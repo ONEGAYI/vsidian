@@ -83,7 +83,7 @@ npm run release:check           # package + pre-release VSIX content & size insp
 npm run release                 # the above + create a GitHub Release with the VSIX
 ```
 
-See the Chinese [README](https://github.com/ONEGAYI/vsidian/blob/main/README.md) for Windows-specific test-host details (dedicated desktop, job objects), performance measurement, and the release pipeline conventions in [AGENTS.md](AGENTS.md).
+See the Chinese [README](https://github.com/ONEGAYI/vsidian/blob/main/README.md) for Windows-specific test-host details (dedicated desktop, job objects), performance measurement, and the release pipeline conventions in the repo skill [.agents/skills/release/SKILL.md](.agents/skills/release/SKILL.md).
 
 ## License
 

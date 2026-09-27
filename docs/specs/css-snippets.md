@@ -47,7 +47,7 @@
 ## 兼容期限与 Agent 约束
 默认长期保留公开入口；先发布弃用声明、替代写法及迁移示例，至少经过两个后续次版本且满 30 天后才允许显式移除。时间从实际发布起算；例如 0.2.x 弃用，最早 0.4.0 且满足天数。补丁版本不计，跳升版本号不能伪造发布历程，到期不自动删除。
 
-本轮工作树 AGENTS.md 的“公开样式契约：Agent 修改约束”须随实现落库；CLAUDE.md 继续只引用它。固定已发布版本/SHA 及历史片段；不得删除、跳过、弱化旧测试或把历史选择器替换成新名来消除失败。检查器/CI/基线变更独立说明审查，缺历史证据时保留兼容入口。
+本轮工作树 AGENTS.md 的“公开样式契约：Agent 修改约束”须随实现落库；CLAUDE.md 继续只引用它（2026-09-27 更新：该约束正文已落库为项目技能 `style-contract`，AGENTS.md 留触发指针）。固定已发布版本/SHA 及历史片段；不得删除、跳过、弱化旧测试或把历史选择器替换成新名来消除失败。检查器/CI/基线变更独立说明审查，缺历史证据时保留兼容入口。
 
 ## 自动兼容与发布门禁（必交付）
 - 比较候选清单与独立历史基线，校验指南生成一致性；旧片段在新实现上验证实际可见效果。
@@ -61,6 +61,39 @@
 行为修改 TDD；纯规则文档做内容/链接/差异检查。复用现有 unit、浏览器生产控制器和真实 VSCode 宿主入口；不为测试构造另一套样式加载实现。覆盖切换模式、视口卸载重挂、明暗主题、字体晚到、输入中热更新、本地与 SSH、路径含空格、读取失败、删除、循环导入、网络失败及暂停恢复。绘制层至少验证实际可见效果，单独 DOM 存在性不算通过。
 
 各票首次长耗时验证落盘日志及退出码。真实 SSH/IME/鼠标验收与自动化分开记录；环境不足不得谎报通过。最终需 VSIX 安装态样式参考/资产加载和包体检查；README 中英文同步。
+
+## 实施落档约定（#129/#130/#133）
+
+2026-09-27 自 AGENTS.md「约定」节迁入（内容未改，仅重组分段），AGENTS.md 留触发指针。修改 CSS 片段导入分析、远程样式加载、CSP 装配或界面域样式入口前必读本节。
+
+### CSS 片段依赖导入约定（#129 落档）
+
+入口片段的 @import/url() 静态分析、越界与符号链接逃逸判定、变更归因（被导入文件变更只重载依赖它的入口，无关变更静默）全部收敛在 `src/shared/cssSnippetImports.ts` 纯逻辑 + `cssSnippetService.ts` 的分析编排，不另建第二套解析。
+
+两条硬边界：
+
+- **形态学与 CSSOM 有效性对齐**——只认**首个生效规则前**的顶层 @import（@charset/@layer 声明不关闭导入窗口；块内与规则后的导入浏览器忽略，宿主也不计入依赖，避免过度归因与过度拒绝），media/supports/layer 条件解析但不求值。
+- **`<link>` 的 error 事件按 sheet 三态分流**（可读有规则=降级晋升/跨源不可读=保留链回报失败/无表或空表=移除保旧）——嵌套导入 404 会对 link 触发 error 但其余规则正在生效，入口级失败（连接拒绝/CSP 拦截）的 sheet 是零规则对象，「sheet 非空」不可作依据，Chromium 实测留证见 `test/browser/cssSnippetImports.mjs` 注释。
+
+入口级缓存击穿版本（`?v=`）与列表版本是两轴：其他入口启停不得扰动未涉及入口的 URI。#130 HTTPS 导入在此基础上扩展 `classifyCssRef` 的 http 类与 CSP `style-src`/`font-src`，勿在宿主预判联网资源成败。
+
+### HTTPS 样式导入与联网字体约定（#130 落档）
+
+远程引用（`classifyCssRef` 的 http 类，含协议相对 `//`）的宿主语义是「**完全不进本地面**」——不进依赖闭包（`importPaths`）、不进 watcher 归因（远程不可 watch）、不触发越界/realpath 拒绝、不预判联网成败（断网/CORS/HTTP 错误/无效 CSS 一律交浏览器与装载器三态分流：入口降级、其他片段不受影响、字体回退备用）；远程内容的重发**只**由入口级版本驱动（手动刷新或入口/本地依赖变更推进 `?v=`）。
+
+CSP 由 `buildEditorCsp`（`src/host/editorCsp.ts` 纯模块，词法契约 `test/unit/editorCsp.test.ts`）装配：`style-src`/`font-src` 追加 `https:`，**脚本面维持 nonce 门控、明文 `http:` 源任何指令不放行、无 connect-src（不以宿主代理绕过 CORS——字体是 CORS 强制资源，须由字体服务回 ACAO）**；设置页 CSP 保持收紧。
+
+字体晚到（@font-face 在链 load 后异步完成）由 `fontArrival`（webview 纯模块，`document.fonts.ready` 有界多轮）在字体集稳定后补一轮重测：live 侧 CM6 requestMeasure、阅读侧显式 updateNow 走 measureAndStabilize 锚定。
+
+自动化约束（实测留证）：浏览器套件页面在同一浏览器进程内做「CM6 页面 + https 样式表装载/热换」累积会使渲染进程被硬杀（Edge 同形态、与生产代码无因果）——`cssHttpsImports` 套件按场景独立浏览器进程规避，新增此类用例沿用该模式；真宿主 webview 内多轮热换稳定性由集成用例钉住。
+
+### 界面域样式契约与片段可覆写（#133 落档）
+
+界面域（代码卡片/公式/图表含按钮组与弹窗/大纲/顶栏）公开入口与渲染验证走与正文域同一清单与生命周期：静态入口由 `src/shared/chromeContract.ts` 探针表在真实渲染中断言（fixture 驱动，`cssProbe.chromeSelectors` 采集），交互态类（located/collapsed/dragging/菜单/重命名/弹窗在场等）不伪造静态探针、由既有浏览器/集成套件按行为路径验证（豁免分工由 `test/unit/chromeContract.test.ts` 钉住）；第三方渲染器（KaTeX/Mermaid）内部 DOM 不提升为稳定接口（limit-katex-internals / limit-mermaid-internals 两条边界条目）。
+
+**内置样式不得压过用户片段的裸类选择器**：tok-\* 色板与大纲层级色经 `:where()` 零特异性书写（明暗两组组内靠顺序分层），新增长效规则若面向片段覆写须同此模式——此前 `#app` 前缀 (1,1,0)/(0,2,0) 压过用户 `.tok-keyword`/`.vsidian-outline-level-n` 的偏差即由此修正；层级色三侧同源（`--vsidian-heading-color-{1..6}`）关系不变。
+
+图表弹窗测试钩子 `graphic.test.popup` 的 action 支持 export-svg/export-png/refresh/close（驱动真实按钮处理器，勿绕过单例直接操作浮层 DOM）。
 
 ## 不在范围
 任意 Obsidian 主题/插件私有 DOM 无条件兼容、原生 VSCode 界面换肤、工作区片段自动加载、跨机器同步、在线资源离线下载管理、完整 CSS 诊断器、发布或合并授权。
