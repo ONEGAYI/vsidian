@@ -9,6 +9,20 @@
 # browser 暂未纳入必需检查（2026-09 核查保护规则仅含 unit / integration）：
 # 其失败不阻塞合并但会在 PR 状态区显示；是否升为必需由维护者视其稳定性决定，
 # 升级前无需改本文件，仅需在仓库设置中加入 browser 上下文。
+# style-contract（#135）为历史 CSS 契约兼容检查（#134 检查器的 CI 接线），
+# 与 unit / integration 同为合并必需检查候选：job 名即 required status check
+# 的 context 名（稳定、独立可查）。2026-09-27 实读远端保护规则仅含
+# unit / integration——把 style-contract 加入必需名单需仓库 admin 权限与
+# 用户授权，操作步骤见 docs/specs/style-contract-gate.md；名单更新前，
+# 其失败只显示在 PR 状态区，不阻塞合并（不得表述为已阻止合并）。
+# 步骤序是防线核心（先证检查器可信，再信检查结果）：
+#   1. --verify-baseline 从 git 对象（v0.4.0 tag 固定 SHA）复验候选基线
+#      文件——候选篡改历史基线在契约检查之前即失败；
+#   2. 打印检查器/基线/工作流文件相对 PR 基点的变更统计到 step summary，
+#      变更本身不失败，但使「检查器/基线变更须独立说明审查」（AGENTS 硬
+#      约定）在 PR Summary 可见；
+#   3. 全量契约检查（基线比较 + 指南一致性 + 期限与发布记录三源交叉）。
+# 报告无论成败均上传（if: always()，沿用 browser job 报告上传先例）。
 name: CI
 
 on:
@@ -38,6 +52,57 @@ jobs:
         run: npm run compile
       - name: 单元测试
         run: npm run test:unit
+
+  style-contract:
+    name: style-contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # verify-baseline 需从 git 对象读 v0.4.0 固定 SHA（75c3df7）的
+          # 映射表，发布记录交叉验证需 refs/tags；浅克隆两者皆缺
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - name: 安装依赖
+        run: npm ci
+      - name: 复验历史基线与 git 锚定内容一致
+        # 先证检查器可信：候选改 test/style-contract/baseline-v0.4.0.json
+        # （抹历史承诺）在此拦截，失败时后续契约检查不再执行
+        run: npm run check:stylecontract:baseline
+      - name: 暴露检查器与基线相对 PR 基点的变更（供独立审查）
+        # 变更不失败（合法演进路径），但统计写入 step summary：PR 评审在
+        # Summary 页一眼可见「检查器/基线/门禁工作流被本 PR 修改」，配合
+        # AGENTS「检查器/CI/基线变更须独立列出理由」约定与必需检查构成
+        # 「候选不得静默替换检查器」的机制——本地工作流无法自证不被删除，
+        # 可见性 + 远端必需检查 + 工作流文件变更走 PR 审查才是完整防线
+        run: |
+          BASE="${{ github.event.pull_request.base.sha || github.sha }}"
+          {
+            echo "## 检查器与基线变更审查（style-contract）"
+            echo "对比基点：\`$BASE\`（push(main) 时即 HEAD，diff 恒为空）"
+            echo '```diff'
+            git diff --stat "$BASE"...HEAD -- \
+              scripts/checkStyleContract.mjs scripts/styleContractCheck.mjs \
+              test/style-contract/ .github/workflows/ci.yml .github/workflows/release.yml
+            echo '```'
+            echo '以上文件若出现在本 PR 的变更中，须在 PR 描述独立列出理由与保护效果（AGENTS「公开样式契约」）。'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: 历史 CSS 契约兼容检查
+        # 再信检查结果：基线比较 + 指南一致性 + 期限与发布记录交叉验证，
+        # 失败即 job 失败（JSON 报告由后续步骤保留）
+        run: npm run check:stylecontract
+      - name: 保存契约检查报告
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: style-contract-report
+          path: out/test/style-contract-report.json
+          if-no-files-found: warn
 
   integration_shard:
     name: integration shard ${{ matrix.shard }}/4

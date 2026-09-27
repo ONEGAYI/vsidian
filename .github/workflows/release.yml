@@ -38,14 +38,32 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          # release 脚本校验 HEAD 精确命中 v<version> 标签，需完整历史与标签
+          # release 脚本校验 HEAD 精确命中 v<version> 标签，需完整历史与标签；
+          # 契约复验的 --verify-baseline 与发布记录交叉验证同样依赖 git 对象
+          # 与 refs/tags（v0.4.0 固定 SHA 等）
           fetch-depth: 0
+          fetch-tags: true
       - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
       - name: 安装依赖
         run: npm ci
+      - name: 发布前复验：历史基线与 git 锚定内容一致
+        # #135：先证检查器可信（基线未被候选篡改），失败即中止发布
+        run: npm run check:stylecontract:baseline
+      - name: 发布前复验：历史 CSS 契约兼容检查
+        # #135：对同一候选产物（HEAD=tag 检出）复验弃用期限（30 天）、发布
+        # 跨度与兼容性；失败即 job 失败，不打包不产出 Release——与
+        # npm run release 沿用同一 VSIX 发布链路，不另建第二条
+        run: npm run check:stylecontract
+      - name: 保存契约复验报告
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: style-contract-report-release
+          path: out/test/style-contract-report.json
+          if-no-files-found: warn
       - name: 打包、检查并创建 Release
         env:
           GH_TOKEN: ${{ github.token }}

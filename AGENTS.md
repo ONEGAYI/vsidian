@@ -22,7 +22,7 @@ VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 
 **触发范围**：修改编辑器 webview 的 DOM、类名、属性、CSS 变量、主题、渲染依赖或片段加载路径，以及修改样式指南、兼容测试、历史基线或相关 CI 时适用。纯业务逻辑且不影响呈现或样式入口的变更无需执行本节专项检查。
 
-**事实入口**：[样式 ADR](docs/adr/0004-stable-styling-contract.md)记录决策，**结构化清单 `src/shared/styleContract.ts`（#132 起单一事实源，115 条；#133 起界面域逐项核实完毕）记录现有入口与生命周期**（旧手写映射表已退位为指向清单的迁移说明），[CONTEXT.md](CONTEXT.md)记录片段产品边界。别名桥实现同源表在 `src/shared/obsidianAlias.ts`（发射侧只引该模块，避免清单文档数据进 webview bundle）；界面域渲染验证探针表在 `src/shared/chromeContract.ts`（webview 采集侧只引该模块）；用户指南由清单生成（`npm run gen:styleguide`，compile 链前置，产物入库、一致性由 `test/unit/styleGuideGen.test.ts` 以 `--check` 钉住——改清单后须重跑并提交产物）；渲染验证经 `cssProbe.obsidianAliases`（正文域，探针属性 outline-color）与 `cssProbe.chromeSelectors`（界面域，探针属性为自定义属性 `--vsidian-chrome-probe`——不可见且与 outline-color/text-decoration-color 两套既有探针正交，同一元素挂多套探针类时零层叠串扰，规则形态由 `test/unit/chromeContract.test.ts` 钉住）。下述行为约束立即适用；**历史契约本地检查器已随 #134 落地**（`npm run check:stylecontract`：独立基线 `test/style-contract/baseline-v0.4.0.json`（v0.4.0 tag 固化快照）对照候选清单比较 + 弃用期限校验 + 别名桥实现一致性 + 指南一致性 + 完整性自检，反规避负向测试与基线驱动旧片段渲染验证在 `test/style-contract/checkStyleContract.test.mjs` 与集成用例「历史基线旧片段渲染验证」；`check:stylecontract:baseline` 从 git 对象复验基线）。target 比较按**类名 token 只增不减**判定（token 消失/替换即改名，括注追加子类/收起态说明放行——#133 数据修正形态）；基线 `lifecycleExemptions` 与 `entryComparisonExemptions` 两键登记**逐条目豁免**（先例：var-heading-accent 期限豁免、mode-toggle「基线承诺从未兑现于任何发布版且有 git 证据」的双层纠错豁免，理由见基线 meta.provenance；豁免不豁免 entry-missing——条目物理删除仍失败，新增豁免须在变更说明中独立列出理由与保护效果）。**合并必需状态与发布前复验的接入仍为 #135 范围**——CI 以受保护来源运行检查器前，不得表述为已阻止合并；本地工具也无法对抗候选分支删除检查器/基线本身（边界与接口见基线 meta.boundary）。
+**事实入口**：[样式 ADR](docs/adr/0004-stable-styling-contract.md)记录决策，**结构化清单 `src/shared/styleContract.ts`（#132 起单一事实源，115 条；#133 起界面域逐项核实完毕）记录现有入口与生命周期**（旧手写映射表已退位为指向清单的迁移说明），[CONTEXT.md](CONTEXT.md)记录片段产品边界。别名桥实现同源表在 `src/shared/obsidianAlias.ts`（发射侧只引该模块，避免清单文档数据进 webview bundle）；界面域渲染验证探针表在 `src/shared/chromeContract.ts`（webview 采集侧只引该模块）；用户指南由清单生成（`npm run gen:styleguide`，compile 链前置，产物入库、一致性由 `test/unit/styleGuideGen.test.ts` 以 `--check` 钉住——改清单后须重跑并提交产物）；渲染验证经 `cssProbe.obsidianAliases`（正文域，探针属性 outline-color）与 `cssProbe.chromeSelectors`（界面域，探针属性为自定义属性 `--vsidian-chrome-probe`——不可见且与 outline-color/text-decoration-color 两套既有探针正交，同一元素挂多套探针类时零层叠串扰，规则形态由 `test/unit/chromeContract.test.ts` 钉住）。下述行为约束立即适用；**历史契约本地检查器已随 #134 落地**（`npm run check:stylecontract`：独立基线 `test/style-contract/baseline-v0.4.0.json`（v0.4.0 tag 固化快照）对照候选清单比较 + 弃用期限校验 + 别名桥实现一致性 + 指南一致性 + 完整性自检，反规避负向测试与基线驱动旧片段渲染验证在 `test/style-contract/checkStyleContract.test.mjs` 与集成用例「历史基线旧片段渲染验证」；`check:stylecontract:baseline` 从 git 对象复验基线）。target 比较按**类名 token 只增不减**判定（token 消失/替换即改名，括注追加子类/收起态说明放行——#133 数据修正形态）；基线 `lifecycleExemptions` 与 `entryComparisonExemptions` 两键登记**逐条目豁免**（先例：var-heading-accent 期限豁免、mode-toggle「基线承诺从未兑现于任何发布版且有 git 证据」的双层纠错豁免，理由见基线 meta.provenance；豁免不豁免 entry-missing——条目物理删除仍失败，新增豁免须在变更说明中独立列出理由与保护效果）。**合并必需状态与发布前复验已随 #135 接线**：CI 新增 `style-contract` job（ci.yml；步骤序为 verify-baseline 复验 → 检查器/基线变更暴露到 PR summary → 全量契约检查，报告无论成败经 artifact 保留），release job 在 `npm run release` 前跑同一检查链（失败即不打包不产出 Release）。诚实边界：**远端 main 分支保护必需名单（2026-09-27 实读为 unit/integration）尚未纳入 style-contract**——名单更新前其失败只在 PR 状态区显示，不得表述为已阻止合并；把 job 加入必需名单的操作步骤与防绕过机制分层说明见 [docs/specs/style-contract-gate.md](docs/specs/style-contract-gate.md)（负向演示脚本 `scripts/demoStyleContractGate.mjs` 可重复重跑）。本地工具无法对抗候选分支删除检查器/基线本身（边界与接口见基线 meta.boundary）。
 
 ### 修改前：固定旧契约
 
@@ -49,7 +49,7 @@ VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 - 对受影响的历史片段，在候选实现的真实浏览器或宿主中验证预期样式及可见结果，并覆盖相关视图、模式切换和视口重新挂载；只检查类名存在、DOM 数量或几何坐标不足以宣布兼容。
 - 按影响范围运行现有 CSS 契约与绘制层测试；涉及输入或光标时遵循本文件的浏览器必跑约定。长耗时检查首次即保留日志及退出码。纯规则文档修改仅做内容、链接与差异检查，不为流程添加无意义运行测试。
 - 交付说明必须列出受影响入口、基线版本/SHA、保留或弃用方式、验证报告及未验证项。检查受限时如实标记，不把代理自检当作用户验收；自动化未落地前按上述过程提供人工核对证据，不虚构命令或 CI 保障。
-- 后续实现自动门禁时，必须验证“候选分支同时改掉实现、清单和测试”仍会被独立历史基线拦住，并将兼容检查接入合并必需检查与发布复验。未实际核对远端保护规则前，不声称失败能够阻止合并。
+- 自动门禁已接入（#135）：「候选分支同时改掉实现、清单和测试仍被独立历史基线拦住」经 `scripts/demoStyleContractGate.mjs`（真实 CLI 隔离演示，可重复）与 #134 反规避负向测试钉住，兼容检查已接入 CI `style-contract` job 与发布前复验。未把该 job 加入远端必需名单前，不声称失败能够阻止合并（实读与操作步骤见 [docs/specs/style-contract-gate.md](docs/specs/style-contract-gate.md)）。
 
 ## 技术栈与构建（工单 #2 确立）
 
@@ -60,6 +60,7 @@ VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 - **测试**：`npm run test:unit`（vitest + `node --test` 启动器契约（testHost/release/browser 调度与 #134 历史契约检查器 `test/style-contract/checkStyleContract.test.mjs`），纯逻辑 + jsdom 的 webview 控制器，无 VSCode 宿主依赖；`VSIDIAN_TEST_HOST_MODE=foreground` 时跳过独立桌面探针）；`npm run test:browser`（Playwright headless Chromium，用原生键盘/IME 驱动生产控制器验证表格光标与输入回流——keydown 注入测不到 `input.type` 回流路径，**涉及 webview 输入/光标行为的变更合并前必跑**，首次需 `npx playwright install chromium`；CI 的 browser job 在 Linux runner 上跑同一脚本并缓存浏览器二进制，通道同为 Playwright chromium，与本地默认一致，`VSIDIAN_TEST_BROWSER_CHANNEL=msedge` 仅本机借系统 Edge 调试用，不进 CI）；`npm run test:integration`（1.86.2 真宿主，fixture 由 `test/integration/fixtures.mjs` 统一生成，开发态 `runTest.mjs` 与安装态 `runInstalled.mjs` 及空窗口激活 `runSettingsActivation.mjs` 三条路径共用 `testHost.mjs` 启动策略：Windows 默认独立桌面不抢前台，`VSIDIAN_TEST_HOST_MODE=foreground` 切前台；三条启动器都会把本次宿主的完整逐例输出与退出码自动落盘到 `.vscode-test/` 下的运行报告——`integration-dev.log` / `integration-installed.log` / `settings-activation.log`，复核结果、统计用例与追查失败优先读报告文件，不为补看信息重跑）。扩展注册 `onegayi.vsidian._test.*` 辅助命令供集成测试观测/注入（仅 `VSIDIAN_TEST_HOOKS=1` 时注册）。测试消息通道是**宿主侧门控、webview 侧被动接收**的分层设计：`_test.*` 注入命令（含向 webview 转发 `table.test.key`/`task.test.click`/`reading.test.image` 等）在宿主侧受 `VSIDIAN_TEST_HOOKS` 门控；webview 侧这些消息分支不做二次门控——webview 面板的消息源只有扩展自身（`panel.webview.postMessage`），封住注入源即封住入口，勿误判为 webview 未设防。
 - **浏览器测试调度与报告**：`npm run test:browser` 经 `test/browser/run.mjs` 默认双并发运行原有 16 个脚本；`-- --workers=1` 回退串行，`-- --suite=tableCaret,graphicPopup` 定向运行，`-- --no-reuse` 禁用本轮构建复用。每轮写入独立的 `out/test/browser-runs/run-*/`，含 `report.json`、`report.md`、逐脚本日志、构建/浏览器启动阶段计时与运行产物。脚本失败后继续收集其他结果，任一失败整体非零；单脚本 120 秒超时，取消时停止已启动的子进程树。共享构建只在本轮有效，浏览器状态不共享；含插件函数的表格 fixture 保留本进程构建。CI 无论成功失败均上传报告与日志。测量方法、收益与边界见 [浏览器测试调度实测](docs/perf/2026-09-browser-test-runner.md)。
 - **集成测试分片**：本地设置 `VSIDIAN_ITEST_SHARDS=4` 再运行 `npm run test:integration`，启动器共用一份 VSCode 程序，为各片创建独立临时便携目录并在全部宿主退出后清理；逐片报告写入 `.vscode-test/integration-dev-s<片号>.log`。缺省仍为单宿主全量测试。CI 使用四个 runner，各注入 `VSIDIAN_TEST_SHARD=k/4` 且只起一个宿主；`integration` 汇总检查保留分支保护所需的稳定名称。
+- **历史契约门禁 job（#135）**：ci.yml 的 `style-contract` job 跑 `npm run check:stylecontract:baseline`（git 锚定基线复验，须在契约检查**之前**——先证检查器可信，再信检查结果）+ `npm run check:stylecontract`（八项全检查），并把检查器/基线/门禁工作流文件相对 PR 基点的变更统计写入 step summary 供独立审查；报告无论成败经 artifact（`style-contract-report`）保留。checkout 须 `fetch-depth: 0` + `fetch-tags: true`（verify-baseline 与发布记录交叉验证依赖 git 对象与 refs/tags，浅克隆即缺）。job 名是远端必需检查的 context 候选，改名视同变更保护规则；远端名单现状与授权后操作步骤见 [docs/specs/style-contract-gate.md](docs/specs/style-contract-gate.md)。
 - **打包与安装态回归（#15）**：`npx @vscode/vsce package --no-dependencies` 产出 VSIX（esbuild bundle 自包含，不带 node_modules；`.vscodeignore` 排除 src/test/docs）。`node test/integration/runInstalled.mjs` 把 VSIX 经 `--install-extension` 装入隔离 profile 的 1.86.2 便携宿主（安装注册链路真实走通；1.86 测试模式要求 `--extensionTestsPath` 依赖 `--extensionDevelopmentPath` 同时存在，故 dev path 指向安装解压目录——加载代码仍是 VSIX 产物而非仓库源码树）后跑同一集成套件。
 - **性能测量**：`node test/perf/runPerf.mjs`（1千/1万/10万行、10 KB/100 KB/1 MB、超长行、图片密集与大围栏；报告写 `docs/perf/data/perf-report.json`）；档位数据与解读汇总在 [docs/perf/2026-09-mvp-performance-summary.md](docs/perf/2026-09-mvp-performance-summary.md)。
 - **版本锁定**：依赖一律精确版本（无 `^`），提交 lockfile；`engines.vscode ^1.86.0` 与 `@types/vscode 1.86.0` 对齐。`@types/node` 锁 22.x（vitest 5 的 vite peer 要求数 >=20.19，类型不进产物，宿主代码仍按 Node 18 API 面编码）。
@@ -70,7 +71,7 @@ VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 - **双重防线**：`.vscodeignore` 挡打包输入，`scripts/release.mjs` 的 `inspectVsixEntries` 检查最终产物（必需清单 + `out/` 白名单 + 禁止模式 + 体积阈值），每次发布前必跑（`npm run release:check`，或随 `npm run release` / CI 自动执行）。新增运行时资产时两处同步维护：`.vscodeignore` 放行 + `REQUIRED_EXTENSION` 登记；漏登记（缺失）与 out/ 未登记产物（多余，如调试遗留）都会被发布检查拦下（`.github/` 混入包内即此类事故，实测发生过）。字体只随包 woff2（chrome118 目标足够），`.woff`/`.ttf` 混入即硬错误——它是字体裁剪失效的信号。
 - **图标**：`media/vsidian-icon.png` 为原图（1254×1254），仅存仓库溯源、**不进 VSIX**；打包用 `media/vsidian-icon-256.png`（package.json `icon` 指向它）。替换图标时重新生成 256 版（PIL LANCZOS + optimize 即可），保持两文件同名关系。
 - **发布流程**：`CHANGELOG.md` 最新 `## <版本> - <日期>` 段落必须与 package.json `version` 一致（`scripts/release.mjs` 强校验，并以该段落作为 GitHub Release 说明）。发版步骤：升 `version` + 新建 CHANGELOG 段落 → 提交 → `npm run release:check` 本地过检查 → `git tag v<版本>` → `npm run release`（或推 tag 由 CI 执行）。
-- **CI 自动发布**：`.github/workflows/release.yml` 由 `v*` 标签触发。`release` job 跑 `npm run release`（检查失败即中止，不产出 Release）；`marketplace` job 从 Release 下载同一 VSIX 发布到 Marketplace（上市场的与 Release 附带的是同一份字节），需先配置仓库 secret `VSCE_PAT`（Azure DevOps PAT：Organization 选 All accessible organizations，Scope 选 Marketplace → Manage）并将 variable `MARKETPLACE_PUBLISH` 设为 `true`——两道开关配置前，推 tag 只产出 GitHub Release。
+- **CI 自动发布**：`.github/workflows/release.yml` 由 `v*` 标签触发。`release` job 在 `npm run release` 前先跑契约复验链（`check:stylecontract:baseline` + `check:stylecontract`，#135：30 天期限/发布跨度/兼容性复验，失败即不打包不产出 Release），随后跑 `npm run release`（检查失败即中止，不产出 Release）；`marketplace` job 从 Release 下载同一 VSIX 发布到 Marketplace（上市场的与 Release 附带的是同一份字节），需先配置仓库 secret `VSCE_PAT`（Azure DevOps PAT：Organization 选 All accessible organizations，Scope 选 Marketplace → Manage）并将 variable `MARKETPLACE_PUBLISH` 设为 `true`——两道开关配置前，推 tag 只产出 GitHub Release。
 - **marketplace 失败的兜底**：v0.1.0 首发实测两坑——job 级 `if` 隐式 `success() &&` 前缀会跳过 dispatch 场景（已用 `!cancelled()` 豁免）；给已注册 workflow 新增触发器后平台注册实体可能滞留旧解析（dispatch 持续 422，对文件做字节变更推送也未能刷新）。**已验证的补发路径**：本地 `gh release download <tag> --pattern '*.vsix'` 下载同一 VSIX 后 `npx @vscode/vsce publish --no-dependencies --packagePath <vsix>`（依赖本地 `vsce login onegayi` 凭证）；dispatch 入口保留，注册表自愈后仍可用。
 - **README 双语**：`README.md`（中文，Marketplace 渲染这份）与 `README.en.md` 互为镜像，文首以**绝对 URL** 互指（相对链接在 Marketplace 页面会失效）。功能与用法变更两边同步维护；`README.en.md` 不进 VSIX（`.vscodeignore` 排除）。
 
@@ -145,6 +146,7 @@ vsidian/
 │       ├── manual-verification.md            # 人工验证清单
 │       ├── mvp-issues.md                     # MVP GitHub Issue 索引
 │       ├── mvp.md                            # MVP 规格主文档
+│       ├── style-contract-gate.md            # 契约门禁 CI 接线与远端配置文档
 │       └── table-interaction-rework.md       # 表格交互重做规格
 ├── esbuild.mjs            # esbuild 多产物构建脚本
 ├── LICENSE                # MIT 许可证全文
@@ -161,12 +163,13 @@ vsidian/
 ├── README.en.md           # 英文版 README，与中文版互指
 ├── README.md              # 项目门面说明
 ├── scripts/               # 仓库工具脚本目录
-│   ├── checkStyleContract.mjs # 历史契约兼容检查器 CLI
-│   ├── genNls.mjs             # manifest NLS 文件生成脚本
-│   ├── genStyleGuide.mjs      # 样式指南生成脚本
-│   ├── quick-action-icons.py  # 快速操作图标生成与校验
-│   ├── release.mjs            # 发布脚本：打包、包体检查与上传
-│   └── styleContractCheck.mjs # 契约检查纯逻辑模块
+│   ├── checkStyleContract.mjs    # 历史契约兼容检查器 CLI
+│   ├── demoStyleContractGate.mjs # 契约门禁负向演示脚本
+│   ├── genNls.mjs                # manifest NLS 文件生成脚本
+│   ├── genStyleGuide.mjs         # 样式指南生成脚本
+│   ├── quick-action-icons.py     # 快速操作图标生成与校验
+│   ├── release.mjs               # 发布脚本：打包、包体检查与上传
+│   └── styleContractCheck.mjs    # 契约检查纯逻辑模块
 ├── src/                   # 扩展源码
 │   ├── extension.ts # 扩展激活入口
 │   ├── host/        # 宿主端实现
