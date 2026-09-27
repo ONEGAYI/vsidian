@@ -8401,6 +8401,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
         ? v : undefined
     }, 30000)
     const readingProbes = CHROME_CONTRACT_PROBES.filter((p) => !p.selector.includes('.vsidian-view-live'))
+    // 同前：连续 4 轮采样均 ≥3 条才判持续差异，重挂/懒加载空窗不触发首轮即抛
+    let remountChromeDiffStreak = 0
     await poll('重挂后 chrome 探针全命中', async () => {
       const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
       const probes0 = v?.cssProbe?.chromeSelectors
@@ -8411,8 +8413,12 @@ export const cases: Array<[string, () => Promise<void>]> = [
           diffs.push(probe.id + '：' + String(probes0[probe.id]) + '≠' + probe.expected)
         }
       }
-      if (diffs.length === 0) return true
-      if (diffs.length >= 3) throw new Error('重挂后 chrome 探针持续差异：' + diffs.join('；'))
+      if (diffs.length === 0) {
+        remountChromeDiffStreak = 0
+        return true
+      }
+      if (diffs.length >= 3 && ++remountChromeDiffStreak >= 4) throw new Error('重挂后 chrome 探针持续差异（连续 4 轮采样）：' + diffs.join('；'))
+      if (diffs.length < 3) remountChromeDiffStreak = 0
       return undefined
     }, 60000)
   }],
