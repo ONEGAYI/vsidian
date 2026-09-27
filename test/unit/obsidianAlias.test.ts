@@ -210,7 +210,8 @@ import { OBSIDIAN_ALIAS_PROBES } from '../../src/shared/obsidianAlias'
 
 const probeCss = readFileSync(path.resolve(process.cwd(), 'media/css-contract-probe.css'), 'utf8')
   // 行尾归一化：checkout/merge 的 autocrlf smudge 会把工作树文件转为 CRLF，
-  // 资产一致性只关心规则形态（选择器 + 期望色），不关心行尾
+  // 资产一致性只关心规则形态（选择器 + 期望色），不关心行尾；
+  // #132/#134 合并两侧同加了此归一化，保留一份
   .replace(/\r\n/g, '\n')
 
 describe('别名探针资产一致性', () => {
