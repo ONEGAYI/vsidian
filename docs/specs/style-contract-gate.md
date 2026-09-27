@@ -26,7 +26,7 @@
 
 1. **git 锚定复验**（verify-baseline）：候选改基线 JSON 抹历史承诺 → 从固定 SHA（v0.4.0 tag = 75c3df7）的 git 对象重新解析映射表比对，多一行少一行都失败。边界：候选同时改检查器（弱化复验逻辑）可绕过本地防线——工作流无法自证检查器不被改。
 2. **变更可见性**（step summary + PR）：`.github/workflows/`、`scripts/checkStyleContract.mjs`、`scripts/styleContractCheck.mjs`、`test/style-contract/` 的变更在 PR 的 Files changed 与 style-contract job summary 中可见，配合 AGENTS「检查器/CI/基线变更须独立列出理由与保护效果」约定，使静默替换需要显式评审放行。边界：可见性只是审查辅助，不构成强制。
-3. **远端必需检查 + 分支保护**（根治，**待用户授权**）：把 `style-contract` 加入 main 分支保护的必需检查后，候选删除该 job 或使其失败都不能合并（保护规则在 GitHub 服务端判定，不随候选分支变化）。边界（2026-09-27 实读）：`enforce_admins: false`——管理员（仓库 owner）直接推送仍可绕过分支保护；`allow_force_pushes: false` 已关闭。**在完成第 6 节的远端配置前，不得表述为「已阻止合并」——style-contract 失败目前只显示在 PR 状态区**。
+3. **远端必需检查 + 分支保护**（根治，**已配置**，2026-09-27）：`style-contract` 已加入 main 分支保护的必需检查（配置后读回验证 `contexts = ["unit","integration","style-contract"]`，其余保护项原样），候选删除该 job 或使其失败都不能合并（保护规则在 GitHub 服务端判定，不随候选分支变化）。边界（2026-09-27 实读）：`enforce_admins: false`——管理员（仓库 owner）直接推送仍可绕过分支保护；`allow_force_pushes: false` 已关闭。
 
 本地工作流无法对抗的组合（诚实记录）：候选分支删除 `style-contract` job、删除检查器脚本或 `continue-on-error` 短路检查步骤。对抗手段只剩远端配置：必需检查（job 删除后 context 缺失 → PR 无法满足保护规则，2026-09 起分支保护对缺失 context 的默认行为是挂起等待而非放行）+ 工作流文件变更经 PR 审查（`pull_request` 触发的 workflow 使用 PR merge ref 的 `.github/` 内容，直接 push main 被保护拦截）。
 
@@ -40,7 +40,9 @@
 - `gh api repos/ONEGAYI/vsidian/rules/branches/main` → `[]`（未使用 rulesets，走经典 branch protection）
 - **`style-contract` 不在必需名单**（预期否：本次授权不含远端修改）
 
-## 待用户授权的操作步骤（把 style-contract 加入必需名单）
+以上为**配置前**实读快照。2026-09-27 经用户授权执行第 6 节方式二（API 全量替换，保留既有两项与全部保护项），配置后读回验证：`required_status_checks.contexts = ["unit","integration","style-contract"]`，`strict: false`、`enforce_admins: false`、`restrictions: null`、`allow_force_pushes: false` 与配置前一致。
+
+## 操作步骤（已于 2026-09-27 执行）
 
 前提：仓库 admin 权限；授权范围仅此配置变更，不涉其他保护项。两种方式等价：
 
@@ -74,7 +76,7 @@ EOF
 - **场景 B（候选改历史基线）**：基线 `sourceRows` 删一行 → `--verify-baseline` exit 1，失败码 `baseline-row-extra`（CI job 第一道防线，排在契约检查之前）
 - **场景 C（恢复态）**：真实仓库树原样 → exit 0，八项检查零失败
 
-最近一轮证据：`logs/style-contract-gate-demo-2026-09-27.md` 与 `logs/style-contract-demo-scenario-a-2026-09-27.json`（logs/ 不入 git，重跑脚本即再生）。「候选删除检查步骤/工作流」的负向验证不可在本地自证——该组合由第 3 层（远端必需检查）对抗，见上节诚实边界，**此为待用户授权的未完成项**。
+最近一轮证据：`logs/style-contract-gate-demo-2026-09-27.md` 与 `logs/style-contract-demo-scenario-a-2026-09-27.json`（logs/ 不入 git，重跑脚本即再生）。「候选删除检查步骤/工作流」的负向验证不可在本地自证——该组合由第 3 层（远端必需检查，已于 2026-09-27 配置生效）对抗，见上节诚实边界。
 
 ## 汇总验证与人工验收
 
