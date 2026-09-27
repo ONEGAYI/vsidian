@@ -83,6 +83,11 @@ export class KeybindingSettingsSection implements SettingsPageSection {
   private draftRaw = ''
   /** 提交进行中标记：提交引发的失焦不得当作取消（见 buildCaptureInput） */
   private completing = false
+  /** 捕获签重聚焦白名单（N-1）：仅行内动作（save/resetOne）与宿主回推
+   *  置位——这些重渲染不是离开意图，焦点落 body 时拉回捕获签继续录制；
+   *  筛选签/搜索/菜单外点/恢复默认等入口的重渲染不置位，由 blur 判定
+   *  自然取消（否则会劫持离开意图：录制存续+焦点抢回+可能误存键位） */
+  private refocusCapture = false
   /** ⋯ 菜单当前打开的操作（一次只开一个） */
   private menuOpenId: string | undefined
   private focusEntry: string | undefined
@@ -115,6 +120,11 @@ export class KeybindingSettingsSection implements SettingsPageSection {
         `.vsidian-keybindings-row[data-operation-id="${this.menuOpenId}"] .vsidian-keybindings-menu-wrap`)
       if (wrap && event.target instanceof Node && wrap.contains(event.target)) return
       this.menuOpenId = undefined
+      // 离开意图显式化（N-1）：目标不在结果区（空白/工具栏）时录制一并取消；
+      // 结果区内（×/＋/另一行 ⋯）是行内动作，交由各自 click 处理保留录制
+      if (!(event.target instanceof Node && this.resultsEl?.contains(event.target))) {
+        this.cancelCapture()
+      }
       this.renderRows()
     }
     document.addEventListener('pointerdown', onDocPointerDown)
@@ -143,6 +153,7 @@ export class KeybindingSettingsSection implements SettingsPageSection {
     }
     this.updateStatus()
     this.renderFilters()
+    this.refocusCapture = true
     this.renderRows()
   }
 
@@ -154,6 +165,7 @@ export class KeybindingSettingsSection implements SettingsPageSection {
   }
 
   private save(id: string, bindings: string[], replaceConflicts = false): void {
+    this.refocusCapture = true // 行内动作：重渲染不是离开意图，录制继续
     const check = applyBindingChange(this.overrides, id, bindings, replaceConflicts)
     if (!check.ok) {
       if (check.reason === 'conflict') {
@@ -170,6 +182,7 @@ export class KeybindingSettingsSection implements SettingsPageSection {
   }
 
   private resetOne(id: string, replaceConflicts = false): void {
+    this.refocusCapture = true // 行内动作（菜单项）：同 save 口径
     const defaults = [...getEffectiveBindings({}, id)]
     const check = applyBindingChange(this.overrides, id, defaults, replaceConflicts)
     if (!check.ok) {
@@ -355,8 +368,10 @@ export class KeybindingSettingsSection implements SettingsPageSection {
     if (this.searchMode === 'key') keyToggle.classList.add('is-active')
     keyToggle.addEventListener('click', () => this.setKeyMode(this.searchMode !== 'key'))
     searchWrap.append(magnifier, nameSearch, keyToggle)
-    toolbar.append(searchWrap, this.button(t('keybindingSettings.resetAll'), () =>
-      this.send({ kind: 'keybindings.resetAll', requestId: ++this.requestId })))
+    toolbar.append(searchWrap, this.button(t('keybindingSettings.resetAll'), () => {
+      this.cancelCapture() // 工具栏按钮是离开录制意图（N-1）
+      this.send({ kind: 'keybindings.resetAll', requestId: ++this.requestId })
+    }))
     parent.append(toolbar)
     const filters = el('div', 'vsidian-keybindings-filters')
     parent.append(filters)
@@ -387,6 +402,7 @@ export class KeybindingSettingsSection implements SettingsPageSection {
       const label = t(FILTER_LABEL_KEYS[kind])
       chip.textContent = kind === 'conflict' ? `${label} (${conflicted.size})` : label
       chip.addEventListener('click', () => {
+        this.cancelCapture() // 筛选是离开录制意图（N-1：显式取消，不依赖帧时序）
         this.filter = kind
         this.renderFilters()
         this.renderRows()
@@ -502,10 +518,11 @@ export class KeybindingSettingsSection implements SettingsPageSection {
       locatedRow.scrollIntoView?.({ block: 'nearest' })
       this.focusEntry = undefined
     }
-    // 捕获进行中（宿主键位回推、行内动作后的重渲染）：捕获签保持活跃且
-    // 草稿已回填，焦点若已落到 body（触发元素被重建移除）则拉回捕获签，
-    // 录制不中断；焦点在别处控件（筛选签、搜索框）时不抢
-    if (this.selected) {
+    // 捕获进行中的重聚焦（N-1 白名单）：仅行内动作与宿主回推的重渲染拉回
+    // 焦点（焦点恰落 body 时）；其余入口（筛选签/搜索/菜单外点/恢复默认）
+    // 不置标志，由 blur 双锚定判定自然取消，离开意图不被劫持
+    if (this.selected && this.refocusCapture) {
+      this.refocusCapture = false
       const capture = parent.querySelector<HTMLInputElement>('.vsidian-keybindings-capture')
       if (capture && document.activeElement === document.body) capture.focus()
     }

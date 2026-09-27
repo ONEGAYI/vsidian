@@ -298,3 +298,70 @@ describe('审查修复（PR #156 复核轮：焦点与菜单编排）', () => {
     cleanup()
   })
 })
+
+describe('审查修复第 2 轮（N-1：离开意图不被重聚焦劫持）', () => {
+  function setup2() {
+    const sent: unknown[] = []
+    const section = new KeybindingSettingsSection({ postMessage: (m) => sent.push(m) })
+    const root = document.createElement('div')
+    document.body.append(root)
+    section.mount(root)
+    section.handleHostMessage({ kind: 'keybindings.snapshot', overrides: {} })
+    return { section, root, sent, cleanup: () => root.remove() }
+  }
+  const add2 = (root: HTMLElement, id: string) =>
+    root.querySelector<HTMLButtonElement>(`[data-operation-id="${id}"] .vsidian-keybindings-add`)!
+
+  it('捕获中点筛选签：录制同步取消（筛选是离开意图；用 all 签避免行被过滤的假阳性）', () => {
+    const { root, sent, cleanup } = setup2()
+    add2(root, 'bold').click()
+    const capture = root.querySelector<HTMLInputElement>('.vsidian-keybindings-capture')!
+    capture.dispatchEvent(chord('b'))
+    root.querySelector<HTMLButtonElement>('.vsidian-keybindings-filter[data-filter="all"]')!.click()
+    expect(root.querySelector('[data-operation-id="bold"]')).toBeTruthy()
+    expect(root.querySelector('.vsidian-keybindings-capture')).toBeNull()
+    expect(sent.filter((m) => (m as { kind: string }).kind === 'keybindings.set')).toEqual([])
+    cleanup()
+  })
+
+  it('捕获中菜单外点收起：目标在结果区外时录制一并取消', () => {
+    const { root, cleanup } = setup2()
+    add2(root, 'bold').click()
+    root.querySelector<HTMLButtonElement>('[data-operation-id="bold"] .vsidian-keybindings-menu-btn')!.click()
+    expect(root.querySelector('[data-operation-id="bold"] .vsidian-keybindings-menu')).toBeTruthy()
+    document.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }))
+    expect(root.querySelector('[data-operation-id="bold"] .vsidian-keybindings-menu')).toBeNull()
+    expect(root.querySelector('.vsidian-keybindings-capture')).toBeNull()
+    cleanup()
+  })
+
+  it('捕获中点「全部恢复默认」：录制取消且 resetAll 消息照发', () => {
+    const { root, sent, cleanup } = setup2()
+    add2(root, 'bold').click()
+    root.querySelector<HTMLInputElement>('.vsidian-keybindings-capture')!.dispatchEvent(chord('b'))
+    const buttons = [...root.querySelectorAll<HTMLButtonElement>('button')]
+    buttons.find((b) => b.textContent === zhCn['keybindingSettings.resetAll'])!.click()
+    expect(root.querySelector('.vsidian-keybindings-capture')).toBeNull()
+    expect(sent.filter((m) => (m as { kind: string }).kind === 'keybindings.resetAll')).toHaveLength(1)
+    cleanup()
+  })
+
+  it('行内动作与宿主回推仍保留录制（重聚焦白名单路径回归）', async () => {
+    const { section, root, sent, cleanup } = setup2()
+    add2(root, 'bold').click()
+    const capture = root.querySelector<HTMLInputElement>('.vsidian-keybindings-capture')!
+    capture.dispatchEvent(chord('b'))
+    root.querySelector<HTMLButtonElement>('[data-operation-id="italic"] .vsidian-keybindings-remove')!.click()
+    await nextFrame()
+    const captureAfter = root.querySelector<HTMLInputElement>('.vsidian-keybindings-capture')
+    expect(captureAfter).toBeTruthy()
+    expect(captureAfter!.value).toBe('Ctrl+B')
+    expect(document.activeElement).toBe(captureAfter)
+    expect(sent.filter((m) => (m as { kind: string }).kind === 'keybindings.set')).toHaveLength(1)
+    section.handleHostMessage({ kind: 'keybindings.snapshot', overrides: { italic: [] } })
+    const captureAgain = root.querySelector<HTMLInputElement>('.vsidian-keybindings-capture')
+    expect(captureAgain?.value).toBe('Ctrl+B')
+    expect(document.activeElement).toBe(captureAgain)
+    cleanup()
+  })
+})
