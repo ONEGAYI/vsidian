@@ -1,11 +1,11 @@
 # 规格：HTML 注释快捷键与双视图呈现
 
-状态：待实施（工单 [#139](https://github.com/ONEGAYI/vsidian/issues/139)）。本文是 HTML 注释操作的单一事实源，工单验收以此为准。语法采用 HTML `<!-- -->`（用户已明确不用 Obsidian `%%`）；词表新增「HTML 注释」条目见 CONTEXT.md。
+状态：已实施（工单 [#139](https://github.com/ONEGAYI/vsidian/issues/139)）。本文是 HTML 注释操作的单一事实源，工单验收以此为准。语法采用 HTML `<!-- -->`（用户已明确不用 Obsidian `%%`）；词表新增「HTML 注释」条目见 CONTEXT.md。
 
 ## 范围
 
 - **覆盖**：`ctrl+/` 注释操作（两态切换）、Live 视图注释淡化呈现、阅读视图注释隐藏。
-- **机制归属**：操作按 #103 行内围栏约定接入 `INLINE` 表与 `FORMAT_OPERATIONS` 注册表；注释属**插入型结构**（同 wikilink / inlineMath 一类），两态取消分支为本规格新增设计。
+- **机制归属**：操作登记 `FORMAT_OPERATIONS` 注册表，**不接入 `INLINE` 表**（注释属**插入型结构**，与 wikilink / inlineMath 同类，无既有围栏语义可继承）；两态取消分支为本规格新增设计、自行实现。
 - **排除**：注释折叠 / 点击显形交互（Obsidian 式，已决策不做，未来另票）；`%%` 语法；源码模式与设置页内 `ctrl+/`（不接管宿主绑定）。
 
 ## 已确认决策（2026-09-27 澄清答复）
@@ -30,7 +30,7 @@
 
 ## 实施决策
 
-- **注册表接入**：`FORMAT_OPERATIONS` 登记 `htmlComment`（live / writes / 默认 `ctrl+/`）；`INLINE` 表 mark / node 字段按实际解析形态填；分派落在 `planFormatOperation` 插入分支（同 wikilink 一类），取消分支自行实现。
+- **注册表接入**（与实现一致）：`FORMAT_OPERATIONS` 登记 `htmlComment`（live / writes / 默认 `ctrl+/`）；**不登记 `INLINE` 表**——分派落在 `planFormatOperation` 插入分支（与 wikilink / inlineMath 同类），取消分支自行实现（Lezer 实测行内节点为 `Comment`、跨行为 `CommentBlock`，均非 `HTMLBlock`）。
 - **Live 装饰**：liveDecorations 按语法树节点发射 mark 装饰（淡色类），复用现有样式注入链；关键 CSS 规则由契约测试钉住。
 - **阅读剥离**：接入点在 `splitReadingBlocks` 交 markdown-it 前（body 切片后），与 frontmatter 剥离同层。
 

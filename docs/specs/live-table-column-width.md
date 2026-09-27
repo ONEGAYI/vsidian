@@ -1,6 +1,6 @@
 # 规格：Live 表格列宽内容比例分配
 
-状态：待实施（工单 [#142](https://github.com/ONEGAYI/vsidian/issues/142)）。本文是 Live 表格列宽机制的单一事实源，工单验收以此为准。
+状态：已实施（工单 [#142](https://github.com/ONEGAYI/vsidian/issues/142)）。本文是 Live 表格列宽机制的单一事实源，工单验收以此为准。
 
 ## 范围
 
@@ -34,8 +34,8 @@
 ## 实施决策
 
 - **纯函数**：列宽计算独立为纯函数（输入：各列宽度样本 + 总宽 + 列数；输出：逐列宽度），脱离 DOM 单测。
-- **装饰层**：`tableGridPlan` 旁新增共享列宽计划；行装饰从内联 `--vsidian-table-columns` 迁移为内联 `grid-template-columns`（或过渡期并存，最终等分规则退场）。
-- **CSS 契约**：更新契约测试钉住新机制，防等分规则回潮。
+- **装饰层**：`tableGridPlan` 旁新增共享列宽计划；行装饰从内联 `--vsidian-table-columns` 迁移为内联 `grid-template-columns`（已实施形态：逐行内联相同计划）。**等分规则不退场，降为 CSS 缺省回退**——无列宽计划（计划缺失的行）时由等分 `repeat(var(--vsidian-table-columns), minmax(0,1fr))` 兜底；契约钉住等分不再是列宽的唯一来源。
+- **CSS 契约**：更新契约测试钉住新机制，防等分规则回潮为唯一来源。
 
 ## 验证与完成条件
 

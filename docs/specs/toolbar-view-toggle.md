@@ -1,6 +1,6 @@
 # 规格：编辑器工具栏双态视图切换按钮
 
-状态：待实施（工单 [#141](https://github.com/ONEGAYI/vsidian/issues/141)）。本文是该按钮与切换通道的单一事实源，工单验收以此为准。
+状态：已实施（工单 [#141](https://github.com/ONEGAYI/vsidian/issues/141)）。本文是该按钮与切换通道的单一事实源，工单验收以此为准。
 
 ## 范围
 
@@ -25,6 +25,7 @@
 3. **与右上角三态按钮互不回归**：`vsidian.activeMode` context 与按钮互斥显隐 when 条件不变；阅读态下右上角「转源码」仍可用。
 4. **键盘可达**：原生 button，Tab 可达、Enter / Space 激活；`mousedown preventDefault` 防抢正文焦点（沿用 `✎` 按钮策略：只拦默认聚焦不拦 click，保留表格格区）。
 5. **快捷键入口**（2026-09-27 用户增补，已定）：「双态切换」单列为可绑定操作（`onegayi.vsidian.mode.toggleDualView`，双模式生效、默认 **ctrl+q**），与工具栏按钮共用同一目标推导（当前态取反）与同一 `runViewSwitch` 编排；触发走既有 `keybindings.execute` 出站 → 宿主 executeCommand → 同一双态切换实现，不另造路径。源码模式不经 webview 键路由，天然不涉及。
+6. **宿主命令的源码态兜底（已实现边界，已记 keybindings.md）**：命令面板或键绑在**源码编辑器态**触发 `toggleDualView` 时，目标推导仍为取反——源码态取反得 live，经 `open-in-vsidian` 分支回 Vsidian 面板（不落源码自环、不弹「已在源码」提示）；工具栏按钮本身在面板内常驻、不出现在源码态，此兜底只作用于宿主命令入口。
 
 ## 用户故事
 
