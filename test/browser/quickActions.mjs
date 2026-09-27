@@ -2,16 +2,15 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { mkdir } from 'node:fs/promises'
-import { build } from 'esbuild'
-import { chromium } from 'playwright'
+import { build, artifactPath, chromium } from './runtime.mjs'
 import { buildZhLocaleIsland } from './localeIsland.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
-const output = path.join(root, 'out/test/browser/quickActions.js')
+const output = artifactPath(root, 'quick/main.js')
 await build({ entryPoints: [path.join(root, 'test/browser/quickActionsFixture.ts')],
   bundle: true, outfile: output, format: 'iife',
   loader: { '.svg': 'file' }, assetNames: 'assets/[name]' })
-const artifacts = path.join(root, 'out/task89')
+const artifacts = artifactPath(root, 'screenshots/quickActions')
 await mkdir(artifacts, { recursive: true })
 // #94：操作条文案经 t() 取词——注入生产同款 zh-cn 数据岛（fixture 入口 boot）
 const { islandHtml, zhCnMessages } = await buildZhLocaleIsland(root)
@@ -52,7 +51,7 @@ try {
     await page.route('http://quick.test/assets/*.svg', async (route) => {
       const name = path.basename(new URL(route.request().url()).pathname)
       iconRequests.push(name)
-      await route.fulfill({ path: path.join(root, 'out/test/browser/assets', name),
+      await route.fulfill({ path: artifactPath(root, 'quick/assets', name),
         contentType: 'image/svg+xml' })
     })
     await page.setContent(`<html><head><base href="http://quick.test/"></head><body class="vscode-${theme}">${islandHtml}<div id="app"></div></body></html>`)

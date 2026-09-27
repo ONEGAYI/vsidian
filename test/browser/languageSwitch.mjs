@@ -8,14 +8,13 @@
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { build } from 'esbuild'
-import { chromium } from 'playwright'
+import { build, artifactPath, chromium } from './runtime.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
-const output = path.join(root, 'out/test/browser/languageSwitch.js')
+const output = artifactPath(root, 'settings/main.js')
 await build({ entryPoints: [path.join(root, 'src/webview/settingsMain.ts')], bundle: true, outfile: output, format: 'iife' })
 // 字典单独构建为 Node 可 import 的 ESM：测试从同一事实源取词条做期望值
-const dictOut = path.join(root, 'out/test/browser/languageSwitchLocales.mjs')
+const dictOut = artifactPath(root, 'languageSwitchLocales.mjs')
 await build({ entryPoints: [path.join(root, 'src/shared/locales/index.ts')], bundle: true, outfile: dictOut, format: 'esm' })
 const { LOCALE_MESSAGES } = await import(pathToFileURL(dictOut).href)
 

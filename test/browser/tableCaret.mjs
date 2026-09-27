@@ -4,17 +4,16 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readFile } from 'node:fs/promises'
-import { build } from 'esbuild'
-import { chromium } from 'playwright'
+import { build, artifactPath, chromium } from './runtime.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
-const bundle = path.join(root, 'out/test/browser/tableCaret.js')
+const bundle = artifactPath(root, 'tableCaret/tableCaret.js')
 // #59 公式依赖（与 esbuild.mjs 生产构建同口径）：
 // - 裸导入 `katex` 重定向到官方预压缩 UMD（dist/katex.min.js，约 272 KB），
 //   与 esbuild 的 ESM 源打包相比省 500 KB+；
 // - fixture 经 `import 'katex/dist/katex.min.css'` 引入 KaTeX 样式，本插件
 //   裁掉 css 里的 woff/ttf 字体回退引用（只留 woff2，chrome/chromium 足够），
-//   字体文件由 loader 产物化到 out/test/browser/assets/。
+//   字体文件由 loader 产物化到本轮 tableCaret/assets/。
 const katexFontStrip = {
   name: 'katex-font-fallback-strip',
   setup(b) {
@@ -184,7 +183,7 @@ try {
       const captureTable = async (name) => {
         const first = await page.locator('.vsidian-table-grid-row').first().boundingBox()
         const last = await page.locator('.vsidian-table-grid-row').last().boundingBox()
-        await page.screenshot({ path: path.join(root, 'out/test/browser', name), clip: {
+        await page.screenshot({ path: artifactPath(root, name), clip: {
           x: Math.max(0, first.x - 28), y: Math.max(0, first.y - 28),
           width: first.width + 58, height: last.y + last.height - first.y + 58,
         } })
@@ -365,7 +364,7 @@ try {
           await page.keyboard.press('ArrowDown')
           const down = await target.evaluate(e => ({ inside:e.contains(getSelection().focusNode), y:getSelection().getRangeAt(0).getBoundingClientRect().top }))
           assert(down.inside && down.y > up.y, '下移应返回同格第二行')
-          await page.screenshot({ path: path.join(root, 'out/test/browser/table-enter-live.png') })
+          await page.screenshot({ path: artifactPath(root, 'table-enter-live.png') })
           const saved = (await page.evaluate(() => window.readEditor())).text
           const reopened = await browser.newPage()
           try {
@@ -378,7 +377,7 @@ try {
             }, saved)
             assert.equal(await reopened.locator('th').nth(1).locator('br').count(), 1, '重开阅读视图应保留格内换行')
             assert(!(await reopened.locator('th').nth(1).innerText()).includes('<br>'), '阅读视图不显示换行源码')
-            await reopened.screenshot({ path: path.join(root, 'out/test/browser/table-enter-reading.png') })
+            await reopened.screenshot({ path: artifactPath(root, 'table-enter-reading.png') })
           } finally { await reopened.close() }
         }
         for (let i = 0; i < input.length + breaks; i++) await page.keyboard.press('Backspace')
@@ -713,7 +712,7 @@ try {
 // 图内链接不跳转、明暗主题重渲染。真实 mermaid 11.12.2，非 mock。
 import http from 'node:http'
 
-const mermaidArtifact = path.join(root, 'out/test/browser/mermaid.js')
+const mermaidArtifact = artifactPath(root, 'mermaid.js')
 await build({
   // 生产同构：与 esbuild.mjs 的 mermaid target 同入口同配置（ESM 源打包，
   // 官方 UMD 的模块作用域全局自赋值会落空，见 mermaidEntry.ts 头注释）
@@ -721,9 +720,9 @@ await build({
   outfile: mermaidArtifact, bundle: true, platform: 'browser', format: 'iife',
   target: 'chrome118', minify: true, sourcemap: false, logLevel: 'silent',
 })
-const browserOutDir = path.join(root, 'out/test/browser')
+const browserOutDir = artifactPath(root, 'tableCaret')
 const serveOutFile = async (res, rel) => {
-  const file = path.join(browserOutDir, rel)
+  const file = rel === 'mermaid.js' ? mermaidArtifact : path.join(browserOutDir, rel)
   try {
     const data = await readFile(file) // 文件顶部的 node:fs/promises 版本
     res.writeHead(200, {

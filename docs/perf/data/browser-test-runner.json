@@ -1,0 +1,595 @@
+{
+  "date": "2026-09-27",
+  "baseCommit": "1b8742f0cc2485803992166da3c6dfa0ad155a12",
+  "environment": {
+    "platform": "win32",
+    "arch": "x64",
+    "node": "v24.15.0",
+    "browserChannel": "chromium"
+  },
+  "baselineCommand": {
+    "exitCode": 0,
+    "durationMs": 62698,
+    "commit": "1b8742f0cc2485803992166da3c6dfa0ad155a12",
+    "channel": null
+  },
+  "optimizedCommand": {
+    "exitCode": 0,
+    "durationMs": 32516,
+    "workers": 2,
+    "reuseBuilds": true
+  },
+  "reductionPercent": 48.14,
+  "runs": [
+    {
+      "label": "serial-reuse",
+      "report": "out/test/browser-runs/run-llv2DS/report.json",
+      "durationMs": 63105,
+      "workers": 1,
+      "reuseBuilds": true,
+      "exitCode": 0,
+      "passedSuites": 16,
+      "buildRequests": 24,
+      "cacheHits": 10,
+      "buildMs": 998,
+      "launchMs": 1646,
+      "suites": [
+        {
+          "name": "tableCaret",
+          "durationMs": 32252,
+          "exitCode": 0
+        },
+        {
+          "name": "taskClick",
+          "durationMs": 1434,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineJump",
+          "durationMs": 3901,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineCollapse",
+          "durationMs": 3867,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineHover",
+          "durationMs": 1331,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineSearch",
+          "durationMs": 2331,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineMenu",
+          "durationMs": 2496,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineDrag",
+          "durationMs": 4047,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineDragBoundary",
+          "durationMs": 1558,
+          "exitCode": 0
+        },
+        {
+          "name": "settingsPage",
+          "durationMs": 1003,
+          "exitCode": 0
+        },
+        {
+          "name": "languageSwitch",
+          "durationMs": 577,
+          "exitCode": 0
+        },
+        {
+          "name": "quickActions",
+          "durationMs": 3666,
+          "exitCode": 0
+        },
+        {
+          "name": "mermaidPaint",
+          "durationMs": 622,
+          "exitCode": 0
+        },
+        {
+          "name": "graphicPopup",
+          "durationMs": 2059,
+          "exitCode": 0
+        },
+        {
+          "name": "keybindings",
+          "durationMs": 1224,
+          "exitCode": 0
+        },
+        {
+          "name": "keybindingEditor",
+          "durationMs": 733,
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "label": "parallel-2",
+      "report": "out/test/browser-runs/run-vptb5n/report.json",
+      "durationMs": 33226,
+      "workers": 2,
+      "reuseBuilds": true,
+      "exitCode": 0,
+      "passedSuites": 16,
+      "buildRequests": 24,
+      "cacheHits": 10,
+      "buildMs": 947,
+      "launchMs": 1609,
+      "suites": [
+        {
+          "name": "tableCaret",
+          "durationMs": 33225,
+          "exitCode": 0
+        },
+        {
+          "name": "taskClick",
+          "durationMs": 1580,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineJump",
+          "durationMs": 3901,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineCollapse",
+          "durationMs": 3859,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineHover",
+          "durationMs": 1109,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineSearch",
+          "durationMs": 2145,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineMenu",
+          "durationMs": 2204,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineDrag",
+          "durationMs": 4085,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineDragBoundary",
+          "durationMs": 1415,
+          "exitCode": 0
+        },
+        {
+          "name": "settingsPage",
+          "durationMs": 828,
+          "exitCode": 0
+        },
+        {
+          "name": "languageSwitch",
+          "durationMs": 594,
+          "exitCode": 0
+        },
+        {
+          "name": "quickActions",
+          "durationMs": 3839,
+          "exitCode": 0
+        },
+        {
+          "name": "mermaidPaint",
+          "durationMs": 687,
+          "exitCode": 0
+        },
+        {
+          "name": "graphicPopup",
+          "durationMs": 2089,
+          "exitCode": 0
+        },
+        {
+          "name": "keybindings",
+          "durationMs": 1311,
+          "exitCode": 0
+        },
+        {
+          "name": "keybindingEditor",
+          "durationMs": 767,
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "label": "parallel-4",
+      "report": "out/test/browser-runs/run-LSKJeC/report.json",
+      "durationMs": 33639,
+      "workers": 4,
+      "reuseBuilds": true,
+      "exitCode": 0,
+      "passedSuites": 16,
+      "buildRequests": 24,
+      "cacheHits": 10,
+      "buildMs": 989,
+      "launchMs": 1814,
+      "suites": [
+        {
+          "name": "tableCaret",
+          "durationMs": 33636,
+          "exitCode": 0
+        },
+        {
+          "name": "taskClick",
+          "durationMs": 1781,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineJump",
+          "durationMs": 3998,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineCollapse",
+          "durationMs": 4184,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineHover",
+          "durationMs": 1041,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineSearch",
+          "durationMs": 2165,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineMenu",
+          "durationMs": 2299,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineDrag",
+          "durationMs": 4231,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineDragBoundary",
+          "durationMs": 1486,
+          "exitCode": 0
+        },
+        {
+          "name": "settingsPage",
+          "durationMs": 871,
+          "exitCode": 0
+        },
+        {
+          "name": "languageSwitch",
+          "durationMs": 588,
+          "exitCode": 0
+        },
+        {
+          "name": "quickActions",
+          "durationMs": 4122,
+          "exitCode": 0
+        },
+        {
+          "name": "mermaidPaint",
+          "durationMs": 747,
+          "exitCode": 0
+        },
+        {
+          "name": "graphicPopup",
+          "durationMs": 2496,
+          "exitCode": 0
+        },
+        {
+          "name": "keybindings",
+          "durationMs": 1399,
+          "exitCode": 0
+        },
+        {
+          "name": "keybindingEditor",
+          "durationMs": 919,
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "label": "parallel-2-no-reuse",
+      "report": "out/test/browser-runs/run-4qbzqA/report.json",
+      "durationMs": 33641,
+      "workers": 2,
+      "reuseBuilds": false,
+      "exitCode": 0,
+      "passedSuites": 16,
+      "buildRequests": 24,
+      "cacheHits": 0,
+      "buildMs": 1529,
+      "launchMs": 1635,
+      "suites": [
+        {
+          "name": "tableCaret",
+          "durationMs": 33638,
+          "exitCode": 0
+        },
+        {
+          "name": "taskClick",
+          "durationMs": 1588,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineJump",
+          "durationMs": 3924,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineCollapse",
+          "durationMs": 3941,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineHover",
+          "durationMs": 1077,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineSearch",
+          "durationMs": 2197,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineMenu",
+          "durationMs": 2179,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineDrag",
+          "durationMs": 4203,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineDragBoundary",
+          "durationMs": 1477,
+          "exitCode": 0
+        },
+        {
+          "name": "settingsPage",
+          "durationMs": 854,
+          "exitCode": 0
+        },
+        {
+          "name": "languageSwitch",
+          "durationMs": 643,
+          "exitCode": 0
+        },
+        {
+          "name": "quickActions",
+          "durationMs": 3865,
+          "exitCode": 0
+        },
+        {
+          "name": "mermaidPaint",
+          "durationMs": 776,
+          "exitCode": 0
+        },
+        {
+          "name": "graphicPopup",
+          "durationMs": 2384,
+          "exitCode": 0
+        },
+        {
+          "name": "keybindings",
+          "durationMs": 1210,
+          "exitCode": 0
+        },
+        {
+          "name": "keybindingEditor",
+          "durationMs": 739,
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "label": "parallel-2-final",
+      "report": "out/test/browser-runs/run-WQ51fH/report.json",
+      "durationMs": 32739,
+      "workers": 2,
+      "reuseBuilds": true,
+      "exitCode": 0,
+      "passedSuites": 16,
+      "buildRequests": 24,
+      "cacheHits": 10,
+      "buildMs": 947,
+      "launchMs": 1548,
+      "suites": [
+        {
+          "name": "tableCaret",
+          "durationMs": 32736,
+          "exitCode": 0
+        },
+        {
+          "name": "taskClick",
+          "durationMs": 1514,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineJump",
+          "durationMs": 3862,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineCollapse",
+          "durationMs": 3873,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineHover",
+          "durationMs": 1081,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineSearch",
+          "durationMs": 2114,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineMenu",
+          "durationMs": 2223,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineDrag",
+          "durationMs": 4067,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineDragBoundary",
+          "durationMs": 1409,
+          "exitCode": 0
+        },
+        {
+          "name": "settingsPage",
+          "durationMs": 843,
+          "exitCode": 0
+        },
+        {
+          "name": "languageSwitch",
+          "durationMs": 582,
+          "exitCode": 0
+        },
+        {
+          "name": "quickActions",
+          "durationMs": 3730,
+          "exitCode": 0
+        },
+        {
+          "name": "mermaidPaint",
+          "durationMs": 656,
+          "exitCode": 0
+        },
+        {
+          "name": "graphicPopup",
+          "durationMs": 2075,
+          "exitCode": 0
+        },
+        {
+          "name": "keybindings",
+          "durationMs": 1223,
+          "exitCode": 0
+        },
+        {
+          "name": "keybindingEditor",
+          "durationMs": 748,
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "label": "parallel-2-repeat",
+      "report": "out/test/browser-runs/run-IFOSbI/report.json",
+      "durationMs": 32258,
+      "workers": 2,
+      "reuseBuilds": true,
+      "exitCode": 0,
+      "passedSuites": 16,
+      "buildRequests": 24,
+      "cacheHits": 10,
+      "buildMs": 949,
+      "launchMs": 1520,
+      "suites": [
+        {
+          "name": "tableCaret",
+          "durationMs": 32255,
+          "exitCode": 0
+        },
+        {
+          "name": "taskClick",
+          "durationMs": 1516,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineJump",
+          "durationMs": 3847,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineCollapse",
+          "durationMs": 3827,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineHover",
+          "durationMs": 1076,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineSearch",
+          "durationMs": 2117,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineMenu",
+          "durationMs": 2188,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineDrag",
+          "durationMs": 4029,
+          "exitCode": 0
+        },
+        {
+          "name": "outlineDragBoundary",
+          "durationMs": 1394,
+          "exitCode": 0
+        },
+        {
+          "name": "settingsPage",
+          "durationMs": 861,
+          "exitCode": 0
+        },
+        {
+          "name": "languageSwitch",
+          "durationMs": 559,
+          "exitCode": 0
+        },
+        {
+          "name": "quickActions",
+          "durationMs": 3677,
+          "exitCode": 0
+        },
+        {
+          "name": "mermaidPaint",
+          "durationMs": 634,
+          "exitCode": 0
+        },
+        {
+          "name": "graphicPopup",
+          "durationMs": 2043,
+          "exitCode": 0
+        },
+        {
+          "name": "keybindings",
+          "durationMs": 1220,
+          "exitCode": 0
+        },
+        {
+          "name": "keybindingEditor",
+          "durationMs": 730,
+          "exitCode": 0
+        }
+      ]
+    }
+  ]
+}

@@ -6,11 +6,11 @@
 // 断言与字典同源取值（不再复制字面量）。
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { build } from 'esbuild'
+import { build, artifactPath } from './runtime.mjs'
 
 /** 构建 zh-cn 语言数据岛 HTML；返回 { islandHtml, zhCnMessages } */
 export async function buildZhLocaleIsland(root) {
-  const outfile = path.join(root, 'out/test/browser/locale-island.mjs')
+  const outfile = artifactPath(root, 'locale-island.mjs')
   // stdin 说明符须为相对路径 + resolveDir（盘符绝对路径会被当裸包名，解析失败）
   const entry = [
     `import { zhCn } from './src/shared/locales/zh-cn.ts'`,
