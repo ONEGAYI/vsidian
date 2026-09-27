@@ -12,10 +12,15 @@ import * as vscode from 'vscode'
 import { createTextEditorProvider, VIEW_TYPE } from './host/textEditorProvider'
 import { SettingsService } from './host/settingsService'
 import { createSettingsPage } from './host/settingsPage'
+import { CssSnippetService } from './host/cssSnippetService'
+import { createSnippetFsPort, createSnippetPageWiring } from './host/cssSnippetWiring'
+import { cssSnippetEnvStamp } from './shared/cssSnippetEnv'
 import { PRODUCTION_SETTING_DEFINITIONS } from './shared/settings'
 import { installHostLocale } from './shared/locales'
 import { hostLocale } from './host/hostLocale'
 import { KeybindingService } from './host/keybindingService'
+import { runStyleReferenceExport } from './host/styleReferenceExport'
+import { t } from './shared/i18n'
 
 export function activate(context: vscode.ExtensionContext): void {
   // 设置存储：context.globalState（用户级，跨窗口一致、重启保留）+ 纯代码
@@ -25,20 +30,86 @@ export function activate(context: vscode.ExtensionContext): void {
   // #93 语言装配（宿主路径）：en 包同时登记为运行时回退
   installHostLocale(hostLocale(settingsService.getSnapshot()))
   const keybindingService = new KeybindingService(context.globalState)
-  const settingsPage = createSettingsPage(context, settingsService, keybindingService)
+  // #128 CSS 片段：用户级目录 + 逐片段开关的宿主权威服务（globalState 独立
+  // key；文件系统/监听经 vscode 层端口注入）。initialScan 在监听者（编辑器
+  // 面板广播、设置页推送）接线完成后启动——早于扫描完成打开的面板先拿空
+  // 清单，扫描完成后经 onChange 广播自愈。
+  // #131 环境隔离：本地与 Remote SSH 的 globalState 分属两台机器的扩展
+  // 宿主（ADR-0007 证据链），天然各存各的；存储值内另落环境桶戳
+  // （remoteName + machineId 推导）作防御层——异桶读取视为未配置
+  const snippetService = new CssSnippetService(context.globalState, createSnippetFsPort(), 'vsidian.cssSnippets', {
+    environmentStamp: cssSnippetEnvStamp({
+      remoteName: vscode.env.remoteName,
+      machineId: vscode.env.machineId,
+    }),
+    onUserVisibleReadError: (directory) => {
+      void vscode.window.showWarningMessage(
+        t('host.cssSnippetReadFailed', { directory }),
+      )
+    },
+    // #129 越界/符号链接逃逸：启用条目被拒时提示（服务只在拒绝态变化时
+    // 触发一次，不逐 watcher 事件重复打扰）
+    onEntryRejected: (name, reason, path) => {
+      void vscode.window.showWarningMessage(
+        t(
+          reason === 'symlink-escape'
+            ? 'host.cssSnippetRejectedSymlink'
+            : 'host.cssSnippetRejectedEscape',
+          { name, path },
+        ),
+      )
+    },
+  })
+  const settingsPage = createSettingsPage(
+    context,
+    settingsService,
+    keybindingService,
+    createSnippetPageWiring(snippetService),
+    // #145 样式契约 JSON 导出：设置页按钮与命令面板命令共用同一入口
+    () => runStyleReferenceExport(context),
+  )
   const provider = createTextEditorProvider(context, {
     service: settingsService,
     keybindings: keybindingService,
     page: settingsPage,
-  })
+  }, snippetService)
+  void snippetService.initialize()
   context.subscriptions.push(
     // enableScripts 在每个面板的 webview.options 上设置（provider 内）；
     // 注册选项仅接受 retainContextWhenHidden 等（1.86 类型契约）
     vscode.window.registerCustomEditorProvider(VIEW_TYPE, provider),
     // #33 设置页入口：打开（或 reveal 已有）Vsidian 设置面板
+    // #132 样式参考：打开设置页并定位到「样式参考」分页（快捷键默认未绑定）
+    vscode.commands.registerCommand('onegayi.vsidian.openStyleReference', () => {
+      settingsPage.openWithSection('style-reference')
+    }),
+    // #145 导出样式参考 JSON：把 VSIX 内机器可读契约清单（与设置页「样式
+    // 参考」分页同源）另存到用户路径（命令面板直接可达，无需打开设置页）
+    vscode.commands.registerCommand('onegayi.vsidian.exportStyleReference', () =>
+      void runStyleReferenceExport(context)),
     vscode.commands.registerCommand('onegayi.vsidian.openSettings', () => {
       settingsPage.open()
     }),
+    // #128 CSS 片段刷新：全局命令（命令面板与快捷键共用 id；无面板也可
+    // 刷新，状态变更经 onChange 广播到全部已开面板与设置页）
+    vscode.commands.registerCommand('onegayi.vsidian.cssSnippets.refresh', () =>
+      snippetService.refresh()),
+    // #131 暂停/恢复全部片段：宿主侧注册——不依赖任何 webview（正文工具
+    // 栏隐藏、编辑器面板异常时命令面板仍可用）。全局冻结保留逐片段开关，
+    // 恢复按原配置立即生效；与逐项停用语义正交
+    vscode.commands.registerCommand('onegayi.vsidian.cssSnippets.pause', () =>
+      void snippetService.setPaused(true).then((result) => {
+        if (result.ok) {
+          void vscode.window.showInformationMessage(t('host.cssSnippetsPaused'))
+        }
+      })),
+    vscode.commands.registerCommand('onegayi.vsidian.cssSnippets.resume', () =>
+      void snippetService.setPaused(false).then((result) => {
+        if (result.ok) {
+          void vscode.window.showInformationMessage(t('host.cssSnippetsResumed'))
+        }
+      })),
+    snippetService,
   )
 }
 

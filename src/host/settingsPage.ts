@@ -20,6 +20,23 @@ import { buildLocaleIslandHtml } from '../shared/locales/island'
 import { hostLocale } from './hostLocale'
 import type { SettingsService } from './settingsService'
 import type { KeybindingService } from './keybindingService'
+import type { CssSnippetState } from '../shared/cssSnippets'
+
+/** #128 CSS 片段管理接线（extension.ts 注入）：设置页面板的片段消息处理
+ *  与状态推送。目录选择对话框（chooseDirectory）经回调进宿主 vscode 层——
+ *  本模块不直接弹窗，测试钩子模式由注入方短路 */
+export interface SnippetPageWiring {
+  getState(): CssSnippetState
+  setDirectory(directory: string | null): Promise<unknown>
+  setEnabled(name: string, enabled: boolean): Promise<unknown>
+  /** #131 全局暂停/恢复（设置页按钮与宿主命令共用服务入口） */
+  setPaused(paused: boolean): Promise<unknown>
+  refresh(): Promise<unknown>
+  /** 弹文件夹选择器并应用所选目录；返回所选路径（取消为 null） */
+  chooseDirectory(): Promise<string | null>
+  /** 在系统文件管理器中打开当前片段目录 */
+  openDirectory(): void
+}
 
 /** 设置页面板 viewType（createWebviewPanel 无需清单声明，customEditors 才要求） */
 export const SETTINGS_VIEW_TYPE = 'onegayi.vsidian.settings'
@@ -51,15 +68,31 @@ export interface SettingsPageHandle {
    * 为新语言）。面板未开时为 no-op（下次 open 按新快照语言生成 HTML）
    */
   notifyLocaleChanged(lang: LocaleCode): void
+  /**
+   * #128 CSS 片段状态推送：宿主片段状态变更后向已开设置页发 snippets.state
+   * （面板未开时 no-op——重开经 snippets.get 重新拉取权威状态回显）
+   */
+  notifySnippetsChanged(): void
+  /**
+   * #132 样式参考：打开（或 reveal）设置页并定位到指定附加分页。
+   * 面板未 ready 时在握手完成后补发（webview 装载是异步的）
+   */
+  openWithSection(section: string): void
 }
 
 export function createSettingsPage(
   context: vscode.ExtensionContext,
   service: SettingsService,
   keybindings: KeybindingService,
+  snippets?: SnippetPageWiring,
+  /** #145 样式契约 JSON 导出（extension.ts 注入 runStyleReferenceExport；
+   *  设置页按钮与命令面板命令共用同一入口，测试可短路） */
+  styleRefExport?: () => void | Promise<void>,
 ): SettingsPageHandle {
   let panel: vscode.WebviewPanel | undefined
   let ready = false
+  // #132：ready 前收到的分页定位请求（settings.get 应答后补发）
+  let pendingSection: string | undefined
 
   /** 设置页 webview 消息处理（onDidReceiveMessage 与测试注入共用入口） */
   const handleMessage = (message: unknown): void => {
@@ -96,6 +129,12 @@ export function createSettingsPage(
           kind: 'settings.snapshot',
           values: service.getSnapshot(),
         })
+        // #132 补发分页定位（openWithSection 先于 ready 到达时）
+        if (pendingSection !== undefined) {
+          const section = pendingSection
+          pendingSection = undefined
+          void current?.webview.postMessage({ kind: 'settings.focusSection', section })
+        }
         // #96 R1 ready 即校准（设置页路径）：settings.get 是设置页的 ready
         // 握手——应答链附带当前语言包（幂等补发，复用 locale.changed 消息，
         // 协议零新增）。面板隐藏重载后 HTML 数据岛装回 open() 时的旧语言，
@@ -108,6 +147,41 @@ export function createSettingsPage(
             messages: LOCALE_MESSAGES[locale],
           })
         }
+        return
+      case 'snippets.get':
+        // #128 片段管理状态拉取（设置页装载/重载时的 ready 回填）
+        if (snippets) {
+          ready = true
+          const state = snippets.getState()
+          void current?.webview.postMessage({ kind: 'snippets.state', directory: state.directory,
+            readError: state.readError, paused: state.paused, version: state.version,
+            entries: [...state.entries], rejections: state.rejections })
+        }
+        return
+      case 'snippets.chooseDirectory':
+        // 选择对话框 + 应用目录（wiring 内完成 setDirectory）；结果经
+        // notifySnippetsChanged 的 snippets.state 推送，不逐次应答
+        void snippets?.chooseDirectory()
+        return
+      case 'snippets.setDirectory':
+        void snippets?.setDirectory(message.directory)
+        return
+      case 'snippets.setEnabled':
+        void snippets?.setEnabled(message.name, message.enabled)
+        return
+      case 'snippets.setPaused':
+        // #131 暂停/恢复：结果经 notifySnippetsChanged 推送（onChange 广播）
+        void snippets?.setPaused(message.paused)
+        return
+      case 'snippets.refresh':
+        void snippets?.refresh()
+        return
+      case 'snippets.openDirectory':
+        snippets?.openDirectory()
+        return
+      case 'styleRef.export':
+        // #145 契约 JSON 导出：结果以宿主通知回报，不逐次应答
+        void styleRefExport?.()
         return
       case 'settings.set': {
         void service.apply(message.values).then((result) => {
@@ -162,8 +236,20 @@ export function createSettingsPage(
     })
   }
 
+  const openWithSection = (section: string): void => {
+    open()
+    const current = panel
+    if (!current) return
+    if (ready) {
+      void current.webview.postMessage({ kind: 'settings.focusSection', section })
+    } else {
+      pendingSection = section
+    }
+  }
+
   return {
     open,
+    openWithSection,
     close: () => {
       panel?.dispose()
     },
@@ -182,6 +268,15 @@ export function createSettingsPage(
         messages: LOCALE_MESSAGES[lang],
       })
       panel.title = settingsPageTitle()
+    },
+    notifySnippetsChanged: () => {
+      if (!panel || !snippets) {
+        return
+      }
+      const state = snippets.getState()
+      void panel.webview.postMessage({ kind: 'snippets.state', directory: state.directory,
+        readError: state.readError, paused: state.paused, version: state.version,
+        entries: [...state.entries], rejections: state.rejections })
     },
   }
 }

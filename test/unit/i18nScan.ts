@@ -18,8 +18,17 @@ import ts from 'typescript'
 /** 扫描范围（仓库相对路径；目录递归、文件精确） */
 export const SCAN_ROOTS = ['src/webview', 'src/host', 'src/shared', 'src/extension.ts'] as const
 
-/** 范围内但豁免的路径前缀：字典目录是语言数据源，不是 UI 硬编码 */
-export const SCAN_EXCLUDED_PREFIXES = ['src/shared/locales/'] as const
+/** 范围内但豁免的路径前缀：
+ *  - 字典目录是语言数据源，不是 UI 硬编码；
+ *  - styleContract.ts 是公开样式契约清单（#132）——条目文案即用户指南的
+ *    文档数据源（语言随仓库文档惯例中文为准），不是界面文案，且绝不进
+ *    webview bundle（发射侧只引 obsidianAlias） */
+export const SCAN_EXCLUDED_PREFIXES = [
+  'src/shared/locales/',
+  // 公开样式契约清单与其生成数据（#132）：指南文档数据源，不是 UI 文案
+  'src/shared/styleContract.ts',
+  'src/webview/styleGuideData.ts',
+] as const
 
 const CJK_RE = /[\u4e00-\u9fff]/
 

@@ -1371,6 +1371,38 @@ describe('模式切换协议（#6）', () => {
     expect(isWebviewToHost({ ...baseViewState, readingAnchorStart: null })).toBe(false)
   })
 
+  it('view.state 接受 obsidianAliases 探针 record（#132），拒绝非法键值', () => {
+    const probe = {
+      liveHeadingDecorationColor: null,
+      readingHeadingDecorationColor: null,
+      readingVarProbe: null,
+      liveStrongDecorationColor: null,
+      liveInlineCodeDecorationColor: null,
+      liveCodeLineDecorationColor: null,
+      readingStrongDecorationColor: null,
+      liveTaskCheckboxDecorationColor: null,
+      readingTaskCheckboxDecorationColor: null,
+      liveLinkDecorationColor: null,
+      readingLinkDecorationColor: null,
+      readingImageDecorationColor: null,
+      liveTablePipeDecorationColor: null,
+      readingTableDecorationColor: null,
+      liveWikilinkDecorationColor: null,
+      readingWikilinkDecorationColor: null,
+      obsidianAliases: { 'inline-strong': 'rgb(110, 111, 112)', 'reading-hr': null },
+    }
+    expect(isWebviewToHost({ ...baseViewState, cssProbe: probe })).toBe(true)
+    expect(
+      isWebviewToHost({ ...baseViewState, cssProbe: { ...probe, obsidianAliases: { x: 7 } } }),
+    ).toBe(false)
+    expect(
+      isWebviewToHost({ ...baseViewState, cssProbe: { ...probe, obsidianAliases: { '': 'rgb(1, 2, 3)' } } }),
+    ).toBe(false)
+    expect(
+      isWebviewToHost({ ...baseViewState, cssProbe: { ...probe, obsidianAliases: ['live-link'] } }),
+    ).toBe(false)
+  })
+
   it('view.state 接受合法 cssProbe（字段可为 null），拒绝结构错误', () => {
     const probe = {
       liveHeadingDecorationColor: 'rgb(1, 2, 3)',
@@ -1673,5 +1705,144 @@ describe('图表导出协议校验（#111）', () => {
     expect(isHostToWebview({ ...base, action: 'export-png' })).toBe(true)
     expect(isHostToWebview({ ...base, action: 'export-tiff' })).toBe(false)
     expect(isHostToWebview({ kind: 'graphic.test.popup', view: 'both', index: 0 })).toBe(false)
+  })
+})
+
+describe('样式参考导出消息协议（#145）', () => {
+  it('接受合法 styleRef.export（无载荷开关类），不误入宿主→webview 方向', () => {
+    expect(isWebviewToHost({ kind: 'styleRef.export' })).toBe(true)
+    expect(isWebviewToHost({ kind: 'styleRef.export', extra: 1 })).toBe(true) // 多余字段不整体拒绝（与既有开关类消息同口径）
+    expect(isWebviewToHost({ kind: 'styleRef.exports' })).toBe(false)
+    expect(isHostToWebview({ kind: 'styleRef.export' })).toBe(false)
+  })
+})
+describe('CSS 片段消息协议（#128）', () => {
+  it('接受合法 snippets.get / chooseDirectory / refresh / openDirectory（无载荷开关类）', () => {
+    for (const kind of ['snippets.get', 'snippets.chooseDirectory', 'snippets.refresh', 'snippets.openDirectory']) {
+      expect(isWebviewToHost({ kind }), kind).toBe(true)
+      expect(isWebviewToHost({ kind, extra: 1 }), kind).toBe(true) // 多余字段不整体拒绝（与既有开关类消息同口径）
+    }
+  })
+
+  it('接受合法 snippets.setDirectory（绝对路径字符串或 null），拒绝空串/数字/缺字段', () => {
+    expect(isWebviewToHost({ kind: 'snippets.setDirectory', directory: 'D:\样式 片段' })).toBe(true)
+    expect(isWebviewToHost({ kind: 'snippets.setDirectory', directory: null })).toBe(true)
+    expect(isWebviewToHost({ kind: 'snippets.setDirectory', directory: '' })).toBe(false)
+    expect(isWebviewToHost({ kind: 'snippets.setDirectory', directory: 7 })).toBe(false)
+    expect(isWebviewToHost({ kind: 'snippets.setDirectory' })).toBe(false)
+  })
+
+  it('接受合法 snippets.setEnabled，拒绝空名/非布尔/缺字段', () => {
+    expect(isWebviewToHost({ kind: 'snippets.setEnabled', name: 'a.css', enabled: true })).toBe(true)
+    expect(isWebviewToHost({ kind: 'snippets.setEnabled', name: '', enabled: false })).toBe(false)
+    expect(isWebviewToHost({ kind: 'snippets.setEnabled', name: 'a.css', enabled: 'on' })).toBe(false)
+    expect(isWebviewToHost({ kind: 'snippets.setEnabled', name: 'a.css' })).toBe(false)
+  })
+
+  it('接受合法 snippets.setPaused（#131 设置页暂停/恢复入口），拒绝非布尔/缺字段', () => {
+    expect(isWebviewToHost({ kind: 'snippets.setPaused', paused: true })).toBe(true)
+    expect(isWebviewToHost({ kind: 'snippets.setPaused', paused: false })).toBe(true)
+    expect(isWebviewToHost({ kind: 'snippets.setPaused', paused: 'yes' })).toBe(false)
+    expect(isWebviewToHost({ kind: 'snippets.setPaused', paused: 1 })).toBe(false)
+    expect(isWebviewToHost({ kind: 'snippets.setPaused' })).toBe(false)
+    expect(isHostToWebview({ kind: 'snippets.setPaused', paused: true })).toBe(false) // 方向：webview 发起
+  })
+
+  it('接受合法 snippets.loadResult，拒绝负版本/缺 ok/方向颠倒（宿主侧不接受）', () => {
+    expect(isWebviewToHost({ kind: 'snippets.loadResult', name: 'a.css', version: 3, ok: false })).toBe(true)
+    expect(isWebviewToHost({ kind: 'snippets.loadResult', name: 'a.css', version: -1, ok: true })).toBe(false)
+    expect(isWebviewToHost({ kind: 'snippets.loadResult', name: 'a.css', version: 3 })).toBe(false)
+    expect(isHostToWebview({ kind: 'snippets.loadResult', name: 'a.css', version: 3, ok: true })).toBe(false)
+  })
+
+  it('接受合法 snippets.snapshot（有序 name+uri 清单），拒绝非数组/条目缺字段/负版本', () => {
+    const base = {
+      kind: 'snippets.snapshot',
+      version: 2,
+      snippets: [
+        { name: 'a.css', uri: 'https://webview/res/a.css?v=2' },
+        { name: 'b.css', uri: 'https://webview/res/b%20c.css?v=2' },
+      ],
+    }
+    expect(isHostToWebview(base)).toBe(true)
+    expect(isHostToWebview({ ...base, snippets: [] })).toBe(true)
+    expect(isHostToWebview({ ...base, snippets: [{ name: 'a.css' }] })).toBe(false)
+    expect(isHostToWebview({ ...base, snippets: [{ name: 1, uri: 'x' }] })).toBe(false)
+    expect(isHostToWebview({ ...base, snippets: 'a.css' })).toBe(false)
+    expect(isHostToWebview({ ...base, version: -1 })).toBe(false)
+    expect(isWebviewToHost(base)).toBe(false) // 方向：snapshot 系宿主方向
+  })
+
+  it('#129 接受条目级缓存击穿版本 v（非负整数或缺省），拒绝负数/小数/字符串', () => {
+    const base = {
+      kind: 'snippets.snapshot',
+      version: 2,
+      snippets: [{ name: 'a.css', uri: 'https://webview/res/a.css?v=3', v: 3 }],
+    }
+    expect(isHostToWebview(base)).toBe(true)
+    expect(isHostToWebview({
+      kind: 'snippets.snapshot',
+      version: 2,
+      snippets: [{ name: 'a.css', uri: 'https://webview/res/a.css?v=2' }],
+    })).toBe(true) // v 缺省合法（仅列表级语义）
+    expect(isHostToWebview({ ...base, snippets: [{ name: 'a.css', uri: 'x', v: -1 }] })).toBe(false)
+    expect(isHostToWebview({ ...base, snippets: [{ name: 'a.css', uri: 'x', v: 1.5 }] })).toBe(false)
+    expect(isHostToWebview({ ...base, snippets: [{ name: 'a.css', uri: 'x', v: '3' }] })).toBe(false)
+  })
+
+  it('接受合法 snippets.state（设置页形态），拒绝非法 directory/readError/entries', () => {
+    const base = {
+      kind: 'snippets.state',
+      directory: 'D:/snips',
+      readError: false,
+      paused: false,
+      version: 1,
+      entries: [
+        { name: 'a.css', enabled: false },
+        { name: 'b.css', enabled: true },
+      ],
+    }
+    expect(isHostToWebview(base)).toBe(true)
+    expect(isHostToWebview({ ...base, directory: null })).toBe(true)
+    expect(isHostToWebview({ ...base, directory: '' })).toBe(false)
+    expect(isHostToWebview({ ...base, readError: 'yes' })).toBe(false)
+    expect(isHostToWebview({ ...base, entries: [{ name: 'a.css' }] })).toBe(false)
+    expect(isHostToWebview({ ...base, entries: [{ name: 'a.css', enabled: 1 }] })).toBe(false)
+    expect(isHostToWebview({ ...base, version: 1.5 })).toBe(false)
+    expect(isWebviewToHost(base)).toBe(false) // 方向：state 系宿主方向
+  })
+
+  it('接受合法 snippets.state.paused（#131 暂停回显），拒绝缺字段/非布尔', () => {
+    const base = {
+      kind: 'snippets.state',
+      directory: null,
+      readError: false,
+      paused: false,
+      version: 0,
+      entries: [],
+    }
+    expect(isHostToWebview(base)).toBe(true)
+    expect(isHostToWebview({ ...base, paused: true })).toBe(true)
+    expect(isHostToWebview({ ...base, paused: undefined })).toBe(false) // 字段必填（宿主两处推送同形）
+    expect(isHostToWebview({ ...base, paused: 'yes' })).toBe(false)
+  })
+
+  it('#129 接受合法 rejections（name → reason/path），拒绝非法 reason/缺 path/非对象', () => {
+    const base = {
+      kind: 'snippets.state',
+      directory: 'D:/snips',
+      readError: false,
+      paused: false,
+      version: 1,
+      entries: [{ name: 'bad.css', enabled: true }],
+      rejections: { 'bad.css': { reason: 'path-escape', path: 'D:/outside.css' } },
+    }
+    expect(isHostToWebview(base)).toBe(true)
+    expect(isHostToWebview({ ...base, rejections: { 'bad.css': { reason: 'symlink-escape', path: 'E:/x.css' } } })).toBe(true)
+    expect(isHostToWebview({ ...base, rejections: {} })).toBe(true)
+    expect(isHostToWebview({ ...base, rejections: undefined })).toBe(true) // 缺省合法
+    expect(isHostToWebview({ ...base, rejections: { 'bad.css': { reason: 'other', path: 'x' } } })).toBe(false)
+    expect(isHostToWebview({ ...base, rejections: { 'bad.css': { reason: 'path-escape' } } })).toBe(false)
+    expect(isHostToWebview({ ...base, rejections: [1, 2] })).toBe(false)
   })
 })

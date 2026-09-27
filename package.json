@@ -19,6 +19,9 @@
   "engines": {
     "vscode": "^1.86.0"
   },
+  "extensionKind": [
+    "workspace"
+  ],
   "categories": [
     "Other"
   ],
@@ -230,8 +233,32 @@
         "category": "Vsidian"
       },
       {
+        "command": "onegayi.vsidian.openStyleReference",
+        "title": "%command.openStyleReference.title%"
+      },
+      {
+        "command": "onegayi.vsidian.exportStyleReference",
+        "title": "%command.exportStyleReference.title%",
+        "category": "Vsidian"
+      },
+      {
         "command": "onegayi.vsidian.openSettings",
         "title": "%command.openSettings.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.cssSnippets.refresh",
+        "title": "%command.cssSnippets.refresh.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.cssSnippets.pause",
+        "title": "%command.cssSnippets.pause.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.cssSnippets.resume",
+        "title": "%command.cssSnippets.resume.title%",
         "category": "Vsidian"
       },
       {
@@ -292,13 +319,16 @@
   },
   "scripts": {
     "gen:nls": "node scripts/genNls.mjs",
-    "compile": "node scripts/genNls.mjs && node esbuild.mjs && tsc --noEmit",
+    "gen:styleguide": "node scripts/genStyleGuide.mjs",
+    "compile": "node scripts/genNls.mjs && node scripts/genStyleGuide.mjs && node esbuild.mjs && tsc --noEmit",
     "watch": "node scripts/genNls.mjs && node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit",
-    "test:unit": "vitest run && node --test test/integration/testHost.test.mjs test/release/release.test.mjs test/browser/runner.test.mjs test/browser/buildBroker.test.mjs",
+    "test:unit": "vitest run && node --test test/integration/testHost.test.mjs test/release/release.test.mjs test/browser/runner.test.mjs test/browser/buildBroker.test.mjs test/style-contract/checkStyleContract.test.mjs",
     "test:integration": "node esbuild.mjs && node ./test/integration/runTest.mjs",
     "test:browser": "node test/browser/run.mjs",
     "test:keybindings-host": "node test/browser/keybindingsHost.mjs",
+    "check:stylecontract": "node scripts/checkStyleContract.mjs",
+    "check:stylecontract:baseline": "node scripts/checkStyleContract.mjs --verify-baseline",
     "release:check": "node scripts/release.mjs",
     "release": "node scripts/release.mjs --upload",
     "vscode:prepublish": "node scripts/genNls.mjs && node esbuild.mjs --production"

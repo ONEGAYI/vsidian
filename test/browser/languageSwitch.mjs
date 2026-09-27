@@ -101,7 +101,7 @@ try {
 
   // 全程只上送 settings.set（换包由宿主 locale.changed 驱动，非 webview 自取）
   assert.deepEqual(
-    (await page.evaluate(() => window.sent.filter((m) => m.kind !== 'settings.get' && m.kind !== 'keybindings.get')))
+    (await page.evaluate(() => window.sent.filter((m) => m.kind !== 'settings.get' && m.kind !== 'keybindings.get' && m.kind !== 'snippets.get')))
       .map((m) => m.values['general.language']),
     ['en', 'zh-cn', 'auto'],
   )

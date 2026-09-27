@@ -25,11 +25,17 @@ out/test/**
 out/task*/**
 # 本地验证样图（如 mermaid 暗色修复的 before/after 探针）仅作留证，非运行时资产。
 out/samples/**
+# 本地工单草稿目录（#128 CSS 片段工单拆分留档）仅作过程留证，非运行时资产。
+out/css-snippets-tickets/**
 **/*.map
 .gitignore
 .git/**
 package-lock.json
 *.vsix
+# 本地实施工件（依赖安装日志、验证日志目录）不进包（#132 实证 npm-install.log 曾混入）
+npm-install.log
+logs/**
+
 # 原图仅存仓库溯源（1254×1254），VSIX 用 media/vsidian-icon-256.png
 media/vsidian-icon.png
 

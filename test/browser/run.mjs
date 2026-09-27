@@ -9,9 +9,13 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // 插在 taskClick 之后、outline 系列之前。
 // #123 合并入列：symbolInput 按长度插在 tabIndent 之后；#124/#125 把该
 // 套件扩至 50 场景（选区包裹与围栏内 Tab 越界，场景数以套件输出为准）。
+// #129 合并入列：cssSnippetImports（依赖导入/相对资源/循环/缓存实验）紧随
+// cssSnippets。
+// #130 合并入列：cssHttpsImports（HTTPS 导入/联网字体/受控 https 服务）。
+// #133 合并入列：chromeContract（界面域样式契约探针）紧随 obsidianAlias。
 const names = ['tableCaret', 'taskClick', 'listEditing', 'tabIndent', 'symbolInput', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage',
-  'languageSwitch', 'quickActions', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor']
+  'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract']
 let workers = 2, reuseBuilds = true, selected = names
 for (const arg of process.argv.slice(2)) {
   if (/^--workers=\d+$/.test(arg)) workers = Number(arg.slice('--workers='.length))

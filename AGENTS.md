@@ -14,7 +14,43 @@ VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 - **视觉层断言（评审必查）**：webview/样式/渲染类变更，评审必须核对断言对象是"用户看到的东西"（可见性、对齐、颜色）而非 DOM 存在性或几何坐标——样式注入失效时后者照样通过（PR #37 P0 实证：CSP 拦截 CM6 注入样式后 74 集成用例仍全绿，正文实际不可见）。涉及呈现的新特性至少一条集成断言落在绘制层（现有 `view.state.paint` 探针），CSS 关键规则由契约测试钉住。
 - **符号输入辅助扩展约定（#123/#124/#125 落档）**：符号键入与围栏内 Tab 的三条路径都是注册表驱动的路径级行为。无选区路径（#123：自动补全、闭合越过、自动空对退格）：`src/shared/symbols.ts` 的 `SYMBOL_AUTOCLOSE_REGISTRY` 登记符号对（open/close、代码上下文适用性、`suppressBefore`/`suppressAfter` 相邻字符抑制、自反触发符的 `mirrorAtRunStartOnly` 串首规则），`src/webview/symbolAutocomplete.ts` 的 transactionFilter／StateField／keymap 自动继承。新增符号只需：注册表加一行（含 `selectionWrap`、`tabEscape` 决定是否参与选区包裹与 Tab 越界）+ `test/unit/symbols.test.ts` 参数化用例钉住其触发/越过/抑制条件（清单数断言同步），不需要改 webview 侧条件分支。选区路径（#124：非空选区键入包裹）：注册表的 `selectionWrap` 字段逐项显式登记包裹能力（**包裹符、自动补全符、Tab 可导航符是三个不同集合，不得等同硬编码**——键入 close 字符不包裹、包裹判定不做邻接抑制），包裹计划纯函数在 `src/shared/symbolWrap.ts`（`planSelectionWrap`：空行序列拆段、纯空白块跳过、产物多 range 原文选区），`src/webview/symbolWrap.ts` 的 transactionFilter 认两种输入形态——单 range 选区替换与 CM6 `replaceSelection` 的多 range 逐条替换（真实键盘在多 range 选区下键入，DOM 原生选区只表达 main range，CM6 的 applyDefaultInsert 经 replaceSelection 覆盖全部 range——跨段第二键叠加包裹的底层机制）；跨段后选区保持多 range（各段原文），依赖随组装配的 `allowMultipleSelections`（EditorState 否则把选区 asSingle；已知呈现边界：未启用 drawSelection，多 range 仅 main range 有原生选区高亮，功能不受影响）。伴生行为：多光标（CM6 默认手势 Windows/Linux 为 Ctrl+click、macOS 为 Cmd+click）随组可用，表内多光标键入 `|` 经 keymap 命令 `tablePipeKeyHandler` **逐 range 转义** `\|`（任一 range 无需转义才整体交默认，避免多光标语义分裂）——多 range 表格竖线路径不走单 range filter 门控，结构不被裸竖线破坏，symbolInput 浏览器套件有钉住用例。包裹语义边界：连续键入是叠加不取消（与格式按钮两态切换是不同操作）；单换行属同段不拆段、屏幕折行无换行符天然不拆；代码上下文沿 `allowInCode`（Markdown 强调整笔不接管、混合选区不转换块结构）、表格格区（`tableRegionField` 非 null）归 tableEditing 不接管；粘贴/拖放不包裹；IME 组合期间不干预（filter 对 `input.type.compose` 事务一律原样放行），**定稿提交恰好等于某注册项 open 的单个起始符号且组合开始时有非空选区时按包裹口径重建**（`src/webview/symbolWrap.ts` 的 wrapCompositionTracker：compositionstart 捕获阶段快照选区原文与代码上下文（先于 CM6 内建跨行删除），compositionend 后微任务重建 `open+原文+close` 并保持原文选中、跨段各 range 同步包裹并支持连续叠加；快照经 `src/webview/symbolCompositionState.ts` 共享——#123 补全 attempt 读到快照即让位，同一提交只允许一条路径生效），无选区、提交完整符号对（既不包裹也不补全）与多字符选字按 #123 口径处理；跨行（跨段）选区经 IME 同样按空行拆段包裹；CM6 在组合开始同步删除跨行选区，须先于内建 observer 快照，并在捕获阶段标记 composing，使删除与定稿重建合并为单笔写回；宿主整段撤销替换若把选区映射成反向范围，外部同步在同一事务中规范为正向原文选区。Tab 越界路径（#125：光标在有效成对围栏内部且无选区时两步越出）：注册表 `tabEscape` 字段是第三个显式集合——括号/引号 12 项表示行内配对扫描参与，markdown 项表示对应树围栏参与（`TAB_ESCAPE_TREE_NODE_NAMES` 五节点与之间源）；**显式决策**：`$` 不登记（行内公式无语法节点，扫描配对边界与公式形态学不一致），wikilink 无专用节点、经方括号行内配对天然纳入（`[[..]]` 栈式配对逐层退出）；定位纯逻辑在 `src/shared/tabEscape.ts`（`matchInlineFences` 栈式配对、自反符号按出现顺序交替、失配 close 忽略；`planTabEscapeTarget` 两步推导——pos 贴闭标记左边界即第二步，无跨按键状态机；嵌套取包含光标的**最窄内容区间**逐层退出），适配层 `src/webview/fenceEscape.ts` 从增量树提取光标行树围栏（首/末子节点须为 mark）后与行内配对合并。**装配顺序陷阱**：CM6 keymap 与 transactionFilter 的顺序语义相反——keymap 按扩展数组顺序**正序**拼接尝试（靠前者先匹配、return false 落穿给后者），filter 逆序应用（靠后者先过滤）；fenceEscape 的 keymap 必须在 tableEditing **之前**（「格内先越界后切格、正文落缩进」三段优先级），#123/#124 的 filter 在 tableEditing 之后——勿据一方经验摆另一方位置。门控：多 range 与非空选区不接管（多 range 显式决策只处理单 range，保持既有缩进/切格语义）、格区不改写、frontmatter 与块级代码上下文（FencedCode/CodeText/CodeBlock/CodeInfo/HTMLBlock）排除（代码块内 Tab 继续缩进），InlineCode 刻意不排除（行内代码本身是有效树围栏）；命中派发纯选区事务（零写回零 dirty，集成断言 appliedEdits 不增、字节不变）；Shift+Tab 不绑 shift 槽（落穿保持反向切格/缩进，不新增反向越界）；**后续工单不得把命令绑定到 Tab 键**（keybindingRouter 先于 keymap 拦截会破坏三段优先级，见 keybindings.md #125 评估段）。设置键 `editor.symbolAutocomplete`、`editor.symbolSelectionWrap`、`editor.symbolTabEscape` 三个独立布尔开关（均默认开）经各自 Compartment 热重配整组增删。三条既有边界不得顺手放宽：越过只认「自动补出的」闭合符号（`autoclosePairs` StateField 记录，手打相邻照常插入；外部同步经 externalSync 注解清空状态，不得用过期位置跳过或删除）；星号序列 `| → *|* → **| → ***|` 由 `mirrorAtRunStartOnly` 钉住且**不得泛化**为所有符号的统一重复输入行为（各符号的重复输入语义以注册项显式登记为准；选区场景的连续包裹是叠加语义、不混用该序列规则；#125 的 Tab 越界与「自动补出来源」无关——覆盖文档既有围栏）；英文尖括号默认不登记（不自动补全、不包裹、不参与越界）。#123 的 IME 补全走双时机：组合期间 filter 按 `symbolComposing` StateField 拦截（compositionend 后**延迟一个宏任务**复位——同步 dispatch 会打断 CM6 组合定稿 flush，tableCaret 的 IME 回归实证），提交补全由 compositionend 钩子的微任务 attempt 统一触发并与组合净输入在 deferredLocal 合并单笔出站（一次补全=一笔 edit.request=宿主撤销一次整体恢复；syncController 侧「组合期间一律暂缓」与「组合暂缓的外部增量经 base 系映射应用而非保守暂停」配套——触碰式暂缓的 #4 暂停口径保持不变）；#124 的包裹 filter 仍按 `input.type.compose` userEvent 排除组合中间与定稿事务（包裹不经 filter 改写组合事务，IME 选区的包裹由 wrapCompositionTracker 在定稿后主动派发——与 #123 补全同款微任务时序，均不在 compositionend 同步 dispatch，会打断 CM6 组合定稿 flush）；#125 的 Tab 是按键命令不是输入事务，组合中 `compositionStarted` 让位即可（tableEditing/indentEditing 同款先判）。
 - **大纲样式设计哲学（#65 落档）**：大纲条目的呈现遵循三条原则，后续大纲呈现类变更不得违背。其一，**结构装饰与正文主题同源**——层级颜色等主题性装饰不复制读值，而是与正文标题引用同一 CSS 变量族（`--vsidian-heading-color-1..6`，定义于 `#app`，live 标题行级、阅读标题块级、大纲条目级三侧同引），主题分级着色一处定义多处生效。其二，**强调语义只认显式标记**——条目一律常规字重（400），不继承标题级别的结构性加粗；仅显式 `**粗体**` 段加重，斜体/行内代码/删除线同理只由标记触发。其三，**透传集合 = 正文已支持的行内标记子集**——当前白名单为粗体/斜体/高亮/行内代码/删除线（`OutlineSpanKind`，提取与校验同源；#105 高亮已按同一机制接入），公式/行内颜色待正文支持后按同一白名单机制接入（提取处 `SPAN_KIND_BY_NODE` 加映射即可），大纲侧零额外设计；双链/链接显示别名/链接文字的纯文本，不可点。
+- **CSS 片段依赖导入约定（#129 落档）**：入口片段的 @import/url() 静态分析、越界与符号链接逃逸判定、变更归因（被导入文件变更只重载依赖它的入口，无关变更静默）全部收敛在 `src/shared/cssSnippetImports.ts` 纯逻辑 + `cssSnippetService.ts` 的分析编排，不另建第二套解析。两条硬边界：其一，形态学与 CSSOM 有效性对齐——只认**首个生效规则前**的顶层 @import（@charset/@layer 声明不关闭导入窗口；块内与规则后的导入浏览器忽略，宿主也不计入依赖，避免过度归因与过度拒绝），media/supports/layer 条件解析但不求值；其二，`<link>` 的 error 事件按 sheet 三态分流（可读有规则=降级晋升/跨源不可读=保留链回报失败/无表或空表=移除保旧）——嵌套导入 404 会对 link 触发 error 但其余规则正在生效，入口级失败（连接拒绝/CSP 拦截）的 sheet 是零规则对象，「sheet 非空」不可作依据，Chromium 实测留证见 `test/browser/cssSnippetImports.mjs` 注释。入口级缓存击穿版本（`?v=`）与列表版本是两轴：其他入口启停不得扰动未涉及入口的 URI。#130 HTTPS 导入在此基础上扩展 `classifyCssRef` 的 http 类与 CSP `style-src`/`font-src`，勿在宿主预判联网资源成败。
+- **HTTPS 样式导入与联网字体约定（#130 落档）**：远程引用（`classifyCssRef` 的 http 类，含协议相对 `//`）的宿主语义是「**完全不进本地面**」——不进依赖闭包（`importPaths`）、不进 watcher 归因（远程不可 watch）、不触发越界/realpath 拒绝、不预判联网成败（断网/CORS/HTTP 错误/无效 CSS 一律交浏览器与装载器三态分流：入口降级、其他片段不受影响、字体回退备用）；远程内容的重发**只**由入口级版本驱动（手动刷新或入口/本地依赖变更推进 `?v=`）。CSP 由 `buildEditorCsp`（`src/host/editorCsp.ts` 纯模块，词法契约 `test/unit/editorCsp.test.ts`）装配：`style-src`/`font-src` 追加 `https:`，**脚本面维持 nonce 门控、明文 `http:` 源任何指令不放行、无 connect-src（不以宿主代理绕过 CORS——字体是 CORS 强制资源，须由字体服务回 ACAO）**；设置页 CSP 保持收紧。字体晚到（@font-face 在链 load 后异步完成）由 `fontArrival`（webview 纯模块，`document.fonts.ready` 有界多轮）在字体集稳定后补一轮重测：live 侧 CM6 requestMeasure、阅读侧显式 updateNow 走 measureAndStabilize 锚定。自动化约束（实测留证）：浏览器套件页面在同一浏览器进程内做「CM6 页面 + https 样式表装载/热换」累积会使渲染进程被硬杀（Edge 同形态、与生产代码无因果）——`cssHttpsImports` 套件按场景独立浏览器进程规避，新增此类用例沿用该模式；真宿主 webview 内多轮热换稳定性由集成用例钉住。
+- **界面域样式契约与片段可覆写（#133 落档）**：界面域（代码卡片/公式/图表含按钮组与弹窗/大纲/顶栏）公开入口与渲染验证走与正文域同一清单与生命周期：静态入口由 `src/shared/chromeContract.ts` 探针表在真实渲染中断言（fixture 驱动，`cssProbe.chromeSelectors` 采集），交互态类（located/collapsed/dragging/菜单/重命名/弹窗在场等）不伪造静态探针、由既有浏览器/集成套件按行为路径验证（豁免分工由 `test/unit/chromeContract.test.ts` 钉住）；第三方渲染器（KaTeX/Mermaid）内部 DOM 不提升为稳定接口（limit-katex-internals / limit-mermaid-internals 两条边界条目）。**内置样式不得压过用户片段的裸类选择器**：tok-\* 色板与大纲层级色经 `:where()` 零特异性书写（明暗两组组内靠顺序分层），新增长效规则若面向片段覆写须同此模式——此前 `#app` 前缀 (1,1,0)/(0,2,0) 压过用户 `.tok-keyword`/`.vsidian-outline-level-n` 的偏差即由此修正；层级色三侧同源（`--vsidian-heading-color-{1..6}`）关系不变。图表弹窗测试钩子 `graphic.test.popup` 的 action 支持 export-svg/export-png/refresh/close（驱动真实按钮处理器，勿绕过单例直接操作浮层 DOM）。
 - **用户可见文字一律 i18n**：所有面向用户的文字（webview 界面、设置页、宿主通知/确认框、package.json command title 与 displayName/description）必须经 `src/shared/locales/` 语言包与 `t()` 字典映射添加，禁止新增硬编码中/英文字面量；两语言包键集由编译期 parity 把关，回潮由 CI 防回潮扫描（源码 CJK 字面量契约测试）拦截。manifest 侧 `package.nls.*.json` 由构建脚本从字典生成，不在 JSON 里手写。
+
+## 公开样式契约：Agent 修改约束
+
+**触发范围**：修改编辑器 webview 的 DOM、类名、属性、CSS 变量、主题、渲染依赖或片段加载路径，以及修改样式指南、兼容测试、历史基线或相关 CI 时适用。纯业务逻辑且不影响呈现或样式入口的变更无需执行本节专项检查。
+
+**事实入口**：[样式 ADR](docs/adr/0004-stable-styling-contract.md)记录决策，**结构化清单 `src/shared/styleContract.ts`（#132 起单一事实源，115 条；#133 起界面域逐项核实完毕）记录现有入口与生命周期**（旧手写映射表已退位为指向清单的迁移说明），[CONTEXT.md](CONTEXT.md)记录片段产品边界。别名桥实现同源表在 `src/shared/obsidianAlias.ts`（发射侧只引该模块，避免清单文档数据进 webview bundle）；界面域渲染验证探针表在 `src/shared/chromeContract.ts`（webview 采集侧只引该模块）；用户指南由清单生成（`npm run gen:styleguide`，compile 链前置，产物入库、一致性由 `test/unit/styleGuideGen.test.ts` 以 `--check` 钉住——改清单后须重跑并提交产物）；渲染验证经 `cssProbe.obsidianAliases`（正文域，探针属性 outline-color）与 `cssProbe.chromeSelectors`（界面域，探针属性为自定义属性 `--vsidian-chrome-probe`——不可见且与 outline-color/text-decoration-color 两套既有探针正交，同一元素挂多套探针类时零层叠串扰，规则形态由 `test/unit/chromeContract.test.ts` 钉住）。下述行为约束立即适用；**历史契约本地检查器已随 #134 落地**（`npm run check:stylecontract`：独立基线 `test/style-contract/baseline-v0.4.0.json`（v0.4.0 tag 固化快照）对照候选清单比较 + 弃用期限校验 + 别名桥实现一致性 + 指南一致性 + 完整性自检，反规避负向测试与基线驱动旧片段渲染验证在 `test/style-contract/checkStyleContract.test.mjs` 与集成用例「历史基线旧片段渲染验证」；`check:stylecontract:baseline` 从 git 对象复验基线）。target 比较按**类名 token 只增不减**判定（token 消失/替换即改名，括注追加子类/收起态说明放行——#133 数据修正形态）；基线 `lifecycleExemptions` 与 `entryComparisonExemptions` 两键登记**逐条目豁免**（先例：var-heading-accent 期限豁免、mode-toggle「基线承诺从未兑现于任何发布版且有 git 证据」的双层纠错豁免，理由见基线 meta.provenance；豁免不豁免 entry-missing——条目物理删除仍失败，新增豁免须在变更说明中独立列出理由与保护效果）。**合并必需状态与发布前复验已随 #135 接线**：CI 新增 `style-contract` job（ci.yml；步骤序为 verify-baseline 复验 → 检查器/基线变更暴露到 PR summary → 全量契约检查，报告无论成败经 artifact 保留），release job 在 `npm run release` 前跑同一检查链（失败即不打包不产出 Release）。诚实边界：**远端 main 分支保护必需名单（2026-09-27 实读为 unit/integration）尚未纳入 style-contract**——名单更新前其失败只在 PR 状态区显示，不得表述为已阻止合并；把 job 加入必需名单的操作步骤与防绕过机制分层说明见 [docs/specs/style-contract-gate.md](docs/specs/style-contract-gate.md)（负向演示脚本 `scripts/demoStyleContractGate.mjs` 可重复重跑）。本地工具无法对抗候选分支删除检查器/基线本身（边界与接口见基线 meta.boundary）。
+
+### 修改前：固定旧契约
+
+1. 列出本次受影响的公开入口、适用视图与状态。公开入口包括文档承诺的选择器、变量及必要的 DOM 关系；保留类名但换到错误节点、改变变量作用域或使旧选择器无法命中，同样属于破坏。不要把所有内部类名一概当作公开接口。
+2. 记录用于对照的已发布版本及提交 SHA，从该版本读取相关入口和历史片段。未发布的已有约定另以目标分支固定提交为基线；不得仅以当前工作分支重写后的清单证明兼容。历史材料缺失时明确记录缺口，保留旧入口，不能据此宣布“无兼容要求”。
+3. 映射表与实现矛盾时核实历史记录和实际渲染；不得为迁就当前实现，直接删去文档承诺或将已公开入口降为内部接口。
+
+### 修改中：保留兼容与独立证据
+
+- 默认保留旧选择器与变量语义，优先通过别名或适配层承接内部重构；别名必须实际命中原有内容，不能只留空节点、无效 CSS 或字符串。
+- 新增公开入口须补齐用途、模式、状态、示例及实际效果验证。只改单一事实源 `src/shared/styleContract.ts`（含正文域逐项渲染验证：probe.css 探针规则 + `OBSIDIAN_ALIAS_PROBES` 表 + 集成/浏览器断言三处同源），经 `npm run gen:styleguide` 更新指南产物，禁止另建手写副本；承诺 Obsidian 原名兼容（direct 级）必须同时在 `src/shared/obsidianAlias.ts` 登记别名并在别名探针表登记验证（`test/unit/styleContract.test.ts` 钉住两表与条目 aliasTargets 一致）。
+- 禁止为消除失败而删除旧片段、跳过旧用例、降低断言强度、把旧选择器替换成新选择器，或从当前实现重新生成历史期望值。旧断言确有错误时，保留原始基线与失败证据，单列纠错依据和替代验证，不得混作普通重构。
+- 兼容检查器、历史基线、CI 工作流的修改须在变更说明中独立列出理由与保护效果；不得通过关闭检查、调整过滤条件或移除必需状态掩盖失败。更改远端保护配置仍遵循用户授权边界。
+
+### 弃用与移除
+
+- 默认长期兼容。确需移除时，先在发布版本中公开弃用声明、替代写法与迁移示例；保留弃用记录，不能删除清单条目以抹去历史。
+- 至少经过两个后续次版本且从弃用版本实际发布时起满 30 天，才允许显式移除。例如 0.2.x 弃用，最早 0.4.0 且满 30 天；补丁版本不计次版本，单纯抬高 package.json 版本号不能替代发布过程。跨主版本不得据此自动豁免迁移期。
+- PR 和发布前均需提供弃用版本、实际发布日期、后续版本记录、替代入口及旧片段迁移验证。缺少证据或条件未满足时保留兼容入口；到期不自动删除，也不自动授权发布。
+- **期限规则已工具化（#134）**：上述条件由 `npm run check:stylecontract` 对照**基线固化发布记录**（tag→SHA + CHANGELOG 日期快照，与候选 CHANGELOG/git tag 交叉验证，矛盾即失败）自动校验——改日期、跳版本号、发布记录缺项不能绕过（29/30 天边界与各规避场景有负向测试钉住）；「弃用声明须含实际发布版本 + 替代写法」同为机器校验项。新版本发布后应更新基线快照并单独评审。
+
+### 完成条件与交付证据
+
+- 对受影响的历史片段，在候选实现的真实浏览器或宿主中验证预期样式及可见结果，并覆盖相关视图、模式切换和视口重新挂载；只检查类名存在、DOM 数量或几何坐标不足以宣布兼容。
+- 按影响范围运行现有 CSS 契约与绘制层测试；涉及输入或光标时遵循本文件的浏览器必跑约定。长耗时检查首次即保留日志及退出码。纯规则文档修改仅做内容、链接与差异检查，不为流程添加无意义运行测试。
+- 交付说明必须列出受影响入口、基线版本/SHA、保留或弃用方式、验证报告及未验证项。检查受限时如实标记，不把代理自检当作用户验收；自动化未落地前按上述过程提供人工核对证据，不虚构命令或 CI 保障。
+- 自动门禁已接入（#135）：「候选分支同时改掉实现、清单和测试仍被独立历史基线拦住」经 `scripts/demoStyleContractGate.mjs`（真实 CLI 隔离演示，可重复）与 #134 反规避负向测试钉住，兼容检查已接入 CI `style-contract` job 与发布前复验。未把该 job 加入远端必需名单前，不声称失败能够阻止合并（实读与操作步骤见 [docs/specs/style-contract-gate.md](docs/specs/style-contract-gate.md)）。
 
 ## 技术栈与构建（工单 #2 确立）
 
@@ -22,9 +58,10 @@ VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 - **宿主端**（`src/extension.ts`、`src/host/`）：`CustomTextEditorProvider`，保存/dirty/Hot Exit 由 VSCode 文本管线自动处理；`TextDocument` 为权威文本，编辑经 `WorkspaceEdit` 写回。
 - **webview 端**（`src/webview/`）：CM6 EditorView + `acquireVsCodeApi` 消息桥；`src/shared/` 为两端共享的消息协议单一事实源（不依赖 vscode/DOM）。协议约定 webview 全程 LF 坐标（CM6 内部把 `\r\n` 规范化为 `\n`，宿主侧 `NewlineCoordinator` 负责双向坐标与文本转换）。
 - **构建**：esbuild 多产物——宿主 `out/extension.js`（node18/cjs/external vscode）、编辑器 webview `out/webview/main.js` 与设置页 webview `out/webview/settings.js`（#33；chrome118/iife，CSS 随 import 打包为同名 `.css`）；`npm run compile` 另跑 `tsc --noEmit` 做类型检查（esbuild 不查类型）。
-- **测试**：`npm run test:unit`（vitest + `node --test` 启动器契约，纯逻辑 + jsdom 的 webview 控制器，无 VSCode 宿主依赖；`VSIDIAN_TEST_HOST_MODE=foreground` 时跳过独立桌面探针）；`npm run test:browser`（Playwright headless Chromium，用原生键盘/IME 驱动生产控制器验证表格光标与输入回流——keydown 注入测不到 `input.type` 回流路径，**涉及 webview 输入/光标行为的变更合并前必跑**，首次需 `npx playwright install chromium`；CI 的 browser job 在 Linux runner 上跑同一脚本并缓存浏览器二进制，通道同为 Playwright chromium，与本地默认一致，`VSIDIAN_TEST_BROWSER_CHANNEL=msedge` 仅本机借系统 Edge 调试用，不进 CI）；`npm run test:integration`（1.86.2 真宿主，fixture 由 `test/integration/fixtures.mjs` 统一生成，开发态 `runTest.mjs` 与安装态 `runInstalled.mjs` 及空窗口激活 `runSettingsActivation.mjs` 三条路径共用 `testHost.mjs` 启动策略：Windows 默认独立桌面不抢前台，`VSIDIAN_TEST_HOST_MODE=foreground` 切前台；三条启动器都会把本次宿主的完整逐例输出与退出码自动落盘到 `.vscode-test/` 下的运行报告——`integration-dev.log` / `integration-installed.log` / `settings-activation.log`，复核结果、统计用例与追查失败优先读报告文件，不为补看信息重跑）。扩展注册 `onegayi.vsidian._test.*` 辅助命令供集成测试观测/注入（仅 `VSIDIAN_TEST_HOOKS=1` 时注册）。测试消息通道是**宿主侧门控、webview 侧被动接收**的分层设计：`_test.*` 注入命令（含向 webview 转发 `table.test.key`/`task.test.click`/`reading.test.image` 等）在宿主侧受 `VSIDIAN_TEST_HOOKS` 门控；webview 侧这些消息分支不做二次门控——webview 面板的消息源只有扩展自身（`panel.webview.postMessage`），封住注入源即封住入口，勿误判为 webview 未设防。
+- **测试**：`npm run test:unit`（vitest + `node --test` 启动器契约（testHost/release/browser 调度与 #134 历史契约检查器 `test/style-contract/checkStyleContract.test.mjs`），纯逻辑 + jsdom 的 webview 控制器，无 VSCode 宿主依赖；`VSIDIAN_TEST_HOST_MODE=foreground` 时跳过独立桌面探针）；`npm run test:browser`（Playwright headless Chromium，用原生键盘/IME 驱动生产控制器验证表格光标与输入回流——keydown 注入测不到 `input.type` 回流路径，**涉及 webview 输入/光标行为的变更合并前必跑**，首次需 `npx playwright install chromium`；CI 的 browser job 在 Linux runner 上跑同一脚本并缓存浏览器二进制，通道同为 Playwright chromium，与本地默认一致，`VSIDIAN_TEST_BROWSER_CHANNEL=msedge` 仅本机借系统 Edge 调试用，不进 CI）；`npm run test:integration`（1.86.2 真宿主，fixture 由 `test/integration/fixtures.mjs` 统一生成，开发态 `runTest.mjs` 与安装态 `runInstalled.mjs` 及空窗口激活 `runSettingsActivation.mjs` 三条路径共用 `testHost.mjs` 启动策略：Windows 默认独立桌面不抢前台，`VSIDIAN_TEST_HOST_MODE=foreground` 切前台；三条启动器都会把本次宿主的完整逐例输出与退出码自动落盘到 `.vscode-test/` 下的运行报告——`integration-dev.log` / `integration-installed.log` / `settings-activation.log`，复核结果、统计用例与追查失败优先读报告文件，不为补看信息重跑）。扩展注册 `onegayi.vsidian._test.*` 辅助命令供集成测试观测/注入（仅 `VSIDIAN_TEST_HOOKS=1` 时注册）。测试消息通道是**宿主侧门控、webview 侧被动接收**的分层设计：`_test.*` 注入命令（含向 webview 转发 `table.test.key`/`task.test.click`/`reading.test.image` 等）在宿主侧受 `VSIDIAN_TEST_HOOKS` 门控；webview 侧这些消息分支不做二次门控——webview 面板的消息源只有扩展自身（`panel.webview.postMessage`），封住注入源即封住入口，勿误判为 webview 未设防。
 - **浏览器测试调度与报告**：`npm run test:browser` 经 `test/browser/run.mjs` 默认双并发运行全部浏览器脚本（脚本清单即 run.mjs 的 `names` 数组，不在此重复记数）；`-- --workers=1` 回退串行，`-- --suite=tableCaret,graphicPopup` 定向运行，`-- --no-reuse` 禁用本轮构建复用。每轮写入独立的 `out/test/browser-runs/run-*/`，含 `report.json`、`report.md`、逐脚本日志、构建/浏览器启动阶段计时与运行产物。脚本失败后继续收集其他结果，任一失败整体非零；单脚本 120 秒超时，取消时停止已启动的子进程树。共享构建只在本轮有效，浏览器状态不共享；含插件函数的表格 fixture 保留本进程构建。CI 无论成功失败均上传报告与日志。测量方法、收益与边界见 [浏览器测试调度实测](docs/perf/2026-09-browser-test-runner.md)。
 - **集成测试分片**：本地设置 `VSIDIAN_ITEST_SHARDS=4` 再运行 `npm run test:integration`，启动器共用一份 VSCode 程序，为各片创建独立临时便携目录并在全部宿主退出后清理；逐片报告写入 `.vscode-test/integration-dev-s<片号>.log`。缺省仍为单宿主全量测试。CI 使用四个 runner，各注入 `VSIDIAN_TEST_SHARD=k/4` 且只起一个宿主；`integration` 汇总检查保留分支保护所需的稳定名称。
+- **历史契约门禁 job（#135）**：ci.yml 的 `style-contract` job 跑 `npm run check:stylecontract:baseline`（git 锚定基线复验，须在契约检查**之前**——先证检查器可信，再信检查结果）+ `npm run check:stylecontract`（八项全检查），并把检查器/基线/门禁工作流文件相对 PR 基点的变更统计写入 step summary 供独立审查；报告无论成败经 artifact（`style-contract-report`）保留。checkout 须 `fetch-depth: 0` + `fetch-tags: true`（verify-baseline 与发布记录交叉验证依赖 git 对象与 refs/tags，浅克隆即缺）。job 名是远端必需检查的 context 候选，改名视同变更保护规则；远端名单现状与授权后操作步骤见 [docs/specs/style-contract-gate.md](docs/specs/style-contract-gate.md)。
 - **打包与安装态回归（#15）**：`npx @vscode/vsce package --no-dependencies` 产出 VSIX（esbuild bundle 自包含，不带 node_modules；`.vscodeignore` 排除 src/test/docs）。`node test/integration/runInstalled.mjs` 把 VSIX 经 `--install-extension` 装入隔离 profile 的 1.86.2 便携宿主（安装注册链路真实走通；1.86 测试模式要求 `--extensionTestsPath` 依赖 `--extensionDevelopmentPath` 同时存在，故 dev path 指向安装解压目录——加载代码仍是 VSIX 产物而非仓库源码树）后跑同一集成套件。
 - **性能测量**：`node test/perf/runPerf.mjs`（1千/1万/10万行、10 KB/100 KB/1 MB、超长行、图片密集与大围栏；报告写 `docs/perf/data/perf-report.json`）；档位数据与解读汇总在 [docs/perf/2026-09-mvp-performance-summary.md](docs/perf/2026-09-mvp-performance-summary.md)。
 - **版本锁定**：依赖一律精确版本（无 `^`），提交 lockfile；`engines.vscode ^1.86.0` 与 `@types/vscode 1.86.0` 对齐。`@types/node` 锁 22.x（vitest 5 的 vite peer 要求数 >=20.19，类型不进产物，宿主代码仍按 Node 18 API 面编码）。
@@ -35,7 +72,7 @@ VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 - **双重防线**：`.vscodeignore` 挡打包输入，`scripts/release.mjs` 的 `inspectVsixEntries` 检查最终产物（必需清单 + `out/` 白名单 + 禁止模式 + 体积阈值），每次发布前必跑（`npm run release:check`，或随 `npm run release` / CI 自动执行）。新增运行时资产时两处同步维护：`.vscodeignore` 放行 + `REQUIRED_EXTENSION` 登记；漏登记（缺失）与 out/ 未登记产物（多余，如调试遗留）都会被发布检查拦下（`.github/` 混入包内即此类事故，实测发生过）。字体只随包 woff2（chrome118 目标足够），`.woff`/`.ttf` 混入即硬错误——它是字体裁剪失效的信号。
 - **图标**：`media/vsidian-icon.png` 为原图（1254×1254），仅存仓库溯源、**不进 VSIX**；打包用 `media/vsidian-icon-256.png`（package.json `icon` 指向它）。替换图标时重新生成 256 版（PIL LANCZOS + optimize 即可），保持两文件同名关系。
 - **发布流程**：`CHANGELOG.md` 最新 `## <版本> - <日期>` 段落必须与 package.json `version` 一致（`scripts/release.mjs` 强校验，并以该段落作为 GitHub Release 说明）。发版步骤：升 `version` + 新建 CHANGELOG 段落 → 提交 → `npm run release:check` 本地过检查 → `git tag v<版本>` → `npm run release`（或推 tag 由 CI 执行）。
-- **CI 自动发布**：`.github/workflows/release.yml` 由 `v*` 标签触发。`release` job 跑 `npm run release`（检查失败即中止，不产出 Release）；`marketplace` job 从 Release 下载同一 VSIX 发布到 Marketplace（上市场的与 Release 附带的是同一份字节），需先配置仓库 secret `VSCE_PAT`（Azure DevOps PAT：Organization 选 All accessible organizations，Scope 选 Marketplace → Manage）并将 variable `MARKETPLACE_PUBLISH` 设为 `true`——两道开关配置前，推 tag 只产出 GitHub Release。
+- **CI 自动发布**：`.github/workflows/release.yml` 由 `v*` 标签触发。`release` job 在 `npm run release` 前先跑契约复验链（`check:stylecontract:baseline` + `check:stylecontract`，#135：30 天期限/发布跨度/兼容性复验，失败即不打包不产出 Release），随后跑 `npm run release`（检查失败即中止，不产出 Release）；`marketplace` job 从 Release 下载同一 VSIX 发布到 Marketplace（上市场的与 Release 附带的是同一份字节），需先配置仓库 secret `VSCE_PAT`（Azure DevOps PAT：Organization 选 All accessible organizations，Scope 选 Marketplace → Manage）并将 variable `MARKETPLACE_PUBLISH` 设为 `true`——两道开关配置前，推 tag 只产出 GitHub Release。
 - **marketplace 失败的兜底**：v0.1.0 首发实测两坑——job 级 `if` 隐式 `success() &&` 前缀会跳过 dispatch 场景（已用 `!cancelled()` 豁免）；给已注册 workflow 新增触发器后平台注册实体可能滞留旧解析（dispatch 持续 422，对文件做字节变更推送也未能刷新）。**已验证的补发路径**：本地 `gh release download <tag> --pattern '*.vsix'` 下载同一 VSIX 后 `npx @vscode/vsce publish --no-dependencies --packagePath <vsix>`（依赖本地 `vsce login onegayi` 凭证）；dispatch 入口保留，注册表自愈后仍可用。
 - **README 双语**：`README.md`（中文，Marketplace 渲染这份）与 `README.en.md` 互为镜像，文首以**绝对 URL** 互指（相对链接在 Marketplace 页面会失效）。功能与用法变更两边同步维护；`README.en.md` 不进 VSIX（`.vscodeignore` 排除）。
 
@@ -78,7 +115,8 @@ vsidian/
 │   │   ├── 0003-source-text-dual-view-editor.md  # 基于源文本的双视图编辑架构
 │   │   ├── 0004-stable-styling-contract.md       # 一期建立稳定样式入口
 │   │   ├── 0005-viewport-rendering.md            # 全文模型与视口渲染分离
-│   │   └── 0006-rebrand-to-vsidian.md            # 统一更名为 vsidian 的映射记录
+│   │   ├── 0006-rebrand-to-vsidian.md            # 统一更名为 vsidian 的映射记录
+│   │   └── 0007-css-snippet-env-isolation.md     # CSS 片段环境隔离决策记录（#131）
 │   ├── agents/   # agent 操作约定
 │   │   ├── domain.md        # 领域文档读取与维护约定
 │   │   └── issue-tracker.md # GitHub Issues 操作约定
@@ -102,18 +140,21 @@ vsidian/
 │   │   └── obsidian-viewport-rendering.md  # 视口渲染性能补充调研
 │   └── specs/    # 产品规格
 │       ├── code-block-card.md                # 代码块卡片功能规格
+│       ├── css-snippets.md                   # CSS片段与样式兼容规格
 │       ├── graphic-code-block-interaction.md # 图形化代码块交互规格
 │       ├── i18n.md                           # 全局 i18n 适配规格
 │       ├── keybindings.md                    # 快捷键清单与默认值
 │       ├── manual-verification.md            # 人工验证清单
 │       ├── mvp-issues.md                     # MVP GitHub Issue 索引
 │       ├── mvp.md                            # MVP 规格主文档
+│       ├── style-contract-gate.md            # 契约门禁 CI 接线与远端配置文档
 │       └── table-interaction-rework.md       # 表格交互重做规格
 ├── esbuild.mjs            # esbuild 多产物构建脚本
 ├── LICENSE                # MIT 许可证全文
 ├── media/                 # 随扩展打包的静态资源
 │   ├── css-contract-probe.css # 样式契约内部测试片段
 │   ├── quick-actions/         # 快速操作明暗图标与源PNG
+│   ├── style-reference/       # 样式参考指南生成资产
 │   ├── vsidian-icon-256.png   # 扩展图标 256 版，VSIX 打包用
 │   └── vsidian-icon.png       # Vsidian 扩展图标
 ├── package-lock.json      # npm 依赖锁定文件
@@ -123,53 +164,70 @@ vsidian/
 ├── README.en.md           # 英文版 README，与中文版互指
 ├── README.md              # 项目门面说明
 ├── scripts/               # 仓库工具脚本目录
-│   ├── genNls.mjs            # manifest NLS 文件生成脚本
-│   ├── quick-action-icons.py # 快速操作图标生成与校验
-│   └── release.mjs           # 发布脚本：打包、包体检查与上传
+│   ├── checkStyleContract.mjs    # 历史契约兼容检查器 CLI
+│   ├── demoStyleContractGate.mjs # 契约门禁负向演示脚本
+│   ├── genNls.mjs                # manifest NLS 文件生成脚本
+│   ├── genStyleGuide.mjs         # 样式指南生成脚本
+│   ├── quick-action-icons.py     # 快速操作图标生成与校验
+│   ├── release.mjs               # 发布脚本：打包、包体检查与上传
+│   └── styleContractCheck.mjs    # 契约检查纯逻辑模块
 ├── src/                   # 扩展源码
 │   ├── extension.ts # 扩展激活入口
 │   ├── host/        # 宿主端实现
-│   │   ├── diagramExportHost.ts     # 宿主图表导出执行壳
-│   │   ├── diagramExportValidate.ts # 图表导出载荷校验
-│   │   ├── documentSession.ts       # 文档会话与写回同步
-│   │   ├── hostLocale.ts            # 生效语言宿主装配解析帮手
-│   │   ├── keybindingService.ts     # 快捷键全局存储服务
-│   │   ├── linkTarget.ts            # 宿主侧链接目标分类纯逻辑（#10）
-│   │   ├── settingsPage.ts          # 独立设置页面板装配
-│   │   ├── settingsService.ts       # 宿主设置服务
-│   │   ├── textEditorProvider.ts    # 自定义文本编辑器提供者
-│   │   ├── viewCycle.ts             # 三态视图编排纯逻辑
-│   │   └── wikilinkTarget.ts        # 宿主侧双链目标解析纯逻辑（#11）
+│   │   ├── cssSnippetService.ts        # CSS 片段宿主权威服务
+│   │   ├── cssSnippetWiring.ts         # CSS 片段 vscode 层装配
+│   │   ├── diagramExportHost.ts        # 宿主图表导出执行壳
+│   │   ├── diagramExportValidate.ts    # 图表导出载荷校验
+│   │   ├── documentSession.ts          # 文档会话与写回同步
+│   │   ├── editorCsp.ts                # 编辑器 CSP 装配纯模块（#130）
+│   │   ├── hostLocale.ts               # 生效语言宿主装配解析帮手
+│   │   ├── keybindingService.ts        # 快捷键全局存储服务
+│   │   ├── linkTarget.ts               # 宿主侧链接目标分类纯逻辑（#10）
+│   │   ├── settingsPage.ts             # 独立设置页面板装配
+│   │   ├── settingsService.ts          # 宿主设置服务
+│   │   ├── styleReferenceExport.ts     # 契约 JSON 导出宿主执行壳
+│   │   ├── styleReferenceExportPlan.ts # 契约 JSON 导出纯规划逻辑
+│   │   ├── textEditorProvider.ts       # 自定义文本编辑器提供者
+│   │   ├── viewCycle.ts                # 三态视图编排纯逻辑
+│   │   └── wikilinkTarget.ts           # 宿主侧双链目标解析纯逻辑（#11）
 │   ├── shared/      # 两端共享纯逻辑
-│   │   ├── changeMapping.ts    # 变更重定位纯函数
-│   │   ├── codeLangs.ts        # 代码块语言注册表与别名路由
-│   │   ├── formatOperations.ts # 格式操作注册清单
-│   │   ├── i18n.ts             # t() 取词与语言包装配状态模块
-│   │   ├── keybindings.ts      # 快捷键操作与冲突模型
-│   │   ├── listPrefix.ts       # 列表引用前缀形态学（#119）
-│   │   ├── locales/            # 语言包字典单一事实源
+│   │   ├── changeMapping.ts     # 变更重定位纯函数
+│   │   ├── chromeContract.ts    # 界面域样式契约探针表
+│   │   ├── codeLangs.ts         # 代码块语言注册表与别名路由
+│   │   ├── cssSnippetEnv.ts     # CSS 片段环境身份与分桶戳（#131）
+│   │   ├── cssSnippetImports.ts # CSS 片段依赖导入形态学单一事实源
+│   │   ├── cssSnippets.ts       # CSS 片段纯逻辑单一事实源
+│   │   ├── formatOperations.ts  # 格式操作注册清单
+│   │   ├── i18n.ts              # t() 取词与语言包装配状态模块
+│   │   ├── keybindings.ts       # 快捷键操作与冲突模型
+│   │   ├── listPrefix.ts        # 列表引用前缀形态学（#119）
+│   │   ├── locales/             # 语言包字典单一事实源
 │   │   │   ├── en.ts     # 英文语言包（类型基准）
 │   │   │   ├── index.ts  # 语言注册表与解析（仅宿主可引）
 │   │   │   ├── island.ts # 语言数据岛构建与解析
 │   │   │   └── zh-cn.ts  # 简体中文语言包（编译期 parity）
-│   │   ├── math.ts             # 公式形态学纯函数（#59）
-│   │   ├── mermaid.ts          # Mermaid 围栏形态学（#60）
-│   │   ├── newline.ts          # CRLF/LF 换行协调器
-│   │   ├── protocol.ts         # 消息协议单一事实源
-│   │   ├── settings.ts         # 设置定义与读写纯逻辑
-│   │   ├── symbols.ts          # 符号注册表单一事实源（#123）
-│   │   ├── symbolWrap.ts       # 选区包裹计划纯函数（#124）
-│   │   ├── tabEscape.ts        # Tab 越界定位纯函数（#125）
-│   │   └── wikilink.ts         # 双链形态学单一事实源（#11）
+│   │   ├── math.ts              # 公式形态学纯函数（#59）
+│   │   ├── mermaid.ts           # Mermaid 围栏形态学（#60）
+│   │   ├── newline.ts           # CRLF/LF 换行协调器
+│   │   ├── obsidianAlias.ts     # Obsidian 别名桥实现同源表
+│   │   ├── protocol.ts          # 消息协议单一事实源
+│   │   ├── settings.ts          # 设置定义与读写纯逻辑
+│   │   ├── styleContract.ts     # 公开样式契约清单单一事实源
+│   │   ├── symbols.ts           # 符号注册表单一事实源（#123）
+│   │   ├── symbolWrap.ts        # 选区包裹计划纯函数（#124）
+│   │   ├── tabEscape.ts         # Tab 越界定位纯函数（#125）
+│   │   └── wikilink.ts          # 双链形态学单一事实源（#11）
 │   └── webview/     # webview 端实现
 │       ├── codeCardState.ts          # 卡片共享状态中立模块
 │       ├── codeHighlight.ts          # 语法高亮引擎装配与缓存
 │       ├── css.d.ts                  # CSS 导入类型声明
+│       ├── cssSnippetSettings.ts     # CSS 片段设置分页
 │       ├── diagramExport.ts          # 图表导出序列化与光栅化
 │       ├── diagramPopup.ts           # 图表弹窗全屏浮层
 │       ├── diagramPopupGeometry.ts   # 弹窗几何纯函数
 │       ├── fenceEscape.ts            # 围栏 Tab 越界适配层（#125）
 │       ├── findSession.ts            # 查找匹配纯函数（#14）
+│       ├── fontArrival.ts            # 字体晚到监听（#130）
 │       ├── formatOperations.ts       # 格式文本变换规划
 │       ├── graphicBlockChrome.ts     # 图形化块右上角按钮组
 │       ├── graphicRenderers.ts       # 图形化渲染器注册表
@@ -213,6 +271,9 @@ vsidian/
 │       ├── settingsMain.ts           # 设置页 webview 入口
 │       ├── settingsPage.css          # 设置页样式
 │       ├── settingsPageView.ts       # 设置页 webview 视图
+│       ├── snippetLoader.ts          # CSS 片段 link 装配器
+│       ├── styleGuideData.ts         # 设置页样式参考数据（生成）
+│       ├── styleReferenceSettings.ts # 设置页样式参考分页
 │       ├── symbolAutocomplete.ts     # 符号自动补全编辑器适配层（#123）
 │       ├── symbolCompositionState.ts # IME 选区快照共享状态
 │       ├── symbolWrap.ts             # 选区包裹编辑器适配层（#124）

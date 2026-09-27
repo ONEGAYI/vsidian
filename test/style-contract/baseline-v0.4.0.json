@@ -1,0 +1,2736 @@
+{
+  "meta": {
+    "baselineVersion": "0.4.0",
+    "sourceTag": "v0.4.0",
+    "sourceSha": "75c3df79074bdeaec0f02a38d40124f0cd66f857",
+    "migrationBaseCommit": "6ef59978d02423d16f5b5d67d51dc9fbb16c8db4",
+    "frozenAt": "2026-09-27",
+    "provenance": [
+      "本基线是独立于候选分支的历史契约快照：全部公开样式入口（110 条清单条目）来自 #132 迁移底稿，而迁移底稿与已发布 v0.4.0 tag（75c3df7）的 docs/design/obsidian-selector-map.md 逐字节一致（git diff --stat v0.4.0 6ef5997 -- <map> 为空；冻结证据 logs/baseline-freeze-2026-09-27.md，另见 docs/design/obsidian-selector-map.md「初始基线」节）。",
+      "sourceRows（89 行）是 v0.4.0 映射表全部表格行的规范化主键 → 清单条目 id 对照；node scripts/checkStyleContract.mjs --verify-baseline 会从 git 对象（固定 SHA）重新解析映射表并与本基线做精确集合比对——候选分支改本文件（增删 sourceRow）即可被复验抓住。",
+      "16 条非表格来源条目（reading-block/suspend-banner/toolbar/mode-toggle 来自旧表散文段；12 条 limit-* 来自「已知不支持项」清单；inline-strikethrough 来自旧表散文承诺）无法从表格机器提取，其 sourceKey 沿用 #132 迁移对照（test/unit/styleContract.test.ts MIGRATION_PARITY，迁移时逐项核实，见 logs/migration-parity.txt）；它们受条目数守恒（entries 总数 110）与 entry-missing 比较保护，不参与 sourceRow 集合复验。",
+      "releases 是 tag→SHA 与 CHANGELOG 日期在冻结时点（2026-09-27，即 v0.4.0 发布日）的固化快照：运行时与候选 CHANGELOG、git tag 交叉验证，矛盾即报错（改日期/重写 tag 不能伪造弃用期限）。新版本发布后应更新本快照并单独评审（AGENTS「公开样式契约」：基线修改须独立列出理由）。",
+      "legacySnippetCases 是 v0.4.0 时代承诺写法的代表性旧片段组（29 条 Obsidian 原名选择器 + 4 条 vsidian 名选择器 + 1 条 Obsidian 原名变量），由集成用例「历史基线旧片段渲染验证」在真实宿主的真实片段通道装载并逐项断言可见效果——期望值独立于候选实现（不从候选清单生成）。",
+      "生命周期豁免 lifecycleExemptions：var-heading-accent 是 #55（2026-09-25，早于本工具）的历史移除先例，弃用声明的结构化记录不完整属历史既成事实，基线冻结时已为 removed 状态；豁免只跳过期限字段的格式校验，条目本体仍受 entry-missing 保护。",
+      "条目比较豁免 entryComparisonExemptions 与 lifecycleExemptions 追加 mode-toggle（#133 合并补登，2026-09-27）：基线快照中该条目（views live/reading）来自旧映射表散文段（本文件 provenance 第 3 条的 16 条非表格来源条目之一），而该类名自 v0.1.0 起从未随任何发布版存在于 DOM——git grep v0.4.0（75c3df7）src/ 零命中，迁移核对（logs/migration-parity.txt）未覆盖散文段的「实际发射」核实。#133 依 git 证据将其转为移除记录条目（views 清空、removed 标注「从未随发布版存在」）。保护效果：豁免只跳过该条目的字段级比较（target/views/support）与 removed 无弃用先行的期限校验，entry-missing 仍拦（条目物理删除即失败）、其余 109 条与后续新增条目的全部比较不受影响；豁免不构成「先弃用后移除」流程的先例——仅适用于「基线承诺从未兑现于任何发布版」且有 git 证据的纠错场景。"
+    ],
+    "boundary": "诚实边界：本基线与检查器同处候选分支时，无法对抗「候选同时删除检查器与基线本身」——#135 将以受保护来源（默认分支的检查器与基线，经 --baseline/--root/--git-tags 参数注入）运行本工具对抗该组合；本文件形态与检查器接口即为该集成准备。"
+  },
+  "releases": {
+    "0.4.0": {
+      "date": "2026-09-27",
+      "tag": "v0.4.0",
+      "sha": "75c3df79074bdeaec0f02a38d40124f0cd66f857"
+    },
+    "0.3.0": {
+      "date": "2026-09-26",
+      "tag": "v0.3.0",
+      "sha": "58928ce062def44b95702d4f5aa7204caa46f353"
+    },
+    "0.2.0": {
+      "date": "2026-09-26",
+      "tag": "v0.2.0",
+      "sha": "3e920cc8db87841ed520700b4011edfd21ae210b"
+    },
+    "0.1.0": {
+      "date": "2026-09-25",
+      "tag": "v0.1.0",
+      "sha": "ad4452331cad901b78c4ed3166ebc3c98a7fa7d2"
+    }
+  },
+  "lifecycleExemptions": [
+    "var-heading-accent",
+    "mode-toggle"
+  ],
+  "entryComparisonExemptions": [
+    "mode-toggle"
+  ],
+  "sourceRows": [
+    {
+      "key": ".vsidian-view-live",
+      "raw": "`.vsidian-view-live`",
+      "ids": [
+        "container-live"
+      ]
+    },
+    {
+      "key": ".vsidian-view-reading",
+      "raw": "`.vsidian-view-reading`",
+      "ids": [
+        "container-reading"
+      ]
+    },
+    {
+      "key": ".vsidian-heading-line-{1..6}",
+      "raw": "`.vsidian-heading-line-{1..6}`（挂在 `.cm-line` 行元素上）",
+      "ids": [
+        "live-heading-line"
+      ]
+    },
+    {
+      "key": ".vsidian-header-{1..6}",
+      "raw": "`.vsidian-header-{1..6}`（#8：标题**内容 span**，mark 装饰）",
+      "ids": [
+        "live-header-span"
+      ]
+    },
+    {
+      "key": ".vsidian-heading-inview / .vsidian-heading-active",
+      "raw": "`.vsidian-heading-inview` / `.vsidian-heading-active`",
+      "ids": [
+        "live-heading-inview",
+        "live-heading-active"
+      ]
+    },
+    {
+      "key": ".vsidian-strong",
+      "raw": "`.vsidian-strong`",
+      "ids": [
+        "inline-strong"
+      ]
+    },
+    {
+      "key": ".vsidian-emphasis",
+      "raw": "`.vsidian-emphasis`",
+      "ids": [
+        "inline-emphasis"
+      ]
+    },
+    {
+      "key": ".vsidian-inline-code",
+      "raw": "`.vsidian-inline-code`",
+      "ids": [
+        "inline-code"
+      ]
+    },
+    {
+      "key": ".vsidian-highlight",
+      "raw": "`.vsidian-highlight`",
+      "ids": [
+        "inline-highlight"
+      ]
+    },
+    {
+      "key": ".vsidian-code-line",
+      "raw": "`.vsidian-code-line`",
+      "ids": [
+        "live-code-line"
+      ]
+    },
+    {
+      "key": ".vsidian-quote-line",
+      "raw": "`.vsidian-quote-line`",
+      "ids": [
+        "live-quote-line"
+      ]
+    },
+    {
+      "key": ".vsidian-list-line",
+      "raw": "`.vsidian-list-line`（+ `-d{1..8}` 嵌套深度修饰）",
+      "ids": [
+        "live-list-line"
+      ]
+    },
+    {
+      "key": ".vsidian-list-bullet / .vsidian-list-ordered",
+      "raw": "`.vsidian-list-bullet` / `.vsidian-list-ordered`",
+      "ids": [
+        "live-list-bullet",
+        "live-list-ordered"
+      ]
+    },
+    {
+      "key": ".vsidian-list-marker-visible",
+      "raw": "`.vsidian-list-marker-visible`",
+      "ids": [
+        "live-list-marker-visible"
+      ]
+    },
+    {
+      "key": ".vsidian-task-checkbox",
+      "raw": "`.vsidian-task-checkbox`（+ `.vsidian-task-checked` 修饰；`input[type=checkbox]`）",
+      "ids": [
+        "live-task-checkbox"
+      ]
+    },
+    {
+      "key": ".vsidian-hr-line",
+      "raw": "`.vsidian-hr-line`",
+      "ids": [
+        "live-hr-line"
+      ]
+    },
+    {
+      "key": ".vsidian-hr",
+      "raw": "`.vsidian-hr`",
+      "ids": [
+        "live-hr-widget"
+      ]
+    },
+    {
+      "key": ".vsidian-frontmatter-line",
+      "raw": "`.vsidian-frontmatter-line`",
+      "ids": [
+        "live-frontmatter-line"
+      ]
+    },
+    {
+      "key": ".vsidian-table-line",
+      "raw": "`.vsidian-table-line`",
+      "ids": [
+        "live-table-line"
+      ]
+    },
+    {
+      "key": ".vsidian-table-header-line / .vsidian-table-delimiter-line",
+      "raw": "`.vsidian-table-header-line` / `.vsidian-table-delimiter-line`",
+      "ids": [
+        "live-table-header-line",
+        "live-table-delimiter-line"
+      ]
+    },
+    {
+      "key": ".vsidian-table-cell",
+      "raw": "`.vsidian-table-cell`（+ `-header` 修饰）",
+      "ids": [
+        "live-table-cell"
+      ]
+    },
+    {
+      "key": ".vsidian-table-pipe",
+      "raw": "`.vsidian-table-pipe`",
+      "ids": [
+        "live-table-pipe"
+      ]
+    },
+    {
+      "key": ".vsidian-table-align-{left/center/right}",
+      "raw": "`.vsidian-table-align-{left/center/right}`",
+      "ids": [
+        "live-table-align"
+      ]
+    },
+    {
+      "key": ".vsidian-table-grid-row / .vsidian-table-grid-cell",
+      "raw": "`.vsidian-table-grid-row` / `.vsidian-table-grid-cell`",
+      "ids": [
+        "live-table-grid-row",
+        "live-table-grid-cell"
+      ]
+    },
+    {
+      "key": ".vsidian-table-grid-delimiter / .vsidian-table-grid-align-{left/center/right}",
+      "raw": "`.vsidian-table-grid-delimiter` / `.vsidian-table-grid-align-{left/center/right}`",
+      "ids": [
+        "live-table-grid-delimiter",
+        "live-table-grid-align"
+      ]
+    },
+    {
+      "key": ".vsidian-table-escaped-pipe",
+      "raw": "`.vsidian-table-escaped-pipe`",
+      "ids": [
+        "live-table-escaped-pipe"
+      ]
+    },
+    {
+      "key": ".vsidian-reading-heading-{1..6}",
+      "raw": "`.vsidian-reading-heading-{1..6}`",
+      "ids": [
+        "reading-heading"
+      ]
+    },
+    {
+      "key": ".vsidian-reading-paragraph",
+      "raw": "`.vsidian-reading-paragraph`",
+      "ids": [
+        "reading-paragraph"
+      ]
+    },
+    {
+      "key": ".vsidian-reading-blockquote",
+      "raw": "`.vsidian-reading-blockquote`",
+      "ids": [
+        "reading-blockquote"
+      ]
+    },
+    {
+      "key": ".vsidian-reading-list",
+      "raw": "`.vsidian-reading-list`",
+      "ids": [
+        "reading-list"
+      ]
+    },
+    {
+      "key": "li.vsidian-reading-task",
+      "raw": "`li.vsidian-reading-task`（li 级）",
+      "ids": [
+        "reading-task"
+      ]
+    },
+    {
+      "key": ".vsidian-reading-task-checkbox",
+      "raw": "`.vsidian-reading-task-checkbox`",
+      "ids": [
+        "reading-task-checkbox"
+      ]
+    },
+    {
+      "key": ".vsidian-reading-code-block",
+      "raw": "`.vsidian-reading-code-block`",
+      "ids": [
+        "reading-code-block"
+      ]
+    },
+    {
+      "key": ".vsidian-reading-hr",
+      "raw": "`.vsidian-reading-hr`",
+      "ids": [
+        "reading-hr"
+      ]
+    },
+    {
+      "key": ".vsidian-reading-table",
+      "raw": "`.vsidian-reading-table`",
+      "ids": [
+        "reading-table"
+      ]
+    },
+    {
+      "key": ".vsidian-reading-frontmatter",
+      "raw": "`.vsidian-reading-frontmatter`",
+      "ids": [
+        "reading-frontmatter"
+      ]
+    },
+    {
+      "key": ".vsidian-reading-spacer",
+      "raw": "`.vsidian-reading-spacer`（`-top` / `-bottom`）",
+      "ids": [
+        "reading-spacer"
+      ]
+    },
+    {
+      "key": ".vsidian-link",
+      "raw": "`.vsidian-link`（live，mark span）",
+      "ids": [
+        "live-link"
+      ]
+    },
+    {
+      "key": "阅读链接",
+      "raw": "阅读链接（无自有类）",
+      "ids": [
+        "reading-link"
+      ]
+    },
+    {
+      "key": ".vsidian-image",
+      "raw": "`.vsidian-image`（双视图）",
+      "ids": [
+        "image-slot"
+      ]
+    },
+    {
+      "key": ".vsidian-image-loading / .vsidian-image-loaded / .vsidian-image-error",
+      "raw": "`.vsidian-image-loading` / `.vsidian-image-loaded` / `.vsidian-image-error`（状态修饰，与 `data-vsidian-img-state` 同步）",
+      "ids": [
+        "image-states"
+      ]
+    },
+    {
+      "key": ".vsidian-wikilink",
+      "raw": "`.vsidian-wikilink`（live）",
+      "ids": [
+        "live-wikilink"
+      ]
+    },
+    {
+      "key": "a.vsidian-wikilink",
+      "raw": "`a.vsidian-wikilink`（阅读）",
+      "ids": [
+        "reading-wikilink"
+      ]
+    },
+    {
+      "key": "无对应",
+      "raw": "无对应（`.cm-hashtag` 方向）",
+      "ids": [
+        "limit-hashtag"
+      ]
+    },
+    {
+      "key": ".vsidian-math",
+      "raw": "`.vsidian-math`（live）",
+      "ids": [
+        "live-math"
+      ]
+    },
+    {
+      "key": ".vsidian-math-block",
+      "raw": "`.vsidian-math-block`（live）",
+      "ids": [
+        "live-math-block"
+      ]
+    },
+    {
+      "key": ".vsidian-math-source",
+      "raw": "`.vsidian-math-source`（live）",
+      "ids": [
+        "live-math-source"
+      ]
+    },
+    {
+      "key": ".katex-block 内 .vsidian-math",
+      "raw": "`.katex-block` 内 `.vsidian-math`（阅读）",
+      "ids": [
+        "reading-math-block"
+      ]
+    },
+    {
+      "key": ".vsidian-math-error",
+      "raw": "`.vsidian-math-error`（两视图共用）",
+      "ids": [
+        "math-error"
+      ]
+    },
+    {
+      "key": ".vsidian-mermaid",
+      "raw": "`.vsidian-mermaid`（live widget 外层与阅读 fence 容器共用）",
+      "ids": [
+        "mermaid-container"
+      ]
+    },
+    {
+      "key": ".vsidian-mermaid svg",
+      "raw": "`.vsidian-mermaid svg`",
+      "ids": [
+        "mermaid-svg"
+      ]
+    },
+    {
+      "key": ".vsidian-reading-mermaid",
+      "raw": "`.vsidian-reading-mermaid`（阅读块级）",
+      "ids": [
+        "reading-mermaid-block"
+      ]
+    },
+    {
+      "key": ".vsidian-mermaid-error",
+      "raw": "`.vsidian-mermaid-error`（两视图共用）",
+      "ids": [
+        "mermaid-error"
+      ]
+    },
+    {
+      "key": ".vsidian-outline-item",
+      "raw": "`.vsidian-outline-item`（+ `.vsidian-outline-level-{1..6}`）",
+      "ids": [
+        "outline-item"
+      ]
+    },
+    {
+      "key": ".vsidian-outline-strong / .vsidian-outline-emphasis / .vsidian-outline-code / .vsidian-outline-strike / .vsidian-outline-highlight",
+      "raw": "`.vsidian-outline-strong` / `.vsidian-outline-emphasis` / `.vsidian-outline-code` / `.vsidian-outline-strike` / `.vsidian-outline-highlight`",
+      "ids": [
+        "outline-inline-marks"
+      ]
+    },
+    {
+      "key": ".vsidian-outline-located",
+      "raw": "`.vsidian-outline-located`",
+      "ids": [
+        "outline-located"
+      ]
+    },
+    {
+      "key": ".vsidian-outline-slider",
+      "raw": "`.vsidian-outline-slider`（+ `::before`）",
+      "ids": [
+        "outline-slider"
+      ]
+    },
+    {
+      "key": ".vsidian-outline-slider-dot",
+      "raw": "`.vsidian-outline-slider-dot`（+ `.vsidian-outline-slider-active`）",
+      "ids": [
+        "outline-slider-dot"
+      ]
+    },
+    {
+      "key": ".vsidian-outline-chevron / .vsidian-outline-chevron-spacer",
+      "raw": "`.vsidian-outline-chevron` / `.vsidian-outline-chevron-spacer`",
+      "ids": [
+        "outline-chevron"
+      ]
+    },
+    {
+      "key": ".vsidian-outline-collapsed",
+      "raw": "`.vsidian-outline-collapsed`",
+      "ids": [
+        "outline-collapsed"
+      ]
+    },
+    {
+      "key": ".vsidian-outline-hidden",
+      "raw": "`.vsidian-outline-hidden`",
+      "ids": [
+        "outline-hidden"
+      ]
+    },
+    {
+      "key": ".vsidian-outline-toolbar",
+      "raw": "`.vsidian-outline-toolbar`",
+      "ids": [
+        "outline-toolbar"
+      ]
+    },
+    {
+      "key": ".vsidian-outline-jump-bottom / .vsidian-outline-reset",
+      "raw": "`.vsidian-outline-jump-bottom` / `.vsidian-outline-reset`",
+      "ids": [
+        "outline-toolbar-buttons"
+      ]
+    },
+    {
+      "key": ".vsidian-outline-search",
+      "raw": "`.vsidian-outline-search`（+ `::placeholder`）",
+      "ids": [
+        "outline-search"
+      ]
+    },
+    {
+      "key": "mark.vsidian-outline-search-hit",
+      "raw": "`mark.vsidian-outline-search-hit`",
+      "ids": [
+        "outline-search-hit"
+      ]
+    },
+    {
+      "key": ".vsidian-outline-nomatch",
+      "raw": "`.vsidian-outline-nomatch`",
+      "ids": [
+        "outline-nomatch"
+      ]
+    },
+    {
+      "key": ".vsidian-outline-menu",
+      "raw": "`.vsidian-outline-menu`（+ `-item` / `-host` / `-submenu` / `-danger` / `-cue`）",
+      "ids": [
+        "outline-menu"
+      ]
+    },
+    {
+      "key": ".vsidian-outline-rename-input",
+      "raw": "`.vsidian-outline-rename-input`",
+      "ids": [
+        "outline-rename-input"
+      ]
+    },
+    {
+      "key": ".vsidian-outline-dragging",
+      "raw": "`.vsidian-outline-dragging`",
+      "ids": [
+        "outline-dragging"
+      ]
+    },
+    {
+      "key": ".vsidian-outline-drop-before / .vsidian-outline-drop-after",
+      "raw": "`.vsidian-outline-drop-before` / `.vsidian-outline-drop-after`",
+      "ids": [
+        "outline-drop-edge"
+      ]
+    },
+    {
+      "key": ".vsidian-outline-drop-inside",
+      "raw": "`.vsidian-outline-drop-inside`",
+      "ids": [
+        "outline-drop-inside"
+      ]
+    },
+    {
+      "key": ".vsidian-code-card-line",
+      "raw": "`.vsidian-code-card-line`",
+      "ids": [
+        "live-code-card-line"
+      ]
+    },
+    {
+      "key": ".vsidian-code-card-edge-top / -bottom",
+      "raw": "`.vsidian-code-card-edge-top` / `-bottom`",
+      "ids": [
+        "live-code-card-edge"
+      ]
+    },
+    {
+      "key": ".vsidian-code-card-header",
+      "raw": "`.vsidian-code-card-header`（live block widget / 阅读头部容器共用）",
+      "ids": [
+        "live-code-card-header"
+      ]
+    },
+    {
+      "key": ".vsidian-code-card-header-label / -actions",
+      "raw": "`.vsidian-code-card-header-label` / `-actions`",
+      "ids": [
+        "live-code-card-header-parts"
+      ]
+    },
+    {
+      "key": ".vsidian-code-card-copy",
+      "raw": "`.vsidian-code-card-copy`（+ `-done` 修饰）",
+      "ids": [
+        "live-code-card-copy"
+      ]
+    },
+    {
+      "key": ".vsidian-code-card-fold",
+      "raw": "`.vsidian-code-card-fold`（+ `-collapsed` 修饰）",
+      "ids": [
+        "live-code-card-fold"
+      ]
+    },
+    {
+      "key": ".vsidian-code-card-linenumber",
+      "raw": "`.vsidian-code-card-linenumber`",
+      "ids": [
+        "live-code-card-linenumber"
+      ]
+    },
+    {
+      "key": "tok-* token 族",
+      "raw": "`tok-*` token 族（`tok-keyword`/`tok-string` 等，`@lezer/highlight` `classHighlighter` 词表）",
+      "ids": [
+        "tok-tokens"
+      ]
+    },
+    {
+      "key": ".vsidian-reading-code-card",
+      "raw": "`.vsidian-reading-code-card`（阅读块级）",
+      "ids": [
+        "reading-code-card"
+      ]
+    },
+    {
+      "key": "--vsidian-heading-accent",
+      "raw": "~~`--vsidian-heading-accent`~~",
+      "ids": [
+        "var-heading-accent"
+      ]
+    },
+    {
+      "key": "--vsidian-heading-color-{1..6}",
+      "raw": "`--vsidian-heading-color-{1..6}`",
+      "ids": [
+        "var-heading-color"
+      ]
+    },
+    {
+      "key": "--vsidian-reading-font-size",
+      "raw": "`--vsidian-reading-font-size`",
+      "ids": [
+        "var-reading-font-size"
+      ]
+    },
+    {
+      "key": "--vsidian-reading-max-width",
+      "raw": "`--vsidian-reading-max-width`",
+      "ids": [
+        "var-reading-max-width"
+      ]
+    },
+    {
+      "key": "--vsidian-reading-line-height",
+      "raw": "`--vsidian-reading-line-height`",
+      "ids": [
+        "var-reading-line-height"
+      ]
+    },
+    {
+      "key": "--vsidian-reading-code-background",
+      "raw": "`--vsidian-reading-code-background`",
+      "ids": [
+        "var-reading-code-background"
+      ]
+    },
+    {
+      "key": "--vsidian-code-card-background",
+      "raw": "`--vsidian-code-card-background`",
+      "ids": [
+        "var-code-card-background"
+      ]
+    },
+    {
+      "key": "--vsidian-highlight-background",
+      "raw": "`--vsidian-highlight-background`",
+      "ids": [
+        "var-highlight-background"
+      ]
+    },
+    {
+      "key": "--vsidian-table-background",
+      "raw": "`--vsidian-table-background`",
+      "ids": [
+        "var-table-background"
+      ]
+    }
+  ],
+  "entries": [
+    {
+      "id": "container-live",
+      "domain": "content",
+      "kind": "container",
+      "target": ".vsidian-view-live",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": [
+        "markdown-source-view",
+        "mod-cm6",
+        "cm-s-obsidian"
+      ],
+      "introduced": "#6（2026-09-23）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "container-reading",
+      "domain": "content",
+      "kind": "container",
+      "target": ".vsidian-view-reading",
+      "views": [
+        "reading"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": [
+        "markdown-preview-view"
+      ],
+      "introduced": "#6（2026-09-23）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-heading-line",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-heading-line-{1..6}",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": [
+        "HyperMD-header-{1..6}"
+      ],
+      "introduced": "#5（2026-09-23）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-header-span",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-header-{1..6}",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": [
+        "cm-header-{1..6}"
+      ],
+      "introduced": "#8（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-heading-inview",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-heading-inview",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#5（2026-09-23）；#55（2026-09-25）移除其左缘竖线绘制",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-heading-active",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-heading-active",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#5（2026-09-23）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "inline-strong",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-strong（live）/ strong 标签（阅读）",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": [
+        "cm-strong"
+      ],
+      "introduced": "#8（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "inline-emphasis",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-emphasis（live）/ em 标签（阅读）",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": [
+        "cm-emphasis"
+      ],
+      "introduced": "#8（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "inline-code",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-inline-code（live）/ code 标签（阅读，块内 code 另有 language-x 类）",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": [
+        "cm-inline-code"
+      ],
+      "introduced": "#8（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "inline-highlight",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-highlight（live）/ mark 标签（阅读）",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": [
+        "cm-highlight"
+      ],
+      "introduced": "#105（2026-09-27）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-code-line",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-code-line",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": [
+        "HyperMD-codeblock"
+      ],
+      "introduced": "#8（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-quote-line",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-quote-line",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": [
+        "HyperMD-quote"
+      ],
+      "introduced": "#8（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-list-line",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-list-line（+ -d{1..8} 嵌套深度修饰）",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": [
+        "HyperMD-list-line"
+      ],
+      "introduced": "#8（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-list-bullet",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-list-bullet",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "native",
+      "aliasTargets": null,
+      "introduced": "#8（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-list-ordered",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-list-ordered",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "native",
+      "aliasTargets": null,
+      "introduced": "#8（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-list-marker-visible",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-list-marker-visible",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "native",
+      "aliasTargets": null,
+      "introduced": "#8（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-task-checkbox",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-task-checkbox（input[type=checkbox]）+ .vsidian-task-checked 修饰",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "semantic",
+      "aliasTargets": null,
+      "introduced": "#8（2026-09-24）；#9（2026-09-24）起可交互",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-hr-line",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-hr-line",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": [
+        "cm-hr"
+      ],
+      "introduced": "#8（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-hr-widget",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-hr",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "semantic",
+      "aliasTargets": null,
+      "introduced": "#106（2026-09-27）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-frontmatter-line",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-frontmatter-line",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": [
+        "cm-hmd-frontmatter"
+      ],
+      "introduced": "#8（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-table-line",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-table-line",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": [
+        "HyperMD-table-line"
+      ],
+      "introduced": "#12（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-table-header-line",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-table-header-line",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "native",
+      "aliasTargets": null,
+      "introduced": "#12（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-table-delimiter-line",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-table-delimiter-line",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "native",
+      "aliasTargets": null,
+      "introduced": "#12（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-table-cell",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-table-cell（+ -header 修饰）",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": [
+        "cm-table-cell"
+      ],
+      "introduced": "#12（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-table-pipe",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-table-pipe",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "native",
+      "aliasTargets": null,
+      "introduced": "#12（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-table-align",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-table-align-{left/center/right}",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "native",
+      "aliasTargets": null,
+      "introduced": "#12（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-table-grid-row",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-table-grid-row（行附 data-vsidian-table-row=header/row 与 --vsidian-table-columns）",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "semantic",
+      "aliasTargets": null,
+      "introduced": "#42（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-table-grid-cell",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-table-grid-cell",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "semantic",
+      "aliasTargets": null,
+      "introduced": "#42（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-table-grid-delimiter",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-table-grid-delimiter",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "semantic",
+      "aliasTargets": null,
+      "introduced": "#42（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-table-grid-align",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-table-grid-align-{left/center/right}",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "semantic",
+      "aliasTargets": null,
+      "introduced": "#42（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-table-escaped-pipe",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-table-escaped-pipe",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "native",
+      "aliasTargets": null,
+      "introduced": "#42（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "reading-block",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-reading-block（+ data-vsidian-src-start / -end 源锚点属性）",
+      "views": [
+        "reading"
+      ],
+      "obsidianSupport": "native",
+      "aliasTargets": null,
+      "introduced": "#6（2026-09-23）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "reading-heading",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-reading-heading-{1..6}（块类）+ 内层语义 h{1..6} 标签",
+      "views": [
+        "reading"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": null,
+      "introduced": "#6（2026-09-23）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "reading-paragraph",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-reading-paragraph（块类）+ 内层 p 标签",
+      "views": [
+        "reading"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": null,
+      "introduced": "#6（2026-09-23）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "reading-blockquote",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-reading-blockquote（块类）+ 内层 blockquote 标签",
+      "views": [
+        "reading"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": null,
+      "introduced": "#8（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "reading-list",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-reading-list（块类）+ 内层 ul/ol/li 嵌套（li 带源锚点）",
+      "views": [
+        "reading"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": null,
+      "introduced": "#6（2026-09-23）；#8 起还原嵌套",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "reading-task",
+      "domain": "content",
+      "kind": "selector",
+      "target": "li.vsidian-reading-task",
+      "views": [
+        "reading"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": [
+        "task-list-item"
+      ],
+      "introduced": "#8（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "reading-task-checkbox",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-reading-task-checkbox（input[type=checkbox]）",
+      "views": [
+        "reading"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": null,
+      "introduced": "#8（2026-09-24）；#9 起启用勾选写回",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "reading-code-block",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-reading-code-block（块类）+ 内层 pre > code（code 带语言类 language-x）",
+      "views": [
+        "reading"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": null,
+      "introduced": "#8（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "reading-hr",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-reading-hr（块类）+ 内层 hr 标签",
+      "views": [
+        "reading"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": null,
+      "introduced": "#8（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "reading-table",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-reading-table（块类）+ 内层真实 table/thead/tbody（GFM 列对齐保留在 th/td 内联 style）",
+      "views": [
+        "reading"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": null,
+      "introduced": "#12（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "reading-frontmatter",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-reading-frontmatter（块类；内部 pre.vsidian-reading-frontmatter-text）",
+      "views": [
+        "reading"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": [
+        "markdown-frontmatter"
+      ],
+      "introduced": "#8（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "reading-spacer",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-reading-spacer（-top / -bottom）",
+      "views": [
+        "reading"
+      ],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#7（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-link",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-link",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": [
+        "cm-link"
+      ],
+      "introduced": "#10（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "reading-link",
+      "domain": "content",
+      "kind": "selector",
+      "target": "阅读链接（语义 a 标签，无自有类）",
+      "views": [
+        "reading"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": null,
+      "introduced": "#10（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "image-slot",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-image（双视图）",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": null,
+      "introduced": "#10（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "image-states",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-image-loading / -loaded / -error（与 data-vsidian-img-state 同步）",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "obsidianSupport": "native",
+      "aliasTargets": null,
+      "introduced": "#10（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-wikilink",
+      "domain": "content",
+      "kind": "selector",
+      "target": ".vsidian-wikilink",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": [
+        "cm-hmd-internal-link"
+      ],
+      "introduced": "#11（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "reading-wikilink",
+      "domain": "content",
+      "kind": "selector",
+      "target": "a.vsidian-wikilink",
+      "views": [
+        "reading"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": [
+        "internal-link"
+      ],
+      "introduced": "#11（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-math",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-math",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "semantic",
+      "aliasTargets": null,
+      "introduced": "#59（2026-09-25）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-math-block",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-math-block",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "semantic",
+      "aliasTargets": null,
+      "introduced": "#59（2026-09-25）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-math-source",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-math-source",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "semantic",
+      "aliasTargets": null,
+      "introduced": "#59（2026-09-25）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "reading-math-block",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-reading-math（块类）+ .katex-block 内层 display 容器",
+      "views": [
+        "reading"
+      ],
+      "obsidianSupport": "semantic",
+      "aliasTargets": null,
+      "introduced": "#59（2026-09-25）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "math-error",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-math-error",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "obsidianSupport": "semantic",
+      "aliasTargets": null,
+      "introduced": "#59（2026-09-25）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "mermaid-container",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-mermaid",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "obsidianSupport": "semantic",
+      "aliasTargets": null,
+      "introduced": "#60（2026-09-25）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "mermaid-svg",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-mermaid svg",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "obsidianSupport": "semantic",
+      "aliasTargets": null,
+      "introduced": "#60（2026-09-25）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "reading-mermaid-block",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-reading-mermaid",
+      "views": [
+        "reading"
+      ],
+      "obsidianSupport": "semantic",
+      "aliasTargets": null,
+      "introduced": "#60（2026-09-25）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "mermaid-error",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-mermaid-error（含 -message / -source）",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "obsidianSupport": "semantic",
+      "aliasTargets": null,
+      "introduced": "#60（2026-09-25）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "outline-item",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-outline-item（+ .vsidian-outline-level-{1..6}）",
+      "views": [],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#54（2026-09-25）；#65 起样式透传",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "outline-inline-marks",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-outline-strong / -emphasis / -code / -strike / -highlight",
+      "views": [],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#65（2026-09-25）；#105 高亮接入",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "outline-located",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-outline-located",
+      "views": [],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#66（2026-09-25）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "outline-slider",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-outline-slider（+ ::before）",
+      "views": [],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#67（2026-09-25）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "outline-slider-dot",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-outline-slider-dot（+ .vsidian-outline-slider-active）",
+      "views": [],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#67（2026-09-25）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "outline-chevron",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-outline-chevron / .vsidian-outline-chevron-spacer",
+      "views": [],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#67（2026-09-25）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "outline-collapsed",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-outline-collapsed",
+      "views": [],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#67（2026-09-25）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "outline-hidden",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-outline-hidden",
+      "views": [],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#67（2026-09-25）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "outline-toolbar",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-outline-toolbar",
+      "views": [],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#68（2026-09-25）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "outline-toolbar-buttons",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-outline-jump-bottom / .vsidian-outline-reset",
+      "views": [],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#68（2026-09-25）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "outline-search",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-outline-search（+ ::placeholder）",
+      "views": [],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#68（2026-09-25）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "outline-search-hit",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": "mark.vsidian-outline-search-hit",
+      "views": [],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#68（2026-09-25）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "outline-nomatch",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-outline-nomatch",
+      "views": [],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#68（2026-09-25）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "outline-menu",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-outline-menu（+ -item / -host / -submenu / -danger / -cue）",
+      "views": [],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#69（2026-09-25）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "outline-rename-input",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-outline-rename-input",
+      "views": [],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#69（2026-09-25）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "outline-dragging",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-outline-dragging",
+      "views": [],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#70（2026-09-25）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "outline-drop-edge",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-outline-drop-before / -after",
+      "views": [],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#70（2026-09-25）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "outline-drop-inside",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-outline-drop-inside",
+      "views": [],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#70（2026-09-25）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-code-card-line",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-code-card-line",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "semantic",
+      "aliasTargets": null,
+      "introduced": "#79（2026-09-26）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-code-card-edge",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-code-card-edge-top / -bottom",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "native",
+      "aliasTargets": null,
+      "introduced": "#79（2026-09-26）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-code-card-header",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-code-card-header（live block widget / 阅读头部容器共用）",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "obsidianSupport": "native",
+      "aliasTargets": null,
+      "introduced": "#79（2026-09-26）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-code-card-header-parts",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-code-card-header-label / -actions",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "obsidianSupport": "native",
+      "aliasTargets": null,
+      "introduced": "#79（2026-09-26）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-code-card-copy",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-code-card-copy（+ -done 修饰）",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "obsidianSupport": "native",
+      "aliasTargets": null,
+      "introduced": "#79（2026-09-26）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-code-card-fold",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-code-card-fold（+ -collapsed 修饰）",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "obsidianSupport": "native",
+      "aliasTargets": null,
+      "introduced": "#79（2026-09-26）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "live-code-card-linenumber",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-code-card-linenumber",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "native",
+      "aliasTargets": null,
+      "introduced": "#79（2026-09-26）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "tok-tokens",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": "tok-* token 族（tok-keyword / tok-string 等，@lezer/highlight classHighlighter 词表）",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "obsidianSupport": "native",
+      "aliasTargets": null,
+      "introduced": "#83（2026-09-26）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "reading-code-card",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-reading-code-card",
+      "views": [
+        "reading"
+      ],
+      "obsidianSupport": "semantic",
+      "aliasTargets": null,
+      "introduced": "#79（2026-09-26）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "suspend-banner",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-suspend-banner",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#4（2026-09-23）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "toolbar",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-toolbar",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#4（2026-09-23）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "mode-toggle",
+      "domain": "chrome",
+      "kind": "selector",
+      "target": ".vsidian-mode-toggle",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#4（2026-09-23）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "var-heading-accent",
+      "domain": "content",
+      "kind": "variable",
+      "target": "--vsidian-heading-accent（已移除）",
+      "views": [],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#5（2026-09-23）",
+      "deprecated": null,
+      "removed": "v0.2.x 周期内随 #55（2026-09-25）移除；移除时该变量仅随内部测试片段使用，无用户迁移负担",
+      "sourceKey": null
+    },
+    {
+      "id": "var-heading-color",
+      "domain": "content",
+      "kind": "variable",
+      "target": "--vsidian-heading-color-{1..6}",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": [
+        "--h1-color",
+        "--h2-color",
+        "--h3-color",
+        "--h4-color",
+        "--h5-color",
+        "--h6-color"
+      ],
+      "introduced": "#65（2026-09-25）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "var-reading-font-size",
+      "domain": "content",
+      "kind": "variable",
+      "target": "--vsidian-reading-font-size",
+      "views": [
+        "reading"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": [
+        "--font-text-size"
+      ],
+      "introduced": "#32（2026-09-24，随两模式排版基线公开）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "var-reading-max-width",
+      "domain": "content",
+      "kind": "variable",
+      "target": "--vsidian-reading-max-width",
+      "views": [
+        "reading"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": [
+        "--file-line-width"
+      ],
+      "introduced": "#32（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "var-reading-line-height",
+      "domain": "content",
+      "kind": "variable",
+      "target": "--vsidian-reading-line-height",
+      "views": [
+        "reading"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": [
+        "--line-height-normal"
+      ],
+      "introduced": "#32（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "var-reading-code-background",
+      "domain": "content",
+      "kind": "variable",
+      "target": "--vsidian-reading-code-background",
+      "views": [
+        "reading"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": [
+        "--code-background"
+      ],
+      "introduced": "#32（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "var-code-card-background",
+      "domain": "chrome",
+      "kind": "variable",
+      "target": "--vsidian-code-card-background",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "obsidianSupport": "semantic",
+      "aliasTargets": null,
+      "introduced": "#79（2026-09-26）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "var-highlight-background",
+      "domain": "content",
+      "kind": "variable",
+      "target": "--vsidian-highlight-background",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": [
+        "--text-highlight-bg"
+      ],
+      "introduced": "#105（2026-09-27）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "var-table-background",
+      "domain": "content",
+      "kind": "variable",
+      "target": "--vsidian-table-background",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": [
+        "--table-background"
+      ],
+      "introduced": "#12（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "limit-hashtag",
+      "domain": "content",
+      "kind": "limitation",
+      "target": ".cm-hashtag / .tag",
+      "views": [],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#11（2026-09-24，随双链节如实记录）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "limit-callout",
+      "domain": "content",
+      "kind": "limitation",
+      "target": ".callout 及其 data 属性",
+      "views": [],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#6（2026-09-23）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "limit-task-extended-states",
+      "domain": "content",
+      "kind": "limitation",
+      "target": ".task-list-item[data-task=\"x\"] 等",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#9（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "limit-markdown-embed",
+      "domain": "content",
+      "kind": "limitation",
+      "target": ".markdown-embed / 嵌入结构",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#11（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "limit-strikethrough-live",
+      "domain": "content",
+      "kind": "limitation",
+      "target": ".cm-strikethrough（live 侧）",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#8（2026-09-24，如实记录）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "limit-quote-span",
+      "domain": "content",
+      "kind": "limitation",
+      "target": ".cm-quote（span 级）",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#8（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "limit-is-unresolved",
+      "domain": "content",
+      "kind": "limitation",
+      "target": "双链 is-unresolved 区分（按目标存在与否变色）",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#11（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "limit-reference-links-live",
+      "domain": "content",
+      "kind": "limitation",
+      "target": "引用式链接/图片（[t][ref]）live 侧",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#10（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "limit-table-crossview",
+      "domain": "content",
+      "kind": "limitation",
+      "target": "行内代码内 | 的表格拆分跨视图差异",
+      "views": [
+        "reading"
+      ],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#12（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "limit-virtualization",
+      "domain": "content",
+      "kind": "limitation",
+      "target": "阅读视图虚拟化（全文 DOM 非常驻）",
+      "views": [
+        "reading"
+      ],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#7（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "limit-find-hit-mask",
+      "domain": "content",
+      "kind": "limitation",
+      "target": "查找高亮与隐藏标记区的交叉形态",
+      "views": [
+        "live"
+      ],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#14（2026-09-24）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "limit-prism-tokens",
+      "domain": "chrome",
+      "kind": "limitation",
+      "target": ".token-*（Prism 原名）/ .HyperMD-codeblock-*",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "obsidianSupport": "none",
+      "aliasTargets": null,
+      "introduced": "#83（2026-09-26）",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    },
+    {
+      "id": "inline-strikethrough",
+      "domain": "content",
+      "kind": "selector",
+      "target": "del 标签（仅阅读）",
+      "views": [
+        "reading"
+      ],
+      "obsidianSupport": "direct",
+      "aliasTargets": null,
+      "introduced": "阅读侧随 #8 语义渲染（2026-09-24）；live 侧缺口如实记录",
+      "deprecated": null,
+      "removed": null,
+      "sourceKey": null
+    }
+  ],
+  "legacySnippetCases": [
+    {
+      "kind": "obsidian-dom",
+      "id": "container-live",
+      "view": "live",
+      "selector": "#app .markdown-source-view.mod-cm6",
+      "property": "outline-color",
+      "probe": "obsidianAliases.container-live",
+      "expected": "rgb(200, 220, 240)"
+    },
+    {
+      "kind": "obsidian-dom",
+      "id": "live-heading-line",
+      "view": "live",
+      "selector": "#app .vsidian-view-live .HyperMD-header-1",
+      "property": "outline-color",
+      "probe": "obsidianAliases.live-heading-line",
+      "expected": "rgb(201, 221, 241)"
+    },
+    {
+      "kind": "obsidian-dom",
+      "id": "live-header-span",
+      "view": "live",
+      "selector": "#app .vsidian-view-live .cm-header-1",
+      "property": "outline-color",
+      "probe": "obsidianAliases.live-header-span",
+      "expected": "rgb(202, 222, 242)"
+    },
+    {
+      "kind": "obsidian-dom",
+      "id": "inline-strong",
+      "view": "live",
+      "selector": "#app .vsidian-view-live .cm-strong",
+      "property": "outline-color",
+      "probe": "obsidianAliases.inline-strong",
+      "expected": "rgb(203, 223, 243)"
+    },
+    {
+      "kind": "obsidian-dom",
+      "id": "inline-emphasis",
+      "view": "live",
+      "selector": "#app .vsidian-view-live .cm-emphasis",
+      "property": "outline-color",
+      "probe": "obsidianAliases.inline-emphasis",
+      "expected": "rgb(204, 224, 244)"
+    },
+    {
+      "kind": "obsidian-dom",
+      "id": "inline-code",
+      "view": "live",
+      "selector": "#app .vsidian-view-live .cm-inline-code",
+      "property": "outline-color",
+      "probe": "obsidianAliases.inline-code",
+      "expected": "rgb(205, 225, 240)"
+    },
+    {
+      "kind": "obsidian-dom",
+      "id": "inline-highlight",
+      "view": "live",
+      "selector": "#app .vsidian-view-live .cm-highlight",
+      "property": "outline-color",
+      "probe": "obsidianAliases.inline-highlight",
+      "expected": "rgb(206, 226, 241)"
+    },
+    {
+      "kind": "obsidian-dom",
+      "id": "live-code-line",
+      "view": "live",
+      "selector": "#app .vsidian-view-live .HyperMD-codeblock",
+      "property": "outline-color",
+      "probe": "obsidianAliases.live-code-line",
+      "expected": "rgb(207, 227, 242)"
+    },
+    {
+      "kind": "obsidian-dom",
+      "id": "live-quote-line",
+      "view": "live",
+      "selector": "#app .vsidian-view-live .HyperMD-quote",
+      "property": "outline-color",
+      "probe": "obsidianAliases.live-quote-line",
+      "expected": "rgb(208, 228, 243)"
+    },
+    {
+      "kind": "obsidian-dom",
+      "id": "live-list-line",
+      "view": "live",
+      "selector": "#app .vsidian-view-live .HyperMD-list-line",
+      "property": "outline-color",
+      "probe": "obsidianAliases.live-list-line",
+      "expected": "rgb(209, 229, 244)"
+    },
+    {
+      "kind": "obsidian-dom",
+      "id": "live-hr-line",
+      "view": "live",
+      "selector": "#app .vsidian-view-live .cm-hr",
+      "property": "outline-color",
+      "probe": "obsidianAliases.live-hr-line",
+      "expected": "rgb(210, 220, 240)"
+    },
+    {
+      "kind": "obsidian-dom",
+      "id": "live-frontmatter-line",
+      "view": "live",
+      "selector": "#app .vsidian-view-live .cm-hmd-frontmatter",
+      "property": "outline-color",
+      "probe": "obsidianAliases.live-frontmatter-line",
+      "expected": "rgb(211, 221, 241)"
+    },
+    {
+      "kind": "obsidian-dom",
+      "id": "live-table-line",
+      "view": "live",
+      "selector": "#app .vsidian-view-live .HyperMD-table-line",
+      "property": "outline-color",
+      "probe": "obsidianAliases.live-table-line",
+      "expected": "rgb(212, 222, 242)"
+    },
+    {
+      "kind": "obsidian-dom",
+      "id": "live-table-cell",
+      "view": "live",
+      "selector": "#app .vsidian-view-live .cm-table-cell",
+      "property": "outline-color",
+      "probe": "obsidianAliases.live-table-cell",
+      "expected": "rgb(213, 223, 243)"
+    },
+    {
+      "kind": "obsidian-dom",
+      "id": "live-link",
+      "view": "live",
+      "selector": "#app .vsidian-view-live .cm-link",
+      "property": "outline-color",
+      "probe": "obsidianAliases.live-link",
+      "expected": "rgb(214, 224, 244)"
+    },
+    {
+      "kind": "obsidian-dom",
+      "id": "live-wikilink",
+      "view": "live",
+      "selector": "#app .vsidian-view-live .cm-hmd-internal-link",
+      "property": "outline-color",
+      "probe": "obsidianAliases.live-wikilink",
+      "expected": "rgb(215, 225, 240)"
+    },
+    {
+      "kind": "obsidian-dom",
+      "id": "reading-heading",
+      "view": "reading",
+      "selector": "#app .markdown-preview-view h1",
+      "property": "outline-color",
+      "probe": "obsidianAliases.reading-heading",
+      "expected": "rgb(216, 226, 241)"
+    },
+    {
+      "kind": "obsidian-dom",
+      "id": "reading-paragraph",
+      "view": "reading",
+      "selector": "#app .markdown-preview-view p",
+      "property": "outline-color",
+      "probe": "obsidianAliases.reading-paragraph",
+      "expected": "rgb(217, 227, 242)"
+    },
+    {
+      "kind": "obsidian-dom",
+      "id": "reading-blockquote",
+      "view": "reading",
+      "selector": "#app .markdown-preview-view blockquote",
+      "property": "outline-color",
+      "probe": "obsidianAliases.reading-blockquote",
+      "expected": "rgb(218, 228, 243)"
+    },
+    {
+      "kind": "obsidian-dom",
+      "id": "reading-list",
+      "view": "reading",
+      "selector": "#app .markdown-preview-view ul",
+      "property": "outline-color",
+      "probe": "obsidianAliases.reading-list",
+      "expected": "rgb(219, 229, 244)"
+    },
+    {
+      "kind": "obsidian-dom",
+      "id": "reading-task",
+      "view": "reading",
+      "selector": "#app .markdown-preview-view .task-list-item",
+      "property": "outline-color",
+      "probe": "obsidianAliases.reading-task",
+      "expected": "rgb(200, 220, 240)"
+    },
+    {
+      "kind": "obsidian-dom",
+      "id": "reading-task-checkbox",
+      "view": "reading",
+      "selector": "#app .markdown-preview-view .task-list-item input[type=\"checkbox\"]",
+      "property": "outline-color",
+      "probe": "obsidianAliases.reading-task-checkbox",
+      "expected": "rgb(201, 221, 241)"
+    },
+    {
+      "kind": "obsidian-dom",
+      "id": "reading-code-block",
+      "view": "reading",
+      "selector": "#app .markdown-preview-view pre",
+      "property": "outline-color",
+      "probe": "obsidianAliases.reading-code-block",
+      "expected": "rgb(202, 222, 242)"
+    },
+    {
+      "kind": "obsidian-dom",
+      "id": "reading-hr",
+      "view": "reading",
+      "selector": "#app .markdown-preview-view hr",
+      "property": "outline-color",
+      "probe": "obsidianAliases.reading-hr",
+      "expected": "rgb(203, 223, 243)"
+    },
+    {
+      "kind": "obsidian-dom",
+      "id": "reading-table",
+      "view": "reading",
+      "selector": "#app .markdown-preview-view table",
+      "property": "outline-color",
+      "probe": "obsidianAliases.reading-table",
+      "expected": "rgb(204, 224, 244)"
+    },
+    {
+      "kind": "obsidian-dom",
+      "id": "reading-frontmatter",
+      "view": "reading",
+      "selector": "#app .markdown-preview-view .markdown-frontmatter",
+      "property": "outline-color",
+      "probe": "obsidianAliases.reading-frontmatter",
+      "expected": "rgb(205, 225, 240)"
+    },
+    {
+      "kind": "obsidian-dom",
+      "id": "reading-link",
+      "view": "reading",
+      "selector": "#app .markdown-preview-view a",
+      "property": "outline-color",
+      "probe": "obsidianAliases.reading-link",
+      "expected": "rgb(206, 226, 241)"
+    },
+    {
+      "kind": "obsidian-dom",
+      "id": "reading-wikilink",
+      "view": "reading",
+      "selector": "#app .markdown-preview-view a.internal-link",
+      "property": "outline-color",
+      "probe": "obsidianAliases.reading-wikilink",
+      "expected": "rgb(207, 227, 242)"
+    },
+    {
+      "kind": "obsidian-dom",
+      "id": "inline-strong-reading",
+      "view": "reading",
+      "selector": "#app .markdown-preview-view strong",
+      "property": "outline-color",
+      "probe": "obsidianAliases.inline-strong-reading",
+      "expected": "rgb(208, 228, 243)"
+    },
+    {
+      "kind": "vsidian-dom",
+      "id": "live-heading-line",
+      "view": "live",
+      "selector": "#app .vsidian-view-live .vsidian-heading-line-1",
+      "probe": "liveHeadingDecorationColor",
+      "property": "text-decoration-color",
+      "expected": "rgb(209, 229, 244)"
+    },
+    {
+      "kind": "vsidian-dom",
+      "id": "inline-strong",
+      "view": "live",
+      "selector": "#app .vsidian-view-live .vsidian-strong",
+      "probe": "liveStrongDecorationColor",
+      "property": "text-decoration-color",
+      "expected": "rgb(210, 220, 240)"
+    },
+    {
+      "kind": "vsidian-dom",
+      "id": "reading-heading",
+      "view": "reading",
+      "selector": "#app .vsidian-view-reading .vsidian-reading-heading-1",
+      "probe": "readingHeadingDecorationColor",
+      "property": "text-decoration-color",
+      "expected": "rgb(211, 221, 241)"
+    },
+    {
+      "kind": "vsidian-dom",
+      "id": "reading-paragraph",
+      "view": "reading",
+      "selector": "#app .vsidian-view-reading .vsidian-reading-block strong",
+      "probe": "readingStrongDecorationColor",
+      "property": "text-decoration-color",
+      "expected": "rgb(212, 222, 242)"
+    },
+    {
+      "kind": "obsidian-variable",
+      "id": "var-heading-color",
+      "view": "both",
+      "declaration": ":root { --h1-color: rgb(240, 241, 242); }",
+      "probeLive": "obsidianVarProbe.liveHeadingColor",
+      "probeReading": "obsidianVarProbe.readingHeadingColor",
+      "expected": "rgb(240, 241, 242)"
+    }
+  ],
+  "guardManifest": {
+    "note": "检查器消费的关键资产存在性与锚点。候选删除任一文件或剥掉锚点内容即检查失败；边界：候选连本基线一起改可绕过 manifest——对抗该组合是 #135 受保护基线（--baseline/--git-tags 外部注入接口已备好）的职责。",
+    "requiredFiles": [
+      {
+        "path": "scripts/checkStyleContract.mjs",
+        "anchor": "runStyleContractCheck"
+      },
+      {
+        "path": "scripts/styleContractCheck.mjs",
+        "anchor": "compareEntries"
+      },
+      {
+        "path": "test/style-contract/baseline-v0.4.0.json",
+        "anchor": "75c3df79074bdeaec0f02a38d40124f0cd66f857"
+      },
+      {
+        "path": "test/style-contract/checkStyleContract.test.mjs",
+        "anchor": "buildSimTree"
+      },
+      {
+        "path": "src/shared/styleContract.ts",
+        "anchor": "STYLE_CONTRACT_ENTRIES"
+      },
+      {
+        "path": "src/shared/obsidianAlias.ts",
+        "anchor": "OBSIDIAN_DOM_ALIASES"
+      },
+      {
+        "path": "test/unit/styleContract.test.ts",
+        "anchor": "MIGRATION_PARITY"
+      },
+      {
+        "path": "test/unit/styleGuideGen.test.ts",
+        "anchor": "--check"
+      },
+      {
+        "path": "test/unit/obsidianAlias.test.ts",
+        "anchor": "OBSIDIAN_ALIAS_PROBES"
+      },
+      {
+        "path": "media/css-contract-probe.css",
+        "anchor": "HyperMD-header-1"
+      },
+      {
+        "path": "test/integration/suite/cases.ts",
+        "anchor": "legacySnippetCases"
+      },
+      {
+        "path": "scripts/genStyleGuide.mjs",
+        "anchor": "buildStyleGuideHtml"
+      }
+    ]
+  }
+}

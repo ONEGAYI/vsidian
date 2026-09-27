@@ -23,6 +23,7 @@ import {
 } from './wikilinkTarget'
 import { parseWikilinkInner } from '../shared/wikilink'
 import { NewlineCoordinator } from '../shared/newline'
+import { buildEditorCsp } from './editorCsp'
 import { FORMAT_OPERATIONS } from '../shared/formatOperations'
 import { KEYBINDING_OPERATIONS, UI_OPERATIONS } from '../shared/keybindings'
 import {
@@ -49,6 +50,8 @@ import {
 } from './viewCycle'
 import type { SettingsService } from './settingsService'
 import type { KeybindingService } from './keybindingService'
+import type { CssSnippetService } from './cssSnippetService'
+import type { SnippetLinkList } from '../shared/cssSnippets'
 import type { SettingsPageHandle } from './settingsPage'
 import { runDiagramExport } from './diagramExportHost'
 import { installHostLocale, LOCALE_MESSAGES, type LocaleCode } from '../shared/locales'
@@ -171,6 +174,55 @@ function imageResourceRoot(document: vscode.TextDocument): vscode.Uri {
   )
 }
 
+/** 编辑器面板的 webview 资源根（C-7 收紧口径）：扩展产物 + 工作区图片根 +
+ *  #128 CSS 片段目录（用户级任意路径，须在许可面内才能 asWebviewUri 加载） */
+function editorResourceRoots(
+  context: vscode.ExtensionContext,
+  document: vscode.TextDocument,
+  snippetDirectory: string | null,
+): vscode.Uri[] {
+  const roots = [
+    vscode.Uri.joinPath(context.extensionUri, 'out'),
+    vscode.Uri.joinPath(context.extensionUri, 'media'),
+    imageResourceRoot(document),
+  ]
+  if (snippetDirectory) {
+    roots.push(vscode.Uri.file(snippetDirectory))
+  }
+  return roots
+}
+
+/**
+ * #128/#129/#131 片段装载清单：宿主权威状态 × 开关映射 × 依赖分析（越界
+ * 条目排除）→ 本面板可加载的 <link> URI 有序清单。URI 由宿主逐面板构造
+ * （asWebviewUri 前缀是 webview 私有的随机 origin）；`?v=<v>` 缓存击穿
+ * 参数取**入口级版本**（#129 依赖归因：入口自身或其 @import 闭包变更时
+ * 推进，其他入口启停不扰动其 URI——webview 装配器按 URI diff 幂等跳过）
+ * 保证「保存后自动更新」取到新内容（webview 资源服务不承诺无缓存）。
+ * 目录未配置/服务未就绪时为空清单。
+ * #131 全局暂停（paused）即空清单（version 取当前状态版本以驱动 webview
+ * 撤链）：编辑器撤下全部片段链、新面板不装，逐片段开关不受影响（恢复时
+ * 重发原清单立即生效，条目 ?v= 仍为各入口的入口级版本）。
+ */
+function buildSnippetLinkList(
+  service: CssSnippetService | undefined,
+  webview: vscode.Webview,
+): SnippetLinkList {
+  const state = service?.getState()
+  if (!service || !state?.directory || state.paused) {
+    return { version: state?.paused ? state.version : 0, snippets: [] }
+  }
+  const directoryUri = vscode.Uri.file(state.directory)
+  return {
+    version: state.version,
+    snippets: service.getLinkItems().map(({ name, v }) => ({
+      name,
+      uri: `${webview.asWebviewUri(vscode.Uri.joinPath(directoryUri, name)).toString()}?v=${v}`,
+      v,
+    })),
+  }
+}
+
 /** #69 笔记名（标题链接 `[[笔记名#标题]]` 的锚）：docUri 字符串 → 文件名
  *  去扩展名（Obsidian 语义：不含路径不含 .md）。URI 解析失败回退原文。
  *  review-loops 第 2 轮披露：笔记名不做转义（理由与标题侧 outlineLinkHeading
@@ -213,6 +265,7 @@ function linkContextOf(document: vscode.TextDocument): LinkContext {
 export function createTextEditorProvider(
   context: vscode.ExtensionContext,
   settings?: SettingsWiring,
+  snippets?: CssSnippetService,
 ): vscode.CustomTextEditorProvider {
   const sessions = new Map<string, SessionEntry>()
   let lastClosedInput: { docUri: string; webviewText?: string; fragments: string[] } | undefined
@@ -751,6 +804,10 @@ export function createTextEditorProvider(
         // 设置页 webview 链路，不经文档会话）
         openSettings: () => settings?.page.open(),
         requestSettings: () => settings?.service.getSnapshot() ?? {},
+        // #128 CSS 片段端口：init 后 snippets.get 的面板级应答（清单 URI
+        // 逐面板构造）与片段链装载结果回报（失败提示；只读交互）
+        requestSnippets: () => buildSnippetLinkList(snippets, webviewPanel.webview),
+        onSnippetLoad: (name, version, ok) => notifySnippetLoad(name, version, ok),
         // #69 剪贴板端口：webview 无 navigator.clipboard 权限面，经宿主
         // env.clipboard.writeText。标题链接变体在此拼 `[[笔记名#标题]]`——
         // 笔记名 = docUri 文件名去扩展名（Obsidian 语义），标题为 webview
@@ -830,16 +887,14 @@ export function createTextEditorProvider(
         releaseEntryIfIdle(document.uri)
       })
 
+      // C-7：显式收紧资源根到扩展产物与样式目录（脚本/CSS 均在其内），
+      // 不留整个扩展目录的默认可读面；#10 增补图片资源根（工作区文件
+      // 经夹带 asWebviewUri 的地址需在许可面内——口径与路径白名单一致）；
+      // #128 增补 CSS 片段目录（须在 html 赋值前设置——webview.options
+      // 是 html 装载时的资源许可面快照）
       webviewPanel.webview.options = {
         enableScripts: true,
-        // C-7：显式收紧资源根到扩展产物与样式目录（脚本/CSS 均在其内），
-        // 不留整个扩展目录的默认可读面；#10 增补图片资源根（工作区文件
-        // 经夹带 asWebviewUri 的地址需在许可面内——口径与路径白名单一致）
-        localResourceRoots: [
-          vscode.Uri.joinPath(context.extensionUri, 'out'),
-          vscode.Uri.joinPath(context.extensionUri, 'media'),
-          imageResourceRoot(document),
-        ],
+        localResourceRoots: editorResourceRoots(context, document, snippets?.getState().directory ?? null),
       }
       webviewPanel.webview.html = buildWebviewHtml(
         webviewPanel.webview,
@@ -918,6 +973,54 @@ export function createTextEditorProvider(
       }
     })
     context.subscriptions.push({ dispose: () => offKeys() })
+  }
+
+  // ---- #128 CSS 片段：装载失败提示（按 片段+版本 去重——多面板各自回报
+  //  同一失败不重复打扰）----
+  const snippetLoadNotified = new Map<string, number>()
+  const notifySnippetLoad = (name: string, version: number, ok: boolean): void => {
+    if (ok) {
+      snippetLoadNotified.delete(name)
+      return
+    }
+    if (snippetLoadNotified.get(name) === version) {
+      return
+    }
+    snippetLoadNotified.set(name, version)
+    void vscode.window.showWarningMessage(t('host.cssSnippetLoadFailed', { name }))
+  }
+
+  // ---- #128 CSS 片段状态广播（照 settings.changed 全面板遍历样板）----
+  if (snippets) {
+    // 上次广播时的目录：资源许可面（localResourceRoots）只在目录变化时刷新
+    // ——开关/内容刷新无需重赋 webview.options（重赋可能触发 webview 资源
+    // 状态重置；扫描失败保留最近成功样式的语义不允许额外扰动）
+    let lastSnippetDirectory = snippets.getState().directory
+    const offSnippets = snippets.onChange((state) => {
+      const directoryChanged = state.directory !== lastSnippetDirectory
+      lastSnippetDirectory = state.directory
+      for (const entry of sessions.values()) {
+        for (const [sessionId, panel] of entry.panels) {
+          // 换目录后已开面板的资源许可面同步刷新：webview.options 可在运行
+          // 期重新赋值，资源服务按请求时点的 roots 校验（集成用例覆盖
+          // 「换目录后旧面板能加载新目录资源」）
+          if (directoryChanged) {
+            panel.webview.options = {
+              enableScripts: true,
+              localResourceRoots: editorResourceRoots(context, entry.doc, state.directory),
+            }
+          }
+          if (entry.session.getInfo().panels.some((p) => p.sessionId === sessionId && p.ready)) {
+            void panel.webview.postMessage({
+              kind: 'snippets.snapshot',
+              ...buildSnippetLinkList(snippets, panel.webview),
+            })
+          }
+        }
+      }
+      settings?.page.notifySnippetsChanged()
+    })
+    context.subscriptions.push({ dispose: () => offSnippets() })
   }
 
   // ---- 三态视图切换（#38）：标题栏三命令（toReading/toSource/toLive）与
@@ -1535,6 +1638,33 @@ export function createTextEditorProvider(
         return true
       },
     ),
+    // ---- #128 CSS 片段测试钩子：观测（权威状态）+ 注入（目录/开关经正式
+    // 服务入口——与设置页按钮同一链路；刷新走真实命令不设钩子）----
+    vscode.commands.registerCommand('onegayi.vsidian._test.getSnippetState', () =>
+      snippets
+        ? { available: true, ...snippets.getState() }
+        : { available: false, directory: null, readError: false, paused: false, entries: [], version: 0 },
+    ),
+    vscode.commands.registerCommand(
+      'onegayi.vsidian._test.setSnippetDirectory',
+      (directory: string | null) => snippets?.setDirectory(directory),
+    ),
+    vscode.commands.registerCommand(
+      'onegayi.vsidian._test.setSnippetEnabled',
+      (name: string, enabled: boolean) => snippets?.setEnabled(name, enabled),
+    ),
+    // #131 环境身份观测钩子（ADR-0007 证据链的机器侧采集点）：本地集成
+    // 测试断言本地语义（remoteName undefined、globalStorageUri 在本机用户
+    // 数据目录）；真实 SSH 窗口人工验收时运行此命令记录远端侧读值
+    vscode.commands.registerCommand('onegayi.vsidian._test.getSnippetEnv', () => ({
+      remoteName: vscode.env.remoteName ?? null,
+      machineId: vscode.env.machineId,
+      appHost: vscode.env.appHost,
+      /** 扩展宿主的 globalState 物理归属目录（隔离证据：本地在用户数据目录，
+       *  SSH 窗口在远端 ~/.vscode-server 下） */
+      globalStorageUri: context.globalStorageUri.toString(),
+      workspaceTrusted: vscode.workspace.isTrusted,
+    })),
   )
   }
 
@@ -1664,21 +1794,10 @@ function buildWebviewHtml(
   const probeCssUri = webview.asWebviewUri(
     vscode.Uri.joinPath(extensionUri, 'media', 'css-contract-probe.css'),
   )
-  const csp = [
-    `default-src 'none'`,
-    // data: 供 #111 图表弹窗 PNG 光栅化（自有 mermaid SVG 经 data URL
-    // 装载到 canvas；位图不可执行，风险面限于解码）
-    `img-src ${webview.cspSource} https: data:`,
-    `script-src ${webview.cspSource} 'nonce-${nonce}'`,
-    // 'unsafe-inline' 仅放行样式：CodeMirror 6（style-mod）在运行时向
-    // document 注入 <style> 元素承载 baseTheme 与扩展样式，属 CSP 的
-    // "内联样式"——不放行则整个 CM6 注入样式表被拒（.sheet 为 null），
-    // .cm-scroller 失去 flex、caret/选区样式缺失（P0：#34 行号加入后
-    // gutter 与正文改为上下堆叠，正文被推出视口）。脚本仍由上方
-    // nonce 门控，本行不放宽任何脚本执行。
-    `style-src ${webview.cspSource} 'unsafe-inline'`,
-    `font-src ${webview.cspSource}`,
-  ].join('; ')
+  // #130 起抽纯逻辑模块（style-src/font-src 追加 https: 放行 HTTPS 导入与
+  // 联网字体；脚本面维持 nonce 门控）——期望形态由 test/unit/editorCsp.test.ts
+  // 钉住，真实宿主内生效由集成测试验证
+  const csp = buildEditorCsp(webview.cspSource, nonce)
   return `<!DOCTYPE html>
 <html lang="${locale}">
 <head>

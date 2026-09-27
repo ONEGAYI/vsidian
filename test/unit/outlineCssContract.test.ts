@@ -73,7 +73,9 @@ describe('大纲条目按级别缩进（用户可见的层级表达）', () => {
     expect(item).toMatch(/white-space:\s*nowrap/)
     expect(item).toMatch(/overflow:\s*hidden/)
     expect(item).toMatch(/text-overflow:\s*ellipsis/)
-    expect(item).toMatch(/color:\s*inherit/)
+    // #133：不再显式 color:inherit——(0,2,0) 会压过层级色 :where 规则与用户片段
+    // 裸类规则（继承语义靠自然继承保持）
+    expect(item).not.toMatch(/color:/)
     // 条目在 flex 列面板内不收缩（滚动成立的另一半）：条目 overflow:hidden
     // 使 flex item 的 min-height:auto 解析为 0，缺 flex:0 0 auto 时长面板
     // 条目被均匀压扁、内容总高不再溢出容器，overflow-y 依旧永不激活
@@ -138,7 +140,8 @@ describe('主题色同源（#65：大纲层级与正文标题引用同一变量�
   it('#app 定义标题层级色变量族 1–6（当前默认前景色，主题分级仅改此处）', () => {
     for (let n = 1; n <= 6; n++) {
       expect(css, `--vsidian-heading-color-${n} 应定义于 #app`).toMatch(
-        new RegExp(`--vsidian-heading-color-${n}:\\s*var\\(--vscode-editor-foreground\\)`),
+        // #132 变量桥：含 Obsidian --h{n}-color fallback（不设别名时回退前景色不变）
+        new RegExp(`--vsidian-heading-color-${n}:\\s*var\\(--h${n}-color, var\\(--vscode-editor-foreground\\)\\)`),
       )
     }
   })
@@ -149,7 +152,8 @@ describe('主题色同源（#65：大纲层级与正文标题引用同一变量�
       expect(live, `live 标题 ${n} 级应引用层级色变量`).toMatch(
         new RegExp(`color:\\s*var\\(--vsidian-heading-color-${n}\\)`),
       )
-      const outline = rule(`.vsidian-sidebar .vsidian-outline-item.vsidian-outline-level-${n}`)
+      // #133：层级色声明拆至 :where() 零特异性规则（用户片段裸类可覆写）
+      const outline = rule(`:where(.vsidian-sidebar .vsidian-outline-item).vsidian-outline-level-${n}`)
       expect(outline, `大纲条目 ${n} 级应引用层级色变量`).toMatch(
         new RegExp(`color:\\s*var\\(--vsidian-heading-color-${n}\\)`),
       )

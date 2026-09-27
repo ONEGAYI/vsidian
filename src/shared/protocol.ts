@@ -81,13 +81,14 @@ export type HostToWebview =
   /** 测试钩子（#111）：按序号点击图形化代码块的 popup 按钮（驱动与用户
    *  点击相同的处理器链路：打开图表弹窗）。宿主测试无法向 webview 派发
    *  真实鼠标事件，以此通道验证真实宿主内的弹窗打开；action 存在时改为
-   *  点击弹窗工具条的导出按钮（集成回归驱动导出链路的消息形态——宿主
-   *  测试钩子模式下短路真实另存为对话框） */
+   *  点击弹窗工具条按钮（export-svg/export-png 驱动导出链路的消息形态
+   *  ——宿主测试钩子模式下短路真实另存为对话框；refresh 驱动弹窗原地
+   *  重取源码刷新——#133 样式保持验证） */
   | {
       kind: 'graphic.test.popup'
       view: 'live' | 'reading'
       index: number
-      action?: 'export-svg' | 'export-png'
+      action?: 'export-svg' | 'export-png' | 'refresh' | 'close'
     }
   /** 测试钩子（#82）：按序号点击卡片头部折叠 chevron（驱动与用户点击相同
    *  的处理器链路：effect → codeCardFoldField 视图态切换） */
@@ -199,6 +200,11 @@ export type HostToWebview =
    *  载荷校验失败（invalid）与写盘失败（writeFailed） */
   | { kind: 'diagram.export.result'; reqId: number; ok: boolean; reason?: 'cancelled' | 'invalid' | 'writeFailed' }
   | { kind: 'settings.snapshot'; values: SettingsPayload }
+  /**
+   * #132 样式参考：打开设置页后定位到指定附加分页（section id）。
+   * 面板未加载完成时由宿主在 ready 握手后补发；未知分页 id 时 webview 忽略
+   */
+  | { kind: 'settings.focusSection'; section: string }
   /** 设置变更通知（#33）：任一设置项保存成功后广播到全部已打开 Vsidian
    *  编辑器面板与设置页（含变更发起页面）。values 仍为全量快照；消费方按
    *  需读取关心的键（#34 场景：editor.lineNumbers 触发 CM6 扩展热重配） */
@@ -210,6 +216,33 @@ export type HostToWebview =
    *  <html lang>；按需创建的控件自然取新词 */
   | { kind: 'locale.changed'; lang: string; messages: Record<string, string> }
   | { kind: 'keybindings.snapshot' | 'keybindings.changed'; overrides: KeybindingOverrides; requestId?: number; ok?: boolean; reason?: 'invalid' | 'conflict' | 'storage'; conflicts?: string[] }
+  /** CSS 片段装载清单（#128/#129，编辑器面板消费）：宿主权威扫描 × 开关
+   *  映射 × 依赖分析（越界条目排除）→ 启用片段的 webview 资源 URI（含
+   *  ?v=版本 缓存击穿参数），按确定性文件名顺序排列（后者覆盖）。编辑器
+   *  面板 init 后经 snippets.get 拉取，状态变更后由宿主广播；空清单即撤下
+   *  全部已装片段。
+   *  v（#129）：入口级缓存击穿版本——入口自身或其 @import 依赖闭包变更时
+   *  推进该入口（装载回报的关联键）；缺省回退列表版本（仅列表级语义） */
+  | {
+      kind: 'snippets.snapshot'
+      version: number
+      snippets: Array<{ name: string; uri: string; v?: number }>
+    }
+  /** CSS 片段管理状态（#128/#129/#131，设置页消费）：目录、读取失败标志、
+   *  全局暂停标志（#131，设置页回显暂停状态条）、全部第一层条目（含未启
+   *  用）与版本。设置页经 snippets.get 拉取；宿主状态变更后推送（含编辑
+   *  器侧片段变更）。不携带 URI——设置页不加载用户 CSS。rejections（#129）：
+   *  被拒启用条目（越界/符号链接逃逸，清单装配排除），设置页行内提示；
+   *  缺省视为无拒绝 */
+  | {
+      kind: 'snippets.state'
+      directory: string | null
+      readError: boolean
+      paused: boolean
+      version: number
+      entries: Array<{ name: string; enabled: boolean }>
+      rejections?: Record<string, { reason: 'path-escape' | 'symlink-escape'; path: string }>
+    }
 
 /** webview → 宿主消息 */
 export type WebviewToHost =
@@ -423,6 +456,36 @@ export type WebviewToHost =
       longTasks: { count: number; maxMs: number; totalMs: number } | null
       headingStats: { totalUpdates: number; lastUpdateScannedLines: number; fullBuildLines: number }
     }
+  /** CSS 片段快照拉取（#128）：编辑器面板 init 后与设置页 ready 后请求；
+   *  宿主分别以 snippets.snapshot（编辑器，含 URI 清单）与 snippets.state
+   *  （设置页，含开关列表）应答 */
+  | { kind: 'snippets.get' }
+  /** CSS 片段 <link> 装载结果回报（#128，编辑器面板）：入口级加载成败——
+   *  失败时 webview 保留最近成功样式（装新链成功后才摘旧链），宿主据此
+   *  给用户提示与诊断；version 对应触发装载的清单版本 */
+  | { kind: 'snippets.loadResult'; name: string; version: number; ok: boolean }
+  /** CSS 片段目录选择对话框（#128，设置页）：宿主弹文件夹选择器并按结果
+   *  应用目录（snippets.chooseOpenLabel 取词作确认按钮文案）；结果经
+   *  snippets.state 推送，不逐次应答 */
+  | { kind: 'snippets.chooseDirectory' }
+  /** 直接设置片段目录（#128，设置页/测试注入通道）：null = 取消配置 */
+  | { kind: 'snippets.setDirectory'; directory: string | null }
+  /** 逐片段开关（#128，设置页）：文件名键 + 显式开关 */
+  | { kind: 'snippets.setEnabled'; name: string; enabled: boolean }
+  /** #131 暂停/恢复全部片段（设置页「暂停全部」按钮与暂停状态条的恢复
+   *  入口）。宿主持久化全局标志；命令面板命令（cssSnippets.pause /
+   *  cssSnippets.resume）与设置页按钮共用同一服务入口——即使 webview
+   *  异常，命令仍独立可用 */
+  | { kind: 'snippets.setPaused'; paused: boolean }
+  /** 手动刷新片段（#128，设置页按钮；命令面板走宿主命令同链路） */
+  | { kind: 'snippets.refresh' }
+  /** 在系统文件管理器中打开片段目录（#128，设置页） */
+  | { kind: 'snippets.openDirectory' }
+  /** 导出样式契约 JSON（#145，设置页「样式参考」分页工具区）：宿主读
+   *  VSIX 内 media/style-reference/style-reference.json（与分发的机器可读
+   *  清单同一字节），经 showSaveDialog 另存到用户路径；成功/失败以宿主
+   *  通知回报，不逐次应答（命令面板 exportStyleReference 同一实现） */
+  | { kind: 'styleRef.export' }
 
 /** 性能快照（#5）：一次观测时点的 DOM 计数 */
 export interface PerfSnapshot {
@@ -498,6 +561,56 @@ export interface CssProbeReport {
   liveMathFontFamily?: string | null
   /** #59：阅读公式内层 `.katex` 的 computed font-family（同上） */
   readingMathFontFamily?: string | null
+  /** #129：@font-face 装载观测（document.fonts 总数与已裂数）——片段
+   *  相对字体按各自 CSS 文件路径解析可用的字节级证据；FontFaceSet 不可
+   *  用（旧环境/jsdom）为 null */
+  documentFonts?: { total: number; loaded: number } | null
+  /** #129：阅读容器 computed background-image（'none' → null）——片段
+   *  相对图片的解析锚点观测（URL 按引用它的 CSS 文件路径解析） */
+  readingBackgroundImage?: string | null
+  /**
+   * #132 Obsidian 原名别名桥探针：键 = 清单条目 ID（或「条目 ID-reading」
+   * 视图消歧后缀），值 = 按 **Obsidian 原名选择器** 定位目标元素的
+   * text-decoration-color（media/css-contract-probe.css 以原名写探针规则；
+   * 别名类未挂上/挂错节点即 null，断言端逐项核对期望 rgb）。选择器表
+   * 单一事实源：src/shared/obsidianAlias.ts 的 OBSIDIAN_ALIAS_PROBES。
+   */
+  obsidianAliases?: Record<string, string | null>
+  /**
+   * #132 变量别名桥观测：一级标题的 computed color（经 --h1-color 驱动的
+   * 可见效果——变量桥生效则随片段设置的 Obsidian 原名变量变化；无目标
+   * 元素为 null）。真实片段链路验证：集成用例「Obsidian 变量别名桥」
+   */
+  obsidianVarProbe?: { liveHeadingColor: string | null; readingHeadingColor: string | null }
+  /**
+   * #133 界面域样式契约探针：键 = 清单条目 ID（或「条目 ID-视图」消歧
+   * 后缀），值 = 按 **vsidian 稳定类名选择器** 在 document 域（界面域目标
+   * 不全在两视图容器内——大纲面板挂侧栏）定位目标元素的 computed 自定义属性
+   * --vsidian-chrome-probe 的 computed 值（不可见探针，与 outline-color /
+   * text-decoration-color 两套既有探针正交；media/css-contract-probe.css 同源
+   * 探针规则；类未挂上/
+   * 挂错节点即 null）。选择器表单一事实源：src/shared/chromeContract.ts
+   * 的 CHROME_CONTRACT_PROBES。
+   */
+  chromeSelectors?: Record<string, string | null>
+  /**
+   * #133 界面域可见颜色观测：各区域代表元素的 computed color（随当前
+   * viewMode 取对应侧目标；无目标元素为 null）。真实片段链路验证：
+   * 集成用例「界面域样式契约」——片段改写这些可见属性即被观测到。
+   */
+  chromePaint?: {
+    mathKatexColor: string | null
+    codeCardLabelColor: string | null
+    tokKeywordColor: string | null
+    mermaidContainerColor: string | null
+    outlineLevel1Color: string | null
+  }
+  /**
+   * #133 图表弹窗样式观测：浮层在场时的 computed color（toolbar 与
+   * stage 两区）；浮层不在场为 null（弹窗 DOM 只在打开期间存在）。
+   * 打开与刷新后样式保持的验证：集成用例「界面域样式契约」。
+   */
+  chromePopup?: { toolbarColor: string | null; stageColor: string | null } | null
 }
 
 /** #34 行号栏观测（view.state 扩展字段）：开关生效态与视口内渲染结果。
@@ -1378,6 +1491,20 @@ function isNullOrString(v: unknown): boolean {
   return v === null || isString(v)
 }
 
+/** #129 snippets.state.rejections 形态守卫 */
+function isCssSnippetRejectionMap(v: unknown): v is Record<string, unknown> {
+  return (
+    isObject(v) &&
+    Object.entries(v).every(
+      ([name, item]) =>
+        name.length > 0 &&
+        isObject(item) &&
+        (item.reason === 'path-escape' || item.reason === 'symlink-escape') &&
+        isString(item.path),
+    )
+  )
+}
+
 function isCssProbeReport(v: unknown): v is CssProbeReport {
   return (
     isObject(v) &&
@@ -1398,7 +1525,36 @@ function isCssProbeReport(v: unknown): v is CssProbeReport {
     isNullOrString(v.liveWikilinkDecorationColor) &&
     isNullOrString(v.readingWikilinkDecorationColor) &&
     (v.liveMathFontFamily === undefined || isNullOrString(v.liveMathFontFamily)) &&
-    (v.readingMathFontFamily === undefined || isNullOrString(v.readingMathFontFamily))
+    (v.readingMathFontFamily === undefined || isNullOrString(v.readingMathFontFamily)) &&
+    (v.documentFonts === undefined ||
+      v.documentFonts === null ||
+      (isObject(v.documentFonts) &&
+        Number.isInteger(v.documentFonts.total) &&
+        (v.documentFonts.total as number) >= 0 &&
+        Number.isInteger(v.documentFonts.loaded) &&
+        (v.documentFonts.loaded as number) >= 0)) &&
+    (v.readingBackgroundImage === undefined || isNullOrString(v.readingBackgroundImage)) &&
+    (v.obsidianAliases === undefined ||
+      (isObject(v.obsidianAliases) &&
+        Object.entries(v.obsidianAliases).every(([k, val]) => k.length > 0 && isNullOrString(val)))) &&
+    (v.obsidianVarProbe === undefined ||
+      (isObject(v.obsidianVarProbe) && isNullOrString(v.obsidianVarProbe.liveHeadingColor) &&
+        isNullOrString(v.obsidianVarProbe.readingHeadingColor))) &&
+    (v.chromeSelectors === undefined ||
+      (isObject(v.chromeSelectors) &&
+        Object.entries(v.chromeSelectors).every(([k, val]) => k.length > 0 && isNullOrString(val)))) &&
+    (v.chromePaint === undefined ||
+      (isObject(v.chromePaint) &&
+        isNullOrString(v.chromePaint.mathKatexColor) &&
+        isNullOrString(v.chromePaint.codeCardLabelColor) &&
+        isNullOrString(v.chromePaint.tokKeywordColor) &&
+        isNullOrString(v.chromePaint.mermaidContainerColor) &&
+        isNullOrString(v.chromePaint.outlineLevel1Color))) &&
+    (v.chromePopup === undefined ||
+      v.chromePopup === null ||
+      (isObject(v.chromePopup) &&
+        isNullOrString(v.chromePopup.toolbarColor) &&
+        isNullOrString(v.chromePopup.stageColor)))
   )
 }
 
@@ -1658,6 +1814,24 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         isNonNegativeInt(v.headingStats.lastUpdateScannedLines) &&
         isNonNegativeInt(v.headingStats.fullBuildLines)
       )
+    case 'snippets.get':
+      return true
+    case 'snippets.loadResult':
+      return isString(v.name) && isNonNegativeInt(v.version) && typeof v.ok === 'boolean'
+    case 'snippets.chooseDirectory':
+      return true
+    case 'snippets.setDirectory':
+      return v.directory === null || (typeof v.directory === 'string' && v.directory.length > 0)
+    case 'snippets.setEnabled':
+      return typeof v.name === 'string' && v.name.length > 0 && typeof v.enabled === 'boolean'
+    case 'snippets.setPaused':
+      return typeof v.paused === 'boolean'
+    case 'snippets.refresh':
+      return true
+    case 'snippets.openDirectory':
+      return true
+    case 'styleRef.export':
+      return true
     default:
       return false
   }
@@ -1742,7 +1916,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return (
         (v.view === 'live' || v.view === 'reading') &&
         isNonNegativeInt(v.index) &&
-        (v.action === undefined || v.action === 'export-svg' || v.action === 'export-png')
+        (v.action === undefined || v.action === 'export-svg' || v.action === 'export-png' ||
+          v.action === 'refresh' || v.action === 'close')
       )
     case 'codecard.test.fold':
       return isNonNegativeInt(v.index)
@@ -1834,6 +2009,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         (v.ctrlKey === undefined || typeof v.ctrlKey === 'boolean')
     case 'settings.snapshot':
       return isSettingsPayload(v.values)
+    case 'settings.focusSection':
+      return isString(v.section)
     case 'settings.changed':
       return isSettingsPayload(v.values)
     case 'locale.changed':
@@ -1844,6 +2021,30 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         v.lang.length > 0 &&
         isObject(v.messages) &&
         Object.values(v.messages).every(isString)
+      )
+    case 'snippets.snapshot':
+      return (
+        isNonNegativeInt(v.version) &&
+        Array.isArray(v.snippets) &&
+        v.snippets.every(
+          (item) =>
+            isObject(item) &&
+            isString(item.name) &&
+            isString(item.uri) &&
+            (item.v === undefined || isNonNegativeInt(item.v)),
+        )
+      )
+    case 'snippets.state':
+      return (
+        (v.directory === null || (typeof v.directory === 'string' && v.directory.length > 0)) &&
+        typeof v.readError === 'boolean' &&
+        typeof v.paused === 'boolean' &&
+        isNonNegativeInt(v.version) &&
+        Array.isArray(v.entries) &&
+        v.entries.every(
+          (item) => isObject(item) && isString(item.name) && typeof item.enabled === 'boolean',
+        ) &&
+        (v.rejections === undefined || isCssSnippetRejectionMap(v.rejections))
       )
     default:
       return false

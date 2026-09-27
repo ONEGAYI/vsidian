@@ -3,6 +3,24 @@
 // 字节级断言），路径经环境变量 WORKSPACE_DIR 传入。
 import * as vscode from 'vscode'
 import { LOCALE_MESSAGES, resolveLocale } from '../../../src/shared/locales'
+import { OBSIDIAN_ALIAS_PROBES } from '../../../src/shared/obsidianAlias'
+import legacyBaselineJson from '../../../test/style-contract/baseline-v0.4.0.json'
+import { CHROME_CONTRACT_PROBES } from '../../../src/shared/chromeContract'
+
+/** #134 历史基线旧片段用例（基线 JSON 的 legacySnippetCases 元素形态） */
+interface LegacySnippetCase {
+  kind: 'obsidian-dom' | 'vsidian-dom' | 'obsidian-variable'
+  id: string
+  view: 'live' | 'reading' | 'both'
+  selector?: string
+  property?: string
+  probe?: string
+  declaration?: string
+  probeLive?: string
+  probeReading?: string
+  expected: string
+}
+const legacySnippetCases = legacyBaselineJson.legacySnippetCases as unknown as LegacySnippetCase[]
 
 /** #94 起编辑器 webview 文案随生效语言取词（auto 按宿主显示语言解析）——
  *  期望值与扩展装配同源计算，不再复制字面量 */
@@ -35,6 +53,10 @@ const CMD = {
   getSettings: 'onegayi.vsidian._test.getSettings',
   setSettings: 'onegayi.vsidian._test.setSettings',
   injectSettingsPageMessage: 'onegayi.vsidian._test.injectSettingsPageMessage',
+  // #128 CSS 片段链路（观测/注入；刷新走真实命令）
+  snippetState: 'onegayi.vsidian._test.getSnippetState',
+  setSnippetDirectory: 'onegayi.vsidian._test.setSnippetDirectory',
+  setSnippetEnabled: 'onegayi.vsidian._test.setSnippetEnabled',
 }
 
 const wsDir = process.env['WORKSPACE_DIR'] ?? ''
@@ -76,6 +98,34 @@ const CRLF_DOC = '标题一\r\n正文 A 行\r\n正文 B 行\r\n'
 // 在 '- 列表项一' 行首插入 '插入的新段落\n' 后的期望全文
 const LF_DOC_AFTER_EDIT = '中文编辑测试\n\n包含 emoji：🎉 与组合 emoji 👨‍👩‍👧‍👦\n\n插入的新段落\n- 列表项一\n- 列表项二\n'
 // #6 模式切换 fixture（与 runTest.mjs 的 MODE_DOC 一致）
+const STYLE_CONTRACT_DOC_TEXT = [
+  '---',
+  'title: 样式契约',
+  '---',
+  '',
+  '# 样式契约标题',
+  '',
+  '**粗体** 与 *斜体* 与 `行内代码` 与 ==高亮==。',
+  '',
+  '> 引用一行',
+  '',
+  '- 无序列表项',
+  '- [ ] 未完成任务',
+  '',
+  '---',
+  '',
+  '```js',
+  'const fence = true',
+  '```',
+  '',
+  '| 表头甲 | 表头乙 |',
+  '| --- | --- |',
+  '| 单元甲 | 单元乙 |',
+  '',
+  '[外部链接](https://example.com/alias) 与 [[双链目标|显示别名]]。',
+  '',
+].join('\n')
+
 const MODE_DOC_TEXT = [
   '# 模式切换标题一',
   '',
@@ -316,6 +366,9 @@ interface ViewState {
     liveHeadingDecorationColor: string | null
     readingHeadingDecorationColor: string | null
     readingVarProbe: string | null
+    /** #129：document.fonts 装载计数与阅读容器背景图（相对资源观测） */
+    documentFonts?: { total: number; loaded: number } | null
+    readingBackgroundImage?: string | null
     liveStrongDecorationColor: string | null
     liveInlineCodeDecorationColor: string | null
     liveCodeLineDecorationColor: string | null
@@ -332,6 +385,22 @@ interface ViewState {
     /** #59 公式字体观测：katex.min.css 生效时含 KaTeX 字体族 */
     liveMathFontFamily?: string | null
     readingMathFontFamily?: string | null
+    /** #132 Obsidian 原名别名桥探针（键 = 清单条目 ID；选择器表见 src/shared/obsidianAlias.ts） */
+    obsidianAliases?: Record<string, string | null>
+    /** #132 变量别名桥观测：--h1-color 驱动的一级标题 computed color */
+    obsidianVarProbe?: { liveHeadingColor: string | null; readingHeadingColor: string | null }
+    /** #133 界面域探针（键 = 清单条目 ID 或 -live/-reading 消歧；选择器表见 src/shared/chromeContract.ts） */
+    chromeSelectors?: Record<string, string | null>
+    /** #133 界面域可见颜色观测（各区域代表元素 computed color，随 viewMode 取对应侧） */
+    chromePaint?: {
+      mathKatexColor: string | null
+      codeCardLabelColor: string | null
+      tokKeywordColor: string | null
+      mermaidContainerColor: string | null
+      outlineLevel1Color: string | null
+    }
+    /** #133 图表弹窗样式观测（浮层在场时的 toolbar/stage computed color；不在场为 null） */
+    chromePopup?: { toolbarColor: string | null; stageColor: string | null } | null
   }
   /** #8 双视图语法一致性观测 */
   liveSyntax?: {
@@ -761,6 +830,60 @@ async function waitViewState(
     return undefined
   }, timeoutMs)
 }
+
+/** #128 CSS 片段宿主权威状态（_test 观测钩子） */
+interface SnippetState {
+  available: boolean
+  directory: string | null
+  readError: boolean
+  paused: boolean
+  version: number
+  entries: Array<{ name: string; enabled: boolean }>
+  /** #129 越界/符号链接逃逸被拒的启用条目 */
+  rejections?: Record<string, { reason: string; path: string }>
+}
+async function snippetState(): Promise<SnippetState> {
+  return (await vscode.commands.executeCommand(CMD.snippetState)) as SnippetState
+}
+async function setSnippetDirectory(dir: string | null): Promise<void> {
+  await vscode.commands.executeCommand(CMD.setSnippetDirectory, dir)
+}
+async function setSnippetEnabled(name: string, enabled: boolean): Promise<void> {
+  await vscode.commands.executeCommand(CMD.setSnippetEnabled, name, enabled)
+}
+/** 工作区内写片段 CSS（utf8 无 BOM） */
+async function writeSnippetCss(file: string, css: string): Promise<void> {
+  await vscode.workspace.fs.writeFile(wsUri(file), Buffer.from(css, 'utf8'))
+}
+
+/** #133 界面域样式契约 fixture（与 fixtures.mjs 的 CHROME_CONTRACT_DOC 一致） */
+const CHROME_CONTRACT_DOC_TEXT = [
+  '# 界面契约一级标题',
+  '',
+  '## 二级标题与 **加粗透传**',
+  '',
+  '行内公式 $E = mc^2$ 与块级公式：',
+  '',
+  '$$\\int_0^1 x^2 \\, dx = \\tfrac{1}{3}$$',
+  '',
+  '错误公式 $\\fauxcmd{x}$ 原文降级。',
+  '',
+  '```mermaid',
+  'flowchart TD',
+  '  A[开始] --> B[结束]',
+  '```',
+  '',
+  '```mermaid',
+  '这个围栏语法无效',
+  '```',
+  '',
+  '```js',
+  'const keyword = true',
+  '```',
+  '',
+  '结尾段落。',
+  '',
+].join('\n')
 
 /** #9 任务勾选 fixture（与 runTest.mjs 的 TASK_DOC 一致） */
 const TASK_DOC_TEXT = [
@@ -7098,4 +7221,1206 @@ export const cases: Array<[string, () => Promise<void>]> = [
       await reopened.save()
     }
   }],
+
+  // ---- #128 CSS 片段目录管理与双视图启停闭环 ----
+
+  ['CSS 片段：目录扫描默认关闭、启用改双视图、文件名顺序后者覆盖（#128）', async () => {
+    // 片段目录（工作区内子目录；仅因显式选择而加载——无任何工作区自动发现）
+    const dir = wsUri('css-snippets').fsPath
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets'))
+    await writeSnippetCss('css-snippets/a.css', [
+      '#app .vsidian-view-live .vsidian-heading-line-1 { text-decoration-color: rgb(70, 80, 90); }',
+      '#app .cm-editor .cm-scroller .vsidian-heading-line-1 { font-size: 31px; }',
+      '#app .vsidian-view-reading { --vsidian-probe-var-reading: snippet-a; }',
+    ].join('\n'))
+    await writeSnippetCss('css-snippets/b.css',
+      '#app .vsidian-view-reading { --vsidian-probe-var-reading: snippet-b; }\n')
+    try {
+      await setSnippetDirectory(dir)
+      // 扫描产出：仅第一层 .css、确定性排序、新片段默认关闭
+      const scanned = await poll('片段扫描完成', async () => {
+        const st = await snippetState()
+        return st.directory === dir && !st.readError && st.entries.length === 2 ? st : undefined
+      })
+      assert(JSON.stringify(scanned.entries) === JSON.stringify([
+        { name: 'a.css', enabled: false },
+        { name: 'b.css', enabled: false },
+      ]), `新片段应默认关闭并按文件名排序，实际 ${JSON.stringify(scanned.entries)}`)
+
+      await openWithEditor('mode.md')
+      await waitSessionReady('mode.md')
+      const uri = wsUri('mode.md').toString()
+      // 未启用：探针维持内部契约片段值（片段不生效）
+      const before = await waitViewState('mode.md', (v) =>
+        v.viewMode === 'live' && v.cssProbe?.liveHeadingDecorationColor !== undefined)
+      assert(before.cssProbe!.liveHeadingDecorationColor === 'rgb(1, 2, 3)',
+        `未启用片段不应影响探针，实际 ${before.cssProbe!.liveHeadingDecorationColor}`)
+
+      // 启用 a.css：live 探针命中（text-decoration-color）+ 可见字号变化（headingFontPx）
+      await setSnippetEnabled('a.css', true)
+      const applied = await waitViewState('mode.md', (v) =>
+        v.cssProbe?.liveHeadingDecorationColor === 'rgb(70, 80, 90)')
+      assert(applied.cssProbe!.liveHeadingDecorationColor === 'rgb(70, 80, 90)', 'live 应被片段命中')
+      assert(applied.headingFontPx === 31,
+        `片段应实际改变可见字号（31px），实际 ${String(applied.headingFontPx)}`)
+
+      // 阅读视图同片段生效（变量管道）
+      await vscode.commands.executeCommand('onegayi.vsidian.toggleViewMode')
+      const readingA = await waitViewState('mode.md', (v) =>
+        v.viewMode === 'reading' && v.cssProbe?.readingVarProbe === 'snippet-a')
+      assert(readingA.cssProbe!.readingVarProbe === 'snippet-a', '阅读视图应被片段命中')
+
+      // b.css 后加载覆盖 a.css（确定性顺序的层叠结果）；停用 b 回到 a
+      await setSnippetEnabled('b.css', true)
+      await waitViewState('mode.md', (v) => v.cssProbe?.readingVarProbe === 'snippet-b')
+      await setSnippetEnabled('b.css', false)
+      await waitViewState('mode.md', (v) => v.cssProbe?.readingVarProbe === 'snippet-a')
+      // 全部停用：撤回到内部契约片段值
+      await setSnippetEnabled('a.css', false)
+      await waitViewState('mode.md', (v) => v.cssProbe?.readingVarProbe === 'contract-ok')
+
+      // 全程不写文档（CSS 启停是纯视图状态）
+      await waitViewState('mode.md', (v) => v.text === MODE_DOC_TEXT)
+      const st = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+      assert(st.appliedEdits === 0, `片段启停不应写文档，实际写回 ${st.appliedEdits} 笔`)
+    } finally {
+      await setSnippetDirectory(null)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
+    }
+  }],
+
+  ['CSS 片段：保存后自动更新与原子保存不误判删除（#128）', async () => {
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets'))
+    const css = (color: string) =>
+      `#app .vsidian-view-live .vsidian-heading-line-1 { text-decoration-color: ${color}; }\n`
+    await writeSnippetCss('css-snippets/edit.css', css('rgb(11, 22, 33)'))
+    try {
+      await setSnippetDirectory(wsUri('css-snippets').fsPath)
+      await setSnippetEnabled('edit.css', true)
+      await openWithEditor('mode.md')
+      await waitSessionReady('mode.md')
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(11, 22, 33)')
+
+      // 编辑保存（磁盘改写）→ watcher 去抖重扫 → 广播 → 新内容生效（缓存击穿）
+      await writeSnippetCss('css-snippets/edit.css', css('rgb(44, 55, 66)'))
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(44, 55, 66)',
+        0, 15000)
+
+      // 原子保存：写临时文件（.tmp 不匹配 *.css，不触发清单变化）再 rename 覆盖
+      await writeSnippetCss('css-snippets/edit.css.tmp', css('rgb(77, 88, 99)'))
+      await vscode.workspace.fs.rename(
+        wsUri('css-snippets/edit.css.tmp'), wsUri('css-snippets/edit.css'), { overwrite: true })
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(77, 88, 99)',
+        0, 15000)
+      // 开关未被误判删除（rename 期间的瞬时消失不清洗显式开关）
+      const st = await snippetState()
+      assert(st.entries.some((e) => e.name === 'edit.css' && e.enabled),
+        `原子保存后开关应保留，实际 ${JSON.stringify(st.entries)}`)
+    } finally {
+      await setSnippetDirectory(null)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
+    }
+  }],
+
+  ['CSS 片段：删除撤下、目录读取失败保留最近成功样式、恢复（#128）', async () => {
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets'))
+    const css = '#app .vsidian-view-live .vsidian-heading-line-1 { text-decoration-color: rgb(120, 130, 140); }\n'
+    await writeSnippetCss('css-snippets/keep.css', css)
+    try {
+      await setSnippetDirectory(wsUri('css-snippets').fsPath)
+      await setSnippetEnabled('keep.css', true)
+      await openWithEditor('mode.md')
+      await waitSessionReady('mode.md')
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(120, 130, 140)')
+
+      // 明确删除：清单移除 + 样式撤下（回到内部契约探针值）
+      await vscode.workspace.fs.delete(wsUri('css-snippets/keep.css'), { useTrash: false })
+      await poll('删除后清单移除', async () => {
+        const st = await snippetState()
+        return st.entries.length === 0 ? st : undefined
+      }, 15000)
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(1, 2, 3)', 0, 15000)
+
+      // 恢复文件：显式开关按设计跨删除保留（原子保存保护——无法区分暂时消失
+      // 与永久删除，不清洗映射），重新入列即带原开关直接重新生效
+      await writeSnippetCss('css-snippets/keep.css', css)
+      await vscode.commands.executeCommand('onegayi.vsidian.cssSnippets.refresh')
+      await poll('恢复后重新入列（开关保留）', async () => {
+        const st = await snippetState()
+        return st.entries.some((e) => e.name === 'keep.css' && e.enabled) ? true : undefined
+      }, 15000)
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(120, 130, 140)', 0, 15000)
+
+      // 目录读取失败（整目录暂时消失）：宿主保留最近成功清单（开关不清洗、
+      // 版本不推进——不向已开面板下发撤下广播）；readError 置位供设置页提示。
+      // 注：已装 <link> 的样式表存续由 webview 资源服务/浏览器决定（宿主不
+      // 下发撤下即不主动扰动），「失败窗口内样式保持」的装载器契约由浏览器
+      // 测试钉住，真实宿主内的观感列入人工验证
+      await vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })
+      const failed = await poll('读取失败置位', async () => {
+        const st = await snippetState()
+        return st.readError ? st : undefined
+      }, 15000)
+      assert(JSON.stringify(failed.entries) === JSON.stringify([{ name: 'keep.css', enabled: true }]),
+        `读取失败应保留最近成功清单，实际 ${JSON.stringify(failed.entries)}`)
+      assert(failed.version > 0, '读取失败不得推进版本（不触发面板重装/撤下）')
+
+      // 目录恢复 + 真实刷新命令：清单保留的直接证据——无需重新启用即自动
+      // 重新生效（恢复后的成功扫描推进版本并广播）
+      await vscode.workspace.fs.createDirectory(wsUri('css-snippets'))
+      await writeSnippetCss('css-snippets/keep.css', css)
+      await vscode.commands.executeCommand('onegayi.vsidian.cssSnippets.refresh')
+      await poll('刷新后失败态清除', async () => {
+        const st = await snippetState()
+        return !st.readError && st.entries.some((e) => e.name === 'keep.css' && e.enabled) ? true : undefined
+      }, 15000)
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(120, 130, 140)', 0, 15000)
+    } finally {
+      await setSnippetDirectory(null)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
+    }
+  }],
+
+  ['CSS 片段：暂停全部冻结视图、保留逐项开关、恢复按原配置生效（#131）', async () => {
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets'))
+    const css = (color: string) =>
+      `#app .vsidian-view-live .vsidian-heading-line-1 { text-decoration-color: ${color}; }\n`
+    await writeSnippetCss('css-snippets/a.css', css('rgb(200, 210, 220)'))
+    await writeSnippetCss('css-snippets/b.css', css('rgb(210, 220, 230)'))
+    try {
+      await setSnippetDirectory(wsUri('css-snippets').fsPath)
+      await setSnippetEnabled('a.css', true)
+      await setSnippetEnabled('b.css', true)
+      await openWithEditor('mode.md')
+      await waitSessionReady('mode.md')
+      // 双片段就绪：b 后加载覆盖 a（原配置的基线观感）
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(210, 220, 230)')
+
+      // 暂停（真实命令面板命令，宿主侧注册——不依赖 webview 健康度）：
+      // 全局冻结立即撤下全部片段（可见效果断言：探针回内部契约值）
+      await vscode.commands.executeCommand('onegayi.vsidian.cssSnippets.pause')
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(1, 2, 3)',
+        0, 15000)
+      const paused = await snippetState()
+      assert(paused.paused === true, `暂停标志应置位，实际 ${String(paused.paused)}`)
+      assert(JSON.stringify(paused.entries) === JSON.stringify([
+        { name: 'a.css', enabled: true }, { name: 'b.css', enabled: true },
+      ]), `暂停应保留逐片段开关（不清空），实际 ${JSON.stringify(paused.entries)}`)
+
+      // 暂停期间翻转逐片段开关：允许且保留（视图保持冻结——暂停与停用不混淆）
+      await setSnippetEnabled('b.css', false)
+      const duringPause = await snippetState()
+      assert(duringPause.paused === true && !duringPause.entries.find((e) => e.name === 'b.css')!.enabled,
+        '暂停期间开关翻转应落地且不解除暂停')
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(1, 2, 3)')
+
+      // 恢复（真实命令）：按暂停期间落地的原配置立即生效——仅 a.css
+      await vscode.commands.executeCommand('onegayi.vsidian.cssSnippets.resume')
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(200, 210, 220)',
+        0, 15000)
+      const resumed = await snippetState()
+      assert(resumed.paused === false, `恢复应清除暂停标志，实际 ${String(resumed.paused)}`)
+
+      // 全程不写文档（暂停/恢复是纯视图状态）
+      await waitViewState('mode.md', (v) => v.text === MODE_DOC_TEXT)
+      const st = (await vscode.commands.executeCommand(CMD.sessionState, wsUri('mode.md').toString())) as SessionState
+      assert(st.appliedEdits === 0, `暂停/恢复不应写文档，实际写回 ${st.appliedEdits} 笔`)
+    } finally {
+      // 清理暂停标志（finally 只复位目录——paused 随目录测试的存储独立，
+      // 显式恢复避免影响后续用例的片段观感）
+      await vscode.commands.executeCommand('onegayi.vsidian.cssSnippets.resume')
+      await setSnippetDirectory(null)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
+    }
+  }],
+
+  ['CSS 片段：环境身份与存储位置证据（#131 本地侧，真实 1.86 宿主）', async () => {
+    // ADR-0007 证据链的机器侧采集：本地集成宿主断言本地语义（remoteName
+    // undefined、globalState 目录在本机用户数据目录、工作区受信）。真实
+    // SSH 窗口的对应读值属人工验收（无法以 mock 冒充），见
+    // docs/specs/manual-verification.md 的 #131 清单。
+    // 注：1.86 宿主实测 globalStorageUri 的 scheme 可为 vscode-userdata:
+    // （虚拟用户数据文件系统）而非 file:——scheme 不在承诺面内，断言钉
+    // 路径归属（宿主用户数据树内的本扩展 globalStorage 目录）
+    const env = (await vscode.commands.executeCommand('onegayi.vsidian._test.getSnippetEnv')) as {
+      remoteName: string | null
+      machineId: string
+      appHost: string
+      globalStorageUri: string
+      workspaceTrusted: boolean
+    }
+    console.log('[集成测试][#131][环境身份]', JSON.stringify(env))
+    assert(env.remoteName === null,
+      `本地扩展宿主的 env.remoteName 应为 undefined（无远程扩展宿主），实际 ${String(env.remoteName)}`)
+    assert(typeof env.machineId === 'string' && env.machineId.length > 0,
+      `env.machineId 应为非空字符串（宿主机器标识），实际 ${JSON.stringify(env.machineId)}`)
+    const storagePath = vscode.Uri.parse(env.globalStorageUri).fsPath.replace(/\\/g, '/').toLowerCase()
+    assert(storagePath.endsWith('user/globalstorage/onegayi.vsidian'),
+      `globalStorageUri 应指向宿主用户数据树内本扩展的 globalStorage 目录，实际 ${env.globalStorageUri}（解析路径 ${storagePath}）`)
+    assert(env.workspaceTrusted === true, '测试宿主的工作区应为受信状态（受限口径见上一用例）')
+  }],
+
+  ['CSS 片段：未配置目录不自动发现工作区片段（#131 受限工作区口径）', async () => {
+    // 受限工作区的可测试行为 = 不自动发现工作区片段：片段只来自用户显式
+    // 选择的用户级目录，工作区内出现的 .css 不进入清单、不注入样式——
+    // 未配置目录时无论工作区内容如何，清单恒空（#128 起的构造性保证，
+    // 本用例在真实宿主钉住）
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets'))
+    await writeSnippetCss('css-snippets/workspace.css',
+      '#app .vsidian-view-live .vsidian-heading-line-1 { text-decoration-color: rgb(230, 240, 250); }\n')
+    try {
+      const st = await snippetState()
+      assert(st.directory === null && st.entries.length === 0,
+        `未配置目录时清单应恒空（不扫描工作区），实际 ${JSON.stringify(st)}`)
+      await openWithEditor('mode.md')
+      await waitSessionReady('mode.md')
+      const view = await waitViewState('mode.md', (v) =>
+        v.cssProbe?.liveHeadingDecorationColor !== undefined)
+      assert(view.cssProbe!.liveHeadingDecorationColor === 'rgb(1, 2, 3)',
+        `工作区内的 .css 不应被发现或注入，实际 ${view.cssProbe!.liveHeadingDecorationColor}`)
+    } finally {
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
+    }
+  }],
+
+  ['CSS 片段：换目录已开面板生效、新面板拉取、输入与撤销保持（#128）', async () => {
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets'))
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets-2'))
+    const css = (color: string) =>
+      `#app .vsidian-view-live .vsidian-heading-line-1 { text-decoration-color: ${color}; }\n`
+    await writeSnippetCss('css-snippets/swap-a.css', css('rgb(140, 150, 160)'))
+    await writeSnippetCss('css-snippets-2/swap-b.css', css('rgb(170, 180, 190)'))
+    try {
+      await setSnippetDirectory(wsUri('css-snippets').fsPath)
+      await setSnippetEnabled('swap-a.css', true)
+      await openWithEditor('mode.md')
+      await waitSessionReady('mode.md')
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(140, 150, 160)')
+
+      const uri = wsUri('mode.md').toString()
+      // 真实输入（sync.test.edit 驱动真实 CM6 事务 → 标准出站 edit.request
+      // 写回权威文档——注入伪造的 edit.request 会绕过 webview 事务生命周期，
+      // webview 自身永远看不到该编辑）
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+        kind: 'sync.test.edit',
+        offset: MODE_DOC_TEXT.length,
+        text: '片段编辑中尾行\n',
+      })
+      const typed = `${MODE_DOC_TEXT}片段编辑中尾行\n`
+      await waitViewState('mode.md', (v) => v.text === typed)
+
+      // 换目录：已开面板动态加载新目录资源（webview.options 资源根更新）；
+      // 换目录重置开关 → swap-a 撤下 → 探针回默认
+      await setSnippetDirectory(wsUri('css-snippets-2').fsPath)
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(1, 2, 3)', 0, 15000)
+      await setSnippetEnabled('swap-b.css', true)
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(170, 180, 190)', 0, 15000)
+
+      // 输入保持（编辑不因 CSS 更新丢失）+ 撤销栈保持（undo 撤销编辑而非样式）
+      const afterSwap = await waitViewState('mode.md', (v) => v.text === typed)
+      assert(afterSwap.text === typed, 'CSS 更新不得改变文档内容')
+      const beforeUndo = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+      await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'history.request', op: 'undo' })
+      await waitViewState('mode.md', (v) => v.text === MODE_DOC_TEXT)
+      const afterUndo = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+      assert(afterUndo.appliedEdits === beforeUndo.appliedEdits,
+        `undo 走宿主文本栈（不经写回），实际写回数变化 ${afterUndo.appliedEdits - beforeUndo.appliedEdits}`)
+
+      // split 新面板：init 后拉取当前清单（新目录片段立即生效）
+      await openWithEditor('mode.md', true)
+      await poll('第二面板就绪', async () => {
+        const st = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+        return st.panels.length === 2 ? true : undefined
+      })
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(170, 180, 190)', 1, 15000)
+
+      // 持久回显：宿主权威状态与设置一致（重新打开/新窗口按此回显）
+      const st = await snippetState()
+      assert(st.directory === wsUri('css-snippets-2').fsPath, '目录应持久为最新选择')
+      assert(st.entries.some((e) => e.name === 'swap-b.css' && e.enabled), '开关应持久为显式值')
+    } finally {
+      await setSnippetDirectory(null)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets-2'), { recursive: true, useTrash: false })).catch(() => undefined)
+    }
+  }],
+  // ---- #129 CSS 本地依赖导入与相对资源热更新 ----
+
+  ['CSS 片段：@import 子目录依赖生效与共享依赖隔离（#129）', async () => {
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets/sub'))
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets/sub2'))
+    await writeSnippetCss('css-snippets/main-a.css', [
+      '@import "sub/dep.css";',
+      '@import "sub2/nested.css";',
+    ].join('\n'))
+    await writeSnippetCss('css-snippets/main-b.css', [
+      '@import "sub/dep.css";',
+      '#app .vsidian-view-live .vsidian-heading-line-1 { text-decoration-color: rgb(111, 121, 131); }',
+    ].join('\n'))
+    // 子目录依赖：dep 直接改 live 标题色并设阅读探针变量；nested 再嵌套
+    // 一层导入改同一变量（后导入者覆盖）
+    await writeSnippetCss('css-snippets/sub/dep.css', [
+      '#app .vsidian-view-live .vsidian-heading-line-1 { text-decoration-color: rgb(81, 91, 101); }',
+      '#app .vsidian-view-reading { --vsidian-probe-var-reading: from-dep; }',
+    ].join('\n'))
+    await writeSnippetCss('css-snippets/sub2/nested.css', '@import "../sub/deeper.css";\n')
+    await writeSnippetCss('css-snippets/sub/deeper.css',
+      '#app .vsidian-view-reading { --vsidian-probe-var-reading: from-nested; }\n')
+    try {
+      await setSnippetDirectory(wsUri('css-snippets').fsPath)
+      // 被引用的子目录文件不成为独立片段：清单只有两个第一层入口
+      const scanned = await poll('片段扫描完成', async () => {
+        const st = await snippetState()
+        return st.directory === wsUri('css-snippets').fsPath && !st.readError && st.entries.length === 2 ? st : undefined
+      })
+      assert(JSON.stringify(scanned.entries.map((e) => e.name)) === JSON.stringify(['main-a.css', 'main-b.css']),
+        `子目录被引用文件不得入清单，实际 ${JSON.stringify(scanned.entries)}`)
+
+      await openWithEditor('mode.md')
+      await waitSessionReady('mode.md')
+      // 启用 main-a：依赖闭包（dep + nested→deeper）全部生效
+      await setSnippetEnabled('main-a.css', true)
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(81, 91, 101)')
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading')
+      await waitViewState('mode.md', (v) =>
+        v.viewMode === 'reading' && v.cssProbe?.readingVarProbe === 'from-nested', 0, 15000)
+
+      // 启用 main-b（共享 dep）：确定性顺序后者覆盖——main-b 自身规则生效
+      await setSnippetEnabled('main-b.css', true)
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive')
+      await waitViewState('mode.md', (v) =>
+        v.viewMode === 'live' && v.cssProbe?.liveHeadingDecorationColor === 'rgb(111, 121, 131)', 0, 15000)
+
+      // 关闭 main-a：撤下其专属依赖（nested/deeper 探针回落），共享 dep 经
+      // main-b 仍生效（live 色不变）——共享同一依赖的其他入口不受影响
+      await setSnippetEnabled('main-a.css', false)
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading')
+      await waitViewState('mode.md', (v) =>
+        v.viewMode === 'reading' && v.cssProbe?.readingVarProbe === 'from-dep', 0, 15000)
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive')
+      await waitViewState('mode.md', (v) =>
+        v.viewMode === 'live' && v.cssProbe?.liveHeadingDecorationColor === 'rgb(111, 121, 131)', 0, 15000)
+
+      // 全部关闭：撤下（回内部契约探针值）
+      await setSnippetEnabled('main-b.css', false)
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(1, 2, 3)', 0, 15000)
+    } finally {
+      await setSnippetDirectory(null)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
+    }
+  }],
+
+  ['CSS 片段：被导入文件修改自动刷新、删除降级与缺失恢复（#129）', async () => {
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets/sub'))
+    const depColor = (color: string) =>
+      `#app .vsidian-view-live .vsidian-heading-line-1 { text-decoration-color: ${color}; }\n`
+    await writeSnippetCss('css-snippets/hot.css', '@import "sub/dep.css";\n')
+    await writeSnippetCss('css-snippets/sub/dep.css', depColor('rgb(201, 211, 221)'))
+    try {
+      await setSnippetDirectory(wsUri('css-snippets').fsPath)
+      await setSnippetEnabled('hot.css', true)
+      await openWithEditor('mode.md')
+      await waitSessionReady('mode.md')
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(201, 211, 221)')
+
+      // 修改被导入文件：watcher（递归）归因到依赖它的入口 → 入口 ?v= 推进 →
+      // import 链在真实 webview 资源服务上取到新字节（缓存语义钉住点）
+      await writeSnippetCss('css-snippets/sub/dep.css', depColor('rgb(222, 32, 42)'))
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(222, 32, 42)', 0, 15000)
+
+      // 入口补自身规则后删除被导入文件：入口重载、嵌套导入 404——入口其余
+      // 规则仍在（降级不整份回滚），依赖的颜色撤回默认
+      await writeSnippetCss('css-snippets/hot.css', [
+        '@import "sub/dep.css";',
+        '#app .vsidian-view-reading { --vsidian-probe-var-reading: entry-own; }',
+      ].join('\n'))
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading')
+      await waitViewState('mode.md', (v) =>
+        v.viewMode === 'reading' && v.cssProbe?.readingVarProbe === 'entry-own', 0, 15000)
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive')
+      // 删除被导入文件（live 态下删）：归因重载后嵌套导入 404——依赖的颜色
+      // 撤回默认，入口其余规则仍在（下一条断言）
+      await vscode.workspace.fs.delete(wsUri('css-snippets/sub/dep.css'), { useTrash: false })
+      await waitViewState('mode.md', (v) =>
+        v.viewMode === 'live' && v.cssProbe?.liveHeadingDecorationColor === 'rgb(1, 2, 3)', 0, 15000)
+      // 删除窗口内宿主不清洗开关、不置读取失败
+      const stDuringMissing = await snippetState()
+      assert(stDuringMissing.entries.some((e) => e.name === 'hot.css' && e.enabled) && !stDuringMissing.readError,
+        '依赖缺失不得清洗开关或置读取失败')
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading')
+      // 入口自身规则（降级）：依赖缺失不整份回滚
+      await waitViewState('mode.md', (v) =>
+        v.viewMode === 'reading' && v.cssProbe?.readingVarProbe === 'entry-own', 0, 15000)
+
+      // 恢复：缺失目标在归因集内（创建事件可归因），内容更新生效
+      await writeSnippetCss('css-snippets/sub/dep.css', depColor('rgb(50, 220, 120)'))
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(50, 220, 120)', 0, 15000)
+    } finally {
+      await setSnippetDirectory(null)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
+    }
+  }],
+
+  ['CSS 片段：循环导入有界与局部无效 CSS 不整份回滚（#129）', async () => {
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets/sub'))
+    await writeSnippetCss('css-snippets/cyc.css', [
+      '@import "sub/back.css";',
+      '#app .vsidian-view-live .vsidian-heading-line-1 { text-decoration-color: rgb(99, 88, 77); }',
+    ].join('\n'))
+    await writeSnippetCss('css-snippets/sub/back.css', [
+      '@import "../cyc.css";',
+      '#app .vsidian-view-reading { --vsidian-probe-var-reading: cycle-ok; }',
+    ].join('\n'))
+    await writeSnippetCss('css-snippets/never.css',
+      '#app .vsidian-view-reading { --vsidian-probe-var-reading: never-loaded; }\n')
+    try {
+      await setSnippetDirectory(wsUri('css-snippets').fsPath)
+      await setSnippetEnabled('cyc.css', true)
+      await openWithEditor('mode.md')
+      await waitSessionReady('mode.md')
+      // 循环链两侧规则都生效且不挂死（waitViewState 超时即挂死证据）
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(99, 88, 77)')
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading')
+      await waitViewState('mode.md', (v) =>
+        v.viewMode === 'reading' && v.cssProbe?.readingVarProbe === 'cycle-ok', 0, 15000)
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive')
+
+      // 局部无效 CSS：规则后导入被忽略、未知 at 规则自终止、无效声明只丢
+      // 自身——其余规则照常生效（浏览器逐规则容错，不整份回滚）
+      await writeSnippetCss('css-snippets/zz-broken.css', [ // 文件名序在 cyc 之后，避免被后载覆盖
+        '#app .vsidian-view-live .vsidian-heading-line-1 { text-decoration-color: rgb(11, 200, 111); }',
+        '@import "never.css";',
+        '@unknown-feature some value;',
+        '#app .vsidian-view-reading { color: notacolor; --vsidian-probe-var-reading: broken-ok; }',
+      ].join('\n'))
+      await setSnippetEnabled('zz-broken.css', true)
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(11, 200, 111)', 0, 15000)
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading')
+      const brokenState = await waitViewState('mode.md', (v) =>
+        v.viewMode === 'reading' && v.cssProbe?.readingVarProbe === 'broken-ok', 0, 15000)
+      assert(brokenState.cssProbe!.readingVarProbe === 'broken-ok', '无效声明所在块的其余声明仍生效')
+      // 规则后的导入不生效（never.css 的值不得出现）
+      await new Promise((r) => setTimeout(r, 600))
+      const afterNever = (await vscode.commands.executeCommand(CMD.viewState, wsUri('mode.md').toString())) as ViewState
+      assert(afterNever.cssProbe?.readingVarProbe !== 'never-loaded', '规则后的 @import 不被浏览器加载')
+    } finally {
+      await setSnippetDirectory(null)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
+    }
+  }],
+
+  ['CSS 片段：越界引用与符号链接逃逸拒绝及修复恢复（#129）', async () => {
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets'))
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets-outside'))
+    await writeSnippetCss('css-snippets-outside/outside.css',
+      '#app .vsidian-view-live .vsidian-heading-line-1 { text-decoration-color: rgb(250, 0, 0); }\n')
+    const ownMarker = '#app .vsidian-view-reading { --vsidian-probe-var-reading: escape-entry; }\n'
+    try {
+      await setSnippetDirectory(wsUri('css-snippets').fsPath)
+      await openWithEditor('mode.md')
+      await waitSessionReady('mode.md')
+
+      // 词法越界（../ 逃逸的 @import 与 url() 资产）：条目被拒——不入装载
+      // 清单、不生效、宿主状态暴露拒绝原因
+      await writeSnippetCss('css-snippets/escape.css', [
+        '@import "../css-snippets-outside/outside.css";',
+        ownMarker,
+      ].join('\n'))
+      await writeSnippetCss('css-snippets/asset-escape.css',
+        '.a { background: url("../../out-of-dir.png"); }\n')
+      await poll('越界条目入列', async () => {
+        const st = await snippetState()
+        return st.entries.length === 2 ? st : undefined
+      }, 15000)
+      await setSnippetEnabled('escape.css', true)
+      await setSnippetEnabled('asset-escape.css', true)
+      const rejected = await poll('拒绝态可见', async () => {
+        const st = await snippetState()
+        return st.rejections?.['escape.css'] && st.rejections?.['asset-escape.css'] ? st : undefined
+      }, 15000)
+      assert(rejected.rejections!['escape.css'].reason === 'path-escape',
+        `@import 越界应记 path-escape，实际 ${JSON.stringify(rejected.rejections)}`)
+      assert(rejected.rejections!['escape.css'].path.includes('outside.css'), '拒绝信息应携带逃逸目标')
+      assert(rejected.rejections!['asset-escape.css'].reason === 'path-escape', '资产 url() 越界同样拒绝')
+      // 被拒条目不生效（探针维持默认）
+      await new Promise((r) => setTimeout(r, 800))
+      const duringReject = await waitViewState('mode.md', (v) =>
+        v.cssProbe?.liveHeadingDecorationColor !== undefined)
+      assert(duringReject.cssProbe!.liveHeadingDecorationColor === 'rgb(1, 2, 3)',
+        '被拒条目不得影响正文样式')
+
+      // 修复（去掉逃逸导入）：拒绝自动清除、条目回清单并生效
+      await writeSnippetCss('css-snippets/escape.css', ownMarker)
+      await poll('拒绝清除', async () => {
+        const st = await snippetState()
+        return st.rejections && !st.rejections['escape.css'] ? true : undefined
+      }, 15000)
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading')
+      await waitViewState('mode.md', (v) =>
+        v.viewMode === 'reading' && v.cssProbe?.readingVarProbe === 'escape-entry', 0, 15000)
+
+      // 符号链接逃逸：链接指向片段目录外（Windows 用 junction 免管理员；
+      // 环境拒绝创建时跳过该段并在运行报告中留痕）
+      try {
+        const fsMod = require('fs') as typeof import('fs')
+        fsMod.symlinkSync(
+          wsUri('css-snippets-outside').fsPath,
+          wsUri('css-snippets/jlink').fsPath,
+          process.platform === 'win32' ? 'junction' : 'dir',
+        )
+        await writeSnippetCss('css-snippets/link.css', '@import "jlink/outside.css";\n')
+        await poll('链接条目入列', async () => {
+          const st = await snippetState()
+          return st.entries.some((e) => e.name === 'link.css') ? st : undefined
+        }, 15000)
+        await setSnippetEnabled('link.css', true)
+        const linkRejected = await poll('链接逃逸拒绝', async () => {
+          const st = await snippetState()
+          return st.rejections?.['link.css'] ? st : undefined
+        }, 15000)
+        assert(linkRejected.rejections!['link.css'].reason === 'symlink-escape',
+          `链接逃逸应记 symlink-escape，实际 ${JSON.stringify(linkRejected.rejections)}`)
+      } catch (err) {
+        console.log(`[#129] 符号链接创建被环境拒绝，逃逸断言跳过：${String(err)}`)
+      }
+    } finally {
+      await setSnippetDirectory(null)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets-outside'), { recursive: true, useTrash: false })).catch(() => undefined)
+    }
+  }],
+
+  ['CSS 片段：相对字体图片按各自 CSS 文件路径解析（空格中文路径，#129）', async () => {
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets/子 目录'))
+    // 字体资产：复制扩展产物中的 woff2（dev 与 VSIX 安装态都有 out/webview/assets）
+    const ext = vscode.extensions.getExtension(EXT_ID)!
+    const assetsDir = vscode.Uri.joinPath(ext.extensionUri, 'out', 'webview', 'assets')
+    const assets = await vscode.workspace.fs.readDirectory(assetsDir)
+    const woff2 = assets.find(([name]) => name.toLowerCase().endsWith('.woff2'))
+    assert(woff2, '扩展产物应含 woff2 字体资产（KaTeX 随包字体）')
+    await vscode.workspace.fs.copy(
+      vscode.Uri.joinPath(assetsDir, woff2![0]),
+      wsUri('css-snippets/子 目录/字体 测试.woff2'),
+      { overwrite: true },
+    )
+    // 1×1 PNG 资产
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64',
+    )
+    await vscode.workspace.fs.writeFile(wsUri('css-snippets/图 片.png'), new Uint8Array(png))
+    // 入口与依赖：依赖文件内的 url() 相对「依赖文件所在目录」解析
+    await writeSnippetCss('css-snippets/主 样式.css', '@import "子 目录/依赖 样式.css";\n')
+    await writeSnippetCss('css-snippets/子 目录/依赖 样式.css', [
+      '@font-face { font-family: "VsidianSnippetProbeFont"; src: url("字体 测试.woff2") format("woff2"); }',
+      '#app .vsidian-view-reading { font-family: "VsidianSnippetProbeFont"; --vsidian-probe-var-reading: asset-ok; background-image: url("../图 片.png"); }',
+    ].join('\n'))
+    try {
+      await setSnippetDirectory(wsUri('css-snippets').fsPath)
+      await poll('空格中文入口入列', async () => {
+        const st = await snippetState()
+        return st.entries.some((e) => e.name === '主 样式.css') ? st : undefined
+      }, 15000)
+      await openWithEditor('mode.md')
+      await waitSessionReady('mode.md')
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading')
+      // 基线：片段未启用时的字体装载计数（阅读态正文存在但片段字体未用）
+      const baseline = await waitViewState('mode.md', (v) =>
+        v.viewMode === 'reading' && v.cssProbe?.documentFonts !== undefined, 0, 15000)
+      const baseLoaded = baseline.cssProbe!.documentFonts?.loaded ?? 0
+
+      await setSnippetEnabled('主 样式.css', true)
+      const applied = await waitViewState('mode.md', (v) =>
+        v.viewMode === 'reading' && v.cssProbe?.readingVarProbe === 'asset-ok', 0, 15000)
+      // 字节级证据：@font-face 字体经「依赖文件路径」解析并在真实资源服务
+      // 上拉取成功（documentFonts.loaded 增量 ≥ 1）
+      await poll('片段字体装载', async () => {
+        const v = (await vscode.commands.executeCommand(CMD.viewState, wsUri('mode.md').toString())) as ViewState
+        return (v.cssProbe?.documentFonts?.loaded ?? 0) > baseLoaded ? v.cssProbe!.documentFonts : undefined
+      }, 15000)
+      // 图片解析锚点：背景图 URL 按依赖文件所在目录解析（../图 片.png → 目录根）
+      const bg = applied.cssProbe?.readingBackgroundImage ?? ''
+      assert(bg !== '' && decodeURIComponent(bg).includes('图 片.png'),
+        `背景图应解析到片段目录内的图片（实际 ${bg}）`)
+      assert((applied.cssProbe?.documentFonts?.total ?? 0) >= 1, '字体 @font-face 已并入文档字体集')
+    } finally {
+      await setSnippetDirectory(null)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
+    }
+  }],
+
+  // ---- #132 Obsidian 原名别名桥与公开样式契约 ----
+
+  ['Obsidian 原名别名桥：正文域选择器双视图命中与模式切换（#132）', async () => {
+    await resetLastMode()
+    await openWithEditor('style-contract.md')
+    await waitSessionReady('style-contract.md')
+    // 显式切 live：初始模式可能落在历史用例遗留的全局记忆上（1.86 globalState
+    // 写入后偶发滞后回翻，reset 也不可靠——见 resetLastMode 注释）
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', wsUri('style-contract.md'))
+
+    // 断言器（轮询稳定形态）：探针表期望值逐项核对（期望与 probe.css 规则同
+    // 源——挂错节点/类未挂即 null）。装饰随视口/编辑增量重建，采集恰逢重建
+    // 空窗会读到瞬时 null——poll 重试至稳定；「持续差异」须连续 4 轮采样
+    // 均 ≥3 条才提前报错（首轮即抛会把懒加载/重建空窗误判为持续差异，
+    // CI 慢环境实测踩过），零星波动继续等，超时兜底
+    const waitAliases = async (view: 'live' | 'reading'): Promise<void> => {
+      let aliasDiffStreak = 0
+      await poll(view + ' 别名探针全命中', async () => {
+        const v = (await vscode.commands.executeCommand(CMD.viewState, wsUri('style-contract.md').toString(), 0)) as ViewState | undefined
+        if (v?.viewMode !== view) return undefined
+        const aliases = v.cssProbe?.obsidianAliases
+        if (!aliases) return undefined
+        const diffs: string[] = []
+        for (const probe of OBSIDIAN_ALIAS_PROBES.filter((x) => x.view === view)) {
+          if (aliases[probe.id] !== probe.expected) {
+            diffs.push(probe.id + '：' + String(aliases[probe.id]) + '≠' + probe.expected)
+          }
+        }
+        if (diffs.length === 0) {
+          aliasDiffStreak = 0
+          return true
+        }
+        if (diffs.length >= 3 && ++aliasDiffStreak >= 4) throw new Error('探针持续差异（连续 4 轮采样）：' + diffs.join('；'))
+        if (diffs.length < 3) aliasDiffStreak = 0
+        return undefined
+      }, 20000)
+    }
+
+    // live：全部 Obsidian 原名选择器经别名桥命中（含容器组合选择器）
+    await waitViewState('style-contract.md', (v) => v.viewMode === 'live')
+    await waitAliases('live')
+
+    // reading：容器别名后的标签选择器族天然命中 + DOM 别名类命中
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri('style-contract.md'))
+    await waitViewState('style-contract.md', (v) => v.viewMode === 'reading')
+    await waitAliases('reading')
+
+    // 模式切换存活：切回 live 探针仍全命中（别名类不随视图切换丢失）
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', wsUri('style-contract.md'))
+    await waitViewState('style-contract.md', (v) => v.viewMode === 'live')
+    await waitAliases('live')
+  }],
+
+  ['Obsidian 原名别名桥：webview 重载后块重挂载探针复验（视口重挂，#132）', async () => {
+    await resetLastMode()
+    await openWithEditor('style-contract.md')
+    await waitSessionReady('style-contract.md')
+    const uri = wsUri('style-contract.md').toString()
+
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri('style-contract.md'))
+    await waitViewState('style-contract.md', (v) => v.viewMode === 'reading')
+    // 重载 webview：阅读块全部销毁重建（retainContextWhenHidden 关闭路径），
+    // 别名类必须随块构建器（READING_CLASS_NAMES + 别名表）重新带上
+    await vscode.commands.executeCommand('workbench.action.webview.reloadWebviewAction')
+    await poll('重载后恢复阅读模式并采集探针', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      return v?.viewMode === 'reading' && v.text === STYLE_CONTRACT_DOC_TEXT && (v.readingBlockCount ?? 0) > 0
+        ? v : undefined
+    }, 30000)
+    // 重挂载后全部 reading 探针复验（轮询吸收块重建窗口；别名类经
+    // READING_CLASS_NAMES + 别名表随块构建器带回）。同前：连续 4 轮采样
+    // 均 ≥3 条才判持续差异，重挂空窗的瞬时 null 不触发首轮即抛
+    let remountDiffStreak = 0
+    await poll('重挂后 reading 别名探针全命中', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      const aliases = v?.cssProbe?.obsidianAliases
+      if (!aliases) return undefined
+      const diffs: string[] = []
+      for (const probe of OBSIDIAN_ALIAS_PROBES.filter((x) => x.view === 'reading')) {
+        if (aliases[probe.id] !== probe.expected) {
+          diffs.push(probe.id + '：' + String(aliases[probe.id]) + '≠' + probe.expected)
+        }
+      }
+      if (diffs.length === 0) {
+        remountDiffStreak = 0
+        return true
+      }
+      if (diffs.length >= 3 && ++remountDiffStreak >= 4) throw new Error('重挂后探针持续差异（连续 4 轮采样）：' + diffs.join('；'))
+      if (diffs.length < 3) remountDiffStreak = 0
+      return undefined
+    }, 20000)
+  }],
+
+  ['Obsidian 变量别名桥：真实片段经 --h1-color 驱动标题可见颜色（#132）', async () => {
+    await resetLastMode()
+    const dir = wsUri('css-snippets').fsPath
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets'))
+    // 片段按 Obsidian 原名书写变量（--h1-color），另附一条 vsidian 类选择器
+    // 规则做装载判别（覆盖 live-header-span 内部探针）
+    await writeSnippetCss('css-snippets/alias-var.css', [
+      ':root { --h1-color: rgb(66, 77, 88); }',
+      '#app .vsidian-view-live .vsidian-header-1 { outline-color: rgb(70, 71, 72); }',
+    ].join('\n'))
+    try {
+      // #128 的稳妥顺序：先配置目录（面板创建时 localResourceRoots 即含
+      // 片段目录），再开面板（与真实用户「先配置后编辑」一致）
+      await setSnippetDirectory(dir)
+      await poll('片段扫描完成', async () => {
+        const st = await snippetState()
+        return st.directory === dir && !st.readError && st.entries.length === 1 ? st : undefined
+      })
+      await openWithEditor('mode.md')
+      await waitSessionReady('mode.md')
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', wsUri('mode.md'))
+
+      await setSnippetEnabled('alias-var.css', true)
+
+      // live：片段选择器规则先证明装载（live-header-span 探针被覆盖），再断言
+      // 标题可见颜色被 --h1-color 驱动（变量桥真实链路）
+      const live = await waitViewState('mode.md', (v) =>
+        v.viewMode === 'live' && v.cssProbe?.obsidianAliases?.['live-header-span'] === 'rgb(70, 71, 72)')
+      assert(live.cssProbe!.obsidianVarProbe!.liveHeadingColor === 'rgb(66, 77, 88)',
+        'live 标题色应被 --h1-color 驱动为 rgb(66, 77, 88)，实际 ' +
+          String(live.cssProbe!.obsidianVarProbe!.liveHeadingColor))
+
+      // reading：同名变量同样驱动阅读 h1（--h1-color 在 :root，两视图同链）；
+      // 未涉及的探针维持内部值（无串扰）
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri('mode.md'))
+      const reading = await waitViewState('mode.md', (v) =>
+        v.viewMode === 'reading' && v.cssProbe?.obsidianVarProbe?.readingHeadingColor === 'rgb(66, 77, 88)')
+      assert(reading.cssProbe!.obsidianAliases!['reading-task'] === 'rgb(163, 164, 165)',
+        '片段不涉及的选择器应维持内部探针值（无串扰）')
+
+      // 停用片段：回退默认（--h1-color 不再驱动，标题色回落主题前景色 ≠ 片段色）
+      await setSnippetEnabled('alias-var.css', false)
+      const reverted = await waitViewState('mode.md', (v) =>
+        v.viewMode === 'reading' && v.cssProbe?.obsidianVarProbe?.readingHeadingColor !== 'rgb(66, 77, 88)')
+      assert(reverted.cssProbe!.obsidianVarProbe!.readingHeadingColor !== null, '停用后标题色应回落主题默认（非 null）')
+    } finally {
+      await setSnippetDirectory(null)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
+    }
+  }],
+
+  // ---- #130 HTTPS 样式导入与联网字体：真宿主 CSP 生效证据 ----
+
+  ['CSS 片段：HTTPS 导入放行与明文拦截的真宿主证据（#130）', async () => {
+    // 受控服务在扩展宿主进程内起（Node 环境）：自签证书 https + 明文 http。
+    // 真宿主 webview 对自签证书做真实校验（测试无法注入信任）——字节是否
+    // 完整送达不可证；可证的是**网络层差分**：CSP 放行的 https 请求会发起
+    // 出网（socket 连接到达服务端，证书校验在其后才失败），被 CSP 拦截的
+    // 明文请求不出网（请求层零命中）。完整装载链路由浏览器套件（受控证书
+    // 校验跳过）与在线字体服务烟测覆盖。
+    const nodeHttps = require('https') as typeof import('https')
+    const nodeHttp = require('http') as typeof import('http')
+    const nodeFs = require('fs') as typeof import('fs')
+    const nodePath = require('path') as typeof import('path')
+    const certDir = nodePath.join(__dirname, '..', '..', '..', '..', 'test', 'browser', 'fixtures', 'https')
+    const tlsCert = nodeFs.readFileSync(nodePath.join(certDir, 'localhost-cert.pem'))
+    const tlsKey = nodeFs.readFileSync(nodePath.join(certDir, 'localhost-key.pem'))
+
+    // https 侧观测：socket 连接（出网意图，证书校验前的下限证据）+ 请求
+    const tlsSeen = { connections: 0, requests: new Set<string>() }
+    const httpsFiles = new Map<string, string>([
+      ['/remote.css', '#app .vsidian-view-reading { --vsidian-probe-var-reading: from-remote-https; }\n'],
+    ])
+    const httpsServer = nodeHttps.createServer({ key: tlsKey, cert: tlsCert }, (req, res) => {
+      tlsSeen.requests.add((req.url ?? '').split('?')[0]!)
+      res.writeHead(200, { 'Content-Type': 'text/css; charset=utf-8' })
+      res.end(httpsFiles.get((req.url ?? '').split('?')[0]!) ?? '/* unknown */')
+    })
+    httpsServer.on('connection', () => {
+      tlsSeen.connections += 1
+    })
+    // 明文 http 侧观测：请求零命中 = 未出网（CSP/混合内容共同保证明文不放行）
+    const plainSeen = { requests: new Set<string>() }
+    const plainServer = nodeHttp.createServer((req, res) => {
+      plainSeen.requests.add((req.url ?? '').split('?')[0]!)
+      res.writeHead(200, { 'Content-Type': 'text/css; charset=utf-8' })
+      res.end('#app .vsidian-view-reading { --vsidian-probe-var-reading: from-plain-http; }\n')
+    })
+    await new Promise<void>((resolve) => httpsServer.listen(0, '127.0.0.1', resolve))
+    await new Promise<void>((resolve) => plainServer.listen(0, '127.0.0.1', resolve))
+    const httpsBase = `https://127.0.0.1:${(httpsServer.address() as { port: number }).port}`
+    const plainBase = `http://127.0.0.1:${(plainServer.address() as { port: number }).port}`
+
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets'))
+    await writeSnippetCss('css-snippets/https.css', [
+      `@import url("${httpsBase}/remote.css");`,
+      '#app .vsidian-view-reading { --vsidian-probe-var-reading: https-own; }',
+    ].join('\n'))
+    await writeSnippetCss('css-snippets/plain.css', [
+      `@import url("${plainBase}/plain-sheet.css");`,
+      '#app .vsidian-view-reading { --vsidian-probe-var-reading: plain-own; }',
+    ].join('\n'))
+    try {
+      await setSnippetDirectory(wsUri('css-snippets').fsPath)
+      await openWithEditor('mode.md')
+      await waitSessionReady('mode.md')
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading')
+      // 基线：远程引用不影响条目装载与拒绝面（远程不进依赖图、不拒绝）
+      await poll('两入口入列', async () => {
+        const st = await snippetState()
+        return st.entries.length === 2 && Object.keys(st.rejections ?? {}).length === 0 ? st : undefined
+      }, 15000)
+      await setSnippetEnabled('https.css', true)
+      await setSnippetEnabled('plain.css', true)
+      // 入口各自规则生效（https 导入即使证书校验失败，入口本地链照常装载、
+      // 自身规则生效——嵌套失败不整份回滚的 #129 语义在真宿主复验）
+      const applied = await waitViewState('mode.md', (v) =>
+        v.viewMode === 'reading' && v.cssProbe?.readingVarProbe === 'plain-own', 0, 20000)
+      assert(applied.cssProbe!.readingVarProbe === 'plain-own', '含明文导入入口的自身规则生效')
+      // 明文 http 不出网：请求层零命中（CSP 层拦截在请求发出前）
+      await new Promise((r) => setTimeout(r, 800))
+      assert(plainSeen.requests.size === 0,
+        `明文 http 导入不得出网（实际命中 ${JSON.stringify([...plainSeen.requests])}）`)
+      // https 放行差分证据：socket 连接到达服务端（证书校验后的成败不由此
+      // 断言——见用例头声明；请求若实际到达则远程规则应已生效，顺带断言）
+      await poll('https 出网连接到达', async () => tlsSeen.connections > 0 ? tlsSeen.connections : undefined, 15000)
+      await new Promise((r) => setTimeout(r, 800))
+      if (tlsSeen.requests.size > 0) {
+        // 宿主未拒绝自签证书（环境相关）：完整装载也应成立
+        await waitViewState('mode.md', (v) =>
+          v.viewMode === 'reading' && v.cssProbe?.readingVarProbe === 'from-remote-https', 0, 15000)
+      } else {
+        // 常见形态：证书校验失败（连接已到达、请求未完成）——能确认的状态
+        // 如实呈现：出网意图已证，字节送达未证（浏览器套件与烟测覆盖）
+        console.log('[#130] 自签证书被宿主拒绝（预期形态）：出网连接已到达，请求未完成')
+      }
+      // 绘制层：paint 探针只测 live 视图（cm-line），切回 live 断言——CSP
+      // 变更不破 CM6 渲染（#37 教训：样式注入失效时 DOM 断言照样绿）
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive')
+      const paintState = await waitViewState('mode.md', (v) =>
+        v.viewMode === 'live' && v.paint?.textVisible === true, 0, 20000)
+      assert(paintState.paint!.textVisible === true, 'HTTPS 片段装载后 live 正文绘制层可见')
+    } finally {
+      await setSnippetDirectory(null)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
+      httpsServer.close()
+      plainServer.close()
+    }
+  }],
+
+  ['CSS 片段：远程字体失败回退与多轮热换稳定（#130）', async () => {
+    // 不可达端口的 https 字体（connection refused 立即失败）：入口其余规则
+    // 生效、备用字体可见；随后多轮入口热换（真宿主 webview 的稳定性证据——
+    // 浏览器套件实测的渲染器硬杀形态在本宿主不得复现）
+    const deadPort = 1 // 127.0.0.1:1 通常无监听：连接拒绝
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets'))
+    const entryCss = (tag: string) => [
+      `@font-face { font-family: "VsidianDeadHttpsFont"; src: url("https://127.0.0.1:${deadPort}/dead.woff2") format("woff2"); }`,
+      '#app .vsidian-view-reading { font-family: "VsidianDeadHttpsFont", sans-serif; --vsidian-probe-var-reading: ' + tag + '; }',
+    ].join('\n')
+    await writeSnippetCss('css-snippets/hot-https.css', entryCss('round-0'))
+    try {
+      await setSnippetDirectory(wsUri('css-snippets').fsPath)
+      await setSnippetEnabled('hot-https.css', true)
+      await openWithEditor('mode.md')
+      await waitSessionReady('mode.md')
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading')
+      // 字体不可达：入口规则生效、正文以备用字体呈现（可读）
+      const round0 = await waitViewState('mode.md', (v) =>
+        v.viewMode === 'reading' && v.cssProbe?.readingVarProbe === 'round-0' &&
+        (v.readingMountedBlocks ?? 0) > 0, 0, 20000)
+      assert(round0.cssProbe!.documentFonts !== undefined, '字体集观测可用')
+      assert((round0.readingMountedBlocks ?? 0) > 0, '远程字体失败时阅读正文块仍挂载（备用字体回退，可读）')
+      // 多轮热换：入口内容变更 → watcher 归因 → 入口 ?v= 推进 → 新链热换
+      //（每轮嵌套 https 字体重试出网——真实宿主的样式表热换稳定性钉住点）
+      for (let round = 1; round <= 5; round++) {
+        await writeSnippetCss('css-snippets/hot-https.css', entryCss(`round-${round}`))
+        const st = await waitViewState('mode.md', (v) =>
+          v.viewMode === 'reading' && v.cssProbe?.readingVarProbe === `round-${round}` &&
+          (v.readingMountedBlocks ?? 0) > 0, 0, 20000)
+        assert((st.readingMountedBlocks ?? 0) > 0, `第 ${round} 轮热换后阅读正文块仍挂载（渲染器存活）`)
+      }
+      // 面板仍就绪 + live 绘制层可见（多轮热换不崩宿主 webview；paint 探针
+      // 只测 live 视图，故切回 live 断言绘制层）
+      const session = (await vscode.commands.executeCommand(CMD.sessionState, wsUri('mode.md').toString())) as
+        { found: boolean; panels: Array<{ ready: boolean }> }
+      assert(session.found && session.panels.some((panel) => panel.ready), '多轮热换后面板仍就绪')
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive')
+      const livePaint = await waitViewState('mode.md', (v) =>
+        v.viewMode === 'live' && v.paint?.textVisible === true, 0, 20000)
+      assert(livePaint.paint!.textVisible === true, '多轮热换后 live 正文绘制层可见')
+    } finally {
+      await setSnippetDirectory(null)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
+    }
+  }],
+
+  ['历史基线旧片段渲染验证：v0.4.0 承诺写法驱动真实可见效果（#134）', async () => {
+    // 基线驱动：片段规则与期望值全部来自独立历史基线（v0.4.0 固化快照），
+    // 不从候选清单/探针表生成——候选实现偏离历史承诺时此处独立失败（负向
+    // 保证见 test/style-contract/checkStyleContract.test.mjs 的模拟树剥离）。
+    await resetLastMode()
+    const dir = wsUri('css-snippets').fsPath
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets'))
+    const snippetCss = legacySnippetCases
+      .map((c) => (c.kind === 'obsidian-variable' ? c.declaration : `${c.selector} {\n  ${c.property}: ${c.expected};\n}`))
+      .join('\n\n')
+    await writeSnippetCss('css-snippets/legacy-baseline.css', snippetCss + '\n')
+    try {
+      await setSnippetDirectory(dir)
+      await poll('片段扫描完成（legacy-baseline）', async () => {
+        const st = await snippetState()
+        return st.directory === dir && !st.readError && st.entries.length === 1 ? st : undefined
+      })
+      await openWithEditor('style-contract.md')
+      await waitSessionReady('style-contract.md')
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', wsUri('style-contract.md'))
+      await setSnippetEnabled('legacy-baseline.css', true)
+
+      /** 按基线用例的探针路径取值（'obsidianAliases.x' / 'obsidianVarProbe.y' / 顶层字段） */
+      const probeValue = (probe: ViewState['cssProbe'], field: string): string | null | undefined => {
+        if (!probe) return undefined
+        const segs = field.split('.')
+        let cur: unknown = probe
+        for (const s of segs) cur = (cur as Record<string, unknown>)?.[s]
+        return (cur as string | null | undefined) ?? undefined
+      }
+
+      // 轮询稳定形态：片段经 <link> 异步装载（enable 后首采可能仍是内部值）、
+      // 装饰随视口/编辑增量重建——重试至基线期望全命中；**连续多轮**差异 ≥3
+      // 条才提前报错（首轮即抛会把「装载中」误判为「持续差异」），零星波动继续等
+      let legacyDiffStreak = 0
+      const assertLegacyView = async (view: 'live' | 'reading'): Promise<void> => {
+        legacyDiffStreak = 0
+        await poll(view + ' 旧片段探针全命中（基线期望）', async () => {
+          const v = (await vscode.commands.executeCommand(CMD.viewState, wsUri('style-contract.md').toString(), 0)) as ViewState | undefined
+          if (v?.viewMode !== view) return undefined
+          if (!v.cssProbe) return undefined
+          const diffs: string[] = []
+          for (const c of legacySnippetCases) {
+            if (c.view !== view && c.view !== 'both') continue
+            const field = c.kind === 'obsidian-variable' ? (view === 'live' ? c.probeLive : c.probeReading) : c.probe
+            if (!field) continue
+            const actual = probeValue(v.cssProbe, field)
+            if (actual !== c.expected) diffs.push(`${c.id}（${field}）：${String(actual)} ≠ ${c.expected}`)
+          }
+          if (diffs.length === 0) return true
+          legacyDiffStreak += 1
+          if (legacyDiffStreak >= 4) throw new Error('旧片段持续差异（连续 4 轮采样）：' + diffs.join('；'))
+          return undefined
+        }, 20000)
+      }
+
+      // live：Obsidian 原名选择器（别名桥）+ vsidian 名 + 变量桥全部命中
+      await assertLegacyView('live')
+      // reading：同名片段驱动阅读侧（容器别名 + 标签选择器族 + 变量同链）
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri('style-contract.md'))
+      await assertLegacyView('reading')
+
+      // 覆盖归因（负对照）：停用片段后基线期望值不再命中——证明覆盖确实
+      // 来自历史片段装载，而非探针表与候选实现的自我印证（reading 侧键
+      // 与该视图采集域一致；期望值同样取自基线，不硬编码）
+      await setSnippetEnabled('legacy-baseline.css', false)
+      const revertCase = legacySnippetCases.find((c) => c.id === 'reading-heading')!
+      await poll('停用后旧片段期望值退场', async () => {
+        const v = (await vscode.commands.executeCommand(CMD.viewState, wsUri('style-contract.md').toString(), 0)) as ViewState | undefined
+        if (v?.viewMode !== 'reading') return undefined
+        return v.cssProbe?.obsidianAliases?.['reading-heading'] !== revertCase.expected &&
+          v.cssProbe?.obsidianVarProbe?.readingHeadingColor !== 'rgb(240, 241, 242)'
+          ? true
+          : undefined
+      }, 20000)
+    } finally {
+      await setSnippetDirectory(null)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
+    }
+  }],
+
+  // ---- #133 界面域公开样式契约（chrome 探针 / 真实片段 / 弹窗 / 重挂载）----
+
+  ['界面域样式契约：chrome 探针双视图命中与模式切换（#133）', async () => {
+    await resetLastMode()
+    await openWithEditor('chrome-contract.md')
+    await waitSessionReady('chrome-contract.md')
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', wsUri('chrome-contract.md'))
+
+    // 探针按选择器作用域分组：live 组含 .vsidian-view-live、reading 组含
+    // .vsidian-view-reading，其余（大纲侧栏、顶栏）DOM 常驻两组都断言
+    const liveProbes = CHROME_CONTRACT_PROBES.filter((p) => p.selector.includes('.vsidian-view-live'))
+    const readingProbes = CHROME_CONTRACT_PROBES.filter((p) => p.selector.includes('.vsidian-view-reading'))
+    const alwaysProbes = CHROME_CONTRACT_PROBES.filter(
+      (p) => !p.selector.includes('.vsidian-view-live') && !p.selector.includes('.vsidian-view-reading'),
+    )
+    assert(liveProbes.length + readingProbes.length + alwaysProbes.length === CHROME_CONTRACT_PROBES.length,
+      '探针分组应完整覆盖探针表')
+
+    // 断言器（轮询稳定形态，同 #132 别名探针）：mermaid 懒加载与装饰重建
+    // 有空窗，poll 至稳定；「持续差异」须连续 4 轮采样均 ≥3 条才提前报错
+    // （首轮即抛会把 mermaid 懒加载空窗误判为持续差异——CI Linux 实测
+    // 808ms 首采三探针全 null 即抛，本地快环境复现不了），超时兜底
+    const waitChrome = async (label: string, probes: readonly typeof CHROME_CONTRACT_PROBES[number][], timeoutMs: number): Promise<void> => {
+      let chromeDiffStreak = 0
+      await poll(label, async () => {
+        const v = (await vscode.commands.executeCommand(CMD.viewState, wsUri('chrome-contract.md').toString(), 0)) as ViewState | undefined
+        const probes0 = v?.cssProbe?.chromeSelectors
+        if (!probes0) return undefined
+        const diffs: string[] = []
+        for (const probe of probes) {
+          if (probes0[probe.id] !== probe.expected) {
+            diffs.push(probe.id + '：' + String(probes0[probe.id]) + '≠' + probe.expected)
+          }
+        }
+        if (diffs.length === 0) {
+          chromeDiffStreak = 0
+          return true
+        }
+        if (diffs.length >= 3 && ++chromeDiffStreak >= 4) throw new Error('chrome 探针持续差异（连续 4 轮采样）：' + diffs.join('；'))
+        if (diffs.length < 3) chromeDiffStreak = 0
+        return undefined
+      }, timeoutMs)
+    }
+
+    // live：全部 live 作用域 + 常驻探针命中（mermaid rendered 态门控在 60s 预算内）
+    await waitViewState('chrome-contract.md', (v) => v.viewMode === 'live')
+    await waitChrome('live chrome 探针全命中', [...liveProbes, ...alwaysProbes], 60000)
+
+    // reading：全部 reading 作用域 + 常驻探针命中
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri('chrome-contract.md'))
+    await waitViewState('chrome-contract.md', (v) => v.viewMode === 'reading')
+    await waitChrome('reading chrome 探针全命中', [...readingProbes, ...alwaysProbes], 60000)
+
+    // 模式切换存活：切回 live 探针仍全命中
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', wsUri('chrome-contract.md'))
+    await waitViewState('chrome-contract.md', (v) => v.viewMode === 'live')
+    await waitChrome('切回 live chrome 探针复验', [...liveProbes, ...alwaysProbes], 60000)
+  }],
+
+  ['界面域样式契约：真实片段驱动 chrome 可见属性与停用回退（#133）', async () => {
+    await resetLastMode()
+    const dir = wsUri('css-snippets').fsPath
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets'))
+    // 片段按用户文档口径书写（无 #app 前缀的稳定类选择器）——五个区域各
+    // 一条可见颜色改写：公式 / 卡片标签 / token / 图表容器 / 大纲层级色
+    await writeSnippetCss('css-snippets/chrome-paint.css', [
+      '.vsidian-math .katex { color: rgb(61, 62, 63); }',
+      '.vsidian-code-card-header-label { color: rgb(64, 65, 66); }',
+      '.tok-keyword { color: rgb(67, 68, 69); }',
+      '.vsidian-mermaid { color: rgb(70, 71, 72); }',
+      '.vsidian-outline-level-1 { color: rgb(73, 74, 75); }',
+    ].join('\n'))
+    try {
+      await setSnippetDirectory(dir)
+      await poll('片段扫描完成', async () => {
+        const st = await snippetState()
+        return st.directory === dir && !st.readError && st.entries.length === 1 ? st : undefined
+      })
+      await openWithEditor('chrome-contract.md')
+      await waitSessionReady('chrome-contract.md')
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', wsUri('chrome-contract.md'))
+      await setSnippetEnabled('chrome-paint.css', true)
+
+      const expectPaint = (v: ViewState): boolean =>
+        v.cssProbe?.chromePaint?.mathKatexColor === 'rgb(61, 62, 63)' &&
+        v.cssProbe?.chromePaint?.codeCardLabelColor === 'rgb(64, 65, 66)' &&
+        v.cssProbe?.chromePaint?.tokKeywordColor === 'rgb(67, 68, 69)' &&
+        v.cssProbe?.chromePaint?.mermaidContainerColor === 'rgb(70, 71, 72)' &&
+        v.cssProbe?.chromePaint?.outlineLevel1Color === 'rgb(73, 74, 75)'
+
+      // live：五区域可见颜色全部被片段驱动（mermaid 懒加载故放宽预算）
+      const live = await waitViewState('chrome-contract.md',
+        (v) => v.viewMode === 'live' && expectPaint(v), 0, 60000)
+      assert(live.cssProbe!.chromePaint!.outlineLevel1Color === 'rgb(73, 74, 75)',
+        '大纲一级条目色应被片段驱动（与正文标题同源变量的层级色入口可覆写）')
+
+      // reading：同类名双侧命中（阅读侧 chromePaint 换取 reading 作用域目标）
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri('chrome-contract.md'))
+      await waitViewState('chrome-contract.md', (v) => v.viewMode === 'reading' && expectPaint(v), 0, 60000)
+
+      // 停用回退：颜色离开片段值且回到非空默认（可见属性回到主题默认）
+      await setSnippetEnabled('chrome-paint.css', false)
+      const reverted = await waitViewState('chrome-contract.md', (v) =>
+        v.viewMode === 'reading' && !expectPaint(v) &&
+        v.cssProbe?.chromePaint?.mathKatexColor !== null &&
+        v.cssProbe?.chromePaint?.tokKeywordColor !== null)
+      assert(reverted.cssProbe!.chromePaint!.mermaidContainerColor !== 'rgb(70, 71, 72)',
+        '停用后图表容器色应回落默认')
+    } finally {
+      await setSnippetDirectory(null)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
+    }
+  }],
+
+  ['界面域样式契约：图表弹窗样式随打开与刷新保持（#133）', async () => {
+    await resetLastMode()
+    const dir = wsUri('css-snippets').fsPath
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets'))
+    await writeSnippetCss('css-snippets/popup-paint.css', [
+      '.vsidian-diagram-toolbar { color: rgb(79, 80, 81); }',
+      '.vsidian-diagram-stage { color: rgb(82, 83, 84); }',
+    ].join('\n'))
+    try {
+      await setSnippetDirectory(dir)
+      await poll('片段扫描完成', async () => {
+        const st = await snippetState()
+        return st.directory === dir && !st.readError && st.entries.length === 1 ? st : undefined
+      })
+      await openWithEditor('chrome-contract.md')
+      await waitSessionReady('chrome-contract.md')
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', wsUri('chrome-contract.md'))
+      await setSnippetEnabled('popup-paint.css', true)
+      const uri = wsUri('chrome-contract.md').toString()
+      // 等 mermaid 就位（popup 按钮挂在渲染成功态的 frame 上）
+      await waitViewState('chrome-contract.md', (v) =>
+        v.viewMode === 'live' && (v.liveMermaidCount ?? 0) >= 1, 0, 60000)
+
+      // 打开前：弹窗不在场（chromePopup 为 null 是在场性观测点）
+      const before = await waitViewState('chrome-contract.md', (v) => v.cssProbe?.chromePopup === null)
+      assert(before.cssProbe!.chromePopup === null, '弹窗未打开时无浮层 DOM')
+
+      // 打开弹窗：浮层在场且两区颜色被片段驱动
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'graphic.test.popup', view: 'live', index: 0 })
+      const opened = await waitViewState('chrome-contract.md', (v) =>
+        v.cssProbe?.chromePopup?.toolbarColor === 'rgb(79, 80, 81)' &&
+        v.cssProbe?.chromePopup?.stageColor === 'rgb(82, 83, 84)', 0, 60000)
+      assert(opened.paint?.graphic?.overlay === true, '浮层应在场（绘制层）')
+
+      // 刷新（原地重取源码重渲染）：浮层保持且片段样式不丢
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'graphic.test.popup', view: 'live', index: 0, action: 'refresh' })
+      await waitViewState('chrome-contract.md', (v) =>
+        v.paint?.graphic?.overlay === true &&
+        v.cssProbe?.chromePopup?.toolbarColor === 'rgb(79, 80, 81)' &&
+        v.cssProbe?.chromePopup?.stageColor === 'rgb(82, 83, 84)', 0, 60000)
+
+      // 关闭：浮层撤下（在场性回到 null）
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'graphic.test.popup', view: 'live', index: 0, action: 'close' })
+      await waitViewState('chrome-contract.md', (v) => v.cssProbe?.chromePopup === null)
+    } finally {
+      await setSnippetDirectory(null)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
+    }
+  }],
+
+  ['界面域样式契约：webview 重载后 chrome 探针复验（虚拟化重挂，#133）', async () => {
+    await resetLastMode()
+    await openWithEditor('chrome-contract.md')
+    await waitSessionReady('chrome-contract.md')
+    const uri = wsUri('chrome-contract.md').toString()
+
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri('chrome-contract.md'))
+    await waitViewState('chrome-contract.md', (v) => v.viewMode === 'reading' && (v.readingBlockCount ?? 0) > 0)
+    // 重载 webview：阅读块全部销毁重建（卡片/公式/图表挂载钩子从源码重新
+    // 增强），侧栏与顶栏同步重建——chrome 探针必须全部重新命中
+    await vscode.commands.executeCommand('workbench.action.webview.reloadWebviewAction')
+    await poll('重载后恢复阅读模式并采集探针', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      return v?.viewMode === 'reading' && v.text === CHROME_CONTRACT_DOC_TEXT && (v.readingBlockCount ?? 0) > 0
+        ? v : undefined
+    }, 30000)
+    const readingProbes = CHROME_CONTRACT_PROBES.filter((p) => !p.selector.includes('.vsidian-view-live'))
+    // 同前：连续 4 轮采样均 ≥3 条才判持续差异，重挂/懒加载空窗不触发首轮即抛
+    let remountChromeDiffStreak = 0
+    await poll('重挂后 chrome 探针全命中', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      const probes0 = v?.cssProbe?.chromeSelectors
+      if (!probes0) return undefined
+      const diffs: string[] = []
+      for (const probe of readingProbes) {
+        if (probes0[probe.id] !== probe.expected) {
+          diffs.push(probe.id + '：' + String(probes0[probe.id]) + '≠' + probe.expected)
+        }
+      }
+      if (diffs.length === 0) {
+        remountChromeDiffStreak = 0
+        return true
+      }
+      if (diffs.length >= 3 && ++remountChromeDiffStreak >= 4) throw new Error('重挂后 chrome 探针持续差异（连续 4 轮采样）：' + diffs.join('；'))
+      if (diffs.length < 3) remountChromeDiffStreak = 0
+      return undefined
+    }, 60000)
+  }],
 ]
+

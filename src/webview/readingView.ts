@@ -18,6 +18,7 @@
 //   （checkbox 启用，#9 点击/键盘切换走 syncController 的出站链路）
 // - 类名映射 Obsidian 同款选择器，见 docs/design/obsidian-selector-map.md
 import { splitReadingBlocks, type ReadingBlock } from './readingBlocks'
+import { applyObsidianDomAlias } from '../shared/obsidianAlias'
 import { convertTaskItems, sanitizeReadingDom } from './readingMarkdown'
 import type { ImageResourceManager } from './imageResource'
 
@@ -52,7 +53,9 @@ export const READING_CLASS_NAMES = {
 /** 创建阅读视图容器（稳定类名 + 模式标记；初始由调用方控制显隐） */
 export function createReadingContainer(): HTMLElement {
   const el = document.createElement('div')
-  el.className = READING_CLASS_NAMES.view
+  // #132 别名桥：容器同时挂 Obsidian 阅读容器名（.markdown-preview-view），
+  // 其后代标签选择器（p/h1/strong/table 等）随之天然命中
+  el.className = applyObsidianDomAlias(READING_CLASS_NAMES.view)
   el.dataset['vsidianMode'] = 'reading'
   return el
 }
@@ -79,7 +82,8 @@ function blockClassNames(block: ReadingBlock): string[] {
       names.push(READING_CLASS_NAMES.hr)
       break
     case 'frontmatter':
-      names.push(READING_CLASS_NAMES.frontmatter)
+      // #132 别名桥：frontmatter 块同时挂 Obsidian 阅读容器名
+      names.push(applyObsidianDomAlias(READING_CLASS_NAMES.frontmatter))
       break
     case 'table':
       names.push(READING_CLASS_NAMES.tableBlock)

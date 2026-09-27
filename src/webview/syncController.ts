@@ -160,6 +160,10 @@ import {
 } from './outlineDrag'
 import { locateOutlineIndex } from './outlineLocate'
 import { resolveStaleTaskToggle } from './taskToggle'
+import { SnippetLoader } from './snippetLoader'
+import { applyObsidianDomAlias, OBSIDIAN_ALIAS_PROBES } from '../shared/obsidianAlias'
+import { createFontArrivalWatch } from './fontArrival'
+import { CHROME_CONTRACT_PROBES } from '../shared/chromeContract'
 import { VirtualReadingView } from './readingVirtualView'
 import { blankRowInputPlan, runCreateTable, runTableEdit, tableEditing, tableRowsAt } from './tableEditing'
 import { symbolAutocomplete } from './symbolAutocomplete'
@@ -450,6 +454,11 @@ export class WebviewSyncController {
   private readingContainer: HTMLElement | undefined
   /** 阅读视图虚拟化控制器（#7：接管阅读容器的按需挂载/回收/锚点定位） */
   private readingView: VirtualReadingView | undefined
+  /** CSS 片段 <link> 装配器（#128）：只增删文档级样式链，不触碰 CM6 状态；
+   *  输入/选区/撤销/模式切换与阅读虚拟化天然不受影响（重挂载块继承文档样式） */
+  private readonly snippetLoader = new SnippetLoader()
+  /** #130 字体晚到补测监听（惰性创建；document.fonts 稳定时机驱动） */
+  private snippetFontArrival: ReturnType<typeof createFontArrivalWatch> | undefined
   /** 图片资源管理器（#10：双视图共用；经宿主通道解析工作区图源） */
   private images: ImageResourceManager | undefined
   private toolbar: HTMLElement | undefined
@@ -733,7 +742,10 @@ export class WebviewSyncController {
     this.banner = this.buildBanner()
     this.findPanel = this.buildFindPanel()
     this.liveWrapper = document.createElement('div')
-    this.liveWrapper.className = 'vsidian-view-live'
+    // #132 别名桥：live 容器同时挂 Obsidian 容器/主题三件套
+    // （markdown-source-view / mod-cm6 / cm-s-obsidian），片段的容器作用域
+    // 与主题容器组合选择器随之命中（清单 container-live 条目）
+    this.liveWrapper.className = applyObsidianDomAlias('vsidian-view-live')
     this.readingContainer = createReadingContainer()
     this.readingContainer.tabIndex = 0
     this.readingContainer.style.display = 'none'
@@ -1050,6 +1062,10 @@ export class WebviewSyncController {
         // 装载（含重载）都拉取；宿主以 settings.snapshot 响应
         this.bridge.postMessage({ kind: 'settings.get' })
         this.bridge.postMessage({ kind: 'keybindings.get' })
+        // #128 CSS 片段清单：同「init 后拉取」模式——宿主权威扫描 × 开关
+        // 映射经 snippets.snapshot 应答（新面板、重载面板、暂未广播的变更
+        // 都在此对齐当前态）
+        this.bridge.postMessage({ kind: 'snippets.get' })
         break
       case 'keybindings.snapshot':
       case 'keybindings.changed': {
@@ -1071,6 +1087,27 @@ export class WebviewSyncController {
         this.applySymbolSelectionWrapSetting()
         this.applyTabEscapeSetting()
         break
+      case 'snippets.snapshot': {
+        // #128 CSS 片段装载：diff 式装配 <link>（失败保留最近成功样式、
+        // 停用立即撤下）；装载结果回报宿主（入口级成败可观测），样式落地
+        // 后唤醒测量——行高/字号变化时 live 侧 CM6 需重测视口（阅读侧由
+        // ResizeObserver → measureAndStabilize 现成管线自动锚定）。
+        // #130 字体晚到：@font-face 字体在链 load 后才异步装载完成，另行
+        // 经 document.fonts.ready 稳定时机补一轮重测（见 scheduleSnippetMeasure）
+        this.snippetLoader.apply(message, (outcome) => {
+          this.bridge.postMessage({
+            kind: 'snippets.loadResult',
+            name: outcome.name,
+            version: outcome.version,
+            ok: outcome.ok,
+          })
+          if (outcome.ok) {
+            this.scheduleSnippetMeasure()
+            this.scheduleSnippetMeasureOnFontArrival()
+          }
+        })
+        break
+      }
       case 'edit.ack': {
         if (this.suspended) {
           // 暂停态：写回已停，任何 ack 结果都不再改变本地状态
@@ -1572,12 +1609,17 @@ export class WebviewSyncController {
       case 'graphic.test.popup': {
         // 测试钩子（#111）：按序号点击图形化代码块 popup 按钮（驱动与用户
         // 点击相同的处理器链路：打开图表弹窗）；action 存在时改为点击弹窗
-        // 工具条的导出按钮（集成回归驱动导出链路的消息形态）。action 路径
-        // 不重开弹窗——单例重开会清空快照，导出点击会落在装载完成前
+        // 工具条按钮（导出按钮驱动导出链路的消息形态；refresh 驱动弹窗
+        // 原地重取源码刷新——#133 样式保持验证）。action 路径不重开弹窗
+        // ——单例重开会清空快照，点击会落在装载完成前
         if (message.action) {
           const cls = message.action === 'export-png'
             ? DIAGRAM_POPUP_CLASS_NAMES.exportPng
-            : DIAGRAM_POPUP_CLASS_NAMES.exportSvg
+            : message.action === 'export-svg'
+              ? DIAGRAM_POPUP_CLASS_NAMES.exportSvg
+              : message.action === 'close'
+                ? DIAGRAM_POPUP_CLASS_NAMES.close
+                : DIAGRAM_POPUP_CLASS_NAMES.refresh
           document.querySelector<HTMLButtonElement>(`.${cls}`)?.click()
           break
         }
@@ -2176,10 +2218,105 @@ export class WebviewSyncController {
         .trim()
       readingVarProbe = value === '' ? null : value
     }
+    // #129 片段相对资源观测：@font-face 装载计数（字节级证据——字体按各自
+    // CSS 文件路径解析并真实拉取）与阅读容器背景图（图片解析锚点）
+    let documentFonts: { total: number; loaded: number } | null = null
+    try {
+      const fonts = document.fonts
+      if (fonts) {
+        let loaded = 0
+        for (const face of fonts) {
+          if (face.status === 'loaded') {
+            loaded += 1
+          }
+        }
+        documentFonts = { total: fonts.size, loaded }
+      }
+    } catch {
+      documentFonts = null
+    }
+    let readingBackgroundImage: string | null = null
+    if (this.readingContainer) {
+      const image = getComputedStyle(this.readingContainer).backgroundImage
+      readingBackgroundImage = image && image !== 'none' ? image : null
+    }
+    // #132 Obsidian 原名别名桥探针：按探针表（单一事实源）在对应视图容器内
+    // 以 **Obsidian 原名选择器** 定位并读 computed text-decoration-color——
+    // probe.css 以原名写探针规则，别名类未挂上/挂错节点即 null
+    const obsidianAliases: Record<string, string | null> = {}
+    for (const probe of OBSIDIAN_ALIAS_PROBES) {
+      const root = probe.view === 'live' ? this.liveWrapper : this.readingContainer
+      // querySelector 只查后代——容器条目（如 .markdown-source-view.mod-cm6）
+      // 的目标可能是 root 自身，先 matches 再查后代
+      const el = root
+        ? root.matches(probe.selector)
+          ? root
+          : root.querySelector(probe.selector)
+        : null
+      // 探针属性统一 outline-color（与既有 text-decoration-color 体系正交）
+      obsidianAliases[probe.id] = el ? getComputedStyle(el).outlineColor || null : null
+    }
+    // #132 变量别名桥观测：--h1-color 驱动的一级标题 computed color（可见效果）
+    const liveHeaderSpan = this.liveWrapper?.querySelector('.vsidian-header-1') ?? null
+    const readingH1 = this.readingContainer?.querySelector('.vsidian-reading-heading-1 h1') ?? null
+    const readColor = (el: Element | null): string | null => (el ? getComputedStyle(el).color : null)
+    // #133 界面域样式契约探针：按探针表（单一事实源）在 **document 域**
+    // 定位（界面域目标不全在两视图容器内——大纲面板挂侧栏）读 computed
+    // outline-color；probe.css 以 vsidian 稳定类名写探针规则，选择器含
+    // 结构上下文（.vsidian-math .katex 等）——类未挂上/挂错节点即 null
+    const chromeSelectors: Record<string, string | null> = {}
+    for (const probe of CHROME_CONTRACT_PROBES) {
+      const el = document.querySelector(probe.selector)
+      // 自定义属性探针：不可见且与 outline-color / text-decoration-color
+      // 两套既有探针正交（双类元素同被多套探针命中时零串扰）
+      const value = el ? getComputedStyle(el).getPropertyValue('--vsidian-chrome-probe').trim() : ''
+      chromeSelectors[probe.id] = el ? value === '' ? null : value : null
+    }
+    // #133 界面域可见颜色观测：各区域代表元素的 computed color（随当前
+    // viewMode 取对应侧目标——真实片段改写可见属性即被观测到）
+    const inLive = this.viewMode === 'live'
+    const readDocColor = (selector: string): string | null => {
+      const el = document.querySelector(selector)
+      return el ? getComputedStyle(el).color || null : null
+    }
+    const chromePaint = {
+      mathKatexColor: readDocColor(inLive
+        ? '#app .vsidian-view-live .vsidian-math .katex'
+        : '#app .vsidian-view-reading .vsidian-reading-math .katex'),
+      codeCardLabelColor: readDocColor(inLive
+        ? '#app .vsidian-view-live .vsidian-code-card-header-label'
+        : '#app .vsidian-view-reading .vsidian-code-card-header-label'),
+      tokKeywordColor: readDocColor(inLive
+        ? '#app .vsidian-view-live .tok-keyword'
+        : '#app .vsidian-view-reading .tok-keyword'),
+      mermaidContainerColor: readDocColor(inLive
+        ? '#app .vsidian-view-live .vsidian-mermaid'
+        : '#app .vsidian-view-reading .vsidian-reading-mermaid .vsidian-mermaid'),
+      outlineLevel1Color: readDocColor('#app .vsidian-sidebar .vsidian-outline-level-1'),
+    }
+    // #133 图表弹窗样式观测：浮层在场时的 toolbar/stage computed color；
+    // 浮层不在场为 null（弹窗 DOM 只在打开期间存在——在场性本身即观测点）
+    const popupOverlay = document.querySelector('.vsidian-diagram-overlay')
+    const chromePopup = popupOverlay
+      ? {
+          toolbarColor: readDocColor('.vsidian-diagram-overlay .vsidian-diagram-toolbar'),
+          stageColor: readDocColor('.vsidian-diagram-overlay .vsidian-diagram-stage'),
+        }
+      : null
     return {
+      obsidianAliases,
+      obsidianVarProbe: {
+        liveHeadingColor: readColor(liveHeaderSpan),
+        readingHeadingColor: readColor(readingH1),
+      },
+      chromeSelectors,
+      chromePaint,
+      chromePopup,
       liveHeadingDecorationColor: read(liveEl),
       readingHeadingDecorationColor: read(readingEl),
       readingVarProbe,
+      documentFonts,
+      readingBackgroundImage,
       liveStrongDecorationColor: read(liveStrong),
       liveInlineCodeDecorationColor: read(liveInlineCode),
       liveCodeLineDecorationColor: read(liveCodeLine),
@@ -4955,6 +5092,40 @@ export class WebviewSyncController {
     this.view?.dispatch({
       effects: this.lineNumbersCompartment.reconfigure(on ? liveLineNumbers() : []),
     })
+  }
+
+  /**
+   * CSS 片段装载成功后的测量唤醒（#128）：外部样式表落地可能改变行高/
+   * 字号，live 侧 CM6 视口需要被重新测量（样式变化不产生 CM6 事务，视口
+   * 不会自行重排）。立即一次 + 下一帧一次（字体类变更的排版常在帧间才
+   * 稳定）。阅读侧无需在此处理：ResizeObserver → measureAndStabilize
+   * 管线按块实测回填并做滚动锚定（#7/#59/#60 反复验证的机制）。
+   */
+  private scheduleSnippetMeasure(): void {
+    this.view?.requestMeasure()
+    requestAnimationFrame(() => this.view?.requestMeasure())
+  }
+
+  /**
+   * #130 字体晚到的补测：片段里的 @font-face（本地或 https 远程字体）在
+   * <link> load 事件之后才异步装载完成——上方即时重测可能早于字体生效，
+   * 行高/字号稳定后的视口测量与滚动锚定需要再补一轮。以 document.fonts
+   * .ready 为稳定时机（字体装载失败同样 settle——此时按备用字体重测，
+   * 正文可读即达成；错误面见 fontArrival 模块头）。live 侧重测 CM6 视口，
+   * 阅读侧显式 updateNow 走 measureAndStabilize 锚定补偿（RO 对挂载块
+   * 的尺寸回调是兜底路径，显式调用保证高度表回填必然执行）。
+   */
+  private scheduleSnippetMeasureOnFontArrival(): void {
+    if (!this.snippetFontArrival) {
+      this.snippetFontArrival = createFontArrivalWatch(
+        () => document.fonts ?? undefined,
+        () => {
+          this.scheduleSnippetMeasure()
+          this.readingView?.updateNow()
+        },
+      )
+    }
+    this.snippetFontArrival.schedule()
   }
 
   /**

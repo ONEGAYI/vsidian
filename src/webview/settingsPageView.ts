@@ -16,7 +16,9 @@ export interface SettingsPageSection {
   id: string
   title: string
   description: string
-  icon: 'keyboard' | 'editor'
+  /** 分页图标（侧栏导航与搜索分组共用；'palette' 为 #128 CSS 片段分页新增；
+   *  'book' 为 #132 样式参考分页） */
+  icon: 'keyboard' | 'editor' | 'palette' | 'book'
   entries: readonly { id: string; title: string; description?: string }[]
   /** 返回清理函数；focusEntry 为全局搜索定位到的入口。 */
   mount(parent: HTMLElement, focusEntry?: string): void | (() => void)
@@ -37,13 +39,14 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, tex
   if (text) el.textContent = text
   return el
 }
-function icon(kind: 'editor' | 'keyboard' | 'search' | 'general'): SVGSVGElement {
+function icon(kind: 'editor' | 'keyboard' | 'search' | 'general' | 'palette' | 'book'): SVGSVGElement {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
   svg.setAttribute('viewBox', '0 0 24 24')
   svg.setAttribute('aria-hidden', 'true')
   const path = document.createElementNS(svg.namespaceURI, 'path')
-  // general（#96「常规」分组）：地球——语言设置的通用意象（lucide globe 形）
-  path.setAttribute('d', kind === 'search' ? 'M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0' : kind === 'keyboard' ? 'M3 5h18v14H3zM6 9h1m3 0h1m3 0h1m3 0h1M6 12h1m3 0h1m3 0h1m3 0h1M7 16h10' : kind === 'general' ? 'M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10' : 'M14 4l6 6M3 21l5-1L21 7a2 2 0 0 0-4-4L4 16z')
+  // general（#96「常规」分组）：地球——语言设置的通用意象（lucide globe 形）；
+  // palette（#128 CSS 片段分页）：画笔（lucide paintbrush 形，取样式定制的意象）
+  path.setAttribute('d', kind === 'search' ? 'M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0' : kind === 'keyboard' ? 'M3 5h18v14H3zM6 9h1m3 0h1m3 0h1m3 0h1M6 12h1m3 0h1m3 0h1m3 0h1M7 16h10' : kind === 'general' ? 'M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10' : kind === 'palette' ? 'M14.6 3.4l6 6L11 19H5v-6L14.6 3.4zM3 21h18' : kind === 'book' ? 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z' : 'M14 4l6 6M3 21l5-1L21 7a2 2 0 0 0-4-4L4 16z')
   svg.append(path)
   return svg
 }
@@ -120,8 +123,21 @@ export class SettingsPageView {
     this.offLocale = undefined
   }
 
+  /** 切换到指定分类（附加分页或内建分组）；整页重渲染（#132） */
+  selectSection(id: string): void {
+    const known = this.categories().some((c) => c.id === id)
+    if (!known) return
+    this.active = id
+    this.render()
+  }
+
   handleHostMessage(message: unknown): void {
     if (!isHostToWebview(message)) return
+    // #132 样式参考：宿主命令定位到指定附加分页（未知 id 忽略）
+    if (message.kind === 'settings.focusSection') {
+      this.selectSection(message.section)
+      return
+    }
     if (message.kind === 'settings.snapshot' || message.kind === 'settings.changed') {
       this.values = message.values
       if (this.pending > 0) {

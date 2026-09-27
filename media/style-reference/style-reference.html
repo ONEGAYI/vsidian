@@ -1,0 +1,1647 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vsidian 样式参考（v0.4.0）</title>
+<style>
+:root { color-scheme: light dark; }
+body { font: 14px/1.65 system-ui, "Segoe UI", "Microsoft YaHei", sans-serif; margin: 0 auto; max-width: 880px; padding: 24px 20px 64px; }
+h1 { font-size: 22px; } h2 { font-size: 17px; margin-top: 40px; border-bottom: 1px solid color-mix(in srgb, currentColor 18%, transparent); padding-bottom: 6px; }
+code { font-family: ui-monospace, Consolas, monospace; background: color-mix(in srgb, currentColor 8%, transparent); padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
+pre { background: color-mix(in srgb, currentColor 7%, transparent); padding: 10px 12px; border-radius: 6px; overflow-x: auto; }
+pre code { background: none; padding: 0; }
+.entry { border: 1px solid color-mix(in srgb, currentColor 16%, transparent); border-radius: 8px; padding: 12px 16px; margin: 14px 0; }
+.entry h3 { font-size: 14.5px; margin: 0 0 6px; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.eid { color: color-mix(in srgb, currentColor 55%, transparent); font-size: 12px; font-weight: 400; }
+.entry p { margin: 4px 0; font-size: 13px; }
+.badge { display: inline-block; border: 1px solid color-mix(in srgb, currentColor 30%, transparent); border-radius: 999px; padding: 0 8px; font-size: 11.5px; }
+.badge-none { opacity: .65; }
+.support { font-weight: 600; margin-left: 6px; }
+.support-direct { color: #1a7f37; } .support-semantic { color: #9a6700; }
+.support-native { color: #6e7781; } .support-none { color: #cf222e; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { border: 1px solid color-mix(in srgb, currentColor 18%, transparent); padding: 5px 9px; text-align: left; }
+ul.legend { padding-left: 18px; font-size: 13px; }
+.note { background: color-mix(in srgb, currentColor 6%, transparent); border-radius: 8px; padding: 10px 14px; font-size: 13px; }
+.pending { color: #9a6700; }
+.empty { color: color-mix(in srgb, currentColor 55%, transparent); }
+</style>
+</head>
+<body>
+<h1>Vsidian 样式参考</h1>
+<p>本指南由公开样式契约清单自动生成，与已安装版本 <strong>v0.4.0</strong> 配套；清单变更随版本更新，旧版本指南不承诺长期有效。CSS 片段的加载、目录与逐片段启停见扩展设置页「CSS 片段」。机器可读的契约 JSON（结构同源）可经扩展设置页「样式参考」分页或命令面板「Vsidian: 导出样式参考 JSON」导出。</p>
+
+<div class="note">
+<p><strong>Obsidian 原名兼容（别名桥）</strong>：标记 <code>direct</code> 的条目，其「别名承诺」列出的 Obsidian 原名选择器/变量在本扩展实际生效——DOM 同时挂载 vsidian 稳定类与 Obsidian 原名类；变量经 <code>var(Obsidian 名, 默认值)</code> 回退链生效，<strong>vsidian 名整条覆盖严格优先于 Obsidian 名</strong>。语义对应（<code>semantic</code>）条目不能用 Obsidian 原名，请改用 vsidian 名。</p>
+<p><strong>主题作用域写法差异</strong>：Obsidian 片段常用的 <code>body.theme-dark</code>/<code>body.theme-light</code> 类不别名；请在 <code>:root</code>/<code>body</code> 或明暗两套属性值内书写（本扩展 webview 主题类为 <code>body.vscode-dark</code>/<code>body.vscode-light</code>）。</p>
+</div>
+
+<h2>支持等级图例</h2>
+<ul class="legend">
+      <li><code>direct</code> <strong>直接兼容</strong> — Obsidian 原名选择器/变量在本扩展实际生效（别名桥承接，两视图已验证）</li>
+      <li><code>semantic</code> <strong>语义对应</strong> — 功能等价但 Obsidian 原名不命中——须使用 vsidian 类名/变量名</li>
+      <li><code>native</code> <strong>原生承担</strong> — Obsidian 由原生结构/机制承担；本扩展为自有形态（无兼容承诺）</li>
+      <li><code>none</code> <strong>无对应 / 不支持</strong> — 无 Obsidian 对应，或该语法/结构当前不支持（片段中不命中）</li>
+</ul>
+
+<h2>Obsidian 变量别名总表</h2>
+<table>
+  <thead><tr><th>Obsidian 变量</th><th>vsidian 变量（优先）</th><th>未设置时默认值</th></tr></thead>
+  <tbody>
+      <tr><td><code>--h1-color</code></td><td><code>--vsidian-heading-color-1</code></td><td><code>var(--vscode-editor-foreground)</code></td></tr>
+      <tr><td><code>--h2-color</code></td><td><code>--vsidian-heading-color-2</code></td><td><code>var(--vscode-editor-foreground)</code></td></tr>
+      <tr><td><code>--h3-color</code></td><td><code>--vsidian-heading-color-3</code></td><td><code>var(--vscode-editor-foreground)</code></td></tr>
+      <tr><td><code>--h4-color</code></td><td><code>--vsidian-heading-color-4</code></td><td><code>var(--vscode-editor-foreground)</code></td></tr>
+      <tr><td><code>--h5-color</code></td><td><code>--vsidian-heading-color-5</code></td><td><code>var(--vscode-editor-foreground)</code></td></tr>
+      <tr><td><code>--h6-color</code></td><td><code>--vsidian-heading-color-6</code></td><td><code>var(--vscode-editor-foreground)</code></td></tr>
+      <tr><td><code>--font-text-size</code></td><td><code>--vsidian-reading-font-size</code></td><td><code>var(--vsidian-content-font-size)</code></td></tr>
+      <tr><td><code>--file-line-width</code></td><td><code>--vsidian-reading-max-width</code></td><td><code>760px</code></td></tr>
+      <tr><td><code>--line-height-normal</code></td><td><code>--vsidian-reading-line-height</code></td><td><code>var(--vsidian-content-line-height)</code></td></tr>
+      <tr><td><code>--code-background</code></td><td><code>--vsidian-reading-code-background</code></td><td><code>var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12))</code></td></tr>
+      <tr><td><code>--text-highlight-bg</code></td><td><code>--vsidian-highlight-background</code></td><td><code>rgba(255, 208, 0, 0.35)</code></td></tr>
+      <tr><td><code>--table-background</code></td><td><code>--vsidian-table-background</code></td><td><code>rgba(128, 128, 128, 0.05)</code></td></tr>
+  </tbody>
+</table>
+
+  <section class="domain" data-domain="content">
+    <h1 style="font-size:19px;margin-bottom:4px">正文域（69 条）</h1>
+
+    <h2>正文域 · 容器与视图（2）</h2>
+    <article class="entry" id="container-live">
+      <h3><code>.vsidian-view-live</code><span class="eid">container-live</span></h3>
+      <p class="purpose">live（实时预览）视图容器，内含 CodeMirror 6 编辑器。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：.markdown-source-view（编辑区容器）、.mod-cm6（CM6 模式标记）、.cm-s-obsidian（CM 主题容器）</p>
+<p class="aliases">别名承诺：<code>markdown-source-view</code> <code>mod-cm6</code> <code>cm-s-obsidian</code></p>
+      <p class="dom">DOM 关系：#app 直接子元素；阅读模式下 display:none 但 DOM 常驻（样式仍可命中，探针口径与 LineGutterProbe 同理）。</p>
+      <pre><code>.markdown-source-view.mod-cm6 {
+  /* Obsidian 容器写法：经别名桥命中 live 容器 */
+}</code></pre>
+      <p class="verify">验证：集成「Obsidian 原名别名桥」（cases.ts）：容器组合选择器在 live 视图命中；cssProbe.obsidianAliases.container-live</p>
+      <p class="life">引入：#6（2026-09-23）</p>
+    </article>
+    <article class="entry" id="container-reading">
+      <h3><code>.vsidian-view-reading</code><span class="eid">container-reading</span></h3>
+      <p class="purpose">reading（阅读）视图容器；其内为按需挂载的块级结构。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：.markdown-preview-view（阅读视图容器）</p>
+<p class="aliases">别名承诺：<code>markdown-preview-view</code></p>
+      <p class="dom">DOM 关系：#app 直接子元素；块内为 markdown-it 渲染的真实语义标签，标签选择器（p/h1/strong 等）作为容器后代天然命中。</p>
+      <pre><code>.markdown-preview-view p {
+  /* Obsidian 阅读容器写法：经别名桥命中阅读容器 */
+}</code></pre>
+      <p class="verify">验证：集成「稳定样式契约」（#6）：.vsidian-view-reading 探针变量可覆盖读取；集成「Obsidian 原名别名桥」：容器后代标签选择器命中；cssProbe.obsidianAliases[&quot;reading-paragraph&quot;]（容器别名经后代标签选择器间接验证）</p>
+      <p class="life">引入：#6（2026-09-23）</p>
+    </article>
+    <h2>正文域 · 标题（4）</h2>
+    <article class="entry" id="live-heading-line">
+      <h3><code>.vsidian-heading-line-{1..6}</code><span class="eid">live-heading-line</span></h3>
+      <p class="purpose">live 标题**行容器**类（挂在 .cm-line 行元素上），整行级样式入口。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：.HyperMD-header-{1..6}（Obsidian live 标题行容器类）</p>
+<p class="aliases">别名承诺：<code>HyperMD-header-{1..6}</code></p>
+      <p class="dom">DOM 关系：live 容器内 .cm-line 行元素；标题标记 # 在光标进入该标题行时显形。</p>
+      <pre><code>.HyperMD-header-1 {
+  text-decoration: underline;
+}</code></pre>
+      <p class="verify">验证：集成「稳定样式契约」（#6）：.vsidian-heading-line-1 探针命中 rgb(1, 2, 3)；集成「Obsidian 原名别名桥」：.HyperMD-header-1 命中；cssProbe.obsidianAliases[&quot;live-heading-line&quot;]</p>
+      <p class="life">引入：#5（2026-09-23）</p>
+    </article>
+    <article class="entry" id="live-header-span">
+      <h3><code>.vsidian-header-{1..6}</code><span class="eid">live-header-span</span></h3>
+      <p class="purpose">live 标题**内容 span** 类（mark 装饰，只包标题文字），行内 token 级入口。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：.cm-header-{1..6}（Obsidian live 标题行内 token 类）</p>
+<p class="aliases">别名承诺：<code>cm-header-{1..6}</code></p>
+      <p class="dom">DOM 关系：标题行内 mark 装饰 span；Setext 标题同样命中。</p>
+      <pre><code>.cm-header-1 {
+  font-weight: 700;
+}</code></pre>
+      <p class="verify">验证：集成「Obsidian 原名别名桥」：.cm-header-1 命中；cssProbe.obsidianAliases[&quot;live-header-span&quot;]</p>
+      <p class="life">引入：#8（2026-09-24）</p>
+    </article>
+    <article class="entry" id="live-heading-inview">
+      <h3><code>.vsidian-heading-inview</code><span class="eid">live-heading-inview</span></h3>
+      <p class="purpose">视口内标题行标记；#55 起仅作 active 背景的作用域限定与观测入口，自身不绘制样式。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-none">none</span></p>
+<p class="states">状态：标题行进入视口时附加；随滚动增减。</p>
+      <p class="obsidian">Obsidian 对应：无直接对应（Obsidian 无视口内标题提示类）</p>
+
+      <p class="dom">DOM 关系：与 .vsidian-heading-line-{n} 同元素（行级叠加类）。</p>
+      <pre><code>.vsidian-heading-inview .vsidian-heading-active {
+  /* 与 active 组合使用 */
+}</code></pre>
+      <p class="verify">验证：单元 liveDecorations：inview/active 类发射契约</p>
+      <p class="life">引入：#5（2026-09-23）；#55（2026-09-25）移除其左缘竖线绘制</p>
+    </article>
+    <article class="entry" id="live-heading-active">
+      <h3><code>.vsidian-heading-active</code><span class="eid">live-heading-active</span></h3>
+      <p class="purpose">光标所在标题行的行背景强调提示；标题 # 标记在光标进入该行时显形。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-none">none</span></p>
+<p class="states">状态：光标位于标题范围内时附加；移出即清除。</p>
+      <p class="obsidian">Obsidian 对应：无直接对应（本项目自有扩展）</p>
+
+      <p class="dom">DOM 关系：与 .vsidian-heading-line-{n} 同元素；背景绘制以 inview 为作用域限定。</p>
+      <pre><code>.vsidian-heading-line-1.vsidian-heading-active {
+  background: rgba(128, 128, 128, 0.08);
+}</code></pre>
+      <p class="verify">验证：单元 liveDecorations：活动标题行类发射契约</p>
+      <p class="life">引入：#5（2026-09-23）</p>
+    </article>
+    <h2>正文域 · 行内格式（5）</h2>
+    <article class="entry" id="inline-strong">
+      <h3><code>.vsidian-strong（live）/ strong 标签（阅读）</code><span class="eid">inline-strong</span></h3>
+      <p class="purpose">粗体内容入口：live 为 mark 装饰 span；阅读为 markdown-it 渲染的语义 strong 标签。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
+<p class="states">状态：live 侧 ** 标记触及显形（光标离开恢复格式化形态）。</p>
+      <p class="obsidian">Obsidian 对应：.cm-strong（live token）/ .markdown-preview-view strong（阅读标签）</p>
+<p class="aliases">别名承诺：<code>cm-strong</code></p>
+      <p class="dom">DOM 关系：live：标题/正文行内 mark span；阅读：块内真实 &lt;strong&gt; 元素。</p>
+      <pre><code>.cm-strong {
+  color: #e06c75;
+}
+.markdown-preview-view strong {
+  color: #e06c75;
+}</code></pre>
+      <p class="verify">验证：集成「稳定样式契约扩展」（#8）：.vsidian-strong 命中 rgb(7, 8, 9)；阅读 strong 探针 rgb(16, 17, 18)；集成「Obsidian 原名别名桥」：.cm-strong 与 .markdown-preview-view strong 命中；cssProbe.liveStrongDecorationColor / readingStrongDecorationColor / obsidianAliases[&quot;inline-strong&quot;] / obsidianAliases[&quot;reading-inline-strong&quot;]</p>
+      <p class="life">引入：#8（2026-09-24）</p>
+    </article>
+    <article class="entry" id="inline-emphasis">
+      <h3><code>.vsidian-emphasis（live）/ em 标签（阅读）</code><span class="eid">inline-emphasis</span></h3>
+      <p class="purpose">斜体内容入口：live mark 装饰 span；阅读语义 em 标签。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
+<p class="states">状态：live 侧 * / _ 标记触及显形。</p>
+      <p class="obsidian">Obsidian 对应：.cm-emphasis（live token）/ .markdown-preview-view em（阅读标签）</p>
+<p class="aliases">别名承诺：<code>cm-emphasis</code></p>
+      <p class="dom">DOM 关系：同 inline-strong 的两侧结构。</p>
+      <pre><code>.cm-emphasis {
+  font-style: italic;
+}</code></pre>
+      <p class="verify">验证：集成「Obsidian 原名别名桥」：.cm-emphasis 命中；cssProbe.obsidianAliases[&quot;inline-emphasis&quot;]</p>
+      <p class="life">引入：#8（2026-09-24）</p>
+    </article>
+    <article class="entry" id="inline-code">
+      <h3><code>.vsidian-inline-code（live）/ code 标签（阅读，块内 code 另有 language-x 类）</code><span class="eid">inline-code</span></h3>
+      <p class="purpose">行内代码内容入口：live mark 装饰 span；阅读语义 code 标签。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
+<p class="states">状态：live 侧反引号标记触及显形。</p>
+      <p class="obsidian">Obsidian 对应：.cm-inline-code（Obsidian 亦用 .cm-hmd-inline-code；本清单承诺前者）</p>
+<p class="aliases">别名承诺：<code>cm-inline-code</code></p>
+      <p class="dom">DOM 关系：live：行内 mark span（多反引号围栏按实际定界符长度）；阅读：块内 &lt;code&gt;。</p>
+      <pre><code>.cm-inline-code {
+  font-family: monospace;
+}</code></pre>
+      <p class="verify">验证：集成「稳定样式契约扩展」（#8）：.vsidian-inline-code 命中 rgb(10, 11, 12)；集成「Obsidian 原名别名桥」：.cm-inline-code 命中；cssProbe.liveInlineCodeDecorationColor / obsidianAliases[&quot;inline-code&quot;]</p>
+      <p class="life">引入：#8（2026-09-24）</p>
+    </article>
+    <article class="entry" id="inline-highlight">
+      <h3><code>.vsidian-highlight（live）/ mark 标签（阅读）</code><span class="eid">inline-highlight</span></h3>
+      <p class="purpose">高亮（==文字==）内容入口：live span 常显主题色底；阅读 mark 标签。底色变量见 var-highlight-background。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
+<p class="states">状态：live 侧 == 定界符触及显形（同粗体语义）。</p>
+      <p class="obsidian">Obsidian 对应：.cm-highlight（live token）/ .markdown-preview-view mark</p>
+<p class="aliases">别名承诺：<code>cm-highlight</code></p>
+      <p class="dom">DOM 关系：live：mark 装饰 span；阅读：块内 &lt;mark&gt;。</p>
+      <pre><code>.cm-highlight {
+  background: rgba(255, 208, 0, 0.35);
+}</code></pre>
+      <p class="verify">验证：集成「Obsidian 原名别名桥」：.cm-highlight 命中；cssProbe.obsidianAliases[&quot;inline-highlight&quot;]</p>
+      <p class="life">引入：#105（2026-09-27）</p>
+    </article>
+    <article class="entry" id="inline-strikethrough">
+      <h3><code>del 标签（仅阅读）</code><span class="eid">inline-strikethrough</span></h3>
+      <p class="purpose">删除线（~~文字~~）内容入口：**仅阅读视图**——markdown-it 渲染语义 del 标签。live 侧解析器支持但未装饰，源码形态呈现（见 limit-strikethrough-live）。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：.markdown-preview-view del（阅读标签）</p>
+
+      <p class="dom">DOM 关系：阅读块内 &lt;del&gt; 元素。live 侧无装饰类，不支持。</p>
+      <pre><code>.markdown-preview-view del {
+  color: var(--vscode-descriptionForeground);
+}</code></pre>
+      <p class="verify">验证：单元 readingMarkdown：~~文字~~ 渲染 del 标签契约</p>
+      <p class="life">引入：阅读侧随 #8 语义渲染（2026-09-24）；live 侧缺口如实记录</p>
+    </article>
+    <h2>正文域 · 列表与任务（5）</h2>
+    <article class="entry" id="live-list-line">
+      <h3><code>.vsidian-list-line（+ -d{1..8} 嵌套深度修饰）</code><span class="eid">live-list-line</span></h3>
+      <p class="purpose">live 列表项行；深度修饰 -d{1..8} 为本项目自有形态（Obsidian 按行 class 组合表达缩进）。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-direct">direct</span></p>
+<p class="states">状态：行首列表标记仅在标记及相邻空格附近显形。</p>
+      <p class="obsidian">Obsidian 对应：.HyperMD-list-line（Obsidian 列表行类族）</p>
+<p class="aliases">别名承诺：<code>HyperMD-list-line</code></p>
+      <p class="dom">DOM 关系：live 容器内 .cm-line 行元素；与 bullet/ordered 修饰叠加。</p>
+      <pre><code>.HyperMD-list-line {
+  line-height: 1.7;
+}</code></pre>
+      <p class="verify">验证：集成「Obsidian 原名别名桥」：.HyperMD-list-line 命中；cssProbe.obsidianAliases[&quot;live-list-line&quot;]</p>
+      <p class="life">引入：#8（2026-09-24）</p>
+    </article>
+    <article class="entry" id="live-list-bullet">
+      <h3><code>.vsidian-list-bullet</code><span class="eid">live-list-bullet</span></h3>
+      <p class="purpose">无序列表行修饰：标记隐藏后以 ::before 圆点呈现。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-native">native</span></p>
+<p class="states">状态：与 .vsidian-list-marker-visible 互斥（源码标记显形时抑制伪圆点）。</p>
+      <p class="obsidian">Obsidian 对应：无直接对应（Obsidian 由 .cm-formatting-list 隐藏 + 原生列表样式承担）</p>
+
+      <p class="dom">DOM 关系：列表行级叠加类；圆点绘制在 ::before。</p>
+      <pre><code>.vsidian-list-line.vsidian-list-bullet::before {
+  color: #61afef;
+}</code></pre>
+      <p class="verify">验证：单元 liveDecorations：bullet/ordered 修饰契约</p>
+      <p class="life">引入：#8（2026-09-24）</p>
+    </article>
+    <article class="entry" id="live-list-ordered">
+      <h3><code>.vsidian-list-ordered</code><span class="eid">live-list-ordered</span></h3>
+      <p class="purpose">有序列表行修饰（编号保留可见）。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-native">native</span></p>
+
+      <p class="obsidian">Obsidian 对应：无直接对应（同 live-list-bullet）</p>
+
+      <p class="dom">DOM 关系：列表行级叠加类。</p>
+      <pre><code>.vsidian-list-line.vsidian-list-ordered {
+  color: inherit;
+}</code></pre>
+      <p class="verify">验证：单元 liveDecorations：bullet/ordered 修饰契约</p>
+      <p class="life">引入：#8（2026-09-24）</p>
+    </article>
+    <article class="entry" id="live-list-marker-visible">
+      <h3><code>.vsidian-list-marker-visible</code><span class="eid">live-list-marker-visible</span></h3>
+      <p class="purpose">无序列表源码标记显形时抑制 ::before 伪圆点，避免双圆点。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-native">native</span></p>
+<p class="states">状态：光标进入标记邻域时附加。</p>
+      <p class="obsidian">Obsidian 对应：无直接对应</p>
+
+      <p class="dom">DOM 关系：列表行级叠加状态类。</p>
+      <pre><code>.vsidian-list-marker-visible::before {
+  content: none;
+}</code></pre>
+      <p class="verify">验证：单元 liveDecorations：marker-visible 状态契约</p>
+      <p class="life">引入：#8（2026-09-24）</p>
+    </article>
+    <article class="entry" id="live-task-checkbox">
+      <h3><code>.vsidian-task-checkbox（input[type=checkbox]）+ .vsidian-task-checked 修饰</code><span class="eid">live-task-checkbox</span></h3>
+      <p class="purpose">live 任务 checkbox（可交互：点击/Enter/空格切换勾选并写回 Markdown）；勾选态双入口：:checked 伪类与 .vsidian-task-checked 类。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-semantic">semantic</span></p>
+<p class="states">状态：光标进入 [ ]/[x] 标记时切回源码形态（widget 撤下）。</p>
+      <p class="obsidian">Obsidian 对应：.cm-task-* 方向（Obsidian 任务标记由 HMR widget 承担，无公开稳定类）</p>
+
+      <p class="dom">DOM 关系：替换任务标记区间的 input widget。</p>
+      <pre><code>.vsidian-task-checkbox:checked {
+  accent-color: #98c379;
+}</code></pre>
+      <p class="verify">验证：集成「稳定样式契约」（#9）：.vsidian-task-checkbox 命中 rgb(19, 20, 21)；cssProbe.liveTaskCheckboxDecorationColor</p>
+      <p class="life">引入：#8（2026-09-24）；#9（2026-09-24）起可交互</p>
+    </article>
+    <h2>正文域 · 行级语法（5）</h2>
+    <article class="entry" id="live-code-line">
+      <h3><code>.vsidian-code-line</code><span class="eid">live-code-line</span></h3>
+      <p class="purpose">live 围栏/缩进代码**行**（含围栏标记行）；卡片开启时的行级类另见 chrome 域 live-code-card-line。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：.HyperMD-codeblock（Obsidian 代码块行类族）</p>
+<p class="aliases">别名承诺：<code>HyperMD-codeblock</code></p>
+      <p class="dom">DOM 关系：live 容器内 .cm-line 行元素；围栏内逐行命中。</p>
+      <pre><code>.HyperMD-codeblock {
+  font-family: monospace;
+}</code></pre>
+      <p class="verify">验证：集成「稳定样式契约扩展」（#8）：.vsidian-code-line 命中 rgb(13, 14, 15)；集成「Obsidian 原名别名桥」：.HyperMD-codeblock 命中；cssProbe.liveCodeLineDecorationColor / obsidianAliases[&quot;live-code-line&quot;]</p>
+      <p class="life">引入：#8（2026-09-24）</p>
+    </article>
+    <article class="entry" id="live-quote-line">
+      <h3><code>.vsidian-quote-line</code><span class="eid">live-quote-line</span></h3>
+      <p class="purpose">live 引用行（&gt; 前缀）；引用内容不额外 span 化（见 limit-quote-span）。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-direct">direct</span></p>
+<p class="states">状态：行首 &gt; 标记仅在标记及相邻空格附近显形。</p>
+      <p class="obsidian">Obsidian 对应：.HyperMD-quote（Obsidian 引用行类）</p>
+<p class="aliases">别名承诺：<code>HyperMD-quote</code></p>
+      <p class="dom">DOM 关系：live 容器内 .cm-line 行元素。</p>
+      <pre><code>.HyperMD-quote {
+  border-left: 3px solid #888;
+  padding-left: 10px;
+}</code></pre>
+      <p class="verify">验证：集成「Obsidian 原名别名桥」：.HyperMD-quote 命中；cssProbe.obsidianAliases[&quot;live-quote-line&quot;]</p>
+      <p class="life">引入：#8（2026-09-24）</p>
+    </article>
+    <article class="entry" id="live-hr-line">
+      <h3><code>.vsidian-hr-line</code><span class="eid">live-hr-line</span></h3>
+      <p class="purpose">live 水平线**行**级类；#106 起升级渲染态后保留作源码态着色。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-direct">direct</span></p>
+<p class="states">状态：光标触及该行时源文显形（行级类仍命中）。</p>
+      <p class="obsidian">Obsidian 对应：.cm-hr（Obsidian 水平线 token 类）</p>
+<p class="aliases">别名承诺：<code>cm-hr</code></p>
+      <p class="dom">DOM 关系：live 容器内 .cm-line 行元素。</p>
+      <pre><code>.cm-hr {
+  color: var(--vsidian-hr-color);
+}</code></pre>
+      <p class="verify">验证：集成「Obsidian 原名别名桥」：.cm-hr 命中；cssProbe.obsidianAliases[&quot;live-hr-line&quot;]</p>
+      <p class="life">引入：#8（2026-09-24）</p>
+    </article>
+    <article class="entry" id="live-hr-widget">
+      <h3><code>.vsidian-hr</code><span class="eid">live-hr-widget</span></h3>
+      <p class="purpose">live 水平线渲染 widget 元素（#106：未触及时源文隐藏，本元素以居中渐变呈现真横线；行盒高等于正文行高，颜色与阅读 hr 同源变量 --vsidian-hr-color）。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-semantic">semantic</span></p>
+<p class="states">状态：光标触及该行时撤下 widget、显源码。</p>
+      <p class="obsidian">Obsidian 对应：.cm-hr 的横线绘制方向（Obsidian 由同一 token 类承担绘制；本项目拆分行类与 widget 两入口）</p>
+
+      <p class="dom">DOM 关系：替换水平线整段源文的行内元素。</p>
+      <pre><code>.vsidian-hr {
+  opacity: 0.9;
+}</code></pre>
+      <p class="verify">验证：单元 liveDecorations：hr widget 契约；hrPaintCssContract 钉横线绘制规则</p>
+      <p class="life">引入：#106（2026-09-27）</p>
+    </article>
+    <article class="entry" id="live-frontmatter-line">
+      <h3><code>.vsidian-frontmatter-line</code><span class="eid">live-frontmatter-line</span></h3>
+      <p class="purpose">live frontmatter 行（头块按源码呈现、语法不解析）。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：.cm-hmd-frontmatter（Obsidian frontmatter 类）</p>
+<p class="aliases">别名承诺：<code>cm-hmd-frontmatter</code></p>
+      <p class="dom">DOM 关系：live 容器内 .cm-line 行元素；边界由 markdownDoc.frontmatterRange 判定（两视图共用）。</p>
+      <pre><code>.cm-hmd-frontmatter {
+  color: var(--vscode-descriptionForeground);
+}</code></pre>
+      <p class="verify">验证：集成「Obsidian 原名别名桥」：.cm-hmd-frontmatter 命中；cssProbe.obsidianAliases[&quot;live-frontmatter-line&quot;]</p>
+      <p class="life">引入：#8（2026-09-24）</p>
+    </article>
+    <h2>正文域 · 表格（11）</h2>
+    <article class="entry" id="live-table-line">
+      <h3><code>.vsidian-table-line</code><span class="eid">live-table-line</span></h3>
+      <p class="purpose">live 表格行（表头/分隔/数据行通用）；仅源码降级或活动分隔行显示管道符。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：.HyperMD-table-line（Obsidian live 表格行类族）</p>
+<p class="aliases">别名承诺：<code>HyperMD-table-line</code></p>
+      <p class="dom">DOM 关系：live 容器内 .cm-line 行元素；与 header/delimiter 修饰叠加。</p>
+      <pre><code>.HyperMD-table-line {
+  font-family: monospace;
+}</code></pre>
+      <p class="verify">验证：集成「Obsidian 原名别名桥」：.HyperMD-table-line 命中；cssProbe.obsidianAliases[&quot;live-table-line&quot;]</p>
+      <p class="life">引入：#12（2026-09-24）</p>
+    </article>
+    <article class="entry" id="live-table-header-line">
+      <h3><code>.vsidian-table-header-line</code><span class="eid">live-table-header-line</span></h3>
+      <p class="purpose">live 表头行修饰。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-native">native</span></p>
+
+      <p class="obsidian">Obsidian 对应：无直接对应（Obsidian 以 thead 样式承担）</p>
+
+      <p class="dom">DOM 关系：表格行级叠加类。</p>
+      <pre><code>.vsidian-table-line.vsidian-table-header-line {
+  font-weight: 600;
+}</code></pre>
+      <p class="verify">验证：单元 liveDecorations：表头/分隔行修饰契约</p>
+      <p class="life">引入：#12（2026-09-24）</p>
+    </article>
+    <article class="entry" id="live-table-delimiter-line">
+      <h3><code>.vsidian-table-delimiter-line</code><span class="eid">live-table-delimiter-line</span></h3>
+      <p class="purpose">live 分隔行修饰（活动分隔行回到源码显示）。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-native">native</span></p>
+<p class="states">状态：光标进入分隔行时源码形态。</p>
+      <p class="obsidian">Obsidian 对应：无直接对应</p>
+
+      <p class="dom">DOM 关系：表格行级叠加类。</p>
+      <pre><code>.vsidian-table-line.vsidian-table-delimiter-line {
+  color: var(--vscode-descriptionForeground);
+}</code></pre>
+      <p class="verify">验证：单元 liveDecorations：分隔行修饰契约</p>
+      <p class="life">引入：#12（2026-09-24）</p>
+    </article>
+    <article class="entry" id="live-table-cell">
+      <h3><code>.vsidian-table-cell（+ -header 修饰）</code><span class="eid">live-table-cell</span></h3>
+      <p class="purpose">live 单元格内容 span（trim 后区间）；GFM 拆分语义自研（\| 与行内代码内的 | 不切分）。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：.cm-table-cell（社区主题常用方向，非 Obsidian 官方类）</p>
+<p class="aliases">别名承诺：<code>cm-table-cell</code></p>
+      <p class="dom">DOM 关系：表格行内 mark 装饰 span；与 align 修饰叠加。</p>
+      <pre><code>.cm-table-cell {
+  padding: 0 6px;
+}</code></pre>
+      <p class="verify">验证：集成「Obsidian 原名别名桥」：.cm-table-cell 命中；cssProbe.obsidianAliases[&quot;live-table-cell&quot;]</p>
+      <p class="life">引入：#12（2026-09-24）</p>
+    </article>
+    <article class="entry" id="live-table-pipe">
+      <h3><code>.vsidian-table-pipe</code><span class="eid">live-table-pipe</span></h3>
+      <p class="purpose">live 管道符 span（含首尾边界管道）；网格状态隐藏，源码状态可见。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-native">native</span></p>
+
+      <p class="obsidian">Obsidian 对应：无对应（Obsidian 隐藏或原样呈现管道）</p>
+
+      <p class="dom">DOM 关系：表格行内 mark 装饰 span。</p>
+      <pre><code>.vsidian-table-pipe {
+  color: var(--vscode-descriptionForeground);
+}</code></pre>
+      <p class="verify">验证：集成「表格装饰与单元格编辑写回」（#12）：.vsidian-table-pipe 命中 rgb(19, 20, 21)；cssProbe.liveTablePipeDecorationColor</p>
+      <p class="life">引入：#12（2026-09-24）</p>
+    </article>
+    <article class="entry" id="live-table-align">
+      <h3><code>.vsidian-table-align-{left/center/right}</code><span class="eid">live-table-align</span></h3>
+      <p class="purpose">live 分隔行声明的列对齐修饰（落在 trim 后内容 span 上）；网格实际布局由 grid-align 承担。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-native">native</span></p>
+
+      <p class="obsidian">Obsidian 对应：无对应（对齐由渲染布局承担）</p>
+
+      <p class="dom">DOM 关系：单元格 span 级叠加类。</p>
+      <pre><code>.vsidian-table-align-center {
+  text-align: center;
+}</code></pre>
+      <p class="verify">验证：单元 liveDecorations：对齐修饰契约</p>
+      <p class="life">引入：#12（2026-09-24）</p>
+    </article>
+    <article class="entry" id="live-table-grid-row">
+      <h3><code>.vsidian-table-grid-row（行附 data-vsidian-table-row=header/row 与 --vsidian-table-columns）</code><span class="eid">live-table-grid-row</span></h3>
+      <p class="purpose">安全表格的 CSS grid 网格行；活动格也保留；单元格仍与源区间对应（非独立表格数据模型）。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-semantic">semantic</span></p>
+
+      <p class="obsidian">Obsidian 对应：Obsidian live 网格方向（无精确对应类）</p>
+
+      <p class="dom">DOM 关系：表格行内的网格行容器（grid 布局）。</p>
+      <pre><code>.vsidian-table-grid-row {
+  grid-template-columns: var(--vsidian-table-columns);
+}</code></pre>
+      <p class="verify">验证：单元 liveDecorations + tableRegionSelection：网格结构契约；tablePaintCssContract 钉网格规则</p>
+      <p class="life">引入：#42（2026-09-24）</p>
+    </article>
+    <article class="entry" id="live-table-grid-cell">
+      <h3><code>.vsidian-table-grid-cell</code><span class="eid">live-table-grid-cell</span></h3>
+      <p class="purpose">安全表格的网格单元格；光标进入格子后网格不撤下，直接在该格源区间输入（复用 CM6 的 IME、导航与写回）。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-semantic">semantic</span></p>
+
+      <p class="obsidian">Obsidian 对应：Obsidian live 网格方向</p>
+
+      <p class="dom">DOM 关系：网格行内的单元格元素。</p>
+      <pre><code>.vsidian-table-grid-cell {
+  padding: 2px 8px;
+}</code></pre>
+      <p class="verify">验证：tablePaintCssContract：网格单元格规则；浏览器 tableCaret：光标直编回流</p>
+      <p class="life">引入：#42（2026-09-24）</p>
+    </article>
+    <article class="entry" id="live-table-grid-delimiter">
+      <h3><code>.vsidian-table-grid-delimiter</code><span class="eid">live-table-grid-delimiter</span></h3>
+      <p class="purpose">网格状态下的分隔行隐藏。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-semantic">semantic</span></p>
+<p class="states">状态：活动分隔行回到源码。</p>
+      <p class="obsidian">Obsidian 对应：Obsidian 表格对齐方向</p>
+
+      <p class="dom">DOM 关系：网格行内的分隔行元素。</p>
+      <pre><code>.vsidian-table-grid-delimiter {
+  display: none;
+}</code></pre>
+      <p class="verify">验证：tablePaintCssContract：分隔行隐藏规则</p>
+      <p class="life">引入：#42（2026-09-24）</p>
+    </article>
+    <article class="entry" id="live-table-grid-align">
+      <h3><code>.vsidian-table-grid-align-{left/center/right}</code><span class="eid">live-table-grid-align</span></h3>
+      <p class="purpose">网格状态的列对齐。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-semantic">semantic</span></p>
+
+      <p class="obsidian">Obsidian 对应：Obsidian 表格对齐方向</p>
+
+      <p class="dom">DOM 关系：网格单元格级叠加类。</p>
+      <pre><code>.vsidian-table-grid-align-center {
+  text-align: center;
+}</code></pre>
+      <p class="verify">验证：tablePaintCssContract：对齐规则</p>
+      <p class="life">引入：#42（2026-09-24）</p>
+    </article>
+    <article class="entry" id="live-table-escaped-pipe">
+      <h3><code>.vsidian-table-escaped-pipe</code><span class="eid">live-table-escaped-pipe</span></h3>
+      <p class="purpose">网格中隐藏转义管道符前的反斜杠；只改变显示，不改 Markdown 原文。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-native">native</span></p>
+
+      <p class="obsidian">Obsidian 对应：无直接对应</p>
+
+      <p class="dom">DOM 关系：网格单元格内 span。</p>
+      <pre><code>.vsidian-table-escaped-pipe {
+  display: none;
+}</code></pre>
+      <p class="verify">验证：单元 tableCells：转义管道拆分契约</p>
+      <p class="life">引入：#42（2026-09-24）</p>
+    </article>
+    <h2>正文域 · 阅读块级结构（12）</h2>
+    <article class="entry" id="reading-block">
+      <h3><code>.vsidian-reading-block（+ data-vsidian-src-start / -end 源锚点属性）</code><span class="eid">reading-block</span></h3>
+      <p class="purpose">阅读容器内每个内容块的基类；锚点属性为 LF 全文 UTF-16 offset（与消息协议坐标同构），按需挂载与任务定位依赖。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-native">native</span></p>
+
+      <p class="obsidian">Obsidian 对应：无对应（Obsidian 阅读为扁平标签流；本项目为 div 包裹 + 内层标签结构）</p>
+
+      <p class="dom">DOM 关系：.vsidian-view-reading 直接子元素；块内为 markdown-it 渲染的真实语义标签。</p>
+      <pre><code>.vsidian-reading-block {
+  margin: 0 0 12px;
+}</code></pre>
+      <p class="verify">验证：单元 readingView：块结构与锚点契约；集成「阅读视图表格」等块级用例</p>
+      <p class="life">引入：#6（2026-09-23）</p>
+    </article>
+    <article class="entry" id="reading-heading">
+      <h3><code>.vsidian-reading-heading-{1..6}（块类）+ 内层语义 h{1..6} 标签</code><span class="eid">reading-heading</span></h3>
+      <p class="purpose">阅读标题块；双入口命中（块类 + 内层标签）。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：.markdown-preview-view h{1..6}</p>
+
+      <p class="dom">DOM 关系：块级容器内含真实 h{n} 元素。</p>
+      <pre><code>.markdown-preview-view h1 {
+  color: var(--vsidian-heading-color-1);
+}</code></pre>
+      <p class="verify">验证：集成「稳定样式契约」（#6）：.vsidian-reading-heading-1 命中 rgb(4, 5, 6)；集成「Obsidian 原名别名桥」：.markdown-preview-view h1 命中；cssProbe.readingHeadingDecorationColor / obsidianAliases[&quot;reading-heading&quot;]</p>
+      <p class="life">引入：#6（2026-09-23）</p>
+    </article>
+    <article class="entry" id="reading-paragraph">
+      <h3><code>.vsidian-reading-paragraph（块类）+ 内层 p 标签</code><span class="eid">reading-paragraph</span></h3>
+      <p class="purpose">阅读段落块。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：.markdown-preview-view p</p>
+
+      <p class="dom">DOM 关系：块级容器内含真实 p 元素。</p>
+      <pre><code>.markdown-preview-view p {
+  margin: 0 0 10px;
+}</code></pre>
+      <p class="verify">验证：集成「Obsidian 原名别名桥」：.markdown-preview-view p 命中；cssProbe.obsidianAliases[&quot;reading-paragraph&quot;]</p>
+      <p class="life">引入：#6（2026-09-23）</p>
+    </article>
+    <article class="entry" id="reading-blockquote">
+      <h3><code>.vsidian-reading-blockquote（块类）+ 内层 blockquote 标签</code><span class="eid">reading-blockquote</span></h3>
+      <p class="purpose">阅读引用块。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：.markdown-preview-view blockquote</p>
+
+      <p class="dom">DOM 关系：块级容器内含真实 blockquote 元素。</p>
+      <pre><code>.markdown-preview-view blockquote {
+  border-left: 3px solid #888;
+}</code></pre>
+      <p class="verify">验证：集成「Obsidian 原名别名桥」：.markdown-preview-view blockquote 命中；cssProbe.obsidianAliases[&quot;reading-blockquote&quot;]</p>
+      <p class="life">引入：#8（2026-09-24）</p>
+    </article>
+    <article class="entry" id="reading-list">
+      <h3><code>.vsidian-reading-list（块类）+ 内层 ul/ol/li 嵌套（li 带源锚点）</code><span class="eid">reading-list</span></h3>
+      <p class="purpose">阅读列表块（整块还原嵌套结构）。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：.markdown-preview-view ul / ol / li</p>
+
+      <p class="dom">DOM 关系：块级容器内含真实 ul/ol &gt; li 嵌套。</p>
+      <pre><code>.markdown-preview-view ul {
+  padding-left: 22px;
+}</code></pre>
+      <p class="verify">验证：集成「Obsidian 原名别名桥」：.markdown-preview-view ul 命中；cssProbe.obsidianAliases[&quot;reading-list&quot;]</p>
+      <p class="life">引入：#6（2026-09-23）；#8 起还原嵌套</p>
+    </article>
+    <article class="entry" id="reading-task">
+      <h3><code>li.vsidian-reading-task</code><span class="eid">reading-task</span></h3>
+      <p class="purpose">阅读任务列表项（挂在语义 li 上）；data-task 扩展勾选状态（[/]、[!] 等）不支持。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：.markdown-preview-view .task-list-item</p>
+<p class="aliases">别名承诺：<code>task-list-item</code></p>
+      <p class="dom">DOM 关系：列表块内 li 元素。</p>
+      <pre><code>.markdown-preview-view .task-list-item {
+  list-style: none;
+}</code></pre>
+      <p class="verify">验证：集成「Obsidian 原名别名桥」：.task-list-item 命中；cssProbe.obsidianAliases[&quot;reading-task&quot;]</p>
+      <p class="life">引入：#8（2026-09-24）</p>
+    </article>
+    <article class="entry" id="reading-task-checkbox">
+      <h3><code>.vsidian-reading-task-checkbox（input[type=checkbox]）</code><span class="eid">reading-task-checkbox</span></h3>
+      <p class="purpose">阅读任务复选框（点击/键盘切换并写回）。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：.markdown-preview-view .task-list-item input[type=&quot;checkbox&quot;]</p>
+
+      <p class="dom">DOM 关系：任务 li 内 input 元素。</p>
+      <pre><code>.markdown-preview-view .task-list-item input[type=&quot;checkbox&quot;] {
+  accent-color: #98c379;
+}</code></pre>
+      <p class="verify">验证：集成「稳定样式契约」（#9）：.vsidian-reading-task-checkbox 命中 rgb(22, 23, 24)；集成「Obsidian 原名别名桥」：.task-list-item input[type=checkbox] 命中；cssProbe.readingTaskCheckboxDecorationColor / obsidianAliases[&quot;reading-task-checkbox&quot;]</p>
+      <p class="life">引入：#8（2026-09-24）；#9 起启用勾选写回</p>
+    </article>
+    <article class="entry" id="reading-code-block">
+      <h3><code>.vsidian-reading-code-block（块类）+ 内层 pre &gt; code（code 带语言类 language-x）</code><span class="eid">reading-code-block</span></h3>
+      <p class="purpose">阅读围栏/缩进代码块（内容不含围栏标记文本；大围栏超 60 行按行细分为多块；卡片化外壳另见 chrome 域 reading-code-card）。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：.markdown-preview-view pre</p>
+
+      <p class="dom">DOM 关系：块级容器内含真实 pre &gt; code。</p>
+      <pre><code>.markdown-preview-view pre {
+  background: var(--vsidian-reading-code-background);
+}</code></pre>
+      <p class="verify">验证：集成「Obsidian 原名别名桥」：.markdown-preview-view pre 命中；cssProbe.obsidianAliases[&quot;reading-code-block&quot;]</p>
+      <p class="life">引入：#8（2026-09-24）</p>
+    </article>
+    <article class="entry" id="reading-hr">
+      <h3><code>.vsidian-reading-hr（块类）+ 内层 hr 标签</code><span class="eid">reading-hr</span></h3>
+      <p class="purpose">阅读水平线块。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：.markdown-preview-view hr</p>
+
+      <p class="dom">DOM 关系：块级容器内含真实 hr 元素。</p>
+      <pre><code>.markdown-preview-view hr {
+  border-color: var(--vsidian-hr-color);
+}</code></pre>
+      <p class="verify">验证：集成「Obsidian 原名别名桥」：.markdown-preview-view hr 命中；cssProbe.obsidianAliases[&quot;reading-hr&quot;]</p>
+      <p class="life">引入：#8（2026-09-24）</p>
+    </article>
+    <article class="entry" id="reading-table">
+      <h3><code>.vsidian-reading-table（块类）+ 内层真实 table/thead/tbody（GFM 列对齐保留在 th/td 内联 style）</code><span class="eid">reading-table</span></h3>
+      <p class="purpose">阅读表格块（markdown-it 渲染，只读呈现）。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：.markdown-preview-view table</p>
+
+      <p class="dom">DOM 关系：块级容器内含真实 table 元素。</p>
+      <pre><code>.markdown-preview-view table {
+  background: var(--vsidian-table-background);
+}</code></pre>
+      <p class="verify">验证：集成「阅读视图表格」（#12）：.vsidian-reading-block table 命中 rgb(22, 23, 24)；集成「Obsidian 原名别名桥」：.markdown-preview-view table 命中；cssProbe.readingTableDecorationColor / obsidianAliases[&quot;reading-table&quot;]</p>
+      <p class="life">引入：#12（2026-09-24）</p>
+    </article>
+    <article class="entry" id="reading-frontmatter">
+      <h3><code>.vsidian-reading-frontmatter（块类；内部 pre.vsidian-reading-frontmatter-text）</code><span class="eid">reading-frontmatter</span></h3>
+      <p class="purpose">阅读 frontmatter 头块（源码呈现，头块内语法不解析，两视图共用边界判定）。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：.markdown-preview-view .markdown-frontmatter</p>
+<p class="aliases">别名承诺：<code>markdown-frontmatter</code></p>
+      <p class="dom">DOM 关系：块级容器内 pre 元素。</p>
+      <pre><code>.markdown-preview-view .markdown-frontmatter {
+  color: var(--vscode-descriptionForeground);
+}</code></pre>
+      <p class="verify">验证：集成「Obsidian 原名别名桥」：.markdown-frontmatter 命中；cssProbe.obsidianAliases[&quot;reading-frontmatter&quot;]</p>
+      <p class="life">引入：#8（2026-09-24）</p>
+    </article>
+    <article class="entry" id="reading-spacer">
+      <h3><code>.vsidian-reading-spacer（-top / -bottom）</code><span class="eid">reading-spacer</span></h3>
+      <p class="purpose">阅读视口占位：屏外块的高度占位（非内容节点，高度为块高度表前后缀和）；本项目自有结构，不参与兼容承诺，出现在片段中不影响内容块定位。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：无对应（Obsidian 虚拟化由内部机制承担）</p>
+
+      <p class="dom">DOM 关系：阅读容器首/尾的占位 div。</p>
+      <pre><code>/* 无需定位；虚拟化结构见 limit-virtualization */</code></pre>
+      <p class="verify">验证：单元 readingViewport / readingVirtualView：挂载窗口与 spacer 契约</p>
+      <p class="life">引入：#7（2026-09-24）</p>
+    </article>
+    <h2>正文域 · 链接、图片与双链（6）</h2>
+    <article class="entry" id="live-link">
+      <h3><code>.vsidian-link</code><span class="eid">live-link</span></h3>
+      <p class="purpose">live 链接**内容** span（始终标记；光标或选区进入该链接范围时显示 [ 和 ](url) 源码，同一行其他链接保持格式化）；隐藏尾部对应 Obsidian .cm-formatting-link / .cm-string.cm-url 方向——本项目以隐藏呈现，无独立样式类。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-direct">direct</span></p>
+<p class="states">状态：光标/选区进入链接范围时源码显形。</p>
+      <p class="obsidian">Obsidian 对应：.cm-link（Obsidian 链接内容 token）</p>
+<p class="aliases">别名承诺：<code>cm-link</code></p>
+      <p class="dom">DOM 关系：live 行内 mark 装饰 span（间接装饰：视口外按源码呈现，滚动进入视口后应用）。</p>
+      <pre><code>.cm-link {
+  color: #61afef;
+}</code></pre>
+      <p class="verify">验证：集成「稳定样式契约」（#10）：.vsidian-link 命中 rgb(19, 20, 21)；集成「Obsidian 原名别名桥」：.cm-link 命中；cssProbe.liveLinkDecorationColor / obsidianAliases[&quot;live-link&quot;]</p>
+      <p class="life">引入：#10（2026-09-24）</p>
+    </article>
+    <article class="entry" id="reading-link">
+      <h3><code>阅读链接（语义 a 标签，无自有类）</code><span class="eid">reading-link</span></h3>
+      <p class="purpose">阅读链接：markdown-it 渲染的语义 &lt;a&gt;（单击经容器委托上报跳转意图，不做 webview 原生导航）。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：.markdown-preview-view a</p>
+
+      <p class="dom">DOM 关系：阅读块内真实 a 元素。</p>
+      <pre><code>.markdown-preview-view a {
+  color: #61afef;
+}</code></pre>
+      <p class="verify">验证：集成「稳定样式契约」（#10）：阅读 a 探针 rgb(22, 23, 24)；集成「Obsidian 原名别名桥」：.markdown-preview-view a 命中；cssProbe.readingLinkDecorationColor / obsidianAliases[&quot;reading-link&quot;]</p>
+      <p class="life">引入：#10（2026-09-24）</p>
+    </article>
+    <article class="entry" id="image-slot">
+      <h3><code>.vsidian-image（双视图）</code><span class="eid">image-slot</span></h3>
+      <p class="purpose">图片槽位基类：阅读视图为 &lt;img&gt; 元素本体（Obsidian img 标签选择器天然命中）；live 视图为 widget 容器 span（内部 img 由资源管理器装载，本项目自有形态）。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
+<p class="states">状态：进入视口才发起装载；离开视口卸载释放（src 清空）。</p>
+      <p class="obsidian">Obsidian 对应：.markdown-preview-view img（阅读）/ .cm-image（live 方向，Obsidian 无公开稳定类）</p>
+
+      <p class="dom">DOM 关系：阅读：块内 img.vsidian-image；live：行内 widget span.vsidian-image &gt; img。</p>
+      <pre><code>.markdown-preview-view img {
+  max-width: 100%;
+}</code></pre>
+      <p class="verify">验证：集成「稳定样式契约」（#10）：阅读 img.vsidian-image 命中 rgb(25, 26, 27)；cssProbe.readingImageDecorationColor</p>
+      <p class="life">引入：#10（2026-09-24）</p>
+    </article>
+    <article class="entry" id="image-states">
+      <h3><code>.vsidian-image-loading / -loaded / -error（与 data-vsidian-img-state 同步）</code><span class="eid">image-states</span></h3>
+      <p class="purpose">图片三态：占位（alt 文本）/ 已加载（load 事件确认）/ 失败（点击重试，可见错误轮廓）。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-native">native</span></p>
+<p class="states">状态：loading → loaded / error；error 态点击可重试。</p>
+      <p class="obsidian">Obsidian 对应：无直接对应（Obsidian 无公开加载状态类）</p>
+
+      <p class="dom">DOM 关系：图片槽位元素级状态修饰类。</p>
+      <pre><code>.vsidian-image-error {
+  outline: 1px dashed #e06c75;
+}</code></pre>
+      <p class="verify">验证：单元 imageResource：三态状态机契约；集成 reading.test.image 注入用例</p>
+      <p class="life">引入：#10（2026-09-24）</p>
+    </article>
+    <article class="entry" id="live-wikilink">
+      <h3><code>.vsidian-wikilink</code><span class="eid">live-wikilink</span></h3>
+      <p class="purpose">live 双链呈现：光标在范围外时为显示文字 widget（替换整个 [[…]]，别名类挂在 widget 外层与源码 mark 上），进入范围后为源码 mark。Obsidian 的拆分形态（链接名/别名/格式化括号）无拆分类。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-direct">direct</span></p>
+<p class="states">状态：光标进入该双链范围时源码显形。</p>
+      <p class="obsidian">Obsidian 对应：.cm-hmd-internal-link（Obsidian live 内链 token 类族）</p>
+<p class="aliases">别名承诺：<code>cm-hmd-internal-link</code></p>
+      <p class="dom">DOM 关系：live 行内 widget 或 mark 装饰（间接装饰，视口外按源码呈现；围栏/行内代码与 frontmatter 内不装饰）。</p>
+      <pre><code>.cm-hmd-internal-link {
+  color: #c678dd;
+}</code></pre>
+      <p class="verify">验证：集成「稳定样式契约」（#11）：.vsidian-wikilink 命中 rgb(28, 29, 30)；集成「Obsidian 原名别名桥」：.cm-hmd-internal-link 命中；cssProbe.liveWikilinkDecorationColor / obsidianAliases[&quot;live-wikilink&quot;]</p>
+      <p class="life">引入：#11（2026-09-24）</p>
+    </article>
+    <article class="entry" id="reading-wikilink">
+      <h3><code>a.vsidian-wikilink</code><span class="eid">reading-wikilink</span></h3>
+      <p class="purpose">阅读双链：markdown-it 双链规则渲染的语义 &lt;a&gt;（href 为原文 target，显示别名或链接名；单击上报跳转意图）。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：.markdown-preview-view a.internal-link（Obsidian 阅读内链类）</p>
+<p class="aliases">别名承诺：<code>internal-link</code></p>
+      <p class="dom">DOM 关系：阅读块内真实 a 元素。</p>
+      <pre><code>.markdown-preview-view a.internal-link {
+  color: #c678dd;
+}</code></pre>
+      <p class="verify">验证：集成「稳定样式契约」（#11）：阅读 a.vsidian-wikilink 命中 rgb(31, 32, 33)；集成「Obsidian 原名别名桥」：a.internal-link 命中；cssProbe.readingWikilinkDecorationColor / obsidianAliases[&quot;reading-wikilink&quot;]</p>
+      <p class="life">引入：#11（2026-09-24）</p>
+    </article>
+    <h2>正文域 · 公开 CSS 变量（8）</h2>
+    <article class="entry" id="var-heading-color">
+      <h3><code>--vsidian-heading-color-{1..6}</code><span class="eid">var-heading-color</span></h3>
+      <p class="purpose">标题层级色变量族：live 标题行级、阅读标题块级与大纲条目级三侧同引（主题分级着色一处定义多处生效）。默认 var(--vscode-editor-foreground)。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：--h1-color … --h6-color（Obsidian 分色变量族）</p>
+<p class="aliases">别名承诺：<code>--h1-color</code> <code>--h2-color</code> <code>--h3-color</code> <code>--h4-color</code> <code>--h5-color</code> <code>--h6-color</code></p>
+      <p class="dom">DOM 关系：定义于 #app；Obsidian 别名 --h{1..6}-color 经变量桥生效（vsidian 名整条覆盖严格优先）。</p>
+      <pre><code>:root {
+  --h1-color: #61afef; /* Obsidian 写法 */
+  --vsidian-heading-color-1: #61afef; /* vsidian 写法（优先） */
+}</code></pre>
+      <p class="verify">验证：集成「Obsidian 原名别名桥」：--h1-color 探针驱动标题 computed color；cssProbe.obsidianHeadingColor（live/reading）；outlineCssContract：三侧同引关系</p>
+      <p class="life">引入：#65（2026-09-25）</p>
+    </article>
+    <article class="entry" id="var-reading-font-size">
+      <h3><code>--vsidian-reading-font-size</code><span class="eid">var-reading-font-size</span></h3>
+      <p class="purpose">阅读正文字号；默认 var(--vsidian-content-font-size)（跟随 VSCode 编辑器字号）。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：--font-text-size</p>
+<p class="aliases">别名承诺：<code>--font-text-size</code></p>
+      <p class="dom">DOM 关系：定义于阅读内容层；Obsidian 别名 --font-text-size。</p>
+      <pre><code>:root { --font-text-size: 16px; }</code></pre>
+      <p class="verify">验证：单元：reading 排版消费契约（#32 排版基线用例）；obsidianAliasCssContract 钉变量桥形态</p>
+      <p class="life">引入：#32（2026-09-24，随两模式排版基线公开）</p>
+    </article>
+    <article class="entry" id="var-reading-max-width">
+      <h3><code>--vsidian-reading-max-width</code><span class="eid">var-reading-max-width</span></h3>
+      <p class="purpose">阅读块最大宽度；默认 760px。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：--file-line-width</p>
+<p class="aliases">别名承诺：<code>--file-line-width</code></p>
+      <p class="dom">DOM 关系：定义于阅读内容层；Obsidian 别名 --file-line-width。</p>
+      <pre><code>:root { --file-line-width: 700px; }</code></pre>
+      <p class="verify">验证：obsidianAliasCssContract：变量桥形态</p>
+      <p class="life">引入：#32（2026-09-24）</p>
+    </article>
+    <article class="entry" id="var-reading-line-height">
+      <h3><code>--vsidian-reading-line-height</code><span class="eid">var-reading-line-height</span></h3>
+      <p class="purpose">阅读正文行高；默认 var(--vsidian-content-line-height)。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：--line-height-normal</p>
+<p class="aliases">别名承诺：<code>--line-height-normal</code></p>
+      <p class="dom">DOM 关系：定义于阅读内容层；Obsidian 别名 --line-height-normal。</p>
+      <pre><code>:root { --line-height-normal: 1.7; }</code></pre>
+      <p class="verify">验证：obsidianAliasCssContract：变量桥形态</p>
+      <p class="life">引入：#32（2026-09-24）</p>
+    </article>
+    <article class="entry" id="var-reading-code-background">
+      <h3><code>--vsidian-reading-code-background</code><span class="eid">var-reading-code-background</span></h3>
+      <p class="purpose">代码块背景；默认 var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12))。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：--code-background</p>
+<p class="aliases">别名承诺：<code>--code-background</code></p>
+      <p class="dom">DOM 关系：定义于阅读代码块层；Obsidian 别名 --code-background。</p>
+      <pre><code>:root { --code-background: rgba(0, 0, 0, 0.3); }</code></pre>
+      <p class="verify">验证：obsidianAliasCssContract：变量桥形态</p>
+      <p class="life">引入：#32（2026-09-24）</p>
+    </article>
+    <article class="entry" id="var-highlight-background">
+      <h3><code>--vsidian-highlight-background</code><span class="eid">var-highlight-background</span></h3>
+      <p class="purpose">高亮底色：live 正文 span、阅读 mark、大纲条目三侧同引。默认深色 rgba(255, 208, 0, 0.35)、浅色 body.vscode-light 覆盖 #ffe066（两轮视觉实测主题变量对比不足，切 Obsidian 式固定荧光黄双主题调校）。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：--text-highlight-bg</p>
+<p class="aliases">别名承诺：<code>--text-highlight-bg</code></p>
+      <p class="dom">DOM 关系：定义于 #app（浅色分支 body.vscode-light）；Obsidian 别名 --text-highlight-bg。</p>
+      <pre><code>:root { --text-highlight-bg: rgba(255, 208, 0, 0.4); }</code></pre>
+      <p class="verify">验证：highlightPaintCssContract：三侧同引；obsidianAliasCssContract：变量桥形态（含浅色分支）</p>
+      <p class="life">引入：#105（2026-09-27）</p>
+    </article>
+    <article class="entry" id="var-table-background">
+      <h3><code>--vsidian-table-background</code><span class="eid">var-table-background</span></h3>
+      <p class="purpose">live 表格行背景 / 阅读表头背景；默认 rgba(128, 128, 128, 0.05)。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：--table-background</p>
+<p class="aliases">别名承诺：<code>--table-background</code></p>
+      <p class="dom">DOM 关系：定义于 #app（#132 起集中定义；此前消费处内联 fallback）；Obsidian 别名 --table-background。</p>
+      <pre><code>:root { --table-background: rgba(128, 128, 128, 0.1); }</code></pre>
+      <p class="verify">验证：obsidianAliasCssContract：变量桥形态</p>
+      <p class="life">引入：#12（2026-09-24）</p>
+    </article>
+    <article class="entry" id="var-heading-accent">
+      <h3><code>--vsidian-heading-accent（已移除）</code><span class="eid">var-heading-accent</span></h3>
+      <p class="purpose">曾为 live 视口内标题左缘强调色；随 #55 移除左缘竖线一并移除，不再公开。保留本条目作为弃用/移除生命周期的历史记录。</p>
+      <p class="views"><span class="badge badge-none">非编辑视图</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：无</p>
+
+      <p class="dom">DOM 关系：无（变量不再被定义或消费）。</p>
+      <pre><code>/* 无替代写法：标题行强调请使用 .vsidian-heading-active 或层级色变量族 */</code></pre>
+      <p class="verify">验证：单元：CSS 源不再含该变量定义（迁移历史断言）</p>
+      <p class="life">引入：#5（2026-09-23） · 移除：v0.2.x 周期内随 #55（2026-09-25）移除；移除时该变量仅随内部测试片段使用，无用户迁移负担</p>
+    </article>
+    <h2>正文域 · 不支持与限制（11）</h2>
+    <article class="entry" id="limit-hashtag">
+      <h3><code>.cm-hashtag / .tag</code><span class="eid">limit-hashtag</span></h3>
+      <p class="purpose">标签（#tag）语法未实现：出现在片段中不命中（不报错也不生效）。</p>
+      <p class="views"><span class="badge badge-none">非编辑视图</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：.cm-hashtag（live）/ .tag（阅读）</p>
+
+      <p class="dom">DOM 关系：无标签节点。</p>
+      <p class="verify">验证：清单即边界：未实现即不承诺</p>
+      <p class="life">引入：#11（2026-09-24，随双链节如实记录）</p>
+    </article>
+    <article class="entry" id="limit-callout">
+      <h3><code>.callout 及其 data 属性</code><span class="eid">limit-callout</span></h3>
+      <p class="purpose">Callout 语法未实现，后续版本提供。</p>
+      <p class="views"><span class="badge badge-none">非编辑视图</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：.callout</p>
+
+      <p class="dom">DOM 关系：无 callout 结构。</p>
+      <p class="verify">验证：清单即边界</p>
+      <p class="life">引入：#6（2026-09-23）</p>
+    </article>
+    <article class="entry" id="limit-task-extended-states">
+      <h3><code>.task-list-item[data-task=&quot;x&quot;] 等</code><span class="eid">limit-task-extended-states</span></h3>
+      <p class="purpose">任务扩展勾选状态不支持：仅空格 / x / X 三态。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：.task-list-item[data-task]</p>
+
+      <p class="dom">DOM 关系：任务 checkbox 仅 :checked 与 .vsidian-task-checked 双入口。</p>
+      <p class="verify">验证：单元 taskToggle：三态解析契约</p>
+      <p class="life">引入：#9（2026-09-24）</p>
+    </article>
+    <article class="entry" id="limit-markdown-embed">
+      <h3><code>.markdown-embed / 嵌入结构</code><span class="eid">limit-markdown-embed</span></h3>
+      <p class="purpose">嵌入（![[…]] 等）结构未提供（双链残缺形态按原文显示）；blockquote 块已支持。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：.markdown-embed</p>
+
+      <p class="dom">DOM 关系：无嵌入容器。</p>
+      <p class="verify">验证：清单即边界</p>
+      <p class="life">引入：#11（2026-09-24）</p>
+    </article>
+    <article class="entry" id="limit-strikethrough-live">
+      <h3><code>.cm-strikethrough（live 侧）</code><span class="eid">limit-strikethrough-live</span></h3>
+      <p class="purpose">删除线 live 侧未装饰：解析器支持但 live 视图无装饰类，源码形态呈现；阅读侧 del 标签可用（见 inline-strikethrough）。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：.cm-strikethrough（live token）/ 阅读侧 del 已支持</p>
+
+      <p class="dom">DOM 关系：live 无删除线 span。</p>
+      <p class="verify">验证：单元 liveDecorations：无 Strikethrough 装饰（现状契约）</p>
+      <p class="life">引入：#8（2026-09-24，如实记录）</p>
+    </article>
+    <article class="entry" id="limit-quote-span">
+      <h3><code>.cm-quote（span 级）</code><span class="eid">limit-quote-span</span></h3>
+      <p class="purpose">引用内容不额外 span 化：live 侧仅行级 .HyperMD-quote 别名；Obsidian 的 span 级 .cm-quote token 类不承诺。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：.cm-quote（span 级 token）</p>
+
+      <p class="dom">DOM 关系：引用行内无内容 span。</p>
+      <p class="verify">验证：单元 liveDecorations：引用仅行级装饰</p>
+      <p class="life">引入：#8（2026-09-24）</p>
+    </article>
+    <article class="entry" id="limit-is-unresolved">
+      <h3><code>双链 is-unresolved 区分（按目标存在与否变色）</code><span class="eid">limit-is-unresolved</span></h3>
+      <p class="purpose">不做：显示时不查询工作区，避免为样式引入索引/查找。双链一律同色呈现。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：.is-unresolved</p>
+
+      <p class="dom">DOM 关系：无 unresolved 修饰类。</p>
+      <p class="verify">验证：清单即边界</p>
+      <p class="life">引入：#11（2026-09-24）</p>
+    </article>
+    <article class="entry" id="limit-reference-links-live">
+      <h3><code>引用式链接/图片（[t][ref]）live 侧</code><span class="eid">limit-reference-links-live</span></h3>
+      <p class="purpose">引用式链接/图片：阅读视图由 markdown-it 完整解析（可点击）；live 视图不解析引用定义、按源码呈现（Ctrl+单击不跳转）——跨视图行为差异。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：Obsidian 两视图均解析</p>
+
+      <p class="dom">DOM 关系：live 无引用式链接装饰。</p>
+      <p class="verify">验证：单元 liveLinks：引用式链接不装饰契约</p>
+      <p class="life">引入：#10（2026-09-24）</p>
+    </article>
+    <article class="entry" id="limit-table-crossview">
+      <h3><code>行内代码内 | 的表格拆分跨视图差异</code><span class="eid">limit-table-crossview</span></h3>
+      <p class="purpose">markdown-it 不识别行内代码内的 |：含该形态的表格在阅读视图错切或降级为段落；live 侧按 GFM 规范正确拆分（偏差记录于 docs/perf/2026-09-table-cell-editing.md「已知限制」）。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：Obsidian 两侧一致</p>
+
+      <p class="dom">DOM 关系：阅读表格按 markdown-it 拆分。</p>
+      <p class="verify">验证：单元 tableCells vs readingTable：拆分语义差异既有记录</p>
+      <p class="life">引入：#12（2026-09-24）</p>
+    </article>
+    <article class="entry" id="limit-virtualization">
+      <h3><code>阅读视图虚拟化（全文 DOM 非常驻）</code><span class="eid">limit-virtualization</span></h3>
+      <p class="purpose">阅读视口外块不存在于 DOM：依赖「全文 DOM 常驻」的片段（全局 :nth-child 定位、跨屏兄弟/后代选择器、假设完整内容高度的滚动条计算）与按需挂载冲突。滚动回视口的块重新挂载并继承文档级样式。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：Obsidian 虚拟化由内部机制承担</p>
+
+      <p class="dom">DOM 关系：视口外由 spacer 占位（见 reading-spacer）。</p>
+      <p class="verify">验证：集成「阅读视图按需挂载」（#7）：窗口有界断言；#132 别名桥用例含视口重挂载探针复验</p>
+      <p class="life">引入：#7（2026-09-24）</p>
+    </article>
+    <article class="entry" id="limit-find-hit-mask">
+      <h3><code>查找高亮与隐藏标记区的交叉形态</code><span class="eid">limit-find-hit-mask</span></h3>
+      <p class="purpose">当前匹配的 replace 装饰优先于查找高亮：命中区间落在被折叠的隐藏标记（如链接语法标记）内时查找高亮不可见；匹配计数与步进不受影响（按全文文本模型计算）。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：—</p>
+
+      <p class="dom">DOM 关系：查找高亮装饰层与语法装饰层叠加。</p>
+      <p class="verify">验证：单元 findSession：匹配计数契约</p>
+      <p class="life">引入：#14（2026-09-24）</p>
+    </article>
+  </section>
+  <section class="domain" data-domain="chrome">
+    <h1 style="font-size:19px;margin-bottom:4px">界面域（46 条）</h1>
+    <p class="note">界面域条目（#133 起逐项核实）：静态入口经探针在真实渲染中断言，交互态入口由浏览器/集成套件按行为路径验证；第三方渲染器（KaTeX/Mermaid）内部 DOM 不承诺为稳定接口（见各域「限制」类目）。</p>
+    <h2>界面域 · 公式（5）</h2>
+    <article class="entry" id="live-math">
+      <h3><code>.vsidian-math</code><span class="eid">live-math</span></h3>
+      <p class="purpose">公式渲染态稳定容器：live 为行内 widget 外层、阅读为 KaTeX 外层 span/p（内含 KaTeX .katex 结构）；颜色继承编辑器前景。Obsidian 拆分 .cm-math-begin/end 定界符类，本项目整体替换、无拆分类。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-semantic">semantic</span></p>
+<p class="states">状态：live 侧光标进入公式范围显源码（见 live-math-source）。</p>
+      <p class="obsidian">Obsidian 对应：.cm-math（Obsidian live 数学 token）</p>
+
+      <p class="dom">DOM 关系：live：行内替换 widget；阅读：行内 span 或块级 p.katex-block（KaTeX HTML 由 KaTeX 产出）。</p>
+      <pre><code>.vsidian-math .katex {
+  color: inherit;
+}</code></pre>
+      <p class="verify">验证：集成「live 公式渲染与绘制层」（#59）：paint.math.visible + cssProbe.liveMathFontFamily；集成「界面域样式契约」（#133）：chromeSelectors[&quot;live-math-live&quot;/&quot;reading-math-block&quot;] 探针命中（KaTeX 在稳定容器内）</p>
+      <p class="life">引入：#59（2026-09-25）</p>
+    </article>
+    <article class="entry" id="live-math-block">
+      <h3><code>.vsidian-math-block</code><span class="eid">live-math-block</span></h3>
+      <p class="purpose">块级公式（$$…$$ / \begin{align} 等）渲染态变体：独立成块、居中、横向滚动。live widget 与阅读 p.katex-block 双侧同发射（与 .vsidian-math 并挂）。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-semantic">semantic</span></p>
+
+      <p class="obsidian">Obsidian 对应：.HyperMD-math（块级数学行）方向</p>
+
+      <p class="dom">DOM 关系：live：块级替换 widget；阅读：p.katex-block（vsidian-math 与本类并挂）。</p>
+      <pre><code>.vsidian-math-block {
+  margin: 8px 0;
+}</code></pre>
+      <p class="verify">验证：mathPaintCssContract：display:block + text-align:center + overflow-x:auto；集成「界面域样式契约」（#133）：chromeSelectors[&quot;live-math-block-live&quot;] 探针命中</p>
+      <p class="life">引入：#59（2026-09-25）</p>
+    </article>
+    <article class="entry" id="live-math-source">
+      <h3><code>.vsidian-math-source</code><span class="eid">live-math-source</span></h3>
+      <p class="purpose">光标进入公式范围后的源码显形 mark（等宽着色 + 浅底）。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-semantic">semantic</span></p>
+<p class="states">状态：光标进入公式范围时。</p>
+      <p class="obsidian">Obsidian 对应：.cm-hmd-math-begin 编辑态方向</p>
+
+      <p class="dom">DOM 关系：live mark 装饰。</p>
+      <pre><code>.vsidian-math-source {
+  color: var(--vscode-textPreformat-foreground);
+}</code></pre>
+      <p class="verify">验证：mathPaintCssContract：--vscode-textPreformat-foreground 着色；单元 liveMath：mathSource mark 发射契约</p>
+      <p class="life">引入：#59（2026-09-25）</p>
+    </article>
+    <article class="entry" id="reading-math-block">
+      <h3><code>.vsidian-reading-math（块类）+ .katex-block 内层 display 容器</code><span class="eid">reading-math-block</span></h3>
+      <p class="purpose">阅读公式块（markdown-it-katex 渲染，挂载即渲染、卸载即释放，高度由 ResizeObserver 回填）；块内公式容器为 p.katex-block（vsidian-math/-math-block 并挂其上）。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-semantic">semantic</span></p>
+
+      <p class="obsidian">Obsidian 对应：.markdown-preview-view .math-block</p>
+
+      <p class="dom">DOM 关系：阅读块级容器内 &lt;p class=&quot;katex-block&quot;&gt; 包 .katex-display。</p>
+      <pre><code>.katex-block {
+  text-align: center;
+}</code></pre>
+      <p class="verify">验证：cssProbe.readingMathFontFamily：KaTeX 字体族；集成「界面域样式契约」（#133）：chromeSelectors[&quot;reading-math-block&quot;] 探针命中（katex-block 在阅读块内）</p>
+      <p class="life">引入：#59（2026-09-25）</p>
+    </article>
+    <article class="entry" id="math-error">
+      <h3><code>.vsidian-math-error</code><span class="eid">math-error</span></h3>
+      <p class="purpose">公式解析失败的原文降级 span：错误色 + 浅红底 + 等宽字体，原文完整可读（两视图共用；title 属性带原文便于悬停核对）。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-semantic">semantic</span></p>
+
+      <p class="obsidian">Obsidian 对应：.math-error / .katex-error 方向</p>
+
+      <p class="dom">DOM 关系：live：替换 widget span；阅读：span（行内）/ p.katex-block&gt;code（块级）。</p>
+      <pre><code>.vsidian-math-error {
+  color: var(--vscode-errorForeground);
+}</code></pre>
+      <p class="verify">验证：mathPaintCssContract：错误色变量；集成「界面域样式契约」（#133）：chromeSelectors[&quot;math-error-live&quot;/&quot;math-error-reading&quot;] 探针命中</p>
+      <p class="life">引入：#59（2026-09-25）</p>
+    </article>
+    <h2>界面域 · 图表渲染（4）</h2>
+    <article class="entry" id="mermaid-container">
+      <h3><code>.vsidian-mermaid</code><span class="eid">mermaid-container</span></h3>
+      <p class="purpose">mermaid 围栏渲染容器（live widget 内层与阅读 fence 容器共用；携带 data-vsidian-mermaid-code 源码与 data-vsidian-mermaid-state 状态 loading/rendered/error）。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-semantic">semantic</span></p>
+
+      <p class="obsidian">Obsidian 对应：.mermaid（Obsidian 阅读渲染的图表容器）</p>
+
+      <p class="dom">DOM 关系：live：vsidian-graphic-frame widget 内层；阅读：vsidian-reading-mermaid 块内。渲染容器内含 mermaid SVG（rendered 态）。</p>
+      <pre><code>.vsidian-mermaid {
+  background: rgba(0, 0, 0, 0.2);
+}</code></pre>
+      <p class="verify">验证：集成「live/阅读 Mermaid 渲染」（#60）：paint.mermaid.visible + 分态计数；mermaidPaintCssContract；集成「界面域样式契约」（#133）：chromeSelectors[&quot;mermaid-container-live&quot;/&quot;mermaid-container-reading&quot;] 探针命中（rendered 态门控）</p>
+      <p class="life">引入：#60（2026-09-25）</p>
+    </article>
+    <article class="entry" id="mermaid-svg">
+      <h3><code>.vsidian-mermaid svg</code><span class="eid">mermaid-svg</span></h3>
+      <p class="purpose">mermaid 自产 SVG（宽度受容器约束、高度等比）。SVG 内部节点为第三方渲染器私有 DOM，不承诺稳定（见 limit-mermaid-internals）。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-semantic">semantic</span></p>
+
+      <p class="obsidian">Obsidian 对应：.mermaid svg</p>
+
+      <p class="dom">DOM 关系：渲染容器内 SVG。</p>
+      <pre><code>.vsidian-mermaid svg {
+  max-width: 100%;
+}</code></pre>
+      <p class="verify">验证：浏览器 mermaidPaint：真实渲染（CSP 复刻页）；mermaidPaintCssContract：max-width；集成「界面域样式契约」（#133）：chromeSelectors[&quot;mermaid-svg-live&quot;] 探针命中</p>
+      <p class="life">引入：#60（2026-09-25）</p>
+    </article>
+    <article class="entry" id="reading-mermaid-block">
+      <h3><code>.vsidian-reading-mermaid</code><span class="eid">reading-mermaid-block</span></h3>
+      <p class="purpose">阅读 mermaid 围栏整块成块的块元素类（豁免 60 行大围栏切片；挂载即渲染、卸载随块释放）；块内才是 .vsidian-mermaid 渲染容器。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-semantic">semantic</span></p>
+
+      <p class="obsidian">Obsidian 对应：.markdown-preview-view .mermaid 方向</p>
+
+      <p class="dom">DOM 关系：阅读块级容器。</p>
+      <pre><code>.vsidian-reading-mermaid {
+  margin: 8px 0;
+}</code></pre>
+      <p class="verify">验证：集成「阅读模式 Mermaid 渲染」（#60）；集成「界面域样式契约」（#133）：chromeSelectors[&quot;reading-mermaid-block&quot;] 探针命中</p>
+      <p class="life">引入：#60（2026-09-25）</p>
+    </article>
+    <article class="entry" id="mermaid-error">
+      <h3><code>.vsidian-mermaid-error（含 -message / -source）</code><span class="eid">mermaid-error</span></h3>
+      <p class="purpose">mermaid 语法/渲染失败降级态：错误信息 + 源码可读，光标进入围栏仍可编辑（两视图共用）。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-semantic">semantic</span></p>
+
+      <p class="obsidian">Obsidian 对应：.mermaid error 方向</p>
+
+      <p class="dom">DOM 关系：错误容器内 message/source 两区。</p>
+      <pre><code>.vsidian-mermaid-error-message {
+  color: var(--vscode-errorForeground);
+}</code></pre>
+      <p class="verify">验证：mermaidPaintCssContract：错误色与左对齐；集成「界面域样式契约」（#133）：chromeSelectors[&quot;mermaid-error&quot;] 探针命中</p>
+      <p class="life">引入：#60（2026-09-25）</p>
+    </article>
+    <h2>界面域 · 图形化按钮与弹窗（2）</h2>
+    <article class="entry" id="graphic-chrome">
+      <h3><code>.vsidian-graphic-frame / .vsidian-graphic-chrome（含 -edit / -popup）</code><span class="eid">graphic-chrome</span></h3>
+      <p class="purpose">图形化代码块（渲染成图形的围栏）定位包裹层与右上角按钮组：edit 进源码编辑（仅实时预览）、popup 打开图表弹窗；按钮组悬停显隐由 CSS 驱动（透明度切换，DOM 常驻渲染成功态）。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+<p class="states">状态：渲染成功态显示按钮组（error 降级块不发射）；edit 按钮仅实时预览侧装配。</p>
+      <p class="obsidian">Obsidian 对应：无（Obsidian 图表块无公开按钮组结构）</p>
+
+      <p class="dom">DOM 关系：live：围栏 widget 外层 frame；阅读：mermaid/图形容器外层 frame。按钮组挂 frame 内 absolute 右上。</p>
+      <pre><code>.vsidian-graphic-chrome {
+  opacity: 1;
+}</code></pre>
+      <p class="verify">验证：集成「图形化代码块按钮组与图表弹窗」（#111）：paint.graphic.frames/editButtons/popupButtons；浏览器 graphicPopup：悬停显隐（透明度两态）；集成「界面域样式契约」（#133）：chromeSelectors[&quot;graphic-chrome&quot;] 探针命中</p>
+      <p class="life">引入：#111（2026-09-26）</p>
+    </article>
+    <article class="entry" id="diagram-popup">
+      <h3><code>.vsidian-diagram-overlay / -backdrop / -stage / -media / -toolbar / -zoom-in / -zoom-out / -zoom-label / -reset / -refresh / -export-svg / -export-png / -close / -error / -note</code><span class="eid">diagram-popup</span></h3>
+      <p class="purpose">图表弹窗全屏浮层（#111）：遮罩 + 舞台（缩放/平移的图本体）+ 工具条（缩放/重置/刷新/导出/关闭）；error 态保留 close 与 refresh；note 为环境不支持 PNG 光栅化时的提示条。挂 document.body，仅在弹窗打开期间在场。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+<p class="states">状态：popup 按钮打开期间在场；Esc/点空白区/关闭按钮撤下。</p>
+      <p class="obsidian">Obsidian 对应：无（Obsidian 图表在新标签页打开）</p>
+
+      <p class="dom">DOM 关系：body 直接子元素 overlay（backdrop/stage/toolbar 三区）。</p>
+      <pre><code>.vsidian-diagram-toolbar {
+  gap: 4px;
+}</code></pre>
+      <p class="verify">验证：集成「图表弹窗」（#111/#133）：cssProbe.chromePopup 打开期间样式观测 + 刷新后保持；浏览器 graphicPopup：原生键鼠路径（缩放/平移/Esc/导出）与样式保持</p>
+      <p class="life">引入：#111（2026-09-26）</p>
+    </article>
+    <h2>界面域 · 代码块卡片（10）</h2>
+    <article class="entry" id="live-code-card-line">
+      <h3><code>.vsidian-code-card-line</code><span class="eid">live-code-card-line</span></h3>
+      <p class="purpose">卡片覆盖的行级类：live 为源行级（含被清空的围栏行与全部代码行，承载卡片底色），阅读为卡内行 span（与 live 同类名，跨视图同口径）；与正文域 live-code-line 并行（live 卡片开启时两者都在场）。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-semantic">semantic</span></p>
+
+      <p class="obsidian">Obsidian 对应：.HyperMD-codeblock（行族；正文域别名挂于 .vsidian-code-line，卡片行类为自有扩展）</p>
+
+      <p class="dom">DOM 关系：live：.cm-line 行元素（卡片开启的围栏范围）；阅读：code 内 span.vsidian-reading-code-line。</p>
+      <pre><code>.vsidian-code-card-line {
+  background: var(--vsidian-code-card-background);
+}</code></pre>
+      <p class="verify">验证：codeCardPaintCssContract：底色变量；集成「界面域样式契约」（#133）：chromeSelectors[&quot;live-code-card-live&quot;/&quot;live-code-card-reading&quot;] 探针命中</p>
+      <p class="life">引入：#79（2026-09-26）</p>
+    </article>
+    <article class="entry" id="live-code-card-edge">
+      <h3><code>.vsidian-code-card-edge-top / -bottom</code><span class="eid">live-code-card-edge</span></h3>
+      <p class="purpose">卡片首/末行圆角修饰（无头部覆盖的底边圆角；顶边圆角由头部横带承担）。仅 live 侧发射；阅读卡片圆角由 .vsidian-reading-code-card 承担。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-native">native</span></p>
+
+      <p class="obsidian">Obsidian 对应：无对应（圆角由 Obsidian 原生 code 块样式承担）</p>
+
+      <p class="dom">DOM 关系：卡片首/末行元素。</p>
+      <pre><code>.vsidian-code-card-edge-bottom {
+  border-radius: 0 0 8px 8px;
+}</code></pre>
+      <p class="verify">验证：codeCardPaintCssContract</p>
+      <p class="life">引入：#79（2026-09-26）</p>
+    </article>
+    <article class="entry" id="live-code-card-header">
+      <h3><code>.vsidian-code-card-header（live block widget / 阅读头部容器共用）</code><span class="eid">live-code-card-header</span></h3>
+      <p class="purpose">卡片头部横带：语言标签 + 右侧按钮区，底部 1px 分隔线（观感参照 Code Styler 插件方向，本项目自有结构）。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-native">native</span></p>
+
+      <p class="obsidian">Obsidian 对应：.code-styler-header-container（Code Styler 插件方向）</p>
+
+      <p class="dom">DOM 关系：卡片首行上方横带（live block widget / 阅读块首子元素）。</p>
+      <pre><code>.vsidian-code-card-header {
+  border-bottom: 1px solid rgba(128, 128, 128, 0.3);
+}</code></pre>
+      <p class="verify">验证：codeCardPaintCssContract；集成「界面域样式契约」（#133）：chromeSelectors[&quot;live-code-card-header-live&quot;] 探针命中</p>
+      <p class="life">引入：#79（2026-09-26）</p>
+    </article>
+    <article class="entry" id="live-code-card-header-parts">
+      <h3><code>.vsidian-code-card-header-label / -actions / -icon</code><span class="eid">live-code-card-header-parts</span></h3>
+      <p class="purpose">卡片语言标签（首字母大写显示名）/ 按钮容器 / 语言徽标（#83 彩色字形徽标，挂标签内）。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-native">native</span></p>
+
+      <p class="obsidian">Obsidian 对应：.code-styler-header-title 方向</p>
+
+      <p class="dom">DOM 关系：头部横带内。</p>
+      <pre><code>.vsidian-code-card-header-label {
+  font-weight: 600;
+}</code></pre>
+      <p class="verify">验证：codeCardPaintCssContract；集成「界面域样式契约」（#133）：chromeSelectors[&quot;live-code-card-header-parts-live&quot;] 探针命中</p>
+      <p class="life">引入：#79（2026-09-26）；#83 徽标</p>
+    </article>
+    <article class="entry" id="live-code-card-copy">
+      <h3><code>.vsidian-code-card-copy（+ -done 修饰）</code><span class="eid">live-code-card-copy</span></h3>
+      <p class="purpose">复制按钮（经宿主剪贴板 API）；-done 为点击后约 1.2s 的 ✓ 反馈态。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-native">native</span></p>
+<p class="states">状态：复制后 -done 约 1.2s；收起态不发射按钮。</p>
+      <p class="obsidian">Obsidian 对应：button.copy-code-button（Obsidian 原生复制按钮）</p>
+
+      <p class="dom">DOM 关系：头部按钮区。</p>
+      <pre><code>.vsidian-code-card-copy-done {
+  color: #98c379;
+}</code></pre>
+      <p class="verify">验证：集成代码卡片用例（codecard.test.copy 剪贴板链路）</p>
+      <p class="life">引入：#79（2026-09-26）</p>
+    </article>
+    <article class="entry" id="live-code-card-fold">
+      <h3><code>.vsidian-code-card-fold（+ -collapsed 修饰）</code><span class="eid">live-code-card-fold</span></h3>
+      <p class="purpose">折叠 chevron；-collapsed 为收起态（转向）；折叠为视图态不写源文件（阅读侧收起另有块级 vsidian-code-card-folded 修饰，见 reading-code-card）。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-native">native</span></p>
+<p class="states">状态：折叠/展开。</p>
+      <p class="obsidian">Obsidian 对应：.code-styler-header-container::after（折叠箭头方向）</p>
+
+      <p class="dom">DOM 关系：头部按钮区。</p>
+      <pre><code>.vsidian-code-card-fold-collapsed {
+  transform: rotate(-90deg);
+}</code></pre>
+      <p class="verify">验证：集成代码卡片用例（codecard.test.fold 折叠链路）</p>
+      <p class="life">引入：#79（2026-09-26）</p>
+    </article>
+    <article class="entry" id="live-code-card-linenumber">
+      <h3><code>.vsidian-code-card-linenumber</code><span class="eid">live-code-card-linenumber</span></h3>
+      <p class="purpose">卡内行号（每块从 1，围栏行不占号；大围栏分块跨片连续）；live 为行首 widget、阅读为行 span（同类名）；与文档行号槽（源文件行号）两列并存互不遮挡。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-native">native</span></p>
+
+      <p class="obsidian">Obsidian 对应：.code-styler-line-number（方向）</p>
+
+      <p class="dom">DOM 关系：卡片代码行首（live widget / 阅读 span）。</p>
+      <pre><code>.vsidian-code-card-linenumber {
+  color: var(--vscode-descriptionForeground);
+}</code></pre>
+      <p class="verify">验证：lineNumberCssContract：两列并存；集成「界面域样式契约」（#133）：chromeSelectors[&quot;live-code-card-linenumber-live&quot;/&quot;live-code-card-linenumber-reading&quot;] 探针命中</p>
+      <p class="life">引入：#79（2026-09-26）</p>
+    </article>
+    <article class="entry" id="tok-tokens">
+      <h3><code>tok-* token 族（tok-keyword / tok-string 等，@lezer/highlight classHighlighter 词表）</code><span class="eid">tok-tokens</span></h3>
+      <p class="purpose">语法高亮 token span，两视图共用同一类名与明暗色板（Dark+/Light+ 取色，非 Obsidian 主题变量）；Prism 原名 .token-* 不提供（见 limit-prism-tokens）。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-native">native</span></p>
+
+      <p class="obsidian">Obsidian 对应：.token-*（Prism 词表方向）/ .cm-* token 族</p>
+
+      <p class="dom">DOM 关系：代码内容内 token span（live mark 装饰 / 阅读卡片行内 span）。</p>
+      <pre><code>.tok-keyword {
+  color: #c678dd;
+}</code></pre>
+      <p class="verify">验证：codeHighlight 单元：词表契约（tok-* 两端共用）；集成「界面域样式契约」（#133）：chromeSelectors[&quot;tok-tokens-live&quot;/&quot;tok-tokens-reading&quot;] 探针命中</p>
+      <p class="life">引入：#83（2026-09-26）</p>
+    </article>
+    <article class="entry" id="reading-code-card">
+      <h3><code>.vsidian-reading-code-card（+ .vsidian-reading-code-line 行结构 / .vsidian-code-card-folded 收起态）</code><span class="eid">reading-code-card</span></h3>
+      <p class="purpose">阅读视图卡片容器（vsidian-reading-code-block 的卡片化外壳）；language-x 类保留在 code 上供路由；行结构 span.vsidian-reading-code-line 携行号与 token；收起态块级修饰隐藏 pre（头部保留）。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-semantic">semantic</span></p>
+
+      <p class="obsidian">Obsidian 对应：.markdown-preview-view pre（原有映射保留于正文域）</p>
+
+      <p class="dom">DOM 关系：阅读代码块外壳（块卸载随 DOM 丢弃，重挂载从源码快照幂等重建）。</p>
+      <pre><code>.vsidian-reading-code-card {
+  background: var(--vsidian-code-card-background);
+}</code></pre>
+      <p class="verify">验证：readingCodeCard 单元（幂等增强与形态矩阵）；集成「界面域样式契约」（#133）：chromeSelectors[&quot;reading-code-card&quot;] 探针命中</p>
+      <p class="life">引入：#79（2026-09-26）</p>
+    </article>
+    <article class="entry" id="var-code-card-background">
+      <h3><code>--vsidian-code-card-background</code><span class="eid">var-code-card-background</span></h3>
+      <p class="purpose">代码块卡片底色（头部横带与代码区共用；阅读卡片同源）；默认 var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12))。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-semantic">semantic</span></p>
+
+      <p class="obsidian">Obsidian 对应：--code-background（语义对应；正文代码块变量的别名桥只承诺给 var-reading-code-background）</p>
+
+      <p class="dom">DOM 关系：定义于 #app。</p>
+      <pre><code>:root { --vsidian-code-card-background: rgba(0, 0, 0, 0.25); }</code></pre>
+      <p class="verify">验证：codeCardPaintCssContract；集成「界面域样式契约」（#133）：真实片段经该变量驱动卡片可见底色</p>
+      <p class="life">引入：#79（2026-09-26）</p>
+    </article>
+    <h2>界面域 · 大纲面板（19）</h2>
+    <article class="entry" id="outline-item">
+      <h3><code>.vsidian-outline-item（+ .vsidian-outline-level-{1..6}）</code><span class="eid">outline-item</span></h3>
+      <p class="purpose">大纲条目（级别类兼作缩进与层级色入口）；条目钉常规字重 400，不继承标题级别加粗；层级色与正文标题同引 --vsidian-heading-color-{1..6}（三侧同源，见 var-heading-color）。</p>
+      <p class="views"><span class="badge badge-none">非编辑视图</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：无（Obsidian 大纲为应用级 DOM）</p>
+
+      <p class="dom">DOM 关系：右侧栏大纲面板条目容器。</p>
+      <pre><code>.vsidian-outline-level-1 {
+  color: var(--vsidian-heading-color-1);
+}</code></pre>
+      <p class="verify">验证：outlineCssContract：层级色三侧同引；单元 outline 系列；集成「界面域样式契约」（#133）：chromeSelectors[&quot;outline-item&quot;] 探针命中</p>
+      <p class="life">引入：#54（2026-09-25）；#65 起样式透传</p>
+    </article>
+    <article class="entry" id="outline-inline-marks">
+      <h3><code>.vsidian-outline-strong / -emphasis / -code / -strike / -highlight</code><span class="eid">outline-inline-marks</span></h3>
+      <p class="purpose">大纲行内标记透传（语义元素 strong/em/code/del/mark 上的第二类名入口）：字重/斜体/等宽/删除线/高亮底只由显式标记触发；双链/链接为纯文本（无 a，不可点）。</p>
+      <p class="views"><span class="badge badge-none">非编辑视图</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：无（Obsidian 侧大纲插件私有 DOM）</p>
+
+      <p class="dom">DOM 关系：大纲条目内语义行内元素。</p>
+      <pre><code>.vsidian-outline-highlight {
+  background: var(--vsidian-highlight-background);
+}</code></pre>
+      <p class="verify">验证：单元 outline：SPAN_KIND_BY_NODE 提取白名单契约；集成「界面域样式契约」（#133）：chromeSelectors[&quot;outline-inline-marks&quot;] 探针命中</p>
+      <p class="life">引入：#65（2026-09-25）；#105 高亮接入</p>
+    </article>
+    <article class="entry" id="outline-guide">
+      <h3><code>.vsidian-outline-guide</code><span class="eid">outline-guide</span></h3>
+      <p class="purpose">层级对齐引导线（条目内绝对定位竖线，left 对齐祖先 chevron 中心——嵌套层级的视觉对齐辅助）。</p>
+      <p class="views"><span class="badge badge-none">非编辑视图</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：无</p>
+
+      <p class="dom">DOM 关系：嵌套层级条目内绝对定位 span。</p>
+      <pre><code>.vsidian-outline-guide {
+  background: var(--vscode-editorIndentGuide-background);
+}</code></pre>
+      <p class="verify">验证：outlineCssContract：引导线规则；集成「界面域样式契约」（#133）：chromeSelectors[&quot;outline-guide&quot;] 探针命中</p>
+      <p class="life">引入：#99（2026-09-26）</p>
+    </article>
+    <article class="entry" id="outline-located">
+      <h3><code>.vsidian-outline-located</code><span class="eid">outline-located</span></h3>
+      <p class="purpose">当前控制域条目的常驻高亮横条（半透明背景；类切换是两态差异唯一来源）；施加在可见代表上（目标被折叠遮蔽时为第一个可见祖先）。</p>
+      <p class="views"><span class="badge badge-none">非编辑视图</span> <span class="support support-none">none</span></p>
+<p class="states">状态：跟随光标位置。</p>
+      <p class="obsidian">Obsidian 对应：无</p>
+
+      <p class="dom">DOM 关系：大纲条目容器。</p>
+      <pre><code>.vsidian-outline-located {
+  background: rgba(128, 128, 128, 0.15);
+}</code></pre>
+      <p class="verify">验证：浏览器 outlineHover/outlineJump 系列；集成 outline.locatedPainted 绘制证据</p>
+      <p class="life">引入：#66（2026-09-25）</p>
+    </article>
+    <article class="entry" id="outline-slider">
+      <h3><code>.vsidian-outline-slider（+ ::before）</code><span class="eid">outline-slider</span></h3>
+      <p class="purpose">折叠滑块行（显隐唯一开关是侧栏容器的 outline-active 类；::before 画贯穿横线；role=group 六按钮组键盘可达）。</p>
+      <p class="views"><span class="badge badge-none">非编辑视图</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：无</p>
+
+      <p class="dom">DOM 关系：侧栏顶栏与条目列表之间。</p>
+      <pre><code>.vsidian-outline-slider::before {
+  background: #888;
+}</code></pre>
+      <p class="verify">验证：浏览器 outlineCollapse；集成 outline.sliderPainted 绘制证据；集成「界面域样式契约」（#133）：chromeSelectors[&quot;outline-slider&quot;] 探针命中</p>
+      <p class="life">引入：#67（2026-09-25）</p>
+    </article>
+    <article class="entry" id="outline-slider-dot">
+      <h3><code>.vsidian-outline-slider-dot（+ .vsidian-outline-slider-active / -filled）</code><span class="eid">outline-slider-dot</span></h3>
+      <p class="purpose">六档折叠圆点：空闲珠空心（透明面 + 描边圆环）、当前珠实心——两态差异唯一来源是 active 类规则；#99 起当前档沿途珠（filled）同态实心；实心色跟随 --vscode-button-background。</p>
+      <p class="views"><span class="badge badge-none">非编辑视图</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：无</p>
+
+      <p class="dom">DOM 关系：滑块行内按钮。</p>
+      <pre><code>.vsidian-outline-slider-active {
+  background: var(--vscode-button-background);
+}</code></pre>
+      <p class="verify">验证：浏览器 outlineCollapse；集成 outline.sliderActiveDotPainted；集成「界面域样式契约」（#133）：chromeSelectors[&quot;outline-slider-dot&quot;] 探针命中</p>
+      <p class="life">引入：#67（2026-09-25）；#99 filled 沿途珠</p>
+    </article>
+    <article class="entry" id="outline-chevron">
+      <h3><code>.vsidian-outline-chevron / .vsidian-outline-chevron-spacer</code><span class="eid">outline-chevron</span></h3>
+      <p class="purpose">折叠箭头按钮（有子项条目）/ 无子项条目的同宽占位（文字左缘对齐）；线宽不写在 SVG 属性上；点箭头折叠/展开、点文字仍跳转。</p>
+      <p class="views"><span class="badge badge-none">非编辑视图</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：无</p>
+
+      <p class="dom">DOM 关系：条目内按钮/占位元素。</p>
+      <pre><code>.vsidian-outline-chevron {
+  color: var(--vscode-foreground);
+}</code></pre>
+      <p class="verify">验证：浏览器 outlineCollapse；集成 outline.chevronPainted；集成「界面域样式契约」（#133）：chromeSelectors[&quot;outline-chevron&quot;] 探针命中</p>
+      <p class="life">引入：#67（2026-09-25）</p>
+    </article>
+    <article class="entry" id="outline-collapsed">
+      <h3><code>.vsidian-outline-collapsed</code><span class="eid">outline-collapsed</span></h3>
+      <p class="purpose">折叠中的父节点条目（箭头旋转 -90° 朝右是两态差异唯一来源）。</p>
+      <p class="views"><span class="badge badge-none">非编辑视图</span> <span class="support support-none">none</span></p>
+<p class="states">状态：折叠态。</p>
+      <p class="obsidian">Obsidian 对应：无</p>
+
+      <p class="dom">DOM 关系：条目容器。</p>
+      <pre><code>.vsidian-outline-collapsed .vsidian-outline-chevron {
+  transform: rotate(-90deg);
+}</code></pre>
+      <p class="verify">验证：浏览器 outlineCollapse：两态往返；单元 outlineCollapse 状态机</p>
+      <p class="life">引入：#67（2026-09-25）</p>
+    </article>
+    <article class="entry" id="outline-hidden">
+      <h3><code>.vsidian-outline-hidden</code><span class="eid">outline-hidden</span></h3>
+      <p class="purpose">折叠遮蔽的条目（display:none，类切换是唯一显隐开关；DOM 保留维持索引序）；#68 起搜索过滤隐藏同用此类。</p>
+      <p class="views"><span class="badge badge-none">非编辑视图</span> <span class="support support-none">none</span></p>
+<p class="states">状态：折叠遮蔽或搜索过滤。</p>
+      <p class="obsidian">Obsidian 对应：无</p>
+
+      <p class="dom">DOM 关系：条目容器。</p>
+      <pre><code>.vsidian-outline-hidden {
+  display: none;
+}</code></pre>
+      <p class="verify">验证：单元 outlineCollapse / outlineSearch；集成 outline.visibleIndices 可见集断言</p>
+      <p class="life">引入：#67（2026-09-25）</p>
+    </article>
+    <article class="entry" id="outline-toolbar">
+      <h3><code>.vsidian-outline-toolbar</code><span class="eid">outline-toolbar</span></h3>
+      <p class="purpose">大纲工具条行（跳转到末尾、重置、搜索框；显隐唯一开关是 outline-active 类）。</p>
+      <p class="views"><span class="badge badge-none">非编辑视图</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：无（Quiet Outline 的 function-bar 为插件私有 DOM）</p>
+
+      <p class="dom">DOM 关系：侧栏顶栏与滑块行之间。</p>
+      <pre><code>.vsidian-outline-toolbar {
+  gap: 4px;
+}</code></pre>
+      <p class="verify">验证：浏览器 outlineSearch；集成 outline.toolbarPainted；集成「界面域样式契约」（#133）：chromeSelectors[&quot;outline-toolbar&quot;] 探针命中</p>
+      <p class="life">引入：#68（2026-09-25）</p>
+    </article>
+    <article class="entry" id="outline-toolbar-buttons">
+      <h3><code>.vsidian-outline-jump-bottom / .vsidian-outline-reset</code><span class="eid">outline-toolbar-buttons</span></h3>
+      <p class="purpose">工具条图标按钮（跳转到笔记末尾 / 重置三合一），与侧栏顶栏按钮同形态（基础形态由 .vsidian-outline-toolbar button 结构选择器承担，本类名为行为锚点与片段入口）。</p>
+      <p class="views"><span class="badge badge-none">非编辑视图</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：无</p>
+
+      <p class="dom">DOM 关系：工具条内按钮。</p>
+      <pre><code>.vsidian-outline-reset:hover {
+  background: rgba(128, 128, 128, 0.2);
+}</code></pre>
+      <p class="verify">验证：浏览器 outlineSearch；集成「界面域样式契约」（#133）：chromeSelectors[&quot;outline-toolbar-buttons&quot;] 探针命中</p>
+      <p class="life">引入：#68（2026-09-25）</p>
+    </article>
+    <article class="entry" id="outline-search">
+      <h3><code>.vsidian-outline-search（+ ::placeholder）</code><span class="eid">outline-search</span></h3>
+      <p class="purpose">标题搜索输入框（flex 占余宽；配色走 --vscode-input-* 变量族）。</p>
+      <p class="views"><span class="badge badge-none">非编辑视图</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：无</p>
+
+      <p class="dom">DOM 关系：工具条内输入框。</p>
+      <pre><code>.vsidian-outline-search:focus {
+  border-color: var(--vscode-focusBorder);
+}</code></pre>
+      <p class="verify">验证：浏览器 outlineSearch；集成「界面域样式契约」（#133）：chromeSelectors[&quot;outline-search&quot;] 探针命中</p>
+      <p class="life">引入：#68（2026-09-25）</p>
+    </article>
+    <article class="entry" id="outline-search-hit">
+      <h3><code>mark.vsidian-outline-search-hit</code><span class="eid">outline-search-hit</span></h3>
+      <p class="purpose">搜索命中片段高亮（只包命中子串；背景跟随 --vscode-editor-findMatchHighlightBackground，与正文查找命中同族视觉语言）；文本层切分，与语义元素正交。</p>
+      <p class="views"><span class="badge badge-none">非编辑视图</span> <span class="support support-none">none</span></p>
+<p class="states">状态：命中条目上。</p>
+      <p class="obsidian">Obsidian 对应：无</p>
+
+      <p class="dom">DOM 关系：条目内 mark 元素。</p>
+      <pre><code>.vsidian-outline-search-hit {
+  background: var(--vscode-editor-findMatchHighlightBackground);
+}</code></pre>
+      <p class="verify">验证：单元 outlineSearch：片段切分契约；集成 outline.searchHitPainted 绘制证据</p>
+      <p class="life">引入：#68（2026-09-25）</p>
+    </article>
+    <article class="entry" id="outline-nomatch">
+      <h3><code>.vsidian-outline-nomatch</code><span class="eid">outline-nomatch</span></h3>
+      <p class="purpose">无匹配占位（有词条零命中的可读反馈）。</p>
+      <p class="views"><span class="badge badge-none">非编辑视图</span> <span class="support support-none">none</span></p>
+<p class="states">状态：搜索零命中。</p>
+      <p class="obsidian">Obsidian 对应：无</p>
+
+      <p class="dom">DOM 关系：条目列表尾。</p>
+      <pre><code>.vsidian-outline-nomatch {
+  color: var(--vscode-descriptionForeground);
+}</code></pre>
+      <p class="verify">验证：浏览器 outlineSearch；集成 outline.nomatchPainted 绘制证据</p>
+      <p class="life">引入：#68（2026-09-25）</p>
+    </article>
+    <article class="entry" id="outline-menu">
+      <h3><code>.vsidian-outline-menu（+ -item / -host / -submenu / -danger / -cue）</code><span class="eid">outline-menu</span></h3>
+      <p class="purpose">右键菜单浮层（挂侧栏内 absolute；菜单项为 button 键盘可达；子菜单显隐唯一开关是父项宿主的 :hover/:focus-within；danger 红字标删除；颜色跟随 --vscode-menu-* 变量族）。</p>
+      <p class="views"><span class="badge badge-none">非编辑视图</span> <span class="support support-none">none</span></p>
+<p class="states">状态：右键唤出。</p>
+      <p class="obsidian">Obsidian 对应：无（VSCode 原生上下文菜单为宿主级）</p>
+
+      <p class="dom">DOM 关系：侧栏内浮层。</p>
+      <pre><code>.vsidian-outline-menu-danger {
+  color: var(--vscode-errorForeground);
+}</code></pre>
+      <p class="verify">验证：浏览器 outlineMenu；集成 outline.test.contextMenu/menuClick 系列</p>
+      <p class="life">引入：#69（2026-09-25）</p>
+    </article>
+    <article class="entry" id="outline-rename-input">
+      <h3><code>.vsidian-outline-rename-input</code><span class="eid">outline-rename-input</span></h3>
+      <p class="purpose">重命名行内编辑态输入框（条目内容区被 input 替换，编辑原文含行内标记）；VSCode 输入框三变量（前景/背景/边框）。</p>
+      <p class="views"><span class="badge badge-none">非编辑视图</span> <span class="support support-none">none</span></p>
+<p class="states">状态：重命名态。</p>
+      <p class="obsidian">Obsidian 对应：无</p>
+
+      <p class="dom">DOM 关系：条目内 input。</p>
+      <pre><code>.vsidian-outline-rename-input {
+  background: var(--vscode-input-background);
+}</code></pre>
+      <p class="verify">验证：浏览器 outlineMenu：重命名路径</p>
+      <p class="life">引入：#69（2026-09-25）</p>
+    </article>
+    <article class="entry" id="outline-dragging">
+      <h3><code>.vsidian-outline-dragging</code><span class="eid">outline-dragging</span></h3>
+      <p class="purpose">拖动中的源条目（整体半透明弱化，类切换是两态差异唯一来源）。</p>
+      <p class="views"><span class="badge badge-none">非编辑视图</span> <span class="support support-none">none</span></p>
+<p class="states">状态：拖动中。</p>
+      <p class="obsidian">Obsidian 对应：无</p>
+
+      <p class="dom">DOM 关系：条目容器。</p>
+      <pre><code>.vsidian-outline-dragging {
+  opacity: 0.5;
+}</code></pre>
+      <p class="verify">验证：浏览器 outlineDrag 系列</p>
+      <p class="life">引入：#70（2026-09-25）</p>
+    </article>
+    <article class="entry" id="outline-drop-edge">
+      <h3><code>.vsidian-outline-drop-before / -after</code><span class="eid">outline-drop-edge</span></h3>
+      <p class="purpose">拖拽目标上/下缘插入线（inset box-shadow 不占布局、不与 located 背景冲突；颜色跟随 --vscode-focusBorder）。</p>
+      <p class="views"><span class="badge badge-none">非编辑视图</span> <span class="support support-none">none</span></p>
+<p class="states">状态：拖拽悬停时。</p>
+      <p class="obsidian">Obsidian 对应：无</p>
+
+      <p class="dom">DOM 关系：目标条目容器。</p>
+      <pre><code>.vsidian-outline-drop-before {
+  box-shadow: inset 0 2px 0 var(--vscode-focusBorder);
+}</code></pre>
+      <p class="verify">验证：浏览器 outlineDragBoundary</p>
+      <p class="life">引入：#70（2026-09-25）</p>
+    </article>
+    <article class="entry" id="outline-drop-inside">
+      <h3><code>.vsidian-outline-drop-inside</code><span class="eid">outline-drop-inside</span></h3>
+      <p class="purpose">拖拽目标包裹高亮（outline 内缩一圈 + 半透明背景，与 located 同变量族——「放入成为子标题」的视觉区分）。</p>
+      <p class="views"><span class="badge badge-none">非编辑视图</span> <span class="support support-none">none</span></p>
+<p class="states">状态：拖拽悬停中部时。</p>
+      <p class="obsidian">Obsidian 对应：无</p>
+
+      <p class="dom">DOM 关系：目标条目容器。</p>
+      <pre><code>.vsidian-outline-drop-inside {
+  outline: 1px solid var(--vscode-focusBorder);
+}</code></pre>
+      <p class="verify">验证：浏览器 outlineDrag</p>
+      <p class="life">引入：#70（2026-09-25）</p>
+    </article>
+    <h2>界面域 · 限制说明（3）</h2>
+    <article class="entry" id="limit-prism-tokens">
+      <h3><code>.token-*（Prism 原名）/ .HyperMD-codeblock-*</code><span class="eid">limit-prism-tokens</span></h3>
+      <p class="purpose">语法高亮以 tok-* 稳定词表提供（见 tok-tokens）；Prism 原名与 .HyperMD-codeblock-* 子类不提供，片段按原名定位不命中。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：.token-* / .HyperMD-codeblock-*</p>
+
+      <p class="dom">DOM 关系：token span 使用 tok-* 类名。</p>
+      <p class="verify">验证：codeHighlight 单元：词表契约</p>
+      <p class="life">引入：#83（2026-09-26）</p>
+    </article>
+    <article class="entry" id="limit-katex-internals">
+      <h3><code>.katex 内部结构（.mord / .mspace / .katex-mathml 等）</code><span class="eid">limit-katex-internals</span></h3>
+      <p class="purpose">内部渲染结构不兼容边界：KaTeX 产出的内部 DOM（字形 span、MathML 层等）随上游版本变化，不承诺为稳定接口——仅稳定容器外壳（.vsidian-math / .vsidian-math-block / .katex-block）公开；片段依赖内部类的着色可能在升级后失效。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：Obsidian 同样不承诺 KaTeX 内部结构</p>
+
+      <p class="dom">DOM 关系：KaTeX HTML 在稳定容器内。</p>
+      <p class="verify">验证：清单即边界：第三方渲染器私有 DOM 不提升为稳定接口</p>
+      <p class="life">引入：#133（2026-09-27，随界面域核实落档）</p>
+    </article>
+    <article class="entry" id="limit-mermaid-internals">
+      <h3><code>mermaid SVG 内部节点（.node / .edgePath / .cluster 等）</code><span class="eid">limit-mermaid-internals</span></h3>
+      <p class="purpose">内部渲染结构不兼容边界：Mermaid 自产 SVG 的内部节点类随上游版本与主题变化，不承诺为稳定接口——仅容器级入口（.vsidian-mermaid 与其 svg 后代）公开；弹窗内 SVG 同源同边界。需要改图内观感请走 mermaid 主题配置而非片段选择器。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：Obsidian 同样不承诺 mermaid 内部结构</p>
+
+      <p class="dom">DOM 关系：mermaid SVG 在稳定容器内。</p>
+      <p class="verify">验证：清单即边界：第三方渲染器私有 DOM 不提升为稳定接口</p>
+      <p class="life">引入：#133（2026-09-27，随界面域核实落档）</p>
+    </article>
+    <h2>界面域 · 工具栏与横幅（3）</h2>
+    <article class="entry" id="suspend-banner">
+      <h3><code>.vsidian-suspend-banner（内含 .vsidian-suspend-banner-text）</code><span class="eid">suspend-banner</span></h3>
+      <p class="purpose">写回冲突暂停横幅（本项目自有 UI）：暂停态顶栏提示 + 恢复按钮。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+<p class="states">状态：写回冲突暂停时。</p>
+      <p class="obsidian">Obsidian 对应：无对应物</p>
+
+      <p class="dom">DOM 关系：#app 顶部横幅。</p>
+      <pre><code>.vsidian-suspend-banner {
+  background: var(--vscode-statusBar-background);
+}</code></pre>
+      <p class="verify">验证：editorChromeCssContract；集成写回冲突用例：暂停横幅在场断言</p>
+      <p class="life">引入：#4（2026-09-23）</p>
+    </article>
+    <article class="entry" id="toolbar">
+      <h3><code>.vsidian-toolbar</code><span class="eid">toolbar</span></h3>
+      <p class="purpose">主编辑区顶栏：设置齿轮（.vsidian-settings-toggle）、快速操作开关（.vsidian-quick-toggle）、侧栏开关（.vsidian-sidebar-toggle）——#38 起模式切换按钮迁宿主标题栏三态命令，不在顶栏（见 mode-toggle 移除记录）。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：无对应物</p>
+
+      <p class="dom">DOM 关系：#app 顶部工具栏。</p>
+      <pre><code>.vsidian-toolbar {
+  gap: 6px;
+}</code></pre>
+      <p class="verify">验证：editorChromeCssContract；集成「界面域样式契约」（#133）：chromeSelectors[&quot;toolbar&quot;] 探针命中</p>
+      <p class="life">引入：#4（2026-09-23）</p>
+    </article>
+    <article class="entry" id="mode-toggle">
+      <h3><code>.vsidian-mode-toggle（已移除）</code><span class="eid">mode-toggle</span></h3>
+      <p class="purpose">曾为顶栏模式切换按钮组。#38（提交 288044d，2026-09-24）起模式切换迁宿主编辑器标题栏三态命令，顶栏不再渲染该类；保留本条目作为旧映射表陈旧行的纠错记录——该类自 v0.1.0 起从未随发布版存在于 DOM（核对：git grep v0.4.0 -- src/ 零命中）。</p>
+      <p class="views"><span class="badge badge-none">非编辑视图</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：无对应物</p>
+
+      <p class="dom">DOM 关系：无（类不再发射）。</p>
+      <pre><code>/* 无替代选择器：模式切换 UI 属宿主标题栏，不在 webview DOM 内 */</code></pre>
+      <p class="verify">验证：单元：webview 源码不再含该类发射（迁移历史断言）</p>
+      <p class="life">引入：#4（2026-09-23） · 移除：#38（2026-09-24，288044d）移除且从未随任何发布版存在；旧映射表该行为陈旧数据（#133 核实纠错，依据 v0.4.0 tag 75c3df7 源码核对）</p>
+    </article>
+  </section>
+<p style="margin-top:48px;color:color-mix(in srgb, currentColor 50%, transparent);font-size:12px">由 src/shared/styleContract.ts 生成（scripts/genStyleGuide.mjs）；产物一致性由 test/unit/styleGuideGen.test.ts 钉住。</p>
+</body>
+</html>

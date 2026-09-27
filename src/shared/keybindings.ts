@@ -31,6 +31,23 @@ const extra: readonly KeybindingOperation[] = [
   { id: 'insertColumnRight', command: 'onegayi.vsidian.table.insertColumnRight', titleKey: 'command.table.insertColumnRight.title', mode: 'live', writes: true, defaults: [] },
   { id: 'deleteColumn', command: 'onegayi.vsidian.table.deleteColumn', titleKey: 'command.table.deleteColumn.title', mode: 'live', writes: true, defaults: [] },
   { id: 'openSettings', command: 'onegayi.vsidian.openSettings', titleKey: 'command.openSettings.title', mode: 'both', writes: false, defaults: [] },
+  // #132 样式参考：打开设置页并定位「样式参考」分页（只读全局命令，双模式
+  // 可用；默认不绑定——设置页入口常驻，快捷键留给用户按需绑定）
+  { id: 'openStyleReference', command: 'onegayi.vsidian.openStyleReference', titleKey: 'command.openStyleReference.title', mode: 'both', writes: false, defaults: [] },
+  // #145 导出样式参考 JSON：只读操作（把随 VSIX 分发的机器可读契约清单另存
+  // 到用户路径，不写文档），双模式可用、默认不占键位——设置页「样式参考」
+  // 分页的「导出 JSON」按钮与命令面板同一实现，评估记录见 keybindings.md
+  { id: 'exportStyleReference', command: 'onegayi.vsidian.exportStyleReference', titleKey: 'command.exportStyleReference.title', mode: 'both', writes: false, defaults: [] },
+  // #128 CSS 片段刷新：只读视图操作（重新扫描目录并广播），双模式可救回
+  // 被片段影响的界面；默认不占键位。「打开 CSS 片段设置」不单列命令——
+  // openSettings（双模式、默认未绑定）打开设置页后经左侧导航直达分页，
+  // 见 docs/specs/keybindings.md 的评估记录
+  { id: 'cssSnippetsRefresh', command: 'onegayi.vsidian.cssSnippets.refresh', titleKey: 'command.cssSnippets.refresh.title', mode: 'both', writes: false, defaults: [] },
+  // #131 暂停/恢复全部片段：宿主侧命令（不依赖 webview 健康），全局冻结
+  // 与逐项停用语义正交（暂停保留开关）。被片段影响的界面可用暂停立即
+  // 撤下全部样式再按原配置恢复——双模式可用，默认不占键位
+  { id: 'cssSnippetsPause', command: 'onegayi.vsidian.cssSnippets.pause', titleKey: 'command.cssSnippets.pause.title', mode: 'both', writes: false, defaults: [] },
+  { id: 'cssSnippetsResume', command: 'onegayi.vsidian.cssSnippets.resume', titleKey: 'command.cssSnippets.resume.title', mode: 'both', writes: false, defaults: [] },
 ]
 
 /** 视图中已有明确目标的按钮动作：命令面板、快捷键均可调用。 */
