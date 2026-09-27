@@ -365,3 +365,29 @@ describe('审查修复第 2 轮（N-1：离开意图不被重聚焦劫持）', (
     cleanup()
   })
 })
+
+describe('审查修复第 3 轮（新-1：复合状态保留录制）', () => {
+  it('捕获中+菜单开着时点结果区内控件：收菜单但录制保留、草稿不清空', () => {
+    const sent: unknown[] = []
+    const section = new KeybindingSettingsSection({ postMessage: (m) => sent.push(m) })
+    const root = document.createElement('div')
+    document.body.append(root)
+    section.mount(root)
+    section.handleHostMessage({ kind: 'keybindings.snapshot', overrides: {} })
+    // 开捕获（bold）录一键，再开另一行 ⋯ 菜单
+    root.querySelector<HTMLButtonElement>('[data-operation-id="bold"] .vsidian-keybindings-add')!.click()
+    const capture = root.querySelector<HTMLInputElement>('.vsidian-keybindings-capture')!
+    capture.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', ctrlKey: true, bubbles: true }))
+    root.querySelector<HTMLButtonElement>('[data-operation-id="italic"] .vsidian-keybindings-menu-btn')!.click()
+    expect(root.querySelector('[data-operation-id="italic"] .vsidian-keybindings-menu')).toBeTruthy()
+    // 点结果区内但不在该菜单容器内的目标（捕获行的 ✓ 提交钮，即复核指出的
+    // 最疼场景）触发菜单外点收起：菜单收、录制留
+    const commit = root.querySelector<HTMLButtonElement>('[data-operation-id="bold"] .vsidian-keybindings-commit')!
+    commit.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }))
+    expect(root.querySelector('[data-operation-id="italic"] .vsidian-keybindings-menu')).toBeNull()
+    const captureAfter = root.querySelector<HTMLInputElement>('.vsidian-keybindings-capture')
+    expect(captureAfter, '结果区内目标不是离开意图，录制应保留').toBeTruthy()
+    expect(captureAfter!.value).toBe('Ctrl+B')
+    root.remove()
+  })
+})

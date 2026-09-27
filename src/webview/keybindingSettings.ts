@@ -120,9 +120,12 @@ export class KeybindingSettingsSection implements SettingsPageSection {
         `.vsidian-keybindings-row[data-operation-id="${this.menuOpenId}"] .vsidian-keybindings-menu-wrap`)
       if (wrap && event.target instanceof Node && wrap.contains(event.target)) return
       this.menuOpenId = undefined
-      // 离开意图显式化（N-1）：目标不在结果区（空白/工具栏）时录制一并取消；
-      // 结果区内（×/＋/另一行 ⋯）是行内动作，交由各自 click 处理保留录制
-      if (!(event.target instanceof Node && this.resultsEl?.contains(event.target))) {
+      if (event.target instanceof Node && this.resultsEl?.contains(event.target)) {
+        // 目标在结果区内（×/＋/另一行 ⋯）：收菜单不是离开意图——置重聚焦
+        // 标志保留录制（被点按钮随重渲染替换、click 落空属已记录的两击边界）
+        this.refocusCapture = true
+      } else {
+        // 目标在结果区外（空白/工具栏）：离开意图，录制一并取消
         this.cancelCapture()
       }
       this.renderRows()
