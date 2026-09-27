@@ -55,13 +55,21 @@ describe('styleContract schema', () => {
     }
   })
 
-  it('界面域条目全部带 #133 逐项核实标记（迁移期防伪：不得自称已核实）', () => {
+  it('界面域条目已逐项核实（#133）：无 pendingVerification 残留且 selector/variable 条目验证定位非空', () => {
+    let chromeCount = 0
     for (const entry of STYLE_CONTRACT_ENTRIES) {
-      if (entry.domain === 'chrome') {
-        expect(entry.pendingVerification, `${entry.id}`).toBe('#133')
+      if (entry.domain !== 'chrome') {
+        continue
+      }
+      chromeCount += 1
+      // 迁移期防伪反向钉：自称已核实的域不得再携带待核实标记
+      expect(entry.pendingVerification, `${entry.id} 不应残留待核实标记`).toBeUndefined()
+      // 已核实条目必须有验证定位（limitation 的「清单即边界」除外）
+      if (entry.kind !== 'limitation' && entry.removed === undefined) {
+        expect(entry.verification.length, `${entry.id} verification`).toBeGreaterThan(0)
       }
     }
-    expect(STYLE_CONTRACT_ENTRIES.some((e) => e.domain === 'chrome')).toBe(true)
+    expect(chromeCount).toBeGreaterThanOrEqual(41)
   })
 
   it('direct 级条目必须给出 aliasTargets（承诺可执行）', () => {
@@ -84,11 +92,15 @@ describe('styleContract schema', () => {
     }
   })
 
-  it('移除条目保留完整生命周期记录（唯一先例 var-heading-accent）', () => {
+  it('移除条目保留完整生命周期记录（先例：var-heading-accent、mode-toggle）', () => {
     const removed = STYLE_CONTRACT_ENTRIES.filter((e) => e.removed !== undefined)
-    expect(removed.map((e) => e.id)).toEqual(['var-heading-accent'])
+    expect(removed.map((e) => e.id)).toEqual(['var-heading-accent', 'mode-toggle'])
     expect(removed[0]!.removed!).toContain('#55')
     expect(removed[0]!.views).toEqual([])
+    // mode-toggle：#38 移除且从未随发布版存在（#133 核实纠错，见条目 removed 记录）
+    expect(removed[1]!.removed!).toContain('#38')
+    expect(removed[1]!.views).toEqual([])
+    expect(removed[1]!.example.length).toBeGreaterThan(0)
   })
 
   it('joinObsidianAlias 拼接稳定', () => {

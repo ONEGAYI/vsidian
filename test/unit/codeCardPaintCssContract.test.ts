@@ -80,12 +80,15 @@ describe('代码块卡片 CSS 契约（#79）', () => {
     ).toMatch(/border-radius:\s*6px/)
   })
 
-  it('token 色板：明暗两套关键类存在（#83，VSCode Dark+/Light+ 取色）', () => {
-    expect(css.match(/#app \.tok-keyword[^{]*\{[^}]*#0000ff/)).not.toBeNull()
-    expect(css.match(/#app \.tok-string[^{]*\{[^}]*#a31515/)).not.toBeNull()
-    expect(css.match(/#app \.tok-comment[^{]*\{[^}]*#008000/)).not.toBeNull()
-    expect(css.match(/body\.vscode-dark #app \.tok-keyword[^{]*\{[^}]*#569cd6/)).not.toBeNull()
-    expect(css.match(/body\.vscode-dark #app \.tok-string[^{]*\{[^}]*#ce9178/)).not.toBeNull()
+  it('token 色板：明暗两套关键类存在（#83，VSCode Dark+/Light+ 取色）；#133 起 :where() 零特异性（用户片段裸 .tok-* 可覆盖）', () => {
+    expect(css.match(/\.tok-keyword[^{]*\{[^}]*#0000ff/)).not.toBeNull()
+    expect(css.match(/\.tok-string[^{]*\{[^}]*#a31515/)).not.toBeNull()
+    expect(css.match(/\.tok-comment[^{]*\{[^}]*#008000/)).not.toBeNull()
+    expect(css.match(/:where\(body\.vscode-dark\)[^{]*\.tok-keyword[^{]*\{[^}]*#569cd6/)).not.toBeNull()
+    expect(css.match(/:where\(body\.vscode-dark\)[^{]*\.tok-string[^{]*\{[^}]*#ce9178/)).not.toBeNull()
+    // 可覆写承诺的形态前提：内置色板不得携带 ID/主题类特异性
+    expect(css.includes('#app .tok-')).toBe(false)
+    expect(css.includes('body.vscode-dark #app .tok-')).toBe(false)
   })
 
   it('语言徽标：头部标签左侧字形徽标（#83）', () => {

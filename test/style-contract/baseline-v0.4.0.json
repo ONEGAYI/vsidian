@@ -11,7 +11,8 @@
       "16 条非表格来源条目（reading-block/suspend-banner/toolbar/mode-toggle 来自旧表散文段；12 条 limit-* 来自「已知不支持项」清单；inline-strikethrough 来自旧表散文承诺）无法从表格机器提取，其 sourceKey 沿用 #132 迁移对照（test/unit/styleContract.test.ts MIGRATION_PARITY，迁移时逐项核实，见 logs/migration-parity.txt）；它们受条目数守恒（entries 总数 110）与 entry-missing 比较保护，不参与 sourceRow 集合复验。",
       "releases 是 tag→SHA 与 CHANGELOG 日期在冻结时点（2026-09-27，即 v0.4.0 发布日）的固化快照：运行时与候选 CHANGELOG、git tag 交叉验证，矛盾即报错（改日期/重写 tag 不能伪造弃用期限）。新版本发布后应更新本快照并单独评审（AGENTS「公开样式契约」：基线修改须独立列出理由）。",
       "legacySnippetCases 是 v0.4.0 时代承诺写法的代表性旧片段组（29 条 Obsidian 原名选择器 + 4 条 vsidian 名选择器 + 1 条 Obsidian 原名变量），由集成用例「历史基线旧片段渲染验证」在真实宿主的真实片段通道装载并逐项断言可见效果——期望值独立于候选实现（不从候选清单生成）。",
-      "生命周期豁免 lifecycleExemptions：var-heading-accent 是 #55（2026-09-25，早于本工具）的历史移除先例，弃用声明的结构化记录不完整属历史既成事实，基线冻结时已为 removed 状态；豁免只跳过期限字段的格式校验，条目本体仍受 entry-missing 保护。"
+      "生命周期豁免 lifecycleExemptions：var-heading-accent 是 #55（2026-09-25，早于本工具）的历史移除先例，弃用声明的结构化记录不完整属历史既成事实，基线冻结时已为 removed 状态；豁免只跳过期限字段的格式校验，条目本体仍受 entry-missing 保护。",
+      "条目比较豁免 entryComparisonExemptions 与 lifecycleExemptions 追加 mode-toggle（#133 合并补登，2026-09-27）：基线快照中该条目（views live/reading）来自旧映射表散文段（本文件 provenance 第 3 条的 16 条非表格来源条目之一），而该类名自 v0.1.0 起从未随任何发布版存在于 DOM——git grep v0.4.0（75c3df7）src/ 零命中，迁移核对（logs/migration-parity.txt）未覆盖散文段的「实际发射」核实。#133 依 git 证据将其转为移除记录条目（views 清空、removed 标注「从未随发布版存在」）。保护效果：豁免只跳过该条目的字段级比较（target/views/support）与 removed 无弃用先行的期限校验，entry-missing 仍拦（条目物理删除即失败）、其余 109 条与后续新增条目的全部比较不受影响；豁免不构成「先弃用后移除」流程的先例——仅适用于「基线承诺从未兑现于任何发布版」且有 git 证据的纠错场景。"
     ],
     "boundary": "诚实边界：本基线与检查器同处候选分支时，无法对抗「候选同时删除检查器与基线本身」——#135 将以受保护来源（默认分支的检查器与基线，经 --baseline/--root/--git-tags 参数注入）运行本工具对抗该组合；本文件形态与检查器接口即为该集成准备。"
   },
@@ -38,7 +39,11 @@
     }
   },
   "lifecycleExemptions": [
-    "var-heading-accent"
+    "var-heading-accent",
+    "mode-toggle"
+  ],
+  "entryComparisonExemptions": [
+    "mode-toggle"
   ],
   "sourceRows": [
     {

@@ -19,6 +19,8 @@ import {
   daysBetween,
   extractLifecycleVersion,
   compareEntries,
+  extractClassTokens,
+  targetCompatible,
   validateLifecycle,
   checkAliasBridge,
   verifyBaselineRows,
@@ -259,6 +261,78 @@ test('compareEntries：chrome 域条目（#133 界面域清单）自动纳入同
 })
 
 // ---------------------------------------------------------------------------
+// 4b. target 类名 token 兼容判定（#133 数据修正形态；合并 #133 时引入）
+// ---------------------------------------------------------------------------
+
+test('extractClassTokens：只提点前缀完整词，无点简写与中文注释不参与', () => {
+  assert.deepEqual([...extractClassTokens('.vsidian-outline-slider-dot（+ .vsidian-outline-slider-active / -filled）')].sort(),
+    ['.vsidian-outline-slider-active', '.vsidian-outline-slider-dot'])
+  assert.deepEqual([...extractClassTokens('.vsidian-mode-toggle（已移除）')], ['.vsidian-mode-toggle'])
+  assert.deepEqual([...extractClassTokens('--vsidian-heading-color-1')], [])
+})
+
+test('targetCompatible：基线类名 token 只增不减的括注扩展放行，消失/替换仍拦', () => {
+  // #133 真实修正形态（合并树候选清单 vs 基线快照）
+  assert.equal(targetCompatible(
+    '.vsidian-outline-slider-dot（+ .vsidian-outline-slider-active）',
+    '.vsidian-outline-slider-dot（+ .vsidian-outline-slider-active / -filled）'), true)
+  assert.equal(targetCompatible(
+    '.vsidian-reading-code-card',
+    '.vsidian-reading-code-card（+ .vsidian-reading-code-line 行结构 / .vsidian-code-card-folded 收起态）'), true)
+  assert.equal(targetCompatible(
+    '.vsidian-suspend-banner',
+    '.vsidian-suspend-banner（内含 .vsidian-suspend-banner-text）'), true)
+  assert.equal(targetCompatible(
+    '.vsidian-mode-toggle',
+    '.vsidian-mode-toggle（已移除）'), true)
+  // 收缩：基线承诺的第二个类被删 → 拦
+  assert.equal(targetCompatible('.vsidian-a / .vsidian-b', '.vsidian-a'), false)
+  // 改名：token 替换 → 拦
+  assert.equal(targetCompatible('.vsidian-heading-line-{1..6}', '.vsidian-heading-row-{1..6}'), false)
+  // 候选丢失全部类名（改成纯文字）→ 拦
+  assert.equal(targetCompatible('.vsidian-a', '无'), false)
+  // 变量 target（无类名 token）回退全等：追加任何文本都按改名报告
+  assert.equal(targetCompatible('--vsidian-x', '--vsidian-x（.vsidian-y）'), false)
+  assert.equal(targetCompatible('--vsidian-x', '--vsidian-x'), true)
+})
+
+test('compareEntries：target 括注扩展（类名 token 只增不减）通过，token 消失仍报', () => {
+  const base = baselineEntry({ target: '.vsidian-suspend-banner', views: [], aliasTargets: undefined })
+  const expanded = [baselineEntry({ target: '.vsidian-suspend-banner（内含 .vsidian-suspend-banner-text）', views: [], aliasTargets: undefined })]
+  assert.deepEqual(compareEntries([base], expanded, CTX), [])
+  const shrunk = [baselineEntry({ target: '.vsidian-a', views: [], aliasTargets: undefined })]
+  assert.deepEqual(failureCodes(compareEntries(
+    [baselineEntry({ target: '.vsidian-a / .vsidian-b', views: [], aliasTargets: undefined })], shrunk, CTX)), ['entry-target-changed'])
+})
+
+// ---------------------------------------------------------------------------
+// 4c. 条目比较豁免（基线 entryComparisonExemptions；mode-toggle 纠错补登）
+// ---------------------------------------------------------------------------
+
+test('compareEntries：豁免条目跳过字段比较，但 entry-missing 仍拦', () => {
+  const base = baselineEntry({ id: 'mode-toggle', target: '.vsidian-mode-toggle', views: ['live', 'reading'], aliasTargets: undefined })
+  // 未豁免：views 收缩 + target 变化即失败
+  const rewritten = [baselineEntry({ id: 'mode-toggle', target: '.vsidian-mode-toggle（已移除）', views: [], aliasTargets: undefined })]
+  assert.ok(compareEntries([base], rewritten, CTX).length >= 2, '未豁免时 target/views 变化应报失败')
+  // 豁免：同形态通过
+  assert.deepEqual(compareEntries([base], rewritten, CTX, new Set(['mode-toggle'])), [])
+  // 豁免不豁免物理删除
+  assert.deepEqual(failureCodes(compareEntries([base], [], CTX, new Set(['mode-toggle']))), ['entry-missing'])
+})
+
+test('基线补登（#133 合并）：mode-toggle 的双层豁免与 provenance 理由在册', () => {
+  assert.ok(BASELINE.lifecycleExemptions?.includes('mode-toggle'),
+    'lifecycleExemptions 应登记 mode-toggle（removed 无弃用先行的期限校验豁免）')
+  assert.deepEqual(BASELINE.entryComparisonExemptions, ['mode-toggle'],
+    'entryComparisonExemptions 应恰登记 mode-toggle（基线快照承诺经 git 证据核实为陈旧数据的纠错豁免）')
+  const note = BASELINE.meta.provenance.find((p) => p.includes('entryComparisonExemptions'))
+  assert.ok(note && note.includes('零命中') && note.includes('entry-missing 仍拦'),
+    'provenance 应记录豁免理由（git 证据）与保护边界（entry-missing 不豁免）')
+  // 豁免与真实基线/候选形态对拍：基线条目存在且候选清单（合并树）确有移除记录条目
+  assert.equal(byId(BASELINE.entries, 'mode-toggle').views.join('/'), 'live/reading')
+})
+
+// ---------------------------------------------------------------------------
 // 5. 弃用期限校验（validateLifecycle）
 // ---------------------------------------------------------------------------
 
@@ -422,6 +496,9 @@ async function buildSimTree(transforms = []) {
     'CHANGELOG.md',
     'src/shared/styleContract.ts',
     'src/shared/obsidianAlias.ts',
+    // #133 起 styleContract.ts 转发导出 chromeContract 的探针表——sim 树
+    // 须一并复制，否则候选清单 esbuild 编译即失败（candidate-contract-error）
+    'src/shared/chromeContract.ts',
     'src/webview/styleGuideData.ts',
     'media/style-reference/style-reference.html',
     ...BASELINE.guardManifest.requiredFiles.map((f) => f.path),

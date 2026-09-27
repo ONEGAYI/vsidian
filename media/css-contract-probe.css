@@ -253,3 +253,160 @@
 #app .markdown-preview-view strong {
   outline-color: rgb(187, 188, 189);
 }
+
+/* ---- #133 界面域探针（选择器表 src/shared/chromeContract.ts；探针属性为自定义属性
+   --vsidian-chrome-probe——天然不可见，且与 #132 别名探针（outline-color）
+   及更早的 text-decoration-color 探针完全正交：同一元素（如代码卡片行
+   同时挂 vsidian-code-card-line 与 HyperMD-codeblock）被多套探针命中时
+   零层叠串扰） ---- */
+
+/* live 行内公式（KaTeX 结构在稳定容器内） */
+#app .vsidian-view-live .vsidian-math .katex {
+  --vsidian-chrome-probe: rgb(200, 0, 1);
+}
+
+/* live 块级公式 */
+#app .vsidian-view-live .vsidian-math-block {
+  --vsidian-chrome-probe: rgb(201, 0, 1);
+}
+
+/* live 公式错误降级 span */
+#app .vsidian-view-live .vsidian-math-error {
+  --vsidian-chrome-probe: rgb(202, 0, 1);
+}
+
+/* 阅读公式块（katex-block 容器） */
+#app .vsidian-view-reading .vsidian-reading-math .katex-block {
+  --vsidian-chrome-probe: rgb(203, 0, 1);
+}
+
+/* 阅读公式错误降级 */
+#app .vsidian-view-reading .vsidian-math-error {
+  --vsidian-chrome-probe: rgb(204, 0, 1);
+}
+
+/* live mermaid 渲染容器（rendered 态） */
+#app .vsidian-view-live .vsidian-mermaid[data-vsidian-mermaid-state="rendered"] {
+  --vsidian-chrome-probe: rgb(205, 0, 1);
+}
+
+/* live mermaid SVG */
+#app .vsidian-view-live .vsidian-mermaid[data-vsidian-mermaid-state="rendered"] svg {
+  --vsidian-chrome-probe: rgb(206, 0, 1);
+}
+
+/* live mermaid 错误降级信息区 */
+#app .vsidian-view-live .vsidian-mermaid-error-message {
+  --vsidian-chrome-probe: rgb(207, 0, 1);
+}
+
+/* 阅读 mermaid 整块（豁免切片的块元素） */
+#app .vsidian-view-reading .vsidian-reading-mermaid {
+  --vsidian-chrome-probe: rgb(208, 0, 1);
+}
+
+/* 阅读 mermaid 渲染容器（块内 fence 容器） */
+#app .vsidian-view-reading .vsidian-reading-mermaid .vsidian-mermaid[data-vsidian-mermaid-state="rendered"] {
+  --vsidian-chrome-probe: rgb(209, 0, 1);
+}
+
+/* 图形化代码块按钮组（挂在渲染容器 frame 上） */
+#app .vsidian-view-live .vsidian-graphic-frame .vsidian-graphic-chrome {
+  --vsidian-chrome-probe: rgb(210, 0, 1);
+}
+
+/* live 代码卡片行 */
+#app .vsidian-view-live .vsidian-code-card-line {
+  --vsidian-chrome-probe: rgb(211, 0, 1);
+}
+
+/* live 卡片头部横带 */
+#app .vsidian-view-live .vsidian-code-card-header {
+  --vsidian-chrome-probe: rgb(212, 0, 1);
+}
+
+/* live 卡片语言标签 */
+#app .vsidian-view-live .vsidian-code-card-header-label {
+  --vsidian-chrome-probe: rgb(213, 0, 1);
+}
+
+/* live 卡内行号 */
+#app .vsidian-view-live .vsidian-code-card-linenumber {
+  --vsidian-chrome-probe: rgb(214, 0, 1);
+}
+
+/* live 语法高亮 token（tok-*） */
+#app .vsidian-view-live .vsidian-code-card-line .tok-keyword {
+  --vsidian-chrome-probe: rgb(215, 0, 1);
+}
+
+/* 阅读代码卡片外壳 */
+#app .vsidian-view-reading .vsidian-reading-code-card {
+  --vsidian-chrome-probe: rgb(216, 0, 1);
+}
+
+/* 阅读卡片行（与 live 同类名） */
+#app .vsidian-view-reading .vsidian-code-card-line {
+  --vsidian-chrome-probe: rgb(217, 0, 1);
+}
+
+/* 阅读卡内行号 */
+#app .vsidian-view-reading .vsidian-code-card-linenumber {
+  --vsidian-chrome-probe: rgb(218, 0, 1);
+}
+
+/* 阅读语法高亮 token */
+#app .vsidian-view-reading .vsidian-reading-code-card .tok-keyword {
+  --vsidian-chrome-probe: rgb(219, 0, 1);
+}
+
+/* 大纲一级条目 */
+#app .vsidian-sidebar .vsidian-outline-item.vsidian-outline-level-1 {
+  --vsidian-chrome-probe: rgb(220, 0, 1);
+}
+
+/* 大纲层级对齐引导线 */
+#app .vsidian-sidebar .vsidian-outline-item .vsidian-outline-guide {
+  --vsidian-chrome-probe: rgb(229, 0, 1);
+}
+
+/* 大纲行内标记透传（粗体） */
+#app .vsidian-sidebar .vsidian-outline-strong {
+  --vsidian-chrome-probe: rgb(221, 0, 1);
+}
+
+/* 大纲折叠滑块行 */
+#app .vsidian-sidebar .vsidian-outline-slider {
+  --vsidian-chrome-probe: rgb(222, 0, 1);
+}
+
+/* 大纲滑块圆点 */
+#app .vsidian-sidebar .vsidian-outline-slider-dot {
+  --vsidian-chrome-probe: rgb(223, 0, 1);
+}
+
+/* 大纲折叠箭头（有子项条目） */
+#app .vsidian-sidebar .vsidian-outline-chevron {
+  --vsidian-chrome-probe: rgb(224, 0, 1);
+}
+
+/* 大纲工具条行 */
+#app .vsidian-sidebar .vsidian-outline-toolbar {
+  --vsidian-chrome-probe: rgb(225, 0, 1);
+}
+
+/* 大纲工具条重置按钮 */
+#app .vsidian-sidebar .vsidian-outline-toolbar .vsidian-outline-reset {
+  --vsidian-chrome-probe: rgb(226, 0, 1);
+}
+
+/* 大纲搜索输入框（含工具条路径——与 main.css 的 outline:none 同特异性，
+   后加载的探针规则按级联胜出） */
+#app .vsidian-sidebar .vsidian-outline-toolbar .vsidian-outline-search {
+  --vsidian-chrome-probe: rgb(227, 0, 1);
+}
+
+/* 编辑器顶栏 */
+#app .vsidian-toolbar {
+  --vsidian-chrome-probe: rgb(228, 0, 1);
+}

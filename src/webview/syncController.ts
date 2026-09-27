@@ -156,6 +156,7 @@ import { resolveStaleTaskToggle } from './taskToggle'
 import { SnippetLoader } from './snippetLoader'
 import { applyObsidianDomAlias, OBSIDIAN_ALIAS_PROBES } from '../shared/obsidianAlias'
 import { createFontArrivalWatch } from './fontArrival'
+import { CHROME_CONTRACT_PROBES } from '../shared/chromeContract'
 import { VirtualReadingView } from './readingVirtualView'
 import { blankRowInputPlan, runCreateTable, runTableEdit, tableEditing, tableRowsAt } from './tableEditing'
 import { listEditing } from './listEditing'
@@ -1574,12 +1575,17 @@ export class WebviewSyncController {
       case 'graphic.test.popup': {
         // 测试钩子（#111）：按序号点击图形化代码块 popup 按钮（驱动与用户
         // 点击相同的处理器链路：打开图表弹窗）；action 存在时改为点击弹窗
-        // 工具条的导出按钮（集成回归驱动导出链路的消息形态）。action 路径
-        // 不重开弹窗——单例重开会清空快照，导出点击会落在装载完成前
+        // 工具条按钮（导出按钮驱动导出链路的消息形态；refresh 驱动弹窗
+        // 原地重取源码刷新——#133 样式保持验证）。action 路径不重开弹窗
+        // ——单例重开会清空快照，点击会落在装载完成前
         if (message.action) {
           const cls = message.action === 'export-png'
             ? DIAGRAM_POPUP_CLASS_NAMES.exportPng
-            : DIAGRAM_POPUP_CLASS_NAMES.exportSvg
+            : message.action === 'export-svg'
+              ? DIAGRAM_POPUP_CLASS_NAMES.exportSvg
+              : message.action === 'close'
+                ? DIAGRAM_POPUP_CLASS_NAMES.close
+                : DIAGRAM_POPUP_CLASS_NAMES.refresh
           document.querySelector<HTMLButtonElement>(`.${cls}`)?.click()
           break
         }
@@ -2218,12 +2224,58 @@ export class WebviewSyncController {
     const liveHeaderSpan = this.liveWrapper?.querySelector('.vsidian-header-1') ?? null
     const readingH1 = this.readingContainer?.querySelector('.vsidian-reading-heading-1 h1') ?? null
     const readColor = (el: Element | null): string | null => (el ? getComputedStyle(el).color : null)
+    // #133 界面域样式契约探针：按探针表（单一事实源）在 **document 域**
+    // 定位（界面域目标不全在两视图容器内——大纲面板挂侧栏）读 computed
+    // outline-color；probe.css 以 vsidian 稳定类名写探针规则，选择器含
+    // 结构上下文（.vsidian-math .katex 等）——类未挂上/挂错节点即 null
+    const chromeSelectors: Record<string, string | null> = {}
+    for (const probe of CHROME_CONTRACT_PROBES) {
+      const el = document.querySelector(probe.selector)
+      // 自定义属性探针：不可见且与 outline-color / text-decoration-color
+      // 两套既有探针正交（双类元素同被多套探针命中时零串扰）
+      const value = el ? getComputedStyle(el).getPropertyValue('--vsidian-chrome-probe').trim() : ''
+      chromeSelectors[probe.id] = el ? value === '' ? null : value : null
+    }
+    // #133 界面域可见颜色观测：各区域代表元素的 computed color（随当前
+    // viewMode 取对应侧目标——真实片段改写可见属性即被观测到）
+    const inLive = this.viewMode === 'live'
+    const readDocColor = (selector: string): string | null => {
+      const el = document.querySelector(selector)
+      return el ? getComputedStyle(el).color || null : null
+    }
+    const chromePaint = {
+      mathKatexColor: readDocColor(inLive
+        ? '#app .vsidian-view-live .vsidian-math .katex'
+        : '#app .vsidian-view-reading .vsidian-reading-math .katex'),
+      codeCardLabelColor: readDocColor(inLive
+        ? '#app .vsidian-view-live .vsidian-code-card-header-label'
+        : '#app .vsidian-view-reading .vsidian-code-card-header-label'),
+      tokKeywordColor: readDocColor(inLive
+        ? '#app .vsidian-view-live .tok-keyword'
+        : '#app .vsidian-view-reading .tok-keyword'),
+      mermaidContainerColor: readDocColor(inLive
+        ? '#app .vsidian-view-live .vsidian-mermaid'
+        : '#app .vsidian-view-reading .vsidian-reading-mermaid .vsidian-mermaid'),
+      outlineLevel1Color: readDocColor('#app .vsidian-sidebar .vsidian-outline-level-1'),
+    }
+    // #133 图表弹窗样式观测：浮层在场时的 toolbar/stage computed color；
+    // 浮层不在场为 null（弹窗 DOM 只在打开期间存在——在场性本身即观测点）
+    const popupOverlay = document.querySelector('.vsidian-diagram-overlay')
+    const chromePopup = popupOverlay
+      ? {
+          toolbarColor: readDocColor('.vsidian-diagram-overlay .vsidian-diagram-toolbar'),
+          stageColor: readDocColor('.vsidian-diagram-overlay .vsidian-diagram-stage'),
+        }
+      : null
     return {
       obsidianAliases,
       obsidianVarProbe: {
         liveHeadingColor: readColor(liveHeaderSpan),
         readingHeadingColor: readColor(readingH1),
       },
+      chromeSelectors,
+      chromePaint,
+      chromePopup,
       liveHeadingDecorationColor: read(liveEl),
       readingHeadingDecorationColor: read(readingEl),
       readingVarProbe,

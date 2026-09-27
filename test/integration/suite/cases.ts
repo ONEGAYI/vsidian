@@ -5,6 +5,7 @@ import * as vscode from 'vscode'
 import { LOCALE_MESSAGES, resolveLocale } from '../../../src/shared/locales'
 import { OBSIDIAN_ALIAS_PROBES } from '../../../src/shared/obsidianAlias'
 import legacyBaselineJson from '../../../test/style-contract/baseline-v0.4.0.json'
+import { CHROME_CONTRACT_PROBES } from '../../../src/shared/chromeContract'
 
 /** #134 历史基线旧片段用例（基线 JSON 的 legacySnippetCases 元素形态） */
 interface LegacySnippetCase {
@@ -388,6 +389,18 @@ interface ViewState {
     obsidianAliases?: Record<string, string | null>
     /** #132 变量别名桥观测：--h1-color 驱动的一级标题 computed color */
     obsidianVarProbe?: { liveHeadingColor: string | null; readingHeadingColor: string | null }
+    /** #133 界面域探针（键 = 清单条目 ID 或 -live/-reading 消歧；选择器表见 src/shared/chromeContract.ts） */
+    chromeSelectors?: Record<string, string | null>
+    /** #133 界面域可见颜色观测（各区域代表元素 computed color，随 viewMode 取对应侧） */
+    chromePaint?: {
+      mathKatexColor: string | null
+      codeCardLabelColor: string | null
+      tokKeywordColor: string | null
+      mermaidContainerColor: string | null
+      outlineLevel1Color: string | null
+    }
+    /** #133 图表弹窗样式观测（浮层在场时的 toolbar/stage computed color；不在场为 null） */
+    chromePopup?: { toolbarColor: string | null; stageColor: string | null } | null
   }
   /** #8 双视图语法一致性观测 */
   liveSyntax?: {
@@ -842,6 +855,35 @@ async function setSnippetEnabled(name: string, enabled: boolean): Promise<void> 
 async function writeSnippetCss(file: string, css: string): Promise<void> {
   await vscode.workspace.fs.writeFile(wsUri(file), Buffer.from(css, 'utf8'))
 }
+
+/** #133 界面域样式契约 fixture（与 fixtures.mjs 的 CHROME_CONTRACT_DOC 一致） */
+const CHROME_CONTRACT_DOC_TEXT = [
+  '# 界面契约一级标题',
+  '',
+  '## 二级标题与 **加粗透传**',
+  '',
+  '行内公式 $E = mc^2$ 与块级公式：',
+  '',
+  '$$\\int_0^1 x^2 \\, dx = \\tfrac{1}{3}$$',
+  '',
+  '错误公式 $\\fauxcmd{x}$ 原文降级。',
+  '',
+  '```mermaid',
+  'flowchart TD',
+  '  A[开始] --> B[结束]',
+  '```',
+  '',
+  '```mermaid',
+  '这个围栏语法无效',
+  '```',
+  '',
+  '```js',
+  'const keyword = true',
+  '```',
+  '',
+  '结尾段落。',
+  '',
+].join('\n')
 
 /** #9 任务勾选 fixture（与 runTest.mjs 的 TASK_DOC 一致） */
 const TASK_DOC_TEXT = [
@@ -7710,4 +7752,195 @@ export const cases: Array<[string, () => Promise<void>]> = [
       await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
     }
   }],
+
+  // ---- #133 界面域公开样式契约（chrome 探针 / 真实片段 / 弹窗 / 重挂载）----
+
+  ['界面域样式契约：chrome 探针双视图命中与模式切换（#133）', async () => {
+    await resetLastMode()
+    await openWithEditor('chrome-contract.md')
+    await waitSessionReady('chrome-contract.md')
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', wsUri('chrome-contract.md'))
+
+    // 探针按选择器作用域分组：live 组含 .vsidian-view-live、reading 组含
+    // .vsidian-view-reading，其余（大纲侧栏、顶栏）DOM 常驻两组都断言
+    const liveProbes = CHROME_CONTRACT_PROBES.filter((p) => p.selector.includes('.vsidian-view-live'))
+    const readingProbes = CHROME_CONTRACT_PROBES.filter((p) => p.selector.includes('.vsidian-view-reading'))
+    const alwaysProbes = CHROME_CONTRACT_PROBES.filter(
+      (p) => !p.selector.includes('.vsidian-view-live') && !p.selector.includes('.vsidian-view-reading'),
+    )
+    assert(liveProbes.length + readingProbes.length + alwaysProbes.length === CHROME_CONTRACT_PROBES.length,
+      '探针分组应完整覆盖探针表')
+
+    // 断言器（轮询稳定形态，同 #132 别名探针）：mermaid 懒加载与装饰重建
+    // 有空窗，poll 至稳定；持续差异 ≥3 条提前带全量差异报错
+    const waitChrome = async (label: string, probes: readonly typeof CHROME_CONTRACT_PROBES[number][], timeoutMs: number): Promise<void> => {
+      await poll(label, async () => {
+        const v = (await vscode.commands.executeCommand(CMD.viewState, wsUri('chrome-contract.md').toString(), 0)) as ViewState | undefined
+        const probes0 = v?.cssProbe?.chromeSelectors
+        if (!probes0) return undefined
+        const diffs: string[] = []
+        for (const probe of probes) {
+          if (probes0[probe.id] !== probe.expected) {
+            diffs.push(probe.id + '：' + String(probes0[probe.id]) + '≠' + probe.expected)
+          }
+        }
+        if (diffs.length === 0) return true
+        if (diffs.length >= 3) throw new Error('chrome 探针持续差异：' + diffs.join('；'))
+        return undefined
+      }, timeoutMs)
+    }
+
+    // live：全部 live 作用域 + 常驻探针命中（mermaid rendered 态门控在 60s 预算内）
+    await waitViewState('chrome-contract.md', (v) => v.viewMode === 'live')
+    await waitChrome('live chrome 探针全命中', [...liveProbes, ...alwaysProbes], 60000)
+
+    // reading：全部 reading 作用域 + 常驻探针命中
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri('chrome-contract.md'))
+    await waitViewState('chrome-contract.md', (v) => v.viewMode === 'reading')
+    await waitChrome('reading chrome 探针全命中', [...readingProbes, ...alwaysProbes], 60000)
+
+    // 模式切换存活：切回 live 探针仍全命中
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', wsUri('chrome-contract.md'))
+    await waitViewState('chrome-contract.md', (v) => v.viewMode === 'live')
+    await waitChrome('切回 live chrome 探针复验', [...liveProbes, ...alwaysProbes], 60000)
+  }],
+
+  ['界面域样式契约：真实片段驱动 chrome 可见属性与停用回退（#133）', async () => {
+    await resetLastMode()
+    const dir = wsUri('css-snippets').fsPath
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets'))
+    // 片段按用户文档口径书写（无 #app 前缀的稳定类选择器）——五个区域各
+    // 一条可见颜色改写：公式 / 卡片标签 / token / 图表容器 / 大纲层级色
+    await writeSnippetCss('css-snippets/chrome-paint.css', [
+      '.vsidian-math .katex { color: rgb(61, 62, 63); }',
+      '.vsidian-code-card-header-label { color: rgb(64, 65, 66); }',
+      '.tok-keyword { color: rgb(67, 68, 69); }',
+      '.vsidian-mermaid { color: rgb(70, 71, 72); }',
+      '.vsidian-outline-level-1 { color: rgb(73, 74, 75); }',
+    ].join('\n'))
+    try {
+      await setSnippetDirectory(dir)
+      await poll('片段扫描完成', async () => {
+        const st = await snippetState()
+        return st.directory === dir && !st.readError && st.entries.length === 1 ? st : undefined
+      })
+      await openWithEditor('chrome-contract.md')
+      await waitSessionReady('chrome-contract.md')
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', wsUri('chrome-contract.md'))
+      await setSnippetEnabled('chrome-paint.css', true)
+
+      const expectPaint = (v: ViewState): boolean =>
+        v.cssProbe?.chromePaint?.mathKatexColor === 'rgb(61, 62, 63)' &&
+        v.cssProbe?.chromePaint?.codeCardLabelColor === 'rgb(64, 65, 66)' &&
+        v.cssProbe?.chromePaint?.tokKeywordColor === 'rgb(67, 68, 69)' &&
+        v.cssProbe?.chromePaint?.mermaidContainerColor === 'rgb(70, 71, 72)' &&
+        v.cssProbe?.chromePaint?.outlineLevel1Color === 'rgb(73, 74, 75)'
+
+      // live：五区域可见颜色全部被片段驱动（mermaid 懒加载故放宽预算）
+      const live = await waitViewState('chrome-contract.md',
+        (v) => v.viewMode === 'live' && expectPaint(v), 0, 60000)
+      assert(live.cssProbe!.chromePaint!.outlineLevel1Color === 'rgb(73, 74, 75)',
+        '大纲一级条目色应被片段驱动（与正文标题同源变量的层级色入口可覆写）')
+
+      // reading：同类名双侧命中（阅读侧 chromePaint 换取 reading 作用域目标）
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri('chrome-contract.md'))
+      await waitViewState('chrome-contract.md', (v) => v.viewMode === 'reading' && expectPaint(v), 0, 60000)
+
+      // 停用回退：颜色离开片段值且回到非空默认（可见属性回到主题默认）
+      await setSnippetEnabled('chrome-paint.css', false)
+      const reverted = await waitViewState('chrome-contract.md', (v) =>
+        v.viewMode === 'reading' && !expectPaint(v) &&
+        v.cssProbe?.chromePaint?.mathKatexColor !== null &&
+        v.cssProbe?.chromePaint?.tokKeywordColor !== null)
+      assert(reverted.cssProbe!.chromePaint!.mermaidContainerColor !== 'rgb(70, 71, 72)',
+        '停用后图表容器色应回落默认')
+    } finally {
+      await setSnippetDirectory(null)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
+    }
+  }],
+
+  ['界面域样式契约：图表弹窗样式随打开与刷新保持（#133）', async () => {
+    await resetLastMode()
+    const dir = wsUri('css-snippets').fsPath
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets'))
+    await writeSnippetCss('css-snippets/popup-paint.css', [
+      '.vsidian-diagram-toolbar { color: rgb(79, 80, 81); }',
+      '.vsidian-diagram-stage { color: rgb(82, 83, 84); }',
+    ].join('\n'))
+    try {
+      await setSnippetDirectory(dir)
+      await poll('片段扫描完成', async () => {
+        const st = await snippetState()
+        return st.directory === dir && !st.readError && st.entries.length === 1 ? st : undefined
+      })
+      await openWithEditor('chrome-contract.md')
+      await waitSessionReady('chrome-contract.md')
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', wsUri('chrome-contract.md'))
+      await setSnippetEnabled('popup-paint.css', true)
+      const uri = wsUri('chrome-contract.md').toString()
+      // 等 mermaid 就位（popup 按钮挂在渲染成功态的 frame 上）
+      await waitViewState('chrome-contract.md', (v) =>
+        v.viewMode === 'live' && (v.liveMermaidCount ?? 0) >= 1, 0, 60000)
+
+      // 打开前：弹窗不在场（chromePopup 为 null 是在场性观测点）
+      const before = await waitViewState('chrome-contract.md', (v) => v.cssProbe?.chromePopup === null)
+      assert(before.cssProbe!.chromePopup === null, '弹窗未打开时无浮层 DOM')
+
+      // 打开弹窗：浮层在场且两区颜色被片段驱动
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'graphic.test.popup', view: 'live', index: 0 })
+      const opened = await waitViewState('chrome-contract.md', (v) =>
+        v.cssProbe?.chromePopup?.toolbarColor === 'rgb(79, 80, 81)' &&
+        v.cssProbe?.chromePopup?.stageColor === 'rgb(82, 83, 84)', 0, 60000)
+      assert(opened.paint?.graphic?.overlay === true, '浮层应在场（绘制层）')
+
+      // 刷新（原地重取源码重渲染）：浮层保持且片段样式不丢
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'graphic.test.popup', view: 'live', index: 0, action: 'refresh' })
+      await waitViewState('chrome-contract.md', (v) =>
+        v.paint?.graphic?.overlay === true &&
+        v.cssProbe?.chromePopup?.toolbarColor === 'rgb(79, 80, 81)' &&
+        v.cssProbe?.chromePopup?.stageColor === 'rgb(82, 83, 84)', 0, 60000)
+
+      // 关闭：浮层撤下（在场性回到 null）
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'graphic.test.popup', view: 'live', index: 0, action: 'close' })
+      await waitViewState('chrome-contract.md', (v) => v.cssProbe?.chromePopup === null)
+    } finally {
+      await setSnippetDirectory(null)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
+    }
+  }],
+
+  ['界面域样式契约：webview 重载后 chrome 探针复验（虚拟化重挂，#133）', async () => {
+    await resetLastMode()
+    await openWithEditor('chrome-contract.md')
+    await waitSessionReady('chrome-contract.md')
+    const uri = wsUri('chrome-contract.md').toString()
+
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri('chrome-contract.md'))
+    await waitViewState('chrome-contract.md', (v) => v.viewMode === 'reading' && (v.readingBlockCount ?? 0) > 0)
+    // 重载 webview：阅读块全部销毁重建（卡片/公式/图表挂载钩子从源码重新
+    // 增强），侧栏与顶栏同步重建——chrome 探针必须全部重新命中
+    await vscode.commands.executeCommand('workbench.action.webview.reloadWebviewAction')
+    await poll('重载后恢复阅读模式并采集探针', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      return v?.viewMode === 'reading' && v.text === CHROME_CONTRACT_DOC_TEXT && (v.readingBlockCount ?? 0) > 0
+        ? v : undefined
+    }, 30000)
+    const readingProbes = CHROME_CONTRACT_PROBES.filter((p) => !p.selector.includes('.vsidian-view-live'))
+    await poll('重挂后 chrome 探针全命中', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      const probes0 = v?.cssProbe?.chromeSelectors
+      if (!probes0) return undefined
+      const diffs: string[] = []
+      for (const probe of readingProbes) {
+        if (probes0[probe.id] !== probe.expected) {
+          diffs.push(probe.id + '：' + String(probes0[probe.id]) + '≠' + probe.expected)
+        }
+      }
+      if (diffs.length === 0) return true
+      if (diffs.length >= 3) throw new Error('重挂后 chrome 探针持续差异：' + diffs.join('；'))
+      return undefined
+    }, 60000)
+  }],
 ]
+

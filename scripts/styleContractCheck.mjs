@@ -150,14 +150,46 @@ export function expandFamilyTargets(targets) {
 }
 
 /**
- * 逐条比较基线与候选清单。候选删除条目（含 removed 历史条目——清单条目
- * 永不物理删除）、改名 target、降级 support、收回 views 或 Obsidian 原名
- * 承诺，均失败。候选新增条目不受限；升级（semantic→direct）、views 扩展
- * 允许。候选条目的支持等级兼容两种形态：清单原生 `obsidian.support` 嵌套
- * 与基线同构的扁平 `obsidianSupport`。工具不写死 content 域——基线含
- * chrome 域条目（#133 起核实）时同一规则自动生效。
+ * 提取 target 文本中的类名 token（点前缀完整词）。`-filled` 这类无点简写
+ * 与中文注释不参与提取——它们是说明性文本，不是独立入口。
  */
-export function compareEntries(baselineEntries, candidateEntries, ctx) {
+export function extractClassTokens(target) {
+  const tokens = String(target ?? '').match(/\.[A-Za-z][A-Za-z0-9_-]*/g)
+  return new Set(tokens ?? [])
+}
+
+/**
+ * target 兼容判定：全等通过；基线承诺的类名 token 在候选中全部保留（只增
+ * 不减）亦通过——target 括注追加子类/收起态等说明（#133 数据修正形态）不
+ * 是入口改名。基线不含任何类名 token（变量等 `--xxx` 形态）时回退全等：
+ * 变量名本身没有可提取的「只增不减」结构，任何文本变化都按改名报告。
+ */
+export function targetCompatible(baselineTarget, candidateTarget) {
+  if (baselineTarget === candidateTarget) return true
+  const baseTokens = extractClassTokens(baselineTarget)
+  if (baseTokens.size === 0) return false
+  const candidateTokens = extractClassTokens(candidateTarget)
+  for (const token of baseTokens) {
+    if (!candidateTokens.has(token)) return false
+  }
+  return true
+}
+
+/**
+ * 逐条比较基线与候选清单。候选删除条目（含 removed 历史条目——清单条目
+ * 永不物理删除）、改名 target（类名 token 消失；token 只增不减的括注扩展
+ * 放行）、降级 support、收回 views 或 Obsidian 原名承诺，均失败。候选新增
+ * 条目不受限；升级（semantic→direct）、views 扩展允许。候选条目的支持等级
+ * 兼容两种形态：清单原生 `obsidian.support` 嵌套与基线同构的扁平
+ * `obsidianSupport`。工具不写死 content 域——基线含 chrome 域条目（#133 起
+ * 核实）时同一规则自动生效。
+ *
+ * entryExemptions（基线 entryComparisonExemptions 登记）：跳过该条目的
+ * 字段级比较——用于基线快照承诺经 git 证据核实为陈旧数据、候选依纠错记录
+ * 改写的场景（登记理由见基线 meta.provenance）。豁免不豁免 entry-missing：
+ * 条目本体从清单物理删除仍失败。
+ */
+export function compareEntries(baselineEntries, candidateEntries, ctx, entryExemptions = new Set()) {
   const failures = []
   const byId = new Map(candidateEntries.map((e) => [e.id, e]))
   for (const b of baselineEntries) {
@@ -168,8 +200,9 @@ export function compareEntries(baselineEntries, candidateEntries, ctx) {
       )
       continue
     }
-    if (b.target !== c.target) {
-      failures.push(fail(ctx, 'entry-target-changed', `条目 ${b.id} 的公开入口改名：${b.target} → ${c.target}`, b, `基线 target：${b.target}；候选 target：${c.target}`))
+    if (entryExemptions.has(b.id)) continue
+    if (!targetCompatible(b.target, c.target)) {
+      failures.push(fail(ctx, 'entry-target-changed', `条目 ${b.id} 的公开入口改名：${b.target} → ${c.target}`, b, `基线 target：${b.target}；候选 target：${c.target}（类名 token 只增不减的括注扩展放行，基线承诺的类名消失/替换即改名）`))
     }
     const candidateSupport = c.obsidian?.support ?? c.obsidianSupport
     const rankB = SUPPORT_RANK[b.obsidianSupport] ?? -1
@@ -562,7 +595,7 @@ export async function runStyleContractCheck(opts = {}) {
 
   if (candidate) {
     // 3. 契约比较
-    await mark('entry-comparison', () => ({ failures: compareEntries(baseline.entries, candidate.entries, ctx) }))
+    await mark('entry-comparison', () => ({ failures: compareEntries(baseline.entries, candidate.entries, ctx, new Set(baseline.entryComparisonExemptions ?? [])) }))
     // 4. 生命周期
     await mark('lifecycle', () => ({ failures: validateLifecycle(candidate.entries, releaseAssembly.trusted, now, baseline.lifecycleExemptions ?? []) }))
     // 5. 别名桥实现一致性
