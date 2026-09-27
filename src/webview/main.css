@@ -1512,10 +1512,12 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
 }
 
 /* 每个单元格 span 对应原始文档区间；点击后光标留在该格，网格不撤下。
-   列数在行装饰的 CSS 变量中。 */
+   #142 列宽内容比例分配：行装饰内联 --vsidian-table-col-widths（逐列
+   minmax(min(48px, 等分份额), 内容占比 fr)，由纯函数按表共享产出），
+   本规则消费之；缺省（源码降级等无计划形态）回退列数等分。 */
 #app .cm-editor .cm-scroller .vsidian-table-grid-row {
   display: grid;
-  grid-template-columns: repeat(var(--vsidian-table-columns), minmax(0, 1fr));
+  grid-template-columns: var(--vsidian-table-col-widths, repeat(var(--vsidian-table-columns), minmax(0, 1fr)));
   width: min(100%, 880px);
   padding: 0;
   box-shadow: none;

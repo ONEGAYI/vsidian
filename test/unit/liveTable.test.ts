@@ -260,6 +260,14 @@ describe('live 表格装饰', () => {
     expect(rows[0]?.dataset['vsidianTableRow']).toBe('header')
     expect(rows[1]?.dataset['vsidianTableRow']).toBe('row')
     expect(rows[0]?.style.getPropertyValue('--vsidian-table-columns')).toBe('2')
+    // #142 列宽计划：同表各行内联同一 grid-template-columns（行是独立 grid，
+    // 计划必须逐字节一致）；内容比例——「名字/苹果/`x|y`」列样本 5、「数量」
+    // 列样本 4，权重 = 样本 + 保底加成 4（9fr vs 8fr），保底 = min(48px, 等分 50%)
+    const template0 = rows[0]?.style.getPropertyValue('--vsidian-table-col-widths')
+    expect(template0).toBe('minmax(min(48px, 50%), 9fr) minmax(min(48px, 50%), 8fr)')
+    for (const row of rows) {
+      expect(row?.style.getPropertyValue('--vsidian-table-col-widths')).toBe(template0)
+    }
     expect(rows[0]?.querySelectorAll(':scope > .vsidian-table-grid-cell')).toHaveLength(2)
     expect(rows[2]?.querySelectorAll(':scope > .vsidian-table-grid-cell')).toHaveLength(2)
     expect(rows[1]?.querySelector('.vsidian-table-grid-align-center')).not.toBeNull()
@@ -309,6 +317,19 @@ describe('live 表格装饰', () => {
     expect(emptyView.state.selection.main.from).toBe(empty.indexOf('|| x |') + 1)
     expect(emptyView.contentDOM.querySelectorAll('.vsidian-table-grid-row')).toHaveLength(2)
     emptyView.destroy()
+    // #142 GFM 列对齐应用到该列全部单元格：空格占位 widget 也携带对齐类
+    // （阅读侧 text-align 内联同语义；此前空格占位缺对齐类）。`||` 相邻管道
+    // 才是零宽空格 widget（`| |` 是填充空格路径，无 widget）
+    const alignedEmpty = '| A | B |\n| :---: | --- |\n|| x |\n'
+    const alignedView = new EditorView({
+      parent: document.body.appendChild(document.createElement('div')),
+      state: EditorState.create({ doc: alignedEmpty, extensions: [livePreviewDecorations],
+        selection: EditorSelection.single(alignedEmpty.length) }),
+    })
+    const emptySlot = alignedView.contentDOM.querySelector<HTMLElement>(
+      `[aria-label="${zhCn['decor.emptyCell']}"]`)
+    expect(emptySlot?.classList.contains('vsidian-table-grid-align-center')).toBe(true)
+    alignedView.destroy()
     const unsafe = '| A | B |\n| --- | --- |\n| only one |\n'
     const unsafeSet = build(unsafe)
     expect(textsFor(unsafeSet, LIVE_CLASS_NAMES.tableGridRow, unsafe)).toHaveLength(0)

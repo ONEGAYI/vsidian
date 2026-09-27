@@ -156,7 +156,7 @@ try {
     }
   }
   const navigationFailures = []
-  for (const scenario of ['horizontal-wrap', 'horizontal-wrap-empty', 'vertical-inside', 'vertical-outside', 'vertical-empty', 'vertical-wrapped', 'enter-cell', 'enter-empty', 'enter-body', 'enter-middle', 'enter-repeat', 'enter-code', 'enter-code-start', 'enter-code-end', 'enter-ime', 'drag-row', 'drag-column', 'region-copy', 'region-exit-outside', 'region-type', 'region-paste', 'region-ime', 'region-zero-width', 'region-zero-width-ime', 'region-padded-drag', 'header-clear', 'empty-row-backspace', 'handle-row', 'handle-column', 'handle-cross-row', 'handle-cross-column', 'handle-hover', 'drag-table-outside']) {
+  for (const scenario of ['horizontal-wrap', 'horizontal-wrap-empty', 'vertical-inside', 'vertical-outside', 'vertical-empty', 'vertical-wrapped', 'enter-cell', 'enter-empty', 'enter-body', 'enter-middle', 'enter-repeat', 'enter-code', 'enter-code-start', 'enter-code-end', 'enter-ime', 'drag-row', 'drag-column', 'region-copy', 'region-exit-outside', 'region-type', 'region-paste', 'region-ime', 'region-zero-width', 'region-zero-width-ime', 'region-padded-drag', 'header-clear', 'empty-row-backspace', 'handle-row', 'handle-column', 'handle-cross-row', 'handle-cross-column', 'handle-hover', 'column-width', 'drag-table-outside']) {
     const page = await browser.newPage()
     try {
       await page.setContent('<div id="app"></div>')
@@ -171,6 +171,7 @@ try {
       if (scenario === 'handle-column') source = source.replace('| --- | --- |', '| :--- | ---: |')
       if (scenario.startsWith('region-zero-width')) source = 'BEFORE\n\n|H1|H2|\n|---|---|\n||B2|\n|C1|C2|\n\nAFTER'
       if (scenario === 'region-padded-drag') source = 'BEFORE\n\n|H1|H2|\n|---|---|\n| |B2|\n|C1|C2|\n\nAFTER'
+      if (scenario === 'column-width') source = 'BEFORE\n\n| 短 | 这是一个内容比较长的表头列 |\n| --- | --- |\n| a | 这一列内容明显更长更长更长 |\n| b | 短 |\n\nAFTER'
       if (scenario.startsWith('handle-cross-')) source += '\n\n| X1 | X2 |\n| --- | --- |\n| Y1 | Y2 |'
       if (scenario === 'enter-empty') source = source.replace('H2', '')
       if (scenario.startsWith('enter-code')) source = source.replace('H2', '`H2`')
@@ -493,9 +494,42 @@ try {
           const sel = await gridState()
           assert(sel.to > sel.from && sel.to >= source.indexOf('AFTER'),
             `拖入正文后须恢复普通文本选区: ${JSON.stringify(sel)}`)
-        } else {
-          // drag-table-outside：表外文本发起、横跨整表拖选，一次 Delete 移除整表
-          const beforeLine = page.locator('.cm-line').filter({ hasText: /^BEFORE$/ })
+      } else if (scenario === 'column-width') {
+        // #142 列宽内容比例分配（绘制层断言：真实布局宽度，非 DOM 存在性）：
+        // 宽内容列宽于窄内容列；同表各行共享同一列宽计划（行是独立 grid，
+        // 列边界逐列对齐）；内容变更即时重算（窄列变长后反超）
+        const widths = () => page.evaluate(() =>
+          [...document.querySelectorAll('.vsidian-table-grid-row')].map((row) =>
+            [...row.querySelectorAll(':scope > .vsidian-table-grid-cell')]
+              .map((c) => c.getBoundingClientRect().width)))
+        const before = await widths()
+        assert.equal(before.length, 3, '三行网格（表头 + 两数据行）')
+        for (const row of before) {
+          assert(row[1] > row[0] + 40, `宽内容列必须明显宽于窄内容列: ${JSON.stringify(row)}`)
+        }
+        for (let c = 0; c < 2; c++) {
+          for (const row of before) {
+            assert(Math.abs(row[c] - before[0][c]) < 0.5,
+              `各行第 ${c} 列宽度须一致（同表共享列宽计划）: ${JSON.stringify(before)}`)
+          }
+        }
+        const plans = await page.evaluate(() =>
+          [...document.querySelectorAll('.vsidian-table-grid-row')]
+            .map((row) => row.style.getPropertyValue('--vsidian-table-col-widths')))
+        assert(plans.every((p) => /^minmax\(min\(48px, 50%\), [\d.]+fr\) minmax\(min\(48px, 50%\), [\d.]+fr\)$/.test(p)),
+          `行内联列宽计划应为 minmax 保底 + fr 占比形态: ${JSON.stringify(plans)}`)
+        assert(new Set(plans).size === 1, '同表各行内联同一列宽计划')
+        // 内容变更重算：窄列表头输入 30 字符后该列反超宽列
+        await cell(0, 0).click()
+        for (let i = 0; i < 30; i++) await page.keyboard.type('w')
+        const after = await widths()
+        assert(after[0][0] > after[0][1], `窄列内容变长后列宽须反超宽列: ${JSON.stringify(after[0])}`)
+        const typed = await page.evaluate(() => (window.readEditor().text.match(/w/g) ?? []).length)
+        assert.equal(typed, 30, '输入须真实写回源文')
+        await captureTable('table-column-width.png')
+      } else {
+        // drag-table-outside：表外文本发起、横跨整表拖选，一次 Delete 移除整表
+        const beforeLine = page.locator('.cm-line').filter({ hasText: /^BEFORE$/ })
           const afterLine = page.locator('.cm-line').filter({ hasText: /^AFTER$/ })
           const a = await beforeLine.boundingBox()
           const b = await afterLine.boundingBox()
