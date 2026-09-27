@@ -170,6 +170,7 @@ import { symbolAutocomplete } from './symbolAutocomplete'
 import { symbolSelectionWrap } from './symbolWrap'
 import { fenceEscape } from './fenceEscape'
 import { frontmatterEditing } from './frontmatterEditing'
+import { FM_CARD_CLASS_NAMES } from './frontmatterDecorations'
 import { listEditing } from './listEditing'
 import { indentEditing } from './indentEditing'
 import { selectTableRegion, tableRegionField } from './tableRegionSelection'
@@ -1268,6 +1269,45 @@ export class WebviewSyncController {
         this.runSidebarResizeTest(message.delta)
         break
       }
+      case 'fm.test.click': {
+        // 测试钩子（#140）：点击真实 frontmatter 卡片结构按钮（与用户点击
+        // 同一 armButton 处理器；编辑计划走标准 CM6 事务出站）。条目级 ×
+        // 与项级 × 同类名，按所在行是否 item-row 区分（DOM 文档序）
+        const live = this.liveWrapper
+        const at = <T extends HTMLElement>(els: T[], index: number): T | undefined =>
+          els[Math.max(0, index)]
+        const all = <T extends HTMLElement>(sel: string): T[] =>
+          [...(live?.querySelectorAll<T>(sel) ?? [])]
+        if (message.action === 'add-entry') {
+          all<HTMLButtonElement>('button.vsidian-fm-add-entry')[0]?.click()
+          break
+        }
+        if (message.action === 'add-item') {
+          at(all<HTMLButtonElement>('button.vsidian-fm-add-item'), message.index ?? 0)?.click()
+          break
+        }
+        if (message.action === 'empty-value') {
+          // 空值占位是 span（FmEmptyValueWidget），交互入口在 mousedown
+          at(all(`.${FM_CARD_CLASS_NAMES.emptyValue}`), message.index ?? 0)?.dispatchEvent(
+            new MouseEvent('mousedown', { bubbles: true, cancelable: true }),
+          )
+          break
+        }
+        const removes = all<HTMLButtonElement>('button.vsidian-fm-remove')
+        const itemButtons = removes.filter((btn) => btn.closest(`.${FM_CARD_CLASS_NAMES.itemRow}`))
+        if (message.action === 'remove-entry') {
+          at(removes.filter((btn) => !itemButtons.includes(btn)), message.index ?? 0)?.click()
+          break
+        }
+        at(itemButtons, message.index ?? 0)?.click()
+        break
+      }
+      case 'view.test.click': {
+        // 测试钩子（#141）：点击顶栏双态视图切换真实按钮（与用户点击同一
+        // 处理器：出站 view.switch.request，切换由宿主编排回流驱动）
+        this.viewToggleBtn?.click()
+        break
+      }
       case 'quick.test.click': {
         const selector = message.action === 'toggle' ? '.vsidian-quick-toggle'
           : message.action === 'heading' ? '.vsidian-quick-heading'
@@ -2202,6 +2242,7 @@ export class WebviewSyncController {
     const readingEl = this.readingContainer?.querySelector('.vsidian-reading-heading-1') ?? null
     const liveStrong = this.liveWrapper?.querySelector('.vsidian-strong') ?? null
     const liveInlineCode = this.liveWrapper?.querySelector('.vsidian-inline-code') ?? null
+    const liveHtmlComment = this.liveWrapper?.querySelector(`.${LIVE_CLASS_NAMES.htmlComment}`) ?? null
     const liveCodeLine = this.liveWrapper?.querySelector('.vsidian-code-line') ?? null
     const liveTablePipe = this.liveWrapper?.querySelector('.vsidian-table-pipe') ?? null
     const readingStrong = this.readingContainer?.querySelector('.vsidian-reading-block strong') ?? null
@@ -2333,6 +2374,8 @@ export class WebviewSyncController {
       readingBackgroundImage,
       liveStrongDecorationColor: read(liveStrong),
       liveInlineCodeDecorationColor: read(liveInlineCode),
+      // #139 HTML 注释淡化探针（live 专属；阅读侧隐藏无对应元素）
+      liveHtmlCommentDecorationColor: read(liveHtmlComment),
       liveCodeLineDecorationColor: read(liveCodeLine),
       readingStrongDecorationColor: read(readingStrong),
       liveTaskCheckboxDecorationColor: read(liveTaskBox),

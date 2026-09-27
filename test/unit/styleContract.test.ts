@@ -356,10 +356,10 @@ describe('styleContract 迁移完整性（旧映射表全集不丢）', () => {
 
 /** 每类目条目数快照（显式钉住归类：重划/迁移类目必须同步改这里，防静默漂移） */
 const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
-  // content 域（69）
+  // content 域（71）
   'view-container': 2,
   heading: 4,
-  'inline-format': 5,
+  'inline-format': 6,
   'list-task': 5,
   'line-syntax': 5,
   table: 11,
@@ -367,14 +367,14 @@ const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   'link-image-wikilink': 6,
   'content-variables': 9,
   'content-limits': 11,
-  // chrome 域（46）
+  // chrome 域（54）
   math: 5,
   diagram: 4,
   'graphic-interact': 2,
   'code-card': 10,
   outline: 19,
   'chrome-limits': 4,
-  'toolbar-banner': 3,
+  'toolbar-banner': 5,
   frontmatter: 5,
 }
 

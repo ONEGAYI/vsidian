@@ -71,6 +71,7 @@ const DYNAMIC_STATE_ENTRIES: ReadonlySet<string> = new Set([
   'suspend-banner', // 暂停态横幅
   'diagram-popup', // 弹窗在场期间（chromePopup 观测）
   'mode-toggle', // 已移除（历史记录条目）
+  'mode-body', // 模式态类（live/reading 互斥，两态必居其一——无静态单值可断言）
 ])
 
 describe('chromeContract 覆盖分工', () => {

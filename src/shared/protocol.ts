@@ -187,6 +187,20 @@ export type HostToWebview =
       position: 'before' | 'after' | 'inside'
       action: 'hover' | 'drop' | 'escape'
     }
+  /** 测试钩子（#140）：点击真实 frontmatter 卡片结构按钮（与用户点击同一
+   *  armButton 处理器；变更走标准 CM6 事务出站）。action/index 定位（DOM
+   *  文档序）：add-entry = 闭合行「添加属性」；add-item = 第 index 个
+   *  block 数组末项「+」；remove-entry = 第 index 个条目行「×」（block
+   *  数组删整组）；remove-item = 第 index 个项行「×」（跨条目累计）；
+   *  empty-value = 第 index 个空值占位格 */
+  | {
+      kind: 'fm.test.click'
+      action: 'add-entry' | 'add-item' | 'remove-entry' | 'remove-item' | 'empty-value'
+      index?: number
+    }
+  /** 测试钩子（#141）：点击顶栏双态视图切换真实按钮（与用户点击同一处理器：
+   *  出站 view.switch.request，切换由宿主 runViewSwitch 编排回流驱动）。 */
+  | { kind: 'view.test.click' }
   /** 测试钩子（#21）：在真实 webview 的 CM6 中输入，验证暂停态即时留存。 */
   | { kind: 'sync.test.edit'; offset: number; text: string; closeAfter?: boolean }
   /** 测试钩子：组合候选写入首行 DOM，经过 CM6 MutationObserver 的真实输入链。 */
@@ -540,6 +554,8 @@ export interface CssProbeReport {
   liveStrongDecorationColor: string | null
   /** #8：live 行内代码 span 经 `.vsidian-inline-code` 命中的属性值；无目标为 null */
   liveInlineCodeDecorationColor: string | null
+  /** #139：live HTML 注释 span 经 `.vsidian-html-comment` 命中的属性值；无目标为 null */
+  liveHtmlCommentDecorationColor: string | null
   /** #8：live 代码行经 `.vsidian-code-line` 命中的属性值；无目标为 null */
   liveCodeLineDecorationColor: string | null
   /** #8：阅读视图内语义 strong 经 `.vsidian-view-reading strong` 命中的属性值 */
@@ -1519,6 +1535,7 @@ function isCssProbeReport(v: unknown): v is CssProbeReport {
     isNullOrString(v.readingVarProbe) &&
     isNullOrString(v.liveStrongDecorationColor) &&
     isNullOrString(v.liveInlineCodeDecorationColor) &&
+    isNullOrString(v.liveHtmlCommentDecorationColor) &&
     isNullOrString(v.liveCodeLineDecorationColor) &&
     isNullOrString(v.readingStrongDecorationColor) &&
     isNullOrString(v.liveTaskCheckboxDecorationColor) &&
@@ -2010,6 +2027,12 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'sync.test.edit':
       return isNonNegativeInt(v.offset) && isString(v.text) &&
         (v.closeAfter === undefined || typeof v.closeAfter === 'boolean')
+    case 'fm.test.click':
+      return (v.action === 'add-entry' || v.action === 'add-item' || v.action === 'remove-entry' ||
+        v.action === 'remove-item' || v.action === 'empty-value') &&
+        (v.index === undefined || isNonNegativeInt(v.index))
+    case 'view.test.click':
+      return true
     case 'sync.test.composition':
       return (v.phase === 'start' || v.phase === 'update' || v.phase === 'end') && isString(v.text)
     case 'link.test.mousedown':
