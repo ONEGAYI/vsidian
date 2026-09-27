@@ -5,28 +5,26 @@ import { zhCn } from '../../src/shared/locales/zh-cn'
 // #94 起文案经 t() 取词：装配生产中文包，断言与字典同源
 installLocale('zh-cn', zhCn)
 
-// frontmatter 表格卡片交互契约（工单 #140）：成型/降级切换、就地增删改
-// 写回、键盘导航。
+// frontmatter 表格卡片交互契约（工单 #140 Popover 改版，2026-09-27 验收
+// 反馈：格内直接编辑退役，改为「只读表格 + 标题栏修改按钮 + Popover」）。
 //
 // 核心断言（用户可观察行为，非实现复述）：
-// - 成型：合法头区渲染两列网格（键值分格、项行、添加按钮在场）
-// - 降级：复杂类型/非法语法退回源码行类，编辑不受限，修复后实时恢复
-// - 编辑：值格内键入直接改源文本且网格保持（输入回流走 CM6 原生路径）
-// - 结构操作：按钮与 Enter 的编辑计划经标准事务派发（文档变更 + 选区）
-// - 出站链路：控制器级验证增删改走 edit.request → 宿主权威回读一致
+// - 成型：合法头区渲染只读表格（标题栏 + 修改按钮 + 两列网格行）；格内
+//   无 ×/＋ 按钮、闭合行无「添加属性」整行按钮
+// - 光标引导：成型态不暴露源码——光标/选区进入头区被弹到闭合行后；
+//   Popover 写回、外部同步、撤销不受影响；降级形态可编辑
+// - Popover 编辑：键/值/项输入即时写回（一笔键入 = 一笔事务）；删行/
+//   删项/加项/添加属性各为一笔事务；Esc 与外点关闭、焦点返还
+// - 出站链路：控制器级验证输入与按钮操作走 edit.request → 宿主权威
+//   回读一致；外部同步改头区时浮层内容跟随刷新
 import { describe, it, expect } from 'vitest'
 import { EditorSelection, EditorState } from '@codemirror/state'
-import { EditorView, keymap } from '@codemirror/view'
-import { defaultKeymap } from '@codemirror/commands'
+import { EditorView } from '@codemirror/view'
 import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/syncController'
 import { DocumentSession, type HostDocumentPort, type SessionNotice } from '../../src/host/documentSession'
 import { livePreviewDecorations } from '../../src/webview/liveDecorations'
-import {
-  fmEnterKeyHandler,
-  fmShiftTabKeyHandler,
-  fmTabKeyHandler,
-  frontmatterEditing,
-} from '../../src/webview/frontmatterEditing'
+import { frontmatterEditing } from '../../src/webview/frontmatterEditing'
+import { FM_POPOVER_CLASS_NAMES } from '../../src/webview/frontmatterPopover'
 import type { HostToWebview, SerChange, WebviewToHost } from '../../src/shared/protocol'
 
 if (typeof Range !== 'undefined' && Range.prototype.getClientRects === undefined) {
@@ -41,6 +39,9 @@ const DOC_URI = 'file:///d%3A/notes/fm.md'
 const FM_DOC = ['---', 'title: hello', 'count: 3', '---', '', '正文段落。', ''].join('\n')
 
 const ARRAY_DOC = ['---', 'tags:', '  - alpha', '  - beta', '---', '', '正文。', ''].join('\n')
+
+/** 闭合行行尾与 body 起点（光标引导目标：闭合行后的换行之后的行首） */
+const BODY_START = FM_DOC.indexOf('---', 4) + 3 + 1
 
 /** 宿主文档桩（liveTable 同款形态：applyChanges 记账 + undo 栈） */
 class FakeDoc implements HostDocumentPort {
@@ -138,13 +139,13 @@ async function setupLinked(text: string): Promise<LinkedPanel> {
   sessionId = session.attachPanel({
     send: (m: HostToWebview) => controller.handleHostMessage(m),
   })
-  controller.mount(document.createElement('div'), [keymap.of(defaultKeymap)])
+  controller.mount(document.createElement('div'), [])
   await settle()
   return { controller, session, doc }
 }
 
-/** 编辑器级直驱视图（装饰 + 键位组） */
-function makeFmView(doc: string, anchor = FM_DOC.length): EditorView {
+/** 编辑器级直驱视图（装饰 + 光标引导；Popover 经标题栏按钮打开） */
+function makeFmView(doc: string, anchor = doc.length): EditorView {
   return new EditorView({
     parent: document.body.appendChild(document.createElement('div')),
     state: EditorState.create({
@@ -155,29 +156,66 @@ function makeFmView(doc: string, anchor = FM_DOC.length): EditorView {
   })
 }
 
-describe('成型与降级切换', () => {
-  it('合法头区渲染两列网格：键值分格、项行、添加按钮在场', () => {
+function popoverEl(): HTMLElement | null {
+  return document.querySelector<HTMLElement>(`.${FM_POPOVER_CLASS_NAMES.popover}`)
+}
+
+function clickEditButton(view: EditorView): void {
+  const btn = view.contentDOM.querySelector<HTMLButtonElement>('.vsidian-fm-edit')
+  if (!btn) throw new Error('修改按钮不在场')
+  btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+}
+
+function popInput(role: string, index = 0): HTMLInputElement {
+  const inputs = document.querySelectorAll<HTMLInputElement>(
+    `.${FM_POPOVER_CLASS_NAMES.popover} .${FM_POPOVER_CLASS_NAMES.input}.${role}`)
+  const input = inputs[index]
+  if (!input) throw new Error(`Popover ${role} 输入框不在场`)
+  return input
+}
+
+function typeInto(input: HTMLInputElement, text: string): void {
+  input.value = text
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+}
+
+function clickPopoverButton(cls: string, index = 0): void {
+  const btns = document.querySelectorAll<HTMLButtonElement>(
+    `.${FM_POPOVER_CLASS_NAMES.popover} .${cls}`)
+  const btn = btns[index]
+  if (!btn) throw new Error(`Popover 按钮 ${cls} 不在场`)
+  btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+}
+
+describe('成型与降级切换（只读表格）', () => {
+  it('合法头区渲染标题栏与两列网格：修改按钮在场，行内无结构按钮', () => {
     const view = makeFmView(FM_DOC)
-    const rows = view.contentDOM.querySelectorAll('.vsidian-fm-row')
-    expect(rows).toHaveLength(2)
-    const first = rows[0]!
-    const key = first.querySelector('.vsidian-fm-key')
-    const value = first.querySelector('.vsidian-fm-value')
-    expect(key?.textContent).toBe('title')
-    expect(value?.textContent).toBe('hello')
-    expect(view.contentDOM.querySelector('.vsidian-fm-add-entry')?.textContent).toBe('添加属性')
-    expect(view.contentDOM.querySelectorAll('.vsidian-fm-card-line').length).toBe(4)
+    const root = view.contentDOM
+    expect(root.querySelectorAll('.vsidian-fm-row')).toHaveLength(2)
+    const first = root.querySelectorAll('.vsidian-fm-row')[0]!
+    expect(first.querySelector('.vsidian-fm-key')?.textContent).toBe('title')
+    expect(first.querySelector('.vsidian-fm-value')?.textContent).toBe('hello')
+    // 标题栏：图标 + Properties 标题 + 修改按钮
+    expect(root.querySelector('.vsidian-fm-header-title')?.textContent).toBe('属性')
+    expect(root.querySelector('.vsidian-fm-header-icon')).not.toBeNull()
+    expect(root.querySelector<HTMLButtonElement>('.vsidian-fm-edit')?.getAttribute('aria-label')).toBe('修改')
+    // 格内编辑时代的三类控件全部退役
+    expect(root.querySelectorAll('.vsidian-fm-remove')).toHaveLength(0)
+    expect(root.querySelectorAll('.vsidian-fm-add-item')).toHaveLength(0)
+    expect(root.querySelectorAll('.vsidian-fm-add-entry')).toHaveLength(0)
+    expect(root.querySelectorAll('.vsidian-fm-empty-value')).toHaveLength(0)
+    expect(root.querySelectorAll('.vsidian-fm-card-line').length).toBe(4)
     view.destroy()
   })
 
-  it('数组 block 形态：项行占位键列与项文本、项删除与加项按钮在场', () => {
+  it('数组 block 形态：项行占位键列与项文本呈现，行内无按钮', () => {
     const view = makeFmView(ARRAY_DOC)
     const rows = view.contentDOM.querySelectorAll('.vsidian-fm-row')
     expect(rows).toHaveLength(3) // 宿主行 + 两项行
     expect(rows[1]?.classList.contains('vsidian-fm-item-row')).toBe(true)
     expect(rows[1]?.querySelector('.vsidian-fm-value')?.textContent).toBe('alpha')
-    expect(view.contentDOM.querySelectorAll('.vsidian-fm-remove').length).toBe(3) // 宿主 + 2 项
-    expect(view.contentDOM.querySelector('.vsidian-fm-add-item')).not.toBeNull()
+    expect(view.contentDOM.querySelectorAll('.vsidian-fm-remove')).toHaveLength(0)
+    expect(view.contentDOM.querySelectorAll('.vsidian-fm-add-item')).toHaveLength(0)
     view.destroy()
   })
 
@@ -196,132 +234,206 @@ describe('成型与降级切换', () => {
   })
 })
 
-describe('就地编辑（输入回流）', () => {
-  it('值格内键入直接改源文本且网格保持', () => {
-    const view = makeFmView(FM_DOC, FM_DOC.indexOf('hello') + 1)
+describe('光标引导（成型态不暴露源码）', () => {
+  it('光标进入头区被弹到闭合行后（正文起点），文档字节不变', () => {
+    const view = makeFmView(FM_DOC, FM_DOC.length)
+    view.dispatch({ selection: EditorSelection.cursor(FM_DOC.indexOf('hello')) })
+    expect(view.state.selection.main.head).toBe(BODY_START)
+    expect(view.state.doc.toString()).toBe(FM_DOC) // 零写回
+    // 闭合围栏行本体也拦截（标题栏替换区点击落位场景）
+    view.dispatch({ selection: EditorSelection.cursor(FM_DOC.indexOf('---', 4) + 1) })
+    expect(view.state.selection.main.head).toBe(BODY_START)
+    view.destroy()
+  })
+
+  it('选区跨越头区时收敛为正文单光标；首围栏行与键值行同样拦截', () => {
+    const view = makeFmView(FM_DOC, FM_DOC.length)
+    view.dispatch({ selection: EditorSelection.range(FM_DOC.indexOf('title'), FM_DOC.indexOf('正文段落。') + 2) })
+    const sel = view.state.selection.main
+    expect(sel.head).toBe(BODY_START)
+    expect(sel.empty).toBe(true)
+    // 头区首字符（打开文档默认光标 0 场景）
+    view.dispatch({ selection: EditorSelection.cursor(0) })
+    expect(view.state.selection.main.head).toBe(BODY_START)
+    view.destroy()
+  })
+
+  it('Popover 式写回（头区变更 + 无选区）不受拦截；undo 恢复的选区被兜底弹出', async () => {
+    const view = makeFmView(FM_DOC, FM_DOC.length)
+    // 头区写回不带选区（Popover dispatchPlan 口径）→ 照常落文档
+    const worldAt = FM_DOC.indexOf('hello')
+    view.dispatch({ changes: { from: worldAt, to: worldAt + 5, insert: 'world' } })
+    expect(view.state.doc.toString()).toContain('title: world')
+    // 撤销恢复（userEvent undo 豁免 filter）；恢复后的选区若落头区由兜底
+    // 弹出（update 途中不得 dispatch,兜底在微任务重读最新状态后执行）
     view.dispatch({
-      changes: { from: FM_DOC.indexOf('hello') + 5, insert: '!' },
-      selection: { anchor: FM_DOC.indexOf('hello') + 6 },
-      userEvent: 'input.type',
+      changes: { from: worldAt, to: worldAt + 5, insert: 'hello' },
+      selection: { anchor: worldAt + 2 },
+      userEvent: 'undo',
     })
-    expect(view.state.doc.toString()).toContain('title: hello!')
-    expect(view.contentDOM.querySelectorAll('.vsidian-fm-row')).toHaveLength(2)
-    expect(view.contentDOM.querySelector('.vsidian-fm-value')?.textContent).toBe('hello!')
+    expect(view.state.doc.toString()).toBe(FM_DOC)
+    await new Promise((r) => setTimeout(r, 0))
+    expect(view.state.selection.main.head).toBe(BODY_START)
+    view.destroy()
+  })
+
+  it('降级形态不引导：光标可入源码头区编辑', () => {
+    const degraded = '---\nouter:\n  inner: 1\n---\n\n正文'
+    const view = makeFmView(degraded, degraded.length)
+    view.dispatch({ selection: EditorSelection.cursor(degraded.indexOf('inner')) })
+    expect(view.state.selection.main.head).toBe(degraded.indexOf('inner'))
     view.destroy()
   })
 })
 
-describe('键盘导航（Tab/Enter）', () => {
-  it('Tab 在 key/value 格间往返；头区外返回 false 落穿', () => {
-    const view = makeFmView(FM_DOC, FM_DOC.indexOf('title') + 1)
-    // key 格 → 本行 value
-    expect(fmTabKeyHandler(view)).toBe(true)
-    expect(view.state.selection.main.head).toBe(FM_DOC.indexOf('hello'))
-    // value → 下行 key
-    expect(fmTabKeyHandler(view)).toBe(true)
-    expect(view.state.selection.main.head).toBe(FM_DOC.indexOf('count'))
-    // Shift+Tab 反向：本行 key 的上一格是上行 value
-    expect(fmShiftTabKeyHandler(view)).toBe(true)
-    expect(view.state.selection.main.head).toBe(FM_DOC.indexOf('hello'))
-    // 正文（头区外）不接管
-    view.dispatch({ selection: EditorSelection.single(FM_DOC.indexOf('正文') + 1) })
-    expect(fmTabKeyHandler(view)).toBe(false)
+describe('Popover 编辑（结构操作与即时写回）', () => {
+  it('点修改按钮开浮层：焦点入首个键输入框；再点同按钮关闭并返还焦点', () => {
+    const view = makeFmView(FM_DOC, FM_DOC.length)
+    const btn = view.contentDOM.querySelector<HTMLButtonElement>('.vsidian-fm-edit')!
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    expect(popoverEl()).not.toBeNull()
+    expect(document.activeElement).toBe(popInput(FM_POPOVER_CLASS_NAMES.key))
+    // 再点同按钮 = 关闭，焦点返还修改按钮
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    expect(popoverEl()).toBeNull()
+    expect(document.activeElement).toBe(btn)
     view.destroy()
   })
 
-  it('Enter 末值格新增键值对并选中新键；中间行导航下行', () => {
-    const view = makeFmView(FM_DOC, FM_DOC.indexOf('hello') + 1)
-    // 首行 value → Enter 导航到下行 value
-    expect(fmEnterKeyHandler(view)).toBe(true)
-    expect(view.state.selection.main.head).toBe(FM_DOC.indexOf('3'))
-    // 末行 value → Enter 加键值对（默认 key: value 模板，键选中）
-    expect(fmEnterKeyHandler(view)).toBe(true)
-    const text = view.state.doc.toString()
-    expect(text).toContain('count: 3\nkey: value\n---')
-    const sel = view.state.selection.main
-    expect(text.slice(sel.from, sel.to)).toBe('key')
+  it('Esc 关闭浮层并返还焦点；点击浮层外关闭', () => {
+    const view = makeFmView(FM_DOC, FM_DOC.length)
+    clickEditButton(view)
+    expect(popoverEl()).not.toBeNull()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    expect(popoverEl()).toBeNull()
+    expect(document.activeElement).toBe(view.contentDOM.querySelector('.vsidian-fm-edit'))
+    // 外点关闭：浮层外 pointerdown
+    clickEditButton(view)
+    expect(popoverEl()).not.toBeNull()
+    document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }))
+    expect(popoverEl()).toBeNull()
+    // 浮层内 pointerdown 不关闭
+    clickEditButton(view)
+    popoverEl()!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }))
+    expect(popoverEl()).not.toBeNull()
     view.destroy()
   })
 
-  it('Enter 数组末项加项（缩进对齐、项文本选中）', () => {
-    const view = makeFmView(ARRAY_DOC, ARRAY_DOC.indexOf('beta') + 1)
-    expect(fmEnterKeyHandler(view)).toBe(true)
-    const text = view.state.doc.toString()
-    expect(text).toContain('  - beta\n  - item')
-    const sel = view.state.selection.main
-    expect(text.slice(sel.from, sel.to)).toBe('item')
-    view.destroy()
-  })
-})
-
-describe('结构按钮（widget 派发）', () => {
-  it('「添加属性」按钮点击插入模板行（文档变更 + 选中新键）', () => {
-    const view = makeFmView(FM_DOC)
-    const btn = view.contentDOM.querySelector<HTMLButtonElement>('.vsidian-fm-add-entry')
-    expect(btn).not.toBeNull()
-    btn!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
-    const text = view.state.doc.toString()
-    expect(text).toContain('count: 3\nkey: value\n---')
-    expect(view.state.selection.main.empty).toBe(false) // 新键被选中
+  it('键与值输入即时写回源文本（一笔键入 = 一笔事务）', () => {
+    const view = makeFmView(FM_DOC, FM_DOC.length)
+    clickEditButton(view)
+    typeInto(popInput(FM_POPOVER_CLASS_NAMES.key, 0), 'name')
+    expect(view.state.doc.toString()).toContain('name: hello')
+    typeInto(popInput(FM_POPOVER_CLASS_NAMES.value, 0), 'world!')
+    expect(view.state.doc.toString()).toContain('name: world!')
+    expect(view.state.doc.toString()).toBe(FM_DOC.replace('title: hello', 'name: world!'))
+    // 表格行跟随刷新（浮层重建不断链）
+    expect(view.contentDOM.querySelector('.vsidian-fm-key')?.textContent).toBe('name')
     view.destroy()
   })
 
-  it('条目删除按钮点击移除整行（block 数组含全部项行）', () => {
-    const view = makeFmView(ARRAY_DOC)
-    const buttons = view.contentDOM.querySelectorAll<HTMLButtonElement>('.vsidian-fm-remove')
-    // 首个 = 宿主行删除（tags 整组）
-    buttons[0]!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
-    expect(view.state.doc.toString()).toBe(['---', '---', '', '正文。', ''].join('\n'))
+  it('空键名与重复键名不写回（标错类），源文本保持合法', () => {
+    const view = makeFmView(FM_DOC, FM_DOC.length)
+    clickEditButton(view)
+    typeInto(popInput(FM_POPOVER_CLASS_NAMES.key, 0), 'count')
+    expect(view.state.doc.toString()).toContain('title: hello') // 未写回
+    expect(popInput(FM_POPOVER_CLASS_NAMES.key, 0).classList.contains(FM_POPOVER_CLASS_NAMES.invalid)).toBe(true)
+    typeInto(popInput(FM_POPOVER_CLASS_NAMES.key, 0), '')
+    expect(view.state.doc.toString()).toContain('title: hello')
+    // 恢复合法键名后标错清除且写回恢复
+    typeInto(popInput(FM_POPOVER_CLASS_NAMES.key, 0), 'title')
+    expect(popInput(FM_POPOVER_CLASS_NAMES.key, 0).classList.contains(FM_POPOVER_CLASS_NAMES.invalid)).toBe(false)
     view.destroy()
   })
 
-  it('数组项删除按钮只移除该项行', () => {
-    const view = makeFmView(ARRAY_DOC)
-    const buttons = view.contentDOM.querySelectorAll<HTMLButtonElement>('.vsidian-fm-remove')
-    // 末个 = 第二项（beta）
-    buttons[buttons.length - 1]!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
-    expect(view.state.doc.toString()).toBe(['---', 'tags:', '  - alpha', '---', '', '正文。', ''].join('\n'))
+  it('block 数组：项输入即时写回、删项与加项按钮单笔写回', () => {
+    const view = makeFmView(ARRAY_DOC, ARRAY_DOC.length)
+    clickEditButton(view)
+    typeInto(popInput(FM_POPOVER_CLASS_NAMES.item, 0), 'alpha!')
+    expect(view.state.doc.toString()).toContain('  - alpha!')
+    // 删首项（alpha!）：只剩 beta
+    clickPopoverButton(FM_POPOVER_CLASS_NAMES.remove, 1) // 0=删行 1=首项删
+    expect(view.state.doc.toString()).toBe(
+      ['---', 'tags:', '  - beta', '---', '', '正文。', ''].join('\n'))
+    // 加项：末尾插入模板项
+    clickPopoverButton(FM_POPOVER_CLASS_NAMES.addItem, 0)
+    expect(view.state.doc.toString()).toContain('  - beta\n  - item')
     view.destroy()
   })
 
-  it('空值格占位点击补结构空格并定位（冒号后无空隙场景）', () => {
-    const doc = '---\ntitle:\n---\n'
-    const view = makeFmView(doc, doc.length)
-    const empty = view.contentDOM.querySelector<HTMLElement>('.vsidian-fm-empty-value')
-    expect(empty).not.toBeNull()
-    empty!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
-    expect(view.state.doc.toString()).toBe('---\ntitle: \n---\n')
-    expect(view.state.selection.main.head).toBe(doc.indexOf(':') + 2)
+  it('删行按钮整组移除条目；添加属性按钮插入模板行并聚焦新行键框全选', () => {
+    const view = makeFmView(FM_DOC, FM_DOC.length)
+    clickEditButton(view)
+    clickPopoverButton(FM_POPOVER_CLASS_NAMES.remove, 0)
+    expect(view.state.doc.toString()).toBe(FM_DOC.replace('title: hello\n', ''))
+    // 添加属性：新行 + 焦点落新键框全选（直接键入覆盖默认键名）
+    clickPopoverButton(FM_POPOVER_CLASS_NAMES.add, 0)
+    expect(view.state.doc.toString()).toContain('count: 3\nkey: value\n---')
+    const active = document.activeElement as HTMLInputElement
+    expect(active.classList.contains(FM_POPOVER_CLASS_NAMES.key)).toBe(true)
+    expect(active.value).toBe('key')
+    expect(active.selectionStart).toBe(0)
+    expect(active.selectionEnd).toBe(3)
+    typeInto(active, 'name')
+    expect(view.state.doc.toString()).toContain('name: value')
+    view.destroy()
+  })
+
+  it('flow 数组值整框原文编辑；空值标量提供加项入口（tags 空值起步）', () => {
+    const flowDoc = '---\ntags: [a, b]\ncount: 1\n---'
+    const view = makeFmView(flowDoc, flowDoc.length)
+    clickEditButton(view)
+    expect(popInput(FM_POPOVER_CLASS_NAMES.value, 0).value).toBe('[a, b]')
+    typeInto(popInput(FM_POPOVER_CLASS_NAMES.value, 0), '[a, b, c]')
+    expect(view.state.doc.toString()).toContain('tags: [a, b, c]')
+    view.destroy()
+
+    const emptyDoc = '---\ntags:\n---'
+    const view2 = makeFmView(emptyDoc, emptyDoc.length)
+    clickEditButton(view2)
+    clickPopoverButton(FM_POPOVER_CLASS_NAMES.addItem, 0)
+    expect(view2.state.doc.toString()).toBe('---\ntags:\n  - item\n---')
+    view2.destroy()
+  })
+
+  it('头区降级时浮层自动关闭（回源码形态编辑）', () => {
+    const view = makeFmView(FM_DOC, FM_DOC.length)
+    clickEditButton(view)
+    expect(popoverEl()).not.toBeNull()
+    // 外部把头区改坏（嵌套）→ 解析降级 → 浮层失去依据自动关闭
+    const at = FM_DOC.indexOf('\ncount')
+    view.dispatch({ changes: { from: at, insert: '\nouter:\n  inner: 1' } })
+    expect(popoverEl()).toBeNull()
     view.destroy()
   })
 })
 
 describe('出站链路（控制器级）', () => {
-  it('值格键入经权威回读后卡片保持；按钮增删的文档变更落宿主', async () => {
+  it('Popover 值输入经权威回读后卡片保持；按钮操作单笔写回落宿主', async () => {
     const linked = await setupLinked(FM_DOC)
     const view = linked.controller.getView()!
     expect(view.contentDOM.querySelectorAll('.vsidian-fm-row')).toHaveLength(2)
-    // 值格键入：edit.request → 宿主 applyChanges → 回读
-    const at = FM_DOC.indexOf('hello')
-    view.dispatch({ changes: { from: at + 5, insert: ' world' }, selection: { anchor: at + 11 }, userEvent: 'input.type' })
+    // Popover 值输入：一笔 edit.request → 宿主 applyChanges → 回读
+    clickEditButton(view)
+    typeInto(popInput(FM_POPOVER_CLASS_NAMES.value, 0), 'hello world')
     await settle()
     expect(linked.doc.getText()).toContain('title: hello world')
     expect(linked.doc.applyCalls.length).toBe(1)
-    // 添加属性按钮：一笔写回
+    expect(view.contentDOM.querySelectorAll('.vsidian-fm-row')).toHaveLength(2)
+    // 删行按钮：一笔写回
     const before = linked.doc.applyCalls.length
-    view.contentDOM.querySelector<HTMLButtonElement>('.vsidian-fm-add-entry')!
-      .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    clickPopoverButton(FM_POPOVER_CLASS_NAMES.remove, 1)
     await settle()
-    expect(linked.doc.getText()).toContain('key: value')
+    expect(linked.doc.getText()).toContain('title: hello world')
     expect(linked.doc.applyCalls.length).toBe(before + 1)
-    expect(view.contentDOM.querySelectorAll('.vsidian-fm-row')).toHaveLength(3)
     linked.controller.dispose()
   })
 
-  it('外部变更同步：宿主侧改头区值，webview 卡片跟随', async () => {
+  it('外部变更同步：宿主侧改头区值，webview 卡片与打开中的浮层同步刷新', async () => {
     const linked = await setupLinked(FM_DOC)
     const view = linked.controller.getView()!
-    // 模拟外部编辑：宿主文档直接变更 → session 广播 doc.changed → webview 增量应用
+    clickEditButton(view)
+    expect(popInput(FM_POPOVER_CLASS_NAMES.value, 0).value).toBe('hello')
     linked.doc.content = FM_DOC.replace('hello', 'changed')
     linked.doc.ver++
     linked.session.handleDocChanged(
@@ -332,6 +444,9 @@ describe('出站链路（控制器级）', () => {
     expect(view.state.doc.toString()).toContain('title: changed')
     expect(view.contentDOM.querySelector('.vsidian-fm-value')?.textContent).toBe('changed')
     expect(view.contentDOM.querySelectorAll('.vsidian-fm-row')).toHaveLength(2)
+    // 浮层仍打开且值框已刷新为外部新值
+    expect(popoverEl()).not.toBeNull()
+    expect(popInput(FM_POPOVER_CLASS_NAMES.value, 0).value).toBe('changed')
     linked.controller.dispose()
   })
 })

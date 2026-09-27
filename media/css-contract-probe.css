@@ -421,7 +421,8 @@
   text-decoration-color: rgb(34, 35, 36);
 }
 
-/* ---- frontmatter 表格卡片（#140）---- */
+/* ---- frontmatter 只读表格卡片（#140 Popover 改版；Popover 容器为交互
+   态，不设静态探针）---- */
 #app .vsidian-view-live .vsidian-fm-card-line {
   --vsidian-chrome-probe: rgb(230, 0, 1);
 }
@@ -442,6 +443,6 @@
   --vsidian-chrome-probe: rgb(234, 0, 1);
 }
 
-#app .vsidian-view-live .vsidian-fm-add-entry {
-  --vsidian-chrome-probe: rgb(235, 0, 1);
+#app .vsidian-view-live .vsidian-fm-header {
+  --vsidian-chrome-probe: rgb(237, 0, 1);
 }

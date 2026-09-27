@@ -596,7 +596,8 @@ function emitForRange(
   if (fm) {
     const fmLast = doc.lineAt(Math.min(fm.end, doc.length)).number
     if (fmModel) {
-      const plan = buildFrontmatterCardPlan(doc, fmModel, selection)
+      // 卡片常驻呈现、不随光标位置变化（光标引导在 frontmatterEditing）
+      const plan = buildFrontmatterCardPlan(doc, fmModel)
       for (const [lineNo, cls] of plan.lineClasses) {
         if (lineNo >= fromLine && lineNo <= toLine) {
           for (const c of cls) {

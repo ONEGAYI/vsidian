@@ -6,7 +6,9 @@
 //   不影响（边界由 frontmatterRange 保证，模型只消费其区间）
 // - 编辑计划：最小重写——只替换被编辑区间，未触及行字节不变；空值
 //   插入自动补 `: ` 结构空格；增删行整行（含换行）操作
-// - 导航：Tab/Shift+Tab 格间往返、Enter 下行同列（末行返回 null 交上层）
+// - Popover 改版（2026-09-27 验收反馈）：格内编辑退役——Tab/Enter 格
+//   导航纯函数随之移除；新增项文本改写计划（planSetFmArrayItem）与
+//   flow 数组值整框改写（planSetFmValue 扩展），供 Popover 输入框派发
 import { describe, it, expect } from 'vitest'
 import { frontmatterRange } from '../../src/webview/markdownDoc'
 import {
@@ -17,9 +19,8 @@ import {
   planRemoveFmEntry,
   planAddFmArrayItem,
   planRemoveFmArrayItem,
-  fmCellAt,
-  fmCellNavTarget,
-  fmCellDownTarget,
+  planSetFmArrayItem,
+  normalizeKey,
   buildFrontmatterTableHtml,
 } from '../../src/shared/frontmatterTable'
 
@@ -298,6 +299,45 @@ describe('编辑计划：最小重写', () => {
     expect(planLast!.selection!.anchor).toBe(span(doc, 'hello').to)
   })
 
+  it('flow 数组值整框改写：值区间（含括号）整体替换（Popover 值框原文编辑）', () => {
+    const doc = '---\ntags: [alpha, beta]\ncount: 1\n---'
+    const model = modelOf(doc)!
+    const plan = planSetFmValue(model, 0, '[alpha, beta, gamma]')!
+    expect(plan.changes).toEqual([
+      { from: span(doc, '[alpha, beta]').from, to: span(doc, '[alpha, beta]').to, insert: '[alpha, beta, gamma]' },
+    ])
+    expect(apply(doc, plan)).toBe('---\ntags: [alpha, beta, gamma]\ncount: 1\n---')
+  })
+
+  it('block 数组值整框不支持（项级计划负责）；写坏形态交降级兜底', () => {
+    const doc = '---\ntags:\n  - a\n---'
+    const model = modelOf(doc)!
+    expect(planSetFmValue(model, 0, '[x]')).toBeNull()
+  })
+
+  it('改 block 数组项文本：只替换项区间，`- ` 标记与缩进保留', () => {
+    const doc = '---\ntags:\n  - alpha\n  - beta\n---'
+    const model = modelOf(doc)!
+    const plan = planSetFmArrayItem(model, 0, 0, 'gamma')!
+    expect(plan.changes).toEqual([{ from: span(doc, 'alpha').from, to: span(doc, 'alpha').to, insert: 'gamma' }])
+    expect(apply(doc, plan)).toBe('---\ntags:\n  - gamma\n  - beta\n---')
+  })
+
+  it('改项文本：标量条目 / flow 数组 / 索引越界返回 null', () => {
+    const scalar = modelOf('---\ntitle: hello\n---')!
+    expect(planSetFmArrayItem(scalar, 0, 0, 'x')).toBeNull()
+    const flow = modelOf('---\ntags: [a, b]\n---')!
+    expect(planSetFmArrayItem(flow, 0, 0, 'x')).toBeNull()
+    const block = modelOf('---\ntags:\n  - a\n---')!
+    expect(planSetFmArrayItem(block, 0, 3, 'x')).toBeNull()
+  })
+
+  it('normalizeKey：键名归一（引号剥除与 trim），Popover 键名去重检查用', () => {
+    expect(normalizeKey('"my key"')).toBe('my key')
+    expect(normalizeKey("'k'")).toBe('k')
+    expect(normalizeKey(' plain ')).toBe('plain')
+  })
+
   it('最小重写总检：多键头区改一个值，其余行逐字节保留（顺序/引号/缩进/注释）', () => {
     const doc = '---\n"quoted": "keep me"  # note\ntags:\n  - a\nplain: 42\n---'
     const model = modelOf(doc)!
@@ -313,84 +353,35 @@ describe('编辑计划：最小重写', () => {
   })
 })
 
-describe('格导航', () => {
-  const DOC = '---\ntitle: hello\ntags:\n  - alpha\n  - beta\ncount: 1\n---\n正文'
-  // 单字符/短词会撞键名，用项标记精确定位
-  const ITEM_A = DOC.indexOf('- alpha') + 2
-  const ITEM_B = DOC.indexOf('- beta') + 2
-  const VAL_COUNT = DOC.indexOf('count: 1') + 7
-
-  it('fmCellAt：key/value/项 格身份按光标定位', () => {
-    const model = modelOf(DOC)!
-    expect(fmCellAt(model, span(DOC, 'titl').from)?.kind).toBe('key')
-    expect(fmCellAt(model, span(DOC, 'hell').from)?.kind).toBe('value')
-    expect(fmCellAt(model, ITEM_A + 1)?.kind).toBe('item')
-  })
-
-  it('Tab 前向：key → value → 下行 key → …；末值 → 闭合行行尾（越出）', () => {
-    const model = modelOf(DOC)!
-    const keyOf = span(DOC, 'title').from
-    expect(fmCellNavTarget(model, keyOf, false)).toBe(span(DOC, 'hello').from)
-    expect(fmCellNavTarget(model, span(DOC, 'hello').from, false)).toBe(span(DOC, 'tags').from)
-    // 数组宿主值格（空）→ 首项
-    expect(fmCellNavTarget(model, span(DOC, 'tags').to + 1, false)).toBe(ITEM_A)
-    // 末项 → 下一 key
-    expect(fmCellNavTarget(model, ITEM_B, false)).toBe(span(DOC, 'count').from)
-    // 末条目值 → 闭合行行尾
-    expect(fmCellNavTarget(model, VAL_COUNT, false)).toBe(DOC.indexOf('\n正文'))
-  })
-
-  it('Shift+Tab 反向：value → 本行 key → 上一行 value', () => {
-    const model = modelOf(DOC)!
-    expect(fmCellNavTarget(model, span(DOC, 'hello').from, true)).toBe(span(DOC, 'title').from)
-    expect(fmCellNavTarget(model, span(DOC, 'tags').from, true)).toBe(span(DOC, 'hello').from)
-  })
-
-  it('fmCellDownTarget：Enter 下行同列；末行返回 null（上层决定加行）', () => {
-    const model = modelOf(DOC)!
-    expect(fmCellDownTarget(model, span(DOC, 'title').from)).toBe(span(DOC, 'tags').from)
-    expect(fmCellDownTarget(model, span(DOC, 'hello').from)).toBe(span(DOC, 'tags').to + 1)
-    // 项 → 下一项
-    expect(fmCellDownTarget(model, ITEM_A)).toBe(ITEM_B)
-    // 末项 → 下一条目值（同列）
-    expect(fmCellDownTarget(model, ITEM_B)).toBe(VAL_COUNT)
-    // 末条目 key/value → null
-    expect(fmCellDownTarget(model, span(DOC, 'count').from)).toBeNull()
-    expect(fmCellDownTarget(model, VAL_COUNT)).toBeNull()
-  })
-
-  it('头区外与围栏行：fmCellAt 为 null（Tab 落穿既有行为）', () => {
-    const model = modelOf(DOC)!
-    expect(fmCellAt(model, 1)).toBeNull()
-    expect(fmCellAt(model, DOC.indexOf('正文'))).toBeNull()
-  })
-})
-
 describe('阅读侧 HTML 构建', () => {
-  it('表格结构与值转义：键值/项分层，HTML 特殊字符全转义', () => {
+  it('表格结构与值转义：键值/项分层，HTML 特殊字符全转义；标题栏在场（图标 + 标题，无按钮）', () => {
     const doc = '---\ntitle: <b>&x\n---'
     const model = modelOf(doc)!
-    const html = buildFrontmatterTableHtml(model, doc, { emptyLabel: '（空）' })
+    const html = buildFrontmatterTableHtml(model, doc, { emptyLabel: '（空）', titleLabel: '属性' })
     expect(html).toContain('vsidian-fm-table')
     expect(html).toContain('<span class="vsidian-fm-cell vsidian-fm-key">title</span>')
     expect(html).toContain('&lt;b&gt;&amp;x')
     expect(html).not.toContain('<b>')
+    expect(html).toContain('vsidian-fm-header')
+    expect(html).toContain('vsidian-fm-header-title')
+    expect(html).toContain('>属性</span>')
+    expect(html).not.toContain('<button')
   })
 
   it('block 数组：项行带占位键列；flow 数组：项逐行列出', () => {
     const blockDoc = '---\ntags:\n  - a\n  - b\n---'
-    const blockHtml = buildFrontmatterTableHtml(modelOf(blockDoc)!, blockDoc, { emptyLabel: '（空）' })
+    const blockHtml = buildFrontmatterTableHtml(modelOf(blockDoc)!, blockDoc, { emptyLabel: '（空）', titleLabel: '属性' })
     expect(blockHtml).toContain('vsidian-fm-item-row')
     expect(blockHtml).toContain('>a</span>')
 
     const flowDoc = '---\ntags: [x, y]\n---'
-    const flowHtml = buildFrontmatterTableHtml(modelOf(flowDoc)!, flowDoc, { emptyLabel: '（空）' })
+    const flowHtml = buildFrontmatterTableHtml(modelOf(flowDoc)!, flowDoc, { emptyLabel: '（空）', titleLabel: '属性' })
     expect(flowHtml).toContain('>x</span>')
     expect(flowHtml).toContain('>y</span>')
   })
 
   it('空头区：占位文案（i18n 词条由调用方传入）', () => {
-    const html = buildFrontmatterTableHtml(modelOf('---\n\n---')!, '---\n\n---', { emptyLabel: '（空）' })
+    const html = buildFrontmatterTableHtml(modelOf('---\n\n---')!, '---\n\n---', { emptyLabel: '（空）', titleLabel: '属性' })
     expect(html).toContain('（空）')
   })
 })

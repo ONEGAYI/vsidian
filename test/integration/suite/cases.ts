@@ -687,6 +687,8 @@ interface ViewState {
     /** #70 落点指示绘制证据（指示条目中心命中 + 插入线/包裹高亮可读） */
     dropHintPainted: boolean
   }
+  /** #140 Popover 改版：frontmatter 属性编辑浮层开态（protocol.ts 缺省可选） */
+  fmPopoverOpen?: boolean
 }
 
 /** #7 阅读视图探针回报（reading.perf.report） */
@@ -8449,37 +8451,53 @@ export const cases: Array<[string, () => Promise<void>]> = [
 
   // ---- #140 / #141：frontmatter 卡片编辑链路与工具栏双态切换 ----
 
-  ['frontmatter 卡片：结构按钮写回、dirty、模式切换、外部同步与保存重开（#140）', async () => {
+  ['frontmatter 只读卡片与 Popover 编辑：写回、dirty、光标引导、模式切换、外部同步与保存重开（#140）', async () => {
     await openWithEditor('fm-edit.md')
     await waitSessionReady('fm-edit.md')
     const uri = wsUri('fm-edit.md').toString()
     const doc = await vscode.workspace.openTextDocument(wsUri('fm-edit.md'))
 
-    // 前置：live 态成型卡片在场（chrome 探针：卡片行 + 键值行 + 添加属性按钮）
+    // 前置：live 态成型只读卡片在场（chrome 探针：卡片行 + 键值行 + 标题栏）
     await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', wsUri('fm-edit.md'))
     await waitViewState('fm-edit.md', (v) => v.viewMode === 'live' &&
       v.cssProbe?.chromeSelectors?.['live-fm-card-line-live'] === 'rgb(230, 0, 1)' &&
       v.cssProbe?.chromeSelectors?.['live-fm-row-live'] === 'rgb(231, 0, 1)' &&
-      v.cssProbe?.chromeSelectors?.['live-fm-add-entry-live'] === 'rgb(235, 0, 1)')
+      v.cssProbe?.chromeSelectors?.['live-fm-header-live'] === 'rgb(237, 0, 1)')
     const st0 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
     const editsBefore = st0.appliedEdits
 
-    // 1) block 数组末尾加项：真实按钮 click → 编辑计划 → CM6 事务 → 宿主写回
-    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'fm.test.click', action: 'add-item', index: 0 })
+    // 0) 光标引导：view.locate 定位进头区 → 选区被弹到闭合行后（成型态
+    //    不暴露源码；定位事务为纯选区，appliedEdits 不增）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: FM_EDIT_DOC_TEXT.indexOf('集成标题') + 1 })
+    const bodyStart = FM_EDIT_DOC_TEXT.indexOf('---', 4) + 4
+    await poll('光标引导弹出头区', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri)) as ViewState
+      return (v.selectionOffset !== undefined && v.selectionOffset >= bodyStart) ? v.selectionOffset : undefined
+    })
+
+    // 1) 打开 Popover → block 数组末尾加项：浮层按钮 click → 编辑计划 →
+    //    CM6 事务 → 宿主写回（一笔）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'fm.test.click', action: 'edit-button' })
+    await waitViewState('fm-edit.md', (v) => v.fmPopoverOpen === true)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'fm.test.click', action: 'popover-add-item', index: 0 })
     const withItem = FM_EDIT_DOC_TEXT.replace('  - 甲\n---', '  - 甲\n  - item\n---')
-    await waitViewState('fm-edit.md', (v) => v.text === withItem)
+    await waitViewState('fm-edit.md', (v) => v.text === withItem && v.fmPopoverOpen === true)
     assert(doc.isDirty, '加项写回后文档应 dirty（未保存）')
     const st1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
     assert(st1.appliedEdits === editsBefore + 1, `一次结构按钮应恰一笔宿主写回，实际增量 ${st1.appliedEdits - editsBefore}`)
 
-    // 2) 删除该项（第 2 个项级 ×，DOM 文档序）：内容回到基线
-    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'fm.test.click', action: 'remove-item', index: 1 })
+    // 2) 删除该项（浮层内第 2 个项删除按钮，DOM 文档序）：内容回到基线
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'fm.test.click', action: 'popover-remove-item', index: 1 })
     await waitViewState('fm-edit.md', (v) => v.text === FM_EDIT_DOC_TEXT)
 
-    // 3) 新增键值对模板（闭合行「添加属性」）：`key: value` 落在末条目后
-    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'fm.test.click', action: 'add-entry' })
+    // 3) 新增键值对模板（浮层「添加属性」）：`key: value` 落在末条目后
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'fm.test.click', action: 'popover-add-entry' })
     const withEntry = FM_EDIT_DOC_TEXT.replace('  - 甲\n---', '  - 甲\nkey: value\n---')
     await waitViewState('fm-edit.md', (v) => v.text === withEntry)
+
+    // 3.5) 关闭浮层（与 Esc 同一关闭函数）：焦点返还、零写回
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'fm.test.click', action: 'popover-close' })
+    await waitViewState('fm-edit.md', (v) => v.fmPopoverOpen === false && v.text === withEntry)
 
     // 4) 模式切换不丢内容：reading 侧同款表格呈现（探针）+ 回 live 卡片仍在
     await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri('fm-edit.md'))
@@ -8510,7 +8528,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await waitSessionReady('fm-edit.md')
     await waitViewState('fm-edit.md', (v) => v.text === externalText &&
       v.cssProbe?.chromeSelectors?.['live-fm-card-line-live'] === 'rgb(230, 0, 1)' &&
-      v.cssProbe?.chromeSelectors?.['live-fm-add-entry-live'] === 'rgb(235, 0, 1)')
+      v.cssProbe?.chromeSelectors?.['live-fm-header-live'] === 'rgb(237, 0, 1)')
   }],
 
   ['工具栏双态切换：真实点击与快捷键通道、三态按钮共存与全局记忆（#141）', async () => {

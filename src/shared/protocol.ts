@@ -187,15 +187,17 @@ export type HostToWebview =
       position: 'before' | 'after' | 'inside'
       action: 'hover' | 'drop' | 'escape'
     }
-  /** 测试钩子（#140）：点击真实 frontmatter 卡片结构按钮（与用户点击同一
-   *  armButton 处理器；变更走标准 CM6 事务出站）。action/index 定位（DOM
-   *  文档序）：add-entry = 闭合行「添加属性」；add-item = 第 index 个
-   *  block 数组末项「+」；remove-entry = 第 index 个条目行「×」（block
-   *  数组删整组）；remove-item = 第 index 个项行「×」（跨条目累计）；
-   *  empty-value = 第 index 个空值占位格 */
+  /** 测试钩子（#140 Popover 改版）：驱动 frontmatter 修改按钮与 Popover
+   *  控件（与用户点击同一处理器；变更走标准 CM6 事务出站）。action/index
+   *  定位（DOM 文档序）：edit-button = 标题栏「修改」按钮（开关浮层）；
+   *  popover-close = 关闭浮层（与 Esc 同一关闭函数）；popover-add-entry =
+   *  浮层「添加属性」；popover-add-item = 第 index 个条目的「添加列表项」；
+   *  popover-remove-entry = 第 index 个条目的删行按钮；popover-remove-item =
+   *  第 index 个删项按钮（跨条目按项行文档序累计） */
   | {
       kind: 'fm.test.click'
-      action: 'add-entry' | 'add-item' | 'remove-entry' | 'remove-item' | 'empty-value'
+      action: 'edit-button' | 'popover-close' | 'popover-add-entry' | 'popover-add-item'
+        | 'popover-remove-entry' | 'popover-remove-item'
       index?: number
     }
   /** 测试钩子（#141）：点击顶栏双态视图切换真实按钮（与用户点击同一处理器：
@@ -389,6 +391,8 @@ export type WebviewToHost =
       sidebar?: SidebarProbe
       /** 大纲观测（#54；面板态、绘制层证据与标题序列，旧 webview 缺省） */
       outline?: OutlineProbe
+      /** #140 Popover 改版：frontmatter 属性编辑浮层是否打开（旧 webview 缺省） */
+      fmPopoverOpen?: boolean
     }
       /** 阅读视图性能探针回报（#7）：滚动往返期间的挂载/回收与解析观测 */
   | {
@@ -1765,6 +1769,7 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         (v.paint === undefined || isPaintProbe(v.paint)) &&
         (v.sidebar === undefined || isSidebarProbe(v.sidebar)) &&
         (v.outline === undefined || isOutlineProbe(v.outline)) &&
+        (v.fmPopoverOpen === undefined || typeof v.fmPopoverOpen === 'boolean') &&
         (v.typography === undefined || isTypographyProbe(v.typography))
       )
     case 'reading.perf.report':
@@ -2028,8 +2033,9 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return isNonNegativeInt(v.offset) && isString(v.text) &&
         (v.closeAfter === undefined || typeof v.closeAfter === 'boolean')
     case 'fm.test.click':
-      return (v.action === 'add-entry' || v.action === 'add-item' || v.action === 'remove-entry' ||
-        v.action === 'remove-item' || v.action === 'empty-value') &&
+      return (v.action === 'edit-button' || v.action === 'popover-close' ||
+        v.action === 'popover-add-entry' || v.action === 'popover-add-item' ||
+        v.action === 'popover-remove-entry' || v.action === 'popover-remove-item') &&
         (v.index === undefined || isNonNegativeInt(v.index))
     case 'view.test.click':
       return true

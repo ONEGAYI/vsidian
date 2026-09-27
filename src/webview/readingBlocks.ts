@@ -158,7 +158,10 @@ export function splitReadingBlocks(text: string): ReadingBlock[] {
       start: 0,
       end: fm.end,
       html: fmModel
-        ? buildFrontmatterTableHtml(fmModel, text, { emptyLabel: t('frontmatter.empty') })
+        ? buildFrontmatterTableHtml(fmModel, text, {
+          emptyLabel: t('frontmatter.empty'),
+          titleLabel: t('frontmatter.title'),
+        })
         : `<pre class="vsidian-reading-frontmatter-text">${escapeHtml(text.slice(0, fm.end))}</pre>`,
     })
     return splitBody(text, env, fmEndLine + 1, blocks)

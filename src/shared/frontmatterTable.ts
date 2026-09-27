@@ -12,9 +12,8 @@
 //   未触及行字节不变（顺序、引号、缩进、行内注释原样保留）；增删行按
 //   整行（含换行）操作。计划是纯数据，由 webview 层组装 CM6 事务走既有
 //   出站管线（edit.request → WorkspaceEdit），不新增旁路。
-// - 格导航：Tab/Shift+Tab 格间往返、Enter 下行同列的定位（表格网格
-//   同构语义；末行返回 null 交上层决定加行）。
-// - 阅读侧 HTML：值全转义的只读表格结构（经 readingBlocks 的安全净化层）。
+// - 阅读侧 HTML：标题栏 + 值全转义的只读表格结构（经 readingBlocks 的
+//   安全净化层）。
 //
 // 坐标约定：全文 LF UTF-16 offset，frontmatter 必在文档首（由
 // frontmatterRange 保证），实现按 fm 区间相对计算，不假设 start 为 0。
@@ -252,8 +251,8 @@ function pushTrimmed(items: FmRange[], s: string, rawFrom: number, rawTo: number
   items.push({ from, to })
 }
 
-/** 键名归一（引号剥除）——重复键检测用 */
-function normalizeKey(raw: string): string {
+/** 键名归一（引号剥除）——重复键检测用（Popover 键名写回前的去重检查） */
+export function normalizeKey(raw: string): string {
   const t = raw.trim()
   if (t.length >= 2 && (t[0] === '"' || t[0] === "'") && t[t.length - 1] === t[0]) {
     return t.slice(1, -1)
@@ -548,14 +547,24 @@ function scalarInsert(entry: FmScalarEntry, newText: string): string {
   return entry.value.from === entry.colonEnd ? ` ${newText}` : newText
 }
 
-/** 改标量值（数组条目返回 null——数组值编辑走整格文本或项级计划） */
+/** 改值：标量为值区间替换（空值补 `: ` 结构空格）；flow 数组为值区间
+ *  （含括号）整框替换——Popover 值输入框的原文编辑口径，形态写坏交解析
+ *  降级兜底。block 数组返回 null（项编辑走项级计划） */
 export function planSetFmValue(model: FmTableModel, entryIndex: number, newValue: string): FmEditPlan | null {
   const entry = model.entries[entryIndex]
-  if (!entry || entry.kind !== 'scalar') {
+  if (!entry) {
+    return null
+  }
+  if (entry.kind === 'scalar') {
+    return {
+      changes: [{ from: entry.value.from, to: entry.value.to, insert: scalarInsert(entry, newValue) }],
+    }
+  }
+  if (entry.form !== 'flow') {
     return null
   }
   return {
-    changes: [{ from: entry.value.from, to: entry.value.to, insert: scalarInsert(entry, newValue) }],
+    changes: [{ from: entry.value.from, to: entry.value.to, insert: newValue }],
   }
 }
 
@@ -598,8 +607,7 @@ export function planAddFmEntry(model: FmTableModel, text: string): FmEditPlan | 
 }
 
 /** 删除条目：整行组（含换行；block 数组含全部项行）。光标落保留内容
- *  （后条目前移后的键首 → 前条目行尾），不落围栏行——删除后光标停在
- *  闭合 `---` 行会撤下「添加属性」按钮（touches 语义），属 UX 缺陷 */
+ *  （后条目前移后的键首 → 前条目行尾），不落围栏行 */
 export function planRemoveFmEntry(model: FmTableModel, entryIndex: number): FmEditPlan | null {
   const entry = model.entries[entryIndex]
   if (!entry) {
@@ -670,128 +678,20 @@ export function planRemoveFmArrayItem(model: FmTableModel, entryIndex: number, i
   }
 }
 
-// ---- 格导航（表格网格同构语义） ----
-
-export type FmCellKind = 'key' | 'value' | 'item'
-
-export interface FmCellTarget {
-  entryIndex: number
-  itemIndex: number // item 格有效；其余 -1
-  kind: FmCellKind
-}
-
-/** 光标所在格（宽松区间：行内分隔/缩进归邻格，注释区不算格） */
-export function fmCellAt(model: FmTableModel, pos: number): FmCellTarget | null {
-  if (pos < model.openTo || pos > model.closeFrom) {
+/** 改 block 数组项文本：只替换项区间（`- ` 标记、缩进与注释保留）——
+ *  Popover 项输入框的写回计划（2026-09-27 Popover 改版新增） */
+export function planSetFmArrayItem(model: FmTableModel, entryIndex: number, itemIndex: number, newText: string): FmEditPlan | null {
+  const entry = model.entries[entryIndex]
+  if (!entry || entry.kind !== 'array' || entry.form !== 'block') {
     return null
   }
-  for (let i = 0; i < model.entries.length; i++) {
-    const entry = model.entries[i]!
-    if (pos >= entry.key.from && pos <= entry.key.to) {
-      return { entryIndex: i, itemIndex: -1, kind: 'key' }
-    }
-    if (entry.kind === 'scalar') {
-      if (pos > entry.key.to && pos <= entry.lineTo && !inComment(entry.comment, pos)) {
-        return { entryIndex: i, itemIndex: -1, kind: 'value' }
-      }
-      continue
-    }
-    if (entry.form === 'flow') {
-      if (pos > entry.key.to && pos <= entry.lineTo && !inComment(entry.comment, pos)) {
-        return { entryIndex: i, itemIndex: -1, kind: 'value' }
-      }
-      continue
-    }
-    // block：宿主行（key 后到宿主行尾）或项行
-    if (pos > entry.key.to && pos <= entry.hostLineTo && !inComment(entry.comment, pos)) {
-      return { entryIndex: i, itemIndex: -1, kind: 'value' }
-    }
-    for (let j = 0; j < entry.items.length; j++) {
-      const item = entry.items[j]!
-      if (pos >= item.lineFrom && pos <= item.lineTo && !inComment(item.comment, pos)) {
-        return { entryIndex: i, itemIndex: j, kind: 'item' }
-      }
-    }
-  }
-  return null
-}
-
-function inComment(comment: FmRange | null, pos: number): boolean {
-  return comment !== null && pos > comment.from && pos <= comment.to
-}
-
-interface SequencedCell {
-  entryIndex: number
-  itemIndex: number
-  kind: FmCellKind
-  from: number
-  lineFrom: number
-}
-
-/** 头区格的文档序序列（key/value/item 依次展开；block 宿主 value 在项前） */
-function cellSequence(model: FmTableModel): SequencedCell[] {
-  const seq: SequencedCell[] = []
-  for (let i = 0; i < model.entries.length; i++) {
-    const entry = model.entries[i]!
-    seq.push({ entryIndex: i, itemIndex: -1, kind: 'key', from: entry.key.from, lineFrom: entry.lineFrom })
-    if (entry.kind === 'array' && entry.form === 'block') {
-      seq.push({ entryIndex: i, itemIndex: -1, kind: 'value', from: entry.value.from, lineFrom: entry.lineFrom })
-      for (let j = 0; j < entry.items.length; j++) {
-        seq.push({ entryIndex: i, itemIndex: j, kind: 'item', from: entry.items[j]!.item.from, lineFrom: entry.items[j]!.lineFrom })
-      }
-    } else {
-      seq.push({ entryIndex: i, itemIndex: -1, kind: 'value', from: entry.value.from, lineFrom: entry.lineFrom })
-    }
-  }
-  return seq
-}
-
-function findCell(seq: SequencedCell[], cell: FmCellTarget): number {
-  return seq.findIndex((s) => s.entryIndex === cell.entryIndex && s.itemIndex === cell.itemIndex && s.kind === cell.kind)
-}
-
-/** Tab/Shift+Tab 格间往返；末格前向 → 闭合行行尾（越出）；首格后向 → null */
-export function fmCellNavTarget(model: FmTableModel, pos: number, backward: boolean): number | null {
-  const cell = fmCellAt(model, pos)
-  if (!cell) {
+  const item = entry.items[itemIndex]
+  if (!item) {
     return null
   }
-  const seq = cellSequence(model)
-  const index = findCell(seq, cell)
-  if (index < 0) {
-    return null
+  return {
+    changes: [{ from: item.item.from, to: item.item.to, insert: newText }],
   }
-  const next = backward ? index - 1 : index + 1
-  if (next < 0) {
-    return null
-  }
-  if (next >= seq.length) {
-    return model.closeTo
-  }
-  return seq[next]!.from
-}
-
-/** Enter 下行同列（值列把宿主空值格与项视为同列）；末行返回 null */
-export function fmCellDownTarget(model: FmTableModel, pos: number): number | null {
-  const cell = fmCellAt(model, pos)
-  if (!cell) {
-    return null
-  }
-  const seq = cellSequence(model)
-  const index = findCell(seq, cell)
-  if (index < 0) {
-    return null
-  }
-  const colOf = (kind: FmCellKind): number => (kind === 'key' ? 0 : 1)
-  const currentCol = colOf(seq[index]!.kind)
-  const currentRow = seq[index]!.lineFrom
-  for (let i = index + 1; i < seq.length; i++) {
-    const candidate = seq[i]!
-    if (candidate.lineFrom > currentRow && colOf(candidate.kind) === currentCol) {
-      return candidate.from
-    }
-  }
-  return null
 }
 
 // ---- 阅读侧 HTML ----
@@ -807,19 +707,35 @@ export function escapeHtml(s: string): string {
     .replaceAll('"', '&quot;')
 }
 
-/** 阅读侧表格 HTML（只读；键值两列、数组项行带占位键列；值全转义） */
+/** 标题栏列表图标（三横线，参考图 A 形态；live 标题栏与阅读侧 HTML 共用） */
+export const FM_HEADER_ICON_SVG =
+  '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M5.5 4h8M5.5 8h8M5.5 12h8"></path>' +
+  '<path d="M2.5 4h.01M2.5 8h.01M2.5 12h.01" stroke-width="2"></path></svg>'
+
+/** 标题栏 HTML（live replace widget 与阅读侧同构：图标 + 标题；按钮为
+ *  live 专属，由 webview 侧 widget 追加） */
+export function buildFrontmatterHeaderHtml(titleHtml: string): string {
+  return (
+    `<div class="vsidian-fm-header"><span class="vsidian-fm-header-icon">${FM_HEADER_ICON_SVG}</span>` +
+    `<span class="vsidian-fm-header-title">${titleHtml}</span></div>`
+  )
+}
+
+/** 阅读侧表格 HTML（只读；标题栏 + 键值两列、数组项行带占位键列；值全转义） */
 export function buildFrontmatterTableHtml(
   model: FmTableModel,
   text: string,
-  opts: { emptyLabel: string },
+  opts: { emptyLabel: string; titleLabel: string },
 ): string {
+  const header = buildFrontmatterHeaderHtml(escapeHtml(opts.titleLabel))
   if (model.entries.length === 0) {
     return (
-      `<div class="vsidian-fm-table"><div class="vsidian-fm-row vsidian-fm-empty-row">` +
+      `<div class="vsidian-fm-table">${header}<div class="vsidian-fm-row vsidian-fm-empty-row">` +
       `<span class="vsidian-fm-empty">${escapeHtml(opts.emptyLabel)}</span></div></div>`
     )
   }
-  const rows: string[] = []
+  const rows: string[] = [header]
   for (const entry of model.entries) {
     const keyHtml = escapeHtml(text.slice(entry.key.from, entry.key.to))
     if (entry.kind === 'scalar') {

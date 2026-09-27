@@ -356,12 +356,23 @@ export const en = {
   'decor.mermaidUnavailable': 'Diagram renderer unavailable (mermaid.js failed to load)',
   'decor.mermaidError': 'Diagram failed to render: {message}',
 
-  // ---- frontmatter.（#140 表格卡片：结构按钮与空态）----
+  // ---- frontmatter.（#140 表格卡片：标题栏、修改按钮与 Popover 编辑）----
+  /** 卡片标题栏文字（对齐 Obsidian Properties 面板） */
+  'frontmatter.title': 'Properties',
+  /** 标题栏右上角「修改」按钮（打开属性编辑 Popover） */
+  'frontmatter.edit': 'Edit',
+  /** Popover 容器 aria 标签 */
+  'frontmatter.popoverAriaLabel': 'Edit properties',
+  /** Popover 内键名输入框 aria 标签 */
+  'frontmatter.keyAriaLabel': 'Property name',
+  /** Popover 内值输入框 aria 标签 */
+  'frontmatter.valueAriaLabel': 'Property value',
+  /** Popover 内数组项输入框 aria 标签 */
+  'frontmatter.itemAriaLabel': 'List item',
   'frontmatter.addProperty': 'Add property',
   'frontmatter.removeProperty': 'Delete property',
   'frontmatter.addItem': 'Add list item',
   'frontmatter.removeItem': 'Delete list item',
-  'frontmatter.emptyValue': 'Empty value',
   'frontmatter.empty': 'No properties yet',
 
   // ---- #97 manifest NLS（命令 title 与 displayName/description 生成源）----

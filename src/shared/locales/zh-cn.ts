@@ -331,12 +331,23 @@ export const zhCn: Record<MessageKey, string> = {
   'decor.mermaidUnavailable': '图表渲染器不可用（mermaid.js 未能加载）',
   'decor.mermaidError': '图表渲染失败：{message}',
 
-  // ---- frontmatter.（#140 表格卡片：结构按钮与空态）----
+  // ---- frontmatter.（#140 表格卡片：标题栏、修改按钮与 Popover 编辑）----
+  /** 卡片标题栏文字（对齐 Obsidian Properties 面板） */
+  'frontmatter.title': '属性',
+  /** 标题栏右上角「修改」按钮（打开属性编辑 Popover） */
+  'frontmatter.edit': '修改',
+  /** Popover 容器 aria 标签 */
+  'frontmatter.popoverAriaLabel': '修改属性',
+  /** Popover 内键名输入框 aria 标签 */
+  'frontmatter.keyAriaLabel': '属性名',
+  /** Popover 内值输入框 aria 标签 */
+  'frontmatter.valueAriaLabel': '属性值',
+  /** Popover 内数组项输入框 aria 标签 */
+  'frontmatter.itemAriaLabel': '列表项',
   'frontmatter.addProperty': '添加属性',
   'frontmatter.removeProperty': '删除属性',
   'frontmatter.addItem': '添加列表项',
   'frontmatter.removeItem': '删除列表项',
-  'frontmatter.emptyValue': '空值',
   'frontmatter.empty': '暂无属性',
 
   // ---- #97 manifest NLS（命令 title 与 displayName/description 生成源）----

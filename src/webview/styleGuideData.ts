@@ -2735,11 +2735,11 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "frontmatter",
     "kind": "selector",
     "target": ".vsidian-fm-card-line（+ -edge-top / -edge-bottom 首尾围栏行修饰）",
-    "purpose": "frontmatter 表格卡片的行级类：合法简单头区（标量 + 字符串数组）成型时覆盖头区全部行（含首尾围栏行与杂项行），承载卡片底色；首尾围栏行另加圆角修饰。卡片行同时承载 vsidian-frontmatter-line（别名桥 direct 级承诺 .cm-hmd-frontmatter 在成型形态下保持命中，降透明副作用由卡片规则重置）。复杂类型/解析失败时整卡降级为 frontmatter-line 源码形态（见 limit-fm-complex-types）。",
+    "purpose": "frontmatter 只读表格卡片的行级类：合法简单头区（标量 + 字符串数组）成型时覆盖头区全部行（含首尾围栏行与杂项行），承载卡片底色与左右边线，首尾围栏行补横线并做圆角修饰，拼装为完整边框圆角卡片。卡片行同时承载 vsidian-frontmatter-line（别名桥 direct 级承诺 .cm-hmd-frontmatter 在成型形态下保持命中，降透明副作用由卡片规则重置）。复杂类型/解析失败时整卡降级为 frontmatter-line 源码形态（见 limit-fm-complex-types）。",
     "views": [
       "live"
     ],
-    "states": "合法头区成型（光标位置无关——常驻卡片，不做光标进入显源码）；首尾围栏行光标触及时撤下清空/按钮替换、源码显形。",
+    "states": "常驻卡片（光标位置无关——成型态不暴露源码，光标进入头区被引导至闭合行后）；格不可点击编辑，编辑收敛到标题栏「修改」按钮的 Popover。",
     "dom": "live 视图 .cm-line 行元素（头区行）。",
     "example": ".vsidian-fm-card-line {\n  background: var(--vsidian-table-background);\n}",
     "obsidian": {
@@ -2758,13 +2758,13 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "frontmatter",
     "kind": "selector",
     "target": ".vsidian-fm-row（+ .vsidian-fm-item-row 数组项行修饰；grid-template-columns: minmax(120px, 32%) 1fr 两列）",
-    "purpose": "表格卡片的键值行（两列网格：键列/值列）；数组项行带 item-row 修饰（键列为 `- ` 标记淡化占位）。阅读侧同款表格行同名（.vsidian-fm-table 容器内）。",
+    "purpose": "只读表格卡片的键值行（两列网格：键列/值列）：无格线，仅行间 1px 淡分隔线（首键值行的分隔线兼作标题栏下边线）；数组项行带 item-row 修饰（键列为 `- ` 标记淡化占位）。阅读侧同款表格行同名（.vsidian-fm-table 容器内）。",
     "views": [
       "live",
       "reading"
     ],
     "dom": "live：.cm-line 行元素（网格行）；阅读：.vsidian-fm-table 内 div。",
-    "example": ".vsidian-fm-row {\n  grid-template-columns: minmax(140px, 40%) 1fr;\n}",
+    "example": ".vsidian-fm-row {\n  grid-template-columns: minmax(120px, 32%) 1fr;\n}",
     "obsidian": {
       "counterpart": ".metadata-property（Obsidian 属性行方向，DOM 结构不同）",
       "support": "none"
@@ -2780,13 +2780,13 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "frontmatter",
     "kind": "selector",
     "target": ".vsidian-fm-cell（+ .vsidian-fm-key 键列 / .vsidian-fm-value 值列 / .vsidian-fm-item-mark 数组项标记 / .vsidian-fm-sep 冒号 / .vsidian-fm-comment 行内注释 / .vsidian-fm-comment-line 独立注释行）",
-    "purpose": "单元格 mark：键与值（含数组项文本）映射为源区间的格；键列对齐正文表格表头视觉（600 字重 + 表头底色引用，不灰字弱化——观感并入表格体系）；sep（冒号与结构空格）与 comment（行内注释）在绘制层隐藏（display:none 不占格位，源文保留可编辑）；item-mark 淡化占键列；独立注释行整行淡化纳入卡片。",
+    "purpose": "单元格 mark：键与值（含数组项文本）映射为源区间的格，只读着色（格不可点击编辑）；键列为常规字重 + 次级前景灰（对齐参考图，#140 首版表头底色形态随格内编辑方案退役）；sep（冒号与结构空格）与 comment（行内注释）在绘制层隐藏（display:none 不占格位）；item-mark 淡化占键列；独立注释行整行淡化纳入卡片。",
     "views": [
       "live",
       "reading"
     ],
     "dom": "live：格 mark span（源区间）；阅读：span（item-mark/sep/comment 为 live 专属隐藏类）。",
-    "example": ".vsidian-fm-key {\n  font-weight: 600;\n}",
+    "example": ".vsidian-fm-key {\n  font-weight: normal;\n}",
     "obsidian": {
       "counterpart": ".metadata-property-key / -value（方向）",
       "support": "none"
@@ -2797,48 +2797,51 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "introduced": "#140（2026-09-27）"
   },
   {
-    "id": "live-fm-controls",
+    "id": "live-fm-header",
     "domain": "chrome",
     "category": "frontmatter",
     "kind": "selector",
-    "target": ".vsidian-fm-remove（删行/删项 ×）/ .vsidian-fm-add-item（末项后 +）/ .vsidian-fm-empty-value（空值格占位）",
-    "purpose": "结构操作控件：键值对与数组项的删除按钮（行尾 widget，行 hover 显现）、数组末尾加项按钮；空值格占位承接点击定位（冒号后无空隙时点击先补结构空格）。",
+    "target": ".vsidian-fm-header（标题栏容器；内含 .vsidian-fm-header-icon 图标 / .vsidian-fm-header-title 标题 / button.vsidian-fm-edit「修改」按钮）",
+    "purpose": "卡片标题栏（首围栏行 replace widget）：列表图标 + Properties 标题（600 字重次级前景灰）+ 右上角圆角描边「修改」按钮（铅笔图标，hover/聚焦高亮）。按钮点击开关属性编辑 Popover。阅读侧同容器内同类名同布局（无按钮，只读）。",
     "views": [
-      "live"
+      "live",
+      "reading"
     ],
-    "states": "hover/聚焦显现（opacity 过渡）；flow 数组不发射项级按钮（整格文本编辑）。",
-    "dom": "live 行尾 widget（absolute 脱流，不占格位）。",
-    "example": ".vsidian-fm-remove {\n  color: var(--vscode-errorForeground);\n}",
+    "states": "标题栏常驻两视图；按钮仅 live（阅读侧不发射）。",
+    "dom": "live：首围栏行 replace widget 内容；阅读：.vsidian-fm-table 首子元素。",
+    "example": "#app .vsidian-fm-header {\n  display: flex;\n}",
     "obsidian": {
-      "counterpart": "无（Obsidian 属性面板为独立面板 UI）",
+      "counterpart": ".metadata-container heading（方向）",
       "support": "none"
     },
     "verification": [
-      "浏览器 frontmatterTable 套件（控件点击写回）"
+      "集成「界面域样式契约」：chromeSelectors[\"live-fm-header-live\"] 探针命中",
+      "浏览器 frontmatterTable 套件（修改按钮开浮层、绘制层可见）"
     ],
-    "introduced": "#140（2026-09-27）"
+    "introduced": "#140（2026-09-27 Popover 改版）"
   },
   {
-    "id": "live-fm-add-entry",
+    "id": "live-fm-popover",
     "domain": "chrome",
     "category": "frontmatter",
     "kind": "selector",
-    "target": ".vsidian-fm-add-entry",
-    "purpose": "「添加属性」按钮（闭合围栏行的整行替换 widget，呈现态常驻）：点击在末条目后插入 key: value 模板并选中新键；空格下为虚线占位形态。",
+    "target": ".vsidian-fm-popover（浮层容器；内含 .vsidian-fm-pop-rows 行区 / .vsidian-fm-pop-input 输入框（-key/-value/-item 修饰、-invalid 非法标记）/ .vsidian-fm-pop-remove 删除 / .vsidian-fm-pop-add-item 加项 / .vsidian-fm-pop-footer 底区 / .vsidian-fm-pop-add「添加属性」主按钮）",
+    "purpose": "属性编辑 Popover：贴「修改」按钮定位的小浮层（挂 body、fixed 定位由 JS 计算），白底圆角 10px + 明显投影；结构化编辑行（键值输入框 + 删除按钮、数组项输入行缩进、加项入口），底部右侧「添加属性」主按钮（主题主色实底）。输入框聚焦 focusBorder 描边、键名非法红边标记。",
     "views": [
       "live"
     ],
-    "states": "呈现态常驻；光标触及闭合行时撤下（源码显形可编辑）。",
-    "dom": "live 闭合围栏行 replace widget。",
-    "example": ".vsidian-fm-add-entry {\n  border-style: solid;\n}",
+    "states": "交互态浮层（打开时挂载、Esc/点击外部/降级自动关闭）——容器本体不进静态探针，开闭与写回由浏览器套件行为验证；样式入口（单类低特异性）公开供片段覆写。",
+    "dom": "document.body 直挂（不在 #app 内，故规则无 #app 前缀）。",
+    "example": ".vsidian-fm-popover {\n  border-radius: 10px;\n}",
     "obsidian": {
-      "counterpart": ".metadata-add-property（方向）",
+      "counterpart": ".metadata-property-editor（Obsidian 属性编辑浮层方向）",
       "support": "none"
     },
     "verification": [
-      "集成「界面域样式契约」：chromeSelectors[\"live-fm-add-entry-live\"] 探针命中"
+      "frontmatterPaintCssContract 单元（fixed/圆角/投影/主按钮钉规则）",
+      "浏览器 frontmatterTable 套件（真实键鼠开闭、输入即时写回、焦点管理）"
     ],
-    "introduced": "#140（2026-09-27）"
+    "introduced": "#140（2026-09-27 Popover 改版）"
   },
   {
     "id": "limit-fm-complex-types",
@@ -2846,7 +2849,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "chrome-limits",
     "kind": "limitation",
     "target": "复杂 YAML 类型（嵌套对象 / 对象数组 / 多行标量 |·> / 锚点别名 / 顶层序列 / 重复键 / 非法语法）",
-    "purpose": "不支持边界：一期表格交互只覆盖标量（字符串/数字/布尔/日期字符串）与字符串数组（block `- item` 行组 + flow `[a, b]` 单行，flow 值格为整格文本编辑、无项级按钮）；复杂类型与解析失败整卡降级源码形态（live 为 .vsidian-frontmatter-line 行类、阅读为 .vsidian-reading-frontmatter-text 转义块），编辑不受限，转简单形态自动成型。",
+    "purpose": "不支持边界：一期表格只覆盖标量（字符串/数字/布尔/日期字符串）与字符串数组（block `- item` 行组 + flow `[a, b]` 单行；live 侧 block 项与 flow 值框在 Popover 内编辑，阅读侧拆项呈现）；复杂类型与解析失败整卡降级源码形态（live 为 .vsidian-frontmatter-line 行类、阅读为 .vsidian-reading-frontmatter-text 转义块），编辑不受限，转简单形态自动成型；降级瞬间打开中的 Popover 自动关闭。",
     "views": [
       "live",
       "reading"
@@ -2858,7 +2861,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "frontmatterTable 纯函数单元（降级矩阵 38 例）"
+      "frontmatterTable 纯函数单元（降级矩阵）"
     ],
     "introduced": "#140（2026-09-27）"
   },

@@ -81,11 +81,13 @@ export const CHROME_CONTRACT_PROBES: readonly ChromeContractProbe[] = [
   // #141 起第四按钮双态视图切换——body 模式类为模式态类，不伪造静态探针） ----
   { id: 'toolbar', selector: '#app .vsidian-toolbar', expected: 'rgb(228, 0, 1)' },
   { id: 'view-toggle', selector: '#app .vsidian-toolbar .vsidian-view-toggle', expected: 'rgb(236, 0, 1)' },
-  // ---- frontmatter 表格卡片（#140；live 侧 + 阅读侧同款表格） ----
+  // ---- frontmatter 只读表格卡片（#140 Popover 改版；live 侧 + 阅读侧
+  //      同款表格。标题栏是常驻静态入口可探针；Popover 容器为交互态
+  //      （打开时挂载），不伪造静态探针，由浏览器套件行为验证） ----
   { id: 'live-fm-card-line-live', selector: '#app .vsidian-view-live .vsidian-fm-card-line', expected: 'rgb(230, 0, 1)' },
   { id: 'live-fm-row-live', selector: '#app .vsidian-view-live .vsidian-fm-row', expected: 'rgb(231, 0, 1)' },
   { id: 'live-fm-cell-live', selector: '#app .vsidian-view-live .vsidian-fm-row > .vsidian-fm-cell', expected: 'rgb(232, 0, 1)' },
   { id: 'live-fm-row-reading', selector: '#app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-row', expected: 'rgb(233, 0, 1)' },
   { id: 'live-fm-cell-reading', selector: '#app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-cell', expected: 'rgb(234, 0, 1)' },
-  { id: 'live-fm-add-entry-live', selector: '#app .vsidian-view-live .vsidian-fm-add-entry', expected: 'rgb(235, 0, 1)' },
+  { id: 'live-fm-header-live', selector: '#app .vsidian-view-live .vsidian-fm-header', expected: 'rgb(237, 0, 1)' },
 ]

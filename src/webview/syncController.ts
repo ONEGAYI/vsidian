@@ -171,6 +171,7 @@ import { symbolSelectionWrap } from './symbolWrap'
 import { fenceEscape } from './fenceEscape'
 import { frontmatterEditing } from './frontmatterEditing'
 import { FM_CARD_CLASS_NAMES } from './frontmatterDecorations'
+import { FM_POPOVER_CLASS_NAMES, closeFmPopover, isFmPopoverOpen } from './frontmatterPopover'
 import { listEditing } from './listEditing'
 import { indentEditing } from './indentEditing'
 import { selectTableRegion, tableRegionField } from './tableRegionSelection'
@@ -974,6 +975,7 @@ export class WebviewSyncController {
 
   dispose(): void {
     closeDiagramPopup()
+    closeFmPopover()
     setDiagramExportSender(null)
     setDiagramPopupDocSource(null)
     this.unsubscribeLocale?.()
@@ -1270,36 +1272,40 @@ export class WebviewSyncController {
         break
       }
       case 'fm.test.click': {
-        // 测试钩子（#140）：点击真实 frontmatter 卡片结构按钮（与用户点击
-        // 同一 armButton 处理器；编辑计划走标准 CM6 事务出站）。条目级 ×
-        // 与项级 × 同类名，按所在行是否 item-row 区分（DOM 文档序）
-        const live = this.liveWrapper
+        // 测试钩子（#140 Popover 改版）：驱动修改按钮与 Popover 控件（与
+        // 用户点击同一处理器；编辑计划走标准 CM6 事务出站）。按钮按类名
+        // + DOM 文档序定位；popover-close 与 Esc 走同一关闭函数
         const at = <T extends HTMLElement>(els: T[], index: number): T | undefined =>
           els[Math.max(0, index)]
         const all = <T extends HTMLElement>(sel: string): T[] =>
-          [...(live?.querySelectorAll<T>(sel) ?? [])]
-        if (message.action === 'add-entry') {
-          all<HTMLButtonElement>('button.vsidian-fm-add-entry')[0]?.click()
+          [...document.querySelectorAll<T>(sel)]
+        if (message.action === 'edit-button') {
+          all<HTMLButtonElement>(`.${FM_CARD_CLASS_NAMES.edit}`)[0]?.click()
           break
         }
-        if (message.action === 'add-item') {
-          at(all<HTMLButtonElement>('button.vsidian-fm-add-item'), message.index ?? 0)?.click()
+        if (message.action === 'popover-close') {
+          closeFmPopover()
           break
         }
-        if (message.action === 'empty-value') {
-          // 空值占位是 span（FmEmptyValueWidget），交互入口在 mousedown
-          at(all(`.${FM_CARD_CLASS_NAMES.emptyValue}`), message.index ?? 0)?.dispatchEvent(
-            new MouseEvent('mousedown', { bubbles: true, cancelable: true }),
-          )
+        if (message.action === 'popover-add-entry') {
+          all<HTMLButtonElement>(`.${FM_POPOVER_CLASS_NAMES.add}`)[0]?.click()
           break
         }
-        const removes = all<HTMLButtonElement>('button.vsidian-fm-remove')
-        const itemButtons = removes.filter((btn) => btn.closest(`.${FM_CARD_CLASS_NAMES.itemRow}`))
-        if (message.action === 'remove-entry') {
-          at(removes.filter((btn) => !itemButtons.includes(btn)), message.index ?? 0)?.click()
+        if (message.action === 'popover-add-item') {
+          at(all<HTMLButtonElement>(`.${FM_POPOVER_CLASS_NAMES.addItem}`), message.index ?? 0)?.click()
           break
         }
-        at(itemButtons, message.index ?? 0)?.click()
+        if (message.action === 'popover-remove-entry') {
+          const entries = all<HTMLElement>(`.${FM_POPOVER_CLASS_NAMES.entry}`)
+          const entry = at(entries, message.index ?? 0)
+          entry?.querySelector<HTMLButtonElement>(
+            `:scope > .${FM_POPOVER_CLASS_NAMES.row} > .${FM_POPOVER_CLASS_NAMES.remove}`)?.click()
+          break
+        }
+        const itemRemoves = all<HTMLElement>(`.${FM_POPOVER_CLASS_NAMES.itemRow}`)
+          .map((row) => row.querySelector<HTMLButtonElement>(`.${FM_POPOVER_CLASS_NAMES.remove}`))
+          .filter((btn): btn is HTMLButtonElement => btn !== null)
+        at(itemRemoves, message.index ?? 0)?.click()
         break
       }
       case 'view.test.click': {
@@ -1857,6 +1863,8 @@ export class WebviewSyncController {
       sidebar: this.collectSidebar(),
       // #54 大纲观测（面板态、绘制层证据与全文标题序列）
       outline: this.collectOutline(),
+      // #140 Popover 改版：属性编辑浮层开态（集成断言用）
+      fmPopoverOpen: isFmPopoverOpen(),
     }
     this.bridge.postMessage(state)
   }
@@ -1995,6 +2003,8 @@ export class WebviewSyncController {
     // review-loops B3：命令面板切模式不经鼠标路径（无 pointercancel），
     // 拖拽会话若残留会跨模式存活（落点判定随视图重算漂移）——统一取消
     this.cancelOutlineDrag()
+    // #140 Popover 改版：属性编辑浮层仅服务 live 表格卡片，切到阅读即关
+    closeFmPopover()
     if (this.view) selectTableRegion(this.view, null)
     if (next === 'reading') {
       const editorHadFocus = document.activeElement === this.view?.contentDOM
@@ -6317,9 +6327,9 @@ export class WebviewSyncController {
       // #79 代码块卡片：呈现态围栏收起 + 头部横带 + 卡片行类（配置经
       // Compartment 热重配，围栏表复用上方 mermaidFencesField）
       this.codeCardCompartment.of(this.codeCardExtension()),
-      // #140 frontmatter 表格键位：Tab/Enter 格导航与末行结构加项——必须
-      // 置于 fenceEscape 之前（keymap 正序拼接：头区格内先切格，越出闭合
-      // 行后才轮到围栏 Tab 越界/缩进；头区外 fmCellAt null 返回 false 落穿）
+      // #140 frontmatter 光标引导：成型头区不暴露源码——选区进入被弹到
+      // 闭合行后（filter 硬拦 + updateListener 兜底），编辑收敛到标题栏
+      // 「修改」按钮的 Popover；文档变更同时驱动浮层按最新模型重建
       frontmatterEditing,
       // #125 围栏内两步 Tab 越界：必须置于 tableEditing **之前**——CM6
       // keymap 与 transactionFilter 的顺序语义相反：keymap 把全部绑定按

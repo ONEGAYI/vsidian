@@ -1,40 +1,33 @@
-// Live 视图 frontmatter 表格卡片装饰（工单 #140，规格
-// docs/specs/frontmatter-table.md）。
+// Live 视图 frontmatter 只读表格卡片装饰（工单 #140 Popover 改版，
+// 2026-09-27 验收反馈；规格 docs/specs/frontmatter-table.md）。
 //
 // 架构（照表格网格 #42 + 代码块卡片 #79 的既有模式）：
-// - 编辑面即 CM6 源文本行：合法头区（shared/frontmatterTable 的模型）的
-//   键 / 值 / 项区间以 mark 装饰映射为两列网格格；冒号分隔与数组 `- `
-//   标记以 mark 淡化呈现（源文仍在，光标可入）；网格在光标进入格内
-//   后保留——编辑直接发生在源区间，IME、Tab、宿主写回链路全部复用
-//   既有管线，无独立输入状态
-// - 首尾围栏行：呈现态清空（首行）/替换为「添加属性」按钮（闭合行）；
-//   光标触及该行时撤下替换、源码显形可编辑（表格分隔行同款语义）
-// - 结构操作（增删键值对 / 数组项）经行尾 widget 按钮触发，编辑计划由
+// - 成型头区呈现为**只读表格**（键值两列）：键 / 值 / 项区间以 mark 装饰
+//   映射为网格格（供样式着色），格不可点击编辑——光标进入头区被
+//   frontmatterEditing 的光标引导弹到闭合行后（成型态不暴露源码），
+//   编辑收敛到标题栏「修改」按钮的 Popover（frontmatterPopover）
+// - 首围栏行：呈现态替换为标题栏（列表图标 + Properties 标题 + 右上角
+//   「修改」按钮，对齐用户参考图 A）；闭合围栏行：呈现态清空（卡片底
+//   边，不承载任何按钮——旧「添加属性」整行按钮随格内编辑方案退役，
+//   现状图「莫名空行/空白」的来源即此行替换按钮与空围栏行的拼装）
+// - 结构操作（增删键值对 / 数组项）入口全部在 Popover 内，编辑计划由
 //   shared/frontmatterTable 纯函数给出，事务走标准出站链路
-// - 空值格零宽：占位 widget 承接点击定位；首次点击补 `: ` 结构空格
-//   （一次文本事务），避免打字即冒号粘连降级
 // - 降级（解析失败 / 复杂类型）：本模块零发射，liveDecorations 的
 //   frontmatter-line 行类照发（现状源码形态）；成型与降级随编辑实时切换
 //
 // 装饰实例全部按参数缓存（同类名 / 同行号复用），增量与全量构建产出
 // 相同实例，RangeSet.eq 成立。
 
-import type { EditorSelection, Range, Text } from '@codemirror/state'
+import type { Range, Text } from '@codemirror/state'
 import { Decoration, EditorView, WidgetType } from '@codemirror/view'
-import {
-  planAddFmArrayItem,
-  planAddFmEntry,
-  planRemoveFmArrayItem,
-  planRemoveFmEntry,
-  type FmEditPlan,
-  type FmTableModel,
-} from '../shared/frontmatterTable'
+import { FM_HEADER_ICON_SVG, type FmTableModel } from '../shared/frontmatterTable'
 import { t } from '../shared/i18n'
 // 循环依赖约定：liveDecorations 装配本模块的构建函数，本模块的 widget
-// 运行时读 liveDecorationsField——两端顶层零引用对方导出（live binding
-// 运行时解析），模块循环加载安全。frontmatter-line 类名字面量与
-// LIVE_CLASS_NAMES.frontmatterLine 同值（liveDecorations 测试钉住不变）。
-import { liveDecorationsField, selectionTouchesRange } from './liveDecorations'
+// 运行时调 frontmatterPopover（→ liveDecorations）——两端顶层零引用对方
+// 导出（live binding 运行时解析），模块循环加载安全。frontmatter-line
+// 类名字面量与 LIVE_CLASS_NAMES.frontmatterLine 同值（liveDecorations
+// 测试钉住不变）。
+import { toggleFmPopover } from './frontmatterPopover'
 
 /** #140 frontmatter 表格卡片稳定类名（样式契约 chrome 域条目同源） */
 export const FM_CARD_CLASS_NAMES = {
@@ -44,7 +37,7 @@ export const FM_CARD_CLASS_NAMES = {
   edgeTop: 'vsidian-fm-card-edge-top',
   /** 闭合围栏行圆角修饰 */
   edgeBottom: 'vsidian-fm-card-edge-bottom',
-  /** 键值行（两列网格；CSS 变量 --vsidian-fm-columns=2） */
+  /** 键值行（两列网格） */
   row: 'vsidian-fm-row',
   /** 数组项行修饰（key 列为项标记占位） */
   itemRow: 'vsidian-fm-item-row',
@@ -62,14 +55,14 @@ export const FM_CARD_CLASS_NAMES = {
   commentLine: 'vsidian-fm-comment-line',
   /** 数组项 `- ` 标记（含前导缩进；淡化占位 key 列） */
   itemMark: 'vsidian-fm-item-mark',
-  /** 键值对删除按钮（行尾 widget） */
-  remove: 'vsidian-fm-remove',
-  /** 添加属性按钮（闭合行替换 widget） */
-  addEntry: 'vsidian-fm-add-entry',
-  /** 添加数组项按钮（末项行尾 widget） */
-  addItem: 'vsidian-fm-add-item',
-  /** 空值格占位（零宽格承接点击） */
-  emptyValue: 'vsidian-fm-empty-value',
+  /** 标题栏（首围栏行 replace widget：图标 + Properties 标题 + 修改按钮） */
+  header: 'vsidian-fm-header',
+  /** 标题栏列表图标 */
+  headerIcon: 'vsidian-fm-header-icon',
+  /** 标题栏标题文字 */
+  headerTitle: 'vsidian-fm-header-title',
+  /** 「修改」按钮（标题栏右端；打开 Popover） */
+  edit: 'vsidian-fm-edit',
 } as const
 
 /** 卡片覆盖行的组合类：vsidian 卡片行 + 降级行名（后者经别名桥携带
@@ -77,9 +70,15 @@ export const FM_CARD_CLASS_NAMES = {
  *  观感副作用 opacity 由 fm-card-line 规则显式重置为 1） */
 const FM_CARD_LINE_CLASSES = `${FM_CARD_CLASS_NAMES.line} vsidian-frontmatter-line`
 
+/** 「修改」按钮铅笔图标（参考图 A 右上角按钮形态） */
+const EDIT_ICON_SVG =
+  '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M11.3 2.7l2 2L6 12l-2.6.6L4 10z"></path></svg>'
+
 // ---- widget ----
 
-/** 按钮公共拦截：终结 mousedown 防 CM6 落选区进源区间，click 派发计划 */
+/** 按钮公共拦截：终结 mousedown 防 CM6 落选区进头区，click 派发动作 */
 function armButton(el: HTMLButtonElement, onClick: () => void): void {
   el.addEventListener('mousedown', (event) => {
     event.preventDefault()
@@ -92,147 +91,43 @@ function armButton(el: HTMLButtonElement, onClick: () => void): void {
   })
 }
 
-/** 当前文档的成型模型（liveDecorationsField 携带；随文档重析） */
-function modelOfView(view: EditorView): FmTableModel | null {
-  const field = view.state.field(liveDecorationsField, false)
-  return field ? field.fmModel : null
-}
-
-/** 从 widget DOM 找回编辑器并派发编辑计划（标准出站链路） */
-function dispatchFmPlan(el: HTMLElement, plan: FmEditPlan | null): void {
-  const view = EditorView.findFromDOM(el)
-  if (!view || !plan) {
-    return
-  }
-  view.dispatch({
-    changes: plan.changes.map((c) => ({ from: c.from, to: c.to ?? c.from, insert: c.insert })),
-    selection: plan.selection
-      ? { anchor: plan.selection.anchor, head: plan.selection.head ?? plan.selection.anchor }
-      : undefined,
-  })
-  view.focus()
-}
-
-/** 结构按钮种类（widget 身份维度之一；编辑计划按种类分派） */
-type FmButtonKind = 'remove-entry' | 'remove-item' | 'add-item'
-
-/** 按钮形态：类名 / 字形 / aria 文案键 */
-const FM_BUTTON_SPEC: Record<FmButtonKind, { cls: string; glyph: string; labelKey: 'frontmatter.removeProperty' | 'frontmatter.removeItem' | 'frontmatter.addItem' }> = {
-  'remove-entry': { cls: FM_CARD_CLASS_NAMES.remove, glyph: '×', labelKey: 'frontmatter.removeProperty' },
-  'remove-item': { cls: FM_CARD_CLASS_NAMES.remove, glyph: '×', labelKey: 'frontmatter.removeItem' },
-  'add-item': { cls: FM_CARD_CLASS_NAMES.addItem, glyph: '+', labelKey: 'frontmatter.addItem' },
-}
-
-/** 种类 → 编辑计划（索引按宿主行行首反查——模型随文档重析，构造时索引会过期） */
-function fmButtonPlan(kind: FmButtonKind, model: FmTableModel, entryIndex: number, itemIndex: number): FmEditPlan | null {
-  if (kind === 'remove-entry') {
-    return planRemoveFmEntry(model, entryIndex)
-  }
-  if (kind === 'remove-item') {
-    return planRemoveFmArrayItem(model, entryIndex, itemIndex)
-  }
-  return planAddFmArrayItem(model, entryIndex)
-}
-
 /**
- * 结构按钮 widget（行尾「×」删除与「+」加项共用一个参数化实现）：
- * entryFrom 为宿主行行首（构造时的条目锚点），派发时按它反查当前模型
- * 的条目索引——模型随文档重析，widget 构造时的索引会过期。
+ * 标题栏 widget（首围栏行整行替换）：列表图标 + Properties 标题 +
+ * 右上角「修改」按钮（点击开关属性编辑 Popover，贴按钮定位）。
  */
-export class FmActionButtonWidget extends WidgetType {
-  constructor(
-    readonly kind: FmButtonKind,
-    readonly entryFrom: number,
-    readonly itemIndex = -1,
-  ) {
-    super()
-  }
-  eq(other: FmActionButtonWidget): boolean {
-    return other.kind === this.kind && other.entryFrom === this.entryFrom && other.itemIndex === this.itemIndex
-  }
-  toDOM(): HTMLElement {
-    const spec = FM_BUTTON_SPEC[this.kind]
-    const btn = document.createElement('button')
-    btn.type = 'button'
-    btn.className = spec.cls
-    btn.textContent = spec.glyph
-    const label = t(spec.labelKey)
-    btn.title = label
-    btn.setAttribute('aria-label', label)
-    armButton(btn, () => {
-      const view = EditorView.findFromDOM(btn)
-      const model = view ? modelOfView(view) : null
-      if (!view || !model) return
-      const index = model.entries.findIndex((e) => e.lineFrom === this.entryFrom)
-      if (index < 0) return
-      dispatchFmPlan(btn, fmButtonPlan(this.kind, model, index, this.itemIndex))
-    })
-    return btn
-  }
-  ignoreEvent(): boolean {
-    return false
-  }
-}
-
-/** 「添加属性」按钮（闭合行整行替换 widget）：插入 `key: value` 模板并选中新键 */
-export class FmAddEntryButtonWidget extends WidgetType {
+export class FmCardHeaderWidget extends WidgetType {
   eq(): boolean {
     return true
   }
   toDOM(): HTMLElement {
+    const wrap = document.createElement('div')
+    wrap.className = FM_CARD_CLASS_NAMES.header
+    const icon = document.createElement('span')
+    icon.className = FM_CARD_CLASS_NAMES.headerIcon
+    icon.innerHTML = FM_HEADER_ICON_SVG
+    icon.setAttribute('aria-hidden', 'true')
+    wrap.appendChild(icon)
+    const title = document.createElement('span')
+    title.className = FM_CARD_CLASS_NAMES.headerTitle
+    title.textContent = t('frontmatter.title')
+    wrap.appendChild(title)
     const btn = document.createElement('button')
     btn.type = 'button'
-    btn.className = FM_CARD_CLASS_NAMES.addEntry
-    btn.textContent = t('frontmatter.addProperty')
+    btn.className = FM_CARD_CLASS_NAMES.edit
+    btn.innerHTML = EDIT_ICON_SVG
+    const label = t('frontmatter.edit')
+    btn.title = label
+    btn.setAttribute('aria-label', label)
     armButton(btn, () => {
-      const view = EditorView.findFromDOM(btn)
-      const model = view ? modelOfView(view) : null
-      if (!view || !model) return
-      dispatchFmPlan(
-        btn,
-        planAddFmEntry(model, view.state.doc.sliceString(model.from, model.to)),
-      )
-    })
-    return btn
-  }
-  ignoreEvent(): boolean {
-    return false
-  }
-}
-
-/**
- * 空值格占位（零宽值格的可点击占位）：点击把光标放到值位置；冒号后
- * 无结构空格时先补一个空格（一次写回），使后续打字不粘连冒号降级。
- * 仅用于标量空值（block 数组宿主的空值格不发射——项编辑走项行与加项按钮）。
- */
-export class FmEmptyValueWidget extends WidgetType {
-  constructor(readonly valueFrom: number, readonly colonEnd: number) {
-    super()
-  }
-  eq(other: FmEmptyValueWidget): boolean {
-    return other.valueFrom === this.valueFrom && other.colonEnd === this.colonEnd
-  }
-  toDOM(): HTMLElement {
-    const span = document.createElement('span')
-    span.className = `${FM_CARD_CLASS_NAMES.cell} ${FM_CARD_CLASS_NAMES.value} ${FM_CARD_CLASS_NAMES.emptyValue}`
-    span.setAttribute('aria-label', t('frontmatter.emptyValue'))
-    span.addEventListener('mousedown', (event) => {
-      event.preventDefault()
-      event.stopPropagation()
-      const view = EditorView.findFromDOM(span)
+      // findFromDOM 只认携带 cmTile 的节点（本版本 CM6 的 Tile.get 语义，
+      // liveCodeCard 同款口径）：按钮是标题栏 widget 的深层叶子无标记，
+      // 须从 widget 根（toDOM 返回值）查找视图
+      const view = EditorView.findFromDOM(wrap)
       if (!view) return
-      if (this.valueFrom > this.colonEnd) {
-        view.dispatch({ selection: { anchor: this.valueFrom }, scrollIntoView: true })
-      } else {
-        view.dispatch({
-          changes: { from: this.colonEnd, insert: ' ' },
-          selection: { anchor: this.colonEnd + 1 },
-          scrollIntoView: true,
-        })
-      }
-      view.focus()
+      toggleFmPopover(view, btn)
     })
-    return span
+    wrap.appendChild(btn)
+    return wrap
   }
   ignoreEvent(): boolean {
     return false
@@ -242,6 +137,8 @@ export class FmEmptyValueWidget extends WidgetType {
 // ---- 装饰实例缓存（增量与全量产出相同实例，RangeSet.eq 前提） ----
 
 const fmHideDeco = Decoration.replace({})
+
+const fmHeaderDeco = Decoration.replace({ widget: new FmCardHeaderWidget() })
 
 const cellDecos = new Map<string, ReturnType<typeof Decoration.mark>>()
 function fmCellDeco(kind: 'key' | 'value'): ReturnType<typeof Decoration.mark> {
@@ -258,44 +155,20 @@ const fmCommentDeco = Decoration.mark({ class: FM_CARD_CLASS_NAMES.comment })
 const fmItemMarkDeco = Decoration.mark({ class: FM_CARD_CLASS_NAMES.itemMark })
 const fmCommentLineDeco = Decoration.mark({ class: FM_CARD_CLASS_NAMES.commentLine })
 
-/** widget 装饰缓存上限（LRU；键含行号，防长会话无界增长） */
-const FM_WIDGET_DECO_CACHE_LIMIT = 128
-const widgetDecos = new Map<string, Decoration>()
-
-function widgetDeco(key: string, make: () => Decoration): Decoration {
-  const hit = widgetDecos.get(key)
-  if (hit) {
-    widgetDecos.delete(key)
-    widgetDecos.set(key, hit)
-    return hit
-  }
-  const deco = make()
-  widgetDecos.set(key, deco)
-  while (widgetDecos.size > FM_WIDGET_DECO_CACHE_LIMIT) {
-    const oldest = widgetDecos.keys().next().value
-    if (oldest === undefined) break
-    widgetDecos.delete(oldest)
-  }
-  return deco
-}
-
 // ---- 卡片构建（纯数据输入，可单测直驱） ----
 
 /**
- * 卡片行类 + 装饰区间构建：成型头区按模型发射——首尾围栏行行类与呈现态
- * 替换、键值行的网格格 mark 与行尾按钮、数组项行标记与按钮、空值占位。
- * 行类以行号 → 类列表返回，由 liveDecorations 的行装饰机制落地。
+ * 卡片行类 + 装饰区间构建：成型头区按模型发射——首围栏行替换为标题栏、
+ * 闭合围栏行清空、键值行的网格格 mark、数组项行标记。卡片**常驻呈现、
+ * 不随光标位置变化**（光标引导由 frontmatterEditing 负责），行类以行号
+ * → 类列表返回，由 liveDecorations 的行装饰机制落地。
  */
 export interface FmCardPlan {
   lineClasses: Map<number, string[]>
   ranges: Array<Range<Decoration>>
 }
 
-export function buildFrontmatterCardPlan(
-  doc: Text,
-  model: FmTableModel,
-  selection: EditorSelection,
-): FmCardPlan {
+export function buildFrontmatterCardPlan(doc: Text, model: FmTableModel): FmCardPlan {
   const lineClasses = new Map<number, string[]>()
   const addCls = (lineNo: number, ...cls: string[]): void => {
     const list = lineClasses.get(lineNo) ?? []
@@ -303,14 +176,11 @@ export function buildFrontmatterCardPlan(
     lineClasses.set(lineNo, list)
   }
   const ranges: Array<Range<Decoration>> = []
-  const touches = (from: number, to: number): boolean => selectionTouchesRange(selection, from, to)
 
-  // 首围栏行：卡片顶边；呈现态清空行内容（行槽保留）
+  // 首围栏行：卡片顶边；呈现态替换为标题栏（图标 + Properties + 修改按钮）
   const openLine = doc.lineAt(Math.min(model.openFrom, doc.length))
   addCls(openLine.number, FM_CARD_LINE_CLASSES, FM_CARD_CLASS_NAMES.edgeTop)
-  if (!touches(model.openFrom, model.openTo)) {
-    ranges.push(fmHideDeco.range(model.openFrom, model.openTo))
-  }
+  ranges.push(fmHeaderDeco.range(model.openFrom, model.openTo))
 
   // 杂项行（独立注释/空行）：纳入卡片背景；注释行内容淡化呈现
   for (const misc of model.miscLines) {
@@ -331,35 +201,18 @@ export function buildFrontmatterCardPlan(
     if (entry.comment) {
       ranges.push(fmCommentDeco.range(entry.comment.from, entry.comment.to))
     }
-    // 宿主行行尾删除按钮（条目级；block 数组删除含全部项行）
-    ranges.push(
-      widgetDeco(`rmEntry\u0000${entry.lineFrom}`, () =>
-        Decoration.widget({ widget: new FmActionButtonWidget('remove-entry', entry.lineFrom), side: 1 }),
-      ).range(entry.kind === 'array' && entry.form === 'block' ? entry.hostLineTo : entry.lineTo),
-    )
     if (entry.kind === 'scalar') {
       if (entry.value.to > entry.value.from) {
         ranges.push(fmCellDeco('value').range(entry.value.from, entry.value.to))
-      } else {
-        ranges.push(
-          widgetDeco(`empty\u0000${entry.value.from}\u0000${entry.colonEnd}`, () =>
-            Decoration.widget({
-              widget: new FmEmptyValueWidget(entry.value.from, entry.colonEnd),
-              side: 1,
-            }),
-          ).range(entry.value.from),
-        )
       }
       continue
     }
     if (entry.form === 'flow') {
-      // flow：值整格文本编辑（原文呈现）
       ranges.push(fmCellDeco('value').range(entry.value.from, entry.value.to))
       continue
     }
-    // block：项行（前缀标记淡化占 key 列 + 项文本值格 + 行尾按钮）
-    for (let j = 0; j < entry.items.length; j++) {
-      const item = entry.items[j]!
+    // block：项行（前缀标记淡化占 key 列 + 项文本值格）
+    for (const item of entry.items) {
       const line = doc.lineAt(Math.min(item.lineFrom, doc.length))
       addCls(line.number, FM_CARD_LINE_CLASSES, FM_CARD_CLASS_NAMES.row, FM_CARD_CLASS_NAMES.itemRow)
       if (item.item.from > item.lineFrom) {
@@ -369,32 +222,13 @@ export function buildFrontmatterCardPlan(
       if (item.comment) {
         ranges.push(fmCommentDeco.range(item.comment.from, item.comment.to))
       }
-      ranges.push(
-        widgetDeco(`rmItem\u0000${entry.lineFrom}\u0000${j}`, () =>
-          Decoration.widget({ widget: new FmActionButtonWidget('remove-item', entry.lineFrom, j), side: 1 }),
-        ).range(item.lineTo),
-      )
-    }
-    if (entry.items.length > 0) {
-      const last = entry.items[entry.items.length - 1]!
-      ranges.push(
-        widgetDeco(`addItem\u0000${entry.lineFrom}`, () =>
-          Decoration.widget({ widget: new FmActionButtonWidget('add-item', entry.lineFrom), side: 1 }),
-        ).range(last.lineTo),
-      )
     }
   }
 
-  // 闭合围栏行：卡片底边；呈现态替换为「添加属性」按钮
+  // 闭合围栏行：卡片底边；呈现态清空行内容（行槽保留，不放任何控件）
   const closeLine = doc.lineAt(Math.min(model.closeFrom, doc.length))
   addCls(closeLine.number, FM_CARD_LINE_CLASSES, FM_CARD_CLASS_NAMES.edgeBottom)
-  if (!touches(model.closeFrom, model.closeTo)) {
-    ranges.push(
-      widgetDeco(`addEntry\u0000${model.closeFrom}`, () =>
-        Decoration.replace({ widget: new FmAddEntryButtonWidget() }),
-      ).range(model.closeFrom, model.closeTo),
-    )
-  }
+  ranges.push(fmHideDeco.range(model.closeFrom, model.closeTo))
 
   return { lineClasses, ranges }
 }
