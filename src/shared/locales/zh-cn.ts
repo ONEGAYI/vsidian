@@ -91,6 +91,7 @@ export const zhCn: Record<MessageKey, string> = {
   'cssSnippets.resume': '恢复片段',
   'cssSnippets.pausedStatus': '已暂停全部 CSS 片段。逐片段开关保留，恢复后按原配置重新生效。',
   'cssSnippets.entryRejected': '已拒绝：引用了片段目录外的路径。',
+  'cssSnippets.remoteCacheNote': 'HTTPS 导入与联网字体（@import url(https://…) 与 @font-face src）直接经网络加载。手动重新加载只重新拉取本地片段入口；远程样式表与字体遵循其服务器的 HTTP 缓存头，扩展不监听远程内容变化，也不承诺远端更新推送。',
 
   // ---- host.（宿主消息）----
   'host.conflictInputCopied': '未确认输入已复制到剪贴板',

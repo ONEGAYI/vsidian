@@ -108,6 +108,8 @@ button:focus-visible, input:focus-visible {
   background: var(--vscode-button-secondaryBackground, transparent); cursor: pointer; }
 .vsidian-css-snippets-actions button:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground, #e9ebef)); }
 .vsidian-css-snippets-status { min-height: 20px; color: var(--vscode-descriptionForeground, #666); }
+/* #130 远程资源缓存说明（HTTPS 导入/联网字体的刷新与缓存边界） */
+.vsidian-css-snippets-remote-note { margin: 2px 0 6px; color: var(--vscode-descriptionForeground, #666); font-size: 11px; line-height: 1.5; }
 .vsidian-css-snippets-status-error { padding: 8px 10px; border-left: 3px solid var(--vscode-inputValidation-warningBorder, #cca700);
   color: var(--vscode-inputValidation-warningForeground, inherit);
   background: var(--vscode-inputValidation-warningBackground, transparent); }

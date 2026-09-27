@@ -102,6 +102,7 @@ export const en = {
   'cssSnippets.resume': 'Resume snippets',
   'cssSnippets.pausedStatus': 'All CSS snippets are paused. Per-snippet switches are kept; resuming reloads them exactly as configured.',
   'cssSnippets.entryRejected': 'Rejected: references a path outside the snippets directory.',
+  'cssSnippets.remoteCacheNote': 'HTTPS imports and online fonts (@import url(https://…) and @font-face src) load directly from the network. Manual reload only re-fetches your local snippet entries; remote stylesheets and fonts follow the server’s HTTP cache headers, and remote servers are not monitored for changes.',
 
   // ---- host.（宿主通知、确认框、QuickPick、链接拦截反馈）----
   'host.conflictInputCopied': 'Unconfirmed input copied to clipboard',
