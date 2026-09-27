@@ -8,8 +8,10 @@ import { EditorView, keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
 import '../../src/webview/main.css'
 
+const hostMessages: unknown[] = []
 const controller = new WebviewSyncController({
   postMessage(message) {
+    hostMessages.push(message)
     ;(window as unknown as Record<string, unknown>)['__lastHostMessage'] = message
   },
   getState() {
@@ -45,6 +47,16 @@ Object.assign(window, {
       to: main.to,
       // #124 多 range 原文选区（跨段包裹产物）的完整回报
       ranges: view.state.selection.ranges.map((range) => ({ from: range.from, to: range.to })) }
+  },
+  readHostMessages() {
+    return hostMessages
+  },
+  ackAndExternalUndo(changes: { offset: number; length: number; text: string }[], version: number) {
+    const request = [...hostMessages].reverse().find((message) =>
+      (message as { kind?: string }).kind === 'edit.request') as { seq: number } | undefined
+    if (!request) throw new Error('缺少待确认的 edit.request')
+    controller.handleHostMessage({ kind: 'edit.ack', seq: request.seq, ok: true, version })
+    controller.handleHostMessage({ kind: 'doc.changed', version: version + 1, origin: 'external', changes })
   },
   // 光标偏移的视口坐标（P2-8 多光标场景：把真实鼠标点击对准字符边界，
   // Ctrl+click 添加光标的落点才可复现）

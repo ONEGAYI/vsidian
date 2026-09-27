@@ -6825,6 +6825,56 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(!bytes.toString('utf8').includes('*包裹正文段*\n'), '不得出现裸 LF 混入')
   }],
 
+  ['选区包裹撤销后再次键入仍包裹原文（#124）', async () => {
+    await openWithEditor('symbol-wrap.md')
+    await waitSessionReady('symbol-wrap.md')
+    const uri = wsUri('symbol-wrap.md').toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri('symbol-wrap.md'))
+    const source = '包裹段甲\n\n包裹段乙\n'
+    const wrapped = '*包裹段甲*\n\n包裹段乙\n'
+    assert(doc.getText() === source, '包裹撤销夹具初始文本不符')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'table.test.crossSelect', anchor: 0, head: 4 })
+    for (let cycle = 0; cycle < 2; cycle++) {
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.domType', text: '*' })
+      await poll('包裹写回权威', () => doc.getText() === wrapped ? true : undefined)
+      await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'history.request', op: 'undo' })
+      await poll('撤销恢复原文', () => doc.getText() === source ? true : undefined)
+      const view = await waitViewState('symbol-wrap.md', (v) => v.text === source)
+      assert(view.selectionOffset !== undefined && view.selectionHead !== undefined &&
+        Math.min(view.selectionOffset, view.selectionHead) === 0 &&
+        Math.max(view.selectionOffset, view.selectionHead) === 4,
+        `撤销后原文应保持选中，实际 ${view.selectionOffset}..${view.selectionHead}`)
+    }
+    await doc.save()
+  }],
+
+  ['IME 包裹撤销后再次提交仍包裹原文（#124）', async () => {
+    await openWithEditor('symbol-wrap.md')
+    await waitSessionReady('symbol-wrap.md')
+    const uri = wsUri('symbol-wrap.md').toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri('symbol-wrap.md'))
+    const source = '包裹段甲\n\n包裹段乙\n'
+    const wrapped = '（包裹段甲）\n\n包裹段乙\n'
+    assert(doc.getText() === source, 'IME 撤销夹具初始文本不符')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'table.test.crossSelect', anchor: 0, head: 4 })
+    for (let cycle = 0; cycle < 2; cycle++) {
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sync.test.composition', phase: 'start', text: '' })
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sync.test.composition', phase: 'update', text: '（' })
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sync.test.composition', phase: 'end', text: '（' })
+      await poll('IME 包裹写回权威', () => doc.getText() === wrapped ? true : undefined)
+      await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'history.request', op: 'undo' })
+      await poll('IME 包裹撤销恢复原文', () => doc.getText() === source ? true : undefined)
+      const view = await waitViewState('symbol-wrap.md', (v) => v.text === source)
+      assert(view.selectionOffset !== undefined && view.selectionHead !== undefined &&
+        Math.min(view.selectionOffset, view.selectionHead) === 0 &&
+        Math.max(view.selectionOffset, view.selectionHead) === 4,
+        `IME 撤销后原文应保持选中，实际 ${view.selectionOffset}..${view.selectionHead}`)
+    }
+    await doc.save()
+  }],
+
   ['选区经 IME 定稿提交起始符号包裹重建、一笔写回与宿主撤销（#124 修复）', async () => {
     await openWithEditor('symbol-wrap.md')
     const initial = await waitSessionReady('symbol-wrap.md')
@@ -6860,6 +6910,29 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(await doc.save(), 'IME 包裹文档应可保存')
     const bytes = Buffer.from(await vscode.workspace.fs.readFile(wsUri('symbol-wrap.md'))).toString('utf8')
     assert(bytes === source, '保存后回读与权威一致')
+  }],
+
+  ['跨段选区 IME 包裹空行保留、一笔写回与宿主撤销（#124）', async () => {
+    await openWithEditor('symbol-wrap.md')
+    const initial = await waitSessionReady('symbol-wrap.md')
+    const uri = wsUri('symbol-wrap.md').toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri('symbol-wrap.md'))
+    const source = '包裹段甲\n\n包裹段乙\n'
+    const wrapped = '（包裹段甲）\n\n（包裹段乙）\n'
+    assert(doc.getText() === source, '跨段 IME 夹具初始文本不符')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'table.test.crossSelect', anchor: 0, head: 10 })
+    await waitViewState('symbol-wrap.md', (v) => v.selectionOffset === 0 && v.selectionHead === 10)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sync.test.composition', phase: 'start', text: '' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sync.test.composition', phase: 'update', text: '（' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sync.test.composition', phase: 'end', text: '（' })
+    await poll('跨段 IME 包裹写回权威', () => doc.getText() === wrapped ? true : undefined)
+    const after = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(after.appliedEdits - initial.appliedEdits === 1,
+      `跨段 IME 应只写回一笔，实际 ${after.appliedEdits - initial.appliedEdits}`)
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'history.request', op: 'undo' })
+    await poll('跨段 IME 一次撤销恢复原文', () => doc.getText() === source ? true : undefined)
+    await doc.save()
   }],
 
   ['选区包裹设置：关闭停用、重开面板回显（#124）', async () => {

@@ -25,7 +25,7 @@
 // - seq 持久化：经 bridge.setState 保存，webview 重载（retainContextWhenHidden
 //   关闭导致的状态重建）后继续编号，宿主按 seq 幂等去重
 import { Annotation, ChangeSet, Compartment, EditorSelection, EditorState, Prec, type Extension, type Text } from '@codemirror/state'
-import { EditorView, keymap } from '@codemirror/view'
+import { EditorView, ViewPlugin, keymap } from '@codemirror/view'
 import { planFormatOperation } from './formatOperations'
 import { createQuickActionStateReader } from './quickActionState'
 import { FORMAT_OPERATIONS, type FormatOperationId } from '../shared/formatOperations'
@@ -4496,8 +4496,27 @@ export class WebviewSyncController {
     if (!view) {
       return
     }
-    view.dispatch({ changes: this.clampedSpec(changes), annotations: externalSync.of(true) })
+    this.dispatchExternalChanges(view, changes)
     this.refreshReading()
+  }
+
+  /** CM6 把非空选区映射穿过覆盖整段的宿主替换时，可能产生 from > to
+   *  的 SelectionRange（两端分别映到替换后区间的右、左边界）。视觉上仍
+   *  高亮，但下一次输入会用反向 change range。须在同一笔外部事务内
+   *  指定规范化选区，避免先渲染无效 range 后被 DOM 观察器折叠。 */
+  private dispatchExternalChanges(view: EditorView, changes: readonly SerChange[]): void {
+    const specs = this.clampedSpec(changes)
+    const mapped = view.state.selection.map(ChangeSet.of(specs, view.state.doc.length))
+    const selection = mapped.ranges.some((range) => range.from > range.to)
+      ? EditorSelection.create(mapped.ranges.map((range) =>
+        range.from > range.to ? EditorSelection.range(range.to, range.from) : range),
+      mapped.mainIndex)
+      : undefined
+    view.dispatch({
+      changes: specs,
+      selection,
+      annotations: externalSync.of(true),
+    })
   }
 
   /**
@@ -4918,7 +4937,7 @@ export class WebviewSyncController {
         this.enterSuspended()
         return
       }
-      this.view.dispatch({ changes: this.clampedSpec(mapped), annotations: externalSync.of(true) })
+      this.dispatchExternalChanges(this.view, mapped)
       lastVersion = group.version
     }
     if (this.inFlight.size === 0) {
@@ -6037,6 +6056,12 @@ export class WebviewSyncController {
   }
 
   private extensions() {
+    const captureCompositionStart = () => {
+      // CM6 的内建 observer 在冒泡阶段会先删除跨行选区；必须在捕获
+      // 阶段标记组合，首笔删除才能进入 deferredLocal 与定稿重建合并。
+      this.composing = true
+      this.beginBlankComposition()
+    }
     return [
       EditorView.lineWrapping,
       // 宿主明暗主题声明：初始按 body 主题 class 判定，切换时热重配
@@ -6181,6 +6206,17 @@ export class WebviewSyncController {
         { key: 'Shift-Mod-z', run: () => this.requestHistory('redo') },
         { key: 'Mod-y', run: () => this.requestHistory('redo') },
       ]),
+      ViewPlugin.fromClass(class {
+        private readonly onStart = captureCompositionStart
+
+        constructor(private readonly view: EditorView) {
+          view.contentDOM.addEventListener('compositionstart', this.onStart, true)
+        }
+
+        destroy() {
+          this.view.contentDOM.removeEventListener('compositionstart', this.onStart, true)
+        }
+      }),
       // IME 组合状态跟踪：compositionend 后调度缓冲 flush
       Prec.highest(EditorView.domEventHandlers({
         compositionstart: () => {

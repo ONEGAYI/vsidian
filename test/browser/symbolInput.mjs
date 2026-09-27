@@ -229,6 +229,34 @@ try {
     await page.keyboard.type('*')
     await checkRanges(page, 'hello **text**', [{ from: 8, to: 12 }], '连续包裹')
   })
+  for (const route of ['keyboard', 'ime']) {
+    await scenario(`包裹撤销后再次包裹：${route}`, { doc: 'hello text', cursor: 6 }, async (page) => {
+      const cdp = route === 'ime' ? await page.context().newCDPSession(page) : null
+      const open = route === 'ime' ? '（' : '*'
+      const close = route === 'ime' ? '）' : '*'
+      await selectRight(page, 4)
+      for (let cycle = 0; cycle < 2; cycle++) {
+        if (cdp) {
+          await cdp.send('Input.imeSetComposition', { text: open, selectionStart: 1, selectionEnd: 1 })
+          await cdp.send('Input.insertText', { text: open })
+        } else {
+          await page.keyboard.type(open)
+        }
+        await checkRanges(page, `hello ${open}text${close}`, [{ from: 7, to: 11 }], `第 ${cycle + 1} 次包裹`)
+        await page.waitForFunction((count) => window.readHostMessages().filter((message) => message.kind === 'edit.request').length >= count,
+          cycle + 1)
+        await page.keyboard.press('Control+z')
+        const requests = await page.evaluate(() => window.readHostMessages().filter((message) => message.kind === 'history.request'))
+        assert.equal(requests.length, cycle + 1, 'Ctrl+Z 发往宿主')
+        const undoChanges = cdp
+          ? [{ offset: 6, length: 6, text: 'text' }]
+          : [{ offset: 6, length: 1, text: '' }, { offset: 11, length: 1, text: '' }]
+        await page.evaluate(({ changes, version }) => window.ackAndExternalUndo(changes, version),
+          { changes: undoChanges, version: 2 + cycle * 2 })
+        await checkRanges(page, 'hello text', [{ from: 6, to: 10 }], `第 ${cycle + 1} 次撤销`)
+      }
+    })
+  }
   await scenario('反向选区（从右往左选）同样包裹', { doc: 'hello text', cursor: 10 }, async (page) => {
     for (let i = 0; i < 4; i++) {
       await page.keyboard.press('Shift+ArrowLeft')
@@ -291,6 +319,24 @@ try {
     await cdp.send('Input.imeSetComposition', { text: '（', selectionStart: 1, selectionEnd: 1 })
     await cdp.send('Input.insertText', { text: '（' })
     await checkRanges(page, 'hello （（text））', [{ from: 8, to: 12 }], 'IME 连续叠加')
+  })
+  await scenario('跨段选区经 IME 提交：各段包裹且空行保留', { doc: '甲段\n\n乙段', cursor: 0 }, async (page) => {
+    const cdp = await page.context().newCDPSession(page)
+    await selectRight(page, 6)
+    await cdp.send('Input.imeSetComposition', { text: '（', selectionStart: 1, selectionEnd: 1 })
+    await cdp.send('Input.insertText', { text: '（' })
+    await checkRanges(page, '（甲段）\n\n（乙段）', [
+      { from: 1, to: 3 },
+      { from: 7, to: 9 },
+    ], '跨段 IME 包裹')
+    const requests = await page.evaluate(() => window.readHostMessages().filter((message) => message.kind === 'edit.request'))
+    assert.equal(requests.length, 1, `跨段 IME 单笔写回: ${JSON.stringify(requests)}`)
+    await cdp.send('Input.imeSetComposition', { text: '（', selectionStart: 1, selectionEnd: 1 })
+    await cdp.send('Input.insertText', { text: '（' })
+    await checkRanges(page, '（（甲段））\n\n（（乙段））', [
+      { from: 2, to: 4 },
+      { from: 10, to: 12 },
+    ], '跨段 IME 连续叠加')
   })
   await scenario('IME 提交弯引号“：得“text”', { doc: 'hello text', cursor: 6 }, async (page) => {
     const cdp = await page.context().newCDPSession(page)

@@ -30,10 +30,12 @@
 // - 粘贴/拖放/IME 完整对（多字符插入）不命中「单字符」形态，天然不包裹。
 // - IME 定稿提交单个起始符号的选区包裹（修复）：组合开始时浏览器已把
 //   DOM 选区替换为组合串，filter 无从包裹——wrapCompositionTracker 在
-//   compositionstart 快照非空选区（原文 + 代码上下文判定），compositionend
+//   compositionstart 捕获阶段快照非空选区（先于 CM6 内建跨行删除，记录原文
+//   与代码上下文），compositionend
 //   后微任务 attempt（#123 同款时序：CM6 定稿 flush 微任务先行完成，
 //   同步 dispatch 会打断定稿）按快照重建 open+原文+close 并保持原文
-//   选中。组合中间与定稿事务本身仍不改写（input.type.compose 排除不变）。
+//   选中；多 range 时各段同步叠加。组合中间与定稿事务本身仍不改写
+//   （input.type.compose 排除不变）。
 //
 // 装配顺序：置于 symbolAutocomplete 之后（扩展数组靠后者先过滤）——
 // 包裹先于补全看到事务（两者分支互斥：包裹只认非空选区），tableEditing
@@ -41,7 +43,7 @@
 // 与 #123 提交补全 attempt 的互斥经 symbolCompositionState 快照让位
 // （#123 handler 在扩展序先执行，attempt 先入队，读到快照即让位）。
 import { EditorSelection, EditorState, Transaction } from '@codemirror/state'
-import { EditorView } from '@codemirror/view'
+import { EditorView, ViewPlugin } from '@codemirror/view'
 import {
   findSelectionWrapEntry,
   shouldSelectionWrap,
@@ -192,8 +194,8 @@ function attemptCompositionWrap(
       selection.main.head !== snapshot.mainFrom + data.length) {
     return
   }
-  // 其余 range 原文须原样保留（DOM 原生选区只表达 main，组合不触碰
-  // 它们——但坐标随 main 替换平移：main 之后的 range 按提交净长度差移动）
+  // 其余 range 原文在组合提交时须原样保留（DOM 原生选区只表达 main，
+  // 组合不触碰它们；下方重建事务再给各 range 叠加包裹符号）
   const commitDelta = data.length - snapshot.mainText.length
   const mainEnd = snapshot.mainFrom + snapshot.mainText.length
   for (const range of snapshot.restRanges) {
@@ -202,71 +204,101 @@ function attemptCompositionWrap(
       return
     }
   }
-  // 快照原文上的包裹计划（相对坐标：[0, mainText.length)）
-  const plan = planSelectionWrap(snapshot.mainText, [{ from: 0, to: snapshot.mainText.length }], entry)
-  if (!plan) {
+  // 每个原文 range 独立套用同一拆段计划。组合只替换 main，其他 range
+  // 仍在文档内；其坐标先按组合提交的净长度映射到当前文档。
+  const mainPlan = planSelectionWrap(snapshot.mainText, [{ from: 0, to: snapshot.mainText.length }], entry)
+  if (!mainPlan) {
     return // 纯空白选区：不重建（保持提交替换结果）
   }
-  // 计划应用到原文得到重建文本（plan.changes 是 from 升序纯插入组）
-  let rebuilt = ''
-  let at = 0
-  for (const change of plan.changes) {
-    rebuilt += snapshot.mainText.slice(at, change.from) + change.insert
-    at = change.from
-  }
-  rebuilt += snapshot.mainText.slice(at)
-  // 重建事务：提交符号区间 → 重建文本；选区 = 各段原文（main 平移）+
-  // 其余 range（快照坐标经「替换+重建」总平移映射：main 之后的按
-  // rebuilt 与原文的净长度差移动，之前的原样）。userEvent 用 input.type
-  // （编程式派发不经 DOM 回流，不带 compose 标记；多字符替换形态不命中
-  // 本组 filter 的单字符门控，不会递归改写）
-  const insertDelta = rebuilt.length - snapshot.mainText.length
-  const ranges = [
-    ...plan.selection.map((range) =>
-      EditorSelection.range(range.anchor + snapshot.mainFrom, range.head + snapshot.mainFrom)),
+  const segments = [
+    { from: snapshot.mainFrom, to: snapshot.mainFrom + data.length, text: snapshot.mainText, plan: mainPlan },
     ...snapshot.restRanges.map((range) => {
-      const shift = range.from >= mainEnd ? insertDelta : 0
-      return EditorSelection.range(range.from + shift, range.to + shift)
+      const shift = range.from >= mainEnd ? commitDelta : 0
+      return {
+        from: range.from + shift,
+        to: range.to + shift,
+        text: range.text,
+        plan: planSelectionWrap(range.text, [{ from: 0, to: range.text.length }], entry),
+      }
     }),
-  ].sort((a, b) => a.from - b.from || a.to - b.to)
+  ].sort((a, b) => a.from - b.from)
+  const changes: { from: number; to: number; insert: string }[] = []
+  const ranges: ReturnType<typeof EditorSelection.range>[] = []
+  let delta = 0
+  for (const segment of segments) {
+    const start = segment.from + delta
+    if (!segment.plan) {
+      ranges.push(EditorSelection.range(start, start + segment.text.length))
+      continue
+    }
+    let rebuilt = ''
+    let at = 0
+    for (const change of segment.plan.changes) {
+      rebuilt += segment.text.slice(at, change.from) + change.insert
+      at = change.from
+    }
+    rebuilt += segment.text.slice(at)
+    changes.push({ from: segment.from, to: segment.to, insert: rebuilt })
+    ranges.push(...segment.plan.selection.map((range) =>
+      EditorSelection.range(start + range.anchor, start + range.head)))
+    delta += rebuilt.length - (segment.to - segment.from)
+  }
+  // 编程式派发不经 DOM 回流；多字符替换形态不命中 filter 的单字符门控。
   view.dispatch({
-    changes: { from: snapshot.mainFrom, to: snapshot.mainFrom + data.length, insert: rebuilt },
+    changes,
     selection: EditorSelection.create(ranges, 0),
     userEvent: 'input.type',
     scrollIntoView: true,
   })
 }
 
-/** IME 组合状态跟踪（选区快照与定稿重建）：组合开始时非空选区已被浏览器
- *  替换为组合串——原文只能此刻快照；定稿后微任务 attempt 重建（时序与
+/** IME 组合状态跟踪（选区快照与定稿重建）：捕获阶段先于 CM6 内建
+ *  observer 快照原文；定稿后微任务 attempt 重建（时序与
  *  #123 提交补全同款：CM6 定稿 flush 微任务先入队，本 attempt 执行时
  *  文档已是提交文本；dispatch 经 deferredLocal 与组合净输入合并单笔
  *  出站 = 宿主撤销一次整体恢复）。快照在 attempt 的 finally 清除——
  *  生命周期严格 start..end，期间 #123 的补全 attempt 读到快照即让位。 */
+function captureCompositionSelection(view: EditorView): void {
+  setCompositionSelectionSnapshot(view, null)
+  const state = view.state
+  const selection = state.selection
+  // 快照条件：全部 range 非空（混合光标形态与直接键入路径同判不接管）、
+  // 非表格格区（格区 main 是空光标，天然不快照；此处再判属防御）
+  if (selection.ranges.some((range) => range.empty)) {
+    return
+  }
+  if (state.field(tableRegionField, false)) {
+    return
+  }
+  const main = selection.main
+  const restRanges = selection.ranges
+    .filter((range) => range !== main)
+    .map((range) => ({ from: range.from, to: range.to, text: state.sliceDoc(range.from, range.to) }))
+  setCompositionSelectionSnapshot(view, {
+    mainFrom: main.from,
+    mainText: state.sliceDoc(main.from, main.to),
+    restRanges,
+    inCode: selectionTouchesCode(state, selection.ranges),
+  })
+}
+
+// 捕获阶段先于 CM6 的冒泡阶段 compositionstart observer；后者会同步删除
+// 跨行选区，因此普通 domEventHandlers 此时已无法读取原文。
+const wrapCompositionCapture = ViewPlugin.fromClass(class {
+  private readonly onStart: () => void
+
+  constructor(private readonly view: EditorView) {
+    this.onStart = () => captureCompositionSelection(view)
+    view.contentDOM.addEventListener('compositionstart', this.onStart, true)
+  }
+
+  destroy() {
+    this.view.contentDOM.removeEventListener('compositionstart', this.onStart, true)
+    setCompositionSelectionSnapshot(this.view, null)
+  }
+})
+
 const wrapCompositionTracker = EditorView.domEventHandlers({
-  compositionstart: (_event, view) => {
-    setCompositionSelectionSnapshot(view, null)
-    const state = view.state
-    const selection = state.selection
-    // 快照条件：全部 range 非空（混合光标形态与直接键入路径同判不接管）、
-    // 非表格格区（格区 main 是空光标，天然不快照；此处再判属防御）
-    if (selection.ranges.some((range) => range.empty)) {
-      return
-    }
-    if (state.field(tableRegionField, false)) {
-      return
-    }
-    const main = selection.main
-    const restRanges = selection.ranges
-      .filter((range) => range !== main)
-      .map((range) => ({ from: range.from, to: range.to, text: state.sliceDoc(range.from, range.to) }))
-    setCompositionSelectionSnapshot(view, {
-      mainFrom: main.from,
-      mainText: state.sliceDoc(main.from, main.to),
-      restRanges,
-      inCode: selectionTouchesCode(state, selection.ranges),
-    })
-  },
   compositionend: (event, view) => {
     const snapshot = getCompositionSelectionSnapshot(view)
     if (!snapshot) {
@@ -286,11 +318,12 @@ const wrapCompositionTracker = EditorView.domEventHandlers({
 /**
  * 装配入口（syncController 经 Compartment 按设置热重配；顺序约束见
  * 文件头——置于 symbolAutocomplete 之后）。allowMultipleSelections 随组
- * 装配：多 range 原文选区的存续前提（也顺带启用 CM6 原生 Alt+click
+ * 装配：多 range 原文选区的存续前提（也顺带启用 CM6 原生 Ctrl/Cmd+click
  * 多光标，属已接受的伴生行为）。
  */
 export const symbolSelectionWrap = [
   EditorState.allowMultipleSelections.of(true),
   selectionWrapFilter,
+  wrapCompositionCapture,
   wrapCompositionTracker,
 ]

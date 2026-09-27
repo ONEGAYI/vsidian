@@ -98,6 +98,23 @@ describe('单段包裹：一次包裹一笔事务、保持原文选中', () => {
     expect(ranges(view)).toEqual([{ from: 8, to: 12 }])
   })
 
+  it('宿主撤销回流后再次键入仍包裹原选区，可重复撤销与包裹', () => {
+    const { controller, view, sent } = setup('hello text')
+    select(view, 6, 10)
+    for (let cycle = 0; cycle < 2; cycle++) {
+      typeOverSelection(view, '*')
+      expect(view.state.doc.toString()).toBe('hello *text*')
+      expect(ranges(view)).toEqual([{ from: 7, to: 11 }])
+      const request = editRequests(sent).at(-1)!
+      controller.handleHostMessage({ kind: 'edit.ack', seq: request.seq, ok: true, version: 2 + cycle * 2 })
+      controller.handleHostMessage({ kind: 'doc.changed', version: 3 + cycle * 2, origin: 'external',
+        changes: [{ offset: 6, length: 6, text: 'text' }] })
+      expect(view.state.doc.toString()).toBe('hello text')
+      const selection = view.state.selection.main
+      expect([Math.min(selection.anchor, selection.head), Math.max(selection.anchor, selection.head)]).toEqual([6, 10])
+    }
+  })
+
   it.each([
     ['(', '(', ')'], ['（', '（', '）'], ['“', '“', '”'], ['~', '~', '~'],
     ['=', '=', '='], ['$', '$', '$'], ['`', '`', '`'], ['_', '_', '_'],
@@ -382,6 +399,21 @@ describe('IME 定稿提交单个起始符号：选区包裹重建（修复）', 
     expect(ranges(view)).toEqual([{ from: 2, to: 4 }])
   })
 
+  it('宿主撤销合并替换后第二次 IME 提交仍包裹原文', async () => {
+    const { controller, view, sent } = setup('甲段乙文')
+    select(view, 0, 2)
+    await composeCommit(controller, view, '（')
+    expect(view.state.doc.toString()).toBe('（甲段）乙文')
+    const request = editRequests(sent).at(-1)!
+    controller.handleHostMessage({ kind: 'edit.ack', seq: request.seq, ok: true, version: 2 })
+    controller.handleHostMessage({ kind: 'doc.changed', version: 3, origin: 'external',
+      changes: [{ offset: 0, length: 4, text: '甲段' }] })
+    expect(view.state.doc.toString()).toBe('甲段乙文')
+    expect(ranges(view)).toEqual([{ from: 0, to: 2 }])
+    await composeCommit(controller, view, '（')
+    expect(view.state.doc.toString()).toBe('（甲段）乙文')
+  })
+
   it('IME 提交弯引号“：得“甲段”', async () => {
     const { controller, view } = setup('甲段乙文')
     select(view, 0, 2)
@@ -462,7 +494,7 @@ describe('IME 定稿提交单个起始符号：选区包裹重建（修复）', 
     expect(view.state.selection.main.head).toBe(1)
   })
 
-  it('跨段包裹产物（多 range）经 IME 提交：重建 main、其余 range 平移保持选中', async () => {
+  it('跨段包裹产物（多 range）经 IME 提交：每段继续叠加并保持原文选中', async () => {
     const { controller, view } = setup('甲段\n\n乙段')
     select(view, 0, 6)
     typeOverSelection(view, '*')
@@ -485,21 +517,53 @@ describe('IME 定稿提交单个起始符号：选区包裹重建（修复）', 
     })
     controller.handleHostMessage({ kind: 'sync.test.composition', phase: 'end', text: '「' })
     await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(view.state.doc.toString()).toBe('*「甲段」*\n\n*乙段*')
+    expect(view.state.doc.toString()).toBe('*「甲段」*\n\n*「乙段」*')
     expect(ranges(view)).toEqual([
       { from: 2, to: 4 },
-      { from: 9, to: 11 },
+      { from: 10, to: 12 },
     ])
   })
 
-  it('跨行（跨段）选区 IME 不重建：CM6 组合前删除跨行选区的既有行为保持', async () => {
+  it('跨段选区 IME 重建各段包裹，空行保留并单笔写回', async () => {
+    const { controller, view, sent } = setup('甲段\n\n乙段')
+    select(view, 0, 6)
+    await composeCommit(controller, view, '「')
+    expect(view.state.doc.toString()).toBe('「甲段」\n\n「乙段」')
+    expect(ranges(view)).toEqual([{ from: 1, to: 3 }, { from: 7, to: 9 }])
+    expect(editRequests(sent)).toHaveLength(1)
+  })
+
+  it.each([
+    ['（）', '（）'], ['你好', '你好'], ['）', '）'],
+  ])('跨段 IME 提交 %s 不按单个起始符号包裹', async (data, expected) => {
     const { controller, view } = setup('甲段\n\n乙段')
     select(view, 0, 6)
-    // CM6 对跨行非空选区的组合开始即 dispatch 删除（view 源码
-    // observers.compositionstart 的规避分支），快照无从建立——重建
-    // 机制上不可达，行为回到「选区被删 + 提交 + #123 补全评估」
-    await composeCommit(controller, view, '「')
-    expect(view.state.doc.toString()).toBe('「」')
+    await composeCommit(controller, view, data)
+    expect(view.state.doc.toString()).toBe(expected)
+  })
+
+  it('跨段 IME 在代码块内遵守符号上下文门控', async () => {
+    const source = '```js\n甲段\n\n乙段\n```'
+    {
+      const { controller, view } = setup(source)
+      select(view, 6, 12)
+      await composeCommit(controller, view, '*')
+      expect(view.state.doc.toString()).toBe('```js\n*\n```')
+    }
+    {
+      const { controller, view } = setup(source)
+      select(view, 6, 12)
+      await composeCommit(controller, view, '（')
+      expect(view.state.doc.toString()).toBe('```js\n（甲段）\n\n（乙段）\n```')
+    }
+  })
+
+  it('跨段 IME 在包裹设置关闭时保持普通替换语义', async () => {
+    const { controller, view } = setup('甲段\n\n乙段')
+    controller.handleHostMessage({ kind: 'settings.changed', values: { 'editor.symbolSelectionWrap': false } })
+    select(view, 0, 6)
+    await composeCommit(controller, view, '（')
+    expect(view.state.doc.toString()).toBe('（）')
   })
 
   it('组合中间事务不被重建路径改写（无 end 无重建）', () => {
