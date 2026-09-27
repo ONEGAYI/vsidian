@@ -180,6 +180,7 @@ vsidian/
 │       ├── liveMath.ts             # 行内与块级公式 live 装饰（#59）
 │       ├── liveMermaid.ts          # Mermaid live 装饰（#60）
 │       ├── localeBoot.ts           # webview 语言装配入口
+│       ├── localeDom.ts            # 常驻控件文案换包单点重刷注册表
 │       ├── main.css                # webview 全局布局样式
 │       ├── main.ts                 # webview 启动入口
 │       ├── markdownDoc.ts          # Markdown 文档工具与树查询

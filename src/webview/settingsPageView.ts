@@ -5,6 +5,7 @@
 // 键化（def.titleKey/descriptionKey → t() 取词），搜索按取词后的显示
 // 文本匹配。
 import { t, onLocaleChanged } from '../shared/i18n'
+import { bindLocale } from './localeDom'
 import { isHostToWebview } from '../shared/protocol'
 import type { SettingDefinition, SettingsPayload, SettingsPayloadValue } from '../shared/settings'
 
@@ -68,23 +69,27 @@ export class SettingsPageView {
   mount(parent: HTMLElement): void {
     const root = element('div', SETTINGS_PAGE_CLASS_NAMES.root)
     const sidebar = element('aside', 'vsidian-settings-sidebar')
-    this.titleEl = element('h1', SETTINGS_PAGE_CLASS_NAMES.title, t('settings.pageTitle'))
+    // #101：常驻骨架文案经 localeDom 登记（创建即写词 + 换包单点重刷）——
+    // 此前 search/nav 四属性不随 render() 重建，是换包漏刷点
+    this.titleEl = element('h1', SETTINGS_PAGE_CLASS_NAMES.title)
+    bindLocale(this.titleEl, 'text', 'settings.pageTitle')
     sidebar.append(this.titleEl)
     if (this.defs.length || this.sections.length) {
       const searchWrap = element('div', 'vsidian-settings-search-wrap')
       this.search = element('input', 'vsidian-settings-search')
       this.search.type = 'search'
-      this.search.placeholder = t('settings.searchPlaceholder')
-      this.search.setAttribute('aria-label', t('settings.searchAriaLabel'))
+      bindLocale(this.search, 'placeholder', 'settings.searchPlaceholder')
+      bindLocale(this.search, 'aria-label', 'settings.searchAriaLabel')
       this.search.addEventListener('input', () => this.render())
       this.search.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') { this.search!.value = ''; this.render() }
       })
       searchWrap.append(icon('search'), this.search)
-      sidebar.append(searchWrap, element('p', 'vsidian-settings-nav-label', t('settings.navLabel')))
+      const navLabel = element('p', 'vsidian-settings-nav-label')
+      bindLocale(navLabel, 'text', 'settings.navLabel')
       this.nav = element('nav', 'vsidian-settings-nav')
-      this.nav.setAttribute('aria-label', t('settings.navAriaLabel'))
-      sidebar.append(this.nav)
+      bindLocale(this.nav, 'aria-label', 'settings.navAriaLabel')
+      sidebar.append(searchWrap, navLabel, this.nav)
     }
     const main = element('main', 'vsidian-settings-main')
     this.status = element('p', 'vsidian-settings-status')
@@ -93,17 +98,15 @@ export class SettingsPageView {
     main.append(this.status, this.listEl)
     root.append(sidebar, main)
     parent.append(root)
-    // 语言切换重渲染（#93）：常驻文本节点（框架标题与列表内容）随换包更新；
-    // 按需创建的控件自然取新词。搜索输入框为持久元素，重渲染不重建不夺焦。
+    // 语言切换重渲染（#93/#101）：常驻骨架（标题/搜索框/侧栏标签）由
+    // localeDom 注册表单点重刷；列表与分页是 render() 的重建产物，随换包
+    // 整体重建取新词。搜索输入框为持久元素，重渲染不重建不夺焦
     this.offLocale = onLocaleChanged(() => this.applyLocale())
     this.render()
   }
 
-  /** 语言换包后的常驻文本重渲染：框架标题就地更新 + 列表整体重建 */
+  /** 语言换包后的重渲染：列表与分页整体重建（骨架文案经 localeDom 重刷） */
   private applyLocale(): void {
-    if (this.titleEl) {
-      this.titleEl.textContent = t('settings.pageTitle')
-    }
     this.render()
   }
 
