@@ -40,6 +40,12 @@ export interface SymbolPairEntry {
   /** 代码上下文内是否允许自动补全：括号引号允许（代码里也要配对），
    *  Markdown 强调抑制（不改写代码内容） */
   readonly allowInCode: boolean
+  /** 选区包裹能力（#124）：有非空选区时键入 open 在选区两侧包裹
+   *  open/close 并保持原文选中。与补全能力是不同集合的显式登记——
+   *  包裹判定不做邻接抑制（选区已圈定范围，词中/转义防误触是无选区
+   *  场景的规则），代码上下文沿用 allowInCode（强调符号不进代码）；
+   *  英文尖括号两项能力都不登记 */
+  readonly selectionWrap?: boolean
   /** 左邻字符抑制（返回 true 不补全）：转义反斜杠、英文撇号的词内形态 */
   readonly suppressBefore?: (charBefore: string) => boolean
   /** 右邻字符抑制（返回 true 不补全）：Markdown 触发符的词中间防误触 */
@@ -68,6 +74,7 @@ function markdownTrigger(open: string): SymbolPairEntry {
     close: open,
     kind: 'markdown',
     allowInCode: false,
+    selectionWrap: true,
     suppressBefore: escapedSuppress,
     suppressAfter: isWordChar,
     mirrorAtRunStartOnly: true,
@@ -80,28 +87,31 @@ function markdownTrigger(open: string): SymbolPairEntry {
  * - 引号 4 对：弯引号 “” ‘’ 与英文单双引号（英文引号自反：open === close）
  * - Markdown 触发符 6 项：* _ ~ ` = $（自反，串首补全；块级结构如
  *   三反引号围栏与 $$ 块不自动创建——非目标，保留原输入）
+ * - #124 起逐项登记 selectionWrap（有选区键入的包裹能力）：括号引号
+ *   与 Markdown 触发符当前全部登记（方括号重复输入形成 [[wikilink]]
+ *   类结构，星号重复包裹形成粗体），与补全清单是两个显式集合
  * - 英文尖括号 <> 默认不登记（不自动补全）；后续新增符号在此追加并
  *   以 test/unit/symbols.test.ts 参数化用例钉住
  */
 export const SYMBOL_AUTOCLOSE_REGISTRY: readonly SymbolPairEntry[] = [
-  { open: '(', close: ')', kind: 'bracket', allowInCode: true, suppressBefore: escapedSuppress },
-  { open: '[', close: ']', kind: 'bracket', allowInCode: true, suppressBefore: escapedSuppress },
-  { open: '{', close: '}', kind: 'bracket', allowInCode: true, suppressBefore: escapedSuppress },
-  { open: '（', close: '）', kind: 'bracket', allowInCode: true, suppressBefore: escapedSuppress },
-  { open: '【', close: '】', kind: 'bracket', allowInCode: true, suppressBefore: escapedSuppress },
-  { open: '《', close: '》', kind: 'bracket', allowInCode: true, suppressBefore: escapedSuppress },
-  { open: '「', close: '」', kind: 'bracket', allowInCode: true, suppressBefore: escapedSuppress },
-  { open: '『', close: '』', kind: 'bracket', allowInCode: true, suppressBefore: escapedSuppress },
-  { open: '“', close: '”', kind: 'quote', allowInCode: true, suppressBefore: escapedSuppress },
-  { open: '‘', close: '’', kind: 'quote', allowInCode: true, suppressBefore: escapedSuppress },
+  { open: '(', close: ')', kind: 'bracket', allowInCode: true, selectionWrap: true, suppressBefore: escapedSuppress },
+  { open: '[', close: ']', kind: 'bracket', allowInCode: true, selectionWrap: true, suppressBefore: escapedSuppress },
+  { open: '{', close: '}', kind: 'bracket', allowInCode: true, selectionWrap: true, suppressBefore: escapedSuppress },
+  { open: '（', close: '）', kind: 'bracket', allowInCode: true, selectionWrap: true, suppressBefore: escapedSuppress },
+  { open: '【', close: '】', kind: 'bracket', allowInCode: true, selectionWrap: true, suppressBefore: escapedSuppress },
+  { open: '《', close: '》', kind: 'bracket', allowInCode: true, selectionWrap: true, suppressBefore: escapedSuppress },
+  { open: '「', close: '」', kind: 'bracket', allowInCode: true, selectionWrap: true, suppressBefore: escapedSuppress },
+  { open: '『', close: '』', kind: 'bracket', allowInCode: true, selectionWrap: true, suppressBefore: escapedSuppress },
+  { open: '“', close: '”', kind: 'quote', allowInCode: true, selectionWrap: true, suppressBefore: escapedSuppress },
+  { open: '‘', close: '’', kind: 'quote', allowInCode: true, selectionWrap: true, suppressBefore: escapedSuppress },
   {
-    open: '"', close: '"', kind: 'quote', allowInCode: true,
+    open: '"', close: '"', kind: 'quote', allowInCode: true, selectionWrap: true,
     suppressBefore: escapedSuppress,
   },
   {
     // 英文单引号：左邻字母/数字视为撇号（it's / dogs' / 中文词内），
-    // 按普通文字处理；行首与空白后照常配对
-    open: "'", close: "'", kind: 'quote', allowInCode: true,
+    // 按普通文字处理；行首与空白后照常配对（选区包裹不受此抑制）
+    open: "'", close: "'", kind: 'quote', allowInCode: true, selectionWrap: true,
     suppressBefore: (charBefore) => escapedSuppress(charBefore) || isWordChar(charBefore),
   },
   markdownTrigger('*'),
@@ -148,4 +158,29 @@ export function shouldAutoclose(entry: SymbolPairEntry, ctx: AutocloseContext): 
     return false
   }
   return true
+}
+
+/** 选区包裹判定上下文（#124；比补全上下文简单——邻接抑制不适用） */
+export interface SelectionWrapContext {
+  /** 包裹范围（或其边界）是否处于代码上下文（行内代码/代码块等） */
+  readonly inCode: boolean
+}
+
+/**
+ * 键入字符是否命中选区包裹（#124 纯判定）：必须等于某注册项的 open
+ * 且该项显式登记了 selectionWrap。键入 close 字符不包裹（`（text` 后
+ * 键 `）` 是普通输入）；英文尖括号不命中。
+ */
+export function findSelectionWrapEntry(ch: string): SymbolPairEntry | null {
+  const entry = ENTRY_BY_CHAR.get(ch) ?? null
+  return entry && entry.selectionWrap && ch === entry.open ? entry : null
+}
+
+/**
+ * 命中的包裹项在给定上下文是否执行包裹（#124 纯判定）：代码上下文
+ * 沿用 allowInCode（Markdown 强调不进代码，括号引号照常）。邻接字符
+ * 抑制（词中/转义）不适用——选区已圈定范围，用户意图明确。
+ */
+export function shouldSelectionWrap(entry: SymbolPairEntry, ctx: SelectionWrapContext): boolean {
+  return !(ctx.inCode && !entry.allowInCode)
 }
