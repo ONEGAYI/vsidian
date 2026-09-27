@@ -312,6 +312,15 @@ describe('extractOutline：行内标记结构（#65 白名单透传）', () => {
     ])
   })
 
+  it('#149 汉字紧贴嵌套高亮：跨格==**建立**==选区后 产 highlight+strong 双 span', () => {
+    const items = extractOutline(text('# 跨格==**建立**==选区后\n'))
+    expect(items[0]!.plainText).toBe('跨格建立选区后')
+    expect(items[0]!.spans).toEqual([
+      { kind: 'highlight', start: 2, end: 4 },
+      { kind: 'strong', start: 2, end: 4 },
+    ])
+  })
+
   it('残缺 == 形态不产 span（字面文本，白名单外不受影响）', () => {
     const items = extractOutline(text('# 残缺 == 高亮\n'))
     expect(items[0]!.plainText).toBe('残缺 == 高亮')
