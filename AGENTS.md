@@ -173,6 +173,7 @@ vsidian/
 │   │   │   ├── index.ts  # 语言注册表与解析（仅宿主可引）
 │   │   │   ├── island.ts # 语言数据岛构建与解析
 │   │   │   └── zh-cn.ts  # 简体中文语言包（编译期 parity）
+│   │   ├── looseLink.ts         # 宽松内联链接/图片形态学单一事实源
 │   │   ├── math.ts              # 公式形态学纯函数（#59）
 │   │   ├── mermaid.ts           # Mermaid 围栏形态学（#60）
 │   │   ├── newline.ts           # CRLF/LF 换行协调器
