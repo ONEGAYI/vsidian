@@ -71,6 +71,8 @@ import {
   type SettingsPayload,
 } from '../shared/settings'
 import { onLocaleChanged, t } from '../shared/i18n'
+import { bindLocale, bindLocaleAttrs, bindLocaleFnAttrs, refreshElementLocale } from './localeDom'
+import { refreshOnDemandControlLocale } from './localeOnDemand'
 import {
   FIND_CLASS_NAMES,
   computeFindMatches,
@@ -102,7 +104,6 @@ import { runReadingPerfProbe } from './readingProbe'
 import { createReadingContainer, prepareReadingImages, READING_CLASS_NAMES } from './readingView'
 import { READING_MARKDOWN_CLASS_NAMES } from './readingMarkdown'
 import {
-  applyOutlineDomLocale,
   applyOutlineSliderState,
   buildOutlineDom,
   buildOutlineSlider,
@@ -943,7 +944,9 @@ export class WebviewSyncController {
     // （浅色墨水叠暗底不可读）
     setMermaidDarkTheme(this.hostDarkApplied)
     this.applyModeDom(this.viewMode)
-    // #94 语言切换：常驻文本就地换词（首帧装配不触发，installLocale 才通知）
+    // #94/#101 语言切换：常驻控件文案由 localeDom 注册表单点重刷（各
+    // build* 创建点登记）；此处订阅只剩复合工具提示重算与按需控件兜底
+    // （首帧装配不触发，installLocale 才通知）
     this.unsubscribeLocale = onLocaleChanged(() => this.applyEditorLocale())
     this.refreshQuickActions()
     this.bridge.postMessage({ kind: 'ready' })
@@ -2401,14 +2404,11 @@ export class WebviewSyncController {
     bar.className = 'vsidian-quick-actions'
     bar.id = 'vsidian-quick-actions'
     bar.setAttribute('role', 'toolbar')
-    bar.setAttribute('aria-label', t('format.toolbarAria'))
-    const button = (label: string, icon: string, className: string,
-      textIcon = false): HTMLButtonElement => {
+    bindLocale(bar, 'aria-label', 'format.toolbarAria')
+    const button = (icon: string, className: string, textIcon = false): HTMLButtonElement => {
       const el = document.createElement('button')
       el.type = 'button'
       el.className = className
-      el.setAttribute('aria-label', label)
-      el.title = label
       const glyph = document.createElement('span')
       glyph.className = textIcon ? 'vsidian-quick-text-icon' : 'vsidian-quick-icon'
       glyph.setAttribute('aria-hidden', 'true')
@@ -2423,15 +2423,17 @@ export class WebviewSyncController {
       const el = document.createElement('div')
       el.className = 'vsidian-quick-action-group'
       el.setAttribute('role', 'group')
-      el.setAttribute('aria-label', t(labelKey))
-      // 语言切换就地换词的锚点（applyEditorLocale 按 data-group 回查）
-      el.dataset['group'] = labelKey
+      bindLocale(el, 'aria-label', labelKey)
       bar.appendChild(el)
       return el
     }
     const addOperation = (target: HTMLElement, op: FormatOperationId): void => {
       const item = FORMAT_OPERATIONS.find((entry) => entry.id === op)!
-      const el = button(t(item.titleKey), op, 'vsidian-quick-action')
+      const el = button(op, 'vsidian-quick-action')
+      // #101：可访问名称与基名 title 经注册表登记（动态键 item.titleKey 走
+      // 键锚点）——操作条关闭时 refreshQuickActions 早退，此前 title 会滞留
+      // 旧语言；开启后 refreshQuickActions 以复合 title（基名+键位）覆写
+      bindLocaleAttrs(el, item.titleKey)
       el.dataset['op'] = op
       el.addEventListener('click', () => this.runFormatOperation(op))
       target.appendChild(el)
@@ -2441,7 +2443,8 @@ export class WebviewSyncController {
       addOperation(textGroup, op)
     }
     const paragraphGroup = group('format.groupParagraph')
-    const heading = button(t('format.heading'), 'heading', 'vsidian-quick-heading')
+    const heading = button('heading', 'vsidian-quick-heading')
+    bindLocaleAttrs(heading, 'format.heading')
     heading.setAttribute('aria-haspopup', 'menu')
     heading.setAttribute('aria-expanded', 'false')
     heading.setAttribute('aria-controls', 'vsidian-quick-heading-menu')
@@ -2453,7 +2456,8 @@ export class WebviewSyncController {
     }
     const insertGroup = group('format.groupInsert')
     addOperation(insertGroup, 'link')
-    const createTable = button(t('format.insertTable'), 'table', 'vsidian-quick-table')
+    const createTable = button('table', 'vsidian-quick-table')
+    bindLocaleAttrs(createTable, 'format.insertTable')
     createTable.addEventListener('click', () => {
       const view = this.view
       if (view && this.viewMode === 'live' && !this.suspended &&
@@ -2470,14 +2474,23 @@ export class WebviewSyncController {
     menu.className = 'vsidian-quick-heading-menu'
     menu.id = 'vsidian-quick-heading-menu'
     menu.setAttribute('role', 'menu')
-    menu.setAttribute('aria-label', t('format.headingMenu'))
+    bindLocale(menu, 'aria-label', 'format.headingMenu')
     menu.hidden = true
     for (const op of [
       'heading1', 'heading2', 'heading3', 'heading4', 'heading5', 'heading6', 'headingNone',
     ] as const) {
       const item = FORMAT_OPERATIONS.find((entry) => entry.id === op)!
-      const el = button(t(item.titleKey), op === 'headingNone' ? t('format.bodyText') : op.replace('heading', 'H'),
+      const el = button(op === 'headingNone' ? t('format.bodyText') : op.replace('heading', 'H'),
         'vsidian-quick-heading-item', true)
+      bindLocaleAttrs(el, item.titleKey)
+      if (op === 'headingNone') {
+        // 「正文」档的 glyph 是文案不是图标：换包随注册表换词（其余档 H1–H6
+        // 是语言无关的字面）
+        const glyph = el.querySelector<HTMLElement>('.vsidian-quick-text-icon')
+        if (glyph) {
+          bindLocale(glyph, 'text', 'format.bodyText')
+        }
+      }
       el.dataset['headingOp'] = op
       el.setAttribute('role', 'menuitemradio')
       el.setAttribute('aria-checked', 'false')
@@ -2626,89 +2639,26 @@ export class WebviewSyncController {
     actions.forEach((action) => { action.tabIndex = action === tabStop ? 0 : -1 })
   }
 
-  /** 语言切换（locale.changed → installLocale 通知）就地刷新常驻文本
-   *  （#94）：顶栏按钮、操作条框架与按钮可访问名称、查找控件、冲突横幅、
-   *  大纲骨架直接换词，工具提示经 refreshQuickActions 重算；按需创建的
-   *  控件（右键菜单、表格控件按钮、装饰 widget）随下次渲染自然取新词 */
+  /** 语言切换（locale.changed → installLocale 通知）后的编辑器面板善后
+   *  （#94 起就地刷新常驻文本；#101 起常驻控件文案创建与换包重刷统一经
+   *  localeDom 注册表单点完成——顶栏/操作条框架与按钮、查找面板、冲突
+   *  横幅、侧栏骨架与大纲骨架不再在此逐项回查，data-group 锚点随之退役，
+   *  data-op/data-heading-op 仅保留给 refreshQuickActions）。此处剩三类：
+   *  - 工具提示经 refreshQuickActions 重算：复合 title（基名+键位）随选区/
+   *    输入驱动，与换包重刷互补（操作条关闭时早退，基名 title 已由注册表
+   *    就地换词）；
+   *  - 表格控件层 aria-label 的就地兜底：tableControls 的控件按钮每轮
+   *    render 全量重建取词（探索笔记 101 §4.5），静止窗口只剩层 aria；
+   *  - 按需控件（#101 第三部分）：代码卡片/图形按钮/公式降级/图片错误/
+   *    mermaid 错误占位/表格空格占位/图表弹窗（overlay 与工具条按钮）的
+   *    固化文案经 localeOnDemand 的 document 级扫描就地重刷（含阅读视图
+   *    已挂载块与 body 直下的弹窗；右键菜单等瞬态浮层随下次打开自然取
+   *    新词，不扫）。 */
   private applyEditorLocale(): void {
-    const settingsBtn = this.toolbar?.querySelector<HTMLButtonElement>('.vsidian-settings-toggle')
-    settingsBtn?.setAttribute('aria-label', t('sidebar.settings'))
-    settingsBtn?.setAttribute('title', t('sidebar.settings'))
-    this.quickToggleBtn?.setAttribute('aria-label', t('sidebar.quickActions'))
-    this.quickToggleBtn?.setAttribute('title', t('sidebar.quickActions'))
-    this.applySidebarDom()
-    const bar = this.quickActionsEl
-    if (bar) {
-      bar.setAttribute('aria-label', t('format.toolbarAria'))
-      for (const group of bar.querySelectorAll<HTMLElement>('.vsidian-quick-action-group')) {
-        const key = group.dataset['group']
-        if (key === 'format.groupText' || key === 'format.groupParagraph' || key === 'format.groupInsert') {
-          group.setAttribute('aria-label', t(key))
-        }
-      }
-      for (const el of bar.querySelectorAll<HTMLButtonElement>('[data-op], [data-heading-op]')) {
-        const op = (el.dataset['op'] ?? el.dataset['headingOp']) as FormatOperationId
-        const item = FORMAT_OPERATIONS.find((entry) => entry.id === op)
-        if (!item) {
-          continue
-        }
-        el.setAttribute('aria-label', t(item.titleKey))
-        if (op === 'headingNone') {
-          const glyph = el.querySelector<HTMLElement>('.vsidian-quick-text-icon')
-          if (glyph) {
-            glyph.textContent = t('format.bodyText')
-          }
-        }
-      }
-      this.quickHeadingBtn?.setAttribute('aria-label', t('format.heading'))
-      this.quickHeadingBtn?.setAttribute('title', t('format.heading'))
-      this.quickHeadingMenu?.setAttribute('aria-label', t('format.headingMenu'))
-      const tableBtn = bar.querySelector<HTMLButtonElement>('.vsidian-quick-table')
-      tableBtn?.setAttribute('aria-label', t('format.insertTable'))
-      if (tableBtn) {
-        tableBtn.title = t('format.insertTable')
-      }
-    }
     this.refreshQuickActions()
-    const banner = this.banner
-    if (banner) {
-      const text = banner.querySelector<HTMLElement>('.vsidian-suspend-banner-text')
-      if (text) {
-        text.textContent = t('conflict.bannerText')
-      }
-      const copy = banner.querySelector<HTMLButtonElement>('button[data-action="copy"]')
-      if (copy) {
-        copy.textContent = t('conflict.copyUnconfirmed')
-      }
-      const resume = banner.querySelector<HTMLButtonElement>('button[data-action="resume"]')
-      if (resume) {
-        resume.textContent = t('conflict.resume')
-      }
-    }
-    const find = this.findPanel
-    if (find) {
-      this.findInputEl?.setAttribute('placeholder', t('find.placeholder'))
-      this.findInputEl?.setAttribute('aria-label', t('find.label'))
-      const setFindBtn = (cls: string, key: 'find.caseToggle' | 'find.prev' | 'find.next' | 'find.close'): void => {
-        const btn = find.querySelector<HTMLButtonElement>(`.${cls}`)
-        if (btn) {
-          btn.textContent = t(key)
-          btn.setAttribute('aria-label', t(key))
-        }
-      }
-      setFindBtn(FIND_CLASS_NAMES.caseToggle, 'find.caseToggle')
-      setFindBtn(FIND_CLASS_NAMES.prev, 'find.prev')
-      setFindBtn(FIND_CLASS_NAMES.next, 'find.next')
-      setFindBtn(FIND_CLASS_NAMES.close, 'find.close')
-    }
-    applyOutlineDomLocale({
-      toggle: this.outlineToggleBtn,
-      panel: this.outlinePanelEl,
-      slider: this.outlineSlider,
-      toolbar: this.outlineToolbar,
-    })
     this.liveWrapper?.querySelector('.vsidian-table-controls')
       ?.setAttribute('aria-label', t('table.controls'))
+    refreshOnDemandControlLocale(document)
   }
 
   /** 主编辑区顶栏（#53 图标化）：左端齿轮设置按钮（打开宿主级 Vsidian
@@ -2721,15 +2671,13 @@ export class WebviewSyncController {
     const settingsBtn = document.createElement('button')
     settingsBtn.type = 'button'
     settingsBtn.className = 'vsidian-settings-toggle'
-    settingsBtn.setAttribute('aria-label', t('sidebar.settings'))
-    settingsBtn.setAttribute('title', t('sidebar.settings'))
+    bindLocaleAttrs(settingsBtn, 'sidebar.settings')
     settingsBtn.appendChild(createSettingsGearIcon())
     settingsBtn.addEventListener('click', () => this.bridge.postMessage({ kind: 'settings.open' }))
     const quickBtn = document.createElement('button')
     quickBtn.type = 'button'
     quickBtn.className = 'vsidian-quick-toggle'
-    quickBtn.setAttribute('aria-label', t('sidebar.quickActions'))
-    quickBtn.setAttribute('title', t('sidebar.quickActions'))
+    bindLocaleAttrs(quickBtn, 'sidebar.quickActions')
     quickBtn.setAttribute('aria-controls', 'vsidian-quick-actions')
     quickBtn.setAttribute('aria-expanded', 'false')
     quickBtn.textContent = '✎'
@@ -2746,6 +2694,10 @@ export class WebviewSyncController {
     sidebarBtn.type = 'button'
     sidebarBtn.className = 'vsidian-sidebar-toggle'
     sidebarBtn.setAttribute('aria-controls', 'vsidian-sidebar')
+    // 可访问名称随开合态与语言双变化：回调登记（换包重算），开合态翻转由
+    // applySidebarDom 调 refreshElementLocale 重算——同一登记点两个触发源
+    const sidebarLabel = (): string => t(this.sidebarOpen ? 'sidebar.collapse' : 'sidebar.expand')
+    bindLocaleFnAttrs(sidebarBtn, sidebarLabel)
     sidebarBtn.appendChild(createSidebarToggleIcon())
     sidebarBtn.addEventListener('click', () => this.toggleSidebar())
     this.sidebarToggleBtn = sidebarBtn
@@ -2968,7 +2920,8 @@ export class WebviewSyncController {
     resizer.className = 'vsidian-sidebar-resizer'
     resizer.setAttribute('role', 'separator')
     resizer.setAttribute('aria-orientation', 'vertical')
-    resizer.setAttribute('aria-label', t('sidebar.resize'))
+    // #101 漏刷修复：此前创建后无任何换包刷新路径覆盖（探索笔记 §1.4）
+    bindLocale(resizer, 'aria-label', 'sidebar.resize')
     resizer.setAttribute('aria-valuemin', String(SIDEBAR_WIDTH_MIN))
     resizer.setAttribute('aria-valuemax', String(SIDEBAR_WIDTH_MAX))
     resizer.setAttribute('aria-valuenow', String(this.sidebarWidth))
@@ -3090,17 +3043,16 @@ export class WebviewSyncController {
   }
 
   /** 侧栏状态落 DOM：body 容器的 open 类（CSS 显隐与图标粗细的唯一开关）
-   *  与切换按钮的可访问名称同步（名称反映当前可执行的动作） */
+   *  与切换按钮的可访问状态同步（名称反映当前可执行的动作，经注册表回调
+   *  重算——见 buildToolbar 的 sidebarLabel 登记） */
   private applySidebarDom(): void {
     if (this.bodyEl) {
       this.bodyEl.classList.toggle('vsidian-sidebar-open', this.sidebarOpen)
     }
     const btn = this.sidebarToggleBtn
     if (btn) {
-      const label = t(this.sidebarOpen ? 'sidebar.collapse' : 'sidebar.expand')
-      btn.setAttribute('aria-label', label)
-      btn.setAttribute('title', label)
       btn.setAttribute('aria-expanded', String(this.sidebarOpen))
+      refreshElementLocale(btn)
     }
     this.persistState()
   }
@@ -3430,7 +3382,7 @@ export class WebviewSyncController {
     if (nomatch && !placeholder) {
       placeholder = document.createElement('div')
       placeholder.className = OUTLINE_CLASS_NAMES.nomatch
-      placeholder.textContent = t('outline.noMatch')
+      bindLocale(placeholder, 'text', 'outline.noMatch')
       panel.appendChild(placeholder)
     } else if (!nomatch && placeholder) {
       placeholder.remove()
@@ -4265,8 +4217,8 @@ export class WebviewSyncController {
     const input = document.createElement('input')
     input.type = 'text'
     input.className = FIND_CLASS_NAMES.input
-    input.setAttribute('placeholder', t('find.placeholder'))
-    input.setAttribute('aria-label', t('find.label'))
+    bindLocale(input, 'placeholder', 'find.placeholder')
+    bindLocale(input, 'aria-label', 'find.label')
     input.addEventListener('input', () => {
       this.findQuery = input.value
       this.findDoc = null // 查询变化：以当前位置为参考重算
@@ -4283,18 +4235,20 @@ export class WebviewSyncController {
     const count = document.createElement('span')
     count.className = FIND_CLASS_NAMES.count
     count.textContent = '0/0'
-    const mkBtn = (cls: string, label: string, onClick: () => void): HTMLButtonElement => {
+    // 按钮文案与可访问名称同键：创建与换包重写共用一次登记
+    const mkBtn = (cls: string, key: 'find.caseToggle' | 'find.prev' | 'find.next' | 'find.close',
+      onClick: () => void): HTMLButtonElement => {
       const b = document.createElement('button')
       b.type = 'button'
       b.className = cls
-      b.textContent = label
-      b.setAttribute('aria-label', label)
+      bindLocale(b, 'text', key)
+      bindLocale(b, 'aria-label', key)
       b.addEventListener('click', onClick)
       return b
     }
     // 大小写切换按钮：语义为「忽略大小写」开关——active 类与 aria-pressed
     // 同步表示「忽略生效」，默认区分大小写（未激活、未按下）
-    const caseBtn = mkBtn(FIND_CLASS_NAMES.caseToggle, t('find.caseToggle'), () => {
+    const caseBtn = mkBtn(FIND_CLASS_NAMES.caseToggle, 'find.caseToggle', () => {
       this.findCaseSensitive = !this.findCaseSensitive
       caseBtn.classList.toggle(FIND_CLASS_NAMES.caseActive, !this.findCaseSensitive)
       caseBtn.setAttribute('aria-pressed', String(!this.findCaseSensitive))
@@ -4309,9 +4263,9 @@ export class WebviewSyncController {
     panel.appendChild(input)
     panel.appendChild(count)
     panel.appendChild(caseBtn)
-    panel.appendChild(mkBtn(FIND_CLASS_NAMES.prev, t('find.prev'), () => this.findStep('prev')))
-    panel.appendChild(mkBtn(FIND_CLASS_NAMES.next, t('find.next'), () => this.findStep('next')))
-    panel.appendChild(mkBtn(FIND_CLASS_NAMES.close, t('find.close'), () => this.closeFind()))
+    panel.appendChild(mkBtn(FIND_CLASS_NAMES.prev, 'find.prev', () => this.findStep('prev')))
+    panel.appendChild(mkBtn(FIND_CLASS_NAMES.next, 'find.next', () => this.findStep('next')))
+    panel.appendChild(mkBtn(FIND_CLASS_NAMES.close, 'find.close', () => this.closeFind()))
     return panel
   }
 
@@ -5979,16 +5933,16 @@ export class WebviewSyncController {
     banner.style.display = 'none'
     const label = document.createElement('span')
     label.className = 'vsidian-suspend-banner-text'
-    label.textContent = t('conflict.bannerText')
+    bindLocale(label, 'text', 'conflict.bannerText')
     banner.appendChild(label)
     const copy = document.createElement('button')
     copy.type = 'button'
     copy.dataset['action'] = 'copy'
-    copy.textContent = t('conflict.copyUnconfirmed')
+    bindLocale(copy, 'text', 'conflict.copyUnconfirmed')
     const resume = document.createElement('button')
     resume.type = 'button'
     resume.dataset['action'] = 'resume'
-    resume.textContent = t('conflict.resume')
+    bindLocale(resume, 'text', 'conflict.resume')
     banner.appendChild(copy)
     banner.appendChild(resume)
     banner.addEventListener('click', (event) => {

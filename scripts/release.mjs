@@ -81,12 +81,14 @@ const KATEX_FONT_FAMILIES = [
 const REQUIRED_KATEX_FONTS = KATEX_FONT_FAMILIES.map(
   (family) => `out/webview/assets/${family}.woff2`,
 )
-// 快速操作条 CSS 引用的 15 项 × 明暗主题 SVG，经 esbuild file loader
+// 快速操作条 CSS 引用的 17 项 × 明暗主题 SVG，经 esbuild file loader
 // 从 media/quick-actions 制作源搬入 out/webview/assets；全部是运行必需项。
+// #105/#106 起新增 highlight 与 horizontalRule 两键。
 const QUICK_ACTION_ICON_KEYS = [
   'bold', 'italic', 'strikethrough', 'inlineCode', 'heading',
   'bulletList', 'orderedList', 'taskList', 'quote', 'codeBlock',
   'link', 'clearInline', 'table', 'inlineMath', 'blockMath',
+  'highlight', 'horizontalRule',
 ]
 const REQUIRED_QUICK_ACTION_SVGS = ['light', 'dark'].flatMap((theme) =>
   QUICK_ACTION_ICON_KEYS.map((key) => `out/webview/assets/${theme}-${key}.svg`),
