@@ -187,6 +187,22 @@ export type HostToWebview =
       position: 'before' | 'after' | 'inside'
       action: 'hover' | 'drop' | 'escape'
     }
+  /** 测试钩子（#140 Popover 改版）：驱动 frontmatter 修改按钮与 Popover
+   *  控件（与用户点击同一处理器；变更走标准 CM6 事务出站）。action/index
+   *  定位（DOM 文档序）：edit-button = 标题栏「修改」按钮（开关浮层）；
+   *  popover-close = 关闭浮层（与 Esc 同一关闭函数）；popover-add-entry =
+   *  浮层「添加属性」；popover-add-item = 第 index 个条目的「添加列表项」；
+   *  popover-remove-entry = 第 index 个条目的删行按钮；popover-remove-item =
+   *  第 index 个删项按钮（跨条目按项行文档序累计） */
+  | {
+      kind: 'fm.test.click'
+      action: 'edit-button' | 'popover-close' | 'popover-add-entry' | 'popover-add-item'
+        | 'popover-remove-entry' | 'popover-remove-item'
+      index?: number
+    }
+  /** 测试钩子（#141）：点击顶栏双态视图切换真实按钮（与用户点击同一处理器：
+   *  出站 view.switch.request，切换由宿主 runViewSwitch 编排回流驱动）。 */
+  | { kind: 'view.test.click' }
   /** 测试钩子（#21）：在真实 webview 的 CM6 中输入，验证暂停态即时留存。 */
   | { kind: 'sync.test.edit'; offset: number; text: string; closeAfter?: boolean }
   /** 测试钩子：组合候选写入首行 DOM，经过 CM6 MutationObserver 的真实输入链。 */
@@ -256,6 +272,12 @@ export type WebviewToHost =
   | { kind: 'keybindings.reset'; id: string; replaceConflicts: boolean; requestId: number }
   | { kind: 'keybindings.resetAll'; requestId: number }
   | { kind: 'keybindings.execute'; id: string }
+  /** #141 工具栏双态切换按钮：请求宿主切换到目标模式（live↔reading，
+   *  宿主复用 runViewSwitch 的编排与模式记忆；源码路径不经本消息——
+   *  右上角三态命令是源码唯一入口）。target=另一态由 webview 按当前
+   *  viewMode 求值，宿主不再推导（多面板场景活动面板与本面板一致时
+   *  按钮才可点，显式目标消除歧义） */
+  | { kind: 'view.switch.request'; target: 'live' | 'reading' }
   /** 编辑请求：seq 会话内单调递增；baseVersion 为发送方自认的权威版本 */
   | {
       kind: 'edit.request'
@@ -369,6 +391,8 @@ export type WebviewToHost =
       sidebar?: SidebarProbe
       /** 大纲观测（#54；面板态、绘制层证据与标题序列，旧 webview 缺省） */
       outline?: OutlineProbe
+      /** #140 Popover 改版：frontmatter 属性编辑浮层是否打开（旧 webview 缺省） */
+      fmPopoverOpen?: boolean
     }
       /** 阅读视图性能探针回报（#7）：滚动往返期间的挂载/回收与解析观测 */
   | {
@@ -534,6 +558,8 @@ export interface CssProbeReport {
   liveStrongDecorationColor: string | null
   /** #8：live 行内代码 span 经 `.vsidian-inline-code` 命中的属性值；无目标为 null */
   liveInlineCodeDecorationColor: string | null
+  /** #139：live HTML 注释 span 经 `.vsidian-html-comment` 命中的属性值；无目标为 null */
+  liveHtmlCommentDecorationColor: string | null
   /** #8：live 代码行经 `.vsidian-code-line` 命中的属性值；无目标为 null */
   liveCodeLineDecorationColor: string | null
   /** #8：阅读视图内语义 strong 经 `.vsidian-view-reading strong` 命中的属性值 */
@@ -1513,6 +1539,7 @@ function isCssProbeReport(v: unknown): v is CssProbeReport {
     isNullOrString(v.readingVarProbe) &&
     isNullOrString(v.liveStrongDecorationColor) &&
     isNullOrString(v.liveInlineCodeDecorationColor) &&
+    isNullOrString(v.liveHtmlCommentDecorationColor) &&
     isNullOrString(v.liveCodeLineDecorationColor) &&
     isNullOrString(v.readingStrongDecorationColor) &&
     isNullOrString(v.liveTaskCheckboxDecorationColor) &&
@@ -1642,6 +1669,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
       return isPositiveInt(v.requestId)
     case 'keybindings.execute':
       return isKeybindingOperationId(v.id)
+    case 'view.switch.request':
+      return v.target === 'live' || v.target === 'reading'
     case 'edit.request':
       return (
         isString(v.sessionId) &&
@@ -1740,6 +1769,7 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         (v.paint === undefined || isPaintProbe(v.paint)) &&
         (v.sidebar === undefined || isSidebarProbe(v.sidebar)) &&
         (v.outline === undefined || isOutlineProbe(v.outline)) &&
+        (v.fmPopoverOpen === undefined || typeof v.fmPopoverOpen === 'boolean') &&
         (v.typography === undefined || isTypographyProbe(v.typography))
       )
     case 'reading.perf.report':
@@ -2002,6 +2032,13 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'sync.test.edit':
       return isNonNegativeInt(v.offset) && isString(v.text) &&
         (v.closeAfter === undefined || typeof v.closeAfter === 'boolean')
+    case 'fm.test.click':
+      return (v.action === 'edit-button' || v.action === 'popover-close' ||
+        v.action === 'popover-add-entry' || v.action === 'popover-add-item' ||
+        v.action === 'popover-remove-entry' || v.action === 'popover-remove-item') &&
+        (v.index === undefined || isNonNegativeInt(v.index))
+    case 'view.test.click':
+      return true
     case 'sync.test.composition':
       return (v.phase === 'start' || v.phase === 'update' || v.phase === 'end') && isString(v.text)
     case 'link.test.mousedown':

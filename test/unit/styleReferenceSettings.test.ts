@@ -85,9 +85,10 @@ describe('样式参考分页（#145 小类分栏与分页）', () => {
     expect(parent.querySelector('.vsidian-style-ref-page-indicator')!.textContent).toBe('第 2 / 2 页')
     expect(parent.querySelector<HTMLButtonElement>('.vsidian-style-ref-pager button')!.disabled).toBe(false)
     expect(parent.querySelectorAll<HTMLButtonElement>('.vsidian-style-ref-pager button')[1]!.disabled).toBe(true)
-    // 切换到小类目（单页）：分页导航收起、页码重置
+    // 切换到小类目（单页）：分页导航收起、页码重置（toolbar-banner 5 条 =
+    // toolbar / view-toggle / mode-body / suspend-banner / mode-toggle 历史条）
     catButton(parent, 'toolbar-banner').click()
-    expect(cardIds(parent).length).toBe(3)
+    expect(cardIds(parent).length).toBe(5)
     expect(parent.querySelector('.vsidian-style-ref-pager')!.children.length).toBe(0)
   })
 

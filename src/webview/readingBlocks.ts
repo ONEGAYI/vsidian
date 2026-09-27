@@ -19,8 +19,11 @@
 //   渲染——保留原文的局部源码降级，不触发整篇改写
 import { frontmatterRange } from './markdownDoc'
 import { maskCodeSpanPipes } from './tableCells'
+import { stripHtmlComments } from './htmlComment'
 import { isRenderedFenceInfo } from '../shared/mermaid'
 import { codeInfoFirstWord } from '../shared/codeLangs'
+import { buildFrontmatterTableHtml, escapeHtml, parseFrontmatterTable } from '../shared/frontmatterTable'
+import { t } from '../shared/i18n'
 import {
   buildLineBounds,
   createMarkdownRenderer,
@@ -102,9 +105,9 @@ function restoreCodePipes(tokens: Token[], marker: string): void {
   }
 }
 
-function escapeHtml(s: string): string {
-  return md.utils.escapeHtml(s)
-}
+/** HTML 文本转义：统一引用 shared/frontmatterTable 的实现（& < > "）——
+ *  与 markdown-it 的 escapeHtml 相比不再实体化单引号，本函数只服务文本
+ *  内容位（双引号属性位已含 " 转义），等价安全 */
 
 /** heading_open 的 tag（h1..h6）→ 级别；其他返回 null */
 function headingLevelOfTag(tag: string): 1 | 2 | 3 | 4 | 5 | 6 | null {
@@ -147,11 +150,19 @@ export function splitReadingBlocks(text: string): ReadingBlock[] {
 
   if (fm) {
     const fmEndLine = lineNumberOfOffset(env, fm.end)
+    // #140：合法简单头区成型为表格（值全转义，进 DOM 前再净化）；降级
+    // （复杂类型/解析失败）保留转义源码块——两形态随内容实时切换
+    const fmModel = parseFrontmatterTable(text, fm)
     blocks.push({
       kind: 'frontmatter',
       start: 0,
       end: fm.end,
-      html: `<pre class="vsidian-reading-frontmatter-text">${escapeHtml(text.slice(0, fm.end))}</pre>`,
+      html: fmModel
+        ? buildFrontmatterTableHtml(fmModel, text, {
+          emptyLabel: t('frontmatter.empty'),
+          titleLabel: t('frontmatter.title'),
+        })
+        : `<pre class="vsidian-reading-frontmatter-text">${escapeHtml(text.slice(0, fm.end))}</pre>`,
     })
     return splitBody(text, env, fmEndLine + 1, blocks)
   }
@@ -182,7 +193,11 @@ function splitBody(
   if (body.trim() === '') {
     return blocks
   }
-  const { parseText, marker } = protectCodePipes(body)
+  // #139 阅读隐藏：body 切片后、markdown-it 解析前剥离注释（等长空格
+  // 替换保锚点坐标系；代码上下文与残缺保留原样，见 htmlComment.ts）。
+  // frontmatter 已先行整块提取，天然不剥
+  const stripped = stripHtmlComments(body)
+  const { parseText, marker } = protectCodePipes(stripped)
   const tokens = md.parse(parseText, env as unknown as Env)
   if (marker) {
     restoreCodePipes(tokens, marker)

@@ -160,11 +160,17 @@ describe('不越界情形：回落既有行为', () => {
     expect(view.state.selection.main.head).toBe(9)
   })
 
-  it('frontmatter 内不接管（按源码呈现，不越界）', () => {
+  it('成型 frontmatter 光标不可达：定位即被引导至闭合行后，头区不参与越界', () => {
     const { controller, view } = setup('---\ntitle: "a"\n---\n\nbody')
+    // #140 Popover 改版：成型头区不暴露源码——定位到引号内部即被光标
+    // 引导弹到闭合行后（body 起点）；Tab 落在正文空行按缩进语义处理，
+    // 头区字节不变（围栏越界路径不涉及头区）
     locate(controller, 12) // 引号内部
+    expect(view.state.selection.main.head).toBe('---\ntitle: "a"\n---\n'.length)
     pressTab(view)
-    expect(view.state.doc.toString()).toBe('---\ntitle: "a"\n---\n\nbody')
+    // 引导位置是空行行首：Tab 按正文缩进语义给空行补一级缩进（空行成为
+    // '  ' 行）；头区字节不变、围栏越界路径不涉及头区
+    expect(view.state.doc.toString()).toBe('---\ntitle: "a"\n---\n  \nbody')
   })
 
   it('Shift+Tab 不新增反向越界：围栏内 Shift+Tab 仍是反向缩进', () => {

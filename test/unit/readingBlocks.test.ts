@@ -71,12 +71,24 @@ describe('splitReadingBlocks：语义切块与源锚点', () => {
     }
   })
 
-  it('frontmatter 整块提取：内部内容不被 Markdown 解析（无 h1/列表）', () => {
+  it('frontmatter 整块提取：合法头区成型表格（值不进 Markdown 解析，无 h1/列表）', () => {
     const fm = blocks[0]!
     expect(sliceAt(DOC, fm)).toBe('---\ntitle: 元\n---')
     expect(fm.html).not.toContain('<h')
     expect(fm.html).not.toContain('<ul')
+    // #140：合法头区为表格 HTML（键值分格）；源文 `title: 元` 不整段出现
+    expect(fm.html).toContain('vsidian-fm-table')
+    expect(fm.html).toContain('vsidian-fm-key">title<')
+    expect(fm.html).toContain('vsidian-fm-value">元<')
+  })
+
+  it('frontmatter 降级：复杂类型头区保持转义源码块', () => {
+    const degraded = splitReadingBlocks('---\ntitle: 元\nouter:\n  inner: 1\n---\n\n正文')
+    const fm = degraded[0]!
+    expect(fm.kind).toBe('frontmatter')
+    expect(fm.html).toContain('vsidian-reading-frontmatter-text')
     expect(fm.html).toContain('title: 元')
+    expect(fm.html).not.toContain('vsidian-fm-table')
   })
 
   it('标题块：级别来自 tag；渲染产物为语义标签（无 # 标记）', () => {
@@ -261,5 +273,50 @@ describe('表格管道遮蔽不得改动普通链接（#22）', () => {
     const href = host.querySelector('a')?.getAttribute('href')
     expect(href).toContain('%7C')
     expect(href).not.toContain('%EE%80%80')
+  })
+})
+
+describe('HTML 注释隐藏（#139）：阅读渲染输入先剥离注释', () => {
+  it('段落内行内注释不出现；正文文字保留', () => {
+    const blocks = splitReadingBlocks('前 <!-- 隐匿 --> 后\n')
+    const para = blocks.find((b) => b.kind === 'paragraph')!
+    expect(para.html).toContain('前')
+    expect(para.html).toContain('后')
+    expect(para.html).not.toContain('隐匿')
+    expect(para.html).not.toContain('&lt;!--')
+  })
+
+  it('跨行块级注释不产出块；两侧段落正常成块', () => {
+    const blocks = splitReadingBlocks('段一\n<!-- 块级\n注释 -->\n段二\n')
+    expect(blocks.filter((b) => b.kind === 'paragraph')).toHaveLength(2)
+    const all = blocks.map((b) => b.html).join('')
+    expect(all).not.toContain('块级')
+    expect(all).not.toContain('注释')
+  })
+
+  it('代码块与行内代码内的字面 <!-- 保留（负面用例）', () => {
+    const blocks = splitReadingBlocks('```\n<!-- 围栏内 -->\n```\n\n说明 `<!-- 码 -->` 完\n')
+    const fence = blocks.find((b) => b.kind === 'code-block')!
+    expect(fence.html).toContain('&lt;!-- 围栏内 --&gt;')
+    const para = blocks.find((b) => b.kind === 'paragraph')!
+    expect(para.html).toContain('<code>&lt;!-- 码 --&gt;</code>')
+  })
+
+  it('frontmatter 内的 <!-- 按源码块呈现（剥离只作用于 body）', () => {
+    const blocks = splitReadingBlocks('---\nnote: <!-- 元 -->\n---\n正文\n')
+    const fm = blocks[0]!
+    expect(fm.kind).toBe('frontmatter')
+    expect(fm.html).toContain('&lt;!-- 元 --&gt;')
+  })
+
+  it('块锚点坐标系不受剥离影响（剥离保行数，token 行号与原文行一致）', () => {
+    const text = '标题段\n<!-- 注 -->\n正文段\n'
+    const blocks = splitReadingBlocks(text)
+    const paras = blocks.filter((b) => b.kind === 'paragraph')
+    expect(paras).toHaveLength(2)
+    // 行号不变：两段仍分别锚定行 0 与行 2（注释行剥离后成为空白行，
+    // 两侧块照常成块且区间与原文行首尾一致）
+    expect(text.slice(paras[0]!.start, paras[0]!.end)).toBe('标题段')
+    expect(text.slice(paras[1]!.start, paras[1]!.end)).toBe('正文段')
   })
 })

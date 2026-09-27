@@ -313,3 +313,67 @@ describe('格式操作的文本契约', () => {
     expect(apply('```\n==文==\n```', 'highlight', 6).text).toBe('```\n==文==\n```')
   })
 })
+
+describe('HTML 注释操作（#139）', () => {
+  // 取消分支节点命中（以 Lezer markdown 实际产出为准，2026-09-27 实测钉住）：
+  // 行内位置 `<!-- x -->` 产出 Comment 节点；整段（可跨行）产出 CommentBlock；
+  // 无内容空对 `<!---->` 不产节点——空插形态须带一个空格（`<!-- -->`）
+  // 才能进入 Comment 节点、两态闭环成立。
+
+  it('选区包裹：定界符包裹选区，原文保持选中（wikilink 同款）', () => {
+    expect(apply('前言 内容 后缀', 'htmlComment', 3, 5))
+      .toEqual({ text: '前言 <!--内容--> 后缀', selection: { anchor: 7, head: 9 } })
+  })
+
+  it('无选区插入空对（带空格保 Comment 解析）：光标落开围栏内侧（按 <!-- 长度）', () => {
+    // 空对形态 <!-- | -->：纯 <!----> 不解析为 Comment（实测），两态闭环断
+    expect(apply('字词', 'htmlComment', 1))
+      .toEqual({ text: '字<!-- -->词', selection: { anchor: 5 } })
+    expect(apply('', 'htmlComment', 0))
+      .toEqual({ text: '<!-- -->', selection: { anchor: 4 } })
+  })
+
+  it('光标在行内注释（Comment 节点）内取消：剥定界符保留内容', () => {
+    expect(apply('a <!-- 注释 --> b', 'htmlComment', 7).text).toBe('a  注释  b')
+    expect(apply('<!--纯文字-->', 'htmlComment', 6).text).toBe('纯文字')
+  })
+
+  it('光标在块级注释（CommentBlock 节点，含跨行）内取消', () => {
+    const block = '段前\n<!-- 跨行\n注释 -->\n段后'
+    expect(apply(block, 'htmlComment', 9).text).toBe('段前\n 跨行\n注释 \n段后')
+    const bare = '段前\n<!--\n块\n-->\n段后'
+    expect(apply(bare, 'htmlComment', 9).text).toBe('段前\n\n块\n\n段后')
+  })
+
+  it('空对（内容纯空白）取消：整节点删除不留残留空格', () => {
+    expect(apply('字<!-- -->词', 'htmlComment', 5).text).toBe('字词')
+    expect(apply('字<!--\n-->词', 'htmlComment', 6).text).toBe('字\n词')
+  })
+
+  it('选区与注释节点区间完全重合时取消（link 先例同款口径）', () => {
+    const text = 'a <!-- 注释 --> b'
+    // Comment 节点区间为 [2,13)（`<!-- 注释 -->`），选区与之重合
+    expect(apply(text, 'htmlComment', 2, 13).text).toBe('a  注释  b')
+  })
+
+  it('add 行为：已在注释内不叠加（toggle 的取消面之外显式 add 为无操作）', () => {
+    expect(apply('a <!-- x --> b', 'htmlComment', 7, 7, null, 'add').text).toBe('a <!-- x --> b')
+  })
+
+  it('代码上下文不接管：围栏、缩进代码与行内代码内返回 null', () => {
+    expect(apply('```\n<!-- 码 -->\n```', 'htmlComment', 8).text).toBe('```\n<!-- 码 -->\n```')
+    expect(apply('    <!-- 缩进 -->', 'htmlComment', 6).text).toBe('    <!-- 缩进 -->')
+    expect(apply('`<!-- 码 -->`', 'htmlComment', 6).text).toBe('`<!-- 码 -->`')
+  })
+
+  it('真 HTML 块（HTMLBlock）内不接管：维持既有禁用上下文语义', () => {
+    const html = '<div>\n<!-- 内嵌 -->\n</div>'
+    expect(apply(html, 'htmlComment', 12).text).toBe(html)
+  })
+
+  it('表格矩形格区内禁用（插入型不入格，与 wikilink 不同、与块级围栏一致）', () => {
+    const table = '| A | B |\n| --- | --- |\n| x | y |'
+    const region = { tableFrom: 0, rowFrom: 0, rowTo: 0, columnFrom: 0, columnTo: 0 }
+    expect(apply(table, 'htmlComment', 2, 3, region).text).toBe(table)
+  })
+})

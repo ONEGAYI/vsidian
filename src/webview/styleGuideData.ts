@@ -193,6 +193,13 @@ export const STYLE_GUIDE_CATEGORIES: readonly StyleContractCategory[] = [
     "title": "工具栏与横幅",
     "titleKey": "styleRef.category.toolbarBanner",
     "order": 7
+  },
+  {
+    "id": "frontmatter",
+    "domain": "chrome",
+    "title": "frontmatter 表格卡片",
+    "titleKey": "styleRef.category.frontmatter",
+    "order": 8
   }
 ] as readonly StyleContractCategory[]
 
@@ -478,6 +485,31 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "introduced": "阅读侧随 #8 语义渲染（2026-09-24）；live 侧缺口如实记录"
   },
   {
+    "id": "html-comment",
+    "domain": "content",
+    "category": "inline-format",
+    "kind": "selector",
+    "target": ".vsidian-html-comment（仅 live）",
+    "purpose": "HTML 注释淡化入口（#139）：live 侧行内 Comment / 跨行 CommentBlock 整区间（含定界符）mark 装饰 span，前景 45% 混入的低对比呈现（不隐藏不折叠、可读可编辑）。阅读侧经整段真删除（仅保留换行、行内不留空位）隐藏（阅读无注释呈现），无对应类。",
+    "views": [
+      "live"
+    ],
+    "states": "live 常显淡化色（无触及显形语义——注释不参与两态切换，Ctrl+/ 是唯一的取消入口）。",
+    "dom": "live 容器内 mark 装饰 span；节点名以 Lezer 实测为准（行内 Comment / 块级 CommentBlock，HTMLBlock 是真 HTML 块、其内注释不可达）。",
+    "example": ".vsidian-html-comment {\n  color: color-mix(in srgb, var(--vscode-editor-foreground, #808080) 45%, transparent);\n}",
+    "obsidian": {
+      "counterpart": ".cm-comment 方向（Obsidian 语义对应但不承诺原名命中）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 liveDecorations（#139 describe）：Comment/CommentBlock 整区间发射契约",
+      "单元 htmlCommentCssContract：淡化色规则钉住",
+      "集成「稳定样式契约扩展」（#8）：.vsidian-html-comment 探针命中 rgb(34, 35, 36)",
+      "cssProbe.liveHtmlCommentDecorationColor"
+    ],
+    "introduced": "#139（2026-09-27）"
+  },
+  {
     "id": "live-code-line",
     "domain": "content",
     "category": "line-syntax",
@@ -509,7 +541,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "line-syntax",
     "kind": "selector",
     "target": ".vsidian-quote-line",
-    "purpose": "live 引用行（> 前缀）；引用内容不额外 span 化（见 limit-quote-span）。",
+    "purpose": "live 引用行（> 前缀）；引用内容不额外 span 化（见 limit-quote-span）。左缘 3px 提示竖条颜色见 var-quote-bar-color（与阅读 blockquote 同源）；左内边距 calc(0.9em + 3px)（QuoteMark 呈现态隐藏后的排版位，与阅读 blockquote 对齐）。",
     "views": [
       "live"
     ],
@@ -857,21 +889,21 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "domain": "content",
     "category": "table",
     "kind": "selector",
-    "target": ".vsidian-table-grid-row（行附 data-vsidian-table-row=header/row 与 --vsidian-table-columns）",
-    "purpose": "安全表格的 CSS grid 网格行；活动格也保留；单元格仍与源区间对应（非独立表格数据模型）。",
+    "target": ".vsidian-table-grid-row（行附 data-vsidian-table-row=header/row、--vsidian-table-columns 列数与 --vsidian-table-col-widths 列宽计划）",
+    "purpose": "安全表格的 CSS grid 网格行；活动格也保留；单元格仍与源区间对应（非独立表格数据模型）。#142 起列宽按内容比例分配：行装饰内联列宽计划（逐列 minmax(min(48px, 等分份额), 内容占比 fr)，同表各行共享同一计划），网格规则消费之；计划缺失时回退列数等分。片段按类规则覆写 grid-template-columns 仍优先生效。",
     "views": [
       "live"
     ],
     "dom": "表格行内的网格行容器（grid 布局）。",
-    "example": ".vsidian-table-grid-row {\n  grid-template-columns: var(--vsidian-table-columns);\n}",
+    "example": ".vsidian-table-grid-row {\n  /* 覆写为固定轨道 */\n  grid-template-columns: 1fr 2fr;\n}",
     "obsidian": {
       "counterpart": "Obsidian live 网格方向（无精确对应类）",
       "support": "semantic"
     },
     "verification": [
-      "单元 liveDecorations + tableRegionSelection：网格结构契约；tablePaintCssContract 钉网格规则"
+      "单元 liveDecorations + tableRegionSelection：网格结构契约；tablePaintCssContract 钉网格规则（防等分回潮）；tableColumnWidth：列宽计划契约"
     ],
-    "introduced": "#42（2026-09-24）"
+    "introduced": "#42（2026-09-24）；#142（2026-09-27）起内容比例列宽"
   },
   {
     "id": "live-table-grid-cell",
@@ -922,7 +954,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "table",
     "kind": "selector",
     "target": ".vsidian-table-grid-align-{left/center/right}",
-    "purpose": "网格状态的列对齐。",
+    "purpose": "网格状态的列对齐（#142 起应用到该列全部单元格——空格占位 widget 同样携带对齐类）。",
     "views": [
       "live"
     ],
@@ -1030,7 +1062,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "reading-structure",
     "kind": "selector",
     "target": ".vsidian-reading-blockquote（块类）+ 内层 blockquote 标签",
-    "purpose": "阅读引用块。",
+    "purpose": "阅读引用块。左边框 3px 提示竖条颜色见 var-quote-bar-color（与 live 引用行同源）。",
     "views": [
       "reading"
     ],
@@ -1531,6 +1563,29 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "highlightPaintCssContract：三侧同引；obsidianAliasCssContract：变量桥形态（含浅色分支）"
     ],
     "introduced": "#105（2026-09-27）"
+  },
+  {
+    "id": "var-quote-bar-color",
+    "domain": "content",
+    "category": "content-variables",
+    "kind": "variable",
+    "target": "--vsidian-quote-bar-color",
+    "purpose": "引用块提示竖条色：live 引用行（.vsidian-quote-line 的 inset 竖条）与阅读 blockquote 左边框两侧同引。明显 accent 紫：暗色主题默认 #a78bfa、浅色 body.vscode-light 分支覆盖 #7c3aed；背景底仍走 --vscode-textBlockQuote-background（仅竖条换色，不新增紫色背景）。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app（浅色分支 body.vscode-light）；自有变量，无 Obsidian 别名。",
+    "example": ":root { --vsidian-quote-bar-color: #c678dd; }",
+    "obsidian": {
+      "counterpart": "无（Obsidian 引用竖条由主题边框样式承担，无公开变量）",
+      "support": "none"
+    },
+    "verification": [
+      "quoteBarCssContract：#app 定义 + 亮色覆盖 + 两侧同引（背景底不换色）",
+      "浏览器 quoteBarPaint：明暗主题 × 双视图 computed 竖条颜色一致且为紫"
+    ],
+    "introduced": "#143（2026-09-27）"
   },
   {
     "id": "var-table-background",
@@ -2675,6 +2730,142 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "introduced": "#79（2026-09-26）"
   },
   {
+    "id": "live-fm-card-line",
+    "domain": "chrome",
+    "category": "frontmatter",
+    "kind": "selector",
+    "target": ".vsidian-fm-card-line（+ -edge-top / -edge-bottom 首尾围栏行修饰）",
+    "purpose": "frontmatter 只读表格卡片的行级类：合法简单头区（标量 + 字符串数组）成型时覆盖头区全部行（含首尾围栏行与杂项行），承载左右边线（行区透明，撞色边界感由边框与标题栏微亮条承担），首尾围栏行补横线并做圆角修饰，拼装为完整边框圆角卡片。卡片行同时承载 vsidian-frontmatter-line（别名桥 direct 级承诺 .cm-hmd-frontmatter 在成型形态下保持命中，降透明副作用由卡片规则重置）。复杂类型/解析失败时整卡降级为 frontmatter-line 源码形态（见 limit-fm-complex-types）。",
+    "views": [
+      "live"
+    ],
+    "states": "常驻卡片（光标位置无关——成型态不暴露源码，光标进入头区被引导至闭合行后）；格不可点击编辑，编辑收敛到标题栏「修改」按钮的 Popover。",
+    "dom": "live 视图 .cm-line 行元素（头区行）。",
+    "example": ".vsidian-fm-card-line {\n  background: var(--vsidian-table-background);\n}",
+    "obsidian": {
+      "counterpart": ".metadata-container（Obsidian 属性面板方向，本项目自有表格卡片形态）",
+      "support": "none"
+    },
+    "verification": [
+      "frontmatterTable 纯函数单元（成型/降级矩阵）",
+      "集成「界面域样式契约」：chromeSelectors[\"live-fm-card-line-live\"] 探针命中"
+    ],
+    "introduced": "#140（2026-09-27）"
+  },
+  {
+    "id": "live-fm-row",
+    "domain": "chrome",
+    "category": "frontmatter",
+    "kind": "selector",
+    "target": ".vsidian-fm-row（+ .vsidian-fm-item-row 数组项行修饰 / .vsidian-fm-list-row 数组宿主行修饰；grid-template-columns: minmax(120px, 32%) 1fr 两列）",
+    "purpose": "只读表格卡片的键值行（两列网格：键列/值列）：无格线无行间分隔（行区透明——撞色边界感由卡片边框与标题栏微亮条承担）；行级 grid 撑满内容区（**不限宽**，限宽会使行级边框与头部行错位形成右侧空洞）；数组宿主行带 list-row 修饰（键名类型图标取列表形 ≡），数组项行带 item-row 修饰（键列为 `- ` 标记淡化占位）。阅读侧同款表格行同名（.vsidian-fm-table 容器内，整宽透明同口径）。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "live：.cm-line 行元素（网格行）；阅读：.vsidian-fm-table 内 div。",
+    "example": ".vsidian-fm-row {\n  grid-template-columns: minmax(120px, 32%) 1fr;\n}",
+    "obsidian": {
+      "counterpart": ".metadata-property（Obsidian 属性行方向，DOM 结构不同）",
+      "support": "none"
+    },
+    "verification": [
+      "集成「界面域样式契约」：chromeSelectors[\"live-fm-row-live\"/\"live-fm-row-reading\"] 探针命中"
+    ],
+    "introduced": "#140（2026-09-27）"
+  },
+  {
+    "id": "live-fm-cell",
+    "domain": "chrome",
+    "category": "frontmatter",
+    "kind": "selector",
+    "target": ".vsidian-fm-cell（+ .vsidian-fm-key 键列 / .vsidian-fm-value 值列 / .vsidian-fm-item-mark 数组项标记 / .vsidian-fm-sep 冒号 / .vsidian-fm-comment 行内注释 / .vsidian-fm-comment-line 独立注释行）",
+    "purpose": "单元格 mark：键与值（含数组项文本）映射为源区间的格，只读着色（格不可点击编辑）；键列常规字重 + 弱化灰（opacity 0.7，参考图 key 浅 value 深）+ 行首类型图标（::before：标量 T、数组宿主行列表形 ≡）；sep（冒号与结构空格）与 comment（行内注释）在绘制层隐藏（display:none 不占格位）；item-mark 淡化占键列；独立注释行整行淡化纳入卡片。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "live：格 mark span（源区间）；阅读：span（item-mark/sep/comment 为 live 专属隐藏类）。",
+    "example": ".vsidian-fm-key {\n  opacity: 0.7;\n}",
+    "obsidian": {
+      "counterpart": ".metadata-property-key / -value（方向）",
+      "support": "none"
+    },
+    "verification": [
+      "集成「界面域样式契约」：chromeSelectors[\"live-fm-cell-live\"/\"live-fm-cell-reading\"] 探针命中"
+    ],
+    "introduced": "#140（2026-09-27）"
+  },
+  {
+    "id": "live-fm-header",
+    "domain": "chrome",
+    "category": "frontmatter",
+    "kind": "selector",
+    "target": ".vsidian-fm-header（标题栏容器；内含 .vsidian-fm-header-icon 图标 / .vsidian-fm-header-title 标题 / button.vsidian-fm-edit「修改」按钮）",
+    "purpose": "卡片标题栏（首围栏行 replace widget）：微亮底色条（与透明行区形成撞色边界感）+ 列表图标 + Properties 标题（600 字重次级前景灰）+ 右上角圆角描边「修改」按钮（铅笔图标，hover/聚焦高亮）。行内前后 cm-widgetBuffer 隐藏（inline replace 的光标停靠点各占一行文字高，成型态光标不进头区无消费者）使头部行高收敛到约 1.2 倍正文行高。按钮点击开关属性编辑 Popover。阅读侧同容器内同类名同布局（无按钮，只读）。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "标题栏常驻两视图；按钮仅 live（阅读侧不发射）。",
+    "dom": "live：首围栏行 replace widget 内容；阅读：.vsidian-fm-table 首子元素。",
+    "example": "#app .vsidian-fm-header {\n  display: flex;\n}",
+    "obsidian": {
+      "counterpart": ".metadata-container heading（方向）",
+      "support": "none"
+    },
+    "verification": [
+      "集成「界面域样式契约」：chromeSelectors[\"live-fm-header-live\"] 探针命中",
+      "浏览器 frontmatterTable 套件（修改按钮开浮层、绘制层可见）"
+    ],
+    "introduced": "#140（2026-09-27 Popover 改版）"
+  },
+  {
+    "id": "live-fm-popover",
+    "domain": "chrome",
+    "category": "frontmatter",
+    "kind": "selector",
+    "target": ".vsidian-fm-popover（浮层容器；内含 .vsidian-fm-pop-rows 行区 / .vsidian-fm-pop-input 输入框（-key/-value/-item 修饰、-invalid 非法标记）/ .vsidian-fm-pop-remove 删除 / .vsidian-fm-pop-add-item 加项 / .vsidian-fm-pop-footer 底区 / .vsidian-fm-pop-add「添加属性」主按钮）",
+    "purpose": "属性编辑 Popover：贴「修改」按钮定位的小浮层（挂 body、fixed 定位由 JS 计算），白底圆角 10px + 明显投影；结构化编辑行（键值输入框 + 删除按钮、数组项输入行缩进、加项入口），底部右侧「添加属性」主按钮（主题主色实底）。输入框聚焦 focusBorder 描边、键名非法红边标记。",
+    "views": [
+      "live"
+    ],
+    "states": "交互态浮层（打开时挂载、Esc/点击外部/降级自动关闭）——容器本体不进静态探针，开闭与写回由浏览器套件行为验证；样式入口（单类低特异性）公开供片段覆写。",
+    "dom": "document.body 直挂（不在 #app 内，故规则无 #app 前缀）。",
+    "example": ".vsidian-fm-popover {\n  border-radius: 10px;\n}",
+    "obsidian": {
+      "counterpart": ".metadata-property-editor（Obsidian 属性编辑浮层方向）",
+      "support": "none"
+    },
+    "verification": [
+      "frontmatterPaintCssContract 单元（fixed/圆角/投影/主按钮钉规则）",
+      "浏览器 frontmatterTable 套件（真实键鼠开闭、输入即时写回、焦点管理）"
+    ],
+    "introduced": "#140（2026-09-27 Popover 改版）"
+  },
+  {
+    "id": "limit-fm-complex-types",
+    "domain": "chrome",
+    "category": "chrome-limits",
+    "kind": "limitation",
+    "target": "复杂 YAML 类型（嵌套对象 / 对象数组 / 多行标量 |·> / 锚点别名 / 顶层序列 / 重复键 / 非法语法）",
+    "purpose": "不支持边界：一期表格只覆盖标量（字符串/数字/布尔/日期字符串）与字符串数组（block `- item` 行组 + flow `[a, b]` 单行；live 侧 block 项与 flow 值框在 Popover 内编辑，阅读侧拆项呈现）；复杂类型与解析失败整卡降级源码形态（live 为 .vsidian-frontmatter-line 行类、阅读为 .vsidian-reading-frontmatter-text 转义块），编辑不受限，转简单形态自动成型；降级瞬间打开中的 Popover 自动关闭。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "降级行/块（frontmatter 边界内）。",
+    "example": "",
+    "obsidian": {
+      "counterpart": "Obsidian 属性面板对复杂类型显示为源码/受限编辑",
+      "support": "none"
+    },
+    "verification": [
+      "frontmatterTable 纯函数单元（降级矩阵）"
+    ],
+    "introduced": "#140（2026-09-27）"
+  },
+  {
     "id": "limit-prism-tokens",
     "domain": "chrome",
     "category": "chrome-limits",
@@ -2770,7 +2961,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "toolbar-banner",
     "kind": "selector",
     "target": ".vsidian-toolbar",
-    "purpose": "主编辑区顶栏：设置齿轮（.vsidian-settings-toggle）、快速操作开关（.vsidian-quick-toggle）、侧栏开关（.vsidian-sidebar-toggle）——#38 起模式切换按钮迁宿主标题栏三态命令，不在顶栏（见 mode-toggle 移除记录）。",
+    "purpose": "主编辑区顶栏：设置齿轮（.vsidian-settings-toggle）、快速操作开关（.vsidian-quick-toggle）、双态视图切换（.vsidian-view-toggle，#141 起第四按钮，独立条目）、侧栏开关（.vsidian-sidebar-toggle）——#38 起三态切换（含源码）在宿主编辑器标题栏命令，不在顶栏（见 mode-toggle 移除记录）。",
     "views": [
       "live",
       "reading"
@@ -2786,6 +2977,54 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "集成「界面域样式契约」（#133）：chromeSelectors[\"toolbar\"] 探针命中"
     ],
     "introduced": "#4（2026-09-23）"
+  },
+  {
+    "id": "view-toggle",
+    "domain": "chrome",
+    "category": "toolbar-banner",
+    "kind": "selector",
+    "target": ".vsidian-view-toggle（按钮本体；内含图标子类 .vsidian-view-toggle-book / .vsidian-view-toggle-edit）",
+    "purpose": "双态视图切换按钮（#141）：live↔reading 互切入口之一（宿主标题栏三态命令与 Ctrl+Q 之外的 webview 内入口）。图标显当前态：书本（当前在阅读）/ 笔（当前在 Live）两图标常驻 DOM，显隐唯一来源是 body 模式类规则（见 mode-body 条目）——样式失效时两图标同显，可被绘制断言暴露。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "按钮本体常驻两模式；点击出站 view.switch.request（不本地执行），按钮态由宿主回流的 view.mode.set 驱动——aria/tooltip 表目标动作随态换词。",
+    "dom": "顶栏 .vsidian-toolbar 内 button，紧邻侧栏开关左侧；内联 SVG 两 path（book/edit 子类）。",
+    "example": ".vsidian-view-toggle {\n  color: var(--vscode-toolbar-foreground);\n}",
+    "obsidian": {
+      "counterpart": "无对应物",
+      "support": "none"
+    },
+    "verification": [
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"view-toggle\"] 探针命中（真宿主渲染验证）",
+      "浏览器套件（#141）：两图标显隐随 body 模式类切换的绘制断言"
+    ],
+    "introduced": "#141（2026-09-27）"
+  },
+  {
+    "id": "mode-body",
+    "domain": "chrome",
+    "category": "toolbar-banner",
+    "kind": "selector",
+    "target": "布局根模式类 .vsidian-body.vsidian-mode-live / .vsidian-body.vsidian-mode-reading（互斥，两态必居其一）",
+    "purpose": "webview 全域模式锚点（#141）：随视图模式在布局根 div（#app 内的 .vsidian-body，非 HTML body 元素——类对不挂在 <body> 上）切换的互斥类对，是用户片段做「按模式生效」样式的公开入口（如 #app .vsidian-body.vsidian-mode-reading .vsidian-toolbar button { … }）。内置消费方：双态切换按钮的 book/edit 图标显隐规则以其为唯一来源。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "模式态类：live 视图挂 .vsidian-mode-live、reading 视图挂 .vsidian-mode-reading，applyModeDom 随每次模式切换重算。",
+    "dom": "#app 内布局根 div（.vsidian-body，水平布局根）的 classList；不在 HTML body 元素或任何具体控件上。",
+    "example": "#app .vsidian-body.vsidian-mode-reading .vsidian-view-toggle svg {\n  opacity: 0.9;\n}",
+    "obsidian": {
+      "counterpart": "无对应物（Obsidian 以 mod-cm6 等容器态类表达，不承诺原名命中）",
+      "support": "none"
+    },
+    "verification": [
+      "浏览器套件（#141）：模式切换后布局根类互斥、图标显隐据此驱动的绘制断言",
+      "探针表豁免（模式态类，非静态可命中——chromeContract.test 豁免表登记）"
+    ],
+    "introduced": "#141（2026-09-27）"
   },
   {
     "id": "mode-toggle",

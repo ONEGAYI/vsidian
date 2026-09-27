@@ -27,6 +27,11 @@ export const FORMAT_OPERATIONS = [
   { id: 'blockMath', command: 'onegayi.vsidian.insert.blockMath', titleKey: 'format.blockMath', mode: 'live', writes: true, defaultKey: null },
   { id: 'wikilink', command: 'onegayi.vsidian.insert.wikilink', titleKey: 'format.wikilink', mode: 'live', writes: true, defaultKey: null },
   { id: 'horizontalRule', command: 'onegayi.vsidian.insert.horizontalRule', titleKey: 'format.horizontalRule', mode: 'live', writes: true, defaultKey: null },
+  // #139 HTML 注释：插入型两态操作（同 wikilink 一类分派，不走 INLINE 表）。
+  // 默认键 ctrl+slash 为注册表内部键名（物理键 ctrl+/，keybindingRouter 的
+  // keyStep 已把 event.key='/' 归一为 slash）；仅 Live 正文生效——覆盖宿主
+  // 行注释绑定属既定语义，源码模式与设置页不接管
+  { id: 'htmlComment', command: 'onegayi.vsidian.format.htmlComment', titleKey: 'format.htmlComment', mode: 'live', writes: true, defaultKey: 'ctrl+slash' },
 ] as const satisfies readonly ({ titleKey: MessageKey } & Record<string, unknown>)[]
 
 export type FormatOperationId = (typeof FORMAT_OPERATIONS)[number]['id']

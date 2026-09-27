@@ -862,6 +862,14 @@ export function createTextEditorProvider(
           }
           return
         }
+        // #141 工具栏双态切换按钮：target 由 webview 按自身 viewMode 求值
+        // （另一态），宿主复用 runViewSwitch 全套编排（模式记忆、diff 防御、
+        // context 刷新、view.mode.set 回流驱动按钮态）。双态裁剪即 target
+        // 域只 live/reading（协议校验拒绝 source），源码路径不经本消息
+        if (isWebviewToHost(message) && message.kind === 'view.switch.request') {
+          void runViewSwitch(message.target, document.uri)
+          return
+        }
         if (process.env.VSIDIAN_TEST_HOOKS === '1' && isWebviewToHost(message) &&
           message.kind === 'sync.test.close' && message.sessionId === sessionId &&
           message.docUri === document.uri.toString()) {
@@ -1260,6 +1268,22 @@ export function createTextEditorProvider(
     vscode.commands.registerCommand(
       'onegayi.vsidian.mode.toLive',
       (uri?: vscode.Uri) => runViewSwitch('live', uri),
+    ),
+    // #141 双态切换（live↔reading）：工具栏按钮（view.switch.request 分支）
+    // 与快捷键（keybindings.execute → executeCommand）共用同一目标推导
+    // （当前态取反）与同一 runViewSwitch 编排——两条入口不造第二条切换
+    // 路径；源码态推导出 open-in-vsidian 回 Vsidian 面板（命令面板调用
+    // 场景），不落源码自环
+    vscode.commands.registerCommand(
+      'onegayi.vsidian.mode.toggleDualView',
+      (uri?: vscode.Uri) => {
+        const active = deriveActiveTabMode()
+        if (!active) {
+          void vscode.window.showWarningMessage(t('host.noActiveMarkdown'))
+          return false
+        }
+        return runViewSwitch(active.mode === 'live' ? 'reading' : 'live', uri)
+      },
     ),
   )
 
