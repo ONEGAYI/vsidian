@@ -3,7 +3,7 @@
     "schemaVersion": 1,
     "vsidianVersion": "0.4.0",
     "generatedAt": "2026-09-27",
-    "entryCount": 116,
+    "entryCount": 121,
     "source": "src/shared/styleContract.ts",
     "generator": "scripts/genStyleGuide.mjs",
     "determinism": "generatedAt 取当前版本在 CHANGELOG.md 的发布日期（无段落时取最新已发布版本日期），同源再生成字节一致。",
@@ -148,7 +148,7 @@
       "title": "公开 CSS 变量",
       "titleKey": "styleRef.category.contentVariables",
       "order": 9,
-      "count": 9
+      "count": 8
     },
     {
       "id": "content-limits",
@@ -204,7 +204,7 @@
       "title": "限制说明",
       "titleKey": "styleRef.category.chromeLimits",
       "order": 6,
-      "count": 3
+      "count": 4
     },
     {
       "id": "toolbar-banner",
@@ -213,6 +213,14 @@
       "titleKey": "styleRef.category.toolbarBanner",
       "order": 7,
       "count": 3
+    },
+    {
+      "id": "frontmatter",
+      "domain": "chrome",
+      "title": "frontmatter 表格卡片",
+      "titleKey": "styleRef.category.frontmatter",
+      "order": 8,
+      "count": 5
     }
   ],
   "variableAliases": [
@@ -589,7 +597,7 @@
       "category": "line-syntax",
       "kind": "selector",
       "target": ".vsidian-quote-line",
-      "purpose": "live 引用行（> 前缀）；引用内容不额外 span 化（见 limit-quote-span）。左缘 3px 提示竖条颜色见 var-quote-bar-color（与阅读 blockquote 同源）。",
+      "purpose": "live 引用行（> 前缀）；引用内容不额外 span 化（见 limit-quote-span）。",
       "views": [
         "live"
       ],
@@ -937,21 +945,21 @@
       "domain": "content",
       "category": "table",
       "kind": "selector",
-      "target": ".vsidian-table-grid-row（行附 data-vsidian-table-row=header/row、--vsidian-table-columns 列数与 --vsidian-table-col-widths 列宽计划）",
-      "purpose": "安全表格的 CSS grid 网格行；活动格也保留；单元格仍与源区间对应（非独立表格数据模型）。#142 起列宽按内容比例分配：行装饰内联列宽计划（逐列 minmax(min(48px, 等分份额), 内容占比 fr)，同表各行共享同一计划），网格规则消费之；计划缺失时回退列数等分。片段按类规则覆写 grid-template-columns 仍优先生效。",
+      "target": ".vsidian-table-grid-row（行附 data-vsidian-table-row=header/row 与 --vsidian-table-columns）",
+      "purpose": "安全表格的 CSS grid 网格行；活动格也保留；单元格仍与源区间对应（非独立表格数据模型）。",
       "views": [
         "live"
       ],
       "dom": "表格行内的网格行容器（grid 布局）。",
-      "example": ".vsidian-table-grid-row {\n  /* 覆写为固定轨道 */\n  grid-template-columns: 1fr 2fr;\n}",
+      "example": ".vsidian-table-grid-row {\n  grid-template-columns: var(--vsidian-table-columns);\n}",
       "obsidian": {
         "counterpart": "Obsidian live 网格方向（无精确对应类）",
         "support": "semantic"
       },
       "verification": [
-        "单元 liveDecorations + tableRegionSelection：网格结构契约；tablePaintCssContract 钉网格规则（防等分回潮）；tableColumnWidth：列宽计划契约"
+        "单元 liveDecorations + tableRegionSelection：网格结构契约；tablePaintCssContract 钉网格规则"
       ],
-      "introduced": "#42（2026-09-24）；#142（2026-09-27）起内容比例列宽"
+      "introduced": "#42（2026-09-24）"
     },
     {
       "id": "live-table-grid-cell",
@@ -1002,7 +1010,7 @@
       "category": "table",
       "kind": "selector",
       "target": ".vsidian-table-grid-align-{left/center/right}",
-      "purpose": "网格状态的列对齐（#142 起应用到该列全部单元格——空格占位 widget 同样携带对齐类）。",
+      "purpose": "网格状态的列对齐。",
       "views": [
         "live"
       ],
@@ -1110,7 +1118,7 @@
       "category": "reading-structure",
       "kind": "selector",
       "target": ".vsidian-reading-blockquote（块类）+ 内层 blockquote 标签",
-      "purpose": "阅读引用块。左边框 3px 提示竖条颜色见 var-quote-bar-color（与 live 引用行同源）。",
+      "purpose": "阅读引用块。",
       "views": [
         "reading"
       ],
@@ -1611,29 +1619,6 @@
         "highlightPaintCssContract：三侧同引；obsidianAliasCssContract：变量桥形态（含浅色分支）"
       ],
       "introduced": "#105（2026-09-27）"
-    },
-    {
-      "id": "var-quote-bar-color",
-      "domain": "content",
-      "category": "content-variables",
-      "kind": "variable",
-      "target": "--vsidian-quote-bar-color",
-      "purpose": "引用块提示竖条色：live 引用行（.vsidian-quote-line 的 inset 竖条）与阅读 blockquote 左边框两侧同引。明显 accent 紫：暗色主题默认 #a78bfa、浅色 body.vscode-light 分支覆盖 #7c3aed；背景底仍走 --vscode-textBlockQuote-background（仅竖条换色，不新增紫色背景）。",
-      "views": [
-        "live",
-        "reading"
-      ],
-      "dom": "定义于 #app（浅色分支 body.vscode-light）；自有变量，无 Obsidian 别名。",
-      "example": ":root { --vsidian-quote-bar-color: #c678dd; }",
-      "obsidian": {
-        "counterpart": "无（Obsidian 引用竖条由主题边框样式承担，无公开变量）",
-        "support": "none"
-      },
-      "verification": [
-        "quoteBarCssContract：#app 定义 + 亮色覆盖 + 两侧同引（背景底不换色）",
-        "浏览器 quoteBarPaint：明暗主题 × 双视图 computed 竖条颜色一致且为紫"
-      ],
-      "introduced": "#143（2026-09-27）"
     },
     {
       "id": "var-table-background",
@@ -2776,6 +2761,139 @@
         "集成「界面域样式契约」（#133）：真实片段经该变量驱动卡片可见底色"
       ],
       "introduced": "#79（2026-09-26）"
+    },
+    {
+      "id": "live-fm-card-line",
+      "domain": "chrome",
+      "category": "frontmatter",
+      "kind": "selector",
+      "target": ".vsidian-fm-card-line（+ -edge-top / -edge-bottom 首尾围栏行修饰）",
+      "purpose": "frontmatter 表格卡片的行级类：合法简单头区（标量 + 字符串数组）成型时覆盖头区全部行（含首尾围栏行与杂项行），承载卡片底色；首尾围栏行另加圆角修饰。卡片行同时承载 vsidian-frontmatter-line（别名桥 direct 级承诺 .cm-hmd-frontmatter 在成型形态下保持命中，降透明副作用由卡片规则重置）。复杂类型/解析失败时整卡降级为 frontmatter-line 源码形态（见 limit-fm-complex-types）。",
+      "views": [
+        "live"
+      ],
+      "states": "合法头区成型（光标位置无关——常驻卡片，不做光标进入显源码）；首尾围栏行光标触及时撤下清空/按钮替换、源码显形。",
+      "dom": "live 视图 .cm-line 行元素（头区行）。",
+      "example": ".vsidian-fm-card-line {\n  background: var(--vsidian-table-background);\n}",
+      "obsidian": {
+        "counterpart": ".metadata-container（Obsidian 属性面板方向，本项目自有表格卡片形态）",
+        "support": "none"
+      },
+      "verification": [
+        "frontmatterTable 纯函数单元（成型/降级矩阵）",
+        "集成「界面域样式契约」：chromeSelectors[\"live-fm-card-line-live\"] 探针命中"
+      ],
+      "introduced": "#140（2026-09-27）"
+    },
+    {
+      "id": "live-fm-row",
+      "domain": "chrome",
+      "category": "frontmatter",
+      "kind": "selector",
+      "target": ".vsidian-fm-row（+ .vsidian-fm-item-row 数组项行修饰；grid-template-columns: minmax(120px, 32%) 1fr 两列）",
+      "purpose": "表格卡片的键值行（两列网格：键列/值列）；数组项行带 item-row 修饰（键列为 `- ` 标记淡化占位）。阅读侧同款表格行同名（.vsidian-fm-table 容器内）。",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "dom": "live：.cm-line 行元素（网格行）；阅读：.vsidian-fm-table 内 div。",
+      "example": ".vsidian-fm-row {\n  grid-template-columns: minmax(140px, 40%) 1fr;\n}",
+      "obsidian": {
+        "counterpart": ".metadata-property（Obsidian 属性行方向，DOM 结构不同）",
+        "support": "none"
+      },
+      "verification": [
+        "集成「界面域样式契约」：chromeSelectors[\"live-fm-row-live\"/\"live-fm-row-reading\"] 探针命中"
+      ],
+      "introduced": "#140（2026-09-27）"
+    },
+    {
+      "id": "live-fm-cell",
+      "domain": "chrome",
+      "category": "frontmatter",
+      "kind": "selector",
+      "target": ".vsidian-fm-cell（+ .vsidian-fm-key 键列 / .vsidian-fm-value 值列 / .vsidian-fm-item-mark 数组项标记 / .vsidian-fm-sep 冒号 / .vsidian-fm-comment 行内注释 / .vsidian-fm-comment-line 独立注释行）",
+      "purpose": "单元格 mark：键与值（含数组项文本）映射为源区间的格；sep（冒号与结构空格）与 comment（行内注释）在绘制层隐藏（display:none 不占格位，源文保留可编辑）；item-mark 淡化占键列；独立注释行整行淡化纳入卡片。",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "dom": "live：格 mark span（源区间）；阅读：span（item-mark/sep/comment 为 live 专属隐藏类）。",
+      "example": ".vsidian-fm-value {\n  color: var(--vscode-editor-foreground);\n}",
+      "obsidian": {
+        "counterpart": ".metadata-property-key / -value（方向）",
+        "support": "none"
+      },
+      "verification": [
+        "集成「界面域样式契约」：chromeSelectors[\"live-fm-cell-live\"/\"live-fm-cell-reading\"] 探针命中"
+      ],
+      "introduced": "#140（2026-09-27）"
+    },
+    {
+      "id": "live-fm-controls",
+      "domain": "chrome",
+      "category": "frontmatter",
+      "kind": "selector",
+      "target": ".vsidian-fm-remove（删行/删项 ×）/ .vsidian-fm-add-item（末项后 +）/ .vsidian-fm-empty-value（空值格占位）",
+      "purpose": "结构操作控件：键值对与数组项的删除按钮（行尾 widget，行 hover 显现）、数组末尾加项按钮；空值格占位承接点击定位（冒号后无空隙时点击先补结构空格）。",
+      "views": [
+        "live"
+      ],
+      "states": "hover/聚焦显现（opacity 过渡）；flow 数组不发射项级按钮（整格文本编辑）。",
+      "dom": "live 行尾 widget（absolute 脱流，不占格位）。",
+      "example": ".vsidian-fm-remove {\n  color: var(--vscode-errorForeground);\n}",
+      "obsidian": {
+        "counterpart": "无（Obsidian 属性面板为独立面板 UI）",
+        "support": "none"
+      },
+      "verification": [
+        "浏览器 frontmatterTable 套件（控件点击写回）"
+      ],
+      "introduced": "#140（2026-09-27）"
+    },
+    {
+      "id": "live-fm-add-entry",
+      "domain": "chrome",
+      "category": "frontmatter",
+      "kind": "selector",
+      "target": ".vsidian-fm-add-entry",
+      "purpose": "「添加属性」按钮（闭合围栏行的整行替换 widget，呈现态常驻）：点击在末条目后插入 key: value 模板并选中新键；空格下为虚线占位形态。",
+      "views": [
+        "live"
+      ],
+      "states": "呈现态常驻；光标触及闭合行时撤下（源码显形可编辑）。",
+      "dom": "live 闭合围栏行 replace widget。",
+      "example": ".vsidian-fm-add-entry {\n  border-style: solid;\n}",
+      "obsidian": {
+        "counterpart": ".metadata-add-property（方向）",
+        "support": "none"
+      },
+      "verification": [
+        "集成「界面域样式契约」：chromeSelectors[\"live-fm-add-entry-live\"] 探针命中"
+      ],
+      "introduced": "#140（2026-09-27）"
+    },
+    {
+      "id": "limit-fm-complex-types",
+      "domain": "chrome",
+      "category": "chrome-limits",
+      "kind": "limitation",
+      "target": "复杂 YAML 类型（嵌套对象 / 对象数组 / 多行标量 |·> / 锚点别名 / 顶层序列 / 重复键 / 非法语法）",
+      "purpose": "不支持边界：一期表格交互只覆盖标量（字符串/数字/布尔/日期字符串）与字符串数组（block `- item` 行组 + flow `[a, b]` 单行，flow 值格为整格文本编辑、无项级按钮）；复杂类型与解析失败整卡降级源码形态（live 为 .vsidian-frontmatter-line 行类、阅读为 .vsidian-reading-frontmatter-text 转义块），编辑不受限，转简单形态自动成型。",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "dom": "降级行/块（frontmatter 边界内）。",
+      "example": "",
+      "obsidian": {
+        "counterpart": "Obsidian 属性面板对复杂类型显示为源码/受限编辑",
+        "support": "none"
+      },
+      "verification": [
+        "frontmatterTable 纯函数单元（降级矩阵 38 例）"
+      ],
+      "introduced": "#140（2026-09-27）"
     },
     {
       "id": "limit-prism-tokens",

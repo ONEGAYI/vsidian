@@ -71,12 +71,24 @@ describe('splitReadingBlocks：语义切块与源锚点', () => {
     }
   })
 
-  it('frontmatter 整块提取：内部内容不被 Markdown 解析（无 h1/列表）', () => {
+  it('frontmatter 整块提取：合法头区成型表格（值不进 Markdown 解析，无 h1/列表）', () => {
     const fm = blocks[0]!
     expect(sliceAt(DOC, fm)).toBe('---\ntitle: 元\n---')
     expect(fm.html).not.toContain('<h')
     expect(fm.html).not.toContain('<ul')
+    // #140：合法头区为表格 HTML（键值分格）；源文 `title: 元` 不整段出现
+    expect(fm.html).toContain('vsidian-fm-table')
+    expect(fm.html).toContain('vsidian-fm-key">title<')
+    expect(fm.html).toContain('vsidian-fm-value">元<')
+  })
+
+  it('frontmatter 降级：复杂类型头区保持转义源码块', () => {
+    const degraded = splitReadingBlocks('---\ntitle: 元\nouter:\n  inner: 1\n---\n\n正文')
+    const fm = degraded[0]!
+    expect(fm.kind).toBe('frontmatter')
+    expect(fm.html).toContain('vsidian-reading-frontmatter-text')
     expect(fm.html).toContain('title: 元')
+    expect(fm.html).not.toContain('vsidian-fm-table')
   })
 
   it('标题块：级别来自 tag；渲染产物为语义标签（无 # 标记）', () => {

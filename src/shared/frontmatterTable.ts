@@ -74,6 +74,8 @@ export interface FmArrayEntry {
   key: FmRange
   /** flow：括号整体区间；block：宿主行空值位（from === to） */
   value: FmRange
+  /** 冒号后第一个字符位置（空值占位交互的判定基准，同标量） */
+  colonEnd: number
   /** 宿主行行内尾注释 */
   comment: FmRange | null
   /** 项列表（flow 也拆分——阅读侧逐项呈现；Live 侧 flow 值格整格编辑） */
@@ -82,9 +84,18 @@ export interface FmArrayEntry {
 
 export type FmEntry = FmScalarEntry | FmArrayEntry
 
+/** 杂项行（独立注释 / 空行）：不进条目模型，原样保留；呈现层纳入卡片 */
+export interface FmMiscLine {
+  from: number
+  to: number
+  kind: 'comment' | 'blank'
+}
+
 /** 成型头区的区间模型 */
 export interface FmTableModel {
   entries: FmEntry[]
+  /** 杂项行（独立注释/空行），按文档序 */
+  miscLines: FmMiscLine[]
   /** 头区整体区间（含首尾围栏行，同 frontmatterRange 返回值） */
   from: number
   to: number
@@ -285,6 +296,7 @@ export function parseFrontmatterTable(text: string, fm: { start: number; end: nu
   const open = lines[0]!
   const close = lines[lines.length - 1]!
   const entries: FmEntry[] = []
+  const miscLines: FmMiscLine[] = []
   const seenKeys = new Set<string>()
   // 待填充宿主（空值键行）在 entries 中的索引；空行/注释不终止，新键行终止
   let pendingHost = -1
@@ -294,8 +306,13 @@ export function parseFrontmatterTable(text: string, fm: { start: number; end: nu
     const line = lines[li]!
     const trimmedStart = line.text.trimStart()
     if (trimmedStart === '' || trimmedStart[0] === '#') {
+      miscLines.push({
+        from: line.from,
+        to: line.to,
+        kind: trimmedStart === '' ? 'blank' : 'comment',
+      })
       lastMidLineTo = line.to
-      continue // 空行 / 独立注释行：保留原位，不进模型
+      continue // 空行 / 独立注释行：保留原位，不进条目模型
     }
     const indentWidth = line.text.length - trimmedStart.length
     if (indentWidth === 0) {
@@ -363,6 +380,7 @@ export function parseFrontmatterTable(text: string, fm: { start: number; end: nu
           lineTo: line.to,
           key: { from: line.from, to: line.from + keyTo },
           value: { from: line.from + valueFrom, to: line.from + valueRawTo },
+          colonEnd: line.from + colonEnd,
           comment,
           items: rel.map((it) => ({
             item: { from: line.from + innerFrom + it.from, to: line.from + innerFrom + it.to },
@@ -430,6 +448,7 @@ export function parseFrontmatterTable(text: string, fm: { start: number; end: nu
         lineTo: line.to,
         key: host.key,
         value: host.value,
+        colonEnd: host.colonEnd,
         comment: host.comment,
         items: [item],
       }
@@ -447,6 +466,7 @@ export function parseFrontmatterTable(text: string, fm: { start: number; end: nu
   }
   return {
     entries,
+    miscLines,
     from: fm.start,
     to: fm.end,
     openFrom: open.from,

@@ -169,6 +169,7 @@ import { blankRowInputPlan, runCreateTable, runTableEdit, tableEditing, tableRow
 import { symbolAutocomplete } from './symbolAutocomplete'
 import { symbolSelectionWrap } from './symbolWrap'
 import { fenceEscape } from './fenceEscape'
+import { frontmatterEditing } from './frontmatterEditing'
 import { listEditing } from './listEditing'
 import { indentEditing } from './indentEditing'
 import { selectTableRegion, tableRegionField } from './tableRegionSelection'
@@ -6237,6 +6238,10 @@ export class WebviewSyncController {
       // #79 代码块卡片：呈现态围栏收起 + 头部横带 + 卡片行类（配置经
       // Compartment 热重配，围栏表复用上方 mermaidFencesField）
       this.codeCardCompartment.of(this.codeCardExtension()),
+      // #140 frontmatter 表格键位：Tab/Enter 格导航与末行结构加项——必须
+      // 置于 fenceEscape 之前（keymap 正序拼接：头区格内先切格，越出闭合
+      // 行后才轮到围栏 Tab 越界/缩进；头区外 fmCellAt null 返回 false 落穿）
+      frontmatterEditing,
       // #125 围栏内两步 Tab 越界：必须置于 tableEditing **之前**——CM6
       // keymap 与 transactionFilter 的顺序语义相反：keymap 把全部绑定按
       // 扩展数组顺序正序拼接后依序尝试（@codemirror/view buildKeymap/

@@ -152,6 +152,7 @@ export const en = {
   'styleRef.category.codeCard': 'Code block cards',
   'styleRef.category.outline': 'Outline panel',
   'styleRef.category.chromeLimits': 'Limitations',
+  'styleRef.category.frontmatter': 'Frontmatter table',
   'styleRef.category.toolbarBanner': 'Toolbar & banner',
   'host.styleRefExported': 'Style contract JSON exported: {path}',
   'host.styleRefExportFailed': 'Failed to export style contract JSON: {reason}',
@@ -350,6 +351,14 @@ export const en = {
   'decor.unknownReason': 'unknown reason',
   'decor.mermaidUnavailable': 'Diagram renderer unavailable (mermaid.js failed to load)',
   'decor.mermaidError': 'Diagram failed to render: {message}',
+
+  // ---- frontmatter.（#140 表格卡片：结构按钮与空态）----
+  'frontmatter.addProperty': 'Add property',
+  'frontmatter.removeProperty': 'Delete property',
+  'frontmatter.addItem': 'Add list item',
+  'frontmatter.removeItem': 'Delete list item',
+  'frontmatter.emptyValue': 'Empty value',
+  'frontmatter.empty': 'No properties yet',
 
   // ---- #97 manifest NLS（命令 title 与 displayName/description 生成源）----
   // 工具条 23 条命令直接复用上方 format.* 既有键（FORMAT_OPERATIONS 的

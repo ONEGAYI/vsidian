@@ -157,14 +157,27 @@ describe('buildLivePreviewDecorations：全量构建（树驱动语义）', () =
     expect(coveredTexts(set, LIVE_CLASS_NAMES.headerSpan(2), FULL_DOC)).toEqual(['二级'])
   })
 
-  it('frontmatter：行级类 + 内部伪标题不判定为标题', () => {
+  it('frontmatter：合法头区成型表格卡片（#140）；内部伪标题不判定为标题', () => {
     const c = byClass(set)
-    expect((c.get(LIVE_CLASS_NAMES.frontmatterLine) ?? []).length).toBe(4) // ---/title/伪标题/--- 四行
-    // frontmatter 内的 '# 伪标题' 不得产生标题类（两视图一致语义的边界）
+    // `# 伪标题` 是 YAML 注释行：头区合法（title: 元 + 注释）→ 成型卡片；
+    // 卡片行同时承载 frontmatter-line（别名桥 direct 级承诺，opacity 由
+    // fm-card-line 重置）；四行全部纳入卡片行类
+    expect((c.get(LIVE_CLASS_NAMES.frontmatterLine) ?? []).length).toBe(4)
+    expect((c.get('vsidian-fm-card-line') ?? []).length).toBe(4)
+    // 注释行整行淡化呈现（独立注释），伪标题不产生标题类（两视图一致语义）
+    expect(coveredTexts(set, 'vsidian-fm-comment-line', FULL_DOC)).toEqual(['# 伪标题'])
     const headingLines = c.get(HEADING_CLASS_NAMES.line) ?? []
     for (const item of headingLines) {
       expect(FULL_DOC.slice(item.from, item.to)).not.toContain('伪标题')
     }
+  })
+
+  it('frontmatter 降级：非法头区保持源码行类（成型与降级实时切换的降级侧）', () => {
+    // 嵌套形态：行级形态学不支持 → 降级 frontmatter-line（现状源码呈现）
+    const degraded = build('---\ntitle: 元\nouter:\n  inner: 1\n---\n正文')
+    const c = byClass(degraded)
+    expect((c.get(LIVE_CLASS_NAMES.frontmatterLine) ?? []).length).toBe(5)
+    expect((c.get('vsidian-fm-card-line') ?? []).length).toBe(0)
   })
 
   it('粗斜体：内容 span + 标记隐藏（非活动行）', () => {

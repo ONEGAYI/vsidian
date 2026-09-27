@@ -79,4 +79,11 @@ export const CHROME_CONTRACT_PROBES: readonly ChromeContractProbe[] = [
   { id: 'outline-search', selector: '#app .vsidian-sidebar .vsidian-outline-toolbar .vsidian-outline-search', expected: 'rgb(227, 0, 1)' },
   // ---- 编辑器顶栏（#4；#38 起模式切换迁宿主标题栏，顶栏为自有三按钮） ----
   { id: 'toolbar', selector: '#app .vsidian-toolbar', expected: 'rgb(228, 0, 1)' },
+  // ---- frontmatter 表格卡片（#140；live 侧 + 阅读侧同款表格） ----
+  { id: 'live-fm-card-line-live', selector: '#app .vsidian-view-live .vsidian-fm-card-line', expected: 'rgb(230, 0, 1)' },
+  { id: 'live-fm-row-live', selector: '#app .vsidian-view-live .vsidian-fm-row', expected: 'rgb(231, 0, 1)' },
+  { id: 'live-fm-cell-live', selector: '#app .vsidian-view-live .vsidian-fm-row > .vsidian-fm-cell', expected: 'rgb(232, 0, 1)' },
+  { id: 'live-fm-row-reading', selector: '#app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-row', expected: 'rgb(233, 0, 1)' },
+  { id: 'live-fm-cell-reading', selector: '#app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-cell', expected: 'rgb(234, 0, 1)' },
+  { id: 'live-fm-add-entry-live', selector: '#app .vsidian-view-live .vsidian-fm-add-entry', expected: 'rgb(235, 0, 1)' },
 ]

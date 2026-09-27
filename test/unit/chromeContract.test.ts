@@ -67,6 +67,7 @@ const DYNAMIC_STATE_ENTRIES: ReadonlySet<string> = new Set([
   'live-code-card-copy', // 复制按钮（悬停显现 + 点击态）
   'live-code-card-fold', // 折叠 chevron
   'live-code-card-edge', // 首末行修饰（首行由头部覆盖，CSS 契约钉）
+  'live-fm-controls', // frontmatter 结构按钮（行 hover 显现；空值占位随空值在场）
   'suspend-banner', // 暂停态横幅
   'diagram-popup', // 弹窗在场期间（chromePopup 观测）
   'mode-toggle', // 已移除（历史记录条目）

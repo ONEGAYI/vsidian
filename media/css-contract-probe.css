@@ -410,3 +410,28 @@
 #app .vsidian-toolbar {
   --vsidian-chrome-probe: rgb(228, 0, 1);
 }
+
+/* ---- frontmatter 表格卡片（#140）---- */
+#app .vsidian-view-live .vsidian-fm-card-line {
+  --vsidian-chrome-probe: rgb(230, 0, 1);
+}
+
+#app .vsidian-view-live .vsidian-fm-row {
+  --vsidian-chrome-probe: rgb(231, 0, 1);
+}
+
+#app .vsidian-view-live .vsidian-fm-row > .vsidian-fm-cell {
+  --vsidian-chrome-probe: rgb(232, 0, 1);
+}
+
+#app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-row {
+  --vsidian-chrome-probe: rgb(233, 0, 1);
+}
+
+#app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-cell {
+  --vsidian-chrome-probe: rgb(234, 0, 1);
+}
+
+#app .vsidian-view-live .vsidian-fm-add-entry {
+  --vsidian-chrome-probe: rgb(235, 0, 1);
+}

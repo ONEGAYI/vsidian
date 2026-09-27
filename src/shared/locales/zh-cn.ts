@@ -141,6 +141,7 @@ export const zhCn: Record<MessageKey, string> = {
   'styleRef.category.codeCard': '代码块卡片',
   'styleRef.category.outline': '大纲面板',
   'styleRef.category.chromeLimits': '限制说明',
+  'styleRef.category.frontmatter': 'frontmatter 表格卡片',
   'styleRef.category.toolbarBanner': '工具栏与横幅',
   'host.styleRefExported': '样式契约 JSON 已导出：{path}',
   'host.styleRefExportFailed': '样式契约 JSON 导出失败：{reason}',
@@ -325,6 +326,14 @@ export const zhCn: Record<MessageKey, string> = {
   'decor.unknownReason': '未知原因',
   'decor.mermaidUnavailable': '图表渲染器不可用（mermaid.js 未能加载）',
   'decor.mermaidError': '图表渲染失败：{message}',
+
+  // ---- frontmatter.（#140 表格卡片：结构按钮与空态）----
+  'frontmatter.addProperty': '添加属性',
+  'frontmatter.removeProperty': '删除属性',
+  'frontmatter.addItem': '添加列表项',
+  'frontmatter.removeItem': '删除列表项',
+  'frontmatter.emptyValue': '空值',
+  'frontmatter.empty': '暂无属性',
 
   // ---- #97 manifest NLS（命令 title 与 displayName/description 生成源）----
   // 值即 package.json 原硬编码字面量（呈现不变）；工具条 23 条命令复用

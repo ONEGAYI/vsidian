@@ -1222,6 +1222,172 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   opacity: 0.75;
 }
 
+/* ---- frontmatter 表格卡片（#140，规格 docs/specs/frontmatter-table.md）----
+   合法简单头区成型为两列网格卡片：键/值/项的源区间以 mark 映射为格，
+   冒号与行内注释在绘制层隐藏（display:none 不占格位，光标仍可入），
+   数组 `- ` 标记淡化占 key 列。首尾围栏行呈现态清空/替换为按钮，光标
+   触及显形源码。结构按钮 absolute 定位脱流（不占 grid 格位），行 hover
+   显现。降级形态沿用上方 vsidian-frontmatter-line。 */
+#app .cm-editor .cm-scroller .cm-line.vsidian-fm-card-line {
+  font-family: var(--vscode-editor-font-family, monospace);
+  background-color: var(--vsidian-table-background, rgba(128, 128, 128, 0.05));
+  /* 卡片行同时携带 vsidian-frontmatter-line（别名桥 direct 级承诺的
+     承载形态）：重置其降透明副作用，卡片内不降透明 */
+  opacity: 1;
+}
+
+#app .cm-editor .cm-scroller .vsidian-fm-card-edge-top {
+  border-top: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
+  border-radius: 6px 6px 0 0;
+}
+
+#app .cm-editor .cm-scroller .vsidian-fm-card-edge-bottom {
+  border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
+  border-radius: 0 0 6px 6px;
+}
+
+#app .cm-editor .cm-scroller .vsidian-fm-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 32%) 1fr;
+  width: min(100%, 880px);
+  padding: 0;
+  box-shadow: none;
+  position: relative;
+}
+
+#app .cm-editor .cm-scroller .vsidian-fm-row > .vsidian-fm-cell {
+  min-width: 0;
+  padding: 4px 10px;
+  box-sizing: border-box;
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
+  border-top: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 首条目行补顶边线（围栏行已清空，格区从首键值行起） */
+#app .cm-editor .cm-scroller .vsidian-fm-card-edge-top + .vsidian-fm-row > .vsidian-fm-cell {
+  border-top: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
+}
+
+/* 键列弱化底色（数据名与值区分） */
+#app .cm-editor .cm-scroller .vsidian-fm-row > .vsidian-fm-key {
+  color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.9));
+}
+
+/* 冒号/结构空格与行内注释：绘制层隐藏（不占格位；源文保留可编辑） */
+#app .cm-editor .cm-scroller .vsidian-fm-sep,
+#app .cm-editor .cm-scroller .vsidian-fm-comment {
+  display: none;
+}
+
+/* 独立注释行：整行淡化呈现（源文保留可编辑） */
+#app .cm-editor .cm-scroller .vsidian-fm-comment-line {
+  opacity: 0.45;
+}
+
+/* 数组项 `- ` 标记（含缩进）：淡化呈现，占 key 列格位 */
+#app .cm-editor .cm-scroller .vsidian-fm-item-mark {
+  opacity: 0.45;
+}
+
+/* 空值格占位：可点击的最小空白（零宽格无原生 caret 锚点） */
+#app .cm-editor .cm-scroller .vsidian-fm-empty-value {
+  display: inline-block;
+  min-width: 2ch;
+  min-height: 1.2em;
+}
+
+/* 结构按钮：absolute 脱流不占格位；行 hover 显现 */
+#app .cm-editor .cm-scroller .vsidian-fm-row > button.vsidian-fm-remove,
+#app .cm-editor .cm-scroller .vsidian-fm-row > button.vsidian-fm-add-item {
+  position: absolute;
+  right: 6px;
+  top: 2px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-icon-foreground, inherit);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s ease-out;
+  z-index: 3;
+}
+
+#app .cm-editor .cm-scroller .vsidian-fm-row:hover > button.vsidian-fm-remove,
+#app .cm-editor .cm-scroller .vsidian-fm-row:hover > button.vsidian-fm-add-item,
+#app .cm-editor .cm-scroller .vsidian-fm-row > button.vsidian-fm-remove:focus-visible,
+#app .cm-editor .cm-scroller .vsidian-fm-row > button.vsidian-fm-add-item:focus-visible {
+  opacity: 1;
+}
+
+#app .cm-editor .cm-scroller .vsidian-fm-row > button.vsidian-fm-remove:hover,
+#app .cm-editor .cm-scroller .vsidian-fm-row > button.vsidian-fm-add-item:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.2));
+}
+
+/* 闭合行的「添加属性」按钮（整行替换 widget）：虚线占位形态 */
+#app .cm-editor .cm-scroller .vsidian-fm-card-edge-bottom .vsidian-fm-add-entry {
+  display: block;
+  width: calc(100% - 24px);
+  margin: 2px 12px;
+  padding: 2px 10px;
+  border: 1px dashed var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.9));
+  cursor: pointer;
+  text-align: left;
+}
+
+#app .cm-editor .cm-scroller .vsidian-fm-card-edge-bottom .vsidian-fm-add-entry:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.12));
+  color: var(--vscode-foreground, inherit);
+}
+
+/* ---- 阅读侧 frontmatter 表格（#140）：与 live 同类名同布局 ---- */
+#app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-table {
+  margin: 0 0 12px;
+  width: min(100%, 880px);
+}
+
+#app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 32%) 1fr;
+}
+
+#app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-row > .vsidian-fm-cell {
+  min-width: 0;
+  padding: 4px 10px;
+  box-sizing: border-box;
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
+  border-top: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 容器承担外框与圆角（上方 .vsidian-fm-table 的 border），首行格不补顶线 */
+#app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-table {
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
+  border-radius: 6px;
+}
+
+#app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-key {
+  color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.9));
+}
+
+#app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-key-placeholder {
+  visibility: hidden;
+}
+
+#app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-empty {
+  padding: 4px 10px;
+  color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.9));
+}
+
 /* ---- 代码块卡片（#79–#84，规格 docs/specs/code-block-card.md）----
    呈现态围栏行内容被清空（replace 装饰零宽）但行槽保留；卡片 = 块首行
    上方的头部横带（block widget）+ 连续块行底色 + 尾行底边圆角（顶边

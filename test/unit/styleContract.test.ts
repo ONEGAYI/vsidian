@@ -373,8 +373,9 @@ const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   'graphic-interact': 2,
   'code-card': 10,
   outline: 19,
-  'chrome-limits': 3,
+  'chrome-limits': 4,
   'toolbar-banner': 3,
+  frontmatter: 5,
 }
 
 describe('styleContract 类目体系（#145）', () => {

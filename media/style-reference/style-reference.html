@@ -1014,7 +1014,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
   </section>
   <section class="domain" data-domain="chrome">
-    <h1 style="font-size:19px;margin-bottom:4px">界面域（46 条）</h1>
+    <h1 style="font-size:19px;margin-bottom:4px">界面域（52 条）</h1>
     <p class="note">界面域条目（#133 起逐项核实）：静态入口经探针在真实渲染中断言，交互态入口由浏览器/集成套件按行为路径验证；第三方渲染器（KaTeX/Mermaid）内部 DOM 不承诺为稳定接口（见各域「限制」类目）。</p>
     <h2>界面域 · 公式（5）</h2>
     <article class="entry" id="live-math">
@@ -1579,7 +1579,18 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：浏览器 outlineDrag</p>
       <p class="life">引入：#70（2026-09-25）</p>
     </article>
-    <h2>界面域 · 限制说明（3）</h2>
+    <h2>界面域 · 限制说明（4）</h2>
+    <article class="entry" id="limit-fm-complex-types">
+      <h3><code>复杂 YAML 类型（嵌套对象 / 对象数组 / 多行标量 |·&gt; / 锚点别名 / 顶层序列 / 重复键 / 非法语法）</code><span class="eid">limit-fm-complex-types</span></h3>
+      <p class="purpose">不支持边界：一期表格交互只覆盖标量（字符串/数字/布尔/日期字符串）与字符串数组（block `- item` 行组 + flow `[a, b]` 单行，flow 值格为整格文本编辑、无项级按钮）；复杂类型与解析失败整卡降级源码形态（live 为 .vsidian-frontmatter-line 行类、阅读为 .vsidian-reading-frontmatter-text 转义块），编辑不受限，转简单形态自动成型。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：Obsidian 属性面板对复杂类型显示为源码/受限编辑</p>
+
+      <p class="dom">DOM 关系：降级行/块（frontmatter 边界内）。</p>
+      <p class="verify">验证：frontmatterTable 纯函数单元（降级矩阵 38 例）</p>
+      <p class="life">引入：#140（2026-09-27）</p>
+    </article>
     <article class="entry" id="limit-prism-tokens">
       <h3><code>.token-*（Prism 原名）/ .HyperMD-codeblock-*</code><span class="eid">limit-prism-tokens</span></h3>
       <p class="purpose">语法高亮以 tok-* 稳定词表提供（见 tok-tokens）；Prism 原名与 .HyperMD-codeblock-* 子类不提供，片段按原名定位不命中。</p>
@@ -1653,6 +1664,77 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <pre><code>/* 无替代选择器：模式切换 UI 属宿主标题栏，不在 webview DOM 内 */</code></pre>
       <p class="verify">验证：单元：webview 源码不再含该类发射（迁移历史断言）</p>
       <p class="life">引入：#4（2026-09-23） · 移除：#38（2026-09-24，288044d）移除且从未随任何发布版存在；旧映射表该行为陈旧数据（#133 核实纠错，依据 v0.4.0 tag 75c3df7 源码核对）</p>
+    </article>
+    <h2>界面域 · frontmatter 表格卡片（5）</h2>
+    <article class="entry" id="live-fm-card-line">
+      <h3><code>.vsidian-fm-card-line（+ -edge-top / -edge-bottom 首尾围栏行修饰）</code><span class="eid">live-fm-card-line</span></h3>
+      <p class="purpose">frontmatter 表格卡片的行级类：合法简单头区（标量 + 字符串数组）成型时覆盖头区全部行（含首尾围栏行与杂项行），承载卡片底色；首尾围栏行另加圆角修饰。卡片行同时承载 vsidian-frontmatter-line（别名桥 direct 级承诺 .cm-hmd-frontmatter 在成型形态下保持命中，降透明副作用由卡片规则重置）。复杂类型/解析失败时整卡降级为 frontmatter-line 源码形态（见 limit-fm-complex-types）。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-none">none</span></p>
+<p class="states">状态：合法头区成型（光标位置无关——常驻卡片，不做光标进入显源码）；首尾围栏行光标触及时撤下清空/按钮替换、源码显形。</p>
+      <p class="obsidian">Obsidian 对应：.metadata-container（Obsidian 属性面板方向，本项目自有表格卡片形态）</p>
+
+      <p class="dom">DOM 关系：live 视图 .cm-line 行元素（头区行）。</p>
+      <pre><code>.vsidian-fm-card-line {
+  background: var(--vsidian-table-background);
+}</code></pre>
+      <p class="verify">验证：frontmatterTable 纯函数单元（成型/降级矩阵）；集成「界面域样式契约」：chromeSelectors[&quot;live-fm-card-line-live&quot;] 探针命中</p>
+      <p class="life">引入：#140（2026-09-27）</p>
+    </article>
+    <article class="entry" id="live-fm-row">
+      <h3><code>.vsidian-fm-row（+ .vsidian-fm-item-row 数组项行修饰；grid-template-columns: minmax(120px, 32%) 1fr 两列）</code><span class="eid">live-fm-row</span></h3>
+      <p class="purpose">表格卡片的键值行（两列网格：键列/值列）；数组项行带 item-row 修饰（键列为 `- ` 标记淡化占位）。阅读侧同款表格行同名（.vsidian-fm-table 容器内）。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：.metadata-property（Obsidian 属性行方向，DOM 结构不同）</p>
+
+      <p class="dom">DOM 关系：live：.cm-line 行元素（网格行）；阅读：.vsidian-fm-table 内 div。</p>
+      <pre><code>.vsidian-fm-row {
+  grid-template-columns: minmax(140px, 40%) 1fr;
+}</code></pre>
+      <p class="verify">验证：集成「界面域样式契约」：chromeSelectors[&quot;live-fm-row-live&quot;/&quot;live-fm-row-reading&quot;] 探针命中</p>
+      <p class="life">引入：#140（2026-09-27）</p>
+    </article>
+    <article class="entry" id="live-fm-cell">
+      <h3><code>.vsidian-fm-cell（+ .vsidian-fm-key 键列 / .vsidian-fm-value 值列 / .vsidian-fm-item-mark 数组项标记 / .vsidian-fm-sep 冒号 / .vsidian-fm-comment 行内注释 / .vsidian-fm-comment-line 独立注释行）</code><span class="eid">live-fm-cell</span></h3>
+      <p class="purpose">单元格 mark：键与值（含数组项文本）映射为源区间的格；sep（冒号与结构空格）与 comment（行内注释）在绘制层隐藏（display:none 不占格位，源文保留可编辑）；item-mark 淡化占键列；独立注释行整行淡化纳入卡片。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：.metadata-property-key / -value（方向）</p>
+
+      <p class="dom">DOM 关系：live：格 mark span（源区间）；阅读：span（item-mark/sep/comment 为 live 专属隐藏类）。</p>
+      <pre><code>.vsidian-fm-value {
+  color: var(--vscode-editor-foreground);
+}</code></pre>
+      <p class="verify">验证：集成「界面域样式契约」：chromeSelectors[&quot;live-fm-cell-live&quot;/&quot;live-fm-cell-reading&quot;] 探针命中</p>
+      <p class="life">引入：#140（2026-09-27）</p>
+    </article>
+    <article class="entry" id="live-fm-controls">
+      <h3><code>.vsidian-fm-remove（删行/删项 ×）/ .vsidian-fm-add-item（末项后 +）/ .vsidian-fm-empty-value（空值格占位）</code><span class="eid">live-fm-controls</span></h3>
+      <p class="purpose">结构操作控件：键值对与数组项的删除按钮（行尾 widget，行 hover 显现）、数组末尾加项按钮；空值格占位承接点击定位（冒号后无空隙时点击先补结构空格）。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-none">none</span></p>
+<p class="states">状态：hover/聚焦显现（opacity 过渡）；flow 数组不发射项级按钮（整格文本编辑）。</p>
+      <p class="obsidian">Obsidian 对应：无（Obsidian 属性面板为独立面板 UI）</p>
+
+      <p class="dom">DOM 关系：live 行尾 widget（absolute 脱流，不占格位）。</p>
+      <pre><code>.vsidian-fm-remove {
+  color: var(--vscode-errorForeground);
+}</code></pre>
+      <p class="verify">验证：浏览器 frontmatterTable 套件（控件点击写回）</p>
+      <p class="life">引入：#140（2026-09-27）</p>
+    </article>
+    <article class="entry" id="live-fm-add-entry">
+      <h3><code>.vsidian-fm-add-entry</code><span class="eid">live-fm-add-entry</span></h3>
+      <p class="purpose">「添加属性」按钮（闭合围栏行的整行替换 widget，呈现态常驻）：点击在末条目后插入 key: value 模板并选中新键；空格下为虚线占位形态。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-none">none</span></p>
+<p class="states">状态：呈现态常驻；光标触及闭合行时撤下（源码显形可编辑）。</p>
+      <p class="obsidian">Obsidian 对应：.metadata-add-property（方向）</p>
+
+      <p class="dom">DOM 关系：live 闭合围栏行 replace widget。</p>
+      <pre><code>.vsidian-fm-add-entry {
+  border-style: solid;
+}</code></pre>
+      <p class="verify">验证：集成「界面域样式契约」：chromeSelectors[&quot;live-fm-add-entry-live&quot;] 探针命中</p>
+      <p class="life">引入：#140（2026-09-27）</p>
     </article>
   </section>
 <p style="margin-top:48px;color:color-mix(in srgb, currentColor 50%, transparent);font-size:12px">由 src/shared/styleContract.ts 生成（scripts/genStyleGuide.mjs）；产物一致性由 test/unit/styleGuideGen.test.ts 钉住。</p>

@@ -21,6 +21,8 @@ import { frontmatterRange } from './markdownDoc'
 import { maskCodeSpanPipes } from './tableCells'
 import { isRenderedFenceInfo } from '../shared/mermaid'
 import { codeInfoFirstWord } from '../shared/codeLangs'
+import { buildFrontmatterTableHtml, parseFrontmatterTable } from '../shared/frontmatterTable'
+import { t } from '../shared/i18n'
 import {
   buildLineBounds,
   createMarkdownRenderer,
@@ -147,11 +149,16 @@ export function splitReadingBlocks(text: string): ReadingBlock[] {
 
   if (fm) {
     const fmEndLine = lineNumberOfOffset(env, fm.end)
+    // #140：合法简单头区成型为表格（值全转义，进 DOM 前再净化）；降级
+    // （复杂类型/解析失败）保留转义源码块——两形态随内容实时切换
+    const fmModel = parseFrontmatterTable(text, fm)
     blocks.push({
       kind: 'frontmatter',
       start: 0,
       end: fm.end,
-      html: `<pre class="vsidian-reading-frontmatter-text">${escapeHtml(text.slice(0, fm.end))}</pre>`,
+      html: fmModel
+        ? buildFrontmatterTableHtml(fmModel, text, { emptyLabel: t('frontmatter.empty') })
+        : `<pre class="vsidian-reading-frontmatter-text">${escapeHtml(text.slice(0, fm.end))}</pre>`,
     })
     return splitBody(text, env, fmEndLine + 1, blocks)
   }
