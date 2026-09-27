@@ -2735,7 +2735,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "frontmatter",
     "kind": "selector",
     "target": ".vsidian-fm-card-line（+ -edge-top / -edge-bottom 首尾围栏行修饰）",
-    "purpose": "frontmatter 只读表格卡片的行级类：合法简单头区（标量 + 字符串数组）成型时覆盖头区全部行（含首尾围栏行与杂项行），承载卡片底色与左右边线，首尾围栏行补横线并做圆角修饰，拼装为完整边框圆角卡片。卡片行同时承载 vsidian-frontmatter-line（别名桥 direct 级承诺 .cm-hmd-frontmatter 在成型形态下保持命中，降透明副作用由卡片规则重置）。复杂类型/解析失败时整卡降级为 frontmatter-line 源码形态（见 limit-fm-complex-types）。",
+    "purpose": "frontmatter 只读表格卡片的行级类：合法简单头区（标量 + 字符串数组）成型时覆盖头区全部行（含首尾围栏行与杂项行），承载左右边线（行区透明，撞色边界感由边框与标题栏微亮条承担），首尾围栏行补横线并做圆角修饰，拼装为完整边框圆角卡片。卡片行同时承载 vsidian-frontmatter-line（别名桥 direct 级承诺 .cm-hmd-frontmatter 在成型形态下保持命中，降透明副作用由卡片规则重置）。复杂类型/解析失败时整卡降级为 frontmatter-line 源码形态（见 limit-fm-complex-types）。",
     "views": [
       "live"
     ],
@@ -2757,8 +2757,8 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "domain": "chrome",
     "category": "frontmatter",
     "kind": "selector",
-    "target": ".vsidian-fm-row（+ .vsidian-fm-item-row 数组项行修饰；grid-template-columns: minmax(120px, 32%) 1fr 两列）",
-    "purpose": "只读表格卡片的键值行（两列网格：键列/值列）：无格线，仅行间 1px 淡分隔线（首键值行的分隔线兼作标题栏下边线）；数组项行带 item-row 修饰（键列为 `- ` 标记淡化占位）。阅读侧同款表格行同名（.vsidian-fm-table 容器内）。",
+    "target": ".vsidian-fm-row（+ .vsidian-fm-item-row 数组项行修饰 / .vsidian-fm-list-row 数组宿主行修饰；grid-template-columns: minmax(120px, 32%) 1fr 两列）",
+    "purpose": "只读表格卡片的键值行（两列网格：键列/值列）：无格线无行间分隔（行区透明——撞色边界感由卡片边框与标题栏微亮条承担）；行级 grid 撑满内容区（**不限宽**，限宽会使行级边框与头部行错位形成右侧空洞）；数组宿主行带 list-row 修饰（键名类型图标取列表形 ≡），数组项行带 item-row 修饰（键列为 `- ` 标记淡化占位）。阅读侧同款表格行同名（.vsidian-fm-table 容器内，整宽透明同口径）。",
     "views": [
       "live",
       "reading"
@@ -2780,13 +2780,13 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "frontmatter",
     "kind": "selector",
     "target": ".vsidian-fm-cell（+ .vsidian-fm-key 键列 / .vsidian-fm-value 值列 / .vsidian-fm-item-mark 数组项标记 / .vsidian-fm-sep 冒号 / .vsidian-fm-comment 行内注释 / .vsidian-fm-comment-line 独立注释行）",
-    "purpose": "单元格 mark：键与值（含数组项文本）映射为源区间的格，只读着色（格不可点击编辑）；键列为常规字重 + 次级前景灰（对齐参考图，#140 首版表头底色形态随格内编辑方案退役）；sep（冒号与结构空格）与 comment（行内注释）在绘制层隐藏（display:none 不占格位）；item-mark 淡化占键列；独立注释行整行淡化纳入卡片。",
+    "purpose": "单元格 mark：键与值（含数组项文本）映射为源区间的格，只读着色（格不可点击编辑）；键列常规字重 + 弱化灰（opacity 0.7，参考图 key 浅 value 深）+ 行首类型图标（::before：标量 T、数组宿主行列表形 ≡）；sep（冒号与结构空格）与 comment（行内注释）在绘制层隐藏（display:none 不占格位）；item-mark 淡化占键列；独立注释行整行淡化纳入卡片。",
     "views": [
       "live",
       "reading"
     ],
     "dom": "live：格 mark span（源区间）；阅读：span（item-mark/sep/comment 为 live 专属隐藏类）。",
-    "example": ".vsidian-fm-key {\n  font-weight: normal;\n}",
+    "example": ".vsidian-fm-key {\n  opacity: 0.7;\n}",
     "obsidian": {
       "counterpart": ".metadata-property-key / -value（方向）",
       "support": "none"
@@ -2802,7 +2802,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "frontmatter",
     "kind": "selector",
     "target": ".vsidian-fm-header（标题栏容器；内含 .vsidian-fm-header-icon 图标 / .vsidian-fm-header-title 标题 / button.vsidian-fm-edit「修改」按钮）",
-    "purpose": "卡片标题栏（首围栏行 replace widget）：列表图标 + Properties 标题（600 字重次级前景灰）+ 右上角圆角描边「修改」按钮（铅笔图标，hover/聚焦高亮）。按钮点击开关属性编辑 Popover。阅读侧同容器内同类名同布局（无按钮，只读）。",
+    "purpose": "卡片标题栏（首围栏行 replace widget）：微亮底色条（与透明行区形成撞色边界感）+ 列表图标 + Properties 标题（600 字重次级前景灰）+ 右上角圆角描边「修改」按钮（铅笔图标，hover/聚焦高亮）。行内前后 cm-widgetBuffer 隐藏（inline replace 的光标停靠点各占一行文字高，成型态光标不进头区无消费者）使头部行高收敛到约 1.2 倍正文行高。按钮点击开关属性编辑 Popover。阅读侧同容器内同类名同布局（无按钮，只读）。",
     "views": [
       "live",
       "reading"

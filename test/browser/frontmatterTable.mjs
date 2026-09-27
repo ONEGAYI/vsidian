@@ -72,6 +72,43 @@ try {
       return { weight: cs.fontWeight, color: cs.color }
     })
     assert.equal(keyStyle.weight, '400', `键列应为常规字重: ${JSON.stringify(keyStyle)}`)
+    // 观感二轮（参考图对齐）：行级 grid 撑满（不限宽——限宽曾使行级背景
+    // /边框与头部行错位，右侧形成编辑器底色空洞与断边）、行区透明（撞色
+    // 边界感 = 边框 + 标题栏微亮条）、头部行高紧凑（buffer 隐藏，约 1.2
+    // 倍正文行高）、键名弱化 + 标量 T 图标
+    const geom = await page.evaluate(() => {
+      const lines = [...document.querySelectorAll('.cm-line.vsidian-fm-card-line')]
+      const widths = lines.map((l) => l.getBoundingClientRect().width)
+      const headerLine = document.querySelector('.cm-line.vsidian-fm-card-edge-top')
+      const rowLine = document.querySelector('.cm-line.vsidian-fm-row')
+      const key = document.querySelector('.vsidian-fm-row > .vsidian-fm-key')
+      return {
+        widthSpread: Math.max(...widths) - Math.min(...widths),
+        cardBg: getComputedStyle(rowLine).backgroundColor,
+        headerH: headerLine.getBoundingClientRect().height,
+        rowH: rowLine.getBoundingClientRect().height,
+        keyOpacity: getComputedStyle(key).opacity,
+        keyIcon: getComputedStyle(key, '::before').content,
+      }
+    })
+    assert.ok(geom.widthSpread < 2, `卡片各行行宽应一致（不限宽，防右侧空洞）: ${JSON.stringify(geom)}`)
+    assert.equal(geom.cardBg, 'rgba(0, 0, 0, 0)', `行区应透明（不铺底色）: ${geom.cardBg}`)
+    assert.ok(geom.headerH < geom.rowH * 2, `头部行高应紧凑（< 2 倍键值行高）: ${JSON.stringify(geom)}`)
+    assert.equal(geom.keyOpacity, '0.7', `键名应弱化（参考图 key 浅）: ${geom.keyOpacity}`)
+    assert.equal(geom.keyIcon, '"T"', `标量键名前应有 T 类型图标: ${geom.keyIcon}`)
+    assert.deepEqual(errors, [], '页面不能有未捕获异常')
+    await page.close()
+  }
+
+  // ---- live：数组宿主行列表形类型图标（观感二轮，参考图行首图标） ----
+  {
+    const { page, errors } = await openPage()
+    await page.evaluate((t) => window.initFmDoc(t, 'live'), ARRAY_DOC)
+    const icon = await page.evaluate(() => {
+      const host = document.querySelector('.vsidian-fm-row.vsidian-fm-list-row > .vsidian-fm-key')
+      return host ? getComputedStyle(host, '::before').content : null
+    })
+    assert.equal(icon, '"≡"', `数组宿主行键名应为列表形图标: ${icon}`)
     assert.deepEqual(errors, [], '页面不能有未捕获异常')
     await page.close()
   }

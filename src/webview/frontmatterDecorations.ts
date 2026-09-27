@@ -39,6 +39,8 @@ export const FM_CARD_CLASS_NAMES = {
   edgeBottom: 'vsidian-fm-card-edge-bottom',
   /** 键值行（两列网格） */
   row: 'vsidian-fm-row',
+  /** 数组宿主行修饰（键名类型图标取列表形；标量行默认 T 形） */
+  listRow: 'vsidian-fm-list-row',
   /** 数组项行修饰（key 列为项标记占位） */
   itemRow: 'vsidian-fm-item-row',
   /** 单元格（key/value 修饰见下） */
@@ -194,6 +196,10 @@ export function buildFrontmatterCardPlan(doc: Text, model: FmTableModel): FmCard
   for (const entry of model.entries) {
     const hostLine = doc.lineAt(Math.min(entry.lineFrom, doc.length))
     addCls(hostLine.number, FM_CARD_LINE_CLASSES, FM_CARD_CLASS_NAMES.row)
+    // 数组宿主行（block 与 flow 同）：键名类型图标取列表形
+    if (entry.kind !== 'scalar') {
+      addCls(hostLine.number, FM_CARD_CLASS_NAMES.listRow)
+    }
     ranges.push(fmCellDeco('key').range(entry.key.from, entry.key.to))
     if (entry.value.from > entry.key.to) {
       ranges.push(fmSepDeco.range(entry.key.to, entry.value.from))

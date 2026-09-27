@@ -743,8 +743,8 @@ export function buildFrontmatterTableHtml(
       rows.push(rowHtml(keyHtml, value, false))
       continue
     }
-    // 数组：宿主行（值列空占位）+ 项行（占位键列）
-    rows.push(rowHtml(keyHtml, '', false))
+    // 数组：宿主行（值列空占位，键名类型图标取列表形）+ 项行（占位键列）
+    rows.push(rowHtml(keyHtml, '', false, true))
     for (const item of entry.items) {
       rows.push(rowHtml('', escapeHtml(text.slice(item.item.from, item.item.to)), true))
     }
@@ -755,11 +755,15 @@ export function buildFrontmatterTableHtml(
   return `<div class="vsidian-fm-table">${rows.join('')}</div>`
 }
 
-function rowHtml(keyHtml: string, valueHtml: string, itemRow: boolean): string {
+function rowHtml(keyHtml: string, valueHtml: string, itemRow: boolean, listHost = false): string {
   const keyClass = itemRow
     ? 'vsidian-fm-cell vsidian-fm-key vsidian-fm-key-placeholder'
     : 'vsidian-fm-cell vsidian-fm-key'
-  const rowClass = itemRow ? 'vsidian-fm-row vsidian-fm-item-row' : 'vsidian-fm-row'
+  const rowClass = itemRow
+    ? 'vsidian-fm-row vsidian-fm-item-row'
+    : listHost
+      ? 'vsidian-fm-row vsidian-fm-list-row'
+      : 'vsidian-fm-row'
   return (
     `<div class="${rowClass}"><span class="${keyClass}">${keyHtml}</span>` +
     `<span class="vsidian-fm-cell vsidian-fm-value">${valueHtml}</span></div>`

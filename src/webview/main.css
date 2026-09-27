@@ -1245,16 +1245,28 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
    围栏行清空为卡片底边（不放控件——格内编辑时代的「添加属性」整行按
    钮与行内 ×/＋ 均已退役）。光标进入头区被引导至闭合行后（成型态不暴
    露源码），编辑收敛到「修改」按钮的 Popover（样式见下方
-   .vsidian-fm-popover 段）。布局对齐参考图：完整边框圆角卡片、行间淡
-   分隔、键列常规字重灰、无格线。降级形态沿用上方 vsidian-frontmatter-line。 */
+   .vsidian-fm-popover 段）。观感对齐参考图（验收二轮）：撞色边界感 =
+   完整 1px 边框 + 标题栏微亮条，行区不铺底色；键值行行级 grid 撑满
+   内容区（不限宽——限宽曾使行级背景/边框与头部行错位，右侧形成
+   「空洞」断边）；行间无分隔线；键名弱化 + 类型图标（标量 T / 数组
+   列表形）。降级形态沿用上方 vsidian-frontmatter-line。 */
 #app .cm-editor .cm-scroller .cm-line.vsidian-fm-card-line {
   font-family: var(--vscode-editor-font-family, monospace);
-  background-color: var(--vsidian-table-background, rgba(128, 128, 128, 0.05));
+  /* 行区透明：撞色边界感由边框与标题栏微亮条承担（参考图形态） */
+  background: none;
   /* 卡片行同时携带 vsidian-frontmatter-line（别名桥 direct 级承诺的
      承载形态）：重置其降透明副作用，卡片内不降透明 */
   opacity: 1;
   border-left: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
   border-right: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
+}
+
+/* 标题栏行的 inline replace widget 前后各插一个 cm-widgetBuffer（各占
+   一行文字高度，头部行总高被撑到约 1.7 倍正文行高——验收二轮实测）。
+   成型态光标被引导不进头区，buffer 的光标停靠点无消费者，隐藏之；
+   CM6 行高测量随 buffer 归零收敛到标题栏自身高度 */
+#app .cm-editor .cm-scroller .vsidian-fm-card-edge-top .cm-widgetBuffer {
+  display: none;
 }
 
 #app .cm-editor .cm-scroller .vsidian-fm-card-edge-top {
@@ -1268,13 +1280,15 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
 }
 
 /* 标题栏（live 首围栏行 replace widget 与阅读侧容器内同构，#app 下两
-   视图同类名同布局） */
+   视图同类名同布局）：微亮条与正文区分（撞色边界感的第二来源，参考图
+   头部条形态），高度紧凑（padding 收敛，总高约 1.2 倍正文行高） */
 #app .vsidian-fm-header {
   display: flex;
   align-items: center;
   gap: 8px;
   box-sizing: border-box;
-  padding: 5px 12px;
+  padding: 3px 10px;
+  background: var(--vsidian-table-background, rgba(128, 128, 128, 0.05));
   font-family: var(--vscode-font-family, sans-serif);
 }
 
@@ -1311,10 +1325,12 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.2));
 }
 
+/* 键值行行级 grid：撑满内容区（不限宽——行级类直接作用于 .cm-line，
+   限宽会把行级背景/边框一并收窄，与头部行错位形成右侧空洞，验收二轮
+   实测教训） */
 #app .cm-editor .cm-scroller .vsidian-fm-row {
   display: grid;
   grid-template-columns: minmax(120px, 32%) 1fr;
-  width: min(100%, 880px);
   padding: 0;
   box-shadow: none;
   position: relative;
@@ -1325,17 +1341,32 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   padding: 4px 12px;
   box-sizing: border-box;
   border: 0;
-  /* 行间淡分隔线（首键值行的分隔线兼作标题栏下边线，对齐参考图） */
-  border-top: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-/* 键列对齐参考图：常规字重、次级前景灰（不再是表头 600 字重 + 底色） */
+/* 键列对齐参考图：常规字重、弱化到约正文前景一半亮度（参考实测键名
+   亮度 ≈ 值的 45%）；键名前类型图标（标量 T / 数组列表形 ≡，参考图
+   行首图标形态；项行 key 格为占位标记，不适用） */
 #app .cm-editor .cm-scroller .vsidian-fm-row > .vsidian-fm-key {
   font-weight: normal;
   background: transparent;
   color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.9));
+  opacity: 0.7;
+}
+
+#app .cm-editor .cm-scroller .vsidian-fm-row > .vsidian-fm-key::before {
+  content: 'T';
+  display: inline-block;
+  width: 14px;
+  margin-right: 4px;
+  font-size: 0.85em;
+  text-align: center;
+  opacity: 0.8;
+}
+
+#app .cm-editor .cm-scroller .vsidian-fm-row.vsidian-fm-list-row > .vsidian-fm-key::before {
+  content: '≡';
 }
 
 /* 冒号/结构空格与行内注释：绘制层隐藏（不占格位；源文保留） */
@@ -1357,13 +1388,14 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   opacity: 0.45;
 }
 
-/* ---- 阅读侧 frontmatter 表格：与 live 同类名同布局 ---- */
+/* ---- 阅读侧 frontmatter 表格：与 live 同类名同布局（行区透明、无行
+   分隔、键名弱化 + 类型图标，与 live 侧同口径） ---- */
 #app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-table {
   margin: 0 0 12px;
-  width: min(100%, 880px);
+  width: 100%;
   border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
   border-radius: 6px;
-  background-color: var(--vsidian-table-background, rgba(128, 128, 128, 0.05));
+  background: none;
   overflow: hidden;
 }
 
@@ -1377,7 +1409,6 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   padding: 4px 12px;
   box-sizing: border-box;
   border: 0;
-  border-top: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -1386,6 +1417,21 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   font-weight: normal;
   background: transparent;
   color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.9));
+  opacity: 0.7;
+}
+
+#app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-key::before {
+  content: 'T';
+  display: inline-block;
+  width: 14px;
+  margin-right: 4px;
+  font-size: 0.85em;
+  text-align: center;
+  opacity: 0.8;
+}
+
+#app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-row.vsidian-fm-list-row > .vsidian-fm-key::before {
+  content: '≡';
 }
 
 #app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-key-placeholder {

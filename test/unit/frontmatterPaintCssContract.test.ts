@@ -25,16 +25,35 @@ describe('frontmatter 表格卡片 CSS 契约（#140 Popover 改版）', () => {
     expect(card).toMatch(/border-right:\s*1px solid var\(--vscode-panel-border/)
   })
 
-  it('格无边框（去格线）只留行间淡分隔；键列常规字重灰（对齐参考图）', () => {
+  it('格无边框无行间分隔（行区干净，靠卡片边框与标题栏微亮条分界）；键名弱化 + 类型图标', () => {
     const cell = rule('.cm-scroller .vsidian-fm-row > .vsidian-fm-cell')
     expect(cell).toMatch(/border:\s*0/)
-    expect(cell).toMatch(/border-top:\s*1px solid var\(--vscode-panel-border/)
+    expect(cell).not.toMatch(/border-top:\s*1px/)
     expect(cell).toMatch(/white-space:\s*pre-wrap/)
     expect(cell).not.toMatch(/display:\s*none/)
     const key = rule('.cm-scroller .vsidian-fm-row > .vsidian-fm-key')
     expect(key).toMatch(/font-weight:\s*normal/)
     expect(key).toMatch(/color:\s*var\(--vscode-descriptionForeground/)
+    // 验收二轮：参考图键名亮度 ≈ 值的 45%，descriptionForeground 之上再压一档
+    expect(key).toMatch(/opacity:\s*0\.7/)
     expect(key).not.toMatch(/background:\s*var\(--vsidian-table-background/)
+    // 键名类型图标：标量 T / 数组宿主行列表形（参考图行首图标）
+    expect(rule('.cm-scroller .vsidian-fm-row > .vsidian-fm-key::before')).toMatch(/content:\s*'T'/)
+    expect(rule('.cm-scroller .vsidian-fm-row.vsidian-fm-list-row > .vsidian-fm-key::before')).toMatch(/content:\s*'≡'/)
+  })
+
+  it('观感二轮修复：行级 grid 不限宽（防右侧空洞）、行区透明、标题栏 buffer 隐藏 + 微亮条', () => {
+    // 限宽曾把行级背景/边框收窄到 880px，与头部行（撑满）错位，右侧形成
+    // 编辑器底色空洞 + 右边框断裂（真机验收图实测）——行级 grid 必须撑满
+    expect(rule('.cm-scroller .vsidian-fm-row')).not.toMatch(/width:\s*min\(/)
+    const card = rule('.cm-line.vsidian-fm-card-line')
+    // 撞色边界感 = 边框 + 标题栏微亮条，行区不铺底色（参考图形态）
+    expect(card).toMatch(/background:\s*none/)
+    // 标题栏行 inline widget 的前后 buffer 各占一行文字高（头部行被撑到
+    // 1.7 倍正文行高），成型态光标不进头区，停靠点隐藏
+    expect(rule('.vsidian-fm-card-edge-top .cm-widgetBuffer')).toMatch(/display:\s*none/)
+    // 标题栏微亮条（与行区透明的对比来源）
+    expect(rule('#app .vsidian-fm-header')).toMatch(/background:\s*var\(--vsidian-table-background/)
   })
 
   it('标题栏与修改按钮：图标标题灰、600 字重标题、圆角描边按钮 hover 高亮', () => {
@@ -56,15 +75,23 @@ describe('frontmatter 表格卡片 CSS 契约（#140 Popover 改版）', () => {
     expect(rule('.vsidian-fm-comment-line')).not.toMatch(/display:\s*none/)
   })
 
-  it('阅读侧同款表格：容器外框圆角、键列常规字重、占位键列隐藏、空态在场', () => {
+  it('阅读侧同款表格：容器外框圆角、整宽透明、键名弱化 + 图标、占位键列隐藏、空态在场', () => {
     const table = rule('.vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-table')
     expect(table).toMatch(/border:\s*1px solid/)
     expect(table).toMatch(/border-radius:\s*6px/)
     expect(table).toMatch(/overflow:\s*hidden/)
+    // 观感二轮同款：不限宽、行区透明
+    expect(table).toMatch(/width:\s*100%/)
+    expect(table).toMatch(/background:\s*none/)
     expect(rule('.vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-row'))
       .toMatch(/display:\s*grid/)
     const readingKey = rule('.vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-key')
     expect(readingKey).toMatch(/font-weight:\s*normal/)
+    expect(readingKey).toMatch(/opacity:\s*0\.7/)
+    expect(rule('.vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-key::before'))
+      .toMatch(/content:\s*'T'/)
+    expect(rule('.vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-row.vsidian-fm-list-row > .vsidian-fm-key::before'))
+      .toMatch(/content:\s*'≡'/)
     expect(rule('.vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-key-placeholder'))
       .toMatch(/visibility:\s*hidden/)
     expect(rule('.vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-empty'))
