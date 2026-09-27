@@ -1,0 +1,47 @@
+# 规格：编辑器工具栏双态视图切换按钮
+
+状态：待实施（工单 [#141](https://github.com/ONEGAYI/vsidian/issues/141)）。本文是该按钮与切换通道的单一事实源，工单验收以此为准。
+
+## 范围
+
+- **覆盖**：webview 编辑器顶栏（`.vsidian-toolbar`）新增阅读 / Live 双态切换按钮；配套的 webview→宿主切换请求通道。
+- **排除**：源码模式入口（右上角三态按钮为源码路径唯一入口）；设置页 webview；快捷键行为变更（仅做入口评估记录）。
+
+## 现状要点（勘察 2026-09-27）
+
+- 工具栏装配 `buildToolbar`：左端齿轮 + 快速操作 `✎`，右端侧栏按钮（`margin-left:auto` 推靠，`src/webview/main.css:560`）。
+- #38 起视图切换收敛宿主：`setViewMode` 为 private，仅宿主 `view.mode.set` 驱动（`src/webview/syncController.ts:1866-1867`）；`WebviewToHost` 无视图切换请求消息；先例 `keybindings.execute` 出站 → 宿主 executeCommand → 回发 `view.mode.set`。
+
+## 已确认决策（2026-09-27 澄清答复）
+
+1. **位置**：工具栏右侧、紧邻侧栏按钮左侧（按钮序：齿轮、`✎`、双态切换、侧栏）。
+2. **形态**：单按钮切换，图标随当前态（阅读态显书本类图标、Live 态显编辑类图标），点击切到另一态。
+3. **通道**：新增 webview→宿主请求消息（protocol.ts 单一事实源），宿主复用 `runViewSwitch` 裁剪为 live↔reading 双态；按钮态由既有 `view.mode.set` 驱动。
+
+## 交互契约
+
+1. **点击行为**：live→reading、reading→live；走同一 `runViewSwitch` 记忆语义（最近停留模式照常更新）；不触及源码路径。
+2. **图标与 aria-label**：随当前态与界面语言双变化，进 localeDom 换包重刷注册表（参照侧栏按钮 `bindLocaleFnAttrs` 先例）。
+3. **与右上角三态按钮互不回归**：`vsidian.activeMode` context 与按钮互斥显隐 when 条件不变；阅读态下右上角「转源码」仍可用。
+4. **键盘可达**：原生 button，Tab 可达、Enter / Space 激活；`mousedown preventDefault` 防抢正文焦点（沿用 `✎` 按钮策略：只拦默认聚焦不拦 click，保留表格格区）。
+5. **快捷键入口评估**：本按钮是既有视图切换操作的 UI 入口；「双态切换」是否单列可绑定操作（默认可不绑定）在实施时定并记录到 `docs/specs/keybindings.md`。
+
+## 用户故事
+
+1. 作为编辑者，我希望不动鼠标到窗口右上角，直接在编辑器顶栏一键在阅读与 Live 之间切换。
+2. 作为用户，我希望按钮图标告诉我当前在哪个模式，点一下就到另一个。
+
+## 实施决策
+
+- **协议**：出站消息命名与载荷遵循 protocol.ts 既有风格（如 `view.switch.request`）；契约测试同步。
+- **宿主**：textEditorProvider 处理新消息 → `runViewSwitch` 双态分支。
+- **webview**：`buildToolbar` 在侧栏按钮前插入；内联 SVG 图标（不引 codicon 依赖，参照既有按钮）。
+
+## 验证与完成条件
+
+- **测试**：协议契约单测；jsdom 控制器单测（出站消息、图标随态、换包重刷）；集成（真宿主点击切换、与三态按钮 / 记忆模式一致性）。
+- **视觉层断言**：按钮绘制层可见且 DOM 序在侧栏按钮之前（契约测试钉住）。
+- **回归与文档**：compile / test:unit / test:browser / test:integration；更新 keybindings.md、README 双语、人工验证清单、文件树。
+- **用户人工验收**：位置（侧栏按钮左侧）与图标随态的观感。
+
+Blocked by: 无
