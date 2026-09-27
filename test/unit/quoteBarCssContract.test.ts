@@ -30,6 +30,11 @@ describe('引用块提示竖条变量族（#143）', () => {
     expect(live).not.toMatch(/--vsidian-quote-bar-color:\s*[^)]*background/)
   })
 
+  it('live 引用行有左内边距（QuoteMark 隐藏后文字不与竖条重合，#143 验收修复）', () => {
+    const live = cssRule(css, '#app .cm-editor .cm-scroller .vsidian-quote-line')
+    expect(live).toMatch(/padding-left:\s*calc\(0\.9em \+ 3px\)/)
+  })
+
   it('阅读 blockquote 左竖条同引变量（两侧一致的颜色来源），背景底不变', () => {
     const reading = cssRule(css, '#app .vsidian-view-reading .vsidian-reading-block blockquote')
     expect(reading).toMatch(/border-left:\s*3px solid var\(--vsidian-quote-bar-color\)/)

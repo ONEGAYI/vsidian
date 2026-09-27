@@ -162,6 +162,32 @@ try {
     await page.close()
   }
 
+  // ---- live/reading：键列对齐表格表头视觉（验收对齐：600 字重 + 表头
+  //      底色，不灰字弱化——观感并入表格体系） ----
+  {
+    const { page, errors } = await openPage()
+    await page.evaluate((t) => window.initFmDoc(t, 'live'), FM_DOC)
+    const liveKey = await page.evaluate(() => {
+      const cs = getComputedStyle(document.querySelector('.vsidian-fm-row > .vsidian-fm-key'))
+      return { weight: cs.fontWeight, bg: cs.backgroundColor }
+    })
+    assert.ok(Number.parseInt(liveKey.weight, 10) >= 600,
+      `live 键列应为表头字重（≥600）: ${JSON.stringify(liveKey)}`)
+    assert.notEqual(liveKey.bg, 'rgba(0, 0, 0, 0)',
+      `live 键列应有表头底色: ${JSON.stringify(liveKey)}`)
+    await page.evaluate((t) => window.initFmDoc(t, 'reading'), FM_DOC)
+    const readingKey = await page.evaluate(() => {
+      const cs = getComputedStyle(document.querySelector('.vsidian-reading-frontmatter .vsidian-fm-key'))
+      return { weight: cs.fontWeight, bg: cs.backgroundColor }
+    })
+    assert.ok(Number.parseInt(readingKey.weight, 10) >= 600,
+      `阅读键列应为表头字重（≥600）: ${JSON.stringify(readingKey)}`)
+    assert.notEqual(readingKey.bg, 'rgba(0, 0, 0, 0)',
+      `阅读键列应有表头底色: ${JSON.stringify(readingKey)}`)
+    assert.deepEqual(errors, [], '页面不能有未捕获异常')
+    await page.close()
+  }
+
   // ---- reading：同款表格只读呈现 ----
   {
     const { page, errors } = await openPage()

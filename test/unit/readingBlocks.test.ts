@@ -309,7 +309,7 @@ describe('HTML 注释隐藏（#139）：阅读渲染输入先剥离注释', () =
     expect(fm.html).toContain('&lt;!-- 元 --&gt;')
   })
 
-  it('块锚点坐标系不受剥离影响（剥离等长，token 行号与原文行一致）', () => {
+  it('块锚点坐标系不受剥离影响（剥离保行数，token 行号与原文行一致）', () => {
     const text = '标题段\n<!-- 注 -->\n正文段\n'
     const blocks = splitReadingBlocks(text)
     const paras = blocks.filter((b) => b.kind === 'paragraph')

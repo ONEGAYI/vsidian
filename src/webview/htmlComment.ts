@@ -1,10 +1,11 @@
-// 阅读侧 HTML 注释剥离（#139）：markdown-it 解析前把注释内容替换为等长
-// 空格（换行保留），使阅读视图不渲染注释、同时保持锚点坐标系。
+// 阅读侧 HTML 注释剥离（#139）：markdown-it 解析前把注释整段删除，
+// 仅保留其中的换行符，使阅读视图不渲染注释且行内不留空位
+// （`单<!--注释-->词` 渲染为 `单词`）。
 //
-// 等长替换是坐标系承诺（readingBlocks 的 token.map 行号与 env.lineStarts
-// 均为原文坐标）：剥离不改行数与行内偏移，块的 start/end、li 锚点、任务
-// 写回锚点（#6/#7/#9 的 data-vsidian-src-*）不受影响。HTML 渲染时连续
-// 空格折叠，行内注释剥离后呈现为单空位。
+// 行数不变是坐标系承诺（readingBlocks 的 token.map 行号与 env.lineStarts
+// 均为原文坐标）：全部锚点取行首/行尾偏移（块的 start/end、li 锚点、任务
+// 写回锚点（#6/#7/#9 的 data-vsidian-src-*）），行内偏移不参与——保留
+// 换行即保行数，锚点不受影响。
 //
 // 代码区保护（多保护优于误剥——误剥正文不可恢复，多显示注释只是呈现
 // 瑕疵）：围栏代码（``` / ~~~ 行级状态机）、行内代码（反引号配对掩码，
@@ -73,9 +74,8 @@ function indentedCodeLine(line: string): boolean {
   return /^(?: {4}|\t)/u.test(line)
 }
 
-/** 阅读渲染输入的注释剥离：全文（body 切片）→ 等长剥离文本。
- *  注释（含跨行块级）替换为空格并保留换行；代码上下文与未闭合残缺
- *  保留原样。纯函数，无副作用。 */
+/** 阅读渲染输入的注释剥离：全文（body 切片）→ 删除注释（仅保留换行）。
+ *  代码上下文与未闭合残缺保留原样。纯函数，无副作用。 */
 export function stripHtmlComments(text: string): string {
   if (!text.includes(OPEN)) return text
   // 逐行掩码：围栏/缩进行整行掩码，其余行掩码行内代码区（\0 占位）
@@ -113,7 +113,8 @@ export function stripHtmlComments(text: string): string {
       continue
     }
     const end = close + CLOSE.length
-    out.push(text.slice(at, end).replace(/[^\n]/gu, ' '))
+    // 整段删除，仅保留换行（行数不变是锚点坐标系承诺，见文件头）
+    out.push(text.slice(at, end).replace(/[^\n]/gu, ''))
     i = end
   }
   return out.join('')

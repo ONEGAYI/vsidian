@@ -30,11 +30,13 @@ try {
   const DOC = ['> 外层引用行', '>', '> > 嵌套引用行', '', '正文段落。'].join('\n')
   await page.evaluate((text) => window.initQuote(text), DOC)
 
-  /** live 侧竖条颜色：box-shadow computed（Chromium 颜色段在最前） */
+  /** live 侧竖条颜色：box-shadow computed（Chromium 颜色段在最前）；
+   *  padding-left = 内容与竖条的排版间距（验收修复：QuoteMark 隐藏后
+   *  内容左移，无内边距时文字与竖条重合） */
   const liveBars = () => page.evaluate(() =>
     [...document.querySelectorAll('.vsidian-quote-line')].map((el) => {
       const m = /rgba?\([^)]+\)/.exec(getComputedStyle(el).boxShadow ?? '')
-      return { bar: m?.[0] ?? null, bg: getComputedStyle(el).backgroundColor }
+      return { bar: m?.[0] ?? null, bg: getComputedStyle(el).backgroundColor, pad: getComputedStyle(el).paddingLeft }
     }))
   /** 阅读侧竖条颜色：外层与嵌套 blockquote 的 borderLeftColor */
   const readingBars = () => page.evaluate(() =>
@@ -42,12 +44,18 @@ try {
       bar: getComputedStyle(el).borderLeftColor,
       bg: getComputedStyle(el).backgroundColor,
       width: getComputedStyle(el).borderLeftWidth,
+      pad: getComputedStyle(el).paddingLeft,
     })))
   const assertGray = (bg, label) => {
     const m = /rgba?\((\d+), (\d+), (\d+)/.exec(bg ?? '')
     assert(m, `${label} 背景应可解析: ${String(bg)}`)
     assert.equal(m[1], m[2], `${label} 背景须为灰调（不新增紫色背景）: ${bg}`)
     assert.equal(m[2], m[3], `${label} 背景须为灰调（不新增紫色背景）: ${bg}`)
+  }
+  /** 文字与竖条不重合：左内边距换算 px 后须超过竖条宽度（3px） */
+  const assertPadClearsBar = (pad, label) => {
+    const px = Number.parseFloat(pad ?? '')
+    assert.ok(Number.isFinite(px) && px > 3, `${label} 左内边距须大于竖条宽度 3px（文字不与竖条重合）: ${pad}`)
   }
 
   // 暗色主题（默认，无 body 主题类）：live 嵌套两行竖条均为暗紫
@@ -56,6 +64,7 @@ try {
   for (const line of live) {
     assert.equal(line.bar, DARK, `live 竖条颜色（暗）: ${JSON.stringify(line)}`)
     assertGray(line.bg, 'live 引用行')
+    assertPadClearsBar(line.pad, 'live 引用行')
   }
   // 阅读侧：外层与嵌套 blockquote 竖条同色，与 live 一致
   await page.evaluate(() => window.setQuoteMode('reading'))
@@ -66,6 +75,7 @@ try {
     assert.equal(q.bar, DARK, `阅读竖条颜色（暗）: ${JSON.stringify(q)}`)
     assert.equal(q.width, '3px', '竖条宽度维持 3px（换色不改形态）')
     assertGray(q.bg, '阅读 blockquote')
+    assertPadClearsBar(q.pad, '阅读 blockquote')
   }
   assert.equal(reading[0].bar, reading[1].bar, '外层与嵌套竖条颜色一致（嵌套不回归）')
   assert.equal(reading[0].bar, live[0].bar, '两侧竖条颜色一致（同一变量来源）')

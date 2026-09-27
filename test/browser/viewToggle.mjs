@@ -96,6 +96,19 @@ try {
     await page.waitForFunction(() =>
       document.querySelector('.vsidian-body')?.classList.contains('vsidian-mode-reading'))
 
+    // ---- 焦点环不出现（验收修复：键盘切换后的程序化聚焦命中
+    //      :focus-visible，UA 默认焦点环会围住整个阅读容器且点击正文
+    //      不消除）——阅读容器聚焦态 computed outline 须为 none ----
+    const ring = await page.evaluate(() => {
+      const el = document.querySelector('.vsidian-view-reading')
+      return { focused: document.activeElement === el, style: getComputedStyle(el).outlineStyle }
+    })
+    // 焦点接管是行为语义（键盘滚动依赖容器聚焦）。焦点环本身在 headless
+    // 不可复现：真机黄线来自 Chromium UA 规则 :focus-visible{outline:auto}
+    // （键盘序列后的程序化聚焦触发启发式），CDP 合成键盘不触发——回归
+    // 防线是 CSS 契约测试钉住 #app .vsidian-view-reading:focus{outline:none}
+    assert.equal(ring.focused, true, '编辑器有焦点时切入阅读，容器应接管焦点（键盘滚动依赖）')
+
     // ---- mousedown 不抢正文焦点（回到 live 后验证）----
     await page.evaluate(() => window.readHostMessages())
     // 切回 live（经按钮点击回环）

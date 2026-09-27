@@ -541,7 +541,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "line-syntax",
     "kind": "selector",
     "target": ".vsidian-quote-line",
-    "purpose": "live 引用行（> 前缀）；引用内容不额外 span 化（见 limit-quote-span）。左缘 3px 提示竖条颜色见 var-quote-bar-color（与阅读 blockquote 同源）。",
+    "purpose": "live 引用行（> 前缀）；引用内容不额外 span 化（见 limit-quote-span）。左缘 3px 提示竖条颜色见 var-quote-bar-color（与阅读 blockquote 同源）；左内边距 calc(0.9em + 3px)（QuoteMark 呈现态隐藏后的排版位，与阅读 blockquote 对齐）。",
     "views": [
       "live"
     ],
@@ -2780,13 +2780,13 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "frontmatter",
     "kind": "selector",
     "target": ".vsidian-fm-cell（+ .vsidian-fm-key 键列 / .vsidian-fm-value 值列 / .vsidian-fm-item-mark 数组项标记 / .vsidian-fm-sep 冒号 / .vsidian-fm-comment 行内注释 / .vsidian-fm-comment-line 独立注释行）",
-    "purpose": "单元格 mark：键与值（含数组项文本）映射为源区间的格；sep（冒号与结构空格）与 comment（行内注释）在绘制层隐藏（display:none 不占格位，源文保留可编辑）；item-mark 淡化占键列；独立注释行整行淡化纳入卡片。",
+    "purpose": "单元格 mark：键与值（含数组项文本）映射为源区间的格；键列对齐正文表格表头视觉（600 字重 + 表头底色引用，不灰字弱化——观感并入表格体系）；sep（冒号与结构空格）与 comment（行内注释）在绘制层隐藏（display:none 不占格位，源文保留可编辑）；item-mark 淡化占键列；独立注释行整行淡化纳入卡片。",
     "views": [
       "live",
       "reading"
     ],
     "dom": "live：格 mark span（源区间）；阅读：span（item-mark/sep/comment 为 live 专属隐藏类）。",
-    "example": ".vsidian-fm-value {\n  color: var(--vscode-editor-foreground);\n}",
+    "example": ".vsidian-fm-key {\n  font-weight: 600;\n}",
     "obsidian": {
       "counterpart": ".metadata-property-key / -value（方向）",
       "support": "none"

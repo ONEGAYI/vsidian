@@ -1179,6 +1179,11 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
 
 #app .cm-editor .cm-scroller .vsidian-quote-line {
   box-shadow: inset 3px 0 0 var(--vsidian-quote-bar-color);
+  /* #143 验收修复：QuoteMark 呈现态隐藏后内容左移至行首，文字与竖条
+     重合——补左内边距对齐阅读 blockquote 的排版（0.9em 内容距 + 3px
+     竖条占位；源码显形时前缀从同一缩进起点显示，与列表行 padding 常驻
+     同款取舍） */
+  padding-left: calc(0.9em + 3px);
   background-color: var(--vscode-textBlockQuote-background, rgba(128, 128, 128, 0.08));
 }
 
@@ -1281,9 +1286,11 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   border-top: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
 }
 
-/* 键列弱化底色（数据名与值区分） */
+/* 键列对齐正文表格表头视觉（#140 验收对齐：600 字重 + 表头底色引用，
+   不再灰字弱化——卡片观感并入表格体系；阅读侧下方同款） */
 #app .cm-editor .cm-scroller .vsidian-fm-row > .vsidian-fm-key {
-  color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.9));
+  font-weight: 600;
+  background: var(--vsidian-table-background, rgba(128, 128, 128, 0.1));
 }
 
 /* 冒号/结构空格与行内注释：绘制层隐藏（不占格位；源文保留可编辑） */
@@ -1340,7 +1347,8 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: var(--vscode-icon-foreground, inherit);
+  /* ＋ 号对齐表格插入控件前景（table-insert-row/column 同款引用） */
+  color: var(--vscode-textLink-foreground, #8abce2);
   cursor: pointer;
   opacity: 0;
   transition: opacity 0.1s ease-out;
@@ -1410,7 +1418,8 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
 }
 
 #app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-key {
-  color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.9));
+  font-weight: 600;
+  background: var(--vsidian-table-background, rgba(128, 128, 128, 0.1));
 }
 
 #app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-key-placeholder {
@@ -1988,6 +1997,16 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   font-family: var(--vsidian-content-font-family);
   font-size: var(--vsidian-reading-font-size);
   line-height: var(--vsidian-reading-line-height);
+}
+
+/* #141 验收修复：键盘快捷键（Ctrl+Q）切换后对容器的程序化聚焦紧随
+   键盘事件，Chromium 判定其匹配 :focus-visible 而绘制默认焦点环——
+   容器为视口大小，主题强调色下呈现围住整个 webview 的黄色亮框；点击
+   阅读正文不转移焦点（div 不夺焦），环无法自行消除。容器自身不画
+   焦点环：模式切换已是强视觉反馈，键盘焦点可见性由滚动与内容交互
+   表达 */
+#app .vsidian-view-reading:focus {
+  outline: none;
 }
 
 #app .vsidian-view-reading .vsidian-reading-block {
