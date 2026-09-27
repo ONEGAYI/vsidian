@@ -446,7 +446,45 @@ describe('按需控件换包后就地重刷（#101 第三部分契约）', () =>
 })
 
 describe('localeDom 注册表有界性（#101 常驻控件契约）', () => {
-  it('批量登记超阈值时顺带剪枝：死绑定不无界累积，连线登记仍换包重刷', () => {
+  it('先登记后挂树同构：超阈值微任务剪枝不误剪同批未挂树活项（N1）', async () => {
+    installLocale('zh-cn', zhCn)
+    const scratch = document.createElement('div')
+    document.body.append(scratch)
+    try {
+      // 清场：一批未挂树登记触发延迟剪枝，把历史用例可能滞留的死项清空，
+      // 使 before 成为全活项的干净基线（installLocale 开头的同步重刷只清
+      // 当刻已脱挂项，未触发过剪枝排队的遗留死项仍可能在册）
+      for (let i = 0; i < 600; i++) {
+        bindLocale(document.createElement('div'), 'text', 'outline.noMatch')
+      }
+      await Promise.resolve() // flush：清场剪枝微任务执行
+      const before = __localeDomBindingCountForTest()
+      // 生产同构（outline 构建函数返回后挂树 / nomatch 占位登记后
+      // appendChild）：bindLocale 时元素尚未入树，登记瞬间
+      // isConnected === false 是常态而非死项信号
+      const items: HTMLElement[] = []
+      for (let i = 0; i < 600; i++) {
+        const item = document.createElement('div')
+        bindLocale(item, 'text', 'outline.noMatch')
+        items.push(item)
+      }
+      // 同步挂树先于微任务：flush 时同批元素已全部 isConnected，
+      // 不得被剪（修复前 register 内同步剪枝在挂树前执行，同批整批
+      // 误剪，计数断言红）
+      scratch.append(...items)
+      await Promise.resolve()
+      expect(__localeDomBindingCountForTest()).toBe(before + 600)
+      // 换包重刷未失：同批元素全部换词（误剪后以残留 zh 形态红）
+      switchToEnglish()
+      for (const item of items) {
+        expect(item.textContent).toBe(en['outline.noMatch'])
+      }
+    } finally {
+      scratch.remove()
+    }
+  })
+
+  it('批量登记超阈值时延迟剪枝：死绑定不无界累积，连线登记仍换包重刷', async () => {
     installLocale('zh-cn', zhCn)
     const scratch = document.createElement('div')
     document.body.append(scratch)
@@ -457,8 +495,9 @@ describe('localeDom 注册表有界性（#101 常驻控件契约）', () => {
       for (let i = 0; i < 600; i++) {
         bindLocale(document.createElement('div'), 'text', 'outline.noMatch')
       }
-      // 超阈值登记触发 register 内剪枝：死绑定（未连线）被移除，
+      // 超阈值触发的剪枝经微任务延迟执行：flush 后死绑定（未连线）被移除，
       // 登记总数显著低于 before + 600（未实现时恰等于，先红）
+      await Promise.resolve()
       expect(__localeDomBindingCountForTest()).toBeLessThan(before + 600)
       // 剪枝不误伤连线登记：挂树元素登记后换包仍被注册表重刷
       const live = document.createElement('div')

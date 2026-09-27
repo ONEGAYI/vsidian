@@ -16,7 +16,13 @@
 //   无 dispose 纪律的函数化模块里累积泄漏）；
 // - 重刷时跳过已脱挂元素并剪除其登记项（三面板的常驻元素一旦脱挂即废弃：
 //   renderOutlineItems 全量重建、控制器 dispose 整体卸载，不存在「暂时
-//   脱挂后复用」的路径；创建到挂载之间是同步代码，不会插入换包）；
+//   脱挂后复用」的路径）；
+// - 「已登记未挂树」的同步创建窗口安全（N1）：生产登记普遍先 register
+//   后挂树（outline 构建函数返回后挂树、nomatch 占位登记后 appendChild），
+//   登记瞬间 isConnected === false 是常态而非死项信号。因此两类清理都
+//   不得落在该窗口内——换包重刷由外部消息驱动，单线程下不会插进创建到
+//   挂树的同步代码块；阈值剪枝经 queueMicrotask 延迟到同步挂树完成后
+//   执行（见 register），此时同批元素的 isConnected 已就位，不误剪；
 // - 换包通知由本模块在首次登记时订阅一次（懒订阅，模块导入零副作用）。
 //
 // 边界：本注册表只救「常驻 DOM」。CM6 widget 等按需控件的文案生命周期
@@ -35,10 +41,10 @@ interface LocaleBinding {
 const bindings: LocaleBinding[] = []
 let subscribed = false
 
-/** 登记数超过该阈值时在 register 内顺带剪枝：死绑定只在换包时清理的话，
- *  大纲条目等高频重建场景（每次重建的 chevron/nomatch 占位都新增登记）
- *  在两次换包间会无界累积。512 取三面板常驻控件峰值（顶栏/操作条/查找/
- *  侧栏骨架/大纲条目）的充分余量——超限即剪，正常文档远达不到 */
+/** 登记数超过该阈值时安排延迟剪枝：死绑定只在换包时清理的话，大纲条目
+ *  等高频重建场景（每次重建的 chevron/nomatch 占位都新增登记）在两次
+ *  换包间会无界累积。512 取三面板常驻控件峰值（顶栏/操作条/查找/侧栏
+ *  骨架/大纲条目）的充分余量——超限即剪，正常文档远达不到 */
 const REGISTER_PRUNE_THRESHOLD = 512
 
 function writeTo(el: Element, target: LocaleTarget, value: string): void {
@@ -57,12 +63,32 @@ function register(el: Element, write: (el: Element) => void): void {
   }
   bindings.push({ ref: new WeakRef(el), write })
   if (bindings.length > REGISTER_PRUNE_THRESHOLD) {
-    pruneDetachedBindings()
+    schedulePrune()
   }
 }
 
+/** 阈值剪枝的微任务调度（N1）：register 内【不可】同步剪——生产登记
+ *  普遍「先登记后挂树」，同步剪枝会把同批尚未 append 的活项按
+ *  isConnected === false 误判为死项整批剪除，挂树后永失换包重刷。
+ *  queueMicrotask 把剪枝推迟到同步挂树完成之后：此时判定对已挂树项
+ *  安全，「永不挂树」的真死项 isConnected 恒为 false 仍被正确剪除。
+ *  模块级标志去重：微任务已排队时同轮多次超阈值不重复排 */
+let pruneScheduled = false
+function schedulePrune(): void {
+  if (pruneScheduled) {
+    return
+  }
+  pruneScheduled = true
+  queueMicrotask(() => {
+    pruneScheduled = false
+    pruneDetachedBindings()
+  })
+}
+
 /** 剪除扫描：移除 deref 失败（已回收）或已脱挂的登记项——与换包重刷
- *  同款存活判定，但不重写存活项（此处非换包驱动，重写无意义） */
+ *  同款存活判定，但不重写存活项（此处非换包驱动，重写无意义）。调用
+ *  时机均在「同步创建窗口」之外：换包重刷就地剪（refreshLocaleDom）
+ *  与阈值微任务（schedulePrune 排队，执行时同批登记已同步挂树完毕） */
 function pruneDetachedBindings(): void {
   let kept = 0
   for (let i = 0; i < bindings.length; i++) {
