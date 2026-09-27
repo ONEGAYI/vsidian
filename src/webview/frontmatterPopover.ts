@@ -96,7 +96,10 @@ interface FmPopoverState {
   cleanups: Array<() => void>
   /** 添加属性后下一轮重建聚焦新条目键框（planAddFmEntry 的选中新键在
    *  浮层语境的等价物）；加项后聚焦新项输入框 */
-  pendingFocus: 'new-entry' | 'new-item' | null
+  /** 焦点接管意图：添加属性（新行总在末尾，取末条目）或对指定条目加项
+   *  （entryFrom 锚——加项可发生在任意条目上，重建后按 data-entry-from
+   *  定位，不能固定取最后条目） */
+  pendingFocus: { kind: 'new-entry' } | { kind: 'new-item'; entryFrom: number } | null
 }
 
 let popover: FmPopoverState | null = null
@@ -286,7 +289,7 @@ function buildRows(p: FmPopoverState, model: FmTableModel): void {
         if (!found) return
         const plan = planAddFmArrayItem(found.model, found.index)
         if (plan) {
-          p.pendingFocus = 'new-item'
+          p.pendingFocus = { kind: 'new-item', entryFrom: entry.lineFrom }
           dispatchPlan(view, plan)
         }
       })
@@ -317,7 +320,7 @@ function buildContainer(p: FmPopoverState): void {
     if (!model) return
     const plan = planAddFmEntry(model, view.state.doc.sliceString(model.from, model.to))
     if (!plan) return
-    p.pendingFocus = 'new-entry'
+    p.pendingFocus = { kind: 'new-entry' }
     dispatchPlan(view, plan)
   })
   footer.appendChild(add)
@@ -372,13 +375,19 @@ function restoreFocus(p: FmPopoverState, mark: FocusMark | 'add' | null): void {
   if (p.pendingFocus !== null) {
     const want = p.pendingFocus
     p.pendingFocus = null
-    const lastEntry = [...p.container.querySelectorAll<HTMLElement>(
-      `.${FM_POPOVER_CLASS_NAMES.entry}`)].at(-1)
-    const target = want === 'new-entry'
-      ? lastEntry?.querySelector<HTMLInputElement>(
+    // new-item 按触发加项的条目锚定位（该条目 lineFrom 不因加项改变）；
+    // new-entry（添加属性）新行总在末尾，取末条目
+    const entryScope = want.kind === 'new-item'
+      ? p.container.querySelector<HTMLElement>(
+        `.${FM_POPOVER_CLASS_NAMES.entry}[data-entry-from="${want.entryFrom}"]`)
+      : [...p.container.querySelectorAll<HTMLElement>(
+        `.${FM_POPOVER_CLASS_NAMES.entry}`)].at(-1)
+    const target = want.kind === 'new-entry'
+      ? entryScope?.querySelector<HTMLInputElement>(
         `.${FM_POPOVER_CLASS_NAMES.input}.${FM_POPOVER_CLASS_NAMES.key}`)
-      : lastEntry?.querySelector<HTMLInputElement>(
-        `.${FM_POPOVER_CLASS_NAMES.input}.${FM_POPOVER_CLASS_NAMES.item}`)
+      // 新项插在该条目末尾：取最后一个项输入框（首个是既有项）
+      : [...(entryScope?.querySelectorAll<HTMLInputElement>(
+        `.${FM_POPOVER_CLASS_NAMES.input}.${FM_POPOVER_CLASS_NAMES.item}`) ?? [])].at(-1)
     if (target) {
       target.focus()
       target.select()

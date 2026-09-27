@@ -171,6 +171,17 @@ describe('parseFrontmatterTable：解析', () => {
     expect(modelOf('---\na: 1\na: 2\n---')).toBeNull()
   })
 
+  it('跨空行/注释续组的 block 序列接受成型（yaml 合法即成型，非降级项）', () => {
+    const doc = '---\ntags:\n\n  - a\n# 独立注释\n  - b\n---'
+    const model = modelOf(doc)!
+    expect(model.entries).toHaveLength(1)
+    const entry = model.entries[0]
+    expect(entry?.kind).toBe('array')
+    if (entry?.kind === 'array') {
+      expect(entry.items).toHaveLength(2)
+    }
+  })
+
   it('头区外正文中的 --- 不参与解析（fm 区间之外的内容不进模型）', () => {
     const doc = '---\na: 1\n---\n\n---\n不在头区: true\n---\n'
     const model = modelOf(doc)!

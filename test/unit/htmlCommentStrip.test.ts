@@ -52,10 +52,17 @@ describe('stripHtmlComments（#139 阅读剥离）', () => {
     expect(stripHtmlComments(text)).toBe(text)
   })
 
-  it('嵌套开标记：体内含 < 的开标记作废，第二个开标记按自身配对（与 Lezer 一致）', () => {
-    // Lezer 实测：第一个 <!-- 的体内再遇 '<'，不是合法注释起点（保留字面），
-    // 只有第二个 <!-- y --> 构成 Comment 节点——剥离器同口径
+  it('嵌套开标记：体内含 <!-- 的开标记作废，第二个开标记按自身配对（与 Lezer 一致）', () => {
+    // Lezer 实测：第一个 <!-- 的体内再遇 '<!--'，不是合法注释起点（保留
+    // 字面），只有第二个 <!-- y --> 构成 Comment 节点——剥离器同口径
     expect(stripHtmlComments('a <!-- x <!-- y --> b')).toBe('a <!-- x  b')
+  })
+
+  it('体内单个 <（非开标记）是合法注释体，照常剥离（与 Lezer 一致）', () => {
+    // Lezer 实测：`a <!-- x <y> --> b` 为单个 Comment 节点；曾因作废条件
+    // 过宽（体内含任意 '<'）导致阅读侧不剥、转义为可见字面文本
+    expect(stripHtmlComments('a <!-- x <y> --> b')).toBe('a  b')
+    expect(stripHtmlComments('<!-- a < b -->')).toBe('')
   })
 
   it('空串与无注释文本原样返回', () => {

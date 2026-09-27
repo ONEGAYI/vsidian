@@ -1409,9 +1409,11 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
     })
     const fragments = TreeFragment.applyChanges(value.fragments, changed)
     const tree = parseTree(doc, fragments)
-    // fmTouched 精确口径：fm 存在时只认 fm 区间内的变更（正文击键不重析
-    // 头区）；fm 尚未识别时头部 8192 内的变更都要检测（构造头区场景）
-    const fmTouched = changed.some((c) => c.fromA < (value.fm ? value.fm.end : FM_SCAN_LIMIT))
+    // fmTouched 精确口径：fm 存在时只认 fm 区间内（含闭边界）的变更
+    // （正文击键不重析头区）；fm.end 是闭合行行尾不含换行——删除其后
+    // 换行会把闭合行与正文合并（头区失效），fromA === fm.end 须触发
+    // 重析；fm 尚未识别时头部 8192 内的变更都要检测（构造头区场景）
+    const fmTouched = changed.some((c) => c.fromA <= (value.fm ? value.fm.end : FM_SCAN_LIMIT))
     const fm = fmTouched ? frontmatterOf(doc) : value.fm
     // #140：fmTouched（头部 8192 内的任何变更）时重析成型模型——成型与
     // 降级随编辑实时切换，模型重析成本 = 头区行扫描 + 一次 yaml 解析

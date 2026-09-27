@@ -90,10 +90,11 @@ export function stripHtmlComments(text: string): string {
     )
   }
   const masked = maskedLines.join('\n')
-  // 在掩码文本上配对开闭（代码区内被遮蔽的 <!-- 不可见），按原文等长剥离。
-  // 注释体含 '<' 时该开标记作废、扫描右移（与 Lezer/HTML 形态学一致：
-  // `a <!-- x <!-- y --> b` 中只有第二个 <!-- 构成注释——体内再遇 '<'
-  // 的开标记不是合法注释起点）
+  // 在掩码文本上配对开闭（代码区内被遮蔽的 <!-- 不可见），按原文真删除。
+  // 体内再遇嵌套开标记 <!-- 时该开标记作废、扫描右移（与 Lezer/HTML
+  // 形态学一致：`a <!-- x <!-- y --> b` 中只有第二个 <!-- 构成注释——
+  // 体内再遇 <!-- 的开标记不是合法注释起点）。体内单个 `<`（非 <!--）
+  // 是合法注释体：`<!-- a < b -->` Lezer 实测为 Comment 节点，照常剥离
   const out: string[] = []
   let i = 0
   while (i <= text.length) {
@@ -105,7 +106,7 @@ export function stripHtmlComments(text: string): string {
     out.push(text.slice(i, at))
     const close = masked.indexOf(CLOSE, at + OPEN.length)
     const body = close < 0 ? '' : masked.slice(at + OPEN.length, close)
-    if (close < 0 || body.includes('<')) {
+    if (close < 0 || body.includes(OPEN)) {
       // 未闭合残缺或体内含 '<'：开标记原样保留，扫描从其后继续
       // （不吞后续正文；后续开标记可按自身开闭正常配对）
       out.push(OPEN)

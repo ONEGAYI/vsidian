@@ -26,7 +26,7 @@
 4. **写回语义不变**：文本输入即时写回（键/值/项分别经 `planSetFmKey` / `planSetFmValue` / `planSetFmArrayItem` 单笔事务），按钮操作（删行/删项/加项/添加属性）单笔写回——一笔操作 = 一笔 edit.request = 撤销一步；浮层派发的事务不带 CM6 选区。
 5. **成型态不暴露源码**（用户决策）：光标或选区进入成型头区即被引导至闭合 `---` 行之后的正文起点——transactionFilter 硬拦纯选区事务 + updateListener 微任务兜底（覆盖初始光标、undo 恢复选区）；外部同步事务（`externalSync` 注解）与 undo/redo 事务豁免 filter，头区重析不受影响。降级形态（复杂类型/非法）不引导，源码可编辑；降级瞬间打开中的浮层自动关闭。
 6. **键名边界**：空键名与重复键名（归一后）不写回，输入框红边标记——写回将使头区非法整卡降级。flow 数组为值整框原文编辑（含括号，与一期「整格文本编辑」同口径）。
-7. **焦点管理**：打开时焦点入首个键输入框；Esc 与点击浮层外关闭（`prevFocus` 模式，非全屏）；关闭后焦点返还修改按钮；切换到阅读视图或面板销毁时浮层关闭。禁止 `window.alert`（宿主 webview sandbox 无 allow-modals）。
+7. **焦点管理**：打开时焦点入首个键输入框；Esc 与点击浮层外关闭（`prevFocus` 模式，非全屏）；关闭后焦点按 prevFocus 口径返还（打开前焦点在编辑器则返编辑器，body 时返按钮）；切换到阅读视图或面板销毁时浮层关闭。禁止 `window.alert`（宿主 webview sandbox 无 allow-modals）。
 8. **样式对齐**：参考图 A/B 的布局、配色、组件形态——完整边框圆角卡片、行间淡分隔、键列常规字重灰、无格线；浮层白底圆角 10px + 投影、输入框浅底描边、主按钮主题主色。样式契约与界面域探针同步（`live-fm-header-live` 静态探针；Popover 容器为交互态，按行为路径验证）。
 
 格内编辑时代的机制全部退役：Tab/Enter 格导航键位、行尾 ×/＋ 按钮、闭合行「添加属性」整行按钮、空值占位格、「光标触及围栏行显源码」语义（被引导语义替代）；对应样式契约条目（live-fm-controls、live-fm-add-entry）移除，`vsidian-fm-remove` / `vsidian-fm-add-item` / `vsidian-fm-add-entry` / `vsidian-fm-empty-value` 类名不再发射。

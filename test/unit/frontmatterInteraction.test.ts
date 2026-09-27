@@ -374,6 +374,36 @@ describe('Popover 编辑（结构操作与即时写回）', () => {
     view.destroy()
   })
 
+  it('多条目文档中间数组加项：焦点落该条目的新项输入框（不取末条目）', async () => {
+    // 数组在前、标量在后：加项发生在首个条目，若焦点还原固定取最后
+    // 条目会找不到 item 输入框（标量条目无项）而丢失焦点
+    const doc = '---\ntags:\n  - a\ntitle: x\n---\n\n正文。\n'
+    const view = makeFmView(doc, doc.length)
+    clickEditButton(view)
+    clickPopoverButton(FM_POPOVER_CLASS_NAMES.addItem, 0)
+    await settle()
+    const active = document.activeElement as HTMLInputElement
+    expect(active.classList.contains(FM_POPOVER_CLASS_NAMES.item)).toBe(true)
+    // 焦点所在条目即被加项的 tags 条目（data-entry-from 指向其行首）
+    const entry = active.closest(`.${FM_POPOVER_CLASS_NAMES.entry}`) as HTMLElement
+    expect(entry.dataset.entryFrom).toBe(String(doc.indexOf('tags:')))
+    expect(active.value).toBe('item')
+    view.destroy()
+  })
+
+  it('删除闭合行后的换行（fromA === fm.end）当笔降级，卡片不残留', () => {
+    const view = makeFmView(FM_DOC, FM_DOC.length)
+    expect(view.contentDOM.querySelectorAll('.vsidian-fm-row').length).toBeGreaterThan(0)
+    const closeMark = FM_DOC.indexOf('---\n\n正文段落')
+    expect(closeMark).toBeGreaterThan(0)
+    // 删闭合行行尾起两个换行（fromA === fm.end）：正文直接贴上 ---，头区
+    // 失效——边界差一曾使该笔不触发头区重析，卡片按过期区间残留
+    view.dispatch({ changes: { from: closeMark + 3, to: closeMark + 5 } })
+    expect(view.contentDOM.querySelectorAll('.vsidian-fm-row')).toHaveLength(0)
+    expect(view.contentDOM.querySelectorAll('.vsidian-fm-card-line')).toHaveLength(0)
+    view.destroy()
+  })
+
   it('删行按钮整组移除条目；添加属性按钮插入模板行并聚焦新行键框全选', () => {
     const view = makeFmView(FM_DOC, FM_DOC.length)
     clickEditButton(view)

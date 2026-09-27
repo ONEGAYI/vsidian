@@ -1,6 +1,6 @@
 # 规格：引用块紫色提示边条
 
-状态：待实施（工单 [#143](https://github.com/ONEGAYI/vsidian/issues/143)）。本文是引用块提示边条换色的单一事实源，工单验收以此为准。
+状态：已实施（工单 [#143](https://github.com/ONEGAYI/vsidian/issues/143)）。本文是引用块提示边条换色的单一事实源，工单验收以此为准。
 
 ## 范围
 

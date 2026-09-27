@@ -571,7 +571,7 @@
       "category": "inline-format",
       "kind": "selector",
       "target": ".vsidian-html-comment（仅 live）",
-      "purpose": "HTML 注释淡化入口（#139）：live 侧行内 Comment / 跨行 CommentBlock 整区间（含定界符）mark 装饰 span，前景 45% 混入的低对比呈现（不隐藏不折叠、可读可编辑）。阅读侧经等长空格替换整体隐藏（阅读无注释呈现），无对应类。",
+      "purpose": "HTML 注释淡化入口（#139）：live 侧行内 Comment / 跨行 CommentBlock 整区间（含定界符）mark 装饰 span，前景 45% 混入的低对比呈现（不隐藏不折叠、可读可编辑）。阅读侧经整段真删除（仅保留换行、行内不留空位）隐藏（阅读无注释呈现），无对应类。",
       "views": [
         "live"
       ],
@@ -3088,21 +3088,21 @@
       "domain": "chrome",
       "category": "toolbar-banner",
       "kind": "selector",
-      "target": "body 元素模式类 .vsidian-mode-live / .vsidian-mode-reading（互斥，两态必居其一）",
-      "purpose": "webview 全域模式锚点（#141）：随视图模式在 body 上切换的互斥类对，是用户片段做「按模式生效」样式的公开入口（如 body.vsidian-mode-reading .vsidian-toolbar button { … }）。内置消费方：双态切换按钮的 book/edit 图标显隐规则以其为唯一来源。",
+      "target": "布局根模式类 .vsidian-body.vsidian-mode-live / .vsidian-body.vsidian-mode-reading（互斥，两态必居其一）",
+      "purpose": "webview 全域模式锚点（#141）：随视图模式在布局根 div（#app 内的 .vsidian-body，非 HTML body 元素——类对不挂在 <body> 上）切换的互斥类对，是用户片段做「按模式生效」样式的公开入口（如 #app .vsidian-body.vsidian-mode-reading .vsidian-toolbar button { … }）。内置消费方：双态切换按钮的 book/edit 图标显隐规则以其为唯一来源。",
       "views": [
         "live",
         "reading"
       ],
       "states": "模式态类：live 视图挂 .vsidian-mode-live、reading 视图挂 .vsidian-mode-reading，applyModeDom 随每次模式切换重算。",
-      "dom": "body 元素（.vsidian-body）的 classList；不在任何具体控件上。",
-      "example": "body.vsidian-mode-reading .vsidian-view-toggle svg {\n  opacity: 0.9;\n}",
+      "dom": "#app 内布局根 div（.vsidian-body，水平布局根）的 classList；不在 HTML body 元素或任何具体控件上。",
+      "example": "#app .vsidian-body.vsidian-mode-reading .vsidian-view-toggle svg {\n  opacity: 0.9;\n}",
       "obsidian": {
         "counterpart": "无对应物（Obsidian 以 mod-cm6 等容器态类表达，不承诺原名命中）",
         "support": "none"
       },
       "verification": [
-        "浏览器套件（#141）：模式切换后 body 类互斥、图标显隐据此驱动的绘制断言",
+        "浏览器套件（#141）：模式切换后布局根类互斥、图标显隐据此驱动的绘制断言",
         "探针表豁免（模式态类，非静态可命中——chromeContract.test 豁免表登记）"
       ],
       "introduced": "#141（2026-09-27）"

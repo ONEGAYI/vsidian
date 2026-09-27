@@ -19,9 +19,10 @@
 // frontmatterRange 保证），实现按 fm 区间相对计算，不假设 start 为 0。
 //
 // 已知边界（一期决策，规格「排除」节）：合法但不支持的 YAML 形态同样
-// 降级源码——零缩进 block 序列（`tags:\n- a`）、跨空行续组的 block 序列
-// 项、空数组项（null 项）、flow 内嵌套结构。降级后编辑不受限，转简单
-// 形态自动成型。
+// 降级源码——零缩进 block 序列（`tags:\n- a`）、空数组项（null 项）、
+// flow 内嵌套结构。跨空行/独立注释行续组的 block 序列是**接受成型**
+// 的（yaml 兜底层合法、项行挂接待填充宿主——行内实现注释「空行/注释
+// 不终止」即此意）。降级后编辑不受限，转简单形态自动成型。
 
 import { isMap, isScalar, isSeq, parseDocument } from 'yaml'
 
