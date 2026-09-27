@@ -42,15 +42,15 @@ describe('格式操作的文本契约', () => {
     // 一按：贴边扩词包裹，selection 落新开围栏内侧（旧实现被 rewrite 闭区间误吞）
     expect(apply('**加粗**普通', 'bold', 6))
       .toEqual({ text: '**加粗****普通**', selection: { anchor: 8 } })
-    // 二按（光标在「普通」处）：只拆光标所在对，「加粗」一对保留
+    // 二按（光标在「普通」处）：只拆光标所在对，「加粗」一对保留，无 selection
     expect(apply('**加粗****普通**', 'bold', 8))
-      .toEqual({ text: '**加粗**普通', selection: null })
+      .toEqual({ text: '**加粗**普通' })
     // 光标在「加粗」处：拆第一对，第二对保留
     expect(apply('**加粗****普通**', 'bold', 3))
-      .toEqual({ text: '加粗**普通**', selection: null })
+      .toEqual({ text: '加粗**普通**' })
     // 一按后光标不动（贴边产物行尾）再按：拆最后一对
     expect(apply('**加粗****普通**', 'bold', 12))
-      .toEqual({ text: '**加粗**普通', selection: null })
+      .toEqual({ text: '**加粗**普通' })
     // 三按：对二按产物再包裹，复原
     expect(apply('**加粗**普通', 'bold', 6))
       .toEqual({ text: '**加粗****普通**', selection: { anchor: 8 } })
@@ -60,9 +60,9 @@ describe('格式操作的文本契约', () => {
     expect(apply('文**后**', 'bold', 0))
       .toEqual({ text: '**文****后**', selection: { anchor: 2 } })
     expect(apply('**文****后**', 'bold', 2))
-      .toEqual({ text: '文**后**', selection: null })
+      .toEqual({ text: '文**后**' })
     expect(apply('**文****后**', 'bold', 6))
-      .toEqual({ text: '**文**后', selection: null })
+      .toEqual({ text: '**文**后' })
   })
 
   it('围栏开边界贴邻即取消：行首与行尾一按取消，不再落入空对插入（#107）', () => {
@@ -81,24 +81,24 @@ describe('格式操作的文本契约', () => {
 
   it('斜体与行内代码贴边往返：合并形态按 mark 出现顺序配对拆分（#107）', () => {
     expect(apply('*斜体*普通', 'italic', 5))
-      .toEqual({ text: '*斜体**普通*', selection: { anchor: 6 } })
-    expect(apply('*斜体**普通*', 'italic', 6))
-      .toEqual({ text: '*斜体*普通', selection: null })
+      .toEqual({ text: '*斜体**普通*', selection: { anchor: 5 } })
+    expect(apply('*斜体**普通*', 'italic', 5))
+      .toEqual({ text: '*斜体*普通' })
     expect(apply('`码`文', 'inlineCode', 3))
       .toEqual({ text: '`码``文`', selection: { anchor: 4 } })
     expect(apply('`码``文`', 'inlineCode', 4))
-      .toEqual({ text: '`码`文', selection: null })
+      .toEqual({ text: '`码`文' })
   })
 
   it('删除线与高亮贴边往返：独立节点两态本就正确，一按携带 selection（#107 防回归）', () => {
     expect(apply('~~删除~~普通', 'strikethrough', 6))
       .toEqual({ text: '~~删除~~~~普通~~', selection: { anchor: 8 } })
     expect(apply('~~删除~~~~普通~~', 'strikethrough', 8))
-      .toEqual({ text: '~~删除~~普通', selection: null })
+      .toEqual({ text: '~~删除~~普通' })
     expect(apply('==亮==普通', 'highlight', 5))
       .toEqual({ text: '==亮====普通==', selection: { anchor: 7 } })
     expect(apply('==亮====普通==', 'highlight', 7))
-      .toEqual({ text: '==亮==普通', selection: null })
+      .toEqual({ text: '==亮==普通' })
   })
 
   it('贴边修复不改变通用空对插入与真重叠重写（#107 回归面）', () => {

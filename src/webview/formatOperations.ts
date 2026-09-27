@@ -39,6 +39,24 @@ function matchingSpan(root: SyntaxNode, name: string, from: number, to: number):
     node.from < from && node.to > to) ?? null
 }
 
+/** 贴邻围栏（#107）：光标恰在某同类围栏节点的起点或终点（开边界外侧）时
+ *  视为位于该围栏——贴邻即切换为取消。光标在节点终点处时该节点不在
+ *  resolveInner 的祖先链里（半开区间不含终点），matchingSpan 放宽条件
+ *  覆盖不了行尾侧，故独立按节点区间查找；多个贴邻候选时后者覆盖前者，
+ *  与 nodesAt 的右向原则一致（缝隙归右侧围栏）。 */
+function adjacentSpan(root: SyntaxNode, name: string, pos: number): SyntaxNode | null {
+  let found: SyntaxNode | null = null
+  const walk = (node: SyntaxNode): void => {
+    if (node.to < pos || node.from > pos) return
+    if (node.name === name && (node.from === pos || node.to === pos)) found = node
+    for (let child = node.childBefore(pos + 1); child && child.from <= pos; child = child.nextSibling) {
+      walk(child)
+    }
+  }
+  walk(root)
+  return found
+}
+
 function blockedInline(root: SyntaxNode, from: number, to: number, target: string): boolean {
   const blocked = new Set(['FencedCode', 'CodeBlock', 'HTMLBlock'])
   if (target !== 'InlineCode') blocked.add('InlineCode')
@@ -251,27 +269,69 @@ function codeDelimiter(content: string): string {
   return '`'.repeat(Math.max(1, ...[...content.matchAll(/`+/gu)].map((match) => match[0].length + 1)))
 }
 
+/** 节点区间内 mark 的全部非重叠出现（#107）：贴边包裹产物被解析为合并
+ *  节点时，中间那对标记是字面内容文本，「两对各自的标记位置」不在语法树
+ *  里，只能按 INLINE[op].mark 做形态学扫描（非重叠贪心，从表派生，
+ *  不按操作名写死，保持登记即继承）。 */
+function markOccurrences(text: string, span: SyntaxNode, mark: string): Array<{ from: number; to: number }> {
+  const found: Array<{ from: number; to: number }> = []
+  let pos = span.from
+  while (pos + mark.length <= span.to) {
+    if (text.startsWith(mark, pos)) {
+      found.push({ from: pos, to: pos + mark.length })
+      pos += mark.length
+    } else {
+      pos += 1
+    }
+  }
+  return found
+}
+
+/** 取消计划（#107）：单对整节点摘除；合并形态（贴边包裹产物）按 mark
+ *  出现顺序配对还原用户意图模型，只拆光标所在对、其余保留。归属取第一
+ *  个闭标记仍在光标右侧的对；两对间零宽缝隙与最末闭标记之后（贴邻右
+ *  外侧）分别归右、归最后一对，与 nodesAt 右向原则一致。奇数/异常形态
+ *  （如中间夹单个字面 mark）无从配对，回退整拆。 */
+function unwrapSpanPlan(text: string, active: SyntaxNode, pos: number, mark: string): FormatPlan | null {
+  const first = active.firstChild
+  const last = active.lastChild
+  if (!first || !last) return null
+  const marks = markOccurrences(text, active, mark)
+  if (marks.length > 2 && marks.length % 2 === 0) {
+    let target = marks.length / 2 - 1
+    for (let pair = 0; pair < marks.length / 2; pair++) {
+      if (pos < marks[2 * pair + 1]!.from) { target = pair; break }
+    }
+    return { changes: [
+      { from: marks[2 * target]!.from, to: marks[2 * target]!.to, insert: '' },
+      { from: marks[2 * target + 1]!.from, to: marks[2 * target + 1]!.to, insert: '' },
+    ] }
+  }
+  return { changes: [{ from: active.from, to: active.to,
+    insert: text.slice(first.to, last.from) }] }
+}
+
 function inlinePlan(text: string, op: FormatOperationId, range: FormatSelection,
   root: SyntaxNode, action: FormatAction): FormatPlan | null {
   const config = INLINE[op]!
   let { from, to } = range
   if (blockedInline(root, from, to, config.node)) return null
   const isCursor = from === to
-  const active = matchingSpan(root, config.node, from, to)
+  const word = isCursor && action !== 'remove' ? wordRange(text, from) : null
+  // 围栏内优先取消（现状语义）；贴邻即取消只在「取不到词」时接管
+  // （#107）：能取到词的贴邻位置（`**加粗**普通` 光标在普通处）按场景
+  // 一扩词包裹，mark 边界（行首 `|**词**`、行尾 `**词**|`）才切换为取消。
+  const active = matchingSpan(root, config.node, from, to) ??
+    (isCursor && action !== 'remove' && !word ? adjacentSpan(root, config.node, from) : null)
   if (isCursor && active) {
     if (action === 'add') return null
-    const first = active.firstChild
-    const last = active.lastChild
-    if (!first || !last) return null
-    return { changes: [{ from: active.from, to: active.to,
-      insert: text.slice(first.to, last.from) }] }
+    return unwrapSpanPlan(text, active, from, config.mark)
   }
   // 无选区扩词包裹时光标须落进开围栏内侧，下一次切换才能命中上方取消分支。
   let wordWrapped = false
   let selection: { anchor: number } | undefined
   if (isCursor) {
     if (action === 'remove') return null
-    const word = wordRange(text, from)
     if (word) { from = word.from; to = word.to; wordWrapped = true }
   }
   const mark = op === 'inlineCode' ? codeDelimiter(text.slice(from, to)) : config.mark
@@ -292,8 +352,11 @@ function inlinePlan(text: string, op: FormatOperationId, range: FormatSelection,
       const start = Math.max(partFrom, lineFrom + prefix)
       if (start < partTo && !blockedInline(root, start, partTo, config.node)) {
         let change: FormatChange | null = null
+        // 真重叠才走行级重写（开区间相交，#107）：贴边相邻（选区与既有
+        // 围栏零字符交叠）改走下方 fresh-wrap，扩词包裹的 selection 才不
+        // 会被 rewrite 吞掉
         if (inlineSpans(root, config.node, lineFrom, lineTo).some((span) =>
-          span.from <= partTo && span.to >= start)) {
+          span.to > start && span.from < partTo)) {
           change = rewriteInlineLine(text, root, config.node, mark,
             lineFrom, lineTo, start, partTo, action)
         } else if (action !== 'remove') {
