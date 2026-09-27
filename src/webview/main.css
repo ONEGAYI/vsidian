@@ -1283,7 +1283,10 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='blockMath'] { 
   display: inline-block;
   width: 0.85em;
   height: 0.85em;
-  margin: 0 5px 0 0;
+  /* 右缘→正文 的空隙对齐普通列表行「圆点墨迹右缘→正文」（= 圆点
+     字形盒空白 1ch-0.25em + 圆点 margin 7px）；标记后空格已并入
+     widget 替换区间，空隙只由本 margin 表达 */
+  margin: 0 calc(1ch + 7px - 0.25em) 0 0;
   padding: 0;
   box-sizing: border-box;
   border: 1px solid var(--vscode-editorLineNumber-foreground, rgba(128, 128, 128, 0.9));

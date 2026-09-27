@@ -211,13 +211,14 @@ describe('buildLivePreviewDecorations：全量构建（树驱动语义）', () =
     expect(hiddenRanges(set)).not.toContainEqual([ordered, ordered + 2])
   })
 
-  it('任务项：非活动行 marker 替换为字形 widget（勾选态映射）', () => {
+  it('任务项：非活动行 marker 替换为字形 widget（勾选态映射；区间吞并标记后一空格）', () => {
     const glyphs = taskGlyphs(set)
     expect(glyphs).toHaveLength(2)
     const unchecked = FULL_DOC.indexOf('[ ]')
     const checked = FULL_DOC.indexOf('[x]')
-    expect(glyphs).toContainEqual({ from: unchecked, to: unchecked + 3, checked: false })
-    expect(glyphs).toContainEqual({ from: checked, to: checked + 3, checked: true })
+    // 区间含后随空格：空隙归 widget margin，与普通行「圆点 margin」同口径
+    expect(glyphs).toContainEqual({ from: unchecked, to: unchecked + 4, checked: false })
+    expect(glyphs).toContainEqual({ from: checked, to: checked + 4, checked: true })
   })
 
   it('水平线：行级类', () => {

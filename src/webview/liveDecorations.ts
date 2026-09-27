@@ -732,7 +732,10 @@ function emitForRange(
       case 'TaskMarker': {
         if (!touches(node.from, node.to)) {
           const checked = doc.sliceString(node.from + 1, Math.min(node.from + 2, node.to)) !== ' '
-          out.push(taskCheckboxDecos[checked ? 1 : 0]!.range(node.from, node.to))
+          // 区间吞并标记后一个空格：checkbox 与正文的空隙由 widget 的
+          // margin 表达，与普通列表行「圆点 margin」同口径，不再叠加
+          // 空格占位（两种行的符号→正文间距相等）
+          out.push(taskCheckboxDecos[checked ? 1 : 0]!.range(node.from, markerEnd(node)))
         }
         return
       }
