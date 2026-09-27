@@ -65,9 +65,66 @@ try {
     await result.click()
     const box = page.getByRole('checkbox', { name: zhCn['setting.editorLineNumbers.title'], exact: true })
     assert.equal(await box.evaluate(el => document.activeElement === el), true)
+    // #155 拨动开关（绘制层）：appearance none 纯 CSS 自绘，选中态为强调色
+    const switchPaint = await box.evaluate(el => {
+      const cs = getComputedStyle(el)
+      return { appearance: cs.appearance, radius: cs.borderRadius, width: cs.width,
+        checkedBg: cs.backgroundColor }
+    })
+    assert.equal(switchPaint.appearance, 'none')
+    assert.equal(switchPaint.radius, '999px')
+    assert.equal(switchPaint.width, '36px')
+    assert.equal(switchPaint.checkedBg, 'rgb(38, 135, 212)', '开态轨道应为主题强调色')
     await page.keyboard.press('Space')
     await page.getByRole('status').filter({ hasText: zhCn['settings.saveDone'] }).waitFor()
     assert.equal(await box.isChecked(), false)
+    // #155 独立滚动骨架（绘制层，编辑器分组内容超一屏）：主区滚动时侧栏静止；
+    // 切过分页后主区滚动复位、根元素不整体滚动
+    const scrollProbe = await page.evaluate(() => {
+      const main = document.querySelector('.vsidian-settings-main')
+      const sidebar = document.querySelector('.vsidian-settings-sidebar')
+      const heading = document.querySelector('.vsidian-settings-heading')
+      const sidebarTop = sidebar.getBoundingClientRect().top
+      const headingTop = heading.getBoundingClientRect().top
+      main.scrollTop = main.scrollHeight
+      const probe = {
+        mainOverflow: getComputedStyle(main).overflowY,
+        sidebarOverflow: getComputedStyle(sidebar).overflowY,
+        mainScrollable: main.scrollHeight > main.clientHeight,
+        scrolled: main.scrollTop > 0,
+        sidebarStatic: sidebar.getBoundingClientRect().top === sidebarTop,
+        headingMovedUp: heading.getBoundingClientRect().top < headingTop,
+        sidebarNotScrollable: sidebar.scrollHeight <= sidebar.clientHeight,
+        docNotScrollable: document.documentElement.scrollHeight <= innerHeight,
+      }
+      main.scrollTop = 0
+      return probe
+    })
+    assert.equal(scrollProbe.mainOverflow, 'auto')
+    assert.equal(scrollProbe.sidebarOverflow, 'auto')
+    assert.equal(scrollProbe.mainScrollable, true, '编辑器条目应超出主区视口高度（可滚）')
+    assert.equal(scrollProbe.scrolled, true)
+    assert.equal(scrollProbe.sidebarStatic, true, '主区滚动时侧栏应保持静止（独立滚动容器）')
+    assert.equal(scrollProbe.headingMovedUp, true, '主区内容应随滚动移动')
+    assert.equal(scrollProbe.sidebarNotScrollable, true, '侧栏内容不超一屏时应无滚动')
+    assert.equal(scrollProbe.docNotScrollable, true, '页面根不应再整体滚动')
+    // #155 分组容器色差（绘制层）：容器底色 = 前景 4% 叠加正文背景，
+    // 且与正文底色确有色差（色值序列化随内核以页面内同公式探针比对）
+    const groupPaint = await page.evaluate(() => {
+      const group = document.querySelector('.vsidian-settings-group')
+      const probe = document.createElement('div')
+      probe.style.background = 'color-mix(in srgb, var(--vscode-editor-foreground) 4%, var(--vscode-editor-background))'
+      document.body.append(probe)
+      const expected = getComputedStyle(probe).backgroundColor
+      probe.remove()
+      const cs = getComputedStyle(group)
+      return { bg: cs.backgroundColor, expected, radius: cs.borderRadius,
+        borderWidth: cs.borderWidth, bodyBg: getComputedStyle(document.body).backgroundColor }
+    })
+    assert.equal(groupPaint.bg, groupPaint.expected, '容器底色应为前景 4% 叠加正文背景')
+    assert.notEqual(groupPaint.bg, groupPaint.bodyBg, '容器与正文应有可辨色差')
+    assert.equal(groupPaint.radius, '10px')
+    assert.equal(groupPaint.borderWidth, '1px')
     await search.focus()
     await page.keyboard.press('Control+b')
     assert.equal(await page.evaluate(() => window.sentMessages.filter(m =>

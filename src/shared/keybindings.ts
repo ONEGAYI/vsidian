@@ -143,6 +143,51 @@ export function findBindingConflicts(overrides: KeybindingOverrides, operationId
     .map((other) => other.id)
 }
 
+/** 快捷键分页筛选签维度（#155）：冲突/全部/已分配/由我分配/未分配 */
+export type KeybindingFilterKind = 'all' | 'conflict' | 'assigned' | 'userAssigned' | 'unassigned'
+
+export const KEYBINDING_FILTER_KINDS: readonly KeybindingFilterKind[] =
+  ['all', 'conflict', 'assigned', 'userAssigned', 'unassigned']
+
+/**
+ * 当前生效键位存在冲突的操作 id 集合（筛选签「冲突」的判定源）：双方生效
+ * 模式可交叠且任一键位重叠（含两段前缀重叠）即各自计入；单侧无绑定不构成
+ * 冲突。纯函数，不与录入路径（findBindingConflicts）共享状态。
+ */
+export function findConflictedOperationIds(overrides: KeybindingOverrides): Set<string> {
+  const conflicted = new Set<string>()
+  for (let i = 0; i < KEYBINDING_OPERATIONS.length; i++) {
+    const source = KEYBINDING_OPERATIONS[i]
+    const sourceBindings = getEffectiveBindings(overrides, source.id)
+    if (!sourceBindings.length) continue
+    for (let j = i + 1; j < KEYBINDING_OPERATIONS.length; j++) {
+      const other = KEYBINDING_OPERATIONS[j]
+      if (!modesOverlap(source.mode, other.mode)) continue
+      const otherBindings = getEffectiveBindings(overrides, other.id)
+      if (sourceBindings.some((chord) => otherBindings.some((candidate) => chordOverlap(chord, candidate)))) {
+        conflicted.add(source.id)
+        conflicted.add(other.id)
+      }
+    }
+  }
+  return conflicted
+}
+
+/**
+ * 筛选签谓词（#155）：操作在指定维度下是否可见。userAssigned 按 overrides
+ * 显式登记判定（含空数组=显式禁用，与存储语义一致）；assigned/unassigned
+ * 按生效绑定判定；conflict 复用 findConflictedOperationIds（可传入复用集合
+ * 避免逐行重算）。
+ */
+export function operationMatchesFilter(overrides: KeybindingOverrides, operationId: string,
+  filter: KeybindingFilterKind, conflicted: ReadonlySet<string> = findConflictedOperationIds(overrides)): boolean {
+  if (filter === 'conflict') return conflicted.has(operationId)
+  if (filter === 'userAssigned') return Object.prototype.hasOwnProperty.call(overrides, operationId)
+  if (filter === 'assigned') return getEffectiveBindings(overrides, operationId).length > 0
+  if (filter === 'unassigned') return getEffectiveBindings(overrides, operationId).length === 0
+  return true
+}
+
 export type BindingChangeResult = { ok: true; overrides: KeybindingOverrides } |
   { ok: false; reason: 'invalid' | 'conflict'; conflicts: string[] }
 

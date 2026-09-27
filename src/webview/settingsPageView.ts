@@ -54,6 +54,10 @@ function icon(kind: 'editor' | 'keyboard' | 'search' | 'general' | 'palette' | '
 export class SettingsPageView {
   private values: SettingsPayload | undefined
   private listEl: HTMLElement | undefined
+  /** 主区滚动容器（#155 独立滚动骨架：侧栏与主区各自 overflow） */
+  private mainEl: HTMLElement | undefined
+  /** 上次渲染上下文（分页+查询）：变化时主区滚动复位到顶部 */
+  private lastRenderKey: string | undefined
   private search: HTMLInputElement | undefined
   private nav: HTMLElement | undefined
   private status: HTMLElement | undefined
@@ -100,6 +104,7 @@ export class SettingsPageView {
     this.listEl = element('div', SETTINGS_PAGE_CLASS_NAMES.list)
     main.append(this.status, this.listEl)
     root.append(sidebar, main)
+    this.mainEl = main
     parent.append(root)
     // 语言切换重渲染（#93/#101）：常驻骨架（标题/搜索框/侧栏标签）由
     // localeDom 注册表单点重刷；列表与分页是 render() 的重建产物，随换包
@@ -185,9 +190,16 @@ export class SettingsPageView {
   }
   private render(focusEntry?: string): void {
     if (!this.listEl) return
+    // #155 主区独立滚动：分页或搜索上下文变化时滚动复位；同分页内的重渲染
+    // （开关回显、换包）保持滚动位置。复位先于内容重建，focusEntry 的
+    // scrollIntoView 在其之后执行，定位不受影响
+    const query = this.search?.value.trim().toLocaleLowerCase() ?? ''
+    const renderKey = `${this.active ?? ''}|${query}`
+    const contextChanged = renderKey !== this.lastRenderKey
+    this.lastRenderKey = renderKey
+    if (contextChanged && this.mainEl) this.mainEl.scrollTop = 0
     this.disposeSection?.()
     this.disposeSection = undefined
-    const query = this.search?.value.trim().toLocaleLowerCase() ?? ''
     // #96 默认分组 = 首个分类（有常规定义时即「常规」）；active 指向已
     // 消失的分类时回落首个（定义表运行时可变：测试 fixture 注册/注销）
     const active = this.categories().find((c) => c.id === this.active) ?? this.categories()[0]
@@ -257,11 +269,16 @@ export class SettingsPageView {
       this.disposeSection = section.mount(content, focusEntry) ?? undefined
       return
     }
-    // 内建分组：general（#96）与 editor，标题、副文案与组内标题均经 t() 取词
+    // 内建分组：general（#96）与 editor，标题、副文案与组内标题均经 t() 取词。
+    // #155 容器语言：组内条目包进分组容器（圆角 + 色差底），随分页统一
     if (active.id === 'general') {
       list.append(element('h2', 'vsidian-settings-heading', t('settings.generalSection')),
         element('p', SETTINGS_PAGE_CLASS_NAMES.subtitle, t('settings.generalSectionDescription')))
-      this.renderDefItems(list, this.generalDefs(), focusEntry)
+      const group = element('div', 'vsidian-settings-group')
+      list.append(group)
+      // 容器先入文档再填充：renderDefItems 的 focusEntry focus/scrollIntoView
+      // 需要条目已在文档中，游离节点上 focus 不生效
+      this.renderDefItems(group, this.generalDefs(), focusEntry)
       return
     }
     list.append(element('h2', 'vsidian-settings-heading', t('settings.editorCategory')),
@@ -271,8 +288,10 @@ export class SettingsPageView {
       list.append(element('p', SETTINGS_PAGE_CLASS_NAMES.empty, t('settings.empty')))
       return
     }
-    list.append(element('h3', 'vsidian-settings-group-title', t('settings.groupDisplay')))
-    this.renderDefItems(list, defs, focusEntry)
+    const group = element('div', 'vsidian-settings-group')
+    group.append(element('h3', 'vsidian-settings-group-title', t('settings.groupDisplay')))
+    list.append(group)
+    this.renderDefItems(group, defs, focusEntry)
   }
 
   /** 设置项行渲染（editor / general 两组共用：标题、说明与控件装配） */

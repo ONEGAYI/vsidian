@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import {
   KEYBINDING_OPERATIONS, getEffectiveBindings, normalizeChord,
-  findBindingConflicts, applyBindingChange, resolveKeybinding,
+  findBindingConflicts, findConflictedOperationIds, operationMatchesFilter,
+  applyBindingChange, resolveKeybinding,
   type KeybindingOverrides,
 } from '../../src/shared/keybindings'
 import { en } from '../../src/shared/locales/en'
@@ -67,5 +68,39 @@ describe('快捷键契约', () => {
     expect(resolveKeybinding(overrides, 'reading', 'ctrl+k')).toEqual({ kind: 'none' })
     expect(resolveKeybinding({}, 'live', 'ctrl+b', false)).toEqual({ kind: 'none' })
     expect(resolveKeybinding({}, 'reading', 'f3', false)).toEqual({ kind: 'command', id: 'findNext' })
+  })
+})
+
+describe('快捷键筛选签（#155）', () => {
+  it('冲突集合：生效模式可交叠且键位重叠的双方都计入；互斥模式与无绑定不计', () => {
+    expect(findConflictedOperationIds({}).size).toBe(0)
+    // find（both，默认 ctrl+f）改绑 ctrl+b 后与 bold（live，ctrl+b）互为冲突
+    const ids = findConflictedOperationIds({ find: ['ctrl+b'] })
+    expect(ids.has('find')).toBe(true)
+    expect(ids.has('bold')).toBe(true)
+    expect(ids.has('italic')).toBe(false)
+    // toReading（reading）与 toLive（live）模式互斥，同键不冲突
+    expect(findConflictedOperationIds({ toReading: ['ctrl+k'] }).has('toLive')).toBe(false)
+  })
+
+  it('筛选谓词：显式清空归未分配且算由我分配，默认绑定算已分配', () => {
+    const overrides: KeybindingOverrides = { bold: [], italic: ['ctrl+b'] }
+    expect(operationMatchesFilter(overrides, 'bold', 'all')).toBe(true)
+    expect(operationMatchesFilter(overrides, 'bold', 'unassigned')).toBe(true)
+    expect(operationMatchesFilter(overrides, 'bold', 'assigned')).toBe(false)
+    expect(operationMatchesFilter(overrides, 'bold', 'userAssigned')).toBe(true)
+    expect(operationMatchesFilter(overrides, 'italic', 'assigned')).toBe(true)
+    expect(operationMatchesFilter(overrides, 'heading1', 'userAssigned')).toBe(false)
+    // 默认键位生效即已分配（如 find 默认 ctrl+f）；默认未绑定的操作归未分配
+    expect(operationMatchesFilter({}, 'find', 'assigned')).toBe(true)
+    expect(operationMatchesFilter({}, 'toReading', 'unassigned')).toBe(true)
+    expect(operationMatchesFilter({}, 'toReading', 'assigned')).toBe(false)
+  })
+
+  it('筛选谓词：冲突维度复用冲突集合判定', () => {
+    const overrides: KeybindingOverrides = { find: ['ctrl+b'] }
+    expect(operationMatchesFilter(overrides, 'bold', 'conflict')).toBe(true)
+    expect(operationMatchesFilter(overrides, 'find', 'conflict')).toBe(true)
+    expect(operationMatchesFilter(overrides, 'italic', 'conflict')).toBe(false)
   })
 })

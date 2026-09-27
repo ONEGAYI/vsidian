@@ -249,14 +249,42 @@ it('扩展分页提供全局搜索入口，定位回调与清理独立于分页�
   result.click()
   expect(located).toBe('bindings')
   expect(parent.textContent).toContain('快捷键内容')
+  // #155 容器语言：附加分页内容住进统一容器；主区为独立滚动容器
+  expect(parent.querySelector('.vsidian-settings-section-content')).toBeTruthy()
+  expect(parent.querySelector('.vsidian-settings-main')).toBeTruthy()
   parent.querySelector<HTMLButtonElement>('.vsidian-settings-nav-item')!.click()
   expect(disposed).toBe(1)
 })
 
-it('样式契约：双栏、主题选中态、可见焦点及窄屏布局', async () => {
+it('分组容器（#155 容器语言）：内建分组条目包进容器，编辑器组标题在容器内', () => {
+  const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
+  // 默认「常规」分组：唯一容器，条目住进容器内
+  const groups = parent.querySelectorAll('.vsidian-settings-group')
+  expect(groups).toHaveLength(1)
+  expect(groups[0]!.querySelectorAll(`.${SETTINGS_PAGE_CLASS_NAMES.item}`).length).toBeGreaterThan(0)
+  expect(groups[0]!.querySelector('.vsidian-settings-group-title')).toBeNull()
+  // 「编辑器」分组：容器内含组标题（显示）与条目
+  const editorNav = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
+    .find((b) => b.textContent === '编辑器')!
+  editorNav.click()
+  const editorGroup = parent.querySelector('.vsidian-settings-group')!
+  expect(editorGroup.querySelector('.vsidian-settings-group-title')?.textContent)
+    .toBe(zhCn['settings.groupDisplay'])
+  expect(editorGroup.querySelectorAll(`.${SETTINGS_PAGE_CLASS_NAMES.item}`).length).toBeGreaterThan(0)
+})
+
+it('样式契约：双栏独立滚动、分组容器、拨动开关、主题选中态、可见焦点及窄屏布局', async () => {
   const { readFileSync } = await import('node:fs')
   const css = readFileSync('src/webview/settingsPage.css', 'utf8')
   expect(css).toContain('grid-template-columns: 236px minmax(0, 1fr)')
+  // #155 独立滚动骨架：侧栏与主区各自 overflow，外层锁定视口高度
+  expect(css).toMatch(/\.vsidian-settings-sidebar\s*\{[^}]*overflow-y:\s*auto/)
+  expect(css).toMatch(/\.vsidian-settings-main\s*\{[^}]*overflow-y:\s*auto/)
+  expect(css).toMatch(/\.vsidian-settings\s*\{[^}]*height:\s*100%/)
+  // #155 容器语言色差与拨动开关均为纯 CSS 契约
+  expect(css).toContain('--vsidian-settings-container-bg')
+  expect(css).toContain('color-mix(in srgb, var(--vsidian-settings-tint) 4%')
+  expect(css).toMatch(/\.vsidian-settings-checkbox\s*\{[^}]*appearance:\s*none/)
   expect(css).toContain('.vsidian-settings-nav-item[aria-current="page"]')
   expect(css).toContain('--vscode-list-activeSelectionBackground')
   expect(css).toContain(':focus-visible')

@@ -113,6 +113,7 @@ vsidian/
 │       ├── manual-verification.md            # 人工验证清单
 │       ├── mvp-issues.md                     # MVP GitHub Issue 索引
 │       ├── mvp.md                            # MVP 规格主文档
+│       ├── settings-page-visual-refresh.md   # 设置页视觉刷新规格（#155）
 │       ├── style-contract-gate.md            # 契约门禁 CI 接线与远端配置文档
 │       ├── symbol-input.md                   # 符号输入与行内围栏扩展约定落档
 │       └── table-interaction-rework.md       # 表格交互重做规格
