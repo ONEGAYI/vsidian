@@ -7,9 +7,11 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // 保留原 test:browser 的全部 16 个脚本；长套件优先启动。
 // #121 合并入列：listEditing（29 场景）与 tabIndent（22 场景）按长度
 // 插在 taskClick 之后、outline 系列之前。
+// #129 合并入列：cssSnippetImports（依赖导入/相对资源/循环/缓存实验）紧随
+// cssSnippets。
 const names = ['tableCaret', 'taskClick', 'listEditing', 'tabIndent', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage',
-  'languageSwitch', 'quickActions', 'cssSnippets', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor']
+  'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor']
 let workers = 2, reuseBuilds = true, selected = names
 for (const arg of process.argv.slice(2)) {
   if (/^--workers=\d+$/.test(arg)) workers = Number(arg.slice('--workers='.length))
