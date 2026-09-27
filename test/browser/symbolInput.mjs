@@ -295,6 +295,101 @@ try {
     await checkRanges(page, '(a )* b', [{ from: 1, to: 3 }], '重开后包裹恢复')
   })
 
+  // ---- #125 围栏内两步 Tab 越界：真实 Tab 键驱动生产 keymap 链 ----
+  // 优先级「越界 → 表格导航 → 缩进」在此实证（生产控制器装配，非注释推断）
+  const tab = (page) => page.keyboard.press('Tab')
+  await scenario('粗体两步越界：闭合左边界 → 越过整个闭合标记（不停在 ** 中间）', { doc: '**something**', cursor: 6 }, async (page) => {
+    await tab(page)
+    await check(page, '**something**', 11, '首按到 ** 左边界')
+    await tab(page)
+    await check(page, '**something**', 13, '再按越过整个 **（零写回）')
+  })
+  await scenario('目标是闭合边界而非词尾：**some| thing** 首按落在空格后', { doc: '**some thing**', cursor: 6 }, async (page) => {
+    await tab(page)
+    await check(page, '**some thing**', 12, '闭合左边界，不是词尾')
+  })
+  await scenario('斜体/行内代码/高亮/删除线（树围栏全类型）两步越界', { doc: '*斜体正文*', cursor: 3 }, async (page) => {
+    await tab(page)
+    await check(page, '*斜体正文*', 5, 'Emphasis 闭合左边界')
+    await tab(page)
+    await check(page, '*斜体正文*', 6, '越出')
+  })
+  await scenario('行内代码两步越出反引号', { doc: 'a `code` b', cursor: 5 }, async (page) => {
+    await tab(page)
+    await check(page, 'a `code` b', 7, '闭 ` 左边界')
+    await tab(page)
+    await check(page, 'a `code` b', 8, '越出')
+  })
+  await scenario('高亮两步越界', { doc: 'a ==高亮== b', cursor: 5 }, async (page) => {
+    await tab(page)
+    await check(page, 'a ==高亮== b', 6, 'Highlight 闭合左边界')
+    await tab(page)
+    await check(page, 'a ==高亮== b', 8, '越出 ==')
+  })
+  await scenario('删除线两步越界', { doc: 'a ~~删除~~ b', cursor: 5 }, async (page) => {
+    await tab(page)
+    await check(page, 'a ~~删除~~ b', 6, 'Strikethrough 闭合左边界')
+    await tab(page)
+    await check(page, 'a ~~删除~~ b', 8, '越出 ~~')
+  })
+  await scenario('全角括号（行内匹配路径）两步越界', { doc: '（全角括号）', cursor: 3 }, async (page) => {
+    await tab(page)
+    await check(page, '（全角括号）', 5, '）左边界')
+    await tab(page)
+    await check(page, '（全角括号）', 6, '越出）')
+  })
+  await scenario('英文引号交替配对两步越界', { doc: 'say "quoted" ok', cursor: 8 }, async (page) => {
+    await tab(page)
+    await check(page, 'say "quoted" ok', 11, '闭引号左边界')
+    await tab(page)
+    await check(page, 'say "quoted" ok', 12, '越出闭引号')
+  })
+  await scenario('嵌套逐层退出（规格样例四步链）', { doc: '(a **bc** d)', cursor: 6 }, async (page) => {
+    await tab(page)
+    await check(page, '(a **bc** d)', 7, '**bc|**')
+    await tab(page)
+    await check(page, '(a **bc** d)', 9, '**bc**|')
+    await tab(page)
+    await check(page, '(a **bc** d)', 11, '(a **bc** d|')
+    await tab(page)
+    await check(page, '(a **bc** d)', 12, '(a **bc** d)|')
+  })
+  const TAB_FENCE_DOC = '| a | **bc** |\n| --- | --- |\n| 1 | 2 |'
+  const ROW2 = TAB_FENCE_DOC.indexOf('**bc**')
+  await scenario('表格格内先两步越界、越出后切格（全程零写回）', { doc: TAB_FENCE_DOC, cursor: ROW2 + 3 }, async (page) => {
+    await tab(page)
+    await check(page, TAB_FENCE_DOC, ROW2 + 4, '**bc|**')
+    await tab(page)
+    await check(page, TAB_FENCE_DOC, ROW2 + 6, '**bc**|（仍在格内）')
+    await tab(page)
+    await check(page, TAB_FENCE_DOC, TAB_FENCE_DOC.indexOf('1'), '越出围栏后切格（跳过分隔行）')
+  })
+  await scenario('格内无围栏直接切格', { doc: TAB_FENCE_DOC, cursor: TAB_FENCE_DOC.indexOf('a') + 1 }, async (page) => {
+    await tab(page)
+    await check(page, TAB_FENCE_DOC, ROW2, '下一格内容首')
+  })
+  await scenario('围栏外不向右搜索：正文沿用既有整行缩进', { doc: 'something **next**', cursor: 2 }, async (page) => {
+    await tab(page)
+    await check(page, '  something **next**', 4, '缩进回落')
+  })
+  await scenario('代码块内 Tab 继续缩进不越界', { doc: '```js\n(ab)\n```', cursor: 6 }, async (page) => {
+    await tab(page)
+    await check(page, '```js\n  (ab)\n```', 8, '缩进不越界')
+  })
+  await scenario('Shift+Tab 不新增反向越界：围栏内仍是反向缩进', { doc: '  **bold** rest', cursor: 7 }, async (page) => {
+    await page.keyboard.press('Shift+Tab')
+    await check(page, '**bold** rest', 5, '反向缩进原行为')
+  })
+  await scenario('Tab 越界设置关闭回落、重开恢复（即时生效）', { doc: '**something**', cursor: 6 }, async (page) => {
+    await page.evaluate(() => window.setSymbolTabEscape(false))
+    await tab(page)
+    await check(page, '  **something**', 8, '关闭后围栏内 Tab 变整行缩进')
+    await page.evaluate(() => window.setSymbolTabEscape(true))
+    await page.evaluate(() => window.locate(8))
+    await tab(page)
+    await check(page, '  **something**', 13, '重开后越界恢复（新文本 ** 左边界 13）')
+  })
+
   // ---- 设置开关即时生效 ----
   await scenario('设置关闭后不补全、重开后恢复', { doc: '', cursor: 0 }, async (page) => {
     await page.evaluate(() => window.setSymbolAutocomplete(false))

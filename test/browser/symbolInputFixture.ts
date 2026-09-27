@@ -34,6 +34,10 @@ Object.assign(window, {
     controller.handleHostMessage({ kind: 'settings.changed',
       values: { 'editor.symbolSelectionWrap': on } })
   },
+  setSymbolTabEscape(on: boolean) {
+    controller.handleHostMessage({ kind: 'settings.changed',
+      values: { 'editor.symbolTabEscape': on } })
+  },
   readEditor() {
     const view = EditorView.findFromDOM(document.querySelector('.cm-editor')!)!
     const main = view.state.selection.main

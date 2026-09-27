@@ -6874,4 +6874,118 @@ export const cases: Array<[string, () => Promise<void>]> = [
       await reopened.save()
     }
   }],
+
+  ['围栏内两步 Tab 越界纯导航：零写回零 dirty、表格格内先越界后切格（#125）', async () => {
+    await openWithEditor('symbol-tab.md')
+    const initial = await waitSessionReady('symbol-tab.md')
+    const uri = wsUri('symbol-tab.md').toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri('symbol-tab.md'))
+    const source = '**越界正文**段\n\n| 甲 | **格内** |\n| --- | --- |\n| 一 | 二 |\n'
+    assert(doc.getText() === source, 'Tab 越界 fixture 初始文本不符')
+
+    // 正文粗体内：**越界|正文**（LF 坐标 4）→ 首按到闭合左边界 6 → 再按
+    // 越过整个 **（8）。table.test.key 驱动真实 keymap 链路
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: 4 })
+    await waitViewState('symbol-tab.md', (v) => v.selectionOffset === 4)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key: 'tab' })
+    await waitViewState('symbol-tab.md', (v) => v.selectionOffset === 6)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key: 'tab' })
+    await waitViewState('symbol-tab.md', (v) => v.selectionOffset === 8)
+
+    // 表格格内：**格|内**（表头行第二格内容中间，LF 坐标 = 表头行起点
+    // + '| 甲 | ' + 3）→ 两步越界后再 Tab 切格到数据行第一格
+    const headerFrom = source.indexOf('| 甲')
+    const cellCursor = headerFrom + '| 甲 | '.length + 3
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: cellCursor })
+    await waitViewState('symbol-tab.md', (v) => v.selectionOffset === cellCursor)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key: 'tab' })
+    await waitViewState('symbol-tab.md', (v) => v.selectionOffset === cellCursor + 1)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key: 'tab' })
+    await waitViewState('symbol-tab.md', (v) => v.selectionOffset === cellCursor + 3)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key: 'tab' })
+    await waitViewState('symbol-tab.md', (v) => v.selectionOffset === source.indexOf('一'))
+
+    // 纯导航硬契约：全程零写回（无 edit.request）、零 dirty、字节不变
+    const state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state.appliedEdits - initial.appliedEdits === 0,
+      `Tab 越界不得产生写回，实际 ${state.appliedEdits - initial.appliedEdits}`)
+    assert(doc.getText() === source, 'Tab 越界不得改动权威文本')
+    assert(!doc.isDirty, '纯导航不得产生 dirty 变更')
+    const bytes = Buffer.from(await vscode.workspace.fs.readFile(wsUri('symbol-tab.md'))).toString('utf8')
+    assert(bytes === source, '文档字节须保持不变')
+
+    // Shift+Tab 原行为：格内反向切格（不新增反向越界）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key: 'shift-tab' })
+    await waitViewState('symbol-tab.md', (v) => v.selectionOffset === cellCursor + 3)
+  }],
+
+  ['CRLF 文档围栏内 Tab 零写回且行尾风格保持（#125）', async () => {
+    await openWithEditor('symbol-tab-crlf.md')
+    await waitSessionReady('symbol-tab-crlf.md')
+    const uri = wsUri('symbol-tab-crlf.md').toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri('symbol-tab-crlf.md'))
+    const original = '**CRLF 越界**段\r\n正文行\r\n'
+    assert(doc.getText() === original, 'Tab 越界 CRLF fixture 初始文本不符')
+
+    // webview 全程 LF 坐标：粗体内容 CRLF| 越 界（光标 6，F 后）→ 两步越界
+    // （内容「CRLF 越界」7 字符：闭 ** 在 9-10——闭合左边界 9 → 越过到 11）
+    const initial = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: 6 })
+    await waitViewState('symbol-tab-crlf.md', (v) => v.selectionOffset === 6)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key: 'tab' })
+    await waitViewState('symbol-tab-crlf.md', (v) => v.selectionOffset === 9)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key: 'tab' })
+    await waitViewState('symbol-tab-crlf.md', (v) => v.selectionOffset === 11)
+    const state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state.appliedEdits - initial.appliedEdits === 0, 'CRLF 文档 Tab 越界同样零写回')
+    assert(!doc.isDirty, 'CRLF 文档纯导航不得 dirty')
+    const bytes = Buffer.from(await vscode.workspace.fs.readFile(wsUri('symbol-tab-crlf.md')))
+    assert(bytes.toString('utf8') === original, 'CRLF 文档字节须保持不变')
+    assert(bytes.toString('utf8').includes('**段\r\n'), '不得引入 LF/CRLF 混排')
+  }],
+
+  ['符号 Tab 越界设置：关闭回落切格、重开面板回显恢复（#125）', async () => {
+    await openWithEditor('symbol-tab.md')
+    const initial = await waitSessionReady('symbol-tab.md')
+    const uri = wsUri('symbol-tab.md').toString()
+    const source = '**越界正文**段\n\n| 甲 | **格内** |\n| --- | --- |\n| 一 | 二 |\n'
+
+    // 关闭设置：格内光标 Tab 不再越界，直接切格到数据行第一格
+    await vscode.commands.executeCommand(CMD.setSettings, { 'editor.symbolTabEscape': false })
+    const headerFrom = source.indexOf('| 甲')
+    const cellCursor = headerFrom + '| 甲 | '.length + 3
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: cellCursor })
+    await waitViewState('symbol-tab.md', (v) => v.selectionOffset === cellCursor)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key: 'tab' })
+    await waitViewState('symbol-tab.md', (v) => v.selectionOffset === source.indexOf('一'))
+    const state1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state1.appliedEdits - initial.appliedEdits === 0, '关闭后切格仍为零写回')
+
+    // 恢复默认开启；关闭面板重开：设置经 globalState 存活回显（持久化
+    // 的行为证据），重开后围栏内 Tab 越界恢复生效
+    await vscode.commands.executeCommand(CMD.setSettings, { 'editor.symbolTabEscape': true })
+    await openWithEditor('symbol-tab.md')
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await poll('面板关闭与会话释放', async () => {
+      const s = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+      return s?.found === false ? true : undefined
+    })
+    await openWithEditor('symbol-tab.md')
+    await waitSessionReady('symbol-tab.md')
+    const snapshot = (await vscode.commands.executeCommand(CMD.getSettings)) as Record<string, unknown>
+    assert(snapshot['editor.symbolTabEscape'] === true,
+      `重开后设置快照应回显开启，实际 ${JSON.stringify(snapshot)}`)
+    const uri2 = wsUri('symbol-tab.md').toString()
+    const reopened = await vscode.workspace.openTextDocument(wsUri('symbol-tab.md'))
+    await waitViewState('symbol-tab.md', (v) => v.viewMode === 'live' && v.text === source)
+    await new Promise((r) => setTimeout(r, 1500))
+    await vscode.commands.executeCommand(CMD.postToPanel, uri2, { kind: 'view.locate', offset: 4 })
+    await waitViewState('symbol-tab.md', (v) => v.selectionOffset === 4)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri2, { kind: 'table.test.key', key: 'tab' })
+    await waitViewState('symbol-tab.md', (v) => v.selectionOffset === 6)
+    assert(reopened.getText() === source && !reopened.isDirty, '重开后越界仍为纯导航')
+    if (reopened.isDirty) {
+      await reopened.save()
+    }
+  }],
 ]
