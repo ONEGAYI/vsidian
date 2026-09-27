@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   SYMBOL_AUTOCLOSE_REGISTRY,
+  TAB_ESCAPE_TREE_NODE_NAMES,
   findAutocloseEntry,
   shouldAutoclose,
   type AutocloseContext,
@@ -135,5 +136,34 @@ describe('英文单引号的撇号防误触（#123）', () => {
 
   it('英文双引号不做撇号抑制（词尾键入照常配对）', () => {
     expect(shouldAutoclose(byOpen('"'), ctx({ charBefore: 't' }))).toBe(true)
+  })
+})
+
+describe('Tab 越界能力登记（#125）', () => {
+  it('括号与引号（12 项）显式登记 tabEscape：行内匹配路径', () => {
+    for (const entry of SYMBOL_AUTOCLOSE_REGISTRY) {
+      if (entry.kind === 'bracket' || entry.kind === 'quote') {
+        expect(entry.tabEscape, `${entry.open} 应登记 tabEscape`).toBe(true)
+      }
+    }
+  })
+
+  it('Markdown 触发符中 * _ ~ ` = 登记 tabEscape（对应树围栏），$ 不登记（显式决策）', () => {
+    for (const open of ['*', '_', '~', '`', '=']) {
+      expect(byOpen(open).tabEscape, `${open} 应登记 tabEscape`).toBe(true)
+    }
+    // $ 与 wikilink 无语法节点结构：行内扫描配对的边界语义与公式/双链
+    // 形态学（KaTeX 渲染范围、alias 竖线）不一致，最小样例先行不含它们
+    expect(byOpen('$').tabEscape).toBeUndefined()
+  })
+
+  it('英文尖括号不在 Tab 越界集合', () => {
+    expect(SYMBOL_AUTOCLOSE_REGISTRY.some((e) => e.open === '<' && e.tabEscape)).toBe(false)
+  })
+
+  it('Tab 可导航树围栏节点集合：五个行内结构节点（与 markdown tabEscape 项对应）', () => {
+    expect([...TAB_ESCAPE_TREE_NODE_NAMES].sort()).toEqual(
+      ['Emphasis', 'Highlight', 'InlineCode', 'Strikethrough', 'StrongEmphasis'],
+    )
   })
 })

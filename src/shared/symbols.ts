@@ -46,6 +46,16 @@ export interface SymbolPairEntry {
    *  场景的规则），代码上下文沿用 allowInCode（强调符号不进代码）；
    *  英文尖括号两项能力都不登记 */
   readonly selectionWrap?: boolean
+  /** Tab 越界能力（#125）：光标在该符号对内部时 Tab 两步越出（闭合
+   *  标记左边界 → 越过整个闭合标记）。与补全/包裹是第三个显式集合：
+   *  括号/引号项表示「行内配对扫描参与」（语法树里是纯文本，无节点）；
+   *  markdown 项表示「其对应的树围栏结构参与」（见
+   *  TAB_ESCAPE_TREE_NODE_NAMES，webview 侧从语法树取边界）。
+   *  显式决策（#125 登记）：$ 美元符不登记——行内公式无语法节点，
+   *  行内扫描的 $..$ 配对边界与公式形态学（KaTeX 渲染范围、转义与
+   *  货币歧义）不一致，最小样例不含；wikilink 经方括号的行内配对
+   *  天然纳入（[[..]] 的栈式配对逐层退出）。英文尖括号不登记 */
+  readonly tabEscape?: boolean
   /** 左邻字符抑制（返回 true 不补全）：转义反斜杠、英文撇号的词内形态 */
   readonly suppressBefore?: (charBefore: string) => boolean
   /** 右邻字符抑制（返回 true 不补全）：Markdown 触发符的词中间防误触 */
@@ -75,6 +85,8 @@ function markdownTrigger(open: string): SymbolPairEntry {
     kind: 'markdown',
     allowInCode: false,
     selectionWrap: true,
+    // Tab 越界：树围栏路径（$ 由调用方逐项改写为不登记，见注册表注释）
+    tabEscape: true,
     suppressBefore: escapedSuppress,
     suppressAfter: isWordChar,
     mirrorAtRunStartOnly: true,
@@ -94,24 +106,24 @@ function markdownTrigger(open: string): SymbolPairEntry {
  *   以 test/unit/symbols.test.ts 参数化用例钉住
  */
 export const SYMBOL_AUTOCLOSE_REGISTRY: readonly SymbolPairEntry[] = [
-  { open: '(', close: ')', kind: 'bracket', allowInCode: true, selectionWrap: true, suppressBefore: escapedSuppress },
-  { open: '[', close: ']', kind: 'bracket', allowInCode: true, selectionWrap: true, suppressBefore: escapedSuppress },
-  { open: '{', close: '}', kind: 'bracket', allowInCode: true, selectionWrap: true, suppressBefore: escapedSuppress },
-  { open: '（', close: '）', kind: 'bracket', allowInCode: true, selectionWrap: true, suppressBefore: escapedSuppress },
-  { open: '【', close: '】', kind: 'bracket', allowInCode: true, selectionWrap: true, suppressBefore: escapedSuppress },
-  { open: '《', close: '》', kind: 'bracket', allowInCode: true, selectionWrap: true, suppressBefore: escapedSuppress },
-  { open: '「', close: '」', kind: 'bracket', allowInCode: true, selectionWrap: true, suppressBefore: escapedSuppress },
-  { open: '『', close: '』', kind: 'bracket', allowInCode: true, selectionWrap: true, suppressBefore: escapedSuppress },
-  { open: '“', close: '”', kind: 'quote', allowInCode: true, selectionWrap: true, suppressBefore: escapedSuppress },
-  { open: '‘', close: '’', kind: 'quote', allowInCode: true, selectionWrap: true, suppressBefore: escapedSuppress },
+  { open: '(', close: ')', kind: 'bracket', allowInCode: true, selectionWrap: true, tabEscape: true, suppressBefore: escapedSuppress },
+  { open: '[', close: ']', kind: 'bracket', allowInCode: true, selectionWrap: true, tabEscape: true, suppressBefore: escapedSuppress },
+  { open: '{', close: '}', kind: 'bracket', allowInCode: true, selectionWrap: true, tabEscape: true, suppressBefore: escapedSuppress },
+  { open: '（', close: '）', kind: 'bracket', allowInCode: true, selectionWrap: true, tabEscape: true, suppressBefore: escapedSuppress },
+  { open: '【', close: '】', kind: 'bracket', allowInCode: true, selectionWrap: true, tabEscape: true, suppressBefore: escapedSuppress },
+  { open: '《', close: '》', kind: 'bracket', allowInCode: true, selectionWrap: true, tabEscape: true, suppressBefore: escapedSuppress },
+  { open: '「', close: '」', kind: 'bracket', allowInCode: true, selectionWrap: true, tabEscape: true, suppressBefore: escapedSuppress },
+  { open: '『', close: '』', kind: 'bracket', allowInCode: true, selectionWrap: true, tabEscape: true, suppressBefore: escapedSuppress },
+  { open: '“', close: '”', kind: 'quote', allowInCode: true, selectionWrap: true, tabEscape: true, suppressBefore: escapedSuppress },
+  { open: '‘', close: '’', kind: 'quote', allowInCode: true, selectionWrap: true, tabEscape: true, suppressBefore: escapedSuppress },
   {
-    open: '"', close: '"', kind: 'quote', allowInCode: true, selectionWrap: true,
+    open: '"', close: '"', kind: 'quote', allowInCode: true, selectionWrap: true, tabEscape: true,
     suppressBefore: escapedSuppress,
   },
   {
     // 英文单引号：左邻字母/数字视为撇号（it's / dogs' / 中文词内），
     // 按普通文字处理；行首与空白后照常配对（选区包裹不受此抑制）
-    open: "'", close: "'", kind: 'quote', allowInCode: true, selectionWrap: true,
+    open: "'", close: "'", kind: 'quote', allowInCode: true, selectionWrap: true, tabEscape: true,
     suppressBefore: (charBefore) => escapedSuppress(charBefore) || isWordChar(charBefore),
   },
   markdownTrigger('*'),
@@ -119,7 +131,9 @@ export const SYMBOL_AUTOCLOSE_REGISTRY: readonly SymbolPairEntry[] = [
   markdownTrigger('~'),
   markdownTrigger('`'),
   markdownTrigger('='),
-  markdownTrigger('$'),
+  // $ 的 Tab 越界显式不登记（tabEscape 覆盖为空）：行内公式无语法节点，
+  // 扫描配对的边界与公式形态学不一致（决策见 SymbolPairEntry.tabEscape 注释）
+  { ...markdownTrigger('$'), tabEscape: undefined },
 ]
 
 const ENTRY_BY_CHAR = new Map<string, SymbolPairEntry>()
@@ -177,10 +191,24 @@ export function findSelectionWrapEntry(ch: string): SymbolPairEntry | null {
 }
 
 /**
- * 命中的包裹项在给定上下文是否执行包裹（#124 纯判定）：代码上下文
- * 沿用 allowInCode（Markdown 强调不进代码，括号引号照常）。邻接字符
+ * 命中的包裹项在给定上下文是否执行包裹（#124 纯判定）：代码上下文沿用
+ * allowInCode（Markdown 强调不进代码，括号引号照常）。邻接字符
  * 抑制（词中/转义）不适用——选区已圈定范围，用户意图明确。
  */
 export function shouldSelectionWrap(entry: SymbolPairEntry, ctx: SelectionWrapContext): boolean {
   return !(ctx.inCode && !entry.allowInCode)
 }
+
+/**
+ * Tab 越界认定的 Markdown 行内围栏语法节点名（#125）：webview 侧 chainAt/
+ * visitRange 命中这些节点的光标处于有效树围栏内（闭合边界取节点末子
+ * mark 节点）。与注册表 markdown 项的 tabEscape 对应——Emphasis 对应 *
+ * 与 _ 两种触发符，故节点集合与触发符集合不是一一映射，登记在此为
+ * 单一事实源（节点名只是字符串，本模块仍不依赖语法树）。InlineCode 在
+ * 集合内：行内代码本身是成对围栏（块级代码 FencedCode/CodeText/
+ * CodeBlock 不在——块内 Tab 继续缩进）；$ 与 wikilink 无专用节点，
+ * 决策见 SymbolPairEntry.tabEscape 注释。
+ */
+export const TAB_ESCAPE_TREE_NODE_NAMES: readonly string[] = [
+  'Emphasis', 'StrongEmphasis', 'Strikethrough', 'Highlight', 'InlineCode',
+]
