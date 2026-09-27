@@ -7,7 +7,7 @@
 import { t, onLocaleChanged } from '../shared/i18n'
 import { bindLocale } from './localeDom'
 import { isHostToWebview } from '../shared/protocol'
-import type { SettingDefinition, SettingsPayload, SettingsPayloadValue } from '../shared/settings'
+import { isSettingEnabled, type SettingDefinition, type SettingsPayload, type SettingsPayloadValue } from '../shared/settings'
 
 export interface SettingsPageBridge { postMessage(message: unknown): void }
 
@@ -155,11 +155,13 @@ export class SettingsPageView {
       for (const box of this.listEl?.querySelectorAll<HTMLInputElement>('input[data-setting-key]') ?? []) {
         const def = this.defs.find((d) => d.key === box.dataset.settingKey)!
         box.checked = this.value(def) === true
+        this.setControlDisabled(box, box.closest(`.${SETTINGS_PAGE_CLASS_NAMES.item}`), !isSettingEnabled(this.defs, this.values ?? {}, def))
       }
       for (const select of this.listEl?.querySelectorAll<HTMLSelectElement>('select[data-setting-key]') ?? []) {
         const def = this.defs.find((d) => d.key === select.dataset.settingKey)
         if (def) {
           select.value = String(this.value(def))
+          this.setControlDisabled(select, select.closest(`.${SETTINGS_PAGE_CLASS_NAMES.item}`), !isSettingEnabled(this.defs, this.values ?? {}, def))
         }
       }
     }
@@ -294,7 +296,9 @@ export class SettingsPageView {
     this.renderDefItems(group, defs, focusEntry)
   }
 
-  /** 设置项行渲染（editor / general 两组共用：标题、说明与控件装配） */
+  /** 设置项行渲染（editor / general 两组共用：标题、说明与控件装配）。
+   *  #155 跟进：dependsOn 依赖关闭时控件禁用 + 条目灰化类（注册表驱动，
+   *  值不清除；回推同步点 syncControlEnabledState 就地联动） */
   private renderDefItems(list: HTMLElement, defs: readonly SettingDefinition[], focusEntry?: string): void {
     for (const def of defs) {
       const item = element('div', SETTINGS_PAGE_CLASS_NAMES.item)
@@ -306,6 +310,9 @@ export class SettingsPageView {
       const control: HTMLInputElement | HTMLSelectElement = def.type === 'string'
         ? this.buildSelect(def)
         : this.buildCheckbox(def)
+      if (!isSettingEnabled(this.defs, this.values ?? {}, def)) {
+        this.setControlDisabled(control, item, true)
+      }
       if (def.descriptionKey) {
         const desc = element('span', SETTINGS_PAGE_CLASS_NAMES.itemDescription, t(def.descriptionKey))
         desc.id = `description-${def.key}`
@@ -323,6 +330,12 @@ export class SettingsPageView {
         item.scrollIntoView?.({ block: 'nearest' })
       }
     }
+  }
+
+  /** 依赖禁用态落盘：控件 disabled + 条目灰化类（与否反之） */
+  private setControlDisabled(control: HTMLInputElement | HTMLSelectElement, item: Element | null, disabled: boolean): void {
+    control.disabled = disabled
+    item?.classList.toggle('vsidian-settings-item-disabled', disabled)
   }
 
   private buildCheckbox(def: BooleanSettingDefinitionLike): HTMLInputElement {

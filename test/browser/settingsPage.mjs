@@ -78,6 +78,32 @@ try {
     await page.keyboard.press('Space')
     await page.getByRole('status').filter({ hasText: zhCn['settings.saveDone'] }).waitFor()
     assert.equal(await box.isChecked(), false)
+    // #155 跟进（真实点击路径）：依赖灰化——关掉「代码块卡片」后子项
+    // 「卡内行号」「复制按钮」就地禁用并降不透明度，独立项「语法高亮」不受
+    // 影响；重新开卡后子项自动解灰且值未被清除（注册表 dependsOn 驱动）
+    const cardBox = page.getByRole('checkbox', { name: zhCn['setting.codeblockCard.title'], exact: true })
+    const lineNumbersBox = page.getByRole('checkbox', { name: zhCn['setting.codeblockLineNumbers.title'], exact: true })
+    const copyButtonBox = page.getByRole('checkbox', { name: zhCn['setting.codeblockCopyButton.title'], exact: true })
+    const highlightBox = page.getByRole('checkbox', { name: zhCn['setting.codeblockHighlight.title'], exact: true })
+    assert.equal(await lineNumbersBox.isDisabled(), false, '卡片开（默认）时卡内行号应可用')
+    await cardBox.click()
+    await page.getByRole('status').filter({ hasText: zhCn['settings.saveDone'] }).waitFor()
+    assert.equal(await lineNumbersBox.isDisabled(), true, '卡片关闭后卡内行号应禁用')
+    assert.equal(await copyButtonBox.isDisabled(), true, '卡片关闭后复制按钮应禁用')
+    assert.equal(await highlightBox.isDisabled(), false, '语法高亮独立于卡片，不应受影响')
+    const dimPaint = await lineNumbersBox.evaluate(el => {
+      const label = el.closest('.vsidian-settings-item')?.querySelector('.vsidian-settings-item-label')
+      return { opacity: getComputedStyle(label).opacity, disabled: el.disabled }
+    })
+    assert.equal(dimPaint.opacity, '0.55', '依赖禁用条目应降不透明度（灰化可见）')
+    await page.screenshot({ path: path.join(artifacts, `settings-${theme}-deps-disabled.png`) })
+    await cardBox.click()
+    await page.getByRole('status').filter({ hasText: zhCn['settings.saveDone'] }).waitFor()
+    assert.equal(await lineNumbersBox.isDisabled(), false, '重新开卡后子项自动解灰')
+    assert.equal(await lineNumbersBox.isChecked(), true, '依赖关闭期间子项值不被清除')
+    const restorePaint = await lineNumbersBox.evaluate(el =>
+      getComputedStyle(el.closest('.vsidian-settings-item')?.querySelector('.vsidian-settings-item-label')).opacity)
+    assert.equal(restorePaint, '1', '解灰后不透明度恢复')
     // #155 独立滚动骨架（绘制层，编辑器分组内容超一屏）：主区滚动时侧栏静止；
     // 切过分页后主区滚动复位、根元素不整体滚动
     const scrollProbe = await page.evaluate(() => {

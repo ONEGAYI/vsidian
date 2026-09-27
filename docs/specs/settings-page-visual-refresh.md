@@ -132,6 +132,8 @@
 - 样式参考总分页签：默认落总表、切换详细查询、全局搜索定位条目直接进详细查询。
 - 详细查询两列独立滚动：类目栏与条目列表各自滚动的手感、工具行固定、搜索时
   列表区内滚动；窄屏退化回整页单滚动。
+- 依赖灰化观感：关闭「代码块卡片」后「卡内行号」「复制按钮」的灰化与禁用、
+  重新开启后解灰且子项值保留。
 
 ## 后续小改（同 PR 跟进，2026-09-28）
 
@@ -154,11 +156,27 @@
    内容列表（`.vsidian-settings-list`）逐层放开 `min-height` 收敛到两列；
    全局基线补 `[hidden] { display: none !important }`（作者 display 规则
    不得压过 hidden 语义）；窄屏（<600px）退化为整页单滚动不做内部双列。
+4. **设置项依赖灰化（注册表驱动）**：设置定义单一事实源
+   （`src/shared/settings.ts`）的 `SettingDefinitionBase` 新增可选 `dependsOn`
+   （依赖项 key，boolean 语义——依赖开启才可用，链上传递）。渲染层据
+   `isSettingEnabled` 落禁用态：依赖关闭时控件 `disabled` + 条目挂
+   `vsidian-settings-item-disabled`（行降不透明度 0.55）；**值不清除**，
+   依赖恢复按原值生效（与 Obsidian 子设置行为一致）。联动全自动：宿主
+   `settings.changed` 回推的既有「就地同步控件值」同步点同时更新全部控件
+   的禁用态——不重渲染、不夺焦点，新增依赖项只需在定义上登记 `dependsOn`
+   即自动获得灰化与联动。`validateSettingDependencies` 校验引用存在与
+   无环（错引用/自环/传递环），生产注册表合法性由单测钉住；消费方（如
+   codeCardCompartment）本就不理依赖关闭时的子项值，行为不变。
+   现有登记：`codeblock.lineNumbers`、`codeblock.copyButton` 依赖
+   `codeblock.card`（`codeblock.highlight` 独立）。
 
 自动化覆盖：`styleReferenceSettings.test.ts` 新增页签与 callout 断言组；
 `cssSnippetSettings.test.ts`、`settingsPage.test.ts` 样式契约补共享样式与
-两列滚动断言；`test/browser/settingsPage.mjs` 补页签切换、callout 与独立
-滚动绘制层断言（明暗两主题，含页签往返恢复主区滚动）。
+两列滚动断言；`settings.test.ts` 新增依赖语义组（可用性/传递/缺值回退/
+环防御/注册表校验/生产登记）；`settingsPage.test.ts` 新增灰化渲染与回推
+联动组；`test/browser/settingsPage.mjs` 补页签切换、callout、独立滚动与
+依赖灰化绘制层断言（明暗两主题，真实点击路径：关卡→灰化→开卡→解灰且
+值保留）。
 
 ## grilling 决策纪要（2026-09-27）
 

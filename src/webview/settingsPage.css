@@ -90,6 +90,10 @@ button:focus-visible, input:focus-visible {
 .vsidian-settings-group-title { font-size: 13px; font-weight: 600; margin: 0 -20px; padding: 12px 20px; border-bottom: 1px solid var(--vscode-panel-border, #d9dde3); }
 .vsidian-settings-item { padding: 18px 0; border-bottom: 1px solid color-mix(in srgb, var(--vsidian-settings-tint) 8%, transparent); }
 .vsidian-settings-item:last-child { border-bottom: 0; }
+/* 依赖灰化（#155 跟进）：dependsOn 依赖关闭时整行降不透明度、控件禁用；
+ * 值保留，依赖恢复自动解灰（注册表驱动，见 shared/settings.ts） */
+.vsidian-settings-item-disabled .vsidian-settings-item-label { opacity: 0.55; }
+.vsidian-settings-item-disabled .vsidian-settings-checkbox { cursor: default; }
 .vsidian-settings-item-label { display: flex; justify-content: space-between; align-items: center; gap: 28px; cursor: pointer; }
 .vsidian-settings-item-copy { min-width: 0; }
 .vsidian-settings-item-title { font-size: 14px; font-weight: 500; }

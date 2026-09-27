@@ -285,6 +285,8 @@ it('样式契约：双栏独立滚动、分组容器、拨动开关、主题选�
   expect(css).toContain('--vsidian-settings-container-bg')
   expect(css).toContain('color-mix(in srgb, var(--vsidian-settings-tint) 4%')
   expect(css).toMatch(/\.vsidian-settings-checkbox\s*\{[^}]*appearance:\s*none/)
+  // #155 跟进：依赖灰化（dependsOn 注册表驱动）为纯 CSS 契约
+  expect(css).toMatch(/\.vsidian-settings-item-disabled[^{]*\{[^}]*opacity:\s*0\.55/)
   expect(css).toContain('.vsidian-settings-nav-item[aria-current="page"]')
   expect(css).toContain('--vscode-list-activeSelectionBackground')
   expect(css).toContain(':focus-visible')
@@ -309,4 +311,80 @@ it('样式契约：详细查询两列独立滚动（#155 跟进）', async () =>
   expect(css).toContain('.vsidian-settings-main:has(.vsidian-style-ref-detail:not([hidden]))')
   expect(css).toMatch(/\.vsidian-style-ref-cats\s*\{[^}]*overflow-y:\s*auto/)
   expect(css).toMatch(/\.vsidian-style-ref-list\s*\{[^}]*overflow-y:\s*auto/)
+})
+
+describe('设置项依赖灰化（#155 跟进：dependsOn 注册表驱动联动）', () => {
+  /** 切到编辑器分组并取生产定义控件（卡片/行号/复制） */
+  function editorControls(parent: HTMLElement) {
+    const editorNav = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
+      .find((b) => b.textContent === '编辑器')!
+    editorNav.click()
+    const byKey = (key: string) =>
+      parent.querySelector<HTMLInputElement>(`input[data-setting-key="${key}"]`)!
+    const itemOf = (key: string) =>
+      parent.querySelector<HTMLInputElement>(`input[data-setting-key="${key}"]`)!
+        .closest('.vsidian-settings-item')!
+    return {
+      card: byKey('codeblock.card'),
+      lineNumbers: byKey('codeblock.lineNumbers'),
+      copyButton: byKey('codeblock.copyButton'),
+      highlight: byKey('codeblock.highlight'),
+      itemOf,
+    }
+  }
+  /** 宿主回推正式消息形态（经协议校验口径构造） */
+  const hostMessage = (values: Record<string, boolean | string>, kind: 'settings.snapshot' | 'settings.changed' = 'settings.changed') =>
+    ({ kind, values })
+
+  it('依赖关闭：子项控件 disabled、条目带灰化类；独立项（语法高亮）不受影响', () => {
+    const { view, parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
+    view.handleHostMessage(hostMessage({
+      'editor.lineNumbers': true, 'codeblock.card': false,
+      'codeblock.lineNumbers': true, 'codeblock.copyButton': true, 'codeblock.highlight': true,
+      'editor.symbolAutocomplete': true, 'editor.symbolSelectionWrap': true, 'editor.symbolTabEscape': true,
+      'general.language': 'auto',
+    }, 'settings.snapshot'))
+    const c = editorControls(parent)
+    expect(c.card.disabled).toBe(false)
+    expect(c.lineNumbers.disabled).toBe(true)
+    expect(c.copyButton.disabled).toBe(true)
+    expect(c.highlight.disabled).toBe(false)
+    expect(c.itemOf('codeblock.lineNumbers').classList.contains('vsidian-settings-item-disabled')).toBe(true)
+    expect(c.itemOf('codeblock.copyButton').classList.contains('vsidian-settings-item-disabled')).toBe(true)
+    expect(c.itemOf('codeblock.highlight').classList.contains('vsidian-settings-item-disabled')).toBe(false)
+  })
+
+  it('联动自动化：宿主回推 settings.changed 后依赖项就地解灰（无重渲染、值不清除）', () => {
+    const { view, parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
+    // 初始快照：卡片关，子项灰化但值保留 true
+    view.handleHostMessage(hostMessage({
+      'editor.lineNumbers': true, 'codeblock.card': false,
+      'codeblock.lineNumbers': true, 'codeblock.copyButton': true, 'codeblock.highlight': true,
+      'editor.symbolAutocomplete': true, 'editor.symbolSelectionWrap': true, 'editor.symbolTabEscape': true,
+      'general.language': 'auto',
+    }, 'settings.snapshot'))
+    const c = editorControls(parent)
+    expect(c.lineNumbers.disabled).toBe(true)
+    // 用户打开卡片：设置页上送 settings.set，宿主合并后回推 changed
+    c.card.click()
+    view.handleHostMessage(hostMessage({
+      'editor.lineNumbers': true, 'codeblock.card': true,
+      'codeblock.lineNumbers': true, 'codeblock.copyButton': true, 'codeblock.highlight': true,
+      'editor.symbolAutocomplete': true, 'editor.symbolSelectionWrap': true, 'editor.symbolTabEscape': true,
+      'general.language': 'auto',
+    }))
+    expect(c.lineNumbers.disabled).toBe(false)
+    expect(c.copyButton.disabled).toBe(false)
+    // 子项值未被清除：依赖恢复后按原值生效
+    expect(c.lineNumbers.checked).toBe(true)
+    expect(c.itemOf('codeblock.lineNumbers').classList.contains('vsidian-settings-item-disabled')).toBe(false)
+    // 再关卡片：就地复灰（同一控件实例，验证不重建分页）
+    view.handleHostMessage(hostMessage({
+      'editor.lineNumbers': true, 'codeblock.card': false,
+      'codeblock.lineNumbers': true, 'codeblock.copyButton': true, 'codeblock.highlight': true,
+      'editor.symbolAutocomplete': true, 'editor.symbolSelectionWrap': true, 'editor.symbolTabEscape': true,
+      'general.language': 'auto',
+    }))
+    expect(c.lineNumbers.disabled).toBe(true)
+  })
 })
