@@ -1620,43 +1620,45 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "domain": "chrome",
     "kind": "selector",
     "target": ".vsidian-math",
-    "purpose": "live 行内公式渲染态 widget 外层（内含 KaTeX .katex 结构）；颜色继承编辑器前景。Obsidian 拆分 .cm-math-begin/end 定界符类，本项目整体替换、无拆分类。",
+    "purpose": "公式渲染态稳定容器：live 为行内 widget 外层、阅读为 KaTeX 外层 span/p（内含 KaTeX .katex 结构）；颜色继承编辑器前景。Obsidian 拆分 .cm-math-begin/end 定界符类，本项目整体替换、无拆分类。",
     "views": [
-      "live"
+      "live",
+      "reading"
     ],
-    "states": "光标进入公式范围显源码（见 live-math-source）。",
-    "dom": "live 行内 widget。",
+    "states": "live 侧光标进入公式范围显源码（见 live-math-source）。",
+    "dom": "live：行内替换 widget；阅读：行内 span 或块级 p.katex-block（KaTeX HTML 由 KaTeX 产出）。",
     "example": ".vsidian-math .katex {\n  color: inherit;\n}",
     "obsidian": {
       "counterpart": ".cm-math（Obsidian live 数学 token）",
       "support": "semantic"
     },
     "verification": [
-      "集成「live 公式渲染与绘制层」（#59）：paint.math.visible + cssProbe.liveMathFontFamily"
+      "集成「live 公式渲染与绘制层」（#59）：paint.math.visible + cssProbe.liveMathFontFamily",
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"live-math-live\"/\"reading-math-block\"] 探针命中（KaTeX 在稳定容器内）"
     ],
-    "introduced": "#59（2026-09-25）",
-    "pendingVerification": "#133"
+    "introduced": "#59（2026-09-25）"
   },
   {
     "id": "live-math-block",
     "domain": "chrome",
     "kind": "selector",
     "target": ".vsidian-math-block",
-    "purpose": "live 块级公式（$$…$$）渲染态变体：独立成块、居中、横向滚动。",
+    "purpose": "块级公式（$$…$$ / \\begin{align} 等）渲染态变体：独立成块、居中、横向滚动。live widget 与阅读 p.katex-block 双侧同发射（与 .vsidian-math 并挂）。",
     "views": [
-      "live"
+      "live",
+      "reading"
     ],
-    "dom": "live 块级 widget。",
+    "dom": "live：块级替换 widget；阅读：p.katex-block（vsidian-math 与本类并挂）。",
     "example": ".vsidian-math-block {\n  margin: 8px 0;\n}",
     "obsidian": {
       "counterpart": ".HyperMD-math（块级数学行）方向",
       "support": "semantic"
     },
     "verification": [
-      "mathPaintCssContract：display:block + text-align:center + overflow-x:auto"
+      "mathPaintCssContract：display:block + text-align:center + overflow-x:auto",
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"live-math-block-live\"] 探针命中"
     ],
-    "introduced": "#59（2026-09-25）",
-    "pendingVerification": "#133"
+    "introduced": "#59（2026-09-25）"
   },
   {
     "id": "live-math-source",
@@ -1675,17 +1677,17 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "semantic"
     },
     "verification": [
-      "mathPaintCssContract：--vscode-textPreformat-foreground 着色"
+      "mathPaintCssContract：--vscode-textPreformat-foreground 着色",
+      "单元 liveMath：mathSource mark 发射契约"
     ],
-    "introduced": "#59（2026-09-25）",
-    "pendingVerification": "#133"
+    "introduced": "#59（2026-09-25）"
   },
   {
     "id": "reading-math-block",
     "domain": "chrome",
     "kind": "selector",
     "target": ".vsidian-reading-math（块类）+ .katex-block 内层 display 容器",
-    "purpose": "阅读公式块（markdown-it-katex 渲染，挂载即渲染、卸载即释放，高度由 ResizeObserver 回填）。",
+    "purpose": "阅读公式块（markdown-it-katex 渲染，挂载即渲染、卸载即释放，高度由 ResizeObserver 回填）；块内公式容器为 p.katex-block（vsidian-math/-math-block 并挂其上）。",
     "views": [
       "reading"
     ],
@@ -1696,83 +1698,83 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "semantic"
     },
     "verification": [
-      "cssProbe.readingMathFontFamily：KaTeX 字体族"
+      "cssProbe.readingMathFontFamily：KaTeX 字体族",
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"reading-math-block\"] 探针命中（katex-block 在阅读块内）"
     ],
-    "introduced": "#59（2026-09-25）",
-    "pendingVerification": "#133"
+    "introduced": "#59（2026-09-25）"
   },
   {
     "id": "math-error",
     "domain": "chrome",
     "kind": "selector",
     "target": ".vsidian-math-error",
-    "purpose": "公式解析失败的原文降级 span：错误色 + 浅红底 + 等宽字体，原文完整可读（两视图共用）。",
+    "purpose": "公式解析失败的原文降级 span：错误色 + 浅红底 + 等宽字体，原文完整可读（两视图共用；title 属性带原文便于悬停核对）。",
     "views": [
       "live",
       "reading"
     ],
-    "dom": "行内降级 span。",
+    "dom": "live：替换 widget span；阅读：span（行内）/ p.katex-block>code（块级）。",
     "example": ".vsidian-math-error {\n  color: var(--vscode-errorForeground);\n}",
     "obsidian": {
       "counterpart": ".math-error / .katex-error 方向",
       "support": "semantic"
     },
     "verification": [
-      "mathPaintCssContract：错误色变量"
+      "mathPaintCssContract：错误色变量",
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"math-error-live\"/\"math-error-reading\"] 探针命中"
     ],
-    "introduced": "#59（2026-09-25）",
-    "pendingVerification": "#133"
+    "introduced": "#59（2026-09-25）"
   },
   {
     "id": "mermaid-container",
     "domain": "chrome",
     "kind": "selector",
     "target": ".vsidian-mermaid",
-    "purpose": "mermaid 围栏渲染容器（live widget 外层与阅读 fence 容器共用；携带 data-vsidian-mermaid-code 源码与 data-vsidian-mermaid-state 状态）。",
+    "purpose": "mermaid 围栏渲染容器（live widget 内层与阅读 fence 容器共用；携带 data-vsidian-mermaid-code 源码与 data-vsidian-mermaid-state 状态 loading/rendered/error）。",
     "views": [
       "live",
       "reading"
     ],
-    "dom": "渲染容器内含 mermaid SVG。",
+    "dom": "live：vsidian-graphic-frame widget 内层；阅读：vsidian-reading-mermaid 块内。渲染容器内含 mermaid SVG（rendered 态）。",
     "example": ".vsidian-mermaid {\n  background: rgba(0, 0, 0, 0.2);\n}",
     "obsidian": {
       "counterpart": ".mermaid（Obsidian 阅读渲染的图表容器）",
       "support": "semantic"
     },
     "verification": [
-      "集成「live/阅读 Mermaid 渲染」（#60）：paint.mermaid.visible + 分态计数；mermaidPaintCssContract"
+      "集成「live/阅读 Mermaid 渲染」（#60）：paint.mermaid.visible + 分态计数；mermaidPaintCssContract",
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"mermaid-container-live\"/\"mermaid-container-reading\"] 探针命中（rendered 态门控）"
     ],
-    "introduced": "#60（2026-09-25）",
-    "pendingVerification": "#133"
+    "introduced": "#60（2026-09-25）"
   },
   {
     "id": "mermaid-svg",
     "domain": "chrome",
     "kind": "selector",
     "target": ".vsidian-mermaid svg",
-    "purpose": "mermaid 自产 SVG（宽度受容器约束、高度等比）。",
+    "purpose": "mermaid 自产 SVG（宽度受容器约束、高度等比）。SVG 内部节点为第三方渲染器私有 DOM，不承诺稳定（见 limit-mermaid-internals）。",
     "views": [
       "live",
       "reading"
     ],
-    "dom": "容器内 SVG。",
+    "dom": "渲染容器内 SVG。",
     "example": ".vsidian-mermaid svg {\n  max-width: 100%;\n}",
     "obsidian": {
       "counterpart": ".mermaid svg",
       "support": "semantic"
     },
     "verification": [
-      "浏览器 mermaidPaint：真实渲染（CSP 复刻页）；mermaidPaintCssContract：max-width"
+      "浏览器 mermaidPaint：真实渲染（CSP 复刻页）；mermaidPaintCssContract：max-width",
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"mermaid-svg-live\"] 探针命中"
     ],
-    "introduced": "#60（2026-09-25）",
-    "pendingVerification": "#133"
+    "introduced": "#60（2026-09-25）"
   },
   {
     "id": "reading-mermaid-block",
     "domain": "chrome",
     "kind": "selector",
     "target": ".vsidian-reading-mermaid",
-    "purpose": "阅读 mermaid 围栏整块成块的块元素类（豁免 60 行大围栏切片；挂载即渲染、卸载随块释放）。",
+    "purpose": "阅读 mermaid 围栏整块成块的块元素类（豁免 60 行大围栏切片；挂载即渲染、卸载随块释放）；块内才是 .vsidian-mermaid 渲染容器。",
     "views": [
       "reading"
     ],
@@ -1783,10 +1785,10 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "semantic"
     },
     "verification": [
-      "集成「阅读模式 Mermaid 渲染」（#60）"
+      "集成「阅读模式 Mermaid 渲染」（#60）",
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"reading-mermaid-block\"] 探针命中"
     ],
-    "introduced": "#60（2026-09-25）",
-    "pendingVerification": "#133"
+    "introduced": "#60（2026-09-25）"
   },
   {
     "id": "mermaid-error",
@@ -1805,17 +1807,64 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "semantic"
     },
     "verification": [
-      "mermaidPaintCssContract：错误色与左对齐"
+      "mermaidPaintCssContract：错误色与左对齐",
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"mermaid-error\"] 探针命中"
     ],
-    "introduced": "#60（2026-09-25）",
-    "pendingVerification": "#133"
+    "introduced": "#60（2026-09-25）"
+  },
+  {
+    "id": "graphic-chrome",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-graphic-frame / .vsidian-graphic-chrome（含 -edit / -popup）",
+    "purpose": "图形化代码块（渲染成图形的围栏）定位包裹层与右上角按钮组：edit 进源码编辑（仅实时预览）、popup 打开图表弹窗；按钮组悬停显隐由 CSS 驱动（透明度切换，DOM 常驻渲染成功态）。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "渲染成功态显示按钮组（error 降级块不发射）；edit 按钮仅实时预览侧装配。",
+    "dom": "live：围栏 widget 外层 frame；阅读：mermaid/图形容器外层 frame。按钮组挂 frame 内 absolute 右上。",
+    "example": ".vsidian-graphic-chrome {\n  opacity: 1;\n}",
+    "obsidian": {
+      "counterpart": "无（Obsidian 图表块无公开按钮组结构）",
+      "support": "none"
+    },
+    "verification": [
+      "集成「图形化代码块按钮组与图表弹窗」（#111）：paint.graphic.frames/editButtons/popupButtons",
+      "浏览器 graphicPopup：悬停显隐（透明度两态）",
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"graphic-chrome\"] 探针命中"
+    ],
+    "introduced": "#111（2026-09-26）"
+  },
+  {
+    "id": "diagram-popup",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-diagram-overlay / -backdrop / -stage / -media / -toolbar / -zoom-in / -zoom-out / -zoom-label / -reset / -refresh / -export-svg / -export-png / -close / -error / -note",
+    "purpose": "图表弹窗全屏浮层（#111）：遮罩 + 舞台（缩放/平移的图本体）+ 工具条（缩放/重置/刷新/导出/关闭）；error 态保留 close 与 refresh；note 为环境不支持 PNG 光栅化时的提示条。挂 document.body，仅在弹窗打开期间在场。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "popup 按钮打开期间在场；Esc/点空白区/关闭按钮撤下。",
+    "dom": "body 直接子元素 overlay（backdrop/stage/toolbar 三区）。",
+    "example": ".vsidian-diagram-toolbar {\n  gap: 4px;\n}",
+    "obsidian": {
+      "counterpart": "无（Obsidian 图表在新标签页打开）",
+      "support": "none"
+    },
+    "verification": [
+      "集成「图表弹窗」（#111/#133）：cssProbe.chromePopup 打开期间样式观测 + 刷新后保持",
+      "浏览器 graphicPopup：原生键鼠路径（缩放/平移/Esc/导出）与样式保持"
+    ],
+    "introduced": "#111（2026-09-26）"
   },
   {
     "id": "outline-item",
     "domain": "chrome",
     "kind": "selector",
     "target": ".vsidian-outline-item（+ .vsidian-outline-level-{1..6}）",
-    "purpose": "大纲条目（级别类兼作缩进与层级色入口）；条目钉常规字重 400，不继承标题级别加粗。",
+    "purpose": "大纲条目（级别类兼作缩进与层级色入口）；条目钉常规字重 400，不继承标题级别加粗；层级色与正文标题同引 --vsidian-heading-color-{1..6}（三侧同源，见 var-heading-color）。",
     "views": [],
     "dom": "右侧栏大纲面板条目容器。",
     "example": ".vsidian-outline-level-1 {\n  color: var(--vsidian-heading-color-1);\n}",
@@ -1824,10 +1873,10 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "outlineCssContract：层级色三侧同引；单元 outline 系列"
+      "outlineCssContract：层级色三侧同引；单元 outline 系列",
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"outline-item\"] 探针命中"
     ],
-    "introduced": "#54（2026-09-25）；#65 起样式透传",
-    "pendingVerification": "#133"
+    "introduced": "#54（2026-09-25）；#65 起样式透传"
   },
   {
     "id": "outline-inline-marks",
@@ -1843,10 +1892,29 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "单元 outline：SPAN_KIND_BY_NODE 提取白名单契约"
+      "单元 outline：SPAN_KIND_BY_NODE 提取白名单契约",
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"outline-inline-marks\"] 探针命中"
     ],
-    "introduced": "#65（2026-09-25）；#105 高亮接入",
-    "pendingVerification": "#133"
+    "introduced": "#65（2026-09-25）；#105 高亮接入"
+  },
+  {
+    "id": "outline-guide",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-outline-guide",
+    "purpose": "层级对齐引导线（条目内绝对定位竖线，left 对齐祖先 chevron 中心——嵌套层级的视觉对齐辅助）。",
+    "views": [],
+    "dom": "嵌套层级条目内绝对定位 span。",
+    "example": ".vsidian-outline-guide {\n  background: var(--vscode-editorIndentGuide-background);\n}",
+    "obsidian": {
+      "counterpart": "无",
+      "support": "none"
+    },
+    "verification": [
+      "outlineCssContract：引导线规则",
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"outline-guide\"] 探针命中"
+    ],
+    "introduced": "#99（2026-09-26）"
   },
   {
     "id": "outline-located",
@@ -1863,10 +1931,9 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "浏览器 outlineHover/outlineJump 系列"
+      "浏览器 outlineHover/outlineJump 系列；集成 outline.locatedPainted 绘制证据"
     ],
-    "introduced": "#66（2026-09-25）",
-    "pendingVerification": "#133"
+    "introduced": "#66（2026-09-25）"
   },
   {
     "id": "outline-slider",
@@ -1882,17 +1949,17 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "浏览器 outlineCollapse"
+      "浏览器 outlineCollapse；集成 outline.sliderPainted 绘制证据",
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"outline-slider\"] 探针命中"
     ],
-    "introduced": "#67（2026-09-25）",
-    "pendingVerification": "#133"
+    "introduced": "#67（2026-09-25）"
   },
   {
     "id": "outline-slider-dot",
     "domain": "chrome",
     "kind": "selector",
-    "target": ".vsidian-outline-slider-dot（+ .vsidian-outline-slider-active）",
-    "purpose": "六档折叠圆点：空闲珠空心（透明面 + 描边圆环）、当前珠实心——两态差异唯一来源是 active 类规则；实心色跟随 --vscode-button-background。",
+    "target": ".vsidian-outline-slider-dot（+ .vsidian-outline-slider-active / -filled）",
+    "purpose": "六档折叠圆点：空闲珠空心（透明面 + 描边圆环）、当前珠实心——两态差异唯一来源是 active 类规则；#99 起当前档沿途珠（filled）同态实心；实心色跟随 --vscode-button-background。",
     "views": [],
     "dom": "滑块行内按钮。",
     "example": ".vsidian-outline-slider-active {\n  background: var(--vscode-button-background);\n}",
@@ -1901,10 +1968,10 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "浏览器 outlineCollapse"
+      "浏览器 outlineCollapse；集成 outline.sliderActiveDotPainted",
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"outline-slider-dot\"] 探针命中"
     ],
-    "introduced": "#67（2026-09-25）",
-    "pendingVerification": "#133"
+    "introduced": "#67（2026-09-25）；#99 filled 沿途珠"
   },
   {
     "id": "outline-chevron",
@@ -1920,10 +1987,10 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "浏览器 outlineCollapse"
+      "浏览器 outlineCollapse；集成 outline.chevronPainted",
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"outline-chevron\"] 探针命中"
     ],
-    "introduced": "#67（2026-09-25）",
-    "pendingVerification": "#133"
+    "introduced": "#67（2026-09-25）"
   },
   {
     "id": "outline-collapsed",
@@ -1940,10 +2007,10 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "浏览器 outlineCollapse"
+      "浏览器 outlineCollapse：两态往返",
+      "单元 outlineCollapse 状态机"
     ],
-    "introduced": "#67（2026-09-25）",
-    "pendingVerification": "#133"
+    "introduced": "#67（2026-09-25）"
   },
   {
     "id": "outline-hidden",
@@ -1960,10 +2027,10 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "单元 outlineCollapse / outlineSearch"
+      "单元 outlineCollapse / outlineSearch",
+      "集成 outline.visibleIndices 可见集断言"
     ],
-    "introduced": "#67（2026-09-25）",
-    "pendingVerification": "#133"
+    "introduced": "#67（2026-09-25）"
   },
   {
     "id": "outline-toolbar",
@@ -1979,17 +2046,17 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "浏览器 outlineSearch"
+      "浏览器 outlineSearch；集成 outline.toolbarPainted",
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"outline-toolbar\"] 探针命中"
     ],
-    "introduced": "#68（2026-09-25）",
-    "pendingVerification": "#133"
+    "introduced": "#68（2026-09-25）"
   },
   {
     "id": "outline-toolbar-buttons",
     "domain": "chrome",
     "kind": "selector",
     "target": ".vsidian-outline-jump-bottom / .vsidian-outline-reset",
-    "purpose": "工具条图标按钮（跳转到笔记末尾 / 重置三合一），与侧栏顶栏按钮同形态。",
+    "purpose": "工具条图标按钮（跳转到笔记末尾 / 重置三合一），与侧栏顶栏按钮同形态（基础形态由 .vsidian-outline-toolbar button 结构选择器承担，本类名为行为锚点与片段入口）。",
     "views": [],
     "dom": "工具条内按钮。",
     "example": ".vsidian-outline-reset:hover {\n  background: rgba(128, 128, 128, 0.2);\n}",
@@ -1998,10 +2065,10 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "浏览器 outlineSearch"
+      "浏览器 outlineSearch",
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"outline-toolbar-buttons\"] 探针命中"
     ],
-    "introduced": "#68（2026-09-25）",
-    "pendingVerification": "#133"
+    "introduced": "#68（2026-09-25）"
   },
   {
     "id": "outline-search",
@@ -2017,10 +2084,10 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "浏览器 outlineSearch"
+      "浏览器 outlineSearch",
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"outline-search\"] 探针命中"
     ],
-    "introduced": "#68（2026-09-25）",
-    "pendingVerification": "#133"
+    "introduced": "#68（2026-09-25）"
   },
   {
     "id": "outline-search-hit",
@@ -2037,10 +2104,10 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "单元 outlineSearch：片段切分契约"
+      "单元 outlineSearch：片段切分契约",
+      "集成 outline.searchHitPainted 绘制证据"
     ],
-    "introduced": "#68（2026-09-25）",
-    "pendingVerification": "#133"
+    "introduced": "#68（2026-09-25）"
   },
   {
     "id": "outline-nomatch",
@@ -2057,10 +2124,10 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "浏览器 outlineSearch"
+      "浏览器 outlineSearch",
+      "集成 outline.nomatchPainted 绘制证据"
     ],
-    "introduced": "#68（2026-09-25）",
-    "pendingVerification": "#133"
+    "introduced": "#68（2026-09-25）"
   },
   {
     "id": "outline-menu",
@@ -2077,10 +2144,10 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "浏览器 outlineMenu"
+      "浏览器 outlineMenu",
+      "集成 outline.test.contextMenu/menuClick 系列"
     ],
-    "introduced": "#69（2026-09-25）",
-    "pendingVerification": "#133"
+    "introduced": "#69（2026-09-25）"
   },
   {
     "id": "outline-rename-input",
@@ -2097,10 +2164,9 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "浏览器 outlineMenu"
+      "浏览器 outlineMenu：重命名路径"
     ],
-    "introduced": "#69（2026-09-25）",
-    "pendingVerification": "#133"
+    "introduced": "#69（2026-09-25）"
   },
   {
     "id": "outline-dragging",
@@ -2119,8 +2185,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "verification": [
       "浏览器 outlineDrag 系列"
     ],
-    "introduced": "#70（2026-09-25）",
-    "pendingVerification": "#133"
+    "introduced": "#70（2026-09-25）"
   },
   {
     "id": "outline-drop-edge",
@@ -2139,8 +2204,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "verification": [
       "浏览器 outlineDragBoundary"
     ],
-    "introduced": "#70（2026-09-25）",
-    "pendingVerification": "#133"
+    "introduced": "#70（2026-09-25）"
   },
   {
     "id": "outline-drop-inside",
@@ -2159,36 +2223,36 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "verification": [
       "浏览器 outlineDrag"
     ],
-    "introduced": "#70（2026-09-25）",
-    "pendingVerification": "#133"
+    "introduced": "#70（2026-09-25）"
   },
   {
     "id": "live-code-card-line",
     "domain": "chrome",
     "kind": "selector",
     "target": ".vsidian-code-card-line",
-    "purpose": "卡片覆盖的源行级类（含被清空的围栏行与全部代码行），承载卡片底色；与正文域 live-code-line 并行（卡片开启时两者都在场）。",
+    "purpose": "卡片覆盖的行级类：live 为源行级（含被清空的围栏行与全部代码行，承载卡片底色），阅读为卡内行 span（与 live 同类名，跨视图同口径）；与正文域 live-code-line 并行（live 卡片开启时两者都在场）。",
     "views": [
-      "live"
+      "live",
+      "reading"
     ],
-    "dom": "live 容器内 .cm-line 行元素（卡片开启的围栏范围）。",
+    "dom": "live：.cm-line 行元素（卡片开启的围栏范围）；阅读：code 内 span.vsidian-reading-code-line。",
     "example": ".vsidian-code-card-line {\n  background: var(--vsidian-code-card-background);\n}",
     "obsidian": {
       "counterpart": ".HyperMD-codeblock（行族；正文域别名挂于 .vsidian-code-line，卡片行类为自有扩展）",
       "support": "semantic"
     },
     "verification": [
-      "codeCardPaintCssContract：底色变量"
+      "codeCardPaintCssContract：底色变量",
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"live-code-card-live\"/\"live-code-card-reading\"] 探针命中"
     ],
-    "introduced": "#79（2026-09-26）",
-    "pendingVerification": "#133"
+    "introduced": "#79（2026-09-26）"
   },
   {
     "id": "live-code-card-edge",
     "domain": "chrome",
     "kind": "selector",
     "target": ".vsidian-code-card-edge-top / -bottom",
-    "purpose": "卡片首/末行圆角修饰（无头部覆盖的底边圆角；顶边圆角由头部横带承担）。",
+    "purpose": "卡片首/末行圆角修饰（无头部覆盖的底边圆角；顶边圆角由头部横带承担）。仅 live 侧发射；阅读卡片圆角由 .vsidian-reading-code-card 承担。",
     "views": [
       "live"
     ],
@@ -2201,8 +2265,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "verification": [
       "codeCardPaintCssContract"
     ],
-    "introduced": "#79（2026-09-26）",
-    "pendingVerification": "#133"
+    "introduced": "#79（2026-09-26）"
   },
   {
     "id": "live-code-card-header",
@@ -2214,24 +2277,24 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "live",
       "reading"
     ],
-    "dom": "卡片首行上方横带。",
+    "dom": "卡片首行上方横带（live block widget / 阅读块首子元素）。",
     "example": ".vsidian-code-card-header {\n  border-bottom: 1px solid rgba(128, 128, 128, 0.3);\n}",
     "obsidian": {
       "counterpart": ".code-styler-header-container（Code Styler 插件方向）",
       "support": "native"
     },
     "verification": [
-      "codeCardPaintCssContract"
+      "codeCardPaintCssContract",
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"live-code-card-header-live\"] 探针命中"
     ],
-    "introduced": "#79（2026-09-26）",
-    "pendingVerification": "#133"
+    "introduced": "#79（2026-09-26）"
   },
   {
     "id": "live-code-card-header-parts",
     "domain": "chrome",
     "kind": "selector",
-    "target": ".vsidian-code-card-header-label / -actions",
-    "purpose": "卡片语言标签（首字母大写显示名）/ 按钮容器。",
+    "target": ".vsidian-code-card-header-label / -actions / -icon",
+    "purpose": "卡片语言标签（首字母大写显示名）/ 按钮容器 / 语言徽标（#83 彩色字形徽标，挂标签内）。",
     "views": [
       "live",
       "reading"
@@ -2243,10 +2306,10 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "native"
     },
     "verification": [
-      "codeCardPaintCssContract"
+      "codeCardPaintCssContract",
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"live-code-card-header-parts-live\"] 探针命中"
     ],
-    "introduced": "#79（2026-09-26）",
-    "pendingVerification": "#133"
+    "introduced": "#79（2026-09-26）；#83 徽标"
   },
   {
     "id": "live-code-card-copy",
@@ -2258,7 +2321,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "live",
       "reading"
     ],
-    "states": "复制后 -done 约 1.2s。",
+    "states": "复制后 -done 约 1.2s；收起态不发射按钮。",
     "dom": "头部按钮区。",
     "example": ".vsidian-code-card-copy-done {\n  color: #98c379;\n}",
     "obsidian": {
@@ -2266,17 +2329,16 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "native"
     },
     "verification": [
-      "集成代码卡片用例"
+      "集成代码卡片用例（codecard.test.copy 剪贴板链路）"
     ],
-    "introduced": "#79（2026-09-26）",
-    "pendingVerification": "#133"
+    "introduced": "#79（2026-09-26）"
   },
   {
     "id": "live-code-card-fold",
     "domain": "chrome",
     "kind": "selector",
     "target": ".vsidian-code-card-fold（+ -collapsed 修饰）",
-    "purpose": "折叠 chevron；-collapsed 为收起态（转向）；折叠为视图态不写源文件。",
+    "purpose": "折叠 chevron；-collapsed 为收起态（转向）；折叠为视图态不写源文件（阅读侧收起另有块级 vsidian-code-card-folded 修饰，见 reading-code-card）。",
     "views": [
       "live",
       "reading"
@@ -2289,31 +2351,31 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "native"
     },
     "verification": [
-      "集成代码卡片用例"
+      "集成代码卡片用例（codecard.test.fold 折叠链路）"
     ],
-    "introduced": "#79（2026-09-26）",
-    "pendingVerification": "#133"
+    "introduced": "#79（2026-09-26）"
   },
   {
     "id": "live-code-card-linenumber",
     "domain": "chrome",
     "kind": "selector",
     "target": ".vsidian-code-card-linenumber",
-    "purpose": "卡内行号（每块从 1，围栏行不占号；行首 widget）；与文档行号槽（源文件行号）两列并存互不遮挡。",
+    "purpose": "卡内行号（每块从 1，围栏行不占号；大围栏分块跨片连续）；live 为行首 widget、阅读为行 span（同类名）；与文档行号槽（源文件行号）两列并存互不遮挡。",
     "views": [
-      "live"
+      "live",
+      "reading"
     ],
-    "dom": "卡片代码行首 widget。",
+    "dom": "卡片代码行首（live widget / 阅读 span）。",
     "example": ".vsidian-code-card-linenumber {\n  color: var(--vscode-descriptionForeground);\n}",
     "obsidian": {
       "counterpart": ".code-styler-line-number（方向）",
       "support": "native"
     },
     "verification": [
-      "lineNumberCssContract：两列并存"
+      "lineNumberCssContract：两列并存",
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"live-code-card-linenumber-live\"/\"live-code-card-linenumber-reading\"] 探针命中"
     ],
-    "introduced": "#79（2026-09-26）",
-    "pendingVerification": "#133"
+    "introduced": "#79（2026-09-26）"
   },
   {
     "id": "tok-tokens",
@@ -2325,38 +2387,38 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "live",
       "reading"
     ],
-    "dom": "代码内容内 token span。",
+    "dom": "代码内容内 token span（live mark 装饰 / 阅读卡片行内 span）。",
     "example": ".tok-keyword {\n  color: #c678dd;\n}",
     "obsidian": {
       "counterpart": ".token-*（Prism 词表方向）/ .cm-* token 族",
       "support": "native"
     },
     "verification": [
-      "codeHighlight 单元：词表契约（tok-* 两端共用）"
+      "codeHighlight 单元：词表契约（tok-* 两端共用）",
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"tok-tokens-live\"/\"tok-tokens-reading\"] 探针命中"
     ],
-    "introduced": "#83（2026-09-26）",
-    "pendingVerification": "#133"
+    "introduced": "#83（2026-09-26）"
   },
   {
     "id": "reading-code-card",
     "domain": "chrome",
     "kind": "selector",
-    "target": ".vsidian-reading-code-card",
-    "purpose": "阅读视图卡片容器（vsidian-reading-code-block 的卡片化外壳）；language-x 类保留在 code 上供路由。",
+    "target": ".vsidian-reading-code-card（+ .vsidian-reading-code-line 行结构 / .vsidian-code-card-folded 收起态）",
+    "purpose": "阅读视图卡片容器（vsidian-reading-code-block 的卡片化外壳）；language-x 类保留在 code 上供路由；行结构 span.vsidian-reading-code-line 携行号与 token；收起态块级修饰隐藏 pre（头部保留）。",
     "views": [
       "reading"
     ],
-    "dom": "阅读代码块外壳。",
+    "dom": "阅读代码块外壳（块卸载随 DOM 丢弃，重挂载从源码快照幂等重建）。",
     "example": ".vsidian-reading-code-card {\n  background: var(--vsidian-code-card-background);\n}",
     "obsidian": {
       "counterpart": ".markdown-preview-view pre（原有映射保留于正文域）",
       "support": "semantic"
     },
     "verification": [
-      "readingCodeCard 单元"
+      "readingCodeCard 单元（幂等增强与形态矩阵）",
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"reading-code-card\"] 探针命中"
     ],
-    "introduced": "#79（2026-09-26）",
-    "pendingVerification": "#133"
+    "introduced": "#79（2026-09-26）"
   },
   {
     "id": "var-code-card-background",
@@ -2375,10 +2437,10 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "semantic"
     },
     "verification": [
-      "codeCardPaintCssContract"
+      "codeCardPaintCssContract",
+      "集成「界面域样式契约」（#133）：真实片段经该变量驱动卡片可见底色"
     ],
-    "introduced": "#79（2026-09-26）",
-    "pendingVerification": "#133"
+    "introduced": "#79（2026-09-26）"
   },
   {
     "id": "limit-prism-tokens",
@@ -2399,15 +2461,56 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "verification": [
       "codeHighlight 单元：词表契约"
     ],
-    "introduced": "#83（2026-09-26）",
-    "pendingVerification": "#133"
+    "introduced": "#83（2026-09-26）"
+  },
+  {
+    "id": "limit-katex-internals",
+    "domain": "chrome",
+    "kind": "limitation",
+    "target": ".katex 内部结构（.mord / .mspace / .katex-mathml 等）",
+    "purpose": "内部渲染结构不兼容边界：KaTeX 产出的内部 DOM（字形 span、MathML 层等）随上游版本变化，不承诺为稳定接口——仅稳定容器外壳（.vsidian-math / .vsidian-math-block / .katex-block）公开；片段依赖内部类的着色可能在升级后失效。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "KaTeX HTML 在稳定容器内。",
+    "example": "",
+    "obsidian": {
+      "counterpart": "Obsidian 同样不承诺 KaTeX 内部结构",
+      "support": "none"
+    },
+    "verification": [
+      "清单即边界：第三方渲染器私有 DOM 不提升为稳定接口"
+    ],
+    "introduced": "#133（2026-09-27，随界面域核实落档）"
+  },
+  {
+    "id": "limit-mermaid-internals",
+    "domain": "chrome",
+    "kind": "limitation",
+    "target": "mermaid SVG 内部节点（.node / .edgePath / .cluster 等）",
+    "purpose": "内部渲染结构不兼容边界：Mermaid 自产 SVG 的内部节点类随上游版本与主题变化，不承诺为稳定接口——仅容器级入口（.vsidian-mermaid 与其 svg 后代）公开；弹窗内 SVG 同源同边界。需要改图内观感请走 mermaid 主题配置而非片段选择器。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "mermaid SVG 在稳定容器内。",
+    "example": "",
+    "obsidian": {
+      "counterpart": "Obsidian 同样不承诺 mermaid 内部结构",
+      "support": "none"
+    },
+    "verification": [
+      "清单即边界：第三方渲染器私有 DOM 不提升为稳定接口"
+    ],
+    "introduced": "#133（2026-09-27，随界面域核实落档）"
   },
   {
     "id": "suspend-banner",
     "domain": "chrome",
     "kind": "selector",
-    "target": ".vsidian-suspend-banner",
-    "purpose": "写回冲突暂停横幅（本项目自有 UI）。",
+    "target": ".vsidian-suspend-banner（内含 .vsidian-suspend-banner-text）",
+    "purpose": "写回冲突暂停横幅（本项目自有 UI）：暂停态顶栏提示 + 恢复按钮。",
     "views": [
       "live",
       "reading"
@@ -2420,17 +2523,17 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "editorChromeCssContract"
+      "editorChromeCssContract",
+      "集成写回冲突用例：暂停横幅在场断言"
     ],
-    "introduced": "#4（2026-09-23）",
-    "pendingVerification": "#133"
+    "introduced": "#4（2026-09-23）"
   },
   {
     "id": "toolbar",
     "domain": "chrome",
     "kind": "selector",
     "target": ".vsidian-toolbar",
-    "purpose": "模式切换工具栏（本项目自有 UI）。",
+    "purpose": "主编辑区顶栏：设置齿轮（.vsidian-settings-toggle）、快速操作开关（.vsidian-quick-toggle）、侧栏开关（.vsidian-sidebar-toggle）——#38 起模式切换按钮迁宿主标题栏三态命令，不在顶栏（见 mode-toggle 移除记录）。",
     "views": [
       "live",
       "reading"
@@ -2442,31 +2545,28 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "editorChromeCssContract"
+      "editorChromeCssContract",
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"toolbar\"] 探针命中"
     ],
-    "introduced": "#4（2026-09-23）",
-    "pendingVerification": "#133"
+    "introduced": "#4（2026-09-23）"
   },
   {
     "id": "mode-toggle",
     "domain": "chrome",
     "kind": "selector",
-    "target": ".vsidian-mode-toggle",
-    "purpose": "工具栏模式切换按钮组。",
-    "views": [
-      "live",
-      "reading"
-    ],
-    "dom": "工具栏内。",
-    "example": ".vsidian-mode-toggle[aria-pressed=\"true\"] {\n  background: var(--vscode-button-background);\n}",
+    "target": ".vsidian-mode-toggle（已移除）",
+    "purpose": "曾为顶栏模式切换按钮组。#38（提交 288044d，2026-09-24）起模式切换迁宿主编辑器标题栏三态命令，顶栏不再渲染该类；保留本条目作为旧映射表陈旧行的纠错记录——该类自 v0.1.0 起从未随发布版存在于 DOM（核对：git grep v0.4.0 -- src/ 零命中）。",
+    "views": [],
+    "dom": "无（类不再发射）。",
+    "example": "/* 无替代选择器：模式切换 UI 属宿主标题栏，不在 webview DOM 内 */",
     "obsidian": {
       "counterpart": "无对应物",
       "support": "none"
     },
     "verification": [
-      "editorChromeCssContract"
+      "单元：webview 源码不再含该类发射（迁移历史断言）"
     ],
     "introduced": "#4（2026-09-23）",
-    "pendingVerification": "#133"
+    "removed": "#38（2026-09-24，288044d）移除且从未随任何发布版存在；旧映射表该行为陈旧数据（#133 核实纠错，依据 v0.4.0 tag 75c3df7 源码核对）"
   }
 ] as readonly StyleContractEntry[]

@@ -81,13 +81,14 @@ export type HostToWebview =
   /** 测试钩子（#111）：按序号点击图形化代码块的 popup 按钮（驱动与用户
    *  点击相同的处理器链路：打开图表弹窗）。宿主测试无法向 webview 派发
    *  真实鼠标事件，以此通道验证真实宿主内的弹窗打开；action 存在时改为
-   *  点击弹窗工具条的导出按钮（集成回归驱动导出链路的消息形态——宿主
-   *  测试钩子模式下短路真实另存为对话框） */
+   *  点击弹窗工具条按钮（export-svg/export-png 驱动导出链路的消息形态
+   *  ——宿主测试钩子模式下短路真实另存为对话框；refresh 驱动弹窗原地
+   *  重取源码刷新——#133 样式保持验证） */
   | {
       kind: 'graphic.test.popup'
       view: 'live' | 'reading'
       index: number
-      action?: 'export-svg' | 'export-png'
+      action?: 'export-svg' | 'export-png' | 'refresh' | 'close'
     }
   /** 测试钩子（#82）：按序号点击卡片头部折叠 chevron（驱动与用户点击相同
    *  的处理器链路：effect → codeCardFoldField 视图态切换） */
@@ -576,6 +577,35 @@ export interface CssProbeReport {
    * 元素为 null）。真实片段链路验证：集成用例「Obsidian 变量别名桥」
    */
   obsidianVarProbe?: { liveHeadingColor: string | null; readingHeadingColor: string | null }
+  /**
+   * #133 界面域样式契约探针：键 = 清单条目 ID（或「条目 ID-视图」消歧
+   * 后缀），值 = 按 **vsidian 稳定类名选择器** 在 document 域（界面域目标
+   * 不全在两视图容器内——大纲面板挂侧栏）定位目标元素的 computed 自定义属性
+   * --vsidian-chrome-probe 的 computed 值（不可见探针，与 outline-color /
+   * text-decoration-color 两套既有探针正交；media/css-contract-probe.css 同源
+   * 探针规则；类未挂上/
+   * 挂错节点即 null）。选择器表单一事实源：src/shared/chromeContract.ts
+   * 的 CHROME_CONTRACT_PROBES。
+   */
+  chromeSelectors?: Record<string, string | null>
+  /**
+   * #133 界面域可见颜色观测：各区域代表元素的 computed color（随当前
+   * viewMode 取对应侧目标；无目标元素为 null）。真实片段链路验证：
+   * 集成用例「界面域样式契约」——片段改写这些可见属性即被观测到。
+   */
+  chromePaint?: {
+    mathKatexColor: string | null
+    codeCardLabelColor: string | null
+    tokKeywordColor: string | null
+    mermaidContainerColor: string | null
+    outlineLevel1Color: string | null
+  }
+  /**
+   * #133 图表弹窗样式观测：浮层在场时的 computed color（toolbar 与
+   * stage 两区）；浮层不在场为 null（弹窗 DOM 只在打开期间存在）。
+   * 打开与刷新后样式保持的验证：集成用例「界面域样式契约」。
+   */
+  chromePopup?: { toolbarColor: string | null; stageColor: string | null } | null
 }
 
 /** #34 行号栏观测（view.state 扩展字段）：开关生效态与视口内渲染结果。
@@ -1504,7 +1534,22 @@ function isCssProbeReport(v: unknown): v is CssProbeReport {
         Object.entries(v.obsidianAliases).every(([k, val]) => k.length > 0 && isNullOrString(val)))) &&
     (v.obsidianVarProbe === undefined ||
       (isObject(v.obsidianVarProbe) && isNullOrString(v.obsidianVarProbe.liveHeadingColor) &&
-        isNullOrString(v.obsidianVarProbe.readingHeadingColor)))
+        isNullOrString(v.obsidianVarProbe.readingHeadingColor))) &&
+    (v.chromeSelectors === undefined ||
+      (isObject(v.chromeSelectors) &&
+        Object.entries(v.chromeSelectors).every(([k, val]) => k.length > 0 && isNullOrString(val)))) &&
+    (v.chromePaint === undefined ||
+      (isObject(v.chromePaint) &&
+        isNullOrString(v.chromePaint.mathKatexColor) &&
+        isNullOrString(v.chromePaint.codeCardLabelColor) &&
+        isNullOrString(v.chromePaint.tokKeywordColor) &&
+        isNullOrString(v.chromePaint.mermaidContainerColor) &&
+        isNullOrString(v.chromePaint.outlineLevel1Color))) &&
+    (v.chromePopup === undefined ||
+      v.chromePopup === null ||
+      (isObject(v.chromePopup) &&
+        isNullOrString(v.chromePopup.toolbarColor) &&
+        isNullOrString(v.chromePopup.stageColor)))
   )
 }
 
@@ -1864,7 +1909,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return (
         (v.view === 'live' || v.view === 'reading') &&
         isNonNegativeInt(v.index) &&
-        (v.action === undefined || v.action === 'export-svg' || v.action === 'export-png')
+        (v.action === undefined || v.action === 'export-svg' || v.action === 'export-png' ||
+          v.action === 'refresh' || v.action === 'close')
       )
     case 'codecard.test.fold':
       return isNonNegativeInt(v.index)

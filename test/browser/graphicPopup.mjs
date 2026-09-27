@@ -140,6 +140,34 @@ try {
   await page.waitForFunction(() => document.querySelector('.vsidian-diagram-media svg') !== null)
   assert.ok(await page.locator('.vsidian-diagram-overlay').isVisible(), '浮层应可见')
 
+  // 4b) 片段样式保持（#133）：注入弹窗样式（真实片段等效），断言打开在场
+  //     即着色；刷新（原地重取源码）后浮层重建内容但样式不丢
+  await page.evaluate(() => {
+    const style = document.createElement('style')
+    style.dataset['vsidianContractProbe'] = 'popup'
+    style.textContent = [
+      '.vsidian-diagram-toolbar { color: rgb(79, 80, 81); }',
+      '.vsidian-diagram-stage { color: rgb(82, 83, 84); }',
+    ].join('\n')
+    document.head.append(style)
+  })
+  let popupStyled = await page.evaluate(() => ({
+    toolbar: getComputedStyle(document.querySelector('.vsidian-diagram-toolbar')).color,
+    stage: getComputedStyle(document.querySelector('.vsidian-diagram-stage')).color,
+  }))
+  assert.equal(popupStyled.toolbar, 'rgb(79, 80, 81)', '片段应驱动弹窗工具条可见色')
+  assert.equal(popupStyled.stage, 'rgb(82, 83, 84)', '片段应驱动弹窗舞台可见色')
+  await page.locator('.vsidian-diagram-refresh').click()
+  await page.waitForFunction(() => document.querySelector('.vsidian-diagram-media svg') !== null)
+  await page.waitForTimeout(200)
+  popupStyled = await page.evaluate(() => ({
+    toolbar: getComputedStyle(document.querySelector('.vsidian-diagram-toolbar')).color,
+    stage: getComputedStyle(document.querySelector('.vsidian-diagram-stage')).color,
+  }))
+  assert.equal(popupStyled.toolbar, 'rgb(79, 80, 81)', '刷新后弹窗工具条样式应保持')
+  assert.equal(popupStyled.stage, 'rgb(82, 83, 84)', '刷新后弹窗舞台样式应保持')
+  await page.evaluate(() => document.querySelector('style[data-vsidian-contract-probe="popup"]')?.remove())
+
   // 5) 滚轮缩放（写 SVG 实际尺寸）：放大后 svg width 增长
   const widthBefore = await page.evaluate(() => {
     const svg = document.querySelector('.vsidian-diagram-media svg')

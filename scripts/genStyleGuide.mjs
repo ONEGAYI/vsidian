@@ -167,7 +167,7 @@ ${sections}
 
 function sections_header(domain, count) {
   return `    <h1 style="font-size:19px;margin-bottom:4px">${DOMAIN_TITLES[domain]}（${count} 条）</h1>
-${domain === 'chrome' ? '    <p class="note">界面域条目自 v0.4.0 迁移自既有映射表；逐项渲染验证随 #133 补齐，支持等级以各条目为准。</p>' : ''}`
+${domain === 'chrome' ? '    <p class="note">界面域条目（#133 起逐项核实）：静态入口经探针在真实渲染中断言，交互态入口由浏览器/集成套件按行为路径验证；第三方渲染器（KaTeX/Mermaid）内部 DOM 不承诺为稳定接口（见「不支持与限制」）。</p>' : ''}`
 }
 
 /** 生成设置页渲染数据模块（styleGuideData.ts，esbuild 打包进 settings.js） */
