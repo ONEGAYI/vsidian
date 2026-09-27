@@ -77,6 +77,17 @@ export const CHROME_CONTRACT_PROBES: readonly ChromeContractProbe[] = [
   { id: 'outline-toolbar', selector: '#app .vsidian-sidebar .vsidian-outline-toolbar', expected: 'rgb(225, 0, 1)' },
   { id: 'outline-toolbar-buttons', selector: '#app .vsidian-sidebar .vsidian-outline-toolbar .vsidian-outline-reset', expected: 'rgb(226, 0, 1)' },
   { id: 'outline-search', selector: '#app .vsidian-sidebar .vsidian-outline-toolbar .vsidian-outline-search', expected: 'rgb(227, 0, 1)' },
-  // ---- 编辑器顶栏（#4；#38 起模式切换迁宿主标题栏，顶栏为自有三按钮） ----
+  // ---- 编辑器顶栏（#4；#38 起模式切换迁宿主标题栏，顶栏为自有三按钮；
+  // #141 起第四按钮双态视图切换——body 模式类为模式态类，不伪造静态探针） ----
   { id: 'toolbar', selector: '#app .vsidian-toolbar', expected: 'rgb(228, 0, 1)' },
+  { id: 'view-toggle', selector: '#app .vsidian-toolbar .vsidian-view-toggle', expected: 'rgb(236, 0, 1)' },
+  // ---- frontmatter 只读表格卡片（#140 Popover 改版；live 侧 + 阅读侧
+  //      同款表格。标题栏是常驻静态入口可探针；Popover 容器为交互态
+  //      （打开时挂载），不伪造静态探针，由浏览器套件行为验证） ----
+  { id: 'live-fm-card-line-live', selector: '#app .vsidian-view-live .vsidian-fm-card-line', expected: 'rgb(230, 0, 1)' },
+  { id: 'live-fm-row-live', selector: '#app .vsidian-view-live .vsidian-fm-row', expected: 'rgb(231, 0, 1)' },
+  { id: 'live-fm-cell-live', selector: '#app .vsidian-view-live .vsidian-fm-row > .vsidian-fm-cell', expected: 'rgb(232, 0, 1)' },
+  { id: 'live-fm-row-reading', selector: '#app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-row', expected: 'rgb(233, 0, 1)' },
+  { id: 'live-fm-cell-reading', selector: '#app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-cell', expected: 'rgb(234, 0, 1)' },
+  { id: 'live-fm-header-live', selector: '#app .vsidian-view-live .vsidian-fm-header', expected: 'rgb(237, 0, 1)' },
 ]

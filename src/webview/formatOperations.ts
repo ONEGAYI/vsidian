@@ -566,7 +566,67 @@ function horizontalRulePlan(text: string, range: FormatSelection): FormatPlan {
   }
 }
 
-/** 纯文本规划：所有 changes 按原文 UTF-16 坐标，调用方一次 CM6 事务提交。 */
+/** HTML 注释两态规划（#139）：插入型结构（同 wikilink 一类分派，不走
+ *  INLINE 表），取消分支为本规格新增设计。
+ *  节点命中（Lezer markdown 实测钉住，契约测试 formatOperations.test.ts）：
+ *  行内位置的 `<!-- x -->` 产出 Comment、整段（可跨行）产出 CommentBlock；
+ *  无内容空对 `<!---->` 不产节点——空插形态带一个空格（`<!-- -->`）保持
+ *  Comment 解析，两态闭环成立。`<div>` 等真 HTML 块整体是 HTMLBlock，
+ *  内部注释不可达：维持 HTMLBlock 既有「格式操作禁用上下文」语义不放宽
+ *  （注释操作在注释块内可取消 = Comment/CommentBlock 不在禁用集，天然
+ *  满足；真 HTML 块内不接管）。 */
+const HTML_COMMENT_OPEN = '<!--'
+const HTML_COMMENT_CLOSE = '-->'
+const HTML_COMMENT_BLOCKED = new Set(['FencedCode', 'CodeBlock', 'InlineCode', 'HTMLBlock'])
+
+function htmlCommentPlan(text: string, range: FormatSelection,
+  root: SyntaxNode, action: FormatAction): FormatPlan | null {
+  const { from, to } = range
+  // 代码上下文与真 HTML 块内不接管（围栏/缩进/行内代码保持字面语义，
+  // 与其余格式操作的禁用口径一致；frontmatter 裸解析器不识别，与既有
+  // 插入型操作同口径不加特判）
+  for (const pos of [from, Math.max(from, to - 1)]) {
+    if (nodesAt(root, pos).some((node) => HTML_COMMENT_BLOCKED.has(node.name))) return null
+  }
+  // 取消：光标严格在注释内部（matchingSpan 同款口径——[from+1, to-1]
+  // 全程命中，空对插入后的光标即落在该区间），或选区与注释节点区间完全
+  // 重合（link 先例同款；matchingSpan 的严格内部条件覆盖不了重合，经
+  // inlineSpans 显式找重合节点）
+  const exactCover = (name: string): SyntaxNode | null => {
+    for (const node of inlineSpans(root, name, from, to)) {
+      if (node.from === from && node.to === to) return node
+    }
+    return null
+  }
+  const active = matchingSpan(root, 'Comment', from, to) ??
+    matchingSpan(root, 'CommentBlock', from, to) ??
+    (from === to ? null : exactCover('Comment') ?? exactCover('CommentBlock'))
+  if (active && (from === to || from === active.from && to === active.to)) {
+    if (action === 'add') return null
+    const content = text.slice(active.from + HTML_COMMENT_OPEN.length,
+      active.to - HTML_COMMENT_CLOSE.length)
+    // 空对（内容纯空白）取消：行内删整节点（无残留空格）；块级（内容
+    // 含 \n）与非空内容一样只剥定界符——行结构不因取消而坍缩
+    if (content.trim() === '' && !content.includes('\n')) {
+      return { changes: [{ from: active.from, to: active.to, insert: '' }] }
+    }
+    return { changes: [
+      { from: active.from, to: active.from + HTML_COMMENT_OPEN.length, insert: '' },
+      { from: active.to - HTML_COMMENT_CLOSE.length, to: active.to, insert: '' },
+    ] }
+  }
+  // 插入：无选区插空对（带空格保 Comment 解析），光标落开围栏内侧
+  // （锚点按 open 长度 4 从实际定界符计算）；有选区包裹并保持原文选中
+  const value = text.slice(from, to)
+  const open = HTML_COMMENT_OPEN
+  const close = value ? HTML_COMMENT_CLOSE : ` ${HTML_COMMENT_CLOSE}`
+  return { changes: [{ from, to, insert: open + value + close }],
+    selection: value
+      ? { anchor: from + open.length, head: from + open.length + value.length }
+      : { anchor: from + open.length } }
+}
+
+
 export function planFormatOperation(
   text: string, op: FormatOperationId, range: FormatSelection, region?: TableRegion | null,
   action: FormatAction = 'toggle',
@@ -617,6 +677,7 @@ export function planFormatOperation(
   if (op === 'clearInline') return clearInlinePlan(text, range, root)
   if (op === 'codeBlock' || op === 'blockMath') return fencePlan(text, op, range, root)
   if (op === 'horizontalRule') return horizontalRulePlan(text, range)
+  if (op === 'htmlComment') return htmlCommentPlan(text, range, root, action)
   if (op.startsWith('heading')) {
     const setext = nodesAt(root, range.from).find((node) => /^SetextHeading[12]$/u.test(node.name))
     if (setext && (range.from === range.to || range.to <= setext.to)) {

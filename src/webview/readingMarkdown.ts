@@ -17,6 +17,7 @@ import { GRAPHIC_LANG_ATTR, MERMAID_CLASS_NAMES, MERMAID_CODE_ATTR, MERMAID_STAT
 import { WIKILINK_CLASS_NAMES, parseWikilinkInner } from '../shared/wikilink'
 import { parseLooseLinkAt } from '../shared/looseLink'
 import { joinObsidianDomAliasForReading } from '../shared/obsidianAlias'
+import { escapeHtml } from '../shared/frontmatterTable'
 import { renderMathHtml } from './mathRenderCache'
 import { highlightFlankOk } from './markdownDoc'
 import { tableCellBreakLength } from './tableCells'
@@ -47,14 +48,7 @@ export const READING_MARKDOWN_CLASS_NAMES = {
  * 环境强制 display）。
  */
 
-/** HTML 转义（降级 span 的原文内容；与 markdown-it 的 default规则同覆盖面） */
-function escapeHtmlText(s: string): string {
-  return s
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-}
+/* HTML 转义收敛至 shared/frontmatterTable 的 escapeHtml（& < > " 覆盖面一致） */
 
 /**
  * Mermaid fence 渲染规则（#60）：覆盖默认 fence 规则——info 为 mermaid 的
@@ -75,8 +69,8 @@ function installMermaidFenceRenderer(md: InstanceType<typeof MarkdownIt>): void 
     // 去掉尾部换行与 live 侧围栏内容口径对齐（缓存键一致）；属性内换行
     // 转义为 &#10;（innerHTML 解析回 \n，html 字符串本身保持单行可读）
     const code = token.content.replace(/\n$/, '')
-    const attr = escapeHtmlText(code).replaceAll('\n', '&#10;')
-    return `<div class="${MERMAID_CLASS_NAMES.diagram}" ${GRAPHIC_LANG_ATTR}="${escapeHtmlText(token.info.trim())}" ${MERMAID_CODE_ATTR}="${attr}" ${MERMAID_STATE_ATTR}="pending"></div>\n`
+    const attr = escapeHtml(code).replaceAll('\n', '&#10;')
+    return `<div class="${MERMAID_CLASS_NAMES.diagram}" ${GRAPHIC_LANG_ATTR}="${escapeHtml(token.info.trim())}" ${MERMAID_CODE_ATTR}="${attr}" ${MERMAID_STATE_ATTR}="pending"></div>\n`
   }
 }
 
@@ -99,14 +93,14 @@ function installMathRenderers(md: InstanceType<typeof MarkdownIt>): void {
     const html = renderMathHtml(content, displayMode)
     return html !== null
       ? `<span class="${MATH_CLASS_NAMES.math}">${html}</span>`
-      : `<span class="${MATH_CLASS_NAMES.mathError}" title="${escapeHtmlText(tex)}">${escapeHtmlText(`$${tex}$`)}</span>`
+      : `<span class="${MATH_CLASS_NAMES.mathError}" title="${escapeHtml(tex)}">${escapeHtml(`$${tex}$`)}</span>`
   }
   const block = (tokens: Token[], idx: number): string => {
     const tex = tokens[idx]!.content
     const html = renderMathHtml(tex, true)
     return html !== null
       ? `<p class="katex-block ${MATH_CLASS_NAMES.math} ${MATH_CLASS_NAMES.mathBlock}">${html}</p>\n`
-      : `<p class="katex-block ${MATH_CLASS_NAMES.mathError}"><code>${escapeHtmlText(`$$${tex}$$`)}</code></p>\n`
+      : `<p class="katex-block ${MATH_CLASS_NAMES.mathError}"><code>${escapeHtml(`$$${tex}$$`)}</code></p>\n`
   }
   md.renderer.rules['math_inline'] = inline
   md.renderer.rules['math_inline_block'] = block

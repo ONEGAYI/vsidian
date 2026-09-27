@@ -92,6 +92,8 @@ const SYNTAX_DOC = [
   '> 引用第一行',
   '> 引用内 **粗体**',
   '',
+  '行内注释 <!-- 注释文字 --> 淡化呈现。',
+  '',
   '1. 有序项一',
   '2. 有序项二',
   '',
@@ -230,9 +232,16 @@ const TINY_PNG_BASE64 =
 export const LARGE_DOC_LINES = 100_000
 
 // #133 界面域样式契约样例：公式（行内/块级/错误）、mermaid（有效/无效）、
-// 代码卡片（js keyword token）、大纲（嵌套标题 + 行内标记）各一——chrome
-// 探针的目标元素全部由本文档产出
+// 代码卡片（js keyword token）、大纲（嵌套标题 + 行内标记）、frontmatter
+// 成型卡片（#140 探针：card-line/row/cell/add-entry 与阅读侧同款表格）
+// 各一—— chrome 探针的目标元素全部由本文档产出
 const CHROME_CONTRACT_DOC = [
+  '---',
+  'title: 界面契约',
+  'tags:',
+  '  - 契约',
+  '---',
+  '',
   '# 界面契约一级标题',
   '',
   '## 二级标题与 **加粗透传**',
@@ -704,6 +713,17 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   writeFileSync(path.join(wsDir, 'outline-style.md'), OUTLINE_STYLE_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'outline-menu.md'), OUTLINE_MENU_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'outline-drag.md'), OUTLINE_DRAG_DOC, 'utf8')
+  // #140 frontmatter 卡片编辑链路样例：成型头区（标量 + block 数组）与正文
+  writeFileSync(path.join(wsDir, 'fm-edit.md'), [
+    '---',
+    'title: 集成标题',
+    'tags:',
+    '  - 甲',
+    '---',
+    '',
+    '正文段落。',
+    '',
+  ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, 'highlight.md'), HIGHLIGHT_DOC, 'utf8')
   writeFileSync(path.join(wsDir, '链接目标.md'), '# 链接目标\n中文目标文档内容。\n', 'utf8')
   writeFileSync(path.join(wsDir, '无扩展名目标.md'), '# 无扩展名目标\n省略扩展名解析目标。\n', 'utf8')

@@ -370,6 +370,10 @@ export class DocumentSession {
       case 'keybindings.execute':
         // 快捷键端口在 provider / 设置页消费；此处仅保持协议穷尽。
         return Promise.resolve()
+      case 'view.switch.request':
+        // #141 双态切换端口在 provider 消费（runViewSwitch 编排）；此处
+        // 仅保持协议穷尽——会话层不触碰视图切换
+        return Promise.resolve()
       case 'clipboard.write':
         // #69 剪贴板写：与 link.activate 同口径的只读交互（不受写回暂停
         // 影响）；两变体（text 直写 / linkHeading 宿主拼标题链接）分别

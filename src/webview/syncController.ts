@@ -174,6 +174,9 @@ import { blankRowInputPlan, runCreateTable, runTableEdit, tableEditing, tableRow
 import { symbolAutocomplete } from './symbolAutocomplete'
 import { symbolSelectionWrap } from './symbolWrap'
 import { fenceEscape } from './fenceEscape'
+import { frontmatterEditing } from './frontmatterEditing'
+import { FM_CARD_CLASS_NAMES } from './frontmatterDecorations'
+import { FM_POPOVER_CLASS_NAMES, closeFmPopover, isFmPopoverOpen } from './frontmatterPopover'
 import { listEditing } from './listEditing'
 import { indentEditing } from './indentEditing'
 import { selectTableRegion, tableRegionField } from './tableRegionSelection'
@@ -490,6 +493,8 @@ export class WebviewSyncController {
   private unsubscribeLocale: (() => void) | undefined
   private quickActionsEl: HTMLElement | undefined
   private quickToggleBtn: HTMLButtonElement | undefined
+  /** #141 工具栏双态视图切换按钮（live↔reading；态随 view.mode.set 回流） */
+  private viewToggleBtn: HTMLButtonElement | undefined
   private quickHeadingBtn: HTMLButtonElement | undefined
   private quickHeadingMenu: HTMLElement | undefined
   private quickActionResizeObserver: ResizeObserver | undefined
@@ -1015,6 +1020,7 @@ export class WebviewSyncController {
 
   dispose(): void {
     closeDiagramPopup()
+    closeFmPopover()
     setDiagramExportSender(null)
     setDiagramPopupDocSource(null)
     this.unsubscribeLocale?.()
@@ -1049,6 +1055,7 @@ export class WebviewSyncController {
     this.quickActionsEl?.remove()
     this.quickActionsEl = undefined
     this.quickToggleBtn = undefined
+    this.viewToggleBtn = undefined
     this.quickHeadingBtn = undefined
     this.quickHeadingMenu = undefined
     this.findPanel?.remove()
@@ -1311,6 +1318,56 @@ export class WebviewSyncController {
         // 测试钩子：真实拖宽句柄 pointer 序列驱动拖宽链路（与用户拖拽
         // 同一处理器）
         this.runSidebarResizeTest(message.delta)
+        break
+      }
+      case 'fm.test.click': {
+        // 测试钩子（#140 Popover 改版）：驱动修改按钮与 Popover 控件（与
+        // 用户点击同一处理器；编辑计划走标准 CM6 事务出站）。按钮按类名
+        // + DOM 文档序定位；popover-close 与 Esc 走同一关闭函数
+        const at = <T extends HTMLElement>(els: T[], index: number): T | undefined =>
+          els[Math.max(0, index)]
+        const all = <T extends HTMLElement>(sel: string): T[] =>
+          [...document.querySelectorAll<T>(sel)]
+        if (message.action === 'edit-button') {
+          all<HTMLButtonElement>(`.${FM_CARD_CLASS_NAMES.edit}`)[0]?.click()
+          break
+        }
+        if (message.action === 'popover-close') {
+          closeFmPopover()
+          break
+        }
+        if (message.action === 'popover-add-entry') {
+          all<HTMLButtonElement>(`.${FM_POPOVER_CLASS_NAMES.add}`)[0]?.click()
+          break
+        }
+        if (message.action === 'popover-add-item') {
+          at(all<HTMLButtonElement>(`.${FM_POPOVER_CLASS_NAMES.addItem}`), message.index ?? 0)?.click()
+          break
+        }
+        // 删除按钮两段式二次确认（产品行为）：钩子驱动完整流程——首击
+        // 武装确认态、再击执行；用例断言「删除后状态」不因确认步骤改变
+        const clickRemoveConfirmed = (btn: HTMLButtonElement | null | undefined): void => {
+          if (!btn) return
+          btn.click()
+          btn.click()
+        }
+        if (message.action === 'popover-remove-entry') {
+          const entries = all<HTMLElement>(`.${FM_POPOVER_CLASS_NAMES.entry}`)
+          const entry = at(entries, message.index ?? 0)
+          clickRemoveConfirmed(entry?.querySelector<HTMLButtonElement>(
+            `:scope > .${FM_POPOVER_CLASS_NAMES.row} > .${FM_POPOVER_CLASS_NAMES.remove}`))
+          break
+        }
+        const itemRemoves = all<HTMLElement>(`.${FM_POPOVER_CLASS_NAMES.itemRow}`)
+          .map((row) => row.querySelector<HTMLButtonElement>(`.${FM_POPOVER_CLASS_NAMES.remove}`))
+          .filter((btn): btn is HTMLButtonElement => btn !== null)
+        clickRemoveConfirmed(at(itemRemoves, message.index ?? 0))
+        break
+      }
+      case 'view.test.click': {
+        // 测试钩子（#141）：点击顶栏双态视图切换真实按钮（与用户点击同一
+        // 处理器：出站 view.switch.request，切换由宿主编排回流驱动）
+        this.viewToggleBtn?.click()
         break
       }
       case 'quick.test.click': {
@@ -1883,6 +1940,8 @@ export class WebviewSyncController {
       sidebar: this.collectSidebar(),
       // #54 大纲观测（面板态、绘制层证据与全文标题序列）
       outline: this.collectOutline(),
+      // #140 Popover 改版：属性编辑浮层开态（集成断言用）
+      fmPopoverOpen: isFmPopoverOpen(),
     }
     this.bridge.postMessage(state)
   }
@@ -2031,6 +2090,8 @@ export class WebviewSyncController {
     // review-loops B3：命令面板切模式不经鼠标路径（无 pointercancel），
     // 拖拽会话若残留会跨模式存活（落点判定随视图重算漂移）——统一取消
     this.cancelOutlineDrag()
+    // #140 Popover 改版：属性编辑浮层仅服务 live 表格卡片，切到阅读即关
+    closeFmPopover()
     if (this.view) selectTableRegion(this.view, null)
     if (next === 'reading') {
       const editorHadFocus = document.activeElement === this.view?.contentDOM
@@ -2100,6 +2161,16 @@ export class WebviewSyncController {
     }
     if (this.readingContainer) {
       this.readingContainer.style.display = mode === 'reading' ? '' : 'none'
+    }
+    // #141 body 模式类（vsidian-mode-live / vsidian-mode-reading）：双态
+    // 切换按钮图标显隐的 CSS 驱动锚点（两图标常驻 DOM，样式失效时同显
+    // 可被浏览器断言暴露）；aria/tooltip 随态换词经注册表单点重算
+    if (this.bodyEl) {
+      this.bodyEl.classList.toggle('vsidian-mode-live', mode === 'live')
+      this.bodyEl.classList.toggle('vsidian-mode-reading', mode === 'reading')
+    }
+    if (this.viewToggleBtn) {
+      refreshElementLocale(this.viewToggleBtn)
     }
     this.persistState()
     // 模式变化主动回报（宿主缓存常新：表格结构命令在 reading 面板上据此
@@ -2268,6 +2339,7 @@ export class WebviewSyncController {
     const readingEl = this.readingContainer?.querySelector('.vsidian-reading-heading-1') ?? null
     const liveStrong = this.liveWrapper?.querySelector('.vsidian-strong') ?? null
     const liveInlineCode = this.liveWrapper?.querySelector('.vsidian-inline-code') ?? null
+    const liveHtmlComment = this.liveWrapper?.querySelector(`.${LIVE_CLASS_NAMES.htmlComment}`) ?? null
     const liveCodeLine = this.liveWrapper?.querySelector('.vsidian-code-line') ?? null
     const liveTablePipe = this.liveWrapper?.querySelector('.vsidian-table-pipe') ?? null
     const readingStrong = this.readingContainer?.querySelector('.vsidian-reading-block strong') ?? null
@@ -2399,6 +2471,8 @@ export class WebviewSyncController {
       readingBackgroundImage,
       liveStrongDecorationColor: read(liveStrong),
       liveInlineCodeDecorationColor: read(liveInlineCode),
+      // #139 HTML 注释淡化探针（live 专属；阅读侧隐藏无对应元素）
+      liveHtmlCommentDecorationColor: read(liveHtmlComment),
       liveCodeLineDecorationColor: read(liveCodeLine),
       readingStrongDecorationColor: read(readingStrong),
       liveTaskCheckboxDecorationColor: read(liveTaskBox),
@@ -2880,8 +2954,9 @@ export class WebviewSyncController {
 
   /** 主编辑区顶栏（#53 图标化）：左端齿轮设置按钮（打开宿主级 Vsidian
    *  设置页面板——webview 无权自建面板，必须经 settings.open 出站），
-   *  右端右侧栏切换按钮（margin-left:auto 推靠）。#6 的模式切换按钮已按
-   *  #38 迁移至编辑器标题栏三态命令，不在顶栏渲染 */
+   *  其后快速操作 ✎；右端双态视图切换（#141，紧邻侧栏按钮左侧）与
+   *  侧栏切换按钮（margin-left:auto 推靠）。#38 起三态切换（含源码）
+   *  仍在宿主标题栏命令，双态按钮不触及源码路径 */
   private buildToolbar(): HTMLElement {
     const bar = document.createElement('div')
     bar.className = 'vsidian-toolbar'
@@ -2907,6 +2982,27 @@ export class WebviewSyncController {
       this.persistState()
     })
     this.quickToggleBtn = quickBtn
+    // #141 双态视图切换按钮（紧邻侧栏按钮左侧）：图标显当前态（阅读=
+    // 书本类 / Live=编辑类，显隐由 body 模式类经 CSS 驱动），aria/tooltip
+    // 表目标动作（点击切到另一态），随当前态与界面语言双变化（回调登记，
+    // 模式翻转经 applyModeDom 的 refreshElementLocale 重算）。切换不本地
+    // 执行（#38 收敛宿主）：出站 view.switch.request，按钮态由宿主回流的
+    // view.mode.set 驱动
+    const viewBtn = document.createElement('button')
+    viewBtn.type = 'button'
+    viewBtn.className = 'vsidian-view-toggle'
+    const viewLabel = (): string => t(this.viewMode === 'reading'
+      ? 'toolbar.switchToLive' : 'toolbar.switchToReading')
+    bindLocaleFnAttrs(viewBtn, viewLabel)
+    viewBtn.appendChild(createViewToggleIcon())
+    viewBtn.addEventListener('mousedown', (event) => event.preventDefault())
+    viewBtn.addEventListener('click', () => {
+      this.bridge.postMessage({
+        kind: 'view.switch.request',
+        target: this.viewMode === 'live' ? 'reading' : 'live',
+      })
+    })
+    this.viewToggleBtn = viewBtn
     const sidebarBtn = document.createElement('button')
     sidebarBtn.type = 'button'
     sidebarBtn.className = 'vsidian-sidebar-toggle'
@@ -2920,6 +3016,7 @@ export class WebviewSyncController {
     this.sidebarToggleBtn = sidebarBtn
     bar.appendChild(settingsBtn)
     bar.appendChild(quickBtn)
+    bar.appendChild(viewBtn)
     bar.appendChild(sidebarBtn)
     return bar
   }
@@ -6430,6 +6527,10 @@ export class WebviewSyncController {
       // #79 代码块卡片：呈现态围栏收起 + 头部横带 + 卡片行类（配置经
       // Compartment 热重配，围栏表复用上方 mermaidFencesField）
       this.codeCardCompartment.of(this.codeCardExtension()),
+      // #140 frontmatter 光标引导：成型头区不暴露源码——选区进入被弹到
+      // 闭合行后（filter 硬拦 + updateListener 兜底），编辑收敛到标题栏
+      // 「修改」按钮的 Popover；文档变更同时驱动浮层按最新模型重建
+      frontmatterEditing,
       // #125 围栏内两步 Tab 越界：必须置于 tableEditing **之前**——CM6
       // keymap 与 transactionFilter 的顺序语义相反：keymap 把全部绑定按
       // 扩展数组顺序正序拼接后依序尝试（@codemirror/view buildKeymap/
@@ -6870,6 +6971,30 @@ function createSidebarToggleIcon(): SVGSVGElement {
   bar.setAttribute('y2', '13.25')
   svg.appendChild(frame)
   svg.appendChild(bar)
+  return svg
+}
+
+/** #141 双态视图切换图标（lucide book / pencil 意象，内联 SVG）：书（当前
+ *  在阅读）与笔（当前在 Live）两图标常驻按钮，显隐唯一来源是 main.css 按
+ *  body 模式类（vsidian-mode-live / vsidian-mode-reading）的切换规则——
+ *  样式失效时两图标同显，浏览器绘制断言据此暴露（侧栏两态图标同款哲学） */
+function createViewToggleIcon(): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg')
+  svg.setAttribute('viewBox', '0 0 24 24')
+  svg.setAttribute('fill', 'none')
+  svg.setAttribute('stroke', 'currentColor')
+  svg.setAttribute('stroke-width', '2')
+  svg.setAttribute('stroke-linecap', 'round')
+  svg.setAttribute('stroke-linejoin', 'round')
+  svg.setAttribute('aria-hidden', 'true')
+  const book = document.createElementNS(SVG_NS, 'path')
+  book.setAttribute('class', 'vsidian-view-toggle-book')
+  book.setAttribute('d', 'M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20')
+  const edit = document.createElementNS(SVG_NS, 'path')
+  edit.setAttribute('class', 'vsidian-view-toggle-edit')
+  edit.setAttribute('d', 'M21.174 6.812a1 1 0 0 0-3.986-3.987L3.642 16.374a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z')
+  svg.appendChild(book)
+  svg.appendChild(edit)
   return svg
 }
 

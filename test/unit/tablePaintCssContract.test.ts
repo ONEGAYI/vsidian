@@ -15,10 +15,13 @@ function rule(selector: string, declaration?: RegExp): string {
 }
 
 describe('表格网格与选中轮廓 CSS 契约（#42/#43）', () => {
-  it('单元格按等宽网格绘制且边框和内容不会被隐藏', () => {
-    expect(rule('.vsidian-table-grid-row')).toMatch(/display:\s*grid/)
-    expect(rule('.vsidian-table-grid-row')).toMatch(
-      /grid-template-columns:\s*repeat\(var\(--vsidian-table-columns\),\s*minmax\(0,\s*1fr\)\)/,
+  it('网格行按列宽计划绘制（内容比例分配），等分仅为缺省回退', () => {
+    const row = rule('.vsidian-table-grid-row')
+    expect(row).toMatch(/display:\s*grid/)
+    // #142：优先消费行装饰内联的列宽计划（minmax 保底 + fr 占比）；
+    // 计划缺失时（源码降级等）回退列数等分——等分不得再成为唯一列宽来源
+    expect(row).toMatch(
+      /grid-template-columns:\s*var\(--vsidian-table-col-widths,\s*repeat\(var\(--vsidian-table-columns\),\s*minmax\(0,\s*1fr\)\)\)/,
     )
     const cell = rule('.vsidian-table-grid-row > .cm-widgetBuffer + .vsidian-table-grid-cell')
     expect(cell).toMatch(/border:\s*1px solid var\(--vscode-panel-border/)
@@ -33,6 +36,15 @@ describe('表格网格与选中轮廓 CSS 契约（#42/#43）', () => {
     const hidden = rule('.vsidian-table-grid-delimiter', /display:\s*none/)
     expect(hidden).toContain('.vsidian-table-grid-row > .vsidian-table-pipe')
     expect(hidden).toContain('.vsidian-table-grid-row > .cm-widgetBuffer')
+  })
+
+  it('GFM 列对齐三态规则齐全（应用到该列全部单元格，空格占位同构）', () => {
+    expect(rule('#app .cm-editor .cm-scroller .vsidian-table-grid-align-left', /text-align/))
+      .toMatch(/text-align:\s*left/)
+    expect(rule('#app .cm-editor .cm-scroller .vsidian-table-grid-align-center', /text-align/))
+      .toMatch(/text-align:\s*center/)
+    expect(rule('#app .cm-editor .cm-scroller .vsidian-table-grid-align-right', /text-align/))
+      .toMatch(/text-align:\s*right/)
   })
 
   it('选中行外框及行列浅色高亮保留主题焦点色', () => {

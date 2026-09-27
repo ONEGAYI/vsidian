@@ -410,3 +410,39 @@
 #app .vsidian-toolbar {
   --vsidian-chrome-probe: rgb(228, 0, 1);
 }
+
+/* 双态视图切换按钮（#141 常驻本体；book/edit 图标显隐属模式态，不设静态探针） */
+#app .vsidian-toolbar .vsidian-view-toggle {
+  --vsidian-chrome-probe: rgb(236, 0, 1);
+}
+
+/* live HTML 注释淡化 span（#139；阅读侧隐藏无对应类） */
+#app .vsidian-view-live .vsidian-html-comment {
+  text-decoration-color: rgb(34, 35, 36);
+}
+
+/* ---- frontmatter 只读表格卡片（#140 Popover 改版；Popover 容器为交互
+   态，不设静态探针）---- */
+#app .vsidian-view-live .vsidian-fm-card-line {
+  --vsidian-chrome-probe: rgb(230, 0, 1);
+}
+
+#app .vsidian-view-live .vsidian-fm-row {
+  --vsidian-chrome-probe: rgb(231, 0, 1);
+}
+
+#app .vsidian-view-live .vsidian-fm-row > .vsidian-fm-cell {
+  --vsidian-chrome-probe: rgb(232, 0, 1);
+}
+
+#app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-row {
+  --vsidian-chrome-probe: rgb(233, 0, 1);
+}
+
+#app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-cell {
+  --vsidian-chrome-probe: rgb(234, 0, 1);
+}
+
+#app .vsidian-view-live .vsidian-fm-header {
+  --vsidian-chrome-probe: rgb(237, 0, 1);
+}

@@ -157,14 +157,27 @@ describe('buildLivePreviewDecorations：全量构建（树驱动语义）', () =
     expect(coveredTexts(set, LIVE_CLASS_NAMES.headerSpan(2), FULL_DOC)).toEqual(['二级'])
   })
 
-  it('frontmatter：行级类 + 内部伪标题不判定为标题', () => {
+  it('frontmatter：合法头区成型表格卡片（#140）；内部伪标题不判定为标题', () => {
     const c = byClass(set)
-    expect((c.get(LIVE_CLASS_NAMES.frontmatterLine) ?? []).length).toBe(4) // ---/title/伪标题/--- 四行
-    // frontmatter 内的 '# 伪标题' 不得产生标题类（两视图一致语义的边界）
+    // `# 伪标题` 是 YAML 注释行：头区合法（title: 元 + 注释）→ 成型卡片；
+    // 卡片行同时承载 frontmatter-line（别名桥 direct 级承诺，opacity 由
+    // fm-card-line 重置）；四行全部纳入卡片行类
+    expect((c.get(LIVE_CLASS_NAMES.frontmatterLine) ?? []).length).toBe(4)
+    expect((c.get('vsidian-fm-card-line') ?? []).length).toBe(4)
+    // 注释行整行淡化呈现（独立注释），伪标题不产生标题类（两视图一致语义）
+    expect(coveredTexts(set, 'vsidian-fm-comment-line', FULL_DOC)).toEqual(['# 伪标题'])
     const headingLines = c.get(HEADING_CLASS_NAMES.line) ?? []
     for (const item of headingLines) {
       expect(FULL_DOC.slice(item.from, item.to)).not.toContain('伪标题')
     }
+  })
+
+  it('frontmatter 降级：非法头区保持源码行类（成型与降级实时切换的降级侧）', () => {
+    // 嵌套形态：行级形态学不支持 → 降级 frontmatter-line（现状源码呈现）
+    const degraded = build('---\ntitle: 元\nouter:\n  inner: 1\n---\n正文')
+    const c = byClass(degraded)
+    expect((c.get(LIVE_CLASS_NAMES.frontmatterLine) ?? []).length).toBe(5)
+    expect((c.get('vsidian-fm-card-line') ?? []).length).toBe(0)
   })
 
   it('粗斜体：内容 span + 标记隐藏（非活动行）', () => {
@@ -837,5 +850,52 @@ describe('B-3：frontmatter 截断口径两视图同源', () => {
     expect(frontmatterRange(doc)).toBeNull()
     expect(splitReadingBlocks(doc)[0]!.kind).not.toBe('frontmatter')
     expect(frontmatterDecoCount(doc)).toBe(0)
+  })
+})
+
+// ---- HTML 注释淡化装饰（#139）----
+// 呈现语义：低对比度、明显非正文、仍可读（不隐藏、不折叠、无显形逻辑——
+// 内容本来就可见）。节点形态以 Lezer markdown 实测为准：行内 Comment /
+// 块级 CommentBlock（裸解析器对 frontmatter 内伪节点的发射由 fm 裁剪拦截）。
+
+describe('HTML 注释淡化（#139）：Comment / CommentBlock 发淡化 mark', () => {
+  it('行内注释：节点整区间（含定界符）发 vsidian-html-comment', () => {
+    const doc = '正文 <!-- 注释文字 --> 尾部'
+    const set = build(doc)
+    expect(coveredTexts(set, LIVE_CLASS_NAMES.htmlComment, doc)).toEqual(['<!-- 注释文字 -->'])
+  })
+
+  it('块级注释（CommentBlock，跨行）：整区间发淡化类', () => {
+    const doc = '段前\n<!-- 跨行\n注释 -->\n段后'
+    const set = build(doc)
+    expect(coveredTexts(set, LIVE_CLASS_NAMES.htmlComment, doc)).toEqual(['<!-- 跨行\n注释 -->'])
+  })
+
+  it('同行多处注释：各自独立发射', () => {
+    const doc = 'a <!-- 一 --> b <!-- 二 --> c'
+    const set = build(doc)
+    expect(coveredTexts(set, LIVE_CLASS_NAMES.htmlComment, doc)).toEqual(['<!-- 一 -->', '<!-- 二 -->'])
+  })
+
+  it('frontmatter 内的伪注释节点不发射（头块按源码呈现）', () => {
+    const doc = '---\nnote: <!-- 伪 -->\n---\n正文'
+    const set = build(doc)
+    expect(coveredTexts(set, LIVE_CLASS_NAMES.htmlComment, doc)).toEqual([])
+  })
+
+  it('代码上下文（围栏/行内代码）内的字面 <!-- 无注释节点、无装饰', () => {
+    const doc = '```\n<!-- 围栏内 -->\n```\n\n`<!-- 码 -->` 完'
+    const set = build(doc)
+    expect(coveredTexts(set, LIVE_CLASS_NAMES.htmlComment, doc)).toEqual([])
+  })
+
+  it('光标进入注释不隐藏内容（淡化常显，无显形切换）', () => {
+    const doc = '正文 <!-- 注释 --> 尾部'
+    const inner = doc.indexOf('注')
+    const set = build(doc, { anchor: inner })
+    expect(coveredTexts(set, LIVE_CLASS_NAMES.htmlComment, doc)).toEqual(['<!-- 注释 -->'])
+    expect(hiddenRanges(set)).not.toContainEqual([
+      doc.indexOf('<!--'), doc.indexOf('<!--') + 4,
+    ])
   })
 })

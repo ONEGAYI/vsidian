@@ -34,6 +34,8 @@ try {
   await page.addScriptTag({ path: output })
 
   const DOC = [
+    // frontmatter 成型头区（#140 探针：card-line/row/cell/add-entry）
+    '---', 'title: 界面契约', 'tags:', '  - 契约', '---', '',
     '# 界面契约一级标题', '',
     '## 二级标题与 **加粗透传**', '',
     '行内公式 $E = mc^2$ 与块级公式：', '',

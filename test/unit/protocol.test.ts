@@ -18,6 +18,16 @@ it('DOM 组合测试钩子只接受明确阶段和字符串候选', () => {
 })
 
 describe('isWebviewToHost', () => {
+  it('view.switch.request 消息校验（#141）：target 仅 live/reading（双态裁剪，源码路径不可达）', () => {
+    expect(isWebviewToHost({ kind: 'view.switch.request', target: 'live' })).toBe(true)
+    expect(isWebviewToHost({ kind: 'view.switch.request', target: 'reading' })).toBe(true)
+    // 源码模式入口是右上角三态按钮（宿主命令），本消息不得触达源码路径
+    expect(isWebviewToHost({ kind: 'view.switch.request', target: 'source' })).toBe(false)
+    expect(isWebviewToHost({ kind: 'view.switch.request' })).toBe(false)
+    expect(isWebviewToHost({ kind: 'view.switch.request', target: 'both' })).toBe(false)
+    expect(isWebviewToHost({ kind: 'view.switch.request', target: 1 })).toBe(false)
+  })
+
   it('接受合法 ready', () => {
     expect(isWebviewToHost({ kind: 'ready' })).toBe(true)
   })
@@ -942,6 +952,7 @@ describe('isWebviewToHost', () => {
         cssProbe: {
           liveHeadingDecorationColor: null, readingHeadingDecorationColor: null, readingVarProbe: null,
           liveStrongDecorationColor: null, liveInlineCodeDecorationColor: null,
+          liveHtmlCommentDecorationColor: null,
           liveCodeLineDecorationColor: null, readingStrongDecorationColor: null,
           liveTaskCheckboxDecorationColor: null, readingTaskCheckboxDecorationColor: null,
           liveLinkDecorationColor: null, readingLinkDecorationColor: null,
@@ -1394,6 +1405,7 @@ describe('模式切换协议（#6）', () => {
       readingVarProbe: null,
       liveStrongDecorationColor: null,
       liveInlineCodeDecorationColor: null,
+      liveHtmlCommentDecorationColor: null,
       liveCodeLineDecorationColor: null,
       readingStrongDecorationColor: null,
       liveTaskCheckboxDecorationColor: null,
@@ -1426,6 +1438,7 @@ describe('模式切换协议（#6）', () => {
       readingVarProbe: 'contract-ok',
       liveStrongDecorationColor: null,
       liveInlineCodeDecorationColor: 'rgb(7, 8, 9)',
+      liveHtmlCommentDecorationColor: null,
       liveCodeLineDecorationColor: null,
       readingStrongDecorationColor: 'rgb(10, 11, 12)',
       liveTaskCheckboxDecorationColor: null,
@@ -1611,6 +1624,7 @@ describe('任务勾选协议（#9）', () => {
       readingVarProbe: null,
       liveStrongDecorationColor: null,
       liveInlineCodeDecorationColor: null,
+      liveHtmlCommentDecorationColor: null,
       liveCodeLineDecorationColor: null,
       readingStrongDecorationColor: null,
       liveTaskCheckboxDecorationColor: 'rgb(19, 20, 21)',

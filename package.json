@@ -68,6 +68,11 @@
         "icon": "$(edit)"
       },
       {
+        "command": "onegayi.vsidian.mode.toggleDualView",
+        "title": "%command.mode.toggleDualView.title%",
+        "category": "Vsidian"
+      },
+      {
         "command": "onegayi.vsidian.find",
         "title": "%command.find.title%",
         "category": "Vsidian"
@@ -233,6 +238,11 @@
         "category": "Vsidian"
       },
       {
+        "command": "onegayi.vsidian.format.htmlComment",
+        "title": "%format.htmlComment%",
+        "category": "Vsidian"
+      },
+      {
         "command": "onegayi.vsidian.openStyleReference",
         "title": "%command.openStyleReference.title%"
       },
@@ -364,7 +374,8 @@
     "@vscode/markdown-it-katex": "1.1.2",
     "katex": "0.16.47",
     "markdown-it": "15.0.2",
-    "mermaid": "11.12.2"
+    "mermaid": "11.12.2",
+    "yaml": "2.9.1"
   },
   "devDependencies": {
     "@types/node": "22.20.4",

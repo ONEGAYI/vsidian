@@ -23,6 +23,11 @@ const extra: readonly KeybindingOperation[] = [
   { id: 'toReading', command: 'onegayi.vsidian.mode.toReading', titleKey: 'command.mode.toReading.title', mode: 'live', writes: false, defaults: [] },
   { id: 'toLive', command: 'onegayi.vsidian.mode.toLive', titleKey: 'command.mode.toLive.title', mode: 'reading', writes: false, defaults: [] },
   { id: 'toSource', command: 'onegayi.vsidian.mode.toSource', titleKey: 'command.mode.toSource.title', mode: 'both', writes: false, defaults: [] },
+  // #141 双态切换（live↔reading，不含源码）：工具栏按钮与快捷键共用
+  // 同一目标推导（当前态取反）。双模式可触发（源码模式不经 webview 键
+  // 路由天然不涉及）；默认 ctrl+q（2026-09-27 用户指示，全仓与宿主
+  // webview 默认无占用——冲突核对记录见本表与 keybindings.md）
+  { id: 'toggleDualView', command: 'onegayi.vsidian.mode.toggleDualView', titleKey: 'command.mode.toggleDualView.title', mode: 'both', writes: false, defaults: ['ctrl+q'] },
   { id: 'tableCreate', command: 'onegayi.vsidian.table.create', titleKey: 'command.table.create.title', mode: 'live', writes: true, defaults: [] },
   { id: 'insertRowAbove', command: 'onegayi.vsidian.table.insertRowAbove', titleKey: 'command.table.insertRowAbove.title', mode: 'live', writes: true, defaults: [] },
   { id: 'insertRowBelow', command: 'onegayi.vsidian.table.insertRowBelow', titleKey: 'command.table.insertRowBelow.title', mode: 'live', writes: true, defaults: [] },
