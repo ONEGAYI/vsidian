@@ -117,6 +117,16 @@ button:focus-visible, input:focus-visible {
 .vsidian-settings-result { display: block; width: 100%; text-align: left; padding: 18px; margin: 0 0 12px; border: 1px solid var(--vsidian-settings-container-border); border-radius: 8px; background: var(--vsidian-settings-container-bg); color: inherit; }
 .vsidian-settings-result:hover { background: var(--vscode-list-hoverBackground, #e9ebef); }
 .vsidian-settings-result-category { display: block; font-size: 12px; margin-bottom: 7px; color: var(--vscode-descriptionForeground, #666); }
+/* 通用 callout（#155 小改）：左侧强调条 + 低占比色底，承载说明性长文案
+ * （CSS 片段远程缓存说明、样式参考别名桥要点共用）；信息色随主题变量，
+ * 缺省回落到色差基调叠加 */
+.vsidian-settings-callout {
+  margin: 10px 0; padding: 10px 14px; border-radius: 8px;
+  border-left: 3px solid var(--vscode-focusBorder, #007fd4);
+  background: var(--vscode-inputValidation-infoBackground, color-mix(in srgb, var(--vsidian-settings-tint) 6%, var(--vscode-editor-background, #fff)));
+  color: var(--vscode-descriptionForeground, #666);
+  line-height: 1.65;
+}
 /* ---- 快捷键分页（#155 对齐 Obsidian：单框搜索＋筛选签＋每操作单行）---- */
 .vsidian-keybindings-toolbar { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
 .vsidian-keybindings-search-wrap { position: relative; flex: 1 1 auto; min-width: 0; display: flex; align-items: center; }
@@ -232,8 +242,8 @@ button:focus-visible, input:focus-visible {
   background: var(--vscode-button-secondaryBackground, transparent); cursor: pointer; }
 .vsidian-css-snippets-actions button:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground, #e9ebef)); }
 .vsidian-css-snippets-status { min-height: 20px; color: var(--vscode-descriptionForeground, #666); }
-/* #130 远程资源缓存说明（HTTPS 导入/联网字体的刷新与缓存边界） */
-.vsidian-css-snippets-remote-note { margin: 2px 0 6px; color: var(--vscode-descriptionForeground, #666); font-size: 11px; line-height: 1.5; }
+/* #130 远程资源缓存说明（HTTPS 导入/联网字体的刷新与缓存边界）——
+ * #155 小改起为 vsidian-settings-callout 形态，专属规则不再需要 */
 .vsidian-css-snippets-status-error { padding: 8px 10px; border-left: 3px solid var(--vscode-inputValidation-warningBorder, #cca700);
   color: var(--vscode-inputValidation-warningForeground, inherit);
   background: var(--vscode-inputValidation-warningBackground, transparent); }
@@ -257,10 +267,17 @@ button:focus-visible, input:focus-visible {
 
 
 /* ---- #132 样式参考分页（styleReferenceSettings；条目卡片与过滤工具行） ---- */
-.vsidian-style-ref-head h2 { margin: 0 0 4px; }
+/* #155 小改：总分页签——总表与详细查询两态，pill 语言与快捷键筛选签一致 */
+.vsidian-style-ref-tabs { display: flex; gap: 6px; margin: 0 0 16px; }
+.vsidian-style-ref-tab { min-height: 28px; padding: 4px 16px; border-radius: 999px;
+  border: 1px solid var(--vsidian-settings-container-border);
+  color: var(--vscode-descriptionForeground, #666); background: transparent; }
+.vsidian-style-ref-tab:hover { background: var(--vscode-list-hoverBackground, #e9ebef); }
+.vsidian-style-ref-tab[aria-selected="true"] {
+  color: var(--vscode-list-activeSelectionForeground, #242a34);
+  background: var(--vscode-list-activeSelectionBackground, #e0e4eb);
+  border-color: var(--vscode-contrastActiveBorder, transparent); }
 .vsidian-style-ref-version { color: var(--vscode-descriptionForeground, #666); margin: 0 0 6px; }
-.vsidian-style-ref-bridge { padding: 8px 12px; border-left: 3px solid var(--vscode-focusBorder, #007fd4);
-  background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.08)); margin: 8px 0 18px; }
 .vsidian-style-ref-vars { border-collapse: collapse; margin-bottom: 18px; }
 .vsidian-style-ref-vars th, .vsidian-style-ref-vars td { border: 1px solid var(--vscode-panel-border, #d9dde3);
   padding: 4px 8px; text-align: left; }

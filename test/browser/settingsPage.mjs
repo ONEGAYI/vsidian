@@ -133,8 +133,25 @@ try {
     const focus = await search.evaluate(el => ({ style: getComputedStyle(el).outlineStyle, width: getComputedStyle(el).outlineWidth }))
     assert.equal(focus.style, 'solid')
     assert.equal(focus.width, '2px')
-    // #145 样式参考分页：小类分栏 + 分页 + 跨类目聚合搜索 + 导出按钮（真实点击路径）
+    // #145 样式参考分页：#155 小改起为总分页签——默认「样式参考」总表，
+    // 点「详细查询」进小类分栏（类目 + 分页 + 跨类目聚合搜索 + 导出）
     await page.getByRole('button', { name: zhCn['styleRef.title'], exact: true }).click()
+    const refTabs = page.locator('.vsidian-style-ref-tab')
+    await refTabs.first().waitFor()
+    assert.equal(await refTabs.count(), 2)
+    assert.equal(await refTabs.nth(0).textContent(), zhCn['styleRef.tabOverview'])
+    assert.equal(await refTabs.nth(1).textContent(), zhCn['styleRef.tabDetail'])
+    // 默认总表可见、详细查询隐藏；页签 pill 形态、激活态为主题选中色（绘制层）
+    assert.equal(await page.locator('.vsidian-style-ref-overview').isVisible(), true)
+    assert.equal(await page.locator('.vsidian-style-ref-detail').isVisible(), false)
+    const tabPaint = await refTabs.nth(0).evaluate(el => ({ radius: getComputedStyle(el).borderRadius }))
+    assert.equal(tabPaint.radius, '999px')
+    await refTabs.nth(1).click()
+    assert.equal(await refTabs.nth(1).getAttribute('aria-selected'), 'true')
+    assert.equal(await refTabs.nth(0).getAttribute('aria-selected'), 'false')
+    assert.equal(await page.locator('.vsidian-style-ref-overview').isVisible(), false)
+    const activeTabPaint = await refTabs.nth(1).evaluate(el => getComputedStyle(el).backgroundColor)
+    assert.equal(activeTabPaint, theme === 'light' ? 'rgb(224, 228, 235)' : 'rgb(55, 61, 73)')
     const catsNav = page.locator('.vsidian-style-ref-cats')
     await catsNav.waitFor()
     await page.locator('.vsidian-style-ref-cats-domain').first().waitFor()
@@ -169,6 +186,18 @@ try {
     await page.getByRole('button', { name: zhCn['styleRef.exportJson'], exact: true }).click()
     assert.equal(await page.evaluate(() => window.sentMessages.some(m => m.kind === 'styleRef.export')), true)
     await page.screenshot({ path: path.join(artifacts, `settings-${theme}-style-ref.png`) })
+    // #155 小改：CSS 片段远程缓存说明为 callout 形态（左强调条 + 圆角色底，绘制层）
+    await page.getByRole('button', { name: zhCn['cssSnippets.title'], exact: true }).click()
+    const remoteNote = page.locator('.vsidian-css-snippets-remote-note')
+    await remoteNote.waitFor()
+    const calloutPaint = await remoteNote.evaluate(el => {
+      const cs = getComputedStyle(el)
+      return { borderLeftWidth: cs.borderLeftWidth, radius: cs.borderRadius, bg: cs.backgroundColor }
+    })
+    assert.equal(calloutPaint.borderLeftWidth, '3px')
+    assert.equal(calloutPaint.radius, '8px')
+    assert.notEqual(calloutPaint.bg, 'rgba(0, 0, 0, 0)', 'callout 应有可辨色底')
+    await page.screenshot({ path: path.join(artifacts, `settings-${theme}-css-snippets.png`) })
     // 切回编辑器分组再走窄屏断言（分页切换会卸载前一分组内容）
     await page.getByRole('button', { name: zhCn['settings.editorCategory'], exact: true }).click()
     await page.setViewportSize({ width: 360, height: 740 })

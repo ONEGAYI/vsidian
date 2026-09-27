@@ -141,6 +141,10 @@ export const en = {
   'styleRef.empty': 'No entries match the current filters.',
   // ---- #145 类目分栏分页与契约 JSON 导出 ----
   'styleRef.categoryNav': 'Browse by category',
+  // #155 小改：总分页签（总表/详细查询两态）
+  'styleRef.tabNav': 'Style reference views',
+  'styleRef.tabOverview': 'Reference',
+  'styleRef.tabDetail': 'Detailed lookup',
   'styleRef.exportJson': 'Export JSON',
   'styleRef.prevPage': 'Previous page',
   'styleRef.nextPage': 'Next page',

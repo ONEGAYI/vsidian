@@ -128,6 +128,27 @@
 - 明暗两种主题下：双滚动条形态、容器色差观感、开关观感、快捷键页单行布局。
 - 色差基调若不满意，在候选变量族间切换后复验。
 - 真实键盘录制两段键位（如 Ctrl+K Ctrl+B）与 Esc 取消手感。
+- 说明框（callout）观感：CSS 片段页远程缓存说明在明暗主题下的左强调条与色底。
+- 样式参考总分页签：默认落总表、切换详细查询、全局搜索定位条目直接进详细查询。
+
+## 后续小改（同 PR 跟进，2026-09-28）
+
+首轮交付后用户复核提出两处小改，随同一 PR 落地：
+
+1. **说明框形态（callout）**：CSS 片段分页的远程缓存说明由小号灰字段落改为
+   说明框——左侧强调条（focusBorder 族）＋低占比色底＋圆角，与样式参考页
+   「直接兼容」要点统一为共享样式 `.vsidian-settings-callout`（主题信息色
+   变量优先，缺省回落到色差基调叠加）；样式参考页别名要点同步改挂共享样式。
+2. **样式参考总分页签**：分页顶部新增两态页签——「样式参考」（总表：版本
+   说明、别名要点、变量别名总表）与「详细查询」（既有类目分栏＋过滤搜索＋
+   分页），`aria-selected` 单选、面板以 `hidden` 切换；分页标题由壳层呈现，
+   总表内不再重复 h2。全局搜索定位条目（focusEntry 非 `overview`）时直接
+   落入详细查询并保留跳页定位；定位 `overview` 落总表。数据源、过滤与导出
+   行为不变。
+
+自动化覆盖：`styleReferenceSettings.test.ts` 新增页签与 callout 断言组；
+`cssSnippetSettings.test.ts`、`settingsPage.test.ts` 样式契约补共享样式断言；
+`test/browser/settingsPage.mjs` 补页签切换与 callout 绘制层断言（明暗两主题）。
 
 ## grilling 决策纪要（2026-09-27）
 
@@ -149,7 +170,10 @@
 - `src/webview/keybindingSettings.ts`：工具行 / 筛选签 / 行布局 / 捕获签 / ⋯菜单。
 - `src/shared/keybindings.ts`：新增冲突集合与筛选谓词纯函数（不改既有语义）。
 - `src/shared/locales/en.ts` / `zh-cn.ts`：新增键（筛选签、捕获签、菜单 aria 等）。
+- `src/webview/styleReferenceSettings.ts`：总分页签结构与 callout 挂载（后续小改）。
+- `src/webview/cssSnippetSettings.ts`：远程缓存说明 callout 化（后续小改）。
 - 单测与浏览器套件：`settingsPage.test.ts`、`keybindingSettings.test.ts`、
-  `keybindings.test.ts`、`test/browser/settingsPage.mjs`、`keybindings.mjs`、
+  `keybindings.test.ts`、`styleReferenceSettings.test.ts`、`cssSnippetSettings.test.ts`、
+  `test/browser/settingsPage.mjs`、`keybindings.mjs`、
   `keybindingEditor.mjs`。
 - CHANGELOG `Unreleased` 与文件树（file-tree 技能维护）。

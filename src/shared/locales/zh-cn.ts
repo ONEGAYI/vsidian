@@ -125,6 +125,10 @@ export const zhCn: Record<MessageKey, string> = {
   'styleRef.empty': '当前筛选条件下没有条目。',
   // ---- #145 类目分栏分页与契约 JSON 导出 ----
   'styleRef.categoryNav': '按类目浏览',
+  // #155 小改：总分页签（总表/详细查询两态）
+  'styleRef.tabNav': '样式参考视图',
+  'styleRef.tabOverview': '样式参考',
+  'styleRef.tabDetail': '详细查询',
   'styleRef.exportJson': '导出 JSON',
   'styleRef.prevPage': '上一页',
   'styleRef.nextPage': '下一页',

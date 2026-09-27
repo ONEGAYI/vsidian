@@ -60,10 +60,11 @@ describe('分页注册与空状态', () => {
     expect(root.querySelector('.vsidian-settings-subtitle')?.textContent).toBe(zhCn['cssSnippets.description'])
   })
 
-  it('#130 远程缓存说明常驻渲染（HTTPS 导入/联网字体的刷新与缓存边界）', () => {
+  it('#130 远程缓存说明常驻渲染，并以 callout 形态呈现（#155 小改）', () => {
     const { parent } = makeSection()
     const note = parent.querySelector('.vsidian-css-snippets-remote-note')
     expect(note?.textContent).toBe(zhCn['cssSnippets.remoteCacheNote'])
+    expect(note?.classList.contains('vsidian-settings-callout')).toBe(true)
   })
 
   it('未收到状态时：目录行显示未配置提示，四个动作按钮可用', () => {

@@ -290,3 +290,14 @@ it('样式契约：双栏独立滚动、分组容器、拨动开关、主题选�
   expect(css).toContain(':focus-visible')
   expect(css).toContain('@media (max-width: 600px)')
 })
+
+it('样式契约：callout 形态与样式参考总分页签（#155 小改）', async () => {
+  const { readFileSync } = await import('node:fs')
+  const css = readFileSync('src/webview/settingsPage.css', 'utf8')
+  // callout：左强调条 + 圆角色底承载说明性长文案（CSS 片段远程缓存说明、样式参考别名桥要点共用）
+  expect(css).toMatch(/\.vsidian-settings-callout\s*\{[^}]*border-left/)
+  expect(css).toMatch(/\.vsidian-settings-callout\s*\{[^}]*border-radius/)
+  // 总分页签：pill 形态，aria-selected 单选激活态走主题选中色
+  expect(css).toMatch(/\.vsidian-style-ref-tab\s*\{[^}]*border-radius:\s*999px/)
+  expect(css).toContain('.vsidian-style-ref-tab[aria-selected="true"]')
+})
