@@ -65,7 +65,7 @@ import {
   type SettingsPayload,
 } from '../shared/settings'
 import { onLocaleChanged, t } from '../shared/i18n'
-import { bindLocale, bindLocaleFn, refreshElementLocale } from './localeDom'
+import { bindLocale, bindLocaleAttrs, bindLocaleFnAttrs, refreshElementLocale } from './localeDom'
 import { refreshOnDemandControlLocale } from './localeOnDemand'
 import {
   FIND_CLASS_NAMES,
@@ -2400,8 +2400,7 @@ export class WebviewSyncController {
       // #101：可访问名称与基名 title 经注册表登记（动态键 item.titleKey 走
       // 键锚点）——操作条关闭时 refreshQuickActions 早退，此前 title 会滞留
       // 旧语言；开启后 refreshQuickActions 以复合 title（基名+键位）覆写
-      bindLocale(el, 'aria-label', item.titleKey)
-      bindLocale(el, 'title', item.titleKey)
+      bindLocaleAttrs(el, item.titleKey)
       el.dataset['op'] = op
       el.addEventListener('click', () => this.runFormatOperation(op))
       target.appendChild(el)
@@ -2412,8 +2411,7 @@ export class WebviewSyncController {
     }
     const paragraphGroup = group('format.groupParagraph')
     const heading = button('heading', 'vsidian-quick-heading')
-    bindLocale(heading, 'aria-label', 'format.heading')
-    bindLocale(heading, 'title', 'format.heading')
+    bindLocaleAttrs(heading, 'format.heading')
     heading.setAttribute('aria-haspopup', 'menu')
     heading.setAttribute('aria-expanded', 'false')
     heading.setAttribute('aria-controls', 'vsidian-quick-heading-menu')
@@ -2426,8 +2424,7 @@ export class WebviewSyncController {
     const insertGroup = group('format.groupInsert')
     addOperation(insertGroup, 'link')
     const createTable = button('table', 'vsidian-quick-table')
-    bindLocale(createTable, 'aria-label', 'format.insertTable')
-    bindLocale(createTable, 'title', 'format.insertTable')
+    bindLocaleAttrs(createTable, 'format.insertTable')
     createTable.addEventListener('click', () => {
       const view = this.view
       if (view && this.viewMode === 'live' && !this.suspended &&
@@ -2452,8 +2449,7 @@ export class WebviewSyncController {
       const item = FORMAT_OPERATIONS.find((entry) => entry.id === op)!
       const el = button(op === 'headingNone' ? t('format.bodyText') : op.replace('heading', 'H'),
         'vsidian-quick-heading-item', true)
-      bindLocale(el, 'aria-label', item.titleKey)
-      bindLocale(el, 'title', item.titleKey)
+      bindLocaleAttrs(el, item.titleKey)
       if (op === 'headingNone') {
         // 「正文」档的 glyph 是文案不是图标：换包随注册表换词（其余档 H1–H6
         // 是语言无关的字面）
@@ -2641,15 +2637,13 @@ export class WebviewSyncController {
     const settingsBtn = document.createElement('button')
     settingsBtn.type = 'button'
     settingsBtn.className = 'vsidian-settings-toggle'
-    bindLocale(settingsBtn, 'aria-label', 'sidebar.settings')
-    bindLocale(settingsBtn, 'title', 'sidebar.settings')
+    bindLocaleAttrs(settingsBtn, 'sidebar.settings')
     settingsBtn.appendChild(createSettingsGearIcon())
     settingsBtn.addEventListener('click', () => this.bridge.postMessage({ kind: 'settings.open' }))
     const quickBtn = document.createElement('button')
     quickBtn.type = 'button'
     quickBtn.className = 'vsidian-quick-toggle'
-    bindLocale(quickBtn, 'aria-label', 'sidebar.quickActions')
-    bindLocale(quickBtn, 'title', 'sidebar.quickActions')
+    bindLocaleAttrs(quickBtn, 'sidebar.quickActions')
     quickBtn.setAttribute('aria-controls', 'vsidian-quick-actions')
     quickBtn.setAttribute('aria-expanded', 'false')
     quickBtn.textContent = '✎'
@@ -2669,8 +2663,7 @@ export class WebviewSyncController {
     // 可访问名称随开合态与语言双变化：回调登记（换包重算），开合态翻转由
     // applySidebarDom 调 refreshElementLocale 重算——同一登记点两个触发源
     const sidebarLabel = (): string => t(this.sidebarOpen ? 'sidebar.collapse' : 'sidebar.expand')
-    bindLocaleFn(sidebarBtn, 'aria-label', sidebarLabel)
-    bindLocaleFn(sidebarBtn, 'title', sidebarLabel)
+    bindLocaleFnAttrs(sidebarBtn, sidebarLabel)
     sidebarBtn.appendChild(createSidebarToggleIcon())
     sidebarBtn.addEventListener('click', () => this.toggleSidebar())
     this.sidebarToggleBtn = sidebarBtn

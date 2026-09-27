@@ -20,38 +20,36 @@ import { GRAPHIC_CHROME_CLASS_NAMES } from './graphicBlockChrome'
 import { MATH_CLASS_NAMES } from '../shared/math'
 import { refreshMermaidErrorLocale } from './mermaidRender'
 
+/** 按钮类控件的双写共用段：选择器命中集就地重写 aria-label 与 title 同词
+ *  ——物化控件侧与常驻侧 bindLocaleAttrs 同一口径（fold 段的逐元素条件
+ *  键经 labelOf(el) 承载） */
+function rewriteButtonLocale(
+  root: ParentNode,
+  selector: string,
+  labelOf: (el: HTMLElement) => string,
+): void {
+  for (const el of root.querySelectorAll<HTMLElement>(selector)) {
+    const label = labelOf(el)
+    el.setAttribute('aria-label', label)
+    el.title = label
+  }
+}
+
 /** 换包后就地重刷已物化按需控件的固化文案（#101）：按钮类控件重写
  *  title/aria-label，mermaid 错误占位经重渲染换词 */
 export function refreshOnDemandControlLocale(root: ParentNode): void {
   // 代码卡片复制按钮（buildCopyButton，live 头部与阅读卡片共用 builder：
   // document 级扫描同时覆盖两视图已挂载块）
-  for (const btn of root.querySelectorAll<HTMLElement>(`.${CODE_CARD_CLASS_NAMES.copy}`)) {
-    const label = t('codeblock.copy')
-    btn.setAttribute('aria-label', label)
-    btn.title = label
-  }
+  rewriteButtonLocale(root, `.${CODE_CARD_CLASS_NAMES.copy}`, () => t('codeblock.copy'))
   // 折叠 chevron（buildFoldButton）：两态词按收起修饰类判定（收起态提示
   // 「展开」）；aria-expanded 是布尔多态、与语言无关，不动
-  for (const btn of root.querySelectorAll<HTMLElement>(`.${CODE_CARD_CLASS_NAMES.fold}`)) {
-    const label = t(
-      btn.classList.contains(CODE_CARD_CLASS_NAMES.foldCollapsed)
-        ? 'codeblock.expand'
-        : 'codeblock.collapse',
-    )
-    btn.setAttribute('aria-label', label)
-    btn.title = label
-  }
+  rewriteButtonLocale(root, `.${CODE_CARD_CLASS_NAMES.fold}`, (btn) =>
+    t(btn.classList.contains(CODE_CARD_CLASS_NAMES.foldCollapsed)
+      ? 'codeblock.expand'
+      : 'codeblock.collapse'))
   // 图形化块按钮组（buildGraphicChrome）：edit（仅实时预览装配）与 popup
-  for (const btn of root.querySelectorAll<HTMLElement>(`.${GRAPHIC_CHROME_CLASS_NAMES.edit}`)) {
-    const label = t('graphic.editSource')
-    btn.setAttribute('aria-label', label)
-    btn.title = label
-  }
-  for (const btn of root.querySelectorAll<HTMLElement>(`.${GRAPHIC_CHROME_CLASS_NAMES.popup}`)) {
-    const label = t('graphic.popup')
-    btn.setAttribute('aria-label', label)
-    btn.title = label
-  }
+  rewriteButtonLocale(root, `.${GRAPHIC_CHROME_CLASS_NAMES.edit}`, () => t('graphic.editSource'))
+  rewriteButtonLocale(root, `.${GRAPHIC_CHROME_CLASS_NAMES.popup}`, () => t('graphic.popup'))
   // 公式降级 span 的 title（LiveMathWidget.toDOM 失败分支；成功态是
   // KaTeX 排版，无本地化文案）
   for (const el of root.querySelectorAll<HTMLElement>(`.${MATH_CLASS_NAMES.mathError}`)) {

@@ -5,6 +5,9 @@
 // - 键锚点 bindLocale(el, 目标, 键)：创建时按当前语言写入并登记，换包时重写；
 // - 回调 bindLocaleFn(el, 目标, resolve)：覆盖动态键（FORMAT_OPERATIONS 的
 //   titleKey）与复合/状态相关文案（侧栏开合的可访问名称）；
+// - 双目标便捷形 bindLocaleAttrs / bindLocaleFnAttrs：图标按钮的通用口径
+//   ——可访问名称（aria-label）与悬停提示（title）同词，一次调用登记两个
+//   目标，收敛成对的两次单目标登记；
 // - 目标是属性名（'aria-label' / 'title' / 'placeholder' / …）或特指
 //   textContent 的 'text'。
 //
@@ -64,6 +67,23 @@ export function bindLocale(
 export function bindLocaleFn(el: Element, target: LocaleTarget, resolve: () => string): void {
   writeTo(el, target, resolve())
   register(el, (node) => writeTo(node, target, resolve()))
+}
+
+/** 双目标便捷形（键锚点）：aria-label 与 title 同键一次登记——图标按钮
+ *  的通用无障碍口径（屏幕阅读器名称与鼠标悬停提示同词） */
+export function bindLocaleAttrs(
+  el: Element,
+  key: MessageKey,
+  params?: MessageParams,
+): void {
+  bindLocale(el, 'aria-label', key, params)
+  bindLocale(el, 'title', key, params)
+}
+
+/** 双目标便捷形（回调）：aria-label 与 title 共用同一求值回调登记 */
+export function bindLocaleFnAttrs(el: Element, resolve: () => string): void {
+  bindLocaleFn(el, 'aria-label', resolve)
+  bindLocaleFn(el, 'title', resolve)
 }
 
 /** 换包重刷：重写全部仍连线的登记项；已脱挂/已回收的登记项就地剪除 */

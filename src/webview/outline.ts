@@ -30,7 +30,7 @@ import type { Text } from '@codemirror/state'
 import type { SyntaxNode, Tree } from '@lezer/common'
 import type { OutlineSpanInfo, OutlineSpanKind } from '../shared/protocol'
 import type { OutlineSearchRange } from './outlineSearch'
-import { bindLocale, bindLocaleFn } from './localeDom'
+import { bindLocale, bindLocaleAttrs, bindLocaleFnAttrs } from './localeDom'
 import { parseWikilinkInner, scanWikilinksInLine } from '../shared/wikilink'
 import {
   docInput,
@@ -688,8 +688,7 @@ export function buildOutlineDom(): { toggle: HTMLButtonElement; panel: HTMLEleme
   const toggle = document.createElement('button')
   toggle.type = 'button'
   toggle.className = 'vsidian-outline-toggle'
-  bindLocale(toggle, 'aria-label', 'outline.label')
-  bindLocale(toggle, 'title', 'outline.label')
+  bindLocaleAttrs(toggle, 'outline.label')
   toggle.setAttribute('aria-controls', 'vsidian-outline-panel')
   toggle.setAttribute('aria-expanded', 'true')
   toggle.appendChild(createOutlineListIcon())
@@ -750,8 +749,7 @@ export function buildOutlineSlider(
     dot.dataset['vsidianLevel'] = String(n)
     // 档位名经 labelOf 回调登记（回调形态：换包时重新求值——labelOf 由
     // 调用方注入，实际取词在 outlineExpandLevelLabel 内部走 t()）
-    bindLocaleFn(dot, 'aria-label', () => labelOf(n))
-    bindLocaleFn(dot, 'title', () => labelOf(n))
+    bindLocaleFnAttrs(dot, () => labelOf(n))
     dots.push(dot)
     row.appendChild(dot)
   }
@@ -820,14 +818,12 @@ export function buildOutlineToolbar(): OutlineToolbarDom {
   const jumpBottom = document.createElement('button')
   jumpBottom.type = 'button'
   jumpBottom.className = OUTLINE_CLASS_NAMES.jumpBottom
-  bindLocale(jumpBottom, 'aria-label', 'outline.jumpBottom')
-  bindLocale(jumpBottom, 'title', 'outline.jumpBottom')
+  bindLocaleAttrs(jumpBottom, 'outline.jumpBottom')
   jumpBottom.appendChild(createOutlineJumpBottomIcon())
   const reset = document.createElement('button')
   reset.type = 'button'
   reset.className = OUTLINE_CLASS_NAMES.reset
-  bindLocale(reset, 'aria-label', 'outline.reset')
-  bindLocale(reset, 'title', 'outline.reset')
+  bindLocaleAttrs(reset, 'outline.reset')
   reset.appendChild(createOutlineResetIcon())
   const search = document.createElement('input')
   search.type = 'search'
