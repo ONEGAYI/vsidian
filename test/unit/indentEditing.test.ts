@@ -98,9 +98,10 @@ describe('Tab 无选区光标行缩进', () => {
     expect(typed(makeEditView(doc, 8))).toEqual({ text: '10. p\n    11. c', from: 12, to: 12 })
   })
 
-  it('任务行：`- [ ] ` 6 格', () => {
+  it('任务行：对齐上方项内容列（`- ` 2 格——任务标记属内容不计列宽）', () => {
     const doc = '- [ ] p\n- [ ] c'
-    expect(typed(makeEditView(doc, 11))).toEqual({ text: '- [ ] p\n      - [ ] c', from: 17, to: 17 })
+    expect(typed(makeEditView(doc, doc.indexOf('c') + 1)))
+      .toEqual({ text: '- [ ] p\n  - [ ] c', from: doc.indexOf('c') + 3, to: doc.indexOf('c') + 3 })
   })
 
   it('引用内列表：缩进落在引用前缀右端', () => {

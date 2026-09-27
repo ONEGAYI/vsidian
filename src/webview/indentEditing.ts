@@ -30,7 +30,6 @@ import {
   dedentCutOf,
   indentUnitOf,
   parseLinePrefix,
-  prefixLength,
   tabIndentWidthOf,
   type LinePrefix,
 } from '../shared/listPrefix'
@@ -72,10 +71,17 @@ function prevItemColsOf(
   const mark = target.getChild('ListMark')
   if (!mark) return null
   const targetPrefix = parseLinePrefix(state.doc.lineAt(mark.from).text)
-  if (!targetPrefix?.mark) return null
+  const shape = targetPrefix?.list
+  if (!targetPrefix || !shape) return null
+  // 子项嵌套列按 CommonMark 内容列：父项「标记+一空格」的宽度——任务
+  // 标记属内容不计（`- [ ] p` 的内容列是 2，不是 `- [ ] ` 总宽 6；按
+  // 总宽缩进会越过内容列+4 的边界，令子行脱离列表结构失去全部样式）
+  const coreMark = shape.bullet
+    ? shape.bullet + shape.gap1
+    : shape.digits + shape.delim + shape.gap1
   return {
-    contentCol: prefixLength(targetPrefix) - targetPrefix.quote.length,
-    markWidth: targetPrefix.mark.length,
+    contentCol: targetPrefix.indent.length + coreMark.length,
+    markWidth: coreMark.length,
   }
 }
 

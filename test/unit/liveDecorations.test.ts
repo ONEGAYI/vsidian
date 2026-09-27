@@ -325,6 +325,16 @@ describe('mark 作用域显形', () => {
     expect((c.get(LIVE_CLASS_NAMES.listLine) ?? []).length).toBe(2) // 续行仍有行级深度类
   })
 
+  it('合法嵌套任务行样式齐全：bullet 深度类与 checkbox widget 并存（#121 验收修复）', () => {
+    const doc = '- [ ] p\n  - [ ] c\n'
+    const set = build(doc, { anchor: doc.length })
+    const c = byClass(set)
+    // 子项行（2 格 = CommonMark 内容列）有自己的 bullet 与 d2 深度类
+    expect((c.get(LIVE_CLASS_NAMES.listBullet) ?? []).length).toBe(2)
+    expect((c.get('vsidian-list-line-d2') ?? []).length).toBeGreaterThanOrEqual(1)
+    expect(taskGlyphs(set)).toHaveLength(2) // 父子两行都有 checkbox
+  })
+
   it('标题行任意位置显形自身的 #；引用仍只在标记附近显形', () => {
     const doc = '# 很长的标题\n## 另一标题\n> 很长的引用\n'
     const heading = doc.indexOf('#')
