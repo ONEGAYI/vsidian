@@ -7861,9 +7861,11 @@ export const cases: Array<[string, () => Promise<void>]> = [
 
     // 断言器（轮询稳定形态）：探针表期望值逐项核对（期望与 probe.css 规则同
     // 源——挂错节点/类未挂即 null）。装饰随视口/编辑增量重建，采集恰逢重建
-    // 空窗会读到瞬时 null——poll 重试至稳定；持续差异 ≥3 条时提前带全量差异
-    // 报错（定位到条目），零星波动继续等
+    // 空窗会读到瞬时 null——poll 重试至稳定；「持续差异」须连续 4 轮采样
+    // 均 ≥3 条才提前报错（首轮即抛会把懒加载/重建空窗误判为持续差异，
+    // CI 慢环境实测踩过），零星波动继续等，超时兜底
     const waitAliases = async (view: 'live' | 'reading'): Promise<void> => {
+      let aliasDiffStreak = 0
       await poll(view + ' 别名探针全命中', async () => {
         const v = (await vscode.commands.executeCommand(CMD.viewState, wsUri('style-contract.md').toString(), 0)) as ViewState | undefined
         if (v?.viewMode !== view) return undefined
@@ -7875,8 +7877,12 @@ export const cases: Array<[string, () => Promise<void>]> = [
             diffs.push(probe.id + '：' + String(aliases[probe.id]) + '≠' + probe.expected)
           }
         }
-        if (diffs.length === 0) return true
-        if (diffs.length >= 3) throw new Error('探针持续差异：' + diffs.join('；'))
+        if (diffs.length === 0) {
+          aliasDiffStreak = 0
+          return true
+        }
+        if (diffs.length >= 3 && ++aliasDiffStreak >= 4) throw new Error('探针持续差异（连续 4 轮采样）：' + diffs.join('；'))
+        if (diffs.length < 3) aliasDiffStreak = 0
         return undefined
       }, 20000)
     }
@@ -7913,7 +7919,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
         ? v : undefined
     }, 30000)
     // 重挂载后全部 reading 探针复验（轮询吸收块重建窗口；别名类经
-    // READING_CLASS_NAMES + 别名表随块构建器带回）
+    // READING_CLASS_NAMES + 别名表随块构建器带回）。同前：连续 4 轮采样
+    // 均 ≥3 条才判持续差异，重挂空窗的瞬时 null 不触发首轮即抛
+    let remountDiffStreak = 0
     await poll('重挂后 reading 别名探针全命中', async () => {
       const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
       const aliases = v?.cssProbe?.obsidianAliases
@@ -7924,8 +7932,12 @@ export const cases: Array<[string, () => Promise<void>]> = [
           diffs.push(probe.id + '：' + String(aliases[probe.id]) + '≠' + probe.expected)
         }
       }
-      if (diffs.length === 0) return true
-      if (diffs.length >= 3) throw new Error('重挂后探针持续差异：' + diffs.join('；'))
+      if (diffs.length === 0) {
+        remountDiffStreak = 0
+        return true
+      }
+      if (diffs.length >= 3 && ++remountDiffStreak >= 4) throw new Error('重挂后探针持续差异（连续 4 轮采样）：' + diffs.join('；'))
+      if (diffs.length < 3) remountDiffStreak = 0
       return undefined
     }, 20000)
   }],
@@ -8227,8 +8239,11 @@ export const cases: Array<[string, () => Promise<void>]> = [
       '探针分组应完整覆盖探针表')
 
     // 断言器（轮询稳定形态，同 #132 别名探针）：mermaid 懒加载与装饰重建
-    // 有空窗，poll 至稳定；持续差异 ≥3 条提前带全量差异报错
+    // 有空窗，poll 至稳定；「持续差异」须连续 4 轮采样均 ≥3 条才提前报错
+    // （首轮即抛会把 mermaid 懒加载空窗误判为持续差异——CI Linux 实测
+    // 808ms 首采三探针全 null 即抛，本地快环境复现不了），超时兜底
     const waitChrome = async (label: string, probes: readonly typeof CHROME_CONTRACT_PROBES[number][], timeoutMs: number): Promise<void> => {
+      let chromeDiffStreak = 0
       await poll(label, async () => {
         const v = (await vscode.commands.executeCommand(CMD.viewState, wsUri('chrome-contract.md').toString(), 0)) as ViewState | undefined
         const probes0 = v?.cssProbe?.chromeSelectors
@@ -8239,8 +8254,12 @@ export const cases: Array<[string, () => Promise<void>]> = [
             diffs.push(probe.id + '：' + String(probes0[probe.id]) + '≠' + probe.expected)
           }
         }
-        if (diffs.length === 0) return true
-        if (diffs.length >= 3) throw new Error('chrome 探针持续差异：' + diffs.join('；'))
+        if (diffs.length === 0) {
+          chromeDiffStreak = 0
+          return true
+        }
+        if (diffs.length >= 3 && ++chromeDiffStreak >= 4) throw new Error('chrome 探针持续差异（连续 4 轮采样）：' + diffs.join('；'))
+        if (diffs.length < 3) chromeDiffStreak = 0
         return undefined
       }, timeoutMs)
     }
