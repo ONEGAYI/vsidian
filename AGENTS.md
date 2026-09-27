@@ -205,7 +205,7 @@ vsidian/
 │   │   ├── cssSnippetImports.ts # CSS 片段依赖导入形态学单一事实源
 │   │   ├── cssSnippets.ts       # CSS 片段纯逻辑单一事实源
 │   │   ├── formatOperations.ts  # 格式操作注册清单
-│   │   ├── frontmatterTable.ts  # frontmatter 表格化纯逻辑单一事实源
+│   │   ├── frontmatterTable.ts  # frontmatter 表格化纯逻辑
 │   │   ├── i18n.ts              # t() 取词与语言包装配状态模块
 │   │   ├── keybindings.ts       # 快捷键操作与冲突模型
 │   │   ├── listPrefix.ts        # 列表引用前缀形态学（#119）
@@ -237,7 +237,7 @@ vsidian/
 │       ├── findSession.ts            # 查找匹配纯函数（#14）
 │       ├── fontArrival.ts            # 字体晚到监听（#130）
 │       ├── formatOperations.ts       # 格式文本变换规划
-│       ├── frontmatterDecorations.ts # frontmatter 卡片装饰与 widget
+│       ├── frontmatterDecorations.ts # frontmatter 卡片装饰
 │       ├── frontmatterEditing.ts     # frontmatter 格导航键位组
 │       ├── graphicBlockChrome.ts     # 图形化块右上角按钮组
 │       ├── graphicRenderers.ts       # 图形化渲染器注册表
