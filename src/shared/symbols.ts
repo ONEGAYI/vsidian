@@ -80,13 +80,15 @@ const escapedSuppress = (charBefore: string): boolean => charBefore === '\\'
  *  左邻抑制共用——词中间（含中文词内）键入按普通文字处理 */
 const isWordChar = (ch: string): boolean => /\p{L}|\p{N}/u.test(ch)
 
-/** 正文中间字符（#151 括号引号的右邻抑制口径，对齐 VSCode
- *  autoClosingBefore / CM6 closeBrackets 先例）：非空白且非注册表
+/** 正文中间字符（#151 括号引号的右邻抑制口径）：非空白且非注册表
  *  闭合字符——词字符与普通标点都算。右邻为这类字符（`|word`、`|,x`）
  *  时不补全，避免闭合符越界补到正文中间；右邻空白/行尾/闭合类字符
  *  （`) ] }`、引号、Markdown 标记符等，含 `[（|）]` 嵌套形态）放行。
- *  闭合类集合 REGISTRY_CLOSE_CHARS 从注册表派生，定义在注册表之后——
- *  本函数只在运行时被调用（模块初始化后），后置引用无 TDZ 风险 */
+ *  本口径比 VSCode autoClosingBefore / CM6 closeBrackets 先例（两者对
+ *  右邻普通标点如 `,` 放行补全，仅抑制词字符）更保守——标点也抑制是
+ *  #151 落档的显式决策，不是先例复刻。闭合类集合 REGISTRY_CLOSE_CHARS
+ *  从注册表派生，定义在注册表之后——本函数只在运行时被调用（模块初始
+ *  化后），后置引用无 TDZ 风险 */
 const isBodyChar = (ch: string): boolean =>
   ch !== '' && !/\s/u.test(ch) && !REGISTRY_CLOSE_CHARS.has(ch)
 

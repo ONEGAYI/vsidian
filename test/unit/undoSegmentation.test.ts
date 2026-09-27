@@ -14,6 +14,9 @@
 //   两笔坐标依次映射（切分点落在字符边界）
 // - #148 竞态守卫不回归：分段多笔在途时 history.request 恒晚于全部
 //   edit.request
+// - 净抵消段同样清空已确认链：在途请求确认后暂缓段自相抵消（输入即删），
+//   本地与权威即刻收敛，Ctrl+Z 必须立即生效——净抵消路径遗留 ackedChain
+//   会让守卫恒真且无收敛点释放（撤销无响应，迟到的释放撤掉新输入）
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/syncController'
 import type { SerChange, WebviewToHost } from '../../src/shared/protocol'
@@ -313,5 +316,26 @@ describe('#153 时间停顿驱动的撤销分段', () => {
     expect(history).toEqual([{ kind: 'history.request', op: 'undo' }])
     const edits = editRequests(sent)
     expect(sent.indexOf(history[0])).toBeGreaterThan(sent.indexOf(edits[2]))
+  })
+
+  it('净抵消段耗尽后守卫即刻收敛：在途确认 + 输入即删，Ctrl+Z 立即生效且撤销目标正确', async () => {
+    const { bridge, sent } = makeBridge()
+    const c = mount(bridge)
+    init(c, 'abcdef', 1)
+    const view = c.getView()!
+    useSegmentClock()
+    view.dispatch({ changes: { from: 0, insert: 'X' } }) // seq1 在途
+    vi.setSystemTime(Date.now() + 600) // 停顿超阈值：下一笔开新段
+    view.dispatch({ changes: { from: 1, insert: 'Y' } }) // 触碰 X → 暂缓段1
+    view.dispatch({ changes: { from: 1, to: 2 } }) // 立即删除 Y：阈值内并入段1 → 段净抵消
+    expect(view.state.doc.toString()).toBe('Xabcdef') // Y 输入即删，本地无 Y
+    // ack(X)：净抵消段出站跳过，此刻本地与权威必须完全收敛（含已确认链
+    // 清空）——遗留 ackedChain 会让 hasUnlandedLocalEdits 恒真且无收敛点
+    c.handleHostMessage({ kind: 'edit.ack', seq: 1, ok: true, version: 2 })
+    expect(editRequests(sent)).toHaveLength(1) // 净抵消段不出站
+    pressUndo(c) // 收敛后 Ctrl+Z：不得暂存，须立即生效
+    expect(historyRequests(sent)).toEqual([{ kind: 'history.request', op: 'undo' }])
+    // 撤销目标正确：唯一已落地编辑是 X（Y 净抵消从未落地），撤 X 回基线
+    expect(undoOnceOver(editRequests(sent), 'abcdef')).toBe('abcdef')
   })
 })

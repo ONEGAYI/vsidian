@@ -4881,52 +4881,56 @@ export class WebviewSyncController {
    *  被调用，依次出站下一笔。分段只改撤销粒度：传输合并语义不变（段内
    *  仍单笔传输），暂缓/冲突/缓冲守卫全部沿用。 */
   private sendDeferredLocal(): void {
-    if (this.deferredSegments.length === 0 || this.suspended || this.blankComposition ||
-        this.inFlight.size > 0 || this.hasBufferedSync()) {
-      return
-    }
-    const head = this.deferredSegments[0]
-    const rest = this.deferredSegments.slice(1)
-    const restComposed = rest.length > 0
-      ? rest.reduce((acc, seg) => acc.compose(seg))
-      : null
-    const changes: SerChange[] = []
-    head.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
-      changes.push({
-        offset: fromA,
-        length: toA - fromA,
-        text: inserted.sliceString(0, inserted.length),
+    // 队首段净抵消时余段继续出站：连续多段恒净抵消以循环处理（原递归
+    // 深度 = 段数，行为等价；每轮迭代重新评估出站守卫）
+    while (this.deferredSegments.length > 0 && !this.suspended && !this.blankComposition &&
+        this.inFlight.size === 0 && !this.hasBufferedSync()) {
+      const head = this.deferredSegments[0]
+      const rest = this.deferredSegments.slice(1)
+      const restComposed = rest.length > 0
+        ? rest.reduce((acc, seg) => acc.compose(seg))
+        : null
+      const changes: SerChange[] = []
+      head.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+        changes.push({
+          offset: fromA,
+          length: toA - fromA,
+          text: inserted.sliceString(0, inserted.length),
+        })
       })
-    })
-    this.deferredSegments = rest
-    this.deferredLocal = restComposed
-    if (!restComposed) {
-      this.deferredFromComposition = false
-    }
-    if (changes.length === 0) {
-      // 队首段净变更完全抵消（段内输入自相抵消）：跳过出站，余段继续
-      this.unconfirmed = restComposed
-      this.sendDeferredLocal()
+      this.deferredSegments = rest
+      this.deferredLocal = restComposed
+      if (!restComposed) {
+        this.deferredFromComposition = false
+      }
+      // 进入出站流程即清已确认链（先于净抵消判定，对齐分段改造前语义）：
+      // 净抵消段跳过出站时同样清空——否则段耗尽路径遗留 ackedChain，
+      // hasUnlandedLocalEdits 恒真且无收敛点释放，Ctrl+Z 被无限期暂缓
+      this.ackedChain = null
+      this.sentTxns = []
+      if (changes.length === 0) {
+        // 队首段净变更完全抵消（段内输入自相抵消）：跳过出站，余段继续
+        this.unconfirmed = restComposed
+        continue
+      }
+      // 未确认集重挂到「全部已确认 + 暂缓集」复合：发送段计入在途、余段
+      // 留守，整体仍等于原复合（队首段 ∘ 余段）；末段出站时退化为旧语义
+      // （unconfirmed = 该段本身）
+      this.unconfirmed = restComposed ? head.compose(restComposed) : head
+      this.seq += 1
+      this.persistState()
+      this.inFlight.add(this.seq)
+      this.sentTxns.push({ seq: this.seq, changes })
+      this.bridge.postMessage({
+        kind: 'edit.request',
+        sessionId: this.sessionId,
+        docUri: this.docUri,
+        seq: this.seq,
+        baseVersion: this.baseVersion,
+        changes,
+      })
       return
     }
-    this.ackedChain = null
-    this.sentTxns = []
-    // 未确认集重挂到「全部已确认 + 暂缓集」复合：发送段计入在途、余段
-    // 留守，整体仍等于原复合（队首段 ∘ 余段）；末段出站时退化为旧语义
-    // （unconfirmed = 该段本身）
-    this.unconfirmed = restComposed ? head.compose(restComposed) : head
-    this.seq += 1
-    this.persistState()
-    this.inFlight.add(this.seq)
-    this.sentTxns.push({ seq: this.seq, changes })
-    this.bridge.postMessage({
-      kind: 'edit.request',
-      sessionId: this.sessionId,
-      docUri: this.docUri,
-      seq: this.seq,
-      baseVersion: this.baseVersion,
-      changes,
-    })
   }
 
   /** #153 撤销分段：组合开始时刻回看与上一笔本地输入的停顿——停顿达阈值
