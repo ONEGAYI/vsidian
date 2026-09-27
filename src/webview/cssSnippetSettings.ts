@@ -117,6 +117,14 @@ export class CssSnippetSettingsSection implements SettingsPageSection {
     dirRow.append(dirLabel, actions)
     parent.append(dirRow)
 
+    // #130 远程资源缓存说明：HTTPS 导入/联网字体经网络加载，手动刷新只
+    // 击穿本地入口（?v=），远程缓存遵循 HTTP 语义、不承诺远端主动更新
+    // （验收：缓存与刷新行为在设置页有说明）
+    const cacheNote = document.createElement('p')
+    cacheNote.className = 'vsidian-css-snippets-remote-note'
+    cacheNote.textContent = t('cssSnippets.remoteCacheNote')
+    parent.append(cacheNote)
+
     // #131 暂停状态条：常驻提示 + 恢复入口（宿主状态驱动回显；恢复按原
     // 配置立即生效——逐项开关全程保留）
     if (state?.paused) {

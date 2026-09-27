@@ -7467,4 +7467,150 @@ export const cases: Array<[string, () => Promise<void>]> = [
       await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
     }
   }],
+
+  // ---- #130 HTTPS 样式导入与联网字体：真宿主 CSP 生效证据 ----
+
+  ['CSS 片段：HTTPS 导入放行与明文拦截的真宿主证据（#130）', async () => {
+    // 受控服务在扩展宿主进程内起（Node 环境）：自签证书 https + 明文 http。
+    // 真宿主 webview 对自签证书做真实校验（测试无法注入信任）——字节是否
+    // 完整送达不可证；可证的是**网络层差分**：CSP 放行的 https 请求会发起
+    // 出网（socket 连接到达服务端，证书校验在其后才失败），被 CSP 拦截的
+    // 明文请求不出网（请求层零命中）。完整装载链路由浏览器套件（受控证书
+    // 校验跳过）与在线字体服务烟测覆盖。
+    const nodeHttps = require('https') as typeof import('https')
+    const nodeHttp = require('http') as typeof import('http')
+    const nodeFs = require('fs') as typeof import('fs')
+    const nodePath = require('path') as typeof import('path')
+    const certDir = nodePath.join(__dirname, '..', '..', '..', '..', 'test', 'browser', 'fixtures', 'https')
+    const tlsCert = nodeFs.readFileSync(nodePath.join(certDir, 'localhost-cert.pem'))
+    const tlsKey = nodeFs.readFileSync(nodePath.join(certDir, 'localhost-key.pem'))
+
+    // https 侧观测：socket 连接（出网意图，证书校验前的下限证据）+ 请求
+    const tlsSeen = { connections: 0, requests: new Set<string>() }
+    const httpsFiles = new Map<string, string>([
+      ['/remote.css', '#app .vsidian-view-reading { --vsidian-probe-var-reading: from-remote-https; }\n'],
+    ])
+    const httpsServer = nodeHttps.createServer({ key: tlsKey, cert: tlsCert }, (req, res) => {
+      tlsSeen.requests.add((req.url ?? '').split('?')[0]!)
+      res.writeHead(200, { 'Content-Type': 'text/css; charset=utf-8' })
+      res.end(httpsFiles.get((req.url ?? '').split('?')[0]!) ?? '/* unknown */')
+    })
+    httpsServer.on('connection', () => {
+      tlsSeen.connections += 1
+    })
+    // 明文 http 侧观测：请求零命中 = 未出网（CSP/混合内容共同保证明文不放行）
+    const plainSeen = { requests: new Set<string>() }
+    const plainServer = nodeHttp.createServer((req, res) => {
+      plainSeen.requests.add((req.url ?? '').split('?')[0]!)
+      res.writeHead(200, { 'Content-Type': 'text/css; charset=utf-8' })
+      res.end('#app .vsidian-view-reading { --vsidian-probe-var-reading: from-plain-http; }\n')
+    })
+    await new Promise<void>((resolve) => httpsServer.listen(0, '127.0.0.1', resolve))
+    await new Promise<void>((resolve) => plainServer.listen(0, '127.0.0.1', resolve))
+    const httpsBase = `https://127.0.0.1:${(httpsServer.address() as { port: number }).port}`
+    const plainBase = `http://127.0.0.1:${(plainServer.address() as { port: number }).port}`
+
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets'))
+    await writeSnippetCss('css-snippets/https.css', [
+      `@import url("${httpsBase}/remote.css");`,
+      '#app .vsidian-view-reading { --vsidian-probe-var-reading: https-own; }',
+    ].join('\n'))
+    await writeSnippetCss('css-snippets/plain.css', [
+      `@import url("${plainBase}/plain-sheet.css");`,
+      '#app .vsidian-view-reading { --vsidian-probe-var-reading: plain-own; }',
+    ].join('\n'))
+    try {
+      await setSnippetDirectory(wsUri('css-snippets').fsPath)
+      await openWithEditor('mode.md')
+      await waitSessionReady('mode.md')
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading')
+      // 基线：远程引用不影响条目装载与拒绝面（远程不进依赖图、不拒绝）
+      await poll('两入口入列', async () => {
+        const st = await snippetState()
+        return st.entries.length === 2 && Object.keys(st.rejections ?? {}).length === 0 ? st : undefined
+      }, 15000)
+      await setSnippetEnabled('https.css', true)
+      await setSnippetEnabled('plain.css', true)
+      // 入口各自规则生效（https 导入即使证书校验失败，入口本地链照常装载、
+      // 自身规则生效——嵌套失败不整份回滚的 #129 语义在真宿主复验）
+      const applied = await waitViewState('mode.md', (v) =>
+        v.viewMode === 'reading' && v.cssProbe?.readingVarProbe === 'plain-own', 0, 20000)
+      assert(applied.cssProbe!.readingVarProbe === 'plain-own', '含明文导入入口的自身规则生效')
+      // 明文 http 不出网：请求层零命中（CSP 层拦截在请求发出前）
+      await new Promise((r) => setTimeout(r, 800))
+      assert(plainSeen.requests.size === 0,
+        `明文 http 导入不得出网（实际命中 ${JSON.stringify([...plainSeen.requests])}）`)
+      // https 放行差分证据：socket 连接到达服务端（证书校验后的成败不由此
+      // 断言——见用例头声明；请求若实际到达则远程规则应已生效，顺带断言）
+      await poll('https 出网连接到达', async () => tlsSeen.connections > 0 ? tlsSeen.connections : undefined, 15000)
+      await new Promise((r) => setTimeout(r, 800))
+      if (tlsSeen.requests.size > 0) {
+        // 宿主未拒绝自签证书（环境相关）：完整装载也应成立
+        await waitViewState('mode.md', (v) =>
+          v.viewMode === 'reading' && v.cssProbe?.readingVarProbe === 'from-remote-https', 0, 15000)
+      } else {
+        // 常见形态：证书校验失败（连接已到达、请求未完成）——能确认的状态
+        // 如实呈现：出网意图已证，字节送达未证（浏览器套件与烟测覆盖）
+        console.log('[#130] 自签证书被宿主拒绝（预期形态）：出网连接已到达，请求未完成')
+      }
+      // 绘制层：paint 探针只测 live 视图（cm-line），切回 live 断言——CSP
+      // 变更不破 CM6 渲染（#37 教训：样式注入失效时 DOM 断言照样绿）
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive')
+      const paintState = await waitViewState('mode.md', (v) =>
+        v.viewMode === 'live' && v.paint?.textVisible === true, 0, 20000)
+      assert(paintState.paint!.textVisible === true, 'HTTPS 片段装载后 live 正文绘制层可见')
+    } finally {
+      await setSnippetDirectory(null)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
+      httpsServer.close()
+      plainServer.close()
+    }
+  }],
+
+  ['CSS 片段：远程字体失败回退与多轮热换稳定（#130）', async () => {
+    // 不可达端口的 https 字体（connection refused 立即失败）：入口其余规则
+    // 生效、备用字体可见；随后多轮入口热换（真宿主 webview 的稳定性证据——
+    // 浏览器套件实测的渲染器硬杀形态在本宿主不得复现）
+    const deadPort = 1 // 127.0.0.1:1 通常无监听：连接拒绝
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets'))
+    const entryCss = (tag: string) => [
+      `@font-face { font-family: "VsidianDeadHttpsFont"; src: url("https://127.0.0.1:${deadPort}/dead.woff2") format("woff2"); }`,
+      '#app .vsidian-view-reading { font-family: "VsidianDeadHttpsFont", sans-serif; --vsidian-probe-var-reading: ' + tag + '; }',
+    ].join('\n')
+    await writeSnippetCss('css-snippets/hot-https.css', entryCss('round-0'))
+    try {
+      await setSnippetDirectory(wsUri('css-snippets').fsPath)
+      await setSnippetEnabled('hot-https.css', true)
+      await openWithEditor('mode.md')
+      await waitSessionReady('mode.md')
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading')
+      // 字体不可达：入口规则生效、正文以备用字体呈现（可读）
+      const round0 = await waitViewState('mode.md', (v) =>
+        v.viewMode === 'reading' && v.cssProbe?.readingVarProbe === 'round-0' &&
+        (v.readingMountedBlocks ?? 0) > 0, 0, 20000)
+      assert(round0.cssProbe!.documentFonts !== undefined, '字体集观测可用')
+      assert((round0.readingMountedBlocks ?? 0) > 0, '远程字体失败时阅读正文块仍挂载（备用字体回退，可读）')
+      // 多轮热换：入口内容变更 → watcher 归因 → 入口 ?v= 推进 → 新链热换
+      //（每轮嵌套 https 字体重试出网——真实宿主的样式表热换稳定性钉住点）
+      for (let round = 1; round <= 5; round++) {
+        await writeSnippetCss('css-snippets/hot-https.css', entryCss(`round-${round}`))
+        const st = await waitViewState('mode.md', (v) =>
+          v.viewMode === 'reading' && v.cssProbe?.readingVarProbe === `round-${round}` &&
+          (v.readingMountedBlocks ?? 0) > 0, 0, 20000)
+        assert((st.readingMountedBlocks ?? 0) > 0, `第 ${round} 轮热换后阅读正文块仍挂载（渲染器存活）`)
+      }
+      // 面板仍就绪 + live 绘制层可见（多轮热换不崩宿主 webview；paint 探针
+      // 只测 live 视图，故切回 live 断言绘制层）
+      const session = (await vscode.commands.executeCommand(CMD.sessionState, wsUri('mode.md').toString())) as
+        { found: boolean; panels: Array<{ ready: boolean }> }
+      assert(session.found && session.panels.some((panel) => panel.ready), '多轮热换后面板仍就绪')
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive')
+      const livePaint = await waitViewState('mode.md', (v) =>
+        v.viewMode === 'live' && v.paint?.textVisible === true, 0, 20000)
+      assert(livePaint.paint!.textVisible === true, '多轮热换后 live 正文绘制层可见')
+    } finally {
+      await setSnippetDirectory(null)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
+    }
+  }],
 ]

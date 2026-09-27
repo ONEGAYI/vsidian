@@ -14,6 +14,7 @@ VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 - **视觉层断言（评审必查）**：webview/样式/渲染类变更，评审必须核对断言对象是"用户看到的东西"（可见性、对齐、颜色）而非 DOM 存在性或几何坐标——样式注入失效时后者照样通过（PR #37 P0 实证：CSP 拦截 CM6 注入样式后 74 集成用例仍全绿，正文实际不可见）。涉及呈现的新特性至少一条集成断言落在绘制层（现有 `view.state.paint` 探针），CSS 关键规则由契约测试钉住。
 - **大纲样式设计哲学（#65 落档）**：大纲条目的呈现遵循三条原则，后续大纲呈现类变更不得违背。其一，**结构装饰与正文主题同源**——层级颜色等主题性装饰不复制读值，而是与正文标题引用同一 CSS 变量族（`--vsidian-heading-color-1..6`，定义于 `#app`，live 标题行级、阅读标题块级、大纲条目级三侧同引），主题分级着色一处定义多处生效。其二，**强调语义只认显式标记**——条目一律常规字重（400），不继承标题级别的结构性加粗；仅显式 `**粗体**` 段加重，斜体/行内代码/删除线同理只由标记触发。其三，**透传集合 = 正文已支持的行内标记子集**——当前白名单为粗体/斜体/高亮/行内代码/删除线（`OutlineSpanKind`，提取与校验同源；#105 高亮已按同一机制接入），公式/行内颜色待正文支持后按同一白名单机制接入（提取处 `SPAN_KIND_BY_NODE` 加映射即可），大纲侧零额外设计；双链/链接显示别名/链接文字的纯文本，不可点。
 - **CSS 片段依赖导入约定（#129 落档）**：入口片段的 @import/url() 静态分析、越界与符号链接逃逸判定、变更归因（被导入文件变更只重载依赖它的入口，无关变更静默）全部收敛在 `src/shared/cssSnippetImports.ts` 纯逻辑 + `cssSnippetService.ts` 的分析编排，不另建第二套解析。两条硬边界：其一，形态学与 CSSOM 有效性对齐——只认**首个生效规则前**的顶层 @import（@charset/@layer 声明不关闭导入窗口；块内与规则后的导入浏览器忽略，宿主也不计入依赖，避免过度归因与过度拒绝），media/supports/layer 条件解析但不求值；其二，`<link>` 的 error 事件按 sheet 三态分流（可读有规则=降级晋升/跨源不可读=保留链回报失败/无表或空表=移除保旧）——嵌套导入 404 会对 link 触发 error 但其余规则正在生效，入口级失败（连接拒绝/CSP 拦截）的 sheet 是零规则对象，「sheet 非空」不可作依据，Chromium 实测留证见 `test/browser/cssSnippetImports.mjs` 注释。入口级缓存击穿版本（`?v=`）与列表版本是两轴：其他入口启停不得扰动未涉及入口的 URI。#130 HTTPS 导入在此基础上扩展 `classifyCssRef` 的 http 类与 CSP `style-src`/`font-src`，勿在宿主预判联网资源成败。
+- **HTTPS 样式导入与联网字体约定（#130 落档）**：远程引用（`classifyCssRef` 的 http 类，含协议相对 `//`）的宿主语义是「**完全不进本地面**」——不进依赖闭包（`importPaths`）、不进 watcher 归因（远程不可 watch）、不触发越界/realpath 拒绝、不预判联网成败（断网/CORS/HTTP 错误/无效 CSS 一律交浏览器与装载器三态分流：入口降级、其他片段不受影响、字体回退备用）；远程内容的重发**只**由入口级版本驱动（手动刷新或入口/本地依赖变更推进 `?v=`）。CSP 由 `buildEditorCsp`（`src/host/editorCsp.ts` 纯模块，词法契约 `test/unit/editorCsp.test.ts`）装配：`style-src`/`font-src` 追加 `https:`，**脚本面维持 nonce 门控、明文 `http:` 源任何指令不放行、无 connect-src（不以宿主代理绕过 CORS——字体是 CORS 强制资源，须由字体服务回 ACAO）**；设置页 CSP 保持收紧。字体晚到（@font-face 在链 load 后异步完成）由 `fontArrival`（webview 纯模块，`document.fonts.ready` 有界多轮）在字体集稳定后补一轮重测：live 侧 CM6 requestMeasure、阅读侧显式 updateNow 走 measureAndStabilize 锚定。自动化约束（实测留证）：浏览器套件页面在同一浏览器进程内做「CM6 页面 + https 样式表装载/热换」累积会使渲染进程被硬杀（Edge 同形态、与生产代码无因果）——`cssHttpsImports` 套件按场景独立浏览器进程规避，新增此类用例沿用该模式；真宿主 webview 内多轮热换稳定性由集成用例钉住。
 - **用户可见文字一律 i18n**：所有面向用户的文字（webview 界面、设置页、宿主通知/确认框、package.json command title 与 displayName/description）必须经 `src/shared/locales/` 语言包与 `t()` 字典映射添加，禁止新增硬编码中/英文字面量；两语言包键集由编译期 parity 把关，回潮由 CI 防回潮扫描（源码 CJK 字面量契约测试）拦截。manifest 侧 `package.nls.*.json` 由构建脚本从字典生成，不在 JSON 里手写。
 
 ## 公开样式契约：Agent 修改约束
@@ -170,6 +171,7 @@ vsidian/
 │   │   ├── diagramExportHost.ts     # 宿主图表导出执行壳
 │   │   ├── diagramExportValidate.ts # 图表导出载荷校验
 │   │   ├── documentSession.ts       # 文档会话与写回同步
+│   │   ├── editorCsp.ts             # 编辑器 CSP 装配纯模块（#130）
 │   │   ├── hostLocale.ts            # 生效语言宿主装配解析帮手
 │   │   ├── keybindingService.ts     # 快捷键全局存储服务
 │   │   ├── linkTarget.ts            # 宿主侧链接目标分类纯逻辑（#10）
@@ -210,6 +212,7 @@ vsidian/
 │       ├── diagramPopup.ts           # 图表弹窗全屏浮层
 │       ├── diagramPopupGeometry.ts   # 弹窗几何纯函数
 │       ├── findSession.ts            # 查找匹配纯函数（#14）
+│       ├── fontArrival.ts            # 字体晚到监听（#130）
 │       ├── formatOperations.ts       # 格式文本变换规划
 │       ├── graphicBlockChrome.ts     # 图形化块右上角按钮组
 │       ├── graphicRenderers.ts       # 图形化渲染器注册表

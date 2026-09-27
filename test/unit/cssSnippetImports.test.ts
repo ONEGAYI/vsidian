@@ -315,6 +315,67 @@ describe('analyzeSnippetEntry：依赖闭包与越界拒绝', () => {
     }
   })
 
+  // ---- #130 HTTPS 引用的宿主语义钉住：不进依赖图、不做本地判定 ----
+
+  it('#130 远程引用不进依赖闭包：https @import 的目标不被读取、不入 importPaths', async () => {
+    let remoteReads = 0
+    const ports: SnippetAnalysisPorts = {
+      readText: async (p) => {
+        if (p === 'D:/snips/main.css') {
+          return [
+            '@import "https://fonts.example/sheet.css";',
+            '@import "local-dep.css";',
+          ].join('\n')
+        }
+        if (p === 'D:/snips/local-dep.css') {
+          remoteReads += 1
+          return '.local{color:red}'
+        }
+        return null
+      },
+      realpath: async (p) => (p === 'D:/snips' ? 'D:/snips' : p),
+    }
+    const result = await analyzeSnippetEntry(DIR, 'main.css', ports, DIR)
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      // 依赖闭包只含本地导入；远程地址不产生任何路径形态（无法 watch、
+      // 不参与变更归因——重发请求由入口级版本 ?v= 驱动，见服务层契约）
+      expect(result.importPaths).toEqual(['D:/snips/local-dep.css'])
+      expect(remoteReads).toBe(1) // 本地依赖照常被读取展开；远程目标从未读取
+    }
+  })
+
+  it('#130 本地依赖文件内的远程引用同样跳过：闭包不因嵌套层引入远程面', async () => {
+    const ports = makePorts({
+      'D:/snips/main.css': '@import "sub/dep.css";',
+      'D:/snips/sub/dep.css': [
+        '@import "https://cdn.example/nested.css";',
+        '@font-face { font-family: X; src: url(//fonts.example/f.woff2); }',
+      ].join('\n'),
+    })
+    const result = await analyzeSnippetEntry(DIR, 'main.css', ports, DIR)
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.importPaths).toEqual(['D:/snips/sub/dep.css'])
+    }
+  })
+
+  it('#130 明文 http:// 引用分类同为 http：宿主不预判（加载成败与协议边界由 CSP 钉住）', async () => {
+    expect(classifyCssRef('http://cdn.example/a.css')).toBe('http')
+    expect(classifyCssRef('HTTP://CDN.EXAMPLE/a.css')).toBe('http')
+    const ports = makePorts({
+      'D:/snips/main.css': [
+        '@import "http://cdn.example/plain.css";',
+        '.a{background:url(http://x/f.woff2)}',
+      ].join('\n'),
+    })
+    const result = await analyzeSnippetEntry(DIR, 'main.css', ports, DIR)
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.importPaths).toEqual([])
+    }
+  })
+
   it('符号链接逃逸：realpath 落在目录外拒绝；指向目录内不拒绝', async () => {
     const escape = makePorts(
       { 'D:/snips/main.css': '@import "sub/link.css";\n.a{color:red}' },
