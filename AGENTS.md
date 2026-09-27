@@ -169,6 +169,7 @@ vsidian/
 │   │   ├── diagramExportHost.ts     # 宿主图表导出执行壳
 │   │   ├── diagramExportValidate.ts # 图表导出载荷校验
 │   │   ├── documentSession.ts       # 文档会话与写回同步
+│   │   ├── editorCsp.ts             # 编辑器 CSP 装配纯模块（#130）
 │   │   ├── hostLocale.ts            # 生效语言宿主装配解析帮手
 │   │   ├── keybindingService.ts     # 快捷键全局存储服务
 │   │   ├── linkTarget.ts            # 宿主侧链接目标分类纯逻辑（#10）
@@ -207,6 +208,7 @@ vsidian/
 │       ├── diagramPopup.ts         # 图表弹窗全屏浮层
 │       ├── diagramPopupGeometry.ts # 弹窗几何纯函数
 │       ├── findSession.ts          # 查找匹配纯函数（#14）
+│       ├── fontArrival.ts          # 字体晚到监听（#130）
 │       ├── formatOperations.ts     # 格式文本变换规划
 │       ├── graphicBlockChrome.ts   # 图形化块右上角按钮组
 │       ├── graphicRenderers.ts     # 图形化渲染器注册表
