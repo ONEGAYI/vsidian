@@ -185,11 +185,11 @@ export interface LineIndentUnit {
 const PLAIN_INDENT_WIDTH = 2
 
 /**
- * 行的缩进单位（#120）。列表行（含引用内列表）一级缩进智能对齐父项
- * 内容起点——宽度取自身标记总宽（同级标记同宽即父项标记列的右移量；
- * 有序编号跨宽度段如 `9.`→`10.` 以行自身为准，不做跨行补齐）；普通
- * 行与纯引用行固定 2 空格。prefix 传 null 表示不按前缀解析（普通行或
- * 代码块内）。
+ * 行的缩进单位（#120）。列表行一级缩进的宽度基准：同族场景下自身标记
+ * 总宽与上方项内容列相等（Tab 主路径经 tabIndentWidthOf 带语法树上下文
+ * 对齐上方最近项内容列，本函数的列表分支保留同族参考值，供无树上下文
+ * 的消费方与文档对照）；普通行与纯引用行固定 2 空格。prefix 传 null
+ * 表示不按前缀解析（普通行或代码块内）。
  */
 export function indentUnitOf(prefix: LinePrefix | null): LineIndentUnit {
   if (prefix && prefix.mark) {
@@ -208,4 +208,21 @@ export function dedentCutOf(line: string, unit: LineIndentUnit): { from: number;
   const end = Math.min(line.length, unit.offset + unit.width)
   while (i < end && /\s/u.test(line[i]!)) i++
   return i > unit.offset ? { from: unit.offset, to: i } : null
+}
+
+/**
+ * Tab 的目标缩进宽度（#121 验收修正：对齐上方最近项的内容列，而非取
+ * 自身标记宽——跨族标记宽不同时后者会越界，令该行脱离列表结构成续行
+ * 或代码块）。curIndent 为当前行的列表缩进宽（相对引用前缀右端）；
+ * prevContentCol / prevMarkWidth 为上方最近列表项的内容列与标记总宽
+ * （调用方从语法树取：前驱兄弟项，无前驱则父项），无上方项传 null。
+ * - 未达内容列：补齐到内容列（Tab 后成为其子项）
+ * - 已达或超过：加深一级（当前缩进 + 其标记总宽）
+ * - 无上方项（首项）：普通行语义，当前缩进 + 固定宽度
+ */
+export function tabIndentWidthOf(curIndent: number, prevContentCol: number | null, prevMarkWidth: number): number {
+  if (prevContentCol === null) {
+    return curIndent + PLAIN_INDENT_WIDTH
+  }
+  return curIndent < prevContentCol ? prevContentCol : curIndent + prevMarkWidth
 }

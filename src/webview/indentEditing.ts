@@ -3,9 +3,12 @@
 //
 // 行为（缩进单位的单一事实源在 shared/listPrefix.ts）：
 // - Tab：每受影响行在缩进落点插入一级宽度；Shift+Tab 从落点删除至多
-//   一级宽度的连续空白（不足全删）。列表行一级宽度取标记总宽（对齐
-//   父项内容起点），普通行（含纯引用行、代码围栏、缩进代码块与块级
-//   公式内）固定 2 空格
+//   一级宽度的连续空白（不足全删）。列表行一级宽度对齐上方最近项的
+//   内容列（树上前驱兄弟/父项，跨列表块按位置回退；未达补齐、已达
+//   加深其标记宽——跨族不取自身标记宽，防越界脱离列表结构成续行或
+//   代码块，#121 验收修正）；Shift+Tab 删至树父项标记列（顶级删全部
+//   缩进）。普通行（含纯引用行、代码围栏、缩进代码块与块级公式内）
+//   固定 2 空格
 // - 光标/选区随缩进平移（锚点与头均向右关联映射，对齐 CM6 命令）
 // - 不自动携带子孙项；整体移动由用户用选区覆盖表达
 // - 不接管（return false 交默认）：表格行——Tab/Shift+Tab 归
@@ -21,9 +24,19 @@
 import { EditorSelection } from '@codemirror/state'
 import { keymap } from '@codemirror/view'
 import type { Command, EditorView } from '@codemirror/view'
-import { dedentCutOf, indentUnitOf, parseLinePrefix } from '../shared/listPrefix'
+import type { EditorState } from '@codemirror/state'
+import type { SyntaxNode } from '@lezer/common'
+import {
+  dedentCutOf,
+  indentUnitOf,
+  parseLinePrefix,
+  prefixLength,
+  tabIndentWidthOf,
+  type LinePrefix,
+} from '../shared/listPrefix'
 import { liveDecorationsField } from './liveDecorations'
 import { mathBlocksField } from './liveMath'
+import { parentIndentWidth } from './listEditing'
 import { chainAt } from './markdownDoc'
 
 /** 表格节点：行落在其中即不接管（单元格导航优先；边界放行不缩进表格行） */
@@ -32,6 +45,60 @@ const TABLE_NODES = new Set([
 ])
 /** 代码块节点：围栏/缩进代码块内同普通行语义（不做列表智能对齐） */
 const CODE_NODES = new Set(['FencedCode', 'CodeText', 'CodeBlock'])
+
+/**
+ * 上方最近列表项的内容列与标记总宽（均相对引用前缀右端）。取树上前驱
+ * 兄弟项；无前驱（首子项）取父项（祖先链上最近的 ListItem）；两级皆无
+ * 时按位置回退——项前文档位置上最近的 ListItem（跨列表块的视觉上方
+ * 最近项，如同为无序的松散列表本就有前驱，走到这里的是异族邻块）。
+ * 仍无（文档首项）返回 null
+ */
+function prevItemColsOf(
+  state: EditorState,
+  chain: readonly SyntaxNode[],
+): { contentCol: number; markWidth: number } | null {
+  const items = chain.filter((node) => node.name === 'ListItem')
+  const self = items[items.length - 1]
+  if (!self) return null
+  let prev = self.prevSibling
+  while (prev && prev.name !== 'ListItem') prev = prev.prevSibling
+  let target: SyntaxNode | null = prev ?? items[items.length - 2] ?? null
+  if (!target) {
+    let node: SyntaxNode | null = chain[0]!.resolveInner(Math.max(0, self.from - 1), -1)
+    while (node && node.name !== 'ListItem') node = node.parent
+    target = node && node !== self ? node : null
+  }
+  if (!target) return null
+  const mark = target.getChild('ListMark')
+  if (!mark) return null
+  const targetPrefix = parseLinePrefix(state.doc.lineAt(mark.from).text)
+  if (!targetPrefix?.mark) return null
+  return {
+    contentCol: prefixLength(targetPrefix) - targetPrefix.quote.length,
+    markWidth: targetPrefix.mark.length,
+  }
+}
+
+/**
+ * 列表行按语法树上下文计算缩进单位：Tab 对齐上方最近项内容列
+ * （tabIndentWidthOf；跨族不取自身标记宽，防越界脱离列表结构）；
+ * Shift+Tab 升一级删至父项标记列（顶级删全部缩进）
+ */
+function listUnitOf(
+  state: EditorState,
+  chain: readonly SyntaxNode[],
+  prefix: LinePrefix,
+  dir: 1 | -1,
+): { offset: number; width: number } {
+  const cur = prefix.indent.length
+  if (dir > 0) {
+    const prev = prevItemColsOf(state, chain)
+    const target = tabIndentWidthOf(cur, prev?.contentCol ?? null, prev?.markWidth ?? 0)
+    return { offset: prefix.quote.length, width: Math.max(0, target - cur) }
+  }
+  const parentCol = parentIndentWidth(state, chain as SyntaxNode[], prefix)
+  return { offset: prefix.quote.length, width: Math.max(0, cur - (parentCol ?? 0)) }
+}
 
 /** Tab/Shift+Tab 共用主体。dir 为 +1 缩进 / -1 反缩进 */
 function indentByDirection(view: EditorView, dir: 1 | -1): boolean {
@@ -63,7 +130,10 @@ function indentByDirection(view: EditorView, dir: 1 | -1): boolean {
     // 块级公式内的列表形态行同代码块口径：普通行语义，不做智能对齐
     const plain = (mathBlocks?.some((b) => line.from < b.to && line.to > b.from) ?? false)
       || chain.some((node) => CODE_NODES.has(node.name))
-    const unit = indentUnitOf(plain ? null : parseLinePrefix(line.text))
+    const prefix = plain ? null : parseLinePrefix(line.text)
+    const unit = prefix?.mark
+      ? listUnitOf(state, chain, prefix, dir)
+      : indentUnitOf(prefix)
     if (dir > 0) {
       changes.push({ from: line.from + unit.offset, insert: ' '.repeat(unit.width) })
     } else {

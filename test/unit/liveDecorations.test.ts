@@ -301,6 +301,30 @@ describe('mark 作用域显形', () => {
     expect(hiddenRanges(build(doc, { anchor: first + 2 }))).not.toContainEqual([first, first + 2])
   })
 
+  it('嵌套无序行隐藏区含行首缩进空白（伪圆点紧邻正文，#121 验收修复）', () => {
+    const doc = '- a\n  - b\n'
+    const at = doc.indexOf('  - b')
+    const body = build(doc, { anchor: doc.indexOf('b') + 1 })
+    // '  - ' 整段（行首缩进 + 标记 + 一空格）被吞并：圆点与正文间无占位空格
+    expect(hiddenRanges(body)).toContainEqual([at, at + 4])
+    expect(hiddenRanges(body)).toContainEqual([0, 2]) // 顶级行不变
+  })
+
+  it('光标进入行首缩进空白即显形整段前缀（隐藏区扩到行首后触及判定随之）', () => {
+    const doc = '- a\n  - b\n'
+    const at = doc.indexOf('  - b')
+    const inIndent = build(doc, { anchor: at + 1 })
+    expect(hiddenRanges(inIndent)).not.toContainEqual([at, at + 4])
+    expect(byClass(inIndent).get('vsidian-list-marker-visible')).toHaveLength(1)
+  })
+
+  it('圆点类限定标记所在行：lazy 续行跟随项缩进但不显圆点（#121 验收修复）', () => {
+    const doc = '- a\n      deep\n'
+    const c = byClass(build(doc, { anchor: doc.indexOf('deep') + 2 }))
+    expect((c.get(LIVE_CLASS_NAMES.listBullet) ?? []).length).toBe(1) // 仅 mark 行
+    expect((c.get(LIVE_CLASS_NAMES.listLine) ?? []).length).toBe(2) // 续行仍有行级深度类
+  })
+
   it('标题行任意位置显形自身的 #；引用仍只在标记附近显形', () => {
     const doc = '# 很长的标题\n## 另一标题\n> 很长的引用\n'
     const heading = doc.indexOf('#')

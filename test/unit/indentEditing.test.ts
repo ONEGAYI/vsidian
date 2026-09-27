@@ -109,6 +109,24 @@ describe('Tab 无选区光标行缩进', () => {
     expect(typed(makeEditView(doc, 7))).toEqual({ text: '> - p\n>   - c', from: 7, to: 7 })
   })
 
+  it('跨族缩进对齐上方项内容列：无序父 + 任务子得 2 格（不取自身标记宽 6，防结构破坏）', () => {
+    const doc = '- a\n- [ ] t'
+    expect(typed(makeEditView(doc, doc.indexOf('t') + 1)))
+      .toEqual({ text: '- a\n  - [ ] t', from: doc.indexOf('t') + 3, to: doc.indexOf('t') + 3 })
+  })
+
+  it('跨族缩进：宽编号有序父 + 无序子得 4 格', () => {
+    const doc = '10. a\n- b'
+    expect(typed(makeEditView(doc, doc.indexOf('b') + 1)))
+      .toEqual({ text: '10. a\n    - b', from: doc.indexOf('b') + 5, to: doc.indexOf('b') + 5 })
+  })
+
+  it('任务首项（无上文项）：退普通行 2 空格', () => {
+    const doc = '- [ ] t'
+    expect(typed(makeEditView(doc, doc.indexOf('t') + 1)))
+      .toEqual({ text: '  - [ ] t', from: doc.indexOf('t') + 3, to: doc.indexOf('t') + 3 })
+  })
+
   it('纯引用行：普通行语义（行首 2 空格）', () => {
     expect(typed(makeEditView('> q', 3))).toEqual({ text: '  > q', from: 5, to: 5 })
   })
@@ -202,6 +220,18 @@ describe('Shift+Tab 反向缩进', () => {
   it('列表行删至父项内容对齐列', () => {
     const doc = '- p\n  - c'
     expect(typed(makeEditView(doc, 7), true)).toEqual({ text: '- p\n- c', from: 5, to: 5 })
+  })
+
+  it('列表行升一级：4 格子项直接删到父项标记列（顶级 0）', () => {
+    const doc = '- p\n    - c'
+    expect(typed(makeEditView(doc, doc.indexOf('c') + 1), true))
+      .toEqual({ text: '- p\n- c', from: 7, to: 7 })
+  })
+
+  it('任务子项升一级：删全部缩进对齐无序父标记列（不按自身标记宽部分删）', () => {
+    const doc = '- a\n  - [ ] t'
+    expect(typed(makeEditView(doc, doc.indexOf('t') + 1), true))
+      .toEqual({ text: '- a\n- [ ] t', from: doc.indexOf('t') - 1, to: doc.indexOf('t') - 1 })
   })
 
   it('有序宽编号删 4 格', () => {

@@ -106,8 +106,11 @@ function blankItemHasChild(state: EditorState, ctx: ListKeyContext): boolean {
   return false
 }
 
-/** 父项标记列（相对引用前缀之后的缩进宽度）；顶级或跨结构返回 null */
-function parentIndentWidth(state: EditorState, chain: SyntaxNode[], prefix: LinePrefix): number | null {
+/**
+ * 父项标记列（相对引用前缀之后的缩进宽度；调用方从语法树取），顶级或
+ * 跨结构返回 null。退格清层与 Shift+Tab 反向缩进共用的层级查询
+ */
+export function parentIndentWidth(state: EditorState, chain: SyntaxNode[], prefix: LinePrefix): number | null {
   const lists = chain.filter((node) => node.name === 'BulletList' || node.name === 'OrderedList')
   if (!lists.length) {
     return null

@@ -47,6 +47,8 @@ const scenarios = [
   { name: 'tab-nested-bullet', doc: '- p\n  - c', cursor: 8, keys: ['Tab'], text: '- p\n    - c', head: 10 },
   { name: 'tab-ordered-wide', doc: '10. p\n11. c', cursor: 10, keys: ['Tab'], text: '10. p\n    11. c', head: 14 },
   { name: 'tab-task', doc: '- [ ] p\n- [ ] c', cursor: 13, keys: ['Tab'], text: '- [ ] p\n      - [ ] c', head: 19 },
+  { name: 'tab-cross-bullet-task', doc: '- a\n- [ ] t', cursor: 11, keys: ['Tab'], text: '- a\n  - [ ] t', head: 13 },
+  { name: 'tab-cross-ordered-bullet', doc: '10. a\n- b', cursor: 9, keys: ['Tab'], text: '10. a\n    - b', head: 13 },
   { name: 'tab-quote-list', doc: '> - p\n> - c', cursor: 8, keys: ['Tab'], text: '> - p\n>   - c', head: 10 },
   { name: 'tab-quote-plain', doc: '> q', cursor: 3, keys: ['Tab'], text: '  > q', head: 5 },
   { name: 'tab-code-fence', doc: '```js\n1. code\n```', cursor: 7, keys: ['Tab'], text: '```js\n  1. code\n```', head: 9 },

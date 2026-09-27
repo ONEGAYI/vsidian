@@ -9,6 +9,7 @@ import {
   stripLayer,
   blankExitCut,
   indentUnitOf,
+  tabIndentWidthOf,
   dedentCutOf,
 } from '../../src/shared/listPrefix'
 
@@ -229,5 +230,24 @@ describe('dedentCutOf Shift+Tab 删除区间（相对行首，至多一级宽度
     expect(dedentCutOf('  plain', indentUnitOf(null))).toEqual({ from: 0, to: 2 })
     expect(dedentCutOf('\tplain', indentUnitOf(null))).toEqual({ from: 0, to: 1 })
     expect(dedentCutOf(' \t- a', indentUnitOf(parseLinePrefix(' \t- a'))!)).toEqual({ from: 0, to: 2 })
+  })
+})
+
+describe('tabIndentWidthOf Tab 目标缩进（对齐上方最近项内容列，#121 验收修正）', () => {
+  it('未达上方项内容列：补齐到内容列（成为其子项）', () => {
+    expect(tabIndentWidthOf(0, 2, 2)).toBe(2) // 无序父 + 任务子：2 格（不取自身标记宽 6）
+    expect(tabIndentWidthOf(0, 6, 6)).toBe(6) // 任务父 + 任务子：同族 6 格
+    expect(tabIndentWidthOf(0, 4, 4)).toBe(4) // 宽编号有序父：4 格
+    expect(tabIndentWidthOf(2, 6, 6)).toBe(6) // 浅缩进行补齐到上方任务项内容列
+  })
+
+  it('已达上方项内容列：加深一级（当前缩进 + 其标记总宽）', () => {
+    expect(tabIndentWidthOf(2, 2, 2)).toBe(4)
+    expect(tabIndentWidthOf(6, 6, 6)).toBe(12)
+  })
+
+  it('无上方项（首项无前驱无父）：普通行语义，当前缩进 + 2', () => {
+    expect(tabIndentWidthOf(0, null, 2)).toBe(2)
+    expect(tabIndentWidthOf(3, null, 6)).toBe(5)
   })
 })
