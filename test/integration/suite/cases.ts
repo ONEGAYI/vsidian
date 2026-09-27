@@ -3694,7 +3694,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await doc.save()
   }],
 
-  ['表格 Tab 导航：真实 keymap 移动光标、边界不吞输入、零写回（#13）', async () => {
+  ['表格 Tab 导航：真实 keymap 移动光标、边界交默认、正文缩进写回（#13/#120）', async () => {
     await openWithEditor('table13.md')
     await waitSessionReady('table13.md')
     const uri = wsUri('table13.md').toString()
@@ -3718,16 +3718,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key: 'shift-tab' })
     await waitViewState('table13.md', (v) => v.selectionOffset === text.indexOf('3') + 1)
 
-    // 表格外 Tab：不吞输入——无表格导航时不移动光标、不改文本
-    const outside = text.indexOf('前导段落甲') + 2
-    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: outside })
-    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key: 'tab' })
-    await new Promise((r) => setTimeout(r, 600))
-    const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState
-    assert(v.selectionOffset === outside, `表格外 Tab 不得移动光标，实际 ${v.selectionOffset}`)
-    assert(v.text === text, '表格外 Tab 不得改写文本')
-
-    // 末行末格 Tab：边界交默认（无动作）
+    // 末行末格 Tab：边界交默认——tableTab 放行后 #120 通用缩进同样不接
+    // 表格行（保结构），按键不被编辑器消费，光标不动
     const lastCell = text.indexOf('4') + 1
     await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: lastCell })
     await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key: 'tab' })
@@ -3735,11 +3727,29 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const v2 = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState
     assert(v2.selectionOffset === lastCell, `末行末格 Tab 应交默认（光标不动），实际 ${v2.selectionOffset}`)
 
-    // 全程零写回：导航是纯选区操作
+    // 表格内导航与边界交默认均为纯选区/零操作：此阶段零写回
     const session1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
     assert(session1.version === session0.version, `导航不得改变文档版本（${session0.version} → ${session1.version}）`)
     assert(session1.appliedEdits === session0.appliedEdits, `导航不得产生写回，实际 ${session1.appliedEdits}`)
-    assert(doc.getText() === text, '导航后权威文本不变')
+
+    // 表格外正文行 Tab：#120 通用行缩进——整行缩进 2 空格、光标随移、
+    // 恰一次写回（旧契约「表格外不吞输入」已被 #120 取代：正文内 Tab
+    // 由编辑器消费为缩进，不再放行给工作台焦点导航）
+    const outside = text.indexOf('前导段落甲') + 2
+    const outsideLineStart = text.lastIndexOf('\n', outside - 1) + 1
+    const indentedText = text.slice(0, outsideLineStart) + '  ' + text.slice(outsideLineStart)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: outside })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key: 'tab' })
+    await waitViewState('table13.md', (v) => v.selectionOffset === outside + 2)
+    const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState
+    assert(v.text === indentedText, '表格外正文行 Tab 应整行缩进 2 空格')
+    const session2 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(session2.version === session1.version + 1, `缩进应恰一次写回（${session1.version} → ${session2.version}）`)
+    assert(
+      session2.appliedEdits === session1.appliedEdits + 1,
+      `缩进写回次数应为 1，实际增量 ${session2.appliedEdits - session1.appliedEdits}`,
+    )
+    assert(doc.getText() === indentedText, '缩进写回后权威文本同步')
   }],
 
   ['阅读模式表格操作忽略：只读语义零写回，宿主按模式缓存给可见反馈（#13）', async () => {
