@@ -519,11 +519,28 @@ try {
         assert(plans.every((p) => /^minmax\(min\(48px, 50%\), [\d.]+fr\) minmax\(min\(48px, 50%\), [\d.]+fr\)$/.test(p)),
           `行内联列宽计划应为 minmax 保底 + fr 占比形态: ${JSON.stringify(plans)}`)
         assert(new Set(plans).size === 1, '同表各行内联同一列宽计划')
+        // computed 轨道（样式解析层）：内联 var 消费失效时 CSS 回退等分
+        // repeat 形态（两轨道同值）——此处解析轨道应为两段不等宽 px 且
+        // 宽列明显大于窄列，与几何断言同向、钉在 grid-template-columns 解析值
+        const tracksOf = () => page.evaluate(() =>
+          [...document.querySelectorAll('.vsidian-table-grid-row')]
+            .map((row) => getComputedStyle(row).gridTemplateColumns))
+        const tracks = await tracksOf()
+        assert(tracks.length === 3 && tracks.every((tr) => /^[\d.]+px [\d.]+px$/.test(tr)),
+          `computed 轨道应为两段 px 形态: ${JSON.stringify(tracks)}`)
+        assert(new Set(tracks).size === 1, `同表各行 computed 轨道一致: ${JSON.stringify(tracks)}`)
+        for (const tr of tracks) {
+          const [narrow, wide] = tr.split(' ').map(Number.parseFloat)
+          assert(wide > narrow + 40, `computed 轨道宽列须明显宽于窄列: ${tr}`)
+        }
         // 内容变更重算：窄列表头输入 30 字符后该列反超宽列
         await cell(0, 0).click()
         for (let i = 0; i < 30; i++) await page.keyboard.type('w')
         const after = await widths()
         assert(after[0][0] > after[0][1], `窄列内容变长后列宽须反超宽列: ${JSON.stringify(after[0])}`)
+        const tracksAfter = await tracksOf()
+        const [narrowAfter, wideAfter] = tracksAfter[0].split(' ').map(Number.parseFloat)
+        assert(narrowAfter > wideAfter, `重算后 computed 轨道窄列须反超: ${tracksAfter[0]}`)
         const typed = await page.evaluate(() => (window.readEditor().text.match(/w/g) ?? []).length)
         assert.equal(typed, 30, '输入须真实写回源文')
         await captureTable('table-column-width.png')

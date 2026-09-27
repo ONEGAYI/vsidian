@@ -113,23 +113,50 @@ function dispatchFmPlan(el: HTMLElement, plan: FmEditPlan | null): void {
   view.focus()
 }
 
+/** 结构按钮种类（widget 身份维度之一；编辑计划按种类分派） */
+type FmButtonKind = 'remove-entry' | 'remove-item' | 'add-item'
+
+/** 按钮形态：类名 / 字形 / aria 文案键 */
+const FM_BUTTON_SPEC: Record<FmButtonKind, { cls: string; glyph: string; labelKey: 'frontmatter.removeProperty' | 'frontmatter.removeItem' | 'frontmatter.addItem' }> = {
+  'remove-entry': { cls: FM_CARD_CLASS_NAMES.remove, glyph: '×', labelKey: 'frontmatter.removeProperty' },
+  'remove-item': { cls: FM_CARD_CLASS_NAMES.remove, glyph: '×', labelKey: 'frontmatter.removeItem' },
+  'add-item': { cls: FM_CARD_CLASS_NAMES.addItem, glyph: '+', labelKey: 'frontmatter.addItem' },
+}
+
+/** 种类 → 编辑计划（索引按宿主行行首反查——模型随文档重析，构造时索引会过期） */
+function fmButtonPlan(kind: FmButtonKind, model: FmTableModel, entryIndex: number, itemIndex: number): FmEditPlan | null {
+  if (kind === 'remove-entry') {
+    return planRemoveFmEntry(model, entryIndex)
+  }
+  if (kind === 'remove-item') {
+    return planRemoveFmArrayItem(model, entryIndex, itemIndex)
+  }
+  return planAddFmArrayItem(model, entryIndex)
+}
+
 /**
- * 键值对删除按钮（条目行尾「×」，hover 显现）。派发时按宿主行行首
- * 反查条目索引（模型随文档重析，widget 构造时的索引会过期）。
+ * 结构按钮 widget（行尾「×」删除与「+」加项共用一个参数化实现）：
+ * entryFrom 为宿主行行首（构造时的条目锚点），派发时按它反查当前模型
+ * 的条目索引——模型随文档重析，widget 构造时的索引会过期。
  */
-export class FmRemoveEntryButtonWidget extends WidgetType {
-  constructor(readonly entryFrom: number) {
+export class FmActionButtonWidget extends WidgetType {
+  constructor(
+    readonly kind: FmButtonKind,
+    readonly entryFrom: number,
+    readonly itemIndex = -1,
+  ) {
     super()
   }
-  eq(other: FmRemoveEntryButtonWidget): boolean {
-    return other.entryFrom === this.entryFrom
+  eq(other: FmActionButtonWidget): boolean {
+    return other.kind === this.kind && other.entryFrom === this.entryFrom && other.itemIndex === this.itemIndex
   }
   toDOM(): HTMLElement {
+    const spec = FM_BUTTON_SPEC[this.kind]
     const btn = document.createElement('button')
     btn.type = 'button'
-    btn.className = FM_CARD_CLASS_NAMES.remove
-    btn.textContent = '×'
-    const label = t('frontmatter.removeProperty')
+    btn.className = spec.cls
+    btn.textContent = spec.glyph
+    const label = t(spec.labelKey)
     btn.title = label
     btn.setAttribute('aria-label', label)
     armButton(btn, () => {
@@ -137,67 +164,8 @@ export class FmRemoveEntryButtonWidget extends WidgetType {
       const model = view ? modelOfView(view) : null
       if (!view || !model) return
       const index = model.entries.findIndex((e) => e.lineFrom === this.entryFrom)
-      dispatchFmPlan(btn, index >= 0 ? planRemoveFmEntry(model, index) : null)
-    })
-    return btn
-  }
-  ignoreEvent(): boolean {
-    return false
-  }
-}
-
-/** 数组项删除按钮（项行尾「×」） */
-export class FmRemoveItemButtonWidget extends WidgetType {
-  constructor(readonly entryFrom: number, readonly itemIndex: number) {
-    super()
-  }
-  eq(other: FmRemoveItemButtonWidget): boolean {
-    return other.entryFrom === this.entryFrom && other.itemIndex === this.itemIndex
-  }
-  toDOM(): HTMLElement {
-    const btn = document.createElement('button')
-    btn.type = 'button'
-    btn.className = FM_CARD_CLASS_NAMES.remove
-    btn.textContent = '×'
-    const label = t('frontmatter.removeItem')
-    btn.title = label
-    btn.setAttribute('aria-label', label)
-    armButton(btn, () => {
-      const view = EditorView.findFromDOM(btn)
-      const model = view ? modelOfView(view) : null
-      if (!view || !model) return
-      const index = model.entries.findIndex((e) => e.lineFrom === this.entryFrom)
-      dispatchFmPlan(btn, index >= 0 ? planRemoveFmArrayItem(model, index, this.itemIndex) : null)
-    })
-    return btn
-  }
-  ignoreEvent(): boolean {
-    return false
-  }
-}
-
-/** 数组末尾加项按钮（末项行尾「+」；flow 数组不发射） */
-export class FmAddItemButtonWidget extends WidgetType {
-  constructor(readonly entryFrom: number) {
-    super()
-  }
-  eq(other: FmAddItemButtonWidget): boolean {
-    return other.entryFrom === this.entryFrom
-  }
-  toDOM(): HTMLElement {
-    const btn = document.createElement('button')
-    btn.type = 'button'
-    btn.className = FM_CARD_CLASS_NAMES.addItem
-    btn.textContent = '+'
-    const label = t('frontmatter.addItem')
-    btn.title = label
-    btn.setAttribute('aria-label', label)
-    armButton(btn, () => {
-      const view = EditorView.findFromDOM(btn)
-      const model = view ? modelOfView(view) : null
-      if (!view || !model) return
-      const index = model.entries.findIndex((e) => e.lineFrom === this.entryFrom)
-      dispatchFmPlan(btn, index >= 0 ? planAddFmArrayItem(model, index) : null)
+      if (index < 0) return
+      dispatchFmPlan(btn, fmButtonPlan(this.kind, model, index, this.itemIndex))
     })
     return btn
   }
@@ -366,7 +334,7 @@ export function buildFrontmatterCardPlan(
     // 宿主行行尾删除按钮（条目级；block 数组删除含全部项行）
     ranges.push(
       widgetDeco(`rmEntry\u0000${entry.lineFrom}`, () =>
-        Decoration.widget({ widget: new FmRemoveEntryButtonWidget(entry.lineFrom), side: 1 }),
+        Decoration.widget({ widget: new FmActionButtonWidget('remove-entry', entry.lineFrom), side: 1 }),
       ).range(entry.kind === 'array' && entry.form === 'block' ? entry.hostLineTo : entry.lineTo),
     )
     if (entry.kind === 'scalar') {
@@ -403,7 +371,7 @@ export function buildFrontmatterCardPlan(
       }
       ranges.push(
         widgetDeco(`rmItem\u0000${entry.lineFrom}\u0000${j}`, () =>
-          Decoration.widget({ widget: new FmRemoveItemButtonWidget(entry.lineFrom, j), side: 1 }),
+          Decoration.widget({ widget: new FmActionButtonWidget('remove-item', entry.lineFrom, j), side: 1 }),
         ).range(item.lineTo),
       )
     }
@@ -411,7 +379,7 @@ export function buildFrontmatterCardPlan(
       const last = entry.items[entry.items.length - 1]!
       ranges.push(
         widgetDeco(`addItem\u0000${entry.lineFrom}`, () =>
-          Decoration.widget({ widget: new FmAddItemButtonWidget(entry.lineFrom), side: 1 }),
+          Decoration.widget({ widget: new FmActionButtonWidget('add-item', entry.lineFrom), side: 1 }),
         ).range(last.lineTo),
       )
     }

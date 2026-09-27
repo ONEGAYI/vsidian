@@ -22,7 +22,7 @@ import { maskCodeSpanPipes } from './tableCells'
 import { stripHtmlComments } from './htmlComment'
 import { isRenderedFenceInfo } from '../shared/mermaid'
 import { codeInfoFirstWord } from '../shared/codeLangs'
-import { buildFrontmatterTableHtml, parseFrontmatterTable } from '../shared/frontmatterTable'
+import { buildFrontmatterTableHtml, escapeHtml, parseFrontmatterTable } from '../shared/frontmatterTable'
 import { t } from '../shared/i18n'
 import {
   buildLineBounds,
@@ -105,9 +105,9 @@ function restoreCodePipes(tokens: Token[], marker: string): void {
   }
 }
 
-function escapeHtml(s: string): string {
-  return md.utils.escapeHtml(s)
-}
+/** HTML 文本转义：统一引用 shared/frontmatterTable 的实现（& < > "）——
+ *  与 markdown-it 的 escapeHtml 相比不再实体化单引号，本函数只服务文本
+ *  内容位（双引号属性位已含 " 转义），等价安全 */
 
 /** heading_open 的 tag（h1..h6）→ 级别；其他返回 null */
 function headingLevelOfTag(tag: string): 1 | 2 | 3 | 4 | 5 | 6 | null {
