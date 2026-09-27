@@ -371,6 +371,7 @@ interface ViewState {
     readingBackgroundImage?: string | null
     liveStrongDecorationColor: string | null
     liveInlineCodeDecorationColor: string | null
+    liveHtmlCommentDecorationColor?: string | null
     liveCodeLineDecorationColor: string | null
     readingStrongDecorationColor: string | null
     liveTaskCheckboxDecorationColor: string | null
@@ -856,8 +857,26 @@ async function writeSnippetCss(file: string, css: string): Promise<void> {
   await vscode.workspace.fs.writeFile(wsUri(file), Buffer.from(css, 'utf8'))
 }
 
+/** #140 frontmatter 卡片编辑 fixture（与 fixtures.mjs 的 fm-edit.md 一致） */
+const FM_EDIT_DOC_TEXT = [
+  '---',
+  'title: 集成标题',
+  'tags:',
+  '  - 甲',
+  '---',
+  '',
+  '正文段落。',
+  '',
+].join('\n')
+
 /** #133 界面域样式契约 fixture（与 fixtures.mjs 的 CHROME_CONTRACT_DOC 一致） */
 const CHROME_CONTRACT_DOC_TEXT = [
+  '---',
+  'title: 界面契约',
+  'tags:',
+  '  - 契约',
+  '---',
+  '',
   '# 界面契约一级标题',
   '',
   '## 二级标题与 **加粗透传**',
@@ -2345,6 +2364,11 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(
       live.cssProbe!.liveInlineCodeDecorationColor === 'rgb(10, 11, 12)',
       `live 行内代码 span 应被片段命中，实际 ${live.cssProbe!.liveInlineCodeDecorationColor}`,
+    )
+    // #139 HTML 注释淡化 span（公开样式入口 html-comment；阅读侧隐藏无对应）
+    assert(
+      live.cssProbe!.liveHtmlCommentDecorationColor === 'rgb(34, 35, 36)',
+      `live HTML 注释 span 应被片段命中 rgb(34, 35, 36)，实际 ${live.cssProbe!.liveHtmlCommentDecorationColor}`,
     )
     await vscode.commands.executeCommand('onegayi.vsidian.toggleViewMode')
     const reading = await poll('阅读模式样式探针', async () => {
@@ -8422,5 +8446,122 @@ export const cases: Array<[string, () => Promise<void>]> = [
       return undefined
     }, 60000)
   }],
-]
 
+  // ---- #140 / #141：frontmatter 卡片编辑链路与工具栏双态切换 ----
+
+  ['frontmatter 卡片：结构按钮写回、dirty、模式切换、外部同步与保存重开（#140）', async () => {
+    await openWithEditor('fm-edit.md')
+    await waitSessionReady('fm-edit.md')
+    const uri = wsUri('fm-edit.md').toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri('fm-edit.md'))
+
+    // 前置：live 态成型卡片在场（chrome 探针：卡片行 + 键值行 + 添加属性按钮）
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', wsUri('fm-edit.md'))
+    await waitViewState('fm-edit.md', (v) => v.viewMode === 'live' &&
+      v.cssProbe?.chromeSelectors?.['live-fm-card-line-live'] === 'rgb(230, 0, 1)' &&
+      v.cssProbe?.chromeSelectors?.['live-fm-row-live'] === 'rgb(231, 0, 1)' &&
+      v.cssProbe?.chromeSelectors?.['live-fm-add-entry-live'] === 'rgb(235, 0, 1)')
+    const st0 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    const editsBefore = st0.appliedEdits
+
+    // 1) block 数组末尾加项：真实按钮 click → 编辑计划 → CM6 事务 → 宿主写回
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'fm.test.click', action: 'add-item', index: 0 })
+    const withItem = FM_EDIT_DOC_TEXT.replace('  - 甲\n---', '  - 甲\n  - item\n---')
+    await waitViewState('fm-edit.md', (v) => v.text === withItem)
+    assert(doc.isDirty, '加项写回后文档应 dirty（未保存）')
+    const st1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(st1.appliedEdits === editsBefore + 1, `一次结构按钮应恰一笔宿主写回，实际增量 ${st1.appliedEdits - editsBefore}`)
+
+    // 2) 删除该项（第 2 个项级 ×，DOM 文档序）：内容回到基线
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'fm.test.click', action: 'remove-item', index: 1 })
+    await waitViewState('fm-edit.md', (v) => v.text === FM_EDIT_DOC_TEXT)
+
+    // 3) 新增键值对模板（闭合行「添加属性」）：`key: value` 落在末条目后
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'fm.test.click', action: 'add-entry' })
+    const withEntry = FM_EDIT_DOC_TEXT.replace('  - 甲\n---', '  - 甲\nkey: value\n---')
+    await waitViewState('fm-edit.md', (v) => v.text === withEntry)
+
+    // 4) 模式切换不丢内容：reading 侧同款表格呈现（探针）+ 回 live 卡片仍在
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri('fm-edit.md'))
+    await waitViewState('fm-edit.md', (v) => v.viewMode === 'reading' && v.text === withEntry &&
+      v.cssProbe?.chromeSelectors?.['live-fm-row-reading'] === 'rgb(233, 0, 1)')
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', wsUri('fm-edit.md'))
+    await waitViewState('fm-edit.md', (v) => v.viewMode === 'live' && v.text === withEntry &&
+      v.cssProbe?.chromeSelectors?.['live-fm-card-line-live'] === 'rgb(230, 0, 1)')
+
+    // 5) 外部变更同步进头区：宿主 applyEdit 改 title，面板同步且卡片不降级
+    const extEdit = new vscode.WorkspaceEdit()
+    extEdit.replace(wsUri('fm-edit.md'), new vscode.Range(1, 7, 1, 11), '外部改写')
+    assert(await vscode.workspace.applyEdit(extEdit), '外部修改应成功')
+    const externalText = withEntry.replace('title: 集成标题', 'title: 外部改写')
+    await waitViewState('fm-edit.md', (v) => v.text === externalText &&
+      v.cssProbe?.chromeSelectors?.['live-fm-card-line-live'] === 'rgb(230, 0, 1)')
+
+    // 6) 保存 → 磁盘落定 → 关面板重开：内容与卡片回放
+    await doc.save()
+    assert(!doc.isDirty, '保存后应清除 dirty')
+    assert(await readDisk('fm-edit.md') === externalText, '保存应把卡片编辑落到磁盘')
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await poll('面板关闭与会话释放', async () => {
+      const s = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+      return s?.found === false ? true : undefined
+    })
+    await openWithEditor('fm-edit.md')
+    await waitSessionReady('fm-edit.md')
+    await waitViewState('fm-edit.md', (v) => v.text === externalText &&
+      v.cssProbe?.chromeSelectors?.['live-fm-card-line-live'] === 'rgb(230, 0, 1)' &&
+      v.cssProbe?.chromeSelectors?.['live-fm-add-entry-live'] === 'rgb(235, 0, 1)')
+  }],
+
+  ['工具栏双态切换：真实点击与快捷键通道、三态按钮共存与全局记忆（#141）', async () => {
+    await openWithEditor('mode.md')
+    await waitSessionReady('mode.md')
+    const uri = wsUri('mode.md').toString()
+
+    // 前置：live 态、按钮在场（chrome 探针 view-toggle 常驻两模式）
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', wsUri('mode.md'))
+    await waitViewState('mode.md', (v) => v.viewMode === 'live' &&
+      v.cssProbe?.chromeSelectors?.['view-toggle'] === 'rgb(236, 0, 1)')
+
+    // 1) 按钮真实点击：live → reading（出站 view.switch.request → 宿主
+    //    runViewSwitch 全套编排：模式记忆、view.mode.set 回流驱动按钮态）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.test.click' })
+    await waitViewState('mode.md', (v) => v.viewMode === 'reading')
+    await waitLastMode('reading')
+
+    // 2) 再点回 live：reading → live，记忆同步（按钮常驻可双向）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.test.click' })
+    await waitViewState('mode.md', (v) => v.viewMode === 'live')
+    await waitLastMode('live')
+
+    // 3) 快捷键通道下游宿主段：keybindings.execute 出站 → 宿主
+    //    executeCommand → 同一双态实现。Ctrl+Q 的按键匹配归 keybindingRouter
+    //    单测；集成宿主中 webview 面板不真实持有焦点（webviewPanel.active
+    //    为 false，宿主对该消息有 active 门控——真实按键场景面板必有焦点），
+    //    故此处直接执行同一宿主命令覆盖下游段
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toggleDualView')
+    await waitViewState('mode.md', (v) => v.viewMode === 'reading')
+    await waitLastMode('reading')
+
+    // 4) 与右上角三态按钮共存一致：三态命令回 live 后按钮再点仍双向可用，
+    //    reading 态按钮在场（图标随 body 模式类切换，探针不依赖模式）
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', wsUri('mode.md'))
+    await waitViewState('mode.md', (v) => v.viewMode === 'live')
+    await waitLastMode('live')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.test.click' })
+    await waitViewState('mode.md', (v) => v.viewMode === 'reading' &&
+      v.cssProbe?.chromeSelectors?.['view-toggle'] === 'rgb(236, 0, 1)')
+    await waitLastMode('reading')
+
+    // 5) 源码态兜底：命令入口在源码编辑器态取反回 Vsidian 面板（open-in-
+    //    vsidian 分支，不落源码自环、不弹「已在源码」提示）
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toSource', wsUri('mode.md'))
+    await waitActiveTextEditor('mode.md')
+    await waitLastMode('source')
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toggleDualView')
+    const session = await waitSessionReady('mode.md')
+    assert(session.panels.length >= 1, '源码态双态命令应回 Vsidian 面板')
+    await waitViewState('mode.md', (v) => v.viewMode === 'live')
+    await waitLastMode('live')
+  }],
+]
