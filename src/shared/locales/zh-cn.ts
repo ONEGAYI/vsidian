@@ -75,6 +75,18 @@ export const zhCn: Record<MessageKey, string> = {
   'setting.languageAuto': '自动',
   'setting.testFlag.title': '测试开关',
 
+  // ---- cssSnippets.（CSS 片段设置分页：目录行、状态条、按钮，#128）----
+  'cssSnippets.title': 'CSS 片段',
+  'cssSnippets.description': '从用户级目录加载第一层 .css 文件作为跨项目共享的片段。新片段默认关闭；片段按确定的文件名顺序加载，同层叠优先级下后加载者覆盖。',
+  'cssSnippets.directoryLabel': '片段目录',
+  'cssSnippets.chooseDirectory': '选择目录…',
+  'cssSnippets.chooseOpenLabel': '选择文件夹',
+  'cssSnippets.openDirectory': '在文件管理器中打开',
+  'cssSnippets.refresh': '重新加载片段',
+  'cssSnippets.noDirectory': '尚未选择片段目录。选择一个文件夹后，其第一层 .css 文件将作为片段（新文件默认关闭）。',
+  'cssSnippets.emptyDirectory': '所选目录的第一层没有 .css 文件。',
+  'cssSnippets.readError': '片段目录读取失败。下方清单为最近成功状态，已打开的编辑器保留最近应用的样式。',
+
   // ---- host.（宿主消息）----
   'host.conflictInputCopied': '未确认输入已复制到剪贴板',
   'host.noConflictInputToCopy': '没有可复制的未确认输入',
@@ -102,6 +114,9 @@ export const zhCn: Record<MessageKey, string> = {
   'host.blockedLinkWindowsDrive': '远程（POSIX）工作区不支持 Windows 盘符路径链接',
   'host.externalOpenFailed': '无法打开外部链接：{url}',
   'host.linkNotFound': '链接目标不存在：{href}（已按相对当前文档目录解析）',
+  /** #128 CSS 片段：宿主侧用户提示 */
+  'host.cssSnippetLoadFailed': 'CSS 片段「{name}」加载失败，已保留最近成功的样式。',
+  'host.cssSnippetReadFailed': '读取 CSS 片段目录「{directory}」失败。',
   'host.invalidSettingDefinition': '非法定义：{definition}',
   'host.duplicateSettingKey': '设置键已存在：{key}',
 
@@ -250,6 +265,8 @@ export const zhCn: Record<MessageKey, string> = {
   'command.table.insertColumnRight.title': '表格：右侧插入列',
   'command.table.deleteColumn.title': '表格：删除列',
   'command.openSettings.title': '打开设置',
+  /** #128 CSS 片段刷新命令（快捷键页与命令面板同源） */
+  'command.cssSnippets.refresh.title': 'CSS 片段：重新加载',
   'command.ui.sidebarToggle.title': '展开或收起右侧栏',
   'command.ui.outlineToggle.title': '显示或隐藏大纲',
   'command.ui.outlineSearch.title': '搜索大纲标题',

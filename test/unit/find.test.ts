@@ -377,7 +377,7 @@ describe('只读契约：查找不修改文本、不产生出站变更', () => {
     // 外零出站（查找全程只读）
     const kinds = new Set(h.sent.map((m) => m.kind))
     expect([...kinds].filter((k) => k !== 'view.state' && k !== 'ready' &&
-      k !== 'settings.get' && k !== 'keybindings.get')).toEqual([])
+      k !== 'settings.get' && k !== 'keybindings.get' && k !== 'snippets.get')).toEqual([])
   })
 
   it('查找会话期间的宿主 undo 不受查找影响（无新历史条目产生）', () => {

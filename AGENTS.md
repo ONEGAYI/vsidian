@@ -161,6 +161,8 @@ vsidian/
 ├── src/                   # 扩展源码
 │   ├── extension.ts # 扩展激活入口
 │   ├── host/        # 宿主端实现
+│   │   ├── cssSnippetService.ts     # CSS 片段宿主权威服务
+│   │   ├── cssSnippetWiring.ts      # CSS 片段 vscode 层装配
 │   │   ├── diagramExportHost.ts     # 宿主图表导出执行壳
 │   │   ├── diagramExportValidate.ts # 图表导出载荷校验
 │   │   ├── documentSession.ts       # 文档会话与写回同步
@@ -175,6 +177,7 @@ vsidian/
 │   ├── shared/      # 两端共享纯逻辑
 │   │   ├── changeMapping.ts    # 变更重定位纯函数
 │   │   ├── codeLangs.ts        # 代码块语言注册表与别名路由
+│   │   ├── cssSnippets.ts      # CSS 片段纯逻辑单一事实源
 │   │   ├── formatOperations.ts # 格式操作注册清单
 │   │   ├── i18n.ts             # t() 取词与语言包装配状态模块
 │   │   ├── keybindings.ts      # 快捷键操作与冲突模型
@@ -194,6 +197,7 @@ vsidian/
 │       ├── codeCardState.ts        # 卡片共享状态中立模块
 │       ├── codeHighlight.ts        # 语法高亮引擎装配与缓存
 │       ├── css.d.ts                # CSS 导入类型声明
+│       ├── cssSnippetSettings.ts   # CSS 片段设置分页
 │       ├── diagramExport.ts        # 图表导出序列化与光栅化
 │       ├── diagramPopup.ts         # 图表弹窗全屏浮层
 │       ├── diagramPopupGeometry.ts # 弹窗几何纯函数
@@ -239,6 +243,7 @@ vsidian/
 │       ├── settingsMain.ts         # 设置页 webview 入口
 │       ├── settingsPage.css        # 设置页样式
 │       ├── settingsPageView.ts     # 设置页 webview 视图
+│       ├── snippetLoader.ts        # CSS 片段 link 装配器
 │       ├── syncController.ts       # CM6 同步控制器
 │       ├── tableCells.ts           # 表格单元格边界、换行与转义
 │       ├── tableControls.ts        # 表格可见行控件与拖动

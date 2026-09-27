@@ -35,6 +35,10 @@ const CMD = {
   getSettings: 'onegayi.vsidian._test.getSettings',
   setSettings: 'onegayi.vsidian._test.setSettings',
   injectSettingsPageMessage: 'onegayi.vsidian._test.injectSettingsPageMessage',
+  // #128 CSS 片段链路（观测/注入；刷新走真实命令）
+  snippetState: 'onegayi.vsidian._test.getSnippetState',
+  setSnippetDirectory: 'onegayi.vsidian._test.setSnippetDirectory',
+  setSnippetEnabled: 'onegayi.vsidian._test.setSnippetEnabled',
 }
 
 const wsDir = process.env['WORKSPACE_DIR'] ?? ''
@@ -760,6 +764,28 @@ async function waitViewState(
     }
     return undefined
   }, timeoutMs)
+}
+
+/** #128 CSS 片段宿主权威状态（_test 观测钩子） */
+interface SnippetState {
+  available: boolean
+  directory: string | null
+  readError: boolean
+  version: number
+  entries: Array<{ name: string; enabled: boolean }>
+}
+async function snippetState(): Promise<SnippetState> {
+  return (await vscode.commands.executeCommand(CMD.snippetState)) as SnippetState
+}
+async function setSnippetDirectory(dir: string | null): Promise<void> {
+  await vscode.commands.executeCommand(CMD.setSnippetDirectory, dir)
+}
+async function setSnippetEnabled(name: string, enabled: boolean): Promise<void> {
+  await vscode.commands.executeCommand(CMD.setSnippetEnabled, name, enabled)
+}
+/** 工作区内写片段 CSS（utf8 无 BOM） */
+async function writeSnippetCss(file: string, css: string): Promise<void> {
+  await vscode.workspace.fs.writeFile(wsUri(file), Buffer.from(css, 'utf8'))
 }
 
 /** #9 任务勾选 fixture（与 runTest.mjs 的 TASK_DOC 一致） */
@@ -6641,6 +6667,227 @@ export const cases: Array<[string, () => Promise<void>]> = [
       `包裹与取消各一笔写回，实际 ${after.appliedEdits - before.appliedEdits}`)
     if (doc.isDirty) {
       await doc.save()
+    }
+  }],
+
+  // ---- #128 CSS 片段目录管理与双视图启停闭环 ----
+
+  ['CSS 片段：目录扫描默认关闭、启用改双视图、文件名顺序后者覆盖（#128）', async () => {
+    // 片段目录（工作区内子目录；仅因显式选择而加载——无任何工作区自动发现）
+    const dir = wsUri('css-snippets').fsPath
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets'))
+    await writeSnippetCss('css-snippets/a.css', [
+      '#app .vsidian-view-live .vsidian-heading-line-1 { text-decoration-color: rgb(70, 80, 90); }',
+      '#app .cm-editor .cm-scroller .vsidian-heading-line-1 { font-size: 31px; }',
+      '#app .vsidian-view-reading { --vsidian-probe-var-reading: snippet-a; }',
+    ].join('\n'))
+    await writeSnippetCss('css-snippets/b.css',
+      '#app .vsidian-view-reading { --vsidian-probe-var-reading: snippet-b; }\n')
+    try {
+      await setSnippetDirectory(dir)
+      // 扫描产出：仅第一层 .css、确定性排序、新片段默认关闭
+      const scanned = await poll('片段扫描完成', async () => {
+        const st = await snippetState()
+        return st.directory === dir && !st.readError && st.entries.length === 2 ? st : undefined
+      })
+      assert(JSON.stringify(scanned.entries) === JSON.stringify([
+        { name: 'a.css', enabled: false },
+        { name: 'b.css', enabled: false },
+      ]), `新片段应默认关闭并按文件名排序，实际 ${JSON.stringify(scanned.entries)}`)
+
+      await openWithEditor('mode.md')
+      await waitSessionReady('mode.md')
+      const uri = wsUri('mode.md').toString()
+      // 未启用：探针维持内部契约片段值（片段不生效）
+      const before = await waitViewState('mode.md', (v) =>
+        v.viewMode === 'live' && v.cssProbe?.liveHeadingDecorationColor !== undefined)
+      assert(before.cssProbe!.liveHeadingDecorationColor === 'rgb(1, 2, 3)',
+        `未启用片段不应影响探针，实际 ${before.cssProbe!.liveHeadingDecorationColor}`)
+
+      // 启用 a.css：live 探针命中（text-decoration-color）+ 可见字号变化（headingFontPx）
+      await setSnippetEnabled('a.css', true)
+      const applied = await waitViewState('mode.md', (v) =>
+        v.cssProbe?.liveHeadingDecorationColor === 'rgb(70, 80, 90)')
+      assert(applied.cssProbe!.liveHeadingDecorationColor === 'rgb(70, 80, 90)', 'live 应被片段命中')
+      assert(applied.headingFontPx === 31,
+        `片段应实际改变可见字号（31px），实际 ${String(applied.headingFontPx)}`)
+
+      // 阅读视图同片段生效（变量管道）
+      await vscode.commands.executeCommand('onegayi.vsidian.toggleViewMode')
+      const readingA = await waitViewState('mode.md', (v) =>
+        v.viewMode === 'reading' && v.cssProbe?.readingVarProbe === 'snippet-a')
+      assert(readingA.cssProbe!.readingVarProbe === 'snippet-a', '阅读视图应被片段命中')
+
+      // b.css 后加载覆盖 a.css（确定性顺序的层叠结果）；停用 b 回到 a
+      await setSnippetEnabled('b.css', true)
+      await waitViewState('mode.md', (v) => v.cssProbe?.readingVarProbe === 'snippet-b')
+      await setSnippetEnabled('b.css', false)
+      await waitViewState('mode.md', (v) => v.cssProbe?.readingVarProbe === 'snippet-a')
+      // 全部停用：撤回到内部契约片段值
+      await setSnippetEnabled('a.css', false)
+      await waitViewState('mode.md', (v) => v.cssProbe?.readingVarProbe === 'contract-ok')
+
+      // 全程不写文档（CSS 启停是纯视图状态）
+      await waitViewState('mode.md', (v) => v.text === MODE_DOC_TEXT)
+      const st = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+      assert(st.appliedEdits === 0, `片段启停不应写文档，实际写回 ${st.appliedEdits} 笔`)
+    } finally {
+      await setSnippetDirectory(null)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
+    }
+  }],
+
+  ['CSS 片段：保存后自动更新与原子保存不误判删除（#128）', async () => {
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets'))
+    const css = (color: string) =>
+      `#app .vsidian-view-live .vsidian-heading-line-1 { text-decoration-color: ${color}; }\n`
+    await writeSnippetCss('css-snippets/edit.css', css('rgb(11, 22, 33)'))
+    try {
+      await setSnippetDirectory(wsUri('css-snippets').fsPath)
+      await setSnippetEnabled('edit.css', true)
+      await openWithEditor('mode.md')
+      await waitSessionReady('mode.md')
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(11, 22, 33)')
+
+      // 编辑保存（磁盘改写）→ watcher 去抖重扫 → 广播 → 新内容生效（缓存击穿）
+      await writeSnippetCss('css-snippets/edit.css', css('rgb(44, 55, 66)'))
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(44, 55, 66)',
+        0, 15000)
+
+      // 原子保存：写临时文件（.tmp 不匹配 *.css，不触发清单变化）再 rename 覆盖
+      await writeSnippetCss('css-snippets/edit.css.tmp', css('rgb(77, 88, 99)'))
+      await vscode.workspace.fs.rename(
+        wsUri('css-snippets/edit.css.tmp'), wsUri('css-snippets/edit.css'), { overwrite: true })
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(77, 88, 99)',
+        0, 15000)
+      // 开关未被误判删除（rename 期间的瞬时消失不清洗显式开关）
+      const st = await snippetState()
+      assert(st.entries.some((e) => e.name === 'edit.css' && e.enabled),
+        `原子保存后开关应保留，实际 ${JSON.stringify(st.entries)}`)
+    } finally {
+      await setSnippetDirectory(null)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
+    }
+  }],
+
+  ['CSS 片段：删除撤下、目录读取失败保留最近成功样式、恢复（#128）', async () => {
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets'))
+    const css = '#app .vsidian-view-live .vsidian-heading-line-1 { text-decoration-color: rgb(120, 130, 140); }\n'
+    await writeSnippetCss('css-snippets/keep.css', css)
+    try {
+      await setSnippetDirectory(wsUri('css-snippets').fsPath)
+      await setSnippetEnabled('keep.css', true)
+      await openWithEditor('mode.md')
+      await waitSessionReady('mode.md')
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(120, 130, 140)')
+
+      // 明确删除：清单移除 + 样式撤下（回到内部契约探针值）
+      await vscode.workspace.fs.delete(wsUri('css-snippets/keep.css'), { useTrash: false })
+      await poll('删除后清单移除', async () => {
+        const st = await snippetState()
+        return st.entries.length === 0 ? st : undefined
+      }, 15000)
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(1, 2, 3)', 0, 15000)
+
+      // 恢复文件：显式开关按设计跨删除保留（原子保存保护——无法区分暂时消失
+      // 与永久删除，不清洗映射），重新入列即带原开关直接重新生效
+      await writeSnippetCss('css-snippets/keep.css', css)
+      await vscode.commands.executeCommand('onegayi.vsidian.cssSnippets.refresh')
+      await poll('恢复后重新入列（开关保留）', async () => {
+        const st = await snippetState()
+        return st.entries.some((e) => e.name === 'keep.css' && e.enabled) ? true : undefined
+      }, 15000)
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(120, 130, 140)', 0, 15000)
+
+      // 目录读取失败（整目录暂时消失）：宿主保留最近成功清单（开关不清洗、
+      // 版本不推进——不向已开面板下发撤下广播）；readError 置位供设置页提示。
+      // 注：已装 <link> 的样式表存续由 webview 资源服务/浏览器决定（宿主不
+      // 下发撤下即不主动扰动），「失败窗口内样式保持」的装载器契约由浏览器
+      // 测试钉住，真实宿主内的观感列入人工验证
+      await vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })
+      const failed = await poll('读取失败置位', async () => {
+        const st = await snippetState()
+        return st.readError ? st : undefined
+      }, 15000)
+      assert(JSON.stringify(failed.entries) === JSON.stringify([{ name: 'keep.css', enabled: true }]),
+        `读取失败应保留最近成功清单，实际 ${JSON.stringify(failed.entries)}`)
+      assert(failed.version > 0, '读取失败不得推进版本（不触发面板重装/撤下）')
+
+      // 目录恢复 + 真实刷新命令：清单保留的直接证据——无需重新启用即自动
+      // 重新生效（恢复后的成功扫描推进版本并广播）
+      await vscode.workspace.fs.createDirectory(wsUri('css-snippets'))
+      await writeSnippetCss('css-snippets/keep.css', css)
+      await vscode.commands.executeCommand('onegayi.vsidian.cssSnippets.refresh')
+      await poll('刷新后失败态清除', async () => {
+        const st = await snippetState()
+        return !st.readError && st.entries.some((e) => e.name === 'keep.css' && e.enabled) ? true : undefined
+      }, 15000)
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(120, 130, 140)', 0, 15000)
+    } finally {
+      await setSnippetDirectory(null)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
+    }
+  }],
+
+  ['CSS 片段：换目录已开面板生效、新面板拉取、输入与撤销保持（#128）', async () => {
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets'))
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets-2'))
+    const css = (color: string) =>
+      `#app .vsidian-view-live .vsidian-heading-line-1 { text-decoration-color: ${color}; }\n`
+    await writeSnippetCss('css-snippets/swap-a.css', css('rgb(140, 150, 160)'))
+    await writeSnippetCss('css-snippets-2/swap-b.css', css('rgb(170, 180, 190)'))
+    try {
+      await setSnippetDirectory(wsUri('css-snippets').fsPath)
+      await setSnippetEnabled('swap-a.css', true)
+      await openWithEditor('mode.md')
+      await waitSessionReady('mode.md')
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(140, 150, 160)')
+
+      const uri = wsUri('mode.md').toString()
+      // 真实输入（sync.test.edit 驱动真实 CM6 事务 → 标准出站 edit.request
+      // 写回权威文档——注入伪造的 edit.request 会绕过 webview 事务生命周期，
+      // webview 自身永远看不到该编辑）
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+        kind: 'sync.test.edit',
+        offset: MODE_DOC_TEXT.length,
+        text: '片段编辑中尾行\n',
+      })
+      const typed = `${MODE_DOC_TEXT}片段编辑中尾行\n`
+      await waitViewState('mode.md', (v) => v.text === typed)
+
+      // 换目录：已开面板动态加载新目录资源（webview.options 资源根更新）；
+      // 换目录重置开关 → swap-a 撤下 → 探针回默认
+      await setSnippetDirectory(wsUri('css-snippets-2').fsPath)
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(1, 2, 3)', 0, 15000)
+      await setSnippetEnabled('swap-b.css', true)
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(170, 180, 190)', 0, 15000)
+
+      // 输入保持（编辑不因 CSS 更新丢失）+ 撤销栈保持（undo 撤销编辑而非样式）
+      const afterSwap = await waitViewState('mode.md', (v) => v.text === typed)
+      assert(afterSwap.text === typed, 'CSS 更新不得改变文档内容')
+      const beforeUndo = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+      await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'history.request', op: 'undo' })
+      await waitViewState('mode.md', (v) => v.text === MODE_DOC_TEXT)
+      const afterUndo = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+      assert(afterUndo.appliedEdits === beforeUndo.appliedEdits,
+        `undo 走宿主文本栈（不经写回），实际写回数变化 ${afterUndo.appliedEdits - beforeUndo.appliedEdits}`)
+
+      // split 新面板：init 后拉取当前清单（新目录片段立即生效）
+      await openWithEditor('mode.md', true)
+      await poll('第二面板就绪', async () => {
+        const st = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+        return st.panels.length === 2 ? true : undefined
+      })
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(170, 180, 190)', 1, 15000)
+
+      // 持久回显：宿主权威状态与设置一致（重新打开/新窗口按此回显）
+      const st = await snippetState()
+      assert(st.directory === wsUri('css-snippets-2').fsPath, '目录应持久为最新选择')
+      assert(st.entries.some((e) => e.name === 'swap-b.css' && e.enabled), '开关应持久为显式值')
+    } finally {
+      await setSnippetDirectory(null)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets-2'), { recursive: true, useTrash: false })).catch(() => undefined)
     }
   }],
 ]

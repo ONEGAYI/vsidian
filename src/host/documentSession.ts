@@ -69,6 +69,12 @@ export interface PanelPort {
   /** #33 设置快照拉取（vscode 层注入：SettingsService.getSnapshot；面板
    *  init 后的 settings.get 以 settings.snapshot 响应） */
   requestSettings?(): SettingsPayload
+  /** #128 CSS 片段装载清单拉取（vscode 层注入：CssSnippetService 状态 ×
+   *  本面板 webview.asWebviewUri——每个 webview 的资源前缀私有，清单必须
+   *  逐面板构造）；面板 init 后的 snippets.get 以 snippets.snapshot 响应 */
+  requestSnippets?(): { version: number; snippets: Array<{ name: string; uri: string }> }
+  /** #128 片段链装载结果（vscode 层注入：用户提示与诊断观测；只读交互） */
+  onSnippetLoad?(name: string, version: number, ok: boolean): void
   /** #69 剪贴板写（直写）：vscode 层注入 env.clipboard.writeText。只读
    *  交互（不写文档、不入撤销栈），暂停态同样放行。#81 代码块复制同走
    *  此端口——入参 text 已由会话按文档 EOL 归一（CRLF 文档收到 \r\n） */
@@ -335,6 +341,23 @@ export class DocumentSession {
       case 'settings.set':
         // #33 设置保存只在设置页 webview 链路（settingsPage 模块）处理，
         // 编辑器面板不会发出；到达此处无副作用
+        return Promise.resolve()
+      case 'snippets.get':
+        // #128 片段清单拉取：面板端口逐面板构造 URI（webview 资源前缀私有）；
+        // 端口未接线（异常装配）时以空清单应答（webview 清空本地装配）
+        panel.port.send({ kind: 'snippets.snapshot', ...(panel.port.requestSnippets?.() ?? { version: 0, snippets: [] }) })
+        return Promise.resolve()
+      case 'snippets.loadResult':
+        // #128 片段链装载结果：转发面板端口（宿主用户提示/诊断）；只读交互
+        panel.port.onSnippetLoad?.(message.name, message.version, message.ok)
+        return Promise.resolve()
+      case 'snippets.chooseDirectory':
+      case 'snippets.setDirectory':
+      case 'snippets.setEnabled':
+      case 'snippets.refresh':
+      case 'snippets.openDirectory':
+        // #128 片段管理动作只在设置页 webview 链路（settingsPage 模块）处理，
+        // 编辑器面板不会发出；到达此处无副作用（保持协议穷尽）
         return Promise.resolve()
       case 'keybindings.get':
       case 'keybindings.set':

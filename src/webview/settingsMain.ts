@@ -6,6 +6,7 @@
 import { SettingsPageView } from './settingsPageView'
 import { PRODUCTION_SETTING_DEFINITIONS } from '../shared/settings'
 import { KeybindingSettingsSection } from './keybindingSettings'
+import { CssSnippetSettingsSection } from './cssSnippetSettings'
 import { bootLocaleFromDocument, handleLocaleChangedMessage } from './localeBoot'
 import './settingsPage.css'
 
@@ -18,18 +19,23 @@ bootLocaleFromDocument()
 
 const vscode = acquireVsCodeApi()
 const keybindings = new KeybindingSettingsSection({ postMessage: (message) => vscode.postMessage(message) })
+const snippets = new CssSnippetSettingsSection({ postMessage: (message) => vscode.postMessage(message) })
 
 const view = new SettingsPageView(
   { postMessage: (message) => vscode.postMessage(message) },
   PRODUCTION_SETTING_DEFINITIONS,
-  [keybindings],
+  [keybindings, snippets],
 )
 view.mount(document.getElementById('app') ?? document.body)
 vscode.postMessage({ kind: 'settings.get' })
 vscode.postMessage({ kind: 'keybindings.get' })
+// #128 CSS 片段管理状态：与 settings.get 同「装载即拉取」模式（retainContext
+// WhenHidden 不开，隐藏释放重开重载，回显每次以宿主权威为准）
+vscode.postMessage({ kind: 'snippets.get' })
 
 window.addEventListener('message', (event) => {
   view.handleHostMessage(event.data)
   keybindings.handleHostMessage(event.data)
+  snippets.handleHostMessage(event.data)
   handleLocaleChangedMessage(event.data)
 })

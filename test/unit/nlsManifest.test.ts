@@ -48,10 +48,10 @@ describe('manifest NLS：两份 nls 文件键集契约', () => {
 })
 
 describe('manifest NLS：package.json 引用契约', () => {
-  it('全部命令 title 为 %key% 引用（45 条全覆盖，无硬编码）', () => {
+  it('全部命令 title 为 %key% 引用（46 条全覆盖，无硬编码）', () => {
     const commands: { command: string; title: string }[] = pkg.contributes.commands
-    // 45 条命令清单基线（#97 工单口径 + #105 高亮 + #106 分割线；新增/删减命令须同步本断言）
-    expect(commands.length).toBe(45)
+    // 46 条命令清单基线（#97 工单口径 + #105 高亮 + #106 分割线 + #128 片段刷新；新增/删减命令须同步本断言）
+    expect(commands.length).toBe(46)
     const literal = commands.filter((c) => !/^%.+%$/.test(c.title))
     expect(
       literal.map((c) => `${c.command}: ${c.title}`),

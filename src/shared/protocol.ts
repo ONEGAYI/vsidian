@@ -210,6 +210,25 @@ export type HostToWebview =
    *  <html lang>；按需创建的控件自然取新词 */
   | { kind: 'locale.changed'; lang: string; messages: Record<string, string> }
   | { kind: 'keybindings.snapshot' | 'keybindings.changed'; overrides: KeybindingOverrides; requestId?: number; ok?: boolean; reason?: 'invalid' | 'conflict' | 'storage'; conflicts?: string[] }
+  /** CSS 片段装载清单（#128，编辑器面板消费）：宿主权威扫描 × 开关映射 →
+   *  启用片段的 webview 资源 URI（含 ?v=版本 缓存击穿参数），按确定性
+   *  文件名顺序排列（后者覆盖）。编辑器面板 init 后经 snippets.get 拉取，
+   *  状态变更后由宿主广播；空清单即撤下全部已装片段 */
+  | {
+      kind: 'snippets.snapshot'
+      version: number
+      snippets: Array<{ name: string; uri: string }>
+    }
+  /** CSS 片段管理状态（#128，设置页消费）：目录、读取失败标志、全部第一层
+   *  条目（含未启用）与版本。设置页经 snippets.get 拉取；宿主状态变更后
+   *  推送（含编辑器侧片段变更）。不携带 URI——设置页不加载用户 CSS */
+  | {
+      kind: 'snippets.state'
+      directory: string | null
+      readError: boolean
+      version: number
+      entries: Array<{ name: string; enabled: boolean }>
+    }
 
 /** webview → 宿主消息 */
 export type WebviewToHost =
@@ -423,6 +442,26 @@ export type WebviewToHost =
       longTasks: { count: number; maxMs: number; totalMs: number } | null
       headingStats: { totalUpdates: number; lastUpdateScannedLines: number; fullBuildLines: number }
     }
+  /** CSS 片段快照拉取（#128）：编辑器面板 init 后与设置页 ready 后请求；
+   *  宿主分别以 snippets.snapshot（编辑器，含 URI 清单）与 snippets.state
+   *  （设置页，含开关列表）应答 */
+  | { kind: 'snippets.get' }
+  /** CSS 片段 <link> 装载结果回报（#128，编辑器面板）：入口级加载成败——
+   *  失败时 webview 保留最近成功样式（装新链成功后才摘旧链），宿主据此
+   *  给用户提示与诊断；version 对应触发装载的清单版本 */
+  | { kind: 'snippets.loadResult'; name: string; version: number; ok: boolean }
+  /** CSS 片段目录选择对话框（#128，设置页）：宿主弹文件夹选择器并按结果
+   *  应用目录（snippets.chooseOpenLabel 取词作确认按钮文案）；结果经
+   *  snippets.state 推送，不逐次应答 */
+  | { kind: 'snippets.chooseDirectory' }
+  /** 直接设置片段目录（#128，设置页/测试注入通道）：null = 取消配置 */
+  | { kind: 'snippets.setDirectory'; directory: string | null }
+  /** 逐片段开关（#128，设置页）：文件名键 + 显式开关 */
+  | { kind: 'snippets.setEnabled'; name: string; enabled: boolean }
+  /** 手动刷新片段（#128，设置页按钮；命令面板走宿主命令同链路） */
+  | { kind: 'snippets.refresh' }
+  /** 在系统文件管理器中打开片段目录（#128，设置页） */
+  | { kind: 'snippets.openDirectory' }
 
 /** 性能快照（#5）：一次观测时点的 DOM 计数 */
 export interface PerfSnapshot {
@@ -1658,6 +1697,20 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         isNonNegativeInt(v.headingStats.lastUpdateScannedLines) &&
         isNonNegativeInt(v.headingStats.fullBuildLines)
       )
+    case 'snippets.get':
+      return true
+    case 'snippets.loadResult':
+      return isString(v.name) && isNonNegativeInt(v.version) && typeof v.ok === 'boolean'
+    case 'snippets.chooseDirectory':
+      return true
+    case 'snippets.setDirectory':
+      return v.directory === null || (typeof v.directory === 'string' && v.directory.length > 0)
+    case 'snippets.setEnabled':
+      return typeof v.name === 'string' && v.name.length > 0 && typeof v.enabled === 'boolean'
+    case 'snippets.refresh':
+      return true
+    case 'snippets.openDirectory':
+      return true
     default:
       return false
   }
@@ -1844,6 +1897,24 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         v.lang.length > 0 &&
         isObject(v.messages) &&
         Object.values(v.messages).every(isString)
+      )
+    case 'snippets.snapshot':
+      return (
+        isNonNegativeInt(v.version) &&
+        Array.isArray(v.snippets) &&
+        v.snippets.every(
+          (item) => isObject(item) && isString(item.name) && isString(item.uri),
+        )
+      )
+    case 'snippets.state':
+      return (
+        (v.directory === null || (typeof v.directory === 'string' && v.directory.length > 0)) &&
+        typeof v.readError === 'boolean' &&
+        isNonNegativeInt(v.version) &&
+        Array.isArray(v.entries) &&
+        v.entries.every(
+          (item) => isObject(item) && isString(item.name) && typeof item.enabled === 'boolean',
+        )
       )
     default:
       return false

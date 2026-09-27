@@ -20,6 +20,21 @@ import { buildLocaleIslandHtml } from '../shared/locales/island'
 import { hostLocale } from './hostLocale'
 import type { SettingsService } from './settingsService'
 import type { KeybindingService } from './keybindingService'
+import type { CssSnippetState } from '../shared/cssSnippets'
+
+/** #128 CSS 片段管理接线（extension.ts 注入）：设置页面板的片段消息处理
+ *  与状态推送。目录选择对话框（chooseDirectory）经回调进宿主 vscode 层——
+ *  本模块不直接弹窗，测试钩子模式由注入方短路 */
+export interface SnippetPageWiring {
+  getState(): CssSnippetState
+  setDirectory(directory: string | null): Promise<unknown>
+  setEnabled(name: string, enabled: boolean): Promise<unknown>
+  refresh(): Promise<unknown>
+  /** 弹文件夹选择器并应用所选目录；返回所选路径（取消为 null） */
+  chooseDirectory(): Promise<string | null>
+  /** 在系统文件管理器中打开当前片段目录 */
+  openDirectory(): void
+}
 
 /** 设置页面板 viewType（createWebviewPanel 无需清单声明，customEditors 才要求） */
 export const SETTINGS_VIEW_TYPE = 'onegayi.vsidian.settings'
@@ -51,12 +66,18 @@ export interface SettingsPageHandle {
    * 为新语言）。面板未开时为 no-op（下次 open 按新快照语言生成 HTML）
    */
   notifyLocaleChanged(lang: LocaleCode): void
+  /**
+   * #128 CSS 片段状态推送：宿主片段状态变更后向已开设置页发 snippets.state
+   * （面板未开时 no-op——重开经 snippets.get 重新拉取权威状态回显）
+   */
+  notifySnippetsChanged(): void
 }
 
 export function createSettingsPage(
   context: vscode.ExtensionContext,
   service: SettingsService,
   keybindings: KeybindingService,
+  snippets?: SnippetPageWiring,
 ): SettingsPageHandle {
   let panel: vscode.WebviewPanel | undefined
   let ready = false
@@ -108,6 +129,32 @@ export function createSettingsPage(
             messages: LOCALE_MESSAGES[locale],
           })
         }
+        return
+      case 'snippets.get':
+        // #128 片段管理状态拉取（设置页装载/重载时的 ready 回填）
+        if (snippets) {
+          ready = true
+          const state = snippets.getState()
+          void current?.webview.postMessage({ kind: 'snippets.state', directory: state.directory,
+            readError: state.readError, version: state.version, entries: [...state.entries] })
+        }
+        return
+      case 'snippets.chooseDirectory':
+        // 选择对话框 + 应用目录（wiring 内完成 setDirectory）；结果经
+        // notifySnippetsChanged 的 snippets.state 推送，不逐次应答
+        void snippets?.chooseDirectory()
+        return
+      case 'snippets.setDirectory':
+        void snippets?.setDirectory(message.directory)
+        return
+      case 'snippets.setEnabled':
+        void snippets?.setEnabled(message.name, message.enabled)
+        return
+      case 'snippets.refresh':
+        void snippets?.refresh()
+        return
+      case 'snippets.openDirectory':
+        snippets?.openDirectory()
         return
       case 'settings.set': {
         void service.apply(message.values).then((result) => {
@@ -182,6 +229,14 @@ export function createSettingsPage(
         messages: LOCALE_MESSAGES[lang],
       })
       panel.title = settingsPageTitle()
+    },
+    notifySnippetsChanged: () => {
+      if (!panel || !snippets) {
+        return
+      }
+      const state = snippets.getState()
+      void panel.webview.postMessage({ kind: 'snippets.state', directory: state.directory,
+        readError: state.readError, version: state.version, entries: [...state.entries] })
     },
   }
 }

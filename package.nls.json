@@ -39,6 +39,7 @@
   "format.wikilink": "Insert wikilink",
   "format.horizontalRule": "Insert horizontal rule",
   "command.openSettings.title": "Open settings",
+  "command.cssSnippets.refresh.title": "CSS snippets: reload",
   "command.ui.sidebarToggle.title": "Expand or collapse the sidebar",
   "command.ui.outlineToggle.title": "Show or hide the outline",
   "command.ui.outlineSearch.title": "Search headings",

@@ -12,10 +12,13 @@ import * as vscode from 'vscode'
 import { createTextEditorProvider, VIEW_TYPE } from './host/textEditorProvider'
 import { SettingsService } from './host/settingsService'
 import { createSettingsPage } from './host/settingsPage'
+import { CssSnippetService } from './host/cssSnippetService'
+import { createSnippetFsPort, createSnippetPageWiring } from './host/cssSnippetWiring'
 import { PRODUCTION_SETTING_DEFINITIONS } from './shared/settings'
 import { installHostLocale } from './shared/locales'
 import { hostLocale } from './host/hostLocale'
 import { KeybindingService } from './host/keybindingService'
+import { t } from './shared/i18n'
 
 export function activate(context: vscode.ExtensionContext): void {
   // 设置存储：context.globalState（用户级，跨窗口一致、重启保留）+ 纯代码
@@ -25,12 +28,29 @@ export function activate(context: vscode.ExtensionContext): void {
   // #93 语言装配（宿主路径）：en 包同时登记为运行时回退
   installHostLocale(hostLocale(settingsService.getSnapshot()))
   const keybindingService = new KeybindingService(context.globalState)
-  const settingsPage = createSettingsPage(context, settingsService, keybindingService)
+  // #128 CSS 片段：用户级目录 + 逐片段开关的宿主权威服务（globalState 独立
+  // key；文件系统/监听经 vscode 层端口注入）。initialScan 在监听者（编辑器
+  // 面板广播、设置页推送）接线完成后启动——早于扫描完成打开的面板先拿空
+  // 清单，扫描完成后经 onChange 广播自愈
+  const snippetService = new CssSnippetService(context.globalState, createSnippetFsPort(), 'vsidian.cssSnippets', {
+    onUserVisibleReadError: (directory) => {
+      void vscode.window.showWarningMessage(
+        t('host.cssSnippetReadFailed', { directory }),
+      )
+    },
+  })
+  const settingsPage = createSettingsPage(
+    context,
+    settingsService,
+    keybindingService,
+    createSnippetPageWiring(snippetService),
+  )
   const provider = createTextEditorProvider(context, {
     service: settingsService,
     keybindings: keybindingService,
     page: settingsPage,
-  })
+  }, snippetService)
+  void snippetService.initialize()
   context.subscriptions.push(
     // enableScripts 在每个面板的 webview.options 上设置（provider 内）；
     // 注册选项仅接受 retainContextWhenHidden 等（1.86 类型契约）
@@ -39,6 +59,11 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('onegayi.vsidian.openSettings', () => {
       settingsPage.open()
     }),
+    // #128 CSS 片段刷新：全局命令（命令面板与快捷键共用 id；无面板也可
+    // 刷新，状态变更经 onChange 广播到全部已开面板与设置页）
+    vscode.commands.registerCommand('onegayi.vsidian.cssSnippets.refresh', () =>
+      snippetService.refresh()),
+    snippetService,
   )
 }
 

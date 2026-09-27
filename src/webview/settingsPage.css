@@ -94,6 +94,28 @@ button:focus-visible, input:focus-visible {
 .vsidian-keybindings-conflict { margin-top: 10px; padding: 10px; border-left: 3px solid var(--vscode-inputValidation-warningBorder, #cca700);
   color: var(--vscode-inputValidation-warningForeground, inherit); background: var(--vscode-inputValidation-warningBackground, transparent); }
 .vsidian-keybindings-conflict button { margin-left: 10px; }
+/* ---- #128 CSS 片段管理分页 ---- */
+.vsidian-css-snippets-directory { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 10px; padding: 10px 0 14px; }
+.vsidian-css-snippets-directory-label { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.vsidian-css-snippets-directory-caption { font-weight: 600; }
+.vsidian-css-snippets-directory-path { color: var(--vscode-descriptionForeground, #666);
+  font-family: var(--vscode-editor-font-family, inherit); word-break: break-all; }
+.vsidian-css-snippets-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.vsidian-css-snippets-actions button { min-height: 26px; padding: 3px 10px;
+  border: 1px solid var(--vscode-button-border, var(--vscode-panel-border, #cbd0d8)); border-radius: 6px;
+  color: var(--vscode-button-secondaryForeground, inherit);
+  background: var(--vscode-button-secondaryBackground, transparent); cursor: pointer; }
+.vsidian-css-snippets-actions button:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground, #e9ebef)); }
+.vsidian-css-snippets-status { min-height: 20px; color: var(--vscode-descriptionForeground, #666); }
+.vsidian-css-snippets-status-error { padding: 8px 10px; border-left: 3px solid var(--vscode-inputValidation-warningBorder, #cca700);
+  color: var(--vscode-inputValidation-warningForeground, inherit);
+  background: var(--vscode-inputValidation-warningBackground, transparent); }
+.vsidian-css-snippets-list { margin-top: 6px; }
+.vsidian-css-snippets-item { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 9px 0; border-bottom: 1px solid var(--vscode-panel-border, #d9dde3); }
+.vsidian-css-snippets-item-name { font-family: var(--vscode-editor-font-family, inherit); word-break: break-all; }
+
 @media (max-width: 600px) {
   .vsidian-settings { grid-template-columns: minmax(0, 1fr); align-content: start; }
   .vsidian-settings-sidebar { padding: 18px 20px; border-right: 0; border-bottom: 1px solid var(--vscode-panel-border, #d9dde3); }

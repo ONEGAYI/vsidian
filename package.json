@@ -235,6 +235,11 @@
         "category": "Vsidian"
       },
       {
+        "command": "onegayi.vsidian.cssSnippets.refresh",
+        "title": "%command.cssSnippets.refresh.title%",
+        "category": "Vsidian"
+      },
+      {
         "command": "onegayi.vsidian.ui.sidebarToggle",
         "title": "%command.ui.sidebarToggle.title%",
         "category": "Vsidian"

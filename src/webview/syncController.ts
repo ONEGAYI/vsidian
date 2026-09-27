@@ -153,6 +153,7 @@ import {
 } from './outlineDrag'
 import { locateOutlineIndex } from './outlineLocate'
 import { resolveStaleTaskToggle } from './taskToggle'
+import { SnippetLoader } from './snippetLoader'
 import { VirtualReadingView } from './readingVirtualView'
 import { blankRowInputPlan, runCreateTable, runTableEdit, tableEditing, tableRowsAt } from './tableEditing'
 import { listEditing } from './listEditing'
@@ -440,6 +441,9 @@ export class WebviewSyncController {
   private readingContainer: HTMLElement | undefined
   /** 阅读视图虚拟化控制器（#7：接管阅读容器的按需挂载/回收/锚点定位） */
   private readingView: VirtualReadingView | undefined
+  /** CSS 片段 <link> 装配器（#128）：只增删文档级样式链，不触碰 CM6 状态；
+   *  输入/选区/撤销/模式切换与阅读虚拟化天然不受影响（重挂载块继承文档样式） */
+  private readonly snippetLoader = new SnippetLoader()
   /** 图片资源管理器（#10：双视图共用；经宿主通道解析工作区图源） */
   private images: ImageResourceManager | undefined
   private toolbar: HTMLElement | undefined
@@ -1019,6 +1023,10 @@ export class WebviewSyncController {
         // 装载（含重载）都拉取；宿主以 settings.snapshot 响应
         this.bridge.postMessage({ kind: 'settings.get' })
         this.bridge.postMessage({ kind: 'keybindings.get' })
+        // #128 CSS 片段清单：同「init 后拉取」模式——宿主权威扫描 × 开关
+        // 映射经 snippets.snapshot 应答（新面板、重载面板、暂未广播的变更
+        // 都在此对齐当前态）
+        this.bridge.postMessage({ kind: 'snippets.get' })
         break
       case 'keybindings.snapshot':
       case 'keybindings.changed': {
@@ -1037,6 +1045,24 @@ export class WebviewSyncController {
         this.applyLineNumbersSetting()
         this.applyCodeCardSetting()
         break
+      case 'snippets.snapshot': {
+        // #128 CSS 片段装载：diff 式装配 <link>（失败保留最近成功样式、
+        // 停用立即撤下）；装载结果回报宿主（入口级成败可观测），样式落地
+        // 后唤醒测量——行高/字号变化时 live 侧 CM6 需重测视口（阅读侧由
+        // ResizeObserver → measureAndStabilize 现成管线自动锚定）
+        this.snippetLoader.apply(message, (outcome) => {
+          this.bridge.postMessage({
+            kind: 'snippets.loadResult',
+            name: outcome.name,
+            version: outcome.version,
+            ok: outcome.ok,
+          })
+          if (outcome.ok) {
+            this.scheduleSnippetMeasure()
+          }
+        })
+        break
+      }
       case 'edit.ack': {
         if (this.suspended) {
           // 暂停态：写回已停，任何 ack 结果都不再改变本地状态
@@ -4936,6 +4962,18 @@ export class WebviewSyncController {
     this.view?.dispatch({
       effects: this.lineNumbersCompartment.reconfigure(on ? liveLineNumbers() : []),
     })
+  }
+
+  /**
+   * CSS 片段装载成功后的测量唤醒（#128）：外部样式表落地可能改变行高/
+   * 字号，live 侧 CM6 视口需要被重新测量（样式变化不产生 CM6 事务，视口
+   * 不会自行重排）。立即一次 + 下一帧一次（字体类变更的排版常在帧间才
+   * 稳定）。阅读侧无需在此处理：ResizeObserver → measureAndStabilize
+   * 管线按块实测回填并做滚动锚定（#7/#59/#60 反复验证的机制）。
+   */
+  private scheduleSnippetMeasure(): void {
+    this.view?.requestMeasure()
+    requestAnimationFrame(() => this.view?.requestMeasure())
   }
 
   /**

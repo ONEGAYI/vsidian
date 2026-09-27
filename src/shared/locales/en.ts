@@ -86,6 +86,18 @@ export const en = {
   /** 测试钩子 fixture 定义（VSIDIAN_TEST_HOOKS 注入设置页的占位开关） */
   'setting.testFlag.title': 'Test flag',
 
+  // ---- cssSnippets.（CSS 片段设置分页：目录行、状态条、按钮，#128）----
+  'cssSnippets.title': 'CSS snippets',
+  'cssSnippets.description': 'Load first-level .css files from a user-level folder as snippets shared across projects. New snippets start disabled; files load in deterministic filename order, so later files override earlier ones at equal specificity.',
+  'cssSnippets.directoryLabel': 'Snippets directory',
+  'cssSnippets.chooseDirectory': 'Choose directory…',
+  'cssSnippets.chooseOpenLabel': 'Select folder',
+  'cssSnippets.openDirectory': 'Open in file manager',
+  'cssSnippets.refresh': 'Reload snippets',
+  'cssSnippets.noDirectory': 'No snippets directory selected. Choose a folder; its first-level .css files become snippets (new files start disabled).',
+  'cssSnippets.emptyDirectory': 'No .css files found in the first level of the selected directory.',
+  'cssSnippets.readError': 'Failed to read the snippets directory. The list below is the last successful state; open editors keep the last applied styles.',
+
   // ---- host.（宿主通知、确认框、QuickPick、链接拦截反馈）----
   'host.conflictInputCopied': 'Unconfirmed input copied to clipboard',
   'host.noConflictInputToCopy': 'No unconfirmed input to copy',
@@ -113,6 +125,9 @@ export const en = {
   'host.blockedLinkWindowsDrive': 'Windows drive-letter path links are not supported on remote (POSIX) workspaces',
   'host.externalOpenFailed': 'Failed to open the external link: {url}',
   'host.linkNotFound': 'Link target not found: {href} (resolved relative to the current document directory)',
+  /** #128 CSS 片段：宿主侧用户提示 */
+  'host.cssSnippetLoadFailed': 'Failed to load CSS snippet "{name}"; the last successful styles are kept.',
+  'host.cssSnippetReadFailed': 'Failed to read the CSS snippets directory "{directory}".',
   /** 运行时设置定义注册（测试钩子/懒注册）的拒绝原因 */
   'host.invalidSettingDefinition': 'Invalid definition: {definition}',
   'host.duplicateSettingKey': 'Setting key already exists: {key}',
@@ -279,6 +294,8 @@ export const en = {
   'command.table.insertColumnRight.title': 'Table: insert column right',
   'command.table.deleteColumn.title': 'Table: delete column',
   'command.openSettings.title': 'Open settings',
+  /** #128 CSS 片段刷新命令（快捷键页与命令面板同源） */
+  'command.cssSnippets.refresh.title': 'CSS snippets: reload',
   'command.ui.sidebarToggle.title': 'Expand or collapse the sidebar',
   'command.ui.outlineToggle.title': 'Show or hide the outline',
   'command.ui.outlineSearch.title': 'Search headings',

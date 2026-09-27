@@ -107,6 +107,22 @@ export async function run(): Promise<void> {
         }
         await new Promise((r) => setTimeout(r, 100))
       }
+      // #128 CSS 片段状态重置（与设置同层的 globalState 迟到回翻风险面）：用例
+      // 间残留目录会让后续用例的样式面板装载无关片段、污染 cssProbe 断言
+      for (let attempt = 0; ; attempt++) {
+        await vscode.commands.executeCommand('onegayi.vsidian._test.setSnippetDirectory', null)
+        const snippet = (await vscode.commands.executeCommand(
+          'onegayi.vsidian._test.getSnippetState')) as { directory?: string | null; entries?: unknown[] }
+        if ((snippet.directory == null && (snippet.entries?.length ?? 0) === 0) || attempt >= 10) {
+          if (attempt >= 10) {
+            console.warn(
+              `[集成测试][WARN] 片段状态重置未稳定（directory=${String(snippet.directory)}），放行用例「${name}」`,
+            )
+          }
+          break
+        }
+        await new Promise((r) => setTimeout(r, 100))
+      }
       await fn()
       console.log(`[集成测试][PASS] ${name}`)
     } catch (err) {
