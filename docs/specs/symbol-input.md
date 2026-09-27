@@ -43,7 +43,7 @@
 
 新增符号只需：注册表加一行（含 `selectionWrap`、`tabEscape` 决定是否参与选区包裹与 Tab 越界）+ `test/unit/symbols.test.ts` 参数化用例钉住其触发/越过/抑制条件（清单数断言同步），不需要改 webview 侧条件分支。
 
-右邻抑制（`suppressAfter`）是**差异化双口径**（#151 参考 VSCode autoClosingBefore / CM6 closeBrackets 先例后采取的保守变体）：括号与引号登记正文中间口径 `isBodyChar`——右邻为非空白且非闭合类字符（词字符、普通标点等「正文中间」形态）时不补全（`|word` 键 `[` 不再越界补出 `[|]word`），右邻空白、行尾或注册表任一 close 字符时照常补全（闭合类集合从注册表派生——新增符号自动继承，嵌套 `[（|）]` 形态照补）；Markdown 触发符维持既有词字符口径 `isWordChar`（右邻普通标点照常补全）。注意与先例的差异：VSCode/CM6 对右邻普通标点（如 `,`）实际放行补全、仅抑制词字符，本项目连标点也抑制，**比先例更保守**——这是 #151 落档的显式决策而非先例复刻。两口径差异化并存同样是 #151 的显式决策，不得顺手统一或放宽。transactionFilter 与 IME 提交补全（`attemptCompositionCommitClose`）共用 `shouldAutoclose` 判定，口径变化同时作用于两条路径。
+右邻抑制（`suppressAfter`）是**差异化双口径**（#151 参考 VSCode autoClosingBefore / CM6 closeBrackets 先例后的取舍）：括号与引号登记正文中间口径 `isBodyChar`——右邻为非空白且非闭合类字符（词字符、普通标点等「正文中间」形态）时不补全（`|word` 键 `[` 不再越界补出 `[|]word`），右邻空白、行尾或注册表任一 close 字符时照常补全（闭合类集合从注册表派生——新增符号自动继承，嵌套 `[（|）]` 形态照补）；Markdown 触发符维持既有词字符口径 `isWordChar`（右邻普通标点照常补全）。注意与先例的差异（核实 @codemirror/autocomplete 6.20.3 源码后）：CM6 closeBrackets 同样抑制右邻普通标点（其放行集为固定 `)]}:;>`，见 `defaults.before`），本项目放行集从注册表派生，方向一致而集合构成不同；VSCode autoClosingBefore 按语言词字符判定（右邻普通标点放行），本项目连标点也抑制，仅比 VSCode 更保守——这是 #151 落档的显式决策而非先例复刻。两口径差异化并存同样是 #151 的显式决策，不得顺手统一或放宽。transactionFilter 与 IME 提交补全（`attemptCompositionCommitClose`）共用 `shouldAutoclose` 判定，口径变化同时作用于两条路径。
 
 ### 选区路径：非空选区键入包裹（#124）
 

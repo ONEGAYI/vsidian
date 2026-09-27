@@ -84,11 +84,14 @@ const isWordChar = (ch: string): boolean => /\p{L}|\p{N}/u.test(ch)
  *  闭合字符——词字符与普通标点都算。右邻为这类字符（`|word`、`|,x`）
  *  时不补全，避免闭合符越界补到正文中间；右邻空白/行尾/闭合类字符
  *  （`) ] }`、引号、Markdown 标记符等，含 `[（|）]` 嵌套形态）放行。
- *  本口径比 VSCode autoClosingBefore / CM6 closeBrackets 先例（两者对
- *  右邻普通标点如 `,` 放行补全，仅抑制词字符）更保守——标点也抑制是
- *  #151 落档的显式决策，不是先例复刻。闭合类集合 REGISTRY_CLOSE_CHARS
- *  从注册表派生，定义在注册表之后——本函数只在运行时被调用（模块初始
- *  化后），后置引用无 TDZ 风险 */
+ *  与先例的关系（核实 @codemirror/autocomplete 6.20.3 源码）：CM6
+ *  closeBrackets 同样抑制右邻普通标点（放行集为固定 `)]}:;>`，见
+ *  defaults.before），本项目放行集从注册表派生——方向一致、集合构成
+ *  不同；VSCode autoClosingBefore 按语言词字符判定（右邻普通标点放
+ *  行），本项目仅比 VSCode 更保守。标点也抑制是 #151 落档的显式决
+ *  策，不是先例复刻。闭合类集合 REGISTRY_CLOSE_CHARS 从注册表派生，
+ *  定义在注册表之后——本函数只在运行时被调用（模块初始化后），
+ *  后置引用无 TDZ 风险 */
 const isBodyChar = (ch: string): boolean =>
   ch !== '' && !/\s/u.test(ch) && !REGISTRY_CLOSE_CHARS.has(ch)
 
