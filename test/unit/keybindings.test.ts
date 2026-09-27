@@ -104,3 +104,43 @@ describe('快捷键筛选签（#155）', () => {
     expect(operationMatchesFilter(overrides, 'italic', 'conflict')).toBe(false)
   })
 })
+
+describe('HTML 注释快捷键（#139）', () => {
+  it('默认 ctrl+slash（ctrl+/ 物理键）仅 Live 生效；可改绑清空恢复', () => {
+    expect(getEffectiveBindings({}, 'htmlComment')).toEqual(['ctrl+slash'])
+    expect(resolveKeybinding({}, 'live', 'ctrl+slash')).toEqual({ kind: 'command', id: 'htmlComment' })
+    // 阅读模式无写操作：none（源码模式与设置页不经编辑器路由，天然不接管）
+    expect(resolveKeybinding({}, 'reading', 'ctrl+slash')).toEqual({ kind: 'none' })
+    // 显式清空后不拦截（宿主行注释回归宿主处理）
+    expect(resolveKeybinding({ htmlComment: [] }, 'live', 'ctrl+slash')).toEqual({ kind: 'none' })
+    // 改绑到 ctrl+shift+c 生效
+    expect(applyBindingChange({}, 'htmlComment', ['ctrl+shift+c'], false))
+      .toMatchObject({ ok: true })
+    expect(getEffectiveBindings({ htmlComment: ['ctrl+shift+c'] }, 'htmlComment'))
+      .toEqual(['ctrl+shift+c'])
+  })
+
+  it('slash 键名规范化：词名大小写归一（裸 / 字符不另设别名，与 minus 等符号口径一致）', () => {
+    expect(normalizeChord('Ctrl+Slash')).toBe('ctrl+slash')
+    expect(normalizeChord('ctrl+slash')).toBe('ctrl+slash')
+  })
+})
+
+describe('双态视图切换快捷键（#141 增补）', () => {
+  it('默认 ctrl+q 双模式生效；manifest 命令已登记', () => {
+    const manifest = JSON.parse(readFileSync('package.json', 'utf8'))
+    expect(getEffectiveBindings({}, 'toggleDualView')).toEqual(['ctrl+q'])
+    expect(resolveKeybinding({}, 'live', 'ctrl+q')).toEqual({ kind: 'command', id: 'toggleDualView' })
+    expect(resolveKeybinding({}, 'reading', 'ctrl+q')).toEqual({ kind: 'command', id: 'toggleDualView' })
+    expect(manifest.contributes.commands.some(
+      (item: { command: string }) => item.command === 'onegayi.vsidian.mode.toggleDualView')).toBe(true)
+    // 显式清空后回落 none（宿主键位归还宿主）；改绑生效
+    expect(resolveKeybinding({ toggleDualView: [] }, 'live', 'ctrl+q')).toEqual({ kind: 'none' })
+    expect(applyBindingChange({}, 'toggleDualView', ['ctrl+alt+r'], false)).toMatchObject({ ok: true })
+  })
+
+  it('与三态切换语义并存：toggleViewMode 仍无默认键，键位互不冲突', () => {
+    const conflicts = findBindingConflicts({}, 'toggleDualView', 'ctrl+q')
+    expect(conflicts).toEqual([])
+  })
+})

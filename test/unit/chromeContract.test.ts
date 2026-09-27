@@ -67,9 +67,11 @@ const DYNAMIC_STATE_ENTRIES: ReadonlySet<string> = new Set([
   'live-code-card-copy', // 复制按钮（悬停显现 + 点击态）
   'live-code-card-fold', // 折叠 chevron
   'live-code-card-edge', // 首末行修饰（首行由头部覆盖，CSS 契约钉）
+  'live-fm-popover', // #140 Popover 改版：属性编辑浮层（打开时挂载 body，开闭与写回由浏览器套件验证）
   'suspend-banner', // 暂停态横幅
   'diagram-popup', // 弹窗在场期间（chromePopup 观测）
   'mode-toggle', // 已移除（历史记录条目）
+  'mode-body', // 模式态类（live/reading 互斥，两态必居其一——无静态单值可断言）
 ])
 
 describe('chromeContract 覆盖分工', () => {

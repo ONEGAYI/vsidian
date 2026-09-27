@@ -13,9 +13,14 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // cssSnippets。
 // #130 合并入列：cssHttpsImports（HTTPS 导入/联网字体/受控 https 服务）。
 // #133 合并入列：chromeContract（界面域样式契约探针）紧随 obsidianAlias。
-const names = ['tableCaret', 'taskClick', 'listEditing', 'tabIndent', 'symbolInput', 'outlineJump', 'outlineCollapse', 'outlineHover',
+// #143 合并入列：quoteBarPaint（引用竖条双视图 × 明暗主题绘制层）紧随
+// tableCaret（同批次 C 组渲染与样式侧套件）。
+// #140 合并入列：frontmatterTable（真实键鼠输入回流与结构按钮）紧随 taskClick。
+// #139 合并入列：commentToggle（HTML 注释 Ctrl+/ 两态、淡化绘制与阅读隐藏）。
+// #141 合并入列：viewToggle（工具栏双态切换按钮与 Ctrl+Q 快捷键入口）。
+const names = ['tableCaret', 'quoteBarPaint', 'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage',
-  'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract']
+  'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract', 'commentToggle', 'viewToggle']
 let workers = 2, reuseBuilds = true, selected = names
 for (const arg of process.argv.slice(2)) {
   if (/^--workers=\d+$/.test(arg)) workers = Number(arg.slice('--workers='.length))

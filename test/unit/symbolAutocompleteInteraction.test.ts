@@ -292,14 +292,16 @@ describe('上下文抑制与共存', () => {
     expect(view.state.doc.toString()).toBe('a `[~]b` c')
   })
 
-  it('frontmatter 内按代码口径：括号照补、强调抑制', () => {
-    const { view } = setup('---\ntitle: x\n---\n')
-    // 光标在 frontmatter 第二行行尾（x 之后）
-    view.dispatch({ selection: { anchor: 12 } })
-    typeText(view, 12, '(')
-    expect(view.state.doc.toString()).toBe('---\ntitle: x()\n---\n')
-    typeText(view, 13, '=')
-    expect(view.state.doc.toString()).toBe('---\ntitle: x(=)\n---\n')
+  it('降级头区（不可成型）按代码口径：括号照补、强调抑制', () => {
+    // #140 Popover 改版：成型头区光标不可达（编辑收敛到 Popover），代码
+    // 口径的可编辑面收敛到降级源码形态（复杂类型）——嵌套键使头区降级
+    const { view } = setup('---\nouter:\n  inner: x\n---\n')
+    // 光标在 x 之后
+    view.dispatch({ selection: { anchor: 21 } })
+    typeText(view, 21, '(')
+    expect(view.state.doc.toString()).toBe('---\nouter:\n  inner: x()\n---\n')
+    typeText(view, 22, '=')
+    expect(view.state.doc.toString()).toBe('---\nouter:\n  inner: x(=)\n---\n')
   })
 
   it('反斜杠转义后的符号按普通文字处理', () => {

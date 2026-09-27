@@ -123,18 +123,30 @@ describe('源文本安全注入', () => {
   })
 })
 
-describe('frontmatter 呈现（局部源码降级）', () => {
-  it('frontmatter 块按源码呈现，内部 # 不渲染为标题', () => {
+describe('frontmatter 呈现（#140 合法成型表格；复杂形态降级源码）', () => {
+  it('合法头区成型表格：键值分格、注释行不显示、内部 # 不渲染为标题', () => {
     const container = createReadingContainer()
     renderReadingBlocks(container, '---\ntitle: 元\n# 伪\n---\n\n# 真标题\n')
     const fm = container.querySelector(`.${READING_CLASS_NAMES.frontmatter}`)
     expect(fm).not.toBeNull()
-    expect(fm!.textContent).toContain('title: 元')
-    expect(fm!.textContent).toContain('# 伪')
+    // 成型表格：键值分格呈现（无 `title: 元` 源文形态）；注释行不显示
+    expect(fm!.querySelector('.vsidian-fm-table')).not.toBeNull()
+    expect(fm!.textContent).toContain('title')
+    expect(fm!.textContent).toContain('元')
+    expect(fm!.textContent).not.toContain('# 伪')
     expect(fm!.querySelector('h1')).toBeNull()
     const headings = Array.from(container.querySelectorAll(`.${READING_CLASS_NAMES.block} h1`))
     expect(headings.length).toBe(1)
     expect(headings[0]!.textContent).toBe('真标题')
+  })
+
+  it('复杂形态降级：转义源码块呈现', () => {
+    const container = createReadingContainer()
+    renderReadingBlocks(container, '---\ntitle: 元\nouter:\n  inner: 1\n---\n\n正文\n')
+    const fm = container.querySelector(`.${READING_CLASS_NAMES.frontmatter}`)
+    expect(fm).not.toBeNull()
+    expect(fm!.querySelector('pre.vsidian-reading-frontmatter-text')).not.toBeNull()
+    expect(fm!.textContent).toContain('inner: 1')
   })
 })
 

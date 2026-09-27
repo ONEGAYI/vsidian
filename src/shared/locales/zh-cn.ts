@@ -150,6 +150,7 @@ export const zhCn: Record<MessageKey, string> = {
   'styleRef.category.codeCard': '代码块卡片',
   'styleRef.category.outline': '大纲面板',
   'styleRef.category.chromeLimits': '限制说明',
+  'styleRef.category.frontmatter': 'frontmatter 表格卡片',
   'styleRef.category.toolbarBanner': '工具栏与横幅',
   'host.styleRefExported': '样式契约 JSON 已导出：{path}',
   'host.styleRefExportFailed': '样式契约 JSON 导出失败：{reason}',
@@ -240,6 +241,7 @@ export const zhCn: Record<MessageKey, string> = {
   'format.blockMath': '插入块级公式',
   'format.wikilink': '插入双链',
   'format.horizontalRule': '插入分割线',
+  'format.htmlComment': 'HTML 注释',
 
   'format.toolbarAria': '格式快速操作',
   'format.groupText': '文字',
@@ -254,6 +256,9 @@ export const zhCn: Record<MessageKey, string> = {
   'sidebar.quickActions': '快速操作条',
   'sidebar.collapse': '收起右侧栏',
   'sidebar.expand': '展开右侧栏',
+  /** #141 工具栏双态视图切换按钮（aria/title 表目标动作，随当前态换词） */
+  'toolbar.switchToReading': '切换到阅读视图',
+  'toolbar.switchToLive': '切换到实时预览',
   'sidebar.resize': '拖拽调整侧栏宽度',
 
   'find.placeholder': '查找',
@@ -335,8 +340,28 @@ export const zhCn: Record<MessageKey, string> = {
   'decor.mermaidUnavailable': '图表渲染器不可用（mermaid.js 未能加载）',
   'decor.mermaidError': '图表渲染失败：{message}',
 
+  // ---- frontmatter.（#140 表格卡片：标题栏、修改按钮与 Popover 编辑）----
+  /** 卡片标题栏文字（对齐 Obsidian Properties 面板） */
+  'frontmatter.title': '属性',
+  /** 标题栏右上角「修改」按钮（打开属性编辑 Popover） */
+  'frontmatter.edit': '修改',
+  /** Popover 容器 aria 标签 */
+  'frontmatter.popoverAriaLabel': '修改属性',
+  /** Popover 内键名输入框 aria 标签 */
+  'frontmatter.keyAriaLabel': '属性名',
+  /** Popover 内值输入框 aria 标签 */
+  'frontmatter.valueAriaLabel': '属性值',
+  /** Popover 内数组项输入框 aria 标签 */
+  'frontmatter.itemAriaLabel': '列表项',
+  'frontmatter.addProperty': '添加属性',
+  'frontmatter.removeProperty': '删除属性',
+  'frontmatter.removeConfirm': '确认删除',
+  'frontmatter.addItem': '添加列表项',
+  'frontmatter.removeItem': '删除列表项',
+  'frontmatter.empty': '暂无属性',
+
   // ---- #97 manifest NLS（命令 title 与 displayName/description 生成源）----
-  // 值即 package.json 原硬编码字面量（呈现不变）；工具条 23 条命令复用
+  // 值即 package.json 原硬编码字面量（呈现不变）；工具条 24 条命令复用
   // format.* 既有键。command.* 键同时是快捷键页 extra/UI 源操作名的
   // titleKey（与命令面板同源，无第二套文案）。
   'manifest.displayName': 'Vsidian',
@@ -346,6 +371,8 @@ export const zhCn: Record<MessageKey, string> = {
   'command.mode.toReading.title': '切换到阅读模式',
   'command.mode.toSource.title': '切换到源码编辑器',
   'command.mode.toLive.title': '切换到实时预览',
+  /** #141 双态切换（live↔reading，不含源码；工具栏按钮与 Ctrl+Q 共用） */
+  'command.mode.toggleDualView.title': '切换阅读/实时预览',
   'command.find.title': '查找（编辑区）',
   'command.find.next.title': '下一个查找结果',
   'command.find.previous.title': '上一个查找结果',
