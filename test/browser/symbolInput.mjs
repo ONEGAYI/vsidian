@@ -329,6 +329,8 @@ try {
       { from: 1, to: 3 },
       { from: 7, to: 9 },
     ], '跨段 IME 包裹')
+    // 出站合并是异步 flush：先等至少一笔到位，再严格断言恰一笔（双写回仍会被抓住）
+    await page.waitForFunction(() => window.readHostMessages().filter((message) => message.kind === 'edit.request').length >= 1)
     const requests = await page.evaluate(() => window.readHostMessages().filter((message) => message.kind === 'edit.request'))
     assert.equal(requests.length, 1, `跨段 IME 单笔写回: ${JSON.stringify(requests)}`)
     await cdp.send('Input.imeSetComposition', { text: '（', selectionStart: 1, selectionEnd: 1 })
