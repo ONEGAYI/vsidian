@@ -89,12 +89,19 @@ try {
     assert.equal(await nameSearch.inputValue(), '粗Z体', '替换中段选区后应保留两侧文本')
     assert.equal(await nameSearch.evaluate((input) => input.selectionStart), 2)
     await nameSearch.fill('')
-    // 捕获签流（#155）：＋ 原位变 ✓，就地录制 Ctrl+B，真实 pointer 点击提交
+    // 捕获签流（#155）：＋ 原位变 ✓，点 ＋ 后立即聚焦（术语契约「立即捕获
+    // 键盘输入」），真实键盘路径录 Ctrl+B（不借 press 自动聚焦），pointer 提交
     const italic = page.locator('[data-operation-id="italic"]')
     await italic.getByRole('button', { name: zhCn['keybindingSettings.addBinding'] }).click()
     const capture = italic.getByRole('textbox', { name: zhCn['keybindingSettings.capturePlaceholder'] })
-    await capture.press('Control+b')
+    assert.equal(await capture.evaluate(el => document.activeElement === el), true,
+      '点 ＋ 后捕获签应立即获得焦点（无需二次点击）')
+    await page.keyboard.press('Control+b')
     assert.equal(await capture.inputValue(), 'Ctrl+B')
+    const capturePaint = await capture.evaluate(el => ({
+      border: getComputedStyle(el).borderColor, radius: getComputedStyle(el).borderRadius }))
+    assert.equal(capturePaint.border, 'rgb(38, 135, 212)', '捕获签应为激活描边色（focusBorder）')
+    assert.equal(capturePaint.radius, '999px')
     const commit = italic.getByRole('button', { name: zhCn['keybindingSettings.commitCapture'] })
     assert.equal(await commit.isDisabled(), false, '草稿非空后提交应可用')
     await commit.click()
@@ -121,21 +128,52 @@ try {
       .press('Enter')
     await page.getByRole('status').filter({ hasText: zhCn['keybindingSettings.saved'] }).waitFor()
     assert.equal(await math.locator('kbd').innerText(), 'Ctrl+K Ctrl+M')
+    // × 一击删除（审查修复）：捕获签聚焦时点击他行键位牌 ×——焦点移向结果区
+    // 控件不取消捕获，click 正常派发，一击即删且捕获签保留（重渲染后重聚焦）
+    // （删 italic 的第一个牌 Ctrl+I 留 Ctrl+B，保留 inlineMath 两段键位供后续段）
+    await bold.getByRole('button', { name: zhCn['keybindingSettings.addBinding'] }).click()
+    const boldCapture = bold.getByRole('textbox', { name: zhCn['keybindingSettings.capturePlaceholder'] })
+    assert.equal(await boldCapture.evaluate(el => document.activeElement === el), true)
+    await italic.locator('.vsidian-keybindings-remove').first().click()
+    await page.waitForFunction(() =>
+      document.querySelectorAll('[data-operation-id="italic"] kbd').length === 1)
+    assert.equal(await italic.locator('kbd').innerText(), 'Ctrl+B', '捕获签聚焦时点 × 应一击删除首牌')
+    assert.equal(await page.evaluate(() => {
+      const sets = window.messages.filter(m => m.kind === 'keybindings.set')
+      const last = sets[sets.length - 1]
+      return last && last.id === 'italic' && JSON.stringify(last.bindings) === '["ctrl+b"]'
+    }), true, '一击删除应发出移除 ctrl+i 的保存消息')
+    assert.equal(await boldCapture.evaluate(el => document.activeElement === el), true,
+      '他行动作引发的回推重渲染后，活跃捕获签应重获焦点（录制不中断）')
+    await page.keyboard.press('Escape')
+    // ⋯ 菜单（审查修复补强）：浮层绘制形态 + 点击别处收起（规格承诺）
+    const boldMenuBtn = bold.getByRole('button', { name: zhCn['keybindingSettings.moreActions'] })
+    await boldMenuBtn.click()
+    const menu = page.locator('[data-operation-id="bold"] .vsidian-keybindings-menu')
+    const menuPaint = await menu.evaluate(el => ({ pos: getComputedStyle(el).position,
+      shadow: getComputedStyle(el).boxShadow, role: el.getAttribute('role') }))
+    assert.equal(menuPaint.pos, 'absolute', '⋯ 菜单应为浮层定位')
+    assert.notEqual(menuPaint.shadow, 'none', '⋯ 菜单应有投影与页面分层')
+    assert.equal(menuPaint.role, 'menu')
+    await page.locator('.vsidian-settings-title').click()
+    assert.equal(await menu.count(), 0, '点击菜单外（页面标题）应收起菜单')
     // 按键捕获过滤模式（#155）：键盘图标切换，就地录制过滤
     const keyToggle = page.getByRole('button', { name: zhCn['keybindingSettings.keySearchToggle'] })
     await keyToggle.click()
     assert.equal(await keyToggle.getAttribute('aria-pressed'), 'true')
     const togglePaint = await keyToggle.evaluate((node) => getComputedStyle(node).color)
     assert.equal(togglePaint, 'rgb(38, 135, 212)', '激活态键盘图标应为主题强调色')
-    await page.getByRole('searchbox', { name: zhCn['keybindingSettings.searchNamePlaceholder'] })
-      .press('Control+k')
-    await page.getByRole('searchbox', { name: zhCn['keybindingSettings.searchNamePlaceholder'] })
-      .press('Control+m')
+    // key 模式下搜索框为按键捕获面：可访问名随模式切换为捕获占位名（C-3 修复）
+    const keyModeSearch = page.getByRole('searchbox', { name: zhCn['keybindingSettings.capturePlaceholder'] })
+    assert.equal(await keyModeSearch.evaluate(el => el.readOnly), true, '按键捕获模式搜索框应只读')
+    await keyModeSearch.press('Control+k')
+    await keyModeSearch.press('Control+m')
     assert.equal(await page.locator('.vsidian-keybindings-row').count(), 1)
     assert.equal(await page.locator('.vsidian-keybindings-row').getAttribute('data-operation-id'), 'inlineMath')
-    await page.getByRole('searchbox', { name: zhCn['keybindingSettings.searchNamePlaceholder'] })
-      .press('Escape')
+    await keyModeSearch.press('Escape')
     assert.equal(await page.locator('.vsidian-keybindings-row').count() > 1, true, 'Esc 退回文字模式应清空键位过滤')
+    assert.equal(await page.getByRole('searchbox', { name: zhCn['keybindingSettings.searchNamePlaceholder'] })
+      .evaluate(el => el.readOnly), false, '退回文字模式恢复可编辑')
     // 筛选签（#155）：冲突计数与四维过滤（真实点击路径）
     await page.evaluate(() => window.dispatchEvent(new MessageEvent('message',
       { data: { kind: 'keybindings.snapshot',

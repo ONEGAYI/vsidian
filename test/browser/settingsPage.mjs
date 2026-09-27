@@ -258,6 +258,17 @@ try {
     await page.setViewportSize({ width: 360, height: 740 })
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
     assert.equal(await box.isVisible(), true)
+    // #155 跟进（窄屏退化契约）：侧栏恢复整页滚动（不再独立 overflow）；
+    // 详细查询页签在窄屏下不做内部双列滚动，主区回到整块滚动
+    assert.deepEqual(await page.evaluate(() => ({
+      sidebar: getComputedStyle(document.querySelector('.vsidian-settings-sidebar')).overflowY,
+      main: getComputedStyle(document.querySelector('.vsidian-settings-main')).overflowY,
+    })), { sidebar: 'visible', main: 'auto' })
+    await page.getByRole('button', { name: zhCn['styleRef.title'], exact: true }).click()
+    await page.locator('.vsidian-style-ref-tab').nth(1).click()
+    assert.equal(await page.evaluate(() =>
+      getComputedStyle(document.querySelector('.vsidian-settings-main')).overflowY), 'auto',
+    '窄屏下详细查询页签应恢复整页滚动')
     await page.screenshot({ path: path.join(artifacts, `settings-${theme}-narrow.png`) })
     assert.deepEqual(errors, [])
     console.log(`[设置页][PASS] ${theme}：主题绘制、图标、原生搜索、定位、保存、焦点与 360px 窄屏`)

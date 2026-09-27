@@ -12,6 +12,9 @@ import { zhCn } from '../../src/shared/locales/zh-cn'
 // #94 起文案经 t() 取词：装配生产中文包，断言与字典同源
 installLocale('zh-cn', zhCn)
 
+/** blur 取消判定在下一帧执行（rAF 焦点锚定）：测试等待一帧再断言 */
+const nextFrame = (): Promise<void> => new Promise((resolve) => requestAnimationFrame(() => resolve()))
+
 function chord(key: string, ctrl = true): KeyboardEvent {
   return new KeyboardEvent('keydown', { key, ctrlKey: ctrl, bubbles: true })
 }
@@ -110,7 +113,7 @@ describe('快捷键设置页', () => {
     root.remove()
   })
 
-  it('捕获签：Esc 与失焦取消录制，草稿不残留、不发送', () => {
+  it('捕获签：Esc 与失焦取消录制，草稿不残留、不发送', async () => {
     const sent: unknown[] = []
     const section = new KeybindingSettingsSection({ postMessage: (m) => sent.push(m) })
     const root = document.createElement('div')
@@ -130,7 +133,9 @@ describe('快捷键设置页', () => {
     add().click()
     capture().focus()
     capture().dispatchEvent(chord('k'))
+    // 失焦取消在下一帧以实际焦点位置判定（焦点已随 blur 回落 body）
     capture().blur()
+    await nextFrame()
     expect(row().querySelector('.vsidian-keybindings-capture')).toBeNull()
     expect(sent).toEqual([])
     root.remove()
@@ -186,5 +191,110 @@ describe('快捷键设置页', () => {
     expect(root.querySelector('.vsidian-keybindings-key-toggle')!.getAttribute('aria-pressed')).toBe('false')
     expect(rowIds().length).toBeGreaterThan(1)
     root.remove()
+  })
+})
+
+describe('审查修复（PR #156 复核轮：焦点与菜单编排）', () => {
+  function setup(overrides: Record<string, string[]> = {}, focusEntry?: string) {
+    const sent: unknown[] = []
+    const section = new KeybindingSettingsSection({ postMessage: (m) => sent.push(m) })
+    const root = document.createElement('div')
+    document.body.append(root)
+    section.mount(root, focusEntry)
+    section.handleHostMessage({ kind: 'keybindings.snapshot', overrides })
+    return { section, root, sent, cleanup: () => root.remove() }
+  }
+  const addOf = (root: HTMLElement, id: string) =>
+    root.querySelector<HTMLButtonElement>(`[data-operation-id="${id}"] .vsidian-keybindings-add`)!
+  const captureOf = (root: HTMLElement, id: string) =>
+    root.querySelector<HTMLInputElement>(`[data-operation-id="${id}"] .vsidian-keybindings-capture`)!
+  const commitOf = (root: HTMLElement, id: string) =>
+    root.querySelector<HTMLButtonElement>(`[data-operation-id="${id}"] .vsidian-keybindings-commit`)!
+
+  it('点 ＋ 后捕获签自动聚焦（术语契约：立即捕获键盘输入）', () => {
+    const { root, cleanup } = setup()
+    addOf(root, 'bold').click()
+    const capture = captureOf(root, 'bold')
+    expect(capture).toBeTruthy()
+    expect(document.activeElement).toBe(capture)
+    // 焦点在捕获签上时按键直接进草稿（不经二次聚焦）
+    capture.dispatchEvent(chord('b'))
+    expect(capture.value).toBe('Ctrl+B')
+    cleanup()
+  })
+
+  it('⋯ 菜单点击别处收起（规格：点击别处或再点 ⋯ 收起），菜单内点击不收起', () => {
+    const { root, cleanup } = setup()
+    root.querySelector<HTMLButtonElement>('[data-operation-id="bold"] .vsidian-keybindings-menu-btn')!.click()
+    expect(root.querySelector('[data-operation-id="bold"] .vsidian-keybindings-menu')).toBeTruthy()
+    // 菜单外的 pointerdown（目标 document）应收起菜单
+    document.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }))
+    expect(root.querySelector('[data-operation-id="bold"] .vsidian-keybindings-menu')).toBeNull()
+    // 重开菜单，pointerdown 落在菜单内目标时不收起
+    root.querySelector<HTMLButtonElement>('[data-operation-id="bold"] .vsidian-keybindings-menu-btn')!.click()
+    const menu2 = root.querySelector<HTMLElement>('[data-operation-id="bold"] .vsidian-keybindings-menu')!
+    menu2.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }))
+    expect(root.querySelector('[data-operation-id="bold"] .vsidian-keybindings-menu')).toBeTruthy()
+    cleanup()
+  })
+
+  it('Backspace 清空草稿后 ✓ 回到禁用态（规格：✓ 在草稿为空时禁用）', () => {
+    const { root, cleanup } = setup({}, 'bold')
+    const capture = captureOf(root, 'bold')
+    capture.dispatchEvent(chord('b'))
+    expect(commitOf(root, 'bold').disabled).toBe(false)
+    capture.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true }))
+    expect(capture.value).toBe('')
+    expect(commitOf(root, 'bold').disabled).toBe(true)
+    cleanup()
+  })
+
+  it('blur 移焦到结果区内控件不取消捕获（× 一击 / Tab ✓ / 点另一行 ＋ 均不吞击）', async () => {
+    const { root, cleanup } = setup()
+    addOf(root, 'bold').click()
+    const capture = captureOf(root, 'bold')
+    capture.dispatchEvent(chord('b'))
+    // 焦点实际移到另一行的 ＋（结果区内）：blur 一帧后录制继续（草稿保留）
+    addOf(root, 'italic').focus()
+    capture.dispatchEvent(new FocusEvent('blur'))
+    await nextFrame()
+    expect(root.querySelector('.vsidian-keybindings-capture')).toBeTruthy()
+    expect(capture.value).toBe('Ctrl+B')
+    // 焦点实际移到搜索框（结果区外）：blur 一帧后取消捕获
+    const search = root.querySelector<HTMLInputElement>('.vsidian-keybindings-search')!
+    search.focus()
+    capture.dispatchEvent(new FocusEvent('blur'))
+    await nextFrame()
+    expect(root.querySelector('.vsidian-keybindings-capture')).toBeNull()
+    cleanup()
+  })
+
+  it('宿主键位回推不吞捕获草稿：捕获签重建、草稿回填并重聚焦', () => {
+    const { section, root, cleanup } = setup({}, 'bold')
+    const capture = captureOf(root, 'bold')
+    capture.dispatchEvent(chord('b'))
+    // 宿主回推（如另一窗口保存后的快照）：重渲染后捕获签仍在、草稿回填、焦点恢复
+    section.handleHostMessage({ kind: 'keybindings.snapshot', overrides: { italic: ['ctrl+b'] } })
+    const captureAfter = captureOf(root, 'bold')
+    expect(captureAfter).toBeTruthy()
+    expect(captureAfter.value).toBe('Ctrl+B')
+    expect(document.activeElement).toBe(captureAfter)
+    cleanup()
+  })
+
+  it('按键捕获过滤模式：搜索框 readOnly 且可访问名随模式切换', () => {
+    const { root, cleanup } = setup()
+    const searchOf = () => root.querySelector<HTMLInputElement>('.vsidian-keybindings-search')!
+    expect(searchOf().readOnly).toBe(false)
+    expect(searchOf().getAttribute('aria-label')).toBe(zhCn['keybindingSettings.searchNamePlaceholder'])
+    root.querySelector<HTMLButtonElement>('.vsidian-keybindings-key-toggle')!.click()
+    // setKeyMode 走全量重渲染：断言落在重建后的新节点上
+    expect(searchOf().readOnly).toBe(true)
+    expect(searchOf().getAttribute('aria-label')).toBe(zhCn['keybindingSettings.capturePlaceholder'])
+    // 切回文字模式恢复可编辑与原名
+    root.querySelector<HTMLButtonElement>('.vsidian-keybindings-key-toggle')!.click()
+    expect(searchOf().readOnly).toBe(false)
+    expect(searchOf().getAttribute('aria-label')).toBe(zhCn['keybindingSettings.searchNamePlaceholder'])
+    cleanup()
   })
 })

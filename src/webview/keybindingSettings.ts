@@ -107,8 +107,20 @@ export class KeybindingSettingsSection implements SettingsPageSection {
       this.focusEntry = focusEntry
     }
     this.selected = focusEntry ?? this.selected
+    // ⋯ 菜单「点击别处收起」（规格承诺）：document 级 pointerdown 常驻监听，
+    // 目标不在当前菜单容器内即收起；随分页卸载移除
+    const onDocPointerDown = (event: Event): void => {
+      if (!this.menuOpenId) return
+      const wrap = this.parent?.querySelector(
+        `.vsidian-keybindings-row[data-operation-id="${this.menuOpenId}"] .vsidian-keybindings-menu-wrap`)
+      if (wrap && event.target instanceof Node && wrap.contains(event.target)) return
+      this.menuOpenId = undefined
+      this.renderRows()
+    }
+    document.addEventListener('pointerdown', onDocPointerDown)
     this.render()
     return () => {
+      document.removeEventListener('pointerdown', onDocPointerDown)
       this.parent = undefined
       this.filtersEl = undefined
       this.resultsEl = undefined
@@ -205,6 +217,9 @@ export class KeybindingSettingsSection implements SettingsPageSection {
         this.draft = ''
         this.draftRaw = ''
         input.value = ''
+        const commit = input.closest('.vsidian-keybindings-row')
+          ?.querySelector<HTMLButtonElement>('.vsidian-keybindings-commit')
+        if (commit) commit.disabled = true
         return
       }
       const step = keyStep(event)
@@ -217,11 +232,28 @@ export class KeybindingSettingsSection implements SettingsPageSection {
         ?.querySelector<HTMLButtonElement>('.vsidian-keybindings-commit')
       if (commit) commit.disabled = !this.draft
     })
-    // 失焦取消录制。提交钮以 pointerdown preventDefault 维持焦点在捕获签上，
-    // 点击提交不产生失焦；提交路径以 completing 标记双保险——提交引发的
-    // DOM 重建即使触发 blur 也不得回退成取消
-    input.addEventListener('blur', () => {
-      if (!this.completing) this.cancelCapture()
+    // 失焦取消录制：双锚定判定（意图 + 现实），直接判 relatedTarget 或
+    // activeElement 单独都不可靠——
+    //  · 行内动作/宿主回推触发全表重渲染时，旧捕获签被移除会异步派发
+    //    relatedTarget=null 的孤儿 blur（此时 renderRows 末尾已把焦点重聚到
+    //    新捕获签，单看 activeElement 可化解）；
+    //  · headless/部分平台点击按钮焦点实际落 body（relatedTarget 才是点击
+    //    意图），单看 activeElement 会误判为用户点空白而取消+重建吞掉 click。
+    // 一帧后：焦点意图（relatedTarget）或实际焦点任一落在捕获签/结果区内
+    // 控件（×、⋯、✓、另一行 ＋）即录制继续；两者都离开（body、搜索框、
+    // 页面其他区域）才取消。提交路径另有 completing 标记双保险
+    input.addEventListener('blur', (event) => {
+      if (this.completing) return
+      const intended = event.relatedTarget
+      const intentInside = intended instanceof Node && this.resultsEl?.contains(intended) === true
+      requestAnimationFrame(() => {
+        if (this.completing || !this.selected) return
+        const active = document.activeElement
+        if (intentInside
+          || (active instanceof Element && (active.classList.contains('vsidian-keybindings-capture')
+            || this.resultsEl?.contains(active) === true))) return
+        this.cancelCapture()
+      })
     })
     return input
   }
@@ -273,7 +305,12 @@ export class KeybindingSettingsSection implements SettingsPageSection {
     nameSearch.type = 'search'
     nameSearch.placeholder = this.searchMode === 'key' ? t('keybindingSettings.capturePlaceholder')
       : t('keybindingSettings.searchNamePlaceholder')
-    nameSearch.setAttribute('aria-label', t('keybindingSettings.searchNamePlaceholder'))
+    // key 模式为按键捕获面（防粘贴/拖放改写显示值），readOnly 与可访问名
+    // 随模式切换，与捕获签同口径
+    nameSearch.readOnly = this.searchMode === 'key'
+    nameSearch.setAttribute('aria-label', this.searchMode === 'key'
+      ? t('keybindingSettings.capturePlaceholder')
+      : t('keybindingSettings.searchNamePlaceholder'))
     nameSearch.value = this.searchMode === 'key'
       ? (this.keyQuery ? formatBindingLabel(this.keyQuery) : '')
       : this.query
@@ -443,6 +480,8 @@ export class KeybindingSettingsSection implements SettingsPageSection {
           this.draftRaw = ''
           this.menuOpenId = undefined
           this.renderRows()
+          // 术语契约「立即捕获键盘输入」：捕获签打开即聚焦（不等用户再点一次）
+          this.resultsEl?.querySelector<HTMLInputElement>('.vsidian-keybindings-capture')?.focus()
         }, 'vsidian-keybindings-add')
         add.setAttribute('aria-label', t('keybindingSettings.addBinding'))
         controls.append(add)
@@ -462,6 +501,13 @@ export class KeybindingSettingsSection implements SettingsPageSection {
       locatedRow.querySelector<HTMLInputElement>('.vsidian-keybindings-capture')?.focus()
       locatedRow.scrollIntoView?.({ block: 'nearest' })
       this.focusEntry = undefined
+    }
+    // 捕获进行中（宿主键位回推、行内动作后的重渲染）：捕获签保持活跃且
+    // 草稿已回填，焦点若已落到 body（触发元素被重建移除）则拉回捕获签，
+    // 录制不中断；焦点在别处控件（筛选签、搜索框）时不抢
+    if (this.selected) {
+      const capture = parent.querySelector<HTMLInputElement>('.vsidian-keybindings-capture')
+      if (capture && document.activeElement === document.body) capture.focus()
     }
   }
 }

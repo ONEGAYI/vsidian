@@ -287,6 +287,9 @@ it('样式契约：双栏独立滚动、分组容器、拨动开关、主题选�
   expect(css).toMatch(/\.vsidian-settings-checkbox\s*\{[^}]*appearance:\s*none/)
   // #155 跟进：依赖灰化（dependsOn 注册表驱动）为纯 CSS 契约
   expect(css).toMatch(/\.vsidian-settings-item-disabled[^{]*\{[^}]*opacity:\s*0\.55/)
+  // 样式参考页签面板切换承载点：author display 规则不得压过 hidden 语义
+  // （detail 面板常驻 display:flex，无此基线两面板会同屏叠加）
+  expect(css).toMatch(/\[hidden\]\s*\{\s*display:\s*none\s*!important/)
   expect(css).toContain('.vsidian-settings-nav-item[aria-current="page"]')
   expect(css).toContain('--vscode-list-activeSelectionBackground')
   expect(css).toContain(':focus-visible')
