@@ -336,3 +336,35 @@ describe('入口级版本与共享依赖隔离', () => {
     expect(linkMap(svc)).toEqual(beforeFail)
   })
 })
+
+describe('#130 远程引用：不进监听归因面，重发由入口版本驱动', () => {
+  it('仅含 https @import 的入口：本地无依赖可归因（无关事件静默）；刷新与入口变更推进 v 驱动重发', async () => {
+    const fs = makeFs(
+      { 'D:/snips/online.css': '@import "https://fonts.example/sheet.css";\n.a{color:red}' },
+      ['online.css'],
+    )
+    const svc = new CssSnippetService(makeStorage(), fs, 'k', { debounceMs: 1 })
+    await svc.setDirectory('D:/snips')
+    await svc.setEnabled('online.css', true)
+    expect(svc.getState().rejections).toEqual({}) // 远程引用不触发越界拒绝
+    const v1 = linkMap(svc)['online.css']
+
+    // 目录内无关子级事件：依赖闭包为空（远程目标不可 watch）→ 完全静默
+    fs.fire('D:/snips/orphan/x.css')
+    await sleep(30)
+    expect(linkMap(svc)['online.css']).toBe(v1)
+
+    // 远程样式源变更宿主无从感知：手动刷新 → 入口 v 推进 → 入口 ?v= 击穿
+    // → 嵌套 https @import 随新入口链重发（远程侧缓存遵循 HTTP 语义，见
+    // test/browser/cssHttpsImports.mjs 的缓存语义钉住点）
+    await svc.refresh()
+    expect(linkMap(svc)['online.css']).toBeGreaterThan(v1)
+
+    // 入口文件自身修改（保存后自动更新路径）同样推进
+    const v2 = linkMap(svc)['online.css']
+    writeFile(fs, 'D:/snips/online.css', '@import "https://fonts.example/sheet2.css";')
+    fs.fire('D:/snips/online.css')
+    await sleep(30)
+    expect(linkMap(svc)['online.css']).toBeGreaterThan(v2)
+  })
+})
