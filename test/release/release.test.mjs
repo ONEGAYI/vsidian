@@ -17,10 +17,13 @@ function katexFontEntries() {
 }
 
 // 快速操作条的两套图标：测试基线独立列出预期键，防止发布清单漏项。
+// #105/#106 起含 highlight 与 horizontalRule（与 scripts/release.mjs 的
+// 17 键对齐；75c3df7 只补了发布清单，此处漏同步致合法基线三例误红）。
 const QUICK_ICON_KEYS = [
   'bold', 'italic', 'strikethrough', 'inlineCode', 'heading',
   'bulletList', 'orderedList', 'taskList', 'quote', 'codeBlock',
   'link', 'clearInline', 'table', 'inlineMath', 'blockMath',
+  'highlight', 'horizontalRule',
 ]
 function quickActionIconEntries() {
   return ['light', 'dark'].flatMap((theme) => QUICK_ICON_KEYS.map((key) => ({
