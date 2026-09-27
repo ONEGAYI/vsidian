@@ -4,7 +4,7 @@
 //   node scripts/release.mjs            # 打包 + 检查（日常本地可跑）
 //   node scripts/release.mjs --upload   # 以上 + gh release create 附带 VSIX
 //
-// 约定见 AGENTS.md「打包与发布」：VSIX 体积严格控制，检查器是发布前的
+// 约定见项目技能 release（.agents/skills/release/SKILL.md）：VSIX 体积严格控制，检查器是发布前的
 // 最后一道闸（.vscodeignore 挡打包输入，这里挡最终产物），失败即非零退出。
 // 纯函数（extractLatestChangelog / parseUnzipListing / inspectVsixEntries）
 // 由 test/release/release.test.mjs 以 node --test 契约测试钉住。

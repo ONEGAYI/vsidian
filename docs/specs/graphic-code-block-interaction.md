@@ -1,6 +1,6 @@
 # 规格：图形化代码块交互（按钮、图表弹窗与导出）
 
-状态：已实施（工单 [#111](https://github.com/ONEGAYI/vsidian/issues/111)，2026-09-26），人工验收按[人工验证清单](manual-verification.md) #111 节逐项记录；关联 [#110 Mermaid 暗色主题修复](https://github.com/ONEGAYI/vsidian/issues/110)（不属本规格范围）。接入清单（新增图形化渲染语言三步）见 `src/webview/graphicRenderers.ts` 文件头注释与 AGENTS.md「图形化代码块扩展约定」。参考 [vscode-office](https://github.com/cweijan/vscode-office)（本地 `D:/CODE/Project/_Extensions/vscode-office`）的交互实现，**只借鉴交互与结构，不复用其代码**。本文是图形化代码块交互的单一事实源，实施工单的验收以此为准。
+状态：已实施（工单 [#111](https://github.com/ONEGAYI/vsidian/issues/111)，2026-09-26），人工验收按[人工验证清单](manual-verification.md) #111 节逐项记录；关联 [#110 Mermaid 暗色主题修复](https://github.com/ONEGAYI/vsidian/issues/110)（不属本规格范围）。接入清单（新增图形化渲染语言三步）见 `src/webview/graphicRenderers.ts` 文件头注释与本文「扩展约定（落档）」节（2026-09-27 自 AGENTS.md 迁入）。参考 [vscode-office](https://github.com/cweijan/vscode-office)（本地 `D:/CODE/Project/_Extensions/vscode-office`）的交互实现，**只借鉴交互与结构，不复用其代码**。本文是图形化代码块交互的单一事实源，实施工单的验收以此为准。
 
 ## 范围
 
@@ -51,6 +51,25 @@
 - **通用性验收**：接入清单文档落地，注册表契约测试覆盖假想渲染器继承路径。
 - **回归与文档**：跑 compile、test:unit、test:browser、test:integration；依实际改动做安装态/打包检查（导出通道新增消息需过集成）。更新中英文 README、人工验证清单、文件树。自动验证不是用户验收——按钮观感、弹窗交互手感、导出文件可用性需用户人工确认。
 - **风险显式化**：PNG 光栅化 CSP 验证结论（通过或降级）写入工单回报，不得静默砍功能。
+
+## 扩展约定（#111 落档）
+
+2026-09-27 自 AGENTS.md「约定」节迁入（内容未改，仅重组分段），AGENTS.md 留触发指针。新增或修改「渲染成图形的围栏代码块」的语言支持、按钮组、弹窗或导出行为前必读本节。
+
+### 注册表与两表同步
+
+按钮组、图表弹窗、禁点击进编辑与导出是注册表驱动的路径级行为：共享侧 `RENDERED_FENCE_LABELS`（`src/shared/mermaid.ts`，同时是 `FenceSpan.rendered` 判定源）登记语言显示名，webview 侧 `graphicRenderers.ts` 登记渲染管线（`renderInto`/`renderSvg`），两侧键集一致性由 `test/unit/graphicRenderers.test.ts` 钉住。
+
+新增此类语言走 `graphicRenderers.ts` 文件头的三步接入清单（标签、管线、契约测试一行），登记即继承全部交互——含阅读侧渲染：挂载钩子经 `renderGraphicBlockInto` 按容器语言分派（review 修复后不再写死 mermaid 管线），**两表必须同步登记**，只登标签不登管线的语言 live 侧降级源码+卡片、阅读侧容器停留 pending（契约测试钉住分派不误渲）。「登记即继承」由假想第二渲染器用例验证，不引入真实依赖。
+
+### 交互行为
+
+- 点击图形本体不进入编辑（widget `ignoreEvent: true`），编辑入口收敛到 edit 按钮（仅实时预览，派发选区触发现有源码显形管线）。
+- 弹窗「刷新」经控制器注入的文档全文与 `locateGraphicFenceCode` 重定位当前围栏源码（外部改写后可取新图，重定位歧义回退快照）；单击图本体不关闭弹窗（关闭判定用按下时原始 target，pointer capture 会重定向 up 事件的 target）。
+
+### PNG 光栅化与降级
+
+PNG 光栅化在 webview canvas 完成，CSP `img-src` 已放行 `data:`（浏览器回归在宿主同形 CSP 复刻页内实证），环境不支持时降级为仅 SVG 并以弹窗内提示条回报——**不得用 `window.alert`**（宿主 webview 的 sandbox iframe 无 `allow-modals`，alert 被静默吞掉）。
 
 ## 参考与范围
 

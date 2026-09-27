@@ -97,7 +97,7 @@ node test/integration/runInstalled.mjs
 Remove-Item Env:VSIDIAN_TEST_HOST_MODE
 ```
 
-发布流程、VSIX 体积红线与包内容检查的约定见 [AGENTS.md](AGENTS.md)「打包与发布」；项目定位与功能边界见 [CONTEXT.md](CONTEXT.md)，MVP 规格见 [docs/specs/mvp.md](docs/specs/mvp.md)，架构决策见 [docs/adr/](docs/adr/)。
+发布流程、VSIX 体积红线与包内容检查的约定见仓库内技能 [.agents/skills/release/SKILL.md](.agents/skills/release/SKILL.md)；项目定位与功能边界见 [CONTEXT.md](CONTEXT.md)，MVP 规格见 [docs/specs/mvp.md](docs/specs/mvp.md)，架构决策见 [docs/adr/](docs/adr/)。
 
 ## 许可证
 

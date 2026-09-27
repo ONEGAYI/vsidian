@@ -16,7 +16,7 @@
 // - 渲染验证：集成用例「Obsidian 原名别名桥」经 cssProbe.obsidianAliases
 //   逐项断言；探针选择器表 OBSIDIAN_ALIAS_PROBES 亦在此定义。
 //
-// 字段约定（AGENTS.md「公开样式契约」）：
+// 字段约定（项目技能 style-contract，.agents/skills/style-contract/）：
 // - 迁移/新增条目只改本文件；指南经生成入口更新，不另建手写副本。
 // - 默认长期兼容：修改语义前先核对历史基线；弃用须填 deprecated 并发布
 //   声明，移除须填 removed 并满足「两个后续次版本 + 满 30 天」条件
@@ -86,7 +86,7 @@ export interface StyleContractEntry {
   verification: readonly string[]
   /** 引入记录（工单号） */
   introduced: string
-  /** 弃用声明（版本 + 替代写法；AGENTS 弃用流程） */
+  /** 弃用声明（版本 + 替代写法；技能 style-contract 弃用流程） */
   deprecated?: string
   /** 移除记录（版本 + 原因；须满足弃用期限） */
   removed?: string

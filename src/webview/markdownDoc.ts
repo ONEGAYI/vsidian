@@ -43,7 +43,7 @@ const PUNCTUATION = /[\p{S}\p{P}]/u
  * 文本降级）；`=` 的块级语义（Setext 下划线）在块层先行解析，不受 inline
  * 扩展影响；代码上下文（行内/围栏）内容为字面文本天然不产节点。live
  * 装饰、大纲透传与 webview/formatOperations 的两态切换共用本语义来源
- * （AGENTS.md「行内围栏扩展约定」的 node 登记）。
+ * （docs/specs/symbol-input.md 行内围栏扩展约定的 node 登记）。
  */
 export const markdownTreeParser: MarkdownParser =
   (markdownLanguage.parser as MarkdownParser).configure({
