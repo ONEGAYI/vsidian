@@ -186,6 +186,33 @@ describe('格式命令生产链路', () => {
     strike.controller.dispose()
   })
 
+  it('围栏前贴邻取消三按链路：取消得裸词，再按扩词包裹复原（#107 补缺口）', () => {
+    // 行首侧：一按取消（光标 0 映射后仍在行首），二按取到词包裹复原
+    const head = setup('**word**')
+    head.view.dispatch({ selection: { anchor: 0 } })
+    head.controller.handleHostMessage({ kind: 'format.command', op: 'bold' })
+    expect(head.view.state.doc.toString()).toBe('word')
+    head.controller.handleHostMessage({ kind: 'format.command', op: 'bold' })
+    expect(head.view.state.doc.toString()).toBe('**word**')
+    head.controller.dispose()
+    // 行尾侧：一按取消（光标映射到裸词末），二按光标在词内取词包裹复原
+    const tail = setup('**word**')
+    tail.view.dispatch({ selection: { anchor: 8 } })
+    tail.controller.handleHostMessage({ kind: 'format.command', op: 'bold' })
+    expect(tail.view.state.doc.toString()).toBe('word')
+    tail.controller.handleHostMessage({ kind: 'format.command', op: 'bold' })
+    expect(tail.view.state.doc.toString()).toBe('**word**')
+    tail.controller.dispose()
+  })
+
+  it('升级定界符围栏取消经生产链路：光标在内容中整拆得裸内容（#107 审查修复）', () => {
+    const code = setup('``码``')
+    code.view.dispatch({ selection: { anchor: 2 } })
+    code.controller.handleHostMessage({ kind: 'format.command', op: 'inlineCode' })
+    expect(code.view.state.doc.toString()).toBe('码')
+    code.controller.dispose()
+  })
+
   it('高亮命令走 CM6 单事务写回（与 bold 同链路）', () => {
     const { controller, sent, view } = setup('中文 English')
     view.dispatch({ selection: { anchor: 0 } })

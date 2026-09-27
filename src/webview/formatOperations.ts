@@ -273,8 +273,8 @@ function codeDelimiter(content: string): string {
  *  节点时，中间那对标记是字面内容文本，「两对各自的标记位置」不在语法树
  *  里，只能按 INLINE[op].mark 做形态学扫描（非重叠贪心，从表派生，
  *  不按操作名写死，保持登记即继承）。 */
-function markOccurrences(text: string, span: SyntaxNode, mark: string): Array<{ from: number; to: number }> {
-  const found: Array<{ from: number; to: number }> = []
+function markOccurrences(text: string, span: SyntaxNode, mark: string): FormatSelection[] {
+  const found: FormatSelection[] = []
   let pos = span.from
   while (pos + mark.length <= span.to) {
     if (text.startsWith(mark, pos)) {
@@ -287,17 +287,33 @@ function markOccurrences(text: string, span: SyntaxNode, mark: string): Array<{ 
   return found
 }
 
-/** 取消计划（#107）：单对整节点摘除；合并形态（贴边包裹产物）按 mark
- *  出现顺序配对还原用户意图模型，只拆光标所在对、其余保留。归属取第一
- *  个闭标记仍在光标右侧的对；两对间零宽缝隙与最末闭标记之后（贴邻右
- *  外侧）分别归右、归最后一对，与 nodesAt 右向原则一致。奇数/异常形态
- *  （如中间夹单个字面 mark）无从配对，回退整拆。 */
+/** 贴边合并形态判定（#107 审查修复）：mark 出现序列可还原为「贴边包裹
+ *  产物」当且仅当两两配对后，每对内部有内容（开.to < 闭.from）且相邻
+ *  对零间隙（前闭.to === 后开.from）。inlineCode 变长定界按静态单 mark
+ *  扫出的「对」内部无内容，内容含字面 mark 的序列对间有间隙——均非
+ *  贴边形态，取消回退整节点摘除；校验只看形态，不感知定界符变长，
+ *  也不接入 per-op marker 函数（保持从 INLINE[op].mark 派生的路径级承诺）。 */
+function adjacentMergedMarks(marks: FormatSelection[]): boolean {
+  if (marks.length <= 2 || marks.length % 2 !== 0) return false
+  for (let pair = 0; pair < marks.length / 2; pair++) {
+    if (marks[2 * pair]!.to >= marks[2 * pair + 1]!.from) return false
+    if (pair > 0 && marks[2 * pair - 1]!.to !== marks[2 * pair]!.from) return false
+  }
+  return true
+}
+
+/** 取消计划（#107）：单对整节点摘除；贴边合并形态（贴边包裹产物，经
+ *  adjacentMergedMarks 校验）按 mark 出现顺序配对还原用户意图模型，只拆
+ *  光标所在对、其余保留。归属取第一个闭标记仍在光标右侧的对；两对间零
+ *  宽缝隙与最末闭标记之后（贴邻右外侧）分别归右、归最后一对，与 nodesAt
+ *  右向原则一致。非贴边形态（变长定界、内容含字面 mark 的偶数序列、奇数
+ *  残缺）无从可靠配对，一律回退整拆。 */
 function unwrapSpanPlan(text: string, active: SyntaxNode, pos: number, mark: string): FormatPlan | null {
   const first = active.firstChild
   const last = active.lastChild
   if (!first || !last) return null
   const marks = markOccurrences(text, active, mark)
-  if (marks.length > 2 && marks.length % 2 === 0) {
+  if (adjacentMergedMarks(marks)) {
     let target = marks.length / 2 - 1
     for (let pair = 0; pair < marks.length / 2; pair++) {
       if (pos < marks[2 * pair + 1]!.from) { target = pair; break }

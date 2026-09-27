@@ -74,6 +74,19 @@ describe('格式操作的文本契约', () => {
     expect(apply('`码`', 'inlineCode', 3).text).toBe('码')
   })
 
+  it('升级定界符（多反引号）围栏取消：光标在内容中整拆，不按单反引号误拆对（#107 审查修复）', () => {
+    // inlineCode 定界符经 codeDelimiter 升级后，静态单 mark 扫描出的「对」内部
+    // 无内容（``码`` 的 [0,1)+[1,2)）——非贴边合并形态，回退整节点摘除
+    expect(apply('``码``', 'inlineCode', 2).text).toBe('码')
+    expect(apply('```码```', 'inlineCode', 3).text).toBe('码')
+  })
+
+  it('内容含字面 mark 的偶数形态不走拆对：按整节点摘除（#107 审查修复）', () => {
+    // *a*b*c* 解析为两个独立 Emphasis，光标在 a 命中第一对整拆；该形态
+    // 永不进入拆对分支（钉住契约，防解析形态或扫描变化后误删中间区间）
+    expect(apply('*a*b*c*', 'italic', 1).text).toBe('ab*c*')
+  })
+
   it('贴边 add 与 toggle 同形：包裹携带 selection，不再产无定位粘连（#107）', () => {
     expect(apply('**加粗**普通', 'bold', 6, 6, undefined, 'add'))
       .toEqual({ text: '**加粗****普通**', selection: { anchor: 8 } })
