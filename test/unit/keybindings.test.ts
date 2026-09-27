@@ -69,3 +69,24 @@ describe('快捷键契约', () => {
     expect(resolveKeybinding({}, 'reading', 'f3', false)).toEqual({ kind: 'command', id: 'findNext' })
   })
 })
+
+describe('HTML 注释快捷键（#139）', () => {
+  it('默认 ctrl+slash（ctrl+/ 物理键）仅 Live 生效；可改绑清空恢复', () => {
+    expect(getEffectiveBindings({}, 'htmlComment')).toEqual(['ctrl+slash'])
+    expect(resolveKeybinding({}, 'live', 'ctrl+slash')).toEqual({ kind: 'command', id: 'htmlComment' })
+    // 阅读模式无写操作：none（源码模式与设置页不经编辑器路由，天然不接管）
+    expect(resolveKeybinding({}, 'reading', 'ctrl+slash')).toEqual({ kind: 'none' })
+    // 显式清空后不拦截（宿主行注释回归宿主处理）
+    expect(resolveKeybinding({ htmlComment: [] }, 'live', 'ctrl+slash')).toEqual({ kind: 'none' })
+    // 改绑到 ctrl+shift+c 生效
+    expect(applyBindingChange({}, 'htmlComment', ['ctrl+shift+c'], false))
+      .toMatchObject({ ok: true })
+    expect(getEffectiveBindings({ htmlComment: ['ctrl+shift+c'] }, 'htmlComment'))
+      .toEqual(['ctrl+shift+c'])
+  })
+
+  it('slash 键名规范化：词名大小写归一（裸 / 字符不另设别名，与 minus 等符号口径一致）', () => {
+    expect(normalizeChord('Ctrl+Slash')).toBe('ctrl+slash')
+    expect(normalizeChord('ctrl+slash')).toBe('ctrl+slash')
+  })
+})

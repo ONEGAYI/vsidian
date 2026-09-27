@@ -1576,6 +1576,14 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   border-radius: 2px;
 }
 
+/* #139 HTML 注释淡化（.cm-comment 方向）：低对比度、明显非正文、仍可读
+   ——正文前景色 45% 混入（color-mix 单规则服务明暗主题，口径同
+   --vsidian-hr-color），不隐藏不折叠；关键规则由 htmlCommentCssContract
+   契约钉住，浏览器套件断言 computed color 差异 */
+#app .cm-editor .cm-scroller .vsidian-html-comment {
+  color: color-mix(in srgb, var(--vscode-editor-foreground, #808080) 45%, transparent);
+}
+
 /* 任务 checkbox（#9 可交互：input[type=checkbox] 替换 [ ]/[x] 标记）。
    appearance 关闭原生形态，沿用 #8 字形绘制语义（颜色跟随 VSCode 变量）；
    .vsidian-task-checked 为稳定修饰类（与 :checked 伪类双入口） */

@@ -38,6 +38,7 @@
   "format.blockMath": "Insert block math",
   "format.wikilink": "Insert wikilink",
   "format.horizontalRule": "Insert horizontal rule",
+  "format.htmlComment": "HTML comment",
   "command.openStyleReference.title": "Vsidian: Open style reference",
   "command.exportStyleReference.title": "Vsidian: Export style reference JSON",
   "command.openSettings.title": "Open settings",

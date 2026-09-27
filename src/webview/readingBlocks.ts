@@ -19,6 +19,7 @@
 //   渲染——保留原文的局部源码降级，不触发整篇改写
 import { frontmatterRange } from './markdownDoc'
 import { maskCodeSpanPipes } from './tableCells'
+import { stripHtmlComments } from './htmlComment'
 import { isRenderedFenceInfo } from '../shared/mermaid'
 import { codeInfoFirstWord } from '../shared/codeLangs'
 import { buildFrontmatterTableHtml, parseFrontmatterTable } from '../shared/frontmatterTable'
@@ -189,7 +190,11 @@ function splitBody(
   if (body.trim() === '') {
     return blocks
   }
-  const { parseText, marker } = protectCodePipes(body)
+  // #139 阅读隐藏：body 切片后、markdown-it 解析前剥离注释（等长空格
+  // 替换保锚点坐标系；代码上下文与残缺保留原样，见 htmlComment.ts）。
+  // frontmatter 已先行整块提取，天然不剥
+  const stripped = stripHtmlComments(body)
+  const { parseText, marker } = protectCodePipes(stripped)
   const tokens = md.parse(parseText, env as unknown as Env)
   if (marker) {
     restoreCodePipes(tokens, marker)

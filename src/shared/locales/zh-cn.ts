@@ -232,6 +232,7 @@ export const zhCn: Record<MessageKey, string> = {
   'format.blockMath': '插入块级公式',
   'format.wikilink': '插入双链',
   'format.horizontalRule': '插入分割线',
+  'format.htmlComment': 'HTML 注释',
 
   'format.toolbarAria': '格式快速操作',
   'format.groupText': '文字',
@@ -336,7 +337,7 @@ export const zhCn: Record<MessageKey, string> = {
   'frontmatter.empty': '暂无属性',
 
   // ---- #97 manifest NLS（命令 title 与 displayName/description 生成源）----
-  // 值即 package.json 原硬编码字面量（呈现不变）；工具条 23 条命令复用
+  // 值即 package.json 原硬编码字面量（呈现不变）；工具条 24 条命令复用
   // format.* 既有键。command.* 键同时是快捷键页 extra/UI 源操作名的
   // titleKey（与命令面板同源，无第二套文案）。
   'manifest.displayName': 'Vsidian',

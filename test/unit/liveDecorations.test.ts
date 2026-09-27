@@ -807,3 +807,50 @@ describe('B-3：frontmatter 截断口径两视图同源', () => {
     expect(frontmatterDecoCount(doc)).toBe(0)
   })
 })
+
+// ---- HTML 注释淡化装饰（#139）----
+// 呈现语义：低对比度、明显非正文、仍可读（不隐藏、不折叠、无显形逻辑——
+// 内容本来就可见）。节点形态以 Lezer markdown 实测为准：行内 Comment /
+// 块级 CommentBlock（裸解析器对 frontmatter 内伪节点的发射由 fm 裁剪拦截）。
+
+describe('HTML 注释淡化（#139）：Comment / CommentBlock 发淡化 mark', () => {
+  it('行内注释：节点整区间（含定界符）发 vsidian-html-comment', () => {
+    const doc = '正文 <!-- 注释文字 --> 尾部'
+    const set = build(doc)
+    expect(coveredTexts(set, LIVE_CLASS_NAMES.htmlComment, doc)).toEqual(['<!-- 注释文字 -->'])
+  })
+
+  it('块级注释（CommentBlock，跨行）：整区间发淡化类', () => {
+    const doc = '段前\n<!-- 跨行\n注释 -->\n段后'
+    const set = build(doc)
+    expect(coveredTexts(set, LIVE_CLASS_NAMES.htmlComment, doc)).toEqual(['<!-- 跨行\n注释 -->'])
+  })
+
+  it('同行多处注释：各自独立发射', () => {
+    const doc = 'a <!-- 一 --> b <!-- 二 --> c'
+    const set = build(doc)
+    expect(coveredTexts(set, LIVE_CLASS_NAMES.htmlComment, doc)).toEqual(['<!-- 一 -->', '<!-- 二 -->'])
+  })
+
+  it('frontmatter 内的伪注释节点不发射（头块按源码呈现）', () => {
+    const doc = '---\nnote: <!-- 伪 -->\n---\n正文'
+    const set = build(doc)
+    expect(coveredTexts(set, LIVE_CLASS_NAMES.htmlComment, doc)).toEqual([])
+  })
+
+  it('代码上下文（围栏/行内代码）内的字面 <!-- 无注释节点、无装饰', () => {
+    const doc = '```\n<!-- 围栏内 -->\n```\n\n`<!-- 码 -->` 完'
+    const set = build(doc)
+    expect(coveredTexts(set, LIVE_CLASS_NAMES.htmlComment, doc)).toEqual([])
+  })
+
+  it('光标进入注释不隐藏内容（淡化常显，无显形切换）', () => {
+    const doc = '正文 <!-- 注释 --> 尾部'
+    const inner = doc.indexOf('注')
+    const set = build(doc, { anchor: inner })
+    expect(coveredTexts(set, LIVE_CLASS_NAMES.htmlComment, doc)).toEqual(['<!-- 注释 -->'])
+    expect(hiddenRanges(set)).not.toContainEqual([
+      doc.indexOf('<!--'), doc.indexOf('<!--') + 4,
+    ])
+  })
+})

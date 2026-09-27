@@ -222,7 +222,7 @@ export const en = {
   'common.keybindingHint': 'Keybinding: {keys}',
   'common.keySeparator': ', ',
 
-  /** 快捷操作工具条 23 条操作标题（兼作命令 title 的 NLS 生成源，#97 映射） */
+  /** 快捷操作工具条 24 条操作标题（兼作命令 title 的 NLS 生成源，#97 映射） */
   'format.bold': 'Bold',
   'format.italic': 'Italic',
   'format.strikethrough': 'Strikethrough',
@@ -246,6 +246,7 @@ export const en = {
   'format.blockMath': 'Insert block math',
   'format.wikilink': 'Insert wikilink',
   'format.horizontalRule': 'Insert horizontal rule',
+  'format.htmlComment': 'HTML comment',
 
   /** 快捷操作工具条框架（分组、标题菜单；非命令标题，不进 #97 映射） */
   'format.toolbarAria': 'Formatting quick actions',
@@ -361,7 +362,7 @@ export const en = {
   'frontmatter.empty': 'No properties yet',
 
   // ---- #97 manifest NLS（命令 title 与 displayName/description 生成源）----
-  // 工具条 23 条命令直接复用上方 format.* 既有键（FORMAT_OPERATIONS 的
+  // 工具条 24 条命令直接复用上方 format.* 既有键（FORMAT_OPERATIONS 的
   // titleKey，见 scripts/genNls.mjs 映射）；其余命令的键按 id 推导：
   // onegayi.vsidian.<suffix> → command.<suffix>.title（既有唯一键
   // command.table.create.title 天然吻合该规则，单轨收编，不留双轨）。

@@ -106,6 +106,7 @@ describe('格式命令生产链路', () => {
     const bindings = FORMAT_OPERATIONS.filter((item) => item.defaultKey !== null)
     expect(bindings.map((item) => item.id)).toEqual([
       'bold', 'heading1', 'heading2', 'heading3', 'heading4', 'heading5', 'heading6', 'headingNone',
+      'htmlComment',
     ])
   })
 
@@ -211,6 +212,35 @@ describe('格式命令生产链路', () => {
     code.controller.handleHostMessage({ kind: 'format.command', op: 'inlineCode' })
     expect(code.view.state.doc.toString()).toBe('码')
     code.controller.dispose()
+  })
+
+  it('HTML 注释两态经生产链路（#139）：空插落光标开围栏内侧，再按取消复原，逐笔写回', () => {
+    const { controller, sent, view } = setup('正文')
+    view.dispatch({ selection: { anchor: 1 } })
+    controller.handleHostMessage({ kind: 'format.command', op: 'htmlComment' })
+    expect(view.state.doc.toString()).toBe('正<!-- -->文')
+    expect(view.state.selection.main.anchor).toBe(5)
+    expect(sent.filter((m) => m.kind === 'edit.request')).toHaveLength(1)
+    // 光标在空对（Comment 节点）内再按 → 取消整对。第二笔与前笔未确认
+    // 区间相触会并入暂缓链（既有协议行为）：先确认第一笔，第二笔立即
+    // 出站——每笔 edit.request 对应宿主一次撤销单元
+    controller.handleHostMessage({ kind: 'edit.ack', seq: 1, ok: true, version: 2 })
+    controller.handleHostMessage({ kind: 'format.command', op: 'htmlComment' })
+    expect(view.state.doc.toString()).toBe('正文')
+    expect(sent.filter((m) => m.kind === 'edit.request')).toHaveLength(2)
+  })
+
+  it('HTML 注释选区包裹经生产链路（#139）：原文保持选中，注释内取消剥定界符', () => {
+    const wrapped = setup('前言 内容 后缀')
+    wrapped.view.dispatch({ selection: { anchor: 3, head: 5 } })
+    wrapped.controller.handleHostMessage({ kind: 'format.command', op: 'htmlComment' })
+    expect(wrapped.view.state.doc.toString()).toBe('前言 <!--内容--> 后缀')
+    expect(wrapped.view.state.selection.main).toMatchObject({ anchor: 7, head: 9 })
+    // 光标留在注释内（折叠）：再按取消，剥定界符保留内容
+    wrapped.view.dispatch({ selection: { anchor: 7 } })
+    wrapped.controller.handleHostMessage({ kind: 'format.command', op: 'htmlComment' })
+    expect(wrapped.view.state.doc.toString()).toBe('前言 内容 后缀')
+    wrapped.controller.dispose()
   })
 
   it('高亮命令走 CM6 单事务写回（与 bold 同链路）', () => {

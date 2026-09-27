@@ -89,6 +89,9 @@ export const LIVE_CLASS_NAMES = {
   inlineCode: 'vsidian-inline-code',
   /** 高亮内容 span（#105，`.cm-highlight` 方向；底色变量见 main.css #app） */
   highlight: 'vsidian-highlight',
+  /** HTML 注释淡化 span（#139，`.cm-comment` 方向；低对比度常显，
+   *  不隐藏不折叠；颜色规则由 htmlCommentCssContract 契约钉住） */
+  htmlComment: 'vsidian-html-comment',
   /** 引用行（`.HyperMD-quote` / `.cm-quote`） */
   quoteLine: 'vsidian-quote-line',
   /** 围栏/缩进代码行（`.HyperMD-codeblock`） */
@@ -157,6 +160,8 @@ const headerSpanDecos = [1, 2, 3, 4, 5, 6].map((lv) =>
   Decoration.mark({ class: applyObsidianDomAlias(LIVE_CLASS_NAMES.headerSpan(lv)) }),
 )
 const strongDeco = Decoration.mark({ class: applyObsidianDomAlias(LIVE_CLASS_NAMES.strong) })
+/** #139 注释淡化：整节点区间（含定界符）常显，无显形切换（内容可见） */
+const htmlCommentDeco = Decoration.mark({ class: LIVE_CLASS_NAMES.htmlComment })
 const emphasisDeco = Decoration.mark({ class: applyObsidianDomAlias(LIVE_CLASS_NAMES.emphasis) })
 const inlineCodeDeco = Decoration.mark({ class: applyObsidianDomAlias(LIVE_CLASS_NAMES.inlineCode) })
 const highlightDeco = Decoration.mark({ class: applyObsidianDomAlias(LIVE_CLASS_NAMES.highlight) })
@@ -765,6 +770,13 @@ function emitForRange(
         // last.from > first.to 检查天然跳过空内容形态 ====）
         pushInnerSpan(out, node, 'HighlightMark', highlightDeco)
         return
+      case 'Comment':
+      case 'CommentBlock':
+        // #139 注释淡化：整节点（含定界符）低对比度常显——明显非正文
+        // 仍可读，不隐藏不折叠、无控制域显形（frontmatter 裁剪在
+        // visitRange 回调头部统一拦截头块伪节点）
+        out.push(htmlCommentDeco.range(node.from, node.to))
+        return
       case 'HeaderMark': {
         const heading = [...path].reverse().find((parent) => headingLevelOf(parent.name) !== null)
         const to = markerEnd(node)
@@ -1086,7 +1098,7 @@ const SEED_NODE_NAMES = new Set([
   'SetextHeading1', 'SetextHeading2',
   'HeaderMark', 'EmphasisMark', 'QuoteMark', 'ListMark', 'TaskMarker',
   'Emphasis', 'StrongEmphasis', 'InlineCode', 'HorizontalRule', 'ListItem',
-  'Highlight', 'HighlightMark',
+  'Highlight', 'HighlightMark', 'Comment', 'CommentBlock',
   'Table', 'TableHeader', 'TableRow', 'TableCell', 'TableDelimiter',
 ])
 
