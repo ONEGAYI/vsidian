@@ -85,6 +85,9 @@ export function createSettingsPage(
   service: SettingsService,
   keybindings: KeybindingService,
   snippets?: SnippetPageWiring,
+  /** #145 样式契约 JSON 导出（extension.ts 注入 runStyleReferenceExport；
+   *  设置页按钮与命令面板命令共用同一入口，测试可短路） */
+  styleRefExport?: () => void | Promise<void>,
 ): SettingsPageHandle {
   let panel: vscode.WebviewPanel | undefined
   let ready = false
@@ -175,6 +178,10 @@ export function createSettingsPage(
         return
       case 'snippets.openDirectory':
         snippets?.openDirectory()
+        return
+      case 'styleRef.export':
+        // #145 契约 JSON 导出：结果以宿主通知回报，不逐次应答
+        void styleRefExport?.()
         return
       case 'settings.set': {
         void service.apply(message.values).then((result) => {

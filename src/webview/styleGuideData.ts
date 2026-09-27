@@ -3,7 +3,7 @@
 // test/unit/styleGuideGen.test.ts 以 --check 钉住（改清单后重跑生成并提交）。
 // 本文件是文档数据（公开指南内容，中文为准），不是 UI 文案——CJK 扫描豁免
 // 同 styleContract.ts；不进编辑器 webview bundle（仅设置页 import）。
-import type { StyleContractEntry } from '../shared/styleContract'
+import type { StyleContractCategory, StyleContractEntry } from '../shared/styleContract'
 import type { ObsidianVariableAlias } from '../shared/obsidianAlias'
 
 /** 指南配套的扩展版本（与安装版本一致） */
@@ -73,11 +73,135 @@ export const STYLE_GUIDE_VARIABLE_ALIASES: readonly ObsidianVariableAlias[] = [
   }
 ]
 
+/** 类目定义表（#145 分栏分组；条目计数据派生） */
+export const STYLE_GUIDE_CATEGORIES: readonly StyleContractCategory[] = [
+  {
+    "id": "view-container",
+    "domain": "content",
+    "title": "容器与视图",
+    "titleKey": "styleRef.category.viewContainer",
+    "order": 1
+  },
+  {
+    "id": "heading",
+    "domain": "content",
+    "title": "标题",
+    "titleKey": "styleRef.category.heading",
+    "order": 2
+  },
+  {
+    "id": "inline-format",
+    "domain": "content",
+    "title": "行内格式",
+    "titleKey": "styleRef.category.inlineFormat",
+    "order": 3
+  },
+  {
+    "id": "list-task",
+    "domain": "content",
+    "title": "列表与任务",
+    "titleKey": "styleRef.category.listTask",
+    "order": 4
+  },
+  {
+    "id": "line-syntax",
+    "domain": "content",
+    "title": "行级语法",
+    "titleKey": "styleRef.category.lineSyntax",
+    "order": 5
+  },
+  {
+    "id": "table",
+    "domain": "content",
+    "title": "表格",
+    "titleKey": "styleRef.category.table",
+    "order": 6
+  },
+  {
+    "id": "reading-structure",
+    "domain": "content",
+    "title": "阅读块级结构",
+    "titleKey": "styleRef.category.readingStructure",
+    "order": 7
+  },
+  {
+    "id": "link-image-wikilink",
+    "domain": "content",
+    "title": "链接、图片与双链",
+    "titleKey": "styleRef.category.linkImageWikilink",
+    "order": 8
+  },
+  {
+    "id": "content-variables",
+    "domain": "content",
+    "title": "公开 CSS 变量",
+    "titleKey": "styleRef.category.contentVariables",
+    "order": 9
+  },
+  {
+    "id": "content-limits",
+    "domain": "content",
+    "title": "不支持与限制",
+    "titleKey": "styleRef.category.contentLimits",
+    "order": 10
+  },
+  {
+    "id": "math",
+    "domain": "chrome",
+    "title": "公式",
+    "titleKey": "styleRef.category.math",
+    "order": 1
+  },
+  {
+    "id": "diagram",
+    "domain": "chrome",
+    "title": "图表渲染",
+    "titleKey": "styleRef.category.diagram",
+    "order": 2
+  },
+  {
+    "id": "graphic-interact",
+    "domain": "chrome",
+    "title": "图形化按钮与弹窗",
+    "titleKey": "styleRef.category.graphicInteract",
+    "order": 3
+  },
+  {
+    "id": "code-card",
+    "domain": "chrome",
+    "title": "代码块卡片",
+    "titleKey": "styleRef.category.codeCard",
+    "order": 4
+  },
+  {
+    "id": "outline",
+    "domain": "chrome",
+    "title": "大纲面板",
+    "titleKey": "styleRef.category.outline",
+    "order": 5
+  },
+  {
+    "id": "chrome-limits",
+    "domain": "chrome",
+    "title": "限制说明",
+    "titleKey": "styleRef.category.chromeLimits",
+    "order": 6
+  },
+  {
+    "id": "toolbar-banner",
+    "domain": "chrome",
+    "title": "工具栏与横幅",
+    "titleKey": "styleRef.category.toolbarBanner",
+    "order": 7
+  }
+] as readonly StyleContractCategory[]
+
 /** 清单条目（渲染数据形态与单一事实源同构） */
 export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "container-live",
     "domain": "content",
+    "category": "view-container",
     "kind": "container",
     "target": ".vsidian-view-live",
     "purpose": "live（实时预览）视图容器，内含 CodeMirror 6 编辑器。",
@@ -104,6 +228,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "container-reading",
     "domain": "content",
+    "category": "view-container",
     "kind": "container",
     "target": ".vsidian-view-reading",
     "purpose": "reading（阅读）视图容器；其内为按需挂载的块级结构。",
@@ -129,6 +254,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-heading-line",
     "domain": "content",
+    "category": "heading",
     "kind": "selector",
     "target": ".vsidian-heading-line-{1..6}",
     "purpose": "live 标题**行容器**类（挂在 .cm-line 行元素上），整行级样式入口。",
@@ -154,6 +280,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-header-span",
     "domain": "content",
+    "category": "heading",
     "kind": "selector",
     "target": ".vsidian-header-{1..6}",
     "purpose": "live 标题**内容 span** 类（mark 装饰，只包标题文字），行内 token 级入口。",
@@ -178,6 +305,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-heading-inview",
     "domain": "content",
+    "category": "heading",
     "kind": "selector",
     "target": ".vsidian-heading-inview",
     "purpose": "视口内标题行标记；#55 起仅作 active 背景的作用域限定与观测入口，自身不绘制样式。",
@@ -199,6 +327,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-heading-active",
     "domain": "content",
+    "category": "heading",
     "kind": "selector",
     "target": ".vsidian-heading-active",
     "purpose": "光标所在标题行的行背景强调提示；标题 # 标记在光标进入该行时显形。",
@@ -220,6 +349,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "inline-strong",
     "domain": "content",
+    "category": "inline-format",
     "kind": "selector",
     "target": ".vsidian-strong（live）/ strong 标签（阅读）",
     "purpose": "粗体内容入口：live 为 mark 装饰 span；阅读为 markdown-it 渲染的语义 strong 标签。",
@@ -247,6 +377,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "inline-emphasis",
     "domain": "content",
+    "category": "inline-format",
     "kind": "selector",
     "target": ".vsidian-emphasis（live）/ em 标签（阅读）",
     "purpose": "斜体内容入口：live mark 装饰 span；阅读语义 em 标签。",
@@ -273,6 +404,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "inline-code",
     "domain": "content",
+    "category": "inline-format",
     "kind": "selector",
     "target": ".vsidian-inline-code（live）/ code 标签（阅读，块内 code 另有 language-x 类）",
     "purpose": "行内代码内容入口：live mark 装饰 span；阅读语义 code 标签。",
@@ -300,6 +432,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "inline-highlight",
     "domain": "content",
+    "category": "inline-format",
     "kind": "selector",
     "target": ".vsidian-highlight（live）/ mark 标签（阅读）",
     "purpose": "高亮（==文字==）内容入口：live span 常显主题色底；阅读 mark 标签。底色变量见 var-highlight-background。",
@@ -326,6 +459,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "inline-strikethrough",
     "domain": "content",
+    "category": "inline-format",
     "kind": "selector",
     "target": "del 标签（仅阅读）",
     "purpose": "删除线（~~文字~~）内容入口：**仅阅读视图**——markdown-it 渲染语义 del 标签。live 侧解析器支持但未装饰，源码形态呈现（见 limit-strikethrough-live）。",
@@ -346,6 +480,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-code-line",
     "domain": "content",
+    "category": "line-syntax",
     "kind": "selector",
     "target": ".vsidian-code-line",
     "purpose": "live 围栏/缩进代码**行**（含围栏标记行）；卡片开启时的行级类另见 chrome 域 live-code-card-line。",
@@ -371,6 +506,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-quote-line",
     "domain": "content",
+    "category": "line-syntax",
     "kind": "selector",
     "target": ".vsidian-quote-line",
     "purpose": "live 引用行（> 前缀）；引用内容不额外 span 化（见 limit-quote-span）。",
@@ -396,6 +532,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-list-line",
     "domain": "content",
+    "category": "list-task",
     "kind": "selector",
     "target": ".vsidian-list-line（+ -d{1..8} 嵌套深度修饰）",
     "purpose": "live 列表项行；深度修饰 -d{1..8} 为本项目自有形态（Obsidian 按行 class 组合表达缩进）。",
@@ -421,6 +558,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-list-bullet",
     "domain": "content",
+    "category": "list-task",
     "kind": "selector",
     "target": ".vsidian-list-bullet",
     "purpose": "无序列表行修饰：标记隐藏后以 ::before 圆点呈现。",
@@ -442,6 +580,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-list-ordered",
     "domain": "content",
+    "category": "list-task",
     "kind": "selector",
     "target": ".vsidian-list-ordered",
     "purpose": "有序列表行修饰（编号保留可见）。",
@@ -462,6 +601,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-list-marker-visible",
     "domain": "content",
+    "category": "list-task",
     "kind": "selector",
     "target": ".vsidian-list-marker-visible",
     "purpose": "无序列表源码标记显形时抑制 ::before 伪圆点，避免双圆点。",
@@ -483,6 +623,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-task-checkbox",
     "domain": "content",
+    "category": "list-task",
     "kind": "selector",
     "target": ".vsidian-task-checkbox（input[type=checkbox]）+ .vsidian-task-checked 修饰",
     "purpose": "live 任务 checkbox（可交互：点击/Enter/空格切换勾选并写回 Markdown）；勾选态双入口：:checked 伪类与 .vsidian-task-checked 类。",
@@ -505,6 +646,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-hr-line",
     "domain": "content",
+    "category": "line-syntax",
     "kind": "selector",
     "target": ".vsidian-hr-line",
     "purpose": "live 水平线**行**级类；#106 起升级渲染态后保留作源码态着色。",
@@ -530,6 +672,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-hr-widget",
     "domain": "content",
+    "category": "line-syntax",
     "kind": "selector",
     "target": ".vsidian-hr",
     "purpose": "live 水平线渲染 widget 元素（#106：未触及时源文隐藏，本元素以居中渐变呈现真横线；行盒高等于正文行高，颜色与阅读 hr 同源变量 --vsidian-hr-color）。",
@@ -551,6 +694,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-frontmatter-line",
     "domain": "content",
+    "category": "line-syntax",
     "kind": "selector",
     "target": ".vsidian-frontmatter-line",
     "purpose": "live frontmatter 行（头块按源码呈现、语法不解析）。",
@@ -575,6 +719,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-table-line",
     "domain": "content",
+    "category": "table",
     "kind": "selector",
     "target": ".vsidian-table-line",
     "purpose": "live 表格行（表头/分隔/数据行通用）；仅源码降级或活动分隔行显示管道符。",
@@ -599,6 +744,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-table-header-line",
     "domain": "content",
+    "category": "table",
     "kind": "selector",
     "target": ".vsidian-table-header-line",
     "purpose": "live 表头行修饰。",
@@ -619,6 +765,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-table-delimiter-line",
     "domain": "content",
+    "category": "table",
     "kind": "selector",
     "target": ".vsidian-table-delimiter-line",
     "purpose": "live 分隔行修饰（活动分隔行回到源码显示）。",
@@ -640,6 +787,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-table-cell",
     "domain": "content",
+    "category": "table",
     "kind": "selector",
     "target": ".vsidian-table-cell（+ -header 修饰）",
     "purpose": "live 单元格内容 span（trim 后区间）；GFM 拆分语义自研（\\| 与行内代码内的 | 不切分）。",
@@ -664,6 +812,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-table-pipe",
     "domain": "content",
+    "category": "table",
     "kind": "selector",
     "target": ".vsidian-table-pipe",
     "purpose": "live 管道符 span（含首尾边界管道）；网格状态隐藏，源码状态可见。",
@@ -685,6 +834,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-table-align",
     "domain": "content",
+    "category": "table",
     "kind": "selector",
     "target": ".vsidian-table-align-{left/center/right}",
     "purpose": "live 分隔行声明的列对齐修饰（落在 trim 后内容 span 上）；网格实际布局由 grid-align 承担。",
@@ -705,6 +855,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-table-grid-row",
     "domain": "content",
+    "category": "table",
     "kind": "selector",
     "target": ".vsidian-table-grid-row（行附 data-vsidian-table-row=header/row 与 --vsidian-table-columns）",
     "purpose": "安全表格的 CSS grid 网格行；活动格也保留；单元格仍与源区间对应（非独立表格数据模型）。",
@@ -725,6 +876,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-table-grid-cell",
     "domain": "content",
+    "category": "table",
     "kind": "selector",
     "target": ".vsidian-table-grid-cell",
     "purpose": "安全表格的网格单元格；光标进入格子后网格不撤下，直接在该格源区间输入（复用 CM6 的 IME、导航与写回）。",
@@ -745,6 +897,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-table-grid-delimiter",
     "domain": "content",
+    "category": "table",
     "kind": "selector",
     "target": ".vsidian-table-grid-delimiter",
     "purpose": "网格状态下的分隔行隐藏。",
@@ -766,6 +919,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-table-grid-align",
     "domain": "content",
+    "category": "table",
     "kind": "selector",
     "target": ".vsidian-table-grid-align-{left/center/right}",
     "purpose": "网格状态的列对齐。",
@@ -786,6 +940,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-table-escaped-pipe",
     "domain": "content",
+    "category": "table",
     "kind": "selector",
     "target": ".vsidian-table-escaped-pipe",
     "purpose": "网格中隐藏转义管道符前的反斜杠；只改变显示，不改 Markdown 原文。",
@@ -806,6 +961,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "reading-block",
     "domain": "content",
+    "category": "reading-structure",
     "kind": "selector",
     "target": ".vsidian-reading-block（+ data-vsidian-src-start / -end 源锚点属性）",
     "purpose": "阅读容器内每个内容块的基类；锚点属性为 LF 全文 UTF-16 offset（与消息协议坐标同构），按需挂载与任务定位依赖。",
@@ -826,6 +982,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "reading-heading",
     "domain": "content",
+    "category": "reading-structure",
     "kind": "selector",
     "target": ".vsidian-reading-heading-{1..6}（块类）+ 内层语义 h{1..6} 标签",
     "purpose": "阅读标题块；双入口命中（块类 + 内层标签）。",
@@ -848,6 +1005,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "reading-paragraph",
     "domain": "content",
+    "category": "reading-structure",
     "kind": "selector",
     "target": ".vsidian-reading-paragraph（块类）+ 内层 p 标签",
     "purpose": "阅读段落块。",
@@ -869,6 +1027,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "reading-blockquote",
     "domain": "content",
+    "category": "reading-structure",
     "kind": "selector",
     "target": ".vsidian-reading-blockquote（块类）+ 内层 blockquote 标签",
     "purpose": "阅读引用块。",
@@ -890,6 +1049,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "reading-list",
     "domain": "content",
+    "category": "reading-structure",
     "kind": "selector",
     "target": ".vsidian-reading-list（块类）+ 内层 ul/ol/li 嵌套（li 带源锚点）",
     "purpose": "阅读列表块（整块还原嵌套结构）。",
@@ -911,6 +1071,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "reading-task",
     "domain": "content",
+    "category": "reading-structure",
     "kind": "selector",
     "target": "li.vsidian-reading-task",
     "purpose": "阅读任务列表项（挂在语义 li 上）；data-task 扩展勾选状态（[/]、[!] 等）不支持。",
@@ -935,6 +1096,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "reading-task-checkbox",
     "domain": "content",
+    "category": "reading-structure",
     "kind": "selector",
     "target": ".vsidian-reading-task-checkbox（input[type=checkbox]）",
     "purpose": "阅读任务复选框（点击/键盘切换并写回）。",
@@ -957,6 +1119,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "reading-code-block",
     "domain": "content",
+    "category": "reading-structure",
     "kind": "selector",
     "target": ".vsidian-reading-code-block（块类）+ 内层 pre > code（code 带语言类 language-x）",
     "purpose": "阅读围栏/缩进代码块（内容不含围栏标记文本；大围栏超 60 行按行细分为多块；卡片化外壳另见 chrome 域 reading-code-card）。",
@@ -978,6 +1141,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "reading-hr",
     "domain": "content",
+    "category": "reading-structure",
     "kind": "selector",
     "target": ".vsidian-reading-hr（块类）+ 内层 hr 标签",
     "purpose": "阅读水平线块。",
@@ -999,6 +1163,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "reading-table",
     "domain": "content",
+    "category": "reading-structure",
     "kind": "selector",
     "target": ".vsidian-reading-table（块类）+ 内层真实 table/thead/tbody（GFM 列对齐保留在 th/td 内联 style）",
     "purpose": "阅读表格块（markdown-it 渲染，只读呈现）。",
@@ -1021,6 +1186,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "reading-frontmatter",
     "domain": "content",
+    "category": "reading-structure",
     "kind": "selector",
     "target": ".vsidian-reading-frontmatter（块类；内部 pre.vsidian-reading-frontmatter-text）",
     "purpose": "阅读 frontmatter 头块（源码呈现，头块内语法不解析，两视图共用边界判定）。",
@@ -1045,6 +1211,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "reading-spacer",
     "domain": "content",
+    "category": "reading-structure",
     "kind": "selector",
     "target": ".vsidian-reading-spacer（-top / -bottom）",
     "purpose": "阅读视口占位：屏外块的高度占位（非内容节点，高度为块高度表前后缀和）；本项目自有结构，不参与兼容承诺，出现在片段中不影响内容块定位。",
@@ -1065,6 +1232,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-link",
     "domain": "content",
+    "category": "link-image-wikilink",
     "kind": "selector",
     "target": ".vsidian-link",
     "purpose": "live 链接**内容** span（始终标记；光标或选区进入该链接范围时显示 [ 和 ](url) 源码，同一行其他链接保持格式化）；隐藏尾部对应 Obsidian .cm-formatting-link / .cm-string.cm-url 方向——本项目以隐藏呈现，无独立样式类。",
@@ -1091,6 +1259,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "reading-link",
     "domain": "content",
+    "category": "link-image-wikilink",
     "kind": "selector",
     "target": "阅读链接（语义 a 标签，无自有类）",
     "purpose": "阅读链接：markdown-it 渲染的语义 <a>（单击经容器委托上报跳转意图，不做 webview 原生导航）。",
@@ -1113,6 +1282,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "image-slot",
     "domain": "content",
+    "category": "link-image-wikilink",
     "kind": "selector",
     "target": ".vsidian-image（双视图）",
     "purpose": "图片槽位基类：阅读视图为 <img> 元素本体（Obsidian img 标签选择器天然命中）；live 视图为 widget 容器 span（内部 img 由资源管理器装载，本项目自有形态）。",
@@ -1136,6 +1306,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "image-states",
     "domain": "content",
+    "category": "link-image-wikilink",
     "kind": "selector",
     "target": ".vsidian-image-loading / -loaded / -error（与 data-vsidian-img-state 同步）",
     "purpose": "图片三态：占位（alt 文本）/ 已加载（load 事件确认）/ 失败（点击重试，可见错误轮廓）。",
@@ -1158,6 +1329,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-wikilink",
     "domain": "content",
+    "category": "link-image-wikilink",
     "kind": "selector",
     "target": ".vsidian-wikilink",
     "purpose": "live 双链呈现：光标在范围外时为显示文字 widget（替换整个 [[…]]，别名类挂在 widget 外层与源码 mark 上），进入范围后为源码 mark。Obsidian 的拆分形态（链接名/别名/格式化括号）无拆分类。",
@@ -1184,6 +1356,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "reading-wikilink",
     "domain": "content",
+    "category": "link-image-wikilink",
     "kind": "selector",
     "target": "a.vsidian-wikilink",
     "purpose": "阅读双链：markdown-it 双链规则渲染的语义 <a>（href 为原文 target，显示别名或链接名；单击上报跳转意图）。",
@@ -1209,6 +1382,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "var-heading-color",
     "domain": "content",
+    "category": "content-variables",
     "kind": "variable",
     "target": "--vsidian-heading-color-{1..6}",
     "purpose": "标题层级色变量族：live 标题行级、阅读标题块级与大纲条目级三侧同引（主题分级着色一处定义多处生效）。默认 var(--vscode-editor-foreground)。",
@@ -1240,6 +1414,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "var-reading-font-size",
     "domain": "content",
+    "category": "content-variables",
     "kind": "variable",
     "target": "--vsidian-reading-font-size",
     "purpose": "阅读正文字号；默认 var(--vsidian-content-font-size)（跟随 VSCode 编辑器字号）。",
@@ -1263,6 +1438,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "var-reading-max-width",
     "domain": "content",
+    "category": "content-variables",
     "kind": "variable",
     "target": "--vsidian-reading-max-width",
     "purpose": "阅读块最大宽度；默认 760px。",
@@ -1286,6 +1462,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "var-reading-line-height",
     "domain": "content",
+    "category": "content-variables",
     "kind": "variable",
     "target": "--vsidian-reading-line-height",
     "purpose": "阅读正文行高；默认 var(--vsidian-content-line-height)。",
@@ -1309,6 +1486,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "var-reading-code-background",
     "domain": "content",
+    "category": "content-variables",
     "kind": "variable",
     "target": "--vsidian-reading-code-background",
     "purpose": "代码块背景；默认 var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12))。",
@@ -1332,6 +1510,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "var-highlight-background",
     "domain": "content",
+    "category": "content-variables",
     "kind": "variable",
     "target": "--vsidian-highlight-background",
     "purpose": "高亮底色：live 正文 span、阅读 mark、大纲条目三侧同引。默认深色 rgba(255, 208, 0, 0.35)、浅色 body.vscode-light 覆盖 #ffe066（两轮视觉实测主题变量对比不足，切 Obsidian 式固定荧光黄双主题调校）。",
@@ -1356,6 +1535,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "var-table-background",
     "domain": "content",
+    "category": "content-variables",
     "kind": "variable",
     "target": "--vsidian-table-background",
     "purpose": "live 表格行背景 / 阅读表头背景；默认 rgba(128, 128, 128, 0.05)。",
@@ -1380,6 +1560,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "var-heading-accent",
     "domain": "content",
+    "category": "content-variables",
     "kind": "variable",
     "target": "--vsidian-heading-accent（已移除）",
     "purpose": "曾为 live 视口内标题左缘强调色；随 #55 移除左缘竖线一并移除，不再公开。保留本条目作为弃用/移除生命周期的历史记录。",
@@ -1399,6 +1580,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "limit-hashtag",
     "domain": "content",
+    "category": "content-limits",
     "kind": "limitation",
     "target": ".cm-hashtag / .tag",
     "purpose": "标签（#tag）语法未实现：出现在片段中不命中（不报错也不生效）。",
@@ -1417,6 +1599,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "limit-callout",
     "domain": "content",
+    "category": "content-limits",
     "kind": "limitation",
     "target": ".callout 及其 data 属性",
     "purpose": "Callout 语法未实现，后续版本提供。",
@@ -1435,6 +1618,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "limit-task-extended-states",
     "domain": "content",
+    "category": "content-limits",
     "kind": "limitation",
     "target": ".task-list-item[data-task=\"x\"] 等",
     "purpose": "任务扩展勾选状态不支持：仅空格 / x / X 三态。",
@@ -1456,6 +1640,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "limit-markdown-embed",
     "domain": "content",
+    "category": "content-limits",
     "kind": "limitation",
     "target": ".markdown-embed / 嵌入结构",
     "purpose": "嵌入（![[…]] 等）结构未提供（双链残缺形态按原文显示）；blockquote 块已支持。",
@@ -1477,6 +1662,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "limit-strikethrough-live",
     "domain": "content",
+    "category": "content-limits",
     "kind": "limitation",
     "target": ".cm-strikethrough（live 侧）",
     "purpose": "删除线 live 侧未装饰：解析器支持但 live 视图无装饰类，源码形态呈现；阅读侧 del 标签可用（见 inline-strikethrough）。",
@@ -1497,6 +1683,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "limit-quote-span",
     "domain": "content",
+    "category": "content-limits",
     "kind": "limitation",
     "target": ".cm-quote（span 级）",
     "purpose": "引用内容不额外 span 化：live 侧仅行级 .HyperMD-quote 别名；Obsidian 的 span 级 .cm-quote token 类不承诺。",
@@ -1517,6 +1704,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "limit-is-unresolved",
     "domain": "content",
+    "category": "content-limits",
     "kind": "limitation",
     "target": "双链 is-unresolved 区分（按目标存在与否变色）",
     "purpose": "不做：显示时不查询工作区，避免为样式引入索引/查找。双链一律同色呈现。",
@@ -1538,6 +1726,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "limit-reference-links-live",
     "domain": "content",
+    "category": "content-limits",
     "kind": "limitation",
     "target": "引用式链接/图片（[t][ref]）live 侧",
     "purpose": "引用式链接/图片：阅读视图由 markdown-it 完整解析（可点击）；live 视图不解析引用定义、按源码呈现（Ctrl+单击不跳转）——跨视图行为差异。",
@@ -1558,6 +1747,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "limit-table-crossview",
     "domain": "content",
+    "category": "content-limits",
     "kind": "limitation",
     "target": "行内代码内 | 的表格拆分跨视图差异",
     "purpose": "markdown-it 不识别行内代码内的 |：含该形态的表格在阅读视图错切或降级为段落；live 侧按 GFM 规范正确拆分（偏差记录于 docs/perf/2026-09-table-cell-editing.md「已知限制」）。",
@@ -1578,6 +1768,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "limit-virtualization",
     "domain": "content",
+    "category": "content-limits",
     "kind": "limitation",
     "target": "阅读视图虚拟化（全文 DOM 非常驻）",
     "purpose": "阅读视口外块不存在于 DOM：依赖「全文 DOM 常驻」的片段（全局 :nth-child 定位、跨屏兄弟/后代选择器、假设完整内容高度的滚动条计算）与按需挂载冲突。滚动回视口的块重新挂载并继承文档级样式。",
@@ -1598,6 +1789,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "limit-find-hit-mask",
     "domain": "content",
+    "category": "content-limits",
     "kind": "limitation",
     "target": "查找高亮与隐藏标记区的交叉形态",
     "purpose": "当前匹配的 replace 装饰优先于查找高亮：命中区间落在被折叠的隐藏标记（如链接语法标记）内时查找高亮不可见；匹配计数与步进不受影响（按全文文本模型计算）。",
@@ -1618,6 +1810,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-math",
     "domain": "chrome",
+    "category": "math",
     "kind": "selector",
     "target": ".vsidian-math",
     "purpose": "公式渲染态稳定容器：live 为行内 widget 外层、阅读为 KaTeX 外层 span/p（内含 KaTeX .katex 结构）；颜色继承编辑器前景。Obsidian 拆分 .cm-math-begin/end 定界符类，本项目整体替换、无拆分类。",
@@ -1641,6 +1834,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-math-block",
     "domain": "chrome",
+    "category": "math",
     "kind": "selector",
     "target": ".vsidian-math-block",
     "purpose": "块级公式（$$…$$ / \\begin{align} 等）渲染态变体：独立成块、居中、横向滚动。live widget 与阅读 p.katex-block 双侧同发射（与 .vsidian-math 并挂）。",
@@ -1663,6 +1857,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-math-source",
     "domain": "chrome",
+    "category": "math",
     "kind": "selector",
     "target": ".vsidian-math-source",
     "purpose": "光标进入公式范围后的源码显形 mark（等宽着色 + 浅底）。",
@@ -1685,6 +1880,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "reading-math-block",
     "domain": "chrome",
+    "category": "math",
     "kind": "selector",
     "target": ".vsidian-reading-math（块类）+ .katex-block 内层 display 容器",
     "purpose": "阅读公式块（markdown-it-katex 渲染，挂载即渲染、卸载即释放，高度由 ResizeObserver 回填）；块内公式容器为 p.katex-block（vsidian-math/-math-block 并挂其上）。",
@@ -1706,6 +1902,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "math-error",
     "domain": "chrome",
+    "category": "math",
     "kind": "selector",
     "target": ".vsidian-math-error",
     "purpose": "公式解析失败的原文降级 span：错误色 + 浅红底 + 等宽字体，原文完整可读（两视图共用；title 属性带原文便于悬停核对）。",
@@ -1728,6 +1925,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "mermaid-container",
     "domain": "chrome",
+    "category": "diagram",
     "kind": "selector",
     "target": ".vsidian-mermaid",
     "purpose": "mermaid 围栏渲染容器（live widget 内层与阅读 fence 容器共用；携带 data-vsidian-mermaid-code 源码与 data-vsidian-mermaid-state 状态 loading/rendered/error）。",
@@ -1750,6 +1948,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "mermaid-svg",
     "domain": "chrome",
+    "category": "diagram",
     "kind": "selector",
     "target": ".vsidian-mermaid svg",
     "purpose": "mermaid 自产 SVG（宽度受容器约束、高度等比）。SVG 内部节点为第三方渲染器私有 DOM，不承诺稳定（见 limit-mermaid-internals）。",
@@ -1772,6 +1971,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "reading-mermaid-block",
     "domain": "chrome",
+    "category": "diagram",
     "kind": "selector",
     "target": ".vsidian-reading-mermaid",
     "purpose": "阅读 mermaid 围栏整块成块的块元素类（豁免 60 行大围栏切片；挂载即渲染、卸载随块释放）；块内才是 .vsidian-mermaid 渲染容器。",
@@ -1793,6 +1993,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "mermaid-error",
     "domain": "chrome",
+    "category": "diagram",
     "kind": "selector",
     "target": ".vsidian-mermaid-error（含 -message / -source）",
     "purpose": "mermaid 语法/渲染失败降级态：错误信息 + 源码可读，光标进入围栏仍可编辑（两视图共用）。",
@@ -1815,6 +2016,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "graphic-chrome",
     "domain": "chrome",
+    "category": "graphic-interact",
     "kind": "selector",
     "target": ".vsidian-graphic-frame / .vsidian-graphic-chrome（含 -edit / -popup）",
     "purpose": "图形化代码块（渲染成图形的围栏）定位包裹层与右上角按钮组：edit 进源码编辑（仅实时预览）、popup 打开图表弹窗；按钮组悬停显隐由 CSS 驱动（透明度切换，DOM 常驻渲染成功态）。",
@@ -1839,6 +2041,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "diagram-popup",
     "domain": "chrome",
+    "category": "graphic-interact",
     "kind": "selector",
     "target": ".vsidian-diagram-overlay / -backdrop / -stage / -media / -toolbar / -zoom-in / -zoom-out / -zoom-label / -reset / -refresh / -export-svg / -export-png / -close / -error / -note",
     "purpose": "图表弹窗全屏浮层（#111）：遮罩 + 舞台（缩放/平移的图本体）+ 工具条（缩放/重置/刷新/导出/关闭）；error 态保留 close 与 refresh；note 为环境不支持 PNG 光栅化时的提示条。挂 document.body，仅在弹窗打开期间在场。",
@@ -1862,6 +2065,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "outline-item",
     "domain": "chrome",
+    "category": "outline",
     "kind": "selector",
     "target": ".vsidian-outline-item（+ .vsidian-outline-level-{1..6}）",
     "purpose": "大纲条目（级别类兼作缩进与层级色入口）；条目钉常规字重 400，不继承标题级别加粗；层级色与正文标题同引 --vsidian-heading-color-{1..6}（三侧同源，见 var-heading-color）。",
@@ -1881,6 +2085,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "outline-inline-marks",
     "domain": "chrome",
+    "category": "outline",
     "kind": "selector",
     "target": ".vsidian-outline-strong / -emphasis / -code / -strike / -highlight",
     "purpose": "大纲行内标记透传（语义元素 strong/em/code/del/mark 上的第二类名入口）：字重/斜体/等宽/删除线/高亮底只由显式标记触发；双链/链接为纯文本（无 a，不可点）。",
@@ -1900,6 +2105,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "outline-guide",
     "domain": "chrome",
+    "category": "outline",
     "kind": "selector",
     "target": ".vsidian-outline-guide",
     "purpose": "层级对齐引导线（条目内绝对定位竖线，left 对齐祖先 chevron 中心——嵌套层级的视觉对齐辅助）。",
@@ -1919,6 +2125,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "outline-located",
     "domain": "chrome",
+    "category": "outline",
     "kind": "selector",
     "target": ".vsidian-outline-located",
     "purpose": "当前控制域条目的常驻高亮横条（半透明背景；类切换是两态差异唯一来源）；施加在可见代表上（目标被折叠遮蔽时为第一个可见祖先）。",
@@ -1938,6 +2145,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "outline-slider",
     "domain": "chrome",
+    "category": "outline",
     "kind": "selector",
     "target": ".vsidian-outline-slider（+ ::before）",
     "purpose": "折叠滑块行（显隐唯一开关是侧栏容器的 outline-active 类；::before 画贯穿横线；role=group 六按钮组键盘可达）。",
@@ -1957,6 +2165,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "outline-slider-dot",
     "domain": "chrome",
+    "category": "outline",
     "kind": "selector",
     "target": ".vsidian-outline-slider-dot（+ .vsidian-outline-slider-active / -filled）",
     "purpose": "六档折叠圆点：空闲珠空心（透明面 + 描边圆环）、当前珠实心——两态差异唯一来源是 active 类规则；#99 起当前档沿途珠（filled）同态实心；实心色跟随 --vscode-button-background。",
@@ -1976,6 +2185,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "outline-chevron",
     "domain": "chrome",
+    "category": "outline",
     "kind": "selector",
     "target": ".vsidian-outline-chevron / .vsidian-outline-chevron-spacer",
     "purpose": "折叠箭头按钮（有子项条目）/ 无子项条目的同宽占位（文字左缘对齐）；线宽不写在 SVG 属性上；点箭头折叠/展开、点文字仍跳转。",
@@ -1995,6 +2205,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "outline-collapsed",
     "domain": "chrome",
+    "category": "outline",
     "kind": "selector",
     "target": ".vsidian-outline-collapsed",
     "purpose": "折叠中的父节点条目（箭头旋转 -90° 朝右是两态差异唯一来源）。",
@@ -2015,6 +2226,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "outline-hidden",
     "domain": "chrome",
+    "category": "outline",
     "kind": "selector",
     "target": ".vsidian-outline-hidden",
     "purpose": "折叠遮蔽的条目（display:none，类切换是唯一显隐开关；DOM 保留维持索引序）；#68 起搜索过滤隐藏同用此类。",
@@ -2035,6 +2247,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "outline-toolbar",
     "domain": "chrome",
+    "category": "outline",
     "kind": "selector",
     "target": ".vsidian-outline-toolbar",
     "purpose": "大纲工具条行（跳转到末尾、重置、搜索框；显隐唯一开关是 outline-active 类）。",
@@ -2054,6 +2267,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "outline-toolbar-buttons",
     "domain": "chrome",
+    "category": "outline",
     "kind": "selector",
     "target": ".vsidian-outline-jump-bottom / .vsidian-outline-reset",
     "purpose": "工具条图标按钮（跳转到笔记末尾 / 重置三合一），与侧栏顶栏按钮同形态（基础形态由 .vsidian-outline-toolbar button 结构选择器承担，本类名为行为锚点与片段入口）。",
@@ -2073,6 +2287,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "outline-search",
     "domain": "chrome",
+    "category": "outline",
     "kind": "selector",
     "target": ".vsidian-outline-search（+ ::placeholder）",
     "purpose": "标题搜索输入框（flex 占余宽；配色走 --vscode-input-* 变量族）。",
@@ -2092,6 +2307,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "outline-search-hit",
     "domain": "chrome",
+    "category": "outline",
     "kind": "selector",
     "target": "mark.vsidian-outline-search-hit",
     "purpose": "搜索命中片段高亮（只包命中子串；背景跟随 --vscode-editor-findMatchHighlightBackground，与正文查找命中同族视觉语言）；文本层切分，与语义元素正交。",
@@ -2112,6 +2328,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "outline-nomatch",
     "domain": "chrome",
+    "category": "outline",
     "kind": "selector",
     "target": ".vsidian-outline-nomatch",
     "purpose": "无匹配占位（有词条零命中的可读反馈）。",
@@ -2132,6 +2349,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "outline-menu",
     "domain": "chrome",
+    "category": "outline",
     "kind": "selector",
     "target": ".vsidian-outline-menu（+ -item / -host / -submenu / -danger / -cue）",
     "purpose": "右键菜单浮层（挂侧栏内 absolute；菜单项为 button 键盘可达；子菜单显隐唯一开关是父项宿主的 :hover/:focus-within；danger 红字标删除；颜色跟随 --vscode-menu-* 变量族）。",
@@ -2152,6 +2370,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "outline-rename-input",
     "domain": "chrome",
+    "category": "outline",
     "kind": "selector",
     "target": ".vsidian-outline-rename-input",
     "purpose": "重命名行内编辑态输入框（条目内容区被 input 替换，编辑原文含行内标记）；VSCode 输入框三变量（前景/背景/边框）。",
@@ -2171,6 +2390,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "outline-dragging",
     "domain": "chrome",
+    "category": "outline",
     "kind": "selector",
     "target": ".vsidian-outline-dragging",
     "purpose": "拖动中的源条目（整体半透明弱化，类切换是两态差异唯一来源）。",
@@ -2190,6 +2410,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "outline-drop-edge",
     "domain": "chrome",
+    "category": "outline",
     "kind": "selector",
     "target": ".vsidian-outline-drop-before / -after",
     "purpose": "拖拽目标上/下缘插入线（inset box-shadow 不占布局、不与 located 背景冲突；颜色跟随 --vscode-focusBorder）。",
@@ -2209,6 +2430,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "outline-drop-inside",
     "domain": "chrome",
+    "category": "outline",
     "kind": "selector",
     "target": ".vsidian-outline-drop-inside",
     "purpose": "拖拽目标包裹高亮（outline 内缩一圈 + 半透明背景，与 located 同变量族——「放入成为子标题」的视觉区分）。",
@@ -2228,6 +2450,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-code-card-line",
     "domain": "chrome",
+    "category": "code-card",
     "kind": "selector",
     "target": ".vsidian-code-card-line",
     "purpose": "卡片覆盖的行级类：live 为源行级（含被清空的围栏行与全部代码行，承载卡片底色），阅读为卡内行 span（与 live 同类名，跨视图同口径）；与正文域 live-code-line 并行（live 卡片开启时两者都在场）。",
@@ -2250,6 +2473,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-code-card-edge",
     "domain": "chrome",
+    "category": "code-card",
     "kind": "selector",
     "target": ".vsidian-code-card-edge-top / -bottom",
     "purpose": "卡片首/末行圆角修饰（无头部覆盖的底边圆角；顶边圆角由头部横带承担）。仅 live 侧发射；阅读卡片圆角由 .vsidian-reading-code-card 承担。",
@@ -2270,6 +2494,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-code-card-header",
     "domain": "chrome",
+    "category": "code-card",
     "kind": "selector",
     "target": ".vsidian-code-card-header（live block widget / 阅读头部容器共用）",
     "purpose": "卡片头部横带：语言标签 + 右侧按钮区，底部 1px 分隔线（观感参照 Code Styler 插件方向，本项目自有结构）。",
@@ -2292,6 +2517,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-code-card-header-parts",
     "domain": "chrome",
+    "category": "code-card",
     "kind": "selector",
     "target": ".vsidian-code-card-header-label / -actions / -icon",
     "purpose": "卡片语言标签（首字母大写显示名）/ 按钮容器 / 语言徽标（#83 彩色字形徽标，挂标签内）。",
@@ -2314,6 +2540,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-code-card-copy",
     "domain": "chrome",
+    "category": "code-card",
     "kind": "selector",
     "target": ".vsidian-code-card-copy（+ -done 修饰）",
     "purpose": "复制按钮（经宿主剪贴板 API）；-done 为点击后约 1.2s 的 ✓ 反馈态。",
@@ -2336,6 +2563,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-code-card-fold",
     "domain": "chrome",
+    "category": "code-card",
     "kind": "selector",
     "target": ".vsidian-code-card-fold（+ -collapsed 修饰）",
     "purpose": "折叠 chevron；-collapsed 为收起态（转向）；折叠为视图态不写源文件（阅读侧收起另有块级 vsidian-code-card-folded 修饰，见 reading-code-card）。",
@@ -2358,6 +2586,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "live-code-card-linenumber",
     "domain": "chrome",
+    "category": "code-card",
     "kind": "selector",
     "target": ".vsidian-code-card-linenumber",
     "purpose": "卡内行号（每块从 1，围栏行不占号；大围栏分块跨片连续）；live 为行首 widget、阅读为行 span（同类名）；与文档行号槽（源文件行号）两列并存互不遮挡。",
@@ -2380,6 +2609,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "tok-tokens",
     "domain": "chrome",
+    "category": "code-card",
     "kind": "selector",
     "target": "tok-* token 族（tok-keyword / tok-string 等，@lezer/highlight classHighlighter 词表）",
     "purpose": "语法高亮 token span，两视图共用同一类名与明暗色板（Dark+/Light+ 取色，非 Obsidian 主题变量）；Prism 原名 .token-* 不提供（见 limit-prism-tokens）。",
@@ -2402,6 +2632,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "reading-code-card",
     "domain": "chrome",
+    "category": "code-card",
     "kind": "selector",
     "target": ".vsidian-reading-code-card（+ .vsidian-reading-code-line 行结构 / .vsidian-code-card-folded 收起态）",
     "purpose": "阅读视图卡片容器（vsidian-reading-code-block 的卡片化外壳）；language-x 类保留在 code 上供路由；行结构 span.vsidian-reading-code-line 携行号与 token；收起态块级修饰隐藏 pre（头部保留）。",
@@ -2423,6 +2654,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "var-code-card-background",
     "domain": "chrome",
+    "category": "code-card",
     "kind": "variable",
     "target": "--vsidian-code-card-background",
     "purpose": "代码块卡片底色（头部横带与代码区共用；阅读卡片同源）；默认 var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12))。",
@@ -2445,6 +2677,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "limit-prism-tokens",
     "domain": "chrome",
+    "category": "chrome-limits",
     "kind": "limitation",
     "target": ".token-*（Prism 原名）/ .HyperMD-codeblock-*",
     "purpose": "语法高亮以 tok-* 稳定词表提供（见 tok-tokens）；Prism 原名与 .HyperMD-codeblock-* 子类不提供，片段按原名定位不命中。",
@@ -2466,6 +2699,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "limit-katex-internals",
     "domain": "chrome",
+    "category": "chrome-limits",
     "kind": "limitation",
     "target": ".katex 内部结构（.mord / .mspace / .katex-mathml 等）",
     "purpose": "内部渲染结构不兼容边界：KaTeX 产出的内部 DOM（字形 span、MathML 层等）随上游版本变化，不承诺为稳定接口——仅稳定容器外壳（.vsidian-math / .vsidian-math-block / .katex-block）公开；片段依赖内部类的着色可能在升级后失效。",
@@ -2487,6 +2721,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "limit-mermaid-internals",
     "domain": "chrome",
+    "category": "chrome-limits",
     "kind": "limitation",
     "target": "mermaid SVG 内部节点（.node / .edgePath / .cluster 等）",
     "purpose": "内部渲染结构不兼容边界：Mermaid 自产 SVG 的内部节点类随上游版本与主题变化，不承诺为稳定接口——仅容器级入口（.vsidian-mermaid 与其 svg 后代）公开；弹窗内 SVG 同源同边界。需要改图内观感请走 mermaid 主题配置而非片段选择器。",
@@ -2508,6 +2743,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "suspend-banner",
     "domain": "chrome",
+    "category": "toolbar-banner",
     "kind": "selector",
     "target": ".vsidian-suspend-banner（内含 .vsidian-suspend-banner-text）",
     "purpose": "写回冲突暂停横幅（本项目自有 UI）：暂停态顶栏提示 + 恢复按钮。",
@@ -2531,6 +2767,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "toolbar",
     "domain": "chrome",
+    "category": "toolbar-banner",
     "kind": "selector",
     "target": ".vsidian-toolbar",
     "purpose": "主编辑区顶栏：设置齿轮（.vsidian-settings-toggle）、快速操作开关（.vsidian-quick-toggle）、侧栏开关（.vsidian-sidebar-toggle）——#38 起模式切换按钮迁宿主标题栏三态命令，不在顶栏（见 mode-toggle 移除记录）。",
@@ -2553,6 +2790,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
   {
     "id": "mode-toggle",
     "domain": "chrome",
+    "category": "toolbar-banner",
     "kind": "selector",
     "target": ".vsidian-mode-toggle（已移除）",
     "purpose": "曾为顶栏模式切换按钮组。#38（提交 288044d，2026-09-24）起模式切换迁宿主编辑器标题栏三态命令，顶栏不再渲染该类；保留本条目作为旧映射表陈旧行的纠错记录——该类自 v0.1.0 起从未随发布版存在于 DOM（核对：git grep v0.4.0 -- src/ 零命中）。",

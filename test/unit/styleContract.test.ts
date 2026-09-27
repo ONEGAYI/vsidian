@@ -12,9 +12,12 @@ import {
   OBSIDIAN_DOM_ALIASES,
   OBSIDIAN_VARIABLE_ALIASES,
   STYLE_CONTRACT_BY_ID,
+  STYLE_CONTRACT_CATEGORIES,
   STYLE_CONTRACT_ENTRIES,
   joinObsidianAlias,
 } from '../../src/shared/styleContract'
+import { en } from '../../src/shared/locales/en'
+import { zhCn } from '../../src/shared/locales/zh-cn'
 
 const SUPPORT_LEVELS = new Set(['direct', 'semantic', 'native', 'none'])
 const DOMAINS = new Set(['content', 'chrome'])
@@ -346,5 +349,80 @@ describe('styleContract 迁移完整性（旧映射表全集不丢）', () => {
   it('旧表条目数守恒（快照：防止对照表自身被删减）', () => {
     expect(MIGRATION_PARITY.length).toBe(110)
     expect(STYLE_CONTRACT_ENTRIES.length).toBeGreaterThanOrEqual(MIGRATION_PARITY.length)
+  })
+})
+
+// ---- 类目体系（#145）：小类分栏与契约 JSON 的分组单一事实源 ----
+
+/** 每类目条目数快照（显式钉住归类：重划/迁移类目必须同步改这里，防静默漂移） */
+const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
+  // content 域（69）
+  'view-container': 2,
+  heading: 4,
+  'inline-format': 5,
+  'list-task': 5,
+  'line-syntax': 5,
+  table: 11,
+  'reading-structure': 12,
+  'link-image-wikilink': 6,
+  'content-variables': 8,
+  'content-limits': 11,
+  // chrome 域（46）
+  math: 5,
+  diagram: 4,
+  'graphic-interact': 2,
+  'code-card': 10,
+  outline: 19,
+  'chrome-limits': 3,
+  'toolbar-banner': 3,
+}
+
+describe('styleContract 类目体系（#145）', () => {
+  it('类目定义表形态合法（id 唯一、kebab-case、域合法、域内 order 连续自 1 起）', () => {
+    const ids = STYLE_CONTRACT_CATEGORIES.map((c) => c.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    for (const cat of STYLE_CONTRACT_CATEGORIES) {
+      expect(DOMAINS.has(cat.domain), `${cat.id} domain`).toBe(true)
+      expect(cat.id, `${cat.id} 须为 kebab-case`).toMatch(/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/)
+      expect(cat.title.length, `${cat.id} title`).toBeGreaterThan(0)
+      expect(cat.order, `${cat.id} order 须为正整数`).toBeGreaterThan(0)
+    }
+    for (const domain of ['content', 'chrome'] as const) {
+      const orders = STYLE_CONTRACT_CATEGORIES.filter((c) => c.domain === domain)
+        .map((c) => c.order).sort((a, b) => a - b)
+      expect(orders, `${domain} 域 order 须从 1 连续`).toEqual(
+        Array.from({ length: orders.length }, (_, i) => i + 1),
+      )
+    }
+  })
+
+  it('每条目已归类且类目存在于定义表（域一致）', () => {
+    const byId = new Map(STYLE_CONTRACT_CATEGORIES.map((c) => [c.id, c]))
+    for (const entry of STYLE_CONTRACT_ENTRIES) {
+      const cat = byId.get(entry.category)
+      expect(cat, `${entry.id} 的类目 ${entry.category} 未在定义表登记`).toBeDefined()
+      expect(cat!.domain, `${entry.id} 归入 ${entry.category} 但域不一致`).toBe(entry.domain)
+    }
+  })
+
+  it('每类目至少一条条目；计数与实际一致（快照）', () => {
+    const counts = new Map<string, number>()
+    for (const entry of STYLE_CONTRACT_ENTRIES) {
+      counts.set(entry.category, (counts.get(entry.category) ?? 0) + 1)
+    }
+    for (const cat of STYLE_CONTRACT_CATEGORIES) {
+      expect(counts.get(cat.id), `类目 ${cat.id} 不能为空`).toBeGreaterThan(0)
+    }
+    expect(Object.fromEntries(counts)).toEqual(CATEGORY_COUNT_SNAPSHOT)
+    expect([...counts.values()].reduce((a, b) => a + b, 0)).toBe(STYLE_CONTRACT_ENTRIES.length)
+  })
+
+  it('类目 titleKey 在两语言包存在，zh-cn 取词与文档名一致（设置页与指南同源）', () => {
+    for (const cat of STYLE_CONTRACT_CATEGORIES) {
+      const key = cat.titleKey as keyof typeof en
+      expect(en[key], `${cat.id} titleKey ${key} 缺 en 词条`).toBeTruthy()
+      expect(zhCn[key], `${cat.id} titleKey ${key} 缺 zh-cn 词条`).toBeTruthy()
+      expect(zhCn[key], `${cat.id} zh-cn 词条须与文档名 title 一致`).toBe(cat.title)
+    }
   })
 })

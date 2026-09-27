@@ -54,6 +54,8 @@ function makeEntries() {
     { size: 3898, name: 'extension/media/css-contract-probe.css' },
     // #132 样式参考指南（清单生成的独立 HTML，实测代表值）
     { size: 113305, name: 'extension/media/style-reference/style-reference.html' },
+    // #145 契约 JSON（机器可读清单，实测代表值）
+    { size: 113123, name: 'extension/media/style-reference/style-reference.json' },
     { size: 35761, name: 'extension/media/vsidian-icon-256.png' },
     ...katexFontEntries(),
     ...quickActionIconEntries(),

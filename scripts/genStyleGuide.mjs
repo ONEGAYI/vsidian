@@ -1,5 +1,5 @@
 // 样式参考指南生成脚本（#132）：从结构化清单单一事实源
-// （src/shared/styleContract.ts）生成用户指南，两份产物同步产出：
+// （src/shared/styleContract.ts）生成用户指南，三份产物同步产出：
 //
 //   media/style-reference/style-reference.html
 //     独立完整的离线指南（随 VSIX 分发；无脚本、自包含样式，
@@ -7,6 +7,10 @@
 //   src/webview/styleGuideData.ts
 //     设置页「样式参考」分页的渲染数据模块（esbuild 打进 settings.js，
 //     保证设置页离线可查、内容与安装版本配套）
+//   media/style-reference/style-reference.json
+//     契约 JSON（#145，AI 可读材料，随 VSIX 分发）：结构化全量清单
+//     （meta 自描述 + 类目定义表 + 条目全字段 + Obsidian 变量别名表）；
+//     设置页「导出 JSON」与命令面板导出的即此文件字节
 //
 //   node scripts/genStyleGuide.mjs          # 生成并写盘（幂等）
 //   node scripts/genStyleGuide.mjs --check  # 不写盘：产物与磁盘不一致即退出 1
@@ -14,6 +18,9 @@
 // 一致性纪律（防手改指南漂移）：产物入库、由本脚本再生；编译链
 // （npm run compile）前置生成，test/unit/styleGuideGen.test.ts 以 --check
 // 钉住「清单 → 指南」可复现。改清单后须重跑并提交产物。
+// 确定性纪律（#145 契约 JSON）：meta.generatedAt 取当前版本在 CHANGELOG
+// 的发布日期（版本无段落时取最新已发布版本日期）——不用运行时钟，
+// 保证同源再生成字节一致。
 import * as esbuild from 'esbuild'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -29,6 +36,9 @@ export const SUPPORT_LEGEND = [
   { level: 'native', label: '原生承担', desc: 'Obsidian 由原生结构/机制承担；本扩展为自有形态（无兼容承诺）' },
   { level: 'none', label: '无对应 / 不支持', desc: '无 Obsidian 对应，或该语法/结构当前不支持（片段中不命中）' },
 ]
+
+/** 契约 JSON 的 schema 版本（结构不兼容变更时 +1，消费方按此分流） */
+export const STYLE_REFERENCE_JSON_SCHEMA_VERSION = 1
 
 const esc = (s) =>
   String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
@@ -68,31 +78,26 @@ ${pending}      <p class="life">${esc(lifecycle(entry))}</p>
     </article>`
 }
 
-/** 生成完整 HTML 指南（无脚本、自包含样式、离线可开） */
+/** 生成完整 HTML 指南（无脚本、自包含样式、离线可开；#145 起按类目分组） */
 export function buildStyleGuideHtml(data) {
-  const { entries, variableAliases, version } = data
-  const byDomain = { content: [], chrome: [] }
-  for (const entry of entries) byDomain[entry.domain].push(entry)
+  const { entries, categories, variableAliases, version } = data
   const sections = ['content', 'chrome']
     .map((domain) => {
-      const list = byDomain[domain]
-      const kindSections = [
-        ['container', '容器'],
-        ['selector', '选择器'],
-        ['variable', 'CSS 变量'],
-        ['limitation', '不支持与限制'],
-      ]
-        .map(([kind, title]) => {
-          const items = list.filter((e) => e.kind === kind)
+      const list = entries.filter((e) => e.domain === domain)
+      const cats = [...categories]
+        .filter((c) => c.domain === domain)
+        .sort((a, b) => a.order - b.order)
+        .map((cat) => {
+          const items = list.filter((e) => e.category === cat.id)
           if (!items.length) return ''
-          return `    <h2>${DOMAIN_TITLES[domain]} · ${title}（${items.length}）</h2>
+          return `    <h2>${DOMAIN_TITLES[domain]} · ${esc(cat.title)}（${items.length}）</h2>
 ${items.map(renderEntryCard).join('\n')}`
         })
         .filter(Boolean)
         .join('\n')
       return `  <section class="domain" data-domain="${domain}">
 ${sections_header(domain, list.length)}
-${kindSections || '    <p class="empty">（无条目）</p>'}
+${cats || '    <p class="empty">（无条目）</p>'}
   </section>`
     })
     .join('\n')
@@ -138,7 +143,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 </head>
 <body>
 <h1>Vsidian 样式参考</h1>
-<p>本指南由公开样式契约清单自动生成，与已安装版本 <strong>v${esc(version)}</strong> 配套；清单变更随版本更新，旧版本指南不承诺长期有效。CSS 片段的加载、目录与逐片段启停见扩展设置页「CSS 片段」。</p>
+<p>本指南由公开样式契约清单自动生成，与已安装版本 <strong>v${esc(version)}</strong> 配套；清单变更随版本更新，旧版本指南不承诺长期有效。CSS 片段的加载、目录与逐片段启停见扩展设置页「CSS 片段」。机器可读的契约 JSON（结构同源）可经扩展设置页「样式参考」分页或命令面板「Vsidian: 导出样式参考 JSON」导出。</p>
 
 <div class="note">
 <p><strong>Obsidian 原名兼容（别名桥）</strong>：标记 <code>direct</code> 的条目，其「别名承诺」列出的 Obsidian 原名选择器/变量在本扩展实际生效——DOM 同时挂载 vsidian 稳定类与 Obsidian 原名类；变量经 <code>var(Obsidian 名, 默认值)</code> 回退链生效，<strong>vsidian 名整条覆盖严格优先于 Obsidian 名</strong>。语义对应（<code>semantic</code>）条目不能用 Obsidian 原名，请改用 vsidian 名。</p>
@@ -167,18 +172,18 @@ ${sections}
 
 function sections_header(domain, count) {
   return `    <h1 style="font-size:19px;margin-bottom:4px">${DOMAIN_TITLES[domain]}（${count} 条）</h1>
-${domain === 'chrome' ? '    <p class="note">界面域条目（#133 起逐项核实）：静态入口经探针在真实渲染中断言，交互态入口由浏览器/集成套件按行为路径验证；第三方渲染器（KaTeX/Mermaid）内部 DOM 不承诺为稳定接口（见「不支持与限制」）。</p>' : ''}`
+${domain === 'chrome' ? '    <p class="note">界面域条目（#133 起逐项核实）：静态入口经探针在真实渲染中断言，交互态入口由浏览器/集成套件按行为路径验证；第三方渲染器（KaTeX/Mermaid）内部 DOM 不承诺为稳定接口（见各域「限制」类目）。</p>' : ''}`
 }
 
 /** 生成设置页渲染数据模块（styleGuideData.ts，esbuild 打包进 settings.js） */
 export function buildStyleGuideDataModule(data) {
-  const { entries, variableAliases, version } = data
+  const { entries, categories, variableAliases, version } = data
   return `// 设置页「样式参考」分页渲染数据（#132）——由 scripts/genStyleGuide.mjs 从
 // src/shared/styleContract.ts 生成，**禁止手改**；一致性由
 // test/unit/styleGuideGen.test.ts 以 --check 钉住（改清单后重跑生成并提交）。
 // 本文件是文档数据（公开指南内容，中文为准），不是 UI 文案——CJK 扫描豁免
 // 同 styleContract.ts；不进编辑器 webview bundle（仅设置页 import）。
-import type { StyleContractEntry } from '../shared/styleContract'
+import type { StyleContractCategory, StyleContractEntry } from '../shared/styleContract'
 import type { ObsidianVariableAlias } from '../shared/obsidianAlias'
 
 /** 指南配套的扩展版本（与安装版本一致） */
@@ -187,9 +192,86 @@ export const STYLE_GUIDE_VERSION = ${JSON.stringify(version)}
 /** Obsidian 变量别名总表（指南总表同源） */
 export const STYLE_GUIDE_VARIABLE_ALIASES: readonly ObsidianVariableAlias[] = ${JSON.stringify(variableAliases, null, 2)}
 
+/** 类目定义表（#145 分栏分组；条目计数据派生） */
+export const STYLE_GUIDE_CATEGORIES: readonly StyleContractCategory[] = ${JSON.stringify(categories, null, 2)} as readonly StyleContractCategory[]
+
 /** 清单条目（渲染数据形态与单一事实源同构） */
 export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = ${JSON.stringify(entries, null, 2)} as readonly StyleContractEntry[]
 `
+}
+
+/**
+ * 契约 JSON 的确定性生成时间（#145）：优先取当前版本在 CHANGELOG 的发布
+ * 日期；版本尚无段落（开发态）时取最新已发布版本的日期。不依赖运行时钟，
+ * 同一 (清单, CHANGELOG, 版本) 再生成字节一致。
+ */
+export function resolveGuideGeneratedAt(changelogMd, version) {
+  const sections = [...String(changelogMd ?? '').matchAll(/^## (\d+\.\d+\.\d+) - (\d{4}-\d{2}-\d{2})$/gm)]
+  if (!sections.length) return 'unknown'
+  const exact = sections.find((m) => m[1] === version)
+  if (exact) return exact[2]
+  return sections[0][2]
+}
+
+/** 生成契约 JSON（#145：AI 可读的结构化全量清单，与 VSIX 内资产同字节） */
+export function buildStyleReferenceJson(data) {
+  const { entries, categories, variableAliases, version, generatedAt } = data
+  const counts = new Map()
+  for (const entry of entries) counts.set(entry.category, (counts.get(entry.category) ?? 0) + 1)
+  const doc = {
+    meta: {
+      schemaVersion: STYLE_REFERENCE_JSON_SCHEMA_VERSION,
+      vsidianVersion: version,
+      generatedAt,
+      entryCount: entries.length,
+      source: 'src/shared/styleContract.ts',
+      generator: 'scripts/genStyleGuide.mjs',
+      determinism: 'generatedAt 取当前版本在 CHANGELOG.md 的发布日期（无段落时取最新已发布版本日期），同源再生成字节一致。',
+      fields: {
+        domains: 'domain 取值：content=正文域（编辑器正文呈现）/ chrome=界面域（扩展界面元素）',
+        categories: {
+          id: '类目稳定 ID（kebab-case，一经公开不再变更）',
+          domain: '所属域',
+          title: '类目中文名称（文档名，与设置页 zh-cn 取词一致）',
+          titleKey: '设置页 UI 的 i18n 消息键',
+          order: '域内呈现顺序（1 起）',
+          count: '该类目条目数（由条目推导）',
+        },
+        entries: {
+          id: '条目稳定 ID（一经公开不再变更；弃用/移除条目保留 ID）',
+          domain: '所属域',
+          category: '所属类目 id（见 categories）',
+          kind: 'container=容器 / selector=选择器 / variable=CSS 变量 / limitation=不支持与限制',
+          target: '选择器或变量名（族用 {1..6} 形态注记；limitation 为不支持项的名称）',
+          purpose: '用途',
+          views: '适用视图：live=实时预览 / reading=阅读；空数组=非编辑视图或不适用',
+          states: '动态态触发条件（可选，常驻入口缺省）',
+          dom: '命中该入口所需的必要 DOM 关系',
+          example: '片段作者可直接使用的示例 CSS（limitation 可为空）',
+          obsidian: { counterpart: 'Obsidian 对应写法（描述性）', support: '兼容等级，见图例 supportLegend' },
+          aliasTargets: 'direct 级别名桥实际承接的 Obsidian 原名（可选；族形态如 cm-header-{1..6}）',
+          verification: '验证定位（测试用例 / 探针字段 / CSS 契约测试）',
+          introduced: '引入记录（工单号与日期）',
+          deprecated: '弃用声明（可选：实际发布版本 + 替代写法）',
+          removed: '移除记录（可选：满足「两个后续次版本且满 30 天」后移除）',
+        },
+        variableAliases: { obsidian: 'Obsidian 变量名', vsidian: 'vsidian 变量名（整条覆盖优先）', fallback: '未设置时的默认值' },
+      },
+    },
+    supportLegend: SUPPORT_LEGEND,
+    domains: [
+      { id: 'content', title: '正文域' },
+      { id: 'chrome', title: '界面域' },
+    ],
+    categories: [...categories]
+      .sort((a, b) => (a.domain === b.domain
+        ? a.order - b.order
+        : (a.domain === 'content' ? -1 : 1) - (b.domain === 'content' ? -1 : 1)))
+      .map((c) => ({ ...c, count: counts.get(c.id) ?? 0 })),
+    variableAliases,
+    entries,
+  }
+  return `${JSON.stringify(doc, null, 2)}\n`
 }
 
 /** 编译并加载清单（TS → ESM 内存产物，data URL import；genNls.mjs 同模式） */
@@ -197,7 +279,7 @@ async function loadContract(root) {
   const result = await esbuild.build({
     stdin: {
       contents: [
-        'export { STYLE_CONTRACT_ENTRIES } from "./src/shared/styleContract.ts"',
+        'export { STYLE_CONTRACT_ENTRIES, STYLE_CONTRACT_CATEGORIES } from "./src/shared/styleContract.ts"',
         'export { OBSIDIAN_VARIABLE_ALIASES } from "./src/shared/obsidianAlias.ts"',
       ].join('\n'),
       resolveDir: root,
@@ -219,13 +301,21 @@ async function main() {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
   const check = process.argv.includes('--check')
 
-  const { STYLE_CONTRACT_ENTRIES, OBSIDIAN_VARIABLE_ALIASES } = await loadContract(root)
+  const { STYLE_CONTRACT_ENTRIES, STYLE_CONTRACT_CATEGORIES, OBSIDIAN_VARIABLE_ALIASES } = await loadContract(root)
   const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'))
-  const data = { entries: STYLE_CONTRACT_ENTRIES, variableAliases: OBSIDIAN_VARIABLE_ALIASES, version: pkg.version }
+  const changelogMd = readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8')
+  const data = {
+    entries: STYLE_CONTRACT_ENTRIES,
+    categories: STYLE_CONTRACT_CATEGORIES,
+    variableAliases: OBSIDIAN_VARIABLE_ALIASES,
+    version: pkg.version,
+    generatedAt: resolveGuideGeneratedAt(changelogMd, pkg.version),
+  }
 
   const outputs = [
     ['media/style-reference/style-reference.html', buildStyleGuideHtml(data)],
     ['src/webview/styleGuideData.ts', buildStyleGuideDataModule(data)],
+    ['media/style-reference/style-reference.json', buildStyleReferenceJson(data)],
   ]
 
   const changed = []

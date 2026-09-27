@@ -19,6 +19,7 @@ import { PRODUCTION_SETTING_DEFINITIONS } from './shared/settings'
 import { installHostLocale } from './shared/locales'
 import { hostLocale } from './host/hostLocale'
 import { KeybindingService } from './host/keybindingService'
+import { runStyleReferenceExport } from './host/styleReferenceExport'
 import { t } from './shared/i18n'
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -64,6 +65,8 @@ export function activate(context: vscode.ExtensionContext): void {
     settingsService,
     keybindingService,
     createSnippetPageWiring(snippetService),
+    // #145 样式契约 JSON 导出：设置页按钮与命令面板命令共用同一入口
+    () => runStyleReferenceExport(context),
   )
   const provider = createTextEditorProvider(context, {
     service: settingsService,
@@ -80,6 +83,10 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('onegayi.vsidian.openStyleReference', () => {
       settingsPage.openWithSection('style-reference')
     }),
+    // #145 导出样式参考 JSON：把 VSIX 内机器可读契约清单（与设置页「样式
+    // 参考」分页同源）另存到用户路径（命令面板直接可达，无需打开设置页）
+    vscode.commands.registerCommand('onegayi.vsidian.exportStyleReference', () =>
+      void runStyleReferenceExport(context)),
     vscode.commands.registerCommand('onegayi.vsidian.openSettings', () => {
       settingsPage.open()
     }),

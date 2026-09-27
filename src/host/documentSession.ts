@@ -357,9 +357,11 @@ export class DocumentSession {
       case 'snippets.setPaused':
       case 'snippets.refresh':
       case 'snippets.openDirectory':
-        // #128 片段管理动作只在设置页 webview 链路（settingsPage 模块）处理，
-        // 编辑器面板不会发出；到达此处无副作用（保持协议穷尽）。
-        // #131 setPaused 同口径（编辑器侧暂停/恢复走宿主命令，不经面板）
+      case 'styleRef.export':
+        // #128 片段管理动作与 #145 契约 JSON 导出只在设置页 webview 链路
+        // （settingsPage 模块）处理，编辑器面板不会发出；到达此处无副作用
+        // （保持协议穷尽）。#131 setPaused 同口径（编辑器侧暂停/恢复走宿主
+        // 命令，不经面板）
         return Promise.resolve()
       case 'keybindings.get':
       case 'keybindings.set':

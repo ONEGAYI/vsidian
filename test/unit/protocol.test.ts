@@ -1708,6 +1708,14 @@ describe('图表导出协议校验（#111）', () => {
   })
 })
 
+describe('样式参考导出消息协议（#145）', () => {
+  it('接受合法 styleRef.export（无载荷开关类），不误入宿主→webview 方向', () => {
+    expect(isWebviewToHost({ kind: 'styleRef.export' })).toBe(true)
+    expect(isWebviewToHost({ kind: 'styleRef.export', extra: 1 })).toBe(true) // 多余字段不整体拒绝（与既有开关类消息同口径）
+    expect(isWebviewToHost({ kind: 'styleRef.exports' })).toBe(false)
+    expect(isHostToWebview({ kind: 'styleRef.export' })).toBe(false)
+  })
+})
 describe('CSS 片段消息协议（#128）', () => {
   it('接受合法 snippets.get / chooseDirectory / refresh / openDirectory（无载荷开关类）', () => {
     for (const kind of ['snippets.get', 'snippets.chooseDirectory', 'snippets.refresh', 'snippets.openDirectory']) {

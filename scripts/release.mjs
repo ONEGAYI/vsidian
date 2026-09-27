@@ -55,6 +55,10 @@ const REQUIRED_EXTENSION = [
   // #132 样式参考指南（清单生成的独立 HTML，随 VSIX 离线分发；设置页内
   // 渲染走 settings.js 内置数据模块，此文件为可独立打开的完整版）
   'media/style-reference/style-reference.html',
+  // #145 契约 JSON（AI 可读的机器清单，与 HTML/数据模块同源生成）：
+  // 设置页「导出 JSON」与命令面板导出的即此文件字节——缺失时导出报
+  // 「安装不完整」
+  'media/style-reference/style-reference.json',
 ]
 
 // #59 KaTeX 字体（仅 woff2，esbuild assetNames 稳定命名无 hash）：缺失任一

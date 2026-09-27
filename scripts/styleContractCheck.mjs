@@ -398,10 +398,10 @@ async function importTsModule(root, exportLines) {
   return import(`data:text/javascript;base64,${Buffer.from(code, 'utf8').toString('base64')}`)
 }
 
-/** 加载候选清单与别名桥（DOM 表函数族按 lv 1..6 展开） */
+/** 加载候选清单、类目表与别名桥（DOM 表函数族按 lv 1..6 展开） */
 export async function loadCandidateContract(root) {
   const mod = await importTsModule(root, [
-    'export { STYLE_CONTRACT_ENTRIES } from "./src/shared/styleContract.ts"',
+    'export { STYLE_CONTRACT_ENTRIES, STYLE_CONTRACT_CATEGORIES } from "./src/shared/styleContract.ts"',
     'export { OBSIDIAN_DOM_ALIASES, OBSIDIAN_VARIABLE_ALIASES } from "./src/shared/obsidianAlias.ts"',
   ])
   const dom = new Set()
@@ -412,6 +412,7 @@ export async function loadCandidateContract(root) {
   const variables = new Set(mod.OBSIDIAN_VARIABLE_ALIASES.map((a) => a.obsidian))
   return {
     entries: mod.STYLE_CONTRACT_ENTRIES,
+    categories: mod.STYLE_CONTRACT_CATEGORIES,
     variableAliases: mod.OBSIDIAN_VARIABLE_ALIASES,
     aliases: { dom, variables },
   }
@@ -497,10 +498,22 @@ async function checkGuideConsistency(root, candidate, candidateVersion) {
   const failures = []
   const ctx = { candidateVersion, baselineLabel: 'generated-guide' }
   const gen = await import(pathToFileURL(path.join(SELF_ROOT, 'scripts/genStyleGuide.mjs')).href)
-  const data = { entries: candidate.entries, variableAliases: candidate.variableAliases, version: candidateVersion }
+  // #145：三产物同源复算（HTML / 数据模块 / 契约 JSON）；generatedAt 与
+  // 生成器同一确定性来源（CHANGELOG 版本日期），不引入运行时钟
+  const data = {
+    entries: candidate.entries,
+    categories: candidate.categories,
+    variableAliases: candidate.variableAliases,
+    version: candidateVersion,
+    generatedAt: gen.resolveGuideGeneratedAt(
+      readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8'),
+      candidateVersion,
+    ),
+  }
   const outputs = [
     ['media/style-reference/style-reference.html', gen.buildStyleGuideHtml(data)],
     ['src/webview/styleGuideData.ts', gen.buildStyleGuideDataModule(data)],
+    ['media/style-reference/style-reference.json', gen.buildStyleReferenceJson(data)],
   ]
   const stale = []
   for (const [name, content] of outputs) {

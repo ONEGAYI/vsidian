@@ -34,6 +34,10 @@ const extra: readonly KeybindingOperation[] = [
   // #132 样式参考：打开设置页并定位「样式参考」分页（只读全局命令，双模式
   // 可用；默认不绑定——设置页入口常驻，快捷键留给用户按需绑定）
   { id: 'openStyleReference', command: 'onegayi.vsidian.openStyleReference', titleKey: 'command.openStyleReference.title', mode: 'both', writes: false, defaults: [] },
+  // #145 导出样式参考 JSON：只读操作（把随 VSIX 分发的机器可读契约清单另存
+  // 到用户路径，不写文档），双模式可用、默认不占键位——设置页「样式参考」
+  // 分页的「导出 JSON」按钮与命令面板同一实现，评估记录见 keybindings.md
+  { id: 'exportStyleReference', command: 'onegayi.vsidian.exportStyleReference', titleKey: 'command.exportStyleReference.title', mode: 'both', writes: false, defaults: [] },
   // #128 CSS 片段刷新：只读视图操作（重新扫描目录并广播），双模式可救回
   // 被片段影响的界面；默认不占键位。「打开 CSS 片段设置」不单列命令——
   // openSettings（双模式、默认未绑定）打开设置页后经左侧导航直达分页，

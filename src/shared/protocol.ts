@@ -481,6 +481,11 @@ export type WebviewToHost =
   | { kind: 'snippets.refresh' }
   /** 在系统文件管理器中打开片段目录（#128，设置页） */
   | { kind: 'snippets.openDirectory' }
+  /** 导出样式契约 JSON（#145，设置页「样式参考」分页工具区）：宿主读
+   *  VSIX 内 media/style-reference/style-reference.json（与分发的机器可读
+   *  清单同一字节），经 showSaveDialog 另存到用户路径；成功/失败以宿主
+   *  通知回报，不逐次应答（命令面板 exportStyleReference 同一实现） */
+  | { kind: 'styleRef.export' }
 
 /** 性能快照（#5）：一次观测时点的 DOM 计数 */
 export interface PerfSnapshot {
@@ -1824,6 +1829,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'snippets.refresh':
       return true
     case 'snippets.openDirectory':
+      return true
+    case 'styleRef.export':
       return true
     default:
       return false
