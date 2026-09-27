@@ -30,20 +30,33 @@ export interface SourceRange {
  *  @lezer/markdown 直接依赖 */
 const HighlightDelim = { resolve: 'Highlight', mark: 'HighlightMark' }
 
-/** Unicode 标点类（CommonMark flanking 判定用；@lezer/markdown 内部同款）。
- *  \p{S}/\p{P} 属性转义自 ES2018 起受支持，宿主（node18/chrome118）恒可用 */
-const PUNCTUATION = /[\p{S}\p{P}]/u
+/**
+ * 高亮定界符宽松 flanking 判定（#149）：定界符内侧（内容侧）紧贴字符非
+ * 空白即放行——标点附着性与外侧字符不参与判定。基准取 Obsidian 的宽松
+ * 侧（用户已确认 `跨格==**建立**==选区后` 正常渲染高亮+粗体）：外贴汉
+ * 字/字母、内贴另一行内标记符号（`*` `=` `~` `` ` `` 均为标点）的外层
+ * 照常配对，不再按 CommonMark 标点 flanking 拒配。空串（定界符贴块边
+ * 界）按空白拒绝。live 侧（Highlight 扩展的 canOpen/canClose）与阅读侧
+ * （markdown-it 高亮规则的 open/close 内侧检查）共用本函数——两端判定
+ * 同源，对拍一致性由 readingMarkdown 单测钉住；残缺、空格紧贴、代码上
+ * 下文等拒绝项在各自配对逻辑里，不经此函数。
+ */
+export function highlightFlankOk(inner: string): boolean {
+  return inner !== '' && !/\s/u.test(inner)
+}
 
 /**
  * live 装饰使用的 Markdown 解析器（#105）：markdownLanguage 已含 GFM 扩展
  * （任务列表 / 表格 / 删除线），此处 configure 在既有扩展链上合并追加
  * `==高亮==` 行内标记——照 GFM Strikethrough 的 delimiter 机制，连续两个
- * `=` 按两侧紧贴空白/标点判定 open/close（flanking），配对产 Highlight
- * 节点（首末 HighlightMark 夹内容区间）。残缺与空格紧贴形态不配对（普通
- * 文本降级）；`=` 的块级语义（Setext 下划线）在块层先行解析，不受 inline
- * 扩展影响；代码上下文（行内/围栏）内容为字面文本天然不产节点。live
- * 装饰、大纲透传与 webview/formatOperations 的两态切换共用本语义来源
- * （docs/specs/symbol-input.md 行内围栏扩展约定的 node 登记）。
+ * `=` 按 highlightFlankOk 的宽松 flanking 判定 open/close（#149 起从
+ * CommonMark 标点口径放宽为 Obsidian 基准：内侧紧贴空白禁配、标点不参
+ * 与判定），配对产 Highlight 节点（首末 HighlightMark 夹内容区间）。残
+ * 缺与空格紧贴形态不配对（普通文本降级）；`=` 的块级语义（Setext 下划
+ * 线）在块层先行解析，不受 inline 扩展影响；代码上下文（行内/围栏）内
+ * 容为字面文本天然不产节点。live 装饰、大纲透传与 webview/formatOperations
+ * 的两态切换共用本语义来源（docs/specs/symbol-input.md 行内围栏扩展约定
+ * 的 node 登记）。
  */
 export const markdownTreeParser: MarkdownParser =
   (markdownLanguage.parser as MarkdownParser).configure({
@@ -58,17 +71,12 @@ export const markdownTreeParser: MarkdownParser =
         if (next !== 61 /* '=' */ || cx.char(pos + 1) !== 61) {
           return -1
         }
-        // flanking 判定与 Strikethrough 同款：紧贴空白禁配，标点按
-        // 左右附着性放宽（CommonMark emphasis 的通用口径）
-        const before = cx.slice(pos - 1, pos)
-        const after = cx.slice(pos + 2, pos + 3)
-        const sBefore = before === '' || /\s/u.test(before)
-        const sAfter = after === '' || /\s/u.test(after)
-        const pBefore = PUNCTUATION.test(before)
-        const pAfter = PUNCTUATION.test(after)
+        // #149 宽松 flanking（Obsidian 基准）：内侧紧贴空白禁配、标点
+        // 附着性不参与判定——经 highlightFlankOk 与阅读侧 markdown-it
+        // 高亮规则同源（canOpen 查开后字符、canClose 查开前字符）
         return cx.addDelimiter(HighlightDelim, pos, pos + 2,
-          !sAfter && (!pAfter || sBefore || pBefore),
-          !sBefore && (!pBefore || sAfter || pAfter))
+          highlightFlankOk(cx.slice(pos + 2, pos + 3)),
+          highlightFlankOk(pos > 0 ? cx.slice(pos - 1, pos) : ''))
       },
       after: 'Emphasis',
     },

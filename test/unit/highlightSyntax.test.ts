@@ -86,3 +86,72 @@ describe('markdownTreeParser：Highlight 扩展（#105 识别层）', () => {
     expect(nodesNamed(parse(table), 'Table')).toHaveLength(1)
   })
 })
+
+describe('嵌套行内围栏 flanking 宽松基准（#149 识别层）', () => {
+  /** 树中首个 Highlight 节点 */
+  function firstHighlight(tree: Tree): SyntaxNode | null {
+    const walk = (node: SyntaxNode): SyntaxNode | null => {
+      if (node.name === 'Highlight') {
+        return node
+      }
+      for (let c = node.firstChild; c; c = c.nextSibling) {
+        const hit = walk(c)
+        if (hit) {
+          return hit
+        }
+      }
+      return null
+    }
+    return walk(tree.topNode)
+  }
+
+  it('票内样例：跨格==**建立**==选区后 → 外层 Highlight 配对、内层 StrongEmphasis 嵌套其内', () => {
+    const text = '跨格==**建立**==选区后'
+    const tree = parse(text)
+    const hit = firstHighlight(tree)
+    expect(hit).not.toBeNull()
+    expect(text.slice(hit!.from, hit!.to)).toBe('==**建立**==')
+    const strong = nodesNamed(tree, 'StrongEmphasis')[0]
+    expect(strong).toBeTruthy()
+    expect(text.slice(strong!.from, strong!.to)).toBe('**建立**')
+    expect(strong!.from).toBeGreaterThanOrEqual(hit!.from)
+    expect(strong!.to).toBeLessThanOrEqual(hit!.to)
+  })
+
+  it('组合矩阵：外层 == × 内层 {**,* ,__,~~,`} × 汉字紧贴均配对且内层节点落在高亮区间内', () => {
+    const matrix: Array<{ inner: string; node: string }> = [
+      { inner: '**词**', node: 'StrongEmphasis' },
+      { inner: '*词*', node: 'Emphasis' },
+      { inner: '__词__', node: 'StrongEmphasis' },
+      { inner: '~~词~~', node: 'Strikethrough' },
+      { inner: '`词`', node: 'InlineCode' },
+    ]
+    for (const { inner, node } of matrix) {
+      const text = `看==${inner}==的`
+      const tree = parse(text)
+      const hit = firstHighlight(tree)
+      expect(hit, inner).not.toBeNull()
+      expect(text.slice(hit!.from, hit!.to), inner).toBe(`==${inner}==`)
+      const nested = nodesNamed(tree, node)[0]
+      expect(nested, inner).toBeTruthy()
+      expect(nested!.from, inner).toBeGreaterThanOrEqual(hit!.from)
+      expect(nested!.to, inner).toBeLessThanOrEqual(hit!.to)
+    }
+  })
+
+  it('字母紧贴与空白外边界照常配对（宽松基准不收窄既有形态）', () => {
+    for (const text of ['word==**bold**==end', '空 ==**词**== 界', '（==**词**==）']) {
+      expect(firstHighlight(parse(text)), text).not.toBeNull()
+    }
+  })
+
+  it('内侧空格紧贴仍拒绝：嵌套组合不放宽空白边界', () => {
+    for (const text of ['a == **b** == c', 'x== **y** ==z']) {
+      expect(nodesNamed(parse(text), 'Highlight'), text).toHaveLength(0)
+    }
+  })
+
+  it('行内代码内的嵌套形态仍为字面文本：不产 Highlight 节点', () => {
+    expect(nodesNamed(parse('`==**x**==`'), 'Highlight')).toHaveLength(0)
+  })
+})

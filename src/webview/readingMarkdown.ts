@@ -17,6 +17,7 @@ import { GRAPHIC_LANG_ATTR, MERMAID_CLASS_NAMES, MERMAID_CODE_ATTR, MERMAID_STAT
 import { WIKILINK_CLASS_NAMES, parseWikilinkInner } from '../shared/wikilink'
 import { joinObsidianDomAliasForReading } from '../shared/obsidianAlias'
 import { renderMathHtml } from './mathRenderCache'
+import { highlightFlankOk } from './markdownDoc'
 import { tableCellBreakLength } from './tableCells'
 
 /** 渲染环境：行首/行尾 offset 表（lineStarts[i]/lineEnds[i] 为第 i 行界） */
@@ -207,14 +208,15 @@ function findHighlightClose(src: string, from: number, posMax: number): number {
 /**
  * 高亮 inline 规则（#105）：成对 `==` 渲染为 mark 语义元素（html:false 下
  * 输出语义标签）。形态学与 lezer 侧（markdownDoc 的 Highlight 扩展）对齐：
- * 定界符紧贴空白拒绝（flanking 同判）、残缺不匹配（普通文本降级，源文
- * 保真）；段内跨行可配对。close 经 findHighlightClose 扫描（code span
- * 区间不参与配对）；空内容（close 紧贴 open，如 `====`）整条拒绝——与
- * live 侧「空区间不发射装饰」口径一致，不产空 mark。已知边界：连续等
- * 号开头的形态（如 `====x====`）两侧仍有残余分歧（阅读按源码降级、live
- * 产嵌套高亮），源码降级是安全侧。规则挂 emphasis 之前——backticks 已
- * 先消费，行内代码内容字面呈现不受影响；内容区间经 tokenize 递归，嵌
- * 套行内标记照常解析。
+ * 定界符内侧 flanking 经 highlightFlankOk 同源判定（#149 宽松基准：内侧
+ * 紧贴空白拒绝、标点不参与），残缺不匹配（普通文本降级，源文保真）；
+ * 段内跨行可配对。close 经 findHighlightClose 扫描（code span 区间不参与
+ * 配对）；空内容（close 紧贴 open，如 `====`）整条拒绝——与 live 侧「空
+ * 区间不发射装饰」口径一致，不产空 mark。已知边界：连续等号开头的形态
+ * （如 `====x====`）两侧仍有残余分歧（阅读按源码降级、live 产嵌套高
+ * 亮），源码降级是安全侧。规则挂 emphasis 之前——backticks 已先消费，
+ * 行内代码内容字面呈现不受影响；内容区间经 tokenize 递归，嵌套行内标
+ * 记照常解析。
  */
 function vsidianHighlightInlineRule(state: StateInline, silent: boolean): boolean {
   const src = state.src
@@ -223,8 +225,7 @@ function vsidianHighlightInlineRule(state: StateInline, silent: boolean): boolea
       src.charCodeAt(start) !== 0x3d /* '=' */ || src.charCodeAt(start + 1) !== 0x3d) {
     return false
   }
-  const after = src.charAt(start + 2)
-  if (after === '' || /\s/u.test(after)) {
+  if (!highlightFlankOk(src.charAt(start + 2))) {
     return false
   }
   const close = findHighlightClose(src, start + 2, state.posMax)
@@ -234,8 +235,7 @@ function vsidianHighlightInlineRule(state: StateInline, silent: boolean): boolea
   if (close === start + 2) {
     return false
   }
-  const before = close > 0 ? src.charAt(close - 1) : ''
-  if (before === '' || /\s/u.test(before)) {
+  if (!highlightFlankOk(close > 0 ? src.charAt(close - 1) : '')) {
     return false
   }
   if (!silent) {
