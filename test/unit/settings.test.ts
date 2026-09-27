@@ -11,6 +11,12 @@ import {
   PRODUCTION_SETTING_DEFINITIONS,
   SHOW_LINE_NUMBERS_DEFAULT,
   SHOW_LINE_NUMBERS_KEY,
+  SYMBOL_AUTOCOMPLETE_DEFAULT,
+  SYMBOL_AUTOCOMPLETE_KEY,
+  SYMBOL_SELECTION_WRAP_DEFAULT,
+  SYMBOL_SELECTION_WRAP_KEY,
+  SYMBOL_TAB_ESCAPE_DEFAULT,
+  SYMBOL_TAB_ESCAPE_KEY,
   applySettingsPatch,
   isSettingDefinition,
   sanitizeStoredSettings,
@@ -75,6 +81,51 @@ describe('生产注册表（#34 起含实际设置项；#95 文案键化）', ()
     expect(def.titleKey).toBe('setting.codeblockHighlight.title')
     expect(zhCn[def.titleKey as keyof typeof zhCn]).toBe('语法高亮')
     expect(isSettingDefinition(def)).toBe(true)
+  })
+
+  it('注册「符号自动补全」：键 editor.symbolAutocomplete、boolean、默认开启（#123）', () => {
+    const def = byKey('editor.symbolAutocomplete')
+    expect(def.type).toBe('boolean')
+    expect(def.default).toBe(true)
+    expect(def.titleKey).toBe('setting.symbolAutocomplete.title')
+    expect(def.descriptionKey).toBe('setting.symbolAutocomplete.description')
+    expect(zhCn[def.titleKey as keyof typeof zhCn]).toBe('符号自动补全')
+    expect(isSettingDefinition(def)).toBe(true)
+  })
+
+  it('注册「符号选区包裹」：键 editor.symbolSelectionWrap、boolean、默认开启（#124）', () => {
+    const def = byKey('editor.symbolSelectionWrap')
+    expect(def.type).toBe('boolean')
+    expect(def.default).toBe(true)
+    expect(def.titleKey).toBe('setting.symbolSelectionWrap.title')
+    expect(def.descriptionKey).toBe('setting.symbolSelectionWrap.description')
+    expect(zhCn[def.titleKey as keyof typeof zhCn]).toBe('选区符号包裹')
+    expect(isSettingDefinition(def)).toBe(true)
+  })
+
+  it('注册「符号 Tab 越界」：键 editor.symbolTabEscape、boolean、默认开启（#125）', () => {
+    const def = byKey('editor.symbolTabEscape')
+    expect(def.type).toBe('boolean')
+    expect(def.default).toBe(true)
+    expect(def.titleKey).toBe('setting.symbolTabEscape.title')
+    expect(def.descriptionKey).toBe('setting.symbolTabEscape.description')
+    expect(zhCn[def.titleKey as keyof typeof zhCn]).toBe('符号 Tab 越界')
+    expect(isSettingDefinition(def)).toBe(true)
+  })
+
+  it('键与消费方常量一致：符号 Tab 越界经 SYMBOL_TAB_ESCAPE_KEY 读同一键（#125）', () => {
+    expect(SYMBOL_TAB_ESCAPE_KEY).toBe('editor.symbolTabEscape')
+    expect(SYMBOL_TAB_ESCAPE_DEFAULT).toBe(true)
+  })
+
+  it('键与消费方常量一致：选区包裹经 SYMBOL_SELECTION_WRAP_KEY 读同一键（#124）', () => {
+    expect(SYMBOL_SELECTION_WRAP_KEY).toBe('editor.symbolSelectionWrap')
+    expect(SYMBOL_SELECTION_WRAP_DEFAULT).toBe(true)
+  })
+
+  it('键与消费方常量一致：符号自动补全经 SYMBOL_AUTOCOMPLETE_KEY 读同一键（#123）', () => {
+    expect(SYMBOL_AUTOCOMPLETE_KEY).toBe('editor.symbolAutocomplete')
+    expect(SYMBOL_AUTOCOMPLETE_DEFAULT).toBe(true)
   })
 
   it('键与消费方常量一致：webview/宿主经 SHOW_LINE_NUMBERS_KEY 读同一键', () => {

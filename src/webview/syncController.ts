@@ -25,7 +25,7 @@
 // - seq 持久化：经 bridge.setState 保存，webview 重载（retainContextWhenHidden
 //   关闭导致的状态重建）后继续编号，宿主按 seq 幂等去重
 import { Annotation, ChangeSet, Compartment, EditorSelection, EditorState, Prec, type Extension, type Text } from '@codemirror/state'
-import { EditorView, keymap } from '@codemirror/view'
+import { EditorView, ViewPlugin, keymap } from '@codemirror/view'
 import { planFormatOperation } from './formatOperations'
 import { createQuickActionStateReader } from './quickActionState'
 import { FORMAT_OPERATIONS, type FormatOperationId } from '../shared/formatOperations'
@@ -62,9 +62,17 @@ import {
   CODEBLOCK_LINE_NUMBERS_KEY,
   SHOW_LINE_NUMBERS_DEFAULT,
   SHOW_LINE_NUMBERS_KEY,
+  SYMBOL_AUTOCOMPLETE_DEFAULT,
+  SYMBOL_AUTOCOMPLETE_KEY,
+  SYMBOL_SELECTION_WRAP_DEFAULT,
+  SYMBOL_SELECTION_WRAP_KEY,
+  SYMBOL_TAB_ESCAPE_DEFAULT,
+  SYMBOL_TAB_ESCAPE_KEY,
   type SettingsPayload,
 } from '../shared/settings'
 import { onLocaleChanged, t } from '../shared/i18n'
+import { bindLocale, bindLocaleAttrs, bindLocaleFnAttrs, refreshElementLocale } from './localeDom'
+import { refreshOnDemandControlLocale } from './localeOnDemand'
 import {
   FIND_CLASS_NAMES,
   computeFindMatches,
@@ -96,7 +104,6 @@ import { runReadingPerfProbe } from './readingProbe'
 import { createReadingContainer, prepareReadingImages, READING_CLASS_NAMES } from './readingView'
 import { READING_MARKDOWN_CLASS_NAMES } from './readingMarkdown'
 import {
-  applyOutlineDomLocale,
   applyOutlineSliderState,
   buildOutlineDom,
   buildOutlineSlider,
@@ -159,6 +166,9 @@ import { createFontArrivalWatch } from './fontArrival'
 import { CHROME_CONTRACT_PROBES } from '../shared/chromeContract'
 import { VirtualReadingView } from './readingVirtualView'
 import { blankRowInputPlan, runCreateTable, runTableEdit, tableEditing, tableRowsAt } from './tableEditing'
+import { symbolAutocomplete } from './symbolAutocomplete'
+import { symbolSelectionWrap } from './symbolWrap'
+import { fenceEscape } from './fenceEscape'
 import { listEditing } from './listEditing'
 import { indentEditing } from './indentEditing'
 import { selectTableRegion, tableRegionField } from './tableRegionSelection'
@@ -625,6 +635,21 @@ export class WebviewSyncController {
   /** 卡片扩展的运行时配置通道（extensions 装配点） */
   private readonly codeCardCompartment = new Compartment()
 
+  /** #123 符号自动补全开关（settings 快照到达时热重配 compartment；
+   *  关闭时补全/越过/空对删除三条路径一并退出装配） */
+  private symbolAutocompleteOn = SYMBOL_AUTOCOMPLETE_DEFAULT
+  private readonly symbolAutocloseCompartment = new Compartment()
+
+  /** #124 选区包裹开关（与 #123 相互独立；关闭时包裹 filter 与
+   *  allowMultipleSelections 一并退出装配，键入回到普通替换选区语义） */
+  private symbolSelectionWrapOn = SYMBOL_SELECTION_WRAP_DEFAULT
+  private readonly symbolSelectionWrapCompartment = new Compartment()
+
+  /** #125 符号 Tab 越界开关（与前两项相互独立；关闭时越界 keymap 退出
+   *  装配，Tab 回落既有表格导航/整行缩进行为） */
+  private tabEscapeOn = SYMBOL_TAB_ESCAPE_DEFAULT
+  private readonly tabEscapeCompartment = new Compartment()
+
   /** #84 阅读侧折叠集合：键 = 块 data-vsidian-src-start（视图态，不持久化；
    *  块卸载重挂载后经此恢复收起形态） */
   private readonly readingCodeFold = new Set<number>()
@@ -654,6 +679,10 @@ export class WebviewSyncController {
   /** 首笔无法安全逆投影的事务起，后续本地事务合并在同一待发 ChangeSet。
    *  定义域是所有已发送事务之后的本地文档，全部 ack 后可直接作为新请求。 */
   private deferredLocal: ChangeSet | null = null
+  /** deferredLocal 的来源标志（#123）：组合期间暂缓的净输入为 true（外部
+   *  增量并存时经 base 系映射应用，不走触碰式保守暂停）；触碰未确认区间
+   *  的暂缓为 false（与外部并存时保留 #4 的暂停口径）。出站/清空同步复位 */
+  private deferredFromComposition = false
   /** 已确认事务复合（定义域 = unconfirmed 定义域 = baseVersion 系）：
    *  外部增量（权威系坐标）先逆穿它平移回 base 系再穿未确认集（C-2），
    *  避免把「已含已确认编辑」的坐标当 base 系多平移 */
@@ -927,7 +956,9 @@ export class WebviewSyncController {
     // （浅色墨水叠暗底不可读）
     setMermaidDarkTheme(this.hostDarkApplied)
     this.applyModeDom(this.viewMode)
-    // #94 语言切换：常驻文本就地换词（首帧装配不触发，installLocale 才通知）
+    // #94/#101 语言切换：常驻控件文案由 localeDom 注册表单点重刷（各
+    // build* 创建点登记）；此处订阅只剩复合工具提示重算与按需控件兜底
+    // （首帧装配不触发，installLocale 才通知）
     this.unsubscribeLocale = onLocaleChanged(() => this.applyEditorLocale())
     this.refreshQuickActions()
     this.bridge.postMessage({ kind: 'ready' })
@@ -1052,6 +1083,9 @@ export class WebviewSyncController {
         this.settings = message.values
         this.applyLineNumbersSetting()
         this.applyCodeCardSetting()
+        this.applySymbolAutocompleteSetting()
+        this.applySymbolSelectionWrapSetting()
+        this.applyTabEscapeSetting()
         break
       case 'snippets.snapshot': {
         // #128 CSS 片段装载：diff 式装配 <link>（失败保留最近成功样式、
@@ -1804,6 +1838,7 @@ export class WebviewSyncController {
     this.ackedChain = null
     this.sentTxns = []
     this.deferredLocal = null
+      this.deferredFromComposition = false
     this.inFlight.clear()
     this.pendingExternal = []
   }
@@ -1887,6 +1922,7 @@ export class WebviewSyncController {
     this.ackedChain = null
     this.sentTxns = []
     this.deferredLocal = null
+      this.deferredFromComposition = false
     this.pendingExternal = []
     this.pendingFull = undefined
     this.pendingVersionAck = undefined
@@ -2505,14 +2541,11 @@ export class WebviewSyncController {
     bar.className = 'vsidian-quick-actions'
     bar.id = 'vsidian-quick-actions'
     bar.setAttribute('role', 'toolbar')
-    bar.setAttribute('aria-label', t('format.toolbarAria'))
-    const button = (label: string, icon: string, className: string,
-      textIcon = false): HTMLButtonElement => {
+    bindLocale(bar, 'aria-label', 'format.toolbarAria')
+    const button = (icon: string, className: string, textIcon = false): HTMLButtonElement => {
       const el = document.createElement('button')
       el.type = 'button'
       el.className = className
-      el.setAttribute('aria-label', label)
-      el.title = label
       const glyph = document.createElement('span')
       glyph.className = textIcon ? 'vsidian-quick-text-icon' : 'vsidian-quick-icon'
       glyph.setAttribute('aria-hidden', 'true')
@@ -2527,15 +2560,17 @@ export class WebviewSyncController {
       const el = document.createElement('div')
       el.className = 'vsidian-quick-action-group'
       el.setAttribute('role', 'group')
-      el.setAttribute('aria-label', t(labelKey))
-      // 语言切换就地换词的锚点（applyEditorLocale 按 data-group 回查）
-      el.dataset['group'] = labelKey
+      bindLocale(el, 'aria-label', labelKey)
       bar.appendChild(el)
       return el
     }
     const addOperation = (target: HTMLElement, op: FormatOperationId): void => {
       const item = FORMAT_OPERATIONS.find((entry) => entry.id === op)!
-      const el = button(t(item.titleKey), op, 'vsidian-quick-action')
+      const el = button(op, 'vsidian-quick-action')
+      // #101：可访问名称与基名 title 经注册表登记（动态键 item.titleKey 走
+      // 键锚点）——操作条关闭时 refreshQuickActions 早退，此前 title 会滞留
+      // 旧语言；开启后 refreshQuickActions 以复合 title（基名+键位）覆写
+      bindLocaleAttrs(el, item.titleKey)
       el.dataset['op'] = op
       el.addEventListener('click', () => this.runFormatOperation(op))
       target.appendChild(el)
@@ -2545,7 +2580,8 @@ export class WebviewSyncController {
       addOperation(textGroup, op)
     }
     const paragraphGroup = group('format.groupParagraph')
-    const heading = button(t('format.heading'), 'heading', 'vsidian-quick-heading')
+    const heading = button('heading', 'vsidian-quick-heading')
+    bindLocaleAttrs(heading, 'format.heading')
     heading.setAttribute('aria-haspopup', 'menu')
     heading.setAttribute('aria-expanded', 'false')
     heading.setAttribute('aria-controls', 'vsidian-quick-heading-menu')
@@ -2557,7 +2593,8 @@ export class WebviewSyncController {
     }
     const insertGroup = group('format.groupInsert')
     addOperation(insertGroup, 'link')
-    const createTable = button(t('format.insertTable'), 'table', 'vsidian-quick-table')
+    const createTable = button('table', 'vsidian-quick-table')
+    bindLocaleAttrs(createTable, 'format.insertTable')
     createTable.addEventListener('click', () => {
       const view = this.view
       if (view && this.viewMode === 'live' && !this.suspended &&
@@ -2574,14 +2611,23 @@ export class WebviewSyncController {
     menu.className = 'vsidian-quick-heading-menu'
     menu.id = 'vsidian-quick-heading-menu'
     menu.setAttribute('role', 'menu')
-    menu.setAttribute('aria-label', t('format.headingMenu'))
+    bindLocale(menu, 'aria-label', 'format.headingMenu')
     menu.hidden = true
     for (const op of [
       'heading1', 'heading2', 'heading3', 'heading4', 'heading5', 'heading6', 'headingNone',
     ] as const) {
       const item = FORMAT_OPERATIONS.find((entry) => entry.id === op)!
-      const el = button(t(item.titleKey), op === 'headingNone' ? t('format.bodyText') : op.replace('heading', 'H'),
+      const el = button(op === 'headingNone' ? t('format.bodyText') : op.replace('heading', 'H'),
         'vsidian-quick-heading-item', true)
+      bindLocaleAttrs(el, item.titleKey)
+      if (op === 'headingNone') {
+        // 「正文」档的 glyph 是文案不是图标：换包随注册表换词（其余档 H1–H6
+        // 是语言无关的字面）
+        const glyph = el.querySelector<HTMLElement>('.vsidian-quick-text-icon')
+        if (glyph) {
+          bindLocale(glyph, 'text', 'format.bodyText')
+        }
+      }
       el.dataset['headingOp'] = op
       el.setAttribute('role', 'menuitemradio')
       el.setAttribute('aria-checked', 'false')
@@ -2730,89 +2776,26 @@ export class WebviewSyncController {
     actions.forEach((action) => { action.tabIndex = action === tabStop ? 0 : -1 })
   }
 
-  /** 语言切换（locale.changed → installLocale 通知）就地刷新常驻文本
-   *  （#94）：顶栏按钮、操作条框架与按钮可访问名称、查找控件、冲突横幅、
-   *  大纲骨架直接换词，工具提示经 refreshQuickActions 重算；按需创建的
-   *  控件（右键菜单、表格控件按钮、装饰 widget）随下次渲染自然取新词 */
+  /** 语言切换（locale.changed → installLocale 通知）后的编辑器面板善后
+   *  （#94 起就地刷新常驻文本；#101 起常驻控件文案创建与换包重刷统一经
+   *  localeDom 注册表单点完成——顶栏/操作条框架与按钮、查找面板、冲突
+   *  横幅、侧栏骨架与大纲骨架不再在此逐项回查，data-group 锚点随之退役，
+   *  data-op/data-heading-op 仅保留给 refreshQuickActions）。此处剩三类：
+   *  - 工具提示经 refreshQuickActions 重算：复合 title（基名+键位）随选区/
+   *    输入驱动，与换包重刷互补（操作条关闭时早退，基名 title 已由注册表
+   *    就地换词）；
+   *  - 表格控件层 aria-label 的就地兜底：tableControls 的控件按钮每轮
+   *    render 全量重建取词（探索笔记 101 §4.5），静止窗口只剩层 aria；
+   *  - 按需控件（#101 第三部分）：代码卡片/图形按钮/公式降级/图片错误/
+   *    mermaid 错误占位/表格空格占位/图表弹窗（overlay 与工具条按钮）的
+   *    固化文案经 localeOnDemand 的 document 级扫描就地重刷（含阅读视图
+   *    已挂载块与 body 直下的弹窗；右键菜单等瞬态浮层随下次打开自然取
+   *    新词，不扫）。 */
   private applyEditorLocale(): void {
-    const settingsBtn = this.toolbar?.querySelector<HTMLButtonElement>('.vsidian-settings-toggle')
-    settingsBtn?.setAttribute('aria-label', t('sidebar.settings'))
-    settingsBtn?.setAttribute('title', t('sidebar.settings'))
-    this.quickToggleBtn?.setAttribute('aria-label', t('sidebar.quickActions'))
-    this.quickToggleBtn?.setAttribute('title', t('sidebar.quickActions'))
-    this.applySidebarDom()
-    const bar = this.quickActionsEl
-    if (bar) {
-      bar.setAttribute('aria-label', t('format.toolbarAria'))
-      for (const group of bar.querySelectorAll<HTMLElement>('.vsidian-quick-action-group')) {
-        const key = group.dataset['group']
-        if (key === 'format.groupText' || key === 'format.groupParagraph' || key === 'format.groupInsert') {
-          group.setAttribute('aria-label', t(key))
-        }
-      }
-      for (const el of bar.querySelectorAll<HTMLButtonElement>('[data-op], [data-heading-op]')) {
-        const op = (el.dataset['op'] ?? el.dataset['headingOp']) as FormatOperationId
-        const item = FORMAT_OPERATIONS.find((entry) => entry.id === op)
-        if (!item) {
-          continue
-        }
-        el.setAttribute('aria-label', t(item.titleKey))
-        if (op === 'headingNone') {
-          const glyph = el.querySelector<HTMLElement>('.vsidian-quick-text-icon')
-          if (glyph) {
-            glyph.textContent = t('format.bodyText')
-          }
-        }
-      }
-      this.quickHeadingBtn?.setAttribute('aria-label', t('format.heading'))
-      this.quickHeadingBtn?.setAttribute('title', t('format.heading'))
-      this.quickHeadingMenu?.setAttribute('aria-label', t('format.headingMenu'))
-      const tableBtn = bar.querySelector<HTMLButtonElement>('.vsidian-quick-table')
-      tableBtn?.setAttribute('aria-label', t('format.insertTable'))
-      if (tableBtn) {
-        tableBtn.title = t('format.insertTable')
-      }
-    }
     this.refreshQuickActions()
-    const banner = this.banner
-    if (banner) {
-      const text = banner.querySelector<HTMLElement>('.vsidian-suspend-banner-text')
-      if (text) {
-        text.textContent = t('conflict.bannerText')
-      }
-      const copy = banner.querySelector<HTMLButtonElement>('button[data-action="copy"]')
-      if (copy) {
-        copy.textContent = t('conflict.copyUnconfirmed')
-      }
-      const resume = banner.querySelector<HTMLButtonElement>('button[data-action="resume"]')
-      if (resume) {
-        resume.textContent = t('conflict.resume')
-      }
-    }
-    const find = this.findPanel
-    if (find) {
-      this.findInputEl?.setAttribute('placeholder', t('find.placeholder'))
-      this.findInputEl?.setAttribute('aria-label', t('find.label'))
-      const setFindBtn = (cls: string, key: 'find.caseToggle' | 'find.prev' | 'find.next' | 'find.close'): void => {
-        const btn = find.querySelector<HTMLButtonElement>(`.${cls}`)
-        if (btn) {
-          btn.textContent = t(key)
-          btn.setAttribute('aria-label', t(key))
-        }
-      }
-      setFindBtn(FIND_CLASS_NAMES.caseToggle, 'find.caseToggle')
-      setFindBtn(FIND_CLASS_NAMES.prev, 'find.prev')
-      setFindBtn(FIND_CLASS_NAMES.next, 'find.next')
-      setFindBtn(FIND_CLASS_NAMES.close, 'find.close')
-    }
-    applyOutlineDomLocale({
-      toggle: this.outlineToggleBtn,
-      panel: this.outlinePanelEl,
-      slider: this.outlineSlider,
-      toolbar: this.outlineToolbar,
-    })
     this.liveWrapper?.querySelector('.vsidian-table-controls')
       ?.setAttribute('aria-label', t('table.controls'))
+    refreshOnDemandControlLocale(document)
   }
 
   /** 主编辑区顶栏（#53 图标化）：左端齿轮设置按钮（打开宿主级 Vsidian
@@ -2825,15 +2808,13 @@ export class WebviewSyncController {
     const settingsBtn = document.createElement('button')
     settingsBtn.type = 'button'
     settingsBtn.className = 'vsidian-settings-toggle'
-    settingsBtn.setAttribute('aria-label', t('sidebar.settings'))
-    settingsBtn.setAttribute('title', t('sidebar.settings'))
+    bindLocaleAttrs(settingsBtn, 'sidebar.settings')
     settingsBtn.appendChild(createSettingsGearIcon())
     settingsBtn.addEventListener('click', () => this.bridge.postMessage({ kind: 'settings.open' }))
     const quickBtn = document.createElement('button')
     quickBtn.type = 'button'
     quickBtn.className = 'vsidian-quick-toggle'
-    quickBtn.setAttribute('aria-label', t('sidebar.quickActions'))
-    quickBtn.setAttribute('title', t('sidebar.quickActions'))
+    bindLocaleAttrs(quickBtn, 'sidebar.quickActions')
     quickBtn.setAttribute('aria-controls', 'vsidian-quick-actions')
     quickBtn.setAttribute('aria-expanded', 'false')
     quickBtn.textContent = '✎'
@@ -2850,6 +2831,10 @@ export class WebviewSyncController {
     sidebarBtn.type = 'button'
     sidebarBtn.className = 'vsidian-sidebar-toggle'
     sidebarBtn.setAttribute('aria-controls', 'vsidian-sidebar')
+    // 可访问名称随开合态与语言双变化：回调登记（换包重算），开合态翻转由
+    // applySidebarDom 调 refreshElementLocale 重算——同一登记点两个触发源
+    const sidebarLabel = (): string => t(this.sidebarOpen ? 'sidebar.collapse' : 'sidebar.expand')
+    bindLocaleFnAttrs(sidebarBtn, sidebarLabel)
     sidebarBtn.appendChild(createSidebarToggleIcon())
     sidebarBtn.addEventListener('click', () => this.toggleSidebar())
     this.sidebarToggleBtn = sidebarBtn
@@ -3072,7 +3057,8 @@ export class WebviewSyncController {
     resizer.className = 'vsidian-sidebar-resizer'
     resizer.setAttribute('role', 'separator')
     resizer.setAttribute('aria-orientation', 'vertical')
-    resizer.setAttribute('aria-label', t('sidebar.resize'))
+    // #101 漏刷修复：此前创建后无任何换包刷新路径覆盖（探索笔记 §1.4）
+    bindLocale(resizer, 'aria-label', 'sidebar.resize')
     resizer.setAttribute('aria-valuemin', String(SIDEBAR_WIDTH_MIN))
     resizer.setAttribute('aria-valuemax', String(SIDEBAR_WIDTH_MAX))
     resizer.setAttribute('aria-valuenow', String(this.sidebarWidth))
@@ -3194,17 +3180,16 @@ export class WebviewSyncController {
   }
 
   /** 侧栏状态落 DOM：body 容器的 open 类（CSS 显隐与图标粗细的唯一开关）
-   *  与切换按钮的可访问名称同步（名称反映当前可执行的动作） */
+   *  与切换按钮的可访问状态同步（名称反映当前可执行的动作，经注册表回调
+   *  重算——见 buildToolbar 的 sidebarLabel 登记） */
   private applySidebarDom(): void {
     if (this.bodyEl) {
       this.bodyEl.classList.toggle('vsidian-sidebar-open', this.sidebarOpen)
     }
     const btn = this.sidebarToggleBtn
     if (btn) {
-      const label = t(this.sidebarOpen ? 'sidebar.collapse' : 'sidebar.expand')
-      btn.setAttribute('aria-label', label)
-      btn.setAttribute('title', label)
       btn.setAttribute('aria-expanded', String(this.sidebarOpen))
+      refreshElementLocale(btn)
     }
     this.persistState()
   }
@@ -3534,7 +3519,7 @@ export class WebviewSyncController {
     if (nomatch && !placeholder) {
       placeholder = document.createElement('div')
       placeholder.className = OUTLINE_CLASS_NAMES.nomatch
-      placeholder.textContent = t('outline.noMatch')
+      bindLocale(placeholder, 'text', 'outline.noMatch')
       panel.appendChild(placeholder)
     } else if (!nomatch && placeholder) {
       placeholder.remove()
@@ -4369,8 +4354,8 @@ export class WebviewSyncController {
     const input = document.createElement('input')
     input.type = 'text'
     input.className = FIND_CLASS_NAMES.input
-    input.setAttribute('placeholder', t('find.placeholder'))
-    input.setAttribute('aria-label', t('find.label'))
+    bindLocale(input, 'placeholder', 'find.placeholder')
+    bindLocale(input, 'aria-label', 'find.label')
     input.addEventListener('input', () => {
       this.findQuery = input.value
       this.findDoc = null // 查询变化：以当前位置为参考重算
@@ -4387,18 +4372,20 @@ export class WebviewSyncController {
     const count = document.createElement('span')
     count.className = FIND_CLASS_NAMES.count
     count.textContent = '0/0'
-    const mkBtn = (cls: string, label: string, onClick: () => void): HTMLButtonElement => {
+    // 按钮文案与可访问名称同键：创建与换包重写共用一次登记
+    const mkBtn = (cls: string, key: 'find.caseToggle' | 'find.prev' | 'find.next' | 'find.close',
+      onClick: () => void): HTMLButtonElement => {
       const b = document.createElement('button')
       b.type = 'button'
       b.className = cls
-      b.textContent = label
-      b.setAttribute('aria-label', label)
+      bindLocale(b, 'text', key)
+      bindLocale(b, 'aria-label', key)
       b.addEventListener('click', onClick)
       return b
     }
     // 大小写切换按钮：语义为「忽略大小写」开关——active 类与 aria-pressed
     // 同步表示「忽略生效」，默认区分大小写（未激活、未按下）
-    const caseBtn = mkBtn(FIND_CLASS_NAMES.caseToggle, t('find.caseToggle'), () => {
+    const caseBtn = mkBtn(FIND_CLASS_NAMES.caseToggle, 'find.caseToggle', () => {
       this.findCaseSensitive = !this.findCaseSensitive
       caseBtn.classList.toggle(FIND_CLASS_NAMES.caseActive, !this.findCaseSensitive)
       caseBtn.setAttribute('aria-pressed', String(!this.findCaseSensitive))
@@ -4413,9 +4400,9 @@ export class WebviewSyncController {
     panel.appendChild(input)
     panel.appendChild(count)
     panel.appendChild(caseBtn)
-    panel.appendChild(mkBtn(FIND_CLASS_NAMES.prev, t('find.prev'), () => this.findStep('prev')))
-    panel.appendChild(mkBtn(FIND_CLASS_NAMES.next, t('find.next'), () => this.findStep('next')))
-    panel.appendChild(mkBtn(FIND_CLASS_NAMES.close, t('find.close'), () => this.closeFind()))
+    panel.appendChild(mkBtn(FIND_CLASS_NAMES.prev, 'find.prev', () => this.findStep('prev')))
+    panel.appendChild(mkBtn(FIND_CLASS_NAMES.next, 'find.next', () => this.findStep('next')))
+    panel.appendChild(mkBtn(FIND_CLASS_NAMES.close, 'find.close', () => this.closeFind()))
     return panel
   }
 
@@ -4600,8 +4587,27 @@ export class WebviewSyncController {
     if (!view) {
       return
     }
-    view.dispatch({ changes: this.clampedSpec(changes), annotations: externalSync.of(true) })
+    this.dispatchExternalChanges(view, changes)
     this.refreshReading()
+  }
+
+  /** CM6 把非空选区映射穿过覆盖整段的宿主替换时，可能产生 from > to
+   *  的 SelectionRange（两端分别映到替换后区间的右、左边界）。视觉上仍
+   *  高亮，但下一次输入会用反向 change range。须在同一笔外部事务内
+   *  指定规范化选区，避免先渲染无效 range 后被 DOM 观察器折叠。 */
+  private dispatchExternalChanges(view: EditorView, changes: readonly SerChange[]): void {
+    const specs = this.clampedSpec(changes)
+    const mapped = view.state.selection.map(ChangeSet.of(specs, view.state.doc.length))
+    const selection = mapped.ranges.some((range) => range.from > range.to)
+      ? EditorSelection.create(mapped.ranges.map((range) =>
+        range.from > range.to ? EditorSelection.range(range.to, range.from) : range),
+      mapped.mainIndex)
+      : undefined
+    view.dispatch({
+      changes: specs,
+      selection,
+      annotations: externalSync.of(true),
+    })
   }
 
   /**
@@ -4707,20 +4713,25 @@ export class WebviewSyncController {
       this.unconfirmed = this.unconfirmed ? this.unconfirmed.compose(changeSet) : changeSet
       return
     }
-    if (this.deferredLocal || (
+    if (this.composing || this.deferredLocal || (
       this.unconfirmed && touchesUnconfirmedChange(changes, chainSections(this.unconfirmed))
     )) {
       this.deferredLocal = this.deferredLocal
         ? this.deferredLocal.compose(changeSet)
         : changeSet
+      if (this.composing) {
+        this.deferredFromComposition = true
+      }
       this.unconfirmed = this.unconfirmed ? this.unconfirmed.compose(changeSet) : changeSet
-      // 组合期间不逐笔上报全文快照（#49）：IME 候选更新从第二笔起必然触碰
-      // 未确认区间进入本分支，逐笔 conflict.report 意味着大文档下每个候选
-      // 都全文序列化 + postMessage。组合结束 flush 后 deferredLocal 经
-      // sendDeferredLocal 以单笔 edit.request 出站、文本进入宿主权威文档，
-      // 取回语义由 VSCode 文本管线兜底；丢失窗口仅限组合进行中（候选未
-      // 上屏）快速关闭/断连，与 VSCode 原生编辑器同类行为一致。组合外
-      // （composing === false）的暂缓输入保持逐笔快照，取回兜底不放宽。
+      // 组合期间不逐笔上报全文快照（#49）：组合中的候选事务一律暂缓
+      // （#123 起含首笔——首笔立即出站会让组合结束点的符号补全成为第二
+      // 笔，破坏「一次补全一笔事务」），逐笔 conflict.report 意味着大文档
+      // 下每个候选都全文序列化 + postMessage。组合结束 flush 后
+      // deferredLocal 经 sendDeferredLocal 以单笔 edit.request 出站、文本
+      // 进入宿主权威文档，取回语义由 VSCode 文本管线兜底；丢失窗口仅限
+      // 组合进行中（候选未上屏）快速关闭/断连，与 VSCode 原生编辑器同类
+      // 行为一致。组合外（composing === false）的暂缓输入保持逐笔快照，
+      // 取回兜底不放宽。
       if (!this.composing) {
         this.reportConflictSnapshot()
       }
@@ -4773,6 +4784,7 @@ export class WebviewSyncController {
       return
     }
     this.deferredLocal = null
+    this.deferredFromComposition = false
     this.ackedChain = null
     this.sentTxns = []
     const changes: SerChange[] = []
@@ -4988,6 +5000,7 @@ export class WebviewSyncController {
       this.ackedChain = null
       this.sentTxns = []
       this.deferredLocal = null
+      this.deferredFromComposition = false
       this.replaceDoc(text)
       this.baseVersion = Math.max(version, ackVersion ?? version)
       this.lastDocChangedVersion = Math.max(this.lastDocChangedVersion, version)
@@ -4996,7 +5009,11 @@ export class WebviewSyncController {
     this.pendingExternal = []
     let lastVersion = this.baseVersion
     for (const group of groups) {
-      if (this.deferredLocal) {
+      if (this.deferredLocal && !this.deferredFromComposition) {
+        // 非组合的触碰式暂缓与外部并存：保留输入并暂停（#4 既有保守
+        // 口径，suspendResume/compositionBuffer 钉住）。组合暂缓净输入
+        // （#123 起含首笔）不在此列——它与 unconfirmed 同步复合、定义域
+        // 一致，经下方 base 系映射应用，真重叠由 mapped 判定兜底
         this.enterSuspended()
         return
       }
@@ -5011,7 +5028,7 @@ export class WebviewSyncController {
         this.enterSuspended()
         return
       }
-      this.view.dispatch({ changes: this.clampedSpec(mapped), annotations: externalSync.of(true) })
+      this.dispatchExternalChanges(this.view, mapped)
       lastVersion = group.version
     }
     if (this.inFlight.size === 0) {
@@ -5026,7 +5043,9 @@ export class WebviewSyncController {
   }
 
   private scheduleFlush(): void {
-    if (this.flushTimer === undefined && (this.hasBufferedSync() || this.blankComposition)) {
+    // deferredLocal 计入（#123）：组合期间一律暂缓的本地净输入在
+    // compositionend 后也由 flush 定时出站（原先仅靠 edit.ack 到达兜底）
+    if (this.flushTimer === undefined && (this.deferredLocal || this.hasBufferedSync() || this.blankComposition)) {
       this.flushTimer = setTimeout(() => this.flushBufferedExternal(), 0)
     }
   }
@@ -5141,6 +5160,61 @@ export class WebviewSyncController {
     if (this.viewMode === 'reading') {
       this.decorateMountedReadingCodeCards()
     }
+  }
+
+  /**
+   * 应用符号自动补全设置（#123；settings.snapshot / settings.changed 到达时）：
+   * 缺键回定义默认、非布尔忽略（与行号同口径）。经 Compartment.reconfigure
+   * 增删 symbolAutocomplete 扩展组——关闭时输入 filter、闭合越过分支与
+   * 空对退格 keymap 一并退出装配（三条路径同门控），EditorView 不重建。
+   */
+  private applySymbolAutocompleteSetting(): void {
+    const raw = this.settings?.[SYMBOL_AUTOCOMPLETE_KEY]
+    const on = typeof raw === 'boolean' ? raw : SYMBOL_AUTOCOMPLETE_DEFAULT
+    if (on === this.symbolAutocompleteOn) {
+      return
+    }
+    this.symbolAutocompleteOn = on
+    this.view?.dispatch({
+      effects: this.symbolAutocloseCompartment.reconfigure(on ? symbolAutocomplete : []),
+    })
+  }
+
+  /**
+   * 应用选区包裹设置（#124；settings.snapshot / settings.changed 到达时）：
+   * 缺键回定义默认、非布尔忽略（与 #123 同口径）。经 Compartment.reconfigure
+   * 增删 symbolSelectionWrap 扩展组——关闭时包裹 filter 与
+   * allowMultipleSelections 退出装配，EditorView 不重建。
+   */
+  private applySymbolSelectionWrapSetting(): void {
+    const raw = this.settings?.[SYMBOL_SELECTION_WRAP_KEY]
+    const on = typeof raw === 'boolean' ? raw : SYMBOL_SELECTION_WRAP_DEFAULT
+    if (on === this.symbolSelectionWrapOn) {
+      return
+    }
+    this.symbolSelectionWrapOn = on
+    this.view?.dispatch({
+      effects: this.symbolSelectionWrapCompartment.reconfigure(on ? symbolSelectionWrap : []),
+    })
+  }
+
+  /**
+   * 应用符号 Tab 越界设置（#125；settings.snapshot / settings.changed 到达
+   * 时）：缺键回定义默认、非布尔忽略（与 #123/#124 同口径）。经
+   * Compartment.reconfigure 增删 fenceEscape keymap——关闭时越界判定
+   * 退出装配（Tab 直接落到 tableEditing/indentEditing），EditorView
+   * 不重建。
+   */
+  private applyTabEscapeSetting(): void {
+    const raw = this.settings?.[SYMBOL_TAB_ESCAPE_KEY]
+    const on = typeof raw === 'boolean' ? raw : SYMBOL_TAB_ESCAPE_DEFAULT
+    if (on === this.tabEscapeOn) {
+      return
+    }
+    this.tabEscapeOn = on
+    this.view?.dispatch({
+      effects: this.tabEscapeCompartment.reconfigure(on ? fenceEscape : []),
+    })
   }
 
   /** #84 增强单个阅读代码块（挂载钩子与重装饰共用入口） */
@@ -6030,16 +6104,16 @@ export class WebviewSyncController {
     banner.style.display = 'none'
     const label = document.createElement('span')
     label.className = 'vsidian-suspend-banner-text'
-    label.textContent = t('conflict.bannerText')
+    bindLocale(label, 'text', 'conflict.bannerText')
     banner.appendChild(label)
     const copy = document.createElement('button')
     copy.type = 'button'
     copy.dataset['action'] = 'copy'
-    copy.textContent = t('conflict.copyUnconfirmed')
+    bindLocale(copy, 'text', 'conflict.copyUnconfirmed')
     const resume = document.createElement('button')
     resume.type = 'button'
     resume.dataset['action'] = 'resume'
-    resume.textContent = t('conflict.resume')
+    bindLocale(resume, 'text', 'conflict.resume')
     banner.appendChild(copy)
     banner.appendChild(resume)
     banner.addEventListener('click', (event) => {
@@ -6107,6 +6181,12 @@ export class WebviewSyncController {
   }
 
   private extensions() {
+    const captureCompositionStart = () => {
+      // CM6 的内建 observer 在冒泡阶段会先删除跨行选区；必须在捕获
+      // 阶段标记组合，首笔删除才能进入 deferredLocal 与定稿重建合并。
+      this.composing = true
+      this.beginBlankComposition()
+    }
     return [
       EditorView.lineWrapping,
       // 宿主明暗主题声明：初始按 body 主题 class 判定，切换时热重配
@@ -6157,9 +6237,30 @@ export class WebviewSyncController {
       // #79 代码块卡片：呈现态围栏收起 + 头部横带 + 卡片行类（配置经
       // Compartment 热重配，围栏表复用上方 mermaidFencesField）
       this.codeCardCompartment.of(this.codeCardExtension()),
+      // #125 围栏内两步 Tab 越界：必须置于 tableEditing **之前**——CM6
+      // keymap 与 transactionFilter 的顺序语义相反：keymap 把全部绑定按
+      // 扩展数组顺序正序拼接后依序尝试（@codemirror/view buildKeymap/
+      // runHandlers 正序遍历，靠前者先匹配、return false 落穿给后者；
+      // filter 是逆序应用——#123/#124 排在 tableEditing 之后即彼故）。
+      // 靠前装配使「格内有效围栏先越界、越出后 Tab 切格、正文未命中落
+      // 缩进」三段优先级无需改 tableEditing/indentEditing 一行代码；
+      // 未命中 return false 自然落穿。关闭时经 tabEscapeCompartment
+      // 整组退出装配
+      this.tabEscapeCompartment.of(this.tabEscapeOn ? fenceEscape : []),
       // 表格单元格输入钩子（#12）：表格行内键入 | 转义写回 \|；
       // 编辑面即 CM6 源文本行，同步链路复用本控制器的标准出站路径
       tableEditing,
+      // #123 符号自动补全：置于 tableEditing 之后（扩展数组靠后者先
+      // 过滤/先匹配）——符号补全先于表格的空白行规范化与格区替换看到
+      // 事务（无选区单字符场景与它们互斥），Backspace 链先于表格删除
+      // 命令（自动空对是更具体的编辑器状态）；设置关闭时经
+      // symbolAutocloseCompartment 整组退出装配
+      this.symbolAutocloseCompartment.of(this.symbolAutocompleteOn ? symbolAutocomplete : []),
+      // #124 选区包裹：置于 symbolAutocomplete 之后（靠后者先过滤）——
+      // 包裹只认非空选区（与补全分支互斥），改写后补全 filter 按
+      // startState 选区门控自然放行；多 range 原文选区依赖随组装配的
+      // allowMultipleSelections；关闭时经 compartment 整组退出
+      this.symbolSelectionWrapCompartment.of(this.symbolSelectionWrapOn ? symbolSelectionWrap : []),
       // #119 列表/引用 Enter 前缀延续与退格清层：必须排在 tableEditing
       // 之后（表格上下文优先，格内 Enter 仍为 <br>）、extraExtensions 的
       // defaultKeymap 之前（先于通用键位拦截）
@@ -6230,6 +6331,17 @@ export class WebviewSyncController {
         { key: 'Shift-Mod-z', run: () => this.requestHistory('redo') },
         { key: 'Mod-y', run: () => this.requestHistory('redo') },
       ]),
+      ViewPlugin.fromClass(class {
+        private readonly onStart = captureCompositionStart
+
+        constructor(private readonly view: EditorView) {
+          view.contentDOM.addEventListener('compositionstart', this.onStart, true)
+        }
+
+        destroy() {
+          this.view.contentDOM.removeEventListener('compositionstart', this.onStart, true)
+        }
+      }),
       // IME 组合状态跟踪：compositionend 后调度缓冲 flush
       Prec.highest(EditorView.domEventHandlers({
         compositionstart: () => {

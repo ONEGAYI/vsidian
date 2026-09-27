@@ -6767,6 +6767,461 @@ export const cases: Array<[string, () => Promise<void>]> = [
     }
   }],
 
+  ['符号自动补全一次写回、宿主撤销一笔恢复并保存（#123）', async () => {
+    await openWithEditor('symbol-input.md')
+    const initial = await waitSessionReady('symbol-input.md')
+    const uri = wsUri('symbol-input.md').toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri('symbol-input.md'))
+    const source = '符号输入正文段\n'
+    assert(doc.getText() === source, '符号输入 fixture 初始文本不符')
+
+    // 行尾提交单个全角起始括号（真实 DOM 组合链路；钩子候选写首行行尾）
+    const at = source.indexOf('正文段') + '正文段'.length
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: at })
+    await waitViewState('symbol-input.md', (v) => v.selectionOffset === at)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sync.test.composition', phase: 'start', text: '' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'sync.test.composition', phase: 'update', text: '符号输入正文段（',
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sync.test.composition', phase: 'end', text: '（' })
+    const completed = '符号输入正文段（）\n'
+    await poll('IME 提交补全写回权威文档', () => doc.getText() === completed ? true : undefined)
+    const state1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state1.appliedEdits - initial.appliedEdits === 1,
+      `补全应为一次写回，实际 ${state1.appliedEdits - initial.appliedEdits}`)
+    // 绘制层断言：补全产物在真宿主可见（不能只看 DOM 文本）
+    const painted = await waitViewState('symbol-input.md', (v) => v.paint?.textVisible === true)
+    assert(painted.paint!.textVisible === true, '补全后正文须在绘制层命中')
+
+    // 宿主撤销一笔整体恢复（不另设编辑器 history）
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'history.request', op: 'undo' })
+    await poll('撤销恢复原文', () => doc.getText() === source ? true : undefined)
+    assert(await doc.save(), '符号输入文档应可保存')
+    const bytes = Buffer.from(await vscode.workspace.fs.readFile(wsUri('symbol-input.md'))).toString('utf8')
+    assert(bytes === source, '保存后回读与权威一致')
+  }],
+
+  ['CRLF 文档符号补全保持行尾风格并保存（#123）', async () => {
+    await openWithEditor('symbol-crlf.md')
+    await waitSessionReady('symbol-crlf.md')
+    const uri = wsUri('symbol-crlf.md').toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri('symbol-crlf.md'))
+    const original = '标题一\r\n正文 A 行\r\n正文 B 行\r\n'
+    assert(doc.getText() === original, 'CRLF fixture 初始文本不符')
+
+    // 首行行尾提交起始引号（钩子候选写首行行尾；webview 侧 LF 坐标 3）
+    const at = '标题一'.length
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: at })
+    await waitViewState('symbol-crlf.md', (v) => v.selectionOffset === at)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sync.test.composition', phase: 'start', text: '' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'sync.test.composition', phase: 'update', text: '标题一【',
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sync.test.composition', phase: 'end', text: '【' })
+    const completed = '标题一【】\r\n正文 A 行\r\n正文 B 行\r\n'
+    await poll('CRLF 文档补全写回', () => doc.getText() === completed ? true : undefined)
+    assert(await doc.save(), 'CRLF 文档应可保存')
+    const bytes = Buffer.from(await vscode.workspace.fs.readFile(wsUri('symbol-crlf.md')))
+    assert(bytes.toString('utf8') === completed, '保存后行尾风格须保持 CRLF')
+    assert(!bytes.toString('utf8').includes('【】\n正文'), '不得出现裸 LF 混入')
+  }],
+
+  ['符号自动补全设置：关闭停用、重开面板保持、保存后回显（#123）', async () => {
+    await openWithEditor('symbol-input.md')
+    await waitSessionReady('symbol-input.md')
+    const uri = wsUri('symbol-input.md').toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri('symbol-input.md'))
+    const source = '符号输入正文段\n'
+
+    // 关闭设置：提交起始符号原样落文（无闭合补全）
+    await vscode.commands.executeCommand(CMD.setSettings, { 'editor.symbolAutocomplete': false })
+    const at = source.indexOf('正文段') + '正文段'.length
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: at })
+    await waitViewState('symbol-input.md', (v) => v.selectionOffset === at)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sync.test.composition', phase: 'start', text: '' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'sync.test.composition', phase: 'update', text: '符号输入正文段【',
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sync.test.composition', phase: 'end', text: '【' })
+    const uncompleted = '符号输入正文段【\n'
+    await poll('关闭后提交原样落文', () => doc.getText() === uncompleted ? true : undefined)
+
+    // 恢复默认开启并还原文档（撤销）
+    await vscode.commands.executeCommand(CMD.setSettings, { 'editor.symbolAutocomplete': true })
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'history.request', op: 'undo' })
+    await poll('撤销还原文档', () => doc.getText() === source ? true : undefined)
+
+    // 关闭面板重开：设置经 globalState 存活（重开后补全仍开 = 持久化回显的行为证据）。
+    // 先 reveal 确保目标面板是活动编辑器（closeActiveEditor 只关活动的）
+    await openWithEditor('symbol-input.md')
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await poll('面板关闭与会话释放', async () => {
+      const s = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+      return s?.found === false ? true : undefined
+    })
+    await openWithEditor('symbol-input.md')
+    await waitSessionReady('symbol-input.md')
+    const snapshot = (await vscode.commands.executeCommand(CMD.getSettings)) as Record<string, unknown>
+    assert(snapshot['editor.symbolAutocomplete'] === true, `重开后设置快照应回显开启，实际 ${JSON.stringify(snapshot)}`)
+    const uri2 = wsUri('symbol-input.md').toString()
+    // 等 webview 完全就绪（live 且文本同步）再驱动 IME 钩子；加稳定窗：
+    // 宿主缓存的 view.state 可能仍是旧面板的回报（重开面板的上报窗口）
+    await waitViewState('symbol-input.md', (v) => v.viewMode === 'live' && v.text === source)
+    await new Promise((r) => setTimeout(r, 1500))
+    // 面板全关后旧 TextDocument 引用可能停止同步：重开面板后重新获取
+    const reopened = await vscode.workspace.openTextDocument(wsUri('symbol-input.md'))
+    await vscode.commands.executeCommand(CMD.postToPanel, uri2, { kind: 'view.locate', offset: at })
+    await waitViewState('symbol-input.md', (v) => v.selectionOffset === at)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri2, { kind: 'sync.test.composition', phase: 'start', text: '' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri2, {
+      kind: 'sync.test.composition', phase: 'update', text: '符号输入正文段（',
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri2, { kind: 'sync.test.composition', phase: 'end', text: '（' })
+    await poll('重开后补全恢复生效', () => reopened.getText() === source.replace('正文段', '正文段（）') ? true : undefined)
+    await vscode.commands.executeCommand(CMD.injectMessage, uri2, { kind: 'history.request', op: 'undo' })
+    await poll('清理：撤销还原', () => reopened.getText() === source ? true : undefined)
+    if (reopened.isDirty) {
+      await reopened.save()
+    }
+  }],
+
+  ['选区包裹一笔写回、跨段二次包裹与宿主撤销整体恢复（#124）', async () => {
+    await openWithEditor('symbol-wrap.md')
+    const initial = await waitSessionReady('symbol-wrap.md')
+    const uri = wsUri('symbol-wrap.md').toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri('symbol-wrap.md'))
+    const source = '包裹段甲\n\n包裹段乙\n'
+    assert(doc.getText() === source, '选区包裹 fixture 初始文本不符')
+
+    // 第一键：经 table.test.crossSelect 设跨段选区（LF 坐标 0..10，两整段），
+    // 再经 table.test.domType 走真实 DOM 输入路径（execCommand insertText
+    // 的选区替换链路与真实键盘一致）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'table.test.crossSelect', anchor: 0, head: 10 })
+    await waitViewState('symbol-wrap.md', (v) => v.selectionOffset === 0 && v.selectionHead === 10)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.domType', text: '*' })
+    const once = '*包裹段甲*\n\n*包裹段乙*\n'
+    await poll('第一键跨段包裹写回（各段包裹、空行保留）', () => doc.getText() === once ? true : undefined)
+    const state1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state1.appliedEdits - initial.appliedEdits === 1,
+      `跨段包裹应为一次写回，实际 ${state1.appliedEdits - initial.appliedEdits}`)
+
+    // 第二键：包裹后选区为多 range（各段原文），真实 DOM 输入替换 main
+    // range 处，CM6 replaceSelection 链路覆盖全部 range——继续包裹
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.domType', text: '*' })
+    const twice = '**包裹段甲**\n\n**包裹段乙**\n'
+    await poll('第二键多 range 继续包裹（第一轮标记不当原文）', () => doc.getText() === twice ? true : undefined)
+
+    // 绘制层断言：包裹产物在真宿主可见（不能只看权威文本）
+    const painted = await waitViewState('symbol-wrap.md', (v) => v.paint?.textVisible === true)
+    assert(painted.paint!.textVisible === true, '包裹后正文须在绘制层命中')
+
+    // 宿主撤销：第二键一笔恢复到第一键态、再一笔整体回原文（跨段多块
+    // 一次撤销整体恢复）
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'history.request', op: 'undo' })
+    await poll('撤销一笔恢复第一键状态', () => doc.getText() === once ? true : undefined)
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'history.request', op: 'undo' })
+    await poll('再撤销整体恢复原文', () => doc.getText() === source ? true : undefined)
+    assert(await doc.save(), '选区包裹文档应可保存')
+    const bytes = Buffer.from(await vscode.workspace.fs.readFile(wsUri('symbol-wrap.md'))).toString('utf8')
+    assert(bytes === source, '保存后回读与权威一致')
+  }],
+
+  ['CRLF 文档选区包裹保持行尾风格并保存（#124）', async () => {
+    await openWithEditor('symbol-wrap-crlf.md')
+    await waitSessionReady('symbol-wrap-crlf.md')
+    const uri = wsUri('symbol-wrap-crlf.md').toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri('symbol-wrap-crlf.md'))
+    const original = '包裹标题段\r\n包裹正文段\r\n'
+    assert(doc.getText() === original, '选区包裹 CRLF fixture 初始文本不符')
+
+    // webview 全程 LF 坐标：'包裹标题段\n包裹正文段\n'，选第二段（LF 6..11）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'table.test.crossSelect', anchor: 6, head: 11 })
+    await waitViewState('symbol-wrap-crlf.md', (v) => v.selectionOffset === 6 && v.selectionHead === 11)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.domType', text: '*' })
+    const wrapped = '包裹标题段\r\n*包裹正文段*\r\n'
+    await poll('CRLF 文档包裹写回', () => doc.getText() === wrapped ? true : undefined)
+    assert(await doc.save(), 'CRLF 包裹文档应可保存')
+    const bytes = Buffer.from(await vscode.workspace.fs.readFile(wsUri('symbol-wrap-crlf.md')))
+    assert(bytes.toString('utf8') === wrapped, '保存后行尾风格须保持 CRLF')
+    assert(!bytes.toString('utf8').includes('*包裹正文段*\n'), '不得出现裸 LF 混入')
+  }],
+
+  ['选区包裹撤销后再次键入仍包裹原文（#124）', async () => {
+    await openWithEditor('symbol-wrap.md')
+    await waitSessionReady('symbol-wrap.md')
+    const uri = wsUri('symbol-wrap.md').toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri('symbol-wrap.md'))
+    const source = '包裹段甲\n\n包裹段乙\n'
+    const wrapped = '*包裹段甲*\n\n包裹段乙\n'
+    assert(doc.getText() === source, '包裹撤销夹具初始文本不符')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'table.test.crossSelect', anchor: 0, head: 4 })
+    for (let cycle = 0; cycle < 2; cycle++) {
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.domType', text: '*' })
+      await poll('包裹写回权威', () => doc.getText() === wrapped ? true : undefined)
+      await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'history.request', op: 'undo' })
+      await poll('撤销恢复原文', () => doc.getText() === source ? true : undefined)
+      const view = await waitViewState('symbol-wrap.md', (v) => v.text === source)
+      assert(view.selectionOffset !== undefined && view.selectionHead !== undefined &&
+        Math.min(view.selectionOffset, view.selectionHead) === 0 &&
+        Math.max(view.selectionOffset, view.selectionHead) === 4,
+        `撤销后原文应保持选中，实际 ${view.selectionOffset}..${view.selectionHead}`)
+    }
+    await doc.save()
+  }],
+
+  ['IME 包裹撤销后再次提交仍包裹原文（#124）', async () => {
+    await openWithEditor('symbol-wrap.md')
+    await waitSessionReady('symbol-wrap.md')
+    const uri = wsUri('symbol-wrap.md').toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri('symbol-wrap.md'))
+    const source = '包裹段甲\n\n包裹段乙\n'
+    const wrapped = '（包裹段甲）\n\n包裹段乙\n'
+    assert(doc.getText() === source, 'IME 撤销夹具初始文本不符')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'table.test.crossSelect', anchor: 0, head: 4 })
+    for (let cycle = 0; cycle < 2; cycle++) {
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sync.test.composition', phase: 'start', text: '' })
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sync.test.composition', phase: 'update', text: '（' })
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sync.test.composition', phase: 'end', text: '（' })
+      await poll('IME 包裹写回权威', () => doc.getText() === wrapped ? true : undefined)
+      await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'history.request', op: 'undo' })
+      await poll('IME 包裹撤销恢复原文', () => doc.getText() === source ? true : undefined)
+      const view = await waitViewState('symbol-wrap.md', (v) => v.text === source)
+      assert(view.selectionOffset !== undefined && view.selectionHead !== undefined &&
+        Math.min(view.selectionOffset, view.selectionHead) === 0 &&
+        Math.max(view.selectionOffset, view.selectionHead) === 4,
+        `IME 撤销后原文应保持选中，实际 ${view.selectionOffset}..${view.selectionHead}`)
+    }
+    await doc.save()
+  }],
+
+  ['选区经 IME 定稿提交起始符号包裹重建、一笔写回与宿主撤销（#124 修复）', async () => {
+    await openWithEditor('symbol-wrap.md')
+    const initial = await waitSessionReady('symbol-wrap.md')
+    const uri = wsUri('symbol-wrap.md').toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri('symbol-wrap.md'))
+    const source = '包裹段甲\n\n包裹段乙\n'
+    assert(doc.getText() === source, 'IME 包裹 fixture 初始文本不符')
+
+    // 选中第一段（钩子候选写第一行，选区放第一段 [0,4)），经真实组合链路
+    // 定稿提交单个全角起始括号：compositionstart 快照选区 → 组合把选区
+    // 替换为候选 → 定稿重建 open+原文+close 并保持原文选中
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'table.test.crossSelect', anchor: 0, head: 4 })
+    await waitViewState('symbol-wrap.md', (v) => v.selectionOffset === 0 && v.selectionHead === 4)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sync.test.composition', phase: 'start', text: '' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'sync.test.composition', phase: 'update', text: '（',
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sync.test.composition', phase: 'end', text: '（' })
+    const wrapped = '（包裹段甲）\n\n包裹段乙\n'
+    await poll('IME 定稿提交包裹重建写回权威文档', () => doc.getText() === wrapped ? true : undefined)
+    const state1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state1.appliedEdits - initial.appliedEdits === 1,
+      `IME 包裹应为组合净输入与重建合并后一次写回，实际 ${state1.appliedEdits - initial.appliedEdits}`)
+
+    // 绘制层断言：重建产物在真宿主可见
+    const painted = await waitViewState('symbol-wrap.md', (v) => v.paint?.textVisible === true)
+    assert(painted.paint!.textVisible === true, 'IME 包裹后正文须在绘制层命中')
+
+    // 宿主撤销一笔整体恢复（组合替换+重建合并单笔，不残留半对也不丢原文）
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'history.request', op: 'undo' })
+    await poll('撤销一笔恢复原文', () => doc.getText() === source ? true : undefined)
+    assert(await doc.save(), 'IME 包裹文档应可保存')
+    const bytes = Buffer.from(await vscode.workspace.fs.readFile(wsUri('symbol-wrap.md'))).toString('utf8')
+    assert(bytes === source, '保存后回读与权威一致')
+  }],
+
+  ['跨段选区 IME 包裹空行保留、一笔写回与宿主撤销（#124）', async () => {
+    await openWithEditor('symbol-wrap.md')
+    const initial = await waitSessionReady('symbol-wrap.md')
+    const uri = wsUri('symbol-wrap.md').toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri('symbol-wrap.md'))
+    const source = '包裹段甲\n\n包裹段乙\n'
+    const wrapped = '（包裹段甲）\n\n（包裹段乙）\n'
+    assert(doc.getText() === source, '跨段 IME 夹具初始文本不符')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'table.test.crossSelect', anchor: 0, head: 10 })
+    await waitViewState('symbol-wrap.md', (v) => v.selectionOffset === 0 && v.selectionHead === 10)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sync.test.composition', phase: 'start', text: '' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sync.test.composition', phase: 'update', text: '（' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sync.test.composition', phase: 'end', text: '（' })
+    await poll('跨段 IME 包裹写回权威', () => doc.getText() === wrapped ? true : undefined)
+    const after = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(after.appliedEdits - initial.appliedEdits === 1,
+      `跨段 IME 应只写回一笔，实际 ${after.appliedEdits - initial.appliedEdits}`)
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'history.request', op: 'undo' })
+    await poll('跨段 IME 一次撤销恢复原文', () => doc.getText() === source ? true : undefined)
+    await doc.save()
+  }],
+
+  ['选区包裹设置：关闭停用、重开面板回显（#124）', async () => {
+    await openWithEditor('symbol-wrap.md')
+    await waitSessionReady('symbol-wrap.md')
+    const uri = wsUri('symbol-wrap.md').toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri('symbol-wrap.md'))
+    const source = '包裹段甲\n\n包裹段乙\n'
+
+    // 关闭设置：选区键入回到普通替换语义（无两侧包裹）
+    await vscode.commands.executeCommand(CMD.setSettings, { 'editor.symbolSelectionWrap': false })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'table.test.crossSelect', anchor: 0, head: 4 })
+    await waitViewState('symbol-wrap.md', (v) => v.selectionOffset === 0 && v.selectionHead === 4)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.domType', text: '*' })
+    const replaced = '*\n\n包裹段乙\n'
+    await poll('关闭后选区按普通替换落文', () => doc.getText() === replaced ? true : undefined)
+
+    // 恢复默认开启并撤销还原
+    await vscode.commands.executeCommand(CMD.setSettings, { 'editor.symbolSelectionWrap': true })
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'history.request', op: 'undo' })
+    await poll('撤销还原文档', () => doc.getText() === source ? true : undefined)
+
+    // 关闭面板重开：设置经 globalState 存活（重开后包裹仍开 = 持久化回显）
+    await openWithEditor('symbol-wrap.md')
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await poll('面板关闭与会话释放', async () => {
+      const s = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+      return s?.found === false ? true : undefined
+    })
+    await openWithEditor('symbol-wrap.md')
+    await waitSessionReady('symbol-wrap.md')
+    const snapshot = (await vscode.commands.executeCommand(CMD.getSettings)) as Record<string, unknown>
+    assert(snapshot['editor.symbolSelectionWrap'] === true,
+      `重开后设置快照应回显开启，实际 ${JSON.stringify(snapshot)}`)
+    // 重开后包裹恢复生效（面板全关后旧 TextDocument 引用可能停止同步：重新获取）
+    const uri2 = wsUri('symbol-wrap.md').toString()
+    const reopened = await vscode.workspace.openTextDocument(wsUri('symbol-wrap.md'))
+    await waitViewState('symbol-wrap.md', (v) => v.viewMode === 'live' && v.text === source)
+    await new Promise((r) => setTimeout(r, 1500))
+    await vscode.commands.executeCommand(CMD.postToPanel, uri2,
+      { kind: 'table.test.crossSelect', anchor: 0, head: 10 })
+    await waitViewState('symbol-wrap.md', (v) => v.selectionOffset === 0 && v.selectionHead === 10)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri2, { kind: 'table.test.domType', text: '*' })
+    await poll('重开后包裹恢复生效', () => reopened.getText() === '*包裹段甲*\n\n*包裹段乙*\n' ? true : undefined)
+    await vscode.commands.executeCommand(CMD.injectMessage, uri2, { kind: 'history.request', op: 'undo' })
+    await poll('清理：撤销还原', () => reopened.getText() === source ? true : undefined)
+    if (reopened.isDirty) {
+      await reopened.save()
+    }
+  }],
+
+  ['围栏内两步 Tab 越界纯导航：零写回零 dirty、表格格内先越界后切格（#125）', async () => {
+    await openWithEditor('symbol-tab.md')
+    const initial = await waitSessionReady('symbol-tab.md')
+    const uri = wsUri('symbol-tab.md').toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri('symbol-tab.md'))
+    const source = '**越界正文**段\n\n| 甲 | **格内** |\n| --- | --- |\n| 一 | 二 |\n'
+    assert(doc.getText() === source, 'Tab 越界 fixture 初始文本不符')
+
+    // 正文粗体内：**越界|正文**（LF 坐标 4）→ 首按到闭合左边界 6 → 再按
+    // 越过整个 **（8）。table.test.key 驱动真实 keymap 链路
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: 4 })
+    await waitViewState('symbol-tab.md', (v) => v.selectionOffset === 4)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key: 'tab' })
+    await waitViewState('symbol-tab.md', (v) => v.selectionOffset === 6)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key: 'tab' })
+    await waitViewState('symbol-tab.md', (v) => v.selectionOffset === 8)
+
+    // 表格格内：**格|内**（表头行第二格内容中间，LF 坐标 = 表头行起点
+    // + '| 甲 | ' + 3）→ 两步越界后再 Tab 切格到数据行第一格
+    const headerFrom = source.indexOf('| 甲')
+    const cellCursor = headerFrom + '| 甲 | '.length + 3
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: cellCursor })
+    await waitViewState('symbol-tab.md', (v) => v.selectionOffset === cellCursor)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key: 'tab' })
+    await waitViewState('symbol-tab.md', (v) => v.selectionOffset === cellCursor + 1)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key: 'tab' })
+    await waitViewState('symbol-tab.md', (v) => v.selectionOffset === cellCursor + 3)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key: 'tab' })
+    await waitViewState('symbol-tab.md', (v) => v.selectionOffset === source.indexOf('一'))
+
+    // 纯导航硬契约：全程零写回（无 edit.request）、零 dirty、字节不变
+    const state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state.appliedEdits - initial.appliedEdits === 0,
+      `Tab 越界不得产生写回，实际 ${state.appliedEdits - initial.appliedEdits}`)
+    assert(doc.getText() === source, 'Tab 越界不得改动权威文本')
+    assert(!doc.isDirty, '纯导航不得产生 dirty 变更')
+    const bytes = Buffer.from(await vscode.workspace.fs.readFile(wsUri('symbol-tab.md'))).toString('utf8')
+    assert(bytes === source, '文档字节须保持不变')
+
+    // Shift+Tab 原行为：格内反向切格（不新增反向越界）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key: 'shift-tab' })
+    await waitViewState('symbol-tab.md', (v) => v.selectionOffset === cellCursor + 3)
+  }],
+
+  ['CRLF 文档围栏内 Tab 零写回且行尾风格保持（#125）', async () => {
+    await openWithEditor('symbol-tab-crlf.md')
+    await waitSessionReady('symbol-tab-crlf.md')
+    const uri = wsUri('symbol-tab-crlf.md').toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri('symbol-tab-crlf.md'))
+    const original = '**CRLF 越界**段\r\n正文行\r\n'
+    assert(doc.getText() === original, 'Tab 越界 CRLF fixture 初始文本不符')
+
+    // webview 全程 LF 坐标：粗体内容 CRLF| 越 界（光标 6，F 后）→ 两步越界
+    // （内容「CRLF 越界」7 字符：闭 ** 在 9-10——闭合左边界 9 → 越过到 11）
+    const initial = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: 6 })
+    await waitViewState('symbol-tab-crlf.md', (v) => v.selectionOffset === 6)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key: 'tab' })
+    await waitViewState('symbol-tab-crlf.md', (v) => v.selectionOffset === 9)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key: 'tab' })
+    await waitViewState('symbol-tab-crlf.md', (v) => v.selectionOffset === 11)
+    const state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state.appliedEdits - initial.appliedEdits === 0, 'CRLF 文档 Tab 越界同样零写回')
+    assert(!doc.isDirty, 'CRLF 文档纯导航不得 dirty')
+    const bytes = Buffer.from(await vscode.workspace.fs.readFile(wsUri('symbol-tab-crlf.md')))
+    assert(bytes.toString('utf8') === original, 'CRLF 文档字节须保持不变')
+    assert(bytes.toString('utf8').includes('**段\r\n'), '不得引入 LF/CRLF 混排')
+  }],
+
+  ['符号 Tab 越界设置：关闭回落切格、重开面板回显恢复（#125）', async () => {
+    await openWithEditor('symbol-tab.md')
+    const initial = await waitSessionReady('symbol-tab.md')
+    const uri = wsUri('symbol-tab.md').toString()
+    const source = '**越界正文**段\n\n| 甲 | **格内** |\n| --- | --- |\n| 一 | 二 |\n'
+
+    // 关闭设置：格内光标 Tab 不再越界，直接切格到数据行第一格
+    await vscode.commands.executeCommand(CMD.setSettings, { 'editor.symbolTabEscape': false })
+    const headerFrom = source.indexOf('| 甲')
+    const cellCursor = headerFrom + '| 甲 | '.length + 3
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: cellCursor })
+    await waitViewState('symbol-tab.md', (v) => v.selectionOffset === cellCursor)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key: 'tab' })
+    await waitViewState('symbol-tab.md', (v) => v.selectionOffset === source.indexOf('一'))
+    const state1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state1.appliedEdits - initial.appliedEdits === 0, '关闭后切格仍为零写回')
+
+    // 恢复默认开启；关闭面板重开：设置经 globalState 存活回显（持久化
+    // 的行为证据），重开后围栏内 Tab 越界恢复生效
+    await vscode.commands.executeCommand(CMD.setSettings, { 'editor.symbolTabEscape': true })
+    await openWithEditor('symbol-tab.md')
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await poll('面板关闭与会话释放', async () => {
+      const s = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+      return s?.found === false ? true : undefined
+    })
+    await openWithEditor('symbol-tab.md')
+    await waitSessionReady('symbol-tab.md')
+    const snapshot = (await vscode.commands.executeCommand(CMD.getSettings)) as Record<string, unknown>
+    assert(snapshot['editor.symbolTabEscape'] === true,
+      `重开后设置快照应回显开启，实际 ${JSON.stringify(snapshot)}`)
+    const uri2 = wsUri('symbol-tab.md').toString()
+    const reopened = await vscode.workspace.openTextDocument(wsUri('symbol-tab.md'))
+    await waitViewState('symbol-tab.md', (v) => v.viewMode === 'live' && v.text === source)
+    await new Promise((r) => setTimeout(r, 1500))
+    await vscode.commands.executeCommand(CMD.postToPanel, uri2, { kind: 'view.locate', offset: 4 })
+    await waitViewState('symbol-tab.md', (v) => v.selectionOffset === 4)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri2, { kind: 'table.test.key', key: 'tab' })
+    await waitViewState('symbol-tab.md', (v) => v.selectionOffset === 6)
+    assert(reopened.getText() === source && !reopened.isDirty, '重开后越界仍为纯导航')
+    if (reopened.isDirty) {
+      await reopened.save()
+    }
+  }],
+
   // ---- #128 CSS 片段目录管理与双视图启停闭环 ----
 
   ['CSS 片段：目录扫描默认关闭、启用改双视图、文件名顺序后者覆盖（#128）', async () => {

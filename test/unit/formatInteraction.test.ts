@@ -126,6 +126,93 @@ describe('格式命令生产链路', () => {
     }
   })
 
+  it('贴边两态三按：包裹带光标定位，再按只拆所在对，三按复原（#107）', () => {
+    const { controller, view } = setup('**加粗**普通')
+    view.dispatch({ selection: { anchor: 6 } })
+    controller.handleHostMessage({ kind: 'format.command', op: 'bold' })
+    expect(view.state.doc.toString()).toBe('**加粗****普通**')
+    expect(view.state.selection.main.anchor).toBe(8)
+    controller.handleHostMessage({ kind: 'format.command', op: 'bold' })
+    expect(view.state.doc.toString()).toBe('**加粗**普通')
+    controller.handleHostMessage({ kind: 'format.command', op: 'bold' })
+    expect(view.state.doc.toString()).toBe('**加粗****普通**')
+  })
+
+  it('围栏开边界贴邻即取消：行首与行尾对称（#107，显式枚举）', () => {
+    const cases: ReadonlyArray<[typeof FORMAT_OPERATIONS[number]['id'], string]> = [
+      ['bold', '**文字**'],
+      ['italic', '*文字*'],
+      ['strikethrough', '~~文字~~'],
+      ['inlineCode', '`文字`'],
+      ['highlight', '==文字=='],
+    ]
+    for (const [op, text] of cases) {
+      const head = setup(text)
+      head.view.dispatch({ selection: { anchor: 0 } })
+      head.controller.handleHostMessage({ kind: 'format.command', op })
+      expect(head.view.state.doc.toString(), `操作 ${op} 行首`).toBe('文字')
+      head.controller.dispose()
+      const tail = setup(text)
+      tail.view.dispatch({ selection: { anchor: text.length } })
+      tail.controller.handleHostMessage({ kind: 'format.command', op })
+      expect(tail.view.state.doc.toString(), `操作 ${op} 行尾`).toBe('文字')
+      tail.controller.dispose()
+    }
+  })
+
+  it('合并形态贴边往返与独立节点贴边往返经生产链路（#107）', () => {
+    // italic / inlineCode 的贴边产物是合并节点：二按按 mark 出现顺序拆光标所在对
+    const italic = setup('*斜体*普通')
+    italic.view.dispatch({ selection: { anchor: 5 } })
+    italic.controller.handleHostMessage({ kind: 'format.command', op: 'italic' })
+    expect(italic.view.state.doc.toString()).toBe('*斜体**普通*')
+    italic.controller.handleHostMessage({ kind: 'format.command', op: 'italic' })
+    expect(italic.view.state.doc.toString()).toBe('*斜体*普通')
+    italic.controller.dispose()
+    const code = setup('`码`文')
+    code.view.dispatch({ selection: { anchor: 3 } })
+    code.controller.handleHostMessage({ kind: 'format.command', op: 'inlineCode' })
+    expect(code.view.state.doc.toString()).toBe('`码``文`')
+    code.controller.handleHostMessage({ kind: 'format.command', op: 'inlineCode' })
+    expect(code.view.state.doc.toString()).toBe('`码`文')
+    code.controller.dispose()
+    // strikethrough / highlight 的贴边产物是独立节点：两态往返
+    const strike = setup('~~删除~~普通')
+    strike.view.dispatch({ selection: { anchor: 6 } })
+    strike.controller.handleHostMessage({ kind: 'format.command', op: 'strikethrough' })
+    expect(strike.view.state.doc.toString()).toBe('~~删除~~~~普通~~')
+    strike.controller.handleHostMessage({ kind: 'format.command', op: 'strikethrough' })
+    expect(strike.view.state.doc.toString()).toBe('~~删除~~普通')
+    strike.controller.dispose()
+  })
+
+  it('围栏前贴邻取消三按链路：取消得裸词，再按扩词包裹复原（#107 补缺口）', () => {
+    // 行首侧：一按取消（光标 0 映射后仍在行首），二按取到词包裹复原
+    const head = setup('**word**')
+    head.view.dispatch({ selection: { anchor: 0 } })
+    head.controller.handleHostMessage({ kind: 'format.command', op: 'bold' })
+    expect(head.view.state.doc.toString()).toBe('word')
+    head.controller.handleHostMessage({ kind: 'format.command', op: 'bold' })
+    expect(head.view.state.doc.toString()).toBe('**word**')
+    head.controller.dispose()
+    // 行尾侧：一按取消（光标映射到裸词末），二按光标在词内取词包裹复原
+    const tail = setup('**word**')
+    tail.view.dispatch({ selection: { anchor: 8 } })
+    tail.controller.handleHostMessage({ kind: 'format.command', op: 'bold' })
+    expect(tail.view.state.doc.toString()).toBe('word')
+    tail.controller.handleHostMessage({ kind: 'format.command', op: 'bold' })
+    expect(tail.view.state.doc.toString()).toBe('**word**')
+    tail.controller.dispose()
+  })
+
+  it('升级定界符围栏取消经生产链路：光标在内容中整拆得裸内容（#107 审查修复）', () => {
+    const code = setup('``码``')
+    code.view.dispatch({ selection: { anchor: 2 } })
+    code.controller.handleHostMessage({ kind: 'format.command', op: 'inlineCode' })
+    expect(code.view.state.doc.toString()).toBe('码')
+    code.controller.dispose()
+  })
+
   it('高亮命令走 CM6 单事务写回（与 bold 同链路）', () => {
     const { controller, sent, view } = setup('中文 English')
     view.dispatch({ selection: { anchor: 0 } })

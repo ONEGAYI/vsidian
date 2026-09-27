@@ -125,6 +125,10 @@ export const LIVE_CLASS_NAMES = {
   /** 安全表格的网格行和单元格；行身份另见 data-vsidian-table-row */
   tableGridRow: 'vsidian-table-grid-row',
   tableGridCell: 'vsidian-table-grid-cell',
+  /** 空格占位 widget 专属标记（#101）：普通格是 mark 装饰共享
+   *  tableGridCell 类名，空格物化物（widget span）以此类独立可辨——
+   *  localeOnDemand 的换包扫描据此只命中空格占位、不误伤普通格 */
+  tableGridEmpty: 'vsidian-table-grid-empty',
   tableGridDelimiter: 'vsidian-table-grid-delimiter',
   tableEscapedPipe: 'vsidian-table-escaped-pipe',
   /** 列对齐修饰（分隔行声明的对齐落到各单元格） */
@@ -285,14 +289,18 @@ function tableGridCellDeco(align: TableAlign | null): ReturnType<typeof Decorati
   return deco
 }
 
-/** 零宽空格仍须占一列；widget 仅在该行进入 CM6 视口时生成 DOM。 */
-class EmptyTableCellWidget extends WidgetType {
+/** 零宽空格仍须占一列；widget 仅在该行进入 CM6 视口时生成 DOM。
+ *  导出供 localeRefreshContract 的直构等价形态用例（同 CodeCardHeaderWidget /
+ *  LiveMathWidget 先例）；生产侧仍只经下方两个单例装饰实例发射。 */
+export class EmptyTableCellWidget extends WidgetType {
   constructor(private readonly active = false) { super() }
   toDOM(): HTMLElement {
     const span = document.createElement('span')
+    // 空格两态都带 tableGridEmpty 标记（换包扫描锚点，#101）；active 态
+    // 只是在其上叠加修饰类（CSS 光标呈现用），同词无独立文案
     span.className = this.active
-      ? `${LIVE_CLASS_NAMES.tableGridCell} vsidian-table-grid-empty-active`
-      : LIVE_CLASS_NAMES.tableGridCell
+      ? `${LIVE_CLASS_NAMES.tableGridCell} ${LIVE_CLASS_NAMES.tableGridEmpty} vsidian-table-grid-empty-active`
+      : `${LIVE_CLASS_NAMES.tableGridCell} ${LIVE_CLASS_NAMES.tableGridEmpty}`
     span.setAttribute('aria-label', t('decor.emptyCell'))
     span.addEventListener('mousedown', (event) => {
       const view = EditorView.findFromDOM(span)

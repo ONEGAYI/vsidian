@@ -67,6 +67,18 @@ export const zhCn: Record<MessageKey, string> = {
   'setting.codeblockCopyButton.description': '卡片头部悬停显示复制按钮，点击复制整块代码（不含围栏行）。需开启「代码块卡片」。',
   'setting.codeblockHighlight.title': '语法高亮',
   'setting.codeblockHighlight.description': '代码块内容按语言着色（卡片关闭时朴素围栏同样生效；未识别语言回退纯文本）。',
+  /** 设置项「符号自动补全」（#123 editor.symbolAutocomplete） */
+  'setting.symbolAutocomplete.title': '符号自动补全',
+  'setting.symbolAutocomplete.description':
+    '实时预览正文中键入起始符号时自动补入对应闭合符号（代码内括号引号照常配对，Markdown 强调符仅在连续串首触发）。紧贴自动补出的闭合符号再键入同一符号可直接越过，自动补出的空符号对内退格两侧同删。关闭后以上行为一并停用。',
+  /** 设置项「选区符号包裹」（#124 editor.symbolSelectionWrap） */
+  'setting.symbolSelectionWrap.title': '选区符号包裹',
+  'setting.symbolSelectionWrap.description':
+    '实时预览选中文字后键入符号，在选区两侧添加对应符号并保持原文选中（连续键入叠加标记：两次星号成粗体，两次方括号成双链类结构；跨段选择按段分别包裹且保留空行）。代码内不对 Markdown 强调符包裹；本开关与符号自动补全相互独立。',
+  /** 设置项「符号 Tab 越界」（#125 editor.symbolTabEscape） */
+  'setting.symbolTabEscape.title': '符号 Tab 越界',
+  'setting.symbolTabEscape.description':
+    '实时预览中光标位于成对符号围栏内部（括号、引号或行内 Markdown 结构）且未选中文字时，Tab 先移到闭合标记左边界，再按一次越过整个闭合标记；嵌套围栏从最内层逐层退出。Tab 仅移动光标，不改动文本。围栏外保持既有行为（表格切格或整行缩进）；Shift+Tab 不受影响。本开关与前两项符号设置相互独立。',
   /** 设置项「界面语言」（#96 general.language，经 titleKey/descriptionKey 取词） */
   'setting.language.title': '界面语言',
   'setting.language.description':
