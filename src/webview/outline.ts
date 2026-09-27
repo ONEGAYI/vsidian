@@ -30,8 +30,7 @@ import type { Text } from '@codemirror/state'
 import type { SyntaxNode, Tree } from '@lezer/common'
 import type { OutlineSpanInfo, OutlineSpanKind } from '../shared/protocol'
 import type { OutlineSearchRange } from './outlineSearch'
-import { t } from '../shared/i18n'
-import { outlineExpandLevelLabel } from './outlineCollapse'
+import { bindLocale, bindLocaleAttrs, bindLocaleFnAttrs } from './localeDom'
 import { parseWikilinkInner, scanWikilinksInLine } from '../shared/wikilink'
 import {
   docInput,
@@ -546,7 +545,7 @@ export function renderOutlineItems(
   if (items.length === 0) {
     const empty = document.createElement('div')
     empty.className = OUTLINE_CLASS_NAMES.empty
-    empty.textContent = t('outline.empty')
+    bindLocale(empty, 'text', 'outline.empty')
     panel.replaceChildren(empty)
     return
   }
@@ -570,7 +569,7 @@ export function renderOutlineItems(
       const chevron = document.createElement('button')
       chevron.type = 'button'
       chevron.className = OUTLINE_CLASS_NAMES.chevron
-      chevron.setAttribute('aria-label', t('outline.chevron'))
+      bindLocale(chevron, 'aria-label', 'outline.chevron')
       chevron.setAttribute('aria-expanded', 'true')
       chevron.appendChild(createOutlineChevronIcon())
       el.appendChild(chevron)
@@ -689,8 +688,7 @@ export function buildOutlineDom(): { toggle: HTMLButtonElement; panel: HTMLEleme
   const toggle = document.createElement('button')
   toggle.type = 'button'
   toggle.className = 'vsidian-outline-toggle'
-  toggle.setAttribute('aria-label', t('outline.label'))
-  toggle.setAttribute('title', t('outline.label'))
+  bindLocaleAttrs(toggle, 'outline.label')
   toggle.setAttribute('aria-controls', 'vsidian-outline-panel')
   toggle.setAttribute('aria-expanded', 'true')
   toggle.appendChild(createOutlineListIcon())
@@ -698,7 +696,7 @@ export function buildOutlineDom(): { toggle: HTMLButtonElement; panel: HTMLEleme
   panel.className = OUTLINE_CLASS_NAMES.panel
   panel.id = 'vsidian-outline-panel'
   panel.setAttribute('role', 'region')
-  panel.setAttribute('aria-label', t('outline.label'))
+  bindLocale(panel, 'aria-label', 'outline.label')
   return { toggle, panel }
 }
 
@@ -742,16 +740,16 @@ export function buildOutlineSlider(
   const row = document.createElement('div')
   row.className = OUTLINE_CLASS_NAMES.slider
   row.setAttribute('role', 'group')
-  row.setAttribute('aria-label', t('outline.expandLevels'))
+  bindLocale(row, 'aria-label', 'outline.expandLevels')
   const dots: HTMLButtonElement[] = []
   for (let n = 0; n <= 5; n++) {
     const dot = document.createElement('button')
     dot.type = 'button'
     dot.className = OUTLINE_CLASS_NAMES.sliderDot
     dot.dataset['vsidianLevel'] = String(n)
-    const label = labelOf(n)
-    dot.setAttribute('aria-label', label)
-    dot.setAttribute('title', label)
+    // 档位名经 labelOf 回调登记（回调形态：换包时重新求值——labelOf 由
+    // 调用方注入，实际取词在 outlineExpandLevelLabel 内部走 t()）
+    bindLocaleFnAttrs(dot, () => labelOf(n))
     dots.push(dot)
     row.appendChild(dot)
   }
@@ -820,20 +818,18 @@ export function buildOutlineToolbar(): OutlineToolbarDom {
   const jumpBottom = document.createElement('button')
   jumpBottom.type = 'button'
   jumpBottom.className = OUTLINE_CLASS_NAMES.jumpBottom
-  jumpBottom.setAttribute('aria-label', t('outline.jumpBottom'))
-  jumpBottom.setAttribute('title', t('outline.jumpBottom'))
+  bindLocaleAttrs(jumpBottom, 'outline.jumpBottom')
   jumpBottom.appendChild(createOutlineJumpBottomIcon())
   const reset = document.createElement('button')
   reset.type = 'button'
   reset.className = OUTLINE_CLASS_NAMES.reset
-  reset.setAttribute('aria-label', t('outline.reset'))
-  reset.setAttribute('title', t('outline.reset'))
+  bindLocaleAttrs(reset, 'outline.reset')
   reset.appendChild(createOutlineResetIcon())
   const search = document.createElement('input')
   search.type = 'search'
   search.className = OUTLINE_CLASS_NAMES.search
-  search.setAttribute('placeholder', t('outline.searchPlaceholder'))
-  search.setAttribute('aria-label', t('outline.searchLabel'))
+  bindLocale(search, 'placeholder', 'outline.searchPlaceholder')
+  bindLocale(search, 'aria-label', 'outline.searchLabel')
   search.autocomplete = 'off'
   search.spellcheck = false
   row.appendChild(jumpBottom)
@@ -842,52 +838,11 @@ export function buildOutlineToolbar(): OutlineToolbarDom {
   return { row, jumpBottom, reset, search }
 }
 
-/**
- * 语言切换时就地刷新大纲常驻文本（#94）：可访问名称、占位文案与滑块档位
- * 名随包换词。条目正文是文档内容，不随语言变化；重命名输入框等编辑态
- * 不打扰（失焦提交，由下次渲染自然取新词）。
- */
-export function applyOutlineDomLocale(dom: {
-  toggle?: HTMLButtonElement
-  panel?: HTMLElement
-  slider?: OutlineSliderDom
-  toolbar?: OutlineToolbarDom
-}): void {
-  if (dom.toggle) {
-    dom.toggle.setAttribute('aria-label', t('outline.label'))
-    dom.toggle.setAttribute('title', t('outline.label'))
-  }
-  if (dom.panel) {
-    dom.panel.setAttribute('aria-label', t('outline.label'))
-    const empty = dom.panel.querySelector(`.${OUTLINE_CLASS_NAMES.empty}`)
-    if (empty) {
-      empty.textContent = t('outline.empty')
-    }
-    const nomatch = dom.panel.querySelector(`.${OUTLINE_CLASS_NAMES.nomatch}`)
-    if (nomatch) {
-      nomatch.textContent = t('outline.noMatch')
-    }
-    for (const chevron of dom.panel.querySelectorAll(`.${OUTLINE_CLASS_NAMES.chevron}`)) {
-      chevron.setAttribute('aria-label', t('outline.chevron'))
-    }
-  }
-  if (dom.slider) {
-    dom.slider.row.setAttribute('aria-label', t('outline.expandLevels'))
-    dom.slider.dots.forEach((dot, n) => {
-      const label = outlineExpandLevelLabel(n)
-      dot.setAttribute('aria-label', label)
-      dot.setAttribute('title', label)
-    })
-  }
-  if (dom.toolbar) {
-    dom.toolbar.jumpBottom.setAttribute('aria-label', t('outline.jumpBottom'))
-    dom.toolbar.jumpBottom.setAttribute('title', t('outline.jumpBottom'))
-    dom.toolbar.reset.setAttribute('aria-label', t('outline.reset'))
-    dom.toolbar.reset.setAttribute('title', t('outline.reset'))
-    dom.toolbar.search.setAttribute('placeholder', t('outline.searchPlaceholder'))
-    dom.toolbar.search.setAttribute('aria-label', t('outline.searchLabel'))
-  }
-}
+// #101 起常驻文案的创建与换包重刷统一经 localeDom 注册表（bindLocale/
+// bindLocaleFn 登记即继承），本文件原有的 applyOutlineDomLocale 对照枚举
+// 已删除：条目正文是文档内容不随语言变化；重命名输入框等编辑态不打扰
+// （失焦提交，由下次渲染自然取新词）；「无匹配」占位在 syncController
+// 创建点登记。
 
 /** #68 跳转到末尾图标（lucide arrow-down-to-line 的 16px 缩放意象）：
  *  竖线 + 箭头 + 底线 */

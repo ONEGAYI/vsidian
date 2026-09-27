@@ -377,6 +377,25 @@ export function setMermaidDarkTheme(next: boolean): void {
   }
 }
 
+/** 换语言时就地重刷错误态占位（#101）：decor.mermaidError /
+ *  decor.mermaidUnavailable 在 applyEntry / applyUnavailable 求值并固化
+ *  于降级 DOM——插值参数（mermaid 原始错误串）不在 DOM 上，无法只改
+ *  文本，须经重渲染重建降级内容。与 setMermaidDarkTheme 同款扫描，但
+ *  只处理 error 态且不清缓存：错误条目的 message 是与语言无关的原始
+ *  错误串，缓存复用安全；成功 SVG 不含本地化文案，无须重画（主题切换
+ *  才需全量重画）。装载失败占位重走 ensureMermaidApi 终态快速失败，
+ *  applyUnavailable 即取新词。第二渲染语言接入时须自行评估换语言联动
+ *  （与主题联动的已知边界同款，见 graphicRenderers.ts 头注释）。 */
+export function refreshMermaidErrorLocale(root: ParentNode): void {
+  for (const el of Array.from(
+    root.querySelectorAll<HTMLElement>(`.${MERMAID_CLASS_NAMES.diagram}[${MERMAID_CODE_ATTR}]`),
+  )) {
+    if (el.getAttribute(MERMAID_STATE_ATTR) === 'error') {
+      renderMermaidInto(el, el.getAttribute(MERMAID_CODE_ATTR)!)
+    }
+  }
+}
+
 /** 当前主题态观测（测试与探针） */
 export function mermaidDarkTheme(): boolean {
   return dark
