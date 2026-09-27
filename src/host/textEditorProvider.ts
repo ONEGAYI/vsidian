@@ -23,6 +23,7 @@ import {
 } from './wikilinkTarget'
 import { parseWikilinkInner } from '../shared/wikilink'
 import { NewlineCoordinator } from '../shared/newline'
+import { buildEditorCsp } from './editorCsp'
 import { FORMAT_OPERATIONS } from '../shared/formatOperations'
 import { KEYBINDING_OPERATIONS, UI_OPERATIONS } from '../shared/keybindings'
 import {
@@ -1793,21 +1794,10 @@ function buildWebviewHtml(
   const probeCssUri = webview.asWebviewUri(
     vscode.Uri.joinPath(extensionUri, 'media', 'css-contract-probe.css'),
   )
-  const csp = [
-    `default-src 'none'`,
-    // data: 供 #111 图表弹窗 PNG 光栅化（自有 mermaid SVG 经 data URL
-    // 装载到 canvas；位图不可执行，风险面限于解码）
-    `img-src ${webview.cspSource} https: data:`,
-    `script-src ${webview.cspSource} 'nonce-${nonce}'`,
-    // 'unsafe-inline' 仅放行样式：CodeMirror 6（style-mod）在运行时向
-    // document 注入 <style> 元素承载 baseTheme 与扩展样式，属 CSP 的
-    // "内联样式"——不放行则整个 CM6 注入样式表被拒（.sheet 为 null），
-    // .cm-scroller 失去 flex、caret/选区样式缺失（P0：#34 行号加入后
-    // gutter 与正文改为上下堆叠，正文被推出视口）。脚本仍由上方
-    // nonce 门控，本行不放宽任何脚本执行。
-    `style-src ${webview.cspSource} 'unsafe-inline'`,
-    `font-src ${webview.cspSource}`,
-  ].join('; ')
+  // #130 起抽纯逻辑模块（style-src/font-src 追加 https: 放行 HTTPS 导入与
+  // 联网字体；脚本面维持 nonce 门控）——期望形态由 test/unit/editorCsp.test.ts
+  // 钉住，真实宿主内生效由集成测试验证
+  const csp = buildEditorCsp(webview.cspSource, nonce)
   return `<!DOCTYPE html>
 <html lang="${locale}">
 <head>
