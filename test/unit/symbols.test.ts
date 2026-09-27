@@ -121,6 +121,65 @@ describe('Markdown 触发符的邻接规则（#123 显式登记）', () => {
   })
 })
 
+describe('括号引号的右邻抑制（#151 生态口径对齐）', () => {
+  const bracketsAndQuotes = SYMBOL_AUTOCLOSE_REGISTRY.filter((e) => e.kind !== 'markdown')
+
+  it.each(bracketsAndQuotes.map((e) => [e.open, e]))(
+    '%s：右邻正文词字符不补——`|word` 键入开符号不再越界补出闭合符', (_open, entry) => {
+      expect(shouldAutoclose(entry, ctx({ charAfter: 'a' }))).toBe(false)
+      expect(shouldAutoclose(entry, ctx({ charAfter: 'W' }))).toBe(false)
+      expect(shouldAutoclose(entry, ctx({ charAfter: '7' }))).toBe(false)
+      expect(shouldAutoclose(entry, ctx({ charAfter: '文' }))).toBe(false)
+    },
+  )
+
+  it.each(bracketsAndQuotes.map((e) => [e.open, e]))(
+    '%s：右邻普通标点不补（非空白且非闭合类即正文中间形态）', (_open, entry) => {
+      expect(shouldAutoclose(entry, ctx({ charAfter: ',' }))).toBe(false)
+      expect(shouldAutoclose(entry, ctx({ charAfter: ':' }))).toBe(false)
+      expect(shouldAutoclose(entry, ctx({ charAfter: '-' }))).toBe(false)
+    },
+  )
+
+  it.each(bracketsAndQuotes.map((e) => [e.open, e]))(
+    '%s：右邻空白/换行/行尾照常补全', (_open, entry) => {
+      expect(shouldAutoclose(entry, ctx({ charAfter: ' ' }))).toBe(true)
+      expect(shouldAutoclose(entry, ctx({ charAfter: '\t' }))).toBe(true)
+      expect(shouldAutoclose(entry, ctx({ charAfter: '\n' }))).toBe(true)
+      expect(shouldAutoclose(entry, ctx({ charAfter: '' }))).toBe(true)
+    },
+  )
+
+  it.each(bracketsAndQuotes.map((e) => [e.open, e]))(
+    '%s：右邻注册表任一 close 字符照常补全（闭合类从注册表派生，嵌套 [（|）] 照补）', (_open, entry) => {
+      for (const other of SYMBOL_AUTOCLOSE_REGISTRY) {
+        expect(shouldAutoclose(entry, ctx({ charAfter: other.close })), `右邻 ${other.close}`).toBe(true)
+      }
+    },
+  )
+
+  it.each(bracketsAndQuotes.map((e) => [e.open, e]))(
+    '%s：右邻开括号/开引号不补（闭合类只含 close 字符）', (_open, entry) => {
+      for (const opener of ['(', '[', '{', '（', '【', '《', '「', '『', '“', '‘']) {
+        expect(shouldAutoclose(entry, ctx({ charAfter: opener })), `右邻 ${opener}`).toBe(false)
+      }
+    },
+  )
+
+  it('括号引号逐项登记 suppressAfter（12 项显式登记，非全局默认）', () => {
+    for (const entry of bracketsAndQuotes) {
+      expect(entry.suppressAfter, `${entry.open} 应登记 suppressAfter`).toBeTypeOf('function')
+    }
+  })
+
+  it('Markdown 触发符右邻口径不变：普通标点照常补全（与括号引号差异化并存）', () => {
+    for (const open of ['*', '_', '~', '`', '=', '$']) {
+      expect(shouldAutoclose(byOpen(open), ctx({ charAfter: ',' }))).toBe(true)
+      expect(shouldAutoclose(byOpen(open), ctx({ charAfter: '.' }))).toBe(true)
+    }
+  })
+})
+
 describe('英文单引号的撇号防误触（#123）', () => {
   it('词中/词尾撇号按普通文字处理：左邻字母数字不补', () => {
     expect(shouldAutoclose(byOpen("'"), ctx({ charBefore: 't' }))).toBe(false)

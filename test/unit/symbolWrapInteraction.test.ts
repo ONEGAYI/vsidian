@@ -334,11 +334,11 @@ describe('设置开关（#124 与 #123 相互独立）', () => {
     select(view, 2, 6)
     typeOverSelection(view, '*')
     expect(view.state.doc.toString()).toBe('a * b')
-    // 无选区补全照常
-    select(view, 0, 0)
+    // 无选区补全照常（光标取行尾——#151 口径下右邻词字符不补，行尾照补）
+    select(view, 5, 5)
     typeOverSelection(view, '(')
-    expect(view.state.doc.toString()).toBe('()a * b')
-    expect(view.state.selection.main.head).toBe(1)
+    expect(view.state.doc.toString()).toBe('a * b()')
+    expect(view.state.selection.main.head).toBe(6)
   })
 
   it('关闭自动补全后选区包裹不受影响', () => {
@@ -473,24 +473,28 @@ describe('IME 定稿提交单个起始符号：选区包裹重建（修复）', 
     selectTableRegion(view, { tableFrom: 0, rowFrom: 1, rowTo: 1, columnFrom: 0, columnTo: 0 })
     // 格区是鼠标框选状态：组合替换事务本身即解除格区（既有语义），包裹
     // 快照在 compositionstart 时看到格区不建立，end 后 #123 补全按普通
-    // 插入路径评估——产物与修复前一致，不在格内容两侧加包裹符号
+    // 插入路径评估——不在格内容两侧加包裹符号；#151 起右邻词字符
+    // （c1 的 c）不再补闭合，产物为单个（
     await composeCommit(controller, view, '（')
-    expect(view.state.doc.toString()).toBe('| a | b |\n| --- | --- |\n| （）c1 | d1 |\n段落')
+    expect(view.state.doc.toString()).toBe('| a | b |\n| --- | --- |\n| （c1 | d1 |\n段落')
   })
 
   it('设置关闭后 IME 提交回到替换+空选区补全现状（不重建）', async () => {
-    const { controller, view } = setup('甲段乙文')
+    const { controller, view } = setup('甲段 乙文')
     controller.handleHostMessage({ kind: 'settings.changed', values: { 'editor.symbolSelectionWrap': false } })
     select(view, 0, 2)
+    // 替换后右邻为空白（#151 口径照补）：得（）——补全来自 #123 路径，
+    // 不是包裹重建（乙文前无新符号、其后无闭合）
     await composeCommit(controller, view, '（')
-    expect(view.state.doc.toString()).toBe('（）乙文')
+    expect(view.state.doc.toString()).toBe('（） 乙文')
     expect(view.state.selection.main.head).toBe(1)
   })
 
   it('无选区 IME 提交照常走 #123 补全（不因新路径重复触发）', async () => {
-    const { controller, view } = setup('乙文')
+    const { controller, view } = setup(' 乙文')
+    // 行首空白前（右邻空格，#151 口径照补）：提交补出一对
     await composeCommit(controller, view, '（')
-    expect(view.state.doc.toString()).toBe('（）乙文')
+    expect(view.state.doc.toString()).toBe('（） 乙文')
     expect(view.state.selection.main.head).toBe(1)
   })
 

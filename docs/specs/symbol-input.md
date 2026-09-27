@@ -43,6 +43,8 @@
 
 新增符号只需：注册表加一行（含 `selectionWrap`、`tabEscape` 决定是否参与选区包裹与 Tab 越界）+ `test/unit/symbols.test.ts` 参数化用例钉住其触发/越过/抑制条件（清单数断言同步），不需要改 webview 侧条件分支。
 
+右邻抑制（`suppressAfter`）是**差异化双口径**（#151 对齐生态）：括号与引号登记生态口径 `isBodyChar`——右邻为非空白且非闭合类字符（词字符、普通标点等「正文中间」形态）时不补全（`|word` 键 `[` 不再越界补出 `[|]word`），右邻空白、行尾或注册表任一 close 字符时照常补全（闭合类集合从注册表派生——新增符号自动继承，嵌套 `[（|）]` 形态照补）；Markdown 触发符维持既有词字符口径 `isWordChar`（右邻普通标点照常补全）。两口径差异化并存是 #151 的显式决策，不得顺手统一或放宽。transactionFilter 与 IME 提交补全（`attemptCompositionCommitClose`）共用 `shouldAutoclose` 判定，口径变化同时作用于两条路径。
+
 ### 选区路径：非空选区键入包裹（#124）
 
 注册表的 `selectionWrap` 字段逐项显式登记包裹能力（**包裹符、自动补全符、Tab 可导航符是三个不同集合，不得等同硬编码**——键入 close 字符不包裹、包裹判定不做邻接抑制），包裹计划纯函数在 `src/shared/symbolWrap.ts`（`planSelectionWrap`：空行序列拆段、纯空白块跳过、产物多 range 原文选区），`src/webview/symbolWrap.ts` 的 transactionFilter 认两种输入形态——单 range 选区替换与 CM6 `replaceSelection` 的多 range 逐条替换（真实键盘在多 range 选区下键入，DOM 原生选区只表达 main range，CM6 的 applyDefaultInsert 经 replaceSelection 覆盖全部 range——跨段第二键叠加包裹的底层机制）；跨段后选区保持多 range（各段原文），依赖随组装配的 `allowMultipleSelections`（EditorState 否则把选区 asSingle；已知呈现边界：未启用 drawSelection，多 range 仅 main range 有原生选区高亮，功能不受影响）。
