@@ -30,10 +30,16 @@ Object.assign(window, {
     controller.handleHostMessage({ kind: 'settings.changed',
       values: { 'editor.symbolAutocomplete': on } })
   },
+  setSymbolSelectionWrap(on: boolean) {
+    controller.handleHostMessage({ kind: 'settings.changed',
+      values: { 'editor.symbolSelectionWrap': on } })
+  },
   readEditor() {
     const view = EditorView.findFromDOM(document.querySelector('.cm-editor')!)!
     const main = view.state.selection.main
     return { text: view.state.doc.toString(), head: main.head, from: main.from,
-      to: main.to }
+      to: main.to,
+      // #124 多 range 原文选区（跨段包裹产物）的完整回报
+      ranges: view.state.selection.ranges.map((range) => ({ from: range.from, to: range.to })) }
   },
 })

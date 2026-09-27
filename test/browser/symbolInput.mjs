@@ -206,6 +206,95 @@ try {
     assert.equal(after.text, TABLE_DOC.replace('1', '1()'), `格内补全: ${JSON.stringify(after)}`)
   })
 
+  // ---- #124 选区包裹：真实键盘选择（Shift+方向键）→ 键入符号 ----
+  const selectRight = async (page, times) => {
+    for (let i = 0; i < times; i++) {
+      await page.keyboard.press('Shift+ArrowRight')
+    }
+  }
+  const checkRanges = async (page, text, expectedRanges, name) => {
+    const after = await read(page)
+    assert.equal(after.text, text, `${name}: ${JSON.stringify(after)}`)
+    assert.deepEqual(after.ranges, expectedRanges, `${name} ranges: ${JSON.stringify(after)}`)
+  }
+  await scenario('选区包裹并保持原文选中：真实键盘选择后键入星号', { doc: 'hello text', cursor: 6 }, async (page) => {
+    await selectRight(page, 4)
+    await page.keyboard.type('*')
+    await checkRanges(page, 'hello *text*', [{ from: 7, to: 11 }], '单段包裹')
+  })
+  await scenario('连续包裹叠加成粗体（不是切换取消）', { doc: 'hello text', cursor: 6 }, async (page) => {
+    await selectRight(page, 4)
+    await page.keyboard.type('*')
+    await page.keyboard.type('*')
+    await checkRanges(page, 'hello **text**', [{ from: 8, to: 12 }], '连续包裹')
+  })
+  await scenario('反向选区（从右往左选）同样包裹', { doc: 'hello text', cursor: 10 }, async (page) => {
+    for (let i = 0; i < 4; i++) {
+      await page.keyboard.press('Shift+ArrowLeft')
+    }
+    await page.keyboard.type('*')
+    await checkRanges(page, 'hello *text*', [{ from: 7, to: 11 }], '反向选区包裹')
+  })
+  await scenario('方括号两键形成 [[wikilink]] 类结构', { doc: 'a word b', cursor: 2 }, async (page) => {
+    await selectRight(page, 4)
+    await page.keyboard.type('[')
+    await page.keyboard.type('[')
+    await checkRanges(page, 'a [[word]] b', [{ from: 4, to: 8 }], '双链类结构')
+  })
+  await scenario('跨段包裹：空行保留、各段原文多 range 保持、第二键不包标记', { doc: '甲段\n\n乙段', cursor: 0 }, async (page) => {
+    await selectRight(page, 6)
+    await page.keyboard.type('*')
+    await checkRanges(page, '*甲段*\n\n*乙段*', [
+      { from: 1, to: 3 },
+      { from: 7, to: 9 },
+    ], '跨段第一键')
+    await page.keyboard.type('*')
+    await checkRanges(page, '**甲段**\n\n**乙段**', [
+      { from: 2, to: 4 },
+      { from: 10, to: 12 },
+    ], '跨段第二键（多 range 真实键盘经 CM6 replaceSelection）')
+  })
+  await scenario('代码块内 Markdown 强调不包裹、括号照常包裹', { doc: '```js\nconst a\n```', cursor: 6 }, async (page) => {
+    await selectRight(page, 5)
+    await page.keyboard.type('*')
+    await check(page, '```js\n* a\n```', 7, '强调不包裹（普通替换，仅 const 被替换）')
+    await page.keyboard.press('Shift+ArrowLeft')
+    await page.keyboard.type('(')
+    await checkRanges(page, '```js\n(*) a\n```', [{ from: 7, to: 8 }], '代码内括号包裹')
+  })
+  await scenario('表格格内局部文本选区照常包裹', { doc: TABLE_DOC, cursor: TABLE_DOC.indexOf('1') }, async (page) => {
+    await selectRight(page, 1)
+    await page.keyboard.type('*')
+    const after = await read(page)
+    assert.equal(after.text, TABLE_DOC.replace('1', '*1*'), `格内选区包裹: ${JSON.stringify(after)}`)
+  })
+  await scenario('粘贴替换选区不包裹', { doc: 'hello text', cursor: 6, grantClipboard: true }, async (page) => {
+    await selectRight(page, 4)
+    await page.evaluate(() => navigator.clipboard.writeText('**'))
+    await page.keyboard.press('Control+v')
+    await check(page, 'hello **', 8, '粘贴按普通替换语义')
+  })
+  await scenario('IME 组合链路选区替换不包裹（沿用 #123 安全规则）', { doc: 'hello text', cursor: 6 }, async (page) => {
+    const cdp = await page.context().newCDPSession(page)
+    await selectRight(page, 4)
+    await cdp.send('Input.imeSetComposition', { text: '（', selectionStart: 1, selectionEnd: 1 })
+    await cdp.send('Input.insertText', { text: '（' })
+    // 组合把选区替换为提交符号（包裹不发生——选区已不存在）；提交后
+    // 光标紧邻起始符号且空选区，#123 补全规则照常适用（补出闭合侧）
+    await check(page, 'hello （）', 7, '组合替换选区，不包裹')
+  })
+  await scenario('选区包裹设置关闭后停用、重开后恢复', { doc: 'a word b', cursor: 2 }, async (page) => {
+    await page.evaluate(() => window.setSymbolSelectionWrap(false))
+    await selectRight(page, 4)
+    await page.keyboard.type('*')
+    await check(page, 'a * b', 3, '关闭后普通替换（word 被键入字符替换）')
+    await page.evaluate(() => window.setSymbolSelectionWrap(true))
+    await page.evaluate(() => window.locate(0))
+    await selectRight(page, 2)
+    await page.keyboard.type('(')
+    await checkRanges(page, '(a )* b', [{ from: 1, to: 3 }], '重开后包裹恢复')
+  })
+
   // ---- 设置开关即时生效 ----
   await scenario('设置关闭后不补全、重开后恢复', { doc: '', cursor: 0 }, async (page) => {
     await page.evaluate(() => window.setSymbolAutocomplete(false))
