@@ -390,14 +390,22 @@ try {
       }
       await document.fonts.ready
       const width = span.getBoundingClientRect().width
-      span.style.fontFamily = 'sans-serif'
-      const fallbackWidth = span.getBoundingClientRect().width
+      // 回退参照用「不存在的家族名」而非 sans-serif：两者同样落到浏览器
+      // 默认字体，跨平台等价；Linux 上 sans-serif 映射无衬线系，与默认
+      // 字体（衬线系）宽度不等，会造成平台相关误报
+      const absent = document.createElement('span')
+      absent.style.cssText = `position:absolute;visibility:hidden;white-space:nowrap;font-size:32px;font-family:'VsFallbackAbsentProbe'`
+      absent.textContent = span.textContent
+      document.body.appendChild(absent)
+      const fallbackWidth = absent.getBoundingClientRect().width
+      absent.remove()
       span.remove()
       return { width, fallbackWidth, status, check: document.fonts.check("32px 'VsCrossDenied'") }
     })
     assert.equal(denied.status, 'error', `无 ACAO 的跨源字体被 CORS 拒载（face.status=error，实际 ${denied.status}）`)
     assert.equal(denied.check, false, 'CORS 拒绝的字体未装载（document.fonts.check 为假）')
-    assert.equal(denied.width, denied.fallbackWidth, '正文以备用字体宽度呈现（回退可见，文本未消失）')
+    assert.ok(denied.width > 0, '正文文本未消失（宽度大于 0）')
+    assert.equal(denied.width, denied.fallbackWidth, '正文以备用字体宽度呈现（与不存在家族名的默认回退同宽）')
     assert.equal(await appVar(page, '--p-cors'), 'cors-ok', '字体 CORS 失败不拖垮同表其余规则')
     await fx.close()
   }
