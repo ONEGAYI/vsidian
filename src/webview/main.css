@@ -1276,7 +1276,10 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
 }
 
 /* 冒号/结构空格与行内注释：绘制层隐藏（不占格位；源文保留可编辑） */
-#app .cm-editor .cm-scroller .vsidian-fm-sep,
+#app .cm-editor .cm-scroller .vsidian-fm-sep {
+  display: none;
+}
+
 #app .cm-editor .cm-scroller .vsidian-fm-comment {
   display: none;
 }
@@ -1299,8 +1302,7 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
 }
 
 /* 结构按钮：absolute 脱流不占格位；行 hover 显现 */
-#app .cm-editor .cm-scroller .vsidian-fm-row > button.vsidian-fm-remove,
-#app .cm-editor .cm-scroller .vsidian-fm-row > button.vsidian-fm-add-item {
+#app .cm-editor .cm-scroller .vsidian-fm-row > button.vsidian-fm-remove {
   position: absolute;
   right: 6px;
   top: 2px;
@@ -1317,9 +1319,30 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   z-index: 3;
 }
 
+#app .cm-editor .cm-scroller .vsidian-fm-row > button.vsidian-fm-add-item {
+  position: absolute;
+  right: 30px;
+  top: 2px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-icon-foreground, inherit);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s ease-out;
+  z-index: 3;
+}
+
+/* 行 hover 显现（按钮 opacity 0 时不可自行命中 hover）+ 键盘聚焦兜底 */
 #app .cm-editor .cm-scroller .vsidian-fm-row:hover > button.vsidian-fm-remove,
+#app .cm-editor .cm-scroller .vsidian-fm-row > button.vsidian-fm-remove:focus-visible {
+  opacity: 1;
+}
+
 #app .cm-editor .cm-scroller .vsidian-fm-row:hover > button.vsidian-fm-add-item,
-#app .cm-editor .cm-scroller .vsidian-fm-row > button.vsidian-fm-remove:focus-visible,
 #app .cm-editor .cm-scroller .vsidian-fm-row > button.vsidian-fm-add-item:focus-visible {
   opacity: 1;
 }
