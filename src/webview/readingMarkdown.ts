@@ -15,6 +15,7 @@ import katexPlugin from '@vscode/markdown-it-katex'
 import { MATH_CLASS_NAMES, stripInlineTexTicks } from '../shared/math'
 import { GRAPHIC_LANG_ATTR, MERMAID_CLASS_NAMES, MERMAID_CODE_ATTR, MERMAID_STATE_ATTR, isRenderedFenceInfo } from '../shared/mermaid'
 import { WIKILINK_CLASS_NAMES, parseWikilinkInner } from '../shared/wikilink'
+import { parseLooseLinkAt } from '../shared/looseLink'
 import { joinObsidianDomAliasForReading } from '../shared/obsidianAlias'
 import { renderMathHtml } from './mathRenderCache'
 import { highlightFlankOk } from './markdownDoc'
@@ -161,6 +162,64 @@ function vsidianWikilinkInlineRule(state: StateInline, silent: boolean): boolean
 }
 
 /**
+ * 宽松内联链接/图片规则（#152）：目标含未编码空格的 `[文字](含空格 路径.md)`
+ * / `![alt](图片 名字.png)` 渲染为链接/图片。markdown-it 按严格 CommonMark
+ * 拒绝裸空格目标（整条按文本渲染），本规则在标准 link/image 之前拦截该形态；
+ * 判定与 live 行扫描共用 shared/looseLink 形态学（两视图逐字节一致）：
+ * %20 编码、<> 包裹、合法标题等标准可解析形态不接管（标准规则照常处理），
+ * 反斜杠/残缺形态按原文降级。href/src 经 normalizeLink 编码（与标准链接
+ * 同管线，宿主容错解码）；危险协议经 validateLink 拦截（与标准层同判）。
+ * 产出 token 与 markdown-it link/image 规则同构（标签内容递归 tokenify，
+ * 嵌套行内标记照常渲染；image 的 children 供 alt 属性渲染）。
+ */
+function vsidianLooseLinkInlineRule(state: StateInline, silent: boolean): boolean {
+  const src = state.src
+  const start = state.pos
+  const code = src.charCodeAt(start)
+  if (code !== 0x5b /* [ */ && code !== 0x21 /* ! */) {
+    return false
+  }
+  // 单行形态：扫描上界取本行行尾（跨行标准形态仍由标准层按其语义处置）
+  const nl = src.indexOf('\n', start)
+  const limit = nl < 0 ? state.posMax : Math.min(state.posMax, nl)
+  const hit = parseLooseLinkAt(src, start, limit)
+  if (!hit) {
+    return false
+  }
+  const href = state.md.normalizeLink(hit.dest)
+  if (!state.md.validateLink(href)) {
+    return false // 危险协议与标准层同判：按普通文本降级
+  }
+  if (!silent) {
+    const max = state.posMax
+    if (hit.image) {
+      const content = src.slice(hit.labelFrom, hit.labelTo)
+      const tokens: Token[] = []
+      state.md.inline.parse(content, state.md, state.env, tokens)
+      const token = state.push('image', 'img', 0)
+      token.attrs = [
+        ['src', href],
+        ['alt', ''],
+      ]
+      token.children = tokens
+      token.content = content
+    } else {
+      const open = state.push('link_open', 'a', 1)
+      open.attrs = [['href', href]]
+      state.linkLevel++
+      state.pos = hit.labelFrom
+      state.posMax = hit.labelTo
+      state.md.inline.tokenize(state)
+      state.linkLevel--
+      state.push('link_close', 'a', -1)
+      state.posMax = max
+    }
+  }
+  state.pos = hit.to
+  return true
+}
+
+/**
  * 高亮 close 定界符扫描（#105）：从 from 起在 [from, posMax) 内找首个
  * `==`，反引号 run（CommonMark code span：n 反引号开、等长 run 闭）区间
  * 整体跳过——lezer 侧 InlineCode 先消费同样区间，裸 indexOf 会把 close
@@ -264,6 +323,9 @@ export function createMarkdownRenderer(): InstanceType<typeof MarkdownIt> {
   // #11 双链规则先于 link（[t](u)）：`[[…]]` 在 CommonMark 中只是普通文本，
   // 必须在文本规则消费前拦截
   md.inline.ruler.before('link', 'vsidian_wikilink', vsidianWikilinkInlineRule)
+  // #152 宽松内联链接（目标含未编码空格，Obsidian 兼容）：插在标准 link
+  // 之前（image 在 link 之后，同被覆盖）；后插者更靠近 link——双链先判定
+  md.inline.ruler.before('link', 'vsidian_loose_link', vsidianLooseLinkInlineRule)
   // #105 高亮：挂 emphasis 之前（backticks 已消费，行内代码内不转换）
   md.inline.ruler.before('emphasis', 'vsidian_highlight', vsidianHighlightInlineRule)
   // #59 公式：@vscode/markdown-it-katex 的解析规则（$…$ / $$…$$ 判定与
