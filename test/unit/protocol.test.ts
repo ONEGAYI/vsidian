@@ -187,11 +187,46 @@ describe('isWebviewToHost', () => {
         lineGutter: { on: false, count: 0, first: null, last: null },
       }),
     ).toBe(true)
-    // 非法：on 非布尔 / count 负数或小数 / first 非字符串非 null
+    // #116 alignment 合法：null 或条目数组（num + deltaBaseline + deltaBottom 均必填）
+    expect(
+      isWebviewToHost({
+        ...base,
+        lineGutter: { on: true, count: 2, first: '1', last: '3', alignment: null },
+      }),
+    ).toBe(true)
+    expect(
+      isWebviewToHost({
+        ...base,
+        lineGutter: {
+          on: true, count: 2, first: '1', last: '3',
+          alignment: [{ num: '3', deltaBaseline: 0.4, deltaBottom: -0.6 }],
+        },
+      }),
+    ).toBe(true)
+    // 非法：on 非布尔 / count 负数或小数 / first 非字符串非 null /
+    // alignment 条目缺基线差或底边差（两口径都为必填数字）
     expect(isWebviewToHost({ ...base, lineGutter: { on: 1, count: 1, first: null, last: null } })).toBe(false)
     expect(isWebviewToHost({ ...base, lineGutter: { on: true, count: -1, first: null, last: null } })).toBe(false)
     expect(isWebviewToHost({ ...base, lineGutter: { on: true, count: 1.5, first: null, last: null } })).toBe(false)
     expect(isWebviewToHost({ ...base, lineGutter: { on: true, count: 1, first: 3, last: null } })).toBe(false)
+    expect(
+      isWebviewToHost({
+        ...base,
+        lineGutter: {
+          on: true, count: 1, first: '1', last: '1',
+          alignment: [{ num: '1', deltaBottom: 0 }],
+        },
+      }),
+    ).toBe(false)
+    expect(
+      isWebviewToHost({
+        ...base,
+        lineGutter: {
+          on: true, count: 1, first: '1', last: '1',
+          alignment: [{ num: '1', deltaBaseline: 0 }],
+        },
+      }),
+    ).toBe(false)
     // 缺省合法（向后兼容：行号扩展未装配的旧 webview）
     expect(isWebviewToHost(base)).toBe(true)
   })
@@ -325,6 +360,57 @@ describe('isWebviewToHost', () => {
     expect(isWebviewToHost(base)).toBe(true)
     expect(isWebviewToHost({ ...base, paint: { ...base.paint,
       quickActions: { ...quickActions, barPainted: 'yes' } } })).toBe(false)
+  })
+
+  it('view.state 的 outline 高亮透传（#105）：highlight kind 的 span 须被接受', () => {
+    const base = { kind: 'view.state', text: '# t', docLength: 4, lineCount: 1, renderedLines: 40 }
+    // 大纲白名单（OutlineSpanKind）#105 起含 highlight：运行时校验漏登会令
+    // 宿主丢弃整条 view.state（highlight.md 集成超时的根因，字段形态见上例）
+    expect(
+      isWebviewToHost({
+        ...base,
+        outline: {
+          active: false,
+          togglePainted: false,
+          panelPainted: false,
+          toggleIconSizePx: null,
+          panelScrollHeightPx: null,
+          panelClientHeightPx: null,
+          items: [
+            { level: 2, text: '嵌套 ==**粗亮**== 标题', plainText: '嵌套 粗亮 标题', line: 1,
+              spans: [{ kind: 'highlight', start: 3, end: 5 }] },
+          ],
+          toggleAriaLabel: null,
+          panelAriaLabel: null,
+          locatedItemIndex: null,
+          locatedText: null,
+          locatedPainted: false,
+          expandLevel: 0,
+          visibleIndices: [0],
+          sliderPainted: false,
+          sliderActiveDotPainted: false,
+          chevronPainted: false,
+          searchQuery: '',
+          searchActive: false,
+          filteredVisibleIndices: [0],
+          toolbarPainted: false,
+          jumpBottomAriaLabel: null,
+          resetAriaLabel: null,
+          searchPlaceholder: null,
+          searchHitPainted: false,
+          nomatchPainted: false,
+          menuOpen: false,
+          menuTargetIndex: null,
+          menuPainted: false,
+          submenuVisible: false,
+          renamingIndex: null,
+          draggingIndex: null,
+          dropTargetIndex: null,
+          dropPosition: null,
+          dropHintPainted: false,
+        },
+      }),
+    ).toBe(true)
   })
 
   it('view.state 的 outline 观测（#54/#65）：合法样本接受、字段非法拒绝', () => {

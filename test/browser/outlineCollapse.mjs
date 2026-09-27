@@ -5,11 +5,10 @@
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { build } from 'esbuild'
-import { chromium } from 'playwright'
+import { build, artifactPath, chromium } from './runtime.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
-const bundle = path.join(root, 'out/test/browser/outlineCollapse.js')
+const bundle = artifactPath(root, 'outlineCollapse/outlineCollapse.js')
 await build({ entryPoints: [path.join(root, 'test/browser/outlineCollapseFixture.ts')],
   bundle: true, outfile: bundle, format: 'iife',
   loader: { '.svg': 'file' }, assetNames: 'assets/[name]' })

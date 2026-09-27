@@ -135,6 +135,11 @@
         "category": "Vsidian"
       },
       {
+        "command": "onegayi.vsidian.format.highlight",
+        "title": "%format.highlight%",
+        "category": "Vsidian"
+      },
+      {
         "command": "onegayi.vsidian.format.heading1",
         "title": "%format.heading1%",
         "category": "Vsidian"
@@ -220,6 +225,11 @@
         "category": "Vsidian"
       },
       {
+        "command": "onegayi.vsidian.insert.horizontalRule",
+        "title": "%format.horizontalRule%",
+        "category": "Vsidian"
+      },
+      {
         "command": "onegayi.vsidian.openSettings",
         "title": "%command.openSettings.title%",
         "category": "Vsidian"
@@ -285,9 +295,9 @@
     "compile": "node scripts/genNls.mjs && node esbuild.mjs && tsc --noEmit",
     "watch": "node scripts/genNls.mjs && node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit",
-    "test:unit": "vitest run && node --test test/integration/testHost.test.mjs test/release/release.test.mjs",
+    "test:unit": "vitest run && node --test test/integration/testHost.test.mjs test/release/release.test.mjs test/browser/runner.test.mjs test/browser/buildBroker.test.mjs",
     "test:integration": "node esbuild.mjs && node ./test/integration/runTest.mjs",
-    "test:browser": "node test/browser/tableCaret.mjs && node test/browser/listEditing.mjs && node test/browser/tabIndent.mjs && node test/browser/outlineJump.mjs && node test/browser/outlineCollapse.mjs && node test/browser/outlineHover.mjs && node test/browser/outlineSearch.mjs && node test/browser/outlineMenu.mjs && node test/browser/outlineDrag.mjs && node test/browser/outlineDragBoundary.mjs && node test/browser/settingsPage.mjs && node test/browser/languageSwitch.mjs && node test/browser/quickActions.mjs && node test/browser/mermaidPaint.mjs && node test/browser/graphicPopup.mjs && node test/browser/keybindings.mjs && node test/browser/keybindingEditor.mjs",
+    "test:browser": "node test/browser/run.mjs",
     "test:keybindings-host": "node test/browser/keybindingsHost.mjs",
     "release:check": "node scripts/release.mjs",
     "release": "node scripts/release.mjs --upload",

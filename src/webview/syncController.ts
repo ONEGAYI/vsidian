@@ -31,13 +31,14 @@ import { createQuickActionStateReader } from './quickActionState'
 import { FORMAT_OPERATIONS, type FormatOperationId } from '../shared/formatOperations'
 import { getEffectiveBindings } from '../shared/keybindings'
 import { KeybindingRouter } from './keybindingRouter'
-import { liveLineNumbers, paintedLineNumbers } from './liveLineNumbers'
+import { LINE_NUMBER_GUTTER_SELECTOR, liveLineNumbers, paintedLineNumbers } from './liveLineNumbers'
 import { CODE_CARD_CLASS_NAMES, codeCardConfigFacet, codeCardCopyRequest, codeCardFoldField, liveCodeCard, type CodeCardConfig } from './liveCodeCard'
 import { decorateReadingCodeCard, isReadingCodeBlock } from './readingCodeCard'
 import {
   isHostToWebview,
   type CssProbeReport,
   type FindSessionProbe,
+  type LineGutterAlignment,
   type LineGutterProbe,
   type LiveSyntaxProbe,
   type OutlineProbe,
@@ -72,7 +73,7 @@ import {
   setFindMatches,
   type FindMatch,
 } from './findSession'
-import { liveDecorationsField, livePreviewDecorations, LIVE_CLASS_NAMES, tableCompositionSettled } from './liveDecorations'
+import { liveDecorationsField, livePreviewDecorations, LIVE_CLASS_NAMES, tableCompositionSettled, TaskCheckboxWidget } from './liveDecorations'
 import { createLinkInteractions, WIKILINK_CLASS_NAMES } from './liveLinks'
 import { liveMath } from './liveMath'
 import { MATH_CLASS_NAMES } from '../shared/math'
@@ -92,7 +93,7 @@ import { GRAPHIC_LANG_ATTR, MERMAID_CLASS_NAMES, MERMAID_CODE_ATTR, MERMAID_STAT
 import { ImageResourceManager } from './imageResource'
 import { runPerfProbe } from './perfProbe'
 import { runReadingPerfProbe } from './readingProbe'
-import { createReadingContainer, prepareReadingImages } from './readingView'
+import { createReadingContainer, prepareReadingImages, READING_CLASS_NAMES } from './readingView'
 import { READING_MARKDOWN_CLASS_NAMES } from './readingMarkdown'
 import {
   applyOutlineDomLocale,
@@ -2268,7 +2269,9 @@ export class WebviewSyncController {
               // 行级类包含全部表格行；cellHeader/align 修饰行已在前序命中
               counts.tableLines += 1
             }
-          } else if (spec.widget !== undefined) {
+          } else if (spec.widget instanceof TaskCheckboxWidget) {
+            // 任务字形只数任务 checkbox widget——#106 起分割线渲染
+            // （HorizontalRuleWidget）同为 replace widget，不得混入计数
             counts.taskGlyphs += 1
             if (spec.widget.checked === true) {
               counts.taskChecked += 1
@@ -2401,7 +2404,7 @@ export class WebviewSyncController {
       target.appendChild(el)
     }
     const textGroup = group('format.groupText')
-    for (const op of ['bold', 'italic', 'strikethrough', 'inlineCode', 'clearInline'] as const) {
+    for (const op of ['bold', 'italic', 'strikethrough', 'highlight', 'inlineCode', 'clearInline'] as const) {
       addOperation(textGroup, op)
     }
     const paragraphGroup = group('format.groupParagraph')
@@ -2429,6 +2432,7 @@ export class WebviewSyncController {
     insertGroup.appendChild(createTable)
     addOperation(insertGroup, 'inlineMath')
     addOperation(insertGroup, 'blockMath')
+    addOperation(insertGroup, 'horizontalRule')
     const menu = document.createElement('div')
     menu.className = 'vsidian-quick-heading-menu'
     menu.id = 'vsidian-quick-heading-menu'
@@ -5032,10 +5036,10 @@ export class WebviewSyncController {
   private collectLineGutter(): LineGutterProbe {
     const view = this.view
     if (!view || !this.lineNumbersOn) {
-      return { on: this.lineNumbersOn, count: 0, first: null, last: null }
+      return { on: this.lineNumbersOn, count: 0, first: null, last: null, alignment: null }
     }
     const texts = Array.from(
-      view.dom.querySelectorAll('.cm-lineNumbers .cm-gutterElement'),
+      view.dom.querySelectorAll(LINE_NUMBER_GUTTER_SELECTOR),
     )
       .filter((el) => (el as HTMLElement).style.visibility !== 'hidden')
       .map((el) => el.textContent ?? '')
@@ -5044,7 +5048,31 @@ export class WebviewSyncController {
       count: texts.length,
       first: texts.length > 0 ? texts[0] : null,
       last: texts.length > 0 ? texts[texts.length - 1] : null,
+      alignment: this.collectGutterAlignment(),
     }
+  }
+
+  /** #116 行号几何对齐采样：每条可见行号取两个口径的偏差——
+   *  deltaBaseline（主口径）：数字基线 − 正文行首可见文本基线，由两侧
+   *  底边差按各自 computed font 的 fontBoundingBox descent 换算（行号字号
+   *  小于正文，底边重合 ≠ 基线重合，光学对齐以基线为准，|值| ≤ 1 视为
+   *  对齐）；deltaBottom（次要上报）：底边差（旧基线代理口径，诊断对照）。
+   *  依赖真实布局（getBoundingClientRect）与 canvas 2D：jsdom 未实现
+   *  Range.getBoundingClientRect（调用即抛错），条目被逐条跳过、整体自然
+   *  为空返回 null（非「rect 恒 0 被过滤」）；reading 态 live 容器隐藏或
+   *  视口内无可见文本行时无可采条目，返回 null 与空文档的空数组区分。
+   *  单条采样相互隔离（#116 flash 审查 F2）：真宿主中个别条目异常（如
+   *  单条 Range 查询失败）只跳过该条，不再静默丢弃余下全部行。 */
+  private collectGutterAlignment(): LineGutterAlignment[] | null {
+    const view = this.view
+    if (!view) return null
+    const fontMetric = createFontBoundingBoxMeasurer()
+    const out: LineGutterAlignment[] = []
+    for (const element of Array.from(view.dom.querySelectorAll<HTMLElement>(LINE_NUMBER_GUTTER_SELECTOR))) {
+      const entry = collectGutterEntryAlignment(view, element, fontMetric)
+      if (entry) out.push(entry)
+    }
+    return out.length ? out : null
   }
 
   /**
@@ -5255,17 +5283,9 @@ export class WebviewSyncController {
     let mathDisplay: string | null = null
     if (mathEl) {
       mathDisplay = getComputedStyle(mathEl).display
-      try {
-        const rect = mathEl.getBoundingClientRect()
-        if (rect.width > 0 && rect.height > 0) {
-          const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
-          if (hit && mathEl.contains(hit)) {
-            mathVisible = true
-          }
-        }
-      } catch {
-        // jsdom 无布局与 elementFromPoint；真宿主才能证明实际可见。
-      }
+      // 可见性口径统一走 hitPaintedElement（rect 有面积 + elementFromPoint
+      // 命中自身；jsdom 无布局恒 false，只作真宿主集成断言依据）
+      mathVisible = hitPaintedElement(mathEl)
     }
     const math = mathEl
       ? {
@@ -5276,6 +5296,40 @@ export class WebviewSyncController {
                 `.${MATH_CLASS_NAMES.math}, .${MATH_CLASS_NAMES.mathError}`,
               ).length
             : 0,
+        }
+      : undefined
+    // #106 分割线绘制探针：live 态取渲染 widget（光标触及该行时源码显形、
+    // widget 不在场，计数随之归零），reading 态取阅读块内原生 <hr>。可见性 =
+    // rect 有面积且 elementFromPoint 命中，口径为任一候选命中即视为绘制
+    // （与 #60 Mermaid 同款；首个候选可能滚出视口——hr.md 插入用例实测
+    // 新分割线已绘制而首条在上文滚出，取首条会误判不可见。jsdom 无布局
+    // 恒 false，只作真宿主集成断言依据）。无分割线时整个字段缺省
+    const hrScope = this.viewMode === 'reading' ? this.readingContainer : view.contentDOM
+    const hrSelector = `.${LIVE_CLASS_NAMES.hrRule}, .${READING_CLASS_NAMES.hr} hr`
+    const hrEls = hrScope ? Array.from(hrScope.querySelectorAll<HTMLElement>(hrSelector)) : []
+    const hrEl = firstPaintedOf(hrEls)
+    let hrVisible = false
+    let hrDisplay: string | null = null
+    let hrBackgroundImage: string | null = null
+    let hrBorderTopWidth: string | null = null
+    if (hrEl) {
+      const hrStyle = getComputedStyle(hrEl)
+      hrDisplay = hrStyle.display
+      // live 态横线以居中渐变落笔、reading 态原生 <hr> 以 border-top
+      // 落笔，两种形态都采集供集成断言区分
+      hrBackgroundImage = hrStyle.backgroundImage
+      hrBorderTopWidth = hrStyle.borderTopWidth
+      // 可见性口径统一走 hitPaintedElement（rect 有面积 + elementFromPoint
+      // 命中自身；jsdom 无布局恒 false，只作真宿主集成断言依据）
+      hrVisible = hitPaintedElement(hrEl)
+    }
+    const hr = hrEl
+      ? {
+          visible: hrVisible,
+          display: hrDisplay,
+          backgroundImage: hrBackgroundImage,
+          borderTopWidth: hrBorderTopWidth,
+          count: hrEls.length,
         }
       : undefined
     // #60 Mermaid 绘制探针：按当前激活视图取图表容器（分态计数）；
@@ -5313,6 +5367,39 @@ export class WebviewSyncController {
       : { rendered: 0, error: 0, count: 0 }
     const mermaid = mermaidEl
       ? { visible: mermaidVisible, display: mermaidDisplay, ...mermaidCounts }
+      : undefined
+    // #105 高亮绘制探针：live 态取 .vsidian-highlight span、reading 态取
+    // mark；底色 computed 证明真实画出（透明 = 样式注入失效信号）。
+    // delimitersHidden 用激活视口文本口径（不依赖布局）：唯一 == 定界符
+    // 不在文本中即隐藏成功——光标触及显形时为 false。可见性口径为任一
+    // 候选命中即视为绘制（firstPaintedOf，与 #106 hr 探针同款——首个
+    // 候选可能滚出视口，不代表样式失效）
+    const highlightSelector = this.viewMode === 'reading' ? 'mark' : '.vsidian-highlight'
+    const highlightScopeEl = this.viewMode === 'reading' ? this.readingContainer : view.contentDOM
+    const highlightEls = highlightScopeEl
+      ? Array.from(highlightScopeEl.querySelectorAll<HTMLElement>(highlightSelector))
+      : []
+    const highlightEl = firstPaintedOf(highlightEls)
+    let highlightVisible = false
+    let highlightBackgroundColor: string | null = null
+    let highlightDisplay: string | null = null
+    if (highlightEl) {
+      const style = getComputedStyle(highlightEl)
+      highlightBackgroundColor = style.backgroundColor
+      highlightDisplay = style.display
+      // 可见性口径统一走 hitPaintedElement（rect 有面积 + elementFromPoint
+      // 命中自身；jsdom 无布局恒 false，只作真宿主集成断言依据）
+      highlightVisible = hitPaintedElement(highlightEl)
+    }
+    const highlight = highlightEl
+      ? {
+        visible: highlightVisible,
+        display: highlightDisplay,
+        backgroundColor: highlightBackgroundColor,
+        count: highlightEls.length,
+        delimitersHidden: this.viewMode === 'reading' ? null
+          : !(highlightScopeEl?.textContent ?? '').includes('=='),
+      }
       : undefined
     // #111 图形化代码块按钮组与图表弹窗探针：当前激活视图内的 frame 与
     // 按钮计数（显隐由 CSS 悬停承担，此处观测 DOM 在场与发射形态）；
@@ -5468,6 +5555,8 @@ export class WebviewSyncController {
       },
       math,
       mermaid,
+      hr,
+      highlight,
       graphic,
       quickActions,
       code,
@@ -5990,6 +6079,113 @@ export class WebviewSyncController {
   }
 }
 
+/** 单条行号对齐采样（collectGutterAlignment 的条目体，#116 flash 审查
+ *  F2）：try/catch 包裹单条目——真宿主中个别条目异常（如单条 Range 查询
+ *  失败）只跳过该条返回 null，调用方继续采样余下行号；跳过条件（隐藏
+ *  格、无可解析行号、无可见正文文本、无有效字体度量）同样返回 null。 */
+function collectGutterEntryAlignment(
+  view: EditorView,
+  element: HTMLElement,
+  fontMetric: (font: string) => { ascent: number; descent: number } | null,
+): LineGutterAlignment | null {
+  try {
+    if (element.style.visibility === 'hidden') return null
+    const text = element.textContent ?? ''
+    if (!text.trim()) return null
+    const lineNo = Number.parseInt(text.trim(), 10)
+    if (!Number.isFinite(lineNo) || lineNo < 1 || lineNo > view.state.doc.lines) return null
+    const line = view.state.doc.line(lineNo)
+    const pos = view.domAtPos(line.from)
+    const anchor = (pos.node.nodeType === 1 ? pos.node : pos.node.parentElement) as HTMLElement | null
+    const lineEl = anchor?.closest('.cm-line')
+    if (!lineEl) return null
+    const walker = document.createTreeWalker(lineEl, NodeFilter.SHOW_TEXT)
+    // 首个可见文本的宿主元素（取 parentElement，避免与 CM6 Text 导入
+    // 重名的 DOM Text 类型）；rect 与宿主同点命中
+    let firstTextHost: HTMLElement | null = null
+    let firstTextRect: DOMRect | null = null
+    while (walker.nextNode()) {
+      const value = walker.currentNode.nodeValue ?? ''
+      const at = value.search(/\S/)
+      if (at < 0) continue
+      const range = document.createRange()
+      range.setStart(walker.currentNode, at)
+      range.setEnd(walker.currentNode, at + 1)
+      const rect = range.getBoundingClientRect()
+      if (rect.height > 0) {
+        firstTextHost = walker.currentNode.parentElement
+        firstTextRect = rect
+        break
+      }
+    }
+    if (!firstTextHost || !firstTextRect) return null
+    const numRange = document.createRange()
+    numRange.selectNodeContents(element)
+    const numRect = numRange.getBoundingClientRect()
+    if (numRect.height <= 0) return null
+    // 基线换算：基线 = 文本盒底边 − 该字体 fontBoundingBox descent，
+    // 两侧各自 computed font 度量（惰性建 canvas；jsdom 条目在 Range
+    // 矩形阶段即抛错跳过，不会触达）
+    const numMetric = fontMetric(getComputedStyle(element).font)
+    const textMetric = fontMetric(getComputedStyle(firstTextHost).font)
+    if (!numMetric || !textMetric) return null
+    const deltaBaseline =
+      (numRect.bottom - numMetric.descent) - (firstTextRect.bottom - textMetric.descent)
+    return {
+      num: text.trim(),
+      deltaBaseline: +deltaBaseline.toFixed(2),
+      deltaBottom: +(numRect.bottom - firstTextRect.bottom).toFixed(2),
+    }
+  } catch {
+    return null
+  }
+}
+
+/** 字体度量盒缓存工厂（#116 基线换算）：font 串 → measureText 的
+ *  fontBoundingBoxAscent/Descent。canvas 2D 惰性创建（首次真实换算才
+ *  触达——jsdom 未实现 Range.getBoundingClientRect，条目在矩形阶段即
+ *  抛错被逐条跳过，不会触达 canvas、不喷「Not implemented」噪音）；
+ *  computed font 串按结果缓存，同一采样内每种字体只量一次。空/空白
+ *  font 串直接返回 null：canvas 对无效 font 赋值会静默沿用默认
+ *  10px sans-serif，量出的是伪度量而非该元素的实际字体。环境无
+ *  canvas 2D 或无 fontBoundingBox 度量时同样返回 null（调用方放弃该
+ *  条目，不伪造基线值）。导出侢单测钉住防御行为。 */
+export function createFontBoundingBoxMeasurer(): (font: string) => { ascent: number; descent: number } | null {
+  let ctx: CanvasRenderingContext2D | null | undefined
+  const cache = new Map<string, { ascent: number; descent: number } | null>()
+  return (font: string): { ascent: number; descent: number } | null => {
+    const cached = cache.get(font)
+    if (cached !== undefined) return cached
+    let metric: { ascent: number; descent: number } | null = null
+    if (!font.trim()) {
+      // 空/无效 computed font：不触 canvas（默认字体伪度量），直接放弃
+      cache.set(font, null)
+      return null
+    }
+    if (ctx === undefined) {
+      try {
+        ctx = document.createElement('canvas').getContext('2d')
+      } catch {
+        ctx = null
+      }
+    }
+    if (ctx) {
+      try {
+        ctx.font = font
+        const measured = ctx.measureText('0')
+        if (typeof measured.fontBoundingBoxAscent === 'number' &&
+            typeof measured.fontBoundingBoxDescent === 'number') {
+          metric = { ascent: measured.fontBoundingBoxAscent, descent: measured.fontBoundingBoxDescent }
+        }
+      } catch {
+        metric = null
+      }
+    }
+    cache.set(font, metric)
+    return metric
+  }
+}
+
 /** Mermaid 图的真实可见区域：视口和各层裁切交集内，命中有效图形子节点。 */
 function isSvgPainted(svg: SVGSVGElement): boolean {
   const rect = svg.getBoundingClientRect()
@@ -6081,6 +6277,21 @@ function hitPaintedElement(
   } catch {
     return false
   }
+}
+
+/** 多候选绘制探针的代表元素选择（#105/#106）：返回首个真实命中
+ *  （hitPaintedElement）的候选——多元素场景下首个候选可能滚出视口
+ *  （hr.md 插入用例实测：新分割线在视口内已绘制，首条在上文滚出，
+ *  elementFromPoint 对视口外坐标返回 null，取首条会误判不可见）；
+ *  全不命中时回退首条（display/computed 字段仍可观测，visible 语义
+ *  由调用方按命中与否给出）；空候选返回 null */
+export function firstPaintedOf(els: HTMLElement[]): HTMLElement | null {
+  for (const el of els) {
+    if (hitPaintedElement(el)) {
+      return el
+    }
+  }
+  return els[0] ?? null
 }
 
 /** #66/#67 绘制层证据共用口径：中心点 elementFromPoint 命中自身（真实

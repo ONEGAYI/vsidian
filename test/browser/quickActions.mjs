@@ -2,16 +2,15 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { mkdir } from 'node:fs/promises'
-import { build } from 'esbuild'
-import { chromium } from 'playwright'
+import { build, artifactPath, chromium } from './runtime.mjs'
 import { buildZhLocaleIsland } from './localeIsland.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
-const output = path.join(root, 'out/test/browser/quickActions.js')
+const output = artifactPath(root, 'quick/main.js')
 await build({ entryPoints: [path.join(root, 'test/browser/quickActionsFixture.ts')],
   bundle: true, outfile: output, format: 'iife',
   loader: { '.svg': 'file' }, assetNames: 'assets/[name]' })
-const artifacts = path.join(root, 'out/task89')
+const artifacts = artifactPath(root, 'screenshots/quickActions')
 await mkdir(artifacts, { recursive: true })
 // #94：操作条文案经 t() 取词——注入生产同款 zh-cn 数据岛（fixture 入口 boot）
 const { islandHtml, zhCnMessages } = await buildZhLocaleIsland(root)
@@ -52,7 +51,7 @@ try {
     await page.route('http://quick.test/assets/*.svg', async (route) => {
       const name = path.basename(new URL(route.request().url()).pathname)
       iconRequests.push(name)
-      await route.fulfill({ path: path.join(root, 'out/test/browser/assets', name),
+      await route.fulfill({ path: artifactPath(root, 'quick/assets', name),
         contentType: 'image/svg+xml' })
     })
     await page.setContent(`<html><head><base href="http://quick.test/"></head><body class="vscode-${theme}">${islandHtml}<div id="app"></div></body></html>`)
@@ -71,10 +70,10 @@ try {
     const editorBox = await page.locator('.vsidian-view-live').boundingBox()
     assert.ok(barBox && editorBox && barBox.height > 30 && editorBox.y >= barBox.y + barBox.height - 1,
       '窄窗口操作条应换行并把正文推到下方')
-    assert.equal(await bar.locator('[data-icon]').count(), 15)
+    assert.equal(await bar.locator('[data-icon]').count(), 17)
     await page.waitForFunction((theme) => performance.getEntriesByType('resource').filter((entry) =>
-      entry.name.includes(`/assets/${theme}-`) && entry.name.endsWith('.svg')).length === 15, theme)
-    assert.equal(iconRequests.filter((name) => name.startsWith(`${theme}-`)).length, 15,
+      entry.name.includes(`/assets/${theme}-`) && entry.name.endsWith('.svg')).length === 17, theme)
+    assert.equal(iconRequests.filter((name) => name.startsWith(`${theme}-`)).length, 17,
       '全部图标资源应真实加载')
     const boldIcon = await iconPaint(page, 'bold')
     assert.ok(boldIcon.colors > 2, '粗体图标应真实绘制')
@@ -111,7 +110,7 @@ try {
     assert.equal(await page.locator('[data-op="bulletList"]').evaluate((el) =>
       document.activeElement === el), true, '方向键应跨组移动焦点')
     await page.keyboard.press('End')
-    assert.equal(await page.locator('[data-op="blockMath"]').evaluate((el) =>
+    assert.equal(await page.locator('[data-op="horizontalRule"]').evaluate((el) =>
       document.activeElement === el), true)
     await page.screenshot({ path: path.join(artifacts, `quick-${theme}.png`) })
     await page.locator('.vsidian-quick-heading').click()

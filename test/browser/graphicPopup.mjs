@@ -8,13 +8,12 @@ import http from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { mkdir, readFile } from 'node:fs/promises'
-import { build } from 'esbuild'
-import { chromium } from 'playwright'
+import { build, artifactPath, chromium } from './runtime.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
-const outDir = path.join(root, 'out/test/browser/graphic')
+const outDir = artifactPath(root, 'quick')
 await mkdir(outDir, { recursive: true })
-const output = path.join(outDir, 'fixture.js')
+const output = path.join(outDir, 'main.js')
 await build({
   entryPoints: [path.join(root, 'test/browser/quickActionsFixture.ts')],
   bundle: true, outfile: output, format: 'iife',
@@ -23,7 +22,7 @@ await build({
 // mermaid 独立产物自建（入口与配置同 esbuild.mjs 的 mermaid target）：CI
 // browser job 不跑 npm run compile，引用 out/webview/mermaid.js 会因产物
 // 缺失而懒加载 404，本测试须自包含、不依赖前置构建
-const mermaidArtifact = path.join(outDir, 'mermaid.js')
+const mermaidArtifact = artifactPath(root, 'mermaid.js')
 await build({
   entryPoints: [path.join(root, 'src/webview/mermaidEntry.ts')],
   outfile: mermaidArtifact, bundle: true, platform: 'browser', format: 'iife',
@@ -47,9 +46,9 @@ const DOC = [
 const graphicNonce = 'vsidian-graphic-test-nonce'
 const pageHtml = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'nonce-${graphicNonce}'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; font-src 'self'">
-<link rel="stylesheet" href="/fixture.css">
+<link rel="stylesheet" href="/main.css">
 <script nonce="${graphicNonce}">window.__vsidianMermaidUri = new URL('/mermaid.js', location.href).href;</script>
-</head><body><div id="app"></div><script nonce="${graphicNonce}" src="/fixture.js"></script></body></html>`
+</head><body><div id="app"></div><script nonce="${graphicNonce}" src="/main.js"></script></body></html>`
 
 const server = http.createServer((req, res) => {
   void (async () => {
@@ -61,7 +60,7 @@ const server = http.createServer((req, res) => {
     }
     const rel = url.pathname.slice(1)
     try {
-      const data = await readFile(path.join(outDir, rel))
+      const data = await readFile(rel === 'mermaid.js' ? mermaidArtifact : path.join(outDir, rel))
       res.writeHead(200, {
         'content-type': rel.endsWith('.css') ? 'text/css' : 'text/javascript',
       })
