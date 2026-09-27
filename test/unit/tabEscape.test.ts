@@ -121,7 +121,7 @@ describe('两步目标推导（planTabEscapeTarget）', () => {
 })
 
 describe('行内配对清单（inlineTabEscapePairs）', () => {
-  it('只含括号与引号（13 对、全部单字符），Markdown 触发符不在其中', () => {
+  it('只含括号与引号（12 项、全部单字符），Markdown 触发符不在其中', () => {
     const pairs = inlineTabEscapePairs()
     expect(pairs.map((p) => p.open)).toEqual(['(', '[', '{', '（', '【', '《', '「', '『', '“', '‘', '"', "'"])
     for (const p of pairs) {

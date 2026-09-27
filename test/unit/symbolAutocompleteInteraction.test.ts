@@ -341,6 +341,30 @@ describe('上下文抑制与共存', () => {
   })
 })
 
+describe('编程式多变更事务（形态门控）', () => {
+  it('插、替、插三变更事务放行原事务：不把第三条纯插入误当单条插入接管', () => {
+    // 评审 P1-1：singleInsertionOf 曾在「纯插入、替换、纯插入」序列下让
+    // 第三条纯插入复活已判废的 found（真实用户路径不可达——单 range 用户
+    // 输入恒为一条变更，多 range 另有 ranges 门控；此形态仅编程式
+    // view.dispatch 复合变更可达，且三条变更间须隔未变字符——CM6 会把
+    // 相邻的替换与插入合并成一条替换，见 ChangeSet 构造）。放行 = 三条
+    // 变更照常应用，不得改写为补全形态（缺陷产物会是 abc()d：三条原始
+    // 变更全部被丢弃、改写为 at 3 插入 ()）
+    const { view } = setup('abcd')
+    view.dispatch({ selection: { anchor: 3 } })
+    view.dispatch({
+      changes: [
+        { from: 0, insert: '(' },
+        { from: 1, to: 2, insert: 'x' },
+        { from: 3, insert: '(' },
+      ],
+      selection: { anchor: 3 },
+      userEvent: 'input.type',
+    })
+    expect(view.state.doc.toString()).toBe('(axc(d')
+  })
+})
+
 describe('设置开关（editor.symbolAutocomplete）', () => {
   it('默认开启；关闭后补全、越过、空对删除全部停用', () => {
     const { controller, sent, view } = setup('')

@@ -294,6 +294,31 @@ try {
     await page.keyboard.type('(')
     await checkRanges(page, '(a )* b', [{ from: 1, to: 3 }], '重开后包裹恢复')
   })
+  await scenario('多光标双 range 表内键入竖线：逐光标转义、不丢字（评审 P2-8 实证）', { doc: TABLE_DOC, cursor: TABLE_DOC.indexOf('a') + 1 }, async (page) => {
+    // allowMultipleSelections 随 #124 包裹组装配的伴生行为：CM6 默认添加
+    // 光标手势为 Ctrl+click（Windows/Linux；macOS Cmd+click——journal-124
+    // 决策 7 与评审 P2-8 记的 Alt+click 系手势误记，CM6 源码
+    // addsSelectionRange 默认 browser.mac ? metaKey : ctrlKey）。实测纠正
+    // 评审预判：多 range 键入 | 不经评审引用的单 range filter 门控，而是
+    // keymap 命令 tablePipeKeyHandler 在 keydown 阶段逐 range 转义为 \|
+    // （任一 range 无需转义才整体交默认，避免多光标语义分裂）——表格
+    // 结构不被裸竖线破坏。断言：双光标建立、两处各自 \|、其余文本逐字
+    // 保持、键入后仍双光标（选区贴插入点左侧）
+    const second = TABLE_DOC.indexOf('1') + 1
+    const at = await page.evaluate((offset) => window.posCoords(offset), second)
+    // 真实手势：按住 Ctrl（键盘修饰键）点击；坐标取边界 +1px 落进右侧
+    // 字符左半段，posAtCoords 就近取目标边界（钉住第二光标在 '1' 后，
+    // 与字体渲染宽度解耦）。page.mouse.click 是低层 API 无 modifiers 参数
+    await page.keyboard.down('Control')
+    await page.mouse.click(at.x + 1, at.y)
+    await page.keyboard.up('Control')
+    const two = await read(page)
+    assert.equal(two.ranges.length, 2, `双光标建立: ${JSON.stringify(two)}`)
+    await page.keyboard.type('|')
+    const after = await read(page)
+    assert.equal(after.text, '| a\\| | b |\n| --- | --- |\n| 1\\| | 2 |\npara', `多光标键入: ${JSON.stringify(after)}`)
+    assert.deepEqual(after.ranges, [{ from: 3, to: 3 }, { from: 29, to: 29 }], `键入后光标: ${JSON.stringify(after)}`)
+  })
 
   // ---- #125 围栏内两步 Tab 越界：真实 Tab 键驱动生产 keymap 链 ----
   // 优先级「越界 → 表格导航 → 缩进」在此实证（生产控制器装配，非注释推断）

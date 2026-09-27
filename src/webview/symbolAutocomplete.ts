@@ -40,7 +40,7 @@
 // 空对是更具体的编辑器状态）。
 import { EditorSelection, EditorState, StateEffect, StateField, Transaction } from '@codemirror/state'
 import { EditorView, keymap, type Command } from '@codemirror/view'
-import { findAutocloseEntry, shouldAutoclose, type SymbolPairEntry } from '../shared/symbols'
+import { findAutocloseEntry, shouldAutoclose } from '../shared/symbols'
 import { externalSync } from './syncController'
 import { liveDecorationsField } from './liveDecorations'
 import { tableRegionField } from './tableRegionSelection'
@@ -134,20 +134,26 @@ function runBeforeOf(state: EditorState, pos: number, ch: string): number {
   return count
 }
 
-/** 单条纯插入提取：{from===to 的单条变更, 插入文本}，否则 null */
+/** 单条纯插入提取：{from===to 的单条变更, 插入文本}，否则 null。
+ *  独立 mismatch 标志判废（同 symbolWrap.singleCharReplacements 写法）：
+ *  直接置 found=null 会在「插、替、插」多变更序列下被第三条纯插入复活 */
 function singleInsertionOf(tr: Transaction): { from: number; text: string } | null {
   if (tr.changes.empty) {
     return null
   }
   let found: { from: number; text: string } | null = null
+  let mismatch = false
   tr.changes.iterChanges((from, to, _fromB, _toB, inserted) => {
+    if (mismatch) {
+      return
+    }
     if (found || from !== to) {
-      found = null
+      mismatch = true
       return
     }
     found = { from, text: inserted.toString() }
   })
-  return found
+  return mismatch ? null : found
 }
 
 /**
@@ -357,12 +363,3 @@ export const symbolAutocomplete = [
   autocloseInputFilter,
   keymap.of([{ key: 'Backspace', run: deleteAutoclosePair }]),
 ]
-
-/** 供测试与 #124/#125 观测：当前自动空对区间（事务后坐标，只读快照） */
-export function autoclosePairSpans(state: EditorState): readonly AutoclosePairSpan[] {
-  return state.field(autoclosePairs, false) ?? []
-}
-
-/** 注册项查询透传（#124/#125 复用注册表的便捷入口） */
-export { findAutocloseEntry, shouldAutoclose }
-export type { SymbolPairEntry }

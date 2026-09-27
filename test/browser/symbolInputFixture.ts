@@ -46,4 +46,11 @@ Object.assign(window, {
       // #124 多 range 原文选区（跨段包裹产物）的完整回报
       ranges: view.state.selection.ranges.map((range) => ({ from: range.from, to: range.to })) }
   },
+  // 光标偏移的视口坐标（P2-8 多光标场景：把真实鼠标点击对准字符边界，
+  // Ctrl+click 添加光标的落点才可复现）
+  posCoords(offset: number) {
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor')!)!
+    const rect = view.coordsAtPos(offset)!
+    return { x: rect.left, y: (rect.top + rect.bottom) / 2 }
+  },
 })
