@@ -125,6 +125,8 @@ button:focus-visible, input:focus-visible {
 .vsidian-css-snippets-item { display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 9px 0; border-bottom: 1px solid var(--vscode-panel-border, #d9dde3); }
 .vsidian-css-snippets-item-name { font-family: var(--vscode-editor-font-family, inherit); word-break: break-all; }
+/* #129 被拒条目（越界/符号链接逃逸）行内提示 */
+.vsidian-css-snippets-item-rejected { color: var(--vscode-inputValidation-warningForeground, inherit); cursor: help; }
 
 @media (max-width: 600px) {
   .vsidian-settings { grid-template-columns: minmax(0, 1fr); align-content: start; }

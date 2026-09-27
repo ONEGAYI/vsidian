@@ -101,6 +101,7 @@ export const en = {
   'cssSnippets.pauseAll': 'Pause all snippets',
   'cssSnippets.resume': 'Resume snippets',
   'cssSnippets.pausedStatus': 'All CSS snippets are paused. Per-snippet switches are kept; resuming reloads them exactly as configured.',
+  'cssSnippets.entryRejected': 'Rejected: references a path outside the snippets directory.',
 
   // ---- host.（宿主通知、确认框、QuickPick、链接拦截反馈）----
   'host.conflictInputCopied': 'Unconfirmed input copied to clipboard',
@@ -135,6 +136,8 @@ export const en = {
   /** #131 暂停/恢复命令反馈（命令面板触发时无 webview 也可见） */
   'host.cssSnippetsPaused': 'All CSS snippets are paused. Per-snippet switches are kept.',
   'host.cssSnippetsResumed': 'CSS snippets resumed; enabled snippets reload as configured.',
+  'host.cssSnippetRejectedEscape': 'CSS snippet "{name}" references "{path}", which is outside the snippets directory; loading it is rejected.',
+  'host.cssSnippetRejectedSymlink': 'CSS snippet "{name}" resolves through a link to "{path}", which is outside the snippets directory; loading it is rejected.',
   /** 运行时设置定义注册（测试钩子/懒注册）的拒绝原因 */
   'host.invalidSettingDefinition': 'Invalid definition: {definition}',
   'host.duplicateSettingKey': 'Setting key already exists: {key}',

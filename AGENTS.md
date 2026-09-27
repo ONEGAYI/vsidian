@@ -13,6 +13,7 @@ VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 - **行内围栏扩展约定（#103 落档）**：粗体/斜体/删除线/行内代码这类成对行内标记统一走 `inlinePlan` 共用路径，两态切换（光标在围栏语法节点内即取消整段）与无选区扩词包裹的光标落位（开围栏内侧，锚点按 `markers.open.length` 从实际定界符计算）是路径级行为，不逐操作实现。新增此类围栏只需：`src/webview/formatOperations.ts` 的 `INLINE` 表登记 `{ mark, node }`（node 为 Lezer 语法节点名，取消分支按它命中）+ `src/shared/formatOperations.ts` 注册表（titleKey／i18n／快捷键入口评估见上条），即自动继承全部行为；「清除行内格式」按 `INLINE` 全表遍历，亦自动覆盖。两处例外需主动适配：定界符随内容变化的围栏（多反引号、补位空格一类）须在全部三处构造 markers 的分派接入自己的 marker 函数——fresh-wrap 包裹处、`rewriteInlineLine` 重包与 `clearInlineLine` 局部重包各有一处 `codeSpanMarkers` 三元，漏改任一处该路径会退回静态定界符——锚点仍自动；插入型结构（wikilink／inlineMath 所在分支）无切换语义，新操作要两态化须自行设计取消分支。测试惯例：新围栏在 `test/unit/formatOperations.test.ts` 补一条包裹后光标位置断言，并在 `test/unit/formatInteraction.test.ts` 两态往返用例的枚举里加一行（现有五种为显式枚举，不自动生成）。已知边界：词与既有同类围栏贴边相邻（如 `**a**b` 光标在 b 处——贴边包裹产物被解析为合并节点，取消会整体摘除）或光标停在既有围栏紧前方（星号处取不到词，落入空对插入）时，包裹与取消仍不两态，属 #107 遗留缺陷，不在「自动继承两态」的承诺范围。
 - **视觉层断言（评审必查）**：webview/样式/渲染类变更，评审必须核对断言对象是"用户看到的东西"（可见性、对齐、颜色）而非 DOM 存在性或几何坐标——样式注入失效时后者照样通过（PR #37 P0 实证：CSP 拦截 CM6 注入样式后 74 集成用例仍全绿，正文实际不可见）。涉及呈现的新特性至少一条集成断言落在绘制层（现有 `view.state.paint` 探针），CSS 关键规则由契约测试钉住。
 - **大纲样式设计哲学（#65 落档）**：大纲条目的呈现遵循三条原则，后续大纲呈现类变更不得违背。其一，**结构装饰与正文主题同源**——层级颜色等主题性装饰不复制读值，而是与正文标题引用同一 CSS 变量族（`--vsidian-heading-color-1..6`，定义于 `#app`，live 标题行级、阅读标题块级、大纲条目级三侧同引），主题分级着色一处定义多处生效。其二，**强调语义只认显式标记**——条目一律常规字重（400），不继承标题级别的结构性加粗；仅显式 `**粗体**` 段加重，斜体/行内代码/删除线同理只由标记触发。其三，**透传集合 = 正文已支持的行内标记子集**——当前白名单为粗体/斜体/高亮/行内代码/删除线（`OutlineSpanKind`，提取与校验同源；#105 高亮已按同一机制接入），公式/行内颜色待正文支持后按同一白名单机制接入（提取处 `SPAN_KIND_BY_NODE` 加映射即可），大纲侧零额外设计；双链/链接显示别名/链接文字的纯文本，不可点。
+- **CSS 片段依赖导入约定（#129 落档）**：入口片段的 @import/url() 静态分析、越界与符号链接逃逸判定、变更归因（被导入文件变更只重载依赖它的入口，无关变更静默）全部收敛在 `src/shared/cssSnippetImports.ts` 纯逻辑 + `cssSnippetService.ts` 的分析编排，不另建第二套解析。两条硬边界：其一，形态学与 CSSOM 有效性对齐——只认**首个生效规则前**的顶层 @import（@charset/@layer 声明不关闭导入窗口；块内与规则后的导入浏览器忽略，宿主也不计入依赖，避免过度归因与过度拒绝），media/supports/layer 条件解析但不求值；其二，`<link>` 的 error 事件按 sheet 三态分流（可读有规则=降级晋升/跨源不可读=保留链回报失败/无表或空表=移除保旧）——嵌套导入 404 会对 link 触发 error 但其余规则正在生效，入口级失败（连接拒绝/CSP 拦截）的 sheet 是零规则对象，「sheet 非空」不可作依据，Chromium 实测留证见 `test/browser/cssSnippetImports.mjs` 注释。入口级缓存击穿版本（`?v=`）与列表版本是两轴：其他入口启停不得扰动未涉及入口的 URI。#130 HTTPS 导入在此基础上扩展 `classifyCssRef` 的 http 类与 CSP `style-src`/`font-src`，勿在宿主预判联网资源成败。
 - **用户可见文字一律 i18n**：所有面向用户的文字（webview 界面、设置页、宿主通知/确认框、package.json command title 与 displayName/description）必须经 `src/shared/locales/` 语言包与 `t()` 字典映射添加，禁止新增硬编码中/英文字面量；两语言包键集由编译期 parity 把关，回潮由 CI 防回潮扫描（源码 CJK 字面量契约测试）拦截。manifest 侧 `package.nls.*.json` 由构建脚本从字典生成，不在 JSON 里手写。
 
 ## 公开样式契约：Agent 修改约束
@@ -176,25 +177,26 @@ vsidian/
 │   │   ├── viewCycle.ts             # 三态视图编排纯逻辑
 │   │   └── wikilinkTarget.ts        # 宿主侧双链目标解析纯逻辑（#11）
 │   ├── shared/      # 两端共享纯逻辑
-│   │   ├── changeMapping.ts    # 变更重定位纯函数
-│   │   ├── codeLangs.ts        # 代码块语言注册表与别名路由
-│   │   ├── cssSnippetEnv.ts    # CSS 片段环境身份与分桶戳（#131）
-│   │   ├── cssSnippets.ts      # CSS 片段纯逻辑单一事实源
-│   │   ├── formatOperations.ts # 格式操作注册清单
-│   │   ├── i18n.ts             # t() 取词与语言包装配状态模块
-│   │   ├── keybindings.ts      # 快捷键操作与冲突模型
-│   │   ├── listPrefix.ts       # 列表引用前缀形态学（#119）
-│   │   ├── locales/            # 语言包字典单一事实源
+│   │   ├── changeMapping.ts     # 变更重定位纯函数
+│   │   ├── codeLangs.ts         # 代码块语言注册表与别名路由
+│   │   ├── cssSnippetEnv.ts     # CSS 片段环境身份与分桶戳（#131）
+│   │   ├── cssSnippetImports.ts # CSS 片段依赖导入形态学单一事实源
+│   │   ├── cssSnippets.ts       # CSS 片段纯逻辑单一事实源
+│   │   ├── formatOperations.ts  # 格式操作注册清单
+│   │   ├── i18n.ts              # t() 取词与语言包装配状态模块
+│   │   ├── keybindings.ts       # 快捷键操作与冲突模型
+│   │   ├── listPrefix.ts        # 列表引用前缀形态学（#119）
+│   │   ├── locales/             # 语言包字典单一事实源
 │   │   │   ├── en.ts     # 英文语言包（类型基准）
 │   │   │   ├── index.ts  # 语言注册表与解析（仅宿主可引）
 │   │   │   ├── island.ts # 语言数据岛构建与解析
 │   │   │   └── zh-cn.ts  # 简体中文语言包（编译期 parity）
-│   │   ├── math.ts             # 公式形态学纯函数（#59）
-│   │   ├── mermaid.ts          # Mermaid 围栏形态学（#60）
-│   │   ├── newline.ts          # CRLF/LF 换行协调器
-│   │   ├── protocol.ts         # 消息协议单一事实源
-│   │   ├── settings.ts         # 设置定义与读写纯逻辑
-│   │   └── wikilink.ts         # 双链形态学单一事实源（#11）
+│   │   ├── math.ts              # 公式形态学纯函数（#59）
+│   │   ├── mermaid.ts           # Mermaid 围栏形态学（#60）
+│   │   ├── newline.ts           # CRLF/LF 换行协调器
+│   │   ├── protocol.ts          # 消息协议单一事实源
+│   │   ├── settings.ts          # 设置定义与读写纯逻辑
+│   │   └── wikilink.ts          # 双链形态学单一事实源（#11）
 │   └── webview/     # webview 端实现
 │       ├── codeCardState.ts        # 卡片共享状态中立模块
 │       ├── codeHighlight.ts        # 语法高亮引擎装配与缓存

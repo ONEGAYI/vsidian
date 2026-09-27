@@ -210,19 +210,24 @@ export type HostToWebview =
    *  <html lang>；按需创建的控件自然取新词 */
   | { kind: 'locale.changed'; lang: string; messages: Record<string, string> }
   | { kind: 'keybindings.snapshot' | 'keybindings.changed'; overrides: KeybindingOverrides; requestId?: number; ok?: boolean; reason?: 'invalid' | 'conflict' | 'storage'; conflicts?: string[] }
-  /** CSS 片段装载清单（#128，编辑器面板消费）：宿主权威扫描 × 开关映射 →
-   *  启用片段的 webview 资源 URI（含 ?v=版本 缓存击穿参数），按确定性
-   *  文件名顺序排列（后者覆盖）。编辑器面板 init 后经 snippets.get 拉取，
-   *  状态变更后由宿主广播；空清单即撤下全部已装片段 */
+  /** CSS 片段装载清单（#128/#129，编辑器面板消费）：宿主权威扫描 × 开关
+   *  映射 × 依赖分析（越界条目排除）→ 启用片段的 webview 资源 URI（含
+   *  ?v=版本 缓存击穿参数），按确定性文件名顺序排列（后者覆盖）。编辑器
+   *  面板 init 后经 snippets.get 拉取，状态变更后由宿主广播；空清单即撤下
+   *  全部已装片段。
+   *  v（#129）：入口级缓存击穿版本——入口自身或其 @import 依赖闭包变更时
+   *  推进该入口（装载回报的关联键）；缺省回退列表版本（仅列表级语义） */
   | {
       kind: 'snippets.snapshot'
       version: number
-      snippets: Array<{ name: string; uri: string }>
+      snippets: Array<{ name: string; uri: string; v?: number }>
     }
-  /** CSS 片段管理状态（#128，设置页消费）：目录、读取失败标志、全局暂停
-   *  标志（#131，设置页回显暂停状态条）、全部第一层条目（含未启用）与
-   *  版本。设置页经 snippets.get 拉取；宿主状态变更后推送（含编辑器侧
-   *  片段变更）。不携带 URI——设置页不加载用户 CSS */
+  /** CSS 片段管理状态（#128/#129/#131，设置页消费）：目录、读取失败标志、
+   *  全局暂停标志（#131，设置页回显暂停状态条）、全部第一层条目（含未启
+   *  用）与版本。设置页经 snippets.get 拉取；宿主状态变更后推送（含编辑
+   *  器侧片段变更）。不携带 URI——设置页不加载用户 CSS。rejections（#129）：
+   *  被拒启用条目（越界/符号链接逃逸，清单装配排除），设置页行内提示；
+   *  缺省视为无拒绝 */
   | {
       kind: 'snippets.state'
       directory: string | null
@@ -230,6 +235,7 @@ export type HostToWebview =
       paused: boolean
       version: number
       entries: Array<{ name: string; enabled: boolean }>
+      rejections?: Record<string, { reason: 'path-escape' | 'symlink-escape'; path: string }>
     }
 
 /** webview → 宿主消息 */
@@ -544,6 +550,13 @@ export interface CssProbeReport {
   liveMathFontFamily?: string | null
   /** #59：阅读公式内层 `.katex` 的 computed font-family（同上） */
   readingMathFontFamily?: string | null
+  /** #129：@font-face 装载观测（document.fonts 总数与已裂数）——片段
+   *  相对字体按各自 CSS 文件路径解析可用的字节级证据；FontFaceSet 不可
+   *  用（旧环境/jsdom）为 null */
+  documentFonts?: { total: number; loaded: number } | null
+  /** #129：阅读容器 computed background-image（'none' → null）——片段
+   *  相对图片的解析锚点观测（URL 按引用它的 CSS 文件路径解析） */
+  readingBackgroundImage?: string | null
 }
 
 /** #34 行号栏观测（view.state 扩展字段）：开关生效态与视口内渲染结果。
@@ -1424,6 +1437,20 @@ function isNullOrString(v: unknown): boolean {
   return v === null || isString(v)
 }
 
+/** #129 snippets.state.rejections 形态守卫 */
+function isCssSnippetRejectionMap(v: unknown): v is Record<string, unknown> {
+  return (
+    isObject(v) &&
+    Object.entries(v).every(
+      ([name, item]) =>
+        name.length > 0 &&
+        isObject(item) &&
+        (item.reason === 'path-escape' || item.reason === 'symlink-escape') &&
+        isString(item.path),
+    )
+  )
+}
+
 function isCssProbeReport(v: unknown): v is CssProbeReport {
   return (
     isObject(v) &&
@@ -1444,7 +1471,15 @@ function isCssProbeReport(v: unknown): v is CssProbeReport {
     isNullOrString(v.liveWikilinkDecorationColor) &&
     isNullOrString(v.readingWikilinkDecorationColor) &&
     (v.liveMathFontFamily === undefined || isNullOrString(v.liveMathFontFamily)) &&
-    (v.readingMathFontFamily === undefined || isNullOrString(v.readingMathFontFamily))
+    (v.readingMathFontFamily === undefined || isNullOrString(v.readingMathFontFamily)) &&
+    (v.documentFonts === undefined ||
+      v.documentFonts === null ||
+      (isObject(v.documentFonts) &&
+        Number.isInteger(v.documentFonts.total) &&
+        (v.documentFonts.total as number) >= 0 &&
+        Number.isInteger(v.documentFonts.loaded) &&
+        (v.documentFonts.loaded as number) >= 0)) &&
+    (v.readingBackgroundImage === undefined || isNullOrString(v.readingBackgroundImage))
   )
 }
 
@@ -1912,7 +1947,11 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         isNonNegativeInt(v.version) &&
         Array.isArray(v.snippets) &&
         v.snippets.every(
-          (item) => isObject(item) && isString(item.name) && isString(item.uri),
+          (item) =>
+            isObject(item) &&
+            isString(item.name) &&
+            isString(item.uri) &&
+            (item.v === undefined || isNonNegativeInt(item.v)),
         )
       )
     case 'snippets.state':
@@ -1924,7 +1963,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         Array.isArray(v.entries) &&
         v.entries.every(
           (item) => isObject(item) && isString(item.name) && typeof item.enabled === 'boolean',
-        )
+        ) &&
+        (v.rejections === undefined || isCssSnippetRejectionMap(v.rejections))
       )
     default:
       return false

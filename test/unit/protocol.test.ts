@@ -1733,6 +1733,23 @@ describe('CSS 片段消息协议（#128）', () => {
     expect(isWebviewToHost(base)).toBe(false) // 方向：snapshot 系宿主方向
   })
 
+  it('#129 接受条目级缓存击穿版本 v（非负整数或缺省），拒绝负数/小数/字符串', () => {
+    const base = {
+      kind: 'snippets.snapshot',
+      version: 2,
+      snippets: [{ name: 'a.css', uri: 'https://webview/res/a.css?v=3', v: 3 }],
+    }
+    expect(isHostToWebview(base)).toBe(true)
+    expect(isHostToWebview({
+      kind: 'snippets.snapshot',
+      version: 2,
+      snippets: [{ name: 'a.css', uri: 'https://webview/res/a.css?v=2' }],
+    })).toBe(true) // v 缺省合法（仅列表级语义）
+    expect(isHostToWebview({ ...base, snippets: [{ name: 'a.css', uri: 'x', v: -1 }] })).toBe(false)
+    expect(isHostToWebview({ ...base, snippets: [{ name: 'a.css', uri: 'x', v: 1.5 }] })).toBe(false)
+    expect(isHostToWebview({ ...base, snippets: [{ name: 'a.css', uri: 'x', v: '3' }] })).toBe(false)
+  })
+
   it('接受合法 snippets.state（设置页形态），拒绝非法 directory/readError/entries', () => {
     const base = {
       kind: 'snippets.state',
@@ -1768,5 +1785,24 @@ describe('CSS 片段消息协议（#128）', () => {
     expect(isHostToWebview({ ...base, paused: true })).toBe(true)
     expect(isHostToWebview({ ...base, paused: undefined })).toBe(false) // 字段必填（宿主两处推送同形）
     expect(isHostToWebview({ ...base, paused: 'yes' })).toBe(false)
+  })
+
+  it('#129 接受合法 rejections（name → reason/path），拒绝非法 reason/缺 path/非对象', () => {
+    const base = {
+      kind: 'snippets.state',
+      directory: 'D:/snips',
+      readError: false,
+      paused: false,
+      version: 1,
+      entries: [{ name: 'bad.css', enabled: true }],
+      rejections: { 'bad.css': { reason: 'path-escape', path: 'D:/outside.css' } },
+    }
+    expect(isHostToWebview(base)).toBe(true)
+    expect(isHostToWebview({ ...base, rejections: { 'bad.css': { reason: 'symlink-escape', path: 'E:/x.css' } } })).toBe(true)
+    expect(isHostToWebview({ ...base, rejections: {} })).toBe(true)
+    expect(isHostToWebview({ ...base, rejections: undefined })).toBe(true) // 缺省合法
+    expect(isHostToWebview({ ...base, rejections: { 'bad.css': { reason: 'other', path: 'x' } } })).toBe(false)
+    expect(isHostToWebview({ ...base, rejections: { 'bad.css': { reason: 'path-escape' } } })).toBe(false)
+    expect(isHostToWebview({ ...base, rejections: [1, 2] })).toBe(false)
   })
 })

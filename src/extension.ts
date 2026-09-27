@@ -46,6 +46,18 @@ export function activate(context: vscode.ExtensionContext): void {
         t('host.cssSnippetReadFailed', { directory }),
       )
     },
+    // #129 越界/符号链接逃逸：启用条目被拒时提示（服务只在拒绝态变化时
+    // 触发一次，不逐 watcher 事件重复打扰）
+    onEntryRejected: (name, reason, path) => {
+      void vscode.window.showWarningMessage(
+        t(
+          reason === 'symlink-escape'
+            ? 'host.cssSnippetRejectedSymlink'
+            : 'host.cssSnippetRejectedEscape',
+          { name, path },
+        ),
+      )
+    },
   })
   const settingsPage = createSettingsPage(
     context,

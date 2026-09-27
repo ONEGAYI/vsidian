@@ -90,6 +90,7 @@ export const zhCn: Record<MessageKey, string> = {
   'cssSnippets.pauseAll': '暂停全部片段',
   'cssSnippets.resume': '恢复片段',
   'cssSnippets.pausedStatus': '已暂停全部 CSS 片段。逐片段开关保留，恢复后按原配置重新生效。',
+  'cssSnippets.entryRejected': '已拒绝：引用了片段目录外的路径。',
 
   // ---- host.（宿主消息）----
   'host.conflictInputCopied': '未确认输入已复制到剪贴板',
@@ -124,6 +125,8 @@ export const zhCn: Record<MessageKey, string> = {
   /** #131 暂停/恢复命令反馈（命令面板触发时无 webview 也可见） */
   'host.cssSnippetsPaused': '已暂停全部 CSS 片段。逐片段开关保留。',
   'host.cssSnippetsResumed': '已恢复 CSS 片段；启用的片段按原配置重新加载。',
+  'host.cssSnippetRejectedEscape': 'CSS 片段「{name}」引用了片段目录外的路径「{path}」，已拒绝加载。',
+  'host.cssSnippetRejectedSymlink': 'CSS 片段「{name}」经链接解析到片段目录外的「{path}」，已拒绝加载。',
   'host.invalidSettingDefinition': '非法定义：{definition}',
   'host.duplicateSettingKey': '设置键已存在：{key}',
 

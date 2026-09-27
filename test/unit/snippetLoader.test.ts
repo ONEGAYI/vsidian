@@ -49,6 +49,17 @@ describe('装载与晋升（成功路径）', () => {
     fireLoad(linkOf('a.css')!)
     expect(outcomes).toEqual([{ name: 'a.css', version: 7, ok: true }])
   })
+
+  it('#129 入口级版本（依赖归因拍）：回报携带条目显式 v 而非列表版本', () => {
+    const loader = new SnippetLoader()
+    const outcomes: SnippetLoadOutcome[] = []
+    loader.apply({
+      version: 5,
+      snippets: [{ name: 'a.css', uri: 'https://w/a.css?v=9', v: 9 }],
+    }, (o) => outcomes.push(o))
+    fireLoad(linkOf('a.css')!)
+    expect(outcomes).toEqual([{ name: 'a.css', version: 9, ok: true }])
+  })
 })
 
 describe('热替换与失败保留', () => {

@@ -104,7 +104,7 @@ describe('暂停字段（#131）', () => {
       { name: 'b.css', enabled: false },
     ])
     const state: CssSnippetState = {
-      directory: 'D:/snips', readError: false, paused: true, entries, version: 2,
+      directory: 'D:/snips', readError: false, paused: true, entries, version: 2, rejections: {},
     }
     expect(enabledSnippetFiles(state)).toEqual(['a.css'])
   })
@@ -114,7 +114,8 @@ describe('启用清单（enabledSnippetFiles）', () => {
   it('目录未配置时恒为空；已配置时按序输出启用文件', () => {
     const base: CssSnippetState = {
       directory: null, readError: false, paused: false,
-      entries: [{ name: 'a.css', enabled: true }], version: 3,
+      entries: [{ name: 'a.css', enabled: true }], version: 3, rejections: {},
+
     }
     expect(enabledSnippetFiles(base)).toEqual([])
     expect(

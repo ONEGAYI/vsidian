@@ -15,7 +15,8 @@ import type { SnippetLinkList } from '../shared/cssSnippets'
 /** 片段链元素标记（data 属性承载片段名；测试与诊断的观测位） */
 export const SNIPPET_LINK_ATTR = 'data-vsidian-snippet'
 
-/** 单片段装载结果（回报告宿主：入口级加载成败可观测） */
+/** 单片段装载结果（回报告宿主：入口级加载成败可观测；version 为触发装
+ *  载的入口级版本 #129——清单条目缺省 v 时回退列表版本） */
 export interface SnippetLoadOutcome {
   name: string
   version: number
@@ -36,11 +37,32 @@ export interface SnippetSlotInfo {
   state: 'pending' | 'settled'
 }
 
+/** 链的 sheet 三态（#129 error 事件分流判定，见 apply 内注释）：
+ *  - none：无 sheet 或可读空表（未装载/入口级失败）
+ *  - rules：可读且规则数 > 0（部分内容已生效）
+ *  - opaque：跨源不可读（读 cssRules 抛异常） */
+type LinkSheetState = 'none' | 'rules' | 'opaque'
+
+function sheetStateOf(link: HTMLLinkElement): LinkSheetState {
+  try {
+    if (link.sheet === null) {
+      return 'none'
+    }
+    return link.sheet.cssRules.length > 0 ? 'rules' : 'none'
+  } catch {
+    return 'opaque'
+  }
+}
+
+/** 链是否已被浏览器实际解析（#129 pending 晋升判定：非空 sheet 且规则数>0） */
+function sheetApplied(link: HTMLLinkElement): boolean {
+  return sheetStateOf(link) === 'rules'
+}
+
 export class SnippetLoader {
   private readonly slots = new Map<string, SnippetSlot>()
   /** 最近一次 apply 的期望顺序（settled 链按此重排） */
   private order: string[] = []
-  private version = 0
 
   /**
    * 应用装载清单（全量 diff）：
@@ -50,8 +72,9 @@ export class SnippetLoader {
    * 3. settled 链按清单顺序重排（DOM 内移动已加载元素不重新取资源）。
    */
   apply(list: SnippetLinkList, onOutcome?: (outcome: SnippetLoadOutcome) => void): void {
-    this.version = list.version
     const desired = new Map(list.snippets.map((item) => [item.name, item.uri]))
+    // #129 入口级版本（装载回报关联键）：条目显式 v 优先，缺省回退列表版本
+    const itemVersions = new Map(list.snippets.map((item) => [item.name, item.v ?? list.version]))
     this.order = list.snippets.map((item) => item.name)
     // 1. 摘除不再需要的
     for (const [name, slot] of [...this.slots]) {
@@ -63,14 +86,22 @@ export class SnippetLoader {
     }
     // 2. 装配与热替换
     for (const { name, uri } of list.snippets) {
+      const itemVersion = itemVersions.get(name) ?? list.version
       let slot = this.slots.get(name)
       if (!slot) {
         slot = {}
         this.slots.set(name, slot)
       }
-      // 旧 pending 被更新的装载请求取代（陈旧结果不再晋升）
+      // 旧 pending 被更新的装载请求取代（陈旧结果不再晋升）。例外
+      //（#129）：事件未到达（Chromium 对个别子资源失败形态不触发任何
+      // link 事件）但浏览器已解析出非空 sheet 且 URI 未变——该链实际已
+      // 生效，直接晋升，避免下一次同清单 apply 把生效样式摘掉
       if (slot.pending) {
-        slot.pending.remove()
+        if (!slot.settled && slot.pending.getAttribute('href') === uri && sheetApplied(slot.pending)) {
+          slot.settled = slot.pending
+        } else {
+          slot.pending.remove()
+        }
         slot.pending = undefined
       }
       if (slot.settled?.getAttribute('href') === uri) {
@@ -96,15 +127,34 @@ export class SnippetLoader {
           return
         }
         current.pending = undefined
-        if (ok) {
+        // #129 嵌套导入失败口径（Chromium 实测留证 test/browser/
+        // cssSnippetImports.mjs 与探针日志）：@import 子资源失败会对
+        // <link> 触发 error，但 sheet 本身已解析、其余规则正在生效。
+        // error 事件按 sheet 三态分流：
+        // - rules：sheet 可读且规则数 > 0 → 部分内容已生效，按「已装载
+        //   （降级）」晋升并回报 ok:true——缺失导入不整份回滚（浏览器逐
+        //   规则容错的既有承诺；生产 webview 片段链与页面同源，cssRules
+        //   可读，命中此态）
+        // - opaque：sheet 存在但跨源不可读（测试环境 http 形态）→ 保留
+        //   该链（浏览器正在应用其能解析的部分），回报 ok:false（能确认
+        //   的状态：有失败，不虚构定位）
+        // - none：无 sheet 或可读空表（入口 404/CSP 拦截）→ 移除失败链，
+        //   settled 原样保留（#128 失败保留最近成功样式）
+        const sheetState = sheetStateOf(link)
+        const applied = ok || sheetState === 'rules'
+        if (applied) {
           current.settled?.remove()
           current.settled = link
           this.reorder()
-        } else {
+        } else if (sheetState === 'none') {
           link.remove()
           // 失败保留最近成功样式：settled 原样保留
+        } else {
+          // opaque：链保留为已失败但浏览器或仍在应用其可解析部分；不
+          // 晋升（不可证），也不移除（避免误撤生效规则）
+          current.pending = link
         }
-        onOutcome?.({ name, version: this.version, ok })
+        onOutcome?.({ name, version: itemVersion, ok: applied })
       }
       link.addEventListener('load', () => settle(true))
       link.addEventListener('error', () => settle(false))

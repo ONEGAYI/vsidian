@@ -56,6 +56,7 @@ export class CssSnippetSettingsSection implements SettingsPageSection {
       paused: message.paused,
       version: message.version,
       entries: message.entries.map((entry) => ({ name: entry.name, enabled: entry.enabled })),
+      rejections: message.rejections ?? {},
     }
     this.render()
   }
@@ -161,7 +162,17 @@ export class CssSnippetSettingsSection implements SettingsPageSection {
       const name = document.createElement('span')
       name.className = 'vsidian-css-snippets-item-name'
       name.textContent = entry.name
-      item.append(name, box)
+      item.append(name)
+      // #129 被拒条目（越界/符号链接逃逸）：行内提示 + title 携带逃逸路径
+      const rejection = this.state?.rejections?.[entry.name]
+      if (rejection) {
+        const mark = document.createElement('span')
+        mark.className = 'vsidian-css-snippets-item-rejected'
+        mark.textContent = t('cssSnippets.entryRejected')
+        mark.title = rejection.path
+        item.append(mark)
+      }
+      item.append(box)
       list.append(item)
       if (focusEntry === `snippet:${entry.name}`) {
         item.classList.add('vsidian-settings-item-located')
