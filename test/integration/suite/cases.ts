@@ -4,6 +4,22 @@
 import * as vscode from 'vscode'
 import { LOCALE_MESSAGES, resolveLocale } from '../../../src/shared/locales'
 import { OBSIDIAN_ALIAS_PROBES } from '../../../src/shared/obsidianAlias'
+import legacyBaselineJson from '../../../test/style-contract/baseline-v0.4.0.json'
+
+/** #134 历史基线旧片段用例（基线 JSON 的 legacySnippetCases 元素形态） */
+interface LegacySnippetCase {
+  kind: 'obsidian-dom' | 'vsidian-dom' | 'obsidian-variable'
+  id: string
+  view: 'live' | 'reading' | 'both'
+  selector?: string
+  property?: string
+  probe?: string
+  declaration?: string
+  probeLive?: string
+  probeReading?: string
+  expected: string
+}
+const legacySnippetCases = legacyBaselineJson.legacySnippetCases as unknown as LegacySnippetCase[]
 
 /** #94 起编辑器 webview 文案随生效语言取词（auto 按宿主显示语言解析）——
  *  期望值与扩展装配同源计算，不再复制字面量 */
@@ -7050,6 +7066,87 @@ export const cases: Array<[string, () => Promise<void>]> = [
       const reverted = await waitViewState('mode.md', (v) =>
         v.viewMode === 'reading' && v.cssProbe?.obsidianVarProbe?.readingHeadingColor !== 'rgb(66, 77, 88)')
       assert(reverted.cssProbe!.obsidianVarProbe!.readingHeadingColor !== null, '停用后标题色应回落主题默认（非 null）')
+    } finally {
+      await setSnippetDirectory(null)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
+    }
+  }],
+
+  ['历史基线旧片段渲染验证：v0.4.0 承诺写法驱动真实可见效果（#134）', async () => {
+    // 基线驱动：片段规则与期望值全部来自独立历史基线（v0.4.0 固化快照），
+    // 不从候选清单/探针表生成——候选实现偏离历史承诺时此处独立失败（负向
+    // 保证见 test/style-contract/checkStyleContract.test.mjs 的模拟树剥离）。
+    await resetLastMode()
+    const dir = wsUri('css-snippets').fsPath
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets'))
+    const snippetCss = legacySnippetCases
+      .map((c) => (c.kind === 'obsidian-variable' ? c.declaration : `${c.selector} {\n  ${c.property}: ${c.expected};\n}`))
+      .join('\n\n')
+    await writeSnippetCss('css-snippets/legacy-baseline.css', snippetCss + '\n')
+    try {
+      await setSnippetDirectory(dir)
+      await poll('片段扫描完成（legacy-baseline）', async () => {
+        const st = await snippetState()
+        return st.directory === dir && !st.readError && st.entries.length === 1 ? st : undefined
+      })
+      await openWithEditor('style-contract.md')
+      await waitSessionReady('style-contract.md')
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', wsUri('style-contract.md'))
+      await setSnippetEnabled('legacy-baseline.css', true)
+
+      /** 按基线用例的探针路径取值（'obsidianAliases.x' / 'obsidianVarProbe.y' / 顶层字段） */
+      const probeValue = (probe: ViewState['cssProbe'], field: string): string | null | undefined => {
+        if (!probe) return undefined
+        const segs = field.split('.')
+        let cur: unknown = probe
+        for (const s of segs) cur = (cur as Record<string, unknown>)?.[s]
+        return (cur as string | null | undefined) ?? undefined
+      }
+
+      // 轮询稳定形态：片段经 <link> 异步装载（enable 后首采可能仍是内部值）、
+      // 装饰随视口/编辑增量重建——重试至基线期望全命中；**连续多轮**差异 ≥3
+      // 条才提前报错（首轮即抛会把「装载中」误判为「持续差异」），零星波动继续等
+      let legacyDiffStreak = 0
+      const assertLegacyView = async (view: 'live' | 'reading'): Promise<void> => {
+        legacyDiffStreak = 0
+        await poll(view + ' 旧片段探针全命中（基线期望）', async () => {
+          const v = (await vscode.commands.executeCommand(CMD.viewState, wsUri('style-contract.md').toString(), 0)) as ViewState | undefined
+          if (v?.viewMode !== view) return undefined
+          if (!v.cssProbe) return undefined
+          const diffs: string[] = []
+          for (const c of legacySnippetCases) {
+            if (c.view !== view && c.view !== 'both') continue
+            const field = c.kind === 'obsidian-variable' ? (view === 'live' ? c.probeLive : c.probeReading) : c.probe
+            if (!field) continue
+            const actual = probeValue(v.cssProbe, field)
+            if (actual !== c.expected) diffs.push(`${c.id}（${field}）：${String(actual)} ≠ ${c.expected}`)
+          }
+          if (diffs.length === 0) return true
+          legacyDiffStreak += 1
+          if (legacyDiffStreak >= 4) throw new Error('旧片段持续差异（连续 4 轮采样）：' + diffs.join('；'))
+          return undefined
+        }, 20000)
+      }
+
+      // live：Obsidian 原名选择器（别名桥）+ vsidian 名 + 变量桥全部命中
+      await assertLegacyView('live')
+      // reading：同名片段驱动阅读侧（容器别名 + 标签选择器族 + 变量同链）
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri('style-contract.md'))
+      await assertLegacyView('reading')
+
+      // 覆盖归因（负对照）：停用片段后基线期望值不再命中——证明覆盖确实
+      // 来自历史片段装载，而非探针表与候选实现的自我印证（reading 侧键
+      // 与该视图采集域一致；期望值同样取自基线，不硬编码）
+      await setSnippetEnabled('legacy-baseline.css', false)
+      const revertCase = legacySnippetCases.find((c) => c.id === 'reading-heading')!
+      await poll('停用后旧片段期望值退场', async () => {
+        const v = (await vscode.commands.executeCommand(CMD.viewState, wsUri('style-contract.md').toString(), 0)) as ViewState | undefined
+        if (v?.viewMode !== 'reading') return undefined
+        return v.cssProbe?.obsidianAliases?.['reading-heading'] !== revertCase.expected &&
+          v.cssProbe?.obsidianVarProbe?.readingHeadingColor !== 'rgb(240, 241, 242)'
+          ? true
+          : undefined
+      }, 20000)
     } finally {
       await setSnippetDirectory(null)
       await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)

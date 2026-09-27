@@ -208,7 +208,8 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { OBSIDIAN_ALIAS_PROBES } from '../../src/shared/obsidianAlias'
 
-const probeCss = readFileSync(path.resolve(process.cwd(), 'media/css-contract-probe.css'), 'utf8')
+// 读入后规范化 CRLF（Windows autocrlf 检出形态与 CI LF 等价；规则比对不受影响）
+const probeCss = readFileSync(path.resolve(process.cwd(), 'media/css-contract-probe.css'), 'utf8').replace(/\r\n/g, '\n')
 
 describe('别名探针资产一致性', () => {
   it('探针表每条在 probe.css 有同形规则（选择器按 Obsidian 原名 + 期望色）', () => {
