@@ -81,6 +81,10 @@ export const en = {
   'setting.symbolAutocomplete.title': 'Auto-close symbol pairs',
   'setting.symbolAutocomplete.description':
     'In live preview, typing an opening symbol also inserts its closing counterpart (brackets and quotes pair even inside code; Markdown emphasis triggers only at a run start). Typing the closing symbol again right after an auto-inserted one skips over it, and backspace inside an empty auto-inserted pair deletes both sides. Turn off to disable all of these.',
+  /** 设置项「选区符号包裹」（#124 editor.symbolSelectionWrap） */
+  'setting.symbolSelectionWrap.title': 'Wrap selection with symbols',
+  'setting.symbolSelectionWrap.description':
+    'With text selected in live preview, typing a registered symbol wraps both sides of the selection (repeated typing stacks markers: two asterisks make bold, two brackets form wiki-link-style structures; a cross-paragraph selection wraps each paragraph and keeps blank lines). The original text stays selected after wrapping. Markdown emphasis is not wrapped inside code; independent from auto-close above.',
   /** 设置项「界面语言」（#96 general.language，经 titleKey/descriptionKey 取词） */
   'setting.language.title': 'Interface language',
   'setting.language.description':

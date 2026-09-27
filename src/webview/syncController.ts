@@ -64,6 +64,8 @@ import {
   SHOW_LINE_NUMBERS_KEY,
   SYMBOL_AUTOCOMPLETE_DEFAULT,
   SYMBOL_AUTOCOMPLETE_KEY,
+  SYMBOL_SELECTION_WRAP_DEFAULT,
+  SYMBOL_SELECTION_WRAP_KEY,
   type SettingsPayload,
 } from '../shared/settings'
 import { onLocaleChanged, t } from '../shared/i18n'
@@ -158,6 +160,7 @@ import { resolveStaleTaskToggle } from './taskToggle'
 import { VirtualReadingView } from './readingVirtualView'
 import { blankRowInputPlan, runCreateTable, runTableEdit, tableEditing, tableRowsAt } from './tableEditing'
 import { symbolAutocomplete } from './symbolAutocomplete'
+import { symbolSelectionWrap } from './symbolWrap'
 import { listEditing } from './listEditing'
 import { indentEditing } from './indentEditing'
 import { selectTableRegion, tableRegionField } from './tableRegionSelection'
@@ -624,6 +627,11 @@ export class WebviewSyncController {
   private symbolAutocompleteOn = SYMBOL_AUTOCOMPLETE_DEFAULT
   private readonly symbolAutocloseCompartment = new Compartment()
 
+  /** #124 选区包裹开关（与 #123 相互独立；关闭时包裹 filter 与
+   *  allowMultipleSelections 一并退出装配，键入回到普通替换选区语义） */
+  private symbolSelectionWrapOn = SYMBOL_SELECTION_WRAP_DEFAULT
+  private readonly symbolSelectionWrapCompartment = new Compartment()
+
   /** #84 阅读侧折叠集合：键 = 块 data-vsidian-src-start（视图态，不持久化；
    *  块卸载重挂载后经此恢复收起形态） */
   private readonly readingCodeFold = new Set<number>()
@@ -1049,6 +1057,7 @@ export class WebviewSyncController {
         this.applyLineNumbersSetting()
         this.applyCodeCardSetting()
         this.applySymbolAutocompleteSetting()
+        this.applySymbolSelectionWrapSetting()
         break
       case 'edit.ack': {
         if (this.suspended) {
@@ -5018,6 +5027,24 @@ export class WebviewSyncController {
     })
   }
 
+  /**
+   * 应用选区包裹设置（#124；settings.snapshot / settings.changed 到达时）：
+   * 缺键回定义默认、非布尔忽略（与 #123 同口径）。经 Compartment.reconfigure
+   * 增删 symbolSelectionWrap 扩展组——关闭时包裹 filter 与
+   * allowMultipleSelections 退出装配，EditorView 不重建。
+   */
+  private applySymbolSelectionWrapSetting(): void {
+    const raw = this.settings?.[SYMBOL_SELECTION_WRAP_KEY]
+    const on = typeof raw === 'boolean' ? raw : SYMBOL_SELECTION_WRAP_DEFAULT
+    if (on === this.symbolSelectionWrapOn) {
+      return
+    }
+    this.symbolSelectionWrapOn = on
+    this.view?.dispatch({
+      effects: this.symbolSelectionWrapCompartment.reconfigure(on ? symbolSelectionWrap : []),
+    })
+  }
+
   /** #84 增强单个阅读代码块（挂载钩子与重装饰共用入口） */
   private decorateReadingCodeCardBlock(block: HTMLElement): void {
     if (!isReadingCodeBlock(block)) {
@@ -6041,6 +6068,11 @@ export class WebviewSyncController {
       // 命令（自动空对是更具体的编辑器状态）；设置关闭时经
       // symbolAutocloseCompartment 整组退出装配
       this.symbolAutocloseCompartment.of(this.symbolAutocompleteOn ? symbolAutocomplete : []),
+      // #124 选区包裹：置于 symbolAutocomplete 之后（靠后者先过滤）——
+      // 包裹只认非空选区（与补全分支互斥），改写后补全 filter 按
+      // startState 选区门控自然放行；多 range 原文选区依赖随组装配的
+      // allowMultipleSelections；关闭时经 compartment 整组退出
+      this.symbolSelectionWrapCompartment.of(this.symbolSelectionWrapOn ? symbolSelectionWrap : []),
       // #119 列表/引用 Enter 前缀延续与退格清层：必须排在 tableEditing
       // 之后（表格上下文优先，格内 Enter 仍为 <br>）、extraExtensions 的
       // defaultKeymap 之前（先于通用键位拦截）

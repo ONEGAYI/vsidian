@@ -13,6 +13,8 @@ import {
   SHOW_LINE_NUMBERS_KEY,
   SYMBOL_AUTOCOMPLETE_DEFAULT,
   SYMBOL_AUTOCOMPLETE_KEY,
+  SYMBOL_SELECTION_WRAP_DEFAULT,
+  SYMBOL_SELECTION_WRAP_KEY,
   applySettingsPatch,
   isSettingDefinition,
   sanitizeStoredSettings,
@@ -87,6 +89,21 @@ describe('生产注册表（#34 起含实际设置项；#95 文案键化）', ()
     expect(def.descriptionKey).toBe('setting.symbolAutocomplete.description')
     expect(zhCn[def.titleKey as keyof typeof zhCn]).toBe('符号自动补全')
     expect(isSettingDefinition(def)).toBe(true)
+  })
+
+  it('注册「符号选区包裹」：键 editor.symbolSelectionWrap、boolean、默认开启（#124）', () => {
+    const def = byKey('editor.symbolSelectionWrap')
+    expect(def.type).toBe('boolean')
+    expect(def.default).toBe(true)
+    expect(def.titleKey).toBe('setting.symbolSelectionWrap.title')
+    expect(def.descriptionKey).toBe('setting.symbolSelectionWrap.description')
+    expect(zhCn[def.titleKey as keyof typeof zhCn]).toBe('选区符号包裹')
+    expect(isSettingDefinition(def)).toBe(true)
+  })
+
+  it('键与消费方常量一致：选区包裹经 SYMBOL_SELECTION_WRAP_KEY 读同一键（#124）', () => {
+    expect(SYMBOL_SELECTION_WRAP_KEY).toBe('editor.symbolSelectionWrap')
+    expect(SYMBOL_SELECTION_WRAP_DEFAULT).toBe(true)
   })
 
   it('键与消费方常量一致：符号自动补全经 SYMBOL_AUTOCOMPLETE_KEY 读同一键（#123）', () => {

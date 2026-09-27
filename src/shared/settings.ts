@@ -106,11 +106,20 @@ export const CODEBLOCK_HIGHLIGHT_DEFAULT = true
 /**
  * #123「符号自动补全」开关：实时预览正文中键入起始符号自动补入闭合
  * 符号（含闭合越过与自动空对退格删除，注册表见 shared/symbols）。
- * 关闭后三条路径（补全/越过/空对删除）一并停用。#124 选区包裹与
- * #125 Tab 越界为另外两个独立布尔键（规格三独立开关）。
+ * 关闭后三条路径（补全/越过/空对删除）一并停用。
  */
 export const SYMBOL_AUTOCOMPLETE_KEY = 'editor.symbolAutocomplete'
 export const SYMBOL_AUTOCOMPLETE_DEFAULT = true
+
+/**
+ * #124「选区符号包裹」开关：有非空选区时键入注册包裹符号在选区两侧
+ * 包裹并保持原文选中（跨段按空行拆段、多 range 原文保持；注册表
+ * selectionWrap 登记）。与 #123 自动补全是两个独立开关，互不替代；
+ * 关闭后包裹路径停用（键入回到普通替换选区语义），无选区补全不受
+ * 影响；#125 Tab 越界为第三个独立布尔键（规格三独立开关）。
+ */
+export const SYMBOL_SELECTION_WRAP_KEY = 'editor.symbolSelectionWrap'
+export const SYMBOL_SELECTION_WRAP_DEFAULT = true
 
 /**
  * 语言设置键（#93 预留，#96 注册定义与「常规」分区）：值域 auto | zh-cn |
@@ -187,6 +196,13 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     default: SYMBOL_AUTOCOMPLETE_DEFAULT,
     titleKey: 'setting.symbolAutocomplete.title',
     descriptionKey: 'setting.symbolAutocomplete.description',
+  },
+  {
+    key: SYMBOL_SELECTION_WRAP_KEY,
+    type: 'boolean',
+    default: SYMBOL_SELECTION_WRAP_DEFAULT,
+    titleKey: 'setting.symbolSelectionWrap.title',
+    descriptionKey: 'setting.symbolSelectionWrap.description',
   },
 ]
 

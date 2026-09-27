@@ -331,11 +331,13 @@ describe('上下文抑制与共存', () => {
     expect(view.state.doc.toString()).toBe('| （ | B |\n| --- | --- |\n|  | y |')
   })
 
-  it('有普通文本选区时不接管：替换选区为原文（包裹归 #124）', () => {
+  it('有普通文本选区时不补全：选区走 #124 包裹路径（两侧包裹，非空对插入）', () => {
     const { view } = setup('word')
     view.dispatch({ selection: { anchor: 0, head: 4 } })
     typeText(view, 0, '(', 'input.type', 4)
-    expect(view.state.doc.toString()).toBe('(')
+    // #124 落地后：非空选区的键入经 symbolWrap 包裹（(word)），补全的
+    // 光标居中形态不复现（详见 symbolWrapInteraction 契约）
+    expect(view.state.doc.toString()).toBe('(word)')
   })
 })
 

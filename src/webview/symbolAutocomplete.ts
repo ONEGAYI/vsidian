@@ -109,8 +109,9 @@ const autoclosePairs = StateField.define<readonly AutoclosePairSpan[]>({
 })
 
 /** 代码上下文判定（#123 口径：增量树 + frontmatter；树未就绪按代码
- *  处理不可靠，返回 true 使 Markdown 触发符被抑制——括号引号不受影响） */
-function inCodeContext(state: EditorState, pos: number): boolean {
+ *  处理不可靠，返回 true 使 Markdown 触发符被抑制——括号引号不受影响）。
+ *  #124 选区包裹复用同一口径（导出共享，不另设判定） */
+export function inCodeContext(state: EditorState, pos: number): boolean {
   const field = state.field(liveDecorationsField, false)
   if (!field) {
     return true
