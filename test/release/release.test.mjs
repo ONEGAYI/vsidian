@@ -17,8 +17,8 @@ function katexFontEntries() {
 }
 
 // 快速操作条的两套图标：测试基线独立列出预期键，防止发布清单漏项。
-// #105/#106 起含 highlight 与 horizontalRule（与 scripts/release.mjs 的
-// 17 键对齐；75c3df7 只补了发布清单，此处漏同步致合法基线三例误红）。
+// #105/#106 起新增 highlight 与 horizontalRule 两键，fixture 当时未同步
+// （基线即失败），此处与 scripts/release.mjs 的清单对齐。
 const QUICK_ICON_KEYS = [
   'bold', 'italic', 'strikethrough', 'inlineCode', 'heading',
   'bulletList', 'orderedList', 'taskList', 'quote', 'codeBlock',
