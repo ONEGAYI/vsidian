@@ -25,6 +25,8 @@ out/test/**
 out/task*/**
 # 本地验证样图（如 mermaid 暗色修复的 before/after 探针）仅作留证，非运行时资产。
 out/samples/**
+# 本地工单草稿目录（#128 CSS 片段工单拆分留档）仅作过程留证，非运行时资产。
+out/css-snippets-tickets/**
 **/*.map
 .gitignore
 .git/**
