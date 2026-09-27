@@ -38,6 +38,7 @@
   "format.blockMath": "Insert block math",
   "format.wikilink": "Insert wikilink",
   "format.horizontalRule": "Insert horizontal rule",
+  "command.openStyleReference.title": "Vsidian: Open style reference",
   "command.openSettings.title": "Open settings",
   "command.cssSnippets.refresh.title": "CSS snippets: reload",
   "command.cssSnippets.pause.title": "CSS snippets: pause all",

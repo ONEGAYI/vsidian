@@ -12,12 +12,14 @@ describe('高亮渲染 CSS 契约（#105）', () => {
   it('底色变量定义于 #app：Obsidian 式固定荧光黄，浅色主题分支覆盖', () => {
     const app = cssRuleExact(css, '#app')
     // 两轮视觉实测主题变量（词高亮/搜索命中色）在用户主题下对比均仅
-    // 约 1.15–1.45:1 不可见，主题跟随路线证伪，按用户决议切固定黄
-    expect(app).toMatch(/--vsidian-highlight-background:\s*rgba\(255, 208, 0, 0\.35\)/u)
+    // 约 1.15–1.45:1 不可见，主题跟随路线证伪，按用户决议切固定黄。
+    // #132 变量桥：默认定义含 Obsidian --text-highlight-bg fallback（形态由
+    // obsidianAliasCssContract 钉住；不设别名时回退固定黄不变）
+    expect(app).toMatch(/--vsidian-highlight-background:\s*var\(--text-highlight-bg, rgba\(255, 208, 0, 0\.35\)\)/u)
     // 浅色主题提高浓度与饱和度（body.vscode-light 为 VSCode webview
     // 标准主题类注入），保证白底目视可辨
     const light = cssRule(css, 'body.vscode-light #app')
-    expect(light).toMatch(/--vsidian-highlight-background:\s*#ffe066/u)
+    expect(light).toMatch(/--vsidian-highlight-background:\s*var\(--text-highlight-bg, #ffe066\)/u)
   })
 
   it('live 正文 span 常显高亮底（底色引用同源变量）', () => {

@@ -30,6 +30,10 @@ out/samples/**
 .git/**
 package-lock.json
 *.vsix
+# 本地实施工件（依赖安装日志、验证日志目录）不进包（#132 实证 npm-install.log 曾混入）
+npm-install.log
+logs/**
+
 # 原图仅存仓库溯源（1254×1254），VSIX 用 media/vsidian-icon-256.png
 media/vsidian-icon.png
 

@@ -11,7 +11,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // cssSnippets。
 const names = ['tableCaret', 'taskClick', 'listEditing', 'tabIndent', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage',
-  'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor']
+  'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias']
 let workers = 2, reuseBuilds = true, selected = names
 for (const arg of process.argv.slice(2)) {
   if (/^--workers=\d+$/.test(arg)) workers = Number(arg.slice('--workers='.length))

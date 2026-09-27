@@ -20,6 +20,19 @@
 
 ## 二期补充：公开契约与用户指南同源（2026-09-27）
 
+> 实施状态更新（#132，2026-09-27）：本节设计已落地——结构化清单
+> `src/shared/styleContract.ts`（110 条，含正文域逐项核实与界面域 #133 待核实
+> 标记）、Obsidian 原名别名桥（`src/shared/obsidianAlias.ts`：DOM 双类名 +
+> 变量 fallback，direct 级承诺在两视图实际生效）、生成式用户指南
+> （`scripts/genStyleGuide.mjs` → `media/style-reference/style-reference.html`
+> + 设置页「样式参考」分页离线渲染）、生成一致性契约
+> （`test/unit/styleGuideGen.test.ts`）与渲染验证（probe.css 按原名写探针 +
+> `cssProbe.obsidianAliases` 逐项断言，集成覆盖双视图/模式切换/webview 重载，
+> 浏览器覆盖明暗主题与阅读重挂载）。旧手写映射表已退位为指向清单的迁移
+> 说明（`docs/design/obsidian-selector-map.md`）；初始基线冻结证据见该文件
+> 「初始基线」节。历史兼容的自动检查与门禁为 #134/#135 范围。
+
+
 状态：已接受设计方向，尚未实施。用户确认用户级指定文件夹、各项目共用，并将可定制范围扩展至正文、大纲、代码块按钮和图表弹窗等编辑器 webview 界面。本地与 Remote SSH 分别配置各环境的目录；独立设置页不应用片段，并提供暂停全部片段的恢复命令。
 
 资源加载范围包括片段目录内的相对路径图片、字体和 CSS 导入，以及 HTTPS 字体和 HTTPS CSS 导入。使用浏览器标准 CSS 解析，扩展负责资源路径、热更新和可观测的加载失败反馈；被引用的本地 CSS 修改也须触发更新，首版不额外提供在线资源离线下载管理。此决定支持分文件样式及在线字体服务，同时引入依赖刷新与网络失败验证成本。

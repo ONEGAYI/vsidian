@@ -56,6 +56,7 @@ import {
 } from './markdownDoc'
 import { resolveTaskToggleAtMarker } from './taskToggle'
 import { t } from '../shared/i18n'
+import { applyObsidianDomAlias } from '../shared/obsidianAlias'
 import {
   barePipeAt,
   escapedPipeBackslashes,
@@ -136,21 +137,23 @@ const hideDeco = Decoration.replace({})
 
 const lineDecoCache = new Map<string, ReturnType<typeof Decoration.line>>()
 function lineDeco(cls: string): ReturnType<typeof Decoration.line> {
-  let deco = lineDecoCache.get(cls)
+  // #132 别名桥：行级类经别名表加工（vsidian 名 + 承诺的 Obsidian 原名同挂）
+  const aliased = applyObsidianDomAlias(cls)
+  let deco = lineDecoCache.get(aliased)
   if (!deco) {
-    deco = Decoration.line({ class: cls })
-    lineDecoCache.set(cls, deco)
+    deco = Decoration.line({ class: aliased })
+    lineDecoCache.set(aliased, deco)
   }
   return deco
 }
 
 const headerSpanDecos = [1, 2, 3, 4, 5, 6].map((lv) =>
-  Decoration.mark({ class: LIVE_CLASS_NAMES.headerSpan(lv) }),
+  Decoration.mark({ class: applyObsidianDomAlias(LIVE_CLASS_NAMES.headerSpan(lv)) }),
 )
-const strongDeco = Decoration.mark({ class: LIVE_CLASS_NAMES.strong })
-const emphasisDeco = Decoration.mark({ class: LIVE_CLASS_NAMES.emphasis })
-const inlineCodeDeco = Decoration.mark({ class: LIVE_CLASS_NAMES.inlineCode })
-const highlightDeco = Decoration.mark({ class: LIVE_CLASS_NAMES.highlight })
+const strongDeco = Decoration.mark({ class: applyObsidianDomAlias(LIVE_CLASS_NAMES.strong) })
+const emphasisDeco = Decoration.mark({ class: applyObsidianDomAlias(LIVE_CLASS_NAMES.emphasis) })
+const inlineCodeDeco = Decoration.mark({ class: applyObsidianDomAlias(LIVE_CLASS_NAMES.inlineCode) })
+const highlightDeco = Decoration.mark({ class: applyObsidianDomAlias(LIVE_CLASS_NAMES.highlight) })
 
 /**
  * 任务 checkbox widget（#9）：input[type=checkbox] 替换任务标记 [ ]/[x]。
@@ -389,10 +392,12 @@ function tableCellDeco(header: boolean, align: TableAlign | null): ReturnType<ty
   ]
     .filter(Boolean)
     .join(' ')
-  let deco = tableCellDecos.get(cls)
+  // #132 别名桥：单元格类串逐 token 加工（vsidian-table-cell → + cm-table-cell）
+  const aliased = applyObsidianDomAlias(cls)
+  let deco = tableCellDecos.get(aliased)
   if (!deco) {
-    deco = Decoration.mark({ class: cls })
-    tableCellDecos.set(cls, deco)
+    deco = Decoration.mark({ class: aliased })
+    tableCellDecos.set(aliased, deco)
   }
   return deco
 }

@@ -233,6 +233,10 @@
         "category": "Vsidian"
       },
       {
+        "command": "onegayi.vsidian.openStyleReference",
+        "title": "%command.openStyleReference.title%"
+      },
+      {
         "command": "onegayi.vsidian.openSettings",
         "title": "%command.openSettings.title%",
         "category": "Vsidian"
@@ -310,7 +314,8 @@
   },
   "scripts": {
     "gen:nls": "node scripts/genNls.mjs",
-    "compile": "node scripts/genNls.mjs && node esbuild.mjs && tsc --noEmit",
+    "gen:styleguide": "node scripts/genStyleGuide.mjs",
+    "compile": "node scripts/genNls.mjs && node scripts/genStyleGuide.mjs && node esbuild.mjs && tsc --noEmit",
     "watch": "node scripts/genNls.mjs && node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run && node --test test/integration/testHost.test.mjs test/release/release.test.mjs test/browser/runner.test.mjs test/browser/buildBroker.test.mjs",

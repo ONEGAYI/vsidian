@@ -7,6 +7,7 @@ import { SettingsPageView } from './settingsPageView'
 import { PRODUCTION_SETTING_DEFINITIONS } from '../shared/settings'
 import { KeybindingSettingsSection } from './keybindingSettings'
 import { CssSnippetSettingsSection } from './cssSnippetSettings'
+import { StyleReferenceSection } from './styleReferenceSettings'
 import { bootLocaleFromDocument, handleLocaleChangedMessage } from './localeBoot'
 import './settingsPage.css'
 
@@ -20,11 +21,13 @@ bootLocaleFromDocument()
 const vscode = acquireVsCodeApi()
 const keybindings = new KeybindingSettingsSection({ postMessage: (message) => vscode.postMessage(message) })
 const snippets = new CssSnippetSettingsSection({ postMessage: (message) => vscode.postMessage(message) })
+// #132 样式参考：离线渲染公开样式契约指南（数据模块随版本生成）
+const styleRef = new StyleReferenceSection()
 
 const view = new SettingsPageView(
   { postMessage: (message) => vscode.postMessage(message) },
   PRODUCTION_SETTING_DEFINITIONS,
-  [keybindings, snippets],
+  [keybindings, snippets, styleRef],
 )
 view.mount(document.getElementById('app') ?? document.body)
 vscode.postMessage({ kind: 'settings.get' })

@@ -199,6 +199,11 @@ export type HostToWebview =
    *  载荷校验失败（invalid）与写盘失败（writeFailed） */
   | { kind: 'diagram.export.result'; reqId: number; ok: boolean; reason?: 'cancelled' | 'invalid' | 'writeFailed' }
   | { kind: 'settings.snapshot'; values: SettingsPayload }
+  /**
+   * #132 样式参考：打开设置页后定位到指定附加分页（section id）。
+   * 面板未加载完成时由宿主在 ready 握手后补发；未知分页 id 时 webview 忽略
+   */
+  | { kind: 'settings.focusSection'; section: string }
   /** 设置变更通知（#33）：任一设置项保存成功后广播到全部已打开 Vsidian
    *  编辑器面板与设置页（含变更发起页面）。values 仍为全量快照；消费方按
    *  需读取关心的键（#34 场景：editor.lineNumbers 触发 CM6 扩展热重配） */
@@ -557,6 +562,20 @@ export interface CssProbeReport {
   /** #129：阅读容器 computed background-image（'none' → null）——片段
    *  相对图片的解析锚点观测（URL 按引用它的 CSS 文件路径解析） */
   readingBackgroundImage?: string | null
+  /**
+   * #132 Obsidian 原名别名桥探针：键 = 清单条目 ID（或「条目 ID-reading」
+   * 视图消歧后缀），值 = 按 **Obsidian 原名选择器** 定位目标元素的
+   * text-decoration-color（media/css-contract-probe.css 以原名写探针规则；
+   * 别名类未挂上/挂错节点即 null，断言端逐项核对期望 rgb）。选择器表
+   * 单一事实源：src/shared/obsidianAlias.ts 的 OBSIDIAN_ALIAS_PROBES。
+   */
+  obsidianAliases?: Record<string, string | null>
+  /**
+   * #132 变量别名桥观测：一级标题的 computed color（经 --h1-color 驱动的
+   * 可见效果——变量桥生效则随片段设置的 Obsidian 原名变量变化；无目标
+   * 元素为 null）。真实片段链路验证：集成用例「Obsidian 变量别名桥」
+   */
+  obsidianVarProbe?: { liveHeadingColor: string | null; readingHeadingColor: string | null }
 }
 
 /** #34 行号栏观测（view.state 扩展字段）：开关生效态与视口内渲染结果。
@@ -1479,7 +1498,13 @@ function isCssProbeReport(v: unknown): v is CssProbeReport {
         (v.documentFonts.total as number) >= 0 &&
         Number.isInteger(v.documentFonts.loaded) &&
         (v.documentFonts.loaded as number) >= 0)) &&
-    (v.readingBackgroundImage === undefined || isNullOrString(v.readingBackgroundImage))
+    (v.readingBackgroundImage === undefined || isNullOrString(v.readingBackgroundImage)) &&
+    (v.obsidianAliases === undefined ||
+      (isObject(v.obsidianAliases) &&
+        Object.entries(v.obsidianAliases).every(([k, val]) => k.length > 0 && isNullOrString(val)))) &&
+    (v.obsidianVarProbe === undefined ||
+      (isObject(v.obsidianVarProbe) && isNullOrString(v.obsidianVarProbe.liveHeadingColor) &&
+        isNullOrString(v.obsidianVarProbe.readingHeadingColor)))
   )
 }
 
@@ -1931,6 +1956,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         (v.ctrlKey === undefined || typeof v.ctrlKey === 'boolean')
     case 'settings.snapshot':
       return isSettingsPayload(v.values)
+    case 'settings.focusSection':
+      return isString(v.section)
     case 'settings.changed':
       return isSettingsPayload(v.values)
     case 'locale.changed':
