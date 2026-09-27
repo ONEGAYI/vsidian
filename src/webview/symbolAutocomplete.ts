@@ -20,7 +20,10 @@
 //   的监听先于扩展 handler，定稿 flush 微任务先行完成，attempt 执行时
 //   光标左侧已是提交文本；attempt 的 dispatch 与组合净输入在
 //   deferredLocal 合并，flush 单笔出站 = 宿主撤销一次整体恢复，幂等检查
-//   防双补）。提交完整符号对（一次两个字符）不命中单字符形态，天然不补。
+//   防双补）。组合开始时有非空选区则 attempt 让位（读
+//   symbolCompositionState 快照——提交归 #124 的包裹重建路径，同一提交
+//   只允许一条路径生效）。提交完整符号对（一次两个字符）不命中单字符
+//   形态，天然不补。
 // - 粘贴/拖放：按 userEvent（input.paste / input.drop）排除。
 // - 代码上下文：chainAt 命中围栏/缩进代码块、行内代码、CodeMark/
 //   CodeInfo 边界或 frontmatter（liveDecorationsField 的增量树与 fm，
@@ -41,6 +44,7 @@
 import { EditorSelection, EditorState, StateEffect, StateField, Transaction } from '@codemirror/state'
 import { EditorView, keymap, type Command } from '@codemirror/view'
 import { findAutocloseEntry, shouldAutoclose } from '../shared/symbols'
+import { getCompositionSelectionSnapshot } from './symbolCompositionState'
 import { externalSync } from './syncController'
 import { liveDecorationsField } from './liveDecorations'
 import { tableRegionField } from './tableRegionSelection'
@@ -277,6 +281,10 @@ function attemptCompositionCommitClose(view: EditorView, data: string): void {
   }
   if (view.compositionStarted || view.state.readOnly) {
     return
+  }
+  if (getCompositionSelectionSnapshot(view)) {
+    return // 组合开始时有非空选区：提交归 #124 包裹重建路径（互斥，
+    // 同一提交只允许一条路径生效；本 attempt 先入队须让位）
   }
   const state = view.state
   const selection = state.selection

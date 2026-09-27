@@ -346,6 +346,175 @@ describe('设置开关（#124 与 #123 相互独立）', () => {
   })
 })
 
+describe('IME 定稿提交单个起始符号：选区包裹重建（修复）', () => {
+  /** 组合链路驱动（真实钩子 + compose 定稿事务形态）：start → 选区被组合
+   *  替换（CM6 定稿事务形态）→ end 提交文本 → 微任务 attempt 重建 */
+  const composeCommit = async (
+    controller: ReturnType<typeof setup>['controller'],
+    view: ReturnType<typeof setup>['view'],
+    data: string,
+  ) => {
+    controller.handleHostMessage({ kind: 'sync.test.composition', phase: 'start', text: '' })
+    typeOverSelection(view, data, 'input.type.compose')
+    controller.handleHostMessage({ kind: 'sync.test.composition', phase: 'end', text: data })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+
+  it('选中甲段经 IME 提交（：得（甲段）并保持原文选中、单笔写回', async () => {
+    const { controller, view, sent } = setup('甲段乙文')
+    select(view, 0, 2)
+    await composeCommit(controller, view, '（')
+    expect(view.state.doc.toString()).toBe('（甲段）乙文')
+    expect(ranges(view)).toEqual([{ from: 1, to: 3 }])
+    const requests = editRequests(sent)
+    expect(requests).toHaveLength(1)
+    expect(requests[0]).toMatchObject({
+      changes: [{ offset: 0, length: 2, text: '（甲段）' }],
+    })
+  })
+
+  it('第二次 IME 提交继续叠加：（（甲段））', async () => {
+    const { controller, view } = setup('甲段乙文')
+    select(view, 0, 2)
+    await composeCommit(controller, view, '（')
+    await composeCommit(controller, view, '（')
+    expect(view.state.doc.toString()).toBe('（（甲段））乙文')
+    expect(ranges(view)).toEqual([{ from: 2, to: 4 }])
+  })
+
+  it('IME 提交弯引号“：得“甲段”', async () => {
+    const { controller, view } = setup('甲段乙文')
+    select(view, 0, 2)
+    await composeCommit(controller, view, '“')
+    expect(view.state.doc.toString()).toBe('“甲段”乙文')
+    expect(ranges(view)).toEqual([{ from: 1, to: 3 }])
+  })
+
+  it('英文半角经 IME 提交同样包裹（按提交文本判定，不按输入法语言）', async () => {
+    const { controller, view } = setup('甲段乙文')
+    select(view, 0, 2)
+    await composeCommit(controller, view, '(')
+    expect(view.state.doc.toString()).toBe('(甲段)乙文')
+    expect(ranges(view)).toEqual([{ from: 1, to: 3 }])
+  })
+
+  it('IME 提交完整符号对（）不包裹不补全（普通替换语义）', async () => {
+    const { controller, view } = setup('甲段乙文')
+    select(view, 0, 2)
+    await composeCommit(controller, view, '（）')
+    expect(view.state.doc.toString()).toBe('（）乙文')
+  })
+
+  it('IME 提交多字符选字文本不动（普通替换语义）', async () => {
+    const { controller, view } = setup('甲段乙文')
+    select(view, 0, 2)
+    await composeCommit(controller, view, '你好')
+    expect(view.state.doc.toString()).toBe('你好乙文')
+  })
+
+  it('提交闭合符号不包裹（选区被替换，普通编辑语义）', async () => {
+    const { controller, view } = setup('甲段乙文')
+    select(view, 0, 2)
+    await composeCommit(controller, view, '）')
+    expect(view.state.doc.toString()).toBe('）乙文')
+  })
+
+  it('代码块内 Markdown 强调不包裹、括号照常（IME 路径同门控）', async () => {
+    const CODE_DOC = '```js\nconst a\n```\n'
+    {
+      const { controller, view } = setup(CODE_DOC)
+      select(view, 6, 11)
+      await composeCommit(controller, view, '*')
+      expect(view.state.doc.toString()).toBe(CODE_DOC.replace('const', '*'))
+    }
+    {
+      const { controller, view } = setup(CODE_DOC)
+      select(view, 6, 11)
+      await composeCommit(controller, view, '（')
+      expect(view.state.doc.toString()).toBe(CODE_DOC.replace('const', '（const）'))
+    }
+  })
+
+  it('表格格区选区 IME 不重建（格区被输入事务解除，回到插入+补全评估）', async () => {
+    const TABLE_DOC = '| a | b |\n| --- | --- |\n| c1 | d1 |\n段落'
+    const { controller, view } = setup(TABLE_DOC)
+    selectTableRegion(view, { tableFrom: 0, rowFrom: 1, rowTo: 1, columnFrom: 0, columnTo: 0 })
+    // 格区是鼠标框选状态：组合替换事务本身即解除格区（既有语义），包裹
+    // 快照在 compositionstart 时看到格区不建立，end 后 #123 补全按普通
+    // 插入路径评估——产物与修复前一致，不在格内容两侧加包裹符号
+    await composeCommit(controller, view, '（')
+    expect(view.state.doc.toString()).toBe('| a | b |\n| --- | --- |\n| （）c1 | d1 |\n段落')
+  })
+
+  it('设置关闭后 IME 提交回到替换+空选区补全现状（不重建）', async () => {
+    const { controller, view } = setup('甲段乙文')
+    controller.handleHostMessage({ kind: 'settings.changed', values: { 'editor.symbolSelectionWrap': false } })
+    select(view, 0, 2)
+    await composeCommit(controller, view, '（')
+    expect(view.state.doc.toString()).toBe('（）乙文')
+    expect(view.state.selection.main.head).toBe(1)
+  })
+
+  it('无选区 IME 提交照常走 #123 补全（不因新路径重复触发）', async () => {
+    const { controller, view } = setup('乙文')
+    await composeCommit(controller, view, '（')
+    expect(view.state.doc.toString()).toBe('（）乙文')
+    expect(view.state.selection.main.head).toBe(1)
+  })
+
+  it('跨段包裹产物（多 range）经 IME 提交：重建 main、其余 range 平移保持选中', async () => {
+    const { controller, view } = setup('甲段\n\n乙段')
+    select(view, 0, 6)
+    typeOverSelection(view, '*')
+    expect(view.state.doc.toString()).toBe('*甲段*\n\n*乙段*')
+    // main=甲段（[1,3)），rest=乙段（[7,9)）；组合只替换 main（DOM 原生
+    // 选区只表达 main，CM6 组合事务把其余 range 按变更平移保留——驱动
+    // 按该形态构造，重建后 rest 坐标平移且保持选中
+    controller.handleHostMessage({ kind: 'sync.test.composition', phase: 'start', text: '' })
+    const main = view.state.selection.main
+    const rest = view.state.selection.ranges.filter((range) => range !== main)
+    const shiftFor = (pos: number) => (pos >= main.to ? '「'.length - (main.to - main.from) : 0)
+    view.dispatch({
+      changes: { from: main.from, to: main.to, insert: '「' },
+      selection: EditorSelection.create([
+        EditorSelection.cursor(main.from + '「'.length),
+        ...rest.map((range) => EditorSelection.range(
+          range.from + shiftFor(range.from), range.to + shiftFor(range.to))),
+      ], 0),
+      userEvent: 'input.type.compose',
+    })
+    controller.handleHostMessage({ kind: 'sync.test.composition', phase: 'end', text: '「' })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(view.state.doc.toString()).toBe('*「甲段」*\n\n*乙段*')
+    expect(ranges(view)).toEqual([
+      { from: 2, to: 4 },
+      { from: 9, to: 11 },
+    ])
+  })
+
+  it('跨行（跨段）选区 IME 不重建：CM6 组合前删除跨行选区的既有行为保持', async () => {
+    const { controller, view } = setup('甲段\n\n乙段')
+    select(view, 0, 6)
+    // CM6 对跨行非空选区的组合开始即 dispatch 删除（view 源码
+    // observers.compositionstart 的规避分支），快照无从建立——重建
+    // 机制上不可达，行为回到「选区被删 + 提交 + #123 补全评估」
+    await composeCommit(controller, view, '「')
+    expect(view.state.doc.toString()).toBe('「」')
+  })
+
+  it('组合中间事务不被重建路径改写（无 end 无重建）', () => {
+    const { controller, view } = setup('甲段乙文')
+    select(view, 0, 2)
+    controller.handleHostMessage({ kind: 'sync.test.composition', phase: 'start', text: '' })
+    typeOverSelection(view, '（', 'input.type.compose')
+    expect(view.state.doc.toString()).toBe('（乙文')
+    return new Promise((resolve) => setTimeout(resolve, 0)).then(() => {
+      // 未见 compositionend：不派发重建，组合替换结果保持
+      expect(view.state.doc.toString()).toBe('（乙文')
+    })
+  })
+})
+
 describe('多光标混合形态防御（#124）', () => {
   it('range 与空光标混合不接管', () => {
     const { view } = setup('a word b')

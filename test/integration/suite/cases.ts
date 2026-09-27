@@ -6825,6 +6825,43 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(!bytes.toString('utf8').includes('*包裹正文段*\n'), '不得出现裸 LF 混入')
   }],
 
+  ['选区经 IME 定稿提交起始符号包裹重建、一笔写回与宿主撤销（#124 修复）', async () => {
+    await openWithEditor('symbol-wrap.md')
+    const initial = await waitSessionReady('symbol-wrap.md')
+    const uri = wsUri('symbol-wrap.md').toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri('symbol-wrap.md'))
+    const source = '包裹段甲\n\n包裹段乙\n'
+    assert(doc.getText() === source, 'IME 包裹 fixture 初始文本不符')
+
+    // 选中第一段（钩子候选写第一行，选区放第一段 [0,4)），经真实组合链路
+    // 定稿提交单个全角起始括号：compositionstart 快照选区 → 组合把选区
+    // 替换为候选 → 定稿重建 open+原文+close 并保持原文选中
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'table.test.crossSelect', anchor: 0, head: 4 })
+    await waitViewState('symbol-wrap.md', (v) => v.selectionOffset === 0 && v.selectionHead === 4)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sync.test.composition', phase: 'start', text: '' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'sync.test.composition', phase: 'update', text: '（',
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sync.test.composition', phase: 'end', text: '（' })
+    const wrapped = '（包裹段甲）\n\n包裹段乙\n'
+    await poll('IME 定稿提交包裹重建写回权威文档', () => doc.getText() === wrapped ? true : undefined)
+    const state1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state1.appliedEdits - initial.appliedEdits === 1,
+      `IME 包裹应为组合净输入与重建合并后一次写回，实际 ${state1.appliedEdits - initial.appliedEdits}`)
+
+    // 绘制层断言：重建产物在真宿主可见
+    const painted = await waitViewState('symbol-wrap.md', (v) => v.paint?.textVisible === true)
+    assert(painted.paint!.textVisible === true, 'IME 包裹后正文须在绘制层命中')
+
+    // 宿主撤销一笔整体恢复（组合替换+重建合并单笔，不残留半对也不丢原文）
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'history.request', op: 'undo' })
+    await poll('撤销一笔恢复原文', () => doc.getText() === source ? true : undefined)
+    assert(await doc.save(), 'IME 包裹文档应可保存')
+    const bytes = Buffer.from(await vscode.workspace.fs.readFile(wsUri('symbol-wrap.md'))).toString('utf8')
+    assert(bytes === source, '保存后回读与权威一致')
+  }],
+
   ['选区包裹设置：关闭停用、重开面板回显（#124）', async () => {
     await openWithEditor('symbol-wrap.md')
     await waitSessionReady('symbol-wrap.md')

@@ -2,7 +2,8 @@
 // 断言最终文本与光标。覆盖：括号引号补全与光标居中、闭合越过（零插入）、
 // 星号三连硬契约（| → *|* → **| → ***|）、自动空对退格同删两侧、非自动
 // 来源不接管、粘贴保持原文、中文 composition 候选不干预与提交补全/完整对
-// 不补、代码块内括号照补与强调抑制、转义与撇号防误触、设置开关即时生效。
+// 不补、选区经 IME 提交单个起始符号的包裹重建（叠加/弯引号/完整对不补）、
+// 代码块内括号照补与强调抑制、转义与撇号防误触、设置开关即时生效。
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -274,14 +275,36 @@ try {
     await page.keyboard.press('Control+v')
     await check(page, 'hello **', 8, '粘贴按普通替换语义')
   })
-  await scenario('IME 组合链路选区替换不包裹（沿用 #123 安全规则）', { doc: 'hello text', cursor: 6 }, async (page) => {
+  await scenario('选中文字经 IME 提交单个起始符号：包裹重建并保持原文选中', { doc: 'hello text', cursor: 6 }, async (page) => {
     const cdp = await page.context().newCDPSession(page)
     await selectRight(page, 4)
     await cdp.send('Input.imeSetComposition', { text: '（', selectionStart: 1, selectionEnd: 1 })
     await cdp.send('Input.insertText', { text: '（' })
-    // 组合把选区替换为提交符号（包裹不发生——选区已不存在）；提交后
-    // 光标紧邻起始符号且空选区，#123 补全规则照常适用（补出闭合侧）
-    await check(page, 'hello （）', 7, '组合替换选区，不包裹')
+    // 组合开始时快照选区，定稿提交单个起始符号 → 重建 open+原文+close
+    await checkRanges(page, 'hello （text）', [{ from: 7, to: 11 }], 'IME 提交包裹')
+  })
+  await scenario('IME 包裹后再次 IME 提交继续叠加（（text））', { doc: 'hello text', cursor: 6 }, async (page) => {
+    const cdp = await page.context().newCDPSession(page)
+    await selectRight(page, 4)
+    await cdp.send('Input.imeSetComposition', { text: '（', selectionStart: 1, selectionEnd: 1 })
+    await cdp.send('Input.insertText', { text: '（' })
+    await cdp.send('Input.imeSetComposition', { text: '（', selectionStart: 1, selectionEnd: 1 })
+    await cdp.send('Input.insertText', { text: '（' })
+    await checkRanges(page, 'hello （（text））', [{ from: 8, to: 12 }], 'IME 连续叠加')
+  })
+  await scenario('IME 提交弯引号“：得“text”', { doc: 'hello text', cursor: 6 }, async (page) => {
+    const cdp = await page.context().newCDPSession(page)
+    await selectRight(page, 4)
+    await cdp.send('Input.imeSetComposition', { text: '“', selectionStart: 1, selectionEnd: 1 })
+    await cdp.send('Input.insertText', { text: '“' })
+    await checkRanges(page, 'hello “text”', [{ from: 7, to: 11 }], 'IME 弯引号对')
+  })
+  await scenario('IME 提交完整符号对（）不包裹不补全', { doc: 'hello text', cursor: 6 }, async (page) => {
+    const cdp = await page.context().newCDPSession(page)
+    await selectRight(page, 4)
+    await cdp.send('Input.imeSetComposition', { text: '（）', selectionStart: 2, selectionEnd: 2 })
+    await cdp.send('Input.insertText', { text: '（）' })
+    await check(page, 'hello （）', 8, '完整对普通替换语义')
   })
   await scenario('选区包裹设置关闭后停用、重开后恢复', { doc: 'a word b', cursor: 2 }, async (page) => {
     await page.evaluate(() => window.setSymbolSelectionWrap(false))

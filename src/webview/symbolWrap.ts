@@ -20,18 +20,28 @@
 //      drawSelection，多 range 只有 main range 反映为 DOM 原生选区高亮
 //      （功能不受影响——继续键入经 replaceSelection 覆盖全部 range）。
 // - 门控链：input 类事务 → 非粘贴/拖放 → 非组合（input.type.compose 涵盖
-//   组合中间与定稿窗口；IME 组合链路里选区已被候选替换，包裹天然不
-//   发生）→ 变更形态与选区对齐（每条单字符替换恰覆盖一个 range，全部
-//   range 非空）→ 非表格格区（tableRegionField 归 tableEditing）→
-//   注册表包裹命中（findSelectionWrapEntry：只认 open）→ 代码上下文
-//   （选区任一端在代码内按代码处理，Markdown 强调整笔不接管、括号引号
-//   照常）→ planSelectionWrap 拆段改写。
+//   组合中间与定稿窗口，filter 一律不改写；IME 选区的包裹重建不走 filter，
+//   由下方 wrapCompositionTracker 在定稿后主动派发）→ 变更形态与选区对齐
+//   （每条单字符替换恰覆盖一个 range，全部 range 非空）→ 非表格格区
+//   （tableRegionField 归 tableEditing）→ 注册表包裹命中
+//   （findSelectionWrapEntry：只认 open）→ 代码上下文（选区任一端在代码
+//   内按代码处理，Markdown 强调整笔不接管、括号引号照常）→
+//   planSelectionWrap 拆段改写。
 // - 粘贴/拖放/IME 完整对（多字符插入）不命中「单字符」形态，天然不包裹。
+// - IME 定稿提交单个起始符号的选区包裹（修复）：组合开始时浏览器已把
+//   DOM 选区替换为组合串，filter 无从包裹——wrapCompositionTracker 在
+//   compositionstart 快照非空选区（原文 + 代码上下文判定），compositionend
+//   后微任务 attempt（#123 同款时序：CM6 定稿 flush 微任务先行完成，
+//   同步 dispatch 会打断定稿）按快照重建 open+原文+close 并保持原文
+//   选中。组合中间与定稿事务本身仍不改写（input.type.compose 排除不变）。
 //
 // 装配顺序：置于 symbolAutocomplete 之后（扩展数组靠后者先过滤）——
 // 包裹先于补全看到事务（两者分支互斥：包裹只认非空选区），tableEditing
-// 的格区替换在更后仍能收到放行的格区事务。
+// 的格区替换在更后仍能收到放行的格区事务。composition tracker 的微任务
+// 与 #123 提交补全 attempt 的互斥经 symbolCompositionState 快照让位
+// （#123 handler 在扩展序先执行，attempt 先入队，读到快照即让位）。
 import { EditorSelection, EditorState, Transaction } from '@codemirror/state'
+import { EditorView } from '@codemirror/view'
 import {
   findSelectionWrapEntry,
   shouldSelectionWrap,
@@ -39,6 +49,11 @@ import {
 } from '../shared/symbols'
 import { planSelectionWrap } from '../shared/symbolWrap'
 import { inCodeContext } from './symbolAutocomplete'
+import {
+  getCompositionSelectionSnapshot,
+  setCompositionSelectionSnapshot,
+  type CompositionSelectionSnapshot,
+} from './symbolCompositionState'
 import { tableRegionField } from './tableRegionSelection'
 
 /** 提取事务的全部纯替换条目；任一条不是「单字符替换」返回 null */
@@ -141,6 +156,133 @@ const selectionWrapFilter = EditorState.transactionFilter.of((tr) => {
   }
 })
 
+/** IME 定稿提交重建：按组合开始时的选区快照恢复原文并两侧插入 open/
+ *  close（与直接键入路径同构——同用 planSelectionWrap 的拆段计划与
+ *  原文选区语义，支持连续叠加）。全部短路条件见内注释；任一不满足即
+ *  放弃，保持组合提交的原有结果（普通替换语义）。 */
+function attemptCompositionWrap(
+  view: EditorView,
+  data: string,
+  snapshot: CompositionSelectionSnapshot,
+): void {
+  if (data.length !== 1) {
+    return // 完整符号对（一次提交两个字符）与多字符选字：不重建
+  }
+  const entry = findSelectionWrapEntry(data)
+  if (!entry) {
+    return // 提交的不是注册表 open（闭合符、尖括号等）：普通提交语义
+  }
+  if (view.compositionStarted || view.state.readOnly) {
+    return
+  }
+  const state = view.state
+  if (state.field(tableRegionField, false)) {
+    return
+  }
+  if (!shouldSelectionWrap(entry, { inCode: snapshot.inCode })) {
+    return // 代码上下文沿 allowInCode（Markdown 强调不进代码）
+  }
+  // 定稿形态校验：main 区间此刻应为「原文被提交符号替换」且光标紧随
+  // 其后（追加式提交）；不符视为异常时序（外部并发改写等），不接管
+  if (state.sliceDoc(snapshot.mainFrom, snapshot.mainFrom + data.length) !== data) {
+    return
+  }
+  const selection = state.selection
+  if (selection.ranges.length !== 1 + snapshot.restRanges.length || !selection.main.empty ||
+      selection.main.head !== snapshot.mainFrom + data.length) {
+    return
+  }
+  // 其余 range 原文须原样保留（DOM 原生选区只表达 main，组合不触碰
+  // 它们——但坐标随 main 替换平移：main 之后的 range 按提交净长度差移动）
+  const commitDelta = data.length - snapshot.mainText.length
+  const mainEnd = snapshot.mainFrom + snapshot.mainText.length
+  for (const range of snapshot.restRanges) {
+    const shift = range.from >= mainEnd ? commitDelta : 0
+    if (state.sliceDoc(range.from + shift, range.to + shift) !== range.text) {
+      return
+    }
+  }
+  // 快照原文上的包裹计划（相对坐标：[0, mainText.length)）
+  const plan = planSelectionWrap(snapshot.mainText, [{ from: 0, to: snapshot.mainText.length }], entry)
+  if (!plan) {
+    return // 纯空白选区：不重建（保持提交替换结果）
+  }
+  // 计划应用到原文得到重建文本（plan.changes 是 from 升序纯插入组）
+  let rebuilt = ''
+  let at = 0
+  for (const change of plan.changes) {
+    rebuilt += snapshot.mainText.slice(at, change.from) + change.insert
+    at = change.from
+  }
+  rebuilt += snapshot.mainText.slice(at)
+  // 重建事务：提交符号区间 → 重建文本；选区 = 各段原文（main 平移）+
+  // 其余 range（快照坐标经「替换+重建」总平移映射：main 之后的按
+  // rebuilt 与原文的净长度差移动，之前的原样）。userEvent 用 input.type
+  // （编程式派发不经 DOM 回流，不带 compose 标记；多字符替换形态不命中
+  // 本组 filter 的单字符门控，不会递归改写）
+  const insertDelta = rebuilt.length - snapshot.mainText.length
+  const ranges = [
+    ...plan.selection.map((range) =>
+      EditorSelection.range(range.anchor + snapshot.mainFrom, range.head + snapshot.mainFrom)),
+    ...snapshot.restRanges.map((range) => {
+      const shift = range.from >= mainEnd ? insertDelta : 0
+      return EditorSelection.range(range.from + shift, range.to + shift)
+    }),
+  ].sort((a, b) => a.from - b.from || a.to - b.to)
+  view.dispatch({
+    changes: { from: snapshot.mainFrom, to: snapshot.mainFrom + data.length, insert: rebuilt },
+    selection: EditorSelection.create(ranges, 0),
+    userEvent: 'input.type',
+    scrollIntoView: true,
+  })
+}
+
+/** IME 组合状态跟踪（选区快照与定稿重建）：组合开始时非空选区已被浏览器
+ *  替换为组合串——原文只能此刻快照；定稿后微任务 attempt 重建（时序与
+ *  #123 提交补全同款：CM6 定稿 flush 微任务先入队，本 attempt 执行时
+ *  文档已是提交文本；dispatch 经 deferredLocal 与组合净输入合并单笔
+ *  出站 = 宿主撤销一次整体恢复）。快照在 attempt 的 finally 清除——
+ *  生命周期严格 start..end，期间 #123 的补全 attempt 读到快照即让位。 */
+const wrapCompositionTracker = EditorView.domEventHandlers({
+  compositionstart: (_event, view) => {
+    setCompositionSelectionSnapshot(view, null)
+    const state = view.state
+    const selection = state.selection
+    // 快照条件：全部 range 非空（混合光标形态与直接键入路径同判不接管）、
+    // 非表格格区（格区 main 是空光标，天然不快照；此处再判属防御）
+    if (selection.ranges.some((range) => range.empty)) {
+      return
+    }
+    if (state.field(tableRegionField, false)) {
+      return
+    }
+    const main = selection.main
+    const restRanges = selection.ranges
+      .filter((range) => range !== main)
+      .map((range) => ({ from: range.from, to: range.to, text: state.sliceDoc(range.from, range.to) }))
+    setCompositionSelectionSnapshot(view, {
+      mainFrom: main.from,
+      mainText: state.sliceDoc(main.from, main.to),
+      restRanges,
+      inCode: selectionTouchesCode(state, selection.ranges),
+    })
+  },
+  compositionend: (event, view) => {
+    const snapshot = getCompositionSelectionSnapshot(view)
+    if (!snapshot) {
+      return
+    }
+    const data = (event as CompositionEvent).data ?? ''
+    queueMicrotask(() => {
+      try {
+        attemptCompositionWrap(view, data, snapshot)
+      } finally {
+        setCompositionSelectionSnapshot(view, null)
+      }
+    })
+  },
+})
+
 /**
  * 装配入口（syncController 经 Compartment 按设置热重配；顺序约束见
  * 文件头——置于 symbolAutocomplete 之后）。allowMultipleSelections 随组
@@ -150,4 +292,5 @@ const selectionWrapFilter = EditorState.transactionFilter.of((tr) => {
 export const symbolSelectionWrap = [
   EditorState.allowMultipleSelections.of(true),
   selectionWrapFilter,
+  wrapCompositionTracker,
 ]
