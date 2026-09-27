@@ -38,6 +38,81 @@ describe('格式操作的文本契约', () => {
     expect(apply('**编辑文字**', 'bold', 3, 5).text).toBe('**编**辑文**字**')
   })
 
+  it('后缀贴边两态：一按包裹携带光标定位，二按只拆光标所在对，三按复原（#107）', () => {
+    // 一按：贴边扩词包裹，selection 落新开围栏内侧（旧实现被 rewrite 闭区间误吞）
+    expect(apply('**加粗**普通', 'bold', 6))
+      .toEqual({ text: '**加粗****普通**', selection: { anchor: 8 } })
+    // 二按（光标在「普通」处）：只拆光标所在对，「加粗」一对保留
+    expect(apply('**加粗****普通**', 'bold', 8))
+      .toEqual({ text: '**加粗**普通', selection: null })
+    // 光标在「加粗」处：拆第一对，第二对保留
+    expect(apply('**加粗****普通**', 'bold', 3))
+      .toEqual({ text: '加粗**普通**', selection: null })
+    // 一按后光标不动（贴边产物行尾）再按：拆最后一对
+    expect(apply('**加粗****普通**', 'bold', 12))
+      .toEqual({ text: '**加粗**普通', selection: null })
+    // 三按：对二按产物再包裹，复原
+    expect(apply('**加粗**普通', 'bold', 6))
+      .toEqual({ text: '**加粗****普通**', selection: { anchor: 8 } })
+  })
+
+  it('前缀贴边同规则：包裹产物同样两态化，拆对只动光标所在对（#107）', () => {
+    expect(apply('文**后**', 'bold', 0))
+      .toEqual({ text: '**文****后**', selection: { anchor: 2 } })
+    expect(apply('**文****后**', 'bold', 2))
+      .toEqual({ text: '文**后**', selection: null })
+    expect(apply('**文****后**', 'bold', 6))
+      .toEqual({ text: '**文**后', selection: null })
+  })
+
+  it('围栏开边界贴邻即取消：行首与行尾一按取消，不再落入空对插入（#107）', () => {
+    expect(apply('**编辑文字**', 'bold', 0).text).toBe('编辑文字')
+    expect(apply('**编辑文字**', 'bold', 8).text).toBe('编辑文字')
+    expect(apply('*斜体*', 'italic', 0).text).toBe('斜体')
+    expect(apply('*斜体*', 'italic', 4).text).toBe('斜体')
+    expect(apply('`码`', 'inlineCode', 0).text).toBe('码')
+    expect(apply('`码`', 'inlineCode', 3).text).toBe('码')
+  })
+
+  it('贴边 add 与 toggle 同形：包裹携带 selection，不再产无定位粘连（#107）', () => {
+    expect(apply('**加粗**普通', 'bold', 6, 6, undefined, 'add'))
+      .toEqual({ text: '**加粗****普通**', selection: { anchor: 8 } })
+  })
+
+  it('斜体与行内代码贴边往返：合并形态按 mark 出现顺序配对拆分（#107）', () => {
+    expect(apply('*斜体*普通', 'italic', 5))
+      .toEqual({ text: '*斜体**普通*', selection: { anchor: 6 } })
+    expect(apply('*斜体**普通*', 'italic', 6))
+      .toEqual({ text: '*斜体*普通', selection: null })
+    expect(apply('`码`文', 'inlineCode', 3))
+      .toEqual({ text: '`码``文`', selection: { anchor: 4 } })
+    expect(apply('`码``文`', 'inlineCode', 4))
+      .toEqual({ text: '`码`文', selection: null })
+  })
+
+  it('删除线与高亮贴边往返：独立节点两态本就正确，一按携带 selection（#107 防回归）', () => {
+    expect(apply('~~删除~~普通', 'strikethrough', 6))
+      .toEqual({ text: '~~删除~~~~普通~~', selection: { anchor: 8 } })
+    expect(apply('~~删除~~~~普通~~', 'strikethrough', 8))
+      .toEqual({ text: '~~删除~~普通', selection: null })
+    expect(apply('==亮==普通', 'highlight', 5))
+      .toEqual({ text: '==亮====普通==', selection: { anchor: 7 } })
+    expect(apply('==亮====普通==', 'highlight', 7))
+      .toEqual({ text: '==亮==普通', selection: null })
+  })
+
+  it('贴边修复不改变通用空对插入与真重叠重写（#107 回归面）', () => {
+    // 非贴边的取不到词场景仍插空对
+    expect(apply('甲 乙', 'bold', 1)).toEqual({ text: '甲**** 乙', selection: { anchor: 3 } })
+    // 有选区贴边：产物与旧实现同形（旧的 rewrite 退化局部包裹与 fresh-wrap 同产物）
+    expect(apply('文**后**', 'bold', 0, 1).text).toBe('**文****后**')
+    expect(apply('**前**后文', 'bold', 5, 7).text).toBe('**前****后文**')
+    // 真重叠/半重叠仍走行级重写
+    expect(apply('前**中**后', 'bold', 0, 7).text).toBe('**前中后**')
+    expect(apply('**前**后', 'bold', 0, 6).text).toBe('**前后**')
+    expect(apply('**前后**', 'bold', 2, 4).text).toBe('前后')
+  })
+
   it('混合格式统一应用且不叠加标记；重复切换可还原', () => {
     expect(apply('**前**后', 'bold', 0, 6).text).toBe('**前后**')
     expect(apply('前**中**后', 'bold', 0, 7).text).toBe('**前中后**')
