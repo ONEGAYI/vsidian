@@ -17,6 +17,8 @@
 import { t } from '../shared/i18n'
 import { CODE_CARD_CLASS_NAMES } from './liveCodeCard'
 import { GRAPHIC_CHROME_CLASS_NAMES } from './graphicBlockChrome'
+import { LIVE_CLASS_NAMES } from './liveDecorations'
+import { DIAGRAM_POPUP_CLASS_NAMES } from './diagramPopup'
 import { MATH_CLASS_NAMES } from '../shared/math'
 import { refreshMermaidErrorLocale } from './mermaidRender'
 
@@ -65,6 +67,27 @@ export function refreshOnDemandControlLocale(root: ParentNode): void {
       reason: reason && reason !== 'unknown' ? reason : t('decor.unknownReason'),
     })
   }
+  // 表格空格占位 widget（EmptyTableCellWidget.toDOM 固化 aria-label）：
+  // 装饰是模块级单例实例（eq 恒成立），物化 DOM 不随换包重建；标记类
+  // tableGridEmpty 只落空格物化物，普通格 mark 装饰不带（不误伤）；
+  // active 态仅叠加修饰类，与常规态同词，一并覆盖
+  for (const el of root.querySelectorAll<HTMLElement>(`.${LIVE_CLASS_NAMES.tableGridEmpty}`)) {
+    el.setAttribute('aria-label', t('decor.emptyCell'))
+  }
+  // 图表弹窗（openGraphicPopup 固化；overlay 挂 body 直下，document 级
+  // 扫描可达）：对话框可访问名 + 工具条 7 按钮双写（title/aria-label
+  // 同词，与常驻侧 bindLocaleAttrs 同口径）。zoomLabel 是百分数字（与
+  // 语言无关）；错误占位/降级提示条是瞬态文本（5 秒自消或下次装载重建）
+  for (const el of root.querySelectorAll<HTMLElement>(`.${DIAGRAM_POPUP_CLASS_NAMES.overlay}`)) {
+    el.setAttribute('aria-label', t('graphic.popup'))
+  }
+  rewriteButtonLocale(root, `.${DIAGRAM_POPUP_CLASS_NAMES.zoomOut}`, () => t('graphic.popupZoomOut'))
+  rewriteButtonLocale(root, `.${DIAGRAM_POPUP_CLASS_NAMES.zoomIn}`, () => t('graphic.popupZoomIn'))
+  rewriteButtonLocale(root, `.${DIAGRAM_POPUP_CLASS_NAMES.reset}`, () => t('graphic.popupReset'))
+  rewriteButtonLocale(root, `.${DIAGRAM_POPUP_CLASS_NAMES.refresh}`, () => t('graphic.popupRefresh'))
+  rewriteButtonLocale(root, `.${DIAGRAM_POPUP_CLASS_NAMES.exportSvg}`, () => t('graphic.popupExportSvg'))
+  rewriteButtonLocale(root, `.${DIAGRAM_POPUP_CLASS_NAMES.exportPng}`, () => t('graphic.popupExportPng'))
+  rewriteButtonLocale(root, `.${DIAGRAM_POPUP_CLASS_NAMES.close}`, () => t('graphic.popupClose'))
   // mermaid 错误占位是降级 DOM 文本（非属性），无法就地改写，经重渲染换词
   refreshMermaidErrorLocale(root)
 }

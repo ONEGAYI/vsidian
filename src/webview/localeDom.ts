@@ -35,6 +35,12 @@ interface LocaleBinding {
 const bindings: LocaleBinding[] = []
 let subscribed = false
 
+/** 登记数超过该阈值时在 register 内顺带剪枝：死绑定只在换包时清理的话，
+ *  大纲条目等高频重建场景（每次重建的 chevron/nomatch 占位都新增登记）
+ *  在两次换包间会无界累积。512 取三面板常驻控件峰值（顶栏/操作条/查找/
+ *  侧栏骨架/大纲条目）的充分余量——超限即剪，正常文档远达不到 */
+const REGISTER_PRUNE_THRESHOLD = 512
+
 function writeTo(el: Element, target: LocaleTarget, value: string): void {
   if (target === 'text') {
     el.textContent = value
@@ -50,6 +56,23 @@ function register(el: Element, write: (el: Element) => void): void {
     onLocaleChanged(refreshLocaleDom)
   }
   bindings.push({ ref: new WeakRef(el), write })
+  if (bindings.length > REGISTER_PRUNE_THRESHOLD) {
+    pruneDetachedBindings()
+  }
+}
+
+/** 剪除扫描：移除 deref 失败（已回收）或已脱挂的登记项——与换包重刷
+ *  同款存活判定，但不重写存活项（此处非换包驱动，重写无意义） */
+function pruneDetachedBindings(): void {
+  let kept = 0
+  for (let i = 0; i < bindings.length; i++) {
+    const binding = bindings[i]!
+    const el = binding.ref.deref()
+    if (el && el.isConnected) {
+      bindings[kept++] = binding
+    }
+  }
+  bindings.length = kept
 }
 
 /** 键锚点登记：立即按当前语言写入目标，换包时按新语言重写 */
@@ -108,4 +131,9 @@ export function refreshElementLocale(el: Element): void {
       binding.write(node)
     }
   }
+}
+
+/** 测试观测：当前登记项总数（有界性契约用例消费；生产不引） */
+export function __localeDomBindingCountForTest(): number {
+  return bindings.length
 }

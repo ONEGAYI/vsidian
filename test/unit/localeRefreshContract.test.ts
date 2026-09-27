@@ -22,7 +22,14 @@ import { en } from '../../src/shared/locales/en'
 import { CodeCardHeaderWidget } from '../../src/webview/liveCodeCard'
 import { buildGraphicChrome } from '../../src/webview/graphicBlockChrome'
 import { LiveMathWidget } from '../../src/webview/liveMath'
+import { EmptyTableCellWidget, LIVE_CLASS_NAMES } from '../../src/webview/liveDecorations'
 import { ImageResourceManager } from '../../src/webview/imageResource'
+import {
+  closeDiagramPopup,
+  DIAGRAM_POPUP_CLASS_NAMES,
+  openGraphicPopup,
+} from '../../src/webview/diagramPopup'
+import { bindLocale, __localeDomBindingCountForTest } from '../../src/webview/localeDom'
 import { MERMAID_CLASS_NAMES, MERMAID_CODE_ATTR } from '../../src/shared/mermaid'
 import {
   __resetMermaidRenderStateForTest,
@@ -186,6 +193,32 @@ describe('换包后 DOM 无旧语言残留（#101 常驻控件契约）', () => 
     }
   })
 
+  it('编辑器面板：大纲搜索无匹配占位换包后换词（nomatch 态钉住）', () => {
+    installLocale('zh-cn', zhCn)
+    const { bridge } = makeBridge()
+    const c = new WebviewSyncController(bridge)
+    const parent = document.createElement('div')
+    const detach = attach(parent)
+    try {
+      c.mount(parent)
+      c.handleHostMessage({ kind: 'init', sessionId: 's1', docUri: DOC_URI, version: 1, text: DOC })
+      c.handleHostMessage({ kind: 'sidebar.test.click' }) // 展开侧栏：大纲工具条入树
+      // 激活无匹配态：输入不命中任何标题的词（setOutlineSearch → 折叠落
+      // DOM 路径幂等补挂 nomatch 占位，与生产同构）
+      const search = parent.querySelector<HTMLInputElement>('.vsidian-outline-search')!
+      search.value = 'zzzz'
+      search.dispatchEvent(new Event('input', { bubbles: true }))
+      const nomatch = parent.querySelector<HTMLElement>('.vsidian-outline-nomatch')
+      // 正控制：占位确实存在且为 zh（防退回直写的钉住基线）
+      expect(nomatch).not.toBeNull()
+      expect(nomatch!.textContent).toBe(zhCn['outline.noMatch'])
+      switchToEnglish()
+      expect(nomatch!.textContent).toBe(en['outline.noMatch'])
+    } finally {
+      detach()
+    }
+  })
+
   it('设置页面板：换包后全树无 zh 唯一值（含搜索框/侧栏导航等常驻骨架）', () => {
     installLocale('zh-cn', zhCn)
     // 与生产 settingsMain.ts 同构：生产定义表 + 快捷键分页
@@ -321,6 +354,120 @@ describe('按需控件换包后就地重刷（#101 第三部分契约）', () =>
     } finally {
       el.remove()
       detach()
+    }
+  })
+
+  it('表格空格占位 widget：换包后 aria-label 就地取 en 词（不误伤普通格）', () => {
+    // 等价形态同前：直调生产 widget.toDOM（CM6 物化即调同一函数）。
+    // 空格 widget 的装饰是模块级单例实例（eq 恒成立），物化 DOM 不随
+    // 换包重建——两态（常规/active）都固化 aria-label，须扫描就地重写；
+    // 普通格是 mark 装饰加同款 tableGridCell 类名，不得被误加 aria-label
+    installLocale('zh-cn', zhCn)
+    const { bridge } = makeBridge()
+    const c = new WebviewSyncController(bridge)
+    const parent = document.createElement('div')
+    const detach = attach(parent)
+    const host = document.createElement('div')
+    document.body.append(host)
+    try {
+      c.mount(parent)
+      c.handleHostMessage({ kind: 'init', sessionId: 's1', docUri: DOC_URI, version: 1, text: DOC })
+      const calm = new EmptyTableCellWidget(false).toDOM()
+      const active = new EmptyTableCellWidget(true).toDOM()
+      const plainCell = document.createElement('span')
+      plainCell.className = LIVE_CLASS_NAMES.tableGridCell // 普通格物化形态（无 aria）
+      host.append(calm, active, plainCell)
+      // 正控制：换包前两态 aria-label 均为 zh
+      expect(calm.getAttribute('aria-label')).toBe(zhCn['decor.emptyCell'])
+      expect(active.getAttribute('aria-label')).toBe(zhCn['decor.emptyCell'])
+      switchToEnglish()
+      expect(calm.getAttribute('aria-label')).toBe(en['decor.emptyCell'])
+      expect(active.getAttribute('aria-label')).toBe(en['decor.emptyCell'])
+      expect(plainCell.getAttribute('aria-label')).toBeNull() // 选择器不误伤普通格
+      expectNoStaleZh(host, '空格占位 widget（直构树）')
+    } finally {
+      host.remove()
+      detach()
+    }
+  })
+
+  it('图表弹窗：打开期间换包后 overlay 名与工具条按钮就地取 en 词', async () => {
+    // 生产路径直开：openGraphicPopup 构建 overlay 挂 body 直下（document
+    // 级扫描可达），mermaid 经 mock API 渲染成功（成功态无错误占位干扰）
+    installLocale('zh-cn', zhCn)
+    __setMermaidApiForTest({
+      initialize() {},
+      async render() {
+        return {
+          svg: '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="30" viewBox="0 0 40 30"><rect width="40" height="30" fill="#888"/></svg>',
+        }
+      },
+    })
+    const { bridge } = makeBridge()
+    const c = new WebviewSyncController(bridge)
+    const parent = document.createElement('div')
+    const detach = attach(parent)
+    try {
+      c.mount(parent)
+      c.handleHostMessage({ kind: 'init', sessionId: 's1', docUri: DOC_URI, version: 1, text: DOC })
+      openGraphicPopup('mermaid', 'graph TD\nA-->B')
+      await settle()
+      const overlay = document.querySelector<HTMLElement>(
+        `.${DIAGRAM_POPUP_CLASS_NAMES.overlay}`,
+      )!
+      // 正控制：换包前 overlay 名与关闭按钮均为 zh
+      expect(overlay.getAttribute('aria-label')).toBe(zhCn['graphic.popup'])
+      expect(overlay.querySelector<HTMLButtonElement>(
+        `.${DIAGRAM_POPUP_CLASS_NAMES.close}`)!.title,
+      ).toBe(zhCn['graphic.popupClose'])
+      switchToEnglish()
+      expect(overlay.getAttribute('aria-label')).toBe(en['graphic.popup'])
+      const toolbarCases: Array<[string, string]> = [
+        [DIAGRAM_POPUP_CLASS_NAMES.zoomOut, en['graphic.popupZoomOut']],
+        [DIAGRAM_POPUP_CLASS_NAMES.zoomIn, en['graphic.popupZoomIn']],
+        [DIAGRAM_POPUP_CLASS_NAMES.reset, en['graphic.popupReset']],
+        [DIAGRAM_POPUP_CLASS_NAMES.refresh, en['graphic.popupRefresh']],
+        [DIAGRAM_POPUP_CLASS_NAMES.exportSvg, en['graphic.popupExportSvg']],
+        [DIAGRAM_POPUP_CLASS_NAMES.exportPng, en['graphic.popupExportPng']],
+        [DIAGRAM_POPUP_CLASS_NAMES.close, en['graphic.popupClose']],
+      ]
+      for (const [cls, word] of toolbarCases) {
+        const btn = overlay.querySelector<HTMLButtonElement>(`.${cls}`)!
+        expect(btn, cls).toBeDefined()
+        expect(btn.title, `${cls} title`).toBe(word)
+        expect(btn.getAttribute('aria-label'), `${cls} aria-label`).toBe(word)
+      }
+      expectNoStaleZh(overlay, '图表弹窗')
+    } finally {
+      closeDiagramPopup()
+      detach()
+    }
+  })
+})
+
+describe('localeDom 注册表有界性（#101 常驻控件契约）', () => {
+  it('批量登记超阈值时顺带剪枝：死绑定不无界累积，连线登记仍换包重刷', () => {
+    installLocale('zh-cn', zhCn)
+    const scratch = document.createElement('div')
+    document.body.append(scratch)
+    try {
+      // 模拟大纲条目反复重建：每次重建 bindLocale 新元素、旧元素脱挂丢弃，
+      // 两次换包间无人触发 refreshLocaleDom 剪枝
+      const before = __localeDomBindingCountForTest()
+      for (let i = 0; i < 600; i++) {
+        bindLocale(document.createElement('div'), 'text', 'outline.noMatch')
+      }
+      // 超阈值登记触发 register 内剪枝：死绑定（未连线）被移除，
+      // 登记总数显著低于 before + 600（未实现时恰等于，先红）
+      expect(__localeDomBindingCountForTest()).toBeLessThan(before + 600)
+      // 剪枝不误伤连线登记：挂树元素登记后换包仍被注册表重刷
+      const live = document.createElement('div')
+      scratch.append(live)
+      bindLocale(live, 'text', 'outline.noMatch')
+      switchToEnglish()
+      expect(live.textContent).toBe(en['outline.noMatch'])
+    } finally {
+      scratch.remove()
     }
   })
 })

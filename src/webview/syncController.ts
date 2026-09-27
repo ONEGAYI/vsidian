@@ -2617,9 +2617,10 @@ export class WebviewSyncController {
    *  - 表格控件层 aria-label 的就地兜底：tableControls 的控件按钮每轮
    *    render 全量重建取词（探索笔记 101 §4.5），静止窗口只剩层 aria；
    *  - 按需控件（#101 第三部分）：代码卡片/图形按钮/公式降级/图片错误/
-   *    mermaid 错误占位的固化文案经 localeOnDemand 的 document 级扫描就地
-   *    重刷（含阅读视图已挂载块与弹窗；右键菜单等瞬态浮层随下次打开
-   *    自然取新词，不扫）。 */
+   *    mermaid 错误占位/表格空格占位/图表弹窗（overlay 与工具条按钮）的
+   *    固化文案经 localeOnDemand 的 document 级扫描就地重刷（含阅读视图
+   *    已挂载块与 body 直下的弹窗；右键菜单等瞬态浮层随下次打开自然取
+   *    新词，不扫）。 */
   private applyEditorLocale(): void {
     this.refreshQuickActions()
     this.liveWrapper?.querySelector('.vsidian-table-controls')
