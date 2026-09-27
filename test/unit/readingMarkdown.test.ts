@@ -271,6 +271,78 @@ describe('嵌套行内围栏 flanking 双视图同源（#149 宽松基准）', (
   })
 })
 
+describe('宽松内联链接/图片行内规则（#152：目标含未编码空格，Obsidian 兼容）', () => {
+  const md = createMarkdownRenderer()
+
+  it('含空格目标渲染为链接：href 为 normalizeLink 编码形态，解码后与字面源文一致', () => {
+    const host = renderToDom(md, '见 [目标 文档](./子 目录/目标 文档.md)。\n')
+    const anchor = host.querySelector('a')
+    expect(anchor).not.toBeNull()
+    expect(anchor!.textContent).toBe('目标 文档')
+    expect(decodeURIComponent(anchor!.getAttribute('href') ?? '')).toBe('./子 目录/目标 文档.md')
+  })
+
+  it('含空格图源渲染为图片：src 编码形态，alt 取标签内容', () => {
+    const host = renderToDom(md, '![图片 说明](./assets/图 片.png)\n')
+    const img = host.querySelector('img')
+    expect(img).not.toBeNull()
+    expect(decodeURIComponent(img!.getAttribute('src') ?? '')).toBe('./assets/图 片.png')
+    expect(img!.getAttribute('alt')).toBe('图片 说明')
+  })
+
+  it('标签内嵌套行内标记照常渲染（与标准链接同构）', () => {
+    const host = renderToDom(md, '[**粗体** 与 `码`](a b.md)\n')
+    const anchor = host.querySelector('a')
+    expect(anchor!.querySelector('strong')?.textContent).toBe('粗体')
+    expect(anchor!.querySelector('code')?.textContent).toBe('码')
+  })
+
+  it('标准层职责形态不受影响：%20、尖括号、合法标题、无空格目标', () => {
+    for (const src of [
+      '[t](./目标%20文档.md)\n',
+      '[t](<a b.md>)\n',
+      '[t](a.md "标题 内容")\n',
+      '[t](a.md)\n',
+    ]) {
+      const host = renderToDom(md, src)
+      const anchor = host.querySelector('a')
+      expect(anchor, src).not.toBeNull()
+      expect(anchor!.textContent, src).toBe('t')
+    }
+  })
+
+  it('标题组合形态整条渲染为一条链接（目标是括号内整段字面文本）', () => {
+    const host = renderToDom(md, '[t](a b "标题")\n')
+    const anchors = host.querySelectorAll('a')
+    expect(anchors).toHaveLength(1)
+    expect(decodeURIComponent(anchors[0]!.getAttribute('href') ?? '')).toBe('a b "标题"')
+  })
+
+  it('降级形态按原文呈现：反斜杠、未闭合、转义前缀、危险协议', () => {
+    for (const src of [
+      '[t](a\\ b)\n',
+      '[t](a b\n',
+      '\\![t](a b.md)\n',
+    ]) {
+      const host = renderToDom(md, src)
+      expect(host.querySelector('a'), src).toBeNull()
+      expect(host.textContent, src).toContain('[t]')
+    }
+    // 危险协议（validateLink 与标准层同判：不产生可点击 href）
+    const danger = renderToDom(md, '[点](javascript:ale rt(1))\n')
+    expect(danger.querySelector('a')).toBeNull()
+    expect(danger.textContent).toContain('[点](javascript:ale rt(1))')
+  })
+
+  it('行内代码与双链形态不被宽松规则干扰', () => {
+    const host = renderToDom(md, '`[t](a b.md)`\n')
+    expect(host.querySelector('a')).toBeNull()
+    expect(host.querySelector('code')?.textContent).toBe('[t](a b.md)')
+    const wikilink = renderToDom(md, '[[含空格 笔记]]\n')
+    expect(wikilink.querySelector('a')?.className).toContain('vsidian-wikilink')
+  })
+})
+
 describe('sanitizeReadingDom：DOM 纵深净化', () => {
   it('移除 script/iframe/style 元素、行内事件属性与 javascript: 链接', () => {
     const host = document.createElement('div')

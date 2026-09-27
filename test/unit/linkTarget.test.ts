@@ -113,6 +113,21 @@ describe('工作区相对路径解析（基于当前文档所在目录）', () =
     expect(png).toEqual({ kind: 'doc', candidates: ['d:\\notes\\子目录\\图.png'] })
   })
 
+  it('#152 宽松形态的字面目标（含空格路径/带引号整段目标）按普通路径分类', () => {
+    // 渲染层放行后 webview 上报字面目标：分类层不得丢空格或拆引号——
+    // 引号组合形态的目标是 `a b "标题"` 整段（宽松形态学口径），文件不存在
+    // 由 vscode 层探测后给 not-found 反馈
+    expect(classifyLinkTarget('./子 目录/目标 文档.md', WIN)).toEqual({
+      kind: 'doc',
+      candidates: ['d:\\notes\\子目录\\子 目录\\目标 文档.md'],
+    })
+    const quoted = classifyLinkTarget('a b "标题"', WIN)
+    expect(quoted).toEqual({
+      kind: 'doc',
+      candidates: ['d:\\notes\\子目录\\a b "标题"', 'd:\\notes\\子目录\\a b "标题".md'],
+    })
+  })
+
   it('POSIX 宿主：相对路径与 UTF-8 命名解析正确', () => {
     const r = classifyLinkTarget('./assets/图 片说明.md', POSIX)
     expect(r).toEqual({ kind: 'doc', candidates: ['/home/u/notes/sub/assets/图 片说明.md'] })

@@ -32,6 +32,7 @@ import {
   scanWikilinksInLine,
   wikilinkAtCol,
 } from '../shared/wikilink'
+import { looseLinkAtCol, scanLooseLinksInLine } from '../shared/looseLink'
 import { applyObsidianDomAlias } from '../shared/obsidianAlias'
 
 /** #10 链接稳定类名（图片类名复用 IMAGE_CLASS_NAMES.image） */
@@ -119,8 +120,9 @@ export class LiveWikilinkWidget extends WidgetType {
   }
 }
 
-/** 双链排除的代码上下文（lezer 节点名）：围栏/缩进代码与行内代码内按源码呈现 */
-const WIKILINK_CODE_CONTEXTS = new Set([
+/** 行扫描类内联装饰（双链 / #152 宽松链接）排除的代码上下文（lezer 节点
+ *  名）：围栏/缩进代码与行内代码内按源码呈现 */
+const INLINE_SCAN_CODE_CONTEXTS = new Set([
   'FencedCode',
   'CodeBlock',
   'CodeText',
@@ -130,12 +132,12 @@ const WIKILINK_CODE_CONTEXTS = new Set([
 ])
 
 /** occurrence 起点是否处于代码上下文或 frontmatter 内（源码降级边界） */
-function wikilinkSuppressed(tree: Tree, from: number, fm: SourceRange | null): boolean {
+function inlineScanSuppressed(tree: Tree, from: number, fm: SourceRange | null): boolean {
   if (fm && from < fm.end) {
     return true
   }
   for (const node of chainAt(tree, from)) {
-    if (WIKILINK_CODE_CONTEXTS.has(node.name)) {
+    if (INLINE_SCAN_CODE_CONTEXTS.has(node.name)) {
       return true
     }
   }
@@ -414,7 +416,7 @@ export function buildWikilinkDecorationRanges(
       if (!seenLines.has(line.number)) {
         seenLines.add(line.number)
         for (const hit of scanWikilinksInLine(line.text, line.from)) {
-          if (wikilinkSuppressed(tree, hit.from, fm)) {
+          if (inlineScanSuppressed(tree, hit.from, fm)) {
             continue
           }
           const parsed = parseWikilinkInner(hit.inner)
@@ -451,6 +453,63 @@ function hrefAtPos(doc: Text, tree: Tree, pos: number): { href: string; from: nu
   return { href, from: node.from, to: node.to }
 }
 
+/**
+ * 构建视口内宽松内联链接/图片装饰区间（#152）：逐行扫描 shared/looseLink
+ * 的出现表——lezer 对含空格目标只产 `[文字]` 残节点（树驱动路径不可用），
+ * 行扫描与阅读渲染共用同一形态学（双链装饰同机制）。呈现语义与树驱动
+ * 路径一致：光标在范围外链接标签为 rendered mark + 首尾隐藏、图片整块
+ * 替换 widget；光标进入显源码。代码上下文与 frontmatter 内不装饰。
+ * 纯数据输入，可单测直驱。
+ */
+export function buildLooseLinkDecorationRanges(
+  doc: Text,
+  tree: Tree,
+  selection: EditorSelection,
+  visibleRanges: ReadonlyArray<{ from: number; to: number }>,
+  fm: SourceRange | null,
+  images?: ImageResourceManager,
+): Array<Range<Decoration>> {
+  const out: Array<Range<Decoration>> = []
+  const seenLines = new Set<number>()
+  for (const range of visibleRanges) {
+    let pos = range.from
+    while (pos < range.to) {
+      const line = doc.lineAt(pos)
+      if (!seenLines.has(line.number)) {
+        seenLines.add(line.number)
+        for (const hit of scanLooseLinksInLine(line.text, line.from)) {
+          if (inlineScanSuppressed(tree, hit.from, fm)) {
+            continue
+          }
+          if (hit.image) {
+            if (selectionTouchesRange(selection, hit.from, hit.to)) {
+              continue // 光标进入该图片范围，显示源码供编辑
+            }
+            const alt = doc.sliceString(hit.labelFrom, hit.labelTo)
+            out.push(imageWidgetDeco(hit.dest, alt, images).range(hit.from, hit.to))
+            continue
+          }
+          const active = selectionTouchesRange(selection, hit.from, hit.to)
+          out.push(
+            (active ? linkMarkDeco : renderedLinkMarkDeco).range(hit.labelFrom, hit.labelTo),
+          )
+          if (!active) {
+            // 首尾整体隐藏：`[` 与 `](目标)`（连续区间；标签内无嵌套图片——
+            // 形态学守卫标签不含 []，嵌套图片即独立出现）
+            out.push(hideDeco.range(hit.from, hit.labelFrom))
+            out.push(hideDeco.range(hit.labelTo, hit.to))
+          }
+        }
+      }
+      if (line.to >= range.to) {
+        break
+      }
+      pos = line.to + 1
+    }
+  }
+  return out
+}
+
 /** 激活指定源位置的链接：命中即上报意图并返回 true */
 export function activateLinkAtPos(
   view: EditorView,
@@ -467,6 +526,34 @@ export function activateLinkAtPos(
     return false
   }
   postActivate(hit.href, hit.from, hit.to)
+  return true
+}
+
+/** 激活指定源位置的宽松链接（#152）：命中即上报意图（字面目标原文，含
+ *  空格——宿主 trim/容错解码）并返回 true。图片形态不是跳转目标（错误
+ *  态重试由资源管理器处理）。替换区间仍有文档坐标，命中判定与源码态一致。 */
+export function activateLooseLinkAtPos(
+  view: EditorView,
+  pos: number,
+  postActivate: (href: string, srcStart: number, srcEnd: number) => void,
+): boolean {
+  const state = view.state
+  const field = state.field(liveDecorationsField, false)
+  if (!field) {
+    return false
+  }
+  const clamped = Math.max(0, Math.min(pos, state.doc.length))
+  const line = state.doc.lineAt(clamped)
+  const hit = looseLinkAtCol(line.text, clamped - line.from)
+  if (!hit || hit.image) {
+    return false
+  }
+  const from = line.from + hit.from
+  const to = line.from + hit.to
+  if (inlineScanSuppressed(field.tree, from, field.fm)) {
+    return false
+  }
+  postActivate(hit.dest, from, to)
   return true
 }
 
@@ -493,7 +580,7 @@ export function activateWikilinkAtPos(
   // 上报区间都以全文坐标为契约）
   const from = line.from + hit.from
   const to = line.from + hit.to
-  if (parseWikilinkInner(hit.inner) === null || wikilinkSuppressed(field.tree, from, field.fm)) {
+  if (parseWikilinkInner(hit.inner) === null || inlineScanSuppressed(field.tree, from, field.fm)) {
     return false
   }
   const pipeAt = hit.inner.indexOf('|')
@@ -503,7 +590,8 @@ export function activateWikilinkAtPos(
 }
 
 /** Ctrl/Cmd+mousedown 直接激活；普通单击在 mouseup 才确认，以免拖选时跳转。
- *  #11：双链先于普通链接判定（两者语法不重叠，先后仅是判定次序） */
+ *  #11：双链先于普通链接判定（两者语法不重叠，先后仅是判定次序）；
+ *  #152：树驱动链接之后是宽松链接（行扫描判定，语法不重叠） */
 export function makeLinkMouseDownHandler(
   postActivate: (href: string, srcStart: number, srcEnd: number) => void,
   postActivateWikilink?: (target: string, srcStart: number, srcEnd: number) => void,
@@ -519,7 +607,7 @@ export function makeLinkMouseDownHandler(
       event.preventDefault()
       return true
     }
-    if (activateLinkAtPos(view, pos, postActivate)) {
+    if (activateLinkAtPos(view, pos, postActivate) || activateLooseLinkAtPos(view, pos, postActivate)) {
       event.preventDefault()
       return true
     }
@@ -555,7 +643,8 @@ export function createLinkInteractions(opts: {
           return RangeSet.empty
         }
         // #11：链接/图片（树驱动）与双链（行扫描）的区间合并为同一装饰集
-        // ——两类语法不重叠，RangeSet.of 排序去重即可
+        // ——两类语法不重叠，RangeSet.of 排序去重即可；#152 宽松链接同为
+        // 行扫描来源，与树驱动/双链语法均不重叠（仅接管标准层拒绝的形态）
         return RangeSet.of(
           [
             ...buildLinkImageDecorationRanges(
@@ -571,6 +660,14 @@ export function createLinkInteractions(opts: {
               view.state.selection,
               view.visibleRanges,
               field.fm,
+            ),
+            ...buildLooseLinkDecorationRanges(
+              view.state.doc,
+              field.tree,
+              view.state.selection,
+              view.visibleRanges,
+              field.fm,
+              opts.images,
             ),
           ],
           true,
@@ -601,12 +698,15 @@ export function createLinkInteractions(opts: {
           pendingClick = null
           if (!pending || event.button !== 0 ||
             Math.hypot(event.clientX - pending.x, event.clientY - pending.y) > 5) return false
+          // #152：树驱动链接未命中再试宽松链接（行扫描；含 pos-1 边界重试）
+          const activateLink = (pos: number) =>
+            activateLinkAtPos(view, pos, opts.postActivate) ||
+            activateLooseLinkAtPos(view, pos, opts.postActivate)
           const hit = pending.target === 'wikilink'
             ? Boolean(opts.postActivateWikilink &&
               (activateWikilinkAtPos(view, pending.pos, opts.postActivateWikilink) ||
                 (pending.pos > 0 && activateWikilinkAtPos(view, pending.pos - 1, opts.postActivateWikilink))))
-            : activateLinkAtPos(view, pending.pos, opts.postActivate) ||
-              (pending.pos > 0 && activateLinkAtPos(view, pending.pos - 1, opts.postActivate))
+            : activateLink(pending.pos) || (pending.pos > 0 && activateLink(pending.pos - 1))
           if (hit) event.preventDefault()
           return hit
         },
