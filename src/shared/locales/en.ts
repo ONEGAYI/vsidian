@@ -54,16 +54,26 @@ export const en = {
   'keybindingSettings.invalid': 'Invalid keybinding; not saved.',
   'keybindingSettings.resetFailed': 'Failed to restore the default.',
   'keybindingSettings.searchNamePlaceholder': 'Search action names',
-  'keybindingSettings.searchKeyPlaceholder': 'Search by keybinding',
-  'keybindingSettings.searchKeyCaption': 'Search by keys',
+  /** 搜索框内键盘图标按钮（#155）：点击切换为按键捕获过滤模式 */
+  'keybindingSettings.keySearchToggle': 'Filter by keybinding',
+  /** 键位捕获签占位（#155）：行内就地录制键位 */
+  'keybindingSettings.capturePlaceholder': 'Press a shortcut…',
+  /** 筛选签（#155）：冲突/全部/已分配/由我分配/未分配 */
+  'keybindingSettings.filterAll': 'All',
+  'keybindingSettings.filterConflicts': 'Conflicts',
+  'keybindingSettings.filterAssigned': 'Assigned',
+  'keybindingSettings.filterUserAssigned': 'Assigned by me',
+  'keybindingSettings.filterUnassigned': 'Unassigned',
+  /** 行内更多操作菜单（⋯）按钮与容器的可访问名 */
+  'keybindingSettings.moreActions': 'More actions',
+  /** 捕获态提交钮（＋ 原位变更）的可访问名 */
+  'keybindingSettings.commitCapture': 'Commit keybinding',
   'keybindingSettings.resetAll': 'Reset all to defaults',
   'keybindingSettings.noMatch': 'No matching actions.',
   'keybindingSettings.unbound': 'Unbound',
   'keybindingSettings.addBinding': 'Add binding',
   'keybindingSettings.clearBindings': 'Clear bindings',
   'keybindingSettings.resetDefault': 'Reset to default',
-  'keybindingSettings.recordPlaceholder': 'Press a single chord or two consecutive chords',
-  'keybindingSettings.saveBinding': 'Save binding',
   'keybindingSettings.replaceConflicts': 'Replace original binding',
 
   // ---- setting.（设置项定义 title/description，经 titleKey/descriptionKey 取词）----
@@ -131,6 +141,10 @@ export const en = {
   'styleRef.empty': 'No entries match the current filters.',
   // ---- #145 类目分栏分页与契约 JSON 导出 ----
   'styleRef.categoryNav': 'Browse by category',
+  // #155 小改：总分页签（总表/详细查询两态）
+  'styleRef.tabNav': 'Style reference views',
+  'styleRef.tabOverview': 'Reference',
+  'styleRef.tabDetail': 'Detailed lookup',
   'styleRef.exportJson': 'Export JSON',
   'styleRef.prevPage': 'Previous page',
   'styleRef.nextPage': 'Next page',

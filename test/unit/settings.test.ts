@@ -8,6 +8,7 @@ import { describe, it, expect } from 'vitest'
 import {
   CODEBLOCK_CARD_DEFAULT,
   CODEBLOCK_CARD_KEY,
+  CODEBLOCK_LINE_NUMBERS_KEY,
   PRODUCTION_SETTING_DEFINITIONS,
   SHOW_LINE_NUMBERS_DEFAULT,
   SHOW_LINE_NUMBERS_KEY,
@@ -19,8 +20,10 @@ import {
   SYMBOL_TAB_ESCAPE_KEY,
   applySettingsPatch,
   isSettingDefinition,
+  isSettingEnabled,
   sanitizeStoredSettings,
   settingsDefaults,
+  validateSettingDependencies,
   type SettingDefinition,
 } from '../../src/shared/settings'
 import { zhCn } from '../../src/shared/locales/zh-cn'
@@ -272,5 +275,93 @@ describe('isSettingDefinition（定义自校验：注册入口防线）', () => 
   it('descriptionKey 可选：缺省合法，存在时须为字符串', () => {
     expect(isSettingDefinition({ key: 'a', type: 'boolean', default: false, titleKey: 'k', descriptionKey: 'kd' })).toBe(true)
     expect(isSettingDefinition({ key: 'a', type: 'boolean', default: false, titleKey: 'k', descriptionKey: 1 })).toBe(false)
+  })
+})
+
+describe('设置项依赖（#155 跟进：dependsOn 注册表驱动）', () => {
+  /** fixture：卡片总开关 + 两个子项 + 一条传递链（孙依赖子、子依赖开关） */
+  const DEP_DEFS: readonly SettingDefinition[] = [
+    { key: 'parent', type: 'boolean', default: true, titleKey: 'k' },
+    { key: 'child', type: 'boolean', default: true, titleKey: 'k', dependsOn: 'parent' },
+    { key: 'grandchild', type: 'boolean', default: true, titleKey: 'k', dependsOn: 'child' },
+    { key: 'independent', type: 'boolean', default: false, titleKey: 'k' },
+  ]
+  const defOf = (defs: readonly SettingDefinition[], key: string): SettingDefinition =>
+    defs.find((d) => d.key === key)!
+
+  it('isSettingEnabled：无依赖恒可用；依赖开启可用、关闭禁用；传递链逐级传导', () => {
+    const enabled = (values: Record<string, boolean>, key: string) =>
+      isSettingEnabled(DEP_DEFS, values, defOf(DEP_DEFS, key))
+    expect(enabled({}, 'independent')).toBe(true)
+    expect(enabled({ parent: true }, 'child')).toBe(true)
+    expect(enabled({ parent: false }, 'child')).toBe(false)
+    // 传递链：parent 关 → child 关 → grandchild 链上不可用
+    expect(enabled({ parent: false }, 'grandchild')).toBe(false)
+    expect(enabled({ parent: true }, 'grandchild')).toBe(true)
+  })
+
+  it('值缺失回退默认值：依赖项默认开启时，快照缺值不误判为禁用', () => {
+    expect(isSettingEnabled(DEP_DEFS, {}, defOf(DEP_DEFS, 'child'))).toBe(true)
+    const defaultOff: readonly SettingDefinition[] = [
+      { key: 'p', type: 'boolean', default: false, titleKey: 'k' },
+      { key: 'c', type: 'boolean', default: true, titleKey: 'k', dependsOn: 'p' },
+    ]
+    expect(isSettingEnabled(defaultOff, {}, defOf(defaultOff, 'c'))).toBe(false)
+  })
+
+  it('非布尔依赖视为不可用（依赖语义只认布尔开关；枚举/异常值不开启）', () => {
+    const defs: readonly SettingDefinition[] = [
+      { key: 'p', type: 'boolean', default: true, titleKey: 'k' },
+      { key: 'c', type: 'boolean', default: true, titleKey: 'k', dependsOn: 'p' },
+    ]
+    expect(isSettingEnabled(defs, { p: 1 as unknown as boolean }, defOf(defs, 'c'))).toBe(false)
+  })
+
+  it('validateSettingDependencies：引用不存在 / 自环 / 传递环均报违规；合法表为空', () => {
+    expect(validateSettingDependencies(DEP_DEFS)).toEqual([])
+    const missing = [
+      { key: 'c', type: 'boolean', default: true, titleKey: 'k', dependsOn: 'ghost' },
+    ] as const
+    expect(validateSettingDependencies(missing as unknown as readonly SettingDefinition[]).join())
+      .toContain('ghost')
+    const selfDep = [
+      { key: 's', type: 'boolean', default: true, titleKey: 'k', dependsOn: 's' },
+    ] as const
+    expect(validateSettingDependencies(selfDep as unknown as readonly SettingDefinition[]).join())
+      .toContain('s')
+    const cyclic: readonly SettingDefinition[] = [
+      { key: 'a', type: 'boolean', default: true, titleKey: 'k', dependsOn: 'b' },
+      { key: 'b', type: 'boolean', default: true, titleKey: 'k', dependsOn: 'a' },
+    ]
+    expect(validateSettingDependencies(cyclic).length).toBeGreaterThan(0)
+  })
+
+  it('环防御：isSettingEnabled 对成环表不死循环（视为可用，注册表校验另行拦截）', () => {
+    const cyclic: readonly SettingDefinition[] = [
+      { key: 'a', type: 'boolean', default: true, titleKey: 'k', dependsOn: 'b' },
+      { key: 'b', type: 'boolean', default: true, titleKey: 'k', dependsOn: 'a' },
+    ]
+    expect(isSettingEnabled(cyclic, {}, defOf(cyclic, 'a'))).toBe(true)
+  })
+
+  it('isSettingDefinition：dependsOn 缺省合法，存在时须为非空字符串', () => {
+    expect(isSettingDefinition({ key: 'a', type: 'boolean', default: false, titleKey: 'k' })).toBe(true)
+    expect(isSettingDefinition({ key: 'a', type: 'boolean', default: false, titleKey: 'k', dependsOn: 'b' })).toBe(true)
+    expect(isSettingDefinition({ key: 'a', type: 'boolean', default: false, titleKey: 'k', dependsOn: 1 })).toBe(false)
+    expect(isSettingDefinition({ key: 'a', type: 'boolean', default: false, titleKey: 'k', dependsOn: '' })).toBe(false)
+  })
+
+  it('生产注册表：依赖登记完整（引用存在、无环）且现有两条依赖指向代码块卡片', () => {
+    expect(validateSettingDependencies(PRODUCTION_SETTING_DEFINITIONS)).toEqual([])
+    const lineNumbers = defOf(PRODUCTION_SETTING_DEFINITIONS, CODEBLOCK_LINE_NUMBERS_KEY)
+    const copyButton = defOf(PRODUCTION_SETTING_DEFINITIONS, 'codeblock.copyButton')
+    expect(lineNumbers.dependsOn).toBe(CODEBLOCK_CARD_KEY)
+    expect(copyButton.dependsOn).toBe(CODEBLOCK_CARD_KEY)
+    // 卡片开（默认）可用；卡片关则两个子项禁用
+    const defaults = settingsDefaults(PRODUCTION_SETTING_DEFINITIONS)
+    expect(defaults[CODEBLOCK_CARD_KEY]).toBe(CODEBLOCK_CARD_DEFAULT)
+    expect(isSettingEnabled(PRODUCTION_SETTING_DEFINITIONS, defaults, lineNumbers)).toBe(true)
+    expect(isSettingEnabled(PRODUCTION_SETTING_DEFINITIONS, { ...defaults, [CODEBLOCK_CARD_KEY]: false }, lineNumbers)).toBe(false)
+    expect(isSettingEnabled(PRODUCTION_SETTING_DEFINITIONS, { ...defaults, [CODEBLOCK_CARD_KEY]: false }, copyButton)).toBe(false)
   })
 })

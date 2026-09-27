@@ -3,6 +3,8 @@
 // 钉住：#145 小类分栏（类目栏含域分组与计数）、分页（每页 15 条、页码导航、
 // 类目切换重置）、跨类目聚合搜索（来源类目标注）、支持等级过滤、
 // focusEntry 跳页定位、导出按钮经消息桥请求宿主。
+// #155 小改：总分页签（总表/详细查询，aria-selected 单选，focusEntry 路由）
+// 与「直接兼容」说明 callout 形态。
 // UI 文案经 t()；条目内容为文档数据。
 // @vitest-environment jsdom
 import { describe, expect, it, beforeAll } from 'vitest'
@@ -164,5 +166,66 @@ describe('样式参考分页（#145 小类分栏与分页）', () => {
   it('全局搜索 entries 覆盖全部条目（设置页搜索可定位）', () => {
     const section = new StyleReferenceSection({ postMessage: () => undefined })
     expect(section.entries.length).toBe(STYLE_GUIDE_ENTRIES.length + 1)
+  })
+})
+
+describe('总分页签与 callout（#155 小改）', () => {
+  it('默认总表页签激活：详细查询面板隐藏，总表含版本说明与别名总表', () => {
+    const { parent } = mount()
+    const tabs = parent.querySelectorAll<HTMLButtonElement>('.vsidian-style-ref-tab')
+    expect([...tabs].map((b) => b.textContent)).toEqual([
+      zhCn['styleRef.tabOverview'], zhCn['styleRef.tabDetail'],
+    ])
+    const [overviewTab, detailTab] = tabs
+    expect(overviewTab!.getAttribute('aria-selected')).toBe('true')
+    expect(detailTab!.getAttribute('aria-selected')).toBe('false')
+    expect(parent.querySelector('[role="tablist"]')!.getAttribute('aria-label'))
+      .toBe(zhCn['styleRef.tabNav'])
+    // 面板显隐：总表可见（无 hidden），详细查询隐藏但结构在
+    expect(parent.querySelector('.vsidian-style-ref-overview')!.hasAttribute('hidden')).toBe(false)
+    expect(parent.querySelector('.vsidian-style-ref-detail')!.hasAttribute('hidden')).toBe(true)
+    expect(parent.querySelector('.vsidian-style-ref-overview')!.textContent)
+      .toContain(zhCn['styleRef.versionNote'].replace('{version}', STYLE_GUIDE_VERSION))
+    expect(parent.querySelector('.vsidian-style-ref-overview .vsidian-style-ref-vars tbody tr'))
+      .toBeTruthy()
+    expect(parent.querySelector('.vsidian-style-ref-detail .vsidian-style-ref-cats')).toBeTruthy()
+  })
+
+  it('点击「详细查询」页签切面板：查询布局可见、总表隐藏，aria-selected 单选', () => {
+    const { parent } = mount()
+    const tabs = parent.querySelectorAll<HTMLButtonElement>('.vsidian-style-ref-tab')
+    tabs[1]!.click()
+    expect(tabs[1]!.getAttribute('aria-selected')).toBe('true')
+    expect(tabs[0]!.getAttribute('aria-selected')).toBe('false')
+    expect(parent.querySelector('.vsidian-style-ref-overview')!.hasAttribute('hidden')).toBe(true)
+    expect(parent.querySelector('.vsidian-style-ref-detail')!.hasAttribute('hidden')).toBe(false)
+    // 切回总表同样生效（两态互斥）
+    tabs[0]!.click()
+    expect(parent.querySelector('.vsidian-style-ref-overview')!.hasAttribute('hidden')).toBe(false)
+    expect(parent.querySelector('.vsidian-style-ref-detail')!.hasAttribute('hidden')).toBe(true)
+  })
+
+  it('focusEntry 路由页签：条目定位落详细查询并跳页，overview 落总表', () => {
+    const parent2 = document.createElement('div')
+    const section2 = new StyleReferenceSection({ postMessage: () => undefined })
+    section2.mount(parent2, 'outline-search-hit')
+    const tabOf = (root: HTMLElement, id: string) =>
+      root.querySelector<HTMLButtonElement>(`.vsidian-style-ref-tab[data-tab="${id}"]`)!
+    expect(tabOf(parent2, 'detail').getAttribute('aria-selected')).toBe('true')
+    expect(parent2.querySelector('.vsidian-style-ref-detail')!.hasAttribute('hidden')).toBe(false)
+    expect(parent2.querySelector('[data-entry="outline-search-hit"]')).not.toBeNull()
+
+    const parent3 = document.createElement('div')
+    const section3 = new StyleReferenceSection({ postMessage: () => undefined })
+    section3.mount(parent3, 'overview')
+    expect(tabOf(parent3, 'overview').getAttribute('aria-selected')).toBe('true')
+    expect(parent3.querySelector('.vsidian-style-ref-overview')!.hasAttribute('hidden')).toBe(false)
+  })
+
+  it('「直接兼容」说明以 callout 形态呈现（共享 vsidian-settings-callout）', () => {
+    const { parent } = mount()
+    const bridge = parent.querySelector('.vsidian-style-ref-bridge')!
+    expect(bridge.classList.contains('vsidian-settings-callout')).toBe(true)
+    expect(bridge.textContent).toBe(zhCn['styleRef.bridgeNote'])
   })
 })
