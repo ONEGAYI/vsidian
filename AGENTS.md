@@ -181,6 +181,7 @@ vsidian/
 │       ├── liveMermaid.ts          # Mermaid live 装饰（#60）
 │       ├── localeBoot.ts           # webview 语言装配入口
 │       ├── localeDom.ts            # 常驻控件文案换包单点重刷注册表
+│       ├── localeOnDemand.ts       # 按需控件文案换包 DOM 级重刷
 │       ├── main.css                # webview 全局布局样式
 │       ├── main.ts                 # webview 启动入口
 │       ├── markdownDoc.ts          # Markdown 文档工具与树查询

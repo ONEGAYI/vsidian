@@ -6,10 +6,12 @@
 // - fixture 文档纯 ASCII：用户文档内容可能天然含中文，排除法不区分来源；
 // - 收集范围刻意不含 aria-description 等运行时动态属性（键位提示由
 //   refreshQuickActions 按选区/输入重算，非换包驱动）；
-// - 按需控件（代码卡片/公式降级/图形按钮/图片占位/表格控件按钮）不在
-//   本契约范围（fixture 不触发物化；另一提交处理）。
+// - 按需控件（#101 第三部分）：fixture 文档含代码围栏/坏公式/图片，若
+//   CM6 在 jsdom 物化 widget 则全树扫描直接覆盖；无法真实物化的控件由
+//   「生产 builder/widget.toDOM 直构 + 挂同一 document 查询域」的等价
+//   形态用例覆盖（见文件末 describe）。
 // - 大纲面板随编辑器控制器装配（buildSidebar 内建骨架），不单列用例。
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/syncController'
 import { SettingsPageView } from '../../src/webview/settingsPageView'
 import { KeybindingSettingsSection } from '../../src/webview/keybindingSettings'
@@ -17,6 +19,16 @@ import { PRODUCTION_SETTING_DEFINITIONS } from '../../src/shared/settings'
 import { installLocale } from '../../src/shared/i18n'
 import { zhCn } from '../../src/shared/locales/zh-cn'
 import { en } from '../../src/shared/locales/en'
+import { CodeCardHeaderWidget } from '../../src/webview/liveCodeCard'
+import { buildGraphicChrome } from '../../src/webview/graphicBlockChrome'
+import { LiveMathWidget } from '../../src/webview/liveMath'
+import { ImageResourceManager } from '../../src/webview/imageResource'
+import { MERMAID_CLASS_NAMES, MERMAID_CODE_ATTR } from '../../src/shared/mermaid'
+import {
+  __resetMermaidRenderStateForTest,
+  __setMermaidApiForTest,
+  renderMermaidInto,
+} from '../../src/webview/mermaidRender'
 
 // #94 起文案经 t() 取词：装配生产中文包（与 outlineSearchPanel 先例同款）
 installLocale('zh-cn', zhCn)
@@ -31,12 +43,22 @@ if (typeof Range !== 'undefined' && Range.prototype.getClientRects === undefined
 
 const DOC_URI = 'file:///d%3A/notes/locale-refresh.md'
 
-/** 纯 ASCII 文档：标题 + 段落，不含表格/任务/代码块/公式/图片/双链——
- *  刻意避开按需控件物化（它们是另一提交的领域） */
+/** 纯 ASCII 文档（#101 第三部分起含按需控件元素）：标题 + 段落 + 代码
+ *  围栏（卡片按钮）+ 坏公式（降级 title）+ 图片（loading 无固化文案）——
+ *  CM6 在 jsdom 无布局、视口物化不保证，物化则全树扫描覆盖，未物化由
+ *  文件末的直构等价形态用例兜底 */
 const DOC = [
   '# Alpha',
   '',
   'Intro paragraph with plain words.',
+  '',
+  '```ts',
+  'const x = 1',
+  '```',
+  '',
+  'Broken math $\\bad$ stays as source text.',
+  '',
+  '![pic](./missing.png)',
   '',
   '## Beta',
   '',
@@ -105,6 +127,14 @@ function attach(parent: HTMLElement): () => void {
   }
 }
 
+/** 排空 mermaid 渲染的异步链（串行队列 + promise 微任务；与
+ *  mermaidRender.test.ts 同款） */
+async function settle(times = 6): Promise<void> {
+  for (let i = 0; i < times; i++) {
+    await Promise.resolve()
+  }
+}
+
 describe('换包后 DOM 无旧语言残留（#101 常驻控件契约）', () => {
   it('编辑器面板：换包后全树无 zh 唯一值（顶栏/操作条/查找/横幅/侧栏/大纲）', () => {
     installLocale('zh-cn', zhCn)
@@ -119,10 +149,18 @@ describe('换包后 DOM 无旧语言残留（#101 常驻控件契约）', () => 
       // 前置：确实装配的是 zh（防 vacuous pass 的正控制之一）
       const resizer = parent.querySelector<HTMLElement>('.vsidian-sidebar-resizer')!
       expect(resizer.getAttribute('aria-label')).toBe(zhCn['sidebar.resize'])
+      // 按需控件真实物化路径正控制：fixture 围栏/坏公式经 CM6 真实物化
+      // （jsdom 无布局但 docView 首屏物化成立），卡片复制按钮 title 为 zh；
+      // 物化若退化此断言先红，提示 fixture 与直构用例的分工需重估
+      const cardCopy = parent.querySelector<HTMLElement>('.vsidian-code-card-copy')!
+      expect(cardCopy.title).toBe(zhCn['codeblock.copy'])
       switchToEnglish()
       // 正控制：既有刷新路径确实换词（标题栏设置按钮）
       const settingsBtn = parent.querySelector<HTMLButtonElement>('.vsidian-settings-toggle')!
       expect(settingsBtn.getAttribute('aria-label')).toBe(en['sidebar.settings'])
+      // 按需控件：就地重刷换词（真实物化的卡片按钮 + 公式降级 title
+      // 由全树 zhOnly 扫描覆盖）
+      expect(cardCopy.title).toBe(en['codeblock.copy'])
       expectNoStaleZh(parent, '编辑器面板')
     } finally {
       detach()
@@ -172,6 +210,117 @@ describe('换包后 DOM 无旧语言残留（#101 常驻控件契约）', () => 
     } finally {
       detach()
       view.dispose()
+    }
+  })
+})
+
+describe('按需控件换包后就地重刷（#101 第三部分契约）', () => {
+  afterEach(() => {
+    // 本组注入的 mermaid mock 不外溢（其他组不消费渲染层状态）
+    __resetMermaidRenderStateForTest()
+  })
+
+  it('卡片/图形/公式/图片控件：换包后 title 与 aria-label 就地取 en 词', () => {
+    // 等价形态：CM6 widget 的视口物化依赖布局（jsdom 无），此处直调生产
+    // widget.toDOM / chrome builder——CM6 物化即调同一函数——并挂进与生产
+    // 相同的 document 查询域；换包链路（installLocale → onLocaleChanged →
+    // applyEditorLocale → localeOnDemand 扫描）走真控制器，与生产同构。
+    // 图片错误态经真实状态机写入（attach → 宿主解析失败），钉住 data 属性
+    // 契约（data-vsidian-img-state / -reason）。
+    installLocale('zh-cn', zhCn)
+    const { bridge } = makeBridge()
+    const c = new WebviewSyncController(bridge)
+    const parent = document.createElement('div')
+    const detach = attach(parent)
+    const host = document.createElement('div')
+    document.body.append(host)
+    try {
+      c.mount(parent)
+      c.handleHostMessage({ kind: 'init', sessionId: 's1', docUri: DOC_URI, version: 1, text: DOC })
+      host.append(
+        new CodeCardHeaderWidget('ts', 'ts', true, 'const x = 1', false).toDOM(),
+        new CodeCardHeaderWidget('ts', 'ts', true, 'const x = 1', true).toDOM(),
+        buildGraphicChrome({ onEdit: () => {}, onPopup: () => {} }),
+        new LiveMathWidget('\\bad', false).toDOM(),
+      )
+      const images = new ImageResourceManager({
+        isDirectSrc: () => false,
+        requestHost: () => {},
+      })
+      const img = document.createElement('img')
+      host.append(img)
+      images.attach(img, './broken.png')
+      images.handleResult({ reqId: 1, ok: false, reason: 'not found' })
+      // 正控制：换包前全部是 zh（展开态提示折叠、收起态提示展开）
+      expect(host.querySelector<HTMLElement>('.vsidian-code-card-copy')!.title)
+        .toBe(zhCn['codeblock.copy'])
+      const folds = [...host.querySelectorAll<HTMLElement>('.vsidian-code-card-fold')]
+      expect(folds.map((btn) => btn.title))
+        .toEqual([zhCn['codeblock.collapse'], zhCn['codeblock.expand']])
+      expect(host.querySelector<HTMLElement>('.vsidian-graphic-chrome-edit')!.title)
+        .toBe(zhCn['graphic.editSource'])
+      expect(host.querySelector<HTMLElement>('.vsidian-graphic-chrome-popup')!.title)
+        .toBe(zhCn['graphic.popup'])
+      expect(host.querySelector<HTMLElement>('.vsidian-math-error')!.title)
+        .toBe(zhCn['decor.mathError'])
+      expect(img.title).toBe(zhCn['decor.imageError'].replace('{reason}', 'not found'))
+      switchToEnglish()
+      // 换包后：就地重刷为 en（title 与 aria-label 同源换词）
+      const copy = host.querySelector<HTMLElement>('.vsidian-code-card-copy')!
+      expect(copy.title).toBe(en['codeblock.copy'])
+      expect(copy.getAttribute('aria-label')).toBe(en['codeblock.copy'])
+      expect(folds.map((btn) => btn.title))
+        .toEqual([en['codeblock.collapse'], en['codeblock.expand']])
+      expect(host.querySelector<HTMLElement>('.vsidian-graphic-chrome-edit')!.title)
+        .toBe(en['graphic.editSource'])
+      expect(host.querySelector<HTMLElement>('.vsidian-graphic-chrome-popup')!.title)
+        .toBe(en['graphic.popup'])
+      expect(host.querySelector<HTMLElement>('.vsidian-math-error')!.title)
+        .toBe(en['decor.mathError'])
+      expect(img.title).toBe(en['decor.imageError'].replace('{reason}', 'not found'))
+      expectNoStaleZh(host, '按需控件（直构树）')
+    } finally {
+      host.remove()
+      detach()
+    }
+  })
+
+  it('mermaid 错误占位：换包后经重渲染取 en 词（缓存复用原始错误串）', async () => {
+    installLocale('zh-cn', zhCn)
+    __setMermaidApiForTest({
+      initialize() {},
+      async render() {
+        throw new Error('Parse error on line 2')
+      },
+    })
+    // 容器形态与生产一致（diagram 类 + 源码 data 属性），挂 document 域
+    const el = document.createElement('div')
+    el.className = MERMAID_CLASS_NAMES.diagram
+    el.setAttribute(MERMAID_CODE_ATTR, 'graph TD\n<<bad')
+    document.body.append(el)
+    const { bridge } = makeBridge()
+    const c = new WebviewSyncController(bridge)
+    const parent = document.createElement('div')
+    const detach = attach(parent)
+    try {
+      c.mount(parent)
+      c.handleHostMessage({ kind: 'init', sessionId: 's1', docUri: DOC_URI, version: 1, text: DOC })
+      renderMermaidInto(el, 'graph TD\n<<bad')
+      await settle()
+      expect(el.getAttribute('data-vsidian-mermaid-state')).toBe('error')
+      // 正控制：换包前是 zh 插值（原始错误串与语言无关）
+      expect(el.querySelector<HTMLElement>('.vsidian-mermaid-error-message')!.textContent)
+        .toBe(zhCn['decor.mermaidError'].replace('{message}', 'Parse error on line 2'))
+      switchToEnglish()
+      // 换包触发 refreshMermaidErrorLocale → 重渲染（异步）→ 新词。
+      // 注意重新取节点：applyEntry 先清空容器重建降级 DOM，换包前抓的
+      // 旧 message 引用已脱挂、textContent 停留旧词
+      await settle()
+      expect(el.querySelector<HTMLElement>('.vsidian-mermaid-error-message')!.textContent)
+        .toBe(en['decor.mermaidError'].replace('{message}', 'Parse error on line 2'))
+    } finally {
+      el.remove()
+      detach()
     }
   })
 })

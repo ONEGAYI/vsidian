@@ -66,6 +66,7 @@ import {
 } from '../shared/settings'
 import { onLocaleChanged, t } from '../shared/i18n'
 import { bindLocale, bindLocaleFn, refreshElementLocale } from './localeDom'
+import { refreshOnDemandControlLocale } from './localeOnDemand'
 import {
   FIND_CLASS_NAMES,
   computeFindMatches,
@@ -2613,19 +2614,21 @@ export class WebviewSyncController {
    *  （#94 起就地刷新常驻文本；#101 起常驻控件文案创建与换包重刷统一经
    *  localeDom 注册表单点完成——顶栏/操作条框架与按钮、查找面板、冲突
    *  横幅、侧栏骨架与大纲骨架不再在此逐项回查，data-group 锚点随之退役，
-   *  data-op/data-heading-op 仅保留给 refreshQuickActions）。此处只剩注册表
-   *  覆盖不到的两类：
+   *  data-op/data-heading-op 仅保留给 refreshQuickActions）。此处剩三类：
    *  - 工具提示经 refreshQuickActions 重算：复合 title（基名+键位）随选区/
    *    输入驱动，与换包重刷互补（操作条关闭时早退，基名 title 已由注册表
    *    就地换词）；
-   *  - 表格控件层 aria-label 的就地兜底：tableControls 是按需控件（层在
-   *    插件构造时物化、按钮每轮 render 重建），【由后续提交处理】——其余
-   *    按需控件（右键菜单、代码卡片/公式降级/图形按钮/图片占位等装饰
-   *    widget）仍随下次渲染自然取新词，同为后续提交的接缝 */
+   *  - 表格控件层 aria-label 的就地兜底：tableControls 的控件按钮每轮
+   *    render 全量重建取词（探索笔记 101 §4.5），静止窗口只剩层 aria；
+   *  - 按需控件（#101 第三部分）：代码卡片/图形按钮/公式降级/图片错误/
+   *    mermaid 错误占位的固化文案经 localeOnDemand 的 document 级扫描就地
+   *    重刷（含阅读视图已挂载块与弹窗；右键菜单等瞬态浮层随下次打开
+   *    自然取新词，不扫）。 */
   private applyEditorLocale(): void {
     this.refreshQuickActions()
     this.liveWrapper?.querySelector('.vsidian-table-controls')
       ?.setAttribute('aria-label', t('table.controls'))
+    refreshOnDemandControlLocale(document)
   }
 
   /** 主编辑区顶栏（#53 图标化）：左端齿轮设置按钮（打开宿主级 Vsidian
