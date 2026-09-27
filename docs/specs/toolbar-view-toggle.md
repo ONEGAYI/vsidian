@@ -24,7 +24,7 @@
 2. **图标与 aria-label**：随当前态与界面语言双变化，进 localeDom 换包重刷注册表（参照侧栏按钮 `bindLocaleFnAttrs` 先例）。
 3. **与右上角三态按钮互不回归**：`vsidian.activeMode` context 与按钮互斥显隐 when 条件不变；阅读态下右上角「转源码」仍可用。
 4. **键盘可达**：原生 button，Tab 可达、Enter / Space 激活；`mousedown preventDefault` 防抢正文焦点（沿用 `✎` 按钮策略：只拦默认聚焦不拦 click，保留表格格区）。
-5. **快捷键入口评估**：本按钮是既有视图切换操作的 UI 入口；「双态切换」是否单列可绑定操作（默认可不绑定）在实施时定并记录到 `docs/specs/keybindings.md`。
+5. **快捷键入口**（2026-09-27 用户增补，已定）：「双态切换」单列为可绑定操作（`onegayi.vsidian.mode.toggleDualView`，双模式生效、默认 **ctrl+q**），与工具栏按钮共用同一目标推导（当前态取反）与同一 `runViewSwitch` 编排；触发走既有 `keybindings.execute` 出站 → 宿主 executeCommand → 同一双态切换实现，不另造路径。源码模式不经 webview 键路由，天然不涉及。
 
 ## 用户故事
 

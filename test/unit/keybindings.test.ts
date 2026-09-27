@@ -90,3 +90,22 @@ describe('HTML 注释快捷键（#139）', () => {
     expect(normalizeChord('ctrl+slash')).toBe('ctrl+slash')
   })
 })
+
+describe('双态视图切换快捷键（#141 增补）', () => {
+  it('默认 ctrl+q 双模式生效；manifest 命令已登记', () => {
+    const manifest = JSON.parse(readFileSync('package.json', 'utf8'))
+    expect(getEffectiveBindings({}, 'toggleDualView')).toEqual(['ctrl+q'])
+    expect(resolveKeybinding({}, 'live', 'ctrl+q')).toEqual({ kind: 'command', id: 'toggleDualView' })
+    expect(resolveKeybinding({}, 'reading', 'ctrl+q')).toEqual({ kind: 'command', id: 'toggleDualView' })
+    expect(manifest.contributes.commands.some(
+      (item: { command: string }) => item.command === 'onegayi.vsidian.mode.toggleDualView')).toBe(true)
+    // 显式清空后回落 none（宿主键位归还宿主）；改绑生效
+    expect(resolveKeybinding({ toggleDualView: [] }, 'live', 'ctrl+q')).toEqual({ kind: 'none' })
+    expect(applyBindingChange({}, 'toggleDualView', ['ctrl+alt+r'], false)).toMatchObject({ ok: true })
+  })
+
+  it('与三态切换语义并存：toggleViewMode 仍无默认键，键位互不冲突', () => {
+    const conflicts = findBindingConflicts({}, 'toggleDualView', 'ctrl+q')
+    expect(conflicts).toEqual([])
+  })
+})

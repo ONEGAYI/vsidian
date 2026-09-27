@@ -247,6 +247,9 @@ export const zhCn: Record<MessageKey, string> = {
   'sidebar.quickActions': '快速操作条',
   'sidebar.collapse': '收起右侧栏',
   'sidebar.expand': '展开右侧栏',
+  /** #141 工具栏双态视图切换按钮（aria/title 表目标动作，随当前态换词） */
+  'toolbar.switchToReading': '切换到阅读视图',
+  'toolbar.switchToLive': '切换到实时预览',
   'sidebar.resize': '拖拽调整侧栏宽度',
 
   'find.placeholder': '查找',
@@ -347,6 +350,8 @@ export const zhCn: Record<MessageKey, string> = {
   'command.mode.toReading.title': '切换到阅读模式',
   'command.mode.toSource.title': '切换到源码编辑器',
   'command.mode.toLive.title': '切换到实时预览',
+  /** #141 双态切换（live↔reading，不含源码；工具栏按钮与 Ctrl+Q 共用） */
+  'command.mode.toggleDualView.title': '切换阅读/实时预览',
   'command.find.title': '查找（编辑区）',
   'command.find.next.title': '下一个查找结果',
   'command.find.previous.title': '上一个查找结果',

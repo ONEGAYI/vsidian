@@ -264,6 +264,9 @@ export const en = {
   'sidebar.quickActions': 'Quick actions',
   'sidebar.collapse': 'Collapse sidebar',
   'sidebar.expand': 'Expand sidebar',
+  /** #141 toolbar dual-state view toggle (aria/title names the target action) */
+  'toolbar.switchToReading': 'Switch to reading view',
+  'toolbar.switchToLive': 'Switch to live preview',
   'sidebar.resize': 'Drag to resize sidebar',
 
   /** 查找控件 */
@@ -376,6 +379,8 @@ export const en = {
   'command.mode.toReading.title': 'Switch to reading view',
   'command.mode.toSource.title': 'Switch to the source editor',
   'command.mode.toLive.title': 'Switch to live preview',
+  /** #141 dual-state toggle (live↔reading; shared by toolbar button and Ctrl+Q) */
+  'command.mode.toggleDualView.title': 'Toggle reading/live preview',
   'command.find.title': 'Find (in the editor)',
   'command.find.next.title': 'Next match',
   'command.find.previous.title': 'Previous match',

@@ -5,6 +5,7 @@
   "command.mode.toReading.title": "切换到阅读模式",
   "command.mode.toSource.title": "切换到源码编辑器",
   "command.mode.toLive.title": "切换到实时预览",
+  "command.mode.toggleDualView.title": "切换阅读/实时预览",
   "command.find.title": "查找（编辑区）",
   "command.find.next.title": "下一个查找结果",
   "command.find.previous.title": "上一个查找结果",

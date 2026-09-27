@@ -14,9 +14,10 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // #130 合并入列：cssHttpsImports（HTTPS 导入/联网字体/受控 https 服务）。
 // #133 合并入列：chromeContract（界面域样式契约探针）紧随 obsidianAlias。
 // #139 合并入列：commentToggle（HTML 注释 Ctrl+/ 两态、淡化绘制与阅读隐藏）。
+// #141 合并入列：viewToggle（工具栏双态切换按钮与 Ctrl+Q 快捷键入口）。
 const names = ['tableCaret', 'taskClick', 'listEditing', 'tabIndent', 'symbolInput', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage',
-  'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract', 'commentToggle']
+  'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract', 'commentToggle', 'viewToggle']
 let workers = 2, reuseBuilds = true, selected = names
 for (const arg of process.argv.slice(2)) {
   if (/^--workers=\d+$/.test(arg)) workers = Number(arg.slice('--workers='.length))

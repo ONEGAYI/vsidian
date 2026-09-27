@@ -576,6 +576,17 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   margin-left: auto;
 }
 
+/* #141 双态视图切换按钮图标显隐：两图标常驻 DOM，显隐唯一来源是 body
+   模式类（vsidian-mode-live / vsidian-mode-reading）的这两条规则——样式
+   失效时两图标同显，浏览器绘制断言据此暴露（侧栏两态图标同款哲学） */
+#app .vsidian-body.vsidian-mode-live .vsidian-toolbar .vsidian-view-toggle .vsidian-view-toggle-book {
+  display: none;
+}
+
+#app .vsidian-body.vsidian-mode-reading .vsidian-toolbar .vsidian-view-toggle .vsidian-view-toggle-edit {
+  display: none;
+}
+
 /* 两态图标线宽（用户截图规格：收起=右侧竖线较细，展开=右侧竖线较粗）。
    差异唯一来源是这两条类切换规则——SVG 属性上不写 stroke-width，
    样式失效时两态同值（集成绘制断言据此暴露） */

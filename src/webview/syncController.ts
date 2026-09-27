@@ -467,6 +467,8 @@ export class WebviewSyncController {
   private unsubscribeLocale: (() => void) | undefined
   private quickActionsEl: HTMLElement | undefined
   private quickToggleBtn: HTMLButtonElement | undefined
+  /** #141 工具栏双态视图切换按钮（live↔reading；态随 view.mode.set 回流） */
+  private viewToggleBtn: HTMLButtonElement | undefined
   private quickHeadingBtn: HTMLButtonElement | undefined
   private quickHeadingMenu: HTMLElement | undefined
   private quickActionResizeObserver: ResizeObserver | undefined
@@ -1005,6 +1007,7 @@ export class WebviewSyncController {
     this.quickActionsEl?.remove()
     this.quickActionsEl = undefined
     this.quickToggleBtn = undefined
+    this.viewToggleBtn = undefined
     this.quickHeadingBtn = undefined
     this.quickHeadingMenu = undefined
     this.findPanel?.remove()
@@ -2022,6 +2025,16 @@ export class WebviewSyncController {
     if (this.readingContainer) {
       this.readingContainer.style.display = mode === 'reading' ? '' : 'none'
     }
+    // #141 body 模式类（vsidian-mode-live / vsidian-mode-reading）：双态
+    // 切换按钮图标显隐的 CSS 驱动锚点（两图标常驻 DOM，样式失效时同显
+    // 可被浏览器断言暴露）；aria/tooltip 随态换词经注册表单点重算
+    if (this.bodyEl) {
+      this.bodyEl.classList.toggle('vsidian-mode-live', mode === 'live')
+      this.bodyEl.classList.toggle('vsidian-mode-reading', mode === 'reading')
+    }
+    if (this.viewToggleBtn) {
+      refreshElementLocale(this.viewToggleBtn)
+    }
     this.persistState()
     // 模式变化主动回报（宿主缓存常新：表格结构命令在 reading 面板上据此
     // 给出可见反馈，不再静默丢弃）。握手前（无 sessionId）不回报——宿主
@@ -2801,8 +2814,9 @@ export class WebviewSyncController {
 
   /** 主编辑区顶栏（#53 图标化）：左端齿轮设置按钮（打开宿主级 Vsidian
    *  设置页面板——webview 无权自建面板，必须经 settings.open 出站），
-   *  右端右侧栏切换按钮（margin-left:auto 推靠）。#6 的模式切换按钮已按
-   *  #38 迁移至编辑器标题栏三态命令，不在顶栏渲染 */
+   *  其后快速操作 ✎；右端双态视图切换（#141，紧邻侧栏按钮左侧）与
+   *  侧栏切换按钮（margin-left:auto 推靠）。#38 起三态切换（含源码）
+   *  仍在宿主标题栏命令，双态按钮不触及源码路径 */
   private buildToolbar(): HTMLElement {
     const bar = document.createElement('div')
     bar.className = 'vsidian-toolbar'
@@ -2828,6 +2842,27 @@ export class WebviewSyncController {
       this.persistState()
     })
     this.quickToggleBtn = quickBtn
+    // #141 双态视图切换按钮（紧邻侧栏按钮左侧）：图标显当前态（阅读=
+    // 书本类 / Live=编辑类，显隐由 body 模式类经 CSS 驱动），aria/tooltip
+    // 表目标动作（点击切到另一态），随当前态与界面语言双变化（回调登记，
+    // 模式翻转经 applyModeDom 的 refreshElementLocale 重算）。切换不本地
+    // 执行（#38 收敛宿主）：出站 view.switch.request，按钮态由宿主回流的
+    // view.mode.set 驱动
+    const viewBtn = document.createElement('button')
+    viewBtn.type = 'button'
+    viewBtn.className = 'vsidian-view-toggle'
+    const viewLabel = (): string => t(this.viewMode === 'reading'
+      ? 'toolbar.switchToLive' : 'toolbar.switchToReading')
+    bindLocaleFnAttrs(viewBtn, viewLabel)
+    viewBtn.appendChild(createViewToggleIcon())
+    viewBtn.addEventListener('mousedown', (event) => event.preventDefault())
+    viewBtn.addEventListener('click', () => {
+      this.bridge.postMessage({
+        kind: 'view.switch.request',
+        target: this.viewMode === 'live' ? 'reading' : 'live',
+      })
+    })
+    this.viewToggleBtn = viewBtn
     const sidebarBtn = document.createElement('button')
     sidebarBtn.type = 'button'
     sidebarBtn.className = 'vsidian-sidebar-toggle'
@@ -2841,6 +2876,7 @@ export class WebviewSyncController {
     this.sidebarToggleBtn = sidebarBtn
     bar.appendChild(settingsBtn)
     bar.appendChild(quickBtn)
+    bar.appendChild(viewBtn)
     bar.appendChild(sidebarBtn)
     return bar
   }
@@ -6663,6 +6699,30 @@ function createSidebarToggleIcon(): SVGSVGElement {
   bar.setAttribute('y2', '13.25')
   svg.appendChild(frame)
   svg.appendChild(bar)
+  return svg
+}
+
+/** #141 双态视图切换图标（lucide book / pencil 意象，内联 SVG）：书（当前
+ *  在阅读）与笔（当前在 Live）两图标常驻按钮，显隐唯一来源是 main.css 按
+ *  body 模式类（vsidian-mode-live / vsidian-mode-reading）的切换规则——
+ *  样式失效时两图标同显，浏览器绘制断言据此暴露（侧栏两态图标同款哲学） */
+function createViewToggleIcon(): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg')
+  svg.setAttribute('viewBox', '0 0 24 24')
+  svg.setAttribute('fill', 'none')
+  svg.setAttribute('stroke', 'currentColor')
+  svg.setAttribute('stroke-width', '2')
+  svg.setAttribute('stroke-linecap', 'round')
+  svg.setAttribute('stroke-linejoin', 'round')
+  svg.setAttribute('aria-hidden', 'true')
+  const book = document.createElementNS(SVG_NS, 'path')
+  book.setAttribute('class', 'vsidian-view-toggle-book')
+  book.setAttribute('d', 'M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20')
+  const edit = document.createElementNS(SVG_NS, 'path')
+  edit.setAttribute('class', 'vsidian-view-toggle-edit')
+  edit.setAttribute('d', 'M21.174 6.812a1 1 0 0 0-3.986-3.987L3.642 16.374a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z')
+  svg.appendChild(book)
+  svg.appendChild(edit)
   return svg
 }
 

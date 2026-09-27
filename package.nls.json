@@ -5,6 +5,7 @@
   "command.mode.toReading.title": "Switch to reading view",
   "command.mode.toSource.title": "Switch to the source editor",
   "command.mode.toLive.title": "Switch to live preview",
+  "command.mode.toggleDualView.title": "Toggle reading/live preview",
   "command.find.title": "Find (in the editor)",
   "command.find.next.title": "Next match",
   "command.find.previous.title": "Previous match",

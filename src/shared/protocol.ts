@@ -256,6 +256,12 @@ export type WebviewToHost =
   | { kind: 'keybindings.reset'; id: string; replaceConflicts: boolean; requestId: number }
   | { kind: 'keybindings.resetAll'; requestId: number }
   | { kind: 'keybindings.execute'; id: string }
+  /** #141 工具栏双态切换按钮：请求宿主切换到目标模式（live↔reading，
+   *  宿主复用 runViewSwitch 的编排与模式记忆；源码路径不经本消息——
+   *  右上角三态命令是源码唯一入口）。target=另一态由 webview 按当前
+   *  viewMode 求值，宿主不再推导（多面板场景活动面板与本面板一致时
+   *  按钮才可点，显式目标消除歧义） */
+  | { kind: 'view.switch.request'; target: 'live' | 'reading' }
   /** 编辑请求：seq 会话内单调递增；baseVersion 为发送方自认的权威版本 */
   | {
       kind: 'edit.request'
@@ -1642,6 +1648,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
       return isPositiveInt(v.requestId)
     case 'keybindings.execute':
       return isKeybindingOperationId(v.id)
+    case 'view.switch.request':
+      return v.target === 'live' || v.target === 'reading'
     case 'edit.request':
       return (
         isString(v.sessionId) &&

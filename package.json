@@ -68,6 +68,11 @@
         "icon": "$(edit)"
       },
       {
+        "command": "onegayi.vsidian.mode.toggleDualView",
+        "title": "%command.mode.toggleDualView.title%",
+        "category": "Vsidian"
+      },
+      {
         "command": "onegayi.vsidian.find",
         "title": "%command.find.title%",
         "category": "Vsidian"
