@@ -15,6 +15,8 @@ import {
   SYMBOL_AUTOCOMPLETE_KEY,
   SYMBOL_SELECTION_WRAP_DEFAULT,
   SYMBOL_SELECTION_WRAP_KEY,
+  SYMBOL_TAB_ESCAPE_DEFAULT,
+  SYMBOL_TAB_ESCAPE_KEY,
   applySettingsPatch,
   isSettingDefinition,
   sanitizeStoredSettings,
@@ -99,6 +101,21 @@ describe('生产注册表（#34 起含实际设置项；#95 文案键化）', ()
     expect(def.descriptionKey).toBe('setting.symbolSelectionWrap.description')
     expect(zhCn[def.titleKey as keyof typeof zhCn]).toBe('选区符号包裹')
     expect(isSettingDefinition(def)).toBe(true)
+  })
+
+  it('注册「符号 Tab 越界」：键 editor.symbolTabEscape、boolean、默认开启（#125）', () => {
+    const def = byKey('editor.symbolTabEscape')
+    expect(def.type).toBe('boolean')
+    expect(def.default).toBe(true)
+    expect(def.titleKey).toBe('setting.symbolTabEscape.title')
+    expect(def.descriptionKey).toBe('setting.symbolTabEscape.description')
+    expect(zhCn[def.titleKey as keyof typeof zhCn]).toBe('符号 Tab 越界')
+    expect(isSettingDefinition(def)).toBe(true)
+  })
+
+  it('键与消费方常量一致：符号 Tab 越界经 SYMBOL_TAB_ESCAPE_KEY 读同一键（#125）', () => {
+    expect(SYMBOL_TAB_ESCAPE_KEY).toBe('editor.symbolTabEscape')
+    expect(SYMBOL_TAB_ESCAPE_DEFAULT).toBe(true)
   })
 
   it('键与消费方常量一致：选区包裹经 SYMBOL_SELECTION_WRAP_KEY 读同一键（#124）', () => {

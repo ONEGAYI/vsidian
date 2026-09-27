@@ -75,6 +75,10 @@ export const zhCn: Record<MessageKey, string> = {
   'setting.symbolSelectionWrap.title': '选区符号包裹',
   'setting.symbolSelectionWrap.description':
     '实时预览选中文字后键入符号，在选区两侧添加对应符号并保持原文选中（连续键入叠加标记：两次星号成粗体，两次方括号成双链类结构；跨段选择按段分别包裹且保留空行）。代码内不对 Markdown 强调符包裹；本开关与符号自动补全相互独立。',
+  /** 设置项「符号 Tab 越界」（#125 editor.symbolTabEscape） */
+  'setting.symbolTabEscape.title': '符号 Tab 越界',
+  'setting.symbolTabEscape.description':
+    '实时预览中光标位于成对符号围栏内部（括号、引号或行内 Markdown 结构）且未选中文字时，Tab 先移到闭合标记左边界，再按一次越过整个闭合标记；嵌套围栏从最内层逐层退出。Tab 仅移动光标，不改动文本。围栏外保持既有行为（表格切格或整行缩进）；Shift+Tab 不受影响。本开关与前两项符号设置相互独立。',
   /** 设置项「界面语言」（#96 general.language，经 titleKey/descriptionKey 取词） */
   'setting.language.title': '界面语言',
   'setting.language.description':

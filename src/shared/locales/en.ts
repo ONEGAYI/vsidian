@@ -85,6 +85,10 @@ export const en = {
   'setting.symbolSelectionWrap.title': 'Wrap selection with symbols',
   'setting.symbolSelectionWrap.description':
     'With text selected in live preview, typing a registered symbol wraps both sides of the selection (repeated typing stacks markers: two asterisks make bold, two brackets form wiki-link-style structures; a cross-paragraph selection wraps each paragraph and keeps blank lines). The original text stays selected after wrapping. Markdown emphasis is not wrapped inside code; independent from auto-close above.',
+  /** 设置项「符号 Tab 越界」（#125 editor.symbolTabEscape） */
+  'setting.symbolTabEscape.title': 'Tab escapes symbol fences',
+  'setting.symbolTabEscape.description':
+    'With the cursor inside a paired symbol fence (brackets, quotes, or inline Markdown structures) and no text selected, Tab first moves to the left edge of the closing marker, then jumps over it; nested fences exit innermost first. Tab moves the cursor only and never edits text. Outside fences, Tab keeps the existing behavior (table cell navigation or line indent); Shift+Tab is unaffected. Independent from the two symbol settings above.',
   /** 设置项「界面语言」（#96 general.language，经 titleKey/descriptionKey 取词） */
   'setting.language.title': 'Interface language',
   'setting.language.description':

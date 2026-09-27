@@ -122,6 +122,15 @@ export const SYMBOL_SELECTION_WRAP_KEY = 'editor.symbolSelectionWrap'
 export const SYMBOL_SELECTION_WRAP_DEFAULT = true
 
 /**
+ * #125「符号 Tab 越界」开关：光标在有效成对围栏内部时 Tab 先到闭合
+ * 标记左边界、再越过整个闭合标记（嵌套逐层退出；表格格内先越界后切格，
+ * 围栏外沿用既有缩进）。与 #123/#124 是三个独立开关（规格三独立开关）；
+ * 关闭后 Tab 回落既有表格导航/整行缩进行为。
+ */
+export const SYMBOL_TAB_ESCAPE_KEY = 'editor.symbolTabEscape'
+export const SYMBOL_TAB_ESCAPE_DEFAULT = true
+
+/**
  * 语言设置键（#93 预留，#96 注册定义与「常规」分区）：值域 auto | zh-cn |
  * en（StringEnumSettingDefinition），解析与语言包装配见 shared/locales。
  * 键常量先行导出——宿主 HTML 生成点读取快照中的该键决定注入语言（缺省
@@ -203,6 +212,13 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     default: SYMBOL_SELECTION_WRAP_DEFAULT,
     titleKey: 'setting.symbolSelectionWrap.title',
     descriptionKey: 'setting.symbolSelectionWrap.description',
+  },
+  {
+    key: SYMBOL_TAB_ESCAPE_KEY,
+    type: 'boolean',
+    default: SYMBOL_TAB_ESCAPE_DEFAULT,
+    titleKey: 'setting.symbolTabEscape.title',
+    descriptionKey: 'setting.symbolTabEscape.description',
   },
 ]
 

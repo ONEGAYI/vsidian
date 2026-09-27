@@ -109,6 +109,21 @@ describe('页面结构（#33 归属与空状态）', () => {
     expect(item!.querySelector<HTMLInputElement>(`input.${SETTINGS_PAGE_CLASS_NAMES.checkbox}`)!.checked)
       .toBe(true)
   })
+
+  it('符号 Tab 越界（#125）渲染为编辑器分组开关：标题/说明经 t() 取词、默认勾选', () => {
+    const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
+    const editorNav = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
+      .find((b) => b.textContent === '编辑器')!
+    editorNav.click()
+    const item = [...parent.querySelectorAll<HTMLElement>(`.${SETTINGS_PAGE_CLASS_NAMES.item}`)]
+      .find((el) => el.querySelector(`.${SETTINGS_PAGE_CLASS_NAMES.itemTitle}`)?.textContent ===
+        zhCn['setting.symbolTabEscape.title'])
+    expect(item, '应渲染「符号 Tab 越界」设置行').toBeTruthy()
+    expect(item!.querySelector(`.${SETTINGS_PAGE_CLASS_NAMES.itemDescription}`)?.textContent)
+      .toBe(zhCn['setting.symbolTabEscape.description'])
+    expect(item!.querySelector<HTMLInputElement>(`input.${SETTINGS_PAGE_CLASS_NAMES.checkbox}`)!.checked)
+      .toBe(true)
+  })
 })
 
 describe('定义渲染与快照回显', () => {

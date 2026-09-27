@@ -66,6 +66,8 @@ import {
   SYMBOL_AUTOCOMPLETE_KEY,
   SYMBOL_SELECTION_WRAP_DEFAULT,
   SYMBOL_SELECTION_WRAP_KEY,
+  SYMBOL_TAB_ESCAPE_DEFAULT,
+  SYMBOL_TAB_ESCAPE_KEY,
   type SettingsPayload,
 } from '../shared/settings'
 import { onLocaleChanged, t } from '../shared/i18n'
@@ -161,6 +163,7 @@ import { VirtualReadingView } from './readingVirtualView'
 import { blankRowInputPlan, runCreateTable, runTableEdit, tableEditing, tableRowsAt } from './tableEditing'
 import { symbolAutocomplete } from './symbolAutocomplete'
 import { symbolSelectionWrap } from './symbolWrap'
+import { fenceEscape } from './fenceEscape'
 import { listEditing } from './listEditing'
 import { indentEditing } from './indentEditing'
 import { selectTableRegion, tableRegionField } from './tableRegionSelection'
@@ -632,6 +635,11 @@ export class WebviewSyncController {
   private symbolSelectionWrapOn = SYMBOL_SELECTION_WRAP_DEFAULT
   private readonly symbolSelectionWrapCompartment = new Compartment()
 
+  /** #125 符号 Tab 越界开关（与前两项相互独立；关闭时越界 keymap 退出
+   *  装配，Tab 回落既有表格导航/整行缩进行为） */
+  private tabEscapeOn = SYMBOL_TAB_ESCAPE_DEFAULT
+  private readonly tabEscapeCompartment = new Compartment()
+
   /** #84 阅读侧折叠集合：键 = 块 data-vsidian-src-start（视图态，不持久化；
    *  块卸载重挂载后经此恢复收起形态） */
   private readonly readingCodeFold = new Set<number>()
@@ -1058,6 +1066,7 @@ export class WebviewSyncController {
         this.applyCodeCardSetting()
         this.applySymbolAutocompleteSetting()
         this.applySymbolSelectionWrapSetting()
+        this.applyTabEscapeSetting()
         break
       case 'edit.ack': {
         if (this.suspended) {
@@ -5045,6 +5054,25 @@ export class WebviewSyncController {
     })
   }
 
+  /**
+   * 应用符号 Tab 越界设置（#125；settings.snapshot / settings.changed 到达
+   * 时）：缺键回定义默认、非布尔忽略（与 #123/#124 同口径）。经
+   * Compartment.reconfigure 增删 fenceEscape keymap——关闭时越界判定
+   * 退出装配（Tab 直接落到 tableEditing/indentEditing），EditorView
+   * 不重建。
+   */
+  private applyTabEscapeSetting(): void {
+    const raw = this.settings?.[SYMBOL_TAB_ESCAPE_KEY]
+    const on = typeof raw === 'boolean' ? raw : SYMBOL_TAB_ESCAPE_DEFAULT
+    if (on === this.tabEscapeOn) {
+      return
+    }
+    this.tabEscapeOn = on
+    this.view?.dispatch({
+      effects: this.tabEscapeCompartment.reconfigure(on ? fenceEscape : []),
+    })
+  }
+
   /** #84 增强单个阅读代码块（挂载钩子与重装饰共用入口） */
   private decorateReadingCodeCardBlock(block: HTMLElement): void {
     if (!isReadingCodeBlock(block)) {
@@ -6059,6 +6087,16 @@ export class WebviewSyncController {
       // #79 代码块卡片：呈现态围栏收起 + 头部横带 + 卡片行类（配置经
       // Compartment 热重配，围栏表复用上方 mermaidFencesField）
       this.codeCardCompartment.of(this.codeCardExtension()),
+      // #125 围栏内两步 Tab 越界：必须置于 tableEditing **之前**——CM6
+      // keymap 与 transactionFilter 的顺序语义相反：keymap 把全部绑定按
+      // 扩展数组顺序正序拼接后依序尝试（@codemirror/view buildKeymap/
+      // runHandlers 正序遍历，靠前者先匹配、return false 落穿给后者；
+      // filter 是逆序应用——#123/#124 排在 tableEditing 之后即彼故）。
+      // 靠前装配使「格内有效围栏先越界、越出后 Tab 切格、正文未命中落
+      // 缩进」三段优先级无需改 tableEditing/indentEditing 一行代码；
+      // 未命中 return false 自然落穿。关闭时经 tabEscapeCompartment
+      // 整组退出装配
+      this.tabEscapeCompartment.of(this.tabEscapeOn ? fenceEscape : []),
       // 表格单元格输入钩子（#12）：表格行内键入 | 转义写回 \|；
       // 编辑面即 CM6 源文本行，同步链路复用本控制器的标准出站路径
       tableEditing,

@@ -54,6 +54,7 @@ describe('快照读取', () => {
       'codeblock.highlight': true,
       'editor.symbolAutocomplete': true,
       'editor.symbolSelectionWrap': true,
+      'editor.symbolTabEscape': true,
     })
   })
 
