@@ -21,8 +21,9 @@ bootLocaleFromDocument()
 const vscode = acquireVsCodeApi()
 const keybindings = new KeybindingSettingsSection({ postMessage: (message) => vscode.postMessage(message) })
 const snippets = new CssSnippetSettingsSection({ postMessage: (message) => vscode.postMessage(message) })
-// #132 样式参考：离线渲染公开样式契约指南（数据模块随版本生成）
-const styleRef = new StyleReferenceSection()
+// #132 样式参考：离线渲染公开样式契约指南（数据模块随版本生成）；
+// #145 契约 JSON 导出：工具区按钮经消息桥请求宿主另存
+const styleRef = new StyleReferenceSection({ postMessage: (message) => vscode.postMessage(message) })
 
 const view = new SettingsPageView(
   { postMessage: (message) => vscode.postMessage(message) },

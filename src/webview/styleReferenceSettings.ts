@@ -1,26 +1,27 @@
 // 设置页「样式参考」分页（#132）：从生成的数据模块（styleGuideData.ts，
 // 由 scripts/genStyleGuide.mjs 从清单单一事实源产出）离线渲染公开样式契约
-// 指南——与安装版本配套，无需网络。本页纯只读（无宿主消息），提供：
-// 域切换、支持等级过滤、文本搜索（id/target/purpose 即时过滤）。
+// 指南——与安装版本配套，无需网络。
+// #145 起改为小类分栏 + 分页：左侧类目栏按 content/chrome 域分组（含条目
+// 计数，域切换语义并入分组呈现），右侧条目卡片每页 15 条（上一页/下一页 +
+// 「第 x/y 页」导航，类目切换重置到第一页）；支持等级过滤与文本搜索保留
+// ——搜索命中跨类目时以聚合结果呈现并标注来源类目。
+// #145 契约 JSON 导出：工具区「导出 JSON」按钮经消息桥请求宿主另存
+// （导出内容与 VSIX 内 style-reference.json 同一数据源）。
 // UI 文案一律 t() 取词（styleRef.* 词条）；条目内容是文档数据（中文为准）。
 import { t } from '../shared/i18n'
-import type { StyleContractEntry } from '../shared/styleContract'
+import type { StyleContractCategory, StyleContractEntry } from '../shared/styleContract'
 import type { SettingsPageSection } from './settingsPageView'
 import {
+  STYLE_GUIDE_CATEGORIES,
   STYLE_GUIDE_ENTRIES,
   STYLE_GUIDE_VARIABLE_ALIASES,
   STYLE_GUIDE_VERSION,
 } from './styleGuideData'
 
-type DomainFilter = 'all' | 'content' | 'chrome'
 type SupportFilter = 'all' | 'direct' | 'semantic' | 'native' | 'none'
 
-const KIND_LABEL: Record<string, () => string> = {
-  container: () => t('styleRef.kindContainer'),
-  selector: () => t('styleRef.kindSelector'),
-  variable: () => t('styleRef.kindVariable'),
-  limitation: () => t('styleRef.kindLimitation'),
-}
+/** 每页条目数（约 15 条：一屏可扫读，115 条清单最长类目分两页） */
+const PAGE_SIZE = 15
 
 const SUPPORT_LABEL: Record<SupportFilter, () => string> = {
   all: () => t('styleRef.filterAll'),
@@ -30,11 +31,23 @@ const SUPPORT_LABEL: Record<SupportFilter, () => string> = {
   none: () => t('styleRef.supportNone'),
 }
 
-const DOMAIN_LABEL_FN: Record<'all' | 'content' | 'chrome', () => string> = {
-  all: () => t('styleRef.filterAll'),
-  content: () => t('styleRef.domainContent'),
-  chrome: () => t('styleRef.domainChrome'),
+/** 类目条目数（按当前全集条目推导；与契约 JSON 的 count 同口径） */
+export function categoryEntryCounts(entries: readonly StyleContractEntry[]): Map<string, number> {
+  const counts = new Map<string, number>()
+  for (const entry of entries) {
+    counts.set(entry.category, (counts.get(entry.category) ?? 0) + 1)
+  }
+  return counts
 }
+
+/** 类目在域内的呈现序（order 升序；content 域在前） */
+function orderedCategories(categories: readonly StyleContractCategory[]): StyleContractCategory[] {
+  return [...categories].sort((a, b) => (a.domain === b.domain
+    ? a.order - b.order
+    : (a.domain === 'content' ? -1 : 1) - (b.domain === 'content' ? -1 : 1)))
+}
+
+export interface StyleReferenceBridge { postMessage(message: unknown): void }
 
 export class StyleReferenceSection implements SettingsPageSection {
   readonly id = 'style-reference'
@@ -42,8 +55,10 @@ export class StyleReferenceSection implements SettingsPageSection {
   get title(): string { return t('styleRef.title') }
   get description(): string { return t('styleRef.description') }
 
+  constructor(private readonly bridge?: StyleReferenceBridge) {}
+
   get entries() {
-    // 全局搜索可定位到具体条目（按 id；域/等级过滤不进搜索索引）
+    // 全局搜索可定位到具体条目（按 id；过滤不进搜索索引）
     return [
       { id: 'overview', title: t('styleRef.title'), description: t('styleRef.description') },
       ...STYLE_GUIDE_ENTRIES.map((entry) => ({ id: entry.id, title: entry.target })),
@@ -95,48 +110,100 @@ export class StyleReferenceSection implements SettingsPageSection {
     varTable.append(thead, tbody)
     parent.append(varTitle, varTable)
 
-    // 过滤工具行：域选择 + 等级选择 + 搜索框
+    // ---- 小类分栏布局：左侧类目栏（按域分组），右侧条目表 + 分页 ----
+    const categories = orderedCategories(STYLE_GUIDE_CATEGORIES)
+    const counts = categoryEntryCounts(STYLE_GUIDE_ENTRIES)
+    // focusEntry 定位：目标条目所在类目成为初始类目（无目标时首个类目）
+    const focusTarget = focusEntry && focusEntry !== 'overview'
+      ? STYLE_GUIDE_ENTRIES.find((entry) => entry.id === focusEntry)
+      : undefined
+    let activeCategory = focusTarget?.category ?? categories[0]!.id
+    let page = 1
+
+    const layout = document.createElement('div')
+    layout.className = 'vsidian-style-ref-layout'
+
+    // 左侧类目栏（域切换语义并入分组呈现：content / chrome 两组）
+    const catNav = document.createElement('nav')
+    catNav.className = 'vsidian-style-ref-cats'
+    catNav.setAttribute('aria-label', t('styleRef.categoryNav'))
+    const catButtons = new Map<string, HTMLButtonElement>()
+    const buildCatNav = (): void => {
+      catNav.replaceChildren()
+      catButtons.clear()
+      for (const domain of ['content', 'chrome'] as const) {
+        const groupTitle = document.createElement('p')
+        groupTitle.className = 'vsidian-style-ref-cats-domain'
+        groupTitle.textContent = domain === 'content' ? t('styleRef.domainContent') : t('styleRef.domainChrome')
+        catNav.append(groupTitle)
+        for (const cat of categories.filter((c) => c.domain === domain)) {
+          const button = document.createElement('button')
+          button.type = 'button'
+          button.className = 'vsidian-style-ref-cat'
+          button.dataset['category'] = cat.id
+          const name = document.createElement('span')
+          name.className = 'vsidian-style-ref-cat-name'
+          name.textContent = t(cat.titleKey)
+          const count = document.createElement('span')
+          count.className = 'vsidian-style-ref-cat-count'
+          count.textContent = String(counts.get(cat.id) ?? 0)
+          button.append(name, count)
+          button.addEventListener('click', () => {
+            if (activeCategory === cat.id) return
+            activeCategory = cat.id
+            page = 1
+            render()
+          })
+          catButtons.set(cat.id, button)
+          catNav.append(button)
+        }
+      }
+    }
+    buildCatNav()
+
+    // 右侧主体：工具行（等级过滤 + 搜索 + 导出）→ 列表 → 分页导航
+    const main = document.createElement('div')
+    main.className = 'vsidian-style-ref-main'
     const bar = document.createElement('div')
     bar.className = 'vsidian-style-ref-bar'
-    const domainSel = document.createElement('select')
-    domainSel.className = 'vsidian-settings-select'
-    domainSel.setAttribute('aria-label', t('styleRef.domainFilter'))
     const supportSel = document.createElement('select')
     supportSel.className = 'vsidian-settings-select'
     supportSel.setAttribute('aria-label', t('styleRef.supportFilter'))
-    const fill = (sel: HTMLSelectElement, keys: readonly (DomainFilter | SupportFilter)[]) => {
-      sel.replaceChildren()
-      for (const key of keys) {
-        const opt = document.createElement('option')
-        opt.value = key
-        opt.textContent = key in DOMAIN_LABEL_FN
-          ? DOMAIN_LABEL_FN[key as DomainFilter]()
-          : SUPPORT_LABEL[key as SupportFilter]()
-        sel.append(opt)
-      }
+    for (const key of ['all', 'direct', 'semantic', 'native', 'none'] as const) {
+      const opt = document.createElement('option')
+      opt.value = key
+      opt.textContent = SUPPORT_LABEL[key]()
+      supportSel.append(opt)
     }
-    fill(domainSel, ['all', 'content', 'chrome'])
-    fill(supportSel, ['all', 'direct', 'semantic', 'native', 'none'])
     const search = document.createElement('input')
     search.type = 'search'
     search.className = 'vsidian-style-ref-search'
     search.placeholder = t('styleRef.searchPlaceholder')
     search.setAttribute('aria-label', t('styleRef.searchPlaceholder'))
-    bar.append(domainSel, supportSel, search)
-    parent.append(bar)
-
-    // 列表容器（过滤即重渲染）
+    // #145 契约 JSON 导出：宿主另存（VSIX 内资产同一数据源）
+    const exportButton = document.createElement('button')
+    exportButton.type = 'button'
+    exportButton.className = 'vsidian-style-ref-export'
+    exportButton.textContent = t('styleRef.exportJson')
+    exportButton.addEventListener('click', () => {
+      this.bridge?.postMessage({ kind: 'styleRef.export' })
+    })
+    bar.append(supportSel, search, exportButton)
     const list = document.createElement('div')
     list.className = 'vsidian-style-ref-list'
-    parent.append(list)
+    const pager = document.createElement('div')
+    pager.className = 'vsidian-style-ref-pager'
+    main.append(bar, list, pager)
+    layout.append(catNav, main)
+    parent.append(layout)
 
     const render = (): void => {
-      const domain = domainSel.value as DomainFilter
       const support = supportSel.value as SupportFilter
       const query = search.value.trim().toLowerCase()
-      list.replaceChildren()
-      const visible = STYLE_GUIDE_ENTRIES.filter((entry) => {
-        if (domain !== 'all' && entry.domain !== domain) return false
+      // 搜索模式：跨类目聚合（等级过滤仍生效）；否则按当前类目浏览
+      const searching = query.length > 0
+      const pool = searching ? STYLE_GUIDE_ENTRIES : STYLE_GUIDE_ENTRIES.filter((e) => e.category === activeCategory)
+      const visible = pool.filter((entry) => {
         if (support !== 'all' && entry.obsidian.support !== support) return false
         if (query) {
           const haystack = `${entry.id} ${entry.target} ${entry.purpose}`.toLowerCase()
@@ -144,47 +211,88 @@ export class StyleReferenceSection implements SettingsPageSection {
         }
         return true
       })
+      const pages = Math.max(1, Math.ceil(visible.length / PAGE_SIZE))
+      if (page > pages) page = pages
+      const slice = visible.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+
+      // 类目栏高亮（搜索模式下不标当前类目——结果不限于该类目）
+      for (const [id, button] of catButtons) {
+        button.setAttribute('aria-current', !searching && id === activeCategory ? 'true' : 'false')
+      }
+
+      list.replaceChildren()
       if (visible.length === 0) {
         const empty = document.createElement('p')
         empty.className = 'vsidian-settings-empty'
         empty.textContent = t('styleRef.empty')
         list.append(empty)
-        return
-      }
-      // 按域 → 种类分组
-      const groups = new Map<string, StyleContractEntry[]>()
-      for (const entry of visible) {
-        const key = `${entry.domain}:${entry.kind}`
-        const bucket = groups.get(key) ?? []
-        bucket.push(entry)
-        groups.set(key, bucket)
-      }
-      for (const [key, items] of groups) {
-        const [domainKey, kindKey] = key.split(':')
-        const groupTitle = document.createElement('h3')
-        groupTitle.className = 'vsidian-style-ref-group'
-        const count = document.createElement('span')
-        count.className = 'vsidian-style-ref-count'
-        count.textContent = String(items.length)
-        groupTitle.append(
-          document.createTextNode(
-            `${domainKey === 'content' ? t('styleRef.domainContent') : t('styleRef.domainChrome')} · ${(KIND_LABEL[kindKey] ?? (() => kindKey))()} `,
-          ),
-          count,
-        )
-        list.append(groupTitle)
-        for (const entry of items) {
-          list.append(this.renderCard(entry))
+      } else if (searching) {
+        // 聚合结果提示 + 来源类目标注
+        const summary = document.createElement('p')
+        summary.className = 'vsidian-style-ref-search-count'
+        summary.setAttribute('role', 'status')
+        summary.textContent = t('styleRef.searchCount', { count: visible.length })
+        list.append(summary)
+        for (const entry of slice) {
+          list.append(this.renderCard(entry, { withCategory: true }))
+        }
+      } else {
+        for (const entry of slice) {
+          list.append(this.renderCard(entry, { withCategory: false }))
         }
       }
+
+      // 分页导航（单页时收起）
+      pager.replaceChildren()
+      if (pages > 1) {
+        const prev = document.createElement('button')
+        prev.type = 'button'
+        prev.className = 'vsidian-style-ref-page-btn'
+        prev.textContent = t('styleRef.prevPage')
+        prev.disabled = page <= 1
+        prev.addEventListener('click', () => {
+          if (page > 1) {
+            page -= 1
+            render()
+          }
+        })
+        const indicator = document.createElement('span')
+        indicator.className = 'vsidian-style-ref-page-indicator'
+        indicator.textContent = t('styleRef.pageIndicator', { page, pages })
+        const next = document.createElement('button')
+        next.type = 'button'
+        next.className = 'vsidian-style-ref-page-btn'
+        next.textContent = t('styleRef.nextPage')
+        next.disabled = page >= pages
+        next.addEventListener('click', () => {
+          if (page < pages) {
+            page += 1
+            render()
+          }
+        })
+        pager.append(prev, indicator, next)
+      }
     }
-    domainSel.addEventListener('change', render)
-    supportSel.addEventListener('change', render)
-    search.addEventListener('input', render)
+    supportSel.addEventListener('change', () => {
+      page = 1
+      render()
+    })
+    search.addEventListener('input', () => {
+      page = 1
+      render()
+    })
     render()
 
-    // 全局搜索定位：滚动到条目卡片并短暂高亮
-    if (focusEntry && focusEntry !== 'overview') {
+    // 全局搜索定位：跳到目标条目所在类目与页，并短暂高亮
+    if (focusTarget) {
+      const support = supportSel.value as SupportFilter
+      const matchesSupport = support === 'all' || focusTarget.obsidian.support === support
+      if (matchesSupport) {
+        const pool = STYLE_GUIDE_ENTRIES.filter((e) => e.category === focusTarget.category)
+        const index = pool.indexOf(focusTarget)
+        page = Math.floor(index / PAGE_SIZE) + 1
+        render()
+      }
       const target = list.querySelector(`[data-entry="${focusEntry}"]`)
       if (target instanceof HTMLElement) {
         target.classList.add('vsidian-settings-item-located')
@@ -194,7 +302,7 @@ export class StyleReferenceSection implements SettingsPageSection {
     return () => undefined
   }
 
-  private renderCard(entry: StyleContractEntry): HTMLElement {
+  private renderCard(entry: StyleContractEntry, opts: { withCategory: boolean }): HTMLElement {
     const card = document.createElement('article')
     card.className = 'vsidian-style-ref-entry'
     card.dataset['entry'] = entry.id
@@ -206,6 +314,17 @@ export class StyleReferenceSection implements SettingsPageSection {
     eid.textContent = entry.id
     title.append(code, eid)
     card.append(title)
+
+    // 跨类目聚合（搜索模式）时标注来源类目
+    if (opts.withCategory) {
+      const cat = STYLE_GUIDE_CATEGORIES.find((c) => c.id === entry.category)
+      if (cat) {
+        const chip = document.createElement('span')
+        chip.className = 'vsidian-style-ref-cat-chip'
+        chip.textContent = t(cat.titleKey)
+        title.append(chip)
+      }
+    }
 
     const purpose = document.createElement('p')
     purpose.textContent = entry.purpose

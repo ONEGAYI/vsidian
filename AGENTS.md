@@ -174,20 +174,22 @@ vsidian/
 ├── src/                   # 扩展源码
 │   ├── extension.ts # 扩展激活入口
 │   ├── host/        # 宿主端实现
-│   │   ├── cssSnippetService.ts     # CSS 片段宿主权威服务
-│   │   ├── cssSnippetWiring.ts      # CSS 片段 vscode 层装配
-│   │   ├── diagramExportHost.ts     # 宿主图表导出执行壳
-│   │   ├── diagramExportValidate.ts # 图表导出载荷校验
-│   │   ├── documentSession.ts       # 文档会话与写回同步
-│   │   ├── editorCsp.ts             # 编辑器 CSP 装配纯模块（#130）
-│   │   ├── hostLocale.ts            # 生效语言宿主装配解析帮手
-│   │   ├── keybindingService.ts     # 快捷键全局存储服务
-│   │   ├── linkTarget.ts            # 宿主侧链接目标分类纯逻辑（#10）
-│   │   ├── settingsPage.ts          # 独立设置页面板装配
-│   │   ├── settingsService.ts       # 宿主设置服务
-│   │   ├── textEditorProvider.ts    # 自定义文本编辑器提供者
-│   │   ├── viewCycle.ts             # 三态视图编排纯逻辑
-│   │   └── wikilinkTarget.ts        # 宿主侧双链目标解析纯逻辑（#11）
+│   │   ├── cssSnippetService.ts        # CSS 片段宿主权威服务
+│   │   ├── cssSnippetWiring.ts         # CSS 片段 vscode 层装配
+│   │   ├── diagramExportHost.ts        # 宿主图表导出执行壳
+│   │   ├── diagramExportValidate.ts    # 图表导出载荷校验
+│   │   ├── documentSession.ts          # 文档会话与写回同步
+│   │   ├── editorCsp.ts                # 编辑器 CSP 装配纯模块（#130）
+│   │   ├── hostLocale.ts               # 生效语言宿主装配解析帮手
+│   │   ├── keybindingService.ts        # 快捷键全局存储服务
+│   │   ├── linkTarget.ts               # 宿主侧链接目标分类纯逻辑（#10）
+│   │   ├── settingsPage.ts             # 独立设置页面板装配
+│   │   ├── settingsService.ts          # 宿主设置服务
+│   │   ├── styleReferenceExport.ts     # 契约 JSON 导出宿主执行壳
+│   │   ├── styleReferenceExportPlan.ts # 契约 JSON 导出纯规划逻辑
+│   │   ├── textEditorProvider.ts       # 自定义文本编辑器提供者
+│   │   ├── viewCycle.ts                # 三态视图编排纯逻辑
+│   │   └── wikilinkTarget.ts           # 宿主侧双链目标解析纯逻辑（#11）
 │   ├── shared/      # 两端共享纯逻辑
 │   │   ├── changeMapping.ts     # 变更重定位纯函数
 │   │   ├── chromeContract.ts    # 界面域样式契约探针表
