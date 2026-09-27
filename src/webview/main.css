@@ -39,19 +39,27 @@ body {
      与行号表头格补偿同源引用；改单元格字面值须同步（契约联动断言：
      lineNumberCssContract） */
   --vsidian-table-cell-shift: calc(4px + 1px);
+  /* 表格行背景 / 阅读表头背景（#12 公开；#132 起集中定义并接 Obsidian
+     --table-background 别名，消费处原内联 fallback 保持同值） */
+  --vsidian-table-background: var(--table-background, rgba(128, 128, 128, 0.05));
   /* 代码块卡片底色（#79 起公开变量，选择器映射表登记；头部与代码区共用，
      阅读卡片同源） */
   --vsidian-code-card-background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12));
+  /* ---- #132 Obsidian 变量别名桥：下列 vsidian 公开变量的默认定义含
+     Obsidian 原名 fallback（如 var(--h1-color, <原默认>)）——用户片段设置
+     Obsidian 原名变量即生效；vsidian 名整条覆盖严格优先（双轨并存）。
+     承诺清单见 src/shared/styleContract.ts 的 OBSIDIAN_VARIABLE_ALIASES，
+     形态由 test/unit/obsidianAliasCssContract.test.ts 钉住。 */
   /* ---- #65 标题层级色变量族：正文标题（live 行级 / 阅读块级）与大纲条目
      共用同一变量族（结构装饰与正文主题同源，不做读值复制）。当前主题无
      分级着色（各级同默认前景色）；未来主题分级着色仅改此族定义，一处
      定义三处生效。变量引用关系由 outlineCssContract 契约测试钉住 */
-  --vsidian-heading-color-1: var(--vscode-editor-foreground);
-  --vsidian-heading-color-2: var(--vscode-editor-foreground);
-  --vsidian-heading-color-3: var(--vscode-editor-foreground);
-  --vsidian-heading-color-4: var(--vscode-editor-foreground);
-  --vsidian-heading-color-5: var(--vscode-editor-foreground);
-  --vsidian-heading-color-6: var(--vscode-editor-foreground);
+  --vsidian-heading-color-1: var(--h1-color, var(--vscode-editor-foreground));
+  --vsidian-heading-color-2: var(--h2-color, var(--vscode-editor-foreground));
+  --vsidian-heading-color-3: var(--h3-color, var(--vscode-editor-foreground));
+  --vsidian-heading-color-4: var(--h4-color, var(--vscode-editor-foreground));
+  --vsidian-heading-color-5: var(--h5-color, var(--vscode-editor-foreground));
+  --vsidian-heading-color-6: var(--h6-color, var(--vscode-editor-foreground));
   /* ---- #106 分割线颜色：Live 渲染态横线与阅读 <hr> 同一来源，两处规则
      共同消费本变量。视觉实测 panel-border 在浅色主题仅约 1.14:1 近乎
      不可见，改按编辑器前景色 35% 派生（明暗主题均为可辨识灰线） */
@@ -62,12 +70,12 @@ body {
      用户主题下对比度均仅约 1.15–1.45:1 不可见——主题跟随路线证伪，
      按用户决议切 Obsidian 式固定荧光黄，明暗主题各自调校（浅色由
      body.vscode-light 分支覆盖为不透明黄） */
-  --vsidian-highlight-background: rgba(255, 208, 0, 0.35);
+  --vsidian-highlight-background: var(--text-highlight-bg, rgba(255, 208, 0, 0.35));
 }
 
 /* #105 浅色主题高亮覆盖：白底上提高浓度与饱和度保证目视可辨 */
 body.vscode-light #app {
-  --vsidian-highlight-background: #ffe066;
+  --vsidian-highlight-background: var(--text-highlight-bg, #ffe066);
 }
 
 #app .cm-editor {
@@ -1740,10 +1748,10 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
    共享基线——两模式正文基础排版由此统一。760px 限宽保留且块级居左
    （margin: 0 0 0.75em，非居中），左缘始终 = 基线留白，不随窗口宽变化 */
 #app .vsidian-view-reading {
-  --vsidian-reading-font-size: var(--vsidian-content-font-size);
-  --vsidian-reading-max-width: 760px;
-  --vsidian-reading-line-height: var(--vsidian-content-line-height);
-  --vsidian-reading-code-background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12));
+  --vsidian-reading-font-size: var(--font-text-size, var(--vsidian-content-font-size));
+  --vsidian-reading-max-width: var(--file-line-width, 760px);
+  --vsidian-reading-line-height: var(--line-height-normal, var(--vsidian-content-line-height));
+  --vsidian-reading-code-background: var(--code-background, var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12)));
   /* #53 起为 vsidian-main 的 flex 成员（顶栏高度扣减由 flex 分配，
      取代旧的固定 30px 减法高度） */
   flex: 1 1 auto;

@@ -3,6 +3,7 @@
 // 字节级断言），路径经环境变量 WORKSPACE_DIR 传入。
 import * as vscode from 'vscode'
 import { LOCALE_MESSAGES, resolveLocale } from '../../../src/shared/locales'
+import { OBSIDIAN_ALIAS_PROBES } from '../../../src/shared/obsidianAlias'
 
 /** #94 起编辑器 webview 文案随生效语言取词（auto 按宿主显示语言解析）——
  *  期望值与扩展装配同源计算，不再复制字面量 */
@@ -80,6 +81,34 @@ const CRLF_DOC = '标题一\r\n正文 A 行\r\n正文 B 行\r\n'
 // 在 '- 列表项一' 行首插入 '插入的新段落\n' 后的期望全文
 const LF_DOC_AFTER_EDIT = '中文编辑测试\n\n包含 emoji：🎉 与组合 emoji 👨‍👩‍👧‍👦\n\n插入的新段落\n- 列表项一\n- 列表项二\n'
 // #6 模式切换 fixture（与 runTest.mjs 的 MODE_DOC 一致）
+const STYLE_CONTRACT_DOC_TEXT = [
+  '---',
+  'title: 样式契约',
+  '---',
+  '',
+  '# 样式契约标题',
+  '',
+  '**粗体** 与 *斜体* 与 `行内代码` 与 ==高亮==。',
+  '',
+  '> 引用一行',
+  '',
+  '- 无序列表项',
+  '- [ ] 未完成任务',
+  '',
+  '---',
+  '',
+  '```js',
+  'const fence = true',
+  '```',
+  '',
+  '| 表头甲 | 表头乙 |',
+  '| --- | --- |',
+  '| 单元甲 | 单元乙 |',
+  '',
+  '[外部链接](https://example.com/alias) 与 [[双链目标|显示别名]]。',
+  '',
+].join('\n')
+
 const MODE_DOC_TEXT = [
   '# 模式切换标题一',
   '',
@@ -336,6 +365,10 @@ interface ViewState {
     /** #59 公式字体观测：katex.min.css 生效时含 KaTeX 字体族 */
     liveMathFontFamily?: string | null
     readingMathFontFamily?: string | null
+    /** #132 Obsidian 原名别名桥探针（键 = 清单条目 ID；选择器表见 src/shared/obsidianAlias.ts） */
+    obsidianAliases?: Record<string, string | null>
+    /** #132 变量别名桥观测：--h1-color 驱动的一级标题 computed color */
+    obsidianVarProbe?: { liveHeadingColor: string | null; readingHeadingColor: string | null }
   }
   /** #8 双视图语法一致性观测 */
   liveSyntax?: {
@@ -6888,6 +6921,138 @@ export const cases: Array<[string, () => Promise<void>]> = [
       await setSnippetDirectory(null)
       await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
       await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets-2'), { recursive: true, useTrash: false })).catch(() => undefined)
+    }
+  }],
+
+  // ---- #132 Obsidian 原名别名桥与公开样式契约 ----
+
+  ['Obsidian 原名别名桥：正文域选择器双视图命中与模式切换（#132）', async () => {
+    await resetLastMode()
+    await openWithEditor('style-contract.md')
+    await waitSessionReady('style-contract.md')
+    // 显式切 live：初始模式可能落在历史用例遗留的全局记忆上（1.86 globalState
+    // 写入后偶发滞后回翻，reset 也不可靠——见 resetLastMode 注释）
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', wsUri('style-contract.md'))
+
+    // 断言器（轮询稳定形态）：探针表期望值逐项核对（期望与 probe.css 规则同
+    // 源——挂错节点/类未挂即 null）。装饰随视口/编辑增量重建，采集恰逢重建
+    // 空窗会读到瞬时 null——poll 重试至稳定；持续差异 ≥3 条时提前带全量差异
+    // 报错（定位到条目），零星波动继续等
+    const waitAliases = async (view: 'live' | 'reading'): Promise<void> => {
+      await poll(view + ' 别名探针全命中', async () => {
+        const v = (await vscode.commands.executeCommand(CMD.viewState, wsUri('style-contract.md').toString(), 0)) as ViewState | undefined
+        if (v?.viewMode !== view) return undefined
+        const aliases = v.cssProbe?.obsidianAliases
+        if (!aliases) return undefined
+        const diffs: string[] = []
+        for (const probe of OBSIDIAN_ALIAS_PROBES.filter((x) => x.view === view)) {
+          if (aliases[probe.id] !== probe.expected) {
+            diffs.push(probe.id + '：' + String(aliases[probe.id]) + '≠' + probe.expected)
+          }
+        }
+        if (diffs.length === 0) return true
+        if (diffs.length >= 3) throw new Error('探针持续差异：' + diffs.join('；'))
+        return undefined
+      }, 20000)
+    }
+
+    // live：全部 Obsidian 原名选择器经别名桥命中（含容器组合选择器）
+    await waitViewState('style-contract.md', (v) => v.viewMode === 'live')
+    await waitAliases('live')
+
+    // reading：容器别名后的标签选择器族天然命中 + DOM 别名类命中
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri('style-contract.md'))
+    await waitViewState('style-contract.md', (v) => v.viewMode === 'reading')
+    await waitAliases('reading')
+
+    // 模式切换存活：切回 live 探针仍全命中（别名类不随视图切换丢失）
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', wsUri('style-contract.md'))
+    await waitViewState('style-contract.md', (v) => v.viewMode === 'live')
+    await waitAliases('live')
+  }],
+
+  ['Obsidian 原名别名桥：webview 重载后块重挂载探针复验（视口重挂，#132）', async () => {
+    await resetLastMode()
+    await openWithEditor('style-contract.md')
+    await waitSessionReady('style-contract.md')
+    const uri = wsUri('style-contract.md').toString()
+
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri('style-contract.md'))
+    await waitViewState('style-contract.md', (v) => v.viewMode === 'reading')
+    // 重载 webview：阅读块全部销毁重建（retainContextWhenHidden 关闭路径），
+    // 别名类必须随块构建器（READING_CLASS_NAMES + 别名表）重新带上
+    await vscode.commands.executeCommand('workbench.action.webview.reloadWebviewAction')
+    await poll('重载后恢复阅读模式并采集探针', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      return v?.viewMode === 'reading' && v.text === STYLE_CONTRACT_DOC_TEXT && (v.readingBlockCount ?? 0) > 0
+        ? v : undefined
+    }, 30000)
+    // 重挂载后全部 reading 探针复验（轮询吸收块重建窗口；别名类经
+    // READING_CLASS_NAMES + 别名表随块构建器带回）
+    await poll('重挂后 reading 别名探针全命中', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      const aliases = v?.cssProbe?.obsidianAliases
+      if (!aliases) return undefined
+      const diffs: string[] = []
+      for (const probe of OBSIDIAN_ALIAS_PROBES.filter((x) => x.view === 'reading')) {
+        if (aliases[probe.id] !== probe.expected) {
+          diffs.push(probe.id + '：' + String(aliases[probe.id]) + '≠' + probe.expected)
+        }
+      }
+      if (diffs.length === 0) return true
+      if (diffs.length >= 3) throw new Error('重挂后探针持续差异：' + diffs.join('；'))
+      return undefined
+    }, 20000)
+  }],
+
+  ['Obsidian 变量别名桥：真实片段经 --h1-color 驱动标题可见颜色（#132）', async () => {
+    await resetLastMode()
+    const dir = wsUri('css-snippets').fsPath
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets'))
+    // 片段按 Obsidian 原名书写变量（--h1-color），另附一条 vsidian 类选择器
+    // 规则做装载判别（覆盖 live-header-span 内部探针）
+    await writeSnippetCss('css-snippets/alias-var.css', [
+      ':root { --h1-color: rgb(66, 77, 88); }',
+      '#app .vsidian-view-live .vsidian-header-1 { outline-color: rgb(70, 71, 72); }',
+    ].join('\n'))
+    try {
+      // #128 的稳妥顺序：先配置目录（面板创建时 localResourceRoots 即含
+      // 片段目录），再开面板（与真实用户「先配置后编辑」一致）
+      await setSnippetDirectory(dir)
+      await poll('片段扫描完成', async () => {
+        const st = await snippetState()
+        return st.directory === dir && !st.readError && st.entries.length === 1 ? st : undefined
+      })
+      await openWithEditor('mode.md')
+      await waitSessionReady('mode.md')
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', wsUri('mode.md'))
+
+      await setSnippetEnabled('alias-var.css', true)
+
+      // live：片段选择器规则先证明装载（live-header-span 探针被覆盖），再断言
+      // 标题可见颜色被 --h1-color 驱动（变量桥真实链路）
+      const live = await waitViewState('mode.md', (v) =>
+        v.viewMode === 'live' && v.cssProbe?.obsidianAliases?.['live-header-span'] === 'rgb(70, 71, 72)')
+      assert(live.cssProbe!.obsidianVarProbe!.liveHeadingColor === 'rgb(66, 77, 88)',
+        'live 标题色应被 --h1-color 驱动为 rgb(66, 77, 88)，实际 ' +
+          String(live.cssProbe!.obsidianVarProbe!.liveHeadingColor))
+
+      // reading：同名变量同样驱动阅读 h1（--h1-color 在 :root，两视图同链）；
+      // 未涉及的探针维持内部值（无串扰）
+      await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri('mode.md'))
+      const reading = await waitViewState('mode.md', (v) =>
+        v.viewMode === 'reading' && v.cssProbe?.obsidianVarProbe?.readingHeadingColor === 'rgb(66, 77, 88)')
+      assert(reading.cssProbe!.obsidianAliases!['reading-task'] === 'rgb(163, 164, 165)',
+        '片段不涉及的选择器应维持内部探针值（无串扰）')
+
+      // 停用片段：回退默认（--h1-color 不再驱动，标题色回落主题前景色 ≠ 片段色）
+      await setSnippetEnabled('alias-var.css', false)
+      const reverted = await waitViewState('mode.md', (v) =>
+        v.viewMode === 'reading' && v.cssProbe?.obsidianVarProbe?.readingHeadingColor !== 'rgb(66, 77, 88)')
+      assert(reverted.cssProbe!.obsidianVarProbe!.readingHeadingColor !== null, '停用后标题色应回落主题默认（非 null）')
+    } finally {
+      await setSnippetDirectory(null)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
     }
   }],
 ]

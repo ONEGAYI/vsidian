@@ -71,6 +71,11 @@ export interface SettingsPageHandle {
    * （面板未开时 no-op——重开经 snippets.get 重新拉取权威状态回显）
    */
   notifySnippetsChanged(): void
+  /**
+   * #132 样式参考：打开（或 reveal）设置页并定位到指定附加分页。
+   * 面板未 ready 时在握手完成后补发（webview 装载是异步的）
+   */
+  openWithSection(section: string): void
 }
 
 export function createSettingsPage(
@@ -81,6 +86,8 @@ export function createSettingsPage(
 ): SettingsPageHandle {
   let panel: vscode.WebviewPanel | undefined
   let ready = false
+  // #132：ready 前收到的分页定位请求（settings.get 应答后补发）
+  let pendingSection: string | undefined
 
   /** 设置页 webview 消息处理（onDidReceiveMessage 与测试注入共用入口） */
   const handleMessage = (message: unknown): void => {
@@ -117,6 +124,12 @@ export function createSettingsPage(
           kind: 'settings.snapshot',
           values: service.getSnapshot(),
         })
+        // #132 补发分页定位（openWithSection 先于 ready 到达时）
+        if (pendingSection !== undefined) {
+          const section = pendingSection
+          pendingSection = undefined
+          void current?.webview.postMessage({ kind: 'settings.focusSection', section })
+        }
         // #96 R1 ready 即校准（设置页路径）：settings.get 是设置页的 ready
         // 握手——应答链附带当前语言包（幂等补发，复用 locale.changed 消息，
         // 协议零新增）。面板隐藏重载后 HTML 数据岛装回 open() 时的旧语言，
@@ -209,8 +222,20 @@ export function createSettingsPage(
     })
   }
 
+  const openWithSection = (section: string): void => {
+    open()
+    const current = panel
+    if (!current) return
+    if (ready) {
+      void current.webview.postMessage({ kind: 'settings.focusSection', section })
+    } else {
+      pendingSection = section
+    }
+  }
+
   return {
     open,
+    openWithSection,
     close: () => {
       panel?.dispose()
     },

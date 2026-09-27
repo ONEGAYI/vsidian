@@ -138,7 +138,8 @@ describe('主题色同源（#65：大纲层级与正文标题引用同一变量�
   it('#app 定义标题层级色变量族 1–6（当前默认前景色，主题分级仅改此处）', () => {
     for (let n = 1; n <= 6; n++) {
       expect(css, `--vsidian-heading-color-${n} 应定义于 #app`).toMatch(
-        new RegExp(`--vsidian-heading-color-${n}:\\s*var\\(--vscode-editor-foreground\\)`),
+        // #132 变量桥：含 Obsidian --h{n}-color fallback（不设别名时回退前景色不变）
+        new RegExp(`--vsidian-heading-color-${n}:\\s*var\\(--h${n}-color, var\\(--vscode-editor-foreground\\)\\)`),
       )
     }
   })

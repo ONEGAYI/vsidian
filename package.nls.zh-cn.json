@@ -38,6 +38,7 @@
   "format.blockMath": "插入块级公式",
   "format.wikilink": "插入双链",
   "format.horizontalRule": "插入分割线",
+  "command.openStyleReference.title": "Vsidian：打开样式参考",
   "command.openSettings.title": "打开设置",
   "command.cssSnippets.refresh.title": "CSS 片段：重新加载",
   "command.ui.sidebarToggle.title": "展开或收起右侧栏",

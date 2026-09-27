@@ -1371,6 +1371,38 @@ describe('模式切换协议（#6）', () => {
     expect(isWebviewToHost({ ...baseViewState, readingAnchorStart: null })).toBe(false)
   })
 
+  it('view.state 接受 obsidianAliases 探针 record（#132），拒绝非法键值', () => {
+    const probe = {
+      liveHeadingDecorationColor: null,
+      readingHeadingDecorationColor: null,
+      readingVarProbe: null,
+      liveStrongDecorationColor: null,
+      liveInlineCodeDecorationColor: null,
+      liveCodeLineDecorationColor: null,
+      readingStrongDecorationColor: null,
+      liveTaskCheckboxDecorationColor: null,
+      readingTaskCheckboxDecorationColor: null,
+      liveLinkDecorationColor: null,
+      readingLinkDecorationColor: null,
+      readingImageDecorationColor: null,
+      liveTablePipeDecorationColor: null,
+      readingTableDecorationColor: null,
+      liveWikilinkDecorationColor: null,
+      readingWikilinkDecorationColor: null,
+      obsidianAliases: { 'inline-strong': 'rgb(110, 111, 112)', 'reading-hr': null },
+    }
+    expect(isWebviewToHost({ ...baseViewState, cssProbe: probe })).toBe(true)
+    expect(
+      isWebviewToHost({ ...baseViewState, cssProbe: { ...probe, obsidianAliases: { x: 7 } } }),
+    ).toBe(false)
+    expect(
+      isWebviewToHost({ ...baseViewState, cssProbe: { ...probe, obsidianAliases: { '': 'rgb(1, 2, 3)' } } }),
+    ).toBe(false)
+    expect(
+      isWebviewToHost({ ...baseViewState, cssProbe: { ...probe, obsidianAliases: ['live-link'] } }),
+    ).toBe(false)
+  })
+
   it('view.state 接受合法 cssProbe（字段可为 null），拒绝结构错误', () => {
     const probe = {
       liveHeadingDecorationColor: 'rgb(1, 2, 3)',

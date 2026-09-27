@@ -9,7 +9,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // 插在 taskClick 之后、outline 系列之前。
 const names = ['tableCaret', 'taskClick', 'listEditing', 'tabIndent', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage',
-  'languageSwitch', 'quickActions', 'cssSnippets', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor']
+  'languageSwitch', 'quickActions', 'cssSnippets', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias']
 let workers = 2, reuseBuilds = true, selected = names
 for (const arg of process.argv.slice(2)) {
   if (/^--workers=\d+$/.test(arg)) workers = Number(arg.slice('--workers='.length))

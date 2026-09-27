@@ -31,6 +31,9 @@ const extra: readonly KeybindingOperation[] = [
   { id: 'insertColumnRight', command: 'onegayi.vsidian.table.insertColumnRight', titleKey: 'command.table.insertColumnRight.title', mode: 'live', writes: true, defaults: [] },
   { id: 'deleteColumn', command: 'onegayi.vsidian.table.deleteColumn', titleKey: 'command.table.deleteColumn.title', mode: 'live', writes: true, defaults: [] },
   { id: 'openSettings', command: 'onegayi.vsidian.openSettings', titleKey: 'command.openSettings.title', mode: 'both', writes: false, defaults: [] },
+  // #132 样式参考：打开设置页并定位「样式参考」分页（只读全局命令，双模式
+  // 可用；默认不绑定——设置页入口常驻，快捷键留给用户按需绑定）
+  { id: 'openStyleReference', command: 'onegayi.vsidian.openStyleReference', titleKey: 'command.openStyleReference.title', mode: 'both', writes: false, defaults: [] },
   // #128 CSS 片段刷新：只读视图操作（重新扫描目录并广播），双模式可救回
   // 被片段影响的界面；默认不占键位。「打开 CSS 片段设置」不单列命令——
   // openSettings（双模式、默认未绑定）打开设置页后经左侧导航直达分页，

@@ -154,6 +154,7 @@ import {
 import { locateOutlineIndex } from './outlineLocate'
 import { resolveStaleTaskToggle } from './taskToggle'
 import { SnippetLoader } from './snippetLoader'
+import { applyObsidianDomAlias, OBSIDIAN_ALIAS_PROBES } from '../shared/obsidianAlias'
 import { VirtualReadingView } from './readingVirtualView'
 import { blankRowInputPlan, runCreateTable, runTableEdit, tableEditing, tableRowsAt } from './tableEditing'
 import { listEditing } from './listEditing'
@@ -708,7 +709,10 @@ export class WebviewSyncController {
     this.banner = this.buildBanner()
     this.findPanel = this.buildFindPanel()
     this.liveWrapper = document.createElement('div')
-    this.liveWrapper.className = 'vsidian-view-live'
+    // #132 别名桥：live 容器同时挂 Obsidian 容器/主题三件套
+    // （markdown-source-view / mod-cm6 / cm-s-obsidian），片段的容器作用域
+    // 与主题容器组合选择器随之命中（清单 container-live 条目）
+    this.liveWrapper.className = applyObsidianDomAlias('vsidian-view-live')
     this.readingContainer = createReadingContainer()
     this.readingContainer.tabIndex = 0
     this.readingContainer.style.display = 'none'
@@ -2166,7 +2170,32 @@ export class WebviewSyncController {
         .trim()
       readingVarProbe = value === '' ? null : value
     }
+    // #132 Obsidian 原名别名桥探针：按探针表（单一事实源）在对应视图容器内
+    // 以 **Obsidian 原名选择器** 定位并读 computed text-decoration-color——
+    // probe.css 以原名写探针规则，别名类未挂上/挂错节点即 null
+    const obsidianAliases: Record<string, string | null> = {}
+    for (const probe of OBSIDIAN_ALIAS_PROBES) {
+      const root = probe.view === 'live' ? this.liveWrapper : this.readingContainer
+      // querySelector 只查后代——容器条目（如 .markdown-source-view.mod-cm6）
+      // 的目标可能是 root 自身，先 matches 再查后代
+      const el = root
+        ? root.matches(probe.selector)
+          ? root
+          : root.querySelector(probe.selector)
+        : null
+      // 探针属性统一 outline-color（与既有 text-decoration-color 体系正交）
+      obsidianAliases[probe.id] = el ? getComputedStyle(el).outlineColor || null : null
+    }
+    // #132 变量别名桥观测：--h1-color 驱动的一级标题 computed color（可见效果）
+    const liveHeaderSpan = this.liveWrapper?.querySelector('.vsidian-header-1') ?? null
+    const readingH1 = this.readingContainer?.querySelector('.vsidian-reading-heading-1 h1') ?? null
+    const readColor = (el: Element | null): string | null => (el ? getComputedStyle(el).color : null)
     return {
+      obsidianAliases,
+      obsidianVarProbe: {
+        liveHeadingColor: readColor(liveHeaderSpan),
+        readingHeadingColor: readColor(readingH1),
+      },
       liveHeadingDecorationColor: read(liveEl),
       readingHeadingDecorationColor: read(readingEl),
       readingVarProbe,

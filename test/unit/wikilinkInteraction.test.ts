@@ -131,8 +131,9 @@ describe('实时预览：双链间接装饰（视口内按各自范围切换）'
     const pos = WIKILINK_DOC.indexOf('[[目标笔记]]') + 3
     const ranges = liveRanges(WIKILINK_DOC, { anchor: pos })
     const inLine = ranges.filter((r) => r.from <= pos && r.to >= WIKILINK_DOC.indexOf('[[目标笔记]]'))
-    const marks = inLine.filter(
-      (r) => r.value.spec['class'] === WIKILINK_CLASS_NAMES.wikilink,
+    // #132 别名桥后类串为「vsidian-wikilink cm-hmd-internal-link」，按 token 包含
+    const marks = inLine.filter((r) =>
+      String(r.value.spec['class'] ?? '').split(' ').includes(WIKILINK_CLASS_NAMES.wikilink),
     )
     expect(marks.length).toBe(1)
     expect(WIKILINK_DOC.slice(marks[0]!.from, marks[0]!.to)).toBe('[[目标笔记]]')

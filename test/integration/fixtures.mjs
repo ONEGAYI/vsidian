@@ -216,6 +216,34 @@ const TINY_PNG_BASE64 =
 export const LARGE_DOC_LINES = 100_000
 
 // #14 查找样例：'目标词' 出现 4 次（段落 2 次、列表项 1 次、emoji 行 1 次）
+const STYLE_CONTRACT_DOC = [
+  '---',
+  'title: 样式契约',
+  '---',
+  '',
+  '# 样式契约标题',
+  '',
+  '**粗体** 与 *斜体* 与 `行内代码` 与 ==高亮==。',
+  '',
+  '> 引用一行',
+  '',
+  '- 无序列表项',
+  '- [ ] 未完成任务',
+  '',
+  '---',
+  '',
+  '```js',
+  'const fence = true',
+  '```',
+  '',
+  '| 表头甲 | 表头乙 |',
+  '| --- | --- |',
+  '| 单元甲 | 单元乙 |',
+  '',
+  '[外部链接](https://example.com/alias) 与 [[双链目标|显示别名]]。',
+  '',
+].join('\n')
+
 const FIND_DOC = [
   '# 查找集成标题',
   '',
@@ -557,6 +585,7 @@ const HR_DOC = [
 export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample, generateMermaidDenseSample }) {
   writeFileSync(path.join(wsDir, 'lf.md'), LF_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'find.md'), FIND_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'style-contract.md'), STYLE_CONTRACT_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'untouched.md'), '未触碰文档\n保持原样\n', 'utf8')
   writeFileSync(path.join(wsDir, 'crlf.md'), CRLF_DOC, 'utf8')
   // #88/#89 独立 CRLF 样本：早期坐标测试会保存修改后的 crlf.md。

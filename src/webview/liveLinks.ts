@@ -32,6 +32,7 @@ import {
   scanWikilinksInLine,
   wikilinkAtCol,
 } from '../shared/wikilink'
+import { applyObsidianDomAlias } from '../shared/obsidianAlias'
 
 /** #10 链接稳定类名（图片类名复用 IMAGE_CLASS_NAMES.image） */
 export const LINK_CLASS_NAMES = {
@@ -41,16 +42,17 @@ export const LINK_CLASS_NAMES = {
 
 export { WIKILINK_CLASS_NAMES }
 
-const linkMarkDeco = Decoration.mark({ class: LINK_CLASS_NAMES.link })
+// #132 别名桥：链接/双链装饰类经别名表加工（vsidian 名 + Obsidian 原名同挂）
+const linkMarkDeco = Decoration.mark({ class: applyObsidianDomAlias(LINK_CLASS_NAMES.link) })
 const renderedLinkMarkDeco = Decoration.mark({
-  class: LINK_CLASS_NAMES.link,
+  class: applyObsidianDomAlias(LINK_CLASS_NAMES.link),
   attributes: { 'data-vsidian-rendered-link': 'true' },
 })
 const hideDeco = Decoration.replace({})
 
 // ---- #11 双链装饰实例缓存（同 display 复用同一实例，RangeSet.eq 成立） ----
 
-const wikilinkMarkDeco = Decoration.mark({ class: WIKILINK_CLASS_NAMES.wikilink })
+const wikilinkMarkDeco = Decoration.mark({ class: applyObsidianDomAlias(WIKILINK_CLASS_NAMES.wikilink) })
 
 /** widget 装饰缓存上限：键是用户内容（双链 display / 图片 src+alt），无上限
  *  会随大文档滚动无限累积——视口内同时可见的双链/图片远小于此，超限逐最旧 */
@@ -106,7 +108,7 @@ export class LiveWikilinkWidget extends WidgetType {
 
   toDOM(): HTMLElement {
     const span = document.createElement('span')
-    span.className = WIKILINK_CLASS_NAMES.wikilink
+    span.className = applyObsidianDomAlias(WIKILINK_CLASS_NAMES.wikilink)
     span.dataset['vsidianRenderedWikilink'] = 'true'
     span.textContent = this.displayText
     return span

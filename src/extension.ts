@@ -56,6 +56,10 @@ export function activate(context: vscode.ExtensionContext): void {
     // 注册选项仅接受 retainContextWhenHidden 等（1.86 类型契约）
     vscode.window.registerCustomEditorProvider(VIEW_TYPE, provider),
     // #33 设置页入口：打开（或 reveal 已有）Vsidian 设置面板
+    // #132 样式参考：打开设置页并定位到「样式参考」分页（快捷键默认未绑定）
+    vscode.commands.registerCommand('onegayi.vsidian.openStyleReference', () => {
+      settingsPage.openWithSection('style-reference')
+    }),
     vscode.commands.registerCommand('onegayi.vsidian.openSettings', () => {
       settingsPage.open()
     }),

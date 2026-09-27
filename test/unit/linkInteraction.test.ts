@@ -276,8 +276,9 @@ describe('实时预览：渲染态单击跳转，源码态普通单击编辑', (
       })
     })
     // 链接 span：外链/本地/自动链接三处内容（危险链接同样有 span——显示语义
-    // 与跳转语义分离，跳转由宿主拦截）
-    const linkSpans = items.filter((i) => i.cls === LINK_CLASS_NAMES.link)
+    // 与跳转语义分离，跳转由宿主拦截）。#132 别名桥后类串为
+    // 「vsidian-link cm-link」，按 token 包含断言
+    const linkSpans = items.filter((i) => i.cls?.split(' ').includes(LINK_CLASS_NAMES.link))
     expect(linkSpans.length).toBeGreaterThanOrEqual(4)
     // 图片 widget：非活动图片行整个 Image 节点替换为 LiveImageWidget
     const widgets = items.filter((i) => i.widget)

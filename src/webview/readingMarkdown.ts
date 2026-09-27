@@ -15,6 +15,7 @@ import katexPlugin from '@vscode/markdown-it-katex'
 import { MATH_CLASS_NAMES, stripInlineTexTicks } from '../shared/math'
 import { GRAPHIC_LANG_ATTR, MERMAID_CLASS_NAMES, MERMAID_CODE_ATTR, MERMAID_STATE_ATTR, isRenderedFenceInfo } from '../shared/mermaid'
 import { WIKILINK_CLASS_NAMES, parseWikilinkInner } from '../shared/wikilink'
+import { joinObsidianDomAliasForReading } from '../shared/obsidianAlias'
 import { renderMathHtml } from './mathRenderCache'
 import { tableCellBreakLength } from './tableCells'
 
@@ -148,7 +149,7 @@ function vsidianWikilinkInlineRule(state: StateInline, silent: boolean): boolean
     const open = state.push('link_open', 'a', 1)
     open.attrs = [
       ['href', target],
-      ['class', WIKILINK_CLASS_NAMES.wikilink],
+      ['class', joinObsidianDomAliasForReading(WIKILINK_CLASS_NAMES.wikilink)],
     ]
     const text = state.push('text', '', 0)
     text.content = parsed.display
@@ -387,7 +388,7 @@ export function convertTaskItems(root: HTMLElement, text: string): void {
     box.dataset['vsidianSrcEnd'] = String(markerStart + 3)
     firstText.parentNode!.insertBefore(box, firstText)
     firstText.nodeValue = firstText.nodeValue!.slice(4)
-    li.classList.add(READING_MARKDOWN_CLASS_NAMES.taskItem)
+    li.classList.add(...joinObsidianDomAliasForReading(READING_MARKDOWN_CLASS_NAMES.taskItem).split(' '))
     if (firstText.nodeValue === '') {
       firstText.remove()
     }

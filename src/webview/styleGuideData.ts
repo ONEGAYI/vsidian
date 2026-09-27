@@ -1,0 +1,2472 @@
+// 设置页「样式参考」分页渲染数据（#132）——由 scripts/genStyleGuide.mjs 从
+// src/shared/styleContract.ts 生成，**禁止手改**；一致性由
+// test/unit/styleGuideGen.test.ts 以 --check 钉住（改清单后重跑生成并提交）。
+// 本文件是文档数据（公开指南内容，中文为准），不是 UI 文案——CJK 扫描豁免
+// 同 styleContract.ts；不进编辑器 webview bundle（仅设置页 import）。
+import type { StyleContractEntry } from '../shared/styleContract'
+import type { ObsidianVariableAlias } from '../shared/obsidianAlias'
+
+/** 指南配套的扩展版本（与安装版本一致） */
+export const STYLE_GUIDE_VERSION = "0.4.0"
+
+/** Obsidian 变量别名总表（指南总表同源） */
+export const STYLE_GUIDE_VARIABLE_ALIASES: readonly ObsidianVariableAlias[] = [
+  {
+    "obsidian": "--h1-color",
+    "vsidian": "--vsidian-heading-color-1",
+    "fallback": "var(--vscode-editor-foreground)"
+  },
+  {
+    "obsidian": "--h2-color",
+    "vsidian": "--vsidian-heading-color-2",
+    "fallback": "var(--vscode-editor-foreground)"
+  },
+  {
+    "obsidian": "--h3-color",
+    "vsidian": "--vsidian-heading-color-3",
+    "fallback": "var(--vscode-editor-foreground)"
+  },
+  {
+    "obsidian": "--h4-color",
+    "vsidian": "--vsidian-heading-color-4",
+    "fallback": "var(--vscode-editor-foreground)"
+  },
+  {
+    "obsidian": "--h5-color",
+    "vsidian": "--vsidian-heading-color-5",
+    "fallback": "var(--vscode-editor-foreground)"
+  },
+  {
+    "obsidian": "--h6-color",
+    "vsidian": "--vsidian-heading-color-6",
+    "fallback": "var(--vscode-editor-foreground)"
+  },
+  {
+    "obsidian": "--font-text-size",
+    "vsidian": "--vsidian-reading-font-size",
+    "fallback": "var(--vsidian-content-font-size)"
+  },
+  {
+    "obsidian": "--file-line-width",
+    "vsidian": "--vsidian-reading-max-width",
+    "fallback": "760px"
+  },
+  {
+    "obsidian": "--line-height-normal",
+    "vsidian": "--vsidian-reading-line-height",
+    "fallback": "var(--vsidian-content-line-height)"
+  },
+  {
+    "obsidian": "--code-background",
+    "vsidian": "--vsidian-reading-code-background",
+    "fallback": "var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12))"
+  },
+  {
+    "obsidian": "--text-highlight-bg",
+    "vsidian": "--vsidian-highlight-background",
+    "fallback": "rgba(255, 208, 0, 0.35)"
+  },
+  {
+    "obsidian": "--table-background",
+    "vsidian": "--vsidian-table-background",
+    "fallback": "rgba(128, 128, 128, 0.05)"
+  }
+]
+
+/** 清单条目（渲染数据形态与单一事实源同构） */
+export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
+  {
+    "id": "container-live",
+    "domain": "content",
+    "kind": "container",
+    "target": ".vsidian-view-live",
+    "purpose": "live（实时预览）视图容器，内含 CodeMirror 6 编辑器。",
+    "views": [
+      "live"
+    ],
+    "dom": "#app 直接子元素；阅读模式下 display:none 但 DOM 常驻（样式仍可命中，探针口径与 LineGutterProbe 同理）。",
+    "example": ".markdown-source-view.mod-cm6 {\n  /* Obsidian 容器写法：经别名桥命中 live 容器 */\n}",
+    "obsidian": {
+      "counterpart": ".markdown-source-view（编辑区容器）、.mod-cm6（CM6 模式标记）、.cm-s-obsidian（CM 主题容器）",
+      "support": "direct"
+    },
+    "aliasTargets": [
+      "markdown-source-view",
+      "mod-cm6",
+      "cm-s-obsidian"
+    ],
+    "verification": [
+      "集成「Obsidian 原名别名桥」（cases.ts）：容器组合选择器在 live 视图命中",
+      "cssProbe.obsidianAliases.container-live"
+    ],
+    "introduced": "#6（2026-09-23）"
+  },
+  {
+    "id": "container-reading",
+    "domain": "content",
+    "kind": "container",
+    "target": ".vsidian-view-reading",
+    "purpose": "reading（阅读）视图容器；其内为按需挂载的块级结构。",
+    "views": [
+      "reading"
+    ],
+    "dom": "#app 直接子元素；块内为 markdown-it 渲染的真实语义标签，标签选择器（p/h1/strong 等）作为容器后代天然命中。",
+    "example": ".markdown-preview-view p {\n  /* Obsidian 阅读容器写法：经别名桥命中阅读容器 */\n}",
+    "obsidian": {
+      "counterpart": ".markdown-preview-view（阅读视图容器）",
+      "support": "direct"
+    },
+    "aliasTargets": [
+      "markdown-preview-view"
+    ],
+    "verification": [
+      "集成「稳定样式契约」（#6）：.vsidian-view-reading 探针变量可覆盖读取",
+      "集成「Obsidian 原名别名桥」：容器后代标签选择器命中",
+      "cssProbe.obsidianAliases[\"reading-paragraph\"]（容器别名经后代标签选择器间接验证）"
+    ],
+    "introduced": "#6（2026-09-23）"
+  },
+  {
+    "id": "live-heading-line",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-heading-line-{1..6}",
+    "purpose": "live 标题**行容器**类（挂在 .cm-line 行元素上），整行级样式入口。",
+    "views": [
+      "live"
+    ],
+    "dom": "live 容器内 .cm-line 行元素；标题标记 # 在光标进入该标题行时显形。",
+    "example": ".HyperMD-header-1 {\n  text-decoration: underline;\n}",
+    "obsidian": {
+      "counterpart": ".HyperMD-header-{1..6}（Obsidian live 标题行容器类）",
+      "support": "direct"
+    },
+    "aliasTargets": [
+      "HyperMD-header-{1..6}"
+    ],
+    "verification": [
+      "集成「稳定样式契约」（#6）：.vsidian-heading-line-1 探针命中 rgb(1, 2, 3)",
+      "集成「Obsidian 原名别名桥」：.HyperMD-header-1 命中",
+      "cssProbe.obsidianAliases[\"live-heading-line\"]"
+    ],
+    "introduced": "#5（2026-09-23）"
+  },
+  {
+    "id": "live-header-span",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-header-{1..6}",
+    "purpose": "live 标题**内容 span** 类（mark 装饰，只包标题文字），行内 token 级入口。",
+    "views": [
+      "live"
+    ],
+    "dom": "标题行内 mark 装饰 span；Setext 标题同样命中。",
+    "example": ".cm-header-1 {\n  font-weight: 700;\n}",
+    "obsidian": {
+      "counterpart": ".cm-header-{1..6}（Obsidian live 标题行内 token 类）",
+      "support": "direct"
+    },
+    "aliasTargets": [
+      "cm-header-{1..6}"
+    ],
+    "verification": [
+      "集成「Obsidian 原名别名桥」：.cm-header-1 命中",
+      "cssProbe.obsidianAliases[\"live-header-span\"]"
+    ],
+    "introduced": "#8（2026-09-24）"
+  },
+  {
+    "id": "live-heading-inview",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-heading-inview",
+    "purpose": "视口内标题行标记；#55 起仅作 active 背景的作用域限定与观测入口，自身不绘制样式。",
+    "views": [
+      "live"
+    ],
+    "states": "标题行进入视口时附加；随滚动增减。",
+    "dom": "与 .vsidian-heading-line-{n} 同元素（行级叠加类）。",
+    "example": ".vsidian-heading-inview .vsidian-heading-active {\n  /* 与 active 组合使用 */\n}",
+    "obsidian": {
+      "counterpart": "无直接对应（Obsidian 无视口内标题提示类）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 liveDecorations：inview/active 类发射契约"
+    ],
+    "introduced": "#5（2026-09-23）；#55（2026-09-25）移除其左缘竖线绘制"
+  },
+  {
+    "id": "live-heading-active",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-heading-active",
+    "purpose": "光标所在标题行的行背景强调提示；标题 # 标记在光标进入该行时显形。",
+    "views": [
+      "live"
+    ],
+    "states": "光标位于标题范围内时附加；移出即清除。",
+    "dom": "与 .vsidian-heading-line-{n} 同元素；背景绘制以 inview 为作用域限定。",
+    "example": ".vsidian-heading-line-1.vsidian-heading-active {\n  background: rgba(128, 128, 128, 0.08);\n}",
+    "obsidian": {
+      "counterpart": "无直接对应（本项目自有扩展）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 liveDecorations：活动标题行类发射契约"
+    ],
+    "introduced": "#5（2026-09-23）"
+  },
+  {
+    "id": "inline-strong",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-strong（live）/ strong 标签（阅读）",
+    "purpose": "粗体内容入口：live 为 mark 装饰 span；阅读为 markdown-it 渲染的语义 strong 标签。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "live 侧 ** 标记触及显形（光标离开恢复格式化形态）。",
+    "dom": "live：标题/正文行内 mark span；阅读：块内真实 <strong> 元素。",
+    "example": ".cm-strong {\n  color: #e06c75;\n}\n.markdown-preview-view strong {\n  color: #e06c75;\n}",
+    "obsidian": {
+      "counterpart": ".cm-strong（live token）/ .markdown-preview-view strong（阅读标签）",
+      "support": "direct"
+    },
+    "aliasTargets": [
+      "cm-strong"
+    ],
+    "verification": [
+      "集成「稳定样式契约扩展」（#8）：.vsidian-strong 命中 rgb(7, 8, 9)；阅读 strong 探针 rgb(16, 17, 18)",
+      "集成「Obsidian 原名别名桥」：.cm-strong 与 .markdown-preview-view strong 命中",
+      "cssProbe.liveStrongDecorationColor / readingStrongDecorationColor / obsidianAliases[\"inline-strong\"] / obsidianAliases[\"reading-inline-strong\"]"
+    ],
+    "introduced": "#8（2026-09-24）"
+  },
+  {
+    "id": "inline-emphasis",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-emphasis（live）/ em 标签（阅读）",
+    "purpose": "斜体内容入口：live mark 装饰 span；阅读语义 em 标签。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "live 侧 * / _ 标记触及显形。",
+    "dom": "同 inline-strong 的两侧结构。",
+    "example": ".cm-emphasis {\n  font-style: italic;\n}",
+    "obsidian": {
+      "counterpart": ".cm-emphasis（live token）/ .markdown-preview-view em（阅读标签）",
+      "support": "direct"
+    },
+    "aliasTargets": [
+      "cm-emphasis"
+    ],
+    "verification": [
+      "集成「Obsidian 原名别名桥」：.cm-emphasis 命中",
+      "cssProbe.obsidianAliases[\"inline-emphasis\"]"
+    ],
+    "introduced": "#8（2026-09-24）"
+  },
+  {
+    "id": "inline-code",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-inline-code（live）/ code 标签（阅读，块内 code 另有 language-x 类）",
+    "purpose": "行内代码内容入口：live mark 装饰 span；阅读语义 code 标签。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "live 侧反引号标记触及显形。",
+    "dom": "live：行内 mark span（多反引号围栏按实际定界符长度）；阅读：块内 <code>。",
+    "example": ".cm-inline-code {\n  font-family: monospace;\n}",
+    "obsidian": {
+      "counterpart": ".cm-inline-code（Obsidian 亦用 .cm-hmd-inline-code；本清单承诺前者）",
+      "support": "direct"
+    },
+    "aliasTargets": [
+      "cm-inline-code"
+    ],
+    "verification": [
+      "集成「稳定样式契约扩展」（#8）：.vsidian-inline-code 命中 rgb(10, 11, 12)",
+      "集成「Obsidian 原名别名桥」：.cm-inline-code 命中",
+      "cssProbe.liveInlineCodeDecorationColor / obsidianAliases[\"inline-code\"]"
+    ],
+    "introduced": "#8（2026-09-24）"
+  },
+  {
+    "id": "inline-highlight",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-highlight（live）/ mark 标签（阅读）",
+    "purpose": "高亮（==文字==）内容入口：live span 常显主题色底；阅读 mark 标签。底色变量见 var-highlight-background。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "live 侧 == 定界符触及显形（同粗体语义）。",
+    "dom": "live：mark 装饰 span；阅读：块内 <mark>。",
+    "example": ".cm-highlight {\n  background: rgba(255, 208, 0, 0.35);\n}",
+    "obsidian": {
+      "counterpart": ".cm-highlight（live token）/ .markdown-preview-view mark",
+      "support": "direct"
+    },
+    "aliasTargets": [
+      "cm-highlight"
+    ],
+    "verification": [
+      "集成「Obsidian 原名别名桥」：.cm-highlight 命中",
+      "cssProbe.obsidianAliases[\"inline-highlight\"]"
+    ],
+    "introduced": "#105（2026-09-27）"
+  },
+  {
+    "id": "inline-strikethrough",
+    "domain": "content",
+    "kind": "selector",
+    "target": "del 标签（仅阅读）",
+    "purpose": "删除线（~~文字~~）内容入口：**仅阅读视图**——markdown-it 渲染语义 del 标签。live 侧解析器支持但未装饰，源码形态呈现（见 limit-strikethrough-live）。",
+    "views": [
+      "reading"
+    ],
+    "dom": "阅读块内 <del> 元素。live 侧无装饰类，不支持。",
+    "example": ".markdown-preview-view del {\n  color: var(--vscode-descriptionForeground);\n}",
+    "obsidian": {
+      "counterpart": ".markdown-preview-view del（阅读标签）",
+      "support": "direct"
+    },
+    "verification": [
+      "单元 readingMarkdown：~~文字~~ 渲染 del 标签契约"
+    ],
+    "introduced": "阅读侧随 #8 语义渲染（2026-09-24）；live 侧缺口如实记录"
+  },
+  {
+    "id": "live-code-line",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-code-line",
+    "purpose": "live 围栏/缩进代码**行**（含围栏标记行）；卡片开启时的行级类另见 chrome 域 live-code-card-line。",
+    "views": [
+      "live"
+    ],
+    "dom": "live 容器内 .cm-line 行元素；围栏内逐行命中。",
+    "example": ".HyperMD-codeblock {\n  font-family: monospace;\n}",
+    "obsidian": {
+      "counterpart": ".HyperMD-codeblock（Obsidian 代码块行类族）",
+      "support": "direct"
+    },
+    "aliasTargets": [
+      "HyperMD-codeblock"
+    ],
+    "verification": [
+      "集成「稳定样式契约扩展」（#8）：.vsidian-code-line 命中 rgb(13, 14, 15)",
+      "集成「Obsidian 原名别名桥」：.HyperMD-codeblock 命中",
+      "cssProbe.liveCodeLineDecorationColor / obsidianAliases[\"live-code-line\"]"
+    ],
+    "introduced": "#8（2026-09-24）"
+  },
+  {
+    "id": "live-quote-line",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-quote-line",
+    "purpose": "live 引用行（> 前缀）；引用内容不额外 span 化（见 limit-quote-span）。",
+    "views": [
+      "live"
+    ],
+    "states": "行首 > 标记仅在标记及相邻空格附近显形。",
+    "dom": "live 容器内 .cm-line 行元素。",
+    "example": ".HyperMD-quote {\n  border-left: 3px solid #888;\n  padding-left: 10px;\n}",
+    "obsidian": {
+      "counterpart": ".HyperMD-quote（Obsidian 引用行类）",
+      "support": "direct"
+    },
+    "aliasTargets": [
+      "HyperMD-quote"
+    ],
+    "verification": [
+      "集成「Obsidian 原名别名桥」：.HyperMD-quote 命中",
+      "cssProbe.obsidianAliases[\"live-quote-line\"]"
+    ],
+    "introduced": "#8（2026-09-24）"
+  },
+  {
+    "id": "live-list-line",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-list-line（+ -d{1..8} 嵌套深度修饰）",
+    "purpose": "live 列表项行；深度修饰 -d{1..8} 为本项目自有形态（Obsidian 按行 class 组合表达缩进）。",
+    "views": [
+      "live"
+    ],
+    "states": "行首列表标记仅在标记及相邻空格附近显形。",
+    "dom": "live 容器内 .cm-line 行元素；与 bullet/ordered 修饰叠加。",
+    "example": ".HyperMD-list-line {\n  line-height: 1.7;\n}",
+    "obsidian": {
+      "counterpart": ".HyperMD-list-line（Obsidian 列表行类族）",
+      "support": "direct"
+    },
+    "aliasTargets": [
+      "HyperMD-list-line"
+    ],
+    "verification": [
+      "集成「Obsidian 原名别名桥」：.HyperMD-list-line 命中",
+      "cssProbe.obsidianAliases[\"live-list-line\"]"
+    ],
+    "introduced": "#8（2026-09-24）"
+  },
+  {
+    "id": "live-list-bullet",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-list-bullet",
+    "purpose": "无序列表行修饰：标记隐藏后以 ::before 圆点呈现。",
+    "views": [
+      "live"
+    ],
+    "states": "与 .vsidian-list-marker-visible 互斥（源码标记显形时抑制伪圆点）。",
+    "dom": "列表行级叠加类；圆点绘制在 ::before。",
+    "example": ".vsidian-list-line.vsidian-list-bullet::before {\n  color: #61afef;\n}",
+    "obsidian": {
+      "counterpart": "无直接对应（Obsidian 由 .cm-formatting-list 隐藏 + 原生列表样式承担）",
+      "support": "native"
+    },
+    "verification": [
+      "单元 liveDecorations：bullet/ordered 修饰契约"
+    ],
+    "introduced": "#8（2026-09-24）"
+  },
+  {
+    "id": "live-list-ordered",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-list-ordered",
+    "purpose": "有序列表行修饰（编号保留可见）。",
+    "views": [
+      "live"
+    ],
+    "dom": "列表行级叠加类。",
+    "example": ".vsidian-list-line.vsidian-list-ordered {\n  color: inherit;\n}",
+    "obsidian": {
+      "counterpart": "无直接对应（同 live-list-bullet）",
+      "support": "native"
+    },
+    "verification": [
+      "单元 liveDecorations：bullet/ordered 修饰契约"
+    ],
+    "introduced": "#8（2026-09-24）"
+  },
+  {
+    "id": "live-list-marker-visible",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-list-marker-visible",
+    "purpose": "无序列表源码标记显形时抑制 ::before 伪圆点，避免双圆点。",
+    "views": [
+      "live"
+    ],
+    "states": "光标进入标记邻域时附加。",
+    "dom": "列表行级叠加状态类。",
+    "example": ".vsidian-list-marker-visible::before {\n  content: none;\n}",
+    "obsidian": {
+      "counterpart": "无直接对应",
+      "support": "native"
+    },
+    "verification": [
+      "单元 liveDecorations：marker-visible 状态契约"
+    ],
+    "introduced": "#8（2026-09-24）"
+  },
+  {
+    "id": "live-task-checkbox",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-task-checkbox（input[type=checkbox]）+ .vsidian-task-checked 修饰",
+    "purpose": "live 任务 checkbox（可交互：点击/Enter/空格切换勾选并写回 Markdown）；勾选态双入口：:checked 伪类与 .vsidian-task-checked 类。",
+    "views": [
+      "live"
+    ],
+    "states": "光标进入 [ ]/[x] 标记时切回源码形态（widget 撤下）。",
+    "dom": "替换任务标记区间的 input widget。",
+    "example": ".vsidian-task-checkbox:checked {\n  accent-color: #98c379;\n}",
+    "obsidian": {
+      "counterpart": ".cm-task-* 方向（Obsidian 任务标记由 HMR widget 承担，无公开稳定类）",
+      "support": "semantic"
+    },
+    "verification": [
+      "集成「稳定样式契约」（#9）：.vsidian-task-checkbox 命中 rgb(19, 20, 21)",
+      "cssProbe.liveTaskCheckboxDecorationColor"
+    ],
+    "introduced": "#8（2026-09-24）；#9（2026-09-24）起可交互"
+  },
+  {
+    "id": "live-hr-line",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-hr-line",
+    "purpose": "live 水平线**行**级类；#106 起升级渲染态后保留作源码态着色。",
+    "views": [
+      "live"
+    ],
+    "states": "光标触及该行时源文显形（行级类仍命中）。",
+    "dom": "live 容器内 .cm-line 行元素。",
+    "example": ".cm-hr {\n  color: var(--vsidian-hr-color);\n}",
+    "obsidian": {
+      "counterpart": ".cm-hr（Obsidian 水平线 token 类）",
+      "support": "direct"
+    },
+    "aliasTargets": [
+      "cm-hr"
+    ],
+    "verification": [
+      "集成「Obsidian 原名别名桥」：.cm-hr 命中",
+      "cssProbe.obsidianAliases[\"live-hr-line\"]"
+    ],
+    "introduced": "#8（2026-09-24）"
+  },
+  {
+    "id": "live-hr-widget",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-hr",
+    "purpose": "live 水平线渲染 widget 元素（#106：未触及时源文隐藏，本元素以居中渐变呈现真横线；行盒高等于正文行高，颜色与阅读 hr 同源变量 --vsidian-hr-color）。",
+    "views": [
+      "live"
+    ],
+    "states": "光标触及该行时撤下 widget、显源码。",
+    "dom": "替换水平线整段源文的行内元素。",
+    "example": ".vsidian-hr {\n  opacity: 0.9;\n}",
+    "obsidian": {
+      "counterpart": ".cm-hr 的横线绘制方向（Obsidian 由同一 token 类承担绘制；本项目拆分行类与 widget 两入口）",
+      "support": "semantic"
+    },
+    "verification": [
+      "单元 liveDecorations：hr widget 契约；hrPaintCssContract 钉横线绘制规则"
+    ],
+    "introduced": "#106（2026-09-27）"
+  },
+  {
+    "id": "live-frontmatter-line",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-frontmatter-line",
+    "purpose": "live frontmatter 行（头块按源码呈现、语法不解析）。",
+    "views": [
+      "live"
+    ],
+    "dom": "live 容器内 .cm-line 行元素；边界由 markdownDoc.frontmatterRange 判定（两视图共用）。",
+    "example": ".cm-hmd-frontmatter {\n  color: var(--vscode-descriptionForeground);\n}",
+    "obsidian": {
+      "counterpart": ".cm-hmd-frontmatter（Obsidian frontmatter 类）",
+      "support": "direct"
+    },
+    "aliasTargets": [
+      "cm-hmd-frontmatter"
+    ],
+    "verification": [
+      "集成「Obsidian 原名别名桥」：.cm-hmd-frontmatter 命中",
+      "cssProbe.obsidianAliases[\"live-frontmatter-line\"]"
+    ],
+    "introduced": "#8（2026-09-24）"
+  },
+  {
+    "id": "live-table-line",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-table-line",
+    "purpose": "live 表格行（表头/分隔/数据行通用）；仅源码降级或活动分隔行显示管道符。",
+    "views": [
+      "live"
+    ],
+    "dom": "live 容器内 .cm-line 行元素；与 header/delimiter 修饰叠加。",
+    "example": ".HyperMD-table-line {\n  font-family: monospace;\n}",
+    "obsidian": {
+      "counterpart": ".HyperMD-table-line（Obsidian live 表格行类族）",
+      "support": "direct"
+    },
+    "aliasTargets": [
+      "HyperMD-table-line"
+    ],
+    "verification": [
+      "集成「Obsidian 原名别名桥」：.HyperMD-table-line 命中",
+      "cssProbe.obsidianAliases[\"live-table-line\"]"
+    ],
+    "introduced": "#12（2026-09-24）"
+  },
+  {
+    "id": "live-table-header-line",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-table-header-line",
+    "purpose": "live 表头行修饰。",
+    "views": [
+      "live"
+    ],
+    "dom": "表格行级叠加类。",
+    "example": ".vsidian-table-line.vsidian-table-header-line {\n  font-weight: 600;\n}",
+    "obsidian": {
+      "counterpart": "无直接对应（Obsidian 以 thead 样式承担）",
+      "support": "native"
+    },
+    "verification": [
+      "单元 liveDecorations：表头/分隔行修饰契约"
+    ],
+    "introduced": "#12（2026-09-24）"
+  },
+  {
+    "id": "live-table-delimiter-line",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-table-delimiter-line",
+    "purpose": "live 分隔行修饰（活动分隔行回到源码显示）。",
+    "views": [
+      "live"
+    ],
+    "states": "光标进入分隔行时源码形态。",
+    "dom": "表格行级叠加类。",
+    "example": ".vsidian-table-line.vsidian-table-delimiter-line {\n  color: var(--vscode-descriptionForeground);\n}",
+    "obsidian": {
+      "counterpart": "无直接对应",
+      "support": "native"
+    },
+    "verification": [
+      "单元 liveDecorations：分隔行修饰契约"
+    ],
+    "introduced": "#12（2026-09-24）"
+  },
+  {
+    "id": "live-table-cell",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-table-cell（+ -header 修饰）",
+    "purpose": "live 单元格内容 span（trim 后区间）；GFM 拆分语义自研（\\| 与行内代码内的 | 不切分）。",
+    "views": [
+      "live"
+    ],
+    "dom": "表格行内 mark 装饰 span；与 align 修饰叠加。",
+    "example": ".cm-table-cell {\n  padding: 0 6px;\n}",
+    "obsidian": {
+      "counterpart": ".cm-table-cell（社区主题常用方向，非 Obsidian 官方类）",
+      "support": "direct"
+    },
+    "aliasTargets": [
+      "cm-table-cell"
+    ],
+    "verification": [
+      "集成「Obsidian 原名别名桥」：.cm-table-cell 命中",
+      "cssProbe.obsidianAliases[\"live-table-cell\"]"
+    ],
+    "introduced": "#12（2026-09-24）"
+  },
+  {
+    "id": "live-table-pipe",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-table-pipe",
+    "purpose": "live 管道符 span（含首尾边界管道）；网格状态隐藏，源码状态可见。",
+    "views": [
+      "live"
+    ],
+    "dom": "表格行内 mark 装饰 span。",
+    "example": ".vsidian-table-pipe {\n  color: var(--vscode-descriptionForeground);\n}",
+    "obsidian": {
+      "counterpart": "无对应（Obsidian 隐藏或原样呈现管道）",
+      "support": "native"
+    },
+    "verification": [
+      "集成「表格装饰与单元格编辑写回」（#12）：.vsidian-table-pipe 命中 rgb(19, 20, 21)",
+      "cssProbe.liveTablePipeDecorationColor"
+    ],
+    "introduced": "#12（2026-09-24）"
+  },
+  {
+    "id": "live-table-align",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-table-align-{left/center/right}",
+    "purpose": "live 分隔行声明的列对齐修饰（落在 trim 后内容 span 上）；网格实际布局由 grid-align 承担。",
+    "views": [
+      "live"
+    ],
+    "dom": "单元格 span 级叠加类。",
+    "example": ".vsidian-table-align-center {\n  text-align: center;\n}",
+    "obsidian": {
+      "counterpart": "无对应（对齐由渲染布局承担）",
+      "support": "native"
+    },
+    "verification": [
+      "单元 liveDecorations：对齐修饰契约"
+    ],
+    "introduced": "#12（2026-09-24）"
+  },
+  {
+    "id": "live-table-grid-row",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-table-grid-row（行附 data-vsidian-table-row=header/row 与 --vsidian-table-columns）",
+    "purpose": "安全表格的 CSS grid 网格行；活动格也保留；单元格仍与源区间对应（非独立表格数据模型）。",
+    "views": [
+      "live"
+    ],
+    "dom": "表格行内的网格行容器（grid 布局）。",
+    "example": ".vsidian-table-grid-row {\n  grid-template-columns: var(--vsidian-table-columns);\n}",
+    "obsidian": {
+      "counterpart": "Obsidian live 网格方向（无精确对应类）",
+      "support": "semantic"
+    },
+    "verification": [
+      "单元 liveDecorations + tableRegionSelection：网格结构契约；tablePaintCssContract 钉网格规则"
+    ],
+    "introduced": "#42（2026-09-24）"
+  },
+  {
+    "id": "live-table-grid-cell",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-table-grid-cell",
+    "purpose": "安全表格的网格单元格；光标进入格子后网格不撤下，直接在该格源区间输入（复用 CM6 的 IME、导航与写回）。",
+    "views": [
+      "live"
+    ],
+    "dom": "网格行内的单元格元素。",
+    "example": ".vsidian-table-grid-cell {\n  padding: 2px 8px;\n}",
+    "obsidian": {
+      "counterpart": "Obsidian live 网格方向",
+      "support": "semantic"
+    },
+    "verification": [
+      "tablePaintCssContract：网格单元格规则；浏览器 tableCaret：光标直编回流"
+    ],
+    "introduced": "#42（2026-09-24）"
+  },
+  {
+    "id": "live-table-grid-delimiter",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-table-grid-delimiter",
+    "purpose": "网格状态下的分隔行隐藏。",
+    "views": [
+      "live"
+    ],
+    "states": "活动分隔行回到源码。",
+    "dom": "网格行内的分隔行元素。",
+    "example": ".vsidian-table-grid-delimiter {\n  display: none;\n}",
+    "obsidian": {
+      "counterpart": "Obsidian 表格对齐方向",
+      "support": "semantic"
+    },
+    "verification": [
+      "tablePaintCssContract：分隔行隐藏规则"
+    ],
+    "introduced": "#42（2026-09-24）"
+  },
+  {
+    "id": "live-table-grid-align",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-table-grid-align-{left/center/right}",
+    "purpose": "网格状态的列对齐。",
+    "views": [
+      "live"
+    ],
+    "dom": "网格单元格级叠加类。",
+    "example": ".vsidian-table-grid-align-center {\n  text-align: center;\n}",
+    "obsidian": {
+      "counterpart": "Obsidian 表格对齐方向",
+      "support": "semantic"
+    },
+    "verification": [
+      "tablePaintCssContract：对齐规则"
+    ],
+    "introduced": "#42（2026-09-24）"
+  },
+  {
+    "id": "live-table-escaped-pipe",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-table-escaped-pipe",
+    "purpose": "网格中隐藏转义管道符前的反斜杠；只改变显示，不改 Markdown 原文。",
+    "views": [
+      "live"
+    ],
+    "dom": "网格单元格内 span。",
+    "example": ".vsidian-table-escaped-pipe {\n  display: none;\n}",
+    "obsidian": {
+      "counterpart": "无直接对应",
+      "support": "native"
+    },
+    "verification": [
+      "单元 tableCells：转义管道拆分契约"
+    ],
+    "introduced": "#42（2026-09-24）"
+  },
+  {
+    "id": "reading-block",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-reading-block（+ data-vsidian-src-start / -end 源锚点属性）",
+    "purpose": "阅读容器内每个内容块的基类；锚点属性为 LF 全文 UTF-16 offset（与消息协议坐标同构），按需挂载与任务定位依赖。",
+    "views": [
+      "reading"
+    ],
+    "dom": ".vsidian-view-reading 直接子元素；块内为 markdown-it 渲染的真实语义标签。",
+    "example": ".vsidian-reading-block {\n  margin: 0 0 12px;\n}",
+    "obsidian": {
+      "counterpart": "无对应（Obsidian 阅读为扁平标签流；本项目为 div 包裹 + 内层标签结构）",
+      "support": "native"
+    },
+    "verification": [
+      "单元 readingView：块结构与锚点契约；集成「阅读视图表格」等块级用例"
+    ],
+    "introduced": "#6（2026-09-23）"
+  },
+  {
+    "id": "reading-heading",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-reading-heading-{1..6}（块类）+ 内层语义 h{1..6} 标签",
+    "purpose": "阅读标题块；双入口命中（块类 + 内层标签）。",
+    "views": [
+      "reading"
+    ],
+    "dom": "块级容器内含真实 h{n} 元素。",
+    "example": ".markdown-preview-view h1 {\n  color: var(--vsidian-heading-color-1);\n}",
+    "obsidian": {
+      "counterpart": ".markdown-preview-view h{1..6}",
+      "support": "direct"
+    },
+    "verification": [
+      "集成「稳定样式契约」（#6）：.vsidian-reading-heading-1 命中 rgb(4, 5, 6)",
+      "集成「Obsidian 原名别名桥」：.markdown-preview-view h1 命中",
+      "cssProbe.readingHeadingDecorationColor / obsidianAliases[\"reading-heading\"]"
+    ],
+    "introduced": "#6（2026-09-23）"
+  },
+  {
+    "id": "reading-paragraph",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-reading-paragraph（块类）+ 内层 p 标签",
+    "purpose": "阅读段落块。",
+    "views": [
+      "reading"
+    ],
+    "dom": "块级容器内含真实 p 元素。",
+    "example": ".markdown-preview-view p {\n  margin: 0 0 10px;\n}",
+    "obsidian": {
+      "counterpart": ".markdown-preview-view p",
+      "support": "direct"
+    },
+    "verification": [
+      "集成「Obsidian 原名别名桥」：.markdown-preview-view p 命中",
+      "cssProbe.obsidianAliases[\"reading-paragraph\"]"
+    ],
+    "introduced": "#6（2026-09-23）"
+  },
+  {
+    "id": "reading-blockquote",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-reading-blockquote（块类）+ 内层 blockquote 标签",
+    "purpose": "阅读引用块。",
+    "views": [
+      "reading"
+    ],
+    "dom": "块级容器内含真实 blockquote 元素。",
+    "example": ".markdown-preview-view blockquote {\n  border-left: 3px solid #888;\n}",
+    "obsidian": {
+      "counterpart": ".markdown-preview-view blockquote",
+      "support": "direct"
+    },
+    "verification": [
+      "集成「Obsidian 原名别名桥」：.markdown-preview-view blockquote 命中",
+      "cssProbe.obsidianAliases[\"reading-blockquote\"]"
+    ],
+    "introduced": "#8（2026-09-24）"
+  },
+  {
+    "id": "reading-list",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-reading-list（块类）+ 内层 ul/ol/li 嵌套（li 带源锚点）",
+    "purpose": "阅读列表块（整块还原嵌套结构）。",
+    "views": [
+      "reading"
+    ],
+    "dom": "块级容器内含真实 ul/ol > li 嵌套。",
+    "example": ".markdown-preview-view ul {\n  padding-left: 22px;\n}",
+    "obsidian": {
+      "counterpart": ".markdown-preview-view ul / ol / li",
+      "support": "direct"
+    },
+    "verification": [
+      "集成「Obsidian 原名别名桥」：.markdown-preview-view ul 命中",
+      "cssProbe.obsidianAliases[\"reading-list\"]"
+    ],
+    "introduced": "#6（2026-09-23）；#8 起还原嵌套"
+  },
+  {
+    "id": "reading-task",
+    "domain": "content",
+    "kind": "selector",
+    "target": "li.vsidian-reading-task",
+    "purpose": "阅读任务列表项（挂在语义 li 上）；data-task 扩展勾选状态（[/]、[!] 等）不支持。",
+    "views": [
+      "reading"
+    ],
+    "dom": "列表块内 li 元素。",
+    "example": ".markdown-preview-view .task-list-item {\n  list-style: none;\n}",
+    "obsidian": {
+      "counterpart": ".markdown-preview-view .task-list-item",
+      "support": "direct"
+    },
+    "aliasTargets": [
+      "task-list-item"
+    ],
+    "verification": [
+      "集成「Obsidian 原名别名桥」：.task-list-item 命中",
+      "cssProbe.obsidianAliases[\"reading-task\"]"
+    ],
+    "introduced": "#8（2026-09-24）"
+  },
+  {
+    "id": "reading-task-checkbox",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-reading-task-checkbox（input[type=checkbox]）",
+    "purpose": "阅读任务复选框（点击/键盘切换并写回）。",
+    "views": [
+      "reading"
+    ],
+    "dom": "任务 li 内 input 元素。",
+    "example": ".markdown-preview-view .task-list-item input[type=\"checkbox\"] {\n  accent-color: #98c379;\n}",
+    "obsidian": {
+      "counterpart": ".markdown-preview-view .task-list-item input[type=\"checkbox\"]",
+      "support": "direct"
+    },
+    "verification": [
+      "集成「稳定样式契约」（#9）：.vsidian-reading-task-checkbox 命中 rgb(22, 23, 24)",
+      "集成「Obsidian 原名别名桥」：.task-list-item input[type=checkbox] 命中",
+      "cssProbe.readingTaskCheckboxDecorationColor / obsidianAliases[\"reading-task-checkbox\"]"
+    ],
+    "introduced": "#8（2026-09-24）；#9 起启用勾选写回"
+  },
+  {
+    "id": "reading-code-block",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-reading-code-block（块类）+ 内层 pre > code（code 带语言类 language-x）",
+    "purpose": "阅读围栏/缩进代码块（内容不含围栏标记文本；大围栏超 60 行按行细分为多块；卡片化外壳另见 chrome 域 reading-code-card）。",
+    "views": [
+      "reading"
+    ],
+    "dom": "块级容器内含真实 pre > code。",
+    "example": ".markdown-preview-view pre {\n  background: var(--vsidian-reading-code-background);\n}",
+    "obsidian": {
+      "counterpart": ".markdown-preview-view pre",
+      "support": "direct"
+    },
+    "verification": [
+      "集成「Obsidian 原名别名桥」：.markdown-preview-view pre 命中",
+      "cssProbe.obsidianAliases[\"reading-code-block\"]"
+    ],
+    "introduced": "#8（2026-09-24）"
+  },
+  {
+    "id": "reading-hr",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-reading-hr（块类）+ 内层 hr 标签",
+    "purpose": "阅读水平线块。",
+    "views": [
+      "reading"
+    ],
+    "dom": "块级容器内含真实 hr 元素。",
+    "example": ".markdown-preview-view hr {\n  border-color: var(--vsidian-hr-color);\n}",
+    "obsidian": {
+      "counterpart": ".markdown-preview-view hr",
+      "support": "direct"
+    },
+    "verification": [
+      "集成「Obsidian 原名别名桥」：.markdown-preview-view hr 命中",
+      "cssProbe.obsidianAliases[\"reading-hr\"]"
+    ],
+    "introduced": "#8（2026-09-24）"
+  },
+  {
+    "id": "reading-table",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-reading-table（块类）+ 内层真实 table/thead/tbody（GFM 列对齐保留在 th/td 内联 style）",
+    "purpose": "阅读表格块（markdown-it 渲染，只读呈现）。",
+    "views": [
+      "reading"
+    ],
+    "dom": "块级容器内含真实 table 元素。",
+    "example": ".markdown-preview-view table {\n  background: var(--vsidian-table-background);\n}",
+    "obsidian": {
+      "counterpart": ".markdown-preview-view table",
+      "support": "direct"
+    },
+    "verification": [
+      "集成「阅读视图表格」（#12）：.vsidian-reading-block table 命中 rgb(22, 23, 24)",
+      "集成「Obsidian 原名别名桥」：.markdown-preview-view table 命中",
+      "cssProbe.readingTableDecorationColor / obsidianAliases[\"reading-table\"]"
+    ],
+    "introduced": "#12（2026-09-24）"
+  },
+  {
+    "id": "reading-frontmatter",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-reading-frontmatter（块类；内部 pre.vsidian-reading-frontmatter-text）",
+    "purpose": "阅读 frontmatter 头块（源码呈现，头块内语法不解析，两视图共用边界判定）。",
+    "views": [
+      "reading"
+    ],
+    "dom": "块级容器内 pre 元素。",
+    "example": ".markdown-preview-view .markdown-frontmatter {\n  color: var(--vscode-descriptionForeground);\n}",
+    "obsidian": {
+      "counterpart": ".markdown-preview-view .markdown-frontmatter",
+      "support": "direct"
+    },
+    "aliasTargets": [
+      "markdown-frontmatter"
+    ],
+    "verification": [
+      "集成「Obsidian 原名别名桥」：.markdown-frontmatter 命中",
+      "cssProbe.obsidianAliases[\"reading-frontmatter\"]"
+    ],
+    "introduced": "#8（2026-09-24）"
+  },
+  {
+    "id": "reading-spacer",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-reading-spacer（-top / -bottom）",
+    "purpose": "阅读视口占位：屏外块的高度占位（非内容节点，高度为块高度表前后缀和）；本项目自有结构，不参与兼容承诺，出现在片段中不影响内容块定位。",
+    "views": [
+      "reading"
+    ],
+    "dom": "阅读容器首/尾的占位 div。",
+    "example": "/* 无需定位；虚拟化结构见 limit-virtualization */",
+    "obsidian": {
+      "counterpart": "无对应（Obsidian 虚拟化由内部机制承担）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 readingViewport / readingVirtualView：挂载窗口与 spacer 契约"
+    ],
+    "introduced": "#7（2026-09-24）"
+  },
+  {
+    "id": "live-link",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-link",
+    "purpose": "live 链接**内容** span（始终标记；光标或选区进入该链接范围时显示 [ 和 ](url) 源码，同一行其他链接保持格式化）；隐藏尾部对应 Obsidian .cm-formatting-link / .cm-string.cm-url 方向——本项目以隐藏呈现，无独立样式类。",
+    "views": [
+      "live"
+    ],
+    "states": "光标/选区进入链接范围时源码显形。",
+    "dom": "live 行内 mark 装饰 span（间接装饰：视口外按源码呈现，滚动进入视口后应用）。",
+    "example": ".cm-link {\n  color: #61afef;\n}",
+    "obsidian": {
+      "counterpart": ".cm-link（Obsidian 链接内容 token）",
+      "support": "direct"
+    },
+    "aliasTargets": [
+      "cm-link"
+    ],
+    "verification": [
+      "集成「稳定样式契约」（#10）：.vsidian-link 命中 rgb(19, 20, 21)",
+      "集成「Obsidian 原名别名桥」：.cm-link 命中",
+      "cssProbe.liveLinkDecorationColor / obsidianAliases[\"live-link\"]"
+    ],
+    "introduced": "#10（2026-09-24）"
+  },
+  {
+    "id": "reading-link",
+    "domain": "content",
+    "kind": "selector",
+    "target": "阅读链接（语义 a 标签，无自有类）",
+    "purpose": "阅读链接：markdown-it 渲染的语义 <a>（单击经容器委托上报跳转意图，不做 webview 原生导航）。",
+    "views": [
+      "reading"
+    ],
+    "dom": "阅读块内真实 a 元素。",
+    "example": ".markdown-preview-view a {\n  color: #61afef;\n}",
+    "obsidian": {
+      "counterpart": ".markdown-preview-view a",
+      "support": "direct"
+    },
+    "verification": [
+      "集成「稳定样式契约」（#10）：阅读 a 探针 rgb(22, 23, 24)",
+      "集成「Obsidian 原名别名桥」：.markdown-preview-view a 命中",
+      "cssProbe.readingLinkDecorationColor / obsidianAliases[\"reading-link\"]"
+    ],
+    "introduced": "#10（2026-09-24）"
+  },
+  {
+    "id": "image-slot",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-image（双视图）",
+    "purpose": "图片槽位基类：阅读视图为 <img> 元素本体（Obsidian img 标签选择器天然命中）；live 视图为 widget 容器 span（内部 img 由资源管理器装载，本项目自有形态）。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "进入视口才发起装载；离开视口卸载释放（src 清空）。",
+    "dom": "阅读：块内 img.vsidian-image；live：行内 widget span.vsidian-image > img。",
+    "example": ".markdown-preview-view img {\n  max-width: 100%;\n}",
+    "obsidian": {
+      "counterpart": ".markdown-preview-view img（阅读）/ .cm-image（live 方向，Obsidian 无公开稳定类）",
+      "support": "direct"
+    },
+    "verification": [
+      "集成「稳定样式契约」（#10）：阅读 img.vsidian-image 命中 rgb(25, 26, 27)",
+      "cssProbe.readingImageDecorationColor"
+    ],
+    "introduced": "#10（2026-09-24）"
+  },
+  {
+    "id": "image-states",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-image-loading / -loaded / -error（与 data-vsidian-img-state 同步）",
+    "purpose": "图片三态：占位（alt 文本）/ 已加载（load 事件确认）/ 失败（点击重试，可见错误轮廓）。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "loading → loaded / error；error 态点击可重试。",
+    "dom": "图片槽位元素级状态修饰类。",
+    "example": ".vsidian-image-error {\n  outline: 1px dashed #e06c75;\n}",
+    "obsidian": {
+      "counterpart": "无直接对应（Obsidian 无公开加载状态类）",
+      "support": "native"
+    },
+    "verification": [
+      "单元 imageResource：三态状态机契约；集成 reading.test.image 注入用例"
+    ],
+    "introduced": "#10（2026-09-24）"
+  },
+  {
+    "id": "live-wikilink",
+    "domain": "content",
+    "kind": "selector",
+    "target": ".vsidian-wikilink",
+    "purpose": "live 双链呈现：光标在范围外时为显示文字 widget（替换整个 [[…]]，别名类挂在 widget 外层与源码 mark 上），进入范围后为源码 mark。Obsidian 的拆分形态（链接名/别名/格式化括号）无拆分类。",
+    "views": [
+      "live"
+    ],
+    "states": "光标进入该双链范围时源码显形。",
+    "dom": "live 行内 widget 或 mark 装饰（间接装饰，视口外按源码呈现；围栏/行内代码与 frontmatter 内不装饰）。",
+    "example": ".cm-hmd-internal-link {\n  color: #c678dd;\n}",
+    "obsidian": {
+      "counterpart": ".cm-hmd-internal-link（Obsidian live 内链 token 类族）",
+      "support": "direct"
+    },
+    "aliasTargets": [
+      "cm-hmd-internal-link"
+    ],
+    "verification": [
+      "集成「稳定样式契约」（#11）：.vsidian-wikilink 命中 rgb(28, 29, 30)",
+      "集成「Obsidian 原名别名桥」：.cm-hmd-internal-link 命中",
+      "cssProbe.liveWikilinkDecorationColor / obsidianAliases[\"live-wikilink\"]"
+    ],
+    "introduced": "#11（2026-09-24）"
+  },
+  {
+    "id": "reading-wikilink",
+    "domain": "content",
+    "kind": "selector",
+    "target": "a.vsidian-wikilink",
+    "purpose": "阅读双链：markdown-it 双链规则渲染的语义 <a>（href 为原文 target，显示别名或链接名；单击上报跳转意图）。",
+    "views": [
+      "reading"
+    ],
+    "dom": "阅读块内真实 a 元素。",
+    "example": ".markdown-preview-view a.internal-link {\n  color: #c678dd;\n}",
+    "obsidian": {
+      "counterpart": ".markdown-preview-view a.internal-link（Obsidian 阅读内链类）",
+      "support": "direct"
+    },
+    "aliasTargets": [
+      "internal-link"
+    ],
+    "verification": [
+      "集成「稳定样式契约」（#11）：阅读 a.vsidian-wikilink 命中 rgb(31, 32, 33)",
+      "集成「Obsidian 原名别名桥」：a.internal-link 命中",
+      "cssProbe.readingWikilinkDecorationColor / obsidianAliases[\"reading-wikilink\"]"
+    ],
+    "introduced": "#11（2026-09-24）"
+  },
+  {
+    "id": "var-heading-color",
+    "domain": "content",
+    "kind": "variable",
+    "target": "--vsidian-heading-color-{1..6}",
+    "purpose": "标题层级色变量族：live 标题行级、阅读标题块级与大纲条目级三侧同引（主题分级着色一处定义多处生效）。默认 var(--vscode-editor-foreground)。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app；Obsidian 别名 --h{1..6}-color 经变量桥生效（vsidian 名整条覆盖严格优先）。",
+    "example": ":root {\n  --h1-color: #61afef; /* Obsidian 写法 */\n  --vsidian-heading-color-1: #61afef; /* vsidian 写法（优先） */\n}",
+    "obsidian": {
+      "counterpart": "--h1-color … --h6-color（Obsidian 分色变量族）",
+      "support": "direct"
+    },
+    "aliasTargets": [
+      "--h1-color",
+      "--h2-color",
+      "--h3-color",
+      "--h4-color",
+      "--h5-color",
+      "--h6-color"
+    ],
+    "verification": [
+      "集成「Obsidian 原名别名桥」：--h1-color 探针驱动标题 computed color",
+      "cssProbe.obsidianHeadingColor（live/reading）",
+      "outlineCssContract：三侧同引关系"
+    ],
+    "introduced": "#65（2026-09-25）"
+  },
+  {
+    "id": "var-reading-font-size",
+    "domain": "content",
+    "kind": "variable",
+    "target": "--vsidian-reading-font-size",
+    "purpose": "阅读正文字号；默认 var(--vsidian-content-font-size)（跟随 VSCode 编辑器字号）。",
+    "views": [
+      "reading"
+    ],
+    "dom": "定义于阅读内容层；Obsidian 别名 --font-text-size。",
+    "example": ":root { --font-text-size: 16px; }",
+    "obsidian": {
+      "counterpart": "--font-text-size",
+      "support": "direct"
+    },
+    "aliasTargets": [
+      "--font-text-size"
+    ],
+    "verification": [
+      "单元：reading 排版消费契约（#32 排版基线用例）；obsidianAliasCssContract 钉变量桥形态"
+    ],
+    "introduced": "#32（2026-09-24，随两模式排版基线公开）"
+  },
+  {
+    "id": "var-reading-max-width",
+    "domain": "content",
+    "kind": "variable",
+    "target": "--vsidian-reading-max-width",
+    "purpose": "阅读块最大宽度；默认 760px。",
+    "views": [
+      "reading"
+    ],
+    "dom": "定义于阅读内容层；Obsidian 别名 --file-line-width。",
+    "example": ":root { --file-line-width: 700px; }",
+    "obsidian": {
+      "counterpart": "--file-line-width",
+      "support": "direct"
+    },
+    "aliasTargets": [
+      "--file-line-width"
+    ],
+    "verification": [
+      "obsidianAliasCssContract：变量桥形态"
+    ],
+    "introduced": "#32（2026-09-24）"
+  },
+  {
+    "id": "var-reading-line-height",
+    "domain": "content",
+    "kind": "variable",
+    "target": "--vsidian-reading-line-height",
+    "purpose": "阅读正文行高；默认 var(--vsidian-content-line-height)。",
+    "views": [
+      "reading"
+    ],
+    "dom": "定义于阅读内容层；Obsidian 别名 --line-height-normal。",
+    "example": ":root { --line-height-normal: 1.7; }",
+    "obsidian": {
+      "counterpart": "--line-height-normal",
+      "support": "direct"
+    },
+    "aliasTargets": [
+      "--line-height-normal"
+    ],
+    "verification": [
+      "obsidianAliasCssContract：变量桥形态"
+    ],
+    "introduced": "#32（2026-09-24）"
+  },
+  {
+    "id": "var-reading-code-background",
+    "domain": "content",
+    "kind": "variable",
+    "target": "--vsidian-reading-code-background",
+    "purpose": "代码块背景；默认 var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12))。",
+    "views": [
+      "reading"
+    ],
+    "dom": "定义于阅读代码块层；Obsidian 别名 --code-background。",
+    "example": ":root { --code-background: rgba(0, 0, 0, 0.3); }",
+    "obsidian": {
+      "counterpart": "--code-background",
+      "support": "direct"
+    },
+    "aliasTargets": [
+      "--code-background"
+    ],
+    "verification": [
+      "obsidianAliasCssContract：变量桥形态"
+    ],
+    "introduced": "#32（2026-09-24）"
+  },
+  {
+    "id": "var-highlight-background",
+    "domain": "content",
+    "kind": "variable",
+    "target": "--vsidian-highlight-background",
+    "purpose": "高亮底色：live 正文 span、阅读 mark、大纲条目三侧同引。默认深色 rgba(255, 208, 0, 0.35)、浅色 body.vscode-light 覆盖 #ffe066（两轮视觉实测主题变量对比不足，切 Obsidian 式固定荧光黄双主题调校）。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app（浅色分支 body.vscode-light）；Obsidian 别名 --text-highlight-bg。",
+    "example": ":root { --text-highlight-bg: rgba(255, 208, 0, 0.4); }",
+    "obsidian": {
+      "counterpart": "--text-highlight-bg",
+      "support": "direct"
+    },
+    "aliasTargets": [
+      "--text-highlight-bg"
+    ],
+    "verification": [
+      "highlightPaintCssContract：三侧同引；obsidianAliasCssContract：变量桥形态（含浅色分支）"
+    ],
+    "introduced": "#105（2026-09-27）"
+  },
+  {
+    "id": "var-table-background",
+    "domain": "content",
+    "kind": "variable",
+    "target": "--vsidian-table-background",
+    "purpose": "live 表格行背景 / 阅读表头背景；默认 rgba(128, 128, 128, 0.05)。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app（#132 起集中定义；此前消费处内联 fallback）；Obsidian 别名 --table-background。",
+    "example": ":root { --table-background: rgba(128, 128, 128, 0.1); }",
+    "obsidian": {
+      "counterpart": "--table-background",
+      "support": "direct"
+    },
+    "aliasTargets": [
+      "--table-background"
+    ],
+    "verification": [
+      "obsidianAliasCssContract：变量桥形态"
+    ],
+    "introduced": "#12（2026-09-24）"
+  },
+  {
+    "id": "var-heading-accent",
+    "domain": "content",
+    "kind": "variable",
+    "target": "--vsidian-heading-accent（已移除）",
+    "purpose": "曾为 live 视口内标题左缘强调色；随 #55 移除左缘竖线一并移除，不再公开。保留本条目作为弃用/移除生命周期的历史记录。",
+    "views": [],
+    "dom": "无（变量不再被定义或消费）。",
+    "example": "/* 无替代写法：标题行强调请使用 .vsidian-heading-active 或层级色变量族 */",
+    "obsidian": {
+      "counterpart": "无",
+      "support": "none"
+    },
+    "verification": [
+      "单元：CSS 源不再含该变量定义（迁移历史断言）"
+    ],
+    "introduced": "#5（2026-09-23）",
+    "removed": "v0.2.x 周期内随 #55（2026-09-25）移除；移除时该变量仅随内部测试片段使用，无用户迁移负担"
+  },
+  {
+    "id": "limit-hashtag",
+    "domain": "content",
+    "kind": "limitation",
+    "target": ".cm-hashtag / .tag",
+    "purpose": "标签（#tag）语法未实现：出现在片段中不命中（不报错也不生效）。",
+    "views": [],
+    "dom": "无标签节点。",
+    "example": "",
+    "obsidian": {
+      "counterpart": ".cm-hashtag（live）/ .tag（阅读）",
+      "support": "none"
+    },
+    "verification": [
+      "清单即边界：未实现即不承诺"
+    ],
+    "introduced": "#11（2026-09-24，随双链节如实记录）"
+  },
+  {
+    "id": "limit-callout",
+    "domain": "content",
+    "kind": "limitation",
+    "target": ".callout 及其 data 属性",
+    "purpose": "Callout 语法未实现，后续版本提供。",
+    "views": [],
+    "dom": "无 callout 结构。",
+    "example": "",
+    "obsidian": {
+      "counterpart": ".callout",
+      "support": "none"
+    },
+    "verification": [
+      "清单即边界"
+    ],
+    "introduced": "#6（2026-09-23）"
+  },
+  {
+    "id": "limit-task-extended-states",
+    "domain": "content",
+    "kind": "limitation",
+    "target": ".task-list-item[data-task=\"x\"] 等",
+    "purpose": "任务扩展勾选状态不支持：仅空格 / x / X 三态。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "任务 checkbox 仅 :checked 与 .vsidian-task-checked 双入口。",
+    "example": "",
+    "obsidian": {
+      "counterpart": ".task-list-item[data-task]",
+      "support": "none"
+    },
+    "verification": [
+      "单元 taskToggle：三态解析契约"
+    ],
+    "introduced": "#9（2026-09-24）"
+  },
+  {
+    "id": "limit-markdown-embed",
+    "domain": "content",
+    "kind": "limitation",
+    "target": ".markdown-embed / 嵌入结构",
+    "purpose": "嵌入（![[…]] 等）结构未提供（双链残缺形态按原文显示）；blockquote 块已支持。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "无嵌入容器。",
+    "example": "",
+    "obsidian": {
+      "counterpart": ".markdown-embed",
+      "support": "none"
+    },
+    "verification": [
+      "清单即边界"
+    ],
+    "introduced": "#11（2026-09-24）"
+  },
+  {
+    "id": "limit-strikethrough-live",
+    "domain": "content",
+    "kind": "limitation",
+    "target": ".cm-strikethrough（live 侧）",
+    "purpose": "删除线 live 侧未装饰：解析器支持但 live 视图无装饰类，源码形态呈现；阅读侧 del 标签可用（见 inline-strikethrough）。",
+    "views": [
+      "live"
+    ],
+    "dom": "live 无删除线 span。",
+    "example": "",
+    "obsidian": {
+      "counterpart": ".cm-strikethrough（live token）/ 阅读侧 del 已支持",
+      "support": "none"
+    },
+    "verification": [
+      "单元 liveDecorations：无 Strikethrough 装饰（现状契约）"
+    ],
+    "introduced": "#8（2026-09-24，如实记录）"
+  },
+  {
+    "id": "limit-quote-span",
+    "domain": "content",
+    "kind": "limitation",
+    "target": ".cm-quote（span 级）",
+    "purpose": "引用内容不额外 span 化：live 侧仅行级 .HyperMD-quote 别名；Obsidian 的 span 级 .cm-quote token 类不承诺。",
+    "views": [
+      "live"
+    ],
+    "dom": "引用行内无内容 span。",
+    "example": "",
+    "obsidian": {
+      "counterpart": ".cm-quote（span 级 token）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 liveDecorations：引用仅行级装饰"
+    ],
+    "introduced": "#8（2026-09-24）"
+  },
+  {
+    "id": "limit-is-unresolved",
+    "domain": "content",
+    "kind": "limitation",
+    "target": "双链 is-unresolved 区分（按目标存在与否变色）",
+    "purpose": "不做：显示时不查询工作区，避免为样式引入索引/查找。双链一律同色呈现。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "无 unresolved 修饰类。",
+    "example": "",
+    "obsidian": {
+      "counterpart": ".is-unresolved",
+      "support": "none"
+    },
+    "verification": [
+      "清单即边界"
+    ],
+    "introduced": "#11（2026-09-24）"
+  },
+  {
+    "id": "limit-reference-links-live",
+    "domain": "content",
+    "kind": "limitation",
+    "target": "引用式链接/图片（[t][ref]）live 侧",
+    "purpose": "引用式链接/图片：阅读视图由 markdown-it 完整解析（可点击）；live 视图不解析引用定义、按源码呈现（Ctrl+单击不跳转）——跨视图行为差异。",
+    "views": [
+      "live"
+    ],
+    "dom": "live 无引用式链接装饰。",
+    "example": "",
+    "obsidian": {
+      "counterpart": "Obsidian 两视图均解析",
+      "support": "none"
+    },
+    "verification": [
+      "单元 liveLinks：引用式链接不装饰契约"
+    ],
+    "introduced": "#10（2026-09-24）"
+  },
+  {
+    "id": "limit-table-crossview",
+    "domain": "content",
+    "kind": "limitation",
+    "target": "行内代码内 | 的表格拆分跨视图差异",
+    "purpose": "markdown-it 不识别行内代码内的 |：含该形态的表格在阅读视图错切或降级为段落；live 侧按 GFM 规范正确拆分（偏差记录于 docs/perf/2026-09-table-cell-editing.md「已知限制」）。",
+    "views": [
+      "reading"
+    ],
+    "dom": "阅读表格按 markdown-it 拆分。",
+    "example": "",
+    "obsidian": {
+      "counterpart": "Obsidian 两侧一致",
+      "support": "none"
+    },
+    "verification": [
+      "单元 tableCells vs readingTable：拆分语义差异既有记录"
+    ],
+    "introduced": "#12（2026-09-24）"
+  },
+  {
+    "id": "limit-virtualization",
+    "domain": "content",
+    "kind": "limitation",
+    "target": "阅读视图虚拟化（全文 DOM 非常驻）",
+    "purpose": "阅读视口外块不存在于 DOM：依赖「全文 DOM 常驻」的片段（全局 :nth-child 定位、跨屏兄弟/后代选择器、假设完整内容高度的滚动条计算）与按需挂载冲突。滚动回视口的块重新挂载并继承文档级样式。",
+    "views": [
+      "reading"
+    ],
+    "dom": "视口外由 spacer 占位（见 reading-spacer）。",
+    "example": "",
+    "obsidian": {
+      "counterpart": "Obsidian 虚拟化由内部机制承担",
+      "support": "none"
+    },
+    "verification": [
+      "集成「阅读视图按需挂载」（#7）：窗口有界断言；#132 别名桥用例含视口重挂载探针复验"
+    ],
+    "introduced": "#7（2026-09-24）"
+  },
+  {
+    "id": "limit-find-hit-mask",
+    "domain": "content",
+    "kind": "limitation",
+    "target": "查找高亮与隐藏标记区的交叉形态",
+    "purpose": "当前匹配的 replace 装饰优先于查找高亮：命中区间落在被折叠的隐藏标记（如链接语法标记）内时查找高亮不可见；匹配计数与步进不受影响（按全文文本模型计算）。",
+    "views": [
+      "live"
+    ],
+    "dom": "查找高亮装饰层与语法装饰层叠加。",
+    "example": "",
+    "obsidian": {
+      "counterpart": "—",
+      "support": "none"
+    },
+    "verification": [
+      "单元 findSession：匹配计数契约"
+    ],
+    "introduced": "#14（2026-09-24）"
+  },
+  {
+    "id": "live-math",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-math",
+    "purpose": "live 行内公式渲染态 widget 外层（内含 KaTeX .katex 结构）；颜色继承编辑器前景。Obsidian 拆分 .cm-math-begin/end 定界符类，本项目整体替换、无拆分类。",
+    "views": [
+      "live"
+    ],
+    "states": "光标进入公式范围显源码（见 live-math-source）。",
+    "dom": "live 行内 widget。",
+    "example": ".vsidian-math .katex {\n  color: inherit;\n}",
+    "obsidian": {
+      "counterpart": ".cm-math（Obsidian live 数学 token）",
+      "support": "semantic"
+    },
+    "verification": [
+      "集成「live 公式渲染与绘制层」（#59）：paint.math.visible + cssProbe.liveMathFontFamily"
+    ],
+    "introduced": "#59（2026-09-25）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "live-math-block",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-math-block",
+    "purpose": "live 块级公式（$$…$$）渲染态变体：独立成块、居中、横向滚动。",
+    "views": [
+      "live"
+    ],
+    "dom": "live 块级 widget。",
+    "example": ".vsidian-math-block {\n  margin: 8px 0;\n}",
+    "obsidian": {
+      "counterpart": ".HyperMD-math（块级数学行）方向",
+      "support": "semantic"
+    },
+    "verification": [
+      "mathPaintCssContract：display:block + text-align:center + overflow-x:auto"
+    ],
+    "introduced": "#59（2026-09-25）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "live-math-source",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-math-source",
+    "purpose": "光标进入公式范围后的源码显形 mark（等宽着色 + 浅底）。",
+    "views": [
+      "live"
+    ],
+    "states": "光标进入公式范围时。",
+    "dom": "live mark 装饰。",
+    "example": ".vsidian-math-source {\n  color: var(--vscode-textPreformat-foreground);\n}",
+    "obsidian": {
+      "counterpart": ".cm-hmd-math-begin 编辑态方向",
+      "support": "semantic"
+    },
+    "verification": [
+      "mathPaintCssContract：--vscode-textPreformat-foreground 着色"
+    ],
+    "introduced": "#59（2026-09-25）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "reading-math-block",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-reading-math（块类）+ .katex-block 内层 display 容器",
+    "purpose": "阅读公式块（markdown-it-katex 渲染，挂载即渲染、卸载即释放，高度由 ResizeObserver 回填）。",
+    "views": [
+      "reading"
+    ],
+    "dom": "阅读块级容器内 <p class=\"katex-block\"> 包 .katex-display。",
+    "example": ".katex-block {\n  text-align: center;\n}",
+    "obsidian": {
+      "counterpart": ".markdown-preview-view .math-block",
+      "support": "semantic"
+    },
+    "verification": [
+      "cssProbe.readingMathFontFamily：KaTeX 字体族"
+    ],
+    "introduced": "#59（2026-09-25）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "math-error",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-math-error",
+    "purpose": "公式解析失败的原文降级 span：错误色 + 浅红底 + 等宽字体，原文完整可读（两视图共用）。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "行内降级 span。",
+    "example": ".vsidian-math-error {\n  color: var(--vscode-errorForeground);\n}",
+    "obsidian": {
+      "counterpart": ".math-error / .katex-error 方向",
+      "support": "semantic"
+    },
+    "verification": [
+      "mathPaintCssContract：错误色变量"
+    ],
+    "introduced": "#59（2026-09-25）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "mermaid-container",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-mermaid",
+    "purpose": "mermaid 围栏渲染容器（live widget 外层与阅读 fence 容器共用；携带 data-vsidian-mermaid-code 源码与 data-vsidian-mermaid-state 状态）。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "渲染容器内含 mermaid SVG。",
+    "example": ".vsidian-mermaid {\n  background: rgba(0, 0, 0, 0.2);\n}",
+    "obsidian": {
+      "counterpart": ".mermaid（Obsidian 阅读渲染的图表容器）",
+      "support": "semantic"
+    },
+    "verification": [
+      "集成「live/阅读 Mermaid 渲染」（#60）：paint.mermaid.visible + 分态计数；mermaidPaintCssContract"
+    ],
+    "introduced": "#60（2026-09-25）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "mermaid-svg",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-mermaid svg",
+    "purpose": "mermaid 自产 SVG（宽度受容器约束、高度等比）。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "容器内 SVG。",
+    "example": ".vsidian-mermaid svg {\n  max-width: 100%;\n}",
+    "obsidian": {
+      "counterpart": ".mermaid svg",
+      "support": "semantic"
+    },
+    "verification": [
+      "浏览器 mermaidPaint：真实渲染（CSP 复刻页）；mermaidPaintCssContract：max-width"
+    ],
+    "introduced": "#60（2026-09-25）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "reading-mermaid-block",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-reading-mermaid",
+    "purpose": "阅读 mermaid 围栏整块成块的块元素类（豁免 60 行大围栏切片；挂载即渲染、卸载随块释放）。",
+    "views": [
+      "reading"
+    ],
+    "dom": "阅读块级容器。",
+    "example": ".vsidian-reading-mermaid {\n  margin: 8px 0;\n}",
+    "obsidian": {
+      "counterpart": ".markdown-preview-view .mermaid 方向",
+      "support": "semantic"
+    },
+    "verification": [
+      "集成「阅读模式 Mermaid 渲染」（#60）"
+    ],
+    "introduced": "#60（2026-09-25）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "mermaid-error",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-mermaid-error（含 -message / -source）",
+    "purpose": "mermaid 语法/渲染失败降级态：错误信息 + 源码可读，光标进入围栏仍可编辑（两视图共用）。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "错误容器内 message/source 两区。",
+    "example": ".vsidian-mermaid-error-message {\n  color: var(--vscode-errorForeground);\n}",
+    "obsidian": {
+      "counterpart": ".mermaid error 方向",
+      "support": "semantic"
+    },
+    "verification": [
+      "mermaidPaintCssContract：错误色与左对齐"
+    ],
+    "introduced": "#60（2026-09-25）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "outline-item",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-outline-item（+ .vsidian-outline-level-{1..6}）",
+    "purpose": "大纲条目（级别类兼作缩进与层级色入口）；条目钉常规字重 400，不继承标题级别加粗。",
+    "views": [],
+    "dom": "右侧栏大纲面板条目容器。",
+    "example": ".vsidian-outline-level-1 {\n  color: var(--vsidian-heading-color-1);\n}",
+    "obsidian": {
+      "counterpart": "无（Obsidian 大纲为应用级 DOM）",
+      "support": "none"
+    },
+    "verification": [
+      "outlineCssContract：层级色三侧同引；单元 outline 系列"
+    ],
+    "introduced": "#54（2026-09-25）；#65 起样式透传",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "outline-inline-marks",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-outline-strong / -emphasis / -code / -strike / -highlight",
+    "purpose": "大纲行内标记透传（语义元素 strong/em/code/del/mark 上的第二类名入口）：字重/斜体/等宽/删除线/高亮底只由显式标记触发；双链/链接为纯文本（无 a，不可点）。",
+    "views": [],
+    "dom": "大纲条目内语义行内元素。",
+    "example": ".vsidian-outline-highlight {\n  background: var(--vsidian-highlight-background);\n}",
+    "obsidian": {
+      "counterpart": "无（Obsidian 侧大纲插件私有 DOM）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 outline：SPAN_KIND_BY_NODE 提取白名单契约"
+    ],
+    "introduced": "#65（2026-09-25）；#105 高亮接入",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "outline-located",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-outline-located",
+    "purpose": "当前控制域条目的常驻高亮横条（半透明背景；类切换是两态差异唯一来源）；施加在可见代表上（目标被折叠遮蔽时为第一个可见祖先）。",
+    "views": [],
+    "states": "跟随光标位置。",
+    "dom": "大纲条目容器。",
+    "example": ".vsidian-outline-located {\n  background: rgba(128, 128, 128, 0.15);\n}",
+    "obsidian": {
+      "counterpart": "无",
+      "support": "none"
+    },
+    "verification": [
+      "浏览器 outlineHover/outlineJump 系列"
+    ],
+    "introduced": "#66（2026-09-25）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "outline-slider",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-outline-slider（+ ::before）",
+    "purpose": "折叠滑块行（显隐唯一开关是侧栏容器的 outline-active 类；::before 画贯穿横线；role=group 六按钮组键盘可达）。",
+    "views": [],
+    "dom": "侧栏顶栏与条目列表之间。",
+    "example": ".vsidian-outline-slider::before {\n  background: #888;\n}",
+    "obsidian": {
+      "counterpart": "无",
+      "support": "none"
+    },
+    "verification": [
+      "浏览器 outlineCollapse"
+    ],
+    "introduced": "#67（2026-09-25）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "outline-slider-dot",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-outline-slider-dot（+ .vsidian-outline-slider-active）",
+    "purpose": "六档折叠圆点：空闲珠空心（透明面 + 描边圆环）、当前珠实心——两态差异唯一来源是 active 类规则；实心色跟随 --vscode-button-background。",
+    "views": [],
+    "dom": "滑块行内按钮。",
+    "example": ".vsidian-outline-slider-active {\n  background: var(--vscode-button-background);\n}",
+    "obsidian": {
+      "counterpart": "无",
+      "support": "none"
+    },
+    "verification": [
+      "浏览器 outlineCollapse"
+    ],
+    "introduced": "#67（2026-09-25）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "outline-chevron",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-outline-chevron / .vsidian-outline-chevron-spacer",
+    "purpose": "折叠箭头按钮（有子项条目）/ 无子项条目的同宽占位（文字左缘对齐）；线宽不写在 SVG 属性上；点箭头折叠/展开、点文字仍跳转。",
+    "views": [],
+    "dom": "条目内按钮/占位元素。",
+    "example": ".vsidian-outline-chevron {\n  color: var(--vscode-foreground);\n}",
+    "obsidian": {
+      "counterpart": "无",
+      "support": "none"
+    },
+    "verification": [
+      "浏览器 outlineCollapse"
+    ],
+    "introduced": "#67（2026-09-25）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "outline-collapsed",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-outline-collapsed",
+    "purpose": "折叠中的父节点条目（箭头旋转 -90° 朝右是两态差异唯一来源）。",
+    "views": [],
+    "states": "折叠态。",
+    "dom": "条目容器。",
+    "example": ".vsidian-outline-collapsed .vsidian-outline-chevron {\n  transform: rotate(-90deg);\n}",
+    "obsidian": {
+      "counterpart": "无",
+      "support": "none"
+    },
+    "verification": [
+      "浏览器 outlineCollapse"
+    ],
+    "introduced": "#67（2026-09-25）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "outline-hidden",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-outline-hidden",
+    "purpose": "折叠遮蔽的条目（display:none，类切换是唯一显隐开关；DOM 保留维持索引序）；#68 起搜索过滤隐藏同用此类。",
+    "views": [],
+    "states": "折叠遮蔽或搜索过滤。",
+    "dom": "条目容器。",
+    "example": ".vsidian-outline-hidden {\n  display: none;\n}",
+    "obsidian": {
+      "counterpart": "无",
+      "support": "none"
+    },
+    "verification": [
+      "单元 outlineCollapse / outlineSearch"
+    ],
+    "introduced": "#67（2026-09-25）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "outline-toolbar",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-outline-toolbar",
+    "purpose": "大纲工具条行（跳转到末尾、重置、搜索框；显隐唯一开关是 outline-active 类）。",
+    "views": [],
+    "dom": "侧栏顶栏与滑块行之间。",
+    "example": ".vsidian-outline-toolbar {\n  gap: 4px;\n}",
+    "obsidian": {
+      "counterpart": "无（Quiet Outline 的 function-bar 为插件私有 DOM）",
+      "support": "none"
+    },
+    "verification": [
+      "浏览器 outlineSearch"
+    ],
+    "introduced": "#68（2026-09-25）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "outline-toolbar-buttons",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-outline-jump-bottom / .vsidian-outline-reset",
+    "purpose": "工具条图标按钮（跳转到笔记末尾 / 重置三合一），与侧栏顶栏按钮同形态。",
+    "views": [],
+    "dom": "工具条内按钮。",
+    "example": ".vsidian-outline-reset:hover {\n  background: rgba(128, 128, 128, 0.2);\n}",
+    "obsidian": {
+      "counterpart": "无",
+      "support": "none"
+    },
+    "verification": [
+      "浏览器 outlineSearch"
+    ],
+    "introduced": "#68（2026-09-25）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "outline-search",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-outline-search（+ ::placeholder）",
+    "purpose": "标题搜索输入框（flex 占余宽；配色走 --vscode-input-* 变量族）。",
+    "views": [],
+    "dom": "工具条内输入框。",
+    "example": ".vsidian-outline-search:focus {\n  border-color: var(--vscode-focusBorder);\n}",
+    "obsidian": {
+      "counterpart": "无",
+      "support": "none"
+    },
+    "verification": [
+      "浏览器 outlineSearch"
+    ],
+    "introduced": "#68（2026-09-25）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "outline-search-hit",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": "mark.vsidian-outline-search-hit",
+    "purpose": "搜索命中片段高亮（只包命中子串；背景跟随 --vscode-editor-findMatchHighlightBackground，与正文查找命中同族视觉语言）；文本层切分，与语义元素正交。",
+    "views": [],
+    "states": "命中条目上。",
+    "dom": "条目内 mark 元素。",
+    "example": ".vsidian-outline-search-hit {\n  background: var(--vscode-editor-findMatchHighlightBackground);\n}",
+    "obsidian": {
+      "counterpart": "无",
+      "support": "none"
+    },
+    "verification": [
+      "单元 outlineSearch：片段切分契约"
+    ],
+    "introduced": "#68（2026-09-25）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "outline-nomatch",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-outline-nomatch",
+    "purpose": "无匹配占位（有词条零命中的可读反馈）。",
+    "views": [],
+    "states": "搜索零命中。",
+    "dom": "条目列表尾。",
+    "example": ".vsidian-outline-nomatch {\n  color: var(--vscode-descriptionForeground);\n}",
+    "obsidian": {
+      "counterpart": "无",
+      "support": "none"
+    },
+    "verification": [
+      "浏览器 outlineSearch"
+    ],
+    "introduced": "#68（2026-09-25）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "outline-menu",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-outline-menu（+ -item / -host / -submenu / -danger / -cue）",
+    "purpose": "右键菜单浮层（挂侧栏内 absolute；菜单项为 button 键盘可达；子菜单显隐唯一开关是父项宿主的 :hover/:focus-within；danger 红字标删除；颜色跟随 --vscode-menu-* 变量族）。",
+    "views": [],
+    "states": "右键唤出。",
+    "dom": "侧栏内浮层。",
+    "example": ".vsidian-outline-menu-danger {\n  color: var(--vscode-errorForeground);\n}",
+    "obsidian": {
+      "counterpart": "无（VSCode 原生上下文菜单为宿主级）",
+      "support": "none"
+    },
+    "verification": [
+      "浏览器 outlineMenu"
+    ],
+    "introduced": "#69（2026-09-25）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "outline-rename-input",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-outline-rename-input",
+    "purpose": "重命名行内编辑态输入框（条目内容区被 input 替换，编辑原文含行内标记）；VSCode 输入框三变量（前景/背景/边框）。",
+    "views": [],
+    "states": "重命名态。",
+    "dom": "条目内 input。",
+    "example": ".vsidian-outline-rename-input {\n  background: var(--vscode-input-background);\n}",
+    "obsidian": {
+      "counterpart": "无",
+      "support": "none"
+    },
+    "verification": [
+      "浏览器 outlineMenu"
+    ],
+    "introduced": "#69（2026-09-25）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "outline-dragging",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-outline-dragging",
+    "purpose": "拖动中的源条目（整体半透明弱化，类切换是两态差异唯一来源）。",
+    "views": [],
+    "states": "拖动中。",
+    "dom": "条目容器。",
+    "example": ".vsidian-outline-dragging {\n  opacity: 0.5;\n}",
+    "obsidian": {
+      "counterpart": "无",
+      "support": "none"
+    },
+    "verification": [
+      "浏览器 outlineDrag 系列"
+    ],
+    "introduced": "#70（2026-09-25）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "outline-drop-edge",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-outline-drop-before / -after",
+    "purpose": "拖拽目标上/下缘插入线（inset box-shadow 不占布局、不与 located 背景冲突；颜色跟随 --vscode-focusBorder）。",
+    "views": [],
+    "states": "拖拽悬停时。",
+    "dom": "目标条目容器。",
+    "example": ".vsidian-outline-drop-before {\n  box-shadow: inset 0 2px 0 var(--vscode-focusBorder);\n}",
+    "obsidian": {
+      "counterpart": "无",
+      "support": "none"
+    },
+    "verification": [
+      "浏览器 outlineDragBoundary"
+    ],
+    "introduced": "#70（2026-09-25）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "outline-drop-inside",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-outline-drop-inside",
+    "purpose": "拖拽目标包裹高亮（outline 内缩一圈 + 半透明背景，与 located 同变量族——「放入成为子标题」的视觉区分）。",
+    "views": [],
+    "states": "拖拽悬停中部时。",
+    "dom": "目标条目容器。",
+    "example": ".vsidian-outline-drop-inside {\n  outline: 1px solid var(--vscode-focusBorder);\n}",
+    "obsidian": {
+      "counterpart": "无",
+      "support": "none"
+    },
+    "verification": [
+      "浏览器 outlineDrag"
+    ],
+    "introduced": "#70（2026-09-25）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "live-code-card-line",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-code-card-line",
+    "purpose": "卡片覆盖的源行级类（含被清空的围栏行与全部代码行），承载卡片底色；与正文域 live-code-line 并行（卡片开启时两者都在场）。",
+    "views": [
+      "live"
+    ],
+    "dom": "live 容器内 .cm-line 行元素（卡片开启的围栏范围）。",
+    "example": ".vsidian-code-card-line {\n  background: var(--vsidian-code-card-background);\n}",
+    "obsidian": {
+      "counterpart": ".HyperMD-codeblock（行族；正文域别名挂于 .vsidian-code-line，卡片行类为自有扩展）",
+      "support": "semantic"
+    },
+    "verification": [
+      "codeCardPaintCssContract：底色变量"
+    ],
+    "introduced": "#79（2026-09-26）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "live-code-card-edge",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-code-card-edge-top / -bottom",
+    "purpose": "卡片首/末行圆角修饰（无头部覆盖的底边圆角；顶边圆角由头部横带承担）。",
+    "views": [
+      "live"
+    ],
+    "dom": "卡片首/末行元素。",
+    "example": ".vsidian-code-card-edge-bottom {\n  border-radius: 0 0 8px 8px;\n}",
+    "obsidian": {
+      "counterpart": "无对应（圆角由 Obsidian 原生 code 块样式承担）",
+      "support": "native"
+    },
+    "verification": [
+      "codeCardPaintCssContract"
+    ],
+    "introduced": "#79（2026-09-26）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "live-code-card-header",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-code-card-header（live block widget / 阅读头部容器共用）",
+    "purpose": "卡片头部横带：语言标签 + 右侧按钮区，底部 1px 分隔线（观感参照 Code Styler 插件方向，本项目自有结构）。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "卡片首行上方横带。",
+    "example": ".vsidian-code-card-header {\n  border-bottom: 1px solid rgba(128, 128, 128, 0.3);\n}",
+    "obsidian": {
+      "counterpart": ".code-styler-header-container（Code Styler 插件方向）",
+      "support": "native"
+    },
+    "verification": [
+      "codeCardPaintCssContract"
+    ],
+    "introduced": "#79（2026-09-26）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "live-code-card-header-parts",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-code-card-header-label / -actions",
+    "purpose": "卡片语言标签（首字母大写显示名）/ 按钮容器。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "头部横带内。",
+    "example": ".vsidian-code-card-header-label {\n  font-weight: 600;\n}",
+    "obsidian": {
+      "counterpart": ".code-styler-header-title 方向",
+      "support": "native"
+    },
+    "verification": [
+      "codeCardPaintCssContract"
+    ],
+    "introduced": "#79（2026-09-26）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "live-code-card-copy",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-code-card-copy（+ -done 修饰）",
+    "purpose": "复制按钮（经宿主剪贴板 API）；-done 为点击后约 1.2s 的 ✓ 反馈态。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "复制后 -done 约 1.2s。",
+    "dom": "头部按钮区。",
+    "example": ".vsidian-code-card-copy-done {\n  color: #98c379;\n}",
+    "obsidian": {
+      "counterpart": "button.copy-code-button（Obsidian 原生复制按钮）",
+      "support": "native"
+    },
+    "verification": [
+      "集成代码卡片用例"
+    ],
+    "introduced": "#79（2026-09-26）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "live-code-card-fold",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-code-card-fold（+ -collapsed 修饰）",
+    "purpose": "折叠 chevron；-collapsed 为收起态（转向）；折叠为视图态不写源文件。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "折叠/展开。",
+    "dom": "头部按钮区。",
+    "example": ".vsidian-code-card-fold-collapsed {\n  transform: rotate(-90deg);\n}",
+    "obsidian": {
+      "counterpart": ".code-styler-header-container::after（折叠箭头方向）",
+      "support": "native"
+    },
+    "verification": [
+      "集成代码卡片用例"
+    ],
+    "introduced": "#79（2026-09-26）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "live-code-card-linenumber",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-code-card-linenumber",
+    "purpose": "卡内行号（每块从 1，围栏行不占号；行首 widget）；与文档行号槽（源文件行号）两列并存互不遮挡。",
+    "views": [
+      "live"
+    ],
+    "dom": "卡片代码行首 widget。",
+    "example": ".vsidian-code-card-linenumber {\n  color: var(--vscode-descriptionForeground);\n}",
+    "obsidian": {
+      "counterpart": ".code-styler-line-number（方向）",
+      "support": "native"
+    },
+    "verification": [
+      "lineNumberCssContract：两列并存"
+    ],
+    "introduced": "#79（2026-09-26）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "tok-tokens",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": "tok-* token 族（tok-keyword / tok-string 等，@lezer/highlight classHighlighter 词表）",
+    "purpose": "语法高亮 token span，两视图共用同一类名与明暗色板（Dark+/Light+ 取色，非 Obsidian 主题变量）；Prism 原名 .token-* 不提供（见 limit-prism-tokens）。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "代码内容内 token span。",
+    "example": ".tok-keyword {\n  color: #c678dd;\n}",
+    "obsidian": {
+      "counterpart": ".token-*（Prism 词表方向）/ .cm-* token 族",
+      "support": "native"
+    },
+    "verification": [
+      "codeHighlight 单元：词表契约（tok-* 两端共用）"
+    ],
+    "introduced": "#83（2026-09-26）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "reading-code-card",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-reading-code-card",
+    "purpose": "阅读视图卡片容器（vsidian-reading-code-block 的卡片化外壳）；language-x 类保留在 code 上供路由。",
+    "views": [
+      "reading"
+    ],
+    "dom": "阅读代码块外壳。",
+    "example": ".vsidian-reading-code-card {\n  background: var(--vsidian-code-card-background);\n}",
+    "obsidian": {
+      "counterpart": ".markdown-preview-view pre（原有映射保留于正文域）",
+      "support": "semantic"
+    },
+    "verification": [
+      "readingCodeCard 单元"
+    ],
+    "introduced": "#79（2026-09-26）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "var-code-card-background",
+    "domain": "chrome",
+    "kind": "variable",
+    "target": "--vsidian-code-card-background",
+    "purpose": "代码块卡片底色（头部横带与代码区共用；阅读卡片同源）；默认 var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12))。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app。",
+    "example": ":root { --vsidian-code-card-background: rgba(0, 0, 0, 0.25); }",
+    "obsidian": {
+      "counterpart": "--code-background（语义对应；正文代码块变量的别名桥只承诺给 var-reading-code-background）",
+      "support": "semantic"
+    },
+    "verification": [
+      "codeCardPaintCssContract"
+    ],
+    "introduced": "#79（2026-09-26）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "limit-prism-tokens",
+    "domain": "chrome",
+    "kind": "limitation",
+    "target": ".token-*（Prism 原名）/ .HyperMD-codeblock-*",
+    "purpose": "语法高亮以 tok-* 稳定词表提供（见 tok-tokens）；Prism 原名与 .HyperMD-codeblock-* 子类不提供，片段按原名定位不命中。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "token span 使用 tok-* 类名。",
+    "example": "",
+    "obsidian": {
+      "counterpart": ".token-* / .HyperMD-codeblock-*",
+      "support": "none"
+    },
+    "verification": [
+      "codeHighlight 单元：词表契约"
+    ],
+    "introduced": "#83（2026-09-26）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "suspend-banner",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-suspend-banner",
+    "purpose": "写回冲突暂停横幅（本项目自有 UI）。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "写回冲突暂停时。",
+    "dom": "#app 顶部横幅。",
+    "example": ".vsidian-suspend-banner {\n  background: var(--vscode-statusBar-background);\n}",
+    "obsidian": {
+      "counterpart": "无对应物",
+      "support": "none"
+    },
+    "verification": [
+      "editorChromeCssContract"
+    ],
+    "introduced": "#4（2026-09-23）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "toolbar",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-toolbar",
+    "purpose": "模式切换工具栏（本项目自有 UI）。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "#app 顶部工具栏。",
+    "example": ".vsidian-toolbar {\n  gap: 6px;\n}",
+    "obsidian": {
+      "counterpart": "无对应物",
+      "support": "none"
+    },
+    "verification": [
+      "editorChromeCssContract"
+    ],
+    "introduced": "#4（2026-09-23）",
+    "pendingVerification": "#133"
+  },
+  {
+    "id": "mode-toggle",
+    "domain": "chrome",
+    "kind": "selector",
+    "target": ".vsidian-mode-toggle",
+    "purpose": "工具栏模式切换按钮组。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "工具栏内。",
+    "example": ".vsidian-mode-toggle[aria-pressed=\"true\"] {\n  background: var(--vscode-button-background);\n}",
+    "obsidian": {
+      "counterpart": "无对应物",
+      "support": "none"
+    },
+    "verification": [
+      "editorChromeCssContract"
+    ],
+    "introduced": "#4（2026-09-23）",
+    "pendingVerification": "#133"
+  }
+] as readonly StyleContractEntry[]

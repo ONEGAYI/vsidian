@@ -52,6 +52,9 @@ const REQUIRED_EXTENSION = [
   // #60 Mermaid 独立产物（按需懒加载的渲染器；缺失时图表降级为错误态）
   'out/webview/mermaid.js',
   'media/css-contract-probe.css',
+  // #132 样式参考指南（清单生成的独立 HTML，随 VSIX 离线分发；设置页内
+  // 渲染走 settings.js 内置数据模块，此文件为可独立打开的完整版）
+  'media/style-reference/style-reference.html',
 ]
 
 // #59 KaTeX 字体（仅 woff2，esbuild assetNames 稳定命名无 hash）：缺失任一

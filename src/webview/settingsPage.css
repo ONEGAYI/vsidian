@@ -116,6 +116,35 @@ button:focus-visible, input:focus-visible {
   padding: 9px 0; border-bottom: 1px solid var(--vscode-panel-border, #d9dde3); }
 .vsidian-css-snippets-item-name { font-family: var(--vscode-editor-font-family, inherit); word-break: break-all; }
 
+
+/* ---- #132 样式参考分页（styleReferenceSettings；条目卡片与过滤工具行） ---- */
+.vsidian-style-ref-head h2 { margin: 0 0 4px; }
+.vsidian-style-ref-version { color: var(--vscode-descriptionForeground, #666); margin: 0 0 6px; }
+.vsidian-style-ref-bridge { padding: 8px 12px; border-left: 3px solid var(--vscode-focusBorder, #007fd4);
+  background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.08)); margin: 8px 0 18px; }
+.vsidian-style-ref-vars { border-collapse: collapse; margin-bottom: 18px; }
+.vsidian-style-ref-vars th, .vsidian-style-ref-vars td { border: 1px solid var(--vscode-panel-border, #d9dde3);
+  padding: 4px 8px; text-align: left; }
+.vsidian-style-ref-bar { display: flex; gap: 10px; margin: 10px 0 16px; flex-wrap: wrap; }
+.vsidian-style-ref-search { flex: 1 1 200px; min-width: 160px; }
+.vsidian-style-ref-group { margin: 18px 0 6px; }
+.vsidian-style-ref-count { color: var(--vscode-descriptionForeground, #666); font-weight: 400; margin-left: 4px; }
+.vsidian-style-ref-entry { border: 1px solid var(--vscode-panel-border, #d9dde3); border-radius: 6px;
+  padding: 10px 14px; margin: 10px 0; }
+.vsidian-style-ref-entry h4 { margin: 0 0 6px; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.vsidian-style-ref-entry code { font-family: var(--vscode-editor-font-family, monospace); font-size: 12.5px;
+  background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.08)); padding: 1px 5px; border-radius: 4px; }
+.vsidian-style-ref-eid { color: var(--vscode-descriptionForeground, #888); font-size: 11.5px; font-weight: 400; }
+.vsidian-style-ref-entry p { margin: 4px 0; }
+.vsidian-style-ref-entry pre { background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.08));
+  padding: 8px 10px; border-radius: 6px; overflow-x: auto; }
+.vsidian-style-ref-meta .vsidian-style-ref-support { font-weight: 600; }
+.vsidian-style-ref-support-direct { color: var(--vscode-testing-iconPassed, #1a7f37); }
+.vsidian-style-ref-support-semantic { color: var(--vscode-editorWarning-foreground, #9a6700); }
+.vsidian-style-ref-support-native { color: var(--vscode-descriptionForeground, #6e7781); }
+.vsidian-style-ref-support-none { color: var(--vscode-errorForeground, #cf222e); }
+.vsidian-style-ref-life { color: var(--vscode-descriptionForeground, #666); font-size: 12px; }
+
 @media (max-width: 600px) {
   .vsidian-settings { grid-template-columns: minmax(0, 1fr); align-content: start; }
   .vsidian-settings-sidebar { padding: 18px 20px; border-right: 0; border-bottom: 1px solid var(--vscode-panel-border, #d9dde3); }

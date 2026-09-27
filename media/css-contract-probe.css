@@ -100,3 +100,156 @@
 #app .vsidian-view-reading .vsidian-reading-block a.vsidian-wikilink {
   text-decoration-color: rgb(31, 32, 33);
 }
+
+/* ---- #132：Obsidian 原名别名桥探针（选择器全部按 Obsidian 原名书写；探针属性
+   用 outline-color——与既有 text-decoration-color 体系正交（outline-style 为 none
+   时无视觉影响且不参与继承），同元素被两套探针命中时零层叠串扰；
+   命中即证明 vsidian DOM 实际挂载了别名类，挂错节点即 null。探针表单一
+   事实源：src/shared/obsidianAlias.ts 的 OBSIDIAN_ALIAS_PROBES；期望值由
+   集成用例「Obsidian 原名别名桥」逐项断言） ---- */
+
+/* live 容器组合（容器本体；用非继承的 outline-color 探针——outline-style
+   为 none 时无视觉影响，且不随后代规则层叠串扰） */
+#app .markdown-source-view.mod-cm6 {
+  outline-color: rgb(101, 102, 103);
+}
+
+/* live 标题行（Obsidian 行容器类） */
+#app .vsidian-view-live .HyperMD-header-1 {
+  outline-color: rgb(104, 105, 106);
+}
+
+/* live 标题内容 span（Obsidian token 类） */
+#app .vsidian-view-live .cm-header-1 {
+  outline-color: rgb(107, 108, 109);
+}
+
+/* live 粗体（Obsidian .cm-strong） */
+#app .vsidian-view-live .cm-strong {
+  outline-color: rgb(110, 111, 112);
+}
+
+/* live 斜体（Obsidian .cm-emphasis） */
+#app .vsidian-view-live .cm-emphasis {
+  outline-color: rgb(113, 114, 115);
+}
+
+/* live 行内代码（Obsidian .cm-inline-code） */
+#app .vsidian-view-live .cm-inline-code {
+  outline-color: rgb(116, 117, 118);
+}
+
+/* live 高亮（Obsidian .cm-highlight） */
+#app .vsidian-view-live .cm-highlight {
+  outline-color: rgb(119, 120, 121);
+}
+
+/* live 代码行（Obsidian .HyperMD-codeblock） */
+#app .vsidian-view-live .HyperMD-codeblock {
+  outline-color: rgb(122, 123, 124);
+}
+
+/* live 引用行（Obsidian .HyperMD-quote） */
+#app .vsidian-view-live .HyperMD-quote {
+  outline-color: rgb(125, 126, 127);
+}
+
+/* live 列表行（Obsidian .HyperMD-list-line） */
+#app .vsidian-view-live .HyperMD-list-line {
+  outline-color: rgb(128, 129, 130);
+}
+
+/* live 水平线行（Obsidian .cm-hr） */
+#app .vsidian-view-live .cm-hr {
+  outline-color: rgb(131, 132, 133);
+}
+
+/* live frontmatter 行（Obsidian .cm-hmd-frontmatter） */
+#app .vsidian-view-live .cm-hmd-frontmatter {
+  outline-color: rgb(134, 135, 136);
+}
+
+/* live 表格行（Obsidian .HyperMD-table-line） */
+#app .vsidian-view-live .HyperMD-table-line {
+  outline-color: rgb(137, 138, 139);
+}
+
+/* live 表格单元格（社区 .cm-table-cell） */
+#app .vsidian-view-live .cm-table-cell {
+  outline-color: rgb(140, 141, 142);
+}
+
+/* live 链接（Obsidian .cm-link） */
+#app .vsidian-view-live .cm-link {
+  outline-color: rgb(143, 144, 145);
+}
+
+/* live 双链（Obsidian .cm-hmd-internal-link） */
+#app .vsidian-view-live .cm-hmd-internal-link {
+  outline-color: rgb(146, 147, 148);
+}
+
+/* reading 容器后代段落（Obsidian .markdown-preview-view p） */
+#app .markdown-preview-view p {
+  outline-color: rgb(154, 155, 156);
+}
+
+/* reading 一级标题（Obsidian 标签选择器经容器别名命中） */
+#app .markdown-preview-view h1 {
+  outline-color: rgb(151, 152, 153);
+}
+
+/* reading 引用块（blockquote 标签） */
+#app .markdown-preview-view blockquote {
+  outline-color: rgb(157, 158, 159);
+}
+
+/* reading 列表（ul 标签） */
+#app .markdown-preview-view ul {
+  outline-color: rgb(160, 161, 162);
+}
+
+/* reading 任务项（Obsidian .task-list-item） */
+#app .markdown-preview-view .task-list-item {
+  outline-color: rgb(163, 164, 165);
+}
+
+/* reading 任务复选框（Obsidian 后代选择器） */
+#app .markdown-preview-view .task-list-item input[type="checkbox"] {
+  outline-color: rgb(166, 167, 168);
+}
+
+/* reading 代码块（pre 标签） */
+#app .markdown-preview-view pre {
+  outline-color: rgb(169, 170, 171);
+}
+
+/* reading 水平线（hr 标签） */
+#app .markdown-preview-view hr {
+  outline-color: rgb(172, 173, 174);
+}
+
+/* reading 表格（table 标签） */
+#app .markdown-preview-view table {
+  outline-color: rgb(175, 176, 177);
+}
+
+/* reading frontmatter（Obsidian .markdown-frontmatter） */
+#app .markdown-preview-view .markdown-frontmatter {
+  outline-color: rgb(178, 179, 180);
+}
+
+/* reading 链接（a 标签） */
+#app .markdown-preview-view a {
+  outline-color: rgb(181, 182, 183);
+}
+
+/* reading 双链（Obsidian a.internal-link） */
+#app .markdown-preview-view a.internal-link {
+  outline-color: rgb(184, 185, 186);
+}
+
+/* reading 粗体（strong 标签） */
+#app .markdown-preview-view strong {
+  outline-color: rgb(187, 188, 189);
+}
