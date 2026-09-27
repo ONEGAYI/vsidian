@@ -25,7 +25,7 @@
 // - seq 持久化：经 bridge.setState 保存，webview 重载（retainContextWhenHidden
 //   关闭导致的状态重建）后继续编号，宿主按 seq 幂等去重
 import { Annotation, ChangeSet, Compartment, EditorSelection, EditorState, Prec, type Extension, type Text } from '@codemirror/state'
-import { EditorView, keymap } from '@codemirror/view'
+import { EditorView, ViewPlugin, keymap } from '@codemirror/view'
 import { planFormatOperation } from './formatOperations'
 import { createQuickActionStateReader } from './quickActionState'
 import { FORMAT_OPERATIONS, type FormatOperationId } from '../shared/formatOperations'
@@ -62,6 +62,12 @@ import {
   CODEBLOCK_LINE_NUMBERS_KEY,
   SHOW_LINE_NUMBERS_DEFAULT,
   SHOW_LINE_NUMBERS_KEY,
+  SYMBOL_AUTOCOMPLETE_DEFAULT,
+  SYMBOL_AUTOCOMPLETE_KEY,
+  SYMBOL_SELECTION_WRAP_DEFAULT,
+  SYMBOL_SELECTION_WRAP_KEY,
+  SYMBOL_TAB_ESCAPE_DEFAULT,
+  SYMBOL_TAB_ESCAPE_KEY,
   type SettingsPayload,
 } from '../shared/settings'
 import { onLocaleChanged, t } from '../shared/i18n'
@@ -156,6 +162,9 @@ import { locateOutlineIndex } from './outlineLocate'
 import { resolveStaleTaskToggle } from './taskToggle'
 import { VirtualReadingView } from './readingVirtualView'
 import { blankRowInputPlan, runCreateTable, runTableEdit, tableEditing, tableRowsAt } from './tableEditing'
+import { symbolAutocomplete } from './symbolAutocomplete'
+import { symbolSelectionWrap } from './symbolWrap'
+import { fenceEscape } from './fenceEscape'
 import { listEditing } from './listEditing'
 import { indentEditing } from './indentEditing'
 import { selectTableRegion, tableRegionField } from './tableRegionSelection'
@@ -617,6 +626,21 @@ export class WebviewSyncController {
   /** 卡片扩展的运行时配置通道（extensions 装配点） */
   private readonly codeCardCompartment = new Compartment()
 
+  /** #123 符号自动补全开关（settings 快照到达时热重配 compartment；
+   *  关闭时补全/越过/空对删除三条路径一并退出装配） */
+  private symbolAutocompleteOn = SYMBOL_AUTOCOMPLETE_DEFAULT
+  private readonly symbolAutocloseCompartment = new Compartment()
+
+  /** #124 选区包裹开关（与 #123 相互独立；关闭时包裹 filter 与
+   *  allowMultipleSelections 一并退出装配，键入回到普通替换选区语义） */
+  private symbolSelectionWrapOn = SYMBOL_SELECTION_WRAP_DEFAULT
+  private readonly symbolSelectionWrapCompartment = new Compartment()
+
+  /** #125 符号 Tab 越界开关（与前两项相互独立；关闭时越界 keymap 退出
+   *  装配，Tab 回落既有表格导航/整行缩进行为） */
+  private tabEscapeOn = SYMBOL_TAB_ESCAPE_DEFAULT
+  private readonly tabEscapeCompartment = new Compartment()
+
   /** #84 阅读侧折叠集合：键 = 块 data-vsidian-src-start（视图态，不持久化；
    *  块卸载重挂载后经此恢复收起形态） */
   private readonly readingCodeFold = new Set<number>()
@@ -646,6 +670,10 @@ export class WebviewSyncController {
   /** 首笔无法安全逆投影的事务起，后续本地事务合并在同一待发 ChangeSet。
    *  定义域是所有已发送事务之后的本地文档，全部 ack 后可直接作为新请求。 */
   private deferredLocal: ChangeSet | null = null
+  /** deferredLocal 的来源标志（#123）：组合期间暂缓的净输入为 true（外部
+   *  增量并存时经 base 系映射应用，不走触碰式保守暂停）；触碰未确认区间
+   *  的暂缓为 false（与外部并存时保留 #4 的暂停口径）。出站/清空同步复位 */
+  private deferredFromComposition = false
   /** 已确认事务复合（定义域 = unconfirmed 定义域 = baseVersion 系）：
    *  外部增量（权威系坐标）先逆穿它平移回 base 系再穿未确认集（C-2），
    *  避免把「已含已确认编辑」的坐标当 base 系多平移 */
@@ -1039,6 +1067,9 @@ export class WebviewSyncController {
         this.settings = message.values
         this.applyLineNumbersSetting()
         this.applyCodeCardSetting()
+        this.applySymbolAutocompleteSetting()
+        this.applySymbolSelectionWrapSetting()
+        this.applyTabEscapeSetting()
         break
       case 'edit.ack': {
         if (this.suspended) {
@@ -1765,6 +1796,7 @@ export class WebviewSyncController {
     this.ackedChain = null
     this.sentTxns = []
     this.deferredLocal = null
+      this.deferredFromComposition = false
     this.inFlight.clear()
     this.pendingExternal = []
   }
@@ -1848,6 +1880,7 @@ export class WebviewSyncController {
     this.ackedChain = null
     this.sentTxns = []
     this.deferredLocal = null
+      this.deferredFromComposition = false
     this.pendingExternal = []
     this.pendingFull = undefined
     this.pendingVersionAck = undefined
@@ -4417,8 +4450,27 @@ export class WebviewSyncController {
     if (!view) {
       return
     }
-    view.dispatch({ changes: this.clampedSpec(changes), annotations: externalSync.of(true) })
+    this.dispatchExternalChanges(view, changes)
     this.refreshReading()
+  }
+
+  /** CM6 把非空选区映射穿过覆盖整段的宿主替换时，可能产生 from > to
+   *  的 SelectionRange（两端分别映到替换后区间的右、左边界）。视觉上仍
+   *  高亮，但下一次输入会用反向 change range。须在同一笔外部事务内
+   *  指定规范化选区，避免先渲染无效 range 后被 DOM 观察器折叠。 */
+  private dispatchExternalChanges(view: EditorView, changes: readonly SerChange[]): void {
+    const specs = this.clampedSpec(changes)
+    const mapped = view.state.selection.map(ChangeSet.of(specs, view.state.doc.length))
+    const selection = mapped.ranges.some((range) => range.from > range.to)
+      ? EditorSelection.create(mapped.ranges.map((range) =>
+        range.from > range.to ? EditorSelection.range(range.to, range.from) : range),
+      mapped.mainIndex)
+      : undefined
+    view.dispatch({
+      changes: specs,
+      selection,
+      annotations: externalSync.of(true),
+    })
   }
 
   /**
@@ -4524,20 +4576,25 @@ export class WebviewSyncController {
       this.unconfirmed = this.unconfirmed ? this.unconfirmed.compose(changeSet) : changeSet
       return
     }
-    if (this.deferredLocal || (
+    if (this.composing || this.deferredLocal || (
       this.unconfirmed && touchesUnconfirmedChange(changes, chainSections(this.unconfirmed))
     )) {
       this.deferredLocal = this.deferredLocal
         ? this.deferredLocal.compose(changeSet)
         : changeSet
+      if (this.composing) {
+        this.deferredFromComposition = true
+      }
       this.unconfirmed = this.unconfirmed ? this.unconfirmed.compose(changeSet) : changeSet
-      // 组合期间不逐笔上报全文快照（#49）：IME 候选更新从第二笔起必然触碰
-      // 未确认区间进入本分支，逐笔 conflict.report 意味着大文档下每个候选
-      // 都全文序列化 + postMessage。组合结束 flush 后 deferredLocal 经
-      // sendDeferredLocal 以单笔 edit.request 出站、文本进入宿主权威文档，
-      // 取回语义由 VSCode 文本管线兜底；丢失窗口仅限组合进行中（候选未
-      // 上屏）快速关闭/断连，与 VSCode 原生编辑器同类行为一致。组合外
-      // （composing === false）的暂缓输入保持逐笔快照，取回兜底不放宽。
+      // 组合期间不逐笔上报全文快照（#49）：组合中的候选事务一律暂缓
+      // （#123 起含首笔——首笔立即出站会让组合结束点的符号补全成为第二
+      // 笔，破坏「一次补全一笔事务」），逐笔 conflict.report 意味着大文档
+      // 下每个候选都全文序列化 + postMessage。组合结束 flush 后
+      // deferredLocal 经 sendDeferredLocal 以单笔 edit.request 出站、文本
+      // 进入宿主权威文档，取回语义由 VSCode 文本管线兜底；丢失窗口仅限
+      // 组合进行中（候选未上屏）快速关闭/断连，与 VSCode 原生编辑器同类
+      // 行为一致。组合外（composing === false）的暂缓输入保持逐笔快照，
+      // 取回兜底不放宽。
       if (!this.composing) {
         this.reportConflictSnapshot()
       }
@@ -4590,6 +4647,7 @@ export class WebviewSyncController {
       return
     }
     this.deferredLocal = null
+    this.deferredFromComposition = false
     this.ackedChain = null
     this.sentTxns = []
     const changes: SerChange[] = []
@@ -4805,6 +4863,7 @@ export class WebviewSyncController {
       this.ackedChain = null
       this.sentTxns = []
       this.deferredLocal = null
+      this.deferredFromComposition = false
       this.replaceDoc(text)
       this.baseVersion = Math.max(version, ackVersion ?? version)
       this.lastDocChangedVersion = Math.max(this.lastDocChangedVersion, version)
@@ -4813,7 +4872,11 @@ export class WebviewSyncController {
     this.pendingExternal = []
     let lastVersion = this.baseVersion
     for (const group of groups) {
-      if (this.deferredLocal) {
+      if (this.deferredLocal && !this.deferredFromComposition) {
+        // 非组合的触碰式暂缓与外部并存：保留输入并暂停（#4 既有保守
+        // 口径，suspendResume/compositionBuffer 钉住）。组合暂缓净输入
+        // （#123 起含首笔）不在此列——它与 unconfirmed 同步复合、定义域
+        // 一致，经下方 base 系映射应用，真重叠由 mapped 判定兜底
         this.enterSuspended()
         return
       }
@@ -4828,7 +4891,7 @@ export class WebviewSyncController {
         this.enterSuspended()
         return
       }
-      this.view.dispatch({ changes: this.clampedSpec(mapped), annotations: externalSync.of(true) })
+      this.dispatchExternalChanges(this.view, mapped)
       lastVersion = group.version
     }
     if (this.inFlight.size === 0) {
@@ -4843,7 +4906,9 @@ export class WebviewSyncController {
   }
 
   private scheduleFlush(): void {
-    if (this.flushTimer === undefined && (this.hasBufferedSync() || this.blankComposition)) {
+    // deferredLocal 计入（#123）：组合期间一律暂缓的本地净输入在
+    // compositionend 后也由 flush 定时出站（原先仅靠 edit.ack 到达兜底）
+    if (this.flushTimer === undefined && (this.deferredLocal || this.hasBufferedSync() || this.blankComposition)) {
       this.flushTimer = setTimeout(() => this.flushBufferedExternal(), 0)
     }
   }
@@ -4924,6 +4989,61 @@ export class WebviewSyncController {
     if (this.viewMode === 'reading') {
       this.decorateMountedReadingCodeCards()
     }
+  }
+
+  /**
+   * 应用符号自动补全设置（#123；settings.snapshot / settings.changed 到达时）：
+   * 缺键回定义默认、非布尔忽略（与行号同口径）。经 Compartment.reconfigure
+   * 增删 symbolAutocomplete 扩展组——关闭时输入 filter、闭合越过分支与
+   * 空对退格 keymap 一并退出装配（三条路径同门控），EditorView 不重建。
+   */
+  private applySymbolAutocompleteSetting(): void {
+    const raw = this.settings?.[SYMBOL_AUTOCOMPLETE_KEY]
+    const on = typeof raw === 'boolean' ? raw : SYMBOL_AUTOCOMPLETE_DEFAULT
+    if (on === this.symbolAutocompleteOn) {
+      return
+    }
+    this.symbolAutocompleteOn = on
+    this.view?.dispatch({
+      effects: this.symbolAutocloseCompartment.reconfigure(on ? symbolAutocomplete : []),
+    })
+  }
+
+  /**
+   * 应用选区包裹设置（#124；settings.snapshot / settings.changed 到达时）：
+   * 缺键回定义默认、非布尔忽略（与 #123 同口径）。经 Compartment.reconfigure
+   * 增删 symbolSelectionWrap 扩展组——关闭时包裹 filter 与
+   * allowMultipleSelections 退出装配，EditorView 不重建。
+   */
+  private applySymbolSelectionWrapSetting(): void {
+    const raw = this.settings?.[SYMBOL_SELECTION_WRAP_KEY]
+    const on = typeof raw === 'boolean' ? raw : SYMBOL_SELECTION_WRAP_DEFAULT
+    if (on === this.symbolSelectionWrapOn) {
+      return
+    }
+    this.symbolSelectionWrapOn = on
+    this.view?.dispatch({
+      effects: this.symbolSelectionWrapCompartment.reconfigure(on ? symbolSelectionWrap : []),
+    })
+  }
+
+  /**
+   * 应用符号 Tab 越界设置（#125；settings.snapshot / settings.changed 到达
+   * 时）：缺键回定义默认、非布尔忽略（与 #123/#124 同口径）。经
+   * Compartment.reconfigure 增删 fenceEscape keymap——关闭时越界判定
+   * 退出装配（Tab 直接落到 tableEditing/indentEditing），EditorView
+   * 不重建。
+   */
+  private applyTabEscapeSetting(): void {
+    const raw = this.settings?.[SYMBOL_TAB_ESCAPE_KEY]
+    const on = typeof raw === 'boolean' ? raw : SYMBOL_TAB_ESCAPE_DEFAULT
+    if (on === this.tabEscapeOn) {
+      return
+    }
+    this.tabEscapeOn = on
+    this.view?.dispatch({
+      effects: this.tabEscapeCompartment.reconfigure(on ? fenceEscape : []),
+    })
   }
 
   /** #84 增强单个阅读代码块（挂载钩子与重装饰共用入口） */
@@ -5890,6 +6010,12 @@ export class WebviewSyncController {
   }
 
   private extensions() {
+    const captureCompositionStart = () => {
+      // CM6 的内建 observer 在冒泡阶段会先删除跨行选区；必须在捕获
+      // 阶段标记组合，首笔删除才能进入 deferredLocal 与定稿重建合并。
+      this.composing = true
+      this.beginBlankComposition()
+    }
     return [
       EditorView.lineWrapping,
       // 宿主明暗主题声明：初始按 body 主题 class 判定，切换时热重配
@@ -5940,9 +6066,30 @@ export class WebviewSyncController {
       // #79 代码块卡片：呈现态围栏收起 + 头部横带 + 卡片行类（配置经
       // Compartment 热重配，围栏表复用上方 mermaidFencesField）
       this.codeCardCompartment.of(this.codeCardExtension()),
+      // #125 围栏内两步 Tab 越界：必须置于 tableEditing **之前**——CM6
+      // keymap 与 transactionFilter 的顺序语义相反：keymap 把全部绑定按
+      // 扩展数组顺序正序拼接后依序尝试（@codemirror/view buildKeymap/
+      // runHandlers 正序遍历，靠前者先匹配、return false 落穿给后者；
+      // filter 是逆序应用——#123/#124 排在 tableEditing 之后即彼故）。
+      // 靠前装配使「格内有效围栏先越界、越出后 Tab 切格、正文未命中落
+      // 缩进」三段优先级无需改 tableEditing/indentEditing 一行代码；
+      // 未命中 return false 自然落穿。关闭时经 tabEscapeCompartment
+      // 整组退出装配
+      this.tabEscapeCompartment.of(this.tabEscapeOn ? fenceEscape : []),
       // 表格单元格输入钩子（#12）：表格行内键入 | 转义写回 \|；
       // 编辑面即 CM6 源文本行，同步链路复用本控制器的标准出站路径
       tableEditing,
+      // #123 符号自动补全：置于 tableEditing 之后（扩展数组靠后者先
+      // 过滤/先匹配）——符号补全先于表格的空白行规范化与格区替换看到
+      // 事务（无选区单字符场景与它们互斥），Backspace 链先于表格删除
+      // 命令（自动空对是更具体的编辑器状态）；设置关闭时经
+      // symbolAutocloseCompartment 整组退出装配
+      this.symbolAutocloseCompartment.of(this.symbolAutocompleteOn ? symbolAutocomplete : []),
+      // #124 选区包裹：置于 symbolAutocomplete 之后（靠后者先过滤）——
+      // 包裹只认非空选区（与补全分支互斥），改写后补全 filter 按
+      // startState 选区门控自然放行；多 range 原文选区依赖随组装配的
+      // allowMultipleSelections；关闭时经 compartment 整组退出
+      this.symbolSelectionWrapCompartment.of(this.symbolSelectionWrapOn ? symbolSelectionWrap : []),
       // #119 列表/引用 Enter 前缀延续与退格清层：必须排在 tableEditing
       // 之后（表格上下文优先，格内 Enter 仍为 <br>）、extraExtensions 的
       // defaultKeymap 之前（先于通用键位拦截）
@@ -6013,6 +6160,17 @@ export class WebviewSyncController {
         { key: 'Shift-Mod-z', run: () => this.requestHistory('redo') },
         { key: 'Mod-y', run: () => this.requestHistory('redo') },
       ]),
+      ViewPlugin.fromClass(class {
+        private readonly onStart = captureCompositionStart
+
+        constructor(private readonly view: EditorView) {
+          view.contentDOM.addEventListener('compositionstart', this.onStart, true)
+        }
+
+        destroy() {
+          this.view.contentDOM.removeEventListener('compositionstart', this.onStart, true)
+        }
+      }),
       // IME 组合状态跟踪：compositionend 后调度缓冲 flush
       Prec.highest(EditorView.domEventHandlers({
         compositionstart: () => {

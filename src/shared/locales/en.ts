@@ -77,6 +77,18 @@ export const en = {
   'setting.codeblockCopyButton.description': 'Show a copy button on the card header on hover; click to copy the whole block (without fence lines). Requires "Code block card".',
   'setting.codeblockHighlight.title': 'Syntax highlighting',
   'setting.codeblockHighlight.description': 'Colorize code block content by language (also applies to plain fences when the card is off; unrecognized languages fall back to plain text).',
+  /** 设置项「符号自动补全」（#123 editor.symbolAutocomplete） */
+  'setting.symbolAutocomplete.title': 'Auto-close symbol pairs',
+  'setting.symbolAutocomplete.description':
+    'In live preview, typing an opening symbol also inserts its closing counterpart (brackets and quotes pair even inside code; Markdown emphasis triggers only at a run start). Typing the closing symbol again right after an auto-inserted one skips over it, and backspace inside an empty auto-inserted pair deletes both sides. Turn off to disable all of these.',
+  /** 设置项「选区符号包裹」（#124 editor.symbolSelectionWrap） */
+  'setting.symbolSelectionWrap.title': 'Wrap selection with symbols',
+  'setting.symbolSelectionWrap.description':
+    'With text selected in live preview, typing a registered symbol wraps both sides of the selection (repeated typing stacks markers: two asterisks make bold, two brackets form wiki-link-style structures; a cross-paragraph selection wraps each paragraph and keeps blank lines). The original text stays selected after wrapping. Markdown emphasis is not wrapped inside code; independent from auto-close above.',
+  /** 设置项「符号 Tab 越界」（#125 editor.symbolTabEscape） */
+  'setting.symbolTabEscape.title': 'Tab escapes symbol fences',
+  'setting.symbolTabEscape.description':
+    'With the cursor inside a paired symbol fence (brackets, quotes, or inline Markdown structures) and no text selected, Tab first moves to the left edge of the closing marker, then jumps over it; nested fences exit innermost first. Tab moves the cursor only and never edits text. Outside fences, Tab keeps the existing behavior (table cell navigation or line indent); Shift+Tab is unaffected. Independent from the two symbol settings above.',
   /** 设置项「界面语言」（#96 general.language，经 titleKey/descriptionKey 取词） */
   'setting.language.title': 'Interface language',
   'setting.language.description':

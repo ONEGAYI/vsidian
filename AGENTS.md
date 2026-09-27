@@ -12,6 +12,7 @@ VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 - **图形化代码块扩展约定（#111 落档）**：「渲染成图形的围栏代码块」的按钮组、图表弹窗、禁点击进编辑与导出是注册表驱动的路径级行为：共享侧 `RENDERED_FENCE_LABELS`（`src/shared/mermaid.ts`，同时是 `FenceSpan.rendered` 判定源）登记语言显示名，webview 侧 `graphicRenderers.ts` 登记渲染管线（`renderInto`/`renderSvg`），两侧键集一致性由 `test/unit/graphicRenderers.test.ts` 钉住。新增此类语言走 `graphicRenderers.ts` 文件头的三步接入清单（标签、管线、契约测试一行），登记即继承全部交互——含阅读侧渲染：挂载钩子经 `renderGraphicBlockInto` 按容器语言分派（review 修复后不再写死 mermaid 管线），**两表必须同步登记**，只登标签不登管线的语言 live 侧降级源码+卡片、阅读侧容器停留 pending（契约测试钉住分派不误渲）。「登记即继承」由假想第二渲染器用例验证，不引入真实依赖。点击图形本体不进入编辑（widget `ignoreEvent: true`），编辑入口收敛到 edit 按钮（仅实时预览，派发选区触发现有源码显形管线）；弹窗「刷新」经控制器注入的文档全文与 `locateGraphicFenceCode` 重定位当前围栏源码（外部改写后可取新图，重定位歧义回退快照）；单击图本体不关闭弹窗（关闭判定用按下时原始 target，pointer capture 会重定向 up 事件的 target）。PNG 光栅化在 webview canvas 完成，CSP `img-src` 已放行 `data:`（浏览器回归在宿主同形 CSP 复刻页内实证），环境不支持时降级为仅 SVG 并以弹窗内提示条回报——**不得用 `window.alert`**（宿主 webview 的 sandbox iframe 无 `allow-modals`，alert 被静默吞掉）。
 - **行内围栏扩展约定（#103 落档）**：粗体/斜体/删除线/行内代码这类成对行内标记统一走 `inlinePlan` 共用路径，两态切换（光标在围栏语法节点内即取消整段）与无选区扩词包裹的光标落位（开围栏内侧，锚点按 `markers.open.length` 从实际定界符计算）是路径级行为，不逐操作实现。新增此类围栏只需：`src/webview/formatOperations.ts` 的 `INLINE` 表登记 `{ mark, node }`（node 为 Lezer 语法节点名，取消分支按它命中）+ `src/shared/formatOperations.ts` 注册表（titleKey／i18n／快捷键入口评估见上条），即自动继承全部行为；「清除行内格式」按 `INLINE` 全表遍历，亦自动覆盖。两处例外需主动适配：定界符随内容变化的围栏（多反引号、补位空格一类）须在全部三处构造 markers 的分派接入自己的 marker 函数——fresh-wrap 包裹处、`rewriteInlineLine` 重包与 `clearInlineLine` 局部重包各有一处 `codeSpanMarkers` 三元，漏改任一处该路径会退回静态定界符——锚点仍自动；插入型结构（wikilink／inlineMath 所在分支）无切换语义，新操作要两态化须自行设计取消分支。测试惯例：新围栏在 `test/unit/formatOperations.test.ts` 补一条包裹后光标位置断言，并在 `test/unit/formatInteraction.test.ts` 两态往返用例的枚举里加一行（现有五种为显式枚举，不自动生成）。两态覆盖（#107 修复后）：词与既有同类围栏贴边相邻（如 `**a**b` 光标在 b 处，贴边包裹产物被解析为合并节点）与光标停在围栏开边界外侧（行首 `|**词**`、行尾 `**词**|`——取不到词且贴邻即取消该围栏；能取到词的贴邻位置仍扩词包裹）两场景均两态化，随登记继承；但取消侧的**拆对**仅在「贴边合并形态」下生效——mark 出现序列（`markOccurrences` 按 `INLINE[op].mark` 非重叠扫描）两两配对后每对内部有内容、相邻对零间隙，经 `adjacentMergedMarks` 校验通过，才只拆光标所在对、其余保留；其余形态（含 inlineCode 变长定界按静态单 mark 扫出的内部无内容「对」、内容含字面 mark 的偶数序列、奇数残缺）一律回退整节点摘除。该扫描点是 #103「三处 markers 分派」之外的第四处（解析侧）mark 扫描，按静态 `INLINE[op].mark` 派生 + 形态校验兜底，不接入 per-op marker 函数。残留边界：`*` 与 `**` 混合粘连（如 `**a***b*`）树形不是简单合并节点，多数进不了取消分支，仍按整拆或字面星号呈现；与贴边产物同形的内容字面 mark（如 `*a**b*` 为单节点、内容 `a**b`）不可区分，按拆对处理。
 - **视觉层断言（评审必查）**：webview/样式/渲染类变更，评审必须核对断言对象是"用户看到的东西"（可见性、对齐、颜色）而非 DOM 存在性或几何坐标——样式注入失效时后者照样通过（PR #37 P0 实证：CSP 拦截 CM6 注入样式后 74 集成用例仍全绿，正文实际不可见）。涉及呈现的新特性至少一条集成断言落在绘制层（现有 `view.state.paint` 探针），CSS 关键规则由契约测试钉住。
+- **符号输入辅助扩展约定（#123/#124/#125 落档）**：符号键入与围栏内 Tab 的三条路径都是注册表驱动的路径级行为。无选区路径（#123：自动补全、闭合越过、自动空对退格）：`src/shared/symbols.ts` 的 `SYMBOL_AUTOCLOSE_REGISTRY` 登记符号对（open/close、代码上下文适用性、`suppressBefore`/`suppressAfter` 相邻字符抑制、自反触发符的 `mirrorAtRunStartOnly` 串首规则），`src/webview/symbolAutocomplete.ts` 的 transactionFilter／StateField／keymap 自动继承。新增符号只需：注册表加一行（含 `selectionWrap`、`tabEscape` 决定是否参与选区包裹与 Tab 越界）+ `test/unit/symbols.test.ts` 参数化用例钉住其触发/越过/抑制条件（清单数断言同步），不需要改 webview 侧条件分支。选区路径（#124：非空选区键入包裹）：注册表的 `selectionWrap` 字段逐项显式登记包裹能力（**包裹符、自动补全符、Tab 可导航符是三个不同集合，不得等同硬编码**——键入 close 字符不包裹、包裹判定不做邻接抑制），包裹计划纯函数在 `src/shared/symbolWrap.ts`（`planSelectionWrap`：空行序列拆段、纯空白块跳过、产物多 range 原文选区），`src/webview/symbolWrap.ts` 的 transactionFilter 认两种输入形态——单 range 选区替换与 CM6 `replaceSelection` 的多 range 逐条替换（真实键盘在多 range 选区下键入，DOM 原生选区只表达 main range，CM6 的 applyDefaultInsert 经 replaceSelection 覆盖全部 range——跨段第二键叠加包裹的底层机制）；跨段后选区保持多 range（各段原文），依赖随组装配的 `allowMultipleSelections`（EditorState 否则把选区 asSingle；已知呈现边界：未启用 drawSelection，多 range 仅 main range 有原生选区高亮，功能不受影响）。伴生行为：多光标（CM6 默认手势 Windows/Linux 为 Ctrl+click、macOS 为 Cmd+click）随组可用，表内多光标键入 `|` 经 keymap 命令 `tablePipeKeyHandler` **逐 range 转义** `\|`（任一 range 无需转义才整体交默认，避免多光标语义分裂）——多 range 表格竖线路径不走单 range filter 门控，结构不被裸竖线破坏，symbolInput 浏览器套件有钉住用例。包裹语义边界：连续键入是叠加不取消（与格式按钮两态切换是不同操作）；单换行属同段不拆段、屏幕折行无换行符天然不拆；代码上下文沿 `allowInCode`（Markdown 强调整笔不接管、混合选区不转换块结构）、表格格区（`tableRegionField` 非 null）归 tableEditing 不接管；粘贴/拖放不包裹；IME 组合期间不干预（filter 对 `input.type.compose` 事务一律原样放行），**定稿提交恰好等于某注册项 open 的单个起始符号且组合开始时有非空选区时按包裹口径重建**（`src/webview/symbolWrap.ts` 的 wrapCompositionTracker：compositionstart 捕获阶段快照选区原文与代码上下文（先于 CM6 内建跨行删除），compositionend 后微任务重建 `open+原文+close` 并保持原文选中、跨段各 range 同步包裹并支持连续叠加；快照经 `src/webview/symbolCompositionState.ts` 共享——#123 补全 attempt 读到快照即让位，同一提交只允许一条路径生效），无选区、提交完整符号对（既不包裹也不补全）与多字符选字按 #123 口径处理；跨行（跨段）选区经 IME 同样按空行拆段包裹；CM6 在组合开始同步删除跨行选区，须先于内建 observer 快照，并在捕获阶段标记 composing，使删除与定稿重建合并为单笔写回；宿主整段撤销替换若把选区映射成反向范围，外部同步在同一事务中规范为正向原文选区。Tab 越界路径（#125：光标在有效成对围栏内部且无选区时两步越出）：注册表 `tabEscape` 字段是第三个显式集合——括号/引号 12 项表示行内配对扫描参与，markdown 项表示对应树围栏参与（`TAB_ESCAPE_TREE_NODE_NAMES` 五节点与之间源）；**显式决策**：`$` 不登记（行内公式无语法节点，扫描配对边界与公式形态学不一致），wikilink 无专用节点、经方括号行内配对天然纳入（`[[..]]` 栈式配对逐层退出）；定位纯逻辑在 `src/shared/tabEscape.ts`（`matchInlineFences` 栈式配对、自反符号按出现顺序交替、失配 close 忽略；`planTabEscapeTarget` 两步推导——pos 贴闭标记左边界即第二步，无跨按键状态机；嵌套取包含光标的**最窄内容区间**逐层退出），适配层 `src/webview/fenceEscape.ts` 从增量树提取光标行树围栏（首/末子节点须为 mark）后与行内配对合并。**装配顺序陷阱**：CM6 keymap 与 transactionFilter 的顺序语义相反——keymap 按扩展数组顺序**正序**拼接尝试（靠前者先匹配、return false 落穿给后者），filter 逆序应用（靠后者先过滤）；fenceEscape 的 keymap 必须在 tableEditing **之前**（「格内先越界后切格、正文落缩进」三段优先级），#123/#124 的 filter 在 tableEditing 之后——勿据一方经验摆另一方位置。门控：多 range 与非空选区不接管（多 range 显式决策只处理单 range，保持既有缩进/切格语义）、格区不改写、frontmatter 与块级代码上下文（FencedCode/CodeText/CodeBlock/CodeInfo/HTMLBlock）排除（代码块内 Tab 继续缩进），InlineCode 刻意不排除（行内代码本身是有效树围栏）；命中派发纯选区事务（零写回零 dirty，集成断言 appliedEdits 不增、字节不变）；Shift+Tab 不绑 shift 槽（落穿保持反向切格/缩进，不新增反向越界）；**后续工单不得把命令绑定到 Tab 键**（keybindingRouter 先于 keymap 拦截会破坏三段优先级，见 keybindings.md #125 评估段）。设置键 `editor.symbolAutocomplete`、`editor.symbolSelectionWrap`、`editor.symbolTabEscape` 三个独立布尔开关（均默认开）经各自 Compartment 热重配整组增删。三条既有边界不得顺手放宽：越过只认「自动补出的」闭合符号（`autoclosePairs` StateField 记录，手打相邻照常插入；外部同步经 externalSync 注解清空状态，不得用过期位置跳过或删除）；星号序列 `| → *|* → **| → ***|` 由 `mirrorAtRunStartOnly` 钉住且**不得泛化**为所有符号的统一重复输入行为（各符号的重复输入语义以注册项显式登记为准；选区场景的连续包裹是叠加语义、不混用该序列规则；#125 的 Tab 越界与「自动补出来源」无关——覆盖文档既有围栏）；英文尖括号默认不登记（不自动补全、不包裹、不参与越界）。#123 的 IME 补全走双时机：组合期间 filter 按 `symbolComposing` StateField 拦截（compositionend 后**延迟一个宏任务**复位——同步 dispatch 会打断 CM6 组合定稿 flush，tableCaret 的 IME 回归实证），提交补全由 compositionend 钩子的微任务 attempt 统一触发并与组合净输入在 deferredLocal 合并单笔出站（一次补全=一笔 edit.request=宿主撤销一次整体恢复；syncController 侧「组合期间一律暂缓」与「组合暂缓的外部增量经 base 系映射应用而非保守暂停」配套——触碰式暂缓的 #4 暂停口径保持不变）；#124 的包裹 filter 仍按 `input.type.compose` userEvent 排除组合中间与定稿事务（包裹不经 filter 改写组合事务，IME 选区的包裹由 wrapCompositionTracker 在定稿后主动派发——与 #123 补全同款微任务时序，均不在 compositionend 同步 dispatch，会打断 CM6 组合定稿 flush）；#125 的 Tab 是按键命令不是输入事务，组合中 `compositionStarted` 让位即可（tableEditing/indentEditing 同款先判）。
 - **大纲样式设计哲学（#65 落档）**：大纲条目的呈现遵循三条原则，后续大纲呈现类变更不得违背。其一，**结构装饰与正文主题同源**——层级颜色等主题性装饰不复制读值，而是与正文标题引用同一 CSS 变量族（`--vsidian-heading-color-1..6`，定义于 `#app`，live 标题行级、阅读标题块级、大纲条目级三侧同引），主题分级着色一处定义多处生效。其二，**强调语义只认显式标记**——条目一律常规字重（400），不继承标题级别的结构性加粗；仅显式 `**粗体**` 段加重，斜体/行内代码/删除线同理只由标记触发。其三，**透传集合 = 正文已支持的行内标记子集**——当前白名单为粗体/斜体/高亮/行内代码/删除线（`OutlineSpanKind`，提取与校验同源；#105 高亮已按同一机制接入），公式/行内颜色待正文支持后按同一白名单机制接入（提取处 `SPAN_KIND_BY_NODE` 加映射即可），大纲侧零额外设计；双链/链接显示别名/链接文字的纯文本，不可点。
 - **用户可见文字一律 i18n**：所有面向用户的文字（webview 界面、设置页、宿主通知/确认框、package.json command title 与 displayName/description）必须经 `src/shared/locales/` 语言包与 `t()` 字典映射添加，禁止新增硬编码中/英文字面量；两语言包键集由编译期 parity 把关，回潮由 CI 防回潮扫描（源码 CJK 字面量契约测试）拦截。manifest 侧 `package.nls.*.json` 由构建脚本从字典生成，不在 JSON 里手写。
 
@@ -22,7 +23,7 @@ VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 - **webview 端**（`src/webview/`）：CM6 EditorView + `acquireVsCodeApi` 消息桥；`src/shared/` 为两端共享的消息协议单一事实源（不依赖 vscode/DOM）。协议约定 webview 全程 LF 坐标（CM6 内部把 `\r\n` 规范化为 `\n`，宿主侧 `NewlineCoordinator` 负责双向坐标与文本转换）。
 - **构建**：esbuild 多产物——宿主 `out/extension.js`（node18/cjs/external vscode）、编辑器 webview `out/webview/main.js` 与设置页 webview `out/webview/settings.js`（#33；chrome118/iife，CSS 随 import 打包为同名 `.css`）；`npm run compile` 另跑 `tsc --noEmit` 做类型检查（esbuild 不查类型）。
 - **测试**：`npm run test:unit`（vitest + `node --test` 启动器契约，纯逻辑 + jsdom 的 webview 控制器，无 VSCode 宿主依赖；`VSIDIAN_TEST_HOST_MODE=foreground` 时跳过独立桌面探针）；`npm run test:browser`（Playwright headless Chromium，用原生键盘/IME 驱动生产控制器验证表格光标与输入回流——keydown 注入测不到 `input.type` 回流路径，**涉及 webview 输入/光标行为的变更合并前必跑**，首次需 `npx playwright install chromium`；CI 的 browser job 在 Linux runner 上跑同一脚本并缓存浏览器二进制，通道同为 Playwright chromium，与本地默认一致，`VSIDIAN_TEST_BROWSER_CHANNEL=msedge` 仅本机借系统 Edge 调试用，不进 CI）；`npm run test:integration`（1.86.2 真宿主，fixture 由 `test/integration/fixtures.mjs` 统一生成，开发态 `runTest.mjs` 与安装态 `runInstalled.mjs` 及空窗口激活 `runSettingsActivation.mjs` 三条路径共用 `testHost.mjs` 启动策略：Windows 默认独立桌面不抢前台，`VSIDIAN_TEST_HOST_MODE=foreground` 切前台；三条启动器都会把本次宿主的完整逐例输出与退出码自动落盘到 `.vscode-test/` 下的运行报告——`integration-dev.log` / `integration-installed.log` / `settings-activation.log`，复核结果、统计用例与追查失败优先读报告文件，不为补看信息重跑）。扩展注册 `onegayi.vsidian._test.*` 辅助命令供集成测试观测/注入（仅 `VSIDIAN_TEST_HOOKS=1` 时注册）。测试消息通道是**宿主侧门控、webview 侧被动接收**的分层设计：`_test.*` 注入命令（含向 webview 转发 `table.test.key`/`task.test.click`/`reading.test.image` 等）在宿主侧受 `VSIDIAN_TEST_HOOKS` 门控；webview 侧这些消息分支不做二次门控——webview 面板的消息源只有扩展自身（`panel.webview.postMessage`），封住注入源即封住入口，勿误判为 webview 未设防。
-- **浏览器测试调度与报告**：`npm run test:browser` 经 `test/browser/run.mjs` 默认双并发运行原有 16 个脚本；`-- --workers=1` 回退串行，`-- --suite=tableCaret,graphicPopup` 定向运行，`-- --no-reuse` 禁用本轮构建复用。每轮写入独立的 `out/test/browser-runs/run-*/`，含 `report.json`、`report.md`、逐脚本日志、构建/浏览器启动阶段计时与运行产物。脚本失败后继续收集其他结果，任一失败整体非零；单脚本 120 秒超时，取消时停止已启动的子进程树。共享构建只在本轮有效，浏览器状态不共享；含插件函数的表格 fixture 保留本进程构建。CI 无论成功失败均上传报告与日志。测量方法、收益与边界见 [浏览器测试调度实测](docs/perf/2026-09-browser-test-runner.md)。
+- **浏览器测试调度与报告**：`npm run test:browser` 经 `test/browser/run.mjs` 默认双并发运行全部浏览器脚本（脚本清单即 run.mjs 的 `names` 数组，不在此重复记数）；`-- --workers=1` 回退串行，`-- --suite=tableCaret,graphicPopup` 定向运行，`-- --no-reuse` 禁用本轮构建复用。每轮写入独立的 `out/test/browser-runs/run-*/`，含 `report.json`、`report.md`、逐脚本日志、构建/浏览器启动阶段计时与运行产物。脚本失败后继续收集其他结果，任一失败整体非零；单脚本 120 秒超时，取消时停止已启动的子进程树。共享构建只在本轮有效，浏览器状态不共享；含插件函数的表格 fixture 保留本进程构建。CI 无论成功失败均上传报告与日志。测量方法、收益与边界见 [浏览器测试调度实测](docs/perf/2026-09-browser-test-runner.md)。
 - **集成测试分片**：本地设置 `VSIDIAN_ITEST_SHARDS=4` 再运行 `npm run test:integration`，启动器共用一份 VSCode 程序，为各片创建独立临时便携目录并在全部宿主退出后清理；逐片报告写入 `.vscode-test/integration-dev-s<片号>.log`。缺省仍为单宿主全量测试。CI 使用四个 runner，各注入 `VSIDIAN_TEST_SHARD=k/4` 且只起一个宿主；`integration` 汇总检查保留分支保护所需的稳定名称。
 - **打包与安装态回归（#15）**：`npx @vscode/vsce package --no-dependencies` 产出 VSIX（esbuild bundle 自包含，不带 node_modules；`.vscodeignore` 排除 src/test/docs）。`node test/integration/runInstalled.mjs` 把 VSIX 经 `--install-extension` 装入隔离 profile 的 1.86.2 便携宿主（安装注册链路真实走通；1.86 测试模式要求 `--extensionTestsPath` 依赖 `--extensionDevelopmentPath` 同时存在，故 dev path 指向安装解压目录——加载代码仍是 VSIX 产物而非仓库源码树）后跑同一集成套件。
 - **性能测量**：`node test/perf/runPerf.mjs`（1千/1万/10万行、10 KB/100 KB/1 MB、超长行、图片密集与大围栏；报告写 `docs/perf/data/perf-report.json`）；档位数据与解读汇总在 [docs/perf/2026-09-mvp-performance-summary.md](docs/perf/2026-09-mvp-performance-summary.md)。
@@ -156,67 +157,74 @@ vsidian/
 │   │   ├── newline.ts          # CRLF/LF 换行协调器
 │   │   ├── protocol.ts         # 消息协议单一事实源
 │   │   ├── settings.ts         # 设置定义与读写纯逻辑
+│   │   ├── symbols.ts          # 符号注册表单一事实源（#123）
+│   │   ├── symbolWrap.ts       # 选区包裹计划纯函数（#124）
+│   │   ├── tabEscape.ts        # Tab 越界定位纯函数（#125）
 │   │   └── wikilink.ts         # 双链形态学单一事实源（#11）
 │   └── webview/     # webview 端实现
-│       ├── codeCardState.ts        # 卡片共享状态中立模块
-│       ├── codeHighlight.ts        # 语法高亮引擎装配与缓存
-│       ├── css.d.ts                # CSS 导入类型声明
-│       ├── diagramExport.ts        # 图表导出序列化与光栅化
-│       ├── diagramPopup.ts         # 图表弹窗全屏浮层
-│       ├── diagramPopupGeometry.ts # 弹窗几何纯函数
-│       ├── findSession.ts          # 查找匹配纯函数（#14）
-│       ├── formatOperations.ts     # 格式文本变换规划
-│       ├── graphicBlockChrome.ts   # 图形化块右上角按钮组
-│       ├── graphicRenderers.ts     # 图形化渲染器注册表
-│       ├── imageResource.ts        # 图片资源状态机（#10）
-│       ├── indentEditing.ts        # Tab 通用行缩进处理器（#120）
-│       ├── keybindingRouter.ts     # 编辑器按键分发器
-│       ├── keybindingSettings.ts   # 快捷键设置分页
-│       ├── listEditing.ts          # Enter 延续与退格清层（#119）
-│       ├── liveCodeCard.ts         # Live 代码块卡片装饰
-│       ├── liveDecorations.ts      # 语法树驱动 Live 装饰（#8）
-│       ├── liveLineNumbers.ts      # 表格段首行号与绘制探针
-│       ├── liveLinks.ts            # live 链接装饰与跳转（#10）
-│       ├── liveMath.ts             # 行内与块级公式 live 装饰（#59）
-│       ├── liveMermaid.ts          # Mermaid live 装饰（#60）
-│       ├── localeBoot.ts           # webview 语言装配入口
-│       ├── localeDom.ts            # 常驻控件文案换包单点重刷注册表
-│       ├── localeOnDemand.ts       # 按需控件文案换包 DOM 级重刷
-│       ├── main.css                # webview 全局布局样式
-│       ├── main.ts                 # webview 启动入口
-│       ├── markdownDoc.ts          # Markdown 文档工具与树查询
-│       ├── mathRenderCache.ts      # KaTeX 渲染 LRU 缓存共享模块
-│       ├── mermaidEntry.ts         # Mermaid 独立产物入口（#60）
-│       ├── mermaidRender.ts        # Mermaid 渲染管线（#60）
-│       ├── mermaidTheme.ts         # Mermaid 暗色主题装配
-│       ├── outline.ts              # 大纲全文解析与面板装配
-│       ├── outlineCollapse.ts      # 大纲折叠状态机纯函数
-│       ├── outlineDrag.ts          # 大纲拖拽移动计划纯函数
-│       ├── outlineLocate.ts        # 大纲定位纯函数
-│       ├── outlineMenu.ts          # 大纲右键菜单模型纯逻辑
-│       ├── outlineSearch.ts        # 大纲标题搜索纯函数
-│       ├── outlineSection.ts       # 大纲控制域纯函数
-│       ├── perfProbe.ts            # webview 性能探针（#5）
-│       ├── quickActionState.ts     # 快速操作状态判定
-│       ├── readingBlocks.ts        # markdown-it 阅读块切分
-│       ├── readingCodeCard.ts      # 阅读代码块卡片增强
-│       ├── readingMarkdown.ts      # markdown-it 安全渲染层
-│       ├── readingProbe.ts         # 阅读视图性能探针
-│       ├── readingView.ts          # 阅读视图 DOM 构建与锚点定位
-│       ├── readingViewport.ts      # 阅读视口挂载窗口纯函数
-│       ├── readingVirtualView.ts   # 阅读视图虚拟化装配层
-│       ├── settingsMain.ts         # 设置页 webview 入口
-│       ├── settingsPage.css        # 设置页样式
-│       ├── settingsPageView.ts     # 设置页 webview 视图
-│       ├── syncController.ts       # CM6 同步控制器
-│       ├── tableCells.ts           # 表格单元格边界、换行与转义
-│       ├── tableControls.ts        # 表格可见行控件与拖动
-│       ├── tableCreate.ts          # 光标处建表规划纯函数
-│       ├── tableEditing.ts         # 表格输入钩子（#12）
-│       ├── tableRegion.ts          # 表格矩形选区与结构规划
-│       ├── tableRegionSelection.ts # 表格格区状态与指针绘制
-│       ├── tableStructure.ts       # 表格导航与增删行列纯函数（#13）
-│       └── taskToggle.ts           # 任务勾选解析纯函数（#9）
+│       ├── codeCardState.ts          # 卡片共享状态中立模块
+│       ├── codeHighlight.ts          # 语法高亮引擎装配与缓存
+│       ├── css.d.ts                  # CSS 导入类型声明
+│       ├── diagramExport.ts          # 图表导出序列化与光栅化
+│       ├── diagramPopup.ts           # 图表弹窗全屏浮层
+│       ├── diagramPopupGeometry.ts   # 弹窗几何纯函数
+│       ├── fenceEscape.ts            # 围栏 Tab 越界适配层（#125）
+│       ├── findSession.ts            # 查找匹配纯函数（#14）
+│       ├── formatOperations.ts       # 格式文本变换规划
+│       ├── graphicBlockChrome.ts     # 图形化块右上角按钮组
+│       ├── graphicRenderers.ts       # 图形化渲染器注册表
+│       ├── imageResource.ts          # 图片资源状态机（#10）
+│       ├── indentEditing.ts          # Tab 通用行缩进处理器（#120）
+│       ├── keybindingRouter.ts       # 编辑器按键分发器
+│       ├── keybindingSettings.ts     # 快捷键设置分页
+│       ├── listEditing.ts            # Enter 延续与退格清层（#119）
+│       ├── liveCodeCard.ts           # Live 代码块卡片装饰
+│       ├── liveDecorations.ts        # 语法树驱动 Live 装饰（#8）
+│       ├── liveLineNumbers.ts        # 表格段首行号与绘制探针
+│       ├── liveLinks.ts              # live 链接装饰与跳转（#10）
+│       ├── liveMath.ts               # 行内与块级公式 live 装饰（#59）
+│       ├── liveMermaid.ts            # Mermaid live 装饰（#60）
+│       ├── localeBoot.ts             # webview 语言装配入口
+│       ├── localeDom.ts              # 常驻控件文案换包单点重刷注册表
+│       ├── localeOnDemand.ts         # 按需控件文案换包 DOM 级重刷
+│       ├── main.css                  # webview 全局布局样式
+│       ├── main.ts                   # webview 启动入口
+│       ├── markdownDoc.ts            # Markdown 文档工具与树查询
+│       ├── mathRenderCache.ts        # KaTeX 渲染 LRU 缓存共享模块
+│       ├── mermaidEntry.ts           # Mermaid 独立产物入口（#60）
+│       ├── mermaidRender.ts          # Mermaid 渲染管线（#60）
+│       ├── mermaidTheme.ts           # Mermaid 暗色主题装配
+│       ├── outline.ts                # 大纲全文解析与面板装配
+│       ├── outlineCollapse.ts        # 大纲折叠状态机纯函数
+│       ├── outlineDrag.ts            # 大纲拖拽移动计划纯函数
+│       ├── outlineLocate.ts          # 大纲定位纯函数
+│       ├── outlineMenu.ts            # 大纲右键菜单模型纯逻辑
+│       ├── outlineSearch.ts          # 大纲标题搜索纯函数
+│       ├── outlineSection.ts         # 大纲控制域纯函数
+│       ├── perfProbe.ts              # webview 性能探针（#5）
+│       ├── quickActionState.ts       # 快速操作状态判定
+│       ├── readingBlocks.ts          # markdown-it 阅读块切分
+│       ├── readingCodeCard.ts        # 阅读代码块卡片增强
+│       ├── readingMarkdown.ts        # markdown-it 安全渲染层
+│       ├── readingProbe.ts           # 阅读视图性能探针
+│       ├── readingView.ts            # 阅读视图 DOM 构建与锚点定位
+│       ├── readingViewport.ts        # 阅读视口挂载窗口纯函数
+│       ├── readingVirtualView.ts     # 阅读视图虚拟化装配层
+│       ├── settingsMain.ts           # 设置页 webview 入口
+│       ├── settingsPage.css          # 设置页样式
+│       ├── settingsPageView.ts       # 设置页 webview 视图
+│       ├── symbolAutocomplete.ts     # 符号自动补全编辑器适配层（#123）
+│       ├── symbolCompositionState.ts # IME 选区快照共享状态
+│       ├── symbolWrap.ts             # 选区包裹编辑器适配层（#124）
+│       ├── syncController.ts         # CM6 同步控制器
+│       ├── tableCells.ts             # 表格单元格边界、换行与转义
+│       ├── tableControls.ts          # 表格可见行控件与拖动
+│       ├── tableCreate.ts            # 光标处建表规划纯函数
+│       ├── tableEditing.ts           # 表格输入钩子（#12）
+│       ├── tableRegion.ts            # 表格矩形选区与结构规划
+│       ├── tableRegionSelection.ts   # 表格格区状态与指针绘制
+│       ├── tableStructure.ts         # 表格导航与增删行列纯函数（#13）
+│       └── taskToggle.ts             # 任务勾选解析纯函数（#9）
 ├── test/…                 # 测试根
 ├── tsconfig.json          # TypeScript 类型检查配置
 └── vitest.config.ts       # vitest 单元测试配置
