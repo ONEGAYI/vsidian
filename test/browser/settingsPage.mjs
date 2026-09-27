@@ -152,6 +152,30 @@ try {
     assert.equal(await page.locator('.vsidian-style-ref-overview').isVisible(), false)
     const activeTabPaint = await refTabs.nth(1).evaluate(el => getComputedStyle(el).backgroundColor)
     assert.equal(activeTabPaint, theme === 'light' ? 'rgb(224, 228, 235)' : 'rgb(55, 61, 73)')
+    // #155 跟进（绘制层）：详细查询页签下主区收起滚动，类目栏与条目列表各自
+    // 独立 overflow；过滤/搜索/导出工具行固定在列表滚动区之外
+    const refScrollProbe = await page.evaluate(() => {
+      const mainEl = document.querySelector('.vsidian-settings-main')
+      const cats = document.querySelector('.vsidian-style-ref-cats')
+      const list = document.querySelector('.vsidian-style-ref-list')
+      const bar = document.querySelector('.vsidian-style-ref-bar')
+      return {
+        mainOverflow: getComputedStyle(mainEl).overflowY,
+        catsOverflow: getComputedStyle(cats).overflowY,
+        listOverflow: getComputedStyle(list).overflowY,
+        barAboveList: bar.getBoundingClientRect().bottom <= list.getBoundingClientRect().top + 1,
+      }
+    })
+    assert.equal(refScrollProbe.mainOverflow, 'hidden', '详细查询页签下主区应收起滚动')
+    assert.equal(refScrollProbe.catsOverflow, 'auto')
+    assert.equal(refScrollProbe.listOverflow, 'auto')
+    assert.equal(refScrollProbe.barAboveList, true, '工具行应固定在列表滚动区之外')
+    // 页签往返：切回总表主区恢复整块滚动，再进详细查询恢复内部滚动
+    await refTabs.nth(0).click()
+    assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.vsidian-settings-main')).overflowY), 'auto')
+    assert.equal(await page.locator('.vsidian-style-ref-overview').isVisible(), true)
+    await refTabs.nth(1).click()
+    assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.vsidian-settings-main')).overflowY), 'hidden')
     const catsNav = page.locator('.vsidian-style-ref-cats')
     await catsNav.waitFor()
     await page.locator('.vsidian-style-ref-cats-domain').first().waitFor()
@@ -167,6 +191,11 @@ try {
     await outlineCat.click()
     const pagerIndicator = page.locator('.vsidian-style-ref-page-indicator')
     await pagerIndicator.waitFor()
+    // 切到大类目后列表内容超出视口：滚动发生在列表内部（独立 overflow 的可见效果）
+    assert.equal(await page.evaluate(() => {
+      const list = document.querySelector('.vsidian-style-ref-list')
+      return list.scrollHeight > list.clientHeight
+    }), true, '大纲类目应超出列表视口（列表独立可滚）')
     assert.equal(await pagerIndicator.textContent(), zhCn['styleRef.pageIndicator'].replace('{page}', '1').replace('{pages}', '2'))
     const firstPageIds = await page.locator('.vsidian-style-ref-entry').evaluateAll(els => els.map(el => el.dataset.entry))
     assert.equal(firstPageIds.length, 15)

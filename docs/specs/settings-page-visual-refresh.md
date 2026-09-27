@@ -130,6 +130,8 @@
 - 真实键盘录制两段键位（如 Ctrl+K Ctrl+B）与 Esc 取消手感。
 - 说明框（callout）观感：CSS 片段页远程缓存说明在明暗主题下的左强调条与色底。
 - 样式参考总分页签：默认落总表、切换详细查询、全局搜索定位条目直接进详细查询。
+- 详细查询两列独立滚动：类目栏与条目列表各自滚动的手感、工具行固定、搜索时
+  列表区内滚动；窄屏退化回整页单滚动。
 
 ## 后续小改（同 PR 跟进，2026-09-28）
 
@@ -145,10 +147,18 @@
    总表内不再重复 h2。全局搜索定位条目（focusEntry 非 `overview`）时直接
    落入详细查询并保留跳页定位；定位 `overview` 落总表。数据源、过滤与导出
    行为不变。
+3. **详细查询两列独立滚动**：详细查询页签可见时主区收起滚动（CSS `:has()`
+   以 `detail:not([hidden])` 联动，切回总表页签自动恢复整块滚动），标题、
+   说明与页签固定；类目栏与条目列表各自独立 overflow——过滤/搜索/导出
+   工具行固定在列表滚动区之外，搜索与翻页不再被主区滚动耦合。高度链经壳层
+   内容列表（`.vsidian-settings-list`）逐层放开 `min-height` 收敛到两列；
+   全局基线补 `[hidden] { display: none !important }`（作者 display 规则
+   不得压过 hidden 语义）；窄屏（<600px）退化为整页单滚动不做内部双列。
 
 自动化覆盖：`styleReferenceSettings.test.ts` 新增页签与 callout 断言组；
-`cssSnippetSettings.test.ts`、`settingsPage.test.ts` 样式契约补共享样式断言；
-`test/browser/settingsPage.mjs` 补页签切换与 callout 绘制层断言（明暗两主题）。
+`cssSnippetSettings.test.ts`、`settingsPage.test.ts` 样式契约补共享样式与
+两列滚动断言；`test/browser/settingsPage.mjs` 补页签切换、callout 与独立
+滚动绘制层断言（明暗两主题，含页签往返恢复主区滚动）。
 
 ## grilling 决策纪要（2026-09-27）
 

@@ -4,6 +4,8 @@
  * 控件为纯 CSS 拨动开关（保留 input[type=checkbox] 语义）。 */
 html, body, #app { height: 100%; margin: 0; padding: 0; }
 * { box-sizing: border-box; }
+/* hidden 属性优先于任何 author display 规则（样式参考总分页签的面板切换依赖它） */
+[hidden] { display: none !important; }
 body {
   font-family: var(--vscode-font-family, system-ui, sans-serif);
   font-size: var(--vscode-font-size, 13px);
@@ -267,8 +269,24 @@ button:focus-visible, input:focus-visible {
 
 
 /* ---- #132 样式参考分页（styleReferenceSettings；条目卡片与过滤工具行） ---- */
+/* #155 跟进：详细查询页签可见时主区收起滚动（:has 联动，切回总表自动恢复）
+ * ——标题、说明与工具行固定，高度链收敛到类目栏与条目列表各自 overflow */
+.vsidian-settings-main:has(.vsidian-style-ref-detail:not([hidden])) {
+  display: flex; flex-direction: column; overflow: hidden;
+}
+/* 高度链要穿透壳层内容列表（.vsidian-settings-list 是 main 的直接子级，
+ * 标题/说明/分页内容都住在它里面），逐层放开 min-height 才能收敛到列表滚动 */
+.vsidian-settings-main:has(.vsidian-style-ref-detail:not([hidden])) .vsidian-settings-list {
+  flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
+}
+.vsidian-settings-main:has(.vsidian-style-ref-detail:not([hidden])) > .vsidian-settings-status,
+.vsidian-settings-main:has(.vsidian-style-ref-detail:not([hidden])) .vsidian-settings-heading,
+.vsidian-settings-main:has(.vsidian-style-ref-detail:not([hidden])) .vsidian-settings-subtitle { flex: none; }
+.vsidian-settings-main:has(.vsidian-style-ref-detail:not([hidden])) .vsidian-settings-section-content {
+  flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
+}
 /* #155 小改：总分页签——总表与详细查询两态，pill 语言与快捷键筛选签一致 */
-.vsidian-style-ref-tabs { display: flex; gap: 6px; margin: 0 0 16px; }
+.vsidian-style-ref-tabs { display: flex; gap: 6px; margin: 0 0 16px; flex: none; }
 .vsidian-style-ref-tab { min-height: 28px; padding: 4px 16px; border-radius: 999px;
   border: 1px solid var(--vsidian-settings-container-border);
   color: var(--vscode-descriptionForeground, #666); background: transparent; }
@@ -281,7 +299,7 @@ button:focus-visible, input:focus-visible {
 .vsidian-style-ref-vars { border-collapse: collapse; margin-bottom: 18px; }
 .vsidian-style-ref-vars th, .vsidian-style-ref-vars td { border: 1px solid var(--vscode-panel-border, #d9dde3);
   padding: 4px 8px; text-align: left; }
-.vsidian-style-ref-bar { display: flex; gap: 10px; margin: 10px 0 16px; flex-wrap: wrap; }
+.vsidian-style-ref-bar { display: flex; gap: 10px; margin: 10px 0 16px; flex-wrap: wrap; flex: none; }
 .vsidian-style-ref-search { flex: 1 1 200px; min-width: 160px; }
 /* #145 契约 JSON 导出按钮（工具区，与过滤/搜索同排） */
 .vsidian-style-ref-export { min-height: 26px; padding: 3px 12px; white-space: nowrap;
@@ -289,10 +307,13 @@ button:focus-visible, input:focus-visible {
   color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-background, #0078d4);
   cursor: pointer; }
 .vsidian-style-ref-export:hover { background: var(--vscode-button-hoverBackground, #006ab8); }
-/* ---- #145 小类分栏布局：左侧类目栏（域分组）+ 右侧条目表与分页 ---- */
-.vsidian-style-ref-layout { display: flex; gap: 18px; align-items: flex-start; }
+/* ---- #145 小类分栏布局：左侧类目栏（域分组）+ 右侧条目表与分页。
+ * #155 跟进起详细查询面板自身为 flex 列：工具行与分页固定，列表独立滚动；
+ * 面板 hidden（总表页签）时这些规则无可见效果 ---- */
+.vsidian-style-ref-detail { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.vsidian-style-ref-layout { display: flex; gap: 18px; align-items: stretch; flex: 1 1 auto; min-height: 0; }
 .vsidian-style-ref-cats { flex: 0 0 168px; display: flex; flex-direction: column; gap: 2px;
-  position: sticky; top: 8px; }
+  min-height: 0; overflow-y: auto; }
 .vsidian-style-ref-cats-domain { margin: 10px 0 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
   text-transform: uppercase; color: var(--vscode-descriptionForeground, #666); }
 .vsidian-style-ref-cats-domain:first-child { margin-top: 0; }
@@ -306,15 +327,17 @@ button:focus-visible, input:focus-visible {
   color: var(--vscode-list-activeSelectionForeground, #fff); }
 .vsidian-style-ref-cat-count { font-size: 11px; color: var(--vscode-descriptionForeground, #888); flex: none; }
 .vsidian-style-ref-cat[aria-current='true'] .vsidian-style-ref-cat-count { color: inherit; opacity: 0.85; }
-.vsidian-style-ref-main { flex: 1 1 auto; min-width: 0; }
+.vsidian-style-ref-main { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+/* 条目列表独立滚动（#155 跟进）：过滤/搜索/导出工具行固定在滚动区之外 */
+.vsidian-style-ref-list { overflow-y: auto; flex: 1 1 auto; min-height: 0; }
 /* 跨类目搜索聚合：命中计数与来源类目标注 */
 .vsidian-style-ref-search-count { margin: 2px 0 8px; color: var(--vscode-descriptionForeground, #666); }
 .vsidian-style-ref-cat-chip { font-size: 11px; font-weight: 400; padding: 0 8px; border-radius: 999px;
   border: 1px solid var(--vscode-panel-border, #d9dde3);
   color: var(--vscode-descriptionForeground, #666); white-space: nowrap; }
-/* 分页导航（单页时由脚本收起） */
+/* 分页导航（单页时由脚本收起），固定在列表滚动区之下 */
 .vsidian-style-ref-pager { display: flex; align-items: center; justify-content: center; gap: 12px;
-  margin: 14px 0 4px; }
+  margin: 14px 0 4px; flex: none; }
 .vsidian-style-ref-page-btn { min-height: 26px; padding: 3px 12px; cursor: pointer;
   border: 1px solid var(--vscode-panel-border, #d9dde3); border-radius: 6px;
   color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-secondaryBackground, #313136); }
@@ -354,7 +377,10 @@ button:focus-visible, input:focus-visible {
   .vsidian-keybindings-row-controls { justify-content: flex-start; }
   /* #145 窄屏：类目栏折到条目表上方横向换行（分栏退化为上下排布） */
   .vsidian-style-ref-layout { flex-direction: column; }
-  .vsidian-style-ref-cats { position: static; flex: 1 1 auto; flex-direction: row; flex-wrap: wrap; }
+  .vsidian-style-ref-cats { flex: 1 1 auto; flex-direction: row; flex-wrap: wrap; overflow: visible; }
   .vsidian-style-ref-cats-domain { flex: 1 0 100%; }
   .vsidian-style-ref-cat { width: auto; }
+  /* #155 跟进：窄屏下详细查询不做内部双列滚动，恢复整页单滚动 */
+  .vsidian-settings-main:has(.vsidian-style-ref-detail:not([hidden])) { display: block; overflow-y: auto; }
+  .vsidian-style-ref-list { overflow: visible; }
 }

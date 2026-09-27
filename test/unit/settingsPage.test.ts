@@ -301,3 +301,12 @@ it('样式契约：callout 形态与样式参考总分页签（#155 小改）', 
   expect(css).toMatch(/\.vsidian-style-ref-tab\s*\{[^}]*border-radius:\s*999px/)
   expect(css).toContain('.vsidian-style-ref-tab[aria-selected="true"]')
 })
+
+it('样式契约：详细查询两列独立滚动（#155 跟进）', async () => {
+  const { readFileSync } = await import('node:fs')
+  const css = readFileSync('src/webview/settingsPage.css', 'utf8')
+  // 详细查询页签可见时主区收起滚动（页签切回总表自动恢复）；滚动收敛到类目栏与条目列表
+  expect(css).toContain('.vsidian-settings-main:has(.vsidian-style-ref-detail:not([hidden]))')
+  expect(css).toMatch(/\.vsidian-style-ref-cats\s*\{[^}]*overflow-y:\s*auto/)
+  expect(css).toMatch(/\.vsidian-style-ref-list\s*\{[^}]*overflow-y:\s*auto/)
+})
