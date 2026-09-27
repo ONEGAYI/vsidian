@@ -597,14 +597,22 @@ export function planAddFmEntry(model: FmTableModel, text: string): FmEditPlan | 
   }
 }
 
-/** 删除条目：整行组（含换行；block 数组含全部项行） */
+/** 删除条目：整行组（含换行；block 数组含全部项行）。光标落保留内容
+ *  （后条目前移后的键首 → 前条目行尾），不落围栏行——删除后光标停在
+ *  闭合 `---` 行会撤下「添加属性」按钮（touches 语义），属 UX 缺陷 */
 export function planRemoveFmEntry(model: FmTableModel, entryIndex: number): FmEditPlan | null {
   const entry = model.entries[entryIndex]
   if (!entry) {
     return null
   }
+  const from = entry.lineFrom
+  const to = Math.min(entry.lineTo + 1, model.closeFrom)
+  const next = model.entries[entryIndex + 1]
+  const prev = model.entries[entryIndex - 1]
+  const anchor = next ? next.key.from - (to - from) : prev ? prev.lineTo : from
   return {
-    changes: [{ from: entry.lineFrom, to: Math.min(entry.lineTo + 1, model.closeFrom), insert: '' }],
+    changes: [{ from, to, insert: '' }],
+    selection: { anchor },
   }
 }
 
@@ -639,7 +647,9 @@ export function planAddFmArrayItem(model: FmTableModel, entryIndex: number): FmE
   }
 }
 
-/** 删除 block 数组项：整项行（含换行）；删到零项保留空宿主行 */
+/** 删除 block 数组项：整项行（含换行）；删到零项保留空宿主行。光标落位
+ *  同 planRemoveFmEntry 口径——前项文本尾 → 后项前移后的文本首 → 宿主行
+ *  行尾，均不落围栏行 */
 export function planRemoveFmArrayItem(model: FmTableModel, entryIndex: number, itemIndex: number): FmEditPlan | null {
   const entry = model.entries[entryIndex]
   if (!entry || entry.kind !== 'array' || entry.form !== 'block') {
@@ -649,8 +659,14 @@ export function planRemoveFmArrayItem(model: FmTableModel, entryIndex: number, i
   if (!item) {
     return null
   }
+  const from = item.lineFrom
+  const to = Math.min(item.lineTo + 1, model.closeFrom)
+  const prev = entry.items[itemIndex - 1]
+  const next = entry.items[itemIndex + 1]
+  const anchor = prev ? prev.item.to : next ? next.item.from - (to - from) : entry.hostLineTo
   return {
-    changes: [{ from: item.lineFrom, to: Math.min(item.lineTo + 1, model.closeFrom), insert: '' }],
+    changes: [{ from, to, insert: '' }],
+    selection: { anchor },
   }
 }
 
@@ -780,8 +796,10 @@ export function fmCellDownTarget(model: FmTableModel, pos: number): number | nul
 
 // ---- 阅读侧 HTML ----
 
-/** HTML 转义（值与键全转义，进 DOM 前还有净化层纵深防御） */
-function escapeHtml(s: string): string {
+/** HTML 文本转义（& < > " 四字符；webview 侧阅读渲染的共享实现——
+ *  覆盖文本内容位与双引号属性位，单引号不需实体化。进 DOM 前还有净化层
+ *  纵深防御） */
+export function escapeHtml(s: string): string {
   return s
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')

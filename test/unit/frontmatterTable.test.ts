@@ -264,6 +264,40 @@ describe('编辑计划：最小重写', () => {
     expect(apply('---\ntags:\n  - alpha\n---', planRemoveFmArrayItem(one, 0, 0)!)).toBe('---\ntags:\n---')
   })
 
+  it('删除计划光标落位：删项后不落围栏行（「添加属性」按钮不随删除消失）', () => {
+    // 删末项（有前项）：光标落前一项文本尾——键值行内容，非围栏
+    const doc = '---\ntags:\n  - alpha\n  - beta\n---'
+    const model = modelOf(doc)!
+    const plan = planRemoveFmArrayItem(model, 0, 1)!
+    expect(plan!.selection).toBeDefined()
+    expect(plan!.selection!.anchor).toBe(span(doc, 'alpha').to)
+    // 删首项（有后项）：光标落后项前移后的文本首
+    const planFirst = planRemoveFmArrayItem(model, 0, 0)!
+    const afterFirst = apply(doc, planFirst)
+    expect(afterFirst).toBe('---\ntags:\n  - beta\n---')
+    expect(planFirst!.selection!.anchor).toBe(span(afterFirst, 'beta').from)
+    // 唯一项删空：光标回宿主行行尾（键值行）
+    const one = modelOf('---\ntags:\n  - alpha\n---')!
+    const planOnly = planRemoveFmArrayItem(one, 0, 0)!
+    expect(planOnly!.selection!.anchor).toBe(one.entries[0]!.kind === 'array'
+      ? (one.entries[0] as { hostLineTo: number }).hostLineTo
+      : -1)
+  })
+
+  it('删除条目计划光标落位：落保留条目而非围栏行', () => {
+    const doc = '---\ntitle: hello\ncount: 1\n---'
+    const model = modelOf(doc)!
+    // 删首条目（有后条目）：光标落后条目前移后的键首
+    const plan = planRemoveFmEntry(model, 0)!
+    const after = apply(doc, plan)
+    expect(after).toBe('---\ncount: 1\n---')
+    expect(plan!.selection).toBeDefined()
+    expect(plan!.selection!.anchor).toBe(span(after, 'count').from)
+    // 删末条目（有前条目）：光标落前条目行尾
+    const planLast = planRemoveFmEntry(model, 1)!
+    expect(planLast!.selection!.anchor).toBe(span(doc, 'hello').to)
+  })
+
   it('最小重写总检：多键头区改一个值，其余行逐字节保留（顺序/引号/缩进/注释）', () => {
     const doc = '---\n"quoted": "keep me"  # note\ntags:\n  - a\nplain: 42\n---'
     const model = modelOf(doc)!
