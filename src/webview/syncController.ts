@@ -154,6 +154,7 @@ import {
 import { locateOutlineIndex } from './outlineLocate'
 import { resolveStaleTaskToggle } from './taskToggle'
 import { SnippetLoader } from './snippetLoader'
+import { createFontArrivalWatch } from './fontArrival'
 import { VirtualReadingView } from './readingVirtualView'
 import { blankRowInputPlan, runCreateTable, runTableEdit, tableEditing, tableRowsAt } from './tableEditing'
 import { listEditing } from './listEditing'
@@ -444,6 +445,8 @@ export class WebviewSyncController {
   /** CSS 片段 <link> 装配器（#128）：只增删文档级样式链，不触碰 CM6 状态；
    *  输入/选区/撤销/模式切换与阅读虚拟化天然不受影响（重挂载块继承文档样式） */
   private readonly snippetLoader = new SnippetLoader()
+  /** #130 字体晚到补测监听（惰性创建；document.fonts 稳定时机驱动） */
+  private snippetFontArrival: ReturnType<typeof createFontArrivalWatch> | undefined
   /** 图片资源管理器（#10：双视图共用；经宿主通道解析工作区图源） */
   private images: ImageResourceManager | undefined
   private toolbar: HTMLElement | undefined
@@ -1049,7 +1052,9 @@ export class WebviewSyncController {
         // #128 CSS 片段装载：diff 式装配 <link>（失败保留最近成功样式、
         // 停用立即撤下）；装载结果回报宿主（入口级成败可观测），样式落地
         // 后唤醒测量——行高/字号变化时 live 侧 CM6 需重测视口（阅读侧由
-        // ResizeObserver → measureAndStabilize 现成管线自动锚定）
+        // ResizeObserver → measureAndStabilize 现成管线自动锚定）。
+        // #130 字体晚到：@font-face 字体在链 load 后才异步装载完成，另行
+        // 经 document.fonts.ready 稳定时机补一轮重测（见 scheduleSnippetMeasure）
         this.snippetLoader.apply(message, (outcome) => {
           this.bridge.postMessage({
             kind: 'snippets.loadResult',
@@ -1059,6 +1064,7 @@ export class WebviewSyncController {
           })
           if (outcome.ok) {
             this.scheduleSnippetMeasure()
+            this.scheduleSnippetMeasureOnFontArrival()
           }
         })
         break
@@ -4998,6 +5004,28 @@ export class WebviewSyncController {
   private scheduleSnippetMeasure(): void {
     this.view?.requestMeasure()
     requestAnimationFrame(() => this.view?.requestMeasure())
+  }
+
+  /**
+   * #130 字体晚到的补测：片段里的 @font-face（本地或 https 远程字体）在
+   * <link> load 事件之后才异步装载完成——上方即时重测可能早于字体生效，
+   * 行高/字号稳定后的视口测量与滚动锚定需要再补一轮。以 document.fonts
+   * .ready 为稳定时机（字体装载失败同样 settle——此时按备用字体重测，
+   * 正文可读即达成；错误面见 fontArrival 模块头）。live 侧重测 CM6 视口，
+   * 阅读侧显式 updateNow 走 measureAndStabilize 锚定补偿（RO 对挂载块
+   * 的尺寸回调是兜底路径，显式调用保证高度表回填必然执行）。
+   */
+  private scheduleSnippetMeasureOnFontArrival(): void {
+    if (!this.snippetFontArrival) {
+      this.snippetFontArrival = createFontArrivalWatch(
+        () => document.fonts ?? undefined,
+        () => {
+          this.scheduleSnippetMeasure()
+          this.readingView?.updateNow()
+        },
+      )
+    }
+    this.snippetFontArrival.schedule()
   }
 
   /**
