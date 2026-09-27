@@ -21,6 +21,7 @@ const QUICK_ICON_KEYS = [
   'bold', 'italic', 'strikethrough', 'inlineCode', 'heading',
   'bulletList', 'orderedList', 'taskList', 'quote', 'codeBlock',
   'link', 'clearInline', 'table', 'inlineMath', 'blockMath',
+  'highlight', 'horizontalRule',
 ]
 function quickActionIconEntries() {
   return ['light', 'dark'].flatMap((theme) => QUICK_ICON_KEYS.map((key) => ({
