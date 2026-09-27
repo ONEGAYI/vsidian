@@ -5,7 +5,9 @@ import { runSuites } from './runner.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // 保留原 test:browser 的全部 16 个脚本；长套件优先启动。
-const names = ['tableCaret', 'taskClick', 'outlineJump', 'outlineCollapse', 'outlineHover',
+// #121 合并入列：listEditing（29 场景）与 tabIndent（22 场景）按长度
+// 插在 taskClick 之后、outline 系列之前。
+const names = ['tableCaret', 'taskClick', 'listEditing', 'tabIndent', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage',
   'languageSwitch', 'quickActions', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor']
 let workers = 2, reuseBuilds = true, selected = names

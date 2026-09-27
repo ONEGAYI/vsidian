@@ -155,6 +155,8 @@ import { locateOutlineIndex } from './outlineLocate'
 import { resolveStaleTaskToggle } from './taskToggle'
 import { VirtualReadingView } from './readingVirtualView'
 import { blankRowInputPlan, runCreateTable, runTableEdit, tableEditing, tableRowsAt } from './tableEditing'
+import { listEditing } from './listEditing'
+import { indentEditing } from './indentEditing'
 import { selectTableRegion, tableRegionField } from './tableRegionSelection'
 import { planTableRegionReplace, type TableRegion } from './tableRegion'
 import { splitTableRowCells } from './tableCells'
@@ -5987,6 +5989,13 @@ export class WebviewSyncController {
       // 表格单元格输入钩子（#12）：表格行内键入 | 转义写回 \|；
       // 编辑面即 CM6 源文本行，同步链路复用本控制器的标准出站路径
       tableEditing,
+      // #119 列表/引用 Enter 前缀延续与退格清层：必须排在 tableEditing
+      // 之后（表格上下文优先，格内 Enter 仍为 <br>）、extraExtensions 的
+      // defaultKeymap 之前（先于通用键位拦截）
+      listEditing,
+      // #120 Tab/Shift+Tab 通用行缩进：排在 tableEditing 之后（表格
+      // 单元格导航优先，表格行不缩进）、defaultKeymap 之前
+      indentEditing,
       // 查找装饰（#14）：当前匹配（直接）+ 全部匹配（视口内间接）
       findDecorations,
       ...this.extraExtensions,
@@ -6041,9 +6050,10 @@ export class WebviewSyncController {
           this.recordLocalChangeSet(tr.changes, changes)
         }
       }),
-      // 撤销/重做转发 keymap：置于数组末尾（CM6 扩展数组靠后者优先级高），
-      // 先于调用方传入的 defaultKeymap（其本地 undo/redo 绑定在未装 history
-      // 扩展时为 no-op）匹配
+      // 撤销/重做转发 keymap：置于数组末尾——CM6 同优先级 keymap 按数组
+      // 先后依次尝试（先者先匹配），调用方传入的 defaultKeymap（其本地
+      // undo/redo 绑定在未装 history 扩展时返回 false）先于本转发落穿，
+      // 之后才轮到转发请求宿主权威栈
       keymap.of([
         { key: 'Mod-z', run: () => this.requestHistory('undo') },
         { key: 'Shift-Mod-z', run: () => this.requestHistory('redo') },

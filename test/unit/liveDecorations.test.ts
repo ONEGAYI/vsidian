@@ -211,13 +211,14 @@ describe('buildLivePreviewDecorations：全量构建（树驱动语义）', () =
     expect(hiddenRanges(set)).not.toContainEqual([ordered, ordered + 2])
   })
 
-  it('任务项：非活动行 marker 替换为字形 widget（勾选态映射）', () => {
+  it('任务项：非活动行 marker 替换为字形 widget（勾选态映射；区间吞并标记后一空格）', () => {
     const glyphs = taskGlyphs(set)
     expect(glyphs).toHaveLength(2)
     const unchecked = FULL_DOC.indexOf('[ ]')
     const checked = FULL_DOC.indexOf('[x]')
-    expect(glyphs).toContainEqual({ from: unchecked, to: unchecked + 3, checked: false })
-    expect(glyphs).toContainEqual({ from: checked, to: checked + 3, checked: true })
+    // 区间含后随空格：空隙归 widget margin，与普通行「圆点 margin」同口径
+    expect(glyphs).toContainEqual({ from: unchecked, to: unchecked + 4, checked: false })
+    expect(glyphs).toContainEqual({ from: checked, to: checked + 4, checked: true })
   })
 
   it('水平线：行级类', () => {
@@ -299,6 +300,40 @@ describe('mark 作用域显形', () => {
     expect(hiddenRanges(atMarker)).toContainEqual([second, second + 2])
     expect(byClass(atMarker).get('vsidian-list-marker-visible')).toHaveLength(1)
     expect(hiddenRanges(build(doc, { anchor: first + 2 }))).not.toContainEqual([first, first + 2])
+  })
+
+  it('嵌套无序行隐藏区含行首缩进空白（伪圆点紧邻正文，#121 验收修复）', () => {
+    const doc = '- a\n  - b\n'
+    const at = doc.indexOf('  - b')
+    const body = build(doc, { anchor: doc.indexOf('b') + 1 })
+    // '  - ' 整段（行首缩进 + 标记 + 一空格）被吞并：圆点与正文间无占位空格
+    expect(hiddenRanges(body)).toContainEqual([at, at + 4])
+    expect(hiddenRanges(body)).toContainEqual([0, 2]) // 顶级行不变
+  })
+
+  it('光标进入行首缩进空白即显形整段前缀（隐藏区扩到行首后触及判定随之）', () => {
+    const doc = '- a\n  - b\n'
+    const at = doc.indexOf('  - b')
+    const inIndent = build(doc, { anchor: at + 1 })
+    expect(hiddenRanges(inIndent)).not.toContainEqual([at, at + 4])
+    expect(byClass(inIndent).get('vsidian-list-marker-visible')).toHaveLength(1)
+  })
+
+  it('圆点类限定标记所在行：lazy 续行跟随项缩进但不显圆点（#121 验收修复）', () => {
+    const doc = '- a\n      deep\n'
+    const c = byClass(build(doc, { anchor: doc.indexOf('deep') + 2 }))
+    expect((c.get(LIVE_CLASS_NAMES.listBullet) ?? []).length).toBe(1) // 仅 mark 行
+    expect((c.get(LIVE_CLASS_NAMES.listLine) ?? []).length).toBe(2) // 续行仍有行级深度类
+  })
+
+  it('合法嵌套任务行样式齐全：bullet 深度类与 checkbox widget 并存（#121 验收修复）', () => {
+    const doc = '- [ ] p\n  - [ ] c\n'
+    const set = build(doc, { anchor: doc.length })
+    const c = byClass(set)
+    // 子项行（2 格 = CommonMark 内容列）有自己的 bullet 与 d2 深度类
+    expect((c.get(LIVE_CLASS_NAMES.listBullet) ?? []).length).toBe(2)
+    expect((c.get('vsidian-list-line-d2') ?? []).length).toBeGreaterThanOrEqual(1)
+    expect(taskGlyphs(set)).toHaveLength(2) // 父子两行都有 checkbox
   })
 
   it('标题行任意位置显形自身的 #；引用仍只在标记附近显形', () => {

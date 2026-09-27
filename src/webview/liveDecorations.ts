@@ -699,12 +699,21 @@ function emitForRange(
         const depth = 1 + path.filter((p) => p.name === 'ListItem').length
         const nearestList = [...path].reverse().find((p) => p.name === 'BulletList' || p.name === 'OrderedList')
         const ordered = nearestList?.name === 'OrderedList'
-        const cls = `${LIVE_CLASS_NAMES.listLine} ${ordered ? LIVE_CLASS_NAMES.listOrdered : LIVE_CLASS_NAMES.listBullet} ${LIVE_CLASS_NAMES.listLine}-d${Math.min(8, depth)}`
+        // 行级深度类覆盖项内全部行（续行跟随项缩进）；bullet/ordered 区分
+        // 类只给标记所在行——续行不显圆点（lazy 续行曾借父项行类误渲圆点）
+        const cls = `${LIVE_CLASS_NAMES.listLine} ${LIVE_CLASS_NAMES.listLine}-d${Math.min(8, depth)}`
         eachNodeLine(doc, node, fromLine, toLine, (n) => {
           for (const part of cls.split(' ')) {
             addLineCls(n, part)
           }
         })
+        const mark = node.getChild('ListMark')
+        if (mark) {
+          const markLine = doc.lineAt(mark.from).number
+          if (markLine >= fromLine && markLine <= toLine) {
+            addLineCls(markLine, ordered ? LIVE_CLASS_NAMES.listOrdered : LIVE_CLASS_NAMES.listBullet)
+          }
+        }
         return
       }
       case 'Emphasis':
@@ -737,18 +746,21 @@ function emitForRange(
         return
       }
       case 'ListMark': {
-        // 有序列表编号保留；无序标记隐藏（吞并其后一个空格）
+        // 有序列表编号保留；无序标记隐藏（吞并行首缩进空白与标记后
+        // 一个空格）——伪圆点紧邻正文，层级缩进统一由 -dN padding 表达，
+        // 行首空格不再与 padding 双重占位
         const ordered =
           [...path].reverse().find((p) => p.name === 'BulletList' || p.name === 'OrderedList')
             ?.name === 'OrderedList'
         if (ordered) {
           return
         }
+        const line = doc.lineAt(node.from)
         const to = markerEnd(node)
-        if (!touches(node.from, to)) {
-          out.push(hideDeco.range(node.from, to))
+        if (!touches(line.from, to)) {
+          out.push(hideDeco.range(line.from, to))
         } else {
-          addLineCls(doc.lineAt(node.from).number, LIVE_CLASS_NAMES.listMarkerVisible)
+          addLineCls(line.number, LIVE_CLASS_NAMES.listMarkerVisible)
         }
         return
       }
@@ -786,7 +798,10 @@ function emitForRange(
       case 'TaskMarker': {
         if (!touches(node.from, node.to)) {
           const checked = doc.sliceString(node.from + 1, Math.min(node.from + 2, node.to)) !== ' '
-          out.push(taskCheckboxDecos[checked ? 1 : 0]!.range(node.from, node.to))
+          // 区间吞并标记后一个空格：checkbox 与正文的空隙由 widget 的
+          // margin 表达，与普通列表行「圆点 margin」同口径，不再叠加
+          // 空格占位（两种行的符号→正文间距相等）
+          out.push(taskCheckboxDecos[checked ? 1 : 0]!.range(node.from, markerEnd(node)))
         }
         return
       }
