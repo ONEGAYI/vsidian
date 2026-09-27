@@ -26,6 +26,9 @@ import {
   verifyBaselineRows,
   checkGuardManifest,
   runStyleContractCheck,
+  parseGitTagLines,
+  readGitTags,
+  GIT_TAG_REF_FORMAT,
 } from '../../scripts/styleContractCheck.mjs'
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -482,6 +485,85 @@ test('runStyleContractCheck：git tag 指向与基线固化 SHA 一致（真实�
   const tagCheck = report.checks.find((c) => c.id === 'git-tag-consistency')
   assert.ok(tagCheck, '报告应含 git tag 一致性分项')
   assert.equal(tagCheck.status, 'pass', JSON.stringify(tagCheck))
+})
+
+// ---------------------------------------------------------------------------
+// 8b. git tag 读取对 annotated tag 的健壮性（R4 回归）
+// ---------------------------------------------------------------------------
+
+test('GIT_TAG_REF_FORMAT 钉住星号解引用形态（annotated tag 回归）', () => {
+  // annotated tag 的裸 %(objectname) 返回 tag 对象 SHA 而非 commit SHA——
+  // 与基线固化的 commit SHA 比对会误报 tag-sha-mismatch（fail-closed 阻塞
+  // 发布）。%(*objectname)（星号前缀）解引用 tag 指向的 commit；
+  // lightweight tag 无解引用对象，%(else) 分支取 %(objectname)（本就是
+  // commit SHA，行为不变）。注：review 建议的 %(objectname:commit) 后缀
+  // 语法在 for-each-ref 中不存在（git 2.53 实测 unrecognized），此为惯用
+  // 等价实现；行为由下方端到端用例真实验证。
+  assert.ok(
+    GIT_TAG_REF_FORMAT.includes('%(*objectname)'),
+    '格式串须含 %(*objectname) 星号解引用（裸 %(objectname) 对 annotated tag 返回 tag 对象 SHA）',
+  )
+  assert.ok(
+    GIT_TAG_REF_FORMAT.includes('%(if)') && GIT_TAG_REF_FORMAT.includes('%(else)'),
+    'lightweight tag 须有 %(else) 回退分支（%(*objectname) 对其输出为空）',
+  )
+})
+
+test('parseGitTagLines：表驱动行解析（tag → 40 位 commit SHA；畸形行跳过）', () => {
+  const sha = (n) => String(n).padStart(40, 'a1b2c3')
+  const tags = parseGitTagLines(
+    [
+      `v0.4.0 ${sha(1)}`,
+      `v1.2.3 ${sha(2)}`,
+      '', // 空行
+      'bogus line', // 非 SHA 行
+      `weird tag ${sha(3)}`, // tag 名含空格（for-each-ref 不会产出，防御跳过）
+    ].join('\n'),
+  )
+  assert.deepEqual(tags, { 'v0.4.0': sha(1), 'v1.2.3': sha(2) })
+})
+
+test('readGitTags：真实临时仓库的 annotated tag 解引用到 commit SHA（端到端）', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'vsidian-tags-'))
+  try {
+    const git = (args) =>
+      execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+    git(['init', '--quiet'])
+    writeFileSync(path.join(dir, 'f.txt'), 'x')
+    git(['add', '.'])
+    git(['-c', 'user.email=t@t.local', '-c', 'user.name=t', 'commit', '--quiet', '-m', 'init'])
+    git(['-c', 'user.email=t@t.local', '-c', 'user.name=t', 'tag', '-a', 'v9.9.9', '-m', 'annotated'])
+    git(['tag', 'light-only']) // 对照：lightweight tag
+    const tags = readGitTags(dir)
+    const commit = git(['rev-parse', 'HEAD']).trim()
+    const tagObject = git(['rev-parse', 'v9.9.9']).trim()
+    assert.notEqual(commit, tagObject, '前置：annotated tag 对象 SHA 应异于 commit SHA（否则用例无鉴别力）')
+    assert.equal(tags['v9.9.9'], commit, 'annotated tag 须解引用到 commit SHA（而非 tag 对象 SHA）')
+    assert.equal(tags['light-only'], commit, 'lightweight tag 行为不变（objectname 即 commit SHA）')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// 8c. skip 门禁语义（隐藏检查不能伪装通过，R5 回归）
+// ---------------------------------------------------------------------------
+
+test('skip candidate：被跳过的检查显式记录且 report.ok 不为 true（不伪装通过）', async () => {
+  const report = await runStyleContractCheck({ root: REPO_ROOT, baselinePath: BASELINE_PATH, skip: ['candidate'] })
+  assert.equal(report.ok, false, '跳过候选面检查（entry-comparison 等四项整块略过）时 ok 不得为 true')
+  assert.deepEqual(report.skipped, ['candidate'], '报告应显式记录 skip 集')
+  const skippedIds = report.checks.filter((c) => c.status === 'skip').map((c) => c.id)
+  for (const id of ['candidate-contract', 'entry-comparison', 'lifecycle', 'alias-bridge', 'guide-consistency']) {
+    assert.ok(skippedIds.includes(id), `${id} 应在 checks 中显式记为 skip（不得静默消失）`)
+  }
+})
+
+test('skip guide：单项显式跳过同样不完整（ok 不为 true）', async () => {
+  const report = await runStyleContractCheck({ root: REPO_ROOT, baselinePath: BASELINE_PATH, skip: ['guide'] })
+  assert.equal(report.ok, false)
+  assert.deepEqual(report.skipped, ['guide'])
+  assert.ok(report.checks.find((c) => c.id === 'guide-consistency')?.status === 'skip')
 })
 
 // ---------------------------------------------------------------------------

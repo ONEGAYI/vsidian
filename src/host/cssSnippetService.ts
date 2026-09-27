@@ -403,13 +403,19 @@ export class CssSnippetService {
     }
   }
 
-  /** 批内路径 → 受影响启用入口（入口自身路径命中或依赖闭包包含） */
+  /** 批内路径 → 受影响启用入口（入口自身路径命中或依赖闭包包含）。比较
+   *  两侧大小写折叠（toLowerCase）：@import 词法路径与 watcher 事件路径
+   *  在大小写不敏感文件系统上可能仅大小写不同（CSS 写 ./Theme.css 而磁盘
+   *  为 theme.css），精确比较会静默漏归因（依赖变更不重载直到自愈）；折叠
+   *  过度匹配只多一次幂等重载（#129 方向取舍：多重载不陈旧）。清单文件名
+   *  显示与目录扫描排序不受影响（仅判定折叠，存储形态保留原大小写） */
   private affectedEntries(pending: ReadonlySet<string>): Set<string> {
     const affected = new Set<string>()
+    const pendingFolded = new Set([...pending].map((p) => p.toLowerCase()))
     for (const name of enabledSnippetFiles(this.getState())) {
-      const entryPath = this.entryPathOf(name)
+      const entryPath = this.entryPathOf(name).toLowerCase()
       const deps = this.depWatch.get(name) ?? []
-      if (pending.has(entryPath) || deps.some((dep) => pending.has(dep))) {
+      if (pendingFolded.has(entryPath) || deps.some((dep) => pendingFolded.has(dep.toLowerCase()))) {
         affected.add(name)
       }
     }

@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest'
 import {
   compareSnippetNames,
   enabledSnippetFiles,
+  fileTypeMatches,
   isSnippetFileName,
   mergeScanEntries,
   sanitizeStoredCssSnippets,
@@ -20,6 +21,32 @@ describe('片段文件判定（isSnippetFileName）', () => {
     expect(isSnippetFileName('theme.scss')).toBe(false)
     expect(isSnippetFileName('csstxt')).toBe(false)
     expect(isSnippetFileName('')).toBe(false)
+  })
+})
+
+describe('目录条目类型判定（fileTypeMatches，FileType 位掩码）', () => {
+  // vscode.FileSystemEntryType 是位掩码（vscode.d.ts 明示可能为组合值）：
+  // Unknown=0、File=1、Directory=2、SymbolicLink=64；符号链接文件在部分
+  // 平台上报 File|SymbolicLink=65 组合位——严格相等会漏掉它。mask 由调用
+  // 方用 vscode.FileType 常量拼装，此处按 vscode.d.ts 枚举数值复刻同一组合。
+  const MASK = 1 | 64 // vscode.FileType.File | vscode.FileType.SymbolicLink
+
+  it('按位判定：File / SymbolicLink / File|SymbolicLink 组合位都命中', () => {
+    expect(fileTypeMatches(1, MASK)).toBe(true) // File
+    expect(fileTypeMatches(64, MASK)).toBe(true) // SymbolicLink
+    expect(fileTypeMatches(65, MASK)).toBe(true) // File|SymbolicLink（符号链接文件组合位）
+  })
+
+  it('Directory(2) 与 Unknown(0) 不命中', () => {
+    expect(fileTypeMatches(2, MASK)).toBe(false)
+    expect(fileTypeMatches(0, MASK)).toBe(false)
+  })
+
+  it('Directory|SymbolicLink(66) 命中：目录符号链接的既有取舍（不阻塞真文件）', () => {
+    // 66 带 SymbolicLink 位会进候选——名为 *.css 的目录符号链接经后续
+    // readFileText 读目录失败归并为不可读（既有降级路径），不误装载；
+    // 反向漏掉 65 组合位的真符号链接文件则是清单缺项，代价更高。
+    expect(fileTypeMatches(66, MASK)).toBe(true)
   })
 })
 

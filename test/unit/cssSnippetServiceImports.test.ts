@@ -142,13 +142,37 @@ describe('依赖归因：子级文件变更只重载受影响入口', () => {
     const svc = new CssSnippetService(makeStorage(), fs, 'k', { debounceMs: 1 })
     await svc.setDirectory('D:/snips')
     await svc.setEnabled('main.css', true)
-    const before = linkMap(svc)
+    const before = linkMap(svc)['main.css']
 
     writeFile(fs, 'D:/snips/sub/missing.css', '.late{color:green}')
     fs.fire('D:/snips/sub/missing.css')
     await sleep(30)
 
-    expect(linkMap(svc)['main.css']).toBeGreaterThan(before['main.css'])
+    expect(linkMap(svc)['main.css']).toBeGreaterThan(before)
+  })
+
+  it('大小写不一致归因：@import 词法路径与事件路径仅大小写不同 → 仍归因到入口', async () => {
+    // 大小写不敏感文件系统形态：磁盘为 sub/dep.css，CSS 写 ./Sub/Dep.css
+    // （浏览器按同一文件解析）。词法路径 D:/snips/Sub/Dep.css 与 watcher
+    // 事件路径 D:/snips/sub/dep.css 精确比较会 miss → 静默不重载（陈旧
+    // 样式直到第一层事件或手动刷新才自愈）；归因判定按大小写折叠——方向
+    // 取「过度匹配→多重载」（重装同 URI 幂等无害）而非「漏匹配→陈旧」。
+    const fs = makeFs(
+      {
+        'D:/snips/main.css': '@import "Sub/Dep.css";\n.a{color:red}',
+        'D:/snips/sub/dep.css': '.d{color:red}',
+      },
+      ['main.css'],
+    )
+    const svc = new CssSnippetService(makeStorage(), fs, 'k', { debounceMs: 1 })
+    await svc.setDirectory('D:/snips')
+    await svc.setEnabled('main.css', true)
+    const before = linkMap(svc)['main.css']
+
+    fs.fire('D:/snips/sub/dep.css') // 事件按磁盘实际大小写到达
+    await sleep(30)
+
+    expect(linkMap(svc)['main.css']).toBeGreaterThan(before)
   })
 
   it('入口文件编辑（第一层事件）：权威重扫 + 归因拍推进该入口与依赖它的入口', async () => {

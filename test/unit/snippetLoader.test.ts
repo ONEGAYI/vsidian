@@ -183,6 +183,54 @@ describe('确定性顺序（后者覆盖）', () => {
   })
 })
 
+describe('#129 opaque 链：下一次 apply 不摘除重装', () => {
+  /** 把链元素打成 opaque 形态：sheet 存在但读 cssRules 抛异常（跨源不可读；
+   *  jsdom 的 link.sheet 默认 null 走 none 态，须用 getter 抛错制造 catch 形态） */
+  function stubOpaqueSheet(link: HTMLLinkElement): void {
+    Object.defineProperty(link, 'sheet', {
+      get() {
+        throw new DOMException('cross-origin cssRules access', 'SecurityError')
+      },
+    })
+  }
+
+  it('opaque pending 同 URI 再 apply：不 remove、不新建 link（保持 pending 原样，已生效部分不闪断）', () => {
+    const loader = new SnippetLoader()
+    const outcomes: SnippetLoadOutcome[] = []
+    loader.apply({ version: 1, snippets: [{ name: 'a.css', uri: 'https://w/a.css?v=1' }] }, (o) => outcomes.push(o))
+    const link = linkOf('a.css')!
+    stubOpaqueSheet(link)
+    // error 事件 + opaque sheet → 链保留为 pending（浏览器仍在应用其能解析
+    // 的部分），回报 ok:false
+    fireError(link)
+    expect(outcomes.at(-1)).toEqual({ name: 'a.css', version: 1, ok: false })
+    expect(loader.describe()).toEqual([{ name: 'a.css', href: 'https://w/a.css?v=1', state: 'pending' }])
+    expect(link.isConnected).toBe(true)
+
+    // 下一次 apply（清单内该片段仍在、URI 不变）：#129 承诺「不移除（避免
+    // 误撤生效规则）」——不得摘除后重装同 URI（重装会闪断已生效样式）
+    loader.apply({ version: 1, snippets: [{ name: 'a.css', uri: 'https://w/a.css?v=1' }] })
+    expect(link.isConnected).toBe(true) // 同一元素未被移除
+    expect(headSnippetNames()).toEqual(['a.css']) // 未新建链（总数仍为 1）
+    expect(linkOf('a.css')).toBe(link) // 在链的正是原元素
+    expect(loader.describe()).toEqual([{ name: 'a.css', href: 'https://w/a.css?v=1', state: 'pending' }])
+  })
+
+  it('对照：sheet 为 null（none 态）的 pending 再 apply 仍被摘除重装（陈旧装载请求被取代）', () => {
+    const loader = new SnippetLoader()
+    loader.apply({ version: 1, snippets: [{ name: 'a.css', uri: 'https://w/a.css?v=1' }] })
+    const stale = linkOf('a.css')!
+    // 不触发任何 load/error（Chromium 个别子资源失败形态不派发事件）：
+    // jsdom link.sheet 保持 null → none 态，下一次 apply 摘除重装
+    loader.apply({ version: 1, snippets: [{ name: 'a.css', uri: 'https://w/a.css?v=1' }] })
+    expect(stale.isConnected).toBe(false) // 旧链被摘除
+    const fresh = linkOf('a.css')
+    expect(fresh).toBeTruthy() // 新链重挂
+    expect(fresh).not.toBe(stale)
+    expect(headSnippetNames()).toEqual(['a.css'])
+  })
+})
+
 describe('clear', () => {
   it('摘除全部链（含 pending）', () => {
     const loader = new SnippetLoader()

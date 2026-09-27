@@ -5,12 +5,14 @@
 import * as vscode from 'vscode'
 import { realpath } from 'fs/promises'
 import { CssSnippetService, type CssSnippetFsPort } from './cssSnippetService'
-import { isSnippetFileName } from '../shared/cssSnippets'
+import { isSnippetFileName, fileTypeMatches } from '../shared/cssSnippets'
 import { t } from '../shared/i18n'
 import type { SnippetPageWiring } from './settingsPage'
 
 /** 目录读取端口：第一层 .css 文件（含符号链接文件——目录内容属用户自管，
- *  链接目标是否越界由服务的 realpath 分析判定）；任何读取异常归并为
+ *  链接目标是否越界由服务的 realpath 分析判定）；类型按位判定
+ *  （vscode.FileSystemEntryType 是位掩码，File|SymbolicLink=65 组合位是
+ *  部分平台的符号链接文件形态，严格相等会漏）。任何读取异常归并为
  *  null（读取失败，服务保留最近成功清单） */
 function listCssFiles(directory: string): Promise<string[] | null> {
   return Promise.resolve(vscode.workspace.fs.readDirectory(vscode.Uri.file(directory)))
@@ -18,7 +20,7 @@ function listCssFiles(directory: string): Promise<string[] | null> {
       entries
         .filter(
           ([name, type]) =>
-            (type === vscode.FileType.File || type === vscode.FileType.SymbolicLink) &&
+            fileTypeMatches(type, vscode.FileType.File | vscode.FileType.SymbolicLink) &&
             isSnippetFileName(name),
         )
         .map(([name]) => name),

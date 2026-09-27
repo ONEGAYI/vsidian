@@ -99,10 +99,20 @@ export class SnippetLoader {
       if (slot.pending) {
         if (!slot.settled && slot.pending.getAttribute('href') === uri && sheetApplied(slot.pending)) {
           slot.settled = slot.pending
+          slot.pending = undefined
+        } else if (slot.pending.getAttribute('href') === uri && sheetStateOf(slot.pending) === 'opaque') {
+          // #129 opaque 承诺（error 事件分流保留的跨源不可读链）：浏览器
+          // 正在应用其能解析的部分，「不移除（避免误撤生效规则）」——同
+          // URI 的下一次 apply 不摘除不重装（重装会闪断已生效规则），保持
+          // pending 原样等待。DOM 顺序不参与 reorder：与「等待晋升的
+          // pending 自带最新 DOM 位次」的既有语义一致（reorder 只重排
+          // settled；opaque 永不晋升，位次停留在自然 append 处即可——
+          // 生产 webview 片段链与页面同源，不出现该态）。
+          continue
         } else {
           slot.pending.remove()
+          slot.pending = undefined
         }
-        slot.pending = undefined
       }
       if (slot.settled?.getAttribute('href') === uri) {
         continue

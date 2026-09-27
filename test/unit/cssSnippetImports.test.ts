@@ -129,6 +129,28 @@ describe('scanCssReferences：url() 资产引用', () => {
   it('URL 大小写形态（URL( )）与括号内空白容忍', () => {
     expect(assetsOf('.a{background:URL( img.png )}')).toEqual(['img.png'])
   })
+
+  it('未引号 url 的 \\) 转义：括号属于地址一部分，不提前终止', () => {
+    // CSS 语法内反斜杠转义在未引号 url 体中合法：url(a\).css) 的地址是
+    // a).css——裸 ')' 才是函数体结束符。修复前扫描停在转义括号处，地址
+    // 被截断为 a\ 且主循环落到括号后继续误扫残余文本。
+    expect(assetsOf('.a{background:url(a\\).css)}')).toEqual(['a).css'])
+    expect(assetsOf('.a{background:url(sub/a\\)b.css)}')).toEqual(['sub/a)b.css'])
+    expect(assetsOf('.a{background:url(\\).css)}')).toEqual([').css'])
+    // 转义反斜杠后跟括号：url(a\\)b.css) 的地址是 a\（反斜杠字面量），
+    // 其后的 ')' 结束函数体，残余 b.css) 不属于地址
+    expect(assetsOf('.a{background:url(a\\\\)b.css)}')).toEqual(['a\\'])
+    // @import url(...) 地址同样受益
+    expect(importsOf('@import url(sub/a\\).css);')).toEqual(['sub/a).css'])
+  })
+
+  it('未引号 url 周边与体内的 /* */ 注释剥离照常（回归钉）', () => {
+    // 注释由 scanCssReferences 前置 stripComments 统一剥离（替换为空白，
+    // 再经 trim 收敛）：体内起始/尾随注释不影响地址提取
+    expect(assetsOf('.a{background:url(/* c */a.css)}')).toEqual(['a.css'])
+    expect(assetsOf('.a{background:url(a.css /* c */)}')).toEqual(['a.css'])
+    expect(assetsOf('.a{background:url(a.css) /* c */ .b{color:red}')).toEqual(['a.css'])
+  })
 })
 
 describe('classifyCssRef / normalizeSnippetPath / resolveCssRefPath', () => {
@@ -179,6 +201,18 @@ describe('classifyCssRef / normalizeSnippetPath / resolveCssRefPath', () => {
     expect(isPathWithinSnippetDirectory('D:/snips', 'D:/snips2/a.css')).toBe(false)
     expect(isPathWithinSnippetDirectory('D:/snips', 'D:/evil.css')).toBe(false)
     expect(isPathWithinSnippetDirectory('/srv/snips', '/srv/snips2/a.css')).toBe(false)
+  })
+
+  it('isPathWithinSnippetDirectory：比较大小写折叠（词法路径与磁盘路径仅大小写不同仍算在内）', () => {
+    // 大小写不敏感文件系统上 realpath 会把词法路径收敛到磁盘实际大小写，
+    // 与目录 realpath 前缀精确比较可能仅大小写不同——折叠后判定包含；
+    // 方向取舍：过度匹配只多一次幂等重载，漏匹配则越界检查与逃逸判定失真
+    expect(isPathWithinSnippetDirectory('D:/Snips', 'D:/snips/a.css')).toBe(true)
+    expect(isPathWithinSnippetDirectory('D:/snips', 'D:/SNIPS/Sub/a.css')).toBe(true)
+    expect(isPathWithinSnippetDirectory('/srv/Snips', '/srv/snips')).toBe(true)
+    // 折叠只放宽大小写差异：段名实质不同仍拒绝
+    expect(isPathWithinSnippetDirectory('D:/snips', 'D:/snips2/a.css')).toBe(false)
+    expect(isPathWithinSnippetDirectory('D:/snips', 'D:/evil.css')).toBe(false)
   })
 })
 

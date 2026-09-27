@@ -70,6 +70,21 @@ export function isSnippetFileName(name: string): boolean {
 }
 
 /**
+ * 目录条目类型按位判定（vscode.FileSystemEntryType 是位掩码，vscode.d.ts
+ * 明示 type 可能为组合值）：命中 mask 中任一置位即接受。目录扫描用
+ * File|SymbolicLink 组合 mask——严格相等（===）会漏掉 File|SymbolicLink(65)
+ * 组合位（部分平台的符号链接文件形态），使符号链接片段不入清单，与「含
+ * 符号链接文件」的目录语义矛盾。
+ * 已知取舍：Directory|SymbolicLink(66) 同样带 SymbolicLink 位会命中——
+ * 名为 *.css 的目录符号链接会进候选，后续 readFileText 读目录失败归并为
+ * 不可读（既有降级路径），不会误装载；反向漏掉真文件是清单缺项，代价更高。
+ * mask 由 vscode 壳用 vscode.FileType 常量拼装传入，本函数不依赖 vscode。
+ */
+export function fileTypeMatches(type: number, mask: number): boolean {
+  return (type & mask) !== 0
+}
+
+/**
  * 确定性文件名排序：UTF-16 code unit 逐位比较。不依赖 locale（localeCompare
  * 结果随系统 locale 漂移），保证同一目录在任何机器上产出同一加载顺序。
  */

@@ -147,7 +147,10 @@ function skipWs(text: string, i: number): number {
   return i
 }
 
-/** 解析 url(...) 函数体（已定位到 '(' 之后）：引号体或裸体 */
+/** 解析 url(...) 函数体（已定位到 '(' 之后）：引号体或裸体。裸体（未引号）
+ *  内的反斜杠转义按 CSS 语法消费（\X → X 计入地址）：url(a\).css) 的地址是
+ *  a).css——转义括号不是函数体结束符，未处理会提前截断。注释不在此处剥
+ *  离（scanCssReferences 已前置 stripComments 统一处理） */
 function readUrlBody(text: string, openParenEnd: number): [string, number] | null {
   let i = skipWs(text, openParenEnd)
   if (i >= text.length) {
@@ -160,6 +163,12 @@ function readUrlBody(text: string, openParenEnd: number): [string, number] | nul
   }
   let value = ''
   while (i < text.length && text[i] !== ')') {
+    if (text[i] === '\\' && i + 1 < text.length) {
+      // 转义：下一字符原样计入地址（含 \) 与 \\），两字符一并消费
+      value += text[i + 1]
+      i += 2
+      continue
+    }
     value += text[i]
     i++
   }
@@ -376,11 +385,15 @@ export function resolveCssRefPath(fromCssPath: string, spec: string): string | n
   return normalizeSnippetPath(`${fromDir}/${decoded}`)
 }
 
-/** 词法包含判定（段边界精确；大小写敏感——大小写不敏感文件系统的权威
- *  判定走 realpath 两侧归一化后比较） */
+/** 词法包含判定（段边界精确；比较两侧大小写折叠——大小写不敏感文件系统
+ *  上 CSS 词法路径与磁盘/realpath 路径可能仅大小写不同（@import "./Theme.css"
+ *  vs theme.css），精确比较会漏判；折叠的方向取「过度匹配」而非「漏匹配」：
+ *  大小写敏感文件系统上仅大小写不同的两个文件被过度判定包含，代价只是一次
+ *  安全重载（重装同 URI 幂等），反向漏判则是越界/逃逸检查失真。段名实质
+ *  不同仍拒绝；权威判定仍以 realpath 两侧归一化后的折叠比较为准） */
 export function isPathWithinSnippetDirectory(directory: string, path: string): boolean {
-  const d = normalizeSnippetPath(directory)
-  const p = normalizeSnippetPath(path)
+  const d = normalizeSnippetPath(directory).toLowerCase()
+  const p = normalizeSnippetPath(path).toLowerCase()
   return p === d || p.startsWith(`${d}/`)
 }
 

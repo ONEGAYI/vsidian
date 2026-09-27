@@ -422,19 +422,38 @@ export async function loadCandidateContract(root) {
 // 发布记录装配：基线固化快照 × CHANGELOG × git tag 三源交叉
 // ---------------------------------------------------------------------------
 
-function readGitTags(root) {
+/** for-each-ref 格式串：tag → commit SHA。`%(*objectname)`（星号前缀）
+ *  解引用 tag 指向的对象——annotated tag 由此取到 commit SHA（裸
+ *  %(objectname) 返回 tag 对象 SHA，与基线固化的 commit SHA 比对会误报
+ *  tag-sha-mismatch，fail-closed 阻塞发布）；lightweight tag 无解引用
+ *  对象（%(*objectname) 为空），走 %(else) 取 %(objectname)——本就是
+ *  commit SHA，行为与旧格式一致。注：`%(objectname:commit)` 后缀语法
+ *  不存在（git 2.53 实测 unrecognized %(objectname) argument），星号 +
+ *  if/then 是惯用等价实现；%(if)/%(then) 自 git 2.13 起可用。 */
+export const GIT_TAG_REF_FORMAT =
+  '%(refname:short) %(if)%(*objectname)%(then)%(*objectname)%(else)%(objectname)%(end)'
+
+/** 解析 for-each-ref 输出行（tag → commit SHA）；畸形行（非 40 位十六
+ *  进制 SHA）防御跳过。annotated tag 的解引用由格式串在 git 侧完成 */
+export function parseGitTagLines(out) {
+  const tags = {}
+  for (const line of String(out).split('\n')) {
+    const m = line.trim().match(/^(\S+) ([0-9a-f]{40})$/)
+    if (m) tags[m[1]] = m[2]
+  }
+  return tags
+}
+
+/** 读取 root 的 tag → commit SHA 映射；git 不可用（无 .git / 缓存场景）
+ *  返回 null（调用方降级为 warning，不阻塞） */
+export function readGitTags(root) {
   try {
-    const out = execFileSync('git', ['for-each-ref', 'refs/tags', '--format=%(refname:short) %(objectname)'], {
+    const out = execFileSync('git', ['for-each-ref', 'refs/tags', `--format=${GIT_TAG_REF_FORMAT}`], {
       cwd: root,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     })
-    const tags = {}
-    for (const line of out.split('\n')) {
-      const m = line.trim().match(/^(\S+) ([0-9a-f]{40})$/)
-      if (m) tags[m[1]] = m[2]
-    }
-    return tags
+    return parseGitTagLines(out)
   } catch {
     return null
   }
@@ -619,19 +638,28 @@ export async function runStyleContractCheck(opts = {}) {
     } else {
       checks.push({ id: 'guide-consistency', status: 'skip', detail: '显式跳过' })
     }
+  } else if (skip.has('candidate')) {
+    // 候选面被显式跳过：依赖它的四项分块不执行，但必须显式记为 skip——
+    // 隐藏检查不能静默消失（伪装通过），report.ok 亦不为 true（见下）
+    for (const id of ['entry-comparison', 'lifecycle', 'alias-bridge', 'guide-consistency']) {
+      checks.push({ id, status: 'skip', detail: '显式跳过（skip candidate：候选面未加载）' })
+    }
   }
 
   // 7. 完整性自检
   await mark('guard-manifest', () => ({ failures: checkGuardManifest(root, baseline.guardManifest) }))
 
+  // ok 语义：零失败且**零跳过**。任何显式 skip 都意味着检查不完整——门禁
+  // 工具不得在略过检查项时宣称通过（fail-closed；CLI 不传 skip 不受影响）
   const report = {
-    ok: failures.length === 0,
+    ok: failures.length === 0 && skip.size === 0,
     tool: TOOL_ID,
     generatedAt: new Date().toISOString(),
     baseline: { version: baseline.meta.baselineVersion, sourceTag: baseline.meta.sourceTag, sourceSha: baseline.meta.sourceSha, path: baselinePath },
     candidate: { root, version: pkg.version },
     now,
     offline: true, // 全程无网络请求：不依赖在线字体服务等外部资源可用性
+    skipped: [...skip],
     checks,
     failures,
     warnings,
