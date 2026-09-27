@@ -6643,4 +6643,122 @@ export const cases: Array<[string, () => Promise<void>]> = [
       await doc.save()
     }
   }],
+
+  ['符号自动补全一次写回、宿主撤销一笔恢复并保存（#123）', async () => {
+    await openWithEditor('symbol-input.md')
+    const initial = await waitSessionReady('symbol-input.md')
+    const uri = wsUri('symbol-input.md').toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri('symbol-input.md'))
+    const source = '符号输入正文段\n'
+    assert(doc.getText() === source, '符号输入 fixture 初始文本不符')
+
+    // 行尾提交单个全角起始括号（真实 DOM 组合链路；钩子候选写首行行尾）
+    const at = source.indexOf('正文段') + '正文段'.length
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: at })
+    await waitViewState('symbol-input.md', (v) => v.selectionOffset === at)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sync.test.composition', phase: 'start', text: '' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'sync.test.composition', phase: 'update', text: '符号输入正文段（',
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sync.test.composition', phase: 'end', text: '（' })
+    const completed = '符号输入正文段（）\n'
+    await poll('IME 提交补全写回权威文档', () => doc.getText() === completed ? true : undefined)
+    const state1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state1.appliedEdits - initial.appliedEdits === 1,
+      `补全应为一次写回，实际 ${state1.appliedEdits - initial.appliedEdits}`)
+    // 绘制层断言：补全产物在真宿主可见（不能只看 DOM 文本）
+    const painted = await waitViewState('symbol-input.md', (v) => v.paint?.textVisible === true)
+    assert(painted.paint!.textVisible === true, '补全后正文须在绘制层命中')
+
+    // 宿主撤销一笔整体恢复（不另设编辑器 history）
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'history.request', op: 'undo' })
+    await poll('撤销恢复原文', () => doc.getText() === source ? true : undefined)
+    assert(await doc.save(), '符号输入文档应可保存')
+    const bytes = Buffer.from(await vscode.workspace.fs.readFile(wsUri('symbol-input.md'))).toString('utf8')
+    assert(bytes === source, '保存后回读与权威一致')
+  }],
+
+  ['CRLF 文档符号补全保持行尾风格并保存（#123）', async () => {
+    await openWithEditor('symbol-crlf.md')
+    await waitSessionReady('symbol-crlf.md')
+    const uri = wsUri('symbol-crlf.md').toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri('symbol-crlf.md'))
+    const original = '标题一\r\n正文 A 行\r\n正文 B 行\r\n'
+    assert(doc.getText() === original, 'CRLF fixture 初始文本不符')
+
+    // 首行行尾提交起始引号（钩子候选写首行行尾；webview 侧 LF 坐标 3）
+    const at = '标题一'.length
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: at })
+    await waitViewState('symbol-crlf.md', (v) => v.selectionOffset === at)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sync.test.composition', phase: 'start', text: '' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'sync.test.composition', phase: 'update', text: '标题一【',
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sync.test.composition', phase: 'end', text: '【' })
+    const completed = '标题一【】\r\n正文 A 行\r\n正文 B 行\r\n'
+    await poll('CRLF 文档补全写回', () => doc.getText() === completed ? true : undefined)
+    assert(await doc.save(), 'CRLF 文档应可保存')
+    const bytes = Buffer.from(await vscode.workspace.fs.readFile(wsUri('symbol-crlf.md')))
+    assert(bytes.toString('utf8') === completed, '保存后行尾风格须保持 CRLF')
+    assert(!bytes.toString('utf8').includes('【】\n正文'), '不得出现裸 LF 混入')
+  }],
+
+  ['符号自动补全设置：关闭停用、重开面板保持、保存后回显（#123）', async () => {
+    await openWithEditor('symbol-input.md')
+    await waitSessionReady('symbol-input.md')
+    const uri = wsUri('symbol-input.md').toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri('symbol-input.md'))
+    const source = '符号输入正文段\n'
+
+    // 关闭设置：提交起始符号原样落文（无闭合补全）
+    await vscode.commands.executeCommand(CMD.setSettings, { 'editor.symbolAutocomplete': false })
+    const at = source.indexOf('正文段') + '正文段'.length
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: at })
+    await waitViewState('symbol-input.md', (v) => v.selectionOffset === at)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sync.test.composition', phase: 'start', text: '' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'sync.test.composition', phase: 'update', text: '符号输入正文段【',
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sync.test.composition', phase: 'end', text: '【' })
+    const uncompleted = '符号输入正文段【\n'
+    await poll('关闭后提交原样落文', () => doc.getText() === uncompleted ? true : undefined)
+
+    // 恢复默认开启并还原文档（撤销）
+    await vscode.commands.executeCommand(CMD.setSettings, { 'editor.symbolAutocomplete': true })
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, { kind: 'history.request', op: 'undo' })
+    await poll('撤销还原文档', () => doc.getText() === source ? true : undefined)
+
+    // 关闭面板重开：设置经 globalState 存活（重开后补全仍开 = 持久化回显的行为证据）。
+    // 先 reveal 确保目标面板是活动编辑器（closeActiveEditor 只关活动的）
+    await openWithEditor('symbol-input.md')
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await poll('面板关闭与会话释放', async () => {
+      const s = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+      return s?.found === false ? true : undefined
+    })
+    await openWithEditor('symbol-input.md')
+    await waitSessionReady('symbol-input.md')
+    const snapshot = (await vscode.commands.executeCommand(CMD.getSettings)) as Record<string, unknown>
+    assert(snapshot['editor.symbolAutocomplete'] === true, `重开后设置快照应回显开启，实际 ${JSON.stringify(snapshot)}`)
+    const uri2 = wsUri('symbol-input.md').toString()
+    // 等 webview 完全就绪（live 且文本同步）再驱动 IME 钩子；加稳定窗：
+    // 宿主缓存的 view.state 可能仍是旧面板的回报（重开面板的上报窗口）
+    await waitViewState('symbol-input.md', (v) => v.viewMode === 'live' && v.text === source)
+    await new Promise((r) => setTimeout(r, 1500))
+    // 面板全关后旧 TextDocument 引用可能停止同步：重开面板后重新获取
+    const reopened = await vscode.workspace.openTextDocument(wsUri('symbol-input.md'))
+    await vscode.commands.executeCommand(CMD.postToPanel, uri2, { kind: 'view.locate', offset: at })
+    await waitViewState('symbol-input.md', (v) => v.selectionOffset === at)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri2, { kind: 'sync.test.composition', phase: 'start', text: '' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri2, {
+      kind: 'sync.test.composition', phase: 'update', text: '符号输入正文段（',
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri2, { kind: 'sync.test.composition', phase: 'end', text: '（' })
+    await poll('重开后补全恢复生效', () => reopened.getText() === source.replace('正文段', '正文段（）') ? true : undefined)
+    await vscode.commands.executeCommand(CMD.injectMessage, uri2, { kind: 'history.request', op: 'undo' })
+    await poll('清理：撤销还原', () => reopened.getText() === source ? true : undefined)
+    if (reopened.isDirty) {
+      await reopened.save()
+    }
+  }],
 ]

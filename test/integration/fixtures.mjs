@@ -13,6 +13,9 @@ const UNDO3_DOC = '撤销守卫甲行\n撤销守卫乙行\n'
 const ACKORDER_DOC = '顺序观测起始行\n顺序观测第二行\n'
 const RESYNC_DOC = '重同步起始内容\n重同步第二段\n'
 const IME_ESC_DOC = 'A文B\n'
+// #123 符号输入辅助：单行正文（IME 钩子的候选写在首行行尾）；行内代码
+// 口径由 unit/browser 两层覆盖，不在集成侧设样本
+const SYMBOL_INPUT_DOC = '符号输入正文段\n'
 const CONFLICT_DOC = '第一段原文甲\n第二段原文乙\n'
 const SPLIT_CONFLICT_DOC = '分裂测试行一\n分裂测试行二\n'
 const HEADING_DOC = '# 顶部一级标题\n普通段落第一行内容\n普通段落第二行内容\n## 中部二级标题\n另一段普通内容结尾\n'
@@ -569,6 +572,9 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   writeFileSync(path.join(wsDir, 'ackorder.md'), ACKORDER_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'resync.md'), RESYNC_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'ime-escape.md'), IME_ESC_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'symbol-input.md'), SYMBOL_INPUT_DOC, 'utf8')
+  // #123 CRLF 补全用独立样本：crlf.md 会被早期坐标用例修改保存
+  writeFileSync(path.join(wsDir, 'symbol-crlf.md'), CRLF_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'conflict.md'), CONFLICT_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'splitconflict.md'), SPLIT_CONFLICT_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'heading.md'), HEADING_DOC, 'utf8')
