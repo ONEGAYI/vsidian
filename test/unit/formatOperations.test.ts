@@ -56,6 +56,23 @@ describe('格式操作的文本契约', () => {
       .toEqual({ text: '**加粗****普通**', selection: { anchor: 8 } })
   })
 
+  it('混合名贴邻：光标在 A 围栏终点、右侧是异名围栏起点时，贴邻取消左侧（#107 审查修复）', () => {
+    // 右向下降只进最右接触子树（右侧 StrongEmphasis 遮蔽，其内无 Emphasis 节点），
+    // 左侧同名 Emphasis to===pos 零间隙贴邻须回探接管取消；
+    // 旧行为取不到 active 误插空对，得坏文本 *em*****strong**
+    // 取消 *em* 删 [0,1)+[3,4) 单星对，三连星余二归 strong 开标记
+    expect(apply('*em***strong**', 'italic', 4)).toEqual({ text: 'em**strong**' })
+    expect(new MarkdownIt().renderInline('em**strong**')).toBe('em<strong>strong</strong>')
+    // 对称不回归：左侧异名、右侧同名贴邻仍右向命中取消（缝隙归右侧原则不变）
+    expect(apply('**bold***em*', 'italic', 8)).toEqual({ text: '**bold**em' })
+  })
+
+  it('闭标记起点的归属：光标恰在合并形态第一对闭标记起点时拆右对（#107 右向归属钉住）', () => {
+    // **加粗****普通** 的 **** 前半是加粗对的闭标记：光标 @4 落其起点，
+    // 零宽缝隙归右——拆「普通」一对、「加粗」保留（文档化确定性行为，不改实现）
+    expect(apply('**加粗****普通**', 'bold', 4)).toEqual({ text: '**加粗**普通' })
+  })
+
   it('前缀贴边同规则：包裹产物同样两态化，拆对只动光标所在对（#107）', () => {
     expect(apply('文**后**', 'bold', 0))
       .toEqual({ text: '**文****后**', selection: { anchor: 2 } })

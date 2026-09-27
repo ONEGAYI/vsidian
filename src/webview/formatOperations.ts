@@ -43,7 +43,12 @@ function matchingSpan(root: SyntaxNode, name: string, from: number, to: number):
  *  视为位于该围栏——贴邻即切换为取消。光标在节点终点处时该节点不在
  *  resolveInner 的祖先链里（半开区间不含终点），matchingSpan 放宽条件
  *  覆盖不了行尾侧，故独立按节点区间查找；多个贴邻候选时后者覆盖前者，
- *  与 nodesAt 的右向原则一致（缝隙归右侧围栏）。 */
+ *  与 nodesAt 的右向原则一致（缝隙归右侧围栏）。
+ *  右向下降只进最右接触子树（childBefore(pos+1) 取 from<=pos 的最右子节点）：
+ *  光标在左侧围栏终点、右侧紧接异名围栏起点时（`*em***strong**` @4 取
+ *  italic），异名子树遮蔽且其内无同名节点，左侧 to===pos 的同名贴邻不可达
+ *  ——此时回探 from<pos 的子树（childBefore(pos)），只认 to===pos 的零间隙
+ *  贴邻接管取消；回探仅在上面的右向查找落空后进行，不改变缝隙归右语义。 */
 function adjacentSpan(root: SyntaxNode, name: string, pos: number): SyntaxNode | null {
   let found: SyntaxNode | null = null
   const walk = (node: SyntaxNode): void => {
@@ -54,6 +59,14 @@ function adjacentSpan(root: SyntaxNode, name: string, pos: number): SyntaxNode |
     }
   }
   walk(root)
+  if (found) return found
+  const walkLeft = (node: SyntaxNode): void => {
+    if (node.name === name && node.to === pos) found = node
+    for (let child = node.childBefore(pos); child && child.to >= pos; child = child.prevSibling) {
+      walkLeft(child)
+    }
+  }
+  walkLeft(root)
   return found
 }
 
