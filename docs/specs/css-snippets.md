@@ -115,3 +115,4 @@ CSP 由 `buildEditorCsp`（`src/host/editorCsp.ts` 纯模块，词法契约 `tes
 
 只有 #128 当前标记 ready-for-agent；其余票等待前置完成。#134 与 #135 均为必交付。
 
+#141 工具栏双态切换按钮已升格公开入口：`view-toggle`（按钮本体 `.vsidian-view-toggle`，含 book/edit 图标子类）与 `mode-body`（body 模式类 `vsidian-mode-live`/`vsidian-mode-reading`，模式态类不伪造静态探针、进 chromeContract.test 豁免表）两条 chrome 域条目钉住，按钮本体在 chrome 探针表有静态探针（`#133` 集成用例自动断言真宿主渲染）；图标显隐属模式态行为，由浏览器套件按路径验证。`.vsidian-html-comment`（#139 Live 淡化）已按正文域条目 `html-comment` 登记（probe.css 探针 + `cssProbe.liveHtmlCommentDecorationColor` 采集 + 集成断言三处同源，无 Obsidian 别名不登别名表）。

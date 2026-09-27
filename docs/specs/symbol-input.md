@@ -82,3 +82,5 @@ CM6 keymap 与 transactionFilter 的顺序语义相反——keymap 按扩展数�
 ### 设置开关
 
 设置键 `editor.symbolAutocomplete`、`editor.symbolSelectionWrap`、`editor.symbolTabEscape` 三个独立布尔开关（均默认开）经各自 Compartment 热重配整组增删。
+
+#139 htmlComment 是首个**带取消分支的插入型操作**：登记 `FORMAT_OPERATIONS` 但不走 INLINE 表（与 wikilink/inlineMath 同类分派），取消分支自行实现——Lezer 实测行内注释节点为 `Comment`、整段（可跨行）为 `CommentBlock`，**不是 HTMLBlock**（那是真 HTML 块，其内注释不可达、不可取消，属允许边界）；空插形态固定 `<!-- -->`（带一个空格——`<!---->` 不解析为 Comment，升级 @lezer/markdown 时 `formatOperations.test.ts` 的 #139 describe 是哨兵）。阅读侧隐藏经 `htmlComment.ts` 的 `stripHtmlComments` 纯函数：**整段真删除（仅保留换行）**——行内不留空位（验收修复：等长空格替换在渲染折叠后残留可见空格，`单<!--注释-->词` 曾显示为 `单 词`）；坐标系安全的前提是全部锚点取行首/行尾偏移（readingBlocks 的 token.map 行号/env.lineStarts 均为原文坐标、查找走 state.doc 原文），新增行内坐标消费者前须先核对此前提，代码保护为保守超集（缩进 ≥4 空格/tab 行不剥，列表续行注释会被多保护——多保护优于误剥）。

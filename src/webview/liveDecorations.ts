@@ -57,6 +57,7 @@ import {
 import { resolveTaskToggleAtMarker } from './taskToggle'
 import { t } from '../shared/i18n'
 import { applyObsidianDomAlias } from '../shared/obsidianAlias'
+import { collectColumnSamples, tableGridTemplate } from './tableColumnWidth'
 import { parseFrontmatterTable, type FmTableModel } from '../shared/frontmatterTable'
 import { buildFrontmatterCardPlan } from './frontmatterDecorations'
 import {
@@ -298,16 +299,20 @@ function tableGridCellDeco(align: TableAlign | null): ReturnType<typeof Decorati
 
 /** 零宽空格仍须占一列；widget 仅在该行进入 CM6 视口时生成 DOM。
  *  导出供 localeRefreshContract 的直构等价形态用例（同 CodeCardHeaderWidget /
- *  LiveMathWidget 先例）；生产侧仍只经下方两个单例装饰实例发射。 */
+ *  LiveMathWidget 先例）；生产侧经下方 emptyTableCellDecoFor 的有限实例
+ *  缓存发射（active × 对齐的有限组合）。#142 起携带列对齐类（GFM 列对齐
+ *  应用到该列全部单元格，空格占位不例外）。 */
 export class EmptyTableCellWidget extends WidgetType {
-  constructor(private readonly active = false) { super() }
+  constructor(private readonly active = false, private readonly align: TableAlign | null = null) { super() }
   toDOM(): HTMLElement {
     const span = document.createElement('span')
     // 空格两态都带 tableGridEmpty 标记（换包扫描锚点，#101）；active 态
-    // 只是在其上叠加修饰类（CSS 光标呈现用），同词无独立文案
+    // 只是在其上叠加修饰类（CSS 光标呈现用），同词无独立文案；对齐类与
+    // 普通格的 tableGridCellDeco 同名（vsidian-table-grid-align-*）
+    const align = this.align ? ` vsidian-table-grid-align-${this.align}` : ''
     span.className = this.active
-      ? `${LIVE_CLASS_NAMES.tableGridCell} ${LIVE_CLASS_NAMES.tableGridEmpty} vsidian-table-grid-empty-active`
-      : `${LIVE_CLASS_NAMES.tableGridCell} ${LIVE_CLASS_NAMES.tableGridEmpty}`
+      ? `${LIVE_CLASS_NAMES.tableGridCell} ${LIVE_CLASS_NAMES.tableGridEmpty} vsidian-table-grid-empty-active${align}`
+      : `${LIVE_CLASS_NAMES.tableGridCell} ${LIVE_CLASS_NAMES.tableGridEmpty}${align}`
     span.setAttribute('aria-label', t('decor.emptyCell'))
     span.addEventListener('mousedown', (event) => {
       const view = EditorView.findFromDOM(span)
@@ -323,14 +328,28 @@ export class EmptyTableCellWidget extends WidgetType {
     return false
   }
 }
-const emptyTableCellDeco = Decoration.widget({ widget: new EmptyTableCellWidget() })
-const activeEmptyTableCellDeco = Decoration.widget({ widget: new EmptyTableCellWidget(true) })
+/** 空格占位 widget 装饰缓存：active × 对齐的有限组合，增量与全量产出相同实例 */
+const emptyCellDecos = new Map<string, ReturnType<typeof Decoration.widget>>()
+function emptyTableCellDecoFor(align: TableAlign | null, active: boolean): ReturnType<typeof Decoration.widget> {
+  const key = `${active}\u0000${align ?? ''}`
+  let deco = emptyCellDecos.get(key)
+  if (!deco) {
+    deco = Decoration.widget({ widget: new EmptyTableCellWidget(active, align) })
+    emptyCellDecos.set(key, deco)
+  }
+  return deco
+}
 
 type GridRowKind = 'header' | 'row'
 interface TableGridPlan {
   columns: number
   rows: Map<number, GridRowKind>
   delimiterLine: number
+  /** #142 列宽计划（grid-template-columns 值）：按表内容比例分配，同表各行共享 */
+  template: string
+  /** #142 逐行内容宽度样本缓存（行号 → 各列宽度）：IME 组合定稿时单行重折
+   *  叠出新计划，计划未变即可走单行恢复快路径（千行表性能契约） */
+  rowSamples: Map<number, number[]>
 }
 
 const tableGridStats = { planCalls: 0, rowsScanned: 0 }
@@ -345,6 +364,7 @@ export function getTableGridStats(): Readonly<typeof tableGridStats> {
 function tableGridPlan(doc: Text, table: SyntaxNode): TableGridPlan | null {
   tableGridStats.planCalls += 1
   const rows = new Map<number, GridRowKind>()
+  const rowSamples = new Map<number, number[]>()
   let delimiterLine = 0
   let columns = 0
   let headers = 0
@@ -370,25 +390,45 @@ function tableGridPlan(doc: Text, table: SyntaxNode): TableGridPlan | null {
   if (headers !== 1 || delimiterLine === 0 || columns === 0 || rows.size === 0) {
     return null
   }
+  const samples = new Array<number>(columns).fill(0)
   for (const lineNo of rows.keys()) {
     tableGridStats.rowsScanned += 1
-    if (!tableRowCellsForColumns(doc.line(lineNo).text, 0, columns)) {
+    const text = doc.line(lineNo).text
+    if (!tableRowCellsForColumns(text, 0, columns)) {
       return null
     }
+    const widths = collectColumnSamples([text], columns)
+    rowSamples.set(lineNo, widths)
+    for (let col = 0; col < columns; col++) {
+      if (widths[col]! > samples[col]!) {
+        samples[col] = widths[col]!
+      }
+    }
   }
-  return { columns, rows, delimiterLine }
+  // #142 列宽计划：表头与数据行的内容宽度样本（分隔行的对齐标记不参与）
+  const template = tableGridTemplate(samples)
+  return { columns, rows, delimiterLine, template, rowSamples }
 }
 
 const gridLineDecos = new Map<string, ReturnType<typeof Decoration.line>>()
+/** 行装饰实例缓存上限：列宽计划随内容变化产生新键（同表各行共享同键），
+ *  逐键缓存量与「编辑过的表格形态数」同阶——清空仅丢失实例复用（eq 暂时
+ *  失配触发一次重绘），不影响正确性；旧文档态不再被引用后条目即死数据 */
+const GRID_LINE_DECO_CACHE_LIMIT = 512
 function tableGridLineDeco(cls: string, kind: GridRowKind, plan: TableGridPlan): ReturnType<typeof Decoration.line> {
-  const key = `${cls}\u0000${kind}\u0000${plan.columns}`
+  const key = `${cls}\u0000${kind}\u0000${plan.columns}\u0000${plan.template}`
   let deco = gridLineDecos.get(key)
   if (!deco) {
+    if (gridLineDecos.size >= GRID_LINE_DECO_CACHE_LIMIT) {
+      gridLineDecos.clear()
+    }
     deco = Decoration.line({
       class: cls,
       attributes: {
         'data-vsidian-table-row': kind,
-        style: `--vsidian-table-columns: ${plan.columns}`,
+        // #142：列数（旧入口保留）+ 列宽计划（minmax 保底 + fr 占比）；
+        // 消费见 main.css 网格行规则（缺省回退等分）
+        style: `--vsidian-table-columns: ${plan.columns}; --vsidian-table-col-widths: ${plan.template}`,
       },
     })
     gridLineDecos.set(key, deco)
@@ -479,8 +519,8 @@ function emitTableRowMarks(
     if (grid) {
       out.push(cell.to > cell.from
         ? tableGridCellDeco(aligns?.[col] ?? null).range(cell.from, cell.to)
-        : (selection.ranges.some((range) => range.empty && range.head === cell.from)
-          ? activeEmptyTableCellDeco : emptyTableCellDeco).range(cell.from))
+        : emptyTableCellDecoFor(aligns?.[col] ?? null,
+          selection.ranges.some((range) => range.empty && range.head === cell.from)).range(cell.from))
       if (cell.to > cell.from && doc.sliceString(cell.to - 1, cell.to) === ' ') {
         out.push(tableGridPaddingDeco.range(cell.to - 1, cell.to))
       }
@@ -1331,20 +1371,36 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
           const stillRow = pipe >= 0 &&
             chainAt(value.tree, currentLine.from + pipe + 1).some((node) => node.name === 'TableRow')
           if (stillRow && tableRowCellsForColumns(currentLine.text, currentLine.from, oldPlan.columns)) {
-            // 取消等仍符合列数的净结果，只需恢复当前行的普通装饰。
-            const decos = value.decos.update({
-              filterFrom: currentLine.from,
-              filterTo: currentLine.to,
-              filter: () => false,
-              add: emitForRange(value.tree, doc, tr.state.selection, value.fm, lineNo, lineNo, value.gridPlans, value.fmModel),
-              sort: true,
-            })
-            return {
-              ...value,
-              decos,
-              gridSegments: updateGridSegments(value.gridSegments, tr.changes,
-                [{ from: currentLine.from, to: currentLine.to }], decos, doc),
-              compositionPreview: false,
+            // #142：组合净结果先以当前行的新宽度样本与逐行缓存折叠出新列宽
+            // 计划——计划未变（取消或宽度无影响的净结果）保持「仅恢复当前行」
+            // 快路径（千行表组合取消不全表扫描的性能契约）；计划变化才落整表
+            // 重发射（同表各行内联的 grid 计划必须一致，成本与一次常规键入的
+            // 表格重建同阶）。折叠是纯数值归并，不重扫行文本。
+            const freshRow = collectColumnSamples([currentLine.text], oldPlan.columns)
+            const merged = new Array<number>(oldPlan.columns).fill(0)
+            for (const [rowNo, widths] of oldPlan.rowSamples) {
+              const row = rowNo === lineNo ? freshRow : widths
+              for (let col = 0; col < oldPlan.columns; col++) {
+                if (row[col]! > merged[col]!) {
+                  merged[col] = row[col]!
+                }
+              }
+            }
+            if (tableGridTemplate(merged) === oldPlan.template) {
+              const decos = value.decos.update({
+                filterFrom: currentLine.from,
+                filterTo: currentLine.to,
+                filter: () => false,
+                add: emitForRange(value.tree, doc, tr.state.selection, value.fm, lineNo, lineNo, value.gridPlans, value.fmModel),
+                sort: true,
+              })
+              return {
+                ...value,
+                decos,
+                gridSegments: updateGridSegments(value.gridSegments, tr.changes,
+                  [{ from: currentLine.from, to: currentLine.to }], decos, doc),
+                compositionPreview: false,
+              }
             }
           }
           let first = oldPlan.delimiterLine
