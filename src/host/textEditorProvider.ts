@@ -50,7 +50,7 @@ import {
 import type { SettingsService } from './settingsService'
 import type { KeybindingService } from './keybindingService'
 import type { CssSnippetService } from './cssSnippetService'
-import { enabledSnippetFiles, type SnippetLinkList } from '../shared/cssSnippets'
+import type { SnippetLinkList } from '../shared/cssSnippets'
 import type { SettingsPageHandle } from './settingsPage'
 import { runDiagramExport } from './diagramExportHost'
 import { installHostLocale, LOCALE_MESSAGES, type LocaleCode } from '../shared/locales'
@@ -192,25 +192,29 @@ function editorResourceRoots(
 }
 
 /**
- * #128 片段装载清单：宿主权威状态 × 开关映射 → 本面板可加载的 <link> URI
- * 有序清单。URI 由宿主逐面板构造（asWebviewUri 前缀是 webview 私有的随机
- * origin）；`?v=<version>` 缓存击穿参数保证「保存后自动更新」取到新内容
- * （webview 资源服务不承诺无缓存）。目录未配置/状态未就绪时为空清单。
+ * #128/#129 片段装载清单：宿主权威状态 × 开关映射 × 依赖分析（越界条目
+ * 排除）→ 本面板可加载的 <link> URI 有序清单。URI 由宿主逐面板构造
+ * （asWebviewUri 前缀是 webview 私有的随机 origin）；`?v=<v>` 缓存击穿
+ * 参数取**入口级版本**（#129 依赖归因：入口自身或其 @import 闭包变更时
+ * 推进，其他入口启停不扰动其 URI——webview 装配器按 URI diff 幂等跳过）
+ * 保证「保存后自动更新」取到新内容（webview 资源服务不承诺无缓存）。
+ * 目录未配置/状态未就绪时为空清单。
  */
 function buildSnippetLinkList(
   service: CssSnippetService | undefined,
   webview: vscode.Webview,
 ): SnippetLinkList {
   const state = service?.getState()
-  if (!state?.directory) {
+  if (!service || !state?.directory) {
     return { version: 0, snippets: [] }
   }
-  const directory = state.directory
+  const directoryUri = vscode.Uri.file(state.directory)
   return {
     version: state.version,
-    snippets: enabledSnippetFiles(state).map((name) => ({
+    snippets: service.getLinkItems().map(({ name, v }) => ({
       name,
-      uri: `${webview.asWebviewUri(vscode.Uri.joinPath(vscode.Uri.file(directory), name)).toString()}?v=${state.version}`,
+      uri: `${webview.asWebviewUri(vscode.Uri.joinPath(directoryUri, name)).toString()}?v=${v}`,
+      v,
     })),
   }
 }

@@ -97,6 +97,7 @@ export const en = {
   'cssSnippets.noDirectory': 'No snippets directory selected. Choose a folder; its first-level .css files become snippets (new files start disabled).',
   'cssSnippets.emptyDirectory': 'No .css files found in the first level of the selected directory.',
   'cssSnippets.readError': 'Failed to read the snippets directory. The list below is the last successful state; open editors keep the last applied styles.',
+  'cssSnippets.entryRejected': 'Rejected: references a path outside the snippets directory.',
 
   // ---- host.（宿主通知、确认框、QuickPick、链接拦截反馈）----
   'host.conflictInputCopied': 'Unconfirmed input copied to clipboard',
@@ -128,6 +129,8 @@ export const en = {
   /** #128 CSS 片段：宿主侧用户提示 */
   'host.cssSnippetLoadFailed': 'Failed to load CSS snippet "{name}"; the last successful styles are kept.',
   'host.cssSnippetReadFailed': 'Failed to read the CSS snippets directory "{directory}".',
+  'host.cssSnippetRejectedEscape': 'CSS snippet "{name}" references "{path}", which is outside the snippets directory; loading it is rejected.',
+  'host.cssSnippetRejectedSymlink': 'CSS snippet "{name}" resolves through a link to "{path}", which is outside the snippets directory; loading it is rejected.',
   /** 运行时设置定义注册（测试钩子/懒注册）的拒绝原因 */
   'host.invalidSettingDefinition': 'Invalid definition: {definition}',
   'host.duplicateSettingKey': 'Setting key already exists: {key}',

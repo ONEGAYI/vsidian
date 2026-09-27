@@ -2166,10 +2166,34 @@ export class WebviewSyncController {
         .trim()
       readingVarProbe = value === '' ? null : value
     }
+    // #129 片段相对资源观测：@font-face 装载计数（字节级证据——字体按各自
+    // CSS 文件路径解析并真实拉取）与阅读容器背景图（图片解析锚点）
+    let documentFonts: { total: number; loaded: number } | null = null
+    try {
+      const fonts = document.fonts
+      if (fonts) {
+        let loaded = 0
+        for (const face of fonts) {
+          if (face.status === 'loaded') {
+            loaded += 1
+          }
+        }
+        documentFonts = { total: fonts.size, loaded }
+      }
+    } catch {
+      documentFonts = null
+    }
+    let readingBackgroundImage: string | null = null
+    if (this.readingContainer) {
+      const image = getComputedStyle(this.readingContainer).backgroundImage
+      readingBackgroundImage = image && image !== 'none' ? image : null
+    }
     return {
       liveHeadingDecorationColor: read(liveEl),
       readingHeadingDecorationColor: read(readingEl),
       readingVarProbe,
+      documentFonts,
+      readingBackgroundImage,
       liveStrongDecorationColor: read(liveStrong),
       liveInlineCodeDecorationColor: read(liveInlineCode),
       liveCodeLineDecorationColor: read(liveCodeLine),

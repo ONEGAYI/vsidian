@@ -88,6 +88,7 @@ describe('启用清单（enabledSnippetFiles）', () => {
   it('目录未配置时恒为空；已配置时按序输出启用文件', () => {
     const base: CssSnippetState = {
       directory: null, readError: false, entries: [{ name: 'a.css', enabled: true }], version: 3,
+      rejections: {},
     }
     expect(enabledSnippetFiles(base)).toEqual([])
     expect(

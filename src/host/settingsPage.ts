@@ -136,7 +136,8 @@ export function createSettingsPage(
           ready = true
           const state = snippets.getState()
           void current?.webview.postMessage({ kind: 'snippets.state', directory: state.directory,
-            readError: state.readError, version: state.version, entries: [...state.entries] })
+            readError: state.readError, version: state.version, entries: [...state.entries],
+            rejections: state.rejections })
         }
         return
       case 'snippets.chooseDirectory':
@@ -236,7 +237,8 @@ export function createSettingsPage(
       }
       const state = snippets.getState()
       void panel.webview.postMessage({ kind: 'snippets.state', directory: state.directory,
-        readError: state.readError, version: state.version, entries: [...state.entries] })
+        readError: state.readError, version: state.version, entries: [...state.entries],
+        rejections: state.rejections })
     },
   }
 }

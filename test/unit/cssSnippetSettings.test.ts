@@ -22,7 +22,13 @@ function makeSection(): { section: CssSnippetSettingsSection; sent: unknown[]; p
 /** 模拟宿主下发 snippets.state（经协议校验的正式形态） */
 function pushState(
   section: CssSnippetSettingsSection,
-  state: { directory: string | null; readError?: boolean; version?: number; entries?: Array<{ name: string; enabled: boolean }> },
+  state: {
+    directory: string | null
+    readError?: boolean
+    version?: number
+    entries?: Array<{ name: string; enabled: boolean }>
+    rejections?: Record<string, { reason: 'path-escape' | 'symlink-escape'; path: string }>
+  },
 ): void {
   const message = {
     kind: 'snippets.state',
@@ -30,6 +36,7 @@ function pushState(
     readError: state.readError ?? false,
     version: state.version ?? 1,
     entries: state.entries ?? [],
+    ...(state.rejections ? { rejections: state.rejections } : {}),
   }
   expect(isHostToWebview(message)).toBe(true)
   section.handleHostMessage(message)
@@ -112,6 +119,31 @@ describe('宿主状态回显与开关上送', () => {
     pushState(section, { directory: 'D:/empty', entries: [] })
     expect(parent.querySelector('.vsidian-css-snippets-status')?.textContent)
       .toBe(zhCn['cssSnippets.emptyDirectory'])
+  })
+
+  it('#129 被拒条目：行内提示（字典文案）+ title 携带逃逸路径；未拒条目无标记', () => {
+    const { section, parent } = makeSection()
+    pushState(section, {
+      directory: 'D:/snips',
+      entries: [
+        { name: 'bad.css', enabled: true },
+        { name: 'good.css', enabled: true },
+      ],
+      rejections: { 'bad.css': { reason: 'path-escape', path: 'D:/outside.css' } },
+    })
+    const marks = [...parent.querySelectorAll<HTMLElement>('.vsidian-css-snippets-item-rejected')]
+    expect(marks).toHaveLength(1)
+    expect(marks[0]!.textContent).toBe(zhCn['cssSnippets.entryRejected'])
+    expect(marks[0]!.title).toBe('D:/outside.css')
+    // 拒绝态解除后重渲染：标记消失
+    pushState(section, {
+      directory: 'D:/snips',
+      entries: [
+        { name: 'bad.css', enabled: true },
+        { name: 'good.css', enabled: true },
+      ],
+    })
+    expect(parent.querySelectorAll('.vsidian-css-snippets-item-rejected')).toHaveLength(0)
   })
 
   it('状态更新就地重渲染（同一 mount 点清空重建，不累积）', () => {

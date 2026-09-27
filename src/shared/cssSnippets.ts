@@ -25,6 +25,15 @@ export interface CssSnippetEntry {
   enabled: boolean
 }
 
+/** #129 条目拒绝信息：越界/符号链接逃逸（清单装配排除；设置页提示） */
+export interface CssSnippetRejection {
+  /** path-escape：词法越界（../ 逃逸、根相对、file: 等非片段资源面引用）；
+   *  symlink-escape：realpath 落在片段目录之外 */
+  reason: 'path-escape' | 'symlink-escape'
+  /** 逃逸目标路径（用户提示与诊断） */
+  path: string
+}
+
 /** 宿主权威状态（webview 无关）：设置页显示与编辑器清单装配共用 */
 export interface CssSnippetState {
   directory: string | null
@@ -32,14 +41,20 @@ export interface CssSnippetState {
   readError: boolean
   /** 第一层 .css 文件条目（确定性文件名排序） */
   entries: readonly CssSnippetEntry[]
-  /** 清单版本：每次成功重扫与开关/目录变更递增（webview URI 缓存击穿用） */
+  /** 清单版本：每次成功重扫与开关/目录变更递增（列表级消息拍；入口级
+   *  ?v= 击穿参数经宿主 getLinkItems 的入口级版本承载） */
   version: number
+  /** #129 被拒条目（name → 拒绝信息）：引用逃出片段目录的启用条目，
+   *  清单装配排除；编辑修复后自动清除。仅对启用条目分析 */
+  rejections: Record<string, CssSnippetRejection>
 }
 
 /** 编辑器 webview 的装载清单（宿主按面板 asWebviewUri 转换后经协议下发） */
 export interface SnippetLinkList {
   version: number
-  snippets: Array<{ name: string; uri: string }>
+  /** v：入口级缓存击穿版本（#129 依赖归因——入口自身或其依赖闭包变更时
+   *  推进；缺省回退列表版本，兼容仅列表级语义的旧装配方） */
+  snippets: Array<{ name: string; uri: string; v?: number }>
 }
 
 /** 目录第一层文件是否算独立片段：扩展名 .css（大小写不敏感） */

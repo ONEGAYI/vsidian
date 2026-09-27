@@ -86,6 +86,7 @@ export const zhCn: Record<MessageKey, string> = {
   'cssSnippets.noDirectory': '尚未选择片段目录。选择一个文件夹后，其第一层 .css 文件将作为片段（新文件默认关闭）。',
   'cssSnippets.emptyDirectory': '所选目录的第一层没有 .css 文件。',
   'cssSnippets.readError': '片段目录读取失败。下方清单为最近成功状态，已打开的编辑器保留最近应用的样式。',
+  'cssSnippets.entryRejected': '已拒绝：引用了片段目录外的路径。',
 
   // ---- host.（宿主消息）----
   'host.conflictInputCopied': '未确认输入已复制到剪贴板',
@@ -117,6 +118,8 @@ export const zhCn: Record<MessageKey, string> = {
   /** #128 CSS 片段：宿主侧用户提示 */
   'host.cssSnippetLoadFailed': 'CSS 片段「{name}」加载失败，已保留最近成功的样式。',
   'host.cssSnippetReadFailed': '读取 CSS 片段目录「{directory}」失败。',
+  'host.cssSnippetRejectedEscape': 'CSS 片段「{name}」引用了片段目录外的路径「{path}」，已拒绝加载。',
+  'host.cssSnippetRejectedSymlink': 'CSS 片段「{name}」经链接解析到片段目录外的「{path}」，已拒绝加载。',
   'host.invalidSettingDefinition': '非法定义：{definition}',
   'host.duplicateSettingKey': '设置键已存在：{key}',
 

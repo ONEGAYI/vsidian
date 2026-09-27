@@ -57,7 +57,7 @@ interface FakeSnippetFs extends CssSnippetFsPort {
 }
 
 function makeFs(initial: string[] | null = null): FakeSnippetFs {
-  const notifyRef = { notify: () => {} }
+  const notifyRef: { notify: (changedPath: string | null) => void } = { notify: () => {} }
   const port: FakeSnippetFs = {
     listing: initial,
     fail: false,
@@ -65,7 +65,7 @@ function makeFs(initial: string[] | null = null): FakeSnippetFs {
     watcherDirs: [],
     disposedWatchers: 0,
     pendingScan: null,
-    watcherEvents: () => notifyRef.notify(),
+    watcherEvents: () => notifyRef.notify(null),
     listCssFiles: async () => {
       port.scans += 1
       if (port.pendingScan) {
@@ -84,6 +84,10 @@ function makeFs(initial: string[] | null = null): FakeSnippetFs {
         }
       }
     },
+    // #129 依赖分析端口：默认无可读文本（条目照常入清单——装载成败由
+    // webview 回报），realpath 恒等（无符号链接）
+    readFileText: async () => null,
+    realpath: async (p) => p,
   }
   return port
 }
@@ -96,7 +100,7 @@ describe('初始状态与初次扫描', () => {
   it('未配置目录：空清单、无失败态，initialize 不触发扫描通知', async () => {
     const fs = makeFs(['a.css'])
     const svc = makeService(makeStorage(), fs)
-    expect(svc.getState()).toEqual({ directory: null, readError: false, entries: [], version: 0 })
+    expect(svc.getState()).toEqual({ directory: null, readError: false, entries: [], version: 0, rejections: {} })
     await svc.initialize()
     expect(fs.scans).toBe(0)
     expect(fs.watcherDirs).toEqual([])

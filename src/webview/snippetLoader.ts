@@ -15,7 +15,8 @@ import type { SnippetLinkList } from '../shared/cssSnippets'
 /** 片段链元素标记（data 属性承载片段名；测试与诊断的观测位） */
 export const SNIPPET_LINK_ATTR = 'data-vsidian-snippet'
 
-/** 单片段装载结果（回报告宿主：入口级加载成败可观测） */
+/** 单片段装载结果（回报告宿主：入口级加载成败可观测；version 为触发装
+ *  载的入口级版本 #129——清单条目缺省 v 时回退列表版本） */
 export interface SnippetLoadOutcome {
   name: string
   version: number
@@ -40,7 +41,6 @@ export class SnippetLoader {
   private readonly slots = new Map<string, SnippetSlot>()
   /** 最近一次 apply 的期望顺序（settled 链按此重排） */
   private order: string[] = []
-  private version = 0
 
   /**
    * 应用装载清单（全量 diff）：
@@ -50,8 +50,9 @@ export class SnippetLoader {
    * 3. settled 链按清单顺序重排（DOM 内移动已加载元素不重新取资源）。
    */
   apply(list: SnippetLinkList, onOutcome?: (outcome: SnippetLoadOutcome) => void): void {
-    this.version = list.version
     const desired = new Map(list.snippets.map((item) => [item.name, item.uri]))
+    // #129 入口级版本（装载回报关联键）：条目显式 v 优先，缺省回退列表版本
+    const itemVersions = new Map(list.snippets.map((item) => [item.name, item.v ?? list.version]))
     this.order = list.snippets.map((item) => item.name)
     // 1. 摘除不再需要的
     for (const [name, slot] of [...this.slots]) {
@@ -63,6 +64,7 @@ export class SnippetLoader {
     }
     // 2. 装配与热替换
     for (const { name, uri } of list.snippets) {
+      const itemVersion = itemVersions.get(name) ?? list.version
       let slot = this.slots.get(name)
       if (!slot) {
         slot = {}
@@ -104,7 +106,7 @@ export class SnippetLoader {
           link.remove()
           // 失败保留最近成功样式：settled 原样保留
         }
-        onOutcome?.({ name, version: this.version, ok })
+        onOutcome?.({ name, version: itemVersion, ok })
       }
       link.addEventListener('load', () => settle(true))
       link.addEventListener('error', () => settle(false))
