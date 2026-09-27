@@ -186,7 +186,11 @@ describe('实时预览：渲染态单击跳转，源码态普通单击编辑', (
       rendered.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }))
       view.contentDOM.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }))
       expect(sentOf(h, 'link.activate')).toHaveLength(0)
-      rendered.dispatchEvent(new MouseEvent('mousedown', { ctrlKey: true, bubbles: true, cancelable: true, clientX: 10, clientY: 10 }))
+      // #150 后格内 widget 嵌套在 cell span 内：普通单击经网格选区样式把
+      // 光标定位进格，链接随即显示源码——Ctrl+单击须在当前 DOM 元素上
+      // 触发（旧引用已随渲染态替换而分离，真实用户点击的也是当前元素）
+      const current = host.querySelector<HTMLElement>('.vsidian-table-grid-row .vsidian-link')!
+      current.dispatchEvent(new MouseEvent('mousedown', { ctrlKey: true, bubbles: true, cancelable: true, clientX: 10, clientY: 10 }))
       expect(sentOf(h, 'link.activate')).toHaveLength(1)
       view.dispatch({ selection: { anchor: text.indexOf('目标') } })
       expect(host.querySelectorAll('.vsidian-table-grid-row')).toHaveLength(2)

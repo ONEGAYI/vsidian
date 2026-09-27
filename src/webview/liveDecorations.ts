@@ -26,6 +26,7 @@
 import {
   Annotation,
   EditorSelection,
+  Prec,
   RangeSet,
   StateField,
   Text,
@@ -1402,7 +1403,17 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
     }
   },
   provide: (f) => [
-    EditorView.decorations.from(f, (s) => s.decos),
+    // #150 格位共存：mark 装饰源经 Prec.low 排到全部 widget 装饰源之后
+    // （decorations facet 的输入序即 RangeSet.spans 的 rank 序）。CM6 构建
+    // 行 DOM 时，replace widget 只会被 rank 不低于自己的活跃 mark 嵌套
+    // （rangeset activeForPoint 以 rank 过滤覆盖 mark）——默认序下本源先于
+    // liveLinks/liveMath 注册，格内双链/图片/公式 widget 便裸露成
+    // .cm-line（CSS grid 容器）直接子元素，各自多占一个格位，grid 自动
+    // 放置把后续单元格顶到多出的行。降序后 widget 连同其 cm-widgetBuffer
+    // 测量缓冲嵌套进覆盖它的 grid-cell mark span 内，含 widget 的行与普通
+    // 行的行级子元素构成等价（管道 ×3 + 单元格 span ×N），渲染保留且网格
+    // 不再错位。事件处理器与 StateField 本体不参与本调整，装配顺序不变。
+    Prec.low(EditorView.decorations.from(f, (s) => s.decos)),
     // `<br>` 的四个源字符是一个可见换行。将其设为原子范围，退格时
     // 一次合行，方向键也不会钻进不可见的 <、b、r、> 中间。
     EditorView.atomicRanges.of((view) => {
