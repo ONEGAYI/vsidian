@@ -1281,6 +1281,7 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='blockMath'] { 
   appearance: none;
   -webkit-appearance: none;
   display: inline-block;
+  position: relative;
   width: 0.85em;
   height: 0.85em;
   /* 右缘→正文 的空隙对齐普通列表行「圆点墨迹右缘→正文」（= 圆点
@@ -1302,13 +1303,19 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='blockMath'] { 
   border-color: var(--vscode-focusBorder, #4fc1ff);
 }
 
+/* 对勾铺满盒内并 flex 双向居中：✓ 字形基线随字体浮动，inline-block
+   基线对齐在小盒内锚点偏左下（#121 验收修复） */
 #app .cm-editor .cm-scroller .vsidian-task-checkbox:checked::after,
 #app .cm-editor .cm-scroller .vsidian-task-checkbox.vsidian-task-checked::after {
   content: '✓';
   color: var(--vscode-settings-checkboxForeground, #ffffff);
   font-size: 0.8em;
   line-height: 1;
-  display: inline-block;
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* 键盘可达（#9）：Tab 聚焦任务 checkbox 时的可见焦点框 */
