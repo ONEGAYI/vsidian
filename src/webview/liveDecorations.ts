@@ -1139,9 +1139,15 @@ function planRebuildSpans(
   }
 
   if ((fmDirty && (newFm !== null || oldFm !== null)) || !sameRange(newFm, oldFm)) {
+    // 旧 fm 端点映射到新坐标再取行号——fm 前方插入/删除行时旧行号已偏移
+    // （#140 外部在头区前插行的场景实测暴露：未映射时清理范围不足，
+    // 成型装饰残留在偏移后的行上）
+    const oldEndMapped = oldFm
+      ? tr.changes.mapPos(Math.min(oldFm.end, oldDoc.length), 1)
+      : 0
     const lastLine = Math.max(
       newFm ? doc.lineAt(Math.min(newFm.end, doc.length)).number : 0,
-      oldFm ? oldDoc.lineAt(Math.min(oldFm.end, oldDoc.length)).number : 0,
+      oldFm ? doc.lineAt(Math.min(oldEndMapped, doc.length)).number : 0,
     )
     spans.push({ fromLine: 1, toLine: Math.max(1, Math.min(lastLine, doc.lines)) })
   }
