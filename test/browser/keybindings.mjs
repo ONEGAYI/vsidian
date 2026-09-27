@@ -5,15 +5,14 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { mkdir } from 'node:fs/promises'
-import { build } from 'esbuild'
-import { chromium } from 'playwright'
+import { build, artifactPath, chromium } from './runtime.mjs'
 import { buildZhLocaleIsland } from './localeIsland.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
-const output = path.join(root, 'out/test/browser/keybindings.js')
+const output = artifactPath(root, 'settings/main.js')
 await build({ entryPoints: [path.join(root, 'src/webview/settingsMain.ts')], bundle: true,
   outfile: output, format: 'iife' })
-const artifacts = path.join(root, 'out/task91')
+const artifacts = artifactPath(root, 'screenshots/keybindings')
 await mkdir(artifacts, { recursive: true })
 // 数据岛与宿主生成点同源；zhCn 为 zhCnMessages 的断言取词别名
 const { islandHtml, zhCnMessages: zhCn } = await buildZhLocaleIsland(root)

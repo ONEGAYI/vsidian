@@ -12,13 +12,12 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { build } from 'esbuild'
-import { chromium } from 'playwright'
+import { build, artifactPath, chromium } from './runtime.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
-const bundleBase = path.join(root, 'out/test/browser/outlineDragBoundary')
+const bundleBase = artifactPath(root, 'drag/main')
 await build({ entryPoints: [path.join(root, 'test/browser/outlineDragFixture.ts')],
-  bundle: true, outfile: `${bundleBase}.js`,
+  bundle: true, outfile: `${bundleBase}.js`, format: 'iife',
   loader: { '.svg': 'file' }, assetNames: 'assets/[name]' })
 
 const js = fs.readFileSync(`${bundleBase}.js`, 'utf8')

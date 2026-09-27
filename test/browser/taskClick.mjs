@@ -5,11 +5,10 @@
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { build } from 'esbuild'
-import { chromium } from 'playwright'
+import { build, artifactPath, chromium } from './runtime.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
-const output = path.join(root, 'out/test/browser/taskClick.js')
+const output = artifactPath(root, 'taskClick/taskClick.js')
 await build({ entryPoints: [path.join(root, 'test/browser/taskClickFixture.ts')],
   bundle: true, outfile: output, format: 'iife',
   loader: { '.svg': 'file' }, assetNames: 'assets/[name]' })
