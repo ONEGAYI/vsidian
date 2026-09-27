@@ -1531,6 +1531,20 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   color: var(--vscode-errorForeground, rgba(229, 57, 53, 1));
 }
 
+/* 删除按钮确认态（两段式二次确认）：首次点击后图标换「确认删除」文字、
+   错误色底提示，2.5s 超时还原（JS 控制）；再次点击执行删除 */
+.vsidian-fm-pop-remove.vsidian-fm-pop-remove-armed {
+  width: auto;
+  padding: 0 8px;
+  color: var(--vscode-errorForeground, rgba(229, 57, 53, 1));
+  background: color-mix(in srgb, var(--vscode-errorForeground, rgba(229, 57, 53, 1)) 12%, transparent);
+}
+
+.vsidian-fm-pop-remove.vsidian-fm-pop-remove-armed:hover {
+  color: var(--vscode-errorForeground, rgba(229, 57, 53, 1));
+  background: color-mix(in srgb, var(--vscode-errorForeground, rgba(229, 57, 53, 1)) 20%, transparent);
+}
+
 .vsidian-fm-pop-add-item {
   justify-self: start;
   display: inline-flex;

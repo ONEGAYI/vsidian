@@ -196,8 +196,17 @@ try {
     await page.keyboard.type('!')
     assert.ok((await page.evaluate(() => window.fmDoc())).includes('- alpha!'),
       '数组项在浮层内键入应回流源文本')
-    // 删除末项（第二个项删除按钮）
-    await page.locator('.vsidian-fm-pop-remove').nth(2).click()
+    // 删除末项（第二个项删除按钮）：两段式二次确认——首次点击只进入
+    // 确认态（垃圾桶换「确认删除」文字、错误色），文档不变；再次点击执行
+    const delBtn = page.locator('.vsidian-fm-pop-remove').nth(2)
+    await delBtn.click()
+    assert.equal(await delBtn.evaluate((el) =>
+      el.classList.contains('vsidian-fm-pop-remove-armed')), true,
+      '首次点击删除按钮应进入确认态（不删除）')
+    assert.equal(await delBtn.textContent(), '确认删除', '确认态按钮文字（i18n）')
+    assert.equal(await page.evaluate(() => window.fmDoc()),
+      '---\ntags:\n  - alpha!\n  - beta\n---\n\n正文。\n', '首次点击不得删除')
+    await delBtn.click()
     assert.equal(await page.evaluate(() => window.fmDoc()),
       '---\ntags:\n  - alpha!\n---\n\n正文。\n', '删除末项应移除整项行')
     assert.equal(await page.locator('.vsidian-fm-row').count(), 2, '删除后宿主行 + 单项行')

@@ -371,6 +371,7 @@ export const en = {
   'frontmatter.itemAriaLabel': 'List item',
   'frontmatter.addProperty': 'Add property',
   'frontmatter.removeProperty': 'Delete property',
+  'frontmatter.removeConfirm': 'Confirm delete',
   'frontmatter.addItem': 'Add list item',
   'frontmatter.removeItem': 'Delete list item',
   'frontmatter.empty': 'No properties yet',

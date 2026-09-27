@@ -1295,17 +1295,24 @@ export class WebviewSyncController {
           at(all<HTMLButtonElement>(`.${FM_POPOVER_CLASS_NAMES.addItem}`), message.index ?? 0)?.click()
           break
         }
+        // 删除按钮两段式二次确认（产品行为）：钩子驱动完整流程——首击
+        // 武装确认态、再击执行；用例断言「删除后状态」不因确认步骤改变
+        const clickRemoveConfirmed = (btn: HTMLButtonElement | null | undefined): void => {
+          if (!btn) return
+          btn.click()
+          btn.click()
+        }
         if (message.action === 'popover-remove-entry') {
           const entries = all<HTMLElement>(`.${FM_POPOVER_CLASS_NAMES.entry}`)
           const entry = at(entries, message.index ?? 0)
-          entry?.querySelector<HTMLButtonElement>(
-            `:scope > .${FM_POPOVER_CLASS_NAMES.row} > .${FM_POPOVER_CLASS_NAMES.remove}`)?.click()
+          clickRemoveConfirmed(entry?.querySelector<HTMLButtonElement>(
+            `:scope > .${FM_POPOVER_CLASS_NAMES.row} > .${FM_POPOVER_CLASS_NAMES.remove}`))
           break
         }
         const itemRemoves = all<HTMLElement>(`.${FM_POPOVER_CLASS_NAMES.itemRow}`)
           .map((row) => row.querySelector<HTMLButtonElement>(`.${FM_POPOVER_CLASS_NAMES.remove}`))
           .filter((btn): btn is HTMLButtonElement => btn !== null)
-        at(itemRemoves, message.index ?? 0)?.click()
+        clickRemoveConfirmed(at(itemRemoves, message.index ?? 0))
         break
       }
       case 'view.test.click': {

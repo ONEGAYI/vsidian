@@ -187,6 +187,19 @@ function clickPopoverButton(cls: string, index = 0): void {
   btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
 }
 
+/** 删除按钮两段式二次确认：首击进确认态（断言武装类在场），再击执行 */
+function confirmRemoveButton(index = 0): void {
+  const btns = document.querySelectorAll<HTMLButtonElement>(
+    `.${FM_POPOVER_CLASS_NAMES.popover} .${FM_POPOVER_CLASS_NAMES.remove}`)
+  const btn = btns[index]
+  if (!btn) throw new Error('Popover 删除按钮不在场')
+  btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+  if (!btn.classList.contains(FM_POPOVER_CLASS_NAMES.removeArmed)) {
+    throw new Error('首击删除按钮应进入确认态（armed 类）')
+  }
+  btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+}
+
 describe('成型与降级切换（只读表格）', () => {
   it('合法头区渲染标题栏与两列网格：修改按钮在场，行内无结构按钮', () => {
     const view = makeFmView(FM_DOC)
@@ -352,7 +365,7 @@ describe('Popover 编辑（结构操作与即时写回）', () => {
     typeInto(popInput(FM_POPOVER_CLASS_NAMES.item, 0), 'alpha!')
     expect(view.state.doc.toString()).toContain('  - alpha!')
     // 删首项（alpha!）：只剩 beta
-    clickPopoverButton(FM_POPOVER_CLASS_NAMES.remove, 1) // 0=删行 1=首项删
+    confirmRemoveButton(1) // 0=删行 1=首项删
     expect(view.state.doc.toString()).toBe(
       ['---', 'tags:', '  - beta', '---', '', '正文。', ''].join('\n'))
     // 加项：末尾插入模板项
@@ -364,7 +377,7 @@ describe('Popover 编辑（结构操作与即时写回）', () => {
   it('删行按钮整组移除条目；添加属性按钮插入模板行并聚焦新行键框全选', () => {
     const view = makeFmView(FM_DOC, FM_DOC.length)
     clickEditButton(view)
-    clickPopoverButton(FM_POPOVER_CLASS_NAMES.remove, 0)
+    confirmRemoveButton(0)
     expect(view.state.doc.toString()).toBe(FM_DOC.replace('title: hello\n', ''))
     // 添加属性：新行 + 焦点落新键框全选（直接键入覆盖默认键名）
     clickPopoverButton(FM_POPOVER_CLASS_NAMES.add, 0)
@@ -422,7 +435,7 @@ describe('出站链路（控制器级）', () => {
     expect(view.contentDOM.querySelectorAll('.vsidian-fm-row')).toHaveLength(2)
     // 删行按钮：一笔写回
     const before = linked.doc.applyCalls.length
-    clickPopoverButton(FM_POPOVER_CLASS_NAMES.remove, 1)
+    confirmRemoveButton(1)
     await settle()
     expect(linked.doc.getText()).toContain('title: hello world')
     expect(linked.doc.applyCalls.length).toBe(before + 1)

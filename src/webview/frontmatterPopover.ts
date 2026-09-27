@@ -65,6 +65,8 @@ export const FM_POPOVER_CLASS_NAMES = {
   item: 'vsidian-fm-pop-item',
   /** 删除按钮（行 / 项共用） */
   remove: 'vsidian-fm-pop-remove',
+  /** 删除按钮确认态（两段式二次确认的武装标记） */
+  removeArmed: 'vsidian-fm-pop-remove-armed',
   /** 加项按钮 */
   addItem: 'vsidian-fm-pop-add-item',
   /** 底部操作区 */
@@ -77,7 +79,10 @@ export const FM_POPOVER_CLASS_NAMES = {
 
 const REMOVE_ICON =
   '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" ' +
-  'stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"></path></svg>'
+  'stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M2.5 4.5h11"></path><path d="M6.5 2.5h3"></path>' +
+  '<path d="M4 4.5l.7 8a1 1 0 0 0 1 .9h4.6a1 1 0 0 0 1-.9l.7-8"></path>' +
+  '<path d="M6.5 7.5v4M9.5 7.5v4"></path></svg>'
 
 const ADD_ICON =
   '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" ' +
@@ -136,13 +141,42 @@ function textInput(cls: string, value: string, label: string): HTMLInputElement 
   return input
 }
 
-function removeButton(label: string): HTMLButtonElement {
+/** 删除按钮（两段式二次确认）：首次点击进入确认态（图标换「确认删除」
+ *  文字、错误色提示），再次点击才执行；2.5s 超时还原图标，浮层全量重建
+ *  时按钮随 DOM 重建自然重置。防误删（撤销栈可回但用户未必知道）。 */
+function removeButton(label: string, onConfirm: () => void): HTMLButtonElement {
   const btn = document.createElement('button')
   btn.type = 'button'
   btn.className = FM_POPOVER_CLASS_NAMES.remove
   btn.innerHTML = REMOVE_ICON
   btn.title = label
   btn.setAttribute('aria-label', label)
+  const resetArmed = (): void => {
+    btn.classList.remove(FM_POPOVER_CLASS_NAMES.removeArmed)
+    btn.innerHTML = REMOVE_ICON
+    btn.title = label
+    btn.setAttribute('aria-label', label)
+  }
+  let armed = false
+  let timer = 0
+  btn.addEventListener('click', () => {
+    if (armed) {
+      window.clearTimeout(timer)
+      onConfirm()
+      return
+    }
+    armed = true
+    btn.classList.add(FM_POPOVER_CLASS_NAMES.removeArmed)
+    const confirmLabel = t('frontmatter.removeConfirm')
+    btn.textContent = confirmLabel
+    btn.title = confirmLabel
+    btn.setAttribute('aria-label', confirmLabel)
+    timer = window.setTimeout(() => {
+      armed = false
+      // 浮层已重建/关闭时按钮已脱树，只剩孤儿定时器，无需还原
+      if (btn.isConnected) resetArmed()
+    }, 2500)
+  })
   return btn
 }
 
@@ -205,8 +239,7 @@ function buildRows(p: FmPopoverState, model: FmTableModel): void {
       mainRow.appendChild(placeholder)
     }
 
-    const removeEntry = removeButton(t('frontmatter.removeProperty'))
-    removeEntry.addEventListener('click', () => {
+    const removeEntry = removeButton(t('frontmatter.removeProperty'), () => {
       const found = entryIndexOf(view, removeEntry)
       if (!found) return
       const plan = planRemoveFmEntry(found.model, found.index)
@@ -228,8 +261,7 @@ function buildRows(p: FmPopoverState, model: FmTableModel): void {
           if (plan) dispatchPlan(view, plan)
         })
         itemRow.appendChild(itemInput)
-        const removeItem = removeButton(t('frontmatter.removeItem'))
-        removeItem.addEventListener('click', () => {
+        const removeItem = removeButton(t('frontmatter.removeItem'), () => {
           const found = entryIndexOf(view, removeItem)
           if (!found) return
           const plan = planRemoveFmArrayItem(found.model, found.index, itemIndex)

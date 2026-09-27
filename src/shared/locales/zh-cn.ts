@@ -346,6 +346,7 @@ export const zhCn: Record<MessageKey, string> = {
   'frontmatter.itemAriaLabel': '列表项',
   'frontmatter.addProperty': '添加属性',
   'frontmatter.removeProperty': '删除属性',
+  'frontmatter.removeConfirm': '确认删除',
   'frontmatter.addItem': '添加列表项',
   'frontmatter.removeItem': '删除列表项',
   'frontmatter.empty': '暂无属性',
