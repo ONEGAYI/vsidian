@@ -683,6 +683,12 @@ export class WebviewSyncController {
    *  增量并存时经 base 系映射应用，不走触碰式保守暂停）；触碰未确认区间
    *  的暂缓为 false（与外部并存时保留 #4 的暂停口径）。出站/清空同步复位 */
   private deferredFromComposition = false
+  /** #148 undo 竞态守卫：本地存在未落地宿主的编辑时暂存的撤销/重做意图，
+   *  按按下序累积（键盘重复/连按不折叠）。此态下宿主撤销栈顶还不是这些
+   *  编辑，先发 history.request 会撤到更早的操作，迟到的本地编辑再经重定位
+   *  静默应用。待本地编辑全部落地确认后经 releasePendingHistory 按序发出；
+   *  进入冲突暂停时随 B-4 口径丢弃（暂停面板的撤销忽略，不补发） */
+  private pendingHistoryOps: ('undo' | 'redo')[] = []
   /** 已确认事务复合（定义域 = unconfirmed 定义域 = baseVersion 系）：
    *  外部增量（权威系坐标）先逆穿它平移回 base 系再穿未确认集（C-2），
    *  避免把「已含已确认编辑」的坐标当 base 系多平移 */
@@ -1135,6 +1141,10 @@ export class WebviewSyncController {
           if (this.inFlight.size === 0 && !this.hasBufferedSync()) {
             this.sendDeferredLocal()
           }
+          // #148：在途编辑全部确认且暂缓集已出站（sendDeferredLocal 发出的
+          // 新请求会留在 inFlight，下方释放自会判定继续等待）——此刻撤销
+          // 意图可安全发出
+          this.releasePendingHistory()
           break
         }
         // ok:false（conflict/error）：本地有未确认输入时保留文本并暂停；
@@ -1433,6 +1443,27 @@ export class WebviewSyncController {
           // 测试用浏览器内容可编辑输入路径；源码事务注入无法观测原生 DOM caret。
           if (document.activeElement !== this.view.contentDOM) this.view.focus()
           document.execCommand('insertText', false, message.text)
+        }
+        break
+      }
+      case 'table.test.history': {
+        // 测试钩子（#148）：直调撤销/重做转发入口（keymap 绑定由单元测试
+        // 钉住）。不派发 keydown——真宿主内 webview 会把按键事件转发给宿主
+        // 键绑定服务，合成 Ctrl+Z 会额外触发一次全局 undo（双撤销）
+        this.requestHistory(message.op)
+        break
+      }
+      case 'table.test.compose': {
+        // 测试钩子（#148）：派发合成 IME 组合序列——组合净输入攒入
+        // deferredLocal 暂缓出站，宿主测试以此驱动真实 webview 的组合
+        // 竞态窗口（宿主无法驱动真实 IME）
+        if (this.view && this.viewMode === 'live' && message.from <= this.view.state.doc.length) {
+          this.view.contentDOM.dispatchEvent(new CompositionEvent('compositionstart'))
+          this.view.dispatch({
+            changes: { from: message.from, insert: message.text },
+            userEvent: 'input.type.compose',
+          })
+          this.view.contentDOM.dispatchEvent(new CompositionEvent('compositionend'))
         }
         break
       }
@@ -1841,6 +1872,9 @@ export class WebviewSyncController {
       this.deferredFromComposition = false
     this.inFlight.clear()
     this.pendingExternal = []
+    // #148：持有的撤销/重做意图随之丢弃——暂停面板的撤销忽略（B-4），
+    // 恢复后不补发（补发会撤到用户无法预期的操作）
+    this.pendingHistoryOps = []
   }
 
   /**
@@ -1909,6 +1943,9 @@ export class WebviewSyncController {
         this.view?.dispatch({ selection: { anchor: pos } })
       }
     }
+    // #148：全文落地即权威基线（本地未落地编辑已被权威文本取代）——
+    // 撤销意图此刻发出，撤销的是宿主栈上最后已完成的操作
+    this.releasePendingHistory()
   }
 
   /** 解除暂停（doc.resync / init 全文装载后调用）：状态全量对齐 */
@@ -5040,6 +5077,9 @@ export class WebviewSyncController {
     this.refreshReading()
     this.baseVersion = Math.max(lastVersion, ackVersion ?? lastVersion)
     this.sendDeferredLocal()
+    // #148：缓冲收敛且暂缓集已出站（或本就无暂缓输入）——撤销意图可
+    // 安全发出（若 sendDeferredLocal 刚发出新请求，释放判定继续等待其 ack）
+    this.releasePendingHistory()
   }
 
   private scheduleFlush(): void {
@@ -5050,13 +5090,56 @@ export class WebviewSyncController {
     }
   }
 
-  /** 撤销/重做转发：宿主持有唯一权威栈，本地不装 history 扩展 */
+  /** 撤销/重做转发：宿主持有唯一权威栈，本地不装 history 扩展。
+   *  #148 竞态守卫：本地还有未落地宿主的编辑时（在途未确认请求、IME/触碰
+   *  暂缓集、未确认坐标链任一非空）不立即发出——宿主队列按到达序串行，
+   *  此刻 undo/redo 撤到的是更早的操作，迟到的本地编辑再经重定位静默应用。
+   *  意图按下序暂存，待全部落地后由 releasePendingHistory 发出；暂停面板
+   *  不持有（B-4 口径不变：照发由宿主忽略）。 */
   private requestHistory(op: 'undo' | 'redo'): boolean {
     if (!this.sessionId) {
       return false // 未初始化：让事件继续传播（defaultKeymap 的本地 no-op undo）
     }
+    if (!this.suspended && this.hasUnlandedLocalEdits()) {
+      this.pendingHistoryOps.push(op)
+      // 主动推进出站（暂缓集/缓冲有 flush 定时兜底，这里确保已调度）
+      this.scheduleFlush()
+      return true
+    }
     this.bridge.postMessage({ kind: 'history.request', op })
     return true
+  }
+
+  /** #148：本地是否存在尚未落地宿主的编辑。在途未确认请求（inFlight/
+   *  sentTxns）、IME/触碰暂缓集（deferredLocal）、未确认坐标链（unconfirmed/
+   *  ackedChain）、组合中未定稿输入或待 flush 的缓冲任一非空即真。 */
+  private hasUnlandedLocalEdits(): boolean {
+    return this.inFlight.size > 0 ||
+      this.sentTxns.length > 0 ||
+      this.deferredLocal !== null ||
+      this.unconfirmed !== null ||
+      this.ackedChain !== null ||
+      this.composing ||
+      this.blankComposition !== null ||
+      this.hasBufferedSync()
+  }
+
+  /** #148：本地编辑全部落地宿主后，发出暂存的撤销/重做意图。释放点为
+   *  「已落地」状态的收敛处：edit.ack 确认、组合/缓冲 flush 完成、全文
+   *  重同步落地。发出后宿主队列保证 history.request 排在刚落地的
+   *  edit.request 之后，撤销的必然是最后一次已完成的编辑。 */
+  private releasePendingHistory(): void {
+    if (this.pendingHistoryOps.length === 0) {
+      return
+    }
+    if (this.suspended || this.hasUnlandedLocalEdits()) {
+      return
+    }
+    const ops = this.pendingHistoryOps
+    this.pendingHistoryOps = []
+    for (const op of ops) {
+      this.bridge.postMessage({ kind: 'history.request', op })
+    }
   }
 
   private replaceDoc(text: string): void {

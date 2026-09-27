@@ -54,15 +54,20 @@ try {
       '点击 checkbox 不得把焦点抢到 input 上')
     // 点击切换事务走标准编辑链：Ctrl+Z 出站 history.request（权威撤销栈
     // 在宿主文本管线，webview 本地不装 history 扩展——集成测试覆盖宿主侧
-    // 撤销；此处验证真实点击后撤销链路可达）
+    // 撤销；此处验证真实点击后撤销链路可达）。#148 竞态守卫：勾选请求
+    // 在途未确认时撤销意图暂存，确认后才出站——宿主可见顺序恒为
+    // edit.request 先于 history.request
     await page.keyboard.press('Control+z')
     assert.deepEqual(await page.evaluate(() => window.taskSent()
-      .filter((m) => m.kind === 'history.request').map((m) => m.op)), ['undo'],
-    'Ctrl+Z 应经 keymap 出站 history.request（undo）')
+      .filter((m) => m.kind === 'history.request').map((m) => m.op)), [],
+    '#148 守卫：勾选请求在途未确认时 Ctrl+Z 意图应暂存不出站')
     // 模拟宿主撤销广播回流（外部增量还原勾选）：checkbox 应回到未勾选。
     // 权威串行管线：先确认在途勾选请求（undo 广播只会在确认后发生）
     await page.evaluate(() => window.controller.handleHostMessage(
       { kind: 'edit.ack', seq: 1, ok: true, version: 2 }))
+    assert.deepEqual(await page.evaluate(() => window.taskSent()
+      .filter((m) => m.kind === 'history.request').map((m) => m.op)), ['undo'],
+    '确认后撤销意图应按序出站 history.request（undo）')
     await page.evaluate((off) => window.controller.handleHostMessage(
       { kind: 'doc.changed', version: 3, origin: 'external',
         changes: [{ offset: off, length: 3, text: '[ ]' }] }), text.indexOf('['))

@@ -278,13 +278,17 @@ try {
         await page.waitForFunction((count) => window.readHostMessages().filter((message) => message.kind === 'edit.request').length >= count,
           cycle + 1)
         await page.keyboard.press('Control+z')
-        const requests = await page.evaluate(() => window.readHostMessages().filter((message) => message.kind === 'history.request'))
-        assert.equal(requests.length, cycle + 1, 'Ctrl+Z 发往宿主')
+        // #148 竞态守卫：包裹编辑在途未确认时撤销意图暂存，确认后才出站
+        // ——宿主可见顺序恒为 edit.request 先于 history.request
+        assert.equal(await page.evaluate(() => window.readHostMessages().filter((message) => message.kind === 'history.request').length),
+          cycle, '#148 守卫：在途包裹请求未确认时 Ctrl+Z 意图应暂存不出站')
         const undoChanges = cdp
           ? [{ offset: 6, length: 6, text: 'text' }]
           : [{ offset: 6, length: 1, text: '' }, { offset: 11, length: 1, text: '' }]
         await page.evaluate(({ changes, version }) => window.ackAndExternalUndo(changes, version),
           { changes: undoChanges, version: 2 + cycle * 2 })
+        assert.equal(await page.evaluate(() => window.readHostMessages().filter((message) => message.kind === 'history.request').length),
+          cycle + 1, '确认后撤销意图应按序发往宿主')
         await checkRanges(page, 'hello text', [{ from: 6, to: 10 }], `第 ${cycle + 1} 次撤销`)
       }
     })
