@@ -104,6 +104,15 @@ export const CODEBLOCK_HIGHLIGHT_KEY = 'codeblock.highlight'
 export const CODEBLOCK_HIGHLIGHT_DEFAULT = true
 
 /**
+ * #123「符号自动补全」开关：实时预览正文中键入起始符号自动补入闭合
+ * 符号（含闭合越过与自动空对退格删除，注册表见 shared/symbols）。
+ * 关闭后三条路径（补全/越过/空对删除）一并停用。#124 选区包裹与
+ * #125 Tab 越界为另外两个独立布尔键（规格三独立开关）。
+ */
+export const SYMBOL_AUTOCOMPLETE_KEY = 'editor.symbolAutocomplete'
+export const SYMBOL_AUTOCOMPLETE_DEFAULT = true
+
+/**
  * 语言设置键（#93 预留，#96 注册定义与「常规」分区）：值域 auto | zh-cn |
  * en（StringEnumSettingDefinition），解析与语言包装配见 shared/locales。
  * 键常量先行导出——宿主 HTML 生成点读取快照中的该键决定注入语言（缺省
@@ -119,7 +128,8 @@ export const LANGUAGE_DEFAULT = 'auto'
  * 实际设置项「显示行号」（设置页自此渲染真实开关），#79 加入「代码块卡片」，
  * #80 加入「卡内行号」，#81 加入「复制按钮」，#83 加入「语法高亮」，#96
  * 加入「界面语言」（首个 string 枚举项，归属设置页「常规」分组——键前缀
- * general.* 的定义渲染进常规分组，见 settingsPageView 分组规则）。
+ * general.* 的定义渲染进常规分组，见 settingsPageView 分组规则），#123
+ * 加入「符号自动补全」。
  * #95 i18n 起文案字段键化（titleKey/descriptionKey → 字典 setting.*），
  * 注册表不再含用户可见字面量。
  */
@@ -170,6 +180,13 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     default: CODEBLOCK_HIGHLIGHT_DEFAULT,
     titleKey: 'setting.codeblockHighlight.title',
     descriptionKey: 'setting.codeblockHighlight.description',
+  },
+  {
+    key: SYMBOL_AUTOCOMPLETE_KEY,
+    type: 'boolean',
+    default: SYMBOL_AUTOCOMPLETE_DEFAULT,
+    titleKey: 'setting.symbolAutocomplete.title',
+    descriptionKey: 'setting.symbolAutocomplete.description',
   },
 ]
 

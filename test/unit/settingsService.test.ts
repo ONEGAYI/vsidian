@@ -43,7 +43,7 @@ function makeStorage(writes: Array<{ key: string; value: unknown }> = []): Setti
 }
 
 describe('快照读取', () => {
-  it('生产注册表（#34 起）：快照为定义默认值（五开关均开 + 语言 auto）', () => {
+  it('生产注册表（#34 起）：快照为定义默认值（六开关均开 + 语言 auto）', () => {
     const svc = new SettingsService(makeStorage(), PRODUCTION_SETTING_DEFINITIONS)
     expect(svc.getSnapshot()).toEqual({
       'general.language': 'auto',
@@ -52,6 +52,7 @@ describe('快照读取', () => {
       'codeblock.lineNumbers': true,
       'codeblock.copyButton': true,
       'codeblock.highlight': true,
+      'editor.symbolAutocomplete': true,
     })
   })
 

@@ -67,6 +67,10 @@ export const zhCn: Record<MessageKey, string> = {
   'setting.codeblockCopyButton.description': '卡片头部悬停显示复制按钮，点击复制整块代码（不含围栏行）。需开启「代码块卡片」。',
   'setting.codeblockHighlight.title': '语法高亮',
   'setting.codeblockHighlight.description': '代码块内容按语言着色（卡片关闭时朴素围栏同样生效；未识别语言回退纯文本）。',
+  /** 设置项「符号自动补全」（#123 editor.symbolAutocomplete） */
+  'setting.symbolAutocomplete.title': '符号自动补全',
+  'setting.symbolAutocomplete.description':
+    '实时预览正文中键入起始符号时自动补入对应闭合符号（代码内括号引号照常配对，Markdown 强调符仅在连续串首触发）。紧贴自动补出的闭合符号再键入同一符号可直接越过，自动补出的空符号对内退格两侧同删。关闭后以上行为一并停用。',
   /** 设置项「界面语言」（#96 general.language，经 titleKey/descriptionKey 取词） */
   'setting.language.title': '界面语言',
   'setting.language.description':

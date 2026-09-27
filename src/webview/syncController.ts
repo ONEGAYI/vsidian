@@ -62,6 +62,8 @@ import {
   CODEBLOCK_LINE_NUMBERS_KEY,
   SHOW_LINE_NUMBERS_DEFAULT,
   SHOW_LINE_NUMBERS_KEY,
+  SYMBOL_AUTOCOMPLETE_DEFAULT,
+  SYMBOL_AUTOCOMPLETE_KEY,
   type SettingsPayload,
 } from '../shared/settings'
 import { onLocaleChanged, t } from '../shared/i18n'
@@ -155,6 +157,7 @@ import { locateOutlineIndex } from './outlineLocate'
 import { resolveStaleTaskToggle } from './taskToggle'
 import { VirtualReadingView } from './readingVirtualView'
 import { blankRowInputPlan, runCreateTable, runTableEdit, tableEditing, tableRowsAt } from './tableEditing'
+import { symbolAutocomplete } from './symbolAutocomplete'
 import { listEditing } from './listEditing'
 import { indentEditing } from './indentEditing'
 import { selectTableRegion, tableRegionField } from './tableRegionSelection'
@@ -616,6 +619,11 @@ export class WebviewSyncController {
   /** 卡片扩展的运行时配置通道（extensions 装配点） */
   private readonly codeCardCompartment = new Compartment()
 
+  /** #123 符号自动补全开关（settings 快照到达时热重配 compartment；
+   *  关闭时补全/越过/空对删除三条路径一并退出装配） */
+  private symbolAutocompleteOn = SYMBOL_AUTOCOMPLETE_DEFAULT
+  private readonly symbolAutocloseCompartment = new Compartment()
+
   /** #84 阅读侧折叠集合：键 = 块 data-vsidian-src-start（视图态，不持久化；
    *  块卸载重挂载后经此恢复收起形态） */
   private readonly readingCodeFold = new Set<number>()
@@ -645,6 +653,10 @@ export class WebviewSyncController {
   /** 首笔无法安全逆投影的事务起，后续本地事务合并在同一待发 ChangeSet。
    *  定义域是所有已发送事务之后的本地文档，全部 ack 后可直接作为新请求。 */
   private deferredLocal: ChangeSet | null = null
+  /** deferredLocal 的来源标志（#123）：组合期间暂缓的净输入为 true（外部
+   *  增量并存时经 base 系映射应用，不走触碰式保守暂停）；触碰未确认区间
+   *  的暂缓为 false（与外部并存时保留 #4 的暂停口径）。出站/清空同步复位 */
+  private deferredFromComposition = false
   /** 已确认事务复合（定义域 = unconfirmed 定义域 = baseVersion 系）：
    *  外部增量（权威系坐标）先逆穿它平移回 base 系再穿未确认集（C-2），
    *  避免把「已含已确认编辑」的坐标当 base 系多平移 */
@@ -1036,6 +1048,7 @@ export class WebviewSyncController {
         this.settings = message.values
         this.applyLineNumbersSetting()
         this.applyCodeCardSetting()
+        this.applySymbolAutocompleteSetting()
         break
       case 'edit.ack': {
         if (this.suspended) {
@@ -1762,6 +1775,7 @@ export class WebviewSyncController {
     this.ackedChain = null
     this.sentTxns = []
     this.deferredLocal = null
+      this.deferredFromComposition = false
     this.inFlight.clear()
     this.pendingExternal = []
   }
@@ -1845,6 +1859,7 @@ export class WebviewSyncController {
     this.ackedChain = null
     this.sentTxns = []
     this.deferredLocal = null
+      this.deferredFromComposition = false
     this.pendingExternal = []
     this.pendingFull = undefined
     this.pendingVersionAck = undefined
@@ -4570,20 +4585,25 @@ export class WebviewSyncController {
       this.unconfirmed = this.unconfirmed ? this.unconfirmed.compose(changeSet) : changeSet
       return
     }
-    if (this.deferredLocal || (
+    if (this.composing || this.deferredLocal || (
       this.unconfirmed && touchesUnconfirmedChange(changes, chainSections(this.unconfirmed))
     )) {
       this.deferredLocal = this.deferredLocal
         ? this.deferredLocal.compose(changeSet)
         : changeSet
+      if (this.composing) {
+        this.deferredFromComposition = true
+      }
       this.unconfirmed = this.unconfirmed ? this.unconfirmed.compose(changeSet) : changeSet
-      // 组合期间不逐笔上报全文快照（#49）：IME 候选更新从第二笔起必然触碰
-      // 未确认区间进入本分支，逐笔 conflict.report 意味着大文档下每个候选
-      // 都全文序列化 + postMessage。组合结束 flush 后 deferredLocal 经
-      // sendDeferredLocal 以单笔 edit.request 出站、文本进入宿主权威文档，
-      // 取回语义由 VSCode 文本管线兜底；丢失窗口仅限组合进行中（候选未
-      // 上屏）快速关闭/断连，与 VSCode 原生编辑器同类行为一致。组合外
-      // （composing === false）的暂缓输入保持逐笔快照，取回兜底不放宽。
+      // 组合期间不逐笔上报全文快照（#49）：组合中的候选事务一律暂缓
+      // （#123 起含首笔——首笔立即出站会让组合结束点的符号补全成为第二
+      // 笔，破坏「一次补全一笔事务」），逐笔 conflict.report 意味着大文档
+      // 下每个候选都全文序列化 + postMessage。组合结束 flush 后
+      // deferredLocal 经 sendDeferredLocal 以单笔 edit.request 出站、文本
+      // 进入宿主权威文档，取回语义由 VSCode 文本管线兜底；丢失窗口仅限
+      // 组合进行中（候选未上屏）快速关闭/断连，与 VSCode 原生编辑器同类
+      // 行为一致。组合外（composing === false）的暂缓输入保持逐笔快照，
+      // 取回兜底不放宽。
       if (!this.composing) {
         this.reportConflictSnapshot()
       }
@@ -4636,6 +4656,7 @@ export class WebviewSyncController {
       return
     }
     this.deferredLocal = null
+    this.deferredFromComposition = false
     this.ackedChain = null
     this.sentTxns = []
     const changes: SerChange[] = []
@@ -4851,6 +4872,7 @@ export class WebviewSyncController {
       this.ackedChain = null
       this.sentTxns = []
       this.deferredLocal = null
+      this.deferredFromComposition = false
       this.replaceDoc(text)
       this.baseVersion = Math.max(version, ackVersion ?? version)
       this.lastDocChangedVersion = Math.max(this.lastDocChangedVersion, version)
@@ -4859,7 +4881,11 @@ export class WebviewSyncController {
     this.pendingExternal = []
     let lastVersion = this.baseVersion
     for (const group of groups) {
-      if (this.deferredLocal) {
+      if (this.deferredLocal && !this.deferredFromComposition) {
+        // 非组合的触碰式暂缓与外部并存：保留输入并暂停（#4 既有保守
+        // 口径，suspendResume/compositionBuffer 钉住）。组合暂缓净输入
+        // （#123 起含首笔）不在此列——它与 unconfirmed 同步复合、定义域
+        // 一致，经下方 base 系映射应用，真重叠由 mapped 判定兜底
         this.enterSuspended()
         return
       }
@@ -4889,7 +4915,9 @@ export class WebviewSyncController {
   }
 
   private scheduleFlush(): void {
-    if (this.flushTimer === undefined && (this.hasBufferedSync() || this.blankComposition)) {
+    // deferredLocal 计入（#123）：组合期间一律暂缓的本地净输入在
+    // compositionend 后也由 flush 定时出站（原先仅靠 edit.ack 到达兜底）
+    if (this.flushTimer === undefined && (this.deferredLocal || this.hasBufferedSync() || this.blankComposition)) {
       this.flushTimer = setTimeout(() => this.flushBufferedExternal(), 0)
     }
   }
@@ -4970,6 +4998,24 @@ export class WebviewSyncController {
     if (this.viewMode === 'reading') {
       this.decorateMountedReadingCodeCards()
     }
+  }
+
+  /**
+   * 应用符号自动补全设置（#123；settings.snapshot / settings.changed 到达时）：
+   * 缺键回定义默认、非布尔忽略（与行号同口径）。经 Compartment.reconfigure
+   * 增删 symbolAutocomplete 扩展组——关闭时输入 filter、闭合越过分支与
+   * 空对退格 keymap 一并退出装配（三条路径同门控），EditorView 不重建。
+   */
+  private applySymbolAutocompleteSetting(): void {
+    const raw = this.settings?.[SYMBOL_AUTOCOMPLETE_KEY]
+    const on = typeof raw === 'boolean' ? raw : SYMBOL_AUTOCOMPLETE_DEFAULT
+    if (on === this.symbolAutocompleteOn) {
+      return
+    }
+    this.symbolAutocompleteOn = on
+    this.view?.dispatch({
+      effects: this.symbolAutocloseCompartment.reconfigure(on ? symbolAutocomplete : []),
+    })
   }
 
   /** #84 增强单个阅读代码块（挂载钩子与重装饰共用入口） */
@@ -5989,6 +6035,12 @@ export class WebviewSyncController {
       // 表格单元格输入钩子（#12）：表格行内键入 | 转义写回 \|；
       // 编辑面即 CM6 源文本行，同步链路复用本控制器的标准出站路径
       tableEditing,
+      // #123 符号自动补全：置于 tableEditing 之后（扩展数组靠后者先
+      // 过滤/先匹配）——符号补全先于表格的空白行规范化与格区替换看到
+      // 事务（无选区单字符场景与它们互斥），Backspace 链先于表格删除
+      // 命令（自动空对是更具体的编辑器状态）；设置关闭时经
+      // symbolAutocloseCompartment 整组退出装配
+      this.symbolAutocloseCompartment.of(this.symbolAutocompleteOn ? symbolAutocomplete : []),
       // #119 列表/引用 Enter 前缀延续与退格清层：必须排在 tableEditing
       // 之后（表格上下文优先，格内 Enter 仍为 <br>）、extraExtensions 的
       // defaultKeymap 之前（先于通用键位拦截）

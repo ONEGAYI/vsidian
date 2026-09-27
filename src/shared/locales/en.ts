@@ -77,6 +77,10 @@ export const en = {
   'setting.codeblockCopyButton.description': 'Show a copy button on the card header on hover; click to copy the whole block (without fence lines). Requires "Code block card".',
   'setting.codeblockHighlight.title': 'Syntax highlighting',
   'setting.codeblockHighlight.description': 'Colorize code block content by language (also applies to plain fences when the card is off; unrecognized languages fall back to plain text).',
+  /** 设置项「符号自动补全」（#123 editor.symbolAutocomplete） */
+  'setting.symbolAutocomplete.title': 'Auto-close symbol pairs',
+  'setting.symbolAutocomplete.description':
+    'In live preview, typing an opening symbol also inserts its closing counterpart (brackets and quotes pair even inside code; Markdown emphasis triggers only at a run start). Typing the closing symbol again right after an auto-inserted one skips over it, and backspace inside an empty auto-inserted pair deletes both sides. Turn off to disable all of these.',
   /** 设置项「界面语言」（#96 general.language，经 titleKey/descriptionKey 取词） */
   'setting.language.title': 'Interface language',
   'setting.language.description':

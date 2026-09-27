@@ -11,6 +11,8 @@ import {
   PRODUCTION_SETTING_DEFINITIONS,
   SHOW_LINE_NUMBERS_DEFAULT,
   SHOW_LINE_NUMBERS_KEY,
+  SYMBOL_AUTOCOMPLETE_DEFAULT,
+  SYMBOL_AUTOCOMPLETE_KEY,
   applySettingsPatch,
   isSettingDefinition,
   sanitizeStoredSettings,
@@ -75,6 +77,21 @@ describe('生产注册表（#34 起含实际设置项；#95 文案键化）', ()
     expect(def.titleKey).toBe('setting.codeblockHighlight.title')
     expect(zhCn[def.titleKey as keyof typeof zhCn]).toBe('语法高亮')
     expect(isSettingDefinition(def)).toBe(true)
+  })
+
+  it('注册「符号自动补全」：键 editor.symbolAutocomplete、boolean、默认开启（#123）', () => {
+    const def = byKey('editor.symbolAutocomplete')
+    expect(def.type).toBe('boolean')
+    expect(def.default).toBe(true)
+    expect(def.titleKey).toBe('setting.symbolAutocomplete.title')
+    expect(def.descriptionKey).toBe('setting.symbolAutocomplete.description')
+    expect(zhCn[def.titleKey as keyof typeof zhCn]).toBe('符号自动补全')
+    expect(isSettingDefinition(def)).toBe(true)
+  })
+
+  it('键与消费方常量一致：符号自动补全经 SYMBOL_AUTOCOMPLETE_KEY 读同一键（#123）', () => {
+    expect(SYMBOL_AUTOCOMPLETE_KEY).toBe('editor.symbolAutocomplete')
+    expect(SYMBOL_AUTOCOMPLETE_DEFAULT).toBe(true)
   })
 
   it('键与消费方常量一致：webview/宿主经 SHOW_LINE_NUMBERS_KEY 读同一键', () => {
