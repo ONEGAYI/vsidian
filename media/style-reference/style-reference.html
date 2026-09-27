@@ -65,7 +65,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 </table>
 
   <section class="domain" data-domain="content">
-    <h1 style="font-size:19px;margin-bottom:4px">正文域（69 条）</h1>
+    <h1 style="font-size:19px;margin-bottom:4px">正文域（70 条）</h1>
 
     <h2>正文域 · 容器与视图（2）</h2>
     <article class="entry" id="container-live">
@@ -315,7 +315,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
     <article class="entry" id="live-quote-line">
       <h3><code>.vsidian-quote-line</code><span class="eid">live-quote-line</span></h3>
-      <p class="purpose">live 引用行（&gt; 前缀）；引用内容不额外 span 化（见 limit-quote-span）。</p>
+      <p class="purpose">live 引用行（&gt; 前缀）；引用内容不额外 span 化（见 limit-quote-span）。左缘 3px 提示竖条颜色见 var-quote-bar-color（与阅读 blockquote 同源）。</p>
       <p class="views"><span class="badge">实时预览</span> <span class="support support-direct">direct</span></p>
 <p class="states">状态：行首 &gt; 标记仅在标记及相邻空格附近显形。</p>
       <p class="obsidian">Obsidian 对应：.HyperMD-quote（Obsidian 引用行类）</p>
@@ -571,7 +571,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
     <article class="entry" id="reading-blockquote">
       <h3><code>.vsidian-reading-blockquote（块类）+ 内层 blockquote 标签</code><span class="eid">reading-blockquote</span></h3>
-      <p class="purpose">阅读引用块。</p>
+      <p class="purpose">阅读引用块。左边框 3px 提示竖条颜色见 var-quote-bar-color（与 live 引用行同源）。</p>
       <p class="views"><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
 
       <p class="obsidian">Obsidian 对应：.markdown-preview-view blockquote</p>
@@ -778,7 +778,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：集成「稳定样式契约」（#11）：阅读 a.vsidian-wikilink 命中 rgb(31, 32, 33)；集成「Obsidian 原名别名桥」：a.internal-link 命中；cssProbe.readingWikilinkDecorationColor / obsidianAliases[&quot;reading-wikilink&quot;]</p>
       <p class="life">引入：#11（2026-09-24）</p>
     </article>
-    <h2>正文域 · 公开 CSS 变量（8）</h2>
+    <h2>正文域 · 公开 CSS 变量（9）</h2>
     <article class="entry" id="var-heading-color">
       <h3><code>--vsidian-heading-color-{1..6}</code><span class="eid">var-heading-color</span></h3>
       <p class="purpose">标题层级色变量族：live 标题行级、阅读标题块级与大纲条目级三侧同引（主题分级着色一处定义多处生效）。默认 var(--vscode-editor-foreground)。</p>
@@ -853,6 +853,18 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <pre><code>:root { --text-highlight-bg: rgba(255, 208, 0, 0.4); }</code></pre>
       <p class="verify">验证：highlightPaintCssContract：三侧同引；obsidianAliasCssContract：变量桥形态（含浅色分支）</p>
       <p class="life">引入：#105（2026-09-27）</p>
+    </article>
+    <article class="entry" id="var-quote-bar-color">
+      <h3><code>--vsidian-quote-bar-color</code><span class="eid">var-quote-bar-color</span></h3>
+      <p class="purpose">引用块提示竖条色：live 引用行（.vsidian-quote-line 的 inset 竖条）与阅读 blockquote 左边框两侧同引。明显 accent 紫：暗色主题默认 #a78bfa、浅色 body.vscode-light 分支覆盖 #7c3aed；背景底仍走 --vscode-textBlockQuote-background（仅竖条换色，不新增紫色背景）。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：无（Obsidian 引用竖条由主题边框样式承担，无公开变量）</p>
+
+      <p class="dom">DOM 关系：定义于 #app（浅色分支 body.vscode-light）；自有变量，无 Obsidian 别名。</p>
+      <pre><code>:root { --vsidian-quote-bar-color: #c678dd; }</code></pre>
+      <p class="verify">验证：quoteBarCssContract：#app 定义 + 亮色覆盖 + 两侧同引（背景底不换色）；浏览器 quoteBarPaint：明暗主题 × 双视图 computed 竖条颜色一致且为紫</p>
+      <p class="life">引入：#143（2026-09-27）</p>
     </article>
     <article class="entry" id="var-table-background">
       <h3><code>--vsidian-table-background</code><span class="eid">var-table-background</span></h3>

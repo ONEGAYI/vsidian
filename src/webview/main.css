@@ -71,11 +71,19 @@ body {
      按用户决议切 Obsidian 式固定荧光黄，明暗主题各自调校（浅色由
      body.vscode-light 分支覆盖为不透明黄） */
   --vsidian-highlight-background: var(--text-highlight-bg, rgba(255, 208, 0, 0.35));
+  /* ---- #143 引用块提示竖条色：live 引用行与阅读 blockquote 两侧同引（同
+     heading-color 先例，一处定义多处生效）。明显 accent 紫（非灰紫）：暗色
+     主题默认 #a78bfa（浅紫，深底可辨），亮色主题 body.vscode-light 分支覆盖
+     #7c3aed（深紫，白底可辨）；背景底维持 VSCode 灰调变量（仅竖条换色）。
+     视觉验收微调色值后须同步写回规格初值（blockquote-accent-bar.md） */
+  --vsidian-quote-bar-color: #a78bfa;
 }
 
 /* #105 浅色主题高亮覆盖：白底上提高浓度与饱和度保证目视可辨 */
+/* #143 浅色主题引用竖条覆盖：白底上取深一档的紫（a78bfa 在白底对比不足） */
 body.vscode-light #app {
   --vsidian-highlight-background: var(--text-highlight-bg, #ffe066);
+  --vsidian-quote-bar-color: #7c3aed;
 }
 
 #app .cm-editor {
@@ -1159,7 +1167,7 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
 }
 
 #app .cm-editor .cm-scroller .vsidian-quote-line {
-  box-shadow: inset 3px 0 0 var(--vscode-textBlockQuote-border, rgba(128, 128, 128, 0.5));
+  box-shadow: inset 3px 0 0 var(--vsidian-quote-bar-color);
   background-color: var(--vscode-textBlockQuote-background, rgba(128, 128, 128, 0.08));
 }
 
@@ -1860,7 +1868,7 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
 #app .vsidian-view-reading .vsidian-reading-block blockquote {
   margin: 0.4em 0;
   padding: 0.1em 0.9em;
-  border-left: 3px solid var(--vscode-textBlockQuote-border, rgba(128, 128, 128, 0.5));
+  border-left: 3px solid var(--vsidian-quote-bar-color);
   background-color: var(--vscode-textBlockQuote-background, rgba(128, 128, 128, 0.08));
   color: var(--vscode-textBlockQuote-foreground, inherit);
 }

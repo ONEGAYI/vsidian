@@ -509,7 +509,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "line-syntax",
     "kind": "selector",
     "target": ".vsidian-quote-line",
-    "purpose": "live 引用行（> 前缀）；引用内容不额外 span 化（见 limit-quote-span）。",
+    "purpose": "live 引用行（> 前缀）；引用内容不额外 span 化（见 limit-quote-span）。左缘 3px 提示竖条颜色见 var-quote-bar-color（与阅读 blockquote 同源）。",
     "views": [
       "live"
     ],
@@ -1030,7 +1030,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "reading-structure",
     "kind": "selector",
     "target": ".vsidian-reading-blockquote（块类）+ 内层 blockquote 标签",
-    "purpose": "阅读引用块。",
+    "purpose": "阅读引用块。左边框 3px 提示竖条颜色见 var-quote-bar-color（与 live 引用行同源）。",
     "views": [
       "reading"
     ],
@@ -1531,6 +1531,29 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "highlightPaintCssContract：三侧同引；obsidianAliasCssContract：变量桥形态（含浅色分支）"
     ],
     "introduced": "#105（2026-09-27）"
+  },
+  {
+    "id": "var-quote-bar-color",
+    "domain": "content",
+    "category": "content-variables",
+    "kind": "variable",
+    "target": "--vsidian-quote-bar-color",
+    "purpose": "引用块提示竖条色：live 引用行（.vsidian-quote-line 的 inset 竖条）与阅读 blockquote 左边框两侧同引。明显 accent 紫：暗色主题默认 #a78bfa、浅色 body.vscode-light 分支覆盖 #7c3aed；背景底仍走 --vscode-textBlockQuote-background（仅竖条换色，不新增紫色背景）。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app（浅色分支 body.vscode-light）；自有变量，无 Obsidian 别名。",
+    "example": ":root { --vsidian-quote-bar-color: #c678dd; }",
+    "obsidian": {
+      "counterpart": "无（Obsidian 引用竖条由主题边框样式承担，无公开变量）",
+      "support": "none"
+    },
+    "verification": [
+      "quoteBarCssContract：#app 定义 + 亮色覆盖 + 两侧同引（背景底不换色）",
+      "浏览器 quoteBarPaint：明暗主题 × 双视图 computed 竖条颜色一致且为紫"
+    ],
+    "introduced": "#143（2026-09-27）"
   },
   {
     "id": "var-table-background",

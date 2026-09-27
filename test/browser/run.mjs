@@ -13,7 +13,9 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // cssSnippets。
 // #130 合并入列：cssHttpsImports（HTTPS 导入/联网字体/受控 https 服务）。
 // #133 合并入列：chromeContract（界面域样式契约探针）紧随 obsidianAlias。
-const names = ['tableCaret', 'taskClick', 'listEditing', 'tabIndent', 'symbolInput', 'outlineJump', 'outlineCollapse', 'outlineHover',
+// #143 合并入列：quoteBarPaint（引用竖条双视图 × 明暗主题绘制层）紧随
+// tableCaret（同批次 C 组渲染与样式侧套件）。
+const names = ['tableCaret', 'quoteBarPaint', 'taskClick', 'listEditing', 'tabIndent', 'symbolInput', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage',
   'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract']
 let workers = 2, reuseBuilds = true, selected = names

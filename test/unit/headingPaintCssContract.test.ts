@@ -57,8 +57,10 @@ describe('标题行绘制 CSS 契约（#55：无左缘竖线）', () => {
   })
 
   it('引用块左缘竖线不受本修复影响（相邻语法样式仍在）', () => {
+    // #143 起竖条色换 --vsidian-quote-bar-color（紫色提示条，形态不变）；
+    // #55 的边界语义不变：引用行仍有左缘竖线、标题行没有
     expect(rule('#app .cm-editor .cm-scroller .vsidian-quote-line'))
-      .toMatch(/box-shadow:\s*inset 3px 0 0 var\(--vscode-textBlockQuote-border/)
+      .toMatch(/box-shadow:\s*inset 3px 0 0 var\(--vsidian-quote-bar-color/)
   })
 
   it('标题左缘强调色变量已随竖线移除（不再有无消费者的公开变量）', () => {
