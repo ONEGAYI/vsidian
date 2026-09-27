@@ -1699,6 +1699,15 @@ describe('CSS 片段消息协议（#128）', () => {
     expect(isWebviewToHost({ kind: 'snippets.setEnabled', name: 'a.css' })).toBe(false)
   })
 
+  it('接受合法 snippets.setPaused（#131 设置页暂停/恢复入口），拒绝非布尔/缺字段', () => {
+    expect(isWebviewToHost({ kind: 'snippets.setPaused', paused: true })).toBe(true)
+    expect(isWebviewToHost({ kind: 'snippets.setPaused', paused: false })).toBe(true)
+    expect(isWebviewToHost({ kind: 'snippets.setPaused', paused: 'yes' })).toBe(false)
+    expect(isWebviewToHost({ kind: 'snippets.setPaused', paused: 1 })).toBe(false)
+    expect(isWebviewToHost({ kind: 'snippets.setPaused' })).toBe(false)
+    expect(isHostToWebview({ kind: 'snippets.setPaused', paused: true })).toBe(false) // 方向：webview 发起
+  })
+
   it('接受合法 snippets.loadResult，拒绝负版本/缺 ok/方向颠倒（宿主侧不接受）', () => {
     expect(isWebviewToHost({ kind: 'snippets.loadResult', name: 'a.css', version: 3, ok: false })).toBe(true)
     expect(isWebviewToHost({ kind: 'snippets.loadResult', name: 'a.css', version: -1, ok: true })).toBe(false)
@@ -1729,6 +1738,7 @@ describe('CSS 片段消息协议（#128）', () => {
       kind: 'snippets.state',
       directory: 'D:/snips',
       readError: false,
+      paused: false,
       version: 1,
       entries: [
         { name: 'a.css', enabled: false },
@@ -1743,5 +1753,20 @@ describe('CSS 片段消息协议（#128）', () => {
     expect(isHostToWebview({ ...base, entries: [{ name: 'a.css', enabled: 1 }] })).toBe(false)
     expect(isHostToWebview({ ...base, version: 1.5 })).toBe(false)
     expect(isWebviewToHost(base)).toBe(false) // 方向：state 系宿主方向
+  })
+
+  it('接受合法 snippets.state.paused（#131 暂停回显），拒绝缺字段/非布尔', () => {
+    const base = {
+      kind: 'snippets.state',
+      directory: null,
+      readError: false,
+      paused: false,
+      version: 0,
+      entries: [],
+    }
+    expect(isHostToWebview(base)).toBe(true)
+    expect(isHostToWebview({ ...base, paused: true })).toBe(true)
+    expect(isHostToWebview({ ...base, paused: undefined })).toBe(false) // 字段必填（宿主两处推送同形）
+    expect(isHostToWebview({ ...base, paused: 'yes' })).toBe(false)
   })
 })

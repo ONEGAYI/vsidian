@@ -771,6 +771,7 @@ interface SnippetState {
   available: boolean
   directory: string | null
   readError: boolean
+  paused: boolean
   version: number
   entries: Array<{ name: string; enabled: boolean }>
 }
@@ -6825,6 +6826,108 @@ export const cases: Array<[string, () => Promise<void>]> = [
       await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(120, 130, 140)', 0, 15000)
     } finally {
       await setSnippetDirectory(null)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
+    }
+  }],
+
+  ['CSS 片段：暂停全部冻结视图、保留逐项开关、恢复按原配置生效（#131）', async () => {
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets'))
+    const css = (color: string) =>
+      `#app .vsidian-view-live .vsidian-heading-line-1 { text-decoration-color: ${color}; }\n`
+    await writeSnippetCss('css-snippets/a.css', css('rgb(200, 210, 220)'))
+    await writeSnippetCss('css-snippets/b.css', css('rgb(210, 220, 230)'))
+    try {
+      await setSnippetDirectory(wsUri('css-snippets').fsPath)
+      await setSnippetEnabled('a.css', true)
+      await setSnippetEnabled('b.css', true)
+      await openWithEditor('mode.md')
+      await waitSessionReady('mode.md')
+      // 双片段就绪：b 后加载覆盖 a（原配置的基线观感）
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(210, 220, 230)')
+
+      // 暂停（真实命令面板命令，宿主侧注册——不依赖 webview 健康度）：
+      // 全局冻结立即撤下全部片段（可见效果断言：探针回内部契约值）
+      await vscode.commands.executeCommand('onegayi.vsidian.cssSnippets.pause')
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(1, 2, 3)',
+        0, 15000)
+      const paused = await snippetState()
+      assert(paused.paused === true, `暂停标志应置位，实际 ${String(paused.paused)}`)
+      assert(JSON.stringify(paused.entries) === JSON.stringify([
+        { name: 'a.css', enabled: true }, { name: 'b.css', enabled: true },
+      ]), `暂停应保留逐片段开关（不清空），实际 ${JSON.stringify(paused.entries)}`)
+
+      // 暂停期间翻转逐片段开关：允许且保留（视图保持冻结——暂停与停用不混淆）
+      await setSnippetEnabled('b.css', false)
+      const duringPause = await snippetState()
+      assert(duringPause.paused === true && !duringPause.entries.find((e) => e.name === 'b.css')!.enabled,
+        '暂停期间开关翻转应落地且不解除暂停')
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(1, 2, 3)')
+
+      // 恢复（真实命令）：按暂停期间落地的原配置立即生效——仅 a.css
+      await vscode.commands.executeCommand('onegayi.vsidian.cssSnippets.resume')
+      await waitViewState('mode.md', (v) => v.cssProbe?.liveHeadingDecorationColor === 'rgb(200, 210, 220)',
+        0, 15000)
+      const resumed = await snippetState()
+      assert(resumed.paused === false, `恢复应清除暂停标志，实际 ${String(resumed.paused)}`)
+
+      // 全程不写文档（暂停/恢复是纯视图状态）
+      await waitViewState('mode.md', (v) => v.text === MODE_DOC_TEXT)
+      const st = (await vscode.commands.executeCommand(CMD.sessionState, wsUri('mode.md').toString())) as SessionState
+      assert(st.appliedEdits === 0, `暂停/恢复不应写文档，实际写回 ${st.appliedEdits} 笔`)
+    } finally {
+      // 清理暂停标志（finally 只复位目录——paused 随目录测试的存储独立，
+      // 显式恢复避免影响后续用例的片段观感）
+      await vscode.commands.executeCommand('onegayi.vsidian.cssSnippets.resume')
+      await setSnippetDirectory(null)
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
+    }
+  }],
+
+  ['CSS 片段：环境身份与存储位置证据（#131 本地侧，真实 1.86 宿主）', async () => {
+    // ADR-0007 证据链的机器侧采集：本地集成宿主断言本地语义（remoteName
+    // undefined、globalState 目录在本机用户数据目录、工作区受信）。真实
+    // SSH 窗口的对应读值属人工验收（无法以 mock 冒充），见
+    // docs/specs/manual-verification.md 的 #131 清单。
+    // 注：1.86 宿主实测 globalStorageUri 的 scheme 可为 vscode-userdata:
+    // （虚拟用户数据文件系统）而非 file:——scheme 不在承诺面内，断言钉
+    // 路径归属（宿主用户数据树内的本扩展 globalStorage 目录）
+    const env = (await vscode.commands.executeCommand('onegayi.vsidian._test.getSnippetEnv')) as {
+      remoteName: string | null
+      machineId: string
+      appHost: string
+      globalStorageUri: string
+      workspaceTrusted: boolean
+    }
+    console.log('[集成测试][#131][环境身份]', JSON.stringify(env))
+    assert(env.remoteName === null,
+      `本地扩展宿主的 env.remoteName 应为 undefined（无远程扩展宿主），实际 ${String(env.remoteName)}`)
+    assert(typeof env.machineId === 'string' && env.machineId.length > 0,
+      `env.machineId 应为非空字符串（宿主机器标识），实际 ${JSON.stringify(env.machineId)}`)
+    const storagePath = vscode.Uri.parse(env.globalStorageUri).fsPath.replace(/\\/g, '/').toLowerCase()
+    assert(storagePath.endsWith('user/globalstorage/onegayi.vsidian'),
+      `globalStorageUri 应指向宿主用户数据树内本扩展的 globalStorage 目录，实际 ${env.globalStorageUri}（解析路径 ${storagePath}）`)
+    assert(env.workspaceTrusted === true, '测试宿主的工作区应为受信状态（受限口径见上一用例）')
+  }],
+
+  ['CSS 片段：未配置目录不自动发现工作区片段（#131 受限工作区口径）', async () => {
+    // 受限工作区的可测试行为 = 不自动发现工作区片段：片段只来自用户显式
+    // 选择的用户级目录，工作区内出现的 .css 不进入清单、不注入样式——
+    // 未配置目录时无论工作区内容如何，清单恒空（#128 起的构造性保证，
+    // 本用例在真实宿主钉住）
+    await vscode.workspace.fs.createDirectory(wsUri('css-snippets'))
+    await writeSnippetCss('css-snippets/workspace.css',
+      '#app .vsidian-view-live .vsidian-heading-line-1 { text-decoration-color: rgb(230, 240, 250); }\n')
+    try {
+      const st = await snippetState()
+      assert(st.directory === null && st.entries.length === 0,
+        `未配置目录时清单应恒空（不扫描工作区），实际 ${JSON.stringify(st)}`)
+      await openWithEditor('mode.md')
+      await waitSessionReady('mode.md')
+      const view = await waitViewState('mode.md', (v) =>
+        v.cssProbe?.liveHeadingDecorationColor !== undefined)
+      assert(view.cssProbe!.liveHeadingDecorationColor === 'rgb(1, 2, 3)',
+        `工作区内的 .css 不应被发现或注入，实际 ${view.cssProbe!.liveHeadingDecorationColor}`)
+    } finally {
       await Promise.resolve(vscode.workspace.fs.delete(wsUri('css-snippets'), { recursive: true, useTrash: false })).catch(() => undefined)
     }
   }],

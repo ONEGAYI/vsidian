@@ -19,10 +19,10 @@
 //   进片段 URI 的查询参数击穿缓存——「保存后自动更新」的实际生效机制。
 import {
   mergeScanEntries,
-  sanitizeStoredCssSnippets,
   type CssSnippetState,
   type StoredCssSnippetState,
 } from '../shared/cssSnippets'
+import { readStoredCssSnippetBucket } from '../shared/cssSnippetEnv'
 
 /** 持久层抽象（与 SettingsService/KeybindingService 同形；vscode 层用
  *  context.globalState 实现） */
@@ -50,7 +50,9 @@ export type CssSnippetSaveResult =
   | { ok: false; reason: 'storage' | 'invalid' }
 
 /** 状态变更原因（onChange 监听者可区分场景；快照本身同形） */
-export type CssSnippetChangeReason = 'initialize' | 'directory' | 'enabled' | 'scan' | 'scan-failed'
+export type CssSnippetChangeReason =
+  | 'initialize' | 'directory' | 'enabled' | 'scan' | 'scan-failed'
+  | 'pause' | 'resume'
 
 /**
  * 扫描失败的用户提示回调（vscode 层接 i18n 通知/界面提示）：只在失败
@@ -62,6 +64,10 @@ export interface CssSnippetServiceOptions {
   /** 监听事件去抖窗口（ms）；默认 400 */
   debounceMs?: number
   onUserVisibleReadError?: (directory: string) => void
+  /** #131 环境桶戳（cssSnippetEnvStamp 推导）：读取侧过滤异桶存储，写入
+   *  侧随值落地。缺省 'local'（与 #128 行为一致——含存量无戳采用语义）。
+   *  权威隔离由 globalState 按宿主机器持久保证（ADR-0007），本戳是防御层 */
+  environmentStamp?: string
 }
 
 export class CssSnippetService {
@@ -83,7 +89,10 @@ export class CssSnippetService {
     private readonly storageKey = 'vsidian.cssSnippets',
     private readonly options: CssSnippetServiceOptions = {},
   ) {
-    this.stored = sanitizeStoredCssSnippets(storage.get(this.storageKey))
+    this.stored = readStoredCssSnippetBucket(
+      storage.get(this.storageKey),
+      this.options.environmentStamp ?? 'local',
+    )
   }
 
   /** 当前权威状态（同步、纯内存） */
@@ -91,6 +100,7 @@ export class CssSnippetService {
     return {
       directory: this.stored.directory,
       readError: this.readError,
+      paused: this.stored.paused,
       entries: mergeScanEntries(this.names, this.stored.enabled),
       version: this.version,
     }
@@ -98,7 +108,11 @@ export class CssSnippetService {
 
   /** 持久层形态（测试/诊断观测面） */
   getStored(): StoredCssSnippetState {
-    return { directory: this.stored.directory, enabled: { ...this.stored.enabled } }
+    return {
+      directory: this.stored.directory,
+      enabled: { ...this.stored.enabled },
+      paused: this.stored.paused,
+    }
   }
 
   onChange(
@@ -129,7 +143,7 @@ export class CssSnippetService {
       return Promise.resolve({ ok: false, reason: 'invalid' })
     }
     return this.serialize(async () => {
-      const next: StoredCssSnippetState = { directory, enabled: {} }
+      const next: StoredCssSnippetState = { directory, enabled: {}, paused: this.stored.paused }
       if (!(await this.persist(next))) {
         return { ok: false, reason: 'storage' }
       }
@@ -151,6 +165,7 @@ export class CssSnippetService {
       const next: StoredCssSnippetState = {
         directory: this.stored.directory,
         enabled: { ...this.stored.enabled, [name]: enabled },
+        paused: this.stored.paused,
       }
       if (!(await this.persist(next))) {
         return { ok: false, reason: 'storage' }
@@ -158,6 +173,40 @@ export class CssSnippetService {
       this.stored = next
       this.version += 1
       this.notify('enabled')
+      return { ok: true, state: this.getState() }
+    })
+  }
+
+  /**
+   * #131 全局暂停/恢复（宿主命令与设置页按钮共用入口）。语义与逐项停用
+   * 正交：只翻转持久化冻结标志，enabled 映射与扫描清单原样保留——恢复时
+   * 按原配置立即生效，无需重新启用。装载门控在宿主广播侧
+   * （buildSnippetLinkList：paused 即空清单），编辑器撤下/重装由广播驱动。
+   * 幂等：同值重复设置不写入不通知（命令面板重复调用不产生冗余广播）。
+   */
+  setPaused(paused: boolean): Promise<CssSnippetSaveResult> {
+    if (typeof paused !== 'boolean') {
+      return Promise.resolve({ ok: false, reason: 'invalid' })
+    }
+    if (this.stored.paused === paused) {
+      return Promise.resolve({ ok: true, state: this.getState() })
+    }
+    return this.serialize(async () => {
+      // 串行段内再查一次：并发翻转以最后一笔为准，中间笔自然跳过
+      if (this.stored.paused === paused) {
+        return { ok: true, state: this.getState() }
+      }
+      const next: StoredCssSnippetState = {
+        directory: this.stored.directory,
+        enabled: { ...this.stored.enabled },
+        paused,
+      }
+      if (!(await this.persist(next))) {
+        return { ok: false, reason: 'storage' }
+      }
+      this.stored = next
+      this.version += 1
+      this.notify(paused ? 'pause' : 'resume')
       return { ok: true, state: this.getState() }
     })
   }
@@ -205,7 +254,11 @@ export class CssSnippetService {
 
   private async persist(next: StoredCssSnippetState): Promise<boolean> {
     try {
-      await this.storage.update(this.storageKey, next)
+      // #131 桶戳随值落地：本环境写入的数据归属本环境（异桶读取侧过滤）
+      await this.storage.update(this.storageKey, {
+        ...next,
+        envStamp: this.options.environmentStamp ?? 'local',
+      })
     } catch {
       return false
     }

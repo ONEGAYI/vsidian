@@ -36,6 +36,11 @@ const extra: readonly KeybindingOperation[] = [
   // openSettings（双模式、默认未绑定）打开设置页后经左侧导航直达分页，
   // 见 docs/specs/keybindings.md 的评估记录
   { id: 'cssSnippetsRefresh', command: 'onegayi.vsidian.cssSnippets.refresh', titleKey: 'command.cssSnippets.refresh.title', mode: 'both', writes: false, defaults: [] },
+  // #131 暂停/恢复全部片段：宿主侧命令（不依赖 webview 健康），全局冻结
+  // 与逐项停用语义正交（暂停保留开关）。被片段影响的界面可用暂停立即
+  // 撤下全部样式再按原配置恢复——双模式可用，默认不占键位
+  { id: 'cssSnippetsPause', command: 'onegayi.vsidian.cssSnippets.pause', titleKey: 'command.cssSnippets.pause.title', mode: 'both', writes: false, defaults: [] },
+  { id: 'cssSnippetsResume', command: 'onegayi.vsidian.cssSnippets.resume', titleKey: 'command.cssSnippets.resume.title', mode: 'both', writes: false, defaults: [] },
 ]
 
 /** 视图中已有明确目标的按钮动作：命令面板、快捷键均可调用。 */

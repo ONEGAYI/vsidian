@@ -19,6 +19,9 @@
   "engines": {
     "vscode": "^1.86.0"
   },
+  "extensionKind": [
+    "workspace"
+  ],
   "categories": [
     "Other"
   ],
@@ -237,6 +240,16 @@
       {
         "command": "onegayi.vsidian.cssSnippets.refresh",
         "title": "%command.cssSnippets.refresh.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.cssSnippets.pause",
+        "title": "%command.cssSnippets.pause.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.cssSnippets.resume",
+        "title": "%command.cssSnippets.resume.title%",
         "category": "Vsidian"
       },
       {

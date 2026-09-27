@@ -22,12 +22,16 @@ function makeSection(): { section: CssSnippetSettingsSection; sent: unknown[]; p
 /** 模拟宿主下发 snippets.state（经协议校验的正式形态） */
 function pushState(
   section: CssSnippetSettingsSection,
-  state: { directory: string | null; readError?: boolean; version?: number; entries?: Array<{ name: string; enabled: boolean }> },
+  state: {
+    directory: string | null; readError?: boolean; paused?: boolean; version?: number
+    entries?: Array<{ name: string; enabled: boolean }>
+  },
 ): void {
   const message = {
     kind: 'snippets.state',
     directory: state.directory,
     readError: state.readError ?? false,
+    paused: state.paused ?? false,
     version: state.version ?? 1,
     entries: state.entries ?? [],
   }
@@ -54,21 +58,24 @@ describe('分页注册与空状态', () => {
     expect(root.querySelector('.vsidian-settings-subtitle')?.textContent).toBe(zhCn['cssSnippets.description'])
   })
 
-  it('未收到状态时：目录行显示未配置提示，三个动作按钮可用', () => {
+  it('未收到状态时：目录行显示未配置提示，四个动作按钮可用', () => {
     const { parent, sent } = makeSection()
     expect(parent.querySelector('.vsidian-css-snippets-directory-path')?.textContent)
       .toBe(zhCn['cssSnippets.noDirectory'])
     const buttons = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-css-snippets-actions button')]
     expect(buttons.map((b) => b.textContent)).toEqual([
       zhCn['cssSnippets.chooseDirectory'], zhCn['cssSnippets.openDirectory'], zhCn['cssSnippets.refresh'],
+      zhCn['cssSnippets.pauseAll'],
     ])
     buttons[0]!.click()
     buttons[1]!.click()
     buttons[2]!.click()
+    buttons[3]!.click()
     expect(sent).toEqual([
       { kind: 'snippets.chooseDirectory' },
       { kind: 'snippets.openDirectory' },
       { kind: 'snippets.refresh' },
+      { kind: 'snippets.setPaused', paused: true },
     ])
   })
 })
@@ -126,6 +133,72 @@ describe('宿主状态回显与开关上送', () => {
   })
 })
 
+describe('暂停/恢复（#131：设置页不受片段影响的恢复入口）', () => {
+  it('暂停状态：常驻暂停状态条（字典文案 + paused 样式类）内含恢复按钮，点击上送 setPaused=false', () => {
+    const { section, sent, parent } = makeSection()
+    pushState(section, {
+      directory: 'D:/snips',
+      paused: true,
+      entries: [{ name: 'a.css', enabled: true }],
+    })
+    const banner = parent.querySelector<HTMLElement>('.vsidian-css-snippets-paused')
+    expect(banner?.classList.contains('vsidian-css-snippets-paused')).toBe(true)
+    expect(banner?.textContent).toContain(zhCn['cssSnippets.pausedStatus'])
+    const resume = banner?.querySelector<HTMLButtonElement>('button')
+    expect(resume?.textContent).toBe(zhCn['cssSnippets.resume'])
+    resume!.click()
+    expect(sent).toEqual([{ kind: 'snippets.setPaused', paused: false }])
+  })
+
+  it('暂停时逐片段开关仍可操作（暂停不清空开关），暂停按钮禁用', () => {
+    const { section, sent, parent } = makeSection()
+    pushState(section, {
+      directory: 'D:/snips',
+      paused: true,
+      entries: [{ name: 'a.css', enabled: true }],
+    })
+    const box = parent.querySelector<HTMLInputElement>('input[data-snippet-name="a.css"]')
+    expect(box?.disabled).toBeFalsy()
+    box!.checked = false
+    box!.dispatchEvent(new Event('change'))
+    expect(sent).toEqual([{ kind: 'snippets.setEnabled', name: 'a.css', enabled: false }])
+    const pauseButton = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-css-snippets-actions button')]
+      .find((b) => b.textContent === zhCn['cssSnippets.pauseAll'])
+    expect(pauseButton?.disabled).toBe(true)
+  })
+
+  it('未暂停：无暂停状态条；暂停按钮可用', () => {
+    const { section, parent } = makeSection()
+    pushState(section, { directory: 'D:/snips', entries: [] })
+    expect(parent.querySelector('.vsidian-css-snippets-paused')).toBeNull()
+    const pauseButton = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-css-snippets-actions button')]
+      .find((b) => b.textContent === zhCn['cssSnippets.pauseAll'])
+    expect(pauseButton?.disabled).toBeFalsy()
+  })
+
+  it('暂停与读取失败并存：两条状态各自可见（独立事实，互不遮蔽）', () => {
+    const { section, parent } = makeSection()
+    pushState(section, {
+      directory: 'D:/gone',
+      paused: true,
+      readError: true,
+      entries: [{ name: 'a.css', enabled: true }],
+    })
+    expect(parent.querySelector('.vsidian-css-snippets-paused')?.textContent)
+      .toContain(zhCn['cssSnippets.pausedStatus'])
+    expect(parent.querySelector('.vsidian-css-snippets-status')?.textContent)
+      .toBe(zhCn['cssSnippets.readError'])
+  })
+
+  it('恢复后：暂停状态条消失（回显由宿主状态驱动，不本地推断）', () => {
+    const { section, parent } = makeSection()
+    pushState(section, { directory: 'D:/snips', paused: true, entries: [] })
+    expect(parent.querySelector('.vsidian-css-snippets-paused')).not.toBeNull()
+    pushState(section, { directory: 'D:/snips', paused: false, entries: [] })
+    expect(parent.querySelector('.vsidian-css-snippets-paused')).toBeNull()
+  })
+})
+
 describe('搜索 entries 与不注入用户 CSS', () => {
   it('entries 动态并入：目录行静态入口 + 已知片段文件条目', () => {
     const { section } = makeSection()
@@ -142,5 +215,15 @@ describe('搜索 entries 与不注入用户 CSS', () => {
     pushState(section, { directory: 'D:/x', entries: [{ name: 'a.css', enabled: true }] })
     expect(document.head.querySelectorAll('link[data-vsidian-snippet]')).toHaveLength(0)
     expect(parent.querySelectorAll('link')).toHaveLength(0)
+  })
+
+  it('样式契约（#131）：暂停状态条信息色边线与恢复主按钮的关键规则钉在 settingsPage.css', async () => {
+    const { readFileSync } = await import('node:fs')
+    const css = readFileSync('src/webview/settingsPage.css', 'utf8')
+    // 暂停条与错误条同布局形态，但边线用 focusBorder（冻结是状态不是故障）
+    expect(css).toContain('.vsidian-css-snippets-paused')
+    expect(css).toMatch(/\.vsidian-css-snippets-paused \{[^}]*border-left: 3px solid var\(--vscode-focusBorder/)
+    // 恢复是主行动：主按钮配色（区别于动作行的次要按钮）
+    expect(css).toMatch(/\.vsidian-css-snippets-paused button \{[^}]*--vscode-button-background/)
   })
 })

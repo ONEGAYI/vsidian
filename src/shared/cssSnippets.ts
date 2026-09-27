@@ -17,6 +17,10 @@ export interface StoredCssSnippetState {
   /** 文件名 → 显式开关。只记用户显式翻转过的项；未记录 = 默认关闭。
    *  文件暂时消失不清洗（原子保存保护）；目录更换时整体重置 */
   enabled: Record<string, boolean>
+  /** #131 全局暂停标志：true = 冻结全部片段下发（编辑器侧撤下、新面板
+   *  不装），但逐片段开关保持原样（恢复按原配置立即生效）。与逐项停用
+   *  语义正交：暂停不清 enabled，停用不动 paused。持久化以支持重启回显 */
+  paused: boolean
 }
 
 /** 单个片段条目（宿主权威状态的列表项） */
@@ -30,9 +34,11 @@ export interface CssSnippetState {
   directory: string | null
   /** 最近一次目录读取失败（true 时 entries 为最近成功清单，编辑器保留样式） */
   readError: boolean
+  /** #131 全局暂停（冻结下发；开关与清单照常维护） */
+  paused: boolean
   /** 第一层 .css 文件条目（确定性文件名排序） */
   entries: readonly CssSnippetEntry[]
-  /** 清单版本：每次成功重扫与开关/目录变更递增（webview URI 缓存击穿用） */
+  /** 清单版本：每次成功重扫与开关/目录/暂停变更递增（webview URI 缓存击穿用） */
   version: number
 }
 
@@ -76,11 +82,12 @@ function isObject(v: unknown): v is Record<string, unknown> {
 /**
  * 存量清洗：持久层读出的任意 JSON → 合法存储形态。
  * 规则：非对象整体视为默认（未配置目录）；directory 只接受非空字符串或
- * null；enabled 只保留非空字符串键与布尔值。永不抛错。
+ * null；enabled 只保留非空字符串键与布尔值；paused 只接受布尔（缺省/
+ * 非布尔归 false——#128 存量无此字段）。永不抛错。
  */
 export function sanitizeStoredCssSnippets(stored: unknown): StoredCssSnippetState {
   if (!isObject(stored)) {
-    return { directory: null, enabled: {} }
+    return { directory: null, enabled: {}, paused: false }
   }
   const directory =
     typeof stored.directory === 'string' && stored.directory.length > 0
@@ -94,7 +101,7 @@ export function sanitizeStoredCssSnippets(stored: unknown): StoredCssSnippetStat
       }
     }
   }
-  return { directory, enabled }
+  return { directory, enabled, paused: stored.paused === true }
 }
 
 /** 当前启用（且目录已配置）的片段文件名，按确定性顺序（自身保证排序，

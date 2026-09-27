@@ -60,8 +60,8 @@ describe('扫描合并（mergeScanEntries）', () => {
 })
 
 describe('存量清洗（sanitizeStoredCssSnippets）', () => {
-  it('非对象 / 数组 / null 回默认：未配置目录、无开关', () => {
-    const empty = { directory: null, enabled: {} }
+  it('非对象 / 数组 / null 回默认：未配置目录、无开关、未暂停', () => {
+    const empty = { directory: null, enabled: {}, paused: false }
     expect(sanitizeStoredCssSnippets(undefined)).toEqual(empty)
     expect(sanitizeStoredCssSnippets(null)).toEqual(empty)
     expect(sanitizeStoredCssSnippets([])).toEqual(empty)
@@ -70,24 +70,51 @@ describe('存量清洗（sanitizeStoredCssSnippets）', () => {
 
   it('合法形态原样保留（目录 + 显式开关，含 false 值）', () => {
     const stored = { directory: 'D:\\样式\\片段', enabled: { 'a.css': true, 'b.css': false } }
-    expect(sanitizeStoredCssSnippets(stored)).toEqual(stored)
+    expect(sanitizeStoredCssSnippets(stored)).toEqual({ ...stored, paused: false })
   })
 
   it('非法字段逐项回默认：空串/非串目录归 null；非布尔值与空名键剔除', () => {
     expect(
       sanitizeStoredCssSnippets({ directory: '', enabled: { 'a.css': 'on', '': true, 'b.css': true } }),
-    ).toEqual({ directory: null, enabled: { 'b.css': true } })
+    ).toEqual({ directory: null, enabled: { 'b.css': true }, paused: false })
     expect(sanitizeStoredCssSnippets({ directory: 42, enabled: [] })).toEqual({
       directory: null,
       enabled: {},
+      paused: false,
     })
+  })
+})
+
+describe('暂停字段（#131）', () => {
+  it('paused 只接受布尔：true 保留，缺省/非布尔归 false（重启回显的数据源）', () => {
+    expect(sanitizeStoredCssSnippets({ paused: true }).paused).toBe(true)
+    expect(sanitizeStoredCssSnippets({ paused: false }).paused).toBe(false)
+    expect(sanitizeStoredCssSnippets({ paused: 'yes' }).paused).toBe(false)
+    expect(sanitizeStoredCssSnippets({ paused: 1 }).paused).toBe(false)
+    expect(sanitizeStoredCssSnippets({}).paused).toBe(false)
+  })
+
+  it('暂停是装载门控叠加，不改扫描合并与启用清单（语义与逐项停用不混淆）', () => {
+    // 暂停不清空开关、不改变清单条目——mergeScanEntries / enabledSnippetFiles
+    // 保持纯语义；「暂停时不下发片段」由宿主装载门控（buildSnippetLinkList）
+    // 与服务广播负责
+    const entries = mergeScanEntries(['a.css', 'b.css'], { 'a.css': true })
+    expect(entries).toEqual([
+      { name: 'a.css', enabled: true },
+      { name: 'b.css', enabled: false },
+    ])
+    const state: CssSnippetState = {
+      directory: 'D:/snips', readError: false, paused: true, entries, version: 2,
+    }
+    expect(enabledSnippetFiles(state)).toEqual(['a.css'])
   })
 })
 
 describe('启用清单（enabledSnippetFiles）', () => {
   it('目录未配置时恒为空；已配置时按序输出启用文件', () => {
     const base: CssSnippetState = {
-      directory: null, readError: false, entries: [{ name: 'a.css', enabled: true }], version: 3,
+      directory: null, readError: false, paused: false,
+      entries: [{ name: 'a.css', enabled: true }], version: 3,
     }
     expect(enabledSnippetFiles(base)).toEqual([])
     expect(

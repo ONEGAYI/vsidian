@@ -196,14 +196,16 @@ function editorResourceRoots(
  * 有序清单。URI 由宿主逐面板构造（asWebviewUri 前缀是 webview 私有的随机
  * origin）；`?v=<version>` 缓存击穿参数保证「保存后自动更新」取到新内容
  * （webview 资源服务不承诺无缓存）。目录未配置/状态未就绪时为空清单。
+ * #131 全局暂停（paused）即空清单：编辑器撤下全部片段链、新面板不装，
+ * 逐片段开关不受影响（恢复时重发原清单立即生效）。
  */
 function buildSnippetLinkList(
   service: CssSnippetService | undefined,
   webview: vscode.Webview,
 ): SnippetLinkList {
   const state = service?.getState()
-  if (!state?.directory) {
-    return { version: 0, snippets: [] }
+  if (!state?.directory || state.paused) {
+    return { version: state?.paused ? state.version : 0, snippets: [] }
   }
   const directory = state.directory
   return {
@@ -1635,7 +1637,7 @@ export function createTextEditorProvider(
     vscode.commands.registerCommand('onegayi.vsidian._test.getSnippetState', () =>
       snippets
         ? { available: true, ...snippets.getState() }
-        : { available: false, directory: null, readError: false, entries: [], version: 0 },
+        : { available: false, directory: null, readError: false, paused: false, entries: [], version: 0 },
     ),
     vscode.commands.registerCommand(
       'onegayi.vsidian._test.setSnippetDirectory',
@@ -1645,6 +1647,18 @@ export function createTextEditorProvider(
       'onegayi.vsidian._test.setSnippetEnabled',
       (name: string, enabled: boolean) => snippets?.setEnabled(name, enabled),
     ),
+    // #131 环境身份观测钩子（ADR-0007 证据链的机器侧采集点）：本地集成
+    // 测试断言本地语义（remoteName undefined、globalStorageUri 在本机用户
+    // 数据目录）；真实 SSH 窗口人工验收时运行此命令记录远端侧读值
+    vscode.commands.registerCommand('onegayi.vsidian._test.getSnippetEnv', () => ({
+      remoteName: vscode.env.remoteName ?? null,
+      machineId: vscode.env.machineId,
+      appHost: vscode.env.appHost,
+      /** 扩展宿主的 globalState 物理归属目录（隔离证据：本地在用户数据目录，
+       *  SSH 窗口在远端 ~/.vscode-server 下） */
+      globalStorageUri: context.globalStorageUri.toString(),
+      workspaceTrusted: vscode.workspace.isTrusted,
+    })),
   )
   }
 

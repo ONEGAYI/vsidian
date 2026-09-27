@@ -40,6 +40,8 @@
   "format.horizontalRule": "插入分割线",
   "command.openSettings.title": "打开设置",
   "command.cssSnippets.refresh.title": "CSS 片段：重新加载",
+  "command.cssSnippets.pause.title": "CSS 片段：暂停全部",
+  "command.cssSnippets.resume.title": "CSS 片段：恢复",
   "command.ui.sidebarToggle.title": "展开或收起右侧栏",
   "command.ui.outlineToggle.title": "显示或隐藏大纲",
   "command.ui.outlineSearch.title": "搜索大纲标题",

@@ -96,7 +96,9 @@ describe('初始状态与初次扫描', () => {
   it('未配置目录：空清单、无失败态，initialize 不触发扫描通知', async () => {
     const fs = makeFs(['a.css'])
     const svc = makeService(makeStorage(), fs)
-    expect(svc.getState()).toEqual({ directory: null, readError: false, entries: [], version: 0 })
+    expect(svc.getState()).toEqual({
+      directory: null, readError: false, paused: false, entries: [], version: 0,
+    })
     await svc.initialize()
     expect(fs.scans).toBe(0)
     expect(fs.watcherDirs).toEqual([])
@@ -128,7 +130,8 @@ describe('目录配置（setDirectory）', () => {
     const svc = makeService(storage, fs)
     await svc.setDirectory('D:/theme')
     expect(svc.getState().entries).toEqual([{ name: 'a.css', enabled: false }])
-    expect(storage.writes.at(-1)?.value).toEqual({ directory: 'D:/theme', enabled: {} })
+    expect(storage.writes.at(-1)?.value)
+      .toEqual({ directory: 'D:/theme', enabled: {}, paused: false, envStamp: 'local' })
     expect(fs.watcherDirs).toEqual(['D:/theme'])
   })
 
@@ -338,8 +341,158 @@ describe('跨窗口共享等价验证（用户级存储）', () => {
     await first.setDirectory('D:/shared')
     await first.setEnabled('a.css', true)
     const revived = new CssSnippetService(storage, makeFs(['a.css']))
-    expect(revived.getStored()).toEqual({ directory: 'D:/shared', enabled: { 'a.css': true } })
+    expect(revived.getStored()).toEqual({ directory: 'D:/shared', enabled: { 'a.css': true }, paused: false })
     await revived.initialize()
     expect(revived.getState().entries).toEqual([{ name: 'a.css', enabled: true }])
+  })
+})
+
+describe('环境隔离分桶（#131：存储值内环境戳——globalState 宿主亲和之外的防御层）', () => {
+  it('写入携带当前环境戳；同环境（同戳）重建服务恢复全部配置', async () => {
+    const storage = makeStorage()
+    await storage.update('vsidian.cssSnippets', {
+      directory: 'D:/old', enabled: { 'a.css': true }, paused: false,
+    })
+    const remoteStamp = 'remote:ssh-remote:m-r1'
+    const svc = new CssSnippetService(storage, makeFs(['a.css']), 'vsidian.cssSnippets', {
+      debounceMs: 1, environmentStamp: remoteStamp,
+    })
+    // #128 存量无 stamp：采用当前环境（迁移友好）
+    expect(svc.getState().directory).toBe('D:/old')
+    await svc.setDirectory('/home/u/.snips')
+    // 写入落地带 stamp
+    expect((storage.writes.at(-1)?.value as { envStamp?: string }).envStamp).toBe(remoteStamp)
+    // 同戳重建：配置恢复
+    const sameEnv = new CssSnippetService(storage, makeFs(['a.css']), 'vsidian.cssSnippets', {
+      debounceMs: 1, environmentStamp: remoteStamp,
+    })
+    expect(sameEnv.getState().directory).toBe('/home/u/.snips')
+  })
+
+  it('异环境读取：不匹配桶的存储被视为未配置，且不回写清空（远程配置不覆盖本地目录）', async () => {
+    const storage = makeStorage()
+    await storage.update('vsidian.cssSnippets', {
+      directory: '/home/u/.snips', enabled: { 'a.css': true }, paused: false,
+      envStamp: 'remote:ssh-remote:m-r1',
+    })
+    const local = makeService(storage, makeFs(['b.css']))
+    // 本地环境（缺省 stamp=local）读不到远程桶
+    expect(local.getState().directory).toBeNull()
+    expect(local.getState().entries).toEqual([])
+    // 异桶读取不触发任何写入（原值原样保留——不是清空，是不读）
+    const raw = storage.get<{ envStamp?: string; directory?: string }>('vsidian.cssSnippets')
+    expect(raw?.envStamp).toBe('remote:ssh-remote:m-r1')
+    expect(raw?.directory).toBe('/home/u/.snips')
+  })
+
+  it('不传 stamp 的服务（缺省 local）：local 桶可读写，与既有 #128 行为一致', async () => {
+    const storage = makeStorage()
+    const svc = makeService(storage, makeFs(['a.css']))
+    await svc.setDirectory('D:/snips')
+    expect((storage.writes.at(-1)?.value as { envStamp?: string }).envStamp).toBe('local')
+  })
+})
+
+describe('暂停/恢复（#131：全局冻结叠加层，不清逐片段开关）', () => {
+  it('setPaused(true)：持久化 paused、版本推进、通知 pause；清单与开关原样保留', async () => {
+    const storage = makeStorage()
+    const fs = makeFs(['a.css'])
+    const svc = makeService(storage, fs)
+    await svc.setDirectory('D:/snips')
+    await svc.setEnabled('a.css', true)
+    const reasons: string[] = []
+    svc.onChange((_s, reason) => reasons.push(reason))
+    const versionBefore = svc.getState().version
+    const result = await svc.setPaused(true)
+    expect(result.ok).toBe(true)
+    const state = svc.getState()
+    expect(state.paused).toBe(true)
+    expect(state.version).toBe(versionBefore + 1)
+    // 冻结不清开关、不出清单变化——entries 与 enabled 原样
+    expect(state.entries).toEqual([{ name: 'a.css', enabled: true }])
+    expect(svc.getStored().enabled).toEqual({ 'a.css': true })
+    expect(svc.getStored().paused).toBe(true)
+    expect(reasons).toEqual(['pause'])
+    expect(storage.writes.at(-1)?.value).toMatchObject({ paused: true })
+  })
+
+  it('恢复：按原配置立即生效（通知 resume、版本推进、开关未被暂停清空）', async () => {
+    const storage = makeStorage()
+    const fs = makeFs(['a.css', 'b.css'])
+    const svc = makeService(storage, fs)
+    await svc.setDirectory('D:/snips')
+    await svc.setEnabled('a.css', true)
+    await svc.setPaused(true)
+    // 暂停期间翻转逐片段开关：允许且保留（恢复后按新配置生效）
+    await svc.setEnabled('b.css', true)
+    expect(svc.getStored().enabled).toEqual({ 'a.css': true, 'b.css': true })
+    const reasons: string[] = []
+    svc.onChange((_s, reason) => reasons.push(reason))
+    await svc.setPaused(false)
+    expect(svc.getState().paused).toBe(false)
+    expect(reasons).toEqual(['resume'])
+    expect(svc.getState().entries).toEqual([
+      { name: 'a.css', enabled: true },
+      { name: 'b.css', enabled: true },
+    ])
+  })
+
+  it('幂等：重复同值不写入不通知（重复按命令面板不产生冗余广播）', async () => {
+    const storage = makeStorage()
+    const svc = makeService(makeStorage(), makeFs(['a.css']))
+    await svc.setDirectory('D:/snips')
+    await svc.setPaused(true)
+    const writesBefore = storage.writes.length
+    const reasons1: string[] = []
+    svc.onChange((_s, reason) => reasons1.push(reason))
+    const result = await svc.setPaused(true)
+    expect(result.ok).toBe(true)
+    expect(storage.writes.length).toBe(writesBefore)
+    expect(reasons1).toEqual([])
+    await svc.setPaused(false)
+    expect(reasons1).toEqual(['resume'])
+  })
+
+  it('非布尔参数拒绝，零写入', async () => {
+    const storage = makeStorage()
+    const svc = makeService(storage, makeFs())
+    expect((await svc.setPaused(1 as never)).ok).toBe(false)
+    expect((await svc.setPaused(undefined as never)).ok).toBe(false)
+    expect(storage.writes).toEqual([])
+  })
+
+  it('持久层写入失败：返回 storage 且状态不变（暂停失败不半落地）', async () => {
+    const storage = makeStorage()
+    const svc = makeService(storage, makeFs(['a.css']))
+    await svc.setDirectory('D:/snips')
+    storage.failNext = true
+    const result = await svc.setPaused(true)
+    expect(result).toEqual({ ok: false, reason: 'storage' })
+    expect(svc.getState().paused).toBe(false)
+  })
+
+  it('重启回显：暂停标志随存储恢复，构造即得 paused=true（设置页可回显）', async () => {
+    const storage = makeStorage()
+    await storage.update('vsidian.cssSnippets', {
+      directory: 'D:/snips', enabled: { 'a.css': true }, paused: true,
+    })
+    const svc = new CssSnippetService(storage, makeFs(['a.css']))
+    expect(svc.getState().paused).toBe(true)
+    await svc.initialize()
+    // 扫描照常推进清单（暂停只门控下发，不冻结扫描），开关保留
+    expect(svc.getState().entries).toEqual([{ name: 'a.css', enabled: true }])
+    expect(svc.getState().paused).toBe(true)
+  })
+
+  it('暂停与逐项停用语义不混淆：暂停后逐项开关映射保持，恢复无需重新启用', async () => {
+    const storage = makeStorage()
+    const fs = makeFs(['a.css'])
+    const svc = makeService(storage, fs)
+    await svc.setDirectory('D:/snips')
+    await svc.setEnabled('a.css', true)
+    await svc.setPaused(true)
+    await svc.setPaused(false)
+    expect(svc.getStored().enabled).toEqual({ 'a.css': true })
+    expect(svc.getState().entries).toEqual([{ name: 'a.css', enabled: true }])
   })
 })

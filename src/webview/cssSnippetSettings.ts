@@ -1,6 +1,8 @@
 // CSS 片段设置分页（#128）：目录选择/打开、逐片段开关、手动刷新与读取
 // 失败状态条。经 SettingsPageSection 注入设置页（与快捷键分页同模式），
 // 状态权威在宿主（snippets.state 推送回显，页面不自行推断）。
+// #131 增暂停/恢复：「暂停全部」按钮与暂停状态条内的恢复入口
+// （snippets.setPaused 上送），暂停不清逐项开关。
 // 本页不加载任何用户 CSS——设置页不注入片段（spec「已确认行为」）。
 // 文案一律 t() 取词（cssSnippets.* 词条）。
 import { t } from '../shared/i18n'
@@ -51,6 +53,7 @@ export class CssSnippetSettingsSection implements SettingsPageSection {
     this.state = {
       directory: message.directory,
       readError: message.readError,
+      paused: message.paused,
       version: message.version,
       entries: message.entries.map((entry) => ({ name: entry.name, enabled: entry.enabled })),
     }
@@ -96,6 +99,11 @@ export class CssSnippetSettingsSection implements SettingsPageSection {
     }
     const actions = document.createElement('div')
     actions.className = 'vsidian-css-snippets-actions'
+    // #131 暂停全部：全局冻结（保留逐项开关）；已暂停时禁用（恢复入口在
+    // 暂停状态条内，语义显式分开）
+    const pauseButton = this.button(t('cssSnippets.pauseAll'), () =>
+      this.send({ kind: 'snippets.setPaused', paused: true }))
+    pauseButton.disabled = state?.paused === true
     actions.append(
       this.button(t('cssSnippets.chooseDirectory'), () =>
         this.send({ kind: 'snippets.chooseDirectory' })),
@@ -103,9 +111,23 @@ export class CssSnippetSettingsSection implements SettingsPageSection {
         this.send({ kind: 'snippets.openDirectory' }), 'vsidian-css-snippets-open'),
       this.button(t('cssSnippets.refresh'), () =>
         this.send({ kind: 'snippets.refresh' })),
+      pauseButton,
     )
     dirRow.append(dirLabel, actions)
     parent.append(dirRow)
+
+    // #131 暂停状态条：常驻提示 + 恢复入口（宿主状态驱动回显；恢复按原
+    // 配置立即生效——逐项开关全程保留）
+    if (state?.paused) {
+      const pausedRow = document.createElement('p')
+      pausedRow.className = 'vsidian-css-snippets-paused'
+      pausedRow.setAttribute('role', 'status')
+      const text = document.createElement('span')
+      text.textContent = t('cssSnippets.pausedStatus')
+      pausedRow.append(text, this.button(t('cssSnippets.resume'), () =>
+        this.send({ kind: 'snippets.setPaused', paused: false })))
+      parent.append(pausedRow)
+    }
 
     // 状态条：读取失败常驻警告（后台失败不打扰、界面必达）；无目录/空目录提示
     const status = document.createElement('p')

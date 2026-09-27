@@ -109,7 +109,8 @@ vsidian/
 │   │   ├── 0003-source-text-dual-view-editor.md  # 基于源文本的双视图编辑架构
 │   │   ├── 0004-stable-styling-contract.md       # 一期建立稳定样式入口
 │   │   ├── 0005-viewport-rendering.md            # 全文模型与视口渲染分离
-│   │   └── 0006-rebrand-to-vsidian.md            # 统一更名为 vsidian 的映射记录
+│   │   ├── 0006-rebrand-to-vsidian.md            # 统一更名为 vsidian 的映射记录
+│   │   └── 0007-css-snippet-env-isolation.md     # CSS 片段环境隔离决策记录（#131）
 │   ├── agents/   # agent 操作约定
 │   │   ├── domain.md        # 领域文档读取与维护约定
 │   │   └── issue-tracker.md # GitHub Issues 操作约定
@@ -177,6 +178,7 @@ vsidian/
 │   ├── shared/      # 两端共享纯逻辑
 │   │   ├── changeMapping.ts    # 变更重定位纯函数
 │   │   ├── codeLangs.ts        # 代码块语言注册表与别名路由
+│   │   ├── cssSnippetEnv.ts    # CSS 片段环境身份与分桶戳（#131）
 │   │   ├── cssSnippets.ts      # CSS 片段纯逻辑单一事实源
 │   │   ├── formatOperations.ts # 格式操作注册清单
 │   │   ├── i18n.ts             # t() 取词与语言包装配状态模块

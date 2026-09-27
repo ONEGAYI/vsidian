@@ -97,6 +97,10 @@ export const en = {
   'cssSnippets.noDirectory': 'No snippets directory selected. Choose a folder; its first-level .css files become snippets (new files start disabled).',
   'cssSnippets.emptyDirectory': 'No .css files found in the first level of the selected directory.',
   'cssSnippets.readError': 'Failed to read the snippets directory. The list below is the last successful state; open editors keep the last applied styles.',
+  /** #131 暂停/恢复（全局冻结，保留逐片段开关；恢复按原配置生效） */
+  'cssSnippets.pauseAll': 'Pause all snippets',
+  'cssSnippets.resume': 'Resume snippets',
+  'cssSnippets.pausedStatus': 'All CSS snippets are paused. Per-snippet switches are kept; resuming reloads them exactly as configured.',
 
   // ---- host.（宿主通知、确认框、QuickPick、链接拦截反馈）----
   'host.conflictInputCopied': 'Unconfirmed input copied to clipboard',
@@ -128,6 +132,9 @@ export const en = {
   /** #128 CSS 片段：宿主侧用户提示 */
   'host.cssSnippetLoadFailed': 'Failed to load CSS snippet "{name}"; the last successful styles are kept.',
   'host.cssSnippetReadFailed': 'Failed to read the CSS snippets directory "{directory}".',
+  /** #131 暂停/恢复命令反馈（命令面板触发时无 webview 也可见） */
+  'host.cssSnippetsPaused': 'All CSS snippets are paused. Per-snippet switches are kept.',
+  'host.cssSnippetsResumed': 'CSS snippets resumed; enabled snippets reload as configured.',
   /** 运行时设置定义注册（测试钩子/懒注册）的拒绝原因 */
   'host.invalidSettingDefinition': 'Invalid definition: {definition}',
   'host.duplicateSettingKey': 'Setting key already exists: {key}',
@@ -296,6 +303,9 @@ export const en = {
   'command.openSettings.title': 'Open settings',
   /** #128 CSS 片段刷新命令（快捷键页与命令面板同源） */
   'command.cssSnippets.refresh.title': 'CSS snippets: reload',
+  /** #131 暂停/恢复全部片段命令 */
+  'command.cssSnippets.pause.title': 'CSS snippets: pause all',
+  'command.cssSnippets.resume.title': 'CSS snippets: resume',
   'command.ui.sidebarToggle.title': 'Expand or collapse the sidebar',
   'command.ui.outlineToggle.title': 'Show or hide the outline',
   'command.ui.outlineSearch.title': 'Search headings',

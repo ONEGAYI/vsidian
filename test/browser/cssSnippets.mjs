@@ -3,6 +3,8 @@
 // 顺序层叠（后者覆盖）、热更新不打断输入且选区保持、加载失败保留最近成功
 // 样式、样式致高度变化后阅读侧滚动锚定（measureAndStabilize 管线）、视口
 // 重挂载后片段仍生效、模式切换不丢样式。
+// #131 暂停/恢复：暂停=空清单撤下（颜色回默认）、恢复=重发原清单同 URI
+// 立即重装生效。
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -131,6 +133,20 @@ try {
     return color === LIVE_COLOR_A ? color : undefined
   })(), '停用 b.css 后回到 a.css 覆盖')
 
+  // ---- 3.5 暂停/恢复（#131）：暂停 = 宿主下发空清单（全局冻结，非逐项
+  // 停用）——已装链撤下、颜色回默认；恢复 = 重发原清单（同一 URI），装载
+  // 器重新装配立即生效（可见效果断言，非 DOM 存在性）----
+  await page.evaluate(() => window.applySnippets(4, []))
+  await waitFor(() => (async () => {
+    const color = await liveHeadingColor(page)
+    return color !== LIVE_COLOR_A ? color : undefined
+  })(), '暂停（空清单）撤下片段样式')
+  await page.evaluate((a) => window.applySnippets(5, [{ name: 'a.css', uri: a }]), urlA)
+  await waitFor(() => (async () => {
+    const color = await liveHeadingColor(page)
+    return color === LIVE_COLOR_A ? color : undefined
+  })(), '恢复重发原清单后片段立即重新生效（同一 URI 重装）')
+
   // ---- 4. 输入中热更新：不打断输入、选区保持、文档内容不因 CSS 变化 ----
   await page.click('.cm-content')
   await page.keyboard.press('Control+a')
@@ -142,7 +158,7 @@ try {
   }))
   const urlA2 = await page.evaluate((color) => window.snippetUrl(
     `#app { --vsidian-heading-color-1: ${color}; }`), LIVE_COLOR_C)
-  await page.evaluate((a) => window.applySnippets(4, [{ name: 'a.css', uri: a }]), urlA2)
+  await page.evaluate((a) => window.applySnippets(6, [{ name: 'a.css', uri: a }]), urlA2)
   await waitFor(() => (async () => {
     const color = await liveHeadingColor(page)
     return color === LIVE_COLOR_C ? color : undefined
@@ -157,14 +173,14 @@ try {
   assert.ok(after.text.startsWith(docText), '文档内容不因 CSS 更新而变化（前缀保持）')
 
   // ---- 5. 加载失败保留最近成功样式 + 失败回报宿主 ----
-  await page.evaluate(() => window.applySnippets(5, [{ name: 'a.css', uri: 'http://127.0.0.1:1/vsidian-missing.css' }]))
+  await page.evaluate(() => window.applySnippets(7, [{ name: 'a.css', uri: 'http://127.0.0.1:1/vsidian-missing.css' }]))
   await waitFor(() => page.evaluate(() =>
     window.snipSent().some((m) => m.kind === 'snippets.loadResult' && m.ok === false &&
-      m.name === 'a.css' && m.version === 5)), '失败回报到达')
+      m.name === 'a.css' && m.version === 7)), '失败回报到达')
   await new Promise((r) => setTimeout(r, 300))
   assert.equal(await liveHeadingColor(page), LIVE_COLOR_C, '加载失败保留最近成功样式（颜色不变）')
   // 恢复：清空清单撤下（明确停用语义）
-  await page.evaluate(() => window.applySnippets(6, []))
+  await page.evaluate(() => window.applySnippets(8, []))
   await new Promise((r) => setTimeout(r, 300))
   assert.notEqual(await liveHeadingColor(page), LIVE_COLOR_C, '停用撤下片段样式')
 
@@ -180,7 +196,7 @@ try {
     document.querySelector('.vsidian-reading-heading-1') !== null), '阅读标题块挂载')
   const urlReading = await page.evaluate(() => window.snippetUrl(
     `#app { --vsidian-heading-color-1: rgb(10, 90, 200); }`))
-  await page.evaluate((uri) => window.applySnippets(7, [{ name: 'r.css', uri }]), urlReading)
+  await page.evaluate((uri) => window.applySnippets(9, [{ name: 'r.css', uri }]), urlReading)
   await waitFor(() => (async () => {
     const color = await readingHeadingColor(page)
     return color === 'rgb(10, 90, 200)' ? color : undefined
@@ -198,7 +214,7 @@ try {
   // + 重复类抬特异性保证生效；不改变换行（换行数变化的重排场景见人工验证）
   const urlTall = await page.evaluate(() => window.snippetUrl(
     `#app .vsidian-view-reading .vsidian-reading-block.vsidian-reading-block { padding-block: 14px; }`))
-  await page.evaluate(({ r, t }) => window.applySnippets(8, [
+  await page.evaluate(({ r, t }) => window.applySnippets(10, [
     { name: 'r.css', uri: r }, { name: 't.css', uri: t }]), { r: urlReading, t: urlTall })
   // 不变式（measureAndStabilize）：锚点块的 tops-scrollTop 差被同量平移补偿，
   // 视口顶部位移保持（实测全文字号翻倍的残留漂移为个位数像素，容差 16px）

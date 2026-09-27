@@ -54,6 +54,7 @@ export function createSnippetPageWiring(service: CssSnippetService): SnippetPage
     getState: () => service.getState(),
     setDirectory: (directory) => service.setDirectory(directory),
     setEnabled: (name, enabled) => service.setEnabled(name, enabled),
+    setPaused: (paused) => service.setPaused(paused),
     refresh: () => service.refresh(),
     chooseDirectory: async () => {
       if (process.env.VSIDIAN_TEST_HOOKS === '1') {

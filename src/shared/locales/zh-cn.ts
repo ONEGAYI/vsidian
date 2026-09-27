@@ -86,6 +86,10 @@ export const zhCn: Record<MessageKey, string> = {
   'cssSnippets.noDirectory': '尚未选择片段目录。选择一个文件夹后，其第一层 .css 文件将作为片段（新文件默认关闭）。',
   'cssSnippets.emptyDirectory': '所选目录的第一层没有 .css 文件。',
   'cssSnippets.readError': '片段目录读取失败。下方清单为最近成功状态，已打开的编辑器保留最近应用的样式。',
+  /** #131 暂停/恢复（全局冻结，保留逐片段开关；恢复按原配置生效） */
+  'cssSnippets.pauseAll': '暂停全部片段',
+  'cssSnippets.resume': '恢复片段',
+  'cssSnippets.pausedStatus': '已暂停全部 CSS 片段。逐片段开关保留，恢复后按原配置重新生效。',
 
   // ---- host.（宿主消息）----
   'host.conflictInputCopied': '未确认输入已复制到剪贴板',
@@ -117,6 +121,9 @@ export const zhCn: Record<MessageKey, string> = {
   /** #128 CSS 片段：宿主侧用户提示 */
   'host.cssSnippetLoadFailed': 'CSS 片段「{name}」加载失败，已保留最近成功的样式。',
   'host.cssSnippetReadFailed': '读取 CSS 片段目录「{directory}」失败。',
+  /** #131 暂停/恢复命令反馈（命令面板触发时无 webview 也可见） */
+  'host.cssSnippetsPaused': '已暂停全部 CSS 片段。逐片段开关保留。',
+  'host.cssSnippetsResumed': '已恢复 CSS 片段；启用的片段按原配置重新加载。',
   'host.invalidSettingDefinition': '非法定义：{definition}',
   'host.duplicateSettingKey': '设置键已存在：{key}',
 
@@ -267,6 +274,9 @@ export const zhCn: Record<MessageKey, string> = {
   'command.openSettings.title': '打开设置',
   /** #128 CSS 片段刷新命令（快捷键页与命令面板同源） */
   'command.cssSnippets.refresh.title': 'CSS 片段：重新加载',
+  /** #131 暂停/恢复全部片段命令 */
+  'command.cssSnippets.pause.title': 'CSS 片段：暂停全部',
+  'command.cssSnippets.resume.title': 'CSS 片段：恢复',
   'command.ui.sidebarToggle.title': '展开或收起右侧栏',
   'command.ui.outlineToggle.title': '显示或隐藏大纲',
   'command.ui.outlineSearch.title': '搜索大纲标题',

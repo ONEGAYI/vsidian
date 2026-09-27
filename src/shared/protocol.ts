@@ -219,13 +219,15 @@ export type HostToWebview =
       version: number
       snippets: Array<{ name: string; uri: string }>
     }
-  /** CSS 片段管理状态（#128，设置页消费）：目录、读取失败标志、全部第一层
-   *  条目（含未启用）与版本。设置页经 snippets.get 拉取；宿主状态变更后
-   *  推送（含编辑器侧片段变更）。不携带 URI——设置页不加载用户 CSS */
+  /** CSS 片段管理状态（#128，设置页消费）：目录、读取失败标志、全局暂停
+   *  标志（#131，设置页回显暂停状态条）、全部第一层条目（含未启用）与
+   *  版本。设置页经 snippets.get 拉取；宿主状态变更后推送（含编辑器侧
+   *  片段变更）。不携带 URI——设置页不加载用户 CSS */
   | {
       kind: 'snippets.state'
       directory: string | null
       readError: boolean
+      paused: boolean
       version: number
       entries: Array<{ name: string; enabled: boolean }>
     }
@@ -458,6 +460,11 @@ export type WebviewToHost =
   | { kind: 'snippets.setDirectory'; directory: string | null }
   /** 逐片段开关（#128，设置页）：文件名键 + 显式开关 */
   | { kind: 'snippets.setEnabled'; name: string; enabled: boolean }
+  /** #131 暂停/恢复全部片段（设置页「暂停全部」按钮与暂停状态条的恢复
+   *  入口）。宿主持久化全局标志；命令面板命令（cssSnippets.pause /
+   *  cssSnippets.resume）与设置页按钮共用同一服务入口——即使 webview
+   *  异常，命令仍独立可用 */
+  | { kind: 'snippets.setPaused'; paused: boolean }
   /** 手动刷新片段（#128，设置页按钮；命令面板走宿主命令同链路） */
   | { kind: 'snippets.refresh' }
   /** 在系统文件管理器中打开片段目录（#128，设置页） */
@@ -1707,6 +1714,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
       return v.directory === null || (typeof v.directory === 'string' && v.directory.length > 0)
     case 'snippets.setEnabled':
       return typeof v.name === 'string' && v.name.length > 0 && typeof v.enabled === 'boolean'
+    case 'snippets.setPaused':
+      return typeof v.paused === 'boolean'
     case 'snippets.refresh':
       return true
     case 'snippets.openDirectory':
@@ -1910,6 +1919,7 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return (
         (v.directory === null || (typeof v.directory === 'string' && v.directory.length > 0)) &&
         typeof v.readError === 'boolean' &&
+        typeof v.paused === 'boolean' &&
         isNonNegativeInt(v.version) &&
         Array.isArray(v.entries) &&
         v.entries.every(

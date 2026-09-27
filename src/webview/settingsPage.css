@@ -111,6 +111,16 @@ button:focus-visible, input:focus-visible {
 .vsidian-css-snippets-status-error { padding: 8px 10px; border-left: 3px solid var(--vscode-inputValidation-warningBorder, #cca700);
   color: var(--vscode-inputValidation-warningForeground, inherit);
   background: var(--vscode-inputValidation-warningBackground, transparent); }
+/* #131 暂停状态条：与错误条同布局形态，边线用信息色（冻结是状态不是故障） */
+.vsidian-css-snippets-paused { display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  margin: 8px 0 0; padding: 8px 10px; border-left: 3px solid var(--vscode-focusBorder, #007fd4);
+  color: var(--vscode-descriptionForeground, #666);
+  background: var(--vscode-inputValidation-infoBackground, transparent); }
+.vsidian-css-snippets-paused button { min-height: 26px; padding: 3px 10px;
+  border: 1px solid var(--vscode-button-border, var(--vscode-panel-border, #cbd0d8)); border-radius: 6px;
+  color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-background, #0078d4);
+  cursor: pointer; }
+.vsidian-css-snippets-paused button:hover { background: var(--vscode-button-hoverBackground, #006ab8); }
 .vsidian-css-snippets-list { margin-top: 6px; }
 .vsidian-css-snippets-item { display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 9px 0; border-bottom: 1px solid var(--vscode-panel-border, #d9dde3); }

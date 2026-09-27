@@ -14,6 +14,7 @@ import { SettingsService } from './host/settingsService'
 import { createSettingsPage } from './host/settingsPage'
 import { CssSnippetService } from './host/cssSnippetService'
 import { createSnippetFsPort, createSnippetPageWiring } from './host/cssSnippetWiring'
+import { cssSnippetEnvStamp } from './shared/cssSnippetEnv'
 import { PRODUCTION_SETTING_DEFINITIONS } from './shared/settings'
 import { installHostLocale } from './shared/locales'
 import { hostLocale } from './host/hostLocale'
@@ -31,8 +32,15 @@ export function activate(context: vscode.ExtensionContext): void {
   // #128 CSS 片段：用户级目录 + 逐片段开关的宿主权威服务（globalState 独立
   // key；文件系统/监听经 vscode 层端口注入）。initialScan 在监听者（编辑器
   // 面板广播、设置页推送）接线完成后启动——早于扫描完成打开的面板先拿空
-  // 清单，扫描完成后经 onChange 广播自愈
+  // 清单，扫描完成后经 onChange 广播自愈。
+  // #131 环境隔离：本地与 Remote SSH 的 globalState 分属两台机器的扩展
+  // 宿主（ADR-0007 证据链），天然各存各的；存储值内另落环境桶戳
+  // （remoteName + machineId 推导）作防御层——异桶读取视为未配置
   const snippetService = new CssSnippetService(context.globalState, createSnippetFsPort(), 'vsidian.cssSnippets', {
+    environmentStamp: cssSnippetEnvStamp({
+      remoteName: vscode.env.remoteName,
+      machineId: vscode.env.machineId,
+    }),
     onUserVisibleReadError: (directory) => {
       void vscode.window.showWarningMessage(
         t('host.cssSnippetReadFailed', { directory }),
@@ -63,6 +71,21 @@ export function activate(context: vscode.ExtensionContext): void {
     // 刷新，状态变更经 onChange 广播到全部已开面板与设置页）
     vscode.commands.registerCommand('onegayi.vsidian.cssSnippets.refresh', () =>
       snippetService.refresh()),
+    // #131 暂停/恢复全部片段：宿主侧注册——不依赖任何 webview（正文工具
+    // 栏隐藏、编辑器面板异常时命令面板仍可用）。全局冻结保留逐片段开关，
+    // 恢复按原配置立即生效；与逐项停用语义正交
+    vscode.commands.registerCommand('onegayi.vsidian.cssSnippets.pause', () =>
+      void snippetService.setPaused(true).then((result) => {
+        if (result.ok) {
+          void vscode.window.showInformationMessage(t('host.cssSnippetsPaused'))
+        }
+      })),
+    vscode.commands.registerCommand('onegayi.vsidian.cssSnippets.resume', () =>
+      void snippetService.setPaused(false).then((result) => {
+        if (result.ok) {
+          void vscode.window.showInformationMessage(t('host.cssSnippetsResumed'))
+        }
+      })),
     snippetService,
   )
 }

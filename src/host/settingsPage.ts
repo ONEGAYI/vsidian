@@ -29,6 +29,8 @@ export interface SnippetPageWiring {
   getState(): CssSnippetState
   setDirectory(directory: string | null): Promise<unknown>
   setEnabled(name: string, enabled: boolean): Promise<unknown>
+  /** #131 全局暂停/恢复（设置页按钮与宿主命令共用服务入口） */
+  setPaused(paused: boolean): Promise<unknown>
   refresh(): Promise<unknown>
   /** 弹文件夹选择器并应用所选目录；返回所选路径（取消为 null） */
   chooseDirectory(): Promise<string | null>
@@ -136,7 +138,8 @@ export function createSettingsPage(
           ready = true
           const state = snippets.getState()
           void current?.webview.postMessage({ kind: 'snippets.state', directory: state.directory,
-            readError: state.readError, version: state.version, entries: [...state.entries] })
+            readError: state.readError, paused: state.paused, version: state.version,
+            entries: [...state.entries] })
         }
         return
       case 'snippets.chooseDirectory':
@@ -149,6 +152,10 @@ export function createSettingsPage(
         return
       case 'snippets.setEnabled':
         void snippets?.setEnabled(message.name, message.enabled)
+        return
+      case 'snippets.setPaused':
+        // #131 暂停/恢复：结果经 notifySnippetsChanged 推送（onChange 广播）
+        void snippets?.setPaused(message.paused)
         return
       case 'snippets.refresh':
         void snippets?.refresh()
@@ -236,7 +243,8 @@ export function createSettingsPage(
       }
       const state = snippets.getState()
       void panel.webview.postMessage({ kind: 'snippets.state', directory: state.directory,
-        readError: state.readError, version: state.version, entries: [...state.entries] })
+        readError: state.readError, paused: state.paused, version: state.version,
+        entries: [...state.entries] })
     },
   }
 }
