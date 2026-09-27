@@ -94,11 +94,11 @@ interface FmPopoverState {
   anchor: HTMLElement
   prevFocus: HTMLElement | null
   cleanups: Array<() => void>
-  /** 添加属性后下一轮重建聚焦新条目键框（planAddFmEntry 的选中新键在
-   *  浮层语境的等价物）；加项后聚焦新项输入框 */
-  /** 焦点接管意图：添加属性（新行总在末尾，取末条目）或对指定条目加项
-   *  （entryFrom 锚——加项可发生在任意条目上，重建后按 data-entry-from
-   *  定位，不能固定取最后条目） */
+  /** 焦点接管意图（下一轮重建时消费）：添加属性后聚焦新行键框（新行
+   *  总在末尾，取末条目——planAddFmEntry 的选中新键在浮层语境的等价
+   *  物）；对指定条目加项后聚焦其新项输入框（entryFrom 锚——加项可
+   *  发生在任意条目上，重建后按 data-entry-from 定位，不能固定取
+   *  最后条目） */
   pendingFocus: { kind: 'new-entry' } | { kind: 'new-item'; entryFrom: number } | null
 }
 

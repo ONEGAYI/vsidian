@@ -107,7 +107,7 @@ export function stripHtmlComments(text: string): string {
     const close = masked.indexOf(CLOSE, at + OPEN.length)
     const body = close < 0 ? '' : masked.slice(at + OPEN.length, close)
     if (close < 0 || body.includes(OPEN)) {
-      // 未闭合残缺或体内含 '<'：开标记原样保留，扫描从其后继续
+      // 未闭合残缺或体内含嵌套开标记：开标记原样保留，扫描从其后继续
       // （不吞后续正文；后续开标记可按自身开闭正常配对）
       out.push(OPEN)
       i = at + OPEN.length
