@@ -169,6 +169,8 @@ vsidian/
 │   │   ├── hostLocale.ts               # 生效语言宿主装配解析帮手
 │   │   ├── imagePasteHost.ts           # 图片粘贴落盘执行壳（#161）
 │   │   ├── imagePastePlan.ts           # 图片粘贴纯逻辑（#161）
+│   │   ├── imageRefreshCoordinator.ts  # 图片刷新协调器（provider 级）
+│   │   ├── imageVersioning.ts          # 图片资源版本表纯逻辑
 │   │   ├── keybindingService.ts        # 快捷键全局存储服务
 │   │   ├── linkTarget.ts               # 宿主侧链接目标分类纯逻辑（#10）
 │   │   ├── settingsPage.ts             # 独立设置页面板装配
@@ -194,6 +196,7 @@ vsidian/
 │   │   ├── formatOperations.ts   # 格式操作注册清单
 │   │   ├── frontmatterTable.ts   # frontmatter 表格化纯逻辑
 │   │   ├── i18n.ts               # t() 取词与语言包装配状态模块
+│   │   ├── imageRefresh.ts       # 图片刷新共享常量与核验决策
 │   │   ├── keybindings.ts        # 快捷键操作与冲突模型
 │   │   ├── listPrefix.ts         # 列表引用前缀形态学（#119）
 │   │   ├── locales/              # 语言包字典单一事实源
@@ -243,6 +246,7 @@ vsidian/
 │       ├── htmlComment.ts              # 阅读侧 HTML 注释剥离纯函数
 │       ├── imagePaste.ts               # 图片粘贴拦截适配层（#161）
 │       ├── imageResource.ts            # 图片资源状态机（#10）
+│       ├── imageVerifyScheduler.ts     # webview 周期核验定时器调度
 │       ├── indentEditing.ts            # Tab 通用行缩进处理器（#120）
 │       ├── indexMaintenanceSettings.ts # 设置页索引维护分页
 │       ├── keybindingRouter.ts         # 编辑器按键分发器

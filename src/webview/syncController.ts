@@ -2239,6 +2239,7 @@ export class WebviewSyncController {
       // 图片状态计数按当前视图作用域（隐藏视图的槽位不计入——同一管理器
       // 服务双视图，隐藏侧的 DOM 不代表用户可见状态）
       imageStates: this.collectImageStates(),
+      imageEntries: this.images?.activeEntries(),
       find: this.collectFindProbe(),
       typography: this.collectTypography(),
       // #33 设置快照缓存（宿主下发过才有值；缺省向后兼容）

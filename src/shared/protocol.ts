@@ -477,6 +477,8 @@ export type WebviewToHost =
       readingWikilinkCount?: number
       /** 图片槽位状态计数（#10：当前视图内 loading/loaded/error） */
       imageStates?: ImageStateCounts
+      /** 图片条目明细（#201：失效/版本刷新链路断言载体，直连外链除外） */
+      imageEntries?: ImageEntryProbe[]
       /** 查找会话观测（#14）：首次打开后回报（未打开过时缺省） */
       find?: FindSessionProbe
       /** 当前生效设置快照（#33 起缓存宿主下发的值；#34 行号等设置的观测面） */
@@ -720,6 +722,25 @@ export interface ImageStateCounts {
   loading: number
   loaded: number
   error: number
+}
+
+/** 图片条目明细观测（#201）：view.state 的 imageEntries 数据形态——失效
+ *  与版本刷新链路的细粒度断言载体（appliedSrc 含 ?v= 代次可直接断言） */
+export interface ImageEntryProbe {
+  src: string
+  state: 'loaded' | 'loading' | 'error'
+  reason?: string
+  appliedSrc?: string
+}
+
+function isImageEntryProbe(v: unknown): v is ImageEntryProbe {
+  return (
+    isObject(v) &&
+    isString(v.src) &&
+    (v.state === 'loaded' || v.state === 'loading' || v.state === 'error') &&
+    (v.reason === undefined || isString(v.reason)) &&
+    (v.appliedSrc === undefined || isString(v.appliedSrc))
+  )
 }
 
 /** CSS 契约探针回报（#6）：一段仅经稳定类名定位的内部测试 CSS 是否生效 */
@@ -2001,6 +2022,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         (v.readingImageCount === undefined || isNonNegativeInt(v.readingImageCount)) &&
         (v.readingWikilinkCount === undefined || isNonNegativeInt(v.readingWikilinkCount)) &&
         (v.imageStates === undefined || isImageStateCounts(v.imageStates)) &&
+        (v.imageEntries === undefined ||
+          (Array.isArray(v.imageEntries) && v.imageEntries.every(isImageEntryProbe))) &&
         (v.find === undefined || isFindSessionProbe(v.find)) &&
         (v.settings === undefined || isSettingsPayload(v.settings)) &&
         (v.lineGutter === undefined || isLineGutterProbe(v.lineGutter)) &&

@@ -262,6 +262,12 @@ const IMAGES_DOC = [
 // 1x1 透明 PNG（合法可解码位图，供真实 webview 装载断言）
 const TINY_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
+// #201 图片刷新：1x1 纯绿 / 1x1 纯蓝 PNG（覆盖保存后内容真实不同——
+// 代次推进 + 新版本 URL 返回新内容的链路载体）
+const REFRESH_GREEN_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgaGAAAAEEAIFw9selAAAAAElFTkSuQmCC'
+const REFRESH_BLUE_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYPgPAAEDAQAIicLsAAAAAElFTkSuQmCC'
 export const LARGE_DOC_LINES = 100_000
 
 // #133 界面域样式契约样例：公式（行内/块级/错误）、mermaid（有效/无效）、
@@ -771,6 +777,19 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   writeFileSync(path.join(wsDir, 'images.md'), IMAGES_DOC, 'utf8')
   mkdirSync(path.join(wsDir, 'assets'), { recursive: true })
   writeFileSync(path.join(wsDir, 'assets', '图片 一.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
+  // #201 图片刷新：初始绿图 + 备用蓝图（覆盖保存的新内容载体）+ 引用文档
+  writeFileSync(path.join(wsDir, 'assets', '刷新甲.png'), Buffer.from(REFRESH_GREEN_PNG_BASE64, 'base64'))
+  writeFileSync(path.join(wsDir, 'assets', '刷新乙.png'), Buffer.from(REFRESH_GREEN_PNG_BASE64, 'base64'))
+  writeFileSync(path.join(wsDir, 'image-refresh.md'), [
+    '# 图片刷新样例',
+    '',
+    '![刷新甲](assets/刷新甲.png)',
+    '',
+    '![刷新乙](assets/刷新乙.png)',
+    '',
+    '结尾段。',
+    '',
+  ].join('\n'), 'utf8')
   // #11 双链：源文档、按名/屏外标题目标、文本编辑器 reveal 目标、重名候选
   // 与大小写目标（Windows 宿主大小写不敏感匹配的断言载体）
   // #197 反链：两个引用者 + 被引目标（反链面板、四态与跳转断言载体）
