@@ -21,6 +21,7 @@ import { hostLocale } from './host/hostLocale'
 import { KeybindingService } from './host/keybindingService'
 import { runStyleReferenceExport } from './host/styleReferenceExport'
 import { createVaultIndexService, currentRootRefs } from './host/vaultIndexWiring'
+import { installRenameRefUpdater } from './host/vaultRenameWiring'
 import { createIndexMaintenance, createIndexSettingsStore, initialExcludePatterns } from './host/vaultIndexMaintenance'
 import { t } from './shared/i18n'
 
@@ -102,6 +103,10 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
         void vaultIndex.setRoots(currentRootRefs())
       }),
+      // #199 单文件更名/移动的引用自动更新：will 通道改写（WorkspaceEdit
+      // 随 rename 原子应用、可撤销）+ did 通道索引刷新；外部工具改名无
+      // 事件，只经 watcher 增量维护（通道语义见 vaultRenameWiring 头注释）
+      ...installRenameRefUpdater(vaultIndex, process.platform === 'win32'),
     )
   }
   context.subscriptions.push(

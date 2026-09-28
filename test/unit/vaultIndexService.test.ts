@@ -1,7 +1,7 @@
 // #197 宿主索引服务契约测试：扫描 / 持久化恢复 / 覆盖层 / 反链查询 /
 // 多根边界 / 生命周期。端口全注入（fake 内存文件系统），不依赖 vscode。
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { VaultIndexService, type VaultIndexScanPort, type VaultIndexStoragePort } from '../../src/host/vaultIndexService'
+import { VaultIndexService, type VaultIndexScanPort, type VaultIndexStoragePort, type VaultTargetChangeEvent } from '../../src/host/vaultIndexService'
 import { rootKeyOf } from '../../src/shared/vaultIndexSnapshot'
 
 beforeEach(() => {
@@ -820,5 +820,154 @@ describe('VaultIndexService：#198 根增删（onDidChangeWorkspaceFolders 域�
     await service.setRoots([{ fsPath: 'C:/r1', uri: 'file:///c%3A/r1' }])
     expect(service.maintenanceInfo().roots[0]!.fileCount).toBe(2)
     expect(itemsOf(await service.backlinksOf('C:/r1/sub/s.md'))).toHaveLength(1)
+  })
+})
+
+describe('VaultIndexService：#199 rename 候选查询', () => {
+  it('renameCandidatesOf：ready 态返回引用者分组与被移动文档出链（磁盘真实形态匹配）', async () => {
+    const fs = makeFs({
+      'C:/vault/target.md': '# T\n\n出链 [[other]]。\n',
+      'C:/vault/ref-a.md': '# A\n\n见 [[target]]。\n',
+      'C:/vault/ref-b.md': '# B\n\n见 [x](target.md)。\n',
+      'C:/vault/other.md': '# O\n',
+    })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    const c = service.renameCandidatesOf('C:/vault/target.md')
+    expect(c.status).toBe('ready')
+    expect(c.incoming.map((g) => g.fsPath)).toEqual(['C:\\vault\\ref-a.md', 'C:\\vault\\ref-b.md'])
+    expect(c.incoming[0]!.edges).toHaveLength(1)
+    expect(c.incoming[0]!.edges[0]).toMatchObject({ kind: 'wikilink', target: 'target', resolvedTarget: 'target.md' })
+    expect(c.incoming[1]!.edges[0]).toMatchObject({ kind: 'mdlink' })
+    expect(c.outgoing).toHaveLength(1)
+    expect(c.outgoing[0]).toMatchObject({ target: 'other', resolvedTarget: 'other.md' })
+  })
+
+  it('无引用时 incoming 为空、outgoing 仍返回；附件目标只含 incoming', async () => {
+    const fs = makeFs({
+      'C:/vault/lonely.md': '# L\n',
+      'C:/vault/a.md': '# A\n\n![图](pic.png)。\n',
+      'C:/vault/pic.png': '\u0000png',
+    })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    const lonely = service.renameCandidatesOf('C:/vault/lonely.md')
+    expect(lonely.status).toBe('ready')
+    expect(lonely.incoming).toEqual([])
+    expect(lonely.outgoing).toEqual([])
+    const pic = service.renameCandidatesOf('C:/vault/pic.png')
+    expect(pic.status).toBe('ready')
+    expect(pic.incoming.map((g) => g.fsPath)).toEqual(['C:\\vault\\a.md'])
+    expect(pic.outgoing).toEqual([])
+  })
+
+  it('覆盖层接管：未保存编辑的引用者用覆盖层边（区间对齐未保存文本）', async () => {
+    const fs = makeFs({
+      'C:/vault/target.md': '# T\n',
+      'C:/vault/ref.md': '# R\n\n见 [[target]]。\n',
+    })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // 未保存编辑：链接前插一行（区间整体后移）+ 新增一处引用
+    const edited = '# R\n\n前置行\n见 [[target]] 与 [[target]]。\n'
+    service.applyUnsaved('C:/vault/ref.md', 3, edited)
+    await vi.advanceTimersByTimeAsync(600) // 冲刷防抖（500ms）
+    const c = service.renameCandidatesOf('C:/vault/target.md')
+    expect(c.status).toBe('ready')
+    expect(c.incoming).toHaveLength(1)
+    expect(c.incoming[0]!.edges).toHaveLength(2) // 覆盖层边接管基线（1 → 2）
+    expect(c.incoming[0]!.edges[0]!.start).toBe(edited.indexOf('[[target]]'))
+  })
+
+  it('扫描未完成时 not-ready；工作区外路径 outside', async () => {
+    const fs = makeFs({ 'C:/vault/a.md': '# A\n' })
+    const { service } = makeService(fs)
+    const init = service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    const scanning = service.renameCandidatesOf('C:/vault/a.md')
+    expect(scanning.status).toBe('not-ready')
+    expect(scanning.incoming).toEqual([])
+    await init
+    const outside = service.renameCandidatesOf('D:/elsewhere/x.md')
+    expect(outside.status).toBe('outside')
+  })
+})
+
+describe('VaultIndexService：#199 rename 后索引刷新（refreshRenamed）', () => {
+  it('md 移动：旧条目移除（deleted 正证据）、新路径登记且出链重算', async () => {
+    const fs = makeFs({
+      'C:/vault/target.md': '# T\n\n出链 [[other]]。\n',
+      'C:/vault/ref.md': '# R\n\n见 [[target]]。\n',
+      'C:/vault/other.md': '# O\n',
+    })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    const before = service.maintenanceInfo().roots[0]!.fileCount
+    // 磁盘完成移动（rename 已发生）
+    fs.files.delete('C:/vault/target.md')
+    fs.stats.delete('C:/vault/target.md')
+    fs.files.set('C:/vault/renamed.md', '# T\n\n出链 [[other]]。\n')
+    fs.stats.set('C:/vault/renamed.md', { mtimeMs: 1_700_000_001_000, size: 20 })
+    const events: VaultTargetChangeEvent[] = []
+    service.onTargetChange((e) => events.push(e))
+    await service.refreshRenamed('C:/vault/target.md', 'C:/vault/renamed.md')
+    // 条目数守恒：旧移除、新登记
+    expect(service.maintenanceInfo().roots[0]!.fileCount).toBe(before)
+    // 新路径出链登记：other.md 的反链含 renamed.md
+    expect(itemsOf(await service.backlinksOf('C:/vault/other.md')).map((i) => i.sourceRelPath))
+      .toContain('renamed.md')
+    // 旧路径正证据删除广播
+    expect(events.some((e) => e.relPath === 'target.md' && e.status === 'deleted')).toBe(true)
+  })
+
+  it('附件移动：旧 asset 移除、新 asset 登记（事件驱动窄登记）且引用解析延续', async () => {
+    const fs = makeFs({
+      'C:/vault/a.md': '# A\n\n![图](pic.png)。\n',
+      'C:/vault/pic.png': '\u0000png',
+    })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    expect(service.maintenanceInfo().roots[0]!.fileCount).toBe(2)
+    fs.files.delete('C:/vault/pic.png')
+    fs.stats.delete('C:/vault/pic.png')
+    fs.files.set('C:/vault/pic2.png', '\u0000png')
+    fs.stats.set('C:/vault/pic2.png', { mtimeMs: 1_700_000_002_000, size: 4 })
+    await service.refreshRenamed('C:/vault/pic.png', 'C:/vault/pic2.png')
+    expect(service.maintenanceInfo().roots[0]!.fileCount).toBe(2) // 旧移除 + 新登记
+    // 引用者重扫后解析延续（改写链路的后续：applyUnsaved 模拟已改写文本）
+    service.applyUnsaved('C:/vault/a.md', 2, '# A\n\n![图](pic2.png)。\n')
+    await vi.advanceTimersByTimeAsync(600)
+    const back = await service.backlinksOf('C:/vault/pic2.png')
+    expect(back.status).toBe('ready')
+    expect(itemsOf(back).map((i) => i.sourceRelPath)).toEqual(['a.md'])
+  })
+
+  it('排除的 md 不入索引域（rename 刷新跳过）；未排除照常', async () => {
+    const fs = makeFs({
+      'C:/vault/keep.md': '# K\n',
+      'C:/vault/ignored/x.md': '# X\n',
+      'C:/vault/ignored/y.md': '# Y\n',
+    })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    await service.setExcludePatterns(['**/.git/**', '**/node_modules/**', 'ignored/**'])
+    const before = service.maintenanceInfo().roots[0]!.fileCount
+    fs.files.delete('C:/vault/ignored/x.md')
+    fs.stats.delete('C:/vault/ignored/x.md')
+    fs.files.set('C:/vault/ignored/x2.md', '# X2\n')
+    fs.stats.set('C:/vault/ignored/x2.md', { mtimeMs: 1, size: 4 })
+    await service.refreshRenamed('C:/vault/ignored/x.md', 'C:/vault/ignored/x2.md')
+    expect(service.maintenanceInfo().roots[0]!.fileCount).toBe(before) // 排除域不进不出
+  })
+
+  it('新路径在索引域外（根外）只移除旧条目', async () => {
+    const fs = makeFs({
+      'C:/vault/target.md': '# T\n',
+    })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    fs.files.delete('C:/vault/target.md')
+    fs.stats.delete('C:/vault/target.md')
+    await service.refreshRenamed('C:/vault/target.md', 'D:/outside/target.md')
+    expect(service.maintenanceInfo().roots[0]!.fileCount).toBe(0)
   })
 })

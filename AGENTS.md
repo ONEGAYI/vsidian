@@ -183,6 +183,7 @@ vsidian/
 │   │   ├── vaultIndexService.ts        # 引用索引宿主服务（#197）
 │   │   ├── vaultIndexWiring.ts         # 索引服务 vscode 层端口装配
 │   │   ├── vaultLinkExtract.ts         # 出链抽取纯逻辑（#197）
+│   │   ├── vaultRenameWiring.ts        # rename 引用更新装配（#199）
 │   │   ├── viewCycle.ts                # 三态视图编排纯逻辑
 │   │   └── wikilinkTarget.ts           # 宿主侧双链目标解析纯逻辑（#11）
 │   ├── shared/      # 两端共享纯逻辑
@@ -221,6 +222,7 @@ vsidian/
 │   │   ├── vaultIndexSchedule.ts # 索引维护调度纯逻辑与初值常量
 │   │   ├── vaultIndexSnapshot.ts # 分片快照存储纯逻辑（#195 选型基线）
 │   │   ├── vaultLink.ts          # 根内相对路径解析单一事实源（#196）
+│   │   ├── vaultRename.ts        # 引用改写计划纯逻辑（#199）
 │   │   └── wikilink.ts           # 双链形态学单一事实源（#11）
 │   └── webview/     # webview 端实现
 │       ├── anchorFlash.ts              # 跳转目标高亮装饰状态

@@ -245,6 +245,11 @@ export const en = {
   'host.indexRebuildFailed': 'Index rebuild failed: {detail}',
   'host.indexCleanupDone': 'Index cache cleaned; {count} obsolete generation(s) removed.',
   'host.indexCleanupFailed': 'Cache cleanup failed: {detail}',
+  // ---- #199 rename/move reference auto-update (host notices; batch merged) ----
+  'host.renameRefsUpdated': 'Renamed "{file}" and updated {count} reference(s) in {files} file(s).',
+  'host.renameRefsPartiallyUpdated': 'Renamed "{file}" and updated {count} reference(s); {skipped} skipped (out of root or content changed) — not fully updated.',
+  'host.renameRefsSkippedAll': 'Renamed "{file}"; references were NOT updated: {skipped} skipped (out of root or content changed).',
+  'host.renameRefsIndexNotReady': 'Renamed "{file}", but the reference index is not ready yet, so references were left unchanged (rebuild the index later from the settings page if needed).',
   /** 运行时设置定义注册（测试钩子/懒注册）的拒绝原因 */
   'host.invalidSettingDefinition': 'Invalid definition: {definition}',
   'host.duplicateSettingKey': 'Setting key already exists: {key}',

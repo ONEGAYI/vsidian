@@ -229,6 +229,11 @@ export const zhCn: Record<MessageKey, string> = {
   'host.indexRebuildFailed': '索引重建失败：{detail}',
   'host.indexCleanupDone': '索引缓存已清理，移除 {count} 个过期代际。',
   'host.indexCleanupFailed': '缓存清理失败：{detail}',
+  // ---- #199 更名/移动引用自动更新（宿主通知；批量操作合并提示）----
+  'host.renameRefsUpdated': '已更名「{file}」并更新 {count} 处引用（{files} 个文件）。',
+  'host.renameRefsPartiallyUpdated': '已更名「{file}」并更新 {count} 处引用；{skipped} 处因越界或内容变化跳过，未全部更新。',
+  'host.renameRefsSkippedAll': '已更名「{file}」，引用未更新：{skipped} 处因越界或内容变化被跳过。',
+  'host.renameRefsIndexNotReady': '已更名「{file}」，但引用索引尚未就绪，本次未更新引用（可稍后在设置页重建索引后手动修正）。',
   'host.invalidSettingDefinition': '非法定义：{definition}',
   'host.duplicateSettingKey': '设置键已存在：{key}',
 
