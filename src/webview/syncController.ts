@@ -166,6 +166,8 @@ import {
   collectBlockIds,
   generateBlockId,
   planBlockIdInsertion,
+  standaloneBlockIdAfterBlock,
+  standaloneBlockIdOf,
 } from '../shared/blockId'
 import { FM_SCAN_LIMIT, frontmatterRange } from './markdownDoc'
 import {
@@ -4450,9 +4452,11 @@ export class WebviewSyncController {
     })
   }
 
-  /** 复制块链接：块尾行既有 ` ^id` 直接用；没有则先自动补写（4 位随机
-   *  小写字母、全文 id 查重；块尾行行尾、不足一空格先补）——单事务
-   *  dispatch（一笔 edit.request = 撤销一次），dispatch 成功再写剪贴板 */
+  /** 复制块链接：块已有块 id（行尾 ` ^id` 或独立行 `^id` 双形态——增集
+   *  识别，手写任一形态都复用）直接用；没有则先自动补写（6 位随机
+   *  [a-z0-9]、全文 id 查重避让；块尾行后空一行写独立行，Obsidian 默认
+   *  形态）——单事务 dispatch（一笔 edit.request = 撤销一次），dispatch
+   *  成功再写剪贴板 */
   private copyBlockLinkOf(target: BlockMenuTarget): void {
     const view = this.view
     if (!view) {
@@ -4462,7 +4466,12 @@ export class WebviewSyncController {
     const lines = doc.toString().split('\n')
     const lastLine = target.block.end
     const lineText = lines[lastLine] ?? ''
-    const existing = blockIdOfLine(lineText)
+    // 已有 id 三个落点：块尾行行尾（行尾形态）、块尾行自身（紧贴独立行被
+    // 块区间吞并）、块尾之后跨空行首个非空行（空行隔开的独立行）
+    const existing =
+      blockIdOfLine(lineText) ??
+      standaloneBlockIdOf(lineText) ??
+      standaloneBlockIdAfterBlock(lines, target.block)
     if (existing !== null) {
       this.bridge.postMessage({
         kind: 'clipboard.write',
@@ -4471,7 +4480,7 @@ export class WebviewSyncController {
       return
     }
     const id = generateBlockId(collectBlockIds(lines))
-    const insert = planBlockIdInsertion(lineText, id)
+    const insert = planBlockIdInsertion(id)
     const lineInfo = doc.line(lastLine + 1)
     try {
       view.dispatch({ changes: { from: lineInfo.to, to: lineInfo.to, insert } })

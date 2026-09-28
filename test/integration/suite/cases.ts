@@ -9039,8 +9039,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
       (await clipboardText()) === '[[block-menu#块菜单标题]]' ? true : undefined),
       `标题链接成品应为 [[block-menu#块菜单标题]]（实际 ${await clipboardText()}）`)
 
-    // 普通段：无 id 自动补写 → 剪贴板 [[block-menu#^xxxx]]，磁盘块尾行尾
-    // 恰好多出 ` ^id`，单笔写回（appliedEdits +1 = 撤销一步）
+    // 普通段：无 id 自动补写 → 剪贴板 [[block-menu#^xxxxxx]]，磁盘块尾行后
+    // 空一行恰好多出独立行 `^id`（#163 验收反馈默认形态），单笔写回
+    // （appliedEdits +1 = 撤销一步）
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
       kind: 'block.test.contextMenu', pos: BLOCK_MENU_DOC.indexOf('右键目标段落'),
     })
@@ -9050,8 +9051,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
     // 写回断言走视图文本：写回使 TextDocument dirty 不落盘（磁盘断言在仓库
     // 惯例中仅用于「不得写」场景，outline/frontmatter 写回用例同款口径）
     const writtenState = await waitViewState('block-menu.md', (v) =>
-      /右键目标段落。 \^[a-z]{4}\n/.test(v.text))
-    const copiedId = (writtenState.text.match(/右键目标段落。 \^([a-z]{4})\n/) ?? [])[1]!
+      /右键目标段落。\n\n\^[a-z0-9]{6}\n/.test(v.text))
+    const copiedId = (writtenState.text.match(/右键目标段落。\n\n\^([a-z0-9]{6})\n/) ?? [])[1]!
     assert(await poll('块链接剪贴板', async () =>
       (await clipboardText()) === `[[block-menu#^${copiedId}]]` ? true : undefined),
       `块链接成品应为 [[block-menu#^${copiedId}]]（实际 ${await clipboardText()}）`)
@@ -9064,10 +9065,10 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.history', op: 'undo' })
     await waitViewState('block-menu.md', (v) => v.text === BLOCK_MENU_DOC)
     await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.history', op: 'redo' })
-    await waitViewState('block-menu.md', (v) => /右键目标段落。 \^[a-z]{4}\n/.test(v.text))
+    await waitViewState('block-menu.md', (v) => /右键目标段落。\n\n\^[a-z0-9]{6}\n/.test(v.text))
 
-    // 表格整块：id 写在表格末行行尾（表格右键按表格整块）。pos 从最新
-    // 文本动态取——前序步骤已在普通段行尾补写 id，旧文档偏移已失效
+    // 表格整块：id 写在表格末行后空一行独立行（表格右键按表格整块）。pos
+    // 从最新文本动态取——前序步骤已在普通段后补写两行，旧文档偏移已失效
     const afterParaWrite = (await waitViewState('block-menu.md')).text
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
       kind: 'block.test.contextMenu', pos: afterParaWrite.indexOf('|---|---|'),
@@ -9076,7 +9077,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
       kind: 'block.test.menuClick', command: 'copyBlockLink',
     })
     const afterTableWrite = await waitViewState('block-menu.md', (v) =>
-      /\| 1 \| 2 \| \^[a-z]{4}\n/.test(v.text))
+      /\| 1 \| 2 \|\n\n\^[a-z0-9]{6}\n/.test(v.text))
 
     // 既有 id 段：直接复制既有 id，零改写（视图文本对拍；pos 同样动态取）
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {

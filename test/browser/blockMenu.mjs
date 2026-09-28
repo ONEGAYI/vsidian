@@ -96,20 +96,22 @@ try {
   console.log('[块菜单回归][PASS] 复制标题链接：linkHeading 出站、标题字面文本')
 
   // ---- 场景 E：复制块链接无 id 段：真实左键 → 自动补写 + linkBlock ----
+  // #163 验收反馈：默认写入形态 = 块尾行后空一行 + 独立行 ^id（6 位随机）
   await line(6).click({ button: 'right', position: { x: 60, y: 6 } })
   await page.locator('.vsidian-block-menu button[data-vsidian-command="copyBlockLink"]').click()
   state = await page.evaluate(() => window.readMenu())
-  assert.match(state.text, /普通段落一行 \^[a-z]{4}/,
-    `块尾行应自动补写 id（实际片段 ${JSON.stringify(state.text.split('\n')[6])}）`)
+  assert.match(state.text, /普通段落一行\n\n\^[a-z0-9]{6}\n/,
+    `块尾行后应空一行写独立行 id（实际片段 ${JSON.stringify(state.text.split('\n').slice(6, 9))}）`)
   const blockMsg = await page.evaluate(() => window.sent().findLast(
     (m) => m.kind === 'clipboard.write' && 'linkBlock' in m))
-  assert.match(blockMsg?.linkBlock?.blockId, /^[a-z]{4}$/, 'linkBlock 携 4 位小写字母 id')
+  assert.match(blockMsg?.linkBlock?.blockId, /^[a-z0-9]{6}$/, 'linkBlock 携 6 位随机 id')
   passed++
-  console.log('[块菜单回归][PASS] 复制块链接：自动补写 4 位 id + linkBlock 出站')
+  console.log('[块菜单回归][PASS] 复制块链接：自动补写独立行 6 位 id + linkBlock 出站')
 
   // ---- 场景 F：已有 id 段：零写回直接复制既有 id ----
+  // 场景 E 插入两行后「已有 id 的段落」从行 8 移到行 10
   await page.evaluate(() => window.clearSent())
-  await line(8).click({ button: 'right', position: { x: 60, y: 6 } })
+  await line(10).click({ button: 'right', position: { x: 60, y: 6 } })
   await page.locator('.vsidian-block-menu button[data-vsidian-command="copyBlockLink"]').click()
   state = await page.evaluate(() => window.readMenu())
   assert.match(state.text, /已有 id 的段落 \^keep1$/, '既有 id 段零改写')
@@ -131,14 +133,14 @@ try {
   await page.evaluate(() => window.post({ kind: 'blockLink.copy' }))
   state = await page.evaluate(() => window.readMenu())
   // 场景 E 已为该块写入 id：光标块复制应沿用既有 id，不再追加第二个标记
-  assert.match(state.text, /普通段落一行 \^[a-z]{4}(?:\n|$)/,
+  assert.match(state.text, /普通段落一行\n\n\^[a-z0-9]{6}(?:\n|$)/,
     '光标所在块应沿用（或补写）恰好一个块 id')
-  const paraLine = state.text.split('\n')[6] ?? ''
-  assert.equal(paraLine.match(/\^[a-z]{4}/g)?.length, 1,
+  const paraBlock = state.text.split('\n').slice(6, 9).join('\n')
+  assert.equal(paraBlock.match(/\^[a-z0-9]{6}/g)?.length, 1,
     '同一块不得追加第二个 id')
   const cursorMsg = await page.evaluate(() => window.sent().findLast(
     (m) => m.kind === 'clipboard.write' && 'linkBlock' in m))
-  assert.match(cursorMsg?.linkBlock?.blockId, /^[a-z]{4}$/, '光标块复制仍出站 linkBlock')
+  assert.match(cursorMsg?.linkBlock?.blockId, /^[a-z0-9]{6}$/, '光标块复制仍出站 linkBlock')
   passed++
   console.log('[块菜单回归][PASS] 快捷键出站与宿主命令回流：光标块同一执行路径')
 

@@ -12,6 +12,8 @@ import {
   generateBlockId,
   planBlockIdInsertion,
   scanFenceBlocks,
+  standaloneBlockIdAfterBlock,
+  standaloneBlockIdOf,
 } from '../../src/shared/blockId'
 
 describe('行尾块 id 标记（blockIdOfLine）', () => {
@@ -125,8 +127,25 @@ describe('行所属块（blockRangeOfLine）', () => {
   })
 })
 
+describe('独立行块 id 标记（standaloneBlockIdOf，#163 验收反馈增集形态）', () => {
+  it('整行仅 ^id（容忍前后空白与缩进）：命中', () => {
+    expect(standaloneBlockIdOf('^abc')).toBe('abc')
+    expect(standaloneBlockIdOf('  ^abc-def')).toBe('abc-def')
+    expect(standaloneBlockIdOf('\t^x9  ')).toBe('x9')
+    expect(standaloneBlockIdOf(' ^abc ')).toBe('abc')
+  })
+  it('带正文 / 行中标记 / 双井号 / 越集字符 / 空行：不命中', () => {
+    expect(standaloneBlockIdOf('正文 ^abc')).toBeNull() // 行尾形态归 blockIdOfLine
+    expect(standaloneBlockIdOf('^abc 后文')).toBeNull()
+    expect(standaloneBlockIdOf('^^abc')).toBeNull()
+    expect(standaloneBlockIdOf('^ab_c')).toBeNull()
+    expect(standaloneBlockIdOf('^中文')).toBeNull()
+    expect(standaloneBlockIdOf('')).toBeNull()
+  })
+})
+
 describe('已有 id 收集与唯一 id 生成（collectBlockIds / generateBlockId）', () => {
-  it('收集：普通行与闭围栏行计入；围栏内部与开围栏行不计', () => {
+  it('收集：双形态并存——行尾、闭围栏行行尾与围栏外独立行都计入；围栏内部与开围栏行不计', () => {
     const lines = [
       '---',
       'title: x',
@@ -134,42 +153,61 @@ describe('已有 id 收集与唯一 id 生成（collectBlockIds / generateBlockI
       '',
       '正文 ^abc',
       '',
+      '^stand1',
+      '',
       '```js',
       'code ^inside',
+      '^insidestd',
       '``` ^fence1',
       '',
       '```js ^info',
       'x',
       '```',
     ]
-    expect(collectBlockIds(lines)).toEqual(new Set(['abc', 'fence1']))
+    expect(collectBlockIds(lines)).toEqual(new Set(['abc', 'stand1', 'fence1']))
   })
-  it('生成：4 位小写字母；与已有冲突重生成直至唯一（注入确定性随机）', () => {
-    // 注入随机数（每字符一次 [0,1) 抽样）：首个产物 abcd 撞车，第二个 abce 唯一
-    const letter = (n: number): number => n / 26
-    const pool = [letter(0), letter(1), letter(2), letter(3), letter(0), letter(1), letter(2), letter(4)]
+  it('生成：6 位 [a-z0-9]（Obsidian 六位随机块 hash 风格）；与已有冲突重生成直至唯一（注入确定性随机）', () => {
+    // 注入随机数（每字符一次 [0,1) 抽样，36 字符集）：首个产物 aaaaaa 撞车，第二个 aaaaab 唯一
+    const char = (n: number): number => n / 36
+    const pool = [
+      char(0), char(0), char(0), char(0), char(0), char(0),
+      char(0), char(0), char(0), char(0), char(0), char(1),
+    ]
     let cursor = 0
     const pick = (): number => pool[cursor++]!
-    expect(generateBlockId(new Set(['abcd']), pick)).toBe('abce')
+    expect(generateBlockId(new Set(['aaaaaa']), pick)).toBe('aaaaab')
   })
   it('生成字符集与长度固定', () => {
     const random = Math.random
     for (let i = 0; i < 50; i++) {
-      expect(generateBlockId(new Set(), random)).toMatch(/^[a-z]{4}$/)
+      expect(generateBlockId(new Set(), random)).toMatch(/^[a-z0-9]{6}$/)
     }
   })
 })
 
-describe('块尾行写入计划（planBlockIdInsertion）', () => {
-  it('行尾无空白：补一个空格再接 ^id', () => {
-    expect(planBlockIdInsertion('正文', 'abcd')).toBe(' ^abcd')
+describe('块尾之后的独立行 id 探查（standaloneBlockIdAfterBlock，复制块链接查已有 id）', () => {
+  it('空行隔开：块尾跨空行后的首个非空行是 ^id 独立行即命中', () => {
+    const lines = ['目标段落', '', '^keepstd', '', '后文']
+    expect(standaloneBlockIdAfterBlock(lines, { start: 0, end: 0 })).toBe('keepstd')
   })
-  it('行尾已有空格/制表符：直接接 ^id（不叠双空格）', () => {
-    expect(planBlockIdInsertion('正文 ', 'abcd')).toBe('^abcd')
-    expect(planBlockIdInsertion('正文\t', 'abcd')).toBe('^abcd')
-    expect(planBlockIdInsertion('正文  ', 'abcd')).toBe('^abcd')
+  it('紧贴块尾的独立行（块区间已吞并该行）：从 end+1 起探查为 null（由 standaloneBlockIdOf(lastLine) 覆盖）', () => {
+    const lines = ['目标段落', '^keeptight', '', '后文']
+    // blockRangeOfLine 会把 ^keeptight 吞进块（end=1），本函数从 end+1 起看
+    expect(standaloneBlockIdAfterBlock(lines, { start: 0, end: 1 })).toBeNull()
+    expect(standaloneBlockIdOf(lines[1]!)).toBe('keeptight')
   })
-  it('闭围栏行同理', () => {
-    expect(planBlockIdInsertion('```', 'zzzz')).toBe(' ^zzzz')
+  it('跨空行后是正文（下一块领地）：不命中——不得越过正文继续找', () => {
+    const lines = ['目标段落', '', '下一块', '', '^other']
+    expect(standaloneBlockIdAfterBlock(lines, { start: 0, end: 0 })).toBeNull()
+  })
+  it('块尾后全空行 / 块即文件末块：null', () => {
+    expect(standaloneBlockIdAfterBlock(['目标段落', '', ''], { start: 0, end: 0 })).toBeNull()
+    expect(standaloneBlockIdAfterBlock(['目标段落'], { start: 0, end: 0 })).toBeNull()
+  })
+})
+
+describe('块 id 写入计划（planBlockIdInsertion，独立行默认形态）', () => {
+  it('统一返回空行 + 独立行文本（自块尾行行尾起插入）：`\\n\\n^id`', () => {
+    expect(planBlockIdInsertion('abc123')).toBe('\n\n^abc123')
   })
 })

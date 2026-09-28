@@ -196,7 +196,7 @@ describe('复制块链接（linkBlock 变体）', () => {
     expect(editRequests(h)).toHaveLength(0)
   })
 
-  it('无 id：块尾行行尾自动补写 4 位小写字母 id（单笔 edit.request，可撤销一步）', () => {
+  it('无 id：块尾行后空一行写独立行 ^id（Obsidian 默认形态，单笔 edit.request，可撤销一步）', () => {
     const h = makeBridge()
     const { c } = mountPanel(h)
     c.handleHostMessage({ kind: 'block.test.contextMenu', pos: POS.paraLine2 })
@@ -206,43 +206,71 @@ describe('复制块链接（linkBlock 变体）', () => {
     const change = edits[0]!.changes[0]!
     expect(change.offset, '写入位置 = 块尾行行尾').toBe(DOC.indexOf('段落甲第二行') + '段落甲第二行'.length)
     expect(change.length).toBe(0)
-    expect(change.text).toMatch(/^ \^[a-z]{4}$/)
-    expect(c.getView()!.state.doc.toString()).toContain('段落甲第二行 ^')
+    expect(change.text).toMatch(/^\n\n\^[a-z0-9]{6}$/)
+    expect(c.getView()!.state.doc.toString()).toContain('段落甲第二行\n\n^')
     // 剪贴板 id 与写入 id 一致
     const linkMsg = h.sent.find((m) => m.kind === 'clipboard.write' && 'linkBlock' in m) as
       Extract<WebviewToHost, { kind: 'clipboard.write'; linkBlock: { docUri: string; blockId: string } }>
-    expect(linkMsg.linkBlock.blockId).toBe(change.text.slice(2))
+    expect(linkMsg.linkBlock.blockId).toBe(change.text.slice(3))
     expect(linkMsg.linkBlock.docUri).toBe(DOC_URI)
   })
 
-  it('行尾不足一个空格先补一个空格；表格按整块写入末行行尾', () => {
+  it('块已有独立行 id（空行隔开，用户手写形态）：直接复用零写回', () => {
+    const h = makeBridge()
+    const doc = '---\ntitle: 头区\n---\n\n目标段落\n\n^keepstd\n\n后文\n'
+    const { c } = mountPanel(h, doc)
+    c.handleHostMessage({ kind: 'block.test.contextMenu', pos: doc.indexOf('目标段落') })
+    c.handleHostMessage({ kind: 'block.test.menuClick', command: 'copyBlockLink' })
+    expect(h.sent).toContainEqual({
+      kind: 'clipboard.write',
+      linkBlock: { docUri: DOC_URI, blockId: 'keepstd' },
+    })
+    expect(editRequests(h)).toHaveLength(0)
+  })
+
+  it('块已有紧贴独立行 id：直接复用零写回', () => {
+    const h = makeBridge()
+    const doc = '---\ntitle: 头区\n---\n\n目标段落\n^keeptight\n\n后文\n'
+    const { c } = mountPanel(h, doc)
+    c.handleHostMessage({ kind: 'block.test.contextMenu', pos: doc.indexOf('目标段落') })
+    c.handleHostMessage({ kind: 'block.test.menuClick', command: 'copyBlockLink' })
+    expect(h.sent).toContainEqual({
+      kind: 'clipboard.write',
+      linkBlock: { docUri: DOC_URI, blockId: 'keeptight' },
+    })
+    expect(editRequests(h)).toHaveLength(0)
+  })
+
+  it('表格按整块：块尾行后空一行写独立行 ^id', () => {
     const h = makeBridge()
     const { c } = mountPanel(h)
     c.handleHostMessage({ kind: 'block.test.contextMenu', pos: POS.tableRow })
     c.handleHostMessage({ kind: 'block.test.menuClick', command: 'copyBlockLink' })
     const text = c.getView()!.state.doc.toString()
-    expect(text).toMatch(/\| 1 \| 2 \| \^[a-z]{4}$/m)
+    expect(text).toMatch(/\| 1 \| 2 \|\n\n\^[a-z0-9]{6}$/m)
     expect(editRequests(h)).toHaveLength(1)
   })
 
-  it('围栏块：id 写在闭围栏行行尾（Obsidian 形态）', () => {
+  it('围栏块：id 写在闭围栏行后空一行独立行（新默认形态）', () => {
     const h = makeBridge()
     const doc = '```js\nconst a = 1\n```\n'
     const { c } = mountPanel(h, doc)
     c.handleHostMessage({ kind: 'block.test.contextMenu', pos: doc.indexOf('const') })
     c.handleHostMessage({ kind: 'block.test.menuClick', command: 'copyBlockLink' })
-    expect(c.getView()!.state.doc.toString()).toMatch(/``` \^[a-z]{4}\n$/)
+    expect(c.getView()!.state.doc.toString()).toMatch(/```\n\n\^[a-z0-9]{6}\n$/)
   })
 
-  it('生成 id 与全文已有 id 查重（不撞车）', () => {
+  it('生成 id 与全文已有 id 查重（不撞车；行尾与独立行形态都进查重域）', () => {
     const h = makeBridge()
-    const doc = '已有甲 ^aaaa\n\n目标段落\n'
+    // 两个既有 id 分属别的块（行尾形态 + 独立行形态），目标段落自身无 id
+    const doc = '已有甲 ^aaaaaa\n\n目标段落\n\n后文块\n\n^bbbbbb\n'
     const { c } = mountPanel(h, doc)
-    c.handleHostMessage({ kind: 'block.test.contextMenu', pos: doc.indexOf('目标') })
+    c.handleHostMessage({ kind: 'block.test.contextMenu', pos: doc.indexOf('目标段落') })
     c.handleHostMessage({ kind: 'block.test.menuClick', command: 'copyBlockLink' })
     const text = c.getView()!.state.doc.toString()
-    const ids = [...text.matchAll(/\^([a-z]{4})/g)].map((m) => m[1])
-    expect(new Set(ids).size, '两次 id 不得重复').toBe(ids.length)
+    const ids = [...text.matchAll(/\^([a-z0-9]{6})/g)].map((m) => m[1])
+    expect(ids.length, '应有三个 6 位 id（两个既有 + 一个生成）').toBe(3)
+    expect(new Set(ids).size, 'id 不得重复').toBe(ids.length)
   })
 })
 
@@ -283,7 +311,7 @@ describe('快捷键入口（同一命令的两个入口汇到同一执行）', (
     view.dispatch({ selection: { anchor: pos, head: pos } })
     h.sent.length = 0
     c.handleHostMessage({ kind: 'blockLink.copy' })
-    expect(c.getView()!.state.doc.toString()).toMatch(/正文段落内容 \^[a-z]{4}/)
+    expect(c.getView()!.state.doc.toString()).toMatch(/正文段落内容\n\n\^[a-z0-9]{6}/)
     expect(h.sent.some((m) => m.kind === 'clipboard.write' && 'linkBlock' in m)).toBe(true)
     expect(h.sent.filter((m) => m.kind === 'edit.request')).toHaveLength(1)
   })

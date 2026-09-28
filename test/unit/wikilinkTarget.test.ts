@@ -358,3 +358,60 @@ describe('findBlockOffset：目标文档块定位（#159，块 id 行尾标记�
     expect(findBlockOffset('正文^no-space\n', 'no-space')).toBeNull()
   })
 })
+
+describe('findBlockOffset：独立行块 id 形态（#163 验收反馈，增集不改行尾行为）', () => {
+  it('空行隔开的独立行（Obsidian 默认写入形态）：命中并归属上方块', () => {
+    const doc = '段落甲\n第二行\n\n^std-blk\n\n后文\n'
+    const hit = findBlockOffset(doc, 'std-blk')!
+    expect(doc.slice(hit.offset, hit.end)).toBe('段落甲')
+    expect(hit.offset).toBe(0)
+  })
+
+  it('紧贴块尾的独立行（无空行）：命中并归属上方块', () => {
+    const doc = '前置\n\n段落甲\n^tight-blk\n\n后文\n'
+    const hit = findBlockOffset(doc, 'tight-blk')!
+    expect(doc.slice(hit.offset, hit.end)).toBe('段落甲')
+    expect(hit.offset).toBe('前置\n\n'.length)
+  })
+
+  it('围栏块的独立行 id（闭围栏后空行 + ^id）：块首=开围栏行', () => {
+    const doc = '```js\nconst a = 1\n```\n\n^fence-std\n'
+    const hit = findBlockOffset(doc, 'fence-std')!
+    expect(doc.slice(hit.offset, hit.end)).toBe('```js')
+    expect(hit.offset).toBe(0)
+  })
+
+  it('围栏内部的独立行 ^id 是代码内容：不命中', () => {
+    const doc = '```js\n^inside-std\n```\n'
+    expect(findBlockOffset(doc, 'inside-std')).toBeNull()
+  })
+
+  it('文件头悬挂的独立行（上方无块）：不命中', () => {
+    expect(findBlockOffset('^orphan-blk\n\n正文\n', 'orphan-blk')).toBeNull()
+    expect(findBlockOffset('\n\n^orphan-blk\n', 'orphan-blk')).toBeNull()
+  })
+
+  it('行尾与独立行双形态并存：各自命中各块；同 id 多命中取文档序首', () => {
+    const doc = '块甲 ^tail-blk\n\n块乙\n\n^std-blk\n\n块丙 ^tail-blk\n'
+    // 行尾形态的块首行区间含标记（#159 既有口径：行首到行尾整行）
+    const tailHit = findBlockOffset(doc, 'tail-blk')!
+    expect(doc.slice(tailHit.offset, tailHit.end)).toBe('块甲 ^tail-blk')
+    // 独立行形态的块首行区间不含标记行（标记行不属于块）
+    const stdHit = findBlockOffset(doc, 'std-blk')!
+    expect(doc.slice(stdHit.offset, stdHit.end)).toBe('块乙')
+  })
+
+  it('列表块的独立行 id：跨空行回溯列表块首行', () => {
+    const doc = '前言\n\n- 项一\n- 项二\n\n^list-std\n'
+    const hit = findBlockOffset(doc, 'list-std')!
+    expect(doc.slice(hit.offset, hit.end)).toBe('- 项一')
+  })
+
+  it('CRLF 行尾容错：宿主系坐标（\\r 计入 offset）', () => {
+    const doc = '段落甲\r\n\r\n^crlf-std\r\n\r\n尾部\r\n'
+    const hit = findBlockOffset(doc, 'crlf-std')!
+    expect(doc.slice(hit.offset, hit.end)).toBe('段落甲')
+    expect(hit.offset).toBe(0) // 块首=段落甲行首（文件头），\r 计入 end 之后各偏移
+    expect(hit.end).toBe('段落甲'.length) // 行尾 \r 不计入 end（剥 \r 后行宽）
+  })
+})

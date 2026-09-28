@@ -26,8 +26,14 @@
 // WikilinkResolveContext 描述（与 LinkContext 同一注入模式）。
 import * as path from 'node:path'
 // 块形态学共享单一事实源（#162 提炼自本模块，行为不变）：ATX/围栏/行尾
-// ` ^id` 判定与 webview 复制块链接入口同源
-import { ATX_HEADING_RE, blockIdOfLine, fenceMarkerOf } from '../shared/blockId'
+// ` ^id` 与独立行 `^id` 双形态判定与 webview 复制块链接入口同源
+import {
+  ATX_HEADING_RE,
+  blockIdOfLine,
+  blockRangeOfLine,
+  fenceMarkerOf,
+  standaloneBlockIdOf,
+} from '../shared/blockId'
 
 /** 双链解析上下文（宿主文件系统语义由注入方描述） */
 export interface WikilinkResolveContext {
@@ -198,15 +204,19 @@ export function findHeadingOffset(
  *  shared/blockId 的 BLOCK_ID_LINE_RE（本模块经 blockIdOfLine 同源使用） */
 
 /**
- * 目标文档内定位块（#159）：扫描行尾 ` ^id` 标记，命中行向上回溯所属块的
- * 首行，返回块首行的 [offset, end)（行首到行尾，不含换行——与
- * findHeadingOffset 的 selection reveal / view.locate 区间同款）。
+ * 目标文档内定位块（#159；#163 验收反馈增集独立行形态）：扫描行尾 ` ^id`
+ * 与独立行 `^id` 双形态标记，命中行回溯所属块的首行，返回块首行的
+ * [offset, end)（行首到行尾，不含换行——与 findHeadingOffset 的
+ * selection reveal / view.locate 区间同款）。
  * 规则（写入测试）：
+ * - 行尾形态：命中行向上回溯块首（块边界=空行、围栏行或文件头——与
+ *   shared/blockId blockRangeOfLine 同口径；#159/#162 两端闭环：右键写入
+ *   id 的块与跳转定位的块逐字节一致）
+ * - 独立行形态（Obsidian 语义）：归属其上方块——跨空行回溯第一个非空行，
+ *   取该行所属块（紧贴无空行同样归属；块首经 blockRangeOfLine 统一判定，
+ *   上方是闭围栏行时归属整个围栏块）；上方无块（文件头悬挂）不命中
  * - 围栏代码块内部的标记不命中；闭围栏行行尾标记是围栏代码块自身的块 id
- *   （Obsidian 形态），块首=开围栏行
- * - 块边界=空行、围栏行或文件头（空行含纯空白行）——与 shared/blockId
- *   blockRangeOfLine 同口径（#159/#162 两端闭环：右键写入 id 的块与跳转
- *   定位的块逐字节一致）；开围栏行的 `^` 属 info string
+ *   （Obsidian 形态），块首=开围栏行；开围栏行的 `^` 属 info string
  * - 同 id 多命中取首；未命中返回 null；CRLF 行尾容错（offset 为宿主系，
  *   \r 计入行宽）
  */
@@ -263,6 +273,21 @@ export function findBlockOffset(
         head--
       }
       return anchorOf(head)
+    }
+    if (standaloneBlockIdOf(line) === blockId) {
+      // 独立行标记归属上方块：跨空行回溯第一个非空行，其所属块即目标
+      // （紧贴时空行数为 0；上方是闭围栏行时 blockRangeOfLine 返回整围栏）
+      let above = i - 1
+      while (above >= 0 && lines[above]!.trim() === '') {
+        above--
+      }
+      if (above < 0) {
+        continue // 文件头悬挂：上方无块，不是有效块标记
+      }
+      const range = blockRangeOfLine(lines, above)
+      if (range !== null) {
+        return anchorOf(range.start)
+      }
     }
   }
   return null
