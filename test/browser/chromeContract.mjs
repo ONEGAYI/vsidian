@@ -104,7 +104,7 @@ try {
   await page.evaluate(() => { document.body.classList.add('vscode-high-contrast'); document.body.classList.remove('vscode-dark') })
   assert.equal((await pythonNameColors('live'))[1], 'rgb(128, 96, 0)',
     '浅色高对比主题（light+HC）函数色应回落浅色组暖黄（白底可读）')
-  await page.evaluate(() => { document.body.classList.add('vscode-dark') })
+  await page.evaluate(() => { document.body.classList.add('vscode-dark'); document.body.classList.remove('vscode-light') })
   assert.equal((await pythonNameColors('live'))[1], 'rgb(220, 220, 170)',
     '深色高对比主题（dark+HC）的函数色须保持可读的淡黄')
   await page.evaluate(() => { document.body.classList.remove('vscode-high-contrast') })
