@@ -23,10 +23,12 @@ import {
   type DiagramExportFailReason,
   type DiagramExportPayload,
   type HostToWebview,
+  type ImagePastePayload,
   type SerChange,
   type SettingsPayload,
   type WebviewToHost,
 } from '../shared/protocol'
+import type { ImagePasteOutcome } from './imagePasteHost'
 import { mapChangeThroughChanges } from '../shared/changeMapping'
 import { NewlineCoordinator } from '../shared/newline'
 import type { ImageResolution } from './linkTarget'
@@ -57,6 +59,12 @@ export interface PanelPort {
   openWikilink?(intent: { target: string; srcStart: number; srcEnd: number }): void
   /** #10 图片资源解析（vscode 层注入：classifyImageTarget + asWebviewUri） */
   resolveImage?(src: string): Promise<ImageResolution>
+  /** #161 图片粘贴落盘（vscode 层注入：设置读取 + 目录解析 + writeFile）；
+   *  report 回报成功（携插入文本）/ 目录非法 / 写入失败 */
+  pasteImage?(
+    payload: ImagePastePayload,
+    report: (result: ImagePasteOutcome) => void,
+  ): void
   /** #111 图表导出（vscode 层注入：载荷校验 + showSaveDialog + writeFile）；
    *  report 回报取消/校验失败/写盘失败/成功 */
   exportDiagram?(
@@ -560,6 +568,34 @@ export class DocumentSession {
           return Promise.resolve()
         }
         return this.resolveImageRequest(panel, message.reqId, message.src)
+      }
+      case 'image.paste': {
+        // #161 图片粘贴落盘：会话守卫对齐 image.request / diagram.export
+        // 先例（就绪且 docUri 匹配才放行，否则静默丢弃）；结果回来源面板。
+        // 写文档动作不在会话内发生（落盘是文件系统写入；正文插入由 webview
+        // 收结果后走标准 edit.request），暂停面板的粘贴拦截已在 webview 侧
+        // 守卫——到达此处的暂停面板请求照常落盘但 webview 不插入（无撕裂）
+        if (!panel.ready || message.docUri !== this.docUri) {
+          return Promise.resolve()
+        }
+        const report = (result: ImagePasteOutcome): void => {
+          panel.port.send(
+            result.ok
+              ? { kind: 'image.paste.result', reqId: message.reqId, ok: true, markdown: result.markdown! }
+              : {
+                  kind: 'image.paste.result',
+                  reqId: message.reqId,
+                  ok: false,
+                  reason: result.reason ?? 'invalid',
+                },
+          )
+        }
+        if (panel.port.pasteImage) {
+          panel.port.pasteImage(message, report)
+        } else {
+          report({ ok: false, reason: 'invalid' })
+        }
+        return Promise.resolve()
       }
       case 'perf.report':
         panel.lastPerfReport = message

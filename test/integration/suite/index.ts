@@ -94,10 +94,17 @@ export async function run(): Promise<void> {
         await vscode.commands.executeCommand('onegayi.vsidian._test.setSettings', {
           'editor.lineNumbers': true,
           'general.language': 'auto',
+          // #161 图片粘贴三键并入重置面：pasteLocation/pasteSubpath 残留会
+          // 让后续粘贴用例落盘到错误位置（paste 总开关残留 false 则整链
+          // 静默失效）
+          'image.paste': true,
+          'image.pasteLocation': 'same-dir',
+          'image.pasteSubpath': 'assets',
         })
         const readBack = (await vscode.commands.executeCommand(
           'onegayi.vsidian._test.getSettings')) as Record<string, unknown>
-        if ((readBack['editor.lineNumbers'] === true && readBack['general.language'] === 'auto') || attempt >= 10) {
+        if ((readBack['editor.lineNumbers'] === true && readBack['general.language'] === 'auto' &&
+          readBack['image.pasteLocation'] === 'same-dir' && readBack['image.pasteSubpath'] === 'assets') || attempt >= 10) {
           if (attempt >= 10) {
             console.warn(
               `[集成测试][WARN] 设置重置未稳定（lineNumbers=true / language=auto，最终 ${String(readBack['editor.lineNumbers'])} / ${String(readBack['general.language'])}），放行用例「${name}」`,

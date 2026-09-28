@@ -31,6 +31,7 @@ import {
   isWebviewToHost,
   type DiagramExportPayload,
   type HostToWebview,
+  type ImagePastePayload,
   type SerChange,
   type TableEditOp,
   type WebviewToHost,
@@ -55,6 +56,7 @@ import type { CssSnippetService } from './cssSnippetService'
 import type { SnippetLinkList } from '../shared/cssSnippets'
 import type { SettingsPageHandle } from './settingsPage'
 import { runDiagramExport } from './diagramExportHost'
+import { runImagePaste, type ImagePasteOutcome } from './imagePasteHost'
 import { installHostLocale, LOCALE_MESSAGES, type LocaleCode } from '../shared/locales'
 import { buildLocaleIslandHtml } from '../shared/locales/island'
 import { hostLocale } from './hostLocale'
@@ -119,6 +121,11 @@ export function isActiveTabCustomEditorOf(
 /** 图表导出消息日志（#111 测试钩子观测：钩子模式下集成测试断言
  *  webview→宿主导出链路的消息形态；按文档 URI 分桶，查询即取走） */
 const diagramExportTestLog = new Map<string, DiagramExportPayload[]>()
+
+/** 图片粘贴消息日志（#161 测试钩子观测：记录宿主收到的 image.paste 载荷
+ *  形态；落盘真实执行（无对话框依赖，与 diagram.export 的短路不同），
+ *  集成测试另以文件系统断言落盘结果；按文档 URI 分桶，查询即取走） */
+const imagePasteTestLog = new Map<string, ImagePastePayload[]>()
 
 /** 链接跳转执行日志（#10 测试钩子观测：VSIDIAN_TEST_HOOKS 下集成测试断言
  *  宿主收到的跳转意图与处置结果） */
@@ -877,6 +884,27 @@ export function createTextEditorProvider(
             return
           }
           void runDiagramExport(payload, document.uri.toString(), report)
+        },
+        // #161 图片粘贴落盘端口：读设置快照 → 目录解析（URI path 空间）→
+        // 建目录/写盘 → 回发插入文本。测试钩子模式记录载荷形态但不短路
+        // 落盘（无对话框依赖，真实写盘可断言）
+        pasteImage: (payload, report: (result: ImagePasteOutcome) => void) => {
+          if (process.env.VSIDIAN_TEST_HOOKS === '1') {
+            const key = document.uri.toString()
+            const log = imagePasteTestLog.get(key) ?? []
+            log.push(payload)
+            imagePasteTestLog.set(key, log)
+          }
+          void runImagePaste(
+            payload,
+            {
+              settings: settings?.service.getSnapshot() ?? {},
+              docUri: document.uri,
+              workspaceRootPath:
+                vscode.workspace.getWorkspaceFolder(document.uri)?.uri.path ?? null,
+            },
+            report,
+          )
         },
       })
       entry.panels.set(sessionId, webviewPanel)
@@ -1640,6 +1668,16 @@ export function createTextEditorProvider(
       (uriStr: string) => {
         const log = diagramExportTestLog.get(uriStr) ?? []
         diagramExportTestLog.set(uriStr, [])
+        return [...log]
+      },
+    ),
+    vscode.commands.registerCommand(
+      // #161 图片粘贴消息日志（取走即清空）：落盘真实执行，此日志供集成
+      // 测试断言 webview→宿主链路的载荷形态（mime/base64/hint/reqId）
+      'onegayi.vsidian._test.takeImagePasteLog',
+      (uriStr: string) => {
+        const log = imagePasteTestLog.get(uriStr) ?? []
+        imagePasteTestLog.set(uriStr, [])
         return [...log]
       },
     ),

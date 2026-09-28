@@ -159,6 +159,8 @@ vsidian/
 │   │   ├── documentSession.ts          # 文档会话与写回同步
 │   │   ├── editorCsp.ts                # 编辑器 CSP 装配纯模块（#130）
 │   │   ├── hostLocale.ts               # 生效语言宿主装配解析帮手
+│   │   ├── imagePasteHost.ts           # 图片粘贴落盘执行壳（#161）
+│   │   ├── imagePastePlan.ts           # 图片粘贴纯逻辑（#161）
 │   │   ├── keybindingService.ts        # 快捷键全局存储服务
 │   │   ├── linkTarget.ts               # 宿主侧链接目标分类纯逻辑（#10）
 │   │   ├── settingsPage.ts             # 独立设置页面板装配
@@ -215,6 +217,7 @@ vsidian/
 │       ├── graphicBlockChrome.ts     # 图形化块右上角按钮组
 │       ├── graphicRenderers.ts       # 图形化渲染器注册表
 │       ├── htmlComment.ts            # 阅读侧 HTML 注释剥离纯函数
+│       ├── imagePaste.ts             # 图片粘贴拦截适配层（#161）
 │       ├── imageResource.ts          # 图片资源状态机（#10）
 │       ├── indentEditing.ts          # Tab 通用行缩进处理器（#120）
 │       ├── keybindingRouter.ts       # 编辑器按键分发器

@@ -55,6 +55,10 @@ describe('快照读取', () => {
       'editor.symbolAutocomplete': true,
       'editor.symbolSelectionWrap': true,
       'editor.symbolTabEscape': true,
+      // #161 图片粘贴三件：总开关 / 存放模式枚举 / 子路径自由文本
+      'image.paste': true,
+      'image.pasteLocation': 'same-dir',
+      'image.pasteSubpath': 'assets',
     })
   })
 

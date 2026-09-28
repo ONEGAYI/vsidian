@@ -60,7 +60,8 @@ describe('生产注册表：general.language 定义（#96）', () => {
     expect(def, '生产注册表应含 general.language').toBeDefined()
     expect(def!.type).toBe('string')
     expect(def!.default).toBe('auto')
-    expect(def!.type === 'string' ? def!.enum : []).toEqual(['auto', 'zh-cn', 'en'])
+    // #161 string 双形态（枚举/自由文本）后按 enum 有无收窄取值域
+    expect(def && def.type === 'string' && 'enum' in def ? [...def.enum] : []).toEqual(['auto', 'zh-cn', 'en'])
     expect(isSettingDefinition(def)).toBe(true)
   })
 
@@ -151,7 +152,7 @@ describe('设置页「常规」分组渲染与选项显示名（视觉层断言�
       .toEqual(['常规', '编辑器'])
   })
 
-  it('分组隔离：切到「编辑器」组只显示编辑器定义（开关），语言项不在其中', () => {
+  it('分组隔离：切到「编辑器」组只显示编辑器定义，语言项不在其中', () => {
     installLocale('zh-cn', zhCn)
     const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
     const editorNav = [...parent.querySelectorAll<HTMLButtonElement>(NAV_ITEM)]
@@ -160,7 +161,11 @@ describe('设置页「常规」分组渲染与选项显示名（视觉层断言�
     expect(parent.querySelector(`h2.vsidian-settings-heading`)?.textContent).toBe('编辑器')
     const boxes = parent.querySelectorAll<HTMLInputElement>(`input.${SETTINGS_PAGE_CLASS_NAMES.checkbox}`)
     expect(boxes.length).toBe(PRODUCTION_SETTING_DEFINITIONS.filter((d) => d.type === 'boolean').length)
-    expect(parent.querySelector(`select.${SETTINGS_PAGE_CLASS_NAMES.select}`)).toBeNull()
+    // #161 编辑器组含 image.* 枚举下拉与自由文本框——语言项（general.）
+    // 仍不得出现在编辑器组
+    const editorSelects = [...parent.querySelectorAll<HTMLSelectElement>(`select.${SETTINGS_PAGE_CLASS_NAMES.select}`)]
+    expect(editorSelects.length).toBeGreaterThan(0)
+    expect(editorSelects.every((s) => (s.dataset.settingKey ?? '').startsWith('general.'))).toBe(false)
   })
 
   it('搜索跨组命中常规项并标注分类，点击定位到常规组', () => {

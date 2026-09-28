@@ -728,6 +728,13 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
     '',
   ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, 'highlight.md'), HIGHLIGHT_DOC, 'utf8')
+  // #161 图片粘贴：落盘目标文档（默认 same-dir 模式下与本文档同目录）
+  writeFileSync(path.join(wsDir, 'paste-image.md'), '# 图片粘贴样例
+
+正文段落。
+
+结尾。
+', 'utf8')
   writeFileSync(path.join(wsDir, '链接目标.md'), '# 链接目标\n中文目标文档内容。\n', 'utf8')
   writeFileSync(path.join(wsDir, '无扩展名目标.md'), '# 无扩展名目标\n省略扩展名解析目标。\n', 'utf8')
   mkdirSync(path.join(wsDir, '子 目录'), { recursive: true })
