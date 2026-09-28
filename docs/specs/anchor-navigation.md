@@ -1,6 +1,6 @@
 # 规格：锚点跳转（标题引用、块引用与复制块链接）
 
-状态：已共识待实施。本文是锚点跳转能力的单一事实源，覆盖本批次三张实施票（wikilink 锚点、普通链接锚点、复制块链接入口；票号开立后回填）。母题为 #16 的锚点切片；反链面板、链接索引、重命名更新引用与 Markdown 嵌入**明确不在本批**（维持 ADR-0002 按需解析路线，无索引）。
+状态：已共识待实施。本文是锚点跳转能力的单一事实源，覆盖本批次三张实施票：[#159](https://github.com/ONEGAYI/vsidian/issues/159)（wikilink 锚点）、[#160](https://github.com/ONEGAYI/vsidian/issues/160)（普通链接锚点）、[#162](https://github.com/ONEGAYI/vsidian/issues/162)（复制块链接入口，Blocked by #159）。母题为 #16 的锚点切片；反链面板、链接索引、重命名更新引用与 Markdown 嵌入**明确不在本批**（维持 ADR-0002 按需解析路线，无索引）。
 
 ## 范围
 
@@ -86,17 +86,17 @@
 
 ## 实施决策
 
-- **票②（wikilink 锚点）**：`wikilink.ts` 放开空路径；`wikilinkTarget.ts` 增 `findBlockOffset`；`textEditorProvider.ts` 的 `executeWikilinkIntent` 接入 blockId 定位与空 path 当前文档分支；新增块 id 缺失提示词条。
-- **票③（普通链接锚点）**：`linkTarget.ts` fragment 结构化传出与 `#` 前缀放行；`executeLinkIntent` 接定位；更新 `linkTarget.test.ts` 既有「锚点拦截/剥 fragment」断言（行为变更）与人工验证清单已知限制。
-- **票④（复制块链接）**：webview 新增正文 contextmenu 模块（纯函数菜单模型 + DOM 装配 + 委托，照 `outlineMenu.ts` 结构）；块边界判定与票②共享形态学；快捷键入 `keybindings` 注册表。
-- 依赖关系：票④ Blocked by 票②（共享块形态学与块定位器）。
+- **#159（wikilink 锚点）**：`wikilink.ts` 放开空路径；`wikilinkTarget.ts` 增 `findBlockOffset`；`textEditorProvider.ts` 的 `executeWikilinkIntent` 接入 blockId 定位与空 path 当前文档分支；新增块 id 缺失提示词条。
+- **#160（普通链接锚点）**：`linkTarget.ts` fragment 结构化传出与 `#` 前缀放行；`executeLinkIntent` 接定位；更新 `linkTarget.test.ts` 既有「锚点拦截/剥 fragment」断言（行为变更）与人工验证清单已知限制。
+- **#162（复制块链接）**：webview 新增正文 contextmenu 模块（纯函数菜单模型 + DOM 装配 + 委托，照 `outlineMenu.ts` 结构）；块边界判定与 #159 共享形态学；快捷键入 `keybindings` 注册表。
+- 依赖关系：#162 Blocked by #159（共享块形态学与块定位器）。
 
 ## 验证与完成条件
 
 - **TDD**：形态学（本文件锚点合法/非法矩阵）、`findBlockOffset` 矩阵（围栏内不命中、CRLF、列表块尾、多命中取首、块首=开围栏行）、普通链接 fragment 拆分先行。
 - **含空格路径测试矩阵**（用户点名必测）：`[t](./my file.md#标题)`、`[t](./my file#标题)`（宽松链接两路）、`[t](#标题)` 页内、`[t](./a#b.md)` 路径含 `#`（按 CommonMark 拆分为路径 `./a` + fragment `b.md`，行为文档化为已知边界）、已编码 `%20` 形态。
-- **控制器与浏览器**：jsdom 单测覆盖跳转意图上报与菜单命令；票④涉及 webview 交互，合并前必跑 `npm run test:browser`。
+- **控制器与浏览器**：jsdom 单测覆盖跳转意图上报与菜单命令；#162 涉及 webview 交互，合并前必跑 `npm run test:browser`。
 - **集成**：双链/普通链接锚点跳转用例（面板内 `view.locate` 与文本编辑器 selection 两路）、块 id 自动写入的可撤销性（undo 一步还原）、缺失提示记录。
 - **回归与文档**：compile / test:unit / test:browser / test:integration 全绿；更新 keybindings.md、人工验证清单、文件树；README 双语功能清单补锚点条目。
 
-Blocked by: 票④依赖票②（块形态学）；票②③相互独立。
+Blocked by: #162 依赖 #159（块形态学）；#159 与 #160 相互独立。
