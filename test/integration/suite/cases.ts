@@ -3700,6 +3700,41 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(await readDisk('wikilinks.md') === diskBefore, '锚点跳转不得改写源文档')
   }],
 
+  ['定位送达后面板重载：恢复最后导航点，不重播历史定位（#163 验收反馈）', async () => {
+    await openWithEditor('wikilinks.md')
+    await waitSessionReady('wikilinks.md')
+    const uri = wsUri('wikilinks.md').toString()
+
+    // 连续程序定位往返（文档头 ⇄ 文末块锚点）：重载后的恢复点必须是最后一次
+    // 导航点。宿主侧「已送达定位不再补发」（view.locate.ack 对账）由
+    // documentSession 单测钉住；本用例观测用户可见行为——恢复落点与幂等
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: ANCHOR_BLK_LF_OFFSET })
+    await waitViewState('wikilinks.md', (v) => v.selectionOffset === ANCHOR_BLK_LF_OFFSET)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: 0 })
+    await waitViewState('wikilinks.md', (v) => v.selectionOffset === 0)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: ANCHOR_BLK_LF_OFFSET })
+    await waitViewState('wikilinks.md', (v) => v.selectionOffset === ANCHOR_BLK_LF_OFFSET)
+
+    // 重载 webview（Developer: Reload Webviews；retainContextWhenHidden 关闭：
+    // 销毁重建同一 panel，走 getState 恢复）——定位点已随锚点持久化落盘
+    await vscode.commands.executeCommand('workbench.action.webview.reloadWebviewAction')
+    const restored = await poll('重载后恢复最后定位点', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      return v && v.text === WIKILINKS_DOC_TEXT && v.selectionOffset === ANCHOR_BLK_LF_OFFSET ? v : undefined
+    }, 30000)
+    assert(restored.selectionOffset === ANCHOR_BLK_LF_OFFSET,
+      `重载后应恢复最后导航点（LF offset ${ANCHOR_BLK_LF_OFFSET}，持久化锚点路径），实际 ${restored.selectionOffset}`)
+
+    // 幂等：再次重载仍稳定在最后导航点（无补发循环、无逐次漂移）
+    await vscode.commands.executeCommand('workbench.action.webview.reloadWebviewAction')
+    const again = await poll('二次重载仍恢复最后定位点', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      return v && v.text === WIKILINKS_DOC_TEXT && v.selectionOffset === ANCHOR_BLK_LF_OFFSET ? v : undefined
+    }, 30000)
+    assert(again.selectionOffset === ANCHOR_BLK_LF_OFFSET,
+      `二次重载不得漂移（期望 LF offset ${ANCHOR_BLK_LF_OFFSET}，实际 ${again.selectionOffset}）`)
+  }],
+
   ['双链歧义与缺失：重名记录候选待选择（测试钩子不弹窗）、缺失提示、不支持降级、不自动建文件（#11）', async () => {
     await openWithEditor('wikilinks.md')
     await waitSessionReady('wikilinks.md')

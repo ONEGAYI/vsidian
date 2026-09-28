@@ -1340,3 +1340,57 @@ describe('图表导出路由（#111）', () => {
     expect(result.reason).toBe('invalid')
   })
 })
+
+describe('定位意图送达确认与补发边界（#163 验收反馈：已送达定位不得重播）', () => {
+  /** postToPanel 发出的 view.locate 计入 sent；重握手（再次 ready）后
+   *  出现的 view.locate 即补发。ack 送达确认前补发兜底，送达后由 webview
+   *  持久化锚点接管恢复，宿主不再重播——用户手动移位不被历史程序定位拉回 */
+  const locateOffsets = (s: ReturnType<typeof setup>, id: string): number[] =>
+    s.sent
+      .get(id)!
+      .filter((m): m is Extract<HostToWebview, { kind: 'view.locate' }> => m.kind === 'view.locate')
+      .map((m) => m.offset)
+
+  it('定位未送达（面板重载竞态）：重握手补发兜底保持', async () => {
+    const s = setup('# 标题\n\n正文段落\n')
+    const id = s.attach()
+    await readyPanel(s, id)
+    s.session.postToPanel(id, { kind: 'view.locate', offset: 7 })
+    // webview 实例在定位消息送达前销毁：ack 不会到来，重握手补发兜底
+    // （重握手不走 readyPanel——补发时 init 不是末条消息）
+    await s.send(id, { kind: 'ready' })
+    expect(locateOffsets(s, id)).toEqual([7, 7])
+  })
+
+  it('送达确认后：重握手不再补发（用户手动移位不被拉回）', async () => {
+    const s = setup('# 标题\n\n正文段落\n')
+    const id = s.attach()
+    await readyPanel(s, id)
+    s.session.postToPanel(id, { kind: 'view.locate', offset: 7 })
+    await s.send(id, { kind: 'view.locate.ack', offset: 7 })
+    await s.send(id, { kind: 'ready' })
+    expect(locateOffsets(s, id)).toEqual([7])
+  })
+
+  it('陈旧 ack（offset 与待送达意图不一致）不清除：仍补发', async () => {
+    const s = setup('# 标题\n\n正文段落\n')
+    const id = s.attach()
+    await readyPanel(s, id)
+    s.session.postToPanel(id, { kind: 'view.locate', offset: 7 })
+    // 连续两次跳转中前一次的 ack 迟到：不得误清后一次的待送达意图
+    await s.send(id, { kind: 'view.locate.ack', offset: 3 })
+    await s.send(id, { kind: 'ready' })
+    expect(locateOffsets(s, id)).toEqual([7, 7])
+  })
+
+  it('ack 后新定位重新进入待送达态：重握手补发新意图', async () => {
+    const s = setup('# 标题\n\n正文段落\n')
+    const id = s.attach()
+    await readyPanel(s, id)
+    s.session.postToPanel(id, { kind: 'view.locate', offset: 7 })
+    await s.send(id, { kind: 'view.locate.ack', offset: 7 })
+    s.session.postToPanel(id, { kind: 'view.locate', offset: 12 })
+    await s.send(id, { kind: 'ready' })
+    expect(locateOffsets(s, id)).toEqual([7, 12, 12])
+  })
+})

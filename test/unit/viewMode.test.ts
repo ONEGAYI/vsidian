@@ -355,6 +355,24 @@ describe('view.locate 定位（#10 查找跳转的前置入口）', () => {
     c.handleHostMessage({ kind: 'view.locate', offset: 99999 })
     expect(viewState(c, h).selectionOffset).toBe(DOC.length)
   })
+
+  it('定位后回发送达确认（#163 反馈修复）：ack 原样携带消息 offset，锚点同步落盘', () => {
+    const h = makeBridge()
+    const c = mountMode(h)
+    const target = DOC.indexOf('中部二级标题')
+    c.handleHostMessage({ kind: 'view.locate', offset: target })
+    // 宿主据此停发补发：已送达定位的重载恢复交给持久化锚点，不再重播
+    expect(h.sent).toContainEqual({ kind: 'view.locate.ack', offset: target })
+    // 定位点持久化（modeAnchor 落盘）——重载后恢复最后导航点
+    expect(h.saved()?.anchor).toBe(target)
+  })
+
+  it('越界定位同样回发 ack（offset 原样，对账语义不受 clamp 影响）', () => {
+    const h = makeBridge()
+    const c = mountMode(h)
+    c.handleHostMessage({ kind: 'view.locate', offset: 99999 })
+    expect(h.sent).toContainEqual({ kind: 'view.locate.ack', offset: 99999 })
+  })
 })
 
 describe('悬挂（冲突暂停）与模式切换', () => {

@@ -530,6 +530,13 @@ export class DocumentSession {
         panel.lastViewState = message
         this.options.onViewState?.(sessionId, message)
         return Promise.resolve()
+      case 'view.locate.ack':
+        // 定位送达确认（#163 验收反馈）：offset 对账后清除待送达意图——
+        // 陈旧 ack（连续跳转中前一次的迟到回执）不得误清后一次的意图
+        if (message.offset === this.lastLocateOffset) {
+          this.lastLocateOffset = null
+        }
+        return Promise.resolve()
       case 'link.activate': {
         // #10 链接跳转意图：校验归属与 ready 后交面板端口执行。只读交互，
         // 不受写回暂停影响（暂停面板照样可以点链接）
@@ -734,7 +741,8 @@ export class DocumentSession {
   }
 
   /** 向指定面板发送宿主消息（诊断请求等）；经此通道的 view.locate 记录
-   *  为「最后定位意图」（webview LF 坐标原样）——面板重握手后补发兜底 */
+   *  为「待送达定位意图」（webview LF 坐标原样）——送达确认（ack）到达前
+   *  面板重握手时补发兜底 */
   postToPanel(sessionId: string, message: HostToWebview): void {
     this.panels.get(sessionId)?.port.send(message)
     if (message.kind === 'view.locate') {
@@ -742,11 +750,12 @@ export class DocumentSession {
     }
   }
 
-  /** 最后定位意图（null=本会话尚无宿主侧定位）。面板重载（retainContext-
-   *  WhenHidden 关闭，隐藏即销毁）会让 view.locate 首投随旧 webview 实例
-   *  丢失、新实例光标停留文档头——重握手 sendInit 后补发恢复「最后程序性
-   *  导航点」。取舍：重载前用户的手动光标移动无法与程序定位区分，恢复到
-   *  最后定位点优于丢失到文档头 */
+  /** 待送达定位意图（null=无未送达意图）。面板重载（retainContextWhenHidden
+   *  关闭，隐藏即销毁）可能让 view.locate 随旧 webview 实例丢失——重握手
+   *  sendInit 后补发兜住这个竞态窗口。**已送达**的定位经 view.locate.ack
+   *  对账清除（#163 验收反馈）：此后不再补发，重载恢复交给 webview 持久化
+   *  锚点（定位点随 locateOffset 落盘）——用户送达后的手动移位不被历史
+   *  程序定位重播 */
   private lastLocateOffset: number | null = null
 
   private sendInit(panel: PanelEntry): void {
@@ -759,6 +768,8 @@ export class DocumentSession {
       text: this.newline.toLfText(this.doc.getText()),
     })
     if (this.lastLocateOffset !== null) {
+      // 仅补发「从未送达」的定位（送达即被 ack 清除）——竞态兜底窗口之外的
+      // 重载恢复一律走 webview 持久化锚点
       panel.port.send({ kind: 'view.locate', offset: this.lastLocateOffset })
     }
   }

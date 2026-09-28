@@ -341,6 +341,10 @@ export type WebviewToHost =
   | { kind: 'sync.test.close'; sessionId: string; docUri: string }
   /** 暂停横幅按钮动作：copy = 请求宿主复制未确认输入；resume = 请求恢复（重新同步） */
   | { kind: 'conflict.action'; sessionId: string; docUri: string; action: 'copy' | 'resume' }
+  /** view.locate 送达确认（#163 验收反馈）：webview 应用定位后原样回发
+   *  消息 offset——宿主只补发「从未送达」的定位意图（面板重载竞态兜底），
+   *  已送达的定位交给 webview 持久化锚点恢复，历史程序定位不再重播 */
+  | { kind: 'view.locate.ack'; offset: number }
   /** 视图诊断回报 */
   | {
       kind: 'view.state'
@@ -1807,6 +1811,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         isString(v.docUri) &&
         (v.action === 'copy' || v.action === 'resume')
       )
+    case 'view.locate.ack':
+      return isNonNegativeInt(v.offset)
     case 'view.state':
       return (
         isString(v.text) &&

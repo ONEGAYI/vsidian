@@ -28,6 +28,16 @@ describe('isWebviewToHost', () => {
     expect(isWebviewToHost({ kind: 'view.switch.request', target: 1 })).toBe(false)
   })
 
+  it('view.locate.ack 送达确认校验（#163 反馈）：offset 为非负整数', () => {
+    expect(isWebviewToHost({ kind: 'view.locate.ack', offset: 0 })).toBe(true)
+    expect(isWebviewToHost({ kind: 'view.locate.ack', offset: 128 })).toBe(true)
+    // 负数 / 非整数 / 字符串 / 缺失整体丢弃
+    expect(isWebviewToHost({ kind: 'view.locate.ack', offset: -1 })).toBe(false)
+    expect(isWebviewToHost({ kind: 'view.locate.ack', offset: 1.5 })).toBe(false)
+    expect(isWebviewToHost({ kind: 'view.locate.ack', offset: '7' })).toBe(false)
+    expect(isWebviewToHost({ kind: 'view.locate.ack' })).toBe(false)
+  })
+
   it('接受合法 ready', () => {
     expect(isWebviewToHost({ kind: 'ready' })).toBe(true)
   })

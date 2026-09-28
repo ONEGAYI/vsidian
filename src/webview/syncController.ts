@@ -1769,6 +1769,10 @@ export class WebviewSyncController {
         // 定位（#10 查找/跳转入口）：光标移到源 offset；reading 滚动到块。
         // 纯视图操作——事务不带 changes，不产生编辑历史
         this.locateOffset(message.offset)
+        // 送达确认（#163 验收反馈）：offset 原样回发（对账不受 clamp/块化
+        // 影响）——宿主停发补发，此后重载恢复走持久化锚点，历史程序定位
+        // 不再重播、不拉回用户已手动离开的位置
+        this.bridge.postMessage({ kind: 'view.locate.ack', offset: message.offset })
         break
       }
       case 'reading.perf': {
@@ -2397,6 +2401,10 @@ export class WebviewSyncController {
       this.revealOutlineIndex(this.outlineLocatedIndex)
     }
     this.applyOutlineHighlight()
+    // 定位点落盘（#163 验收反馈）：modeAnchor 此前仅内存更新——面板重载后
+    // 恢复的是更早的持久锚点。定位是「我在哪」的最新信号，同步持久化使
+    // 重载恢复落在最后导航点；此后用户的手动移位不再被历史定位覆盖
+    this.persistState()
   }
 
   /** #66 大纲条目点击跳转：标题行号 → 源 offset（doc.line(n).from）后走
