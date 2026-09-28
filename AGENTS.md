@@ -182,6 +182,7 @@ vsidian/
 │   │   ├── changeMapping.ts     # 变更重定位纯函数
 │   │   ├── chromeContract.ts    # 界面域样式契约探针表
 │   │   ├── codeLangs.ts         # 代码块语言注册表与别名路由
+│   │   ├── contextMenu.ts       # 统一右键菜单内核纯函数单一事实源
 │   │   ├── cssSnippetEnv.ts     # CSS 片段环境身份与分桶戳（#131）
 │   │   ├── cssSnippetImports.ts # CSS 片段依赖导入形态学单一事实源
 │   │   ├── cssSnippets.ts       # CSS 片段纯逻辑单一事实源
@@ -211,9 +212,9 @@ vsidian/
 │   └── webview/     # webview 端实现
 │       ├── anchorFlash.ts            # 跳转目标高亮装饰状态
 │       ├── blockIdStrip.ts           # 阅读渲染块标记剥离纯函数
-│       ├── blockMenu.ts              # 正文右键菜单与复制块链接
 │       ├── codeCardState.ts          # 卡片共享状态中立模块
 │       ├── codeHighlight.ts          # 语法高亮引擎装配与缓存
+│       ├── contextMenuDom.ts         # 统一菜单 DOM 装配与子菜单翻转
 │       ├── css.d.ts                  # CSS 导入类型声明
 │       ├── cssSnippetSettings.ts     # CSS 片段设置分页
 │       ├── diagramExport.ts          # 图表导出序列化与光栅化
