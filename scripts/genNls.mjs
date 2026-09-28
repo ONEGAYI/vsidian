@@ -127,6 +127,9 @@ async function main() {
   }
 
   for (const [name, content] of outputs) {
+    // 内容不变不写盘：autocrlf=true 的 Windows 检出为 CRLF，回写 LF 会
+    // 触碰文件 stat，让 git status 误标改动、卡住发布链的脏工作树检查。
+    if (!changed.includes(name)) continue
     writeFileSync(path.join(root, name), content, 'utf8')
   }
   console.log(`已生成 ${outputs.map(([n]) => n).join('、')}（${changed.length ? `更新：${changed.join('、')}` : '无变化（幂等）'}）`)
