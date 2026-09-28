@@ -33,7 +33,7 @@ try {
   await page.addStyleTag({ path: output.replace(/\.js$/, '.css') })
   await page.addScriptTag({ path: output })
   const LONG = '这是一段足够长的正文文字用来撑满可用宽度并触发折行。'.repeat(12)
-  const DOC = `# 标题\n\n${LONG}\n\n${LONG}\n`
+  const DOC = `# 标题\n\n${LONG}\n\n${LONG}\n\n| 列一 | 列二 | 列三 | 列四 | 列五 |\n| --- | --- | --- | --- | --- |\n| 数据 | 数据 | 数据 | 数据 | 数据 |\n\n\`\`\`js\nconst width = 'clamped'\n\`\`\`\n`
   await page.evaluate((text) => window.initReadingWidth(text), DOC)
 
   /** 阅读侧观测：容器内容区与首个段落块的几何 */
@@ -139,6 +139,25 @@ try {
     Math.abs(reading.blockW - reading.contentW) < 2,
     `块宽=${reading.blockW.toFixed(1)} 可用=${reading.contentW.toFixed(1)}（1280 视口收侧栏后）`)
   await page.evaluate(() => window.setRwSidebar(false))
+
+  // —— A7：宽块同钳制（Q6：表格与代码块随正文列限宽）——
+  await page.evaluate(() => window.setRwSettings({ 'editor.lineNumbers': true, 'editor.readableLineWidth': 600 }))
+  await page.waitForTimeout(250) // 侧栏关闭过渡与重排稳定后再量
+  const wideBlocks = await page.evaluate(() => {
+    const view = document.querySelector('.vsidian-view-reading')
+    const table = view?.querySelector('table')
+    const pre = view?.querySelector('pre')
+    return {
+      tableW: table?.getBoundingClientRect().width ?? 0,
+      tableLeft: table?.getBoundingClientRect().left ?? 0,
+      preW: pre?.getBoundingClientRect().width ?? 0,
+    }
+  })
+  check('A7 宽表格钳制进正文列（600）', wideBlocks.tableW <= 610 && wideBlocks.tableLeft > 300,
+    `表宽=${wideBlocks.tableW.toFixed(1)} 左缘=${wideBlocks.tableLeft.toFixed(1)}（列内居中）`)
+  check('A7 代码块钳制进正文列（600）', wideBlocks.preW <= 610 && wideBlocks.preW > 0,
+    `代码块宽=${wideBlocks.preW.toFixed(1)}`)
+  await page.evaluate(() => window.setRwSettings({ 'editor.readableLineWidth': 0 }))
 
   // —— A6：优先序（设置 0 → 片段常规规则；设置 900 → 设置优先；!important 可覆盖）——
   const snippet = await page.addStyleTag({ content: '#app { --vsidian-reading-max-width: 700px; }' })

@@ -198,8 +198,8 @@ describe('styleContract 别名桥同源', () => {
       expect(alias.obsidian.startsWith('--vsidian')).toBe(false)
       expect(alias.fallback.length).toBeGreaterThan(0)
     }
-    // heading-color 族 6 条 + 阅读排版 4 + 高亮 + 表格 = 12
-    expect(OBSIDIAN_VARIABLE_ALIASES.length).toBe(12)
+    // heading-color 族 6 条 + 阅读排版 4 + 高亮 + 表格 = 12；#175 live 限宽 = 13
+    expect(OBSIDIAN_VARIABLE_ALIASES.length).toBe(13)
   })
 
   it('变量别名条目的 aliasTargets 与变量别名表一致', () => {
@@ -315,6 +315,7 @@ const MIGRATION_PARITY: ReadonlyArray<[string, string]> = [
   ['--vsidian-heading-color-{1..6}', 'var-heading-color'],
   ['--vsidian-reading-font-size', 'var-reading-font-size'],
   ['--vsidian-reading-max-width', 'var-reading-max-width'],
+  ['--vsidian-live-preview-max-width', 'var-live-preview-max-width'],
   ['--vsidian-reading-line-height', 'var-reading-line-height'],
   ['--vsidian-reading-code-background', 'var-reading-code-background'],
   ['--vsidian-code-card-background', 'var-code-card-background'],
@@ -347,7 +348,8 @@ describe('styleContract 迁移完整性（旧映射表全集不丢）', () => {
   })
 
   it('旧表条目数守恒（快照：防止对照表自身被删减）', () => {
-    expect(MIGRATION_PARITY.length).toBe(110)
+    // #175 新增 var-live-preview-max-width 对照行：110 → 111
+    expect(MIGRATION_PARITY.length).toBe(111)
     expect(STYLE_CONTRACT_ENTRIES.length).toBeGreaterThanOrEqual(MIGRATION_PARITY.length)
   })
 })
@@ -365,7 +367,7 @@ const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   table: 11,
   'reading-structure': 12,
   'link-image-wikilink': 6,
-  'content-variables': 9,
+  'content-variables': 10,
   'content-limits': 11,
   // chrome 域（54）
   math: 5,

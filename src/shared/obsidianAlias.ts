@@ -79,7 +79,10 @@ export const OBSIDIAN_VARIABLE_ALIASES: readonly ObsidianVariableAlias[] = [
   { obsidian: '--h5-color', vsidian: '--vsidian-heading-color-5', fallback: 'var(--vscode-editor-foreground)' },
   { obsidian: '--h6-color', vsidian: '--vsidian-heading-color-6', fallback: 'var(--vscode-editor-foreground)' },
   { obsidian: '--font-text-size', vsidian: '--vsidian-reading-font-size', fallback: 'var(--vsidian-content-font-size)' },
-  { obsidian: '--file-line-width', vsidian: '--vsidian-reading-max-width', fallback: '760px' },
+  // #175 可读行宽双变量同接 --file-line-width（Obsidian 一个全局行宽管两
+  // 视图的语义）；缺省 none = 铺满（#174 修复，原 760px 兜底废止）
+  { obsidian: '--file-line-width', vsidian: '--vsidian-reading-max-width', fallback: 'none' },
+  { obsidian: '--file-line-width', vsidian: '--vsidian-live-preview-max-width', fallback: 'none' },
   { obsidian: '--line-height-normal', vsidian: '--vsidian-reading-line-height', fallback: 'var(--vsidian-content-line-height)' },
   {
     obsidian: '--code-background',
