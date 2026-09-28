@@ -736,6 +736,8 @@ interface LinkLogData {
     /** #11 双链条目字段 */
     target?: string
     heading?: string
+    /** #159 块引用目标（与 heading 互斥） */
+    blockId?: string
     candidates?: string[]
     locate?: 'custom-panel' | 'text-editor' | 'none'
   }>
@@ -757,7 +759,12 @@ const WIKILINKS_DOC_TEXT = [
   '',
   '结尾段落。',
   '',
+  '锚点目标块。 ^anchor-blk',
+  '',
 ].join('\n')
+/** #159 本文件块锚点目标行的 LF offset（view.locate 光标断言依据；
+ *  wikilinks.md 为 LF 行尾，宿主系与 LF 系一致） */
+const ANCHOR_BLK_LF_OFFSET = WIKILINKS_DOC_TEXT.indexOf('锚点目标块')
 const TARGET_NOTE_TEXT = (() => {
   const out = ['# 目标笔记标题', '', '开篇段落。', '']
   for (let i = 1; i <= 200; i++) {
@@ -3625,6 +3632,62 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(targetSession.appliedEdits === 0, `目标面板不得产生 applyEdit，实际 ${targetSession.appliedEdits}`)
     assert(await readDisk('wikilinks.md') === diskSource, '跳转不得改写源文档')
     assert(await readDisk('wikilink-crlf-target.md') === diskTarget, '跳转不得改写目标文档（CRLF 保真）')
+  }],
+
+  ['双链块引用与本文件锚点跳转（#159）：块定位 selection reveal、页内面板 view.locate、缺失仍打开', async () => {
+    // 跨文件块引用：文本编辑器打开 + selection reveal 到块首行
+    await openWithEditor('wikilinks.md')
+    await waitSessionReady('wikilinks.md')
+    const uri = wsUri('wikilinks.md').toString()
+    const diskBefore = await readDisk('wikilinks.md')
+
+    await injectWikilink(uri, 'wikilink-target#^blk-target')
+    let logData = await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.blockId === 'blk-target')
+    assert(logData!.locate === 'text-editor', `块引用应经文本编辑器 selection reveal，实际 ${logData!.locate}`)
+    await poll('块目标被打开', () =>
+      vscode.window.activeTextEditor?.document.uri.toString() === wsUri('wikilink-target.md').toString()
+        ? true
+        : undefined,
+    )
+    const editor = vscode.window.activeTextEditor!
+    const selLine = editor.document.lineAt(editor.selection.active).text
+    assert(selLine.trim() === '带块标记的段落。 ^blk-target', `selection 应在块首行，实际「${selLine}」`)
+
+    // 块 id 缺失：文档照常打开（不定位），日志记录 locate=none——缺失给可见反馈
+    await openWithEditor('wikilinks.md')
+    await waitSessionReady('wikilinks.md')
+    await injectWikilink(uri, 'wikilink-target#^不存在块')
+    logData = await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.blockId === '不存在块')
+    assert(logData!.locate === 'none', `缺失块 id 应记录 locate=none，实际 ${logData!.locate}`)
+    await poll('缺失块 id 目标仍被打开', () =>
+      vscode.window.activeTextEditor?.document.uri.toString() === wsUri('wikilink-target.md').toString()
+        ? true
+        : undefined,
+    )
+
+    // 本文件块锚点（[[#^anchor-blk]]）：空 path 目标即当前文档，当前面板走
+    // view.locate（live 光标观测）——先离开初始光标 0，观测到块首行 offset
+    await openWithEditor('wikilinks.md')
+    await waitSessionReady('wikilinks.md')
+    await injectWikilink(uri, '#^anchor-blk')
+    logData = await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.blockId === 'anchor-blk')
+    assert(logData!.locate === 'custom-panel', `本文件锚点应走当前面板定位，实际 ${logData!.locate}`)
+    assert(logData!.path === wsUri('wikilinks.md').fsPath, `本文件锚点目标应为当前文档，实际 ${logData!.path}`)
+    const located = await waitViewState('wikilinks.md', (v) => v.selectionOffset === ANCHOR_BLK_LF_OFFSET)
+    assert(
+      located.selectionOffset === ANCHOR_BLK_LF_OFFSET,
+      `本文件块锚点光标应落块首行 LF offset ${ANCHOR_BLK_LF_OFFSET}，实际 ${located.selectionOffset}`,
+    )
+
+    // 本文件标题锚点（[[#双链样例]]）：光标从锚点块回到文档首标题（0）
+    await injectWikilink(uri, '#双链样例')
+    logData = await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.heading === '双链样例')
+    assert(logData!.locate === 'custom-panel', `本文件标题锚点应走面板定位，实际 ${logData!.locate}`)
+    const top = await waitViewState('wikilinks.md', (v) => v.selectionOffset === 0)
+    assert(top.selectionOffset === 0, `本文件标题锚点光标应回文档头，实际 ${top.selectionOffset}`)
+
+    // 锚点跳转全程只读
+    assert(await readDisk('wikilinks.md') === diskBefore, '锚点跳转不得改写源文档')
   }],
 
   ['双链歧义与缺失：重名记录候选待选择（测试钩子不弹窗）、缺失提示、不支持降级、不自动建文件（#11）', async () => {

@@ -199,7 +199,7 @@ export const en = {
   'host.confirmResume': 'This will discard the unconfirmed local changes in the "{name}" editor and resync with the on-disk/authoritative content. Consider copying the unconfirmed input first.',
   'host.conflictPaused': 'Editing of "{name}" is paused: the external change and the unconfirmed input cannot be merged safely. The unconfirmed input is kept and can be retrieved at any time.',
   'host.panelClosedWithInput': 'The editor for "{name}" was closed (or the connection dropped) with unsaved unconfirmed input: {text}',
-  'host.wikilinkUnsupported': 'Unsupported wikilink form "[[{target}]]" (block references ^ and embeds ![[…]] belong to a later phase): kept as-is',
+  'host.wikilinkUnsupported': 'Unsupported wikilink form "[[{target}]]" (embeds ![[…]] belong to a later phase): kept as-is',
   'host.wikilinkNoWorkspace': 'The current document is not in any workspace folder: wikilink targets are resolved against the workspace, so jumping is unavailable with no folder open (the link text is kept)',
   'host.wikilinkNotFound': 'Wikilink target not found: [[{target}]] (looked up on demand within the current workspace; files are never created automatically)',
   'host.wikilinkAmbiguousPick': 'Multiple wikilink targets found for "{target}"; choose the note to open',
@@ -430,6 +430,10 @@ export const en = {
   'command.ui.outlineReset.title': 'Reset outline',
   'command.ui.outlineCollapseAll.title': 'Collapse all outline headings',
   'command.ui.outlineExpandAll.title': 'Expand all outline headings',
+
+  // ---- #159 锚点跳转（块引用定位与本文件锚点）----
+  /** 块 id 缺失提示（与标题缺失同款「打开后提示」行为） */
+  'host.wikilinkBlockMissing': 'Opened {link} in the target document, but the block reference "^{blockId}" was not found (block ids are ` ^id` markers at the end of a block’s last line)',
 } as const satisfies Record<string, string>
 
 /** 字典键：点分扁平键，以本包为类型基准（编译期检查 t() 取词键） */

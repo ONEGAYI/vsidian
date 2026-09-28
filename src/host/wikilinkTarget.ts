@@ -16,6 +16,10 @@
 // 标题定位（findHeadingOffset）：ATX 标题行扫描（setext 不匹配，一期规则），
 // 规范化 = trim + 空白折叠 + 小写（写入测试固定）；围栏代码内的伪标题跳过。
 //
+// 块定位（findBlockOffset，#159）：行尾 ` ^id` 标记扫描（跳过围栏代码内部；
+// 闭围栏行行尾标记算围栏代码块自身的块 id，块首=开围栏行），命中行向上回溯
+// 所属块首行（块边界=空行或文件头），返回 [offset, end) 块首行区间。
+//
 // 本模块不依赖 vscode（node 单测直驱）；平台语义由注入的
 // WikilinkResolveContext 描述（与 LinkContext 同一注入模式）。
 import * as path from 'node:path'
@@ -186,6 +190,75 @@ export function findHeadingOffset(
       }
     }
     offset += rawLine.length + 1
+  }
+  return null
+}
+
+/** 块 id 行尾标记：正文 + 至少一空格 + `^id` + 行尾（尾随空白容忍）。
+ *  id 全字匹配由捕获组与目标串全等保证（`^abc-def` 不被 `abc` 命中）；
+ *  行内代码内的字面 `^id` 因其后还有反引号等字符天然不匹配 */
+const BLOCK_ID_LINE_RE = /[ \t]\^([A-Za-z0-9-]+)[ \t]*$/
+
+/**
+ * 目标文档内定位块（#159）：扫描行尾 ` ^id` 标记，命中行向上回溯所属块的
+ * 首行，返回块首行的 [offset, end)（行首到行尾，不含换行——与
+ * findHeadingOffset 的 selection reveal / view.locate 区间同款）。
+ * 规则（写入测试）：
+ * - 围栏代码块内部的标记不命中；闭围栏行行尾标记是围栏代码块自身的块 id
+ *   （Obsidian 形态），块首=开围栏行
+ * - 块边界=空行或文件头（空行含纯空白行）；开围栏行的 `^` 属 info string
+ * - 同 id 多命中取首；未命中返回 null；CRLF 行尾容错（offset 为宿主系，
+ *   \r 计入行宽）
+ */
+export function findBlockOffset(
+  text: string,
+  blockId: string,
+): { offset: number; end: number } | null {
+  if (blockId === '') {
+    return null
+  }
+  // 行信息缓存：剥 \r 后文本 + 宿主系行首 offset（\r 计入前文累计）
+  const lines: string[] = []
+  const lineStarts: number[] = []
+  let offset = 0
+  for (const rawLine of text.split('\n')) {
+    lines.push(rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine)
+    lineStarts.push(offset)
+    offset += rawLine.length + 1
+  }
+  const anchorOf = (idx: number): { offset: number; end: number } => ({
+    offset: lineStarts[idx]!,
+    end: lineStarts[idx]! + lines[idx]!.length,
+  })
+  let fenceChar: string | null = null
+  let fenceHead = -1 // 开围栏行 idx（闭围栏行命中时的块首）
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!
+    const marker = fenceMarkerOf(line)
+    if (fenceChar !== null) {
+      if (marker === fenceChar) {
+        // 闭围栏行：Obsidian 允许行尾 ` ^id` 标记整个围栏代码块
+        const m = BLOCK_ID_LINE_RE.exec(line)
+        if (m && m[1] === blockId) {
+          return anchorOf(fenceHead)
+        }
+        fenceChar = null
+      }
+      continue // 围栏内部（非闭围栏行）的 ^id 是代码内容，不视为块标记
+    }
+    if (marker !== null) {
+      fenceChar = marker
+      fenceHead = i
+      continue // 开围栏行的 ^ 属 info string
+    }
+    const m = BLOCK_ID_LINE_RE.exec(line)
+    if (m && m[1] === blockId) {
+      let head = i
+      while (head > 0 && lines[head - 1]!.trim() !== '') {
+        head-- // 块边界=空行；到文件头自然停
+      }
+      return anchorOf(head)
+    }
   }
   return null
 }
