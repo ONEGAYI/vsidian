@@ -142,6 +142,7 @@ vsidian/
 ├── scripts/               # 仓库工具脚本目录
 │   ├── checkStyleContract.mjs    # 历史契约兼容检查器 CLI
 │   ├── demoStyleContractGate.mjs # 契约门禁负向演示脚本
+│   ├── genNls.d.mts              # genNls 的 TS 声明
 │   ├── genNls.mjs                # manifest NLS 文件生成脚本
 │   ├── genStyleGuide.mjs         # 样式指南生成脚本
 │   ├── quick-action-icons.py     # 快速操作图标生成与校验
@@ -266,7 +267,8 @@ vsidian/
 │       ├── tableCreate.ts            # 光标处建表规划纯函数
 │       ├── tableEditing.ts           # 表格输入钩子（#12）
 │       ├── tableRegion.ts            # 表格矩形选区与结构规划
-│       ├── tableRegionSelection.ts   # 表格格区状态与指针绘制
+│       ├── tableRegionField.ts       # 表格格区选区状态单一事实源
+│       ├── tableRegionSelection.ts   # 表格格区拖选指针交互
 │       ├── tableStructure.ts         # 表格导航与增删行列纯函数（#13）
 │       └── taskToggle.ts             # 任务勾选解析纯函数（#9）
 ├── test/…                 # 测试根

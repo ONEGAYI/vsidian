@@ -1,33 +1,13 @@
-import { EditorSelection, StateEffect, StateField } from '@codemirror/state'
-import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view'
+import { EditorSelection } from '@codemirror/state'
+import { EditorView, ViewPlugin } from '@codemirror/view'
 import type { Tree } from '@lezer/common'
 import { normalizeTableRegion, type TableRegion } from './tableRegion'
 import type { TableRowInfo } from './tableStructure'
 import { liveDecorationsField } from './liveDecorations'
 import { splitTableRowCells } from './tableCells'
+import { setTableRegion, tableRegionField } from './tableRegionField'
 
-export const setTableRegion = StateEffect.define<TableRegion | null>()
-
-function caretInRegion(state: import('@codemirror/state').EditorState, region: TableRegion, pos: number): boolean {
-  const header = state.doc.lineAt(region.tableFrom)
-  const line = state.doc.lineAt(pos)
-  const row = line.number - header.number - (line.number > header.number ? 1 : 0)
-  if (row < region.rowFrom || row > region.rowTo) return false
-  const cells = splitTableRowCells(line.text, line.from)
-  return cells.some((cell, column) => column >= region.columnFrom && column <= region.columnTo &&
-    pos >= cell.from && pos <= cell.to)
-}
-
-export const tableRegionField = StateField.define<TableRegion | null>({
-  create: () => null,
-  update(region, tr) {
-    if (tr.docChanged || region && tr.selection !== undefined && !tr.isUserEvent('select.pointer') &&
-        (tr.isUserEvent('select') || !caretInRegion(tr.startState, region, tr.selection.main.head) ||
-          !caretInRegion(tr.startState, region, tr.selection.main.anchor))) region = null
-    for (const effect of tr.effects) if (effect.is(setTableRegion)) region = effect.value
-    return region
-  },
-})
+export { setTableRegion, tableRegionField, sameTableRegion } from './tableRegionField'
 
 export function selectTableRegion(view: EditorView, region: TableRegion | null): void {
   const normalized = region ? normalizeTableRegion(region) : null
@@ -45,18 +25,16 @@ export function selectTableRegion(view: EditorView, region: TableRegion | null):
   }
 }
 
-const CLASSES = ['vsidian-table-region-cell', 'vsidian-table-region-top', 'vsidian-table-region-bottom',
-  'vsidian-table-region-left', 'vsidian-table-region-right']
-
 function contentIndex(rows: TableRowInfo[], lineFrom: number): number {
   return [rows[0], ...rows.slice(2)].findIndex((row) => row?.lineFrom === lineFrom)
 }
 
-/** 鼠标原生事件只负责确定格坐标；选择、复制与删除读取同一 StateField。 */
+/** 鼠标原生事件只负责确定格坐标；选择、复制与删除读取同一 StateField。
+ *  矩形蒙版类不在此绘制——由 liveDecorations 把 region 类并入网格格装饰
+ *  托管（外部贴类会与列把手高亮、CM6 mark 重写互抹，2026-09-28）。 */
 export function createTableRegionPointer(tableRowsAt: (view: EditorView, pos: number, tree: Tree) => TableRowInfo[] | null) {
   return ViewPlugin.fromClass(class {
     private anchor: { tableFrom: number; row: number; column: number } | null = null
-    private painted = new Set<HTMLElement>()
 
     constructor(private readonly view: EditorView) {
       view.contentDOM.addEventListener('pointerdown', this.onDown)
@@ -67,12 +45,6 @@ export function createTableRegionPointer(tableRowsAt: (view: EditorView, pos: nu
       document.addEventListener('pointerup', this.onUp)
       document.addEventListener('pointercancel', this.onUp)
       view.dom.addEventListener('focusout', this.onBlur)
-      this.paint()
-    }
-
-    update(update: ViewUpdate): void {
-      if (update.docChanged || update.selectionSet || update.viewportChanged || update.geometryChanged ||
-          update.transactions.some((tr) => tr.effects.some((effect) => effect.is(setTableRegion)))) this.paint()
     }
 
     destroy(): void {
@@ -81,7 +53,6 @@ export function createTableRegionPointer(tableRowsAt: (view: EditorView, pos: nu
       document.removeEventListener('pointerup', this.onUp)
       document.removeEventListener('pointercancel', this.onUp)
       this.view.dom.removeEventListener('focusout', this.onBlur)
-      this.clearPaint()
     }
 
     private readonly onBlur = (event: FocusEvent): void => {
@@ -168,39 +139,6 @@ export function createTableRegionPointer(tableRowsAt: (view: EditorView, pos: nu
         this.selectWithoutNativeText(region)
       } else if (!this.view.state.selection.main.empty) {
         this.selectWithoutNativeText(region)
-      }
-    }
-
-    private clearPaint(): void {
-      for (const cell of this.painted) cell.classList.remove(...CLASSES)
-      this.painted.clear()
-    }
-
-    private paint(): void {
-      this.clearPaint()
-      const selected = this.view.state.field(tableRegionField)
-      if (!selected) return
-      const live = this.view.state.field(this.liveField, false)
-      if (!live) return
-      for (const element of this.view.contentDOM.querySelectorAll<HTMLElement>('.vsidian-table-grid-row')) {
-        let pos: number
-        try { pos = this.view.posAtDOM(element, 0) } catch { continue }
-        const lineFrom = this.view.state.doc.lineAt(pos).from
-        const rows = tableRowsAt(this.view, lineFrom, live.tree)
-        if (rows?.[0]?.lineFrom !== selected.tableFrom) continue
-        const index = contentIndex(rows, lineFrom)
-        if (index < selected.rowFrom || index > selected.rowTo) continue
-        const cells = element.querySelectorAll<HTMLElement>(':scope > .vsidian-table-grid-cell')
-        for (let col = selected.columnFrom; col <= selected.columnTo; col++) {
-          const cell = cells[col]
-          if (!cell) continue
-          cell.classList.add(CLASSES[0]!)
-          if (index === selected.rowFrom) cell.classList.add(CLASSES[1]!)
-          if (index === selected.rowTo) cell.classList.add(CLASSES[2]!)
-          if (col === selected.columnFrom) cell.classList.add(CLASSES[3]!)
-          if (col === selected.columnTo) cell.classList.add(CLASSES[4]!)
-          this.painted.add(cell)
-        }
       }
     }
   })

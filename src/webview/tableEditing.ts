@@ -28,7 +28,7 @@ import { escapeCellText, needsPipeEscapeAt, parseTableDelimiter, planBlankRowCel
 import { planTableColumnMove, planTableEdit, planTableRowMove, tableCellNavTarget, type TableRowInfo } from './tableStructure'
 import { createTableControls } from './tableControls'
 import { planCreateTable } from './tableCreate'
-import { planTableRegionDelete, planTableRegionReplace, serializeTableRegion } from './tableRegion'
+import { parseTableRegionClipboard, planTableRegionDelete, planTableRegionPaste, planTableRegionReplace, serializeTableRegion } from './tableRegion'
 import { createTableRegionPointer, setTableRegion, tableRegionField } from './tableRegionSelection'
 
 /** 表格行身份的解析树节点名（分隔行整体是一个 TableDelimiter 节点） */
@@ -600,6 +600,9 @@ const protectGridCellContent = EditorState.transactionFilter.of((tr) => {
 /** 原生键入、粘贴与 IME 候选的首笔输入均替换整片格区。
  * 后续 IME 候选只更新左上格；宿主组合缓冲将全过程合成一次写回。 */
 const replaceTableRegionInput = EditorState.transactionFilter.of((tr) => {
+  // 事件层格对格粘贴派发的事务（input.paste + tableRegionReplacement）已
+  // 是最终形态，不得按「文本落左上格」再重写一遍（表头会重复铺开）
+  if (tr.annotation(tableRegionReplacement)) return tr
   if (!tr.docChanged || !tr.isUserEvent('input') || tr.isUserEvent('input.type.compose')) return tr
   const region = tr.startState.field(tableRegionField, false)
   const field = tr.startState.field(liveDecorationsField, false)
@@ -613,7 +616,12 @@ const replaceTableRegionInput = EditorState.transactionFilter.of((tr) => {
     text = inserted.toString()
   })
   if (count !== 1 || !text) return tr
-  const plan = planTableRegionReplace(tr.startState.doc.toString(), rows, region, text)
+  // 剪贴板是合法表格（如格区复制产物）时格对格铺开（2026-09-28 决策：
+  // 剥产物表头包装、扩表容纳、永不删行列）；普通文本仍落左上格
+  const matrix = parseTableRegionClipboard(text)
+  const plan = matrix
+    ? planTableRegionPaste(tr.startState.doc.toString(), rows, region, matrix)
+    : planTableRegionReplace(tr.startState.doc.toString(), rows, region, text)
   if (!plan) return tr
   return { changes: plan.changes, selection: { anchor: plan.selection },
     annotations: [tableRegionReplacement.of(true),
@@ -1134,6 +1142,24 @@ export const tableEditing = [
       const text = serializeTableRegion(view.state.doc.toString(), selected.rows, selected.region)
       if (text === null) return false
       event.clipboardData.setData('text/plain', text)
+      event.preventDefault()
+      return true
+    },
+    // 格对格粘贴（2026-09-28 决策）：格区选区 + 合法表格剪贴板在事件层
+    // 截获直发单事务——事务层的格内粘贴转义（protectGridPointerSelection
+    // 的 escapeCellText）会把管道/换行预转义，表格判定必须抢在它之前。
+    // 普通文本粘贴不拦截，落回左上格现状链路（region-paste 场景钉住）。
+    paste: (event, view) => {
+      const selected = selectedRegionRows(view)
+      const text = event.clipboardData?.getData('text/plain')
+      if (!selected || !text) return false
+      const matrix = parseTableRegionClipboard(text)
+      if (!matrix) return false
+      const plan = planTableRegionPaste(view.state.doc.toString(), selected.rows, selected.region, matrix)
+      if (!plan) return false
+      view.dispatch({ changes: plan.changes, selection: { anchor: plan.selection },
+        annotations: [tableRegionReplacement.of(true), Transaction.userEvent.of('input.paste')],
+        scrollIntoView: true })
       event.preventDefault()
       return true
     },

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import MarkdownIt from 'markdown-it'
-import { planTableRegionDelete, planTableRegionReplace, serializeTableRegion, type TableRegion } from '../../src/webview/tableRegion'
+import { parseTableRegionClipboard, planTableRegionDelete, planTableRegionPaste, planTableRegionReplace, serializeTableRegion, type TableRegion } from '../../src/webview/tableRegion'
 import type { TableRowInfo } from '../../src/webview/tableStructure'
 
 const doc = '正文前\n\n| 名字 | 数量 | 备注 |\n| --- | :---: | ---: |\n| 苹果 | 3 | 甲 |\n| 香蕉 | 5 | 乙\\|丙 |\n| 樱桃 | 7 | `a|b` |\n\n正文后'
@@ -78,5 +78,60 @@ describe('矩形单元格区域', () => {
     expect(after).toContain('| 苹果 | X\\|换行<br>后续 |  |\n| 香蕉 |  |  |')
     expect(after).toContain('| 樱桃 | 7 | `a|b` |')
     expect(after.slice(plan.selection - 2, plan.selection)).toBe('后续')
+  })
+})
+
+describe('格对格粘贴（2026-09-28 决策：剥包装、扩表容纳、永不删行列）', () => {
+  it('parseTableRegionClipboard：复制产物可解析，剥掉表头包装首行也是数据，转义管道保真', () => {
+    const clipboard = serializeTableRegion(doc, rows, region(1, 2, 1, 2))!
+    const matrix = parseTableRegionClipboard(clipboard)!
+    expect(matrix).toEqual([[' 3 ', ' 甲 '], [' 5 ', ' 乙\\|丙 ']])
+  })
+
+  it('parseTableRegionClipboard：缺分隔行 / 列不齐 / 空文本一律不判为表格', () => {
+    expect(parseTableRegionClipboard('| a | b |')).toBeNull()
+    expect(parseTableRegionClipboard('| a | b |\n| --- |\n| c | d |')).toBeNull()
+    expect(parseTableRegionClipboard('')).toBeNull()
+    expect(parseTableRegionClipboard('普通段落\n不是表格')).toBeNull()
+  })
+
+  it('同尺寸 2×2：四格逐一替换，行列结构与其他格不动', () => {
+    const matrix = [[' 一 ', ' 二 '], [' 三 ', ' 四 ']]
+    const after = apply(planTableRegionPaste(doc, rows, region(1, 2, 1, 2), matrix)!.changes)
+    expect(after).toContain('| 名字 | 数量 | 备注 |\n| --- | :---: | ---: |\n| 苹果 | 一 | 二 |\n| 香蕉 | 三 | 四 |\n| 樱桃 | 7 | `a|b` |')
+  })
+
+  it('源小于选区：选区内未覆盖格清空，行数不变（粘贴永不删行列）', () => {
+    const matrix = [[' 一 ']]
+    const after = apply(planTableRegionPaste(doc, rows, region(1, 2, 1, 2), matrix)!.changes)
+    expect(after).toContain('| 苹果 | 一 | |\n| 香蕉 | | |')
+    expect(after).toContain('| 樱桃 | 7 | `a|b` |')
+  })
+
+  it('源越过选区：以选区左上为锚铺开，覆盖表内已有格（不删行列）', () => {
+    const matrix = [[' 一 ', ' 二 '], [' 三 ', ' 四 '], [' 五 ', ' 六 ']]
+    const after = apply(planTableRegionPaste(doc, rows, region(1, 1, 1, 1), matrix)!.changes)
+    expect(after).toContain('| 苹果 | 一 | 二 |\n| 香蕉 | 三 | 四 |\n| 樱桃 | 五 | 六 |')
+  })
+
+  it('源行数超表：表格末尾扩行容纳，选区外行与表头不动', () => {
+    const matrix = [[' 一 ', ' 二 '], [' 三 ', ' 四 '], [' 五 ', ' 六 '], [' 七 ', ' 八 ']]
+    const after = apply(planTableRegionPaste(doc, rows, region(1, 1, 0, 0), matrix)!.changes)
+    const lines = after.split('\n')
+    expect(lines.slice(2, 8).join('\n')).toBe(
+      '| 名字 | 数量 | 备注 |\n| --- | :---: | ---: |\n| 一 | 二 | 甲 |\n| 三 | 四 | 乙\\|丙 |\n| 五 | 六 | `a|b` |\n| 七 | 八 | |')
+    expect(after).toContain('正文后')
+  })
+
+  it('源列数超表：全表加列，分隔行原对齐保真并补默认对齐格', () => {
+    const matrix = [[' 一 ', ' 二 ', ' 三 '], [' 四 ', ' 五 ', ' 六 ']]
+    const after = apply(planTableRegionPaste(doc, rows, region(1, 2, 1, 1), matrix)!.changes)
+    expect(after).toContain('| 名字 | 数量 | 备注 | |\n| --- | :---: | ---: | --- |\n| 苹果 | 一 | 二 | 三 |\n| 香蕉 | 四 | 五 | 六 |\n| 樱桃 | 7 | `a|b` | |')
+  })
+
+  it('格内 <br> 字面与行内格式原样保真', () => {
+    const matrix = [[' a<br>b ', ' **粗** ']]
+    const after = apply(planTableRegionPaste(doc, rows, region(0, 0, 0, 1), matrix)!.changes)
+    expect(after).toContain('| a<br>b | **粗** | 备注 |')
   })
 })
