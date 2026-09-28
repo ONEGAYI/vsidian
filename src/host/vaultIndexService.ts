@@ -1332,6 +1332,137 @@ export class VaultIndexService {
 
   // ---- 反链查询 ----
 
+  /**
+   * #199/#200 rename 改写候选：指向 oldFsPath 的引用边（按来源文档分组，
+   * 基线 + 覆盖层合并视图——覆盖层在场的来源用未保存文本的边，区间对齐
+   * 文档当前最新内容）与被移动文档自身的出链（.md 时；覆盖层优先）。
+   * not-ready（首扫未完成/快照恢复中）时调用方不得做静默部分更新。
+   */
+  renameCandidatesOf(oldFsPath: string): {
+    status: 'ready' | 'not-ready' | 'outside'
+    incoming: Array<{ fsPath: string; edges: readonly VaultEdge[] }>
+    outgoing: readonly VaultEdge[]
+  } {
+    const state = this.rootOf(oldFsPath)
+    if (!state) {
+      return { status: 'outside', incoming: [], outgoing: [] }
+    }
+    if (!state.hasData || !state.model || !state.backlinks) {
+      return { status: 'not-ready', incoming: [], outgoing: [] }
+    }
+    const rel = this.relOf(state, oldFsPath)
+    if (rel === null) {
+      return { status: 'outside', incoming: [], outgoing: [] }
+    }
+    // 反链桶按磁盘真实形态聚合（resolvedTarget 原文）；fsPath 大小写可能
+    // 与磁盘形态不同——fold 匹配桶键（Windows 语义）
+    let bucketKey: string | null = null
+    for (const key of state.backlinks.keys()) {
+      if (this.foldKey(key) === this.foldKey(rel)) {
+        bucketKey = key
+        break
+      }
+    }
+    const incoming = new Map<string, VaultEdge[]>()
+    if (bucketKey !== null) {
+      for (const e of queryBacklinks(state.backlinks, state.overlay, bucketKey)) {
+        const abs = this.absOf(state, e.source)
+        let list = incoming.get(abs)
+        if (!list) {
+          incoming.set(abs, (list = []))
+        }
+        list.push(e)
+      }
+    }
+    const overlayEntry = state.overlay.get(rel)
+    const outgoing = overlayEntry
+      ? overlayEntry.edges
+      : state.model.edges.filter((e) => e.source === rel)
+    return {
+      status: 'ready',
+      incoming: [...incoming.entries()].map(([fsPath, edges]) => ({ fsPath, edges })),
+      outgoing,
+    }
+  }
+
+  /**
+   * #199/#200 rename 后索引刷新（onDidRenameFiles 域）：旧路径退场与
+   * 新路径登记。旧路径移除必须有 missing 正证据（不可访问标 stale 不当
+   * 删除）；新路径 .md 增量重扫、非 .md 附件**无条件登记** asset 条目
+   * （事件驱动的窄登记——保证改写后引用者的解析延续；无人引用的冗余
+   * 条目由下一次全量重扫/覆盖范围重算自然校正，asset 不解析内容无正确
+   * 性影响）。排除的 .md 不入索引域（排除来源不贡献索引）。外部工具改名
+   * 无 rename 事件，只经 watcher 增量维护，不经本入口。
+   */
+  async refreshRenamed(oldFsPath: string, newFsPath: string): Promise<void> {
+    const oldState = this.rootOf(oldFsPath)
+    if (oldState) {
+      const oldRel = this.relOf(oldState, oldFsPath)
+      if (oldRel !== null && /\.md$/i.test(oldFsPath)) {
+        if (!this.excludeMatcher.test(oldRel)) {
+          await this.rescanFile(oldState, oldFsPath) // rename 后必 missing → 移除
+        }
+      } else if (oldRel !== null) {
+        await this.removeIfMissing(oldState, oldFsPath)
+      }
+    }
+    const newState = this.rootOf(newFsPath)
+    if (!newState || this.disposed) {
+      return
+    }
+    const newRel = this.relOf(newState, newFsPath)
+    if (newRel === null) {
+      return
+    }
+    if (/\.md$/i.test(newFsPath)) {
+      if (!this.excludeMatcher.test(newRel)) {
+        await this.rescanFile(newState, newFsPath)
+        this.scheduleCommit(newState)
+      }
+      return
+    }
+    if (!newState.model) {
+      return
+    }
+    const stat = await this.scan.statFile(newFsPath)
+    if (!stat) {
+      return
+    }
+    const prev = newState.model.files.get(newRel)
+    newState.model.files.set(newRel, {
+      path: newRel,
+      kind: 'asset',
+      mtimeMs: stat.mtimeMs,
+      size: stat.size,
+      contentVersion: (prev?.contentVersion ?? 0) + 1,
+    })
+    this.ensureGeneration(newFsPath)
+    this.notify()
+    this.scheduleCommit(newState)
+  }
+
+  /** 移除非 md 条目的正证据路径（missing 才移除；不可访问标 stale） */
+  private async removeIfMissing(state: RootIndexState, fsPath: string): Promise<void> {
+    if (!state.model) {
+      return
+    }
+    const rel = this.relOf(state, fsPath)
+    if (rel === null) {
+      return
+    }
+    const access = await this.scan.accessOf(fsPath)
+    if (access === 'missing') {
+      this.removeBaselineEntry(state, rel)
+      this.publishTargetChange(state, rel, 'deleted', null)
+    } else if (access === 'inaccessible') {
+      const prev = state.model.files.get(rel)
+      this.publishTargetChange(
+        state, rel, 'stale',
+        prev ? { mtimeMs: prev.mtimeMs, size: prev.size } : null,
+      )
+    }
+  }
+
   /** 查询文档的反链（面板数据源；items 按来源路径/位置稳定排序） */
   async backlinksOf(fsPath: string): Promise<BacklinksResult> {
     const state = this.rootOf(fsPath)

@@ -218,6 +218,7 @@ vsidian/
 │   │   ├── vaultIndexSchedule.ts # 索引维护调度纯逻辑与初值常量
 │   │   ├── vaultIndexSnapshot.ts # 分片快照存储纯逻辑（#195 选型基线）
 │   │   ├── vaultLink.ts          # 根内相对路径解析单一事实源（#196）
+│   │   ├── vaultRename.ts        # 引用改写计划纯逻辑（#199）
 │   │   └── wikilink.ts           # 双链形态学单一事实源（#11）
 │   └── webview/     # webview 端实现
 │       ├── anchorFlash.ts              # 跳转目标高亮装饰状态
