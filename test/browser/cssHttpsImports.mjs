@@ -320,7 +320,10 @@ try {
   setFile(files, '/snips/broken-import.css',
     `@import url("${base}/remote/missing.css");\n#app { --p-broken-import: own-ok; }`)
   setFile(files, '/snips/error-import.css',
-    `@import url("${base}/remote/error.css");\n#app { --p-error-import: own-ok; }`)
+    `@import url("${base}/remote/error.css");\n#app { --p-error-import: own-ok; }`,
+    // 入口表刻意带延迟（#193）：全量并发下入口响应可能晚于断言到达，本段
+    // 断言必须经 waitFor 等落地——立即读在延迟窗口内必读到 null（偶发红根因）
+    { delayMs: 400 })
   setFile(files, '/snips/invalid-import.css',
     `@import url("${base}/remote/invalid.css");\n#app { --p-invalid-import: own-ok; }`)
   {
@@ -333,9 +336,9 @@ try {
       { name: 'invalid-import.css', uri: `${base}/snips/invalid-import.css?v=1`, v: 1 },
     ])
     assert.equal(await waitFor(() => appVar(page, '--p-broken-import')), 'own-ok', '远程 404：入口自身规则仍生效（降级）')
-    assert.equal(await appVar(page, '--p-error-import'), 'own-ok', '远程 500：入口自身规则仍生效')
-    assert.equal(await appVar(page, '--p-invalid-import'), 'own-ok', '无效 CSS 远程表：入口自身规则仍生效')
-    assert.equal(await appVar(page, '--p-remote'), 'remote-ok', '失败隔离：好的远程导入不受坏远程导入影响')
+    assert.equal(await waitFor(() => appVar(page, '--p-error-import')), 'own-ok', '远程 500：入口自身规则仍生效')
+    assert.equal(await waitFor(() => appVar(page, '--p-invalid-import')), 'own-ok', '无效 CSS 远程表：入口自身规则仍生效')
+    assert.equal(await waitFor(() => appVar(page, '--p-remote')), 'remote-ok', '失败隔离：好的远程导入不受坏远程导入影响')
     // 远程入口本身不可达（跨源 404 → sheet 跨源不可读，装载器 opaque 失败分支）
     setFile(filesCross, '/ghost.css', 'x', { status: 404 })
     await apply(2, [
@@ -345,7 +348,7 @@ try {
     await waitFor(() => page.evaluate(() =>
       window.snipSent().some((m) => m.kind === 'snippets.loadResult' && m.name === 'remote-dead-entry.css' && m.ok === false)),
       '远程入口不可达的失败回报到达')
-    assert.equal(await appVar(page, '--p-remote'), 'remote-ok', '远程入口失败不影响其他片段')
+    assert.equal(await waitFor(() => appVar(page, '--p-remote')), 'remote-ok', '远程入口失败不影响其他片段')
     await fx.close()
   }
 
