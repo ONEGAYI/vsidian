@@ -8,6 +8,8 @@
 //   introduced/verification/id/views）不得出现；可选字段仅当中文条目
 //   确有该字段时才覆盖（无值字段跳过）；
 // - 覆盖值非空字符串；
+// - 反向完整性：中文条目双语字段有值 ⇒ 英文覆盖必有对应键且非空
+//   （130 条全量；不译字段不在锁内）——防未来新增条目/字段漏翻；
 // - content 域 75 条、chrome 域 55 条 id 全量覆盖（#179/#180 域级完整性，
 //   合计 130 条全覆盖）；
 // - 取词纯函数行为：英文语言字段级 merge、非英文语言与覆盖表缺失条目
@@ -15,11 +17,7 @@
 // - 生成数据模块（styleGuideData.ts，settings.js 渲染数据）携带同源双语。
 import { describe, expect, it } from 'vitest'
 import { STYLE_CONTRACT_ENTRIES } from '../../src/shared/styleContract'
-import {
-  STYLE_CONTRACT_EN_OVERRIDES,
-  applyStyleContractEntryOverride,
-  localizedStyleContractEntry,
-} from '../../src/shared/styleContractEn'
+import { STYLE_CONTRACT_EN_OVERRIDES, applyStyleContractEntryOverride } from '../../src/shared/styleContractEn'
 import { STYLE_GUIDE_EN_OVERRIDES } from '../../src/webview/styleGuideData'
 
 /** 双语字段全集（规格字段分级；obsidian 覆盖形态固定为 { counterpart }） */
@@ -114,14 +112,48 @@ describe('英文覆盖一致性契约（#178 机制 + #179 content 域全量 + #
     }
   })
 
-  it('便捷封装 localizedStyleContractEntry 查本模块覆盖表', () => {
+  it('取词：本模块覆盖表直连消费（container-reading 字段级覆盖与中文回退）', () => {
     const entry = entryById.get('container-reading')!
     const override = STYLE_CONTRACT_EN_OVERRIDES['container-reading']!
-    expect(localizedStyleContractEntry(entry, 'en').purpose).toBe(override.purpose)
-    expect(localizedStyleContractEntry(entry, 'en').obsidian.counterpart).toBe(override.obsidian!.counterpart)
-    expect(localizedStyleContractEntry(entry, 'zh-cn')).toBe(entry)
+    const localized = applyStyleContractEntryOverride(entry, 'en', STYLE_CONTRACT_EN_OVERRIDES)
+    expect(localized.purpose).toBe(override.purpose)
+    expect(localized.obsidian.counterpart).toBe(override.obsidian!.counterpart)
+    expect(applyStyleContractEntryOverride(entry, 'zh-cn', STYLE_CONTRACT_EN_OVERRIDES)).toBe(entry)
   })
 
+  it('反向完整性：中文条目双语字段有值 ⇒ 英文覆盖必有对应键且非空（130 条全量）', () => {
+    // 双语字段反向锁（规格字段分级）：purpose/dom 为必填恒锁；states/
+    // deprecated/removed 为可选，中文条目确有该字段才锁；example 等不译
+    // 字段不在锁内。防未来新增条目/改写字段时英文覆盖漏跟（正向键锁
+    // 只防「覆盖表脏键」，此锁防「基准扩展后覆盖静默缺失」）。
+    const requiredKeys = ['purpose', 'dom'] as const
+    const optionalKeys = ['states', 'deprecated', 'removed'] as const
+    for (const entry of STYLE_CONTRACT_ENTRIES) {
+      const override = STYLE_CONTRACT_EN_OVERRIDES[entry.id]
+      for (const key of requiredKeys) {
+        const enValue = override?.[key]
+        expect(
+          typeof enValue === 'string' && enValue.trim().length > 0,
+          `${entry.id}.${key}：必填双语字段英文覆盖缺失或为空`,
+        ).toBe(true)
+      }
+      for (const key of optionalKeys) {
+        if (entry[key] === undefined) continue
+        const enValue = override?.[key]
+        expect(
+          typeof enValue === 'string' && enValue.trim().length > 0,
+          `${entry.id}.${key}：中文基准有值而英文覆盖缺失或为空`,
+        ).toBe(true)
+      }
+      if (entry.obsidian.counterpart) {
+        const enCounterpart = override?.obsidian?.counterpart
+        expect(
+          typeof enCounterpart === 'string' && enCounterpart.trim().length > 0,
+          `${entry.id}.obsidian.counterpart：中文基准有值而英文覆盖缺失或为空`,
+        ).toBe(true)
+      }
+    }
+  })
   it('生成数据模块携带同源双语（settings.js 渲染数据由生成器内联）', () => {
     expect(Object.keys(STYLE_GUIDE_EN_OVERRIDES)).toEqual(Object.keys(STYLE_CONTRACT_EN_OVERRIDES))
     for (const [id, override] of Object.entries(STYLE_CONTRACT_EN_OVERRIDES)) {
