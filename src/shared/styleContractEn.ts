@@ -944,10 +944,3 @@ export function applyStyleContractEntryOverride(
       : {}),
   }
 }
-
-/** 便捷封装：查本模块覆盖表（生成器加载校验与测试用；设置页消费生成物
- *  内联覆盖表时走参数化 applyStyleContractEntryOverride，避免本模块数据
- *  与生成物数据重复进 bundle） */
-export function localizedStyleContractEntry(entry: StyleContractEntry, lang: string): StyleContractEntry {
-  return applyStyleContractEntryOverride(entry, lang, STYLE_CONTRACT_EN_OVERRIDES)
-}

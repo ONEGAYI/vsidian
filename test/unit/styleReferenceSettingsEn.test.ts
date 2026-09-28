@@ -12,6 +12,7 @@ import { zhCn } from '../../src/shared/locales/zh-cn'
 import { STYLE_CONTRACT_EN_OVERRIDES } from '../../src/shared/styleContractEn'
 import { STYLE_GUIDE_ENTRIES } from '../../src/webview/styleGuideData'
 import { StyleReferenceSection } from '../../src/webview/styleReferenceSettings'
+import { CJK_RE } from './i18nScan'
 
 function mountDetail(focusEntry?: string): HTMLElement {
   const parent = document.createElement('div')
@@ -108,31 +109,37 @@ describe('样式参考英文 UI 呈现（#178 试点）', () => {
 // ---------------------------------------------------------------------------
 // #180 收尾：全局残留断言——英文 UI 下「样式参考」页无中文残留。
 //
-// 断言口径：汉字 [\u4e00-\u9fff]，与 test/unit/i18nScan.ts 的 CJK_RE 同源
-// （全角标点不算 CJK——renderCard 骨架里的全角冒号是既定呈现，不属残留）。
+// 断言口径：汉字 [\u4e00-\u9fff]，直接引用 test/unit/i18nScan.ts 的
+// CJK_RE（同一正则对象，非复制；全角标点不算 CJK——renderCard 骨架里的
+// 全角冒号是既定呈现，不属残留）。
 // 断言层级（用户可见文本层，PR #37 教训）：
 // - 总表面板整体 textContent（版本说明/别名桥要点/变量总表 = t() 词条 +
 //   ASCII 变量名，本就应无汉字）；
-// - 每张条目卡片中承载双语字段的三个可见段落——purpose 段（标题后首个
-//   p）、meta 段（视图徽标 + 支持等级 + states）、Obsidian 对应段——无汉字；
+// - 每张条目卡片中承载翻译面的四个可见段落——purpose 段（标题后首个
+//   p）、meta 段（视图徽标 + 支持等级 + states）、Obsidian 对应段、life
+//   生命周期行（deprecated/removed 词条与英译值在此渲染）——无汉字；
 // - 搜索聚合模式对全部 130 条 id 逐一检索（子串命中放大覆盖面），聚合
 //   渲染路径（含来源类目 chip 与命中计数行）同口径断言。
-// 不译字段按规格保留中文（target / example / introduced 会出现在卡片标题
-// code、示例 pre 与生命周期行），故不做整卡 textContent 汉字断言——那与
-// 规格字段分级冲突；双语字段段落断言恰好堵住「漏翻条目回退中文基准」这一
-// 本票要防的失效模式。
+// 不译字段按规格保留中文（target / example 会出现在卡片标题 code、示例
+// pre），故不做整卡 textContent 汉字断言——那与规格字段分级冲突；段落
+// 断言恰好堵住「漏翻条目回退中文基准」这一本票要防的失效模式。life 行
+// 行首的 introduced 同为不译字段，且清单 20 条的 introduced 值含中文
+// 说明（数据形态不止「#N（日期）」），按规格属既定呈现、不算残留——
+// life 断言先剔除行首 introduced 原文再判汉字，只锁翻译面（deprecated/
+// removed 词条与英译值）。
 // ---------------------------------------------------------------------------
 describe('样式参考英文 UI 全局残留断言（#180 收尾）', () => {
-  // 与 test/unit/i18nScan.ts 的 CJK_RE 同口径（仅汉字）
-  const HAN_RE = /[\u4e00-\u9fff]/
-
   // 显式固定英文环境：不依赖前序 describe 留下的语言状态
   beforeAll(() => {
     installLocale('en', en)
   })
 
-  /** 双语字段可见段落无汉字断言（purpose / meta / obsidian 三段） */
-  function assertCardBilingualFieldsHanFree(card: HTMLElement, label: string): void {
+  // introduced 原文表（渲染消费的生成数据与中文基准同源）：renderCard 以
+  // introduced 作为 life 行首段拼行，剔除后再对翻译面判汉字
+  const introducedById = new Map(STYLE_GUIDE_ENTRIES.map((e) => [e.id, e.introduced]))
+
+  /** 翻译面可见段落无汉字断言（purpose / meta / obsidian / life 四段） */
+  function assertCardSectionsHanFree(card: HTMLElement, label: string): void {
     const purpose = card.querySelector('p')
     const meta = card.querySelector('.vsidian-style-ref-meta')
     const obsidian = card.querySelector('.vsidian-style-ref-obsidian')
@@ -143,15 +150,24 @@ describe('样式参考英文 UI 全局残留断言（#180 收尾）', () => {
     ] as const) {
       expect(el, `${label}：双语段落 ${name} 未渲染`).toBeTruthy()
       const text = el!.textContent ?? ''
-      const m = HAN_RE.exec(text)
+      const m = CJK_RE.exec(text)
       expect(m, `${label}：${name} 段残留汉字「${m?.[0]}」——「${text.slice(0, 80)}」`).toBeNull()
     }
+    // life 生命周期行：deprecated/removed 词条与英译值在此渲染；行首
+    // introduced 为不译字段（规格保留中文），剔除其原文后断言翻译面
+    const life = card.querySelector('.vsidian-style-ref-life')
+    expect(life, `${label}：生命周期行未渲染`).toBeTruthy()
+    const lifeText = life!.textContent ?? ''
+    const introduced = introducedById.get(card.dataset['entry']!) ?? ''
+    const translatedPart = lifeText.startsWith(introduced) ? lifeText.slice(introduced.length) : lifeText
+    const m = CJK_RE.exec(translatedPart)
+    expect(m, `${label}：life 行翻译面残留汉字「${m?.[0]}」——「${lifeText.slice(0, 80)}」`).toBeNull()
   }
 
   it('总表面板整体无汉字（版本说明/别名桥要点/变量别名总表）', () => {
     const parent = mountDetail('overview')
     const overview = parent.querySelector('.vsidian-style-ref-overview')!
-    const m = HAN_RE.exec(overview.textContent ?? '')
+    const m = CJK_RE.exec(overview.textContent ?? '')
     expect(m, `总表面板残留汉字「${m?.[0]}」`).toBeNull()
   })
 
@@ -167,13 +183,13 @@ describe('样式参考英文 UI 全局残留断言（#180 收尾）', () => {
         for (const card of parent.querySelectorAll<HTMLElement>('.vsidian-style-ref-entry')) {
           const id = card.dataset['entry']!
           seen.add(id)
-          assertCardBilingualFieldsHanFree(card, `类目 ${catId} 条目 ${id}`)
+          assertCardSectionsHanFree(card, `类目 ${catId} 条目 ${id}`)
         }
         // 翻页：分页行存在时点「下一页」直至禁用（outline 类目 19 条占两页）
         const pageButtons = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-style-ref-page-btn')]
         const pager = parent.querySelector('.vsidian-style-ref-pager')!
         if (pager.childElementCount > 0) {
-          const m = HAN_RE.exec(pager.textContent ?? '')
+          const m = CJK_RE.exec(pager.textContent ?? '')
           expect(m, `类目 ${catId} 分页指示残留汉字`).toBeNull()
         }
         const next = pageButtons[pageButtons.length - 1]
@@ -194,11 +210,11 @@ describe('样式参考英文 UI 全局残留断言（#180 收尾）', () => {
       const cards = [...parent.querySelectorAll<HTMLElement>('.vsidian-style-ref-entry')]
       expect(cards.length, `搜索 ${entry.id} 应至少命中其自身条目`).toBeGreaterThan(0)
       for (const card of cards) {
-        assertCardBilingualFieldsHanFree(card, `搜索 ${entry.id} 命中条目 ${card.dataset['entry']}`)
+        assertCardSectionsHanFree(card, `搜索 ${entry.id} 命中条目 ${card.dataset['entry']}`)
       }
       // 聚合提示行（「{count} matches across all categories」）为 t() 词条
       const summary = parent.querySelector('.vsidian-style-ref-search-count')!
-      const m = HAN_RE.exec(summary.textContent ?? '')
+      const m = CJK_RE.exec(summary.textContent ?? '')
       expect(m, `搜索 ${entry.id} 聚合计数行残留汉字`).toBeNull()
     }
     // 收尾：清空搜索回到类目浏览形态
