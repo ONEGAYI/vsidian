@@ -19,9 +19,11 @@ import {
 import {
   findBlockOffset,
   findHeadingOffset,
-  resolveWikilinkFile,
-  type WikilinkResolveContext,
 } from './wikilinkTarget'
+import {
+  resolveVaultLinkFile,
+  type VaultLinkResolveContext,
+} from '../shared/vaultLink'
 import { parseWikilinkInner } from '../shared/wikilink'
 import { NewlineCoordinator } from '../shared/newline'
 import { buildEditorCsp } from './editorCsp'
@@ -146,15 +148,15 @@ export interface LinkLogEntry {
   locate?: 'custom-panel' | 'none'
 }
 
-/** 双链跳转执行日志（#11；与 LinkLogEntry 共用 linkLog 通道） */
+/** 双链跳转执行日志（#11；与 LinkLogEntry 共用 linkLog 通道；#196 起
+ *  同名歧义条目随 QuickPick 选择废除，新增越界条目） */
 export interface WikilinkLogEntry {
   kind:
     | 'wikilink-doc'
-    | 'wikilink-ambiguous'
     | 'wikilink-not-found'
     | 'wikilink-no-workspace'
     | 'wikilink-unsupported'
-    | 'wikilink-cancelled'
+    | 'wikilink-outside-root'
   /** 上报的原始 target（| 之前） */
   target: string
   /** wikilink-doc 的目标绝对路径 */
@@ -163,8 +165,6 @@ export interface WikilinkLogEntry {
   heading?: string
   /** 请求的块引用目标（#159；与 heading 互斥） */
   blockId?: string
-  /** ambiguous 的候选绝对路径 */
-  candidates?: string[]
   /** wikilink-doc 的定位方式：custom-panel=本扩展面板挂载定位；none=无标题定位 */
   locate?: 'custom-panel' | 'none'
 }
@@ -595,35 +595,16 @@ export function createTextEditorProvider(
     }
   }
 
-  /** 当前工作区内（限定当前文档所属文件夹）的全部 .md 绝对路径，按需现查 */
-  const findWorkspaceMdFiles = async (folder: vscode.Uri): Promise<string[]> => {
-    const uris = await vscode.workspace.findFiles('**/*.md')
-    const rootFsPath = folder.fsPath
-    const out: string[] = []
-    for (const uri of uris) {
-      const rel = path.relative(rootFsPath, uri.fsPath)
-      // 精确越界判定（与 linkTarget 的 isInsideRoot 同口径）：`..foo.md`
-      // 是同级合法文件名，粗判 startsWith('..') 会误排除
-      if (
-        rel !== '' &&
-        (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel))
-      ) {
-        continue // 多根工作区：只取当前文档所属文件夹内的文件
-      }
-      out.push(uri.fsPath)
-    }
-    return out
-  }
-
   /**
-   * 双链跳转执行（#11；#159 块引用定位与本文件锚点）：解析（按需 findFiles +
-   * 纯分类器）→ 重名 QuickPick 选择 → 打开目标并定位锚点（标题或块 id，互斥）。
-   * 空 path（[[#标题]] / [[#^块id]]）：目标即当前文档，不查文件、无 ambiguous。
+   * 双链跳转执行（#11；#159 块引用定位与本文件锚点；#196 根内相对路径
+   * 解析）：目标一律按来源文档相对路径解析（shared/vaultLink，docDir 基准、
+   * 越出所属根拦截、多根互不补查），经 fs.stat 端口探测存在性后打开并定位
+   * 锚点（标题或块 id，互斥）。
+   * 空 path（[[#标题]] / [[#^块id]]）：目标即当前文档，不查文件。
    * 目标一律由 Vsidian 面板打开（vscode.openWith 对已开面板是重显），
    * 面板就绪后发 view.locate；reading 模式经 #14 的块挂载定位。
    * 全程只读：不触碰 TextDocument、不建索引、不自动创建文件。
-   * 测试钩子模式（VSIDIAN_TEST_HOOKS）下歧义只记录不弹 QuickPick（与 #10 外链
-   * 不真开浏览器同口径）。
+   * basename 全根搜索、根相对双候选与 QuickPick 同名选择已随 #196 废除。
    */
   const executeWikilinkIntent = async (
     document: vscode.TextDocument,
@@ -645,23 +626,30 @@ export function createTextEditorProvider(
       return
     }
     // #159 本文件锚点（[[#标题]] / [[#^块id]]）：path 为空串，目标即当前文档
-    // ——不查工作区文件、无 ambiguous/QuickPick（与无工作区提示无关）
+    // ——不查工作区、无候选选择（与无工作区提示无关）
     let targetPath: string
     if (parsed.path === '') {
       targetPath = document.uri.fsPath
     } else {
+      // #196 根内相对路径解析：docDir 为基准、所属根（嵌套根取最具体——
+      // getWorkspaceFolder 返回最内层 folder）为边界，越出即拦截；存在性经
+      // fs.stat 端口探测（大小写语义由宿主文件系统裁决：NTFS 不敏感/POSIX 严格）
       const folder = vscode.workspace.getWorkspaceFolder(document.uri)
-      const ctx: WikilinkResolveContext = {
+      const ctx: VaultLinkResolveContext = {
         docDir: path.dirname(document.uri.fsPath),
         rootDir: (folder ? folder.uri : vscode.Uri.joinPath(document.uri, '..')).fsPath,
         isWindowsHost: process.platform === 'win32',
         hasWorkspace: folder !== undefined,
       }
-      const mdFiles = ctx.hasWorkspace ? await findWorkspaceMdFiles(folder!.uri) : []
-      const resolution = resolveWikilinkFile({ path: parsed.path }, ctx, mdFiles)
+      const resolution = await resolveVaultLinkFile(parsed.path, ctx, statFileRealPath)
       if (resolution.kind === 'no-workspace') {
         pushLog({ kind: 'wikilink-no-workspace', target: parsed.path })
         void vscode.window.showWarningMessage(t('host.wikilinkNoWorkspace'))
+        return
+      }
+      if (resolution.kind === 'escape') {
+        pushLog({ kind: 'wikilink-outside-root', target: parsed.path })
+        void vscode.window.showWarningMessage(t('host.wikilinkOutsideRoot', { target: parsed.path }))
         return
       }
       if (resolution.kind === 'not-found') {
@@ -671,28 +659,7 @@ export function createTextEditorProvider(
         )
         return
       }
-      if (resolution.kind === 'ambiguous') {
-        const candidates = [...resolution.fsPaths]
-        pushLog({ kind: 'wikilink-ambiguous', target: parsed.path, candidates })
-        if (process.env.VSIDIAN_TEST_HOOKS === '1') {
-          return // 集成测试环境无法驱动 QuickPick：只记录候选（手感留 #15 人工验证）
-        }
-        const items = candidates.map((p) => ({
-          label: vscode.workspace.asRelativePath(vscode.Uri.file(p), false),
-          description: p,
-          fsPath: p,
-        }))
-        const pick = await vscode.window.showQuickPick(items, {
-          placeHolder: t('host.wikilinkAmbiguousPick', { target: parsed.path }),
-        })
-        if (!pick) {
-          pushLog({ kind: 'wikilink-cancelled', target: parsed.path, candidates })
-          return
-        }
-        targetPath = pick.fsPath
-      } else {
-        targetPath = resolution.fsPath
-      }
+      targetPath = resolution.fsPath
     }
 
     const targetUri = vscode.Uri.file(targetPath)
@@ -1838,6 +1805,44 @@ function isBlockIdFragment(fragment: string): boolean {
  * NewlineCoordinator 转换）。全程只读：不触碰 TextDocument
  * 写路径、不建索引、不自动创建文件。
  */
+/** 文件存在性端口（fs 适配）：双链跳转链路经 shared/vaultLink 的 exists
+ *  端口注入（#196）。stat 验证存在且为普通文件；返回**磁盘真实路径**——
+ *  Windows 宿主（NTFS 不敏感）命中后逐段 readDirectory 归正大小写，
+ *  避免以注入形态建立 URI 与真实文档/面板身份漂移（集成实测教训）；
+ *  远程 POSIX 宿主 stat 严格命中即真实路径，原样返回。#197 引用索引
+ *  落地后可换传索引查询（索引持磁盘真实路径，直接返回）。 */
+async function statFileRealPath(fsPath: string): Promise<string | null> {
+  const uri = vscode.Uri.file(fsPath)
+  try {
+    const st = await vscode.workspace.fs.stat(uri)
+    if ((st.type & vscode.FileType.File) === 0) {
+      return null
+    }
+  } catch {
+    return null
+  }
+  if (process.platform !== 'win32') {
+    return fsPath
+  }
+  // Windows：逐段归正用户输入段的大小写（docDir 段来自已打开文档的真实
+  // URI，天然真实；归正从盘符根走一遍最稳——段数少，跳转单击频率可承受）
+  const ops = path.win32
+  let current = ops.parse(fsPath).root
+  for (const seg of fsPath.slice(current.length).split(/[\\/]+/)) {
+    if (seg === '') {
+      continue
+    }
+    try {
+      const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(current))
+      const hit = entries.find(([name]) => name.toLowerCase() === seg.toLowerCase())
+      current = ops.join(current, hit ? hit[0] : seg)
+    } catch {
+      return fsPath // 目录列举失败（不应发生——stat 已过）：退回注入形态
+    }
+  }
+  return current
+}
+
 async function executeLinkIntent(
   document: vscode.TextDocument,
   ctx: LinkContext,

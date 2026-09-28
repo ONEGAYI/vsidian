@@ -210,6 +210,7 @@ vsidian/
 │   │   ├── tabEscape.ts          # Tab 越界定位纯函数（#125）
 │   │   ├── vaultIndexModel.ts    # 引用索引内存模型纯逻辑
 │   │   ├── vaultIndexSnapshot.ts # 分片快照存储纯逻辑（#195 选型基线）
+│   │   ├── vaultLink.ts          # 根内相对路径解析单一事实源（#196）
 │   │   └── wikilink.ts           # 双链形态学单一事实源（#11）
 │   └── webview/     # webview 端实现
 │       ├── anchorFlash.ts            # 跳转目标高亮装饰状态
