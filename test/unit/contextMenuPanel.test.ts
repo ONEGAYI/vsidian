@@ -322,6 +322,30 @@ describe('菜单开合（Esc / 外点 / 命令后 / 钩子关闭 / 模式切换�
     expect(h.sent.filter((m) => m.kind === 'clipboard.write')).toHaveLength(0)
     expect(menuEl(), '放弃路径也应关闭菜单').toBeNull()
   })
+
+  it('还焦 prevFocus：打开前焦点在菜单外控件时，关闭还回该控件而非硬编码编辑器（review-loops 修复）', () => {
+    const h = makeBridge()
+    const { c } = mountPanel(h)
+    const outside = document.createElement('button')
+    outside.type = 'button'
+    document.body.appendChild(outside)
+    mountedParents.push(outside)
+    outside.focus()
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: POS.para })
+    expect(document.activeElement, '打开菜单应夺焦到菜单容器').not.toBe(outside)
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClose' })
+    expect(document.activeElement, '关闭应还焦打开前的控件').toBe(outside)
+  })
+
+  it('menuClick command 含选择器元字符时不抛异常（CSS.escape 拼接安全，review-loops 修复）', () => {
+    const h = makeBridge()
+    const { c } = mountPanel(h)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: POS.para })
+    expect(() =>
+      c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'a"b]c' }),
+    ).not.toThrow()
+    expect(menuEl(), '未命中按钮的点击是 no-op，菜单不受影响').toBeTruthy()
+  })
 })
 
 describe('剪贴板四项（宿主桥链路）', () => {

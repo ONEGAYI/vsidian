@@ -117,12 +117,20 @@ try {
       return Number.parseFloat(getComputedStyle(hint).fontSize) <
         Number.parseFloat(getComputedStyle(label).fontSize)
     })(),
+    hintDim: (() => {
+      // 用户明确要求的「浅一点」：降低不透明度（review-loops 补断言——此前
+      // opacity 只活在 CSS，删改规则无测试失败）
+      const hint = document.querySelector('button[data-vsidian-command="cut"] .vsidian-context-menu-hint')
+      if (!hint) return null
+      return Number.parseFloat(getComputedStyle(hint).opacity) < 1
+    })(),
   }))
   assert.equal(hintState.cut, 'Ctrl+X', '剪切提示列固定显示 Ctrl+X')
   assert.equal(hintState.selectAll, 'Ctrl+A', '全选提示列固定显示 Ctrl+A')
   assert.equal(hintState.wikilink, null, '未绑定项提示列不占位')
   assert.ok(hintState.hintRight, '提示列应右对齐（位于项右半区）')
   assert.ok(hintState.hintSmall, '提示列字号应小于菜单项文字（不抢戏）')
+  assert.ok(hintState.hintDim, '提示列应降低不透明度（弱化不抢戏，用户明确要求）')
   passed++
   console.log('[统一菜单回归][PASS] 分组线绘制 + 提示列右对齐小字 + 未绑定不占位')
 

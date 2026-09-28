@@ -645,6 +645,11 @@ export class WebviewSyncController {
   private outlineMenuDismissPointer: ((e: PointerEvent) => void) | undefined
   /** 菜单 Esc 关闭监听（document capture keydown；close 时摘除） */
   private outlineMenuDismissKey: ((e: KeyboardEvent) => void) | undefined
+  /** 两类菜单（大纲/正文统一，互斥打开）共用的还焦宿主：打开菜单夺焦前
+   *  记录 activeElement（body 不算，照 frontmatterPopover/diagramPopup 的
+   *  prevFocus 模式），关闭时若焦点仍在菜单内则还回——review-loops 修复：
+   *  此前硬编码还焦编辑器，大纲搜索框/查找面板输入中途右键再 Esc 会丢焦点 */
+  private menuPrevFocus: HTMLElement | null = null
 
   // ---- 正文统一右键菜单状态（#183 全域接管；blockMenu 已退役并入）----
   /** 当前打开的统一菜单容器（挂 document.body，fixed 定位；undefined = 未打开） */
@@ -1635,9 +1640,9 @@ export class WebviewSyncController {
       case 'contextMenu.test.menuClick': {
         // 测试钩子（#183）：点击菜单中 command 对应的真实按钮（与用户点击
         // 同一处理器；command 已由协议校验器限定为非空字符串——含运行期
-        // 注册项）
+        // 注册项；CSS.escape 防拼接值含选择器元字符时 querySelector 抛错）
         this.contextMenuEl
-          ?.querySelector<HTMLButtonElement>(`button[data-vsidian-command="${message.command}"]`)
+          ?.querySelector<HTMLButtonElement>(`button[data-vsidian-command="${CSS.escape(message.command)}"]`)
           ?.click()
         break
       }
@@ -1655,6 +1660,11 @@ export class WebviewSyncController {
         this.clipboardReadReqId += 1
         const view = this.view
         if (!message.ok || !view || this.viewMode !== 'live' || this.suspended) {
+          if (!message.ok) {
+            // 只读失败告警不弹窗（与未知命令的 console.warn 同口径——
+            // review-loops 修复：此前零日志，粘贴无反应无从定位）
+            console.warn('[vsidian] 剪贴板读取失败，粘贴放弃（宿主 readText 失败或端口未接线）')
+          }
           break
         }
         // 光标处插入（选区被替换——与原生粘贴同语义）；单笔事务走标准出站
@@ -4222,7 +4232,9 @@ export class WebviewSyncController {
     applySubmenuFlip(menu, window.innerWidth || 1200, {
       submenu: OUTLINE_MENU_CLASS_NAMES.submenu,
     })
-    // 键盘导航起点：聚焦菜单容器（方向键导航经内核装配自动继承）
+    // 键盘导航起点：聚焦菜单容器（方向键导航经内核装配自动继承）；夺焦前
+    // 记录先前焦点宿主（closeOutlineMenu 还焦——见 menuPrevFocus 注释）
+    this.captureMenuFocus()
     focusMenuDom(menu)
     // 关闭通道：菜单外 pointerdown（capture，含其他面板区域）与 Esc
     this.outlineMenuDismissPointer = (e) => {
@@ -4251,9 +4263,9 @@ export class WebviewSyncController {
       this.outlineMenuDismissKey = undefined
     }
     // 键盘导航还焦：打开菜单聚焦过容器（focusMenuDom），关闭时若焦点仍
-    // 在菜单内，还回编辑器（Esc 后继续打字不失效）
+    // 在菜单内，还回打开前的焦点宿主（未记录/已移除时回落编辑器）
     if (this.outlineMenuEl && this.outlineMenuEl.contains(document.activeElement)) {
-      this.view?.focus()
+      this.restoreMenuFocus()
     }
     this.outlineMenuEl?.remove()
     this.outlineMenuEl = undefined
@@ -4541,7 +4553,9 @@ export class WebviewSyncController {
     menu.style.left = `${Math.max(0, pos.left)}px`
     menu.style.top = `${Math.max(0, pos.top)}px`
     applySubmenuFlip(menu, window.innerWidth || 1200)
-    // 键盘导航起点：聚焦菜单容器（打开菜单接管方向键；关闭时还焦编辑器）
+    // 键盘导航起点：聚焦菜单容器（打开菜单接管方向键；关闭时还焦先前
+    // 宿主——见 menuPrevFocus 注释）
+    this.captureMenuFocus()
     focusMenuDom(menu)
     // 关闭通道：菜单外 pointerdown（capture）与 Esc（与大纲菜单同模式）
     this.contextMenuDismissPointer = (e) => {
@@ -4570,14 +4584,35 @@ export class WebviewSyncController {
       this.contextMenuDismissKey = undefined
     }
     // 键盘导航还焦：打开菜单聚焦过容器（focusMenuDom），关闭时若焦点仍
-    // 在菜单内，还回编辑器（Esc 后继续打字不失效）
+    // 在菜单内，还回打开前的焦点宿主（未记录/已移除时回落编辑器）
     if (this.contextMenuEl && this.contextMenuEl.contains(document.activeElement)) {
-      this.view?.focus()
+      this.restoreMenuFocus()
     }
     this.contextMenuEl?.remove()
     this.contextMenuEl = undefined
     this.contextMenuTarget = null
     this.contextMenuDoc = null
+  }
+
+  /** 菜单夺焦前记录焦点宿主（body 不算——照 frontmatterPopover 先例；
+   *  两类菜单互斥打开，共用 menuPrevFocus 一个槽位） */
+  private captureMenuFocus(): void {
+    this.menuPrevFocus =
+      document.activeElement instanceof HTMLElement && document.activeElement !== document.body
+        ? document.activeElement
+        : null
+  }
+
+  /** 菜单还焦：还回打开前的焦点宿主（已移出文档时回落编辑器）。仅在焦点
+   *  仍在菜单内时被调用（关闭路径已有 contains 判定） */
+  private restoreMenuFocus(): void {
+    const prev = this.menuPrevFocus
+    this.menuPrevFocus = null
+    if (prev && prev.isConnected) {
+      prev.focus()
+      return
+    }
+    this.view?.focus()
   }
 
   /** 菜单命令分派：锚点过期防御后按命令执行——先查运行期 handler（覆写

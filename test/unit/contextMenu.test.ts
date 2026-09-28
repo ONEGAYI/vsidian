@@ -177,6 +177,60 @@ describe('覆写层语义（运行期注册表，内置 = 第一个注册者）'
     expect(overrideContextMenuItem('nonexistent', { labelKey: 'contextMenu.copy' })).toBe(false)
     expect(hideContextMenuItem('nonexistent')).toBe(false)
   })
+
+  it('register→override→cleanup：先注册者的 cleanup 不回滚更晚的覆写（review-loops 修复）', () => {
+    const cleanup = registerContextMenuItem({
+      id: 'selectAll', group: 'clipboard', order: 3,
+      command: 'selectAll', labelKey: 'contextMenu.copy',
+    }, 'ext-b')
+    expect(overrideContextMenuItem('selectAll', { hidden: true }, 'ext-c')).toBe(true)
+    cleanup()
+    // ext-c 的覆写仍在（来源与隐藏都保留），不被 ext-b 的卸载清掉
+    expect(contextMenuItemSources()['selectAll']).toBe('ext-c')
+    expect(modelIds(normalCtx())).not.toContain('selectAll')
+  })
+
+  it('register 新增项→override→cleanup：条目与覆写都保留（后注册者胜对 override 链成立）', () => {
+    const cleanup = registerContextMenuItem({
+      id: 'customKeep', group: 'link', order: 97,
+      command: 'customKeep', labelKey: 'contextMenu.selectAll',
+    })
+    expect(overrideContextMenuItem('customKeep', { labelKey: 'contextMenu.copy' })).toBe(true)
+    cleanup()
+    const item = buildContextMenuModel(normalCtx())
+      .flatMap((g) => g.items).find((i) => i.id === 'customKeep')!
+    expect(item.labelKey).toBe('contextMenu.copy')
+  })
+})
+
+describe('环防护（registerContextMenuItem 拒绝循环嵌套）', () => {
+  it('子树引用自身 id 抛错（防渲染递归栈溢出；注册被整体拒绝不留痕）', () => {
+    expect(() => registerContextMenuItem({
+      id: 'loopSelf', group: 'link', order: 96,
+      command: 'loopSelf', labelKey: 'contextMenu.selectAll',
+      children: [
+        { id: 'loopSelf', group: 'link', order: 0, command: 'loopSelf', labelKey: 'contextMenu.copy' },
+      ],
+    })).toThrow('循环嵌套')
+    expect(contextMenuItemSources()['loopSelf']).toBeUndefined()
+  })
+
+  it('跨条目环在闭合注册时暴露（B 子树含 C、C 子树含 B）', () => {
+    registerContextMenuItem({
+      id: 'loopB', group: 'link', order: 95,
+      command: 'loopB', labelKey: 'contextMenu.selectAll',
+      children: [
+        { id: 'loopC', group: 'link', order: 0, command: 'loopC', labelKey: 'contextMenu.copy' },
+      ],
+    })
+    expect(() => registerContextMenuItem({
+      id: 'loopC', group: 'link', order: 94,
+      command: 'loopC', labelKey: 'contextMenu.copy',
+      children: [
+        { id: 'loopB', group: 'link', order: 0, command: 'loopB', labelKey: 'contextMenu.selectAll' },
+      ],
+    })).toThrow('循环嵌套')
+  })
 })
 
 describe('handler 承载（覆写语义：可换执行体；分派先查运行期 handler）', () => {
@@ -351,6 +405,15 @@ describe('键位提示派生（contextMenuKeybindingHints）', () => {
     const cleared = contextMenuKeybindingHints({ bold: [] })
     expect(cleared['bold']).toBeUndefined()
   })
+
+  it('运行期新增条目同样按 command 派生提示（遍历源是注册表快照——review-loops 修复）', () => {
+    registerContextMenuItem({
+      id: 'myBold', group: 'link', order: 93,
+      command: 'bold', labelKey: 'contextMenu.selectAll',
+    })
+    expect(contextMenuKeybindingHints({})['myBold']).toBe('Ctrl+B')
+    expect(contextMenuKeybindingHints({ bold: [] })['myBold']).toBeUndefined()
+  })
 })
 
 describe('命中判定（contextMenuBlockTargetAt，自 blockMenu 迁移）', () => {
@@ -469,6 +532,12 @@ describe('区域判定（contextMenuZoneAt：全域接管的安全降级输入�
 
   it('含 | 但无分隔行不是表格（普通段落）', () => {
     expect(contextMenuZoneAt(['a | b 普通段落'], 0, -1)).toBe('normal')
+  })
+
+  it('短分隔行表格（|-|-|，GFM 单连字符）判为 table——与 tableCells 口径对齐（review-loops 修复）', () => {
+    const short = ['|-|-|', '|a|b|']
+    expect(contextMenuZoneAt(short, 0, -1)).toBe('table')
+    expect(contextMenuZoneAt(short, 1, -1)).toBe('table')
   })
 
   it('围栏代码区（含开闭围栏行）判定为 fence；mermaid 围栏判定为 graphic', () => {

@@ -1336,13 +1336,16 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
 }
 
 /* 级联子菜单：默认隐藏，父项宿主 hover/focus-within 展开（显隐主开关）；
-   open 类为父项点击兜底通道；flip 类在装配期右缘放不下时翻到左侧 */
+   open 类为父项点击兜底通道；flip 类在装配期右缘放不下时翻到左侧；
+   max-width 与主菜单同款钳制——极窄视口下两侧都放不下时至少不被裁切
+   （review-loops 修复：此前仅 min-width，<约 400px 视口必溢出） */
 .vsidian-context-menu .vsidian-context-menu-submenu {
   display: none;
   position: absolute;
   left: 100%;
   top: -5px; /* 对齐父项宿主的菜单容器 padding（4px）+1px 边框 */
   min-width: 170px;
+  max-width: calc(100vw - 8px);
   box-sizing: border-box;
   padding: 4px;
   background: var(--vscode-menu-background, rgba(37, 37, 38, 0.98));

@@ -69,7 +69,6 @@ const DYNAMIC_STATE_ENTRIES: ReadonlySet<string> = new Set([
   'live-code-card-fold', // 折叠 chevron
   'live-code-card-edge', // 首末行修饰（首行由头部覆盖，CSS 契约钉）
   'live-fm-popover', // #140 Popover 改版：属性编辑浮层（打开时挂载 body，开闭与写回由浏览器套件验证）
-  'block-menu', // #162 正文右键菜单（右键唤出时挂载 body，fixed 定位；开合与绘制由浏览器套件 blockMenu 验证）
   'suspend-banner', // 暂停态横幅
   'diagram-popup', // 弹窗在场期间（chromePopup 观测）
   'mode-toggle', // 已移除（历史记录条目）

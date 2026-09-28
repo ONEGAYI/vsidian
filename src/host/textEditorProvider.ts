@@ -851,21 +851,29 @@ export function createTextEditorProvider(
         // env.clipboard.writeText。标题链接变体在此拼 `[[笔记名#标题]]`——
         // 笔记名 = docUri 文件名去扩展名（Obsidian 语义），标题为 webview
         // 上报的条目原文（含行内标记，与 findHeadingOffset 的字面比较同源）。
-        // #81 代码块复制同走 writeClipboard（text 已由会话按文档 EOL 归一）
+        // #81 代码块复制同走 writeClipboard（text 已由会话按文档 EOL 归一）。
+        // 写方向无回执协议（review-loops 已知边界）：写入失败仅记日志——
+        // 剪切的选区删除不等回执，失败时文档可 Ctrl+Z 恢复
         writeClipboard: (text: string) => {
-          void vscode.env.clipboard.writeText(text)
+          void vscode.env.clipboard.writeText(text).then(undefined, (error: unknown) => {
+            console.error('[vsidian] 剪贴板写入失败（text）', error)
+          })
         },
         writeHeadingLinkClipboard: (docUri: string, heading: string) => {
           void vscode.env.clipboard.writeText(
             `[[${outlineNoteNameOf(docUri)}#${outlineLinkHeading(heading)}]]`,
-          )
+          ).then(undefined, (error: unknown) => {
+            console.error('[vsidian] 剪贴板写入失败（标题链接）', error)
+          })
         },
         // #162 块链接变体：拼 `[[笔记名#^块id]]`（笔记名与标题链接同源；
         // 块 id 字符集 [A-Za-z0-9-] 不含 ] | # ^，无转义议题）
         writeBlockLinkClipboard: (docUri: string, blockId: string) => {
           void vscode.env.clipboard.writeText(
             `[[${outlineNoteNameOf(docUri)}#^${blockId}]]`,
-          )
+          ).then(undefined, (error: unknown) => {
+            console.error('[vsidian] 剪贴板写入失败（块链接）', error)
+          })
         },
         // #183 剪贴板读（粘贴桥）：env.clipboard.readText 读回后按 LF 归一
         // （webview 全程 LF 坐标——Windows 剪贴板常见 CRLF；写方向由会话

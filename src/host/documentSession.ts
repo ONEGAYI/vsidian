@@ -394,7 +394,12 @@ export class DocumentSession {
         // 影响）；三变体（text 直写 / linkHeading 宿主拼标题链接 / linkBlock
         // 宿主拼块链接 #162）分别转发到注入端口
         if ('text' in message) {
-          panel.port.writeClipboard?.(message.text)
+          // #81 行尾契约（review-loops 修复：此前 text 变体漏归一）：webview
+          // 出站恒 LF（CM6 LF 模型），CRLF 文档按权威行尾归一后写入——与
+          // codeblock.copy 同式，剪贴板产物与文档行尾一致
+          panel.port.writeClipboard?.(
+            this.doc.eol === 2 ? message.text.replace(/\n/g, '\r\n') : message.text,
+          )
         } else if ('linkHeading' in message) {
           panel.port.writeHeadingLinkClipboard?.(message.linkHeading.docUri, message.linkHeading.heading)
         } else if ('linkBlock' in message) {
@@ -403,8 +408,8 @@ export class DocumentSession {
         return Promise.resolve()
       case 'clipboard.read': {
         // #183 剪贴板读（粘贴桥）：只读交互（与 clipboard.write 同口径，
-        // 暂停态同样放行）；端口未接线/读失败回报 read-failed（webview 静默
-        // 放弃粘贴，不弹窗）
+        // 暂停态同样放行）；端口未接线/读失败回报 read-failed（webview 放弃
+        // 粘贴并记告警日志，不弹窗）
         const report = (result: { ok: true; text: string } | { ok: false; reason: 'read-failed' }): void => {
           panel.port.send(result.ok
             ? { kind: 'clipboard.read.result', reqId: message.reqId, ok: true, text: result.text }

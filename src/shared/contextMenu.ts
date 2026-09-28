@@ -235,19 +235,48 @@ function flattenDefs(defs: readonly MenuItemDescriptor[]): MenuItemDescriptor[] 
 }
 
 /**
+ * 注册树是否包含 id（环检测输入）：子项先按字面判 id，再经注册表解析其
+ * children 递归下探（跨条目环在闭合的那次注册暴露）。seen 只防注册表
+ * 既有数据自身成环时检测函数栈溢出，不影响命中判定。
+ */
+function menuTreeContainsId(def: MenuItemDescriptor, id: string, seen: Set<string>): boolean {
+  for (const child of def.children ?? []) {
+    if (child.id === id) {
+      return true
+    }
+    if (seen.has(child.id)) {
+      continue
+    }
+    seen.add(child.id)
+    if (menuTreeContainsId(resolveDef(child), id, seen)) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
  * 注册菜单项：新增条目或覆盖既有条目（同 id 后注册者胜；覆盖内置项时来源
  * 更新为注册方，cleanup 后还原内置）。返回 cleanup 函数。
+ *
+ * 环防护：子树（经注册表既有条目解析）引用自身 id 时抛错——渲染链
+ * （deepResolve/renderDef/buildMenuDom）对 children 递归无深度上限，
+ * 循环嵌套会在右键装配时栈溢出（菜单打不开）。嵌套深度本身不受限。
  */
 export function registerContextMenuItem(
   def: MenuItemDescriptor,
   source = 'runtime',
 ): () => void {
   seedBuiltin()
+  if (menuTreeContainsId(def, def.id, new Set())) {
+    throw new Error(`[vsidian] 菜单项注册拒绝循环嵌套：${def.id} 的子树引用了自身`)
+  }
   const prev = registry.get(def.id) ?? null
   registry.set(def.id, { descriptor: def, source })
   restoreStack.set(def.id, prev)
   return () => {
-    // 只还原未被后续注册再覆盖的槽位（后注册者胜，先注册者的 cleanup 不回滚更晚的注册）
+    // 只还原未被后续写入（register/override）再覆盖的槽位（后注册者胜，
+    // 先注册者的 cleanup 不回滚更晚的注册或覆写）
     if (restoreStack.get(def.id) === prev) {
       restoreStack.delete(def.id)
       if (prev === null) {
@@ -273,6 +302,10 @@ export function overrideContextMenuItem(
   if (!entry) {
     return false
   }
+  // 覆写同样入还原栈：更早注册者的 cleanup 见栈顶已变即跳过回滚——
+  // 「后注册者胜」对 register→override→cleanup 交错序列同样成立（覆写
+  // 不被先注册者的卸载清掉）
+  restoreStack.set(id, entry)
   registry.set(id, { descriptor: { ...entry.descriptor, ...partial }, source })
   return true
 }
@@ -484,7 +517,10 @@ export function contextMenuKeybindingHints(
   overrides: KeybindingOverrides,
 ): Readonly<Record<string, string>> {
   const out: Record<string, string> = { ...CLIPBOARD_FIXED_HINTS }
-  for (const def of flattenDefs(CONTEXT_MENU_ITEMS)) {
+  // 遍历注册表快照而非内置表——运行期新增条目同样按其 command 派生提示
+  // （提示列数据只派生自键位注册表的原则对注册项一致）；剪贴板四项固定
+  // 提示以 id 判重优先，不被覆写 command 顶掉
+  for (const def of flattenDefs(contextMenuRegistrySnapshot())) {
     if (out[def.id] !== undefined) {
       continue
     }
@@ -522,9 +558,11 @@ export function contextMenuBlockTargetAt(
   return { block, heading }
 }
 
-/** 表格分隔行形态（与 webview/tableCells.parseTableDelimiter 的判定口径
- *  对齐的行级近似——`|---|---|` / `--- | :---: |` / 无边界管道形态） */
-const TABLE_DELIMITER_RE = /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)*\|?\s*$/
+/** 表格分隔行形态（与 webview/tableCells.parseTableDelimiter 的格子口径
+ *  对齐的行级近似——最小连字符数同为 `-+`（GFM 单连字符 `|-|-|` 即合法），
+ *  `|---|---|` / `:---: |` / 无边界管道形态；转义管道等完整切分语义仍以
+ *  tableCells 为准，此处只服务区域判定） */
+const TABLE_DELIMITER_RE = /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/
 
 function tableRowLike(line: string): boolean {
   return line.includes('|') && line.trim() !== ''
