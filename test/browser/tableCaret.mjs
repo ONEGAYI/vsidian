@@ -156,7 +156,7 @@ try {
     }
   }
   const navigationFailures = []
-  for (const scenario of ['horizontal-wrap', 'horizontal-wrap-empty', 'vertical-inside', 'vertical-outside', 'vertical-empty', 'vertical-wrapped', 'enter-cell', 'enter-empty', 'enter-body', 'enter-middle', 'enter-repeat', 'enter-code', 'enter-code-start', 'enter-code-end', 'enter-ime', 'drag-row', 'drag-column', 'region-copy', 'region-exit-outside', 'region-type', 'region-paste', 'region-ime', 'region-zero-width', 'region-zero-width-ime', 'region-padded-drag', 'header-clear', 'empty-row-backspace', 'handle-row', 'handle-column', 'handle-cross-row', 'handle-cross-column', 'handle-hover', 'column-width', 'drag-table-outside']) {
+  for (const scenario of ['horizontal-wrap', 'horizontal-wrap-empty', 'vertical-inside', 'vertical-outside', 'vertical-empty', 'vertical-wrapped', 'enter-cell', 'enter-empty', 'enter-body', 'enter-middle', 'enter-repeat', 'enter-code', 'enter-code-start', 'enter-code-end', 'enter-ime', 'drag-row', 'drag-column', 'region-copy', 'region-exit-outside', 'region-drag-live-selection', 'region-type', 'region-paste', 'region-ime', 'region-zero-width', 'region-zero-width-ime', 'region-padded-drag', 'header-clear', 'empty-row-backspace', 'empty-row-realclick', 'empty-cell-padding', 'handle-row', 'handle-column', 'handle-cross-row', 'handle-cross-column', 'handle-hover', 'column-width', 'drag-table-outside']) {
     const page = await browser.newPage()
     try {
       await page.setContent('<div id="app"></div>')
@@ -167,6 +167,8 @@ try {
       if (scenario === 'vertical-empty') source = source.replace(' B2 ', ' ')
       if (scenario === 'vertical-wrapped') source = source.replace('H2', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ')
       if (scenario === 'empty-row-backspace') source = source.replace('| B1 | B2 |', '|  |  |')
+      if (scenario === 'empty-row-realclick') source = source.replace('| B1 | B2 |', '|  |  |')
+      if (scenario === 'empty-cell-padding') source = source.replace('| B1 | B2 |', '|  | B2 |')
       if (scenario === 'header-clear') source = source.replace('| H1 | H2 |', '| H1 |  |')
       if (scenario === 'handle-column') source = source.replace('| --- | --- |', '| :--- | ---: |')
       if (scenario.startsWith('region-zero-width')) source = 'BEFORE\n\n|H1|H2|\n|---|---|\n||B2|\n|C1|C2|\n\nAFTER'
@@ -329,6 +331,67 @@ try {
         await page.keyboard.press('Backspace')
         assert.equal((await page.evaluate(() => window.readEditor())).text,
           source.replace('|  |  |\n', ''), '空行首格起点退格应删整行且保留正文')
+      } else if (scenario === 'empty-row-realclick') {
+        // 真实点击（不经 view.locate 精确定位）空行首格：光标落在格区间
+        // 任意透明空白位（from 而非 contentFrom），退格仍须删整行。
+        await cell(1, 0).click()
+        const entered = await page.evaluate(() => window.readEditor())
+        assert(entered.head >= source.indexOf('|  |  |') && entered.head <= source.indexOf('|  |  |') + 7,
+          `点击空行首格光标应落在首格区间: ${JSON.stringify(entered)}`)
+        await page.keyboard.press('Backspace')
+        assert.equal((await page.evaluate(() => window.readEditor())).text,
+          source.replace('|  |  |\n', ''), '真实点击空行首格退格应删整行')
+        assert.equal(await page.locator('.vsidian-table-grid-row').count(), 2, '删行后网格少一行')
+      } else if (scenario === 'empty-cell-padding') {
+        // 填充空格对用户透明：右移一步直接切到右格内容首（不逐位经过空格）；
+        // 左移回到同一锚点；行非全空时退格不得删除填充空白。
+        await cell(1, 0).click()
+        const anchor = (await page.evaluate(() => window.readEditor())).head
+        await page.keyboard.press('ArrowRight')
+        const afterRight = await page.evaluate(() => window.readEditor())
+        assert.equal(afterRight.head, source.indexOf('B2'),
+          `空格右移一步应直接切到右格内容首: ${JSON.stringify({ anchor, afterRight })}`)
+        await page.keyboard.press('ArrowLeft')
+        const afterLeft = await page.evaluate(() => window.readEditor())
+        assert.equal(afterLeft.head, anchor, `右格左移应回到空格同一锚点: ${JSON.stringify({ anchor, afterLeft })}`)
+        await page.keyboard.press('Backspace')
+        assert.equal((await page.evaluate(() => window.readEditor())).text, source,
+          '行非全空时退格不得删除填充空白')
+        await cell(1, 1).click()
+        // 点击落点在 B2 内容中间不确定：先格内全选收到内容首，再左移入空格
+        await page.keyboard.press('Control+a')
+        await page.keyboard.press('ArrowLeft')
+        await page.keyboard.press('ArrowLeft')
+        await page.keyboard.press('Backspace')
+        assert.equal((await page.evaluate(() => window.readEditor())).text, source,
+          '从右格左移入空格后退格同样不得删除填充空白')
+      } else if (scenario === 'region-drag-live-selection') {
+        // 拖选进行中（未松手）：跨格矩形建立后不得出现原生线性蓝选区——
+        // 矩形边框与蒙版是唯一选区反馈（region=0 的首格内阶段仍属普通文本拖选）。
+        const a = await cell(1, 0).boundingBox()
+        const b = await cell(2, 1).boundingBox()
+        await page.mouse.move(a.x + 14, a.y + a.height / 2)
+        await page.mouse.down()
+        const frames = []
+        for (let step = 1; step <= 6; step++) {
+          await page.mouse.move(a.x + 14 + (b.x + 26 - a.x - 14) * step / 6,
+            a.y + a.height / 2 + (b.y + b.height / 2 - a.y - a.height / 2) * step / 6)
+          frames.push(await page.evaluate(() => ({
+            from: window.readEditor().from, to: window.readEditor().to,
+            native: getSelection()?.toString() ?? '',
+            region: document.querySelectorAll('.vsidian-table-region-cell').length,
+          })))
+        }
+        await page.mouse.up()
+        assert(frames.some((frame) => frame.region > 0), `拖动过程中应已形成矩形选区: ${JSON.stringify(frames)}`)
+        for (const frame of frames) {
+          if (frame.region === 0) continue
+          assert.equal(frame.from, frame.to, `跨格拖选中 CM6 选区必须折叠（无蓝色线性高亮）: ${JSON.stringify(frames)}`)
+          assert.equal(frame.native, '', `跨格拖选中原生 selection 不得残留文字: ${JSON.stringify(frames)}`)
+        }
+        assert.equal(frames.at(-1).region, 4, '松手前 2×2 矩形已就位')
+        const after = await page.evaluate(() => window.readEditor())
+        assert.equal(after.from, after.to, '松手后光标保持折叠')
       } else if (scenario.startsWith('enter-')) {
         const target = cell(scenario === 'enter-body' ? 1 : 0, 1)
         await target.click()

@@ -3219,7 +3219,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(await readDisk(name) === source, '合回原行后保存不得残留换行标记')
   }],
 
-  ['中格空白连续删除后再输入仍保持表头网格样式', async () => {
+  ['中格空白删除被守恒拒绝，再输入仍保持表头网格样式', async () => {
     const name = 'table-middle-delete.md'
     const source = '| 带 |  | 送 |\n| --- | --- | --- |\n| 左 | 右 | 末 |\n'
     await vscode.workspace.fs.writeFile(wsUri(name), Buffer.from(source))
@@ -3232,9 +3232,11 @@ export const cases: Array<[string, () => Promise<void>]> = [
     for (let i = 0; i < 2; i++) {
       await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key: 'delete' })
     }
-    await poll('中格空白退格后源文', () => doc.getText().startsWith('| 带 | | 送 |') ? true : undefined)
     await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.domType', text: '是' })
-    await poll('中格再次输入写回', () => doc.getText().startsWith('| 带 |是 | 送 |') ? true : undefined)
+    // 2026-09-28 填充守恒（用户报告语义变更）：空内容格的 delete 被拒，
+    // 两个填充空格原样保留；'是' 从点击锚点（格首）写入。文本形态本身
+    // 证明删除未生效（旧行为删到 | 带 | | 送 | 已被否定）
+    await poll('中格输入写回（填充守恒）', () => doc.getText().startsWith('| 带 |是  | 送 |') ? true : undefined)
     const state = await waitViewState(name, (v) => v.tableGrid?.selectedRowCells[1]?.includes('是') === true)
     const backgrounds = state.paint?.table?.headerCellBackgrounds ?? []
     assert(backgrounds.length === 3 && backgrounds.every((color) => color === backgrounds[0]),
@@ -3255,11 +3257,11 @@ export const cases: Array<[string, () => Promise<void>]> = [
       assert(typed.paint?.table?.caretGridColumn === 1,
         `中格删空后连续输入光标须留中列（第 ${count} 次）：${JSON.stringify(typed.paint?.table)}`)
     }
-    assert(doc.getText().startsWith('| 带 |是ssssssss | 送 |'),
+    assert(doc.getText().startsWith('| 带 |是ssssssss  | 送 |'),
       `中格删空后文字须继续落入中列：${JSON.stringify(doc.getText().split('\n')[0])}`)
     await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key: 'backspace' })
     await poll('中格连续输入后可退格', () =>
-      doc.getText().startsWith('| 带 |是sssssss | 送 |') ? true : undefined)
+      doc.getText().startsWith('| 带 |是sssssss  | 送 |') ? true : undefined)
     const afterBackspace = await waitViewState(name, (v) => v.text === doc.getText())
     assert(afterBackspace.paint?.table?.caretDomColumn === 1,
       '连续输入后退格仍须把原生光标留在中格')
