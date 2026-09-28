@@ -670,7 +670,7 @@ test('负向 b：同时删清单条目 + 删旧迁移测试（MIGRATION_PARITY �
     deleteEntry('live-heading-line'),
     // 候选顺手删掉 #132 的迁移守恒断言与 parity 行，消除候选侧测试的阻力
     dropLines('test/unit/styleContract.test.ts', (l) => l.includes("['.vsidian-heading-line-{1..6}', 'live-heading-line']")),
-    dropLines('test/unit/styleContract.test.ts', (l) => l.includes('MIGRATION_PARITY.length).toBe(110)')),
+    dropLines('test/unit/styleContract.test.ts', (l) => l.includes('MIGRATION_PARITY.length).toBe(111)')),
     dropLines('test/unit/styleContract.test.ts', (l) => l.includes('旧条目「${oldKey}」→ 清单 ${id} 缺失')),
   ])
   try {

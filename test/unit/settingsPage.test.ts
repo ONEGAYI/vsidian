@@ -391,3 +391,80 @@ describe('设置项依赖灰化（#155 跟进：dependsOn 注册表驱动联动�
     expect(c.lineNumbers.disabled).toBe(true)
   })
 })
+
+describe('可读行宽定义（#175）', () => {
+  it('注册「可读行宽」：number 定义带 zeroLabelKey/unit（0 档显示词走注册表，渲染层无特判）', () => {
+    const def = PRODUCTION_SETTING_DEFINITIONS.find((d) => d.key === 'editor.readableLineWidth')
+    expect(def).toBeTruthy()
+    if (def && def.type === 'number') {
+      expect(def.zeroLabelKey).toBe('setting.readableLineWidthFill')
+      expect(def.unit).toBe('px')
+    } else {
+      expect.unreachable('可读行宽应为 number 定义')
+    }
+  })
+})
+
+describe('可读行宽滑块（#175：number 型渲染为 range 控件）', () => {
+  /** 切到编辑器分组（可读行宽落编辑器组）并取滑块/值文本 */
+  function slider(parent: HTMLElement) {
+    const editorNav = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
+      .find((b) => b.textContent === '编辑器')!
+    editorNav.click()
+    const input = parent.querySelector<HTMLInputElement>('input[type=range][data-setting-key="editor.readableLineWidth"]')!
+    const readout = parent.querySelector('.vsidian-settings-range-value')!
+    return { input, readout }
+  }
+
+  it('渲染滑块：min/max/step 来自定义；默认 0 的值文本与 aria-valuetext 为「铺满」', () => {
+    const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
+    const { input, readout } = slider(parent)
+    expect(input.min).toBe('0')
+    expect(input.max).toBe('1600')
+    expect(input.step).toBe('20')
+    expect(input.value).toBe('0')
+    expect(readout.textContent).toBe(zhCn['setting.readableLineWidthFill'])
+    expect(input.getAttribute('aria-valuetext')).toBe(zhCn['setting.readableLineWidthFill'])
+  })
+
+  it('settings.snapshot 回显 900：input 值、值文本与 aria-valuetext 同步为 900px', () => {
+    const { view, parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
+    view.handleHostMessage({ kind: 'settings.snapshot', values: { 'editor.readableLineWidth': 900 } })
+    const { input, readout } = slider(parent)
+    expect(input.value).toBe('900')
+    expect(readout.textContent).toBe('900px')
+    expect(input.getAttribute('aria-valuetext')).toBe('900px')
+  })
+
+  it('拖动释放（change）上送 settings.set 数值', () => {
+    const { sent, parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
+    const { input } = slider(parent)
+    input.value = '900'
+    input.dispatchEvent(new Event('change'))
+    expect(sent).toContainEqual({
+      kind: 'settings.set',
+      values: { 'editor.readableLineWidth': 900 },
+    })
+  })
+
+  it('拖动中（input）即时刷新值文本但不立即上送（保存语义在释放）', () => {
+    const { sent, parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
+    const { input, readout } = slider(parent)
+    input.value = '1200'
+    input.dispatchEvent(new Event('input'))
+    expect(readout.textContent).toBe('1200px')
+    expect(input.getAttribute('aria-valuetext')).toBe('1200px')
+    expect(sent).toHaveLength(0)
+    // 拖回 0：值文本回到铺满档
+    input.value = '0'
+    input.dispatchEvent(new Event('input'))
+    expect(readout.textContent).toBe(zhCn['setting.readableLineWidthFill'])
+  })
+
+  it('滑块样式契约：range 控件与值文本规则存在于 settingsPage.css', async () => {
+    const { readFileSync } = await import('node:fs')
+    const css = readFileSync('src/webview/settingsPage.css', 'utf8')
+    expect(css).toMatch(/\.vsidian-settings-range\s*\{[^}]*accent-color/)
+    expect(css).toMatch(/\.vsidian-settings-range-value\s*\{[^}]*min-width/)
+  })
+})
