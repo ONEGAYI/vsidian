@@ -23,7 +23,8 @@ function isMarkdownDoc(uri: vscode.Uri): boolean {
   return uri.scheme === 'file' && /\.md$/i.test(uri.path)
 }
 
-/** 扫描端口：findFiles 列举（#198 排除谓词在此接入——首版恒不排除） */
+/** 扫描端口：findFiles 列举（排除过滤在服务侧统一执行——语义单一事实源
+ *  在 shared/vaultIndexExclude，端口只列举不筛） */
 function createScanPort(): VaultIndexScanPort {
   return {
     async listMarkdownFiles(rootFsPath: string) {
@@ -47,6 +48,19 @@ function createScanPort(): VaultIndexScanPort {
         return { mtimeMs: st.mtime, size: st.size }
       } catch {
         return null
+      }
+    },
+    async accessOf(fsPath: string) {
+      // 可访问性三态（#198）：FileNotFound=明确不存在；其余失败
+      // （NoPermissions/Unavailable——SSH 断连等）=不可访问，不得等同删除
+      try {
+        await vscode.workspace.fs.stat(vscode.Uri.file(fsPath))
+        return 'ok' as const
+      } catch (err) {
+        const code = (err as { code?: string }).code
+        return code === 'FileNotFound' || code === 'ENOENT'
+          ? ('missing' as const)
+          : ('inaccessible' as const)
       }
     },
     watchRoot(rootFsPath, onEvent) {
