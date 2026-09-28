@@ -3,7 +3,10 @@
 // test/unit/styleGuideGen.test.ts 以 --check 钉住（改清单后重跑生成并提交）。
 // 本文件是文档数据（公开指南内容，中文为准），不是 UI 文案——CJK 扫描豁免
 // 同 styleContract.ts；不进编辑器 webview bundle（仅设置页 import）。
+// #178：条目文档字段的英文覆盖随本模块内联（取词规则与字段分级见
+// src/shared/styleContractEn.ts），仅进设置页产物。
 import type { StyleContractCategory, StyleContractEntry } from '../shared/styleContract'
+import type { StyleContractEntryOverride } from '../shared/styleContractEn'
 import type { ObsidianVariableAlias } from '../shared/obsidianAlias'
 
 /** 指南配套的扩展版本（与安装版本一致） */
@@ -3180,3 +3183,22 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "introduced": "#162（2026-09-28）"
   }
 ] as readonly StyleContractEntry[]
+
+/** 条目英文覆盖（#178 双语化：字段级，条目/字段缺失回退中文基准；取词经
+ *  src/shared/styleContractEn.ts 的 applyStyleContractEntryOverride 按表应用） */
+export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntryOverride>> = {
+  "container-live": {
+    "purpose": "Live preview view container; holds the CodeMirror 6 editor.",
+    "dom": "Direct child of #app; hidden with display:none in reading view but stays in the DOM, so styles still match (same probe convention as LineGutterProbe).",
+    "obsidian": {
+      "counterpart": ".markdown-source-view (editing-area container), .mod-cm6 (CM6 mode marker), .cm-s-obsidian (CM theme container)"
+    }
+  },
+  "container-reading": {
+    "purpose": "Reading view container; holds block-level structures that are mounted on demand.",
+    "dom": "Direct child of #app; blocks are real semantic tags rendered by markdown-it, so tag selectors (p/h1/strong etc.) match naturally as descendants of the container.",
+    "obsidian": {
+      "counterpart": ".markdown-preview-view (reading view container)"
+    }
+  }
+} as Readonly<Record<string, StyleContractEntryOverride>>

@@ -175,15 +175,21 @@ function sections_header(domain, count) {
 ${domain === 'chrome' ? '    <p class="note">界面域条目（#133 起逐项核实）：静态入口经探针在真实渲染中断言，交互态入口由浏览器/集成套件按行为路径验证；第三方渲染器（KaTeX/Mermaid）内部 DOM 不承诺为稳定接口（见各域「限制」类目）。</p>' : ''}`
 }
 
-/** 生成设置页渲染数据模块（styleGuideData.ts，esbuild 打包进 settings.js） */
+/** 生成设置页渲染数据模块（styleGuideData.ts，esbuild 打包进 settings.js）。
+ *  #178 起携带条目英文覆盖（STYLE_GUIDE_EN_OVERRIDES）：设置页按 UI 语言
+ *  经 src/shared/styleContractEn.ts 的参数化取词函数应用（英文优先、字段级
+ *  回退中文基准）；契约 JSON 与离线 HTML 固定取中文，不携带双语。 */
 export function buildStyleGuideDataModule(data) {
-  const { entries, categories, variableAliases, version } = data
+  const { entries, categories, variableAliases, enOverrides = {}, version } = data
   return `// 设置页「样式参考」分页渲染数据（#132）——由 scripts/genStyleGuide.mjs 从
 // src/shared/styleContract.ts 生成，**禁止手改**；一致性由
 // test/unit/styleGuideGen.test.ts 以 --check 钉住（改清单后重跑生成并提交）。
 // 本文件是文档数据（公开指南内容，中文为准），不是 UI 文案——CJK 扫描豁免
 // 同 styleContract.ts；不进编辑器 webview bundle（仅设置页 import）。
+// #178：条目文档字段的英文覆盖随本模块内联（取词规则与字段分级见
+// src/shared/styleContractEn.ts），仅进设置页产物。
 import type { StyleContractCategory, StyleContractEntry } from '../shared/styleContract'
+import type { StyleContractEntryOverride } from '../shared/styleContractEn'
 import type { ObsidianVariableAlias } from '../shared/obsidianAlias'
 
 /** 指南配套的扩展版本（与安装版本一致） */
@@ -197,6 +203,10 @@ export const STYLE_GUIDE_CATEGORIES: readonly StyleContractCategory[] = ${JSON.s
 
 /** 清单条目（渲染数据形态与单一事实源同构） */
 export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = ${JSON.stringify(entries, null, 2)} as readonly StyleContractEntry[]
+
+/** 条目英文覆盖（#178 双语化：字段级，条目/字段缺失回退中文基准；取词经
+ *  src/shared/styleContractEn.ts 的 applyStyleContractEntryOverride 按表应用） */
+export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntryOverride>> = ${JSON.stringify(enOverrides, null, 2)} as Readonly<Record<string, StyleContractEntryOverride>>
 `
 }
 
@@ -280,6 +290,8 @@ async function loadContract(root) {
     stdin: {
       contents: [
         'export { STYLE_CONTRACT_ENTRIES, STYLE_CONTRACT_CATEGORIES } from "./src/shared/styleContract.ts"',
+        // #178：条目英文覆盖随中文清单同源加载（内联进设置页渲染数据）
+        'export { STYLE_CONTRACT_EN_OVERRIDES } from "./src/shared/styleContractEn.ts"',
         'export { OBSIDIAN_VARIABLE_ALIASES } from "./src/shared/obsidianAlias.ts"',
       ].join('\n'),
       resolveDir: root,
@@ -301,13 +313,15 @@ async function main() {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
   const check = process.argv.includes('--check')
 
-  const { STYLE_CONTRACT_ENTRIES, STYLE_CONTRACT_CATEGORIES, OBSIDIAN_VARIABLE_ALIASES } = await loadContract(root)
+  const { STYLE_CONTRACT_ENTRIES, STYLE_CONTRACT_CATEGORIES, OBSIDIAN_VARIABLE_ALIASES, STYLE_CONTRACT_EN_OVERRIDES } = await loadContract(root)
   const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'))
   const changelogMd = readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8')
   const data = {
     entries: STYLE_CONTRACT_ENTRIES,
     categories: STYLE_CONTRACT_CATEGORIES,
     variableAliases: OBSIDIAN_VARIABLE_ALIASES,
+    // #178：英文覆盖仅进设置页渲染数据（JSON/HTML 固定取中文，不引用）
+    enOverrides: STYLE_CONTRACT_EN_OVERRIDES,
     version: pkg.version,
     generatedAt: resolveGuideGeneratedAt(changelogMd, pkg.version),
   }
