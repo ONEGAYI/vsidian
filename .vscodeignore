@@ -41,3 +41,7 @@ media/vsidian-icon.png
 
 # 快速操作图标的 SVG/PNG 制作源仅存仓库；CSS 引用的 SVG 经 esbuild 进入 out/webview/assets。
 media/quick-actions/**
+
+# 样式参考独立 HTML 仅存仓库：无运行时加载方（设置页走 settings.js 内置数据模块，
+# 契约检查器校验仓库副本）；同目录的 style-reference.json 是导出功能数据源，保留入包。
+media/style-reference/style-reference.html
