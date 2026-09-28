@@ -51,8 +51,9 @@ body {
      行宽管两视图）。设置值（editor.readableLineWidth 非 0 档）由
      syncController 以内联形式写到挂载根元素——优先序两级：根级片段
      （同元素/祖先声明）需 !important 才覆盖内联；按视图作用域声明的
-     后代级片段（如 #app .vsidian-view-reading { … }）继承链更近、常规
-     规则即可生效，这正是两模式差异化定制路径。0 档不写内联，本处
+     后代级片段继承链更近、常规规则即可生效（示例：在
+     .vsidian-view-reading / .vsidian-view-live 容器上声明变量），
+     这正是两模式差异化定制路径。0 档不写内联，本处
      缺省生效，片段全层级可定制。 */
   --vsidian-reading-max-width: var(--file-line-width, none);
   --vsidian-live-preview-max-width: var(--file-line-width, none);
