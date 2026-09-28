@@ -1,16 +1,17 @@
-// 英文平行覆盖一致性契约（#178 机制 + #179 content 域全量）：src/shared/
-// styleContractEn.ts 是条目文档字段英文版的单一事实源——按条目 id 索引、
-// 字段级覆盖，取词规则为英文优先、条目或字段缺失回退中文基准（规格
-// docs/specs/style-reference-i18n.md）。本测试钉住：
+// 英文平行覆盖一致性契约（#178 机制 + #179 content 域全量 + #180 chrome 域
+// 全量）：src/shared/styleContractEn.ts 是条目文档字段英文版的单一事实源——
+// 按条目 id 索引、字段级覆盖，取词规则为英文优先、条目或字段缺失回退中文
+// 基准（规格 docs/specs/style-reference-i18n.md）。本测试钉住：
 // - 覆盖集 id ⊆ 中文清单条目 id（清单删除/改名条目时英文表同步收敛）；
 // - 覆盖字段键只含双语字段（purpose/states/dom/deprecated/removed/
 //   obsidian.counterpart），不译字段（target/example/aliasTargets/
 //   introduced/verification/id/views）不得出现；可选字段仅当中文条目
 //   确有该字段时才覆盖（无值字段跳过）；
 // - 覆盖值非空字符串；
-// - content 域 75 条 id 全量覆盖（#179 域级完整性）；
-// - 取词纯函数行为：英文语言字段级 merge、非英文语言与未覆盖条目原样
-//   返回、原条目不被改写；
+// - content 域 75 条、chrome 域 55 条 id 全量覆盖（#179/#180 域级完整性，
+//   合计 130 条全覆盖）；
+// - 取词纯函数行为：英文语言字段级 merge、非英文语言与覆盖表缺失条目
+//   原样返回、原条目不被改写；
 // - 生成数据模块（styleGuideData.ts，settings.js 渲染数据）携带同源双语。
 import { describe, expect, it } from 'vitest'
 import { STYLE_CONTRACT_ENTRIES } from '../../src/shared/styleContract'
@@ -26,7 +27,7 @@ const BILINGUAL_KEYS = ['purpose', 'states', 'dom', 'deprecated', 'removed', 'ob
 
 type OverrideField = Exclude<keyof typeof STYLE_CONTRACT_EN_OVERRIDES[string], 'obsidian'>
 
-describe('英文覆盖一致性契约（#178 机制 + #179 content 域全量）', () => {
+describe('英文覆盖一致性契约（#178 机制 + #179 content 域全量 + #180 chrome 域全量）', () => {
   const entryById = new Map(STYLE_CONTRACT_ENTRIES.map((entry) => [entry.id, entry]))
 
   it('覆盖集 id ⊆ 中文清单条目 id', () => {
@@ -79,13 +80,14 @@ describe('英文覆盖一致性契约（#178 机制 + #179 content 域全量）'
     expect(entry.purpose).not.toBe(localized.purpose)
   })
 
-  it('取词：非英文语言与未覆盖条目原样返回（同一引用，零开销回退）', () => {
+  it('取词：非英文语言原样返回（同一引用，零开销回退）；覆盖表缺条目同样原样返回', () => {
     const entry = entryById.get('container-live')!
     expect(applyStyleContractEntryOverride(entry, 'zh-cn', STYLE_CONTRACT_EN_OVERRIDES)).toBe(entry)
     expect(applyStyleContractEntryOverride(entry, '', STYLE_CONTRACT_EN_OVERRIDES)).toBe(entry)
-    // content 域 #179 起全量覆盖；未覆盖条目取 chrome 域（#180 渐进合入前的真实缺口）
-    const uncovered = entryById.get('live-math')!
-    expect(applyStyleContractEntryOverride(uncovered, 'en', STYLE_CONTRACT_EN_OVERRIDES)).toBe(uncovered)
+    // #180 起两域 130 条全量覆盖，覆盖表已无真实缺口条目——「表内缺条目
+    // 原样返回」的回退分支用合成空表保留纯函数行为断言（消费方传入部分
+    // 覆盖表仍是合法形态）。
+    expect(applyStyleContractEntryOverride(entry, 'en', {})).toBe(entry)
   })
 
   it('content 域全部 75 条 id 均有英文覆盖（#179 全量交付）', () => {
@@ -93,6 +95,22 @@ describe('英文覆盖一致性契约（#178 机制 + #179 content 域全量）'
     expect(contentIds.length).toBe(75)
     for (const id of contentIds) {
       expect(STYLE_CONTRACT_EN_OVERRIDES[id], `content 条目缺英文覆盖：${id}`).toBeDefined()
+    }
+  })
+
+  it('chrome 域全部 55 条 id 均有英文覆盖（#180 全量交付）', () => {
+    const chromeIds = STYLE_CONTRACT_ENTRIES.filter((e) => e.domain === 'chrome').map((e) => e.id)
+    expect(chromeIds.length).toBe(55)
+    for (const id of chromeIds) {
+      expect(STYLE_CONTRACT_EN_OVERRIDES[id], `chrome 条目缺英文覆盖：${id}`).toBeDefined()
+    }
+  })
+
+  it('两域合计 130 条全量覆盖，无覆盖表缺口（#179 + #180 收尾）', () => {
+    expect(STYLE_CONTRACT_ENTRIES.length).toBe(130)
+    expect(Object.keys(STYLE_CONTRACT_EN_OVERRIDES).length).toBe(130)
+    for (const entry of STYLE_CONTRACT_ENTRIES) {
+      expect(STYLE_CONTRACT_EN_OVERRIDES[entry.id], `条目缺英文覆盖：${entry.id}`).toBeDefined()
     }
   })
 

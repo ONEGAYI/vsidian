@@ -1,9 +1,9 @@
-// 样式参考条目英文平行覆盖（#178 机制 + #179 content 域全量）：设置页
-// 「样式参考」条目文档字段的英文版单一事实源——中文清单（./styleContract）
-// 保持权威基准不动，本模块按条目 id 索引、字段级覆盖；取词规则为**英文优先、
-// 条目或字段缺失回退中文基准**（规格 docs/specs/style-reference-i18n.md）。
-// content 域 75 条已全量覆盖（域级完整性由
-// test/unit/styleContractEn.test.ts 钉住）；chrome 域随 #180 渐进合入。
+// 样式参考条目英文平行覆盖（#178 机制 + #179 content 域全量 + #180 chrome
+// 域全量）：设置页「样式参考」条目文档字段的英文版单一事实源——中文清单
+// （./styleContract）保持权威基准不动，本模块按条目 id 索引、字段级覆盖；
+// 取词规则为**英文优先、条目或字段缺失回退中文基准**（规格
+// docs/specs/style-reference-i18n.md）。130 条（content 75 + chrome 55）
+// 已全量覆盖（域级完整性由 test/unit/styleContractEn.test.ts 钉住）。
 //
 // 字段分级（规格钉死）：
 // - 双语（可覆盖）：purpose / states / dom / deprecated / removed /
@@ -523,6 +523,398 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
       'The replace decoration of the current match takes precedence over find highlights: when a hit falls inside a folded hidden marker (such as link syntax markers), the find highlight is not visible; match counting and stepping are unaffected (computed over the whole-document text model).',
     dom: 'The find highlight decoration layer and the syntax decoration layer stack.',
     obsidian: { counterpart: '—' },
+  },
+
+  // ==== 界面域（chrome，55 条；#180 全量）====
+  // 术语锚点：公式 = math、图表 = diagram、大纲 = outline、
+  // frontmatter 表格卡片 = frontmatter table card、属性 = property、
+  // 修改按钮 = Edit button、添加属性 = Add property（均与 locales/en.ts
+  // 对应界面词条同源）；降级 = falls back / degrades、成型 = well-formed、
+  // 写回 = writes back。
+
+  // ---- 公式（math，5 条；#59）----
+  'live-math': {
+    purpose:
+      'The stable container of the rendered math state: in live view the outer wrapper of the inline widget; in reading view the KaTeX outer span/p (containing the KaTeX .katex structure); color inherits the editor foreground. Obsidian splits the .cm-math-begin/end delimiter classes; this project replaces the range as a whole and has no split classes.',
+    states: 'In live view the source is revealed while the cursor is inside the math range (see live-math-source).',
+    dom: 'Live: an inline replacement widget; reading: an inline span or a block-level p.katex-block (the KaTeX HTML is produced by KaTeX).',
+    obsidian: { counterpart: '.cm-math (the Obsidian live math token)' },
+  },
+  'live-math-block': {
+    purpose:
+      'The rendered-state variant of block math ($$…$$ / \\begin{align} etc.): its own block, centered, horizontally scrollable. Emitted on both sides — the live widget and the reading p.katex-block (attached alongside .vsidian-math).',
+    dom: 'Live: a block-level replacement widget; reading: p.katex-block (vsidian-math and this class are attached together).',
+    obsidian: { counterpart: 'The direction of .HyperMD-math (block math lines)' },
+  },
+  'live-math-source': {
+    purpose: 'The source-revealing mark shown while the cursor is inside the math range (monospace coloring + a light background).',
+    states: 'While the cursor is inside the math range.',
+    dom: 'A live mark decoration.',
+    obsidian: { counterpart: 'The editing-state direction of .cm-hmd-math-begin' },
+  },
+  'reading-math-block': {
+    purpose:
+      'The reading math block (rendered by markdown-it-katex; rendered on mount, released on unmount, height filled back in by a ResizeObserver); the math container inside the block is p.katex-block (vsidian-math / -math-block attached on top of it).',
+    dom: 'Inside the reading block container, a <p class="katex-block"> wrapping .katex-display.',
+    obsidian: { counterpart: '.markdown-preview-view .math-block' },
+  },
+  'math-error': {
+    purpose:
+      'The raw-source fallback span for math that fails to parse: error color + light red background + monospace font, with the original text fully readable (shared by both views; the title attribute carries the original text for hover checking).',
+    dom: 'Live: a replacement widget span; reading: a span (inline) / p.katex-block>code (block).',
+    obsidian: { counterpart: 'The direction of .math-error / .katex-error' },
+  },
+
+  // ---- 图表渲染（diagram，4 条；#60）----
+  'mermaid-container': {
+    purpose:
+      'The rendering container of a mermaid fence (shared by the live widget inner layer and the reading fence container; carries the data-vsidian-mermaid-code source and the data-vsidian-mermaid-state state loading/rendered/error).',
+    dom: 'Live: the inner layer of the vsidian-graphic-frame widget; reading: inside the vsidian-reading-mermaid block. The rendering container holds the mermaid SVG (in the rendered state).',
+    obsidian: { counterpart: '.mermaid (the diagram container of the Obsidian reading rendering)' },
+  },
+  'mermaid-svg': {
+    purpose:
+      'The SVG produced by mermaid itself (width constrained by the container, height scaled proportionally). Nodes inside the SVG are private DOM of the third-party renderer and are not promised stable (see limit-mermaid-internals).',
+    dom: 'An SVG inside the rendering container.',
+    obsidian: { counterpart: '.mermaid svg' },
+  },
+  'reading-mermaid-block': {
+    purpose:
+      'The block element class for a reading mermaid fence rendered as one whole block (exempt from the 60-line large-fence splitting; rendered on mount, released with the block on unmount); the .vsidian-mermaid rendering container lives inside the block.',
+    dom: 'A reading block-level container.',
+    obsidian: { counterpart: 'The direction of .markdown-preview-view .mermaid' },
+  },
+  'mermaid-error': {
+    purpose:
+      'The fallback state for mermaid syntax/render failures: the error message and the source stay readable, and the fence remains editable when the cursor enters (shared by both views).',
+    dom: 'The message and source areas inside the error container.',
+    obsidian: { counterpart: 'The direction of the .mermaid error' },
+  },
+
+  // ---- 图形化按钮与弹窗（graphic-interact，2 条；#111）----
+  'graphic-chrome': {
+    purpose:
+      'The positioning wrapper of graphic code blocks (fences rendered as graphics) and its top-right button group: edit enters source editing (live preview only), popup opens the diagram popup; the group hover show/hide is CSS-driven (an opacity toggle; the DOM stays present in the rendered-success state).',
+    states:
+      'The button group shows in the rendered-success state (error fallback blocks do not emit it); the edit button is assembled only on the live preview side.',
+    dom: "Live: the frame around the fence widget; reading: the frame around the mermaid/graphic container. The button group is absolutely positioned at the frame's top right.",
+    obsidian: { counterpart: 'None (Obsidian diagram blocks have no public button-group structure)' },
+  },
+  'diagram-popup': {
+    purpose:
+      'The fullscreen overlay of the diagram popup (#111): backdrop + stage (the diagram body being zoomed/panned) + toolbar (zoom/reset/refresh/export/close); the error state keeps close and refresh; note is the notice bar shown when the environment does not support PNG rasterization. Attached to document.body and present only while the popup is open.',
+    states: 'Present while opened via the popup button; dismissed by Esc, clicking the empty area or the close button.',
+    dom: 'A direct child of body — the overlay (backdrop/stage/toolbar areas).',
+    obsidian: { counterpart: 'None (Obsidian opens diagrams in a new tab)' },
+  },
+
+  // ---- 大纲面板（outline，19 条；#54/#65–#70；Obsidian 大纲为应用级 DOM，
+  // 全系本项目自有）----
+  'outline-item': {
+    purpose:
+      'An outline entry (the level class doubles as the indentation and level-color entry); entries are pinned to regular weight 400 and do not inherit heading-level bolding; the level colors reference the same --vsidian-heading-color-{1..6} as body headings (one source across the three sides, see var-heading-color).',
+    dom: 'The entry container of the outline panel in the right sidebar.',
+    obsidian: { counterpart: 'None (the Obsidian outline is app-level DOM)' },
+  },
+  'outline-inline-marks': {
+    purpose:
+      'Inline mark passthrough for outline entries (a second class-name entry on the semantic strong/em/code/del/mark elements): weight/italic/monospace/strikethrough/highlight background are triggered only by explicit markers; wikilinks/links are plain text (no a, not clickable).',
+    dom: 'Semantic inline elements inside outline entries.',
+    obsidian: { counterpart: 'None (the Obsidian-side outline plugin DOM is private)' },
+  },
+  'outline-guide': {
+    purpose:
+      'Level-alignment guide lines (absolutely positioned vertical lines inside entries; left aligns with the center of the ancestor chevron — a visual alignment aid for nesting levels).',
+    dom: 'An absolutely positioned span inside entries with nesting levels.',
+    obsidian: { counterpart: 'None' },
+  },
+  'outline-located': {
+    purpose:
+      "The persistent highlight bar of the current section's entry (semi-transparent background; the class toggle is the only source of the two-state difference); applied to the visible representative (the first visible ancestor when the target is hidden by collapse).",
+    states: 'Follows the cursor position.',
+    dom: 'The outline entry container.',
+    obsidian: { counterpart: 'None' },
+  },
+  'outline-slider': {
+    purpose:
+      'The collapse slider row (its only show/hide switch is the outline-active class on the sidebar container; ::before draws the through line; the six-button role=group group is keyboard accessible).',
+    dom: 'Between the sidebar top bar and the entry list.',
+    obsidian: { counterpart: 'None' },
+  },
+  'outline-slider-dot': {
+    purpose:
+      'The six-step collapse dots: idle beads are hollow (transparent fill + outlined ring) and the current bead is solid — the active class rule is the only source of the two-state difference; since #99 the beads along the way to the current step (filled) are solid in the same state; the solid color follows --vscode-button-background.',
+    dom: 'Buttons inside the slider row.',
+    obsidian: { counterpart: 'None' },
+  },
+  'outline-chevron': {
+    purpose:
+      'The collapse chevron button (entries with children) / an equal-width placeholder for childless entries (keeping text left edges aligned); the stroke width is not written on SVG attributes; clicking the arrow collapses/expands while clicking the text still jumps.',
+    dom: 'Button/placeholder elements inside entries.',
+    obsidian: { counterpart: 'None' },
+  },
+  'outline-collapsed': {
+    purpose:
+      'A parent entry in the collapsed state (the arrow rotated -90° to point right is the only source of the two-state difference).',
+    states: 'Collapsed state.',
+    dom: 'The entry container.',
+    obsidian: { counterpart: 'None' },
+  },
+  'outline-hidden': {
+    purpose:
+      'Entries hidden by collapse (display:none; the class toggle is the only show/hide switch; the DOM is kept to preserve index order); since #68 search filtering hides entries with the same class.',
+    states: 'Hidden by collapse or filtered out by search.',
+    dom: 'The entry container.',
+    obsidian: { counterpart: 'None' },
+  },
+  'outline-toolbar': {
+    purpose:
+      'The outline toolbar row (jump to end, reset, search box; the outline-active class is the only show/hide switch).',
+    dom: 'Between the sidebar top bar and the slider row.',
+    obsidian: { counterpart: 'None (the Quiet Outline function bar is plugin-private DOM)' },
+  },
+  'outline-toolbar-buttons': {
+    purpose:
+      'The toolbar icon buttons (jump to the end of the note / the three-in-one reset — clearing the search, resetting the level and clearing manual collapse), sharing the shape of the sidebar top bar buttons (the base form is carried by the .vsidian-outline-toolbar button structural selector; this class name is the behavior anchor and snippet entry).',
+    dom: 'Buttons inside the toolbar.',
+    obsidian: { counterpart: 'None' },
+  },
+  'outline-search': {
+    purpose:
+      'The heading search input (flex-fills the remaining width; colors come from the --vscode-input-* variable family).',
+    dom: 'The input inside the toolbar.',
+    obsidian: { counterpart: 'None' },
+  },
+  'outline-search-hit': {
+    purpose:
+      'Search hit fragment highlights (wrapping only the matched substring; the background follows --vscode-editor-findMatchHighlightBackground, the same visual language family as body find hits); split at the text layer, orthogonal to the semantic elements.',
+    states: 'On entries with hits.',
+    dom: 'A mark element inside the entry.',
+    obsidian: { counterpart: 'None' },
+  },
+  'outline-nomatch': {
+    purpose: 'The no-match placeholder (readable feedback when a query has zero hits).',
+    states: 'The search has zero hits.',
+    dom: 'At the end of the entry list.',
+    obsidian: { counterpart: 'None' },
+  },
+  'outline-menu': {
+    purpose:
+      "The context-menu overlay (absolutely positioned inside the sidebar; menu items are keyboard-accessible buttons; the submenu's only show/hide switch is the parent item host's :hover/:focus-within; danger marks delete in red; colors follow the --vscode-menu-* variable family).",
+    states: 'Summoned by right-click.',
+    dom: 'An overlay inside the sidebar.',
+    obsidian: { counterpart: 'None (the VSCode native context menu lives at the host level)' },
+  },
+  'outline-rename-input': {
+    purpose:
+      'The rename inline-editing input (the entry content area is replaced by an input; the text being edited includes inline markers); the three VSCode input variables (foreground/background/border).',
+    states: 'Rename state.',
+    dom: 'An input inside the entry.',
+    obsidian: { counterpart: 'None' },
+  },
+  'outline-dragging': {
+    purpose:
+      'The source entry being dragged (whole-element translucent weakening; the class toggle is the only source of the two-state difference).',
+    states: 'While being dragged.',
+    dom: 'The entry container.',
+    obsidian: { counterpart: 'None' },
+  },
+  'outline-drop-edge': {
+    purpose:
+      "The insertion lines on the drop target's top/bottom edges (inset box-shadow takes no layout space and does not conflict with the located background; the color follows --vscode-focusBorder).",
+    states: 'While a drag hovers over the target.',
+    dom: 'The target entry container.',
+    obsidian: { counterpart: 'None' },
+  },
+  'outline-drop-inside': {
+    purpose:
+      'The drop-target wrapping highlight (an outline inset by one ring + a semi-transparent background, same variable family as located — the visual distinction for "drop inside to become a child heading").',
+    states: 'While a drag hovers over the middle of the target.',
+    dom: 'The target entry container.',
+    obsidian: { counterpart: 'None' },
+  },
+
+  // ---- 代码块卡片（code-card，10 条；#78–#84）----
+  'live-code-card-line': {
+    purpose:
+      'The line-level class covered by cards: in live view the source line level (including the cleared fence lines and all code lines, carrying the card background); in reading view the in-card line spans (same class name as live, same convention across views); runs in parallel with the content-domain live-code-line (both are present when live cards are enabled).',
+    dom: 'Live: .cm-line line elements (the fence range with cards enabled); reading: span.vsidian-reading-code-line inside code.',
+    obsidian: {
+      counterpart:
+        '.HyperMD-codeblock (the line family; the content-domain alias is attached to .vsidian-code-line, and the card line class is a vsidian-specific extension)',
+    },
+  },
+  'live-code-card-edge': {
+    purpose:
+      'Corner rounding modifiers for the first/last card lines (the bottom corners where no header covers them; the top corners are carried by the header band). Emitted on the live side only; reading card corners are carried by .vsidian-reading-code-card.',
+    dom: "The card's first/last line elements.",
+    obsidian: { counterpart: 'No counterpart (corners are handled by the Obsidian native code block styles)' },
+  },
+  'live-code-card-header': {
+    purpose:
+      'The card header band: the language label + the button area on the right, with a bottom 1px separator (the look references the Code Styler plugin direction; the structure is vsidian-specific).',
+    dom: "The band above the card's first line (a live block widget / the reading block's first child).",
+    obsidian: { counterpart: '.code-styler-header-container (the Code Styler plugin direction)' },
+  },
+  'live-code-card-header-parts': {
+    purpose:
+      'The card language label (capitalized display name) / the button container / the language badge (the #83 colored-glyph badge, mounted inside the label).',
+    dom: 'Inside the header band.',
+    obsidian: { counterpart: 'The direction of .code-styler-header-title' },
+  },
+  'live-code-card-copy': {
+    purpose: 'The copy button (through the host clipboard API); -done is the ✓ feedback state for about 1.2s after the click.',
+    states: '-done lasts about 1.2s after copying; the button is not emitted in the collapsed state.',
+    dom: 'The header button area.',
+    obsidian: { counterpart: 'button.copy-code-button (the Obsidian native copy button)' },
+  },
+  'live-code-card-fold': {
+    purpose:
+      'The fold chevron; -collapsed is the collapsed state (rotated); folding is a view state and never writes to the source file (the reading-side collapse additionally has the block-level vsidian-code-card-folded modifier, see reading-code-card).',
+    states: 'Collapse/expand.',
+    dom: 'The header button area.',
+    obsidian: { counterpart: '.code-styler-header-container::after (the fold arrow direction)' },
+  },
+  'live-code-card-linenumber': {
+    purpose:
+      'In-card line numbers (each block starts at 1, fence lines take no number; numbering continues across the split chunks of a large fence); a line-start widget in live view and a line span in reading view (same class name); coexists with the document line-number gutter (source file line numbers) as two separate columns that do not overlap.',
+    dom: "At the start of the card's code lines (a live widget / a reading span).",
+    obsidian: { counterpart: '.code-styler-line-number (direction)' },
+  },
+  'tok-tokens': {
+    purpose:
+      'Syntax highlight token spans; both views share the same class names and dark/light palettes (colors taken from Dark+/Light+, not Obsidian theme variables); the Prism original names .token-* are not provided (see limit-prism-tokens).',
+    dom: 'Token spans inside code content (a live mark decoration / reading in-card line spans).',
+    obsidian: { counterpart: '.token-* (the Prism vocabulary direction) / the .cm-* token family' },
+  },
+  'reading-code-card': {
+    purpose:
+      'The reading view card container (the card shell of vsidian-reading-code-block); the language-x class stays on code for routing; the line structure span.vsidian-reading-code-line carries line numbers and tokens; the collapsed block-level modifier hides the pre (the header is kept).',
+    dom: 'The reading code block shell (discarded with the DOM when the block unmounts; rebuilt idempotently from the source snapshot on remount).',
+    obsidian: { counterpart: '.markdown-preview-view pre (the original mapping is kept in the content domain)' },
+  },
+  'var-code-card-background': {
+    purpose:
+      'The code block card background (shared by the header band and the code area; the reading card uses the same source); defaults to var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12)).',
+    dom: 'Defined on #app.',
+    obsidian: {
+      counterpart:
+        '--code-background (semantic correspondence; the alias bridge for the content code block variable is promised only to var-reading-code-background)',
+    },
+  },
+
+  // ---- frontmatter 表格卡片（frontmatter，5 条；#140 Popover 改版）----
+  'live-fm-card-line': {
+    purpose:
+      'Line-level class of the read-only frontmatter table card: when a legal simple header block (scalars + string arrays) is well-formed, it covers every line of the header block (including the opening/closing fence lines and stray lines) and carries the left/right border lines (the row area stays transparent — the contrasting boundary feel comes from the card border and the slightly brighter header strip); the opening/closing fence lines add horizontal rules and corner rounding, assembling a full bordered rounded card. Card lines also carry vsidian-frontmatter-line (the alias bridge promises at the direct level that .cm-hmd-frontmatter keeps matching in the well-formed shape; its transparency-lowering side effect is reset by the card rules). Complex types / parse failures degrade the whole card back to the frontmatter-line raw-source shape (see limit-fm-complex-types).',
+    states:
+      'Persistent card (independent of cursor position — the well-formed state never exposes the raw source, and a cursor entering the header area is guided to just after the closing line); cells are not click-to-edit — editing is funneled into the Popover opened by the header bar Edit button.',
+    dom: 'A .cm-line line element in the live view (header block lines).',
+    obsidian: { counterpart: '.metadata-container (the Obsidian properties panel direction; the table card shape is vsidian-specific)' },
+  },
+  'live-fm-row': {
+    purpose:
+      'Key-value rows of the read-only table card (a two-column grid: key column / value column): no cell borders and no row separators (the row area stays transparent — the contrasting boundary feel comes from the card border and the slightly brighter header strip); the row-level grid spans the full content area (**no width cap** — capping it would misalign the row-level borders with the header row and leave a hole on the right); array host rows carry the list-row modifier (the key type icon takes the list shape ≡) and array item rows carry the item-row modifier (the key column is a dimmed `- ` marker placeholder). The reading side renders the same table rows under the same names (inside the .vsidian-fm-table container, full-width and transparent under the same convention).',
+    dom: 'Live: .cm-line line elements (grid rows); reading: divs inside .vsidian-fm-table.',
+    obsidian: { counterpart: '.metadata-property (the Obsidian property row direction; the DOM structure differs)' },
+  },
+  'live-fm-cell': {
+    purpose:
+      'Cell marks: keys and values (array item text included) map to cells over their source ranges with read-only coloring (cells are not click-to-edit); the key column uses a regular font weight + muted gray (opacity 0.7 — in the reference mock the key is lighter and the value darker) + a leading type icon (::before: scalar T, list shape ≡ for array host rows); sep (the colon and structural spaces) and comment (inline comments) are hidden in the paint layer (display:none, occupying no cell slot); item-mark is a dimmed placeholder in the key column; standalone comment lines are dimmed as a whole line inside the card.',
+    dom: 'Live: cell mark spans (source ranges); reading: spans (item-mark/sep/comment are live-only hiding classes).',
+    obsidian: { counterpart: '.metadata-property-key / -value (direction)' },
+  },
+  'live-fm-header': {
+    purpose:
+      'The card header bar (a replace widget on the opening fence line): a slightly brighter background strip (creating the contrasting boundary feel against the transparent row area) + a list icon + a Properties title (600 weight, secondary-foreground gray) + a rounded outlined Edit button at the top right (pencil icon, highlighted on hover/focus). The cm-widgetBuffers before and after the inline replacement are hidden (the cursor parking spots of the inline replace each take one line of text height, and in the well-formed state the cursor never enters the header area so there are no consumers), pulling the header row height down to about 1.2x the body line height. Clicking the button toggles the property-editing Popover. The reading side renders the same container, class names and layout (no button, read-only).',
+    states: 'The header bar is persistent in both views; the button exists only in live (not emitted on the reading side).',
+    dom: 'Live: the content of the replace widget on the opening fence line; reading: the first child of .vsidian-fm-table.',
+    obsidian: { counterpart: '.metadata-container heading (direction)' },
+  },
+  'live-fm-popover': {
+    purpose:
+      'The property-editing Popover: a small floating layer positioned next to the Edit button (attached to body, fixed positioning computed by JS) with a white background, 10px rounded corners and a distinct shadow; structured editing rows (key/value inputs + a remove button, indented array item input rows, an add-item entry) and a primary Add property button at the bottom right (solid fill in the theme accent color). Focused inputs get a focusBorder outline; invalid key names get a red border marker.',
+    states:
+      'An interaction-state floating layer (mounted while open, auto-closed by Esc / outside click / degradation) — the container itself is not part of the static probes; open/close and write-back are verified behaviorally by the browser suite; the style entry point (a single low-specificity class) is public for snippet overrides.',
+    dom: 'Attached directly to document.body (outside #app, so the rules carry no #app prefix).',
+    obsidian: { counterpart: '.metadata-property-editor (the Obsidian property editor overlay direction)' },
+  },
+
+  // ---- 限制说明（chrome-limits，4 条）----
+  'limit-fm-complex-types': {
+    purpose:
+      'A boundary of what is supported: the first-version table covers only scalars (strings/numbers/booleans/date strings) and string arrays (block `- item` line groups + single-line flow `[a, b]`; on the live side block items and the flow value box are edited in the Popover, and the reading side renders items split out); complex types and parse failures degrade the whole card to the raw-source shape (the .vsidian-frontmatter-line line class in live, the .vsidian-reading-frontmatter-text escaped block in reading) with editing unrestricted, and the card becomes well-formed again automatically once the header returns to a simple shape; an open Popover closes automatically at the moment of degradation.',
+    dom: 'The degraded lines/block (within the frontmatter boundaries).',
+    obsidian: { counterpart: 'The Obsidian properties panel shows complex types as source / restricted editing' },
+  },
+  'limit-prism-tokens': {
+    purpose:
+      'Syntax highlighting is provided through the stable tok-* vocabulary (see tok-tokens); the Prism original names and the .HyperMD-codeblock-* subclasses are not provided, and snippets targeting them by their original names match nothing.',
+    dom: 'Token spans use the tok-* class names.',
+    obsidian: { counterpart: '.token-* / .HyperMD-codeblock-*' },
+  },
+  'limit-katex-internals': {
+    purpose:
+      'A compatibility boundary of internal rendering structures: the internal DOM produced by KaTeX (glyph spans, the MathML layer, etc.) changes with upstream versions and is not promised as a stable interface — only the stable container shells (.vsidian-math / .vsidian-math-block / .katex-block) are public; snippet coloring that depends on internal classes may stop working after upgrades.',
+    dom: 'The KaTeX HTML sits inside the stable containers.',
+    obsidian: { counterpart: 'Obsidian likewise does not promise KaTeX internal structures' },
+  },
+  'limit-mermaid-internals': {
+    purpose:
+      'A compatibility boundary of internal rendering structures: the internal node classes of the SVG produced by Mermaid change with upstream versions and themes and are not promised as a stable interface — only the container-level entries (.vsidian-mermaid and its svg descendants) are public; the SVG inside the popup shares the same source and boundary. To restyle the inside of a diagram, use mermaid theme configuration instead of snippet selectors.',
+    dom: 'The mermaid SVG sits inside the stable container.',
+    obsidian: { counterpart: 'Obsidian likewise does not promise mermaid internal structures' },
+  },
+
+  // ---- 工具栏与横幅（toolbar-banner，5 条；#4/#5，本项目自有 UI）----
+  'suspend-banner': {
+    purpose:
+      'The write-back conflict suspension banner (vsidian-specific UI): a top-of-view notice while paused + a resume button.',
+    states: 'While a write-back conflict has paused writing back.',
+    dom: 'A banner at the top of #app.',
+    obsidian: { counterpart: 'No counterpart' },
+  },
+  'toolbar': {
+    purpose:
+      'The top toolbar of the main editing area: the settings gear (.vsidian-settings-toggle), the quick-action toggle (.vsidian-quick-toggle), the dual-state view toggle (.vsidian-view-toggle, the fourth button since #141 with its own entry) and the sidebar toggle (.vsidian-sidebar-toggle) — since #38 the three-state switch (including source mode) lives in the host editor title bar commands, not on this toolbar (see the mode-toggle removal record).',
+    dom: 'The toolbar at the top of #app.',
+    obsidian: { counterpart: 'No counterpart' },
+  },
+  'view-toggle': {
+    purpose:
+      'The dual-state view toggle button (#141): one of the entries for switching between live↔reading (the in-webview entry besides the host title bar three-state command and Ctrl+Q). The icons show the current mode: a book (currently reading) / a pen (currently live) — both icons stay in the DOM permanently, and their show/hide has a single source: the body mode class rules (see the mode-body entry) — when styles fail, both icons show at once, which paint assertions can expose.',
+    states:
+      'The button itself is persistent in both modes; a click posts a view.switch.request outbound (not applied locally), and the button state is driven by the view.mode.set flowed back from the host — the aria/tooltip names the target action and re-words as the mode changes.',
+    dom:
+      'A button inside the top .vsidian-toolbar, immediately to the left of the sidebar toggle; since #158 the two form the right-end group — this button holds margin-left:auto to push itself against the right end of the toolbar, leaving a flexible gap toward the left group (settings, quick actions); an inline SVG with two paths (book/edit subclasses).',
+    obsidian: { counterpart: 'No counterpart' },
+  },
+  'mode-body': {
+    purpose:
+      'The webview-wide mode anchor (#141): a mutually exclusive class pair that switches with the view mode on the layout root div (.vsidian-body inside #app, not the HTML body element — the class pair is not attached to <body>), serving as the public entry for user snippets styling "per mode" (e.g. #app .vsidian-body.vsidian-mode-reading .vsidian-toolbar button { … }). Built-in consumer: the show/hide rules of the view toggle book/edit icons take it as their single source.',
+    states:
+      'Mode-state classes: the live view carries .vsidian-mode-live and the reading view .vsidian-mode-reading, recomputed by applyModeDom on every mode switch.',
+    dom:
+      'The classList of the layout root div inside #app (.vsidian-body, the horizontal layout root); not on the HTML body element or any specific control.',
+    obsidian: { counterpart: 'No counterpart (Obsidian expresses this through container-state classes such as mod-cm6; the original name is not promised to match)' },
+  },
+  'mode-toggle': {
+    purpose:
+      'Formerly the mode toggle button group on the toolbar. Since #38 (commit 288044d, 2026-09-24) mode switching moved to the host editor title bar three-state commands and the toolbar no longer renders this class; the entry is kept as the correction record for a stale row of the old mapping table — the class has never existed in the DOM of any released build since v0.1.0 (verified: git grep v0.4.0 -- src/ has zero hits).',
+    dom: 'None (the class is no longer emitted).',
+    obsidian: { counterpart: 'No counterpart' },
+    removed:
+      'Removed by #38 (2026-09-24, 288044d) and never present in any released build; the old mapping table row was stale data (corrected during the #133 verification against the v0.4.0 tag 75c3df7 source).',
+  },
+
+  // ---- 正文右键菜单（context-menu，1 条；#162）----
+  'block-menu': {
+    purpose:
+      'The content context-menu overlay (copy heading link / copy block link, #162): a self-drawn fixed-position menu attached to body; menu items are keyboard-accessible buttons; colors follow the --vscode-menu-* variable family (same visual language family as the outline menu, no cascading submenus).',
+    states:
+      'Right-clicking a block in the live body (the frontmatter header area and empty lines are not intercepted — the native menu behaves as usual).',
+    dom: 'A direct child of document.body (viewport-fixed positioning).',
+    obsidian: { counterpart: 'None (the Obsidian context menu is an app-native menu, not a DOM element)' },
   },
 }
 
