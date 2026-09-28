@@ -6,13 +6,14 @@
 // 菜单开合与控制器装配在 outlineMenuPanel.test.ts。
 import { describe, expect, it } from 'vitest'
 import {
-  buildOutlineMenu,
+  buildOutlineMenuDom,
   OUTLINE_MENU_CLASS_NAMES,
   outlineMenuPosition,
   outlineMenuSpec,
   type OutlineMenuCommand,
   outlineStructuralExpand,
 } from '../../src/webview/outlineMenu'
+import type { MenuContextSnapshot } from '../../src/shared/contextMenu'
 import { installLocale } from '../../src/shared/i18n'
 import { zhCn } from '../../src/shared/locales/zh-cn'
 
@@ -70,11 +71,14 @@ describe('菜单结构模型（票面命令清单）', () => {
     ])
   })
 
-  it('无子项条目：递归展开 disabled（其余命令仍可用）', () => {
+  it('无子项条目：递归展开 enable=false（其余命令仍可用）；删除为 danger', () => {
+    const ctx: MenuContextSnapshot = { zone: 'normal', hasSelection: false, blockTarget: null }
     const spec = outlineMenuSpec(false)
-    expect(spec.find((s) => s.id === 'expandRecursively')?.disabled).toBe(true)
-    expect(spec.find((s) => s.id === 'collapseSiblings')?.disabled).not.toBe(true)
-    expect(spec.find((s) => s.id === 'delete')?.disabled).toBeUndefined()
+    expect(spec.find((s) => s.id === 'expandRecursively')?.enable?.(ctx)).toBe(false)
+    expect(spec.find((s) => s.id === 'collapseSiblings')?.enable).toBeUndefined()
+    expect(spec.find((s) => s.id === 'delete')?.enable).toBeUndefined()
+    // #183 内核字段承载 danger（原由装配函数按 id 硬编码）
+    expect(spec.find((s) => s.id === 'delete')?.danger).toBe(true)
   })
 })
 
@@ -121,7 +125,7 @@ describe('结构命令 → 展开集合（消费折叠状态机）', () => {
 
 describe('菜单 DOM 装配（键盘可达 + 稳定类名锚点）', () => {
   it('容器 role=menu + 稳定类名；菜单项为 button（含子菜单的父项也是 button）', () => {
-    const menu = buildOutlineMenu(outlineMenuSpec(true), () => {})
+    const menu = buildOutlineMenuDom(true, () => {})
     expect(menu.classList.contains(OUTLINE_MENU_CLASS_NAMES.menu)).toBe(true)
     expect(menu.getAttribute('role')).toBe('menu')
     const buttons = menu.querySelectorAll(`button.${OUTLINE_MENU_CLASS_NAMES.item}`)
@@ -130,7 +134,7 @@ describe('菜单 DOM 装配（键盘可达 + 稳定类名锚点）', () => {
   })
 
   it('菜单项携带命令 id（data-vsidian-command，测试钩子与断言锚点）', () => {
-    const menu = buildOutlineMenu(outlineMenuSpec(true), () => {})
+    const menu = buildOutlineMenuDom(true, () => {})
     const btn = menu.querySelector<HTMLButtonElement>('button[data-vsidian-command="delete"]')
     expect(btn?.textContent).toBe(zhCn['outlineMenu.delete'])
     expect(menu.querySelector('button[data-vsidian-command="copyLink"]')?.textContent)
@@ -138,7 +142,7 @@ describe('菜单 DOM 装配（键盘可达 + 稳定类名锚点）', () => {
   })
 
   it('级联子菜单嵌套于父项内（hover/focus-within CSS 显隐的 DOM 前提）', () => {
-    const menu = buildOutlineMenu(outlineMenuSpec(true), () => {})
+    const menu = buildOutlineMenuDom(true, () => {})
     const copyItem = menu.querySelector<HTMLButtonElement>('button[data-vsidian-command="copy"]')!
     const submenu = copyItem.closest(`.${OUTLINE_MENU_CLASS_NAMES.itemHost}`)?.querySelector(
       `.${OUTLINE_MENU_CLASS_NAMES.submenu}`,
@@ -149,7 +153,7 @@ describe('菜单 DOM 装配（键盘可达 + 稳定类名锚点）', () => {
 
   it('disabled 项渲染 disabled 属性（键盘跳过、点击无回调）', () => {
     const fired: string[] = []
-    const menu = buildOutlineMenu(outlineMenuSpec(false), (id) => fired.push(id))
+    const menu = buildOutlineMenuDom(false, (id) => fired.push(id))
     const btn = menu.querySelector<HTMLButtonElement>('button[data-vsidian-command="expandRecursively"]')!
     expect(btn.disabled).toBe(true)
     btn.click()
@@ -158,14 +162,14 @@ describe('菜单 DOM 装配（键盘可达 + 稳定类名锚点）', () => {
 
   it('点击菜单项回调命令 id（子菜单项同样回调）', () => {
     const fired: OutlineMenuCommand[] = []
-    const menu = buildOutlineMenu(outlineMenuSpec(true), (id) => fired.push(id))
+    const menu = buildOutlineMenuDom(true, (id) => fired.push(id))
     menu.querySelector<HTMLButtonElement>('button[data-vsidian-command="collapseSiblings"]')!.click()
     menu.querySelector<HTMLButtonElement>('button[data-vsidian-command="levelDownRecursive"]')!.click()
     expect(fired).toEqual(['collapseSiblings', 'levelDownRecursive'])
   })
 
   it('删除项带 danger 类（视觉差异锚点）', () => {
-    const menu = buildOutlineMenu(outlineMenuSpec(true), () => {})
+    const menu = buildOutlineMenuDom(true, () => {})
     const del = menu.querySelector<HTMLButtonElement>('button[data-vsidian-command="delete"]')!
     expect(del.classList.contains(OUTLINE_MENU_CLASS_NAMES.danger)).toBe(true)
   })

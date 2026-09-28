@@ -2520,7 +2520,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "outline",
     "kind": "selector",
     "target": ".vsidian-outline-menu（+ -item / -host / -submenu / -danger / -cue）",
-    "purpose": "右键菜单浮层（挂侧栏内 absolute；菜单项为 button 键盘可达；子菜单显隐唯一开关是父项宿主的 :hover/:focus-within；danger 红字标删除；颜色跟随 --vscode-menu-* 变量族）。",
+    "purpose": "右键菜单浮层（挂侧栏内 absolute；菜单项为 button 键盘可达；子菜单显隐唯一开关是父项宿主的 :hover/:focus-within；danger 红字标删除；颜色跟随 --vscode-menu-* 变量族）。#183 迁移到统一菜单内核装配（描述符化，类名不变）；公用态类 vsidian-menu-open（父项点击展开兜底）与 vsidian-menu-flip（子菜单装配期左翻——大纲面板右置时不再溢出屏幕）叠加在既有子菜单类上。",
     "views": [],
     "states": "右键唤出。",
     "dom": "侧栏内浮层。",
@@ -2530,7 +2530,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "浏览器 outlineMenu",
+      "浏览器 outlineMenu（含子菜单翻转矩阵）",
       "集成 outline.test.contextMenu/menuClick 系列"
     ],
     "introduced": "#69（2026-09-25）"
@@ -3184,27 +3184,28 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "removed": "#38（2026-09-24，288044d）移除且从未随任何发布版存在；旧映射表该行为陈旧数据（#133 核实纠错，依据 v0.4.0 tag 75c3df7 源码核对）"
   },
   {
-    "id": "block-menu",
+    "id": "context-menu",
     "domain": "chrome",
     "category": "context-menu",
     "kind": "selector",
-    "target": ".vsidian-block-menu（+ -item）",
-    "purpose": "正文右键菜单浮层（复制标题链接/复制块链接，#162）：挂 body 的 fixed 定位自绘菜单；菜单项为 button 键盘可达；颜色跟随 --vscode-menu-* 变量族（与大纲菜单同族视觉语言，无级联子菜单）。",
+    "target": ".vsidian-context-menu（+ -group / -separator / -host / -item / -icon / -badge / -check / -label / -hint / -submenu / -cue / -danger）",
+    "purpose": "统一右键菜单浮层（#183 Live 正文全域接管）：挂 body 的 fixed 定位自绘菜单。三簇分组线（-separator）、级联子菜单（-submenu；:hover/:focus-within 显隐 + 父项点击兜底 vsidian-menu-open 类 + 右缘放不下装配期左翻 vsidian-menu-flip 类）、图标位（-icon 以 data-icon 驱动 mask，资产未接入时留空）、文字徽标（-badge，H1–H6）、勾选态（-check）、置灰（disabled）、danger 红字、快捷键提示列（-hint 右对齐小字低不透明度，未绑定不占位）。菜单项为 button 键盘可达；颜色跟随 --vscode-menu-* 变量族（与大纲菜单同族视觉语言）。前身 blockMenu（#162 的 .vsidian-block-menu*）退役并入——该类名从未随任何发布版存在（v0.5.0 tag 零命中），无兼容义务，清单不留条目。",
     "views": [
       "live"
     ],
-    "states": "Live 正文右键命中块（frontmatter 头区与空行不接管，原生菜单照常）。",
-    "dom": "document.body 直接子元素（视口系 fixed 定位）。",
-    "example": ".vsidian-block-menu .vsidian-block-menu-item:hover {\n  background: var(--vscode-menu-selectionBackground);\n}",
+    "states": "Live 正文右键（空行/普通文本/表格行/围栏内/图形块上均接管；frontmatter 头区与阅读态不接管，原生菜单照常）。结构敏感区（表格/围栏/图形块）写操作置灰（安全降级矩阵）。",
+    "dom": "document.body 直接子元素（视口系 fixed 定位）；子菜单嵌父项宿主内（absolute）。",
+    "example": ".vsidian-context-menu .vsidian-context-menu-hint {\n  font-size: 11px;\n  opacity: 0.65;\n}",
     "obsidian": {
       "counterpart": "无（Obsidian 右键菜单为应用原生菜单，非 DOM 内元素）",
       "support": "none"
     },
     "verification": [
-      "单元 blockMenu/blockMenuPanel：菜单装配与命令交互",
-      "集成 block.test.contextMenu/menuClick 系列钩子"
+      "单元 contextMenuDom/contextMenuPanel：菜单装配、分组线、降级矩阵与命令交互",
+      "浏览器 contextMenu：真实右键、子菜单展开与翻转、提示列绘制",
+      "集成 contextMenu.test.* 注入通道 + 绘制层断言"
     ],
-    "introduced": "#162（2026-09-28）"
+    "introduced": "#183（2026-09-28）"
   }
 ] as readonly StyleContractEntry[]
 

@@ -155,11 +155,10 @@ import {
   outlineSearchRepresentativeIndex,
 } from './outlineSearch'
 import {
-  buildOutlineMenu,
+  buildOutlineMenuDom,
   type OutlineMenuCommand,
   OUTLINE_MENU_CLASS_NAMES,
   outlineMenuPosition,
-  outlineMenuSpec,
   outlineStructuralExpand,
 } from './outlineMenu'
 import { applySubmenuFlip, buildMenuDom } from './contextMenuDom'
@@ -4194,7 +4193,9 @@ export class WebviewSyncController {
     this.closeContextMenu() // 与正文统一菜单互斥（一次只有一个右键菜单）
     this.cancelOutlineRename()
     const hasChildren = this.outlineFacts.hasChildren[index] === true
-    const menu = buildOutlineMenu(outlineMenuSpec(hasChildren), (command) => {
+    // #183 内核装配：描述符模型 + 类名映射（既有 vsidian-outline-menu* 类，
+    // 行为与视觉不变）；挂载后装配期翻转子菜单（大纲右置不再溢出屏幕）
+    const menu = buildOutlineMenuDom(hasChildren, (command) => {
       this.runOutlineMenuCommand(command)
     })
     this.outlineMenuEl = menu
@@ -4213,6 +4214,11 @@ export class WebviewSyncController {
     )
     menu.style.left = `${Math.max(0, pos.left - bounds.left)}px`
     menu.style.top = `${Math.max(0, pos.top - bounds.top)}px`
+    // #183 子菜单装配期翻转：右缘放不下翻左（宿主坐标系是视口系——
+    // getBoundingClientRect 与窗口宽同系）
+    applySubmenuFlip(menu, window.innerWidth || 1200, {
+      submenu: OUTLINE_MENU_CLASS_NAMES.submenu,
+    })
     // 关闭通道：菜单外 pointerdown（capture，含其他面板区域）与 Esc
     this.outlineMenuDismissPointer = (e) => {
       if (menu.contains(e.target as Node)) {

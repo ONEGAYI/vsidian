@@ -1118,13 +1118,30 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   display: block;
 }
 
-/* ---- #162 正文右键菜单（复制块链接）：自绘浮层挂 body（fixed 定位）。
-   菜单项一律 button（键盘 Tab/Enter/空格可达）；无级联子菜单与 disabled
-   态（复制项恒可用）。颜色跟随 VSCode 菜单变量，与大纲菜单同族视觉语言 */
-.vsidian-block-menu {
+/* ---- #183 大纲菜单内核迁移增补：父项点击展开兜底（open 类，显隐主通道
+   仍是 :hover/:focus-within）与子菜单装配期左翻（大纲面板右置时不再溢出
+   屏幕——翻转判定为内核 submenuSide 纯函数，装配期一次加类） */
+.vsidian-sidebar .vsidian-outline-menu .vsidian-outline-menu-host.vsidian-menu-open .vsidian-outline-menu-submenu {
+  display: block;
+}
+
+.vsidian-sidebar .vsidian-outline-menu .vsidian-outline-menu-submenu.vsidian-menu-flip {
+  left: auto;
+  right: 100%;
+}
+
+/* ---- #183 统一右键菜单（Live 正文全域接管；blockMenu #162 退役并入）：
+   自绘浮层挂 body（fixed 定位）。三簇分组线、级联子菜单（:hover/
+   :focus-within 显隐 + 点击兜底 open 类 + 右缘放不下装配期翻左 flip 类）、
+   图标位（data-icon 驱动 mask；资产未接入时变量未定义——透明渐变回退
+   即留空，资产后补规则即生效）、文字徽标（H1–H6）、勾选态、置灰、
+   danger、提示列（label flex:1 右推——右对齐小字低不透明度，未绑定
+   不占位）。菜单项一律 button（键盘 Tab/Enter/空格可达）；颜色跟随
+   VSCode 菜单变量，与大纲菜单同族视觉语言 */
+.vsidian-context-menu {
   position: fixed;
   z-index: 40;
-  min-width: 160px;
+  min-width: 220px;
   max-width: calc(100vw - 8px);
   box-sizing: border-box;
   padding: 4px;
@@ -1135,16 +1152,25 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   color: var(--vscode-menu-foreground, var(--vscode-editor-foreground));
 }
 
-.vsidian-block-menu .vsidian-block-menu-item {
-  display: block;
+.vsidian-context-menu .vsidian-context-menu-host {
+  position: relative; /* 级联子菜单 left:100% 的定位锚 */
+}
+
+.vsidian-context-menu .vsidian-context-menu-separator {
+  margin: 4px 0;
+  border-top: 1px solid var(--vscode-menu-separatorBackground, rgba(128, 128, 128, 0.25));
+}
+
+.vsidian-context-menu .vsidian-context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   width: 100%;
   box-sizing: border-box;
   padding: 4px 10px;
   font-size: var(--vscode-font-size, 13px);
   line-height: 18px;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   text-align: left;
   cursor: pointer;
   background: transparent;
@@ -1153,11 +1179,102 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   color: inherit;
 }
 
-.vsidian-block-menu .vsidian-block-menu-item:hover,
-.vsidian-block-menu .vsidian-block-menu-item:focus-visible {
+.vsidian-context-menu .vsidian-context-menu-item .vsidian-context-menu-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vsidian-context-menu .vsidian-context-menu-item:not(:disabled):hover {
   background: var(--vscode-menu-selectionBackground, rgba(9, 71, 113, 0.55));
   color: var(--vscode-menu-selectionForeground, inherit);
   outline: none;
+}
+
+.vsidian-context-menu .vsidian-context-menu-item:not(:disabled):focus-visible {
+  background: var(--vscode-menu-selectionBackground, rgba(9, 71, 113, 0.55));
+  color: var(--vscode-menu-selectionForeground, inherit);
+  outline: none;
+}
+
+.vsidian-context-menu .vsidian-context-menu-item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* 破坏性命令红字：danger 类是唯一差异来源（与大纲菜单同族） */
+.vsidian-context-menu .vsidian-context-menu-danger {
+  color: var(--vscode-errorForeground, #f48771);
+}
+
+/* 图标位：mask 驱动（随 currentColor 前景与明暗主题）。资产未接入时
+   --vsidian-context-icon 未定义——透明渐变回退使 mask 全透（留空占位，
+   不画实心块）；#184 资产票按 [data-icon='key'] 逐 key 定义变量即生效 */
+.vsidian-context-menu .vsidian-context-menu-icon {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  background-color: currentColor;
+  mask-image: var(--vsidian-context-icon, linear-gradient(transparent, transparent));
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+}
+
+/* 文字徽标（H1–H6）：语言无关的字面，弱化一档与文案区分 */
+.vsidian-context-menu .vsidian-context-menu-badge {
+  flex: 0 0 auto;
+  min-width: 16px;
+  text-align: center;
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+/* 勾选指示（✓ 槽） */
+.vsidian-context-menu .vsidian-context-menu-check {
+  flex: 0 0 auto;
+}
+
+/* 快捷键提示列：右对齐、小字号 + 降低不透明度，不与菜单项文字抢戏；
+   未绑定项 DOM 不发射该槽（不占位） */
+.vsidian-context-menu .vsidian-context-menu-hint {
+  flex: 0 0 auto;
+  font-size: 11px;
+  opacity: 0.65;
+}
+
+/* 子菜单指示箭头（▸） */
+.vsidian-context-menu .vsidian-context-menu-cue {
+  flex: 0 0 auto;
+  opacity: 0.7;
+}
+
+/* 级联子菜单：默认隐藏，父项宿主 hover/focus-within 展开（显隐主开关）；
+   open 类为父项点击兜底通道；flip 类在装配期右缘放不下时翻到左侧 */
+.vsidian-context-menu .vsidian-context-menu-submenu {
+  display: none;
+  position: absolute;
+  left: 100%;
+  top: -5px; /* 对齐父项宿主的菜单容器 padding（4px）+1px 边框 */
+  min-width: 170px;
+  box-sizing: border-box;
+  padding: 4px;
+  background: var(--vscode-menu-background, rgba(37, 37, 38, 0.98));
+  border: 1px solid var(--vscode-menu-border, rgba(128, 128, 128, 0.4));
+  border-radius: 5px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+}
+
+.vsidian-context-menu .vsidian-context-menu-host:hover .vsidian-context-menu-submenu,
+.vsidian-context-menu .vsidian-context-menu-host:focus-within .vsidian-context-menu-submenu,
+.vsidian-context-menu .vsidian-context-menu-host.vsidian-menu-open .vsidian-context-menu-submenu {
+  display: block;
+}
+
+.vsidian-context-menu .vsidian-context-menu-submenu.vsidian-menu-flip {
+  left: auto;
+  right: 100%;
 }
 
 /* 重命名行内编辑态：条目内容区被 input 替换（原文可含行内标记）。

@@ -60,6 +60,7 @@ const DYNAMIC_STATE_ENTRIES: ReadonlySet<string> = new Set([
   'outline-search-hit', // 搜索命中
   'outline-nomatch', // 搜索零命中
   'outline-menu', // 右键唤出
+  'context-menu', // 右键唤出（#183 统一菜单；瞬态挂载，行为路径验证）
   'outline-rename-input', // 重命名态
   'outline-dragging', // 拖动中
   'outline-drop-edge', // 拖拽悬停

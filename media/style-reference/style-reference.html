@@ -1594,7 +1594,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
     <article class="entry" id="outline-menu">
       <h3><code>.vsidian-outline-menu（+ -item / -host / -submenu / -danger / -cue）</code><span class="eid">outline-menu</span></h3>
-      <p class="purpose">右键菜单浮层（挂侧栏内 absolute；菜单项为 button 键盘可达；子菜单显隐唯一开关是父项宿主的 :hover/:focus-within；danger 红字标删除；颜色跟随 --vscode-menu-* 变量族）。</p>
+      <p class="purpose">右键菜单浮层（挂侧栏内 absolute；菜单项为 button 键盘可达；子菜单显隐唯一开关是父项宿主的 :hover/:focus-within；danger 红字标删除；颜色跟随 --vscode-menu-* 变量族）。#183 迁移到统一菜单内核装配（描述符化，类名不变）；公用态类 vsidian-menu-open（父项点击展开兜底）与 vsidian-menu-flip（子菜单装配期左翻——大纲面板右置时不再溢出屏幕）叠加在既有子菜单类上。</p>
       <p class="views"><span class="badge badge-none">非编辑视图</span> <span class="support support-none">none</span></p>
 <p class="states">状态：右键唤出。</p>
       <p class="obsidian">Obsidian 对应：无（VSCode 原生上下文菜单为宿主级）</p>
@@ -1603,7 +1603,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <pre><code>.vsidian-outline-menu-danger {
   color: var(--vscode-errorForeground);
 }</code></pre>
-      <p class="verify">验证：浏览器 outlineMenu；集成 outline.test.contextMenu/menuClick 系列</p>
+      <p class="verify">验证：浏览器 outlineMenu（含子菜单翻转矩阵）；集成 outline.test.contextMenu/menuClick 系列</p>
       <p class="life">引入：#69（2026-09-25）</p>
     </article>
     <article class="entry" id="outline-rename-input">
@@ -1848,19 +1848,20 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="life">引入：#140（2026-09-27 Popover 改版）</p>
     </article>
     <h2>界面域 · 正文右键菜单（1）</h2>
-    <article class="entry" id="block-menu">
-      <h3><code>.vsidian-block-menu（+ -item）</code><span class="eid">block-menu</span></h3>
-      <p class="purpose">正文右键菜单浮层（复制标题链接/复制块链接，#162）：挂 body 的 fixed 定位自绘菜单；菜单项为 button 键盘可达；颜色跟随 --vscode-menu-* 变量族（与大纲菜单同族视觉语言，无级联子菜单）。</p>
+    <article class="entry" id="context-menu">
+      <h3><code>.vsidian-context-menu（+ -group / -separator / -host / -item / -icon / -badge / -check / -label / -hint / -submenu / -cue / -danger）</code><span class="eid">context-menu</span></h3>
+      <p class="purpose">统一右键菜单浮层（#183 Live 正文全域接管）：挂 body 的 fixed 定位自绘菜单。三簇分组线（-separator）、级联子菜单（-submenu；:hover/:focus-within 显隐 + 父项点击兜底 vsidian-menu-open 类 + 右缘放不下装配期左翻 vsidian-menu-flip 类）、图标位（-icon 以 data-icon 驱动 mask，资产未接入时留空）、文字徽标（-badge，H1–H6）、勾选态（-check）、置灰（disabled）、danger 红字、快捷键提示列（-hint 右对齐小字低不透明度，未绑定不占位）。菜单项为 button 键盘可达；颜色跟随 --vscode-menu-* 变量族（与大纲菜单同族视觉语言）。前身 blockMenu（#162 的 .vsidian-block-menu*）退役并入——该类名从未随任何发布版存在（v0.5.0 tag 零命中），无兼容义务，清单不留条目。</p>
       <p class="views"><span class="badge">实时预览</span> <span class="support support-none">none</span></p>
-<p class="states">状态：Live 正文右键命中块（frontmatter 头区与空行不接管，原生菜单照常）。</p>
+<p class="states">状态：Live 正文右键（空行/普通文本/表格行/围栏内/图形块上均接管；frontmatter 头区与阅读态不接管，原生菜单照常）。结构敏感区（表格/围栏/图形块）写操作置灰（安全降级矩阵）。</p>
       <p class="obsidian">Obsidian 对应：无（Obsidian 右键菜单为应用原生菜单，非 DOM 内元素）</p>
 
-      <p class="dom">DOM 关系：document.body 直接子元素（视口系 fixed 定位）。</p>
-      <pre><code>.vsidian-block-menu .vsidian-block-menu-item:hover {
-  background: var(--vscode-menu-selectionBackground);
+      <p class="dom">DOM 关系：document.body 直接子元素（视口系 fixed 定位）；子菜单嵌父项宿主内（absolute）。</p>
+      <pre><code>.vsidian-context-menu .vsidian-context-menu-hint {
+  font-size: 11px;
+  opacity: 0.65;
 }</code></pre>
-      <p class="verify">验证：单元 blockMenu/blockMenuPanel：菜单装配与命令交互；集成 block.test.contextMenu/menuClick 系列钩子</p>
-      <p class="life">引入：#162（2026-09-28）</p>
+      <p class="verify">验证：单元 contextMenuDom/contextMenuPanel：菜单装配、分组线、降级矩阵与命令交互；浏览器 contextMenu：真实右键、子菜单展开与翻转、提示列绘制；集成 contextMenu.test.* 注入通道 + 绘制层断言</p>
+      <p class="life">引入：#183（2026-09-28）</p>
     </article>
   </section>
 <p style="margin-top:48px;color:color-mix(in srgb, currentColor 50%, transparent);font-size:12px">由 src/shared/styleContract.ts 生成（scripts/genStyleGuide.mjs）；产物一致性由 test/unit/styleGuideGen.test.ts 钉住。</p>
