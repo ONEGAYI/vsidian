@@ -458,8 +458,9 @@ try {
         const after = await count()
         assert.equal(settled, 6, `拖选中（未松手）整表蒙版须六格齐备: 逐帧 ${JSON.stringify(frames)} settled=${settled}`)
         assert.equal(after, 6, '松手后整表蒙版保持六格')
-        const painted = frames.filter((n) => n > 0)
-        assert(painted.length > 0 && painted.every((n, i) => i === 0 || n >= painted[i - 1]),
+        // 扩张手势 region 只增不减：含 0 帧全程单调——瞬断（n→0→n）与
+        // 部分回退（6→3）都是断裂形态，一并抓
+        assert(frames.every((n, i) => i === 0 || n >= frames[i - 1]),
           `扩张拖选中蒙版数量不得回退（回退即断裂帧）: ${JSON.stringify(frames)}`)
       } else if (scenario.startsWith('enter-')) {
         const target = cell(scenario === 'enter-body' ? 1 : 0, 1)

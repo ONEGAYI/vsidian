@@ -1150,6 +1150,7 @@ export const tableEditing = [
     // 的 escapeCellText）会把管道/换行预转义，表格判定必须抢在它之前。
     // 普通文本粘贴不拦截，落回左上格现状链路（region-paste 场景钉住）。
     paste: (event, view) => {
+      if (view.compositionStarted) return false
       const selected = selectedRegionRows(view)
       const text = event.clipboardData?.getData('text/plain')
       if (!selected || !text) return false

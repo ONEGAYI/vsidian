@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import MarkdownIt from 'markdown-it'
 import { parseTableRegionClipboard, planTableRegionDelete, planTableRegionPaste, planTableRegionReplace, serializeTableRegion, type TableRegion } from '../../src/webview/tableRegion'
+import { parseTableDelimiter as parseTableDelimiterForTest } from '../../src/webview/tableCells'
 import type { TableRowInfo } from '../../src/webview/tableStructure'
 
 const doc = '正文前\n\n| 名字 | 数量 | 备注 |\n| --- | :---: | ---: |\n| 苹果 | 3 | 甲 |\n| 香蕉 | 5 | 乙\\|丙 |\n| 樱桃 | 7 | `a|b` |\n\n正文后'
@@ -133,5 +134,40 @@ describe('格对格粘贴（2026-09-28 决策：剥包装、扩表容纳、永�
     const matrix = [[' a<br>b ', ' **粗** ']]
     const after = apply(planTableRegionPaste(doc, rows, region(0, 0, 0, 1), matrix)!.changes)
     expect(after).toContain('| a<br>b | **粗** | 备注 |')
+  })
+
+  it('非扩列粘贴不规范化选区上方行：无尾管道的历史源形态字节级保留', () => {
+    const loose = '| a | b\n| --- | ---\n| c | x'
+    const looseRows: TableRowInfo[] = [
+      { kind: 'header', lineFrom: 0, lineTo: 7 },
+      { kind: 'delimiter', lineFrom: 8, lineTo: 19 },
+      { kind: 'row', lineFrom: 20, lineTo: 27 },
+    ]
+    const plan = planTableRegionPaste(loose, looseRows,
+      { tableFrom: 0, rowFrom: 1, rowTo: 1, columnFrom: 1, columnTo: 1 }, [[' 新 ']])!
+    const after = [...plan.changes].sort((a, b) => b.from - a.from).reduce((text, item) =>
+      text.slice(0, item.from) + item.insert + text.slice(item.to), loose)
+    expect(after.split('\n').slice(0, 2).join('\n')).toBe('| a | b\n| --- | ---')
+    expect(after).toContain('| c | 新 |')
+  })
+
+  it('无尾管道分隔行上扩列：分隔行按原对齐重建为显式边界，产物仍是合法表格', () => {
+    const loose = '| a | b\n| :--- | ---:\n| c | x'
+    const looseRows: TableRowInfo[] = [
+      { kind: 'header', lineFrom: 0, lineTo: 7 },
+      { kind: 'delimiter', lineFrom: 8, lineTo: 21 },
+      { kind: 'row', lineFrom: 22, lineTo: 29 },
+    ]
+    const plan = planTableRegionPaste(loose, looseRows,
+      { tableFrom: 0, rowFrom: 1, rowTo: 1, columnFrom: 1, columnTo: 1 },
+      [[' 一 ', ' 二 ']])!
+    const after = [...plan.changes].sort((a, b) => b.from - a.from).reduce((text, item) =>
+      text.slice(0, item.from) + item.insert + text.slice(item.to), loose)
+    const lines = after.split('\n')
+    expect(lines[1]).toBe('| :--- | ---: | --- |')
+    expect(lines[2]).toBe('| c | 一 | 二 |')
+    // 产物整表可再解析：对齐声明非空且各行列数一致
+    const aligns = parseTableDelimiterForTest(lines[1]!)
+    expect(aligns).toEqual(['left', 'right', null])
   })
 })

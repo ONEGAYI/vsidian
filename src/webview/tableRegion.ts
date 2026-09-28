@@ -208,9 +208,12 @@ export function planTableRegionPaste(doc: string, rows: TableRowInfo[], selected
   let firstCellFrom = 0
   let firstCellText = ' '
   for (let index = 0; index < parts.content.length; index++) {
+    // 重建集 = 选区行 ∪ 源溢入行；扩列时全表行加格不可免——非规范源形态
+    // （省略边界管道等）在扩列场景被等价规范化属功能必需，非扩列场景
+    // 上方行原样保留（与 planTableRegionReplace 只重写选区行同口径）
     const touched = totalCols > parts.columns ||
       (index >= region.rowFrom && index <= region.rowTo) ||
-      index < region.rowFrom + sourceRows
+      (index >= region.rowFrom && index < region.rowFrom + sourceRows)
     if (!touched) {
       lines.push(doc.slice(parts.content[index]!.lineFrom, parts.content[index]!.lineTo))
       continue
@@ -224,9 +227,14 @@ export function planTableRegionPaste(doc: string, rows: TableRowInfo[], selected
     }
     lines.push('|' + values.join('|') + '|')
   }
+  // 扩列时分隔行按原对齐重建为显式边界形态：源分隔行可能省略尾管道
+  // （GFM 合法），直接原文拼接会产出 `--- ---` 类非法声明使整表降级
+  const aligns = parseTableDelimiter(doc.slice(rows[1]!.lineFrom, rows[1]!.lineTo)) ?? []
   const delimiter = totalCols > parts.columns
-    ? doc.slice(rows[1]!.lineFrom, rows[1]!.lineTo).replace(/\s*$/, '') +
-      ' --- |'.repeat(totalCols - parts.columns)
+    ? '|' + Array.from({ length: totalCols }, (_unused, col) => {
+        const align = col < aligns.length ? aligns[col] : null
+        return align === 'center' ? ' :---: ' : align === 'right' ? ' ---: ' : align === 'left' ? ' :--- ' : ' --- '
+      }).join('|') + '|'
     : doc.slice(rows[1]!.lineFrom, rows[1]!.lineTo)
   const allLines = [lines[0]!, delimiter, ...lines.slice(1)]
   // 追加行（源行数越过表尾）：源覆盖列取源值，其余格为空白
