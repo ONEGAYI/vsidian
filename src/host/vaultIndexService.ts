@@ -1420,6 +1420,25 @@ export class VaultIndexService {
   }
 
   /**
+   * 目录子树是否整体落在排除域（#200 映射展开的 fs 递归剪枝）：探测目录
+   * 下代表性路径——子树模式（默认的 .git、node_modules 排除与「目录名 +
+   * 双星」这类整树形态）命中即剪；纯文件名模式（如「星.md」）不命中不剪
+   * （目录内有未排除内容，误剪会丢 fs 兜底清单——索引清单不含排除者，
+   * 二者合流仍完整）。
+   */
+  isExcludedDirDeep(dirFsPath: string): boolean {
+    const state = this.rootOf(dirFsPath)
+    if (!state) {
+      return false
+    }
+    const rel = this.relOf(state, dirFsPath)
+    if (rel === null) {
+      return false
+    }
+    return this.excludeMatcher.test(`${rel}/\u0000probe`)
+  }
+
+  /**
    * #200 批量 rename 刷新（onDidRenameFiles 域，目录/多文件移动的展开后
    * 逐文件映射）：整批一次处理而非逐文件循环提交。语义与单条通道一致——
    *
@@ -1437,6 +1456,13 @@ export class VaultIndexService {
    * - publishTargetChange 逐文件保持（#201 消费 per-target 代次）
    */
   async refreshRenamedBatch(moves: ReadonlyArray<{ oldFsPath: string; newFsPath: string }>): Promise<void> {
+    interface MdLoad {
+      fsPath: string
+      rel: string
+      text: string
+      stat: { mtimeMs: number; size: number }
+      prevEntry: VaultFileEntry | undefined
+    }
     if (this.disposed || moves.length === 0) {
       return
     }
@@ -1493,13 +1519,6 @@ export class VaultIndexService {
     for (const [state, fsPaths] of newByRoot) {
       if (!state.model || this.disposed) {
         continue
-      }
-      interface MdLoad {
-        fsPath: string
-        rel: string
-        text: string
-        stat: { mtimeMs: number; size: number }
-        prevEntry: VaultFileEntry | undefined
       }
       const mdLoads: MdLoad[] = []
       const assetPaths: string[] = []

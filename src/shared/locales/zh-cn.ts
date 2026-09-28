@@ -234,6 +234,10 @@ export const zhCn: Record<MessageKey, string> = {
   'host.renameRefsPartiallyUpdated': '已更名「{file}」并更新 {count} 处引用；{skipped} 处因越界或内容变化跳过，未全部更新。',
   'host.renameRefsSkippedAll': '已更名「{file}」，引用未更新：{skipped} 处因越界或内容变化被跳过。',
   'host.renameRefsIndexNotReady': '已更名「{file}」，但引用索引尚未就绪，本次未更新引用（可稍后在设置页重建索引后手动修正）。',
+  // ---- #200 目录/批量移动：未更新项详情行与跳过原因 ----
+  'host.renameRefsSkippedDetail': '未更新项：{items}',
+  'host.renameRefsSkipCrossRoot': '越出所属根',
+  'host.renameRefsSkipEdgeStale': '内容已变化',
   'host.invalidSettingDefinition': '非法定义：{definition}',
   'host.duplicateSettingKey': '设置键已存在：{key}',
 

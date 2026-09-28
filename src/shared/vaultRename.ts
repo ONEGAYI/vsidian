@@ -60,9 +60,12 @@ export interface RenameExpandPort {
   indexedFilesUnder(dirFsPath: string): string[] | null
 }
 
-/** 展开结果：逐文件映射（原始文件条目原样保留；目录条目被其内容替换） */
+/** 展开结果：逐文件映射（原始文件条目原样保留；目录条目被其内容替换）；
+ *  notReadyMoves = 因索引未就绪被整体放弃的目录条目数（调用方计入反馈，
+ *  不静默部分更新——not-ready 根的候选边查询与批量刷新同样无效） */
 export interface RenameExpandResult {
   moves: RenameMoveEntry[]
+  notReadyMoves: number
 }
 
 /**
@@ -87,6 +90,7 @@ export async function expandRenameMoves(
   /** 被展开替代的原始目录条目键（输出剔除目录条目本身） */
   const dirOldKeys = new Set<string>()
   const expanded: RenameMoveEntry[] = []
+  let notReadyMoves = 0
   for (const move of moves) {
     const oldKey = fold(norm(move.oldFsPath))
     const isDir = (await port.isDirectory(move.oldFsPath)) ||
@@ -94,13 +98,20 @@ export async function expandRenameMoves(
     if (!isDir) {
       continue // 文件条目原样保留（已在 byOld）
     }
+    const indexed = port.indexedFilesUnder(move.oldFsPath)
+    if (indexed === null) {
+      // 索引未就绪：该目录整体放弃（引用者边查询与批量刷新同样无效——
+      // 不静默部分更新），计入反馈
+      notReadyMoves += 1
+      dirOldKeys.add(oldKey)
+      continue
+    }
     dirOldKeys.add(oldKey)
     const oldDir = norm(move.oldFsPath)
     const newDir = norm(move.newFsPath)
     // 清单合流：fs 递归列举的 .md（权威兜底）∪ 索引清单全部登记类型
     //（asset 只在索引有登记——未引用附件无引用边，不产生映射）
     const fsFiles = await port.listFilesUnder(move.oldFsPath)
-    const indexed = port.indexedFilesUnder(move.oldFsPath)
     const seen = new Set<string>()
     const add = (absFsPath: string): void => {
       const key = fold(norm(absFsPath))
@@ -127,10 +138,8 @@ export async function expandRenameMoves(
         add(f)
       }
     }
-    if (indexed !== null) {
-      for (const f of indexed) {
-        add(f)
-      }
+    for (const f of indexed) {
+      add(f)
     }
   }
   return {
@@ -138,6 +147,7 @@ export async function expandRenameMoves(
       ...moves.filter((m) => !dirOldKeys.has(fold(norm(m.oldFsPath)))),
       ...expanded,
     ],
+    notReadyMoves,
   }
 }
 

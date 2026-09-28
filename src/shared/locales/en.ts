@@ -250,6 +250,10 @@ export const en = {
   'host.renameRefsPartiallyUpdated': 'Renamed "{file}" and updated {count} reference(s); {skipped} skipped (out of root or content changed) — not fully updated.',
   'host.renameRefsSkippedAll': 'Renamed "{file}"; references were NOT updated: {skipped} skipped (out of root or content changed).',
   'host.renameRefsIndexNotReady': 'Renamed "{file}", but the reference index is not ready yet, so references were left unchanged (rebuild the index later from the settings page if needed).',
+  // ---- #200 batch/folder moves: skipped-item detail line and reasons ----
+  'host.renameRefsSkippedDetail': 'Not updated: {items}',
+  'host.renameRefsSkipCrossRoot': 'outside its root',
+  'host.renameRefsSkipEdgeStale': 'content changed',
   /** 运行时设置定义注册（测试钩子/懒注册）的拒绝原因 */
   'host.invalidSettingDefinition': 'Invalid definition: {definition}',
   'host.duplicateSettingKey': 'Setting key already exists: {key}',

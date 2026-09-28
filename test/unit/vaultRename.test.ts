@@ -463,7 +463,8 @@ function expandPort(o: {
       return o.filesUnder?.[dirFsPath] ?? []
     },
     indexedFilesUnder(dirFsPath: string) {
-      return o.indexed?.[dirFsPath] ?? []
+      const value = o.indexed?.[dirFsPath]
+      return value === undefined ? [] : value
     },
   }
 }
@@ -533,7 +534,7 @@ describe('vaultRename：#200 目录移动映射展开（expandRenameMoves）', (
     ])
   })
 
-  it('索引未就绪（null）：仅 fs 列举的 .md 入映射', async () => {
+  it('索引未就绪（null）：目录整体放弃并入计数（不静默部分更新）', async () => {
     const port = expandPort({
       dirs: [`${WIN_ROOT}/dir-old`],
       filesUnder: { [`${WIN_ROOT}/dir-old`]: [
@@ -545,9 +546,10 @@ describe('vaultRename：#200 目录移动映射展开（expandRenameMoves）', (
     const result = await expandRenameMoves(true, [
       { oldFsPath: `${WIN_ROOT}/dir-old`, newFsPath: `${WIN_ROOT}/dir-new` },
     ], port)
-    expect(movesOf(result.moves)).toEqual([
-      [`${WIN_ROOT}/dir-old/a.md`, `${WIN_ROOT}/dir-new/a.md`],
-    ])
+    // not-ready 根的候选边查询与批量刷新同样无效——fs 清单也不采（避免
+    // 只刷新不改写的半吊子部分更新）
+    expect(result.moves).toEqual([])
+    expect(result.notReadyMoves).toBe(1)
   })
 
   it('did 保底：旧路径已不存在（isDirectory 旧 false）但新路径是目录 → 按索引清单展开', async () => {
