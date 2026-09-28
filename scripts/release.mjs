@@ -96,6 +96,9 @@ const QUICK_ACTION_ICON_KEYS = [
   'bulletList', 'orderedList', 'taskList', 'quote', 'codeBlock',
   'link', 'clearInline', 'table', 'inlineMath', 'blockMath',
   'highlight', 'horizontalRule',
+  // #185 右键菜单图标接入同一图标集（部分复用上列既有键，此处为新增键）
+  'normalText', 'textFormat', 'paragraphStyle', 'comment',
+  'externalLink', 'cut', 'copy', 'paste', 'selectAll', 'insertPlus',
 ]
 const REQUIRED_QUICK_ACTION_SVGS = ['light', 'dark'].flatMap((theme) =>
   QUICK_ACTION_ICON_KEYS.map((key) => `out/webview/assets/${theme}-${key}.svg`),
