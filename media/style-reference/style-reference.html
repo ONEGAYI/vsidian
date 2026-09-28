@@ -56,7 +56,8 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <tr><td><code>--h5-color</code></td><td><code>--vsidian-heading-color-5</code></td><td><code>var(--vscode-editor-foreground)</code></td></tr>
       <tr><td><code>--h6-color</code></td><td><code>--vsidian-heading-color-6</code></td><td><code>var(--vscode-editor-foreground)</code></td></tr>
       <tr><td><code>--font-text-size</code></td><td><code>--vsidian-reading-font-size</code></td><td><code>var(--vsidian-content-font-size)</code></td></tr>
-      <tr><td><code>--file-line-width</code></td><td><code>--vsidian-reading-max-width</code></td><td><code>760px</code></td></tr>
+      <tr><td><code>--file-line-width</code></td><td><code>--vsidian-reading-max-width</code></td><td><code>none</code></td></tr>
+      <tr><td><code>--file-line-width</code></td><td><code>--vsidian-live-preview-max-width</code></td><td><code>none</code></td></tr>
       <tr><td><code>--line-height-normal</code></td><td><code>--vsidian-reading-line-height</code></td><td><code>var(--vsidian-content-line-height)</code></td></tr>
       <tr><td><code>--code-background</code></td><td><code>--vsidian-reading-code-background</code></td><td><code>var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12))</code></td></tr>
       <tr><td><code>--text-highlight-bg</code></td><td><code>--vsidian-highlight-background</code></td><td><code>rgba(255, 208, 0, 0.35)</code></td></tr>
@@ -65,7 +66,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 </table>
 
   <section class="domain" data-domain="content">
-    <h1 style="font-size:19px;margin-bottom:4px">正文域（74 条）</h1>
+    <h1 style="font-size:19px;margin-bottom:4px">正文域（75 条）</h1>
 
     <h2>正文域 · 容器与视图（2）</h2>
     <article class="entry" id="container-live">
@@ -820,7 +821,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：单元 anchorFlash：目标区间推导与 StateField set/clear；单元 anchorFlashPanel：定位加类、点击/滚动/blur 消失、程序滚动时间窗不误清；单元 anchorFlashCssContract：两视图规则同引变量、变量定义于 #app；浏览器 anchorFlash：真实 view.locate 后绘制层背景断言与消失交互</p>
       <p class="life">引入：#163 验收反馈（2026-09-28）</p>
     </article>
-    <h2>正文域 · 公开 CSS 变量（10）</h2>
+    <h2>正文域 · 公开 CSS 变量（11）</h2>
     <article class="entry" id="var-anchor-flash-background">
       <h3><code>--vsidian-anchor-flash-background</code><span class="eid">var-anchor-flash-background</span></h3>
       <p class="purpose">跳转目标高亮的半透黄背景色（#163 验收反馈）：用户可覆盖的 CSS 接口，live 行级与 reading 块级两条规则同引（一处定义两视图生效）。默认 rgba(255, 213, 79, 0.25)。</p>
@@ -864,15 +865,27 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
     <article class="entry" id="var-reading-max-width">
       <h3><code>--vsidian-reading-max-width</code><span class="eid">var-reading-max-width</span></h3>
-      <p class="purpose">阅读块最大宽度；默认 760px。</p>
+      <p class="purpose">阅读块最大宽度（#175 起为可读行宽双变量之一，设置 editor.readableLineWidth 一份值同时驱动两模式，片段可分别单独覆盖）；默认 none = 铺满（原 760px 隐形限宽随 #174 修复废止）。</p>
       <p class="views"><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
 
       <p class="obsidian">Obsidian 对应：--file-line-width</p>
 <p class="aliases">别名承诺：<code>--file-line-width</code></p>
-      <p class="dom">DOM 关系：定义于阅读内容层；Obsidian 别名 --file-line-width。</p>
+      <p class="dom">DOM 关系：定义于 #app 层（#175 起与 live 变量同址——设置值以内联写在挂载根元素，原阅读层定义会遮蔽内联故上移）；Obsidian 别名 --file-line-width。</p>
       <pre><code>:root { --file-line-width: 700px; }</code></pre>
-      <p class="verify">验证：obsidianAliasCssContract：变量桥形态</p>
+      <p class="verify">验证：obsidianAliasCssContract：变量桥形态；浏览器：readingWidthProbe（铺满/限宽居中/片段优先序三态）</p>
       <p class="life">引入：#32（2026-09-24）</p>
+    </article>
+    <article class="entry" id="var-live-preview-max-width">
+      <h3><code>--vsidian-live-preview-max-width</code><span class="eid">var-live-preview-max-width</span></h3>
+      <p class="purpose">Live 正文列最大宽度（#175 新增，与阅读变量共用设置值；限宽时 [行号列+间距+正文列] 整组居中，行号列随列移动）；默认 none = 铺满。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：--file-line-width</p>
+<p class="aliases">别名承诺：<code>--file-line-width</code></p>
+      <p class="dom">DOM 关系：定义于 #app 层；Obsidian 别名 --file-line-width（与阅读变量同别名——Obsidian 语义即一个全局行宽同时作用于编辑与阅读两视图）。</p>
+      <pre><code>:root { --file-line-width: 700px; }</code></pre>
+      <p class="verify">验证：obsidianAliasCssContract：变量桥形态；浏览器：readingWidthProbe（限宽整组居中/行号列随列）</p>
+      <p class="life">引入：#175（2026-09-28）</p>
     </article>
     <article class="entry" id="var-reading-line-height">
       <h3><code>--vsidian-reading-line-height</code><span class="eid">var-reading-line-height</span></h3>

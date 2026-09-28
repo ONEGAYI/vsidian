@@ -22,6 +22,18 @@ function titleOfId(id: string): string {
   return op ? t(op.titleKey) : id
 }
 
+/**
+ * #164：快照 overrides 与当前是否等价（未收到快照的初始 undefined 视为
+ * 「无用户覆盖」，与空对象等价——装载语义即确认默认绑定）。
+ */
+function sameOverrides(current: KeybindingOverrides | undefined, next: KeybindingOverrides): boolean {
+  const base = current ?? {}
+  for (const key of new Set([...Object.keys(base), ...Object.keys(next)])) {
+    if ((base[key] ?? []).join('\u0000') !== (next[key] ?? []).join('\u0000')) return false
+  }
+  return true
+}
+
 function el(tag: string, cls: string, text = ''): HTMLElement {
   const node = document.createElement(tag)
   node.className = cls
@@ -146,6 +158,13 @@ export class KeybindingSettingsSection implements SettingsPageSection {
     if (!isHostToWebview(message) ||
       (message.kind !== 'keybindings.snapshot' && message.kind !== 'keybindings.changed')) return
     const payload = message
+    // #164 竞态源短路：装载快照（无 requestId）与当前状态幂等时跳过整容器
+    // 重建——renderRows 的 replaceChildren 会使已解析的行节点 detached
+    // （computed 取空串；CI 负载下装载回流漂移进断言窗口即测试间歇红）。
+    // 保存回执带 requestId（status/conflict 更新依赖全渲染）、外部值变更、
+    // 冲突待清理三种情形不走此短路。
+    if (payload.requestId === undefined && !this.conflict
+      && sameOverrides(this.overrides, payload.overrides)) return
     this.overrides = payload.overrides
     if (payload.requestId !== undefined && payload.requestId === this.requestId) {
       this.status = payload.ok ? t('keybindingSettings.saved')

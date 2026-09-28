@@ -10,6 +10,11 @@ import {
   CODEBLOCK_CARD_KEY,
   CODEBLOCK_LINE_NUMBERS_KEY,
   PRODUCTION_SETTING_DEFINITIONS,
+  READABLE_LINE_WIDTH_DEFAULT,
+  READABLE_LINE_WIDTH_KEY,
+  READABLE_LINE_WIDTH_MAX,
+  READABLE_LINE_WIDTH_MIN,
+  READABLE_LINE_WIDTH_STEP,
   SHOW_LINE_NUMBERS_DEFAULT,
   SHOW_LINE_NUMBERS_KEY,
   SYMBOL_AUTOCOMPLETE_DEFAULT,
@@ -129,6 +134,32 @@ describe('生产注册表（#34 起含实际设置项；#95 文案键化）', ()
   it('键与消费方常量一致：符号自动补全经 SYMBOL_AUTOCOMPLETE_KEY 读同一键（#123）', () => {
     expect(SYMBOL_AUTOCOMPLETE_KEY).toBe('editor.symbolAutocomplete')
     expect(SYMBOL_AUTOCOMPLETE_DEFAULT).toBe(true)
+  })
+
+  it('注册「可读行宽」：键 editor.readableLineWidth、number、默认 0（铺满）（#175）', () => {
+    const def = byKey('editor.readableLineWidth')
+    expect(def.type).toBe('number')
+    if (def.type === 'number') {
+      expect(def.default).toBe(0)
+      expect(def.min).toBe(0)
+      expect(def.max).toBe(1600)
+      expect(def.step).toBe(20)
+    }
+    expect(def.titleKey).toBe('setting.readableLineWidth.title')
+    expect(def.descriptionKey).toBe('setting.readableLineWidth.description')
+    expect(zhCn['setting.readableLineWidth.title']).toBe('可读行宽')
+    expect(zhCn['setting.readableLineWidth.description']).toContain('铺满')
+    // 0 档显示名（滑块值文本，非 0px）
+    expect(zhCn['setting.readableLineWidthFill']).toBe('铺满')
+    expect(isSettingDefinition(def)).toBe(true)
+  })
+
+  it('键与消费方常量一致：可读行宽经 READABLE_LINE_WIDTH_* 读同一键（#175）', () => {
+    expect(READABLE_LINE_WIDTH_KEY).toBe('editor.readableLineWidth')
+    expect(READABLE_LINE_WIDTH_DEFAULT).toBe(0)
+    expect(READABLE_LINE_WIDTH_MIN).toBe(0)
+    expect(READABLE_LINE_WIDTH_MAX).toBe(1600)
+    expect(READABLE_LINE_WIDTH_STEP).toBe(20)
   })
 
   it('键与消费方常量一致：webview/宿主经 SHOW_LINE_NUMBERS_KEY 读同一键', () => {
@@ -260,8 +291,8 @@ describe('isSettingDefinition（定义自校验：注册入口防线）', () => 
     expect(isSettingDefinition({ key: '', type: 'boolean', default: false, titleKey: 'k' })).toBe(false)
   })
 
-  it('拒绝未知 type 与非布尔 default', () => {
-    expect(isSettingDefinition({ key: 'a', type: 'number', default: 1, titleKey: 'k' })).toBe(false)
+  it('拒绝未知 type 与非布尔 default（number 为已知类型，见下文专述）', () => {
+    expect(isSettingDefinition({ key: 'a', type: 'color', default: 1, titleKey: 'k' })).toBe(false)
     expect(isSettingDefinition({ key: 'a', type: 'boolean', default: 1, titleKey: 'k' })).toBe(false)
     expect(isSettingDefinition({ key: 'a', type: 'boolean', default: 'false', titleKey: 'k' })).toBe(false)
   })
@@ -394,5 +425,72 @@ describe('枚举值依赖 dependsOnEnum（#163 验收反馈防呆）', () => {
     expect(violations.some((v) => v.includes('非枚举'))).toBe(true)
     expect(violations.some((v) => v.includes('不在依赖项枚举'))).toBe(true)
     expect(validateSettingDependencies(defs)).toEqual([])
+  })
+})
+
+describe('number 设置项（#175：范围与步进内建于类型，0 为普通值——铺满语义归消费方）', () => {
+  type NumberDef = Extract<SettingDefinition, { type: 'number' }>
+  const base: NumberDef = { key: 'n', type: 'number', default: 100, min: 0, max: 1600, step: 20, titleKey: 'k' }
+  /** 覆盖字段构造定义；非法形态用 as 走非安全通道（被测方须拒绝） */
+  const def = (over: Partial<NumberDef> | Record<string, unknown>): SettingDefinition =>
+    ({ ...base, ...over }) as SettingDefinition
+
+  it('isSettingDefinition 接受合法定义（默认在范围内、步进为正有限数）', () => {
+    expect(isSettingDefinition(base)).toBe(true)
+    expect(isSettingDefinition({ ...base, default: 0, min: 0 })).toBe(true)
+    expect(isSettingDefinition({ ...base, default: 1600 })).toBe(true)
+  })
+
+  it('拒绝：default 非数字 / 超出范围 / 非有限数', () => {
+    expect(isSettingDefinition(def({ default: '100' }))).toBe(false)
+    expect(isSettingDefinition(def({ default: -20 }))).toBe(false)
+    expect(isSettingDefinition(def({ default: 2000 }))).toBe(false)
+    expect(isSettingDefinition(def({ default: Number.NaN }))).toBe(false)
+    expect(isSettingDefinition(def({ default: Number.POSITIVE_INFINITY }))).toBe(false)
+  })
+
+  it('拒绝：min/max/step 缺失或非有限数', () => {
+    expect(isSettingDefinition(def({ min: undefined }))).toBe(false)
+    expect(isSettingDefinition(def({ max: undefined }))).toBe(false)
+    expect(isSettingDefinition(def({ step: undefined }))).toBe(false)
+    expect(isSettingDefinition(def({ min: Number.NaN }))).toBe(false)
+    expect(isSettingDefinition(def({ max: Number.POSITIVE_INFINITY }))).toBe(false)
+    expect(isSettingDefinition(def({ step: Number.NaN }))).toBe(false)
+  })
+
+  it('拒绝：min 大于 max、step 非正', () => {
+    expect(isSettingDefinition(def({ min: 100, max: 50 }))).toBe(false)
+    expect(isSettingDefinition(def({ step: 0 }))).toBe(false)
+    expect(isSettingDefinition(def({ step: -20 }))).toBe(false)
+  })
+
+  it('sanitizeStoredSettings：范围内保留；超范围/非数字/非有限恢复默认', () => {
+    const defs = [def({ key: 'n', default: 100 })]
+    expect(sanitizeStoredSettings(defs, { n: 900 })).toEqual({ n: 900 })
+    expect(sanitizeStoredSettings(defs, { n: 0 })).toEqual({ n: 0 })
+    for (const bad of [-5, 9999, '900', Number.NaN, Number.POSITIVE_INFINITY, null]) {
+      expect(sanitizeStoredSettings(defs, { n: bad as never })).toEqual({ n: 100 })
+    }
+  })
+
+  it('applySettingsPatch：范围内接受；超范围/非数字拒绝且整批原子', () => {
+    const current = { n: 100 }
+    expect(applySettingsPatch([base], current, { n: 900 })).toEqual({ ok: true, merged: { n: 900 } })
+    expect(applySettingsPatch([base], current, { n: 0 })).toEqual({ ok: true, merged: { n: 0 } })
+    for (const bad of [-5, 9999, '900', Number.NaN]) {
+      const result = applySettingsPatch([base], current, { n: bad as never })
+      expect(result.ok).toBe(false)
+    }
+  })
+
+  it('zeroLabelKey/unit 可选显示字段：缺省合法，存在时须为字符串', () => {
+    expect(isSettingDefinition(def({ zeroLabelKey: 'setting.readableLineWidthFill', unit: 'px' }))).toBe(true)
+    expect(isSettingDefinition(def({ zeroLabelKey: undefined, unit: undefined }))).toBe(true)
+    expect(isSettingDefinition(def({ zeroLabelKey: 1 }))).toBe(false)
+    expect(isSettingDefinition(def({ unit: 2 }))).toBe(false)
+  })
+
+  it('步进倍数不强制（手改存量 906 合法——校验只管范围与类型）', () => {
+    expect(applySettingsPatch([base], { n: 100 }, { n: 906 })).toEqual({ ok: true, merged: { n: 906 } })
   })
 })

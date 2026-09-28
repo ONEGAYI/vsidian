@@ -157,3 +157,95 @@ export function planTableRegionReplace(doc: string, rows: TableRowInfo[], select
   }
   return selection >= 0 ? { changes, selection } : null
 }
+
+/** 解析剪贴板文本为格值矩阵：全部行须构成合法 GFM 表格。复制产物把首行
+ *  包装成表头使剪贴板独立成表，粘贴时剥掉包装——首行也是数据；分隔行
+ *  不计（2026-09-28 决策）。格值保留原文（含保护空格、既有转义与 <br>
+ *  字面；\| 在 GFM 拆分时还原为管道字符）。 */
+export function parseTableRegionClipboard(text: string): string[][] | null {
+  const lines = text.replace(/\r\n?/g, '\n').split('\n')
+  while (lines.length && lines[0]!.trim() === '') lines.shift()
+  while (lines.length && lines.at(-1)!.trim() === '') lines.pop()
+  if (lines.length < 2) return null
+  const columns = parseTableDelimiter(lines[1]!)?.length
+  if (!columns) return null
+  const matrix: string[][] = []
+  for (const [index, line] of lines.entries()) {
+    if (index === 1) continue
+    const cells = tableRowCellsForColumns(line, 0, columns)
+    if (!cells || cells.length !== columns) return null
+    matrix.push(cells.map((cell) => line.slice(cell.from, cell.to)))
+  }
+  return matrix.length ? matrix : null
+}
+
+/** 格对格粘贴计划（2026-09-28 决策）：以选区左上为锚铺开源矩阵——源覆盖
+ *  到的格逐一替换（含越过选区落入表内的格）；选区内源未覆盖的格清空；
+ *  源越出表格时向表格末尾扩行、扩列容纳（扩列的分隔格用默认对齐）；粘贴
+ *  永不删行列。整表块重建（同 planTableRegionDelete 的整列分支先例）。 */
+export function planTableRegionPaste(doc: string, rows: TableRowInfo[], selected: TableRegion,
+  matrix: string[][]): PlannedTableEdit | null {
+  const parts = tableParts(doc, rows)
+  const region = normalizeTableRegion(selected)
+  if (!parts || !validRegion(region, rows, parts.columns) || !matrix.length ||
+      matrix.some((row) => row.length !== matrix[0]!.length)) return null
+  const sourceRows = matrix.length
+  const sourceCols = matrix[0]!.length
+  const totalCols = Math.max(parts.columns, region.columnFrom + sourceCols)
+  const valueFor = (index: number, col: number): string => {
+    const dr = index - region.rowFrom
+    const dc = col - region.columnFrom
+    if (dr >= 0 && dr < sourceRows && dc >= 0 && dc < sourceCols) return matrix[dr]![dc]!
+    if (col >= parts.columns) return ' '
+    if (index >= region.rowFrom && index <= region.rowTo &&
+        col >= region.columnFrom && col <= region.columnTo) return ''
+    // 追加行（越出原表）的其余格为空白
+    if (index >= parts.content.length) return ' '
+    return doc.slice(parts.cells[index]![col]!.from, parts.cells[index]![col]!.to)
+  }
+  const lines: string[] = []
+  let firstCellLine = 0
+  let firstCellFrom = 0
+  let firstCellText = ' '
+  for (let index = 0; index < parts.content.length; index++) {
+    // 重建集 = 选区行 ∪ 源溢入行；扩列时全表行加格不可免——非规范源形态
+    // （省略边界管道等）在扩列场景被等价规范化属功能必需，非扩列场景
+    // 上方行原样保留（与 planTableRegionReplace 只重写选区行同口径）
+    const touched = totalCols > parts.columns ||
+      (index >= region.rowFrom && index <= region.rowTo) ||
+      (index >= region.rowFrom && index < region.rowFrom + sourceRows)
+    if (!touched) {
+      lines.push(doc.slice(parts.content[index]!.lineFrom, parts.content[index]!.lineTo))
+      continue
+    }
+    const values = Array.from({ length: totalCols }, (_unused, col) => valueFor(index, col) || ' ')
+    if (index === region.rowFrom) {
+      firstCellLine = index === 0 ? 0 : index + 1
+      firstCellFrom = 1 + values.slice(0, region.columnFrom)
+        .reduce((length, value) => length + value.length + 1, 0)
+      firstCellText = values[region.columnFrom]!
+    }
+    lines.push('|' + values.join('|') + '|')
+  }
+  // 扩列时分隔行按原对齐重建为显式边界形态：源分隔行可能省略尾管道
+  // （GFM 合法），直接原文拼接会产出 `--- ---` 类非法声明使整表降级
+  const aligns = parseTableDelimiter(doc.slice(rows[1]!.lineFrom, rows[1]!.lineTo)) ?? []
+  const delimiter = totalCols > parts.columns
+    ? '|' + Array.from({ length: totalCols }, (_unused, col) => {
+        const align = col < aligns.length ? aligns[col] : null
+        return align === 'center' ? ' :---: ' : align === 'right' ? ' ---: ' : align === 'left' ? ' :--- ' : ' --- '
+      }).join('|') + '|'
+    : doc.slice(rows[1]!.lineFrom, rows[1]!.lineTo)
+  const allLines = [lines[0]!, delimiter, ...lines.slice(1)]
+  // 追加行（源行数越过表尾）：源覆盖列取源值，其余格为空白
+  for (let index = parts.content.length; index < region.rowFrom + sourceRows; index++) {
+    const values = Array.from({ length: totalCols }, (_unused, col) => valueFor(index, col) || ' ')
+    allLines.push('|' + values.join('|') + '|')
+  }
+  const blockFrom = rows[0]!.lineFrom
+  const blockTo = rows.at(-1)!.lineTo
+  const insert = allLines.join('\n')
+  const selection = blockFrom + allLines.slice(0, firstCellLine).join('\n').length +
+    (firstCellLine > 0 ? 1 : 0) + firstCellFrom + firstCellText.length
+  return { changes: [{ from: blockFrom, to: blockTo, insert }], selection }
+}

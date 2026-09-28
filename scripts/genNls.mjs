@@ -67,6 +67,40 @@ export function renderNlsFile(entries) {
 }
 
 /**
+ * 比较（并可选写盘）nls 产物，返回差异文件名列表。行尾规范化后比较：
+ * 产物与生成内容恒为 LF，仓库 core.autocrlf=true 且无 .gitattributes，
+ * Windows 检出会把工作树文本转 CRLF——按字节直比会在重检出后误报。
+ * write 模式只写真实差异文件，内容不变不写盘：无条件回写 LF 会触碰
+ * 文件 stat，让 git status 误标改动、卡住发布链的脏工作树检查
+ * （v0.5.0 发布实证）。文件缺失视为差异（首次生成可补写）。
+ * @param {string} root 仓库根（产物相对它寻址）
+ * @param {[string, string][]} outputs [文件名, 生成内容][]
+ * @param {{readFileSync(path: string, encoding?: string): string,
+ *          writeFileSync(path: string, content: string, encoding?: string): void}} io 文件系统注入（测试替身用）
+ * @param {{write: boolean}} options write=false 即 --check 语义：只报告不落盘
+ * @returns {string[]} 差异文件名（保持 outputs 顺序）
+ */
+export function syncNlsOutputs(root, outputs, io, { write }) {
+  const changed = []
+  for (const [name, content] of outputs) {
+    let current
+    try {
+      current = io.readFileSync(path.join(root, name), 'utf8')
+    } catch {
+      changed.push(name)
+      continue
+    }
+    if (current.replace(/\r\n/g, '\n') !== content) changed.push(name)
+  }
+  if (write) {
+    for (const name of changed) {
+      io.writeFileSync(path.join(root, name), outputs.find(([n]) => n === name)[1], 'utf8')
+    }
+  }
+  return changed
+}
+
+/**
  * 编译并加载字典与格式注册表（TS → ESM 内存产物，data URL import）。
  * esbuild stdin 的 import 说明符必须是相对路径（resolveDir 锚定仓库根）——
  * 盘符绝对路径会被当裸包名解析失败（#94 browser harness 实证坑）。
@@ -107,14 +141,7 @@ async function main() {
     ['package.nls.zh-cn.json', renderNlsFile(buildNlsEntries(pkg, formatByCommand, zhCn))],
   ]
 
-  const changed = []
-  for (const [name, content] of outputs) {
-    // 行尾规范化后比较：产物与生成内容恒为 LF；仓库 core.autocrlf=true 且
-    // 无 .gitattributes，Windows 检出会把工作树文本转 CRLF——按字节直比
-    // 会在重检出后误报，规范化比较只对内容语义负责。
-    const current = readFileSync(path.join(root, name), 'utf8').replace(/\r\n/g, '\n')
-    if (current !== content) changed.push(name)
-  }
+  const changed = syncNlsOutputs(root, outputs, { readFileSync, writeFileSync }, { write: !check })
 
   if (check) {
     if (changed.length) {
@@ -126,12 +153,6 @@ async function main() {
     return
   }
 
-  for (const [name, content] of outputs) {
-    // 内容不变不写盘：autocrlf=true 的 Windows 检出为 CRLF，回写 LF 会
-    // 触碰文件 stat，让 git status 误标改动、卡住发布链的脏工作树检查。
-    if (!changed.includes(name)) continue
-    writeFileSync(path.join(root, name), content, 'utf8')
-  }
   console.log(`已生成 ${outputs.map(([n]) => n).join('、')}（${changed.length ? `更新：${changed.join('、')}` : '无变化（幂等）'}）`)
 }
 

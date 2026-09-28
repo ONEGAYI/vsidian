@@ -40,6 +40,8 @@ export const SETTINGS_PAGE_CLASS_NAMES = {
   select: 'vsidian-settings-select',
   /** #161 自由文本设置项的 text input（类名随控件分支稳定） */
   textInput: 'vsidian-settings-text',
+  range: 'vsidian-settings-range', rangeWrap: 'vsidian-settings-range-wrap',
+  rangeValue: 'vsidian-settings-range-value',
   empty: 'vsidian-settings-empty',
 } as const
 
@@ -166,9 +168,17 @@ export class SettingsPageView {
       // 同步值不重建分页，也不夺走搜索框和开关的键盘焦点。
       for (const box of this.listEl?.querySelectorAll<HTMLInputElement>('input[data-setting-key]') ?? []) {
         const def = this.defs.find((d) => d.key === box.dataset.settingKey)!
-        // #161 控件分型回显：checkbox 用 checked；自由文本 text input 用
-        // value（同一 data-setting-key 选择器命中两类控件）
-        if (box.type === 'text') {
+        if (def.type === 'number') {
+          // #175 滑块：值、值文本与 aria-valuetext 就地同步（铺满档显示词）。
+          // 显示值读回 input.value：浏览器对 range 有步进吸附（手改存量
+          // 906 会吸附到 900），文本须与 thumb 实际位置一致
+          const raw = this.value(def)
+          const numeric = typeof raw === 'number' ? raw : def.default
+          box.value = String(numeric)
+          this.syncRangeDisplay(def, box, Number(box.value))
+        } else if (box.type === 'text') {
+          // #161 控件分型回显：checkbox 用 checked；自由文本 text input 用
+          // value（同一 data-setting-key 选择器命中两类控件）
           box.value = String(this.value(def))
         } else {
           box.checked = this.value(def) === true
@@ -189,6 +199,9 @@ export class SettingsPageView {
     const raw = this.values?.[def.key]
     if (def.type === 'boolean') {
       return typeof raw === 'boolean' ? raw : def.default
+    }
+    if (def.type === 'number') {
+      return typeof raw === 'number' && Number.isFinite(raw) && raw >= def.min && raw <= def.max ? raw : def.default
     }
     // #161 string 分型：枚举按值域；自由文本按 maxLength（与
     // valueMatchesType 同口径，超长/类型不符回默认）
@@ -364,10 +377,19 @@ export class SettingsPageView {
       text.append(element('span', SETTINGS_PAGE_CLASS_NAMES.itemTitle, t(def.titleKey)))
       // #93 控件分流：boolean → 复选开关；string 枚举 → 下拉（enum 顺序即
       // 选项顺序，显示名见 optionLabel 的三级回退）；#161 string 自由文本
-      // → text input（enum 有无分型，maxLength 上限随定义）
-      const control: HTMLInputElement | HTMLSelectElement = def.type === 'string'
-        ? ('enum' in def ? this.buildSelect(def) : this.buildTextInput(def))
-        : this.buildCheckbox(def)
+      // → text input（enum 有无分型，maxLength 上限随定义）；#175 number →
+      // 滑块（range + 值文本，0 档显示词经 zeroLabelKey 取词，注册表驱动）
+      let control: HTMLInputElement | HTMLSelectElement
+      let rangeReadout: HTMLElement | undefined
+      if (def.type === 'string') {
+        control = 'enum' in def ? this.buildSelect(def) : this.buildTextInput(def)
+      } else if (def.type === 'number') {
+        const range = this.buildRange(def)
+        control = range.input
+        rangeReadout = range.readout
+      } else {
+        control = this.buildCheckbox(def)
+      }
       if (!isSettingEnabled(this.defs, this.values ?? {}, def)) {
         this.setControlDisabled(control, item, true)
       }
@@ -379,7 +401,13 @@ export class SettingsPageView {
       }
       control.dataset.settingKey = def.key
       control.setAttribute('aria-label', t(def.titleKey))
-      label.append(text, control)
+      if (rangeReadout) {
+        const wrap = element('span', SETTINGS_PAGE_CLASS_NAMES.rangeWrap)
+        wrap.append(control, rangeReadout)
+        label.append(text, wrap)
+      } else {
+        label.append(text, control)
+      }
       item.append(label)
       list.append(item)
       if (focusEntry === def.key) {
@@ -462,6 +490,51 @@ export class SettingsPageView {
     })
     return input
   }
+
+  /**
+   * #175 number 设置项的滑块控件：range + 值文本（0 档显示词经
+   * zeroLabelKey 取词、非 0 值带单位后缀，均来自定义注册表）。拖动中
+   * （input）即时刷新值文本与 aria-valuetext；释放（change）才上送
+   * settings.set——保存语义与其他控件一致（宿主权威，回推回显）。
+   */
+  private buildRange(def: NumberSettingDefinitionLike): { input: HTMLInputElement; readout: HTMLElement } {
+    const input = element('input', SETTINGS_PAGE_CLASS_NAMES.range)
+    input.type = 'range'
+    input.min = String(def.min)
+    input.max = String(def.max)
+    input.step = String(def.step)
+    const raw = this.value(def)
+    const numeric = typeof raw === 'number' ? raw : def.default
+    input.value = String(numeric)
+    // 读回吸附后的值做显示（见快照同步处同注释）
+    const shown = Number(input.value)
+    const readout = element('span', SETTINGS_PAGE_CLASS_NAMES.rangeValue, this.numberValueText(def, shown))
+    this.syncRangeDisplay(def, input, shown, readout)
+    input.addEventListener('input', () => this.syncRangeDisplay(def, input, Number(input.value), readout))
+    input.addEventListener('change', () => {
+      if (!this.pending) this.saveFailed = false
+      this.pending++
+      if (this.status) this.status.textContent = t('settings.saving')
+      this.bridge.postMessage({ kind: 'settings.set', values: { [def.key]: Number(input.value) } })
+    })
+    return { input, readout }
+  }
+
+  /** 滑块值显示文本：0 且定义有 zeroLabelKey 时取词（铺满档），否则原值 + 单位后缀 */
+  private numberValueText(def: NumberSettingDefinitionLike, value: number): string {
+    if (value === 0 && def.zeroLabelKey) {
+      return t(def.zeroLabelKey)
+    }
+    return def.unit ? `${value}${def.unit}` : String(value)
+  }
+
+  /** 滑块显示态同步：值文本与 aria-valuetext（快照回推与拖动共用） */
+  private syncRangeDisplay(def: NumberSettingDefinitionLike, input: HTMLInputElement, value: number, readout?: HTMLElement): void {
+    const text = this.numberValueText(def, value)
+    const target = readout ?? input.parentElement?.querySelector(`.${SETTINGS_PAGE_CLASS_NAMES.rangeValue}`)
+    if (target) target.textContent = text
+    input.setAttribute('aria-valuetext', text)
+  }
 }
 
 /** 渲染层对定义的结构收窄（避免在分流点反复判 type）；string 双形态直接
@@ -469,3 +542,4 @@ export class SettingsPageView {
 type BooleanSettingDefinitionLike = Extract<SettingDefinition, { type: 'boolean' }>
 type StringEnumSettingDefinitionLike = StringEnumSettingDefinition
 type StringTextSettingDefinitionLike = StringTextSettingDefinition
+type NumberSettingDefinitionLike = Extract<SettingDefinition, { type: 'number' }>

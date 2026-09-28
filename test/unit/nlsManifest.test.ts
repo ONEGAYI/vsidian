@@ -12,6 +12,7 @@ import { spawnSync } from 'node:child_process'
 import path from 'node:path'
 import { describe, it, expect } from 'vitest'
 import { FORMAT_OPERATIONS } from '../../src/shared/formatOperations'
+import { syncNlsOutputs } from '../../scripts/genNls.mjs'
 
 const REPO_ROOT = path.resolve(process.cwd())
 const NLS_EN_PATH = path.join(REPO_ROOT, 'package.nls.json')
@@ -113,5 +114,73 @@ describe('manifest NLS：生成幂等（字典是唯一事实源）', () => {
       run.status,
       `genNls --check 应通过（字典改动后须重跑 npm run gen:nls 并提交产物）；输出：${run.stdout}${run.stderr}`,
     ).toBe(0)
+  })
+})
+
+// v0.5.0 发布实证：Windows autocrlf=true 检出为 CRLF，生成脚本无条件回写 LF
+// 使 git status 误标改动、卡住 release.mjs 脏工作树检查。此处钉住修复语义：
+// 内容（行尾规范化后）不变 → 不写盘；真实差异 → 只写差异文件。
+describe('manifest NLS：幂等写盘（autocrlf 检出不得被回写弄脏）', () => {
+  type Io = { readFileSync: (p: string) => string; writeFileSync: (p: string, c: string) => void }
+
+  function memoryIo(files: Record<string, string>): Io & { writes: [string, string][] } {
+    const writes: [string, string][] = []
+    return {
+      readFileSync: (p) => {
+        const hit = files[p]
+        if (hit === undefined) throw new Error(`ENOENT: ${p}`)
+        return hit
+      },
+      writeFileSync: (p, c) => {
+        files[p] = c
+        writes.push([p, c])
+      },
+      writes,
+    } as Io & { writes: [string, string][] }
+  }
+
+  const outputs = (en: string, zh: string) => [
+    ['package.nls.json', en],
+    ['package.nls.zh-cn.json', zh],
+  ] as [string, string][]
+
+  it('CRLF 检出且内容一致：changed 为空且 write 模式零写盘', () => {
+    const gen = outputs('{\n  "a": "1"\n}\n', '{\n  "a": "一"\n}\n')
+    const io = memoryIo({
+      [path.join('R', 'package.nls.json')]: gen[0][1].replace(/\n/g, '\r\n'),
+      [path.join('R', 'package.nls.zh-cn.json')]: gen[1][1].replace(/\n/g, '\r\n'),
+    })
+    const changed = syncNlsOutputs('R', gen, io, { write: true })
+    expect(changed).toEqual([])
+    expect(io.writes, '内容不变不得写盘（autocrlf 检出会被 stat 触碰误标改动）').toEqual([])
+  })
+
+  it('真实差异：changed 列出差异文件且 write 模式只写差异项（LF 落盘）', () => {
+    const gen = outputs('{\n  "a": "1"\n}\n', '{\n  "a": "一"\n}\n')
+    const io = memoryIo({
+      [path.join('R', 'package.nls.json')]: '{\r\n  "a": "旧"\r\n}\r\n', // CRLF + 内容也不同
+      [path.join('R', 'package.nls.zh-cn.json')]: gen[1][1].replace(/\n/g, '\r\n'), // 仅 CRLF，语义一致
+    })
+    const changed = syncNlsOutputs('R', gen, io, { write: true })
+    expect(changed).toEqual(['package.nls.json'])
+    expect(io.writes.length).toBe(1)
+    expect(io.writes[0]![0]).toBe(path.join('R', 'package.nls.json'))
+    expect(io.writes[0]![1]).toBe(gen[0][1])
+  })
+
+  it('文件缺失：视为 changed 并在 write 模式下补写', () => {
+    const gen = outputs('{\n  "a": "1"\n}\n', '{\n  "a": "一"\n}\n')
+    const io = memoryIo({})
+    const changed = syncNlsOutputs('R', gen, io, { write: true })
+    expect(changed).toEqual(['package.nls.json', 'package.nls.zh-cn.json'])
+    expect(io.writes.length).toBe(2)
+  })
+
+  it('check 模式（write: false）：只报告不落盘', () => {
+    const gen = outputs('{\n  "a": "1"\n}\n', '{\n  "a": "一"\n}\n')
+    const io = memoryIo({})
+    const changed = syncNlsOutputs('R', gen, io, { write: false })
+    expect(changed).toEqual(['package.nls.json', 'package.nls.zh-cn.json'])
+    expect(io.writes).toEqual([])
   })
 })

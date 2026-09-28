@@ -67,6 +67,10 @@ import {
   CODEBLOCK_LINE_NUMBERS_KEY,
   IMAGE_PASTE_DEFAULT,
   IMAGE_PASTE_KEY,
+  READABLE_LINE_WIDTH_DEFAULT,
+  READABLE_LINE_WIDTH_KEY,
+  READABLE_LINE_WIDTH_MAX,
+  READABLE_LINE_WIDTH_MIN,
   SHOW_LINE_NUMBERS_DEFAULT,
   SHOW_LINE_NUMBERS_KEY,
   SYMBOL_AUTOCOMPLETE_DEFAULT,
@@ -702,6 +706,8 @@ export class WebviewSyncController {
   /** 宿主下发的当前设置快照缓存（#34 行号等设置的消费源）；webview 不
    *  持久化设置——每次装载（init）后经 settings.get 向宿主拉取 */
   private settings: SettingsPayload | undefined
+  /** 挂载根元素（#175 可读行宽：设置值以内联 CSS 变量落此，全树生效） */
+  private rootEl: HTMLElement | undefined
 
   // ---- 行号栏状态（#34）----
   /** 行号开关生效态：mount 时按定义默认装配（默认开），设置快照/变更
@@ -863,6 +869,7 @@ export class WebviewSyncController {
       return
     }
     this.extraExtensions = extraExtensions
+    this.rootEl = parent
     this.toolbar = this.buildToolbar()
     this.quickActionsEl = this.buildQuickActions()
     this.banner = this.buildBanner()
@@ -1233,6 +1240,7 @@ export class WebviewSyncController {
         this.applySymbolAutocompleteSetting()
         this.applySymbolSelectionWrapSetting()
         this.applyTabEscapeSetting()
+        this.applyReadableLineWidthSetting()
         break
       case 'snippets.snapshot': {
         // #128 CSS 片段装载：diff 式装配 <link>（失败保留最近成功样式、
@@ -6106,6 +6114,42 @@ export class WebviewSyncController {
     this.view?.dispatch({
       effects: this.tabEscapeCompartment.reconfigure(on ? fenceEscape : []),
     })
+  }
+
+  /**
+   * 应用可读行宽设置（#175；settings.snapshot / settings.changed 到达时）：
+   * - 非 0 档：把两模式限宽变量（--vsidian-reading-max-width /
+   *   --vsidian-live-preview-max-width，定义于 #app 层，见 main.css）以
+   *   内联形式写到挂载根元素——优先序两级：根级片段（同元素/祖先声明）
+   *   需 !important 覆盖；按视图作用域声明的后代级片段继承链更近、常规
+   *   规则即可生效（两模式差异化定制路径）
+   * - 0 档（铺满，默认）：移除内联，变量落回 CSS 缺省 none——产品零
+   *   干预，片段全层级可定制（Q7/Q8 共识）
+   * - 避让与居中由 CSS 层自动完成（min(设定宽, 可用宽) + 主区动态居中），
+   *   此处仅落值；宽度变化后补 CM6 视口测量（重排不产生 CM6 事务，
+   *   与 scheduleSnippetMeasure 同因）
+   * - 缺键/越界/非数值回默认 0，非法形态不写值（协议是宽标量容器，
+   *   类型语义校验归宿主，webview 侧防御——与其他设置应用器一致）
+   */
+  private applyReadableLineWidthSetting(): void {
+    const raw = this.settings?.[READABLE_LINE_WIDTH_KEY]
+    const px = typeof raw === 'number' && Number.isFinite(raw) &&
+      raw > READABLE_LINE_WIDTH_MIN && raw <= READABLE_LINE_WIDTH_MAX
+      ? raw
+      : READABLE_LINE_WIDTH_DEFAULT
+    const root = this.rootEl
+    if (!root) {
+      return // mount 前到达（防御）：快照必在 init 后回填，届时再落值
+    }
+    if (px === 0) {
+      root.style.removeProperty('--vsidian-reading-max-width')
+      root.style.removeProperty('--vsidian-live-preview-max-width')
+    } else {
+      root.style.setProperty('--vsidian-reading-max-width', `${px}px`)
+      root.style.setProperty('--vsidian-live-preview-max-width', `${px}px`)
+    }
+    this.view?.requestMeasure()
+    requestAnimationFrame(() => this.view?.requestMeasure())
   }
 
   /** #84 增强单个阅读代码块（挂载钩子与重装饰共用入口） */

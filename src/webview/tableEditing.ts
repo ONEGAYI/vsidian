@@ -28,7 +28,7 @@ import { escapeCellText, needsPipeEscapeAt, parseTableDelimiter, planBlankRowCel
 import { planTableColumnMove, planTableEdit, planTableRowMove, tableCellNavTarget, type TableRowInfo } from './tableStructure'
 import { createTableControls } from './tableControls'
 import { planCreateTable } from './tableCreate'
-import { planTableRegionDelete, planTableRegionReplace, serializeTableRegion } from './tableRegion'
+import { parseTableRegionClipboard, planTableRegionDelete, planTableRegionPaste, planTableRegionReplace, serializeTableRegion } from './tableRegion'
 import { createTableRegionPointer, setTableRegion, tableRegionField } from './tableRegionSelection'
 
 /** 表格行身份的解析树节点名（分隔行整体是一个 TableDelimiter 节点） */
@@ -492,6 +492,20 @@ const protectGridCellContent = EditorState.transactionFilter.of((tr) => {
     return tr
   }
   if (!cell) return tr
+  // 空内容格不接受纯空白输入（2026-09-28 语义：空白是结构承载，对用户
+  // 透明）：空格里键入/粘贴空格不产生可见效果，也不留下可被退格发现的
+  // 痕迹。prepareGridInputPadding 的承载补齐不经 input 事件，不受影响；
+  // 含非空白字符的输入（如 "a b"）照常进入。
+  if (cell.contentFrom === cell.contentTo && tr.isUserEvent('input') &&
+      !tr.isUserEvent('input.type.compose')) {
+    let blank = false
+    let inside = true
+    tr.changes.iterChanges((from, to, _fromB, _toB, inserted) => {
+      if (inserted.length !== 0 && inserted.toString().trim().length === 0) blank = true
+      if (from < cell.from || to > cell.to) inside = false
+    })
+    if (blank && inside) return []
+  }
   // 边界取管道内侧；普通空白可删除，但删到零长度时保留一个 Markdown
   // 填充空格作为原生输入节点。纯 `||` 没有文字节点，浏览器会把输入/IME
   // 附着到相邻格或不可编辑 widget；这个空格在装饰层须保持视觉透明。
@@ -566,6 +580,12 @@ const protectGridCellContent = EditorState.transactionFilter.of((tr) => {
       }
     }
   }
+  // 空内容格的源码填充不属于用户内容（与 gridCellMouseSelection 同语义）：
+  // 删除它只会改变透明空白的数量，无可见效果——拒绝，保持填充守恒。
+  // 覆盖键盘 delete 与 DOM observer 回报的 input 删除；插入类事务不受影响。
+  if (cell.contentFrom === cell.contentTo &&
+      changes.some((change) => change.to > change.from && change.insert === '' &&
+        change.from >= cell.from && change.to <= cell.to)) return []
   if (!clipped) return tr
   if (!changes.length) return []
   const event = tr.annotation(Transaction.userEvent)
@@ -580,6 +600,9 @@ const protectGridCellContent = EditorState.transactionFilter.of((tr) => {
 /** 原生键入、粘贴与 IME 候选的首笔输入均替换整片格区。
  * 后续 IME 候选只更新左上格；宿主组合缓冲将全过程合成一次写回。 */
 const replaceTableRegionInput = EditorState.transactionFilter.of((tr) => {
+  // 事件层格对格粘贴派发的事务（input.paste + tableRegionReplacement）已
+  // 是最终形态，不得按「文本落左上格」再重写一遍（表头会重复铺开）
+  if (tr.annotation(tableRegionReplacement)) return tr
   if (!tr.docChanged || !tr.isUserEvent('input') || tr.isUserEvent('input.type.compose')) return tr
   const region = tr.startState.field(tableRegionField, false)
   const field = tr.startState.field(liveDecorationsField, false)
@@ -593,7 +616,12 @@ const replaceTableRegionInput = EditorState.transactionFilter.of((tr) => {
     text = inserted.toString()
   })
   if (count !== 1 || !text) return tr
-  const plan = planTableRegionReplace(tr.startState.doc.toString(), rows, region, text)
+  // 剪贴板是合法表格（如格区复制产物）时格对格铺开（2026-09-28 决策：
+  // 剥产物表头包装、扩表容纳、永不删行列）；普通文本仍落左上格
+  const matrix = parseTableRegionClipboard(text)
+  const plan = matrix
+    ? planTableRegionPaste(tr.startState.doc.toString(), rows, region, matrix)
+    : planTableRegionReplace(tr.startState.doc.toString(), rows, region, text)
   if (!plan) return tr
   return { changes: plan.changes, selection: { anchor: plan.selection },
     annotations: [tableRegionReplacement.of(true),
@@ -762,6 +790,8 @@ const deleteGridCellBreak: Command = (view) => {
 
 /** 在可编辑边界直接导航到相邻格，跳过透明填充和隐藏管道。
  * 格内仍交给原生左右移动；若无条件拦截，光标将无法逐字移动。
+ * 空内容格的填充空白对用户透明：格内无可见内容可逐字行走，方向键
+ * 一律直接切格，不得逐位经过空白（否则按键会"发现"隐藏空格）。
  * 格尾返回 true 还用于阻止原生右移进入隐藏的分隔符。 */
 function moveAcrossGridCell(view: EditorView, forward: boolean): boolean {
   if (view.compositionStarted || view.state.selection.ranges.length !== 1 || !view.state.selection.main.empty) return false
@@ -769,7 +799,8 @@ function moveAcrossGridCell(view: EditorView, forward: boolean): boolean {
   const cell = editableGridCellAt(view.state, head)
   if (!cell) return false
   const end = cell.to > cell.from && view.state.sliceDoc(cell.to - 1, cell.to) === ' ' ? cell.to - 1 : cell.to
-  if (forward ? head < end : head > cell.contentFrom) return false
+  const emptyContent = cell.contentFrom === cell.contentTo
+  if (!emptyContent && (forward ? head < end : head > cell.contentFrom)) return false
   const target = navTargetsOf(view, forward, true)?.[0]
   if (target === undefined) return true
   const next = editableGridCellAt(view.state, target)
@@ -862,12 +893,14 @@ function moveVerticallyAcrossGrid(view: EditorView, forward: boolean): boolean {
   return select(at, empty || at === next.contentFrom ? 1 : -1)
 }
 /** 退格直接删除可见内容，不先消耗透明填充。
- * 填充空格虽然写在源文里，却不是用户打出的末尾空格。 */
+ * 填充空格虽然写在源文里，却不是用户打出的末尾空格。
+ * 空内容格无从"跳过填充删内容"：bail 交后续链路（空白守恒拒绝删除）。 */
 const deleteBeforeGridPadding: Command = (view) => {
   if (view.compositionStarted || view.state.selection.ranges.length !== 1 || !view.state.selection.main.empty) return false
   const head = view.state.selection.main.head
   const cell = editableGridCellAt(view.state, head)
-  if (!cell || head !== cell.to || head <= cell.from || view.state.sliceDoc(head - 1, head) !== ' ') return false
+  if (!cell || head !== cell.to || head <= cell.from || view.state.sliceDoc(head - 1, head) !== ' ' ||
+      cell.contentFrom === cell.contentTo) return false
   view.dispatch({ selection: EditorSelection.create([EditorSelection.cursor(head - 1, 1)]) })
   return deleteCharBackward(view)
 }
@@ -1069,12 +1102,14 @@ function selectedRegionRows(view: EditorView) {
   return rows?.[0]?.lineFrom === region.tableFrom ? { region, rows } : null
 }
 
-/** 空内容行首格起点退格按结构删行，单笔事务走宿主撤销链路。 */
+/** 空内容行首格起点退格按结构删行，单笔事务走宿主撤销链路。
+ *  光标可落在首格区间任意透明空白位（gridCellMouseSelection 空格锚 from），
+ *  不必恰好压在 contentFrom 上——透明空白内所有位置同语义。 */
 const deleteEmptyGridRow: Command = (view) => {
   if (view.compositionStarted || !view.state.selection.main.empty) return false
   const head = view.state.selection.main.head
   const cell = editableGridCellAt(view.state, head)
-  if (!cell || cell.from !== cell.cells[0]?.from || head !== cell.contentFrom ||
+  if (!cell || cell.from !== cell.cells[0]?.from || head < cell.from || head > cell.to ||
       cell.cells.some((entry) => view.state.sliceDoc(entry.contentFrom, entry.contentTo).length > 0)) return false
   const field = view.state.field(liveDecorationsField, false)
   const rows = field && tableRowsAt(view.state, head, field.tree)
@@ -1107,6 +1142,25 @@ export const tableEditing = [
       const text = serializeTableRegion(view.state.doc.toString(), selected.rows, selected.region)
       if (text === null) return false
       event.clipboardData.setData('text/plain', text)
+      event.preventDefault()
+      return true
+    },
+    // 格对格粘贴（2026-09-28 决策）：格区选区 + 合法表格剪贴板在事件层
+    // 截获直发单事务——事务层的格内粘贴转义（protectGridPointerSelection
+    // 的 escapeCellText）会把管道/换行预转义，表格判定必须抢在它之前。
+    // 普通文本粘贴不拦截，落回左上格现状链路（region-paste 场景钉住）。
+    paste: (event, view) => {
+      if (view.compositionStarted) return false
+      const selected = selectedRegionRows(view)
+      const text = event.clipboardData?.getData('text/plain')
+      if (!selected || !text) return false
+      const matrix = parseTableRegionClipboard(text)
+      if (!matrix) return false
+      const plan = planTableRegionPaste(view.state.doc.toString(), selected.rows, selected.region, matrix)
+      if (!plan) return false
+      view.dispatch({ changes: plan.changes, selection: { anchor: plan.selection },
+        annotations: [tableRegionReplacement.of(true), Transaction.userEvent.of('input.paste')],
+        scrollIntoView: true })
       event.preventDefault()
       return true
     },

@@ -156,7 +156,7 @@ try {
     }
   }
   const navigationFailures = []
-  for (const scenario of ['horizontal-wrap', 'horizontal-wrap-empty', 'vertical-inside', 'vertical-outside', 'vertical-empty', 'vertical-wrapped', 'enter-cell', 'enter-empty', 'enter-body', 'enter-middle', 'enter-repeat', 'enter-code', 'enter-code-start', 'enter-code-end', 'enter-ime', 'drag-row', 'drag-column', 'region-copy', 'region-exit-outside', 'region-type', 'region-paste', 'region-ime', 'region-zero-width', 'region-zero-width-ime', 'region-padded-drag', 'header-clear', 'empty-row-backspace', 'handle-row', 'handle-column', 'handle-cross-row', 'handle-cross-column', 'handle-hover', 'column-width', 'drag-table-outside']) {
+  for (const scenario of ['horizontal-wrap', 'horizontal-wrap-empty', 'vertical-inside', 'vertical-outside', 'vertical-empty', 'vertical-wrapped', 'enter-cell', 'enter-empty', 'enter-body', 'enter-middle', 'enter-repeat', 'enter-code', 'enter-code-start', 'enter-code-end', 'enter-ime', 'drag-row', 'drag-column', 'region-copy', 'region-exit-outside', 'region-drag-live-selection', 'region-drag-fulltable-mask', 'region-type', 'region-paste', 'region-paste-grid', 'region-ime', 'region-zero-width', 'region-zero-width-ime', 'region-padded-drag', 'header-clear', 'empty-row-backspace', 'empty-row-realclick', 'empty-cell-padding', 'handle-row', 'handle-column', 'handle-cross-row', 'handle-cross-column', 'handle-hover', 'column-width', 'drag-table-outside']) {
     const page = await browser.newPage()
     try {
       await page.setContent('<div id="app"></div>')
@@ -167,6 +167,8 @@ try {
       if (scenario === 'vertical-empty') source = source.replace(' B2 ', ' ')
       if (scenario === 'vertical-wrapped') source = source.replace('H2', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ')
       if (scenario === 'empty-row-backspace') source = source.replace('| B1 | B2 |', '|  |  |')
+      if (scenario === 'empty-row-realclick') source = source.replace('| B1 | B2 |', '|  |  |')
+      if (scenario === 'empty-cell-padding') source = source.replace('| B1 | B2 |', '|  | B2 |')
       if (scenario === 'header-clear') source = source.replace('| H1 | H2 |', '| H1 |  |')
       if (scenario === 'handle-column') source = source.replace('| --- | --- |', '| :--- | ---: |')
       if (scenario.startsWith('region-zero-width')) source = 'BEFORE\n\n|H1|H2|\n|---|---|\n||B2|\n|C1|C2|\n\nAFTER'
@@ -329,6 +331,137 @@ try {
         await page.keyboard.press('Backspace')
         assert.equal((await page.evaluate(() => window.readEditor())).text,
           source.replace('|  |  |\n', ''), '空行首格起点退格应删整行且保留正文')
+      } else if (scenario === 'empty-row-realclick') {
+        // 真实点击（不经 view.locate 精确定位）空行首格：光标落在格区间
+        // 任意透明空白位（from 而非 contentFrom），退格仍须删整行。
+        await cell(1, 0).click()
+        const entered = await page.evaluate(() => window.readEditor())
+        assert(entered.head >= source.indexOf('|  |  |') && entered.head <= source.indexOf('|  |  |') + 7,
+          `点击空行首格光标应落在首格区间: ${JSON.stringify(entered)}`)
+        await page.keyboard.press('Backspace')
+        assert.equal((await page.evaluate(() => window.readEditor())).text,
+          source.replace('|  |  |\n', ''), '真实点击空行首格退格应删整行')
+        assert.equal(await page.locator('.vsidian-table-grid-row').count(), 2, '删行后网格少一行')
+      } else if (scenario === 'empty-cell-padding') {
+        // 填充空格对用户透明：右移一步直接切到右格内容首（不逐位经过空格）；
+        // 左移回到同一锚点；行非全空时退格不得删除填充空白。
+        await cell(1, 0).click()
+        const anchor = (await page.evaluate(() => window.readEditor())).head
+        await page.keyboard.press('ArrowRight')
+        const afterRight = await page.evaluate(() => window.readEditor())
+        assert.equal(afterRight.head, source.indexOf('B2'),
+          `空格右移一步应直接切到右格内容首: ${JSON.stringify({ anchor, afterRight })}`)
+        await page.keyboard.press('ArrowLeft')
+        const afterLeft = await page.evaluate(() => window.readEditor())
+        assert.equal(afterLeft.head, anchor, `右格左移应回到空格同一锚点: ${JSON.stringify({ anchor, afterLeft })}`)
+        await page.keyboard.press('Backspace')
+        assert.equal((await page.evaluate(() => window.readEditor())).text, source,
+          '行非全空时退格不得删除填充空白')
+        await cell(1, 1).click()
+        // 点击落点在 B2 内容中间不确定：先格内全选收到内容首，再左移入空格
+        await page.keyboard.press('Control+a')
+        await page.keyboard.press('ArrowLeft')
+        await page.keyboard.press('ArrowLeft')
+        await page.keyboard.press('Backspace')
+        assert.equal((await page.evaluate(() => window.readEditor())).text, source,
+          '从右格左移入空格后退格同样不得删除填充空白')
+      } else if (scenario === 'region-drag-live-selection') {
+        // 拖选进行中（未松手）：跨格矩形建立后不得出现原生线性蓝选区——
+        // 矩形边框与蒙版是唯一选区反馈（region=0 的首格内阶段仍属普通文本拖选）。
+        const a = await cell(1, 0).boundingBox()
+        const b = await cell(2, 1).boundingBox()
+        await page.mouse.move(a.x + 14, a.y + a.height / 2)
+        await page.mouse.down()
+        const frames = []
+        for (let step = 1; step <= 6; step++) {
+          await page.mouse.move(a.x + 14 + (b.x + 26 - a.x - 14) * step / 6,
+            a.y + a.height / 2 + (b.y + b.height / 2 - a.y - a.height / 2) * step / 6)
+          frames.push(await page.evaluate(() => ({
+            from: window.readEditor().from, to: window.readEditor().to,
+            native: getSelection()?.toString() ?? '',
+            region: document.querySelectorAll('.vsidian-table-region-cell').length,
+          })))
+        }
+        await page.mouse.up()
+        assert(frames.some((frame) => frame.region > 0), `拖动过程中应已形成矩形选区: ${JSON.stringify(frames)}`)
+        for (const frame of frames) {
+          if (frame.region === 0) continue
+          assert.equal(frame.from, frame.to, `跨格拖选中 CM6 选区必须折叠（无蓝色线性高亮）: ${JSON.stringify(frames)}`)
+          assert.equal(frame.native, '', `跨格拖选中原生 selection 不得残留文字: ${JSON.stringify(frames)}`)
+        }
+        assert.equal(frames.at(-1).region, 4, '松手前 2×2 矩形已就位')
+        const after = await page.evaluate(() => window.readEditor())
+        assert.equal(after.from, after.to, '松手后光标保持折叠')
+      } else if (scenario === 'region-paste-grid') {
+        // 格对格粘贴（2026-09-28 决策）：格区复制产物（带表头包装的表格）
+        // 粘回格区须逐格铺开替换，不再整段落左上格；表头包装剥掉、结构
+        // 保持；源越界扩表容纳。普通文本粘贴仍走左上格（region-paste 场景）。
+        const paste = async (text) => {
+          await page.evaluate((payload) => {
+            const data = new DataTransfer()
+            data.setData('text/plain', payload)
+            document.querySelector('.cm-content').dispatchEvent(new ClipboardEvent('paste',
+              { clipboardData: data, bubbles: true, cancelable: true }))
+          }, text)
+        }
+        const a = await cell(1, 0).boundingBox()
+        const b = await cell(2, 1).boundingBox()
+        await page.mouse.move(a.x + 14, a.y + a.height / 2)
+        await page.mouse.down()
+        await page.mouse.move(b.x + 26, b.y + b.height / 2, { steps: 6 })
+        await page.mouse.up()
+        assert.equal(await page.locator('.vsidian-table-region-cell').count(), 4, '粘贴前 2×2 蒙版就位')
+        await paste('| 一 | 二 |\n| --- | --- |\n| 三 | 四 |')
+        let text = (await page.evaluate(() => window.readEditor())).text
+        assert(text.includes('| H1 | H2 |\n| --- | --- |\n| 一 | 二 |\n| 三 | 四 |\n\nAFTER'),
+          `同尺寸 2×2 须格对格替换且表头结构不动: ${JSON.stringify(text)}`)
+        assert.equal(await page.locator('.vsidian-table-grid-row').count(), 3, '同尺寸粘贴不得增删行列')
+        assert.equal(await page.locator('.vsidian-table-region-cell').count(), 0, '粘贴后蒙版退场')
+        // 源行数超表：末尾扩行容纳；表头与非选区行不动
+        const c = await cell(1, 0).boundingBox()
+        const d = await cell(2, 1).boundingBox()
+        await page.mouse.move(c.x + 14, c.y + c.height / 2)
+        await page.mouse.down()
+        await page.mouse.move(d.x + 26, d.y + d.height / 2, { steps: 6 })
+        await page.mouse.up()
+        await paste('| 甲 | 乙 |\n| --- | --- |\n| 丙 | 丁 |\n| 戊 | 己 |')
+        text = (await page.evaluate(() => window.readEditor())).text
+        assert(text.includes('| H1 | H2 |\n| --- | --- |\n| 甲 | 乙 |\n| 丙 | 丁 |\n| 戊 | 己 |\n\nAFTER'),
+          `源越界须向表尾扩行容纳: ${JSON.stringify(text)}`)
+        assert.equal(await page.locator('.vsidian-table-grid-row').count(), 4, '扩行后网格多一行')
+      } else if (scenario === 'region-drag-fulltable-mask') {
+        // 拖选进行中蒙版不得断档：满列再横拉到整表的扩张路径上，外贴蒙版类
+        // 曾与列把手高亮、CM6 mark 更新竞态互抹——第一列整列消失直到松手。
+        // 断言逐帧蒙版数量单调不减，且未松手时整表六格蒙版就位（脱手恢复不算数）。
+        const boxes = [await cell(0, 0).boundingBox(), await cell(1, 0).boundingBox(),
+          await cell(2, 0).boundingBox(), await cell(2, 1).boundingBox()]
+        const center = (box) => ({ x: box.x + box.width / 2, y: box.y + box.height / 2 })
+        const count = () => page.evaluate(() =>
+          document.querySelectorAll('.vsidian-table-grid-row > .vsidian-table-grid-cell.vsidian-table-region-cell').length)
+        const start = center(boxes[0])
+        await page.mouse.move(start.x, start.y)
+        await page.mouse.down()
+        const frames = []
+        let last = start
+        for (const [index, box] of [boxes[1], boxes[2], boxes[3]].entries()) {
+          const target = center(box)
+          const steps = index === 2 ? 8 : 5
+          for (let i = 1; i <= steps; i++) {
+            await page.mouse.move(last.x + (target.x - last.x) * i / steps,
+              last.y + (target.y - last.y) * i / steps)
+            frames.push(await count())
+          }
+          last = target
+        }
+        const settled = await count()
+        await page.mouse.up()
+        const after = await count()
+        assert.equal(settled, 6, `拖选中（未松手）整表蒙版须六格齐备: 逐帧 ${JSON.stringify(frames)} settled=${settled}`)
+        assert.equal(after, 6, '松手后整表蒙版保持六格')
+        // 扩张手势 region 只增不减：含 0 帧全程单调——瞬断（n→0→n）与
+        // 部分回退（6→3）都是断裂形态，一并抓
+        assert(frames.every((n, i) => i === 0 || n >= frames[i - 1]),
+          `扩张拖选中蒙版数量不得回退（回退即断裂帧）: ${JSON.stringify(frames)}`)
       } else if (scenario.startsWith('enter-')) {
         const target = cell(scenario === 'enter-body' ? 1 : 0, 1)
         await target.click()

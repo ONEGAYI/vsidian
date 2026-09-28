@@ -9,7 +9,7 @@ description: 在 vsidian 仓库准备或执行版本发布时使用：升版本�
 
 ## 体积红线
 
-VSIX 解压总量警告 5.5 MB / 上限 6.5 MB（#85 代码块高亮后基线约 4.45 MB，距旧警告线 4.5 MB 仅约 57 KB，用户决策两条线各上调 1 MB），一般单文件警告 3 MB / 上限 4 MB，图标上限 100 KB（256×256）。阈值定义在 `scripts/release.mjs` 的 `SIZE_LIMITS`；修改阈值视同变更本约定，需同步本技能。#60 起基线含 mermaid 独立产物 `out/webview/mermaid.js`（minify 后约 2.6 MB，刻意 vendored 的按需懒加载渲染器，单文件与总量阈值据此上调）——彼时主 bundle main.js 约 0.80 MB 不触单文件警告；#83 代码块高亮语言包并入后 main.js 约 2.4 MB（距单文件警告线 3 MB 约 0.6 MB 余量），其增长由总量线约束——属已接受取舍。
+VSIX 解压总量警告 6.5 MB / 上限 7.5 MB（#85 代码块高亮后基线约 4.45 MB 时首次上调；v0.5.0 后基线约 5.44 MB，距警告线 5.5 MB 仅约 66 KB，用户决策两条线再次各上调 1 MB），一般单文件警告 3 MB / 上限 4 MB，图标上限 100 KB（256×256）。阈值定义在 `scripts/release.mjs` 的 `SIZE_LIMITS`；修改阈值视同变更本约定，需同步本技能。#60 起基线含 mermaid 独立产物 `out/webview/mermaid.js`（minify 后约 2.6 MB，刻意 vendored 的按需懒加载渲染器，单文件与总量阈值据此上调）；主 bundle main.js 现约 1.65 MB（v0.5.0 实测，含 CM6 + KaTeX 与 Lezer 语言表），不触发单文件警告——其增长由总量线约束，属已接受取舍。
 
 ## 双重防线
 
@@ -21,7 +21,7 @@ VSIX 解压总量警告 5.5 MB / 上限 6.5 MB（#85 代码块高亮后基线约
 
 ## 发布流程
 
-`CHANGELOG.md` 最新 `## <版本> - <日期>` 段落必须与 package.json `version` 一致（`scripts/release.mjs` 强校验，并以该段落作为 GitHub Release 说明）。发版步骤：升 `version` + 新建 CHANGELOG 段落 → 提交 → `npm run release:check` 本地过检查 → `git tag v<版本>` → `npm run release`（或推 tag 由 CI 执行）。
+`CHANGELOG.md` 最新 `## <版本> - <日期>` 段落必须与 package.json `version` 一致（`scripts/release.mjs` 强校验，并以该段落作为 GitHub Release 说明）。发版步骤：升 `version` + 新建 CHANGELOG 段落 → **重跑 `npm run gen:styleguide`**（三份指南产物内嵌版本戳随 `version` 变化，漏跑会被契约复验的 guide-consistency 拦截——v0.5.0 发布实证过一次 tag 推送失败）→ 连同指南产物提交 → `npm run release:check` 本地过检查（含与 CI 发布链相同的契约复验链）→ `git tag v<版本>` → `npm run release`（或推 tag 由 CI 执行）。发布提交直推 main 会 bypass 远端必需状态检查——推送后跟踪该次 CI 运行至全绿再离手（失败先 `gh run rerun <id> --failed` 判别间歇性，非间歇失败需修复并重新评估 tag 指向）。
 
 ## CI 自动发布
 

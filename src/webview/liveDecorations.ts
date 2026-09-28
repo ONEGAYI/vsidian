@@ -59,6 +59,8 @@ import { resolveTaskToggleAtMarker } from './taskToggle'
 import { t } from '../shared/i18n'
 import { applyObsidianDomAlias } from '../shared/obsidianAlias'
 import { collectColumnSamples, tableGridTemplate } from './tableColumnWidth'
+import { sameTableRegion, tableRegionField } from './tableRegionField'
+import type { TableRegion } from './tableRegion'
 import { parseFrontmatterTable, type FmTableModel } from '../shared/frontmatterTable'
 import { buildFrontmatterCardPlan } from './frontmatterDecorations'
 import {
@@ -138,6 +140,13 @@ export const LIVE_CLASS_NAMES = {
   tableGridEmpty: 'vsidian-table-grid-empty',
   tableGridDelimiter: 'vsidian-table-grid-delimiter',
   tableEscapedPipe: 'vsidian-table-escaped-pipe',
+  /** 矩形格区蒙版（#73）：并入网格格装饰的 class 托管——外部贴类会与
+   *  列把手高亮、CM6 mark 重写互抹（2026-09-28 拖选断裂实测） */
+  tableRegionCell: 'vsidian-table-region-cell',
+  tableRegionTop: 'vsidian-table-region-top',
+  tableRegionBottom: 'vsidian-table-region-bottom',
+  tableRegionLeft: 'vsidian-table-region-left',
+  tableRegionRight: 'vsidian-table-region-right',
   /** 列对齐修饰（分隔行声明的对齐落到各单元格） */
   tableAlign: (a: TableAlign) => `vsidian-table-align-${a}`,
 } as const
@@ -284,10 +293,10 @@ const tableCellBreakDeco = Decoration.replace({ widget: new TableCellBreakWidget
 export const tableCompositionPreview = Annotation.define<boolean>()
 export const tableCompositionSettled = Annotation.define<boolean>()
 const tableGridCellDecos = new Map<string, ReturnType<typeof Decoration.mark>>()
-function tableGridCellDeco(align: TableAlign | null): ReturnType<typeof Decoration.mark> {
-  const cls = align
+function tableGridCellDeco(align: TableAlign | null, regionCls = ''): ReturnType<typeof Decoration.mark> {
+  const cls = (align
     ? `${LIVE_CLASS_NAMES.tableGridCell} vsidian-table-grid-align-${align}`
-    : LIVE_CLASS_NAMES.tableGridCell
+    : LIVE_CLASS_NAMES.tableGridCell) + (regionCls ? ` ${regionCls}` : '')
   let deco = tableGridCellDecos.get(cls)
   if (!deco) {
     // 内容恰好填满单元格区间时，网格 span 仍须包在内容 span 外层；
@@ -298,22 +307,36 @@ function tableGridCellDeco(align: TableAlign | null): ReturnType<typeof Decorati
   return deco
 }
 
+/** 矩形格区在该格上的蒙版类（#73）：区域端点行/列另加边框类（与既有
+ *  CSS 联合类选择器同名，仅施加者由外部贴类改为装饰托管）。 */
+function tableRegionClassesFor(region: TableRegion, index: number, col: number): string {
+  if (index < region.rowFrom || index > region.rowTo || col < region.columnFrom || col > region.columnTo) return ''
+  const cls: string[] = [LIVE_CLASS_NAMES.tableRegionCell]
+  if (index === region.rowFrom) cls.push(LIVE_CLASS_NAMES.tableRegionTop)
+  if (index === region.rowTo) cls.push(LIVE_CLASS_NAMES.tableRegionBottom)
+  if (col === region.columnFrom) cls.push(LIVE_CLASS_NAMES.tableRegionLeft)
+  if (col === region.columnTo) cls.push(LIVE_CLASS_NAMES.tableRegionRight)
+  return cls.join(' ')
+}
+
 /** 零宽空格仍须占一列；widget 仅在该行进入 CM6 视口时生成 DOM。
  *  导出供 localeRefreshContract 的直构等价形态用例（同 CodeCardHeaderWidget /
  *  LiveMathWidget 先例）；生产侧经下方 emptyTableCellDecoFor 的有限实例
  *  缓存发射（active × 对齐的有限组合）。#142 起携带列对齐类（GFM 列对齐
  *  应用到该列全部单元格，空格占位不例外）。 */
 export class EmptyTableCellWidget extends WidgetType {
-  constructor(private readonly active = false, private readonly align: TableAlign | null = null) { super() }
+  constructor(private readonly active = false, private readonly align: TableAlign | null = null,
+    private readonly regionCls = '') { super() }
   toDOM(): HTMLElement {
     const span = document.createElement('span')
     // 空格两态都带 tableGridEmpty 标记（换包扫描锚点，#101）；active 态
     // 只是在其上叠加修饰类（CSS 光标呈现用），同词无独立文案；对齐类与
     // 普通格的 tableGridCellDeco 同名（vsidian-table-grid-align-*）
     const align = this.align ? ` vsidian-table-grid-align-${this.align}` : ''
+    const region = this.regionCls ? ` ${this.regionCls}` : ''
     span.className = this.active
-      ? `${LIVE_CLASS_NAMES.tableGridCell} ${LIVE_CLASS_NAMES.tableGridEmpty} vsidian-table-grid-empty-active${align}`
-      : `${LIVE_CLASS_NAMES.tableGridCell} ${LIVE_CLASS_NAMES.tableGridEmpty}${align}`
+      ? `${LIVE_CLASS_NAMES.tableGridCell} ${LIVE_CLASS_NAMES.tableGridEmpty} vsidian-table-grid-empty-active${align}${region}`
+      : `${LIVE_CLASS_NAMES.tableGridCell} ${LIVE_CLASS_NAMES.tableGridEmpty}${align}${region}`
     span.setAttribute('aria-label', t('decor.emptyCell'))
     span.addEventListener('mousedown', (event) => {
       const view = EditorView.findFromDOM(span)
@@ -331,11 +354,12 @@ export class EmptyTableCellWidget extends WidgetType {
 }
 /** 空格占位 widget 装饰缓存：active × 对齐的有限组合，增量与全量产出相同实例 */
 const emptyCellDecos = new Map<string, ReturnType<typeof Decoration.widget>>()
-function emptyTableCellDecoFor(align: TableAlign | null, active: boolean): ReturnType<typeof Decoration.widget> {
-  const key = `${active}\u0000${align ?? ''}`
+function emptyTableCellDecoFor(align: TableAlign | null, active: boolean,
+  regionCls = ''): ReturnType<typeof Decoration.widget> {
+  const key = `${active}\u0000${align ?? ''}\u0000${regionCls}`
   let deco = emptyCellDecos.get(key)
   if (!deco) {
-    deco = Decoration.widget({ widget: new EmptyTableCellWidget(active, align) })
+    deco = Decoration.widget({ widget: new EmptyTableCellWidget(active, align, regionCls) })
     emptyCellDecos.set(key, deco)
   }
   return deco
@@ -508,20 +532,27 @@ function emitTableRowMarks(
   selection: EditorSelection,
   grid: boolean,
   columns?: number,
+  region: TableRegion | null = null,
 ): void {
   const line = doc.lineAt(node.from)
   const header = node.name === 'TableHeader'
-  const aligns = tableAlignsOf(doc, tableAncestor(path))
+  const table = tableAncestor(path)
+  const aligns = tableAlignsOf(doc, table)
+  // 内容行索引（表头 0，数据行跳过分隔行）——与 tableRegionField 的坐标一致
+  const regionIndex = region && table && region.tableFrom === table.from
+    ? header ? 0 : line.number - doc.lineAt(region.tableFrom).number - 1
+    : -1
   const cells = grid && columns
     ? tableRowCellsForColumns(line.text, line.from, columns) ?? []
     : splitTableRowCells(line.text, line.from)
   for (let col = 0; col < cells.length; col++) {
     const cell = cells[col]!
     if (grid) {
+      const regionCls = regionIndex >= 0 ? tableRegionClassesFor(region!, regionIndex, col) : ''
       out.push(cell.to > cell.from
-        ? tableGridCellDeco(aligns?.[col] ?? null).range(cell.from, cell.to)
+        ? tableGridCellDeco(aligns?.[col] ?? null, regionCls).range(cell.from, cell.to)
         : emptyTableCellDecoFor(aligns?.[col] ?? null,
-          selection.ranges.some((range) => range.empty && range.head === cell.from)).range(cell.from))
+          selection.ranges.some((range) => range.empty && range.head === cell.from), regionCls).range(cell.from))
       if (cell.to > cell.from && doc.sliceString(cell.to - 1, cell.to) === ' ') {
         out.push(tableGridPaddingDeco.range(cell.to - 1, cell.to))
       }
@@ -615,6 +646,7 @@ function emitForRange(
   toLine: number,
   gridPlans: Map<number, TableGridPlan | null> = new Map(),
   fmModel: FmTableModel | null = null,
+  region: TableRegion | null = null,
 ): Array<Range<Decoration>> {
   const out: Array<Range<Decoration>> = []
   const lineCls: Array<Set<string> | undefined> = new Array(toLine - fromLine + 1).fill(undefined)
@@ -748,7 +780,7 @@ function emitForRange(
         if (lineNo >= fromLine && lineNo <= toLine) {
           addLineCls(lineNo, LIVE_CLASS_NAMES.tableHeaderLine)
           const grid = gridPlans.get(tableAncestor(path)?.from ?? -1)
-          emitTableRowMarks(out, doc, node, path, selection, Boolean(grid && gridLines.has(lineNo)), grid?.columns)
+          emitTableRowMarks(out, doc, node, path, selection, Boolean(grid && gridLines.has(lineNo)), grid?.columns, region)
         }
         return
       }
@@ -756,7 +788,7 @@ function emitForRange(
         const lineNo = doc.lineAt(node.from).number
         if (lineNo >= fromLine && lineNo <= toLine) {
           const grid = gridPlans.get(tableAncestor(path)?.from ?? -1)
-          emitTableRowMarks(out, doc, node, path, selection, Boolean(grid && gridLines.has(lineNo)), grid?.columns)
+          emitTableRowMarks(out, doc, node, path, selection, Boolean(grid && gridLines.has(lineNo)), grid?.columns, region)
         }
         return
       }
@@ -1096,12 +1128,13 @@ function headText(doc: Text): string {
 }
 
 /** 全量构建（create / 全文替换 / 探针对拍） */
-export function buildLivePreviewDecorations(doc: Text, selection: EditorSelection): DecorationSet {
+export function buildLivePreviewDecorations(doc: Text, selection: EditorSelection,
+  region: TableRegion | null = null): DecorationSet {
   const tree = parseTree(doc)
   const fm = frontmatterOf(doc)
   stats.fullBuildLines = doc.lines
   return RangeSet.of(
-    emitForRange(tree, doc, selection, fm, 1, doc.lines, new Map(), frontmatterModelOf(doc, fm)),
+    emitForRange(tree, doc, selection, fm, 1, doc.lines, new Map(), frontmatterModelOf(doc, fm), region),
     true,
   )
 }
@@ -1130,6 +1163,21 @@ function selectionSpans(tr: Transaction): LineSpan[] {
   }
   for (const r of tr.state.selection.ranges) {
     spans.push({ fromLine: doc.lineAt(r.from).number, toLine: doc.lineAt(r.to).number })
+  }
+  return spans
+}
+
+/** 矩形格区驱动的重建行：旧/新区域覆盖行（含端点行整段重算——top/bottom
+ *  边框类随端点行变化）。蒙版类并入网格格装饰后，区域增删必须同步重刷
+ *  受影响行，否则旧类残留（2026-09-28）。 */
+function regionSpans(tr: Transaction, doc: Text): LineSpan[] {
+  const spans: LineSpan[] = []
+  for (const region of [tr.startState.field(tableRegionField, false), tr.state.field(tableRegionField, false)]) {
+    if (!region) continue
+    const headerNo = doc.lineAt(tr.changes.mapPos(region.tableFrom, -1)).number
+    const first = headerNo + region.rowFrom + (region.rowFrom > 0 ? 1 : 0)
+    const last = Math.min(headerNo + region.rowTo + (region.rowTo > 0 ? 1 : 0), doc.lines)
+    if (last >= first) spans.push({ fromLine: first, toLine: last })
   }
   return spans
 }
@@ -1341,7 +1389,8 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
     stats.fullBuildLines = state.doc.lines
     const gridPlans = new Map<number, TableGridPlan | null>()
     const decos = RangeSet.of(
-      emitForRange(tree, state.doc, state.selection, fm, 1, state.doc.lines, gridPlans, fmModel), true)
+      emitForRange(tree, state.doc, state.selection, fm, 1, state.doc.lines, gridPlans, fmModel,
+        state.field(tableRegionField, false)), true)
     return {
       decos,
       tree,
@@ -1354,7 +1403,8 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
     }
   },
   update(value, tr) {
-    if (!tr.docChanged && tr.selection === undefined) {
+    if (!tr.docChanged && tr.selection === undefined &&
+        sameTableRegion(tr.startState.field(tableRegionField, false), tr.state.field(tableRegionField, false))) {
       return value
     }
     if (!tr.docChanged) {
@@ -1392,7 +1442,8 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
                 filterFrom: currentLine.from,
                 filterTo: currentLine.to,
                 filter: () => false,
-                add: emitForRange(value.tree, doc, tr.state.selection, value.fm, lineNo, lineNo, value.gridPlans, value.fmModel),
+                add: emitForRange(value.tree, doc, tr.state.selection, value.fm, lineNo, lineNo, value.gridPlans, value.fmModel,
+                  tr.state.field(tableRegionField, false)),
                 sort: true,
               })
               return {
@@ -1416,7 +1467,8 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
             filterFrom: doc.line(first).from,
             filterTo: doc.line(last).to,
             filter: () => false,
-            add: emitForRange(value.tree, doc, tr.state.selection, value.fm, first, last, gridPlans, value.fmModel),
+            add: emitForRange(value.tree, doc, tr.state.selection, value.fm, first, last, gridPlans, value.fmModel,
+              tr.state.field(tableRegionField, false)),
             sort: true,
           })
           return {
@@ -1435,7 +1487,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
       let decos = value.decos
       let scanned = 0
       const rebuilt: Array<{ from: number; to: number }> = []
-      for (const span of selectionSpans(tr)) {
+      for (const span of [...selectionSpans(tr), ...regionSpans(tr, doc)]) {
         const from = doc.line(span.fromLine).from
         const to = doc.line(span.toLine).to
         rebuilt.push({ from, to })
@@ -1443,7 +1495,8 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
           filterFrom: from,
           filterTo: to,
           filter: () => false,
-          add: emitForRange(value.tree, doc, tr.state.selection, value.fm, span.fromLine, span.toLine, value.gridPlans, value.fmModel),
+          add: emitForRange(value.tree, doc, tr.state.selection, value.fm, span.fromLine, span.toLine, value.gridPlans, value.fmModel,
+            tr.state.field(tableRegionField, false)),
           sort: true,
         })
         scanned += span.toLine - span.fromLine + 1
@@ -1490,7 +1543,8 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
         compositionPreview: true,
       }
     }
-    const spans = planRebuildSpans(tr, value.tree, tree, changed, value.fm, fm, fmTouched)
+    const spans = [...planRebuildSpans(tr, value.tree, tree, changed, value.fm, fm, fmTouched),
+      ...regionSpans(tr, doc)]
     const gridPlans = new Map<number, TableGridPlan | null>()
     let decos = value.decos.map(tr.changes)
     let scanned = 0
@@ -1503,7 +1557,8 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
         filterFrom: from,
         filterTo: to,
         filter: () => false,
-        add: emitForRange(tree, doc, tr.state.selection, fm, span.fromLine, span.toLine, gridPlans, fmModel),
+        add: emitForRange(tree, doc, tr.state.selection, fm, span.fromLine, span.toLine, gridPlans, fmModel,
+          tr.state.field(tableRegionField, false)),
         sort: true,
       })
       scanned += span.toLine - span.fromLine + 1

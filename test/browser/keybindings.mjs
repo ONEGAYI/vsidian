@@ -64,20 +64,16 @@ try {
     const bold = page.locator('[data-operation-id="bold"]')
     await bold.locator('kbd').waitFor()
     assert.equal(await bold.locator('kbd').innerText(), 'Ctrl+B')
-    // 读取竞态加固：mock 的 keybindings.snapshot 回包会 replaceChildren 重建
-    // 分页，locator 解析与 evaluate 执行之间存在 IPC 间隙，恰好撞上重建会拿
-    // 到已移除节点（computed style 全空串）。空背景值重读吸收该窗口（实测
-    // 组合并发下约 1/3 概率触发）；断言仍落最终计算值，强度不变
-    const readPaint = () => bold.locator('.vsidian-keybindings-tag').evaluate((node) => {
+    // #164 等帧稳定：定位落入分页开的捕获签在 nav 聚焦后经 rAF 一帧才
+    // cancelCapture 重建行容器——不排空该帧，paint 断言的节点解析与
+    // computed 查询之间会撞上重建（节点 detached、computed 取空串）
+    await page.evaluate(() => new Promise((resolve) =>
+      requestAnimationFrame(() => setTimeout(resolve, 0))))
+    const paint = await bold.locator('.vsidian-keybindings-tag').evaluate((node) => {
       const style = getComputedStyle(node)
       const rect = node.getBoundingClientRect()
       return { bg: style.backgroundColor, border: style.borderStyle, visible: rect.width > 0 && rect.height > 0 }
     })
-    let paint = await readPaint()
-    for (let i = 0; paint.bg === '' && i < 60; i++) {
-      await page.waitForTimeout(50)
-      paint = await readPaint()
-    }
     assert.equal(paint.bg, theme === 'light' ? 'rgb(242, 244, 247)' : 'rgb(49, 49, 54)')
     assert.equal(paint.border, 'solid')
     assert.equal(paint.visible, true)
@@ -152,15 +148,12 @@ try {
       const last = sets[sets.length - 1]
       return last && last.id === 'italic' && JSON.stringify(last.bindings) === '["ctrl+b"]'
     }), true, '一击删除应发出移除 ctrl+i 的保存消息')
-    // 焦点重落是回推重渲染后的异步终态：上面 waitForFunction 通过时焦点可
-    // 能尚未落回（单次快照断言在并发负载下偶发 false）。轮询到重获（false
-    // 为暂态），上限 3 秒——终态断言语义不变
-    let recaptured = false
-    for (let i = 0; i < 60 && !recaptured; i++) {
-      recaptured = await boldCapture.evaluate(el => document.activeElement === el)
-      if (!recaptured) await page.waitForTimeout(50)
-    }
-    assert.equal(recaptured, true,
+    // 删除按钮先触发本地重渲染，宿主保存回执随后再重渲染一次；待回执
+    // 和孤儿 blur 的一帧回调排空后，核对最终焦点而非中间瞬态。
+    await page.getByRole('status').filter({ hasText: zhCn['keybindingSettings.saved'] }).waitFor()
+    await page.evaluate(() => new Promise((resolve) =>
+      requestAnimationFrame(() => setTimeout(resolve, 0))))
+    assert.equal(await boldCapture.evaluate(el => document.activeElement === el), true,
       '他行动作引发的回推重渲染后，活跃捕获签应重获焦点（录制不中断）')
     await page.keyboard.press('Escape')
     // ⋯ 菜单（审查修复补强）：浮层绘制形态 + 点击别处收起（规格承诺）

@@ -45,6 +45,18 @@ body {
   /* 代码块卡片底色（#79 起公开变量，选择器映射表登记；头部与代码区共用，
      阅读卡片同源） */
   --vsidian-code-card-background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12));
+  /* ---- #175 可读行宽双变量（#app 层定义，两模式同引；移自阅读层，语义
+     见下方阅读视图注释）。缺省 none = 铺满（bug #174 修复：默认无限宽）；
+     Obsidian 别名 --file-line-width 同接两变量（Obsidian 语义即一个全局
+     行宽管两视图）。设置值（editor.readableLineWidth 非 0 档）由
+     syncController 以内联形式写到挂载根元素——优先序两级：根级片段
+     （同元素/祖先声明）需 !important 才覆盖内联；按视图作用域声明的
+     后代级片段继承链更近、常规规则即可生效（示例：在
+     .vsidian-view-reading / .vsidian-view-live 容器上声明变量），
+     这正是两模式差异化定制路径。0 档不写内联，本处
+     缺省生效，片段全层级可定制。 */
+  --vsidian-reading-max-width: var(--file-line-width, none);
+  --vsidian-live-preview-max-width: var(--file-line-width, none);
   /* ---- #132 Obsidian 变量别名桥：下列 vsidian 公开变量的默认定义含
      Obsidian 原名 fallback（如 var(--h1-color, <原默认>)）——用户片段设置
      Obsidian 原名变量即生效；vsidian 名整条覆盖严格优先（双轨并存）。
@@ -216,6 +228,25 @@ body.vscode-light #app {
 #app .vsidian-view-live {
   flex: 1 1 auto;
   min-height: 0;
+}
+
+/* ---- #175 可读行宽（live 侧）----
+   .cm-content 挂 max-width（消费 #app 层 --vsidian-live-preview-max-width，
+   缺省 none = 铺满）；.cm-scroller 以 justify-content: safe center 把
+   [行号列 + 正文列] 作为整组在滚动区内容盒内居中——行号列贴正文列左缘
+   随列移动（Obsidian 行为，Q5 共识）。铺满档 content flex-grow 占满、
+   无剩余空间，居中对齐零位移（与旧布局逐像素一致）；限宽档剩余空间
+   由 justify 分配，侧栏开合收缩时整组实时重新居中（纯 CSS）。
+   safe 修饰：内容溢出（超宽表格等撑破列宽）时回退起点对齐，避免
+   居中裁切左缘。#32 行号契约修订：限宽态下行号列随列居中，正文列宽
+   = min(设定宽, 可用宽 - 行号列)，设定宽不超出（可用 - 行号列）时与
+   无行号态正文宽一致（铺满态两态仍严格一致，行为不变）。 */
+#app .vsidian-view-live .cm-editor .cm-scroller {
+  justify-content: safe center;
+}
+
+#app .vsidian-view-live .cm-editor .cm-scroller .cm-content {
+  max-width: var(--vsidian-live-preview-max-width);
 }
 
 /* ---- #53 顶栏图标化与右侧栏布局 ----
@@ -1438,6 +1469,7 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
 #app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-table {
   margin: 0 0 12px;
   width: 100%;
+  box-sizing: border-box;
   border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
   border-radius: 6px;
   background: none;
@@ -2203,11 +2235,13 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
    公开 CSS 变量入口（外部片段可覆盖）：--vsidian-reading-font-size / -max-width /
    -line-height / -code-background；#32 起前两者缺省值改引共享基线
    （--vsidian-content-*，见 #app 变量组），容器字体族与正文左留白同引
-   共享基线——两模式正文基础排版由此统一。760px 限宽保留且块级居左
-   （margin: 0 0 0.75em，非居中），左缘始终 = 基线留白，不随窗口宽变化 */
+   共享基线——两模式正文基础排版由此统一。
+   #175 可读行宽改版（bug #174 修复）：--vsidian-reading-max-width 的
+   定义上移至 #app 层（与 live 双变量同址，设置内联落值的需要——阅读层
+   重复定义会遮蔽 #app 内联）；缺省 none = 铺满（原 760px 隐形限宽废止），
+   阅读块随可用宽度铺满并在限宽档水平居中（见下方块规则）。 */
 #app .vsidian-view-reading {
   --vsidian-reading-font-size: var(--font-text-size, var(--vsidian-content-font-size));
-  --vsidian-reading-max-width: var(--file-line-width, 760px);
   --vsidian-reading-line-height: var(--line-height-normal, var(--vsidian-content-line-height));
   --vsidian-reading-code-background: var(--code-background, var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12)));
   /* #53 起为 vsidian-main 的 flex 成员（顶栏高度扣减由 flex 分配，
@@ -2235,9 +2269,13 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   outline: none;
 }
 
+/* #175 可读行宽：块级 max-width 消费 + margin-inline auto 居中——铺满档
+   （max-width none）auto 无感（等宽即贴满）；限宽档块在容器内容区
+   （基线留白以内）水平居中，容器随侧栏开合收缩时居中实时重算（纯
+   CSS 布局，无 JS 参与）。 */
 #app .vsidian-view-reading .vsidian-reading-block {
   max-width: var(--vsidian-reading-max-width);
-  margin: 0 0 0.75em;
+  margin: 0 auto 0.75em;
 }
 
 /* 视口占位 spacer（#7 按需挂载）：屏外块的布局信息占位（高度 = 块高度表

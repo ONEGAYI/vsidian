@@ -43,7 +43,7 @@ function makeStorage(writes: Array<{ key: string; value: unknown }> = []): Setti
 }
 
 describe('快照读取', () => {
-  it('生产注册表（#34 起）：快照为定义默认值（七开关均开 + 语言 auto）', () => {
+  it('生产注册表（#34 起）：快照为定义默认值（七开关均开 + 语言 auto + 可读行宽 0）', () => {
     const svc = new SettingsService(makeStorage(), PRODUCTION_SETTING_DEFINITIONS)
     expect(svc.getSnapshot()).toEqual({
       'general.language': 'auto',
@@ -59,6 +59,7 @@ describe('快照读取', () => {
       'image.paste': true,
       'image.pasteLocation': 'same-dir',
       'image.pasteSubpath': 'assets',
+      'editor.readableLineWidth': 0,
     })
   })
 

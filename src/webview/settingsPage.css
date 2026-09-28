@@ -123,6 +123,12 @@ button:focus-visible, input:focus-visible {
  * select 先例（同 padding/圆角，行内等高）；颜色用 input 变量族（VSCode
  * 文本输入语义，与快捷键页搜索框同源），缺省回落 dropdown 值保持同观感 */
 .vsidian-settings-text { flex: none; width: 180px; max-width: 50%; margin: 0 3px; padding: 3px 6px; font: inherit; color: var(--vscode-input-foreground, inherit); background: var(--vscode-input-background, var(--vscode-dropdown-background, transparent)); border: 1px solid var(--vscode-input-border, var(--vscode-dropdown-border, var(--vscode-panel-border, #d9dde3))); border-radius: 2px; cursor: text; }
+/* #175 可读行宽滑块：range 控件 + 右侧值文本（0 档显示词「铺满」）。
+   accent-color 走主题焦点色（原生轨道渲染，与拨动开关同源的主题联动）；
+   值文本固定最小宽防拖动抖动，表格数字对齐 */
+.vsidian-settings-range-wrap { display: inline-flex; align-items: center; gap: 10px; flex: none; }
+.vsidian-settings-range { width: 150px; margin: 0 3px; accent-color: var(--vscode-focusBorder, #007fd4); }
+.vsidian-settings-range-value { min-width: 3.5em; text-align: right; color: var(--vscode-descriptionForeground, #666); font-variant-numeric: tabular-nums; }
 .vsidian-settings-item-located { outline: 1px solid var(--vscode-focusBorder, #007fd4); outline-offset: 8px; border-radius: 3px; }
 .vsidian-settings-status { min-height: 20px; margin: 0 0 14px; color: var(--vscode-descriptionForeground, #666); font-size: 12px; }
 .vsidian-settings-empty { color: var(--vscode-descriptionForeground, #666); padding: 24px 0; }
