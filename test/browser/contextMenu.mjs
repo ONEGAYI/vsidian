@@ -20,6 +20,7 @@ await build({ entryPoints: [path.join(root, 'test/browser/contextMenuFixture.ts'
 
 // 行号（0 基）：0 `---` 1 头区行 2 `---` 3 空行 4 H1 5 空行 6 段落 7 空行
 // 8 表格三行 11 空行 12 ```js 13 代码 14 ``` 15 空行 16 mermaid 三行
+// 19 空行 20 已有 id 段（行尾 ^keep1——场景 N 块 id 双形态断言的在场形态）
 const DOC = [
   '---',
   'title: 头区',
@@ -40,6 +41,8 @@ const DOC = [
   '```mermaid',
   'graph TD; A-->B;',
   '```',
+  '',
+  '已有 id 的段落 ^keep1',
 ].join('\n')
 
 // #94：菜单文案经 t() 取词（无岛回退键名会改变菜单测宽）——注入岛
@@ -524,6 +527,53 @@ try {
   await page.evaluate(() => window.post({ kind: 'contextMenu.test.menuClose' }))
   passed++
   console.log('[统一菜单回归][PASS] 键盘方向键导航：面内移动、进子级真实展开、退回、Enter 执行')
+
+  // ---- 场景 N：块 id 标记淡化绘制（#163 验收线，双形态 computed——自
+  // blockMenu.mjs 场景 I 迁回：右键菜单套件承载块 id 绘制证据） ----
+  await page.evaluate((t) => window.initContextMenu(t), DOC)
+  await page.waitForTimeout(80)
+  // 经统一菜单真实链路补写独立行 id（DOC 自带行尾 ^keep1——补写后双形态在场）
+  await line(6).click({ button: 'right', position: { x: 60, y: 6 } })
+  await page.locator('.vsidian-context-menu button[data-vsidian-command="copyBlockLink"]').click()
+  state = await page.evaluate(() => window.readMenu())
+  assert.ok(!state.menuExists, '前置：copyBlockLink 执行后菜单关闭')
+  const paints = await page.evaluate(() => window.readBlockIdPaint())
+  assert.ok(paints.length >= 2, `行尾与独立行双形态标记应各有淡化 span（实际 ${paints.length}）`)
+  const hasTail = paints.some((p) => /keep1/.test(p.text))
+  const hasStandalone = paints.some((p) => /^ \^[a-z0-9]{6}$|^\^[a-z0-9]{6}$/.test(p.text))
+  assert.ok(hasTail, `行尾形态标记应淡化（实际 ${JSON.stringify(paints.map((p) => p.text))}）`)
+  assert.ok(hasStandalone, `独立行形态标记应淡化（实际 ${JSON.stringify(paints.map((p) => p.text))}）`)
+  const alphaOf = (color) => {
+    const rgba = /rgba?\(([^)]+)\)/.exec(color)
+    if (rgba) {
+      const parts = rgba[1].split(',').map((p) => p.trim())
+      return parts.length > 3 ? Number(parts[3]) : 1
+    }
+    const css = /color\(srgb[^/]*\/\s*([\d.]+)\)/.exec(color)
+    return css ? Number(css[1]) : 1
+  }
+  const bodyColor = await page.evaluate(() =>
+    getComputedStyle(document.querySelector('.cm-line')).color)
+  for (const p of paints) {
+    assert.equal(p.display, 'inline', `淡化不得隐藏（${p.text}）`)
+    assert.ok(alphaOf(p.color) < alphaOf(bodyColor),
+      `标记色 alpha 应低于正文（${p.text}: ${p.color} vs ${bodyColor}）`)
+  }
+  // 自定义字体色适配：改动正文前景变量后标记色跟随（相对变换而非锚定固定色）
+  const beforeFg = paints[0].color
+  await page.addStyleTag({ content: ':root { --vscode-editor-foreground: #c01c1c; }' })
+  const repaints = await page.evaluate(() => window.readBlockIdPaint())
+  assert.notEqual(repaints[0].color, beforeFg,
+    `标记色应跟随正文前景变化（适配自定义字体色：${beforeFg} → ${repaints[0].color}）`)
+  // 阅读侧隐藏：标记不进阅读渲染（剥离在 markdown-it 解析前）
+  await page.evaluate(() => window.post({ kind: 'view.mode.set', mode: 'reading' }))
+  await page.waitForTimeout(60)
+  const readingText = await page.evaluate(() => window.readingText())
+  assert.ok(readingText.includes('已有 id 的段落'), '阅读侧正文保留')
+  assert.ok(!readingText.includes('keep1') && !readingText.includes('^'),
+    `阅读侧不应出现块 id 标记（实际片段 ${JSON.stringify(readingText.slice(-80))}）`)
+  passed++
+  console.log('[统一菜单回归][PASS] 块 id 双形态淡化 + 自定义字体色适配 + 阅读隐藏（迁移回归）')
 } finally {
   await browser.close()
 }

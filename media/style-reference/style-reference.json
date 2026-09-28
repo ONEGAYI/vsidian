@@ -623,7 +623,7 @@
       "verification": [
         "单元 liveBlockId：双形态标记区间发射契约",
         "单元 blockIdCssContract：淡化色规则钉住",
-        "浏览器 blockMenu：淡化 computed color 断言（双形态）"
+        "浏览器 contextMenu：淡化 computed color 断言（双形态 + 自定义字体色跟随 + 阅读隐藏；随 #183 菜单套件统一自 blockMenu 迁移）"
       ],
       "introduced": "#163 验收反馈（2026-09-28）"
     },
@@ -2609,7 +2609,7 @@
         "support": "none"
       },
       "verification": [
-        "浏览器 outlineMenu（含子菜单翻转矩阵）",
+        "浏览器 outlineMenu（含右置子菜单翻转矩阵：装配期全翻左 + 展开后右缘不溢出视口）",
         "集成 outline.test.contextMenu/menuClick 系列"
       ],
       "introduced": "#69（2026-09-25）"

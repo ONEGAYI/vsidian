@@ -117,6 +117,20 @@ Object.assign(window, {
   },
   controller,
   readMenu,
+  /** 块 id 淡化标记观测（#163 验收线：双形态 computed color 断言——
+   *  自 blockMenuFixture 迁移，绘制证据随菜单回归并入本套件） */
+  readBlockIdPaint() {
+    return Array.from(document.querySelectorAll<HTMLElement>('.vsidian-block-id')).map((el) => ({
+      text: el.textContent ?? '',
+      color: getComputedStyle(el).color,
+      display: getComputedStyle(el).display,
+    }))
+  },
+  /** 阅读容器文本（阅读隐藏断言：块 id 标记不进阅读渲染） */
+  readingText() {
+    const container = document.querySelector('.vsidian-view-reading')
+    return container ? container.textContent ?? '' : ''
+  },
   /** 宿主消息通道（测试钩子、剪贴板回包与真实点击同一处理器） */
   post(msg: Record<string, unknown>) {
     controller.handleHostMessage(msg)
