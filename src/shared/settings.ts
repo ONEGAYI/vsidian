@@ -171,8 +171,9 @@ export const SYMBOL_TAB_ESCAPE_DEFAULT = true
  * 非 0 值为列宽上限，内容自动避让右侧大纲栏收缩（min(设定宽, 可用宽)）
  * 并在主区水平居中、随侧栏开合动态跟随。应用层经 CSS 双变量落地：
  * --vsidian-reading-max-width（阅读）与 --vsidian-live-preview-max-width
- * （Live）——0 档产品不写内联变量（CSS 片段常规规则可分别定制两模式），
- * 非 0 档内联写两变量、设置优先（片段覆盖需 !important）。键与消费方
+ * （Live）——0 档产品不写内联变量（CSS 片段全层级常规规则可定制），
+ * 非 0 档内联写两变量：根级片段覆盖需 !important，按视图作用域声明的
+ * 后代级片段常规规则即生效（差异化路径）。键与消费方
  * （syncController 的应用器）成对导出，避免字面量漂移。
  */
 export const READABLE_LINE_WIDTH_KEY = 'editor.readableLineWidth'

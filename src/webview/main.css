@@ -1423,6 +1423,7 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
 #app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-table {
   margin: 0 0 12px;
   width: 100%;
+  box-sizing: border-box;
   border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
   border-radius: 6px;
   background: none;

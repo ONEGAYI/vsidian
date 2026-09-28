@@ -161,8 +161,8 @@ try {
     `表宽=${wideBlocks.tableW.toFixed(1)} 左缘=${wideBlocks.tableLeft.toFixed(1)}（列内居中）`)
   check('A7 代码块钳制进正文列（600）', wideBlocks.preW <= 610 && wideBlocks.preW > 0,
     `代码块宽=${wideBlocks.preW.toFixed(1)}`)
-  check('A7 frontmatter 卡钳制进正文列（600）', wideBlocks.fmW <= 610 && wideBlocks.fmW > 0,
-    `FM 表宽=${wideBlocks.fmW.toFixed(1)}`)
+  check('A7 frontmatter 卡钳制进正文列（600）', wideBlocks.fmW <= 601 && wideBlocks.fmW > 0,
+    `FM 表宽=${wideBlocks.fmW.toFixed(1)}（border-box 后不超列宽）`)
   check('A7 Mermaid 块钳制进正文列（600）', wideBlocks.mermaidW <= 610 && wideBlocks.mermaidW > 0,
     `Mermaid 块宽=${wideBlocks.mermaidW.toFixed(1)}`)
   await page.evaluate(() => window.setRwSettings({ 'editor.readableLineWidth': 0 }))
