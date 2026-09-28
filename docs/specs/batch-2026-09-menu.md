@@ -33,12 +33,12 @@
 
 | 工单 | 主题 | 规格 | 类型 |
 |---|---|---|---|
-| （开票后回填） | 统一右键菜单内核与基建 | [context-menu.md](context-menu.md) 全文 | 基建，先行 |
-| （开票后回填） | 正文场景菜单内容全量接线 | 同上「菜单结构」节 | 内容 |
-| （开票后回填） | 菜单图标 AI 生成（Codex 移交） | 同上「图标」节 | 资产 |
-| （开票后回填） | 表格场景差异化菜单 | 同上「安全降级矩阵」+ 票位 | 票位，待切片 |
-| （开票后回填） | 图形块场景差异化菜单 | 同上 | 票位，待切片 |
-| （开票后回填） | 链接场景差异化菜单 | 同上 | 票位，待切片 |
+| [#183](https://github.com/ONEGAYI/vsidian/issues/183) | 统一右键菜单内核与基建（含剪贴板四项、blockMenu 退役、outlineMenu 迁移与溢出修复） | [context-menu.md](context-menu.md) 全文 | 基建，先行 |
+| [#184](https://github.com/ONEGAYI/vsidian/issues/184) | 正文场景菜单内容全量接线 | 同上「菜单结构」节 | 内容 |
+| [#185](https://github.com/ONEGAYI/vsidian/issues/185) | 菜单图标 AI 生成（Codex 移交，14 枚） | 同上「图标」节 | 资产 |
+| [#186](https://github.com/ONEGAYI/vsidian/issues/186) | 表格场景差异化菜单 | 同上「安全降级矩阵」+ 票位 | 票位，待切片 |
+| [#187](https://github.com/ONEGAYI/vsidian/issues/187) | 图形块场景差异化菜单 | 同上 | 票位，待切片 |
+| [#188](https://github.com/ONEGAYI/vsidian/issues/188) | 链接场景差异化菜单 | 同上 | 票位，待切片 |
 
 实施分支按仓库惯例 `impl/<编号>-<slug>`，基建票与内容票可融合实施；规格 PR 合入 main 后为可实施票补 `ready-for-agent` 标签。
 
