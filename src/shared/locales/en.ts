@@ -430,6 +430,10 @@ export const en = {
   'command.ui.outlineReset.title': 'Reset outline',
   'command.ui.outlineCollapseAll.title': 'Collapse all outline headings',
   'command.ui.outlineExpandAll.title': 'Expand all outline headings',
+
+  // ---- #160 普通链接锚点定位（host 通知）----
+  'host.linkAnchorMissing':
+    'Opened the document targeted by {href}, but the heading "{heading}" was not found (heading matching: trimmed, whitespace-collapsed, case-insensitive ATX headings)',
 } as const satisfies Record<string, string>
 
 /** 字典键：点分扁平键，以本包为类型基准（编译期检查 t() 取词键） */

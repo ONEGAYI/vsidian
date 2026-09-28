@@ -396,4 +396,8 @@ export const zhCn: Record<MessageKey, string> = {
   'command.ui.outlineReset.title': '重置大纲',
   'command.ui.outlineCollapseAll.title': '折叠全部大纲',
   'command.ui.outlineExpandAll.title': '展开全部大纲',
+
+  // ---- #160 普通链接锚点定位（host 通知）----
+  'host.linkAnchorMissing':
+    '已打开 {href} 指向的文档，但未找到标题「{heading}」（标题匹配：trim + 空白折叠 + 大小写不敏感的 ATX 标题）',
 }

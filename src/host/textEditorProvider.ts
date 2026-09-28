@@ -122,7 +122,7 @@ const diagramExportTestLog = new Map<string, DiagramExportPayload[]>()
 /** 链接跳转执行日志（#10 测试钩子观测：VSIDIAN_TEST_HOOKS 下集成测试断言
  *  宿主收到的跳转意图与处置结果） */
 export interface LinkLogEntry {
-  kind: 'external' | 'doc' | 'blocked' | 'not-found'
+  kind: 'external' | 'doc' | 'anchor' | 'blocked' | 'not-found'
   href: string
   /** blocked 的原因码 */
   reason?: string
@@ -130,6 +130,12 @@ export interface LinkLogEntry {
   scheme?: string
   /** doc 的实际目标路径 */
   path?: string
+  /** #160 doc/anchor 的锚点目标（容错解码后原文） */
+  fragment?: string
+  /** #160 doc/anchor 的定位方式：custom-panel=本扩展面板挂载定位；
+   *  text-editor=文本编辑器 selection reveal；none=无定位（无锚点、
+   *  `#^` 块引用定位器缺席降级或目标标题缺失） */
+  locate?: 'custom-panel' | 'text-editor' | 'none'
 }
 
 /** 双链跳转执行日志（#11；与 LinkLogEntry 共用 linkLog 通道） */
@@ -793,7 +799,12 @@ export function createTextEditorProvider(
       // ---- #10 链接跳转与图片资源执行（面板端口注入；URI 解析在宿主侧） ----
       const linkCtx = linkContextOf(document)
       const openLink = (intent: { href: string; srcStart: number; srcEnd: number }): void => {
-        void executeLinkIntent(document, linkCtx, intent, entry.linkLog)
+        // #160 锚点落位的面板双路依赖（会话表 + 就绪等待）经端口注入：
+        // executeLinkIntent 保持模块级（与 vscode 层纯函数分工一致）
+        void executeLinkIntent(document, linkCtx, intent, entry.linkLog, {
+          findEntry: (uri) => sessions.get(uri.toString()),
+          waitForReadyPanel,
+        })
       }
       // #11 双链跳转执行端口（按需 findFiles 解析 + 打开/定位/反馈）
       const openWikilink = (intent: { target: string; srcStart: number; srcEnd: number }): void => {
@@ -1720,15 +1731,44 @@ function blockedLinkMessage(
 }
 
 /**
- * 链接跳转意图执行（#10）：分类 → external 经 env.openExternal 外开；
- * doc 按候选探测存在性（精确优先、无扩展名补 .md）后以文本编辑器打开；
- * blocked/not-found 给用户可见反馈。全程只读：不触碰 TextDocument。
+ * #160 锚点落位的面板双路依赖：executeLinkIntent 是模块级函数，会话表与
+ * 面板就绪等待在 provider 闭包内——经此端口注入（与 executeWikilinkIntent
+ * 的闭包内直取同一份状态，不复制）
+ */
+interface LinkAnchorPort {
+  /** 目标 URI 对应的会话条目（已是本扩展面板时非空） */
+  findEntry: (uri: vscode.Uri) => SessionEntry | undefined
+  /** 目标面板就绪等待（隐藏面板重载场景），返回可投递面板 sessionId */
+  waitForReadyPanel: (entry: SessionEntry) => Promise<string | undefined>
+}
+
+/**
+ * #160 fragment → 文档内定位区间（宿主系坐标，getText 保留 \r\n）：
+ * 标题 fragment 复用 #11 的 findHeadingOffset（与双链锚点同源比较口径）；
+ * `#^块id` 的块定位器由并行票 #159 交付，本票降级为打开不定位
+ * （TODO(#159)，合并后接通共享定位器）。调用方以 isBlockIdFragment 区分
+ * 「降级」与「标题未命中」——后者须给用户可见反馈。
+ */
+function isBlockIdFragment(fragment: string): boolean {
+  return fragment.startsWith('^')
+}
+
+/**
+ * 链接跳转意图执行（#10；#160 补锚点定位）：分类 → external 经
+ * env.openExternal 外开（URL 含 `#` 原样外开——网页锚点语义不接管）；
+ * anchor（`#frag`）页内定位当前文档；doc 按候选探测存在性（精确优先、
+ * 无扩展名补 .md）后打开并按 fragment 定位；blocked/not-found 给用户
+ * 可见反馈。定位双路径与 #11 双链跳转同款：目标已是本扩展面板 → reveal
+ * 面板后 view.locate（LF 偏移经 NewlineCoordinator 转换）；否则文本
+ * 编辑器 selection reveal（1.86 API 面）。全程只读：不触碰 TextDocument
+ * 写路径、不建索引、不自动创建文件。
  */
 async function executeLinkIntent(
   document: vscode.TextDocument,
   ctx: LinkContext,
   intent: { href: string; srcStart: number; srcEnd: number },
   log: Array<LinkLogEntry | WikilinkLogEntry>,
+  anchors: LinkAnchorPort,
 ): Promise<void> {
   const pushLog = (entry: LinkLogEntry): void => {
     log.push(entry)
@@ -1755,6 +1795,28 @@ async function executeLinkIntent(
     void vscode.window.showWarningMessage(blockedLinkMessage(target))
     return
   }
+  if (target.kind === 'anchor') {
+    // #160 页内锚点：目标即当前文档（意图源面板），不查文件系统。
+    // `#^` 前缀为块引用（#159 交付定位器），先降级为仅显面板不定位
+    const blockPending = isBlockIdFragment(target.fragment)
+    const offset = blockPending
+      ? null
+      : findHeadingOffset(document.getText(), target.fragment)
+    const entry = anchors.findEntry(document.uri)
+    pushLog({
+      kind: 'anchor',
+      href: intent.href,
+      fragment: target.fragment,
+      locate: offset ? (entry ? 'custom-panel' : 'text-editor') : 'none',
+    })
+    await revealLinkAnchor(anchors, entry, document.uri, document, offset)
+    if (!blockPending && offset === null) {
+      void vscode.window.showWarningMessage(
+        t('host.linkAnchorMissing', { href: intent.href, heading: target.fragment }),
+      )
+    }
+    return
+  }
   for (const fsPath of target.candidates) {
     const uri = vscode.Uri.file(fsPath)
     try {
@@ -1762,16 +1824,69 @@ async function executeLinkIntent(
     } catch {
       continue
     }
-    pushLog({ kind: 'doc', href: intent.href, path: fsPath })
-    const doc = await vscode.workspace.openTextDocument(uri)
-    await vscode.window.showTextDocument(doc)
+    // openTextDocument 只装载不显示；fragment 定位区间与日志先于打开动作
+    // （文本编辑器打开会替换源面板，事后无从观测——与 #11 同口径）
+    const targetDoc = await vscode.workspace.openTextDocument(uri)
+    const blockPending = target.fragment !== null && isBlockIdFragment(target.fragment)
+    const offset =
+      target.fragment !== null && !blockPending
+        ? findHeadingOffset(targetDoc.getText(), target.fragment)
+        : null
+    const entry = anchors.findEntry(uri)
+    pushLog({
+      kind: 'doc',
+      href: intent.href,
+      path: fsPath,
+      fragment: target.fragment ?? undefined,
+      locate: offset ? (entry ? 'custom-panel' : 'text-editor') : 'none',
+    })
+    await revealLinkAnchor(anchors, entry, uri, targetDoc, offset)
+    if (target.fragment !== null && !blockPending && offset === null) {
+      void vscode.window.showWarningMessage(
+        t('host.linkAnchorMissing', { href: intent.href, heading: target.fragment }),
+      )
+    }
     return
   }
   pushLog({ kind: 'not-found', href: intent.href })
   void vscode.window.showWarningMessage(
     t('host.linkNotFound', { href: intent.href }),
   )
-  void document // 意图源自本文档；名称留给后续 #11 锚点定位使用
+}
+
+/**
+ * #160 锚点落位双路（与 executeWikilinkIntent 同款）：目标已是本扩展
+ * 面板 → reveal 面板（vscode.openWith 对已开面板是重显）后 view.locate
+ * （reading 模式经 #14 块挂载定位，live 模式光标+滚动）；否则文本编辑器
+ * 打开，有定位区间时以标题行 selection reveal。offset 为宿主系坐标
+ * （positionAt 在宿主系内闭合）；面板分支发 view.locate 前经
+ * NewlineCoordinator 转 LF 系（webview 全程 LF 坐标，CRLF 按行数漂移）。
+ */
+async function revealLinkAnchor(
+  anchors: LinkAnchorPort,
+  entry: SessionEntry | undefined,
+  uri: vscode.Uri,
+  doc: vscode.TextDocument,
+  offset: { offset: number; end: number } | null,
+): Promise<void> {
+  if (entry) {
+    await vscode.commands.executeCommand('vscode.openWith', uri, VIEW_TYPE)
+    const sessionId = await anchors.waitForReadyPanel(entry)
+    if (offset && sessionId) {
+      const lfOffset = new NewlineCoordinator(doc.getText()).hostOffsetToLf(offset.offset)
+      entry.session.postToPanel(sessionId, { kind: 'view.locate', offset: lfOffset })
+    }
+    return
+  }
+  if (offset) {
+    const selection = new vscode.Range(
+      doc.positionAt(offset.offset),
+      doc.positionAt(offset.end),
+    )
+    await vscode.window.showTextDocument(doc, { selection })
+    return
+  }
+  await vscode.window.showTextDocument(doc)
 }
 
 /**
