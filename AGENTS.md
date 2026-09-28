@@ -85,7 +85,8 @@ vsidian/
 │   │   ├── 0004-stable-styling-contract.md       # 一期建立稳定样式入口
 │   │   ├── 0005-viewport-rendering.md            # 全文模型与视口渲染分离
 │   │   ├── 0006-rebrand-to-vsidian.md            # 统一更名为 vsidian 的映射记录
-│   │   └── 0007-css-snippet-env-isolation.md     # CSS 片段环境隔离决策记录（#131）
+│   │   ├── 0007-css-snippet-env-isolation.md     # CSS 片段环境隔离决策记录（#131）
+│   │   └── 0008-workspace-reference-index.md     # 工作区引用索引架构原则
 │   ├── agents/   # agent 操作约定
 │   │   ├── domain.md        # 领域文档读取与维护约定
 │   │   └── issue-tracker.md # GitHub Issues 操作约定
@@ -129,6 +130,7 @@ vsidian/
 │       ├── symbol-input.md                   # 符号输入与行内围栏扩展约定落档
 │       ├── table-interaction-rework.md       # 表格交互重做规格
 │       ├── toolbar-view-toggle.md            # 工具栏双态切换按钮规格
+│       ├── vault-index-backlinks.md          # 引用索引与反链实施规格
 │       └── viewport-width.md                 # 可读行宽与双模式列布局规格
 ├── esbuild.mjs            # esbuild 多产物构建脚本
 ├── LICENSE                # MIT 许可证全文
