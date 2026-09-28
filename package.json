@@ -310,6 +310,10 @@
         "command": "onegayi.vsidian.ui.outlineExpandAll",
         "title": "%command.ui.outlineExpandAll.title%",
         "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.ui.backlinksToggle",
+        "title": "%command.ui.backlinksToggle.title%"
       }
     ],
     "menus": {

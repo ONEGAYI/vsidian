@@ -69,6 +69,10 @@ export const UI_OPERATIONS = [
   { id: 'outlineReset', command: 'onegayi.vsidian.ui.outlineReset', titleKey: 'command.ui.outlineReset.title', mode: 'both', writes: false, defaults: [] },
   { id: 'outlineCollapseAll', command: 'onegayi.vsidian.ui.outlineCollapseAll', titleKey: 'command.ui.outlineCollapseAll.title', mode: 'both', writes: false, defaults: [] },
   { id: 'outlineExpandAll', command: 'onegayi.vsidian.ui.outlineExpandAll', titleKey: 'command.ui.outlineExpandAll.title', mode: 'both', writes: false, defaults: [] },
+  // #197 反链面板：双模式 UI 操作（面板在 Live/阅读两模式均可用，切换为
+  // 纯视图状态零写回）；默认不占键位——侧栏按钮与命令面板常驻入口，快捷键
+  // 留给用户按需绑定（评估记录见 docs/specs/keybindings.md）
+  { id: 'backlinksToggle', command: 'onegayi.vsidian.ui.backlinksToggle', titleKey: 'command.ui.backlinksToggle.title', mode: 'both', writes: false, defaults: [] },
 ] as const satisfies readonly KeybindingOperation[]
 export type UiOperationId = (typeof UI_OPERATIONS)[number]['id']
 export function isUiOperationId(value: unknown): value is UiOperationId {

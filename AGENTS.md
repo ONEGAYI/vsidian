@@ -218,6 +218,7 @@ vsidian/
 │   │   └── wikilink.ts           # 双链形态学单一事实源（#11）
 │   └── webview/     # webview 端实现
 │       ├── anchorFlash.ts            # 跳转目标高亮装饰状态
+│       ├── backlinkPanel.ts          # 反链面板 DOM 与四态渲染（#197）
 │       ├── blockIdStrip.ts           # 阅读渲染块标记剥离纯函数
 │       ├── blockMenu.ts              # 正文右键菜单与复制块链接
 │       ├── codeCardState.ts          # 卡片共享状态中立模块

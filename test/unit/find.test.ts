@@ -373,11 +373,12 @@ describe('只读契约：查找不修改文本、不产生出站变更', () => {
     expect(editRequestCount(h)).toBe(0)
     expect(after.text).toBe(baseline.text)
     expect(after.docLength).toBe(baseline.docLength)
-    // 除 mount 的 ready、诊断回报与 init 后的设置快照拉取（#33，只读）
-    // 外零出站（查找全程只读）
+    // 除 mount 的 ready、诊断回报与 init 后的只读拉取（#33 设置快照 /
+    // #91 快捷键 / #128 片段清单 / #197 反链快照）外零出站（查找全程只读）
     const kinds = new Set(h.sent.map((m) => m.kind))
     expect([...kinds].filter((k) => k !== 'view.state' && k !== 'ready' &&
-      k !== 'settings.get' && k !== 'keybindings.get' && k !== 'snippets.get')).toEqual([])
+      k !== 'settings.get' && k !== 'keybindings.get' && k !== 'snippets.get' &&
+      k !== 'backlinks.get')).toEqual([])
   })
 
   it('查找会话期间的宿主 undo 不受查找影响（无新历史条目产生）', () => {

@@ -369,7 +369,7 @@ const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   'link-image-wikilink': 7,
   'content-variables': 11,
   'content-limits': 11,
-  // chrome 域（55）
+  // chrome 域（57）
   math: 5,
   diagram: 4,
   'graphic-interact': 2,
@@ -379,6 +379,7 @@ const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   'toolbar-banner': 5,
   frontmatter: 5,
   'context-menu': 1,
+  backlinks: 2,
 }
 
 describe('styleContract 类目体系（#145）', () => {

@@ -597,6 +597,64 @@ export function createTextEditorProvider(
     }
   }
 
+  // ---- #197 反链面板：快照应答与条目跳转（面板级 UI 意图的执行体） ----
+
+  /** 反链快照（backlinks.get 应答与 onChange 广播共用）：结果形态与
+   *  backlinks.snapshot 协议一致（items 为空数组兜底） */
+  const sendBacklinksSnapshot = async (
+    entry: SessionEntry,
+    sessionId: string,
+    docUri: vscode.Uri,
+  ): Promise<void> => {
+    if (!vaultIndex) {
+      entry.session.postToPanel(sessionId, {
+        kind: 'backlinks.snapshot',
+        docUri: docUri.toString(),
+        state: 'error',
+        reason: 'no-workspace',
+        items: [],
+      })
+      return
+    }
+    const result = await vaultIndex.backlinksOf(docUri.fsPath)
+    entry.session.postToPanel(sessionId, {
+      kind: 'backlinks.snapshot',
+      docUri: docUri.toString(),
+      state: result.status,
+      updating: result.status === 'ready' ? result.updating : undefined,
+      reason: result.status === 'error' ? result.reason : undefined,
+      items: result.status === 'ready'
+        ? result.items.map((item) => ({
+          sourceRelPath: item.sourceRelPath,
+          sourceFsPath: item.sourceFsPath,
+          kind: item.kind,
+          anchor: item.anchor,
+          start: item.start,
+          end: item.end,
+          line: item.line,
+          snippet: item.snippet,
+        }))
+        : [],
+    })
+  }
+
+  /** 反链条目跳转：打开来源文档（Vsidian 面板）并定位到出链标记——
+   *  openWith 对已开面板是重显；offset 为来源正文 LF 偏移（宿主抽取侧
+   *  已归一），直接作 view.locate 输入（webview 全程 LF 坐标） */
+  const openBacklinkSource = async (sourceUri: string, offset: number): Promise<void> => {
+    let uri: vscode.Uri
+    try {
+      uri = vscode.Uri.parse(sourceUri)
+    } catch {
+      return
+    }
+    await vscode.commands.executeCommand('vscode.openWith', uri, VIEW_TYPE)
+    const ready = await waitForReadyPanel(uri)
+    if (ready) {
+      ready.entry.session.postToPanel(ready.sessionId, { kind: 'view.locate', offset })
+    }
+  }
+
   /**
    * 双链跳转执行（#11；#159 块引用定位与本文件锚点；#196 根内相对路径
    * 解析）：目标一律按来源文档相对路径解析（shared/vaultLink，docDir 基准、
@@ -906,6 +964,17 @@ export function createTextEditorProvider(
           void runViewSwitch(message.target, document.uri)
           return
         }
+        // #197 反链面板：面板级 UI 意图在 provider 层拦截（索引服务与跳转
+        // 执行都在 provider 域；session 对这两类消息显式 return 保持穷尽）
+        if (vaultIndex && isWebviewToHost(message) && message.kind === 'backlinks.get' &&
+          message.docUri === document.uri.toString()) {
+          void sendBacklinksSnapshot(entry, sessionId, document.uri)
+          return
+        }
+        if (isWebviewToHost(message) && message.kind === 'backlink.activate') {
+          void openBacklinkSource(message.sourceUri, message.offset)
+          return
+        }
         if (process.env.VSIDIAN_TEST_HOOKS === '1' && isWebviewToHost(message) &&
           message.kind === 'sync.test.close' && message.sessionId === sessionId &&
           message.docUri === document.uri.toString()) {
@@ -1087,6 +1156,23 @@ export function createTextEditorProvider(
       settings?.page.notifySnippetsChanged()
     })
     context.subscriptions.push({ dispose: () => offSnippets() })
+  }
+
+  // ---- #197 反链快照广播：索引模型变化（覆盖层更新/重扫/重建完成）→
+  //  全部 ready 面板各自文档的反链快照（面板按 docUri 匹配丢弃他文档快照；
+  //  notify 已在服务侧合并——覆盖层 500ms 去抖、重扫 800ms 去抖、快照提交
+  //  1.5s 合并，无逐键广播）----
+  if (vaultIndex) {
+    const offIndex = vaultIndex.onChange(() => {
+      for (const entry of sessions.values()) {
+        for (const panel of entry.session.getInfo().panels) {
+          if (panel.ready) {
+            void sendBacklinksSnapshot(entry, panel.sessionId, entry.doc.uri)
+          }
+        }
+      }
+    })
+    context.subscriptions.push({ dispose: () => offIndex() })
   }
 
   // ---- 三态视图切换（#38）：标题栏三命令（toReading/toSource/toLive）与

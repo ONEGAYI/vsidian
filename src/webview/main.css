@@ -775,6 +775,89 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   border-radius: 4px;
 }
 
+/* ---- #197 反链面板 ----
+   显隐唯一开关是侧栏容器的 vsidian-backlinks-active 类（与大纲面板同
+   模式，二者互斥——同域面板区域同一时刻只显示一个）：默认 display:none，
+   active 时 flex 列 + 纵向滚动（滚动成立前提与大纲面板同款：flex:1 +
+   min-height:0 钳制高度，overflow-y 才有滚动余量）。 */
+#app .vsidian-sidebar .vsidian-backlink-panel {
+  display: none;
+}
+
+#app .vsidian-sidebar.vsidian-backlinks-active .vsidian-backlink-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  gap: 2px;
+}
+
+/* 反链条目：来源行（文件:行号，弱化）+ 片段行（引用行文本，单行省略）；
+   按钮语义整行可点（无序列表外观重置），悬停跟随 VSCode 列表悬停色 */
+.vsidian-sidebar .vsidian-backlink-item {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 6px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.vsidian-sidebar .vsidian-backlink-item:hover,
+.vsidian-sidebar .vsidian-backlink-item:focus-visible {
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.14));
+  outline: none;
+}
+
+.vsidian-sidebar .vsidian-backlink-item .vsidian-backlink-item-source {
+  font-size: var(--vsidian-outline-font-size, 12px);
+  font-weight: 600;
+  opacity: 0.85;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vsidian-sidebar .vsidian-backlink-item .vsidian-backlink-item-snippet {
+  font-size: var(--vsidian-outline-font-size, 12px);
+  opacity: 0.75;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 更新中细条：索引重建中的弱化提示（ready + updating 时面板首行） */
+.vsidian-sidebar .vsidian-backlink-updating {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  font-size: var(--vsidian-outline-font-size, 12px);
+  opacity: 0.7;
+  border-bottom: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.2));
+  margin-bottom: 2px;
+}
+
+/* 状态占位（loading/empty/error 共用形态，文案随 locale 键变化） */
+.vsidian-sidebar .vsidian-backlink-placeholder {
+  opacity: 0.7;
+  padding: 8px 10px;
+  font-size: var(--vsidian-outline-font-size, 12px);
+}
+
+/* active 态的按钮高亮（与大纲按钮 active 态同模式，视觉指示当前面板） */
+#app .vsidian-sidebar.vsidian-backlinks-active .vsidian-sidebar-toolbar button.vsidian-backlinks-toggle {
+  background: var(--vscode-list-activeSelectionBackground, rgba(128, 128, 128, 0.2));
+}
+
+
 /* #99 层级对齐引导线：父级 chevron 中心的 1px 竖线，逐行线段连成整条
    包住子树（Obsidian 口径，实测亮色主题约 12% 黑）。颜色跟随 VSCode
    缩进引导变量（暗色主题自动适配）；span 是纯装饰——aria-hidden、
