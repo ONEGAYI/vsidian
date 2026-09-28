@@ -5,8 +5,8 @@
 // - 存储与 schema 完全归 Vsidian 自有链路：不使用 workspace.getConfiguration，
 //   不声明 contributes.configuration——设置项不出现在 VSCode 统一设置中心，
 //   界面入口只有扩展自己的设置页。
-// - 定义含键、类型、默认值；校验内建于类型（boolean 开关与 string 枚举
-//   （#93 i18n 语言设置型）；number 为后续扩展预留）。
+// - 定义含键、类型、默认值；校验内建于类型（boolean 开关、string 枚举
+//   （#93 i18n 语言设置型）、number 范围步进（#175 可读行宽滑块型））。
 // - 生产注册表初始为空：设置页据此渲染空状态，不展示不能生效的占位开关；
 //   后续工单接入实际设置项时在 PRODUCTION_SETTING_DEFINITIONS 追加。
 // - 值域语义：无效存量（类型不符）恢复默认值；未知键（历史遗留）忽略；
@@ -70,7 +70,26 @@ export interface StringEnumSettingDefinition extends SettingDefinitionBase {
   optionLabelKeys?: Readonly<Record<string, MessageKey>>
 }
 
-export type SettingDefinition = BooleanSettingDefinition | StringEnumSettingDefinition
+/**
+ * 数字设置项（#175「可读行宽」起启用，本文件头注的 number 预留兑现）：
+ * 范围与步进内建于类型——min/max/step 必为有限数、min ≤ max、step > 0、
+ * default 在 [min, max] 内；校验只管类型与范围，步进倍数不强制（滑块产出
+ * 步进值，手改存量允许任意范围内值）。0 是普通合法值——「0 = 铺满」的
+ * 领域语义归各消费方解释（见 READABLE_LINE_WIDTH_* 注释），schema 不特判。
+ * 设置页渲染为滑块控件（range），值文本显示消费方自定（如铺满档显示词）。
+ */
+export interface NumberSettingDefinition extends SettingDefinitionBase {
+  type: 'number'
+  default: number
+  /** 值域下限（含） */
+  min: number
+  /** 值域上限（含） */
+  max: number
+  /** 步进（正有限数；显示与滑块粒度，不作为存量校验条件） */
+  step: number
+}
+
+export type SettingDefinition = BooleanSettingDefinition | StringEnumSettingDefinition | NumberSettingDefinition
 
 /**
  * #34「显示行号」：实时预览侧 CM6 行号栏开关。键与消费方常量成对导出——
@@ -137,6 +156,26 @@ export const SYMBOL_SELECTION_WRAP_DEFAULT = true
  */
 export const SYMBOL_TAB_ESCAPE_KEY = 'editor.symbolTabEscape'
 export const SYMBOL_TAB_ESCAPE_DEFAULT = true
+
+/**
+ * #175「可读行宽」：正文内容列的最大宽度（px），Live 与阅读两模式共用
+ * 一份值。**0 = 铺满**（不限宽，默认档）——两模式内容铺满主区可用宽度；
+ * 非 0 值为列宽上限，内容自动避让右侧大纲栏收缩（min(设定宽, 可用宽)）
+ * 并在主区水平居中、随侧栏开合动态跟随。应用层经 CSS 双变量落地：
+ * --vsidian-reading-max-width（阅读）与 --vsidian-live-preview-max-width
+ * （Live）——0 档产品不写内联变量（CSS 片段常规规则可分别定制两模式），
+ * 非 0 档内联写两变量、设置优先（片段覆盖需 !important）。键与消费方
+ * （syncController 的应用器）成对导出，避免字面量漂移。
+ */
+export const READABLE_LINE_WIDTH_KEY = 'editor.readableLineWidth'
+/** 默认 0 = 铺满（bug #174 修复语义：默认无限宽，阅读与 Live 默认一致） */
+export const READABLE_LINE_WIDTH_DEFAULT = 0
+/** 值域下限：0 即铺满档，不另设独立开关 */
+export const READABLE_LINE_WIDTH_MIN = 0
+/** 值域上限：1600px（更宽需求走铺满档） */
+export const READABLE_LINE_WIDTH_MAX = 1600
+/** 步进 20px（滑块粒度） */
+export const READABLE_LINE_WIDTH_STEP = 20
 
 /**
  * 语言设置键（#93 预留，#96 注册定义与「常规」分区）：值域 auto | zh-cn |
@@ -231,6 +270,16 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     titleKey: 'setting.symbolTabEscape.title',
     descriptionKey: 'setting.symbolTabEscape.description',
   },
+  {
+    key: READABLE_LINE_WIDTH_KEY,
+    type: 'number',
+    default: READABLE_LINE_WIDTH_DEFAULT,
+    min: READABLE_LINE_WIDTH_MIN,
+    max: READABLE_LINE_WIDTH_MAX,
+    step: READABLE_LINE_WIDTH_STEP,
+    titleKey: 'setting.readableLineWidth.title',
+    descriptionKey: 'setting.readableLineWidth.description',
+  },
 ]
 
 function isObject(v: unknown): v is Record<string, unknown> {
@@ -317,6 +366,16 @@ export function isSettingDefinition(v: unknown): v is SettingDefinition {
   if (v.type === 'boolean') {
     return typeof v.default === 'boolean'
   }
+  if (v.type === 'number') {
+    // #175 number 型：min/max/step 有限、min ≤ max、step 正数、default 在范围内
+    return (
+      typeof v.default === 'number' && Number.isFinite(v.default) &&
+      typeof v.min === 'number' && Number.isFinite(v.min) &&
+      typeof v.max === 'number' && Number.isFinite(v.max) &&
+      typeof v.step === 'number' && Number.isFinite(v.step) &&
+      v.min <= v.max && v.step > 0 && v.default >= v.min && v.default <= v.max
+    )
+  }
   if (v.type === 'string') {
     // #93 string 枚举：值域非空、全字符串、无重复，默认值在值域内
     if (
@@ -348,10 +407,13 @@ export function isSettingDefinition(v: unknown): v is SettingDefinition {
   return false
 }
 
-/** 值是否符合定义的类型（boolean 布尔；string 枚举值域内字符串） */
+/** 值是否符合定义的类型（boolean 布尔；string 枚举值域内字符串；number 范围内有限数） */
 function valueMatchesType(def: SettingDefinition, value: unknown): boolean {
   if (def.type === 'boolean') {
     return typeof value === 'boolean'
+  }
+  if (def.type === 'number') {
+    return typeof value === 'number' && Number.isFinite(value) && value >= def.min && value <= def.max
   }
   return typeof value === 'string' && def.enum.includes(value)
 }

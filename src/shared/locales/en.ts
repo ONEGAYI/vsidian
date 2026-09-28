@@ -79,6 +79,9 @@ export const en = {
   // ---- setting.（设置项定义 title/description，经 titleKey/descriptionKey 取词）----
   'setting.editorLineNumbers.title': 'Show line numbers',
   'setting.editorLineNumbers.description': 'Show source file line numbers in the left gutter of the live preview (not shown in reading view).',
+  'setting.readableLineWidth.title': 'Readable line width',
+  'setting.readableLineWidth.description': 'Maximum width of the content column in the live preview and reading view: 0 fills the available width; a specific value caps the column, which then centers in the editor area and yields to the outline sidebar when space is tight.',
+  'setting.readableLineWidthFill': 'Fill',
   'setting.codeblockCard.title': 'Code block card',
   'setting.codeblockCard.description': 'Collapse a fenced code block into a card when the cursor leaves it: hide the fence markers and show a language header bar. Turn off to restore the plain source fence look.',
   'setting.codeblockLineNumbers.title': 'Line numbers inside cards',
