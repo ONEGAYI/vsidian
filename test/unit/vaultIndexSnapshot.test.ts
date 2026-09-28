@@ -7,6 +7,7 @@ import {
   buildBacklinkIndex,
   loadSnapshot,
   planSnapshotCommit,
+  planSnapshotCommitChunked,
   rootKeyOf,
   stableHash,
   normalizeRootUri,
@@ -320,6 +321,57 @@ describe('loadSnapshot 损坏与回退', () => {
 
   it('无任何快照 → null', async () => {
     expect(await loadSnapshot(makePort(), BASE)).toBeNull()
+  })
+})
+
+describe('planSnapshotCommitChunked 分批提交（ADR-0008 片间让出接线，#197）', () => {
+  it('产物与同步版逐字段一致（一致性钉住——同一实现路径，仅片间插入让出）', async () => {
+    const model = modelOf(['a.md', 'b.md', 'c.md', 'd.md'], 3)
+    const opts = { baseDir: BASE, shardCount: 3, existingDirs: ['gen-000001-old'] }
+    const sync = planSnapshotCommit(model, opts)
+    const chunked = await planSnapshotCommitChunked(model, opts, async () => {})
+    expect(chunked).toEqual(sync)
+  })
+
+  it('每片序列化后让出事件循环（yield 次数 = 实写片数；继承片不重算不计数）', async () => {
+    const model = modelOf(['a.md', 'b.md'], 1)
+    const opts = { baseDir: BASE, shardCount: 2 }
+    const plan = await planSnapshotCommitChunked(model, opts, async () => {})
+    expect(plan.stats.writtenShards).toBe(2)
+    let yields = 0
+    await planSnapshotCommitChunked(model, opts, async () => {
+      yields += 1
+    })
+    expect(yields).toBe(2)
+    // 增量：未变片继承，只对变化片让出
+    const port = makePort()
+    await applyWrites(port, plan)
+    const changed = modelOf(['a.md', 'b.md', 'c.md'], 1)
+    const checksums = new Map<number, string>()
+    for (const [k, v] of port.files) {
+      const m = k.match(new RegExp(`^${BASE}/${plan.dirName}/shard-(\\d+)\\.json$`))
+      if (m) checksums.set(Number(m[1]), stableHash(v))
+    }
+    let incYields = 0
+    await planSnapshotCommitChunked(changed, {
+      baseDir: BASE, shardCount: 2,
+      prev: { generation: plan.generation, dirName: plan.dirName, shardChecksums: checksums },
+    }, async () => {
+      incYields += 1
+    })
+    expect(incYields).toBeGreaterThanOrEqual(1)
+    expect(incYields).toBeLessThan(3)
+  })
+
+  it('写回端口后可正常恢复（与同步版同一崩溃安全契约）', async () => {
+    const port = makePort()
+    const model = modelOf(['a.md', 'b.md'], 2)
+    const plan = await planSnapshotCommitChunked(model, { baseDir: BASE, shardCount: 2 }, async () => {})
+    for (const w of plan.writes) port.files.set(w.path, w.content)
+    const loaded = await loadSnapshot(port, BASE)
+    expect(loaded).not.toBeNull()
+    expect(loaded!.meta.generation).toBe(plan.generation)
+    expect(loaded!.model.files.size).toBe(2)
   })
 })
 
