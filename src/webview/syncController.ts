@@ -166,6 +166,7 @@ import {
   PLAIN_MENU_LINE,
   buildContextMenuModel,
   contextMenuBlockTargetAt,
+  contextMenuHandlerForCommand,
   contextMenuKeybindingHints,
   contextMenuZoneAt,
   menuLineStructureOf,
@@ -4579,9 +4580,11 @@ export class WebviewSyncController {
     this.contextMenuDoc = null
   }
 
-  /** 菜单命令分派：锚点过期防御后按命令执行——格式操作复用快速操作条同一
-   *  执行路径（runFormatOperation）；块链接两项沿用 blockMenu 迁入实现；
-   *  剪贴板四项见模块头 */
+  /** 菜单命令分派：锚点过期防御后按命令执行——先查运行期 handler（覆写
+   *  语义「可换 handler」：register/override 带 handler 即替换执行体），未
+   *  命中再走内置白名单：格式操作复用快速操作条同一执行路径
+   *  （runFormatOperation）；块链接两项沿用 blockMenu 迁入实现；剪贴板
+   *  四项见模块头。无 handler 非白名单命令 console.warn（不再静默） */
   private runContextMenuCommand(command: string): void {
     const target = this.contextMenuTarget
     const view = this.view
@@ -4596,6 +4599,12 @@ export class WebviewSyncController {
       return
     }
     this.closeContextMenu()
+    // 运行期 handler 优先（含覆写内置 id——替换内置执行体）
+    const handler = contextMenuHandlerForCommand(command)
+    if (handler !== undefined) {
+      handler()
+      return
+    }
     if (command === 'copyHeadingLink') {
       if (target !== null && target.heading !== null) {
         this.copyHeadingLink(target.heading.text)
@@ -4641,8 +4650,9 @@ export class WebviewSyncController {
       this.runFormatOperation(command)
       return
     }
-    // 运行期注册的未知命令：静默忽略（内核渲染开放注册，本控制器无对应
-    // 执行器——扩展方应在描述符外自管命令执行）
+    // 运行期注册且无 handler、又不在白名单：开发期告警（注册方应在描述符
+    // 带 handler 或对齐内置命令名；不再静默忽略）
+    console.warn(`[vsidian] 右键菜单命令无执行器：${command}（注册项未带 handler 且不在内置白名单）`)
   }
 
   /** 剪切/复制：选区文本经宿主剪贴板桥直写（多行 EOL 归一在会话层）；

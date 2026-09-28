@@ -10,6 +10,11 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/syncController'
 import type { WebviewToHost } from '../../src/shared/protocol'
+import {
+  __resetContextMenuRegistryForTest,
+  overrideContextMenuItem,
+  registerContextMenuItem,
+} from '../../src/shared/contextMenu'
 
 if (typeof Range !== 'undefined' && Range.prototype.getClientRects === undefined) {
   ;(Range.prototype as unknown as { getClientRects(): DOMRectList }).getClientRects =
@@ -27,6 +32,7 @@ afterEach(() => {
   for (const parent of mountedParents.splice(0)) {
     parent.remove()
   }
+  __resetContextMenuRegistryForTest()
 })
 
 const DOC_URI = 'file:///d%3A/notes/block.md'
@@ -413,6 +419,64 @@ describe('格式命令与插入表格（复用快速操作条执行路径）', (
     c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'insertTable' })
     expect(c.getView()!.state.doc.toString()).toContain('| --- | --- |')
     expect(h.sent.filter((m) => m.kind === 'edit.request')).toHaveLength(1)
+  })
+})
+
+describe('handler 承载（覆写语义：分派先查运行期 handler，未命中走内置白名单）', () => {
+  it('注册带 handler 的新命令：菜单渲染该项且 menuClick 执行 handler（零内置出站）', () => {
+    const h = makeBridge()
+    const { c } = mountPanel(h)
+    let calls = 0
+    const cleanup = registerContextMenuItem({
+      id: 'customTool', group: 'link', order: 99,
+      command: 'customTool', labelKey: 'contextMenu.copy',
+      handler: () => { calls++ },
+    }, 'test-extension')
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: POS.para })
+    expect(topCommands(), '注册项应渲染进菜单').toContain('customTool')
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'customTool' })
+    expect(calls, 'handler 应被执行').toBe(1)
+    expect(h.sent.filter((m) => m.kind === 'edit.request' || m.kind === 'clipboard.write'),
+      '运行期命令不走内置编辑/剪贴板出站').toHaveLength(0)
+    expect(menuEl(), '命令执行后菜单关闭').toBeNull()
+    cleanup()
+    __resetContextMenuRegistryForTest()
+  })
+
+  it('覆写内置 id 的 handler：替换执行体（内置格式路径不触发）', () => {
+    const h = makeBridge()
+    const { c } = mountPanel(h)
+    const view = c.getView()!
+    view.dispatch({ selection: { anchor: POS.para, head: POS.para + 3 } })
+    let calls = 0
+    expect(overrideContextMenuItem('bold', { handler: () => { calls++ } }, 'ext-a')).toBe(true)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: POS.para })
+    c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'bold' })
+    expect(calls, '覆写 handler 替换内置执行体').toBe(1)
+    expect(c.getView()!.state.doc.toString(), '内置格式路径不触发（无 ** 写回）').not.toContain('**段落甲**')
+    expect(h.sent.filter((m) => m.kind === 'edit.request')).toHaveLength(0)
+    __resetContextMenuRegistryForTest()
+  })
+
+  it('无 handler 非白名单命令：console.warn 不抛错（不再静默）', () => {
+    const h = makeBridge()
+    const { c } = mountPanel(h)
+    registerContextMenuItem({
+      id: 'ghostTool', group: 'link', order: 98,
+      command: 'ghostTool', labelKey: 'contextMenu.copy',
+    }, 'test-extension')
+    const warns: string[] = []
+    const originalWarn = console.warn
+    console.warn = (...args: unknown[]) => { warns.push(String(args[0])) }
+    try {
+      c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: POS.para })
+      c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'ghostTool' })
+    } finally {
+      console.warn = originalWarn
+    }
+    expect(warns.some((w) => w.includes('ghostTool')), '应 warn 命令名（开发期可见）').toBe(true)
+    expect(menuEl(), '未知命令路径也应关闭菜单').toBeNull()
+    __resetContextMenuRegistryForTest()
   })
 })
 

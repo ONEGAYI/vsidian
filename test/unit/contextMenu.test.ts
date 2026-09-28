@@ -18,6 +18,7 @@ import {
   buildContextMenuModel,
   buildMenuModel,
   contextMenuBlockTargetAt,
+  contextMenuHandlerForCommand,
   contextMenuItemSources,
   contextMenuKeybindingHints,
   contextMenuRegistrySnapshot,
@@ -175,6 +176,53 @@ describe('覆写层语义（运行期注册表，内置 = 第一个注册者）'
   it('override 不存在的 id 返回 false（内置项不可删、不可伪造父级覆写）', () => {
     expect(overrideContextMenuItem('nonexistent', { labelKey: 'contextMenu.copy' })).toBe(false)
     expect(hideContextMenuItem('nonexistent')).toBe(false)
+  })
+})
+
+describe('handler 承载（覆写语义：可换执行体；分派先查运行期 handler）', () => {
+  it('内置表保持纯数据：全部条目无 handler 字段', () => {
+    for (const def of contextMenuRegistrySnapshot()) {
+      expect(def.handler, `${def.id}：内置 as const 表不写 handler（执行体在分派器）`).toBeUndefined()
+    }
+    expect(contextMenuHandlerForCommand('bold')).toBeUndefined()
+    expect(contextMenuHandlerForCommand('selectAll')).toBeUndefined()
+  })
+
+  it('register 带 handler 的新命令：按 command 命中且可执行；cleanup 后回落', () => {
+    let calls = 0
+    const cleanup = registerContextMenuItem({
+      id: 'customRun', group: 'link', order: 99,
+      command: 'customRun', labelKey: 'contextMenu.selectAll',
+      handler: () => { calls++ },
+    }, 'test-extension')
+    const handler = contextMenuHandlerForCommand('customRun')
+    expect(typeof handler).toBe('function')
+    handler!()
+    expect(calls).toBe(1)
+    cleanup()
+    expect(contextMenuHandlerForCommand('customRun'), 'cleanup 后回落无 handler').toBeUndefined()
+  })
+
+  it('override 内置 id 带 handler：替换执行体（原 command 通道让位）', () => {
+    let calls = 0
+    expect(overrideContextMenuItem('bold', { handler: () => { calls++ } }, 'ext-a')).toBe(true)
+    const handler = contextMenuHandlerForCommand('bold')
+    handler!()
+    expect(calls, '覆写 handler 替换内置执行体').toBe(1)
+    __resetContextMenuRegistryForTest()
+    expect(contextMenuHandlerForCommand('bold'), '还原后回内置（无 handler）').toBeUndefined()
+  })
+
+  it('handler 查找按 command 字段跨条目（id 与 command 不同名的注册项同样命中）', () => {
+    let calls = 0
+    registerContextMenuItem({
+      id: 'myTool', group: 'link', order: 98,
+      command: 'tool.command', labelKey: 'contextMenu.copy',
+      handler: () => { calls++ },
+    })
+    contextMenuHandlerForCommand('tool.command')!()
+    expect(calls).toBe(1)
+    expect(contextMenuHandlerForCommand('myTool'), '查找键是 command 不是 id').toBeUndefined()
   })
 })
 

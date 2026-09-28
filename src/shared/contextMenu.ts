@@ -110,6 +110,10 @@ export interface MenuItemDescriptor {
   danger?: boolean
   /** 覆写层专用：隐藏不删（内置项保底可用性的载体） */
   hidden?: boolean
+  /** 运行期执行体（覆写语义「可换 handler」的载体）：分派器先查运行期
+   *  handler，未命中再走内置白名单。内置 as const 表保持纯数据不写此
+   *  字段——内置执行体在控制器分派器（formatOperations 路由 + 显式分支） */
+  handler?: () => void
 }
 
 /** 簇序（组间分隔线的落点 = 组边界；渲染按此序产出组） */
@@ -292,6 +296,19 @@ export function contextMenuItemSources(): Readonly<Record<string, string>> {
 export function contextMenuRegistrySnapshot(): readonly MenuItemDescriptor[] {
   seedBuiltin()
   return [...registry.values()].map((entry) => entry.descriptor)
+}
+
+/** 按命令标识查运行期 handler（查找键是 command 字段而非条目 id）：命中
+ *  返回执行体，无 handler 或无条目返回 undefined——分派器先查此表，未命中
+ *  再走内置白名单（覆写内置 id 的 handler 即替换内置执行体） */
+export function contextMenuHandlerForCommand(command: string): (() => void) | undefined {
+  seedBuiltin()
+  for (const entry of registry.values()) {
+    if (entry.descriptor.command === command && entry.descriptor.handler !== undefined) {
+      return entry.descriptor.handler
+    }
+  }
+  return undefined
 }
 
 /** 测试钩子：还原注册表到内置态 */
