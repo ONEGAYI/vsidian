@@ -1866,6 +1866,12 @@ async function executeLinkIntent(
       log.shift()
     }
   }
+  // fragment 定位失败的用户提示（anchor 与 doc 两分支共用）：块引用缺失
+  // 复用双链的块 id 词条、标题缺失用链接锚点词条——两分支语义一致不分写
+  const fragmentMissingMessage = (fragment: string): string =>
+    isBlockIdFragment(fragment)
+      ? t('host.wikilinkBlockMissing', { link: intent.href, blockId: fragment.slice(1) })
+      : t('host.linkAnchorMissing', { href: intent.href, heading: fragment })
   const target = classifyLinkTarget(intent.href, ctx)
   if (target.kind === 'external') {
     pushLog({ kind: 'external', href: intent.href })
@@ -1902,9 +1908,7 @@ async function executeLinkIntent(
     })
     await revealLinkAnchor(anchors, entry, document.uri, document, offset)
     if (offset === null) {
-      void vscode.window.showWarningMessage(isBlock
-        ? t('host.wikilinkBlockMissing', { link: intent.href, blockId: target.fragment.slice(1) })
-        : t('host.linkAnchorMissing', { href: intent.href, heading: target.fragment }))
+      void vscode.window.showWarningMessage(fragmentMissingMessage(target.fragment))
     }
     return
   }
@@ -1935,9 +1939,7 @@ async function executeLinkIntent(
     })
     await revealLinkAnchor(anchors, entry, uri, targetDoc, offset)
     if (target.fragment !== null && offset === null) {
-      void vscode.window.showWarningMessage(isBlock
-        ? t('host.wikilinkBlockMissing', { link: intent.href, blockId: target.fragment.slice(1) })
-        : t('host.linkAnchorMissing', { href: intent.href, heading: target.fragment }))
+      void vscode.window.showWarningMessage(fragmentMissingMessage(target.fragment))
     }
     return
   }

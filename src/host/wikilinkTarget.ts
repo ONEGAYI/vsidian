@@ -18,7 +18,9 @@
 //
 // 块定位（findBlockOffset，#159）：行尾 ` ^id` 标记扫描（跳过围栏代码内部；
 // 闭围栏行行尾标记算围栏代码块自身的块 id，块首=开围栏行），命中行向上回溯
-// 所属块首行（块边界=空行或文件头），返回 [offset, end) 块首行区间。
+// 所属块首行（块边界=空行、围栏行或文件头——与 shared/blockId 的
+// blockRangeOfLine 同口径：围栏自成一块，紧贴围栏无空行的段落不被吞并），
+// 返回 [offset, end) 块首行区间。
 //
 // 本模块不依赖 vscode（node 单测直驱）；平台语义由注入的
 // WikilinkResolveContext 描述（与 LinkContext 同一注入模式）。
@@ -202,7 +204,9 @@ export function findHeadingOffset(
  * 规则（写入测试）：
  * - 围栏代码块内部的标记不命中；闭围栏行行尾标记是围栏代码块自身的块 id
  *   （Obsidian 形态），块首=开围栏行
- * - 块边界=空行或文件头（空行含纯空白行）；开围栏行的 `^` 属 info string
+ * - 块边界=空行、围栏行或文件头（空行含纯空白行）——与 shared/blockId
+ *   blockRangeOfLine 同口径（#159/#162 两端闭环：右键写入 id 的块与跳转
+ *   定位的块逐字节一致）；开围栏行的 `^` 属 info string
  * - 同 id 多命中取首；未命中返回 null；CRLF 行尾容错（offset 为宿主系，
  *   \r 计入行宽）
  */
@@ -248,8 +252,15 @@ export function findBlockOffset(
     }
     if (blockIdOfLine(line) === blockId) {
       let head = i
-      while (head > 0 && lines[head - 1]!.trim() !== '') {
-        head-- // 块边界=空行；到文件头自然停
+      // 块边界=空行或围栏行（围栏行是 fenceMarkerOf 命中行；命中行必在围栏
+      // 外，回溯首遇的围栏行必为闭围栏行）；到文件头自然停——与
+      // blockRangeOfLine 的回溯条件同源
+      while (
+        head > 0 &&
+        lines[head - 1]!.trim() !== '' &&
+        fenceMarkerOf(lines[head - 1]!) === null
+      ) {
+        head--
       }
       return anchorOf(head)
     }

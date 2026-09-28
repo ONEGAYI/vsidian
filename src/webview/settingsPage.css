@@ -117,6 +117,10 @@ button:focus-visible, input:focus-visible {
 .vsidian-settings-checkbox:checked { background: var(--vscode-focusBorder, #007fd4); }
 .vsidian-settings-checkbox:checked::before { transform: translateX(16px); }
 .vsidian-settings-select { flex: none; margin: 0 3px; padding: 3px 6px; font: inherit; color: var(--vscode-dropdown-foreground, inherit); background: var(--vscode-dropdown-background, transparent); border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border, #d9dde3)); border-radius: 2px; cursor: pointer; }
+/* #161 自由文本控件（StringText 型，如 image.pasteSubpath）：几何与边框照
+ * select 先例（同 padding/圆角，行内等高）；颜色用 input 变量族（VSCode
+ * 文本输入语义，与快捷键页搜索框同源），缺省回落 dropdown 值保持同观感 */
+.vsidian-settings-text { flex: none; width: 180px; max-width: 50%; margin: 0 3px; padding: 3px 6px; font: inherit; color: var(--vscode-input-foreground, inherit); background: var(--vscode-input-background, var(--vscode-dropdown-background, transparent)); border: 1px solid var(--vscode-input-border, var(--vscode-dropdown-border, var(--vscode-panel-border, #d9dde3))); border-radius: 2px; cursor: text; }
 .vsidian-settings-item-located { outline: 1px solid var(--vscode-focusBorder, #007fd4); outline-offset: 8px; border-radius: 3px; }
 .vsidian-settings-status { min-height: 20px; margin: 0 0 14px; color: var(--vscode-descriptionForeground, #666); font-size: 12px; }
 .vsidian-settings-empty { color: var(--vscode-descriptionForeground, #666); padding: 24px 0; }

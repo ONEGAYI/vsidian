@@ -8938,7 +8938,25 @@ export const cases: Array<[string, () => Promise<void>]> = [
     } catch {
       // 预期：目标不可达（无文件产生）
     }
-    // 3) 设置复位（防跨用例污染；string 子路径合法值回默认）
+    // 3) 重开回显：三键非默认组合经 globalState 存活，关闭重开编辑器面板后
+    //    读回一致（#123 先例：closeActiveEditor 只关活动编辑器，先 reveal
+    //    确保目标面板活动；pasteSubpath 先回合法值再断言——快照断言用可
+    //    复现组合，非法 ../escape 只属于上一节的拒绝路径）
+    await waitSettings({ 'image.paste': true, 'image.pasteLocation': 'workspace-root', 'image.pasteSubpath': 'assets/sub' })
+    await openWithEditor('paste-image.md')
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await poll('面板关闭与会话释放', async () => {
+      const s = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+      return s?.found === false ? true : undefined
+    })
+    await openWithEditor('paste-image.md')
+    await waitSessionReady('paste-image.md')
+    const snapshot = (await vscode.commands.executeCommand(CMD.getSettings)) as Record<string, unknown>
+    assert(snapshot['image.paste'] === true
+      && snapshot['image.pasteLocation'] === 'workspace-root'
+      && snapshot['image.pasteSubpath'] === 'assets/sub',
+      `重开后图片三键应回显非默认组合，实际 ${JSON.stringify(snapshot)}`)
+    // 4) 设置复位（防跨用例污染；string 子路径合法值回默认）
     await waitSettings({ 'image.paste': true, 'image.pasteLocation': 'same-dir', 'image.pasteSubpath': 'assets' })
   }],
 
@@ -9001,6 +9019,13 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const afterWrite = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
     assert(afterWrite.appliedEdits === before.appliedEdits + 1,
       `自动补写应恰一笔写回（实际 +${afterWrite.appliedEdits - before.appliedEdits}）`)
+
+    // 自动补写可撤销（undo 实测，照图片粘贴用例先例）：补写是一笔标准
+    // edit.request = 宿主文本栈一条记录，undo 一步全文还原、redo 恢复
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.history', op: 'undo' })
+    await waitViewState('block-menu.md', (v) => v.text === BLOCK_MENU_DOC)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.history', op: 'redo' })
+    await waitViewState('block-menu.md', (v) => /右键目标段落。 \^[a-z]{4}\n/.test(v.text))
 
     // 表格整块：id 写在表格末行行尾（表格右键按表格整块）。pos 从最新
     // 文本动态取——前序步骤已在普通段行尾补写 id，旧文档偏移已失效

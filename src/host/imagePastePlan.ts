@@ -49,11 +49,6 @@ export type ImagePasteDirResult =
   | { ok: true; dirPath: string; /** workspace-root 模式无工作区回退同目录时为 true（调用方通知用户） */ fellBack: boolean }
   | { ok: false; reason: 'invalid-subpath' }
 
-function dirnameOf(p: string): string {
-  const dir = posix.dirname(p)
-  return dir
-}
-
 /** 三模式目录解析（#161 规格）：same-dir=文档同目录；workspace-root=
  *  工作区根+子路径（无工作区回退同目录并标记）；relative-to-file=
  *  文档目录+子路径。子路径非法（绝对路径/..）任何模式拒绝。 */
@@ -62,7 +57,7 @@ export function resolveImagePasteDir(input: ImagePasteDirInput): ImagePasteDirRe
   if (sub === null) {
     return { ok: false, reason: 'invalid-subpath' }
   }
-  const docDir = dirnameOf(input.docPath)
+  const docDir = posix.dirname(input.docPath)
   if (input.mode === 'same-dir') {
     // 同目录模式子路径不生效（设置描述写明，不做模式依赖灰化）
     return { ok: true, dirPath: docDir, fellBack: false }

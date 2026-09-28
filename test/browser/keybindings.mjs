@@ -64,11 +64,20 @@ try {
     const bold = page.locator('[data-operation-id="bold"]')
     await bold.locator('kbd').waitFor()
     assert.equal(await bold.locator('kbd').innerText(), 'Ctrl+B')
-    const paint = await bold.locator('.vsidian-keybindings-tag').evaluate((node) => {
+    // 读取竞态加固：mock 的 keybindings.snapshot 回包会 replaceChildren 重建
+    // 分页，locator 解析与 evaluate 执行之间存在 IPC 间隙，恰好撞上重建会拿
+    // 到已移除节点（computed style 全空串）。空背景值重读吸收该窗口（实测
+    // 组合并发下约 1/3 概率触发）；断言仍落最终计算值，强度不变
+    const readPaint = () => bold.locator('.vsidian-keybindings-tag').evaluate((node) => {
       const style = getComputedStyle(node)
       const rect = node.getBoundingClientRect()
       return { bg: style.backgroundColor, border: style.borderStyle, visible: rect.width > 0 && rect.height > 0 }
     })
+    let paint = await readPaint()
+    for (let i = 0; paint.bg === '' && i < 60; i++) {
+      await page.waitForTimeout(50)
+      paint = await readPaint()
+    }
     assert.equal(paint.bg, theme === 'light' ? 'rgb(242, 244, 247)' : 'rgb(49, 49, 54)')
     assert.equal(paint.border, 'solid')
     assert.equal(paint.visible, true)
@@ -143,7 +152,15 @@ try {
       const last = sets[sets.length - 1]
       return last && last.id === 'italic' && JSON.stringify(last.bindings) === '["ctrl+b"]'
     }), true, '一击删除应发出移除 ctrl+i 的保存消息')
-    assert.equal(await boldCapture.evaluate(el => document.activeElement === el), true,
+    // 焦点重落是回推重渲染后的异步终态：上面 waitForFunction 通过时焦点可
+    // 能尚未落回（单次快照断言在并发负载下偶发 false）。轮询到重获（false
+    // 为暂态），上限 3 秒——终态断言语义不变
+    let recaptured = false
+    for (let i = 0; i < 60 && !recaptured; i++) {
+      recaptured = await boldCapture.evaluate(el => document.activeElement === el)
+      if (!recaptured) await page.waitForTimeout(50)
+    }
+    assert.equal(recaptured, true,
       '他行动作引发的回推重渲染后，活跃捕获签应重获焦点（录制不中断）')
     await page.keyboard.press('Escape')
     // ⋯ 菜单（审查修复补强）：浮层绘制形态 + 点击别处收起（规格承诺）
