@@ -1,5 +1,5 @@
 // 代码块语法高亮引擎契约测试（工单 #83）：语言路由（Lezer + legacy-modes
-// StreamLanguage）、classHighlighter 的 tok-* 词表、(languageId, code) LRU
+// StreamLanguage）、classHighlighter 的 tok-* 词表及函数标签补充、(languageId, code) LRU
 // 缓存（键入路径只重解析被编辑块）、超大围栏降级、跨行 token 切段。
 import { describe, expect, it } from 'vitest'
 import {
@@ -50,6 +50,27 @@ describe('token 产出与词表（#83）', () => {
     const a = highlightCodeRanges('javascript', 'let x = 1')
     const b = highlightCodeRanges('typescript', 'let x = 1')
     expect(a).toEqual(b)
+  })
+
+  it('Python 函数与方法调用叠加函数类，普通属性保留原词类', () => {
+    const code = 'sys.path.insert(0, "src/llm")\nload_encoded_csv("data", 12)'
+    const ranges = highlightCodeRanges('python', code)
+    const cls = (word: string): string | undefined => ranges.find(
+      (r) => code.slice(r.from, r.to) === word,
+    )?.cls
+    expect(cls('path')).toBe('tok-propertyName')
+    expect(cls('insert')).toBe('tok-propertyName tok-function')
+    expect(cls('load_encoded_csv')).toBe('tok-variableName tok-function')
+  })
+
+  it('同一函数类也覆盖 JavaScript 的方法调用，不改普通变量类', () => {
+    const code = 'const result = api.run(1)'
+    const ranges = highlightCodeRanges('javascript', code)
+    const cls = (word: string): string | undefined => ranges.find(
+      (r) => code.slice(r.from, r.to) === word,
+    )?.cls
+    expect(cls('api')).toBe('tok-variableName')
+    expect(cls('run')).toBe('tok-propertyName tok-function')
   })
 })
 

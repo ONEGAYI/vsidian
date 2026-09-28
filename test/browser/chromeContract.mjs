@@ -42,6 +42,7 @@ try {
     '$$\\int_0^1 x^2 \\, dx = \\tfrac{1}{3}$$', '',
     '错误公式 $\\fauxcmd{x}$ 原文降级。', '',
     '```js', 'const keyword = true', '```', '',
+    '```python', 'import sys', 'sys.path.insert(0, "src/llm")', 'load_encoded_csv("data", 12)', '# comment', '```', '',
     '结尾段落。', '',
   ].join('\n')
   await page.evaluate((text) => window.initChromeContract(text), DOC)
@@ -71,10 +72,37 @@ try {
     }, probes.map((p) => ({ id: p.id })))
     assert.deepEqual(bad, [], `${label}：chrome 探针应全命中（挂错节点即失败）`)
   }
+  const pythonNameColors = (mode) => page.evaluate((root) => [
+    getComputedStyle(document.querySelector(`${root} .tok-propertyName:not(.tok-function)`)).color,
+    getComputedStyle(document.querySelector(`${root} .tok-propertyName.tok-function`)).color,
+    getComputedStyle(document.querySelector(`${root} .tok-variableName.tok-function`)).color,
+  ], `.vsidian-view-${mode}`)
 
   // live 视图（默认）：live 作用域 + 常驻探针
   await page.waitForTimeout(150)
   await checkProbes([...liveProbes, ...alwaysProbes].filter(notMermaid), '初始 live')
+  await page.evaluate(() => { document.body.classList.add('vscode-light'); document.body.classList.remove('vscode-dark') })
+  assert.equal(await page.evaluate(() => window.chromeProbe()?.chromePaint?.tokKeywordColor),
+    'rgb(175, 0, 219)', 'live 浅色主题的代码关键词应绘制为共享色板颜色')
+  assert.deepEqual(await page.evaluate(() => [
+    getComputedStyle(document.querySelector('.vsidian-view-live .tok-string')).color,
+    getComputedStyle(document.querySelector('.vsidian-view-live .tok-comment')).color,
+  ]), ['rgb(10, 48, 105)', 'rgb(110, 119, 129)'], 'live Python 字符串与注释应绘制为浅色组颜色')
+  assert.deepEqual(await pythonNameColors('live'), ['rgb(31, 35, 40)', 'rgb(128, 96, 0)', 'rgb(128, 96, 0)'],
+    'live Python 普通属性保持正文色，方法与函数调用呈现浅色暖黄')
+  await page.evaluate(() => { document.body.classList.add('vscode-dark'); document.body.classList.remove('vscode-light') })
+  assert.equal(await page.evaluate(() => window.chromeProbe()?.chromePaint?.tokKeywordColor),
+    'rgb(197, 134, 192)', 'live 深色主题的代码关键词应绘制为共享色板颜色')
+  assert.deepEqual(await page.evaluate(() => [
+    getComputedStyle(document.querySelector('.vsidian-view-live .tok-string')).color,
+    getComputedStyle(document.querySelector('.vsidian-view-live .tok-comment')).color,
+  ]), ['rgb(165, 214, 255)', 'rgb(139, 148, 158)'], 'live Python 字符串与注释应绘制为深色组颜色')
+  assert.deepEqual(await pythonNameColors('live'), ['rgb(201, 209, 217)', 'rgb(220, 220, 170)', 'rgb(220, 220, 170)'],
+    'live Python 深色组应区分普通属性与黄色函数调用')
+  await page.evaluate(() => { document.body.classList.add('vscode-high-contrast'); document.body.classList.remove('vscode-dark') })
+  assert.equal((await pythonNameColors('live'))[1], 'rgb(220, 220, 170)',
+    '深色高对比主题的函数色须保持可读的淡黄')
+  await page.evaluate(() => { document.body.classList.add('vscode-dark'); document.body.classList.remove('vscode-high-contrast') })
 
   // reading 视图：reading 作用域 + 常驻探针
   await page.evaluate(() => window.setChromeContractMode('reading'))
@@ -85,8 +113,24 @@ try {
   // 主题类漂移；探针规则无主题条件）
   await page.evaluate(() => { document.body.classList.add('vscode-light'); document.body.classList.remove('vscode-dark') })
   await checkProbes([...readingProbes, ...alwaysProbes].filter(notMermaid), '浅色主题')
+  assert.equal(await page.evaluate(() => window.chromeProbe()?.chromePaint?.tokKeywordColor),
+    'rgb(175, 0, 219)', '浅色主题的代码关键词应绘制为共享色板颜色')
+  assert.deepEqual(await page.evaluate(() => [
+    getComputedStyle(document.querySelector('.vsidian-view-reading .tok-string')).color,
+    getComputedStyle(document.querySelector('.vsidian-view-reading .tok-comment')).color,
+  ]), ['rgb(10, 48, 105)', 'rgb(110, 119, 129)'], '阅读侧 Python 字符串与注释应绘制为浅色组颜色')
+  assert.deepEqual(await pythonNameColors('reading'), ['rgb(31, 35, 40)', 'rgb(128, 96, 0)', 'rgb(128, 96, 0)'],
+    '阅读侧 Python 普通属性保持正文色，方法与函数调用呈现浅色暖黄')
   await page.evaluate(() => { document.body.classList.add('vscode-dark'); document.body.classList.remove('vscode-light') })
   await checkProbes([...readingProbes, ...alwaysProbes].filter(notMermaid), '回深色主题')
+  assert.equal(await page.evaluate(() => window.chromeProbe()?.chromePaint?.tokKeywordColor),
+    'rgb(197, 134, 192)', '深色主题的代码关键词应绘制为共享色板颜色')
+  assert.deepEqual(await page.evaluate(() => [
+    getComputedStyle(document.querySelector('.vsidian-view-reading .tok-string')).color,
+    getComputedStyle(document.querySelector('.vsidian-view-reading .tok-comment')).color,
+  ]), ['rgb(165, 214, 255)', 'rgb(139, 148, 158)'], '阅读侧 Python 字符串与注释应绘制为深色组颜色')
+  assert.deepEqual(await pythonNameColors('reading'), ['rgb(201, 209, 217)', 'rgb(220, 220, 170)', 'rgb(220, 220, 170)'],
+    '阅读侧 Python 深色组应区分普通属性与黄色函数调用')
 
   // 片段注入（真实片段等效——webview 内 <style> 注入）驱动 chrome 可见颜色：
   // 阅读侧四个区域（公式 KaTeX / 卡片标签 / tok token / 大纲层级色）
