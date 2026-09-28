@@ -183,7 +183,7 @@ export const zhCn: Record<MessageKey, string> = {
   'host.confirmResume': '将放弃“{name}”编辑器中未确认的本地修改，并以磁盘/权威内容重新同步。建议先复制未确认输入。',
   'host.conflictPaused': '“{name}”的编辑已暂停：外部修改与未确认输入无法安全合并。未确认输入已保留，可随时取回。',
   'host.panelClosedWithInput': '“{name}”的编辑器已关闭（或连接断开），存在未保存的未确认输入：{text}',
-  'host.wikilinkUnsupported': '不支持的双链形态「[[{target}]]」（块引用 ^、嵌入 ![[…]] 等属二期）：已按原文保留',
+  'host.wikilinkUnsupported': '不支持的双链形态「[[{target}]]」（嵌入 ![[…]] 属二期）：已按原文保留',
   'host.wikilinkNoWorkspace': '当前文档不在任何工作区文件夹内：双链目标需要按工作区查找，未打开文件夹时无法跳转（链接文本保留）',
   'host.wikilinkNotFound': '双链目标不存在：[[{target}]]（已按当前工作区按需查找；不会自动创建文件）',
   'host.wikilinkAmbiguousPick': '找到多个双链目标「{target}」，请选择要打开的笔记',
@@ -396,4 +396,8 @@ export const zhCn: Record<MessageKey, string> = {
   'command.ui.outlineReset.title': '重置大纲',
   'command.ui.outlineCollapseAll.title': '折叠全部大纲',
   'command.ui.outlineExpandAll.title': '展开全部大纲',
+
+  // ---- #159 锚点跳转（块引用定位与本文件锚点）----
+  /** 块 id 缺失提示（与标题缺失同款「打开后提示」行为） */
+  'host.wikilinkBlockMissing': '已在目标文档中打开{link}，但未找到块引用「^{blockId}」（块 id 是块尾行行尾的 ` ^id` 标记）',
 }

@@ -489,6 +489,8 @@ const WIKILINKS_DOC = [
   '',
   '结尾段落。',
   '',
+  '锚点目标块。 ^anchor-blk',
+  '',
 ].join('\n')
 // #11 按名跳转目标：长文使「深处的标题」位于首屏外（阅读挂载定位的屏外目标）
 const TARGET_NOTE_DOC = (() => {
@@ -499,13 +501,14 @@ const TARGET_NOTE_DOC = (() => {
   out.push('# 深处的标题', '', '标题下的正文。', '')
   return out.join('\n')
 })()
-// #11 文本编辑器 reveal 目标：中部小节标题
+// #11 文本编辑器 reveal 目标：中部小节标题；#159 块引用目标：末尾块标记
 const WIKILINK_TARGET_DOC = (() => {
   const out = ['# 双链跳转目标', '', '顶部段落。', '']
   for (let i = 2; i <= 30; i++) {
     out.push(`第 ${i} 段正文。`, '')
   }
   out.push('## 深处小节', '', '小节内容。', '')
+  out.push('带块标记的段落。 ^blk-target', '')
   return out.join('\n')
 })()
 // CRLF 目标（view.locate 坐标系断言载体）：宿主系 offset 与 LF offset 在

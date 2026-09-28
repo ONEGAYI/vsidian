@@ -76,11 +76,12 @@ describe('parseWikilinkInner：目标结构解析', () => {
     expect(parseWikilinkInner('目录/笔记#标题')!.display).toBe('目录/笔记#标题')
   })
 
-  it('不支持形态返回 null：路径裸^/空路径/空标题/空别名/多级标题/空串', () => {
+  it('不支持形态返回 null：路径裸^/空锚点/空标题/空别名/多级标题/空串', () => {
     expect(parseWikilinkInner('笔记^块ID')).toBeNull()
     expect(parseWikilinkInner('目录/笔记^abc#标题')).toBeNull()
-    expect(parseWikilinkInner('#标题')).toBeNull()
-    expect(parseWikilinkInner('#^37066d')).toBeNull() // [[#^块]]：空路径（本文档引用整体属二期）
+    expect(parseWikilinkInner('#')).toBeNull() // [[#]]：空锚点维持降级
+    expect(parseWikilinkInner('# ')).toBeNull()
+    expect(parseWikilinkInner('#^')).toBeNull() // [[#^]]：空块 ID 维持降级
     expect(parseWikilinkInner('')).toBeNull()
     expect(parseWikilinkInner('   ')).toBeNull()
     expect(parseWikilinkInner('笔记#')).toBeNull()
@@ -151,6 +152,83 @@ describe('块引用形态：[[笔记#^块ID]]（Obsidian `#^` 标准形态）', 
     expect(parseWikilinkInner('笔记#^中文')).toBeNull()
     expect(parseWikilinkInner('笔记#^id#x')).toBeNull()
     expect(parseWikilinkInner('笔记#标题^x')).toBeNull()
+  })
+})
+
+describe('本文件锚点（#159）：[[#标题]] 与 [[#^块id]] 空路径放开', () => {
+  it('[[#标题]]：path 为空串、heading 照常填充、display 默认锚点原文', () => {
+    expect(parseWikilinkInner('#标题')).toEqual({
+      path: '',
+      heading: '标题',
+      blockId: null,
+      alias: null,
+      display: '#标题',
+    })
+  })
+
+  it('[[#^块id]]：path 为空串、blockId 照常填充、display 默认 `#^块id`', () => {
+    expect(parseWikilinkInner('#^37066d')).toEqual({
+      path: '',
+      heading: null,
+      blockId: '37066d',
+      alias: null,
+      display: '#^37066d',
+    })
+    expect(parseWikilinkInner('#^quote-of-the-day')).toMatchObject({
+      path: '',
+      blockId: 'quote-of-the-day',
+      display: '#^quote-of-the-day',
+    })
+  })
+
+  it('别名优先：display 取别名；空路径与别名组合各字段独立', () => {
+    expect(parseWikilinkInner('#标题|显示')).toEqual({
+      path: '',
+      heading: '标题',
+      blockId: null,
+      alias: '显示',
+      display: '显示',
+    })
+    expect(parseWikilinkInner('#^37066d|显示')).toEqual({
+      path: '',
+      heading: null,
+      blockId: '37066d',
+      alias: '显示',
+      display: '显示',
+    })
+  })
+
+  it('首尾空白 trim（`[[ #标题 ]]` 命中同一路径）；目标侧内部空格保留', () => {
+    expect(parseWikilinkInner(' # 深处 的小节 ')).toMatchObject({
+      path: '',
+      heading: '深处 的小节',
+      display: '#深处 的小节',
+    })
+  })
+
+  it('非法形态维持降级：空锚点/空块 ID/越集字符/多级标题/标题^块/空别名', () => {
+    expect(parseWikilinkInner('#标题#小节')).toBeNull()
+    expect(parseWikilinkInner('#标题^x')).toBeNull()
+    expect(parseWikilinkInner('#^id$bad')).toBeNull()
+    expect(parseWikilinkInner('#^中文')).toBeNull()
+    expect(parseWikilinkInner('#^id#x')).toBeNull()
+    expect(parseWikilinkInner('#|别名')).toBeNull()
+    expect(parseWikilinkInner('|别名')).toBeNull() // 无锚点无路径
+  })
+
+  it('扫描层命中本文件锚点形态（live/阅读装饰自动覆盖）', () => {
+    const line = '看 [[#小节]] 与 [[#^blk-id|显示]] 与 [[#坏#形态]] 尾'
+    expect(scanWikilinksInLine(line).map((h) => h.inner)).toEqual(['#小节', '#^blk-id|显示'])
+    // 嵌入 ![[#标题]] 不命中（前置 ! 守卫，嵌入仍属二期）
+    const embed = scanWikilinksInLine('嵌入 ![[#小节]] 与 [[#小节]]')
+    expect(embed.map((h) => h.inner)).toEqual(['#小节'])
+  })
+
+  it('wikilinkAtCol 命中本文件锚点（Ctrl/Cmd+单击判定同源）', () => {
+    const line = '看 [[#小节]] 尾'
+    const from = line.indexOf('[[#小节]]')
+    expect(wikilinkAtCol(line, from + 3)?.inner).toBe('#小节')
+    expect(wikilinkAtCol(line, from - 1)).toBeNull()
   })
 })
 
