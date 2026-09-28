@@ -18,15 +18,16 @@ import { fileURLToPath } from 'node:url'
 export const SIZE_LIMITS = {
   // 解压总体积：#59 KaTeX 后基线约 1.05 MB，#60 加入 mermaid.js 独立产物
   // （约 2.60 MB）后基线约 4.1 MB，#78-85 代码块高亮（Lezer 语言表）后
-  // 基线约 4.45 MB——距旧警告线 4.5 MB 仅约 57 KB，用户决策两条线各
-  // 上调 1 MB 给功能增长留余量；防"意外塞进大文件"的语义不变。
-  totalWarnBytes: 5.5 * 1024 * 1024,
-  totalMaxBytes: 6.5 * 1024 * 1024,
+  // 基线约 4.45 MB（首次上调），v0.5.0（样式参考 HTML/JSON 入包 + 设置页
+  // 刷新）后基线约 5.44 MB——距警告线 5.5 MB 仅约 66 KB，用户决策两条线
+  // 再次各上调 1 MB；防"意外塞进大文件"的语义不变。
+  totalWarnBytes: 6.5 * 1024 * 1024,
+  totalMaxBytes: 7.5 * 1024 * 1024,
   // 一般单文件：mermaid.js（刻意 vendored 的独立产物，minify 后实测
   // 2,727,077 B ≈ 2.60 MB）是最大单项，警告线 3 MB 在其上留小余量、
   // 失败线 4 MB 拦截意外超大文件（如误升 mermaid 12.x 的 5.3 MB 产物）。
-  // 主 bundle（main.js 约 0.80 MB，含 CM6 + KaTeX）随之不再触发单文件
-  // 警告——其增长由总量线约束，属本阈值调整的已接受取舍。
+  // 主 bundle（main.js，含 CM6 + KaTeX 与 Lezer 语言表，v0.5.0 实测约
+  // 1.65 MB）不触发单文件警告——其增长由总量线约束，属已接受取舍。
   fileWarnBytes: 3 * 1024 * 1024,
   fileMaxBytes: 4 * 1024 * 1024,
   // 图标专项：Marketplace 展示只需 256×256，35 KB 已足够，百 KB 级即异常。
