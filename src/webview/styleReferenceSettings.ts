@@ -27,7 +27,7 @@ import {
 
 type SupportFilter = 'all' | 'direct' | 'semantic' | 'native' | 'none'
 
-/** 每页条目数（约 15 条：一屏可扫读，115 条清单最长类目分两页） */
+/** 每页条目数（约 15 条：一屏可扫读，130 条清单最长类目分两页） */
 const PAGE_SIZE = 15
 
 const SUPPORT_LABEL: Record<SupportFilter, () => string> = {
