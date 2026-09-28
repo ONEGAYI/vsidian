@@ -4,7 +4,15 @@ import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { runSuites } from './runner.mjs'
+import { parseBrowserRunOptions, runSuites } from './runner.mjs'
+
+test('浏览器入口默认三并发，显式参数仍可覆盖并发与套件', () => {
+  const names = ['alpha', 'beta', 'gamma']
+  assert.deepEqual(parseBrowserRunOptions([], names), { workers: 3, reuseBuilds: true, selected: names })
+  assert.deepEqual(parseBrowserRunOptions(['--workers=2', '--suite=beta,alpha', '--no-reuse'], names),
+    { workers: 2, reuseBuilds: false, selected: ['beta', 'alpha'] })
+  assert.throws(() => parseBrowserRunOptions(['--workers=17'], names), /范围/)
+})
 
 test('有限并行继续收集失败，完整输出与退出码写入报告', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'vsidian-browser-runner-'))

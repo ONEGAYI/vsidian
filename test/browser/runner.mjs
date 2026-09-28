@@ -5,6 +5,21 @@ import path from 'node:path'
 import { build } from 'esbuild'
 import { createBuildBroker } from './buildBroker.mjs'
 
+export function parseBrowserRunOptions(args, names) {
+  let workers = 3, reuseBuilds = true, selected = names
+  for (const arg of args) {
+    if (/^--workers=\d+$/.test(arg)) workers = Number(arg.slice('--workers='.length))
+    else if (arg === '--no-reuse') reuseBuilds = false
+    else if (arg.startsWith('--suite=')) selected = arg.slice('--suite='.length).split(',')
+    else throw new Error(`未知参数: ${arg}`)
+  }
+  if (!Number.isInteger(workers) || workers < 1 || workers > 16) throw new Error('--workers 范围为 1..16')
+  if (new Set(selected).size !== selected.length || selected.some(name => !names.includes(name))) {
+    throw new Error(`--suite 必须是不重复的套件名，可选: ${names.join(',')}`)
+  }
+  return { workers, reuseBuilds, selected }
+}
+
 // 每个脚本保留独立进程/浏览器；一个失败仍收集其他脚本的结果。
 export async function runSuites({ suites, workers, reportDir, root, timeoutMs = 120000, reuseBuilds = true, signal }) {
   if (!Number.isInteger(workers) || workers < 1) throw new Error('workers 必须为正整数')

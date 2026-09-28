@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { mkdir, mkdtemp } from 'node:fs/promises'
-import { runSuites } from './runner.mjs'
+import { parseBrowserRunOptions, runSuites } from './runner.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // 保留原 test:browser 的全部脚本；长套件优先启动。
@@ -21,17 +21,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const names = ['tableCaret', 'quoteBarPaint', 'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage',
   'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract', 'commentToggle', 'viewToggle']
-let workers = 2, reuseBuilds = true, selected = names
-for (const arg of process.argv.slice(2)) {
-  if (/^--workers=\d+$/.test(arg)) workers = Number(arg.slice('--workers='.length))
-  else if (arg === '--no-reuse') reuseBuilds = false
-  else if (arg.startsWith('--suite=')) selected = arg.slice('--suite='.length).split(',')
-  else throw new Error(`未知参数: ${arg}`)
-}
-if (!Number.isInteger(workers) || workers < 1 || workers > 16) throw new Error('--workers 范围为 1..16')
-if (new Set(selected).size !== selected.length || selected.some(name => !names.includes(name))) {
-  throw new Error(`--suite 必须是不重复的套件名，可选: ${names.join(',')}`)
-}
+const { workers, reuseBuilds, selected } = parseBrowserRunOptions(process.argv.slice(2), names)
 const parent = path.join(root, 'out/test/browser-runs')
 await mkdir(parent, { recursive: true })
 const reportDir = await mkdtemp(path.join(parent, 'run-'))
