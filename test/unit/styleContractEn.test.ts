@@ -1,13 +1,14 @@
-// 英文平行覆盖一致性契约（#178）：src/shared/styleContractEn.ts 是条目文档
-// 字段英文版的单一事实源——按条目 id 索引、字段级覆盖，取词规则为英文优先、
-// 条目或字段缺失回退中文基准（规格 docs/specs/style-reference-i18n.md）。
-// 本测试钉住：
+// 英文平行覆盖一致性契约（#178 机制 + #179 content 域全量）：src/shared/
+// styleContractEn.ts 是条目文档字段英文版的单一事实源——按条目 id 索引、
+// 字段级覆盖，取词规则为英文优先、条目或字段缺失回退中文基准（规格
+// docs/specs/style-reference-i18n.md）。本测试钉住：
 // - 覆盖集 id ⊆ 中文清单条目 id（清单删除/改名条目时英文表同步收敛）；
 // - 覆盖字段键只含双语字段（purpose/states/dom/deprecated/removed/
 //   obsidian.counterpart），不译字段（target/example/aliasTargets/
 //   introduced/verification/id/views）不得出现；可选字段仅当中文条目
 //   确有该字段时才覆盖（无值字段跳过）；
 // - 覆盖值非空字符串；
+// - content 域 75 条 id 全量覆盖（#179 域级完整性）；
 // - 取词纯函数行为：英文语言字段级 merge、非英文语言与未覆盖条目原样
 //   返回、原条目不被改写；
 // - 生成数据模块（styleGuideData.ts，settings.js 渲染数据）携带同源双语。
@@ -25,7 +26,7 @@ const BILINGUAL_KEYS = ['purpose', 'states', 'dom', 'deprecated', 'removed', 'ob
 
 type OverrideField = Exclude<keyof typeof STYLE_CONTRACT_EN_OVERRIDES[string], 'obsidian'>
 
-describe('英文覆盖一致性契约（#178）', () => {
+describe('英文覆盖一致性契约（#178 机制 + #179 content 域全量）', () => {
   const entryById = new Map(STYLE_CONTRACT_ENTRIES.map((entry) => [entry.id, entry]))
 
   it('覆盖集 id ⊆ 中文清单条目 id', () => {
@@ -82,8 +83,17 @@ describe('英文覆盖一致性契约（#178）', () => {
     const entry = entryById.get('container-live')!
     expect(applyStyleContractEntryOverride(entry, 'zh-cn', STYLE_CONTRACT_EN_OVERRIDES)).toBe(entry)
     expect(applyStyleContractEntryOverride(entry, '', STYLE_CONTRACT_EN_OVERRIDES)).toBe(entry)
-    const uncovered = entryById.get('inline-strong')!
+    // content 域 #179 起全量覆盖；未覆盖条目取 chrome 域（#180 渐进合入前的真实缺口）
+    const uncovered = entryById.get('live-math')!
     expect(applyStyleContractEntryOverride(uncovered, 'en', STYLE_CONTRACT_EN_OVERRIDES)).toBe(uncovered)
+  })
+
+  it('content 域全部 75 条 id 均有英文覆盖（#179 全量交付）', () => {
+    const contentIds = STYLE_CONTRACT_ENTRIES.filter((e) => e.domain === 'content').map((e) => e.id)
+    expect(contentIds.length).toBe(75)
+    for (const id of contentIds) {
+      expect(STYLE_CONTRACT_EN_OVERRIDES[id], `content 条目缺英文覆盖：${id}`).toBeDefined()
+    }
   })
 
   it('便捷封装 localizedStyleContractEntry 查本模块覆盖表', () => {

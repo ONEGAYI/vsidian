@@ -1,6 +1,7 @@
-// 设置页「样式参考」英文 UI 呈现（#178 试点端到端）：renderCard 按 UI 语言
-// 取词——英文环境试点条目显示英文，未覆盖条目回退中文基准；换包后经设置页
-// 壳层重刷路径（applyLocale → render → section.mount 重建）跟随新语言。
+// 设置页「样式参考」英文 UI 呈现（#178 试点端到端 + #179 content 域全量）：
+// renderCard 按 UI 语言取词——英文环境 content 域条目显示英文，未覆盖条目
+// （chrome 域，#180 渐进合入前）回退中文基准；换包后经设置页壳层重刷路径
+// （applyLocale → render → section.mount 重建）跟随新语言。
 // 断言落在用户可见文本（卡片 textContent / 类目名），非 DOM 存在性
 // （PR #37 教训：样式注入失效时 DOM 存在性照样通过）。
 // @vitest-environment jsdom
@@ -58,11 +59,16 @@ describe('样式参考英文 UI 呈现（#178 试点）', () => {
     expect(readingCard.textContent).toContain(readingOverride.obsidian!.counterpart)
     expect(readingCard.textContent).not.toContain('阅读）视图容器')
 
-    // 回退路径：未覆盖条目（heading 类目 live-heading-line）显示中文基准
+    // content 域 #179 起全量覆盖：试点外条目（heading 类目抽验）同样显示英文
     parent.querySelector<HTMLButtonElement>('.vsidian-style-ref-cat[data-category="heading"]')!.click()
     const headingCard = cardOf(parent, 'live-heading-line')
-    expect(headingCard.textContent).toContain('行容器')
-    expect(headingCard.textContent).toContain('整行级样式入口')
+    expect(headingCard.textContent).toContain(STYLE_CONTRACT_EN_OVERRIDES['live-heading-line']!.purpose!)
+    expect(headingCard.textContent).not.toContain('行容器')
+    expect(headingCard.textContent).not.toContain('整行级样式入口')
+
+    // 回退路径：未覆盖条目（chrome 域，#180 渐进合入前的真实缺口）显示中文基准
+    parent.querySelector<HTMLButtonElement>('.vsidian-style-ref-cat[data-category="math"]')!.click()
+    expect(cardOf(parent, 'live-math').textContent).toContain('公式渲染态稳定容器')
   })
 
   it('英文环境：搜索按英文取词命中（用途词可检索）', () => {
