@@ -43,6 +43,8 @@ const CMD = {
   linkLog: 'onegayi.vsidian._test.getLinkLog',
   // #111 图表导出消息日志（钩子模式下宿主短路另存为对话框并记录）
   diagramExportLog: 'onegayi.vsidian._test.takeDiagramExportLog',
+  // #161 图片粘贴消息日志（钩子模式记录载荷形态；落盘真实执行）
+  imagePasteLog: 'onegayi.vsidian._test.takeImagePasteLog',
   // #38 三态记忆
   getLastMode: 'onegayi.vsidian._test.getLastMode',
   resetLastMode: 'onegayi.vsidian._test.resetLastMode',
@@ -158,6 +160,10 @@ const HIGHLIGHT_DOC_TEXT = [
   '',
   '普通段落。',
 ].join('\n')
+
+/** #161 图片粘贴载荷：1x1 PNG（字节与解码断言的对照源） */
+const PASTE_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
 
 function wsUri(name: string): vscode.Uri {
   return vscode.Uri.file(`${wsDir}/${name}`)
@@ -8628,5 +8634,106 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(session.panels.length >= 1, '源码态双态命令应回 Vsidian 面板')
     await waitViewState('mode.md', (v) => v.viewMode === 'live')
     await waitLastMode('live')
+  }],
+
+  ['图片粘贴：截图时间戳名落盘、插入文本与撤销一步还原（#161）', async () => {
+    await openWithEditor('paste-image.md')
+    await waitSessionReady('paste-image.md')
+    const uri = wsUri('paste-image.md').toString()
+    const diskBefore = await readDisk('paste-image.md')
+    // 设置基线：三键回默认（同目录模式；防止其他用例遗留的偏好污染）
+    await waitSettings({ 'image.paste': true, 'image.pasteLocation': 'same-dir', 'image.pasteSubpath': 'assets' })
+    // 注入截图形态的 image.paste（无 fileNameHint，宿主生成时间戳名）——
+    // 与真实 webview 消息同一校验与处理入口（宿主测试无法驱动真实剪贴板）
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, {
+      kind: 'image.paste', docUri: uri, reqId: 1,
+      mime: 'image/png', dataBase64: PASTE_PNG_BASE64,
+    })
+    // webview 收到落盘结果后在光标处插入（宿主计算的 markdown 全文）
+    const view = await waitViewState('paste-image.md', (v) =>
+      /!\[Pasted image \d{14}\]\(Pasted%20image%20\d{14}\.png\)/.test(v.text))
+    const match = /!\[Pasted image (\d{14})\]\(Pasted%20image%20\d{14}\.png\)/.exec(view.text)
+    assert(match !== null, '插入文本应为时间戳名图片引用')
+    // 落盘断言：文档同目录出现时间戳名 PNG，字节与载荷解码一致
+    const fileName = `Pasted image ${match![1]}.png`
+    const bytes = await vscode.workspace.fs.readFile(wsUri(fileName))
+    assert(Buffer.compare(Buffer.from(bytes), Buffer.from(PASTE_PNG_BASE64, 'base64')) === 0,
+      '落盘文件字节应与 base64 载荷解码一致')
+    // 钩子日志：宿主收到的消息形态（mime/hint 缺省/reqId）
+    const log = (await vscode.commands.executeCommand(CMD.imagePasteLog, uri)) as
+      Array<{ mime?: string; reqId?: number; fileNameHint?: string; docUri?: string }>
+    assert(log.some((m) => m.mime === 'image/png' && m.reqId === 1 &&
+      m.fileNameHint === undefined && m.docUri === uri),
+      `宿主应记录截图形态载荷，实际 ${JSON.stringify(log)}`)
+    // 撤销一步还原：插入是一笔 edit.request（宿主文本栈一条记录）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.history', op: 'undo' })
+    await waitViewState('paste-image.md', (v) => v.text === diskBefore)
+    // 撤销只回滚文本引用，不删除落盘文件（资产文件保留）
+    const stillThere = await vscode.workspace.fs.stat(wsUri(fileName))
+    assert(stillThere !== undefined, '撤销后落盘文件应保留')
+  }],
+
+  ['图片粘贴：原名清洗沿用与重名 -1 递增（#161）', async () => {
+    await openWithEditor('paste-image.md')
+    await waitSessionReady('paste-image.md')
+    const uri = wsUri('paste-image.md').toString()
+    await waitSettings({ 'image.paste': true, 'image.pasteLocation': 'same-dir', 'image.pasteSubpath': 'assets' })
+    // 随机基名防跨运行残留同名（撤销不删文件，上轮运行可能已占用固定名）
+    const base = `集成贴图${Date.now() % 100000}`
+    const hint = `${base}<1>.png` // 含 Windows 非法字符 < >
+    const cleaned = `${base}1`    // 清洗后基名；扩展名按 mime 重建为 .png
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, {
+      kind: 'image.paste', docUri: uri, reqId: 1,
+      mime: 'image/png', dataBase64: PASTE_PNG_BASE64, fileNameHint: hint,
+    })
+    await waitViewState('paste-image.md', (v) => v.text.includes(`![${cleaned}](${cleaned}.png)`))
+    // 同名再次粘贴：重名 -1 递增
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, {
+      kind: 'image.paste', docUri: uri, reqId: 2,
+      mime: 'image/png', dataBase64: PASTE_PNG_BASE64, fileNameHint: hint,
+    })
+    await waitViewState('paste-image.md', (v) => v.text.includes(`![${cleaned}-1](${cleaned}-1.png)`))
+    for (const name of [`${cleaned}.png`, `${cleaned}-1.png`]) {
+      const stat = await vscode.workspace.fs.stat(wsUri(name))
+      assert(stat !== undefined, `落盘文件 ${name} 应存在`)
+    }
+  }],
+
+  ['图片粘贴：三存放模式与子路径越界拒绝、无工作区回退通知路径（#161）', async () => {
+    await openWithEditor('paste-image.md')
+    await waitSessionReady('paste-image.md')
+    const uri = wsUri('paste-image.md').toString()
+    await waitSettings({ 'image.paste': true, 'image.pasteLocation': 'same-dir', 'image.pasteSubpath': 'assets' })
+    // 1) workspace-root + 子路径 assets/sub：落盘到工作区根下（递归建目录）
+    await vscode.commands.executeCommand(CMD.setSettings, {
+      'image.pasteLocation': 'workspace-root', 'image.pasteSubpath': 'assets/sub',
+    })
+    const base = `根目录贴图${Date.now() % 100000}`
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, {
+      kind: 'image.paste', docUri: uri, reqId: 1,
+      mime: 'image/png', dataBase64: PASTE_PNG_BASE64, fileNameHint: `${base}.png`,
+    })
+    await waitViewState('paste-image.md', (v) =>
+      v.text.includes(`![${base}](assets/sub/${base}.png)`))
+    const stat = await vscode.workspace.fs.stat(wsUri(`assets/sub/${base}.png`))
+    assert(stat !== undefined, '应递归创建 assets/sub 并落盘到工作区根')
+    // 2) 子路径越界（../escape）：失败不插入、不落盘（宿主弹 i18n 通知）
+    const before = (await waitViewState('paste-image.md')).text
+    await vscode.commands.executeCommand(CMD.setSettings, { 'image.pasteSubpath': '../escape' })
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, {
+      kind: 'image.paste', docUri: uri, reqId: 2,
+      mime: 'image/png', dataBase64: PASTE_PNG_BASE64, fileNameHint: '越界.png',
+    })
+    await new Promise((r) => setTimeout(r, 800))
+    const after = (await waitViewState('paste-image.md')).text
+    assert(after === before, '子路径越界时不得插入文本')
+    try {
+      await vscode.workspace.fs.stat(wsUri('../escape/越界.png'))
+      assert(false, '越界路径不得落盘')
+    } catch {
+      // 预期：目标不可达（无文件产生）
+    }
+    // 3) 设置复位（防跨用例污染；string 子路径合法值回默认）
+    await waitSettings({ 'image.paste': true, 'image.pasteLocation': 'same-dir', 'image.pasteSubpath': 'assets' })
   }],
 ]

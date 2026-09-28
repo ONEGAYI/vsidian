@@ -104,6 +104,18 @@ export type HostToWebview =
       reason: 'blocked' | 'outside-workspace' | 'not-found' | 'read-error'
       detail?: string
     }
+  /** 图片粘贴落盘结果（#161）：ok 时 markdown 为宿主计算好的完整插入文本
+   *  （![stem](percent-encode 相对路径)，与渲染端 normalizeImgSrc 的 decode
+   *  对偶），webview 在光标处单事务插入（一笔撤销）；失败附原因码
+   *  （invalid-location=子路径越界/绝对路径；write-failed=建目录或写盘
+   *  失败；invalid=载荷校验失败），webview 不插入文本 */
+  | { kind: 'image.paste.result'; reqId: number; ok: true; markdown: string }
+  | {
+      kind: 'image.paste.result'
+      reqId: number
+      ok: false
+      reason: 'invalid-location' | 'write-failed' | 'invalid'
+    }
   /** 查找会话指令（#14）：open 打开 webview 内浮动查找面板（可预置查询词，
    *  焦点进输入框）；close 关闭并归还焦点；step 循环定位上一/下一匹配。
    *  查找是纯只读视图操作：不写文档、不产生编辑历史、无 webview→宿主消息 */
@@ -445,6 +457,21 @@ export type WebviewToHost =
   /** 图片资源解析请求（#10）：非 http(s) 直连的工作区图源经宿主解析为
    *  webview 可加载地址（reqId 会话面板内自增，对应 image.result） */
   | { kind: 'image.request'; sessionId: string; docUri: string; reqId: number; src: string }
+  /** 图片粘贴落盘（#161）：webview paste 拦截命中 image/* 剪贴板项后出站；
+   *  mime 为 image/*、dataBase64 为严格 base64（上限见 IMAGE_PASTE_LIMITS），
+   *  fileNameHint 可选（剪贴板文件的原始名，宿主判定合成名后决定沿用或
+   *  时间戳命名）。宿主按设置解析目录 → 建目录 → 写盘，结果经
+   *  image.paste.result 回来源面板（载荷形态照 diagram.export 的 base64
+   *  先例） */
+  | {
+      kind: 'image.paste'
+      sessionId: string
+      docUri: string
+      reqId: number
+      mime: string
+      dataBase64: string
+      fileNameHint?: string
+    }
   /** 代码块复制请求（#81）：卡片头部复制按钮点击 → 宿主剪贴板 API 写入。
    *  text 为代码体原文（两条围栏行之间，不含围栏与 info string），恒为
    *  LF（CM6 LF 模型）；宿主按文档 EOL 归一后写剪贴板（webview 不触碰
@@ -1488,6 +1515,10 @@ function isString(v: unknown): boolean {
   return typeof v === 'string'
 }
 
+/** #161 图片粘贴 base64 形态（严格 base64；与 diagramExportValidate 同式，
+ *  该常量归协议层因校验在此侧发生） */
+const BASE64_STRICT = /^[A-Za-z0-9+/]+={0,2}$/
+
 /** 非负数值（含小数）：滚动位置/元素位置等亚像素观测量 */
 function isNonNegativeNumber(v: unknown): boolean {
   return typeof v === 'number' && Number.isFinite(v) && v >= 0
@@ -1657,6 +1688,20 @@ export type DiagramExportPayload = Extract<WebviewToHost, { kind: 'diagram.expor
 
 /** #111 图表导出失败原因（cancelled=用户取消另存为对话框） */
 export type DiagramExportFailReason = 'cancelled' | 'invalid' | 'writeFailed'
+
+/** #161 图片粘贴载荷上限（单一事实源；协议校验与宿主防御共用） */
+export const IMAGE_PASTE_LIMITS = {
+  /** dataBase64 上限（字符；约 12MB 二进制，与 diagram.export PNG 档同量级） */
+  dataBase64MaxChars: 16_000_000,
+  /** fileNameHint 上限（字符；清洗/时间戳名不受此限） */
+  fileNameHintMaxChars: 255,
+} as const
+
+/** #161 图片粘贴请求载荷（宿主侧消费形态） */
+export type ImagePastePayload = Extract<WebviewToHost, { kind: 'image.paste' }>
+
+/** #161 图片粘贴失败原因（invalid-location=目录非法；write-failed=写盘；invalid=载荷） */
+export type ImagePasteFailReason = 'invalid-location' | 'write-failed' | 'invalid'
 
 export function isWebviewToHost(v: unknown): v is WebviewToHost {
   if (!isObject(v)) {
@@ -1829,6 +1874,24 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         isPositiveInt(v.reqId) &&
         isString(v.src)
       )
+    case 'image.paste':
+      // #161 图片粘贴：mime 白名单形态（image/*）、严格 base64 + 上限、
+      // fileNameHint 可选限长（非法整体丢弃，不部分读取）
+      return (
+        isString(v.sessionId) &&
+        isString(v.docUri) &&
+        isPositiveInt(v.reqId) &&
+        typeof v.mime === 'string' &&
+        v.mime.startsWith('image/') &&
+        v.mime.length > 'image/'.length &&
+        typeof v.dataBase64 === 'string' &&
+        v.dataBase64.length > 0 &&
+        v.dataBase64.length <= IMAGE_PASTE_LIMITS.dataBase64MaxChars &&
+        BASE64_STRICT.test(v.dataBase64) &&
+        (v.fileNameHint === undefined ||
+          (typeof v.fileNameHint === 'string' &&
+            v.fileNameHint.length <= IMAGE_PASTE_LIMITS.fileNameHintMaxChars))
+      )
     case 'perf.report':
       return (
         isNonNegativeInt(v.typingRounds) &&
@@ -1977,6 +2040,18 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         )
       }
       return false
+    case 'image.paste.result':
+      // #161 图片粘贴结果：ok 携完整插入文本；失败 reason 枚举
+      if (!isPositiveInt(v.reqId)) {
+        return false
+      }
+      if (v.ok === true) {
+        return isString(v.markdown)
+      }
+      return (
+        v.ok === false &&
+        (v.reason === 'invalid-location' || v.reason === 'write-failed' || v.reason === 'invalid')
+      )
     case 'view.find.open':
       return v.query === undefined || isString(v.query)
     case 'view.find.close':

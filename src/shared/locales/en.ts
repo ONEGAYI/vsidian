@@ -430,6 +430,20 @@ export const en = {
   'command.ui.outlineReset.title': 'Reset outline',
   'command.ui.outlineCollapseAll.title': 'Collapse all outline headings',
   'command.ui.outlineExpandAll.title': 'Expand all outline headings',
+  // ---- #161 image paste (setting entries + host notifications) ----
+  'setting.imagePaste.title': 'Paste images from clipboard',
+  'setting.imagePaste.description': 'When pasting an image in the live preview, save it to the configured asset folder and insert a Markdown image reference at the cursor.',
+  'setting.imagePasteLocation.title': 'Image save location',
+  'setting.imagePasteLocation.description': 'Where pasted images are saved: next to the current file, under the workspace root plus subpath, or next to the current file plus subpath. The subpath applies to the last two modes only.',
+  'setting.imagePasteLocationSameDir': 'Same folder as the file',
+  'setting.imagePasteLocationWorkspaceRoot': 'Relative to workspace root',
+  'setting.imagePasteLocationRelativeToFile': 'Relative to current file',
+  'setting.imagePasteSubpath.title': 'Image subpath',
+  'setting.imagePasteSubpath.description': 'Subfolder appended in the workspace-root and relative-to-file modes (ignored in the same-folder mode). Absolute paths and parent traversal (..) are rejected.',
+  'host.imagePasteInvalidLocation': 'Pasted image was not saved: the configured subpath "{subpath}" is invalid (absolute paths and ".." are not allowed).',
+  'host.imagePasteNoWorkspaceFallback': 'No workspace folder is open; the pasted image was saved next to the current file.',
+  'host.imagePasteWriteFailed': 'Failed to save the pasted image.',
+
 } as const satisfies Record<string, string>
 
 /** 字典键：点分扁平键，以本包为类型基准（编译期检查 t() 取词键） */

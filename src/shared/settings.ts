@@ -70,7 +70,23 @@ export interface StringEnumSettingDefinition extends SettingDefinitionBase {
   optionLabelKeys?: Readonly<Record<string, MessageKey>>
 }
 
-export type SettingDefinition = BooleanSettingDefinition | StringEnumSettingDefinition
+/**
+ * 字符串自由文本设置项（#161 图片粘贴）：无值域的受限文本——长度上限
+ * 必填（防误存超长字符串进 globalState 与协议载荷），设置页渲染为
+ * text input。与 StringEnum 的分型判据是 enum 字段有无（两者 type 同为
+ * 'string'，TS 经 `'enum' in def` 收窄）。
+ */
+export interface StringTextSettingDefinition extends SettingDefinitionBase {
+  type: 'string'
+  default: string
+  /** 值长度上限（正整数；default 与存量/补丁值均不得超限） */
+  maxLength: number
+}
+
+export type SettingDefinition =
+  | BooleanSettingDefinition
+  | StringEnumSettingDefinition
+  | StringTextSettingDefinition
 
 /**
  * #34「显示行号」：实时预览侧 CM6 行号栏开关。键与消费方常量成对导出——
@@ -150,13 +166,42 @@ export const LANGUAGE_KEY = 'general.language'
 export const LANGUAGE_DEFAULT = 'auto'
 
 /**
+ * #161「粘贴图片插入」总开关：Live 正文粘贴剪贴板图片时拦截并落盘为
+ * 资产文件、光标处插入图片引用。关闭后粘贴回到 CM6 默认行为（零拦截）。
+ * 键与消费方（webview paste 拦截守卫、宿主落盘链路）成对导出。
+ */
+export const IMAGE_PASTE_KEY = 'image.paste'
+export const IMAGE_PASTE_DEFAULT = true
+
+/**
+ * #161 图片存放位置模式（StringEnum）：same-dir=与当前文件同目录（默认）；
+ * workspace-root=工作区第一文件夹根 + 子路径；relative-to-file=当前文档
+ * 所在目录 + 子路径。解析纯函数在 host/imagePastePlan（URI path 空间）。
+ */
+export const IMAGE_PASTE_LOCATION_KEY = 'image.pasteLocation'
+export const IMAGE_PASTE_LOCATION_MODES = ['same-dir', 'workspace-root', 'relative-to-file'] as const
+export type ImagePasteLocationMode = (typeof IMAGE_PASTE_LOCATION_MODES)[number]
+export const IMAGE_PASTE_LOCATION_DEFAULT: ImagePasteLocationMode = 'same-dir'
+
+/**
+ * #161 图片存放子路径（自由文本，默认 assets）：workspace-root /
+ * relative-to-file 模式下拼在根后；same-dir 模式不生效（描述文案写明）。
+ * 目录解析拒绝绝对路径与 `..` 越界（违规粘贴失败通知，不落盘）。
+ */
+export const IMAGE_PASTE_SUBPATH_KEY = 'image.pasteSubpath'
+export const IMAGE_PASTE_SUBPATH_DEFAULT = 'assets'
+/** 子路径长度上限（与定义 maxLength 同源；防超长字符串进存储与消息） */
+export const IMAGE_PASTE_SUBPATH_MAX_LENGTH = 200
+
+/**
  * 生产设置定义注册表：#33 交付空状态页面与完整数据链路，#34 加入首个
  * 实际设置项「显示行号」（设置页自此渲染真实开关），#79 加入「代码块卡片」，
  * #80 加入「卡内行号」，#81 加入「复制按钮」，#83 加入「语法高亮」，#96
  * 加入「界面语言」（首个 string 枚举项，归属设置页「常规」分组——键前缀
  * general.* 的定义渲染进常规分组，见 settingsPageView 分组规则），#123
  * 加入「符号自动补全」，#124 加入「选区符号包裹」，#125 加入「符号 Tab
- * 越界」（三者独立布尔开关，见上方键常量注释）。
+ * 越界」（三者独立布尔开关，见上方键常量注释），#161 加入图片粘贴三件
+ * （总开关 / 存放模式枚举 / 子路径自由文本，首个 StringText 型）。
  * #95 i18n 起文案字段键化（titleKey/descriptionKey → 字典 setting.*），
  * 注册表不再含用户可见字面量。
  */
@@ -230,6 +275,36 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     default: SYMBOL_TAB_ESCAPE_DEFAULT,
     titleKey: 'setting.symbolTabEscape.title',
     descriptionKey: 'setting.symbolTabEscape.description',
+  },
+  // #161 图片粘贴：总开关 + 存放模式枚举 + 子路径自由文本（首个
+  // StringTextSettingDefinition——设置页 text input 控件分支随本批接入）
+  {
+    key: IMAGE_PASTE_KEY,
+    type: 'boolean',
+    default: IMAGE_PASTE_DEFAULT,
+    titleKey: 'setting.imagePaste.title',
+    descriptionKey: 'setting.imagePaste.description',
+  },
+  {
+    key: IMAGE_PASTE_LOCATION_KEY,
+    type: 'string',
+    default: IMAGE_PASTE_LOCATION_DEFAULT,
+    enum: IMAGE_PASTE_LOCATION_MODES,
+    titleKey: 'setting.imagePasteLocation.title',
+    descriptionKey: 'setting.imagePasteLocation.description',
+    optionLabelKeys: {
+      'same-dir': 'setting.imagePasteLocationSameDir',
+      'workspace-root': 'setting.imagePasteLocationWorkspaceRoot',
+      'relative-to-file': 'setting.imagePasteLocationRelativeToFile',
+    },
+  },
+  {
+    key: IMAGE_PASTE_SUBPATH_KEY,
+    type: 'string',
+    default: IMAGE_PASTE_SUBPATH_DEFAULT,
+    maxLength: IMAGE_PASTE_SUBPATH_MAX_LENGTH,
+    titleKey: 'setting.imagePasteSubpath.title',
+    descriptionKey: 'setting.imagePasteSubpath.description',
   },
 ]
 
@@ -318,6 +393,16 @@ export function isSettingDefinition(v: unknown): v is SettingDefinition {
     return typeof v.default === 'boolean'
   }
   if (v.type === 'string') {
+    // #161 自由文本形态：无 enum + maxLength 正整数 + default 不超限
+    if (v.enum === undefined) {
+      return (
+        typeof v.default === 'string' &&
+        typeof v.maxLength === 'number' &&
+        Number.isInteger(v.maxLength) &&
+        v.maxLength > 0 &&
+        v.default.length <= v.maxLength
+      )
+    }
     // #93 string 枚举：值域非空、全字符串、无重复，默认值在值域内
     if (
       typeof v.default !== 'string' ||
@@ -348,12 +433,16 @@ export function isSettingDefinition(v: unknown): v is SettingDefinition {
   return false
 }
 
-/** 值是否符合定义的类型（boolean 布尔；string 枚举值域内字符串） */
+/** 值是否符合定义的类型（boolean 布尔；string 枚举值域内 / 自由文本不超
+ *  上限的字符串——按 enum 有无分型，与 isSettingDefinition 同判据） */
 function valueMatchesType(def: SettingDefinition, value: unknown): boolean {
   if (def.type === 'boolean') {
     return typeof value === 'boolean'
   }
-  return typeof value === 'string' && def.enum.includes(value)
+  if ('enum' in def) {
+    return typeof value === 'string' && def.enum.includes(value)
+  }
+  return typeof value === 'string' && value.length <= def.maxLength
 }
 
 /** 按定义表产出默认值快照 */

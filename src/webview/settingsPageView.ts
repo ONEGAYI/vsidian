@@ -7,7 +7,14 @@
 import { t, onLocaleChanged } from '../shared/i18n'
 import { bindLocale } from './localeDom'
 import { isHostToWebview } from '../shared/protocol'
-import { isSettingEnabled, type SettingDefinition, type SettingsPayload, type SettingsPayloadValue } from '../shared/settings'
+import {
+  isSettingEnabled,
+  type SettingDefinition,
+  type SettingsPayload,
+  type SettingsPayloadValue,
+  type StringEnumSettingDefinition,
+  type StringTextSettingDefinition,
+} from '../shared/settings'
 
 export interface SettingsPageBridge { postMessage(message: unknown): void }
 
@@ -30,6 +37,8 @@ export const SETTINGS_PAGE_CLASS_NAMES = {
   item: 'vsidian-settings-item', itemTitle: 'vsidian-settings-item-title',
   itemDescription: 'vsidian-settings-item-description', checkbox: 'vsidian-settings-checkbox',
   select: 'vsidian-settings-select',
+  /** #161 自由文本设置项的 text input（类名随控件分支稳定） */
+  textInput: 'vsidian-settings-text',
   empty: 'vsidian-settings-empty',
 } as const
 
@@ -154,7 +163,13 @@ export class SettingsPageView {
       // 同步值不重建分页，也不夺走搜索框和开关的键盘焦点。
       for (const box of this.listEl?.querySelectorAll<HTMLInputElement>('input[data-setting-key]') ?? []) {
         const def = this.defs.find((d) => d.key === box.dataset.settingKey)!
-        box.checked = this.value(def) === true
+        // #161 控件分型回显：checkbox 用 checked；自由文本 text input 用
+        // value（同一 data-setting-key 选择器命中两类控件）
+        if (box.type === 'text') {
+          box.value = String(this.value(def))
+        } else {
+          box.checked = this.value(def) === true
+        }
         this.setControlDisabled(box, box.closest(`.${SETTINGS_PAGE_CLASS_NAMES.item}`), !isSettingEnabled(this.defs, this.values ?? {}, def))
       }
       for (const select of this.listEl?.querySelectorAll<HTMLSelectElement>('select[data-setting-key]') ?? []) {
@@ -172,7 +187,12 @@ export class SettingsPageView {
     if (def.type === 'boolean') {
       return typeof raw === 'boolean' ? raw : def.default
     }
-    return typeof raw === 'string' && def.enum.includes(raw) ? raw : def.default
+    // #161 string 分型：枚举按值域；自由文本按 maxLength（与
+    // valueMatchesType 同口径，超长/类型不符回默认）
+    if ('enum' in def) {
+      return typeof raw === 'string' && def.enum.includes(raw) ? raw : def.default
+    }
+    return typeof raw === 'string' && raw.length <= def.maxLength ? raw : def.default
   }
   /** #96 分组规则：键前缀 general.* 的定义归属 general 分组（标题经 t()
    * 取词），其余归编辑器分组 */
@@ -306,9 +326,10 @@ export class SettingsPageView {
       const text = element('span', 'vsidian-settings-item-copy')
       text.append(element('span', SETTINGS_PAGE_CLASS_NAMES.itemTitle, t(def.titleKey)))
       // #93 控件分流：boolean → 复选开关；string 枚举 → 下拉（enum 顺序即
-      // 选项顺序，显示名见 optionLabel 的三级回退）
+      // 选项顺序，显示名见 optionLabel 的三级回退）；#161 string 自由文本
+      // → text input（enum 有无分型，maxLength 上限随定义）
       const control: HTMLInputElement | HTMLSelectElement = def.type === 'string'
-        ? this.buildSelect(def)
+        ? ('enum' in def ? this.buildSelect(def) : this.buildTextInput(def))
         : this.buildCheckbox(def)
       if (!isSettingEnabled(this.defs, this.values ?? {}, def)) {
         this.setControlDisabled(control, item, true)
@@ -385,8 +406,29 @@ export class SettingsPageView {
     })
     return select
   }
+
+  /**
+   * #161 自由文本控件：text input，值经宿主按定义校验（超长整批拒绝后
+   * 以权威快照回显恢复）；change（失焦/回车）时上送，与 checkbox/select
+   * 同一保存链路
+   */
+  private buildTextInput(def: StringTextSettingDefinitionLike): HTMLInputElement {
+    const input = element('input', SETTINGS_PAGE_CLASS_NAMES.textInput)
+    input.type = 'text'
+    input.value = String(this.value(def))
+    input.maxLength = def.maxLength
+    input.addEventListener('change', () => {
+      if (!this.pending) this.saveFailed = false
+      this.pending++
+      if (this.status) this.status.textContent = t('settings.saving')
+      this.bridge.postMessage({ kind: 'settings.set', values: { [def.key]: input.value } })
+    })
+    return input
+  }
 }
 
-/** 渲染层对两类定义的结构收窄（避免在分流点反复判 type） */
+/** 渲染层对定义的结构收窄（避免在分流点反复判 type）；string 双形态直接
+ *  引用 shared 接口（#161：枚举 / 自由文本按 enum 有无分型） */
 type BooleanSettingDefinitionLike = Extract<SettingDefinition, { type: 'boolean' }>
-type StringEnumSettingDefinitionLike = Extract<SettingDefinition, { type: 'string' }>
+type StringEnumSettingDefinitionLike = StringEnumSettingDefinition
+type StringTextSettingDefinitionLike = StringTextSettingDefinition

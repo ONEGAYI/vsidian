@@ -396,4 +396,17 @@ export const zhCn: Record<MessageKey, string> = {
   'command.ui.outlineReset.title': '重置大纲',
   'command.ui.outlineCollapseAll.title': '折叠全部大纲',
   'command.ui.outlineExpandAll.title': '展开全部大纲',
+  // ---- #161 图片粘贴（设置项与宿主通知）----
+  'setting.imagePaste.title': '粘贴图片插入',
+  'setting.imagePaste.description': '实时预览中粘贴剪贴板图片时，自动保存到配置的资产文件夹并在光标处插入图片引用。',
+  'setting.imagePasteLocation.title': '图片存放位置',
+  'setting.imagePasteLocation.description': '粘贴图片的落盘位置：与当前文件同目录、相对工作区根加子路径、或相对当前文件加子路径。子路径仅对后两种模式生效。',
+  'setting.imagePasteLocationSameDir': '与当前文件同目录',
+  'setting.imagePasteLocationWorkspaceRoot': '相对工作区根',
+  'setting.imagePasteLocationRelativeToFile': '相对当前文件',
+  'setting.imagePasteSubpath.title': '图片存放子路径',
+  'setting.imagePasteSubpath.description': '「相对工作区根」与「相对当前文件」模式下拼接的子文件夹（同目录模式不生效）。拒绝绝对路径与 .. 越界。',
+  'host.imagePasteInvalidLocation': '粘贴图片未保存：子路径 {subpath} 非法（不允许绝对路径或 ..）。',
+  'host.imagePasteNoWorkspaceFallback': '未打开工作区文件夹，粘贴图片已保存到当前文件同目录。',
+  'host.imagePasteWriteFailed': '粘贴图片保存失败。',
 }

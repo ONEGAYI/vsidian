@@ -1876,3 +1876,47 @@ describe('CSS 片段消息协议（#128）', () => {
     expect(isHostToWebview({ ...base, rejections: [1, 2] })).toBe(false)
   })
 })
+
+describe('图片粘贴消息协议（#161）', () => {
+  const base = {
+    kind: 'image.paste',
+    sessionId: 'panel-1',
+    docUri: 'file:///d/a.md',
+    reqId: 2,
+    mime: 'image/png',
+    dataBase64: 'aGk=',
+  }
+  it('合法载荷通过 isWebviewToHost（fileNameHint 可选）', () => {
+    expect(isWebviewToHost(base)).toBe(true)
+    expect(isWebviewToHost({ ...base, fileNameHint: 'shot.png' })).toBe(true)
+  })
+  it('mime 必须 image/*、base64 严格形态、reqId 正整数；非法整体丢弃', () => {
+    expect(isWebviewToHost({ ...base, mime: 'text/plain' })).toBe(false)
+    expect(isWebviewToHost({ ...base, mime: 'image' })).toBe(false)
+    expect(isWebviewToHost({ ...base, dataBase64: 'not base64!' })).toBe(false)
+    expect(isWebviewToHost({ ...base, dataBase64: '' })).toBe(false)
+    expect(isWebviewToHost({ ...base, reqId: 0 })).toBe(false)
+    expect(isWebviewToHost({ ...base, sessionId: 1 })).toBe(false)
+    expect(isWebviewToHost({ ...base, fileNameHint: 42 })).toBe(false)
+    expect(isWebviewToHost({ ...base, fileNameHint: 'x'.repeat(300) })).toBe(false)
+  })
+  it('dataBase64 超上限拒绝（约 12MB 二进制）', () => {
+    const tooBig = 'A'.repeat(16_000_001)
+    expect(isWebviewToHost({ ...base, dataBase64: tooBig })).toBe(false)
+    const atLimit = 'A'.repeat(16_000_000)
+    expect(isWebviewToHost({ ...base, dataBase64: atLimit })).toBe(true)
+  })
+  it('image.paste.result 双向校验：ok 携 markdown、失败 reason 枚举', () => {
+    expect(isHostToWebview({ kind: 'image.paste.result', reqId: 2, ok: true, markdown: '![a](a.png)' })).toBe(true)
+    expect(isHostToWebview({ kind: 'image.paste.result', reqId: 2, ok: false, reason: 'invalid-location' })).toBe(true)
+    expect(isHostToWebview({ kind: 'image.paste.result', reqId: 2, ok: false, reason: 'write-failed' })).toBe(true)
+    expect(isHostToWebview({ kind: 'image.paste.result', reqId: 2, ok: false, reason: 'invalid' })).toBe(true)
+    expect(isHostToWebview({ kind: 'image.paste.result', reqId: 2, ok: false, reason: 'nope' })).toBe(false)
+    expect(isHostToWebview({ kind: 'image.paste.result', reqId: 2, ok: false })).toBe(false)
+    expect(isHostToWebview({ kind: 'image.paste.result', reqId: 2, ok: true, markdown: 1 })).toBe(false)
+    expect(isHostToWebview({ kind: 'image.paste.result', reqId: 2, ok: true })).toBe(false)
+    // 方向校验
+    expect(isWebviewToHost({ kind: 'image.paste.result', reqId: 2, ok: true, markdown: 'x' })).toBe(false)
+    expect(isHostToWebview({ ...base })).toBe(false)
+  })
+})

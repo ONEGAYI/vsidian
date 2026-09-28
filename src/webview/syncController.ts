@@ -65,6 +65,8 @@ import {
   CODEBLOCK_HIGHLIGHT_KEY,
   CODEBLOCK_LINE_NUMBERS_DEFAULT,
   CODEBLOCK_LINE_NUMBERS_KEY,
+  IMAGE_PASTE_DEFAULT,
+  IMAGE_PASTE_KEY,
   SHOW_LINE_NUMBERS_DEFAULT,
   SHOW_LINE_NUMBERS_KEY,
   SYMBOL_AUTOCOMPLETE_DEFAULT,
@@ -104,6 +106,7 @@ import { graphicRendererFor, renderGraphicBlockInto } from './graphicRenderers'
 import { GRAPHIC_CHROME_CLASS_NAMES, wrapGraphicFrame } from './graphicBlockChrome'
 import { GRAPHIC_LANG_ATTR, MERMAID_CLASS_NAMES, MERMAID_CODE_ATTR, MERMAID_STATE_ATTR } from '../shared/mermaid'
 import { ImageResourceManager } from './imageResource'
+import { createImagePaste, imagePasteCanInsertAt } from './imagePaste'
 import { runPerfProbe } from './perfProbe'
 import { runReadingPerfProbe } from './readingProbe'
 import { createReadingContainer, prepareReadingImages, READING_CLASS_NAMES } from './readingView'
@@ -679,6 +682,12 @@ export class WebviewSyncController {
   private tabEscapeOn = SYMBOL_TAB_ESCAPE_DEFAULT
   private readonly tabEscapeCompartment = new Compartment()
 
+  /** #161 图片粘贴：面板内自增 reqId 与在途集合（结果按 reqId 路由，
+   *  陈旧/未知 reqId 的回包丢弃，防止重复插入）；总开关运行时读设置
+   *  快照（handler 每次事件自取，无需 Compartment——未命中直接放行） */
+  private imagePasteReqId = 0
+  private readonly imagePastePending = new Set<number>()
+
   /** #84 阅读侧折叠集合：键 = 块 data-vsidian-src-start（视图态，不持久化；
    *  块卸载重挂载后经此恢复收起形态） */
   private readonly readingCodeFold = new Set<number>()
@@ -1157,6 +1166,36 @@ export class WebviewSyncController {
             this.scheduleSnippetMeasure()
             this.scheduleSnippetMeasureOnFontArrival()
           }
+        })
+        break
+      }
+      case 'image.paste.result': {
+        // #161 图片粘贴落盘结果：reqId 在途校验（陈旧/未知回包丢弃）；
+        // 成功在光标处单事务插入宿主计算好的 markdown（守卫对齐格式操作
+        // ——live、非暂停、可编辑；单笔 dispatch = 一笔 edit.request =
+        // 撤销一步还原）；失败不插入文本（宿主已弹 i18n 通知）
+        if (!this.imagePastePending.delete(message.reqId)) {
+          break
+        }
+        if (!message.ok) {
+          break
+        }
+        const view = this.view
+        if (
+          !view ||
+          !imagePasteCanInsertAt({
+            live: this.viewMode === 'live',
+            suspended: this.suspended,
+            editable: !view.state.readOnly && view.state.facet(EditorView.editable),
+          })
+        ) {
+          break
+        }
+        const range = view.state.selection.main
+        view.dispatch({
+          changes: { from: range.from, to: range.to, insert: message.markdown },
+          selection: { anchor: range.from + message.markdown.length },
+          scrollIntoView: true,
         })
         break
       }
@@ -6562,6 +6601,25 @@ export class WebviewSyncController {
       // #120 Tab/Shift+Tab 通用行缩进：排在 tableEditing 之后（表格
       // 单元格导航优先，表格行不缩进）、defaultKeymap 之前
       indentEditing,
+      // #161 图片粘贴拦截（paste domEventHandler）：无 keymap/filter 顺序
+      // 语义（paste 与其他 DOM handler 互不竞争），置于装饰与编辑钩子之后
+      // 仅作分组；命中 image/* 剪贴板项即出站宿主落盘，未命中放行默认粘贴
+      createImagePaste({
+        isEnabled: () => {
+          const raw = this.settings?.[IMAGE_PASTE_KEY]
+          const enabled = typeof raw === 'boolean' ? raw : IMAGE_PASTE_DEFAULT
+          // 阅读模式不接管（只读语义）；暂停面板不产生新写回链路
+          return enabled && this.viewMode === 'live' && !this.suspended
+        },
+        getSession: () => (this.sessionId ? { sessionId: this.sessionId, docUri: this.docUri } : null),
+        nextReqId: () => ++this.imagePasteReqId,
+        post: (message) => {
+          if (message.kind === 'image.paste') {
+            this.imagePastePending.add(message.reqId)
+          }
+          this.bridge.postMessage(message)
+        },
+      }),
       // 查找装饰（#14）：当前匹配（直接）+ 全部匹配（视口内间接）
       findDecorations,
       ...this.extraExtensions,
