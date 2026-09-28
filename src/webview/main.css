@@ -49,9 +49,11 @@ body {
      见下方阅读视图注释）。缺省 none = 铺满（bug #174 修复：默认无限宽）；
      Obsidian 别名 --file-line-width 同接两变量（Obsidian 语义即一个全局
      行宽管两视图）。设置值（editor.readableLineWidth 非 0 档）由
-     syncController 以内联形式写到挂载根元素——内联优先于本处定义与片段
-     常规规则（设置优先，片段 !important 可覆盖）；0 档不写内联，本处
-     缺省生效，片段常规规则可分别定制两模式。 */
+     syncController 以内联形式写到挂载根元素——优先序两级：根级片段
+     （同元素/祖先声明）需 !important 才覆盖内联；按视图作用域声明的
+     后代级片段（如 #app .vsidian-view-reading { … }）继承链更近、常规
+     规则即可生效，这正是两模式差异化定制路径。0 档不写内联，本处
+     缺省生效，片段全层级可定制。 */
   --vsidian-reading-max-width: var(--file-line-width, none);
   --vsidian-live-preview-max-width: var(--file-line-width, none);
   /* ---- #132 Obsidian 变量别名桥：下列 vsidian 公开变量的默认定义含

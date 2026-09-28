@@ -53,8 +53,8 @@ node test/browser/readingWidthProbe.mjs   # 工作树内，真实 Chromium + 生
 - **避让与居中（Q4）**：内容宽 = min(设定宽, 主区可用宽)，无额外下限；内容列在主区（侧栏左缘以左的整个「左中」区域）内水平居中，侧栏展开/收起动画期间实时跟随（纯 CSS，回路 A3′ 届时转绿）。
 - **行号列（Q5）**：行号列贴正文列左缘、随列一起居中（Obsidian 行为）；#32「行号列+间距+正文总宽=无行号正文宽」契约在限宽态修订表述并联动契约测试。
 - **宽块内容（Q6）**：表格、代码块卡片、frontmatter 卡片、Mermaid 一并钳制进正文列（Obsidian 同款）；表格自身列宽逻辑在列内不变。
-- **变量落点（Q7，用户方案）**：**双变量**——`--vsidian-reading-max-width`（既有，阅读侧）+ 新增 `--vsidian-live-preview-max-width`（Live 侧）。滑块一份值**同时写两变量**；CSS 片段可分别单独覆盖任一模式实现差异化。设置优先：非 0 档内联落值，片段覆盖需 `!important`。
-- **铺满档机制（Q8，用户定 0 = 铺满；机制随第二轮一并确认）**：0 档产品**不写内联变量**（对齐 Obsidian「关限宽即零干预」：CSS 缺省为不限宽，片段常规规则即可定制两模式）；非 0 档写内联两变量。两基础变量缺省值由 760px / 无 → **`none`**（铺满）。
+- **变量落点（Q7，用户方案）**：**双变量**——`--vsidian-reading-max-width`（既有，阅读侧）+ 新增 `--vsidian-live-preview-max-width`（Live 侧）。滑块一份值**同时写两变量**；CSS 片段可分别单独覆盖任一模式实现差异化。优先序两级：非 0 档内联落**挂载根**——根级片段（同元素/祖先声明）覆盖需 `!important`；**按视图作用域声明的后代级片段**（如 `#app .vsidian-view-reading { … }`）继承链更近、常规规则即可生效（差异化定制路径）。
+- **铺满档机制（Q8，用户定 0 = 铺满；机制随第二轮一并确认）**：0 档产品**不写内联变量**（对齐 Obsidian「关限宽即零干预」：CSS 缺省为不限宽，片段全层级常规规则即可定制两模式）；非 0 档写内联两变量。两基础变量缺省值由 760px / 无 → **`none`**（铺满）。
 - **Obsidian 别名扩展（Q9，用户同意）**：`--file-line-width` 接进**两变量**兜底链——`--vsidian-reading-max-width: var(--file-line-width, none)` 与 `--vsidian-live-preview-max-width: var(--file-line-width, none)`；别名桥 `obsidianAlias.ts` 同源表为 live 变量加行（fallback `none`）。片段设一个 Obsidian 名同管两模式（Obsidian 心智），差异化改用 vsidian 双名。
 
 ### 非目标
@@ -189,7 +189,7 @@ docs/specs/viewport-width.md（分支 impl/2026-09-viewport-width）。
 ### 行为契约（钉住，不得顺手放宽）
 
 - **双变量同写**：`--vsidian-reading-max-width` 与 `--vsidian-live-preview-max-width` 定义于 **#app 层**（阅读层不得重复定义——会遮蔽设置内联值）；缺省 `var(--file-line-width, none)`，别名桥两行同源（`obsidianAlias.ts`）。
-- **0 = 铺满零干预**：`applyReadableLineWidthSetting`（syncController）在 0 档**移除内联**、非 0 档把 `Npx` 内联写到挂载根元素——设置优先，片段 `!important` 可覆盖；0 档片段常规规则生效。
+- **0 = 铺满零干预**：`applyReadableLineWidthSetting`（syncController）在 0 档**移除内联**、非 0 档把 `Npx` 内联写到挂载根元素——优先序两级：根级片段需 `!important` 覆盖内联，按视图作用域声明的后代级片段常规规则即生效（差异化路径）；0 档片段全层级可定制。
 - **居中单位**：阅读块 `margin-inline auto`；Live 是 `[.cm-gutters + 间距 + .cm-content]` 整组经 scroller `justify-content: safe center` 居中（safe 防溢出裁左缘），`.cm-content` 挂 max-width。**铺满态零位移**（flex-grow 占满，justify 无剩余空间），与旧布局一致。
 - **#32 行号契约修订**：铺满态行为不变；限宽态正文列宽 = min(设定宽， 可用宽 − 行号列足迹)，行号列随列移动、间距不变。
 - **设置项**：`editor.readableLineWidth`（number 型，0–1600 步进 20，默认 0）；number schema 校验只管类型与范围，0 语义归消费方；设置页 0 档显示词经定义的 `zeroLabelKey` 取词（注册表驱动，渲染层无特判）。

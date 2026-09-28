@@ -157,11 +157,13 @@ export class SettingsPageView {
       for (const box of this.listEl?.querySelectorAll<HTMLInputElement>('input[data-setting-key]') ?? []) {
         const def = this.defs.find((d) => d.key === box.dataset.settingKey)!
         if (def.type === 'number') {
-          // #175 滑块：值、值文本与 aria-valuetext 就地同步（铺满档显示词）
+          // #175 滑块：值、值文本与 aria-valuetext 就地同步（铺满档显示词）。
+          // 显示值读回 input.value：浏览器对 range 有步进吸附（手改存量
+          // 906 会吸附到 900），文本须与 thumb 实际位置一致
           const raw = this.value(def)
           const numeric = typeof raw === 'number' ? raw : def.default
           box.value = String(numeric)
-          this.syncRangeDisplay(def, box, numeric)
+          this.syncRangeDisplay(def, box, Number(box.value))
         } else {
           box.checked = this.value(def) === true
         }
@@ -429,8 +431,10 @@ export class SettingsPageView {
     const raw = this.value(def)
     const numeric = typeof raw === 'number' ? raw : def.default
     input.value = String(numeric)
-    const readout = element('span', SETTINGS_PAGE_CLASS_NAMES.rangeValue, this.numberValueText(def, numeric))
-    this.syncRangeDisplay(def, input, numeric, readout)
+    // 读回吸附后的值做显示（见快照同步处同注释）
+    const shown = Number(input.value)
+    const readout = element('span', SETTINGS_PAGE_CLASS_NAMES.rangeValue, this.numberValueText(def, shown))
+    this.syncRangeDisplay(def, input, shown, readout)
     input.addEventListener('input', () => this.syncRangeDisplay(def, input, Number(input.value), readout))
     input.addEventListener('change', () => {
       if (!this.pending) this.saveFailed = false

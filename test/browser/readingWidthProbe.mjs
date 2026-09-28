@@ -33,7 +33,7 @@ try {
   await page.addStyleTag({ path: output.replace(/\.js$/, '.css') })
   await page.addScriptTag({ path: output })
   const LONG = '这是一段足够长的正文文字用来撑满可用宽度并触发折行。'.repeat(12)
-  const DOC = `# 标题\n\n${LONG}\n\n${LONG}\n\n| 列一 | 列二 | 列三 | 列四 | 列五 |\n| --- | --- | --- | --- | --- |\n| 数据 | 数据 | 数据 | 数据 | 数据 |\n\n\`\`\`js\nconst width = 'clamped'\n\`\`\`\n`
+  const DOC = `---\ntitle: 宽度\n---\n\n# 标题\n\n${LONG}\n\n${LONG}\n\n| 列一 | 列二 | 列三 | 列四 | 列五 |\n| --- | --- | --- | --- | --- |\n| 数据 | 数据 | 数据 | 数据 | 数据 |\n\n\`\`\`js\nconst width = 'clamped'\n\`\`\`\n\n\`\`\`mermaid\ngraph LR\n  A --> B --> C\n\`\`\`\n`
   await page.evaluate((text) => window.initReadingWidth(text), DOC)
 
   /** 阅读侧观测：容器内容区与首个段落块的几何 */
@@ -140,24 +140,76 @@ try {
     `块宽=${reading.blockW.toFixed(1)} 可用=${reading.contentW.toFixed(1)}（1280 视口收侧栏后）`)
   await page.evaluate(() => window.setRwSidebar(false))
 
-  // —— A7：宽块同钳制（Q6：表格与代码块随正文列限宽）——
+  // —— A7：宽块同钳制（Q6：表格、代码块、frontmatter 卡、Mermaid 随正文列限宽）——
   await page.evaluate(() => window.setRwSettings({ 'editor.lineNumbers': true, 'editor.readableLineWidth': 600 }))
   await page.waitForTimeout(250) // 侧栏关闭过渡与重排稳定后再量
   const wideBlocks = await page.evaluate(() => {
     const view = document.querySelector('.vsidian-view-reading')
-    const table = view?.querySelector('table')
+    const table = view?.querySelector('.vsidian-reading-table table')
     const pre = view?.querySelector('pre')
+    const fm = view?.querySelector('.vsidian-reading-frontmatter .vsidian-fm-table')
+    const mermaid = view?.querySelector('.vsidian-reading-mermaid')
     return {
       tableW: table?.getBoundingClientRect().width ?? 0,
       tableLeft: table?.getBoundingClientRect().left ?? 0,
       preW: pre?.getBoundingClientRect().width ?? 0,
+      fmW: fm?.getBoundingClientRect().width ?? 0,
+      mermaidW: mermaid?.getBoundingClientRect().width ?? 0,
     }
   })
   check('A7 宽表格钳制进正文列（600）', wideBlocks.tableW <= 610 && wideBlocks.tableLeft > 300,
     `表宽=${wideBlocks.tableW.toFixed(1)} 左缘=${wideBlocks.tableLeft.toFixed(1)}（列内居中）`)
   check('A7 代码块钳制进正文列（600）', wideBlocks.preW <= 610 && wideBlocks.preW > 0,
     `代码块宽=${wideBlocks.preW.toFixed(1)}`)
+  check('A7 frontmatter 卡钳制进正文列（600）', wideBlocks.fmW <= 610 && wideBlocks.fmW > 0,
+    `FM 表宽=${wideBlocks.fmW.toFixed(1)}`)
+  check('A7 Mermaid 块钳制进正文列（600）', wideBlocks.mermaidW <= 610 && wideBlocks.mermaidW > 0,
+    `Mermaid 块宽=${wideBlocks.mermaidW.toFixed(1)}`)
   await page.evaluate(() => window.setRwSettings({ 'editor.readableLineWidth': 0 }))
+
+  // —— A8：长文档虚拟化重排（规格注意点 3：宽度变更 → 折行高度变 → 高度表重算）——
+  {
+    const page2 = await browser.newPage({ viewport: { width: 1280, height: 800 } })
+    const errors2 = []
+    page2.on('pageerror', (error) => errors2.push(error.message))
+    await page2.setContent('<div id="app"></div>')
+    await page2.addStyleTag({ path: output.replace(/\.js$/, '.css') })
+    await page2.addScriptTag({ path: output })
+    const PARAS = Array.from({ length: 150 }, (_, i) => `第${i}段 ${LONG}`).join('\n\n')
+    await page2.evaluate((text) => window.initReadingWidth(text), PARAS)
+    await page2.evaluate(() => window.setRwMode('reading'))
+    await page2.waitForSelector('.vsidian-reading-block p')
+    const readState = () => page2.evaluate(() => {
+      const view = document.querySelector('.vsidian-view-reading')
+      const blocks = [...view.querySelectorAll('.vsidian-reading-block')]
+      const first = blocks.find((b) => {
+        const r = b.getBoundingClientRect()
+        return r.bottom > 0 && r.top < innerHeight
+      })
+      return { scrollH: view.scrollHeight, scrollTop: view.scrollTop, visibleW: first?.getBoundingClientRect().width ?? 0, mounted: blocks.length }
+    })
+    await page2.evaluate(() => { document.querySelector('.vsidian-view-reading').scrollTop = 6000 })
+    await page2.waitForTimeout(300)
+    await page2.evaluate(() => window.setRwSettings({ 'editor.readableLineWidth': 600 }))
+    await page2.waitForTimeout(400)
+    const narrow = await readState()
+    check('A8 长文限宽：视口内已挂载块钳制到 600（虚拟化路径）',
+      Math.abs(narrow.visibleW - 600) < 2 && narrow.mounted < 150,
+      `可见块宽=${narrow.visibleW.toFixed(1)} 已挂载=${narrow.mounted}/150（虚拟化激活）`)
+    await page2.evaluate(() => window.setRwSettings({ 'editor.readableLineWidth': 0 }))
+    await page2.waitForTimeout(400)
+    const filled = await readState()
+    check('A8 宽度切铺满：总高变短（折行减少）且可见块铺满',
+      filled.scrollH < narrow.scrollH && filled.visibleW > 1000,
+      `总高 ${narrow.scrollH} → ${filled.scrollH}，可见块宽=${filled.visibleW.toFixed(1)}`)
+    await page2.evaluate(() => window.setRwSettings({ 'editor.readableLineWidth': 600 }))
+    await page2.waitForTimeout(400)
+    const back = await readState()
+    check('A8 切回限宽：高度表稳定复原', Math.abs(back.scrollH - narrow.scrollH) < 40,
+      `总高 ${narrow.scrollH} → ${back.scrollH}（往返一致）`)
+    check('A8 长文重排无脚本错误', errors2.length === 0, JSON.stringify(errors2))
+    await page2.close()
+  }
 
   // —— A6：优先序（设置 0 → 片段常规规则；设置 900 → 设置优先；!important 可覆盖）——
   const snippet = await page.addStyleTag({ content: '#app { --vsidian-reading-max-width: 700px; }' })
@@ -173,6 +225,21 @@ try {
   await page.waitForTimeout(50)
   reading = await measureReading()
   check('A6 限宽档：片段 !important 可覆盖设置', Math.abs(reading.blockW - 700) < 2,
+    `块宽=${reading.blockW.toFixed(1)}`)
+  // A6″ 差异化定制：按视图作用域声明的后代级片段常规规则即可单独覆盖
+  // 一侧（Q7 双变量方案的存在理由；继承链比挂载根内联更近）
+  await snippet.evaluate((el) => { el.textContent = '.vsidian-view-live { --vsidian-live-preview-max-width: 640px; }' })
+  await page.evaluate(() => window.setRwMode('live'))
+  await page.waitForSelector('.cm-line')
+  live = await measureLive()
+  check('A6 Live 侧片段单独覆盖（后代级常规规则，无需 !important）',
+    Math.abs(live.colW - 640) < 2,
+    `列宽=${live.colW.toFixed(1)}（设置 900，Live 作用域片段 640）`)
+  await page.evaluate(() => window.setRwMode('reading'))
+  await page.waitForSelector('.vsidian-reading-block p')
+  reading = await measureReading()
+  check('A6 阅读侧不受 Live 作用域片段影响（两模式差异化成立）',
+    Math.abs(reading.blockW - 900) < 2,
     `块宽=${reading.blockW.toFixed(1)}`)
   await snippet.evaluate((el) => { el.textContent = '' })
   await page.evaluate(() => window.setRwSettings({ 'editor.readableLineWidth': 0 }))

@@ -5513,10 +5513,11 @@ export class WebviewSyncController {
    * 应用可读行宽设置（#175；settings.snapshot / settings.changed 到达时）：
    * - 非 0 档：把两模式限宽变量（--vsidian-reading-max-width /
    *   --vsidian-live-preview-max-width，定义于 #app 层，见 main.css）以
-   *   内联形式写到挂载根元素——内联优先于 CSS 定义与片段常规规则
-   *   （设置优先，片段 !important 可覆盖）
+   *   内联形式写到挂载根元素——优先序两级：根级片段（同元素/祖先声明）
+   *   需 !important 覆盖；按视图作用域声明的后代级片段继承链更近、常规
+   *   规则即可生效（两模式差异化定制路径）
    * - 0 档（铺满，默认）：移除内联，变量落回 CSS 缺省 none——产品零
-   *   干预，片段常规规则可分别定制两模式（Q7/Q8 共识）
+   *   干预，片段全层级可定制（Q7/Q8 共识）
    * - 避让与居中由 CSS 层自动完成（min(设定宽, 可用宽) + 主区动态居中），
    *   此处仅落值；宽度变化后补 CM6 视口测量（重排不产生 CM6 事务，
    *   与 scheduleSnippetMeasure 同因）
