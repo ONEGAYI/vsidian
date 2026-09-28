@@ -95,6 +95,9 @@ export interface PanelPort {
    *  blockId 为 webview 侧块尾行既有 id 或刚经标准 edit.request 写入的
    *  新 id（写入与复制是两条消息，本端口只管拼接剪贴板） */
   writeBlockLinkClipboard?(docUri: string, blockId: string): void
+  /** #183 剪贴板读（粘贴桥）：vscode 层注入 env.clipboard.readText；读回
+   *  文本按 LF 归一（webview 全程 LF 坐标）；环境读失败返回 null */
+  readClipboard?(): Promise<string | null>
 }
 
 /** 会话通知（#4）：冲突暂停、复制请求、面板关闭时存在未确认输入等需要
@@ -398,6 +401,23 @@ export class DocumentSession {
           panel.port.writeBlockLinkClipboard?.(message.linkBlock.docUri, message.linkBlock.blockId)
         }
         return Promise.resolve()
+      case 'clipboard.read': {
+        // #183 剪贴板读（粘贴桥）：只读交互（与 clipboard.write 同口径，
+        // 暂停态同样放行）；端口未接线/读失败回报 read-failed（webview 静默
+        // 放弃粘贴，不弹窗）
+        const report = (result: { ok: true; text: string } | { ok: false; reason: 'read-failed' }): void => {
+          panel.port.send(result.ok
+            ? { kind: 'clipboard.read.result', reqId: message.reqId, ok: true, text: result.text }
+            : { kind: 'clipboard.read.result', reqId: message.reqId, ok: false, reason: result.reason })
+        }
+        if (!panel.port.readClipboard) {
+          report({ ok: false, reason: 'read-failed' })
+          return Promise.resolve()
+        }
+        return panel.port.readClipboard().then((text) => {
+          report(text === null ? { ok: false, reason: 'read-failed' } : { ok: true, text })
+        })
+      }
       case 'ready': {
         const wasReady = panel.ready
         this.sendInit(panel)

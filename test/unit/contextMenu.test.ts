@@ -84,7 +84,8 @@ describe('描述符表契约（CONTEXT_MENU_ITEMS）', () => {
   })
 
   it('内置菜单最深两级（根 → 子菜单）', () => {
-    expect(CONTEXT_MENU_ITEMS.some((def) => def.children?.some((child) => child.children?.length))).toBe(false)
+    expect(CONTEXT_MENU_ITEMS.some((def) =>
+      (def as MenuItemDescriptor).children?.some((child) => child.children?.length))).toBe(false)
   })
 
   it('三簇齐全：链接 / 块与格式 / 剪贴板（组序即簇序）', () => {
@@ -186,8 +187,11 @@ describe('空组收起（可见项为零时整组连同分隔线消失；置灰�
   })
 
   it('子项全部隐藏：父项随之隐藏（子菜单无叶不可留）', () => {
-    for (const def of flattenItems(CONTEXT_MENU_ITEMS).filter((d) => d.group === 'blockFormat' && d.children)) {
-      for (const child of def.children!) {
+    for (const def of flattenItems(CONTEXT_MENU_ITEMS)) {
+      if (def.group !== 'blockFormat' || !def.children) {
+        continue
+      }
+      for (const child of def.children) {
         hideContextMenuItem(child.id)
       }
       hideContextMenuItem(def.id)

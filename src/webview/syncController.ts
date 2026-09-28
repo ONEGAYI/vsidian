@@ -33,8 +33,8 @@ import { Annotation, ChangeSet, Compartment, EditorSelection, EditorState, Prec,
 import { EditorView, ViewPlugin, keymap } from '@codemirror/view'
 import { planFormatOperation } from './formatOperations'
 import { createQuickActionStateReader } from './quickActionState'
-import { FORMAT_OPERATIONS, type FormatOperationId } from '../shared/formatOperations'
-import { getEffectiveBindings } from '../shared/keybindings'
+import { FORMAT_OPERATIONS, isFormatOperationId, type FormatOperationId } from '../shared/formatOperations'
+import { getEffectiveBindings, type KeybindingOverrides } from '../shared/keybindings'
 import { KeybindingRouter } from './keybindingRouter'
 import { LINE_NUMBER_GUTTER_SELECTOR, liveLineNumbers, paintedLineNumbers } from './liveLineNumbers'
 import { CODE_CARD_CLASS_NAMES, codeCardConfigFacet, codeCardCopyRequest, codeCardFoldField, codeCardHoverReveal, liveCodeCard, type CodeCardConfig } from './liveCodeCard'
@@ -162,14 +162,16 @@ import {
   outlineMenuSpec,
   outlineStructuralExpand,
 } from './outlineMenu'
+import { applySubmenuFlip, buildMenuDom } from './contextMenuDom'
 import {
-  blockMenuTargetAt,
-  blockMenuPosition,
-  blockMenuSpec,
-  buildBlockMenu,
-  type BlockMenuCommand,
-  type BlockMenuTarget,
-} from './blockMenu'
+  buildContextMenuModel,
+  contextMenuBlockTargetAt,
+  contextMenuKeybindingHints,
+  contextMenuZoneAt,
+  menuViewportPosition,
+  type ContextMenuBlockTarget,
+  type MenuContextSnapshot,
+} from '../shared/contextMenu'
 import {
   blockIdOfLine,
   collectBlockIds,
@@ -642,17 +644,21 @@ export class WebviewSyncController {
   /** 菜单 Esc 关闭监听（document capture keydown；close 时摘除） */
   private outlineMenuDismissKey: ((e: KeyboardEvent) => void) | undefined
 
-  // ---- 正文右键菜单状态（#162 复制块链接）----
-  /** 当前打开的块菜单容器（挂 document.body，fixed 定位；undefined = 未打开） */
-  private blockMenuEl: HTMLElement | undefined
-  /** 菜单目标（块区间 + 命中行标题；菜单打开期间的命令分派对象） */
-  private blockMenuTarget: BlockMenuTarget | null = null
-  /** 菜单打开期间目标对应的文档快照（命令执行时 doc 已变则放弃——锚点过期防御） */
-  private blockMenuDoc: Text | null = null
+  // ---- 正文统一右键菜单状态（#183 全域接管；blockMenu 已退役并入）----
+  /** 当前打开的统一菜单容器（挂 document.body，fixed 定位；undefined = 未打开） */
+  private contextMenuEl: HTMLElement | undefined
+  /** 菜单目标快照（块区间 + 命中行标题；块链接两项的命令分派对象） */
+  private contextMenuTarget: ContextMenuBlockTarget | null = null
+  /** 菜单打开时的文档快照（命令执行时 doc 已变则放弃——锚点过期防御） */
+  private contextMenuDoc: Text | null = null
   /** 菜单外点关闭监听（document capture pointerdown；close 时摘除） */
-  private blockMenuDismissPointer: ((e: PointerEvent) => void) | undefined
+  private contextMenuDismissPointer: ((e: PointerEvent) => void) | undefined
   /** 菜单 Esc 关闭监听（document capture keydown；close 时摘除） */
-  private blockMenuDismissKey: ((e: KeyboardEvent) => void) | undefined
+  private contextMenuDismissKey: ((e: KeyboardEvent) => void) | undefined
+  /** 剪贴板读（粘贴桥）在途 reqId（陈旧回包丢弃；image.paste 在途表先例） */
+  private clipboardReadReqId = 0
+  /** 键位覆盖缓存（#183 提示列派生输入；keybindings.snapshot/changed 同步） */
+  private keybindingOverrides: KeybindingOverrides = {}
   /** 重命名编辑态的条目索引（null = 无编辑态；条目内容区被 input 替换） */
   private outlineRenameIndex: number | null = null
   /** 重命名打开时的 doc 快照（review-loops C1：提交前锚点防御——外部改写
@@ -1182,8 +1188,8 @@ export class WebviewSyncController {
     this.outlineToolbar = undefined
     // #69：菜单浮层与重命名编辑态随卸载退出（document 监听一并摘除）
     this.closeOutlineMenu()
-    // #162：正文块菜单随卸载退出（document 监听一并摘除）
-    this.closeBlockMenu()
+    // #183：统一右键菜单随卸载退出（document 监听一并摘除）
+    this.closeContextMenu()
     this.outlineRenameIndex = null
     this.outlineRenameDoc = null
     // #70：拖拽会话随卸载退出（document 监听一并摘除）
@@ -1232,6 +1238,7 @@ export class WebviewSyncController {
       case 'keybindings.changed': {
         const overrides = message.overrides
         this.keybindingRouter.update(overrides)
+        this.keybindingOverrides = overrides
         this.setQuickActionBindingHints((id) => getEffectiveBindings(overrides, id))
         break
       }
@@ -1613,27 +1620,48 @@ export class WebviewSyncController {
         this.closeOutlineMenu()
         break
       }
-      case 'block.test.contextMenu': {
-        // 测试钩子（#162）：在正文 doc 偏移 pos 处打开块菜单（与用户右键
+      case 'contextMenu.test.contextMenu': {
+        // 测试钩子（#183）：在正文 doc 偏移 pos 处打开统一菜单（与用户右键
         // 同一命中判定与装配链路——posAtCoords 的替代注入点；宿主测试无法
         // 向 webview 派发真实鼠标事件，不接管位同样不开菜单）
-        const target = this.blockTargetAt(message.pos)
-        if (target) {
-          this.openBlockMenu(target, 24, 24)
+        const snapshot = this.contextSnapshotAt(message.pos)
+        if (snapshot) {
+          this.openContextMenu(snapshot, 24, 24)
         }
         break
       }
-      case 'block.test.menuClick': {
-        // 测试钩子（#162）：点击菜单中 command 对应的真实按钮（与用户点击
-        // 同一处理器；command 已由协议校验器限定为合法块菜单命令）
-        this.blockMenuEl
+      case 'contextMenu.test.menuClick': {
+        // 测试钩子（#183）：点击菜单中 command 对应的真实按钮（与用户点击
+        // 同一处理器；command 已由协议校验器限定为非空字符串——含运行期
+        // 注册项）
+        this.contextMenuEl
           ?.querySelector<HTMLButtonElement>(`button[data-vsidian-command="${message.command}"]`)
           ?.click()
         break
       }
-      case 'block.test.menuClose': {
-        // 测试钩子（#162）：关闭当前块菜单（等价 Esc/外点路径）
-        this.closeBlockMenu()
+      case 'contextMenu.test.menuClose': {
+        // 测试钩子（#183）：关闭当前统一菜单（等价 Esc/外点路径）
+        this.closeContextMenu()
+        break
+      }
+      case 'clipboard.read.result': {
+        // #183 粘贴桥回包：reqId 陈旧即丢弃。消费即推进（不回退清零）——
+        // 回退会让下一次粘贴复用旧 reqId，旧回包重放成为可能
+        if (message.reqId !== this.clipboardReadReqId) {
+          break
+        }
+        this.clipboardReadReqId += 1
+        const view = this.view
+        if (!message.ok || !view || this.viewMode !== 'live' || this.suspended) {
+          break
+        }
+        // 光标处插入（选区被替换——与原生粘贴同语义）；单笔事务走标准出站
+        const range = view.state.selection.main
+        try {
+          view.dispatch({ changes: { from: range.from, to: range.to, insert: message.text } })
+        } catch (error) {
+          console.error('[vsidian] 粘贴插入失败（坐标与当前文档不匹配）', error)
+        }
         break
       }
       case 'outline.test.renameKey': {
@@ -2301,9 +2329,9 @@ export class WebviewSyncController {
     // review-loops B3：命令面板切模式不经鼠标路径（无 pointercancel），
     // 拖拽会话若残留会跨模式存活（落点判定随视图重算漂移）——统一取消
     this.cancelOutlineDrag()
-    // #69/#162：右键菜单（大纲与正文块菜单）不跨模式存活——阅读只读不接管
+    // #69/#183：右键菜单（大纲与正文统一菜单）不跨模式存活——阅读只读不接管
     this.closeOutlineMenu()
-    this.closeBlockMenu()
+    this.closeContextMenu()
     // #140 Popover 改版：属性编辑浮层仅服务 live 表格卡片，切到阅读即关
     closeFmPopover()
     if (this.view) selectTableRegion(this.view, null)
@@ -4163,7 +4191,7 @@ export class WebviewSyncController {
     // 先取消拖拽防两会话并存的指示混乱（数据由锚点防御兜底）
     this.cancelOutlineDrag()
     this.closeOutlineMenu()
-    this.closeBlockMenu() // 与正文块菜单互斥（一次只有一个右键菜单）
+    this.closeContextMenu() // 与正文统一菜单互斥（一次只有一个右键菜单）
     this.cancelOutlineRename()
     const hasChildren = this.outlineFacts.hasChildren[index] === true
     const menu = buildOutlineMenu(outlineMenuSpec(hasChildren), (command) => {
@@ -4415,15 +4443,17 @@ export class WebviewSyncController {
     this.applyOutlineHighlight()
   }
 
-  // ---- 正文右键菜单（#162 复制块链接）----
-  // 命中判定与菜单模型是纯函数（blockMenu.ts）；写操作（无 id 自动补写）
-  // 是一次 CM6 事务 dispatch（单笔 edit.request = 宿主撤销一次）；剪贴板
-  // 经宿主消息桥（clipboard.write 的 linkHeading / linkBlock 变体，宿主拼
-  // `[[笔记名#…]]`）。快捷键与命令面板入口经宿主 blockLink.copy 消息汇到
-  // 同一 runBlockCopyAtCursor——与右键菜单是同一命令的两个入口。
+  // ---- 正文统一右键菜单（#183 Live 全域接管；blockMenu #162 已退役并入）----
+  // 内核与描述符表是纯函数（shared/contextMenu.ts）；DOM 装配在
+  // contextMenuDom.ts。全域接管：空行、普通文本、选区、表格行、围栏代码
+  // 内、图形块上均弹统一菜单；frontmatter 头区与阅读态不接管（透传原生
+  // 菜单）。安全降级矩阵由注册表谓词承载（zone 判定 → 结构敏感区写操作
+  // 置灰）；剪贴板四项：剪切/复制/粘贴经宿主剪贴板桥（clipboard.write /
+  // clipboard.read 消息），全选为 CM6 纯选区事务。快捷键与命令面板入口经
+  // 宿主 blockLink.copy 消息汇到同一 runBlockCopyAtCursor。
 
-  /** contentDOM contextmenu：坐标 → posAtCoords → 命中判定；接管位
-   *  preventDefault 后弹菜单，不接管位放行原生菜单 */
+  /** contentDOM contextmenu：坐标 → posAtCoords → 区域与块目标判定；
+   *  接管位（全域，头区除外）preventDefault 后弹菜单 */
   private onContentContextMenu(event: MouseEvent): void {
     const view = this.view
     if (!view || this.viewMode !== 'live') {
@@ -4433,17 +4463,18 @@ export class WebviewSyncController {
     if (pos === null) {
       return
     }
-    const target = this.blockTargetAt(pos)
-    if (target === null) {
-      return
+    const snapshot = this.contextSnapshotAt(pos)
+    if (snapshot === null) {
+      return // 不接管位（frontmatter 头区）：放行浏览器原生菜单
     }
     event.preventDefault()
-    this.openBlockMenu(target, event.clientX, event.clientY)
+    this.openContextMenu(snapshot, event.clientX, event.clientY)
   }
 
-  /** doc 偏移 → 命中目标（头区行索引在此推导：frontmatterRange 的字符
-   *  区间换算为结束行索引） */
-  private blockTargetAt(pos: number): BlockMenuTarget | null {
+  /** doc 偏移 → 打开菜单的判定快照（zone + 块目标 + 选区态；不接管位
+   *  返回 null）。头区行索引在此推导：frontmatterRange 的字符区间换算为
+   *  结束行索引 */
+  private contextSnapshotAt(pos: number): MenuContextSnapshot | null {
     const view = this.view
     if (!view || pos < 0 || pos > view.state.doc.length) {
       return null
@@ -4453,86 +4484,176 @@ export class WebviewSyncController {
     const fm = frontmatterRange(text.slice(0, FM_SCAN_LIMIT))
     const fmEndLine = fm === null ? -1 : text.slice(0, fm.end).split('\n').length - 1
     const lineIndex = view.state.doc.lineAt(pos).number - 1
-    return blockMenuTargetAt(lines, lineIndex, fmEndLine)
+    const zone = contextMenuZoneAt(lines, lineIndex, fmEndLine)
+    if (zone === null) {
+      return null // 头区不接管：成型卡片只读；降级源码行写 ^id 只会破坏 YAML
+    }
+    return {
+      zone,
+      hasSelection: !view.state.selection.main.empty,
+      blockTarget: contextMenuBlockTargetAt(lines, lineIndex, fmEndLine),
+    }
   }
 
-  /** 打开菜单（先关旧菜单；大纲菜单与块菜单互斥）。定位：挂载后量尺寸，
-   *  视口系 fixed clamp + 底部上翻（jsdom 无布局时退化为点击点） */
-  private openBlockMenu(target: BlockMenuTarget, clientX: number, clientY: number): void {
+  /** 打开统一菜单（先关旧菜单；与大纲菜单互斥）。定位：挂载后量尺寸，
+   *  视口系 fixed clamp + 底部上翻（jsdom 无布局时退化为点击点）；子菜单
+   *  右缘放不下装配期翻左（applySubmenuFlip） */
+  private openContextMenu(snapshot: MenuContextSnapshot, clientX: number, clientY: number): void {
     const view = this.view
     if (!view) {
       return
     }
-    this.closeBlockMenu()
+    this.closeContextMenu()
     this.closeOutlineMenu()
-    const menu = buildBlockMenu(
-      blockMenuSpec(target.heading !== null),
-      (command) => this.runBlockMenuCommand(command),
-    )
-    this.blockMenuEl = menu
-    this.blockMenuTarget = target
-    this.blockMenuDoc = view.state.doc
+    const hints = contextMenuKeybindingHints(this.keybindingOverrides)
+    const menu = buildMenuDom(buildContextMenuModel(snapshot, hints), {
+      onCommand: (command) => this.runContextMenuCommand(command),
+    })
+    this.contextMenuEl = menu
+    this.contextMenuTarget = snapshot.blockTarget
+    this.contextMenuDoc = view.state.doc
     document.body.appendChild(menu)
-    const size = { w: menu.offsetWidth || 180, h: menu.offsetHeight || 60 }
-    const pos = blockMenuPosition(
+    const size = { w: menu.offsetWidth || 220, h: menu.offsetHeight || 260 }
+    const pos = menuViewportPosition(
       { x: clientX, y: clientY },
       size,
       { width: window.innerWidth || 1200, height: window.innerHeight || 800 },
     )
     menu.style.left = `${Math.max(0, pos.left)}px`
     menu.style.top = `${Math.max(0, pos.top)}px`
+    applySubmenuFlip(menu, window.innerWidth || 1200)
     // 关闭通道：菜单外 pointerdown（capture）与 Esc（与大纲菜单同模式）
-    this.blockMenuDismissPointer = (e) => {
+    this.contextMenuDismissPointer = (e) => {
       if (menu.contains(e.target as Node)) {
         return
       }
-      this.closeBlockMenu()
+      this.closeContextMenu()
     }
-    this.blockMenuDismissKey = (e) => {
+    this.contextMenuDismissKey = (e) => {
       if (e.key === 'Escape') {
-        this.closeBlockMenu()
+        this.closeContextMenu()
       }
     }
-    document.addEventListener('pointerdown', this.blockMenuDismissPointer, true)
-    document.addEventListener('keydown', this.blockMenuDismissKey, true)
+    document.addEventListener('pointerdown', this.contextMenuDismissPointer, true)
+    document.addEventListener('keydown', this.contextMenuDismissKey, true)
   }
 
   /** 关闭菜单（幂等；摘除 document 关闭监听） */
-  private closeBlockMenu(): void {
-    if (this.blockMenuDismissPointer) {
-      document.removeEventListener('pointerdown', this.blockMenuDismissPointer, true)
-      this.blockMenuDismissPointer = undefined
+  private closeContextMenu(): void {
+    if (this.contextMenuDismissPointer) {
+      document.removeEventListener('pointerdown', this.contextMenuDismissPointer, true)
+      this.contextMenuDismissPointer = undefined
     }
-    if (this.blockMenuDismissKey) {
-      document.removeEventListener('keydown', this.blockMenuDismissKey, true)
-      this.blockMenuDismissKey = undefined
+    if (this.contextMenuDismissKey) {
+      document.removeEventListener('keydown', this.contextMenuDismissKey, true)
+      this.contextMenuDismissKey = undefined
     }
-    this.blockMenuEl?.remove()
-    this.blockMenuEl = undefined
-    this.blockMenuTarget = null
-    this.blockMenuDoc = null
+    this.contextMenuEl?.remove()
+    this.contextMenuEl = undefined
+    this.contextMenuTarget = null
+    this.contextMenuDoc = null
   }
 
-  /** 菜单命令分派：锚点过期防御后按命令复制（见模块头） */
-  private runBlockMenuCommand(command: BlockMenuCommand): void {
-    const target = this.blockMenuTarget
+  /** 菜单命令分派：锚点过期防御后按命令执行——格式操作复用快速操作条同一
+   *  执行路径（runFormatOperation）；块链接两项沿用 blockMenu 迁入实现；
+   *  剪贴板四项见模块头 */
+  private runContextMenuCommand(command: string): void {
+    const target = this.contextMenuTarget
     const view = this.view
-    if (target === null || !view) {
-      this.closeBlockMenu()
+    if (!view) {
+      this.closeContextMenu()
       return
     }
     // 锚点过期防御（与大纲菜单同口径）：菜单打开期间文档被外部变更改写
     // 则块行号失效，放弃执行（CM6 Text 不可变——外部变更必换实例）
-    if (this.blockMenuDoc !== view.state.doc) {
-      this.closeBlockMenu()
+    if (this.contextMenuDoc !== view.state.doc) {
+      this.closeContextMenu()
       return
     }
-    this.closeBlockMenu()
-    if (command === 'copyHeadingLink' && target.heading !== null) {
-      this.copyHeadingLink(target.heading.text)
+    this.closeContextMenu()
+    if (command === 'copyHeadingLink') {
+      if (target !== null && target.heading !== null) {
+        this.copyHeadingLink(target.heading.text)
+      }
       return
     }
-    this.copyBlockLinkOf(target)
+    if (command === 'copyBlockLink') {
+      if (target !== null) {
+        this.copyBlockLinkOf(target)
+      }
+      return
+    }
+    if (command === 'cut' || command === 'copy') {
+      this.copySelectionToClipboard(command === 'cut')
+      return
+    }
+    if (command === 'paste') {
+      this.requestClipboardPaste()
+      return
+    }
+    if (command === 'selectAll') {
+      // 全选：CM6 纯选区事务（零写回）
+      try {
+        view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } })
+      } catch (error) {
+        console.error('[vsidian] 全选失败（选区坐标与当前文档不匹配）', error)
+      }
+      view.focus()
+      return
+    }
+    if (command === 'insertTable') {
+      // 与快速操作条建表同源入口
+      if (this.viewMode === 'live' && !this.suspended && !view.state.readOnly &&
+          view.state.facet(EditorView.editable)) {
+        runCreateTable(view)
+        view.focus()
+      }
+      return
+    }
+    // 其余为 formatOperations id（wikilink/link/bold/…/heading1-6）——复用
+    // 快速操作条同一执行路径（含守卫、计划与焦点归还）
+    if (isFormatOperationId(command)) {
+      this.runFormatOperation(command)
+      return
+    }
+    // 运行期注册的未知命令：静默忽略（内核渲染开放注册，本控制器无对应
+    // 执行器——扩展方应在描述符外自管命令执行）
+  }
+
+  /** 剪切/复制：选区文本经宿主剪贴板桥直写（多行 EOL 归一在会话层）；
+   *  剪切再以单笔事务删选区（一笔 edit.request = 宿主撤销一次） */
+  private copySelectionToClipboard(cut: boolean): void {
+    const view = this.view
+    if (!view || this.viewMode !== 'live' || this.suspended ||
+        view.state.readOnly || !view.state.facet(EditorView.editable)) {
+      return
+    }
+    const range = view.state.selection.main
+    if (range.empty) {
+      return
+    }
+    const text = view.state.sliceDoc(range.from, range.to)
+    this.bridge.postMessage({ kind: 'clipboard.write', text })
+    if (cut) {
+      try {
+        view.dispatch({ changes: { from: range.from, to: range.to } })
+      } catch (error) {
+        console.error('[vsidian] 剪切删除失败（坐标与当前文档不匹配）', error)
+      }
+    }
+    view.focus()
+  }
+
+  /** 粘贴：宿主剪贴板读桥（reqId 在途防陈旧回包）；回包在
+   *  clipboard.read.result 分派处插入（光标处/替换选区） */
+  private requestClipboardPaste(): void {
+    const view = this.view
+    if (!view || this.viewMode !== 'live' || this.suspended ||
+        view.state.readOnly || !view.state.facet(EditorView.editable)) {
+      return
+    }
+    this.clipboardReadReqId += 1
+    this.bridge.postMessage({ kind: 'clipboard.read', reqId: this.clipboardReadReqId })
   }
 
   /** 快捷键/命令面板入口（宿主 blockLink.copy 消息）：对光标所在块执行
@@ -4542,7 +4663,7 @@ export class WebviewSyncController {
     if (!view || this.viewMode !== 'live') {
       return
     }
-    const target = this.blockTargetAt(view.state.selection.main.head)
+    const target = this.contextSnapshotAt(view.state.selection.main.head)?.blockTarget ?? null
     if (target === null) {
       return
     }
@@ -4567,7 +4688,7 @@ export class WebviewSyncController {
    *  [a-z0-9]、全文 id 查重避让；块尾行后空一行写独立行，Obsidian 默认
    *  形态）——单事务 dispatch（一笔 edit.request = 撤销一次），dispatch
    *  成功再写剪贴板 */
-  private copyBlockLinkOf(target: BlockMenuTarget): void {
+  private copyBlockLinkOf(target: ContextMenuBlockTarget): void {
     const view = this.view
     if (!view) {
       return

@@ -867,6 +867,17 @@ export function createTextEditorProvider(
             `[[${outlineNoteNameOf(docUri)}#^${blockId}]]`,
           )
         },
+        // #183 剪贴板读（粘贴桥）：env.clipboard.readText 读回后按 LF 归一
+        // （webview 全程 LF 坐标——Windows 剪贴板常见 CRLF；写方向由会话
+        // 按文档 EOL 归一，读方向恒 LF）；读失败返回 null（webview 静默放弃）
+        readClipboard: async () => {
+          try {
+            const text = await vscode.env.clipboard.readText()
+            return text.replace(/\r\n?/g, '\n')
+          } catch {
+            return null
+          }
+        },
         // #111 图表导出端口：弹窗工具条 → 载荷校验 + showSaveDialog +
         // writeFile，结果经 diagram.export.result 回来源面板。测试钩子
         // 模式（VSIDIAN_TEST_HOOKS）短路真实对话框：记录消息形态供集成

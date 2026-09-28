@@ -213,6 +213,23 @@ export type HostToWebview =
   | { kind: 'block.test.menuClick'; command: string }
   /** 测试钩子（#162）：关闭当前块链接右键菜单（等价 Esc/外点关闭路径） */
   | { kind: 'block.test.menuClose' }
+  /** 剪贴板读结果（#183）：ok 时 text 为 LF 归一后的剪贴板文本；失败附
+   *  原因码（read-failed = 环境读失败）。陈旧回包由 webview 按 reqId
+   *  丢弃（在途表先例见 image.paste） */
+  | { kind: 'clipboard.read.result'; reqId: number; ok: true; text: string }
+  | { kind: 'clipboard.read.result'; reqId: number; ok: false; reason: 'read-failed' }
+  /** 测试钩子（#183 统一右键菜单）：在正文 doc 偏移 pos 处打开统一右键
+   *  菜单（与用户右键同一命中判定与装配链路——posAtCoords 的替代注入点；
+   *  frontmatter 头区等不接管位同样不开菜单；空行与表格/围栏/图形块均
+   *  接管）。宿主测试无法向 webview 派发真实鼠标事件，以此通道验证真实
+   *  宿主内的菜单装配 */
+  | { kind: 'contextMenu.test.contextMenu'; pos: number }
+  /** 测试钩子（#183）：点击菜单中 command 对应的真实按钮（与用户点击同一
+   *  处理器；command 取菜单项描述符的 command——含运行期注册项，通道为
+   *  非空字符串校验） */
+  | { kind: 'contextMenu.test.menuClick'; command: string }
+  /** 测试钩子（#183）：关闭当前统一右键菜单（等价 Esc/外点关闭路径） */
+  | { kind: 'contextMenu.test.menuClose' }
   /** 测试钩子（#69）：向重命名输入框注入文本并以 Enter/Esc 收尾（真实
    *  keydown 链路；须先经 menuClick command='rename' 进入重命名态） */
   | { kind: 'outline.test.renameKey'; text: string; key: 'enter' | 'escape' }
@@ -534,6 +551,11 @@ export type WebviewToHost =
    *  标准 edit.request 落权威文档，本消息只携最终 id；与 linkHeading
    *  同一只读交互端口） */
   | { kind: 'clipboard.write'; linkBlock: { docUri: string; blockId: string } }
+  /** 剪贴板读（#183 统一右键菜单粘贴项）：webview 无 navigator.clipboard
+   *  权限面，经宿主 env.clipboard.readText 读回（沿 clipboard.write 消息
+   *  桥先例）；结果经 clipboard.read.result 回来源面板。宿主读回文本按
+   *  LF 归一（webview 全程 LF 坐标） */
+  | { kind: 'clipboard.read'; reqId: number }
   /** 性能探针回报（#5）：快照为 DOM 计数，输入延迟含 rAF 稳定等待 */
   | {
       kind: 'perf.report'
@@ -1811,6 +1833,9 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         isString(v.linkBlock.docUri) &&
         isString(v.linkBlock.blockId)
       )
+    case 'clipboard.read':
+      // #183 粘贴桥：reqId 会话面板内自增（对应 clipboard.read.result）
+      return isPositiveInt(v.reqId)
     case 'conflict.action':
       return (
         isString(v.sessionId) &&
@@ -2173,6 +2198,20 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'block.test.menuClick':
       return v.command === 'copyHeadingLink' || v.command === 'copyBlockLink'
     case 'block.test.menuClose':
+      return true
+    case 'clipboard.read.result':
+      if (!isPositiveInt(v.reqId)) {
+        return false
+      }
+      if (v.ok === true) {
+        return isString(v.text)
+      }
+      return v.ok === false && v.reason === 'read-failed'
+    case 'contextMenu.test.contextMenu':
+      return isNonNegativeInt(v.pos)
+    case 'contextMenu.test.menuClick':
+      return typeof v.command === 'string' && v.command.length > 0
+    case 'contextMenu.test.menuClose':
       return true
     case 'outline.test.renameKey':
       return isString(v.text) && (v.key === 'enter' || v.key === 'escape')
