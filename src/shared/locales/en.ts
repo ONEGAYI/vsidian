@@ -467,11 +467,22 @@ export const en = {
   'host.imagePasteNoWorkspaceFallback': 'No workspace folder is open; the pasted image was saved next to the current file.',
   'host.imagePasteWriteFailed': 'Failed to save the pasted image.',
 
-  // ---- #162 复制块链接（正文右键菜单与快捷键）----
+  // ---- #183 统一右键菜单（Live 正文全域接管；块链接两项自 #162 迁入）----
   /** 右键菜单：标题行命中的额外项（拼 [[笔记名#标题]]，标题取行面文本） */
-  'blockMenu.copyHeadingLink': 'Copy heading link',
+  'contextMenu.copyHeadingLink': 'Copy heading link',
   /** 右键菜单/快捷键共用项（拼 [[笔记名#^块id]]，无 id 时先自动补写） */
-  'blockMenu.copyLink': 'Copy block link',
+  'contextMenu.copyBlockLink': 'Copy block link',
+  /** 簇 2 父项：行内文本格式子菜单 */
+  'contextMenu.textFormat': 'Text format',
+  /** 簇 2 父项：段落结构子菜单（列表/标题/引用） */
+  'contextMenu.paragraphStyle': 'Paragraph style',
+  /** 簇 2 父项：插入子菜单（表格/分隔线/代码块/数学块） */
+  'contextMenu.insert': 'Insert',
+  /** 剪贴板四项（键位沿用 CM6 默认，提示列固定显示） */
+  'contextMenu.cut': 'Cut',
+  'contextMenu.copy': 'Copy',
+  'contextMenu.paste': 'Paste',
+  'contextMenu.selectAll': 'Select all',
   /** 命令面板/快捷键页操作名（keybindings 注册表 titleKey） */
   'command.block.copyLink.title': 'Copy link to current block',
 } as const satisfies Record<string, string>

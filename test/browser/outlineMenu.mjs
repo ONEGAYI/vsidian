@@ -69,16 +69,31 @@ try {
   passed++
   console.log('[菜单回归][PASS] 真实右键弹出菜单：绘制、让位不遮挡、右缘 clamp')
 
-  // ---- 场景 B：hover 级联子菜单展开（:hover 显隐唯一开关） ----
+  // ---- 场景 B：hover 级联子菜单展开（:hover 显隐唯一开关）+ 右置翻转矩阵
+  // （侧栏恒在视口右缘：#53 右侧栏布局，父项宿主右缘贴侧栏右缘 = 屏幕右缘，
+  // 子菜单右放必溢出 → 装配期应全部翻左，展开后右边界不溢出视口） ----
   const subBefore = await page.evaluate(() => window.readMenu().submenuDisplay)
   assert.ok(subBefore.every((d) => d === 'none'), `子菜单默认应隐藏（实际 ${JSON.stringify(subBefore)}）`)
+  const flipBefore = await page.evaluate(() => window.readMenu().submenus)
+  assert.ok(flipBefore.length > 0, '前置：大纲菜单应含级联子菜单（copy/level 两处）')
+  assert.ok(flipBefore.every((s) => s.flipped),
+    `侧栏右置时全部子菜单应装配期翻左（实际 ${JSON.stringify(flipBefore.map((s) => s.flipped))}）`)
   await page.locator('.vsidian-outline-menu button[data-vsidian-command="copy"]').hover()
   await page.waitForTimeout(80)
   state = await page.evaluate(() => window.readMenu())
   assert.ok(state.submenuDisplay.some((d) => d === 'block'),
     `hover 复制父项后子菜单应展开（实际 ${JSON.stringify(state.submenuDisplay)}）`)
+  const openedSub = state.submenus.find((s) => s.display === 'block')
+  assert.ok(openedSub, '翻转断言前置：应有展开的子菜单')
+  const viewportWidth = 1000
+  assert.ok(openedSub.rect.right <= viewportWidth + 1,
+    `翻转后子菜单右边界不得溢出视口（实际 right=${openedSub.rect.right}）`)
+  assert.ok(openedSub.rect.left >= -1,
+    `翻转后子菜单不得溢出视口左缘（实际 left=${openedSub.rect.left}）`)
+  assert.ok(openedSub.parentRect && openedSub.rect.right <= openedSub.parentRect.left + 2,
+    `翻转子菜单应落在父项宿主左侧（实际 submenu.right=${openedSub.rect.right} parent.left=${openedSub.parentRect && openedSub.parentRect.left}）`)
   passed++
-  console.log('[菜单回归][PASS] hover 级联子菜单：默认隐藏、悬停父项展开')
+  console.log('[菜单回归][PASS] hover 级联子菜单：默认隐藏、悬停展开、右置全部翻左不溢出')
 
   // ---- 场景 C：子菜单真实点击复制标题（剪贴板桥出站 plainText） ----
   await page.locator('.vsidian-outline-menu button[data-vsidian-command="copyHeading"]').click()

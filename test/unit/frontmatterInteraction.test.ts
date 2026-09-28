@@ -259,13 +259,25 @@ describe('光标引导（成型态不暴露源码）', () => {
     view.destroy()
   })
 
-  it('选区跨越头区时收敛为正文单光标；首围栏行与键值行同样拦截', () => {
+  it('完全落入头区的选区被收敛；跨头区选区（含全选）放行——#183 两端都在口径', () => {
     const view = makeFmView(FM_DOC, FM_DOC.length)
-    view.dispatch({ selection: EditorSelection.range(FM_DOC.indexOf('title'), FM_DOC.indexOf('正文段落。') + 2) })
+    // 头区内选区（双击选词形态）：两端都在头区 → 收敛为正文单光标
+    const titleAt = FM_DOC.indexOf('title')
+    view.dispatch({ selection: EditorSelection.range(titleAt, titleAt + 5) })
     const sel = view.state.selection.main
     expect(sel.head).toBe(BODY_START)
     expect(sel.empty).toBe(true)
-    // 头区首字符（打开文档默认光标 0 场景）
+    // 跨头区选区（一端头区一端正文）：放行（全选/跨区拖选的语义前提）
+    view.dispatch({ selection: EditorSelection.range(titleAt, FM_DOC.indexOf('正文段落。') + 2) })
+    const cross = view.state.selection.main
+    expect(cross.anchor).toBe(titleAt)
+    expect(cross.head).toBe(FM_DOC.indexOf('正文段落。') + 2)
+    // 全选（#183 菜单项 Ctrl+A 同语义）：全文选区保持，不被弹回
+    view.dispatch({ selection: EditorSelection.range(0, FM_DOC.length) })
+    const all = view.state.selection.main
+    expect(all.from).toBe(0)
+    expect(all.to).toBe(FM_DOC.length)
+    // 头区首字符（打开文档默认光标 0 场景）：单光标两端同点在头区 → 仍拦
     view.dispatch({ selection: EditorSelection.cursor(0) })
     expect(view.state.selection.main.head).toBe(BODY_START)
     view.destroy()

@@ -1195,6 +1195,18 @@ describe('#69 clipboard.write：两变体路由到注入端口', () => {
     expect(links).toEqual([])
   })
 
+  it('CRLF 文档的 text 变体按权威行尾归一（LF 出站转 \r\n；#81 同 codeblock.copy——review-loops 修复）', async () => {
+    const s = setup('段落一\r\n段落二')
+    s.doc.eol = 2
+    const written: string[] = []
+    const id = s.session.attachPanel({
+      send: () => undefined,
+      writeClipboard: (text) => written.push(text),
+    })
+    await s.send(id, { kind: 'clipboard.write', text: '段落一\n段落二' })
+    expect(written).toEqual(['段落一\r\n段落二'])
+  })
+
   it('linkHeading 变体路由 writeHeadingLinkClipboard（docUri + 剥标记标题）', async () => {
     const s = setup()
     const written: unknown[] = []

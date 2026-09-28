@@ -700,7 +700,7 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
   },
   'outline-menu': {
     purpose:
-      "The context-menu overlay (absolutely positioned inside the sidebar; menu items are keyboard-accessible buttons; the submenu's only show/hide switch is the parent item host's :hover/:focus-within; danger marks delete in red; colors follow the --vscode-menu-* variable family).",
+      "The context-menu overlay (absolutely positioned inside the sidebar; menu items are keyboard-accessible buttons; the submenu's only show/hide switch is the parent item host's :hover/:focus-within; danger marks delete in red; colors follow the --vscode-menu-* variable family). Since #183 it is assembled through the unified menu kernel (descriptor-driven, class names unchanged); the shared state classes vsidian-menu-open (the parent-item click fallback that pins the submenu open) and vsidian-menu-flip (the submenu flips left at assembly time when the right edge would clip) layer on top of the existing submenu classes.",
     states: 'Summoned by right-click.',
     dom: 'An overlay inside the sidebar.',
     obsidian: { counterpart: 'None (the VSCode native context menu lives at the host level)' },
@@ -914,13 +914,13 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
       'Removed by #38 (2026-09-24, 288044d) and never present in any released build; the old mapping table row was stale data (corrected during the #133 verification against the v0.4.0 tag 75c3df7 source).',
   },
 
-  // ---- 正文右键菜单（context-menu，1 条；#162）----
-  'block-menu': {
+  // ---- 正文右键菜单（context-menu，1 条；#183 统一内核）----
+  'context-menu': {
     purpose:
-      'The content context-menu overlay (copy heading link / copy block link, #162): a self-drawn fixed-position menu attached to body; menu items are keyboard-accessible buttons; colors follow the --vscode-menu-* variable family (same visual language family as the outline menu, no cascading submenus).',
+      'The unified context-menu overlay (#183 takes over the whole live body): a self-drawn fixed-position menu attached to body. Three cluster separators (-separator), cascading submenus (-submenu; shown/hidden via :hover/:focus-within + the parent-item click fallback class vsidian-menu-open + the assembly-time left flip vsidian-menu-flip when the right edge would clip), the icon slot (-icon driven by data-icon through a mask; since #184 the 26 wired icon keys define light/dark assets via --vsidian-context-icon, spare keys keep assets on disk but stay unwired), text badges (-badge, H1-H6), checkmarks (-check, paragraph-style items lit per line structure), disabled greying, danger red text, and the shortcut hint column (-hint, right-aligned small text at lowered opacity, no placeholder when unbound). Menu items are keyboard-accessible buttons; colors follow the --vscode-menu-* variable family (same visual language family as the outline menu). The former blockMenu (#162, .vsidian-block-menu*) is retired and folded in — that class name never existed in any released build (zero hits in the v0.5.0 tag), so there is no compatibility obligation and the contract keeps no entry for it.',
     states:
-      'Right-clicking a block in the live body (the frontmatter header area and empty lines are not intercepted — the native menu behaves as usual).',
-    dom: 'A direct child of document.body (viewport-fixed positioning).',
+      'Right-clicking the live body (empty lines, plain text, table rows, inside fences and graphic blocks are all intercepted; the frontmatter header area and reading mode are not — the native menu behaves as usual). Write commands are greyed out in structure-sensitive areas (the safe-degradation matrix).',
+    dom: 'A direct child of document.body (viewport-fixed positioning); submenus are nested inside their parent item host (absolute).',
     obsidian: { counterpart: 'None (the Obsidian context menu is an app-native menu, not a DOM element)' },
   },
 }

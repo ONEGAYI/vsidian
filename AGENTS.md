@@ -2,7 +2,7 @@
 
 VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 
-> 当前状态：**MVP 主要功能已实施，整体验收未结**。一期双视图编辑、增量写回、任务、链接图片、双链、表格、查找、三态切换、独立设置页与源文件行号，二期公式渲染、Mermaid 图表、表格交互重做（[#72 规格](docs/specs/table-interaction-rework.md)）与大纲面板二期（#65–#70，样式透传、跳转高亮、折叠滑块、工具条搜索、右键菜单、拖拽排序）均已落地；自动化通过不等于真实 IME、物理鼠标与视觉观感已由用户验收。功能范围见 [docs/specs/mvp.md](docs/specs/mvp.md)；待验项与历轮执行记录见 [docs/specs/manual-verification.md](docs/specs/manual-verification.md)；用户可见变更见 [CHANGELOG.md](CHANGELOG.md)。本文件是项目级 agent 规则的**单一入口**：横切约定常驻于此，领域落档约定的正文在指针目标（specs 文档与项目技能）中维护——入口唯一、不另建副本，指针写明触发分支，改动正文只改指针目标。
+> 当前状态：**MVP 主要功能已实施，整体验收未结**。一期双视图编辑、增量写回、任务、链接图片、双链、表格、查找、三态切换、独立设置页与源文件行号，二期公式渲染、Mermaid 图表、表格交互重做（[#72 规格](docs/specs/table-interaction-rework.md)）与大纲面板二期（#65–#70，样式透传、跳转高亮、折叠滑块、工具条搜索、右键菜单、拖拽排序）均已落地；统一右键菜单批次已落地（2026-09-28，#183 内核：Live 正文全域接管 + 注册/覆写基建 + 剪贴板四项，`blockMenu` 退役、`outlineMenu` 迁移内核并修复子菜单溢出；#184 内容接线：26 枚图标明暗资产接线 + 段落设置按行结构勾选 + 三簇命令分派核查钉住；规格 [docs/specs/context-menu.md](docs/specs/context-menu.md)）；自动化通过不等于真实 IME、物理鼠标与视觉观感已由用户验收。功能范围见 [docs/specs/mvp.md](docs/specs/mvp.md)；待验项与历轮执行记录见 [docs/specs/manual-verification.md](docs/specs/manual-verification.md)；用户可见变更见 [CHANGELOG.md](CHANGELOG.md)。本文件是项目级 agent 规则的**单一入口**：横切约定常驻于此，领域落档约定的正文在指针目标（specs 文档与项目技能）中维护——入口唯一、不另建副本，指针写明触发分支，改动正文只改指针目标。
 
 ## 约定
 
@@ -12,11 +12,12 @@ VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 - **图形化代码块扩展约定（#111 落档）**：新增或修改「渲染成图形的围栏代码块」的语言支持、按钮组、图表弹窗或导出行为前，必读 [docs/specs/graphic-code-block-interaction.md](docs/specs/graphic-code-block-interaction.md) 的「扩展约定（落档）」节——注册表两表（`RENDERED_FENCE_LABELS` 与 `graphicRenderers.ts`）必须同步登记，三步接入清单与降级边界在其中。
 - **符号输入与行内围栏扩展约定（#103/#107/#123/#124/#125 落档）**：新增符号对、新增成对行内标记操作（粗体/斜体/删除线/行内代码类）、调整选区包裹、Tab 越界、IME 组合期输入行为或 CM6 扩展装配顺序前，必读 [docs/specs/symbol-input.md](docs/specs/symbol-input.md)——注册表驱动路径、装配顺序陷阱、「既有边界不得顺手放宽」清单与测试惯例均在其中。
 
-- **frontmatter 表格扩展约定（#140 落档；2026-09-27 验收反馈改版为「只读表格 + Popover 编辑」）**：YAML 头「成型/降级」判定的单一事实源在 `src/shared/frontmatterTable.ts`——自研行级形态学定位区间（tableCells 先例）+ `yaml` 包 parseDocument 兜底合法性与类型，双层各司其职；新增支持类型只改该模块，并在 `test/unit/frontmatterTable.test.ts` 补降级矩阵。成型头区在 live 侧呈现为**只读键值两列表格**（格不可点击编辑，行内 ×/＋、闭合行整行「添加属性」按钮、Tab/Enter 格导航键位均已随格内编辑方案退役），编辑收敛到标题栏「修改」按钮（`frontmatterDecorations.ts` 的 FmCardHeaderWidget，replace 首围栏行）打开的 **Popover**（`frontmatterPopover.ts`：贴按钮 fixed 定位小浮层挂 body，非全屏；结构化输入行 + 底部「添加属性」主按钮）。**编辑链路**：文本输入即时写回（planSetFmKey / planSetFmValue（flow 值整框）/ planSetFmArrayItem）与按钮操作（删行/删项/加项/添加属性，planRemoveFmEntry 等）各为单笔事务走标准出站；浮层事务不带 CM6 选区（键名选中等价物是浮层内 input 全选），**一笔操作 = 一笔 edit.request = 撤销一步**。**成型态不暴露源码**（用户决策）：光标/选区进入成型头区即被引导至闭合行后正文起点——`frontmatterEditing` 的 transactionFilter 硬拦纯选区事务 + updateListener 微任务兜底（初始光标、undo 恢复选区；update 途中不得同步 dispatch 是 CM6 约束，兜底必须延迟重读最新状态）；`externalSync` 与 undo/redo 事务豁免 filter，头区重析与 `fmModel` 的 fmTouched 增量重析不受影响（头块重建区间仍须 `tr.changes.mapPos` 映射）。**浮层同步**：文档变更经 updateListener 通知浮层按最新模型全量重建行 DOM、焦点与光标位按行标识（`data-entry-from` + role）还原，外部同步改写头区同样回流；头区降级瞬间浮层自动关闭（回源码可编辑），键名空/重复不写回只红边标记（写回即降级），flow 数组为值整框原文编辑。**焦点管理**照 diagramPopup 的 prevFocus 模式（body 不算先前焦点、此时返还按钮），Esc/外点关闭、切阅读或 dispose 关闭；禁止 window.alert。阅读侧合法头区在 `splitReadingBlocks` 产同构表格 HTML（含标题栏、无按钮、值全转义）。成型卡片行同时保留 `vsidian-frontmatter-line` 行类（Obsidian 别名桥 `.cm-hmd-frontmatter` direct 级在成型形态保持命中，降透明副作用由卡片规则重置）。观感硬约束（验收二轮实测教训，改版须保持）：**行级 grid 不限宽**——`vsidian-fm-row` 是行级类（直接作用于 .cm-line），任何 width 上限都会把行级背景/边框一并收窄、与头部行（widget 撑满）错位，右侧形成编辑器底色空洞与断边；**行区透明**（撞色边界感 = 卡片边框 + 标题栏微亮条，不铺底色）；标题栏行的 cm-widgetBuffer 隐藏（inline replace 前后各一个、各占一行文字高，头部行曾被撑到 1.7 倍正文行高）；键名弱化 opacity 0.7 + ::before 类型图标（标量 T / 数组宿主行 `vsidian-fm-list-row` 列表形 ≡，两侧同类名同规则）。样式契约：live-fm-header 为静态探针（chromeSelectors["live-fm-header-live"]），live-fm-popover 为交互态条目（豁免分工表钉住，行为路径验证）；live-fm-controls / live-fm-add-entry 条目与四个行内控件类名已退役。一期边界（`limit-fm-complex-types` 条目钉住）：flow 数组 Popover 内值整框编辑、无项级拆分（阅读侧仍拆项呈现）；行内注释卡片内绘制层隐藏；零缩进 block 序列降级源码。
+- **frontmatter 表格扩展约定（#140 落档；2026-09-27 验收反馈改版为「只读表格 + Popover 编辑」）**：YAML 头「成型/降级」判定的单一事实源在 `src/shared/frontmatterTable.ts`——自研行级形态学定位区间（tableCells 先例）+ `yaml` 包 parseDocument 兜底合法性与类型，双层各司其职；新增支持类型只改该模块，并在 `test/unit/frontmatterTable.test.ts` 补降级矩阵。成型头区在 live 侧呈现为**只读键值两列表格**（格不可点击编辑，行内 ×/＋、闭合行整行「添加属性」按钮、Tab/Enter 格导航键位均已随格内编辑方案退役），编辑收敛到标题栏「修改」按钮（`frontmatterDecorations.ts` 的 FmCardHeaderWidget，replace 首围栏行）打开的 **Popover**（`frontmatterPopover.ts`：贴按钮 fixed 定位小浮层挂 body，非全屏；结构化输入行 + 底部「添加属性」主按钮）。**编辑链路**：文本输入即时写回（planSetFmKey / planSetFmValue（flow 值整框）/ planSetFmArrayItem）与按钮操作（删行/删项/加项/添加属性，planRemoveFmEntry 等）各为单笔事务走标准出站；浮层事务不带 CM6 选区（键名选中等价物是浮层内 input 全选），**一笔操作 = 一笔 edit.request = 撤销一步**。**成型态不暴露源码**（用户决策）：光标/选区进入成型头区即被引导至闭合行后正文起点——`frontmatterEditing` 的 transactionFilter 硬拦纯选区事务 + updateListener 微任务兜底（初始光标、undo 恢复选区；update 途中不得同步 dispatch 是 CM6 约束，兜底必须延迟重读最新状态）；#183 起引导口径收窄为**选区两端都在头区**（全选/跨头区拖选放行——统一菜单剪贴板全选的语义前提，`Ctrl+A` 在带头区文档的既存缺陷同修复；完全落入头区的选区仍被引导）；`externalSync` 与 undo/redo 事务豁免 filter，头区重析与 `fmModel` 的 fmTouched 增量重析不受影响（头块重建区间仍须 `tr.changes.mapPos` 映射）。**浮层同步**：文档变更经 updateListener 通知浮层按最新模型全量重建行 DOM、焦点与光标位按行标识（`data-entry-from` + role）还原，外部同步改写头区同样回流；头区降级瞬间浮层自动关闭（回源码可编辑），键名空/重复不写回只红边标记（写回即降级），flow 数组为值整框原文编辑。**焦点管理**照 diagramPopup 的 prevFocus 模式（body 不算先前焦点、此时返还按钮），Esc/外点关闭、切阅读或 dispose 关闭；禁止 window.alert。阅读侧合法头区在 `splitReadingBlocks` 产同构表格 HTML（含标题栏、无按钮、值全转义）。成型卡片行同时保留 `vsidian-frontmatter-line` 行类（Obsidian 别名桥 `.cm-hmd-frontmatter` direct 级在成型形态保持命中，降透明副作用由卡片规则重置）。观感硬约束（验收二轮实测教训，改版须保持）：**行级 grid 不限宽**——`vsidian-fm-row` 是行级类（直接作用于 .cm-line），任何 width 上限都会把行级背景/边框一并收窄、与头部行（widget 撑满）错位，右侧形成编辑器底色空洞与断边；**行区透明**（撞色边界感 = 卡片边框 + 标题栏微亮条，不铺底色）；标题栏行的 cm-widgetBuffer 隐藏（inline replace 前后各一个、各占一行文字高，头部行曾被撑到 1.7 倍正文行高）；键名弱化 opacity 0.7 + ::before 类型图标（标量 T / 数组宿主行 `vsidian-fm-list-row` 列表形 ≡，两侧同类名同规则）。样式契约：live-fm-header 为静态探针（chromeSelectors["live-fm-header-live"]），live-fm-popover 为交互态条目（豁免分工表钉住，行为路径验证）；live-fm-controls / live-fm-add-entry 条目与四个行内控件类名已退役。一期边界（`limit-fm-complex-types` 条目钉住）：flow 数组 Popover 内值整框编辑、无项级拆分（阅读侧仍拆项呈现）；行内注释卡片内绘制层隐藏；零缩进 block 序列降级源码。
 - **视觉层断言（评审必查）**：webview/样式/渲染类变更，评审必须核对断言对象是"用户看到的东西"（可见性、对齐、颜色）而非 DOM 存在性或几何坐标——样式注入失效时后者照样通过（PR #37 P0 实证：CSP 拦截 CM6 注入样式后 74 集成用例仍全绿，正文实际不可见）。涉及呈现的新特性至少一条集成断言落在绘制层（现有 `view.state.paint` 探针），CSS 关键规则由契约测试钉住。
 - **大纲样式设计哲学（#65 落档）**：大纲条目的呈现遵循三条原则，后续大纲呈现类变更不得违背。其一，**结构装饰与正文主题同源**——层级颜色等主题性装饰不复制读值，而是与正文标题引用同一 CSS 变量族（`--vsidian-heading-color-1..6`，定义于 `#app`，live 标题行级、阅读标题块级、大纲条目级三侧同引），主题分级着色一处定义多处生效。其二，**强调语义只认显式标记**——条目一律常规字重（400），不继承标题级别的结构性加粗；仅显式 `**粗体**` 段加重，斜体/行内代码/删除线同理只由标记触发。其三，**透传集合 = 正文已支持的行内标记子集**——当前白名单为粗体/斜体/高亮/行内代码/删除线（`OutlineSpanKind`，提取与校验同源；#105 高亮已按同一机制接入），公式/行内颜色待正文支持后按同一白名单机制接入（提取处 `SPAN_KIND_BY_NODE` 加映射即可），大纲侧零额外设计；双链/链接显示别名/链接文字的纯文本，不可点。
 - **CSS 片段导入与界面域样式约定（#129/#130/#133 落档）**：修改 CSS 片段依赖导入分析、远程（HTTPS）样式加载、CSP 装配或界面域样式入口前，必读 [docs/specs/css-snippets.md](docs/specs/css-snippets.md) 的「实施落档约定」节——导入形态学与 CSSOM 对齐、远程引用「完全不进本地面」语义、内置样式 `:where()` 零特异性等硬边界在其中。
 - **可读行宽与双模式列布局约定（#174/#175 落档）**：修改双模式正文限宽、列居中、Live 行号列跟随、可读行宽设置，或触及 `--file-line-width` / `--vsidian-reading-max-width` / `--vsidian-live-preview-max-width` 变量前，必读 [docs/specs/viewport-width.md](docs/specs/viewport-width.md) 的「实施落档」节——双变量 #app 层同写、0 = 铺满零干预、设置与片段优先序、铺满态零位移与 #32 行号契约修订均在其中。
+- **统一右键菜单扩展约定（2026-09 菜单批次落档）**：新增或修改右键菜单项、簇、子菜单、覆写行为、安全降级矩阵或菜单图标接线前，必读 [docs/specs/context-menu.md](docs/specs/context-menu.md) 的「扩展约定（落档）」节——菜单项注册表与图标 key 表的两表同步、三步接入清单与「既有边界不得顺手放宽」清单（阅读/头区不接管、内置只隐藏不删、提示列只派生自键位注册表）均在其中。
 - **用户可见文字一律 i18n**：所有面向用户的文字（webview 界面、设置页、宿主通知/确认框、package.json command title 与 displayName/description）必须经 `src/shared/locales/` 语言包与 `t()` 字典映射添加，禁止新增硬编码中/英文字面量；两语言包键集由编译期 parity 把关，回潮由 CI 防回潮扫描（源码 CJK 字面量契约测试）拦截。manifest 侧 `package.nls.*.json` 由构建脚本从字典生成，不在 JSON 里手写。
 
 ## 公开样式契约：Agent 修改约束（项目技能 style-contract）
@@ -109,9 +110,11 @@ vsidian/
 │   │   └── obsidian-viewport-rendering.md  # 视口渲染性能补充调研
 │   └── specs/    # 产品规格
 │       ├── anchor-navigation.md              # 锚点跳转规格（标题/块引用/复制块链接）
+│       ├── batch-2026-09-menu.md             # 右键菜单批次总览与决策回执
 │       ├── batch-2026-09.md                  # 2026-09 开票批次总览
 │       ├── blockquote-accent-bar.md          # 引用块紫色提示边条规格
 │       ├── code-block-card.md                # 代码块卡片功能规格
+│       ├── context-menu.md                   # 统一右键菜单规格（正文全域接管）
 │       ├── css-snippets.md                   # CSS片段与样式兼容规格
 │       ├── frontmatter-table.md              # frontmatter 表格化规格
 │       ├── graphic-code-block-interaction.md # 图形化代码块交互规格
@@ -179,6 +182,7 @@ vsidian/
 │   │   ├── changeMapping.ts     # 变更重定位纯函数
 │   │   ├── chromeContract.ts    # 界面域样式契约探针表
 │   │   ├── codeLangs.ts         # 代码块语言注册表与别名路由
+│   │   ├── contextMenu.ts       # 统一右键菜单内核纯函数单一事实源
 │   │   ├── cssSnippetEnv.ts     # CSS 片段环境身份与分桶戳（#131）
 │   │   ├── cssSnippetImports.ts # CSS 片段依赖导入形态学单一事实源
 │   │   ├── cssSnippets.ts       # CSS 片段纯逻辑单一事实源
@@ -208,9 +212,9 @@ vsidian/
 │   └── webview/     # webview 端实现
 │       ├── anchorFlash.ts            # 跳转目标高亮装饰状态
 │       ├── blockIdStrip.ts           # 阅读渲染块标记剥离纯函数
-│       ├── blockMenu.ts              # 正文右键菜单与复制块链接
 │       ├── codeCardState.ts          # 卡片共享状态中立模块
 │       ├── codeHighlight.ts          # 语法高亮引擎装配与缓存
+│       ├── contextMenuDom.ts         # 统一菜单 DOM 装配与子菜单翻转
 │       ├── css.d.ts                  # CSS 导入类型声明
 │       ├── cssSnippetSettings.ts     # CSS 片段设置分页
 │       ├── diagramExport.ts          # 图表导出序列化与光栅化

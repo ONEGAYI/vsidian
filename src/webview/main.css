@@ -1118,13 +1118,30 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   display: block;
 }
 
-/* ---- #162 正文右键菜单（复制块链接）：自绘浮层挂 body（fixed 定位）。
-   菜单项一律 button（键盘 Tab/Enter/空格可达）；无级联子菜单与 disabled
-   态（复制项恒可用）。颜色跟随 VSCode 菜单变量，与大纲菜单同族视觉语言 */
-.vsidian-block-menu {
+/* ---- #183 大纲菜单内核迁移增补：父项点击展开兜底（open 类，显隐主通道
+   仍是 :hover/:focus-within）与子菜单装配期左翻（大纲面板右置时不再溢出
+   屏幕——翻转判定为内核 submenuSide 纯函数，装配期一次加类） */
+.vsidian-sidebar .vsidian-outline-menu .vsidian-outline-menu-host.vsidian-menu-open .vsidian-outline-menu-submenu {
+  display: block;
+}
+
+.vsidian-sidebar .vsidian-outline-menu .vsidian-outline-menu-submenu.vsidian-menu-flip {
+  left: auto;
+  right: 100%;
+}
+
+/* ---- #183 统一右键菜单（Live 正文全域接管；blockMenu #162 退役并入）：
+   自绘浮层挂 body（fixed 定位）。三簇分组线、级联子菜单（:hover/
+   :focus-within 显隐 + 点击兜底 open 类 + 右缘放不下装配期翻左 flip 类）、
+   图标位（data-icon 驱动 mask；资产未接入时变量未定义——透明渐变回退
+   即留空，资产后补规则即生效）、文字徽标（H1–H6）、勾选态、置灰、
+   danger、提示列（label flex:1 右推——右对齐小字低不透明度，未绑定
+   不占位）。菜单项一律 button（键盘 Tab/Enter/空格可达）；颜色跟随
+   VSCode 菜单变量，与大纲菜单同族视觉语言 */
+.vsidian-context-menu {
   position: fixed;
   z-index: 40;
-  min-width: 160px;
+  min-width: 220px;
   max-width: calc(100vw - 8px);
   box-sizing: border-box;
   padding: 4px;
@@ -1135,16 +1152,34 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   color: var(--vscode-menu-foreground, var(--vscode-editor-foreground));
 }
 
-.vsidian-block-menu .vsidian-block-menu-item {
-  display: block;
+/* 菜单容器不画焦点圈（#183 验收反馈）：容器是 tabindex=-1 的程序聚焦落点
+   （键盘导航起点），Chromium 的 :focus-visible 启发式在键盘焦点转移到容器
+   时会画出宿主 focusBorder（偶发黄圈）；键盘可达性由菜单项按钮的焦点态
+   承担，容器自身无交互语义。两类菜单容器同规则 */
+.vsidian-context-menu:focus,
+.vsidian-sidebar .vsidian-outline-menu:focus {
+  outline: none;
+}
+
+.vsidian-context-menu .vsidian-context-menu-host {
+  position: relative; /* 级联子菜单 left:100% 的定位锚 */
+}
+
+.vsidian-context-menu .vsidian-context-menu-separator {
+  margin: 4px 0;
+  border-top: 1px solid var(--vscode-menu-separatorBackground, rgba(128, 128, 128, 0.25));
+}
+
+.vsidian-context-menu .vsidian-context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   width: 100%;
   box-sizing: border-box;
   padding: 4px 10px;
   font-size: var(--vscode-font-size, 13px);
   line-height: 18px;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   text-align: left;
   cursor: pointer;
   background: transparent;
@@ -1153,11 +1188,190 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   color: inherit;
 }
 
-.vsidian-block-menu .vsidian-block-menu-item:hover,
-.vsidian-block-menu .vsidian-block-menu-item:focus-visible {
+.vsidian-context-menu .vsidian-context-menu-item .vsidian-context-menu-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vsidian-context-menu .vsidian-context-menu-item:not(:disabled):hover {
   background: var(--vscode-menu-selectionBackground, rgba(9, 71, 113, 0.55));
   color: var(--vscode-menu-selectionForeground, inherit);
   outline: none;
+}
+
+.vsidian-context-menu .vsidian-context-menu-item:not(:disabled):focus-visible {
+  background: var(--vscode-menu-selectionBackground, rgba(9, 71, 113, 0.55));
+  color: var(--vscode-menu-selectionForeground, inherit);
+  outline: none;
+}
+
+.vsidian-context-menu .vsidian-context-menu-item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* 破坏性命令红字：danger 类是唯一差异来源（与大纲菜单同族） */
+.vsidian-context-menu .vsidian-context-menu-danger {
+  color: var(--vscode-errorForeground, #f48771);
+}
+
+/* 图标位：mask 驱动（随 currentColor 前景与明暗主题）。资产未接入时
+   --vsidian-context-icon 未定义——透明渐变回退使 mask 全透（留空占位，
+   不画实心块）；#184 资产票按 [data-icon='key'] 逐 key 定义变量即生效 */
+.vsidian-context-menu .vsidian-context-menu-icon {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  background-color: currentColor;
+  mask-image: var(--vsidian-context-icon, linear-gradient(transparent, transparent));
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+}
+
+/* #184 图标接线（26 枚 = 16 复用快速操作资产 + 10 新生成）：菜单挂 body
+   （不在 #app 内），规则不带 #app 前缀；两套资源与快速操作条同一 18px
+   画布资产族，mask 跟随前景色。备用 4 key（pastePlain/media/footnote/
+   callout）资产在场但菜单不引用——规格「扩展约定」显式记账，两表同步
+   由 test/unit/contextMenu.test.ts 钉住。 */
+.vsidian-context-menu [data-icon='link'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-link.svg'); }
+.vsidian-context-menu [data-icon='externalLink'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-externalLink.svg'); }
+.vsidian-context-menu [data-icon='textFormat'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-textFormat.svg'); }
+.vsidian-context-menu [data-icon='paragraphStyle'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-paragraphStyle.svg'); }
+.vsidian-context-menu [data-icon='insertPlus'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-insertPlus.svg'); }
+.vsidian-context-menu [data-icon='normalText'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-normalText.svg'); }
+.vsidian-context-menu [data-icon='cut'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-cut.svg'); }
+.vsidian-context-menu [data-icon='copy'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-copy.svg'); }
+.vsidian-context-menu [data-icon='paste'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-paste.svg'); }
+.vsidian-context-menu [data-icon='selectAll'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-selectAll.svg'); }
+.vsidian-context-menu [data-icon='comment'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-comment.svg'); }
+.vsidian-context-menu [data-icon='bold'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-bold.svg'); }
+.vsidian-context-menu [data-icon='italic'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-italic.svg'); }
+.vsidian-context-menu [data-icon='strikethrough'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-strikethrough.svg'); }
+.vsidian-context-menu [data-icon='highlight'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-highlight.svg'); }
+.vsidian-context-menu [data-icon='inlineCode'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-inlineCode.svg'); }
+.vsidian-context-menu [data-icon='inlineMath'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-inlineMath.svg'); }
+.vsidian-context-menu [data-icon='clearInline'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-clearInline.svg'); }
+.vsidian-context-menu [data-icon='bulletList'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-bulletList.svg'); }
+.vsidian-context-menu [data-icon='orderedList'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-orderedList.svg'); }
+.vsidian-context-menu [data-icon='taskList'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-taskList.svg'); }
+.vsidian-context-menu [data-icon='quote'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-quote.svg'); }
+.vsidian-context-menu [data-icon='table'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-table.svg'); }
+.vsidian-context-menu [data-icon='horizontalRule'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-horizontalRule.svg'); }
+.vsidian-context-menu [data-icon='codeBlock'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-codeBlock.svg'); }
+.vsidian-context-menu [data-icon='blockMath'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-blockMath.svg'); }
+
+body.vscode-dark .vsidian-context-menu [data-icon='link'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='link'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-link.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='externalLink'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='externalLink'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-externalLink.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='textFormat'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='textFormat'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-textFormat.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='paragraphStyle'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='paragraphStyle'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-paragraphStyle.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='insertPlus'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='insertPlus'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-insertPlus.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='normalText'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='normalText'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-normalText.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='cut'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='cut'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-cut.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='copy'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='copy'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-copy.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='paste'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='paste'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-paste.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='selectAll'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='selectAll'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-selectAll.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='comment'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='comment'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-comment.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='bold'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='bold'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-bold.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='italic'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='italic'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-italic.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='strikethrough'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='strikethrough'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-strikethrough.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='highlight'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='highlight'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-highlight.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='inlineCode'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='inlineCode'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-inlineCode.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='inlineMath'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='inlineMath'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-inlineMath.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='clearInline'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='clearInline'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-clearInline.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='bulletList'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='bulletList'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-bulletList.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='orderedList'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='orderedList'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-orderedList.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='taskList'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='taskList'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-taskList.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='quote'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='quote'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-quote.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='table'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='table'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-table.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='horizontalRule'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='horizontalRule'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-horizontalRule.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='codeBlock'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='codeBlock'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-codeBlock.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='blockMath'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-blockMath.svg'); }
+
+/* 文字徽标（H1–H6）：语言无关的字面，弱化一档与文案区分 */
+.vsidian-context-menu .vsidian-context-menu-badge {
+  flex: 0 0 auto;
+  min-width: 16px;
+  text-align: center;
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+/* 勾选指示（✓ 槽） */
+.vsidian-context-menu .vsidian-context-menu-check {
+  flex: 0 0 auto;
+}
+
+/* 快捷键提示列：右对齐、小字号 + 降低不透明度，不与菜单项文字抢戏；
+   未绑定项 DOM 不发射该槽（不占位） */
+.vsidian-context-menu .vsidian-context-menu-hint {
+  flex: 0 0 auto;
+  font-size: 11px;
+  opacity: 0.65;
+}
+
+/* 子菜单指示箭头（▸） */
+.vsidian-context-menu .vsidian-context-menu-cue {
+  flex: 0 0 auto;
+  opacity: 0.7;
+}
+
+/* 级联子菜单：默认隐藏，父项宿主 hover/focus-within 展开（显隐主开关）；
+   open 类为父项点击兜底通道；flip 类在装配期右缘放不下时翻到左侧；
+   max-width 与主菜单同款钳制——极窄视口下两侧都放不下时至少不被裁切
+   （review-loops 修复：此前仅 min-width，<约 400px 视口必溢出） */
+.vsidian-context-menu .vsidian-context-menu-submenu {
+  display: none;
+  position: absolute;
+  left: 100%;
+  top: -5px; /* 对齐父项宿主的菜单容器 padding（4px）+1px 边框 */
+  min-width: 170px;
+  max-width: calc(100vw - 8px);
+  box-sizing: border-box;
+  padding: 4px;
+  background: var(--vscode-menu-background, rgba(37, 37, 38, 0.98));
+  border: 1px solid var(--vscode-menu-border, rgba(128, 128, 128, 0.4));
+  border-radius: 5px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+}
+
+.vsidian-context-menu .vsidian-context-menu-host:hover .vsidian-context-menu-submenu,
+.vsidian-context-menu .vsidian-context-menu-host:focus-within .vsidian-context-menu-submenu,
+.vsidian-context-menu .vsidian-context-menu-host.vsidian-menu-open .vsidian-context-menu-submenu {
+  display: block;
+}
+
+.vsidian-context-menu .vsidian-context-menu-submenu.vsidian-menu-flip {
+  left: auto;
+  right: 100%;
 }
 
 /* 重命名行内编辑态：条目内容区被 input 替换（原文可含行内标记）。
