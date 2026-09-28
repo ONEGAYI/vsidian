@@ -108,6 +108,7 @@ vsidian/
 │   │   ├── obsidian-live-preview-editor.md # Obsidian 技术栈与选型调研
 │   │   └── obsidian-viewport-rendering.md  # 视口渲染性能补充调研
 │   └── specs/    # 产品规格
+│       ├── anchor-navigation.md              # 锚点跳转规格（标题/块引用/复制块链接）
 │       ├── batch-2026-09.md                  # 2026-09 开票批次总览
 │       ├── blockquote-accent-bar.md          # 引用块紫色提示边条规格
 │       ├── code-block-card.md                # 代码块卡片功能规格
@@ -116,6 +117,7 @@ vsidian/
 │       ├── graphic-code-block-interaction.md # 图形化代码块交互规格
 │       ├── html-comment-support.md           # HTML 注释快捷键与呈现规格
 │       ├── i18n.md                           # 全局 i18n 适配规格
+│       ├── image-paste.md                    # 图片粘贴插入与资产文件夹规格
 │       ├── keybindings.md                    # 快捷键清单与默认值
 │       ├── live-table-column-width.md        # Live 表格列宽规格
 │       ├── manual-verification.md            # 人工验证清单
@@ -160,6 +162,8 @@ vsidian/
 │   │   ├── documentSession.ts          # 文档会话与写回同步
 │   │   ├── editorCsp.ts                # 编辑器 CSP 装配纯模块（#130）
 │   │   ├── hostLocale.ts               # 生效语言宿主装配解析帮手
+│   │   ├── imagePasteHost.ts           # 图片粘贴落盘执行壳（#161）
+│   │   ├── imagePastePlan.ts           # 图片粘贴纯逻辑（#161）
 │   │   ├── keybindingService.ts        # 快捷键全局存储服务
 │   │   ├── linkTarget.ts               # 宿主侧链接目标分类纯逻辑（#10）
 │   │   ├── settingsPage.ts             # 独立设置页面板装配
@@ -170,6 +174,7 @@ vsidian/
 │   │   ├── viewCycle.ts                # 三态视图编排纯逻辑
 │   │   └── wikilinkTarget.ts           # 宿主侧双链目标解析纯逻辑（#11）
 │   ├── shared/      # 两端共享纯逻辑
+│   │   ├── blockId.ts           # 块 id 与块边界单一事实源
 │   │   ├── changeMapping.ts     # 变更重定位纯函数
 │   │   ├── chromeContract.ts    # 界面域样式契约探针表
 │   │   ├── codeLangs.ts         # 代码块语言注册表与别名路由
@@ -199,6 +204,9 @@ vsidian/
 │   │   ├── tabEscape.ts         # Tab 越界定位纯函数（#125）
 │   │   └── wikilink.ts          # 双链形态学单一事实源（#11）
 │   └── webview/     # webview 端实现
+│       ├── anchorFlash.ts            # 跳转目标高亮装饰状态
+│       ├── blockIdStrip.ts           # 阅读渲染块标记剥离纯函数
+│       ├── blockMenu.ts              # 正文右键菜单与复制块链接
 │       ├── codeCardState.ts          # 卡片共享状态中立模块
 │       ├── codeHighlight.ts          # 语法高亮引擎装配与缓存
 │       ├── css.d.ts                  # CSS 导入类型声明
@@ -216,11 +224,13 @@ vsidian/
 │       ├── graphicBlockChrome.ts     # 图形化块右上角按钮组
 │       ├── graphicRenderers.ts       # 图形化渲染器注册表
 │       ├── htmlComment.ts            # 阅读侧 HTML 注释剥离纯函数
+│       ├── imagePaste.ts             # 图片粘贴拦截适配层（#161）
 │       ├── imageResource.ts          # 图片资源状态机（#10）
 │       ├── indentEditing.ts          # Tab 通用行缩进处理器（#120）
 │       ├── keybindingRouter.ts       # 编辑器按键分发器
 │       ├── keybindingSettings.ts     # 快捷键设置分页
 │       ├── listEditing.ts            # Enter 延续与退格清层（#119）
+│       ├── liveBlockId.ts            # 块 id 标记 live 淡化装饰
 │       ├── liveCodeCard.ts           # Live 代码块卡片装饰
 │       ├── liveDecorations.ts        # 语法树驱动 Live 装饰（#8）
 │       ├── liveLineNumbers.ts        # 表格段首行号与绘制探针

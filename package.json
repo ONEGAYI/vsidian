@@ -123,6 +123,11 @@
         "category": "Vsidian"
       },
       {
+        "command": "onegayi.vsidian.block.copyLink",
+        "title": "%command.block.copyLink.title%",
+        "category": "Vsidian"
+      },
+      {
         "command": "onegayi.vsidian.format.bold",
         "title": "%format.bold%",
         "category": "Vsidian"

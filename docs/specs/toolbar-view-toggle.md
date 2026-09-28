@@ -1,6 +1,6 @@
 # 规格：编辑器工具栏双态视图切换按钮
 
-状态：已实施（工单 [#141](https://github.com/ONEGAYI/vsidian/issues/141)）。本文是该按钮与切换通道的单一事实源，工单验收以此为准。
+状态：已实施（工单 [#141](https://github.com/ONEGAYI/vsidian/issues/141)；[#158](https://github.com/ONEGAYI/vsidian/issues/158) 起按钮移至工具栏右端组）。本文是该按钮与切换通道的单一事实源，工单验收以此为准。
 
 ## 范围
 
@@ -9,12 +9,12 @@
 
 ## 现状要点（勘察 2026-09-27）
 
-- 工具栏装配 `buildToolbar`：左端齿轮 + 快速操作 `✎`，右端侧栏按钮（`margin-left:auto` 推靠，`src/webview/main.css:560`）。
+- 工具栏装配 `buildToolbar`：左端齿轮 + 快速操作 `✎`；#158 起右端组 = 双态切换（持有 `margin-left:auto` 推靠）+ 侧栏按钮紧随其后（`src/webview/main.css`），与左组间弹性空隙。
 - #38 起视图切换收敛宿主：`setViewMode` 为 private，仅宿主 `view.mode.set` 驱动（`src/webview/syncController.ts:1866-1867`）；`WebviewToHost` 无视图切换请求消息；先例 `keybindings.execute` 出站 → 宿主 executeCommand → 回发 `view.mode.set`。
 
 ## 已确认决策（2026-09-27 澄清答复）
 
-1. **位置**：工具栏右侧、紧邻侧栏按钮左侧（按钮序：齿轮、`✎`、双态切换、侧栏）。
+1. **位置**：#141 定为工具栏右侧、紧邻侧栏按钮左侧（按钮序：齿轮、`✎`、双态切换、侧栏）；#158 起视觉上移入右端组——双态切换持有 `margin-left:auto` 推靠右端、侧栏开关紧随其后，与左侧组（齿轮、`✎`）间为弹性空隙。DOM 序始终未动。
 2. **形态**：单按钮切换，图标随当前态（阅读态显书本类图标、Live 态显编辑类图标），点击切到另一态。
 3. **通道**：新增 webview→宿主请求消息（protocol.ts 单一事实源），宿主复用 `runViewSwitch` 裁剪为 live↔reading 双态；按钮态由既有 `view.mode.set` 驱动。
 
@@ -41,8 +41,8 @@
 ## 验证与完成条件
 
 - **测试**：协议契约单测；jsdom 控制器单测（出站消息、图标随态、换包重刷）；集成（真宿主点击切换、与三态按钮 / 记忆模式一致性）。
-- **视觉层断言**：按钮绘制层可见且 DOM 序在侧栏按钮之前（契约测试钉住）。
+- **视觉层断言**：按钮绘制层可见且 DOM 序在侧栏按钮之前（契约测试钉住）；#158 起浏览器套件补几何断言——按钮位于工具栏水平中点右侧、与侧栏开关以 gap 紧邻组成右端组。
 - **回归与文档**：compile / test:unit / test:browser / test:integration；更新 keybindings.md、README 双语、人工验证清单、文件树。
-- **用户人工验收**：位置（侧栏按钮左侧）与图标随态的观感。
+- **用户人工验收**：位置（#158 起与侧栏开关组成右端组、侧栏开关左侧）与图标随态的观感。
 
 Blocked by: 无

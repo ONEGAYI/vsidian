@@ -35,6 +35,11 @@ const extra: readonly KeybindingOperation[] = [
   { id: 'insertColumnLeft', command: 'onegayi.vsidian.table.insertColumnLeft', titleKey: 'command.table.insertColumnLeft.title', mode: 'live', writes: true, defaults: [] },
   { id: 'insertColumnRight', command: 'onegayi.vsidian.table.insertColumnRight', titleKey: 'command.table.insertColumnRight.title', mode: 'live', writes: true, defaults: [] },
   { id: 'deleteColumn', command: 'onegayi.vsidian.table.deleteColumn', titleKey: 'command.table.deleteColumn.title', mode: 'live', writes: true, defaults: [] },
+  // #162 复制块链接：目标由光标所在块即时推导（标题行=复制标题链接；无块
+  // id 先在块尾自动补写——一笔可撤销编辑），与正文右键菜单同一命令的两个
+  // 入口。默认 ctrl+shift+c（2026-09-28 冲突核对：操作表与 keybindingRouter
+  // 零占用，宿主编辑器正文无默认占用——评估记录见 docs/specs/keybindings.md）
+  { id: 'blockCopyLink', command: 'onegayi.vsidian.block.copyLink', titleKey: 'command.block.copyLink.title', mode: 'live', writes: true, defaults: ['ctrl+shift+c'] },
   { id: 'openSettings', command: 'onegayi.vsidian.openSettings', titleKey: 'command.openSettings.title', mode: 'both', writes: false, defaults: [] },
   // #132 样式参考：打开设置页并定位「样式参考」分页（只读全局命令，双模式
   // 可用；默认不绑定——设置页入口常驻，快捷键留给用户按需绑定）

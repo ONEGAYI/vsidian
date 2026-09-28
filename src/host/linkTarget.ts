@@ -12,7 +12,11 @@
 // - 相对路径、空格、中文与 %编码：percent-decode 容错（源文原样或已编码
 //   两种写法解析到同一目标）
 // - 文档链接无扩展名：候选为「精确路径优先，其次补 .md」（与 #11 双链
-//   「扩展名省略按 Markdown 处理」同语义；标题/锚点定位不在本票）
+//   「扩展名省略按 Markdown 处理」同语义）
+// - 锚点 fragment（#160）：CommonMark 语义取首个 `#`——其前为路径、其后
+//   整段为 fragment，结构化保留供执行层定位（不再静默丢弃）；仅锚点
+//   （#frag）解析为本文件锚点目标；外部 scheme（http/https 等）的 `#`
+//   是网页锚点语义不接管，照旧外开；图片通道无锚点语义，`#` 开头维持拦截
 //
 // 本模块不依赖 vscode（可在 node 单测直驱）；fsPath 语义由注入的
 // LinkContext 提供，vscode 层负责 Uri ↔ fsPath 的双向换算（同一扩展宿主
@@ -32,7 +36,13 @@ export interface LinkContext {
 /** 链接目标分类结果 */
 export type LinkTarget =
   | { kind: 'external'; url: string }
-  | { kind: 'doc'; candidates: string[] }
+  | { kind: 'doc'; candidates: string[]; fragment: string | null }
+  | {
+      /** 本文件锚点目标（#160：`#frag` 省略路径，目标即当前文档） */
+      kind: 'anchor'
+      /** 容错 percent-decode 后的锚点文本（空串已被拦截） */
+      fragment: string
+    }
   | {
       kind: 'blocked'
       reason: 'empty' | 'scheme' | 'escape' | 'windows-drive-on-posix'
@@ -88,9 +98,33 @@ function pathOps(ctx: LinkContext) {
   return ctx.isWindowsHost ? path.win32 : path.posix
 }
 
+/**
+ * CommonMark 语义的 href 拆分（#160）：**首个** `#` 之前为路径部分、之后
+ * 整段为 fragment（`./a#b.md` 拆为 `./a` + `b.md`——路径本身含 `#` 属
+ * 已知边界）；`#` 后为空串时无 fragment。fragment 做容错 percent-decode
+ * （阅读侧 href 经 markdown-it normalizeLink 编码、live 侧为字面原文，
+ * 两种写法须解析到同一锚点——与路径同口径）；空 fragment 解码后回空串
+ * 交由调用方按「无可定位目标」处置。
+ */
+function splitHrefFragment(
+  href: string,
+): { pathText: string; fragment: string | null } {
+  const hashIdx = href.indexOf('#')
+  if (hashIdx < 0) {
+    return { pathText: href, fragment: null }
+  }
+  const rawFragment = href.slice(hashIdx + 1)
+  if (rawFragment === '') {
+    return { pathText: href.slice(0, hashIdx), fragment: null }
+  }
+  return { pathText: href.slice(0, hashIdx), fragment: tolerantDecode(rawFragment) }
+}
+
 /** 解析为工作区内的绝对路径：返回绝对 fsPath；越出资源根返回 null */
 function resolveInside(href: string, ctx: LinkContext): string | null {
-  // 剥掉 #fragment 与 ?query（路径部分才参与解析；锚点定位属 #11）
+  // 剥掉 #fragment 与 ?query（路径部分才参与解析；链接通道的 fragment 已
+  // 由 #160 的 splitHrefFragment 结构化保留，此处剥除对图片通道与防御性
+  // 重复剥除均为无操作——pathText 无 # 时 split('#')[0] 即原文）
   const withoutHash = href.split('#')[0]!
   const pathPart = withoutHash.split('?')[0]!
   let p = tolerantDecode(pathPart.trim())
@@ -134,12 +168,13 @@ function isWin32OddBasename(raw: string): boolean {
   return base.includes(':') || /[.\s]$/.test(base)
 }
 
-/** 通用分类前半段：外链放行 / 空白与锚点拦截 / scheme 拦截 / 盘符拦截 */
+/** 通用分类前半段：外链放行 / 空白拦截 / 锚点放行 / scheme 拦截 / 盘符拦截 */
 function preClassify(
   raw: string,
   ctx: LinkContext,
 ):
   | { kind: 'external'; url: string }
+  | { kind: 'anchor'; fragment: string }
   | {
       kind: 'blocked'
       reason: 'empty' | 'scheme' | 'escape' | 'windows-drive-on-posix'
@@ -148,7 +183,15 @@ function preClassify(
     }
   | { kind: 'path'; pathText: string } {
   const href = raw.trim()
-  if (href === '' || href.startsWith('#')) {
+  if (href.startsWith('#')) {
+    // #160 仅锚点目标：本文件页内跳转；空锚点（裸 #）无可定位目标维持拦截
+    const { fragment } = splitHrefFragment(href)
+    if (fragment === null) {
+      return { kind: 'blocked', reason: 'empty' }
+    }
+    return { kind: 'anchor', fragment }
+  }
+  if (href === '') {
     // #95 i18n：empty 分支原带的 detail（空白链接/仅锚点）无消费方——反馈
     // 文案由 vscode 层按 reason 键名取词，分类层不再产出文案字面量
     return { kind: 'blocked', reason: 'empty' }
@@ -187,15 +230,20 @@ function preClassify(
 }
 
 /**
- * 链接目标分类：external → openExternal；doc → 候选绝对路径（存在性由
- * vscode 层探测，精确优先、无扩展名其次补 .md）；blocked → 用户可见反馈。
+ * 链接目标分类：external → openExternal（URL 原样含 `#`，网页锚点语义
+ * 不接管）；anchor → 本文件锚点目标（#160 页内跳转）；doc → 候选绝对
+ * 路径 + 结构化 fragment（存在性由 vscode 层探测，精确优先、无扩展名
+ * 其次补 .md；fragment 供执行层定位）；blocked → 用户可见反馈。
  */
 export function classifyLinkTarget(href: string, ctx: LinkContext): LinkTarget {
   const pre = preClassify(href, ctx)
   if (pre.kind !== 'path') {
     return pre
   }
-  const absolute = resolveInside(pre.pathText, ctx)
+  // #160 首个 `#` 拆分：路径部分参与解析（?query 仍由 resolveInside 剥），
+  // fragment 结构化保留——含空格的宽松字面目标在此层同样拆分
+  const { pathText, fragment } = splitHrefFragment(pre.pathText)
+  const absolute = resolveInside(pathText, ctx)
   if (absolute === null) {
     return { kind: 'blocked', reason: 'escape', detail: pre.pathText }
   }
@@ -203,7 +251,7 @@ export function classifyLinkTarget(href: string, ctx: LinkContext): LinkTarget {
   if (!pathOps(ctx).extname(absolute)) {
     candidates.push(`${absolute}.md`)
   }
-  return { kind: 'doc', candidates }
+  return { kind: 'doc', candidates, fragment }
 }
 
 /** 图片目标分类：仅工作区内相对路径可经宿主读取；外链/危险 scheme 拦截
@@ -212,6 +260,10 @@ export function classifyImageTarget(src: string, ctx: LinkContext): ImageTarget 
   const pre = preClassify(src, ctx)
   if (pre.kind === 'external') {
     return { kind: 'blocked', reason: 'scheme', scheme: 'https' }
+  }
+  if (pre.kind === 'anchor') {
+    // #160：`#frag` src 无图片语义（不随链接锚点放行），维持 empty 拦截
+    return { kind: 'blocked', reason: 'empty' }
   }
   if (pre.kind === 'blocked') {
     return pre

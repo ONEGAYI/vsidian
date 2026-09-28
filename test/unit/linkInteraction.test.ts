@@ -805,3 +805,93 @@ describe('装饰实例缓存上限（widget deco cache）', () => {
     expect(wikilinkWidgetDeco('常驻显示')).toBe(pinned)
   })
 })
+
+describe('#160 普通链接锚点：webview 上报通道矩阵（含空格路径两路）', () => {
+  // 宿主 fragment 拆分（linkTarget.test.ts）的前提是 webview 原样上报
+  // href/字面 dest：本组钉住三条上报通道对 `#锚点` 形态不过滤不改写——
+  // live 树驱动（标准链接）、宽松行扫描（#152）、阅读单击（normalizeLink
+  // 编码后 href）。定位落位语义由集成用例覆盖。
+
+  const ANCHOR_DOC = [
+    '# 锚点样例',
+    '',
+    '标准 [甲](./my%20file.md#标题) 与页内 [乙](#页内小节) 与井号 [戊](./a#b.md)。',
+    '',
+    '宽松 [丙](./my file.md#标题) 与无扩展名 [丁](./my file#标题)。',
+    '',
+  ].join('\n')
+
+  function anchorView(): { view: EditorView; parent: HTMLElement } {
+    const state = EditorState.create({ doc: ANCHOR_DOC, extensions: [liveDecorationsField] })
+    const parent = document.createElement('div')
+    document.body.appendChild(parent)
+    return { view: new EditorView({ state, parent }), parent }
+  }
+
+  it('activateLinkAtPos（树驱动标准链接）：#锚点 href 原样上报（%20 编码/页内/路径含 #）', () => {
+    const { view, parent } = anchorView()
+    try {
+      const posted: string[] = []
+      // %20 编码形态：live 上报源文原样 URI（解码归宿主）
+      expect(activateLinkAtPos(view, ANCHOR_DOC.indexOf('甲'), (href) => posted.push(href))).toBe(true)
+      // 页内锚点（# 开头）：不被 webview 层拦截，宿主解析为 anchor 目标
+      expect(activateLinkAtPos(view, ANCHOR_DOC.indexOf('乙'), (href) => posted.push(href))).toBe(true)
+      // 路径含 #：整段照报（宿主按 CommonMark 首个 # 拆分为 ./a + b.md）
+      expect(activateLinkAtPos(view, ANCHOR_DOC.indexOf('戊'), (href) => posted.push(href))).toBe(true)
+      expect(posted).toEqual(['./my%20file.md#标题', '#页内小节', './a#b.md'])
+    } finally {
+      view.destroy()
+      parent.remove()
+    }
+  })
+
+  it('activateLooseLinkAtPos（宽松行扫描）：含空格路径 + 锚点整段字面上报（含无扩展名）', () => {
+    const { view, parent } = anchorView()
+    try {
+      const posted: Array<{ href: string; from: number; to: number }> = []
+      const openC = ANCHOR_DOC.indexOf('[丙]')
+      const openD = ANCHOR_DOC.indexOf('[丁]')
+      expect(
+        activateLooseLinkAtPos(view, ANCHOR_DOC.indexOf('丙'), (href, f, t) => posted.push({ href, from: f, to: t })),
+      ).toBe(true)
+      expect(
+        activateLooseLinkAtPos(view, ANCHOR_DOC.indexOf('丁'), (href, f, t) => posted.push({ href, from: f, to: t })),
+      ).toBe(true)
+      // 宽松形态学不拆 #：dest 为括号内整段字面文本（含空格与锚点），
+      // 拆分归宿主 resolveInside 前 splitHrefFragment
+      expect(posted.map((p) => p.href)).toEqual(['./my file.md#标题', './my file#标题'])
+      expect(posted[0]!.from).toBe(openC)
+      expect(posted[0]!.to).toBe(ANCHOR_DOC.indexOf(')', openC) + 1)
+      expect(posted[1]!.from).toBe(openD)
+      expect(posted[1]!.to).toBe(ANCHOR_DOC.indexOf(')', openD) + 1)
+    } finally {
+      view.destroy()
+      parent.remove()
+    }
+  })
+
+  it('阅读视图：#锚点链接渲染可点击，单击上报编码形态 href（宽松与页内两路）', () => {
+    const h = makeBridge()
+    const c = mount(h, ANCHOR_DOC)
+    try {
+      c.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
+      const anchors = Array.from(readingContainer().querySelectorAll<HTMLAnchorElement>('a'))
+      // 五条锚点链接全部渲染（宽松两路 + 标准三路），无 href 净化
+      expect(anchors.length).toBe(5)
+      const byDecoded = (needle: string) =>
+        anchors.find((a) => decodeURIComponent(a.getAttribute('href') ?? '') === needle)!
+      // 宽松含空格路径 + 锚点：href 编码形态，单击解码后与字面源文一致
+      byDecoded('./my file.md#标题').click()
+      // 页内锚点：href 为 # 开头编码形态
+      byDecoded('#页内小节').click()
+      const intents = sentOf(h, 'link.activate') as LinkActivate[]
+      expect(intents.map((m) => decodeURIComponent(m.href))).toEqual([
+        './my file.md#标题',
+        '#页内小节',
+      ])
+      expect(sentOf(h, 'edit.request').length).toBe(0)
+    } finally {
+      c.dispose()
+    }
+  })
+})

@@ -18,13 +18,21 @@ export const zhCn: Record<MessageKey, string> = {
   'settings.searchResults': '搜索结果',
   'settings.searchCount': '找到 {count} 项设置',
   'settings.searchEmpty': '未找到匹配的设置，请尝试其他关键词。',
-  'settings.editorSubtitle': '调整实时预览的显示方式。更改会自动保存。',
+  'settings.editorSubtitle': '调整编辑与呈现行为。更改会自动保存。',
   'settings.empty': '暂无可配置项。',
+  /** 设置页编辑器分组页内的组内小节标题（#163 二轮还原：侧栏只留
+   *  常规/编辑器，分类以下方组内标题呈现——group* 键族） */
   'settings.groupDisplay': '显示',
   /** 设置页「常规」分组标题（#96 general.* 设置项的归属分组） */
   'settings.generalSection': '常规',
   /** 设置页「常规」分组副文案（对齐「编辑器」分组的说明句式） */
   'settings.generalSectionDescription': '调整 Vsidian 的基础行为。更改会自动保存。',
+  /** 编辑器页内小节（#163 二轮还原）：editor.symbol* 输入行为类 */
+  'settings.groupSymbols': '符号输入',
+  /** 编辑器页内小节：codeblock.* 呈现类 */
+  'settings.groupCodeblock': '代码块',
+  /** 编辑器页内小节：image.* 图片粘贴设置 */
+  'settings.groupImage': '图片',
 
   // ---- keybindingSettings.（快捷键分页）----
   'keybindingSettings.title': '快捷键',
@@ -155,6 +163,7 @@ export const zhCn: Record<MessageKey, string> = {
   'styleRef.category.chromeLimits': '限制说明',
   'styleRef.category.frontmatter': 'frontmatter 表格卡片',
   'styleRef.category.toolbarBanner': '工具栏与横幅',
+  'styleRef.category.contextMenu': '正文右键菜单',
   'host.styleRefExported': '样式契约 JSON 已导出：{path}',
   'host.styleRefExportFailed': '样式契约 JSON 导出失败：{reason}',
   'host.styleRefExportReasonMissingAsset': '扩展安装不完整（缺少 style-reference.json）',
@@ -186,7 +195,7 @@ export const zhCn: Record<MessageKey, string> = {
   'host.confirmResume': '将放弃“{name}”编辑器中未确认的本地修改，并以磁盘/权威内容重新同步。建议先复制未确认输入。',
   'host.conflictPaused': '“{name}”的编辑已暂停：外部修改与未确认输入无法安全合并。未确认输入已保留，可随时取回。',
   'host.panelClosedWithInput': '“{name}”的编辑器已关闭（或连接断开），存在未保存的未确认输入：{text}',
-  'host.wikilinkUnsupported': '不支持的双链形态「[[{target}]]」（块引用 ^、嵌入 ![[…]] 等属二期）：已按原文保留',
+  'host.wikilinkUnsupported': '不支持的双链形态「[[{target}]]」（嵌入 ![[…]] 属二期）：已按原文保留',
   'host.wikilinkNoWorkspace': '当前文档不在任何工作区文件夹内：双链目标需要按工作区查找，未打开文件夹时无法跳转（链接文本保留）',
   'host.wikilinkNotFound': '双链目标不存在：[[{target}]]（已按当前工作区按需查找；不会自动创建文件）',
   'host.wikilinkAmbiguousPick': '找到多个双链目标「{target}」，请选择要打开的笔记',
@@ -399,4 +408,34 @@ export const zhCn: Record<MessageKey, string> = {
   'command.ui.outlineReset.title': '重置大纲',
   'command.ui.outlineCollapseAll.title': '折叠全部大纲',
   'command.ui.outlineExpandAll.title': '展开全部大纲',
+
+  // ---- #159 锚点跳转（块引用定位与本文件锚点）----
+  /** 块 id 缺失提示（与标题缺失同款「打开后提示」行为） */
+  'host.wikilinkBlockMissing': '已在目标文档中打开{link}，但未找到块引用「^{blockId}」（块 id 是块尾行行尾的 ` ^id` 标记）',
+
+  // ---- #160 普通链接锚点定位（host 通知）----
+  'host.linkAnchorMissing':
+    '已打开 {href} 指向的文档，但未找到标题「{heading}」（标题匹配：trim + 空白折叠 + 大小写不敏感的 ATX 标题）',
+
+  // ---- #161 图片粘贴（设置项与宿主通知）----
+  'setting.imagePaste.title': '粘贴图片插入',
+  'setting.imagePaste.description': '实时预览中粘贴剪贴板图片时，自动保存到配置的资产文件夹并在光标处插入图片引用。',
+  'setting.imagePasteLocation.title': '图片存放位置',
+  'setting.imagePasteLocation.description': '粘贴图片的落盘位置：与当前文件同目录、相对工作区根加子路径、或相对当前文件加子路径。子路径仅对后两种模式生效。',
+  'setting.imagePasteLocationSameDir': '与当前文件同目录',
+  'setting.imagePasteLocationWorkspaceRoot': '相对工作区根',
+  'setting.imagePasteLocationRelativeToFile': '相对当前文件',
+  'setting.imagePasteSubpath.title': '图片存放子路径',
+  'setting.imagePasteSubpath.description': '「相对工作区根」与「相对当前文件」模式下拼接的子文件夹——选择「与当前文件同目录」时本项置灰不可编辑。拒绝绝对路径与 .. 越界。',
+  'host.imagePasteInvalidLocation': '粘贴图片未保存：子路径 {subpath} 非法（不允许绝对路径或 ..）。',
+  'host.imagePasteNoWorkspaceFallback': '未打开工作区文件夹，粘贴图片已保存到当前文件同目录。',
+  'host.imagePasteWriteFailed': '粘贴图片保存失败。',
+ 
+  // ---- #162 复制块链接（正文右键菜单与快捷键）----
+  /** 右键菜单：标题行命中的额外项（拼 [[笔记名#标题]]，标题取行面文本） */
+  'blockMenu.copyHeadingLink': '复制标题链接',
+  /** 右键菜单/快捷键共用项（拼 [[笔记名#^块id]]，无 id 时先自动补写） */
+  'blockMenu.copyLink': '复制块链接',
+  /** 命令面板/快捷键页操作名（keybindings 注册表 titleKey） */
+  'command.block.copyLink.title': '复制当前块链接',
 }

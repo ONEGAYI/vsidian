@@ -1,7 +1,7 @@
 // 集成测试 fixture 单一事实源（工单 #15 抽取）：生成临时工作区全部样例文档。
 // runTest.mjs（开发模式加载）与 runInstalled.mjs（VSIX 安装态回归）共用，
 // 两条路径跑同一套 fixture，保证安装态与开发态断言的是同一组文档。
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
 const LF_DOC = '中文编辑测试\n\n包含 emoji：🎉 与组合 emoji 👨‍👩‍👧‍👦\n\n- 列表项一\n- 列表项二\n'
@@ -69,6 +69,9 @@ const MODE_DOC = [
   '结尾段落。',
   '',
 ].join('\n')
+// 视口重载回归：真实观测夹具的表格、公式与 Mermaid 组合使相同像素高度
+// 在 webview 重建前后对应不同源码行。固定文本见同目录资产。
+const VIEWPORT_MERMAID_DOC = readFileSync(new URL('./viewport-mermaid.md', import.meta.url), 'utf8')
 // #6 锚点恢复：无特殊语法的多段落（块边界清晰）
 const MODE_ANCHOR_DOC = '模式锚点第一段文字\n\n中间段落文本\n\n最后段落结束\n'
 // #8 双模式显示一致性样例：覆盖标题/粗斜体/列表/任务/引用/行内代码/围栏/
@@ -489,6 +492,8 @@ const WIKILINKS_DOC = [
   '',
   '结尾段落。',
   '',
+  '锚点目标块。 ^anchor-blk',
+  '',
 ].join('\n')
 // #11 按名跳转目标：长文使「深处的标题」位于首屏外（阅读挂载定位的屏外目标）
 const TARGET_NOTE_DOC = (() => {
@@ -499,13 +504,14 @@ const TARGET_NOTE_DOC = (() => {
   out.push('# 深处的标题', '', '标题下的正文。', '')
   return out.join('\n')
 })()
-// #11 文本编辑器 reveal 目标：中部小节标题
+// #11 文本编辑器 reveal 目标：中部小节标题；#159 块引用目标：末尾块标记
 const WIKILINK_TARGET_DOC = (() => {
   const out = ['# 双链跳转目标', '', '顶部段落。', '']
   for (let i = 2; i <= 30; i++) {
     out.push(`第 ${i} 段正文。`, '')
   }
   out.push('## 深处小节', '', '小节内容。', '')
+  out.push('带块标记的段落。 ^blk-target', '')
   return out.join('\n')
 })()
 // CRLF 目标（view.locate 坐标系断言载体）：宿主系 offset 与 LF offset 在
@@ -668,6 +674,7 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   writeFileSync(path.join(wsDir, 'heading.md'), HEADING_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'typography.md'), TYPOGRAPHY_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'mode.md'), MODE_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'viewport-mermaid.md'), VIEWPORT_MERMAID_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'mode-anchor.md'), MODE_ANCHOR_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'syntax.md'), SYNTAX_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'fence-chunk.md'), FENCE_CHUNK_DOC, 'utf8')
@@ -725,7 +732,9 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
     '',
   ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, 'highlight.md'), HIGHLIGHT_DOC, 'utf8')
-  writeFileSync(path.join(wsDir, '链接目标.md'), '# 链接目标\n中文目标文档内容。\n', 'utf8')
+  // #161 图片粘贴：落盘目标文档（默认 same-dir 模式下与本文档同目录）
+  writeFileSync(path.join(wsDir, 'paste-image.md'), '# 图片粘贴样例\n\n正文段落。\n\n结尾。\n', 'utf8')
+  writeFileSync(path.join(wsDir, '链接目标.md'), '# 链接目标\n中文目标文档内容。\n\n普通链接块引用目标段落。 ^link-blk\n', 'utf8')
   writeFileSync(path.join(wsDir, '无扩展名目标.md'), '# 无扩展名目标\n省略扩展名解析目标。\n', 'utf8')
   mkdirSync(path.join(wsDir, '子 目录'), { recursive: true })
   writeFileSync(path.join(wsDir, '子 目录', '目标 二.md'), '# 目标 二\n含空格路径的目标文档。\n', 'utf8')
@@ -738,6 +747,24 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   writeFileSync(path.join(wsDir, '目标笔记.md'), TARGET_NOTE_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'wikilink-target.md'), WIKILINK_TARGET_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'wikilink-crlf-target.md'), WIKILINK_CRLF_TARGET_DOC, 'utf8')
+  // #162 复制块链接：frontmatter 头区（不接管断言）、标题行/普通段/表格/
+  // 既有 id 段（菜单两态与零写回断言载体）
+  writeFileSync(path.join(wsDir, 'block-menu.md'), [
+    '---',
+    'title: 块菜单',
+    '---',
+    '',
+    '# 块菜单标题',
+    '',
+    '右键目标段落。',
+    '',
+    '| a | b |',
+    '|---|---|',
+    '| 1 | 2 |',
+    '',
+    '已有 id 段落 ^keep9',
+    '',
+  ].join('\n'), 'utf8')
   mkdirSync(path.join(wsDir, 'dup'), { recursive: true })
   writeFileSync(path.join(wsDir, 'dup', '甲.md'), '# 重名甲（dup 目录）\n', 'utf8')
   mkdirSync(path.join(wsDir, 'other'), { recursive: true })

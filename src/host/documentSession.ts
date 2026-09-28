@@ -23,10 +23,12 @@ import {
   type DiagramExportFailReason,
   type DiagramExportPayload,
   type HostToWebview,
+  type ImagePastePayload,
   type SerChange,
   type SettingsPayload,
   type WebviewToHost,
 } from '../shared/protocol'
+import type { ImagePasteOutcome } from './imagePasteHost'
 import { mapChangeThroughChanges } from '../shared/changeMapping'
 import { NewlineCoordinator } from '../shared/newline'
 import type { ImageResolution } from './linkTarget'
@@ -57,6 +59,12 @@ export interface PanelPort {
   openWikilink?(intent: { target: string; srcStart: number; srcEnd: number }): void
   /** #10 图片资源解析（vscode 层注入：classifyImageTarget + asWebviewUri） */
   resolveImage?(src: string): Promise<ImageResolution>
+  /** #161 图片粘贴落盘（vscode 层注入：设置读取 + 目录解析 + writeFile）；
+   *  report 回报成功（携插入文本）/ 目录非法 / 写入失败 */
+  pasteImage?(
+    payload: ImagePastePayload,
+    report: (result: ImagePasteOutcome) => void,
+  ): void
   /** #111 图表导出（vscode 层注入：载荷校验 + showSaveDialog + writeFile）；
    *  report 回报取消/校验失败/写盘失败/成功 */
   exportDiagram?(
@@ -83,6 +91,10 @@ export interface PanelPort {
    *  笔记名 = docUri 文件名去扩展名（Obsidian 语义），标题为 webview
    *  上报的条目原文（含行内标记，与宿主 findHeadingOffset 的字面匹配同源） */
   writeHeadingLinkClipboard?(docUri: string, heading: string): void
+  /** #162 剪贴板写（块链接）：`[[笔记名#^块id]]` 的拼接在 vscode 层——
+   *  blockId 为 webview 侧块尾行既有 id 或刚经标准 edit.request 写入的
+   *  新 id（写入与复制是两条消息，本端口只管拼接剪贴板） */
+  writeBlockLinkClipboard?(docUri: string, blockId: string): void
 }
 
 /** 会话通知（#4）：冲突暂停、复制请求、面板关闭时存在未确认输入等需要
@@ -376,12 +388,14 @@ export class DocumentSession {
         return Promise.resolve()
       case 'clipboard.write':
         // #69 剪贴板写：与 link.activate 同口径的只读交互（不受写回暂停
-        // 影响）；两变体（text 直写 / linkHeading 宿主拼标题链接）分别
-        // 转发到注入端口
+        // 影响）；三变体（text 直写 / linkHeading 宿主拼标题链接 / linkBlock
+        // 宿主拼块链接 #162）分别转发到注入端口
         if ('text' in message) {
           panel.port.writeClipboard?.(message.text)
-        } else if (message.linkHeading !== undefined) {
+        } else if ('linkHeading' in message) {
           panel.port.writeHeadingLinkClipboard?.(message.linkHeading.docUri, message.linkHeading.heading)
+        } else if ('linkBlock' in message) {
+          panel.port.writeBlockLinkClipboard?.(message.linkBlock.docUri, message.linkBlock.blockId)
         }
         return Promise.resolve()
       case 'ready': {
@@ -516,6 +530,13 @@ export class DocumentSession {
         panel.lastViewState = message
         this.options.onViewState?.(sessionId, message)
         return Promise.resolve()
+      case 'view.locate.ack':
+        // 定位送达确认（#163 验收反馈）：offset 对账后清除待送达意图——
+        // 陈旧 ack（连续跳转中前一次的迟到回执）不得误清后一次的意图
+        if (message.offset === this.lastLocateOffset) {
+          this.lastLocateOffset = null
+        }
+        return Promise.resolve()
       case 'link.activate': {
         // #10 链接跳转意图：校验归属与 ready 后交面板端口执行。只读交互，
         // 不受写回暂停影响（暂停面板照样可以点链接）
@@ -560,6 +581,34 @@ export class DocumentSession {
           return Promise.resolve()
         }
         return this.resolveImageRequest(panel, message.reqId, message.src)
+      }
+      case 'image.paste': {
+        // #161 图片粘贴落盘：会话守卫对齐 image.request / diagram.export
+        // 先例（就绪且 docUri 匹配才放行，否则静默丢弃）；结果回来源面板。
+        // 写文档动作不在会话内发生（落盘是文件系统写入；正文插入由 webview
+        // 收结果后走标准 edit.request），暂停面板的粘贴拦截已在 webview 侧
+        // 守卫——到达此处的暂停面板请求照常落盘但 webview 不插入（无撕裂）
+        if (!panel.ready || message.docUri !== this.docUri) {
+          return Promise.resolve()
+        }
+        const report = (result: ImagePasteOutcome): void => {
+          panel.port.send(
+            result.ok
+              ? { kind: 'image.paste.result', reqId: message.reqId, ok: true, markdown: result.markdown! }
+              : {
+                  kind: 'image.paste.result',
+                  reqId: message.reqId,
+                  ok: false,
+                  reason: result.reason ?? 'invalid',
+                },
+          )
+        }
+        if (panel.port.pasteImage) {
+          panel.port.pasteImage(message, report)
+        } else {
+          report({ ok: false, reason: 'invalid' })
+        }
+        return Promise.resolve()
       }
       case 'perf.report':
         panel.lastPerfReport = message
@@ -691,10 +740,23 @@ export class DocumentSession {
     }
   }
 
-  /** 向指定面板发送宿主消息（诊断请求等） */
+  /** 向指定面板发送宿主消息（诊断请求等）；经此通道的 view.locate 记录
+   *  为「待送达定位意图」（webview LF 坐标原样）——送达确认（ack）到达前
+   *  面板重握手时补发兜底 */
   postToPanel(sessionId: string, message: HostToWebview): void {
     this.panels.get(sessionId)?.port.send(message)
+    if (message.kind === 'view.locate') {
+      this.lastLocateOffset = message.offset
+    }
   }
+
+  /** 待送达定位意图（null=无未送达意图）。面板重载（retainContextWhenHidden
+   *  关闭，隐藏即销毁）可能让 view.locate 随旧 webview 实例丢失——重握手
+   *  sendInit 后补发兜住这个竞态窗口。**已送达**的定位经 view.locate.ack
+   *  对账清除（#163 验收反馈）：此后不再补发，重载恢复交给 webview 持久化
+   *  锚点（定位点随 locateOffset 落盘）——用户送达后的手动移位不被历史
+   *  程序定位重播 */
+  private lastLocateOffset: number | null = null
 
   private sendInit(panel: PanelEntry): void {
     panel.ready = true
@@ -705,6 +767,11 @@ export class DocumentSession {
       version: this.doc.version,
       text: this.newline.toLfText(this.doc.getText()),
     })
+    if (this.lastLocateOffset !== null) {
+      // 仅补发「从未送达」的定位（送达即被 ack 清除）——竞态兜底窗口之外的
+      // 重载恢复一律走 webview 持久化锚点
+      panel.port.send({ kind: 'view.locate', offset: this.lastLocateOffset })
+    }
   }
 
   private async processEditRequest(

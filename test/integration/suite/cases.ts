@@ -43,6 +43,8 @@ const CMD = {
   linkLog: 'onegayi.vsidian._test.getLinkLog',
   // #111 图表导出消息日志（钩子模式下宿主短路另存为对话框并记录）
   diagramExportLog: 'onegayi.vsidian._test.takeDiagramExportLog',
+  // #161 图片粘贴消息日志（钩子模式记录载荷形态；落盘真实执行）
+  imagePasteLog: 'onegayi.vsidian._test.takeImagePasteLog',
   // #38 三态记忆
   getLastMode: 'onegayi.vsidian._test.getLastMode',
   resetLastMode: 'onegayi.vsidian._test.resetLastMode',
@@ -158,6 +160,10 @@ const HIGHLIGHT_DOC_TEXT = [
   '',
   '普通段落。',
 ].join('\n')
+
+/** #161 图片粘贴载荷：1x1 PNG（字节与解码断言的对照源） */
+const PASTE_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
 
 function wsUri(name: string): vscode.Uri {
   return vscode.Uri.file(`${wsDir}/${name}`)
@@ -350,6 +356,8 @@ interface ViewState {
   selectionOffset?: number
   selectionHead?: number
   selectionAssoc?: number
+  liveViewportCenterLine?: number
+  liveScrollTopPx?: number
   wordSegmenter?: boolean
   readingBlockCount?: number
   readingAnchorStart?: number
@@ -733,11 +741,15 @@ interface LinkLogData {
     reason?: string
     scheme?: string
     path?: string
+    /** #160 doc/anchor 条目的锚点目标 */
+    fragment?: string
     /** #11 双链条目字段 */
     target?: string
     heading?: string
+    /** #159 块引用目标（与 heading 互斥） */
+    blockId?: string
     candidates?: string[]
-    locate?: 'custom-panel' | 'text-editor' | 'none'
+    locate?: 'custom-panel' | 'none'
   }>
 }
 
@@ -757,7 +769,12 @@ const WIKILINKS_DOC_TEXT = [
   '',
   '结尾段落。',
   '',
+  '锚点目标块。 ^anchor-blk',
+  '',
 ].join('\n')
+/** #159 本文件块锚点目标行的 LF offset（view.locate 光标断言依据；
+ *  wikilinks.md 为 LF 行尾，宿主系与 LF 系一致） */
+const ANCHOR_BLK_LF_OFFSET = WIKILINKS_DOC_TEXT.indexOf('锚点目标块')
 const TARGET_NOTE_TEXT = (() => {
   const out = ['# 目标笔记标题', '', '开篇段落。', '']
   for (let i = 1; i <= 200; i++) {
@@ -2678,13 +2695,12 @@ export const cases: Array<[string, () => Promise<void>]> = [
       srcStart: 0,
       srcEnd: 10,
     })
-    // 宿主以文本编辑器打开目标文档（真实 openTextDocument + showTextDocument）
-    await poll('目标文档被打开', () =>
-      vscode.window.activeTextEditor?.document.uri.toString() === wsUri('子 目录/目标 二.md').toString()
-        ? true
-        : undefined,
-    )
-    const opened = vscode.window.activeTextEditor!.document
+    // 宿主以 Vsidian 面板打开目标文档，沿用当前阅读模式记忆
+    await waitSessionReady('子 目录/目标 二.md')
+    await waitActiveCustomTab('子 目录/目标 二.md')
+    await waitViewState('子 目录/目标 二.md', (v) => v.viewMode === 'reading')
+    assert(tabsOf('子 目录/目标 二.md', 'native') === 0, '阅读跳转不应产生源码标签')
+    const opened = await vscode.workspace.openTextDocument(wsUri('子 目录/目标 二.md'))
     assert(opened.getText().startsWith('# 目标 二'), `打开的目标内容不符：${JSON.stringify(opened.getText().slice(0, 20))}`)
 
     // 跳转全程只读：源文档零写回、磁盘不变
@@ -2739,16 +2755,14 @@ export const cases: Array<[string, () => Promise<void>]> = [
       `拦截类意图不得打开编辑器，实际 ${JSON.stringify(logData.log)}`,
     )
 
-    // 无扩展名目标：候选补 .md 后真实打开（放最后——面板随编辑器切换退场）
+    // 无扩展名目标：候选补 .md 后以 Vsidian 面板打开
     await vscode.commands.executeCommand(CMD.injectMessage, uri, {
       kind: 'link.activate', sessionId: '', docUri: uri,
       href: './无扩展名目标', srcStart: 0, srcEnd: 5,
     })
-    await poll('无扩展名目标（补 .md）被打开', () =>
-      vscode.window.activeTextEditor?.document.uri.toString() === wsUri('无扩展名目标.md').toString()
-        ? true
-        : undefined,
-    )
+    await waitSessionReady('无扩展名目标.md')
+    await waitActiveCustomTab('无扩展名目标.md')
+    assert(tabsOf('无扩展名目标.md', 'native') === 0, '补扩展名跳转不应产生源码标签')
     const diskAfter = await readDisk('links2.md')
     assert(diskAfter === diskBefore, '链接执行不得改写源文档')
     assert(session.appliedEdits === 0, `链接执行不得产生 applyEdit，实际 ${session.appliedEdits}`)
@@ -3502,19 +3516,17 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const versionBefore = (await vscode.workspace.openTextDocument(wsUri('wikilinks.md'))).version
 
     // 按名查找：工作区内唯一 basename 命中（findFiles 按需，不建索引）。
-    // 日志先于打开动作写入（文本编辑器打开会替换源面板——#10 同现象）
+    // 日志先于打开动作写入，目标应以 Vsidian 面板打开
     await injectWikilink(uri, '目标笔记')
     let logData = await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.target === '目标笔记')
     assert(logData!.path === wsUri('目标笔记.md').fsPath, `按名目标路径不符：${logData!.path}`)
-    await poll('按名目标被打开', () =>
-      vscode.window.activeTextEditor?.document.uri.toString() === wsUri('目标笔记.md').toString()
-        ? true
-        : undefined,
-    )
-    const opened = vscode.window.activeTextEditor!.document
+    await waitSessionReady('目标笔记.md')
+    await waitActiveCustomTab('目标笔记.md')
+    assert(tabsOf('目标笔记.md', 'native') === 0, '按名跳转不应额外打开源码标签')
+    const opened = await vscode.workspace.openTextDocument(wsUri('目标笔记.md'))
     assert(opened.getText().startsWith('# 目标笔记标题'), '按名打开的目标内容不符')
 
-    // 文本编辑器打开会替换源面板：重开源面板再注入
+    // 重显源面板再注入下一条双链
     await openWithEditor('wikilinks.md')
     await waitSessionReady('wikilinks.md')
     // 显式路径（含中文与空格目录）：文档相对 + 工作区相对双候选精确解析
@@ -3522,11 +3534,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
     logData = await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.target === '子 目录/目标 二')
     assert(logData!.path === wsUri('子 目录/目标 二.md').fsPath, `显式路径目标不符：${logData!.path}`)
     assert(logData!.locate === 'none', `无标题目标不应定位，实际 ${logData!.locate}`)
-    await poll('显式路径目标被打开', () =>
-      vscode.window.activeTextEditor?.document.uri.toString() === wsUri('子 目录/目标 二.md').toString()
-        ? true
-        : undefined,
-    )
+    await waitSessionReady('子 目录/目标 二.md')
+    await waitActiveCustomTab('子 目录/目标 二.md')
+    assert(tabsOf('子 目录/目标 二.md', 'native') === 0, '显式路径跳转不应打开源码标签')
 
     // 跳转全程只读：源文档零写回、磁盘不变、版本不变
     const state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
@@ -3535,24 +3545,22 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(await readDisk('wikilinks.md') === diskBefore, '双链跳转不得改写源文档')
   }],
 
-  ['双链标题跳转（文本编辑器）：selection reveal 到标题行；缺失标题仍打开并记录（#11）', async () => {
+  ['双链标题跳转（Vsidian 面板）：定位到标题行；缺失标题仍打开并记录（#11）', async () => {
     await openWithEditor('wikilinks.md')
     await waitSessionReady('wikilinks.md')
     const uri = wsUri('wikilinks.md').toString()
     const diskBefore = await readDisk('wikilinks.md')
 
-    // 标题目标：打开后 selection 落在标题行（1.86 API 面 reveal）
+    // 标题目标：新面板就绪后 view.locate 落在标题行
     await injectWikilink(uri, 'wikilink-target#深处小节')
     let logData = await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.heading === '深处小节')
-    assert(logData!.locate === 'text-editor', `文本编辑器路径应记录 locate=text-editor，实际 ${logData!.locate}`)
-    await poll('标题目标被打开', () =>
-      vscode.window.activeTextEditor?.document.uri.toString() === wsUri('wikilink-target.md').toString()
-        ? true
-        : undefined,
-    )
-    const editor = vscode.window.activeTextEditor!
-    const selLine = editor.document.lineAt(editor.selection.active).text
-    assert(selLine.trim() === '## 深处小节', `selection 应在标题行，实际「${selLine}」`)
+    assert(logData!.locate === 'custom-panel', `跨文件标题应由 Vsidian 面板定位，实际 ${logData!.locate}`)
+    await waitSessionReady('wikilink-target.md')
+    await waitActiveCustomTab('wikilink-target.md')
+    const targetText = (await vscode.workspace.openTextDocument(wsUri('wikilink-target.md'))).getText()
+    const headingOffset = targetText.indexOf('## 深处小节')
+    await waitViewState('wikilink-target.md', (v) => v.selectionOffset === headingOffset)
+    assert(tabsOf('wikilink-target.md', 'native') === 0, '标题跳转不应产生源码标签')
 
     // 缺失标题：文档照常打开（不定位），日志记录 locate=none——缺失给可见反馈
     await openWithEditor('wikilinks.md')
@@ -3560,11 +3568,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await injectWikilink(uri, 'wikilink-target#不存在的小节')
     logData = await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.heading === '不存在的小节')
     assert(logData!.locate === 'none', `缺失标题应记录 locate=none，实际 ${logData!.locate}`)
-    await poll('缺失标题目标仍被打开', () =>
-      vscode.window.activeTextEditor?.document.uri.toString() === wsUri('wikilink-target.md').toString()
-        ? true
-        : undefined,
-    )
+    await waitActiveCustomTab('wikilink-target.md')
+    assert(tabsOf('wikilink-target.md', 'native') === 0, '缺失标题仍不应产生源码标签')
 
     assert(await readDisk('wikilinks.md') === diskBefore, '标题跳转不得改写源文档')
   }],
@@ -3603,6 +3608,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert((after.readingParseCount ?? 0) === parseBefore, `定位不得触发全文重解析（${parseBefore} → ${after.readingParseCount}）`)
     const logData = await waitWikilinkLog(sourceUri, (e) => e.kind === 'wikilink-doc' && e.heading === '深处的标题')
     assert(logData!.locate === 'custom-panel', `本扩展面板路径应记录 locate=custom-panel，实际 ${logData!.locate}`)
+    await waitActiveCustomTab('目标笔记.md')
+    assert(tabsOf('目标笔记.md', 'vsidian') === 1, '已开目标应重显现有 Vsidian 标签')
+    assert(tabsOf('目标笔记.md', 'native') === 0, '已开目标不应并存源码标签')
 
     // 双侧零写回
     assert(targetSession.appliedEdits === 0, `目标面板不得产生 applyEdit，实际 ${targetSession.appliedEdits}`)
@@ -3643,6 +3651,130 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(await readDisk('wikilink-crlf-target.md') === diskTarget, '跳转不得改写目标文档（CRLF 保真）')
   }],
 
+  ['双链块引用与本文件锚点跳转（#159）：块定位面板 view.locate、缺失仍打开', async () => {
+    // 跨文件块引用：Vsidian 面板打开并定位到块首行
+    await openWithEditor('wikilinks.md')
+    await waitSessionReady('wikilinks.md')
+    const uri = wsUri('wikilinks.md').toString()
+    const diskBefore = await readDisk('wikilinks.md')
+
+    await injectWikilink(uri, 'wikilink-target#^blk-target')
+    let logData = await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.blockId === 'blk-target')
+    assert(logData!.locate === 'custom-panel', `块引用应经 Vsidian 面板定位，实际 ${logData!.locate}`)
+    await waitSessionReady('wikilink-target.md')
+    await waitActiveCustomTab('wikilink-target.md')
+    const blockText = (await vscode.workspace.openTextDocument(wsUri('wikilink-target.md'))).getText()
+    await waitViewState('wikilink-target.md', (v) =>
+      v.selectionOffset === blockText.indexOf('带块标记的段落。 ^blk-target'))
+    assert(tabsOf('wikilink-target.md', 'native') === 0, '块引用跳转不应产生源码标签')
+
+    // 块 id 缺失：文档照常打开（不定位），日志记录 locate=none——缺失给可见反馈
+    await openWithEditor('wikilinks.md')
+    await waitSessionReady('wikilinks.md')
+    // 块 id 缺失用合法字符集 id（BLOCK_ID_RE 仅拉丁字母/数字/连字符——中文 id
+    // 在解析层即 unsupported，走不到"缺失块"分支，#154 已知边界）
+    await injectWikilink(uri, 'wikilink-target#^missing-blk')
+    logData = await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.blockId === 'missing-blk')
+    assert(logData!.locate === 'none', `缺失块 id 应记录 locate=none，实际 ${logData!.locate}`)
+    await waitActiveCustomTab('wikilink-target.md')
+    assert(tabsOf('wikilink-target.md', 'native') === 0, '缺失块 id 仍不应产生源码标签')
+
+    // 本文件块锚点（[[#^anchor-blk]]）：空 path 目标即当前文档，当前面板走
+    // view.locate（live 光标观测）——先离开初始光标 0，观测到块首行 offset
+    await openWithEditor('wikilinks.md')
+    await waitSessionReady('wikilinks.md')
+    await injectWikilink(uri, '#^anchor-blk')
+    logData = await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.blockId === 'anchor-blk')
+    assert(logData!.locate === 'custom-panel', `本文件锚点应走当前面板定位，实际 ${logData!.locate}`)
+    assert(logData!.path === wsUri('wikilinks.md').fsPath, `本文件锚点目标应为当前文档，实际 ${logData!.path}`)
+    const located = await waitViewState('wikilinks.md', (v) => v.selectionOffset === ANCHOR_BLK_LF_OFFSET)
+    assert(
+      located.selectionOffset === ANCHOR_BLK_LF_OFFSET,
+      `本文件块锚点光标应落块首行 LF offset ${ANCHOR_BLK_LF_OFFSET}，实际 ${located.selectionOffset}`,
+    )
+
+    // 本文件标题锚点（[[#双链样例]]）：光标从锚点块回到文档首标题（0）
+    await injectWikilink(uri, '#双链样例')
+    logData = await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.heading === '双链样例')
+    assert(logData!.locate === 'custom-panel', `本文件标题锚点应走面板定位，实际 ${logData!.locate}`)
+    const top = await waitViewState('wikilinks.md', (v) => v.selectionOffset === 0)
+    assert(top.selectionOffset === 0, `本文件标题锚点光标应回文档头，实际 ${top.selectionOffset}`)
+
+    // 锚点跳转全程只读
+    assert(await readDisk('wikilinks.md') === diskBefore, '锚点跳转不得改写源文档')
+  }],
+
+  ['Live 视口源锚点：Mermaid 围栏附近切标签页后中心行与光标保持', async () => {
+    const targetUri = wsUri('viewport-mermaid.md')
+    const uri = targetUri.toString()
+    await vscode.commands.executeCommand('vscode.openWith', targetUri, VIEW_TYPE)
+    await poll('观测夹具面板就绪', async () => {
+      const state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState | undefined
+      return state?.panels.some((p) => p.ready) ? true : undefined
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'viewport.test.position', cursorLine: 123 })
+    const waitProbe = () => poll('观测夹具视口探针', async () => {
+      const state = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      return state?.liveViewportCenterLine !== undefined ? state : undefined
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'viewport.test.position', scrollNearLine: 123, scrollBiasPx: 150 })
+    await new Promise((r) => setTimeout(r, 400))
+    const before = await waitProbe()
+    assert((before.liveViewportCenterLine ?? 0) >= 110 && (before.liveViewportCenterLine ?? 0) <= 123,
+      `前置：视口中心须在 Mermaid 围栏附近，实际 ${before.liveViewportCenterLine}`)
+    await openWithEditor('mode.md')
+    await waitSessionReady('mode.md')
+    await vscode.commands.executeCommand('vscode.openWith', targetUri, VIEW_TYPE)
+    await poll('观测夹具重握手就绪', async () => {
+      const state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState | undefined
+      return state?.panels.some((p) => p.ready) ? true : undefined
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'viewport.test.position' })
+    await new Promise((r) => setTimeout(r, 600))
+    const after = await waitProbe()
+    assert(after.selectionOffset === before.selectionOffset,
+      `纯光标移动应跨标签页恢复：${before.selectionOffset} → ${after.selectionOffset}`)
+    assert(Math.abs((after.liveViewportCenterLine ?? 0) - (before.liveViewportCenterLine ?? 0)) <= 2,
+      `Live 切标签页后中心行漂移：${before.liveViewportCenterLine} → ${after.liveViewportCenterLine}（scrollTop ${before.liveScrollTopPx} → ${after.liveScrollTopPx}）`)
+  }],
+
+  ['定位送达后面板重载：恢复最后导航点，不重播历史定位（#163 验收反馈）', async () => {
+    await openWithEditor('wikilinks.md')
+    await waitSessionReady('wikilinks.md')
+    const uri = wsUri('wikilinks.md').toString()
+
+    // 连续程序定位往返（文档头 ⇄ 文末块锚点）：重载后的恢复点必须是最后一次
+    // 导航点。宿主侧「已送达定位不再补发」（view.locate.ack 对账）由
+    // documentSession 单测钉住；本用例观测用户可见行为——恢复落点与幂等
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: ANCHOR_BLK_LF_OFFSET })
+    await waitViewState('wikilinks.md', (v) => v.selectionOffset === ANCHOR_BLK_LF_OFFSET)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: 0 })
+    await waitViewState('wikilinks.md', (v) => v.selectionOffset === 0)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: ANCHOR_BLK_LF_OFFSET })
+    await waitViewState('wikilinks.md', (v) => v.selectionOffset === ANCHOR_BLK_LF_OFFSET)
+
+    // 重载 webview（Developer: Reload Webviews；retainContextWhenHidden 关闭：
+    // 销毁重建同一 panel，走 getState 恢复）——定位点已随锚点持久化落盘
+    await vscode.commands.executeCommand('workbench.action.webview.reloadWebviewAction')
+    const restored = await poll('重载后恢复最后定位点', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      return v && v.text === WIKILINKS_DOC_TEXT && v.selectionOffset === ANCHOR_BLK_LF_OFFSET ? v : undefined
+    }, 30000)
+    assert(restored.selectionOffset === ANCHOR_BLK_LF_OFFSET,
+      `重载后应恢复最后导航点（LF offset ${ANCHOR_BLK_LF_OFFSET}，持久化锚点路径），实际 ${restored.selectionOffset}`)
+
+    // 幂等：再次重载仍稳定在最后导航点（无补发循环、无逐次漂移）
+    await vscode.commands.executeCommand('workbench.action.webview.reloadWebviewAction')
+    const again = await poll('二次重载仍恢复最后定位点', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      return v && v.text === WIKILINKS_DOC_TEXT && v.selectionOffset === ANCHOR_BLK_LF_OFFSET ? v : undefined
+    }, 30000)
+    assert(again.selectionOffset === ANCHOR_BLK_LF_OFFSET,
+      `二次重载不得漂移（期望 LF offset ${ANCHOR_BLK_LF_OFFSET}，实际 ${again.selectionOffset}）`)
+  }],
+
   ['双链歧义与缺失：重名记录候选待选择（测试钩子不弹窗）、缺失提示、不支持降级、不自动建文件（#11）', async () => {
     await openWithEditor('wikilinks.md')
     await waitSessionReady('wikilinks.md')
@@ -3676,7 +3808,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     }
     assert(!created, '缺失目标不得自动创建文件')
 
-    // 拦截链路零写回（在会退场的 casenote 打开动作之前断言：会话仍在）
+    // 拦截链路零写回（在 casenote 打开动作之前断言）
     const state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
     assert(state.appliedEdits === 0, `歧义/缺失链路不得产生 applyEdit，实际 ${state.appliedEdits}`)
     assert(state.version === versionBefore, `版本不得变化（${versionBefore} → ${state.version}）`)
@@ -3687,11 +3819,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
     // 与下方 not-found 断言矛盾，Linux 宿主上必超时）
     await injectWikilink(uri, 'casenote')
     if (process.platform === 'win32') {
-      await poll('大小写不敏感目标被打开', () =>
-        vscode.window.activeTextEditor?.document.uri.toString() === wsUri('CaseNote.md').toString()
-          ? true
-          : undefined,
-      )
+      await waitSessionReady('CaseNote.md')
+      await waitActiveCustomTab('CaseNote.md')
+      assert(tabsOf('CaseNote.md', 'native') === 0, '大小写不敏感命中不应产生源码标签')
     } else {
       await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-not-found' && e.target === 'casenote')
     }
@@ -5669,22 +5799,12 @@ export const cases: Array<[string, () => Promise<void>]> = [
       assert(log.path === wsUri('outline-menu.md').fsPath,
         `定位目标应为 outline-menu.md，实际 ${String(log.path)}`)
       const offset = headingOffsetOf(headingLine)
-      if (log.locate === 'custom-panel') {
-        // 目标（outline-menu.md）即本面板自身：宿主 reveal 面板后发 view.locate，
-        // live 态光标落标题行首——面板侧可见落点，不只看日志
-        const view = await waitViewState('outline-menu.md', (v) => v.selectionOffset === offset)
-        assert(view.selectionOffset === offset,
-          `面板光标应落标题行首 offset ${offset}，实际 ${view.selectionOffset}`)
-      } else {
-        // 目标面为文本编辑器：以标题行 selection reveal。此处目标恒为本面板
-        // 自身，该分支用于让落点断言不硬编码定位面（按日志回报的实际面取证据）
-        const editor = await poll('标题跳转落到文本编辑器', () =>
-          vscode.window.activeTextEditor?.document.uri.toString() === wsUri('outline-menu.md').toString()
-            ? vscode.window.activeTextEditor
-            : undefined)
-        const line = editor.document.lineAt(editor.selection.active).text
-        assert(line === headingLine, `文本编辑器 selection 应在标题行「${headingLine}」，实际「${line}」`)
-      }
+      assert(log.locate === 'custom-panel', `标题跳转应经 Vsidian 面板定位，实际 ${log.locate}`)
+      // 目标（outline-menu.md）即本面板自身：宿主 reveal 后发 view.locate，
+      // live 态光标落标题行首——面板侧可见落点，不只看日志
+      const view = await waitViewState('outline-menu.md', (v) => v.selectionOffset === offset)
+      assert(view.selectionOffset === offset,
+        `面板光标应落标题行首 offset ${offset}，实际 ${view.selectionOffset}`)
     }
     // 含标记标题（index 1）：写入端原文 → 读回端字面匹配原文，本轮修复的回归钉子
     await roundTrip(markedLink, '## **加粗** Alpha')
@@ -8644,5 +8764,371 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(session.panels.length >= 1, '源码态双态命令应回 Vsidian 面板')
     await waitViewState('mode.md', (v) => v.viewMode === 'live')
     await waitLastMode('live')
+  }],
+
+  // ---- #160：普通链接锚点定位（fragment 结构化保留 + 打开后定位） ----
+
+  ['普通链接锚点跳转（Vsidian 面板）：含空格路径矩阵；缺失标题、块 id 定位与外部 #（#160）', async () => {
+    /** 注入普通链接意图（与真实 webview 消息同一校验与处理入口） */
+    const injectLink = async (uri: string, href: string): Promise<void> => {
+      await vscode.commands.executeCommand(CMD.injectMessage, uri, {
+        kind: 'link.activate', sessionId: '', docUri: uri, href, srcStart: 0, srcEnd: 10,
+      })
+    }
+    await openWithEditor('links.md')
+    await waitSessionReady('links.md')
+    const uri = wsUri('links.md').toString()
+    const diskBefore = await readDisk('links.md')
+
+    // 含空格路径 + 锚点（%20/%E5 编码形态）：拆分出路径与 fragment 后
+    // 面板定位到标题行（fixture「子 目录/目标 二.md」首行 `# 目标 二`）
+    await injectLink(uri, './子%20目录/目标%20二.md#%E7%9B%AE%E6%A0%87%20%E4%BA%8C')
+    let logData = await waitWikilinkLog(uri, (e) =>
+      e.kind === 'doc' && e.fragment === '目标 二' && e.path === wsUri('子 目录/目标 二.md').fsPath)
+    assert(logData!.locate === 'custom-panel', `含空格路径应经面板定位，实际 ${logData!.locate}`)
+    await waitSessionReady('子 目录/目标 二.md')
+    await waitActiveCustomTab('子 目录/目标 二.md')
+    await waitViewState('子 目录/目标 二.md', (v) => v.selectionOffset === 0)
+    assert(tabsOf('子 目录/目标 二.md', 'native') === 0, '含空格路径不应打开源码标签')
+
+    // 重显源面板再注入
+    await openWithEditor('links.md')
+    await waitSessionReady('links.md')
+    // 无扩展名路径 + 锚点：候选补 .md 后命中（fragment 定位同款）
+    await injectLink(uri, './链接目标#链接目标')
+    logData = await waitWikilinkLog(uri, (e) =>
+      e.kind === 'doc' && e.fragment === '链接目标' && e.path === wsUri('链接目标.md').fsPath)
+    assert(logData!.locate === 'custom-panel', `无扩展名锚点应经面板定位，实际 ${logData!.locate}`)
+    await waitSessionReady('链接目标.md')
+    await waitActiveCustomTab('链接目标.md')
+    await waitViewState('链接目标.md', (v) => v.selectionOffset === 0)
+    assert(tabsOf('链接目标.md', 'native') === 0, '无扩展名锚点不应打开源码标签')
+
+    // 缺失标题：文档照常打开（不定位），日志 locate=none——缺失给可见反馈
+    await openWithEditor('links.md')
+    await waitSessionReady('links.md')
+    await injectLink(uri, './链接目标.md#不存在的小节')
+    logData = await waitWikilinkLog(uri, (e) => e.kind === 'doc' && e.fragment === '不存在的小节')
+    assert(logData!.locate === 'none', `缺失标题应记录 locate=none，实际 ${logData!.locate}`)
+    await waitActiveCustomTab('链接目标.md')
+
+    // #^块id fragment：块定位器与双链锚点同源（#159 交付，批次合并后接通）——
+    // 面板 view.locate 应落在目标块首行（findBlockOffset 块首语义）
+    await openWithEditor('links.md')
+    await waitSessionReady('links.md')
+    await injectLink(uri, './链接目标.md#^link-blk')
+    logData = await waitWikilinkLog(uri, (e) => e.kind === 'doc' && e.fragment === '^link-blk')
+    assert(logData!.locate === 'custom-panel', `块 id 应经面板定位，实际 ${logData!.locate}`)
+    const linkTargetText = (await vscode.workspace.openTextDocument(wsUri('链接目标.md'))).getText()
+    await waitViewState('链接目标.md', (v) =>
+      v.selectionOffset === linkTargetText.indexOf('普通链接块引用目标段落。 ^link-blk'))
+    assert(tabsOf('链接目标.md', 'native') === 0, '块 id 跳转不应打开源码标签')
+
+    // 外部 URL 的 # 不接管：照旧 external 归类（测试钩子不真开浏览器）。
+    // 先重显源面板再注入
+    await openWithEditor('links.md')
+    await waitSessionReady('links.md')
+    await injectLink(uri, 'https://example.com/a#frag')
+    await waitWikilinkLog(uri, (e) => e.kind === 'external' && e.href === 'https://example.com/a#frag')
+
+    assert(await readDisk('links.md') === diskBefore, '锚点跳转不得改写源文档')
+  }],
+
+  ['普通链接页内锚点与面板定位：view.locate 挂载定位（#160）', async () => {
+    // 源面板（links.md）+ 目标面板（目标笔记.md）并排；目标切阅读模式，
+    // 页内锚点（#frag）与跨文档锚点（./目标.md#标题）都应走 custom-panel
+    await openWithEditor('links.md')
+    await waitSessionReady('links.md')
+    const sourceUri = wsUri('links.md').toString()
+    await openWithEditor('目标笔记.md', true)
+    await waitSessionReady('目标笔记.md')
+    const targetUri = wsUri('目标笔记.md').toString()
+    const diskSource = await readDisk('links.md')
+    const diskTarget = await readDisk('目标笔记.md')
+
+    await vscode.commands.executeCommand('onegayi.vsidian.toggleViewMode')
+    await poll('目标进入阅读模式', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, targetUri, 0)) as ViewState | undefined
+      return v?.viewMode === 'reading' && v.readingTotalBlocks !== undefined ? v : undefined
+    })
+
+    // 页内锚点（# 开头 href）：目标即当前文档（目标笔记面板自身），
+    // 阅读模式经 view.locate 块挂载定位到屏外标题（DEEP_HEADING_OFFSET）
+    await vscode.commands.executeCommand(CMD.injectMessage, targetUri, {
+      kind: 'link.activate', sessionId: '', docUri: targetUri,
+      href: '#深处的标题', srcStart: 0, srcEnd: 10,
+    })
+    const after = await poll('页内锚点挂载定位', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, targetUri, 0)) as ViewState | undefined
+      return v?.viewMode === 'reading' && v.readingAnchorStart === DEEP_HEADING_OFFSET ? v : undefined
+    }, 30000)
+    assert(after.readingAnchorStart === DEEP_HEADING_OFFSET,
+      `页内锚点阅读锚点应为屏外标题块 start，实际 ${after.readingAnchorStart}`)
+    let logData = await waitWikilinkLog(targetUri, (e) =>
+      e.kind === 'anchor' && e.fragment === '深处的标题')
+    assert(logData!.locate === 'custom-panel', `面板路径应记录 locate=custom-panel，实际 ${logData!.locate}`)
+
+    // 跨文档锚点：从源面板（links.md）跳 ./目标笔记.md#深处的标题——
+    // 目标已是本扩展面板，reveal 后 view.locate（与 #11 双链同款落位）
+    await vscode.commands.executeCommand(CMD.injectMessage, sourceUri, {
+      kind: 'link.activate', sessionId: '', docUri: sourceUri,
+      href: './目标笔记.md#深处的标题', srcStart: 0, srcEnd: 10,
+    })
+    await poll('跨文档锚点挂载定位', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, targetUri, 0)) as ViewState | undefined
+      return v?.viewMode === 'reading' && v.readingAnchorStart === DEEP_HEADING_OFFSET ? v : undefined
+    }, 30000)
+    logData = await waitWikilinkLog(sourceUri, (e) =>
+      e.kind === 'doc' && e.fragment === '深处的标题' && e.path === wsUri('目标笔记.md').fsPath)
+    assert(logData!.locate === 'custom-panel', `跨文档面板路径应记录 locate=custom-panel，实际 ${logData!.locate}`)
+
+    assert(await readDisk('links.md') === diskSource, '页内锚点跳转不得改写源文档')
+    assert(await readDisk('目标笔记.md') === diskTarget, '锚点跳转不得改写目标文档')
+  }],
+  ['图片粘贴：截图时间戳名落盘、插入文本与撤销一步还原（#161）', async () => {
+    await openWithEditor('paste-image.md')
+    await waitSessionReady('paste-image.md')
+    const uri = wsUri('paste-image.md').toString()
+    const diskBefore = await readDisk('paste-image.md')
+    // 设置基线：三键回默认（同目录模式；防止其他用例遗留的偏好污染）
+    await waitSettings({ 'image.paste': true, 'image.pasteLocation': 'same-dir', 'image.pasteSubpath': 'assets' })
+    // 注入截图形态的 image.paste（无 fileNameHint，宿主生成时间戳名）——
+    // 与真实 webview 消息同一校验与处理入口（宿主测试无法驱动真实剪贴板）。
+    // 注入绕过 webview 拦截，先补登记在途 reqId（image.test.pending），
+    // 结果回包才能通过陈旧回包校验走完插入往返
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'image.test.pending', reqId: 1 })
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, {
+      kind: 'image.paste', docUri: uri, reqId: 1,
+      mime: 'image/png', dataBase64: PASTE_PNG_BASE64,
+    })
+    // webview 收到落盘结果后在光标处插入（宿主计算的 markdown 全文）
+    const view = await waitViewState('paste-image.md', (v) =>
+      /!\[Pasted image \d{14}\]\(Pasted%20image%20\d{14}\.png\)/.test(v.text))
+    const match = /!\[Pasted image (\d{14})\]\(Pasted%20image%20\d{14}\.png\)/.exec(view.text)
+    assert(match !== null, '插入文本应为时间戳名图片引用')
+    // 落盘断言：文档同目录出现时间戳名 PNG，字节与载荷解码一致
+    const fileName = `Pasted image ${match![1]}.png`
+    const bytes = await vscode.workspace.fs.readFile(wsUri(fileName))
+    assert(Buffer.compare(Buffer.from(bytes), Buffer.from(PASTE_PNG_BASE64, 'base64')) === 0,
+      '落盘文件字节应与 base64 载荷解码一致')
+    // 钩子日志：宿主收到的消息形态（mime/hint 缺省/reqId）
+    const log = (await vscode.commands.executeCommand(CMD.imagePasteLog, uri)) as
+      Array<{ mime?: string; reqId?: number; fileNameHint?: string; docUri?: string }>
+    assert(log.some((m) => m.mime === 'image/png' && m.reqId === 1 &&
+      m.fileNameHint === undefined && m.docUri === uri),
+      `宿主应记录截图形态载荷，实际 ${JSON.stringify(log)}`)
+    // 撤销一步还原：插入是一笔 edit.request（宿主文本栈一条记录）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.history', op: 'undo' })
+    await waitViewState('paste-image.md', (v) => v.text === diskBefore)
+    // 撤销只回滚文本引用，不删除落盘文件（资产文件保留）
+    const stillThere = await vscode.workspace.fs.stat(wsUri(fileName))
+    assert(stillThere !== undefined, '撤销后落盘文件应保留')
+  }],
+
+  ['图片粘贴：原名清洗沿用与重名 -1 递增（#161）', async () => {
+    await openWithEditor('paste-image.md')
+    await waitSessionReady('paste-image.md')
+    const uri = wsUri('paste-image.md').toString()
+    await waitSettings({ 'image.paste': true, 'image.pasteLocation': 'same-dir', 'image.pasteSubpath': 'assets' })
+    // 随机基名防跨运行残留同名（撤销不删文件，上轮运行可能已占用固定名）
+    const base = `集成贴图${Date.now() % 100000}`
+    const hint = `${base}<1>.png` // 含 Windows 非法字符 < >
+    const cleaned = `${base}1`    // 清洗后基名；扩展名按 mime 重建为 .png
+    // 插入文本路径分段 percent-encode（中文基名经 encodeURIComponent 编码）
+    const enc1 = encodeURIComponent(`${cleaned}.png`)
+    const enc1Alt = encodeURIComponent(`${cleaned}-1.png`)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'image.test.pending', reqId: 1 })
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, {
+      kind: 'image.paste', docUri: uri, reqId: 1,
+      mime: 'image/png', dataBase64: PASTE_PNG_BASE64, fileNameHint: hint,
+    })
+    await waitViewState('paste-image.md', (v) => v.text.includes(`![${cleaned}](${enc1})`))
+    // 同名再次粘贴：重名 -1 递增
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'image.test.pending', reqId: 2 })
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, {
+      kind: 'image.paste', docUri: uri, reqId: 2,
+      mime: 'image/png', dataBase64: PASTE_PNG_BASE64, fileNameHint: hint,
+    })
+    await waitViewState('paste-image.md', (v) => v.text.includes(`![${cleaned}-1](${enc1Alt})`))
+    for (const name of [`${cleaned}.png`, `${cleaned}-1.png`]) {
+      const stat = await vscode.workspace.fs.stat(wsUri(name))
+      assert(stat !== undefined, `落盘文件 ${name} 应存在`)
+    }
+  }],
+
+  ['图片粘贴：三存放模式与子路径越界拒绝、无工作区回退通知路径（#161）', async () => {
+    await openWithEditor('paste-image.md')
+    await waitSessionReady('paste-image.md')
+    const uri = wsUri('paste-image.md').toString()
+    await waitSettings({ 'image.paste': true, 'image.pasteLocation': 'same-dir', 'image.pasteSubpath': 'assets' })
+    // 1) workspace-root + 子路径 assets/sub：落盘到工作区根下（递归建目录）
+    await vscode.commands.executeCommand(CMD.setSettings, {
+      'image.pasteLocation': 'workspace-root', 'image.pasteSubpath': 'assets/sub',
+    })
+    const base = `根目录贴图${Date.now() % 100000}`
+    const encRoot = encodeURIComponent(`${base}.png`)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'image.test.pending', reqId: 1 })
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, {
+      kind: 'image.paste', docUri: uri, reqId: 1,
+      mime: 'image/png', dataBase64: PASTE_PNG_BASE64, fileNameHint: `${base}.png`,
+    })
+    await waitViewState('paste-image.md', (v) =>
+      v.text.includes(`![${base}](assets/sub/${encRoot})`))
+    const stat = await vscode.workspace.fs.stat(wsUri(`assets/sub/${base}.png`))
+    assert(stat !== undefined, '应递归创建 assets/sub 并落盘到工作区根')
+    // 2) 子路径越界（../escape）：失败不插入、不落盘（宿主弹 i18n 通知）
+    const before = (await waitViewState('paste-image.md')).text
+    await vscode.commands.executeCommand(CMD.setSettings, { 'image.pasteSubpath': '../escape' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'image.test.pending', reqId: 2 })
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, {
+      kind: 'image.paste', docUri: uri, reqId: 2,
+      mime: 'image/png', dataBase64: PASTE_PNG_BASE64, fileNameHint: '越界.png',
+    })
+    await new Promise((r) => setTimeout(r, 800))
+    const after = (await waitViewState('paste-image.md')).text
+    assert(after === before, '子路径越界时不得插入文本')
+    try {
+      await vscode.workspace.fs.stat(wsUri('../escape/越界.png'))
+      assert(false, '越界路径不得落盘')
+    } catch {
+      // 预期：目标不可达（无文件产生）
+    }
+    // 3) 重开回显：三键非默认组合经 globalState 存活，关闭重开编辑器面板后
+    //    读回一致（#123 先例：closeActiveEditor 只关活动编辑器，先 reveal
+    //    确保目标面板活动；pasteSubpath 先回合法值再断言——快照断言用可
+    //    复现组合，非法 ../escape 只属于上一节的拒绝路径）
+    await waitSettings({ 'image.paste': true, 'image.pasteLocation': 'workspace-root', 'image.pasteSubpath': 'assets/sub' })
+    await openWithEditor('paste-image.md')
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await poll('面板关闭与会话释放', async () => {
+      const s = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+      return s?.found === false ? true : undefined
+    })
+    await openWithEditor('paste-image.md')
+    await waitSessionReady('paste-image.md')
+    const snapshot = (await vscode.commands.executeCommand(CMD.getSettings)) as Record<string, unknown>
+    assert(snapshot['image.paste'] === true
+      && snapshot['image.pasteLocation'] === 'workspace-root'
+      && snapshot['image.pasteSubpath'] === 'assets/sub',
+      `重开后图片三键应回显非默认组合，实际 ${JSON.stringify(snapshot)}`)
+    // 4) 设置复位（防跨用例污染；string 子路径合法值回默认）
+    await waitSettings({ 'image.paste': true, 'image.pasteLocation': 'same-dir', 'image.pasteSubpath': 'assets' })
+  }],
+
+  // ---- #162 复制块链接（正文右键菜单与快捷键） ----
+
+  ['复制块链接：右键菜单两态、自动补写可撤销与快捷键入口（#162）', async () => {
+    // 断言口径：剪贴板成品对拍（vscode.env.clipboard.readText——真实宿主
+    // 权威）、磁盘文本对拍（自动补写走标准写回）与单笔写回（appliedEdits
+    // 恰 +1 = 撤销一步）。菜单经 block.test.contextMenu/menuClick 真实按钮
+    // 点击链路驱动（宿主测试无法派发真实右键）
+    const BLOCK_MENU_DOC = [
+      '---',
+      'title: 块菜单',
+      '---',
+      '',
+      '# 块菜单标题',
+      '',
+      '右键目标段落。',
+      '',
+      '| a | b |',
+      '|---|---|',
+      '| 1 | 2 |',
+      '',
+      '已有 id 段落 ^keep9',
+      '',
+    ].join('\n')
+    await openWithEditor('block-menu.md')
+    await waitSessionReady('block-menu.md')
+    const uri = wsUri('block-menu.md').toString()
+    const before = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    const clipboardText = () => vscode.env.clipboard.readText()
+
+    // 标题行：复制标题链接 → 剪贴板成品 [[笔记名#标题]]，零写回
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'block.test.contextMenu', pos: BLOCK_MENU_DOC.indexOf('# 块菜单标题'),
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'block.test.menuClick', command: 'copyHeadingLink',
+    })
+    assert(await poll('标题链接剪贴板', async () =>
+      (await clipboardText()) === '[[block-menu#块菜单标题]]' ? true : undefined),
+      `标题链接成品应为 [[block-menu#块菜单标题]]（实际 ${await clipboardText()}）`)
+
+    // 普通段：无 id 自动补写 → 剪贴板 [[block-menu#^xxxxxx]]，磁盘块尾行后
+    // 空一行恰好多出独立行 `^id`（#163 验收反馈默认形态），单笔写回
+    // （appliedEdits +1 = 撤销一步）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'block.test.contextMenu', pos: BLOCK_MENU_DOC.indexOf('右键目标段落'),
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'block.test.menuClick', command: 'copyBlockLink',
+    })
+    // 写回断言走视图文本：写回使 TextDocument dirty 不落盘（磁盘断言在仓库
+    // 惯例中仅用于「不得写」场景，outline/frontmatter 写回用例同款口径）
+    const writtenState = await waitViewState('block-menu.md', (v) =>
+      /右键目标段落。\n\n\^[a-z0-9]{6}\n/.test(v.text))
+    const copiedId = (writtenState.text.match(/右键目标段落。\n\n\^([a-z0-9]{6})\n/) ?? [])[1]!
+    assert(await poll('块链接剪贴板', async () =>
+      (await clipboardText()) === `[[block-menu#^${copiedId}]]` ? true : undefined),
+      `块链接成品应为 [[block-menu#^${copiedId}]]（实际 ${await clipboardText()}）`)
+    const afterWrite = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(afterWrite.appliedEdits === before.appliedEdits + 1,
+      `自动补写应恰一笔写回（实际 +${afterWrite.appliedEdits - before.appliedEdits}）`)
+
+    // 自动补写可撤销（undo 实测，照图片粘贴用例先例）：补写是一笔标准
+    // edit.request = 宿主文本栈一条记录，undo 一步全文还原、redo 恢复
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.history', op: 'undo' })
+    await waitViewState('block-menu.md', (v) => v.text === BLOCK_MENU_DOC)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.history', op: 'redo' })
+    await waitViewState('block-menu.md', (v) => /右键目标段落。\n\n\^[a-z0-9]{6}\n/.test(v.text))
+
+    // 表格整块：id 写在表格末行后空一行独立行（表格右键按表格整块）。pos
+    // 从最新文本动态取——前序步骤已在普通段后补写两行，旧文档偏移已失效
+    const afterParaWrite = (await waitViewState('block-menu.md')).text
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'block.test.contextMenu', pos: afterParaWrite.indexOf('|---|---|'),
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'block.test.menuClick', command: 'copyBlockLink',
+    })
+    const afterTableWrite = await waitViewState('block-menu.md', (v) =>
+      /\| 1 \| 2 \|\n\n\^[a-z0-9]{6}\n/.test(v.text))
+
+    // 既有 id 段：直接复制既有 id，零改写（视图文本对拍；pos 同样动态取）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'block.test.contextMenu', pos: afterTableWrite.text.indexOf('已有 id 段落'),
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'block.test.menuClick', command: 'copyBlockLink',
+    })
+    assert(await poll('既有 id 剪贴板', async () =>
+      (await clipboardText()) === '[[block-menu#^keep9]]' ? true : undefined),
+      `既有 id 应直接复制（实际 ${await clipboardText()}）`)
+    const finalState = await waitViewState('block-menu.md')
+    assert(finalState.text.includes('已有 id 段落 ^keep9\n'), '既有 id 段零改写')
+
+    // 快捷键/命令面板入口（同一命令）：光标落标题行 → 复制标题链接
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'table.test.crossSelect',
+      anchor: finalState.text.indexOf('# 块菜单标题'),
+      head: finalState.text.indexOf('# 块菜单标题'),
+    })
+    await vscode.commands.executeCommand('onegayi.vsidian.block.copyLink')
+    assert(await poll('快捷键入口剪贴板', async () =>
+      (await clipboardText()) === '[[block-menu#块菜单标题]]' ? true : undefined),
+      `命令入口光标在标题行应复制标题链接（实际 ${await clipboardText()}）`)
+
+    // frontmatter 头区：右键不接管（原生菜单照常——钩子不开菜单即链路证据）
+    const stateBefore = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'block.test.contextMenu', pos: BLOCK_MENU_DOC.indexOf('title: 块菜单'),
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'block.test.menuClick', command: 'copyBlockLink',
+    })
+    const stateAfter = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(stateAfter.appliedEdits === stateBefore.appliedEdits && stateAfter.version === stateBefore.version,
+      '头区不接管：零写回零版本推进')
   }],
 ]

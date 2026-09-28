@@ -65,6 +65,8 @@ import {
   CODEBLOCK_HIGHLIGHT_KEY,
   CODEBLOCK_LINE_NUMBERS_DEFAULT,
   CODEBLOCK_LINE_NUMBERS_KEY,
+  IMAGE_PASTE_DEFAULT,
+  IMAGE_PASTE_KEY,
   READABLE_LINE_WIDTH_DEFAULT,
   READABLE_LINE_WIDTH_KEY,
   READABLE_LINE_WIDTH_MAX,
@@ -95,6 +97,11 @@ import { createLinkInteractions, WIKILINK_CLASS_NAMES } from './liveLinks'
 import { liveMath } from './liveMath'
 import { MATH_CLASS_NAMES } from '../shared/math'
 import { liveMermaid } from './liveMermaid'
+// #163 验收反馈：块 id 标记 live 淡化（行尾/独立行双形态 mark 装饰）
+import { liveBlockId } from './liveBlockId'
+// #163 验收反馈：跳转目标高亮（view.locate 通道；半透黄经变量暴露，
+// 用户任意操作后消失）
+import { anchorFlash, anchorFlashClear, anchorFlashRangeOf, anchorFlashSet } from './anchorFlash'
 import { setMermaidDarkTheme } from './mermaidRender'
 import {
   closeDiagramPopup,
@@ -108,6 +115,7 @@ import { graphicRendererFor, renderGraphicBlockInto } from './graphicRenderers'
 import { GRAPHIC_CHROME_CLASS_NAMES, wrapGraphicFrame } from './graphicBlockChrome'
 import { GRAPHIC_LANG_ATTR, MERMAID_CLASS_NAMES, MERMAID_CODE_ATTR, MERMAID_STATE_ATTR } from '../shared/mermaid'
 import { ImageResourceManager } from './imageResource'
+import { createImagePaste, imagePasteCanInsertAt } from './imagePaste'
 import { runPerfProbe } from './perfProbe'
 import { runReadingPerfProbe } from './readingProbe'
 import { createReadingContainer, prepareReadingImages, READING_CLASS_NAMES } from './readingView'
@@ -155,6 +163,23 @@ import {
   outlineStructuralExpand,
 } from './outlineMenu'
 import {
+  blockMenuTargetAt,
+  blockMenuPosition,
+  blockMenuSpec,
+  buildBlockMenu,
+  type BlockMenuCommand,
+  type BlockMenuTarget,
+} from './blockMenu'
+import {
+  blockIdOfLine,
+  collectBlockIds,
+  generateBlockId,
+  planBlockIdInsertion,
+  standaloneBlockIdAfterBlock,
+  standaloneBlockIdOf,
+} from '../shared/blockId'
+import { FM_SCAN_LIMIT, frontmatterRange } from './markdownDoc'
+import {
   outlineChangesOrdered,
   outlineCopyText,
   outlineDeleteChange,
@@ -199,6 +224,8 @@ function scheduleFrame(fn: () => void): void {
 /** #66 高亮重算去抖（ms）：滚动事件驱动，轻于 250ms 数据刷新链路（只做
  *  定位纯函数 + 一次类切换，不解析文档） */
 const OUTLINE_HIGHLIGHT_DEBOUNCE_MS = 100
+const VIEWPORT_SAVE_DEBOUNCE_MS = 250
+const SELECTION_SAVE_DEBOUNCE_MS = 250
 
 /** #66 防抖动护栏超时（ms）：跳转程序性滚动后一直无滚动事件到达时的
  *  兜底释放（正常路径由首个滚动事件释放） */
@@ -258,6 +285,9 @@ interface PersistedState {
   viewMode?: ViewMode
   /** 最近一次模式锚点（UTF-16 offset）：live=光标主位，reading=锚点块 start */
   anchor?: number
+  /** 标签页重载时恢复可见视口：Live 同存中心源码偏移与像素兜底；
+   *  独立于模式切换使用的 anchor。 */
+  viewport?: { mode: ViewMode; top: number; centerOffset?: number }
   conflictRevision?: number
   /** #53 右侧栏展开态（缺省收起） */
   sidebarOpen?: boolean
@@ -479,10 +509,27 @@ export class WebviewSyncController {
   private viewMode: ViewMode
   /** 最近模式锚点：live=光标主位；reading=锚点块 src-start（源码位置锚点） */
   private modeAnchor: number | null
+  /** 当前模式的滚动像素位置；与 modeAnchor 分开，避免纯滚动移动编辑光标。 */
+  private viewport: { mode: ViewMode; top: number; centerOffset?: number } | null
+  private viewportSaveTimer: ReturnType<typeof setTimeout> | undefined
+  private selectionSaveTimer: ReturnType<typeof setTimeout> | undefined
+  private restoringViewport = false
+  /** 仅测试注入后开放绘制中心探针，避免常规 view.state 改变 CM6 测量时机。 */
+  private viewportProbeEnabled = false
+  private readonly flushViewportOnHide = (): void => {
+    if (document.visibilityState === 'hidden') this.flushPendingViewState()
+  }
+  private readonly flushViewportOnPageHide = (): void => this.flushPendingViewState()
   /** live 容器（稳定类名 vsidian-view-live，内含 CM6 编辑器） */
   private liveWrapper: HTMLElement | undefined
   /** 阅读容器（稳定类名 vsidian-view-reading，块级源锚点结构） */
   private readingContainer: HTMLElement | undefined
+
+  // ---- #163 验收反馈：跳转目标高亮的消失监听 ----
+  /** 在挂的消失监听卸载器（clearAnchorFlash 时全部执行） */
+  private anchorFlashDetachers: Array<() => void> = []
+  /** 高亮设置时刻（scroll 事件时间窗过滤——定位自身的程序滚动不误清） */
+  private anchorFlashSince = 0
   /** 阅读视图虚拟化控制器（#7：接管阅读容器的按需挂载/回收/锚点定位） */
   private readingView: VirtualReadingView | undefined
   /** CSS 片段 <link> 装配器（#128）：只增删文档级样式链，不触碰 CM6 状态；
@@ -594,6 +641,18 @@ export class WebviewSyncController {
   private outlineMenuDismissPointer: ((e: PointerEvent) => void) | undefined
   /** 菜单 Esc 关闭监听（document capture keydown；close 时摘除） */
   private outlineMenuDismissKey: ((e: KeyboardEvent) => void) | undefined
+
+  // ---- 正文右键菜单状态（#162 复制块链接）----
+  /** 当前打开的块菜单容器（挂 document.body，fixed 定位；undefined = 未打开） */
+  private blockMenuEl: HTMLElement | undefined
+  /** 菜单目标（块区间 + 命中行标题；菜单打开期间的命令分派对象） */
+  private blockMenuTarget: BlockMenuTarget | null = null
+  /** 菜单打开期间目标对应的文档快照（命令执行时 doc 已变则放弃——锚点过期防御） */
+  private blockMenuDoc: Text | null = null
+  /** 菜单外点关闭监听（document capture pointerdown；close 时摘除） */
+  private blockMenuDismissPointer: ((e: PointerEvent) => void) | undefined
+  /** 菜单 Esc 关闭监听（document capture keydown；close 时摘除） */
+  private blockMenuDismissKey: ((e: KeyboardEvent) => void) | undefined
   /** 重命名编辑态的条目索引（null = 无编辑态；条目内容区被 input 替换） */
   private outlineRenameIndex: number | null = null
   /** 重命名打开时的 doc 快照（review-loops C1：提交前锚点防御——外部改写
@@ -684,6 +743,12 @@ export class WebviewSyncController {
    *  装配，Tab 回落既有表格导航/整行缩进行为） */
   private tabEscapeOn = SYMBOL_TAB_ESCAPE_DEFAULT
   private readonly tabEscapeCompartment = new Compartment()
+
+  /** #161 图片粘贴：面板内自增 reqId 与在途集合（结果按 reqId 路由，
+   *  陈旧/未知 reqId 的回包丢弃，防止重复插入）；总开关运行时读设置
+   *  快照（handler 每次事件自取，无需 Compartment——未命中直接放行） */
+  private imagePasteReqId = 0
+  private readonly imagePastePending = new Set<number>()
 
   /** #84 阅读侧折叠集合：键 = 块 data-vsidian-src-start（视图态，不持久化；
    *  块卸载重挂载后经此恢复收起形态） */
@@ -779,6 +844,17 @@ export class WebviewSyncController {
       ? Math.floor(saved.conflictRevision) : 0
     this.viewMode = saved?.viewMode === 'reading' ? 'reading' : 'live'
     this.modeAnchor = typeof saved?.anchor === 'number' && saved.anchor >= 0 ? Math.floor(saved.anchor) : null
+    this.viewport = saved?.viewport &&
+      (saved.viewport.mode === 'live' || saved.viewport.mode === 'reading') &&
+      Number.isFinite(saved.viewport.top) && saved.viewport.top >= 0
+      ? {
+          mode: saved.viewport.mode,
+          top: saved.viewport.top,
+          ...(typeof saved.viewport.centerOffset === 'number' &&
+            Number.isInteger(saved.viewport.centerOffset) && saved.viewport.centerOffset >= 0
+            ? { centerOffset: saved.viewport.centerOffset } : {}),
+        }
+      : null
     this.sidebarOpen = saved?.sidebarOpen === true
     // 宽度恢复：非数值（含缺失）经 clampSidebarWidth 回默认；越界值钳制
     this.sidebarWidth = clampSidebarWidth(saved?.sidebarWidth ?? Number.NaN)
@@ -853,6 +929,7 @@ export class WebviewSyncController {
         }
       }
       view?.handleScroll()
+      this.scheduleViewportSave()
       this.onOutlineScrollSignal()
     })
     // 任务勾选（#9）：阅读模式除任务勾选外只读——checkbox 点击经容器事件
@@ -987,7 +1064,18 @@ export class WebviewSyncController {
     // #66 大纲高亮联动：live 视口滚动（用户与程序性同源）驱动当前控制域
     // 重算。监听器挂在 view 自身的 scrollDOM 上——dispose 时整棵 view.dom
     // 随 destroy 移除，无需单独解绑
-    this.view.scrollDOM.addEventListener('scroll', () => this.onOutlineScrollSignal())
+    this.view.scrollDOM.addEventListener('scroll', () => {
+      this.scheduleViewportSave()
+      this.onOutlineScrollSignal()
+    })
+    document.addEventListener('visibilitychange', this.flushViewportOnHide)
+    window.addEventListener('pagehide', this.flushViewportOnPageHide)
+    // #162 复制块链接：正文 contextmenu 委托（挂在 contentDOM 上——view
+    // 生命周期内 DOM 不重建；reading 态 live 容器隐藏天然不触发）。头区/
+    // 空行等不接管位不 preventDefault，浏览器原生菜单照常
+    this.view.contentDOM.addEventListener('contextmenu', (event) => {
+      this.onContentContextMenu(event)
+    })
     // #111 图表导出通道：弹窗 → 宿主另存为（会话字段在此补齐；只读交互，
     // init 前无会话时静默丢弃——按钮在渲染成功后才可点）
     setDiagramExportSender((req) => {
@@ -1026,6 +1114,11 @@ export class WebviewSyncController {
   }
 
   dispose(): void {
+    this.flushPendingViewState()
+    document.removeEventListener('visibilitychange', this.flushViewportOnHide)
+    window.removeEventListener('pagehide', this.flushViewportOnPageHide)
+    // #163 验收反馈：卸载跳转目标高亮的消失监听（window 级监听防泄漏）
+    this.detachAnchorFlashDismiss()
     closeDiagramPopup()
     closeFmPopover()
     setDiagramExportSender(null)
@@ -1082,6 +1175,8 @@ export class WebviewSyncController {
     this.outlineToolbar = undefined
     // #69：菜单浮层与重命名编辑态随卸载退出（document 监听一并摘除）
     this.closeOutlineMenu()
+    // #162：正文块菜单随卸载退出（document 监听一并摘除）
+    this.closeBlockMenu()
     this.outlineRenameIndex = null
     this.outlineRenameDoc = null
     // #70：拖拽会话随卸载退出（document 监听一并摘除）
@@ -1165,6 +1260,42 @@ export class WebviewSyncController {
             this.scheduleSnippetMeasure()
             this.scheduleSnippetMeasureOnFontArrival()
           }
+        })
+        break
+      }
+      case 'image.test.pending': {
+        // #161 测试钩子：补登记在途 reqId（宿主注入 image.paste 绕过拦截侧
+        // 登记，见协议注释——webview 侧测试消息不做二次门控属既定分层设计）
+        this.imagePastePending.add(message.reqId)
+        break
+      }
+      case 'image.paste.result': {
+        // #161 图片粘贴落盘结果：reqId 在途校验（陈旧/未知回包丢弃）；
+        // 成功在光标处单事务插入宿主计算好的 markdown（守卫对齐格式操作
+        // ——live、非暂停、可编辑；单笔 dispatch = 一笔 edit.request =
+        // 撤销一步还原）；失败不插入文本（宿主已弹 i18n 通知）
+        if (!this.imagePastePending.delete(message.reqId)) {
+          break
+        }
+        if (!message.ok) {
+          break
+        }
+        const view = this.view
+        if (
+          !view ||
+          !imagePasteCanInsertAt({
+            live: this.viewMode === 'live',
+            suspended: this.suspended,
+            editable: !view.state.readOnly && view.state.facet(EditorView.editable),
+          })
+        ) {
+          break
+        }
+        const range = view.state.selection.main
+        view.dispatch({
+          changes: { from: range.from, to: range.to, insert: message.markdown },
+          selection: { anchor: range.from + message.markdown.length },
+          scrollIntoView: true,
         })
         break
       }
@@ -1267,7 +1398,10 @@ export class WebviewSyncController {
         break
       case 'view.mode.set':
         // 模式切换指令（宿主命令路径；webview 按钮走同一状态机）
+        // #163 验收反馈：切换模式 = 离开当前视图，跳转目标高亮随之消失——
+        // 清理置于装载之后（切换同步链内的 dispatch 会干扰阅读装载时序）
         this.setViewMode(message.mode)
+        this.clearAnchorFlash()
         break
       case 'view.find.open':
         // 查找会话（#14）：webview 内浮动面板；纯只读视图操作
@@ -1296,6 +1430,15 @@ export class WebviewSyncController {
       }
       case 'format.command': {
         this.runFormatOperation(message.op)
+        break
+      }
+      case 'blockLink.copy': {
+        // #162 复制块链接（快捷键/命令面板入口）：仅 live 执行（阅读只读）；
+        // 无 id 时自动补写经 CM6 事务走标准出站链路（一笔 edit.request =
+        // 撤销一次），暂停态与 live 输入同语义（本地保留、不写回）
+        if (this.view && this.viewMode === 'live') {
+          this.runBlockCopyAtCursor()
+        }
         break
       }
       case 'ui.command':
@@ -1463,6 +1606,29 @@ export class WebviewSyncController {
         this.closeOutlineMenu()
         break
       }
+      case 'block.test.contextMenu': {
+        // 测试钩子（#162）：在正文 doc 偏移 pos 处打开块菜单（与用户右键
+        // 同一命中判定与装配链路——posAtCoords 的替代注入点；宿主测试无法
+        // 向 webview 派发真实鼠标事件，不接管位同样不开菜单）
+        const target = this.blockTargetAt(message.pos)
+        if (target) {
+          this.openBlockMenu(target, 24, 24)
+        }
+        break
+      }
+      case 'block.test.menuClick': {
+        // 测试钩子（#162）：点击菜单中 command 对应的真实按钮（与用户点击
+        // 同一处理器；command 已由协议校验器限定为合法块菜单命令）
+        this.blockMenuEl
+          ?.querySelector<HTMLButtonElement>(`button[data-vsidian-command="${message.command}"]`)
+          ?.click()
+        break
+      }
+      case 'block.test.menuClose': {
+        // 测试钩子（#162）：关闭当前块菜单（等价 Esc/外点路径）
+        this.closeBlockMenu()
+        break
+      }
       case 'outline.test.renameKey': {
         // 测试钩子（#69）：向重命名输入框注入文本并以 Enter/Esc 收尾
         // （真实 keydown 链路）
@@ -1482,6 +1648,25 @@ export class WebviewSyncController {
         // 测试钩子（#70）：真实条目 pointer 事件序列驱动拖拽链路（与用户
         // 拖拽同一处理器）；宿主测试无法向 webview 派发真实鼠标事件
         this.runOutlineDragTest(message.from, message.to, message.position, message.action)
+        break
+      }
+      case 'viewport.test.position': {
+        this.viewportProbeEnabled = true
+        const view = this.view
+        if (view && this.viewMode === 'live') {
+          if (message.cursorLine !== undefined) {
+            const line = Math.max(1, Math.min(view.state.doc.lines, message.cursorLine))
+            view.dispatch({ selection: { anchor: view.state.doc.line(line).from } })
+          }
+          if (message.scrollNearLine !== undefined) {
+            const line = Math.max(1, Math.min(view.state.doc.lines, message.scrollNearLine))
+            const block = view.lineBlockAt(view.state.doc.line(line).from)
+            view.scrollDOM.scrollTop = Math.max(0,
+              block.top + block.height / 2 - view.scrollDOM.clientHeight / 2 +
+              (message.scrollBiasPx ?? 0))
+            view.scrollDOM.dispatchEvent(new Event('scroll'))
+          }
+        }
         break
       }
       case 'table.test.key': {
@@ -1664,7 +1849,11 @@ export class WebviewSyncController {
       case 'view.locate': {
         // 定位（#10 查找/跳转入口）：光标移到源 offset；reading 滚动到块。
         // 纯视图操作——事务不带 changes，不产生编辑历史
-        this.locateOffset(message.offset)
+        this.locateOffset(message.offset, true)
+        // 送达确认（#163 验收反馈）：offset 原样回发（对账不受 clamp/块化
+        // 影响）——宿主停发补发，此后重载恢复走持久化锚点，历史程序定位
+        // 不再重播、不拉回用户已手动离开的位置
+        this.bridge.postMessage({ kind: 'view.locate.ack', offset: message.offset })
         break
       }
       case 'reading.perf': {
@@ -1869,6 +2058,8 @@ export class WebviewSyncController {
         readingAnchorTopPx = el.getBoundingClientRect().top - box.top + this.readingContainer.scrollTop
       }
     }
+    const liveView = this.viewMode === 'live' ? this.view : undefined
+    const liveCenterPos = this.viewportProbeEnabled ? this.liveViewportCenterPosition() : null
     // #32：typography 为 view.state 正式可选字段（协议校验器见
     // shared/protocol.ts 的 isTypographyProbe）
     const state: Extract<WebviewToHost, { kind: 'view.state' }> = {
@@ -1888,6 +2079,8 @@ export class WebviewSyncController {
       wordSegmenter: typeof Intl.Segmenter === 'function',
       selectionHead: this.view?.state.selection.main.head ?? 0,
       selectionAssoc: this.view?.state.selection.main.assoc ?? 0,
+      liveViewportCenterLine: liveCenterPos === null ? undefined : liveView?.state.doc.lineAt(liveCenterPos).number,
+      liveScrollTopPx: this.viewportProbeEnabled ? liveView?.scrollDOM.scrollTop : undefined,
       readingBlockCount: rStats?.mountedBlocks ?? 0,
       readingAnchorStart,
       // #7 按需挂载观测：块模型总量/挂载量/DOM 计数/解析次数/虚拟化状态
@@ -2042,7 +2235,7 @@ export class WebviewSyncController {
     this.refreshReading()
     if (opts.restoreAnchor) {
       if (this.viewMode === 'reading') {
-        if (this.modeAnchor !== null && this.readingView) {
+        if (this.modeAnchor !== null && this.readingView && this.viewport?.mode !== 'reading') {
           this.readingView.scrollToOffset(this.clampToDoc(this.modeAnchor))
         }
       } else if (this.modeAnchor !== null && this.modeAnchor > 0) {
@@ -2050,6 +2243,9 @@ export class WebviewSyncController {
         const pos = this.clampToDoc(this.modeAnchor)
         this.view?.dispatch({ selection: { anchor: pos } })
       }
+      // 光标/模式锚点与阅读视口是两种状态：恢复光标后再恢复离开时视口。
+      // 若没有新版 viewport，旧持久状态仍沿用上面的锚点恢复路径。
+      this.restoreViewport()
     }
     // #148：全文落地即权威基线（本地未落地编辑已被权威文本取代）——
     // 撤销意图此刻发出，撤销的是宿主栈上最后已完成的操作
@@ -2098,6 +2294,9 @@ export class WebviewSyncController {
     // review-loops B3：命令面板切模式不经鼠标路径（无 pointercancel），
     // 拖拽会话若残留会跨模式存活（落点判定随视图重算漂移）——统一取消
     this.cancelOutlineDrag()
+    // #69/#162：右键菜单（大纲与正文块菜单）不跨模式存活——阅读只读不接管
+    this.closeOutlineMenu()
+    this.closeBlockMenu()
     // #140 Popover 改版：属性编辑浮层仅服务 live 表格卡片，切到阅读即关
     closeFmPopover()
     if (this.view) selectTableRegion(this.view, null)
@@ -2161,6 +2360,9 @@ export class WebviewSyncController {
 
   /** 容器显隐（稳定类名 vsidian-view-live / vsidian-view-reading） */
   private applyModeDom(mode: ViewMode): void {
+    if (mode !== this.viewMode) {
+      this.clearViewport()
+    }
     this.viewMode = mode
     this.closeQuickHeadingMenu(false)
     this.refreshQuickActions()
@@ -2255,9 +2457,14 @@ export class WebviewSyncController {
    * changes，不产生编辑历史。#66 起：程序性滚动前置防抖动护栏（过渡期
    * 中间态视口不参与高亮计算），并以目标位置所在行即时落位常驻高亮
    * （不等滚动事件——被点击条目就是目标控制域）。
+   * #163 验收反馈：flash = true（view.locate 链接跳转通道）时目标标题/
+   * 段落整体覆盖半透黄高亮，用户任意操作后消失（大纲点击不闪——已有
+   * 条目常驻高亮）。
    */
-  private locateOffset(offset: number): void {
+  private locateOffset(offset: number, flash = false): void {
     const pos = this.clampToDoc(offset)
+    // 新的程序定位应覆盖旧视口记忆；实际滚动事件会重新记录新视口。
+    this.clearViewport()
     this.suspendOutlineLinking()
     if (this.viewMode === 'reading' && this.readingView) {
       const start = this.readingView.anchorStartFor(pos) ?? pos
@@ -2267,6 +2474,10 @@ export class WebviewSyncController {
       // 事件在挂载窗口重算（rAF）之前同步读取视口锚点，瞬态值不得覆盖
       // 定位目标——帧+宏任务后重申（同一窗口内的用户滚动会被覆盖）
       this.reassertReadingAnchor(start, 2)
+      if (flash) {
+        this.readingView.flashBlock(start)
+        this.scheduleAnchorFlashDismiss()
+      }
     } else {
       this.modeAnchor = pos
       // #57：定位离开表格选区语境时清选区（view.locate 与大纲跳转共用）
@@ -2277,8 +2488,17 @@ export class WebviewSyncController {
       this.view?.focus()
       this.view?.dispatch({
         selection: { anchor: pos },
-        effects: EditorView.scrollIntoView(pos, { y: 'center' }),
+        effects: [
+          EditorView.scrollIntoView(pos, { y: 'center' }),
+          // 高亮并入同一事务（无 changes，仍纯视图操作）
+          ...(flash
+            ? [anchorFlashSet.of(anchorFlashRangeOf(this.view.state.doc, pos))]
+            : []),
+        ],
       })
+      if (flash) {
+        this.scheduleAnchorFlashDismiss()
+      }
     }
     const doc = this.view?.state.doc
     this.outlineLocatedIndex = doc
@@ -2290,6 +2510,10 @@ export class WebviewSyncController {
       this.revealOutlineIndex(this.outlineLocatedIndex)
     }
     this.applyOutlineHighlight()
+    // 定位点落盘（#163 验收反馈）：modeAnchor 此前仅内存更新——面板重载后
+    // 恢复的是更早的持久锚点。定位是「我在哪」的最新信号，同步持久化使
+    // 重载恢复落在最后导航点；此后用户的手动移位不再被历史定位覆盖
+    this.persistState()
   }
 
   /** #66 大纲条目点击跳转：标题行号 → 源 offset（doc.line(n).from）后走
@@ -2303,6 +2527,69 @@ export class WebviewSyncController {
     }
     const line = Math.min(Math.max(1, item.line), view.state.doc.lines)
     this.locateOffset(view.state.doc.line(line).from)
+  }
+
+  /** #163 验收反馈：挂载跳转目标高亮的消失监听——用户任意操作（点击、
+   *  滚动、按键、切走页面）后清除。scroll 事件带时间窗（定位自身的程序
+   *  滚动在窗口内忽略）；监听一次性（清除即全部卸载，重复定位重挂） */
+  private scheduleAnchorFlashDismiss(): void {
+    this.detachAnchorFlashDismiss()
+    this.anchorFlashSince = Date.now()
+    const dismiss = (): void => this.clearAnchorFlash()
+    const onScroll = (): void => {
+      if (Date.now() - this.anchorFlashSince < 300) {
+        return // 定位自身的程序滚动（scrollIntoView/scrollToSrcStart/虚拟化重算）
+      }
+      dismiss()
+    }
+    const targets: Array<[EventTarget, string, EventListener]> = []
+    if (this.viewMode === 'reading') {
+      if (this.readingContainer) {
+        targets.push(
+          [this.readingContainer, 'pointerdown', dismiss],
+          [this.readingContainer, 'wheel', dismiss],
+          [this.readingContainer, 'scroll', onScroll],
+        )
+      }
+    } else if (this.view) {
+      targets.push(
+        [this.view.contentDOM, 'pointerdown', dismiss],
+        [this.view.contentDOM, 'wheel', dismiss],
+        [this.view.contentDOM, 'keydown', dismiss],
+        [this.view.scrollDOM, 'scroll', onScroll],
+      )
+    }
+    for (const target of targets) {
+      target[0].addEventListener(target[1], target[2])
+      this.anchorFlashDetachers.push(() => target[0].removeEventListener(target[1], target[2]))
+    }
+    // 切走页面（标签切换/窗口失焦）：window 级监听两模式常挂
+    const onVisibility = (): void => {
+      if (document.visibilityState === 'hidden') {
+        dismiss()
+      }
+    }
+    window.addEventListener('blur', dismiss)
+    document.addEventListener('visibilitychange', onVisibility)
+    this.anchorFlashDetachers.push(() => {
+      window.removeEventListener('blur', dismiss)
+      document.removeEventListener('visibilitychange', onVisibility)
+    })
+  }
+
+  /** 清除跳转目标高亮并卸载消失监听（重复调用幂等） */
+  private clearAnchorFlash(): void {
+    this.detachAnchorFlashDismiss()
+    if (this.view) {
+      this.view.dispatch({ effects: anchorFlashClear.of(null) })
+    }
+    this.readingView?.flashBlock(null)
+  }
+
+  private detachAnchorFlashDismiss(): void {
+    for (const detach of this.anchorFlashDetachers.splice(0)) {
+      detach()
+    }
   }
 
   /**
@@ -2657,10 +2944,137 @@ export class WebviewSyncController {
     }
   }
 
-  /** 持久化（合并写入）：seq、viewMode、anchor、sidebarOpen、outlineActive、
+  /** 可见视口按屏幕坐标映射回源码 offset；Mermaid 等替换 widget 的高度
+   *  改变时，源码位置比 scrollTop 更能表达用户正在看的内容。 */
+  private liveViewportCenterPosition(): number | null {
+    const view = this.viewMode === 'live' ? this.view : undefined
+    if (!view) return null
+    const box = view.scrollDOM.getBoundingClientRect()
+    if (box.height <= 0) return null
+    const content = view.contentDOM.getBoundingClientRect()
+    return view.posAtCoords({
+      x: content.left + Math.min(60, content.width / 2),
+      y: box.top + box.height / 2,
+    })
+  }
+
+  /** 滚动事件高频到达：内存状态即时更新，bridge 写入尾随去抖。隐藏或卸载
+   *  时同步冲刷，覆盖用户滚动后立刻切标签页的窗口。 */
+  private scheduleViewportSave(): void {
+    if (!this.sessionId || this.restoringViewport) return
+    const scroller = this.viewMode === 'reading'
+      ? this.readingContainer : this.view?.scrollDOM
+    if (!scroller) return
+    const previous = this.viewport?.mode === this.viewMode ? this.viewport : null
+    // 高频事件只读廉价的 scrollTop；源码坐标等布局稳定后再测。
+    this.viewport = {
+      mode: this.viewMode,
+      top: Math.max(0, scroller.scrollTop),
+      centerOffset: previous?.centerOffset,
+    }
+    if (this.viewportSaveTimer !== undefined) clearTimeout(this.viewportSaveTimer)
+    this.viewportSaveTimer = setTimeout(() => this.flushViewportSave(), VIEWPORT_SAVE_DEBOUNCE_MS)
+  }
+
+  private captureViewport(): void {
+    const scroller = this.viewMode === 'reading'
+      ? this.readingContainer : this.view?.scrollDOM
+    if (!scroller) return
+    const previous = this.viewport?.mode === this.viewMode ? this.viewport : null
+    const hasLayout = scroller.getBoundingClientRect().height > 0
+    const centerOffset = this.liveViewportCenterPosition() ?? previous?.centerOffset
+    const top = hasLayout || !previous ? scroller.scrollTop : previous.top
+    this.viewport = { mode: this.viewMode, top: Math.max(0, top), centerOffset }
+  }
+
+  private flushViewportSave(): void {
+    if (this.viewportSaveTimer === undefined) return
+    clearTimeout(this.viewportSaveTimer)
+    this.viewportSaveTimer = undefined
+    if (!this.restoringViewport) this.captureViewport()
+    this.persistState()
+  }
+
+  private scheduleSelectionSave(): void {
+    if (this.selectionSaveTimer !== undefined) clearTimeout(this.selectionSaveTimer)
+    this.selectionSaveTimer = setTimeout(() => this.flushSelectionSave(), SELECTION_SAVE_DEBOUNCE_MS)
+  }
+
+  private flushSelectionSave(): void {
+    if (this.selectionSaveTimer === undefined) return
+    clearTimeout(this.selectionSaveTimer)
+    this.selectionSaveTimer = undefined
+    this.persistState()
+  }
+
+  private flushPendingViewState(): void {
+    const pending = this.viewportSaveTimer !== undefined || this.selectionSaveTimer !== undefined
+    if (this.viewportSaveTimer !== undefined) clearTimeout(this.viewportSaveTimer)
+    if (this.selectionSaveTimer !== undefined) clearTimeout(this.selectionSaveTimer)
+    this.viewportSaveTimer = undefined
+    this.selectionSaveTimer = undefined
+    if (this.viewport && !this.restoringViewport) this.captureViewport()
+    if (pending || this.viewport) this.persistState()
+  }
+
+  private clearViewport(): void {
+    if (this.viewportSaveTimer !== undefined) {
+      clearTimeout(this.viewportSaveTimer)
+      this.viewportSaveTimer = undefined
+    }
+    this.viewport = null
+    this.restoringViewport = false
+  }
+
+  private restoreViewport(): void {
+    const viewport = this.viewport
+    if (!viewport || viewport.mode !== this.viewMode) return
+    this.restoringViewport = true
+    if (viewport.mode === 'reading') {
+      const container = this.readingContainer
+      if (!container) {
+        this.restoringViewport = false
+        return
+      }
+      container.scrollTop = viewport.top
+      this.readingView?.handleScroll()
+      requestAnimationFrame(() => {
+        if (this.viewport === viewport && this.viewMode === 'reading') {
+          container.scrollTop = viewport.top
+          this.readingView?.handleScroll()
+        }
+        this.restoringViewport = false
+      })
+    } else {
+      const view = this.view
+      if (!view) {
+        this.restoringViewport = false
+        return
+      }
+      view.scrollDOM.scrollTop = viewport.top
+      requestAnimationFrame(() => {
+        if (this.view === view && this.viewport === viewport && this.viewMode === 'live') {
+          if (viewport.centerOffset !== undefined) {
+            view.dispatch({ effects: EditorView.scrollIntoView(
+              this.clampToDoc(viewport.centerOffset), { y: 'center' },
+            ) })
+          } else {
+            view.scrollDOM.scrollTop = viewport.top
+          }
+        }
+        this.restoringViewport = false
+      })
+    }
+  }
+
+  /** 持久化（合并写入）：seq、viewMode、anchor、viewport、sidebarOpen、outlineActive、
    *  outlineExpandLevel（#67 档位全局记忆）、sidebarWidth（拖宽记忆）共存
    *  互不覆盖 */
   private persistState(): void {
+    if (this.selectionSaveTimer !== undefined) {
+      clearTimeout(this.selectionSaveTimer)
+      this.selectionSaveTimer = undefined
+    }
     const saved = this.bridge.getState<PersistedState>() ?? {}
     this.bridge.setState({
       ...saved,
@@ -2668,6 +3082,7 @@ export class WebviewSyncController {
       conflictRevision: this.conflictRevision,
       viewMode: this.viewMode,
       anchor: this.modeAnchor ?? undefined,
+      viewport: this.viewport ?? undefined,
       sidebarOpen: this.sidebarOpen,
       outlineActive: this.outlineActive,
       outlineExpandLevel: this.outlineExpandLevel,
@@ -2962,9 +3377,9 @@ export class WebviewSyncController {
 
   /** 主编辑区顶栏（#53 图标化）：左端齿轮设置按钮（打开宿主级 Vsidian
    *  设置页面板——webview 无权自建面板，必须经 settings.open 出站），
-   *  其后快速操作 ✎；右端双态视图切换（#141，紧邻侧栏按钮左侧）与
-   *  侧栏切换按钮（margin-left:auto 推靠）。#38 起三态切换（含源码）
-   *  仍在宿主标题栏命令，双态按钮不触及源码路径 */
+   *  其后快速操作 ✎；右端组（#158）= 双态视图切换（#141，持有
+   *  margin-left:auto 推靠）+ 侧栏切换按钮紧随其后，与左组间弹性空隙。
+   *  #38 起三态切换（含源码）仍在宿主标题栏命令，双态按钮不触及源码路径 */
   private buildToolbar(): HTMLElement {
     const bar = document.createElement('div')
     bar.className = 'vsidian-toolbar'
@@ -3741,6 +4156,7 @@ export class WebviewSyncController {
     // 先取消拖拽防两会话并存的指示混乱（数据由锚点防御兜底）
     this.cancelOutlineDrag()
     this.closeOutlineMenu()
+    this.closeBlockMenu() // 与正文块菜单互斥（一次只有一个右键菜单）
     this.cancelOutlineRename()
     const hasChildren = this.outlineFacts.hasChildren[index] === true
     const menu = buildOutlineMenu(outlineMenuSpec(hasChildren), (command) => {
@@ -3990,6 +4406,197 @@ export class WebviewSyncController {
       this.outlineSearchState?.ranges)
     this.applyOutlineCollapseDom()
     this.applyOutlineHighlight()
+  }
+
+  // ---- 正文右键菜单（#162 复制块链接）----
+  // 命中判定与菜单模型是纯函数（blockMenu.ts）；写操作（无 id 自动补写）
+  // 是一次 CM6 事务 dispatch（单笔 edit.request = 宿主撤销一次）；剪贴板
+  // 经宿主消息桥（clipboard.write 的 linkHeading / linkBlock 变体，宿主拼
+  // `[[笔记名#…]]`）。快捷键与命令面板入口经宿主 blockLink.copy 消息汇到
+  // 同一 runBlockCopyAtCursor——与右键菜单是同一命令的两个入口。
+
+  /** contentDOM contextmenu：坐标 → posAtCoords → 命中判定；接管位
+   *  preventDefault 后弹菜单，不接管位放行原生菜单 */
+  private onContentContextMenu(event: MouseEvent): void {
+    const view = this.view
+    if (!view || this.viewMode !== 'live') {
+      return
+    }
+    const pos = view.posAtCoords({ x: event.clientX, y: event.clientY })
+    if (pos === null) {
+      return
+    }
+    const target = this.blockTargetAt(pos)
+    if (target === null) {
+      return
+    }
+    event.preventDefault()
+    this.openBlockMenu(target, event.clientX, event.clientY)
+  }
+
+  /** doc 偏移 → 命中目标（头区行索引在此推导：frontmatterRange 的字符
+   *  区间换算为结束行索引） */
+  private blockTargetAt(pos: number): BlockMenuTarget | null {
+    const view = this.view
+    if (!view || pos < 0 || pos > view.state.doc.length) {
+      return null
+    }
+    const text = view.state.doc.toString()
+    const lines = text.split('\n')
+    const fm = frontmatterRange(text.slice(0, FM_SCAN_LIMIT))
+    const fmEndLine = fm === null ? -1 : text.slice(0, fm.end).split('\n').length - 1
+    const lineIndex = view.state.doc.lineAt(pos).number - 1
+    return blockMenuTargetAt(lines, lineIndex, fmEndLine)
+  }
+
+  /** 打开菜单（先关旧菜单；大纲菜单与块菜单互斥）。定位：挂载后量尺寸，
+   *  视口系 fixed clamp + 底部上翻（jsdom 无布局时退化为点击点） */
+  private openBlockMenu(target: BlockMenuTarget, clientX: number, clientY: number): void {
+    const view = this.view
+    if (!view) {
+      return
+    }
+    this.closeBlockMenu()
+    this.closeOutlineMenu()
+    const menu = buildBlockMenu(
+      blockMenuSpec(target.heading !== null),
+      (command) => this.runBlockMenuCommand(command),
+    )
+    this.blockMenuEl = menu
+    this.blockMenuTarget = target
+    this.blockMenuDoc = view.state.doc
+    document.body.appendChild(menu)
+    const size = { w: menu.offsetWidth || 180, h: menu.offsetHeight || 60 }
+    const pos = blockMenuPosition(
+      { x: clientX, y: clientY },
+      size,
+      { width: window.innerWidth || 1200, height: window.innerHeight || 800 },
+    )
+    menu.style.left = `${Math.max(0, pos.left)}px`
+    menu.style.top = `${Math.max(0, pos.top)}px`
+    // 关闭通道：菜单外 pointerdown（capture）与 Esc（与大纲菜单同模式）
+    this.blockMenuDismissPointer = (e) => {
+      if (menu.contains(e.target as Node)) {
+        return
+      }
+      this.closeBlockMenu()
+    }
+    this.blockMenuDismissKey = (e) => {
+      if (e.key === 'Escape') {
+        this.closeBlockMenu()
+      }
+    }
+    document.addEventListener('pointerdown', this.blockMenuDismissPointer, true)
+    document.addEventListener('keydown', this.blockMenuDismissKey, true)
+  }
+
+  /** 关闭菜单（幂等；摘除 document 关闭监听） */
+  private closeBlockMenu(): void {
+    if (this.blockMenuDismissPointer) {
+      document.removeEventListener('pointerdown', this.blockMenuDismissPointer, true)
+      this.blockMenuDismissPointer = undefined
+    }
+    if (this.blockMenuDismissKey) {
+      document.removeEventListener('keydown', this.blockMenuDismissKey, true)
+      this.blockMenuDismissKey = undefined
+    }
+    this.blockMenuEl?.remove()
+    this.blockMenuEl = undefined
+    this.blockMenuTarget = null
+    this.blockMenuDoc = null
+  }
+
+  /** 菜单命令分派：锚点过期防御后按命令复制（见模块头） */
+  private runBlockMenuCommand(command: BlockMenuCommand): void {
+    const target = this.blockMenuTarget
+    const view = this.view
+    if (target === null || !view) {
+      this.closeBlockMenu()
+      return
+    }
+    // 锚点过期防御（与大纲菜单同口径）：菜单打开期间文档被外部变更改写
+    // 则块行号失效，放弃执行（CM6 Text 不可变——外部变更必换实例）
+    if (this.blockMenuDoc !== view.state.doc) {
+      this.closeBlockMenu()
+      return
+    }
+    this.closeBlockMenu()
+    if (command === 'copyHeadingLink' && target.heading !== null) {
+      this.copyHeadingLink(target.heading.text)
+      return
+    }
+    this.copyBlockLinkOf(target)
+  }
+
+  /** 快捷键/命令面板入口（宿主 blockLink.copy 消息）：对光标所在块执行
+   *  与右键同款复制（光标在标题行 = 复制标题链接） */
+  private runBlockCopyAtCursor(): void {
+    const view = this.view
+    if (!view || this.viewMode !== 'live') {
+      return
+    }
+    const target = this.blockTargetAt(view.state.selection.main.head)
+    if (target === null) {
+      return
+    }
+    if (target.heading !== null) {
+      this.copyHeadingLink(target.heading.text)
+      return
+    }
+    this.copyBlockLinkOf(target)
+  }
+
+  /** 复制标题链接：标题取行面字面文本（含行内标记）——与大纲 copyLink 及
+   *  宿主 findHeadingOffset 的字面比较口径同源（宿主拼 `[[笔记名#标题]]`） */
+  private copyHeadingLink(headingText: string): void {
+    this.bridge.postMessage({
+      kind: 'clipboard.write',
+      linkHeading: { docUri: this.docUri, heading: headingText },
+    })
+  }
+
+  /** 复制块链接：块已有块 id（行尾 ` ^id` 或独立行 `^id` 双形态——增集
+   *  识别，手写任一形态都复用）直接用；没有则先自动补写（6 位随机
+   *  [a-z0-9]、全文 id 查重避让；块尾行后空一行写独立行，Obsidian 默认
+   *  形态）——单事务 dispatch（一笔 edit.request = 撤销一次），dispatch
+   *  成功再写剪贴板 */
+  private copyBlockLinkOf(target: BlockMenuTarget): void {
+    const view = this.view
+    if (!view) {
+      return
+    }
+    const doc = view.state.doc
+    const lines = doc.toString().split('\n')
+    const lastLine = target.block.end
+    const lineText = lines[lastLine] ?? ''
+    // 已有 id 三个落点：块尾行行尾（行尾形态）、块尾行自身（紧贴独立行被
+    // 块区间吞并）、块尾之后跨空行首个非空行（空行隔开的独立行）
+    const existing =
+      blockIdOfLine(lineText) ??
+      standaloneBlockIdOf(lineText) ??
+      standaloneBlockIdAfterBlock(lines, target.block)
+    if (existing !== null) {
+      this.bridge.postMessage({
+        kind: 'clipboard.write',
+        linkBlock: { docUri: this.docUri, blockId: existing },
+      })
+      return
+    }
+    const id = generateBlockId(collectBlockIds(lines))
+    const insert = planBlockIdInsertion(id)
+    const lineInfo = doc.line(lastLine + 1)
+    try {
+      view.dispatch({ changes: { from: lineInfo.to, to: lineInfo.to, insert } })
+    } catch (error) {
+      // 越界坐标等异常不逃逸（与 applyOutlineEdits 同口径）——写入失败时
+      // 不写剪贴板（链接会指向不存在的 id）
+      console.error('[vsidian] 块 id 写入失败（块尾行坐标与当前文档不匹配）', error)
+      return
+    }
+    this.bridge.postMessage({
+      kind: 'clipboard.write',
+      linkBlock: { docUri: this.docUri, blockId: id },
+    })
   }
 
   // ---- 大纲拖拽排序（#70）----
@@ -6568,6 +7175,11 @@ export class WebviewSyncController {
       // #60 Mermaid：围栏表 + 跨行块 replace 装饰（光标进入围栏显源码、
       // 离开恢复渲染图；渲染容器与阅读侧共用 mermaidRender 管线）
       liveMermaid,
+      // #163 验收反馈：块 id 标记淡化（行尾 ` ^id` 与独立行 `^id` 双形态
+      // mark 装饰；围栏内部不命中；docChanged 全量行扫描重建）
+      liveBlockId,
+      // #163 验收反馈：跳转目标高亮（行级 line 装饰，effect 驱动）
+      anchorFlash,
       // #79 代码块卡片：呈现态围栏收起 + 头部横带 + 卡片行类（配置经
       // Compartment 热重配，围栏表复用上方 mermaidFencesField）
       this.codeCardCompartment.of(this.codeCardExtension()),
@@ -6606,6 +7218,25 @@ export class WebviewSyncController {
       // #120 Tab/Shift+Tab 通用行缩进：排在 tableEditing 之后（表格
       // 单元格导航优先，表格行不缩进）、defaultKeymap 之前
       indentEditing,
+      // #161 图片粘贴拦截（paste domEventHandler）：无 keymap/filter 顺序
+      // 语义（paste 与其他 DOM handler 互不竞争），置于装饰与编辑钩子之后
+      // 仅作分组；命中 image/* 剪贴板项即出站宿主落盘，未命中放行默认粘贴
+      createImagePaste({
+        isEnabled: () => {
+          const raw = this.settings?.[IMAGE_PASTE_KEY]
+          const enabled = typeof raw === 'boolean' ? raw : IMAGE_PASTE_DEFAULT
+          // 阅读模式不接管（只读语义）；暂停面板不产生新写回链路
+          return enabled && this.viewMode === 'live' && !this.suspended
+        },
+        getSession: () => (this.sessionId ? { sessionId: this.sessionId, docUri: this.docUri } : null),
+        nextReqId: () => ++this.imagePasteReqId,
+        post: (message) => {
+          if (message.kind === 'image.paste') {
+            this.imagePastePending.add(message.reqId)
+          }
+          this.bridge.postMessage(message)
+        },
+      }),
       // 查找装饰（#14）：当前匹配（直接）+ 全部匹配（视口内间接）
       findDecorations,
       ...this.extraExtensions,
@@ -6614,6 +7245,13 @@ export class WebviewSyncController {
           // StateField 已在本事务更新；微任务避免在 CM6 update 生命周期内
           // 再读取旧 EditorView.state。重复信号合并由当前状态读取自然收敛。
           queueMicrotask(() => this.refreshQuickActions())
+        }
+        if (update.selectionSet && !update.docChanged && this.viewMode === 'live') {
+          const anchor = update.state.selection.main.from
+          if (anchor !== this.modeAnchor) {
+            this.modeAnchor = anchor
+            this.scheduleSelectionSave()
+          }
         }
         if (!update.docChanged) {
           return

@@ -40,6 +40,12 @@ interface SettingDefinitionBase {
    * 单测钉住恒合法）；依赖链可传递（A 依赖 B、B 依赖 C 则逐级传导）。
    */
   dependsOn?: string
+  /**
+   * 可选枚举值依赖（#163 验收反馈防呆）：依赖项（string 枚举型）当前值
+   * ∈ values 时本项可用——语义为「仅这些取值下本设置才有意义」。依赖项
+   * 自身灰化时传导（链式）；values ⊆ 依赖项枚举由校验把关。
+   */
+  dependsOnEnum?: { key: string; values: readonly string[] }
 }
 
 /** 布尔设置项（开关；#34「显示源文件行号」同型） */
@@ -71,6 +77,19 @@ export interface StringEnumSettingDefinition extends SettingDefinitionBase {
 }
 
 /**
+ * 字符串自由文本设置项（#161 图片粘贴）：无值域的受限文本——长度上限
+ * 必填（防误存超长字符串进 globalState 与协议载荷），设置页渲染为
+ * text input。与 StringEnum 的分型判据是 enum 字段有无（两者 type 同为
+ * 'string'，TS 经 `'enum' in def` 收窄）。
+ */
+export interface StringTextSettingDefinition extends SettingDefinitionBase {
+  type: 'string'
+  default: string
+  /** 值长度上限（正整数；default 与存量/补丁值均不得超限） */
+  maxLength: number
+}
+
+/**
  * 数字设置项（#175「可读行宽」起启用，本文件头注的 number 预留兑现）：
  * 范围与步进内建于类型——min/max/step 必为有限数、min ≤ max、step > 0、
  * default 在 [min, max] 内；校验只管类型与范围，步进倍数不强制（滑块产出
@@ -97,7 +116,11 @@ export interface NumberSettingDefinition extends SettingDefinitionBase {
   unit?: string
 }
 
-export type SettingDefinition = BooleanSettingDefinition | StringEnumSettingDefinition | NumberSettingDefinition
+export type SettingDefinition =
+  | BooleanSettingDefinition
+  | StringEnumSettingDefinition
+  | StringTextSettingDefinition
+  | NumberSettingDefinition
 
 /**
  * #34「显示行号」：实时预览侧 CM6 行号栏开关。键与消费方常量成对导出——
@@ -198,13 +221,42 @@ export const LANGUAGE_KEY = 'general.language'
 export const LANGUAGE_DEFAULT = 'auto'
 
 /**
+ * #161「粘贴图片插入」总开关：Live 正文粘贴剪贴板图片时拦截并落盘为
+ * 资产文件、光标处插入图片引用。关闭后粘贴回到 CM6 默认行为（零拦截）。
+ * 键与消费方（webview paste 拦截守卫、宿主落盘链路）成对导出。
+ */
+export const IMAGE_PASTE_KEY = 'image.paste'
+export const IMAGE_PASTE_DEFAULT = true
+
+/**
+ * #161 图片存放位置模式（StringEnum）：same-dir=与当前文件同目录（默认）；
+ * workspace-root=工作区第一文件夹根 + 子路径；relative-to-file=当前文档
+ * 所在目录 + 子路径。解析纯函数在 host/imagePastePlan（URI path 空间）。
+ */
+export const IMAGE_PASTE_LOCATION_KEY = 'image.pasteLocation'
+export const IMAGE_PASTE_LOCATION_MODES = ['same-dir', 'workspace-root', 'relative-to-file'] as const
+export type ImagePasteLocationMode = (typeof IMAGE_PASTE_LOCATION_MODES)[number]
+export const IMAGE_PASTE_LOCATION_DEFAULT: ImagePasteLocationMode = 'same-dir'
+
+/**
+ * #161 图片存放子路径（自由文本，默认 assets）：workspace-root /
+ * relative-to-file 模式下拼在根后；same-dir 模式不生效（描述文案写明）。
+ * 目录解析拒绝绝对路径与 `..` 越界（违规粘贴失败通知，不落盘）。
+ */
+export const IMAGE_PASTE_SUBPATH_KEY = 'image.pasteSubpath'
+export const IMAGE_PASTE_SUBPATH_DEFAULT = 'assets'
+/** 子路径长度上限（与定义 maxLength 同源；防超长字符串进存储与消息） */
+export const IMAGE_PASTE_SUBPATH_MAX_LENGTH = 200
+
+/**
  * 生产设置定义注册表：#33 交付空状态页面与完整数据链路，#34 加入首个
  * 实际设置项「显示行号」（设置页自此渲染真实开关），#79 加入「代码块卡片」，
  * #80 加入「卡内行号」，#81 加入「复制按钮」，#83 加入「语法高亮」，#96
  * 加入「界面语言」（首个 string 枚举项，归属设置页「常规」分组——键前缀
  * general.* 的定义渲染进常规分组，见 settingsPageView 分组规则），#123
  * 加入「符号自动补全」，#124 加入「选区符号包裹」，#125 加入「符号 Tab
- * 越界」（三者独立布尔开关，见上方键常量注释）。
+ * 越界」（三者独立布尔开关，见上方键常量注释），#161 加入图片粘贴三件
+ * （总开关 / 存放模式枚举 / 子路径自由文本，首个 StringText 型）。
  * #95 i18n 起文案字段键化（titleKey/descriptionKey → 字典 setting.*），
  * 注册表不再含用户可见字面量。
  */
@@ -279,6 +331,45 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     titleKey: 'setting.symbolTabEscape.title',
     descriptionKey: 'setting.symbolTabEscape.description',
   },
+  // #161 图片粘贴：总开关 + 存放模式枚举 + 子路径自由文本（首个
+  // StringTextSettingDefinition——设置页 text input 控件分支随本批接入）
+  {
+    key: IMAGE_PASTE_KEY,
+    type: 'boolean',
+    default: IMAGE_PASTE_DEFAULT,
+    titleKey: 'setting.imagePaste.title',
+    descriptionKey: 'setting.imagePaste.description',
+  },
+  {
+    key: IMAGE_PASTE_LOCATION_KEY,
+    type: 'string',
+    default: IMAGE_PASTE_LOCATION_DEFAULT,
+    enum: IMAGE_PASTE_LOCATION_MODES,
+    titleKey: 'setting.imagePasteLocation.title',
+    descriptionKey: 'setting.imagePasteLocation.description',
+    // 总开关关闭时模式选择一并灰化（子路径经 dependsOnEnum 链级联）
+    dependsOn: IMAGE_PASTE_KEY,
+    optionLabelKeys: {
+      'same-dir': 'setting.imagePasteLocationSameDir',
+      'workspace-root': 'setting.imagePasteLocationWorkspaceRoot',
+      'relative-to-file': 'setting.imagePasteLocationRelativeToFile',
+    },
+  },
+  {
+    key: IMAGE_PASTE_SUBPATH_KEY,
+    type: 'string',
+    default: IMAGE_PASTE_SUBPATH_DEFAULT,
+    maxLength: IMAGE_PASTE_SUBPATH_MAX_LENGTH,
+    titleKey: 'setting.imagePasteSubpath.title',
+    descriptionKey: 'setting.imagePasteSubpath.description',
+    // #163 验收反馈防呆：子路径只对后两种存放模式生效——同目录模式下
+    // 控件灰化禁改（值不清除，切回有效模式按原值生效）；依赖链经
+    // pasteLocation 的 dependsOn 传导（总开关关闭时整组灰化）
+    dependsOnEnum: {
+      key: IMAGE_PASTE_LOCATION_KEY,
+      values: ['workspace-root', 'relative-to-file'],
+    },
+  },
   {
     key: READABLE_LINE_WIDTH_KEY,
     type: 'number',
@@ -298,11 +389,13 @@ function isObject(v: unknown): v is Record<string, unknown> {
 }
 
 /**
- * 依赖可用性（#155 跟进）：按 dependsOn 链递归解析本项当前是否可用。
- * 语义：无依赖恒可用；依赖项（boolean）开启才可用，链上传导（父不可用则
- * 子不可用）；快照缺值回退依赖项默认值（与 sanitize 语义一致）；非布尔值
- * 不视为开启。成环时视为可用不死循环——环由 validateSettingDependencies
- * 拦截（生产注册表单测钉住恒合法），此处只做渲染层兜底。
+ * 依赖可用性（#155 跟进；#163 验收反馈增枚举值依赖）：按 dependsOn /
+ * dependsOnEnum 链递归解析本项当前是否可用。语义：无依赖恒可用；
+ * dependsOn（boolean）依赖项开启才可用；dependsOnEnum 依赖项值 ∈ values
+ * 才可用；链上传导（父不可用则子不可用）；快照缺值回退依赖项默认值
+ * （与 sanitize 语义一致）；非布尔值不视为开启。成环时视为可用不死
+ * 循环——环由 validateSettingDependencies 拦截（生产注册表单测钉住恒
+ * 合法），此处只做渲染层兜底。
  */
 export function isSettingEnabled(
   defs: readonly SettingDefinition[],
@@ -310,51 +403,83 @@ export function isSettingEnabled(
   def: SettingDefinition,
 ): boolean {
   const byKey = new Map(defs.map((d) => [d.key, d]))
-  const visited = new Set<string>()
-  let current: SettingDefinition | undefined = def
-  while (current?.dependsOn) {
-    const dependencyKey = current.dependsOn
-    if (visited.has(dependencyKey)) {
-      return true // 环兜底（注册表校验另行拦截）
+  const enabledOf = (current: SettingDefinition, visited: Set<string>): boolean => {
+    if (current.dependsOn !== undefined) {
+      if (visited.has(current.dependsOn)) {
+        return true // 环兜底（注册表校验另行拦截）
+      }
+      const dependency = byKey.get(current.dependsOn)
+      if (!dependency) {
+        return true // 引用缺失兜底（注册表校验另行拦截）
+      }
+      const raw = values[current.dependsOn]
+      if ((raw === undefined ? dependency.default : raw) !== true) {
+        return false
+      }
+      visited.add(current.dependsOn)
+      return enabledOf(dependency, visited)
     }
-    visited.add(dependencyKey)
-    const dependency = byKey.get(dependencyKey)
-    if (!dependency) {
-      return true // 引用缺失兜底（注册表校验另行拦截）
+    if (current.dependsOnEnum !== undefined) {
+      const { key, values: allowed } = current.dependsOnEnum
+      if (visited.has(key)) {
+        return true // 环兜底
+      }
+      const dependency = byKey.get(key)
+      if (!dependency) {
+        return true // 引用缺失兜底
+      }
+      const raw = values[key]
+      if (!allowed.includes(raw === undefined ? String(dependency.default) : String(raw))) {
+        return false
+      }
+      // 依赖项自身不可用时传导灰化（链式语义与 dependsOn 一致）
+      visited.add(key)
+      return enabledOf(dependency, visited)
     }
-    const raw = values[dependencyKey]
-    const value = raw === undefined ? dependency.default : raw
-    if (value !== true) {
-      return false
-    }
-    current = dependency
+    return true
   }
-  return true
+  return enabledOf(def, new Set())
 }
 
 /**
- * 依赖注册完整性校验（#155 跟进）：每个 dependsOn 引用必须存在于定义表，
- * 且依赖链无自环、无传递环。返回违规描述列表（空数组 = 合法）。生产注册表
- * 的合法性由单测钉住——新增依赖项时此函数保证错引用/成环在测试期暴露。
+ * 依赖注册完整性校验（#155 跟进；#163 验收反馈增枚举值依赖）：每个
+ * dependsOn / dependsOnEnum 引用必须存在于定义表，且依赖链无自环、无
+ * 传递环；dependsOnEnum 的目标必须是 string 枚举型、values 不得越出其
+ * 枚举。返回违规描述列表（空数组 = 合法）。生产注册表的合法性由单测钉
+ * 住——新增依赖项时此函数保证错引用/成环/越界在测试期暴露。
  */
 export function validateSettingDependencies(defs: readonly SettingDefinition[]): string[] {
   const byKey = new Map(defs.map((d) => [d.key, d]))
   const violations: string[] = []
   for (const def of defs) {
-    if (!def.dependsOn) continue
-    if (!byKey.has(def.dependsOn)) {
+    if (!def.dependsOn && !def.dependsOnEnum) continue
+    if (def.dependsOn && !byKey.has(def.dependsOn)) {
       violations.push(`${def.key} dependsOn 未注册的 ${def.dependsOn}`)
-      continue
+    }
+    if (def.dependsOnEnum) {
+      const { key, values } = def.dependsOnEnum
+      const dependency = byKey.get(key)
+      if (!dependency) {
+        violations.push(`${def.key} dependsOnEnum 未注册的 ${key}`)
+      } else if (!('enum' in dependency) || !Array.isArray(dependency.enum)) {
+        violations.push(`${def.key} dependsOnEnum 依赖非枚举型的 ${key}`)
+      } else if (values.some((v) => !dependency.enum!.includes(v))) {
+        violations.push(`${def.key} dependsOnEnum values 不在依赖项枚举内（${key}）`)
+      }
     }
     const chain = new Set<string>()
     let cursor: SettingDefinition | undefined = def
-    while (cursor?.dependsOn) {
-      if (chain.has(cursor.key)) {
-        violations.push(`${def.key} 依赖链成环（${[...chain, cursor.key].join(' -> ')}）`)
+    for (;;) {
+      const nextKey = cursor?.dependsOn ?? cursor?.dependsOnEnum?.key
+      if (nextKey === undefined) {
         break
       }
-      chain.add(cursor.key)
-      cursor = byKey.get(cursor.dependsOn)
+      if (chain.has(cursor!.key)) {
+        violations.push(`${def.key} 依赖链成环（${[...chain, cursor!.key].join(' -> ')}）`)
+        break
+      }
+      chain.add(cursor!.key)
+      cursor = byKey.get(nextKey)
     }
   }
   return violations
@@ -370,7 +495,15 @@ export function isSettingDefinition(v: unknown): v is SettingDefinition {
     v.key.length === 0 ||
     typeof v.titleKey !== 'string' ||
     (v.descriptionKey !== undefined && typeof v.descriptionKey !== 'string') ||
-    (v.dependsOn !== undefined && (typeof v.dependsOn !== 'string' || v.dependsOn.length === 0))
+    (v.dependsOn !== undefined && (typeof v.dependsOn !== 'string' || v.dependsOn.length === 0)) ||
+    (v.dependsOnEnum !== undefined && (
+      !isObject(v.dependsOnEnum) ||
+      typeof v.dependsOnEnum.key !== 'string' ||
+      v.dependsOnEnum.key.length === 0 ||
+      !Array.isArray(v.dependsOnEnum.values) ||
+      v.dependsOnEnum.values.length === 0 ||
+      !v.dependsOnEnum.values.every((item) => typeof item === 'string')
+    ))
   ) {
     return false
   }
@@ -391,6 +524,16 @@ export function isSettingDefinition(v: unknown): v is SettingDefinition {
     )
   }
   if (v.type === 'string') {
+    // #161 自由文本形态：无 enum + maxLength 正整数 + default 不超限
+    if (v.enum === undefined) {
+      return (
+        typeof v.default === 'string' &&
+        typeof v.maxLength === 'number' &&
+        Number.isInteger(v.maxLength) &&
+        v.maxLength > 0 &&
+        v.default.length <= v.maxLength
+      )
+    }
     // #93 string 枚举：值域非空、全字符串、无重复，默认值在值域内
     if (
       typeof v.default !== 'string' ||
@@ -421,7 +564,9 @@ export function isSettingDefinition(v: unknown): v is SettingDefinition {
   return false
 }
 
-/** 值是否符合定义的类型（boolean 布尔；string 枚举值域内字符串；number 范围内有限数） */
+/** 值是否符合定义的类型（boolean 布尔；string 枚举值域内 / 自由文本不超
+ *  上限的字符串——按 enum 有无分型，与 isSettingDefinition 同判据；number
+ *  范围内有限数） */
 function valueMatchesType(def: SettingDefinition, value: unknown): boolean {
   if (def.type === 'boolean') {
     return typeof value === 'boolean'
@@ -429,7 +574,10 @@ function valueMatchesType(def: SettingDefinition, value: unknown): boolean {
   if (def.type === 'number') {
     return typeof value === 'number' && Number.isFinite(value) && value >= def.min && value <= def.max
   }
-  return typeof value === 'string' && def.enum.includes(value)
+  if ('enum' in def) {
+    return typeof value === 'string' && def.enum.includes(value)
+  }
+  return typeof value === 'string' && value.length <= def.maxLength
 }
 
 /** 按定义表产出默认值快照 */

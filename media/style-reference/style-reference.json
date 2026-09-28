@@ -3,7 +3,7 @@
     "schemaVersion": 1,
     "vsidianVersion": "0.5.0",
     "generatedAt": "2026-09-28",
-    "entryCount": 126,
+    "entryCount": 130,
     "source": "src/shared/styleContract.ts",
     "generator": "scripts/genStyleGuide.mjs",
     "determinism": "generatedAt 取当前版本在 CHANGELOG.md 的发布日期（无段落时取最新已发布版本日期），同源再生成字节一致。",
@@ -100,7 +100,7 @@
       "title": "行内格式",
       "titleKey": "styleRef.category.inlineFormat",
       "order": 3,
-      "count": 6
+      "count": 7
     },
     {
       "id": "list-task",
@@ -140,7 +140,7 @@
       "title": "链接、图片与双链",
       "titleKey": "styleRef.category.linkImageWikilink",
       "order": 8,
-      "count": 6
+      "count": 7
     },
     {
       "id": "content-variables",
@@ -148,7 +148,7 @@
       "title": "公开 CSS 变量",
       "titleKey": "styleRef.category.contentVariables",
       "order": 9,
-      "count": 10
+      "count": 11
     },
     {
       "id": "content-limits",
@@ -221,6 +221,14 @@
       "titleKey": "styleRef.category.frontmatter",
       "order": 8,
       "count": 5
+    },
+    {
+      "id": "context-menu",
+      "domain": "chrome",
+      "title": "正文右键菜单",
+      "titleKey": "styleRef.category.contextMenu",
+      "order": 9,
+      "count": 1
     }
   ],
   "variableAliases": [
@@ -594,6 +602,30 @@
         "cssProbe.liveHtmlCommentDecorationColor"
       ],
       "introduced": "#139（2026-09-27）"
+    },
+    {
+      "id": "block-id-mark",
+      "domain": "content",
+      "category": "inline-format",
+      "kind": "selector",
+      "target": ".vsidian-block-id（仅 live）",
+      "purpose": "块 id 标记淡化入口（#163 验收反馈）：live 侧行尾 ` ^id` 与独立行 `^id` 双形态整区间 mark 装饰 span（含行尾形态的前导空白），正文前景 45% 混入的低对比呈现——相对正文色变换而非锚定固定色，适配自定义字体颜色；color-mix 单规则服务明暗主题；不隐藏不折叠、可读可编辑。阅读侧经渲染前剥离隐藏（blockIdStrip：行尾删标记、独立行删内容保换行），无对应类。",
+      "views": [
+        "live"
+      ],
+      "states": "live 常显淡化色（块 id 是结构标记，无光标两态切换语义——复制块链接入口在右键菜单/快捷键）。",
+      "dom": "live 容器内 mark 装饰 span；围栏内部不命中（代码内容），闭围栏行行尾标记命中（围栏块自身的 id）。",
+      "example": ".vsidian-block-id {\n  color: color-mix(in srgb, var(--vscode-editor-foreground, #808080) 45%, transparent);\n}",
+      "obsidian": {
+        "counterpart": "无（Obsidian 阅读隐藏、live 内建样式淡化，无公开类名）",
+        "support": "none"
+      },
+      "verification": [
+        "单元 liveBlockId：双形态标记区间发射契约",
+        "单元 blockIdCssContract：淡化色规则钉住",
+        "浏览器 blockMenu：淡化 computed color 断言（双形态）"
+      ],
+      "introduced": "#163 验收反馈（2026-09-28）"
     },
     {
       "id": "live-code-line",
@@ -1496,6 +1528,54 @@
         "cssProbe.readingWikilinkDecorationColor / obsidianAliases[\"reading-wikilink\"]"
       ],
       "introduced": "#11（2026-09-24）"
+    },
+    {
+      "id": "anchor-flash",
+      "domain": "content",
+      "category": "link-image-wikilink",
+      "kind": "selector",
+      "target": ".vsidian-anchor-flash",
+      "purpose": "跳转目标高亮（#163 验收反馈）：双链/普通链接锚点跳转（view.locate 通道）后目标标题/段落整体覆盖半透黄；用户任意操作（点击、滚动、按键、切走页面）后消失。live 为行级 line 装饰（目标块逐行）、reading 为块级类（flashBlock，虚拟化重挂载后保持）——类名跨视图同口径，背景色经 --vsidian-anchor-flash-background 变量暴露（用户可覆盖的 CSS 接口，见 var-anchor-flash-background）。大纲点击不闪（已有条目常驻高亮）。",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "states": "跳转定位后出现，用户任意操作（含切换模式、编辑文档）后消失——瞬态提示，无常驻态。",
+      "dom": "live：.cm-line 行元素（目标块各行）；reading：.vsidian-reading-block 块元素。",
+      "example": ".vsidian-anchor-flash {\n  background: var(--vsidian-anchor-flash-background);\n}",
+      "obsidian": {
+        "counterpart": "无（Obsidian 内建高亮动画无公开类名）",
+        "support": "none"
+      },
+      "verification": [
+        "单元 anchorFlash：目标区间推导与 StateField set/clear",
+        "单元 anchorFlashPanel：定位加类、点击/滚动/blur 消失、程序滚动时间窗不误清",
+        "单元 anchorFlashCssContract：两视图规则同引变量、变量定义于 #app",
+        "浏览器 anchorFlash：真实 view.locate 后绘制层背景断言与消失交互"
+      ],
+      "introduced": "#163 验收反馈（2026-09-28）"
+    },
+    {
+      "id": "var-anchor-flash-background",
+      "domain": "content",
+      "category": "content-variables",
+      "kind": "variable",
+      "target": "--vsidian-anchor-flash-background",
+      "purpose": "跳转目标高亮的半透黄背景色（#163 验收反馈）：用户可覆盖的 CSS 接口，live 行级与 reading 块级两条规则同引（一处定义两视图生效）。默认 rgba(255, 213, 79, 0.25)。",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "dom": "定义于 #app。",
+      "example": ":root {\n  --vsidian-anchor-flash-background: rgba(255, 213, 79, 0.25);\n}",
+      "obsidian": {
+        "counterpart": "无",
+        "support": "none"
+      },
+      "verification": [
+        "单元 anchorFlashCssContract：变量定义与两规则引用"
+      ],
+      "introduced": "#163 验收反馈（2026-09-28）"
     },
     {
       "id": "var-heading-color",
@@ -3102,7 +3182,7 @@
         "reading"
       ],
       "states": "按钮本体常驻两模式；点击出站 view.switch.request（不本地执行），按钮态由宿主回流的 view.mode.set 驱动——aria/tooltip 表目标动作随态换词。",
-      "dom": "顶栏 .vsidian-toolbar 内 button，紧邻侧栏开关左侧；内联 SVG 两 path（book/edit 子类）。",
+      "dom": "顶栏 .vsidian-toolbar 内 button，紧邻侧栏开关左侧；#158 起两者组成右端组——本按钮持有 margin-left:auto 推靠工具栏右端，与左侧组（设置、快速操作）间为弹性空隙；内联 SVG 两 path（book/edit 子类）。",
       "example": ".vsidian-view-toggle {\n  color: var(--vscode-toolbar-foreground);\n}",
       "obsidian": {
         "counterpart": "无对应物",
@@ -3157,6 +3237,29 @@
       ],
       "introduced": "#4（2026-09-23）",
       "removed": "#38（2026-09-24，288044d）移除且从未随任何发布版存在；旧映射表该行为陈旧数据（#133 核实纠错，依据 v0.4.0 tag 75c3df7 源码核对）"
+    },
+    {
+      "id": "block-menu",
+      "domain": "chrome",
+      "category": "context-menu",
+      "kind": "selector",
+      "target": ".vsidian-block-menu（+ -item）",
+      "purpose": "正文右键菜单浮层（复制标题链接/复制块链接，#162）：挂 body 的 fixed 定位自绘菜单；菜单项为 button 键盘可达；颜色跟随 --vscode-menu-* 变量族（与大纲菜单同族视觉语言，无级联子菜单）。",
+      "views": [
+        "live"
+      ],
+      "states": "Live 正文右键命中块（frontmatter 头区与空行不接管，原生菜单照常）。",
+      "dom": "document.body 直接子元素（视口系 fixed 定位）。",
+      "example": ".vsidian-block-menu .vsidian-block-menu-item:hover {\n  background: var(--vscode-menu-selectionBackground);\n}",
+      "obsidian": {
+        "counterpart": "无（Obsidian 右键菜单为应用原生菜单，非 DOM 内元素）",
+        "support": "none"
+      },
+      "verification": [
+        "单元 blockMenu/blockMenuPanel：菜单装配与命令交互",
+        "集成 block.test.contextMenu/menuClick 系列钩子"
+      ],
+      "introduced": "#162（2026-09-28）"
     }
   ]
 }

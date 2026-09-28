@@ -24,14 +24,22 @@ export const en = {
   'settings.searchResults': 'Search results',
   'settings.searchCount': 'Settings found: {count}',
   'settings.searchEmpty': 'No matching settings found. Try other keywords.',
-  'settings.editorSubtitle': 'Adjust how the live preview is displayed. Changes are saved automatically.',
+  'settings.editorSubtitle': 'Adjust editing and presentation behavior. Changes are saved automatically.',
   'settings.empty': 'Nothing to configure yet.',
+  /** Editor-page group section titles (#163 second-pass restore: sidebar keeps
+   *  General/Editor only; categories render as in-page group titles — group* keys) */
   'settings.groupDisplay': 'Display',
   /** 设置页「常规」分组标题（#96 general.* 设置项的归属分组） */
   'settings.generalSection': 'General',
   /** 设置页「常规」分组副文案（对齐「编辑器」分组的说明句式） */
   'settings.generalSectionDescription':
     'Adjust basic Vsidian behavior. Changes save automatically.',
+  /** Editor-page section: editor.symbol* input behaviors */
+  'settings.groupSymbols': 'Symbols',
+  /** Editor-page section: codeblock.* presentation */
+  'settings.groupCodeblock': 'Code blocks',
+  /** Editor-page section: image.* paste settings */
+  'settings.groupImage': 'Images',
 
   // ---- keybindingSettings.（快捷键分页：标题、模式标签、状态、搜索、按钮）----
   'keybindingSettings.title': 'Keybindings',
@@ -171,6 +179,7 @@ export const en = {
   'styleRef.category.chromeLimits': 'Limitations',
   'styleRef.category.frontmatter': 'Frontmatter table',
   'styleRef.category.toolbarBanner': 'Toolbar & banner',
+  'styleRef.category.contextMenu': 'Content context menu',
   'host.styleRefExported': 'Style contract JSON exported: {path}',
   'host.styleRefExportFailed': 'Failed to export style contract JSON: {reason}',
   'host.styleRefExportReasonMissingAsset': 'extension install incomplete (style-reference.json missing)',
@@ -202,7 +211,7 @@ export const en = {
   'host.confirmResume': 'This will discard the unconfirmed local changes in the "{name}" editor and resync with the on-disk/authoritative content. Consider copying the unconfirmed input first.',
   'host.conflictPaused': 'Editing of "{name}" is paused: the external change and the unconfirmed input cannot be merged safely. The unconfirmed input is kept and can be retrieved at any time.',
   'host.panelClosedWithInput': 'The editor for "{name}" was closed (or the connection dropped) with unsaved unconfirmed input: {text}',
-  'host.wikilinkUnsupported': 'Unsupported wikilink form "[[{target}]]" (block references ^ and embeds ![[…]] belong to a later phase): kept as-is',
+  'host.wikilinkUnsupported': 'Unsupported wikilink form "[[{target}]]" (embeds ![[…]] belong to a later phase): kept as-is',
   'host.wikilinkNoWorkspace': 'The current document is not in any workspace folder: wikilink targets are resolved against the workspace, so jumping is unavailable with no folder open (the link text is kept)',
   'host.wikilinkNotFound': 'Wikilink target not found: [[{target}]] (looked up on demand within the current workspace; files are never created automatically)',
   'host.wikilinkAmbiguousPick': 'Multiple wikilink targets found for "{target}"; choose the note to open',
@@ -433,6 +442,36 @@ export const en = {
   'command.ui.outlineReset.title': 'Reset outline',
   'command.ui.outlineCollapseAll.title': 'Collapse all outline headings',
   'command.ui.outlineExpandAll.title': 'Expand all outline headings',
+
+  // ---- #159 锚点跳转（块引用定位与本文件锚点）----
+  /** 块 id 缺失提示（与标题缺失同款「打开后提示」行为） */
+  'host.wikilinkBlockMissing': 'Opened {link} in the target document, but the block reference "^{blockId}" was not found (block ids are ` ^id` markers at the end of a block’s last line)',
+
+  // ---- #160 普通链接锚点定位（host 通知）----
+  'host.linkAnchorMissing':
+    'Opened the document targeted by {href}, but the heading "{heading}" was not found (heading matching: trimmed, whitespace-collapsed, case-insensitive ATX headings)',
+
+  // ---- #161 image paste (setting entries + host notifications) ----
+  'setting.imagePaste.title': 'Paste images from clipboard',
+  'setting.imagePaste.description': 'When pasting an image in the live preview, save it to the configured asset folder and insert a Markdown image reference at the cursor.',
+  'setting.imagePasteLocation.title': 'Image save location',
+  'setting.imagePasteLocation.description': 'Where pasted images are saved: next to the current file, under the workspace root plus subpath, or next to the current file plus subpath. The subpath applies to the last two modes only.',
+  'setting.imagePasteLocationSameDir': 'Same folder as the file',
+  'setting.imagePasteLocationWorkspaceRoot': 'Relative to workspace root',
+  'setting.imagePasteLocationRelativeToFile': 'Relative to current file',
+  'setting.imagePasteSubpath.title': 'Image subpath',
+  'setting.imagePasteSubpath.description': 'Subfolder appended in the workspace-root and relative-to-file modes — greyed out while the same-folder mode is selected. Absolute paths and parent traversal (..) are rejected.',
+  'host.imagePasteInvalidLocation': 'Pasted image was not saved: the configured subpath "{subpath}" is invalid (absolute paths and ".." are not allowed).',
+  'host.imagePasteNoWorkspaceFallback': 'No workspace folder is open; the pasted image was saved next to the current file.',
+  'host.imagePasteWriteFailed': 'Failed to save the pasted image.',
+
+  // ---- #162 复制块链接（正文右键菜单与快捷键）----
+  /** 右键菜单：标题行命中的额外项（拼 [[笔记名#标题]]，标题取行面文本） */
+  'blockMenu.copyHeadingLink': 'Copy heading link',
+  /** 右键菜单/快捷键共用项（拼 [[笔记名#^块id]]，无 id 时先自动补写） */
+  'blockMenu.copyLink': 'Copy block link',
+  /** 命令面板/快捷键页操作名（keybindings 注册表 titleKey） */
+  'command.block.copyLink.title': 'Copy link to current block',
 } as const satisfies Record<string, string>
 
 /** 字典键：点分扁平键，以本包为类型基准（编译期检查 t() 取词键） */

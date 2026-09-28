@@ -104,6 +104,23 @@ export type HostToWebview =
       reason: 'blocked' | 'outside-workspace' | 'not-found' | 'read-error'
       detail?: string
     }
+  /** 图片粘贴落盘结果（#161）：ok 时 markdown 为宿主计算好的完整插入文本
+   *  （![stem](percent-encode 相对路径)，与渲染端 normalizeImgSrc 的 decode
+   *  对偶），webview 在光标处单事务插入（一笔撤销）；失败附原因码
+   *  （invalid-location=子路径越界/绝对路径；write-failed=建目录或写盘
+   *  失败；invalid=载荷校验失败），webview 不插入文本 */
+  | { kind: 'image.paste.result'; reqId: number; ok: true; markdown: string }
+  | {
+      kind: 'image.paste.result'
+      reqId: number
+      ok: false
+      reason: 'invalid-location' | 'write-failed' | 'invalid'
+    }
+  /** 测试钩子（#161）：登记图片粘贴在途 reqId。集成测试经宿主注入
+   *  image.paste（绕过 webview 的 paste 拦截，拦截侧的在途登记不会发生），
+   *  以此补登记同 reqId，使结果回包能通过陈旧回包校验、走完插入往返
+   *  （与真实粘贴同一在途表同一插入路径） */
+  | { kind: 'image.test.pending'; reqId: number }
   /** 查找会话指令（#14）：open 打开 webview 内浮动查找面板（可预置查询词，
    *  焦点进输入框）；close 关闭并归还焦点；step 循环定位上一/下一匹配。
    *  查找是纯只读视图操作：不写文档、不产生编辑历史、无 webview→宿主消息 */
@@ -118,11 +135,17 @@ export type HostToWebview =
   | { kind: 'table.create' }
   /** 格式命令在 Live 光标/选区处执行，单个 CM6 事务经宿主写回。 */
   | { kind: 'format.command'; op: FormatOperationId }
+  /** #162 复制块链接命令（快捷键/命令面板入口）：面板在 Live 光标所在块
+   *  执行与右键菜单同款的复制（标题行=复制标题链接；无块 id 先自动补写
+   *  ——一笔标准编辑事务，可撤销）。阅读模式只读忽略 */
+  | { kind: 'blockLink.copy' }
   | { kind: 'ui.command'; op: UiOperationId }
   /** 测试钩子（#13）：向真实编辑器派发 Tab/Shift+Tab keydown（与用户按键
    *  同一 keymap 链路；纯选区导航，零写回）。宿主测试无法向 webview 派发
    *  真实键盘事件，以此通道验证导航装配 */
   | { kind: 'table.test.key'; key: 'tab' | 'shift-tab' | 'select-all' | 'backspace' | 'delete' | 'enter' }
+  /** 测试钩子：模拟 Live 纯光标移动和纯滚动；空载荷仅启用绘制探针。 */
+  | { kind: 'viewport.test.position'; cursorLine?: number; scrollNearLine?: number; scrollBiasPx?: number }
   /** 测试钩子（#42）：在真实 webview 网格单元格派发鼠标点击及当前位置输入。 */
   | { kind: 'table.test.cellClick'; rowIndex: number; columnIndex: number; point?: 'edge' | 'middle' | 'right-edge' }
   | { kind: 'table.test.crossSelect'; anchor: number; head: number }
@@ -180,6 +203,16 @@ export type HostToWebview =
   | { kind: 'outline.test.menuClick'; command: string }
   /** 测试钩子（#69）：关闭当前右键菜单（等价 Esc/外点关闭路径） */
   | { kind: 'outline.test.menuClose' }
+  /** 测试钩子（#162）：在正文 doc 偏移 pos 处打开块链接右键菜单（与用户
+   *  右键同一命中判定与装配链路——posAtCoords 的替代注入点；frontmatter
+   *  头区/空行等不接管位同样不开菜单）。宿主测试无法向 webview 派发真实
+   *  鼠标事件，以此通道验证真实宿主内的菜单装配 */
+  | { kind: 'block.test.contextMenu'; pos: number }
+  /** 测试钩子（#162）：点击菜单中 command 对应的真实按钮（与用户点击同一
+   *  处理器；command 取 blockMenu 的 BlockMenuCommand） */
+  | { kind: 'block.test.menuClick'; command: string }
+  /** 测试钩子（#162）：关闭当前块链接右键菜单（等价 Esc/外点关闭路径） */
+  | { kind: 'block.test.menuClose' }
   /** 测试钩子（#69）：向重命名输入框注入文本并以 Enter/Esc 收尾（真实
    *  keydown 链路；须先经 menuClick command='rename' 进入重命名态） */
   | { kind: 'outline.test.renameKey'; text: string; key: 'enter' | 'escape' }
@@ -310,6 +343,10 @@ export type WebviewToHost =
   | { kind: 'sync.test.close'; sessionId: string; docUri: string }
   /** 暂停横幅按钮动作：copy = 请求宿主复制未确认输入；resume = 请求恢复（重新同步） */
   | { kind: 'conflict.action'; sessionId: string; docUri: string; action: 'copy' | 'resume' }
+  /** view.locate 送达确认（#163 验收反馈）：webview 应用定位后原样回发
+   *  消息 offset——宿主只补发「从未送达」的定位意图（面板重载竞态兜底），
+   *  已送达的定位交给 webview 持久化锚点恢复，历史程序定位不再重播 */
+  | { kind: 'view.locate.ack'; offset: number }
   /** 视图诊断回报 */
   | {
       kind: 'view.state'
@@ -335,6 +372,10 @@ export type WebviewToHost =
       selectionOffset?: number
       selectionHead?: number
       selectionAssoc?: number
+      /** Live 绘制视口中心对应的源码行号（真布局时可用）。 */
+      liveViewportCenterLine?: number
+      /** Live 实际滚动像素；与中心源码行对拍，暴露重排后像素坐标失真。 */
+      liveScrollTopPx?: number
       /** webview 实际运行时能否使用词级分段器（#88）。 */
       wordSegmenter?: boolean
       /** 阅读容器内块元素数（#6；#7 起为挂载块数，屏外块不创建） */
@@ -445,6 +486,21 @@ export type WebviewToHost =
   /** 图片资源解析请求（#10）：非 http(s) 直连的工作区图源经宿主解析为
    *  webview 可加载地址（reqId 会话面板内自增，对应 image.result） */
   | { kind: 'image.request'; sessionId: string; docUri: string; reqId: number; src: string }
+  /** 图片粘贴落盘（#161）：webview paste 拦截命中 image/* 剪贴板项后出站；
+   *  mime 为 image/*、dataBase64 为严格 base64（上限见 IMAGE_PASTE_LIMITS），
+   *  fileNameHint 可选（剪贴板文件的原始名，宿主判定合成名后决定沿用或
+   *  时间戳命名）。宿主按设置解析目录 → 建目录 → 写盘，结果经
+   *  image.paste.result 回来源面板（载荷形态照 diagram.export 的 base64
+   *  先例） */
+  | {
+      kind: 'image.paste'
+      sessionId: string
+      docUri: string
+      reqId: number
+      mime: string
+      dataBase64: string
+      fileNameHint?: string
+    }
   /** 代码块复制请求（#81）：卡片头部复制按钮点击 → 宿主剪贴板 API 写入。
    *  text 为代码体原文（两条围栏行之间，不含围栏与 info string），恒为
    *  LF（CM6 LF 模型）；宿主按文档 EOL 归一后写剪贴板（webview 不触碰
@@ -473,6 +529,11 @@ export type WebviewToHost =
    *  （含行内标记，与宿主 findHeadingOffset 的字面匹配同源；剥标记可见
    *  文本只用于 text 直写变体的「复制标题」纯文本场景） */
   | { kind: 'clipboard.write'; linkHeading: { docUri: string; heading: string } }
+  /** #162 剪贴板写（块链接）：`[[笔记名#^块id]]` 的拼接在宿主侧——
+   *  blockId 为 webview 侧块尾行既有 id 或刚自动写入的新 id（写入先经
+   *  标准 edit.request 落权威文档，本消息只携最终 id；与 linkHeading
+   *  同一只读交互端口） */
+  | { kind: 'clipboard.write'; linkBlock: { docUri: string; blockId: string } }
   /** 性能探针回报（#5）：快照为 DOM 计数，输入延迟含 rAF 稳定等待 */
   | {
       kind: 'perf.report'
@@ -1488,6 +1549,10 @@ function isString(v: unknown): boolean {
   return typeof v === 'string'
 }
 
+/** #161 图片粘贴 base64 形态（严格 base64；与 diagramExportValidate 同式，
+ *  该常量归协议层因校验在此侧发生） */
+const BASE64_STRICT = /^[A-Za-z0-9+/]+={0,2}$/
+
 /** 非负数值（含小数）：滚动位置/元素位置等亚像素观测量 */
 function isNonNegativeNumber(v: unknown): boolean {
   return typeof v === 'number' && Number.isFinite(v) && v >= 0
@@ -1658,6 +1723,20 @@ export type DiagramExportPayload = Extract<WebviewToHost, { kind: 'diagram.expor
 /** #111 图表导出失败原因（cancelled=用户取消另存为对话框） */
 export type DiagramExportFailReason = 'cancelled' | 'invalid' | 'writeFailed'
 
+/** #161 图片粘贴载荷上限（单一事实源；协议校验与宿主防御共用） */
+export const IMAGE_PASTE_LIMITS = {
+  /** dataBase64 上限（字符；约 12MB 二进制，与 diagram.export PNG 档同量级） */
+  dataBase64MaxChars: 16_000_000,
+  /** fileNameHint 上限（字符；清洗/时间戳名不受此限） */
+  fileNameHintMaxChars: 255,
+} as const
+
+/** #161 图片粘贴请求载荷（宿主侧消费形态） */
+export type ImagePastePayload = Extract<WebviewToHost, { kind: 'image.paste' }>
+
+/** #161 图片粘贴失败原因（invalid-location=目录非法；write-failed=写盘；invalid=载荷） */
+export type ImagePasteFailReason = 'invalid-location' | 'write-failed' | 'invalid'
+
 export function isWebviewToHost(v: unknown): v is WebviewToHost {
   if (!isObject(v)) {
     return false
@@ -1713,15 +1792,24 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'settings.set':
       return isSettingsPayload(v.values)
     case 'clipboard.write':
-      // #69 两变体：text 直写 / linkHeading 由宿主拼标题链接
-      if (isString(v.text) && v.linkHeading === undefined) {
+      // #69 两变体：text 直写 / linkHeading 由宿主拼标题链接；
+      // #162 第三变体 linkBlock 由宿主拼块链接 [[笔记名#^id]]
+      if (isString(v.text) && v.linkHeading === undefined && v.linkBlock === undefined) {
         return true
       }
-      return (
-        v.text === undefined &&
+      if (
+        v.text === undefined && v.linkBlock === undefined &&
         isObject(v.linkHeading) &&
         isString(v.linkHeading.docUri) &&
         isString(v.linkHeading.heading)
+      ) {
+        return true
+      }
+      return (
+        v.text === undefined && v.linkHeading === undefined &&
+        isObject(v.linkBlock) &&
+        isString(v.linkBlock.docUri) &&
+        isString(v.linkBlock.blockId)
       )
     case 'conflict.action':
       return (
@@ -1729,6 +1817,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         isString(v.docUri) &&
         (v.action === 'copy' || v.action === 'resume')
       )
+    case 'view.locate.ack':
+      return isNonNegativeInt(v.offset)
     case 'view.state':
       return (
         isString(v.text) &&
@@ -1746,6 +1836,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         (v.selectionHead === undefined || isNonNegativeInt(v.selectionHead)) &&
         (v.selectionAssoc === undefined || (typeof v.selectionAssoc === 'number' &&
           Number.isInteger(v.selectionAssoc) && v.selectionAssoc >= -1 && v.selectionAssoc <= 1)) &&
+        (v.liveViewportCenterLine === undefined || isNonNegativeInt(v.liveViewportCenterLine)) &&
+        (v.liveScrollTopPx === undefined || isNonNegativeNumber(v.liveScrollTopPx)) &&
         (v.wordSegmenter === undefined || typeof v.wordSegmenter === 'boolean') &&
         (v.readingBlockCount === undefined || isNonNegativeInt(v.readingBlockCount)) &&
         (v.readingAnchorStart === undefined || isNonNegativeInt(v.readingAnchorStart)) &&
@@ -1828,6 +1920,24 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         isString(v.docUri) &&
         isPositiveInt(v.reqId) &&
         isString(v.src)
+      )
+    case 'image.paste':
+      // #161 图片粘贴：mime 白名单形态（image/*）、严格 base64 + 上限、
+      // fileNameHint 可选限长（非法整体丢弃，不部分读取）
+      return (
+        isString(v.sessionId) &&
+        isString(v.docUri) &&
+        isPositiveInt(v.reqId) &&
+        typeof v.mime === 'string' &&
+        v.mime.startsWith('image/') &&
+        v.mime.length > 'image/'.length &&
+        typeof v.dataBase64 === 'string' &&
+        v.dataBase64.length > 0 &&
+        v.dataBase64.length <= IMAGE_PASTE_LIMITS.dataBase64MaxChars &&
+        BASE64_STRICT.test(v.dataBase64) &&
+        (v.fileNameHint === undefined ||
+          (typeof v.fileNameHint === 'string' &&
+            v.fileNameHint.length <= IMAGE_PASTE_LIMITS.fileNameHintMaxChars))
       )
     case 'perf.report':
       return (
@@ -1977,6 +2087,21 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         )
       }
       return false
+    case 'image.paste.result':
+      // #161 图片粘贴结果：ok 携完整插入文本；失败 reason 枚举
+      if (!isPositiveInt(v.reqId)) {
+        return false
+      }
+      if (v.ok === true) {
+        return isString(v.markdown)
+      }
+      return (
+        v.ok === false &&
+        (v.reason === 'invalid-location' || v.reason === 'write-failed' || v.reason === 'invalid')
+      )
+    case 'image.test.pending':
+      // #161 测试钩子：补登记在途 reqId（见消息定义注释）
+      return isPositiveInt(v.reqId)
     case 'view.find.open':
       return v.query === undefined || isString(v.query)
     case 'view.find.close':
@@ -1989,11 +2114,18 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return true
     case 'format.command':
       return isFormatOperationId(v.op)
+    case 'blockLink.copy':
+      return true
     case 'ui.command':
       return isUiOperationId(v.op)
     case 'table.test.key':
       return v.key === 'tab' || v.key === 'shift-tab' || v.key === 'select-all' || v.key === 'enter' ||
         v.key === 'backspace' || v.key === 'delete'
+    case 'viewport.test.position':
+      return (v.cursorLine === undefined || isNonNegativeInt(v.cursorLine)) &&
+        (v.scrollNearLine === undefined || isNonNegativeInt(v.scrollNearLine)) &&
+        (v.scrollBiasPx === undefined || (v.scrollNearLine !== undefined &&
+          typeof v.scrollBiasPx === 'number' && Number.isFinite(v.scrollBiasPx)))
     case 'table.test.cellClick':
       return isNonNegativeInt(v.rowIndex) && isNonNegativeInt(v.columnIndex) &&
         (v.point === undefined || v.point === 'edge' || v.point === 'middle' || v.point === 'right-edge')
@@ -2035,6 +2167,12 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'outline.test.menuClick':
       return isOutlineMenuCommand(v.command)
     case 'outline.test.menuClose':
+      return true
+    case 'block.test.contextMenu':
+      return isNonNegativeInt(v.pos)
+    case 'block.test.menuClick':
+      return v.command === 'copyHeadingLink' || v.command === 'copyBlockLink'
+    case 'block.test.menuClose':
       return true
     case 'outline.test.renameKey':
       return isString(v.text) && (v.key === 'enter' || v.key === 'escape')

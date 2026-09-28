@@ -51,11 +51,18 @@ try {
     await page.waitForSelector('.vsidian-view-toggle')
     let paint = await page.evaluate(() => window.readTogglePaint())
     assert.ok(paint.visible, '双态按钮应有绘制尺寸')
-    assert.equal(paint.hitIsButton, true, '按钮中心点元素命中应为按钮自身（未被遮挡）')
+    assert.ok(paint.hitIsButton, true, '按钮中心点元素命中应为按钮自身（未被遮挡）')
     assert.notEqual(paint.editDisplay, 'none', 'live 态应显示编辑类图标（SVG path 默认 inline）')
     assert.equal(paint.bookDisplay, 'none', 'live 态应隐藏书本图标')
     assert.equal(paint.aria, zhCn['toolbar.switchToReading'], 'live 态 aria 表目标动作（切换到阅读）')
     assert.equal(paint.title, zhCn['toolbar.switchToReading'], 'title 与 aria 同词')
+
+    // ---- #158 右端组几何（绘制层）：按钮位于工具栏水平中点右侧，
+    //      与侧栏开关以工具栏 gap（4px）紧邻组成右端组 ----
+    assert.ok(paint.centerX > paint.toolbarCenterX,
+      `双态按钮中心应位于工具栏水平中点右侧（#158 右端组）：centerX=${paint.centerX}, toolbarCenterX=${paint.toolbarCenterX}`)
+    assert.ok(paint.gapToSidebar !== null && Math.abs(paint.gapToSidebar - 4) < 1,
+      `双态切换与侧栏开关应以工具栏 gap 紧邻组成右端组（实测间距 ${paint.gapToSidebar}px）`)
 
     // ---- 点击出站 + 宿主回环后图标随态翻转（reading：book 可见）----
     const beforeClick = await page.evaluate(() => window.readHostMessages().length)
@@ -119,6 +126,50 @@ try {
     await page.locator('.vsidian-view-toggle').dispatchEvent('mousedown')
     assert.equal(await page.evaluate(() => window.editorHasFocus()), true,
       'mousedown 按钮后正文应保持焦点')
+
+    // ---- 标签页隐藏即销毁的等价重建：纯滚动视口跨 controller 保留 ----
+    const longDoc = Array.from({ length: 240 }, (_, i) =>
+      `## 段落 ${i}\n\n这是足够长的正文，用于验证滚动进度。\n`).join('\n')
+    await page.evaluate((text) => window.resetViewportDoc(text), longDoc)
+    await page.waitForFunction(() => {
+      const el = document.querySelector('.cm-scroller')
+      return el && el.scrollHeight > el.clientHeight + 1000
+    })
+    await page.evaluate(() => {
+      const el = document.querySelector('.cm-scroller')
+      el.scrollTop = 640
+      el.dispatchEvent(new Event('scroll'))
+    })
+    const liveTop = await page.evaluate(() => document.querySelector('.cm-scroller').scrollTop)
+    assert.ok(liveTop > 100, 'live 前置条件：视口已滚离文首')
+    await page.waitForTimeout(80)
+    const liveCenter = await page.evaluate(() => window.liveCenterLine())
+    assert.ok(liveCenter > 1, 'live 前置条件：视口中心已离开文首')
+    await page.evaluate((text) => window.reloadViewportDoc(text), longDoc)
+    await page.waitForFunction((line) =>
+      window.liveCenterLine() !== null && Math.abs(window.liveCenterLine() - line) <= 1, liveCenter)
+    await page.waitForTimeout(100)
+    assert.ok(Math.abs((await page.evaluate(() => window.liveCenterLine())) - liveCenter) <= 1,
+      'live 重建后视口中心应保持同一源码行')
+
+    await page.evaluate((text) => window.resetViewportDoc(text), longDoc)
+    await page.evaluate(() => window.setViewportMode('reading'))
+    await page.waitForFunction(() => {
+      const el = document.querySelector('.vsidian-view-reading')
+      return el && el.scrollHeight > el.clientHeight + 1000
+    })
+    await page.evaluate(() => {
+      const el = document.querySelector('.vsidian-view-reading')
+      el.scrollTop = 720
+      el.dispatchEvent(new Event('scroll'))
+    })
+    await page.waitForTimeout(100)
+    const readingTop = await page.evaluate(() => document.querySelector('.vsidian-view-reading').scrollTop)
+    assert.ok(readingTop > 100, 'reading 前置条件：视口已滚离文首')
+    await page.evaluate((text) => window.reloadViewportDoc(text), longDoc)
+    await page.waitForTimeout(120)
+    assert.ok(Math.abs((await page.evaluate(() => document.querySelector('.vsidian-view-reading').scrollTop)) - readingTop) <= 2,
+      'reading 重建后视口应稳定在离开时位置')
 
     assert.deepEqual(errors, [], `页面不应有脚本错误: ${errors.join('; ')}`)
     await page.close()

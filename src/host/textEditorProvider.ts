@@ -17,6 +17,7 @@ import {
   type LinkContext,
 } from './linkTarget'
 import {
+  findBlockOffset,
   findHeadingOffset,
   resolveWikilinkFile,
   type WikilinkResolveContext,
@@ -30,6 +31,7 @@ import {
   isWebviewToHost,
   type DiagramExportPayload,
   type HostToWebview,
+  type ImagePastePayload,
   type SerChange,
   type TableEditOp,
   type WebviewToHost,
@@ -54,6 +56,7 @@ import type { CssSnippetService } from './cssSnippetService'
 import type { SnippetLinkList } from '../shared/cssSnippets'
 import type { SettingsPageHandle } from './settingsPage'
 import { runDiagramExport } from './diagramExportHost'
+import { runImagePaste, type ImagePasteOutcome } from './imagePasteHost'
 import { installHostLocale, LOCALE_MESSAGES, type LocaleCode } from '../shared/locales'
 import { buildLocaleIslandHtml } from '../shared/locales/island'
 import { hostLocale } from './hostLocale'
@@ -119,10 +122,15 @@ export function isActiveTabCustomEditorOf(
  *  webview→宿主导出链路的消息形态；按文档 URI 分桶，查询即取走） */
 const diagramExportTestLog = new Map<string, DiagramExportPayload[]>()
 
+/** 图片粘贴消息日志（#161 测试钩子观测：记录宿主收到的 image.paste 载荷
+ *  形态；落盘真实执行（无对话框依赖，与 diagram.export 的短路不同），
+ *  集成测试另以文件系统断言落盘结果；按文档 URI 分桶，查询即取走） */
+const imagePasteTestLog = new Map<string, ImagePastePayload[]>()
+
 /** 链接跳转执行日志（#10 测试钩子观测：VSIDIAN_TEST_HOOKS 下集成测试断言
  *  宿主收到的跳转意图与处置结果） */
 export interface LinkLogEntry {
-  kind: 'external' | 'doc' | 'blocked' | 'not-found'
+  kind: 'external' | 'doc' | 'anchor' | 'blocked' | 'not-found'
   href: string
   /** blocked 的原因码 */
   reason?: string
@@ -130,6 +138,12 @@ export interface LinkLogEntry {
   scheme?: string
   /** doc 的实际目标路径 */
   path?: string
+  /** #160 doc/anchor 的锚点目标（容错解码后原文） */
+  fragment?: string
+  /** #160 doc/anchor 的定位方式：custom-panel=本扩展面板挂载定位；
+   *  none=无定位（无锚点、
+   *  `#^` 块引用定位器缺席降级或目标标题缺失） */
+  locate?: 'custom-panel' | 'none'
 }
 
 /** 双链跳转执行日志（#11；与 LinkLogEntry 共用 linkLog 通道） */
@@ -147,11 +161,12 @@ export interface WikilinkLogEntry {
   path?: string
   /** 请求的标题目标（trim 后） */
   heading?: string
+  /** 请求的块引用目标（#159；与 heading 互斥） */
+  blockId?: string
   /** ambiguous 的候选绝对路径 */
   candidates?: string[]
-  /** wikilink-doc 的定位方式：custom-panel=本扩展面板挂载定位；
-   *  text-editor=文本编辑器 selection reveal；none=无标题定位 */
-  locate?: 'custom-panel' | 'text-editor' | 'none'
+  /** wikilink-doc 的定位方式：custom-panel=本扩展面板挂载定位；none=无标题定位 */
+  locate?: 'custom-panel' | 'none'
 }
 
 interface SessionEntry {
@@ -552,16 +567,26 @@ export function createTextEditorProvider(
 
   // ---- #11 双链跳转执行（ADR-0002：按需 findFiles 解析，不建持久索引） ----
 
-  /** 目标已是本扩展面板时等待其就绪（隐藏面板重载场景），返回可投递面板 */
+  /** URI 的大小写差异不应让已打开的 Windows 文件面板漏命中。 */
+  const findEntry = (uri: vscode.Uri): SessionEntry | undefined => {
+    const exact = sessions.get(uri.toString())
+    if (exact || process.platform !== 'win32' || uri.scheme !== 'file') return exact
+    const fsPath = uri.fsPath.toLowerCase()
+    return [...sessions.values()].find((entry) =>
+      entry.doc.uri.scheme === 'file' && entry.doc.uri.fsPath.toLowerCase() === fsPath)
+  }
+
+  /** openWith 可能先返回、随后才注册新面板；按 URI 等待实际可投递面板。 */
   const waitForReadyPanel = async (
-    entry: SessionEntry,
+    uri: vscode.Uri,
     timeoutMs = 5000,
-  ): Promise<string | undefined> => {
+  ): Promise<{ entry: SessionEntry; sessionId: string } | undefined> => {
     const deadline = Date.now() + timeoutMs
     for (;;) {
-      const panel = entry.session.getInfo().panels.find((p) => p.ready)
+      const entry = findEntry(uri)
+      const panel = entry?.session.getInfo().panels.find((p) => p.ready)
       if (panel) {
-        return panel.sessionId
+        return { entry: entry!, sessionId: panel.sessionId }
       }
       if (Date.now() > deadline) {
         return undefined
@@ -591,12 +616,11 @@ export function createTextEditorProvider(
   }
 
   /**
-   * 双链跳转执行（#11）：解析（按需 findFiles + 纯分类器）→ 重名 QuickPick
-   * 选择 → 打开目标并定位标题。定位双路径：
-   * - 目标已是本扩展面板：reveal 该面板（vscode.openWith 对已开面板是重显）
-   *   后发 view.locate——reading 模式经 #14 的块挂载定位（屏外目标可定位），
-   *   live 模式光标+滚动
-   * - 其余：文本编辑器打开；有标题时以标题行 selection reveal（1.86 API 面）
+   * 双链跳转执行（#11；#159 块引用定位与本文件锚点）：解析（按需 findFiles +
+   * 纯分类器）→ 重名 QuickPick 选择 → 打开目标并定位锚点（标题或块 id，互斥）。
+   * 空 path（[[#标题]] / [[#^块id]]）：目标即当前文档，不查文件、无 ambiguous。
+   * 目标一律由 Vsidian 面板打开（vscode.openWith 对已开面板是重显），
+   * 面板就绪后发 view.locate；reading 模式经 #14 的块挂载定位。
    * 全程只读：不触碰 TextDocument、不建索引、不自动创建文件。
    * 测试钩子模式（VSIDIAN_TEST_HOOKS）下歧义只记录不弹 QuickPick（与 #10 外链
    * 不真开浏览器同口径）。
@@ -620,54 +644,59 @@ export function createTextEditorProvider(
       )
       return
     }
-    const folder = vscode.workspace.getWorkspaceFolder(document.uri)
-    const ctx: WikilinkResolveContext = {
-      docDir: path.dirname(document.uri.fsPath),
-      rootDir: (folder ? folder.uri : vscode.Uri.joinPath(document.uri, '..')).fsPath,
-      isWindowsHost: process.platform === 'win32',
-      hasWorkspace: folder !== undefined,
-    }
-    const mdFiles = ctx.hasWorkspace ? await findWorkspaceMdFiles(folder!.uri) : []
-    const resolution = resolveWikilinkFile({ path: parsed.path }, ctx, mdFiles)
-    if (resolution.kind === 'no-workspace') {
-      pushLog({ kind: 'wikilink-no-workspace', target: parsed.path })
-      void vscode.window.showWarningMessage(t('host.wikilinkNoWorkspace'))
-      return
-    }
-    if (resolution.kind === 'not-found') {
-      pushLog({ kind: 'wikilink-not-found', target: parsed.path, heading: parsed.heading ?? undefined })
-      void vscode.window.showWarningMessage(
-        t('host.wikilinkNotFound', { target: parsed.path }),
-      )
-      return
-    }
+    // #159 本文件锚点（[[#标题]] / [[#^块id]]）：path 为空串，目标即当前文档
+    // ——不查工作区文件、无 ambiguous/QuickPick（与无工作区提示无关）
     let targetPath: string
-    if (resolution.kind === 'ambiguous') {
-      const candidates = [...resolution.fsPaths]
-      pushLog({ kind: 'wikilink-ambiguous', target: parsed.path, candidates })
-      if (process.env.VSIDIAN_TEST_HOOKS === '1') {
-        return // 集成测试环境无法驱动 QuickPick：只记录候选（手感留 #15 人工验证）
+    if (parsed.path === '') {
+      targetPath = document.uri.fsPath
+    } else {
+      const folder = vscode.workspace.getWorkspaceFolder(document.uri)
+      const ctx: WikilinkResolveContext = {
+        docDir: path.dirname(document.uri.fsPath),
+        rootDir: (folder ? folder.uri : vscode.Uri.joinPath(document.uri, '..')).fsPath,
+        isWindowsHost: process.platform === 'win32',
+        hasWorkspace: folder !== undefined,
       }
-      const items = candidates.map((p) => ({
-        label: vscode.workspace.asRelativePath(vscode.Uri.file(p), false),
-        description: p,
-        fsPath: p,
-      }))
-      const pick = await vscode.window.showQuickPick(items, {
-        placeHolder: t('host.wikilinkAmbiguousPick', { target: parsed.path }),
-      })
-      if (!pick) {
-        pushLog({ kind: 'wikilink-cancelled', target: parsed.path, candidates })
+      const mdFiles = ctx.hasWorkspace ? await findWorkspaceMdFiles(folder!.uri) : []
+      const resolution = resolveWikilinkFile({ path: parsed.path }, ctx, mdFiles)
+      if (resolution.kind === 'no-workspace') {
+        pushLog({ kind: 'wikilink-no-workspace', target: parsed.path })
+        void vscode.window.showWarningMessage(t('host.wikilinkNoWorkspace'))
         return
       }
-      targetPath = pick.fsPath
-    } else {
-      targetPath = resolution.fsPath
+      if (resolution.kind === 'not-found') {
+        pushLog({ kind: 'wikilink-not-found', target: parsed.path, heading: parsed.heading ?? undefined })
+        void vscode.window.showWarningMessage(
+          t('host.wikilinkNotFound', { target: parsed.path }),
+        )
+        return
+      }
+      if (resolution.kind === 'ambiguous') {
+        const candidates = [...resolution.fsPaths]
+        pushLog({ kind: 'wikilink-ambiguous', target: parsed.path, candidates })
+        if (process.env.VSIDIAN_TEST_HOOKS === '1') {
+          return // 集成测试环境无法驱动 QuickPick：只记录候选（手感留 #15 人工验证）
+        }
+        const items = candidates.map((p) => ({
+          label: vscode.workspace.asRelativePath(vscode.Uri.file(p), false),
+          description: p,
+          fsPath: p,
+        }))
+        const pick = await vscode.window.showQuickPick(items, {
+          placeHolder: t('host.wikilinkAmbiguousPick', { target: parsed.path }),
+        })
+        if (!pick) {
+          pushLog({ kind: 'wikilink-cancelled', target: parsed.path, candidates })
+          return
+        }
+        targetPath = pick.fsPath
+      } else {
+        targetPath = resolution.fsPath
+      }
     }
 
     const targetUri = vscode.Uri.file(targetPath)
-    // 块引用（blockId）回显拼 `#^块ID`；其 heading 恒为 null，下方标题定位
-    // 分支整体跳过——打开目标文件即止，不定位、不弹「未找到标题」（块级定位属二期）
+    // 回显拼锚点原文（path 空时即 [[#标题]] / [[#^块ID]]）
     const display = `[[${parsed.path}${
       parsed.heading !== null
         ? `#${parsed.heading}`
@@ -675,54 +704,52 @@ export function createTextEditorProvider(
           ? `#^${parsed.blockId}`
           : ''
     }]]`
-    // 标题定位：先读目标内容算 offset（openTextDocument 只装载不显示）。
-    // offset 是宿主系（getText 保留 \r\n）——text-editor 分支用 positionAt
-    // 在宿主系内闭合不受影响；面板分支发 view.locate 前须转 LF 系（见下）
-    let headingOffset: { offset: number; end: number } | null = null
-    let headingMissing = false
-    let headingDoc: vscode.TextDocument | undefined
-    if (parsed.heading !== null) {
-      headingDoc = await vscode.workspace.openTextDocument(targetUri)
-      headingOffset = findHeadingOffset(headingDoc.getText(), parsed.heading)
-      headingMissing = headingOffset === null
+    // 锚点定位（#159：标题→findHeadingOffset、块 id→findBlockOffset，互斥）：
+    // 先读目标内容算 offset（openTextDocument 只装载不显示）。offset 是宿主系
+    // （getText 保留 \r\n），发 view.locate 前须转 LF 系（见下）
+    let anchorOffset: { offset: number; end: number } | null = null
+    let anchorMissing = false
+    let anchorDoc: vscode.TextDocument | undefined
+    if (parsed.heading !== null || parsed.blockId !== null) {
+      anchorDoc = await vscode.workspace.openTextDocument(targetUri)
+      const text = anchorDoc.getText()
+      anchorOffset =
+        parsed.heading !== null
+          ? findHeadingOffset(text, parsed.heading)
+          : findBlockOffset(text, parsed.blockId!)
+      anchorMissing = anchorOffset === null
     }
 
-    const targetEntry = sessions.get(targetUri.toString())
-    // 日志先于打开动作（与 #10 executeLinkIntent 同口径）：文本编辑器打开会
-    // 替换源面板（会话退场），事后无从观测
+    // 日志先于打开动作，保留源面板会话中的跳转记录。
     pushLog({
       kind: 'wikilink-doc',
       target: parsed.path,
       path: targetPath,
       heading: parsed.heading ?? undefined,
-      locate: headingOffset ? (targetEntry ? 'custom-panel' : 'text-editor') : 'none',
+      blockId: parsed.blockId ?? undefined,
+      locate: anchorOffset ? 'custom-panel' : 'none',
     })
-    if (targetEntry) {
-      // 目标已是本扩展面板：reveal 面板后 view.locate（reading 挂载定位路径）。
-      // CRLF 目标：findHeadingOffset 是宿主系坐标（getText 保留 \r\n），而
-      // webview 全程 LF 坐标——发送前经 newline 协调器转换，否则按 \r\n 行数漂移
-      await vscode.commands.executeCommand('vscode.openWith', targetUri, VIEW_TYPE)
-      const sessionId = await waitForReadyPanel(targetEntry)
-      if (headingOffset && headingDoc && sessionId) {
-        const lfOffset = new NewlineCoordinator(headingDoc.getText()).hostOffsetToLf(headingOffset.offset)
-        targetEntry.session.postToPanel(sessionId, { kind: 'view.locate', offset: lfOffset })
-      }
-    } else {
-      const targetDoc = await vscode.workspace.openTextDocument(targetUri)
-      if (headingOffset) {
-        const selection = new vscode.Range(
-          targetDoc.positionAt(headingOffset.offset),
-          targetDoc.positionAt(headingOffset.end),
-        )
-        await vscode.window.showTextDocument(targetDoc, { selection })
-      } else {
-        await vscode.window.showTextDocument(targetDoc)
+    // CRLF 目标先转 LF 坐标。面板重载期间丢失的首投由 DocumentSession
+    // 在重握手后补发，送达确认后不再重播历史定位。
+    await vscode.commands.executeCommand('vscode.openWith', targetUri, VIEW_TYPE)
+    if (anchorOffset && anchorDoc) {
+      const ready = await waitForReadyPanel(targetUri)
+      if (ready) {
+        const lfOffset = new NewlineCoordinator(anchorDoc.getText()).hostOffsetToLf(anchorOffset.offset)
+        ready.entry.session.postToPanel(ready.sessionId, { kind: 'view.locate', offset: lfOffset })
       }
     }
-    if (headingMissing) {
-      void vscode.window.showWarningMessage(
-        t('host.wikilinkHeadingMissing', { link: display, heading: parsed.heading ?? '' }),
-      )
+    if (anchorMissing) {
+      // 缺失反馈与打开同款「打开后提示」语义（规格 2026-09-28 决策 4）
+      if (parsed.heading !== null) {
+        void vscode.window.showWarningMessage(
+          t('host.wikilinkHeadingMissing', { link: display, heading: parsed.heading }),
+        )
+      } else {
+        void vscode.window.showWarningMessage(
+          t('host.wikilinkBlockMissing', { link: display, blockId: parsed.blockId ?? '' }),
+        )
+      }
     }
   }
 
@@ -793,7 +820,11 @@ export function createTextEditorProvider(
       // ---- #10 链接跳转与图片资源执行（面板端口注入；URI 解析在宿主侧） ----
       const linkCtx = linkContextOf(document)
       const openLink = (intent: { href: string; srcStart: number; srcEnd: number }): void => {
-        void executeLinkIntent(document, linkCtx, intent, entry.linkLog)
+        // #160 锚点落位的面板双路依赖（会话表 + 就绪等待）经端口注入：
+        // executeLinkIntent 保持模块级（与 vscode 层纯函数分工一致）
+        void executeLinkIntent(document, linkCtx, intent, entry.linkLog, {
+          waitForReadyPanel,
+        })
       }
       // #11 双链跳转执行端口（按需 findFiles 解析 + 打开/定位/反馈）
       const openWikilink = (intent: { target: string; srcStart: number; srcEnd: number }): void => {
@@ -829,6 +860,13 @@ export function createTextEditorProvider(
             `[[${outlineNoteNameOf(docUri)}#${outlineLinkHeading(heading)}]]`,
           )
         },
+        // #162 块链接变体：拼 `[[笔记名#^块id]]`（笔记名与标题链接同源；
+        // 块 id 字符集 [A-Za-z0-9-] 不含 ] | # ^，无转义议题）
+        writeBlockLinkClipboard: (docUri: string, blockId: string) => {
+          void vscode.env.clipboard.writeText(
+            `[[${outlineNoteNameOf(docUri)}#^${blockId}]]`,
+          )
+        },
         // #111 图表导出端口：弹窗工具条 → 载荷校验 + showSaveDialog +
         // writeFile，结果经 diagram.export.result 回来源面板。测试钩子
         // 模式（VSIDIAN_TEST_HOOKS）短路真实对话框：记录消息形态供集成
@@ -843,6 +881,27 @@ export function createTextEditorProvider(
             return
           }
           void runDiagramExport(payload, document.uri.toString(), report)
+        },
+        // #161 图片粘贴落盘端口：读设置快照 → 目录解析（URI path 空间）→
+        // 建目录/写盘 → 回发插入文本。测试钩子模式记录载荷形态但不短路
+        // 落盘（无对话框依赖，真实写盘可断言）
+        pasteImage: (payload, report: (result: ImagePasteOutcome) => void) => {
+          if (process.env.VSIDIAN_TEST_HOOKS === '1') {
+            const key = document.uri.toString()
+            const log = imagePasteTestLog.get(key) ?? []
+            log.push(payload)
+            imagePasteTestLog.set(key, log)
+          }
+          void runImagePaste(
+            payload,
+            {
+              settings: settings?.service.getSnapshot() ?? {},
+              docUri: document.uri,
+              workspaceRootPath:
+                vscode.workspace.getWorkspaceFolder(document.uri)?.uri.path ?? null,
+            },
+            report,
+          )
         },
       })
       entry.panels.set(sessionId, webviewPanel)
@@ -1401,6 +1460,26 @@ export function createTextEditorProvider(
       return false
     }))
   }
+
+  // ---- #162 复制块链接命令：快捷键（keybindings.execute 转发）与命令面板
+  // 共用 id；与正文右键菜单是同一命令的两个入口。命令在面板 Live 光标所在
+  // 块执行（标题行=复制标题链接；无块 id 先自动补写一笔可撤销编辑——写回
+  // 链路在 webview，本命令只投递 blockLink.copy）。阅读只读静默不接管
+  // （与格式命令同口径），无活动面板返回 false ----
+  context.subscriptions.push(
+    vscode.commands.registerCommand('onegayi.vsidian.block.copyLink', async (): Promise<boolean> => {
+      for (const entry of sessions.values()) {
+        for (const [sessionId, panel] of entry.panels) {
+          if (!panel.active || !entry.session.getInfo().panels.some((p) =>
+            p.sessionId === sessionId && p.ready)) continue
+          if (entry.session.getViewState(sessionId)?.viewMode === 'reading') return false
+          entry.session.postToPanel(sessionId, { kind: 'blockLink.copy' })
+          return true
+        }
+      }
+      return false
+    }),
+  )
   for (const operation of UI_OPERATIONS) {
     context.subscriptions.push(vscode.commands.registerCommand(operation.command, (): boolean => {
       for (const entry of sessions.values()) for (const [sessionId, panel] of entry.panels) {
@@ -1610,6 +1689,16 @@ export function createTextEditorProvider(
       },
     ),
     vscode.commands.registerCommand(
+      // #161 图片粘贴消息日志（取走即清空）：落盘真实执行，此日志供集成
+      // 测试断言 webview→宿主链路的载荷形态（mime/base64/hint/reqId）
+      'onegayi.vsidian._test.takeImagePasteLog',
+      (uriStr: string) => {
+        const log = imagePasteTestLog.get(uriStr) ?? []
+        imagePasteTestLog.set(uriStr, [])
+        return [...log]
+      },
+    ),
+    vscode.commands.registerCommand(
       // #38 全局模式记忆读取（非法值容错同正式链路）：集成测试断言
       // 切换后记忆写入 / 弹回不写记忆等契约
       'onegayi.vsidian._test.getLastMode',
@@ -1720,15 +1809,41 @@ function blockedLinkMessage(
 }
 
 /**
- * 链接跳转意图执行（#10）：分类 → external 经 env.openExternal 外开；
- * doc 按候选探测存在性（精确优先、无扩展名补 .md）后以文本编辑器打开；
- * blocked/not-found 给用户可见反馈。全程只读：不触碰 TextDocument。
+ * #160 锚点落位的面板依赖：executeLinkIntent 是模块级函数，会话表与
+ * 面板就绪等待在 provider 闭包内——经此端口注入（与 executeWikilinkIntent
+ * 的闭包内直取同一份状态，不复制）
+ */
+interface LinkAnchorPort {
+  /** 目标面板就绪等待（新建或隐藏重载），返回可投递面板 */
+  waitForReadyPanel: (uri: vscode.Uri) => Promise<{ entry: SessionEntry; sessionId: string } | undefined>
+}
+
+/**
+ * #160 fragment → 文档内定位区间（宿主系坐标，getText 保留 \r\n）：
+ * 标题 fragment 复用 #11 的 findHeadingOffset（与双链锚点同源比较口径）；
+ * `#^块id` 走 #159 的 findBlockOffset（同源块定位器，批次合并后接通）。
+ * 调用方以 isBlockIdFragment 区分「块引用」与「标题引用」——两者的
+ * 缺失提示词条不同（块缺失复用双链的块 id 提示，语义一致）。
+ */
+function isBlockIdFragment(fragment: string): boolean {
+  return fragment.startsWith('^')
+}
+
+/**
+ * 链接跳转意图执行（#10；#160 补锚点定位）：分类 → external 经
+ * env.openExternal 外开（URL 含 `#` 原样外开——网页锚点语义不接管）；
+ * anchor（`#frag`）页内定位当前文档；doc 按候选探测存在性（精确优先、
+ * 无扩展名补 .md）后打开并按 fragment 定位；blocked/not-found 给用户
+ * 可见反馈。目标一律用本扩展面板打开，随后 view.locate（LF 偏移经
+ * NewlineCoordinator 转换）。全程只读：不触碰 TextDocument
+ * 写路径、不建索引、不自动创建文件。
  */
 async function executeLinkIntent(
   document: vscode.TextDocument,
   ctx: LinkContext,
   intent: { href: string; srcStart: number; srcEnd: number },
   log: Array<LinkLogEntry | WikilinkLogEntry>,
+  anchors: LinkAnchorPort,
 ): Promise<void> {
   const pushLog = (entry: LinkLogEntry): void => {
     log.push(entry)
@@ -1736,6 +1851,12 @@ async function executeLinkIntent(
       log.shift()
     }
   }
+  // fragment 定位失败的用户提示（anchor 与 doc 两分支共用）：块引用缺失
+  // 复用双链的块 id 词条、标题缺失用链接锚点词条——两分支语义一致不分写
+  const fragmentMissingMessage = (fragment: string): string =>
+    isBlockIdFragment(fragment)
+      ? t('host.wikilinkBlockMissing', { link: intent.href, blockId: fragment.slice(1) })
+      : t('host.linkAnchorMissing', { href: intent.href, heading: fragment })
   const target = classifyLinkTarget(intent.href, ctx)
   if (target.kind === 'external') {
     pushLog({ kind: 'external', href: intent.href })
@@ -1755,6 +1876,26 @@ async function executeLinkIntent(
     void vscode.window.showWarningMessage(blockedLinkMessage(target))
     return
   }
+  if (target.kind === 'anchor') {
+    // #160 页内锚点：目标即当前文档（意图源面板），不查文件系统。
+    // #^ 前缀为块引用（#159 同源定位器）：块首行落位，标题行落位标题
+    const isBlock = isBlockIdFragment(target.fragment)
+    const text = document.getText()
+    const offset = isBlock
+      ? findBlockOffset(text, target.fragment.slice(1))
+      : findHeadingOffset(text, target.fragment)
+    pushLog({
+      kind: 'anchor',
+      href: intent.href,
+      fragment: target.fragment,
+      locate: offset ? 'custom-panel' : 'none',
+    })
+    await revealLinkAnchor(anchors, document.uri, document, offset)
+    if (offset === null) {
+      void vscode.window.showWarningMessage(fragmentMissingMessage(target.fragment))
+    }
+    return
+  }
   for (const fsPath of target.candidates) {
     const uri = vscode.Uri.file(fsPath)
     try {
@@ -1762,16 +1903,53 @@ async function executeLinkIntent(
     } catch {
       continue
     }
-    pushLog({ kind: 'doc', href: intent.href, path: fsPath })
-    const doc = await vscode.workspace.openTextDocument(uri)
-    await vscode.window.showTextDocument(doc)
+    // openTextDocument 只装载不显示；fragment 定位区间与日志先于打开动作
+    const targetDoc = await vscode.workspace.openTextDocument(uri)
+    const isBlock = target.fragment !== null && isBlockIdFragment(target.fragment)
+    const targetText = targetDoc.getText()
+    const offset =
+      target.fragment === null ? null
+        : isBlock
+          ? findBlockOffset(targetText, target.fragment.slice(1))
+          : findHeadingOffset(targetText, target.fragment)
+    pushLog({
+      kind: 'doc',
+      href: intent.href,
+      path: fsPath,
+      fragment: target.fragment ?? undefined,
+      locate: offset ? 'custom-panel' : 'none',
+    })
+    await revealLinkAnchor(anchors, uri, targetDoc, offset)
+    if (target.fragment !== null && offset === null) {
+      void vscode.window.showWarningMessage(fragmentMissingMessage(target.fragment))
+    }
     return
   }
   pushLog({ kind: 'not-found', href: intent.href })
   void vscode.window.showWarningMessage(
     t('host.linkNotFound', { href: intent.href }),
   )
-  void document // 意图源自本文档；名称留给后续 #11 锚点定位使用
+}
+
+/**
+ * #160 锚点落位（与 executeWikilinkIntent 同款）：openWith 打开或重显
+ * Vsidian 面板后 view.locate。offset 为宿主系坐标；发送前经
+ * NewlineCoordinator 转 LF 系（webview 全程 LF 坐标，CRLF 按行数漂移）。
+ */
+async function revealLinkAnchor(
+  anchors: LinkAnchorPort,
+  uri: vscode.Uri,
+  doc: vscode.TextDocument,
+  offset: { offset: number; end: number } | null,
+): Promise<void> {
+  await vscode.commands.executeCommand('vscode.openWith', uri, VIEW_TYPE)
+  if (offset) {
+    const ready = await anchors.waitForReadyPanel(uri)
+    if (ready) {
+      const lfOffset = new NewlineCoordinator(doc.getText()).hostOffsetToLf(offset.offset)
+      ready.entry.session.postToPanel(ready.sessionId, { kind: 'view.locate', offset: lfOffset })
+    }
+  }
 }
 
 /**

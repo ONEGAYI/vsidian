@@ -5,9 +5,17 @@
 // 键化（def.titleKey/descriptionKey → t() 取词），搜索按取词后的显示
 // 文本匹配。
 import { t, onLocaleChanged } from '../shared/i18n'
+import type { MessageKey } from '../shared/locales/en'
 import { bindLocale } from './localeDom'
 import { isHostToWebview } from '../shared/protocol'
-import { isSettingEnabled, type SettingDefinition, type SettingsPayload, type SettingsPayloadValue } from '../shared/settings'
+import {
+  isSettingEnabled,
+  type SettingDefinition,
+  type SettingsPayload,
+  type SettingsPayloadValue,
+  type StringEnumSettingDefinition,
+  type StringTextSettingDefinition,
+} from '../shared/settings'
 
 export interface SettingsPageBridge { postMessage(message: unknown): void }
 
@@ -30,6 +38,8 @@ export const SETTINGS_PAGE_CLASS_NAMES = {
   item: 'vsidian-settings-item', itemTitle: 'vsidian-settings-item-title',
   itemDescription: 'vsidian-settings-item-description', checkbox: 'vsidian-settings-checkbox',
   select: 'vsidian-settings-select',
+  /** #161 自由文本设置项的 text input（类名随控件分支稳定） */
+  textInput: 'vsidian-settings-text',
   range: 'vsidian-settings-range', rangeWrap: 'vsidian-settings-range-wrap',
   rangeValue: 'vsidian-settings-range-value',
   empty: 'vsidian-settings-empty',
@@ -47,7 +57,9 @@ function icon(kind: 'editor' | 'keyboard' | 'search' | 'general' | 'palette' | '
   svg.setAttribute('aria-hidden', 'true')
   const path = document.createElementNS(svg.namespaceURI, 'path')
   // general（#96「常规」分组）：地球——语言设置的通用意象（lucide globe 形）；
-  // palette（#128 CSS 片段分页）：画笔（lucide paintbrush 形，取样式定制的意象）
+  // palette（#128 CSS 片段分页）：画笔（lucide paintbrush 形，取样式定制的意象）。
+  // #163 一轮曾为符号/代码块/图片三组新增 keyboard 复用与 code/image 形，
+  // 二轮还原为页内小节后侧栏不再使用，已随分支退役
   path.setAttribute('d', kind === 'search' ? 'M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0' : kind === 'keyboard' ? 'M3 5h18v14H3zM6 9h1m3 0h1m3 0h1m3 0h1M6 12h1m3 0h1m3 0h1m3 0h1M7 16h10' : kind === 'general' ? 'M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10' : kind === 'palette' ? 'M14.6 3.4l6 6L11 19H5v-6L14.6 3.4zM3 21h18' : kind === 'book' ? 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z' : 'M14 4l6 6M3 21l5-1L21 7a2 2 0 0 0-4-4L4 16z')
   svg.append(path)
   return svg
@@ -164,6 +176,10 @@ export class SettingsPageView {
           const numeric = typeof raw === 'number' ? raw : def.default
           box.value = String(numeric)
           this.syncRangeDisplay(def, box, Number(box.value))
+        } else if (box.type === 'text') {
+          // #161 控件分型回显：checkbox 用 checked；自由文本 text input 用
+          // value（同一 data-setting-key 选择器命中两类控件）
+          box.value = String(this.value(def))
         } else {
           box.checked = this.value(def) === true
         }
@@ -187,22 +203,55 @@ export class SettingsPageView {
     if (def.type === 'number') {
       return typeof raw === 'number' && Number.isFinite(raw) && raw >= def.min && raw <= def.max ? raw : def.default
     }
-    return typeof raw === 'string' && def.enum.includes(raw) ? raw : def.default
+    // #161 string 分型：枚举按值域；自由文本按 maxLength（与
+    // valueMatchesType 同口径，超长/类型不符回默认）
+    if ('enum' in def) {
+      return typeof raw === 'string' && def.enum.includes(raw) ? raw : def.default
+    }
+    return typeof raw === 'string' && raw.length <= def.maxLength ? raw : def.default
   }
-  /** #96 分组规则：键前缀 general.* 的定义归属 general 分组（标题经 t()
-   * 取词），其余归编辑器分组 */
+  /** 分组规则（#96 general 前缀；#163 验收反馈二轮还原）：侧栏只分
+   *  general.* 常规与其余 editor.* 编辑器两组；分类职责由编辑器页内的
+   *  组内小节承担（显示/符号输入/代码块/图片，editorSectionDefs）。
+   *  键名即持久化标识，分组纯展示归属（重组零迁移：已存设置值不受影响） */
   private generalDefs(): readonly SettingDefinition[] {
     return this.defs.filter((d) => d.key.startsWith('general.'))
+  }
+  private symbolDefs(): readonly SettingDefinition[] {
+    return this.defs.filter((d) => d.key.startsWith('editor.symbol'))
+  }
+  private codeblockDefs(): readonly SettingDefinition[] {
+    return this.defs.filter((d) => d.key.startsWith('codeblock.'))
+  }
+  private imageDefs(): readonly SettingDefinition[] {
+    return this.defs.filter((d) => d.key.startsWith('image.'))
+  }
+  /** 编辑器页「显示」小节：非 general 且不属其他小节的 editor.* 定义 */
+  private displayDefs(): readonly SettingDefinition[] {
+    return this.editorDefs().filter(
+      (d) => !d.key.startsWith('editor.symbol') && !d.key.startsWith('codeblock.') && !d.key.startsWith('image.'))
   }
   private editorDefs(): readonly SettingDefinition[] {
     return this.defs.filter((d) => !d.key.startsWith('general.'))
   }
+  /** 编辑器页内小节（顺序即渲染顺序）；空小节由调用方跳过不渲染 */
+  private editorSectionDefs(): Array<{ titleKey: MessageKey; defs: () => readonly SettingDefinition[] }> {
+    return [
+      { titleKey: 'settings.groupDisplay', defs: () => this.displayDefs() },
+      { titleKey: 'settings.groupSymbols', defs: () => this.symbolDefs() },
+      { titleKey: 'settings.groupCodeblock', defs: () => this.codeblockDefs() },
+      { titleKey: 'settings.groupImage', defs: () => this.imageDefs() },
+    ]
+  }
   private categories() {
     const builtIn: Array<{ id: string; title: string; icon: 'general' | 'editor' }> = []
+    // 空组不注册（fixture 可能只含部分前缀——空组不得占据默认激活位）
     if (this.generalDefs().length > 0) {
       builtIn.push({ id: 'general', title: t('settings.generalSection'), icon: 'general' })
     }
-    builtIn.push({ id: 'editor', title: t('settings.editorCategory'), icon: 'editor' })
+    if (this.editorDefs().length > 0) {
+      builtIn.push({ id: 'editor', title: t('settings.editorCategory'), icon: 'editor' })
+    }
     return [...builtIn, ...this.sections]
   }
   private render(focusEntry?: string): void {
@@ -240,7 +289,8 @@ export class SettingsPageView {
       list.append(element('h2', 'vsidian-settings-heading', t('settings.searchResults')))
       // 搜索按用户看到的显示文本匹配：设置项定义经 t() 取词后参与过滤
       // （titleKey/descriptionKey → 当前语言文本，#95 键化迁移），分组与
-      // 侧栏一致（#96 general/editor 两组）
+      // 侧栏一致（#96 general/editor 两组；#163 二轮还原后内建分类只在
+      // 编辑器页内小节，不参与搜索分组列）
       const toEntries = (defs: readonly SettingDefinition[]) =>
         defs.map((d) => ({
           id: d.key,
@@ -286,7 +336,8 @@ export class SettingsPageView {
       this.disposeSection = section.mount(content, focusEntry) ?? undefined
       return
     }
-    // 内建分组：general（#96）与 editor，标题、副文案与组内标题均经 t() 取词。
+    // 编辑器分组（#163 二轮还原）：页内按组内标题分小节（显示/符号输入/
+    // 代码块/图片），各小节一个容器，空小节不渲染；general 组无小节。
     // #155 容器语言：组内条目包进分组容器（圆角 + 色差底），随分页统一
     if (active.id === 'general') {
       list.append(element('h2', 'vsidian-settings-heading', t('settings.generalSection')),
@@ -300,15 +351,19 @@ export class SettingsPageView {
     }
     list.append(element('h2', 'vsidian-settings-heading', t('settings.editorCategory')),
       element('p', SETTINGS_PAGE_CLASS_NAMES.subtitle, t('settings.editorSubtitle')))
-    const defs = this.editorDefs()
-    if (!defs.length) {
-      list.append(element('p', SETTINGS_PAGE_CLASS_NAMES.empty, t('settings.empty')))
-      return
+    let rendered = false
+    for (const section of this.editorSectionDefs()) {
+      const defs = section.defs()
+      if (!defs.length) continue
+      const container = element('div', 'vsidian-settings-group')
+      container.append(element('h3', 'vsidian-settings-group-title', t(section.titleKey)))
+      list.append(container)
+      this.renderDefItems(container, defs, focusEntry)
+      rendered = true
     }
-    const group = element('div', 'vsidian-settings-group')
-    group.append(element('h3', 'vsidian-settings-group-title', t('settings.groupDisplay')))
-    list.append(group)
-    this.renderDefItems(group, defs, focusEntry)
+    if (!rendered) {
+      list.append(element('p', SETTINGS_PAGE_CLASS_NAMES.empty, t('settings.empty')))
+    }
   }
 
   /** 设置项行渲染（editor / general 两组共用：标题、说明与控件装配）。
@@ -321,12 +376,13 @@ export class SettingsPageView {
       const text = element('span', 'vsidian-settings-item-copy')
       text.append(element('span', SETTINGS_PAGE_CLASS_NAMES.itemTitle, t(def.titleKey)))
       // #93 控件分流：boolean → 复选开关；string 枚举 → 下拉（enum 顺序即
-      // 选项顺序，显示名见 optionLabel 的三级回退）；#175 number → 滑块
-      // （range + 值文本，0 档显示词经 zeroLabelKey 取词，注册表驱动）
+      // 选项顺序，显示名见 optionLabel 的三级回退）；#161 string 自由文本
+      // → text input（enum 有无分型，maxLength 上限随定义）；#175 number →
+      // 滑块（range + 值文本，0 档显示词经 zeroLabelKey 取词，注册表驱动）
       let control: HTMLInputElement | HTMLSelectElement
       let rangeReadout: HTMLElement | undefined
       if (def.type === 'string') {
-        control = this.buildSelect(def)
+        control = 'enum' in def ? this.buildSelect(def) : this.buildTextInput(def)
       } else if (def.type === 'number') {
         const range = this.buildRange(def)
         control = range.input
@@ -417,6 +473,25 @@ export class SettingsPageView {
   }
 
   /**
+   * #161 自由文本控件：text input，值经宿主按定义校验（超长整批拒绝后
+   * 以权威快照回显恢复）；change（失焦/回车）时上送，与 checkbox/select
+   * 同一保存链路
+   */
+  private buildTextInput(def: StringTextSettingDefinitionLike): HTMLInputElement {
+    const input = element('input', SETTINGS_PAGE_CLASS_NAMES.textInput)
+    input.type = 'text'
+    input.value = String(this.value(def))
+    input.maxLength = def.maxLength
+    input.addEventListener('change', () => {
+      if (!this.pending) this.saveFailed = false
+      this.pending++
+      if (this.status) this.status.textContent = t('settings.saving')
+      this.bridge.postMessage({ kind: 'settings.set', values: { [def.key]: input.value } })
+    })
+    return input
+  }
+
+  /**
    * #175 number 设置项的滑块控件：range + 值文本（0 档显示词经
    * zeroLabelKey 取词、非 0 值带单位后缀，均来自定义注册表）。拖动中
    * （input）即时刷新值文本与 aria-valuetext；释放（change）才上送
@@ -462,7 +537,9 @@ export class SettingsPageView {
   }
 }
 
-/** 渲染层对三类定义的结构收窄（避免在分流点反复判 type） */
+/** 渲染层对定义的结构收窄（避免在分流点反复判 type）；string 双形态直接
+ *  引用 shared 接口（#161：枚举 / 自由文本按 enum 有无分型） */
 type BooleanSettingDefinitionLike = Extract<SettingDefinition, { type: 'boolean' }>
-type StringEnumSettingDefinitionLike = Extract<SettingDefinition, { type: 'string' }>
+type StringEnumSettingDefinitionLike = StringEnumSettingDefinition
+type StringTextSettingDefinitionLike = StringTextSettingDefinition
 type NumberSettingDefinitionLike = Extract<SettingDefinition, { type: 'number' }>

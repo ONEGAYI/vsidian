@@ -368,6 +368,71 @@ describe('阅读视图：双链渲染为 a.vsidian-wikilink 与单击上报', ()
   })
 })
 
+describe('本文件锚点形态：[[#标题]] 与 [[#^块id]] 装饰与点击（#159）', () => {
+  // 独立文档：不影响上方共享 WIKILINK_DOC 的计数断言。块 id 仅拉丁字母/
+  // 数字/连字符（Obsidian 约束），中文 id 是非法形态
+  const ANCHOR_DOC = [
+    '# 当前笔记',
+    '',
+    '页内跳转 [[#当前笔记]] 与 [[#^target-blk|显示别名]] 两种形态。',
+    '',
+    '降级形态：[[#]] 与 [[#^]] 与 [[#坏#形态]]。',
+    '',
+    '目标块正文。',
+    '目标块末行 ^target-blk',
+    '',
+  ].join('\n')
+
+  it('live 装饰：display 默认锚点原文、别名优先；降级形态不装饰', () => {
+    const h = makeBridge()
+    const c = mount(h, ANCHOR_DOC)
+    const state = c.getView()!.state
+    const ranges = buildWikilinkDecorationRanges(
+      state.doc,
+      state.field(liveDecorationsField).tree,
+      state.selection,
+      [{ from: 0, to: state.doc.length }],
+      state.field(liveDecorationsField).fm,
+    )
+    const widgets = ranges
+      .filter((r) => r.value.spec.widget instanceof LiveWikilinkWidget)
+      .map((r) => (r.value.spec.widget as LiveWikilinkWidget).displayText)
+    expect(widgets).toEqual(['#当前笔记', '显示别名'])
+    c.dispose()
+  })
+
+  it('阅读渲染：a.vsidian-wikilink 的 href 为 | 之前原文、text 为 display；降级按原文显示', () => {
+    const h = makeBridge()
+    const c = mount(h, ANCHOR_DOC)
+    c.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
+    const anchors = Array.from(
+      readingContainer().querySelectorAll<HTMLAnchorElement>(`a.${WIKILINK_CLASS_NAMES.wikilink}`),
+    )
+    expect(anchors.map((a) => a.getAttribute('href'))).toEqual(['#当前笔记', '#^target-blk'])
+    expect(anchors.map((a) => a.textContent)).toEqual(['#当前笔记', '显示别名'])
+    const text = readingContainer().textContent ?? ''
+    expect(text).toContain('[[#]]')
+    expect(text).toContain('[[#^]]')
+    expect(text).toContain('[[#坏#形态]]')
+    c.dispose()
+  })
+
+  it('阅读侧单击上报原始 target（含 # 前缀），零写回', () => {
+    const h = makeBridge()
+    const c = mount(h, ANCHOR_DOC)
+    c.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
+    const anchor = readingContainer().querySelector<HTMLAnchorElement>(
+      `a.${WIKILINK_CLASS_NAMES.wikilink}`,
+    )!
+    anchor.click()
+    const intents = sentOf(h, 'wikilink.activate') as WikilinkActivate[]
+    expect(intents).toHaveLength(1)
+    expect(intents[0]!.target).toBe('#当前笔记')
+    expect(sentOf(h, 'edit.request').length).toBe(0)
+    c.dispose()
+  })
+})
+
 describe('新增协议消息结构校验（#11）', () => {
   it('wikilink.activate：合法通过；缺字段/类型错误拒绝', () => {
     const base = {

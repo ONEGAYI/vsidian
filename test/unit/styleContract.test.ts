@@ -361,15 +361,15 @@ const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   // content 域（71）
   'view-container': 2,
   heading: 4,
-  'inline-format': 6,
+  'inline-format': 7,
   'list-task': 5,
   'line-syntax': 5,
   table: 11,
   'reading-structure': 12,
-  'link-image-wikilink': 6,
-  'content-variables': 10,
+  'link-image-wikilink': 7,
+  'content-variables': 11,
   'content-limits': 11,
-  // chrome 域（54）
+  // chrome 域（55）
   math: 5,
   diagram: 4,
   'graphic-interact': 2,
@@ -378,6 +378,7 @@ const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   'chrome-limits': 4,
   'toolbar-banner': 5,
   frontmatter: 5,
+  'context-menu': 1,
 }
 
 describe('styleContract 类目体系（#145）', () => {

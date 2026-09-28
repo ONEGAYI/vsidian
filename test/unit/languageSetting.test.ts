@@ -60,7 +60,8 @@ describe('生产注册表：general.language 定义（#96）', () => {
     expect(def, '生产注册表应含 general.language').toBeDefined()
     expect(def!.type).toBe('string')
     expect(def!.default).toBe('auto')
-    expect(def!.type === 'string' ? def!.enum : []).toEqual(['auto', 'zh-cn', 'en'])
+    // #161 string 双形态（枚举/自由文本）后按 enum 有无收窄取值域
+    expect(def && def.type === 'string' && 'enum' in def ? [...def.enum] : []).toEqual(['auto', 'zh-cn', 'en'])
     expect(isSettingDefinition(def)).toBe(true)
   })
 
@@ -151,16 +152,22 @@ describe('设置页「常规」分组渲染与选项显示名（视觉层断言�
       .toEqual(['常规', '编辑器'])
   })
 
-  it('分组隔离：切到「编辑器」组只显示编辑器定义（开关），语言项不在其中', () => {
+  it('分组隔离（#163 二轮还原口径）：编辑器页「图片」小节只含 image.* 定义，语言项不在其中', () => {
     installLocale('zh-cn', zhCn)
     const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
     const editorNav = [...parent.querySelectorAll<HTMLButtonElement>(NAV_ITEM)]
       .find((b) => b.textContent === '编辑器')!
     editorNav.click()
-    expect(parent.querySelector(`h2.vsidian-settings-heading`)?.textContent).toBe('编辑器')
-    const boxes = parent.querySelectorAll<HTMLInputElement>(`input.${SETTINGS_PAGE_CLASS_NAMES.checkbox}`)
-    expect(boxes.length).toBe(PRODUCTION_SETTING_DEFINITIONS.filter((d) => d.type === 'boolean').length)
-    expect(parent.querySelector(`select.${SETTINGS_PAGE_CLASS_NAMES.select}`)).toBeNull()
+    // #163 二轮还原：图片是编辑器页内的组内标题小节——语言项（general.）
+    // 仍在「常规」页，不得出现在编辑器页任何小节
+    const imageSection = [...parent.querySelectorAll('.vsidian-settings-group')]
+      .find((g) => g.querySelector('.vsidian-settings-group-title')?.textContent === '图片')!
+    const editorSelects = [...imageSection.querySelectorAll<HTMLSelectElement>(`select.${SETTINGS_PAGE_CLASS_NAMES.select}`)]
+    expect(editorSelects.length).toBe(1)
+    expect(editorSelects[0]!.dataset.settingKey).toBe('image.pasteLocation')
+    const allGeneral = [...parent.querySelectorAll('[data-setting-key]')].every((el) =>
+      !(el.getAttribute('data-setting-key') ?? '').startsWith('general.'))
+    expect(allGeneral).toBe(true)
   })
 
   it('搜索跨组命中常规项并标注分类，点击定位到常规组', () => {
