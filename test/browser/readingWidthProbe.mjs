@@ -1,11 +1,12 @@
-// 诊断探针（视窗宽度 bug 回路，diagnosing-bugs Phase 1）：真实 Chromium +
-// 生产控制器 + 产物 CSS，测量用户看到的东西——正文行的实际渲染宽度与
-// 水平位置。回路语义（对应用户报告「阅读模式下宽度有隐形限制」）：
-//   A1 阅读正文块宽度 === Live 同文档正文行宽度（两模式一致，无隐形钳制）
-//   A2 宽度小于可用区时正文块在可用区内水平居中（左缝 ≈ 右缝）
-//   A3 侧栏展开时阅读正文自动避让收缩、仍居中
-// 现状预期全红（760px 兜底 + 块级居左 + 侧栏不影响正文宽）。观测值全部
-// 打印，断言失败逐条收集后统一报告。
+// 可读行宽回归套件（#174 bug 修复 + #175 功能）：真实 Chromium + 生产
+// 控制器 + 产物 CSS，断言用户看到的东西（AGENTS 视觉层断言）——正文列
+// 实际渲染宽度、水平位置与设置/片段的生效次序：
+//   A1 默认（0=铺满）双模式铺满可用宽度，无隐形钳制（bug #174 修复本体）
+//   A2 行号关闭时两模式正文宽严格一致（模式一致性基线）
+//   A3 限宽档（600px）双模式列宽 = 设定值且在主区居中（左缝≈右缝）
+//   A4 侧栏开合：铺满档实时避让；限宽档居中跟随（动画后测量）
+//   A5 Live 行号列贴正文列左缘随列居中（Q5 共识）
+//   A6 优先序：0 档片段常规规则生效；非 0 档设置优先、片段 !important 可覆盖
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build, artifactPath, chromium } from './runtime.mjs'
@@ -23,6 +24,7 @@ const check = (name, ok, detail) => {
   console.log(`[${ok ? 'PASS' : 'FAIL'}] ${name}: ${detail}`)
   if (!ok) failures.push(`${name}: ${detail}`)
 }
+/** 容差：居中缝隙 ±4px，宽度差 ±2px（子像素与取整余量） */
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
   const errors = []
@@ -34,20 +36,11 @@ try {
   const DOC = `# 标题\n\n${LONG}\n\n${LONG}\n`
   await page.evaluate((text) => window.initReadingWidth(text), DOC)
 
-  // —— Live 观测（对照组：铺满）——
-  await page.waitForSelector('.cm-line')
-  const live = await page.evaluate(() => {
-    const app = document.getElementById('app')
-    const line = document.querySelector('.cm-line')
-    const r = line.getBoundingClientRect()
-    return { appWidth: app.getBoundingClientRect().width, lineLeft: r.left, lineW: r.width }
-  })
-  console.log(`观测 Live   : app=${live.appWidth}px 正文行 left=${live.lineLeft} width=${live.lineW}`)
-
-  // —— 阅读观测（侧栏收起 / 展开 / 变量覆盖，三轮）——
-  const measureReading = (label) => page.evaluate((l) => {
+  /** 阅读侧观测：容器内容区与首个段落块的几何 */
+  const measureReading = () => page.evaluate(() => {
     const view = document.querySelector('.vsidian-view-reading')
     const p = document.querySelector('.vsidian-reading-block p')
+    if (!view || !p) return null
     const cs = getComputedStyle(view)
     const vr = view.getBoundingClientRect()
     const r = p.getBoundingClientRect()
@@ -55,44 +48,122 @@ try {
     const padR = Number.parseFloat(cs.paddingRight)
     const contentLeft = vr.left + padL
     const contentW = view.clientWidth - padL - padR
-    return { label: l, viewW: vr.width, contentW, blockLeft: r.left, blockW: r.width,
+    return { contentW, blockW: r.width, blockLeft: r.left,
       gapL: r.left - contentLeft, gapR: contentLeft + contentW - (r.left + r.width) }
-  }, label).then((m) => {
-    console.log(`观测 阅读(${m.label}): 容器=${m.viewW}px 可用=${m.contentW}px 块 left=${m.blockLeft.toFixed(1)} width=${m.blockW.toFixed(1)} 左缝=${m.gapL.toFixed(1)} 右缝=${m.gapR.toFixed(1)}`)
-    return m
+  })
+  /** Live 侧观测：正文列与行号列的几何。#32 契约：行号列与正文间有固定
+   *  间距（--vsidian-ln-gap，随 UI 字号），限宽档居中的单位是
+   *  [行号列 + 间距 + 正文列] 整组；gutterLeft 是组左缘 */
+  const measureLive = () => page.evaluate(() => {
+    const content = document.querySelector('.cm-content')
+    const gutters = document.querySelector('.cm-gutters')
+    const scroller = document.querySelector('.cm-scroller')
+    if (!content || !scroller) return null
+    const c = content.getBoundingClientRect()
+    const g = gutters?.getBoundingClientRect()
+    const sr = scroller.getBoundingClientRect()
+    const cs = getComputedStyle(scroller)
+    const padL = Number.parseFloat(cs.paddingLeft)
+    const padR = Number.parseFloat(cs.paddingRight)
+    const contentLeft = sr.left + padL
+    const contentW = scroller.clientWidth - padL - padR
+    return { contentW, colW: c.width, colLeft: c.left, colRight: c.right,
+      gutterLeft: g ? g.left : null, gutterRight: g ? g.right : null, gutterW: g ? g.width : 0,
+      spacing: g ? c.left - g.right : 0,
+      gapL: (g ? g.left : c.left) - contentLeft, gapR: contentLeft + contentW - c.right }
   })
 
+  // —— A1/A2：默认（0 = 铺满）——
+  await page.evaluate(() => window.setRwSettings({ 'editor.readableLineWidth': 0 }))
+  await page.waitForSelector('.cm-line')
+  let live = await measureLive()
+  // 铺满态（#32 语义）：行号组贴容器左缘（组左缝 0，与旧布局一致）、
+  // 正文右缘贴可用区右缘、行号-正文间距保留
+  check('A1 Live 铺满（组贴左缘、正文贴右缘、间距保留）',
+    Math.abs(live.gapR) < 2 && Math.abs(live.gapL) < 2 && live.spacing > 0,
+    `右缝=${live.gapR.toFixed(1)} 组左缝=${live.gapL.toFixed(1)} 行号列宽=${live.gutterW.toFixed(1)} 间距=${live.spacing.toFixed(1)}`)
+  const fillSpacing = live.spacing
   await page.evaluate(() => window.setRwMode('reading'))
   await page.waitForSelector('.vsidian-reading-block p')
-  const closed = await measureReading('侧栏收起')
+  let reading = await measureReading()
+  check('A1 阅读铺满（bug #174：无 760px 隐形钳制）',
+    Math.abs(reading.blockW - reading.contentW) < 2,
+    `块宽=${reading.blockW.toFixed(1)} 可用=${reading.contentW.toFixed(1)}`)
 
+  // A2：行号关闭后两模式正文宽严格一致（一致性基线）
+  await page.evaluate(() => window.setRwSettings({ 'editor.lineNumbers': false, 'editor.readableLineWidth': 0 }))
+  await page.evaluate(() => window.setRwMode('live'))
+  await page.waitForSelector('.cm-line')
+  live = await measureLive()
+  check('A2 行号关闭：Live 正文列占满（无行号列）',
+    Math.abs(live.colW - live.contentW) < 2 && live.gutterW === 0,
+    `列宽=${live.colW.toFixed(1)} 可用=${live.contentW.toFixed(1)} 行号列宽=${live.gutterW}`)
+  const liveFill = live.colW
+  await page.evaluate(() => window.setRwMode('reading'))
+  await page.waitForSelector('.vsidian-reading-block p')
+  reading = await measureReading()
+  check('A2 行号关闭：两模式正文宽一致',
+    Math.abs(reading.blockW - liveFill) < 2,
+    `阅读=${reading.blockW.toFixed(1)} live=${liveFill.toFixed(1)}`)
+
+  // —— A3/A5：限宽档 600px（行号恢复默认开启走新一轮快照）——
+  await page.evaluate(() => window.setRwSettings({ 'editor.lineNumbers': true, 'editor.readableLineWidth': 600 }))
+  reading = await measureReading()
+  check('A3 阅读限宽 600 居中', Math.abs(reading.blockW - 600) < 2 && Math.abs(reading.gapL - reading.gapR) < 4,
+    `块宽=${reading.blockW.toFixed(1)} 左缝=${reading.gapL.toFixed(1)} 右缝=${reading.gapR.toFixed(1)}`)
+  await page.evaluate(() => window.setRwMode('live'))
+  await page.waitForSelector('.cm-line')
+  live = await measureLive()
+  check('A3 Live 限宽 600 整组居中（行号列+间距+正文）',
+    Math.abs(live.colW - 600) < 2 && Math.abs(live.gapL - live.gapR) < 2,
+    `列宽=${live.colW.toFixed(1)} 组左缝=${live.gapL.toFixed(1)} 右缝=${live.gapR.toFixed(1)}`)
+  check('A5 行号列随列移动（不钉死容器左缘）且间距不变',
+    live.gapL > 50 && Math.abs(live.spacing - fillSpacing) < 1,
+    `组左缝=${live.gapL.toFixed(1)} 行号-正文间距=${live.spacing.toFixed(1)}（铺满态 ${fillSpacing.toFixed(1)}）`)
+
+  // —— A4：侧栏开合（铺满档避让 + 限宽档居中跟随）——
+  await page.evaluate(() => window.setRwMode('reading'))
+  await page.waitForSelector('.vsidian-reading-block p')
   await page.evaluate(() => window.setRwSidebar(true))
-  await page.waitForTimeout(250) // 侧栏 0.15s 宽度过渡完成
-  const opened = await measureReading('侧栏展开')
-
+  await page.waitForTimeout(250)
+  reading = await measureReading()
+  check('A4 侧栏展开·限宽档仍居中', Math.abs(reading.gapL - reading.gapR) < 4,
+    `左缝=${reading.gapL.toFixed(1)} 右缝=${reading.gapR.toFixed(1)} 可用=${reading.contentW.toFixed(1)}`)
   await page.evaluate(() => window.setRwSidebar(false))
-  await page.evaluate(() => window.setRwLineWidth('900px'))
-  const overridden = await measureReading('file-line-width=900px')
-  await page.evaluate(() => window.setRwLineWidth(''))
+  await page.evaluate(() => window.setRwSettings({ 'editor.lineNumbers': true, 'editor.readableLineWidth': 0 }))
+  await page.waitForTimeout(250)
+  await page.evaluate(() => window.setRwSidebar(true))
+  await page.waitForTimeout(250)
+  reading = await measureReading()
+  check('A4 侧栏展开·铺满档避让到新可用宽',
+    Math.abs(reading.blockW - reading.contentW) < 2,
+    `块宽=${reading.blockW.toFixed(1)} 可用=${reading.contentW.toFixed(1)}（1280 视口收侧栏后）`)
+  await page.evaluate(() => window.setRwSidebar(false))
 
-  // —— 回路断言 ——
-  check('A1 两模式正文宽度一致（阅读无隐形钳制）', Math.abs(closed.blockW - live.lineW) < 2,
-    `阅读=${closed.blockW.toFixed(1)} live=${live.lineW.toFixed(1)}`)
-  check('A2 阅读正文水平居中', Math.abs(closed.gapL - closed.gapR) < 4,
-    `左缝=${closed.gapL.toFixed(1)} 右缝=${closed.gapR.toFixed(1)}`)
-  check('A3 侧栏展开自动避让（宽度收缩到可用区）', Math.abs(opened.blockW - opened.contentW) < 2,
-    `展开后块宽=${opened.blockW.toFixed(1)} 可用=${opened.contentW.toFixed(1)}`)
-  check('A3′ 侧栏展开仍居中', Math.abs(opened.gapL - opened.gapR) < 4,
-    `左缝=${opened.gapL.toFixed(1)} 右缝=${opened.gapR.toFixed(1)}`)
-  console.log(`观测 根因证: 手动设 --file-line-width=900px → 阅读块宽=${overridden.blockW.toFixed(1)}（证明钳制来源即该变量兜底 760px）`)
-  check('附 值可覆盖', Math.abs(overridden.blockW - 900) < 2, `覆盖后=${overridden.blockW.toFixed(1)}`)
+  // —— A6：优先序（设置 0 → 片段常规规则；设置 900 → 设置优先；!important 可覆盖）——
+  const snippet = await page.addStyleTag({ content: '#app { --vsidian-reading-max-width: 700px; }' })
+  await page.waitForTimeout(50)
+  reading = await measureReading()
+  check('A6 铺满档：片段常规规则生效（CSS 定制空间）', Math.abs(reading.blockW - 700) < 2,
+    `块宽=${reading.blockW.toFixed(1)}`)
+  await page.evaluate(() => window.setRwSettings({ 'editor.readableLineWidth': 900 }))
+  reading = await measureReading()
+  check('A6 限宽档：设置优先于片段常规规则', Math.abs(reading.blockW - 900) < 2,
+    `块宽=${reading.blockW.toFixed(1)}`)
+  await snippet.evaluate((el) => { el.textContent = '#app { --vsidian-reading-max-width: 700px !important; }' })
+  await page.waitForTimeout(50)
+  reading = await measureReading()
+  check('A6 限宽档：片段 !important 可覆盖设置', Math.abs(reading.blockW - 700) < 2,
+    `块宽=${reading.blockW.toFixed(1)}`)
+  await snippet.evaluate((el) => { el.textContent = '' })
+  await page.evaluate(() => window.setRwSettings({ 'editor.readableLineWidth': 0 }))
 
   check('页面无脚本错误', errors.length === 0, JSON.stringify(errors))
   if (failures.length > 0) {
-    console.error(`readingWidthProbe: ${failures.length} 条断言红（bug 复现）`)
+    console.error(`readingWidthProbe: ${failures.length} 条断言红`)
     process.exitCode = 1
   } else {
-    console.log('readingWidthProbe: 全部断言通过')
+    console.log('readingWidthProbe: 全部断言通过（铺满/限宽居中/行号跟随/侧栏避让/优先序）')
   }
 } finally {
   await browser.close()

@@ -1,6 +1,7 @@
-// 诊断探针 fixture（视窗宽度 bug 回路）：真实生产控制器 + 产物 CSS，
-// 引导 live/reading 双视图后暴露宽度观测钩子（模式切换与侧栏开关走 DOM
-// 类，与产线驱动方式等价——本探针只测 CSS 布局层，不测交互链）。
+// 可读行宽回归 fixture（#174/#175）：真实生产控制器 + 产物 CSS，暴露
+// 文档装载、模式切换、侧栏开关与设置快照注入钩子（设置走 settings.snapshot
+// 与产线同消息；侧栏开关走 DOM 类，与产线按钮驱动等价——本套件测 CSS
+// 布局层）。
 import { WebviewSyncController } from '../../src/webview/syncController'
 import { bootLocaleFromDocument } from '../../src/webview/localeBoot'
 import '../../src/webview/main.css'
@@ -24,9 +25,7 @@ Object.assign(window, {
   setRwSidebar(open: boolean) {
     document.querySelector('.vsidian-body')?.classList.toggle('vsidian-sidebar-open', open)
   },
-  setRwLineWidth(value: string) {
-    const app = document.getElementById('app')!
-    if (value === '') app.style.removeProperty('--file-line-width')
-    else app.style.setProperty('--file-line-width', value)
+  setRwSettings(values: Record<string, unknown>) {
+    controller.handleHostMessage({ kind: 'settings.snapshot', values })
   },
 })
