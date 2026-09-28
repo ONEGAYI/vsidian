@@ -267,7 +267,8 @@ vsidian/
 │       ├── tableCreate.ts            # 光标处建表规划纯函数
 │       ├── tableEditing.ts           # 表格输入钩子（#12）
 │       ├── tableRegion.ts            # 表格矩形选区与结构规划
-│       ├── tableRegionSelection.ts   # 表格格区状态与指针绘制
+│       ├── tableRegionField.ts       # 表格格区选区状态单一事实源
+│       ├── tableRegionSelection.ts   # 表格格区拖选指针交互
 │       ├── tableStructure.ts         # 表格导航与增删行列纯函数（#13）
 │       └── taskToggle.ts             # 任务勾选解析纯函数（#9）
 ├── test/…                 # 测试根

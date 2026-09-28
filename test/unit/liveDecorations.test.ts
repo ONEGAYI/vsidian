@@ -22,6 +22,7 @@ import {
   liveDecorationsField,
   livePreviewDecorations,
 } from '../../src/webview/liveDecorations'
+import { setTableRegion, tableRegionField } from '../../src/webview/tableRegionField'
 
 // ---- 断言辅助 ----
 
@@ -693,6 +694,65 @@ describe('liveDecorationsField：增量维护与全量对拍', () => {
 })
 
 // ---- 间接装饰（视口内纯样式） ----
+
+describe('表格格区蒙版并入网格装饰（#73 托管化，2026-09-28）', () => {
+  // 蒙版类由网格格 mark 装饰的 class 托管；外部贴类曾与列把手高亮、
+  // CM6 mark 重写互抹（满列→整表拖选中第一列整列消失直到松手）。
+  const TABLE_DOC = Text.of('| H1 | H2 |\n| --- | --- |\n| B1 | B2 |\n| C1 | C2 |\n'.split('\n'))
+  const FULL_REGION = { tableFrom: 0, rowFrom: 0, rowTo: 2, columnFrom: 0, columnTo: 1 }
+  const regionCells = (set: DecorationSet) => (byClass(set).get(LIVE_CLASS_NAMES.tableRegionCell) ?? []).length
+
+  it('全量构建携带 region：蒙版类随端点行列落在网格格装饰上', () => {
+    const set = buildLivePreviewDecorations(TABLE_DOC, EditorSelection.single(10), FULL_REGION)
+    expect(regionCells(set)).toBe(6)
+    expect((byClass(set).get(LIVE_CLASS_NAMES.tableRegionTop) ?? []).length).toBe(2)
+    expect((byClass(set).get(LIVE_CLASS_NAMES.tableRegionBottom) ?? []).length).toBe(2)
+    expect((byClass(set).get(LIVE_CLASS_NAMES.tableRegionLeft) ?? []).length).toBe(3)
+    expect((byClass(set).get(LIVE_CLASS_NAMES.tableRegionRight) ?? []).length).toBe(3)
+    // 蒙版与网格类同元素（联合类选择器前提）：region-cell 项都是网格格 mark
+    const gridCells = byClass(set).get(LIVE_CLASS_NAMES.tableGridCell) ?? []
+    expect(gridCells.length).toBeGreaterThanOrEqual(6)
+    for (const item of byClass(set).get(LIVE_CLASS_NAMES.tableRegionCell) ?? []) {
+      expect(gridCells.some((grid) => grid.from === item.from && grid.to === item.to)).toBe(true)
+    }
+  })
+
+  it('region=null 不产生任何蒙版类', () => {
+    const set = buildLivePreviewDecorations(TABLE_DOC, EditorSelection.single(10), null)
+    expect(regionCells(set)).toBe(0)
+  })
+
+  it('field 增量：region 建立即重刷，与携带 region 的全量重建对拍一致', () => {
+    let state = EditorState.create({ doc: TABLE_DOC, extensions: [liveDecorationsField, tableRegionField] })
+    state = state.update({ effects: setTableRegion.of(FULL_REGION) }).state
+    expect(regionCells(state.field(liveDecorationsField).decos)).toBe(6)
+    expect(RangeSet.eq([state.field(liveDecorationsField).decos],
+      [buildLivePreviewDecorations(state.doc, state.selection, FULL_REGION)])).toBe(true)
+  })
+
+  it('field 增量：region 清除与区域外编辑都不残留蒙版类', () => {
+    let state = EditorState.create({ doc: `正文\n\n${TABLE_DOC}`, extensions: [liveDecorationsField, tableRegionField] })
+    const tableFrom = state.doc.line(3).from
+    state = state.update({ effects: setTableRegion.of({ ...FULL_REGION, tableFrom }) }).state
+    expect(regionCells(state.field(liveDecorationsField).decos)).toBe(6)
+    // 表格外编辑：tableRegionField 因 docChanged 清空，蒙版类须随增量重刷消失
+    state = state.update({ changes: { from: 0, insert: '改' } }).state
+    expect(regionCells(state.field(liveDecorationsField).decos)).toBe(0)
+    expect(RangeSet.eq([state.field(liveDecorationsField).decos],
+      [buildLivePreviewDecorations(state.doc, state.selection)])).toBe(true)
+  })
+
+  it('region 端点变化重刷旧行：top/bottom 边框类随端点行迁移', () => {
+    let state = EditorState.create({ doc: TABLE_DOC, extensions: [liveDecorationsField, tableRegionField] })
+    state = state.update({ effects: setTableRegion.of(FULL_REGION) }).state
+    state = state.update({ effects: setTableRegion.of({ ...FULL_REGION, rowTo: 1 }) }).state
+    const set = state.field(liveDecorationsField).decos
+    expect(regionCells(set)).toBe(4)
+    expect((byClass(set).get(LIVE_CLASS_NAMES.tableRegionBottom) ?? []).length).toBe(2)
+    expect(RangeSet.eq([set], [buildLivePreviewDecorations(state.doc, state.selection,
+      { ...FULL_REGION, rowTo: 1 })])).toBe(true)
+  })
+})
 
 describe('buildViewportLiveDecorations：间接装饰（纯数据输入）', () => {
   const doc = '# 标题一\n正文一\n## 标题二\n```js\n# 围栏内伪标题\n```\n### 标题三'
