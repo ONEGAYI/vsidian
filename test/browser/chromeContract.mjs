@@ -99,10 +99,15 @@ try {
   ]), ['rgb(165, 214, 255)', 'rgb(139, 148, 158)'], 'live Python 字符串与注释应绘制为深色组颜色')
   assert.deepEqual(await pythonNameColors('live'), ['rgb(201, 209, 217)', 'rgb(220, 220, 170)', 'rgb(220, 220, 170)'],
     'live Python 深色组应区分普通属性与黄色函数调用')
+  // HC 两档分别断言（评审 A-2）：浅色高对比（light + HC）函数色回落
+  // 浅色组暖黄（白底可读）；深色高对比（dark + HC）保持深色淡黄
   await page.evaluate(() => { document.body.classList.add('vscode-high-contrast'); document.body.classList.remove('vscode-dark') })
+  assert.equal((await pythonNameColors('live'))[1], 'rgb(128, 96, 0)',
+    '浅色高对比主题（light+HC）函数色应回落浅色组暖黄（白底可读）')
+  await page.evaluate(() => { document.body.classList.add('vscode-dark') })
   assert.equal((await pythonNameColors('live'))[1], 'rgb(220, 220, 170)',
-    '深色高对比主题的函数色须保持可读的淡黄')
-  await page.evaluate(() => { document.body.classList.add('vscode-dark'); document.body.classList.remove('vscode-high-contrast') })
+    '深色高对比主题（dark+HC）的函数色须保持可读的淡黄')
+  await page.evaluate(() => { document.body.classList.remove('vscode-high-contrast') })
 
   // reading 视图：reading 作用域 + 常驻探针
   await page.evaluate(() => window.setChromeContractMode('reading'))

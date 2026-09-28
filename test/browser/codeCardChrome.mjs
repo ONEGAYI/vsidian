@@ -75,10 +75,20 @@ try {
     const lines = [...document.querySelectorAll('.cm-line.vsidian-code-card-line:not(.vsidian-code-card-edge-top):not(.vsidian-code-card-edge-bottom)')]
     const code = lines[0]
     const number = code.querySelector('.vsidian-code-card-linenumber')
+    // 数字文字右缘（Range 全量矩形）：右对齐锚定须抵消行级负 text-indent 的
+    // 继承——盒内文字不因悬挂缩进移位（评审 A 疑点的回归钉）
+    let numberTextRight = null
+    if (number) {
+      const range = document.createRange()
+      range.selectNodeContents(number)
+      numberTextRight = range.getBoundingClientRect().right
+    }
     return {
       fenceTopX: window.textX(fence),
       codeX: window.textX(code),
       numberX: number ? number.getBoundingClientRect().left : null,
+      numberTextRight,
+      numberBoxRight: number ? number.getBoundingClientRect().right : null,
       codeLineX: code.getBoundingClientRect().left,
       fencePad: getComputedStyle(fence).paddingLeft,
     }
@@ -88,6 +98,8 @@ try {
   // 行号边距 8+16 重分配：行号左缘让出 8px（数字右移，列总占与代码列 x 不变）
   assert(Math.abs(((small.numberX ?? -1) - (small.codeLineX ?? -2)) - 8) < 1,
     `#189 代码行行号左缘应距行左缘 8px：行号 ${small.numberX} vs 行左缘 ${small.codeLineX}`)
+  assert(Math.abs((small.numberTextRight ?? -1) - (small.numberBoxRight ?? -2)) < 1,
+    `#189 行号数字应右对齐贴盒右缘（负 text-indent 继承不致文字移位）：文字 ${small.numberTextRight} vs 盒 ${small.numberBoxRight}`)
   const smallPad = Number.parseFloat(small.fencePad ?? '')
   assert.ok(Number.isFinite(smallPad) && smallPad > 0, `首块围栏左内边距应 > 0（2ch 档）：${small.fencePad}`)
 
@@ -301,7 +313,8 @@ try {
   const wrapBtn = page.locator('.vsidian-reading-block.vsidian-reading-code-card').first()
     .locator('button.vsidian-code-card-wrap')
   // 先把指针移到正文段落（卡片横带贴近容器左缘，(8,8) 仍可能落在卡上）；
-  // 隐藏断言等渐隐过渡（0.12s）稳定，不得在过渡起点立即断读
+  // 隐藏断言等 opacity 数值过渡（0.12s）归零——视觉上移出即隐（visibility
+  // 立即生效），数值经过渡稳定，不得在过渡起点立即断读
   await page.locator('.vsidian-reading-block', { hasText: '正文段落' }).first().hover()
   await page.waitForFunction(() => {
     const btn = document.querySelector('.vsidian-reading-code-card button.vsidian-code-card-wrap')

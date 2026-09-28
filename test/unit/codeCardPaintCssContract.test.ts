@@ -104,7 +104,8 @@ describe('代码块卡片 CSS 契约（#79）', () => {
     expect(css.match(/:where\(body\.vscode-dark\) \.tok-comment[^{]*\{[^}]*#8b949e/i)).not.toBeNull()
     expect(css.match(/:where\(body\.vscode-dark\) \.tok-propertyName[^{]*\{[^}]*#c9d1d9/i)).not.toBeNull()
     expect(css.match(/:where\(body\.vscode-dark\) \.tok-function[^{]*\{[^}]*#dcdcaa/i)).not.toBeNull()
-    expect(css.match(/:where\(body\.vscode-high-contrast\) \.tok-function[^{]*\{[^}]*#dcdcaa/i)).not.toBeNull()
+    // HC 函数色限定深色组合（评审 A-2）：浅色高对比回落浅色组 #806000
+    expect(css.match(/:where\(body\.vscode-dark\.vscode-high-contrast\) \.tok-function[^{]*\{[^}]*#dcdcaa/i)).not.toBeNull()
     // 可覆写承诺的形态前提：内置色板不得携带 ID/主题类特异性
     expect(css.includes('#app .tok-')).toBe(false)
     expect(css.includes('body.vscode-dark #app .tok-')).toBe(false)

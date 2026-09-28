@@ -2968,7 +2968,11 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
 :where(body.vscode-dark) .tok-operator { color: #d4d4d4; }
 :where(body.vscode-dark) .tok-invalid { color: #ffa198; text-decoration-color: #ffa198; }
 :where(body.vscode-high-contrast) .tok-keyword { color: #569cd6; }
-:where(body.vscode-high-contrast) .tok-function { color: #dcdcaa; }
+/* HC 覆盖限定深色组合（评审 A-2）：HC 浅色（vscode-light + vscode-high-
+   contrast，VS Code 1.77+ Default High Contrast Light）回落浅色组
+   #806000——不分深浅时白底取深色淡黄 #dcdcaa 难辨；keyword 行为既有
+   （旧版即不分深浅），仅修正本批新增的函数色行 */
+:where(body.vscode-dark.vscode-high-contrast) .tok-function { color: #dcdcaa; }
 
 /* ---- 阅读视图代码块卡片（#84）----
    与 Live 同类名（头部/行号/复制/折叠/徽标/tok 走上文泛化规则）；此处

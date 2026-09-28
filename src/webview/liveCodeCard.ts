@@ -681,6 +681,10 @@ export function codeCardHoverReveal(): Extension {
           this.contentDOM.addEventListener('mouseleave', this.onLeave)
         }
         destroy() {
+          // 热重配（设置变更经 Compartment 重装扩展）时清掉本闭包挂的
+          // 显现类：旧头部若仍在 DOM，残留类会让复制/折行钮保持显现，
+          // 直到下次 mouseover/mouseleave 才自愈（评审 B-2）
+          this.onLeave()
           this.contentDOM.removeEventListener('mouseleave', this.onLeave)
         }
       },
