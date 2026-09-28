@@ -118,7 +118,7 @@ export type { ChromeContractProbe } from './chromeContract'
 // ---------------------------------------------------------------------------
 
 export const STYLE_CONTRACT_CATEGORIES: readonly StyleContractCategory[] = [
-  // -- content 域（69 条）--
+  // -- content 域（75 条）--
   { id: 'view-container', domain: 'content', title: '容器与视图', titleKey: 'styleRef.category.viewContainer', order: 1 },
   { id: 'heading', domain: 'content', title: '标题', titleKey: 'styleRef.category.heading', order: 2 },
   { id: 'inline-format', domain: 'content', title: '行内格式', titleKey: 'styleRef.category.inlineFormat', order: 3 },
@@ -129,7 +129,7 @@ export const STYLE_CONTRACT_CATEGORIES: readonly StyleContractCategory[] = [
   { id: 'link-image-wikilink', domain: 'content', title: '链接、图片与双链', titleKey: 'styleRef.category.linkImageWikilink', order: 8 },
   { id: 'content-variables', domain: 'content', title: '公开 CSS 变量', titleKey: 'styleRef.category.contentVariables', order: 9 },
   { id: 'content-limits', domain: 'content', title: '不支持与限制', titleKey: 'styleRef.category.contentLimits', order: 10 },
-  // -- chrome 域（46 条）--
+  // -- chrome 域（55 条）--
   { id: 'math', domain: 'chrome', title: '公式', titleKey: 'styleRef.category.math', order: 1 },
   { id: 'diagram', domain: 'chrome', title: '图表渲染', titleKey: 'styleRef.category.diagram', order: 2 },
   { id: 'graphic-interact', domain: 'chrome', title: '图形化按钮与弹窗', titleKey: 'styleRef.category.graphicInteract', order: 3 },

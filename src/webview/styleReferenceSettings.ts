@@ -10,12 +10,16 @@
 // #155 小改：总分页签两态——「样式参考」总表（版本说明、别名桥要点、变量
 // 别名总表）与「详细查询」（类目分栏 + 过滤搜索 + 分页）；全局搜索定位条目
 // 时直接落入详细查询页签。
-// UI 文案一律 t() 取词（styleRef.* 词条）；条目内容是文档数据（中文为准）。
-import { t } from '../shared/i18n'
+// UI 文案一律 t() 取词（styleRef.* 词条）；条目内容是文档数据（中文基准），
+// #178 起按 UI 语言取词——英文环境应用条目英文覆盖（字段级，未覆盖字段
+// 回退中文基准；换包跟随经壳层 applyLocale → render → mount 重建）。
+import { currentLocaleLang, t } from '../shared/i18n'
+import { applyStyleContractEntryOverride } from '../shared/styleContractEn'
 import type { StyleContractCategory, StyleContractEntry } from '../shared/styleContract'
 import type { SettingsPageSection } from './settingsPageView'
 import {
   STYLE_GUIDE_CATEGORIES,
+  STYLE_GUIDE_EN_OVERRIDES,
   STYLE_GUIDE_ENTRIES,
   STYLE_GUIDE_VARIABLE_ALIASES,
   STYLE_GUIDE_VERSION,
@@ -23,7 +27,7 @@ import {
 
 type SupportFilter = 'all' | 'direct' | 'semantic' | 'native' | 'none'
 
-/** 每页条目数（约 15 条：一屏可扫读，115 条清单最长类目分两页） */
+/** 每页条目数（约 15 条：一屏可扫读，130 条清单最长类目分两页） */
 const PAGE_SIZE = 15
 
 const SUPPORT_LABEL: Record<SupportFilter, () => string> = {
@@ -146,6 +150,11 @@ export class StyleReferenceSection implements SettingsPageSection {
     // ---- 小类分栏布局：左侧类目栏（按域分组），右侧条目表 + 分页 ----
     const categories = orderedCategories(STYLE_GUIDE_CATEGORIES)
     const counts = categoryEntryCounts(STYLE_GUIDE_ENTRIES)
+    // #178：条目文档字段按 UI 语言取词（英文优先、条目/字段缺失回退中文
+    // 基准）；换包跟随走设置页壳层重刷路径（applyLocale → render → 本
+    // mount 重建），此处按当时语言计算一次。搜索与卡片渲染共用该列表。
+    const localizedEntries = STYLE_GUIDE_ENTRIES.map((entry) =>
+      applyStyleContractEntryOverride(entry, currentLocaleLang(), STYLE_GUIDE_EN_OVERRIDES))
     // focusEntry 定位：目标条目所在类目成为初始类目（无目标时首个类目）
     const focusTarget = focusEntry && focusEntry !== 'overview'
       ? STYLE_GUIDE_ENTRIES.find((entry) => entry.id === focusEntry)
@@ -237,7 +246,7 @@ export class StyleReferenceSection implements SettingsPageSection {
       const query = search.value.trim().toLowerCase()
       // 搜索模式：跨类目聚合（等级过滤仍生效）；否则按当前类目浏览
       const searching = query.length > 0
-      const pool = searching ? STYLE_GUIDE_ENTRIES : STYLE_GUIDE_ENTRIES.filter((e) => e.category === activeCategory)
+      const pool = searching ? localizedEntries : localizedEntries.filter((e) => e.category === activeCategory)
       const visible = pool.filter((entry) => {
         if (support !== 'all' && entry.obsidian.support !== support) return false
         if (query) {

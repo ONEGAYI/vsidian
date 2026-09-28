@@ -11,7 +11,7 @@ description: 在 vsidian 仓库修改编辑器 webview 的 DOM、类名、属性
 
 ## 事实入口
 
-[样式 ADR](docs/adr/0004-stable-styling-contract.md)记录决策，**结构化清单 `src/shared/styleContract.ts`（#132 起单一事实源，115 条；#133 起界面域逐项核实完毕）记录现有入口与生命周期**（旧手写映射表已退位为指向清单的迁移说明），[CONTEXT.md](CONTEXT.md)记录片段产品边界。别名桥实现同源表在 `src/shared/obsidianAlias.ts`（发射侧只引该模块，避免清单文档数据进 webview bundle）；界面域渲染验证探针表在 `src/shared/chromeContract.ts`（webview 采集侧只引该模块）；用户指南由清单生成（`npm run gen:styleguide`，compile 链前置，产物入库、一致性由 `test/unit/styleGuideGen.test.ts` 以 `--check` 钉住——改清单后须重跑并提交产物）；渲染验证经 `cssProbe.obsidianAliases`（正文域，探针属性 outline-color）与 `cssProbe.chromeSelectors`（界面域，探针属性为自定义属性 `--vsidian-chrome-probe`——不可见且与 outline-color/text-decoration-color 两套既有探针正交，同一元素挂多套探针类时零层叠串扰，规则形态由 `test/unit/chromeContract.test.ts` 钉住）。
+[样式 ADR](docs/adr/0004-stable-styling-contract.md)记录决策，**结构化清单 `src/shared/styleContract.ts`（#132 起单一事实源，130 条；#133 起界面域逐项核实完毕）记录现有入口与生命周期**（旧手写映射表已退位为指向清单的迁移说明），[CONTEXT.md](CONTEXT.md)记录片段产品边界。别名桥实现同源表在 `src/shared/obsidianAlias.ts`（发射侧只引该模块，避免清单文档数据进 webview bundle）；界面域渲染验证探针表在 `src/shared/chromeContract.ts`（webview 采集侧只引该模块）；用户指南由清单生成（`npm run gen:styleguide`，compile 链前置，产物入库、一致性由 `test/unit/styleGuideGen.test.ts` 以 `--check` 钉住——改清单后须重跑并提交产物）；渲染验证经 `cssProbe.obsidianAliases`（正文域，探针属性 outline-color）与 `cssProbe.chromeSelectors`（界面域，探针属性为自定义属性 `--vsidian-chrome-probe`——不可见且与 outline-color/text-decoration-color 两套既有探针正交，同一元素挂多套探针类时零层叠串扰，规则形态由 `test/unit/chromeContract.test.ts` 钉住）。
 
 下述行为约束立即适用；**历史契约本地检查器已随 #134 落地**（`npm run check:stylecontract`：独立基线 `test/style-contract/baseline-v0.4.0.json`（v0.4.0 tag 固化快照）对照候选清单比较 + 弃用期限校验 + 别名桥实现一致性 + 指南一致性 + 完整性自检，反规避负向测试与基线驱动旧片段渲染验证在 `test/style-contract/checkStyleContract.test.mjs` 与集成用例「历史基线旧片段渲染验证」；`check:stylecontract:baseline` 从 git 对象复验基线）。target 比较按**类名 token 只增不减**判定（token 消失/替换即改名，括注追加子类/收起态说明放行——#133 数据修正形态）；基线 `lifecycleExemptions` 与 `entryComparisonExemptions` 两键登记**逐条目豁免**（先例：var-heading-accent 期限豁免、mode-toggle「基线承诺从未兑现于任何发布版且有 git 证据」的双层纠错豁免，理由见基线 meta.provenance；豁免不豁免 entry-missing——条目物理删除仍失败，新增豁免须在变更说明中独立列出理由与保护效果）。
 
@@ -27,6 +27,7 @@ description: 在 vsidian 仓库修改编辑器 webview 的 DOM、类名、属性
 
 - 默认保留旧选择器与变量语义，优先通过别名或适配层承接内部重构；别名必须实际命中原有内容，不能只留空节点、无效 CSS 或字符串。
 - 新增公开入口须补齐用途、模式、状态、示例及实际效果验证。只改单一事实源 `src/shared/styleContract.ts`（含正文域逐项渲染验证：probe.css 探针规则 + `OBSIDIAN_ALIAS_PROBES` 表 + 集成/浏览器断言三处同源），经 `npm run gen:styleguide` 更新指南产物，禁止另建手写副本；承诺 Obsidian 原名兼容（direct 级）必须同时在 `src/shared/obsidianAlias.ts` 登记别名并在别名探针表登记验证（`test/unit/styleContract.test.ts` 钉住两表与条目 aliasTargets 一致）。
+- **条目文档字段须同步登记英文文案**（样式参考双语化，#178 起生效）：新增或修改清单条目时，双语字段（`purpose`/`states`/`obsidian.counterpart`/`dom`/`deprecated`/`removed`）的英文版须同时登记到条目级英文覆盖模块，未登记时渲染回退中文基准，新增/修改条目不得缺登记；字段分级与取词规则见 [style-reference-i18n.md](docs/specs/style-reference-i18n.md)。
 - 禁止为消除失败而删除旧片段、跳过旧用例、降低断言强度、把旧选择器替换成新选择器，或从当前实现重新生成历史期望值。旧断言确有错误时，保留原始基线与失败证据，单列纠错依据和替代验证，不得混作普通重构。
 - 兼容检查器、历史基线、CI 工作流的修改须在变更说明中独立列出理由与保护效果；不得通过关闭检查、调整过滤条件或移除必需状态掩盖失败。更改远端保护配置仍遵循用户授权边界。
 

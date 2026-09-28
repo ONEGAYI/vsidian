@@ -30,7 +30,9 @@ export const SCAN_EXCLUDED_PREFIXES = [
   'src/webview/styleGuideData.ts',
 ] as const
 
-const CJK_RE = /[\u4e00-\u9fff]/
+/** 汉字判定正则（仅汉字，全角标点不算）：扫描器与依赖同一口径的测试
+ *  断言共用——导出保证两边引用同一对象，口径漂移在单一来源处被拦住 */
+export const CJK_RE = /[\u4e00-\u9fff]/
 
 export interface CjkViolation {
   /** 仓库相对路径，正斜杠 */
