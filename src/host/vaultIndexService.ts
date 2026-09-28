@@ -304,7 +304,9 @@ export class VaultIndexService {
   }
 
   /** 根集合变更（onDidChangeWorkspaceFolders 域）：新增根扫描纳入、移除根
-   *  停监听退出索引域（快照留在磁盘，显式清理才回收） */
+   *  停监听退出索引域（快照留在磁盘，显式清理才回收）。集合有变时对全部
+   *  存留根做**覆盖范围重算**（#194「根增删后重新判断覆盖范围」）——嵌套
+   *  根新增/移除会改变既存根的归属边界，父根已索引的文件须重新划分。 */
   async setRoots(roots: readonly VaultRootRef[]): Promise<void> {
     if (this.disposed) {
       return
@@ -316,6 +318,7 @@ export class VaultIndexService {
         wanted.set(key, root)
       }
     }
+    let changed = false
     for (const key of [...this.roots.keys()]) {
       if (wanted.has(key)) {
         continue
@@ -323,6 +326,7 @@ export class VaultIndexService {
       const state = this.roots.get(key)!
       this.teardownState(state)
       this.roots.delete(key)
+      changed = true
     }
     for (const [key, root] of wanted) {
       if (this.roots.has(key) || this.disposed) {
@@ -333,8 +337,23 @@ export class VaultIndexService {
       const state = this.roots.get(key)!
       state.unwatch = this.scan.watchRoot(state.fsPath, (fsPath) => this.onWatchEvent(state, fsPath))
       await this.recoverOrScan(state)
+      changed = true
     }
     this.rootOrder = [...this.roots.keys()].sort((a, b) => b.length - a.length)
+    if (!changed) {
+      return
+    }
+    // 覆盖范围重算：全部存留根全量重扫（归属边界变化后重新划分；快照增量
+    // 继承使未变片不重写，成本可控——根集合变更是低频事件）
+    this.maintenanceEpoch++
+    const epoch = this.maintenanceEpoch
+    for (const state of this.roots.values()) {
+      if (this.disposed || epoch !== this.maintenanceEpoch) {
+        return
+      }
+      await this.fullScan(state, { epoch })
+    }
+    this.notify()
   }
 
   dispose(): void {
@@ -664,7 +683,9 @@ export class VaultIndexService {
 
       const resolveWith = (absFsPath: string): string | null => {
         const rel = this.relOf(state, absFsPath)
-        if (rel === null) {
+        // 越根或归属更具体根（嵌套根）的目标不解析（断链保留——各根独立
+        // 资源边界，#194「路径与范围」）
+        if (rel === null || this.rootOf(absFsPath) !== state) {
           return null
         }
         const mdHit = foldIndex.get(this.foldKey(rel))
@@ -726,7 +747,9 @@ export class VaultIndexService {
         }
         const abs = uniqueMissed[i]!
         const rel = this.relOf(state, abs)
-        if (rel === null || files.has(rel)) {
+        // 归属更具体根（嵌套根）的候选不登记（不能重复归属）；
+        // resolveWith 已按 rootOf 过滤，此为登记侧同口径防线
+        if (rel === null || this.rootOf(abs) !== state || files.has(rel)) {
           continue
         }
         const stat = await this.scan.statFile(abs)
@@ -995,8 +1018,10 @@ export class VaultIndexService {
       return
     }
     const rel = this.relOf(state, fsPath)
-    if (rel === null || this.excludeMatcher.test(rel)) {
-      return // 越根/排除文件不入增量域
+    // 越根/排除/归属更具体根（嵌套根——父子根 watcher 监听树重叠，变更
+    // 事件会在两个根各到达一次）的文件不入本根增量域
+    if (rel === null || this.excludeMatcher.test(rel) || this.rootOf(fsPath) !== state) {
+      return
     }
     const key = this.normKey(fsPath)
     const prev = state.rescanTimers.get(key)

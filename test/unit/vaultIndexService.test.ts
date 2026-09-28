@@ -790,4 +790,35 @@ describe('VaultIndexService：#198 根增删（onDidChangeWorkspaceFolders 域�
     expect(itemsOf(await service.backlinksOf('C:/r2/d.md'))).toHaveLength(1)
     expect(events.filter((e) => e === 'watch').length).toBeGreaterThanOrEqual(2)
   })
+
+  it('新增嵌套根后覆盖范围重算：父根已索引的嵌套文件重新归属（不重复）', async () => {
+    const fs = makeFs({
+      'C:/r1/a.md': '# A\n\n见 [[sub/s]]。\n',
+      'C:/r1/sub/s.md': '# S\n\n见 [[../a]]。\n',
+    })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/r1', uri: 'file:///c%3A/r1' }])
+    // 初始：sub 非根，两文件都属 r1（2 条目）
+    expect(service.maintenanceInfo().roots[0]!.fileCount).toBe(2)
+    expect(itemsOf(await service.backlinksOf('C:/r1/sub/s.md'))).toHaveLength(1)
+    // 新增嵌套根 sub：s.md 归属重划到 sub 根，父根不再持有（不重复归属）
+    await service.setRoots([
+      { fsPath: 'C:/r1', uri: 'file:///c%3A/r1' },
+      { fsPath: 'C:/r1/sub', uri: 'file:///c%3A/r1/sub' },
+    ])
+    const roots = service.maintenanceInfo().roots
+    expect(roots.length).toBe(2)
+    const parent = roots.find((r) => r.fsPath === 'C:/r1')!
+    const nested = roots.find((r) => r.fsPath === 'C:/r1/sub')!
+    expect(parent.fileCount).toBe(1) // 仅 a.md
+    expect(nested.fileCount).toBe(1) // s.md
+    // 跨根不解析：sub 根内 [[../a]] 越出 sub 边界（r1/a 属父根）→ 断链；
+    // a.md 的 [[sub/s]] 对 r1 而言是子目录文件（现属 sub 根）→ 也断链
+    expect(itemsOf(await service.backlinksOf('C:/r1/a.md'))).toHaveLength(0)
+    expect(itemsOf(await service.backlinksOf('C:/r1/sub/s.md'))).toHaveLength(0)
+    // 移除嵌套根：归属还原（覆盖范围再次重算）
+    await service.setRoots([{ fsPath: 'C:/r1', uri: 'file:///c%3A/r1' }])
+    expect(service.maintenanceInfo().roots[0]!.fileCount).toBe(2)
+    expect(itemsOf(await service.backlinksOf('C:/r1/sub/s.md'))).toHaveLength(1)
+  })
 })

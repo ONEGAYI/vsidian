@@ -1864,11 +1864,13 @@ export function createTextEditorProvider(
       globalStorageUri: context.globalStorageUri.toString(),
       workspaceTrusted: vscode.workspace.isTrusted,
     })),
-    // ---- #198 索引维护测试钩子：观测（服务权威状态 + 持久化原始值）----
+    // ---- #198 索引维护测试钩子：观测（服务权威状态 + 持久化原始值 +
+    //      快照分区根目录——集成用例直接列目录断言代际回收）----
     vscode.commands.registerCommand('onegayi.vsidian._test.getVaultIndexState', () => ({
       available: vaultIndex !== undefined,
       ...(vaultIndex ? vaultIndex.maintenanceInfo() : { roots: [], rebuilding: false }),
       persistedPatterns: indexMaintenance?.persistedRaw() ?? null,
+      storageRoot: context.storageUri ? context.storageUri.fsPath : null,
     })),
     vscode.commands.registerCommand(
       'onegayi.vsidian._test.setIndexPatterns',
