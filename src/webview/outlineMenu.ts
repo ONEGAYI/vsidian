@@ -135,7 +135,8 @@ export function buildOutlineMenuDom(
 ): HTMLElement {
   return buildMenuDom(buildMenuModel(outlineMenuSpec(hasChildren), OUTLINE_MENU_CONTEXT), {
     classNames: OUTLINE_MENU_DOM_NAMES,
-    onCommand,
+    // 协议校验器已限定合法菜单命令（isOutlineMenuCommand），收窄安全
+    onCommand: (command) => onCommand(command as OutlineMenuCommand),
   })
 }
 

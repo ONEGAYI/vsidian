@@ -748,7 +748,8 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   writeFileSync(path.join(wsDir, 'wikilink-target.md'), WIKILINK_TARGET_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'wikilink-crlf-target.md'), WIKILINK_CRLF_TARGET_DOC, 'utf8')
   // #162 复制块链接：frontmatter 头区（不接管断言）、标题行/普通段/表格/
-  // 既有 id 段（菜单两态与零写回断言载体）
+  // 既有 id 段（菜单两态与零写回断言载体）；#183 补围栏行（统一菜单降级
+  // 矩阵的围栏区断言载体）
   writeFileSync(path.join(wsDir, 'block-menu.md'), [
     '---',
     'title: 块菜单',
@@ -761,6 +762,10 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
     '| a | b |',
     '|---|---|',
     '| 1 | 2 |',
+    '',
+    '```js',
+    'const fence = 1',
+    '```',
     '',
     '已有 id 段落 ^keep9',
     '',

@@ -203,16 +203,6 @@ export type HostToWebview =
   | { kind: 'outline.test.menuClick'; command: string }
   /** 测试钩子（#69）：关闭当前右键菜单（等价 Esc/外点关闭路径） */
   | { kind: 'outline.test.menuClose' }
-  /** 测试钩子（#162）：在正文 doc 偏移 pos 处打开块链接右键菜单（与用户
-   *  右键同一命中判定与装配链路——posAtCoords 的替代注入点；frontmatter
-   *  头区/空行等不接管位同样不开菜单）。宿主测试无法向 webview 派发真实
-   *  鼠标事件，以此通道验证真实宿主内的菜单装配 */
-  | { kind: 'block.test.contextMenu'; pos: number }
-  /** 测试钩子（#162）：点击菜单中 command 对应的真实按钮（与用户点击同一
-   *  处理器；command 取 blockMenu 的 BlockMenuCommand） */
-  | { kind: 'block.test.menuClick'; command: string }
-  /** 测试钩子（#162）：关闭当前块链接右键菜单（等价 Esc/外点关闭路径） */
-  | { kind: 'block.test.menuClose' }
   /** 剪贴板读结果（#183）：ok 时 text 为 LF 归一后的剪贴板文本；失败附
    *  原因码（read-failed = 环境读失败）。陈旧回包由 webview 按 reqId
    *  丢弃（在途表先例见 image.paste） */
@@ -949,6 +939,16 @@ export interface PaintProbe {
     boxShadowValues: string[]
     borderLeftWidthValues: string[]
   } | null
+  /** #183 统一右键菜单绘制：浮层在场（瞬态挂载）时的实际可见性
+   *  （elementFromPoint 命中——样式注入失效时 DOM 在场但命中失败）、
+   *  分组线与置灰计数（安全降级矩阵的绘制层证据）；菜单关闭时缺省。
+   *  jsdom 无布局恒 false，只作真宿主集成断言依据 */
+  contextMenu?: {
+    visible: boolean
+    display: string | null
+    separatorCount: number
+    disabledCount: number
+  }
 }
 
 /** #32 排版一致性探针：正文基础排版四项样本（null = 元素缺失/不可读） */
@@ -1525,6 +1525,13 @@ function isPaintProbe(v: unknown): v is PaintProbe {
       isNonNegativeInt(v.heading.inviewCount) &&
       Array.isArray(v.heading.boxShadowValues) && v.heading.boxShadowValues.every(isString) &&
       Array.isArray(v.heading.borderLeftWidthValues) && v.heading.borderLeftWidthValues.every(isString)
+    )) &&
+    (v.contextMenu === undefined || (
+      isObject(v.contextMenu) &&
+      typeof v.contextMenu.visible === 'boolean' &&
+      isNullOrString(v.contextMenu.display) &&
+      isNonNegativeInt(v.contextMenu.separatorCount) &&
+      isNonNegativeInt(v.contextMenu.disabledCount)
     ))
   )
 }
@@ -2192,12 +2199,6 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'outline.test.menuClick':
       return isOutlineMenuCommand(v.command)
     case 'outline.test.menuClose':
-      return true
-    case 'block.test.contextMenu':
-      return isNonNegativeInt(v.pos)
-    case 'block.test.menuClick':
-      return v.command === 'copyHeadingLink' || v.command === 'copyBlockLink'
-    case 'block.test.menuClose':
       return true
     case 'clipboard.read.result':
       if (!isPositiveInt(v.reqId)) {

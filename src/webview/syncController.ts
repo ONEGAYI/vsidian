@@ -161,7 +161,7 @@ import {
   outlineMenuPosition,
   outlineStructuralExpand,
 } from './outlineMenu'
-import { applySubmenuFlip, buildMenuDom } from './contextMenuDom'
+import { applySubmenuFlip, buildMenuDom, CONTEXT_MENU_CLASS_NAMES } from './contextMenuDom'
 import {
   buildContextMenuModel,
   contextMenuBlockTargetAt,
@@ -6769,6 +6769,19 @@ export class WebviewSyncController {
           overlaySvg: document.querySelector(`.${DIAGRAM_POPUP_CLASS_NAMES.media} svg`) !== null,
         }
       : undefined
+    // #183 统一右键菜单绘制探针：浮层在场（瞬态挂载）时的实际可见性
+    // （elementFromPoint 命中——样式注入失效时 DOM 在场但命中失败）、分组
+    // 线与置灰计数（安全降级矩阵的绘制层证据）；菜单关闭时缺省
+    const contextMenuEl = this.contextMenuEl
+    const contextMenu = contextMenuEl
+      ? {
+          visible: hitPaintedElement(contextMenuEl),
+          display: getComputedStyle(contextMenuEl).display,
+          separatorCount: contextMenuEl.querySelectorAll(
+            `.${CONTEXT_MENU_CLASS_NAMES.separator}`).length,
+          disabledCount: contextMenuEl.querySelectorAll('button:disabled').length,
+        }
+      : undefined
     const quickBar = this.quickActionsEl
     const quickBold = quickBar?.querySelector<HTMLElement>('[data-op="bold"]') ?? null
     const quickActive = quickBar?.querySelector<HTMLElement>('[data-format-state="active"]') ?? null
@@ -6899,6 +6912,7 @@ export class WebviewSyncController {
       quickActions,
       code,
       heading: headingPaint,
+      ...(contextMenu ? { contextMenu } : {}),
     }
   }
 

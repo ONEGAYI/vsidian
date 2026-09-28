@@ -601,6 +601,13 @@ interface ViewState {
       boxShadowValues: string[]
       borderLeftWidthValues: string[]
     } | null
+    /** #183 统一右键菜单绘制：浮层在场时的实际可见性与降级矩阵证据 */
+    contextMenu?: {
+      visible: boolean
+      display: string | null
+      separatorCount: number
+      disabledCount: number
+    }
   }
   /** #53 右侧栏观测：布局态与绘制层证据（结构见 src/shared/protocol.ts SidebarProbe） */
   sidebar?: {
@@ -9015,13 +9022,127 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await waitSettings({ 'image.paste': true, 'image.pasteLocation': 'same-dir', 'image.pasteSubpath': 'assets' })
   }],
 
-  // ---- #162 复制块链接（正文右键菜单与快捷键） ----
+  // ---- #183 统一右键菜单（Live 正文全域接管；#162 块链接两项迁入） ----
 
-  ['复制块链接：右键菜单两态、自动补写可撤销与快捷键入口（#162）', async () => {
+  ['统一右键菜单：全域接管、绘制层断言与剪贴板四项端到端（#183）', async () => {
+    // 断言口径：view.state.paint.contextMenu 是绘制层探针（elementFromPoint
+    // 命中——DOM 在场但样式注入失效时 visible=false，评审必查的视觉层断言）；
+    // 剪贴板动作走真实宿主剪贴板（vscode.env.clipboard 读写对拍）。菜单经
+    // contextMenu.test.contextMenu/menuClick 注入通道驱动（宿主测试无法向
+    // webview 派发真实右键）
+    const MENU_DOC = [
+      '---',
+      'title: 块菜单',
+      '---',
+      '',
+      '# 块菜单标题',
+      '',
+      '右键目标段落。',
+      '',
+      '| a | b |',
+      '|---|---|',
+      '| 1 | 2 |',
+      '',
+      '```js',
+      'const fence = 1',
+      '```',
+      '',
+      '已有 id 段落 ^keep9',
+      '',
+    ].join('\n')
+    await openWithEditor('block-menu.md')
+    await waitSessionReady('block-menu.md')
+    const uri = wsUri('block-menu.md').toString()
+    const post = (message: Record<string, unknown>) =>
+      vscode.commands.executeCommand(CMD.postToPanel, uri, message)
+    const clipboardText = () => vscode.env.clipboard.readText()
+
+    // 1) 普通段打开菜单：绘制层断言（可见性 + 三簇两条分组线 + display）
+    await post({ kind: 'contextMenu.test.contextMenu', pos: MENU_DOC.indexOf('右键目标段落') })
+    const normal = await waitViewState('block-menu.md', (v) => v.paint?.contextMenu != null)
+    const normalMenu = normal.paint!.contextMenu!
+    assert(normalMenu.visible === true,
+      `绘制层：菜单中心点应被命中（实际 ${JSON.stringify(normalMenu)}）`)
+    assert(normalMenu.display !== 'none', '菜单应非 display:none')
+    assert(normalMenu.separatorCount === 2,
+      `三簇应恰两条分组线（实际 ${normalMenu.separatorCount}）`)
+    // 无选区：仅剪切/复制置灰（cut/copy 两项）
+    const normalDisabled = normalMenu.disabledCount
+    assert(normalDisabled === 2, `无选区普通段：仅剪切/复制置灰（实际 ${normalDisabled}）`)
+
+    // 2) 空行接管（全域验收线）
+    await post({ kind: 'contextMenu.test.menuClose' })
+    const blankPos = MENU_DOC.split('\n').slice(0, 3).join('\n').length + 1
+    await post({ kind: 'contextMenu.test.contextMenu', pos: blankPos })
+    const blank = await waitViewState('block-menu.md', (v) => v.paint?.contextMenu != null)
+    assert(blank.paint!.contextMenu!.visible === true, '空行右键应接管（菜单真实绘制）')
+
+    // 3) frontmatter 头区：不接管（探针缺省——无菜单即链路证据）
+    await post({ kind: 'contextMenu.test.menuClose' })
+    await post({ kind: 'contextMenu.test.contextMenu', pos: MENU_DOC.indexOf('title: 块菜单') })
+    const fmState = await waitViewState('block-menu.md', (v) => v.paint != null && v.paint.contextMenu === undefined)
+    assert(fmState.paint!.contextMenu === undefined, '头区不接管：无菜单浮层')
+
+    // 4) 表格行与围栏内：安全降级矩阵（簇 1 新增两项 + 簇 2 整簇置灰）
+    await post({ kind: 'contextMenu.test.menuClose' })
+    await post({ kind: 'contextMenu.test.contextMenu', pos: MENU_DOC.indexOf('|---|---|') })
+    const table = await waitViewState('block-menu.md', (v) => v.paint?.contextMenu != null)
+    assert(table.paint!.contextMenu!.disabledCount >= normalDisabled + 20,
+      `表格行：簇 1 新增两项 + 簇 2 全簇（含子项）置灰（实际 ${table.paint!.contextMenu!.disabledCount} vs 基线 ${normalDisabled}）`)
+    await post({ kind: 'contextMenu.test.menuClose' })
+    await post({ kind: 'contextMenu.test.contextMenu', pos: MENU_DOC.indexOf('const fence') })
+    const fence = await waitViewState('block-menu.md', (v) => v.paint?.contextMenu != null)
+    assert(fence.paint!.contextMenu!.disabledCount >= normalDisabled + 20,
+      `围栏代码内：同表格降级（实际 ${fence.paint!.contextMenu!.disabledCount}）`)
+    await post({ kind: 'contextMenu.test.menuClose' })
+
+    // 5) 剪贴板四项端到端（真实宿主剪贴板对拍）：
+    //    选区（table.test.crossSelect 注入）→ copy 剪贴板成品 → cut 删除 +
+    //    单笔写回 → 宿主写剪贴板后 paste 插入 → selectAll 纯选区
+    const before = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    const selFrom = MENU_DOC.indexOf('右键目标')
+    await post({ kind: 'table.test.crossSelect', anchor: selFrom, head: selFrom + 4 })
+    await post({ kind: 'contextMenu.test.contextMenu', pos: selFrom + 1 })
+    await post({ kind: 'contextMenu.test.menuClick', command: 'copy' })
+    assert(await poll('复制剪贴板', async () =>
+      (await clipboardText()) === '右键目标' ? true : undefined),
+      `复制应写入真实宿主剪贴板（实际 ${await clipboardText()}）`)
+    const afterCopy = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(afterCopy.appliedEdits === before.appliedEdits, '复制零写回')
+
+    await post({ kind: 'table.test.crossSelect', anchor: selFrom, head: selFrom + 4 })
+    await post({ kind: 'contextMenu.test.contextMenu', pos: selFrom + 1 })
+    await post({ kind: 'contextMenu.test.menuClick', command: 'cut' })
+    assert(await poll('剪切剪贴板', async () =>
+      (await clipboardText()) === '右键目标' ? true : undefined), '剪切应先桥写选区文本')
+    const afterCut = await waitViewState('block-menu.md', (v) => !v.text.includes('右键目标'))
+    assert(afterCut.text.includes('段落。'), '剪切应删除选区保留其余正文')
+    const cutState = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(cutState.appliedEdits === before.appliedEdits + 1,
+      `剪切删除应恰一笔写回（实际 +${cutState.appliedEdits - before.appliedEdits}）`)
+
+    await vscode.env.clipboard.writeText('宿主桥粘贴文本')
+    await post({ kind: 'contextMenu.test.contextMenu', pos: afterCut.text.indexOf('段落。') })
+    await post({ kind: 'contextMenu.test.menuClick', command: 'paste' })
+    await waitViewState('block-menu.md', (v) => v.text.includes('宿主桥粘贴文本'))
+    assert((await clipboardText()) === '宿主桥粘贴文本', '粘贴不改变剪贴板内容')
+
+    await post({ kind: 'contextMenu.test.contextMenu', pos: afterCut.text.indexOf('段落。') })
+    await post({ kind: 'contextMenu.test.menuClick', command: 'selectAll' })
+    const selected = await waitViewState('block-menu.md', (v) =>
+      v.selectionOffset === 0 && v.selectionHead === v.docLength)
+    assert(selected.selectionHead === selected.docLength, '全选应为全文纯选区（零写回）')
+    const finalState = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(finalState.appliedEdits === cutState.appliedEdits + 1,
+      `全选零写回（实际 +${finalState.appliedEdits - cutState.appliedEdits}）`)
+    await post({ kind: 'contextMenu.test.menuClose' })
+  }],
+
+  ['块链接两项：统一菜单两态、自动补写可撤销与快捷键入口（#183，自 #162 迁移）', async () => {
     // 断言口径：剪贴板成品对拍（vscode.env.clipboard.readText——真实宿主
     // 权威）、磁盘文本对拍（自动补写走标准写回）与单笔写回（appliedEdits
-    // 恰 +1 = 撤销一步）。菜单经 block.test.contextMenu/menuClick 真实按钮
-    // 点击链路驱动（宿主测试无法派发真实右键）
+    // 恰 +1 = 撤销一步）。菜单经 contextMenu.test.contextMenu/menuClick
+    // 真实按钮点击链路驱动（宿主测试无法派发真实右键）
     const BLOCK_MENU_DOC = [
       '---',
       'title: 块菜单',
@@ -9035,6 +9156,10 @@ export const cases: Array<[string, () => Promise<void>]> = [
       '|---|---|',
       '| 1 | 2 |',
       '',
+      '```js',
+      'const fence = 1',
+      '```',
+      '',
       '已有 id 段落 ^keep9',
       '',
     ].join('\n')
@@ -9046,10 +9171,10 @@ export const cases: Array<[string, () => Promise<void>]> = [
 
     // 标题行：复制标题链接 → 剪贴板成品 [[笔记名#标题]]，零写回
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
-      kind: 'block.test.contextMenu', pos: BLOCK_MENU_DOC.indexOf('# 块菜单标题'),
+      kind: 'contextMenu.test.contextMenu', pos: BLOCK_MENU_DOC.indexOf('# 块菜单标题'),
     })
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
-      kind: 'block.test.menuClick', command: 'copyHeadingLink',
+      kind: 'contextMenu.test.menuClick', command: 'copyHeadingLink',
     })
     assert(await poll('标题链接剪贴板', async () =>
       (await clipboardText()) === '[[block-menu#块菜单标题]]' ? true : undefined),
@@ -9059,10 +9184,10 @@ export const cases: Array<[string, () => Promise<void>]> = [
     // 空一行恰好多出独立行 `^id`（#163 验收反馈默认形态），单笔写回
     // （appliedEdits +1 = 撤销一步）
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
-      kind: 'block.test.contextMenu', pos: BLOCK_MENU_DOC.indexOf('右键目标段落'),
+      kind: 'contextMenu.test.contextMenu', pos: BLOCK_MENU_DOC.indexOf('右键目标段落'),
     })
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
-      kind: 'block.test.menuClick', command: 'copyBlockLink',
+      kind: 'contextMenu.test.menuClick', command: 'copyBlockLink',
     })
     // 写回断言走视图文本：写回使 TextDocument dirty 不落盘（磁盘断言在仓库
     // 惯例中仅用于「不得写」场景，outline/frontmatter 写回用例同款口径）
@@ -9087,20 +9212,20 @@ export const cases: Array<[string, () => Promise<void>]> = [
     // 从最新文本动态取——前序步骤已在普通段后补写两行，旧文档偏移已失效
     const afterParaWrite = (await waitViewState('block-menu.md')).text
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
-      kind: 'block.test.contextMenu', pos: afterParaWrite.indexOf('|---|---|'),
+      kind: 'contextMenu.test.contextMenu', pos: afterParaWrite.indexOf('|---|---|'),
     })
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
-      kind: 'block.test.menuClick', command: 'copyBlockLink',
+      kind: 'contextMenu.test.menuClick', command: 'copyBlockLink',
     })
     const afterTableWrite = await waitViewState('block-menu.md', (v) =>
       /\| 1 \| 2 \|\n\n\^[a-z0-9]{6}\n/.test(v.text))
 
     // 既有 id 段：直接复制既有 id，零改写（视图文本对拍；pos 同样动态取）
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
-      kind: 'block.test.contextMenu', pos: afterTableWrite.text.indexOf('已有 id 段落'),
+      kind: 'contextMenu.test.contextMenu', pos: afterTableWrite.text.indexOf('已有 id 段落'),
     })
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
-      kind: 'block.test.menuClick', command: 'copyBlockLink',
+      kind: 'contextMenu.test.menuClick', command: 'copyBlockLink',
     })
     assert(await poll('既有 id 剪贴板', async () =>
       (await clipboardText()) === '[[block-menu#^keep9]]' ? true : undefined),
@@ -9122,10 +9247,10 @@ export const cases: Array<[string, () => Promise<void>]> = [
     // frontmatter 头区：右键不接管（原生菜单照常——钩子不开菜单即链路证据）
     const stateBefore = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
-      kind: 'block.test.contextMenu', pos: BLOCK_MENU_DOC.indexOf('title: 块菜单'),
+      kind: 'contextMenu.test.contextMenu', pos: BLOCK_MENU_DOC.indexOf('title: 块菜单'),
     })
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
-      kind: 'block.test.menuClick', command: 'copyBlockLink',
+      kind: 'contextMenu.test.menuClick', command: 'copyBlockLink',
     })
     const stateAfter = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
     assert(stateAfter.appliedEdits === stateBefore.appliedEdits && stateAfter.version === stateBefore.version,

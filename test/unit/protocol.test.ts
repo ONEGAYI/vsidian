@@ -791,16 +791,14 @@ describe('isWebviewToHost', () => {
     })).toBe(false)
   })
 
-  it('blockLink.copy 与 block.test.* 测试钩子消息校验（#162）', () => {
+  it('blockLink.copy 消息校验与 block.test.* 钩子退役（#162/#183）', () => {
     expect(isHostToWebview({ kind: 'blockLink.copy' })).toBe(true)
     expect(isHostToWebview({ kind: 'blockLink.copy', extra: 1 })).toBe(true)
-    expect(isHostToWebview({ kind: 'block.test.contextMenu', pos: 12 })).toBe(true)
-    expect(isHostToWebview({ kind: 'block.test.contextMenu', pos: -1 })).toBe(false)
-    expect(isHostToWebview({ kind: 'block.test.contextMenu', pos: '4' })).toBe(false)
-    expect(isHostToWebview({ kind: 'block.test.menuClick', command: 'copyBlockLink' })).toBe(true)
-    expect(isHostToWebview({ kind: 'block.test.menuClick', command: 'copyHeadingLink' })).toBe(true)
-    expect(isHostToWebview({ kind: 'block.test.menuClick', command: 'rename' })).toBe(false)
-    expect(isHostToWebview({ kind: 'block.test.menuClose' })).toBe(true)
+    // blockMenu 退役：block.test.* 三条钩子随模块删除（用例全部迁移到
+    // contextMenu.test.*，见上方统一菜单通道校验）
+    expect(isHostToWebview({ kind: 'block.test.contextMenu', pos: 12 })).toBe(false)
+    expect(isHostToWebview({ kind: 'block.test.menuClick', command: 'copyBlockLink' })).toBe(false)
+    expect(isHostToWebview({ kind: 'block.test.menuClose' })).toBe(false)
   })
 
   it('clipboard.read 消息校验（#183）：webview 请求宿主读剪贴板（粘贴桥）', () => {

@@ -242,8 +242,14 @@ describe('菜单开合（Esc / 外点 / 命令后 / 钩子关闭 / 模式切换�
 })
 
 describe('剪贴板四项（宿主桥链路）', () => {
-  const selectRange = (c: { getView(): { dispatch(tr: object): void } | undefined }, from: number, to: number) => {
-    c.getView()!.dispatch({ selection: { anchor: from, head: to } } as object)
+  // tsconfig target 低于 es2023（无 findLast）——倒序找最后一条
+  const lastOf = <T>(arr: readonly T[], pred: (item: T) => boolean): T | undefined => {
+    for (let i = arr.length - 1; i >= 0; i--) {
+      if (pred(arr[i]!)) {
+        return arr[i]
+      }
+    }
+    return undefined
   }
 
   it('copy：选区文本经 clipboard.write 直写，零写回', () => {
@@ -277,7 +283,7 @@ describe('剪贴板四项（宿主桥链路）', () => {
     c.getView()!.dispatch({ selection: { anchor: POS.para, head: POS.para } })
     c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: POS.para })
     c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'paste' })
-    const read = h.sent.findLast((m) => m.kind === 'clipboard.read') as
+    const read = lastOf(h.sent, (m) => m.kind === 'clipboard.read') as
       Extract<WebviewToHost, { kind: 'clipboard.read' }>
     expect(read, '粘贴应经宿主剪贴板读桥').toBeTruthy()
     // 陈旧回包（伪造旧 reqId）不生效
@@ -291,7 +297,7 @@ describe('剪贴板四项（宿主桥链路）', () => {
     // 再次粘贴（新 reqId）：旧 reqId 回包丢弃
     c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: POS.para })
     c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'paste' })
-    const read2 = h.sent.findLast((m) => m.kind === 'clipboard.read') as
+    const read2 = lastOf(h.sent, (m) => m.kind === 'clipboard.read') as
       Extract<WebviewToHost, { kind: 'clipboard.read' }>
     c.handleHostMessage({ kind: 'clipboard.read.result', reqId: read.reqId, ok: true, text: '旧包' })
     expect(c.getView()!.state.doc.toString()).not.toContain('旧包')
