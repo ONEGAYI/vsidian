@@ -60,7 +60,10 @@ export function createTableRegionPointer(tableRowsAt: (view: EditorView, pos: nu
 
     constructor(private readonly view: EditorView) {
       view.contentDOM.addEventListener('pointerdown', this.onDown)
-      document.addEventListener('pointermove', this.onMove)
+      // CM6 的拖选线性更新监听在 document（bubble）的 mousemove 上；接管期
+      // 须在 capture 阶段先行拦截，折叠事务才不会被随后的原生展开覆盖
+      //（pointermove 上拦截无效：兼容 mousemove 仍会派发给 CM6）。
+      document.addEventListener('mousemove', this.onMove, { capture: true })
       document.addEventListener('pointerup', this.onUp)
       document.addEventListener('pointercancel', this.onUp)
       view.dom.addEventListener('focusout', this.onBlur)
@@ -74,7 +77,7 @@ export function createTableRegionPointer(tableRowsAt: (view: EditorView, pos: nu
 
     destroy(): void {
       this.view.contentDOM.removeEventListener('pointerdown', this.onDown)
-      document.removeEventListener('pointermove', this.onMove)
+      document.removeEventListener('mousemove', this.onMove, { capture: true })
       document.removeEventListener('pointerup', this.onUp)
       document.removeEventListener('pointercancel', this.onUp)
       this.view.dom.removeEventListener('focusout', this.onBlur)
@@ -109,7 +112,7 @@ export function createTableRegionPointer(tableRowsAt: (view: EditorView, pos: nu
       this.view.dispatch({ selection: EditorSelection.single(cell.contentFrom), effects: setTableRegion.of(region) })
     }
 
-    private hit(event: PointerEvent) {
+    private hit(event: MouseEvent) {
       const target = document.elementFromPoint(event.clientX, event.clientY) ?? event.target as Element
       const cell = target instanceof Element ? target.closest<HTMLElement>('.vsidian-table-grid-cell') : null
       const row = cell?.closest<HTMLElement>('.vsidian-table-grid-row')
@@ -138,19 +141,22 @@ export function createTableRegionPointer(tableRowsAt: (view: EditorView, pos: nu
       if (this.view.state.field(tableRegionField)) selectTableRegion(this.view, null)
     }
 
-    private readonly onMove = (event: PointerEvent): void => {
+    private readonly onMove = (event: MouseEvent): void => {
       if (!this.anchor || !(event.buttons & 1)) return
       const target = this.hit(event)
       if (!target || target.tableFrom !== this.anchor.tableFrom) {
         // 手势离开该表格后交回 CM6 原生文本拖选，不能保留过期矩形。
+        // 此分支不拦截：CM6 需继续收到 mousemove 才能把线性选区扩到当前位置。
         if (this.view.state.field(tableRegionField)) selectTableRegion(this.view, null)
         this.anchor = null
         return
       }
       if (target.row === this.anchor.row && target.column === this.anchor.column) {
+        // 仍在首格内：不拦截，保留 CM6 原生逐字文本拖选。
         if (this.view.state.field(tableRegionField)) selectTableRegion(this.view, null)
         return
       }
+      // 跨格接管：capture 阶段截断本事件，CM6 的 bubble 监听不再更新线性选区。
       event.preventDefault()
       event.stopImmediatePropagation()
       const region = normalizeTableRegion({ tableFrom: target.tableFrom,

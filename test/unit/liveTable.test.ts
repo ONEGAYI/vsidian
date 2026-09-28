@@ -143,18 +143,20 @@ describe('live 表格装饰', () => {
     view.destroy()
   })
 
-  it('中间空格连续退格后再输入仍包在中列网格标记中', () => {
+  it('中间空格连续退格不删填充（空白透明），再输入仍包在中列网格标记中', () => {
     const doc = '| 带 |  | 送 |\n| --- | --- | --- |\n| 左 | 右 | 末 |'
     const line = doc.split('\n')[0]!
     const middle = splitTableRowCells(line, 0)[1]!
     const view = makeEditView(doc, middle.contentFrom)
     deleteCharBackward(view)
     deleteCharBackward(view)
-    expect(view.state.doc.line(1).text).toBe('| 带 | | 送 |')
+    // 2026-09-28 语义变更：空内容格的源码填充对用户透明——连续退格不得
+    // 删掉填充空白（旧行为删到 | 带 | | 送 | 已被用户报告否定）
+    expect(view.state.doc.line(1).text).toBe('| 带 |  | 送 |')
     const at = view.state.selection.main.head
     view.dispatch({ changes: { from: at, insert: '是' },
       selection: { anchor: at + 1 }, userEvent: 'input.type' })
-    expect(view.state.doc.line(1).text).toBe('| 带 |是 | 送 |')
+    expect(view.state.doc.line(1).text).toBe('| 带 |  是| 送 |')
     expect(view.state.selection.main.assoc).toBe(-1)
     const rendered = view.state.field(liveDecorationsField).decos
     const rebuilt = buildLivePreviewDecorations(view.state.doc, view.state.selection)
@@ -173,7 +175,7 @@ describe('live 表格装饰', () => {
       expect(current.text.slice(columns[2]!.contentFrom - current.from,
         columns[2]!.contentTo - current.from)).toBe('送')
     }
-    expect(view.state.doc.line(1).text).toBe('| 带 |是ssssssss | 送 |')
+    expect(view.state.doc.line(1).text).toBe('| 带 |  是ssssssss| 送 |')
     expect(view.state.selection.main.assoc).toBe(-1)
     view.destroy()
   })
@@ -623,7 +625,9 @@ describe('单元格编辑权威链路', () => {
     expect(view.contentDOM.querySelectorAll('.vsidian-table-grid-row')).toHaveLength(3)
     for (let i = 0; i < 3; i++) deleteCharForward(view)
     await settle()
-    expect(linked.doc.getText()).toBe(TABLE_DOC.replace('| 苹果 |', '| |'))
+    // 2026-09-28 语义变更：清空后的填充空白透明，forward 删除被守恒拒绝，
+    // 不再删到 | |（旧行为已被用户报告否定）
+    expect(linked.doc.getText()).toBe(TABLE_DOC.replace('苹果', ''))
     linked.controller.dispose()
   })
 
@@ -698,7 +702,7 @@ describe('单元格编辑权威链路', () => {
     view.destroy()
   })
 
-  it('空单元格新输入的空格也可退格删除，不能把可编辑空白当作结构标记', () => {
+  it('空单元格不接受空白输入：填充透明，退格也无操作（2026-09-28 语义）', () => {
     const text = TABLE_DOC.replace('苹果', '')
     const view = makeEditView(text, text.indexOf('|  |') + 2)
     const at = view.state.selection.main.head
