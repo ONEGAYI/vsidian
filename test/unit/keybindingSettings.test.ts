@@ -391,3 +391,35 @@ describe('审查修复第 3 轮（新-1：复合状态保留录制）', () => {
     root.remove()
   })
 })
+
+describe('#164 装载快照幂等（间歇竞态源）', () => {
+  // 机制：装载回流的 keybindings.snapshot（无 requestId、overrides 与当前
+  // 相同）触发 renderRows 的 replaceChildren 整体重建——Playwright
+  // locator.evaluate 在协议往返间隙持有的行节点被替换为 detached，
+  // computed backgroundColor 取空串（CI 负载下回流漂移到断言窗口即间歇红，
+  // issue #164）。幂等快照必须跳过重建；真实变更与保存回执仍全量重渲染。
+  it('相同 overrides 的装载快照不重建行 DOM，外部变更仍重建', () => {
+    const section = new KeybindingSettingsSection({ postMessage: () => {} })
+    const root = document.createElement('div')
+    document.body.append(root)
+    section.mount(root)
+    const tag = root.querySelector<HTMLElement>('[data-operation-id="bold"] .vsidian-keybindings-tag')!
+    expect(tag.isConnected).toBe(true)
+
+    // 装载回流：overrides 与初始态等价（无用户覆盖）、无 requestId → 幂等
+    section.handleHostMessage({ kind: 'keybindings.snapshot', overrides: {} })
+    expect(tag.isConnected, '幂等快照不得替换行节点（#164：重建使已解析节点 detached）').toBe(true)
+
+    // 保存回执（带 requestId）不受幂等短路影响：仍走全渲染（status 更新依赖）
+    section.handleHostMessage({ kind: 'keybindings.changed', overrides: {}, requestId: 1, ok: true })
+    const afterReceipt = root.querySelector<HTMLElement>('[data-operation-id="bold"] .vsidian-keybindings-tag')!
+    expect(afterReceipt.isConnected).toBe(true)
+
+    // 外部变更（overrides 不同、无 requestId）→ 全量重建
+    section.handleHostMessage({ kind: 'keybindings.snapshot', overrides: { bold: ['ctrl+alt+b'] } })
+    const fresh = root.querySelector<HTMLElement>('[data-operation-id="bold"] .vsidian-keybindings-tag')!
+    expect(fresh).not.toBe(tag)
+    expect(fresh.textContent).toContain('Ctrl+Alt+B')
+    root.remove()
+  })
+})

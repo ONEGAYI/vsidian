@@ -64,6 +64,11 @@ try {
     const bold = page.locator('[data-operation-id="bold"]')
     await bold.locator('kbd').waitFor()
     assert.equal(await bold.locator('kbd').innerText(), 'Ctrl+B')
+    // #164 等帧稳定：定位落入分页开的捕获签在 nav 聚焦后经 rAF 一帧才
+    // cancelCapture 重建行容器——不排空该帧，paint 断言的节点解析与
+    // computed 查询之间会撞上重建（节点 detached、computed 取空串）
+    await page.evaluate(() => new Promise((resolve) =>
+      requestAnimationFrame(() => setTimeout(resolve, 0))))
     const paint = await bold.locator('.vsidian-keybindings-tag').evaluate((node) => {
       const style = getComputedStyle(node)
       const rect = node.getBoundingClientRect()
