@@ -169,6 +169,7 @@ vsidian/
 │   │   ├── viewCycle.ts                # 三态视图编排纯逻辑
 │   │   └── wikilinkTarget.ts           # 宿主侧双链目标解析纯逻辑（#11）
 │   ├── shared/      # 两端共享纯逻辑
+│   │   ├── blockId.ts           # 块 id 与块边界单一事实源
 │   │   ├── changeMapping.ts     # 变更重定位纯函数
 │   │   ├── chromeContract.ts    # 界面域样式契约探针表
 │   │   ├── codeLangs.ts         # 代码块语言注册表与别名路由
