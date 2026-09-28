@@ -180,7 +180,18 @@ export function buildMenuDom(
       const submenu = document.createElement('div')
       submenu.className = names.submenu
       submenu.setAttribute('role', 'menu')
+      // 子菜单分组（#183 验收反馈）：组边界落分隔线——复用顶级 separator
+      // 类与 presentation 角色，观感与顶级三簇一致；模型层 children 已按
+      // 组聚排（sortMenuDefsByGroup），隐藏组不产出、相邻交界自然单线
+      let prevGroup: string | undefined
       for (const child of def.children) {
+        if (prevGroup !== undefined && child.group !== prevGroup) {
+          const separator = document.createElement('div')
+          separator.className = names.separator
+          separator.setAttribute('role', 'presentation')
+          submenu.appendChild(separator)
+        }
+        prevGroup = child.group
         appendItem(submenu, child)
       }
       itemHost.appendChild(submenu)

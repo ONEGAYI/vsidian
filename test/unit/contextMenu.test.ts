@@ -72,10 +72,13 @@ describe('描述符表契约（CONTEXT_MENU_ITEMS）', () => {
     expect(new Set(ids).size).toBe(ids.length)
   })
 
-  it('每项 group 已登记且 labelKey 在两语言包中存在（双包 parity 抽查）', () => {
-    for (const def of all) {
+  it('group 与 labelKey 契约：顶级 group 已登记（簇序受控）；子项 group 非空（子组按首现序排后）；双包 parity 抽查', () => {
+    for (const def of CONTEXT_MENU_ITEMS) {
       expect(CONTEXT_MENU_GROUP_ORDER.includes(def.group as (typeof CONTEXT_MENU_GROUP_ORDER)[number]),
-        `${def.id} 的 group ${def.group} 未登记`).toBe(true)
+        `顶级 ${def.id} 的 group ${def.group} 未登记`).toBe(true)
+    }
+    for (const def of all) {
+      expect(def.group.length > 0, `${def.id} 的 group 为空`).toBe(true)
       expect(en[def.labelKey], `${def.id} 的 labelKey ${def.labelKey} 缺英文词条`).toBeDefined()
       expect(zhCn[def.labelKey], `${def.id} 的 labelKey ${def.labelKey} 缺中文词条`).toBeDefined()
     }
@@ -308,6 +311,38 @@ describe('handler 承载（覆写语义：可换执行体；分派先查运行�
     contextMenuHandlerForCommand('tool.command')!()
     expect(calls).toBe(1)
     expect(contextMenuHandlerForCommand('myTool'), '查找键是 command 不是 id').toBeUndefined()
+  })
+})
+
+describe('子菜单分组（#183 验收反馈：组聚排 + 组边界分隔线的数据面）', () => {
+  it('段落设置子项分三组且组聚排：正文+标题｜列表｜引用（组内序稳定）', () => {
+    const para = buildContextMenuModel(normalCtx())
+      .flatMap((g) => g.items).find((i) => i.id === 'paragraphStyle')!
+    expect(para.children!.map((c) => c.id)).toEqual([
+      'headingNone', 'heading1', 'heading2', 'heading3', 'heading4', 'heading5', 'heading6',
+      'bulletList', 'orderedList', 'taskList',
+      'quote',
+    ])
+    const groups = [...new Set(para.children!.map((c) => c.group))]
+    expect(groups).toEqual(['paragraphHeading', 'paragraphList', 'paragraphQuote'])
+  })
+
+  it('子组未登记 CONTEXT_MENU_GROUP_ORDER：按首现顺序排后（数据序即呈现序）', () => {
+    // 内置 paragraphChildren 原始序已是目标呈现序；乱序注册的运行期子项同样聚排
+    const cleanup = registerContextMenuItem({
+      id: 'mixed', group: 'link', order: 89,
+      command: 'mixed', labelKey: 'contextMenu.selectAll',
+      children: [
+        { id: 'mB', group: 'subB', order: 0, command: 'mB', labelKey: 'contextMenu.copy' },
+        { id: 'mA', group: 'subA', order: 0, command: 'mA', labelKey: 'contextMenu.copy' },
+        { id: 'mB2', group: 'subB', order: 1, command: 'mB2', labelKey: 'contextMenu.copy' },
+      ],
+    })
+    const mixed = buildContextMenuModel(normalCtx())
+      .flatMap((g) => g.items).find((i) => i.id === 'mixed')!
+    // subB 首现在前，subA 排后；组内按 order（mB 先于 mB2）
+    expect(mixed.children!.map((c) => c.id)).toEqual(['mB', 'mB2', 'mA'])
+    cleanup()
   })
 })
 

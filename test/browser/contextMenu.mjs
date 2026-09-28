@@ -451,11 +451,35 @@ try {
     h2: window.readMenu().checkedOf('heading2'),
     h1Role: document.querySelector('button[data-vsidian-command="heading1"]')?.getAttribute('role') ?? null,
     h2Role: document.querySelector('button[data-vsidian-command="heading2"]')?.getAttribute('role') ?? null,
+    // 子菜单分组线（#183 验收反馈）：正文+标题｜列表｜引用——两条真实绘制
+    //（computed 非零厚度），且菜单容器无焦点圈（outline:none 修复接线）
+    submenuSeps: (() => {
+      const btn = document.querySelector('button[data-vsidian-command="paragraphStyle"]')
+      const submenu = btn?.closest('.vsidian-context-menu-host')
+        ?.querySelector('.vsidian-context-menu-submenu') ?? null
+      if (!submenu) return null
+      const seps = [...submenu.querySelectorAll(':scope > .vsidian-context-menu-separator')]
+      return {
+        count: seps.length,
+        painted: seps.every((s) => {
+          const style = getComputedStyle(s)
+          return style.borderTopWidth !== '0px' && style.display !== 'none'
+        }),
+      }
+    })(),
+    menuOutline: (() => {
+      const menu = document.querySelector('.vsidian-context-menu')
+      return menu ? getComputedStyle(menu).outlineStyle : null
+    })(),
   }))
   assert.equal(checkState.h1, 'true', '标题行右键：H1 应勾选')
   assert.equal(checkState.h2, null, 'H2 不应勾选')
   assert.equal(checkState.h1Role, 'menuitemcheckbox', '勾选项 role 应为 menuitemcheckbox')
   assert.equal(checkState.h2Role, 'menuitem', '未勾选项回落 menuitem')
+  assert.ok(checkState.submenuSeps, '段落设置子菜单应在场')
+  assert.equal(checkState.submenuSeps.count, 2, '子菜单应两条分组线（正文+标题｜列表｜引用）')
+  assert.ok(checkState.submenuSeps.painted, '子菜单分组线应真实绘制（边框厚度非零）')
+  assert.equal(checkState.menuOutline, 'none', '菜单容器不应画焦点圈（焦点圈修复）')
   await page.evaluate(() => window.post({ kind: 'contextMenu.test.menuClose' }))
   // 任务行（真实右键）：taskList 勾选、bulletList 不勾（族互斥）
   const TASK_DOC = '正文一段\n\n- [ ] 待办任务\n'

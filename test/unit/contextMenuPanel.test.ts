@@ -146,11 +146,14 @@ describe('全域接管与不接管位（contextMenu.test.contextMenu 钩子）',
     expect(menuEl()).toBeNull()
   })
 
-  it('分组线恰两条（三簇）；子菜单按钮与叶命令同级可达', () => {
+  it('分组线恰两条（三簇，限定顶级直接子级——子菜单内另有分组线）；子菜单按钮与叶命令同级可达', () => {
     const h = makeBridge()
     const { c } = mountPanel(h)
     c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: POS.para })
-    expect(menuEl()!.querySelectorAll('.vsidian-context-menu-separator')).toHaveLength(2)
+    // jsdom 对 :scope > 支持不可靠，用 children 过滤等价判定直接子级
+    const topSeps = [...menuEl()!.children].filter((el) =>
+      el.classList.contains('vsidian-context-menu-separator'))
+    expect(topSeps).toHaveLength(2)
     // 子菜单内的叶命令（文本格式/段落设置/插入）经 data-vsidian-command 可定位
     for (const command of ['bold', 'heading1', 'insertTable', 'clearInline']) {
       expect(allCommands(), `${command} 应在子菜单中`).toContain(command)
@@ -345,6 +348,23 @@ describe('菜单开合（Esc / 外点 / 命令后 / 钩子关闭 / 模式切换�
       c.handleHostMessage({ kind: 'contextMenu.test.menuClick', command: 'a"b]c' }),
     ).not.toThrow()
     expect(menuEl(), '未命中按钮的点击是 no-op，菜单不受影响').toBeTruthy()
+  })
+
+  it('段落设置子菜单分组线：正文+标题｜列表｜引用 两条（#183 验收反馈）', () => {
+    const h = makeBridge()
+    const { c } = mountPanel(h)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: POS.para })
+    // 定位段落设置父项宿主下的子菜单（DOM 首个 submenu 属文本格式——单组无分组线）
+    const host = buttonOf('paragraphStyle')!.closest('.vsidian-context-menu-host')!
+    const submenu = host.querySelector<HTMLElement>('.vsidian-context-menu-submenu')!
+    // jsdom 对 :scope > 支持不可靠，用 children 过滤等价判定直接子级
+    const submenuSeps = [...submenu.children].filter((el) =>
+      el.classList.contains('vsidian-context-menu-separator'))
+    expect(submenuSeps).toHaveLength(2)
+    // 顶级三簇口径不受子菜单分组线影响（两条）
+    const topSeps = [...menuEl()!.children].filter((el) =>
+      el.classList.contains('vsidian-context-menu-separator'))
+    expect(topSeps).toHaveLength(2)
   })
 })
 

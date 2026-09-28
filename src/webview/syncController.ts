@@ -6835,14 +6835,15 @@ export class WebviewSyncController {
       : undefined
     // #183 统一右键菜单绘制探针：浮层在场（瞬态挂载）时的实际可见性
     // （elementFromPoint 命中——样式注入失效时 DOM 在场但命中失败）、分组
-    // 线与置灰计数（安全降级矩阵的绘制层证据）；菜单关闭时缺省
+    // 线与置灰计数（安全降级矩阵的绘制层证据）；菜单关闭时缺省。分组线
+    // 计数限定顶级（:scope 直接子级）——子菜单内另有分组线，不计入三簇口径
     const contextMenuEl = this.contextMenuEl
     const contextMenu = contextMenuEl
       ? {
           visible: hitPaintedElement(contextMenuEl),
           display: getComputedStyle(contextMenuEl).display,
           separatorCount: contextMenuEl.querySelectorAll(
-            `.${CONTEXT_MENU_CLASS_NAMES.separator}`).length,
+            `:scope > .${CONTEXT_MENU_CLASS_NAMES.separator}`).length,
           disabledCount: contextMenuEl.querySelectorAll('button:disabled').length,
         }
       : undefined

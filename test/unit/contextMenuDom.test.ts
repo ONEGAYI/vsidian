@@ -23,6 +23,7 @@ const label = (key: MessageKey): string => `<${key}>`
 const item = (over: Partial<RenderedMenuItem> & { id: string }): RenderedMenuItem => ({
   labelKey: 'contextMenu.copy' as MessageKey,
   command: over.id,
+  group: 'g',
   danger: false,
   enabled: true,
   checked: false,
@@ -32,6 +33,42 @@ const item = (over: Partial<RenderedMenuItem> & { id: string }): RenderedMenuIte
 
 const build = (groups: readonly RenderedMenuGroup[]) =>
   buildMenuDom(groups, { onCommand: () => {}, resolveLabel: label })
+
+describe('子菜单分组分隔线（#183 验收反馈）', () => {
+  /** 直接子级分隔线计数（jsdom 对 :scope > 支持不可靠，children 过滤等价） */
+  const directSeps = (host: HTMLElement) =>
+    [...host.children].filter((el) => el.classList.contains(CONTEXT_MENU_CLASS_NAMES.separator))
+
+  it('children 跨组落分隔线：每个组边界一条，role=presentation', () => {
+    const menu = build([{
+      id: 'g', items: [item({
+        id: 'parent', children: [
+          item({ id: 'a1', group: 'ga' }),
+          item({ id: 'a2', group: 'ga' }),
+          item({ id: 'b1', group: 'gb' }),
+          item({ id: 'c1', group: 'gc' }),
+        ],
+      })],
+    }])
+    const submenu = menu.querySelector<HTMLElement>(`.${CONTEXT_MENU_CLASS_NAMES.submenu}`)!
+    const seps = directSeps(submenu)
+    expect(seps.length, '两个组边界各一条（ga|gb、gb|gc）').toBe(2)
+    expect(seps[0]!.getAttribute('role')).toBe('presentation')
+  })
+
+  it('单组 children 无分隔线（与既有平铺观感一致——大纲菜单子菜单不受影响）', () => {
+    const menu = build([{
+      id: 'g', items: [item({
+        id: 'parent', children: [
+          item({ id: 'a1', group: 'ga' }),
+          item({ id: 'a2', group: 'ga' }),
+        ],
+      })],
+    }])
+    const submenu = menu.querySelector<HTMLElement>(`.${CONTEXT_MENU_CLASS_NAMES.submenu}`)!
+    expect(directSeps(submenu).length).toBe(0)
+  })
+})
 
 describe('基础装配（role / 命令锚点 / 分组线）', () => {
   it('容器 role=menu；顶级项 button role=menuitem 携 data-vsidian-command；文案经取词器', () => {

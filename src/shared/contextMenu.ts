@@ -161,18 +161,21 @@ const isPlainParagraphLine = (ctx: MenuContextSnapshot): boolean => {
   const line = lineOf(ctx)
   return line.hasText && line.headingLevel === null && line.listKind === null && !line.quoted
 }
+// 段落设置子项分子类组（#183 验收反馈）：正文+标题族｜列表族｜引用 各成
+// 一组，DOM 装配在组边界落分隔线（与顶级三簇同机制）；组内序 = Obsidian
+// 顺序（正文在最前、标题按级、列表保持既有相对序）
 const paragraphChildren: readonly MenuItemDescriptor[] = [
-  { id: 'bulletList', group: 'blockFormat', order: 0, command: 'bulletList', labelKey: 'format.bulletList', iconKey: 'bulletList', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).listKind === 'bullet' },
-  { id: 'orderedList', group: 'blockFormat', order: 1, command: 'orderedList', labelKey: 'format.orderedList', iconKey: 'orderedList', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).listKind === 'ordered' },
-  { id: 'taskList', group: 'blockFormat', order: 2, command: 'taskList', labelKey: 'format.taskList', iconKey: 'taskList', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).listKind === 'task' },
-  { id: 'heading1', group: 'blockFormat', order: 3, command: 'heading1', labelKey: 'format.heading1', badge: 'H1', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).headingLevel === 1 },
-  { id: 'heading2', group: 'blockFormat', order: 4, command: 'heading2', labelKey: 'format.heading2', badge: 'H2', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).headingLevel === 2 },
-  { id: 'heading3', group: 'blockFormat', order: 5, command: 'heading3', labelKey: 'format.heading3', badge: 'H3', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).headingLevel === 3 },
-  { id: 'heading4', group: 'blockFormat', order: 6, command: 'heading4', labelKey: 'format.heading4', badge: 'H4', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).headingLevel === 4 },
-  { id: 'heading5', group: 'blockFormat', order: 7, command: 'heading5', labelKey: 'format.heading5', badge: 'H5', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).headingLevel === 5 },
-  { id: 'heading6', group: 'blockFormat', order: 8, command: 'heading6', labelKey: 'format.heading6', badge: 'H6', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).headingLevel === 6 },
-  { id: 'headingNone', group: 'blockFormat', order: 9, command: 'headingNone', labelKey: 'format.headingNone', iconKey: 'normalText', enable: enabledOutsideStructure, checked: isPlainParagraphLine },
-  { id: 'quote', group: 'blockFormat', order: 10, command: 'quote', labelKey: 'format.quote', iconKey: 'quote', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).quoted },
+  { id: 'headingNone', group: 'paragraphHeading', order: 0, command: 'headingNone', labelKey: 'format.headingNone', iconKey: 'normalText', enable: enabledOutsideStructure, checked: isPlainParagraphLine },
+  { id: 'heading1', group: 'paragraphHeading', order: 1, command: 'heading1', labelKey: 'format.heading1', badge: 'H1', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).headingLevel === 1 },
+  { id: 'heading2', group: 'paragraphHeading', order: 2, command: 'heading2', labelKey: 'format.heading2', badge: 'H2', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).headingLevel === 2 },
+  { id: 'heading3', group: 'paragraphHeading', order: 3, command: 'heading3', labelKey: 'format.heading3', badge: 'H3', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).headingLevel === 3 },
+  { id: 'heading4', group: 'paragraphHeading', order: 4, command: 'heading4', labelKey: 'format.heading4', badge: 'H4', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).headingLevel === 4 },
+  { id: 'heading5', group: 'paragraphHeading', order: 5, command: 'heading5', labelKey: 'format.heading5', badge: 'H5', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).headingLevel === 5 },
+  { id: 'heading6', group: 'paragraphHeading', order: 6, command: 'heading6', labelKey: 'format.heading6', badge: 'H6', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).headingLevel === 6 },
+  { id: 'bulletList', group: 'paragraphList', order: 0, command: 'bulletList', labelKey: 'format.bulletList', iconKey: 'bulletList', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).listKind === 'bullet' },
+  { id: 'orderedList', group: 'paragraphList', order: 1, command: 'orderedList', labelKey: 'format.orderedList', iconKey: 'orderedList', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).listKind === 'ordered' },
+  { id: 'taskList', group: 'paragraphList', order: 2, command: 'taskList', labelKey: 'format.taskList', iconKey: 'taskList', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).listKind === 'task' },
+  { id: 'quote', group: 'paragraphQuote', order: 0, command: 'quote', labelKey: 'format.quote', iconKey: 'quote', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).quoted },
 ]
 
 /** 插入子项（簇 2.3；表格与快速操作条建表同源入口 command=insertTable） */
@@ -365,13 +368,15 @@ export interface RenderedMenuItem {
   id: string
   labelKey: MessageKey
   command: string
+  /** 所属组（DOM 层在子菜单内按组边界落分隔线的判定键；顶级分组由 buildMenuModel 聚合） */
+  group: string
   iconKey?: string
   badge?: string
   danger: boolean
   enabled: boolean
   checked: boolean
   hint?: string
-  /** 组内排序键（DOM 不消费；buildMenuModel 排序用） */
+  /** 组内排序键（DOM 不消费；buildMenuModel / 子菜单排序用） */
   order: number
   children?: readonly RenderedMenuItem[]
 }
@@ -396,7 +401,7 @@ function renderDef(
   // enable 求值一次；父项置灰向子树传播（簇 2 整簇置灰的矩阵语义）
   const selfEnabled = !parentDisabled && (def.enable ? def.enable(ctx) : true)
   const children: RenderedMenuItem[] = []
-  for (const child of def.children ?? []) {
+  for (const child of sortMenuDefsByGroup(def.children ?? [])) {
     const rendered = renderDef(child, ctx, hints, !selfEnabled)
     if (rendered) {
       children.push(rendered)
@@ -409,6 +414,7 @@ function renderDef(
     id: def.id,
     labelKey: def.labelKey,
     command: def.command,
+    group: def.group,
     danger: def.danger === true,
     enabled: selfEnabled,
     checked: def.checked ? def.checked(ctx) : false,
@@ -428,6 +434,29 @@ function renderDef(
     item.children = children
   }
   return item
+}
+
+/**
+ * 子菜单项分组排序（与顶级 buildMenuModel 同口径）：CONTEXT_MENU_GROUP_ORDER
+ * 登记组按登记序，未登记子组按首现顺序排后；组内 order 稳定排序。DOM 装配
+ * 在组边界落分隔线，子菜单由此获得与顶级一致的分组呈现；整组不可见时相邻
+ * 组交界自然收敛为单线（renderDef 已过滤隐藏项，无需独立收起逻辑）。
+ */
+function sortMenuDefsByGroup(defs: readonly MenuItemDescriptor[]): MenuItemDescriptor[] {
+  const seen: string[] = []
+  for (const def of defs) {
+    if (
+      !(CONTEXT_MENU_GROUP_ORDER as readonly string[]).includes(def.group) &&
+      !seen.includes(def.group)
+    ) {
+      seen.push(def.group)
+    }
+  }
+  const keyOf = (group: string): number => {
+    const registered = (CONTEXT_MENU_GROUP_ORDER as readonly string[]).indexOf(group)
+    return registered !== -1 ? registered : CONTEXT_MENU_GROUP_ORDER.length + seen.indexOf(group)
+  }
+  return [...defs].sort((a, b) => keyOf(a.group) - keyOf(b.group) || a.order - b.order)
 }
 
 /**

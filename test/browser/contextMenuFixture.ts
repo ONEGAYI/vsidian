@@ -47,7 +47,8 @@ function readMenu() {
     menuRect: menu ? menu.getBoundingClientRect() : null,
     menuPosition: style ? style.position : null,
     menuBackground: style ? style.backgroundColor : null,
-    separatorCount: menu ? menu.querySelectorAll('.vsidian-context-menu-separator').length : 0,
+    // 分组线计数限定顶级（:scope 直接子级）：子菜单内另有分组线（#183 验收反馈），不计入三簇口径
+    separatorCount: menu ? menu.querySelectorAll(':scope > .vsidian-context-menu-separator').length : 0,
     /** 顶级命令序列（分组容器 → 项宿主 → button 稳定层级） */
     topCommands: menu
       ? Array.from(menu.querySelectorAll<HTMLButtonElement>(

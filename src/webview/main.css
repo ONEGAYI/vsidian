@@ -1152,6 +1152,15 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   color: var(--vscode-menu-foreground, var(--vscode-editor-foreground));
 }
 
+/* 菜单容器不画焦点圈（#183 验收反馈）：容器是 tabindex=-1 的程序聚焦落点
+   （键盘导航起点），Chromium 的 :focus-visible 启发式在键盘焦点转移到容器
+   时会画出宿主 focusBorder（偶发黄圈）；键盘可达性由菜单项按钮的焦点态
+   承担，容器自身无交互语义。两类菜单容器同规则 */
+.vsidian-context-menu:focus,
+.vsidian-sidebar .vsidian-outline-menu:focus {
+  outline: none;
+}
+
 .vsidian-context-menu .vsidian-context-menu-host {
   position: relative; /* 级联子菜单 left:100% 的定位锚 */
 }

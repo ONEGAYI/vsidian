@@ -51,14 +51,14 @@
 | 行内代码 / 行内数学 / 注释 | `inlineCode` / `inlineMath` / `htmlComment` | `inlineCode` / `inlineMath` / `comment` |
 | 清除格式 | `clearInline` | `clearInline` |
 
-**段落设置 ▸**（图标 `paragraphStyle`；各项按当前行实际结构点亮勾选，正文场景「正文 ✓」已经参考图证实，其余按同规则推导、人工验收核对）
+**段落设置 ▸**（图标 `paragraphStyle`；各项按当前行实际结构点亮勾选，正文场景「正文 ✓」已经参考图证实，其余按同规则推导、人工验收核对。**子菜单内分子类组**（验收反馈落地）：`正文 + 标题 1–6`｜`列表`｜`引用` 三组，组边界落分隔线（与顶级三簇同机制——内核 `sortMenuDefsByGroup` 组聚排 + DOM 组边界分隔线，任意子菜单按 `group` 字段生效，空组自然收敛））
 
-| 子项 | 命令 | 图标 key / 徽标 |
-|---|---|---|
-| 无序 / 有序 / 任务列表 | `bulletList` / `orderedList` / `taskList` | 同名复用 |
-| 标题 1–6 | `heading1`–`heading6` | 文字徽标 `H1`–`H6`（不经生图） |
-| 正文 | `headingNone` | `normalText` |
-| 引用 | `quote` | `quote`（段落设置末项，引用之后无更多项——已向用户核实） |
+| 子项 | 子组 | 命令 | 图标 key / 徽标 |
+|---|---|---|---|
+| 正文 | `paragraphHeading` | `headingNone` | `normalText` |
+| 标题 1–6 | `paragraphHeading` | `heading1`–`heading6` | 文字徽标 `H1`–`H6`（不经生图） |
+| 无序 / 有序 / 任务列表 | `paragraphList` | `bulletList` / `orderedList` / `taskList` | 同名复用 |
+| 引用 | `paragraphQuote` | `quote` | `quote`（末组单项——引用之后无更多项，已向用户核实） |
 
 **插入 ▸**（图标 `insertPlus`）
 
@@ -133,8 +133,8 @@
 ## 交互契约
 
 - **定位**：视口系 fixed、右键点位锚定、右/下缘 clamp、底部放不下翻上方（提为内核公用纯函数，两菜单共用）。
-- **子菜单**：默认右侧展开；**右缘放不下自动翻左侧**——此能力即大纲右置时子菜单溢出屏幕缺陷的修复载体，列入迁移验收线。显隐沿用 CSS `:hover` / `:focus-within`（无 JS 展开状态机），父项**点击也展开**作兜底，补 `aria-haspopup` / `aria-expanded` 派生。
-- **键盘**：`role=menu` / `menuitem`；ArrowUp/Down 移动、ArrowRight 进子级、ArrowLeft 退出、Enter/Space 执行、Esc 关闭整个菜单。
+- **子菜单**：默认右侧展开；**右缘放不下自动翻左侧**——此能力即大纲右置时子菜单溢出屏幕缺陷的修复载体，列入迁移验收线。显隐沿用 CSS `:hover` / `:focus-within`（无 JS 展开状态机），父项**点击也展开**作兜底，补 `aria-haspopup` / `aria-expanded` 派生。**子菜单内分组**（验收反馈落地）：子项 `group` 按组聚排（登记序优先、未登记子组按首现序），DOM 在组边界落分隔线（复用顶级 separator 类）；整组不可见时交界自然收敛为单线。
+- **键盘**：`role=menu` / `menuitem`；ArrowUp/Down 移动、ArrowRight 进子级、ArrowLeft 退出、Enter/Space 执行、Esc 关闭整个菜单。菜单容器是 `tabindex=-1` 的程序聚焦落点（键盘导航起点），**不画焦点圈**（`:focus` 置 `outline: none`——Chromium `:focus-visible` 启发式会在键盘焦点转移到容器时画出宿主 focusBorder 黄圈；键盘可达性由菜单项按钮承担）。
 - **快捷键提示列**：右对齐、**小字 + 降低不透明度，不与菜单项文字抢戏**（用户明确要求）；仅显示当前生效绑定，未绑定不占位。已知边界：剪贴板四项的固定提示按 Ctrl 语义显示（`Ctrl+X/C/V/A`），macOS 宿主实际为 Cmd 修饰——提示失真属已知盲点，待后续批次随平台感知提示一并修订；提示派生对 override 后子级条目的 command 变更不追溯（flatten 先到先得）——极边缘，改子级 command 且期待提示跟随的注册方应整树覆写（review 二轮披露）。
 - **互斥与关闭**：同一时间至多一个菜单（沿既有互斥）；外点 pointerdown capture、Esc、执行命令后关闭。
 - **锚点过期防御**：菜单打开期间文档变更（如外部同步）即放弃待执行命令（沿 `blockMenu` doc 实例判等模式）。
