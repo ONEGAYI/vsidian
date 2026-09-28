@@ -666,7 +666,15 @@ export function createTextEditorProvider(
     }
 
     const targetUri = vscode.Uri.file(targetPath)
-    const display = `[[${parsed.path}${parsed.heading !== null ? `#${parsed.heading}` : ''}]]`
+    // 块引用（blockId）回显拼 `#^块ID`；其 heading 恒为 null，下方标题定位
+    // 分支整体跳过——打开目标文件即止，不定位、不弹「未找到标题」（块级定位属二期）
+    const display = `[[${parsed.path}${
+      parsed.heading !== null
+        ? `#${parsed.heading}`
+        : parsed.blockId !== null
+          ? `#^${parsed.blockId}`
+          : ''
+    }]]`
     // 标题定位：先读目标内容算 offset（openTextDocument 只装载不显示）。
     // offset 是宿主系（getText 保留 \r\n）——text-editor 分支用 positionAt
     // 在宿主系内闭合不受影响；面板分支发 view.locate 前须转 LF 系（见下）
