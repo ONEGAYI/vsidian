@@ -7,6 +7,9 @@
 // ——搜索命中跨类目时以聚合结果呈现并标注来源类目。
 // #145 契约 JSON 导出：工具区「导出 JSON」按钮经消息桥请求宿主另存
 // （导出内容与 VSIX 内 style-reference.json 同一数据源）。
+// #155 小改：总分页签两态——「样式参考」总表（版本说明、别名桥要点、变量
+// 别名总表）与「详细查询」（类目分栏 + 过滤搜索 + 分页）；全局搜索定位条目
+// 时直接落入详细查询页签。
 // UI 文案一律 t() 取词（styleRef.* 词条）；条目内容是文档数据（中文为准）。
 import { t } from '../shared/i18n'
 import type { StyleContractCategory, StyleContractEntry } from '../shared/styleContract'
@@ -68,19 +71,49 @@ export class StyleReferenceSection implements SettingsPageSection {
   mount(parent: HTMLElement, focusEntry?: string): () => void {
     parent.replaceChildren()
 
-    // 头部：版本配套说明 + 别名桥要点（文档内容，直接呈现）
-    const head = document.createElement('div')
-    head.className = 'vsidian-style-ref-head'
-    const h = document.createElement('h2')
-    h.textContent = t('styleRef.title')
+    // ---- 总分页签（#155 小改）：总表 / 详细查询两态，aria-selected 单选 ----
+    // 全局搜索定位条目（focusEntry 非 overview）时直接落入详细查询
+    const initialTab = focusEntry && focusEntry !== 'overview' ? 'detail' : 'overview'
+    const tabbar = document.createElement('div')
+    tabbar.className = 'vsidian-style-ref-tabs'
+    tabbar.setAttribute('role', 'tablist')
+    tabbar.setAttribute('aria-label', t('styleRef.tabNav'))
+    const overviewPanel = document.createElement('div')
+    overviewPanel.className = 'vsidian-style-ref-overview'
+    overviewPanel.setAttribute('role', 'tabpanel')
+    const detailPanel = document.createElement('div')
+    detailPanel.className = 'vsidian-style-ref-detail'
+    detailPanel.setAttribute('role', 'tabpanel')
+    const tabs = new Map<string, HTMLButtonElement>()
+    const setTab = (tab: string): void => {
+      for (const [id, button] of tabs) {
+        button.setAttribute('aria-selected', id === tab ? 'true' : 'false')
+      }
+      overviewPanel.toggleAttribute('hidden', tab !== 'overview')
+      detailPanel.toggleAttribute('hidden', tab !== 'detail')
+    }
+    for (const id of ['overview', 'detail'] as const) {
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.className = 'vsidian-style-ref-tab'
+      button.dataset['tab'] = id
+      button.setAttribute('role', 'tab')
+      button.textContent = id === 'overview' ? t('styleRef.tabOverview') : t('styleRef.tabDetail')
+      button.addEventListener('click', () => setTab(id))
+      tabs.set(id, button)
+      tabbar.append(button)
+    }
+    parent.append(tabbar)
+
+    // 总表面板：版本配套说明 + 别名桥要点（callout 形态，文档内容直接呈现）。
+    // 分页标题由设置页壳层呈现，此处不再重复 h2。
     const ver = document.createElement('p')
     ver.className = 'vsidian-style-ref-version'
     ver.textContent = t('styleRef.versionNote', { version: STYLE_GUIDE_VERSION })
     const bridge = document.createElement('p')
-    bridge.className = 'vsidian-style-ref-bridge'
+    bridge.className = 'vsidian-style-ref-bridge vsidian-settings-callout'
     bridge.textContent = t('styleRef.bridgeNote')
-    head.append(h, ver, bridge)
-    parent.append(head)
+    overviewPanel.append(ver, bridge)
 
     // 变量别名总表
     const varTitle = document.createElement('h3')
@@ -108,7 +141,7 @@ export class StyleReferenceSection implements SettingsPageSection {
       tbody.append(row)
     }
     varTable.append(thead, tbody)
-    parent.append(varTitle, varTable)
+    overviewPanel.append(varTitle, varTable)
 
     // ---- 小类分栏布局：左侧类目栏（按域分组），右侧条目表 + 分页 ----
     const categories = orderedCategories(STYLE_GUIDE_CATEGORIES)
@@ -195,7 +228,9 @@ export class StyleReferenceSection implements SettingsPageSection {
     pager.className = 'vsidian-style-ref-pager'
     main.append(bar, list, pager)
     layout.append(catNav, main)
-    parent.append(layout)
+    detailPanel.append(layout)
+    parent.append(overviewPanel, detailPanel)
+    setTab(initialTab)
 
     const render = (): void => {
       const support = supportSel.value as SupportFilter

@@ -119,9 +119,10 @@ export class CssSnippetSettingsSection implements SettingsPageSection {
 
     // #130 远程资源缓存说明：HTTPS 导入/联网字体经网络加载，手动刷新只
     // 击穿本地入口（?v=），远程缓存遵循 HTTP 语义、不承诺远端主动更新
-    // （验收：缓存与刷新行为在设置页有说明）
+    // （验收：缓存与刷新行为在设置页有说明）。#155 小改：说明性长文案
+    // 统一 callout 形态（与样式参考别名桥要点共用 vsidian-settings-callout）
     const cacheNote = document.createElement('p')
-    cacheNote.className = 'vsidian-css-snippets-remote-note'
+    cacheNote.className = 'vsidian-css-snippets-remote-note vsidian-settings-callout'
     cacheNote.textContent = t('cssSnippets.remoteCacheNote')
     parent.append(cacheNote)
 

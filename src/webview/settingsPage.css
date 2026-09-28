@@ -1,6 +1,11 @@
-/* 独立设置页：使用 VSCode 主题变量，侧栏搜索与内容分页相互独立。 */
-html, body, #app { min-height: 100%; margin: 0; padding: 0; }
+/* 独立设置页：使用 VSCode 主题变量。#155 视觉刷新：左右两列各自独立滚动
+ * （外层锁定视口高度，侧栏与主区各自 overflow-y）；全分页统一容器语言
+ * （分组容器圆角色差，色差用前景色低占比叠加，任意主题自适应）；布尔
+ * 控件为纯 CSS 拨动开关（保留 input[type=checkbox] 语义）。 */
+html, body, #app { height: 100%; margin: 0; padding: 0; }
 * { box-sizing: border-box; }
+/* hidden 属性优先于任何 author display 规则（样式参考总分页签的面板切换依赖它） */
+[hidden] { display: none !important; }
 body {
   font-family: var(--vscode-font-family, system-ui, sans-serif);
   font-size: var(--vscode-font-size, 13px);
@@ -16,12 +21,35 @@ button:focus-visible, input:focus-visible {
 .vsidian-settings {
   display: grid;
   grid-template-columns: 236px minmax(0, 1fr);
-  min-height: 100vh;
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
+  /* 分组容器色差基调（#155）：前景色低占比叠加正文背景，随主题自适应；
+   * 候选变量族（语义控件底 / 侧栏底 / 半透明叠加）经此两变量收敛，
+   * 观感验收不满意时可整族切换 */
+  --vsidian-settings-tint: var(--vscode-editor-foreground, #333);
+  --vsidian-settings-container-bg: color-mix(in srgb, var(--vsidian-settings-tint) 4%, var(--vscode-editor-background, #fff));
+  --vsidian-settings-container-border: color-mix(in srgb, var(--vsidian-settings-tint) 10%, transparent);
 }
 .vsidian-settings-sidebar {
   padding: 28px 16px;
   background: var(--vscode-sideBar-background, #f6f7f9);
   border-right: 1px solid var(--vscode-panel-border, #d9dde3);
+  overflow-y: auto;
+}
+.vsidian-settings-main {
+  min-width: 0;
+  padding: 28px clamp(24px, 5vw, 72px) 48px;
+  overflow-y: auto;
+}
+/* 独立滚动条（#155）：细圆点样式，色随主题前景 */
+.vsidian-settings-sidebar::-webkit-scrollbar,
+.vsidian-settings-main::-webkit-scrollbar { width: 12px; }
+.vsidian-settings-sidebar::-webkit-scrollbar-thumb,
+.vsidian-settings-main::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--vsidian-settings-tint) 25%, transparent);
+  border: 3px solid transparent;
+  border-radius: 6px;
+  background-clip: padding-box;
 }
 .vsidian-settings-title { font-size: 17px; font-weight: 600; margin: 0 10px 26px; }
 .vsidian-settings-search-wrap { position: relative; }
@@ -46,54 +74,166 @@ button:focus-visible, input:focus-visible {
   background: var(--vscode-list-activeSelectionBackground, #e0e4eb);
   border-color: var(--vscode-contrastActiveBorder, transparent);
 }
-.vsidian-settings-main { min-width: 0; padding: 28px clamp(24px, 5vw, 72px) 48px; }
 .vsidian-settings-list { max-width: 850px; }
 .vsidian-settings-heading { font-size: 24px; font-weight: 600; margin: 0 0 10px; }
-.vsidian-settings-subtitle { color: var(--vscode-descriptionForeground, #666); line-height: 1.7; margin: 0 0 32px; }
-.vsidian-settings-group-title { font-size: 13px; font-weight: 600; margin: 0; padding: 0 0 12px; border-bottom: 1px solid var(--vscode-panel-border, #d9dde3); }
-.vsidian-settings-item { padding: 22px 0; border-bottom: 1px solid var(--vscode-panel-border, #d9dde3); }
+.vsidian-settings-subtitle { color: var(--vscode-descriptionForeground, #666); line-height: 1.7; margin: 0 0 28px; }
+/* 分组容器（#155 容器语言）：圆角 + 色差底 + 同族描边；附加分页的内容区
+ * 套用同一容器观感（快捷键/CSS 片段/样式参考的内容整体住进一块容器） */
+.vsidian-settings-group,
+.vsidian-settings-section-content {
+  background: var(--vsidian-settings-container-bg);
+  border: 1px solid var(--vsidian-settings-container-border);
+  border-radius: 10px;
+}
+.vsidian-settings-group { padding: 2px 20px 8px; }
+.vsidian-settings-section-content { padding: 16px 20px; }
+.vsidian-settings-group-title { font-size: 13px; font-weight: 600; margin: 0 -20px; padding: 12px 20px; border-bottom: 1px solid var(--vscode-panel-border, #d9dde3); }
+.vsidian-settings-item { padding: 18px 0; border-bottom: 1px solid color-mix(in srgb, var(--vsidian-settings-tint) 8%, transparent); }
+.vsidian-settings-item:last-child { border-bottom: 0; }
+/* 依赖灰化（#155 跟进）：dependsOn 依赖关闭时整行降不透明度、控件禁用；
+ * 值保留，依赖恢复自动解灰（注册表驱动，见 shared/settings.ts） */
+.vsidian-settings-item-disabled .vsidian-settings-item-label { opacity: 0.55; }
+.vsidian-settings-item-disabled .vsidian-settings-checkbox { cursor: default; }
 .vsidian-settings-item-label { display: flex; justify-content: space-between; align-items: center; gap: 28px; cursor: pointer; }
 .vsidian-settings-item-copy { min-width: 0; }
 .vsidian-settings-item-title { font-size: 14px; font-weight: 500; }
 .vsidian-settings-item-description { display: block; color: var(--vscode-descriptionForeground, #666); margin: 7px 0 0; font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
-.vsidian-settings-checkbox { width: 18px; height: 18px; margin: 0 3px; flex: none; accent-color: var(--vscode-focusBorder, #007fd4); cursor: pointer; }
+/* 布尔拨动开关（#155）：appearance none 纯 CSS 自绘，语义与键盘可达不变 */
+.vsidian-settings-checkbox {
+  appearance: none;
+  width: 36px; height: 20px; margin: 0 3px; flex: none; cursor: pointer;
+  position: relative; border-radius: 999px;
+  background: color-mix(in srgb, var(--vsidian-settings-tint) 24%, var(--vscode-editor-background, #fff));
+  transition: background-color 120ms ease;
+}
+.vsidian-settings-checkbox::before {
+  content: '';
+  position: absolute; top: 2px; left: 2px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--vscode-editor-background, #fff);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform 120ms ease;
+}
+.vsidian-settings-checkbox:checked { background: var(--vscode-focusBorder, #007fd4); }
+.vsidian-settings-checkbox:checked::before { transform: translateX(16px); }
 .vsidian-settings-select { flex: none; margin: 0 3px; padding: 3px 6px; font: inherit; color: var(--vscode-dropdown-foreground, inherit); background: var(--vscode-dropdown-background, transparent); border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border, #d9dde3)); border-radius: 2px; cursor: pointer; }
 .vsidian-settings-item-located { outline: 1px solid var(--vscode-focusBorder, #007fd4); outline-offset: 8px; border-radius: 3px; }
 .vsidian-settings-status { min-height: 20px; margin: 0 0 14px; color: var(--vscode-descriptionForeground, #666); font-size: 12px; }
 .vsidian-settings-empty { color: var(--vscode-descriptionForeground, #666); padding: 24px 0; }
-.vsidian-settings-result { display: block; width: 100%; text-align: left; padding: 18px; margin: 0 0 12px; border: 1px solid var(--vscode-panel-border, #d9dde3); border-radius: 8px; background: transparent; color: inherit; }
+.vsidian-settings-result { display: block; width: 100%; text-align: left; padding: 18px; margin: 0 0 12px; border: 1px solid var(--vsidian-settings-container-border); border-radius: 8px; background: var(--vsidian-settings-container-bg); color: inherit; }
 .vsidian-settings-result:hover { background: var(--vscode-list-hoverBackground, #e9ebef); }
 .vsidian-settings-result-category { display: block; font-size: 12px; margin-bottom: 7px; color: var(--vscode-descriptionForeground, #666); }
-.vsidian-keybindings-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; }
-.vsidian-keybindings-toolbar input { flex: 1 1 180px; min-width: 0; }
-.vsidian-keybindings-key-search { display: flex; flex: 1 1 220px; min-width: 0; align-items: center; gap: 8px; }
-.vsidian-keybindings-key-search-caption { flex: none; color: var(--vscode-descriptionForeground, #666); font-size: 12px; white-space: nowrap; }
-.vsidian-keybindings-key-search input { flex: 1 1 auto; min-width: 0; }
-.vsidian-keybindings-toolbar input, .vsidian-keybindings-editor input {
-  min-height: 36px; padding: 7px 10px; border: 1px solid var(--vscode-input-border, var(--vscode-panel-border, #cbd0d8));
-  border-radius: 6px; color: var(--vscode-input-foreground, #333); background: var(--vscode-input-background, #fff);
+/* 通用 callout（#155 小改）：左侧强调条 + 低占比色底，承载说明性长文案
+ * （CSS 片段远程缓存说明、样式参考别名桥要点共用）；信息色随主题变量，
+ * 缺省回落到色差基调叠加 */
+.vsidian-settings-callout {
+  margin: 10px 0; padding: 10px 14px; border-radius: 8px;
+  border-left: 3px solid var(--vscode-focusBorder, #007fd4);
+  background: var(--vscode-inputValidation-infoBackground, color-mix(in srgb, var(--vsidian-settings-tint) 6%, var(--vscode-editor-background, #fff)));
+  color: var(--vscode-descriptionForeground, #666);
+  line-height: 1.65;
 }
-.vsidian-keybindings-toolbar button, .vsidian-keybindings-actions button, .vsidian-keybindings-editor button, .vsidian-keybindings-conflict button {
-  min-height: 32px; padding: 6px 10px; border: 1px solid var(--vscode-button-border, var(--vscode-panel-border, #cbd0d8));
+/* ---- 快捷键分页（#155 对齐 Obsidian：单框搜索＋筛选签＋每操作单行）---- */
+.vsidian-keybindings-toolbar { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
+.vsidian-keybindings-search-wrap { position: relative; flex: 1 1 auto; min-width: 0; display: flex; align-items: center; }
+.vsidian-keybindings-search {
+  width: 100%; min-height: 36px; padding: 7px 40px 7px 32px;
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border, #cbd0d8));
+  border-radius: 8px; color: var(--vscode-input-foreground, #333);
+  background: var(--vscode-input-background, #fff);
+}
+.vsidian-keybindings-search::placeholder { color: var(--vscode-input-placeholderForeground, #737b89); }
+.vsidian-settings .vsidian-keybindings-search-icon { position: absolute; left: 9px; width: 16px; height: 16px; pointer-events: none; color: var(--vscode-descriptionForeground, #666); }
+/* 键盘图标钮：点击切换按键捕获过滤模式（aria-pressed 呈激活态） */
+.vsidian-keybindings-key-toggle {
+  position: absolute; right: 4px; display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px;
+  background: transparent; color: var(--vscode-descriptionForeground, #666);
+}
+.vsidian-keybindings-key-toggle:hover { background: var(--vscode-list-hoverBackground, #e9ebef); }
+.vsidian-keybindings-key-toggle.is-active { color: var(--vscode-focusBorder, #007fd4); background: var(--vscode-list-hoverBackground, #e9ebef); }
+.vsidian-settings .vsidian-keybindings-key-toggle svg { width: 16px; height: 16px; }
+.vsidian-keybindings-toolbar > button {
+  flex: none; min-height: 32px; padding: 6px 12px;
+  border: 1px solid var(--vscode-button-border, var(--vscode-panel-border, #cbd0d8));
   border-radius: 6px; color: var(--vscode-button-secondaryForeground, inherit);
   background: var(--vscode-button-secondaryBackground, transparent);
 }
-.vsidian-keybindings-toolbar button:hover, .vsidian-keybindings-actions button:hover, .vsidian-keybindings-editor button:hover, .vsidian-keybindings-conflict button:hover {
-  background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground, #e9ebef));
+.vsidian-keybindings-toolbar > button:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground, #e9ebef)); }
+/* 筛选签：冲突/全部/已分配/由我分配/未分配，单选（aria-pressed） */
+.vsidian-keybindings-filters { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
+.vsidian-keybindings-filter {
+  min-height: 26px; padding: 3px 14px; border-radius: 999px;
+  border: 1px solid var(--vsidian-settings-container-border);
+  color: var(--vscode-descriptionForeground, #666); background: transparent;
 }
-.vsidian-keybindings-status { min-height: 20px; color: var(--vscode-descriptionForeground, #666); }
-.vsidian-keybindings-row { padding: 16px 0; border-bottom: 1px solid var(--vscode-panel-border, #d9dde3); }
-.vsidian-keybindings-row-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.vsidian-keybindings-filter:hover { background: var(--vscode-list-hoverBackground, #e9ebef); }
+.vsidian-keybindings-filter[aria-pressed="true"] {
+  color: var(--vscode-list-activeSelectionForeground, #242a34);
+  background: var(--vscode-list-activeSelectionBackground, #e0e4eb);
+  border-color: var(--vscode-contrastActiveBorder, transparent);
+}
+.vsidian-keybindings-status { min-height: 20px; margin: 0 0 4px; color: var(--vscode-descriptionForeground, #666); }
+/* 单行布局：名称+模式占左，键位牌/菜单/添加占右；冲突警示条横贯整行 */
+.vsidian-keybindings-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center;
+  gap: 6px 16px; padding: 12px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--vsidian-settings-tint) 8%, transparent);
+}
+.vsidian-keybindings-row:last-child { border-bottom: 0; }
+.vsidian-keybindings-row-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .vsidian-keybindings-mode, .vsidian-keybindings-unbound { color: var(--vscode-descriptionForeground, #666); font-size: 12px; }
-.vsidian-keybindings-tags, .vsidian-keybindings-actions, .vsidian-keybindings-editor { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
-.vsidian-keybindings-tag { display: inline-flex; align-items: center; gap: 5px; padding: 3px 5px 3px 9px; border-radius: 5px;
+.vsidian-keybindings-row-controls { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.vsidian-keybindings-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.vsidian-keybindings-tag { display: inline-flex; align-items: center; gap: 5px; padding: 3px 5px 3px 9px; border-radius: 6px;
   border: 1px solid var(--vscode-panel-border, #cbd0d8); background: var(--vscode-editorWidget-background, var(--vscode-editor-background, #fff)); }
 .vsidian-keybindings-tag kbd { color: var(--vscode-editorWidget-foreground, inherit); font-family: inherit; }
 .vsidian-keybindings-tag .vsidian-keybindings-remove { border: 0; background: transparent; color: inherit; min-width: 22px; cursor: pointer; }
-.vsidian-keybindings-editor input { flex: 1 1 220px; }
-.vsidian-keybindings-conflict { margin-top: 10px; padding: 10px; border-left: 3px solid var(--vscode-inputValidation-warningBorder, #cca700);
+/* 键位捕获签（#155）：就地录制，激活描边 */
+.vsidian-keybindings-capture {
+  width: 12ch; min-height: 28px; padding: 4px 12px; text-align: center;
+  border: 1px solid var(--vscode-focusBorder, #007fd4); border-radius: 999px;
+  color: var(--vscode-input-foreground, #333); background: var(--vscode-input-background, #fff);
+}
+.vsidian-keybindings-capture::placeholder { color: var(--vscode-focusBorder, #007fd4); opacity: 0.75; }
+/* ⋯ 更多操作菜单：清空绑定/恢复默认（一次只开一个） */
+.vsidian-keybindings-menu-wrap { position: relative; flex: none; }
+.vsidian-keybindings-menu-btn {
+  width: 28px; height: 28px; padding: 0; font-size: 15px;
+  border: 1px solid transparent; border-radius: 6px;
+  background: transparent; color: var(--vscode-descriptionForeground, #666);
+}
+.vsidian-keybindings-menu-btn:hover,
+.vsidian-keybindings-menu-btn[aria-expanded="true"] { background: var(--vscode-list-hoverBackground, #e9ebef); color: inherit; }
+.vsidian-keybindings-menu {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 6;
+  display: flex; flex-direction: column; min-width: 132px; padding: 4px;
+  border: 1px solid var(--vsidian-settings-container-border); border-radius: 8px;
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background, #fff));
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+}
+.vsidian-keybindings-menu-item { text-align: left; padding: 6px 10px; border: 0; border-radius: 6px; background: transparent; color: inherit; }
+.vsidian-keybindings-menu-item:hover { background: var(--vscode-list-hoverBackground, #e9ebef); }
+/* ＋ 添加 / ✓ 提交（捕获态原位变更；草稿为空时提交禁用） */
+.vsidian-keybindings-add, .vsidian-keybindings-commit {
+  width: 28px; height: 28px; padding: 0; flex: none; font-size: 15px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--vscode-panel-border, #cbd0d8);
+  color: var(--vscode-button-secondaryForeground, inherit);
+  background: transparent;
+}
+.vsidian-keybindings-add:hover { background: var(--vscode-list-hoverBackground, #e9ebef); }
+.vsidian-keybindings-commit { border-color: var(--vscode-focusBorder, #007fd4); color: var(--vscode-focusBorder, #007fd4); }
+.vsidian-keybindings-commit:hover:not(:disabled) { background: var(--vscode-list-hoverBackground, #e9ebef); }
+.vsidian-keybindings-commit:disabled { opacity: 0.4; cursor: default; }
+.vsidian-keybindings-conflict { grid-column: 1 / -1; margin-top: 2px; padding: 10px; border-left: 3px solid var(--vscode-inputValidation-warningBorder, #cca700);
   color: var(--vscode-inputValidation-warningForeground, inherit); background: var(--vscode-inputValidation-warningBackground, transparent); }
-.vsidian-keybindings-conflict button { margin-left: 10px; }
+.vsidian-keybindings-conflict button { margin-left: 10px; min-height: 26px; padding: 3px 10px;
+  border: 1px solid var(--vscode-button-border, var(--vscode-panel-border, #cbd0d8));
+  border-radius: 6px; color: var(--vscode-button-secondaryForeground, inherit);
+  background: var(--vscode-button-secondaryBackground, transparent); }
+.vsidian-keybindings-conflict button:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground, #e9ebef)); }
 /* ---- #128 CSS 片段管理分页 ---- */
 .vsidian-css-snippets-directory { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
   gap: 10px; padding: 10px 0 14px; }
@@ -108,8 +248,8 @@ button:focus-visible, input:focus-visible {
   background: var(--vscode-button-secondaryBackground, transparent); cursor: pointer; }
 .vsidian-css-snippets-actions button:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground, #e9ebef)); }
 .vsidian-css-snippets-status { min-height: 20px; color: var(--vscode-descriptionForeground, #666); }
-/* #130 远程资源缓存说明（HTTPS 导入/联网字体的刷新与缓存边界） */
-.vsidian-css-snippets-remote-note { margin: 2px 0 6px; color: var(--vscode-descriptionForeground, #666); font-size: 11px; line-height: 1.5; }
+/* #130 远程资源缓存说明（HTTPS 导入/联网字体的刷新与缓存边界）——
+ * #155 小改起为 vsidian-settings-callout 形态，专属规则不再需要 */
 .vsidian-css-snippets-status-error { padding: 8px 10px; border-left: 3px solid var(--vscode-inputValidation-warningBorder, #cca700);
   color: var(--vscode-inputValidation-warningForeground, inherit);
   background: var(--vscode-inputValidation-warningBackground, transparent); }
@@ -125,21 +265,45 @@ button:focus-visible, input:focus-visible {
 .vsidian-css-snippets-paused button:hover { background: var(--vscode-button-hoverBackground, #006ab8); }
 .vsidian-css-snippets-list { margin-top: 6px; }
 .vsidian-css-snippets-item { display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 9px 0; border-bottom: 1px solid var(--vscode-panel-border, #d9dde3); }
+  padding: 9px 0; border-bottom: 1px solid color-mix(in srgb, var(--vsidian-settings-tint) 8%, transparent); }
+.vsidian-css-snippets-item:last-child { border-bottom: 0; }
 .vsidian-css-snippets-item-name { font-family: var(--vscode-editor-font-family, inherit); word-break: break-all; }
 /* #129 被拒条目（越界/符号链接逃逸）行内提示 */
 .vsidian-css-snippets-item-rejected { color: var(--vscode-inputValidation-warningForeground, inherit); cursor: help; }
 
 
 /* ---- #132 样式参考分页（styleReferenceSettings；条目卡片与过滤工具行） ---- */
-.vsidian-style-ref-head h2 { margin: 0 0 4px; }
+/* #155 跟进：详细查询页签可见时主区收起滚动（:has 联动，切回总表自动恢复）
+ * ——标题、说明与工具行固定，高度链收敛到类目栏与条目列表各自 overflow */
+.vsidian-settings-main:has(.vsidian-style-ref-detail:not([hidden])) {
+  display: flex; flex-direction: column; overflow: hidden;
+}
+/* 高度链要穿透壳层内容列表（.vsidian-settings-list 是 main 的直接子级，
+ * 标题/说明/分页内容都住在它里面），逐层放开 min-height 才能收敛到列表滚动 */
+.vsidian-settings-main:has(.vsidian-style-ref-detail:not([hidden])) .vsidian-settings-list {
+  flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
+}
+.vsidian-settings-main:has(.vsidian-style-ref-detail:not([hidden])) > .vsidian-settings-status,
+.vsidian-settings-main:has(.vsidian-style-ref-detail:not([hidden])) .vsidian-settings-heading,
+.vsidian-settings-main:has(.vsidian-style-ref-detail:not([hidden])) .vsidian-settings-subtitle { flex: none; }
+.vsidian-settings-main:has(.vsidian-style-ref-detail:not([hidden])) .vsidian-settings-section-content {
+  flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
+}
+/* #155 小改：总分页签——总表与详细查询两态，pill 语言与快捷键筛选签一致 */
+.vsidian-style-ref-tabs { display: flex; gap: 6px; margin: 0 0 16px; flex: none; }
+.vsidian-style-ref-tab { min-height: 28px; padding: 4px 16px; border-radius: 999px;
+  border: 1px solid var(--vsidian-settings-container-border);
+  color: var(--vscode-descriptionForeground, #666); background: transparent; }
+.vsidian-style-ref-tab:hover { background: var(--vscode-list-hoverBackground, #e9ebef); }
+.vsidian-style-ref-tab[aria-selected="true"] {
+  color: var(--vscode-list-activeSelectionForeground, #242a34);
+  background: var(--vscode-list-activeSelectionBackground, #e0e4eb);
+  border-color: var(--vscode-contrastActiveBorder, transparent); }
 .vsidian-style-ref-version { color: var(--vscode-descriptionForeground, #666); margin: 0 0 6px; }
-.vsidian-style-ref-bridge { padding: 8px 12px; border-left: 3px solid var(--vscode-focusBorder, #007fd4);
-  background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.08)); margin: 8px 0 18px; }
 .vsidian-style-ref-vars { border-collapse: collapse; margin-bottom: 18px; }
 .vsidian-style-ref-vars th, .vsidian-style-ref-vars td { border: 1px solid var(--vscode-panel-border, #d9dde3);
   padding: 4px 8px; text-align: left; }
-.vsidian-style-ref-bar { display: flex; gap: 10px; margin: 10px 0 16px; flex-wrap: wrap; }
+.vsidian-style-ref-bar { display: flex; gap: 10px; margin: 10px 0 16px; flex-wrap: wrap; flex: none; }
 .vsidian-style-ref-search { flex: 1 1 200px; min-width: 160px; }
 /* #145 契约 JSON 导出按钮（工具区，与过滤/搜索同排） */
 .vsidian-style-ref-export { min-height: 26px; padding: 3px 12px; white-space: nowrap;
@@ -147,10 +311,13 @@ button:focus-visible, input:focus-visible {
   color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-background, #0078d4);
   cursor: pointer; }
 .vsidian-style-ref-export:hover { background: var(--vscode-button-hoverBackground, #006ab8); }
-/* ---- #145 小类分栏布局：左侧类目栏（域分组）+ 右侧条目表与分页 ---- */
-.vsidian-style-ref-layout { display: flex; gap: 18px; align-items: flex-start; }
+/* ---- #145 小类分栏布局：左侧类目栏（域分组）+ 右侧条目表与分页。
+ * #155 跟进起详细查询面板自身为 flex 列：工具行与分页固定，列表独立滚动；
+ * 面板 hidden（总表页签）时这些规则无可见效果 ---- */
+.vsidian-style-ref-detail { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.vsidian-style-ref-layout { display: flex; gap: 18px; align-items: stretch; flex: 1 1 auto; min-height: 0; }
 .vsidian-style-ref-cats { flex: 0 0 168px; display: flex; flex-direction: column; gap: 2px;
-  position: sticky; top: 8px; }
+  min-height: 0; overflow-y: auto; }
 .vsidian-style-ref-cats-domain { margin: 10px 0 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
   text-transform: uppercase; color: var(--vscode-descriptionForeground, #666); }
 .vsidian-style-ref-cats-domain:first-child { margin-top: 0; }
@@ -164,15 +331,17 @@ button:focus-visible, input:focus-visible {
   color: var(--vscode-list-activeSelectionForeground, #fff); }
 .vsidian-style-ref-cat-count { font-size: 11px; color: var(--vscode-descriptionForeground, #888); flex: none; }
 .vsidian-style-ref-cat[aria-current='true'] .vsidian-style-ref-cat-count { color: inherit; opacity: 0.85; }
-.vsidian-style-ref-main { flex: 1 1 auto; min-width: 0; }
+.vsidian-style-ref-main { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+/* 条目列表独立滚动（#155 跟进）：过滤/搜索/导出工具行固定在滚动区之外 */
+.vsidian-style-ref-list { overflow-y: auto; flex: 1 1 auto; min-height: 0; }
 /* 跨类目搜索聚合：命中计数与来源类目标注 */
 .vsidian-style-ref-search-count { margin: 2px 0 8px; color: var(--vscode-descriptionForeground, #666); }
 .vsidian-style-ref-cat-chip { font-size: 11px; font-weight: 400; padding: 0 8px; border-radius: 999px;
   border: 1px solid var(--vscode-panel-border, #d9dde3);
   color: var(--vscode-descriptionForeground, #666); white-space: nowrap; }
-/* 分页导航（单页时由脚本收起） */
+/* 分页导航（单页时由脚本收起），固定在列表滚动区之下 */
 .vsidian-style-ref-pager { display: flex; align-items: center; justify-content: center; gap: 12px;
-  margin: 14px 0 4px; }
+  margin: 14px 0 4px; flex: none; }
 .vsidian-style-ref-page-btn { min-height: 26px; padding: 3px 12px; cursor: pointer;
   border: 1px solid var(--vscode-panel-border, #d9dde3); border-radius: 6px;
   color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-secondaryBackground, #313136); }
@@ -198,17 +367,24 @@ button:focus-visible, input:focus-visible {
 .vsidian-style-ref-life { color: var(--vscode-descriptionForeground, #666); font-size: 12px; }
 
 @media (max-width: 600px) {
-  .vsidian-settings { grid-template-columns: minmax(0, 1fr); align-content: start; }
-  .vsidian-settings-sidebar { padding: 18px 20px; border-right: 0; border-bottom: 1px solid var(--vscode-panel-border, #d9dde3); }
+  /* 窄屏退化（#155）：侧栏折到顶部横排且不再独立滚动，主区独占滚动 */
+  .vsidian-settings { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .vsidian-settings-sidebar { padding: 18px 20px; border-right: 0; border-bottom: 1px solid var(--vscode-panel-border, #d9dde3); overflow-y: visible; }
   .vsidian-settings-title { margin: 0 0 16px; }
   .vsidian-settings-nav-label { display: none; }
   .vsidian-settings-nav { display: flex; flex-wrap: wrap; margin-top: 14px; }
   .vsidian-settings-nav-item { width: auto; flex: 1 1 auto; }
   .vsidian-settings-main { padding: 16px 24px 32px; }
   .vsidian-settings-subtitle { margin-bottom: 24px; }
+  /* #155 窄屏快捷键行：退化为上下两段（名称在上、控件在下） */
+  .vsidian-keybindings-row { grid-template-columns: 1fr; }
+  .vsidian-keybindings-row-controls { justify-content: flex-start; }
   /* #145 窄屏：类目栏折到条目表上方横向换行（分栏退化为上下排布） */
   .vsidian-style-ref-layout { flex-direction: column; }
-  .vsidian-style-ref-cats { position: static; flex: 1 1 auto; flex-direction: row; flex-wrap: wrap; }
+  .vsidian-style-ref-cats { flex: 1 1 auto; flex-direction: row; flex-wrap: wrap; overflow: visible; }
   .vsidian-style-ref-cats-domain { flex: 1 0 100%; }
   .vsidian-style-ref-cat { width: auto; }
+  /* #155 跟进：窄屏下详细查询不做内部双列滚动，恢复整页单滚动 */
+  .vsidian-settings-main:has(.vsidian-style-ref-detail:not([hidden])) { display: block; overflow-y: auto; }
+  .vsidian-style-ref-list { overflow: visible; }
 }

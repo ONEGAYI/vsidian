@@ -32,6 +32,14 @@ interface SettingDefinitionBase {
   titleKey: string
   /** 可选说明消息键（设置页副文案，同样经 t() 取词） */
   descriptionKey?: string
+  /**
+   * 可选依赖（#155 跟进）：本项可用的前提设置项 key（boolean 语义——
+   * 依赖项开启时本项可用）。设置页据此自动灰化：依赖关闭时控件禁用、
+   * 条目降不透明度，依赖恢复自动解灰；值不清除，依赖恢复后按原值生效。
+   * 引用存在性与无环由 validateSettingDependencies 校验（生产注册表由
+   * 单测钉住恒合法）；依赖链可传递（A 依赖 B、B 依赖 C 则逐级传导）。
+   */
+  dependsOn?: string
 }
 
 /** 布尔设置项（开关；#34「显示源文件行号」同型） */
@@ -185,6 +193,7 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     default: CODEBLOCK_LINE_NUMBERS_DEFAULT,
     titleKey: 'setting.codeblockLineNumbers.title',
     descriptionKey: 'setting.codeblockLineNumbers.description',
+    dependsOn: CODEBLOCK_CARD_KEY,
   },
   {
     key: CODEBLOCK_COPY_BUTTON_KEY,
@@ -192,6 +201,7 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     default: CODEBLOCK_COPY_BUTTON_DEFAULT,
     titleKey: 'setting.codeblockCopyButton.title',
     descriptionKey: 'setting.codeblockCopyButton.description',
+    dependsOn: CODEBLOCK_CARD_KEY,
   },
   {
     key: CODEBLOCK_HIGHLIGHT_KEY,
@@ -227,6 +237,69 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
+/**
+ * 依赖可用性（#155 跟进）：按 dependsOn 链递归解析本项当前是否可用。
+ * 语义：无依赖恒可用；依赖项（boolean）开启才可用，链上传导（父不可用则
+ * 子不可用）；快照缺值回退依赖项默认值（与 sanitize 语义一致）；非布尔值
+ * 不视为开启。成环时视为可用不死循环——环由 validateSettingDependencies
+ * 拦截（生产注册表单测钉住恒合法），此处只做渲染层兜底。
+ */
+export function isSettingEnabled(
+  defs: readonly SettingDefinition[],
+  values: SettingsPayload,
+  def: SettingDefinition,
+): boolean {
+  const byKey = new Map(defs.map((d) => [d.key, d]))
+  const visited = new Set<string>()
+  let current: SettingDefinition | undefined = def
+  while (current?.dependsOn) {
+    const dependencyKey = current.dependsOn
+    if (visited.has(dependencyKey)) {
+      return true // 环兜底（注册表校验另行拦截）
+    }
+    visited.add(dependencyKey)
+    const dependency = byKey.get(dependencyKey)
+    if (!dependency) {
+      return true // 引用缺失兜底（注册表校验另行拦截）
+    }
+    const raw = values[dependencyKey]
+    const value = raw === undefined ? dependency.default : raw
+    if (value !== true) {
+      return false
+    }
+    current = dependency
+  }
+  return true
+}
+
+/**
+ * 依赖注册完整性校验（#155 跟进）：每个 dependsOn 引用必须存在于定义表，
+ * 且依赖链无自环、无传递环。返回违规描述列表（空数组 = 合法）。生产注册表
+ * 的合法性由单测钉住——新增依赖项时此函数保证错引用/成环在测试期暴露。
+ */
+export function validateSettingDependencies(defs: readonly SettingDefinition[]): string[] {
+  const byKey = new Map(defs.map((d) => [d.key, d]))
+  const violations: string[] = []
+  for (const def of defs) {
+    if (!def.dependsOn) continue
+    if (!byKey.has(def.dependsOn)) {
+      violations.push(`${def.key} dependsOn 未注册的 ${def.dependsOn}`)
+      continue
+    }
+    const chain = new Set<string>()
+    let cursor: SettingDefinition | undefined = def
+    while (cursor?.dependsOn) {
+      if (chain.has(cursor.key)) {
+        violations.push(`${def.key} 依赖链成环（${[...chain, cursor.key].join(' -> ')}）`)
+        break
+      }
+      chain.add(cursor.key)
+      cursor = byKey.get(cursor.dependsOn)
+    }
+  }
+  return violations
+}
+
 /** 定义自校验（注册入口防线：非法定义整体拒绝）。titleKey/descriptionKey
  *  只校验字符串形态（非空）；键是否存在于语言包由渲染层 t() 回退链兜底
  *  （缺键显示键名本身），生产键的正确性由字典编译期 parity 保证 */
@@ -236,7 +309,8 @@ export function isSettingDefinition(v: unknown): v is SettingDefinition {
     typeof v.key !== 'string' ||
     v.key.length === 0 ||
     typeof v.titleKey !== 'string' ||
-    (v.descriptionKey !== undefined && typeof v.descriptionKey !== 'string')
+    (v.descriptionKey !== undefined && typeof v.descriptionKey !== 'string') ||
+    (v.dependsOn !== undefined && (typeof v.dependsOn !== 'string' || v.dependsOn.length === 0))
   ) {
     return false
   }
