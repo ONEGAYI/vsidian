@@ -8703,7 +8703,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
 
   // ---- #160：普通链接锚点定位（fragment 结构化保留 + 打开后定位） ----
 
-  ['普通链接锚点跳转（文本编辑器）：含空格路径矩阵与 selection reveal；缺失标题、块 id 降级与外部 #（#160）', async () => {
+  ['普通链接锚点跳转（文本编辑器）：含空格路径矩阵与 selection reveal；缺失标题、块 id 定位与外部 #（#160）', async () => {
     /** 注入普通链接意图（与真实 webview 消息同一校验与处理入口） */
     const injectLink = async (uri: string, href: string): Promise<void> => {
       await vscode.commands.executeCommand(CMD.injectMessage, uri, {
@@ -8753,12 +8753,19 @@ export const cases: Array<[string, () => Promise<void>]> = [
       vscode.window.activeTextEditor?.document.uri.toString() === wsUri('链接目标.md').toString()
         ? true : undefined)
 
-    // #^块id fragment：块定位器由 #159 并行交付，本票降级打开不定位（无警告）
+    // #^块id fragment：块定位器与双链锚点同源（#159 交付，批次合并后接通）——
+    // 文本编辑器路径 selection 应落在目标块首行（findBlockOffset 块首语义）
     await openWithEditor('links.md')
     await waitSessionReady('links.md')
-    await injectLink(uri, './链接目标.md#^abc123')
-    logData = await waitWikilinkLog(uri, (e) => e.kind === 'doc' && e.fragment === '^abc123')
-    assert(logData!.locate === 'none', `块 id 降级应记录 locate=none，实际 ${logData!.locate}`)
+    await injectLink(uri, './链接目标.md#^link-blk')
+    logData = await waitWikilinkLog(uri, (e) => e.kind === 'doc' && e.fragment === '^link-blk')
+    assert(logData!.locate === 'text-editor', `块 id 应定位（text-editor），实际 ${logData!.locate}`)
+    const blockSel = vscode.window.activeTextEditor?.selection
+    const blockSelLine = blockSel
+      ? vscode.window.activeTextEditor!.document.lineAt(blockSel.active).text
+      : ''
+    assert(blockSelLine.trim() === '普通链接块引用目标段落。 ^link-blk',
+      `块锚点 selection 应在块首行，实际「${blockSelLine}」`)
 
     // 外部 URL 的 # 不接管：照旧 external 归类（测试钩子不真开浏览器）。
     // 前一注入打开的文本编辑器已替换源面板——先重开再注入

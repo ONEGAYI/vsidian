@@ -1806,9 +1806,9 @@ interface LinkAnchorPort {
 /**
  * #160 fragment → 文档内定位区间（宿主系坐标，getText 保留 \r\n）：
  * 标题 fragment 复用 #11 的 findHeadingOffset（与双链锚点同源比较口径）；
- * `#^块id` 的块定位器由并行票 #159 交付，本票降级为打开不定位
- * （TODO(#159)，合并后接通共享定位器）。调用方以 isBlockIdFragment 区分
- * 「降级」与「标题未命中」——后者须给用户可见反馈。
+ * `#^块id` 走 #159 的 findBlockOffset（同源块定位器，批次合并后接通）。
+ * 调用方以 isBlockIdFragment 区分「块引用」与「标题引用」——两者的
+ * 缺失提示词条不同（块缺失复用双链的块 id 提示，语义一致）。
  */
 function isBlockIdFragment(fragment: string): boolean {
   return fragment.startsWith('^')
@@ -1858,11 +1858,12 @@ async function executeLinkIntent(
   }
   if (target.kind === 'anchor') {
     // #160 页内锚点：目标即当前文档（意图源面板），不查文件系统。
-    // `#^` 前缀为块引用（#159 交付定位器），先降级为仅显面板不定位
-    const blockPending = isBlockIdFragment(target.fragment)
-    const offset = blockPending
-      ? null
-      : findHeadingOffset(document.getText(), target.fragment)
+    // #^ 前缀为块引用（#159 同源定位器）：块首行落位，标题行落位标题
+    const isBlock = isBlockIdFragment(target.fragment)
+    const text = document.getText()
+    const offset = isBlock
+      ? findBlockOffset(text, target.fragment.slice(1))
+      : findHeadingOffset(text, target.fragment)
     const entry = anchors.findEntry(document.uri)
     pushLog({
       kind: 'anchor',
@@ -1871,10 +1872,10 @@ async function executeLinkIntent(
       locate: offset ? (entry ? 'custom-panel' : 'text-editor') : 'none',
     })
     await revealLinkAnchor(anchors, entry, document.uri, document, offset)
-    if (!blockPending && offset === null) {
-      void vscode.window.showWarningMessage(
-        t('host.linkAnchorMissing', { href: intent.href, heading: target.fragment }),
-      )
+    if (offset === null) {
+      void vscode.window.showWarningMessage(isBlock
+        ? t('host.wikilinkBlockMissing', { link: intent.href, blockId: target.fragment.slice(1) })
+        : t('host.linkAnchorMissing', { href: intent.href, heading: target.fragment }))
     }
     return
   }
@@ -1888,11 +1889,13 @@ async function executeLinkIntent(
     // openTextDocument 只装载不显示；fragment 定位区间与日志先于打开动作
     // （文本编辑器打开会替换源面板，事后无从观测——与 #11 同口径）
     const targetDoc = await vscode.workspace.openTextDocument(uri)
-    const blockPending = target.fragment !== null && isBlockIdFragment(target.fragment)
+    const isBlock = target.fragment !== null && isBlockIdFragment(target.fragment)
+    const targetText = targetDoc.getText()
     const offset =
-      target.fragment !== null && !blockPending
-        ? findHeadingOffset(targetDoc.getText(), target.fragment)
-        : null
+      target.fragment === null ? null
+        : isBlock
+          ? findBlockOffset(targetText, target.fragment.slice(1))
+          : findHeadingOffset(targetText, target.fragment)
     const entry = anchors.findEntry(uri)
     pushLog({
       kind: 'doc',
@@ -1902,10 +1905,10 @@ async function executeLinkIntent(
       locate: offset ? (entry ? 'custom-panel' : 'text-editor') : 'none',
     })
     await revealLinkAnchor(anchors, entry, uri, targetDoc, offset)
-    if (target.fragment !== null && !blockPending && offset === null) {
-      void vscode.window.showWarningMessage(
-        t('host.linkAnchorMissing', { href: intent.href, heading: target.fragment }),
-      )
+    if (target.fragment !== null && offset === null) {
+      void vscode.window.showWarningMessage(isBlock
+        ? t('host.wikilinkBlockMissing', { link: intent.href, blockId: target.fragment.slice(1) })
+        : t('host.linkAnchorMissing', { href: intent.href, heading: target.fragment }))
     }
     return
   }
