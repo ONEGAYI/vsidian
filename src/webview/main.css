@@ -1723,12 +1723,15 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
 }
 
 /* 卡内行号（#80）：代码行行首右对齐数字，颜色与文档行号槽同源；与文档
-   行号槽两列并存（读图结论），user-select:none 且点击穿透编辑器 */
+   行号槽两列并存（读图结论），user-select:none 且点击穿透编辑器。
+   边距 8+16 重分配（2026-09-28 验收调整）：总占恒为列宽 + 24px——左缘
+   8px 离卡片边、数字与代码 16px；代码列 x 与悬挂缩进基准不受影响 */
 #app .vsidian-code-card-linenumber {
   display: inline-block;
   min-width: 2ch;
   text-align: right;
-  margin-right: 24px;
+  margin-left: 8px;
+  margin-right: 16px;
   color: var(--vscode-editorLineNumber-foreground, rgba(128, 128, 128, 0.8));
   user-select: none;
 }
@@ -1755,7 +1758,9 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
 }
 
 #app .vsidian-code-card-header:hover .vsidian-code-card-copy,
-#app .vsidian-code-card-header .vsidian-code-card-copy:focus-visible {
+#app .vsidian-code-card-header:hover .vsidian-code-card-wrap,
+#app .vsidian-code-card-header .vsidian-code-card-copy:focus-visible,
+#app .vsidian-code-card-header .vsidian-code-card-wrap:focus-visible {
   opacity: 1;
   visibility: visible;
 }
@@ -1764,7 +1769,8 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
    兄弟节点、无公共 DOM 祖先，纯 CSS :hover 不可达——liveCodeCard 的 JS
    指针追踪（mouseover 反查头部）给头部挂 reveal 类（内部交互态类，不入
    公开样式契约）；header:hover 与 :focus-visible 显现规则保留 */
-#app .vsidian-code-card-header.vsidian-code-card-reveal .vsidian-code-card-copy {
+#app .vsidian-code-card-header.vsidian-code-card-reveal .vsidian-code-card-copy,
+#app .vsidian-code-card-header.vsidian-code-card-reveal .vsidian-code-card-wrap {
   opacity: 1;
   visibility: visible;
 }
@@ -1830,8 +1836,10 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
 }
 
 /* 折行开关（#191）：仅阅读侧头部装配（Live 恒折行——CM6 折行是编辑器级
-   facet 无法按块关，不放此钮）；点击全文联动开/关自动折行。常驻呈现与
-   折叠 chevron 同形态（word-wrap 图标：三条横线第三条收短 + 右端折返箭头） */
+   facet 无法按块关，不放此钮）；点击全文联动开/关自动折行。显隐与复制钮
+   同口径（#190 决议：折叠钮常驻、其余进卡即显）——默认隐藏，三处显现
+   组（header hover/focus、live reveal、阅读块容器 hover）命中的选择器组
+   见下方显现规则（word-wrap 图标：三条横线第三条收短 + 右端折返箭头） */
 #app .vsidian-code-card-header .vsidian-code-card-wrap {
   display: inline-flex;
   align-items: center;
@@ -1845,19 +1853,22 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   cursor: pointer;
   background: transparent;
   color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.9));
-  opacity: 0.7;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s ease;
 }
 
 #app .vsidian-code-card-header .vsidian-code-card-wrap:hover,
 #app .vsidian-code-card-header .vsidian-code-card-wrap:focus-visible {
   background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.16));
-  opacity: 1;
 }
 
-/* -off 修饰：折行已关闭（当前横向滚动），降不透明度与折叠态区分；title
-   提示将触发的动作（开启自动折行） */
+/* -off 修饰：折行已关闭（当前横向滚动），经 filter 弱化与关闭态区分（title
+   提示将触发的动作「开启自动折行」）；opacity/visibility 归显隐体系独占，
+   filter 与之正交——显现态仍保持弱化（若改用 opacity 会与显隐规则互相
+   覆盖，显现值被特异性更高的显现组压回 1，弱化失效） */
 #app .vsidian-code-card-header .vsidian-code-card-wrap-off {
-  opacity: 0.4;
+  filter: opacity(0.4);
 }
 
 /* 行内格式 span（mark 按各自范围显形；类名为稳定样式入口，Obsidian 对应
@@ -3003,12 +3014,15 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
 /* sticky 行号：钉在滚动视口左缘不随横向滚动滑走。遮罩背景两层合成——
    上层卡片底色（可半透明的 --vsidian-code-card-background），下层不透
    明编辑器底色（body 背景同源，真实主题中恒不透明），合成结果不透明，
-   遮住横向滑过的文本；间距收进 padding（margin 在盒外遮不住内容） */
+   遮住横向滑过的文本；基态的 8+16 边距整体收进 padding（margin 在盒外
+   遮不住内容；左缘 8px 同入遮罩，盒总占恒为列宽 + 24px） */
 #app .vsidian-view-reading.vsidian-reading-nowrap .vsidian-reading-block.vsidian-reading-code-card .vsidian-code-card-linenumber {
   position: sticky;
   left: 0;
+  margin-left: 0;
   margin-right: 0;
-  padding-right: 24px;
+  padding-left: 8px;
+  padding-right: 16px;
   background-image: linear-gradient(var(--vsidian-code-card-background, rgba(128, 128, 128, 0.12)), var(--vsidian-code-card-background, rgba(128, 128, 128, 0.12)));
   background-color: var(--vscode-editor-background, #1e1e1e);
 }
@@ -3019,8 +3033,9 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
 }
 
 /* #190 整卡悬停恒显（阅读）：头部与代码同在块容器内，纯 CSS 可达——
-   块容器 :hover 下显现复制钮（折叠钮常驻不受影响） */
-#app .vsidian-view-reading .vsidian-reading-block.vsidian-reading-code-card:hover .vsidian-code-card-copy {
+   块容器 :hover 下显现复制/折行钮（折叠钮常驻不受影响） */
+#app .vsidian-view-reading .vsidian-reading-block.vsidian-reading-code-card:hover .vsidian-code-card-copy,
+#app .vsidian-view-reading .vsidian-reading-block.vsidian-reading-code-card:hover .vsidian-code-card-wrap {
   opacity: 1;
   visibility: visible;
 }

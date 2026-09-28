@@ -85,8 +85,9 @@ try {
   })
   assert(Math.abs((small.fenceTopX ?? -1) - (small.codeX ?? -2)) < 1,
     `#189 开围栏符号应与代码文本列同 x：围栏 ${small.fenceTopX} vs 文本 ${small.codeX}`)
-  assert(Math.abs((small.numberX ?? -1) - (small.codeLineX ?? -2)) < 1,
-    `#189 代码行行号列起点不得位移：行号 ${small.numberX} vs 行左缘 ${small.codeLineX}`)
+  // 行号边距 8+16 重分配：行号左缘让出 8px（数字右移，列总占与代码列 x 不变）
+  assert(Math.abs(((small.numberX ?? -1) - (small.codeLineX ?? -2)) - 8) < 1,
+    `#189 代码行行号左缘应距行左缘 8px：行号 ${small.numberX} vs 行左缘 ${small.codeLineX}`)
   const smallPad = Number.parseFloat(small.fencePad ?? '')
   assert.ok(Number.isFinite(smallPad) && smallPad > 0, `首块围栏左内边距应 > 0（2ch 档）：${small.fencePad}`)
 
@@ -284,20 +285,34 @@ try {
   }, scope)
 
   // (a-reading) 折行态（默认）：长行续行首字符与代码文本列对齐（悬挂缩进），
-  // 不窜入卡内行号区；首行行号 x = 行左缘（首行零位移）
+  // 不窜入卡内行号区；行号左缘距行左缘 8px（8+16 重分配，列总占不变）
   const readWrap = await longLineMetrics('.vsidian-reading-code-line')
   assert.ok(readWrap, '阅读长行应折出续行（127 字符 > 视口可用宽）')
   assert(Math.abs(readWrap.contX - readWrap.firstX) < 1,
     `#191 阅读续行首字符应与文本列对齐：续行 ${readWrap.contX} vs 首行 ${readWrap.firstX}`)
-  assert.ok(readWrap.lnRight !== null && readWrap.contX > readWrap.lnRight + 23,
-    `#191 阅读续行不得窜入行号区：续行 x ${readWrap.contX} 应 > 行号右缘+23（${readWrap.lnRight}）`)
-  assert(Math.abs((readWrap.lnLeft ?? -1) - readWrap.lineLeft) < 1,
-    `#191 阅读首行行号应零位移（x=行左缘）：${readWrap.lnLeft} vs ${readWrap.lineLeft}`)
+  assert.ok(readWrap.lnRight !== null && readWrap.contX > readWrap.lnRight + 15,
+    `#191 阅读续行不得窜入行号区：续行 x ${readWrap.contX} 应 > 行号右缘+15（${readWrap.lnRight}）`)
+  assert(Math.abs(((readWrap.lnLeft ?? -1) - readWrap.lineLeft) - 8) < 1,
+    `#191 阅读首行行号左缘应距行左缘 8px：${readWrap.lnLeft} vs ${readWrap.lineLeft}`)
 
   // (b/d) 阅读关闭折行：点击任一块折行钮 → 容器类 + 全部已挂载块（含
-  // 大围栏各片）pre 同时进入 nowrap；不触发热区折叠
+  // 大围栏各片）pre 同时进入 nowrap；不触发热区折叠。折行钮与复制钮同口径
+  // 进卡即显（#190 决议）：未悬停隐藏，hover 卡片显现后方可点击
   const wrapBtn = page.locator('.vsidian-reading-block.vsidian-reading-code-card').first()
     .locator('button.vsidian-code-card-wrap')
+  // 先把指针移到正文段落（卡片横带贴近容器左缘，(8,8) 仍可能落在卡上）；
+  // 隐藏断言等渐隐过渡（0.12s）稳定，不得在过渡起点立即断读
+  await page.locator('.vsidian-reading-block', { hasText: '正文段落' }).first().hover()
+  await page.waitForFunction(() => {
+    const btn = document.querySelector('.vsidian-reading-code-card button.vsidian-code-card-wrap')
+    return btn !== null && getComputedStyle(btn).opacity === '0'
+  }, undefined, { timeout: 2000 })
+  const firstReadCard = page.locator('.vsidian-reading-block.vsidian-reading-code-card').first()
+  await firstReadCard.hover()
+  await page.waitForFunction(() => {
+    const btn = document.querySelector('.vsidian-reading-code-card button.vsidian-code-card-wrap')
+    return btn !== null && getComputedStyle(btn).opacity === '1'
+  })
   const longCardLineCount = () => page.evaluate(() => {
     const line = [...document.querySelectorAll('.vsidian-reading-code-line')]
       .find((el) => el.textContent.includes('wrapLongLine'))
@@ -368,7 +383,9 @@ try {
     `#191 遮罩底层应为不透明色：${scrollGeom.maskColor}`)
 
   // (c-restore) 再点恢复折行：全部块回 pre-wrap；恢复后长行续行仍对齐
-  // （验收「再开启恢复折行且续行对齐」）
+  // （验收「再开启恢复折行且续行对齐」）；折行钮进卡即显——鼠标仍在卡内，
+  // 显现态延续，点击前确保 hover 在场
+  await firstReadCard.hover()
   await wrapBtn.click()
   await page.waitForFunction(() =>
     !document.querySelector('.vsidian-view-reading')?.classList.contains('vsidian-reading-nowrap'))
@@ -392,10 +409,10 @@ try {
   assert.ok(liveWrap, 'live 长行应折出续行（lineWrapping 全局折行）')
   assert(Math.abs(liveWrap.contX - liveWrap.firstX) < 1,
     `#191 Live 续行首字符应与文本列对齐：续行 ${liveWrap.contX} vs 首行 ${liveWrap.firstX}`)
-  assert.ok(liveWrap.lnRight !== null && liveWrap.contX > liveWrap.lnRight + 23,
-    `#191 Live 续行不得窜入行号区：续行 x ${liveWrap.contX} 应 > 行号右缘+23（${liveWrap.lnRight}）`)
-  assert(Math.abs((liveWrap.lnLeft ?? -1) - liveWrap.lineLeft) < 1,
-    `#191 Live 首行行号应零位移（x=行左缘）：${liveWrap.lnLeft} vs ${liveWrap.lineLeft}`)
+  assert.ok(liveWrap.lnRight !== null && liveWrap.contX > liveWrap.lnRight + 15,
+    `#191 Live 续行不得窜入行号区：续行 x ${liveWrap.contX} 应 > 行号右缘+15（${liveWrap.lnRight}）`)
+  assert(Math.abs(((liveWrap.lnLeft ?? -1) - liveWrap.lineLeft) - 8) < 1,
+    `#191 Live 首行行号左缘应距行左缘 8px：${liveWrap.lnLeft} vs ${liveWrap.lineLeft}`)
 
   assert.deepEqual(errors, [], '页面不得有脚本错误')
   console.log('codeCardChrome: #189 + #190 + #191 断言通过（围栏真实对齐、折叠钮位置恒定、整卡悬停恒显、整条热区、折行开关与续行对齐）')

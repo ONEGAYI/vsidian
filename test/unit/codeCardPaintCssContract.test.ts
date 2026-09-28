@@ -54,12 +54,14 @@ describe('代码块卡片 CSS 契约（#79）', () => {
       .toMatch(/display:\s*inline-flex/)
   })
 
-  it('卡内行号：右对齐、颜色与文档行号槽同源、禁选（#80）', () => {
+  it('卡内行号：右对齐、颜色与文档行号槽同源、禁选（#80）；边距 8+16 重分配（左缘 8px、数字与代码 16px，总占恒定代码列不动）', () => {
     const ln = rule('#app .vsidian-code-card-linenumber')
     expect(ln).toMatch(/display:\s*inline-block/)
     expect(ln).toMatch(/text-align:\s*right/)
     expect(ln).toMatch(/color:\s*var\(--vscode-editorLineNumber-foreground/)
     expect(ln).toMatch(/user-select:\s*none/)
+    expect(ln).toMatch(/margin-left:\s*8px/)
+    expect(ln).toMatch(/margin-right:\s*16px/)
   })
 
   it('复制按钮：悬停卡片显现、✓ 反馈态切换图标（#81）', () => {
@@ -114,22 +116,25 @@ describe('代码块卡片 CSS 契约（#79）', () => {
   })
 
   it('复制按钮显现规则组（#190 整卡悬停恒显）：header:hover 保留 + live reveal 类 + 阅读块容器 hover', () => {
+    // 组内块匹配（copy 段与 wrap 段同组，选择器不以 copy 结尾，rule() 的
+    // endsWith 匹配不适用）
+    const blockHit = (sel: string) => (css.match(/[^{}]+\{[^{}]*\}/g) ?? []).filter((b) =>
+      b.split('{')[0]!.includes(sel))
     // header:hover 直达显现保留（头部横带自身悬停仍显现）
-    const hover = (css.match(/[^{}]+\{[^{}]*\}/g) ?? []).filter((b) =>
-      b.split('{')[0]!.includes('.vsidian-code-card-header:hover .vsidian-code-card-copy') &&
-      /opacity:\s*1/.test(b.split('{')[1] ?? ''))
+    const hover = blockHit('.vsidian-code-card-header:hover .vsidian-code-card-copy')
+      .filter((b) => /opacity:\s*1/.test(b.split('{')[1] ?? ''))
     expect(hover, 'header:hover 显现规则（opacity 0→1）应存在').toHaveLength(1)
     // live 整卡显现：头部 block widget 与卡片行无公共 DOM 祖先，JS 指针
     // 追踪给头部挂 reveal 类（内部交互态类，不入公开样式契约）
-    expect(rule('#app .vsidian-code-card-header.vsidian-code-card-reveal .vsidian-code-card-copy'))
-      .toMatch(/opacity:\s*1/)
-    expect(rule('#app .vsidian-code-card-header.vsidian-code-card-reveal .vsidian-code-card-copy'))
-      .toMatch(/visibility:\s*visible/)
+    const reveal = blockHit('.vsidian-code-card-header.vsidian-code-card-reveal .vsidian-code-card-copy')
+    expect(reveal, 'live reveal 显现规则组应存在').toHaveLength(1)
+    expect(reveal[0]!.split('{')[1]!).toMatch(/opacity:\s*1/)
+    expect(reveal[0]!.split('{')[1]!).toMatch(/visibility:\s*visible/)
     // 阅读整卡显现：头部与代码同在块容器内，纯 CSS 可达
-    expect(rule('#app .vsidian-view-reading .vsidian-reading-block.vsidian-reading-code-card:hover .vsidian-code-card-copy'))
-      .toMatch(/opacity:\s*1/)
-    expect(rule('#app .vsidian-view-reading .vsidian-reading-block.vsidian-reading-code-card:hover .vsidian-code-card-copy'))
-      .toMatch(/visibility:\s*visible/)
+    const reading = blockHit('.vsidian-reading-block.vsidian-reading-code-card:hover .vsidian-code-card-copy')
+    expect(reading, '阅读块容器 hover 显现规则组应存在').toHaveLength(1)
+    expect(reading[0]!.split('{')[1]!).toMatch(/opacity:\s*1/)
+    expect(reading[0]!.split('{')[1]!).toMatch(/visibility:\s*visible/)
   })
 
   it('头部横带整条折叠热区：cursor: pointer 视觉暗示（#190）', () => {
@@ -169,20 +174,37 @@ describe('折行窜行修复与折行开关（#191）', () => {
     expect(line).toMatch(/min-width:\s*100%/)
   })
 
-  it('阅读关闭折行：行号 sticky 钉左 + 不透明合成遮罩（卡片色叠不透明编辑器底色）', () => {
+  it('阅读关闭折行：行号 sticky 钉左 + 不透明合成遮罩（卡片色叠不透明编辑器底色）；边距 8+16 收进 padding（margin 在盒外遮不住内容）', () => {
     const ln = rule('#app .vsidian-view-reading.vsidian-reading-nowrap .vsidian-reading-block.vsidian-reading-code-card .vsidian-code-card-linenumber')
     expect(ln).toMatch(/position:\s*sticky/)
     expect(ln).toMatch(/left:\s*0/)
+    expect(ln).toMatch(/margin-left:\s*0/)
+    expect(ln).toMatch(/margin-right:\s*0/)
+    expect(ln).toMatch(/padding-left:\s*8px/)
+    expect(ln).toMatch(/padding-right:\s*16px/)
     // 上层卡片底色（可半透明）叠下层不透明编辑器底色——遮住横向滑过的文本
     expect(ln).toMatch(/background-image:\s*linear-gradient\(var\(--vsidian-code-card-background/)
     expect(ln).toMatch(/background-color:\s*var\(--vscode-editor-background/)
   })
 
-  it('折行钮常驻呈现（与折叠 chevron 同形态）、-off 关闭态降不透明度区分', () => {
+  it('折行钮与复制钮同口径进卡即显：默认隐藏、三处显现组（header hover/focus、live reveal、阅读块容器 hover）；-off 经 filter 弱化（与显隐 opacity 正交）', () => {
     const btn = rule('#app .vsidian-code-card-header .vsidian-code-card-wrap')
     expect(btn).toMatch(/display:\s*inline-flex/)
-    expect(btn).toMatch(/opacity:\s*0\.7/)
+    expect(btn).toMatch(/opacity:\s*0;/)
+    expect(btn).toMatch(/visibility:\s*hidden/)
+    expect(btn).toMatch(/transition:\s*opacity/)
     expect(rule('#app .vsidian-code-card-header .vsidian-code-card-wrap-off'))
-      .toMatch(/opacity:\s*0\.4/)
+      .toMatch(/filter:\s*opacity\(0\.4\)/)
+    // 三处显现组各含 wrap 且给 opacity 1（组选择器块内命中）
+    for (const sel of [
+      '.vsidian-code-card-header:hover .vsidian-code-card-wrap',
+      '.vsidian-code-card-header.vsidian-code-card-reveal .vsidian-code-card-wrap',
+      '.vsidian-reading-block.vsidian-reading-code-card:hover .vsidian-code-card-wrap',
+    ]) {
+      const hits = (css.match(/[^{}]+\{[^{}]*\}/g) ?? []).filter((b) =>
+        b.split('{')[0]!.includes(sel) &&
+        /opacity:\s*1/.test(b.split('{')[1] ?? ''))
+      expect(hits, `显现规则 ${sel}（opacity 1）应存在`).toHaveLength(1)
+    }
   })
 })
