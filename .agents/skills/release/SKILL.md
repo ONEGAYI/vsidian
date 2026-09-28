@@ -21,7 +21,7 @@ VSIX 解压总量警告 6.5 MB / 上限 7.5 MB（#85 代码块高亮后基线约
 
 ## 发布流程
 
-`CHANGELOG.md` 最新 `## <版本> - <日期>` 段落必须与 package.json `version` 一致（`scripts/release.mjs` 强校验，并以该段落作为 GitHub Release 说明）。发版步骤：升 `version` + 新建 CHANGELOG 段落 → **重跑 `npm run gen:styleguide`**（三份指南产物内嵌版本戳随 `version` 变化，漏跑会被契约复验的 guide-consistency 拦截——v0.5.0 发布实证过一次 tag 推送失败）→ 连同指南产物提交 → `npm run release:check` 本地过检查（含与 CI 发布链相同的契约复验链）→ `git tag v<版本>` → `npm run release`（或推 tag 由 CI 执行）。发布提交直推 main 会 bypass 远端必需状态检查——推送后跟踪该次 CI 运行至全绿再离手（失败先 `gh run rerun <id> --failed` 判别间歇性，非间歇失败需修复并重新评估 tag 指向）。
+`CHANGELOG.md` 最新 `## <版本> - <日期>` 段落必须与 package.json `version` 一致（`scripts/release.mjs` 强校验，并以该段落作为 GitHub Release 说明；顶部常驻的 `## Unreleased` 段被提取跳过，可与版本段共存）。发版步骤：升 `version` + **Unreleased 段转正**为 `## <版本> - <日期>`，并**同笔在顶部重建空的 `## Unreleased - 开发中` 段**（发布后批次条目自断有段可记——v0.5.0 后无人重建，四个批次把条目回填进已定案的 0.5.0 段，靠 0.6.0 手工迁回）→ **重跑 `npm run gen:styleguide`**（三份指南产物内嵌版本戳与 `generatedAt` 随版本段变化，须在版本段落定后跑——v0.5.0 实证漏跑 tag 推送失败；v0.6.0 实证转正前跑产出 fallback 日期，同样被 guide-consistency 拦）→ 连同指南产物提交 → `npm run release:check` 本地过检查（含与 CI 发布链相同的契约复验链）→ `git tag v<版本>` → `npm run release`（或推 tag 由 CI 执行）。已发布版本段落随 tag 定案不得回填删改：契约检查器 `changelog-section-mutated` 以 tag 时点快照比对段落正文（排版与折行差异豁免，条目增删必拦），本地与 CI 同拦。发布提交直推 main 会 bypass 远端必需状态检查——推送后跟踪该次 CI 运行至全绿再离手（失败先 `gh run rerun <id> --failed` 判别间歇性，非间歇失败需修复并重新评估 tag 指向）。
 
 ## CI 自动发布
 

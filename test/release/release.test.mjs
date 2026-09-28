@@ -92,6 +92,38 @@ test('CHANGELOG 提取：没有任何版本段落时报错', () => {
   assert.throws(() => extractLatestChangelog('# Changelog\n\n只有开头'), /未找到/)
 })
 
+test('CHANGELOG 提取：顶部常驻 Unreleased 段时跳过，取首个版本段', () => {
+  const content = [
+    '# Changelog',
+    '',
+    '## Unreleased - 开发中',
+    '',
+    '### 新增',
+    '',
+    '- 开发中条目（尚未发布）',
+    '',
+    '## 0.2.0 - 2026-10-01',
+    '',
+    '### 新增',
+    '',
+    '- B 功能',
+    '',
+    '## 0.1.0 - 2026-09-25',
+    '',
+    '- 首个版本',
+  ].join('\n')
+  const notes = extractLatestChangelog(content, '0.2.0')
+  assert.equal(notes.version, '0.2.0')
+  assert.equal(notes.date, '2026-10-01')
+  assert.doesNotMatch(notes.body, /Unreleased/, '发布说明不得混入 Unreleased 段内容')
+  assert.match(notes.body, /- B 功能/)
+})
+
+test('CHANGELOG 提取：只有 Unreleased 段而无版本段落时报错', () => {
+  const content = '# Changelog\n\n## Unreleased - 开发中\n\n- 开发中条目'
+  assert.throws(() => extractLatestChangelog(content, '0.1.0'), /未找到/)
+})
+
 test('折行合并：中文行间直接拼接不留空格，结构换行保留', () => {
   const body = [
     '本版本围绕编辑效率：新增功能条与快捷键管理，',
