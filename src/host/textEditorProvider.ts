@@ -870,6 +870,13 @@ export function createTextEditorProvider(
             `[[${outlineNoteNameOf(docUri)}#${outlineLinkHeading(heading)}]]`,
           )
         },
+        // #162 块链接变体：拼 `[[笔记名#^块id]]`（笔记名与标题链接同源；
+        // 块 id 字符集 [A-Za-z0-9-] 不含 ] | # ^，无转义议题）
+        writeBlockLinkClipboard: (docUri: string, blockId: string) => {
+          void vscode.env.clipboard.writeText(
+            `[[${outlineNoteNameOf(docUri)}#^${blockId}]]`,
+          )
+        },
         // #111 图表导出端口：弹窗工具条 → 载荷校验 + showSaveDialog +
         // writeFile，结果经 diagram.export.result 回来源面板。测试钩子
         // 模式（VSIDIAN_TEST_HOOKS）短路真实对话框：记录消息形态供集成
@@ -1463,6 +1470,26 @@ export function createTextEditorProvider(
       return false
     }))
   }
+
+  // ---- #162 复制块链接命令：快捷键（keybindings.execute 转发）与命令面板
+  // 共用 id；与正文右键菜单是同一命令的两个入口。命令在面板 Live 光标所在
+  // 块执行（标题行=复制标题链接；无块 id 先自动补写一笔可撤销编辑——写回
+  // 链路在 webview，本命令只投递 blockLink.copy）。阅读只读静默不接管
+  // （与格式命令同口径），无活动面板返回 false ----
+  context.subscriptions.push(
+    vscode.commands.registerCommand('onegayi.vsidian.block.copyLink', async (): Promise<boolean> => {
+      for (const entry of sessions.values()) {
+        for (const [sessionId, panel] of entry.panels) {
+          if (!panel.active || !entry.session.getInfo().panels.some((p) =>
+            p.sessionId === sessionId && p.ready)) continue
+          if (entry.session.getViewState(sessionId)?.viewMode === 'reading') return false
+          entry.session.postToPanel(sessionId, { kind: 'blockLink.copy' })
+          return true
+        }
+      }
+      return false
+    }),
+  )
   for (const operation of UI_OPERATIONS) {
     context.subscriptions.push(vscode.commands.registerCommand(operation.command, (): boolean => {
       for (const entry of sessions.values()) for (const [sessionId, panel] of entry.panels) {

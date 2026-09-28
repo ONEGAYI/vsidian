@@ -1087,6 +1087,48 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   display: block;
 }
 
+/* ---- #162 正文右键菜单（复制块链接）：自绘浮层挂 body（fixed 定位）。
+   菜单项一律 button（键盘 Tab/Enter/空格可达）；无级联子菜单与 disabled
+   态（复制项恒可用）。颜色跟随 VSCode 菜单变量，与大纲菜单同族视觉语言 */
+.vsidian-block-menu {
+  position: fixed;
+  z-index: 40;
+  min-width: 160px;
+  max-width: calc(100vw - 8px);
+  box-sizing: border-box;
+  padding: 4px;
+  background: var(--vscode-menu-background, rgba(37, 37, 38, 0.98));
+  border: 1px solid var(--vscode-menu-border, rgba(128, 128, 128, 0.4));
+  border-radius: 5px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+  color: var(--vscode-menu-foreground, var(--vscode-editor-foreground));
+}
+
+.vsidian-block-menu .vsidian-block-menu-item {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 10px;
+  font-size: var(--vscode-font-size, 13px);
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: inherit;
+}
+
+.vsidian-block-menu .vsidian-block-menu-item:hover,
+.vsidian-block-menu .vsidian-block-menu-item:focus-visible {
+  background: var(--vscode-menu-selectionBackground, rgba(9, 71, 113, 0.55));
+  color: var(--vscode-menu-selectionForeground, inherit);
+  outline: none;
+}
+
 /* 重命名行内编辑态：条目内容区被 input 替换（原文可含行内标记）。
    撑满条目剩余宽度、继承条目字号；VSCode 输入框三变量 */
 .vsidian-sidebar .vsidian-outline-item .vsidian-outline-rename-input {

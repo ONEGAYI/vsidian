@@ -16,6 +16,7 @@
   "command.table.insertColumnLeft.title": "表格：左侧插入列",
   "command.table.insertColumnRight.title": "表格：右侧插入列",
   "command.table.deleteColumn.title": "表格：删除列",
+  "command.block.copyLink.title": "复制当前块链接",
   "format.bold": "粗体",
   "format.italic": "斜体",
   "format.strikethrough": "删除线",

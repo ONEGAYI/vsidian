@@ -23,6 +23,9 @@
 // 本模块不依赖 vscode（node 单测直驱）；平台语义由注入的
 // WikilinkResolveContext 描述（与 LinkContext 同一注入模式）。
 import * as path from 'node:path'
+// 块形态学共享单一事实源（#162 提炼自本模块，行为不变）：ATX/围栏/行尾
+// ` ^id` 判定与 webview 复制块链接入口同源
+import { ATX_HEADING_RE, blockIdOfLine, fenceMarkerOf } from '../shared/blockId'
 
 /** 双链解析上下文（宿主文件系统语义由注入方描述） */
 export interface WikilinkResolveContext {
@@ -150,13 +153,8 @@ export function normalizeHeadingText(s: string): string {
   return s.trim().replace(/\s+/g, ' ').toLowerCase()
 }
 
-const ATX_HEADING_RE = /^ {0,3}(#{1,6})[ \t]+([^\n]*?)(?:[ \t]+#+)?[ \t\r]*$/
-
-/** 围栏行标记（``` 或 ~~~，≥3 个）：返回围栏字符，非围栏行返回 null */
-function fenceMarkerOf(line: string): string | null {
-  const m = /^ {0,3}(`{3,}|~{3,})/.exec(line)
-  return m ? m[1]![0]! : null
-}
+/** 围栏行标记（``` 或 ~~~，≥3 个）：返回围栏字符，非围栏行返回 null。
+ *  #162 起实现提炼至 shared/blockId（本模块 import 同源实现） */
 
 /**
  * 目标文档内定位标题：返回首个匹配标题行的 [offset, end)（行首到行尾，
@@ -194,10 +192,8 @@ export function findHeadingOffset(
   return null
 }
 
-/** 块 id 行尾标记：正文 + 至少一空格 + `^id` + 行尾（尾随空白容忍）。
- *  id 全字匹配由捕获组与目标串全等保证（`^abc-def` 不被 `abc` 命中）；
- *  行内代码内的字面 `^id` 因其后还有反引号等字符天然不匹配 */
-const BLOCK_ID_LINE_RE = /[ \t]\^([A-Za-z0-9-]+)[ \t]*$/
+/** 块 id 行尾标记（` ^id` 形态与全字匹配语义）：#162 起实现提炼至
+ *  shared/blockId 的 BLOCK_ID_LINE_RE（本模块经 blockIdOfLine 同源使用） */
 
 /**
  * 目标文档内定位块（#159）：扫描行尾 ` ^id` 标记，命中行向上回溯所属块的
@@ -238,8 +234,7 @@ export function findBlockOffset(
     if (fenceChar !== null) {
       if (marker === fenceChar) {
         // 闭围栏行：Obsidian 允许行尾 ` ^id` 标记整个围栏代码块
-        const m = BLOCK_ID_LINE_RE.exec(line)
-        if (m && m[1] === blockId) {
+        if (blockIdOfLine(line) === blockId) {
           return anchorOf(fenceHead)
         }
         fenceChar = null
@@ -251,8 +246,7 @@ export function findBlockOffset(
       fenceHead = i
       continue // 开围栏行的 ^ 属 info string
     }
-    const m = BLOCK_ID_LINE_RE.exec(line)
-    if (m && m[1] === blockId) {
+    if (blockIdOfLine(line) === blockId) {
       let head = i
       while (head > 0 && lines[head - 1]!.trim() !== '') {
         head-- // 块边界=空行；到文件头自然停

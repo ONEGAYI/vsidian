@@ -758,6 +758,41 @@ describe('isWebviewToHost', () => {
     })).toBe(false)
   })
 
+  it('clipboard.write linkBlock 变体校验（#162）：宿主拼 [[笔记名#^块id]]', () => {
+    expect(isWebviewToHost({
+      kind: 'clipboard.write',
+      linkBlock: { docUri: 'file:///d%3A/notes/a.md', blockId: 'abcd' },
+    })).toBe(true)
+    // 非法：字段缺失/类型不对/变体混装
+    expect(isWebviewToHost({ kind: 'clipboard.write', linkBlock: {} })).toBe(false)
+    expect(isWebviewToHost({
+      kind: 'clipboard.write',
+      linkBlock: { docUri: 'file:///a.md', blockId: 9 },
+    })).toBe(false)
+    expect(isWebviewToHost({
+      kind: 'clipboard.write',
+      text: 'x',
+      linkBlock: { docUri: 'file:///a.md', blockId: 'abcd' },
+    })).toBe(false)
+    expect(isWebviewToHost({
+      kind: 'clipboard.write',
+      linkHeading: { docUri: 'file:///a.md', heading: 'h' },
+      linkBlock: { docUri: 'file:///a.md', blockId: 'abcd' },
+    })).toBe(false)
+  })
+
+  it('blockLink.copy 与 block.test.* 测试钩子消息校验（#162）', () => {
+    expect(isHostToWebview({ kind: 'blockLink.copy' })).toBe(true)
+    expect(isHostToWebview({ kind: 'blockLink.copy', extra: 1 })).toBe(true)
+    expect(isHostToWebview({ kind: 'block.test.contextMenu', pos: 12 })).toBe(true)
+    expect(isHostToWebview({ kind: 'block.test.contextMenu', pos: -1 })).toBe(false)
+    expect(isHostToWebview({ kind: 'block.test.contextMenu', pos: '4' })).toBe(false)
+    expect(isHostToWebview({ kind: 'block.test.menuClick', command: 'copyBlockLink' })).toBe(true)
+    expect(isHostToWebview({ kind: 'block.test.menuClick', command: 'copyHeadingLink' })).toBe(true)
+    expect(isHostToWebview({ kind: 'block.test.menuClick', command: 'rename' })).toBe(false)
+    expect(isHostToWebview({ kind: 'block.test.menuClose' })).toBe(true)
+  })
+
   it('outline.test.contextMenu / menuClick / menuClose / renameKey 测试钩子消息校验（#69）', () => {
     expect(isHostToWebview({ kind: 'outline.test.contextMenu', index: 0 })).toBe(true)
     expect(isHostToWebview({ kind: 'outline.test.contextMenu', index: 4, extra: 1 })).toBe(true)

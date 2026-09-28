@@ -168,6 +168,7 @@ export const en = {
   'styleRef.category.chromeLimits': 'Limitations',
   'styleRef.category.frontmatter': 'Frontmatter table',
   'styleRef.category.toolbarBanner': 'Toolbar & banner',
+  'styleRef.category.contextMenu': 'Content context menu',
   'host.styleRefExported': 'Style contract JSON exported: {path}',
   'host.styleRefExportFailed': 'Failed to export style contract JSON: {reason}',
   'host.styleRefExportReasonMissingAsset': 'extension install incomplete (style-reference.json missing)',
@@ -453,6 +454,13 @@ export const en = {
   'host.imagePasteNoWorkspaceFallback': 'No workspace folder is open; the pasted image was saved next to the current file.',
   'host.imagePasteWriteFailed': 'Failed to save the pasted image.',
 
+  // ---- #162 复制块链接（正文右键菜单与快捷键）----
+  /** 右键菜单：标题行命中的额外项（拼 [[笔记名#标题]]，标题取行面文本） */
+  'blockMenu.copyHeadingLink': 'Copy heading link',
+  /** 右键菜单/快捷键共用项（拼 [[笔记名#^块id]]，无 id 时先自动补写） */
+  'blockMenu.copyLink': 'Copy block link',
+  /** 命令面板/快捷键页操作名（keybindings 注册表 titleKey） */
+  'command.block.copyLink.title': 'Copy link to current block',
 } as const satisfies Record<string, string>
 
 /** 字典键：点分扁平键，以本包为类型基准（编译期检查 t() 取词键） */

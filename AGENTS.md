@@ -171,6 +171,7 @@ vsidian/
 │   │   ├── viewCycle.ts                # 三态视图编排纯逻辑
 │   │   └── wikilinkTarget.ts           # 宿主侧双链目标解析纯逻辑（#11）
 │   ├── shared/      # 两端共享纯逻辑
+│   │   ├── blockId.ts           # 块 id 与块边界单一事实源
 │   │   ├── changeMapping.ts     # 变更重定位纯函数
 │   │   ├── chromeContract.ts    # 界面域样式契约探针表
 │   │   ├── codeLangs.ts         # 代码块语言注册表与别名路由
@@ -200,6 +201,7 @@ vsidian/
 │   │   ├── tabEscape.ts         # Tab 越界定位纯函数（#125）
 │   │   └── wikilink.ts          # 双链形态学单一事实源（#11）
 │   └── webview/     # webview 端实现
+│       ├── blockMenu.ts              # 正文右键菜单与复制块链接
 │       ├── codeCardState.ts          # 卡片共享状态中立模块
 │       ├── codeHighlight.ts          # 语法高亮引擎装配与缓存
 │       ├── css.d.ts                  # CSS 导入类型声明
