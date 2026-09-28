@@ -452,6 +452,13 @@ describe('number 设置项（#175：范围与步进内建于类型，0 为普通
     }
   })
 
+  it('zeroLabelKey/unit 可选显示字段：缺省合法，存在时须为字符串', () => {
+    expect(isSettingDefinition(def({ zeroLabelKey: 'setting.readableLineWidthFill', unit: 'px' }))).toBe(true)
+    expect(isSettingDefinition(def({ zeroLabelKey: undefined, unit: undefined }))).toBe(true)
+    expect(isSettingDefinition(def({ zeroLabelKey: 1 }))).toBe(false)
+    expect(isSettingDefinition(def({ unit: 2 }))).toBe(false)
+  })
+
   it('步进倍数不强制（手改存量 906 合法——校验只管范围与类型）', () => {
     expect(applySettingsPatch([base], { n: 100 }, { n: 906 })).toEqual({ ok: true, merged: { n: 906 } })
   })

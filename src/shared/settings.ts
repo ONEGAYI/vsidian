@@ -87,6 +87,14 @@ export interface NumberSettingDefinition extends SettingDefinitionBase {
   max: number
   /** 步进（正有限数；显示与滑块粒度，不作为存量校验条件） */
   step: number
+  /**
+   * 可选：值 0 的显示词消息键（#175 可读行宽的「铺满」档）——设置页滑块
+   * 的值文本与 aria-valuetext 在 0 时取此词，缺省显示原值。语义归消费方
+   * （schema 不特判 0），显示归渲染层经本键取词（注册表驱动，无逐项特判）。
+   */
+  zeroLabelKey?: MessageKey
+  /** 可选：非 0 值的单位后缀（如 'px'），缺省无单位 */
+  unit?: string
 }
 
 export type SettingDefinition = BooleanSettingDefinition | StringEnumSettingDefinition | NumberSettingDefinition
@@ -279,6 +287,8 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     step: READABLE_LINE_WIDTH_STEP,
     titleKey: 'setting.readableLineWidth.title',
     descriptionKey: 'setting.readableLineWidth.description',
+    zeroLabelKey: 'setting.readableLineWidthFill',
+    unit: 'px',
   },
 ]
 
@@ -367,13 +377,16 @@ export function isSettingDefinition(v: unknown): v is SettingDefinition {
     return typeof v.default === 'boolean'
   }
   if (v.type === 'number') {
-    // #175 number 型：min/max/step 有限、min ≤ max、step 正数、default 在范围内
+    // #175 number 型：min/max/step 有限、min ≤ max、step 正数、default 在范围内；
+    // zeroLabelKey/unit 可选显示字段存在时须为字符串
     return (
       typeof v.default === 'number' && Number.isFinite(v.default) &&
       typeof v.min === 'number' && Number.isFinite(v.min) &&
       typeof v.max === 'number' && Number.isFinite(v.max) &&
       typeof v.step === 'number' && Number.isFinite(v.step) &&
-      v.min <= v.max && v.step > 0 && v.default >= v.min && v.default <= v.max
+      v.min <= v.max && v.step > 0 && v.default >= v.min && v.default <= v.max &&
+      (v.zeroLabelKey === undefined || typeof v.zeroLabelKey === 'string') &&
+      (v.unit === undefined || typeof v.unit === 'string')
     )
   }
   if (v.type === 'string') {
