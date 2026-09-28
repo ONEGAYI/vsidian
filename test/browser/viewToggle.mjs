@@ -127,6 +127,47 @@ try {
     assert.equal(await page.evaluate(() => window.editorHasFocus()), true,
       'mousedown 按钮后正文应保持焦点')
 
+    // ---- 标签页隐藏即销毁的等价重建：纯滚动视口跨 controller 保留 ----
+    const longDoc = Array.from({ length: 240 }, (_, i) =>
+      `## 段落 ${i}\n\n这是足够长的正文，用于验证滚动进度。\n`).join('\n')
+    await page.evaluate((text) => window.resetViewportDoc(text), longDoc)
+    await page.waitForFunction(() => {
+      const el = document.querySelector('.cm-scroller')
+      return el && el.scrollHeight > el.clientHeight + 1000
+    })
+    await page.evaluate(() => {
+      const el = document.querySelector('.cm-scroller')
+      el.scrollTop = 640
+      el.dispatchEvent(new Event('scroll'))
+    })
+    const liveTop = await page.evaluate(() => document.querySelector('.cm-scroller').scrollTop)
+    assert.ok(liveTop > 100, 'live 前置条件：视口已滚离文首')
+    await page.evaluate((text) => window.reloadViewportDoc(text), longDoc)
+    await page.waitForFunction((top) =>
+      Math.abs(document.querySelector('.cm-scroller').scrollTop - top) <= 2, liveTop)
+    await page.waitForTimeout(100)
+    assert.ok(Math.abs((await page.evaluate(() => document.querySelector('.cm-scroller').scrollTop)) - liveTop) <= 2,
+      'live 重建后视口应稳定在离开时位置')
+
+    await page.evaluate((text) => window.resetViewportDoc(text), longDoc)
+    await page.evaluate(() => window.setViewportMode('reading'))
+    await page.waitForFunction(() => {
+      const el = document.querySelector('.vsidian-view-reading')
+      return el && el.scrollHeight > el.clientHeight + 1000
+    })
+    await page.evaluate(() => {
+      const el = document.querySelector('.vsidian-view-reading')
+      el.scrollTop = 720
+      el.dispatchEvent(new Event('scroll'))
+    })
+    await page.waitForTimeout(100)
+    const readingTop = await page.evaluate(() => document.querySelector('.vsidian-view-reading').scrollTop)
+    assert.ok(readingTop > 100, 'reading 前置条件：视口已滚离文首')
+    await page.evaluate((text) => window.reloadViewportDoc(text), longDoc)
+    await page.waitForTimeout(120)
+    assert.ok(Math.abs((await page.evaluate(() => document.querySelector('.vsidian-view-reading').scrollTop)) - readingTop) <= 2,
+      'reading 重建后视口应稳定在离开时位置')
+
     assert.deepEqual(errors, [], `页面不应有脚本错误: ${errors.join('; ')}`)
     await page.close()
   }

@@ -747,7 +747,7 @@ interface LinkLogData {
     /** #159 块引用目标（与 heading 互斥） */
     blockId?: string
     candidates?: string[]
-    locate?: 'custom-panel' | 'text-editor' | 'none'
+    locate?: 'custom-panel' | 'none'
   }>
 }
 
@@ -2693,13 +2693,12 @@ export const cases: Array<[string, () => Promise<void>]> = [
       srcStart: 0,
       srcEnd: 10,
     })
-    // 宿主以文本编辑器打开目标文档（真实 openTextDocument + showTextDocument）
-    await poll('目标文档被打开', () =>
-      vscode.window.activeTextEditor?.document.uri.toString() === wsUri('子 目录/目标 二.md').toString()
-        ? true
-        : undefined,
-    )
-    const opened = vscode.window.activeTextEditor!.document
+    // 宿主以 Vsidian 面板打开目标文档，沿用当前阅读模式记忆
+    await waitSessionReady('子 目录/目标 二.md')
+    await waitActiveCustomTab('子 目录/目标 二.md')
+    await waitViewState('子 目录/目标 二.md', (v) => v.viewMode === 'reading')
+    assert(tabsOf('子 目录/目标 二.md', 'native') === 0, '阅读跳转不应产生源码标签')
+    const opened = await vscode.workspace.openTextDocument(wsUri('子 目录/目标 二.md'))
     assert(opened.getText().startsWith('# 目标 二'), `打开的目标内容不符：${JSON.stringify(opened.getText().slice(0, 20))}`)
 
     // 跳转全程只读：源文档零写回、磁盘不变
@@ -2754,16 +2753,14 @@ export const cases: Array<[string, () => Promise<void>]> = [
       `拦截类意图不得打开编辑器，实际 ${JSON.stringify(logData.log)}`,
     )
 
-    // 无扩展名目标：候选补 .md 后真实打开（放最后——面板随编辑器切换退场）
+    // 无扩展名目标：候选补 .md 后以 Vsidian 面板打开
     await vscode.commands.executeCommand(CMD.injectMessage, uri, {
       kind: 'link.activate', sessionId: '', docUri: uri,
       href: './无扩展名目标', srcStart: 0, srcEnd: 5,
     })
-    await poll('无扩展名目标（补 .md）被打开', () =>
-      vscode.window.activeTextEditor?.document.uri.toString() === wsUri('无扩展名目标.md').toString()
-        ? true
-        : undefined,
-    )
+    await waitSessionReady('无扩展名目标.md')
+    await waitActiveCustomTab('无扩展名目标.md')
+    assert(tabsOf('无扩展名目标.md', 'native') === 0, '补扩展名跳转不应产生源码标签')
     const diskAfter = await readDisk('links2.md')
     assert(diskAfter === diskBefore, '链接执行不得改写源文档')
     assert(session.appliedEdits === 0, `链接执行不得产生 applyEdit，实际 ${session.appliedEdits}`)
@@ -3503,19 +3500,17 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const versionBefore = (await vscode.workspace.openTextDocument(wsUri('wikilinks.md'))).version
 
     // 按名查找：工作区内唯一 basename 命中（findFiles 按需，不建索引）。
-    // 日志先于打开动作写入（文本编辑器打开会替换源面板——#10 同现象）
+    // 日志先于打开动作写入，目标应以 Vsidian 面板打开
     await injectWikilink(uri, '目标笔记')
     let logData = await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.target === '目标笔记')
     assert(logData!.path === wsUri('目标笔记.md').fsPath, `按名目标路径不符：${logData!.path}`)
-    await poll('按名目标被打开', () =>
-      vscode.window.activeTextEditor?.document.uri.toString() === wsUri('目标笔记.md').toString()
-        ? true
-        : undefined,
-    )
-    const opened = vscode.window.activeTextEditor!.document
+    await waitSessionReady('目标笔记.md')
+    await waitActiveCustomTab('目标笔记.md')
+    assert(tabsOf('目标笔记.md', 'native') === 0, '按名跳转不应额外打开源码标签')
+    const opened = await vscode.workspace.openTextDocument(wsUri('目标笔记.md'))
     assert(opened.getText().startsWith('# 目标笔记标题'), '按名打开的目标内容不符')
 
-    // 文本编辑器打开会替换源面板：重开源面板再注入
+    // 重显源面板再注入下一条双链
     await openWithEditor('wikilinks.md')
     await waitSessionReady('wikilinks.md')
     // 显式路径（含中文与空格目录）：文档相对 + 工作区相对双候选精确解析
@@ -3523,11 +3518,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
     logData = await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.target === '子 目录/目标 二')
     assert(logData!.path === wsUri('子 目录/目标 二.md').fsPath, `显式路径目标不符：${logData!.path}`)
     assert(logData!.locate === 'none', `无标题目标不应定位，实际 ${logData!.locate}`)
-    await poll('显式路径目标被打开', () =>
-      vscode.window.activeTextEditor?.document.uri.toString() === wsUri('子 目录/目标 二.md').toString()
-        ? true
-        : undefined,
-    )
+    await waitSessionReady('子 目录/目标 二.md')
+    await waitActiveCustomTab('子 目录/目标 二.md')
+    assert(tabsOf('子 目录/目标 二.md', 'native') === 0, '显式路径跳转不应打开源码标签')
 
     // 跳转全程只读：源文档零写回、磁盘不变、版本不变
     const state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
@@ -3536,24 +3529,22 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(await readDisk('wikilinks.md') === diskBefore, '双链跳转不得改写源文档')
   }],
 
-  ['双链标题跳转（文本编辑器）：selection reveal 到标题行；缺失标题仍打开并记录（#11）', async () => {
+  ['双链标题跳转（Vsidian 面板）：定位到标题行；缺失标题仍打开并记录（#11）', async () => {
     await openWithEditor('wikilinks.md')
     await waitSessionReady('wikilinks.md')
     const uri = wsUri('wikilinks.md').toString()
     const diskBefore = await readDisk('wikilinks.md')
 
-    // 标题目标：打开后 selection 落在标题行（1.86 API 面 reveal）
+    // 标题目标：新面板就绪后 view.locate 落在标题行
     await injectWikilink(uri, 'wikilink-target#深处小节')
     let logData = await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.heading === '深处小节')
-    assert(logData!.locate === 'text-editor', `文本编辑器路径应记录 locate=text-editor，实际 ${logData!.locate}`)
-    await poll('标题目标被打开', () =>
-      vscode.window.activeTextEditor?.document.uri.toString() === wsUri('wikilink-target.md').toString()
-        ? true
-        : undefined,
-    )
-    const editor = vscode.window.activeTextEditor!
-    const selLine = editor.document.lineAt(editor.selection.active).text
-    assert(selLine.trim() === '## 深处小节', `selection 应在标题行，实际「${selLine}」`)
+    assert(logData!.locate === 'custom-panel', `跨文件标题应由 Vsidian 面板定位，实际 ${logData!.locate}`)
+    await waitSessionReady('wikilink-target.md')
+    await waitActiveCustomTab('wikilink-target.md')
+    const targetText = (await vscode.workspace.openTextDocument(wsUri('wikilink-target.md'))).getText()
+    const headingOffset = targetText.indexOf('## 深处小节')
+    await waitViewState('wikilink-target.md', (v) => v.selectionOffset === headingOffset)
+    assert(tabsOf('wikilink-target.md', 'native') === 0, '标题跳转不应产生源码标签')
 
     // 缺失标题：文档照常打开（不定位），日志记录 locate=none——缺失给可见反馈
     await openWithEditor('wikilinks.md')
@@ -3561,11 +3552,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await injectWikilink(uri, 'wikilink-target#不存在的小节')
     logData = await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.heading === '不存在的小节')
     assert(logData!.locate === 'none', `缺失标题应记录 locate=none，实际 ${logData!.locate}`)
-    await poll('缺失标题目标仍被打开', () =>
-      vscode.window.activeTextEditor?.document.uri.toString() === wsUri('wikilink-target.md').toString()
-        ? true
-        : undefined,
-    )
+    await waitActiveCustomTab('wikilink-target.md')
+    assert(tabsOf('wikilink-target.md', 'native') === 0, '缺失标题仍不应产生源码标签')
 
     assert(await readDisk('wikilinks.md') === diskBefore, '标题跳转不得改写源文档')
   }],
@@ -3602,6 +3590,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert((after.readingParseCount ?? 0) === parseBefore, `定位不得触发全文重解析（${parseBefore} → ${after.readingParseCount}）`)
     const logData = await waitWikilinkLog(sourceUri, (e) => e.kind === 'wikilink-doc' && e.heading === '深处的标题')
     assert(logData!.locate === 'custom-panel', `本扩展面板路径应记录 locate=custom-panel，实际 ${logData!.locate}`)
+    await waitActiveCustomTab('目标笔记.md')
+    assert(tabsOf('目标笔记.md', 'vsidian') === 1, '已开目标应重显现有 Vsidian 标签')
+    assert(tabsOf('目标笔记.md', 'native') === 0, '已开目标不应并存源码标签')
 
     // 双侧零写回
     assert(targetSession.appliedEdits === 0, `目标面板不得产生 applyEdit，实际 ${targetSession.appliedEdits}`)
@@ -3642,8 +3633,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(await readDisk('wikilink-crlf-target.md') === diskTarget, '跳转不得改写目标文档（CRLF 保真）')
   }],
 
-  ['双链块引用与本文件锚点跳转（#159）：块定位 selection reveal、页内面板 view.locate、缺失仍打开', async () => {
-    // 跨文件块引用：文本编辑器打开 + selection reveal 到块首行
+  ['双链块引用与本文件锚点跳转（#159）：块定位面板 view.locate、缺失仍打开', async () => {
+    // 跨文件块引用：Vsidian 面板打开并定位到块首行
     await openWithEditor('wikilinks.md')
     await waitSessionReady('wikilinks.md')
     const uri = wsUri('wikilinks.md').toString()
@@ -3651,15 +3642,13 @@ export const cases: Array<[string, () => Promise<void>]> = [
 
     await injectWikilink(uri, 'wikilink-target#^blk-target')
     let logData = await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.blockId === 'blk-target')
-    assert(logData!.locate === 'text-editor', `块引用应经文本编辑器 selection reveal，实际 ${logData!.locate}`)
-    await poll('块目标被打开', () =>
-      vscode.window.activeTextEditor?.document.uri.toString() === wsUri('wikilink-target.md').toString()
-        ? true
-        : undefined,
-    )
-    const editor = vscode.window.activeTextEditor!
-    const selLine = editor.document.lineAt(editor.selection.active).text
-    assert(selLine.trim() === '带块标记的段落。 ^blk-target', `selection 应在块首行，实际「${selLine}」`)
+    assert(logData!.locate === 'custom-panel', `块引用应经 Vsidian 面板定位，实际 ${logData!.locate}`)
+    await waitSessionReady('wikilink-target.md')
+    await waitActiveCustomTab('wikilink-target.md')
+    const blockText = (await vscode.workspace.openTextDocument(wsUri('wikilink-target.md'))).getText()
+    await waitViewState('wikilink-target.md', (v) =>
+      v.selectionOffset === blockText.indexOf('带块标记的段落。 ^blk-target'))
+    assert(tabsOf('wikilink-target.md', 'native') === 0, '块引用跳转不应产生源码标签')
 
     // 块 id 缺失：文档照常打开（不定位），日志记录 locate=none——缺失给可见反馈
     await openWithEditor('wikilinks.md')
@@ -3669,11 +3658,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await injectWikilink(uri, 'wikilink-target#^missing-blk')
     logData = await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.blockId === 'missing-blk')
     assert(logData!.locate === 'none', `缺失块 id 应记录 locate=none，实际 ${logData!.locate}`)
-    await poll('缺失块 id 目标仍被打开', () =>
-      vscode.window.activeTextEditor?.document.uri.toString() === wsUri('wikilink-target.md').toString()
-        ? true
-        : undefined,
-    )
+    await waitActiveCustomTab('wikilink-target.md')
+    assert(tabsOf('wikilink-target.md', 'native') === 0, '缺失块 id 仍不应产生源码标签')
 
     // 本文件块锚点（[[#^anchor-blk]]）：空 path 目标即当前文档，当前面板走
     // view.locate（live 光标观测）——先离开初始光标 0，观测到块首行 offset
@@ -3768,7 +3754,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     }
     assert(!created, '缺失目标不得自动创建文件')
 
-    // 拦截链路零写回（在会退场的 casenote 打开动作之前断言：会话仍在）
+    // 拦截链路零写回（在 casenote 打开动作之前断言）
     const state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
     assert(state.appliedEdits === 0, `歧义/缺失链路不得产生 applyEdit，实际 ${state.appliedEdits}`)
     assert(state.version === versionBefore, `版本不得变化（${versionBefore} → ${state.version}）`)
@@ -3779,11 +3765,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
     // 与下方 not-found 断言矛盾，Linux 宿主上必超时）
     await injectWikilink(uri, 'casenote')
     if (process.platform === 'win32') {
-      await poll('大小写不敏感目标被打开', () =>
-        vscode.window.activeTextEditor?.document.uri.toString() === wsUri('CaseNote.md').toString()
-          ? true
-          : undefined,
-      )
+      await waitSessionReady('CaseNote.md')
+      await waitActiveCustomTab('CaseNote.md')
+      assert(tabsOf('CaseNote.md', 'native') === 0, '大小写不敏感命中不应产生源码标签')
     } else {
       await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-not-found' && e.target === 'casenote')
     }
@@ -5761,22 +5745,12 @@ export const cases: Array<[string, () => Promise<void>]> = [
       assert(log.path === wsUri('outline-menu.md').fsPath,
         `定位目标应为 outline-menu.md，实际 ${String(log.path)}`)
       const offset = headingOffsetOf(headingLine)
-      if (log.locate === 'custom-panel') {
-        // 目标（outline-menu.md）即本面板自身：宿主 reveal 面板后发 view.locate，
-        // live 态光标落标题行首——面板侧可见落点，不只看日志
-        const view = await waitViewState('outline-menu.md', (v) => v.selectionOffset === offset)
-        assert(view.selectionOffset === offset,
-          `面板光标应落标题行首 offset ${offset}，实际 ${view.selectionOffset}`)
-      } else {
-        // 目标面为文本编辑器：以标题行 selection reveal。此处目标恒为本面板
-        // 自身，该分支用于让落点断言不硬编码定位面（按日志回报的实际面取证据）
-        const editor = await poll('标题跳转落到文本编辑器', () =>
-          vscode.window.activeTextEditor?.document.uri.toString() === wsUri('outline-menu.md').toString()
-            ? vscode.window.activeTextEditor
-            : undefined)
-        const line = editor.document.lineAt(editor.selection.active).text
-        assert(line === headingLine, `文本编辑器 selection 应在标题行「${headingLine}」，实际「${line}」`)
-      }
+      assert(log.locate === 'custom-panel', `标题跳转应经 Vsidian 面板定位，实际 ${log.locate}`)
+      // 目标（outline-menu.md）即本面板自身：宿主 reveal 后发 view.locate，
+      // live 态光标落标题行首——面板侧可见落点，不只看日志
+      const view = await waitViewState('outline-menu.md', (v) => v.selectionOffset === offset)
+      assert(view.selectionOffset === offset,
+        `面板光标应落标题行首 offset ${offset}，实际 ${view.selectionOffset}`)
     }
     // 含标记标题（index 1）：写入端原文 → 读回端字面匹配原文，本轮修复的回归钉子
     await roundTrip(markedLink, '## **加粗** Alpha')
@@ -8740,7 +8714,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
 
   // ---- #160：普通链接锚点定位（fragment 结构化保留 + 打开后定位） ----
 
-  ['普通链接锚点跳转（文本编辑器）：含空格路径矩阵与 selection reveal；缺失标题、块 id 定位与外部 #（#160）', async () => {
+  ['普通链接锚点跳转（Vsidian 面板）：含空格路径矩阵；缺失标题、块 id 定位与外部 #（#160）', async () => {
     /** 注入普通链接意图（与真实 webview 消息同一校验与处理入口） */
     const injectLink = async (uri: string, href: string): Promise<void> => {
       await vscode.commands.executeCommand(CMD.injectMessage, uri, {
@@ -8753,32 +8727,28 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const diskBefore = await readDisk('links.md')
 
     // 含空格路径 + 锚点（%20/%E5 编码形态）：拆分出路径与 fragment 后
-    // selection reveal 到标题行（fixture「子 目录/目标 二.md」首行 `# 目标 二`）
+    // 面板定位到标题行（fixture「子 目录/目标 二.md」首行 `# 目标 二`）
     await injectLink(uri, './子%20目录/目标%20二.md#%E7%9B%AE%E6%A0%87%20%E4%BA%8C')
     let logData = await waitWikilinkLog(uri, (e) =>
       e.kind === 'doc' && e.fragment === '目标 二' && e.path === wsUri('子 目录/目标 二.md').fsPath)
-    assert(logData!.locate === 'text-editor', `文本编辑器路径应记录 locate=text-editor，实际 ${logData!.locate}`)
-    await poll('含空格路径锚点目标被打开', () =>
-      vscode.window.activeTextEditor?.document.uri.toString() === wsUri('子 目录/目标 二.md').toString()
-        ? true : undefined)
-    let selLine = vscode.window.activeTextEditor!.document.lineAt(
-      vscode.window.activeTextEditor!.selection.active).text
-    assert(selLine.trim() === '# 目标 二', `selection 应在标题行，实际「${selLine}」`)
+    assert(logData!.locate === 'custom-panel', `含空格路径应经面板定位，实际 ${logData!.locate}`)
+    await waitSessionReady('子 目录/目标 二.md')
+    await waitActiveCustomTab('子 目录/目标 二.md')
+    await waitViewState('子 目录/目标 二.md', (v) => v.selectionOffset === 0)
+    assert(tabsOf('子 目录/目标 二.md', 'native') === 0, '含空格路径不应打开源码标签')
 
-    // 文本编辑器打开会替换源面板：重开源面板再注入
+    // 重显源面板再注入
     await openWithEditor('links.md')
     await waitSessionReady('links.md')
     // 无扩展名路径 + 锚点：候选补 .md 后命中（fragment 定位同款）
     await injectLink(uri, './链接目标#链接目标')
     logData = await waitWikilinkLog(uri, (e) =>
       e.kind === 'doc' && e.fragment === '链接目标' && e.path === wsUri('链接目标.md').fsPath)
-    assert(logData!.locate === 'text-editor', `无扩展名锚点应 text-editor 定位，实际 ${logData!.locate}`)
-    await poll('无扩展名锚点目标被打开', () =>
-      vscode.window.activeTextEditor?.document.uri.toString() === wsUri('链接目标.md').toString()
-        ? true : undefined)
-    selLine = vscode.window.activeTextEditor!.document.lineAt(
-      vscode.window.activeTextEditor!.selection.active).text
-    assert(selLine.trim() === '# 链接目标', `无扩展名锚点 selection 应在标题行，实际「${selLine}」`)
+    assert(logData!.locate === 'custom-panel', `无扩展名锚点应经面板定位，实际 ${logData!.locate}`)
+    await waitSessionReady('链接目标.md')
+    await waitActiveCustomTab('链接目标.md')
+    await waitViewState('链接目标.md', (v) => v.selectionOffset === 0)
+    assert(tabsOf('链接目标.md', 'native') === 0, '无扩展名锚点不应打开源码标签')
 
     // 缺失标题：文档照常打开（不定位），日志 locate=none——缺失给可见反馈
     await openWithEditor('links.md')
@@ -8786,26 +8756,22 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await injectLink(uri, './链接目标.md#不存在的小节')
     logData = await waitWikilinkLog(uri, (e) => e.kind === 'doc' && e.fragment === '不存在的小节')
     assert(logData!.locate === 'none', `缺失标题应记录 locate=none，实际 ${logData!.locate}`)
-    await poll('缺失标题目标仍被打开', () =>
-      vscode.window.activeTextEditor?.document.uri.toString() === wsUri('链接目标.md').toString()
-        ? true : undefined)
+    await waitActiveCustomTab('链接目标.md')
 
     // #^块id fragment：块定位器与双链锚点同源（#159 交付，批次合并后接通）——
-    // 文本编辑器路径 selection 应落在目标块首行（findBlockOffset 块首语义）
+    // 面板 view.locate 应落在目标块首行（findBlockOffset 块首语义）
     await openWithEditor('links.md')
     await waitSessionReady('links.md')
     await injectLink(uri, './链接目标.md#^link-blk')
     logData = await waitWikilinkLog(uri, (e) => e.kind === 'doc' && e.fragment === '^link-blk')
-    assert(logData!.locate === 'text-editor', `块 id 应定位（text-editor），实际 ${logData!.locate}`)
-    const blockSel = vscode.window.activeTextEditor?.selection
-    const blockSelLine = blockSel
-      ? vscode.window.activeTextEditor!.document.lineAt(blockSel.active).text
-      : ''
-    assert(blockSelLine.trim() === '普通链接块引用目标段落。 ^link-blk',
-      `块锚点 selection 应在块首行，实际「${blockSelLine}」`)
+    assert(logData!.locate === 'custom-panel', `块 id 应经面板定位，实际 ${logData!.locate}`)
+    const linkTargetText = (await vscode.workspace.openTextDocument(wsUri('链接目标.md'))).getText()
+    await waitViewState('链接目标.md', (v) =>
+      v.selectionOffset === linkTargetText.indexOf('普通链接块引用目标段落。 ^link-blk'))
+    assert(tabsOf('链接目标.md', 'native') === 0, '块 id 跳转不应打开源码标签')
 
     // 外部 URL 的 # 不接管：照旧 external 归类（测试钩子不真开浏览器）。
-    // 前一注入打开的文本编辑器已替换源面板——先重开再注入
+    // 先重显源面板再注入
     await openWithEditor('links.md')
     await waitSessionReady('links.md')
     await injectLink(uri, 'https://example.com/a#frag')

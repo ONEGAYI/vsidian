@@ -2,7 +2,7 @@
 // 点击与 Ctrl+Q 只由真实输入发起。宿主侧 mock：view.switch.request 与
 // keybindings.execute 的回环经 view.mode.set 回发（生产宿主同款驱动）。
 import 'katex/dist/katex.min.css'
-import { WebviewSyncController } from '../../src/webview/syncController'
+import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/syncController'
 import { EditorView, keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
 import { bootLocaleFromDocument } from '../../src/webview/localeBoot'
@@ -12,7 +12,8 @@ import '../../src/webview/main.css'
 bootLocaleFromDocument()
 
 const hostMessages: unknown[] = []
-const controller = new WebviewSyncController({
+let persistedState: Record<string, unknown> | undefined
+const bridge: VsCodeBridge = {
   postMessage(message) {
     hostMessages.push(message)
     // 生产宿主行为回环：双态切换请求/快捷键 → runViewSwitch（目标=当前态
@@ -32,13 +33,31 @@ const controller = new WebviewSyncController({
       })
     }
   },
-  getState() {
-    return undefined
+  getState<T>() {
+    return persistedState as T | undefined
   },
-  setState() {},
-})
+  setState(state: unknown) {
+    persistedState = state as Record<string, unknown>
+  },
+}
+let controller = new WebviewSyncController(bridge)
 controller.mount(document.getElementById('app')!, [keymap.of(defaultKeymap)])
+
+function mountViewportDoc(text: string, clearState: boolean): void {
+  controller.dispose()
+  if (clearState) persistedState = undefined
+  controller = new WebviewSyncController(bridge)
+  controller.mount(document.getElementById('app')!, [keymap.of(defaultKeymap)])
+  controller.handleHostMessage({ kind: 'init', sessionId: 'view-toggle',
+    docUri: 'file:///toggle.md', version: 1, text })
+}
+
 Object.assign(window, {
+  resetViewportDoc(text: string) { mountViewportDoc(text, true) },
+  reloadViewportDoc(text: string) { mountViewportDoc(text, false) },
+  setViewportMode(mode: 'live' | 'reading') {
+    controller.handleHostMessage({ kind: 'view.mode.set', mode })
+  },
   initDoc(text: string) {
     controller.handleHostMessage({ kind: 'init', sessionId: 'view-toggle',
       docUri: 'file:///toggle.md', version: 1, text })

@@ -250,6 +250,46 @@ describe('视图容器显隐与稳定类名', () => {
 })
 
 describe('持久化与 webview 重载恢复', () => {
+  it('live 纯滚动后立即销毁重建，恢复离开时的视口而非旧光标', () => {
+    const h = makeBridge()
+    const longDoc = DOC.repeat(30)
+    const c1 = mountMode(h, longDoc)
+    const scroller = c1.getView()!.scrollDOM
+    scroller.scrollTop = 180
+    scroller.dispatchEvent(new Event('scroll'))
+    window.dispatchEvent(new Event('pagehide'))
+    expect(h.saved()?.viewport).toEqual({ mode: 'live', top: 180 })
+    c1.dispose()
+
+    const c2 = mountMode(h, longDoc)
+    expect(c2.getView()!.scrollDOM.scrollTop).toBe(180)
+    expect(viewState(c2, h).selectionOffset).toBe(0)
+    c2.dispose()
+  })
+
+  it('reading 纯滚动后立即销毁重建，恢复独立视口位置', () => {
+    const h = makeBridge()
+    const longDoc = DOC.repeat(30)
+    const parent1 = document.createElement('div')
+    const c1 = new WebviewSyncController(h.bridge)
+    c1.mount(parent1)
+    c1.handleHostMessage({ kind: 'init', sessionId: 's1', docUri: DOC_URI, version: 1, text: longDoc })
+    c1.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
+    const reading1 = parent1.querySelector<HTMLElement>('.vsidian-view-reading')!
+    reading1.scrollTop = 240
+    reading1.dispatchEvent(new Event('scroll'))
+    window.dispatchEvent(new Event('pagehide'))
+    expect(h.saved()?.viewport).toEqual({ mode: 'reading', top: 240 })
+    c1.dispose()
+
+    const parent2 = document.createElement('div')
+    const c2 = new WebviewSyncController(h.bridge)
+    c2.mount(parent2)
+    c2.handleHostMessage({ kind: 'init', sessionId: 's1', docUri: DOC_URI, version: 1, text: longDoc })
+    expect(parent2.querySelector<HTMLElement>('.vsidian-view-reading')!.scrollTop).toBe(240)
+    c2.dispose()
+  })
+
   it('模式与锚点写入 bridge state，与 seq 合并互不覆盖', () => {
     const h = makeBridge()
     const c = mountMode(h)

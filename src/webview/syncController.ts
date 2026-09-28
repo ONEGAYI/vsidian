@@ -213,6 +213,7 @@ function scheduleFrame(fn: () => void): void {
 /** #66 高亮重算去抖（ms）：滚动事件驱动，轻于 250ms 数据刷新链路（只做
  *  定位纯函数 + 一次类切换，不解析文档） */
 const OUTLINE_HIGHLIGHT_DEBOUNCE_MS = 100
+const VIEWPORT_SAVE_DEBOUNCE_MS = 250
 
 /** #66 防抖动护栏超时（ms）：跳转程序性滚动后一直无滚动事件到达时的
  *  兜底释放（正常路径由首个滚动事件释放） */
@@ -272,6 +273,8 @@ interface PersistedState {
   viewMode?: ViewMode
   /** 最近一次模式锚点（UTF-16 offset）：live=光标主位，reading=锚点块 start */
   anchor?: number
+  /** 标签页重载时恢复可见视口；独立于模式切换使用的 anchor。 */
+  viewport?: { mode: ViewMode; top: number }
   conflictRevision?: number
   /** #53 右侧栏展开态（缺省收起） */
   sidebarOpen?: boolean
@@ -493,6 +496,14 @@ export class WebviewSyncController {
   private viewMode: ViewMode
   /** 最近模式锚点：live=光标主位；reading=锚点块 src-start（源码位置锚点） */
   private modeAnchor: number | null
+  /** 当前模式的滚动像素位置；与 modeAnchor 分开，避免纯滚动移动编辑光标。 */
+  private viewport: { mode: ViewMode; top: number } | null
+  private viewportSaveTimer: ReturnType<typeof setTimeout> | undefined
+  private restoringViewport = false
+  private readonly flushViewportOnHide = (): void => {
+    if (document.visibilityState === 'hidden') this.flushViewportSave()
+  }
+  private readonly flushViewportOnPageHide = (): void => this.flushViewportSave()
   /** live 容器（稳定类名 vsidian-view-live，内含 CM6 编辑器） */
   private liveWrapper: HTMLElement | undefined
   /** 阅读容器（稳定类名 vsidian-view-reading，块级源锚点结构） */
@@ -809,6 +820,11 @@ export class WebviewSyncController {
       ? Math.floor(saved.conflictRevision) : 0
     this.viewMode = saved?.viewMode === 'reading' ? 'reading' : 'live'
     this.modeAnchor = typeof saved?.anchor === 'number' && saved.anchor >= 0 ? Math.floor(saved.anchor) : null
+    this.viewport = saved?.viewport &&
+      (saved.viewport.mode === 'live' || saved.viewport.mode === 'reading') &&
+      Number.isFinite(saved.viewport.top) && saved.viewport.top >= 0
+      ? { mode: saved.viewport.mode, top: saved.viewport.top }
+      : null
     this.sidebarOpen = saved?.sidebarOpen === true
     // 宽度恢复：非数值（含缺失）经 clampSidebarWidth 回默认；越界值钳制
     this.sidebarWidth = clampSidebarWidth(saved?.sidebarWidth ?? Number.NaN)
@@ -882,6 +898,7 @@ export class WebviewSyncController {
         }
       }
       view?.handleScroll()
+      this.scheduleViewportSave()
       this.onOutlineScrollSignal()
     })
     // 任务勾选（#9）：阅读模式除任务勾选外只读——checkbox 点击经容器事件
@@ -1016,7 +1033,12 @@ export class WebviewSyncController {
     // #66 大纲高亮联动：live 视口滚动（用户与程序性同源）驱动当前控制域
     // 重算。监听器挂在 view 自身的 scrollDOM 上——dispose 时整棵 view.dom
     // 随 destroy 移除，无需单独解绑
-    this.view.scrollDOM.addEventListener('scroll', () => this.onOutlineScrollSignal())
+    this.view.scrollDOM.addEventListener('scroll', () => {
+      this.scheduleViewportSave()
+      this.onOutlineScrollSignal()
+    })
+    document.addEventListener('visibilitychange', this.flushViewportOnHide)
+    window.addEventListener('pagehide', this.flushViewportOnPageHide)
     // #162 复制块链接：正文 contextmenu 委托（挂在 contentDOM 上——view
     // 生命周期内 DOM 不重建；reading 态 live 容器隐藏天然不触发）。头区/
     // 空行等不接管位不 preventDefault，浏览器原生菜单照常
@@ -1061,6 +1083,9 @@ export class WebviewSyncController {
   }
 
   dispose(): void {
+    this.flushViewportSave()
+    document.removeEventListener('visibilitychange', this.flushViewportOnHide)
+    window.removeEventListener('pagehide', this.flushViewportOnPageHide)
     closeDiagramPopup()
     closeFmPopover()
     setDiagramExportSender(null)
@@ -2150,7 +2175,7 @@ export class WebviewSyncController {
     this.refreshReading()
     if (opts.restoreAnchor) {
       if (this.viewMode === 'reading') {
-        if (this.modeAnchor !== null && this.readingView) {
+        if (this.modeAnchor !== null && this.readingView && this.viewport?.mode !== 'reading') {
           this.readingView.scrollToOffset(this.clampToDoc(this.modeAnchor))
         }
       } else if (this.modeAnchor !== null && this.modeAnchor > 0) {
@@ -2158,6 +2183,9 @@ export class WebviewSyncController {
         const pos = this.clampToDoc(this.modeAnchor)
         this.view?.dispatch({ selection: { anchor: pos } })
       }
+      // 光标/模式锚点与阅读视口是两种状态：恢复光标后再恢复离开时视口。
+      // 若没有新版 viewport，旧持久状态仍沿用上面的锚点恢复路径。
+      this.restoreViewport()
     }
     // #148：全文落地即权威基线（本地未落地编辑已被权威文本取代）——
     // 撤销意图此刻发出，撤销的是宿主栈上最后已完成的操作
@@ -2272,6 +2300,9 @@ export class WebviewSyncController {
 
   /** 容器显隐（稳定类名 vsidian-view-live / vsidian-view-reading） */
   private applyModeDom(mode: ViewMode): void {
+    if (mode !== this.viewMode) {
+      this.clearViewport()
+    }
     this.viewMode = mode
     this.closeQuickHeadingMenu(false)
     this.refreshQuickActions()
@@ -2369,6 +2400,8 @@ export class WebviewSyncController {
    */
   private locateOffset(offset: number): void {
     const pos = this.clampToDoc(offset)
+    // 新的程序定位应覆盖旧视口记忆；实际滚动事件会重新记录新视口。
+    this.clearViewport()
     this.suspendOutlineLinking()
     if (this.viewMode === 'reading' && this.readingView) {
       const start = this.readingView.anchorStartFor(pos) ?? pos
@@ -2772,7 +2805,70 @@ export class WebviewSyncController {
     }
   }
 
-  /** 持久化（合并写入）：seq、viewMode、anchor、sidebarOpen、outlineActive、
+  /** 滚动事件高频到达：内存状态即时更新，bridge 写入尾随去抖。隐藏或卸载
+   *  时同步冲刷，覆盖用户滚动后立刻切标签页的窗口。 */
+  private scheduleViewportSave(): void {
+    if (!this.sessionId || this.restoringViewport) return
+    const scroller = this.viewMode === 'reading'
+      ? this.readingContainer : this.view?.scrollDOM
+    if (!scroller) return
+    this.viewport = { mode: this.viewMode, top: Math.max(0, scroller.scrollTop) }
+    if (this.viewportSaveTimer !== undefined) clearTimeout(this.viewportSaveTimer)
+    this.viewportSaveTimer = setTimeout(() => this.flushViewportSave(), VIEWPORT_SAVE_DEBOUNCE_MS)
+  }
+
+  private flushViewportSave(): void {
+    if (this.viewportSaveTimer === undefined) return
+    clearTimeout(this.viewportSaveTimer)
+    this.viewportSaveTimer = undefined
+    this.persistState()
+  }
+
+  private clearViewport(): void {
+    if (this.viewportSaveTimer !== undefined) {
+      clearTimeout(this.viewportSaveTimer)
+      this.viewportSaveTimer = undefined
+    }
+    this.viewport = null
+    this.restoringViewport = false
+  }
+
+  private restoreViewport(): void {
+    const viewport = this.viewport
+    if (!viewport || viewport.mode !== this.viewMode) return
+    this.restoringViewport = true
+    if (viewport.mode === 'reading') {
+      const container = this.readingContainer
+      if (!container) {
+        this.restoringViewport = false
+        return
+      }
+      container.scrollTop = viewport.top
+      this.readingView?.handleScroll()
+      requestAnimationFrame(() => {
+        if (this.viewport === viewport && this.viewMode === 'reading') {
+          container.scrollTop = viewport.top
+          this.readingView?.handleScroll()
+        }
+        this.restoringViewport = false
+      })
+    } else {
+      const view = this.view
+      if (!view) {
+        this.restoringViewport = false
+        return
+      }
+      view.scrollDOM.scrollTop = viewport.top
+      requestAnimationFrame(() => {
+        if (this.view === view && this.viewport === viewport && this.viewMode === 'live') {
+          view.scrollDOM.scrollTop = viewport.top
+        }
+        this.restoringViewport = false
+      })
+    }
+  }
+
+  /** 持久化（合并写入）：seq、viewMode、anchor、viewport、sidebarOpen、outlineActive、
    *  outlineExpandLevel（#67 档位全局记忆）、sidebarWidth（拖宽记忆）共存
    *  互不覆盖 */
   private persistState(): void {
@@ -2783,6 +2879,7 @@ export class WebviewSyncController {
       conflictRevision: this.conflictRevision,
       viewMode: this.viewMode,
       anchor: this.modeAnchor ?? undefined,
+      viewport: this.viewport ?? undefined,
       sidebarOpen: this.sidebarOpen,
       outlineActive: this.outlineActive,
       outlineExpandLevel: this.outlineExpandLevel,

@@ -26,7 +26,7 @@
 
 1. 不做反链与索引：锚点跳转继续**按需解析**——跳转时读取目标文档文本定位，无任何持久或内存级全库索引。
 2. 复制块链接入口取**正文右键菜单**形态（自绘 contextmenu，架构照大纲菜单先例），并按项目快捷键约定登记可绑定操作，默认 `ctrl+shift+c`、仅 Live 编辑正文时生效。
-3. 跳转后的呈现与现有标题跳转同款（面板内 `view.locate` / 文本编辑器 selection reveal），不做 Obsidian 式目标高亮闪烁。
+3. 跨文件跳转一律以 Vsidian 面板打开或重显目标文档，并继承该面板的三态记忆；锚点通过 `view.locate` 落位，不做 Obsidian 式目标高亮闪烁。
 4. 跳转目标缺失时（标题找不到、块 id 不存在）打开文档后给出 i18n 提示，与现有「标题缺失」行为同款。
 
 ## 形态学与定位规则
@@ -52,7 +52,7 @@
   - `resolveInside` 不再丢弃 `#fragment`——按 **CommonMark 语义取首个 `#`**，其前为路径、其后整段为 fragment；路径部分再按现状剥 `?query`；
   - `preClassify` 不再把 `#` 开头的 href 拦为 blocked/empty——解析为本文件锚点目标。
 - **fragment 仅对解析为工作区内文档目标的链接接管**：`http(s)`、`mailto`、`vscode` 等带 scheme 的外部链接照旧外部打开，其 `#` 是网页锚点语义，不做标题定位。
-- 定位执行：目标文档打开后复用与 wikilink 同源的定位器（标题→`findHeadingOffset`；fragment 本批仅支持标题语义——`#^块id` 形态的普通链接同样定位到块，能力同源不额外设限）。目标已在本扩展面板走 `view.locate`，否则 `showTextDocument` + selection reveal，与 wikilink 跳转同款。
+- 定位执行：目标文档打开后复用与 wikilink 同源的定位器（标题→`findHeadingOffset`；`#^块id` 形态同样定位到块）。无论目标此前是否已打开，都通过 `vscode.openWith` 使用 Vsidian 面板；面板就绪后以 `view.locate` 定位。目标已有面板时由 VSCode 重显。
 - 含空格路径（宽松链接）与锚点并存时同样按上述规则拆分，**测试矩阵必须覆盖**（见验证节）。
 
 ## 复制块链接入口（右键菜单与快捷键）
@@ -76,7 +76,7 @@
 2. 菜单 UI：自绘菜单（`role=menu`、键盘可导航、Esc 与外点关闭、定位纯函数），结构与样式照大纲菜单先例；新界面元素按 style-contract 技能评估是否登记契约探针。
 3. 所有用户可见文字（菜单项、tooltip、通知）经 `src/shared/locales/` 双语言包，禁止硬编码字面量。
 4. 修正过时文案：`host.wikilinkUnsupported`（块引用 `^` 属二期）随块引用定位落地同步更新。
-5. 面板重载竞态兜底（**送达确认制**，2026-09-28 验收反馈修订）：定位目标面板在跳转瞬间被重载（`retainContextWhenHidden` 关闭、隐藏即销毁，重显触发重握手）会让 `view.locate` 首投随旧 webview 实例丢失——会话记录「待送达定位意图」（`view.locate` 经面板通道发送时留 LF 偏移），重握手 `sendInit` 后补发兜住该竞态窗口。**webview 应用定位后回发 `view.locate.ack`（offset 原样对账，陈旧 ack 不误清新意图），宿主收到即清除待送达意图、此后不再补发**——已送达定位的重载恢复交给 webview 持久化锚点（定位点随 `locateOffset` 同步落盘为 `modeAnchor`），用户此后的手动滚动/移位不再被历史程序定位重播拉回。已知边界：纯滚动的视口像素位置不持久化，重载恢复落在最后锚点（编辑/模式切换/程序定位处）。
+5. 面板重载竞态兜底（**送达确认制**，2026-09-28 验收反馈修订）：定位目标面板在跳转瞬间被重载（`retainContextWhenHidden` 关闭、隐藏即销毁，重显触发重握手）会让 `view.locate` 首投随旧 webview 实例丢失——会话记录「待送达定位意图」（`view.locate` 经面板通道发送时留 LF 偏移），重握手 `sendInit` 后补发兜住该竞态窗口。**webview 应用定位后回发 `view.locate.ack`（offset 原样对账，陈旧 ack 不误清新意图），宿主收到即清除待送达意图、此后不再补发**。已送达定位的重载恢复交给 webview：`modeAnchor` 保留光标与模式切换语义，独立的 `viewport` 记录当前模式的滚动位置。滚动更新在 250 毫秒后持久化，隐藏或卸载时同步写入；重建优先恢复视口，旧状态无 `viewport` 时仍回退到模式锚点。
 
 ## 用户故事
 
@@ -97,7 +97,7 @@
 - **TDD**：形态学（本文件锚点合法/非法矩阵）、`findBlockOffset` 矩阵（围栏内不命中、CRLF、列表块尾、多命中取首、块首=开围栏行）、普通链接 fragment 拆分先行。
 - **含空格路径测试矩阵**（用户点名必测）：`[t](./my file.md#标题)`、`[t](./my file#标题)`（宽松链接两路）、`[t](#标题)` 页内、`[t](./a#b.md)` 路径含 `#`（按 CommonMark 拆分为路径 `./a` + fragment `b.md`，行为文档化为已知边界）、已编码 `%20` 形态。
 - **控制器与浏览器**：jsdom 单测覆盖跳转意图上报与菜单命令；#162 涉及 webview 交互，合并前必跑 `npm run test:browser`。
-- **集成**：双链/普通链接锚点跳转用例（面板内 `view.locate` 与文本编辑器 selection 两路）、块 id 自动写入的可撤销性（undo 一步还原）、缺失提示记录。
+- **集成**：双链/普通链接锚点跳转用例（新建与已有面板统一 `view.locate`）、块 id 自动写入的可撤销性（undo 一步还原）、缺失提示记录。
 - **回归与文档**：compile / test:unit / test:browser / test:integration 全绿；更新 keybindings.md、人工验证清单、文件树；README 双语功能清单补锚点条目。
 
 Blocked by: #162 依赖 #159（块形态学）；#159 与 #160 相互独立。
