@@ -236,6 +236,60 @@ async function readDisk(file: string): Promise<string> {
   return Buffer.from(bytes).toString('utf8')
 }
 
+// ---- #199 rename 引用改写辅助 ----
+
+/** fixture 原始文本（与 fixtures.mjs 的 RENAME_* 常量字节一致——现场还原
+ *  的写回对照源；漂移检测与改写断言不依赖这些字面量本身） */
+const RENAME_REF_A_DOC_TEXT = [
+  '# 改名引用甲',
+  '',
+  '见 [[改名目标]] 与 [同目标](./改名目标.md)。',
+  '',
+  '带锚 [[改名目标#深处小节|别名]]。',
+  '',
+  '附件 ![图](assets/rename-pic.png)。',
+  '',
+].join('\n')
+const RENAME_REF_B_DOC_TEXT = [
+  '# 改名引用乙',
+  '',
+  '上行 [[../改名目标]]。',
+  '',
+].join('\n')
+const RENAME_MOVED_DOC_TEXT = [
+  '# 移动自测',
+  '',
+  '见 [[改名目标]] 与 [子文档](notes/rename-note.md)。',
+  '',
+].join('\n')
+
+/** #199 rename 计划观测日志（_test.getRenameRefLog）末条 */
+async function lastRenameRefLog(): Promise<{
+  moves: Array<{ oldFsPath: string; newFsPath: string }>
+  plannedEdits: number
+  plannedFiles: number
+  skipped: Array<{ fsPath: string; reason: string }>
+  indexNotReady: number
+  cancelled: boolean
+  notice: string | null
+} | null> {
+  const entries = (await vscode.commands.executeCommand('onegayi.vsidian._test.getRenameRefLog')) as
+    | Array<{ plannedEdits: number }>
+    | undefined
+  return entries && entries.length > 0 ? (entries[entries.length - 1] as never) : null
+}
+
+/** #199 rename 用例的索引就绪等待（主根 hasData 且不在扫描中） */
+async function waitRenameIndexReady(): Promise<void> {
+  await poll('rename 用例索引就绪', async () => {
+    const s = (await vscode.commands.executeCommand('onegayi.vsidian._test.getVaultIndexState')) as {
+      roots: Array<{ fsPath: string; hasData: boolean; scanning: boolean }>
+    }
+    const root = s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir))
+    return root?.hasData && !root.scanning ? true : undefined
+  })
+}
+
 /** #38 全局模式记忆读取（容错语义同正式链路：无历史为 live） */
 async function getLastMode(): Promise<string> {
   return (await vscode.commands.executeCommand(CMD.getLastMode)) as string
@@ -9531,6 +9585,266 @@ export const cases: Array<[string, () => Promise<void>]> = [
       await poll('父根覆盖范围还原', async () => {
         const s = await state()
         return s.roots[0]!.fileCount === parentBefore ? s : undefined
+      })
+    }
+  }],
+
+  // ---- #199 单文件更名/移动的引用自动更新 ----
+
+  ['rename 引用改写：多边型改写、面板同步、通知与撤销（#199）', async () => {
+    await waitRenameIndexReady()
+    // 引用甲面板打开（did 通道改写后 doc.changed 广播同步的断言载体）
+    await openWithEditor('rename-ref-a.md')
+    await waitSessionReady('rename-ref-a.md')
+    const refAUri = wsUri('rename-ref-a.md').toString()
+    // rename 走 workspace.applyEdit(renameFile)——与资源管理器/命令面板同一
+    // will/did 事件通道（类型注释明示 applyEdit-api 触发，实测断言其成立）
+    const edit = new vscode.WorkspaceEdit()
+    edit.renameFile(wsUri('改名目标.md'), wsUri('改名目标2.md'), { overwrite: false })
+    assert(await vscode.workspace.applyEdit(edit), 'rename 应成功应用（applyEdit 通道触发 will 事件）')
+    // 引用乙（未打开文档）被改写并落盘：子目录上行路径按新名重算
+    const refB = await poll('引用乙改写落盘', async () => {
+      const text = (await vscode.workspace.openTextDocument(wsUri('notes/rename-ref-b.md'))).getText()
+      return text.includes('[[../改名目标2]]') ? text : undefined
+    })
+    assert(refB.includes('上行 [[../改名目标2]]。'), `引用乙应重算为 ../改名目标2（实际 ${refB}` + '）')
+    // 计划面：引用甲 3 边 + 引用乙 1 边（先于面板断言——区分计划缺失与
+    // 面板同步断点）
+    await poll('rename 计划日志', async () => {
+      const last = await lastRenameRefLog()
+      return last && last.plannedEdits === 5 && last.plannedFiles === 3 &&
+        last.skipped.length === 0 && last.notice === 'host.renameRefsUpdated' ? last : undefined
+    }).catch(async (err) => {
+      throw new Error(`${(err as Error).message}；log实况=${JSON.stringify(await vscode.commands.executeCommand('onegayi.vsidian._test.getRenameRefLog'))}`)
+    })
+    // 引用甲 TextDocument（宿主层）：edit 已作用于已打开文档的 buffer
+    await poll('引用甲宿主文本更新', async () => {
+      const text = (await vscode.workspace.openTextDocument(wsUri('rename-ref-a.md'))).getText()
+      return text.includes('[同目标](改名目标2.md)') ? text : undefined
+    })
+    // 引用甲（已打开面板）三种边型经 doc.changed 同步；附件边不动（目标未移动）
+    await poll('引用甲面板同步', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, refAUri)) as { text?: string } | undefined
+      return v?.text && v.text.includes('[[改名目标2]]') &&
+        v.text.includes('[同目标](改名目标2.md)') &&
+        v.text.includes('[[改名目标2#深处小节|别名]]') &&
+        v.text.includes('![图](assets/rename-pic.png)') ? v : undefined
+    }).catch(async (err) => {
+      // 诊断兜底：带面板视图与会话实况重新报错（定位 doc.changed 同步断点）
+      const v = await vscode.commands.executeCommand(CMD.viewState, refAUri)
+      const s = await vscode.commands.executeCommand(CMD.sessionState, refAUri)
+      throw new Error(`${(err as Error).message}；viewState=${JSON.stringify(v)}；session=${JSON.stringify(s)}`)
+    })
+    // 索引刷新（did 通道）：旧条目退场——改名目标.md 不在索引，新名就位
+    await poll('索引条目更替', async () => {
+      const s = (await vscode.commands.executeCommand('onegayi.vsidian._test.getVaultIndexState')) as {
+        roots: Array<{ fsPath: string; hasData: boolean; scanning: boolean }>
+      }
+      const root = s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir))
+      return root && root.hasData && !root.scanning ? true : undefined
+    })
+    // 撤销一步恢复：rename 与改写 edit 是同一撤销单元（undo 一次全部回退）
+    await vscode.commands.executeCommand('undo')
+    await poll('撤销恢复引用甲', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, refAUri)) as { text?: string } | undefined
+      return v?.text && v.text.includes('[同目标](./改名目标.md)') && !v.text.includes('改名目标2') ? v : undefined
+    })
+    await poll('撤销恢复引用乙', async () => {
+      const text = (await vscode.workspace.openTextDocument(wsUri('notes/rename-ref-b.md'))).getText()
+      return text.includes('[[../改名目标]]') && !text.includes('改名目标2') ? true : undefined
+    })
+    // undo 文件名回滚落定等待（撤销队列串行；抢跑会与兜底 rename 竞态出
+    // 双文件并存）。旧名存在且新名消失 = undo 已回滚 rename
+    await new Promise((r) => setTimeout(r, 600))
+    try {
+      await vscode.workspace.fs.stat(wsUri('改名目标2.md'))
+      // undo 未回滚文件名（拆分撤销单元的宿主行为）：外部 fs 通道显式移回
+      // （不触发 will——引用文本已回旧名，无改写）
+      await vscode.workspace.fs.rename(wsUri('改名目标2.md'), wsUri('改名目标.md'), { overwrite: true })
+    } catch {
+      // undo 已回滚文件名
+    }
+    await new Promise((r) => setTimeout(r, 400))
+  }],
+
+  ['rename 引用改写：move 出链按新目录重算与附件扩展名保持（#199）', async () => {
+    await waitRenameIndexReady()
+    // 目标子目录先建（renameFile 不自动创建父目录）
+    await vscode.workspace.fs.createDirectory(wsUri('notes/deep'))
+    try {
+      // move：被移动 Markdown 自身的相对出链按新目录重算
+      const edit = new vscode.WorkspaceEdit()
+      edit.renameFile(wsUri('rename-moved.md'), wsUri('notes/deep/moved-2.md'), { overwrite: false })
+      assert(await vscode.workspace.applyEdit(edit), 'move 应成功应用')
+      const movedText = await poll('被移动文档出链重算', async () => {
+        const text = (await vscode.workspace.openTextDocument(wsUri('notes/deep/moved-2.md'))).getText()
+        return text.includes('[[../../改名目标]]') && text.includes('[子文档](../rename-note.md)') ? text : undefined
+      })
+      assert(movedText.includes('见 [[../../改名目标]] 与 [子文档](../rename-note.md)。'),
+        `出链应按 notes/deep 重算（实际 ${movedText}` + '）')
+      // 等索引增量把 move 后的盘文本重扫（did 通道 + watcher 双保险）
+      await new Promise((r) => setTimeout(r, 1600))
+      // 附件 rename：显式扩展名保持、不补 .md；引用甲的 image 边改写
+      const picEdit = new vscode.WorkspaceEdit()
+      picEdit.renameFile(wsUri('assets/rename-pic.png'), wsUri('assets/rename-pic2.png'), { overwrite: false })
+      assert(await vscode.workspace.applyEdit(picEdit), '附件 rename 应成功应用')
+      // 引用甲面板（用例 1 后仍打开）经 doc.changed 同步改写
+      const refAUri = wsUri('rename-ref-a.md').toString()
+      await poll('附件引用改写', async () => {
+        const v = (await vscode.commands.executeCommand(CMD.viewState, refAUri)) as { text?: string } | undefined
+        const text = v?.text ?? (await vscode.workspace.openTextDocument(wsUri('rename-ref-a.md'))).getText()
+        return text.includes('![图](assets/rename-pic2.png)') ? true : undefined
+      })
+    } finally {
+      // 现场还原（外部 fs 通道 + 覆盖写回原始内容，索引经 watcher 自愈）
+      await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('rename-ref-a.md'), Buffer.from(RENAME_REF_A_DOC_TEXT, 'utf8'))).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.rename(wsUri('notes/deep/moved-2.md'), wsUri('rename-moved.md'), { overwrite: true })).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('rename-moved.md'), Buffer.from(RENAME_MOVED_DOC_TEXT, 'utf8'))).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.rename(wsUri('assets/rename-pic2.png'), wsUri('assets/rename-pic.png'), { overwrite: true })).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.delete(wsUri('notes/deep'), { recursive: true })).catch(() => {})
+      await new Promise((r) => setTimeout(r, 400))
+    }
+  }],
+
+  ['rename 引用改写：未保存内容的漂移保护与叠加改写（#199）', async () => {
+    await waitRenameIndexReady()
+    await openWithEditor('notes/rename-ref-b.md')
+    await waitSessionReady('notes/rename-ref-b.md')
+    const bUri = wsUri('notes/rename-ref-b.md')
+    try {
+      // ---- A 段（漂移保护）：链接前插行（dirty 未保存）后立即 rename——
+      // 索引边仍是基线区间，当前文本已漂移 → 文档级跳过（过期不硬改）----
+      const dirtyEdit = new vscode.WorkspaceEdit()
+      dirtyEdit.insert(bUri, new vscode.Position(0, 0), '漂移前置行\n')
+      assert(await vscode.workspace.applyEdit(dirtyEdit), '插行应成功')
+      const renameEdit = new vscode.WorkspaceEdit()
+      renameEdit.renameFile(wsUri('改名目标.md'), wsUri('改名目标2.md'), { overwrite: false })
+      assert(await vscode.workspace.applyEdit(renameEdit), 'rename 应成功应用')
+      // 引用乙未改写（漂移保护）：链接保持原目标文本
+      await poll('漂移引用乙不被改写', async () => {
+        const v = (await vscode.commands.executeCommand(CMD.viewState, bUri.toString())) as { text?: string } | undefined
+        return v?.text && v.text.includes('漂移前置行') && v.text.includes('[[../改名目标]]') &&
+          !v.text.includes('改名目标2') ? v : undefined
+      })
+      // 反馈：引用甲照常改写（部分更新，skip 报漂移文档）
+      await poll('漂移跳过上报', async () => {
+        const last = await lastRenameRefLog()
+        return last && last.skipped.some((s) => normFsPath(s.fsPath) === normFsPath(bUri.fsPath) &&
+          s.reason === 'edge-stale') && last.notice === 'host.renameRefsPartiallyUpdated' ? last : undefined
+      })
+      // ---- A 段还原（外部 fs 通道，不走 undo：bulk edit 的撤销项不在
+      // 非受影响焦点文档的撤销栈顶，undo 会误撤引用乙的漂移行——实测教训）----
+      await Promise.resolve(vscode.commands.executeCommand('workbench.action.closeAllEditors')).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.writeFile(bUri, Buffer.from(RENAME_REF_B_DOC_TEXT, 'utf8'))).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.rename(wsUri('改名目标2.md'), wsUri('改名目标.md'), { overwrite: true })).catch(() => {})
+      // 等索引重扫（watcher 去抖 + 增量队列）
+      await new Promise((r) => setTimeout(r, 1800))
+      // ---- B 段（叠加改写）：漂移行（未保存）+ 覆盖层边对齐当前文本 →
+      // rename 改写经 did 通道叠加在未保存内容上（漂移行保留，不覆盖）----
+      await openWithEditor('notes/rename-ref-b.md')
+      await waitSessionReady('notes/rename-ref-b.md')
+      const driftEdit = new vscode.WorkspaceEdit()
+      driftEdit.insert(bUri, new vscode.Position(0, 0), '漂移前置行\n')
+      assert(await vscode.workspace.applyEdit(driftEdit), 'B 段首行插行应成功')
+      // 两次插行：文档重开后 version 重新计数（#197 覆盖层仲裁按 TextDocument
+      // 实例的 version 单调），A 段覆盖层条目停在 version=2——单次插行同样
+      // 到 version=2 会被仲裁拒绝（旧扫描不覆盖新内容的防御），第二次编辑
+      // 才被采信并重抽边（对齐漂移文本）
+      const driftEdit2 = new vscode.WorkspaceEdit()
+      driftEdit2.insert(bUri, new vscode.Position(1, 0), '漂移第二行\n')
+      assert(await vscode.workspace.applyEdit(driftEdit2), 'B 段次行插行应成功')
+      // 覆盖层 flush（500ms 防抖）：边重抽对齐漂移文本、目标解析命中
+      await new Promise((r) => setTimeout(r, 1400))
+      const renameEdit2 = new vscode.WorkspaceEdit()
+      renameEdit2.renameFile(wsUri('改名目标.md'), wsUri('改名目标3.md'), { overwrite: false })
+      assert(await vscode.workspace.applyEdit(renameEdit2), '二次 rename 应成功应用')
+      // 宿主层先行断言（dirty 文档改写叠加：漂移行保留 + 链接更新）
+      await poll('漂移后宿主文本叠加', async () => {
+        const text = (await vscode.workspace.openTextDocument(bUri)).getText()
+        return text.includes('漂移前置行') && text.includes('漂移第二行') && text.includes('[[../改名目标3]]') ? text : undefined
+      }).catch(async (err) => {
+        const text = (await vscode.workspace.openTextDocument(bUri)).getText()
+        throw new Error(`${(err as Error).message}；宿主实况=${JSON.stringify(text)}`)
+      })
+      await poll('漂移后叠加改写', async () => {
+        const v = (await vscode.commands.executeCommand(CMD.viewState, bUri.toString())) as { text?: string } | undefined
+        return v?.text && v.text.includes('漂移前置行') && v.text.includes('漂移第二行') && v.text.includes('[[../改名目标3]]') ? v : undefined
+      })
+    } finally {
+      // 强兜底还原（断言失败也不泄漏现场）：关面板丢弃 dirty buffer，外部
+      // fs 通道归位文件并写回引用文档原文（索引经 watcher 自愈）
+      await Promise.resolve(vscode.commands.executeCommand('workbench.action.closeAllEditors')).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('rename-ref-a.md'), Buffer.from(RENAME_REF_A_DOC_TEXT, 'utf8'))).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('notes/rename-ref-b.md'), Buffer.from(RENAME_REF_B_DOC_TEXT, 'utf8'))).catch(() => {})
+      for (const name of ['改名目标3.md', '改名目标2.md']) {
+        await Promise.resolve(vscode.workspace.fs.rename(wsUri(name), wsUri('改名目标.md'), { overwrite: true })).catch(() => {})
+      }
+      await new Promise((r) => setTimeout(r, 400))
+    }
+  }],
+
+  ['rename 引用改写：跨根移动不改写并明确报告（#199）', async () => {
+    await waitRenameIndexReady()
+    const secondDir = `${wsDir}-rename-second`
+    await mkdir(secondDir, { recursive: true })
+    const added = vscode.workspace.updateWorkspaceFolders(
+      vscode.workspace.workspaceFolders!.length, 0,
+      { uri: vscode.Uri.file(secondDir) },
+    )
+    assert(added === true, 'updateWorkspaceFolders 应接受新增')
+    try {
+      // 等第二根索引就绪（引用域边界就位）
+      await poll('第二根纳入', async () => {
+        const s = (await vscode.commands.executeCommand('onegayi.vsidian._test.getVaultIndexState')) as {
+          roots: Array<{ fsPath: string; hasData: boolean }>
+        }
+        const second = s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(secondDir))
+        return second?.hasData ? true : undefined
+      }, 30000)
+      // 跨根移动：改名目标.md → 第二根（跨根移动不被拦截，但不得生成跨根引用）
+      const edit = new vscode.WorkspaceEdit()
+      edit.renameFile(wsUri('改名目标.md'), vscode.Uri.file(`${secondDir}/改名目标.md`), { overwrite: false })
+      assert(await vscode.workspace.applyEdit(edit), '跨根 rename 应成功应用')
+      // 引用者文本原样（不生成 ../.. 跨根相对引用）
+      const textA = (await vscode.workspace.openTextDocument(wsUri('rename-ref-a.md'))).getText()
+      const textB = (await vscode.workspace.openTextDocument(wsUri('notes/rename-ref-b.md'))).getText()
+      assert(textA.includes('[同目标](./改名目标.md)') && !textA.includes('rename-second'),
+        `跨根不得改写引用甲（实际 ${textA}` + '）')
+      assert(textB.includes('[[../改名目标]]'), `跨根不得改写引用乙（实际 ${textB}` + '）')
+      // 反馈：全部跳过（cross-root）、零更新
+      await poll('跨根跳过上报', async () => {
+        const last = await lastRenameRefLog()
+        return last && last.plannedEdits === 0 && last.skipped.length >= 2 &&
+          last.skipped.every((s) => s.reason === 'cross-root') &&
+          last.notice === 'host.renameRefsSkippedAll' ? last : undefined
+      })
+    } finally {
+      // 现场还原：外部 fs 通道移回（不触发 will），按身份移除第二根，等索引稳定
+      await vscode.workspace.fs.rename(vscode.Uri.file(`${secondDir}/改名目标.md`), wsUri('改名目标.md'), { overwrite: true })
+      await poll('还原后主根就绪', async () => {
+        const s = (await vscode.commands.executeCommand('onegayi.vsidian._test.getVaultIndexState')) as {
+          roots: Array<{ fsPath: string; hasData: boolean; scanning: boolean }>
+        }
+        const main = s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir))
+        return main?.hasData && !main.scanning ? true : undefined
+      })
+      for (let round = 0; round < 3; round++) {
+        const folders = vscode.workspace.workspaceFolders ?? []
+        const idx = folders.findIndex((f) => normFsPath(f.uri.fsPath) === normFsPath(secondDir))
+        if (idx < 0) {
+          break
+        }
+        if (!vscode.workspace.updateWorkspaceFolders(idx, 1)) {
+          break
+        }
+        await new Promise((r) => setTimeout(r, 300))
+      }
+      await rm(secondDir, { recursive: true, force: true })
+      await poll('根集合还原', async () => {
+        const s = (await vscode.commands.executeCommand('onegayi.vsidian._test.getVaultIndexState')) as {
+          roots: Array<{ fsPath: string }>
+        }
+        return s.roots.length === 1 ? true : undefined
       })
     }
   }],

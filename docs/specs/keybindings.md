@@ -66,3 +66,5 @@
 **「打开/切换反链面板」注册为 UI 操作、默认未绑定（#197 评估结论）**：目标固定明确（侧栏反链面板的显隐翻转，与大纲面板互斥），**单列为可绑定操作**（`onegayi.vsidian.ui.backlinksToggle`，双模式生效 `mode: both`、非写操作 `writes: false`）。反链查看为双模式需求（Live/阅读均显示当前笔记的反向链接，规格 [vault-index-backlinks.md](vault-index-backlinks.md)），面板切换是纯视图状态翻转（零写回、零出站编辑）；快捷键经 `keybindings.execute` 出站 → 宿主 `executeCommand` → `ui.command` 回流 webview，与侧栏按钮、命令面板三入口同链路（UI_OPERATIONS 登记即自动获得宿主命令注册）。默认不占键位：侧栏按钮常驻可见，快捷键留给高频用户按需绑定。索引维护类操作（重建/清理缓存）不在此列——属设置页/宿主域操作（#198 接线），不接管正文输入。
 
 **索引维护命令注册为宿主命令、默认未绑定（#198 评估结论）**：「完整重建」（`onegayi.vsidian.index.rebuild`）与「清理当前工作区缓存」（`onegayi.vsidian.index.cleanup`）登记于 extra 操作表（双模式生效 `mode: both`、非写操作 `writes: false`——语义为命令在两模式下均可用；操作本体不写正文，只维护索引缓存）。索引维护属**设置页/宿主域操作**：入口常驻设置页「索引维护」分页（按钮与命令共用同一 wiring），不接管正文输入、不进 webview 键路由；宿主侧注册保证设置页或面板异常时命令面板仍可达（cssSnippets.pause 同模式）。低频操作默认不占键位，用户可按需绑定。
+
+**单文件更名/移动的引用自动更新无快捷键（#199 评估结论）**：引用改写由 `onWillRenameFiles`/`onDidRenameFiles` 事件自动驱动（用户在资源管理器/命令面板发起 rename 或 move 即触发，任何 VSCode 原生改名入口都覆盖），不是可枚举目标的用户命令、不注册操作、不占键位（通道语义与实测边界见 [vault-index-backlinks.md](vault-index-backlinks.md) 的「#199 实施落档」节）。外部工具改名不触发 VSCode rename 事件，只刷新索引不改写（「不猜测旧新身份」）。

@@ -200,6 +200,44 @@ const TASK_DOC = [
 ].join('\n')
 // #10 链接样例：中文/空格目录（%20 编码形态——CommonMark 无尖括号目标
 // 不允许裸空格）、无扩展名目标、危险 scheme、自动链接与本地图片
+// #199 rename 引用改写样例：目标文档被根目录/子目录引用者以三种边型引用
+// （短名双链 / 显式路径 mdlink / 带标题锚与别名双链 / 子目录上行双链）+
+// 附件引用 + 被移动文档自身出链（改写、撤销、未保存保护与跨根断言载体）
+const RENAME_REF_A_DOC = [
+  '# 改名引用甲',
+  '',
+  '见 [[改名目标]] 与 [同目标](./改名目标.md)。',
+  '',
+  '带锚 [[改名目标#深处小节|别名]]。',
+  '',
+  '附件 ![图](assets/rename-pic.png)。',
+  '',
+].join('\n')
+const RENAME_REF_B_DOC = [
+  '# 改名引用乙',
+  '',
+  '上行 [[../改名目标]]。',
+  '',
+].join('\n')
+const RENAME_MOVED_DOC = [
+  '# 移动自测',
+  '',
+  '见 [[改名目标]] 与 [子文档](notes/rename-note.md)。',
+  '',
+].join('\n')
+const RENAME_NOTE_DOC = [
+  '# 子文档',
+  '',
+].join('\n')
+const RENAME_TARGET_DOC_WITH_ANCHOR = [
+  '# 改名目标',
+  '',
+  '## 深处小节',
+  '',
+  '小节内容。',
+  '',
+].join('\n')
+
 // #197 反链样例：目标文档被两个引用者以三种边型引用（wikilink 短名 /
 // mdlink 显式路径 / wikilink 带标题锚）——反链面板与跳转的断言载体。
 // 目标文档的反链期望（sortEdges 序：来源路径 → 区间）：
@@ -777,6 +815,14 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   writeFileSync(path.join(wsDir, 'backlinks-a.md'), BACKLINKS_SOURCE_A_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'backlinks-b.md'), BACKLINKS_SOURCE_B_DOC, 'utf8')
   writeFileSync(path.join(wsDir, '反链目标.md'), BACKLINKS_TARGET_DOC, 'utf8')
+  // #199 rename 引用改写：目标 + 根/子目录引用者 + 被移动文档与子文档 + 附件
+  writeFileSync(path.join(wsDir, '改名目标.md'), RENAME_TARGET_DOC_WITH_ANCHOR, 'utf8')
+  writeFileSync(path.join(wsDir, 'rename-ref-a.md'), RENAME_REF_A_DOC, 'utf8')
+  mkdirSync(path.join(wsDir, 'notes'), { recursive: true })
+  writeFileSync(path.join(wsDir, 'notes', 'rename-ref-b.md'), RENAME_REF_B_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'rename-moved.md'), RENAME_MOVED_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'notes', 'rename-note.md'), RENAME_NOTE_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'assets', 'rename-pic.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
   writeFileSync(path.join(wsDir, 'wikilinks.md'), WIKILINKS_DOC, 'utf8')
   writeFileSync(path.join(wsDir, '目标笔记.md'), TARGET_NOTE_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'wikilink-target.md'), WIKILINK_TARGET_DOC, 'utf8')
