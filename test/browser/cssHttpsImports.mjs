@@ -501,13 +501,15 @@ try {
     }))
     assert.ok(afterLate.text.endsWith('早早早中中中晚晚晚'),
       `字体晚到过程中输入不丢（尾部实际 ${JSON.stringify(afterLate.text.slice(-9))}）`)
-    // 绘制层探针量的是视口内前 8 行：光标随输入滚到文末，先滚回顶部再观测
-    await page.evaluate(() => {
-      document.querySelector('.cm-scroller').scrollTop = 0
-    })
-    await page.evaluate(() => window.controller.handleHostMessage({ kind: 'view.state.request' }))
-    const paintLive = await page.evaluate(() =>
-      window.snipSent().filter((m) => m.kind === 'view.state').at(-1))
+    // 绘制层探针量的是前 8 行；只滚动 scroller 会被文末光标的自动入视
+    // 拉回底部。经真实键盘把光标移至文首，再等待实际可见的绘制层状态。
+    await page.keyboard.press('Control+Home')
+    const paintLive = await waitFor(async () => {
+      await page.evaluate(() => window.controller.handleHostMessage({ kind: 'view.state.request' }))
+      const state = await page.evaluate(() =>
+        window.snipSent().filter((m) => m.kind === 'view.state').at(-1))
+      return state?.paint?.textVisible === true ? state : false
+    }, '字体晚到后 live 正文绘制层可见')
     assert.equal(paintLive.paint?.textVisible, true, '字体晚到后 live 正文绘制层仍可见')
 
     // reading：字体晚到改变块高度——measureAndStabilize 锚定补偿

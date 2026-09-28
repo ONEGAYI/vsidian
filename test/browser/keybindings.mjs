@@ -148,6 +148,11 @@ try {
       const last = sets[sets.length - 1]
       return last && last.id === 'italic' && JSON.stringify(last.bindings) === '["ctrl+b"]'
     }), true, '一击删除应发出移除 ctrl+i 的保存消息')
+    // 删除按钮先触发本地重渲染，宿主保存回执随后再重渲染一次；待回执
+    // 和孤儿 blur 的一帧回调排空后，核对最终焦点而非中间瞬态。
+    await page.getByRole('status').filter({ hasText: zhCn['keybindingSettings.saved'] }).waitFor()
+    await page.evaluate(() => new Promise((resolve) =>
+      requestAnimationFrame(() => setTimeout(resolve, 0))))
     assert.equal(await boldCapture.evaluate(el => document.activeElement === el), true,
       '他行动作引发的回推重渲染后，活跃捕获签应重获焦点（录制不中断）')
     await page.keyboard.press('Escape')
