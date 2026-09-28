@@ -163,10 +163,12 @@ import {
 } from './outlineMenu'
 import { applySubmenuFlip, buildMenuDom, CONTEXT_MENU_CLASS_NAMES } from './contextMenuDom'
 import {
+  PLAIN_MENU_LINE,
   buildContextMenuModel,
   contextMenuBlockTargetAt,
   contextMenuKeybindingHints,
   contextMenuZoneAt,
+  menuLineStructureOf,
   menuViewportPosition,
   type ContextMenuBlockTarget,
   type MenuContextSnapshot,
@@ -4477,9 +4479,11 @@ export class WebviewSyncController {
     this.openContextMenu(snapshot, event.clientX, event.clientY)
   }
 
-  /** doc 偏移 → 打开菜单的判定快照（zone + 块目标 + 选区态；不接管位
-   *  返回 null）。头区行索引在此推导：frontmatterRange 的字符区间换算为
-   *  结束行索引 */
+  /** doc 偏移 → 打开菜单的判定快照（zone + 块目标 + 选区态 + 行段落结构；
+   *  不接管位返回 null）。头区行索引在此推导：frontmatterRange 的字符区间
+   *  换算为结束行索引。行结构只在 normal 区解析（#184 勾选接线）——表格/
+   *  围栏/图形区整簇置灰且围栏内 `# 行` 是代码内容非结构，采集中性态
+   *  不点亮任何勾选 */
   private contextSnapshotAt(pos: number): MenuContextSnapshot | null {
     const view = this.view
     if (!view || pos < 0 || pos > view.state.doc.length) {
@@ -4498,6 +4502,7 @@ export class WebviewSyncController {
       zone,
       hasSelection: !view.state.selection.main.empty,
       blockTarget: contextMenuBlockTargetAt(lines, lineIndex, fmEndLine),
+      line: zone === 'normal' ? menuLineStructureOf(lines[lineIndex] ?? '') : PLAIN_MENU_LINE,
     }
   }
 

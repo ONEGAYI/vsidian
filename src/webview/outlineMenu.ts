@@ -35,6 +35,7 @@
 import type { OutlineMenuCommand } from '../shared/protocol'
 import type { MessageKey } from '../shared/locales/en'
 import {
+  PLAIN_MENU_LINE,
   buildMenuModel,
   type MenuContextSnapshot,
   type MenuItemDescriptor,
@@ -73,12 +74,13 @@ const OUTLINE_MENU_DOM_NAMES: Partial<MenuDomClassNames> = {
   cue: OUTLINE_MENU_CLASS_NAMES.cue,
 }
 
-/** 大纲菜单的固定上下文快照（谓词不消费区域/选区——模型仅由 hasChildren
- *  驱动；内核渲染管线要求 ctx 形参，此处为常量） */
+/** 大纲菜单的固定上下文快照（谓词不消费区域/选区/行结构——模型仅由
+ *  hasChildren 驱动；内核渲染管线要求 ctx 形参，此处为常量） */
 const OUTLINE_MENU_CONTEXT: MenuContextSnapshot = {
   zone: 'normal',
   hasSelection: false,
   blockTarget: null,
+  line: PLAIN_MENU_LINE,
 }
 
 /** 描述条目（id 与命令同值；子菜单 children 级联） */

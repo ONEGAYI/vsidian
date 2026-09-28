@@ -17,6 +17,7 @@
 // 运行期注册不受限）。
 import type { MessageKey } from './locales/en'
 import { atxHeadingOf, blockRangeOfLine, scanFenceBlocks } from './blockId'
+import { parseLinePrefix } from './listPrefix'
 import { isRenderedFenceInfo } from './mermaid'
 import { formatBindingLabel, getEffectiveBindings, type KeybindingOverrides } from './keybindings'
 
@@ -31,11 +32,55 @@ export interface ContextMenuBlockTarget {
   heading: { level: number; text: string } | null
 }
 
+/** 命中行的段落结构（段落设置勾选判定的输入；#184）——行文本形态学
+ *  （atxHeadingOf + parseLinePrefix）单一事实源在本模块 */
+export interface MenuLineStructure {
+  /** ATX 标题级别；非标题行 null */
+  headingLevel: number | null
+  /** 列表族（任务标记优先归 task，与无序互斥）；非列表行 null */
+  listKind: 'bullet' | 'ordered' | 'task' | null
+  /** 行首引用层在场（含纯引用空行与引用内列表） */
+  quoted: boolean
+  /** 行去空白后非空（空行不点亮任何段落勾选） */
+  hasText: boolean
+}
+
+/** 中性态（结构敏感区与不可解析行：不点亮任何勾选——采集侧约定） */
+export const PLAIN_MENU_LINE: MenuLineStructure = {
+  headingLevel: null,
+  listKind: null,
+  quoted: false,
+  hasText: false,
+}
+
+/**
+ * 行文本 → 段落结构形态学（#184 段落设置勾选的判定源）：ATX 标题优先
+ * （`# - 伪列表` 的 `- 伪列表` 是标题文本），再解析引用层 + 列表标记
+ * （伪标记 `-item` 不算列表——与 listPrefix #119 口径一致）。呈现层
+ * （liveDecorations）走语法树；菜单快照走行文本形态学——两者判定源
+ * 不同层，本函数只服务勾选语义。
+ */
+export function menuLineStructureOf(line: string): MenuLineStructure {
+  const hasText = line.trim() !== ''
+  const heading = atxHeadingOf(line)
+  if (heading !== null) {
+    return { headingLevel: heading.level, listKind: null, quoted: false, hasText }
+  }
+  const prefix = parseLinePrefix(line)
+  const quoted = prefix !== null && prefix.quote !== ''
+  const list = prefix?.list ?? null
+  const listKind =
+    list === null ? null : list.task !== null ? 'task' : list.bullet !== '' ? 'bullet' : 'ordered'
+  return { headingLevel: null, listKind, quoted, hasText }
+}
+
 /** 打开菜单时采集的判定输入快照（when/enable/checked 谓词的唯一数据面） */
 export interface MenuContextSnapshot {
   zone: ContextMenuZone
   hasSelection: boolean
   blockTarget: ContextMenuBlockTarget | null
+  /** 命中行段落结构（checked 谓词输入；结构敏感区采集中性态不点亮） */
+  line: MenuLineStructure
 }
 
 /** 上下文谓词（纯函数；输入只认 MenuContextSnapshot） */
@@ -104,19 +149,26 @@ const textFormatChildren: readonly MenuItemDescriptor[] = [
   { id: 'clearInline', group: 'blockFormat', order: 7, command: 'clearInline', labelKey: 'format.clearInline', iconKey: 'clearInline', enable: enabledOutsideStructure },
 ]
 
-/** 段落设置子项（簇 2.2；H1–H6 用文字徽标不经生图；checked 接线归内容票） */
+/** 段落设置子项（簇 2.2；H1–H6 用文字徽标不经生图；checked 按当前行结构
+ *  点亮——#184：任务标记优先归 task（族互斥），引用与列表可并存双勾，
+ *  空行/中性态不点亮任何项） */
+const lineOf = (ctx: MenuContextSnapshot) => ctx.line
+const isPlainParagraphLine = (ctx: MenuContextSnapshot): boolean => {
+  const line = lineOf(ctx)
+  return line.hasText && line.headingLevel === null && line.listKind === null && !line.quoted
+}
 const paragraphChildren: readonly MenuItemDescriptor[] = [
-  { id: 'bulletList', group: 'blockFormat', order: 0, command: 'bulletList', labelKey: 'format.bulletList', iconKey: 'bulletList', enable: enabledOutsideStructure },
-  { id: 'orderedList', group: 'blockFormat', order: 1, command: 'orderedList', labelKey: 'format.orderedList', iconKey: 'orderedList', enable: enabledOutsideStructure },
-  { id: 'taskList', group: 'blockFormat', order: 2, command: 'taskList', labelKey: 'format.taskList', iconKey: 'taskList', enable: enabledOutsideStructure },
-  { id: 'heading1', group: 'blockFormat', order: 3, command: 'heading1', labelKey: 'format.heading1', badge: 'H1', enable: enabledOutsideStructure },
-  { id: 'heading2', group: 'blockFormat', order: 4, command: 'heading2', labelKey: 'format.heading2', badge: 'H2', enable: enabledOutsideStructure },
-  { id: 'heading3', group: 'blockFormat', order: 5, command: 'heading3', labelKey: 'format.heading3', badge: 'H3', enable: enabledOutsideStructure },
-  { id: 'heading4', group: 'blockFormat', order: 6, command: 'heading4', labelKey: 'format.heading4', badge: 'H4', enable: enabledOutsideStructure },
-  { id: 'heading5', group: 'blockFormat', order: 7, command: 'heading5', labelKey: 'format.heading5', badge: 'H5', enable: enabledOutsideStructure },
-  { id: 'heading6', group: 'blockFormat', order: 8, command: 'heading6', labelKey: 'format.heading6', badge: 'H6', enable: enabledOutsideStructure },
-  { id: 'headingNone', group: 'blockFormat', order: 9, command: 'headingNone', labelKey: 'format.headingNone', iconKey: 'normalText', enable: enabledOutsideStructure },
-  { id: 'quote', group: 'blockFormat', order: 10, command: 'quote', labelKey: 'format.quote', iconKey: 'quote', enable: enabledOutsideStructure },
+  { id: 'bulletList', group: 'blockFormat', order: 0, command: 'bulletList', labelKey: 'format.bulletList', iconKey: 'bulletList', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).listKind === 'bullet' },
+  { id: 'orderedList', group: 'blockFormat', order: 1, command: 'orderedList', labelKey: 'format.orderedList', iconKey: 'orderedList', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).listKind === 'ordered' },
+  { id: 'taskList', group: 'blockFormat', order: 2, command: 'taskList', labelKey: 'format.taskList', iconKey: 'taskList', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).listKind === 'task' },
+  { id: 'heading1', group: 'blockFormat', order: 3, command: 'heading1', labelKey: 'format.heading1', badge: 'H1', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).headingLevel === 1 },
+  { id: 'heading2', group: 'blockFormat', order: 4, command: 'heading2', labelKey: 'format.heading2', badge: 'H2', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).headingLevel === 2 },
+  { id: 'heading3', group: 'blockFormat', order: 5, command: 'heading3', labelKey: 'format.heading3', badge: 'H3', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).headingLevel === 3 },
+  { id: 'heading4', group: 'blockFormat', order: 6, command: 'heading4', labelKey: 'format.heading4', badge: 'H4', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).headingLevel === 4 },
+  { id: 'heading5', group: 'blockFormat', order: 7, command: 'heading5', labelKey: 'format.heading5', badge: 'H5', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).headingLevel === 5 },
+  { id: 'heading6', group: 'blockFormat', order: 8, command: 'heading6', labelKey: 'format.heading6', badge: 'H6', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).headingLevel === 6 },
+  { id: 'headingNone', group: 'blockFormat', order: 9, command: 'headingNone', labelKey: 'format.headingNone', iconKey: 'normalText', enable: enabledOutsideStructure, checked: isPlainParagraphLine },
+  { id: 'quote', group: 'blockFormat', order: 10, command: 'quote', labelKey: 'format.quote', iconKey: 'quote', enable: enabledOutsideStructure, checked: (ctx) => lineOf(ctx).quoted },
 ]
 
 /** 插入子项（簇 2.3；表格与快速操作条建表同源入口 command=insertTable） */

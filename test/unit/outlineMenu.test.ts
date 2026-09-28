@@ -72,7 +72,8 @@ describe('菜单结构模型（票面命令清单）', () => {
   })
 
   it('无子项条目：递归展开 enable=false（其余命令仍可用）；删除为 danger', () => {
-    const ctx: MenuContextSnapshot = { zone: 'normal', hasSelection: false, blockTarget: null }
+    const ctx: MenuContextSnapshot = { zone: 'normal', hasSelection: false, blockTarget: null,
+      line: { headingLevel: null, listKind: null, quoted: false, hasText: false } }
     const spec = outlineMenuSpec(false)
     expect(spec.find((s) => s.id === 'expandRecursively')?.enable?.(ctx)).toBe(false)
     expect(spec.find((s) => s.id === 'collapseSiblings')?.enable).toBeUndefined()

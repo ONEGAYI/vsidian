@@ -194,6 +194,83 @@ describe('安全降级矩阵（结构敏感区写操作置灰）', () => {
   })
 })
 
+describe('段落设置勾选（行结构采集 + checked DOM 渲染，#184）', () => {
+  /** 命令按钮的勾选三态（role / aria-checked / ✓ 槽有无） */
+  const checkedOf = (command: string) => {
+    const btn = buttonOf(command)
+    if (!btn) {
+      return null
+    }
+    return {
+      role: btn.getAttribute('role'),
+      ariaChecked: btn.getAttribute('aria-checked'),
+      hasCheckSlot: !!btn.querySelector('.vsidian-context-menu-check'),
+    }
+  }
+
+  it('H2 行：heading2 勾选（menuitemcheckbox + ✓ 槽）；heading1 未勾选回落 menuitem', () => {
+    const h = makeBridge()
+    const text = '## 二级标题\n正文'
+    const { c } = mountPanel(h, text)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: 0 })
+    expect(checkedOf('heading2')).toEqual({
+      role: 'menuitemcheckbox', ariaChecked: 'true', hasCheckSlot: true,
+    })
+    const h1 = checkedOf('heading1')!
+    expect(h1.role).toBe('menuitem')
+    expect(h1.ariaChecked).toBeNull()
+    expect(h1.hasCheckSlot).toBe(false)
+  })
+
+  it('任务行：taskList 勾选且 bulletList 不勾（族互斥）', () => {
+    const h = makeBridge()
+    const text = '- [ ] 待办事项'
+    const { c } = mountPanel(h, text)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: text.indexOf('待办') })
+    expect(checkedOf('taskList')!.ariaChecked).toBe('true')
+    expect(checkedOf('bulletList')!.ariaChecked).toBeNull()
+  })
+
+  it('普通段落：正文（headingNone）勾选；quote 不勾', () => {
+    const h = makeBridge()
+    const { c } = mountPanel(h) // DOC 段落甲
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: POS.para })
+    expect(checkedOf('headingNone')!.ariaChecked).toBe('true')
+    expect(checkedOf('quote')!.ariaChecked).toBeNull()
+  })
+
+  it('引用行：quote 勾选', () => {
+    const h = makeBridge()
+    const quoted = '> 引用一行'
+    const { c } = mountPanel(h, quoted)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: quoted.indexOf('引用') })
+    expect(checkedOf('quote')!.ariaChecked).toBe('true')
+    expect(checkedOf('headingNone')!.ariaChecked).toBeNull()
+  })
+
+  it('围栏内 # 行是代码内容：中性态不点亮任何段落勾选（采集侧约定）', () => {
+    const h = makeBridge()
+    const text = '```md\n# 伪标题\n```'
+    const { c } = mountPanel(h, text)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: text.indexOf('# 伪') })
+    for (const command of ['heading1', 'heading2', 'headingNone', 'quote', 'bulletList', 'taskList']) {
+      const state = checkedOf(command)!
+      expect(state.ariaChecked, `${command} 围栏内不点亮`).toBeNull()
+      expect(state.hasCheckSlot, `${command} 围栏内无 ✓ 槽`).toBe(false)
+    }
+  })
+
+  it('空行：不点亮任何段落勾选（含正文）', () => {
+    const h = makeBridge()
+    const text = '正文\n\n结尾'
+    const blankPos = text.indexOf('\n\n') + 1
+    const { c } = mountPanel(h, text)
+    c.handleHostMessage({ kind: 'contextMenu.test.contextMenu', pos: blankPos })
+    expect(checkedOf('headingNone')!.ariaChecked).toBeNull()
+    expect(checkedOf('quote')!.ariaChecked).toBeNull()
+  })
+})
+
 describe('菜单开合（Esc / 外点 / 命令后 / 钩子关闭 / 模式切换）', () => {
   it('Esc 关闭；菜单内 pointerdown 不关闭；外点关闭；contextMenu.test.menuClose 钩子关闭', () => {
     const h = makeBridge()

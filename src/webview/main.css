@@ -1222,6 +1222,91 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   mask-size: contain;
 }
 
+/* #184 图标接线（26 枚 = 16 复用快速操作资产 + 10 新生成）：菜单挂 body
+   （不在 #app 内），规则不带 #app 前缀；两套资源与快速操作条同一 18px
+   画布资产族，mask 跟随前景色。备用 4 key（pastePlain/media/footnote/
+   callout）资产在场但菜单不引用——规格「扩展约定」显式记账，两表同步
+   由 test/unit/contextMenu.test.ts 钉住。 */
+.vsidian-context-menu [data-icon='link'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-link.svg'); }
+.vsidian-context-menu [data-icon='externalLink'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-externalLink.svg'); }
+.vsidian-context-menu [data-icon='textFormat'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-textFormat.svg'); }
+.vsidian-context-menu [data-icon='paragraphStyle'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-paragraphStyle.svg'); }
+.vsidian-context-menu [data-icon='insertPlus'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-insertPlus.svg'); }
+.vsidian-context-menu [data-icon='normalText'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-normalText.svg'); }
+.vsidian-context-menu [data-icon='cut'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-cut.svg'); }
+.vsidian-context-menu [data-icon='copy'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-copy.svg'); }
+.vsidian-context-menu [data-icon='paste'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-paste.svg'); }
+.vsidian-context-menu [data-icon='selectAll'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-selectAll.svg'); }
+.vsidian-context-menu [data-icon='comment'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-comment.svg'); }
+.vsidian-context-menu [data-icon='bold'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-bold.svg'); }
+.vsidian-context-menu [data-icon='italic'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-italic.svg'); }
+.vsidian-context-menu [data-icon='strikethrough'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-strikethrough.svg'); }
+.vsidian-context-menu [data-icon='highlight'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-highlight.svg'); }
+.vsidian-context-menu [data-icon='inlineCode'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-inlineCode.svg'); }
+.vsidian-context-menu [data-icon='inlineMath'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-inlineMath.svg'); }
+.vsidian-context-menu [data-icon='clearInline'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-clearInline.svg'); }
+.vsidian-context-menu [data-icon='bulletList'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-bulletList.svg'); }
+.vsidian-context-menu [data-icon='orderedList'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-orderedList.svg'); }
+.vsidian-context-menu [data-icon='taskList'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-taskList.svg'); }
+.vsidian-context-menu [data-icon='quote'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-quote.svg'); }
+.vsidian-context-menu [data-icon='table'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-table.svg'); }
+.vsidian-context-menu [data-icon='horizontalRule'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-horizontalRule.svg'); }
+.vsidian-context-menu [data-icon='codeBlock'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-codeBlock.svg'); }
+.vsidian-context-menu [data-icon='blockMath'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-blockMath.svg'); }
+
+body.vscode-dark .vsidian-context-menu [data-icon='link'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='link'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-link.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='externalLink'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='externalLink'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-externalLink.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='textFormat'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='textFormat'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-textFormat.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='paragraphStyle'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='paragraphStyle'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-paragraphStyle.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='insertPlus'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='insertPlus'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-insertPlus.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='normalText'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='normalText'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-normalText.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='cut'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='cut'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-cut.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='copy'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='copy'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-copy.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='paste'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='paste'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-paste.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='selectAll'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='selectAll'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-selectAll.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='comment'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='comment'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-comment.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='bold'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='bold'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-bold.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='italic'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='italic'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-italic.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='strikethrough'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='strikethrough'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-strikethrough.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='highlight'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='highlight'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-highlight.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='inlineCode'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='inlineCode'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-inlineCode.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='inlineMath'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='inlineMath'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-inlineMath.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='clearInline'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='clearInline'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-clearInline.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='bulletList'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='bulletList'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-bulletList.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='orderedList'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='orderedList'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-orderedList.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='taskList'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='taskList'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-taskList.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='quote'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='quote'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-quote.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='table'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='table'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-table.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='horizontalRule'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='horizontalRule'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-horizontalRule.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='codeBlock'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='codeBlock'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-codeBlock.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='blockMath'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-blockMath.svg'); }
+
 /* 文字徽标（H1–H6）：语言无关的字面，弱化一档与文案区分 */
 .vsidian-context-menu .vsidian-context-menu-badge {
   flex: 0 0 auto;

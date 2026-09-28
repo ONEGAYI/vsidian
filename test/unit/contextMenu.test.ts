@@ -4,11 +4,17 @@
 // 安全降级矩阵（逐区域 enable/when）、键位提示派生（剪贴板四项固定 + 键位
 // 注册表派生）。命中判定（contextMenuBlockTargetAt）自 blockMenu.test.ts
 // 迁移（断言语义不变）。DOM 装配契约在 contextMenuDom.test.ts。
+// #184 追加：段落设置勾选矩阵（menuLineStructureOf + checked 谓词）、图标
+// 资产两表同步（描述符 iconKey ↔ 资产文件与 CSS 接线规则）、命令分派契约
+// （每个内置叶命令都有执行路径）。
 import { describe, expect, it, afterEach } from 'vitest'
+import { existsSync, readFileSync } from 'node:fs'
+import path from 'node:path'
 import {
   CONTEXT_MENU_GROUP_ORDER,
   CONTEXT_MENU_ICON_KEYS,
   CONTEXT_MENU_ITEMS,
+  PLAIN_MENU_LINE,
   buildContextMenuModel,
   buildMenuModel,
   contextMenuBlockTargetAt,
@@ -17,6 +23,7 @@ import {
   contextMenuRegistrySnapshot,
   contextMenuZoneAt,
   hideContextMenuItem,
+  menuLineStructureOf,
   menuViewportPosition,
   overrideContextMenuItem,
   registerContextMenuItem,
@@ -25,6 +32,7 @@ import {
   type MenuContextSnapshot,
   type MenuItemDescriptor,
 } from '../../src/shared/contextMenu'
+import { isFormatOperationId } from '../../src/shared/formatOperations'
 import { en } from '../../src/shared/locales/en'
 import { zhCn } from '../../src/shared/locales/zh-cn'
 
@@ -48,6 +56,7 @@ const normalCtx = (over: Partial<MenuContextSnapshot> = {}): MenuContextSnapshot
   zone: 'normal',
   hasSelection: false,
   blockTarget: { block: { start: 0, end: 0 }, heading: null },
+  line: PLAIN_MENU_LINE,
   ...over,
 })
 
@@ -467,5 +476,169 @@ describe('通用模型构建（buildMenuModel：大纲等非注册表场景复�
       { id: 'del', group: 'outline', order: 0, command: 'del', labelKey: 'contextMenu.copy', danger: true },
     ]
     expect(buildMenuModel(defs, normalCtx())[0]!.items[0]!.danger).toBe(true)
+  })
+})
+
+// ---- #184：段落设置勾选矩阵（menuLineStructureOf 形态学 + checked 谓词）----
+
+/** 行文本 → 段落设置子项勾选映射（模型级断言：谓词真实求值） */
+const paragraphCheckedOf = (line: string): Record<string, boolean> => {
+  const ctx = normalCtx({ line: menuLineStructureOf(line) })
+  const style = buildContextMenuModel(ctx).flatMap((g) => g.items).find((i) => i.id === 'paragraphStyle')!
+  return Object.fromEntries((style.children ?? []).map((child) => [child.id, child.checked]))
+}
+
+describe('行结构形态学（menuLineStructureOf，#184）', () => {
+  it('普通段落：仅 hasText；空行全中性（不点亮任何勾选）', () => {
+    expect(menuLineStructureOf('普通段落一行'))
+      .toEqual({ headingLevel: null, listKind: null, quoted: false, hasText: true })
+    expect(menuLineStructureOf('   '))
+      .toEqual({ headingLevel: null, listKind: null, quoted: false, hasText: false })
+    expect(menuLineStructureOf(''))
+      .toEqual({ headingLevel: null, listKind: null, quoted: false, hasText: false })
+  })
+
+  it('ATX 标题：级别入快照（# - 伪列表 是标题文本不是列表）', () => {
+    expect(menuLineStructureOf('## 标题').headingLevel).toBe(2)
+    expect(menuLineStructureOf('###### 六级').headingLevel).toBe(6)
+    const pseudo = menuLineStructureOf('# - 伪列表')
+    expect(pseudo.headingLevel).toBe(1)
+    expect(pseudo.listKind).toBeNull()
+  })
+
+  it('列表族：无序/有序/任务（任务标记优先归 task）；伪标记不算列表', () => {
+    expect(menuLineStructureOf('- 项目').listKind).toBe('bullet')
+    expect(menuLineStructureOf('* 星号项').listKind).toBe('bullet')
+    expect(menuLineStructureOf('1. 有序').listKind).toBe('ordered')
+    expect(menuLineStructureOf('01) 括号有序').listKind).toBe('ordered')
+    expect(menuLineStructureOf('- [ ] 待办').listKind).toBe('task')
+    expect(menuLineStructureOf('- [x] 完成').listKind).toBe('task')
+    expect(menuLineStructureOf('-紧贴伪标记 item').listKind).toBeNull()
+    expect(menuLineStructureOf('-').listKind).toBe('bullet') // 空项裸标记
+  })
+
+  it('引用层：纯引用与引用内列表都置 quoted', () => {
+    expect(menuLineStructureOf('> 引用').quoted).toBe(true)
+    expect(menuLineStructureOf('>> 双层').quoted).toBe(true)
+    expect(menuLineStructureOf('> - 引用内列表').quoted).toBe(true)
+    expect(menuLineStructureOf('> - [ ] 引用内任务').quoted).toBe(true)
+    expect(menuLineStructureOf('普通 > 文本中部').quoted).toBe(false)
+  })
+})
+
+describe('段落设置勾选矩阵（checked 谓词按当前行结构点亮，#184）', () => {
+  type CheckedMap = Record<string, boolean>
+  /** 场景矩阵：行文本 → 非默认（true）的勾选子项（其余全 false） */
+  const matrix: Array<[string, CheckedMap]> = [
+    ['普通段落一行', { headingNone: true }],
+    ['## 用 **重点** 说明', { heading2: true }],
+    ['# 一级', { heading1: true }],
+    ['- 无序项', { bulletList: true }],
+    ['3. 有序项', { orderedList: true }],
+    ['- [ ] 待办任务', { taskList: true }],
+    ['- [x] 已完成任务', { taskList: true }],
+    ['> 引用文字', { quote: true }],
+    // 引用内列表：结构如实双勾（引用层 + 列表族并存）
+    ['> - 引用内列表项', { quote: true, bulletList: true }],
+    ['> 1. 引用内有序', { quote: true, orderedList: true }],
+    // 空行与中性态：不点亮任何项
+    ['', {}],
+    ['   ', {}],
+  ]
+
+  for (const [line, expectedTrue] of matrix) {
+    it(`${JSON.stringify(line)} → 勾选 ${JSON.stringify(expectedTrue)}`, () => {
+      const checked = paragraphCheckedOf(line)
+      const paragraphIds = Object.keys(checked)
+      expect(paragraphIds.sort()).toEqual(['bulletList', 'heading1', 'heading2', 'heading3', 'heading4',
+        'heading5', 'heading6', 'headingNone', 'orderedList', 'quote', 'taskList'])
+      for (const id of paragraphIds) {
+        expect(checked[id], `${JSON.stringify(line)} 的 ${id} 勾选态错误`).toBe(expectedTrue[id] === true)
+      }
+    })
+  }
+
+  it('任务行不点亮无序列表（任务标记优先归 task——族互斥）', () => {
+    const checked = paragraphCheckedOf('- [ ] 待办')
+    expect(checked['taskList']).toBe(true)
+    expect(checked['bulletList']).toBe(false)
+  })
+
+  it('中性态快照（结构敏感区采集约定）：不点亮任何勾选', () => {
+    const checked = paragraphCheckedOf('## 不该勾') // 行本身是标题——
+    const neutral = buildContextMenuModel(normalCtx({ line: PLAIN_MENU_LINE }))
+      .flatMap((g) => g.items).find((i) => i.id === 'paragraphStyle')!
+    expect((neutral.children ?? []).every((child) => !child.checked)).toBe(true)
+    expect(checked['heading2']).toBe(true) // 对照组：真实结构照常点亮
+  })
+
+  it('文本格式类不显示勾选（切换语义下勾选意义模糊——#183 既定边界）', () => {
+    const ctx = normalCtx({ line: menuLineStructureOf('**粗体** 文字') })
+    const format = buildContextMenuModel(ctx).flatMap((g) => g.items).find((i) => i.id === 'textFormat')!
+    expect((format.children ?? []).every((child) => !child.checked)).toBe(true)
+  })
+})
+
+// ---- #184：图标资产两表同步（描述符 iconKey ↔ 资产文件与 CSS 接线规则）----
+
+describe('图标资产两表同步（#184：规格「扩展约定」两表同步的机器钉法）', () => {
+  const referenced = new Set(
+    flattenItems(CONTEXT_MENU_ITEMS).flatMap((def) => (def.iconKey ? [def.iconKey] : [])),
+  )
+  const root = path.resolve(process.cwd())
+
+  it('被描述符引用的图标 key 恰 26 枚（16 复用 + 10 新生成接线）', () => {
+    expect(referenced.size).toBe(26)
+  })
+
+  it('每个被引用 key 都有明暗两套 SVG 资产文件', () => {
+    for (const key of referenced) {
+      expect(existsSync(path.join(root, 'media/quick-actions/light', `light-${key}.svg`)),
+        `${key} 缺 light SVG 资产`).toBe(true)
+      expect(existsSync(path.join(root, 'media/quick-actions/dark', `dark-${key}.svg`)),
+        `${key} 缺 dark SVG 资产`).toBe(true)
+    }
+  })
+
+  it('备用 4 key（pastePlain/media/footnote/callout）不被任何描述符引用（显式记账）', () => {
+    for (const key of ['pastePlain', 'media', 'footnote', 'callout']) {
+      expect(referenced.has(key), `备用 key ${key} 不应被描述符引用`).toBe(false)
+      // 资产在表登记（KEYS 同步）：备用资产文件同样在场
+      expect(existsSync(path.join(root, 'media/quick-actions/light', `light-${key}.svg`)),
+        `备用 key ${key} 的资产应在场（记账）`).toBe(true)
+    }
+  })
+
+  it('main.css 为每个被引用 key 提供明暗两套 [data-icon] 接线规则', () => {
+    const css = readFileSync(path.join(root, 'src/webview/main.css'), 'utf8')
+    for (const key of referenced) {
+      const lightRule = new RegExp(
+        `\\.vsidian-context-menu \\[data-icon='${key}'\\]\\s*\\{[^}]*light-${key}\\.svg`)
+      const darkRule = new RegExp(
+        `body\\.vscode-dark[^{]*\\.vsidian-context-menu \\[data-icon='${key}'\\][^}]*dark-${key}\\.svg`)
+      expect(lightRule.test(css), `${key} 缺 light 接线规则（--vsidian-context-icon → light SVG）`).toBe(true)
+      expect(darkRule.test(css), `${key} 缺 dark 接线规则（vscode-dark/high-contrast → dark SVG）`).toBe(true)
+    }
+  })
+})
+
+// ---- #184：命令分派契约（每个内置叶命令在 runContextMenuCommand 有执行路径）----
+
+describe('命令分派契约（三簇叶命令可执行；显式分支另有面板行为用例逐项钉住）', () => {
+  it('叶命令 ∈ formatOperations id ∪ 显式分派分支集；父项（有 children）无叶命令豁免', () => {
+    // runContextMenuCommand（syncController）的显式分支集合——行为级用例在
+    // contextMenuPanel.test.ts 逐项覆盖（cut/copy/paste/selectAll/
+    // copyHeadingLink/copyBlockLink/insertTable + bold 代表 formatOperations
+    // 同路径）；本契约防「新增描述符忘接分派」的回归。
+    const explicit = new Set(['cut', 'copy', 'paste', 'selectAll', 'copyHeadingLink', 'copyBlockLink', 'insertTable'])
+    for (const def of flattenItems(CONTEXT_MENU_ITEMS)) {
+      if (def.children && def.children.length > 0) {
+        continue // 父项点击只展开不执行（无叶命令）
+      }
+      expect(
+        isFormatOperationId(def.command) || explicit.has(def.command),
+        `${def.id} 的命令 ${def.command} 无执行路径（formatOperations 与显式分支均未覆盖）`,
+      ).toBe(true)
+    }
   })
 })
