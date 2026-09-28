@@ -86,7 +86,7 @@ vsidian/
 │   │   ├── 0005-viewport-rendering.md            # 全文模型与视口渲染分离
 │   │   ├── 0006-rebrand-to-vsidian.md            # 统一更名为 vsidian 的映射记录
 │   │   ├── 0007-css-snippet-env-isolation.md     # CSS 片段环境隔离决策记录（#131）
-│   │   └── 0008-workspace-reference-index.md     # 工作区引用索引架构原则
+│   │   └── 0008-workspace-reference-index.md     # 工作区引用索引架构与存储选型
 │   ├── agents/   # agent 操作约定
 │   │   ├── domain.md        # 领域文档读取与维护约定
 │   │   └── issue-tracker.md # GitHub Issues 操作约定
@@ -102,9 +102,11 @@ vsidian/
 │   │   ├── 2026-09-reading-viewport-mount.md    # 阅读按需挂载实测数据
 │   │   ├── 2026-09-table-cell-editing.md        # 表格单元格编辑性能实测（#12）
 │   │   ├── 2026-09-title-decoration-viewport.md # 标题切片视口渲染实测数据
+│   │   ├── 2026-09-vault-index-storage.md       # 索引存储选型三档基准解读（#195）
 │   │   └── data/                                # 性能探针原始报告数据
-│   │       ├── browser-test-runner.json # 浏览器调度实测数据
-│   │       └── perf-report.json         # 性能探针原始报告数据
+│   │       ├── browser-test-runner.json       # 浏览器调度实测数据
+│   │       ├── perf-report.json               # 性能探针原始报告数据
+│   │       └── vault-index-storage-bench.json # 索引存储基准原始数据（#195）
 │   ├── research/ # 技术调研报告
 │   │   ├── obsidian-live-preview-editor.md # Obsidian 技术栈与选型调研
 │   │   └── obsidian-viewport-rendering.md  # 视口渲染性能补充调研
@@ -177,36 +179,38 @@ vsidian/
 │   │   ├── viewCycle.ts                # 三态视图编排纯逻辑
 │   │   └── wikilinkTarget.ts           # 宿主侧双链目标解析纯逻辑（#11）
 │   ├── shared/      # 两端共享纯逻辑
-│   │   ├── blockId.ts           # 块 id 与块边界单一事实源
-│   │   ├── changeMapping.ts     # 变更重定位纯函数
-│   │   ├── chromeContract.ts    # 界面域样式契约探针表
-│   │   ├── codeLangs.ts         # 代码块语言注册表与别名路由
-│   │   ├── cssSnippetEnv.ts     # CSS 片段环境身份与分桶戳（#131）
-│   │   ├── cssSnippetImports.ts # CSS 片段依赖导入形态学单一事实源
-│   │   ├── cssSnippets.ts       # CSS 片段纯逻辑单一事实源
-│   │   ├── formatOperations.ts  # 格式操作注册清单
-│   │   ├── frontmatterTable.ts  # frontmatter 表格化纯逻辑
-│   │   ├── i18n.ts              # t() 取词与语言包装配状态模块
-│   │   ├── keybindings.ts       # 快捷键操作与冲突模型
-│   │   ├── listPrefix.ts        # 列表引用前缀形态学（#119）
-│   │   ├── locales/             # 语言包字典单一事实源
+│   │   ├── blockId.ts            # 块 id 与块边界单一事实源
+│   │   ├── changeMapping.ts      # 变更重定位纯函数
+│   │   ├── chromeContract.ts     # 界面域样式契约探针表
+│   │   ├── codeLangs.ts          # 代码块语言注册表与别名路由
+│   │   ├── cssSnippetEnv.ts      # CSS 片段环境身份与分桶戳（#131）
+│   │   ├── cssSnippetImports.ts  # CSS 片段依赖导入形态学单一事实源
+│   │   ├── cssSnippets.ts        # CSS 片段纯逻辑单一事实源
+│   │   ├── formatOperations.ts   # 格式操作注册清单
+│   │   ├── frontmatterTable.ts   # frontmatter 表格化纯逻辑
+│   │   ├── i18n.ts               # t() 取词与语言包装配状态模块
+│   │   ├── keybindings.ts        # 快捷键操作与冲突模型
+│   │   ├── listPrefix.ts         # 列表引用前缀形态学（#119）
+│   │   ├── locales/              # 语言包字典单一事实源
 │   │   │   ├── en.ts     # 英文语言包（类型基准）
 │   │   │   ├── index.ts  # 语言注册表与解析（仅宿主可引）
 │   │   │   ├── island.ts # 语言数据岛构建与解析
 │   │   │   └── zh-cn.ts  # 简体中文语言包（编译期 parity）
-│   │   ├── looseLink.ts         # 宽松内联链接/图片形态学单一事实源
-│   │   ├── math.ts              # 公式形态学纯函数（#59）
-│   │   ├── mermaid.ts           # Mermaid 围栏形态学（#60）
-│   │   ├── newline.ts           # CRLF/LF 换行协调器
-│   │   ├── obsidianAlias.ts     # Obsidian 别名桥实现同源表
-│   │   ├── protocol.ts          # 消息协议单一事实源
-│   │   ├── settings.ts          # 设置定义与读写纯逻辑
-│   │   ├── styleContract.ts     # 公开样式契约清单单一事实源
-│   │   ├── styleContractEn.ts   # 样式参考条目英文覆盖单一事实源
-│   │   ├── symbols.ts           # 符号注册表单一事实源（#123）
-│   │   ├── symbolWrap.ts        # 选区包裹计划纯函数（#124）
-│   │   ├── tabEscape.ts         # Tab 越界定位纯函数（#125）
-│   │   └── wikilink.ts          # 双链形态学单一事实源（#11）
+│   │   ├── looseLink.ts          # 宽松内联链接/图片形态学单一事实源
+│   │   ├── math.ts               # 公式形态学纯函数（#59）
+│   │   ├── mermaid.ts            # Mermaid 围栏形态学（#60）
+│   │   ├── newline.ts            # CRLF/LF 换行协调器
+│   │   ├── obsidianAlias.ts      # Obsidian 别名桥实现同源表
+│   │   ├── protocol.ts           # 消息协议单一事实源
+│   │   ├── settings.ts           # 设置定义与读写纯逻辑
+│   │   ├── styleContract.ts      # 公开样式契约清单单一事实源
+│   │   ├── styleContractEn.ts    # 样式参考条目英文覆盖单一事实源
+│   │   ├── symbols.ts            # 符号注册表单一事实源（#123）
+│   │   ├── symbolWrap.ts         # 选区包裹计划纯函数（#124）
+│   │   ├── tabEscape.ts          # Tab 越界定位纯函数（#125）
+│   │   ├── vaultIndexModel.ts    # 引用索引内存模型纯逻辑
+│   │   ├── vaultIndexSnapshot.ts # 分片快照存储纯逻辑（#195 选型基线）
+│   │   └── wikilink.ts           # 双链形态学单一事实源（#11）
 │   └── webview/     # webview 端实现
 │       ├── anchorFlash.ts            # 跳转目标高亮装饰状态
 │       ├── blockIdStrip.ts           # 阅读渲染块标记剥离纯函数
