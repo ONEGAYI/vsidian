@@ -916,6 +916,23 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
     dom: 'A direct child of document.body (viewport-fixed positioning).',
     obsidian: { counterpart: 'None (the Obsidian context menu is an app-native menu, not a DOM element)' },
   },
+
+  // ---- 反链面板（backlinks，2 条；#197）----
+  'backlink-panel': {
+    purpose:
+      'The backlinks panel (#197): the reverse-link list for the current note — each item shows the source file:line (muted bold row) plus the quoting snippet (single-line ellipsis); the four-state placeholders (loading/empty/error) and the updating strip share the container. The visibility switch is the vsidian-backlinks-active class on the sidebar container (same mechanism as, and mutually exclusive with, the outline panel).',
+    states:
+      'The panel DOM is persistent in the sidebar (.vsidian-sidebar-panel), display:none by default; visible when the sidebar is expanded and the panel is active. Items are dynamic data (driven by host index snapshots); the four states follow the latest backlinks.snapshot.',
+    dom: 'In the sidebar panel area: vsidian-backlink-panel container > vsidian-backlink-updating strip (optional) + vsidian-backlink-item buttons (item-source + item-snippet), or a vsidian-backlink-placeholder.',
+    obsidian: { counterpart: 'None (the Obsidian backlinks pane is app-level DOM)' },
+  },
+  'backlinks-toggle': {
+    purpose:
+      'The sidebar toolbar button toggling the backlinks panel (same row as the outline button): clicking toggles the panel (mutually exclusive with the outline panel); the active-state highlight follows --vscode-list-activeSelectionBackground.',
+    states: 'Visible when the sidebar is expanded; aria-expanded tracks the panel active state.',
+    dom: 'A button plus a looped-arrow SVG icon inside .vsidian-sidebar-toolbar-actions.',
+    obsidian: { counterpart: 'None (the Obsidian backlinks toggle is app-level UI)' },
+  },
 }
 
 /**

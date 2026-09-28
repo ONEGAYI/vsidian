@@ -164,6 +164,7 @@ export const zhCn: Record<MessageKey, string> = {
   'styleRef.category.frontmatter': 'frontmatter 表格卡片',
   'styleRef.category.toolbarBanner': '工具栏与横幅',
   'styleRef.category.contextMenu': '正文右键菜单',
+  'styleRef.category.backlinks': '反链面板',
   'host.styleRefExported': '样式契约 JSON 已导出：{path}',
   'host.styleRefExportFailed': '样式契约 JSON 导出失败：{reason}',
   'host.styleRefExportReasonMissingAsset': '扩展安装不完整（缺少 style-reference.json）',
@@ -318,6 +319,15 @@ export const zhCn: Record<MessageKey, string> = {
   'outlineMenu.rename': '重命名',
   'outlineMenu.delete': '删除',
 
+  /** 反链面板（#197：四态与条目） */
+  'backlinks.label': '反向链接',
+  'backlinks.empty': '没有反向链接',
+  'backlinks.loading': '正在加载反向链接…',
+  'backlinks.updating': '索引更新中…',
+  'backlinks.error': '反向链接不可用',
+  'backlinks.errorNoWorkspace': '未打开工作区，无法查看反向链接',
+  'backlinks.jumpTo': '跳转到 {file} 的引用处（第 {n} 行）',
+
   'table.controls': '表格操作控件',
   'table.insertColumnRight': '在右侧新增列',
   'table.insertRowBelow': '在表格底部新增行',
@@ -408,6 +418,8 @@ export const zhCn: Record<MessageKey, string> = {
   'command.ui.outlineReset.title': '重置大纲',
   'command.ui.outlineCollapseAll.title': '折叠全部大纲',
   'command.ui.outlineExpandAll.title': '展开全部大纲',
+  /** #197 反链面板：双模式 UI 操作，默认未绑定（评估记录见 keybindings.md） */
+  'command.ui.backlinksToggle.title': '显示或隐藏反链面板',
 
   // ---- #159 锚点跳转（块引用定位与本文件锚点）----
   /** 块 id 缺失提示（与标题缺失同款「打开后提示」行为） */

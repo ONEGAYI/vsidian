@@ -1083,7 +1083,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
   </section>
   <section class="domain" data-domain="chrome">
-    <h1 style="font-size:19px;margin-bottom:4px">界面域（55 条）</h1>
+    <h1 style="font-size:19px;margin-bottom:4px">界面域（57 条）</h1>
     <p class="note">界面域条目（#133 起逐项核实）：静态入口经探针在真实渲染中断言，交互态入口由浏览器/集成套件按行为路径验证；第三方渲染器（KaTeX/Mermaid）内部 DOM 不承诺为稳定接口（见各域「限制」类目）。</p>
     <h2>界面域 · 公式（5）</h2>
     <article class="entry" id="live-math">
@@ -1847,6 +1847,35 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 }</code></pre>
       <p class="verify">验证：单元 blockMenu/blockMenuPanel：菜单装配与命令交互；集成 block.test.contextMenu/menuClick 系列钩子</p>
       <p class="life">引入：#162（2026-09-28）</p>
+    </article>
+    <h2>界面域 · 反链面板（2）</h2>
+    <article class="entry" id="backlink-panel">
+      <h3><code>.vsidian-backlink-panel（+ .vsidian-backlink-item / -item-source / -item-snippet / -item 上 -source 类）</code><span class="eid">backlink-panel</span></h3>
+      <p class="purpose">反链面板（#197）：当前笔记的反向链接列表——条目 = 来源文件:行号（弱化加重行）+ 引用片段（单行省略）；四态占位（loading/empty/error）与更新中细条共用容器。显隐唯一开关是侧栏容器的 vsidian-backlinks-active 类（与大纲面板同模式且互斥）。</p>
+      <p class="views"><span class="badge badge-none">非编辑视图</span> <span class="support support-none">none</span></p>
+<p class="states">状态：面板 DOM 常驻侧栏（.vsidian-sidebar-panel 内），默认 display:none；侧栏展开 + 面板 active 时可见。条目为动态数据（宿主索引快照驱动），四态随最近 backlinks.snapshot 变化。</p>
+      <p class="obsidian">Obsidian 对应：无（Obsidian 反链为应用级侧栏 DOM）</p>
+
+      <p class="dom">DOM 关系：右侧栏面板区域：vsidian-backlink-panel 容器 &gt; vsidian-backlink-updating（更新中细条，可选）+ vsidian-backlink-item 按钮条目（item-source + item-snippet）或 vsidian-backlink-placeholder 占位。</p>
+      <pre><code>.vsidian-backlink-item .vsidian-backlink-item-source {
+  font-weight: 600;
+}</code></pre>
+      <p class="verify">验证：单元 backlinkPanel：四态渲染与类名锚点；集成「反链面板」（#197）：backlinks.togglePainted/panelPainted/itemPainted/emptyPainted 绘制证据；集成「界面域样式契约」（#133）：chromeSelectors[&quot;backlink-panel&quot;] 探针命中</p>
+      <p class="life">引入：#197（2026-09-29）</p>
+    </article>
+    <article class="entry" id="backlinks-toggle">
+      <h3><code>.vsidian-backlinks-toggle</code><span class="eid">backlinks-toggle</span></h3>
+      <p class="purpose">侧栏顶栏的反链面板切换按钮（与大纲按钮同排）：点击切换反链面板显隐（与大纲面板互斥）；active 态按钮高亮跟随 --vscode-list-activeSelectionBackground。</p>
+      <p class="views"><span class="badge badge-none">非编辑视图</span> <span class="support support-none">none</span></p>
+<p class="states">状态：侧栏展开时可见；aria-expanded 随面板 active 同步。</p>
+      <p class="obsidian">Obsidian 对应：无（Obsidian 反链开关为应用级 UI）</p>
+
+      <p class="dom">DOM 关系：侧栏顶栏工具行（.vsidian-sidebar-toolbar-actions）内按钮 + 回环箭头 SVG 图标。</p>
+      <pre><code>.vsidian-sidebar.vsidian-backlinks-active .vsidian-sidebar-toolbar button.vsidian-backlinks-toggle {
+  background: var(--vscode-list-activeSelectionBackground);
+}</code></pre>
+      <p class="verify">验证：集成「反链面板」（#197）：backlinks.togglePainted 绘制证据与 toggleAriaLabel</p>
+      <p class="life">引入：#197（2026-09-29）</p>
     </article>
   </section>
 <p style="margin-top:48px;color:color-mix(in srgb, currentColor 50%, transparent);font-size:12px">由 src/shared/styleContract.ts 生成（scripts/genStyleGuide.mjs）；产物一致性由 test/unit/styleGuideGen.test.ts 钉住。</p>

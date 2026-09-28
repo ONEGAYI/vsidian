@@ -55,6 +55,7 @@ import {
 import type { SettingsService } from './settingsService'
 import type { KeybindingService } from './keybindingService'
 import type { CssSnippetService } from './cssSnippetService'
+import type { VaultIndexService } from './vaultIndexService'
 import type { SnippetLinkList } from '../shared/cssSnippets'
 import type { SettingsPageHandle } from './settingsPage'
 import { runDiagramExport } from './diagramExportHost'
@@ -281,6 +282,7 @@ export function createTextEditorProvider(
   context: vscode.ExtensionContext,
   settings?: SettingsWiring,
   snippets?: CssSnippetService,
+  vaultIndex?: VaultIndexService,
 ): vscode.CustomTextEditorProvider {
   const sessions = new Map<string, SessionEntry>()
   let lastClosedInput: { docUri: string; webviewText?: string; fragments: string[] } | undefined
@@ -595,6 +597,61 @@ export function createTextEditorProvider(
     }
   }
 
+  // ---- #197 反链面板：快照应答与条目跳转（面板级 UI 意图的执行体） ----
+
+  /** 反链快照（backlinks.get 应答与 onChange 广播共用）：结果形态与
+   *  backlinks.snapshot 协议一致（items 为空数组兜底） */
+  const sendBacklinksSnapshot = async (
+    entry: SessionEntry,
+    sessionId: string,
+    docUri: vscode.Uri,
+  ): Promise<void> => {
+    if (!vaultIndex) {
+      entry.session.postToPanel(sessionId, {
+        kind: 'backlinks.snapshot',
+        docUri: docUri.toString(),
+        state: 'error',
+        reason: 'no-workspace',
+        items: [],
+      })
+      return
+    }
+    const result = await vaultIndex.backlinksOf(docUri.fsPath)
+    entry.session.postToPanel(sessionId, {
+      kind: 'backlinks.snapshot',
+      docUri: docUri.toString(),
+      state: result.status,
+      updating: result.status === 'ready' ? result.updating : undefined,
+      reason: result.status === 'error' ? result.reason : undefined,
+      items: result.status === 'ready'
+        ? result.items.map((item) => ({
+          sourceRelPath: item.sourceRelPath,
+          sourceFsPath: item.sourceFsPath,
+          kind: item.kind,
+          anchor: item.anchor,
+          start: item.start,
+          end: item.end,
+          line: item.line,
+          snippet: item.snippet,
+        }))
+        : [],
+    })
+  }
+
+  /** 反链条目跳转：打开来源文档（Vsidian 面板）并定位到出链标记——
+   *  openWith 对已开面板是重显；offset 为来源正文 LF 偏移（宿主抽取侧
+   *  已归一），直接作 view.locate 输入（webview 全程 LF 坐标）。
+   *  sourceUri 是平台分隔符 fsPath 形态（快照载荷原样回传），经
+   *  Uri.file 解析（Uri.parse 会把反斜杠当 URI 字符错误编码） */
+  const openBacklinkSource = async (sourceUri: string, offset: number): Promise<void> => {
+    const uri = vscode.Uri.file(sourceUri)
+    await vscode.commands.executeCommand('vscode.openWith', uri, VIEW_TYPE)
+    const ready = await waitForReadyPanel(uri)
+    if (ready) {
+      ready.entry.session.postToPanel(ready.sessionId, { kind: 'view.locate', offset })
+    }
+  }
+
   /**
    * 双链跳转执行（#11；#159 块引用定位与本文件锚点；#196 根内相对路径
    * 解析）：目标一律按来源文档相对路径解析（shared/vaultLink，docDir 基准、
@@ -904,6 +961,17 @@ export function createTextEditorProvider(
           void runViewSwitch(message.target, document.uri)
           return
         }
+        // #197 反链面板：面板级 UI 意图在 provider 层拦截（索引服务与跳转
+        // 执行都在 provider 域；session 对这两类消息显式 return 保持穷尽）
+        if (vaultIndex && isWebviewToHost(message) && message.kind === 'backlinks.get' &&
+          message.docUri === document.uri.toString()) {
+          void sendBacklinksSnapshot(entry, sessionId, document.uri)
+          return
+        }
+        if (isWebviewToHost(message) && message.kind === 'backlink.activate') {
+          void openBacklinkSource(message.sourceUri, message.offset)
+          return
+        }
         if (process.env.VSIDIAN_TEST_HOOKS === '1' && isWebviewToHost(message) &&
           message.kind === 'sync.test.close' && message.sessionId === sessionId &&
           message.docUri === document.uri.toString()) {
@@ -952,6 +1020,15 @@ export function createTextEditorProvider(
   // undo/redo）的变更都进入 session 识别与广播
   context.subscriptions.push(
     vscode.workspace.onDidChangeTextDocument((event) => {
+      // #197 索引覆盖层：消费原始事件（不经 session 产物——任何编辑器打开
+      // 的 .md 都是索引来源域）；服务内做版本仲裁与去抖，未保存内容不落盘
+      if (vaultIndex && event.document.uri.scheme === 'file' && /\.md$/i.test(event.document.uri.path)) {
+        vaultIndex.applyUnsaved(
+          event.document.uri.fsPath,
+          event.document.version,
+          event.document.getText(),
+        )
+      }
       const entry = getEntry(event.document.uri)
       if (!entry) {
         return
@@ -966,6 +1043,19 @@ export function createTextEditorProvider(
       )
     }),
   )
+
+  // ---- #197 索引：保存事件（磁盘基线重扫 + 覆盖层退役；服务内合并提交
+  //  快照）。外部修改经服务自身的 watcher 端口到达（onDidChange 对外部
+  //  工具不可见，watcher 兜底） ----
+  if (vaultIndex) {
+    context.subscriptions.push(
+      vscode.workspace.onDidSaveTextDocument((document) => {
+        if (document.uri.scheme === 'file' && /\.md$/i.test(document.uri.path)) {
+          void vaultIndex.documentSaved(document.uri.fsPath)
+        }
+      }),
+    )
+  }
 
   // ---- 设置变更广播（#33）：宿主保存成功后把新快照推给全部已打开
   // Vsidian 编辑器面板（复用 toggleViewMode 的全 session 遍历样板）。
@@ -1063,6 +1153,23 @@ export function createTextEditorProvider(
       settings?.page.notifySnippetsChanged()
     })
     context.subscriptions.push({ dispose: () => offSnippets() })
+  }
+
+  // ---- #197 反链快照广播：索引模型变化（覆盖层更新/重扫/重建完成）→
+  //  全部 ready 面板各自文档的反链快照（面板按 docUri 匹配丢弃他文档快照；
+  //  notify 已在服务侧合并——覆盖层 500ms 去抖、重扫 800ms 去抖、快照提交
+  //  1.5s 合并，无逐键广播）----
+  if (vaultIndex) {
+    const offIndex = vaultIndex.onChange(() => {
+      for (const entry of sessions.values()) {
+        for (const panel of entry.session.getInfo().panels) {
+          if (panel.ready) {
+            void sendBacklinksSnapshot(entry, panel.sessionId, entry.doc.uri)
+          }
+        }
+      }
+    })
+    context.subscriptions.push({ dispose: () => offIndex() })
   }
 
   // ---- 三态视图切换（#38）：标题栏三命令（toReading/toSource/toLive）与

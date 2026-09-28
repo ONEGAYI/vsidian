@@ -180,6 +180,7 @@ export const en = {
   'styleRef.category.frontmatter': 'Frontmatter table',
   'styleRef.category.toolbarBanner': 'Toolbar & banner',
   'styleRef.category.contextMenu': 'Content context menu',
+  'styleRef.category.backlinks': 'Backlinks panel',
   'host.styleRefExported': 'Style contract JSON exported: {path}',
   'host.styleRefExportFailed': 'Failed to export style contract JSON: {reason}',
   'host.styleRefExportReasonMissingAsset': 'extension install incomplete (style-reference.json missing)',
@@ -345,6 +346,15 @@ export const en = {
   'outlineMenu.rename': 'Rename',
   'outlineMenu.delete': 'Delete',
 
+  /** 反链面板（#197：四态与条目） */
+  'backlinks.label': 'Backlinks',
+  'backlinks.empty': 'No backlinks',
+  'backlinks.loading': 'Loading backlinks…',
+  'backlinks.updating': 'Index updating…',
+  'backlinks.error': 'Backlinks unavailable',
+  'backlinks.errorNoWorkspace': 'Open a workspace to see backlinks',
+  'backlinks.jumpTo': 'Jump to reference in {file} (line {n})',
+
   /** 表格可见行控件 */
   'table.controls': 'Table controls',
   'table.insertColumnRight': 'Add column on the right',
@@ -442,6 +452,8 @@ export const en = {
   'command.ui.outlineReset.title': 'Reset outline',
   'command.ui.outlineCollapseAll.title': 'Collapse all outline headings',
   'command.ui.outlineExpandAll.title': 'Expand all outline headings',
+  /** #197 反链面板：双模式 UI 操作，默认未绑定（评估记录见 keybindings.md） */
+  'command.ui.backlinksToggle.title': 'Show or hide the backlinks panel',
 
   // ---- #159 锚点跳转（块引用定位与本文件锚点）----
   /** 块 id 缺失提示（与标题缺失同款「打开后提示」行为） */

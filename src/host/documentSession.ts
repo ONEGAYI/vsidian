@@ -317,6 +317,11 @@ export class DocumentSession {
       case 'sync.test.close':
         // 仅由测试模式的 provider 消费；若绕过面板入口则无副作用。
         return Promise.resolve()
+      case 'backlinks.get':
+      case 'backlink.activate':
+        // #197 反链面板：面板级 UI 意图，provider 层拦截消费（索引服务与
+        // 跳转执行都在 provider 域）；绕过面板入口则无副作用。
+        return Promise.resolve()
       case 'settings.open':
         // #33 打开设置页：不依赖文档状态（无文档语义在宿主层闭合），
         // 暂停态同样放行（与 link.activate 同口径的只读交互）

@@ -20,6 +20,7 @@ import { installHostLocale } from './shared/locales'
 import { hostLocale } from './host/hostLocale'
 import { KeybindingService } from './host/keybindingService'
 import { runStyleReferenceExport } from './host/styleReferenceExport'
+import { createVaultIndexService } from './host/vaultIndexWiring'
 import { t } from './shared/i18n'
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -68,12 +69,24 @@ export function activate(context: vscode.ExtensionContext): void {
     // #145 样式契约 JSON 导出：设置页按钮与命令面板命令共用同一入口
     () => runStyleReferenceExport(context),
   )
+  // #197 引用索引：activate 装配的服务级单例（不进 SessionEntry——面板全关
+  // 不销毁）；恢复或重建各根索引并挂监听（分批让出，不饿死宿主）。无工作区
+  // 时不建（既有编辑不因索引不可用而阻塞）。后台初始化：面板先拿 loading，
+  // 索引就绪后经 onChange 广播自愈（snippetService.initialize 同模式）
+  const vaultIndex = createVaultIndexService(context)
   const provider = createTextEditorProvider(context, {
     service: settingsService,
     keybindings: keybindingService,
     page: settingsPage,
-  }, snippetService)
+  }, snippetService, vaultIndex)
   void snippetService.initialize()
+  if (vaultIndex) {
+    const roots = vscode.workspace.workspaceFolders
+      ? vscode.workspace.workspaceFolders.map((f) => ({ fsPath: f.uri.fsPath, uri: f.uri.toString() }))
+      : []
+    void vaultIndex.initialize(roots)
+    context.subscriptions.push(vaultIndex)
+  }
   context.subscriptions.push(
     // enableScripts 在每个面板的 webview.options 上设置（provider 内）；
     // 注册选项仅接受 retainContextWhenHidden 等（1.86 类型契约）

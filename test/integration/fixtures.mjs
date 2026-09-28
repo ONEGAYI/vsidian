@@ -200,6 +200,36 @@ const TASK_DOC = [
 ].join('\n')
 // #10 链接样例：中文/空格目录（%20 编码形态——CommonMark 无尖括号目标
 // 不允许裸空格）、无扩展名目标、危险 scheme、自动链接与本地图片
+// #197 反链样例：目标文档被两个引用者以三种边型引用（wikilink 短名 /
+// mdlink 显式路径 / wikilink 带标题锚）——反链面板与跳转的断言载体。
+// 目标文档的反链期望（sortEdges 序：来源路径 → 区间）：
+//   backlinks-a.md: [[反链目标]]、[同目标](./反链目标.md)、[[反链目标#深处小节]]
+//   backlinks-b.md: [[反链目标]]
+const BACKLINKS_SOURCE_A_DOC = [
+  '# 反链引用者甲',
+  '',
+  '见 [[反链目标]] 与 [同目标](./反链目标.md)。',
+  '',
+  '第二段引用 [[反链目标#深处小节]]。',
+  '',
+].join('\n')
+const BACKLINKS_SOURCE_B_DOC = [
+  '# 反链引用者乙',
+  '',
+  '上行引用 [[反链目标]]。',
+  '',
+].join('\n')
+const BACKLINKS_TARGET_DOC = [
+  '# 反链目标',
+  '',
+  '开篇段落。',
+  '',
+  '## 深处小节',
+  '',
+  '小节内容。',
+  '',
+].join('\n')
+
 const LINKS_DOC = [
   '# 链接样例',
   '',
@@ -743,6 +773,10 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   writeFileSync(path.join(wsDir, 'assets', '图片 一.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
   // #11 双链：源文档、按名/屏外标题目标、文本编辑器 reveal 目标、重名候选
   // 与大小写目标（Windows 宿主大小写不敏感匹配的断言载体）
+  // #197 反链：两个引用者 + 被引目标（反链面板、四态与跳转断言载体）
+  writeFileSync(path.join(wsDir, 'backlinks-a.md'), BACKLINKS_SOURCE_A_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'backlinks-b.md'), BACKLINKS_SOURCE_B_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, '反链目标.md'), BACKLINKS_TARGET_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'wikilinks.md'), WIKILINKS_DOC, 'utf8')
   writeFileSync(path.join(wsDir, '目标笔记.md'), TARGET_NOTE_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'wikilink-target.md'), WIKILINK_TARGET_DOC, 'utf8')

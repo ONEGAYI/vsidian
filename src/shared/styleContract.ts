@@ -129,7 +129,7 @@ export const STYLE_CONTRACT_CATEGORIES: readonly StyleContractCategory[] = [
   { id: 'link-image-wikilink', domain: 'content', title: '链接、图片与双链', titleKey: 'styleRef.category.linkImageWikilink', order: 8 },
   { id: 'content-variables', domain: 'content', title: '公开 CSS 变量', titleKey: 'styleRef.category.contentVariables', order: 9 },
   { id: 'content-limits', domain: 'content', title: '不支持与限制', titleKey: 'styleRef.category.contentLimits', order: 10 },
-  // -- chrome 域（55 条）--
+  // -- chrome 域（57 条）--
   { id: 'math', domain: 'chrome', title: '公式', titleKey: 'styleRef.category.math', order: 1 },
   { id: 'diagram', domain: 'chrome', title: '图表渲染', titleKey: 'styleRef.category.diagram', order: 2 },
   { id: 'graphic-interact', domain: 'chrome', title: '图形化按钮与弹窗', titleKey: 'styleRef.category.graphicInteract', order: 3 },
@@ -139,6 +139,7 @@ export const STYLE_CONTRACT_CATEGORIES: readonly StyleContractCategory[] = [
   { id: 'toolbar-banner', domain: 'chrome', title: '工具栏与横幅', titleKey: 'styleRef.category.toolbarBanner', order: 7 },
   { id: 'frontmatter', domain: 'chrome', title: 'frontmatter 表格卡片', titleKey: 'styleRef.category.frontmatter', order: 8 },
   { id: 'context-menu', domain: 'chrome', title: '正文右键菜单', titleKey: 'styleRef.category.contextMenu', order: 9 },
+  { id: 'backlinks', domain: 'chrome', title: '反链面板', titleKey: 'styleRef.category.backlinks', order: 10 },
 ]
 
 /** 类目按 ID 索引（消费方查找用） */
@@ -2276,6 +2277,42 @@ export const STYLE_CONTRACT_ENTRIES: readonly StyleContractEntry[] = [
     obsidian: { counterpart: '无（Obsidian 右键菜单为应用原生菜单，非 DOM 内元素）', support: 'none' },
     verification: ['单元 blockMenu/blockMenuPanel：菜单装配与命令交互', '集成 block.test.contextMenu/menuClick 系列钩子'],
     introduced: '#162（2026-09-28）',
+  },
+
+  // -- 反链面板（#197；Obsidian 反链为应用级 DOM，全系本项目自有）--
+  {
+    id: 'backlink-panel',
+    domain: 'chrome',
+    category: 'backlinks',
+    kind: 'selector',
+    target: '.vsidian-backlink-panel（+ .vsidian-backlink-item / -item-source / -item-snippet / -item 上 -source 类）',
+    purpose: '反链面板（#197）：当前笔记的反向链接列表——条目 = 来源文件:行号（弱化加重行）+ 引用片段（单行省略）；四态占位（loading/empty/error）与更新中细条共用容器。显隐唯一开关是侧栏容器的 vsidian-backlinks-active 类（与大纲面板同模式且互斥）。',
+    views: [],
+    states: '面板 DOM 常驻侧栏（.vsidian-sidebar-panel 内），默认 display:none；侧栏展开 + 面板 active 时可见。条目为动态数据（宿主索引快照驱动），四态随最近 backlinks.snapshot 变化。',
+    dom: '右侧栏面板区域：vsidian-backlink-panel 容器 > vsidian-backlink-updating（更新中细条，可选）+ vsidian-backlink-item 按钮条目（item-source + item-snippet）或 vsidian-backlink-placeholder 占位。',
+    example: '.vsidian-backlink-item .vsidian-backlink-item-source {\n  font-weight: 600;\n}',
+    obsidian: { counterpart: '无（Obsidian 反链为应用级侧栏 DOM）', support: 'none' },
+    verification: [
+      '单元 backlinkPanel：四态渲染与类名锚点',
+      '集成「反链面板」（#197）：backlinks.togglePainted/panelPainted/itemPainted/emptyPainted 绘制证据',
+      '集成「界面域样式契约」（#133）：chromeSelectors["backlink-panel"] 探针命中',
+    ],
+    introduced: '#197（2026-09-29）',
+  },
+  {
+    id: 'backlinks-toggle',
+    domain: 'chrome',
+    category: 'backlinks',
+    kind: 'selector',
+    target: '.vsidian-backlinks-toggle',
+    purpose: '侧栏顶栏的反链面板切换按钮（与大纲按钮同排）：点击切换反链面板显隐（与大纲面板互斥）；active 态按钮高亮跟随 --vscode-list-activeSelectionBackground。',
+    views: [],
+    states: '侧栏展开时可见；aria-expanded 随面板 active 同步。',
+    dom: '侧栏顶栏工具行（.vsidian-sidebar-toolbar-actions）内按钮 + 回环箭头 SVG 图标。',
+    example: '.vsidian-sidebar.vsidian-backlinks-active .vsidian-sidebar-toolbar button.vsidian-backlinks-toggle {\n  background: var(--vscode-list-activeSelectionBackground);\n}',
+    obsidian: { counterpart: '无（Obsidian 反链开关为应用级 UI）', support: 'none' },
+    verification: ['集成「反链面板」（#197）：backlinks.togglePainted 绘制证据与 toggleAriaLabel'],
+    introduced: '#197（2026-09-29）',
   },
 ]
 

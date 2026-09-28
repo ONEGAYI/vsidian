@@ -90,4 +90,9 @@ export const CHROME_CONTRACT_PROBES: readonly ChromeContractProbe[] = [
   { id: 'live-fm-row-reading', selector: '#app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-row', expected: 'rgb(233, 0, 1)' },
   { id: 'live-fm-cell-reading', selector: '#app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-cell', expected: 'rgb(234, 0, 1)' },
   { id: 'live-fm-header-live', selector: '#app .vsidian-view-live .vsidian-fm-header', expected: 'rgb(237, 0, 1)' },
+  // ---- 反链面板（#197；面板容器 DOM 常驻侧栏（显隐由类控制），可静态
+  //      探针；条目为动态数据（宿主索引快照驱动），不伪造静态探针，由
+  //      集成 backlinks probe 的行为路径验证） ----
+  { id: 'backlink-panel', selector: '#app .vsidian-sidebar .vsidian-backlink-panel', expected: 'rgb(238, 0, 1)' },
+  { id: 'backlinks-toggle', selector: '#app .vsidian-sidebar .vsidian-sidebar-toolbar .vsidian-backlinks-toggle', expected: 'rgb(239, 0, 1)' },
 ]

@@ -207,13 +207,23 @@ interface Manifest {
   stats: { fileCount: number; edgeCount: number }
 }
 
-/** 规划一次快照提交：产出待写文件（含顺序）与回收清单，不触碰 fs。 */
-export function planSnapshotCommit(model: VaultIndexModel, opts: PlanSnapshotOptions): SnapshotCommitPlan {
-  const shardCount = Math.max(1, Math.min(MAX_SHARD_COUNT, opts.shardCount ?? 16))
-  const writerTag = sanitizeTag(opts.writerTag ?? 'w000')
-  const generation = (opts.prev?.generation ?? 0) + 1
-  const dirName = `gen-${String(generation).padStart(6, '0')}-${writerTag}`
+/** 单片的序列化产物（分批提交规划的中间件；同步版与 chunked 版共用） */
+interface PlannedShard {
+  index: number
+  path: string
+  content: string
+  checksum: string
+}
 
+/** 分组并按片号升序逐片序列化（生成器：同步版一次跑完，chunked 版逐片
+ *  消费后在片间让出事件循环——大库单次同步序列化的 3.72s 饿死由此切片，
+ *  ADR-0008「接线约束（事件循环）」的实现载体）。 */
+function* planShards(
+  model: VaultIndexModel,
+  shardCount: number,
+  baseDir: string,
+  dirName: string,
+): Generator<PlannedShard> {
   // 分片：文件条目与其出链同片（都以 source 文件路径为键）
   const filesByShard = new Map<number, VaultFileEntry[]>()
   const edgesByShard = new Map<number, VaultEdge[]>()
@@ -229,21 +239,42 @@ export function planSnapshotCommit(model: VaultIndexModel, opts: PlanSnapshotOpt
     if (!list) edgesByShard.set(s, (list = []))
     list.push(e)
   }
+  for (let i = 0; i < shardCount; i++) {
+    const content = serializeShard(filesByShard.get(i) ?? [], edgesByShard.get(i) ?? [])
+    yield {
+      index: i,
+      path: `${optsShardPath(baseDir, dirName, i)}`,
+      content,
+      checksum: stableHash(content),
+    }
+  }
+}
 
+function optsShardPath(baseDir: string, dirName: string, index: number): string {
+  return `${baseDir}/${dirName}/shard-${String(index).padStart(3, '0')}.json`
+}
+
+/** 消费片序列化结果，产出提交计划的公共部分（片写入 + manifest + CURRENT
+ *  + 回收清单）。chunked 与同步两入口唯一差异是片间是否让出。 */
+function finishCommitPlan(
+  model: VaultIndexModel,
+  opts: PlanSnapshotOptions,
+  shardCount: number,
+  dirName: string,
+  planned: readonly PlannedShard[],
+): SnapshotCommitPlan {
+  const generation = (opts.prev?.generation ?? 0) + 1
   const writes: SnapshotWrite[] = []
   const shards: ManifestShardEntry[] = []
   let writtenShards = 0
-  for (let i = 0; i < shardCount; i++) {
-    const content = serializeShard(filesByShard.get(i) ?? [], edgesByShard.get(i) ?? [])
-    const checksum = stableHash(content)
-    const path = `${opts.baseDir}/${dirName}/shard-${String(i).padStart(3, '0')}.json`
-    const prevChecksum = opts.prev?.shardChecksums.get(i)
-    if (prevChecksum !== undefined && prevChecksum === checksum) {
-      shards.push({ i, bytes: null, checksum, inheritedFrom: opts.prev!.dirName })
+  for (const shard of planned) {
+    const prevChecksum = opts.prev?.shardChecksums.get(shard.index)
+    if (prevChecksum !== undefined && prevChecksum === shard.checksum) {
+      shards.push({ i: shard.index, bytes: null, checksum: shard.checksum, inheritedFrom: opts.prev!.dirName })
       continue
     }
-    writes.push({ path, content, atomic: true })
-    shards.push({ i, bytes: content.length, checksum, inheritedFrom: null })
+    writes.push({ path: shard.path, content: shard.content, atomic: true })
+    shards.push({ i: shard.index, bytes: shard.content.length, checksum: shard.checksum, inheritedFrom: null })
     writtenShards++
   }
 
@@ -273,6 +304,37 @@ export function planSnapshotCommit(model: VaultIndexModel, opts: PlanSnapshotOpt
     obsoleteDirs,
     stats: { fileCount: model.files.size, edgeCount: model.edges.length, shardCount, writtenShards },
   }
+}
+
+/** 规划一次快照提交：产出待写文件（含顺序）与回收清单，不触碰 fs。 */
+export function planSnapshotCommit(model: VaultIndexModel, opts: PlanSnapshotOptions): SnapshotCommitPlan {
+  const shardCount = Math.max(1, Math.min(MAX_SHARD_COUNT, opts.shardCount ?? 16))
+  const writerTag = sanitizeTag(opts.writerTag ?? 'w000')
+  const generation = (opts.prev?.generation ?? 0) + 1
+  const dirName = `gen-${String(generation).padStart(6, '0')}-${writerTag}`
+  return finishCommitPlan(model, opts, shardCount, dirName, [...planShards(model, shardCount, opts.baseDir, dirName)])
+}
+
+/** 分批版提交规划（#197 接线入口，ADR-0008 片间让出硬约束）：每序列化
+ *  一片后 await yieldToEventLoop()（宿主传 setImmediate 适配），把单次
+ *  同步序列化的饿死切成百毫秒级切片。产物与 planSnapshotCommit 逐字段
+ *  一致（同一实现路径，一致性由单测钉住）；继承判定发生在全部片产出后
+ *  （继承片未重写即未消耗序列化成本，让出计数对应实写片数）。 */
+export async function planSnapshotCommitChunked(
+  model: VaultIndexModel,
+  opts: PlanSnapshotOptions,
+  yieldToEventLoop: () => Promise<void>,
+): Promise<SnapshotCommitPlan> {
+  const shardCount = Math.max(1, Math.min(MAX_SHARD_COUNT, opts.shardCount ?? 16))
+  const writerTag = sanitizeTag(opts.writerTag ?? 'w000')
+  const generation = (opts.prev?.generation ?? 0) + 1
+  const dirName = `gen-${String(generation).padStart(6, '0')}-${writerTag}`
+  const planned: PlannedShard[] = []
+  for (const shard of planShards(model, shardCount, opts.baseDir, dirName)) {
+    planned.push(shard)
+    await yieldToEventLoop()
+  }
+  return finishCommitPlan(model, opts, shardCount, dirName, planned)
 }
 
 /** 回收计划：旧代（代号 ≤ 新代且非继承源）、同代号孤儿、tmp- 残留。 */

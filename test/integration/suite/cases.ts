@@ -9167,4 +9167,146 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(stateAfter.appliedEdits === stateBefore.appliedEdits && stateAfter.version === stateBefore.version,
       '头区不接管：零写回零版本推进')
   }],
+
+  // ---- #197 反链面板：索引就绪 → 面板显示 → 点击跳转，四态与互斥 ----
+
+  ['反链面板：索引就绪后按稳定序列显示反链并真实绘制（#197）', async () => {
+    await openWithEditor('反链目标.md')
+    await waitSessionReady('反链目标.md')
+    const uri = wsUri('反链目标.md').toString()
+    // 展开侧栏 + 切到反链面板（与用户点击同一处理器链）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sidebar.test.click' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'backlinks.test.click' })
+    // 索引就绪后面板为 ready 态（宿主启动即扫，这里轮询收敛）
+    const state = await poll('反链面板就绪', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri)) as
+        | { backlinks?: { state: string; items: Array<{ sourceRelPath: string; kind: string; line: number; snippet: string }> } }
+        | undefined
+      return v?.backlinks && v.backlinks.state === 'ready' ? v : undefined
+    })
+    const items = state.backlinks!.items
+    // 稳定排序：来源路径 → 区间（fixtures.mjs 的三边型两引用者）
+    assert(JSON.stringify(items.map((i) => [i.sourceRelPath, i.kind])) === JSON.stringify([
+      ['backlinks-a.md', 'wikilink'],
+      ['backlinks-a.md', 'mdlink'],
+      ['backlinks-a.md', 'wikilink'],
+      ['backlinks-b.md', 'wikilink'],
+    ]), `反链序列不符：${JSON.stringify(items)}`)
+    assert(items[0]!.line === 3, `首条来源行号应为 3（实际 ${items[0]!.line}）`)
+    assert(items[0]!.snippet.includes('[[反链目标]]'), '首条片段应含引用原文')
+    // 绘制层断言（elementFromPoint）：面板、按钮与首条目真实可见，非 DOM 存在性
+    const painted = await poll('反链绘制层', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri)) as
+        | { backlinks?: { panelPainted: boolean; togglePainted: boolean; itemPainted: boolean; active: boolean; panelAriaLabel: string | null; toggleAriaLabel: string | null } }
+        | undefined
+      const b = v?.backlinks
+      return b && b.panelPainted && b.togglePainted && b.itemPainted ? b : undefined
+    })
+    assert(painted.active === true, '反链面板应 active')
+    assert(painted.panelAriaLabel === editorMessages()['backlinks.label'],
+      `面板可访问名称应为「${editorMessages()['backlinks.label']}」，实际 ${String(painted.panelAriaLabel)}`)
+    assert(painted.toggleAriaLabel === editorMessages()['backlinks.label'], '按钮可访问名称应随语言包')
+    // 互斥：反链面板 active 时大纲面板必须让位（同一面板区域单一显示）
+    const outline = await vscode.commands.executeCommand(CMD.viewState, uri) as
+      | { outline?: { active: boolean; panelPainted: boolean } }
+      | undefined
+    assert(outline?.outline?.active === false, '反链与大纲面板应互斥（大纲 active 应为 false）')
+    assert(outline?.outline?.panelPainted === false, '互斥后大纲面板不得绘制')
+    // 切回大纲：反链让位（可开关性 + 不挤坏大纲的双向验证）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'outline.test.click' })
+    const after = await vscode.commands.executeCommand(CMD.viewState, uri) as
+      | { backlinks?: { active: boolean; panelPainted: boolean }; outline?: { active: boolean; panelPainted: boolean } }
+      | undefined
+    assert(after?.backlinks?.active === false && after?.backlinks?.panelPainted === false,
+      '切回大纲后反链面板应收起且不绘制')
+    assert(after?.outline?.active === true && after?.outline?.panelPainted === true,
+      '切回大纲后大纲面板应恢复绘制')
+  }],
+
+  ['反链面板：无引用文档呈空态占位（四态之空，#197）', async () => {
+    await openWithEditor('untouched.md')
+    await waitSessionReady('untouched.md')
+    const uri = wsUri('untouched.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sidebar.test.click' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'backlinks.test.click' })
+    const state = await poll('空态就绪', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri)) as
+        | { backlinks?: { state: string; items: unknown[]; emptyPainted: boolean; panelPainted: boolean; active: boolean } }
+        | undefined
+      const b = v?.backlinks
+      return b && b.state === 'ready' && b.items.length === 0 && b.emptyPainted ? b : undefined
+    }, 20000).catch(async (err) => {
+      // 诊断兜底：带完整 probe 重新报错（定位空态占位不命中的布局原因）
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri)) as unknown
+      throw new Error(`${(err as Error).message}；probe=${JSON.stringify(v)}`)
+    })
+    assert(state.emptyPainted === true, '空态占位应真实绘制（无反向链接）')
+  }],
+
+  ['反链面板：工作区外文档呈失败态（四态之失败，含索引不可用口径，#197）', async () => {
+    // 无工作区文件夹上下文的文档：索引域外（no-workspace），面板显示失败态
+    const outsideUri = vscode.Uri.file(`${wsDir}-outside/反链区外.md`)
+    await vscode.workspace.fs.createDirectory(vscode.Uri.file(`${wsDir}-outside`))
+    await vscode.workspace.fs.writeFile(outsideUri, Buffer.from('# 区外文档\n\n正文。\n', 'utf8'))
+    await vscode.commands.executeCommand('vscode.openWith', outsideUri, VIEW_TYPE)
+    const uri = outsideUri.toString()
+    // 工作区外路径不适用 waitSessionReady（其内部拼 WORKSPACE_DIR 前缀），
+    // 直接轮询会话状态直到面板就绪
+    await poll('区外面板会话就绪', async () => {
+      const s = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+      return s.found && s.panels.some((p) => p.ready) ? true : undefined
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sidebar.test.click' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'backlinks.test.click' })
+    const state = await poll('失败态到达', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri)) as
+        | { backlinks?: { state: string; items: unknown[] } }
+        | undefined
+      const b = v?.backlinks
+      return b && b.state === 'error' && b.items.length === 0 ? b : undefined
+    })
+    assert(state.state === 'error', '工作区外文档的反链应为 error 态')
+  }],
+
+  ['反链条目跳转：打开来源文档并定位到出链标记（#197）', async () => {
+    // 源面板：反链目标.md；点击首条目 → 活动面板切到 backlinks-a.md 且光标
+    // 落在首条出链 [[反链目标]] 起点（LF 偏移与 fixtures.mjs 文本一致计算）
+    await openWithEditor('反链目标.md')
+    await waitSessionReady('反链目标.md')
+    const uri = wsUri('反链目标.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sidebar.test.click' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'backlinks.test.click' })
+    await poll('反链就绪', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri)) as
+        | { backlinks?: { state: string; items: unknown[] } }
+        | undefined
+      return v?.backlinks && v.backlinks.state === 'ready' && v.backlinks.items.length > 0 ? true : undefined
+    })
+    // 首条边起点：BACKLINKS_SOURCE_A_DOC 的首个 [[反链目标]]（文本与
+    // fixtures.mjs 字节一致）
+    const sourceText = [
+      '# 反链引用者甲',
+      '',
+      '见 [[反链目标]] 与 [同目标](./反链目标.md)。',
+      '',
+      '第二段引用 [[反链目标#深处小节]]。',
+      '',
+    ].join('\n')
+    const firstEdgeStart = sourceText.indexOf('[[反链目标]]')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'backlinks.test.itemClick', index: 0 })
+    // 活动面板切到 backlinks-a.md（Vsidian 面板打开来源文档）
+    await poll('活动面板为来源文档', async () => {
+      const tab = vscode.window.tabGroups.activeTabGroup.activeTab
+      return tab?.input instanceof vscode.TabInputCustom && tab.input.viewType === VIEW_TYPE &&
+        tab.input.uri.toString() === wsUri('backlinks-a.md').toString() ? true : undefined
+    })
+    // view.locate 落位：光标主位 = 首条边起点（LF 文档直发）
+    const located = await poll('光标落位到出链起点', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, wsUri('backlinks-a.md').toString())) as
+        | { selectionOffset?: number; viewMode?: string }
+        | undefined
+      return v && v.selectionOffset === firstEdgeStart ? v : undefined
+    })
+    assert(located.viewMode === 'live', '跳转目标面板应为 live 模式（可编辑）')
+  }],
 ]

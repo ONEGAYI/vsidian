@@ -176,6 +176,10 @@ vsidian/
 │   │   ├── styleReferenceExport.ts     # 契约 JSON 导出宿主执行壳
 │   │   ├── styleReferenceExportPlan.ts # 契约 JSON 导出纯规划逻辑
 │   │   ├── textEditorProvider.ts       # 自定义文本编辑器提供者
+│   │   ├── vaultIndexOverlay.ts        # 索引覆盖层与反链查询纯逻辑（#197）
+│   │   ├── vaultIndexService.ts        # 引用索引宿主服务（#197）
+│   │   ├── vaultIndexWiring.ts         # 索引服务 vscode 层端口装配
+│   │   ├── vaultLinkExtract.ts         # 出链抽取纯逻辑（#197）
 │   │   ├── viewCycle.ts                # 三态视图编排纯逻辑
 │   │   └── wikilinkTarget.ts           # 宿主侧双链目标解析纯逻辑（#11）
 │   ├── shared/      # 两端共享纯逻辑
@@ -214,6 +218,7 @@ vsidian/
 │   │   └── wikilink.ts           # 双链形态学单一事实源（#11）
 │   └── webview/     # webview 端实现
 │       ├── anchorFlash.ts            # 跳转目标高亮装饰状态
+│       ├── backlinkPanel.ts          # 反链面板 DOM 与四态渲染（#197）
 │       ├── blockIdStrip.ts           # 阅读渲染块标记剥离纯函数
 │       ├── blockMenu.ts              # 正文右键菜单与复制块链接
 │       ├── codeCardState.ts          # 卡片共享状态中立模块
