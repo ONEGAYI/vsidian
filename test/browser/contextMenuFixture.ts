@@ -87,6 +87,8 @@ function readMenu() {
       const badge = item(command)?.querySelector<HTMLElement>('.vsidian-context-menu-badge')
       return badge ? badge.textContent : null
     },
+    /** 勾选态（aria-checked；未勾选 null）——段落设置按行结构点亮（#184） */
+    checkedOf: (command: string) => item(command)?.getAttribute('aria-checked') ?? null,
     /** 子菜单态：display（hover/兜底展开）、flip 类、首个子菜单几何 */
     submenus: menu
       ? Array.from(menu.querySelectorAll<HTMLElement>('.vsidian-context-menu-submenu')).map((el) => ({

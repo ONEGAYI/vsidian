@@ -1,9 +1,11 @@
-// 统一右键菜单（#183）的原生浏览器回归：真实布局（Chromium）下用真实右键、
+// 统一右键菜单（#183/#184）的原生浏览器回归：真实布局（Chromium）下用真实右键、
 // 真实键盘（Ctrl+Shift+C/Escape）与真实 hover 验证——Live 正文全域接管（空行
 // 接管、头区不接管）、菜单浮层真实绘制与 fixed 定位、三簇分组线、安全降级
 // 矩阵（表格/围栏区写操作置灰）、子菜单 hover 展开与右缘翻转、提示列小字
-// 渲染、图标位资产缺失留空、剪贴板四项桥链路（cut/copy/paste/selectAll）、
-// 块链接两项（自 blockMenu.mjs 迁移：标题链接/自动补写/既有 id 复用）。
+// 渲染、图标资产接线（#184：明暗两套真实加载 + mask 绘制 + 暗色主题切换）、
+// 段落设置勾选（#184：按行结构点亮）、剪贴板四项桥链路（cut/copy/paste/
+// selectAll）、块链接两项（自 blockMenu.mjs 迁移：标题链接/自动补写/既有
+// id 复用）。
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -49,7 +51,17 @@ try {
   const page = await browser.newPage({ viewport: { width: 900, height: 560 } })
   const errors = []
   page.on('pageerror', (error) => errors.push(error.message))
-  await page.setContent(`${islandHtml}<div id="app"></div>`)
+  // #184 图标接线：CSS 内资产 url 经 base href 走 route（esbuild 产物
+  // assets/ 目录 fulfill）——统计真实加载并保证可解析
+  const iconRequests = []
+  await page.route('http://ctx.test/assets/*.svg', async (route) => {
+    const name = path.basename(new URL(route.request().url()).pathname)
+    iconRequests.push(name)
+    await route.fulfill({ path: artifactPath(root, 'contextMenu/assets', name),
+      contentType: 'image/svg+xml' })
+  })
+  await page.setContent(
+    `<html><head><base href="http://ctx.test/"></head><body>${islandHtml}<div id="app"></div></body></html>`)
   await page.addStyleTag({ content: 'html, body { margin: 0; height: 100%; }' })
   await page.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
   await page.addScriptTag({ path: bundle })
@@ -111,16 +123,94 @@ try {
   passed++
   console.log('[统一菜单回归][PASS] 分组线绘制 + 提示列右对齐小字 + 未绑定不占位')
 
-  // ---- 场景 C：图标位资产缺失留空 + H1 徽标在场 ----
-  const iconState = await page.evaluate(() => ({
-    mask: window.readMenu().iconMaskOf('selectAll'),
-    badge: window.readMenu().badgeOf('heading1'),
-  }))
-  assert.ok(iconState.mask === null || !iconState.mask.includes('url('),
-    `图标资产未接入时 mask 应留空（实际 ${iconState.mask}）`)
+  // ---- 场景 C：图标资产接线（#184：26 枚 mask 有 url + 真实加载 + 真实绘制 + H1 徽标） ----
+  const iconState = await page.evaluate(() => {
+    const icons = [...document.querySelectorAll('.vsidian-context-menu [data-icon]')]
+    return {
+      keys: icons.map((el) => el.dataset['icon']),
+      noUrl: icons.filter((el) => !getComputedStyle(el).maskImage.includes('url(')).map((el) => el.dataset['icon']),
+      notLight: icons.filter((el) => !getComputedStyle(el).maskImage.includes('light-')).map((el) => el.dataset['icon']),
+      badge: window.readMenu().badgeOf('heading1'),
+    }
+  })
+  assert.equal(new Set(iconState.keys).size, 26, `菜单应引用 26 枚接线图标（实际 ${JSON.stringify([...new Set(iconState.keys)])}）`)
+  assert.deepEqual(iconState.noUrl, [], `全部图标位 mask 应有资产 url（缺 ${JSON.stringify(iconState.noUrl)}）`)
+  assert.deepEqual(iconState.notLight, [], `默认亮色页面应指向 light 资产（偏 ${JSON.stringify(iconState.notLight)}）`)
   assert.equal(iconState.badge, 'H1', '段落设置 H1 档用文字徽标（不经生图）')
+  await page.waitForFunction(() =>
+    performance.getEntriesByType('resource').filter((entry) =>
+      entry.name.endsWith('.svg') && entry.name.includes('/light-')).length >= 26)
+  assert.ok(iconRequests.filter((name) => name.startsWith('light-')).length >= 26,
+    `亮色图标资产应真实网络加载（实际 ${iconRequests.length} 次）`)
+  // 顶级项图标真实绘制（mask 遮罩后非纯背景——照 quickActions 像素分析先例）
+  const iconPaint = async (key) => {
+    const png = await page.locator(`.vsidian-context-menu [data-icon='${key}']`).screenshot()
+    return page.evaluate(async (base64) => {
+      const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${base64}`)).blob())
+      const canvas = document.createElement('canvas')
+      canvas.width = bitmap.width
+      canvas.height = bitmap.height
+      const context = canvas.getContext('2d')
+      context.drawImage(bitmap, 0, 0)
+      const data = context.getImageData(0, 0, bitmap.width, bitmap.height).data
+      const colors = new Set()
+      const base = [...data.slice(0, 3)]
+      let paintedPixels = 0
+      for (let at = 0; at < data.length; at += 4) {
+        const color = [data[at], data[at + 1], data[at + 2]]
+        colors.add(color.join(','))
+        if (color.some((channel, index) => Math.abs(channel - base[index]) > 30)) {
+          paintedPixels++
+        }
+      }
+      return { colors: colors.size, paintedPixels }
+    }, png.toString('base64'))
+  }
+  const brush = await iconPaint('textFormat')
+  assert.ok(brush.colors > 2 && brush.paintedPixels > 4, `textFormat 笔刷图标应真实绘制（${JSON.stringify(brush)}）`)
+  const clipboard = await iconPaint('paste')
+  assert.ok(clipboard.colors > 2 && clipboard.paintedPixels > 4, `paste 图标应真实绘制（${JSON.stringify(clipboard)}）`)
   passed++
-  console.log('[统一菜单回归][PASS] 图标位资产缺失留空 + H1 文字徽标')
+  console.log('[统一菜单回归][PASS] 图标接线：26 枚 mask 资产、真实加载与绘制、H1 徽标')
+
+  // ---- 场景 C2：暗色主题图标切换（body.vscode-dark → dark 资产加载） ----
+  const darkPage = await browser.newPage({ viewport: { width: 900, height: 560 } })
+  const darkErrors = []
+  darkPage.on('pageerror', (error) => darkErrors.push(error.message))
+  const darkRequests = []
+  await darkPage.route('http://ctx.test/assets/*.svg', async (route) => {
+    const name = path.basename(new URL(route.request().url()).pathname)
+    darkRequests.push(name)
+    await route.fulfill({ path: artifactPath(root, 'contextMenu/assets', name),
+      contentType: 'image/svg+xml' })
+  })
+  await darkPage.setContent(
+    `<html><head><base href="http://ctx.test/"></head><body class="vscode-dark">${islandHtml}<div id="app"></div></body></html>`)
+  await darkPage.addStyleTag({ content: 'html, body { margin: 0; height: 100%; }' })
+  await darkPage.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
+  await darkPage.addScriptTag({ path: bundle })
+  await darkPage.evaluate((text) => window.initContextMenu(text), DOC)
+  await darkPage.locator('.cm-line').first().waitFor()
+  await darkPage.waitForTimeout(120)
+  await darkPage.locator('.cm-line').nth(6).click({ button: 'right', position: { x: 60, y: 6 } })
+  const darkState = await darkPage.evaluate(() => {
+    const icons = [...document.querySelectorAll('.vsidian-context-menu [data-icon]')]
+    return {
+      uniqueKeys: new Set(icons.map((el) => el.dataset['icon'])).size,
+      notDark: icons.filter((el) => !getComputedStyle(el).maskImage.includes('dark-')).map((el) => el.dataset['icon']),
+    }
+  })
+  assert.equal(darkState.uniqueKeys, 26, '暗色页应同样引用 26 枚接线图标')
+  assert.deepEqual(darkState.notDark, [], `暗色主题应指向 dark 资产（偏 ${JSON.stringify(darkState.notDark)}）`)
+  await darkPage.waitForFunction(() =>
+    performance.getEntriesByType('resource').filter((entry) =>
+      entry.name.endsWith('.svg') && entry.name.includes('/dark-')).length >= 26)
+  assert.ok(darkRequests.filter((name) => name.startsWith('dark-')).length >= 26,
+    `暗色图标资产应真实网络加载（实际 ${darkRequests.length} 次）`)
+  assert.deepEqual(darkErrors, [], '暗色页无未捕获异常')
+  await darkPage.close()
+  passed++
+  console.log('[统一菜单回归][PASS] 暗色主题：图标切换 dark 资产并真实加载')
 
   // ---- 场景 D：子菜单 hover 展开 + 翻转（视口右缘右键）----
   const submenu = page.locator('.vsidian-context-menu-host', { has: page.locator('button[data-vsidian-command="textFormat"]') })
@@ -331,6 +421,53 @@ try {
   await page.evaluate(() => window.post({ kind: 'contextMenu.test.menuClose' }))
   passed++
   console.log('[统一菜单回归][PASS] 菜单项键盘可达（button 可聚焦）')
+
+  // ---- 场景 L：段落设置勾选（#184 真实右键按行结构点亮，hover 展开子菜单） ----
+  const hoverParagraphStyle = async () => {
+    await page.locator('.vsidian-context-menu button[data-vsidian-command="paragraphStyle"]').hover()
+    await page.waitForTimeout(80)
+  }
+  // 标题行（真实右键）：H1 勾选、H2 不勾、勾选项 role=menuitemcheckbox
+  await line(4).click({ button: 'right', position: { x: 40, y: 6 } })
+  await hoverParagraphStyle()
+  let checkState = await page.evaluate(() => ({
+    h1: window.readMenu().checkedOf('heading1'),
+    h2: window.readMenu().checkedOf('heading2'),
+    h1Role: document.querySelector('button[data-vsidian-command="heading1"]')?.getAttribute('role') ?? null,
+    h2Role: document.querySelector('button[data-vsidian-command="heading2"]')?.getAttribute('role') ?? null,
+  }))
+  assert.equal(checkState.h1, 'true', '标题行右键：H1 应勾选')
+  assert.equal(checkState.h2, null, 'H2 不应勾选')
+  assert.equal(checkState.h1Role, 'menuitemcheckbox', '勾选项 role 应为 menuitemcheckbox')
+  assert.equal(checkState.h2Role, 'menuitem', '未勾选项回落 menuitem')
+  await page.evaluate(() => window.post({ kind: 'contextMenu.test.menuClose' }))
+  // 任务行（真实右键）：taskList 勾选、bulletList 不勾（族互斥）
+  const TASK_DOC = '正文一段\n\n- [ ] 待办任务\n'
+  await page.evaluate((t) => window.initContextMenu(t), TASK_DOC)
+  await page.waitForTimeout(80)
+  await page.locator('.cm-line').nth(2).click({ button: 'right', position: { x: 90, y: 6 } })
+  await hoverParagraphStyle()
+  checkState = await page.evaluate(() => ({
+    task: window.readMenu().checkedOf('taskList'),
+    bullet: window.readMenu().checkedOf('bulletList'),
+  }))
+  assert.equal(checkState.task, 'true', '任务行右键：taskList 应勾选')
+  assert.equal(checkState.bullet, null, '任务行：bulletList 不勾（任务标记优先归 task）')
+  await page.evaluate(() => window.post({ kind: 'contextMenu.test.menuClose' }))
+  // 普通段（真实右键）：正文（headingNone）勾选
+  await page.evaluate((t) => window.initContextMenu(t), DOC)
+  await page.waitForTimeout(80)
+  await line(6).click({ button: 'right', position: { x: 60, y: 6 } })
+  await hoverParagraphStyle()
+  checkState = await page.evaluate(() => ({
+    none: window.readMenu().checkedOf('headingNone'),
+    quote: window.readMenu().checkedOf('quote'),
+  }))
+  assert.equal(checkState.none, 'true', '普通段右键：正文应勾选')
+  assert.equal(checkState.quote, null, '普通段：引用不勾')
+  await page.evaluate(() => window.post({ kind: 'contextMenu.test.menuClose' }))
+  passed++
+  console.log('[统一菜单回归][PASS] 段落设置勾选：标题/任务/正文按行结构点亮')
 } finally {
   await browser.close()
 }
