@@ -107,6 +107,7 @@ vsidian/
 │   │   ├── obsidian-live-preview-editor.md # Obsidian 技术栈与选型调研
 │   │   └── obsidian-viewport-rendering.md  # 视口渲染性能补充调研
 │   └── specs/    # 产品规格
+│       ├── anchor-navigation.md              # 锚点跳转规格（标题/块引用/复制块链接）
 │       ├── batch-2026-09.md                  # 2026-09 开票批次总览
 │       ├── blockquote-accent-bar.md          # 引用块紫色提示边条规格
 │       ├── code-block-card.md                # 代码块卡片功能规格
@@ -115,6 +116,7 @@ vsidian/
 │       ├── graphic-code-block-interaction.md # 图形化代码块交互规格
 │       ├── html-comment-support.md           # HTML 注释快捷键与呈现规格
 │       ├── i18n.md                           # 全局 i18n 适配规格
+│       ├── image-paste.md                    # 图片粘贴插入与资产文件夹规格
 │       ├── keybindings.md                    # 快捷键清单与默认值
 │       ├── live-table-column-width.md        # Live 表格列宽规格
 │       ├── manual-verification.md            # 人工验证清单
