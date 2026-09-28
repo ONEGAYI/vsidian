@@ -974,6 +974,25 @@ export const STYLE_CONTRACT_ENTRIES: readonly StyleContractEntry[] = [
     verification: ['单元 imageResource：三态状态机契约；集成 reading.test.image 注入用例'],
     introduced: '#10（2026-09-24）',
   },
+  {
+    id: 'image-failure-variants',
+    domain: 'content',
+    category: 'link-image-wikilink',
+    kind: 'selector',
+    target: '.vsidian-image-notfound / .vsidian-image-unreachable（叠加在 error 基类上）',
+    purpose: '#201 失败态细分：明确删除（磁盘正证据 missing，找不到）与不可访问（SSH 断连/权限错误）不冒充彼此——找不到淡红底强调、不可访问黄系提示；与 data-vsidian-img-reason（not-found / inaccessible）同步。',
+    views: ['live', 'reading'],
+    states: '仅在 error 基类上叠加出现；失效重发成功（loaded）或槽位释放时移除。',
+    dom: '图片槽位元素级失败原因修饰类。',
+    example: '.vsidian-image-notfound {\n  background: rgba(190, 17, 0, 0.08);\n}\n.vsidian-image-unreachable {\n  border-color: #cca700;\n}',
+    obsidian: { counterpart: '无对应（Obsidian 无删除/不可访问区分类）', support: 'none' },
+    verification: [
+      '单元 imageResource：细分类与 data 同步契约',
+      '集成 #201：删除图片后 notfound 绘制层可见',
+      '浏览器 imageRefresh：删除可见态与不可访问区分断言',
+    ],
+    introduced: '#201（2026-09-29）',
+  },
 
   // ==== 双链 ====
   {
