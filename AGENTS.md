@@ -181,6 +181,7 @@ vsidian/
 │   │   ├── vaultIndexService.ts        # 引用索引宿主服务（#197）
 │   │   ├── vaultIndexWiring.ts         # 索引服务 vscode 层端口装配
 │   │   ├── vaultLinkExtract.ts         # 出链抽取纯逻辑（#197）
+│   │   ├── vaultRenameWiring.ts        # rename 引用更新装配（#199）
 │   │   ├── viewCycle.ts                # 三态视图编排纯逻辑
 │   │   └── wikilinkTarget.ts           # 宿主侧双链目标解析纯逻辑（#11）
 │   ├── shared/      # 两端共享纯逻辑

@@ -1340,19 +1340,21 @@ export class VaultIndexService {
    */
   renameCandidatesOf(oldFsPath: string): {
     status: 'ready' | 'not-ready' | 'outside'
+    /** ready 时为 old 所属根（incoming/outgoing 边的 resolvedTarget 根空间） */
+    rootFsPath: string | null
     incoming: Array<{ fsPath: string; edges: readonly VaultEdge[] }>
     outgoing: readonly VaultEdge[]
   } {
     const state = this.rootOf(oldFsPath)
     if (!state) {
-      return { status: 'outside', incoming: [], outgoing: [] }
+      return { status: 'outside', rootFsPath: null, incoming: [], outgoing: [] }
     }
     if (!state.hasData || !state.model || !state.backlinks) {
-      return { status: 'not-ready', incoming: [], outgoing: [] }
+      return { status: 'not-ready', rootFsPath: null, incoming: [], outgoing: [] }
     }
     const rel = this.relOf(state, oldFsPath)
     if (rel === null) {
-      return { status: 'outside', incoming: [], outgoing: [] }
+      return { status: 'outside', rootFsPath: null, incoming: [], outgoing: [] }
     }
     // 反链桶按磁盘真实形态聚合（resolvedTarget 原文）；fsPath 大小写可能
     // 与磁盘形态不同——fold 匹配桶键（Windows 语义）
@@ -1380,6 +1382,7 @@ export class VaultIndexService {
       : state.model.edges.filter((e) => e.source === rel)
     return {
       status: 'ready',
+      rootFsPath: state.fsPath,
       incoming: [...incoming.entries()].map(([fsPath, edges]) => ({ fsPath, edges })),
       outgoing,
     }

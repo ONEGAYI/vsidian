@@ -3,6 +3,7 @@
 // 批量映射（#200 接口就绪）。被测模块不依赖 vscode/DOM（node 直驱）。
 import { describe, expect, it } from 'vitest'
 import {
+  lfOffsetToLineCol,
   planVaultRenameRewrites,
   type RenameDocInput,
   type RenameMoveEntry,
@@ -410,5 +411,32 @@ describe('vaultRename：平台语义', () => {
     const movesCase = [{ oldFsPath: '/vault/Target.MD', newFsPath: '/vault/renamed.md' }]
     const resultCase = planVaultRenameRewrites({ rootFsPaths: ['/vault'], isWindowsHost: false, moves: movesCase }, docs)
     expect(resultCase.docs).toEqual([])
+  })
+})
+
+describe('vaultRename：LF 偏移 → 宿主行/列换算（vscode 层坐标桥）', () => {
+  it('LF 文本（无 \r）：行/列与直接按 LF 拆分一致', () => {
+    const host = 'aa\nbb\nccc\n'
+    expect(lfOffsetToLineCol(host, 0)).toEqual({ line: 0, character: 0 })
+    expect(lfOffsetToLineCol(host, 3)).toEqual({ line: 1, character: 0 })
+    expect(lfOffsetToLineCol(host, 5)).toEqual({ line: 1, character: 2 })
+    expect(lfOffsetToLineCol(host, 6)).toEqual({ line: 2, character: 0 })
+    expect(lfOffsetToLineCol(host, 9)).toEqual({ line: 2, character: 3 })
+  })
+
+  it('CRLF 宿主文本：\r 不计入列，LF 偏移跨行界推进', () => {
+    const host = 'aa\r\nbb\r\nccc\r\n'
+    expect(lfOffsetToLineCol(host, 0)).toEqual({ line: 0, character: 0 })
+    expect(lfOffsetToLineCol(host, 2)).toEqual({ line: 0, character: 2 })
+    expect(lfOffsetToLineCol(host, 3)).toEqual({ line: 1, character: 0 }) // LF 行 1 首（跨过 \r\n）
+    expect(lfOffsetToLineCol(host, 5)).toEqual({ line: 1, character: 2 })
+    expect(lfOffsetToLineCol(host, 6)).toEqual({ line: 2, character: 0 })
+  })
+
+  it('混合行尾与越界防御（钳到文末）', () => {
+    const host = 'a\r\nb\nc'
+    expect(lfOffsetToLineCol(host, 2)).toEqual({ line: 1, character: 0 })
+    expect(lfOffsetToLineCol(host, 4)).toEqual({ line: 2, character: 0 })
+    expect(lfOffsetToLineCol(host, 99)).toEqual({ line: 2, character: 1 })
   })
 })

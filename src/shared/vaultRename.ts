@@ -259,6 +259,36 @@ export function planVaultRenameRewrites(
   return { docs: planDocs, skipped }
 }
 
+/**
+ * LF 偏移 → 宿主文本行/列（vscode 层把计划 edit 转为 Position 用）。
+ * 宿主文本行界按 /\r\n|\n|\r/ 与 LF 归一（\r\n? → \n）对偶拆分——第 k 个
+ * LF 行对应宿主第 k 行，列偏移一致（行界字符不计入列）。
+ */
+export function lfOffsetToLineCol(
+  hostText: string,
+  lfOffset: number,
+): { line: number; character: number } {
+  const lineRe = /\r\n|\n|\r/g
+  let line = 0
+  let lfAcc = 0 // 当前行首的 LF 偏移
+  let searchFrom = 0
+  for (;;) {
+    lineRe.lastIndex = searchFrom
+    const m = lineRe.exec(hostText)
+    const segEnd = m === null ? hostText.length : m.index
+    const segLen = segEnd - searchFrom
+    if (lfOffset <= lfAcc + segLen) {
+      return { line, character: lfOffset - lfAcc }
+    }
+    if (m === null) {
+      return { line, character: segLen } // 越界防御：钳到文末
+    }
+    line += 1
+    lfAcc += segLen + 1
+    searchFrom = m.index + m[0].length
+  }
+}
+
 /** root 是否包含 absolute（含根本身；`..foo` 同级文件名不误判） */
 function isInside(ops: typeof path.posix, root: string, absolute: string): boolean {
   const rel = ops.relative(ops.resolve(root), ops.resolve(absolute))
