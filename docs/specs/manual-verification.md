@@ -915,3 +915,5 @@ Live 渲染态经 lezer `HorizontalRule` 节点驱动：未触及该行时源文
 - **链路修正**：`clipboard.write` text 变体按文档权威行尾归一（#81 同 codeblock.copy，含大纲复制路径；CRLF 会话单测钉住）；粘贴读失败 webview 记告警；menuClick 测试钩子选择器拼接 CSS.escape。
 - **观感兜底**：子菜单补 `max-width` 钳制（极窄视口两侧都放不下时至少不裁切）；提示列 `opacity < 1` 入浏览器断言（用户要求的「浅一点」此前无防回归保护）。
 - **清理**：chromeContract 豁免表移除 `block-menu` 悬空条目（契约条目已更名 `context-menu`，原注释指向已删除的 blockMenu 浏览器套件）。
+
+二轮独立复核（同日）：13 项修复逐项验证通过（实现与声明一致、断言可证非恒真、回归扫描零新增问题）；复核另报一项防护面缺口——**override 换 children 可绕过 register 侧环防护**，已补同口径检测与用例（覆写拒绝时注册表与还原栈均不留痕）；栈式 LWW 卸载顺序（已卸载方可经后注册者的 cleanup 短暂复活）与提示派生不追溯 override 子级 command 两处既有取舍落规格已知边界披露。

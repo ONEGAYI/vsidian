@@ -231,6 +231,37 @@ describe('环防护（registerContextMenuItem 拒绝循环嵌套）', () => {
       ],
     })).toThrow('循环嵌套')
   })
+
+  it('override children 同样受环防护（review-loops 二轮 P3-1：register 侧检测不可被覆写绕过）', () => {
+    // 单条目：合法注册后 override children 引入自环 → 抛错且不留痕
+    registerContextMenuItem({
+      id: 'ovSelf', group: 'link', order: 92,
+      command: 'ovSelf', labelKey: 'contextMenu.selectAll',
+    })
+    expect(() => overrideContextMenuItem('ovSelf', {
+      children: [
+        { id: 'ovSelf', group: 'link', order: 0, command: 'ovSelf', labelKey: 'contextMenu.copy' },
+      ],
+    })).toThrow('循环嵌套')
+    const item = buildContextMenuModel(normalCtx())
+      .flatMap((g) => g.items).find((i) => i.id === 'ovSelf')!
+    expect(item.children, '拒绝的覆写不留痕（原条目无子级）').toBeUndefined()
+    // 跨条目：两个已注册条目 override children 互引 → 闭合侧抛错
+    const cleanupA = registerContextMenuItem({
+      id: 'ovA', group: 'link', order: 91, command: 'ovA', labelKey: 'contextMenu.selectAll',
+    })
+    const cleanupB = registerContextMenuItem({
+      id: 'ovB', group: 'link', order: 90, command: 'ovB', labelKey: 'contextMenu.copy',
+    })
+    expect(overrideContextMenuItem('ovA', {
+      children: [{ id: 'ovB', group: 'link', order: 0, command: 'ovB', labelKey: 'contextMenu.copy' }],
+    })).toBe(true)
+    expect(() => overrideContextMenuItem('ovB', {
+      children: [{ id: 'ovA', group: 'link', order: 0, command: 'ovA', labelKey: 'contextMenu.selectAll' }],
+    })).toThrow('循环嵌套')
+    cleanupA()
+    cleanupB()
+  })
 })
 
 describe('handler 承载（覆写语义：可换执行体；分派先查运行期 handler）', () => {

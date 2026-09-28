@@ -302,11 +302,18 @@ export function overrideContextMenuItem(
   if (!entry) {
     return false
   }
+  // 环防护与 register 同口径（review-loops 二轮 P3-1：children 整体替换
+  // 同样能引入环，register 侧检测不可被 override 绕过）；检测在写入之前，
+  // 抛错时注册表与还原栈都不留痕
+  const merged: MenuItemDescriptor = { ...entry.descriptor, ...partial }
+  if (menuTreeContainsId(merged, id, new Set())) {
+    throw new Error(`[vsidian] 菜单项覆写拒绝循环嵌套：${id} 的子树引用了自身`)
+  }
   // 覆写同样入还原栈：更早注册者的 cleanup 见栈顶已变即跳过回滚——
   // 「后注册者胜」对 register→override→cleanup 交错序列同样成立（覆写
   // 不被先注册者的卸载清掉）
   restoreStack.set(id, entry)
-  registry.set(id, { descriptor: { ...entry.descriptor, ...partial }, source })
+  registry.set(id, { descriptor: merged, source })
   return true
 }
 
