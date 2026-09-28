@@ -47,7 +47,7 @@ describe('queryBacklinks：基线 × 覆盖层合成查询', () => {
     const overlay = new VaultIndexOverlay()
     // b.md 未保存：编辑后不再引用目标（边清空）——基线中 b.md 的边必须消失
     overlay.apply('b.md', 9, [])
-    const edges = queryBacklinks(base, buildBacklinkIndex(base.edges), overlay, '目标.md')
+    const edges = queryBacklinks(buildBacklinkIndex(base.edges), overlay, '目标.md')
     expect(edges.map((e) => e.source)).toEqual(['a.md', 'c.md'])
   })
 
@@ -55,7 +55,7 @@ describe('queryBacklinks：基线 × 覆盖层合成查询', () => {
     const base = modelOf(['a.md'], [])
     const overlay = new VaultIndexOverlay()
     overlay.apply('a.md', 2, [edge('a.md', '目标', '目标.md', 42)])
-    const edges = queryBacklinks(base, buildBacklinkIndex(base.edges), overlay, '目标.md')
+    const edges = queryBacklinks(buildBacklinkIndex(base.edges), overlay, '目标.md')
     expect(edges).toEqual([edge('a.md', '目标', '目标.md', 42)])
   })
 
@@ -64,13 +64,13 @@ describe('queryBacklinks：基线 × 覆盖层合成查询', () => {
       edge('b.md', '缺失', null, 5),
       edge('a.md', '缺失', null, 9),
     ])
-    const edges = queryBacklinks(base, buildBacklinkIndex(base.edges), new VaultIndexOverlay(), '缺失')
+    const edges = queryBacklinks(buildBacklinkIndex(base.edges), new VaultIndexOverlay(), '缺失')
     expect(edges.map((e) => [e.source, e.start])).toEqual([['a.md', 9], ['b.md', 5]])
   })
 
   it('无反链时返回空数组；overlay=null 时纯基线查询（向后兼容）', () => {
     const base = modelOf(['a.md'], [edge('a.md', 'x', 'x.md')])
-    expect(queryBacklinks(base, buildBacklinkIndex(base.edges), new VaultIndexOverlay(), '不存在.md')).toEqual([])
-    expect(queryBacklinks(base, buildBacklinkIndex(base.edges), null, 'x.md')).toEqual([edge('a.md', 'x', 'x.md')])
+    expect(queryBacklinks(buildBacklinkIndex(base.edges), new VaultIndexOverlay(), '不存在.md')).toEqual([])
+    expect(queryBacklinks(buildBacklinkIndex(base.edges), null, 'x.md')).toEqual([edge('a.md', 'x', 'x.md')])
   })
 })

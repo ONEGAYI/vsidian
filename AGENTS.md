@@ -177,6 +177,8 @@ vsidian/
 │   │   ├── styleReferenceExportPlan.ts # 契约 JSON 导出纯规划逻辑
 │   │   ├── textEditorProvider.ts       # 自定义文本编辑器提供者
 │   │   ├── vaultIndexOverlay.ts        # 索引覆盖层与反链查询纯逻辑（#197）
+│   │   ├── vaultIndexService.ts        # 引用索引宿主服务（#197）
+│   │   ├── vaultIndexWiring.ts         # 索引服务 vscode 层端口装配
 │   │   ├── vaultLinkExtract.ts         # 出链抽取纯逻辑（#197）
 │   │   ├── viewCycle.ts                # 三态视图编排纯逻辑
 │   │   └── wikilinkTarget.ts           # 宿主侧双链目标解析纯逻辑（#11）

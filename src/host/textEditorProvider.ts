@@ -55,6 +55,7 @@ import {
 import type { SettingsService } from './settingsService'
 import type { KeybindingService } from './keybindingService'
 import type { CssSnippetService } from './cssSnippetService'
+import type { VaultIndexService } from './vaultIndexService'
 import type { SnippetLinkList } from '../shared/cssSnippets'
 import type { SettingsPageHandle } from './settingsPage'
 import { runDiagramExport } from './diagramExportHost'
@@ -281,6 +282,7 @@ export function createTextEditorProvider(
   context: vscode.ExtensionContext,
   settings?: SettingsWiring,
   snippets?: CssSnippetService,
+  vaultIndex?: VaultIndexService,
 ): vscode.CustomTextEditorProvider {
   const sessions = new Map<string, SessionEntry>()
   let lastClosedInput: { docUri: string; webviewText?: string; fragments: string[] } | undefined
@@ -952,6 +954,15 @@ export function createTextEditorProvider(
   // undo/redo）的变更都进入 session 识别与广播
   context.subscriptions.push(
     vscode.workspace.onDidChangeTextDocument((event) => {
+      // #197 索引覆盖层：消费原始事件（不经 session 产物——任何编辑器打开
+      // 的 .md 都是索引来源域）；服务内做版本仲裁与去抖，未保存内容不落盘
+      if (vaultIndex && event.document.uri.scheme === 'file' && /\.md$/i.test(event.document.uri.path)) {
+        vaultIndex.applyUnsaved(
+          event.document.uri.fsPath,
+          event.document.version,
+          event.document.getText(),
+        )
+      }
       const entry = getEntry(event.document.uri)
       if (!entry) {
         return
@@ -966,6 +977,19 @@ export function createTextEditorProvider(
       )
     }),
   )
+
+  // ---- #197 索引：保存事件（磁盘基线重扫 + 覆盖层退役；服务内合并提交
+  //  快照）。外部修改经服务自身的 watcher 端口到达（onDidChange 对外部
+  //  工具不可见，watcher 兜底） ----
+  if (vaultIndex) {
+    context.subscriptions.push(
+      vscode.workspace.onDidSaveTextDocument((document) => {
+        if (document.uri.scheme === 'file' && /\.md$/i.test(document.uri.path)) {
+          void vaultIndex.documentSaved(document.uri.fsPath)
+        }
+      }),
+    )
+  }
 
   // ---- 设置变更广播（#33）：宿主保存成功后把新快照推给全部已打开
   // Vsidian 编辑器面板（复用 toggleViewMode 的全 session 遍历样板）。

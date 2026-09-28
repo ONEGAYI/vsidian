@@ -8,7 +8,7 @@
 //
 // 本模块不依赖 vscode / DOM（node 单测直驱）。
 import { buildBacklinkIndex } from '../shared/vaultIndexSnapshot'
-import { sortEdges, type VaultEdge, type VaultIndexModel } from '../shared/vaultIndexModel'
+import { sortEdges, type VaultEdge } from '../shared/vaultIndexModel'
 
 /** 单文档的覆盖条目（未保存内容的内存索引结果） */
 export interface VaultOverlayEntry {
@@ -57,7 +57,6 @@ export class VaultIndexOverlay {
  * overlay 传 null 时退化为纯基线查询。
  */
 export function queryBacklinks(
-  base: VaultIndexModel,
   baseIndex: ReadonlyMap<string, readonly VaultEdge[]>,
   overlay: VaultIndexOverlay | null,
   targetRelPath: string,
