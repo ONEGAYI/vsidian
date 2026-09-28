@@ -171,4 +171,19 @@ describe('scanLooseLinksInLine / looseLinkAtCol：单行扫描与定位', () => 
     expect(looseLinkAtCol(line, line.indexOf(')') + 1)).toBeNull()
     expect(looseLinkAtCol(line, 0)).toBeNull()
   })
+
+  it('#160 含空格路径 + 锚点：dest 为整段字面文本（# 不拆分，含无扩展名）', () => {
+    // 含空格路径的锚点跳转矩阵（用户点名）：宽松形态学对 `#` 保持透明——
+    // `./my file.md#标题` 的目标是整段字面文本，首个 `#` 的路径/锚点拆分
+    // 由宿主 linkTarget 层做（与 %20 编码通道同宿主语义）
+    const withExt = parseLooseLinkAt('见 [丙](./my file.md#标题)。', '见 '.length)
+    expect(withExt).toMatchObject({ dest: './my file.md#标题', image: false })
+    const noExt = parseLooseLinkAt('见 [丁](./my file#标题)。', '见 '.length)
+    expect(noExt).toMatchObject({ dest: './my file#标题', image: false })
+    // 锚点内含空格同样整段保留（标题匹配走宿主的空白折叠口径）
+    const spaced = parseLooseLinkAt('见 [己](./my file.md#小 节)。', '见 '.length)
+    expect(spaced).toMatchObject({ dest: './my file.md#小 节' })
+    // 标准语法门维持：含空格 + # 的形态标准层无法解析，宽松层接管
+    expect(standardInlineDestParses('./my file.md#标题')).toBe(false)
+  })
 })

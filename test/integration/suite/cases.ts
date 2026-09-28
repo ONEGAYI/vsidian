@@ -733,6 +733,8 @@ interface LinkLogData {
     reason?: string
     scheme?: string
     path?: string
+    /** #160 doc/anchor 条目的锚点目标 */
+    fragment?: string
     /** #11 双链条目字段 */
     target?: string
     heading?: string
@@ -8691,5 +8693,126 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(session.panels.length >= 1, '源码态双态命令应回 Vsidian 面板')
     await waitViewState('mode.md', (v) => v.viewMode === 'live')
     await waitLastMode('live')
+  }],
+
+  // ---- #160：普通链接锚点定位（fragment 结构化保留 + 打开后定位） ----
+
+  ['普通链接锚点跳转（文本编辑器）：含空格路径矩阵与 selection reveal；缺失标题、块 id 降级与外部 #（#160）', async () => {
+    /** 注入普通链接意图（与真实 webview 消息同一校验与处理入口） */
+    const injectLink = async (uri: string, href: string): Promise<void> => {
+      await vscode.commands.executeCommand(CMD.injectMessage, uri, {
+        kind: 'link.activate', sessionId: '', docUri: uri, href, srcStart: 0, srcEnd: 10,
+      })
+    }
+    await openWithEditor('links.md')
+    await waitSessionReady('links.md')
+    const uri = wsUri('links.md').toString()
+    const diskBefore = await readDisk('links.md')
+
+    // 含空格路径 + 锚点（%20/%E5 编码形态）：拆分出路径与 fragment 后
+    // selection reveal 到标题行（fixture「子 目录/目标 二.md」首行 `# 目标 二`）
+    await injectLink(uri, './子%20目录/目标%20二.md#%E7%9B%AE%E6%A0%87%20%E4%BA%8C')
+    let logData = await waitWikilinkLog(uri, (e) =>
+      e.kind === 'doc' && e.fragment === '目标 二' && e.path === wsUri('子 目录/目标 二.md').fsPath)
+    assert(logData!.locate === 'text-editor', `文本编辑器路径应记录 locate=text-editor，实际 ${logData!.locate}`)
+    await poll('含空格路径锚点目标被打开', () =>
+      vscode.window.activeTextEditor?.document.uri.toString() === wsUri('子 目录/目标 二.md').toString()
+        ? true : undefined)
+    let selLine = vscode.window.activeTextEditor!.document.lineAt(
+      vscode.window.activeTextEditor!.selection.active).text
+    assert(selLine.trim() === '# 目标 二', `selection 应在标题行，实际「${selLine}」`)
+
+    // 文本编辑器打开会替换源面板：重开源面板再注入
+    await openWithEditor('links.md')
+    await waitSessionReady('links.md')
+    // 无扩展名路径 + 锚点：候选补 .md 后命中（fragment 定位同款）
+    await injectLink(uri, './链接目标#链接目标')
+    logData = await waitWikilinkLog(uri, (e) =>
+      e.kind === 'doc' && e.fragment === '链接目标' && e.path === wsUri('链接目标.md').fsPath)
+    assert(logData!.locate === 'text-editor', `无扩展名锚点应 text-editor 定位，实际 ${logData!.locate}`)
+    await poll('无扩展名锚点目标被打开', () =>
+      vscode.window.activeTextEditor?.document.uri.toString() === wsUri('链接目标.md').toString()
+        ? true : undefined)
+    selLine = vscode.window.activeTextEditor!.document.lineAt(
+      vscode.window.activeTextEditor!.selection.active).text
+    assert(selLine.trim() === '# 链接目标', `无扩展名锚点 selection 应在标题行，实际「${selLine}」`)
+
+    // 缺失标题：文档照常打开（不定位），日志 locate=none——缺失给可见反馈
+    await openWithEditor('links.md')
+    await waitSessionReady('links.md')
+    await injectLink(uri, './链接目标.md#不存在的小节')
+    logData = await waitWikilinkLog(uri, (e) => e.kind === 'doc' && e.fragment === '不存在的小节')
+    assert(logData!.locate === 'none', `缺失标题应记录 locate=none，实际 ${logData!.locate}`)
+    await poll('缺失标题目标仍被打开', () =>
+      vscode.window.activeTextEditor?.document.uri.toString() === wsUri('链接目标.md').toString()
+        ? true : undefined)
+
+    // #^块id fragment：块定位器由 #159 并行交付，本票降级打开不定位（无警告）
+    await openWithEditor('links.md')
+    await waitSessionReady('links.md')
+    await injectLink(uri, './链接目标.md#^abc123')
+    logData = await waitWikilinkLog(uri, (e) => e.kind === 'doc' && e.fragment === '^abc123')
+    assert(logData!.locate === 'none', `块 id 降级应记录 locate=none，实际 ${logData!.locate}`)
+
+    // 外部 URL 的 # 不接管：照旧 external 归类（测试钩子不真开浏览器）。
+    // 前一注入打开的文本编辑器已替换源面板——先重开再注入
+    await openWithEditor('links.md')
+    await waitSessionReady('links.md')
+    await injectLink(uri, 'https://example.com/a#frag')
+    await waitWikilinkLog(uri, (e) => e.kind === 'external' && e.href === 'https://example.com/a#frag')
+
+    assert(await readDisk('links.md') === diskBefore, '锚点跳转不得改写源文档')
+  }],
+
+  ['普通链接页内锚点与面板定位：view.locate 挂载定位（#160）', async () => {
+    // 源面板（links.md）+ 目标面板（目标笔记.md）并排；目标切阅读模式，
+    // 页内锚点（#frag）与跨文档锚点（./目标.md#标题）都应走 custom-panel
+    await openWithEditor('links.md')
+    await waitSessionReady('links.md')
+    const sourceUri = wsUri('links.md').toString()
+    await openWithEditor('目标笔记.md', true)
+    await waitSessionReady('目标笔记.md')
+    const targetUri = wsUri('目标笔记.md').toString()
+    const diskSource = await readDisk('links.md')
+    const diskTarget = await readDisk('目标笔记.md')
+
+    await vscode.commands.executeCommand('onegayi.vsidian.toggleViewMode')
+    await poll('目标进入阅读模式', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, targetUri, 0)) as ViewState | undefined
+      return v?.viewMode === 'reading' && v.readingTotalBlocks !== undefined ? v : undefined
+    })
+
+    // 页内锚点（# 开头 href）：目标即当前文档（目标笔记面板自身），
+    // 阅读模式经 view.locate 块挂载定位到屏外标题（DEEP_HEADING_OFFSET）
+    await vscode.commands.executeCommand(CMD.injectMessage, targetUri, {
+      kind: 'link.activate', sessionId: '', docUri: targetUri,
+      href: '#深处的标题', srcStart: 0, srcEnd: 10,
+    })
+    const after = await poll('页内锚点挂载定位', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, targetUri, 0)) as ViewState | undefined
+      return v?.viewMode === 'reading' && v.readingAnchorStart === DEEP_HEADING_OFFSET ? v : undefined
+    }, 30000)
+    assert(after.readingAnchorStart === DEEP_HEADING_OFFSET,
+      `页内锚点阅读锚点应为屏外标题块 start，实际 ${after.readingAnchorStart}`)
+    let logData = await waitWikilinkLog(targetUri, (e) =>
+      e.kind === 'anchor' && e.fragment === '深处的标题')
+    assert(logData!.locate === 'custom-panel', `面板路径应记录 locate=custom-panel，实际 ${logData!.locate}`)
+
+    // 跨文档锚点：从源面板（links.md）跳 ./目标笔记.md#深处的标题——
+    // 目标已是本扩展面板，reveal 后 view.locate（与 #11 双链同款落位）
+    await vscode.commands.executeCommand(CMD.injectMessage, sourceUri, {
+      kind: 'link.activate', sessionId: '', docUri: sourceUri,
+      href: './目标笔记.md#深处的标题', srcStart: 0, srcEnd: 10,
+    })
+    await poll('跨文档锚点挂载定位', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, targetUri, 0)) as ViewState | undefined
+      return v?.viewMode === 'reading' && v.readingAnchorStart === DEEP_HEADING_OFFSET ? v : undefined
+    }, 30000)
+    logData = await waitWikilinkLog(sourceUri, (e) =>
+      e.kind === 'doc' && e.fragment === '深处的标题' && e.path === wsUri('目标笔记.md').fsPath)
+    assert(logData!.locate === 'custom-panel', `跨文档面板路径应记录 locate=custom-panel，实际 ${logData!.locate}`)
+
+    assert(await readDisk('links.md') === diskSource, '页内锚点跳转不得改写源文档')
+    assert(await readDisk('目标笔记.md') === diskTarget, '锚点跳转不得改写目标文档')
   }],
 ]

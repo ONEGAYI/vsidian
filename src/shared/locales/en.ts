@@ -434,6 +434,10 @@ export const en = {
   // ---- #159 锚点跳转（块引用定位与本文件锚点）----
   /** 块 id 缺失提示（与标题缺失同款「打开后提示」行为） */
   'host.wikilinkBlockMissing': 'Opened {link} in the target document, but the block reference "^{blockId}" was not found (block ids are ` ^id` markers at the end of a block’s last line)',
+
+  // ---- #160 普通链接锚点定位（host 通知）----
+  'host.linkAnchorMissing':
+    'Opened the document targeted by {href}, but the heading "{heading}" was not found (heading matching: trimmed, whitespace-collapsed, case-insensitive ATX headings)',
 } as const satisfies Record<string, string>
 
 /** 字典键：点分扁平键，以本包为类型基准（编译期检查 t() 取词键） */

@@ -400,4 +400,8 @@ export const zhCn: Record<MessageKey, string> = {
   // ---- #159 锚点跳转（块引用定位与本文件锚点）----
   /** 块 id 缺失提示（与标题缺失同款「打开后提示」行为） */
   'host.wikilinkBlockMissing': '已在目标文档中打开{link}，但未找到块引用「^{blockId}」（块 id 是块尾行行尾的 ` ^id` 标记）',
+
+  // ---- #160 普通链接锚点定位（host 通知）----
+  'host.linkAnchorMissing':
+    '已打开 {href} 指向的文档，但未找到标题「{heading}」（标题匹配：trim + 空白折叠 + 大小写不敏感的 ATX 标题）',
 }
