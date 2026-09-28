@@ -2916,7 +2916,19 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand(CMD.setSettings, { 'editor.lineNumbers': false })
     await waitViewState('table42.md', (v) => v.lineGutter?.on === false)
     await vscode.commands.executeCommand(CMD.setSettings, { 'editor.lineNumbers': true })
-    const restored = await waitViewState('table42.md', (v) => v.lineGutter?.on === true)
+    // Compartment 已重配不代表 CM6 的 gutter 绘制已完成；等绘制层恢复整组行号。
+    let lastState: ViewState | undefined
+    let restored: ViewState
+    try {
+      restored = await waitViewState('table42.md', (v) => {
+        lastState = v
+        return v.lineGutter?.on === true &&
+          JSON.stringify(v.paint?.visibleLineNumbers) === JSON.stringify(expected)
+      })
+    } catch (error) {
+      throw new Error(`重新开启行号绘制未稳定：开关 ${String(lastState?.lineGutter?.on)}，` +
+        `预期 ${JSON.stringify(expected)}，实际 ${JSON.stringify(lastState?.paint?.visibleLineNumbers)}；${String(error)}`)
+    }
     assert(JSON.stringify(restored.paint?.visibleLineNumbers) === JSON.stringify(expected),
       '重新开启行号应保留表格段首策略')
   }],
@@ -3572,7 +3584,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand('onegayi.vsidian.toggleViewMode')
     const before = await poll('目标进入阅读模式', async () => {
       const v = (await vscode.commands.executeCommand(CMD.viewState, targetUri, 0)) as ViewState | undefined
-      return v?.viewMode === 'reading' && v.readingTotalBlocks !== undefined ? v : undefined
+      // 模式先于阅读块模型上报；0 块 / 0 次解析是合法过渡态，不可作跳转前基线。
+      return v?.viewMode === 'reading' &&
+        (v.readingTotalBlocks ?? 0) > 0 && (v.readingParseCount ?? 0) > 0 ? v : undefined
     })
     const totalBlocks = before.readingTotalBlocks!
     const parseBefore = before.readingParseCount ?? 0
