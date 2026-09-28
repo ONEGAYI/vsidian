@@ -16,6 +16,11 @@
 //   推进——组合产生的 edit.request 携带组合前版本，由宿主重定位；
 //   flush 时外部增量坐标映射穿过组合编辑（CM6 ChangeSet），区间重叠无法
 //   安全映射时进入冲突暂停（#4：保留本地输入并上报，不再全文覆盖丢字）
+// - 撤销分段（#153）：撤销粒度由出站节奏决定（每笔 edit.request = 一条
+//   宿主 undo 记录），分段从 ack 往返驱动改为时间停顿驱动——连续输入停顿
+//   ≥500ms 或用户主动移光标即开新段，组合进行中不切段（原子），组合间按
+//   时间分段；触碰暂缓/组合攒批仍承担传输合并但不再决定撤销分段，段边界
+//   以切分点记录在暂缓集内，ack 收敛后按切分点拆多笔依次出站
 // - 未确认变更集（#4）：本地乐观编辑发出后未收 ack 前，外部增量必须经
 //   mapSerGroupThroughCm 平移穿过未确认集再应用（否则静默错位）；区间
 //   重叠无法安全映射 → 冲突暂停
@@ -194,6 +199,25 @@ const OUTLINE_HIGHLIGHT_DEBOUNCE_MS = 100
 /** #66 防抖动护栏超时（ms）：跳转程序性滚动后一直无滚动事件到达时的
  *  兜底释放（正常路径由首个滚动事件释放） */
 const OUTLINE_JUMP_GUARD_MS = 1000
+
+/** #153 撤销分段停顿阈值（ms）：连续输入停顿达到该时长，或用户主动移
+ *  光标（点击 / 方向键选区移动），下一笔输入即开新撤销段——每段独立一笔
+ *  edit.request = 一条宿主 undo 记录，对齐 VSCode 原生「停顿数百毫秒或
+ *  光标变化即新段」的可预期手感。数值以 VSCode 手感对齐为起点，验收阶段
+ *  按真实手感校准仅调此常量；如需暴露为用户设置另开工单（本票不加设置
+ *  项）。IME 组合进行中不切段（一次组合的提交永不跨段，切分点最早落在
+ *  组合提交之后）；触碰暂缓/组合攒批继续承担传输合并，但不再决定撤销
+ *  分段（分段边界以切分点记录，ack 收敛后的出站按切分点拆多笔依次发出）。
+ *  判定用 Date.now（fake timers 的 Date 可驱动，测试见 undoSegmentation） */
+const UNDO_SEGMENT_PAUSE_MS = 500
+
+/** #153 主动移光标的导航键集合（不含修改键差异——Shift+方向键选区移动
+ *  同样开新段）：这些键的 keydown 意味着用户主动移动了插入点/选区；纯
+ *  输入导致的光标后移不触发分段 */
+const UNDO_SEGMENT_NAV_KEYS = new Set([
+  'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown',
+  'Home', 'End', 'PageUp', 'PageDown',
+])
 
 /** 侧栏默认宽度（px）：与 main.css 的 --vsidian-sidebar-width 回退值同源；
  *  默认宽度不写内联变量——保持该变量的公开覆盖入口（外部片段可注入） */
@@ -684,10 +708,31 @@ export class WebviewSyncController {
   /** 首笔无法安全逆投影的事务起，后续本地事务合并在同一待发 ChangeSet。
    *  定义域是所有已发送事务之后的本地文档，全部 ack 后可直接作为新请求。 */
   private deferredLocal: ChangeSet | null = null
+  /** #153 撤销分段：暂缓集按撤销段切分的 ChangeSet 序列（与 deferredLocal
+   *  平行维护，恒满足 composeAll(段序列) === deferredLocal）。每段定义域为
+   *  该段开始时的本地文档；sendDeferredLocal 每次只出站队首段（余段留守
+   *  暂缓集），队首段 ack 收敛后依次出站——每段一笔 edit.request = 一条
+   *  宿主 undo 记录。重置与 deferredLocal 同步 */
+  private deferredSegments: ChangeSet[] = []
+  /** #153 撤销分段：最近一笔本地输入（含组合候选事务）的时间戳；null
+   *  表示尚无本地输入（不启动停顿计时）。停顿判定是惰性的——只在下一笔
+   *  输入/组合开始时回看间隔，不设分段定时器 */
+  private lastLocalInputAt: number | null = null
+  /** #153 撤销分段：用户主动移过光标（点击/导航键）的一次性边界标记，
+   *  由 markUndoSegmentBoundary 置位、recordLocalChangeSet 消费；组合
+   *  进行中不置位（组合原子性优先），组合开始时刻的停顿由
+   *  markPauseBoundary 单独判定 */
+  private undoCursorBoundary = false
   /** deferredLocal 的来源标志（#123）：组合期间暂缓的净输入为 true（外部
    *  增量并存时经 base 系映射应用，不走触碰式保守暂停）；触碰未确认区间
    *  的暂缓为 false（与外部并存时保留 #4 的暂停口径）。出站/清空同步复位 */
   private deferredFromComposition = false
+  /** #148 undo 竞态守卫：本地存在未落地宿主的编辑时暂存的撤销/重做意图，
+   *  按按下序累积（键盘重复/连按不折叠）。此态下宿主撤销栈顶还不是这些
+   *  编辑，先发 history.request 会撤到更早的操作，迟到的本地编辑再经重定位
+   *  静默应用。待本地编辑全部落地确认后经 releasePendingHistory 按序发出；
+   *  进入冲突暂停时随 B-4 口径丢弃（暂停面板的撤销忽略，不补发） */
+  private pendingHistoryOps: ('undo' | 'redo')[] = []
   /** 已确认事务复合（定义域 = unconfirmed 定义域 = baseVersion 系）：
    *  外部增量（权威系坐标）先逆穿它平移回 base 系再穿未确认集（C-2），
    *  避免把「已含已确认编辑」的坐标当 base 系多平移 */
@@ -1142,6 +1187,10 @@ export class WebviewSyncController {
           if (this.inFlight.size === 0 && !this.hasBufferedSync()) {
             this.sendDeferredLocal()
           }
+          // #148：在途编辑全部确认且暂缓集已出站（sendDeferredLocal 发出的
+          // 新请求会留在 inFlight，下方释放自会判定继续等待）——此刻撤销
+          // 意图可安全发出
+          this.releasePendingHistory()
           break
         }
         // ok:false（conflict/error）：本地有未确认输入时保留文本并暂停；
@@ -1490,6 +1539,27 @@ export class WebviewSyncController {
           // 测试用浏览器内容可编辑输入路径；源码事务注入无法观测原生 DOM caret。
           if (document.activeElement !== this.view.contentDOM) this.view.focus()
           document.execCommand('insertText', false, message.text)
+        }
+        break
+      }
+      case 'table.test.history': {
+        // 测试钩子（#148）：直调撤销/重做转发入口（keymap 绑定由单元测试
+        // 钉住）。不派发 keydown——真宿主内 webview 会把按键事件转发给宿主
+        // 键绑定服务，合成 Ctrl+Z 会额外触发一次全局 undo（双撤销）
+        this.requestHistory(message.op)
+        break
+      }
+      case 'table.test.compose': {
+        // 测试钩子（#148）：派发合成 IME 组合序列——组合净输入攒入
+        // deferredLocal 暂缓出站，宿主测试以此驱动真实 webview 的组合
+        // 竞态窗口（宿主无法驱动真实 IME）
+        if (this.view && this.viewMode === 'live' && message.from <= this.view.state.doc.length) {
+          this.view.contentDOM.dispatchEvent(new CompositionEvent('compositionstart'))
+          this.view.dispatch({
+            changes: { from: message.from, insert: message.text },
+            userEvent: 'input.type.compose',
+          })
+          this.view.contentDOM.dispatchEvent(new CompositionEvent('compositionend'))
         }
         break
       }
@@ -1897,9 +1967,14 @@ export class WebviewSyncController {
     this.ackedChain = null
     this.sentTxns = []
     this.deferredLocal = null
+    this.deferredSegments = []
+    this.undoCursorBoundary = false
       this.deferredFromComposition = false
     this.inFlight.clear()
     this.pendingExternal = []
+    // #148：持有的撤销/重做意图随之丢弃——暂停面板的撤销忽略（B-4），
+    // 恢复后不补发（补发会撤到用户无法预期的操作）
+    this.pendingHistoryOps = []
   }
 
   /**
@@ -1968,6 +2043,9 @@ export class WebviewSyncController {
         this.view?.dispatch({ selection: { anchor: pos } })
       }
     }
+    // #148：全文落地即权威基线（本地未落地编辑已被权威文本取代）——
+    // 撤销意图此刻发出，撤销的是宿主栈上最后已完成的操作
+    this.releasePendingHistory()
   }
 
   /** 解除暂停（doc.resync / init 全文装载后调用）：状态全量对齐 */
@@ -1981,6 +2059,8 @@ export class WebviewSyncController {
     this.ackedChain = null
     this.sentTxns = []
     this.deferredLocal = null
+    this.deferredSegments = []
+    this.undoCursorBoundary = false
       this.deferredFromComposition = false
     this.pendingExternal = []
     this.pendingFull = undefined
@@ -4810,9 +4890,28 @@ export class WebviewSyncController {
       this.unconfirmed = this.unconfirmed ? this.unconfirmed.compose(changeSet) : changeSet
       return
     }
+    // #153 撤销段边界判定（先于本笔累积，比较用上一笔时间戳）：光标边界
+    // 标记来自用户主动移光标（或组合开始时刻的停顿回看）；时间停顿仅在
+    // 非组合态回看——组合进行中不切段（原子性），组合间停顿已在
+    // compositionstart 的 markPauseBoundary 判定过
+    const segmentBoundary = this.undoCursorBoundary ||
+      (!this.composing && this.lastLocalInputAt !== null &&
+        Date.now() - this.lastLocalInputAt >= UNDO_SEGMENT_PAUSE_MS)
+    this.undoCursorBoundary = false
+    this.lastLocalInputAt = Date.now()
     if (this.composing || this.deferredLocal || (
       this.unconfirmed && touchesUnconfirmedChange(changes, chainSections(this.unconfirmed))
     )) {
+      if (this.deferredLocal && segmentBoundary) {
+        // #153：分段边界落地——本笔开新撤销段（切分点落在字符边界，两段
+        // 定义域依次衔接，出站坐标由 sendDeferredLocal 依次映射）
+        this.deferredSegments.push(changeSet)
+      } else if (this.deferredSegments.length > 0) {
+        const last = this.deferredSegments.length - 1
+        this.deferredSegments[last] = this.deferredSegments[last].compose(changeSet)
+      } else {
+        this.deferredSegments = [changeSet]
+      }
       this.deferredLocal = this.deferredLocal
         ? this.deferredLocal.compose(changeSet)
         : changeSet
@@ -4873,42 +4972,82 @@ export class WebviewSyncController {
     })
   }
 
-  /** 已发请求全部确认后，以确认后的权威版本发送待发本地净变更。 */
+  /** 已发请求全部确认后，以确认后的权威版本发送待发本地净变更。
+   *  #153 撤销分段：暂缓集按撤销段切分出站——队首段即本笔 edit.request
+   *  （一条宿主 undo 记录），余段留守暂缓集；队首段 ack 收敛后本方法再次
+   *  被调用，依次出站下一笔。分段只改撤销粒度：传输合并语义不变（段内
+   *  仍单笔传输），暂缓/冲突/缓冲守卫全部沿用。 */
   private sendDeferredLocal(): void {
-    const deferred = this.deferredLocal
-    if (!deferred || this.suspended || this.blankComposition ||
-        this.inFlight.size > 0 || this.hasBufferedSync()) {
-      return
-    }
-    this.deferredLocal = null
-    this.deferredFromComposition = false
-    this.ackedChain = null
-    this.sentTxns = []
-    const changes: SerChange[] = []
-    deferred.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
-      changes.push({
-        offset: fromA,
-        length: toA - fromA,
-        text: inserted.sliceString(0, inserted.length),
+    // 队首段净抵消时余段继续出站：连续多段恒净抵消以循环处理（原递归
+    // 深度 = 段数，行为等价；每轮迭代重新评估出站守卫）
+    while (this.deferredSegments.length > 0 && !this.suspended && !this.blankComposition &&
+        this.inFlight.size === 0 && !this.hasBufferedSync()) {
+      const head = this.deferredSegments[0]
+      const rest = this.deferredSegments.slice(1)
+      const restComposed = rest.length > 0
+        ? rest.reduce((acc, seg) => acc.compose(seg))
+        : null
+      const changes: SerChange[] = []
+      head.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+        changes.push({
+          offset: fromA,
+          length: toA - fromA,
+          text: inserted.sliceString(0, inserted.length),
+        })
       })
-    })
-    if (changes.length === 0) {
-      this.unconfirmed = null
+      this.deferredSegments = rest
+      this.deferredLocal = restComposed
+      if (!restComposed) {
+        this.deferredFromComposition = false
+      }
+      // 进入出站流程即清已确认链（先于净抵消判定，对齐分段改造前语义）：
+      // 净抵消段跳过出站时同样清空——否则段耗尽路径遗留 ackedChain，
+      // hasUnlandedLocalEdits 恒真且无收敛点释放，Ctrl+Z 被无限期暂缓
+      this.ackedChain = null
+      this.sentTxns = []
+      if (changes.length === 0) {
+        // 队首段净变更完全抵消（段内输入自相抵消）：跳过出站，余段继续
+        this.unconfirmed = restComposed
+        continue
+      }
+      // 未确认集重挂到「全部已确认 + 暂缓集」复合：发送段计入在途、余段
+      // 留守，整体仍等于原复合（队首段 ∘ 余段）；末段出站时退化为旧语义
+      // （unconfirmed = 该段本身）
+      this.unconfirmed = restComposed ? head.compose(restComposed) : head
+      this.seq += 1
+      this.persistState()
+      this.inFlight.add(this.seq)
+      this.sentTxns.push({ seq: this.seq, changes })
+      this.bridge.postMessage({
+        kind: 'edit.request',
+        sessionId: this.sessionId,
+        docUri: this.docUri,
+        seq: this.seq,
+        baseVersion: this.baseVersion,
+        changes,
+      })
       return
     }
-    this.unconfirmed = deferred
-    this.seq += 1
-    this.persistState()
-    this.inFlight.add(this.seq)
-    this.sentTxns.push({ seq: this.seq, changes })
-    this.bridge.postMessage({
-      kind: 'edit.request',
-      sessionId: this.sessionId,
-      docUri: this.docUri,
-      seq: this.seq,
-      baseVersion: this.baseVersion,
-      changes,
-    })
+  }
+
+  /** #153 撤销分段：组合开始时刻回看与上一笔本地输入的停顿——停顿达阈值
+   *  即置位段边界（本组合的净输入落到新段）。组合间分段只能在此判定：
+   *  组合进行中的候选事务不回看停顿（原子性），组合结束后再输入则由
+   *  recordLocalChangeSet 的常规判定覆盖 */
+  private markPauseBoundary(): void {
+    if (this.lastLocalInputAt !== null &&
+        Date.now() - this.lastLocalInputAt >= UNDO_SEGMENT_PAUSE_MS) {
+      this.undoCursorBoundary = true
+    }
+  }
+
+  /** #153 撤销分段：用户主动移光标（点击 / 导航键）开新段。组合进行中
+   *  不置位——真实浏览器里点击通常直接取消组合（触发 compositionend），
+   *  新一轮组合开始时由 markPauseBoundary 重新判定 */
+  private markUndoSegmentBoundary(): void {
+    if (!this.composing) {
+      this.undoCursorBoundary = true
+    }
   }
 
   /**
@@ -5097,6 +5236,8 @@ export class WebviewSyncController {
       this.ackedChain = null
       this.sentTxns = []
       this.deferredLocal = null
+      this.deferredSegments = []
+      this.undoCursorBoundary = false
       this.deferredFromComposition = false
       this.replaceDoc(text)
       this.baseVersion = Math.max(version, ackVersion ?? version)
@@ -5137,6 +5278,9 @@ export class WebviewSyncController {
     this.refreshReading()
     this.baseVersion = Math.max(lastVersion, ackVersion ?? lastVersion)
     this.sendDeferredLocal()
+    // #148：缓冲收敛且暂缓集已出站（或本就无暂缓输入）——撤销意图可
+    // 安全发出（若 sendDeferredLocal 刚发出新请求，释放判定继续等待其 ack）
+    this.releasePendingHistory()
   }
 
   private scheduleFlush(): void {
@@ -5147,13 +5291,56 @@ export class WebviewSyncController {
     }
   }
 
-  /** 撤销/重做转发：宿主持有唯一权威栈，本地不装 history 扩展 */
+  /** 撤销/重做转发：宿主持有唯一权威栈，本地不装 history 扩展。
+   *  #148 竞态守卫：本地还有未落地宿主的编辑时（在途未确认请求、IME/触碰
+   *  暂缓集、未确认坐标链任一非空）不立即发出——宿主队列按到达序串行，
+   *  此刻 undo/redo 撤到的是更早的操作，迟到的本地编辑再经重定位静默应用。
+   *  意图按下序暂存，待全部落地后由 releasePendingHistory 发出；暂停面板
+   *  不持有（B-4 口径不变：照发由宿主忽略）。 */
   private requestHistory(op: 'undo' | 'redo'): boolean {
     if (!this.sessionId) {
       return false // 未初始化：让事件继续传播（defaultKeymap 的本地 no-op undo）
     }
+    if (!this.suspended && this.hasUnlandedLocalEdits()) {
+      this.pendingHistoryOps.push(op)
+      // 主动推进出站（暂缓集/缓冲有 flush 定时兜底，这里确保已调度）
+      this.scheduleFlush()
+      return true
+    }
     this.bridge.postMessage({ kind: 'history.request', op })
     return true
+  }
+
+  /** #148：本地是否存在尚未落地宿主的编辑。在途未确认请求（inFlight/
+   *  sentTxns）、IME/触碰暂缓集（deferredLocal）、未确认坐标链（unconfirmed/
+   *  ackedChain）、组合中未定稿输入或待 flush 的缓冲任一非空即真。 */
+  private hasUnlandedLocalEdits(): boolean {
+    return this.inFlight.size > 0 ||
+      this.sentTxns.length > 0 ||
+      this.deferredLocal !== null ||
+      this.unconfirmed !== null ||
+      this.ackedChain !== null ||
+      this.composing ||
+      this.blankComposition !== null ||
+      this.hasBufferedSync()
+  }
+
+  /** #148：本地编辑全部落地宿主后，发出暂存的撤销/重做意图。释放点为
+   *  「已落地」状态的收敛处：edit.ack 确认、组合/缓冲 flush 完成、全文
+   *  重同步落地。发出后宿主队列保证 history.request 排在刚落地的
+   *  edit.request 之后，撤销的必然是最后一次已完成的编辑。 */
+  private releasePendingHistory(): void {
+    if (this.pendingHistoryOps.length === 0) {
+      return
+    }
+    if (this.suspended || this.hasUnlandedLocalEdits()) {
+      return
+    }
+    const ops = this.pendingHistoryOps
+    this.pendingHistoryOps = []
+    for (const op of ops) {
+      this.bridge.postMessage({ kind: 'history.request', op })
+    }
   }
 
   private replaceDoc(text: string): void {
@@ -6279,6 +6466,12 @@ export class WebviewSyncController {
 
   private extensions() {
     const captureCompositionStart = () => {
+      // #153：组合开始时刻（捕获阶段、置组合态之前）回看与上一笔本地
+      // 输入的停顿——组合间分段的唯一判定点。必须在 composing 置 true 前
+      // 判定（ViewPlugin 捕获阶段先于 domEventHandlers 冒泡运行）；组合
+      // 进行中的候选更新不再回看，否则组合中长停顿后继续选候选会把一次
+      // 组合拆成两段（违反原子性）
+      this.markPauseBoundary()
       // CM6 的内建 observer 在冒泡阶段会先删除跨行选区；必须在捕获
       // 阶段标记组合，首笔删除才能进入 deferredLocal 与定稿重建合并。
       this.composing = true
@@ -6403,6 +6596,8 @@ export class WebviewSyncController {
           if (this.blankComposition) {
             const buffered = this.blankComposition
             buffered.changes = buffered.changes ? buffered.changes.compose(tr.changes) : tr.changes
+            // #153：空白格组合候选也是本地输入——刷新停顿计时的基准
+            this.lastLocalInputAt = Date.now()
             this.reportBlankCompositionChanges(tr.changes)
             continue
           }
@@ -6446,17 +6641,34 @@ export class WebviewSyncController {
       // IME 组合状态跟踪：compositionend 后调度缓冲 flush
       Prec.highest(EditorView.domEventHandlers({
         compositionstart: () => {
+          // 停顿回看在 captureCompositionStart（捕获阶段）已完成——到达
+          // 冒泡 handler 时 composing 已置 true，此处只保留既有标记逻辑
           this.composing = true
           this.beginBlankComposition()
         },
         compositionupdate: () => {
-          this.composing = true
+          // 未观察到 start 的迟入组合（missed start 兜底）：捕获阶段未回看
+          // 停顿，这里在置组合态前补判；组合中的候选更新不再回看（原子性）
+          if (!this.composing) {
+            this.markPauseBoundary()
+            this.composing = true
+          }
           this.beginBlankComposition()
         },
         compositionend: (event) => {
           this.compositionCommittedText = event.data || null
           this.composing = false
           this.scheduleFlush()
+        },
+        // #153：用户主动移光标开新撤销段（点击 / 导航键选区移动）；纯输入
+        // 导致的光标后移不在此列（不派发 DOM 事件信号）
+        mousedown: () => {
+          this.markUndoSegmentBoundary()
+        },
+        keydown: (event) => {
+          if (UNDO_SEGMENT_NAV_KEYS.has(event.key)) {
+            this.markUndoSegmentBoundary()
+          }
         },
       })),
     ]

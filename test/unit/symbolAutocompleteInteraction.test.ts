@@ -282,14 +282,19 @@ describe('上下文抑制与共存', () => {
 
   it('行内代码内：括号照补、强调抑制', () => {
     const { view } = setup('a `b` c')
-    // 光标在行内代码内容首（b 之前）：[ 插入并补对
+    // 内容首（b 之前）键 [：#151 右邻词字符不补——口径不豁免代码上下文
     view.dispatch({ selection: { anchor: 3 } })
     typeText(view, 3, '[')
-    expect(view.state.doc.toString()).toBe('a `[]b` c')
+    expect(view.state.doc.toString()).toBe('a `[b` c')
     expect(view.state.selection.main.head).toBe(4)
-    // 同位置再键强调符：抑制（左邻 [ 非转义、词中抑制与代码抑制均成立）
-    typeText(view, 4, '~')
-    expect(view.state.doc.toString()).toBe('a `[~]b` c')
+    // 内容尾（闭反引号前，右邻 ` 属注册表闭合类）键 [：allowInCode 照补
+    view.dispatch({ selection: { anchor: 5 } })
+    typeText(view, 5, '[')
+    expect(view.state.doc.toString()).toBe('a `[b[]` c')
+    expect(view.state.selection.main.head).toBe(6)
+    // 同位置再键强调符：行内代码按代码口径抑制（不补对）
+    typeText(view, 6, '~')
+    expect(view.state.doc.toString()).toBe('a `[b[~]` c')
   })
 
   it('降级头区（不可成型）按代码口径：括号照补、强调抑制', () => {

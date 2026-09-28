@@ -2535,6 +2535,53 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await doc.save()
   }],
 
+  ['#148 undo 竞态守卫：IME 组合输入未落地时立即撤销，撤销的是刚落地的输入', async () => {
+    await openWithEditor('undo4.md')
+    await waitSessionReady('undo4.md')
+    const uri = wsUri('undo4.md').toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri('undo4.md'))
+    const original = '撤销竞态甲行\n撤销竞态乙行\n'
+    assert(doc.getText() === original, `初始文本不符：${JSON.stringify(doc.getText())}`)
+    // 早前操作（模拟表格把手移动等已确认编辑）经外部 WorkspaceEdit 落地：
+    // 产生宿主撤销记录且以外部增量广播，真实 webview 同步显示（注入
+    // edit.request 属面板自发编辑，只回 ack 不回显，无法驱动 webview 状态）
+    const afterEarlier = '撤销竞态甲行【表】\n撤销竞态乙行\n'
+    const earlier = new vscode.WorkspaceEdit()
+    earlier.insert(wsUri('undo4.md'), new vscode.Position(0, 6), '【表】')
+    assert(await vscode.workspace.applyEdit(earlier), '早前操作应写入成功')
+    await poll('早前操作写入宿主文档', () => (doc.getText() === afterEarlier ? true : undefined))
+    await waitViewState('undo4.md', (v) => v.text === afterEarlier)
+    // 与票面场景一致的时间间隔：早前操作确认后过一段时间再输入（同时
+    // 避开宿主 undoRedoService 对相邻编辑的时间窗合并——间隔内两笔
+    // WorkspaceEdit 可能并成一个撤销元素，一次 undo 会连撤两笔）
+    await new Promise((r) => setTimeout(r, 1500))
+
+    // webview IME 组合输入（合成组合序列）：组合净输入攒入暂缓集
+    // （deferredLocal，未发宿主），webview 本地文本已含组合字。
+    // 插入点 = 全文末尾（afterEarlier.length，尾随换行之后）
+    const afterCompose = '撤销竞态甲行【表】\n撤销竞态乙行\n拼'
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'table.test.compose', from: afterEarlier.length, text: '拼',
+    })
+    await waitViewState('undo4.md', (v) => v.text === afterCompose)
+
+    // 立即撤销（不等待组合输入落地宿主）：#148 守卫保证撤销意图暂存至
+    // 组合输入落地确认后发出——撤销的是刚落地的组合输入而非早前操作。
+    // 经 table.test.history 直调转发入口（合成 Ctrl+Z keydown 会被 webview
+    // 转发给宿主键绑定服务，额外触发一次全局 undo，无法观测单次转发语义）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.history', op: 'undo' })
+    await poll('undo 撤销刚落地的组合输入', () => (doc.getText() === afterEarlier ? true : undefined))
+    await waitViewState('undo4.md', (v) => v.text === afterEarlier)
+
+    // 全程无冲突暂停、无回声写回（早前操作 + 组合输入共 2 笔写回；
+    // undo 走宿主撤销栈不产生新写回）
+    const conflict = (await vscode.commands.executeCommand(CMD.conflictState, uri)) as ConflictState
+    assert(conflict.suspended !== true, '撤销竞态链路不得进入冲突暂停')
+    const finalState = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(finalState.appliedEdits === 1, `appliedEdits 应为 1（组合输入；早前操作经 WorkspaceEdit 不计 applyEdit），实际 ${finalState.appliedEdits}`)
+    await doc.save()
+  }],
+
   ['ack 与 doc.changed 到达顺序：确认后的外部增量版本更高且内容一致（B 观测）', async () => {
     await openWithEditor('ackorder.md')
     await waitSessionReady('ackorder.md')

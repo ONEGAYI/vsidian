@@ -128,6 +128,15 @@ export type HostToWebview =
   | { kind: 'table.test.crossSelect'; anchor: number; head: number }
   | { kind: 'table.test.type'; text: string }
   | { kind: 'table.test.domType'; text: string }
+  /** 测试钩子（#148）：直调撤销/重做转发入口 requestHistory（keymap 绑定
+   *  由单元测试钉住）。不派发 keydown——真宿主内 webview 会把按键事件
+   *  转发给宿主键绑定服务，合成 Ctrl+Z 会额外触发一次全局 undo，与转发
+   *  意图叠加成双撤销 */
+  | { kind: 'table.test.history'; op: 'undo' | 'redo' }
+  /** 测试钩子（#148）：派发合成 IME 组合序列（compositionstart → 组合事务
+   *  → compositionend），组合净输入经 deferredLocal 暂缓出站——驱动真实
+   *  webview 的组合竞态窗口（宿主测试无法驱动真实 IME） */
+  | { kind: 'table.test.compose'; from: number; text: string }
   /** 测试钩子（#43）：点击真实行/列抓手，验证选中态实际绘制。 */
   | { kind: 'table.test.select'; axis: 'row' | 'column'; index: number }
   /** 测试钩子（#43）：真实 webview DOM 的点阵抓手拖动事件。 */
@@ -1993,6 +2002,10 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'table.test.type':
     case 'table.test.domType':
       return isString(v.text)
+    case 'table.test.history':
+      return v.op === 'undo' || v.op === 'redo'
+    case 'table.test.compose':
+      return isNonNegativeInt(v.from) && isString(v.text)
     case 'table.test.select':
       return (v.axis === 'row' || v.axis === 'column') && isNonNegativeInt(v.index)
     case 'table.test.drag':

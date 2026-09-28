@@ -490,6 +490,51 @@ describe('高亮 ==text==（#105）：#29 行内标记组语义', () => {
       expect(setsEqual(state, buildLivePreviewDecorations(state.doc, state.selection))).toBe(true)
     }
   })
+
+  it('#149 票内样例：跨格==**建立**==选区后 → 高亮 span 与粗体 span 均发射、四组定界符隐藏', () => {
+    const doc = '跨格==**建立**==选区后'
+    const set = build(doc, { anchor: 0 })
+    expect(coveredTexts(set, 'vsidian-highlight', doc)).toEqual(['**建立**'])
+    const hlOpen = doc.indexOf('==')
+    const hlClose = doc.indexOf('==', hlOpen + 2)
+    const bOpen = doc.indexOf('**')
+    const bClose = doc.indexOf('**', bOpen + 2)
+    const hidden = hiddenRanges(set)
+    expect(hidden).toContainEqual([hlOpen, hlOpen + 2])
+    expect(hidden).toContainEqual([hlClose, hlClose + 2])
+    expect(hidden).toContainEqual([bOpen, bOpen + 2])
+    expect(hidden).toContainEqual([bClose, bClose + 2])
+  })
+
+  it('#149 组合矩阵：外层 == × 内层标记 × 紧贴上下文的高亮内容 span 照常覆盖内层源文', () => {
+    const samples: Array<[string, string]> = [
+      ['看==*词*==的', '*词*'],
+      ['看==__词__==的', '__词__'],
+      ['看==`词`==的', '`词`'],
+      ['word==**bold**==end', '**bold**'],
+      ['空 ==**词**== 界', '**词**'],
+    ]
+    for (const [doc, inner] of samples) {
+      expect(coveredTexts(build(doc, { anchor: 0 }), 'vsidian-highlight', doc), doc).toEqual([inner])
+    }
+  })
+
+  it('#149 删除线内层：外层高亮照常，~~ 按既有契约保持源码可见（limit-strikethrough-live）', () => {
+    const doc = '看==~~词~~==的'
+    const set = build(doc, { anchor: 0 })
+    expect(coveredTexts(set, 'vsidian-highlight', doc)).toEqual(['~~词~~'])
+    const strike = doc.indexOf('~~')
+    expect(hiddenRanges(set)).not.toContainEqual([strike, strike + 2])
+  })
+
+  it('#149 内侧空格紧贴不发射：嵌套组合不放宽空白边界', () => {
+    const doc = 'a == **b** == c'
+    const set = build(doc, { anchor: 0 })
+    expect(coveredTexts(set, 'vsidian-highlight', doc)).toEqual([])
+    for (const at of [doc.indexOf('=='), doc.lastIndexOf('==')]) {
+      expect(hiddenRanges(set), doc.slice(at, at + 2)).not.toContainEqual([at, at + 2])
+    }
+  })
 })
 
 describe('边界输入：转义、未闭合、嵌套', () => {

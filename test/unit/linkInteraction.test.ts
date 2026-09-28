@@ -15,7 +15,9 @@ import {
   LiveImageWidget,
   WIDGET_DECO_CACHE_LIMIT,
   activateLinkAtPos,
+  activateLooseLinkAtPos,
   buildLinkImageDecorations,
+  buildLooseLinkDecorationRanges,
   imageWidgetDeco,
   makeLinkMouseDownHandler,
   wikilinkWidgetDeco,
@@ -184,7 +186,11 @@ describe('实时预览：渲染态单击跳转，源码态普通单击编辑', (
       rendered.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }))
       view.contentDOM.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }))
       expect(sentOf(h, 'link.activate')).toHaveLength(0)
-      rendered.dispatchEvent(new MouseEvent('mousedown', { ctrlKey: true, bubbles: true, cancelable: true, clientX: 10, clientY: 10 }))
+      // #150 后格内 widget 嵌套在 cell span 内：普通单击经网格选区样式把
+      // 光标定位进格，链接随即显示源码——Ctrl+单击须在当前 DOM 元素上
+      // 触发（旧引用已随渲染态替换而分离，真实用户点击的也是当前元素）
+      const current = host.querySelector<HTMLElement>('.vsidian-table-grid-row .vsidian-link')!
+      current.dispatchEvent(new MouseEvent('mousedown', { ctrlKey: true, bubbles: true, cancelable: true, clientX: 10, clientY: 10 }))
       expect(sentOf(h, 'link.activate')).toHaveLength(1)
       view.dispatch({ selection: { anchor: text.indexOf('目标') } })
       expect(host.querySelectorAll('.vsidian-table-grid-row')).toHaveLength(2)
@@ -532,6 +538,241 @@ describe('点击与图片全链路零写回（核心不变量）', () => {
     const state = viewState(c, h)
     expect(state.text).toBe(LINK_DOC)
     expect(sentOf(h, 'edit.request').length).toBe(0)
+  })
+})
+
+// #152 宽松内联链接/图片：目标含未编码空格（Obsidian 兼容）——live 侧
+// 行扫描装饰（与双链同机制：形态学在 shared/looseLink，代码上下文与
+// frontmatter 内降级）、点击上报字面目标；阅读侧 markdown-it 自定义规则
+// 渲染（href 经 normalizeLink 编码，宿主解码后解析——与 %20 通道同语义）
+const LOOSE_DOC = [
+  '# 宽松链接样例',
+  '',
+  '段落含 [目标 文档](./子 目录/目标 文档.md) 与 ![图片 说明](./assets/图 片.png)。',
+  '',
+  '尖括号 [对照](<a b.md>) 与编码 [对照](./目标%20文档.md)。',
+  '',
+].join('\n')
+
+describe('实时预览：宽松内联链接/图片装饰（#152）', () => {
+  function looseItems(
+    text: string,
+    anchor?: number,
+  ): Array<{ cls: string | null; widget: object | null; from: number; to: number; rendered: boolean }> {
+    const state = EditorState.create({
+      doc: text,
+      ...(anchor === undefined ? {} : { selection: { anchor } }),
+      extensions: [liveDecorationsField],
+    })
+    const ranges = buildLooseLinkDecorationRanges(
+      state.doc,
+      state.field(liveDecorationsField).tree,
+      state.selection,
+      [{ from: 0, to: state.doc.length }],
+      state.field(liveDecorationsField).fm,
+    )
+    const items: Array<{ cls: string | null; widget: object | null; from: number; to: number; rendered: boolean }> = []
+    for (const range of ranges) {
+      const spec = (range.value as unknown as { spec: { class?: string; widget?: object; attributes?: Record<string, string> } }).spec
+      items.push({
+        cls: spec.class ?? null,
+        widget: spec.widget ?? null,
+        from: range.from,
+        to: range.to,
+        rendered: spec.attributes?.['data-vsidian-rendered-link'] === 'true',
+      })
+    }
+    return items
+  }
+
+  it('非活动行：链接标签为 rendered mark、首尾标记与目标整体隐藏；图片整块替换 widget', () => {
+    const text = '前 [目标 文档](./子 目录/a b.md) 中 ![图片 说明](./assets/图 片.png) 后'
+    const items = looseItems(text)
+    const open = text.indexOf('[')
+    const close = text.indexOf(']', open)
+    const label = text.indexOf('目标')
+    // 链接：标签 rendered mark（普通单击跳转的 data 钩子）
+    const linkSpan = items.find((i) => i.cls?.split(' ').includes(LINK_CLASS_NAMES.link))
+    expect(linkSpan).toMatchObject({ from: label, to: label + '目标 文档'.length, rendered: true })
+    // 隐藏：`[` 与 `](…)` 尾部（连续区间）
+    const hidden = items.filter((i) => i.cls === null && i.widget === null)
+    expect(hidden).toContainEqual({ cls: null, widget: null, from: open, to: open + 1, rendered: false })
+    expect(hidden).toContainEqual({ cls: null, widget: null, from: close, to: text.indexOf(')', close) + 1, rendered: false })
+    // 图片：整块替换 widget，src 为字面目标（宿主通道容错解码）
+    const imageOpen = text.indexOf('![')
+    const widget = items.find((i) => i.widget !== null)
+    expect(widget).toMatchObject({ from: imageOpen, to: text.indexOf(')', imageOpen) + 1 })
+    expect(widget!.widget).toBeInstanceOf(LiveImageWidget)
+    expect((widget!.widget as LiveImageWidget).src).toBe('./assets/图 片.png')
+    expect((widget!.widget as LiveImageWidget).alt).toBe('图片 说明')
+  })
+
+  it('光标进入：链接标签显形源码（无隐藏）、图片撤销 widget', () => {
+    const text = '前 [目标 文档](a b.md) 中 ![图片 说明](x y.png) 后'
+    const inLink = looseItems(text, text.indexOf('目标'))
+    expect(inLink.some((i) => i.cls?.split(' ').includes(LINK_CLASS_NAMES.link) && !i.rendered)).toBe(true)
+    expect(inLink.every((i) => i.cls !== null || i.widget)).toBe(true) // 无隐藏装饰
+    const inImage = looseItems(text, text.indexOf('图片'))
+    expect(inImage.some((i) => i.widget)).toBe(false)
+  })
+
+  it('行内代码与围栏内不装饰（源码降级边界与既有链接一致）', () => {
+    for (const text of [
+      '前 `[代码](a b.md)` 后',
+      '```\n[围栏](a b.md)\n```\n',
+    ]) {
+      expect(looseItems(text)).toHaveLength(0)
+    }
+  })
+
+  it('activateLooseLinkAtPos：标签位置上报字面目标与出现区间；图片位置不激活', () => {
+    const state = EditorState.create({ doc: LOOSE_DOC, extensions: [liveDecorationsField] })
+    const parent = document.createElement('div')
+    document.body.appendChild(parent)
+    const view = new EditorView({ state, parent })
+    try {
+      const posted: Array<{ href: string; from: number; to: number }> = []
+      const labelPos = LOOSE_DOC.indexOf('目标 文档')
+      const open = LOOSE_DOC.indexOf('[')
+      const to = LOOSE_DOC.indexOf(')', open) + 1
+      expect(activateLooseLinkAtPos(view, labelPos, (href, f, t) => posted.push({ href, from: f, to: t }))).toBe(true)
+      // 源文原样目标（含字面空格，宿主侧 trim/容错解码——与 %20 通道同宿主语义）
+      expect(posted).toEqual([{ href: './子 目录/目标 文档.md', from: open, to }])
+      const imagePos = LOOSE_DOC.indexOf('图片 说明')
+      expect(activateLooseLinkAtPos(view, imagePos, (href) => posted.push({ href, from: 0, to: 0 }))).toBe(false)
+      expect(posted.length).toBe(1)
+    } finally {
+      view.destroy()
+      parent.remove()
+    }
+  })
+
+  it('mousedown 处理器：Ctrl 单击宽松链接上报字面目标并 preventDefault', () => {
+    const state = EditorState.create({ doc: LOOSE_DOC, extensions: [liveDecorationsField] })
+    const parent = document.createElement('div')
+    document.body.appendChild(parent)
+    const view = new EditorView({ state, parent })
+    try {
+      const posted: string[] = []
+      const handler = makeLinkMouseDownHandler((href) => posted.push(href))
+      const hitView = { posAtCoords: () => LOOSE_DOC.indexOf('目标 文档'), state: view.state } as unknown as EditorView
+      const ev = new MouseEvent('mousedown', { ctrlKey: true, bubbles: true, cancelable: true })
+      expect(handler(ev, hitView)).toBe(true)
+      expect(ev.defaultPrevented).toBe(true)
+      expect(posted).toEqual(['./子 目录/目标 文档.md'])
+    } finally {
+      view.destroy()
+      parent.remove()
+    }
+  })
+
+  it('表格网格中的宽松链接：单元格内 rendered mark 与网格 mark 共存', () => {
+    const h = makeBridge()
+    const text = '前文\n\n| [目标 文档](a b.md) | 数量 |\n| --- | --- |\n| 甲 | 1 |\n'
+    const c = mount(h, text)
+    try {
+      const rendered = host.querySelector<HTMLElement>('.vsidian-table-grid-row .vsidian-link')
+      expect(rendered).not.toBeNull()
+      expect(rendered!.dataset['vsidianRenderedLink']).toBe('true')
+    } finally {
+      c.dispose()
+    }
+  })
+
+  it('渲染态普通单击走 mouseup 确认后上报（完整事件链路）', () => {
+    const h = makeBridge()
+    const text = '普通行\n\n[目标 文档](./子 目录/a b.md)\n'
+    const c = mount(h, text)
+    const view = c.getView()!
+    const pos = text.indexOf('目标')
+    const hit = vi.spyOn(view, 'posAtCoords').mockReturnValue(pos)
+    try {
+      const rendered = host.querySelector<HTMLElement>('.vsidian-link')!
+      expect(rendered.dataset['vsidianRenderedLink']).toBe('true')
+      rendered.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }))
+      expect(sentOf(h, 'link.activate')).toHaveLength(0)
+      view.contentDOM.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }))
+      const intents = sentOf(h, 'link.activate') as LinkActivate[]
+      expect(intents).toHaveLength(1)
+      expect(intents[0]!.href).toBe('./子 目录/a b.md')
+      expect(intents[0]!.srcStart).toBe(text.indexOf('[目标 文档]'))
+      expect(intents[0]!.srcEnd).toBe(text.indexOf(')', text.indexOf('[目标 文档]')) + 1)
+      expect(sentOf(h, 'edit.request').length).toBe(0)
+    } finally {
+      hit.mockRestore()
+      c.dispose()
+    }
+  })
+})
+
+describe('阅读视图：宽松内联链接/图片渲染与跳转（#152）', () => {
+  let c!: WebviewSyncController
+
+  function looseMount(): Harness {
+    const h = makeBridge()
+    c = mount(h, LOOSE_DOC)
+    c.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
+    return h
+  }
+
+  it('含空格目标渲染为链接：href 为编码形态，单击上报解码后与字面源文一致', () => {
+    const h = looseMount()
+    const anchors = Array.from(readingContainer().querySelectorAll<HTMLAnchorElement>('a'))
+    // 宽松 + 尖括号 + %20 三处均渲染为可点击链接
+    expect(anchors.length).toBe(3)
+    const loose = anchors.find((a) => decodeURIComponent(a.getAttribute('href') ?? '').includes('子 目录/目标 文档.md'))
+    expect(loose).toBeDefined()
+    expect(loose!.textContent).toBe('目标 文档')
+    loose!.click()
+    const intents = sentOf(h, 'link.activate') as LinkActivate[]
+    expect(intents.length).toBe(1)
+    expect(decodeURIComponent(intents[0]!.href)).toBe('./子 目录/目标 文档.md')
+    expect(intents[0]!.srcStart).toBe(LOOSE_DOC.indexOf('段落含'))
+    expect(sentOf(h, 'edit.request').length).toBe(0)
+  })
+
+  it('含空格图源渲染为图片并经宿主通道装载（request src 解码后为字面路径）', () => {
+    const h = looseMount()
+    const image = readingContainer().querySelector<HTMLImageElement>('img.vsidian-image')!
+    expect(image).not.toBeNull()
+    expect(decodeURIComponent(image.dataset['vsidianImgSrc'] ?? '')).toBe('./assets/图 片.png')
+    expect(image.alt).toBe('图片 说明')
+    const requests = sentOf(h, 'image.request') as ImageRequest[]
+    expect(requests.length).toBe(1)
+    expect(decodeURIComponent(requests[0]!.src)).toBe('./assets/图 片.png')
+    c.dispose()
+  })
+
+  it('标题组合形态整条渲染为链接（不产生部分链接）', () => {
+    const h = makeBridge()
+    const text = '见 [说明](a b.md "标题")。\n'
+    const c = mount(h, text)
+    c.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
+    const anchors = Array.from(readingContainer().querySelectorAll<HTMLAnchorElement>('a'))
+    expect(anchors).toHaveLength(1)
+    expect(anchors[0]!.textContent).toBe('说明')
+    expect(decodeURIComponent(anchors[0]!.getAttribute('href') ?? '')).toBe('a b.md "标题"')
+    c.dispose()
+  })
+
+  it('行内代码内的宽松形态按字面呈现（边界与既有链接一致）', () => {
+    const h = makeBridge()
+    const text = '示例 `[文字](a b.md)` 字面\n'
+    const c = mount(h, text)
+    c.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
+    expect(readingContainer().querySelectorAll('a')).toHaveLength(0)
+    expect(readingContainer().querySelector('code')?.textContent).toBe('[文字](a b.md)')
+    c.dispose()
+  })
+
+  it('危险协议宽松形态不产生可点击 href（validateLink 与标准层同判）', () => {
+    const h = makeBridge()
+    const text = '点 [这里](javascript:ale rt(1)) 别\n'
+    const c = mount(h, text)
+    c.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
+    expect(readingContainer().querySelectorAll('a')).toHaveLength(0)
+    expect(readingContainer().textContent).toContain('[这里](javascript:ale rt(1))')
+    c.dispose()
   })
 })
 

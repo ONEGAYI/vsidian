@@ -181,6 +181,168 @@ describe('高亮 ==text== 行内规则（#105）', () => {
   })
 })
 
+describe('嵌套行内围栏 flanking 双视图同源（#149 宽松基准）', () => {
+  const md = createMarkdownRenderer()
+
+  /** 树中首个 Highlight 节点 */
+  function findHighlight(node: SyntaxNode): SyntaxNode | null {
+    if (node.name === 'Highlight') {
+      return node
+    }
+    for (let c = node.firstChild; c; c = c.nextSibling) {
+      const hit = findHighlight(c)
+      if (hit) {
+        return hit
+      }
+    }
+    return null
+  }
+
+  /** Highlight 首末 HighlightMark 之间的内容源文（lezer 侧内容区间） */
+  function lezerHighlightInner(src: string): string | null {
+    const tree = markdownTreeParser.parse(docInput(Text.of(src.trimEnd().split('\n'))))
+    const hit = findHighlight(tree.topNode)
+    if (!hit) {
+      return null
+    }
+    let first: SyntaxNode | null = null
+    let last: SyntaxNode | null = null
+    for (let c = hit.firstChild; c; c = c.nextSibling) {
+      if (c.name === 'HighlightMark') {
+        if (!first) {
+          first = c
+        }
+        last = c
+      }
+    }
+    return first && last ? src.slice(first.to, last.from) : null
+  }
+
+  /** 组合矩阵：外层 == × 内层标记 × {汉字紧贴、字母紧贴、空白外边界、标点外边界} */
+  const matrix: Array<{ label: string; src: string; inner: string; plain: string; nested: string }> = [
+    { label: '票内样例：汉字外贴+星号内贴', src: '跨格==**建立**==选区后\n', inner: '**建立**', plain: '建立', nested: 'strong' },
+    { label: '汉字外贴+单星内层', src: '看==*词*==的\n', inner: '*词*', plain: '词', nested: 'em' },
+    { label: '汉字外贴+下划线粗体内层', src: '看==__词__==的\n', inner: '__词__', plain: '词', nested: 'strong' },
+    { label: '汉字外贴+删除线内层（外层同源；strike 呈现分野是既有契约）', src: '看==~~词~~==的\n', inner: '~~词~~', plain: '词', nested: 's' },
+    { label: '汉字外贴+行内代码内层', src: '看==`词`==的\n', inner: '`词`', plain: '词', nested: 'code' },
+    { label: '字母外贴', src: 'word==**bold**==end\n', inner: '**bold**', plain: 'bold', nested: 'strong' },
+    { label: '空白外边界', src: '空 ==**词**== 界\n', inner: '**词**', plain: '词', nested: 'strong' },
+    { label: '标点外边界', src: '（==**词**==）\n', inner: '**词**', plain: '词', nested: 'strong' },
+  ]
+
+  it('组合矩阵对拍：阅读渲染与 lezer 树外层高亮均配对、内容区间同源', () => {
+    for (const { label, src, inner, plain, nested } of matrix) {
+      // 阅读侧：mark 语义元素 + 嵌套标记照常渲染
+      const host = renderToDom(md, src)
+      const mark = host.querySelector('mark')
+      expect(mark, label).not.toBeNull()
+      expect(mark!.textContent, label).toBe(plain)
+      expect(mark!.querySelector(nested)?.textContent, label).toBe(plain)
+      // lezer 侧对拍：Highlight 配对且首末 mark 间内容与源文一致
+      expect(lezerHighlightInner(src), label).toBe(inner)
+    }
+  })
+
+  it('内侧空格紧贴仍拒绝：宽松基准不放宽空白边界（两视图一致降级）', () => {
+    for (const src of ['a == **b** == c\n', 'x== **y** ==z\n']) {
+      const host = renderToDom(md, src)
+      expect(host.querySelectorAll('mark'), src).toHaveLength(0)
+      expect(host.textContent, src).toContain('==')
+      expect(lezerHighlightInner(src), src).toBeNull()
+    }
+  })
+
+  it('* 系外层（**==词==**）双视图一致按 CommonMark 现状裸外层：内层高亮照常渲染（Obsidian 对照留人工验收）', () => {
+    const src = '看**==词==**的\n'
+    const host = renderToDom(md, src)
+    expect(host.querySelector('strong')).toBeNull()
+    expect(host.textContent).toContain('**')
+    expect(host.querySelector('mark')?.textContent).toBe('词')
+    // lezer 侧对拍：内层 Highlight 照常配对、外层 StrongEmphasis 不存在
+    expect(lezerHighlightInner(src)).toBe('词')
+    const tree = markdownTreeParser.parse(docInput(Text.of(src.trimEnd().split('\n'))))
+    let strongCount = 0
+    const walk = (node: SyntaxNode): void => {
+      if (node.name === 'StrongEmphasis') strongCount++
+      for (let c = node.firstChild; c; c = c.nextSibling) walk(c)
+    }
+    walk(tree.topNode)
+    expect(strongCount).toBe(0)
+  })
+})
+
+describe('宽松内联链接/图片行内规则（#152：目标含未编码空格，Obsidian 兼容）', () => {
+  const md = createMarkdownRenderer()
+
+  it('含空格目标渲染为链接：href 为 normalizeLink 编码形态，解码后与字面源文一致', () => {
+    const host = renderToDom(md, '见 [目标 文档](./子 目录/目标 文档.md)。\n')
+    const anchor = host.querySelector('a')
+    expect(anchor).not.toBeNull()
+    expect(anchor!.textContent).toBe('目标 文档')
+    expect(decodeURIComponent(anchor!.getAttribute('href') ?? '')).toBe('./子 目录/目标 文档.md')
+  })
+
+  it('含空格图源渲染为图片：src 编码形态，alt 取标签内容', () => {
+    const host = renderToDom(md, '![图片 说明](./assets/图 片.png)\n')
+    const img = host.querySelector('img')
+    expect(img).not.toBeNull()
+    expect(decodeURIComponent(img!.getAttribute('src') ?? '')).toBe('./assets/图 片.png')
+    expect(img!.getAttribute('alt')).toBe('图片 说明')
+  })
+
+  it('标签内嵌套行内标记照常渲染（与标准链接同构）', () => {
+    const host = renderToDom(md, '[**粗体** 与 `码`](a b.md)\n')
+    const anchor = host.querySelector('a')
+    expect(anchor!.querySelector('strong')?.textContent).toBe('粗体')
+    expect(anchor!.querySelector('code')?.textContent).toBe('码')
+  })
+
+  it('标准层职责形态不受影响：%20、尖括号、合法标题、无空格目标', () => {
+    for (const src of [
+      '[t](./目标%20文档.md)\n',
+      '[t](<a b.md>)\n',
+      '[t](a.md "标题 内容")\n',
+      '[t](a.md)\n',
+    ]) {
+      const host = renderToDom(md, src)
+      const anchor = host.querySelector('a')
+      expect(anchor, src).not.toBeNull()
+      expect(anchor!.textContent, src).toBe('t')
+    }
+  })
+
+  it('标题组合形态整条渲染为一条链接（目标是括号内整段字面文本）', () => {
+    const host = renderToDom(md, '[t](a b "标题")\n')
+    const anchors = host.querySelectorAll('a')
+    expect(anchors).toHaveLength(1)
+    expect(decodeURIComponent(anchors[0]!.getAttribute('href') ?? '')).toBe('a b "标题"')
+  })
+
+  it('降级形态按原文呈现：反斜杠、未闭合、转义前缀、危险协议', () => {
+    for (const src of [
+      '[t](a\\ b)\n',
+      '[t](a b\n',
+      '\\![t](a b.md)\n',
+    ]) {
+      const host = renderToDom(md, src)
+      expect(host.querySelector('a'), src).toBeNull()
+      expect(host.textContent, src).toContain('[t]')
+    }
+    // 危险协议（validateLink 与标准层同判：不产生可点击 href）
+    const danger = renderToDom(md, '[点](javascript:ale rt(1))\n')
+    expect(danger.querySelector('a')).toBeNull()
+    expect(danger.textContent).toContain('[点](javascript:ale rt(1))')
+  })
+
+  it('行内代码与双链形态不被宽松规则干扰', () => {
+    const host = renderToDom(md, '`[t](a b.md)`\n')
+    expect(host.querySelector('a')).toBeNull()
+    expect(host.querySelector('code')?.textContent).toBe('[t](a b.md)')
+    const wikilink = renderToDom(md, '[[含空格 笔记]]\n')
+    expect(wikilink.querySelector('a')?.className).toContain('vsidian-wikilink')
+  })
+})
+
 describe('sanitizeReadingDom：DOM 纵深净化', () => {
   it('移除 script/iframe/style 元素、行内事件属性与 javascript: 链接', () => {
     const host = document.createElement('div')

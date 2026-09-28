@@ -29,6 +29,15 @@ describe('表格网格与选中轮廓 CSS 契约（#42/#43）', () => {
     expect(cell).not.toMatch(/display:\s*none/)
   })
 
+  it('格位外的行级子元素不参与 grid 放置（#150 视觉保障）', () => {
+    // 格内 widget 与其 cm-widgetBuffer 嵌套在 cell span 内（DOM 结构由
+    // tableCellWidget.test.ts 钉住）；行级残留的管道/测量缓冲/分隔符必须
+    // 从绘制层排除，grid 自动放置只认 cell span，格位不再错乱。
+    const hidden = rule('.vsidian-table-grid-delimiter', /display:\s*none/)
+    expect(hidden).toContain('.vsidian-table-grid-row > .vsidian-table-pipe')
+    expect(hidden).toContain('.vsidian-table-grid-row > .cm-widgetBuffer')
+  })
+
   it('GFM 列对齐三态规则齐全（应用到该列全部单元格，空格占位同构）', () => {
     expect(rule('#app .cm-editor .cm-scroller .vsidian-table-grid-align-left', /text-align/))
       .toMatch(/text-align:\s*left/)

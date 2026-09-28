@@ -1222,6 +1222,22 @@ describe('isHostToWebview', () => {
     expect(isHostToWebview({ kind: 'table.test.key' })).toBe(false)
   })
 
+  it('table.test.history 只接受 undo/redo 操作（#148 测试钩子）', () => {
+    expect(isHostToWebview({ kind: 'table.test.history', op: 'undo' })).toBe(true)
+    expect(isHostToWebview({ kind: 'table.test.history', op: 'redo' })).toBe(true)
+    expect(isHostToWebview({ kind: 'table.test.history', op: 'other' })).toBe(false)
+    expect(isHostToWebview({ kind: 'table.test.history' })).toBe(false)
+  })
+
+  it('table.test.compose 只接受非负整数起点与文本（#148 测试钩子）', () => {
+    expect(isHostToWebview({ kind: 'table.test.compose', from: 3, text: '拼' })).toBe(true)
+    expect(isHostToWebview({ kind: 'table.test.compose', from: 0, text: '' })).toBe(true)
+    expect(isHostToWebview({ kind: 'table.test.compose', from: -1, text: '拼' })).toBe(false)
+    expect(isHostToWebview({ kind: 'table.test.compose', from: 1.5, text: '拼' })).toBe(false)
+    expect(isHostToWebview({ kind: 'table.test.compose', from: 1 })).toBe(false)
+    expect(isHostToWebview({ kind: 'table.test.compose', text: '拼' })).toBe(false)
+  })
+
   it('table.test.drag 只接受非负整数行索引与有效目标槽位（#43）', () => {
     expect(isHostToWebview({ kind: 'table.test.drag', sourceIndex: 2, targetSlot: 0 })).toBe(true)
     expect(isHostToWebview({ kind: 'table.test.drag', sourceIndex: -1, targetSlot: 0 })).toBe(false)

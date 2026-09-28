@@ -3,7 +3,9 @@
 // 星号三连硬契约（| → *|* → **| → ***|）、自动空对退格同删两侧、非自动
 // 来源不接管、粘贴保持原文、中文 composition 候选不干预与提交补全/完整对
 // 不补、选区经 IME 提交单个起始符号的包裹重建（叠加/弯引号/完整对不补）、
-// 代码块内括号照补与强调抑制、转义与撇号防误触、设置开关即时生效。
+// 代码块内括号照补与强调抑制、转义与撇号防误触、右邻抑制生态口径
+// （#151：词字符/标点前不越界补全，空白/闭合类照补、双链骨架两键成型、
+// IME 提交同口径）、设置开关即时生效。
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -200,6 +202,36 @@ try {
     await check(page, "don'", 4, '不配对')
   })
 
+  // ---- #151 右邻抑制（生态口径对齐）：真实键盘与 IME 提交两路径同口径 ----
+  await scenario('右邻正文词字符不越界补全：word 前键 [ 原样插入', { doc: 'a word', cursor: 2 }, async (page) => {
+    await page.keyboard.type('[')
+    await check(page, 'a [word', 3, '不补闭合')
+  })
+  await scenario('右邻普通标点不越界补全：逗号前键（ 原样插入', { doc: 'a, b', cursor: 1 }, async (page) => {
+    await page.keyboard.type('(')
+    await check(page, 'a(, b', 2, '不补闭合')
+  })
+  await scenario('右邻空白照常补全（对照）', { doc: 'a word', cursor: 1 }, async (page) => {
+    await page.keyboard.type('[')
+    await check(page, 'a[] word', 2, '照常补全')
+  })
+  await scenario('右邻闭合类照常补全（对照）：) 前键 [ 得 [])b', { doc: 'a )b', cursor: 2 }, async (page) => {
+    await page.keyboard.type('[')
+    await check(page, 'a [])b', 3, '闭合类放行')
+  })
+  await scenario('双链骨架两键成型：[|] 内再键 [ 得 [[|]]（右邻 ] 属闭合类，照补保留）', { doc: '', cursor: 0 }, async (page) => {
+    await page.keyboard.type('[')
+    await check(page, '[]', 1, '第一键补对')
+    await page.keyboard.type('[')
+    await check(page, '[[]]', 2, '第二键照补（[[|]] 骨架）')
+  })
+  await scenario('IME 提交路径同口径：右邻词字符提交全角括号不补', { doc: 'word', cursor: 0 }, async (page) => {
+    const cdp = await page.context().newCDPSession(page)
+    await cdp.send('Input.imeSetComposition', { text: '（', selectionStart: 1, selectionEnd: 1 })
+    await cdp.send('Input.insertText', { text: '（' })
+    await check(page, '（word', 1, 'IME 提交不补')
+  })
+
   // ---- 表格格内补全（格内允许括号；格区语义另有集成覆盖）----
   await scenario('表格格内键入括号照常补全', { doc: TABLE_DOC, cursor: TABLE_DOC.indexOf('1') + 1 }, async (page) => {
     await page.keyboard.type('(')
@@ -246,13 +278,17 @@ try {
         await page.waitForFunction((count) => window.readHostMessages().filter((message) => message.kind === 'edit.request').length >= count,
           cycle + 1)
         await page.keyboard.press('Control+z')
-        const requests = await page.evaluate(() => window.readHostMessages().filter((message) => message.kind === 'history.request'))
-        assert.equal(requests.length, cycle + 1, 'Ctrl+Z 发往宿主')
+        // #148 竞态守卫：包裹编辑在途未确认时撤销意图暂存，确认后才出站
+        // ——宿主可见顺序恒为 edit.request 先于 history.request
+        assert.equal(await page.evaluate(() => window.readHostMessages().filter((message) => message.kind === 'history.request').length),
+          cycle, '#148 守卫：在途包裹请求未确认时 Ctrl+Z 意图应暂存不出站')
         const undoChanges = cdp
           ? [{ offset: 6, length: 6, text: 'text' }]
           : [{ offset: 6, length: 1, text: '' }, { offset: 11, length: 1, text: '' }]
         await page.evaluate(({ changes, version }) => window.ackAndExternalUndo(changes, version),
           { changes: undoChanges, version: 2 + cycle * 2 })
+        assert.equal(await page.evaluate(() => window.readHostMessages().filter((message) => message.kind === 'history.request').length),
+          cycle + 1, '确认后撤销意图应按序发往宿主')
         await checkRanges(page, 'hello text', [{ from: 6, to: 10 }], `第 ${cycle + 1} 次撤销`)
       }
     })

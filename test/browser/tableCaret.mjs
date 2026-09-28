@@ -580,6 +580,70 @@ try {
       console.error(`[原生输入][FAIL] ${scenario}: ${error.message}`)
     } finally { await page.close() }
   }
+  // ---- #150 表格格内 widget 网格回归：双链/图片/公式渲染保留且网格不错位 ----
+  // 视觉层断言落在用户可见结果：渲染态 widget 真实绘制（rect 有面积）且
+  // 位于格盒内；含 widget 的行两格同顶（「四」不被顶到多出的一行）。
+  const cellWidgetFailures = []
+  for (const scenario of ['wikilink', 'image', 'math']) {
+    const page = await browser.newPage()
+    const errors = []
+    page.on('pageerror', (error) => errors.push(error.message))
+    try {
+      await page.setContent('<div id="app"></div>')
+      await page.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
+      await page.addScriptTag({ path: bundle })
+      const cellText = scenario === 'wikilink' ? '三[[a b]]'
+        : scenario === 'image' ? '三![alt 图](a.png)' : '三$x$'
+      const source = `| 甲 | 乙 |\n| --- | --- |\n| 一 | 二 |\n| ${cellText} | 四 |`
+      await page.evaluate((text) => window.initTable(text), source)
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+      const selector = scenario === 'wikilink' ? '[data-vsidian-rendered-wikilink]'
+        : scenario === 'image' ? '.vsidian-image' : '[data-vsidian-rendered-math]'
+      const widgetRow = page.locator('.vsidian-table-grid-row').nth(2)
+      const cell0 = widgetRow.locator('.vsidian-table-grid-cell').nth(0)
+      const cell1 = widgetRow.locator('.vsidian-table-grid-cell').nth(1)
+      // 渲染态在第一格内真实绘制（可见性：面积 > 0，且不越出格盒）
+      const rendered = await cell0.locator(selector).evaluate((el) => {
+        const rect = el.getBoundingClientRect()
+        const cellEl = el.closest('.vsidian-table-grid-cell')
+        const box = cellEl ? cellEl.getBoundingClientRect() : null
+        return {
+          w: rect.width, h: rect.height,
+          inside: !!box && rect.left >= box.left - 1 && rect.right <= box.right + 1 &&
+            rect.top >= box.top - 1 && rect.bottom <= box.bottom + 1,
+        }
+      })
+      assert(rendered.w > 0 && rendered.h > 0, `${scenario} 渲染态必须真实绘制: ${JSON.stringify(rendered)}`)
+      assert(rendered.inside, `${scenario} 渲染元素须落在格盒内: ${JSON.stringify(rendered)}`)
+      // 对齐：同行两格同顶、第二格在右侧（widget 不多占格位、不产生多出的行）
+      const a = await cell0.boundingBox()
+      const b = await cell1.boundingBox()
+      assert(Math.abs(a.y - b.y) < 1, `${scenario} 行两格必须同顶（不被 widget 顶到多出的行）: ${JSON.stringify({ a, b })}`)
+      assert(b.x > a.x, `${scenario} 第二格必须在第一格右侧`)
+      // 格区选区不回归：拖选该行两格形成行内矩形
+      await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2)
+      await page.mouse.down()
+      await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 4 })
+      await page.mouse.up()
+      assert.equal(await page.locator('.vsidian-table-region-cell').count(), 2,
+        `${scenario} 行内拖选须形成两格矩形`)
+      // Tab 切格不回归：进入第一格后 Tab 落到第二格内容
+      await cell0.click()
+      await page.keyboard.press('Tab')
+      const after = await page.evaluate(() => window.readEditor())
+      const four = source.indexOf('四')
+      assert(after.head >= four - 1 && after.head <= four + 1,
+        `${scenario} Tab 应切到第二格内容: ${JSON.stringify(after)}`)
+      assert.equal(after.text, source, '格内 widget 场景交互不得改写源文')
+      await page.screenshot({ path: artifactPath(root, `table-cell-widget-${scenario}.png`) })
+      assert.deepEqual(errors, [], `页面异常: ${JSON.stringify(errors)}`)
+      console.log(`[原生输入][PASS] cell-widget/${scenario}`)
+    } catch (error) {
+      cellWidgetFailures.push(error)
+      console.error(`[原生输入][FAIL] cell-widget/${scenario}: ${error.message}`)
+    } finally { await page.close() }
+  }
+  if (cellWidgetFailures.length) throw new AggregateError(cellWidgetFailures, '表格格内 widget 网格回归失败')
   // ---- #59 公式输入回归：进入/编辑/离开、IME、粘贴、删除、块级与普通美元 ----
   const mathFailures = []
   for (const scenario of ['render-toggle', 'inline-edit', 'inline-ime', 'inline-paste',

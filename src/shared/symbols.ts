@@ -12,6 +12,9 @@
 //   不能把包裹清单（formatOperations 的 INLINE 表）当作无条件补全清单——
 //   两侧语义不同：包裹认「已有选区的围栏标记」，补全认「无选区时的
 //   起始符号」，后者受邻接字符与代码上下文约束。
+// - #151：右邻抑制为差异化双口径——括号引号登记生态口径（isBodyChar：
+//   右邻非空白且非注册表闭合字符即不补全），Markdown 触发符维持既有
+//   词字符口径（isWordChar）不动。
 // - 本模块不依赖 vscode/DOM/语法树：代码上下文（inCode）由调用方按
 //   语法树判定后传入，保持纯逻辑可单测。
 
@@ -58,7 +61,9 @@ export interface SymbolPairEntry {
   readonly tabEscape?: boolean
   /** 左邻字符抑制（返回 true 不补全）：转义反斜杠、英文撇号的词内形态 */
   readonly suppressBefore?: (charBefore: string) => boolean
-  /** 右邻字符抑制（返回 true 不补全）：Markdown 触发符的词中间防误触 */
+  /** 右邻字符抑制（返回 true 不补全）：括号引号登记生态口径（#151——
+   *  右邻为非空白且非闭合类字符的「正文中间形态」不补全，isBodyChar）；
+   *  Markdown 触发符登记词中间防误触（isWordChar，既有行为） */
   readonly suppressAfter?: (charAfter: string) => boolean
   /** 自反触发符（open === close）仅在连续串首键入时补全——钉住星号
    *  契约 `| → *|* → **| → ***|` 的第三步：左侧已有同字符（如 `**|`）
@@ -74,6 +79,21 @@ const escapedSuppress = (charBefore: string): boolean => charBefore === '\\'
 /** 词类字符（Unicode 字母/数字）：Markdown 触发符右邻抑制与英文撇号
  *  左邻抑制共用——词中间（含中文词内）键入按普通文字处理 */
 const isWordChar = (ch: string): boolean => /\p{L}|\p{N}/u.test(ch)
+
+/** 正文中间字符（#151 括号引号的右邻抑制口径）：非空白且非注册表
+ *  闭合字符——词字符与普通标点都算。右邻为这类字符（`|word`、`|,x`）
+ *  时不补全，避免闭合符越界补到正文中间；右邻空白/行尾/闭合类字符
+ *  （`) ] }`、引号、Markdown 标记符等，含 `[（|）]` 嵌套形态）放行。
+ *  与先例的关系（核实 @codemirror/autocomplete 6.20.3 源码）：CM6
+ *  closeBrackets 同样抑制右邻普通标点（放行集为固定 `)]}:;>`，见
+ *  defaults.before），本项目放行集从注册表派生——方向一致、集合构成
+ *  不同；VSCode autoClosingBefore 按语言词字符判定（右邻普通标点放
+ *  行），本项目仅比 VSCode 更保守。标点也抑制是 #151 落档的显式决
+ *  策，不是先例复刻。闭合类集合 REGISTRY_CLOSE_CHARS 从注册表派生，
+ *  定义在注册表之后——本函数只在运行时被调用（模块初始化后），
+ *  后置引用无 TDZ 风险 */
+const isBodyChar = (ch: string): boolean =>
+  ch !== '' && !/\s/u.test(ch) && !REGISTRY_CLOSE_CHARS.has(ch)
 
 /** Markdown 触发符的邻接抑制集合（`* _ ~ ` = $` 共用形态）：
  *  左邻转义、右邻词字符（词中间不补——flanking 防误触的保守默认值）、
@@ -99,6 +119,10 @@ function markdownTrigger(open: string): SymbolPairEntry {
  * - 引号 4 对：弯引号 “” ‘’ 与英文单双引号（英文引号自反：open === close）
  * - Markdown 触发符 6 项：* _ ~ ` = $（自反，串首补全；块级结构如
  *   三反引号围栏与 $$ 块不自动创建——非目标，保留原输入）
+ * - #151：括号引号逐项登记 suppressAfter（isBodyChar）——右邻为非空白
+ *   且非闭合类字符（词字符/普通标点）不补全，对齐生态惯例（此前
+ *   `|word` 键 [ 会越界补出 `[|]word`）；Markdown 触发符维持词字符
+ *   口径不变（右邻普通标点照常补全）
  * - #124 起逐项登记 selectionWrap（有选区键入的包裹能力）：括号引号
  *   与 Markdown 触发符当前全部登记（方括号重复输入形成 [[wikilink]]
  *   类结构，星号重复包裹形成粗体），与补全清单是两个显式集合
@@ -106,25 +130,27 @@ function markdownTrigger(open: string): SymbolPairEntry {
  *   以 test/unit/symbols.test.ts 参数化用例钉住
  */
 export const SYMBOL_AUTOCLOSE_REGISTRY: readonly SymbolPairEntry[] = [
-  { open: '(', close: ')', kind: 'bracket', allowInCode: true, selectionWrap: true, tabEscape: true, suppressBefore: escapedSuppress },
-  { open: '[', close: ']', kind: 'bracket', allowInCode: true, selectionWrap: true, tabEscape: true, suppressBefore: escapedSuppress },
-  { open: '{', close: '}', kind: 'bracket', allowInCode: true, selectionWrap: true, tabEscape: true, suppressBefore: escapedSuppress },
-  { open: '（', close: '）', kind: 'bracket', allowInCode: true, selectionWrap: true, tabEscape: true, suppressBefore: escapedSuppress },
-  { open: '【', close: '】', kind: 'bracket', allowInCode: true, selectionWrap: true, tabEscape: true, suppressBefore: escapedSuppress },
-  { open: '《', close: '》', kind: 'bracket', allowInCode: true, selectionWrap: true, tabEscape: true, suppressBefore: escapedSuppress },
-  { open: '「', close: '」', kind: 'bracket', allowInCode: true, selectionWrap: true, tabEscape: true, suppressBefore: escapedSuppress },
-  { open: '『', close: '』', kind: 'bracket', allowInCode: true, selectionWrap: true, tabEscape: true, suppressBefore: escapedSuppress },
-  { open: '“', close: '”', kind: 'quote', allowInCode: true, selectionWrap: true, tabEscape: true, suppressBefore: escapedSuppress },
-  { open: '‘', close: '’', kind: 'quote', allowInCode: true, selectionWrap: true, tabEscape: true, suppressBefore: escapedSuppress },
+  { open: '(', close: ')', kind: 'bracket', allowInCode: true, selectionWrap: true, tabEscape: true, suppressBefore: escapedSuppress, suppressAfter: isBodyChar },
+  { open: '[', close: ']', kind: 'bracket', allowInCode: true, selectionWrap: true, tabEscape: true, suppressBefore: escapedSuppress, suppressAfter: isBodyChar },
+  { open: '{', close: '}', kind: 'bracket', allowInCode: true, selectionWrap: true, tabEscape: true, suppressBefore: escapedSuppress, suppressAfter: isBodyChar },
+  { open: '（', close: '）', kind: 'bracket', allowInCode: true, selectionWrap: true, tabEscape: true, suppressBefore: escapedSuppress, suppressAfter: isBodyChar },
+  { open: '【', close: '】', kind: 'bracket', allowInCode: true, selectionWrap: true, tabEscape: true, suppressBefore: escapedSuppress, suppressAfter: isBodyChar },
+  { open: '《', close: '》', kind: 'bracket', allowInCode: true, selectionWrap: true, tabEscape: true, suppressBefore: escapedSuppress, suppressAfter: isBodyChar },
+  { open: '「', close: '」', kind: 'bracket', allowInCode: true, selectionWrap: true, tabEscape: true, suppressBefore: escapedSuppress, suppressAfter: isBodyChar },
+  { open: '『', close: '』', kind: 'bracket', allowInCode: true, selectionWrap: true, tabEscape: true, suppressBefore: escapedSuppress, suppressAfter: isBodyChar },
+  { open: '“', close: '”', kind: 'quote', allowInCode: true, selectionWrap: true, tabEscape: true, suppressBefore: escapedSuppress, suppressAfter: isBodyChar },
+  { open: '‘', close: '’', kind: 'quote', allowInCode: true, selectionWrap: true, tabEscape: true, suppressBefore: escapedSuppress, suppressAfter: isBodyChar },
   {
     open: '"', close: '"', kind: 'quote', allowInCode: true, selectionWrap: true, tabEscape: true,
     suppressBefore: escapedSuppress,
+    suppressAfter: isBodyChar,
   },
   {
     // 英文单引号：左邻字母/数字视为撇号（it's / dogs' / 中文词内），
     // 按普通文字处理；行首与空白后照常配对（选区包裹不受此抑制）
     open: "'", close: "'", kind: 'quote', allowInCode: true, selectionWrap: true, tabEscape: true,
     suppressBefore: (charBefore) => escapedSuppress(charBefore) || isWordChar(charBefore),
+    suppressAfter: isBodyChar,
   },
   markdownTrigger('*'),
   markdownTrigger('_'),
@@ -135,6 +161,12 @@ export const SYMBOL_AUTOCLOSE_REGISTRY: readonly SymbolPairEntry[] = [
   // 扫描配对的边界与公式形态学不一致（决策见 SymbolPairEntry.tabEscape 注释）
   { ...markdownTrigger('$'), tabEscape: undefined },
 ]
+
+/** 闭合类字符集合（#151）：注册表全部 close 字符（自反符号 open ===
+ *  close 天然在内，Markdown 标记符即自反项）。括号引号右邻抑制经
+ *  isBodyChar 引用本集合——新增符号自动获得「右邻贴其闭合/标记字符
+ *  时照常补全」语义，不另设第二份清单 */
+const REGISTRY_CLOSE_CHARS = new Set(SYMBOL_AUTOCLOSE_REGISTRY.map((entry) => entry.close))
 
 const ENTRY_BY_CHAR = new Map<string, SymbolPairEntry>()
 for (const entry of SYMBOL_AUTOCLOSE_REGISTRY) {

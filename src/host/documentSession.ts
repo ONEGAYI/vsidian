@@ -487,7 +487,10 @@ export class DocumentSession {
         // 撤销/重做经队列串行：排在在途 edit.request 之后，保证撤销的是
         // 已完整应用（含回流确认）的编辑；undo/redo 的文档变更经
         // handleDocChanged 回流广播（逆变更不匹配任何 pending 正向变更，
-        // 天然走 external 分支，不会作为确认吞掉）
+        // 天然走 external 分支，不会作为确认吞掉）。
+        // #148：本保证只覆盖「已到达宿主」的请求——webview 手里暂缓未发的
+        // 编辑（IME/触碰暂缓集）宿主不可见，由 webview 侧竞态守卫保证
+        // history.request 不早于这些编辑的 edit.request 发出
         if (!panel.ready || panel.suspended) {
           // 暂停面板忽略（B-4，与 edit.request 一致）：宿主 undo 命令作用于
           // 活动编辑器，暂停面板的请求会撤销到其他目标文档

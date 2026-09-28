@@ -15,9 +15,11 @@ import katexPlugin from '@vscode/markdown-it-katex'
 import { MATH_CLASS_NAMES, stripInlineTexTicks } from '../shared/math'
 import { GRAPHIC_LANG_ATTR, MERMAID_CLASS_NAMES, MERMAID_CODE_ATTR, MERMAID_STATE_ATTR, isRenderedFenceInfo } from '../shared/mermaid'
 import { WIKILINK_CLASS_NAMES, parseWikilinkInner } from '../shared/wikilink'
+import { parseLooseLinkAt } from '../shared/looseLink'
 import { joinObsidianDomAliasForReading } from '../shared/obsidianAlias'
 import { escapeHtml } from '../shared/frontmatterTable'
 import { renderMathHtml } from './mathRenderCache'
+import { highlightFlankOk } from './markdownDoc'
 import { tableCellBreakLength } from './tableCells'
 
 /** 渲染环境：行首/行尾 offset 表（lineStarts[i]/lineEnds[i] 为第 i 行界） */
@@ -154,6 +156,64 @@ function vsidianWikilinkInlineRule(state: StateInline, silent: boolean): boolean
 }
 
 /**
+ * 宽松内联链接/图片规则（#152）：目标含未编码空格的 `[文字](含空格 路径.md)`
+ * / `![alt](图片 名字.png)` 渲染为链接/图片。markdown-it 按严格 CommonMark
+ * 拒绝裸空格目标（整条按文本渲染），本规则在标准 link/image 之前拦截该形态；
+ * 判定与 live 行扫描共用 shared/looseLink 形态学（两视图逐字节一致）：
+ * %20 编码、<> 包裹、合法标题等标准可解析形态不接管（标准规则照常处理），
+ * 反斜杠/残缺形态按原文降级。href/src 经 normalizeLink 编码（与标准链接
+ * 同管线，宿主容错解码）；危险协议经 validateLink 拦截（与标准层同判）。
+ * 产出 token 与 markdown-it link/image 规则同构（标签内容递归 tokenify，
+ * 嵌套行内标记照常渲染；image 的 children 供 alt 属性渲染）。
+ */
+function vsidianLooseLinkInlineRule(state: StateInline, silent: boolean): boolean {
+  const src = state.src
+  const start = state.pos
+  const code = src.charCodeAt(start)
+  if (code !== 0x5b /* [ */ && code !== 0x21 /* ! */) {
+    return false
+  }
+  // 单行形态：扫描上界取本行行尾（跨行标准形态仍由标准层按其语义处置）
+  const nl = src.indexOf('\n', start)
+  const limit = nl < 0 ? state.posMax : Math.min(state.posMax, nl)
+  const hit = parseLooseLinkAt(src, start, limit)
+  if (!hit) {
+    return false
+  }
+  const href = state.md.normalizeLink(hit.dest)
+  if (!state.md.validateLink(href)) {
+    return false // 危险协议与标准层同判：按普通文本降级
+  }
+  if (!silent) {
+    const max = state.posMax
+    if (hit.image) {
+      const content = src.slice(hit.labelFrom, hit.labelTo)
+      const tokens: Token[] = []
+      state.md.inline.parse(content, state.md, state.env, tokens)
+      const token = state.push('image', 'img', 0)
+      token.attrs = [
+        ['src', href],
+        ['alt', ''],
+      ]
+      token.children = tokens
+      token.content = content
+    } else {
+      const open = state.push('link_open', 'a', 1)
+      open.attrs = [['href', href]]
+      state.linkLevel++
+      state.pos = hit.labelFrom
+      state.posMax = hit.labelTo
+      state.md.inline.tokenize(state)
+      state.linkLevel--
+      state.push('link_close', 'a', -1)
+      state.posMax = max
+    }
+  }
+  state.pos = hit.to
+  return true
+}
+
+/**
  * 高亮 close 定界符扫描（#105）：从 from 起在 [from, posMax) 内找首个
  * `==`，反引号 run（CommonMark code span：n 反引号开、等长 run 闭）区间
  * 整体跳过——lezer 侧 InlineCode 先消费同样区间，裸 indexOf 会把 close
@@ -201,14 +261,15 @@ function findHighlightClose(src: string, from: number, posMax: number): number {
 /**
  * 高亮 inline 规则（#105）：成对 `==` 渲染为 mark 语义元素（html:false 下
  * 输出语义标签）。形态学与 lezer 侧（markdownDoc 的 Highlight 扩展）对齐：
- * 定界符紧贴空白拒绝（flanking 同判）、残缺不匹配（普通文本降级，源文
- * 保真）；段内跨行可配对。close 经 findHighlightClose 扫描（code span
- * 区间不参与配对）；空内容（close 紧贴 open，如 `====`）整条拒绝——与
- * live 侧「空区间不发射装饰」口径一致，不产空 mark。已知边界：连续等
- * 号开头的形态（如 `====x====`）两侧仍有残余分歧（阅读按源码降级、live
- * 产嵌套高亮），源码降级是安全侧。规则挂 emphasis 之前——backticks 已
- * 先消费，行内代码内容字面呈现不受影响；内容区间经 tokenize 递归，嵌
- * 套行内标记照常解析。
+ * 定界符内侧 flanking 经 highlightFlankOk 同源判定（#149 宽松基准：内侧
+ * 紧贴空白拒绝、标点不参与），残缺不匹配（普通文本降级，源文保真）；
+ * 段内跨行可配对。close 经 findHighlightClose 扫描（code span 区间不参与
+ * 配对）；空内容（close 紧贴 open，如 `====`）整条拒绝——与 live 侧「空
+ * 区间不发射装饰」口径一致，不产空 mark。已知边界：连续等号开头的形态
+ * （如 `====x====`）两侧仍有残余分歧（阅读按源码降级、live 产嵌套高
+ * 亮），源码降级是安全侧。规则挂 emphasis 之前——backticks 已先消费，
+ * 行内代码内容字面呈现不受影响；内容区间经 tokenize 递归，嵌套行内标
+ * 记照常解析。
  */
 function vsidianHighlightInlineRule(state: StateInline, silent: boolean): boolean {
   const src = state.src
@@ -217,8 +278,7 @@ function vsidianHighlightInlineRule(state: StateInline, silent: boolean): boolea
       src.charCodeAt(start) !== 0x3d /* '=' */ || src.charCodeAt(start + 1) !== 0x3d) {
     return false
   }
-  const after = src.charAt(start + 2)
-  if (after === '' || /\s/u.test(after)) {
+  if (!highlightFlankOk(src.charAt(start + 2))) {
     return false
   }
   const close = findHighlightClose(src, start + 2, state.posMax)
@@ -228,8 +288,7 @@ function vsidianHighlightInlineRule(state: StateInline, silent: boolean): boolea
   if (close === start + 2) {
     return false
   }
-  const before = close > 0 ? src.charAt(close - 1) : ''
-  if (before === '' || /\s/u.test(before)) {
+  if (!highlightFlankOk(close > 0 ? src.charAt(close - 1) : '')) {
     return false
   }
   if (!silent) {
@@ -258,6 +317,9 @@ export function createMarkdownRenderer(): InstanceType<typeof MarkdownIt> {
   // #11 双链规则先于 link（[t](u)）：`[[…]]` 在 CommonMark 中只是普通文本，
   // 必须在文本规则消费前拦截
   md.inline.ruler.before('link', 'vsidian_wikilink', vsidianWikilinkInlineRule)
+  // #152 宽松内联链接（目标含未编码空格，Obsidian 兼容）：插在标准 link
+  // 之前（image 在 link 之后，同被覆盖）；后插者更靠近 link——双链先判定
+  md.inline.ruler.before('link', 'vsidian_loose_link', vsidianLooseLinkInlineRule)
   // #105 高亮：挂 emphasis 之前（backticks 已消费，行内代码内不转换）
   md.inline.ruler.before('emphasis', 'vsidian_highlight', vsidianHighlightInlineRule)
   // #59 公式：@vscode/markdown-it-katex 的解析规则（$…$ / $$…$$ 判定与
