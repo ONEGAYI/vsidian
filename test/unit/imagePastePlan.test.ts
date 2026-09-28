@@ -176,6 +176,16 @@ describe('插入文本编码（#161，与 normalizeImgSrc decode 对偶）', () 
     expect(relativePosixImagePath('/data/notes/proj', '/data/notes/proj/assets/x', 'a.png')).toBe('assets/x/a.png')
   })
 
+  it('relativePosixImagePath：Windows 盘符大小写不敏感（workspace folder 与文档 URI 来源差异）', () => {
+    // 真宿主实测：workspace folder URI 为 /C:/…、文档 URI 为 /c:/…——
+    // 盘符字面不同时 posix.relative 会产出逐级向上的逃逸路径，此处钉住归一
+    expect(relativePosixImagePath('/c:/Users/u/notes', '/C:/Users/u/notes/assets', 'a.png'))
+      .toBe('assets/a.png')
+    expect(relativePosixImagePath('/C:/Users/u/notes', '/c:/Users/u/notes', 'a.png')).toBe('a.png')
+    expect(relativePosixImagePath('/c:/Users/u/notes', '/C:/Users/u/notes/assets/sub', '图.png'))
+      .toBe('assets/sub/图.png')
+  })
+
   it('buildImageInsertMarkdown：stem alt + 编码路径；alt 内 [] 转义', () => {
     expect(buildImageInsertMarkdown('photo', 'assets/photo 1.png')).toBe(
       '![photo](assets/photo%201.png)',

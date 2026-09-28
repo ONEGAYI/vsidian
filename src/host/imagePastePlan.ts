@@ -160,10 +160,22 @@ export function encodeImagePathComponent(segment: string): string {
   )
 }
 
+/** Windows 盘符段大小写不敏感：统一小写消除 URI path 来源差异——宿主的
+ *  workspace folder URI 与文档 URI 盘符大小写不保证一致（实测一为 /C:/、
+ *  一为 /c:/），posix.relative 按字面比较会把同盘路径判为无公共前缀，
+ *  产出逐级向上的逃逸相对路径 */
+function normalizeDriveCase(p: string): string {
+  return p.replace(/^(\/?)([A-Za-z]):(\/)/, (_full, slash: string, drive: string, sep: string) =>
+    `${slash}${drive.toLowerCase()}${sep}`)
+}
+
 /** 从文档目录到目标文件的相对路径（POSIX 分隔符；目标在上级时自然产生
  *  `../` 前缀——CommonMark 链接目标允许，渲染端同路径解析） */
 export function relativePosixImagePath(docDirPath: string, targetDirPath: string, fileName: string): string {
-  return posix.relative(docDirPath, posix.join(targetDirPath, fileName))
+  return posix.relative(
+    normalizeDriveCase(docDirPath),
+    normalizeDriveCase(posix.join(targetDirPath, fileName)),
+  )
 }
 
 /** alt 文本转义：`[` `]` 会使 markdown 语法歧义，反斜杠转义保字面 */

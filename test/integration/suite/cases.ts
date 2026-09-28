@@ -3664,8 +3664,10 @@ export const cases: Array<[string, () => Promise<void>]> = [
     // 块 id 缺失：文档照常打开（不定位），日志记录 locate=none——缺失给可见反馈
     await openWithEditor('wikilinks.md')
     await waitSessionReady('wikilinks.md')
-    await injectWikilink(uri, 'wikilink-target#^不存在块')
-    logData = await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.blockId === '不存在块')
+    // 块 id 缺失用合法字符集 id（BLOCK_ID_RE 仅拉丁字母/数字/连字符——中文 id
+    // 在解析层即 unsupported，走不到"缺失块"分支，#154 已知边界）
+    await injectWikilink(uri, 'wikilink-target#^missing-blk')
+    logData = await waitWikilinkLog(uri, (e) => e.kind === 'wikilink-doc' && e.blockId === 'missing-blk')
     assert(logData!.locate === 'none', `缺失块 id 应记录 locate=none，实际 ${logData!.locate}`)
     await poll('缺失块 id 目标仍被打开', () =>
       vscode.window.activeTextEditor?.document.uri.toString() === wsUri('wikilink-target.md').toString()
@@ -8836,7 +8838,10 @@ export const cases: Array<[string, () => Promise<void>]> = [
     // 设置基线：三键回默认（同目录模式；防止其他用例遗留的偏好污染）
     await waitSettings({ 'image.paste': true, 'image.pasteLocation': 'same-dir', 'image.pasteSubpath': 'assets' })
     // 注入截图形态的 image.paste（无 fileNameHint，宿主生成时间戳名）——
-    // 与真实 webview 消息同一校验与处理入口（宿主测试无法驱动真实剪贴板）
+    // 与真实 webview 消息同一校验与处理入口（宿主测试无法驱动真实剪贴板）。
+    // 注入绕过 webview 拦截，先补登记在途 reqId（image.test.pending），
+    // 结果回包才能通过陈旧回包校验走完插入往返
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'image.test.pending', reqId: 1 })
     await vscode.commands.executeCommand(CMD.injectMessage, uri, {
       kind: 'image.paste', docUri: uri, reqId: 1,
       mime: 'image/png', dataBase64: PASTE_PNG_BASE64,
@@ -8874,17 +8879,22 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const base = `集成贴图${Date.now() % 100000}`
     const hint = `${base}<1>.png` // 含 Windows 非法字符 < >
     const cleaned = `${base}1`    // 清洗后基名；扩展名按 mime 重建为 .png
+    // 插入文本路径分段 percent-encode（中文基名经 encodeURIComponent 编码）
+    const enc1 = encodeURIComponent(`${cleaned}.png`)
+    const enc1Alt = encodeURIComponent(`${cleaned}-1.png`)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'image.test.pending', reqId: 1 })
     await vscode.commands.executeCommand(CMD.injectMessage, uri, {
       kind: 'image.paste', docUri: uri, reqId: 1,
       mime: 'image/png', dataBase64: PASTE_PNG_BASE64, fileNameHint: hint,
     })
-    await waitViewState('paste-image.md', (v) => v.text.includes(`![${cleaned}](${cleaned}.png)`))
+    await waitViewState('paste-image.md', (v) => v.text.includes(`![${cleaned}](${enc1})`))
     // 同名再次粘贴：重名 -1 递增
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'image.test.pending', reqId: 2 })
     await vscode.commands.executeCommand(CMD.injectMessage, uri, {
       kind: 'image.paste', docUri: uri, reqId: 2,
       mime: 'image/png', dataBase64: PASTE_PNG_BASE64, fileNameHint: hint,
     })
-    await waitViewState('paste-image.md', (v) => v.text.includes(`![${cleaned}-1](${cleaned}-1.png)`))
+    await waitViewState('paste-image.md', (v) => v.text.includes(`![${cleaned}-1](${enc1Alt})`))
     for (const name of [`${cleaned}.png`, `${cleaned}-1.png`]) {
       const stat = await vscode.workspace.fs.stat(wsUri(name))
       assert(stat !== undefined, `落盘文件 ${name} 应存在`)
@@ -8901,17 +8911,20 @@ export const cases: Array<[string, () => Promise<void>]> = [
       'image.pasteLocation': 'workspace-root', 'image.pasteSubpath': 'assets/sub',
     })
     const base = `根目录贴图${Date.now() % 100000}`
+    const encRoot = encodeURIComponent(`${base}.png`)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'image.test.pending', reqId: 1 })
     await vscode.commands.executeCommand(CMD.injectMessage, uri, {
       kind: 'image.paste', docUri: uri, reqId: 1,
       mime: 'image/png', dataBase64: PASTE_PNG_BASE64, fileNameHint: `${base}.png`,
     })
     await waitViewState('paste-image.md', (v) =>
-      v.text.includes(`![${base}](assets/sub/${base}.png)`))
+      v.text.includes(`![${base}](assets/sub/${encRoot})`))
     const stat = await vscode.workspace.fs.stat(wsUri(`assets/sub/${base}.png`))
     assert(stat !== undefined, '应递归创建 assets/sub 并落盘到工作区根')
     // 2) 子路径越界（../escape）：失败不插入、不落盘（宿主弹 i18n 通知）
     const before = (await waitViewState('paste-image.md')).text
     await vscode.commands.executeCommand(CMD.setSettings, { 'image.pasteSubpath': '../escape' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'image.test.pending', reqId: 2 })
     await vscode.commands.executeCommand(CMD.injectMessage, uri, {
       kind: 'image.paste', docUri: uri, reqId: 2,
       mime: 'image/png', dataBase64: PASTE_PNG_BASE64, fileNameHint: '越界.png',
@@ -8977,11 +8990,11 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
       kind: 'block.test.menuClick', command: 'copyBlockLink',
     })
-    const written = await poll('块 id 写回磁盘', async () => {
-      const text = await readDisk('block-menu.md')
-      return /右键目标段落。 \^[a-z]{4}$/.test(text.split('\n')[6] ?? '') ? text : undefined
-    })
-    const copiedId = (written.split('\n')[6]!.match(/\^([a-z]{4})$/) ?? [])[1]!
+    // 写回断言走视图文本：写回使 TextDocument dirty 不落盘（磁盘断言在仓库
+    // 惯例中仅用于「不得写」场景，outline/frontmatter 写回用例同款口径）
+    const writtenState = await waitViewState('block-menu.md', (v) =>
+      /右键目标段落。 \^[a-z]{4}\n/.test(v.text))
+    const copiedId = (writtenState.text.match(/右键目标段落。 \^([a-z]{4})\n/) ?? [])[1]!
     assert(await poll('块链接剪贴板', async () =>
       (await clipboardText()) === `[[block-menu#^${copiedId}]]` ? true : undefined),
       `块链接成品应为 [[block-menu#^${copiedId}]]（实际 ${await clipboardText()}）`)
@@ -8989,21 +9002,21 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(afterWrite.appliedEdits === before.appliedEdits + 1,
       `自动补写应恰一笔写回（实际 +${afterWrite.appliedEdits - before.appliedEdits}）`)
 
-    // 表格整块：id 写在表格末行行尾（表格右键按表格整块）
+    // 表格整块：id 写在表格末行行尾（表格右键按表格整块）。pos 从最新
+    // 文本动态取——前序步骤已在普通段行尾补写 id，旧文档偏移已失效
+    const afterParaWrite = (await waitViewState('block-menu.md')).text
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
-      kind: 'block.test.contextMenu', pos: BLOCK_MENU_DOC.indexOf('|---|---|'),
+      kind: 'block.test.contextMenu', pos: afterParaWrite.indexOf('|---|---|'),
     })
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
       kind: 'block.test.menuClick', command: 'copyBlockLink',
     })
-    await poll('表格块 id 写回磁盘', async () => {
-      const text = await readDisk('block-menu.md')
-      return /\| 1 \| 2 \| \^[a-z]{4}$/.test(text.split('\n')[10] ?? '') ? text : undefined
-    })
+    const afterTableWrite = await waitViewState('block-menu.md', (v) =>
+      /\| 1 \| 2 \| \^[a-z]{4}\n/.test(v.text))
 
-    // 既有 id 段：直接复制既有 id，零改写
+    // 既有 id 段：直接复制既有 id，零改写（视图文本对拍；pos 同样动态取）
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
-      kind: 'block.test.contextMenu', pos: BLOCK_MENU_DOC.indexOf('已有 id 段落'),
+      kind: 'block.test.contextMenu', pos: afterTableWrite.text.indexOf('已有 id 段落'),
     })
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
       kind: 'block.test.menuClick', command: 'copyBlockLink',
@@ -9011,13 +9024,14 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(await poll('既有 id 剪贴板', async () =>
       (await clipboardText()) === '[[block-menu#^keep9]]' ? true : undefined),
       `既有 id 应直接复制（实际 ${await clipboardText()}）`)
-    const finalDisk = await readDisk('block-menu.md')
-    assert(finalDisk.includes('已有 id 段落 ^keep9\n'), '既有 id 段零改写')
+    const finalState = await waitViewState('block-menu.md')
+    assert(finalState.text.includes('已有 id 段落 ^keep9\n'), '既有 id 段零改写')
 
     // 快捷键/命令面板入口（同一命令）：光标落标题行 → 复制标题链接
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
-      kind: 'table.test.crossSelect', anchor: BLOCK_MENU_DOC.indexOf('# 块菜单标题'),
-      head: BLOCK_MENU_DOC.indexOf('# 块菜单标题'),
+      kind: 'table.test.crossSelect',
+      anchor: finalState.text.indexOf('# 块菜单标题'),
+      head: finalState.text.indexOf('# 块菜单标题'),
     })
     await vscode.commands.executeCommand('onegayi.vsidian.block.copyLink')
     assert(await poll('快捷键入口剪贴板', async () =>

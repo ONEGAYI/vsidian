@@ -731,11 +731,22 @@ export function createTextEditorProvider(
       // CRLF 目标：锚点定位是宿主系坐标（getText 保留 \r\n），而 webview 全程
       // LF 坐标——发送前经 newline 协调器转换，否则按 \r\n 行数漂移
       await vscode.commands.executeCommand('vscode.openWith', targetUri, VIEW_TYPE)
-      const sessionId = await waitForReadyPanel(targetEntry)
-      if (anchorOffset && anchorDoc && sessionId) {
+      const sendLocate = async (): Promise<void> => {
+        const sessionId = await waitForReadyPanel(targetEntry)
+        if (!anchorOffset || !anchorDoc || !sessionId) {
+          return
+        }
         const lfOffset = new NewlineCoordinator(anchorDoc.getText()).hostOffsetToLf(anchorOffset.offset)
         targetEntry.session.postToPanel(sessionId, { kind: 'view.locate', offset: lfOffset })
       }
+      await sendLocate()
+      // openWith 重显曾被隐藏（如跳转经文本编辑器中转后返回）的面板会触发
+      // webview 重载（retainContextWhenHidden 关闭），首次投递可能随旧实例
+      // 丢失、新实例光标停留文档头——延迟重投一次兜底。view.locate 幂等
+      // （纯选区定位），与阅读定位的重申机制（reassertReadingAnchor）同哲学
+      setTimeout(() => {
+        void sendLocate()
+      }, 600)
     } else {
       const targetDoc = await vscode.workspace.openTextDocument(targetUri)
       if (anchorOffset) {

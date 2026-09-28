@@ -1954,4 +1954,15 @@ describe('图片粘贴消息协议（#161）', () => {
     expect(isWebviewToHost({ kind: 'image.paste.result', reqId: 2, ok: true, markdown: 'x' })).toBe(false)
     expect(isHostToWebview({ ...base })).toBe(false)
   })
+
+  it('image.test.pending 校验：正整数 reqId（集成测试补登记在途表）', () => {
+    expect(isHostToWebview({ kind: 'image.test.pending', reqId: 1 })).toBe(true)
+    expect(isHostToWebview({ kind: 'image.test.pending', reqId: 0 })).toBe(false)
+    expect(isHostToWebview({ kind: 'image.test.pending', reqId: -1 })).toBe(false)
+    expect(isHostToWebview({ kind: 'image.test.pending', reqId: 1.5 })).toBe(false)
+    expect(isHostToWebview({ kind: 'image.test.pending', reqId: '1' })).toBe(false)
+    expect(isHostToWebview({ kind: 'image.test.pending' })).toBe(false)
+    // 方向校验
+    expect(isWebviewToHost({ kind: 'image.test.pending', reqId: 1 })).toBe(false)
+  })
 })

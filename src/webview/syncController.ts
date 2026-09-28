@@ -1204,6 +1204,12 @@ export class WebviewSyncController {
         })
         break
       }
+      case 'image.test.pending': {
+        // #161 测试钩子：补登记在途 reqId（宿主注入 image.paste 绕过拦截侧
+        // 登记，见协议注释——webview 侧测试消息不做二次门控属既定分层设计）
+        this.imagePastePending.add(message.reqId)
+        break
+      }
       case 'image.paste.result': {
         // #161 图片粘贴落盘结果：reqId 在途校验（陈旧/未知回包丢弃）；
         // 成功在光标处单事务插入宿主计算好的 markdown（守卫对齐格式操作

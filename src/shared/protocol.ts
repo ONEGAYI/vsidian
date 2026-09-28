@@ -116,6 +116,11 @@ export type HostToWebview =
       ok: false
       reason: 'invalid-location' | 'write-failed' | 'invalid'
     }
+  /** 测试钩子（#161）：登记图片粘贴在途 reqId。集成测试经宿主注入
+   *  image.paste（绕过 webview 的 paste 拦截，拦截侧的在途登记不会发生），
+   *  以此补登记同 reqId，使结果回包能通过陈旧回包校验、走完插入往返
+   *  （与真实粘贴同一在途表同一插入路径） */
+  | { kind: 'image.test.pending'; reqId: number }
   /** 查找会话指令（#14）：open 打开 webview 内浮动查找面板（可预置查询词，
    *  焦点进输入框）；close 关闭并归还焦点；step 循环定位上一/下一匹配。
    *  查找是纯只读视图操作：不写文档、不产生编辑历史、无 webview→宿主消息 */
@@ -2080,6 +2085,9 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         v.ok === false &&
         (v.reason === 'invalid-location' || v.reason === 'write-failed' || v.reason === 'invalid')
       )
+    case 'image.test.pending':
+      // #161 测试钩子：补登记在途 reqId（见消息定义注释）
+      return isPositiveInt(v.reqId)
     case 'view.find.open':
       return v.query === undefined || isString(v.query)
     case 'view.find.close':
