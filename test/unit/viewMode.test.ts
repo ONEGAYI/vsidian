@@ -250,6 +250,21 @@ describe('视图容器显隐与稳定类名', () => {
 })
 
 describe('持久化与 webview 重载恢复', () => {
+  it('纯光标移动后立即切页，落盘并在重载后恢复光标', () => {
+    const h = makeBridge()
+    const c1 = mountMode(h)
+    const target = DOC.indexOf('中部二级标题')
+    c1.getView()!.dispatch({ selection: { anchor: target } })
+    window.dispatchEvent(new Event('pagehide'))
+    expect(h.saved()?.anchor).toBe(target)
+    expect(sentEditRequests(h)).toBe(0)
+    c1.dispose()
+
+    const c2 = mountMode(h)
+    expect(viewState(c2, h).selectionOffset).toBe(target)
+    c2.dispose()
+  })
+
   it('live 纯滚动后立即销毁重建，恢复离开时的视口而非旧光标', () => {
     const h = makeBridge()
     const longDoc = DOC.repeat(30)

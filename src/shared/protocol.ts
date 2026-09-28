@@ -144,6 +144,8 @@ export type HostToWebview =
    *  同一 keymap 链路；纯选区导航，零写回）。宿主测试无法向 webview 派发
    *  真实键盘事件，以此通道验证导航装配 */
   | { kind: 'table.test.key'; key: 'tab' | 'shift-tab' | 'select-all' | 'backspace' | 'delete' | 'enter' }
+  /** 测试钩子：模拟 Live 纯光标移动和纯滚动；空载荷仅启用绘制探针。 */
+  | { kind: 'viewport.test.position'; cursorLine?: number; scrollNearLine?: number; scrollBiasPx?: number }
   /** 测试钩子（#42）：在真实 webview 网格单元格派发鼠标点击及当前位置输入。 */
   | { kind: 'table.test.cellClick'; rowIndex: number; columnIndex: number; point?: 'edge' | 'middle' | 'right-edge' }
   | { kind: 'table.test.crossSelect'; anchor: number; head: number }
@@ -370,6 +372,10 @@ export type WebviewToHost =
       selectionOffset?: number
       selectionHead?: number
       selectionAssoc?: number
+      /** Live 绘制视口中心对应的源码行号（真布局时可用）。 */
+      liveViewportCenterLine?: number
+      /** Live 实际滚动像素；与中心源码行对拍，暴露重排后像素坐标失真。 */
+      liveScrollTopPx?: number
       /** webview 实际运行时能否使用词级分段器（#88）。 */
       wordSegmenter?: boolean
       /** 阅读容器内块元素数（#6；#7 起为挂载块数，屏外块不创建） */
@@ -1830,6 +1836,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         (v.selectionHead === undefined || isNonNegativeInt(v.selectionHead)) &&
         (v.selectionAssoc === undefined || (typeof v.selectionAssoc === 'number' &&
           Number.isInteger(v.selectionAssoc) && v.selectionAssoc >= -1 && v.selectionAssoc <= 1)) &&
+        (v.liveViewportCenterLine === undefined || isNonNegativeInt(v.liveViewportCenterLine)) &&
+        (v.liveScrollTopPx === undefined || isNonNegativeNumber(v.liveScrollTopPx)) &&
         (v.wordSegmenter === undefined || typeof v.wordSegmenter === 'boolean') &&
         (v.readingBlockCount === undefined || isNonNegativeInt(v.readingBlockCount)) &&
         (v.readingAnchorStart === undefined || isNonNegativeInt(v.readingAnchorStart)) &&
@@ -2113,6 +2121,11 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'table.test.key':
       return v.key === 'tab' || v.key === 'shift-tab' || v.key === 'select-all' || v.key === 'enter' ||
         v.key === 'backspace' || v.key === 'delete'
+    case 'viewport.test.position':
+      return (v.cursorLine === undefined || isNonNegativeInt(v.cursorLine)) &&
+        (v.scrollNearLine === undefined || isNonNegativeInt(v.scrollNearLine)) &&
+        (v.scrollBiasPx === undefined || (v.scrollNearLine !== undefined &&
+          typeof v.scrollBiasPx === 'number' && Number.isFinite(v.scrollBiasPx)))
     case 'table.test.cellClick':
       return isNonNegativeInt(v.rowIndex) && isNonNegativeInt(v.columnIndex) &&
         (v.point === undefined || v.point === 'edge' || v.point === 'middle' || v.point === 'right-edge')

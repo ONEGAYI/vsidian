@@ -142,12 +142,15 @@ try {
     })
     const liveTop = await page.evaluate(() => document.querySelector('.cm-scroller').scrollTop)
     assert.ok(liveTop > 100, 'live 前置条件：视口已滚离文首')
+    await page.waitForTimeout(80)
+    const liveCenter = await page.evaluate(() => window.liveCenterLine())
+    assert.ok(liveCenter > 1, 'live 前置条件：视口中心已离开文首')
     await page.evaluate((text) => window.reloadViewportDoc(text), longDoc)
-    await page.waitForFunction((top) =>
-      Math.abs(document.querySelector('.cm-scroller').scrollTop - top) <= 2, liveTop)
+    await page.waitForFunction((line) =>
+      window.liveCenterLine() !== null && Math.abs(window.liveCenterLine() - line) <= 1, liveCenter)
     await page.waitForTimeout(100)
-    assert.ok(Math.abs((await page.evaluate(() => document.querySelector('.cm-scroller').scrollTop)) - liveTop) <= 2,
-      'live 重建后视口应稳定在离开时位置')
+    assert.ok(Math.abs((await page.evaluate(() => window.liveCenterLine())) - liveCenter) <= 1,
+      'live 重建后视口中心应保持同一源码行')
 
     await page.evaluate((text) => window.resetViewportDoc(text), longDoc)
     await page.evaluate(() => window.setViewportMode('reading'))

@@ -214,6 +214,7 @@ function scheduleFrame(fn: () => void): void {
  *  定位纯函数 + 一次类切换，不解析文档） */
 const OUTLINE_HIGHLIGHT_DEBOUNCE_MS = 100
 const VIEWPORT_SAVE_DEBOUNCE_MS = 250
+const SELECTION_SAVE_DEBOUNCE_MS = 250
 
 /** #66 防抖动护栏超时（ms）：跳转程序性滚动后一直无滚动事件到达时的
  *  兜底释放（正常路径由首个滚动事件释放） */
@@ -273,8 +274,9 @@ interface PersistedState {
   viewMode?: ViewMode
   /** 最近一次模式锚点（UTF-16 offset）：live=光标主位，reading=锚点块 start */
   anchor?: number
-  /** 标签页重载时恢复可见视口；独立于模式切换使用的 anchor。 */
-  viewport?: { mode: ViewMode; top: number }
+  /** 标签页重载时恢复可见视口：Live 同存中心源码偏移与像素兜底；
+   *  独立于模式切换使用的 anchor。 */
+  viewport?: { mode: ViewMode; top: number; centerOffset?: number }
   conflictRevision?: number
   /** #53 右侧栏展开态（缺省收起） */
   sidebarOpen?: boolean
@@ -497,13 +499,16 @@ export class WebviewSyncController {
   /** 最近模式锚点：live=光标主位；reading=锚点块 src-start（源码位置锚点） */
   private modeAnchor: number | null
   /** 当前模式的滚动像素位置；与 modeAnchor 分开，避免纯滚动移动编辑光标。 */
-  private viewport: { mode: ViewMode; top: number } | null
+  private viewport: { mode: ViewMode; top: number; centerOffset?: number } | null
   private viewportSaveTimer: ReturnType<typeof setTimeout> | undefined
+  private selectionSaveTimer: ReturnType<typeof setTimeout> | undefined
   private restoringViewport = false
+  /** 仅测试注入后开放绘制中心探针，避免常规 view.state 改变 CM6 测量时机。 */
+  private viewportProbeEnabled = false
   private readonly flushViewportOnHide = (): void => {
-    if (document.visibilityState === 'hidden') this.flushViewportSave()
+    if (document.visibilityState === 'hidden') this.flushPendingViewState()
   }
-  private readonly flushViewportOnPageHide = (): void => this.flushViewportSave()
+  private readonly flushViewportOnPageHide = (): void => this.flushPendingViewState()
   /** live 容器（稳定类名 vsidian-view-live，内含 CM6 编辑器） */
   private liveWrapper: HTMLElement | undefined
   /** 阅读容器（稳定类名 vsidian-view-reading，块级源锚点结构） */
@@ -823,7 +828,13 @@ export class WebviewSyncController {
     this.viewport = saved?.viewport &&
       (saved.viewport.mode === 'live' || saved.viewport.mode === 'reading') &&
       Number.isFinite(saved.viewport.top) && saved.viewport.top >= 0
-      ? { mode: saved.viewport.mode, top: saved.viewport.top }
+      ? {
+          mode: saved.viewport.mode,
+          top: saved.viewport.top,
+          ...(typeof saved.viewport.centerOffset === 'number' &&
+            Number.isInteger(saved.viewport.centerOffset) && saved.viewport.centerOffset >= 0
+            ? { centerOffset: saved.viewport.centerOffset } : {}),
+        }
       : null
     this.sidebarOpen = saved?.sidebarOpen === true
     // 宽度恢复：非数值（含缺失）经 clampSidebarWidth 回默认；越界值钳制
@@ -1083,7 +1094,7 @@ export class WebviewSyncController {
   }
 
   dispose(): void {
-    this.flushViewportSave()
+    this.flushPendingViewState()
     document.removeEventListener('visibilitychange', this.flushViewportOnHide)
     window.removeEventListener('pagehide', this.flushViewportOnPageHide)
     closeDiagramPopup()
@@ -1613,6 +1624,25 @@ export class WebviewSyncController {
         this.runOutlineDragTest(message.from, message.to, message.position, message.action)
         break
       }
+      case 'viewport.test.position': {
+        this.viewportProbeEnabled = true
+        const view = this.view
+        if (view && this.viewMode === 'live') {
+          if (message.cursorLine !== undefined) {
+            const line = Math.max(1, Math.min(view.state.doc.lines, message.cursorLine))
+            view.dispatch({ selection: { anchor: view.state.doc.line(line).from } })
+          }
+          if (message.scrollNearLine !== undefined) {
+            const line = Math.max(1, Math.min(view.state.doc.lines, message.scrollNearLine))
+            const block = view.lineBlockAt(view.state.doc.line(line).from)
+            view.scrollDOM.scrollTop = Math.max(0,
+              block.top + block.height / 2 - view.scrollDOM.clientHeight / 2 +
+              (message.scrollBiasPx ?? 0))
+            view.scrollDOM.dispatchEvent(new Event('scroll'))
+          }
+        }
+        break
+      }
       case 'table.test.key': {
         // 测试钩子：向真实编辑器派发 keydown，走用户按键的同一 keymap 链路。
         if (this.view) {
@@ -2002,6 +2032,8 @@ export class WebviewSyncController {
         readingAnchorTopPx = el.getBoundingClientRect().top - box.top + this.readingContainer.scrollTop
       }
     }
+    const liveView = this.viewMode === 'live' ? this.view : undefined
+    const liveCenterPos = this.viewportProbeEnabled ? this.liveViewportCenterPosition() : null
     // #32：typography 为 view.state 正式可选字段（协议校验器见
     // shared/protocol.ts 的 isTypographyProbe）
     const state: Extract<WebviewToHost, { kind: 'view.state' }> = {
@@ -2021,6 +2053,8 @@ export class WebviewSyncController {
       wordSegmenter: typeof Intl.Segmenter === 'function',
       selectionHead: this.view?.state.selection.main.head ?? 0,
       selectionAssoc: this.view?.state.selection.main.assoc ?? 0,
+      liveViewportCenterLine: liveCenterPos === null ? undefined : liveView?.state.doc.lineAt(liveCenterPos).number,
+      liveScrollTopPx: this.viewportProbeEnabled ? liveView?.scrollDOM.scrollTop : undefined,
       readingBlockCount: rStats?.mountedBlocks ?? 0,
       readingAnchorStart,
       // #7 按需挂载观测：块模型总量/挂载量/DOM 计数/解析次数/虚拟化状态
@@ -2805,6 +2839,20 @@ export class WebviewSyncController {
     }
   }
 
+  /** 可见视口按屏幕坐标映射回源码 offset；Mermaid 等替换 widget 的高度
+   *  改变时，源码位置比 scrollTop 更能表达用户正在看的内容。 */
+  private liveViewportCenterPosition(): number | null {
+    const view = this.viewMode === 'live' ? this.view : undefined
+    if (!view) return null
+    const box = view.scrollDOM.getBoundingClientRect()
+    if (box.height <= 0) return null
+    const content = view.contentDOM.getBoundingClientRect()
+    return view.posAtCoords({
+      x: content.left + Math.min(60, content.width / 2),
+      y: box.top + box.height / 2,
+    })
+  }
+
   /** 滚动事件高频到达：内存状态即时更新，bridge 写入尾随去抖。隐藏或卸载
    *  时同步冲刷，覆盖用户滚动后立刻切标签页的窗口。 */
   private scheduleViewportSave(): void {
@@ -2812,16 +2860,56 @@ export class WebviewSyncController {
     const scroller = this.viewMode === 'reading'
       ? this.readingContainer : this.view?.scrollDOM
     if (!scroller) return
-    this.viewport = { mode: this.viewMode, top: Math.max(0, scroller.scrollTop) }
+    const previous = this.viewport?.mode === this.viewMode ? this.viewport : null
+    // 高频事件只读廉价的 scrollTop；源码坐标等布局稳定后再测。
+    this.viewport = {
+      mode: this.viewMode,
+      top: Math.max(0, scroller.scrollTop),
+      centerOffset: previous?.centerOffset,
+    }
     if (this.viewportSaveTimer !== undefined) clearTimeout(this.viewportSaveTimer)
     this.viewportSaveTimer = setTimeout(() => this.flushViewportSave(), VIEWPORT_SAVE_DEBOUNCE_MS)
+  }
+
+  private captureViewport(): void {
+    const scroller = this.viewMode === 'reading'
+      ? this.readingContainer : this.view?.scrollDOM
+    if (!scroller) return
+    const previous = this.viewport?.mode === this.viewMode ? this.viewport : null
+    const hasLayout = scroller.getBoundingClientRect().height > 0
+    const centerOffset = this.liveViewportCenterPosition() ?? previous?.centerOffset
+    const top = hasLayout || !previous ? scroller.scrollTop : previous.top
+    this.viewport = { mode: this.viewMode, top: Math.max(0, top), centerOffset }
   }
 
   private flushViewportSave(): void {
     if (this.viewportSaveTimer === undefined) return
     clearTimeout(this.viewportSaveTimer)
     this.viewportSaveTimer = undefined
+    if (!this.restoringViewport) this.captureViewport()
     this.persistState()
+  }
+
+  private scheduleSelectionSave(): void {
+    if (this.selectionSaveTimer !== undefined) clearTimeout(this.selectionSaveTimer)
+    this.selectionSaveTimer = setTimeout(() => this.flushSelectionSave(), SELECTION_SAVE_DEBOUNCE_MS)
+  }
+
+  private flushSelectionSave(): void {
+    if (this.selectionSaveTimer === undefined) return
+    clearTimeout(this.selectionSaveTimer)
+    this.selectionSaveTimer = undefined
+    this.persistState()
+  }
+
+  private flushPendingViewState(): void {
+    const pending = this.viewportSaveTimer !== undefined || this.selectionSaveTimer !== undefined
+    if (this.viewportSaveTimer !== undefined) clearTimeout(this.viewportSaveTimer)
+    if (this.selectionSaveTimer !== undefined) clearTimeout(this.selectionSaveTimer)
+    this.viewportSaveTimer = undefined
+    this.selectionSaveTimer = undefined
+    if (this.viewport && !this.restoringViewport) this.captureViewport()
+    if (pending || this.viewport) this.persistState()
   }
 
   private clearViewport(): void {
@@ -2861,7 +2949,13 @@ export class WebviewSyncController {
       view.scrollDOM.scrollTop = viewport.top
       requestAnimationFrame(() => {
         if (this.view === view && this.viewport === viewport && this.viewMode === 'live') {
-          view.scrollDOM.scrollTop = viewport.top
+          if (viewport.centerOffset !== undefined) {
+            view.dispatch({ effects: EditorView.scrollIntoView(
+              this.clampToDoc(viewport.centerOffset), { y: 'center' },
+            ) })
+          } else {
+            view.scrollDOM.scrollTop = viewport.top
+          }
         }
         this.restoringViewport = false
       })
@@ -2872,6 +2966,10 @@ export class WebviewSyncController {
    *  outlineExpandLevel（#67 档位全局记忆）、sidebarWidth（拖宽记忆）共存
    *  互不覆盖 */
   private persistState(): void {
+    if (this.selectionSaveTimer !== undefined) {
+      clearTimeout(this.selectionSaveTimer)
+      this.selectionSaveTimer = undefined
+    }
     const saved = this.bridge.getState<PersistedState>() ?? {}
     this.bridge.setState({
       ...saved,
@@ -6994,6 +7092,13 @@ export class WebviewSyncController {
           // StateField 已在本事务更新；微任务避免在 CM6 update 生命周期内
           // 再读取旧 EditorView.state。重复信号合并由当前状态读取自然收敛。
           queueMicrotask(() => this.refreshQuickActions())
+        }
+        if (update.selectionSet && !update.docChanged && this.viewMode === 'live') {
+          const anchor = update.state.selection.main.from
+          if (anchor !== this.modeAnchor) {
+            this.modeAnchor = anchor
+            this.scheduleSelectionSave()
+          }
         }
         if (!update.docChanged) {
           return

@@ -55,6 +55,16 @@ function mountViewportDoc(text: string, clearState: boolean): void {
 Object.assign(window, {
   resetViewportDoc(text: string) { mountViewportDoc(text, true) },
   reloadViewportDoc(text: string) { mountViewportDoc(text, false) },
+  liveCenterLine() {
+    const view = controller.getView()!
+    const box = view.scrollDOM.getBoundingClientRect()
+    const content = view.contentDOM.getBoundingClientRect()
+    const pos = view.posAtCoords({
+      x: content.left + Math.min(60, content.width / 2),
+      y: box.top + box.height / 2,
+    })
+    return pos === null ? null : view.state.doc.lineAt(pos).number
+  },
   setViewportMode(mode: 'live' | 'reading') {
     controller.handleHostMessage({ kind: 'view.mode.set', mode })
   },

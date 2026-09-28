@@ -356,6 +356,8 @@ interface ViewState {
   selectionOffset?: number
   selectionHead?: number
   selectionAssoc?: number
+  liveViewportCenterLine?: number
+  liveScrollTopPx?: number
   wordSegmenter?: boolean
   readingBlockCount?: number
   readingAnchorStart?: number
@@ -3684,6 +3686,42 @@ export const cases: Array<[string, () => Promise<void>]> = [
 
     // 锚点跳转全程只读
     assert(await readDisk('wikilinks.md') === diskBefore, '锚点跳转不得改写源文档')
+  }],
+
+  ['Live 视口源锚点：Mermaid 围栏附近切标签页后中心行与光标保持', async () => {
+    const targetUri = wsUri('viewport-mermaid.md')
+    const uri = targetUri.toString()
+    await vscode.commands.executeCommand('vscode.openWith', targetUri, VIEW_TYPE)
+    await poll('观测夹具面板就绪', async () => {
+      const state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState | undefined
+      return state?.panels.some((p) => p.ready) ? true : undefined
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'viewport.test.position', cursorLine: 123 })
+    const waitProbe = () => poll('观测夹具视口探针', async () => {
+      const state = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      return state?.liveViewportCenterLine !== undefined ? state : undefined
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'viewport.test.position', scrollNearLine: 123, scrollBiasPx: 150 })
+    await new Promise((r) => setTimeout(r, 400))
+    const before = await waitProbe()
+    assert((before.liveViewportCenterLine ?? 0) >= 110 && (before.liveViewportCenterLine ?? 0) <= 123,
+      `前置：视口中心须在 Mermaid 围栏附近，实际 ${before.liveViewportCenterLine}`)
+    await openWithEditor('mode.md')
+    await waitSessionReady('mode.md')
+    await vscode.commands.executeCommand('vscode.openWith', targetUri, VIEW_TYPE)
+    await poll('观测夹具重握手就绪', async () => {
+      const state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState | undefined
+      return state?.panels.some((p) => p.ready) ? true : undefined
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'viewport.test.position' })
+    await new Promise((r) => setTimeout(r, 600))
+    const after = await waitProbe()
+    assert(after.selectionOffset === before.selectionOffset,
+      `纯光标移动应跨标签页恢复：${before.selectionOffset} → ${after.selectionOffset}`)
+    assert(Math.abs((after.liveViewportCenterLine ?? 0) - (before.liveViewportCenterLine ?? 0)) <= 2,
+      `Live 切标签页后中心行漂移：${before.liveViewportCenterLine} → ${after.liveViewportCenterLine}（scrollTop ${before.liveScrollTopPx} → ${after.liveScrollTopPx}）`)
   }],
 
   ['定位送达后面板重载：恢复最后导航点，不重播历史定位（#163 验收反馈）', async () => {

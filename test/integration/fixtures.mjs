@@ -1,7 +1,7 @@
 // 集成测试 fixture 单一事实源（工单 #15 抽取）：生成临时工作区全部样例文档。
 // runTest.mjs（开发模式加载）与 runInstalled.mjs（VSIX 安装态回归）共用，
 // 两条路径跑同一套 fixture，保证安装态与开发态断言的是同一组文档。
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
 const LF_DOC = '中文编辑测试\n\n包含 emoji：🎉 与组合 emoji 👨‍👩‍👧‍👦\n\n- 列表项一\n- 列表项二\n'
@@ -69,6 +69,9 @@ const MODE_DOC = [
   '结尾段落。',
   '',
 ].join('\n')
+// 视口重载回归：真实观测夹具的表格、公式与 Mermaid 组合使相同像素高度
+// 在 webview 重建前后对应不同源码行。固定文本见同目录资产。
+const VIEWPORT_MERMAID_DOC = readFileSync(new URL('./viewport-mermaid.md', import.meta.url), 'utf8')
 // #6 锚点恢复：无特殊语法的多段落（块边界清晰）
 const MODE_ANCHOR_DOC = '模式锚点第一段文字\n\n中间段落文本\n\n最后段落结束\n'
 // #8 双模式显示一致性样例：覆盖标题/粗斜体/列表/任务/引用/行内代码/围栏/
@@ -671,6 +674,7 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   writeFileSync(path.join(wsDir, 'heading.md'), HEADING_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'typography.md'), TYPOGRAPHY_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'mode.md'), MODE_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'viewport-mermaid.md'), VIEWPORT_MERMAID_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'mode-anchor.md'), MODE_ANCHOR_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'syntax.md'), SYNTAX_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'fence-chunk.md'), FENCE_CHUNK_DOC, 'utf8')
