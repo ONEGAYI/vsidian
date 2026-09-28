@@ -640,14 +640,11 @@ export function createTextEditorProvider(
 
   /** 反链条目跳转：打开来源文档（Vsidian 面板）并定位到出链标记——
    *  openWith 对已开面板是重显；offset 为来源正文 LF 偏移（宿主抽取侧
-   *  已归一），直接作 view.locate 输入（webview 全程 LF 坐标） */
+   *  已归一），直接作 view.locate 输入（webview 全程 LF 坐标）。
+   *  sourceUri 是平台分隔符 fsPath 形态（快照载荷原样回传），经
+   *  Uri.file 解析（Uri.parse 会把反斜杠当 URI 字符错误编码） */
   const openBacklinkSource = async (sourceUri: string, offset: number): Promise<void> => {
-    let uri: vscode.Uri
-    try {
-      uri = vscode.Uri.parse(sourceUri)
-    } catch {
-      return
-    }
+    const uri = vscode.Uri.file(sourceUri)
     await vscode.commands.executeCommand('vscode.openWith', uri, VIEW_TYPE)
     const ready = await waitForReadyPanel(uri)
     if (ready) {
