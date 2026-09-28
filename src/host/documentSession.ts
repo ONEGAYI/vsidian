@@ -733,10 +733,21 @@ export class DocumentSession {
     }
   }
 
-  /** 向指定面板发送宿主消息（诊断请求等） */
+  /** 向指定面板发送宿主消息（诊断请求等）；经此通道的 view.locate 记录
+   *  为「最后定位意图」（webview LF 坐标原样）——面板重握手后补发兜底 */
   postToPanel(sessionId: string, message: HostToWebview): void {
     this.panels.get(sessionId)?.port.send(message)
+    if (message.kind === 'view.locate') {
+      this.lastLocateOffset = message.offset
+    }
   }
+
+  /** 最后定位意图（null=本会话尚无宿主侧定位）。面板重载（retainContext-
+   *  WhenHidden 关闭，隐藏即销毁）会让 view.locate 首投随旧 webview 实例
+   *  丢失、新实例光标停留文档头——重握手 sendInit 后补发恢复「最后程序性
+   *  导航点」。取舍：重载前用户的手动光标移动无法与程序定位区分，恢复到
+   *  最后定位点优于丢失到文档头 */
+  private lastLocateOffset: number | null = null
 
   private sendInit(panel: PanelEntry): void {
     panel.ready = true
@@ -747,6 +758,9 @@ export class DocumentSession {
       version: this.doc.version,
       text: this.newline.toLfText(this.doc.getText()),
     })
+    if (this.lastLocateOffset !== null) {
+      panel.port.send({ kind: 'view.locate', offset: this.lastLocateOffset })
+    }
   }
 
   private async processEditRequest(
