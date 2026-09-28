@@ -320,3 +320,24 @@ describe('HTML 注释隐藏（#139）：阅读渲染输入先剥离注释', () =
     expect(text.slice(paras[1]!.start, paras[1]!.end)).toBe('正文段')
   })
 })
+
+describe('块 id 标记隐藏（#163 验收反馈）：阅读渲染输入先剥离标记', () => {
+  it('行尾与独立行双形态标记不出现；正文保留', () => {
+    const blocks = splitReadingBlocks('段甲 ^tail999\n\n段乙\n\n^std888\n')
+    const paras = blocks.filter((b) => b.kind === 'paragraph')
+    expect(paras).toHaveLength(2)
+    expect(paras[0]!.html).toContain('段甲')
+    expect(paras[0]!.html).not.toContain('tail999')
+    expect(paras.map((b) => b.html).join('')).not.toContain('std888')
+  })
+
+  it('围栏内的字面 ^id 保留（代码内容）；锚点坐标系不受剥离影响', () => {
+    const text = '段甲\n\n```\ncode ^keep\n```\n\n段乙 ^b1\n'
+    const blocks = splitReadingBlocks(text)
+    const fence = blocks.find((b) => b.kind === 'code-block')!
+    expect(fence.html).toContain('code ^keep')
+    // 剥离保行数：段乙仍锚定原文行（行尾标记剥成空白后行区间不变）
+    const para = blocks.filter((b) => b.kind === 'paragraph').find((b) => b.html.includes('段乙'))!
+    expect(text.slice(para.start, para.end)).toBe('段乙 ^b1')
+  })
+})

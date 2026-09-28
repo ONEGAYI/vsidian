@@ -48,6 +48,17 @@ function readMenu() {
   }
 }
 
+/** 块 id 标记淡化绘制观测（#163 验收反馈）：双形态标记 span 的 computed
+ *  color 与 display（样式注入失效时 DOM 在场但 color 不淡化——断言用户
+ *  看到的对比度差异） */
+function readBlockIdPaint() {
+  return Array.from(document.querySelectorAll<HTMLElement>('.vsidian-block-id')).map((el) => ({
+    text: el.textContent ?? '',
+    color: getComputedStyle(el).color,
+    display: getComputedStyle(el).display,
+  }))
+}
+
 Object.assign(window, {
   initBlockMenu(text: string) {
     controller.handleHostMessage({
@@ -57,6 +68,7 @@ Object.assign(window, {
   },
   controller,
   readMenu,
+  readBlockIdPaint,
   /** 宿主消息通道（测试钩子与真实点击同一处理器） */
   post(msg: Record<string, unknown>) {
     controller.handleHostMessage(msg)
@@ -70,5 +82,10 @@ Object.assign(window, {
   /** 光标落位（blockLink.copy 命令的目标推导输入） */
   setCursor(pos: number) {
     controller.getView()!.dispatch({ selection: { anchor: pos, head: pos } })
+  },
+  /** 阅读容器文本（阅读隐藏断言：块 id 标记不进阅读渲染） */
+  readingText() {
+    const container = document.querySelector('.vsidian-view-reading')
+    return container ? container.textContent ?? '' : ''
   },
 })

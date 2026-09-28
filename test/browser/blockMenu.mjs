@@ -157,6 +157,47 @@ try {
   assert.deepEqual(errors, [], '页面无未捕获异常')
   passed++
   console.log('[块菜单回归][PASS] 头区不接管 + Esc 真实键盘关闭')
+
+  // ---- 场景 I：块 id 标记淡化绘制（#163 验收反馈，双形态 computed）----
+  // 此前场景已写入独立行 id（场景 E）且 DOC 自带行尾 ^keep1——双形态在场
+  const paints = await page.evaluate(() => window.readBlockIdPaint())
+  assert.ok(paints.length >= 2, `行尾与独立行双形态标记应各有淡化 span（实际 ${paints.length}）`)
+  const hasTail = paints.some((p) => /keep1/.test(p.text))
+  const hasStandalone = paints.some((p) => /^ \^[a-z0-9]{6}$|^\^[a-z0-9]{6}$/.test(p.text))
+  assert.ok(hasTail, `行尾形态标记应淡化（实际 ${JSON.stringify(paints.map((p) => p.text))}）`)
+  assert.ok(hasStandalone, `独立行形态标记应淡化（实际 ${JSON.stringify(paints.map((p) => p.text))}）`)
+  const alphaOf = (color) => {
+    const rgba = /rgba?\(([^)]+)\)/.exec(color)
+    if (rgba) {
+      const parts = rgba[1].split(',').map((p) => p.trim())
+      return parts.length > 3 ? Number(parts[3]) : 1
+    }
+    const css = /color\(srgb[^/]*\/\s*([\d.]+)\)/.exec(color)
+    return css ? Number(css[1]) : 1
+  }
+  const bodyColor = await page.evaluate(() =>
+    getComputedStyle(document.querySelector('.cm-line')).color)
+  for (const p of paints) {
+    assert.equal(p.display, 'inline', `淡化不得隐藏（${p.text}）`)
+    assert.ok(alphaOf(p.color) < alphaOf(bodyColor),
+      `标记色 alpha 应低于正文（${p.text}: ${p.color} vs ${bodyColor}）`)
+  }
+  // 自定义字体色适配：改动正文前景变量后标记色跟随（相对变换而非锚定
+  // 固定色——用户可自定义字体颜色，淡化必须随之）
+  const beforeFg = paints[0].color
+  await page.addStyleTag({ content: ':root { --vscode-editor-foreground: #c01c1c; }' })
+  const repaints = await page.evaluate(() => window.readBlockIdPaint())
+  assert.notEqual(repaints[0].color, beforeFg,
+    `标记色应跟随正文前景变化（适配自定义字体色：${beforeFg} → ${repaints[0].color}）`)
+  // 阅读侧隐藏：标记不进阅读渲染（剥离在 markdown-it 解析前）
+  await page.evaluate(() => window.post({ kind: 'view.mode.set', mode: 'reading' }))
+  await page.waitForTimeout(60)
+  const readingText = await page.evaluate(() => window.readingText())
+  assert.ok(readingText.includes('已有 id 的段落'), '阅读侧正文保留')
+  assert.ok(!readingText.includes('keep1') && !readingText.includes('^'),
+    `阅读侧不应出现块 id 标记（实际片段 ${JSON.stringify(readingText.slice(-80))}）`)
+  passed++
+  console.log('[块菜单回归][PASS] 块 id 双形态淡化 + 自定义字体色适配 + 阅读隐藏')
 } finally {
   await browser.close()
 }

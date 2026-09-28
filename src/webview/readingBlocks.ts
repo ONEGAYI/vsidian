@@ -20,6 +20,8 @@
 import { frontmatterRange } from './markdownDoc'
 import { maskCodeSpanPipes } from './tableCells'
 import { stripHtmlComments } from './htmlComment'
+// #163 验收反馈：块 id 标记阅读隐藏（渲染前剥离，行数不变保锚点坐标系）
+import { stripBlockIdMarks } from './blockIdStrip'
 import { isRenderedFenceInfo } from '../shared/mermaid'
 import { codeInfoFirstWord } from '../shared/codeLangs'
 import { buildFrontmatterTableHtml, escapeHtml, parseFrontmatterTable } from '../shared/frontmatterTable'
@@ -196,7 +198,7 @@ function splitBody(
   // #139 阅读隐藏：body 切片后、markdown-it 解析前剥离注释（等长空格
   // 替换保锚点坐标系；代码上下文与残缺保留原样，见 htmlComment.ts）。
   // frontmatter 已先行整块提取，天然不剥
-  const stripped = stripHtmlComments(body)
+  const stripped = stripBlockIdMarks(stripHtmlComments(body))
   const { parseText, marker } = protectCodePipes(stripped)
   const tokens = md.parse(parseText, env as unknown as Env)
   if (marker) {

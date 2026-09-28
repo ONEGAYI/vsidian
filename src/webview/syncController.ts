@@ -93,6 +93,8 @@ import { createLinkInteractions, WIKILINK_CLASS_NAMES } from './liveLinks'
 import { liveMath } from './liveMath'
 import { MATH_CLASS_NAMES } from '../shared/math'
 import { liveMermaid } from './liveMermaid'
+// #163 验收反馈：块 id 标记 live 淡化（行尾/独立行双形态 mark 装饰）
+import { liveBlockId } from './liveBlockId'
 import { setMermaidDarkTheme } from './mermaidRender'
 import {
   closeDiagramPopup,
@@ -7036,6 +7038,9 @@ export class WebviewSyncController {
       // #60 Mermaid：围栏表 + 跨行块 replace 装饰（光标进入围栏显源码、
       // 离开恢复渲染图；渲染容器与阅读侧共用 mermaidRender 管线）
       liveMermaid,
+      // #163 验收反馈：块 id 标记淡化（行尾 ` ^id` 与独立行 `^id` 双形态
+      // mark 装饰；围栏内部不命中；docChanged 全量行扫描重建）
+      liveBlockId,
       // #79 代码块卡片：呈现态围栏收起 + 头部横带 + 卡片行类（配置经
       // Compartment 热重配，围栏表复用上方 mermaidFencesField）
       this.codeCardCompartment.of(this.codeCardExtension()),

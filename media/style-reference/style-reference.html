@@ -65,7 +65,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 </table>
 
   <section class="domain" data-domain="content">
-    <h1 style="font-size:19px;margin-bottom:4px">正文域（71 条）</h1>
+    <h1 style="font-size:19px;margin-bottom:4px">正文域（72 条）</h1>
 
     <h2>正文域 · 容器与视图（2）</h2>
     <article class="entry" id="container-live">
@@ -153,7 +153,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：单元 liveDecorations：活动标题行类发射契约</p>
       <p class="life">引入：#5（2026-09-23）</p>
     </article>
-    <h2>正文域 · 行内格式（6）</h2>
+    <h2>正文域 · 行内格式（7）</h2>
     <article class="entry" id="inline-strong">
       <h3><code>.vsidian-strong（live）/ strong 标签（阅读）</code><span class="eid">inline-strong</span></h3>
       <p class="purpose">粗体内容入口：live 为 mark 装饰 span；阅读为 markdown-it 渲染的语义 strong 标签。</p>
@@ -240,6 +240,20 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 }</code></pre>
       <p class="verify">验证：单元 liveDecorations（#139 describe）：Comment/CommentBlock 整区间发射契约；单元 htmlCommentCssContract：淡化色规则钉住；集成「稳定样式契约扩展」（#8）：.vsidian-html-comment 探针命中 rgb(34, 35, 36)；cssProbe.liveHtmlCommentDecorationColor</p>
       <p class="life">引入：#139（2026-09-27）</p>
+    </article>
+    <article class="entry" id="block-id-mark">
+      <h3><code>.vsidian-block-id（仅 live）</code><span class="eid">block-id-mark</span></h3>
+      <p class="purpose">块 id 标记淡化入口（#163 验收反馈）：live 侧行尾 ` ^id` 与独立行 `^id` 双形态整区间 mark 装饰 span（含行尾形态的前导空白），正文前景 45% 混入的低对比呈现——相对正文色变换而非锚定固定色，适配自定义字体颜色；color-mix 单规则服务明暗主题；不隐藏不折叠、可读可编辑。阅读侧经渲染前剥离隐藏（blockIdStrip：行尾删标记、独立行删内容保换行），无对应类。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-none">none</span></p>
+<p class="states">状态：live 常显淡化色（块 id 是结构标记，无光标两态切换语义——复制块链接入口在右键菜单/快捷键）。</p>
+      <p class="obsidian">Obsidian 对应：无（Obsidian 阅读隐藏、live 内建样式淡化，无公开类名）</p>
+
+      <p class="dom">DOM 关系：live 容器内 mark 装饰 span；围栏内部不命中（代码内容），闭围栏行行尾标记命中（围栏块自身的 id）。</p>
+      <pre><code>.vsidian-block-id {
+  color: color-mix(in srgb, var(--vscode-editor-foreground, #808080) 45%, transparent);
+}</code></pre>
+      <p class="verify">验证：单元 liveBlockId：双形态标记区间发射契约；单元 blockIdCssContract：淡化色规则钉住；浏览器 blockMenu：淡化 computed color 断言（双形态）</p>
+      <p class="life">引入：#163 验收反馈（2026-09-28）</p>
     </article>
     <h2>正文域 · 列表与任务（5）</h2>
     <article class="entry" id="live-list-line">

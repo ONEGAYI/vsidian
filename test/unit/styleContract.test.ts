@@ -359,7 +359,7 @@ const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   // content 域（71）
   'view-container': 2,
   heading: 4,
-  'inline-format': 6,
+  'inline-format': 7,
   'list-task': 5,
   'line-syntax': 5,
   table: 11,

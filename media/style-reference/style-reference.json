@@ -3,7 +3,7 @@
     "schemaVersion": 1,
     "vsidianVersion": "0.5.0",
     "generatedAt": "2026-09-28",
-    "entryCount": 126,
+    "entryCount": 127,
     "source": "src/shared/styleContract.ts",
     "generator": "scripts/genStyleGuide.mjs",
     "determinism": "generatedAt 取当前版本在 CHANGELOG.md 的发布日期（无段落时取最新已发布版本日期），同源再生成字节一致。",
@@ -100,7 +100,7 @@
       "title": "行内格式",
       "titleKey": "styleRef.category.inlineFormat",
       "order": 3,
-      "count": 6
+      "count": 7
     },
     {
       "id": "list-task",
@@ -597,6 +597,30 @@
         "cssProbe.liveHtmlCommentDecorationColor"
       ],
       "introduced": "#139（2026-09-27）"
+    },
+    {
+      "id": "block-id-mark",
+      "domain": "content",
+      "category": "inline-format",
+      "kind": "selector",
+      "target": ".vsidian-block-id（仅 live）",
+      "purpose": "块 id 标记淡化入口（#163 验收反馈）：live 侧行尾 ` ^id` 与独立行 `^id` 双形态整区间 mark 装饰 span（含行尾形态的前导空白），正文前景 45% 混入的低对比呈现——相对正文色变换而非锚定固定色，适配自定义字体颜色；color-mix 单规则服务明暗主题；不隐藏不折叠、可读可编辑。阅读侧经渲染前剥离隐藏（blockIdStrip：行尾删标记、独立行删内容保换行），无对应类。",
+      "views": [
+        "live"
+      ],
+      "states": "live 常显淡化色（块 id 是结构标记，无光标两态切换语义——复制块链接入口在右键菜单/快捷键）。",
+      "dom": "live 容器内 mark 装饰 span；围栏内部不命中（代码内容），闭围栏行行尾标记命中（围栏块自身的 id）。",
+      "example": ".vsidian-block-id {\n  color: color-mix(in srgb, var(--vscode-editor-foreground, #808080) 45%, transparent);\n}",
+      "obsidian": {
+        "counterpart": "无（Obsidian 阅读隐藏、live 内建样式淡化，无公开类名）",
+        "support": "none"
+      },
+      "verification": [
+        "单元 liveBlockId：双形态标记区间发射契约",
+        "单元 blockIdCssContract：淡化色规则钉住",
+        "浏览器 blockMenu：淡化 computed color 断言（双形态）"
+      ],
+      "introduced": "#163 验收反馈（2026-09-28）"
     },
     {
       "id": "live-code-line",

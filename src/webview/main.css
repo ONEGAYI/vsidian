@@ -1804,6 +1804,16 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   color: color-mix(in srgb, var(--vscode-editor-foreground, #808080) 45%, transparent);
 }
 
+/* 块 id 标记淡化（#163 验收反馈）：行尾 ` ^id` 与独立行 `^id` 双形态的
+   mark 装饰 span——正文前景色 45% 混入（color-mix 相对正文色变换而非
+   锚定固定色，适配自定义字体颜色；单规则服务明暗主题，口径同
+   html-comment），不隐藏不折叠（live 可读可编辑）；阅读侧经渲染前剥离
+   隐藏（blockIdStrip，不经 CSS）；关键规则由 blockIdCssContract 契约
+   钉住，浏览器套件断言 computed color 差异 */
+#app .cm-editor .cm-scroller .vsidian-block-id {
+  color: color-mix(in srgb, var(--vscode-editor-foreground, #808080) 45%, transparent);
+}
+
 /* 任务 checkbox（#9 可交互：input[type=checkbox] 替换 [ ]/[x] 标记）。
    appearance 关闭原生形态，沿用 #8 字形绘制语义（颜色跟随 VSCode 变量）；
    .vsidian-task-checked 为稳定修饰类（与 :checked 伪类双入口） */
