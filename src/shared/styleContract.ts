@@ -2149,7 +2149,7 @@ export const STYLE_CONTRACT_ENTRIES: readonly StyleContractEntry[] = [
     purpose: '双态视图切换按钮（#141）：live↔reading 互切入口之一（宿主标题栏三态命令与 Ctrl+Q 之外的 webview 内入口）。图标显当前态：书本（当前在阅读）/ 笔（当前在 Live）两图标常驻 DOM，显隐唯一来源是 body 模式类规则（见 mode-body 条目）——样式失效时两图标同显，可被绘制断言暴露。',
     views: ['live', 'reading'],
     states: '按钮本体常驻两模式；点击出站 view.switch.request（不本地执行），按钮态由宿主回流的 view.mode.set 驱动——aria/tooltip 表目标动作随态换词。',
-    dom: '顶栏 .vsidian-toolbar 内 button，紧邻侧栏开关左侧；内联 SVG 两 path（book/edit 子类）。',
+    dom: '顶栏 .vsidian-toolbar 内 button，紧邻侧栏开关左侧；#158 起两者组成右端组——本按钮持有 margin-left:auto 推靠工具栏右端，与左侧组（设置、快速操作）间为弹性空隙；内联 SVG 两 path（book/edit 子类）。',
     example: '.vsidian-view-toggle {\n  color: var(--vscode-toolbar-foreground);\n}',
     obsidian: { counterpart: '无对应物', support: 'none' },
     verification: [

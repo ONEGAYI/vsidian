@@ -71,8 +71,17 @@ describe('侧栏布局骨架 CSS 契约（#53）', () => {
     expect(rule('#app .vsidian-sidebar .vsidian-sidebar-panel')).toMatch(/flex:\s*1 1 auto/)
   })
 
-  it('切换按钮推到主编辑区顶栏右端', () => {
-    expect(rule('.vsidian-toolbar .vsidian-sidebar-toggle')).toMatch(/margin-left:\s*auto/)
+  it('双态切换按钮推到右端组（#158）：margin-left:auto 由 view-toggle 持有', () => {
+    // #158：推右职责从侧栏开关移交双态切换按钮——右端组 = 双态切换 +
+    // 侧栏开关紧挨（gap），与左侧组（设置、快速操作）间为弹性空隙
+    expect(rule('.vsidian-toolbar .vsidian-view-toggle')).toMatch(/margin-left:\s*auto/)
+    // 侧栏开关不得再持有推右规则：两按钮都留 auto 会在二者之间再拉出
+    // 一段弹性空隙，破坏右端组紧挨观感
+    const blocks = css.match(/[^{}]+\{[^{}]*\}/g) ?? []
+    const sidebarPush = blocks.filter((block) =>
+      block.split('{')[0]?.trim().endsWith('.vsidian-toolbar .vsidian-sidebar-toggle') &&
+      /margin-left:\s*auto/.test(block.split('{')[1] ?? ''))
+    expect(sidebarPush, '侧栏开关不应再持有 margin-left:auto').toHaveLength(0)
   })
 
   it('拖宽句柄热区就位：左缘定位、col-resize 光标、触屏不被滚动劫持', () => {

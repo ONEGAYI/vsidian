@@ -51,11 +51,18 @@ try {
     await page.waitForSelector('.vsidian-view-toggle')
     let paint = await page.evaluate(() => window.readTogglePaint())
     assert.ok(paint.visible, '双态按钮应有绘制尺寸')
-    assert.equal(paint.hitIsButton, true, '按钮中心点元素命中应为按钮自身（未被遮挡）')
+    assert.ok(paint.hitIsButton, true, '按钮中心点元素命中应为按钮自身（未被遮挡）')
     assert.notEqual(paint.editDisplay, 'none', 'live 态应显示编辑类图标（SVG path 默认 inline）')
     assert.equal(paint.bookDisplay, 'none', 'live 态应隐藏书本图标')
     assert.equal(paint.aria, zhCn['toolbar.switchToReading'], 'live 态 aria 表目标动作（切换到阅读）')
     assert.equal(paint.title, zhCn['toolbar.switchToReading'], 'title 与 aria 同词')
+
+    // ---- #158 右端组几何（绘制层）：按钮位于工具栏水平中点右侧，
+    //      与侧栏开关以工具栏 gap（4px）紧邻组成右端组 ----
+    assert.ok(paint.centerX > paint.toolbarCenterX,
+      `双态按钮中心应位于工具栏水平中点右侧（#158 右端组）：centerX=${paint.centerX}, toolbarCenterX=${paint.toolbarCenterX}`)
+    assert.ok(paint.gapToSidebar !== null && Math.abs(paint.gapToSidebar - 4) < 1,
+      `双态切换与侧栏开关应以工具栏 gap 紧邻组成右端组（实测间距 ${paint.gapToSidebar}px）`)
 
     // ---- 点击出站 + 宿主回环后图标随态翻转（reading：book 可见）----
     const beforeClick = await page.evaluate(() => window.readHostMessages().length)

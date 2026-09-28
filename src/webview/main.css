@@ -570,9 +570,12 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   display: block;
 }
 
-/* 侧栏切换按钮推到主编辑区顶栏右端（工单：收起态位于主编辑区顶栏右端；
-   展开态随主编辑区右边界移向中间由 flex 布局自然承接） */
-.vsidian-toolbar .vsidian-sidebar-toggle {
+/* #158 右端组推右：margin-left:auto 由双态视图切换按钮持有，把右端组
+   （双态切换 + 侧栏开关，紧挨）推到主编辑区顶栏右端、与左侧组（设置、
+   快速操作）之间拉出弹性空隙。推右规则只落在右端组首按钮——两个按钮
+   都留 auto 会在二者之间再拉出一段空隙。收起/展开态随主编辑区右边界
+   移动由 flex 布局自然承接 */
+.vsidian-toolbar .vsidian-view-toggle {
   margin-left: auto;
 }
 

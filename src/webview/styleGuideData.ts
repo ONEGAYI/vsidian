@@ -2990,7 +2990,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "reading"
     ],
     "states": "按钮本体常驻两模式；点击出站 view.switch.request（不本地执行），按钮态由宿主回流的 view.mode.set 驱动——aria/tooltip 表目标动作随态换词。",
-    "dom": "顶栏 .vsidian-toolbar 内 button，紧邻侧栏开关左侧；内联 SVG 两 path（book/edit 子类）。",
+    "dom": "顶栏 .vsidian-toolbar 内 button，紧邻侧栏开关左侧；#158 起两者组成右端组——本按钮持有 margin-left:auto 推靠工具栏右端，与左侧组（设置、快速操作）间为弹性空隙；内联 SVG 两 path（book/edit 子类）。",
     "example": ".vsidian-view-toggle {\n  color: var(--vscode-toolbar-foreground);\n}",
     "obsidian": {
       "counterpart": "无对应物",

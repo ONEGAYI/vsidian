@@ -2954,9 +2954,9 @@ export class WebviewSyncController {
 
   /** 主编辑区顶栏（#53 图标化）：左端齿轮设置按钮（打开宿主级 Vsidian
    *  设置页面板——webview 无权自建面板，必须经 settings.open 出站），
-   *  其后快速操作 ✎；右端双态视图切换（#141，紧邻侧栏按钮左侧）与
-   *  侧栏切换按钮（margin-left:auto 推靠）。#38 起三态切换（含源码）
-   *  仍在宿主标题栏命令，双态按钮不触及源码路径 */
+   *  其后快速操作 ✎；右端组（#158）= 双态视图切换（#141，持有
+   *  margin-left:auto 推靠）+ 侧栏切换按钮紧随其后，与左组间弹性空隙。
+   *  #38 起三态切换（含源码）仍在宿主标题栏命令，双态按钮不触及源码路径 */
   private buildToolbar(): HTMLElement {
     const bar = document.createElement('div')
     bar.className = 'vsidian-toolbar'

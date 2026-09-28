@@ -55,7 +55,9 @@ Object.assign(window, {
   readHostMessages() {
     return hostMessages
   },
-  /** 绘制层探针：按钮可见性（尺寸/元素命中）与图标随态（computed display） */
+  /** 绘制层探针：按钮可见性（尺寸/元素命中）与图标随态（computed display）；
+   * #158 起附右端组几何字段：按钮中心/工具栏中心水平坐标、与侧栏开关的
+   * 水平间距（绘制层断言据此钉住「中点右侧 + gap 紧邻组成右端组」） */
   readTogglePaint() {
     const btn = document.querySelector<HTMLButtonElement>('.vsidian-view-toggle')
     if (!btn) return null
@@ -63,6 +65,9 @@ Object.assign(window, {
     const hit = rect.width > 0 && rect.height > 0
       ? document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
       : null
+    const barRect = btn.closest('.vsidian-toolbar')?.getBoundingClientRect() ?? null
+    const sideRect = document.querySelector('.vsidian-sidebar-toggle')
+      ?.getBoundingClientRect() ?? null
     const displayOf = (cls: string) => {
       const icon = btn.querySelector(`.${cls}`)
       return icon ? getComputedStyle(icon).display : 'missing'
@@ -74,6 +79,9 @@ Object.assign(window, {
       editDisplay: displayOf('vsidian-view-toggle-edit'),
       aria: btn.getAttribute('aria-label'),
       title: btn.getAttribute('title'),
+      centerX: rect.x + rect.width / 2,
+      toolbarCenterX: barRect ? barRect.x + barRect.width / 2 : null,
+      gapToSidebar: sideRect ? sideRect.left - rect.right : null,
     }
   },
   /** 工具栏按钮序（DOM 序契约） */
