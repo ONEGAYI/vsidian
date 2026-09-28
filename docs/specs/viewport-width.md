@@ -181,3 +181,26 @@ docs/specs/viewport-width.md（分支 impl/2026-09-viewport-width）。
 - `gh issue create --title <上> --body-file <正文文件>`（docs/agents/issue-tracker.md 约定，中文标题正文）。
 - 两票正文互引（bug 票指向功能票修复方向；建票后补功能票编号回填）。
 - 标签暂不加（现有专用标签 code-block-card / ready-for-agent 均不适用；如需主题标签由用户定）。
+
+## 六、实施落档（#174/#175，2026-09-28）
+
+分支 `impl/2026-09-viewport-width` 完整实现并通过全量验证。**后续改双模式正文限宽、居中、行号列跟随、可读行宽设置或 `--file-line-width` / `--vsidian-*-max-width` 变量前，必读本节。**
+
+### 行为契约（钉住，不得顺手放宽）
+
+- **双变量同写**：`--vsidian-reading-max-width` 与 `--vsidian-live-preview-max-width` 定义于 **#app 层**（阅读层不得重复定义——会遮蔽设置内联值）；缺省 `var(--file-line-width, none)`，别名桥两行同源（`obsidianAlias.ts`）。
+- **0 = 铺满零干预**：`applyReadableLineWidthSetting`（syncController）在 0 档**移除内联**、非 0 档把 `Npx` 内联写到挂载根元素——设置优先，片段 `!important` 可覆盖；0 档片段常规规则生效。
+- **居中单位**：阅读块 `margin-inline auto`；Live 是 `[.cm-gutters + 间距 + .cm-content]` 整组经 scroller `justify-content: safe center` 居中（safe 防溢出裁左缘），`.cm-content` 挂 max-width。**铺满态零位移**（flex-grow 占满，justify 无剩余空间），与旧布局一致。
+- **#32 行号契约修订**：铺满态行为不变；限宽态正文列宽 = min(设定宽， 可用宽 − 行号列足迹)，行号列随列移动、间距不变。
+- **设置项**：`editor.readableLineWidth`（number 型，0–1600 步进 20，默认 0）；number schema 校验只管类型与范围，0 语义归消费方；设置页 0 档显示词经定义的 `zeroLabelKey` 取词（注册表驱动，渲染层无特判）。
+
+### 验证矩阵（2026-09-28，工作树内全绿）
+
+- 单测 3071（含 number schema 契约、滑块渲染/回显/上送、快照八键）+ node --test 契约检查器 99。
+- 浏览器 `readingWidthProbe` **15 项**（已注册 run.mjs）：铺满双模式、行号关一致性、限宽 600 居中、侧栏避让、行号列随列、宽块（表格/代码块）钳制、优先序三态。
+- `check:stylecontract` 8 项零失败（条目 116：var-reading-max-width 更新 + var-live-preview-max-width 新增）；`npm run compile` 类型零错。
+
+### 已知边界
+
+- 溢出裁切防护靠 `safe center`；超宽不可断内容（超宽表格单元格）在限宽档由各行内滚动（表格 `overflow-x: auto`）承接。
+- frontmatter 卡片行级 grid 不限宽硬约束（AGENTS.md 落档）与列限宽正交：整列一起钳制，卡片与行同列，无错位。

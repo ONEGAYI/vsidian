@@ -56,7 +56,8 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <tr><td><code>--h5-color</code></td><td><code>--vsidian-heading-color-5</code></td><td><code>var(--vscode-editor-foreground)</code></td></tr>
       <tr><td><code>--h6-color</code></td><td><code>--vsidian-heading-color-6</code></td><td><code>var(--vscode-editor-foreground)</code></td></tr>
       <tr><td><code>--font-text-size</code></td><td><code>--vsidian-reading-font-size</code></td><td><code>var(--vsidian-content-font-size)</code></td></tr>
-      <tr><td><code>--file-line-width</code></td><td><code>--vsidian-reading-max-width</code></td><td><code>760px</code></td></tr>
+      <tr><td><code>--file-line-width</code></td><td><code>--vsidian-reading-max-width</code></td><td><code>none</code></td></tr>
+      <tr><td><code>--file-line-width</code></td><td><code>--vsidian-live-preview-max-width</code></td><td><code>none</code></td></tr>
       <tr><td><code>--line-height-normal</code></td><td><code>--vsidian-reading-line-height</code></td><td><code>var(--vsidian-content-line-height)</code></td></tr>
       <tr><td><code>--code-background</code></td><td><code>--vsidian-reading-code-background</code></td><td><code>var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12))</code></td></tr>
       <tr><td><code>--text-highlight-bg</code></td><td><code>--vsidian-highlight-background</code></td><td><code>rgba(255, 208, 0, 0.35)</code></td></tr>
@@ -65,7 +66,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 </table>
 
   <section class="domain" data-domain="content">
-    <h1 style="font-size:19px;margin-bottom:4px">正文域（71 条）</h1>
+    <h1 style="font-size:19px;margin-bottom:4px">正文域（72 条）</h1>
 
     <h2>正文域 · 容器与视图（2）</h2>
     <article class="entry" id="container-live">
@@ -792,7 +793,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：集成「稳定样式契约」（#11）：阅读 a.vsidian-wikilink 命中 rgb(31, 32, 33)；集成「Obsidian 原名别名桥」：a.internal-link 命中；cssProbe.readingWikilinkDecorationColor / obsidianAliases[&quot;reading-wikilink&quot;]</p>
       <p class="life">引入：#11（2026-09-24）</p>
     </article>
-    <h2>正文域 · 公开 CSS 变量（9）</h2>
+    <h2>正文域 · 公开 CSS 变量（10）</h2>
     <article class="entry" id="var-heading-color">
       <h3><code>--vsidian-heading-color-{1..6}</code><span class="eid">var-heading-color</span></h3>
       <p class="purpose">标题层级色变量族：live 标题行级、阅读标题块级与大纲条目级三侧同引（主题分级着色一处定义多处生效）。默认 var(--vscode-editor-foreground)。</p>
@@ -822,15 +823,27 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
     <article class="entry" id="var-reading-max-width">
       <h3><code>--vsidian-reading-max-width</code><span class="eid">var-reading-max-width</span></h3>
-      <p class="purpose">阅读块最大宽度；默认 760px。</p>
+      <p class="purpose">阅读块最大宽度（#175 起为可读行宽双变量之一，设置 editor.readableLineWidth 一份值同时驱动两模式，片段可分别单独覆盖）；默认 none = 铺满（原 760px 隐形限宽随 #174 修复废止）。</p>
       <p class="views"><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
 
       <p class="obsidian">Obsidian 对应：--file-line-width</p>
 <p class="aliases">别名承诺：<code>--file-line-width</code></p>
-      <p class="dom">DOM 关系：定义于阅读内容层；Obsidian 别名 --file-line-width。</p>
+      <p class="dom">DOM 关系：定义于 #app 层（#175 起与 live 变量同址——设置值以内联写在挂载根元素，原阅读层定义会遮蔽内联故上移）；Obsidian 别名 --file-line-width。</p>
       <pre><code>:root { --file-line-width: 700px; }</code></pre>
-      <p class="verify">验证：obsidianAliasCssContract：变量桥形态</p>
+      <p class="verify">验证：obsidianAliasCssContract：变量桥形态；浏览器：readingWidthProbe（铺满/限宽居中/片段优先序三态）</p>
       <p class="life">引入：#32（2026-09-24）</p>
+    </article>
+    <article class="entry" id="var-live-preview-max-width">
+      <h3><code>--vsidian-live-preview-max-width</code><span class="eid">var-live-preview-max-width</span></h3>
+      <p class="purpose">Live 正文列最大宽度（#175 新增，与阅读变量共用设置值；限宽时 [行号列+间距+正文列] 整组居中，行号列随列移动）；默认 none = 铺满。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-direct">direct</span></p>
+
+      <p class="obsidian">Obsidian 对应：--file-line-width</p>
+<p class="aliases">别名承诺：<code>--file-line-width</code></p>
+      <p class="dom">DOM 关系：定义于 #app 层；Obsidian 别名 --file-line-width（与阅读变量同别名——Obsidian 语义即一个全局行宽同时作用于编辑与阅读两视图）。</p>
+      <pre><code>:root { --file-line-width: 700px; }</code></pre>
+      <p class="verify">验证：obsidianAliasCssContract：变量桥形态；浏览器：readingWidthProbe（限宽整组居中/行号列随列）</p>
+      <p class="life">引入：#175（2026-09-28）</p>
     </article>
     <article class="entry" id="var-reading-line-height">
       <h3><code>--vsidian-reading-line-height</code><span class="eid">var-reading-line-height</span></h3>
