@@ -158,7 +158,8 @@ export class SettingsPageView {
         const def = this.defs.find((d) => d.key === box.dataset.settingKey)!
         if (def.type === 'number') {
           // #175 滑块：值、值文本与 aria-valuetext 就地同步（铺满档显示词）
-          const numeric = this.value(def)
+          const raw = this.value(def)
+          const numeric = typeof raw === 'number' ? raw : def.default
           box.value = String(numeric)
           this.syncRangeDisplay(def, box, numeric)
         } else {
@@ -425,7 +426,8 @@ export class SettingsPageView {
     input.min = String(def.min)
     input.max = String(def.max)
     input.step = String(def.step)
-    const numeric = this.value(def)
+    const raw = this.value(def)
+    const numeric = typeof raw === 'number' ? raw : def.default
     input.value = String(numeric)
     const readout = element('span', SETTINGS_PAGE_CLASS_NAMES.rangeValue, this.numberValueText(def, numeric))
     this.syncRangeDisplay(def, input, numeric, readout)

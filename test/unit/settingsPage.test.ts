@@ -437,7 +437,7 @@ describe('可读行宽滑块（#175：number 型渲染为 range 控件）', () =
   })
 
   it('拖动释放（change）上送 settings.set 数值', () => {
-    const { view, sent, parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
+    const { sent, parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
     const { input } = slider(parent)
     input.value = '900'
     input.dispatchEvent(new Event('change'))
@@ -448,7 +448,7 @@ describe('可读行宽滑块（#175：number 型渲染为 range 控件）', () =
   })
 
   it('拖动中（input）即时刷新值文本但不立即上送（保存语义在释放）', () => {
-    const { view, sent, parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
+    const { sent, parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
     const { input, readout } = slider(parent)
     input.value = '1200'
     input.dispatchEvent(new Event('input'))
