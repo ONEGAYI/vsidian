@@ -18,22 +18,21 @@ export const zhCn: Record<MessageKey, string> = {
   'settings.searchResults': '搜索结果',
   'settings.searchCount': '找到 {count} 项设置',
   'settings.searchEmpty': '未找到匹配的设置，请尝试其他关键词。',
-  'settings.editorSubtitle': '调整实时预览的显示方式。更改会自动保存。',
+  'settings.editorSubtitle': '调整编辑与呈现行为。更改会自动保存。',
   'settings.empty': '暂无可配置项。',
+  /** 设置页编辑器分组页内的组内小节标题（#163 二轮还原：侧栏只留
+   *  常规/编辑器，分类以下方组内标题呈现——group* 键族） */
   'settings.groupDisplay': '显示',
   /** 设置页「常规」分组标题（#96 general.* 设置项的归属分组） */
   'settings.generalSection': '常规',
   /** 设置页「常规」分组副文案（对齐「编辑器」分组的说明句式） */
   'settings.generalSectionDescription': '调整 Vsidian 的基础行为。更改会自动保存。',
-  /** 设置页「符号输入」分组（#163 验收反馈细化：editor.symbol* 输入行为类设置） */
-  'settings.symbolCategory': '符号输入',
-  'settings.symbolSubtitle': '符号对自动补全、选区包裹与 Tab 越界等输入行为。更改会自动保存。',
-  /** 设置页「代码块」分组（#163 验收反馈细化：codeblock.* 呈现类设置） */
-  'settings.codeblockCategory': '代码块',
-  'settings.codeblockSubtitle': '代码块卡片呈现与语法高亮。更改会自动保存。',
-  /** 设置页「图片」分组（#163 验收反馈细化：image.* 图片粘贴设置） */
-  'settings.imageCategory': '图片',
-  'settings.imageSubtitle': '粘贴图片的落盘位置与插入行为。更改会自动保存。',
+  /** 编辑器页内小节（#163 二轮还原）：editor.symbol* 输入行为类 */
+  'settings.groupSymbols': '符号输入',
+  /** 编辑器页内小节：codeblock.* 呈现类 */
+  'settings.groupCodeblock': '代码块',
+  /** 编辑器页内小节：image.* 图片粘贴设置 */
+  'settings.groupImage': '图片',
 
   // ---- keybindingSettings.（快捷键分页）----
   'keybindingSettings.title': '快捷键',

@@ -39,6 +39,21 @@ function makeView(defs: readonly SettingDefinition[]): {
   return { view, sent, parent }
 }
 
+/** 点击侧栏导航项（按显示文本定位，生产注册表口径） */
+function clickNav(parent: HTMLElement, title: string): void {
+  const nav = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
+    .find((b) => b.textContent === title)!
+  nav.click()
+}
+
+/** 编辑器页内的组内标题小节容器（#163 二轮还原：编辑器页按小节分容器） */
+function sectionByTitle(parent: HTMLElement, title: string): HTMLElement {
+  const group = [...parent.querySelectorAll('.vsidian-settings-group')]
+    .find((g) => g.querySelector('.vsidian-settings-group-title')?.textContent === title)
+  expect(group, `应渲染「${title}」小节`).toBeTruthy()
+  return group as HTMLElement
+}
+
 describe('页面结构（#33 归属与空状态）', () => {
   it('标题经 t() 取词：与字典 settings.pageTitle 同源（#93）', () => {
     const { parent } = makeView(FIXTURE_DEFS)
@@ -57,7 +72,7 @@ describe('页面结构（#33 归属与空状态）', () => {
     expect(parent.querySelectorAll('button')).toHaveLength(0)
   })
 
-  it('生产注册表（#34 起）渲染真实开关：显示行号、默认勾选', () => {
+  it('生产注册表（#34 起）渲染真实开关：显示行号在「显示」小节、默认勾选', () => {
     // #34：首个实际设置项接入后设置页不再是空状态——注册表追加定义即
     // 出现开关（#33 设计的预期演进），此处以生产定义直测渲染结果。
     // #96 起注册表含「界面语言」（string 枚举），设置页新增「常规」分组
@@ -67,26 +82,21 @@ describe('页面结构（#33 归属与空状态）', () => {
     expect(parent.querySelector(`.${SETTINGS_PAGE_CLASS_NAMES.empty}`)).toBeNull()
     // 默认分组 = 常规（首个分类）：语言项可见，无开关
     expect(parent.querySelector(`select.${SETTINGS_PAGE_CLASS_NAMES.select}`)).toBeTruthy()
-    const editorNav = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
-      .find((b) => b.textContent === '编辑器')!
-    editorNav.click()
-    // #163 验收反馈分组重组：编辑器组只含行号一个开关（符号/代码块/图片
-    // 各自成组，见「分组重组」describe）
-    const boxes = parent.querySelectorAll<HTMLInputElement>(
-      `input.${SETTINGS_PAGE_CLASS_NAMES.checkbox}`,
-    )
-    expect(boxes).toHaveLength(1)
-    const first = parent.querySelector(`.${SETTINGS_PAGE_CLASS_NAMES.itemTitle}`)
+    clickNav(parent, zhCn['settings.editorCategory'])
+    // #163 验收反馈二轮还原：分类收敛回侧栏两组，编辑器页内按小节分容器——
+    // 「显示」小节承载行号开关（其余小节见「分组重组」describe）
+    const display = sectionByTitle(parent, zhCn['settings.groupDisplay'])
+    const first = display.querySelector(`.${SETTINGS_PAGE_CLASS_NAMES.itemTitle}`)
     expect(first?.textContent).toBe(zhCn['setting.editorLineNumbers.title'])
-    expect(boxes[0]!.checked).toBe(true) // 默认开启
+    const box = display.querySelector<HTMLInputElement>(`input.${SETTINGS_PAGE_CLASS_NAMES.checkbox}`)!
+    expect(box.checked).toBe(true) // 默认开启
   })
 
-  it('符号选区包裹（#124）渲染为符号输入分组开关（#163 分组重组）：标题/说明经 t() 取词、默认勾选', () => {
+  it('符号选区包裹（#124）渲染于编辑器页符号输入小节：标题/说明经 t() 取词、默认勾选', () => {
     const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
-    const symbolNav = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
-      .find((b) => b.textContent === zhCn['settings.symbolCategory'])!
-    symbolNav.click()
-    const item = [...parent.querySelectorAll<HTMLElement>(`.${SETTINGS_PAGE_CLASS_NAMES.item}`)]
+    clickNav(parent, zhCn['settings.editorCategory'])
+    const item = [...sectionByTitle(parent, zhCn['settings.groupSymbols'])
+      .querySelectorAll<HTMLElement>(`.${SETTINGS_PAGE_CLASS_NAMES.item}`)]
       .find((el) => el.querySelector(`.${SETTINGS_PAGE_CLASS_NAMES.itemTitle}`)?.textContent ===
         zhCn['setting.symbolSelectionWrap.title'])
     expect(item, '应渲染「选区符号包裹」设置行').toBeTruthy()
@@ -96,12 +106,11 @@ describe('页面结构（#33 归属与空状态）', () => {
       .toBe(true)
   })
 
-  it('符号自动补全（#123）渲染为符号输入分组开关（#163 分组重组）：标题/说明经 t() 取词、默认勾选', () => {
+  it('符号自动补全（#123）渲染于编辑器页符号输入小节：标题/说明经 t() 取词、默认勾选', () => {
     const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
-    const symbolNav = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
-      .find((b) => b.textContent === zhCn['settings.symbolCategory'])!
-    symbolNav.click()
-    const item = [...parent.querySelectorAll<HTMLElement>(`.${SETTINGS_PAGE_CLASS_NAMES.item}`)]
+    clickNav(parent, zhCn['settings.editorCategory'])
+    const item = [...sectionByTitle(parent, zhCn['settings.groupSymbols'])
+      .querySelectorAll<HTMLElement>(`.${SETTINGS_PAGE_CLASS_NAMES.item}`)]
       .find((el) => el.querySelector(`.${SETTINGS_PAGE_CLASS_NAMES.itemTitle}`)?.textContent ===
         zhCn['setting.symbolAutocomplete.title'])
     expect(item, '应渲染「符号自动补全」设置行').toBeTruthy()
@@ -111,12 +120,11 @@ describe('页面结构（#33 归属与空状态）', () => {
       .toBe(true)
   })
 
-  it('符号 Tab 越界（#125）渲染为符号输入分组开关（#163 分组重组）：标题/说明经 t() 取词、默认勾选', () => {
+  it('符号 Tab 越界（#125）渲染于编辑器页符号输入小节：标题/说明经 t() 取词、默认勾选', () => {
     const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
-    const symbolNav = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
-      .find((b) => b.textContent === zhCn['settings.symbolCategory'])!
-    symbolNav.click()
-    const item = [...parent.querySelectorAll<HTMLElement>(`.${SETTINGS_PAGE_CLASS_NAMES.item}`)]
+    clickNav(parent, zhCn['settings.editorCategory'])
+    const item = [...sectionByTitle(parent, zhCn['settings.groupSymbols'])
+      .querySelectorAll<HTMLElement>(`.${SETTINGS_PAGE_CLASS_NAMES.item}`)]
       .find((el) => el.querySelector(`.${SETTINGS_PAGE_CLASS_NAMES.itemTitle}`)?.textContent ===
         zhCn['setting.symbolTabEscape.title'])
     expect(item, '应渲染「符号 Tab 越界」设置行').toBeTruthy()
@@ -257,21 +265,20 @@ it('扩展分页提供全局搜索入口，定位回调与清理独立于分页�
   expect(disposed).toBe(1)
 })
 
-it('分组容器（#155 容器语言）：内建分组条目包进容器，编辑器组标题在容器内', () => {
+it('分组容器（#155 容器语言）：内建分组条目包进容器，编辑器页按小节分容器', () => {
   const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
-  // 默认「常规」分组：唯一容器，条目住进容器内
+  // 默认「常规」分组：唯一容器，条目住进容器内、无组内标题
   const groups = parent.querySelectorAll('.vsidian-settings-group')
   expect(groups).toHaveLength(1)
   expect(groups[0]!.querySelectorAll(`.${SETTINGS_PAGE_CLASS_NAMES.item}`).length).toBeGreaterThan(0)
   expect(groups[0]!.querySelector('.vsidian-settings-group-title')).toBeNull()
-  // 「编辑器」分组：容器内含组标题（显示）与条目
-  const editorNav = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
-    .find((b) => b.textContent === '编辑器')!
-  editorNav.click()
-  const editorGroup = parent.querySelector('.vsidian-settings-group')!
-  expect(editorGroup.querySelector('.vsidian-settings-group-title')?.textContent)
+  // 「编辑器」分组：多个小节容器，各含组标题（显示/符号输入/…）与条目
+  clickNav(parent, zhCn['settings.editorCategory'])
+  const editorGroups = parent.querySelectorAll('.vsidian-settings-group')
+  expect(editorGroups.length).toBeGreaterThanOrEqual(2)
+  expect(editorGroups[0]!.querySelector('.vsidian-settings-group-title')?.textContent)
     .toBe(zhCn['settings.groupDisplay'])
-  expect(editorGroup.querySelectorAll(`.${SETTINGS_PAGE_CLASS_NAMES.item}`).length).toBeGreaterThan(0)
+  expect(editorGroups[0]!.querySelectorAll(`.${SETTINGS_PAGE_CLASS_NAMES.item}`).length).toBeGreaterThan(0)
 })
 
 it('样式契约：双栏独立滚动、分组容器、拨动开关、主题选中态、可见焦点及窄屏布局', async () => {
@@ -285,6 +292,8 @@ it('样式契约：双栏独立滚动、分组容器、拨动开关、主题选�
   // #155 容器语言色差与拨动开关均为纯 CSS 契约
   expect(css).toContain('--vsidian-settings-container-bg')
   expect(css).toContain('color-mix(in srgb, var(--vsidian-settings-tint) 4%')
+  // #163 二轮还原：编辑器页多小节容器，容器间留呼吸间距
+  expect(css).toMatch(/\.vsidian-settings-group \+ \.vsidian-settings-group\s*\{[^}]*margin-top:\s*20px/)
   expect(css).toMatch(/\.vsidian-settings-checkbox\s*\{[^}]*appearance:\s*none/)
   // #155 跟进：依赖灰化（dependsOn 注册表驱动）为纯 CSS 契约
   expect(css).toMatch(/\.vsidian-settings-item-disabled[^{]*\{[^}]*opacity:\s*0\.55/)
@@ -318,12 +327,10 @@ it('样式契约：详细查询两列独立滚动（#155 跟进）', async () =>
 })
 
 describe('设置项依赖灰化（#155 跟进：dependsOn 注册表驱动联动）', () => {
-  /** 切到代码块分组并取生产定义控件（卡片/行号/复制）——#163 分组重组后
-   *  codeblock.* 自成一组 */
+  /** 切到编辑器分组并取生产定义控件（卡片/行号/复制）——#163 二轮还原后
+   *  codeblock.* 是编辑器页内的「代码块」小节 */
   function editorControls(parent: HTMLElement) {
-    const editorNav = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
-      .find((b) => b.textContent === zhCn['settings.codeblockCategory'])!
-    editorNav.click()
+    clickNav(parent, zhCn['settings.editorCategory'])
     const byKey = (key: string) =>
       parent.querySelector<HTMLInputElement>(`input[data-setting-key="${key}"]`)!
     const itemOf = (key: string) =>
@@ -394,49 +401,47 @@ describe('设置项依赖灰化（#155 跟进：dependsOn 注册表驱动联动�
   })
 })
 
-describe('分组重组（#163 验收反馈：编辑器大杂烩拆分为语义分组）', () => {
+describe('分组重组二轮还原（#163 验收反馈：侧栏只留常规/编辑器，编辑器页内小节分类）', () => {
   const navTitles = (parent: HTMLElement): string[] =>
     [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
       .map((b) => b.textContent ?? '')
-  const gotoGroup = (parent: HTMLElement, title: string): void => {
-    const nav = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
-      .find((b) => b.textContent === title)!
-    nav.click()
-  }
-  const groupItemTitles = (parent: HTMLElement): string[] =>
-    [...parent.querySelectorAll(`.${SETTINGS_PAGE_CLASS_NAMES.item}`)]
+  const sectionTitles = (parent: HTMLElement): string[] =>
+    [...parent.querySelectorAll('.vsidian-settings-group-title')].map((el) => el.textContent ?? '')
+  const groupItemTitles = (parent: HTMLElement, title: string): string[] =>
+    [...sectionByTitle(parent, title).querySelectorAll(`.${SETTINGS_PAGE_CLASS_NAMES.item}`)]
       .map((el) => el.querySelector(`.${SETTINGS_PAGE_CLASS_NAMES.itemTitle}`)?.textContent ?? '')
 
-  it('侧栏呈现常规/编辑器/符号输入/代码块/图片五个内置分组（生产注册表）', () => {
+  it('侧栏只呈现常规/编辑器两个内置分组（附加分页另算）', () => {
     const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
     expect(navTitles(parent)).toEqual([
       zhCn['settings.generalSection'],
       zhCn['settings.editorCategory'],
-      zhCn['settings.symbolCategory'],
-      zhCn['settings.codeblockCategory'],
-      zhCn['settings.imageCategory'],
     ])
   })
 
-  it('编辑器组只剩行号；符号三项归符号输入组；代码块四项与图片三件套各归各组', () => {
+  it('编辑器页内小节为显示/符号输入/代码块/图片，条目按前缀归节', () => {
     const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
-    gotoGroup(parent, zhCn['settings.editorCategory'])
-    expect(groupItemTitles(parent)).toEqual([zhCn['setting.editorLineNumbers.title']])
-    gotoGroup(parent, zhCn['settings.symbolCategory'])
-    expect(groupItemTitles(parent)).toEqual([
+    clickNav(parent, zhCn['settings.editorCategory'])
+    expect(sectionTitles(parent)).toEqual([
+      zhCn['settings.groupDisplay'],
+      zhCn['settings.groupSymbols'],
+      zhCn['settings.groupCodeblock'],
+      zhCn['settings.groupImage'],
+    ])
+    expect(groupItemTitles(parent, zhCn['settings.groupDisplay']))
+      .toEqual([zhCn['setting.editorLineNumbers.title']])
+    expect(groupItemTitles(parent, zhCn['settings.groupSymbols'])).toEqual([
       zhCn['setting.symbolAutocomplete.title'],
       zhCn['setting.symbolSelectionWrap.title'],
       zhCn['setting.symbolTabEscape.title'],
     ])
-    gotoGroup(parent, zhCn['settings.codeblockCategory'])
-    expect(groupItemTitles(parent)).toEqual([
+    expect(groupItemTitles(parent, zhCn['settings.groupCodeblock'])).toEqual([
       zhCn['setting.codeblockCard.title'],
       zhCn['setting.codeblockLineNumbers.title'],
       zhCn['setting.codeblockCopyButton.title'],
       zhCn['setting.codeblockHighlight.title'],
     ])
-    gotoGroup(parent, zhCn['settings.imageCategory'])
-    expect(groupItemTitles(parent)).toEqual([
+    expect(groupItemTitles(parent, zhCn['settings.groupImage'])).toEqual([
       zhCn['setting.imagePaste.title'],
       zhCn['setting.imagePasteLocation.title'],
       zhCn['setting.imagePasteSubpath.title'],
@@ -445,7 +450,7 @@ describe('分组重组（#163 验收反馈：编辑器大杂烩拆分为语义�
 
   it('图片子路径依赖灰化（#163 验收反馈防呆）：同目录模式置灰禁改，后两种模式可用', () => {
     const { view, parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
-    gotoGroup(parent, zhCn['settings.imageCategory'])
+    clickNav(parent, zhCn['settings.editorCategory'])
     const subpathInput = parent.querySelector<HTMLInputElement>(
       'input[type="text"][data-setting-key="image.pasteSubpath"]')!
     // 默认 same-dir：子路径灰化禁改

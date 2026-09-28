@@ -81,8 +81,9 @@ try {
     // #155 跟进（真实点击路径）：依赖灰化——关掉「代码块卡片」后子项
     // 「卡内行号」「复制按钮」就地禁用并降不透明度，独立项「语法高亮」不受
     // 影响；重新开卡后子项自动解灰且值未被清除（注册表 dependsOn 驱动）。
-    // #163 分组重组：codeblock.* 自成「代码块」组——先进组再取控件
-    await page.getByRole('button', { name: zhCn['settings.codeblockCategory'], exact: true }).click()
+    // #163 二轮还原：分类收敛为编辑器页内小节——codeblock.* 控件在
+    // 「编辑器」分组页的「代码块」小节内，先进组再取控件
+    await page.getByRole('button', { name: zhCn['settings.editorCategory'], exact: true }).click()
     const cardBox = page.getByRole('checkbox', { name: zhCn['setting.codeblockCard.title'], exact: true })
     const lineNumbersBox = page.getByRole('checkbox', { name: zhCn['setting.codeblockLineNumbers.title'], exact: true })
     const copyButtonBox = page.getByRole('checkbox', { name: zhCn['setting.codeblockCopyButton.title'], exact: true })
@@ -106,10 +107,9 @@ try {
     const restorePaint = await lineNumbersBox.evaluate(el =>
       getComputedStyle(el.closest('.vsidian-settings-item')?.querySelector('.vsidian-settings-item-label')).opacity)
     assert.equal(restorePaint, '1', '解灰后不透明度恢复')
-    // #155 独立滚动骨架（绘制层，内容超一屏的分页）：主区滚动时侧栏静止；
-    // 切过分页后主区滚动复位、根元素不整体滚动。#163 分组重组后内置五组
-    // 均不超一屏——改用「快捷键」附加分页承载（条目多，天然可滚）
-    await page.getByRole('button', { name: zhCn['keybindingSettings.title'], exact: true }).click()
+    // #155 独立滚动骨架（绘制层，编辑器分组内容超一屏）：主区滚动时侧栏静止；
+    // 切过分页后主区滚动复位、根元素不整体滚动。#163 二轮还原后编辑器页
+    // 内置四小节（生产注册表 11 项）天然超一屏，直接承载本探针
     const scrollProbe = await page.evaluate(() => {
       const main = document.querySelector('.vsidian-settings-main')
       const sidebar = document.querySelector('.vsidian-settings-sidebar')
@@ -140,8 +140,7 @@ try {
     assert.equal(scrollProbe.docNotScrollable, true, '页面根不应再整体滚动')
     // #155 分组容器色差（绘制层）：容器底色 = 前景 4% 叠加正文背景，
     // 且与正文底色确有色差（色值序列化随内核以页面内同公式探针比对）。
-    // 附加分页无分组容器——先切回「代码块」组取 .vsidian-settings-group
-    await page.getByRole('button', { name: zhCn['settings.codeblockCategory'], exact: true }).click()
+    // #163 二轮还原后正停在「编辑器」分组——首个容器即「显示」小节
     const groupPaint = await page.evaluate(() => {
       const group = document.querySelector('.vsidian-settings-group')
       const probe = document.createElement('div')

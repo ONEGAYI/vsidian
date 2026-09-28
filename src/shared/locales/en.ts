@@ -24,23 +24,22 @@ export const en = {
   'settings.searchResults': 'Search results',
   'settings.searchCount': 'Settings found: {count}',
   'settings.searchEmpty': 'No matching settings found. Try other keywords.',
-  'settings.editorSubtitle': 'Adjust how the live preview is displayed. Changes are saved automatically.',
+  'settings.editorSubtitle': 'Adjust editing and presentation behavior. Changes are saved automatically.',
   'settings.empty': 'Nothing to configure yet.',
+  /** Editor-page group section titles (#163 second-pass restore: sidebar keeps
+   *  General/Editor only; categories render as in-page group titles — group* keys) */
   'settings.groupDisplay': 'Display',
   /** 设置页「常规」分组标题（#96 general.* 设置项的归属分组） */
   'settings.generalSection': 'General',
   /** 设置页「常规」分组副文案（对齐「编辑器」分组的说明句式） */
   'settings.generalSectionDescription':
     'Adjust basic Vsidian behavior. Changes save automatically.',
-  /** 设置页「符号输入」分组（#163 验收反馈细化：editor.symbol* 输入行为类设置） */
-  'settings.symbolCategory': 'Symbols',
-  'settings.symbolSubtitle': 'Symbol auto-pair completion, selection wrapping, and Tab escape input behaviors. Changes save automatically.',
-  /** 设置页「代码块」分组（#163 验收反馈细化：codeblock.* 呈现类设置） */
-  'settings.codeblockCategory': 'Code blocks',
-  'settings.codeblockSubtitle': 'Code block card presentation and syntax highlighting. Changes save automatically.',
-  /** 设置页「图片」分组（#163 验收反馈细化：image.* 图片粘贴设置） */
-  'settings.imageCategory': 'Images',
-  'settings.imageSubtitle': 'Where pasted images are stored and how they are inserted. Changes save automatically.',
+  /** Editor-page section: editor.symbol* input behaviors */
+  'settings.groupSymbols': 'Symbols',
+  /** Editor-page section: codeblock.* presentation */
+  'settings.groupCodeblock': 'Code blocks',
+  /** Editor-page section: image.* paste settings */
+  'settings.groupImage': 'Images',
 
   // ---- keybindingSettings.（快捷键分页：标题、模式标签、状态、搜索、按钮）----
   'keybindingSettings.title': 'Keybindings',

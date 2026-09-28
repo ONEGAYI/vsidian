@@ -49,16 +49,16 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, tex
   if (text) el.textContent = text
   return el
 }
-function icon(kind: 'editor' | 'keyboard' | 'search' | 'general' | 'palette' | 'book' | 'code' | 'image'): SVGSVGElement {
+function icon(kind: 'editor' | 'keyboard' | 'search' | 'general' | 'palette' | 'book'): SVGSVGElement {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
   svg.setAttribute('viewBox', '0 0 24 24')
   svg.setAttribute('aria-hidden', 'true')
   const path = document.createElementNS(svg.namespaceURI, 'path')
   // general（#96「常规」分组）：地球——语言设置的通用意象（lucide globe 形）；
-  // palette（#128 CSS 片段分页）：画笔（lucide paintbrush 形，取样式定制的意象）；
-  // code / image（#163 验收反馈分组细化）：代码括号（lucide code 形）与
-  // 图片（lucide image 形——外框 + 日 + 山，单 path 多子路径拼合）
-  path.setAttribute('d', kind === 'search' ? 'M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0' : kind === 'keyboard' ? 'M3 5h18v14H3zM6 9h1m3 0h1m3 0h1m3 0h1M6 12h1m3 0h1m3 0h1m3 0h1M7 16h10' : kind === 'general' ? 'M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10' : kind === 'palette' ? 'M14.6 3.4l6 6L11 19H5v-6L14.6 3.4zM3 21h18' : kind === 'book' ? 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z' : kind === 'code' ? 'M16 18l6-6-6-6M8 6l-6 6 6 6' : kind === 'image' ? 'M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM15 3l4 4M9 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM21 15l-4.29-4.29a1 1 0 0 0-1.42 0L6 21' : 'M14 4l6 6M3 21l5-1L21 7a2 2 0 0 0-4-4L4 16z')
+  // palette（#128 CSS 片段分页）：画笔（lucide paintbrush 形，取样式定制的意象）。
+  // #163 一轮曾为符号/代码块/图片三组新增 keyboard 复用与 code/image 形，
+  // 二轮还原为页内小节后侧栏不再使用，已随分支退役
+  path.setAttribute('d', kind === 'search' ? 'M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0' : kind === 'keyboard' ? 'M3 5h18v14H3zM6 9h1m3 0h1m3 0h1m3 0h1M6 12h1m3 0h1m3 0h1m3 0h1M7 16h10' : kind === 'general' ? 'M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10' : kind === 'palette' ? 'M14.6 3.4l6 6L11 19H5v-6L14.6 3.4zM3 21h18' : kind === 'book' ? 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z' : 'M14 4l6 6M3 21l5-1L21 7a2 2 0 0 0-4-4L4 16z')
   svg.append(path)
   return svg
 }
@@ -197,10 +197,10 @@ export class SettingsPageView {
     }
     return typeof raw === 'string' && raw.length <= def.maxLength ? raw : def.default
   }
-  /** 分组规则（#96 general 前缀；#163 验收反馈细化）：键前缀定组——
-   *  general.* 常规、editor.symbol* 符号输入、codeblock.* 代码块、
-   *  image.* 图片，其余 editor.* 编辑器。键名即持久化标识，分组纯展示
-   *  归属（重组零迁移：已存设置值不受影响） */
+  /** 分组规则（#96 general 前缀；#163 验收反馈二轮还原）：侧栏只分
+   *  general.* 常规与其余 editor.* 编辑器两组；分类职责由编辑器页内的
+   *  组内小节承担（显示/符号输入/代码块/图片，editorSectionDefs）。
+   *  键名即持久化标识，分组纯展示归属（重组零迁移：已存设置值不受影响） */
   private generalDefs(): readonly SettingDefinition[] {
     return this.defs.filter((d) => d.key.startsWith('general.'))
   }
@@ -213,28 +213,31 @@ export class SettingsPageView {
   private imageDefs(): readonly SettingDefinition[] {
     return this.defs.filter((d) => d.key.startsWith('image.'))
   }
+  /** 编辑器页「显示」小节：非 general 且不属其他小节的 editor.* 定义 */
+  private displayDefs(): readonly SettingDefinition[] {
+    return this.editorDefs().filter(
+      (d) => !d.key.startsWith('editor.symbol') && !d.key.startsWith('codeblock.') && !d.key.startsWith('image.'))
+  }
   private editorDefs(): readonly SettingDefinition[] {
-    return this.defs.filter(
-      (d) => !d.key.startsWith('general.') && !d.key.startsWith('editor.symbol') &&
-        !d.key.startsWith('codeblock.') && !d.key.startsWith('image.'))
+    return this.defs.filter((d) => !d.key.startsWith('general.'))
+  }
+  /** 编辑器页内小节（顺序即渲染顺序）；空小节由调用方跳过不渲染 */
+  private editorSectionDefs(): Array<{ titleKey: MessageKey; defs: () => readonly SettingDefinition[] }> {
+    return [
+      { titleKey: 'settings.groupDisplay', defs: () => this.displayDefs() },
+      { titleKey: 'settings.groupSymbols', defs: () => this.symbolDefs() },
+      { titleKey: 'settings.groupCodeblock', defs: () => this.codeblockDefs() },
+      { titleKey: 'settings.groupImage', defs: () => this.imageDefs() },
+    ]
   }
   private categories() {
-    const builtIn: Array<{ id: string; title: string; icon: 'general' | 'editor' | 'keyboard' | 'code' | 'image' }> = []
+    const builtIn: Array<{ id: string; title: string; icon: 'general' | 'editor' }> = []
+    // 空组不注册（fixture 可能只含部分前缀——空组不得占据默认激活位）
     if (this.generalDefs().length > 0) {
       builtIn.push({ id: 'general', title: t('settings.generalSection'), icon: 'general' })
     }
-    // 空组不注册（fixture 可能只含部分前缀——空组不得占据默认激活位）
     if (this.editorDefs().length > 0) {
       builtIn.push({ id: 'editor', title: t('settings.editorCategory'), icon: 'editor' })
-    }
-    if (this.symbolDefs().length > 0) {
-      builtIn.push({ id: 'symbols', title: t('settings.symbolCategory'), icon: 'keyboard' })
-    }
-    if (this.codeblockDefs().length > 0) {
-      builtIn.push({ id: 'codeblock', title: t('settings.codeblockCategory'), icon: 'code' })
-    }
-    if (this.imageDefs().length > 0) {
-      builtIn.push({ id: 'image', title: t('settings.imageCategory'), icon: 'image' })
     }
     return [...builtIn, ...this.sections]
   }
@@ -273,7 +276,8 @@ export class SettingsPageView {
       list.append(element('h2', 'vsidian-settings-heading', t('settings.searchResults')))
       // 搜索按用户看到的显示文本匹配：设置项定义经 t() 取词后参与过滤
       // （titleKey/descriptionKey → 当前语言文本，#95 键化迁移），分组与
-      // 侧栏一致（#96 general/editor 两组）
+      // 侧栏一致（#96 general/editor 两组；#163 二轮还原后内建分类只在
+      // 编辑器页内小节，不参与搜索分组列）
       const toEntries = (defs: readonly SettingDefinition[]) =>
         defs.map((d) => ({
           id: d.key,
@@ -283,9 +287,6 @@ export class SettingsPageView {
       const groups = [
         { id: 'general', title: t('settings.generalSection'), entries: toEntries(this.generalDefs()) },
         { id: 'editor', title: t('settings.editorCategory'), entries: toEntries(this.editorDefs()) },
-        { id: 'symbols', title: t('settings.symbolCategory'), entries: toEntries(this.symbolDefs()) },
-        { id: 'codeblock', title: t('settings.codeblockCategory'), entries: toEntries(this.codeblockDefs()) },
-        { id: 'image', title: t('settings.imageCategory'), entries: toEntries(this.imageDefs()) },
         ...this.sections,
       ]
       let count = 0
@@ -322,8 +323,8 @@ export class SettingsPageView {
       this.disposeSection = section.mount(content, focusEntry) ?? undefined
       return
     }
-    // 内建分组（#163 验收反馈细化）：general / editor / symbols /
-    // codeblock / image，标题与副文案均经 t() 取词。
+    // 编辑器分组（#163 二轮还原）：页内按组内标题分小节（显示/符号输入/
+    // 代码块/图片），各小节一个容器，空小节不渲染；general 组无小节。
     // #155 容器语言：组内条目包进分组容器（圆角 + 色差底），随分页统一
     if (active.id === 'general') {
       list.append(element('h2', 'vsidian-settings-heading', t('settings.generalSection')),
@@ -335,53 +336,21 @@ export class SettingsPageView {
       this.renderDefItems(group, this.generalDefs(), focusEntry)
       return
     }
-    const builtin: Array<{
-      id: string
-      defs: () => readonly SettingDefinition[]
-      headingKey: MessageKey
-      subtitleKey: MessageKey
-      groupTitleKey?: MessageKey
-    }> = [
-      {
-        id: 'editor',
-        defs: () => this.editorDefs(),
-        headingKey: 'settings.editorCategory',
-        subtitleKey: 'settings.editorSubtitle',
-        groupTitleKey: 'settings.groupDisplay',
-      },
-      {
-        id: 'symbols',
-        defs: () => this.symbolDefs(),
-        headingKey: 'settings.symbolCategory',
-        subtitleKey: 'settings.symbolSubtitle',
-      },
-      {
-        id: 'codeblock',
-        defs: () => this.codeblockDefs(),
-        headingKey: 'settings.codeblockCategory',
-        subtitleKey: 'settings.codeblockSubtitle',
-      },
-      {
-        id: 'image',
-        defs: () => this.imageDefs(),
-        headingKey: 'settings.imageCategory',
-        subtitleKey: 'settings.imageSubtitle',
-      },
-    ]
-    const group = builtin.find((g) => g.id === active.id)!
-    list.append(element('h2', 'vsidian-settings-heading', t(group.headingKey)),
-      element('p', SETTINGS_PAGE_CLASS_NAMES.subtitle, t(group.subtitleKey)))
-    const defs = group.defs()
-    if (!defs.length) {
+    list.append(element('h2', 'vsidian-settings-heading', t('settings.editorCategory')),
+      element('p', SETTINGS_PAGE_CLASS_NAMES.subtitle, t('settings.editorSubtitle')))
+    let rendered = false
+    for (const section of this.editorSectionDefs()) {
+      const defs = section.defs()
+      if (!defs.length) continue
+      const container = element('div', 'vsidian-settings-group')
+      container.append(element('h3', 'vsidian-settings-group-title', t(section.titleKey)))
+      list.append(container)
+      this.renderDefItems(container, defs, focusEntry)
+      rendered = true
+    }
+    if (!rendered) {
       list.append(element('p', SETTINGS_PAGE_CLASS_NAMES.empty, t('settings.empty')))
-      return
     }
-    const container = element('div', 'vsidian-settings-group')
-    if (group.groupTitleKey !== undefined) {
-      container.append(element('h3', 'vsidian-settings-group-title', t(group.groupTitleKey)))
-    }
-    list.append(container)
-    this.renderDefItems(container, defs, focusEntry)
   }
 
   /** 设置项行渲染（editor / general 两组共用：标题、说明与控件装配）。
