@@ -1,6 +1,7 @@
 // 代码块语法高亮引擎装配（工单 #83，规格 docs/specs/code-block-card.md）：
 // 官方 Lezer 语言包 + @codemirror/legacy-modes StreamLanguage，统一经
-// @lezer/highlight 的 classHighlighter 产出 tok-* 稳定类名——live 的 mark
+// @lezer/highlight 的 classHighlighter 产出 tok-* 稳定类名；函数调用额外补
+// tok-function（classHighlighter 会回退到变量/属性类）——live 的 mark
 // 装饰与阅读渲染（#84）共用同一词表与色板（main.css 明暗两套）。
 //
 // - 语言路由：shared/codeLangs 的语言 id → Parser（javascript/typescript
@@ -10,7 +11,7 @@
 // - 超大围栏（> 4096 行）跳过着色降级纯文本（逐键全块解析不可接受；
 //   已知限制随 #85 性能文档记录）
 // - 本模块不做 DOM/CM6 装饰（纯区间计算），node 单测直驱
-import { classHighlighter, highlightTree } from '@lezer/highlight'
+import { classHighlighter, highlightTree, tagHighlighter, tags } from '@lezer/highlight'
 import type { Parser } from '@lezer/common'
 import { StreamLanguage } from '@codemirror/language'
 import { javascript } from '@codemirror/lang-javascript'
@@ -35,7 +36,7 @@ export const HIGHLIGHT_MAX_LINES = 4096
 /** token 区间缓存上限（键 = languageId + 源码；与 mermaid 装饰缓存同量级） */
 export const HIGHLIGHT_CACHE_LIMIT = 64
 
-/** 一段高亮 token：cls 为 classHighlighter 的 tok-* 稳定类（可多词） */
+/** 一段高亮 token：cls 为基础 tok-* 类与可选的 tok-function（可多词） */
 export interface CodeTokenRange {
   from: number
   to: number
@@ -63,6 +64,13 @@ const PARSERS: Readonly<Record<string, Parser>> = {
   yaml: StreamLanguage.define(yaml).parser,
   verilog: StreamLanguage.define(verilog).parser,
 }
+
+// 仅对解析器已提供的函数调用标签追加类名；这是显式的共享函数色设计，
+// 不推测模块、只读等语言服务语义，也不保证逐词等同 VS Code 的最终着色。
+// 同时保留 classHighlighter 原类，旧 CSS 片段仍可命中。
+const functionClassHighlighter = tagHighlighter([
+  { tag: [tags.function(tags.variableName), tags.function(tags.propertyName)], class: 'tok-function' },
+])
 
 /** 语言 id 是否有着色引擎（text 与未知语言无） */
 export function hasHighlightEngine(languageId: string | null): boolean {
@@ -108,7 +116,7 @@ export function highlightCodeRanges(languageId: string | null, code: string): re
   stats.parserCalls += 1
   const tree = PARSERS[languageId!]!.parse(code)
   const ranges: CodeTokenRange[] = []
-  highlightTree(tree, classHighlighter, (from, to, cls) => {
+  highlightTree(tree, [classHighlighter, functionClassHighlighter], (from, to, cls) => {
     if (to > from) {
       ranges.push({ from, to, cls })
     }

@@ -37,6 +37,7 @@ interface Item {
   widget?: CodeCardHeaderWidget
   ln?: { value: number; widthCh: number }
   hide?: boolean
+  attrs?: Record<string, string>
 }
 
 /** 装饰集合直驱（卡片装饰来自 StateField；围栏表来自 mermaidFencesField） */
@@ -80,7 +81,7 @@ function decosFolded(text: string, anchor: number, foldAt: number): { items: Ite
 function itemsOf(set: import('@codemirror/view').DecorationSet): Item[] {
   const out: Item[] = []
   set.between(0, Number.MAX_SAFE_INTEGER, (from, to, value) => {
-    const spec = value.spec as { class?: string; widget?: CodeCardHeaderWidget | CodeCardLineNumberWidget; block?: boolean }
+    const spec = value.spec as { class?: string; widget?: CodeCardHeaderWidget | CodeCardLineNumberWidget; block?: boolean; attributes?: Record<string, string> }
     const widget = spec.widget
     const isHeader = widget instanceof CodeCardHeaderWidget
     const isLn = widget instanceof CodeCardLineNumberWidget
@@ -94,6 +95,7 @@ function itemsOf(set: import('@codemirror/view').DecorationSet): Item[] {
         ? { value: (widget as CodeCardLineNumberWidget).value, widthCh: (widget as CodeCardLineNumberWidget).widthCh }
         : undefined,
       hide: spec['class'] === undefined && spec.widget === undefined && to > from,
+      attrs: spec.attributes,
     })
   })
   return out.sort((a, b) => a.from - b.from || a.to - b.to)
@@ -148,6 +150,56 @@ describe('代码块卡片：呈现态外壳', () => {
     expect(items.filter((i) => i.cls?.includes(CODE_CARD_CLASS_NAMES.line))).toHaveLength(2)
     expect(items.filter((i) => i.hide)).toHaveLength(2)
     expect(items.find((i) => i.widget)?.widget!.label).toBe('Plain text')
+  })
+})
+
+describe('围栏行与代码文本列真实对齐（#189）', () => {
+  const INDENT_2CH = '--vsidian-code-indent: calc(2ch + 24px)'
+  const fenceRows = (items: Item[]) =>
+    items.filter((i) => i.cls?.includes(CODE_CARD_CLASS_NAMES.edgeTop) || i.cls?.includes(CODE_CARD_CLASS_NAMES.edgeBottom))
+
+  it('围栏行装饰携带 --vsidian-code-indent = 行号列宽 + 24px 间距（块内位数取列宽）', () => {
+    const items = decos(DOC, 0)
+    const fence = fenceRows(items)
+    expect(fence).toHaveLength(2)
+    for (const row of fence) {
+      expect(row.attrs?.['style'], `${row.cls}`).toBe(INDENT_2CH)
+    }
+    // ≥100 内容行 → 3 位行号列
+    const big = '```js\n' + Array.from({ length: 120 }, (_, i) => `line${i}`).join('\n') + '\n```'
+    const bigFence = fenceRows(decos(big, 0))
+    expect(bigFence[0]!.attrs?.['style']).toBe('--vsidian-code-indent: calc(3ch + 24px)')
+  })
+
+  it('行号子开关关闭 → 缩进归零（无行号列时围栏与代码文本同在 x=0）', () => {
+    const fence = fenceRows(decos(DOC, 0, { lineNumbers: false }))
+    expect(fence).toHaveLength(2)
+    for (const row of fence) {
+      expect(row.attrs?.['style']).toBe('--vsidian-code-indent: 0px')
+    }
+  })
+
+  it('空代码块（无内容行，行号不发射）→ 缩进归零', () => {
+    const fence = fenceRows(decos('a\n\n```\n```\n\nb', 0))
+    expect(fence).toHaveLength(2)
+    for (const row of fence) {
+      expect(row.attrs?.['style']).toBe('--vsidian-code-indent: 0px')
+    }
+  })
+
+  it('编辑态同样携带（围栏源码显形时的对齐不因态切换丢失）', () => {
+    const fence = fenceRows(decos(DOC, FENCE_FROM + 4))
+    expect(fence).toHaveLength(2)
+    for (const row of fence) {
+      expect(row.attrs?.['style']).toBe(INDENT_2CH)
+    }
+  })
+
+  it('同块行共享同一装饰实例语义：不同列宽块产出不同实例（缓存键含缩进）', () => {
+    const a = decos(DOC, 0).find((i) => i.cls?.includes(CODE_CARD_CLASS_NAMES.edgeTop))
+    const b = decos('```js\n' + Array.from({ length: 120 }, (_, i) => `l${i}`).join('\n') + '\n```', 0)
+      .find((i) => i.cls?.includes(CODE_CARD_CLASS_NAMES.edgeTop))
+    expect(a!.attrs?.['style']).not.toBe(b!.attrs?.['style'])
   })
 })
 
@@ -739,5 +791,48 @@ describe('头部 widget 形态', () => {
       state.field(mermaidFencesField).spans,
     )
     expect(ranges.length).toBeGreaterThan(0)
+  })
+})
+
+describe('头部按钮区与热区（#190）', () => {
+  it('按钮区顺序 [复制] [折叠]：折叠钮固定最右（收起/展开位置恒定，不挪鼠标可连续开合）', () => {
+    const dom = new CodeCardHeaderWidget('JavaScript', 'javascript', true, 'let a').toDOM()
+    const actions = dom.querySelector(`.${CODE_CARD_CLASS_NAMES.headerActions}`)!
+    const kids = [...actions.children]
+    expect(kids[0]!.classList.contains(CODE_CARD_CLASS_NAMES.copy)).toBe(true)
+    expect(kids[kids.length - 1]!.classList.contains(CODE_CARD_CLASS_NAMES.fold)).toBe(true)
+    expect(kids).toHaveLength(2)
+  })
+
+  it('收起态（copy=false）仅渲染折叠钮且仍在最右', () => {
+    const dom = new CodeCardHeaderWidget('JavaScript', 'javascript', false, 'let a', true).toDOM()
+    const actions = dom.querySelector(`.${CODE_CARD_CLASS_NAMES.headerActions}`)!
+    expect(actions.children).toHaveLength(1)
+    expect(actions.children[0]!.classList.contains(CODE_CARD_CLASS_NAMES.fold)).toBe(true)
+  })
+
+  it('头部热区：对 header 根 dispatch click 不抛错（折叠派发真实链路交浏览器测试）', () => {
+    const dom = new CodeCardHeaderWidget('JavaScript', 'javascript', true, 'let a').toDOM()
+    expect(() => {
+      dom.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      dom.querySelector(`.${CODE_CARD_CLASS_NAMES.headerLabel}`)!
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    }).not.toThrow()
+  })
+
+  it('按钮事件不冒泡到头部热区：click/mousedown 在按钮内被 stopPropagation（折叠仅由按钮自身触发一次）', () => {
+    const dom = new CodeCardHeaderWidget('JavaScript', 'javascript', true, 'let a').toDOM()
+    const clicks = vi.fn()
+    const mousedowns = vi.fn()
+    dom.addEventListener('click', clicks)
+    dom.addEventListener('mousedown', mousedowns)
+    dom.querySelector(`button.${CODE_CARD_CLASS_NAMES.fold}`)!
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    dom.querySelector(`button.${CODE_CARD_CLASS_NAMES.fold}`)!
+      .dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    dom.querySelector(`button.${CODE_CARD_CLASS_NAMES.copy}`)!
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(clicks).not.toHaveBeenCalled()
+    expect(mousedowns).not.toHaveBeenCalled()
   })
 })

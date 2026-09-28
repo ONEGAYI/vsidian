@@ -2752,6 +2752,30 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "introduced": "#79（2026-09-26）"
   },
   {
+    "id": "live-code-card-wrap",
+    "domain": "chrome",
+    "category": "code-card",
+    "kind": "selector",
+    "target": ".vsidian-code-card-wrap（+ -off 修饰，仅阅读侧发射）",
+    "purpose": "折行开关按钮（#191）：点击全文联动开/关阅读视图代码块自动折行——开启为现行 pre-wrap 折行，关闭为代码区横向滚动（行号列 sticky 钉左、头部固定）；-off 为已关闭修饰（经 filter: opacity(0.4) 弱化，与显隐 opacity 正交）。仅阅读卡片头部装配：Live 恒折行（CM6 折行是编辑器级 facet 无法按块关）。状态为视图态，不持久化、不设设置项（与折叠 chevron 同语义）。",
+    "views": [
+      "reading"
+    ],
+    "states": "折行开启（默认）/ 关闭（-off，title 提示开启）；与复制钮同口径进卡即显（默认隐藏、悬停卡片显现）；收起态不发射。",
+    "dom": "头部按钮区最左（[折行] [复制] [折叠]）。",
+    "example": ".vsidian-code-card-wrap-off {\n  filter: opacity(0.4);\n}",
+    "obsidian": {
+      "counterpart": "无对应（Obsidian 代码块无逐块折行开关）",
+      "support": "none"
+    },
+    "verification": [
+      "codeCardPaintCssContract：进卡即显显隐体系与 -off filter 弱化",
+      "浏览器 codeCardChrome：折行/nowrap 几何、sticky 行号与联动断言",
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"live-code-card-wrap-reading\"] 探针命中"
+    ],
+    "introduced": "#191（2026-09-28）"
+  },
+  {
     "id": "live-code-card-linenumber",
     "domain": "chrome",
     "category": "code-card",
@@ -2780,13 +2804,13 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "code-card",
     "kind": "selector",
     "target": "tok-* token 族（tok-keyword / tok-string 等，@lezer/highlight classHighlighter 词表）",
-    "purpose": "语法高亮 token span，两视图共用同一类名与明暗色板（Dark+/Light+ 取色，非 Obsidian 主题变量）；Prism 原名 .token-* 不提供（见 limit-prism-tokens）。",
+    "purpose": "语法高亮 token span，两视图及已注册语言共用同一类名与明暗色板；解析器已有函数标签时在旧变量/属性类上叠加 tok-function（基础色取自 VS Code 主题导出与逐词检查，函数色为用户选择的暖黄，非语义 token 逐语言复刻，也非 Obsidian 主题变量）；Prism 原名 .token-* 不提供（见 limit-prism-tokens）。",
     "views": [
       "live",
       "reading"
     ],
     "dom": "代码内容内 token span（live mark 装饰 / 阅读卡片行内 span）。",
-    "example": ".tok-keyword {\n  color: #c678dd;\n}",
+    "example": ".tok-keyword {\n  color: #af00db;\n}",
     "obsidian": {
       "counterpart": ".token-*（Prism 词表方向）/ .cm-* token 族",
       "support": "native"
@@ -4001,6 +4025,14 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     "dom": "The header button area.",
     "obsidian": {
       "counterpart": ".code-styler-header-container::after (the fold arrow direction)"
+    }
+  },
+  "live-code-card-wrap": {
+    "purpose": "The word-wrap toggle (#191): one click toggles auto word wrap for all reading-view code blocks at once — on is the current pre-wrap wrapping, off makes the code area scroll horizontally (the line-number column sticks to the left edge, the header stays fixed); -off is the wrapped-off modifier (weakened via filter: opacity(0.4), orthogonal to the show/hide opacity). Reading-card header only: live view always wraps (CM6 wrapping is an editor-level facet and cannot be turned off per block). A view state, not persisted and with no setting (same semantics as the fold chevron).",
+    "states": "Wrapping on (default) / off (-off, the title offers to turn it back on); revealed on card hover like the copy button (hidden by default); not emitted in the collapsed state.",
+    "dom": "The leftmost slot of the header button area ([wrap] [copy] [fold]).",
+    "obsidian": {
+      "counterpart": "No counterpart (Obsidian code blocks have no per-block wrap toggle)"
     }
   },
   "live-code-card-linenumber": {

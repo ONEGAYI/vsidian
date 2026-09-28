@@ -90,4 +90,6 @@ export const CHROME_CONTRACT_PROBES: readonly ChromeContractProbe[] = [
   { id: 'live-fm-row-reading', selector: '#app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-row', expected: 'rgb(233, 0, 1)' },
   { id: 'live-fm-cell-reading', selector: '#app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-cell', expected: 'rgb(234, 0, 1)' },
   { id: 'live-fm-header-live', selector: '#app .vsidian-view-live .vsidian-fm-header', expected: 'rgb(237, 0, 1)' },
+  // ---- 代码块卡片折行开关（#191；仅阅读侧发射，非收起块头部常驻在场） ----
+  { id: 'live-code-card-wrap-reading', selector: '#app .vsidian-view-reading .vsidian-code-card-wrap', expected: 'rgb(238, 0, 1)' },
 ]

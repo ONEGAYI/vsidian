@@ -446,3 +446,8 @@
 #app .vsidian-view-live .vsidian-fm-header {
   --vsidian-chrome-probe: rgb(237, 0, 1);
 }
+
+/* ---- 代码块卡片折行开关（#191；仅阅读侧发射，-off 为交互态修饰） ---- */
+#app .vsidian-view-reading .vsidian-code-card-wrap {
+  --vsidian-chrome-probe: rgb(238, 0, 1);
+}

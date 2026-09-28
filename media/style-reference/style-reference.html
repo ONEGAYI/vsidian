@@ -1083,7 +1083,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
   </section>
   <section class="domain" data-domain="chrome">
-    <h1 style="font-size:19px;margin-bottom:4px">界面域（55 条）</h1>
+    <h1 style="font-size:19px;margin-bottom:4px">界面域（56 条）</h1>
     <p class="note">界面域条目（#133 起逐项核实）：静态入口经探针在真实渲染中断言，交互态入口由浏览器/集成套件按行为路径验证；第三方渲染器（KaTeX/Mermaid）内部 DOM 不承诺为稳定接口（见各域「限制」类目）。</p>
     <h2>界面域 · 公式（5）</h2>
     <article class="entry" id="live-math">
@@ -1242,7 +1242,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：集成「图表弹窗」（#111/#133）：cssProbe.chromePopup 打开期间样式观测 + 刷新后保持；浏览器 graphicPopup：原生键鼠路径（缩放/平移/Esc/导出）与样式保持</p>
       <p class="life">引入：#111（2026-09-26）</p>
     </article>
-    <h2>界面域 · 代码块卡片（10）</h2>
+    <h2>界面域 · 代码块卡片（11）</h2>
     <article class="entry" id="live-code-card-line">
       <h3><code>.vsidian-code-card-line</code><span class="eid">live-code-card-line</span></h3>
       <p class="purpose">卡片覆盖的行级类：live 为源行级（含被清空的围栏行与全部代码行，承载卡片底色），阅读为卡内行 span（与 live 同类名，跨视图同口径）；与正文域 live-code-line 并行（live 卡片开启时两者都在场）。</p>
@@ -1327,6 +1327,20 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：集成代码卡片用例（codecard.test.fold 折叠链路）</p>
       <p class="life">引入：#79（2026-09-26）</p>
     </article>
+    <article class="entry" id="live-code-card-wrap">
+      <h3><code>.vsidian-code-card-wrap（+ -off 修饰，仅阅读侧发射）</code><span class="eid">live-code-card-wrap</span></h3>
+      <p class="purpose">折行开关按钮（#191）：点击全文联动开/关阅读视图代码块自动折行——开启为现行 pre-wrap 折行，关闭为代码区横向滚动（行号列 sticky 钉左、头部固定）；-off 为已关闭修饰（经 filter: opacity(0.4) 弱化，与显隐 opacity 正交）。仅阅读卡片头部装配：Live 恒折行（CM6 折行是编辑器级 facet 无法按块关）。状态为视图态，不持久化、不设设置项（与折叠 chevron 同语义）。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+<p class="states">状态：折行开启（默认）/ 关闭（-off，title 提示开启）；与复制钮同口径进卡即显（默认隐藏、悬停卡片显现）；收起态不发射。</p>
+      <p class="obsidian">Obsidian 对应：无对应（Obsidian 代码块无逐块折行开关）</p>
+
+      <p class="dom">DOM 关系：头部按钮区最左（[折行] [复制] [折叠]）。</p>
+      <pre><code>.vsidian-code-card-wrap-off {
+  filter: opacity(0.4);
+}</code></pre>
+      <p class="verify">验证：codeCardPaintCssContract：进卡即显显隐体系与 -off filter 弱化；浏览器 codeCardChrome：折行/nowrap 几何、sticky 行号与联动断言；集成「界面域样式契约」（#133）：chromeSelectors[&quot;live-code-card-wrap-reading&quot;] 探针命中</p>
+      <p class="life">引入：#191（2026-09-28）</p>
+    </article>
     <article class="entry" id="live-code-card-linenumber">
       <h3><code>.vsidian-code-card-linenumber</code><span class="eid">live-code-card-linenumber</span></h3>
       <p class="purpose">卡内行号（每块从 1，围栏行不占号；大围栏分块跨片连续）；live 为行首 widget、阅读为行 span（同类名）；与文档行号槽（源文件行号）两列并存互不遮挡。</p>
@@ -1343,14 +1357,14 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
     <article class="entry" id="tok-tokens">
       <h3><code>tok-* token 族（tok-keyword / tok-string 等，@lezer/highlight classHighlighter 词表）</code><span class="eid">tok-tokens</span></h3>
-      <p class="purpose">语法高亮 token span，两视图共用同一类名与明暗色板（Dark+/Light+ 取色，非 Obsidian 主题变量）；Prism 原名 .token-* 不提供（见 limit-prism-tokens）。</p>
+      <p class="purpose">语法高亮 token span，两视图及已注册语言共用同一类名与明暗色板；解析器已有函数标签时在旧变量/属性类上叠加 tok-function（基础色取自 VS Code 主题导出与逐词检查，函数色为用户选择的暖黄，非语义 token 逐语言复刻，也非 Obsidian 主题变量）；Prism 原名 .token-* 不提供（见 limit-prism-tokens）。</p>
       <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-native">native</span></p>
 
       <p class="obsidian">Obsidian 对应：.token-*（Prism 词表方向）/ .cm-* token 族</p>
 
       <p class="dom">DOM 关系：代码内容内 token span（live mark 装饰 / 阅读卡片行内 span）。</p>
       <pre><code>.tok-keyword {
-  color: #c678dd;
+  color: #af00db;
 }</code></pre>
       <p class="verify">验证：codeHighlight 单元：词表契约（tok-* 两端共用）；集成「界面域样式契约」（#133）：chromeSelectors[&quot;tok-tokens-live&quot;/&quot;tok-tokens-reading&quot;] 探针命中</p>
       <p class="life">引入：#83（2026-09-26）</p>
