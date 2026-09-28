@@ -1,0 +1,552 @@
+// 统一右键菜单内核（#183，规格 docs/specs/context-menu.md）：菜单项描述符、
+// 内置表（as const 编译期）、运行期覆写层（模块私有 Map + 访问器，照
+// graphicRenderers 惯例）、渲染模型构建（分组/排序/when 过滤/enable 传播/
+// 空组收起）、安全降级区域判定、键位提示派生与定位纯函数（视口 clamp 与
+// 子菜单左右翻转）。零 vscode/DOM 依赖，node 单测直驱。
+//
+// 接入清单（新增菜单项的三步，规格「扩展约定（落档）」）：
+// 1. CONTEXT_MENU_ITEMS 登记描述符——`when` / `enable` 必须显式声明，安全
+//    降级矩阵不得因新项破例（结构敏感区 zone!=='normal' 时写操作置灰）；
+// 2. 图标位：iconKey 必须已在 CONTEXT_MENU_ICON_KEYS 登记（资产接入归图标
+//    票——渲染层按 CSS 有无规则自然降级留空，资产后补即生效）；
+// 3. 语言包双写（en/zh-cn）+ 契约测试钉住（本文件 describe「描述符表契约」）。
+//
+// 既有边界（不得顺手放宽）：阅读模式与 frontmatter 头区不接管（zone 判定
+// 返回 null）；内置项不可删只可隐藏；提示列数据只派生自键位注册表（剪贴板
+// 四项固定提示除外）；内置菜单最深两级（children 数据结构支持任意嵌套，
+// 运行期注册不受限）。
+import type { MessageKey } from './locales/en'
+import { atxHeadingOf, blockRangeOfLine, scanFenceBlocks } from './blockId'
+import { isRenderedFenceInfo } from './mermaid'
+import { formatBindingLabel, getEffectiveBindings, type KeybindingOverrides } from './keybindings'
+
+/** 右键命中区域（安全降级矩阵的行维度；null = 不接管） */
+export type ContextMenuZone = 'normal' | 'table' | 'fence' | 'graphic'
+
+/** 块链接目标（迁自 blockMenu 的 BlockMenuTarget，语义不变） */
+export interface ContextMenuBlockTarget {
+  /** 行索引闭区间（LF 系，与 CM6 doc 同坐标） */
+  block: { start: number; end: number }
+  /** 命中行为 ATX 标题行时的标题（行面字面文本，含行内标记） */
+  heading: { level: number; text: string } | null
+}
+
+/** 打开菜单时采集的判定输入快照（when/enable/checked 谓词的唯一数据面） */
+export interface MenuContextSnapshot {
+  zone: ContextMenuZone
+  hasSelection: boolean
+  blockTarget: ContextMenuBlockTarget | null
+}
+
+/** 上下文谓词（纯函数；输入只认 MenuContextSnapshot） */
+export type MenuPredicate = (ctx: MenuContextSnapshot) => boolean
+
+/** 菜单项描述符（注册单位；children 支持任意嵌套，内置表最深两级） */
+export interface MenuItemDescriptor {
+  id: string
+  /** 簇 id（正文菜单须在 CONTEXT_MENU_GROUP_ORDER 登记；其他场景组按首现顺序排后） */
+  group: string
+  /** 组内排序键（稳定排序） */
+  order: number
+  labelKey: MessageKey
+  /** 命令标识（formatOperations id / 内建命令名 / 运行期自定义） */
+  command: string
+  /** 图标 key（须存在于 CONTEXT_MENU_ICON_KEYS；与 badge 互斥） */
+  iconKey?: string
+  /** 文字徽标（如 H1–H6；与 iconKey 互斥） */
+  badge?: string
+  /** 上下文显隐谓词（缺省可见；隐藏只用于显隐规则声明的场合） */
+  when?: MenuPredicate
+  /** 置灰谓词（缺省可用；置灰项仍显示——保住可发现性） */
+  enable?: MenuPredicate
+  /** 勾选态谓词（段落设置为首个消费者；文本格式类不接） */
+  checked?: MenuPredicate
+  children?: readonly MenuItemDescriptor[]
+  danger?: boolean
+  /** 覆写层专用：隐藏不删（内置项保底可用性的载体） */
+  hidden?: boolean
+}
+
+/** 簇序（组间分隔线的落点 = 组边界；渲染按此序产出组） */
+export const CONTEXT_MENU_GROUP_ORDER = ['link', 'blockFormat', 'clipboard'] as const
+export type ContextMenuGroupId = (typeof CONTEXT_MENU_GROUP_ORDER)[number]
+
+/** 图标 key 表（规格图标清单全量：复用 16 + 需生成接线 10 + 备用记账 4。
+ *  资产生成与 quick-action-icons.py KEYS 的两表同步归图标接线票；渲染层
+ *  按 CSS 有无 data-icon 规则降级留空，key 先行登记不阻塞内核。 */
+export const CONTEXT_MENU_ICON_KEYS = [
+  // 复用现有快速操作图标资产
+  'link', 'bold', 'italic', 'strikethrough', 'highlight', 'inlineCode', 'inlineMath',
+  'clearInline', 'bulletList', 'orderedList', 'taskList', 'quote', 'table',
+  'horizontalRule', 'codeBlock', 'blockMath',
+  // 需 AI 新生成（接线）
+  'externalLink', 'textFormat', 'paragraphStyle', 'insertPlus', 'normalText',
+  'cut', 'copy', 'paste', 'selectAll', 'comment',
+  // 备用（项不做，显式记账）
+  'pastePlain', 'media', 'footnote', 'callout',
+] as const
+
+/** 结构敏感区谓词（表格单元格/围栏代码/图形块——写操作置灰的矩阵单元） */
+const structureSensitive = (ctx: MenuContextSnapshot): boolean => ctx.zone !== 'normal'
+/** 簇 1 新增链接与簇 2 全簇的 enable（矩阵：结构敏感区置灰） */
+const enabledOutsideStructure = (ctx: MenuContextSnapshot): boolean => !structureSensitive(ctx)
+const hasSelection = (ctx: MenuContextSnapshot): boolean => ctx.hasSelection
+
+/** 文本格式子项（簇 2.1）——id/command/iconKey 与 formatOperations 同名 */
+const textFormatChildren: readonly MenuItemDescriptor[] = [
+  { id: 'bold', group: 'blockFormat', order: 0, command: 'bold', labelKey: 'format.bold', iconKey: 'bold', enable: enabledOutsideStructure },
+  { id: 'italic', group: 'blockFormat', order: 1, command: 'italic', labelKey: 'format.italic', iconKey: 'italic', enable: enabledOutsideStructure },
+  { id: 'strikethrough', group: 'blockFormat', order: 2, command: 'strikethrough', labelKey: 'format.strikethrough', iconKey: 'strikethrough', enable: enabledOutsideStructure },
+  { id: 'highlight', group: 'blockFormat', order: 3, command: 'highlight', labelKey: 'format.highlight', iconKey: 'highlight', enable: enabledOutsideStructure },
+  { id: 'inlineCode', group: 'blockFormat', order: 4, command: 'inlineCode', labelKey: 'format.inlineCode', iconKey: 'inlineCode', enable: enabledOutsideStructure },
+  { id: 'inlineMath', group: 'blockFormat', order: 5, command: 'inlineMath', labelKey: 'format.inlineMath', iconKey: 'inlineMath', enable: enabledOutsideStructure },
+  { id: 'htmlComment', group: 'blockFormat', order: 6, command: 'htmlComment', labelKey: 'format.htmlComment', iconKey: 'comment', enable: enabledOutsideStructure },
+  { id: 'clearInline', group: 'blockFormat', order: 7, command: 'clearInline', labelKey: 'format.clearInline', iconKey: 'clearInline', enable: enabledOutsideStructure },
+]
+
+/** 段落设置子项（簇 2.2；H1–H6 用文字徽标不经生图；checked 接线归内容票） */
+const paragraphChildren: readonly MenuItemDescriptor[] = [
+  { id: 'bulletList', group: 'blockFormat', order: 0, command: 'bulletList', labelKey: 'format.bulletList', iconKey: 'bulletList', enable: enabledOutsideStructure },
+  { id: 'orderedList', group: 'blockFormat', order: 1, command: 'orderedList', labelKey: 'format.orderedList', iconKey: 'orderedList', enable: enabledOutsideStructure },
+  { id: 'taskList', group: 'blockFormat', order: 2, command: 'taskList', labelKey: 'format.taskList', iconKey: 'taskList', enable: enabledOutsideStructure },
+  { id: 'heading1', group: 'blockFormat', order: 3, command: 'heading1', labelKey: 'format.heading1', badge: 'H1', enable: enabledOutsideStructure },
+  { id: 'heading2', group: 'blockFormat', order: 4, command: 'heading2', labelKey: 'format.heading2', badge: 'H2', enable: enabledOutsideStructure },
+  { id: 'heading3', group: 'blockFormat', order: 5, command: 'heading3', labelKey: 'format.heading3', badge: 'H3', enable: enabledOutsideStructure },
+  { id: 'heading4', group: 'blockFormat', order: 6, command: 'heading4', labelKey: 'format.heading4', badge: 'H4', enable: enabledOutsideStructure },
+  { id: 'heading5', group: 'blockFormat', order: 7, command: 'heading5', labelKey: 'format.heading5', badge: 'H5', enable: enabledOutsideStructure },
+  { id: 'heading6', group: 'blockFormat', order: 8, command: 'heading6', labelKey: 'format.heading6', badge: 'H6', enable: enabledOutsideStructure },
+  { id: 'headingNone', group: 'blockFormat', order: 9, command: 'headingNone', labelKey: 'format.headingNone', iconKey: 'normalText', enable: enabledOutsideStructure },
+  { id: 'quote', group: 'blockFormat', order: 10, command: 'quote', labelKey: 'format.quote', iconKey: 'quote', enable: enabledOutsideStructure },
+]
+
+/** 插入子项（簇 2.3；表格与快速操作条建表同源入口 command=insertTable） */
+const insertChildren: readonly MenuItemDescriptor[] = [
+  { id: 'insertTable', group: 'blockFormat', order: 0, command: 'insertTable', labelKey: 'format.insertTable', iconKey: 'table', enable: enabledOutsideStructure },
+  { id: 'horizontalRule', group: 'blockFormat', order: 1, command: 'horizontalRule', labelKey: 'format.horizontalRule', iconKey: 'horizontalRule', enable: enabledOutsideStructure },
+  { id: 'codeBlock', group: 'blockFormat', order: 2, command: 'codeBlock', labelKey: 'format.codeBlock', iconKey: 'codeBlock', enable: enabledOutsideStructure },
+  { id: 'blockMath', group: 'blockFormat', order: 3, command: 'blockMath', labelKey: 'format.blockMath', iconKey: 'blockMath', enable: enabledOutsideStructure },
+]
+
+/** 内置项编译期表（照 formatOperations 惯例；运行期覆写层的首个注册者） */
+export const CONTEXT_MENU_ITEMS = [
+  // ---- 簇 1：链接 ----
+  { id: 'insertWikilink', group: 'link', order: 0, command: 'wikilink', labelKey: 'format.wikilink', iconKey: 'link', enable: enabledOutsideStructure },
+  { id: 'insertExternalLink', group: 'link', order: 1, command: 'link', labelKey: 'format.link', iconKey: 'externalLink', enable: enabledOutsideStructure },
+  { id: 'copyHeadingLink', group: 'link', order: 2, command: 'copyHeadingLink', labelKey: 'contextMenu.copyHeadingLink', iconKey: 'link', when: (ctx: MenuContextSnapshot) => ctx.blockTarget?.heading != null },
+  { id: 'copyBlockLink', group: 'link', order: 3, command: 'copyBlockLink', labelKey: 'contextMenu.copyBlockLink', iconKey: 'link', when: (ctx: MenuContextSnapshot) => ctx.blockTarget != null },
+  // ---- 簇 2：块与格式（全部带子菜单）----
+  { id: 'textFormat', group: 'blockFormat', order: 0, command: 'textFormat', labelKey: 'contextMenu.textFormat', iconKey: 'textFormat', enable: enabledOutsideStructure, children: textFormatChildren },
+  { id: 'paragraphStyle', group: 'blockFormat', order: 1, command: 'paragraphStyle', labelKey: 'contextMenu.paragraphStyle', iconKey: 'paragraphStyle', enable: enabledOutsideStructure, children: paragraphChildren },
+  { id: 'insert', group: 'blockFormat', order: 2, command: 'insert', labelKey: 'contextMenu.insert', iconKey: 'insertPlus', enable: enabledOutsideStructure, children: insertChildren },
+  // ---- 簇 3：剪贴板（键位沿用 CM6 默认，提示列固定显示）----
+  { id: 'cut', group: 'clipboard', order: 0, command: 'cut', labelKey: 'contextMenu.cut', iconKey: 'cut', enable: hasSelection },
+  { id: 'copy', group: 'clipboard', order: 1, command: 'copy', labelKey: 'contextMenu.copy', iconKey: 'copy', enable: hasSelection },
+  { id: 'paste', group: 'clipboard', order: 2, command: 'paste', labelKey: 'contextMenu.paste', iconKey: 'paste' },
+  { id: 'selectAll', group: 'clipboard', order: 3, command: 'selectAll', labelKey: 'contextMenu.selectAll', iconKey: 'selectAll' },
+] as const satisfies readonly MenuItemDescriptor[]
+
+// ---- 覆写层（模块私有 Map + 访问器；内置 = 第一个注册者，无第二套渲染路径）----
+
+interface RegistryEntry {
+  descriptor: MenuItemDescriptor
+  /** 来源标签（'builtin' 或运行期注册方标识；后注册者胜时被覆盖） */
+  source: string
+}
+
+const registry = new Map<string, RegistryEntry>()
+
+/** 运行期条目的还原栈（cleanup 时恢复被覆盖的前一条目） */
+const restoreStack = new Map<string, RegistryEntry | null>()
+
+function seedBuiltin(): void {
+  if (registry.size > 0) {
+    return
+  }
+  for (const def of flattenDefs(CONTEXT_MENU_ITEMS)) {
+    registry.set(def.id, { descriptor: def, source: 'builtin' })
+  }
+}
+
+function flattenDefs(defs: readonly MenuItemDescriptor[]): MenuItemDescriptor[] {
+  const out: MenuItemDescriptor[] = []
+  for (const def of defs) {
+    out.push(def)
+    if (def.children) {
+      out.push(...flattenDefs(def.children))
+    }
+  }
+  return out
+}
+
+/**
+ * 注册菜单项：新增条目或覆盖既有条目（同 id 后注册者胜；覆盖内置项时来源
+ * 更新为注册方，cleanup 后还原内置）。返回 cleanup 函数。
+ */
+export function registerContextMenuItem(
+  def: MenuItemDescriptor,
+  source = 'runtime',
+): () => void {
+  seedBuiltin()
+  const prev = registry.get(def.id) ?? null
+  registry.set(def.id, { descriptor: def, source })
+  restoreStack.set(def.id, prev)
+  return () => {
+    // 只还原未被后续注册再覆盖的槽位（后注册者胜，先注册者的 cleanup 不回滚更晚的注册）
+    if (restoreStack.get(def.id) === prev) {
+      restoreStack.delete(def.id)
+      if (prev === null) {
+        registry.delete(def.id)
+      } else {
+        registry.set(def.id, prev)
+      }
+    }
+  }
+}
+
+/**
+ * 覆写既有条目的部分字段（浅合并；children 提供时整体替换）。隐藏内置项
+ * 用 hideContextMenuItem（隐藏不删）。返回是否命中既有条目。
+ */
+export function overrideContextMenuItem(
+  id: string,
+  partial: Partial<MenuItemDescriptor>,
+  source = 'runtime',
+): boolean {
+  seedBuiltin()
+  const entry = registry.get(id)
+  if (!entry) {
+    return false
+  }
+  registry.set(id, { descriptor: { ...entry.descriptor, ...partial }, source })
+  return true
+}
+
+/** 隐藏条目（内置项保底可用性：只隐藏不删，registry 条目仍在） */
+export function hideContextMenuItem(id: string, source = 'runtime'): boolean {
+  return overrideContextMenuItem(id, { hidden: true }, source)
+}
+
+/** 覆写来源观测（排查「谁改了菜单项」） */
+export function contextMenuItemSources(): Readonly<Record<string, string>> {
+  seedBuiltin()
+  const out: Record<string, string> = {}
+  for (const [id, entry] of registry) {
+    out[id] = entry.source
+  }
+  return out
+}
+
+/** 注册表快照（渲染唯一数据源；内置项全量经此路径） */
+export function contextMenuRegistrySnapshot(): readonly MenuItemDescriptor[] {
+  seedBuiltin()
+  return [...registry.values()].map((entry) => entry.descriptor)
+}
+
+/** 测试钩子：还原注册表到内置态 */
+export function __resetContextMenuRegistryForTest(): void {
+  registry.clear()
+  restoreStack.clear()
+  seedBuiltin()
+}
+
+// ---- 渲染模型 ----
+
+/** 渲染后的菜单项（DOM 装配的直接输入；谓词已求值） */
+export interface RenderedMenuItem {
+  id: string
+  labelKey: MessageKey
+  command: string
+  iconKey?: string
+  badge?: string
+  danger: boolean
+  enabled: boolean
+  checked: boolean
+  hint?: string
+  /** 组内排序键（DOM 不消费；buildMenuModel 排序用） */
+  order: number
+  children?: readonly RenderedMenuItem[]
+}
+
+export interface RenderedMenuGroup {
+  id: string
+  items: readonly RenderedMenuItem[]
+}
+
+function renderDef(
+  def: MenuItemDescriptor,
+  ctx: MenuContextSnapshot,
+  hints: Readonly<Record<string, string>> | undefined,
+  parentDisabled: boolean,
+): RenderedMenuItem | null {
+  if (def.hidden === true) {
+    return null
+  }
+  if (def.when && !def.when(ctx)) {
+    return null
+  }
+  // enable 求值一次；父项置灰向子树传播（簇 2 整簇置灰的矩阵语义）
+  const selfEnabled = !parentDisabled && (def.enable ? def.enable(ctx) : true)
+  const children: RenderedMenuItem[] = []
+  for (const child of def.children ?? []) {
+    const rendered = renderDef(child, ctx, hints, !selfEnabled)
+    if (rendered) {
+      children.push(rendered)
+    }
+  }
+  if (def.children && def.children.length > 0 && children.length === 0) {
+    return null // 子项全数不可见：父项随之隐藏（空子菜单不可留）
+  }
+  const item: RenderedMenuItem = {
+    id: def.id,
+    labelKey: def.labelKey,
+    command: def.command,
+    danger: def.danger === true,
+    enabled: selfEnabled,
+    checked: def.checked ? def.checked(ctx) : false,
+    order: def.order,
+  }
+  if (def.iconKey !== undefined) {
+    item.iconKey = def.iconKey
+  }
+  if (def.badge !== undefined) {
+    item.badge = def.badge
+  }
+  const hint = hints?.[def.id]
+  if (hint !== undefined) {
+    item.hint = hint
+  }
+  if (children.length > 0) {
+    item.children = children
+  }
+  return item
+}
+
+/**
+ * 通用模型构建：描述符集 → 分组渲染模型。组序 = CONTEXT_MENU_GROUP_ORDER
+ * 优先 + 未登记组按首现顺序排后；组内按 order 稳定排序；可见项为零的组整组
+ * 收起（连同分隔线的落点）；组内置灰项不触发收起。大纲菜单等非注册表场景
+ * 与正文菜单共用此渲染管线。
+ */
+export function buildMenuModel(
+  defs: readonly MenuItemDescriptor[],
+  ctx: MenuContextSnapshot,
+  hints?: Readonly<Record<string, string>>,
+): readonly RenderedMenuGroup[] {
+  const byGroup = new Map<string, RenderedMenuItem[]>()
+  const groupOrder: string[] = []
+  for (const def of defs) {
+    const item = renderDef(def, ctx, hints, false)
+    if (!item) {
+      continue
+    }
+    let items = byGroup.get(def.group)
+    if (!items) {
+      items = []
+      byGroup.set(def.group, items)
+      groupOrder.push(def.group)
+    }
+    items.push(item)
+  }
+  const registeredIndex = (group: string): number => {
+    const index = (CONTEXT_MENU_GROUP_ORDER as readonly string[]).indexOf(group)
+    return index === -1 ? CONTEXT_MENU_GROUP_ORDER.length + groupOrder.indexOf(group) : index
+  }
+  const sorted = groupOrder
+    .filter((group) => (byGroup.get(group) ?? []).length > 0)
+    .sort((a, b) => registeredIndex(a) - registeredIndex(b))
+  return sorted.map((group) => {
+    const items = byGroup.get(group)!
+    items.sort((a, b) => a.order - b.order)
+    return { id: group, items }
+  })
+}
+
+/** 注册表内按 id 取覆写后的描述符（无条目时原样返回） */
+function resolveDef(def: MenuItemDescriptor): MenuItemDescriptor {
+  const entry = registry.get(def.id)
+  if (!entry) {
+    return def
+  }
+  return entry.descriptor
+}
+
+/** 递归应用覆写：内置树为骨架，每个节点（含子项）被 registry 中的版本替换 */
+function deepResolve(def: MenuItemDescriptor): MenuItemDescriptor {
+  const resolved = resolveDef(def)
+  if (!resolved.children) {
+    return resolved
+  }
+  return { ...resolved, children: resolved.children.map(deepResolve) }
+}
+
+/**
+ * 正文统一菜单模型（注册表驱动——内置全量经运行期层渲染，无第二套代码
+ * 路径）：顶级结构 = 内置树（逐节点应用覆写）+ 运行期新增顶级项（内置树
+ * 中不存在的 id）按注册顺序追加。对子项的覆写经 deepResolve 拾取，子项
+ * 不会因扁平注册表而被提升为顶级项。
+ */
+export function buildContextMenuModel(
+  ctx: MenuContextSnapshot,
+  hints?: Readonly<Record<string, string>>,
+): readonly RenderedMenuGroup[] {
+  seedBuiltin()
+  const builtinIds = new Set(flattenDefs(CONTEXT_MENU_ITEMS).map((def) => def.id))
+  const topDefs = CONTEXT_MENU_ITEMS.map(deepResolve)
+  for (const entry of registry.values()) {
+    if (!builtinIds.has(entry.descriptor.id)) {
+      topDefs.push(entry.descriptor)
+    }
+  }
+  return buildMenuModel(topDefs, ctx, hints)
+}
+
+// ---- 键位提示派生（提示列唯一数据通道：键位注册表 + 剪贴板固定提示）----
+
+/** 剪贴板四项固定提示（沿用 CM6 既有默认绑定，不新增键位注册表条目） */
+const CLIPBOARD_FIXED_HINTS: Readonly<Record<string, string>> = {
+  cut: 'Ctrl+X',
+  copy: 'Ctrl+C',
+  paste: 'Ctrl+V',
+  selectAll: 'Ctrl+A',
+}
+
+/** 菜单项 id → 当前生效键位的显示形态；未绑定不出现（不占位） */
+export function contextMenuKeybindingHints(
+  overrides: KeybindingOverrides,
+): Readonly<Record<string, string>> {
+  const out: Record<string, string> = { ...CLIPBOARD_FIXED_HINTS }
+  for (const def of flattenDefs(CONTEXT_MENU_ITEMS)) {
+    if (out[def.id] !== undefined) {
+      continue
+    }
+    const bindings = getEffectiveBindings(overrides, def.command)
+    if (bindings.length > 0) {
+      out[def.id] = formatBindingLabel(bindings[0]!)
+    }
+  }
+  return out
+}
+
+// ---- 命中判定与区域判定（安全降级矩阵的输入侧）----
+
+/**
+ * 块目标命中（迁自 blockMenu.blockMenuTargetAt，断言语义不变）：行 → 行
+ * 所属块（围栏块整块、空行分界）+ 命中行自身是否 ATX 标题行。头区与空行
+ * 返回 null（块链接两项据此隐藏；空行仍接管菜单——全域接管）。
+ */
+export function contextMenuBlockTargetAt(
+  lines: readonly string[],
+  lineIndex: number,
+  fmEndLine: number,
+): ContextMenuBlockTarget | null {
+  if (lineIndex <= fmEndLine) {
+    return null // 头区不接管：成型卡片只读；降级源码行写 ^id 只会破坏 YAML
+  }
+  const block = blockRangeOfLine(lines, lineIndex)
+  if (block === null) {
+    return null // 空行/越界不属于任何块
+  }
+  const inFence = scanFenceBlocks(lines).some(
+    (fence) => lineIndex >= fence.start && lineIndex <= fence.end,
+  )
+  const heading = inFence ? null : atxHeadingOf(lines[lineIndex]!)
+  return { block, heading }
+}
+
+/** 表格分隔行形态（与 webview/tableCells.parseTableDelimiter 的判定口径
+ *  对齐的行级近似——`|---|---|` / `--- | :---: |` / 无边界管道形态） */
+const TABLE_DELIMITER_RE = /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)*\|?\s*$/
+
+function tableRowLike(line: string): boolean {
+  return line.includes('|') && line.trim() !== ''
+}
+
+/** 命中行是否落在表格块内（连续 pipe 行组内存在分隔行） */
+function tableZoneAt(lines: readonly string[], lineIndex: number): boolean {
+  if (!tableRowLike(lines[lineIndex]!)) {
+    return false
+  }
+  let start = lineIndex
+  while (start > 0 && tableRowLike(lines[start - 1]!)) {
+    start -= 1
+  }
+  let end = lineIndex
+  while (end + 1 < lines.length && tableRowLike(lines[end + 1]!)) {
+    end += 1
+  }
+  for (let k = start; k <= end; k++) {
+    if (TABLE_DELIMITER_RE.test(lines[k]!)) {
+      return true
+    }
+  }
+  return false
+}
+
+/** 开围栏行的 info string（matchFenceOpen 同式；shared/blockId 不透出 info） */
+function fenceInfoOf(openLine: string): string {
+  const m = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(openLine)
+  return m ? (m[2] ?? '') : ''
+}
+
+/**
+ * 区域判定（全域接管的降级输入）：头区与越界返回 null（不接管，原生菜单
+ * 照常——frontmatter 头区边界沿 blockMenu 既有语义）；围栏区含开闭围栏行
+ * （渲染型围栏 = graphic，其余 = fence）；表格按行级形态学；普通行与空行
+ * 均 normal（空行接管是全域接管的验收线之一）。
+ */
+export function contextMenuZoneAt(
+  lines: readonly string[],
+  lineIndex: number,
+  fmEndLine: number,
+): ContextMenuZone | null {
+  if (lineIndex < 0 || lineIndex >= lines.length || lineIndex <= fmEndLine) {
+    return null
+  }
+  for (const fence of scanFenceBlocks(lines)) {
+    if (lineIndex >= fence.start && lineIndex <= fence.end) {
+      return isRenderedFenceInfo(fenceInfoOf(lines[fence.start]!)) ? 'graphic' : 'fence'
+    }
+  }
+  if (tableZoneAt(lines, lineIndex)) {
+    return 'table'
+  }
+  return 'normal'
+}
+
+// ---- 定位纯函数（块菜单与大纲菜单共用；子菜单翻转是大纲右置修复载体）----
+
+/**
+ * 视口系 fixed 定位（迁自 blockMenu.blockMenuPosition，语义不变）：点击点
+ * 起、右/下缘 clamp、底部放不下翻上方、再放不下 clamp 视口顶。
+ */
+export function menuViewportPosition(
+  click: { x: number; y: number },
+  menu: { w: number; h: number },
+  viewport: { width: number; height: number },
+): { left: number; top: number } {
+  const left = Math.max(0, Math.min(click.x, viewport.width - menu.w))
+  let top = click.y
+  if (top + menu.h > viewport.height) {
+    top = Math.max(0, click.y - menu.h)
+  }
+  return { left, top }
+}
+
+/**
+ * 子菜单展开侧判定：右缘放不下翻左侧（大纲面板右置时子菜单溢出屏幕的修复
+ * 载体）；两侧都放不下时取剩余空间更大侧（等空间优先右）。
+ * @param anchor 父项宿主的视口坐标区间
+ */
+export function submenuSide(
+  anchor: { left: number; right: number },
+  submenuWidth: number,
+  viewportWidth: number,
+): 'right' | 'left' {
+  if (anchor.right + submenuWidth <= viewportWidth) {
+    return 'right'
+  }
+  if (anchor.left - submenuWidth >= 0) {
+    return 'left'
+  }
+  return viewportWidth - anchor.right >= anchor.left ? 'right' : 'left'
+}
