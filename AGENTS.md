@@ -79,7 +79,7 @@ vsidian/
 ├── CLAUDE.md              # Claude 专属规则导入入口
 ├── CONTEXT.md             # 领域语言与产品边界事实源
 ├── docs/                  # 项目文档根
-│   ├── adr/      # 架构决策记录
+│   ├── adr/        # 架构决策记录
 │   │   ├── 0001-vscode-186-remote-support.md     # 兼容 VSCode 1.86 与远程
 │   │   ├── 0002-wikilink-on-demand-resolution.md # 双链按需解析不建持久索引
 │   │   ├── 0003-source-text-dual-view-editor.md  # 基于源文本的双视图编辑架构
@@ -87,12 +87,13 @@ vsidian/
 │   │   ├── 0005-viewport-rendering.md            # 全文模型与视口渲染分离
 │   │   ├── 0006-rebrand-to-vsidian.md            # 统一更名为 vsidian 的映射记录
 │   │   └── 0007-css-snippet-env-isolation.md     # CSS 片段环境隔离决策记录（#131）
-│   ├── agents/   # agent 操作约定
+│   ├── agents/     # agent 操作约定
 │   │   ├── domain.md        # 领域文档读取与维护约定
 │   │   └── issue-tracker.md # GitHub Issues 操作约定
-│   ├── design/   # 设计文档（选择器映射等）
+│   ├── design/     # 设计文档（选择器映射等）
 │   │   └── obsidian-selector-map.md # Obsidian 选择器映射表
-│   ├── perf/     # 性能实测数据与测量工具说明
+│   ├── features.md # README 功能与设置详解下沉页
+│   ├── perf/       # 性能实测数据与测量工具说明
 │   │   ├── 2026-09-browser-test-runner.md       # 浏览器测试调度实测
 │   │   ├── 2026-09-code-block-card.md           # 代码块卡片性能实测（#85）
 │   │   ├── 2026-09-live-syntax-decorations.md   # 语法树装饰与大围栏细分实测（#8）
@@ -105,10 +106,10 @@ vsidian/
 │   │   └── data/                                # 性能探针原始报告数据
 │   │       ├── browser-test-runner.json # 浏览器调度实测数据
 │   │       └── perf-report.json         # 性能探针原始报告数据
-│   ├── research/ # 技术调研报告
+│   ├── research/   # 技术调研报告
 │   │   ├── obsidian-live-preview-editor.md # Obsidian 技术栈与选型调研
 │   │   └── obsidian-viewport-rendering.md  # 视口渲染性能补充调研
-│   └── specs/    # 产品规格
+│   └── specs/      # 产品规格
 │       ├── anchor-navigation.md              # 锚点跳转规格（标题/块引用/复制块链接）
 │       ├── batch-2026-09-menu.md             # 右键菜单批次总览与决策回执
 │       ├── batch-2026-09.md                  # 2026-09 开票批次总览

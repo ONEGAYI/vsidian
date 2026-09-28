@@ -2,97 +2,87 @@
 
 English | **[中文](https://github.com/ONEGAYI/vsidian/blob/main/README.md)**
 
-An Obsidian-like Markdown editing experience in VS Code: a source-text-based editor with **live preview + reading** dual views.
+Vsidian brings an Obsidian-like Markdown editing experience to VS Code. After installing, opening a `.md` file enters live preview directly: the document renders as you read it, moving the cursor onto a heading, link, or formula reveals its source, and the rendering restores once you move on. A reading mode and the native source editor are one click away at any time.
 
-## Features
-
-- **Dual-view editor**: the live preview is backed by a full-document CodeMirror 6 instance (no DOM outside the viewport); reading mode renders markdown-it blocks mounted on demand — performance stays flat on 100k-line / 100k-block documents.
-- **Three-state cycling**: the title-bar button cycles **Live preview → Reading → Source editor**; the last-used mode is remembered globally across windows, and source positions are preserved when switching. `.md` / `.markdown` files open with Vsidian by default — right-click "Open With…" to revert to the native editor at any time. The editor toolbar also offers a Reading/Live toggle button on its right side plus a `Ctrl+Q` shortcut (source mode untouched), with the icon following the current mode.
-- **Right sidebar & outline**: the toolbar gear button opens the settings page; a toolbar toggle expands and collapses the right sidebar (thin/thick line icons, state remembered across panels), and dragging its left edge resizes it (double-click resets, arrow keys nudge, width remembered). The **Outline** panel stays in sync with every heading (ATX/Setext semantics, pseudo-headings inside code fences or frontmatter excluded); click an entry to jump to it in either view, with a persistent highlight marking the section you are reading; a six-notch "knot-string" slider sets the expansion depth, per-entry chevrons collapse manually, and scrolling auto-expands the current path; the toolbar offers jump-to-end, reset, and heading search with hit-fragment highlighting; inline heading styles (bold, italic, highlight, inline code, strikethrough) and theme heading colors carry over; the context menu provides structural commands, five copy actions, level adjustment, rename (inline markup preserved), and whole-section delete; drag entries to reorder whole sections — nothing outside the moved section is touched, and one undo rolls it all back.
-- **Table editing**: well-formed tables render as a grid; click a cell to edit, drag across cells for a rectangular selection, and copy it as a standalone Markdown table. Hover near an edge to add rows or columns; click a dotted handle to select a row or column, or drag it to reorder. Tab / Shift+Tab navigate between cells, and typing `|` inside a cell is escaped automatically; six row/column commands plus a bilingual "Create a Table" command live in the Command Palette. Column widths are distributed proportionally to content (narrow columns stay narrow), matching reading mode, and GFM alignment markers (`:-:`) apply per column.
-- **List & quote editing**: in live preview, pressing Enter on a list or quote line continues its structural prefix (ordered numbering +1 with width preserved, new task items reset to unchecked, quotes around lists carry the full prefix); pressing Enter again on an empty item exits the structure back to a plain paragraph. With the cursor right after a list marker, Backspace peels the structure off in layers (nested items outdent one level first, a top-level item loses its whole marker at once, quotes strip layer by layer). Tab / Shift+Tab indent whole lines by one level — list lines align with the nearest item above, plain lines take 2 spaces, and tables keep cell navigation. Block quotes carry a prominent purple accent bar on the left (light/dark variants; the public `--vsidian-quote-bar-color` variable can be overridden by CSS snippets).
-- **Formatting commands**: in live preview, use the Command Palette to toggle bold, italic, strikethrough, highlight, inline code, headings, lists, quotes, code blocks, and links, clear inline styling, or insert math, wikilinks, and horizontal rules. An explicit selection takes priority; without one, inline formatting targets the current word. Each action is one undo step.
-- **Frontmatter property table**: the YAML frontmatter at the document head forms a read-only two-column table card in live preview, topped by a header bar with an Edit button in the corner; the button opens a popover anchored to it where you can add, edit, or remove key/value pairs and string-array items (tag-like lists), plus an "Add property" action — input takes effect immediately and every action is one undo step. A valid frontmatter typed by hand forms automatically. The formed state never exposes source (the cursor lands past the card); nested or otherwise complex types degrade the block to editable source with nothing lost. Reading mode renders the same read-only table (header bar included).
-- **HTML comments**: `Ctrl+/` wraps or unwraps `<!-- -->` comments in one stroke in live preview (wraps the selection, or inserts an empty pair without one); comments appear dimmed in live preview and are fully hidden in reading mode, while literal `<!--` inside code blocks is left alone.
-- **Quick actions**: the pen button in the editor toolbar expands an in-flow formatting bar. Common formats, a heading-level menu, math and horizontal-rule insertion, and table creation act on the original selection; the expanded state is remembered. Formatting writes are unavailable in reading mode.
-- **Keybinding management**: the "Keybindings" page in the settings centralizes every bindable action (formatting, tables, find, view cycling, outline, etc.); record new bindings (chords supported), remove them one by one, clear all, or reset one/all to defaults — cleared bindings stay cleared across restarts and upgrades. Internal conflicts are detected by identical keys over overlapping scopes; write shortcuts only intercept keys while the live editor body has focus, leaving source mode and settings inputs untouched.
-- **Bilingual interface (English / 简体中文)**: the editor, settings page, notifications, and command titles all resolve through locale packs; the "General → Interface language" setting offers Auto / 简体中文 / English, defaults to following VS Code's display language, and applies immediately.
-- **Links, images & wikilinks**: links and `[[wikilinks]]` reveal their source as the cursor enters, and open with a single click; wikilinks support `[[note]]`, `[[path/note]]`, `[[note|alias]]`, `[[note#heading]]`, and `[[note#^block-id]]`, while `[[#heading]]` / `[[#^block-id]]` same-file anchors omit the note name; jumps land on the heading line or the first line of the target block, ambiguous names open a candidate picker, and missing targets or anchors show a hint instead of silently creating files; local images load through a host channel, and dangerous schemes such as `file://` and `javascript:` are blocked.
-- **Image paste**: pressing Ctrl+V with a clipboard image in the live preview saves it as an asset and inserts the reference at the cursor — screenshots get `Pasted image <timestamp>.png` (Obsidian-style), copied files keep their names (Windows-illegal characters sanitized, duplicates suffixed `-1`); the save location is configurable (next to the current file / under the workspace root plus subpath / next to the current file plus subpath; the subpath rejects absolute paths and `..`, missing folders are created); the insert undoes in one step and failures notify without inserting; reading mode and settings inputs are left alone, and pasting during IME composition falls through to the default.
-- **Copy block link**: right-click any block in live preview (paragraph, list, quote, table, or code block) to copy `[[note#^block-id]]`; heading lines also offer `[[note#heading]]`. If the target block has no id yet, one is generated (6 random alphanumeric characters, checked against existing ids) and written as a standalone `^id` line after a blank line following the block — Obsidian's default form, a single undoable edit — before copying. Hand-written ids in either form (standalone `^id` line after the block, or ` ^id` at the end of the block's last line) are recognized and reused. The `Ctrl+Shift+C` shortcut runs the same copy on the block under the cursor (on a heading line it copies the heading link) and is rebindable in settings.
-- **Jump target highlight**: after a wikilink or standard-link anchor jump, the target heading or paragraph is covered with a translucent yellow flash that disappears on any interaction (click, scroll, tab switch); the color is exposed via the `--vsidian-anchor-flash-background` CSS variable and can be overridden in CSS snippets, identically in live preview and reading mode.
-- **Math rendering**: inline `$…$` and block `$$…$$` LaTeX formulas render in live preview and reading mode (KaTeX bundled locally, no CDN); the cursor entering a formula reveals its source for direct editing, parse failures fall back to readable raw text, and plain dollar amounts, escapes, and code spans are never misread as math.
-- **Mermaid diagrams**: fenced code blocks tagged `mermaid` render as diagrams in live preview and reading mode (flowcharts, sequence diagrams, etc.; mermaid bundled locally and lazy-loaded, no CDN); the cursor entering a fence reveals its source for direct editing, syntax errors fall back to an error note with readable source that never swallows the rest of the document; light/dark themes are followed automatically, and links inside diagrams never navigate.
-- **Graphic code-block interactions**: rendered diagrams show a hover button group in their top-right corner — "Edit source" (live preview only; the cursor enters the fence and reveals the source) and "Open in popup" (both views; a full-screen overlay for zoomed browsing: wheel/keyboard zoom, drag panning, one-key fit-to-view, refresh from the current source, with zoom applied as vector re-layout so text stays crisp). Clicking the diagram itself no longer enters editing — the entry point is the button. Diagrams export as SVG and PNG files via the host save-as dialog (PNG degrades to SVG-only where rasterization is unsupported). Buttons, the popup, and export are driven by a renderer registry: future diagram languages inherit every interaction by registration.
-- **Code block cards**: fenced code blocks collapse into cards once the cursor leaves — a language header band (colored badge + display name), in-card line numbers, a hover copy button (written with the document's line-ending style, so CRLF documents get CRLF), and a collapse chevron; a built-in highlight engine covers 17 languages (plus plain text, with aliases, dark/light VSCode-style palettes, and plain-text fallback for unrecognized languages), looking identical across live preview and reading; rendered fences such as mermaid show the same card shell and line numbers in the editing state.
-- **Task toggling**: click a checkbox in either view to write back to the source text, with undo support.
-- **Find**: Ctrl+F / Cmd+F inside the editor (when the Vsidian editor is active).
-- **Standalone settings page**: settings live in the extension's own settings page (not the VSCode Settings UI) — category navigation and global name/description search help locate settings, with light/dark themes, narrow layouts and keyboard access. Settings are saved per user, restored on reopen and applied immediately; failed saves restore the active value with feedback.
-- **Input & sync safety**: IME composition (e.g. Chinese input) is buffered so half-typed candidates never hit the file; when an external change cannot be synced safely, a conflict banner appears and local input is never lost.
+- **Both views render only the viewport**: scrolling and editing stay responsive on large documents.
+- **Obsidian editing habits**: wikilinks and block-reference jumps, grid table editing, task checkboxes, frontmatter property tables, image paste with automatic saving, and a unified context menu — familiar operations in familiar places.
+- **Public styling surface**: a built-in CSS snippet system plus a documented style contract browsed offline and exportable as JSON, with Obsidian-name selectors and CSS variables accepted directly.
 
 ## Installation
 
-**Option 1: Extension Marketplace** (recommended)
+**Marketplace (recommended)**: search for **Vsidian** in the Extensions view of VS Code (1.86+), or open the [Marketplace page](https://marketplace.visualstudio.com/items?itemName=onegayi.vsidian); reload after installing.
 
-1. In VS Code (1.86+), search for **Vsidian** in the Extensions view, or open the [Marketplace page](https://marketplace.visualstudio.com/items?itemName=onegayi.vsidian).
-2. Install and reload; open any `.md` file to enter the live preview.
+**Manual VSIX**: download `vsidian-*.vsix` from [GitHub Releases](https://github.com/ONEGAYI/vsidian/releases), then Command Palette → "Extensions: Install from VSIX…", pick the file and reload. For Remote SSH, install the same VSIX in the remote extension host.
 
-**Option 2: Manual VSIX**
+## Feature overview
 
-Download the latest `vsidian-*.vsix` from [GitHub Releases](https://github.com/ONEGAYI/vsidian/releases), then Command Palette → "Extensions: Install from VSIX…", pick the file and reload. For Remote SSH, install the same VSIX in the remote extension host (compatibility per [ADR-0001](docs/adr/0001-vscode-186-remote-support.md)).
+### Editing & formatting
 
-## Quick reference
-
-| Action | Entry point |
+| Feature | Description |
 | --- | --- |
-| Cycle views | Title-bar button, or Command Palette "Vsidian: Switch to the next view mode"; the toolbar's dual-state button or `Ctrl+Q` toggles directly between reading and live preview |
-| Back to source editor | Title-bar pencil button, or "Vsidian: Switch to the source editor" |
-| HTML comments | `Ctrl+/` wraps or unwraps a comment (live preview body; rebindable in settings) |
-| Frontmatter properties | The Edit button on the document-head table card opens a popover to add/edit/remove key-value pairs; a valid frontmatter typed by hand forms automatically |
-| Create a table | Command Palette "Vsidian: Create a Table" (localized) |
-| Format text | Vsidian formatting commands in the Command Palette; Ctrl+B toggles bold, Ctrl+1–6 sets heading levels, and Ctrl+0 removes a heading (live editor only) |
-| Quick actions | Click the pen button in the editor toolbar, choose a format or H1–H6/paragraph from the H⌄ menu, then click the pen button again to collapse |
-| Keybindings | Settings "Keybindings" page: search actions, record new keys, clear or reset to defaults |
-| Add table rows & columns | Hover near the bottom/right edge to reveal an add strip, or use the "Table: …" commands |
-| Select and copy table cells | Drag across cells to select a rectangle; Ctrl+C / Cmd+C copies a complete Markdown table using the selection's first row as its header |
-| Delete table content | Delete / Backspace clears a partial region, removes fully selected rows/columns, or deletes a fully selected table; Backspace at the start of an empty row's first cell removes that row |
-| Reorder table rows & columns | Hover over the left/top edge for dotted handles; click to select or drag to the insertion line to move; the top row becomes the header |
-| List continuation & exit | Enter on a list/quote line continues the structure (numbering +1, new tasks unchecked); Enter on an empty item exits to a plain paragraph; Backspace right after a marker peels the structure off in layers |
-| Indent whole lines | Tab / Shift+Tab indent/outdent the cursor line or every selected line (live preview body; inside tables this is cell navigation) |
-| Find | Ctrl+F / Cmd+F |
-| Right sidebar / outline | Toolbar toggle on the right; once open, click "Outline"; drag the sidebar's left edge to resize (double-click resets) |
-| Outline interactions | Click an entry to jump; drag the slider for expansion depth; chevrons collapse; toolbar search & jump-to-end; right-click for the menu (copy / levels / rename / delete); drag entries to reorder sections |
-| Code block cards | Fences collapse into cards once the cursor leaves; hover the header to copy the whole block; click the chevron to collapse, cursor enters to expand |
-| CSS snippets | Pick a user-level folder in settings; its first-level `.css` files become per-file snippets shared across projects, loaded in filename order with individual toggles; entries may `@import` CSS from subfolders (nesting and media/supports/layer conditions) or HTTPS stylesheets and online fonts (e.g. Google Fonts), with relative images/fonts resolved per CSS file; edits apply automatically (editing an imported file reloads only the entries that depend on it), plus a manual reload entry; pause/resume all snippets from the command palette (per-file toggles are kept); references escaping the folder or symlinks are rejected with a notice |
-| Style reference | The "Style reference" settings section shows the public style contract offline: selectors, CSS variables, Obsidian-name compatibility levels (entries marked "direct" accept Obsidian names as-is) and limitations, browsed by category sidebar with per-category counts and paginated entries, generated per installed version; the contract JSON is exportable from the section toolbar or the command palette for AI/external tools |
-| Settings | "Vsidian: Open settings", or the toolbar gear button |
+| Three view states | Cycle live preview, reading, and the source editor; the last mode and scroll position are remembered across windows |
+| Unified context menu | Right-click anywhere in the live preview body for link, formatting, and clipboard clusters, with cascading submenus, icons, and shortcut hints |
+| Text formatting | Command palette and quick-action bar cover bold, italic, highlight, headings, inline code, and more; every action is rebindable |
+| Keybindings | Every action rebinds in one place (chords supported) with conflict detection, clear, and reset to defaults |
+| Find | Ctrl+F / Cmd+F (when the editor is active) |
 
-Current settings: **CSS snippets** — in the "CSS snippets" settings section, pick a user-level folder: first-level `.css` files become standalone snippets (new files start disabled), loaded in deterministic filename order (later files override earlier ones at equal specificity); entry snippets may `@import` CSS from subfolders (nested imports and standard media/supports/layer condition syntax; imported files never become standalone snippets themselves), and relative images/fonts inside a snippet resolve against that CSS file's own folder (paths with spaces and non-ASCII characters work); editing an imported file hot-reloads only the entries that depend on it, and circular imports stay bounded; entries whose references escape the snippets folder (`../` traversals, root-relative, `file:`) or resolve through symlinks outside it are rejected with a notice in the section and recover automatically once fixed; partially invalid CSS follows the browser's per-rule error recovery. `@import url(https://…)` remote stylesheets and `@font-face` online fonts (e.g. Google Fonts) load directly over the network (relative font URLs inside a remote sheet resolve against that sheet's address; HTTPS only — plaintext http is not allowed and script permissions are not expanded; on network failure or a font service refusing cross-origin requests, other snippets keep working, text falls back to backup fonts, and late-arriving fonts trigger a height remeasure that preserves the scroll position). Toggle each file, open the folder in the file manager, or reload manually; transient read failures keep the last successful styles and show a notice in the section. Manual reload only re-fetches local snippet entries; remote styles and fonts follow their server's HTTP caching, and remote content is not monitored for changes. "Vsidian: Pause all CSS snippets / Resume CSS snippets" (same entry in the settings section, no default keybinding) freezes all snippets at any time — pausing keeps per-file toggles and survives restarts, resuming reapplies the saved configuration instantly; the command runs on the host side, so the palette can recover an interface affected by snippets. The snippets folder and toggle states are stored per environment (local and each SSH remote separately, never overwriting each other). Snippets only affect the live preview and reading views and never touch input or document content; the settings page and the native source editor never load user CSS. **Style reference** — the "Style reference" settings section browses the public style contract of the installed version offline (115 entries: selectors, CSS variables, Obsidian-name compatibility levels, and limitations across content and interface domains; the interface domain covers code cards and syntax highlighting, math, diagrams (including the button group and popup), the outline panel, and the editor top bar, with every static entry verified by real-rendering probes); the guide is generated from the contract manifest and shipped with the extension. Entries marked "direct" accept Obsidian names as-is (e.g. `.cm-strong`, `.markdown-preview-view p`, `--h1-color`): elements carry both class names and variables fall back through the Obsidian name, while vsidian names (e.g. `.vsidian-strong`, `--vsidian-heading-color-1`) take precedence. Reach it via the command palette with "Vsidian: Open style reference" (no default keybinding). Entries are browsed through a category sidebar (grouped by content/interface domain, with per-category counts) and paginated 15 entries per page; search hits aggregate across categories with their source category labeled. The "Export JSON" button and the "Vsidian: Export style reference JSON" command save the machine-readable contract JSON (shipped with the extension, same source as the section, including the category table and every entry in full) to a user-chosen path for AI assistants and external tools. **interface language** (Auto by default) — follows VS Code's display language, or pin to 简体中文 / English; changes apply immediately. **Show line numbers** (on by default) — the live preview gutter shows source-file line numbers, and table segments show the first row's number; reading mode never shows line numbers. **Code block cards / in-card line numbers / copy button / syntax highlighting** (on by default) — the card appearance plus three sub-toggles; highlighting is independent of the card (plain fences stay colored with the card off).**Paste images from clipboard** (on by default) — pasting a clipboard image in the live preview saves it as an asset and inserts the reference at the cursor; **Image save location** (same folder as the file / relative to workspace root / relative to current file; same folder by default) and **Image subpath** (`assets` by default, applies to the last two modes only; absolute paths and `..` are rejected with a notice).
+### Structured content
+
+| Feature | Description |
+| --- | --- |
+| Table editing | Well-formed tables render as an editable grid: in-cell editing, rectangular selection and copy, row/column add, delete and reorder, content-proportional column widths |
+| Lists & quotes | Enter continues structure, Backspace peels it off in layers, Tab indents whole lines; nested lists and quotes fully supported |
+| Frontmatter properties | The YAML head renders as a read-only table card; a popover adds, edits, and removes properties, one undo per action |
+
+### Links & images
+
+| Feature | Description |
+| --- | --- |
+| Wikilinks & anchors | Five `[[wikilink]]` forms; `#heading` and `#^block-id` jumps land on the target, with a highlight flash on arrival |
+| Copy block link | Right-click any block to copy `[[note#^block-id]]`, generating an id when missing; `Ctrl+Shift+C` shortcut |
+| Image paste | Ctrl+V saves the clipboard image and inserts the reference at the cursor; save location and subpath are configurable |
+
+### Code blocks & diagrams
+
+| Feature | Description |
+| --- | --- |
+| Code block cards | Fences collapse into cards with a language badge, line numbers, copy, fold, and a reading-view wrap toggle; syntax colors follow the VS Code theme |
+| Diagrams & math | Mermaid diagrams and KaTeX math render in both views; diagrams zoom in a full-screen popup and export as SVG/PNG |
+
+### Outline
+
+| Feature | Description |
+| --- | --- |
+| Outline panel | Headings stay in sync; click to jump, drag to reorder whole sections, search, and fold with a depth slider |
+
+### Appearance & customization
+
+| Feature | Description |
+| --- | --- |
+| CSS snippets | First-level `.css` files in a user folder become cross-project snippets with per-file toggles, nested `@import`, and HTTPS remote styles and fonts |
+| Style reference | The public style contract browses offline with search; the contract JSON exports for AI assistants and external tools |
+| Readable line width | One slider constrains the body column in both views; 0 fills the available width, the column centers and yields to the outline panel |
+| Interface language | English and 简体中文 switch instantly, following the VS Code display language by default |
+
+The complete behavior, boundaries, and settings of each feature are documented in [docs/features.md](https://github.com/ONEGAYI/vsidian/blob/main/docs/features.md) (in Chinese).
 
 ## Known limitations
 
 - No support for Obsidian Canvas, whiteboards, the Obsidian plugin ecosystem, or note formats other than Markdown.
-- The CSP allows `img-src https:` — any https image source is reachable (a design trade-off for remote image hosting; in theory usable as a tracking pixel).
-- Tables with inconsistent column counts show as editable source instead of a grid.
-- Frontmatter table: nested objects degrade the whole block to source, and flow arrays (`[a, b]`) edit as a single value box in the popover — neither gets item-level table editing.
-- Code block cards: fences longer than 4096 lines skip syntax coloring (falling back to a plain-text card); language badges are glyph badges, not vector logos.
+- The CSP allows any https image source (a design trade-off for remote image hosting; in theory usable as a tracking pixel).
+- Very long code blocks skip syntax coloring and fall back to a plain-text card.
 
-Please report issues at [Issues](https://github.com/ONEGAYI/vsidian/issues); see [CHANGELOG](CHANGELOG.md) for version history.
-
-## Development
+## Building from source
 
 ```bash
-npm install                     # install pinned dependencies (all exact versions)
-npm run compile                 # esbuild bundles + tsc type check
-npm run test:unit               # vitest & launcher contract tests (no VSCode host)
-npm run test:browser            # Playwright native-keyboard/IME table caret regression
-npm run test:integration        # real 1.86.2 host integration tests
-npm run release:check           # package + pre-release VSIX content & size inspection
-npm run release                 # the above + create a GitHub Release with the VSIX
+npm install             # install pinned dependencies
+npm run compile         # esbuild bundles + tsc type check
+npm run test:unit       # unit tests (no VS Code host required)
+npm run test:browser    # Playwright browser regression (first run: npx playwright install chromium)
+npm run test:integration # real-host integration tests
+npm run release:check   # package the VSIX and run pre-release checks
 ```
 
-See the Chinese [README](https://github.com/ONEGAYI/vsidian/blob/main/README.md) for Windows-specific test-host details (dedicated desktop, job objects), performance measurement, and the release pipeline conventions in the repo skill [.agents/skills/release/SKILL.md](.agents/skills/release/SKILL.md).
+On Windows, integration tests launch the real VS Code host on a separate desktop by default, without disturbing the current one; the foreground mode for unattended environments and shard settings are documented in the launchers under `test/integration/`. Release conventions live in the in-repo skills (`.agents/skills/release/` and `.agents/skills/style-contract/`).
 
-## License
-
-[MIT](LICENSE)
+Please report issues at [Issues](https://github.com/ONEGAYI/vsidian/issues); see [CHANGELOG](https://github.com/ONEGAYI/vsidian/blob/main/CHANGELOG.md) for version history.
