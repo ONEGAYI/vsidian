@@ -1814,6 +1814,22 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   color: color-mix(in srgb, var(--vscode-editor-foreground, #808080) 45%, transparent);
 }
 
+/* #163 验收反馈：跳转目标高亮（双链/普通链接锚点跳转后，目标标题/段落
+   整体覆盖半透黄；用户任意操作后消失）。颜色经变量暴露（用户可覆盖的
+   CSS 接口），定义于 #app 一处、live 行级与 reading 块级两条规则同引
+   （类名跨视图同口径）；关键规则由 anchorFlashCssContract 契约钉住 */
+#app {
+  --vsidian-anchor-flash-background: rgba(255, 213, 79, 0.25);
+}
+
+#app .cm-editor .cm-scroller .cm-line.vsidian-anchor-flash {
+  background: var(--vsidian-anchor-flash-background);
+}
+
+#app .vsidian-view-reading .vsidian-anchor-flash {
+  background: var(--vsidian-anchor-flash-background);
+}
+
 /* 任务 checkbox（#9 可交互：input[type=checkbox] 替换 [ ]/[x] 标记）。
    appearance 关闭原生形态，沿用 #8 字形绘制语义（颜色跟随 VSCode 变量）；
    .vsidian-task-checked 为稳定修饰类（与 :checked 伪类双入口） */

@@ -95,6 +95,9 @@ import { MATH_CLASS_NAMES } from '../shared/math'
 import { liveMermaid } from './liveMermaid'
 // #163 验收反馈：块 id 标记 live 淡化（行尾/独立行双形态 mark 装饰）
 import { liveBlockId } from './liveBlockId'
+// #163 验收反馈：跳转目标高亮（view.locate 通道；半透黄经变量暴露，
+// 用户任意操作后消失）
+import { anchorFlash, anchorFlashClear, anchorFlashRangeOf, anchorFlashSet } from './anchorFlash'
 import { setMermaidDarkTheme } from './mermaidRender'
 import {
   closeDiagramPopup,
@@ -517,6 +520,12 @@ export class WebviewSyncController {
   private liveWrapper: HTMLElement | undefined
   /** 阅读容器（稳定类名 vsidian-view-reading，块级源锚点结构） */
   private readingContainer: HTMLElement | undefined
+
+  // ---- #163 验收反馈：跳转目标高亮的消失监听 ----
+  /** 在挂的消失监听卸载器（clearAnchorFlash 时全部执行） */
+  private anchorFlashDetachers: Array<() => void> = []
+  /** 高亮设置时刻（scroll 事件时间窗过滤——定位自身的程序滚动不误清） */
+  private anchorFlashSince = 0
   /** 阅读视图虚拟化控制器（#7：接管阅读容器的按需挂载/回收/锚点定位） */
   private readingView: VirtualReadingView | undefined
   /** CSS 片段 <link> 装配器（#128）：只增删文档级样式链，不触碰 CM6 状态；
@@ -1101,6 +1110,8 @@ export class WebviewSyncController {
     this.flushPendingViewState()
     document.removeEventListener('visibilitychange', this.flushViewportOnHide)
     window.removeEventListener('pagehide', this.flushViewportOnPageHide)
+    // #163 验收反馈：卸载跳转目标高亮的消失监听（window 级监听防泄漏）
+    this.detachAnchorFlashDismiss()
     closeDiagramPopup()
     closeFmPopover()
     setDiagramExportSender(null)
@@ -1379,7 +1390,10 @@ export class WebviewSyncController {
         break
       case 'view.mode.set':
         // 模式切换指令（宿主命令路径；webview 按钮走同一状态机）
+        // #163 验收反馈：切换模式 = 离开当前视图，跳转目标高亮随之消失——
+        // 清理置于装载之后（切换同步链内的 dispatch 会干扰阅读装载时序）
         this.setViewMode(message.mode)
+        this.clearAnchorFlash()
         break
       case 'view.find.open':
         // 查找会话（#14）：webview 内浮动面板；纯只读视图操作
@@ -1827,7 +1841,7 @@ export class WebviewSyncController {
       case 'view.locate': {
         // 定位（#10 查找/跳转入口）：光标移到源 offset；reading 滚动到块。
         // 纯视图操作——事务不带 changes，不产生编辑历史
-        this.locateOffset(message.offset)
+        this.locateOffset(message.offset, true)
         // 送达确认（#163 验收反馈）：offset 原样回发（对账不受 clamp/块化
         // 影响）——宿主停发补发，此后重载恢复走持久化锚点，历史程序定位
         // 不再重播、不拉回用户已手动离开的位置
@@ -2435,8 +2449,11 @@ export class WebviewSyncController {
    * changes，不产生编辑历史。#66 起：程序性滚动前置防抖动护栏（过渡期
    * 中间态视口不参与高亮计算），并以目标位置所在行即时落位常驻高亮
    * （不等滚动事件——被点击条目就是目标控制域）。
+   * #163 验收反馈：flash = true（view.locate 链接跳转通道）时目标标题/
+   * 段落整体覆盖半透黄高亮，用户任意操作后消失（大纲点击不闪——已有
+   * 条目常驻高亮）。
    */
-  private locateOffset(offset: number): void {
+  private locateOffset(offset: number, flash = false): void {
     const pos = this.clampToDoc(offset)
     // 新的程序定位应覆盖旧视口记忆；实际滚动事件会重新记录新视口。
     this.clearViewport()
@@ -2449,6 +2466,10 @@ export class WebviewSyncController {
       // 事件在挂载窗口重算（rAF）之前同步读取视口锚点，瞬态值不得覆盖
       // 定位目标——帧+宏任务后重申（同一窗口内的用户滚动会被覆盖）
       this.reassertReadingAnchor(start, 2)
+      if (flash) {
+        this.readingView.flashBlock(start)
+        this.scheduleAnchorFlashDismiss()
+      }
     } else {
       this.modeAnchor = pos
       // #57：定位离开表格选区语境时清选区（view.locate 与大纲跳转共用）
@@ -2459,8 +2480,17 @@ export class WebviewSyncController {
       this.view?.focus()
       this.view?.dispatch({
         selection: { anchor: pos },
-        effects: EditorView.scrollIntoView(pos, { y: 'center' }),
+        effects: [
+          EditorView.scrollIntoView(pos, { y: 'center' }),
+          // 高亮并入同一事务（无 changes，仍纯视图操作）
+          ...(flash
+            ? [anchorFlashSet.of(anchorFlashRangeOf(this.view.state.doc, pos))]
+            : []),
+        ],
       })
+      if (flash) {
+        this.scheduleAnchorFlashDismiss()
+      }
     }
     const doc = this.view?.state.doc
     this.outlineLocatedIndex = doc
@@ -2489,6 +2519,69 @@ export class WebviewSyncController {
     }
     const line = Math.min(Math.max(1, item.line), view.state.doc.lines)
     this.locateOffset(view.state.doc.line(line).from)
+  }
+
+  /** #163 验收反馈：挂载跳转目标高亮的消失监听——用户任意操作（点击、
+   *  滚动、按键、切走页面）后清除。scroll 事件带时间窗（定位自身的程序
+   *  滚动在窗口内忽略）；监听一次性（清除即全部卸载，重复定位重挂） */
+  private scheduleAnchorFlashDismiss(): void {
+    this.detachAnchorFlashDismiss()
+    this.anchorFlashSince = Date.now()
+    const dismiss = (): void => this.clearAnchorFlash()
+    const onScroll = (): void => {
+      if (Date.now() - this.anchorFlashSince < 300) {
+        return // 定位自身的程序滚动（scrollIntoView/scrollToSrcStart/虚拟化重算）
+      }
+      dismiss()
+    }
+    const targets: Array<[EventTarget, string, EventListener]> = []
+    if (this.viewMode === 'reading') {
+      if (this.readingContainer) {
+        targets.push(
+          [this.readingContainer, 'pointerdown', dismiss],
+          [this.readingContainer, 'wheel', dismiss],
+          [this.readingContainer, 'scroll', onScroll],
+        )
+      }
+    } else if (this.view) {
+      targets.push(
+        [this.view.contentDOM, 'pointerdown', dismiss],
+        [this.view.contentDOM, 'wheel', dismiss],
+        [this.view.contentDOM, 'keydown', dismiss],
+        [this.view.scrollDOM, 'scroll', onScroll],
+      )
+    }
+    for (const target of targets) {
+      target[0].addEventListener(target[1], target[2])
+      this.anchorFlashDetachers.push(() => target[0].removeEventListener(target[1], target[2]))
+    }
+    // 切走页面（标签切换/窗口失焦）：window 级监听两模式常挂
+    const onVisibility = (): void => {
+      if (document.visibilityState === 'hidden') {
+        dismiss()
+      }
+    }
+    window.addEventListener('blur', dismiss)
+    document.addEventListener('visibilitychange', onVisibility)
+    this.anchorFlashDetachers.push(() => {
+      window.removeEventListener('blur', dismiss)
+      document.removeEventListener('visibilitychange', onVisibility)
+    })
+  }
+
+  /** 清除跳转目标高亮并卸载消失监听（重复调用幂等） */
+  private clearAnchorFlash(): void {
+    this.detachAnchorFlashDismiss()
+    if (this.view) {
+      this.view.dispatch({ effects: anchorFlashClear.of(null) })
+    }
+    this.readingView?.flashBlock(null)
+  }
+
+  private detachAnchorFlashDismiss(): void {
+    for (const detach of this.anchorFlashDetachers.splice(0)) {
+      detach()
+    }
   }
 
   /**
@@ -7041,6 +7134,8 @@ export class WebviewSyncController {
       // #163 验收反馈：块 id 标记淡化（行尾 ` ^id` 与独立行 `^id` 双形态
       // mark 装饰；围栏内部不命中；docChanged 全量行扫描重建）
       liveBlockId,
+      // #163 验收反馈：跳转目标高亮（行级 line 装饰，effect 驱动）
+      anchorFlash,
       // #79 代码块卡片：呈现态围栏收起 + 头部横带 + 卡片行类（配置经
       // Compartment 热重配，围栏表复用上方 mermaidFencesField）
       this.codeCardCompartment.of(this.codeCardExtension()),

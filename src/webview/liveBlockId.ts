@@ -21,8 +21,8 @@ const blockIdMarkDeco = Decoration.mark({ class: 'vsidian-block-id' })
 
 /** 全文块 id 标记区间扫描（LF 坐标）：行尾形态 = 前导空白到行尾（含尾随
  *  空白），独立行形态 = 整行；按文档序有序返回 */
-export function buildBlockIdMarkRanges(doc: Text): Array<Range<{ class: string }>> {
-  const out: Array<Range<{ class: string }>> = []
+export function buildBlockIdMarkRanges(doc: Text): Array<Range<Decoration>> {
+  const out: Array<Range<Decoration>> = []
   let fenceChar: string | null = null
   for (let n = 1; n <= doc.lines; n++) {
     const line = doc.line(n)

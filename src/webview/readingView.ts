@@ -48,6 +48,9 @@ export const READING_CLASS_NAMES = {
   spacerBottom: 'vsidian-reading-spacer-bottom',
   /** #14 查找当前匹配所在块的高亮（块级；面板关闭即清除） */
   findHit: 'vsidian-reading-find-hit',
+  /** #163 验收反馈：跳转目标高亮（块级；用户任意操作后清除）——与 live
+   *  行级高亮同类名（跨视图同口径，颜色经 --vsidian-anchor-flash-background） */
+  anchorFlash: 'vsidian-anchor-flash',
 } as const
 
 /** 创建阅读视图容器（稳定类名 + 模式标记；初始由调用方控制显隐） */

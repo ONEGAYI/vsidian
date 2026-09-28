@@ -65,7 +65,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 </table>
 
   <section class="domain" data-domain="content">
-    <h1 style="font-size:19px;margin-bottom:4px">正文域（72 条）</h1>
+    <h1 style="font-size:19px;margin-bottom:4px">正文域（74 条）</h1>
 
     <h2>正文域 · 容器与视图（2）</h2>
     <article class="entry" id="container-live">
@@ -721,7 +721,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：单元 readingViewport / readingVirtualView：挂载窗口与 spacer 契约</p>
       <p class="life">引入：#7（2026-09-24）</p>
     </article>
-    <h2>正文域 · 链接、图片与双链（6）</h2>
+    <h2>正文域 · 链接、图片与双链（7）</h2>
     <article class="entry" id="live-link">
       <h3><code>.vsidian-link</code><span class="eid">live-link</span></h3>
       <p class="purpose">live 链接**内容** span（始终标记；光标或选区进入该链接范围时显示 [ 和 ](url) 源码，同一行其他链接保持格式化）；隐藏尾部对应 Obsidian .cm-formatting-link / .cm-string.cm-url 方向——本项目以隐藏呈现，无独立样式类。</p>
@@ -806,7 +806,35 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：集成「稳定样式契约」（#11）：阅读 a.vsidian-wikilink 命中 rgb(31, 32, 33)；集成「Obsidian 原名别名桥」：a.internal-link 命中；cssProbe.readingWikilinkDecorationColor / obsidianAliases[&quot;reading-wikilink&quot;]</p>
       <p class="life">引入：#11（2026-09-24）</p>
     </article>
-    <h2>正文域 · 公开 CSS 变量（9）</h2>
+    <article class="entry" id="anchor-flash">
+      <h3><code>.vsidian-anchor-flash</code><span class="eid">anchor-flash</span></h3>
+      <p class="purpose">跳转目标高亮（#163 验收反馈）：双链/普通链接锚点跳转（view.locate 通道）后目标标题/段落整体覆盖半透黄；用户任意操作（点击、滚动、按键、切走页面）后消失。live 为行级 line 装饰（目标块逐行）、reading 为块级类（flashBlock，虚拟化重挂载后保持）——类名跨视图同口径，背景色经 --vsidian-anchor-flash-background 变量暴露（用户可覆盖的 CSS 接口，见 var-anchor-flash-background）。大纲点击不闪（已有条目常驻高亮）。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+<p class="states">状态：跳转定位后出现，用户任意操作（含切换模式、编辑文档）后消失——瞬态提示，无常驻态。</p>
+      <p class="obsidian">Obsidian 对应：无（Obsidian 内建高亮动画无公开类名）</p>
+
+      <p class="dom">DOM 关系：live：.cm-line 行元素（目标块各行）；reading：.vsidian-reading-block 块元素。</p>
+      <pre><code>.vsidian-anchor-flash {
+  background: var(--vsidian-anchor-flash-background);
+}</code></pre>
+      <p class="verify">验证：单元 anchorFlash：目标区间推导与 StateField set/clear；单元 anchorFlashPanel：定位加类、点击/滚动/blur 消失、程序滚动时间窗不误清；单元 anchorFlashCssContract：两视图规则同引变量、变量定义于 #app；浏览器 anchorFlash：真实 view.locate 后绘制层背景断言与消失交互</p>
+      <p class="life">引入：#163 验收反馈（2026-09-28）</p>
+    </article>
+    <h2>正文域 · 公开 CSS 变量（10）</h2>
+    <article class="entry" id="var-anchor-flash-background">
+      <h3><code>--vsidian-anchor-flash-background</code><span class="eid">var-anchor-flash-background</span></h3>
+      <p class="purpose">跳转目标高亮的半透黄背景色（#163 验收反馈）：用户可覆盖的 CSS 接口，live 行级与 reading 块级两条规则同引（一处定义两视图生效）。默认 rgba(255, 213, 79, 0.25)。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：无</p>
+
+      <p class="dom">DOM 关系：定义于 #app。</p>
+      <pre><code>:root {
+  --vsidian-anchor-flash-background: rgba(255, 213, 79, 0.25);
+}</code></pre>
+      <p class="verify">验证：单元 anchorFlashCssContract：变量定义与两规则引用</p>
+      <p class="life">引入：#163 验收反馈（2026-09-28）</p>
+    </article>
     <article class="entry" id="var-heading-color">
       <h3><code>--vsidian-heading-color-{1..6}</code><span class="eid">var-heading-color</span></h3>
       <p class="purpose">标题层级色变量族：live 标题行级、阅读标题块级与大纲条目级三侧同引（主题分级着色一处定义多处生效）。默认 var(--vscode-editor-foreground)。</p>

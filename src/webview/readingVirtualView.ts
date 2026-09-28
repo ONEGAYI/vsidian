@@ -108,6 +108,11 @@ export class VirtualReadingView {
   /** #14 查找命中块的源 start（null 无高亮）：挂载/重建后自动重新施加 */
   private highlightSrcStart: number | null = null
 
+  /** #163 验收反馈：跳转目标高亮块的源 start（null 无）；挂载/重建后
+   *  保持（与 highlightSrcStart 同机制），清除由 syncController 的消失
+   *  监听驱动（用户任意操作后消失） */
+  private flashSrcStart: number | null = null
+
   private spacerTop: HTMLElement
   private spacerBottom: HTMLElement
   private observer: ResizeObserver | null = null
@@ -160,6 +165,7 @@ export class VirtualReadingView {
         this.hooks.onBlockMounted?.(el)
       }
       this.applyHighlightToDom()
+      this.applyFlashToDom()
       return
     }
     this.virtualized = true
@@ -332,6 +338,36 @@ export class VirtualReadingView {
     this.applyHighlightToDom()
   }
 
+  /** 跳转目标高亮（#163 验收反馈）：块级类，null 清除；挂载/全文重建后
+   *  保持——与 highlightBlock 同机制，但生命周期归 syncController 的
+   *  消失监听（用户任意操作后清除），不随查找会话 */
+  flashBlock(srcStart: number | null): void {
+    this.flashSrcStart = srcStart
+    this.applyFlashToDom()
+  }
+
+  /** 把当前 flashSrcStart 施加到容器内既有块（两条路径通用） */
+  private applyFlashToDom(): void {
+    if (!this.virtualized) {
+      const els = this.container.querySelectorAll<HTMLElement>(
+        `.${READING_CLASS_NAMES.block}[data-vsidian-src-start]`,
+      )
+      for (const el of els) {
+        el.classList.toggle(
+          READING_CLASS_NAMES.anchorFlash,
+          Number(el.dataset['vsidianSrcStart']) === this.flashSrcStart,
+        )
+      }
+      return
+    }
+    for (const [i, el] of this.elements) {
+      el.classList.toggle(
+        READING_CLASS_NAMES.anchorFlash,
+        this.blocks[i]?.start === this.flashSrcStart,
+      )
+    }
+  }
+
   /** 把当前 highlightSrcStart 施加到容器内既有块（两条路径通用） */
   private applyHighlightToDom(): void {
     if (!this.virtualized) {
@@ -473,6 +509,10 @@ export class VirtualReadingView {
     if (block.start === this.highlightSrcStart) {
       // #14 查找命中块：滚动窗口平移导致重挂载后高亮保持
       el.classList.add(READING_CLASS_NAMES.findHit)
+    }
+    if (block.start === this.flashSrcStart) {
+      // #163 验收反馈：跳转目标高亮块重挂载后保持
+      el.classList.add(READING_CLASS_NAMES.anchorFlash)
     }
     this.elements.set(i, el)
     this.observer?.observe(el)
