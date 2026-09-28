@@ -283,6 +283,42 @@ button:focus-visible, input:focus-visible {
 /* #129 被拒条目（越界/符号链接逃逸）行内提示 */
 .vsidian-css-snippets-item-rejected { color: var(--vscode-inputValidation-warningForeground, inherit); cursor: help; }
 
+/* ---- #198 索引维护分页（排除模式编辑与清理/重建操作） ---- */
+.vsidian-index-patterns { padding: 10px 0 6px; }
+.vsidian-index-patterns-label { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.vsidian-index-patterns-caption { font-weight: 600; }
+.vsidian-index-patterns-description { color: var(--vscode-descriptionForeground, #666); }
+.vsidian-index-unavailable { margin: 8px 0 0; padding: 8px 10px; border-left: 3px solid var(--vscode-focusBorder, #007fd4);
+  color: var(--vscode-descriptionForeground, #666);
+  background: var(--vscode-inputValidation-infoBackground, transparent); }
+.vsidian-index-pattern-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.vsidian-index-pattern-row { display: flex; align-items: center; gap: 8px; }
+.vsidian-index-pattern-input { flex: 1 1 auto; min-width: 0;
+  font-family: var(--vscode-editor-font-family, inherit); }
+.vsidian-index-pattern-remove { flex: none; min-height: 26px; padding: 3px 10px;
+  border: 1px solid var(--vscode-button-border, var(--vscode-panel-border, #cbd0d8)); border-radius: 6px;
+  color: var(--vscode-button-secondaryForeground, inherit);
+  background: var(--vscode-button-secondaryBackground, transparent); cursor: pointer; }
+.vsidian-index-pattern-remove:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground, #e9ebef)); }
+.vsidian-index-pattern-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.vsidian-index-pattern-actions button { min-height: 26px; padding: 3px 10px;
+  border: 1px solid var(--vscode-button-border, var(--vscode-panel-border, #cbd0d8)); border-radius: 6px;
+  color: var(--vscode-button-secondaryForeground, inherit);
+  background: var(--vscode-button-secondaryBackground, transparent); cursor: pointer; }
+.vsidian-index-pattern-actions button:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground, #e9ebef)); }
+/* 主操作（保存模式/完整重建）与片段暂停条同用主按钮配色 */
+.vsidian-index-pattern-actions button.vsidian-index-primary {
+  color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-background, #0078d4);
+  border-color: transparent; }
+.vsidian-index-pattern-actions button.vsidian-index-primary:hover { background: var(--vscode-button-hoverBackground, #006ab8); }
+.vsidian-index-pattern-actions button:disabled { opacity: 0.55; cursor: default; }
+.vsidian-index-actions { padding: 14px 0 6px; }
+.vsidian-index-progress { min-height: 20px; margin: 8px 0 0; color: var(--vscode-descriptionForeground, #666); }
+.vsidian-index-notice { margin: 8px 0 0; color: var(--vscode-descriptionForeground, #666); }
+.vsidian-index-notice-warn { padding: 8px 10px; border-left: 3px solid var(--vscode-inputValidation-warningBorder, #cca700);
+  color: var(--vscode-inputValidation-warningForeground, inherit);
+  background: var(--vscode-inputValidation-warningBackground, transparent); }
+
 
 /* ---- #132 样式参考分页（styleReferenceSettings；条目卡片与过滤工具行） ---- */
 /* #155 跟进：详细查询页签可见时主区收起滚动（:has 联动，切回总表自动恢复）

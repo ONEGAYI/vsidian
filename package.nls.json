@@ -47,6 +47,8 @@
   "command.cssSnippets.refresh.title": "CSS snippets: reload",
   "command.cssSnippets.pause.title": "CSS snippets: pause all",
   "command.cssSnippets.resume.title": "CSS snippets: resume",
+  "command.index.rebuild.title": "Index: full rebuild",
+  "command.index.cleanup.title": "Index: clean workspace cache",
   "command.ui.sidebarToggle.title": "Expand or collapse the sidebar",
   "command.ui.outlineToggle.title": "Show or hide the outline",
   "command.ui.outlineSearch.title": "Search headings",

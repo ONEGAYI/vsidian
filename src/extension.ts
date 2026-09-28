@@ -20,7 +20,8 @@ import { installHostLocale } from './shared/locales'
 import { hostLocale } from './host/hostLocale'
 import { KeybindingService } from './host/keybindingService'
 import { runStyleReferenceExport } from './host/styleReferenceExport'
-import { createVaultIndexService } from './host/vaultIndexWiring'
+import { createVaultIndexService, currentRootRefs } from './host/vaultIndexWiring'
+import { createIndexMaintenance, createIndexSettingsStore, initialExcludePatterns } from './host/vaultIndexMaintenance'
 import { t } from './shared/i18n'
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -61,6 +62,17 @@ export function activate(context: vscode.ExtensionContext): void {
       )
     },
   })
+  // #198 索引维护接线：排除模式持久化（workspaceState，工作区维度）+
+  // 设置页/命令面板共用的清理与重建入口。先于设置页装配（设置页构造要
+  // 收 index wiring）；状态变更 → 设置页 index.state 推送的订阅在其后接线
+  const indexStore = createIndexSettingsStore(context.workspaceState)
+  // #197 引用索引：activate 装配的服务级单例（不进 SessionEntry——面板全关
+  // 不销毁）；恢复或重建各根索引并挂监听（分批让出，不饿死宿主）。无工作区
+  // 时不建（既有编辑不因索引不可用而阻塞）。后台初始化：面板先拿 loading，
+  // 索引就绪后经 onChange 广播自愈（snippetService.initialize 同模式）。
+  // #198：构造时读入持久化排除模式（无有效存储回落默认值）
+  const vaultIndex = createVaultIndexService(context, initialExcludePatterns(indexStore))
+  const indexMaintenance = createIndexMaintenance(indexStore, vaultIndex)
   const settingsPage = createSettingsPage(
     context,
     settingsService,
@@ -68,24 +80,29 @@ export function activate(context: vscode.ExtensionContext): void {
     createSnippetPageWiring(snippetService),
     // #145 样式契约 JSON 导出：设置页按钮与命令面板命令共用同一入口
     () => runStyleReferenceExport(context),
+    // #198 索引维护：设置页按钮与宿主命令共用同一 wiring
+    indexMaintenance,
   )
-  // #197 引用索引：activate 装配的服务级单例（不进 SessionEntry——面板全关
-  // 不销毁）；恢复或重建各根索引并挂监听（分批让出，不饿死宿主）。无工作区
-  // 时不建（既有编辑不因索引不可用而阻塞）。后台初始化：面板先拿 loading，
-  // 索引就绪后经 onChange 广播自愈（snippetService.initialize 同模式）
-  const vaultIndex = createVaultIndexService(context)
+  indexMaintenance.onStateChanged(() => settingsPage.notifyIndexChanged())
   const provider = createTextEditorProvider(context, {
     service: settingsService,
     keybindings: keybindingService,
     page: settingsPage,
-  }, snippetService, vaultIndex)
+  }, snippetService, vaultIndex, indexMaintenance)
   void snippetService.initialize()
   if (vaultIndex) {
-    const roots = vscode.workspace.workspaceFolders
-      ? vscode.workspace.workspaceFolders.map((f) => ({ fsPath: f.uri.fsPath, uri: f.uri.toString() }))
-      : []
-    void vaultIndex.initialize(roots)
-    context.subscriptions.push(vaultIndex)
+    // 后台初始化（不阻塞激活）；#198 根增删与窗口焦点由下方订阅接线
+    void vaultIndex.initialize(currentRootRefs())
+    context.subscriptions.push(
+      vaultIndex,
+      // #198 重连/长时间离开：窗口焦点回归触发核验（服务内做间隔保护）
+      vscode.window.onDidChangeWindowState((state) => vaultIndex.setActive(state.focused)),
+      // #198 根增删（onDidChangeWorkspaceFolders 域）：新增根扫描纳入、
+      // 移除根停监听退出索引域（快照留存，显式清理才回收）
+      vscode.workspace.onDidChangeWorkspaceFolders(() => {
+        void vaultIndex.setRoots(currentRootRefs())
+      }),
+    )
   }
   context.subscriptions.push(
     // enableScripts 在每个面板的 webview.options 上设置（provider 内）；
@@ -121,6 +138,33 @@ export function activate(context: vscode.ExtensionContext): void {
         if (result.ok) {
           void vscode.window.showInformationMessage(t('host.cssSnippetsResumed'))
         }
+      })),
+    // #198 索引维护命令：设置页按钮与命令面板共用同一 wiring；宿主侧注册
+    // （不依赖 webview 健康度）。默认未绑定键位（评估记录见
+    // docs/specs/keybindings.md）——索引维护是低频操作，设置页入口常驻
+    vscode.commands.registerCommand('onegayi.vsidian.index.rebuild', () =>
+      void indexMaintenance.rebuild().then((result) => {
+        if (result === 'done') {
+          void vscode.window.showInformationMessage(t('host.indexRebuildDone'))
+        } else if (result === 'cancelled') {
+          void vscode.window.showInformationMessage(t('host.indexRebuildCancelled'))
+        } else if (result === 'failed') {
+          const detail = indexMaintenance.getState().notice?.detail ?? ''
+          void vscode.window.showWarningMessage(t('host.indexRebuildFailed', { detail }))
+        }
+      })),
+    vscode.commands.registerCommand('onegayi.vsidian.index.cleanup', () =>
+      void indexMaintenance.cleanup().then((result) => {
+        if (result === 'unavailable') {
+          return
+        }
+        if (result === 'failed') {
+          const detail = indexMaintenance.getState().notice?.detail ?? ''
+          void vscode.window.showWarningMessage(t('host.indexCleanupFailed', { detail }))
+          return
+        }
+        void vscode.window.showInformationMessage(
+          t('host.indexCleanupDone', { count: String(result.removedDirs) }))
       })),
     snippetService,
   )

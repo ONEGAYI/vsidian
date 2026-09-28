@@ -115,14 +115,13 @@ function createStoragePort(): VaultIndexStoragePort {
 }
 
 /**
- * 组装索引服务（activate 装配入口）：存储根 = context.storageUri（工作区
- * 私有、Remote SSH 落宿主侧）；根列表取 workspaceFolders（语法异构同指向
- * 的 URI 按 normalizeRootUri 去重——嵌套根保留，由服务按最具体根划分）。
- * 无工作区时不建服务（返回 undefined——无工作区编辑不因索引不可用而阻塞）。
+ * 当前工作区根引用列表（activate 初始化与 onDidChangeWorkspaceFolders 增删
+ * 共用）：语法异构同指向的 URI 去重（normalizeRootUri 同源归则——嵌套根
+ * 保留，由服务按最具体根划分）。
  */
-export function createVaultIndexService(context: vscode.ExtensionContext): VaultIndexService | undefined {
-  if (!vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0) {
-    return undefined
+export function currentRootRefs(): VaultRootRef[] {
+  if (!vscode.workspace.workspaceFolders) {
+    return []
   }
   const seen = new Set<string>()
   const roots: VaultRootRef[] = []
@@ -136,9 +135,27 @@ export function createVaultIndexService(context: vscode.ExtensionContext): Vault
     seen.add(dedupeKey)
     roots.push({ fsPath: folder.uri.fsPath, uri: uriStr })
   }
+  return roots
+}
+
+/**
+ * 组装索引服务（activate 装配入口）：存储根 = context.storageUri（工作区
+ * 私有、Remote SSH 落宿主侧）；根列表取 currentRootRefs；excludePatterns
+ * 为 activate 读入的持久化排除模式（#198，缺省不排除——生产装配传入
+ * initialExcludePatterns(store)）。无工作区时不建服务（返回 undefined——
+ * 无工作区编辑不因索引不可用而阻塞）。
+ */
+export function createVaultIndexService(
+  context: vscode.ExtensionContext,
+  excludePatterns?: readonly string[],
+): VaultIndexService | undefined {
+  if (!vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0) {
+    return undefined
+  }
   const service = new VaultIndexService(createScanPort(), createStoragePort(), {
     storageRoot: context.storageUri ? context.storageUri.fsPath : path.join(context.globalStorageUri.fsPath, 'ws-fallback'),
     isWindowsHost: process.platform === 'win32',
+    excludePatterns,
   })
   return service
 }

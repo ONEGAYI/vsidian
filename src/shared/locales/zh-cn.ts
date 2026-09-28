@@ -223,6 +223,12 @@ export const zhCn: Record<MessageKey, string> = {
   'host.cssSnippetsResumed': '已恢复 CSS 片段；启用的片段按原配置重新加载。',
   'host.cssSnippetRejectedEscape': 'CSS 片段「{name}」引用了片段目录外的路径「{path}」，已拒绝加载。',
   'host.cssSnippetRejectedSymlink': 'CSS 片段「{name}」经链接解析到片段目录外的「{path}」，已拒绝加载。',
+  /** #198 索引维护命令反馈（命令面板触发时无 webview 也可见；设置页按钮同链路） */
+  'host.indexRebuildDone': '已按磁盘正文完整重建索引。',
+  'host.indexRebuildCancelled': '索引重建已取消，继续使用原有索引。',
+  'host.indexRebuildFailed': '索引重建失败：{detail}',
+  'host.indexCleanupDone': '索引缓存已清理，移除 {count} 个过期代际。',
+  'host.indexCleanupFailed': '缓存清理失败：{detail}',
   'host.invalidSettingDefinition': '非法定义：{definition}',
   'host.duplicateSettingKey': '设置键已存在：{key}',
 
@@ -328,6 +334,30 @@ export const zhCn: Record<MessageKey, string> = {
   'backlinks.errorNoWorkspace': '未打开工作区，无法查看反向链接',
   'backlinks.jumpTo': '跳转到 {file} 的引用处（第 {n} 行）',
 
+  /** 索引维护设置分页（#198：排除模式与维护操作） */
+  'indexMaintenance.title': '索引维护',
+  'indexMaintenance.description': '控制工作区引用索引的扫描范围，并提供建立索引缓存的重建与清理操作。维护在后台执行；调度取值为工程默认初值，不构成时限承诺。',
+  'indexMaintenance.patternsLabel': '排除模式',
+  'indexMaintenance.patternsDescription': '按各工作区根的相对路径匹配的 glob 模式（支持 **、* 与 ?；单独的目录名会排除其整个子树）。默认为 **/.git/** 与 **/node_modules/**。不继承 VSCode 搜索排除规则与 .gitignore。被排除的文件不参与扫描；其中被已索引笔记显式引用的目标仍会登记。',
+  'indexMaintenance.addPattern': '添加模式',
+  'indexMaintenance.removePattern': '移除模式',
+  'indexMaintenance.patternPlaceholder': '例如 drafts/**',
+  'indexMaintenance.patternsAriaLabel': '排除模式列表',
+  'indexMaintenance.savePatterns': '保存模式',
+  'indexMaintenance.resetPatterns': '恢复默认',
+  'indexMaintenance.rebuild': '完整重建',
+  'indexMaintenance.cleanup': '清理当前工作区缓存',
+  'indexMaintenance.cancel': '取消',
+  'indexMaintenance.rebuildProgress': '重建中：{done} / {total} 篇',
+  'indexMaintenance.unavailable': '当前未打开工作区。模式仍会保存，打开工作区后生效。',
+  'indexMaintenance.noticePatternsSaved': '排除模式已保存，正在重算覆盖范围。',
+  'indexMaintenance.noticePatternsInvalid': '部分模式被拒绝（{detail}），合法项已保存。',
+  'indexMaintenance.noticeRebuildDone': '已按磁盘正文完整重建索引。',
+  'indexMaintenance.noticeRebuildCancelled': '重建已取消，继续使用原有索引。',
+  'indexMaintenance.noticeRebuildFailed': '重建失败：{detail}',
+  'indexMaintenance.noticeCleanupDone': '索引缓存已清理，移除 {count} 个过期代际。',
+  'indexMaintenance.noticeCleanupFailed': '缓存清理失败：{detail}',
+
   'table.controls': '表格操作控件',
   'table.insertColumnRight': '在右侧新增列',
   'table.insertRowBelow': '在表格底部新增行',
@@ -411,6 +441,10 @@ export const zhCn: Record<MessageKey, string> = {
   /** #131 暂停/恢复全部片段命令 */
   'command.cssSnippets.pause.title': 'CSS 片段：暂停全部',
   'command.cssSnippets.resume.title': 'CSS 片段：恢复',
+  /** #198 索引维护命令（设置页按钮与命令面板共用入口；默认未绑定，
+   *  评估记录见 docs/specs/keybindings.md） */
+  'command.index.rebuild.title': '索引：完整重建',
+  'command.index.cleanup.title': '索引：清理当前工作区缓存',
   'command.ui.sidebarToggle.title': '展开或收起右侧栏',
   'command.ui.outlineToggle.title': '显示或隐藏大纲',
   'command.ui.outlineSearch.title': '搜索大纲标题',

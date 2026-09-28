@@ -239,6 +239,12 @@ export const en = {
   'host.cssSnippetsResumed': 'CSS snippets resumed; enabled snippets reload as configured.',
   'host.cssSnippetRejectedEscape': 'CSS snippet "{name}" references "{path}", which is outside the snippets directory; loading it is rejected.',
   'host.cssSnippetRejectedSymlink': 'CSS snippet "{name}" resolves through a link to "{path}", which is outside the snippets directory; loading it is rejected.',
+  /** #198 索引维护命令反馈（命令面板触发时无 webview 也可见；设置页按钮同链路） */
+  'host.indexRebuildDone': 'Index rebuilt from disk contents.',
+  'host.indexRebuildCancelled': 'Index rebuild was cancelled; the previous index stays in use.',
+  'host.indexRebuildFailed': 'Index rebuild failed: {detail}',
+  'host.indexCleanupDone': 'Index cache cleaned; {count} obsolete generation(s) removed.',
+  'host.indexCleanupFailed': 'Cache cleanup failed: {detail}',
   /** 运行时设置定义注册（测试钩子/懒注册）的拒绝原因 */
   'host.invalidSettingDefinition': 'Invalid definition: {definition}',
   'host.duplicateSettingKey': 'Setting key already exists: {key}',
@@ -355,6 +361,30 @@ export const en = {
   'backlinks.errorNoWorkspace': 'Open a workspace to see backlinks',
   'backlinks.jumpTo': 'Jump to reference in {file} (line {n})',
 
+  /** 索引维护设置分页（#198：排除模式与维护操作） */
+  'indexMaintenance.title': 'Index maintenance',
+  'indexMaintenance.description': 'Control what the workspace reference index scans, and rebuild or clean the index cache. Maintenance runs in the background; scheduling values are engineering defaults, not time-limit guarantees.',
+  'indexMaintenance.patternsLabel': 'Exclude patterns',
+  'indexMaintenance.patternsDescription': 'Glob patterns matched against paths relative to each workspace root (**, * and ?; a plain folder name excludes its whole subtree). Defaults to **/.git/** and **/node_modules/**. VSCode search exclude rules and .gitignore are never inherited. Excluded files are not scanned, while targets inside them that an indexed note references explicitly stay registered.',
+  'indexMaintenance.addPattern': 'Add pattern',
+  'indexMaintenance.removePattern': 'Remove pattern',
+  'indexMaintenance.patternPlaceholder': 'e.g. drafts/**',
+  'indexMaintenance.patternsAriaLabel': 'Exclude pattern list',
+  'indexMaintenance.savePatterns': 'Save patterns',
+  'indexMaintenance.resetPatterns': 'Restore defaults',
+  'indexMaintenance.rebuild': 'Full rebuild',
+  'indexMaintenance.cleanup': 'Clean workspace cache',
+  'indexMaintenance.cancel': 'Cancel',
+  'indexMaintenance.rebuildProgress': 'Rebuilding: {done} / {total} notes',
+  'indexMaintenance.unavailable': 'No workspace is open. Patterns are still saved and will take effect once a workspace is opened.',
+  'indexMaintenance.noticePatternsSaved': 'Exclude patterns saved; coverage is being recalculated.',
+  'indexMaintenance.noticePatternsInvalid': 'Some patterns were rejected ({detail}); the valid ones were saved.',
+  'indexMaintenance.noticeRebuildDone': 'Index rebuilt from disk contents.',
+  'indexMaintenance.noticeRebuildCancelled': 'Rebuild cancelled; the previous index stays in use.',
+  'indexMaintenance.noticeRebuildFailed': 'Rebuild failed: {detail}',
+  'indexMaintenance.noticeCleanupDone': 'Index cache cleaned; {count} obsolete generation(s) removed.',
+  'indexMaintenance.noticeCleanupFailed': 'Cache cleanup failed: {detail}',
+
   /** 表格可见行控件 */
   'table.controls': 'Table controls',
   'table.insertColumnRight': 'Add column on the right',
@@ -445,6 +475,10 @@ export const en = {
   /** #131 暂停/恢复全部片段命令 */
   'command.cssSnippets.pause.title': 'CSS snippets: pause all',
   'command.cssSnippets.resume.title': 'CSS snippets: resume',
+  /** #198 索引维护命令（设置页按钮与命令面板共用入口；默认未绑定，
+   *  评估记录见 docs/specs/keybindings.md） */
+  'command.index.rebuild.title': 'Index: full rebuild',
+  'command.index.cleanup.title': 'Index: clean workspace cache',
   'command.ui.sidebarToggle.title': 'Expand or collapse the sidebar',
   'command.ui.outlineToggle.title': 'Show or hide the outline',
   'command.ui.outlineSearch.title': 'Search headings',
