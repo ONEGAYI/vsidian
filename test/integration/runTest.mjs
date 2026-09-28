@@ -45,14 +45,17 @@ try {
       const wsDir = mkdtempSync(path.join(tmpdir(), `vsidian-itest-s${shard}-`))
       wsDirs.push(wsDir)
       writeFixtures(wsDir, { generatePerfSample, generateReadingSample, generateMermaidDenseSample })
-      const portable = sharded ? createPortableShardHost(testCacheDir, shard) : null
-      if (portable) portableDirs.push(portable.portableDir)
+      // 每次运行一律独立便携目录（#198 教训：非分片模式共享 user-data 会把
+      // 「工作区根增删」用例留下的多根窗口状态泄漏给后续运行——失效根被
+      // 恢复、宿主多开、fixture 交叉污染；隔离的便携目录随 finally 清理）
+      const portable = createPortableShardHost(testCacheDir, shard)
+      portableDirs.push(portable.portableDir)
       const args = buildTestHostArgs({
         workspaceDir: wsDir,
         testsPath: path.join(root, 'out', 'test', 'integration', 'suite', 'index.js'),
         extensionPath: root,
-        extensionsDir: portable?.extensionsDir ?? path.join(testCacheDir, 'extensions'),
-        userDataDir: portable?.userDataDir ?? path.join(testCacheDir, 'user-data'),
+        extensionsDir: portable.extensionsDir,
+        userDataDir: portable.userDataDir,
         disableExtensions: true,
       })
       // CI 的 xvfb 虚拟显示无 GPU，Electron GPU 进程反复崩溃会拖垮 webview 面板

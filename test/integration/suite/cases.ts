@@ -166,6 +166,10 @@ const HIGHLIGHT_DOC_TEXT = [
 const PASTE_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
 
+function normFsPath(p: string): string {
+  return p.replace(/\\/g, '/').replace(/\/$/, '').toLowerCase()
+}
+
 function wsUri(name: string): vscode.Uri {
   return vscode.Uri.file(`${wsDir}/${name}`)
 }
@@ -9324,7 +9328,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
       (await vscode.commands.executeCommand('onegayi.vsidian._test.getVaultIndexState')) as IndexState
     const rootCount = async (): Promise<number> => {
       const s = await state()
-      return s.roots.find((r) => r.fsPath.replace(/\\/g, '/') === wsDir)!.fileCount
+      return s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir))?.fileCount ?? -1
     }
     // 初始：默认模式、无持久化
     const initialCount = await poll('索引就绪', async () => {
@@ -9350,38 +9354,43 @@ export const cases: Array<[string, () => Promise<void>]> = [
     })
     const excluded = await poll('排除后覆盖范围重算', async () => {
       const s = await state()
-      const c = s.roots.find((r) => r.fsPath.replace(/\\/g, '/') === wsDir)!.fileCount
+      const c = s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir))?.fileCount ?? -1
       return c === countWithBoth - 2 ? s : undefined
     })
     assert(JSON.stringify(excluded.persistedPatterns) === JSON.stringify(['ex-zone/**']),
       `排除模式应持久化（实际 ${JSON.stringify(excluded.persistedPatterns)}）`)
-    // 非法项回显 + 合法项照常生效（超长模式被拒）
+    // 非法项回显 + 合法项照常生效（超长模式被拒）；计数条件并入轮询——
+    // 模式值在重扫开始即更新，覆盖范围重算完成才可断言
     await vscode.commands.executeCommand(CMD.injectSettingsPageMessage, {
       kind: 'index.setPatterns', patterns: ['**/.git/**', 'a'.repeat(300)],
     })
-    const partial = await poll('非法项拒绝、合法项生效', async () => {
+    await poll('非法项拒绝、合法项生效且覆盖范围还原', async () => {
       const s = await state()
+      const c = s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir))?.fileCount ?? -1
       return JSON.stringify(s.excludePatterns) === JSON.stringify(['**/.git/**']) &&
-        JSON.stringify(s.persistedPatterns) === JSON.stringify(['**/.git/**']) ? s : undefined
+        JSON.stringify(s.persistedPatterns) === JSON.stringify(['**/.git/**']) &&
+        c === countWithBoth ? s : undefined
     })
-    assert(partial.roots.find((r) => r.fsPath.replace(/\\/g, '/') === wsDir)!.fileCount === countWithBoth,
-      '被拒项不应影响覆盖范围（ex-zone 重新纳入）')
     // 恢复默认：模式回默认并持久化、覆盖范围还原
     await vscode.commands.executeCommand(CMD.injectSettingsPageMessage, { kind: 'index.resetPatterns' })
     await poll('恢复默认', async () => {
       const s = await state()
-      const c = s.roots.find((r) => r.fsPath.replace(/\\/g, '/') === wsDir)!.fileCount
+      const c = s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir))?.fileCount ?? -1
       return c === countWithBoth &&
         JSON.stringify(s.excludePatterns) === JSON.stringify(['**/.git/**', '**/node_modules/**']) &&
         JSON.stringify(s.persistedPatterns) === JSON.stringify(['**/.git/**', '**/node_modules/**'])
         ? s : undefined
     })
-    // 收尾：清理临时文档（保持后续用例计数稳定）
-    await vscode.workspace.fs.delete(wsUri('ex-zone'), { recursive: true, useTrash: false })
+    // 收尾：清理临时文档（保持后续用例计数稳定）。逐文件删除——整目录
+    // 删除不产生逐文件的 *.md watcher 事件（目录删除在周期核验前不被察觉，
+    // 已知边界见规格），逐文件删除走真实增量链路
+    await vscode.workspace.fs.delete(wsUri('ex-zone/隐藏甲.md'), { useTrash: false })
+    await vscode.workspace.fs.delete(wsUri('ex-zone/隐藏乙.md'), { useTrash: false })
     await poll('临时文档移出索引', async () => {
       const c = await rootCount()
       return c === initialCount ? c : undefined
     })
+    await vscode.workspace.fs.delete(wsUri('ex-zone'), { recursive: true, useTrash: false })
   }],
 
   ['索引维护：完整重建读盘收敛与缓存清理安全回收（#198）', async () => {
@@ -9393,7 +9402,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     }
     const state = async (): Promise<IndexState> =>
       (await vscode.commands.executeCommand('onegayi.vsidian._test.getVaultIndexState')) as IndexState
-    const rootOf = (s: IndexState) => s.roots.find((r) => r.fsPath.replace(/\\/g, '/') === wsDir)!
+    const rootOf = (s: IndexState) => s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir))!
     const initial = await poll('索引就绪', async () => {
       const s = await state()
       return s.available && rootOf(s).hasData && rootOf(s).edgeCount > 0 ? s : undefined
@@ -9480,21 +9489,38 @@ export const cases: Array<[string, () => Promise<void>]> = [
       const after = await poll('新根纳入并完成覆盖范围重算', async () => {
         const s = await state()
         if (s.roots.length !== 3) return undefined
-        const parent = s.roots.find((r) => r.fsPath.replace(/\\/g, '/') === wsDir)
-        const second = s.roots.find((r) => r.fsPath.replace(/\\/g, '/') === secondDir)
-        const nested = s.roots.find((r) => r.fsPath.replace(/\\/g, '/') === nestedDir)
+        const parent = s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir))
+        const second = s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(secondDir))
+        const nested = s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(nestedDir))
         return parent && second && nested && second.hasData && nested.hasData &&
           parent.fileCount === parentBefore ? s : undefined
       }, 30000)
-      const nested = after.roots.find((r) => r.fsPath.replace(/\\/g, '/') === nestedDir)!
-      const second = after.roots.find((r) => r.fsPath.replace(/\\/g, '/') === secondDir)!
+      const nested = after.roots.find((r) => normFsPath(r.fsPath) === normFsPath(nestedDir))!
+      const second = after.roots.find((r) => normFsPath(r.fsPath) === normFsPath(secondDir))!
       assert(nested.fileCount === 2, `嵌套根应持有自己的 2 个文档（实际 ${nested.fileCount}）`)
       assert(second.fileCount === 2 && second.edgeCount === 1,
         `第二根内双链应解析（files=${second.fileCount} edges=${second.edgeCount}）`)
     } finally {
-      // 还原根集合（两个新增根在尾部连续：一次删除两个）
-      const removed = vscode.workspace.updateWorkspaceFolders(1, 2)
-      assert(removed === true, 'updateWorkspaceFolders 应接受移除')
+      // 还原根集合：按**身份**移除本用例新增的两个根（位置无关——宿主
+      // 可能恢复出上次会话遗留的失效根，位置移除会删错对象并把多根状态
+      // 泄漏进窗口持久化，污染后续非分片运行）
+      const dropFolder = async (dir: string): Promise<void> => {
+        for (let round = 0; round < 3; round++) {
+          const folders = vscode.workspace.workspaceFolders ?? []
+          const idx = folders.findIndex((f) => normFsPath(f.uri.fsPath) === normFsPath(dir))
+          if (idx < 0) {
+            return
+          }
+          if (!vscode.workspace.updateWorkspaceFolders(idx, 1)) {
+            return
+          }
+          // updateWorkspaceFolders 不可并发调用：等事件落定再试下一轮
+          await new Promise((r) => setTimeout(r, 300))
+        }
+      }
+      await dropFolder(secondDir)
+      await dropFolder(nestedDir)
+      // 等待移除生效（索引根集合回到 1）
       await poll('根移除', async () => {
         const s = await state()
         return s.roots.length === 1 ? s : undefined

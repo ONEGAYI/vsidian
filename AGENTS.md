@@ -176,6 +176,7 @@ vsidian/
 │   │   ├── styleReferenceExport.ts     # 契约 JSON 导出宿主执行壳
 │   │   ├── styleReferenceExportPlan.ts # 契约 JSON 导出纯规划逻辑
 │   │   ├── textEditorProvider.ts       # 自定义文本编辑器提供者
+│   │   ├── vaultIndexMaintenance.ts    # 索引维护接线：排除持久化与操作编排
 │   │   ├── vaultIndexOverlay.ts        # 索引覆盖层与反链查询纯逻辑（#197）
 │   │   ├── vaultIndexService.ts        # 引用索引宿主服务（#197）
 │   │   ├── vaultIndexWiring.ts         # 索引服务 vscode 层端口装配
@@ -212,91 +213,94 @@ vsidian/
 │   │   ├── symbols.ts            # 符号注册表单一事实源（#123）
 │   │   ├── symbolWrap.ts         # 选区包裹计划纯函数（#124）
 │   │   ├── tabEscape.ts          # Tab 越界定位纯函数（#125）
+│   │   ├── vaultIndexExclude.ts  # 索引排除模式纯逻辑单一事实源
 │   │   ├── vaultIndexModel.ts    # 引用索引内存模型纯逻辑
+│   │   ├── vaultIndexSchedule.ts # 索引维护调度纯逻辑与初值常量
 │   │   ├── vaultIndexSnapshot.ts # 分片快照存储纯逻辑（#195 选型基线）
 │   │   ├── vaultLink.ts          # 根内相对路径解析单一事实源（#196）
 │   │   └── wikilink.ts           # 双链形态学单一事实源（#11）
 │   └── webview/     # webview 端实现
-│       ├── anchorFlash.ts            # 跳转目标高亮装饰状态
-│       ├── backlinkPanel.ts          # 反链面板 DOM 与四态渲染（#197）
-│       ├── blockIdStrip.ts           # 阅读渲染块标记剥离纯函数
-│       ├── blockMenu.ts              # 正文右键菜单与复制块链接
-│       ├── codeCardState.ts          # 卡片共享状态中立模块
-│       ├── codeHighlight.ts          # 语法高亮引擎装配与缓存
-│       ├── css.d.ts                  # CSS 导入类型声明
-│       ├── cssSnippetSettings.ts     # CSS 片段设置分页
-│       ├── diagramExport.ts          # 图表导出序列化与光栅化
-│       ├── diagramPopup.ts           # 图表弹窗全屏浮层
-│       ├── diagramPopupGeometry.ts   # 弹窗几何纯函数
-│       ├── fenceEscape.ts            # 围栏 Tab 越界适配层（#125）
-│       ├── findSession.ts            # 查找匹配纯函数（#14）
-│       ├── fontArrival.ts            # 字体晚到监听（#130）
-│       ├── formatOperations.ts       # 格式文本变换规划
-│       ├── frontmatterDecorations.ts # frontmatter 卡片装饰
-│       ├── frontmatterEditing.ts     # frontmatter 格导航键位组
-│       ├── frontmatterPopover.ts     # frontmatter 属性编辑浮层
-│       ├── graphicBlockChrome.ts     # 图形化块右上角按钮组
-│       ├── graphicRenderers.ts       # 图形化渲染器注册表
-│       ├── htmlComment.ts            # 阅读侧 HTML 注释剥离纯函数
-│       ├── imagePaste.ts             # 图片粘贴拦截适配层（#161）
-│       ├── imageResource.ts          # 图片资源状态机（#10）
-│       ├── indentEditing.ts          # Tab 通用行缩进处理器（#120）
-│       ├── keybindingRouter.ts       # 编辑器按键分发器
-│       ├── keybindingSettings.ts     # 快捷键设置分页
-│       ├── listEditing.ts            # Enter 延续与退格清层（#119）
-│       ├── liveBlockId.ts            # 块 id 标记 live 淡化装饰
-│       ├── liveCodeCard.ts           # Live 代码块卡片装饰
-│       ├── liveDecorations.ts        # 语法树驱动 Live 装饰（#8）
-│       ├── liveLineNumbers.ts        # 表格段首行号与绘制探针
-│       ├── liveLinks.ts              # live 链接装饰与跳转（#10）
-│       ├── liveMath.ts               # 行内与块级公式 live 装饰（#59）
-│       ├── liveMermaid.ts            # Mermaid live 装饰（#60）
-│       ├── localeBoot.ts             # webview 语言装配入口
-│       ├── localeDom.ts              # 常驻控件文案换包单点重刷注册表
-│       ├── localeOnDemand.ts         # 按需控件文案换包 DOM 级重刷
-│       ├── main.css                  # webview 全局布局样式
-│       ├── main.ts                   # webview 启动入口
-│       ├── markdownDoc.ts            # Markdown 文档工具与树查询
-│       ├── mathRenderCache.ts        # KaTeX 渲染 LRU 缓存共享模块
-│       ├── mermaidEntry.ts           # Mermaid 独立产物入口（#60）
-│       ├── mermaidRender.ts          # Mermaid 渲染管线（#60）
-│       ├── mermaidTheme.ts           # Mermaid 暗色主题装配
-│       ├── outline.ts                # 大纲全文解析与面板装配
-│       ├── outlineCollapse.ts        # 大纲折叠状态机纯函数
-│       ├── outlineDrag.ts            # 大纲拖拽移动计划纯函数
-│       ├── outlineLocate.ts          # 大纲定位纯函数
-│       ├── outlineMenu.ts            # 大纲右键菜单模型纯逻辑
-│       ├── outlineSearch.ts          # 大纲标题搜索纯函数
-│       ├── outlineSection.ts         # 大纲控制域纯函数
-│       ├── perfProbe.ts              # webview 性能探针（#5）
-│       ├── quickActionState.ts       # 快速操作状态判定
-│       ├── readingBlocks.ts          # markdown-it 阅读块切分
-│       ├── readingCodeCard.ts        # 阅读代码块卡片增强
-│       ├── readingMarkdown.ts        # markdown-it 安全渲染层
-│       ├── readingProbe.ts           # 阅读视图性能探针
-│       ├── readingView.ts            # 阅读视图 DOM 构建与锚点定位
-│       ├── readingViewport.ts        # 阅读视口挂载窗口纯函数
-│       ├── readingVirtualView.ts     # 阅读视图虚拟化装配层
-│       ├── settingsMain.ts           # 设置页 webview 入口
-│       ├── settingsPage.css          # 设置页样式
-│       ├── settingsPageView.ts       # 设置页 webview 视图
-│       ├── snippetLoader.ts          # CSS 片段 link 装配器
-│       ├── styleGuideData.ts         # 设置页样式参考数据（生成）
-│       ├── styleReferenceSettings.ts # 设置页样式参考分页
-│       ├── symbolAutocomplete.ts     # 符号自动补全编辑器适配层（#123）
-│       ├── symbolCompositionState.ts # IME 选区快照共享状态
-│       ├── symbolWrap.ts             # 选区包裹编辑器适配层（#124）
-│       ├── syncController.ts         # CM6 同步控制器
-│       ├── tableCells.ts             # 表格单元格边界、换行与转义
-│       ├── tableColumnWidth.ts       # 表格列宽采样与轨道计划纯函数
-│       ├── tableControls.ts          # 表格可见行控件与拖动
-│       ├── tableCreate.ts            # 光标处建表规划纯函数
-│       ├── tableEditing.ts           # 表格输入钩子（#12）
-│       ├── tableRegion.ts            # 表格矩形选区与结构规划
-│       ├── tableRegionField.ts       # 表格格区选区状态单一事实源
-│       ├── tableRegionSelection.ts   # 表格格区拖选指针交互
-│       ├── tableStructure.ts         # 表格导航与增删行列纯函数（#13）
-│       └── taskToggle.ts             # 任务勾选解析纯函数（#9）
+│       ├── anchorFlash.ts              # 跳转目标高亮装饰状态
+│       ├── backlinkPanel.ts            # 反链面板 DOM 与四态渲染（#197）
+│       ├── blockIdStrip.ts             # 阅读渲染块标记剥离纯函数
+│       ├── blockMenu.ts                # 正文右键菜单与复制块链接
+│       ├── codeCardState.ts            # 卡片共享状态中立模块
+│       ├── codeHighlight.ts            # 语法高亮引擎装配与缓存
+│       ├── css.d.ts                    # CSS 导入类型声明
+│       ├── cssSnippetSettings.ts       # CSS 片段设置分页
+│       ├── diagramExport.ts            # 图表导出序列化与光栅化
+│       ├── diagramPopup.ts             # 图表弹窗全屏浮层
+│       ├── diagramPopupGeometry.ts     # 弹窗几何纯函数
+│       ├── fenceEscape.ts              # 围栏 Tab 越界适配层（#125）
+│       ├── findSession.ts              # 查找匹配纯函数（#14）
+│       ├── fontArrival.ts              # 字体晚到监听（#130）
+│       ├── formatOperations.ts         # 格式文本变换规划
+│       ├── frontmatterDecorations.ts   # frontmatter 卡片装饰
+│       ├── frontmatterEditing.ts       # frontmatter 格导航键位组
+│       ├── frontmatterPopover.ts       # frontmatter 属性编辑浮层
+│       ├── graphicBlockChrome.ts       # 图形化块右上角按钮组
+│       ├── graphicRenderers.ts         # 图形化渲染器注册表
+│       ├── htmlComment.ts              # 阅读侧 HTML 注释剥离纯函数
+│       ├── imagePaste.ts               # 图片粘贴拦截适配层（#161）
+│       ├── imageResource.ts            # 图片资源状态机（#10）
+│       ├── indentEditing.ts            # Tab 通用行缩进处理器（#120）
+│       ├── indexMaintenanceSettings.ts # 设置页索引维护分页
+│       ├── keybindingRouter.ts         # 编辑器按键分发器
+│       ├── keybindingSettings.ts       # 快捷键设置分页
+│       ├── listEditing.ts              # Enter 延续与退格清层（#119）
+│       ├── liveBlockId.ts              # 块 id 标记 live 淡化装饰
+│       ├── liveCodeCard.ts             # Live 代码块卡片装饰
+│       ├── liveDecorations.ts          # 语法树驱动 Live 装饰（#8）
+│       ├── liveLineNumbers.ts          # 表格段首行号与绘制探针
+│       ├── liveLinks.ts                # live 链接装饰与跳转（#10）
+│       ├── liveMath.ts                 # 行内与块级公式 live 装饰（#59）
+│       ├── liveMermaid.ts              # Mermaid live 装饰（#60）
+│       ├── localeBoot.ts               # webview 语言装配入口
+│       ├── localeDom.ts                # 常驻控件文案换包单点重刷注册表
+│       ├── localeOnDemand.ts           # 按需控件文案换包 DOM 级重刷
+│       ├── main.css                    # webview 全局布局样式
+│       ├── main.ts                     # webview 启动入口
+│       ├── markdownDoc.ts              # Markdown 文档工具与树查询
+│       ├── mathRenderCache.ts          # KaTeX 渲染 LRU 缓存共享模块
+│       ├── mermaidEntry.ts             # Mermaid 独立产物入口（#60）
+│       ├── mermaidRender.ts            # Mermaid 渲染管线（#60）
+│       ├── mermaidTheme.ts             # Mermaid 暗色主题装配
+│       ├── outline.ts                  # 大纲全文解析与面板装配
+│       ├── outlineCollapse.ts          # 大纲折叠状态机纯函数
+│       ├── outlineDrag.ts              # 大纲拖拽移动计划纯函数
+│       ├── outlineLocate.ts            # 大纲定位纯函数
+│       ├── outlineMenu.ts              # 大纲右键菜单模型纯逻辑
+│       ├── outlineSearch.ts            # 大纲标题搜索纯函数
+│       ├── outlineSection.ts           # 大纲控制域纯函数
+│       ├── perfProbe.ts                # webview 性能探针（#5）
+│       ├── quickActionState.ts         # 快速操作状态判定
+│       ├── readingBlocks.ts            # markdown-it 阅读块切分
+│       ├── readingCodeCard.ts          # 阅读代码块卡片增强
+│       ├── readingMarkdown.ts          # markdown-it 安全渲染层
+│       ├── readingProbe.ts             # 阅读视图性能探针
+│       ├── readingView.ts              # 阅读视图 DOM 构建与锚点定位
+│       ├── readingViewport.ts          # 阅读视口挂载窗口纯函数
+│       ├── readingVirtualView.ts       # 阅读视图虚拟化装配层
+│       ├── settingsMain.ts             # 设置页 webview 入口
+│       ├── settingsPage.css            # 设置页样式
+│       ├── settingsPageView.ts         # 设置页 webview 视图
+│       ├── snippetLoader.ts            # CSS 片段 link 装配器
+│       ├── styleGuideData.ts           # 设置页样式参考数据（生成）
+│       ├── styleReferenceSettings.ts   # 设置页样式参考分页
+│       ├── symbolAutocomplete.ts       # 符号自动补全编辑器适配层（#123）
+│       ├── symbolCompositionState.ts   # IME 选区快照共享状态
+│       ├── symbolWrap.ts               # 选区包裹编辑器适配层（#124）
+│       ├── syncController.ts           # CM6 同步控制器
+│       ├── tableCells.ts               # 表格单元格边界、换行与转义
+│       ├── tableColumnWidth.ts         # 表格列宽采样与轨道计划纯函数
+│       ├── tableControls.ts            # 表格可见行控件与拖动
+│       ├── tableCreate.ts              # 光标处建表规划纯函数
+│       ├── tableEditing.ts             # 表格输入钩子（#12）
+│       ├── tableRegion.ts              # 表格矩形选区与结构规划
+│       ├── tableRegionField.ts         # 表格格区选区状态单一事实源
+│       ├── tableRegionSelection.ts     # 表格格区拖选指针交互
+│       ├── tableStructure.ts           # 表格导航与增删行列纯函数（#13）
+│       └── taskToggle.ts               # 任务勾选解析纯函数（#9）
 ├── test/…                 # 测试根
 ├── tsconfig.json          # TypeScript 类型检查配置
 └── vitest.config.ts       # vitest 单元测试配置
