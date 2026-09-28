@@ -2,7 +2,7 @@
 
 ## 状态与最终共识
 
-2026-09-28 用户结束访谈并授权规划开票。本文是本批实施规格；功能尚未实施。独立分支 `codex/vault-index-backlinks` 与对应工作树用于后续实施，文档随最终实施一并 PR。开票授权不等于当前推送或合并授权。
+2026-09-28 用户结束访谈并授权规划开票。本文是本批实施规格。实施进度：#195（存储选型，ADR-0008 落档）、#196（根内相对路径解析）、#197（持久索引与反链面板首条闭环）、#198（增量维护、排除设置与完整重建）已完成开发并通过自动化验证，用户验收未结；#199–#202 待续。#198 的落地语义见文末「#198 实施落档」节。开票授权不等于当前推送或合并授权。
 
 最终规则覆盖访谈中的旧建议：**链接只按来源文档的相对路径解析，不按文件名搜索、不按目录距离或字典序挑候选、不跨根解析相对引用**。多根工作区照常索引，但各根是独立资源边界。同名冲突 Alert 及“放弃/覆盖”的设想随短名搜索撤销；索引未就绪、并发改写等失败提示保留。
 
@@ -89,6 +89,47 @@ webview/样式修改执行 style-contract，绘制层至少验证真实可见性
 [ADR-0008](../adr/0008-workspace-reference-index.md) 替代 [ADR-0002](../adr/0002-wikilink-on-demand-resolution.md) 的按需查找/同名选择范围；旧 ADR 保留历史。当前实现事实来自 `src/host/wikilinkTarget.ts`、`textEditorProvider.ts`、`documentSession.ts`、`src/webview/imageResource.ts`。
 
 官方依据：[VSCode API](https://code.visualstudio.com/api/references/vscode-api)、[Node.js SQLite](https://nodejs.org/api/sqlite.html)。实施以仓库锁定的 VSCode 1.86 类型及真实宿主为准。
+
+## #198 实施落档（2026-09-29）
+
+工单 #198（索引增量维护、排除设置与完整重建）的落地事实。调度数值全部是**待测初值**（集中于 `src/shared/vaultIndexSchedule.ts` 的 `SCHEDULE_DEFAULTS`，可在服务构造参数覆盖），不构成完成时限承诺。
+
+### 调度与增量维护
+
+- **编辑防抖与强制合并**：未保存编辑防抖 500ms 冲刷内存覆盖层；连续输入自首个未冲刷事件起 2s 封顶强制合并一次（`planFlushAt` 决策——防抖时点与封顶点取较早者，长时间连续输入不饿死）。
+- **增量队列**：保存与外部文件事件统一进入**有界去重队列**（容量 2000、每批 8 文件、批间让出事件循环）。容量溢出的降级策略：清空队列转一次清单核验（批量 Git 切换不产生无界任务）；泵与全量扫描/核验互斥（busy 挂起、完成后接力），排空后合并为一次快照提交。
+- **核验时机**：快照恢复后（启动，后台执行）、窗口焦点回归（`onDidChangeWindowState`，间隔保护 30s，长时间离开/断连恢复即触发）与活跃期周期（约 10 分钟，失焦挂起）。核验为 mtime+size 清单比对（`diffManifest`）——**仅筛变化，不作内容一致性证明**；完整重建是兜底恢复路径。
+- **删除与不可访问的区分**：扫描端口 `accessOf` 三态（ok / missing / inaccessible，vscode 壳按 `FileSystemError.code` 区分 FileNotFound 与其余）。移除条目必须有 `missing` 正证据；不可访问（SSH 断连、权限错误）只标 stale 保留条目，不得等同删除。
+
+### 排除设置
+
+- 语义单一事实源 `src/shared/vaultIndexExclude.ts`：glob 子集（`**` 跨目录、`*`/`?` 不跨分隔符、正则特殊字符字面量化），无通配符模式按目录前缀（整个子树）排除；Windows 宿主大小写折叠。**不读取也不合并** VSCode 搜索排除（search.exclude）与 .gitignore。
+- 默认 `**/.git/**`、`**/node_modules/**`；持久化在 `context.workspaceState`（键 `vsidian.index.excludePatterns`，工作区维度独立）。空数组是合法存储（显式清空）与「无存储回落默认」严格区分。
+- 排除文件不扫描、不入覆盖层与增量域；**被显式引用的排除位置目标仍登记**（asset 元数据形态，不递归解析其内容）。模式变更触发全部根覆盖范围重算（全量重扫，快照增量继承使未变片不重写）。
+- 清洗规则：逐项 trim、空行丢弃、保序去重、单条 ≤256 字符、至多 64 条；非法项在设置页回显（合法项照常生效）。
+
+### 清理与完整重建
+
+- **清理当前工作区缓存**：按 `planCleanupDirs` 安全回收各根分区的过期代际——保留 CURRENT 指向代、其全部继承源与**更高代际**目录（可能是并发窗口的在途提交），回收严格更旧代、孤儿代与 tmp-/非法目录名残留。不删活跃文件；健康缓存不按固定天数失效；清理是用户显式操作。
+- **完整重建**：全部根全量重扫（重解析正文并核验资源），进度回报（约每 2% 推送一次）与取消（`cancelMaintenance` 递增维护代际，扫描/核验/队列泵在批间检查并中止；中止后模型保持上次完整数据）。重建与清理互斥。
+- 入口：设置页「索引维护」分页按钮与宿主命令 `onegayi.vsidian.index.rebuild` / `onegayi.vsidian.index.cleanup`（默认未绑定，评估记录见 [keybindings.md](keybindings.md)）共用同一 wiring。
+
+### 变化发布通道（#201 消费）
+
+- 服务维护目标级**已观测变化代次**（`generation` per target，单调递增、首观测为 1），宿主侧订阅接口 `vaultIndex.onTargetChange(listener)`，事件 `VaultTargetChangeEvent = { fsPath, rootFsPath, relPath, generation, status: 'changed' | 'deleted' | 'stale', stat }`。`generation` 可作 `?v=` 缓存击穿参数。
+- 语义要点：`deleted` 只在有磁盘删除正证据时广播（索引条目消失——被排除、引用消失、嵌套根重划——不等于磁盘删除，不广播）；`stale` 只在首次转入不可访问时广播（恢复后广播 `changed` 并清标记）；首扫描只建代次不广播（避免启动风暴）。来源断链在目标删除后保留（目标自身的出链随条目移除）。
+
+### 根增删与嵌套根加固（集成用例暴露的 #197 缺口）
+
+- `onDidChangeWorkspaceFolders` → `setRoots`：新增根扫描纳入、移除根停监听退出索引域（快照留存，显式清理才回收）；**集合有变时对全部存留根覆盖范围重算**（嵌套根增删改变既存根的归属边界）。
+- 边界过滤三处同口径（`rootOf` 最具体根）：链接解析（resolveWith）与附件登记不越权处理属于更具体根的文件（父根对嵌套根文件按断链/不登记，跨根不解析）；watcher 事件按最具体根分流（父子根监听树重叠，同一变更会在两根各到达一次）。
+
+### 边界与待验
+
+- 双窗口同工作区的写入协调依赖 ADR-0008 三不变量（写者标签/CURRENT 原子替换/保守回收）；代际仲裁语义由单测钉住，真实双窗口与 Remote SSH 场景待人工验证（见 [manual-verification.md](manual-verification.md)）。
+- 核验的 stat 失败不进清单，由移除正证据兜底区分（列举漂移保守跳过，下轮核验兜底）。
+- 设置页 notice 保留至下一次操作覆盖（页面不自行清除）；无工作区窗口模式可编辑保存、操作不可用（打开工作区后生效）。
+- **外部整目录删除不产生逐文件事件**（实测 1.86.2 Windows：`workspace.fs.delete(dir, {recursive})` 后 `**/*.md` watcher 无逐文件 delete 事件）——索引在周期核验（约 10 分钟）或显式完整重建前不知晓；单文件删除/改写有事件走增量链路。
 
 ## 工单与依赖
 

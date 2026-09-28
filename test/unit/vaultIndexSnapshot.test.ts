@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildBacklinkIndex,
   loadSnapshot,
+  planCleanupDirs,
   planSnapshotCommit,
   planSnapshotCommitChunked,
   rootKeyOf,
@@ -400,6 +401,42 @@ describe('代际回收计划', () => {
     expect(names.some((n) => n.startsWith('gen-') && n.endsWith('-orphan'))).toBe(true)
     // 当前新代与上一代（继承源）不在回收清单
     expect(names).not.toContain(dir1)
+  })
+})
+
+describe('缓存清理计划（#198 清理当前工作区缓存）', () => {
+  it('保留 CURRENT 代、其继承源与更高代际（可能是并发窗口在途提交），回收更旧代与 tmp- 残留', () => {
+    const names = planCleanupDirs({
+      currentDirName: 'gen-000003-w1',
+      inheritSources: ['gen-000002-w0'],
+      existingDirs: [
+        'gen-000001-w0',   // 更旧代：回收
+        'gen-000002-w0',   // 继承源：保留
+        'gen-000003-w1',   // CURRENT：保留
+        'gen-000004-w2',   // 更高代（并发在途）：保留
+        'tmp-write-9',     // 临时残留：回收
+        'not-a-gen-dir',   // 非法目录名残留：回收
+      ],
+    })
+    expect(names).toEqual(['gen-000001-w0', 'tmp-write-9', 'not-a-gen-dir'])
+  })
+
+  it('无 CURRENT（无快照）时全部 gen 目录与 tmp- 均可回收', () => {
+    const names = planCleanupDirs({
+      currentDirName: null,
+      inheritSources: [],
+      existingDirs: ['gen-000001-a', 'gen-000007-b', 'tmp-x'],
+    })
+    expect(names.sort()).toEqual(['gen-000001-a', 'gen-000007-b', 'tmp-x'])
+  })
+
+  it('同代异写者目录（并发窗口完整旧代）保守保留，仅严格更旧代回收', () => {
+    const names = planCleanupDirs({
+      currentDirName: 'gen-000005-a',
+      inheritSources: [],
+      existingDirs: ['gen-000005-b', 'gen-000004-a'],
+    })
+    expect(names).toEqual(['gen-000004-a'])
   })
 })
 

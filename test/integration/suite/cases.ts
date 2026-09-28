@@ -2,6 +2,7 @@
 // fixture 工作区由 runTest.mjs 在临时目录动态生成（避免 git 换行转换干扰
 // 字节级断言），路径经环境变量 WORKSPACE_DIR 传入。
 import * as vscode from 'vscode'
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { LOCALE_MESSAGES, resolveLocale } from '../../../src/shared/locales'
 import { OBSIDIAN_ALIAS_PROBES } from '../../../src/shared/obsidianAlias'
 import legacyBaselineJson from '../../../test/style-contract/baseline-v0.4.0.json'
@@ -164,6 +165,10 @@ const HIGHLIGHT_DOC_TEXT = [
 /** #161 图片粘贴载荷：1x1 PNG（字节与解码断言的对照源） */
 const PASTE_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+
+function normFsPath(p: string): string {
+  return p.replace(/\\/g, '/').replace(/\/$/, '').toLowerCase()
+}
 
 function wsUri(name: string): vscode.Uri {
   return vscode.Uri.file(`${wsDir}/${name}`)
@@ -9308,5 +9313,225 @@ export const cases: Array<[string, () => Promise<void>]> = [
       return v && v.selectionOffset === firstEdgeStart ? v : undefined
     })
     assert(located.viewMode === 'live', '跳转目标面板应为 live 模式（可编辑）')
+  }],
+
+  // ---- #198 索引维护：排除模式设置、增量与重建、清理回收、根增删 ----
+
+  ['索引维护：排除模式保存/持久化/恢复默认与覆盖范围重算（#198）', async () => {
+    type IndexState = {
+      available: boolean
+      excludePatterns: string[]
+      roots: Array<{ fsPath: string; fileCount: number; edgeCount: number; hasData: boolean }>
+      persistedPatterns: string[] | null
+    }
+    const state = async (): Promise<IndexState> =>
+      (await vscode.commands.executeCommand('onegayi.vsidian._test.getVaultIndexState')) as IndexState
+    const rootCount = async (): Promise<number> => {
+      const s = await state()
+      return s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir))?.fileCount ?? -1
+    }
+    // 初始：默认模式、无持久化
+    const initialCount = await poll('索引就绪', async () => {
+      const c = await rootCount()
+      return c > 0 ? c : undefined
+    })
+    const initial = await state()
+    assert(
+      JSON.stringify(initial.excludePatterns) === JSON.stringify(['**/.git/**', '**/node_modules/**']),
+      `初始应为默认排除模式（实际 ${JSON.stringify(initial.excludePatterns)}）`)
+    assert(initial.persistedPatterns === null, '未保存过不应有持久化值')
+    // 排除目录中的未引用文档：默认不排除 → 纳入索引（watcher 增量路径端到端）
+    await vscode.workspace.fs.createDirectory(wsUri('ex-zone'))
+    await vscode.workspace.fs.writeFile(wsUri('ex-zone/隐藏甲.md'), Buffer.from('# 隐藏甲\n'))
+    await vscode.workspace.fs.writeFile(wsUri('ex-zone/隐藏乙.md'), Buffer.from('# 隐藏乙\n'))
+    const countWithBoth = await poll('新文档经增量入索引', async () => {
+      const c = await rootCount()
+      return c === initialCount + 2 ? c : undefined
+    })
+    // 设置页链路保存排除（与「保存」按钮同一处理入口）
+    await vscode.commands.executeCommand(CMD.injectSettingsPageMessage, {
+      kind: 'index.setPatterns', patterns: ['ex-zone/**'],
+    })
+    const excluded = await poll('排除后覆盖范围重算', async () => {
+      const s = await state()
+      const c = s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir))?.fileCount ?? -1
+      return c === countWithBoth - 2 ? s : undefined
+    })
+    assert(JSON.stringify(excluded.persistedPatterns) === JSON.stringify(['ex-zone/**']),
+      `排除模式应持久化（实际 ${JSON.stringify(excluded.persistedPatterns)}）`)
+    // 非法项回显 + 合法项照常生效（超长模式被拒）；计数条件并入轮询——
+    // 模式值在重扫开始即更新，覆盖范围重算完成才可断言
+    await vscode.commands.executeCommand(CMD.injectSettingsPageMessage, {
+      kind: 'index.setPatterns', patterns: ['**/.git/**', 'a'.repeat(300)],
+    })
+    await poll('非法项拒绝、合法项生效且覆盖范围还原', async () => {
+      const s = await state()
+      const c = s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir))?.fileCount ?? -1
+      return JSON.stringify(s.excludePatterns) === JSON.stringify(['**/.git/**']) &&
+        JSON.stringify(s.persistedPatterns) === JSON.stringify(['**/.git/**']) &&
+        c === countWithBoth ? s : undefined
+    })
+    // 恢复默认：模式回默认并持久化、覆盖范围还原
+    await vscode.commands.executeCommand(CMD.injectSettingsPageMessage, { kind: 'index.resetPatterns' })
+    await poll('恢复默认', async () => {
+      const s = await state()
+      const c = s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir))?.fileCount ?? -1
+      return c === countWithBoth &&
+        JSON.stringify(s.excludePatterns) === JSON.stringify(['**/.git/**', '**/node_modules/**']) &&
+        JSON.stringify(s.persistedPatterns) === JSON.stringify(['**/.git/**', '**/node_modules/**'])
+        ? s : undefined
+    })
+    // 收尾：清理临时文档（保持后续用例计数稳定）。逐文件删除——整目录
+    // 删除不产生逐文件的 *.md watcher 事件（目录删除在周期核验前不被察觉，
+    // 已知边界见规格），逐文件删除走真实增量链路
+    await vscode.workspace.fs.delete(wsUri('ex-zone/隐藏甲.md'), { useTrash: false })
+    await vscode.workspace.fs.delete(wsUri('ex-zone/隐藏乙.md'), { useTrash: false })
+    await poll('临时文档移出索引', async () => {
+      const c = await rootCount()
+      return c === initialCount ? c : undefined
+    })
+    await vscode.workspace.fs.delete(wsUri('ex-zone'), { recursive: true, useTrash: false })
+  }],
+
+  ['索引维护：完整重建读盘收敛与缓存清理安全回收（#198）', async () => {
+    type IndexState = {
+      available: boolean
+      rebuilding: boolean
+      roots: Array<{ fsPath: string; fileCount: number; edgeCount: number; hasData: boolean }>
+      storageRoot: string | null
+    }
+    const state = async (): Promise<IndexState> =>
+      (await vscode.commands.executeCommand('onegayi.vsidian._test.getVaultIndexState')) as IndexState
+    const rootOf = (s: IndexState) => s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir))!
+    const initial = await poll('索引就绪', async () => {
+      const s = await state()
+      return s.available && rootOf(s).hasData && rootOf(s).edgeCount > 0 ? s : undefined
+    })
+    const baseEdges = rootOf(initial).edgeCount
+    // 新文档带出链（watcher 增量路径）
+    await vscode.workspace.fs.writeFile(wsUri('rebuild-doc.md'), Buffer.from('# 重建前\n\n见 [[反链目标]]。\n'))
+    await poll('增量入索引', async () => {
+      const s = await state()
+      return rootOf(s).edgeCount === baseEdges + 1 ? s : undefined
+    })
+    // 磁盘改写（去引用）后完整重建：经设置页链路触发（与按钮同一入口）
+    await vscode.workspace.fs.writeFile(wsUri('rebuild-doc.md'), Buffer.from('# 重建后\n\n引用消失。\n'))
+    await vscode.commands.executeCommand(CMD.injectSettingsPageMessage, { kind: 'index.rebuild' })
+    await poll('重建读盘收敛', async () => {
+      const s = await state()
+      return !s.rebuilding && rootOf(s).edgeCount === baseEdges ? s : undefined
+    })
+    // 缓存清理：手工制造垃圾代际目录 → 清理后回收、索引保持可用
+    const storageRoot = initial.storageRoot!
+    const partRoot = `${storageRoot.replace(/\\/g, '/')}/vsidian-index`
+    const partitions = (await readdir(partRoot)).filter((d) => !d.startsWith('.'))
+    assert(partitions.length > 0, '应有至少一个根分区目录')
+    const junkDir = `${partRoot}/${partitions[0]}/gen-000001-dead`
+    await mkdir(junkDir, { recursive: true })
+    await writeFile(`${junkDir}/shard-000.json`, 'garbage', 'utf8')
+    await vscode.commands.executeCommand(CMD.injectSettingsPageMessage, { kind: 'index.cleanup' })
+    await poll('垃圾代际被回收', async () => {
+      try {
+        await readdir(junkDir)
+        return undefined
+      } catch {
+        return true as const
+      }
+    })
+    // CURRENT 代未被删：分区内仍能读到 CURRENT 指针文件
+    const currentKept = await poll('活跃代保留', async () => {
+      try {
+        const content = (await readFile(`${partRoot}/${partitions[0]}/CURRENT`, 'utf8')).trim()
+        return content.startsWith('gen-') ? content : undefined
+      } catch {
+        return undefined
+      }
+    })
+    assert(currentKept.length > 0, '清理不得删除 CURRENT 指向的活跃代')
+    // 清理后索引仍可用（状态可观测、计数稳定）
+    const after = await state()
+    assert(after.available && rootOf(after).hasData, '清理后索引应保持可用')
+    // 收尾：移除临时文档
+    await vscode.workspace.fs.delete(wsUri('rebuild-doc.md'), { useTrash: false })
+    await poll('临时文档移出', async () => {
+      const s = await state()
+      return rootOf(s).fileCount === rootOf(initial).fileCount ? s : undefined
+    })
+  }],
+
+  ['索引维护：工作区根增删与嵌套根归属（#198）', async () => {
+    type IndexState = {
+      roots: Array<{ fsPath: string; fileCount: number; edgeCount: number; hasData: boolean }>
+    }
+    const state = async (): Promise<IndexState> =>
+      (await vscode.commands.executeCommand('onegayi.vsidian._test.getVaultIndexState')) as IndexState
+    const initial = await poll('初始单根就绪', async () => {
+      const s = await state()
+      return s.roots.length === 1 && s.roots[0]!.hasData ? s : undefined
+    })
+    const parentBefore = initial.roots[0]!.fileCount
+    // 独立第二根 + 嵌套根（父根目录内子目录）：双链按各根内相对路径解析
+    const secondDir = `${wsDir}-second`
+    const nestedDir = `${wsDir}/nested-root`
+    await mkdir(secondDir, { recursive: true })
+    await mkdir(nestedDir, { recursive: true })
+    await writeFile(`${secondDir}/second-src.md`, '# 二根来源\n\n见 [[second-target]]。\n', 'utf8')
+    await writeFile(`${secondDir}/second-target.md`, '# 二根目标\n', 'utf8')
+    await writeFile(`${nestedDir}/nested-a.md`, '# 嵌套来源\n\n见 [[nested-target]]。\n', 'utf8')
+    await writeFile(`${nestedDir}/nested-target.md`, '# 嵌套目标\n', 'utf8')
+    // 增根（一次调用插入两个，尾部连续——还原时可一次删除）
+    const added = vscode.workspace.updateWorkspaceFolders(
+      vscode.workspace.workspaceFolders!.length, 0,
+      { uri: vscode.Uri.file(secondDir) }, { uri: vscode.Uri.file(nestedDir) },
+    )
+    assert(added === true, 'updateWorkspaceFolders 应接受新增')
+    try {
+      const after = await poll('新根纳入并完成覆盖范围重算', async () => {
+        const s = await state()
+        if (s.roots.length !== 3) return undefined
+        const parent = s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir))
+        const second = s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(secondDir))
+        const nested = s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(nestedDir))
+        return parent && second && nested && second.hasData && nested.hasData &&
+          parent.fileCount === parentBefore ? s : undefined
+      }, 30000)
+      const nested = after.roots.find((r) => normFsPath(r.fsPath) === normFsPath(nestedDir))!
+      const second = after.roots.find((r) => normFsPath(r.fsPath) === normFsPath(secondDir))!
+      assert(nested.fileCount === 2, `嵌套根应持有自己的 2 个文档（实际 ${nested.fileCount}）`)
+      assert(second.fileCount === 2 && second.edgeCount === 1,
+        `第二根内双链应解析（files=${second.fileCount} edges=${second.edgeCount}）`)
+    } finally {
+      // 还原根集合：按**身份**移除本用例新增的两个根（位置无关——宿主
+      // 可能恢复出上次会话遗留的失效根，位置移除会删错对象并把多根状态
+      // 泄漏进窗口持久化，污染后续非分片运行）
+      const dropFolder = async (dir: string): Promise<void> => {
+        for (let round = 0; round < 3; round++) {
+          const folders = vscode.workspace.workspaceFolders ?? []
+          const idx = folders.findIndex((f) => normFsPath(f.uri.fsPath) === normFsPath(dir))
+          if (idx < 0) {
+            return
+          }
+          if (!vscode.workspace.updateWorkspaceFolders(idx, 1)) {
+            return
+          }
+          // updateWorkspaceFolders 不可并发调用：等事件落定再试下一轮
+          await new Promise((r) => setTimeout(r, 300))
+        }
+      }
+      await dropFolder(secondDir)
+      await dropFolder(nestedDir)
+      // 等待移除生效（索引根集合回到 1）
+      await poll('根移除', async () => {
+        const s = await state()
+        return s.roots.length === 1 ? s : undefined
+      })
+      await rm(secondDir, { recursive: true, force: true })
+      await rm(nestedDir, { recursive: true, force: true })
+      // 父根覆盖范围随移除还原（嵌套目录已删，计数回到 parentBefore）
+      await poll('父根覆盖范围还原', async () => {
+        const s = await state()
+        return s.roots[0]!.fileCount === parentBefore ? s : undefined
+      })
+    }
   }],
 ]

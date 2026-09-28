@@ -58,6 +58,12 @@ const extra: readonly KeybindingOperation[] = [
   // 撤下全部样式再按原配置恢复——双模式可用，默认不占键位
   { id: 'cssSnippetsPause', command: 'onegayi.vsidian.cssSnippets.pause', titleKey: 'command.cssSnippets.pause.title', mode: 'both', writes: false, defaults: [] },
   { id: 'cssSnippetsResume', command: 'onegayi.vsidian.cssSnippets.resume', titleKey: 'command.cssSnippets.resume.title', mode: 'both', writes: false, defaults: [] },
+  // #198 索引维护：宿主侧命令（设置页按钮与命令面板共用同一 wiring，
+  // 不依赖 webview 健康度）。索引维护属设置页/宿主域操作，不接管正文
+  // 输入（mode: both 只表示两模式下命令均可用）；低频操作默认不占键位，
+  // 评估记录见 docs/specs/keybindings.md
+  { id: 'indexRebuild', command: 'onegayi.vsidian.index.rebuild', titleKey: 'command.index.rebuild.title', mode: 'both', writes: false, defaults: [] },
+  { id: 'indexCleanup', command: 'onegayi.vsidian.index.cleanup', titleKey: 'command.index.cleanup.title', mode: 'both', writes: false, defaults: [] },
 ]
 
 /** 视图中已有明确目标的按钮动作：命令面板、快捷键均可调用。 */

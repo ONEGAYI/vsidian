@@ -31,19 +31,36 @@ function makeFs(initial: Record<string, string> = {}): FakeFs {
   return { files, stats }
 }
 
-/** 扫描端口：listMarkdownFiles 按扩展名过滤 .md（磁盘真实形态，/ 分隔） */
-function scanPortOf(fs: FakeFs, events: string[] = []): VaultIndexScanPort & { yields: number } {
+/** 扫描端口：listMarkdownFiles 按扩展名过滤 .md（磁盘真实形态，/ 分隔）；
+ *  inaccessible 集合模拟 SSH 断连/权限错误（accessOf 返回 inaccessible） */
+function scanPortOf(fs: FakeFs, events: string[] = []): VaultIndexScanPort & { yields: number; inaccessible: Set<string> } {
   return {
     yields: 0,
+    inaccessible: new Set<string>(),
     async listMarkdownFiles(rootFsPath: string) {
       const prefix = rootFsPath.replace(/\\/g, '/').replace(/\/$/, '') + '/'
       return [...fs.files.keys()].filter((p) => p.startsWith(prefix) && /\.md$/i.test(p))
     },
     async readFileText(fsPath: string) {
-      return fs.files.get(fsPath.replace(/\\/g, '/')) ?? null
+      const key = fsPath.replace(/\\/g, '/')
+      if (this.inaccessible.has(key)) {
+        return null // 不可访问：读失败（与真实 EACCES/断连一致）
+      }
+      return fs.files.get(key) ?? null
     },
     async statFile(fsPath: string) {
-      return fs.stats.get(fsPath.replace(/\\/g, '/')) ?? null
+      const key = fsPath.replace(/\\/g, '/')
+      if (this.inaccessible.has(key)) {
+        return null // 不可访问：stat 失败
+      }
+      return fs.stats.get(key) ?? null
+    },
+    async accessOf(fsPath: string) {
+      const key = fsPath.replace(/\\/g, '/')
+      if (this.inaccessible.has(key)) {
+        return 'inaccessible' as const
+      }
+      return fs.files.has(key) ? ('ok' as const) : ('missing' as const)
     },
     watchRoot(_rootFsPath, _onEvent) {
       events.push('watch')
@@ -53,7 +70,7 @@ function scanPortOf(fs: FakeFs, events: string[] = []): VaultIndexScanPort & { y
       this.yields += 1
       await Promise.resolve()
     },
-  } as VaultIndexScanPort & { yields: number }
+  } as VaultIndexScanPort & { yields: number; inaccessible: Set<string> }
 }
 
 /** 存储端口：内存目录树（沿用 snapshot 的 `/` 拼接路径） */
@@ -373,5 +390,435 @@ describe('VaultIndexService：watcher 与生命周期', () => {
     service.onChange(() => seen.push('changed'))
     await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
     expect(seen.length).toBeGreaterThanOrEqual(1)
+  })
+})
+
+describe('VaultIndexService：#198 编辑调度（防抖 + 2s 强制合并）', () => {
+  it('连续输入不超过 2s 强制合并一次（无静默期也冲刷覆盖层）', async () => {
+    const { service } = makeService(makeFs({
+      'C:/vault/a.md': '# A\n\n引用 [[目标]]。\n',
+      'C:/vault/目标.md': '# 目标\n',
+    }))
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // 连续键入：t=0..1800 每 400ms 一版（防抖不断重置、永不静默 500ms）
+    service.applyUnsaved('C:/vault/a.md', 2, '# A\n\nv2 [[目标]]。\n')
+    await vi.advanceTimersByTimeAsync(400)
+    service.applyUnsaved('C:/vault/a.md', 3, '# A\n\nv3 [[目标]]。\n')
+    await vi.advanceTimersByTimeAsync(400)
+    service.applyUnsaved('C:/vault/a.md', 4, '# A\n\nv4 [[目标]]。\n')
+    await vi.advanceTimersByTimeAsync(400)
+    service.applyUnsaved('C:/vault/a.md', 5, '# A\n\nv5 [[目标]]。\n')
+    await vi.advanceTimersByTimeAsync(400)
+    service.applyUnsaved('C:/vault/a.md', 6, '# A\n\nv6 引用消失。\n')
+    // t=1600：防抖点 2100 晚于强制合并点 2000，尚无冲刷
+    await vi.advanceTimersByTimeAsync(0)
+    expect(itemsOf(await service.backlinksOf('C:/vault/目标.md'))).toHaveLength(1)
+    // t=2000：首事件起 2s 封顶强制合并
+    await vi.advanceTimersByTimeAsync(400)
+    expect(itemsOf(await service.backlinksOf('C:/vault/目标.md'))).toHaveLength(0)
+  })
+})
+
+describe('VaultIndexService：#198 增量队列（有界、合并提交、溢出降级）', () => {
+  it('批量外部事件（模拟 Git 切换）合并为一次快照提交', async () => {
+    const initial: Record<string, string> = { 'C:/vault/b.md': '# B\n' }
+    for (let i = 0; i < 6; i++) initial[`C:/vault/a${i}.md`] = `# A${i}\n\n见 [[b]]。\n`
+    const fs = makeFs(initial)
+    let notify: ((p: string | null) => void) | undefined
+    const scan = scanPortOf(fs)
+    scan.watchRoot = (_r, onEvent) => { notify = onEvent; return () => {} }
+    const storage = storagePortOf()
+    const service = new VaultIndexService(scan, storage, {
+      storageRoot: 'C:/store', isWindowsHost: IS_WIN, scanBatchFiles: 2,
+    })
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    const commitsBefore = storage.writes.filter((w) => w.endsWith('/CURRENT')).length
+    for (let i = 0; i < 6; i++) {
+      fs.files.set(`C:/vault/a${i}.md`, `# A${i}\n\n引用消失。\n`)
+      fs.stats.set(`C:/vault/a${i}.md`, { mtimeMs: 1_700_000_050_000 + i, size: 10 })
+      notify!(`C:/vault/a${i}.md`)
+    }
+    await vi.advanceTimersByTimeAsync(1200) // 去抖 + 队列泵落定
+    await vi.advanceTimersByTimeAsync(2000) // 合并提交去抖落定
+    // 六文件一批 → 恰一次 CURRENT 提交（合并磁盘写）
+    expect(storage.writes.filter((w) => w.endsWith('/CURRENT')).length - commitsBefore).toBe(1)
+    expect(itemsOf(await service.backlinksOf('C:/vault/b.md'))).toHaveLength(0)
+  })
+
+  it('队列溢出降级为清单核验（不产生无界任务；核验检出删除）', async () => {
+    const fs = makeFs({ 'C:/vault/a.md': '# A\n\n见 [[b]]。\n', 'C:/vault/b.md': '# B\n' })
+    let notify: ((p: string | null) => void) | undefined
+    const scan = scanPortOf(fs)
+    scan.watchRoot = (_r, onEvent) => { notify = onEvent; return () => {} }
+    // 泵滞留门：首个增量任务挂在 accessOf 上，制造队列积压窗口
+    const origAccess = scan.accessOf.bind(scan)
+    let releasePump!: () => void
+    const pumpGate = new Promise<void>((r) => { releasePump = r })
+    let stalled = false
+    scan.accessOf = async (fsPath: string) => {
+      if (!stalled && fsPath.replace(/\\/g, '/').endsWith('x1.md')) {
+        stalled = true
+        await pumpGate
+      }
+      return origAccess(fsPath)
+    }
+    const service = new VaultIndexService(scan, storagePortOf(), {
+      storageRoot: 'C:/store', isWindowsHost: IS_WIN, scanBatchFiles: 2,
+      rescanQueueCapacity: 1,
+    })
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // 磁盘上 a.md 已删除；x1 先入队并滞留泵，随后 x2/x3 到达（容量 1 → 溢出）
+    fs.files.delete('C:/vault/a.md')
+    fs.stats.delete('C:/vault/a.md')
+    notify!('C:/vault/x1.md')
+    await vi.advanceTimersByTimeAsync(1000) // 泵启动并滞留于 x1
+    notify!('C:/vault/x2.md')
+    notify!('C:/vault/x3.md')
+    await vi.advanceTimersByTimeAsync(1000) // x2 入队、x3 溢出 → 降级核验挂起
+    releasePump()
+    await vi.advanceTimersByTimeAsync(2000) // 泵收尾 → 接力核验检出删除 → 合并提交
+    const result = await service.backlinksOf('C:/vault/b.md')
+    expect(itemsOf(result)).toHaveLength(0) // a.md 删除被核验兜底移除
+  })
+})
+
+describe('VaultIndexService：#198 排除语义', () => {
+  const EXCLUDED_FS = {
+    'C:/vault/a.md': '# A\n\n见 [[ex/秘密]] 与 ![图](ex/图.png)。\n',
+    'C:/vault/ex/秘密.md': '# 秘密\n\n见 [[../b]]。\n',
+    'C:/vault/b.md': '# B\n',
+  }
+
+  it('排除的 Markdown 不入索引域（无出链贡献），但被显式引用仍登记为目标', async () => {
+    const { service } = makeService(makeFs(EXCLUDED_FS))
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // 排除前：ex/秘密.md 在 md 域内、贡献指向 b.md 的反链
+    expect(itemsOf(await service.backlinksOf('C:/vault/b.md')).map((i) => i.sourceRelPath)).toEqual(['ex/秘密.md'])
+    await service.setExcludePatterns(['ex/**'])
+    // 排除后：无出链贡献（b.md 反链为空）
+    expect(itemsOf(await service.backlinksOf('C:/vault/b.md'))).toHaveLength(0)
+    // 被显式引用的排除目标仍登记：a.md 的 [[ex/秘密]] 反链可达
+    const toSecret = await service.backlinksOf('C:/vault/ex/秘密.md')
+    expect(itemsOf(toSecret).map((i) => i.sourceRelPath)).toEqual(['a.md'])
+    // files 计入登记条目：a.md、b.md（md 域）+ ex/秘密.md（显式引用登记的
+    // asset 目标——排除不递归扫描但保留可解析性）
+    expect(service.maintenanceInfo().roots[0]!.fileCount).toBe(3)
+  })
+
+  it('排除变更触发覆盖范围重算（先前纳入的文件被移出）', async () => {
+    const { service, fs } = makeService(makeFs(EXCLUDED_FS))
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    expect(itemsOf(await service.backlinksOf('C:/vault/b.md')).map((i) => i.sourceRelPath)).toContain('ex/秘密.md')
+    await service.setExcludePatterns(['ex/**'])
+    expect(itemsOf(await service.backlinksOf('C:/vault/b.md'))).toHaveLength(0)
+    // 恢复空排除 → 重算后重新纳入
+    await service.setExcludePatterns([])
+    expect(itemsOf(await service.backlinksOf('C:/vault/b.md')).map((i) => i.sourceRelPath)).toContain('ex/秘密.md')
+    void fs
+  })
+
+  it('排除文件的未保存编辑不入覆盖层；watcher 事件被忽略', async () => {
+    const fs = makeFs(EXCLUDED_FS)
+    let notify: ((p: string | null) => void) | undefined
+    const scan = scanPortOf(fs)
+    scan.watchRoot = (_r, onEvent) => { notify = onEvent; return () => {} }
+    const service = new VaultIndexService(scan, storagePortOf(), {
+      storageRoot: 'C:/store', isWindowsHost: IS_WIN,
+    })
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    await service.setExcludePatterns(['ex/**'])
+    // 排除文档的未保存编辑不产生覆盖层边
+    service.applyUnsaved('C:/vault/ex/秘密.md', 2, '# 秘密\n\n又见 [[b]]。\n')
+    await vi.advanceTimersByTimeAsync(2500)
+    expect(itemsOf(await service.backlinksOf('C:/vault/b.md'))).toHaveLength(0)
+    // 排除文件的外部变更不触发重扫（条目 stat 不变）
+    fs.files.set('C:/vault/ex/秘密.md', '# 改\n')
+    fs.stats.set('C:/vault/ex/秘密.md', { mtimeMs: 9_999, size: 2 })
+    notify!('C:/vault/ex/秘密.md')
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(itemsOf(await service.backlinksOf('C:/vault/ex/秘密.md')).map((i) => i.sourceRelPath)).toEqual(['a.md'])
+  })
+
+  it('getExcludePatterns / maintenanceInfo 回读当前模式', async () => {
+    const { service } = makeService(makeFs(EXCLUDED_FS))
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    await service.setExcludePatterns(['**/.git/**'])
+    expect(service.getExcludePatterns()).toEqual(['**/.git/**'])
+    expect(service.maintenanceInfo().excludePatterns).toEqual(['**/.git/**'])
+  })
+})
+
+describe('VaultIndexService：#198 核验（启动/清单比对/stale 语义）', () => {
+  it('启动核验：快照恢复后磁盘已变的文件被重扫、已删文件被移除', async () => {
+    const fs = makeFs({
+      'C:/vault/a.md': '# A\n\n见 [[b]]。\n',
+      'C:/vault/b.md': '# B\n',
+    })
+    const first = makeService(fs)
+    await first.service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // 停机窗口内：a.md 改写（引删除用）、c.md 新增、b.md 保持
+    fs.files.set('C:/vault/a.md', '# A\n\n引用消失。\n')
+    fs.stats.set('C:/vault/a.md', { mtimeMs: 1_700_000_100_000, size: 12 })
+    fs.files.set('C:/vault/c.md', '# C\n\n见 [[b]]。\n')
+    fs.stats.set('C:/vault/c.md', { mtimeMs: 1_700_000_100_000, size: 12 })
+    const second = new VaultIndexService(first.scan, first.storage, {
+      storageRoot: 'C:/store', isWindowsHost: IS_WIN,
+    })
+    const events: string[] = []
+    second.onTargetChange((e) => events.push(`${e.relPath}:${e.status}`))
+    await second.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // 恢复后自动核验（异步）：等待微任务与批间让出落定
+    await vi.advanceTimersByTimeAsync(0)
+    const items = itemsOf(await second.backlinksOf('C:/vault/b.md'))
+    expect(items.map((i) => i.sourceRelPath).sort()).toEqual(['c.md'])
+    expect(events.some((e) => e === 'a.md:changed')).toBe(true)
+  })
+
+  it('verifyNow：mtime+size 清单比对筛出变化（含不可访问不误删）', async () => {
+    const fs = makeFs({
+      'C:/vault/a.md': '# A\n\n见 [[b]]。\n',
+      'C:/vault/b.md': '# B\n',
+    })
+    const ctx = makeService(fs)
+    await ctx.service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // 磁盘变化：a.md 引用消失（mtime/size 变）；d.md 删除场景用「不可访问」模拟
+    fs.files.set('C:/vault/a.md', '# A\n\n引用消失。\n')
+    fs.stats.set('C:/vault/a.md', { mtimeMs: 1_700_000_200_000, size: 12 })
+    fs.files.set('C:/vault/d.md', '# D\n\n见 [[b]]。\n')
+    fs.stats.set('C:/vault/d.md', { mtimeMs: 1_700_000_200_000, size: 12 })
+    await ctx.service.verifyNow()
+    expect(itemsOf(await ctx.service.backlinksOf('C:/vault/b.md')).map((i) => i.sourceRelPath)).toEqual(['d.md'])
+    // 不可访问（SSH 断连/权限）：不得等同删除
+    fs.files.delete('C:/vault/d.md')
+    fs.stats.delete('C:/vault/d.md')
+    ;(ctx.scan as unknown as { inaccessible: Set<string> }).inaccessible.add('C:/vault/d.md')
+    await ctx.service.verifyNow()
+    expect(itemsOf(await ctx.service.backlinksOf('C:/vault/b.md')).map((i) => i.sourceRelPath)).toEqual(['d.md'])
+  })
+
+  it('焦点回归触发核验（长时间离开恢复；间隔保护）', async () => {
+    const fs = makeFs({ 'C:/vault/a.md': '# A\n\n见 [[b]]。\n', 'C:/vault/b.md': '# B\n' })
+    const ctx = makeService(fs)
+    await ctx.service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    fs.files.set('C:/vault/a.md', '# A\n\n引用消失。\n')
+    fs.stats.set('C:/vault/a.md', { mtimeMs: 1_700_000_300_000, size: 12 })
+    ctx.service.setActive(false)
+    ctx.service.setActive(true) // 回归即核验
+    await vi.advanceTimersByTimeAsync(0)
+    expect(itemsOf(await ctx.service.backlinksOf('C:/vault/b.md'))).toHaveLength(0)
+  })
+})
+
+describe('VaultIndexService：#198 变化发布通道（generation per target）', () => {
+  it('单文件重扫发布 changed/deleted，代次单调递增；断链来源保留', async () => {
+    const fs = makeFs({
+      'C:/vault/a.md': '# A\n\n见 [[b]]。\n',
+      'C:/vault/b.md': '# B\n',
+    })
+    let notify: ((p: string | null) => void) | undefined
+    const scan = scanPortOf(fs)
+    scan.watchRoot = (_r, onEvent) => { notify = onEvent; return () => {} }
+    const service = new VaultIndexService(scan, storagePortOf(), {
+      storageRoot: 'C:/store', isWindowsHost: IS_WIN,
+    })
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    const seen: Array<{ relPath: string; status: string; generation: number }> = []
+    service.onTargetChange((e) => seen.push({ relPath: e.relPath, status: e.status, generation: e.generation }))
+    // 变更
+    fs.files.set('C:/vault/a.md', '# A2\n\n见 [[b]]。\n')
+    fs.stats.set('C:/vault/a.md', { mtimeMs: 1_700_000_400_000, size: 12 })
+    notify!('C:/vault/a.md')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(seen.filter((e) => e.relPath === 'a.md').map((e) => e.status)).toEqual(['changed'])
+    // 删除
+    fs.files.delete('C:/vault/b.md')
+    fs.stats.delete('C:/vault/b.md')
+    notify!('C:/vault/b.md')
+    await vi.advanceTimersByTimeAsync(1000)
+    const bEvents = seen.filter((e) => e.relPath === 'b.md')
+    expect(bEvents.map((e) => e.status)).toEqual(['deleted'])
+    // 来源断链保留：a.md 的边仍在（指向已删除目标）
+    expect(itemsOf(await service.backlinksOf('C:/vault/b.md')).map((i) => i.sourceRelPath)).toEqual(['a.md'])
+  })
+
+  it('不可访问发布 stale 且不移除条目；恢复后发布 changed 并清 stale 标记', async () => {
+    const fs = makeFs({
+      'C:/vault/a.md': '# A\n\n见 [[b]]。\n',
+      'C:/vault/b.md': '# B\n',
+    })
+    const ctx = makeService(fs)
+    await ctx.service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    const seen: Array<{ relPath: string; status: string; generation: number }> = []
+    ctx.service.onTargetChange((e) => seen.push({ relPath: e.relPath, status: e.status, generation: e.generation }))
+    ;(ctx.scan as unknown as { inaccessible: Set<string> }).inaccessible.add('C:/vault/a.md')
+    await ctx.service.verifyNow()
+    expect(seen.filter((e) => e.relPath === 'a.md').map((e) => e.status)).toEqual(['stale'])
+    // 再次核验仍不可访问：不重复广播 stale
+    await ctx.service.verifyNow()
+    expect(seen.filter((e) => e.status === 'stale')).toHaveLength(1)
+    // 恢复可访问 + 内容变化
+    fs.files.set('C:/vault/a.md', '# A2\n\n见 [[b]]。\n')
+    fs.stats.set('C:/vault/a.md', { mtimeMs: 1_700_000_500_000, size: 12 })
+    ;(ctx.scan as unknown as { inaccessible: Set<string> }).inaccessible.delete('C:/vault/a.md')
+    await ctx.service.verifyNow()
+    expect(seen.filter((e) => e.relPath === 'a.md').map((e) => e.status)).toEqual(['stale', 'changed'])
+    const gens = seen.filter((e) => e.relPath === 'a.md').map((e) => e.generation)
+    expect(gens[1]!).toBeGreaterThan(gens[0]!)
+  })
+
+  it('完整重建对磁盘删除发布 deleted、对索引条目消失但磁盘仍在不发布', async () => {
+    const fs = makeFs({
+      'C:/vault/a.md': '# A\n\n见 [[b]]。\n',
+      'C:/vault/b.md': '# B\n',
+    })
+    const ctx = makeService(fs)
+    await ctx.service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    const seen: Array<{ relPath: string; status: string }> = []
+    ctx.service.onTargetChange((e) => seen.push({ relPath: e.relPath, status: e.status }))
+    // b.md 磁盘删除；a.md 磁盘在但将被排除（条目消失≠磁盘删除，不得广播）
+    fs.files.delete('C:/vault/b.md')
+    fs.stats.delete('C:/vault/b.md')
+    await ctx.service.setExcludePatterns(['a.md'])
+    await ctx.service.rebuildAll()
+    expect(seen.filter((e) => e.relPath === 'b.md').map((e) => e.status)).toEqual(['deleted'])
+    expect(seen.some((e) => e.relPath === 'a.md')).toBe(false)
+  })
+})
+
+describe('VaultIndexService：#198 清理与完整重建', () => {
+  it('cleanupCache 回收旧代与残留、保留 CURRENT 与继承源（不删活跃文件）', async () => {
+    const fs = makeFs({ 'C:/vault/a.md': '# A\n\n见 [[b]]。\n', 'C:/vault/b.md': '# B\n' })
+    const ctx = makeService(fs)
+    await ctx.service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // 再提交一代（gen2 继承 gen1 片）+ 模拟残留
+    fs.files.set('C:/vault/a.md', '# A2\n')
+    fs.stats.set('C:/vault/a.md', { mtimeMs: 1_700_000_600_000, size: 6 })
+    await ctx.service.verifyNow()
+    await vi.advanceTimersByTimeAsync(2000)
+    ctx.storage.files.set(`${STORE_BASE}/gen-000001-dead/shard-000.json`, 'x')
+    ctx.storage.files.set(`${STORE_BASE}/tmp-write-1/f.txt`, 'x')
+    const current = ctx.storage.files.get(`${STORE_BASE}/CURRENT`)!
+    const manifest = JSON.parse(ctx.storage.files.get(`${STORE_BASE}/${current}/manifest.json`)!) as {
+      shards: Array<{ inheritedFrom: string | null }>
+    }
+    const inherit = manifest.shards.find((s) => s.inheritedFrom)?.inheritedFrom ?? null
+    const result = await ctx.service.cleanupCache()
+    expect(result.removedDirs).toBeGreaterThanOrEqual(2) // 残留代 + tmp（至少）
+    const dirs = new Set(await ctx.storage.listDirs(STORE_BASE))
+    expect(dirs.has(current)).toBe(true)
+    if (inherit) expect(dirs.has(inherit)).toBe(true)
+    expect(dirs.has('gen-000001-dead')).toBe(false)
+    expect(dirs.has('tmp-write-1')).toBe(false)
+    // 清理后索引仍可读（活跃代未动）
+    expect(itemsOf(await ctx.service.backlinksOf('C:/vault/b.md')).length).toBeGreaterThanOrEqual(0)
+  })
+
+  it('rebuildAll 重新解析正文（快照旧内容被磁盘新内容取代）并回报进度', async () => {
+    const fs = makeFs({ 'C:/vault/a.md': '# A\n\n见 [[b]]。\n', 'C:/vault/b.md': '# B\n' })
+    const first = makeService(fs)
+    await first.service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // 第二实例恢复旧快照后磁盘已变：重建应读盘
+    fs.files.set('C:/vault/a.md', '# A\n\n引用消失。\n')
+    fs.stats.set('C:/vault/a.md', { mtimeMs: 1_700_000_700_000, size: 12 })
+    const second = new VaultIndexService(first.scan, first.storage, {
+      storageRoot: 'C:/store', isWindowsHost: IS_WIN,
+    })
+    // 跳过恢复期自动核验干扰：直接重建（initialize 的后台核验与本断言并存）
+    await second.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    const progress: Array<{ done: number; total: number }> = []
+    const result = await second.rebuildAll((p) => progress.push({ ...p }))
+    expect(result).toBe('done')
+    expect(itemsOf(await second.backlinksOf('C:/vault/b.md'))).toHaveLength(0)
+    expect(progress.length).toBeGreaterThan(0)
+    expect(progress.at(-1)!.done).toBe(progress.at(-1)!.total)
+  })
+
+  it('cancelMaintenance 中止重建（返回 cancelled；中断点在批间检查）', async () => {
+    const files: Record<string, string> = { 'C:/vault/b.md': '# B\n' }
+    for (let i = 0; i < 4; i++) files[`C:/vault/a${i}.md`] = `# A${i}\n\n见 [[b]]。\n`
+    const fs = makeFs(files)
+    const scan = scanPortOf(fs)
+    const origList = scan.listMarkdownFiles.bind(scan)
+    let release!: () => void
+    const gate = new Promise<void>((r) => { release = r })
+    let calls = 0
+    // 只拦第二次列举（首次 = initialize 全量扫描，第二次 = 重建）
+    scan.listMarkdownFiles = async (root: string) => {
+      calls += 1
+      if (calls === 2) {
+        await gate
+      }
+      return origList(root)
+    }
+    const service = new VaultIndexService(scan, storagePortOf(), {
+      storageRoot: 'C:/store', isWindowsHost: IS_WIN, scanBatchFiles: 1,
+    })
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    const rebuild = service.rebuildAll()
+    await Promise.resolve() // 重建进入列举、挂于 gate
+    service.cancelMaintenance()
+    release()
+    expect(await rebuild).toBe('cancelled')
+    // 模型保持上次完整数据（重建中止不清空基线）
+    expect(itemsOf(await service.backlinksOf('C:/vault/b.md')).length).toBeGreaterThan(0)
+  })
+})
+
+describe('VaultIndexService：#198 根增删（onDidChangeWorkspaceFolders 域）', () => {
+  it('setRoots 新增根被扫描、移除根停监听且退出索引域', async () => {
+    const events: string[] = []
+    const fs = makeFs({
+      'C:/r1/a.md': '# A\n\n见 [[b]]。\n',
+      'C:/r1/b.md': '# B\n',
+      'C:/r2/c.md': '# C\n\n见 [[d]]。\n',
+      'C:/r2/d.md': '# D\n',
+    })
+    const scan = scanPortOf(fs, events)
+    const service = new VaultIndexService(scan, storagePortOf(), { storageRoot: 'C:/store', isWindowsHost: IS_WIN })
+    await service.initialize([{ fsPath: 'C:/r1', uri: 'file:///c%3A/r1' }])
+    expect(itemsOf(await service.backlinksOf('C:/r1/b.md'))).toHaveLength(1)
+    expect(await service.backlinksOf('C:/r2/d.md')).toMatchObject({ status: 'error', reason: 'no-workspace' })
+    // 新增 r2
+    await service.setRoots([
+      { fsPath: 'C:/r1', uri: 'file:///c%3A/r1' },
+      { fsPath: 'C:/r2', uri: 'file:///c%3A/r2' },
+    ])
+    expect(itemsOf(await service.backlinksOf('C:/r2/d.md'))).toHaveLength(1)
+    // 移除 r1
+    await service.setRoots([{ fsPath: 'C:/r2', uri: 'file:///c%3A/r2' }])
+    expect(await service.backlinksOf('C:/r1/b.md')).toMatchObject({ status: 'error', reason: 'no-workspace' })
+    expect(itemsOf(await service.backlinksOf('C:/r2/d.md'))).toHaveLength(1)
+    expect(events.filter((e) => e === 'watch').length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('新增嵌套根后覆盖范围重算：父根已索引的嵌套文件重新归属（不重复）', async () => {
+    const fs = makeFs({
+      'C:/r1/a.md': '# A\n\n见 [[sub/s]]。\n',
+      'C:/r1/sub/s.md': '# S\n\n见 [[../a]]。\n',
+    })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/r1', uri: 'file:///c%3A/r1' }])
+    // 初始：sub 非根，两文件都属 r1（2 条目）
+    expect(service.maintenanceInfo().roots[0]!.fileCount).toBe(2)
+    expect(itemsOf(await service.backlinksOf('C:/r1/sub/s.md'))).toHaveLength(1)
+    // 新增嵌套根 sub：s.md 归属重划到 sub 根，父根不再持有（不重复归属）
+    await service.setRoots([
+      { fsPath: 'C:/r1', uri: 'file:///c%3A/r1' },
+      { fsPath: 'C:/r1/sub', uri: 'file:///c%3A/r1/sub' },
+    ])
+    const roots = service.maintenanceInfo().roots
+    expect(roots.length).toBe(2)
+    const parent = roots.find((r) => r.fsPath === 'C:/r1')!
+    const nested = roots.find((r) => r.fsPath === 'C:/r1/sub')!
+    expect(parent.fileCount).toBe(1) // 仅 a.md
+    expect(nested.fileCount).toBe(1) // s.md
+    // 跨根不解析：sub 根内 [[../a]] 越出 sub 边界（r1/a 属父根）→ 断链；
+    // a.md 的 [[sub/s]] 对 r1 而言是子目录文件（现属 sub 根）→ 也断链
+    expect(itemsOf(await service.backlinksOf('C:/r1/a.md'))).toHaveLength(0)
+    expect(itemsOf(await service.backlinksOf('C:/r1/sub/s.md'))).toHaveLength(0)
+    // 移除嵌套根：归属还原（覆盖范围再次重算）
+    await service.setRoots([{ fsPath: 'C:/r1', uri: 'file:///c%3A/r1' }])
+    expect(service.maintenanceInfo().roots[0]!.fileCount).toBe(2)
+    expect(itemsOf(await service.backlinksOf('C:/r1/sub/s.md'))).toHaveLength(1)
   })
 })

@@ -277,6 +277,16 @@
         "category": "Vsidian"
       },
       {
+        "command": "onegayi.vsidian.index.rebuild",
+        "title": "%command.index.rebuild.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.index.cleanup",
+        "title": "%command.index.cleanup.title%",
+        "category": "Vsidian"
+      },
+      {
         "command": "onegayi.vsidian.ui.sidebarToggle",
         "title": "%command.ui.sidebarToggle.title%",
         "category": "Vsidian"

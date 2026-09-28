@@ -321,6 +321,26 @@ export type HostToWebview =
       reason?: 'no-workspace' | 'read-error'
       items?: BacklinkItemPayload[]
     }
+  /** 索引维护状态（#198，设置页消费）：排除模式（当前生效 + 默认值）、
+   *  维护操作状态与进度、最近一次操作结果反馈。设置页经 index.get 拉取；
+   *  宿主状态变更（模式保存/进度推进/操作完成）后推送。available=false
+   *  表示当前窗口无工作区（索引服务未建——操作按钮禁用，模式仍可编辑
+   *  持久化，打开工作区后生效）。notice 保留至下一次操作覆盖（页面不
+   *  自行清除）；detail 为补充信息（如被拒的非法模式列表） */
+  | {
+      kind: 'index.state'
+      available: boolean
+      patterns: string[]
+      defaults: string[]
+      status: 'idle' | 'cleaning' | 'rebuilding'
+      progress: { done: number; total: number } | null
+      roots: number
+      notice: {
+        kind: 'patterns-saved' | 'patterns-invalid' | 'rebuild-done' | 'rebuild-cancelled'
+          | 'rebuild-failed' | 'cleanup-done' | 'cleanup-failed'
+        detail?: string
+      } | null
+    }
 
 /** webview → 宿主消息 */
 export type WebviewToHost =
@@ -609,6 +629,23 @@ export type WebviewToHost =
    *  面板）并定位到出链标记处。offset 为来源正文的 LF 偏移（宿主打开后
    *  经 NewlineCoordinator 换算发 view.locate，与双链跳转同链路） */
   | { kind: 'backlink.activate'; sessionId: string; docUri: string; sourceUri: string; offset: number }
+  /** 索引维护状态拉取（#198，设置页）：宿主以 index.state 应答；状态变更
+   *  后由宿主推送（onStateChanged → settingsPage.notifyIndexChanged） */
+  | { kind: 'index.get' }
+  /** 保存排除模式（#198，设置页）：宿主清洗（shared/vaultIndexExclude 规
+   *  则）后持久化并触发覆盖范围重算；结果经 index.state 推送（非法项在
+   *  notice.patterns-invalid 回显，合法项照常生效） */
+  | { kind: 'index.setPatterns'; patterns: string[] }
+  /** 恢复默认排除模式（#198，设置页）：等价保存默认值清单 */
+  | { kind: 'index.resetPatterns' }
+  /** 清理当前工作区索引缓存（#198，设置页）：安全回收旧代际（进度/结果
+   *  经 index.state 推送） */
+  | { kind: 'index.cleanup' }
+  /** 完整重建索引（#198，设置页）：全根重扫 + 资源核验，进度经 index.state
+   *  推送；index.cancel 可中止 */
+  | { kind: 'index.rebuild' }
+  /** 取消在途维护操作（#198，设置页，重建/清理期间可用） */
+  | { kind: 'index.cancel' }
 
 /** 反链面板条目载荷（#197 backlinks.snapshot.items；形态与宿主
  *  BacklinkItem 同构——本接口为协议层稳定契约） */
@@ -2067,6 +2104,14 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'backlink.activate':
       return isString(v.sessionId) && isString(v.docUri) &&
         isString(v.sourceUri) && isNonNegativeInt(v.offset)
+    case 'index.get':
+    case 'index.resetPatterns':
+    case 'index.cleanup':
+    case 'index.rebuild':
+    case 'index.cancel':
+      return true
+    case 'index.setPatterns':
+      return Array.isArray(v.patterns) && v.patterns.every(isString)
     default:
       return false
   }
@@ -2332,9 +2377,31 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         (v.reason === undefined || v.reason === 'no-workspace' || v.reason === 'read-error') &&
         (v.items === undefined || (Array.isArray(v.items) && v.items.every(isBacklinkItemPayload)))
       )
+    case 'index.state':
+      return (
+        typeof v.available === 'boolean' &&
+        Array.isArray(v.patterns) && v.patterns.every(isString) &&
+        Array.isArray(v.defaults) && v.defaults.every(isString) &&
+        (v.status === 'idle' || v.status === 'cleaning' || v.status === 'rebuilding') &&
+        (v.progress === null || (isObject(v.progress) &&
+          isNonNegativeInt(v.progress.done) && isNonNegativeInt(v.progress.total))) &&
+        isNonNegativeInt(v.roots) &&
+        (v.notice === null || (isObject(v.notice) && isIndexNoticeKind(v.notice.kind) &&
+          (v.notice.detail === undefined || isString(v.notice.detail))))
+      )
     default:
       return false
   }
+}
+
+/** #198 索引维护操作结果反馈种类（index.state.notice.kind） */
+const INDEX_NOTICE_KINDS = [
+  'patterns-saved', 'patterns-invalid', 'rebuild-done', 'rebuild-cancelled',
+  'rebuild-failed', 'cleanup-done', 'cleanup-failed',
+] as const
+
+function isIndexNoticeKind(v: unknown): v is (typeof INDEX_NOTICE_KINDS)[number] {
+  return typeof v === 'string' && (INDEX_NOTICE_KINDS as readonly string[]).includes(v)
 }
 
 /** #197 反链条目载荷形态守卫 */

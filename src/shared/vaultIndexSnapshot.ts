@@ -353,6 +353,39 @@ export function planObsoleteDirs(input: { baseDir: string; newDirName: string; i
   return result
 }
 
+/**
+ * 缓存清理计划（#198 设置页「清理当前工作区缓存」）：与提交回收
+ * （planObsoleteDirs）同域但**更保守**——尊重其他活跃读者/写者，不删活跃
+ * 文件。保留：CURRENT 指向代、其全部继承源（读者按 manifest 回读继承片）
+ * 与更高代际目录（可能是并发窗口的在途提交）。回收：严格更旧代、非继承
+ * 源孤儿代、tmp- 残留与非法目录名残留。currentDirName 为 null（无
+ * CURRENT——无快照或已整体损坏）时全部 gen 目录视为孤儿可回收。
+ * 健康缓存不按固定天数失效；清理是用户显式操作。
+ */
+export function planCleanupDirs(input: { currentDirName: string | null; inheritSources: readonly string[]; existingDirs: readonly string[] }): string[] {
+  const keep = new Set(input.inheritSources)
+  const currentGen = input.currentDirName !== null ? genNumOf(input.currentDirName) : null
+  const out: string[] = []
+  for (const dir of input.existingDirs) {
+    if (dir === input.currentDirName || keep.has(dir) || dir === 'CURRENT') {
+      continue
+    }
+    if (dir.startsWith('tmp-')) {
+      out.push(dir)
+      continue
+    }
+    const g = genNumOf(dir)
+    if (g === null) {
+      out.push(dir) // 非法目录名残留
+      continue
+    }
+    if (currentGen === null || g < currentGen) {
+      out.push(dir)
+    }
+  }
+  return out
+}
+
 function genNumOf(dirName: string): number | null {
   const m = /^gen-(\d+)/.exec(dirName)
   return m ? Number(m[1]) : null

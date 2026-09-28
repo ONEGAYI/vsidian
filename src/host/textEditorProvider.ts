@@ -56,6 +56,7 @@ import type { SettingsService } from './settingsService'
 import type { KeybindingService } from './keybindingService'
 import type { CssSnippetService } from './cssSnippetService'
 import type { VaultIndexService } from './vaultIndexService'
+import type { IndexMaintenance } from './vaultIndexMaintenance'
 import type { SnippetLinkList } from '../shared/cssSnippets'
 import type { SettingsPageHandle } from './settingsPage'
 import { runDiagramExport } from './diagramExportHost'
@@ -283,6 +284,9 @@ export function createTextEditorProvider(
   settings?: SettingsWiring,
   snippets?: CssSnippetService,
   vaultIndex?: VaultIndexService,
+  /** #198 索引维护接线（测试钩子观测持久化与生效模式用；生产由
+   *  extension.ts 注入 createIndexMaintenance 产物） */
+  indexMaintenance?: IndexMaintenance,
 ): vscode.CustomTextEditorProvider {
   const sessions = new Map<string, SessionEntry>()
   let lastClosedInput: { docUri: string; webviewText?: string; fragments: string[] } | undefined
@@ -1860,6 +1864,18 @@ export function createTextEditorProvider(
       globalStorageUri: context.globalStorageUri.toString(),
       workspaceTrusted: vscode.workspace.isTrusted,
     })),
+    // ---- #198 索引维护测试钩子：观测（服务权威状态 + 持久化原始值 +
+    //      快照分区根目录——集成用例直接列目录断言代际回收）----
+    vscode.commands.registerCommand('onegayi.vsidian._test.getVaultIndexState', () => ({
+      available: vaultIndex !== undefined,
+      ...(vaultIndex ? vaultIndex.maintenanceInfo() : { roots: [], rebuilding: false }),
+      persistedPatterns: indexMaintenance?.persistedRaw() ?? null,
+      storageRoot: context.storageUri ? context.storageUri.fsPath : null,
+    })),
+    vscode.commands.registerCommand(
+      'onegayi.vsidian._test.setIndexPatterns',
+      (patterns: string[]) => indexMaintenance?.setPatterns(patterns),
+    ),
   )
   }
 

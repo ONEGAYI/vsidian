@@ -1,5 +1,6 @@
-// 工作区引用索引宿主服务（工单 #197）：扫描 / 持久化 / 覆盖层 / 反链查询
-// 的编排核心。fs 与监听全部经端口注入（vscode 层壳见 vaultIndexWiring.ts），
+// 工作区引用索引宿主服务（工单 #197 建立，#198 增量维护扩展）：扫描 /
+// 持久化 / 覆盖层 / 反链查询 / 调度 / 排除 / 核验 / 变化发布 / 清理重建的
+// 编排核心。fs 与监听全部经端口注入（vscode 层壳见 vaultIndexWiring.ts），
 // 本体不依赖 vscode / DOM（vitest 直驱）。
 //
 // 架构约定（#194 规格 + ADR-0008）：
@@ -12,18 +13,37 @@
 //   TextDocument.version 单调仲裁——旧扫描/旧请求不得覆盖新版本）；快照
 //   只存磁盘基线，覆盖层不落盘
 // - **事件循环**：扫描分批让出（scanBatchFiles/批）；快照提交经
-//   planSnapshotCommitChunked 片间让出（ADR-0008 接线硬约束）
-// - **排除谓词留位**：scanPort.exclude 供 #198 接线（首版恒不排除）
+//   planSnapshotCommitChunked 片间让出（ADR-0008 接线硬约束）；增量队列
+//   与核验同样分批让出（#198）
 //
-// 调度初值（#194「生命周期」，待测初值非时限承诺）：未保存编辑去抖 500ms
-// 重抽；watcher/保存变更去抖合并后重扫并合并提交快照（1.5s）；周期核验、
-// 增量队列与排除设置归 #198。
+// #198 增量维护语义（初值集中于 shared/vaultIndexSchedule，待测初值非时
+// 限承诺）：
+// - **编辑调度**：未保存编辑防抖 500ms 冲刷覆盖层；连续输入自首事件起
+//   2s 强制合并一次（planFlushAt）
+// - **增量队列**：保存/外部事件进入有界去重队列（容量上限；溢出降级为
+//   一次清单核验——批量 Git 切换不产生无界任务）；批间让出；不与全量
+//   扫描/核验重叠（busy 时挂起，完成后接力）
+// - **核验**：快照恢复后（启动）、窗口焦点回归（长时间离开/断连恢复）与
+//   活跃期周期（约 10 分钟）触发 mtime+size 清单比对（diffManifest）——
+//   **仅筛变化，不作内容一致性证明**；移除动作必须有 accessOf=missing 的
+//   正证据，不可访问（SSH 断连/权限错误）标 stale 不移除
+// - **排除**：模式匹配语义单一事实源在 shared/vaultIndexExclude（服务在
+//   列举后过滤；不继承 VSCode 搜索排除与 .gitignore）；排除变更触发全部
+//   根覆盖范围重算（全量重扫）；被显式引用的排除位置目标仍登记（missed-
+//   stat 路径按 asset 登记元数据，不递归扫描）
+// - **变化发布**：按目标记录已观测变化代次（generation per target，单调
+//   递增，可作 ?v= 缓存击穿参数）；onTargetChange 供宿主侧订阅（#201 图
+//   片刷新复用）；索引条目消失不等于磁盘删除——只有正证据才广播 deleted
+// - **维护操作**：cleanupCache 按 planCleanupDirs 安全回收旧代际（保留
+//   CURRENT 代、继承源与更高代际——尊重并发窗口的活跃读者/写者）；
+//   rebuildAll 全根全量重扫（重解析正文并核验资源，进度回报、可取消）
 import * as path from 'node:path'
 import { extractVaultEdges } from './vaultLinkExtract'
 import { queryBacklinks, VaultIndexOverlay } from './vaultIndexOverlay'
 import {
   buildBacklinkIndex,
   loadSnapshot,
+  planCleanupDirs,
   planSnapshotCommitChunked,
   rootKeyOf,
   type VaultEdge,
@@ -32,6 +52,13 @@ import {
   type VaultIndexModel,
   type SnapshotMeta,
 } from '../shared/vaultIndexSnapshot'
+import { compileExcludeMatcher, type ExcludeMatcher } from '../shared/vaultIndexExclude'
+import {
+  BoundedKeyQueue,
+  diffManifest,
+  planFlushAt,
+  SCHEDULE_DEFAULTS,
+} from '../shared/vaultIndexSchedule'
 
 /** 工作区根引用（wiring 层已按 vscode 语义对语法异构同指向 URI 去重） */
 export interface VaultRootRef {
@@ -40,15 +67,19 @@ export interface VaultRootRef {
   uri: string
 }
 
-/** 扫描端口（vscode 层壳实现；#198 在 listMarkdownFiles 内接排除谓词） */
+/** 扫描端口（vscode 层壳实现；排除过滤在服务侧统一执行——语义单一事实源
+ *  在 shared/vaultIndexExclude，端口只负责列举/读取/探测） */
 export interface VaultIndexScanPort {
-  /** 列根内全部 Markdown（绝对 fsPath，磁盘真实形态；不含排除项） */
+  /** 列根内全部 Markdown（绝对 fsPath，磁盘真实形态；含将被排除者） */
   listMarkdownFiles(rootFsPath: string): Promise<string[]>
   /** 读文件 utf-8 文本；失败/不存在 null（原样返回，CRLF 由服务归一） */
   readFileText(fsPath: string): Promise<string | null>
   /** stat（mtime/size——快照条目与增量筛选）；失败 null */
   statFile(fsPath: string): Promise<{ mtimeMs: number; size: number } | null>
-  /** 递归监听根内 *.md 变更（首版：保存/删除/外部修改触发单文件重扫） */
+  /** 可访问性探测（#198）：区分「明确不存在」与「不可访问」（SSH 断连/
+   *  权限错误）——后者不得等同删除。 */
+  accessOf(fsPath: string): Promise<'ok' | 'missing' | 'inaccessible'>
+  /** 递归监听根内 *.md 变更（保存/删除/外部修改触发单文件重扫） */
   watchRoot(rootFsPath: string, onEvent: (fsPath: string | null) => void): () => void
   /** 让出事件循环（扫描分批与快照片间；vscode 层传 setImmediate） */
   yieldToEventLoop(): Promise<void>
@@ -85,6 +116,30 @@ export type BacklinksResult =
   | { status: 'loading' }
   | { status: 'error'; reason: 'no-workspace' | 'read-error' }
 
+/** 目标变化状态：changed=观测到元数据/内容变化；deleted=有正证据的磁盘
+ *  删除（来源断链保留）；stale=核验失败（不可访问——SSH 断连/权限错误，
+ *  不得等同删除，条目保留）。 */
+export type VaultTargetChangeStatus = 'changed' | 'deleted' | 'stale'
+
+/**
+ * 目标变化事件（#198 变化发布通道；#201 图片刷新消费）。
+ * generation 为同一目标的已观测变化代次（单调递增；首观测为 1）——
+ * 可作 ?v= 缓存击穿参数（webview 资源服务不承诺无缓存）。收到事件的
+ * 订阅者即使元数据相同也应失效（防 mtime 粒度漏检——#194 图片节）。
+ */
+export interface VaultTargetChangeEvent {
+  /** 绝对路径（宿主文件系统形态——宿主侧订阅者的资源身份） */
+  fsPath: string
+  /** 所属根 fsPath */
+  rootFsPath: string
+  /** 根内相对路径（索引域身份，`/` 形态） */
+  relPath: string
+  generation: number
+  status: VaultTargetChangeStatus
+  /** 已观测元数据（deleted 为 null；stale 携带最后已知的成功 stat） */
+  stat: { mtimeMs: number; size: number } | null
+}
+
 /** 单根的索引状态 */
 interface RootIndexState {
   fsPath: string
@@ -104,7 +159,21 @@ interface RootIndexState {
   rescanTimers: Map<string, ReturnType<typeof setTimeout>>
   /** 未保存文档的最新文本（去抖窗口内） */
   unsaved: Map<string, { version: number; text: string }>
+  /** 首个未冲刷事件时刻（强制合并窗口起点；键同 unsaved） */
+  unsavedSince: Map<string, number>
   unsavedTimers: Map<string, ReturnType<typeof setTimeout>>
+  /** 增量重扫任务队列（有界去重） */
+  rescanQueue: BoundedKeyQueue
+  /** 增量队列泵在跑 */
+  pumping: boolean
+  /** 泵的当前轮 Promise（documentSaved 等待排空用） */
+  pumpRun: Promise<void> | undefined
+  /** 扫描/核验期间到达的队列任务（完成后接力泵） */
+  pumpPending: boolean
+  /** 清单核验进行中 */
+  verifying: boolean
+  /** 泵忙碌时错过的核验请求（溢出降级触发；泵完成后补跑） */
+  verifyPending: boolean
 }
 
 export interface VaultIndexServiceOptions {
@@ -114,14 +183,28 @@ export interface VaultIndexServiceOptions {
   isWindowsHost: boolean
   /** 扫描批大小（每批之间让出事件循环）；缺省 24 */
   scanBatchFiles?: number
-  /** 未保存编辑去抖 ms；缺省 500（#194 待测初值） */
+  /** 未保存编辑防抖 ms；缺省 500（#194 待测初值） */
   unsavedDebounceMs?: number
+  /** 连续输入强制合并上限 ms（自首个未冲刷事件起算）；缺省 2000 */
+  unsavedMaxWaitMs?: number
   /** 文件重扫去抖 ms；缺省 800 */
   rescanDebounceMs?: number
   /** 快照合并提交去抖 ms；缺省 1500 */
   commitDebounceMs?: number
   /** 片段截断长度；缺省 160 */
   snippetLimit?: number
+  /** 增量队列容量；缺省 SCHEDULE_DEFAULTS.rescanQueueCapacity */
+  rescanQueueCapacity?: number
+  /** 增量队列每批文件数；缺省 SCHEDULE_DEFAULTS.rescanBatchFiles */
+  rescanBatchFiles?: number
+  /** 核验清单每批 stat 数；缺省 SCHEDULE_DEFAULTS.verifyBatchFiles */
+  verifyBatchFiles?: number
+  /** 周期核验间隔 ms；缺省约 10 分钟（低优先级补漏初值） */
+  verifyIntervalMs?: number
+  /** 焦点回归触发核验的最小间隔 ms；缺省 SCHEDULE_DEFAULTS */
+  verifyFocusRegainMinGapMs?: number
+  /** 初始排除模式（activate 从持久化读入；缺省不排除） */
+  excludePatterns?: readonly string[]
 }
 
 const ADAPTIVE_SHARDS: readonly { maxFiles: number; shards: number }[] = [
@@ -138,9 +221,35 @@ export class VaultIndexService {
   private disposed = false
   private readonly scanBatch: number
   private readonly unsavedDebounce: number
+  private readonly unsavedMaxWait: number
   private readonly rescanDebounce: number
   private readonly commitDebounce: number
   private readonly snippetLimit: number
+  private readonly rescanQueueCapacity: number
+  private readonly rescanBatchFiles: number
+  private readonly verifyBatchFiles: number
+  private readonly verifyIntervalMs: number
+  private readonly verifyFocusRegainMinGapMs: number
+
+  // ---- #198 维护状态 ----
+  /** 排除模式（清洗后）与编译匹配器 */
+  private excludePatterns: readonly string[] = []
+  private excludeMatcher: ExcludeMatcher
+  /** 维护代际：每次取消/覆盖范围重算/重建递增——在途长任务批间检查，
+   *  不匹配即中止（不与新一轮维护交叠） */
+  private maintenanceEpoch = 0
+  /** 目标 → 已观测变化代次（变化发布通道；session 内单调） */
+  private readonly targetGenerations = new Map<string, number>()
+  private readonly targetListeners = new Set<(event: VaultTargetChangeEvent) => void>()
+  /** 已标 stale 的目标（去重：持续不可访问不重复广播） */
+  private readonly staleMarks = new Set<string>()
+  /** 周期核验定时器（活跃期低优先级补漏） */
+  private verifyTimer: ReturnType<typeof setInterval> | undefined
+  private lastVerifyAt = 0
+  /** 窗口活跃（焦点）状态——wiring 经 onDidChangeWindowState 接线 */
+  private windowActive = true
+  /** 完整重建进行中（互斥重建） */
+  private rebuilding = false
 
   constructor(
     private readonly scan: VaultIndexScanPort,
@@ -148,10 +257,19 @@ export class VaultIndexService {
     private readonly opts: VaultIndexServiceOptions,
   ) {
     this.scanBatch = opts.scanBatchFiles ?? 24
-    this.unsavedDebounce = opts.unsavedDebounceMs ?? 500
-    this.rescanDebounce = opts.rescanDebounceMs ?? 800
-    this.commitDebounce = opts.commitDebounceMs ?? 1500
+    this.unsavedDebounce = opts.unsavedDebounceMs ?? SCHEDULE_DEFAULTS.unsavedDebounceMs
+    this.unsavedMaxWait = opts.unsavedMaxWaitMs ?? SCHEDULE_DEFAULTS.unsavedMaxWaitMs
+    this.rescanDebounce = opts.rescanDebounceMs ?? SCHEDULE_DEFAULTS.rescanDebounceMs
+    this.commitDebounce = opts.commitDebounceMs ?? SCHEDULE_DEFAULTS.commitDebounceMs
     this.snippetLimit = opts.snippetLimit ?? 160
+    this.rescanQueueCapacity = opts.rescanQueueCapacity ?? SCHEDULE_DEFAULTS.rescanQueueCapacity
+    this.rescanBatchFiles = opts.rescanBatchFiles ?? SCHEDULE_DEFAULTS.rescanBatchFiles
+    this.verifyBatchFiles = opts.verifyBatchFiles ?? SCHEDULE_DEFAULTS.verifyBatchFiles
+    this.verifyIntervalMs = opts.verifyIntervalMs ?? SCHEDULE_DEFAULTS.verifyIntervalMs
+    this.verifyFocusRegainMinGapMs =
+      opts.verifyFocusRegainMinGapMs ?? SCHEDULE_DEFAULTS.verifyFocusRegainMinGapMs
+    this.excludePatterns = [...(opts.excludePatterns ?? [])]
+    this.excludeMatcher = compileExcludeMatcher(this.excludePatterns, { foldCase: opts.isWindowsHost })
   }
 
   /** activate 装配入口：恢复或重建各根索引并挂监听 */
@@ -164,21 +282,7 @@ export class VaultIndexService {
         continue
       }
       seen.add(key)
-      this.roots.set(key, {
-        fsPath: root.fsPath,
-        uri: root.uri,
-        model: null,
-        backlinks: null,
-        overlay: new VaultIndexOverlay(),
-        meta: null,
-        scanning: false,
-        hasData: false,
-        unwatch: null,
-        commitTimer: undefined,
-        rescanTimers: new Map(),
-        unsaved: new Map(),
-        unsavedTimers: new Map(),
-      })
+      this.roots.set(key, this.freshState(root))
     }
     this.rootOrder = [...this.roots.keys()].sort((a, b) => b.length - a.length)
     for (const state of this.roots.values()) {
@@ -188,25 +292,79 @@ export class VaultIndexService {
       state.unwatch = this.scan.watchRoot(state.fsPath, (fsPath) => this.onWatchEvent(state, fsPath))
       await this.recoverOrScan(state)
     }
+    // 活跃期周期核验（约 10 分钟；低优先级——非活跃期挂起、busy 跳过）
+    if (this.verifyIntervalMs > 0 && this.verifyTimer === undefined && !this.disposed) {
+      this.verifyTimer = setInterval(() => {
+        if (this.disposed || !this.windowActive) {
+          return
+        }
+        void this.verifyNow()
+      }, this.verifyIntervalMs)
+    }
+  }
+
+  /** 根集合变更（onDidChangeWorkspaceFolders 域）：新增根扫描纳入、移除根
+   *  停监听退出索引域（快照留在磁盘，显式清理才回收）。集合有变时对全部
+   *  存留根做**覆盖范围重算**（#194「根增删后重新判断覆盖范围」）——嵌套
+   *  根新增/移除会改变既存根的归属边界，父根已索引的文件须重新划分。 */
+  async setRoots(roots: readonly VaultRootRef[]): Promise<void> {
+    if (this.disposed) {
+      return
+    }
+    const wanted = new Map<string, VaultRootRef>()
+    for (const root of roots) {
+      const key = this.normKey(root.fsPath)
+      if (!wanted.has(key)) {
+        wanted.set(key, root)
+      }
+    }
+    let changed = false
+    for (const key of [...this.roots.keys()]) {
+      if (wanted.has(key)) {
+        continue
+      }
+      const state = this.roots.get(key)!
+      this.teardownState(state)
+      this.roots.delete(key)
+      changed = true
+    }
+    for (const [key, root] of wanted) {
+      if (this.roots.has(key) || this.disposed) {
+        continue
+      }
+      this.roots.set(key, this.freshState(root))
+      this.rootOrder = [...this.roots.keys()].sort((a, b) => b.length - a.length)
+      const state = this.roots.get(key)!
+      state.unwatch = this.scan.watchRoot(state.fsPath, (fsPath) => this.onWatchEvent(state, fsPath))
+      await this.recoverOrScan(state)
+      changed = true
+    }
+    this.rootOrder = [...this.roots.keys()].sort((a, b) => b.length - a.length)
+    if (!changed) {
+      return
+    }
+    // 覆盖范围重算：全部存留根全量重扫（归属边界变化后重新划分；快照增量
+    // 继承使未变片不重写，成本可控——根集合变更是低频事件）
+    this.maintenanceEpoch++
+    const epoch = this.maintenanceEpoch
+    for (const state of this.roots.values()) {
+      if (this.disposed || epoch !== this.maintenanceEpoch) {
+        return
+      }
+      await this.fullScan(state, { epoch })
+    }
+    this.notify()
   }
 
   dispose(): void {
     this.disposed = true
+    this.maintenanceEpoch++ // 中止在途核验/队列/重建
+    if (this.verifyTimer !== undefined) {
+      clearInterval(this.verifyTimer)
+      this.verifyTimer = undefined
+    }
     for (const state of this.roots.values()) {
-      state.unwatch?.()
-      state.unwatch = null
-      if (state.commitTimer !== undefined) {
-        clearTimeout(state.commitTimer)
-      }
-      for (const timer of state.rescanTimers.values()) {
-        clearTimeout(timer)
-      }
-      for (const timer of state.unsavedTimers.values()) {
-        clearTimeout(timer)
-      }
-      state.rescanTimers.clear()
-      state.unsavedTimers.clear()
-      state.unsaved.clear()
+      this.teardownState(state)
     }
   }
 
@@ -216,6 +374,192 @@ export class VaultIndexService {
     return () => this.listeners.delete(listener)
   }
 
+  /**
+   * 目标变化订阅（#201 图片刷新复用）：覆盖层/重扫/核验/重建观测到的
+   * 磁盘目标变化（changed/deleted/stale）逐条发布；返回退订函数。
+   */
+  onTargetChange(listener: (event: VaultTargetChangeEvent) => void): () => void {
+    this.targetListeners.add(listener)
+    return () => this.targetListeners.delete(listener)
+  }
+
+  // ---- 维护观测与操作（设置页 / 宿主命令 / 测试钩子共用） ----
+
+  /** 当前排除模式（清洗后形态） */
+  getExcludePatterns(): readonly string[] {
+    return this.excludePatterns
+  }
+
+  /** 维护观测（设置页状态与测试钩子） */
+  maintenanceInfo(): {
+    excludePatterns: readonly string[]
+    rebuilding: boolean
+    roots: Array<{
+      fsPath: string
+      hasData: boolean
+      scanning: boolean
+      verifying: boolean
+      queued: number
+      fileCount: number
+      edgeCount: number
+    }>
+  } {
+    return {
+      excludePatterns: this.excludePatterns,
+      rebuilding: this.rebuilding,
+      roots: [...this.roots.values()].map((state) => ({
+        fsPath: state.fsPath,
+        hasData: state.hasData,
+        scanning: state.scanning,
+        verifying: state.verifying,
+        queued: state.rescanQueue.size,
+        fileCount: state.model?.files.size ?? 0,
+        edgeCount: state.model?.edges.length ?? 0,
+      })),
+    }
+  }
+
+  /**
+   * 排除模式变更：更新匹配器并触发**全部根覆盖范围重算**（全量重扫）。
+   * 在途增量/核验/扫描被中止（代际递增），新一轮扫描以新覆盖域为准。
+   */
+  async setExcludePatterns(patterns: readonly string[]): Promise<void> {
+    this.excludePatterns = [...patterns]
+    this.excludeMatcher = compileExcludeMatcher(this.excludePatterns, { foldCase: this.opts.isWindowsHost })
+    this.maintenanceEpoch++
+    const epoch = this.maintenanceEpoch
+    for (const state of this.roots.values()) {
+      if (this.disposed || epoch !== this.maintenanceEpoch) {
+        return
+      }
+      state.rescanQueue.clear()
+      // 新近排除的文档：覆盖层条目退役（不再作为反链来源）
+      for (const rel of [...state.overlay.entriesOf().keys()]) {
+        if (this.excludeMatcher.test(rel)) {
+          state.overlay.clear(rel)
+        }
+      }
+      await this.fullScan(state, { epoch })
+    }
+    this.notify()
+  }
+
+  /** 立即核验全部根（busy 根跳过——不与扫描/泵重叠）；设置页手动入口与
+   *  焦点回归共用 */
+  async verifyNow(): Promise<void> {
+    for (const state of this.roots.values()) {
+      if (this.disposed) {
+        return
+      }
+      await this.verifyRoot(state)
+    }
+  }
+
+  /**
+   * 清理当前工作区索引缓存：按 planCleanupDirs 安全回收各根分区下的旧
+   * 代际与 tmp- 残留——保留 CURRENT 指向代、其继承源与更高代际（并发
+   * 窗口可能在途提交），不删活跃文件；健康缓存不按固定天数失效。
+   */
+  async cleanupCache(): Promise<{ removedDirs: number }> {
+    let removedDirs = 0
+    for (const state of this.roots.values()) {
+      if (this.disposed) {
+        break
+      }
+      const baseDir = this.baseDirOf(state)
+      let currentDir: string | null = null
+      try {
+        currentDir = (await this.storage.readFile(`${baseDir}/CURRENT`)).trim() || null
+      } catch {
+        currentDir = null
+      }
+      const inheritSources = new Set<string>()
+      if (currentDir !== null) {
+        try {
+          const manifest = JSON.parse(await this.storage.readFile(`${baseDir}/${currentDir}/manifest.json`)) as {
+            shards?: Array<{ inheritedFrom?: string | null }>
+          }
+          for (const shard of manifest.shards ?? []) {
+            if (shard.inheritedFrom) {
+              inheritSources.add(shard.inheritedFrom)
+            }
+          }
+        } catch {
+          // manifest 不可读：只保留 CURRENT 代（保守回收其余）
+        }
+      }
+      const dirs = await this.storage.listDirs(baseDir)
+      for (const dir of planCleanupDirs({
+        currentDirName: currentDir,
+        inheritSources: [...inheritSources],
+        existingDirs: dirs,
+      })) {
+        try {
+          await this.storage.removeDir(`${baseDir}/${dir}`)
+          removedDirs++
+        } catch {
+          // 回收失败不阻塞清理；残留由下一轮回收兜底
+        }
+      }
+    }
+    return { removedDirs }
+  }
+
+  /**
+   * 完整重建：全部根全量重扫（重新解析正文并核验资源）。进度经 onProgress
+   * 回报（done/total 为已处理/总计 Markdown 数）；cancelMaintenance 可中止
+   * （返回 'cancelled'——模型保持上次完整数据，不清空基线）。
+   */
+  async rebuildAll(
+    onProgress?: (progress: { done: number; total: number }) => void,
+  ): Promise<'done' | 'cancelled' | 'busy'> {
+    if (this.rebuilding) {
+      return 'busy'
+    }
+    this.rebuilding = true
+    this.maintenanceEpoch++ // 中止在途增量/核验/扫描，避免交叠
+    const epoch = this.maintenanceEpoch
+    try {
+      let offset = 0
+      for (const state of this.roots.values()) {
+        if (this.disposed || epoch !== this.maintenanceEpoch) {
+          return 'cancelled'
+        }
+        await this.fullScan(state, {
+          epoch,
+          onProgress: (done, total) => onProgress?.({ done: offset + done, total: offset + total }),
+        })
+        // fullScan 在代际失配时静默中止（模型保持旧数据）——此处显式判定
+        if (this.disposed || epoch !== this.maintenanceEpoch) {
+          return 'cancelled'
+        }
+        offset += state.model?.files.size ?? 0
+      }
+      return 'done'
+    } finally {
+      this.rebuilding = false
+    }
+  }
+
+  /** 取消在途维护操作（核验/增量队列/重建在批间检查代际并中止） */
+  cancelMaintenance(): void {
+    this.maintenanceEpoch++
+  }
+
+  /**
+   * 窗口活跃状态（wiring 经 vscode.window.onDidChangeWindowState 接线）。
+   * 失焦挂起周期核验；长时间离开后焦点回归触发一次核验（断连/离开恢复）。
+   */
+  setActive(active: boolean): void {
+    if (this.disposed || active === this.windowActive) {
+      return
+    }
+    this.windowActive = active
+    if (active && Date.now() - this.lastVerifyAt >= this.verifyFocusRegainMinGapMs) {
+      void this.verifyNow()
+    }
+  }
+
   private notify(): void {
     for (const listener of [...this.listeners]) {
       listener()
@@ -223,6 +567,51 @@ export class VaultIndexService {
   }
 
   // ---- 恢复与全量扫描 ----
+
+  private freshState(root: VaultRootRef): RootIndexState {
+    return {
+      fsPath: root.fsPath,
+      uri: root.uri,
+      model: null,
+      backlinks: null,
+      overlay: new VaultIndexOverlay(),
+      meta: null,
+      scanning: false,
+      hasData: false,
+      unwatch: null,
+      commitTimer: undefined,
+      rescanTimers: new Map(),
+      unsaved: new Map(),
+      unsavedSince: new Map(),
+      unsavedTimers: new Map(),
+      rescanQueue: new BoundedKeyQueue(this.rescanQueueCapacity),
+      pumping: false,
+      pumpRun: undefined,
+      pumpPending: false,
+      verifying: false,
+      verifyPending: false,
+    }
+  }
+
+  private teardownState(state: RootIndexState): void {
+    state.unwatch?.()
+    state.unwatch = null
+    if (state.commitTimer !== undefined) {
+      clearTimeout(state.commitTimer)
+      state.commitTimer = undefined
+    }
+    for (const timer of state.rescanTimers.values()) {
+      clearTimeout(timer)
+    }
+    for (const timer of state.unsavedTimers.values()) {
+      clearTimeout(timer)
+    }
+    state.rescanTimers.clear()
+    state.unsavedTimers.clear()
+    state.unsaved.clear()
+    state.unsavedSince.clear()
+    state.rescanQueue.clear()
+  }
 
   private baseDirOf(state: RootIndexState): string {
     // 分区键以 wiring 传入的真实根 URI 求（rootKeyOf 只做语法层归一——
@@ -243,6 +632,9 @@ export class VaultIndexService {
         state.hasData = true
         state.scanning = false
         this.notify()
+        // 启动核验（#198）：快照恢复不读正文——停机窗口内的漂移由清单比对
+        // 检出（mtime+size 仅筛变化；后台执行，不阻塞激活）
+        void this.verifyRoot(state)
         return
       }
     } catch {
@@ -251,136 +643,204 @@ export class VaultIndexService {
     await this.fullScan(state)
   }
 
-  /** 全量扫描：分批读盘抽取（批间让出）→ 附件登记（两遍法）→ 快照提交 */
-  private async fullScan(state: RootIndexState): Promise<void> {
+  /** 全量扫描：分批读盘抽取（批间让出）→ 附件登记（两遍法）→ 快照提交。
+   *  epoch 不匹配（取消/新一轮维护）时中止——扫描标志经 finally 复位，
+   *  模型保持上次完整数据。 */
+  private async fullScan(
+    state: RootIndexState,
+    runOpts: { epoch?: number; onProgress?: (done: number, total: number) => void } = {},
+  ): Promise<void> {
+    const epoch = runOpts.epoch ?? this.maintenanceEpoch
+    const cancelled = (): boolean => this.disposed || epoch !== this.maintenanceEpoch
     state.scanning = true
+    state.rescanQueue.clear() // 全量重扫涵盖增量任务，排空避免重复
     this.notify()
-    // 嵌套根划分：父根扫描排除「实际属于更具体根」的文件（不重复归属，
-    // #194「路径与范围」；rootOrder 深度降序保证 rootOf 取最具体根）
-    const listed = (await this.scan.listMarkdownFiles(state.fsPath))
-      .filter((abs) => this.rootOf(abs) === state)
-    const foldIndex = new Map<string, string>() // fold(rel) → rel（md 集合）
-    const absByRel = new Map<string, string>()
-    for (const abs of listed) {
-      const rel = this.relOf(state, abs)
-      if (rel !== null) {
-        foldIndex.set(this.foldKey(rel), rel)
-        absByRel.set(rel, abs)
+    try {
+      // 嵌套根划分 + 排除过滤：父根扫描排除「实际属于更具体根」的文件
+      // （rootOrder 深度降序保证 rootOf 取最具体根）与命中排除模式的文件
+      const listed = (await this.scan.listMarkdownFiles(state.fsPath)).filter((abs) => {
+        const rel = this.relOf(state, abs)
+        return rel !== null && this.rootOf(abs) === state && !this.excludeMatcher.test(rel)
+      })
+      const foldIndex = new Map<string, string>() // fold(rel) → rel（md 集合）
+      const absByRel = new Map<string, string>()
+      for (const abs of listed) {
+        const rel = this.relOf(state, abs)
+        if (rel !== null) {
+          foldIndex.set(this.foldKey(rel), rel)
+          absByRel.set(rel, abs)
+        }
       }
-    }
-    const files = new Map<string, VaultFileEntry>()
-    const edges: VaultEdge[] = []
-    /** 附件登记：fold(rel) → 条目（两遍法的第二遍起可见） */
-    const assetFold = new Map<string, VaultFileEntry>()
-    /** 第一遍 miss 的非 md 候选（绝对形态；stat 后决定是否登记 asset） */
-    const missed: string[] = []
-    /** 存在断链边的来源 rel（第二遍重抽——asset 登记后可能命中） */
-    const pendingSources = new Set<string>()
+      const files = new Map<string, VaultFileEntry>()
+      const edges: VaultEdge[] = []
+      /** 附件登记：fold(rel) → 条目（两遍法的第二遍起可见） */
+      const assetFold = new Map<string, VaultFileEntry>()
+      /** 第一遍 miss 的非 md 候选（绝对形态；stat 后决定是否登记 asset——
+       *  含被显式引用的排除位置目标：登记元数据，不递归扫描） */
+      const missed: string[] = []
+      /** 存在断链边的来源 rel（第二遍重抽——asset 登记后可能命中） */
+      const pendingSources = new Set<string>()
 
-    const resolveWith = (absFsPath: string): string | null => {
-      const rel = this.relOf(state, absFsPath)
-      if (rel === null) {
+      const resolveWith = (absFsPath: string): string | null => {
+        const rel = this.relOf(state, absFsPath)
+        // 越根或归属更具体根（嵌套根）的目标不解析（断链保留——各根独立
+        // 资源边界，#194「路径与范围」）
+        if (rel === null || this.rootOf(absFsPath) !== state) {
+          return null
+        }
+        const mdHit = foldIndex.get(this.foldKey(rel))
+        if (mdHit !== undefined) {
+          return mdHit
+        }
+        const assetHit = assetFold.get(this.foldKey(rel))
+        if (assetHit !== undefined) {
+          return assetHit.path
+        }
+        missed.push(absFsPath)
         return null
       }
-      const mdHit = foldIndex.get(this.foldKey(rel))
-      if (mdHit !== undefined) {
-        return mdHit
-      }
-      const assetHit = assetFold.get(this.foldKey(rel))
-      if (assetHit !== undefined) {
-        return assetHit.path
-      }
-      missed.push(absFsPath)
-      return null
-    }
 
-    const ctxOf = (abs: string) => ({
-      docDir: this.dirname(abs),
-      rootDir: state.fsPath,
-      isWindowsHost: this.opts.isWindowsHost,
-    })
-
-    // 第一遍：md 互解析（附件目标 miss 收集）
-    const mdList = [...absByRel.keys()].sort()
-    for (let i = 0; i < mdList.length; i++) {
-      if (this.disposed) {
-        return
-      }
-      const rel = mdList[i]!
-      const abs = absByRel.get(rel)!
-      const raw = await this.scan.readFileText(abs)
-      const stat = await this.scan.statFile(abs)
-      if (raw === null) {
-        continue // 读失败：不登记（watcher 兜底）
-      }
-      const text = normalizeLf(raw)
-      const docEdges = extractVaultEdges(rel, text, ctxOf(abs), resolveWith)
-      edges.push(...docEdges)
-      files.set(rel, {
-        path: rel,
-        kind: 'markdown',
-        mtimeMs: stat?.mtimeMs ?? 0,
-        size: stat?.size ?? 0,
-        contentVersion: 1,
+      const ctxOf = (abs: string) => ({
+        docDir: this.dirname(abs),
+        rootDir: state.fsPath,
+        isWindowsHost: this.opts.isWindowsHost,
       })
-      if (docEdges.some((e) => e.resolvedTarget === null)) {
-        pendingSources.add(rel)
-      }
-      if ((i + 1) % this.scanBatch === 0) {
-        await this.scan.yieldToEventLoop()
-      }
-    }
 
-    // 附件登记：miss 候选中真实存在者（任意类型，仅登记元数据与被引用关系，
-    // 不解析内容——#194 规格）
-    const uniqueMissed = [...new Set(missed)]
-    for (let i = 0; i < uniqueMissed.length; i++) {
-      if (this.disposed) {
-        return
-      }
-      const abs = uniqueMissed[i]!
-      const rel = this.relOf(state, abs)
-      if (rel === null || files.has(rel)) {
-        continue
-      }
-      const stat = await this.scan.statFile(abs)
-      if (stat) {
-        const entry: VaultFileEntry = {
-          path: rel, kind: 'asset', mtimeMs: stat.mtimeMs, size: stat.size, contentVersion: 1,
+      // 第一遍：md 互解析（附件目标 miss 收集）
+      const mdList = [...absByRel.keys()].sort()
+      for (let i = 0; i < mdList.length; i++) {
+        if (cancelled()) {
+          return
         }
-        files.set(rel, entry)
-        assetFold.set(this.foldKey(rel), entry)
+        const rel = mdList[i]!
+        const abs = absByRel.get(rel)!
+        const raw = await this.scan.readFileText(abs)
+        const stat = await this.scan.statFile(abs)
+        if (raw === null) {
+          continue // 读失败：不登记（watcher 兜底）
+        }
+        const text = normalizeLf(raw)
+        const docEdges = extractVaultEdges(rel, text, ctxOf(abs), resolveWith)
+        edges.push(...docEdges)
+        files.set(rel, {
+          path: rel,
+          kind: 'markdown',
+          mtimeMs: stat?.mtimeMs ?? 0,
+          size: stat?.size ?? 0,
+          contentVersion: 1,
+        })
+        if (docEdges.some((e) => e.resolvedTarget === null)) {
+          pendingSources.add(rel)
+        }
+        runOpts.onProgress?.(i + 1, mdList.length)
+        if ((i + 1) % this.scanBatch === 0) {
+          await this.scan.yieldToEventLoop()
+        }
       }
-      if ((i + 1) % this.scanBatch === 0) {
-        await this.scan.yieldToEventLoop()
-      }
-    }
 
-    // 第二遍：重抽存在断链边的文件（asset 集合就绪后可能命中；逐文件幂等替换）
-    for (const rel of pendingSources) {
-      if (this.disposed) {
-        return
+      // 附件登记：miss 候选中真实存在者（任意类型，仅登记元数据与被引用
+      // 关系，不解析内容——#194 规格）
+      const uniqueMissed = [...new Set(missed)]
+      for (let i = 0; i < uniqueMissed.length; i++) {
+        if (cancelled()) {
+          return
+        }
+        const abs = uniqueMissed[i]!
+        const rel = this.relOf(state, abs)
+        // 归属更具体根（嵌套根）的候选不登记（不能重复归属）；
+        // resolveWith 已按 rootOf 过滤，此为登记侧同口径防线
+        if (rel === null || this.rootOf(abs) !== state || files.has(rel)) {
+          continue
+        }
+        const stat = await this.scan.statFile(abs)
+        if (stat) {
+          const entry: VaultFileEntry = {
+            path: rel, kind: 'asset', mtimeMs: stat.mtimeMs, size: stat.size, contentVersion: 1,
+          }
+          files.set(rel, entry)
+          assetFold.set(this.foldKey(rel), entry)
+        }
+        if ((i + 1) % this.scanBatch === 0) {
+          await this.scan.yieldToEventLoop()
+        }
       }
-      const abs = absByRel.get(rel)
-      if (!abs) {
-        continue
-      }
-      const raw = await this.scan.readFileText(abs)
-      if (raw === null) {
-        continue
-      }
-      const text = normalizeLf(raw)
-      const next = extractVaultEdges(rel, text, ctxOf(abs), resolveWith)
-      replaceEdgesOf(edges, rel, next)
-    }
 
-    const model: VaultIndexModel = { files, edges }
-    state.model = model
-    state.backlinks = buildBacklinkIndex(model.edges)
-    state.hasData = true
-    state.scanning = false
-    this.notify()
-    await this.commitSnapshot(state)
+      // 第二遍：重抽存在断链边的文件（asset 集合就绪后可能命中；逐文件幂等替换）
+      for (const rel of pendingSources) {
+        if (cancelled()) {
+          return
+        }
+        const abs = absByRel.get(rel)
+        if (!abs) {
+          continue
+        }
+        const raw = await this.scan.readFileText(abs)
+        if (raw === null) {
+          continue
+        }
+        const text = normalizeLf(raw)
+        const next = extractVaultEdges(rel, text, ctxOf(abs), resolveWith)
+        replaceEdgesOf(edges, rel, next)
+      }
+
+      // 变化发布（#198）：与上一版模型比对 stat（重扫/重建场景）；首扫描
+      // 只建立代次不广播（避免启动风暴）；索引条目消失 ≠ 磁盘删除——
+      // 只有 accessOf=missing 的正证据才广播 deleted
+      const prevModel = state.model
+      for (const [rel, entry] of files) {
+        const prev = prevModel?.files.get(rel)
+        if (prev === undefined) {
+          this.ensureGeneration(this.absOf(state, rel))
+        } else if (prev.mtimeMs !== entry.mtimeMs || prev.size !== entry.size) {
+          this.publishTargetChange(state, rel, 'changed', { mtimeMs: entry.mtimeMs, size: entry.size })
+        }
+      }
+      if (prevModel) {
+        for (const rel of prevModel.files.keys()) {
+          if (files.has(rel)) {
+            continue
+          }
+          if (cancelled()) {
+            return
+          }
+          const abs = this.absOf(state, rel)
+          const access = await this.scan.accessOf(abs)
+          if (access === 'missing') {
+            this.publishTargetChange(state, rel, 'deleted', null)
+          } else if (access === 'inaccessible') {
+            const prev = prevModel.files.get(rel)
+            this.publishTargetChange(
+              state, rel, 'stale',
+              prev ? { mtimeMs: prev.mtimeMs, size: prev.size } : null,
+            )
+          }
+          // access=ok：条目消失但磁盘仍在（排除/引用消失等）——不广播
+        }
+      }
+
+      const model: VaultIndexModel = { files, edges }
+      state.model = model
+      state.backlinks = buildBacklinkIndex(model.edges)
+      state.hasData = true
+      state.scanning = false
+      this.notify()
+      await this.commitSnapshot(state)
+    } finally {
+      state.scanning = false
+      this.resumeAfterBusy(state)
+    }
+  }
+
+  /** 扫描/核验完成后接力：挂起的增量泵与溢出降级核验 */
+  private resumeAfterBusy(state: RootIndexState): void {
+    if (state.pumpPending && !state.pumping && !state.scanning && !state.verifying) {
+      state.pumpPending = false
+      void this.pumpRescans(state)
+    }
+    if (state.verifyPending && !state.pumping && !state.scanning && !state.verifying) {
+      state.verifyPending = false
+      void this.verifyRoot(state)
+    }
   }
 
   // ---- 快照提交 ----
@@ -464,21 +924,39 @@ export class VaultIndexService {
       return // 工作区外文档不入索引域
     }
     const key = this.normKey(fsPath)
+    // 排除文档不入覆盖层（排除来源不贡献反链——#194「排除来源不保证其
+    // 引用自动更新」的索引侧推论）
+    const rel = this.relOf(state, key)
+    if (rel !== null && this.excludeMatcher.test(rel)) {
+      return
+    }
     // 服务层版本仲裁：迟到的旧版本事件（乱序广播）不覆盖已登记的新版本——
     // overlay.apply 是第二道防线（扫描完成时再仲裁一次）
     const pending = state.unsaved.get(key)
     if (pending && version <= pending.version) {
       return
     }
+    const now = Date.now()
     state.unsaved.set(key, { version, text })
+    if (!state.unsavedTimers.has(key)) {
+      state.unsavedSince.set(key, now)
+    }
+    // 冲刷时刻 = min(末次事件+防抖, 首个未冲刷事件+强制合并上限)
+    const flushAt = planFlushAt(
+      state.unsavedSince.get(key) ?? now,
+      now,
+      this.unsavedDebounce,
+      this.unsavedMaxWait,
+    )
     const prevTimer = state.unsavedTimers.get(key)
     if (prevTimer !== undefined) {
       clearTimeout(prevTimer)
     }
     state.unsavedTimers.set(key, setTimeout(() => {
       state.unsavedTimers.delete(key)
+      state.unsavedSince.delete(key)
       void this.flushUnsaved(state, key)
-    }, this.unsavedDebounce))
+    }, Math.max(0, flushAt - now)))
   }
 
   private async flushUnsaved(state: RootIndexState, key: string): Promise<void> {
@@ -511,7 +989,7 @@ export class VaultIndexService {
     }
   }
 
-  /** 文档保存：覆盖层退役 + 磁盘基线重扫 + 合并提交快照 */
+  /** 文档保存：覆盖层退役 + 增量队列重扫（有界；等待排空） */
   async documentSaved(fsPath: string): Promise<void> {
     const state = this.rootOf(fsPath)
     if (!state) {
@@ -524,18 +1002,25 @@ export class VaultIndexService {
       state.unsavedTimers.delete(key)
     }
     state.unsaved.delete(key)
+    state.unsavedSince.delete(key)
     const rel = this.relOf(state, fsPath)
     if (rel !== null) {
       state.overlay.clear(rel)
     }
-    await this.rescanFile(state, fsPath)
-    this.scheduleCommit(state)
+    // 保存走有界增量队列（与外部事件同域：容量/溢出/分批语义一致）
+    await this.enqueueRescan(state, key)
   }
 
-  // ---- watcher / 单文件重扫 ----
+  // ---- watcher / 增量队列 ----
 
   private onWatchEvent(state: RootIndexState, fsPath: string | null): void {
     if (!fsPath) {
+      return
+    }
+    const rel = this.relOf(state, fsPath)
+    // 越根/排除/归属更具体根（嵌套根——父子根 watcher 监听树重叠，变更
+    // 事件会在两个根各到达一次）的文件不入本根增量域
+    if (rel === null || this.excludeMatcher.test(rel) || this.rootOf(fsPath) !== state) {
       return
     }
     const key = this.normKey(fsPath)
@@ -545,11 +1030,85 @@ export class VaultIndexService {
     }
     state.rescanTimers.set(key, setTimeout(() => {
       state.rescanTimers.delete(key)
-      void this.rescanFile(state, fsPath).then(() => this.scheduleCommit(state))
+      void this.enqueueRescan(state, key)
     }, this.rescanDebounce))
   }
 
-  /** 重扫单文件（保存/外部变更/新建）；文件已删则移除其基线条目与边 */
+  /** 入增量队列并启动泵（容量溢出降级为一次清单核验）；返回可等待的
+   *  排空 Promise（保存路径用；busy 时挂起接力，不等实际完成）。 */
+  private enqueueRescan(state: RootIndexState, key: string): Promise<void> {
+    if (this.disposed) {
+      return Promise.resolve()
+    }
+    const result = state.rescanQueue.enqueue(key)
+    if (result === 'overflow') {
+      // 溢出策略：放弃逐文件增量（清空队列），降级为一次清单核验——
+      // 批量 Git 切换不产生无界任务
+      state.rescanQueue.clear()
+      if (state.pumping || state.scanning || state.verifying) {
+        state.verifyPending = true
+      } else {
+        void this.verifyRoot(state)
+      }
+      return Promise.resolve()
+    }
+    if (state.pumping) {
+      const run = state.pumpRun
+      if (run) {
+        return run.then(() => {
+          // 泵可能在本次入队前的最后一次排空后退出：接力再泵一轮
+          if (!state.pumping && state.rescanQueue.size > 0 && !state.scanning && !state.verifying) {
+            return this.pumpRescans(state)
+          }
+          return undefined
+        })
+      }
+      return Promise.resolve()
+    }
+    if (state.scanning || state.verifying) {
+      state.pumpPending = true
+      return Promise.resolve()
+    }
+    return this.pumpRescans(state)
+  }
+
+  /** 增量队列泵：分批重扫（批间让出），排空后合并提交一次快照 */
+  private pumpRescans(state: RootIndexState): Promise<void> {
+    const epoch = this.maintenanceEpoch
+    state.pumping = true
+    const run = this.drainRescanQueue(state, epoch)
+    state.pumpRun = run
+    return run
+  }
+
+  private async drainRescanQueue(state: RootIndexState, epoch: number): Promise<void> {
+    try {
+      for (;;) {
+        if (this.disposed || epoch !== this.maintenanceEpoch) {
+          return
+        }
+        const batch = state.rescanQueue.drain(this.rescanBatchFiles)
+        if (batch.length === 0) {
+          break
+        }
+        for (const key of batch) {
+          if (this.disposed || epoch !== this.maintenanceEpoch) {
+            return
+          }
+          await this.rescanFile(state, key)
+        }
+        await this.scan.yieldToEventLoop()
+      }
+      this.scheduleCommit(state) // 一批任务合并为一次磁盘提交
+    } finally {
+      state.pumping = false
+      state.pumpRun = undefined
+      this.resumeAfterBusy(state)
+    }
+  }
+
+  /** 重扫单文件（保存/外部变更/新建/核验候选）；文件已删则移除其基线条目
+   *  与边；不可访问标 stale 不移除（SSH 断连/权限错误不得等同删除）。 */
   private async rescanFile(state: RootIndexState, fsPath: string): Promise<void> {
     if (this.disposed || !state.model) {
       return
@@ -558,15 +1117,29 @@ export class VaultIndexService {
     if (rel === null) {
       return
     }
+    const access = await this.scan.accessOf(fsPath)
+    if (access === 'missing') {
+      // 删除：移除基线（未保存覆盖层保留——编辑器内未保存内容仍接管查询）
+      this.removeBaselineEntry(state, rel)
+      this.publishTargetChange(state, rel, 'deleted', null)
+      return
+    }
+    if (access === 'inaccessible') {
+      const prev = state.model.files.get(rel)
+      this.publishTargetChange(
+        state, rel, 'stale',
+        prev ? { mtimeMs: prev.mtimeMs, size: prev.size } : null,
+      )
+      return
+    }
     const [raw, stat] = await Promise.all([this.scan.readFileText(fsPath), this.scan.statFile(fsPath)])
     if (raw === null || stat === null) {
-      // 删除或不可读：移除基线（未保存覆盖层保留——编辑器内未保存内容仍接管查询）
-      if (state.model.files.has(rel)) {
-        state.model.files.delete(rel)
-        state.model.edges = state.model.edges.filter((e) => e.source !== rel)
-        state.backlinks = buildBacklinkIndex(state.model.edges)
-        this.notify()
-      }
+      // 可访问但读失败：保守按 stale 处理（不删条目）
+      const prev = state.model.files.get(rel)
+      this.publishTargetChange(
+        state, rel, 'stale',
+        prev ? { mtimeMs: prev.mtimeMs, size: prev.size } : null,
+      )
       return
     }
     const text = normalizeLf(raw)
@@ -585,6 +1158,20 @@ export class VaultIndexService {
     })
     state.model.edges = state.model.edges.filter((e) => e.source !== rel).concat(edges)
     state.backlinks = buildBacklinkIndex(state.model.edges)
+    if (!prevEntry || prevEntry.mtimeMs !== stat.mtimeMs || prevEntry.size !== stat.size) {
+      this.publishTargetChange(state, rel, 'changed', { mtimeMs: stat.mtimeMs, size: stat.size })
+    }
+    this.notify()
+  }
+
+  /** 移除基线条目与该文件的全部出链（删除的正证据路径专用） */
+  private removeBaselineEntry(state: RootIndexState, rel: string): void {
+    if (!state.model?.files.has(rel)) {
+      return
+    }
+    state.model.files.delete(rel)
+    state.model.edges = state.model.edges.filter((e) => e.source !== rel)
+    state.backlinks = buildBacklinkIndex(state.model.edges)
     this.notify()
   }
 
@@ -600,6 +1187,146 @@ export class VaultIndexService {
         return null
       }
       return foldIndex.get(this.foldKey(rel)) ?? null
+    }
+  }
+
+  // ---- 清单核验（#198） ----
+
+  /**
+   * 单根清单核验：列盘 → 分批 stat → mtime+size 比对（diffManifest，仅筛
+   * 变化不作一致性证明）→ 变更/新增走 rescanFile（读正文重建边）、移除需
+   * accessOf=missing 正证据（不可访问标 stale 不移除）。busy（扫描/泵/核验
+   * 进行中）跳过——不重叠。
+   */
+  private async verifyRoot(state: RootIndexState): Promise<'busy' | 'done' | 'cancelled'> {
+    if (this.disposed) {
+      return 'cancelled'
+    }
+    if (state.scanning || state.verifying || state.pumping) {
+      return 'busy'
+    }
+    if (!state.hasData || !state.model) {
+      return 'done' // 无基线（首扫未完成/根刚移除）无事可核
+    }
+    state.verifying = true
+    const epoch = this.maintenanceEpoch
+    const cancelled = (): boolean => this.disposed || epoch !== this.maintenanceEpoch
+    try {
+      const candidates: Array<{ abs: string; rel: string }> = []
+      for (const abs of await this.scan.listMarkdownFiles(state.fsPath)) {
+        const rel = this.relOf(state, abs)
+        if (rel !== null && this.rootOf(abs) === state && !this.excludeMatcher.test(rel)) {
+          candidates.push({ abs, rel })
+        }
+      }
+      const known = new Map<string, { mtimeMs: number; size: number }>()
+      for (const [rel, entry] of state.model.files) {
+        if (entry.kind === 'markdown') {
+          known.set(rel, entry)
+        }
+      }
+      // 分批 stat（批间让出；stat 失败不进清单——由移除正证据兜底区分）
+      const current: Array<{ path: string; mtimeMs: number; size: number }> = []
+      for (let i = 0; i < candidates.length; i++) {
+        if (cancelled()) {
+          return 'cancelled'
+        }
+        const { abs, rel } = candidates[i]!
+        const stat = await this.scan.statFile(abs)
+        if (stat) {
+          current.push({ path: rel, mtimeMs: stat.mtimeMs, size: stat.size })
+        }
+        if ((i + 1) % this.verifyBatchFiles === 0) {
+          await this.scan.yieldToEventLoop()
+        }
+      }
+      const diff = diffManifest(known, current)
+      let touched = false
+      // 移除候选：正证据（accessOf=missing）才执行——不可访问不得当删除
+      for (const rel of diff.removed) {
+        if (cancelled()) {
+          return 'cancelled'
+        }
+        const abs = this.absOf(state, rel)
+        const access = await this.scan.accessOf(abs)
+        if (access === 'missing') {
+          this.removeBaselineEntry(state, rel)
+          this.publishTargetChange(state, rel, 'deleted', null)
+          touched = true
+        } else if (access === 'inaccessible') {
+          const prev = known.get(rel)
+          this.publishTargetChange(
+            state, rel, 'stale',
+            prev ? { mtimeMs: prev.mtimeMs, size: prev.size } : null,
+          )
+        }
+        // access=ok 但未在清单（列举漂移）：保守跳过，下轮核验兜底
+      }
+      // 变更/新增候选：逐文件重扫（读正文；核验批粒度让出）
+      const pendingRels = [...diff.changed, ...diff.added]
+      for (let i = 0; i < pendingRels.length; i++) {
+        if (cancelled()) {
+          return 'cancelled'
+        }
+        await this.rescanFile(state, this.absOf(state, pendingRels[i]!))
+        touched = true
+        if ((i + 1) % this.rescanBatchFiles === 0) {
+          await this.scan.yieldToEventLoop()
+        }
+      }
+      if (touched) {
+        this.scheduleCommit(state)
+      }
+      return 'done'
+    } finally {
+      state.verifying = false
+      this.lastVerifyAt = Date.now()
+      this.resumeAfterBusy(state)
+    }
+  }
+
+  // ---- 变化发布（#198 通道；#201 消费） ----
+
+  /** 初次观测：建立代次（=1）不广播 */
+  private ensureGeneration(absFsPath: string): void {
+    const key = this.normKey(absFsPath)
+    if (!this.targetGenerations.has(key)) {
+      this.targetGenerations.set(key, 1)
+    }
+  }
+
+  private publishTargetChange(
+    state: RootIndexState,
+    rel: string,
+    status: VaultTargetChangeStatus,
+    stat: { mtimeMs: number; size: number } | null,
+  ): void {
+    const abs = this.absOf(state, rel)
+    const key = this.normKey(abs)
+    if (status === 'stale') {
+      if (this.staleMarks.has(key)) {
+        return // 持续不可访问：只广播首次转入
+      }
+      this.staleMarks.add(key)
+    } else {
+      this.staleMarks.delete(key)
+    }
+    const generation = (this.targetGenerations.get(key) ?? 0) + 1
+    this.targetGenerations.set(key, generation)
+    const event: VaultTargetChangeEvent = {
+      fsPath: abs,
+      rootFsPath: state.fsPath,
+      relPath: rel,
+      generation,
+      status,
+      stat,
+    }
+    for (const listener of [...this.targetListeners]) {
+      try {
+        listener(event)
+      } catch {
+        // 订阅者异常不阻断维护链路
+      }
     }
   }
 
