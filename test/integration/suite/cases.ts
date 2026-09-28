@@ -8815,4 +8815,112 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(await readDisk('links.md') === diskSource, '页内锚点跳转不得改写源文档')
     assert(await readDisk('目标笔记.md') === diskTarget, '锚点跳转不得改写目标文档')
   }],
+
+  // ---- #162 复制块链接（正文右键菜单与快捷键） ----
+
+  ['复制块链接：右键菜单两态、自动补写可撤销与快捷键入口（#162）', async () => {
+    // 断言口径：剪贴板成品对拍（vscode.env.clipboard.readText——真实宿主
+    // 权威）、磁盘文本对拍（自动补写走标准写回）与单笔写回（appliedEdits
+    // 恰 +1 = 撤销一步）。菜单经 block.test.contextMenu/menuClick 真实按钮
+    // 点击链路驱动（宿主测试无法派发真实右键）
+    const BLOCK_MENU_DOC = [
+      '---',
+      'title: 块菜单',
+      '---',
+      '',
+      '# 块菜单标题',
+      '',
+      '右键目标段落。',
+      '',
+      '| a | b |',
+      '|---|---|',
+      '| 1 | 2 |',
+      '',
+      '已有 id 段落 ^keep9',
+      '',
+    ].join('\n')
+    await openWithEditor('block-menu.md')
+    await waitSessionReady('block-menu.md')
+    const uri = wsUri('block-menu.md').toString()
+    const before = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    const clipboardText = () => vscode.env.clipboard.readText()
+
+    // 标题行：复制标题链接 → 剪贴板成品 [[笔记名#标题]]，零写回
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'block.test.contextMenu', pos: BLOCK_MENU_DOC.indexOf('# 块菜单标题'),
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'block.test.menuClick', command: 'copyHeadingLink',
+    })
+    assert(await poll('标题链接剪贴板', async () =>
+      (await clipboardText()) === '[[block-menu#块菜单标题]]' ? true : undefined),
+      `标题链接成品应为 [[block-menu#块菜单标题]]（实际 ${await clipboardText()}）`)
+
+    // 普通段：无 id 自动补写 → 剪贴板 [[block-menu#^xxxx]]，磁盘块尾行尾
+    // 恰好多出 ` ^id`，单笔写回（appliedEdits +1 = 撤销一步）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'block.test.contextMenu', pos: BLOCK_MENU_DOC.indexOf('右键目标段落'),
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'block.test.menuClick', command: 'copyBlockLink',
+    })
+    const written = await poll('块 id 写回磁盘', async () => {
+      const text = await readDisk('block-menu.md')
+      return /右键目标段落。 \^[a-z]{4}$/.test(text.split('\n')[6] ?? '') ? text : undefined
+    })
+    const copiedId = (written.split('\n')[6]!.match(/\^([a-z]{4})$/) ?? [])[1]!
+    assert(await poll('块链接剪贴板', async () =>
+      (await clipboardText()) === `[[block-menu#^${copiedId}]]` ? true : undefined),
+      `块链接成品应为 [[block-menu#^${copiedId}]]（实际 ${await clipboardText()}）`)
+    const afterWrite = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(afterWrite.appliedEdits === before.appliedEdits + 1,
+      `自动补写应恰一笔写回（实际 +${afterWrite.appliedEdits - before.appliedEdits}）`)
+
+    // 表格整块：id 写在表格末行行尾（表格右键按表格整块）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'block.test.contextMenu', pos: BLOCK_MENU_DOC.indexOf('|---|---|'),
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'block.test.menuClick', command: 'copyBlockLink',
+    })
+    await poll('表格块 id 写回磁盘', async () => {
+      const text = await readDisk('block-menu.md')
+      return /\| 1 \| 2 \| \^[a-z]{4}$/.test(text.split('\n')[10] ?? '') ? text : undefined
+    })
+
+    // 既有 id 段：直接复制既有 id，零改写
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'block.test.contextMenu', pos: BLOCK_MENU_DOC.indexOf('已有 id 段落'),
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'block.test.menuClick', command: 'copyBlockLink',
+    })
+    assert(await poll('既有 id 剪贴板', async () =>
+      (await clipboardText()) === '[[block-menu#^keep9]]' ? true : undefined),
+      `既有 id 应直接复制（实际 ${await clipboardText()}）`)
+    const finalDisk = await readDisk('block-menu.md')
+    assert(finalDisk.includes('已有 id 段落 ^keep9\n'), '既有 id 段零改写')
+
+    // 快捷键/命令面板入口（同一命令）：光标落标题行 → 复制标题链接
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'table.test.crossSelect', anchor: BLOCK_MENU_DOC.indexOf('# 块菜单标题'),
+      head: BLOCK_MENU_DOC.indexOf('# 块菜单标题'),
+    })
+    await vscode.commands.executeCommand('onegayi.vsidian.block.copyLink')
+    assert(await poll('快捷键入口剪贴板', async () =>
+      (await clipboardText()) === '[[block-menu#块菜单标题]]' ? true : undefined),
+      `命令入口光标在标题行应复制标题链接（实际 ${await clipboardText()}）`)
+
+    // frontmatter 头区：右键不接管（原生菜单照常——钩子不开菜单即链路证据）
+    const stateBefore = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'block.test.contextMenu', pos: BLOCK_MENU_DOC.indexOf('title: 块菜单'),
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'block.test.menuClick', command: 'copyBlockLink',
+    })
+    const stateAfter = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(stateAfter.appliedEdits === stateBefore.appliedEdits && stateAfter.version === stateBefore.version,
+      '头区不接管：零写回零版本推进')
+  }],
 ]

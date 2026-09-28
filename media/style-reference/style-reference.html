@@ -1028,7 +1028,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
   </section>
   <section class="domain" data-domain="chrome">
-    <h1 style="font-size:19px;margin-bottom:4px">界面域（54 条）</h1>
+    <h1 style="font-size:19px;margin-bottom:4px">界面域（55 条）</h1>
     <p class="note">界面域条目（#133 起逐项核实）：静态入口经探针在真实渲染中断言，交互态入口由浏览器/集成套件按行为路径验证；第三方渲染器（KaTeX/Mermaid）内部 DOM 不承诺为稳定接口（见各域「限制」类目）。</p>
     <h2>界面域 · 公式（5）</h2>
     <article class="entry" id="live-math">
@@ -1777,6 +1777,21 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 }</code></pre>
       <p class="verify">验证：frontmatterPaintCssContract 单元（fixed/圆角/投影/主按钮钉规则）；浏览器 frontmatterTable 套件（真实键鼠开闭、输入即时写回、焦点管理）</p>
       <p class="life">引入：#140（2026-09-27 Popover 改版）</p>
+    </article>
+    <h2>界面域 · 正文右键菜单（1）</h2>
+    <article class="entry" id="block-menu">
+      <h3><code>.vsidian-block-menu（+ -item）</code><span class="eid">block-menu</span></h3>
+      <p class="purpose">正文右键菜单浮层（复制标题链接/复制块链接，#162）：挂 body 的 fixed 定位自绘菜单；菜单项为 button 键盘可达；颜色跟随 --vscode-menu-* 变量族（与大纲菜单同族视觉语言，无级联子菜单）。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-none">none</span></p>
+<p class="states">状态：Live 正文右键命中块（frontmatter 头区与空行不接管，原生菜单照常）。</p>
+      <p class="obsidian">Obsidian 对应：无（Obsidian 右键菜单为应用原生菜单，非 DOM 内元素）</p>
+
+      <p class="dom">DOM 关系：document.body 直接子元素（视口系 fixed 定位）。</p>
+      <pre><code>.vsidian-block-menu .vsidian-block-menu-item:hover {
+  background: var(--vscode-menu-selectionBackground);
+}</code></pre>
+      <p class="verify">验证：单元 blockMenu/blockMenuPanel：菜单装配与命令交互；集成 block.test.contextMenu/menuClick 系列钩子</p>
+      <p class="life">引入：#162（2026-09-28）</p>
     </article>
   </section>
 <p style="margin-top:48px;color:color-mix(in srgb, currentColor 50%, transparent);font-size:12px">由 src/shared/styleContract.ts 生成（scripts/genStyleGuide.mjs）；产物一致性由 test/unit/styleGuideGen.test.ts 钉住。</p>

@@ -113,11 +113,14 @@ describe('HTML 注释快捷键（#139）', () => {
     expect(resolveKeybinding({}, 'reading', 'ctrl+slash')).toEqual({ kind: 'none' })
     // 显式清空后不拦截（宿主行注释回归宿主处理）
     expect(resolveKeybinding({ htmlComment: [] }, 'live', 'ctrl+slash')).toEqual({ kind: 'none' })
-    // 改绑到 ctrl+shift+c 生效
+    // #162 起 ctrl+shift+c 有默认占用（复制块链接）：改绑到该键按冲突拒绝，
+    // 改绑到空闲键正常生效
     expect(applyBindingChange({}, 'htmlComment', ['ctrl+shift+c'], false))
+      .toMatchObject({ ok: false, reason: 'conflict' })
+    expect(applyBindingChange({}, 'htmlComment', ['ctrl+alt+h'], false))
       .toMatchObject({ ok: true })
-    expect(getEffectiveBindings({ htmlComment: ['ctrl+shift+c'] }, 'htmlComment'))
-      .toEqual(['ctrl+shift+c'])
+    expect(getEffectiveBindings({ htmlComment: ['ctrl+alt+h'] }, 'htmlComment'))
+      .toEqual(['ctrl+alt+h'])
   })
 
   it('slash 键名规范化：词名大小写归一（裸 / 字符不另设别名，与 minus 等符号口径一致）', () => {
@@ -142,5 +145,29 @@ describe('双态视图切换快捷键（#141 增补）', () => {
   it('与三态切换语义并存：toggleViewMode 仍无默认键，键位互不冲突', () => {
     const conflicts = findBindingConflicts({}, 'toggleDualView', 'ctrl+q')
     expect(conflicts).toEqual([])
+  })
+})
+
+describe('复制块链接快捷键（#162）', () => {
+  it('默认 ctrl+shift+c 仅 Live 生效（写操作）；manifest 命令已登记', () => {
+    const manifest = JSON.parse(readFileSync('package.json', 'utf8'))
+    const op = KEYBINDING_OPERATIONS.find((item) => item.id === 'blockCopyLink')
+    expect(op).toMatchObject({ mode: 'live', writes: true, command: 'onegayi.vsidian.block.copyLink' })
+    expect(getEffectiveBindings({}, 'blockCopyLink')).toEqual(['ctrl+shift+c'])
+    expect(resolveKeybinding({}, 'live', 'ctrl+shift+c')).toEqual({ kind: 'command', id: 'blockCopyLink' })
+    // 阅读只读不接管；源码模式与设置页输入不经编辑器路由，天然不接管
+    expect(resolveKeybinding({}, 'reading', 'ctrl+shift+c')).toEqual({ kind: 'none' })
+    // 阅读态查表不可达（mode 门）；写门（allowWrites=false）同样不拦截
+    expect(resolveKeybinding({}, 'live', 'ctrl+shift+c', false)).toEqual({ kind: 'none' })
+    expect(manifest.contributes.commands.some(
+      (item: { command: string }) => item.command === 'onegayi.vsidian.block.copyLink')).toBe(true)
+    // 显式清空后回落 none（键位归还宿主）；改绑生效
+    expect(resolveKeybinding({ blockCopyLink: [] }, 'live', 'ctrl+shift+c')).toEqual({ kind: 'none' })
+    expect(applyBindingChange({}, 'blockCopyLink', ['ctrl+alt+b'], false)).toMatchObject({ ok: true })
+  })
+
+  it('与全部既有默认键位零冲突（冲突核对 2026-09-28 结论的钉住）', () => {
+    expect(findBindingConflicts({}, 'blockCopyLink', 'ctrl+shift+c')).toEqual([])
+    expect([...findConflictedOperationIds({})]).toEqual([])
   })
 })

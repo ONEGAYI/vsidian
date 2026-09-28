@@ -83,6 +83,10 @@ export interface PanelPort {
    *  笔记名 = docUri 文件名去扩展名（Obsidian 语义），标题为 webview
    *  上报的条目原文（含行内标记，与宿主 findHeadingOffset 的字面匹配同源） */
   writeHeadingLinkClipboard?(docUri: string, heading: string): void
+  /** #162 剪贴板写（块链接）：`[[笔记名#^块id]]` 的拼接在 vscode 层——
+   *  blockId 为 webview 侧块尾行既有 id 或刚经标准 edit.request 写入的
+   *  新 id（写入与复制是两条消息，本端口只管拼接剪贴板） */
+  writeBlockLinkClipboard?(docUri: string, blockId: string): void
 }
 
 /** 会话通知（#4）：冲突暂停、复制请求、面板关闭时存在未确认输入等需要
@@ -376,12 +380,14 @@ export class DocumentSession {
         return Promise.resolve()
       case 'clipboard.write':
         // #69 剪贴板写：与 link.activate 同口径的只读交互（不受写回暂停
-        // 影响）；两变体（text 直写 / linkHeading 宿主拼标题链接）分别
-        // 转发到注入端口
+        // 影响）；三变体（text 直写 / linkHeading 宿主拼标题链接 / linkBlock
+        // 宿主拼块链接 #162）分别转发到注入端口
         if ('text' in message) {
           panel.port.writeClipboard?.(message.text)
-        } else if (message.linkHeading !== undefined) {
+        } else if ('linkHeading' in message) {
           panel.port.writeHeadingLinkClipboard?.(message.linkHeading.docUri, message.linkHeading.heading)
+        } else if ('linkBlock' in message) {
+          panel.port.writeBlockLinkClipboard?.(message.linkBlock.docUri, message.linkBlock.blockId)
         }
         return Promise.resolve()
       case 'ready': {

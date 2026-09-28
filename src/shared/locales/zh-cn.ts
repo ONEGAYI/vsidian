@@ -152,6 +152,7 @@ export const zhCn: Record<MessageKey, string> = {
   'styleRef.category.chromeLimits': '限制说明',
   'styleRef.category.frontmatter': 'frontmatter 表格卡片',
   'styleRef.category.toolbarBanner': '工具栏与横幅',
+  'styleRef.category.contextMenu': '正文右键菜单',
   'host.styleRefExported': '样式契约 JSON 已导出：{path}',
   'host.styleRefExportFailed': '样式契约 JSON 导出失败：{reason}',
   'host.styleRefExportReasonMissingAsset': '扩展安装不完整（缺少 style-reference.json）',
@@ -404,4 +405,12 @@ export const zhCn: Record<MessageKey, string> = {
   // ---- #160 普通链接锚点定位（host 通知）----
   'host.linkAnchorMissing':
     '已打开 {href} 指向的文档，但未找到标题「{heading}」（标题匹配：trim + 空白折叠 + 大小写不敏感的 ATX 标题）',
+
+  // ---- #162 复制块链接（正文右键菜单与快捷键）----
+  /** 右键菜单：标题行命中的额外项（拼 [[笔记名#标题]]，标题取行面文本） */
+  'blockMenu.copyHeadingLink': '复制标题链接',
+  /** 右键菜单/快捷键共用项（拼 [[笔记名#^块id]]，无 id 时先自动补写） */
+  'blockMenu.copyLink': '复制块链接',
+  /** 命令面板/快捷键页操作名（keybindings 注册表 titleKey） */
+  'command.block.copyLink.title': '复制当前块链接',
 }

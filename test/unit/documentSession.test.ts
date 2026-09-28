@@ -1218,6 +1218,26 @@ describe('#69 clipboard.write：两变体路由到注入端口', () => {
     await s.send(id, { kind: 'clipboard.write', text: 'x' })
     // 无异常即通过
   })
+
+  it('linkBlock 变体路由 writeBlockLinkClipboard（docUri + 块 id，#162）', async () => {
+    const s = setup()
+    const written: unknown[] = []
+    const headingLinks: unknown[] = []
+    const blockLinks: Array<[string, string]> = []
+    const id = s.session.attachPanel({
+      send: () => undefined,
+      writeClipboard: (text) => written.push(text),
+      writeHeadingLinkClipboard: (docUri, heading) => headingLinks.push([docUri, heading]),
+      writeBlockLinkClipboard: (docUri, blockId) => blockLinks.push([docUri, blockId]),
+    })
+    await s.send(id, {
+      kind: 'clipboard.write',
+      linkBlock: { docUri: 'file:///d%3A/notes/a.md', blockId: 'abcd' },
+    })
+    expect(blockLinks).toEqual([['file:///d%3A/notes/a.md', 'abcd']])
+    expect(written).toEqual([])
+    expect(headingLinks).toEqual([])
+  })
 })
 
 describe('图表导出路由（#111）', () => {

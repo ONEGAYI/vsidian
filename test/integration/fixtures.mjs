@@ -741,6 +741,24 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   writeFileSync(path.join(wsDir, '目标笔记.md'), TARGET_NOTE_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'wikilink-target.md'), WIKILINK_TARGET_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'wikilink-crlf-target.md'), WIKILINK_CRLF_TARGET_DOC, 'utf8')
+  // #162 复制块链接：frontmatter 头区（不接管断言）、标题行/普通段/表格/
+  // 既有 id 段（菜单两态与零写回断言载体）
+  writeFileSync(path.join(wsDir, 'block-menu.md'), [
+    '---',
+    'title: 块菜单',
+    '---',
+    '',
+    '# 块菜单标题',
+    '',
+    '右键目标段落。',
+    '',
+    '| a | b |',
+    '|---|---|',
+    '| 1 | 2 |',
+    '',
+    '已有 id 段落 ^keep9',
+    '',
+  ].join('\n'), 'utf8')
   mkdirSync(path.join(wsDir, 'dup'), { recursive: true })
   writeFileSync(path.join(wsDir, 'dup', '甲.md'), '# 重名甲（dup 目录）\n', 'utf8')
   mkdirSync(path.join(wsDir, 'other'), { recursive: true })

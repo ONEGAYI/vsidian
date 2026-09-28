@@ -16,6 +16,7 @@
   "command.table.insertColumnLeft.title": "Table: insert column left",
   "command.table.insertColumnRight.title": "Table: insert column right",
   "command.table.deleteColumn.title": "Table: delete column",
+  "command.block.copyLink.title": "Copy link to current block",
   "format.bold": "Bold",
   "format.italic": "Italic",
   "format.strikethrough": "Strikethrough",

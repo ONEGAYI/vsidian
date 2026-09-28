@@ -199,6 +199,7 @@ vsidian/
 │   │   ├── tabEscape.ts         # Tab 越界定位纯函数（#125）
 │   │   └── wikilink.ts          # 双链形态学单一事实源（#11）
 │   └── webview/     # webview 端实现
+│       ├── blockMenu.ts              # 正文右键菜单与复制块链接
 │       ├── codeCardState.ts          # 卡片共享状态中立模块
 │       ├── codeHighlight.ts          # 语法高亮引擎装配与缓存
 │       ├── css.d.ts                  # CSS 导入类型声明

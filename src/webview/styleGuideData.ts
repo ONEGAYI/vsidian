@@ -200,6 +200,13 @@ export const STYLE_GUIDE_CATEGORIES: readonly StyleContractCategory[] = [
     "title": "frontmatter 表格卡片",
     "titleKey": "styleRef.category.frontmatter",
     "order": 8
+  },
+  {
+    "id": "context-menu",
+    "domain": "chrome",
+    "title": "正文右键菜单",
+    "titleKey": "styleRef.category.contextMenu",
+    "order": 9
   }
 ] as readonly StyleContractCategory[]
 
@@ -3045,5 +3052,28 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     ],
     "introduced": "#4（2026-09-23）",
     "removed": "#38（2026-09-24，288044d）移除且从未随任何发布版存在；旧映射表该行为陈旧数据（#133 核实纠错，依据 v0.4.0 tag 75c3df7 源码核对）"
+  },
+  {
+    "id": "block-menu",
+    "domain": "chrome",
+    "category": "context-menu",
+    "kind": "selector",
+    "target": ".vsidian-block-menu（+ -item）",
+    "purpose": "正文右键菜单浮层（复制标题链接/复制块链接，#162）：挂 body 的 fixed 定位自绘菜单；菜单项为 button 键盘可达；颜色跟随 --vscode-menu-* 变量族（与大纲菜单同族视觉语言，无级联子菜单）。",
+    "views": [
+      "live"
+    ],
+    "states": "Live 正文右键命中块（frontmatter 头区与空行不接管，原生菜单照常）。",
+    "dom": "document.body 直接子元素（视口系 fixed 定位）。",
+    "example": ".vsidian-block-menu .vsidian-block-menu-item:hover {\n  background: var(--vscode-menu-selectionBackground);\n}",
+    "obsidian": {
+      "counterpart": "无（Obsidian 右键菜单为应用原生菜单，非 DOM 内元素）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 blockMenu/blockMenuPanel：菜单装配与命令交互",
+      "集成 block.test.contextMenu/menuClick 系列钩子"
+    ],
+    "introduced": "#162（2026-09-28）"
   }
 ] as readonly StyleContractEntry[]

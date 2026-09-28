@@ -118,6 +118,10 @@ export type HostToWebview =
   | { kind: 'table.create' }
   /** 格式命令在 Live 光标/选区处执行，单个 CM6 事务经宿主写回。 */
   | { kind: 'format.command'; op: FormatOperationId }
+  /** #162 复制块链接命令（快捷键/命令面板入口）：面板在 Live 光标所在块
+   *  执行与右键菜单同款的复制（标题行=复制标题链接；无块 id 先自动补写
+   *  ——一笔标准编辑事务，可撤销）。阅读模式只读忽略 */
+  | { kind: 'blockLink.copy' }
   | { kind: 'ui.command'; op: UiOperationId }
   /** 测试钩子（#13）：向真实编辑器派发 Tab/Shift+Tab keydown（与用户按键
    *  同一 keymap 链路；纯选区导航，零写回）。宿主测试无法向 webview 派发
@@ -180,6 +184,16 @@ export type HostToWebview =
   | { kind: 'outline.test.menuClick'; command: string }
   /** 测试钩子（#69）：关闭当前右键菜单（等价 Esc/外点关闭路径） */
   | { kind: 'outline.test.menuClose' }
+  /** 测试钩子（#162）：在正文 doc 偏移 pos 处打开块链接右键菜单（与用户
+   *  右键同一命中判定与装配链路——posAtCoords 的替代注入点；frontmatter
+   *  头区/空行等不接管位同样不开菜单）。宿主测试无法向 webview 派发真实
+   *  鼠标事件，以此通道验证真实宿主内的菜单装配 */
+  | { kind: 'block.test.contextMenu'; pos: number }
+  /** 测试钩子（#162）：点击菜单中 command 对应的真实按钮（与用户点击同一
+   *  处理器；command 取 blockMenu 的 BlockMenuCommand） */
+  | { kind: 'block.test.menuClick'; command: string }
+  /** 测试钩子（#162）：关闭当前块链接右键菜单（等价 Esc/外点关闭路径） */
+  | { kind: 'block.test.menuClose' }
   /** 测试钩子（#69）：向重命名输入框注入文本并以 Enter/Esc 收尾（真实
    *  keydown 链路；须先经 menuClick command='rename' 进入重命名态） */
   | { kind: 'outline.test.renameKey'; text: string; key: 'enter' | 'escape' }
@@ -473,6 +487,11 @@ export type WebviewToHost =
    *  （含行内标记，与宿主 findHeadingOffset 的字面匹配同源；剥标记可见
    *  文本只用于 text 直写变体的「复制标题」纯文本场景） */
   | { kind: 'clipboard.write'; linkHeading: { docUri: string; heading: string } }
+  /** #162 剪贴板写（块链接）：`[[笔记名#^块id]]` 的拼接在宿主侧——
+   *  blockId 为 webview 侧块尾行既有 id 或刚自动写入的新 id（写入先经
+   *  标准 edit.request 落权威文档，本消息只携最终 id；与 linkHeading
+   *  同一只读交互端口） */
+  | { kind: 'clipboard.write'; linkBlock: { docUri: string; blockId: string } }
   /** 性能探针回报（#5）：快照为 DOM 计数，输入延迟含 rAF 稳定等待 */
   | {
       kind: 'perf.report'
@@ -1713,15 +1732,24 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'settings.set':
       return isSettingsPayload(v.values)
     case 'clipboard.write':
-      // #69 两变体：text 直写 / linkHeading 由宿主拼标题链接
-      if (isString(v.text) && v.linkHeading === undefined) {
+      // #69 两变体：text 直写 / linkHeading 由宿主拼标题链接；
+      // #162 第三变体 linkBlock 由宿主拼块链接 [[笔记名#^id]]
+      if (isString(v.text) && v.linkHeading === undefined && v.linkBlock === undefined) {
         return true
       }
-      return (
-        v.text === undefined &&
+      if (
+        v.text === undefined && v.linkBlock === undefined &&
         isObject(v.linkHeading) &&
         isString(v.linkHeading.docUri) &&
         isString(v.linkHeading.heading)
+      ) {
+        return true
+      }
+      return (
+        v.text === undefined && v.linkHeading === undefined &&
+        isObject(v.linkBlock) &&
+        isString(v.linkBlock.docUri) &&
+        isString(v.linkBlock.blockId)
       )
     case 'conflict.action':
       return (
@@ -1989,6 +2017,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return true
     case 'format.command':
       return isFormatOperationId(v.op)
+    case 'blockLink.copy':
+      return true
     case 'ui.command':
       return isUiOperationId(v.op)
     case 'table.test.key':
@@ -2035,6 +2065,12 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'outline.test.menuClick':
       return isOutlineMenuCommand(v.command)
     case 'outline.test.menuClose':
+      return true
+    case 'block.test.contextMenu':
+      return isNonNegativeInt(v.pos)
+    case 'block.test.menuClick':
+      return v.command === 'copyHeadingLink' || v.command === 'copyBlockLink'
+    case 'block.test.menuClose':
       return true
     case 'outline.test.renameKey':
       return isString(v.text) && (v.key === 'enter' || v.key === 'escape')
