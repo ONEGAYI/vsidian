@@ -373,7 +373,7 @@ const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   math: 5,
   diagram: 4,
   'graphic-interact': 2,
-  'code-card': 10,
+  'code-card': 11,
   outline: 19,
   'chrome-limits': 4,
   'toolbar-banner': 5,

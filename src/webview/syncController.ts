@@ -37,8 +37,8 @@ import { FORMAT_OPERATIONS, type FormatOperationId } from '../shared/formatOpera
 import { getEffectiveBindings } from '../shared/keybindings'
 import { KeybindingRouter } from './keybindingRouter'
 import { LINE_NUMBER_GUTTER_SELECTOR, liveLineNumbers, paintedLineNumbers } from './liveLineNumbers'
-import { CODE_CARD_CLASS_NAMES, codeCardConfigFacet, codeCardCopyRequest, codeCardFoldField, liveCodeCard, type CodeCardConfig } from './liveCodeCard'
-import { decorateReadingCodeCard, isReadingCodeBlock } from './readingCodeCard'
+import { CODE_CARD_CLASS_NAMES, codeCardConfigFacet, codeCardCopyRequest, codeCardFoldField, codeCardHoverReveal, liveCodeCard, type CodeCardConfig } from './liveCodeCard'
+import { decorateReadingCodeCard, isReadingCodeBlock, READING_CODE_NOWRAP_CLASS } from './readingCodeCard'
 import {
   isHostToWebview,
   type CssProbeReport,
@@ -753,6 +753,13 @@ export class WebviewSyncController {
   /** #84 阅读侧折叠集合：键 = 块 data-vsidian-src-start（视图态，不持久化；
    *  块卸载重挂载后经此恢复收起形态） */
   private readonly readingCodeFold = new Set<number>()
+
+  /** #191 阅读侧全文折行开关状态：默认折行（现行行为）；视图态、不跨会话
+   *  持久化、不新增设置项（与折叠 chevron 同语义）。关闭态经容器类
+   *  vsidian-reading-nowrap 门控 pre 横向滚动；任一块的开关翻转即全文
+   *  联动（含大围栏 60 行分片各片——各片独立滚动）。Live 恒折行（CM6
+   *  lineWrapping 是编辑器级 facet，无法按块关），不放开关 */
+  private readingCodeWrapOn = true
 
   // ---- 宿主主题明暗自适应（不硬编码 dark，也不硬编码颜色）----
   /** CM6 明暗声明通道：跟随 webview body 的主题 class（vscode-dark 等），
@@ -6168,11 +6175,32 @@ export class WebviewSyncController {
         }
         this.decorateReadingCodeCardBlock(block)
       },
+      // #191 折行开关：按钮仅入口，状态在控制器（全文联动）；翻转后容器
+      // 类增删 + 全部已挂载块头部重建（各块按钮态同步，pre 行为由容器类承担）
+      wrap: this.readingCodeWrapOn,
+      onWrapToggle: () => {
+        this.readingCodeWrapOn = !this.readingCodeWrapOn
+        this.applyReadingCodeWrap()
+        this.decorateMountedReadingCodeCards()
+      },
     })
+  }
+
+  /** #191 阅读折行容器类落位（幂等）：仅关闭态挂 vsidian-reading-nowrap，
+   *  开启态移除（pre 回 pre-wrap 折行）；切回阅读/块重挂载路径经
+   *  decorateMountedReadingCodeCards 每次补挂，容器生命周期内不丢失 */
+  private applyReadingCodeWrap(): void {
+    const container = this.readingContainer
+    if (!container) {
+      return
+    }
+    container.classList.toggle(READING_CODE_NOWRAP_CLASS, !this.readingCodeWrapOn)
   }
 
   /** #84 刷新全部已挂载阅读块的卡片形态（设置变更/切回阅读模式） */
   private decorateMountedReadingCodeCards(): void {
+    // #191 顺路补挂折行容器类（幂等；容器重建/模式切换后状态不丢）
+    this.applyReadingCodeWrap()
     this.readingContainer
       ?.querySelectorAll<HTMLElement>('.vsidian-reading-block')
       .forEach((el) => this.decorateReadingCodeCardBlock(el))
@@ -6190,13 +6218,16 @@ export class WebviewSyncController {
     }
   }
 
-  /** 卡片扩展装配（#79–#82）：facet + 折叠状态 + 装饰 StateField + 复制
-   *  请求转发监听。初次装配与设置热重配共用，保证监听器在默认配置下同样在场 */
+  /** 卡片扩展装配（#79–#82/#190）：facet + 折叠状态 + 装饰 StateField +
+   *  复制请求转发监听 + 整卡悬停显现追踪（#190：头部与卡片行无公共 DOM
+   *  祖先，reveal 类经 JS 指针追踪挂载）。初次装配与设置热重配共用，
+   *  保证监听器在默认配置下同样在场 */
   private codeCardExtension() {
     return [
       codeCardConfigFacet.of(this.codeCardConfig),
       codeCardFoldField,
       liveCodeCard,
+      codeCardHoverReveal(),
       // #81 复制请求转发：零写回事务携带 effect → codeblock.copy 出站
       EditorView.updateListener.of((update) => {
         for (const tr of update.transactions) {

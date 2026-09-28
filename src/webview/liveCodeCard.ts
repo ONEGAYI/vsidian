@@ -23,7 +23,7 @@
 //   #79 仅 card 生效；lineNumbers/copyButton 见 #80/#81，highlight 见 #83）
 import { RangeSet, StateField, type Extension, type Range, type Text } from '@codemirror/state'
 import type { EditorSelection } from '@codemirror/state'
-import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view'
+import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet } from '@codemirror/view'
 import { liveDecorationsField, selectionTouchesRange } from './liveDecorations'
 import { mermaidFencesField } from './liveMermaid'
 import { RENDERED_FENCE_LABELS, type FenceSpan } from '../shared/mermaid'
@@ -75,6 +75,10 @@ export const CODE_CARD_CLASS_NAMES = {
   fold: 'vsidian-code-card-fold',
   /** 折叠收起态修饰（chevron 转向；头部仍保留） */
   foldCollapsed: 'vsidian-code-card-fold-collapsed',
+  /** 折行开关（#191：仅阅读侧头部发射，点击全文联动开/关自动折行） */
+  wrap: 'vsidian-code-card-wrap',
+  /** 折行关闭态修饰（#191：降不透明度区分，title 提示开启） */
+  wrapOff: 'vsidian-code-card-wrap-off',
   /** 语言徽标（#83：头部标签左侧的彩色字形徽标，两视图共用） */
   headerIcon: 'vsidian-code-card-header-icon',
 } as const
@@ -151,23 +155,46 @@ export class CodeCardHeaderWidget extends WidgetType {
     label.appendChild(document.createTextNode(this.label))
     const actions = document.createElement('span')
     actions.className = CODE_CARD_CLASS_NAMES.headerActions
-    actions.appendChild(buildFoldButton(this.folded, () => {
-      // findFromDOM 只认携带 cmTile 的节点（本版本 CM6 的 Tile.get 语义）：
-      // 按钮是头部 widget 子孙无标记，须从头部根查找；块 widget 的 posAtDOM
-      // 即其挂点位置 = 围栏起始 offset
-      const view = EditorView.findFromDOM(div)
-      if (view) {
-        view.dispatch({ effects: codeCardFoldToggle.of(view.posAtDOM(div)) })
-      }
-    }))
+    // #190 按钮区顺序 [复制] [折叠]：折叠钮固定最右——收起态复制不渲染
+    //（现有行为保留），折叠/展开按钮位置恒定，不挪鼠标可连续开合。
+    // 折行钮（#191 交付）届时插在复制钮左侧
     if (this.copy) {
       actions.appendChild(buildCopyButton(this.code, (code) => {
+        // findFromDOM 只认携带 cmTile 的节点（本版本 CM6 的 Tile.get 语义）：
+        // 按钮是头部 widget 子孙无标记，须从头部根查找；块 widget 的 posAtDOM
+        // 即其挂点位置 = 围栏起始 offset
         const view = EditorView.findFromDOM(div)
         if (view) {
           view.dispatch({ effects: codeCardCopyRequest.of(code) })
         }
       }))
     }
+    // 折叠切换闭包：按钮与整条热区共用同一入口（#190）
+    const toggleFold = () => {
+      const view = EditorView.findFromDOM(div)
+      if (view) {
+        view.dispatch({ effects: codeCardFoldToggle.of(view.posAtDOM(div)) })
+      }
+    }
+    actions.appendChild(buildFoldButton(this.folded, toggleFold))
+    // #190 整条折叠热区：头部横带整体可点击切换折叠，排除按钮本身；
+    // mousedown 阻断 CM6 点击落位/切编辑态（按钮自身 mousedown 已
+    // stopPropagation，不会走到这里）
+    const onButtonTarget = (target: EventTarget | null): boolean =>
+      target instanceof Element && target.closest('button') !== null
+    div.addEventListener('mousedown', (event) => {
+      if (onButtonTarget(event.target)) {
+        return
+      }
+      event.preventDefault()
+      event.stopPropagation()
+    })
+    div.addEventListener('click', (event) => {
+      if (onButtonTarget(event.target)) {
+        return
+      }
+      toggleFold()
+    })
     div.append(label, actions)
     return div
   }
@@ -224,9 +251,13 @@ export function buildCopyButton(code: string, onCopy: (code: string) => void): H
   // 旧定时器到点提前复原第二次点击的 ✓
   let restoreTimer: ReturnType<typeof setTimeout> | undefined
   btn.addEventListener('mousedown', (event) => {
+    // #190 stopPropagation 防冒泡触发热区（头部横带 click/mousedown）；
+    // preventDefault 阻断 CM6 的点击落位（live 块 widget 场景；阅读侧无副作用）
     event.preventDefault()
+    event.stopPropagation()
   })
-  btn.addEventListener('click', () => {
+  btn.addEventListener('click', (event) => {
+    event.stopPropagation()
     onCopy(code)
     btn.classList.add(CODE_CARD_CLASS_NAMES.copyDone)
     if (restoreTimer !== undefined) {
@@ -255,9 +286,47 @@ export function buildFoldButton(folded: boolean, onToggle: () => void): HTMLButt
     '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" ' +
     'stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"></path></svg>'
   btn.addEventListener('mousedown', (event) => {
+    // #190 stopPropagation 防冒泡触发热区；preventDefault 阻断 CM6 落选区
     event.preventDefault()
+    event.stopPropagation()
   })
-  btn.addEventListener('click', () => {
+  btn.addEventListener('click', (event) => {
+    event.stopPropagation()
+    onToggle()
+  })
+  return btn
+}
+
+/** 折行开关钮（#191，仅阅读侧头部装配）：两态常驻（-off 为关闭折行修饰，
+ *  CSS 降不透明度区分）；title/aria-label 取**将触发的动作**（开→提示关、
+ *  关→提示开），aria-pressed 反映当前折行态。点击经回调执行（阅读侧翻
+ *  全局折行状态并联动重建）。word-wrap 形态图标：三条横线第三条收短、
+ *  右端向下折返箭头（文字流到右缘折下行的观感）。 */
+export function buildWrapButton(wrapOn: boolean, onToggle: () => void): HTMLButtonElement {
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.className = wrapOn
+    ? CODE_CARD_CLASS_NAMES.wrap
+    : `${CODE_CARD_CLASS_NAMES.wrap} ${CODE_CARD_CLASS_NAMES.wrapOff}`
+  btn.setAttribute('aria-label', wrapOn ? t('codeblock.wrapDisable') : t('codeblock.wrapEnable'))
+  btn.setAttribute('aria-pressed', wrapOn ? 'true' : 'false')
+  btn.title = wrapOn ? t('codeblock.wrapDisable') : t('codeblock.wrapEnable')
+  btn.innerHTML =
+    '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" ' +
+    'stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M2.5 4.5h11"></path>' +
+    '<path d="M2.5 8h11"></path>' +
+    '<path d="M2.5 11.5h5"></path>' +
+    '<path d="M12.5 9.2v2.6"></path>' +
+    '<path d="M10.9 10.4l1.6 1.6 1.6-1.6"></path></svg>'
+  btn.addEventListener('mousedown', (event) => {
+    // 与复制/折叠同口径：stopPropagation 防冒泡触发热区；preventDefault 阻
+    // 断 CM6 落选区（live 场景；阅读侧无副作用）
+    event.preventDefault()
+    event.stopPropagation()
+  })
+  btn.addEventListener('click', (event) => {
+    event.stopPropagation()
     onToggle()
   })
   return btn
@@ -268,11 +337,15 @@ export function buildFoldButton(folded: boolean, onToggle: () => void): HTMLButt
 const fenceHideDeco = Decoration.replace({})
 
 const cardLineDecos = new Map<string, ReturnType<typeof Decoration.line>>()
-function cardLineDeco(cls: string): ReturnType<typeof Decoration.line> {
-  let deco = cardLineDecos.get(cls)
+/** 卡片行装饰（#189）：attributes 携带按块计算的 --vsidian-code-indent
+ *  （围栏符号与代码文本列对齐的缩进值；缓存键须含缩进——不同列宽块
+ *  产出不同实例，RangeSet.eq 前提） */
+function cardLineDeco(cls: string, indent: string): ReturnType<typeof Decoration.line> {
+  const key = `${cls}\u0000${indent}`
+  let deco = cardLineDecos.get(key)
   if (!deco) {
-    deco = Decoration.line({ class: cls })
-    cardLineDecos.set(cls, deco)
+    deco = Decoration.line({ class: cls, attributes: { style: `--vsidian-code-indent: ${indent}` } })
+    cardLineDecos.set(key, deco)
   }
   return deco
 }
@@ -450,6 +523,12 @@ export function buildCodeCardDecorations(
       out.push(fenceHideDeco.range(openLine.from, Math.min(closeLine.to + 1, doc.length)))
       continue
     }
+    // #189 围栏行与代码文本列真实对齐：缩进值 = 行号列宽 + 24px 间距，
+    // 按块注入 --vsidian-code-indent；行号关闭或无内容行时归零（围栏与
+    // 文本同在 x=0）。代码行同值复用为续行悬挂缩进的列宽基准（#191）
+    const numbersOn = config.lineNumbers && closeLine.number > openLine.number + 1
+    const widthCh = Math.max(2, String(closeLine.number - openLine.number - 1).length)
+    const indent = numbersOn ? `calc(${widthCh}ch + 24px)` : '0px'
     for (let n = openLine.number; n <= closeLine.number; n++) {
       const line = doc.line(n)
       const cls = [
@@ -459,10 +538,9 @@ export function buildCodeCardDecorations(
       ]
         .filter(Boolean)
         .join(' ')
-      out.push(cardLineDeco(cls).range(line.from, line.from))
+      out.push(cardLineDeco(cls, indent).range(line.from, line.from))
     }
-    if (config.lineNumbers && closeLine.number > openLine.number + 1) {
-      const widthCh = Math.max(2, String(closeLine.number - openLine.number - 1).length)
+    if (numbersOn) {
       for (let n = openLine.number + 1; n < closeLine.number; n++) {
         out.push(linenumberDeco(n - openLine.number, widthCh).range(doc.line(n).from))
       }
@@ -520,3 +598,92 @@ export const codeCardDecorations = StateField.define<DecorationSet>({
 
 /** Live 代码块卡片扩展装配（随 codeCardConfigFacet 经 Compartment 装配） */
 export const liveCodeCard: Extension = codeCardDecorations
+
+/**
+ * #190 整卡悬停显现类（内部交互态类，不入公开样式契约）：live 侧头部是
+ * CM6 block widget，与卡片行是 .cm-content 下兄弟节点、无公共 DOM 祖先，
+ * 纯 CSS :hover 不可达——由 codeCardHoverReveal 的 JS 指针追踪挂载。
+ * CSS 规则 `.vsidian-code-card-header.vsidian-code-card-reveal .vsidian-code-card-copy`。
+ */
+export const CODE_CARD_REVEAL_CLASS = 'vsidian-code-card-reveal'
+
+/**
+ * 从事件目标反查所属卡片头部（live 侧，#190）：目标在头部内直接命中；
+ * 否则目标所在行是卡片行时，向 previousElementSibling 方向遍历找头部
+ * （途中遇到非卡片行的 .cm-line 即中止，防越界到上一块；CM6 视口虚拟化
+ * 下兄弟节点数天然受视口限制，遍历代价有界）。其余（正文行、编辑器
+ * 空白区等）返回 null。
+ */
+function cardHeaderFromTarget(target: EventTarget | null): HTMLElement | null {
+  if (!(target instanceof Element)) {
+    return null
+  }
+  const direct = target.closest(`.${CODE_CARD_CLASS_NAMES.header}`)
+  if (direct instanceof HTMLElement) {
+    return direct
+  }
+  const line = target.closest('.cm-line')
+  if (!(line instanceof HTMLElement) || !line.classList.contains(CODE_CARD_CLASS_NAMES.line)) {
+    return null
+  }
+  for (let node = line.previousElementSibling; node; node = node.previousElementSibling) {
+    if (node instanceof HTMLElement && node.classList.contains(CODE_CARD_CLASS_NAMES.header)) {
+      return node
+    }
+    if (node.classList.contains('cm-line') && !node.classList.contains(CODE_CARD_CLASS_NAMES.line)) {
+      return null
+    }
+  }
+  return null
+}
+
+/**
+ * #190 live 整卡悬停显现扩展：鼠标进入卡片（头部或任一卡片行）即给该
+ * 头部挂 reveal 类、离开即清——复制按钮的显现触发区从 head 横带扩大为
+ * 整个卡片。阅读侧头部与代码同在块容器内，纯 CSS 承担（无需本扩展）。
+ * 已知边界：光标进出块导致 widget 重建时鼠标未移动则显现类丢失（瞬态，
+ * 下次鼠标移动即恢复），属可接受取舍（规格 2026-09-28 决议）。
+ */
+export function codeCardHoverReveal(): Extension {
+  let revealed: HTMLElement | null = null
+  const clearReveal = () => {
+    revealed?.classList.remove(CODE_CARD_REVEAL_CLASS)
+    revealed = null
+  }
+  const revealHeader = (header: HTMLElement | null) => {
+    if (header === revealed) {
+      return
+    }
+    clearReveal()
+    if (header) {
+      header.classList.add(CODE_CARD_REVEAL_CLASS)
+      revealed = header
+    }
+  }
+  return [
+    // mouseover 冒泡监听（view.dom）：从事件目标反查所属头部，切换卡片
+    // 时先清旧类；返回 false 不拦截事件
+    EditorView.domEventHandlers({
+      mouseover: (event) => {
+        revealHeader(cardHeaderFromTarget(event.target))
+        return false
+      },
+    }),
+    // mouseleave 不冒泡，domEventHandlers 挂不上——经 ViewPlugin 在
+    // contentDOM 上手动挂/卸（鼠标离开编辑器内容区清除显现）
+    ViewPlugin.fromClass(
+      class {
+        private readonly contentDOM: HTMLElement
+        private readonly onLeave: () => void
+        constructor(view: EditorView) {
+          this.contentDOM = view.contentDOM
+          this.onLeave = clearReveal
+          this.contentDOM.addEventListener('mouseleave', this.onLeave)
+        }
+        destroy() {
+          this.contentDOM.removeEventListener('mouseleave', this.onLeave)
+        }
+      },
+    ),
+  ]
+}

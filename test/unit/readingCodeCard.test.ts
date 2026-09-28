@@ -1,8 +1,15 @@
 // 阅读视图代码块卡片契约测试（工单 #84）：朴素 pre/code 增强为卡片
 // （头部徽标+标签+折叠+复制）、卡内行号、tok-* 着色、形态矩阵（卡片/
 // 高亮独立开关）、折叠收起、复制回调、幂等重装饰与源码保真。
+// #191：折行开关（仅阅读侧头部按钮，[折行] [复制] [折叠]）与行内联
+// --vsidian-code-indent 注入（悬挂缩进的列宽基准，与行号列宽同源）。
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
+import { installLocale } from '../../src/shared/i18n'
+import { zhCn } from '../../src/shared/locales/zh-cn'
+
+// 文案经 t() 取词：装配生产中文包，断言与字典同源（与 liveCodeCard.test 同模式）
+installLocale('zh-cn', zhCn)
 import {
   READING_CODE_CARD_CLASS,
   READING_CODE_CARD_FOLDED_CLASS,
@@ -192,5 +199,119 @@ describe('阅读代码块卡片（#84）', () => {
     const block = makeBlock('c++', 'int main() {}')
     decorate(block)
     expect(block.querySelector(`.${CODE_CARD_CLASS_NAMES.headerLabel}`)!.textContent).toContain('C++')
+  })
+})
+
+describe('按钮区顺序与整条折叠热区（#190）', () => {
+  it('按钮区顺序 [复制] [折叠]：折叠钮固定最右（与 Live 同步换位）', () => {
+    const block = makeBlock('js')
+    decorate(block)
+    const actions = block.querySelector(`.${CODE_CARD_CLASS_NAMES.headerActions}`)!
+    const kids = [...actions.children]
+    expect(kids[0]!.classList.contains(CODE_CARD_CLASS_NAMES.copy)).toBe(true)
+    expect(kids[kids.length - 1]!.classList.contains(CODE_CARD_CLASS_NAMES.fold)).toBe(true)
+    expect(kids).toHaveLength(2)
+  })
+
+  it('收起态仅渲染折叠钮且仍在最右', () => {
+    const block = makeBlock('js')
+    decorate(block, { folded: true })
+    const actions = block.querySelector(`.${CODE_CARD_CLASS_NAMES.headerActions}`)!
+    expect(actions.children).toHaveLength(1)
+    expect(actions.children[0]!.classList.contains(CODE_CARD_CLASS_NAMES.fold)).toBe(true)
+  })
+
+  it('热区：点击 header 根与语言标签区触发 onFoldToggle 恰一次', () => {
+    const block = makeBlock('js')
+    let toggles = 0
+    decorate(block, { onFoldToggle: () => { toggles += 1 } })
+    const header = block.querySelector(`:scope > .${CODE_CARD_CLASS_NAMES.header}`)!
+    header.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    header.querySelector(`.${CODE_CARD_CLASS_NAMES.headerLabel}`)!
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(toggles).toBe(2)
+  })
+
+  it('点击复制/折叠按钮不触发热区（onFoldToggle 仅按钮自身各一次）', () => {
+    const block = makeBlock('js')
+    let toggles = 0
+    let copied = ''
+    decorate(block, { onFoldToggle: () => { toggles += 1 }, onCopy: (code) => { copied = code } })
+    ;(block.querySelector(`.${CODE_CARD_CLASS_NAMES.copy}`) as HTMLButtonElement).click()
+    expect(copied).toBe(CODE)
+    expect(toggles).toBe(0)
+    ;(block.querySelector(`.${CODE_CARD_CLASS_NAMES.fold}`) as HTMLButtonElement).click()
+    expect(toggles).toBe(1)
+  })
+})
+
+describe('折行开关与窜行修复（#191）', () => {
+  it('按钮区顺序 [折行] [复制] [折叠]：折行钮插在复制钮左侧、折叠钮仍最右（提供 onWrapToggle 时）', () => {
+    const block = makeBlock('js')
+    decorate(block, { onWrapToggle: () => {} })
+    const actions = block.querySelector(`.${CODE_CARD_CLASS_NAMES.headerActions}`)!
+    const kids = [...actions.children]
+    expect(kids).toHaveLength(3)
+    expect(kids[0]!.classList.contains(CODE_CARD_CLASS_NAMES.wrap)).toBe(true)
+    expect(kids[1]!.classList.contains(CODE_CARD_CLASS_NAMES.copy)).toBe(true)
+    expect(kids[2]!.classList.contains(CODE_CARD_CLASS_NAMES.fold)).toBe(true)
+  })
+
+  it('收起态仅渲染折叠钮（折行钮与复制钮同口径不发射）', () => {
+    const block = makeBlock('js')
+    decorate(block, { folded: true, onWrapToggle: () => {} })
+    const actions = block.querySelector(`.${CODE_CARD_CLASS_NAMES.headerActions}`)!
+    expect(actions.children).toHaveLength(1)
+    expect(actions.children[0]!.classList.contains(CODE_CARD_CLASS_NAMES.fold)).toBe(true)
+    expect(block.querySelector(`.${CODE_CARD_CLASS_NAMES.wrap}`)).toBeNull()
+  })
+
+  it('折行钮回调：点击触发 onWrapToggle 恰一次且不触发热区折叠', () => {
+    const block = makeBlock('js')
+    let wraps = 0
+    let folds = 0
+    decorate(block, { onWrapToggle: () => { wraps += 1 }, onFoldToggle: () => { folds += 1 } })
+    ;(block.querySelector(`.${CODE_CARD_CLASS_NAMES.wrap}`) as HTMLButtonElement).click()
+    expect(wraps).toBe(1)
+    expect(folds).toBe(0)
+  })
+
+  it('折行态修饰与文案：wrap=true 无 -off 类、title/aria-label 取将触发的动作（关闭自动折行）、aria-pressed=true；wrap=false 带类与开启文案', () => {
+    const on = makeBlock('js')
+    decorate(on, { onWrapToggle: () => {} })
+    const onBtn = on.querySelector(`.${CODE_CARD_CLASS_NAMES.wrap}`)!
+    expect(onBtn.classList.contains(CODE_CARD_CLASS_NAMES.wrapOff)).toBe(false)
+    expect(onBtn.getAttribute('aria-label')).toBe(zhCn['codeblock.wrapDisable'])
+    expect(onBtn.getAttribute('title')).toBe(zhCn['codeblock.wrapDisable'])
+    expect(onBtn.getAttribute('aria-pressed')).toBe('true')
+
+    const off = makeBlock('js')
+    decorate(off, { wrap: false, onWrapToggle: () => {} })
+    const offBtn = off.querySelector(`.${CODE_CARD_CLASS_NAMES.wrap}`)!
+    expect(offBtn.classList.contains(CODE_CARD_CLASS_NAMES.wrapOff)).toBe(true)
+    expect(offBtn.getAttribute('aria-label')).toBe(zhCn['codeblock.wrapEnable'])
+    expect(offBtn.getAttribute('title')).toBe(zhCn['codeblock.wrapEnable'])
+    expect(offBtn.getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('行内联 --vsidian-code-indent 与行号列宽同源：值 = calc(列宽ch + 24px)；行号关闭不注入（回落 CSS 缺省）', () => {
+    const block = makeBlock('js')
+    decorate(block)
+    const rows = [...block.querySelectorAll(`.${READING_CODE_LINE_CLASS}`)] as HTMLElement[]
+    expect(rows).toHaveLength(2)
+    // 2 行块 → 列宽 2ch → 缩进 calc(2ch + 24px)（与 ln.style.width 同处同源）
+    expect(rows[0]!.style.getPropertyValue('--vsidian-code-indent')).toBe('calc(2ch + 24px)')
+    expect(rows[1]!.style.getPropertyValue('--vsidian-code-indent')).toBe('calc(2ch + 24px)')
+
+    const noLn = makeBlock('js')
+    decorate(noLn, { config: { card: true, lineNumbers: false, copyButton: true, highlight: true } })
+    const noLnRows = [...noLn.querySelectorAll(`.${READING_CODE_LINE_CLASS}`)] as HTMLElement[]
+    expect(noLnRows[0]!.style.getPropertyValue('--vsidian-code-indent')).toBe('')
+  })
+
+  it('朴素形态无折行钮（无头部可挂）', () => {
+    const block = makeBlock('js')
+    decorate(block, { config: { card: false, lineNumbers: false, copyButton: false, highlight: true }, onWrapToggle: () => {} })
+    expect(block.querySelector(`.${CODE_CARD_CLASS_NAMES.wrap}`)).toBeNull()
   })
 })

@@ -327,6 +327,8 @@ export const zhCn: Record<MessageKey, string> = {
   'codeblock.copy': '复制代码',
   'codeblock.expand': '展开代码块',
   'codeblock.collapse': '折叠代码块',
+  'codeblock.wrapEnable': '开启自动折行',
+  'codeblock.wrapDisable': '关闭自动折行',
 
   /** 图形化代码块按钮组与图表弹窗（#111） */
   'graphic.editSource': '编辑源码',
