@@ -27,6 +27,7 @@ description: 在 vsidian 仓库修改编辑器 webview 的 DOM、类名、属性
 
 - 默认保留旧选择器与变量语义，优先通过别名或适配层承接内部重构；别名必须实际命中原有内容，不能只留空节点、无效 CSS 或字符串。
 - 新增公开入口须补齐用途、模式、状态、示例及实际效果验证。只改单一事实源 `src/shared/styleContract.ts`（含正文域逐项渲染验证：probe.css 探针规则 + `OBSIDIAN_ALIAS_PROBES` 表 + 集成/浏览器断言三处同源），经 `npm run gen:styleguide` 更新指南产物，禁止另建手写副本；承诺 Obsidian 原名兼容（direct 级）必须同时在 `src/shared/obsidianAlias.ts` 登记别名并在别名探针表登记验证（`test/unit/styleContract.test.ts` 钉住两表与条目 aliasTargets 一致）。
+- **条目文档字段须同步登记英文文案**（样式参考双语化，#178 起生效）：新增或修改清单条目时，双语字段（`purpose`/`states`/`obsidian.counterpart`/`dom`/`deprecated`/`removed`）的英文版须同时登记到条目级英文覆盖模块，未登记时渲染回退中文基准，新增/修改条目不得缺登记；字段分级与取词规则见 [style-reference-i18n.md](docs/specs/style-reference-i18n.md)。
 - 禁止为消除失败而删除旧片段、跳过旧用例、降低断言强度、把旧选择器替换成新选择器，或从当前实现重新生成历史期望值。旧断言确有错误时，保留原始基线与失败证据，单列纠错依据和替代验证，不得混作普通重构。
 - 兼容检查器、历史基线、CI 工作流的修改须在变更说明中独立列出理由与保护效果；不得通过关闭检查、调整过滤条件或移除必需状态掩盖失败。更改远端保护配置仍遵循用户授权边界。
 
