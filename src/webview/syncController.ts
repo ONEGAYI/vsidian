@@ -116,6 +116,7 @@ import { graphicRendererFor, renderGraphicBlockInto } from './graphicRenderers'
 import { GRAPHIC_CHROME_CLASS_NAMES, wrapGraphicFrame } from './graphicBlockChrome'
 import { GRAPHIC_LANG_ATTR, MERMAID_CLASS_NAMES, MERMAID_CODE_ATTR, MERMAID_STATE_ATTR } from '../shared/mermaid'
 import { ImageResourceManager } from './imageResource'
+import { ImageVerifyScheduler } from './imageVerifyScheduler'
 import { createImagePaste, imagePasteCanInsertAt } from './imagePaste'
 import { runPerfProbe } from './perfProbe'
 import { runReadingPerfProbe } from './readingProbe'
@@ -549,6 +550,12 @@ export class WebviewSyncController {
   private snippetFontArrival: ReturnType<typeof createFontArrivalWatch> | undefined
   /** 图片资源管理器（#10：双视图共用；经宿主通道解析工作区图源） */
   private images: ImageResourceManager | undefined
+  /** #201 图片周期核验调度器（mount 创建，dispose 释放） */
+  private imageVerify: ImageVerifyScheduler | undefined
+  /** #201 面板可见性入口（visibilitychange 绑定/摘除成对） */
+  private readonly imageVisibilityEntry = (): void => {
+    this.imageVerify?.onVisibilityChange()
+  }
   private toolbar: HTMLElement | undefined
   /** 语言切换重渲染订阅的退订句柄（#94；dispose 释放） */
   private unsubscribeLocale: (() => void) | undefined
@@ -919,7 +926,32 @@ export class WebviewSyncController {
           src,
         })
       },
+      // #201 周期核验调度：首个非直连条目起表、全回收停表
+      onBecomeActive: () => this.imageVerify?.onBecomeActive(),
+      onBecomeIdle: () => this.imageVerify?.onBecomeIdle(),
     })
+    // #201 周期核验：活跃图源合并上报（间隔约 30 秒，工程初值；无活跃停表；
+    // 面板恢复可见/宿主唤醒立即核验）。visibilitychange 常驻监听随 dispose 摘除
+    this.imageVerify = new ImageVerifyScheduler(
+      () =>
+        (this.images?.activeEntries() ?? []).map((entry) => ({
+          src: entry.src,
+          state: entry.state,
+          reason: entry.reason,
+        })),
+      (items) => {
+        if (!this.sessionId) {
+          return
+        }
+        this.bridge.postMessage({
+          kind: 'image.verify',
+          sessionId: this.sessionId,
+          docUri: this.docUri,
+          items,
+        })
+      },
+    )
+    document.addEventListener('visibilitychange', this.imageVisibilityEntry)
     this.readingView = new VirtualReadingView(this.readingContainer, {
       // #10 图片生命周期：块挂载预备装载，卸载释放（src 清空、条目回收）
       // #60 Mermaid：挂载即渲染 pending 容器（DOM 随块卸载 el.remove 释放）
@@ -1216,6 +1248,10 @@ export class WebviewSyncController {
     this.bodyEl = undefined
     this.images?.dispose()
     this.images = undefined
+    // #201 周期核验调度与可见性监听随卸载退出
+    this.imageVerify?.dispose()
+    this.imageVerify = undefined
+    document.removeEventListener('visibilitychange', this.imageVisibilityEntry)
   }
 
   /** 宿主消息入口（window message 事件转发） */
@@ -2029,6 +2065,15 @@ export class WebviewSyncController {
         // #10 图片解析结果路由（只读显示通道：暂停态同样可用）
         this.images?.handleResult(message)
         break
+      case 'image.invalidate':
+        // #201 失效通知：作废命中条目并重发请求（新版本 URL；旧 reqId 在途
+        // 结果由代次守卫丢弃）。只读显示通道，暂停态同样可用
+        this.images?.invalidate(message.srcs)
+        break
+      case 'image.wake':
+        // #201 及时核验：窗口焦点回归/远程重连，有活跃图源立即触发一轮
+        this.imageVerify?.wake()
+        break
       case 'view.state.request': {
         // 查找观测前同步校验新鲜度（文档变化后微任务可能尚未执行）；
         // 此处不在 CM6 update 内，可以安全 dispatch 纯 effect 事务
@@ -2194,6 +2239,7 @@ export class WebviewSyncController {
       // 图片状态计数按当前视图作用域（隐藏视图的槽位不计入——同一管理器
       // 服务双视图，隐藏侧的 DOM 不代表用户可见状态）
       imageStates: this.collectImageStates(),
+      imageEntries: this.images?.activeEntries(),
       find: this.collectFindProbe(),
       typography: this.collectTypography(),
       // #33 设置快照缓存（宿主下发过才有值；缺省向后兼容）

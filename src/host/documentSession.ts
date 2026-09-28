@@ -32,6 +32,8 @@ import type { ImagePasteOutcome } from './imagePasteHost'
 import { mapChangeThroughChanges } from '../shared/changeMapping'
 import { NewlineCoordinator } from '../shared/newline'
 import type { ImageResolution } from './linkTarget'
+import { imageFsKey } from './imageVersioning'
+import type { ImageVerifyItem } from '../shared/imageRefresh'
 
 /** 权威文档适配器：vscode 层实现 */
 export interface HostDocumentPort {
@@ -127,6 +129,14 @@ export interface DocumentSessionOptions {
    *  都以此对齐当前生效语言（与 init 重发全文同模式）。会话保持纯逻辑：
    *  hostLocale + LOCALE_MESSAGES 的装配由 vscode 层注入；未注入不发 */
   requestLocale?: () => { lang: string; messages: Readonly<Record<string, string>> } | undefined
+  /** #201 周期核验端口：image.verify 的 items 透传给 provider 协调器
+   *  （stat + 版本表决策 + 失效回调走 invalidateImagesByFsPath）。
+   *  会话侧只做会话守卫与串行合并（并发有界）；未注入时 verify 静默
+   *  丢弃（按需 stat 核验仍可用——verify 只是周期兜底） */
+  verifyImages?: (items: ImageVerifyItem[]) => Promise<void>
+  /** #201 宿主文件系统语义（vscode 层注入 process.platform === 'win32'）：
+   *  归一目标键的大小写与分隔符行为。缺省 false（纯逻辑 POSIX 语义） */
+  isWindowsHost?: boolean
 }
 
 interface PendingEdit {
@@ -217,6 +227,17 @@ export class DocumentSession {
   /** #10 图片解析：同 src 在途去重与成功结果缓存（失败不缓存，重试重解析） */
   private readonly imageInFlight = new Map<string, Promise<ImageResolution>>()
   private readonly imageCache = new Map<string, ImageResolution>()
+  /** #201 图源 → 归一目标键登记（失效通道反查：按文件目标找 src 集合） */
+  private readonly imageSrcTarget = new Map<string, string>()
+  /** #201 缓存世代（失效时推进）：在途请求跨失效窗口完成后不得回写缓存 */
+  private readonly imageEpochs = new Map<string, number>()
+  /** #201 失效时钟（单调）：归一目标键 → 最近失效时刻。在途请求发起时
+   *  记当前时钟，完成时对比目标键的失效时刻——失效先于完成（登记尚未
+   *  发生、反查为空的竞态窗口）也能检出并补失效广播 */
+  private readonly imageInvalidatedAt = new Map<string, number>()
+  private imageClock = 0
+  /** #201 周期核验串行链（并发有界：同一时刻至多一轮 verify 在途） */
+  private verifyChain: Promise<void> = Promise.resolve()
 
   constructor(
     private readonly doc: HostDocumentPort,
@@ -596,6 +617,14 @@ export class DocumentSession {
         }
         return this.resolveImageRequest(panel, message.reqId, message.src)
       }
+      case 'image.verify': {
+        // #201 周期核验：会话守卫对齐 image.request；items 透传注入端口
+        // （决策与失效由 provider 协调器执行），串行合并保证并发有界
+        if (!panel.ready || message.docUri !== this.docUri) {
+          return Promise.resolve()
+        }
+        return this.enqueueImageVerify(message.items)
+      }
       case 'image.paste': {
         // #161 图片粘贴落盘：会话守卫对齐 image.request / diagram.export
         // 先例（就绪且 docUri 匹配才放行，否则静默丢弃）；结果回来源面板。
@@ -692,7 +721,8 @@ export class DocumentSession {
     return this.panels.get(sessionId)?.lastReadingPerfReport
   }
 
-  /** #10 图片解析请求处理（去重/缓存/回发） */
+  /** #10 图片解析请求处理（去重/缓存/回发）；#201 起成功结果登记归一目标
+   *  键并按世代防迟到回写 */
   private async resolveImageRequest(
     panel: PanelEntry,
     reqId: number,
@@ -727,21 +757,111 @@ export class DocumentSession {
       this.imageInFlight.set(src, pending)
       // 完成后清理在途表；成功结果进入小容量缓存（滚动回视口的重复请求
       // 直接命中，避免反复读盘；失败不缓存，保留重试语义）
+      const epoch = this.imageEpochs.get(src) ?? 0
+      const requestClock = this.imageClock
       void pending.then((resolution) => {
         this.imageInFlight.delete(src)
-        if (resolution.ok) {
-          this.imageCache.set(src, resolution)
-          while (this.imageCache.size > 16) {
-            const oldest = this.imageCache.keys().next().value
-            if (oldest === undefined) {
-              break
-            }
-            this.imageCache.delete(oldest)
-          }
+        // #201 世代守卫：解析在途期间该 src 被失效（缓存已删）——迟到结果
+        // 仍回发请求面板（webview 侧按 reqId 代次守卫丢弃），但不得回写
+        // 缓存复活旧解析
+        if ((this.imageEpochs.get(src) ?? 0) !== epoch) {
+          return
         }
+        if (!resolution.fsPath) {
+          this.commitImageResult(src, resolution, null)
+          return
+        }
+        const key = imageFsKey(resolution.fsPath, this.options.isWindowsHost ?? false)
+        // 在途竞态补失效：目标在请求发起后被失效过（当时登记未发生、
+        // 反查为空）——结果不缓存并补发失效广播（webview 立即重取新版本）
+        const invalidatedAt = this.imageInvalidatedAt.get(key) ?? 0
+        this.commitImageResult(src, resolution, invalidatedAt > requestClock ? key : null)
       })
     }
     send(await pending)
+  }
+
+  /** 结果落库（#201）：登记反查映射；被失效覆盖（overshadowKey 非空）时
+   *  不写缓存并对该 src 补失效广播，成功结果照常仅作登记 */
+  private commitImageResult(
+    src: string,
+    resolution: ImageResolution,
+    overshadowKey: string | null,
+  ): void {
+    if (resolution.fsPath) {
+      this.imageSrcTarget.set(
+        src,
+        imageFsKey(resolution.fsPath, this.options.isWindowsHost ?? false),
+      )
+    }
+    if (resolution.ok && !overshadowKey) {
+      this.imageCache.set(src, resolution)
+      while (this.imageCache.size > 16) {
+        const oldest = this.imageCache.keys().next().value
+        if (oldest === undefined) {
+          break
+        }
+        this.imageCache.delete(oldest)
+      }
+      return
+    }
+    if (overshadowKey) {
+      this.invalidateImageSrcs([src])
+    }
+  }
+
+  /**
+   * #201 图片失效入口（provider 协调器调用：watcher 事件 / onTargetChange /
+   * 周期核验 refresh 决策）：按归一目标键反查本会话登记的 src 集合，删除
+   * 宿主解析缓存并推进世代（在途请求完成后不回写），向**全部面板**广播
+   * image.invalidate（多面板一致；webview 侧作废条目重发请求拿新版本 URL）。
+   * 无登记（该文件未被本文档引用）时静默返回（时钟仍推进——在途请求
+   *  完成时按目标键检出覆盖）。
+   */
+  invalidateImagesByFsPath(fsPath: string): void {
+    if (this.disposed) {
+      return
+    }
+    const key = imageFsKey(fsPath, this.options.isWindowsHost ?? false)
+    this.imageClock++
+    this.imageInvalidatedAt.set(key, this.imageClock)
+    const srcs: string[] = []
+    for (const [src, target] of this.imageSrcTarget) {
+      if (target === key) {
+        srcs.push(src)
+      }
+    }
+    if (srcs.length === 0) {
+      return
+    }
+    this.invalidateImageSrcs(srcs)
+  }
+
+  /** 按(src) 执行失效：删缓存、推进世代、广播全部面板 */
+  private invalidateImageSrcs(srcs: string[]): void {
+    for (const src of srcs) {
+      this.imageCache.delete(src)
+      this.imageEpochs.set(src, (this.imageEpochs.get(src) ?? 0) + 1)
+    }
+    const message: HostToWebview = { kind: 'image.invalidate', srcs }
+    for (const panel of this.panels.values()) {
+      panel.port.send(message)
+    }
+  }
+
+  /** #201 周期核验串行入链（并发有界：同会话至多一轮 verify 在途） */
+  private enqueueImageVerify(items: ImageVerifyItem[]): Promise<void> {
+    const verifier = this.options.verifyImages
+    if (!verifier) {
+      return Promise.resolve()
+    }
+    const run = this.verifyChain.then(() => verifier(items))
+    // 链尾自愈：verifier 异常不断链（下一轮照常入链）
+    this.verifyChain = run.then(
+      () => undefined,
+      () => undefined,
+    )
+    return run
   }
 
   /** 会话观测信息（测试钩子与调试用） */

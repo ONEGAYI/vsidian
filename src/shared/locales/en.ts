@@ -418,6 +418,8 @@ export const en = {
   'decor.emptyCell': 'Empty cell',
   'decor.mathError': 'Math failed to parse: source text is shown; move the cursor in to edit',
   'decor.imageError': 'Image failed to load ({reason}). Click to retry',
+  'decor.imageNotFound': 'Image not found (file missing or deleted). Click to retry',
+  'decor.imageInaccessible': 'Image inaccessible (remote connection or permission issue). Click to retry',
   'decor.unknownReason': 'unknown reason',
   'decor.mermaidUnavailable': 'Diagram renderer unavailable (mermaid.js failed to load)',
   'decor.mermaidError': 'Diagram failed to render: {message}',

@@ -131,6 +131,35 @@ webview/样式修改执行 style-contract，绘制层至少验证真实可见性
 - 设置页 notice 保留至下一次操作覆盖（页面不自行清除）；无工作区窗口模式可编辑保存、操作不可用（打开工作区后生效）。
 - **外部整目录删除不产生逐文件事件**（实测 1.86.2 Windows：`workspace.fs.delete(dir, {recursive})` 后 `**/*.md` watcher 无逐文件 delete 事件）——索引在周期核验（约 10 分钟）或显式完整重建前不知晓；单文件删除/改写有事件走增量链路。
 
+## #201 实施落档（2026-09-29）
+
+工单 #201（图片定期刷新与删除后找不到状态）的落地事实。工程常量集中于 `src/shared/imageRefresh.ts`（周期核验间隔 30s、事件去抖 400ms、唤醒节流 5s、图片扩展清单——watcher glob 与事件过滤同源），全部是**待测初值**，不构成刷新时限承诺。
+
+### 三层失效通道
+
+三层缓存各击一层，缺一不可（浏览器/资源服务 HTTP 缓存 → 宿主解析缓存 → webview 图源条目）：
+
+- **版本表**（`src/host/imageVersioning.ts`，provider 级单件）：目标 URI 归一键去重（`imageFsKey`，与索引 normKey 同语义——resolve + 分隔符归一 + Windows 大小写折叠）；代次 `generation` 单调递增，直接拼 `?v=` 击穿（`buildSnippetLinkList` 先例——webview 资源服务不承诺无缓存）。**解析路径**（请求时 stat）mtime/size 相同不推进（URI 稳定让浏览器缓存可用——「未变化不强制重载」）；**事件路径**（watcher / onTargetChange）无条件推进（「收到变更事件即使元数据相同仍失效」——防 mtime 粒度漏检）；缺失→存在即使元数据回到缺失前的值也推进（`lastKnown` 置空过即视为变化，删除重建必检出）。
+- **stat 升级**（`resolveWorkspaceImage`）：保留 mtime/size 进版本表（不再只验存在性）；stat 失败按 `FileSystemError.code` 区分 FileNotFound=`not-found` 与其余=`inaccessible`（新 reason 码，不冒充删除）。
+- **会话失效**（`documentSession.invalidateImagesByFsPath`）：成功与失败结果登记 src→归一目标反查映射（同一 src 在不同文档指向不同文件——映射必须会话级）；失效时删宿主缓存、推进世代（epoch）并向**全部面板**广播 `image.invalidate`（多面板一致）；在途请求跨失效窗口完成时不回写缓存，并按失效时钟（fsKey→时刻）检出「登记未发生的竞态窗口」补失效广播。
+- **webview 作废重发**（`imageResource.invalidate`）：条目重建（新 reqId——旧在途结果匹配不到 pending 条目被丢弃，代次守卫）；槽位撤下旧图（释放位图）回 loading；load/error 事件按「当前承载元素」过滤（阅读槽位 img 即 slot、监听与槽位同生命周期——旧世代在途事件不覆盖新状态）。error 重试与失效共用 `rebuildEntry` 重建路径。
+
+### 事件与周期核验
+
+- **事件即时核验**（`imageRefreshCoordinator.handleTargetEvent`，无条件失效）：宿主自建图片扩展 watcher（每工作区根一个花括号 glob watcher，根增删整体重建；索引域 watcher 只听 `**/*.md` 不覆盖图片）+ `vaultIndex.onTargetChange` 订阅（图片扩展过滤；当前事件均为 md 域、天然空操作，未来索引扩展到非 md 目标自动接通）。事件去抖 400ms 归并（保存器写临时文件 + rename 成组事件）。stat 三态决定写表：ok→带 stat 推进；missing→置空；inaccessible→不动表仅广播（文件可能未变，重发请求按 inaccessible 呈现）。
+- **周期核验**（webview 驱动）：`ImageVerifyScheduler` 每 30s 合并上报活跃图源（`activeEntries`，直连外链除外）；无活跃槽位停表、面板隐藏停表、恢复可见立即核验；宿主 `image.wake`（窗口焦点回归节流 5s 广播——远程重连的及时核验）同样立即触发。宿主侧 `planImageVerification` 纯函数决策（fsKey 去重、串行 stat 并发有界）：元数据相同且呈现健康→`current` 零动作；变化/呈现态与磁盘真相不符→`refresh`（元数据相同时不推进代次——断连恢复走浏览器缓存命中，无需网络重取）。维持态（全部条目已呈 not-found / inaccessible）不扰动。
+
+### 状态呈现与边界
+
+- 失败态细分：`vsidian-image-notfound`（明确删除，淡红底）/ `vsidian-image-unreachable`（不可访问，警告黄边）叠加在 error 基类上，与 `data-vsidian-img-reason` 同步；词条 `decor.imageNotFound` / `decor.imageInaccessible` 双语 parity。样式契约条目 `image-failure-variants`（content 域），CSS 规则由 `imageStatesCssContract.test.ts` 钉住。
+- 失败槽位（error 态）保留在活跃图源集内被周期核验覆盖——文件恢复（watcher create 事件即时 / 周期核验兜底）后重新显示。
+- 无工作区：无 watcher，按需 stat（解析请求路径）与周期核验照常（不依赖全库索引）；HTTP(S) 直连图源不经本管线（webview `isDirectSrc` 分支，不入失效/核验/活跃度）；不持久化图片内容，刷新零写回（不改 Markdown/dirty）。
+- 观测通道：`view.state.imageEntries`（条目明细含 `appliedSrc`——`?v=` 代次可直接断言）；测试钩子 `_test.takeImageRefreshEvents`（失效日志）/ `_test.getImageVersions`（版本表快照）。
+
+### 顺带修复（既有缺陷）
+
+`releaseImages` 原实现无条件解绑 load/error 监听——阅读槽位的 img 即 slot 本身，重试（error→ok 路径）或失效重发后再应用 src 会永远停在 loading（监听已随首次释放丢失）。修复为仅 live 槽位（render 回调创建的内部 img）随释放解绑，阅读槽位监听与槽位同生命周期（代次守卫改由事件目标过滤承担）。
+
 ## 工单与依赖
 
 总规格：[#194](https://github.com/ONEGAYI/vsidian/issues/194)。
