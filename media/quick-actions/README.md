@@ -1,8 +1,8 @@
 # 快速操作图标
 
-`contact-sheet.png` 是栅格总览：17 列按下表顺序排列，首行为浅色主题，次行为深色主题。每格 96×96 像素，透明背景。`light/` 和 `dark/` 内的 PNG 从总览逐格原样裁切；同名 SVG 再由 VTracer 对该 PNG 描摹生成，内含真实 `<path>`，不嵌入位图。
+`contact-sheet.png` 是栅格总览：31 列按下表顺序排列，首行为浅色主题，次行为深色主题。每格 96×96 像素，透明背景。`light/` 和 `dark/` 内的 PNG 从总览逐格原样裁切；同名 SVG 再由 VTracer 对该 PNG 描摹生成，内含真实 `<path>`，不嵌入位图。
 
-`highlight-horizontal-rule-ai-board.png` 保留了参考既有图标生成的单张原图。`highlight-horizontal-rule-source.png` 是从原图底部两格裁切、二值化后的透明单色源图（192×96）：左格为高亮笔，右格为分割线。重建脚本按格裁切源图的 alpha，分别着浅色或深色主题色，再纳入总览及 VTracer 描摹流程；既有 15 枚仍由脚本绘制。
+AI 生图源图有两张，均保留最终原图与裁切源图：`highlight-horizontal-rule-ai-board.png` / `highlight-horizontal-rule-source.png`（高亮笔与分割线，192×96），`context-menu-ai-board.png` / `context-menu-source.png`（右键菜单图标 14 枚，1344×96；提示词与工具记录见 `context-menu-ai-prompt.md`）。重建脚本按格裁切源图的 alpha，分别着浅色或深色主题色，再纳入总览及 VTracer 描摹流程；其余 15 枚仍由脚本绘制。
 
 | 列 | 图标 key | 列 | 图标 key | 列 | 图标 key |
 | --- | --- | --- | --- | --- | --- |
@@ -12,6 +12,15 @@
 | 4 | `inlineCode` | 9 | `quote` | 14 | `inlineMath` |
 | 5 | `heading` | 10 | `codeBlock` | 15 | `blockMath` |
 | 16 | `highlight` | 17 | `horizontalRule` | | |
+
+右键菜单图标（#185，18–31 列；`pastePlain` / `media` / `footnote` / `callout` 为备用 key，已登记暂不接线）：
+
+| 列 | 图标 key | 列 | 图标 key | 列 | 图标 key | 列 | 图标 key |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 18 | `externalLink` | 22 | `normalText` | 26 | `selectAll` | 30 | `footnote` |
+| 19 | `textFormat` | 23 | `cut` | 27 | `comment` | 31 | `callout` |
+| 20 | `paragraphStyle` | 24 | `copy` | 28 | `pastePlain` | | |
+| 21 | `insertPlus` | 25 | `paste` | 29 | `media` | | |
 
 重建命令：
 
