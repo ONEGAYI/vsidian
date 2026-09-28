@@ -20,6 +20,15 @@
 // 4. 子菜单右缘放不下自动翻左侧：applySubmenuFlip 在菜单挂载后一次判定
 //    （临时显形量宽 → shared/contextMenu.submenuSide 纯函数 → flip 类；
 //    无布局环境安全跳过）。
+//
+// 5. 键盘方向键导航（规格「交互契约」）：菜单容器 tabindex=-1 承载编程焦
+//    点（打开时 focusMenuDom 聚焦容器，不进 Tab 序列），容器 keydown 承载
+//    ArrowUp/Down（当前菜单面内循环移动，跳过置灰）、ArrowRight（父项进
+//    子菜单首项）、ArrowLeft（子菜单面退回父项）。当前面判定走 role=menu
+//    锚点（不依赖类名，大纲参数化同样生效）；Enter/Space 留给原生 button
+//    激活（不 preventDefault），Esc 关整个菜单由消费方 document capture
+//    通道承担（既有）。父项 aria-expanded 镜像 CSS 显隐语义（宿主 open
+//    类或 :focus-within 即展开）。
 import type { MessageKey } from '../shared/locales/en'
 import { t } from '../shared/i18n'
 import { submenuSide, type RenderedMenuGroup, type RenderedMenuItem } from '../shared/contextMenu'
@@ -93,6 +102,9 @@ export function buildMenuDom(
   const menu = document.createElement('div')
   menu.className = names.menu
   menu.setAttribute('role', 'menu')
+  // 键盘导航起点：容器可编程聚焦（打开时 focusMenuDom），-1 不进 Tab 序列
+  menu.tabIndex = -1
+  menu.addEventListener('keydown', (event) => handleMenuKeydown(event, menu, names))
 
   const appendItem = (host: HTMLElement, def: RenderedMenuItem): void => {
     const itemHost = document.createElement('div')
@@ -203,6 +215,106 @@ export function buildMenuDom(
     menu.appendChild(groupEl)
   }
   return menu
+}
+
+/** 打开菜单时的键盘导航起点：聚焦容器（tabindex=-1 由内核装配），首个
+ *  方向键从顶级面起步（ArrowDown 首项 / ArrowUp 末项） */
+export function focusMenuDom(menu: HTMLElement): void {
+  menu.focus()
+}
+
+/** 菜单面直属可聚焦项：face 内 item 按钮，过滤更深层子菜单项（最近
+ *  role=menu 祖先必须就是 face——嵌套子菜单各归各面）与置灰项 */
+function menuFaceItems(face: Element, names: MenuDomClassNames): HTMLButtonElement[] {
+  return Array.from(face.querySelectorAll<HTMLButtonElement>(`button.${names.item}`)).filter(
+    (btn) => btn.closest('[role="menu"]') === face && !btn.disabled,
+  )
+}
+
+/** 父项 aria-expanded 镜像 CSS 显隐：宿主 open 类（点击兜底）或焦点仍在
+ *  宿主内（:focus-within）即视为展开 */
+function syncAriaExpanded(menu: HTMLElement, names: MenuDomClassNames): void {
+  const active = menu.ownerDocument.activeElement
+  for (const btn of Array.from(
+    menu.querySelectorAll<HTMLButtonElement>('button[aria-haspopup="true"]'),
+  )) {
+    const host = btn.closest(`.${names.itemHost}`)
+    const expanded = host !== null && (host.classList.contains(names.open) || host.contains(active))
+    btn.setAttribute('aria-expanded', String(expanded))
+  }
+}
+
+/** 菜单级 keydown：ArrowUp/Down 面内循环移动、ArrowRight 进子级首项、
+ *  ArrowLeft 退回父项。Enter/Space 不在此处理（原生 button 激活语义），
+ *  Esc 关整个菜单由消费方 document capture 承担（既有通道）。 */
+function handleMenuKeydown(event: KeyboardEvent, menu: HTMLElement, names: MenuDomClassNames): void {
+  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') {
+    return
+  }
+  const doc = menu.ownerDocument
+  const active =
+    doc.activeElement instanceof HTMLElement && menu.contains(doc.activeElement)
+      ? doc.activeElement
+      : null
+  const activeBtn = active instanceof HTMLButtonElement && active.classList.contains(names.item)
+    ? active
+    : null
+  // 当前菜单面：焦点按钮所在的最近 role=menu（顶级容器或子菜单）；焦点
+  // 不在项上（容器/丢失）时以顶级面起步
+  const face = activeBtn?.closest('[role="menu"]') ?? menu
+
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    const items = menuFaceItems(face, names)
+    if (items.length === 0) {
+      return
+    }
+    event.preventDefault()
+    const delta = event.key === 'ArrowDown' ? 1 : -1
+    const idx = activeBtn ? items.indexOf(activeBtn) : -1
+    const next =
+      idx === -1
+        ? delta === 1
+          ? items[0]!
+          : items[items.length - 1]!
+        : items[(idx + delta + items.length) % items.length]!
+    next.focus()
+    // 焦点移出父项宿主 → 子菜单随 :focus-within 收起，aria 同步回落
+    syncAriaExpanded(menu, names)
+    return
+  }
+
+  if (!activeBtn) {
+    return
+  }
+  const host = activeBtn.closest(`.${names.itemHost}`)
+  const submenu =
+    host?.querySelector<HTMLElement>(`:scope > .${names.submenu}`) ?? null
+
+  if (event.key === 'ArrowRight') {
+    if (!submenu) {
+      return
+    }
+    const first = menuFaceItems(submenu, names)[0]
+    if (!first) {
+      return // 子项全置灰：无可聚焦项，保持不动
+    }
+    event.preventDefault()
+    first.focus()
+    syncAriaExpanded(menu, names)
+    return
+  }
+
+  // ArrowLeft：仅在子菜单面内退出（退回父项 button，宿主因父项聚焦仍
+  // :focus-within、子菜单保持可见）；顶级面无操作
+  if (face !== menu) {
+    const parentHost = face.parentElement // 子菜单嵌父项宿主内（装配契约）
+    const parentBtn = parentHost?.querySelector<HTMLElement>(`:scope > button.${names.item}`)
+    if (parentBtn) {
+      event.preventDefault()
+      parentBtn.focus()
+      syncAriaExpanded(menu, names)
+    }
+  }
 }
 
 /**

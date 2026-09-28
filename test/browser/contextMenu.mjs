@@ -407,20 +407,25 @@ try {
   passed++
   console.log('[统一菜单回归][PASS] 快捷键入口 + Esc 真实键盘关闭')
 
-  // ---- 场景 K：菜单键盘可达（button 原生可聚焦 + Enter 执行）----
+  // ---- 场景 K：菜单键盘可达（打开即聚焦容器（导航起点）+ button 原生可聚焦）----
   await line(6).click({ button: 'right', position: { x: 60, y: 6 } })
   const focusState = await page.evaluate(() => {
-    // 右键不转移焦点（Tab 序起点依环境而异）——直接验证按钮原生可聚焦，
-    // 键盘可达的本质是 button 元素（Tab/Enter/Space 原生行为）
+    // 打开即聚焦菜单容器（focusMenuDom，tabindex=-1 不进 Tab 序列）——
+    // 方向键导航的事件起点；键盘可达的本质仍是 button 元素（Tab/Enter/Space）
+    const menu = document.querySelector('.vsidian-context-menu')
     const btn = document.querySelector('.vsidian-context-menu button')
-    if (!btn) return false
+    if (!menu || !btn) return { containerFocused: false, tabindex: null, btnFocusable: false }
+    const containerFocused = document.activeElement === menu
+    const tabindex = menu.getAttribute('tabindex')
     btn.focus()
-    return document.activeElement === btn
+    return { containerFocused, tabindex, btnFocusable: document.activeElement === btn }
   })
-  assert.ok(focusState, '菜单项应可聚焦（button 键盘可达）')
+  assert.ok(focusState.containerFocused, '打开菜单应聚焦容器（键盘导航起点）')
+  assert.equal(focusState.tabindex, '-1', '容器 tabindex=-1（不进 Tab 序列）')
+  assert.ok(focusState.btnFocusable, '菜单项应可聚焦（button 键盘可达）')
   await page.evaluate(() => window.post({ kind: 'contextMenu.test.menuClose' }))
   passed++
-  console.log('[统一菜单回归][PASS] 菜单项键盘可达（button 可聚焦）')
+  console.log('[统一菜单回归][PASS] 打开即聚焦容器（tabindex=-1）+ 菜单项键盘可达')
 
   // ---- 场景 L：段落设置勾选（#184 真实右键按行结构点亮，hover 展开子菜单） ----
   const hoverParagraphStyle = async () => {
@@ -468,6 +473,57 @@ try {
   await page.evaluate(() => window.post({ kind: 'contextMenu.test.menuClose' }))
   passed++
   console.log('[统一菜单回归][PASS] 段落设置勾选：标题/任务/正文按行结构点亮')
+
+  // ---- 场景 M：键盘方向键导航（规格交互契约：Up/Down 移动、Right 进子级、
+  // Left 退出；真实 page.keyboard——ArrowRight 进子级后子菜单须真实可见） ----
+  const focusedCommand = () => page.evaluate(() => {
+    const el = document.activeElement
+    if (!el) return null
+    if (el.tagName === 'BUTTON') return el.dataset['vsidianCommand'] ?? null
+    return el.classList?.contains('vsidian-context-menu') ? '<container>' : null
+  })
+  await line(6).click({ button: 'right', position: { x: 60, y: 6 } })
+  // Up/Down 在顶级面移动（真实键盘，事件经焦点元素冒泡到菜单容器）
+  await page.keyboard.press('ArrowDown')
+  assert.equal(await focusedCommand(), 'wikilink', 'ArrowDown 从容器聚焦首项')
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('ArrowDown')
+  assert.equal(await focusedCommand(), 'textFormat', 'ArrowDown 连击到簇 2 父项')
+  // ArrowRight 进子级：焦点落子菜单首项 + 子菜单真实展开（:focus-within 协同）
+  await page.keyboard.press('ArrowRight')
+  assert.equal(await focusedCommand(), 'bold', 'ArrowRight 应聚焦子菜单首项')
+  let navState = await page.evaluate(() => window.readMenu())
+  const navSub = navState.submenus[0]
+  assert.equal(navSub.display, 'block', 'ArrowRight 进子级后子菜单应真实可见')
+  assert.equal(navSub.parentExpanded, 'true', '父项 aria-expanded 应镜像展开')
+  // 子菜单面内 Down 移动；Left 退回父项
+  await page.keyboard.press('ArrowDown')
+  assert.equal(await focusedCommand(), 'italic', '子菜单面内 ArrowDown 移动')
+  await page.keyboard.press('ArrowLeft')
+  assert.equal(await focusedCommand(), 'textFormat', 'ArrowLeft 应退回父项')
+  await page.keyboard.press('ArrowUp')
+  assert.equal(await focusedCommand(), 'copyBlockLink', 'ArrowUp 反向移动')
+  // Esc 关整个菜单 + 焦点还回编辑器（打开聚焦容器的对称收尾）
+  await page.keyboard.press('Escape')
+  navState = await page.evaluate(() => window.readMenu())
+  assert.ok(!navState.menuExists, 'Esc 应关闭整个菜单')
+  const editorFocused = await page.evaluate(() =>
+    document.activeElement?.classList.contains('cm-content') === true)
+  assert.ok(editorFocused, '关闭菜单后焦点应还回编辑器（Esc 后继续打字不失效）')
+  // Enter 原生 button 承担：ArrowUp 从容器落末项 selectAll → Enter 全选
+  await line(6).click({ button: 'right', position: { x: 60, y: 6 } })
+  await page.keyboard.press('ArrowUp')
+  assert.equal(await focusedCommand(), 'selectAll', 'ArrowUp 从容器聚焦末项')
+  await page.keyboard.press('Enter')
+  navState = await page.evaluate(() => window.readMenu())
+  assert.ok(!navState.menuExists, 'Enter 执行后菜单应关闭')
+  assert.ok(!navState.selection.empty && navState.selection.from === 0
+    && navState.selection.to === navState.text.length,
+    `Enter 应原生激活 button 执行全选（实际 ${JSON.stringify(navState.selection)}）`)
+  await page.evaluate(() => window.post({ kind: 'contextMenu.test.menuClose' }))
+  passed++
+  console.log('[统一菜单回归][PASS] 键盘方向键导航：面内移动、进子级真实展开、退回、Enter 执行')
 } finally {
   await browser.close()
 }

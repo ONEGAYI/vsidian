@@ -12,6 +12,7 @@ import {
   applySubmenuFlip,
   buildMenuDom,
   CONTEXT_MENU_CLASS_NAMES,
+  focusMenuDom,
   type MenuDomClassNames,
 } from '../../src/webview/contextMenuDom'
 import type { RenderedMenuGroup, RenderedMenuItem } from '../../src/shared/contextMenu'
@@ -214,5 +215,156 @@ describe('子菜单翻转装配期判定（applySubmenuFlip）', () => {
     applySubmenuFlip(menu, 900)
     const submenu = menu.querySelector<HTMLElement>(`.${CONTEXT_MENU_CLASS_NAMES.submenu}`)!
     expect(submenu.classList.contains(CONTEXT_MENU_CLASS_NAMES.submenuFlip)).toBe(false)
+  })
+})
+
+describe('键盘方向键导航（规格交互契约：Up/Down 移动、Right 进子级、Left 退出）', () => {
+  // 顶级面：a（叶）/ disabled（叶，跳过）/ parent（子菜单 child1+child2）
+  const navGroups: readonly RenderedMenuGroup[] = [{
+    id: 'g',
+    items: [
+      item({ id: 'a' }),
+      item({ id: 'off', enabled: false }),
+      item({ id: 'parent', children: [item({ id: 'child1' }), item({ id: 'child2' })] }),
+    ],
+  }]
+
+  /** 挂 body（jsdom 焦点语义需要连接态）并派发冒泡 keydown 到当前焦点元素 */
+  const mount = (groups: readonly RenderedMenuGroup[] = navGroups) => {
+    const menu = build(groups)
+    document.body.appendChild(menu)
+    return menu
+  }
+  const press = (el: Element, key: string): void => {
+    el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+  }
+  const btn = (menu: HTMLElement, command: string): HTMLButtonElement =>
+    menu.querySelector<HTMLButtonElement>(`button[data-vsidian-command="${command}"]`)!
+  const activeCommand = (menu: HTMLElement): string | null =>
+    (menu.ownerDocument.activeElement as HTMLElement | null)?.dataset?.['vsidianCommand'] ?? null
+
+  it('容器 tabindex=-1（键盘导航起点：可编程聚焦、不进 Tab 序列）', () => {
+    const menu = mount()
+    expect(menu.getAttribute('tabindex')).toBe('-1')
+    menu.remove()
+  })
+
+  it('focusMenuDom 聚焦容器：ArrowDown 从顶级面首项起步，ArrowUp 从末项起步', () => {
+    const menu = mount()
+    focusMenuDom(menu)
+    expect(menu.ownerDocument.activeElement).toBe(menu)
+    press(menu, 'ArrowDown')
+    expect(activeCommand(menu)).toBe('a')
+    menu.remove()
+
+    const menu2 = mount()
+    focusMenuDom(menu2)
+    press(menu2, 'ArrowUp')
+    expect(activeCommand(menu2), 'ArrowUp 从容器起步落末项').toBe('parent')
+    menu2.remove()
+  })
+
+  it('ArrowDown/Up 在当前面内循环移动且跳过置灰项', () => {
+    const menu = mount()
+    const first = btn(menu, 'a')
+    first.focus()
+    press(first, 'ArrowDown')
+    expect(activeCommand(menu), '跳过 disabled').toBe('parent')
+    press(menu.ownerDocument.activeElement!, 'ArrowDown')
+    expect(activeCommand(menu), '末项循环回首项').toBe('a')
+    press(menu.ownerDocument.activeElement!, 'ArrowUp')
+    expect(activeCommand(menu), '反向循环回末项').toBe('parent')
+    menu.remove()
+  })
+
+  it('ArrowRight 进入子菜单首项；父项 aria-expanded 镜像为 true', () => {
+    const menu = mount()
+    const parent = btn(menu, 'parent')
+    parent.focus()
+    press(parent, 'ArrowRight')
+    expect(activeCommand(menu)).toBe('child1')
+    expect(parent.getAttribute('aria-expanded')).toBe('true')
+    menu.remove()
+  })
+
+  it('子菜单面内 ArrowDown 移动子项；ArrowLeft 退回父项 button', () => {
+    const menu = mount()
+    const parent = btn(menu, 'parent')
+    parent.focus()
+    press(parent, 'ArrowRight')
+    press(menu.ownerDocument.activeElement!, 'ArrowDown')
+    expect(activeCommand(menu)).toBe('child2')
+    press(menu.ownerDocument.activeElement!, 'ArrowLeft')
+    expect(menu.ownerDocument.activeElement).toBe(parent)
+    menu.remove()
+  })
+
+  it('顶级面 ArrowLeft 无操作；叶项 ArrowRight 无操作（均不抛错不挪焦点）', () => {
+    const menu = mount()
+    const leaf = btn(menu, 'a')
+    leaf.focus()
+    press(leaf, 'ArrowLeft')
+    expect(menu.ownerDocument.activeElement).toBe(leaf)
+    press(leaf, 'ArrowRight')
+    expect(menu.ownerDocument.activeElement, '叶项无子菜单不动').toBe(leaf)
+    menu.remove()
+  })
+
+  it('Enter/Space 不被菜单 keydown 拦截（原生 button 激活语义保留）', () => {
+    const menu = mount()
+    const leaf = btn(menu, 'a')
+    leaf.focus()
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    leaf.dispatchEvent(enter)
+    expect(enter.defaultPrevented, 'Enter 不 preventDefault').toBe(false)
+    const space = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })
+    leaf.dispatchEvent(space)
+    expect(space.defaultPrevented, 'Space 不 preventDefault').toBe(false)
+    menu.remove()
+  })
+
+  it('焦点移出父项宿主后 aria-expanded 回落 false（镜像 CSS :focus-within 显隐）', () => {
+    const menu = mount()
+    const parent = btn(menu, 'parent')
+    parent.focus()
+    press(parent, 'ArrowRight')
+    expect(parent.getAttribute('aria-expanded')).toBe('true')
+    press(menu.ownerDocument.activeElement!, 'ArrowLeft')
+    press(menu.ownerDocument.activeElement!, 'ArrowUp')
+    expect(menu.ownerDocument.activeElement).toBe(btn(menu, 'a'))
+    expect(parent.getAttribute('aria-expanded'), '宿主失焦且无 open 类回落').toBe('false')
+    menu.remove()
+  })
+
+  it('类名参数化（大纲菜单）同样导航：face 判定走 role=menu 锚点不依赖内核类名', () => {
+    const menu = buildMenuDom(
+      [{
+        id: 'outline',
+        items: [
+          item({ id: 'expandRecursively' }),
+          item({ id: 'copy', children: [item({ id: 'copyHeading' }), item({ id: 'copyLink' })] }),
+        ],
+      }],
+      {
+        onCommand: () => {},
+        resolveLabel: label,
+        classNames: {
+          menu: 'vsidian-outline-menu',
+          itemHost: 'vsidian-outline-menu-host',
+          item: 'vsidian-outline-menu-item',
+          submenu: 'vsidian-outline-menu-submenu',
+        },
+      },
+    )
+    document.body.appendChild(menu)
+    focusMenuDom(menu)
+    press(menu, 'ArrowDown')
+    expect(activeCommand(menu)).toBe('expandRecursively')
+    press(menu.ownerDocument.activeElement!, 'ArrowDown')
+    press(menu.ownerDocument.activeElement!, 'ArrowRight')
+    expect(activeCommand(menu), '大纲子菜单首项').toBe('copyHeading')
+    press(menu.ownerDocument.activeElement!, 'ArrowLeft')
+    expect(activeCommand(menu)).toBe('copy')
+    menu.remove()
   })
 })

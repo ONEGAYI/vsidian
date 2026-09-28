@@ -161,7 +161,7 @@ import {
   outlineMenuPosition,
   outlineStructuralExpand,
 } from './outlineMenu'
-import { applySubmenuFlip, buildMenuDom, CONTEXT_MENU_CLASS_NAMES } from './contextMenuDom'
+import { applySubmenuFlip, buildMenuDom, CONTEXT_MENU_CLASS_NAMES, focusMenuDom } from './contextMenuDom'
 import {
   PLAIN_MENU_LINE,
   buildContextMenuModel,
@@ -4221,6 +4221,8 @@ export class WebviewSyncController {
     applySubmenuFlip(menu, window.innerWidth || 1200, {
       submenu: OUTLINE_MENU_CLASS_NAMES.submenu,
     })
+    // 键盘导航起点：聚焦菜单容器（方向键导航经内核装配自动继承）
+    focusMenuDom(menu)
     // 关闭通道：菜单外 pointerdown（capture，含其他面板区域）与 Esc
     this.outlineMenuDismissPointer = (e) => {
       if (menu.contains(e.target as Node)) {
@@ -4237,7 +4239,7 @@ export class WebviewSyncController {
     document.addEventListener('keydown', this.outlineMenuDismissKey, true)
   }
 
-  /** 关闭菜单（幂等；摘除 document 关闭监听） */
+  /** 关闭菜单（幂等；摘除 document 关闭监听；焦点在菜单内时还回编辑器） */
   private closeOutlineMenu(): void {
     if (this.outlineMenuDismissPointer) {
       document.removeEventListener('pointerdown', this.outlineMenuDismissPointer, true)
@@ -4246,6 +4248,11 @@ export class WebviewSyncController {
     if (this.outlineMenuDismissKey) {
       document.removeEventListener('keydown', this.outlineMenuDismissKey, true)
       this.outlineMenuDismissKey = undefined
+    }
+    // 键盘导航还焦：打开菜单聚焦过容器（focusMenuDom），关闭时若焦点仍
+    // 在菜单内，还回编辑器（Esc 后继续打字不失效）
+    if (this.outlineMenuEl && this.outlineMenuEl.contains(document.activeElement)) {
+      this.view?.focus()
     }
     this.outlineMenuEl?.remove()
     this.outlineMenuEl = undefined
@@ -4533,6 +4540,8 @@ export class WebviewSyncController {
     menu.style.left = `${Math.max(0, pos.left)}px`
     menu.style.top = `${Math.max(0, pos.top)}px`
     applySubmenuFlip(menu, window.innerWidth || 1200)
+    // 键盘导航起点：聚焦菜单容器（打开菜单接管方向键；关闭时还焦编辑器）
+    focusMenuDom(menu)
     // 关闭通道：菜单外 pointerdown（capture）与 Esc（与大纲菜单同模式）
     this.contextMenuDismissPointer = (e) => {
       if (menu.contains(e.target as Node)) {
@@ -4549,7 +4558,7 @@ export class WebviewSyncController {
     document.addEventListener('keydown', this.contextMenuDismissKey, true)
   }
 
-  /** 关闭菜单（幂等；摘除 document 关闭监听） */
+  /** 关闭菜单（幂等；摘除 document 关闭监听；焦点在菜单内时还回编辑器） */
   private closeContextMenu(): void {
     if (this.contextMenuDismissPointer) {
       document.removeEventListener('pointerdown', this.contextMenuDismissPointer, true)
@@ -4558,6 +4567,11 @@ export class WebviewSyncController {
     if (this.contextMenuDismissKey) {
       document.removeEventListener('keydown', this.contextMenuDismissKey, true)
       this.contextMenuDismissKey = undefined
+    }
+    // 键盘导航还焦：打开菜单聚焦过容器（focusMenuDom），关闭时若焦点仍
+    // 在菜单内，还回编辑器（Esc 后继续打字不失效）
+    if (this.contextMenuEl && this.contextMenuEl.contains(document.activeElement)) {
+      this.view?.focus()
     }
     this.contextMenuEl?.remove()
     this.contextMenuEl = undefined
