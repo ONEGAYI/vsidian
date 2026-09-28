@@ -125,6 +125,7 @@ vsidian/
 │       ├── mvp.md                            # MVP 规格主文档
 │       ├── settings-page-visual-refresh.md   # 设置页视觉刷新规格（#155）
 │       ├── style-contract-gate.md            # 契约门禁 CI 接线与远端配置文档
+│       ├── style-reference-i18n.md           # 样式参考条目双语化规格
 │       ├── symbol-input.md                   # 符号输入与行内围栏扩展约定落档
 │       ├── table-interaction-rework.md       # 表格交互重做规格
 │       ├── toolbar-view-toggle.md            # 工具栏双态切换按钮规格
@@ -199,6 +200,7 @@ vsidian/
 │   │   ├── protocol.ts          # 消息协议单一事实源
 │   │   ├── settings.ts          # 设置定义与读写纯逻辑
 │   │   ├── styleContract.ts     # 公开样式契约清单单一事实源
+│   │   ├── styleContractEn.ts   # 样式参考条目英文覆盖单一事实源
 │   │   ├── symbols.ts           # 符号注册表单一事实源（#123）
 │   │   ├── symbolWrap.ts        # 选区包裹计划纯函数（#124）
 │   │   ├── tabEscape.ts         # Tab 越界定位纯函数（#125）

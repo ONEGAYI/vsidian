@@ -581,6 +581,8 @@ async function buildSimTree(transforms = []) {
     // #133 起 styleContract.ts 转发导出 chromeContract 的探针表——sim 树
     // 须一并复制，否则候选清单 esbuild 编译即失败（candidate-contract-error）
     'src/shared/chromeContract.ts',
+    // #178 起候选加载同源携带条目英文覆盖（guide 复算口径），sim 树同复制
+    'src/shared/styleContractEn.ts',
     'src/webview/styleGuideData.ts',
     'media/style-reference/style-reference.html',
     ...BASELINE.guardManifest.requiredFiles.map((f) => f.path),

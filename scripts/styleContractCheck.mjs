@@ -402,6 +402,8 @@ async function importTsModule(root, exportLines) {
 export async function loadCandidateContract(root) {
   const mod = await importTsModule(root, [
     'export { STYLE_CONTRACT_ENTRIES, STYLE_CONTRACT_CATEGORIES } from "./src/shared/styleContract.ts"',
+    // #178：条目英文覆盖随候选同源加载（guide 一致性复算与生成器同口径）
+    'export { STYLE_CONTRACT_EN_OVERRIDES } from "./src/shared/styleContractEn.ts"',
     'export { OBSIDIAN_DOM_ALIASES, OBSIDIAN_VARIABLE_ALIASES } from "./src/shared/obsidianAlias.ts"',
   ])
   const dom = new Set()
@@ -414,6 +416,7 @@ export async function loadCandidateContract(root) {
     entries: mod.STYLE_CONTRACT_ENTRIES,
     categories: mod.STYLE_CONTRACT_CATEGORIES,
     variableAliases: mod.OBSIDIAN_VARIABLE_ALIASES,
+    enOverrides: mod.STYLE_CONTRACT_EN_OVERRIDES,
     aliases: { dom, variables },
   }
 }
@@ -523,6 +526,8 @@ async function checkGuideConsistency(root, candidate, candidateVersion) {
     entries: candidate.entries,
     categories: candidate.categories,
     variableAliases: candidate.variableAliases,
+    // #178：英文覆盖与生成器同源（数据模块内联段复算一致，缺失即 guide-stale）
+    enOverrides: candidate.enOverrides,
     version: candidateVersion,
     generatedAt: gen.resolveGuideGeneratedAt(
       readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8'),
