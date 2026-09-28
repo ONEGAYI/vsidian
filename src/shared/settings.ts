@@ -40,6 +40,12 @@ interface SettingDefinitionBase {
    * 单测钉住恒合法）；依赖链可传递（A 依赖 B、B 依赖 C 则逐级传导）。
    */
   dependsOn?: string
+  /**
+   * 可选枚举值依赖（#163 验收反馈防呆）：依赖项（string 枚举型）当前值
+   * ∈ values 时本项可用——语义为「仅这些取值下本设置才有意义」。依赖项
+   * 自身灰化时传导（链式）；values ⊆ 依赖项枚举由校验把关。
+   */
+  dependsOnEnum?: { key: string; values: readonly string[] }
 }
 
 /** 布尔设置项（开关；#34「显示源文件行号」同型） */
@@ -292,6 +298,8 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     enum: IMAGE_PASTE_LOCATION_MODES,
     titleKey: 'setting.imagePasteLocation.title',
     descriptionKey: 'setting.imagePasteLocation.description',
+    // 总开关关闭时模式选择一并灰化（子路径经 dependsOnEnum 链级联）
+    dependsOn: IMAGE_PASTE_KEY,
     optionLabelKeys: {
       'same-dir': 'setting.imagePasteLocationSameDir',
       'workspace-root': 'setting.imagePasteLocationWorkspaceRoot',
@@ -305,6 +313,13 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     maxLength: IMAGE_PASTE_SUBPATH_MAX_LENGTH,
     titleKey: 'setting.imagePasteSubpath.title',
     descriptionKey: 'setting.imagePasteSubpath.description',
+    // #163 验收反馈防呆：子路径只对后两种存放模式生效——同目录模式下
+    // 控件灰化禁改（值不清除，切回有效模式按原值生效）；依赖链经
+    // pasteLocation 的 dependsOn 传导（总开关关闭时整组灰化）
+    dependsOnEnum: {
+      key: IMAGE_PASTE_LOCATION_KEY,
+      values: ['workspace-root', 'relative-to-file'],
+    },
   },
 ]
 
@@ -313,11 +328,13 @@ function isObject(v: unknown): v is Record<string, unknown> {
 }
 
 /**
- * 依赖可用性（#155 跟进）：按 dependsOn 链递归解析本项当前是否可用。
- * 语义：无依赖恒可用；依赖项（boolean）开启才可用，链上传导（父不可用则
- * 子不可用）；快照缺值回退依赖项默认值（与 sanitize 语义一致）；非布尔值
- * 不视为开启。成环时视为可用不死循环——环由 validateSettingDependencies
- * 拦截（生产注册表单测钉住恒合法），此处只做渲染层兜底。
+ * 依赖可用性（#155 跟进；#163 验收反馈增枚举值依赖）：按 dependsOn /
+ * dependsOnEnum 链递归解析本项当前是否可用。语义：无依赖恒可用；
+ * dependsOn（boolean）依赖项开启才可用；dependsOnEnum 依赖项值 ∈ values
+ * 才可用；链上传导（父不可用则子不可用）；快照缺值回退依赖项默认值
+ * （与 sanitize 语义一致）；非布尔值不视为开启。成环时视为可用不死
+ * 循环——环由 validateSettingDependencies 拦截（生产注册表单测钉住恒
+ * 合法），此处只做渲染层兜底。
  */
 export function isSettingEnabled(
   defs: readonly SettingDefinition[],
@@ -325,51 +342,83 @@ export function isSettingEnabled(
   def: SettingDefinition,
 ): boolean {
   const byKey = new Map(defs.map((d) => [d.key, d]))
-  const visited = new Set<string>()
-  let current: SettingDefinition | undefined = def
-  while (current?.dependsOn) {
-    const dependencyKey = current.dependsOn
-    if (visited.has(dependencyKey)) {
-      return true // 环兜底（注册表校验另行拦截）
+  const enabledOf = (current: SettingDefinition, visited: Set<string>): boolean => {
+    if (current.dependsOn !== undefined) {
+      if (visited.has(current.dependsOn)) {
+        return true // 环兜底（注册表校验另行拦截）
+      }
+      const dependency = byKey.get(current.dependsOn)
+      if (!dependency) {
+        return true // 引用缺失兜底（注册表校验另行拦截）
+      }
+      const raw = values[current.dependsOn]
+      if ((raw === undefined ? dependency.default : raw) !== true) {
+        return false
+      }
+      visited.add(current.dependsOn)
+      return enabledOf(dependency, visited)
     }
-    visited.add(dependencyKey)
-    const dependency = byKey.get(dependencyKey)
-    if (!dependency) {
-      return true // 引用缺失兜底（注册表校验另行拦截）
+    if (current.dependsOnEnum !== undefined) {
+      const { key, values: allowed } = current.dependsOnEnum
+      if (visited.has(key)) {
+        return true // 环兜底
+      }
+      const dependency = byKey.get(key)
+      if (!dependency) {
+        return true // 引用缺失兜底
+      }
+      const raw = values[key]
+      if (!allowed.includes(raw === undefined ? String(dependency.default) : String(raw))) {
+        return false
+      }
+      // 依赖项自身不可用时传导灰化（链式语义与 dependsOn 一致）
+      visited.add(key)
+      return enabledOf(dependency, visited)
     }
-    const raw = values[dependencyKey]
-    const value = raw === undefined ? dependency.default : raw
-    if (value !== true) {
-      return false
-    }
-    current = dependency
+    return true
   }
-  return true
+  return enabledOf(def, new Set())
 }
 
 /**
- * 依赖注册完整性校验（#155 跟进）：每个 dependsOn 引用必须存在于定义表，
- * 且依赖链无自环、无传递环。返回违规描述列表（空数组 = 合法）。生产注册表
- * 的合法性由单测钉住——新增依赖项时此函数保证错引用/成环在测试期暴露。
+ * 依赖注册完整性校验（#155 跟进；#163 验收反馈增枚举值依赖）：每个
+ * dependsOn / dependsOnEnum 引用必须存在于定义表，且依赖链无自环、无
+ * 传递环；dependsOnEnum 的目标必须是 string 枚举型、values 不得越出其
+ * 枚举。返回违规描述列表（空数组 = 合法）。生产注册表的合法性由单测钉
+ * 住——新增依赖项时此函数保证错引用/成环/越界在测试期暴露。
  */
 export function validateSettingDependencies(defs: readonly SettingDefinition[]): string[] {
   const byKey = new Map(defs.map((d) => [d.key, d]))
   const violations: string[] = []
   for (const def of defs) {
-    if (!def.dependsOn) continue
-    if (!byKey.has(def.dependsOn)) {
+    if (!def.dependsOn && !def.dependsOnEnum) continue
+    if (def.dependsOn && !byKey.has(def.dependsOn)) {
       violations.push(`${def.key} dependsOn 未注册的 ${def.dependsOn}`)
-      continue
+    }
+    if (def.dependsOnEnum) {
+      const { key, values } = def.dependsOnEnum
+      const dependency = byKey.get(key)
+      if (!dependency) {
+        violations.push(`${def.key} dependsOnEnum 未注册的 ${key}`)
+      } else if (!('enum' in dependency) || !Array.isArray(dependency.enum)) {
+        violations.push(`${def.key} dependsOnEnum 依赖非枚举型的 ${key}`)
+      } else if (values.some((v) => !dependency.enum!.includes(v))) {
+        violations.push(`${def.key} dependsOnEnum values 不在依赖项枚举内（${key}）`)
+      }
     }
     const chain = new Set<string>()
     let cursor: SettingDefinition | undefined = def
-    while (cursor?.dependsOn) {
-      if (chain.has(cursor.key)) {
-        violations.push(`${def.key} 依赖链成环（${[...chain, cursor.key].join(' -> ')}）`)
+    for (;;) {
+      const nextKey = cursor?.dependsOn ?? cursor?.dependsOnEnum?.key
+      if (nextKey === undefined) {
         break
       }
-      chain.add(cursor.key)
-      cursor = byKey.get(cursor.dependsOn)
+      if (chain.has(cursor!.key)) {
+        violations.push(`${def.key} 依赖链成环（${[...chain, cursor!.key].join(' -> ')}）`)
+        break
+      }
+      chain.add(cursor!.key)
+      cursor = byKey.get(nextKey)
     }
   }
   return violations
@@ -385,7 +434,15 @@ export function isSettingDefinition(v: unknown): v is SettingDefinition {
     v.key.length === 0 ||
     typeof v.titleKey !== 'string' ||
     (v.descriptionKey !== undefined && typeof v.descriptionKey !== 'string') ||
-    (v.dependsOn !== undefined && (typeof v.dependsOn !== 'string' || v.dependsOn.length === 0))
+    (v.dependsOn !== undefined && (typeof v.dependsOn !== 'string' || v.dependsOn.length === 0)) ||
+    (v.dependsOnEnum !== undefined && (
+      !isObject(v.dependsOnEnum) ||
+      typeof v.dependsOnEnum.key !== 'string' ||
+      v.dependsOnEnum.key.length === 0 ||
+      !Array.isArray(v.dependsOnEnum.values) ||
+      v.dependsOnEnum.values.length === 0 ||
+      !v.dependsOnEnum.values.every((item) => typeof item === 'string')
+    ))
   ) {
     return false
   }

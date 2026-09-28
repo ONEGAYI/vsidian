@@ -13,6 +13,7 @@ import {
   pastedImageStem,
   relativePosixImagePath,
   resolveImagePasteDir,
+  decodeFileNameHint,
   sanitizeImageFileName,
 } from '../../src/host/imagePastePlan'
 
@@ -194,5 +195,19 @@ describe('插入文本编码（#161，与 normalizeImgSrc decode 对偶）', () 
     expect(buildImageInsertMarkdown('Pasted image 20260928090503', 'Pasted image 20260928090503.png')).toBe(
       '![Pasted image 20260928090503](Pasted%20image%2020260928090503.png)',
     )
+  })
+})
+
+
+describe('文件名提示解码（#163 验收反馈：percent-encode 形态剪贴板名）', () => {
+  it('编码形态先解码再由调用方清洗（中文与空格还原）', () => {
+    expect(decodeFileNameHint('%E7%A4%BA%E4%BE%8B%20%E5%9B%BE%E7%89%87%20A.png'))
+      .toBe('示例 图片 A.png')
+    expect(decodeFileNameHint('%E5%9B%BE.png')).toBe('图.png')
+  })
+  it('无编码序列原样返回；孤 % 与非法序列不炸（解码失败回退原文）', () => {
+    expect(decodeFileNameHint('photo 100%.png')).toBe('photo 100%.png')
+    expect(decodeFileNameHint('示例 图片 A.png')).toBe('示例 图片 A.png')
+    expect(decodeFileNameHint('bad %zz name.png')).toBe('bad %zz name.png')
   })
 })

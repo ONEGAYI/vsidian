@@ -32,6 +32,15 @@ export const en = {
   /** 设置页「常规」分组副文案（对齐「编辑器」分组的说明句式） */
   'settings.generalSectionDescription':
     'Adjust basic Vsidian behavior. Changes save automatically.',
+  /** 设置页「符号输入」分组（#163 验收反馈细化：editor.symbol* 输入行为类设置） */
+  'settings.symbolCategory': 'Symbols',
+  'settings.symbolSubtitle': 'Symbol auto-pair completion, selection wrapping, and Tab escape input behaviors. Changes save automatically.',
+  /** 设置页「代码块」分组（#163 验收反馈细化：codeblock.* 呈现类设置） */
+  'settings.codeblockCategory': 'Code blocks',
+  'settings.codeblockSubtitle': 'Code block card presentation and syntax highlighting. Changes save automatically.',
+  /** 设置页「图片」分组（#163 验收反馈细化：image.* 图片粘贴设置） */
+  'settings.imageCategory': 'Images',
+  'settings.imageSubtitle': 'Where pasted images are stored and how they are inserted. Changes save automatically.',
 
   // ---- keybindingSettings.（快捷键分页：标题、模式标签、状态、搜索、按钮）----
   'keybindingSettings.title': 'Keybindings',
@@ -449,7 +458,7 @@ export const en = {
   'setting.imagePasteLocationWorkspaceRoot': 'Relative to workspace root',
   'setting.imagePasteLocationRelativeToFile': 'Relative to current file',
   'setting.imagePasteSubpath.title': 'Image subpath',
-  'setting.imagePasteSubpath.description': 'Subfolder appended in the workspace-root and relative-to-file modes (ignored in the same-folder mode). Absolute paths and parent traversal (..) are rejected.',
+  'setting.imagePasteSubpath.description': 'Subfolder appended in the workspace-root and relative-to-file modes — greyed out while the same-folder mode is selected. Absolute paths and parent traversal (..) are rejected.',
   'host.imagePasteInvalidLocation': 'Pasted image was not saved: the configured subpath "{subpath}" is invalid (absolute paths and ".." are not allowed).',
   'host.imagePasteNoWorkspaceFallback': 'No workspace folder is open; the pasted image was saved next to the current file.',
   'host.imagePasteWriteFailed': 'Failed to save the pasted image.',

@@ -20,6 +20,7 @@ import type { SettingsPayload } from '../shared/settings'
 import {
   buildImageInsertMarkdown,
   candidateImageFileNames,
+  decodeFileNameHint,
   imageExtensionForMime,
   isSyntheticClipboardImageName,
   pastedImageStem,
@@ -89,9 +90,11 @@ export async function runImagePaste(
   const hint = payload.fileNameHint
   let stem: string
   if (hint !== undefined && !isSyntheticClipboardImageName(hint)) {
-    // 复制文件对象：清洗非法字符后沿用基名；扩展名统一按实际字节（mime）
-    // 重建——原扩展段剥除（同名异扩展的历史文件不产生误导性扩展名）
-    const cleaned = sanitizeImageFileName(hint)
+    // 复制文件对象：先解 percent-encode 形态（#163 验收反馈修复——部分
+    // 剪贴板来源给编码名），再清洗非法字符沿用基名；扩展名统一按实际
+    // 字节（mime）重建——原扩展段剥除（同名异扩展的历史文件不产生误导
+    // 性扩展名）
+    const cleaned = sanitizeImageFileName(decodeFileNameHint(hint))
     stem = cleaned.replace(/\.[^.]+$/, '')
   } else {
     // 截图（无文件名或 Chromium 合成名）：时间戳名（Obsidian 默认风格）

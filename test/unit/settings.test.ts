@@ -365,3 +365,34 @@ describe('设置项依赖（#155 跟进：dependsOn 注册表驱动）', () => {
     expect(isSettingEnabled(PRODUCTION_SETTING_DEFINITIONS, { ...defaults, [CODEBLOCK_CARD_KEY]: false }, copyButton)).toBe(false)
   })
 })
+
+describe('枚举值依赖 dependsOnEnum（#163 验收反馈防呆）', () => {
+  const defs = [
+    { key: 'img.paste', type: 'boolean', default: true, titleKey: 'setting.imagePaste.title' },
+    { key: 'img.location', type: 'string', default: 'same-dir', enum: ['same-dir', 'workspace-root', 'relative-to-file'], titleKey: 'setting.imagePasteLocation.title', dependsOn: 'img.paste' },
+    { key: 'img.subpath', type: 'string', default: 'assets', maxLength: 64, titleKey: 'setting.imagePasteSubpath.title', dependsOnEnum: { key: 'img.location', values: ['workspace-root', 'relative-to-file'] } },
+  ] as unknown as readonly SettingDefinition[]
+
+  it('依赖项值 ∈ values 时可用；同目录（不在 values）灰化', () => {
+    expect(isSettingEnabled(defs, { 'img.location': 'workspace-root' }, defs[2]!)).toBe(true)
+    expect(isSettingEnabled(defs, { 'img.location': 'relative-to-file' }, defs[2]!)).toBe(true)
+    expect(isSettingEnabled(defs, { 'img.location': 'same-dir' }, defs[2]!)).toBe(false)
+    expect(isSettingEnabled(defs, {}, defs[2]!)).toBe(false) // 缺值回退默认 same-dir
+  })
+  it('依赖链传递：总开关关闭时（location 灰）子路径级联灰化', () => {
+    expect(isSettingEnabled(defs, { 'img.paste': false, 'img.location': 'workspace-root' }, defs[2]!)).toBe(false)
+  })
+  it('注册校验：引用缺失 / 依赖项非枚举型 / values 越界为违规', () => {
+    const bad = [
+      { key: 'a', type: 'boolean', default: true, titleKey: 'setting.testFlag.title', dependsOnEnum: { key: 'missing', values: ['x'] } },
+      { key: 'b', type: 'string', default: 's', maxLength: 8, titleKey: 'setting.testFlag.title', dependsOnEnum: { key: 'a', values: ['x'] } },
+      { key: 'loc', type: 'string', default: 'same-dir', enum: ['same-dir', 'workspace-root'], titleKey: 'setting.testFlag.title' },
+      { key: 'c', type: 'string', default: 's', maxLength: 8, titleKey: 'setting.testFlag.title', dependsOnEnum: { key: 'loc', values: ['nope'] } },
+    ] as unknown as readonly SettingDefinition[]
+    const violations = validateSettingDependencies(bad)
+    expect(violations.some((v) => v.includes('未注册'))).toBe(true)
+    expect(violations.some((v) => v.includes('非枚举'))).toBe(true)
+    expect(violations.some((v) => v.includes('不在依赖项枚举'))).toBe(true)
+    expect(validateSettingDependencies(defs)).toEqual([])
+  })
+})

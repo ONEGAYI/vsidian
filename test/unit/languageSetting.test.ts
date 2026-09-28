@@ -138,34 +138,38 @@ describe('设置页「常规」分组渲染与选项显示名（视觉层断言�
     installLocale('zh-cn', zhCn)
     const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
     expect([...parent.querySelectorAll<HTMLButtonElement>(NAV_ITEM)].map((b) => b.textContent))
-      .toEqual(['常规', '编辑器'])
+      .toEqual(['常规', '编辑器', '符号输入', '代码块', '图片'])
     installLocale('en', en)
     // 不重新 mount：onLocaleChanged 订阅触发 applyLocale → render 重建；
     // 编辑器分类标题经 t() 取词（#95 键化），同样随语言变化
     expect([...parent.querySelectorAll<HTMLButtonElement>(NAV_ITEM)].map((b) => b.textContent))
-      .toEqual([en['settings.generalSection'], en['settings.editorCategory']])
+      .toEqual([en['settings.generalSection'], en['settings.editorCategory'],
+        en['settings.symbolCategory'], en['settings.codeblockCategory'], en['settings.imageCategory']])
     const select = parent.querySelector<HTMLSelectElement>(`select.${SETTINGS_PAGE_CLASS_NAMES.select}`)!
     expect([...select.options].map((o) => o.textContent)).toEqual(['Auto', '简体中文', 'English'])
     // 换回 zh 同样就地恢复
     installLocale('zh-cn', zhCn)
     expect([...parent.querySelectorAll<HTMLButtonElement>(NAV_ITEM)].map((b) => b.textContent))
-      .toEqual(['常规', '编辑器'])
+      .toEqual(['常规', '编辑器', '符号输入', '代码块', '图片'])
   })
 
-  it('分组隔离：切到「编辑器」组只显示编辑器定义，语言项不在其中', () => {
+  it('分组隔离（#163 重组口径）：切到「图片」组只显示 image.* 定义，语言项不在其中', () => {
+    const root_items_all_not_general = (parent: HTMLElement): boolean =>
+      [...parent.querySelectorAll('[data-setting-key]')].every((el) =>
+        !(el.getAttribute('data-setting-key') ?? '').startsWith('general.'))
+    void root_items_all_not_general
     installLocale('zh-cn', zhCn)
     const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
     const editorNav = [...parent.querySelectorAll<HTMLButtonElement>(NAV_ITEM)]
-      .find((b) => b.textContent === '编辑器')!
+      .find((b) => b.textContent === '图片')!
     editorNav.click()
-    expect(parent.querySelector(`h2.vsidian-settings-heading`)?.textContent).toBe('编辑器')
-    const boxes = parent.querySelectorAll<HTMLInputElement>(`input.${SETTINGS_PAGE_CLASS_NAMES.checkbox}`)
-    expect(boxes.length).toBe(PRODUCTION_SETTING_DEFINITIONS.filter((d) => d.type === 'boolean').length)
-    // #161 编辑器组含 image.* 枚举下拉与自由文本框——语言项（general.）
-    // 仍不得出现在编辑器组
+    expect(parent.querySelector(`h2.vsidian-settings-heading`)?.textContent).toBe('图片')
+    // #163 分组重组：图片组含 image.* 三件（下拉 + 自由文本 + 开关）——
+    // 语言项（general.）不得出现在其中
     const editorSelects = [...parent.querySelectorAll<HTMLSelectElement>(`select.${SETTINGS_PAGE_CLASS_NAMES.select}`)]
-    expect(editorSelects.length).toBeGreaterThan(0)
-    expect(editorSelects.every((s) => (s.dataset.settingKey ?? '').startsWith('general.'))).toBe(false)
+    expect(editorSelects.length).toBe(1)
+    expect(editorSelects[0]!.dataset.settingKey).toBe('image.pasteLocation')
+    expect(root_items_all_not_general(parent)).toBe(true)
   })
 
   it('搜索跨组命中常规项并标注分类，点击定位到常规组', () => {

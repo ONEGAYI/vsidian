@@ -77,6 +77,25 @@ export function resolveImagePasteDir(input: ImagePasteDirInput): ImagePasteDirRe
 }
 
 /**
+ * 文件名提示的 percent-encode 解码（#163 验收反馈修复）：部分剪贴板来源
+ * （浏览器复制等）给出的 fileNameHint 是 URL 编码形态
+ * （`%E7%A4%BA%E4%BE%8B%20A.png`）——直接清洗会把编码串原样落盘（中文
+ * 「洗没」的观感）。含 `%XX` 序列时先尝试 decodeURIComponent 还原本名，
+ * 解码失败（非法序列如 `%zz`）回退原文；无编码序列原样返回（用户真想用
+ * 字面 `%` 的文件名不受影响——`100%.png` 无 `%XX` 序列不进解码分支）。
+ */
+export function decodeFileNameHint(raw: string): string {
+  if (!/%[0-9A-Fa-f]{2}/.test(raw)) {
+    return raw
+  }
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return raw
+  }
+}
+
+/**
  * 文件名清洗：去除 Windows 非法字符（`<>:"/\|?*`）与控制字符（保留中文
  * 与空格）、去首尾空格与点。清洗后为空（原名全是非法字符）返回空串——
  * 调用方回退时间戳名（#161 规格）。

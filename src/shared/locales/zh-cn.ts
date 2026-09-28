@@ -25,6 +25,15 @@ export const zhCn: Record<MessageKey, string> = {
   'settings.generalSection': '常规',
   /** 设置页「常规」分组副文案（对齐「编辑器」分组的说明句式） */
   'settings.generalSectionDescription': '调整 Vsidian 的基础行为。更改会自动保存。',
+  /** 设置页「符号输入」分组（#163 验收反馈细化：editor.symbol* 输入行为类设置） */
+  'settings.symbolCategory': '符号输入',
+  'settings.symbolSubtitle': '符号对自动补全、选区包裹与 Tab 越界等输入行为。更改会自动保存。',
+  /** 设置页「代码块」分组（#163 验收反馈细化：codeblock.* 呈现类设置） */
+  'settings.codeblockCategory': '代码块',
+  'settings.codeblockSubtitle': '代码块卡片呈现与语法高亮。更改会自动保存。',
+  /** 设置页「图片」分组（#163 验收反馈细化：image.* 图片粘贴设置） */
+  'settings.imageCategory': '图片',
+  'settings.imageSubtitle': '粘贴图片的落盘位置与插入行为。更改会自动保存。',
 
   // ---- keybindingSettings.（快捷键分页）----
   'keybindingSettings.title': '快捷键',
@@ -415,7 +424,7 @@ export const zhCn: Record<MessageKey, string> = {
   'setting.imagePasteLocationWorkspaceRoot': '相对工作区根',
   'setting.imagePasteLocationRelativeToFile': '相对当前文件',
   'setting.imagePasteSubpath.title': '图片存放子路径',
-  'setting.imagePasteSubpath.description': '「相对工作区根」与「相对当前文件」模式下拼接的子文件夹（同目录模式不生效）。拒绝绝对路径与 .. 越界。',
+  'setting.imagePasteSubpath.description': '「相对工作区根」与「相对当前文件」模式下拼接的子文件夹——选择「与当前文件同目录」时本项置灰不可编辑。拒绝绝对路径与 .. 越界。',
   'host.imagePasteInvalidLocation': '粘贴图片未保存：子路径 {subpath} 非法（不允许绝对路径或 ..）。',
   'host.imagePasteNoWorkspaceFallback': '未打开工作区文件夹，粘贴图片已保存到当前文件同目录。',
   'host.imagePasteWriteFailed': '粘贴图片保存失败。',

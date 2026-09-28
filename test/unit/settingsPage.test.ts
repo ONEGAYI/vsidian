@@ -70,21 +70,22 @@ describe('页面结构（#33 归属与空状态）', () => {
     const editorNav = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
       .find((b) => b.textContent === '编辑器')!
     editorNav.click()
-    const booleanDefs = PRODUCTION_SETTING_DEFINITIONS.filter((d) => d.type === 'boolean')
+    // #163 验收反馈分组重组：编辑器组只含行号一个开关（符号/代码块/图片
+    // 各自成组，见「分组重组」describe）
     const boxes = parent.querySelectorAll<HTMLInputElement>(
       `input.${SETTINGS_PAGE_CLASS_NAMES.checkbox}`,
     )
-    expect(boxes).toHaveLength(booleanDefs.length)
+    expect(boxes).toHaveLength(1)
     const first = parent.querySelector(`.${SETTINGS_PAGE_CLASS_NAMES.itemTitle}`)
     expect(first?.textContent).toBe(zhCn['setting.editorLineNumbers.title'])
     expect(boxes[0]!.checked).toBe(true) // 默认开启
   })
 
-  it('符号选区包裹（#124）渲染为编辑器分组开关：标题/说明经 t() 取词、默认勾选', () => {
+  it('符号选区包裹（#124）渲染为符号输入分组开关（#163 分组重组）：标题/说明经 t() 取词、默认勾选', () => {
     const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
-    const editorNav = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
-      .find((b) => b.textContent === '编辑器')!
-    editorNav.click()
+    const symbolNav = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
+      .find((b) => b.textContent === zhCn['settings.symbolCategory'])!
+    symbolNav.click()
     const item = [...parent.querySelectorAll<HTMLElement>(`.${SETTINGS_PAGE_CLASS_NAMES.item}`)]
       .find((el) => el.querySelector(`.${SETTINGS_PAGE_CLASS_NAMES.itemTitle}`)?.textContent ===
         zhCn['setting.symbolSelectionWrap.title'])
@@ -95,11 +96,11 @@ describe('页面结构（#33 归属与空状态）', () => {
       .toBe(true)
   })
 
-  it('符号自动补全（#123）渲染为编辑器分组开关：标题/说明经 t() 取词、默认勾选', () => {
+  it('符号自动补全（#123）渲染为符号输入分组开关（#163 分组重组）：标题/说明经 t() 取词、默认勾选', () => {
     const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
-    const editorNav = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
-      .find((b) => b.textContent === '编辑器')!
-    editorNav.click()
+    const symbolNav = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
+      .find((b) => b.textContent === zhCn['settings.symbolCategory'])!
+    symbolNav.click()
     const item = [...parent.querySelectorAll<HTMLElement>(`.${SETTINGS_PAGE_CLASS_NAMES.item}`)]
       .find((el) => el.querySelector(`.${SETTINGS_PAGE_CLASS_NAMES.itemTitle}`)?.textContent ===
         zhCn['setting.symbolAutocomplete.title'])
@@ -110,11 +111,11 @@ describe('页面结构（#33 归属与空状态）', () => {
       .toBe(true)
   })
 
-  it('符号 Tab 越界（#125）渲染为编辑器分组开关：标题/说明经 t() 取词、默认勾选', () => {
+  it('符号 Tab 越界（#125）渲染为符号输入分组开关（#163 分组重组）：标题/说明经 t() 取词、默认勾选', () => {
     const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
-    const editorNav = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
-      .find((b) => b.textContent === '编辑器')!
-    editorNav.click()
+    const symbolNav = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
+      .find((b) => b.textContent === zhCn['settings.symbolCategory'])!
+    symbolNav.click()
     const item = [...parent.querySelectorAll<HTMLElement>(`.${SETTINGS_PAGE_CLASS_NAMES.item}`)]
       .find((el) => el.querySelector(`.${SETTINGS_PAGE_CLASS_NAMES.itemTitle}`)?.textContent ===
         zhCn['setting.symbolTabEscape.title'])
@@ -317,10 +318,11 @@ it('样式契约：详细查询两列独立滚动（#155 跟进）', async () =>
 })
 
 describe('设置项依赖灰化（#155 跟进：dependsOn 注册表驱动联动）', () => {
-  /** 切到编辑器分组并取生产定义控件（卡片/行号/复制） */
+  /** 切到代码块分组并取生产定义控件（卡片/行号/复制）——#163 分组重组后
+   *  codeblock.* 自成一组 */
   function editorControls(parent: HTMLElement) {
     const editorNav = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
-      .find((b) => b.textContent === '编辑器')!
+      .find((b) => b.textContent === zhCn['settings.codeblockCategory'])!
     editorNav.click()
     const byKey = (key: string) =>
       parent.querySelector<HTMLInputElement>(`input[data-setting-key="${key}"]`)!
@@ -389,5 +391,82 @@ describe('设置项依赖灰化（#155 跟进：dependsOn 注册表驱动联动�
       'general.language': 'auto',
     }))
     expect(c.lineNumbers.disabled).toBe(true)
+  })
+})
+
+describe('分组重组（#163 验收反馈：编辑器大杂烩拆分为语义分组）', () => {
+  const navTitles = (parent: HTMLElement): string[] =>
+    [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
+      .map((b) => b.textContent ?? '')
+  const gotoGroup = (parent: HTMLElement, title: string): void => {
+    const nav = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
+      .find((b) => b.textContent === title)!
+    nav.click()
+  }
+  const groupItemTitles = (parent: HTMLElement): string[] =>
+    [...parent.querySelectorAll(`.${SETTINGS_PAGE_CLASS_NAMES.item}`)]
+      .map((el) => el.querySelector(`.${SETTINGS_PAGE_CLASS_NAMES.itemTitle}`)?.textContent ?? '')
+
+  it('侧栏呈现常规/编辑器/符号输入/代码块/图片五个内置分组（生产注册表）', () => {
+    const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
+    expect(navTitles(parent)).toEqual([
+      zhCn['settings.generalSection'],
+      zhCn['settings.editorCategory'],
+      zhCn['settings.symbolCategory'],
+      zhCn['settings.codeblockCategory'],
+      zhCn['settings.imageCategory'],
+    ])
+  })
+
+  it('编辑器组只剩行号；符号三项归符号输入组；代码块四项与图片三件套各归各组', () => {
+    const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
+    gotoGroup(parent, zhCn['settings.editorCategory'])
+    expect(groupItemTitles(parent)).toEqual([zhCn['setting.editorLineNumbers.title']])
+    gotoGroup(parent, zhCn['settings.symbolCategory'])
+    expect(groupItemTitles(parent)).toEqual([
+      zhCn['setting.symbolAutocomplete.title'],
+      zhCn['setting.symbolSelectionWrap.title'],
+      zhCn['setting.symbolTabEscape.title'],
+    ])
+    gotoGroup(parent, zhCn['settings.codeblockCategory'])
+    expect(groupItemTitles(parent)).toEqual([
+      zhCn['setting.codeblockCard.title'],
+      zhCn['setting.codeblockLineNumbers.title'],
+      zhCn['setting.codeblockCopyButton.title'],
+      zhCn['setting.codeblockHighlight.title'],
+    ])
+    gotoGroup(parent, zhCn['settings.imageCategory'])
+    expect(groupItemTitles(parent)).toEqual([
+      zhCn['setting.imagePaste.title'],
+      zhCn['setting.imagePasteLocation.title'],
+      zhCn['setting.imagePasteSubpath.title'],
+    ])
+  })
+
+  it('图片子路径依赖灰化（#163 验收反馈防呆）：同目录模式置灰禁改，后两种模式可用', () => {
+    const { view, parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
+    gotoGroup(parent, zhCn['settings.imageCategory'])
+    const subpathInput = parent.querySelector<HTMLInputElement>(
+      'input[type="text"][data-setting-key="image.pasteSubpath"]')!
+    // 默认 same-dir：子路径灰化禁改
+    expect(subpathInput.disabled).toBe(true)
+    expect(subpathInput.closest(`.${SETTINGS_PAGE_CLASS_NAMES.item}`)!.classList
+      .contains('vsidian-settings-item-disabled')).toBe(true)
+    // 切到相对工作区根：解灰可用
+    view.handleHostMessage({ kind: 'settings.snapshot', values: {
+      'general.language': 'auto',
+      'image.paste': true,
+      'image.pasteLocation': 'workspace-root',
+      'image.pasteSubpath': 'assets',
+    } } as never)
+    expect(subpathInput.disabled).toBe(false)
+    // 总开关关闭：整组级联灰化（依赖链传递）
+    view.handleHostMessage({ kind: 'settings.snapshot', values: {
+      'general.language': 'auto',
+      'image.paste': false,
+      'image.pasteLocation': 'workspace-root',
+      'image.pasteSubpath': 'assets',
+    } } as never)
+    expect(subpathInput.disabled).toBe(true)
   })
 })
