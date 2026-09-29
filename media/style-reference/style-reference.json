@@ -3,7 +3,7 @@
     "schemaVersion": 1,
     "vsidianVersion": "0.6.0",
     "generatedAt": "2026-09-29",
-    "entryCount": 132,
+    "entryCount": 133,
     "source": "src/shared/styleContract.ts",
     "generator": "scripts/genStyleGuide.mjs",
     "determinism": "generatedAt 取当前版本在 CHANGELOG.md 的发布日期（无段落时取最新已发布版本日期），同源再生成字节一致。",
