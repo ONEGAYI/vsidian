@@ -4064,10 +4064,6 @@ export const cases: Array<[string, () => Promise<void>]> = [
     })
     await vscode.commands.executeCommand(CMD.postToPanel, uri,
       { kind: 'viewport.test.position', cursorLine: 123 })
-    const waitProbe = () => poll('观测夹具视口探针', async () => {
-      const state = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
-      return state?.liveViewportCenterLine !== undefined ? state : undefined
-    })
     await vscode.commands.executeCommand(CMD.postToPanel, uri,
       { kind: 'viewport.test.position', scrollNearLine: 123, scrollBiasPx: 150 })
     const before = await waitViewportSettled('viewport-mermaid.md')
