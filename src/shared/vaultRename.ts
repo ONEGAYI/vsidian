@@ -23,7 +23,19 @@
 // - **同文档合并**：同一文档多处命中合并为单一计划的多个 edit（区间
 //   升序、互不重叠）；重叠异常按 stale 防御丢弃
 // - **批量映射就绪（#200）**：moves 为映射表——同批移动的目标互指出链
-//   按映射统一改写，不重复替换
+//   按映射统一改写，不重复替换；**恒等替换滤除**（重算结果与原文一致
+//   的边不产生编辑——目录整体平移时同目录互链的相对路径不变，不得计
+//   入编辑数或产生空替换）
+//
+// #200 目录/批量移动映射展开（expandRenameMoves）：onWillRenameFiles 对
+// 目录 rename/move 只给目录级 old→new——展开为目录下全部受影响文件的
+// 逐文件映射。清单来源两路合流：**fs 递归列举**（.md 权威——索引滞后时
+// 兜底，保证 did 批量重扫后索引域完整）∪ **索引清单**（asset 只在索引
+// 有登记——被引用才有引用边，未引用附件无需映射）。fs/索引访问经端口
+// 注入（node 单测直驱 fake；wiring 注入 workspace.fs 与索引服务）。
+// will 阶段旧目录仍存在（isDirectory(old) 判定）；did 保底路径旧目录已
+// 消失，但新路径是目录 + 索引仍是旧形态（watcher 对目录 rename 无逐文件
+// 事件，#198 实测边界）→ 同样可展开。
 //
 // 本模块不依赖 vscode/DOM（node 单测直驱）；路径平台语义由 isWindowsHost
 // 注入（与 vaultLink 同约定，与运行进程平台无关）。
@@ -34,6 +46,109 @@ import type { VaultEdge } from './vaultIndexModel'
 export interface RenameMoveEntry {
   oldFsPath: string
   newFsPath: string
+}
+
+/** 目录移动映射展开端口（#200）：fs 访问与索引清单经端口注入（wiring
+ *  实现 = workspace.fs.stat/readDirectory + 索引服务；单测注入 fake） */
+export interface RenameExpandPort {
+  /** 路径是否目录（will 阶段旧路径有效；did 保底时旧路径可能已不存在——
+   *  实现应同时探测新路径） */
+  isDirectory(fsPath: string): Promise<boolean>
+  /** 递归列举目录下全部文件（绝对 fsPath；目录不存在返回空） */
+  listFilesUnder(dirFsPath: string): Promise<string[]>
+  /** 索引清单：目录前缀下全部已登记文件（.md + asset）；根未就绪 null */
+  indexedFilesUnder(dirFsPath: string): string[] | null
+}
+
+/** 展开结果：逐文件映射（原始文件条目原样保留；目录条目被其内容替换）；
+ *  notReadyMoves = 因索引未就绪被整体放弃的目录条目数（调用方计入反馈，
+ *  不静默部分更新——not-ready 根的候选边查询与批量刷新同样无效） */
+export interface RenameExpandResult {
+  moves: RenameMoveEntry[]
+  notReadyMoves: number
+}
+
+/**
+ * 目录/批量移动映射展开（#200）：目录条目 → 目录下全部受影响文件的
+ * 逐文件 old→new；文件条目原样。同 old 折叠去重（Windows 大小写语义），
+ * 显式文件条目优先于展开产物（防御宿主不发的混合形态）。
+ */
+export async function expandRenameMoves(
+  isWindowsHost: boolean,
+  moves: readonly RenameMoveEntry[],
+  port: RenameExpandPort,
+): Promise<RenameExpandResult> {
+  const ops = isWindowsHost ? path.win32 : path.posix
+  const fold = (p: string): string => (isWindowsHost ? p.toLowerCase() : p)
+  const norm = (p: string): string => ops.resolve(p)
+
+  /** 已占用的 old 键（显式文件条目优先于展开产物） */
+  const byOld = new Map<string, RenameMoveEntry>()
+  for (const move of moves) {
+    byOld.set(fold(norm(move.oldFsPath)), move)
+  }
+  /** 被展开替代的原始目录条目键（输出剔除目录条目本身） */
+  const dirOldKeys = new Set<string>()
+  const expanded: RenameMoveEntry[] = []
+  let notReadyMoves = 0
+  for (const move of moves) {
+    const oldKey = fold(norm(move.oldFsPath))
+    const isDir = (await port.isDirectory(move.oldFsPath)) ||
+      (await port.isDirectory(move.newFsPath))
+    if (!isDir) {
+      continue // 文件条目原样保留（已在 byOld）
+    }
+    const indexed = port.indexedFilesUnder(move.oldFsPath)
+    if (indexed === null) {
+      // 索引未就绪：该目录整体放弃（引用者边查询与批量刷新同样无效——
+      // 不静默部分更新），计入反馈
+      notReadyMoves += 1
+      dirOldKeys.add(oldKey)
+      continue
+    }
+    dirOldKeys.add(oldKey)
+    const oldDir = norm(move.oldFsPath)
+    const newDir = norm(move.newFsPath)
+    // 清单合流：fs 递归列举的 .md（权威兜底）∪ 索引清单全部登记类型
+    //（asset 只在索引有登记——未引用附件无引用边，不产生映射）
+    const fsFiles = await port.listFilesUnder(move.oldFsPath)
+    const seen = new Set<string>()
+    const add = (absFsPath: string): void => {
+      const key = fold(norm(absFsPath))
+      if (seen.has(key)) {
+        return
+      }
+      seen.add(key)
+      if (byOld.has(key)) {
+        return // 显式文件条目/先前展开优先
+      }
+      const rel = ops.relative(oldDir, norm(absFsPath))
+      if (rel === '' || rel.startsWith('..')) {
+        return // 防御：非目录内路径
+      }
+      const entry: RenameMoveEntry = {
+        oldFsPath: absFsPath,
+        newFsPath: ops.join(newDir, ...rel.split(ops.sep)),
+      }
+      byOld.set(key, entry)
+      expanded.push(entry)
+    }
+    for (const f of fsFiles) {
+      if (/\.md$/i.test(f)) {
+        add(f)
+      }
+    }
+    for (const f of indexed) {
+      add(f)
+    }
+  }
+  return {
+    moves: [
+      ...moves.filter((m) => !dirOldKeys.has(fold(norm(m.oldFsPath)))),
+      ...expanded,
+    ],
+    notReadyMoves,
+  }
 }
 
 /** 改写规划上下文 */
@@ -212,6 +327,11 @@ export function planVaultRenameRewrites(
       if (edit === null) {
         docStale = true
         break
+      }
+      // 恒等替换滤除（#200）：重算结果与原文一致（目录整体平移时同目录
+      // 互链的相对路径不变）——不产生编辑、不计入编辑数
+      if (doc.text.slice(edit.start, edit.end) === edit.replacement) {
+        continue
       }
       docEdits.push(edit)
     }

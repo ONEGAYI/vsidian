@@ -971,3 +971,189 @@ describe('VaultIndexService：#199 rename 后索引刷新（refreshRenamed）', 
     expect(service.maintenanceInfo().roots[0]!.fileCount).toBe(0)
   })
 })
+
+// ---- #200 目录/批量移动：索引清单查询与批量刷新 ----
+
+describe('VaultIndexService：#200 目录前缀清单（indexedFilesUnder）', () => {
+  it('返回前缀下全部登记文件（.md 与被引用 asset）；域外与未就绪返回 null', async () => {
+    const fs = makeFs({
+      // pic.png 被 a.md 引用才登记（asset 只在被引用时入索引——#197 语义）
+      'C:/vault/dir/a.md': '# A\n\n![图](pic.png)。\n',
+      'C:/vault/dir/deep/b.md': '# B\n',
+      'C:/vault/dir/pic.png': '\u0000png',
+      'C:/vault/dir/unreferenced.png': '\u0000png2',
+      'C:/vault/outside.md': '# O\n',
+    })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    const listed = service.indexedFilesUnder('C:/vault/dir')
+    expect(listed).not.toBeNull()
+    expect(listed!.map((p) => p.replace(/\\/g, '/')).sort()).toEqual([
+      'C:/vault/dir/a.md',
+      'C:/vault/dir/deep/b.md',
+      'C:/vault/dir/pic.png',
+    ])
+    // 域外（根外）
+    expect(service.indexedFilesUnder('D:/elsewhere/dir')).toBeNull()
+  })
+
+  it('根未就绪（无数据）返回 null', async () => {
+    const fs = makeFs({ 'C:/vault/dir/a.md': '# A\n' })
+    const { service } = makeService(fs)
+    // 未 initialize：无快照无数据
+    expect(service.indexedFilesUnder('C:/vault/dir')).toBeNull()
+  })
+})
+
+describe('VaultIndexService：#200 批量 rename 刷新（refreshRenamedBatch）', () => {
+  it('目录批移除与登记：条目守恒、反链新键命中、旧键退场、deleted 正证据广播', async () => {
+    const fs = makeFs({
+      'C:/vault/dir-old/a.md': '# A\n\n见 [[b]]。\n',
+      'C:/vault/dir-old/b.md': '# B\n',
+      'C:/vault/dir-old/deep/c.md': '# C\n',
+      'C:/vault/dir-old/pic.png': '\u0000png',
+      'C:/vault/dir-ref.md': '# R\n\n![图](dir-old/pic.png)。\n',
+      'C:/vault/keep.md': '# K\n',
+    })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    const before = service.maintenanceInfo().roots[0]!.fileCount
+    // 磁盘完成目录移动（rename 已发生——外部 fs 通道语义）
+    for (const rel of ['a.md', 'b.md', 'deep/c.md', 'pic.png']) {
+      const oldKey = `C:/vault/dir-old/${rel}`
+      const newKey = `C:/vault/dir-new/${rel}`
+      const content = fs.files.get(oldKey)!
+      fs.files.delete(oldKey)
+      fs.stats.delete(oldKey)
+      fs.files.set(newKey, content)
+      fs.stats.set(newKey, { mtimeMs: 1_700_000_009_000, size: content.length })
+    }
+    const moves = [
+      { oldFsPath: 'C:/vault/dir-old/a.md', newFsPath: 'C:/vault/dir-new/a.md' },
+      { oldFsPath: 'C:/vault/dir-old/b.md', newFsPath: 'C:/vault/dir-new/b.md' },
+      { oldFsPath: 'C:/vault/dir-old/deep/c.md', newFsPath: 'C:/vault/dir-new/deep/c.md' },
+      { oldFsPath: 'C:/vault/dir-old/pic.png', newFsPath: 'C:/vault/dir-new/pic.png' },
+    ]
+    const events: VaultTargetChangeEvent[] = []
+    service.onTargetChange((e) => events.push(e))
+    await service.refreshRenamedBatch(moves)
+    // 条目守恒（旧移除 + 新登记）
+    expect(service.maintenanceInfo().roots[0]!.fileCount).toBe(before)
+    // 批内互链不断链：a 的 [[b]] 在新目录下仍解析（两遍登记的 resolver 可见性）
+    const backOfB = itemsOf(await service.backlinksOf('C:/vault/dir-new/b.md'))
+    expect(backOfB.map((i) => i.sourceRelPath)).toEqual(['dir-new/a.md'])
+    // asset 新键可查反链（引用者 dir-ref 重扫后——applyUnsaved 模拟改写后文本）
+    service.applyUnsaved('C:/vault/dir-ref.md', 2, '# R\n\n![图](dir-new/pic.png)。\n')
+    await vi.advanceTimersByTimeAsync(600)
+    const backOfPic = itemsOf(await service.backlinksOf('C:/vault/dir-new/pic.png'))
+    expect(backOfPic.map((i) => i.sourceRelPath)).toEqual(['dir-ref.md'])
+    // 旧键正证据删除广播
+    expect(events.some((e) => e.relPath === 'dir-old/a.md' && e.status === 'deleted')).toBe(true)
+  })
+
+  it('批量合并通知与快照提交：整批一次 onChange 广播、一次 CURRENT 提交', async () => {
+    const fs = makeFs({
+      'C:/vault/dir-old/a.md': '# A\n',
+      'C:/vault/dir-old/b.md': '# B\n',
+      'C:/vault/dir-old/c.md': '# C\n',
+    })
+    const { service, storage } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    for (const name of ['a.md', 'b.md', 'c.md']) {
+      const oldKey = `C:/vault/dir-old/${name}`
+      const newKey = `C:/vault/dir-new/${name}`
+      fs.files.delete(oldKey)
+      fs.stats.delete(oldKey)
+      fs.files.set(newKey, `# ${name.toUpperCase()}\n`)
+      fs.stats.set(newKey, { mtimeMs: 1_700_000_010_000, size: 6 })
+    }
+    let notifyCount = 0
+    service.onChange(() => { notifyCount += 1 })
+    const writesBefore = storage.writes.length
+    await service.refreshRenamedBatch([
+      { oldFsPath: 'C:/vault/dir-old/a.md', newFsPath: 'C:/vault/dir-new/a.md' },
+      { oldFsPath: 'C:/vault/dir-old/b.md', newFsPath: 'C:/vault/dir-new/b.md' },
+      { oldFsPath: 'C:/vault/dir-old/c.md', newFsPath: 'C:/vault/dir-new/c.md' },
+    ])
+    // 整批一次广播（旧侧+新侧合并；逐文件循环会按文件数广播）
+    expect(notifyCount).toBe(1)
+    // 快照提交一次（去抖后一次 CURRENT/分片写——advanceTimers 触发提交）
+    await vi.advanceTimersByTimeAsync(2000)
+    const commitWrites = storage.writes.slice(writesBefore).filter((w) => w.endsWith('/CURRENT'))
+    expect(commitWrites.length).toBeLessThanOrEqual(1)
+    expect(commitWrites.length).toBe(1)
+  })
+
+  it('大目录分批让出（yield 计数增长）', async () => {
+    const initial: Record<string, string> = {}
+    const moves: Array<{ oldFsPath: string; newFsPath: string }> = []
+    for (let i = 0; i < 40; i++) {
+      initial[`C:/vault/dir-old/f${i}.md`] = `# F${i}\n`
+      moves.push({ oldFsPath: `C:/vault/dir-old/f${i}.md`, newFsPath: `C:/vault/dir-new/f${i}.md` })
+    }
+    const fs = makeFs(initial)
+    const { service, scan } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    for (let i = 0; i < 40; i++) {
+      fs.files.delete(`C:/vault/dir-old/f${i}.md`)
+      fs.stats.delete(`C:/vault/dir-old/f${i}.md`)
+      fs.files.set(`C:/vault/dir-new/f${i}.md`, `# F${i}\n`)
+      fs.stats.set(`C:/vault/dir-new/f${i}.md`, { mtimeMs: 1, size: 6 })
+    }
+    const yieldsBefore = scan.yields
+    await service.refreshRenamedBatch(moves)
+    expect(scan.yields).toBeGreaterThan(yieldsBefore)
+    expect(service.maintenanceInfo().roots[0]!.fileCount).toBe(40)
+  })
+
+  it('跨根批移动：两根各自更新且互不串扰', async () => {
+    const fs = makeFs({
+      'C:/vault/dir/a.md': '# A\n',
+      'D:/other/dir/b.md': '# B\n',
+    })
+    const { service } = makeService(fs)
+    await service.initialize([
+      { fsPath: 'C:/vault', uri: 'file:///c%3A/vault' },
+      { fsPath: 'D:/other', uri: 'file:///d%3A/other' },
+    ])
+    // C 根目录移到 D 根（跨根目录移动）
+    fs.files.delete('C:/vault/dir/a.md')
+    fs.stats.delete('C:/vault/dir/a.md')
+    fs.files.set('D:/other/dir-x/a.md', '# A\n')
+    fs.stats.set('D:/other/dir-x/a.md', { mtimeMs: 1, size: 5 })
+    await service.refreshRenamedBatch([
+      { oldFsPath: 'C:/vault/dir/a.md', newFsPath: 'D:/other/dir-x/a.md' },
+    ])
+    const roots = service.maintenanceInfo().roots
+    expect(roots[0]!.fileCount).toBe(0) // C 根旧条目退场
+    expect(roots[1]!.fileCount).toBe(2) // D 根新增（b.md + a.md）
+  })
+
+  it('排除语义：排除区内 rename 不进不出；移出排除区被登记（位置 glob）', async () => {
+    const fs = makeFs({
+      'C:/vault/keep.md': '# K\n',
+      'C:/vault/ignored/x.md': '# X\n',
+      'C:/vault/ignored/y.md': '# Y\n',
+    })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    await service.setExcludePatterns(['ignored/**'])
+    const before = service.maintenanceInfo().roots[0]!.fileCount // = 1（keep.md）
+    // 排除区内 rename（ignored/x.md → ignored/x2.md，模式仍匹配）：不进不出
+    fs.files.delete('C:/vault/ignored/x.md')
+    fs.stats.delete('C:/vault/ignored/x.md')
+    fs.files.set('C:/vault/ignored/x2.md', '# X\n')
+    fs.stats.set('C:/vault/ignored/x2.md', { mtimeMs: 1, size: 4 })
+    // 排除区 → 根（移出排除区）：按新位置登记
+    fs.files.delete('C:/vault/ignored/y.md')
+    fs.stats.delete('C:/vault/ignored/y.md')
+    fs.files.set('C:/vault/y-out.md', '# Y\n')
+    fs.stats.set('C:/vault/y-out.md', { mtimeMs: 1, size: 4 })
+    await service.refreshRenamedBatch([
+      { oldFsPath: 'C:/vault/ignored/x.md', newFsPath: 'C:/vault/ignored/x2.md' },
+      { oldFsPath: 'C:/vault/ignored/y.md', newFsPath: 'C:/vault/y-out.md' },
+    ])
+    // 排除是位置 glob：区内不进不出；移出者在新位置入索引域
+    expect(service.maintenanceInfo().roots[0]!.fileCount).toBe(before + 1)
+  })
+})

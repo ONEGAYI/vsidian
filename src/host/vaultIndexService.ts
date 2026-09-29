@@ -1390,79 +1390,222 @@ export class VaultIndexService {
 
   /**
    * #199/#200 rename 后索引刷新（onDidRenameFiles 域）：旧路径退场与
-   * 新路径登记。旧路径移除必须有 missing 正证据（不可访问标 stale 不当
-   * 删除）；新路径 .md 增量重扫、非 .md 附件**无条件登记** asset 条目
-   * （事件驱动的窄登记——保证改写后引用者的解析延续；无人引用的冗余
-   * 条目由下一次全量重扫/覆盖范围重算自然校正，asset 不解析内容无正确
-   * 性影响）。排除的 .md 不入索引域（排除来源不贡献索引）。外部工具改名
-   * 无 rename 事件，只经 watcher 增量维护，不经本入口。
+   * 新路径登记。#200 起为批量化实现的单条委托（refreshRenamedBatch）。
+   * 语义见 refreshRenamedBatch 注释；外部工具改名无 rename 事件，只经
+   * watcher 增量维护，不经本入口。
    */
   async refreshRenamed(oldFsPath: string, newFsPath: string): Promise<void> {
-    const oldState = this.rootOf(oldFsPath)
-    if (oldState) {
-      const oldRel = this.relOf(oldState, oldFsPath)
-      if (oldRel !== null && /\.md$/i.test(oldFsPath)) {
-        if (!this.excludeMatcher.test(oldRel)) {
-          await this.rescanFile(oldState, oldFsPath) // rename 后必 missing → 移除
-        }
-      } else if (oldRel !== null) {
-        await this.removeIfMissing(oldState, oldFsPath)
-      }
-    }
-    const newState = this.rootOf(newFsPath)
-    if (!newState || this.disposed) {
-      return
-    }
-    const newRel = this.relOf(newState, newFsPath)
-    if (newRel === null) {
-      return
-    }
-    if (/\.md$/i.test(newFsPath)) {
-      if (!this.excludeMatcher.test(newRel)) {
-        await this.rescanFile(newState, newFsPath)
-        this.scheduleCommit(newState)
-      }
-      return
-    }
-    if (!newState.model) {
-      return
-    }
-    const stat = await this.scan.statFile(newFsPath)
-    if (!stat) {
-      return
-    }
-    const prev = newState.model.files.get(newRel)
-    newState.model.files.set(newRel, {
-      path: newRel,
-      kind: 'asset',
-      mtimeMs: stat.mtimeMs,
-      size: stat.size,
-      contentVersion: (prev?.contentVersion ?? 0) + 1,
-    })
-    this.ensureGeneration(newFsPath)
-    this.notify()
-    this.scheduleCommit(newState)
+    await this.refreshRenamedBatch([{ oldFsPath, newFsPath }])
   }
 
-  /** 移除非 md 条目的正证据路径（missing 才移除；不可访问标 stale） */
-  private async removeIfMissing(state: RootIndexState, fsPath: string): Promise<void> {
-    if (!state.model) {
-      return
+  /**
+   * 目录前缀下已登记文件清单（#200 映射展开与 did 保底刷新的索引侧数据
+   * 面）：.md 与 asset 全量返回。根未就绪（无数据）或路径在索引域外返回
+   * null——调用方（expandRenameMoves）以 fs 列举兜底。
+   */
+  indexedFilesUnder(dirFsPath: string): string[] | null {
+    const state = this.rootOf(dirFsPath)
+    if (!state || !state.hasData || !state.model) {
+      return null
     }
-    const rel = this.relOf(state, fsPath)
+    const prefix = `${this.foldKey(this.normKey(this.ops.resolve(dirFsPath)))}/`
+    const out: string[] = []
+    for (const rel of state.model.files.keys()) {
+      const abs = this.absOf(state, rel)
+      if (this.foldKey(this.normKey(abs)).startsWith(prefix)) {
+        out.push(abs)
+      }
+    }
+    return out
+  }
+
+  /**
+   * 目录子树是否整体落在排除域（#200 映射展开的 fs 递归剪枝）：探测目录
+   * 下代表性路径——子树模式（默认的 .git、node_modules 排除与「目录名 +
+   * 双星」这类整树形态）命中即剪；纯文件名模式（如「星.md」）不命中不剪
+   * （目录内有未排除内容，误剪会丢 fs 兜底清单——索引清单不含排除者，
+   * 二者合流仍完整）。
+   */
+  isExcludedDirDeep(dirFsPath: string): boolean {
+    const state = this.rootOf(dirFsPath)
+    if (!state) {
+      return false
+    }
+    const rel = this.relOf(state, dirFsPath)
     if (rel === null) {
+      return false
+    }
+    return this.excludeMatcher.test(`${rel}/\u0000probe`)
+  }
+
+  /**
+   * #200 批量 rename 刷新（onDidRenameFiles 域，目录/多文件移动的展开后
+   * 逐文件映射）：整批一次处理而非逐文件循环提交。语义与单条通道一致——
+   *
+   * - 旧侧移除须有 missing 正证据（不可访问标 stale 不当删除）；**旧路径
+   *   仍可访问（ok）的极端形态跳过**——rename 完成后旧路径不应存在，ok
+   *   意味着同位置另有文件（或映射异常），watcher 增量兜底（单文件通道
+   *   经 rescanFile 重扫的等价行为由增量队列承担）
+   * - 新侧 .md **两遍登记**：遍 1 装载文本与 stat 并登记 files entry，
+   *   遍 2 统一抽边——批内互链文档（目录内 A 引用 B）的 resolver 可见
+   *   完整新清单，不因处理顺序产生断链
+   * - 新侧非 .md 附件无条件登记 asset（事件驱动窄登记，同单条通道）
+   * - 排除的 .md 不进不出（排除来源不贡献索引）
+   * - **批末合并**：每根一次 backlinks 重建 + 一次广播 + 一次快照提交
+   *   （去抖合并）；分批让出事件循环（批大小复用 rescanBatchFiles）
+   * - publishTargetChange 逐文件保持（#201 消费 per-target 代次）
+   */
+  async refreshRenamedBatch(moves: ReadonlyArray<{ oldFsPath: string; newFsPath: string }>): Promise<void> {
+    interface MdLoad {
+      fsPath: string
+      rel: string
+      text: string
+      stat: { mtimeMs: number; size: number }
+      prevEntry: VaultFileEntry | undefined
+    }
+    if (this.disposed || moves.length === 0) {
       return
     }
-    const access = await this.scan.accessOf(fsPath)
-    if (access === 'missing') {
-      this.removeBaselineEntry(state, rel)
-      this.publishTargetChange(state, rel, 'deleted', null)
-    } else if (access === 'inaccessible') {
-      const prev = state.model.files.get(rel)
-      this.publishTargetChange(
-        state, rel, 'stale',
-        prev ? { mtimeMs: prev.mtimeMs, size: prev.size } : null,
-      )
+    const oldByRoot = new Map<RootIndexState, string[]>()
+    const newByRoot = new Map<RootIndexState, string[]>()
+    for (const move of moves) {
+      const oldState = this.rootOf(move.oldFsPath)
+      if (oldState) {
+        pushTo(oldByRoot, oldState, move.oldFsPath)
+      }
+      const newState = this.rootOf(move.newFsPath)
+      if (newState) {
+        pushTo(newByRoot, newState, move.newFsPath)
+      }
+    }
+
+    // ---- 旧侧：移除（missing 正证据）/ stale 标记 ----
+    const touchedRoots = new Set<RootIndexState>()
+    for (const [state, fsPaths] of oldByRoot) {
+      if (!state.model) {
+        continue
+      }
+      for (let i = 0; i < fsPaths.length; i++) {
+        const fsPath = fsPaths[i]!
+        const rel = this.relOf(state, fsPath)
+        if (rel === null) {
+          continue
+        }
+        if (/\.md$/i.test(fsPath) && this.excludeMatcher.test(rel)) {
+          continue // 排除域不进不出
+        }
+        const access = await this.scan.accessOf(fsPath)
+        if (access === 'missing') {
+          if (state.model.files.has(rel)) {
+            state.model.files.delete(rel)
+            state.model.edges = state.model.edges.filter((e) => e.source !== rel)
+            touchedRoots.add(state)
+          }
+          this.publishTargetChange(state, rel, 'deleted', null)
+        } else if (access === 'inaccessible') {
+          const prev = state.model.files.get(rel)
+          this.publishTargetChange(
+            state, rel, 'stale',
+            prev ? { mtimeMs: prev.mtimeMs, size: prev.size } : null,
+          )
+        }
+        if ((i + 1) % this.rescanBatchFiles === 0) {
+          await this.scan.yieldToEventLoop()
+        }
+      }
+    }
+
+    // ---- 新侧：.md 两遍登记 / asset 无条件登记 ----
+    for (const [state, fsPaths] of newByRoot) {
+      if (!state.model || this.disposed) {
+        continue
+      }
+      const mdLoads: MdLoad[] = []
+      const assetPaths: string[] = []
+      for (let i = 0; i < fsPaths.length; i++) {
+        const fsPath = fsPaths[i]!
+        const rel = this.relOf(state, fsPath)
+        if (rel === null) {
+          continue
+        }
+        if (/\.md$/i.test(fsPath)) {
+          if (this.excludeMatcher.test(rel)) {
+            continue
+          }
+          const [raw, stat] = await Promise.all([this.scan.readFileText(fsPath), this.scan.statFile(fsPath)])
+          if (raw === null || stat === null) {
+            continue // 可访问但读失败：保守跳过，watcher 增量兜底
+          }
+          mdLoads.push({
+            fsPath,
+            rel,
+            text: normalizeLf(raw),
+            stat,
+            prevEntry: state.model.files.get(rel),
+          })
+          state.model.files.set(rel, {
+            path: rel,
+            kind: 'markdown',
+            mtimeMs: stat.mtimeMs,
+            size: stat.size,
+            contentVersion: (state.model.files.get(rel)?.contentVersion ?? 0) + 1,
+          })
+        } else {
+          assetPaths.push(fsPath)
+        }
+        if ((i + 1) % this.rescanBatchFiles === 0) {
+          await this.scan.yieldToEventLoop()
+        }
+      }
+      // 遍 2：抽边（resolver 可见遍 1 登记的完整新清单——批内互链不断链）
+      for (const load of mdLoads) {
+        const edges = extractVaultEdges(load.rel, load.text, {
+          docDir: this.dirname(load.fsPath),
+          rootDir: state.fsPath,
+          isWindowsHost: this.opts.isWindowsHost,
+        }, this.makeModelResolver(state))
+        state.model.edges = state.model.edges.filter((e) => e.source !== load.rel).concat(edges)
+      }
+      let touched = mdLoads.length > 0
+      for (const fsPath of assetPaths) {
+        const rel = this.relOf(state, fsPath)
+        if (rel === null) {
+          continue
+        }
+        const stat = await this.scan.statFile(fsPath)
+        if (!stat) {
+          continue
+        }
+        const prev = state.model.files.get(rel)
+        state.model.files.set(rel, {
+          path: rel,
+          kind: 'asset',
+          mtimeMs: stat.mtimeMs,
+          size: stat.size,
+          contentVersion: (prev?.contentVersion ?? 0) + 1,
+        })
+        this.ensureGeneration(fsPath)
+        touched = true
+      }
+      if (touched) {
+        touchedRoots.add(state)
+        for (const load of mdLoads) {
+          if (!load.prevEntry || load.prevEntry.mtimeMs !== load.stat.mtimeMs ||
+            load.prevEntry.size !== load.stat.size) {
+            this.publishTargetChange(state, load.rel, 'changed', load.stat)
+          }
+        }
+      }
+    }
+
+    // ---- 批末：每根一次 backlinks 重建 + 广播 + 快照提交（整批合并） ----
+    for (const state of touchedRoots) {
+      if (!state.model) {
+        continue
+      }
+      state.backlinks = buildBacklinkIndex(state.model.edges)
+      this.notify()
+      this.scheduleCommit(state)
     }
   }
 
@@ -1570,6 +1713,16 @@ export class VaultIndexService {
 /** LF 归一（读盘文本统一进 LF 坐标——与协议/边表契约一致） */
 function normalizeLf(text: string): string {
   return text.includes('\r') ? text.replace(/\r\n?/g, '\n') : text
+}
+
+/** Map<K, V[]> 追加（#200 批量刷新的按根分组辅助） */
+function pushTo<K, V>(map: Map<K, V[]>, key: K, value: V): void {
+  const list = map.get(key)
+  if (list) {
+    list.push(value)
+  } else {
+    map.set(key, [value])
+  }
 }
 
 /** 原地替换指定 source 的全部边（单文件重扫/重抽的幂等替换） */

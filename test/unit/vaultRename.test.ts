@@ -1,11 +1,15 @@
 // #199 引用改写计划纯逻辑契约测试：rename/move 的相对路径重算、别名/锚点/
 // URL 编码保留、显式扩展名语义、跨根跳过、区间漂移检测、同文档合并与
-// 批量映射（#200 接口就绪）。被测模块不依赖 vscode/DOM（node 直驱）。
+// 批量映射（#200 接口就绪）。
+// #200 目录/批量移动：映射展开（目录 → 逐文件）与恒等替换滤除契约。
+// 被测模块不依赖 vscode/DOM（node 直驱）。
 import { describe, expect, it } from 'vitest'
 import {
+  expandRenameMoves,
   lfOffsetToLineCol,
   planVaultRenameRewrites,
   type RenameDocInput,
+  type RenameExpandPort,
   type RenameMoveEntry,
   type RenamePlanContext,
 } from '../../src/shared/vaultRename'
@@ -438,5 +442,184 @@ describe('vaultRename：LF 偏移 → 宿主行/列换算（vscode 层坐标桥�
     expect(lfOffsetToLineCol(host, 2)).toEqual({ line: 1, character: 0 })
     expect(lfOffsetToLineCol(host, 4)).toEqual({ line: 2, character: 0 })
     expect(lfOffsetToLineCol(host, 99)).toEqual({ line: 2, character: 1 })
+  })
+})
+
+// ---- #200 目录/批量移动映射展开 ----
+
+/** 展开端口 fake：dirs 显式目录集合；filesUnder = listFilesUnder 返回；
+ *  indexed = 索引清单（null = 根未就绪；缺省该前缀无登记） */
+function expandPort(o: {
+  dirs?: readonly string[]
+  filesUnder?: Record<string, string[]>
+  indexed?: Record<string, string[] | null>
+}): RenameExpandPort {
+  const dirs = new Set((o.dirs ?? []).map((d) => d.toLowerCase()))
+  return {
+    async isDirectory(fsPath: string) {
+      return dirs.has(fsPath.toLowerCase())
+    },
+    async listFilesUnder(dirFsPath: string) {
+      return o.filesUnder?.[dirFsPath] ?? []
+    },
+    indexedFilesUnder(dirFsPath: string) {
+      const value = o.indexed?.[dirFsPath]
+      return value === undefined ? [] : value
+    },
+  }
+}
+
+/** moves 集合断言辅助（顺序无关；展开按目录列举序、断言按排序对齐） */
+function movesOf(moves: readonly RenameMoveEntry[]): Array<[string, string]> {
+  return moves.map((m) => [m.oldFsPath.replace(/\\/g, '/'), m.newFsPath.replace(/\\/g, '/')] as [string, string])
+    .sort((a, b) => a[0]!.localeCompare(b[0]!))
+}
+
+describe('vaultRename：#200 目录移动映射展开（expandRenameMoves）', () => {
+  it('目录 rename：展开为目录下全部受影响文件的逐文件映射（嵌套多层 + 索引 asset + fs 遗漏 md 兜底）', async () => {
+    const port = expandPort({
+      dirs: [`${WIN_ROOT}/dir-old`],
+      // fs 递归列举：.md 全列（含索引遗漏的 new.md）；非 md 也列出但不应入映射
+      filesUnder: { [`${WIN_ROOT}/dir-old`]: [
+        `${WIN_ROOT}/dir-old/a.md`,
+        `${WIN_ROOT}/dir-old/deep/b.md`,
+        `${WIN_ROOT}/dir-old/new-not-indexed.md`,
+        `${WIN_ROOT}/dir-old/unreferenced.bin`,
+      ] },
+      // 索引清单：.md 与被引用 asset（pic.png 被 dir-ref 引用而登记）
+      indexed: { [`${WIN_ROOT}/dir-old`]: [
+        `${WIN_ROOT}/dir-old/a.md`,
+        `${WIN_ROOT}/dir-old/deep/b.md`,
+        `${WIN_ROOT}/dir-old/pic.png`,
+      ] },
+    })
+    const result = await expandRenameMoves(true, [
+      { oldFsPath: `${WIN_ROOT}/dir-old`, newFsPath: `${WIN_ROOT}/dir-new` },
+    ], port)
+    expect(movesOf(result.moves)).toEqual([
+      [`${WIN_ROOT}/dir-old/a.md`, `${WIN_ROOT}/dir-new/a.md`],
+      [`${WIN_ROOT}/dir-old/deep/b.md`, `${WIN_ROOT}/dir-new/deep/b.md`],
+      [`${WIN_ROOT}/dir-old/new-not-indexed.md`, `${WIN_ROOT}/dir-new/new-not-indexed.md`],
+      [`${WIN_ROOT}/dir-old/pic.png`, `${WIN_ROOT}/dir-new/pic.png`],
+    ])
+  })
+
+  it('文件条目原样保留：目录与文件混合批（多选移动）', async () => {
+    const port = expandPort({
+      dirs: [`${WIN_ROOT}/dir-old`],
+      filesUnder: { [`${WIN_ROOT}/dir-old`]: [`${WIN_ROOT}/dir-old/a.md`] },
+    })
+    const result = await expandRenameMoves(true, [
+      { oldFsPath: `${WIN_ROOT}/dir-old`, newFsPath: `${WIN_ROOT}/dir-new` },
+      { oldFsPath: `${WIN_ROOT}/single.md`, newFsPath: `${WIN_ROOT}/single2.md` },
+    ], port)
+    expect(movesOf(result.moves)).toEqual([
+      [`${WIN_ROOT}/dir-old/a.md`, `${WIN_ROOT}/dir-new/a.md`],
+      [`${WIN_ROOT}/single.md`, `${WIN_ROOT}/single2.md`],
+    ])
+  })
+
+  it('同 old 重复映射去重（Windows 大小写折叠；显式文件条目优先于展开）', async () => {
+    const port = expandPort({
+      dirs: [`${WIN_ROOT}/DIR-OLD`],
+      filesUnder: { [`${WIN_ROOT}/DIR-OLD`]: [`${WIN_ROOT}/DIR-OLD/a.md`] },
+    })
+    // 同批既有目录条目又有其子文件条目（防御形态）：同 old 折叠后保留先到者
+    const result = await expandRenameMoves(true, [
+      { oldFsPath: `${WIN_ROOT}/dir-old/a.md`, newFsPath: `${WIN_ROOT}/explicit.md` },
+      { oldFsPath: `${WIN_ROOT}/DIR-OLD`, newFsPath: `${WIN_ROOT}/dir-new` },
+    ], port)
+    expect(movesOf(result.moves)).toEqual([
+      [`${WIN_ROOT}/dir-old/a.md`, `${WIN_ROOT}/explicit.md`],
+    ])
+  })
+
+  it('索引未就绪（null）：目录整体放弃并入计数（不静默部分更新）', async () => {
+    const port = expandPort({
+      dirs: [`${WIN_ROOT}/dir-old`],
+      filesUnder: { [`${WIN_ROOT}/dir-old`]: [
+        `${WIN_ROOT}/dir-old/a.md`,
+        `${WIN_ROOT}/dir-old/pic.png`,
+      ] },
+      indexed: { [`${WIN_ROOT}/dir-old`]: null },
+    })
+    const result = await expandRenameMoves(true, [
+      { oldFsPath: `${WIN_ROOT}/dir-old`, newFsPath: `${WIN_ROOT}/dir-new` },
+    ], port)
+    // not-ready 根的候选边查询与批量刷新同样无效——fs 清单也不采（避免
+    // 只刷新不改写的半吊子部分更新）
+    expect(result.moves).toEqual([])
+    expect(result.notReadyMoves).toBe(1)
+  })
+
+  it('did 保底：旧路径已不存在（isDirectory 旧 false）但新路径是目录 → 按索引清单展开', async () => {
+    // did 阶段旧目录已消失：listFilesUnder 返回空；索引仍是旧形态（watcher
+    // 对目录 rename 无逐文件事件，#198 实测边界）
+    const port = expandPort({
+      dirs: [`${WIN_ROOT}/dir-new`],
+      filesUnder: {},
+      indexed: { [`${WIN_ROOT}/dir-old`]: [
+        `${WIN_ROOT}/dir-old/a.md`,
+        `${WIN_ROOT}/dir-old/deep/b.md`,
+        `${WIN_ROOT}/dir-old/pic.png`,
+      ] },
+    })
+    const result = await expandRenameMoves(true, [
+      { oldFsPath: `${WIN_ROOT}/dir-old`, newFsPath: `${WIN_ROOT}/dir-new` },
+    ], port)
+    expect(movesOf(result.moves)).toEqual([
+      [`${WIN_ROOT}/dir-old/a.md`, `${WIN_ROOT}/dir-new/a.md`],
+      [`${WIN_ROOT}/dir-old/deep/b.md`, `${WIN_ROOT}/dir-new/deep/b.md`],
+      [`${WIN_ROOT}/dir-old/pic.png`, `${WIN_ROOT}/dir-new/pic.png`],
+    ])
+  })
+
+  it('跨根目录移动同样按前缀展开（新绝对路径在另一根下）', async () => {
+    const port = expandPort({
+      dirs: [`${WIN_ROOT}/dir-old`],
+      filesUnder: { [`${WIN_ROOT}/dir-old`]: [`${WIN_ROOT}/dir-old/a.md`] },
+      indexed: { [`${WIN_ROOT}/dir-old`]: [`${WIN_ROOT}/dir-old/a.md`] },
+    })
+    const result = await expandRenameMoves(true, [
+      { oldFsPath: `${WIN_ROOT}/dir-old`, newFsPath: 'D:/other-root/dir-new' },
+    ], port)
+    expect(movesOf(result.moves)).toEqual([
+      [`${WIN_ROOT}/dir-old/a.md`, 'D:/other-root/dir-new/a.md'],
+    ])
+  })
+})
+
+describe('vaultRename：#200 恒等替换滤除', () => {
+  it('目录整体平移：同目录互链的相对路径不变 → 不产生编辑（不重复替换）', () => {
+    // dir-old → dir-new（a 与 b 同批移动——目录展开后的映射形态）：a 与 b
+    // 同目录，a 的 [[b]] 经映射重算后仍为 b（相对关系保持）→ 恒等滤除。
+    // 反例（只移 a 不移 b）不是恒等：b 留在 dir-old，a 的 [[b]] 须改
+    // ../dir-old/b——该语义由「指向同批被移动目标的出链」既有用例族覆盖
+    const textA = '见 [[b]]。\n'
+    const moves = [
+      { oldFsPath: `${WIN_ROOT}/dir-old/a.md`, newFsPath: `${WIN_ROOT}/dir-new/a.md` },
+      { oldFsPath: `${WIN_ROOT}/dir-old/b.md`, newFsPath: `${WIN_ROOT}/dir-new/b.md` },
+    ]
+    const docs: RenameDocInput[] = [
+      { fsPath: `${WIN_ROOT}/dir-new/a.md`, text: textA, edgeRootFsPath: WIN_ROOT, edges: [
+        edge({ target: 'b', resolved: 'dir-old/b.md', kind: 'wikilink', start: 2, end: 2 + '[[b]]'.length }),
+      ] },
+    ]
+    const result = planVaultRenameRewrites(winCtx(moves), docs)
+    expect(result.docs).toEqual([]) // 恒等替换滤除：无编辑即无计划文档
+    expect(result.skipped).toEqual([])
+  })
+
+  it('目录跨深度移动后相对路径确有变化时照常改写（滤除不影响真替换）', () => {
+    // dir-old → sub/dir-old：a 的上行出链 [[../c]] 须变 [[../../c]]
+    const textA = '上行 [[../c]]。\n'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/dir-old/a.md`, newFsPath: `${WIN_ROOT}/sub/dir-old/a.md` }]
+    const docs: RenameDocInput[] = [
+      { fsPath: `${WIN_ROOT}/sub/dir-old/a.md`, text: textA, edgeRootFsPath: WIN_ROOT, edges: [
+        edge({ target: '../c', resolved: 'c.md', kind: 'wikilink', start: 3, end: 3 + '[[../c]]'.length }),
+      ] },
+    ]
+    const result = planVaultRenameRewrites(winCtx(moves), docs)
+    expect(applyEdits(textA, result.docs[0]!.edits)).toBe('上行 [[../../c]]。\n')
   })
 })
