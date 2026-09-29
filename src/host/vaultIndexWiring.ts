@@ -11,6 +11,7 @@ import { mkdir, readFile, readdir, rename, rm, writeFile } from 'fs/promises'
 import * as path from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { VaultIndexService, type VaultIndexScanPort, type VaultIndexStoragePort, type VaultRootRef } from './vaultIndexService'
+import { isFileNotFound } from '../shared/imageRefresh'
 
 /** 抽象路径（`/` 拼接）→ 宿主平台真实路径 */
 function realPathOf(abstractPath: string): string {
@@ -57,8 +58,7 @@ function createScanPort(): VaultIndexScanPort {
         await vscode.workspace.fs.stat(vscode.Uri.file(fsPath))
         return 'ok' as const
       } catch (err) {
-        const code = (err as { code?: string }).code
-        return code === 'FileNotFound' || code === 'ENOENT'
+        return isFileNotFound(err)
           ? ('missing' as const)
           : ('inaccessible' as const)
       }

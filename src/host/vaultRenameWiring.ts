@@ -46,7 +46,7 @@ import {
   type RenameDocInput,
   type RenameMoveEntry,
 } from '../shared/vaultRename'
-import type { VaultIndexService } from './vaultIndexService'
+import { normalizeSeparators, type VaultIndexService } from './vaultIndexService'
 import type { VaultEdge } from '../shared/vaultIndexModel'
 
 /** 计划结果观测（集成测试钩子；通知文案的数据面） */
@@ -558,14 +558,15 @@ function notifyOf(log: RenameRefLogEntry): void {
   }
 }
 
-/** 路径归一键（批次配对与合并表；Windows 折叠 + 分隔符统一） */
+/** 路径归一键（批次配对与合并表；Windows 折叠 + 分隔符统一——折叠为
+ *  本模块语义，与索引服务的 foldKey 分立，不并入共享步） */
 function normKeyOf(fsPath: string): string {
-  const norm = fsPath.replace(/\\/g, '/')
+  const norm = normalizeSeparators(fsPath)
   return process.platform === 'win32' ? norm.toLowerCase() : norm
 }
 
 function basenameOf(fsPath: string): string {
-  const norm = fsPath.replace(/\\/g, '/')
+  const norm = normalizeSeparators(fsPath)
   return norm.slice(norm.lastIndexOf('/') + 1)
 }
 
