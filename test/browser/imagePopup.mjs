@@ -373,6 +373,23 @@ try {
   check('26 live 宽幅 SVG 撑满不塌（块级基准守恒）', (liveGeometry.wideWidth ?? 0) > 400,
     `render=${liveGeometry.wideWidth} natural=${liveGeometry.wideNatural}`)
 
+  // 14) 按钮底色不透底（半透明主题面透出图片色的回归钉住）：常态与
+  //     悬停面为「主题色纯色渐变层 + 编辑器底实垫」双层合成——断言垫底
+  //     为不透明实色且渐变层在场（fixture 无 VSCode 变量注入，走半透明
+  //     fallback 面 + 实色垫底，恰为半透明主题的最不利场景）
+  await frame.hover()
+  await frame.locator('.vsidian-graphic-chrome-popup').hover()
+  await page.waitForFunction(() =>
+    getComputedStyle(document.querySelector('.vsidian-graphic-frame.vsidian-image .vsidian-graphic-chrome-popup')).opacity === '1')
+  const hoverBg = await page.evaluate(() => {
+    const cs = getComputedStyle(document.querySelector(
+      '.vsidian-graphic-frame.vsidian-image .vsidian-graphic-chrome-popup'))
+    return { color: cs.backgroundColor, image: cs.backgroundImage }
+  })
+  check('27 悬停按钮底色垫实底（不透出图片色）',
+    /^rgb\(/.test(hoverBg.color) && hoverBg.image.includes('linear-gradient'),
+    JSON.stringify(hoverBg))
+
   check('23 页面无脚本错误', errors.length === 0, JSON.stringify(errors))
   await page.close()
 

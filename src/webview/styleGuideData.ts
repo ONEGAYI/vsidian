@@ -2273,7 +2273,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "graphic-interact",
     "kind": "selector",
     "target": ".vsidian-graphic-frame / .vsidian-graphic-chrome（含 -edit / -popup）",
-    "purpose": "图形化代码块（渲染成图形的围栏）定位包裹层与右上角按钮组：edit 进源码编辑（仅实时预览）、popup 打开图表弹窗；按钮组悬停显隐由 CSS 驱动（透明度切换，DOM 常驻渲染成功态）。#212 起 Markdown 图片复用同款按钮组与交互契约（edit+popup 双钮 / 阅读仅 popup；图片本体吞点击防误触），链接内嵌与表格网格内图片不挂（规格明确排除）。",
+    "purpose": "图形化代码块（渲染成图形的围栏）定位包裹层与右上角按钮组：edit 进源码编辑（仅实时预览）、popup 打开图表弹窗；按钮组悬停显隐由 CSS 驱动（透明度切换，DOM 常驻渲染成功态）。#212 起 Markdown 图片复用同款按钮组与交互契约（edit+popup 双钮 / 阅读仅 popup；图片本体吞点击防误触），链接内嵌与表格网格内图片不挂（规格明确排除）。按钮底色为「主题面纯色渐变层 + 编辑器底实垫」双层合成（常态 editorWidget-background、悬停 button-secondaryBackground）：主题变量可能半透明（玻璃风主题），按钮直浮图片等斑驳内容时半透明面透出内容色，垫实底后任何主题不透底；主题值为实色时渐变层全覆盖、观感与单层等同。",
     "views": [
       "live",
       "reading"
@@ -2289,7 +2289,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "集成「图形化代码块按钮组与图表弹窗」（#111）：paint.graphic.frames/editButtons/popupButtons",
       "浏览器 graphicPopup：悬停显隐（透明度两态）",
       "集成「界面域样式契约」（#133）：chromeSelectors[\"graphic-chrome\"] 探针命中",
-      "单元/浏览器 imagePopup（#212）：图片按钮组构成、悬停显隐与排除项"
+      "单元/浏览器 imagePopup（#212）：图片按钮组构成、悬停显隐与排除项；悬停按钮底色垫实底（computed backgroundColor 不透明 + 渐变面在场）"
     ],
     "introduced": "#111（2026-09-26）"
   },
@@ -4089,7 +4089,7 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "graphic-chrome": {
-    "purpose": "The positioning wrapper of graphic code blocks (fences rendered as graphics) and its top-right button group: edit enters source editing (live preview only), popup opens the diagram popup; the group hover show/hide is CSS-driven (an opacity toggle; the DOM stays present in the rendered-success state). Since #212 Markdown images reuse the same button group and interaction contract (edit+popup on live / popup-only on reading; the image body swallows clicks to prevent accidental edits); images inside links or table grids do not carry it (explicitly out of scope).",
+    "purpose": "The positioning wrapper of graphic code blocks (fences rendered as graphics) and its top-right button group: edit enters source editing (live preview only), popup opens the diagram popup; the group hover show/hide is CSS-driven (an opacity toggle; the DOM stays present in the rendered-success state). Since #212 Markdown images reuse the same button group and interaction contract (edit+popup on live / popup-only on reading; the image body swallows clicks to prevent accidental edits); images inside links or table grids do not carry it (explicitly out of scope). The button background is a two-layer composite (a solid-color gradient layer of the theme face + a solid editor-background underlay; editorWidget-background at rest, button-secondaryBackground on hover): theme variables may be translucent (glass-style themes), and with the buttons floating directly over mottled content such as images a translucent face lets the content color bleed through; the solid underlay keeps the face opaque under any theme, while solid theme values are fully covered by the gradient layer with no visual change.",
     "states": "The button group shows in the rendered-success state (error fallback blocks do not emit it); the edit button is assembled only on the live preview side. Image form: shown in the loaded state (driven by sibling/descendant selectors on data-vsidian-img-state); frame.vsidian-image takes an inline layout (inline mixed flow is not broken).",
     "dom": "Live: the frame around the fence widget; reading: the frame around the mermaid/graphic container. Image form: the live slot span doubles as the frame (vsidian-image added); reading imgs are wrapped by an inline frame span. The button group is absolutely positioned at the frame's top right.",
     "obsidian": {
