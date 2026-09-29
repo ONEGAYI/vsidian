@@ -9551,6 +9551,120 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(located.viewMode === 'live', '跳转目标面板应为 live 模式（可编辑）')
   }],
 
+  ['侧栏状态：跳转返回后保持跳转前激活面板（形态改版批次）', async () => {
+    // 用户报障复现：反链面板 active 时点击条目跳转到来源文档（原文档 tab
+    // 隐藏 → webview 卸载），切回原文档后侧栏应保持反链面板 active；
+    // 三面板无一 active（侧栏空白）即为报障症状
+    await openWithEditor('反链目标.md')
+    await waitSessionReady('反链目标.md')
+    const uri = wsUri('反链目标.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sidebar.test.click' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'backlinks.test.click' })
+    await poll('跳转前反链面板 active 且条目就绪', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri)) as
+        | { backlinks?: { active: boolean; state: string; items: unknown[] } }
+        | undefined
+      return v?.backlinks?.active === true && v.backlinks.state === 'ready' && v.backlinks.items.length > 0 ? true : undefined
+    })
+    // 条目点击跳转：活动面板切到来源文档
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'backlinks.test.itemClick', index: 0 })
+    await poll('活动面板为来源文档', async () => {
+      const tab = vscode.window.tabGroups.activeTabGroup.activeTab
+      return tab?.input instanceof vscode.TabInputCustom && tab.input.viewType === VIEW_TYPE &&
+        tab.input.uri.toString() === wsUri('backlinks-a.md').toString() ? true : undefined
+    })
+    // 切回原文档 tab（组内前一编辑器；隐藏期 webview 已卸载，返回即重载）
+    await vscode.commands.executeCommand('workbench.action.previousEditor')
+    await poll('切回原文档', async () => {
+      const tab = vscode.window.tabGroups.activeTabGroup.activeTab
+      return tab?.input instanceof vscode.TabInputCustom && tab.input.viewType === VIEW_TYPE &&
+        tab.input.uri.toString() === uri ? true : undefined
+    })
+    // 重载后面板视图状态响应恢复（新面板 boot 完成）
+    await poll('原文档视图状态响应', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri)) as
+        | Record<string, unknown>
+        | undefined
+      return v !== undefined ? true : undefined
+    })
+    // 回路断言：跳转前的激活面板保持（三标志全 false 即报障；绘制层给
+    // boot 留收敛窗口，持续不绘制才判红）
+    const after = await poll('跳转返回后反链面板绘制', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri)) as
+        | { sidebar?: { open?: boolean }; backlinks?: { active: boolean; panelPainted: boolean }; outline?: { active: boolean }; outlinks?: { active: boolean } }
+        | undefined
+      return v?.backlinks?.panelPainted === true ? v : undefined
+    }, 5000).catch(async () => {
+      return (await vscode.commands.executeCommand(CMD.viewState, uri)) as
+        | { sidebar?: { open?: boolean }; backlinks?: { active: boolean; panelPainted: boolean }; outline?: { active: boolean }; outlinks?: { active: boolean } }
+        | undefined
+    })
+    assert(after?.backlinks?.active === true && after.backlinks.panelPainted === true,
+      `跳转返回后反链面板应保持 active 且绘制（实际 backlinks=${String(after?.backlinks?.active)} painted=${String(after?.backlinks?.panelPainted)} outline=${String(after?.outline?.active)} outlinks=${String(after?.outlinks?.active)} sidebarOpen=${String(after?.sidebar?.open)}）`)
+    // 变体二：出链面板跳转 → previousEditor 返回 → 保持出链 active
+    await openWithEditor('出链源.md')
+    await waitSessionReady('出链源.md')
+    const srcUri = wsUri('出链源.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, srcUri, { kind: 'sidebar.test.click' })
+    await vscode.commands.executeCommand(CMD.postToPanel, srcUri, { kind: 'outlinks.test.click' })
+    await poll('出链面板 active 且条目就绪', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, srcUri)) as
+        | { outlinks?: { active: boolean; state: string; items: unknown[] } }
+        | undefined
+      return v?.outlinks?.active === true && v.outlinks.state === 'ready' && v.outlinks.items.length > 0 ? true : undefined
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, srcUri, { kind: 'outlinks.test.itemClick', index: 0 })
+    await poll('活动面板为出链普通目标', async () => {
+      const tab = vscode.window.tabGroups.activeTabGroup.activeTab
+      return tab?.input instanceof vscode.TabInputCustom && tab.input.viewType === VIEW_TYPE &&
+        tab.input.uri.toString() === wsUri('出链普通目标.md').toString() ? true : undefined
+    })
+    await vscode.commands.executeCommand('workbench.action.previousEditor')
+    await poll('切回出链源', async () => {
+      const tab = vscode.window.tabGroups.activeTabGroup.activeTab
+      return tab?.input instanceof vscode.TabInputCustom && tab.input.viewType === VIEW_TYPE &&
+        tab.input.uri.toString() === srcUri ? true : undefined
+    })
+    await poll('出链源视图状态响应', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, srcUri)) as
+        | Record<string, unknown>
+        | undefined
+      return v !== undefined ? true : undefined
+    })
+    const afterOut = (await vscode.commands.executeCommand(CMD.viewState, srcUri)) as
+      | { backlinks?: { active: boolean }; outline?: { active: boolean }; outlinks?: { active: boolean; panelPainted: boolean } }
+      | undefined
+    assert(afterOut?.outlinks?.active === true && afterOut.outlinks.panelPainted === true,
+      `出链跳转返回后应保持 active 且绘制（实际 outlinks=${String(afterOut?.outlinks?.active)} painted=${String(afterOut?.outlinks?.panelPainted)} outline=${String(afterOut?.outline?.active)} backlinks=${String(afterOut?.backlinks?.active)}）`)
+    // 变体三：工具栏交互（搜索框 + 排序选择）后跳转 → 关闭目标页签返回
+    await vscode.commands.executeCommand(CMD.postToPanel, srcUri, { kind: 'backlinks.test.toolbarClick', action: 'search' })
+    await vscode.commands.executeCommand(CMD.postToPanel, srcUri, { kind: 'backlinks.test.sortSelect', mode: 'mtimeDesc' })
+    await vscode.commands.executeCommand(CMD.postToPanel, srcUri, { kind: 'outlinks.test.itemClick', index: 0 })
+    await poll('活动面板为出链普通目标（变体三）', async () => {
+      const tab = vscode.window.tabGroups.activeTabGroup.activeTab
+      return tab?.input instanceof vscode.TabInputCustom && tab.input.viewType === VIEW_TYPE &&
+        tab.input.uri.toString() === wsUri('出链普通目标.md').toString() ? true : undefined
+    })
+    // 关闭目标页签：前一编辑器（出链源）自动成为活动面板（webview 卸载后重载）
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await poll('关闭目标后回到出链源', async () => {
+      const tab = vscode.window.tabGroups.activeTabGroup.activeTab
+      return tab?.input instanceof vscode.TabInputCustom && tab.input.viewType === VIEW_TYPE &&
+        tab.input.uri.toString() === srcUri ? true : undefined
+    })
+    await poll('出链源视图状态响应（变体三）', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, srcUri)) as
+        | Record<string, unknown>
+        | undefined
+      return v !== undefined ? true : undefined
+    })
+    const afterClose = (await vscode.commands.executeCommand(CMD.viewState, srcUri)) as
+      | { backlinks?: { active: boolean }; outline?: { active: boolean }; outlinks?: { active: boolean; panelPainted: boolean } }
+      | undefined
+    assert(afterClose?.outlinks?.active === true && afterClose.outlinks.panelPainted === true,
+      `关闭目标页签返回后应保持出链 active 且绘制（实际 outlinks=${String(afterClose?.outlinks?.active)} painted=${String(afterClose?.outlinks?.panelPainted)} outline=${String(afterClose?.outline?.active)} backlinks=${String(afterClose?.backlinks?.active)}）`)
+  }],
+
   // ---- 出链面板批次：出链四态/绘制/互斥 + 锚点跳转 + 断链不可点；
   //      反链面板形态改版的分组卡片/命中高亮/搜索/排序 ----
 

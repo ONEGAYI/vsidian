@@ -3685,6 +3685,11 @@ export class WebviewSyncController {
     const sidebar = document.createElement('div')
     sidebar.className = 'vsidian-sidebar'
     sidebar.id = 'vsidian-sidebar'
+    // 就地登记：函数末尾的恢复收敛经 applyBacklinksDom/applyOutlinksDom 落
+    // 容器类，彼时调用点（mount 的 this.sidebarEl = this.buildSidebar()）尚未
+    // 返回赋值——不在此登记则重载恢复的反链/出链类被守卫跳过（大纲无此
+    // 问题：applyOutlineDom 在 mount 后段、赋值之后才调用）
+    this.sidebarEl = sidebar
     const bar = document.createElement('div')
     bar.className = 'vsidian-sidebar-toolbar'
     const actions = document.createElement('div')
