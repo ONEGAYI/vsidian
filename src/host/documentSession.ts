@@ -23,6 +23,7 @@ import {
   type DiagramExportFailReason,
   type DiagramExportPayload,
   type HostToWebview,
+  type HoverPreviewRequestPayload,
   type ImageExportFailReason,
   type ImageExportPayload,
   type ImagePastePayload,
@@ -30,6 +31,7 @@ import {
   type SettingsPayload,
   type WebviewToHost,
 } from '../shared/protocol'
+import type { HoverReadOutcome } from './hoverDocAccess'
 import type { ImagePasteOutcome } from './imagePasteHost'
 import { mapChangeThroughChanges } from '../shared/changeMapping'
 import { NewlineCoordinator } from '../shared/newline'
@@ -61,6 +63,14 @@ export interface PanelPort {
   /** #11 双链跳转执行（vscode 层注入：wikilinkTarget 按需解析 + 打开/
    *  定位/用户反馈）；只读交互，暂停态同样放行 */
   openWikilink?(intent: { target: string; srcStart: number; srcEnd: number }): void
+  /** #218 悬停预览文档读取（vscode 层注入：hoverDocAccess 无副作用读取——
+   *  目标解析 + openTextDocument + LF 转换）；report 回报 hover.result 载荷
+   *  （成功携带身份/版本/全文/范围，失败为错误分态）。只读交互，不进
+   *  edit.request 通道，暂停态同样放行 */
+  readHoverTarget?(
+    payload: HoverPreviewRequestPayload,
+    report: (result: HoverReadOutcome) => void,
+  ): void
   /** #10 图片资源解析（vscode 层注入：classifyImageTarget + asWebviewUri） */
   resolveImage?(src: string): Promise<ImageResolution>
   /** #161 图片粘贴落盘（vscode 层注入：设置读取 + 目录解析 + writeFile）；
@@ -726,6 +736,45 @@ export class DocumentSession {
         }
         const generation = this.invalidateImages()
         panel.port.send({ kind: 'refresh.invalidated', reqId: message.reqId, generation })
+        return Promise.resolve()
+      }
+      case 'hover.request': {
+        // #218 悬停预览文档读取：会话守卫对齐 image.request / diagram.export
+        // 先例（就绪且 docUri 匹配才放行，否则静默丢弃）；读取执行经面板
+        // 端口注入（hoverDocAccess 无副作用路径），结果回来源面板（reqId +
+        // instanceId 双配对——迟到回包由 webview 侧实例守卫丢弃）。只读
+        // 交互：不进 edit.request 通道、不写文档，暂停态同样放行
+        if (!panel.ready || message.docUri !== this.docUri) {
+          return Promise.resolve()
+        }
+        const report = (result: HoverReadOutcome): void => {
+          panel.port.send(
+            result.ok
+              ? {
+                  kind: 'hover.result',
+                  reqId: message.reqId,
+                  instanceId: message.instanceId,
+                  ok: true,
+                  target: { fsPath: result.fsPath, relPath: result.relPath },
+                  version: result.version,
+                  text: result.lfText,
+                  range: result.range,
+                  scope: { kind: 'full' },
+                }
+              : {
+                  kind: 'hover.result',
+                  reqId: message.reqId,
+                  instanceId: message.instanceId,
+                  ok: false,
+                  reason: result.reason,
+                },
+          )
+        }
+        if (panel.port.readHoverTarget) {
+          panel.port.readHoverTarget(message, report)
+        } else {
+          report({ ok: false, reason: 'read-failed' })
+        }
         return Promise.resolve()
       }
       case 'perf.report':

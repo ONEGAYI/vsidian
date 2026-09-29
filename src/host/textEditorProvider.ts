@@ -75,6 +75,11 @@ import type { SettingsPageHandle } from './settingsPage'
 import { runDiagramExport } from './diagramExportHost'
 import { runImageExport } from './imageExportHost'
 import { runImagePaste, type ImagePasteOutcome } from './imagePasteHost'
+import {
+  readHoverDocTarget,
+  type HoverDocAccessContext,
+  type HoverReadOutcome,
+} from './hoverDocAccess'
 import { installHostLocale, LOCALE_MESSAGES, type LocaleCode } from '../shared/locales'
 import { buildLocaleIslandHtml } from '../shared/locales/island'
 import { hostLocale } from './hostLocale'
@@ -1046,6 +1051,24 @@ export function createTextEditorProvider(
     }
   }
 
+  /** #218 悬停预览读取上下文：与 executeWikilinkIntent 同款解析语境
+   *  （docDir 基准、所属根边界、无工作区判定），供 hoverDocAccess 纯逻辑
+   *  装配——读取不依赖写入，不触碰编辑会话 */
+  const hoverAccessContextOf = (document: vscode.TextDocument): HoverDocAccessContext => {
+    const folder = vscode.workspace.getWorkspaceFolder(document.uri)
+    const rootDir = (folder ? folder.uri : vscode.Uri.joinPath(document.uri, '..')).fsPath
+    return {
+      resolve: {
+        docDir: path.dirname(document.uri.fsPath),
+        rootDir,
+        isWindowsHost: process.platform === 'win32',
+        hasWorkspace: folder !== undefined,
+      },
+      sourceFsPath: document.uri.fsPath,
+      rootFsPath: rootDir,
+    }
+  }
+
   const provider: vscode.CustomTextEditorProvider = {
     resolveCustomTextEditor(document, webviewPanel, _token): void {
       // #38：全局记忆为 source 时弹回原生编辑器——priority=default 后 VSCode
@@ -1123,6 +1146,36 @@ export function createTextEditorProvider(
       const openWikilink = (intent: { target: string; srcStart: number; srcEnd: number }): void => {
         void executeWikilinkIntent(document, intent, entry.linkLog)
       }
+      // #218 悬停预览文档读取端口：hoverDocAccess 无副作用路径（目标解析 +
+      // openTextDocument 只装载不显示 + LF 转换）；报告回 hover.result（经
+      // 会话 report 闭包回来源面板）。读取异常一律收敛为 read-failed 分态
+      // ——就地 i18n 呈现，不弹宿主通知
+      const readHoverTargetPort = (
+        payload: { target: string },
+        report: (result: HoverReadOutcome) => void,
+      ): void => {
+        void (async (): Promise<void> => {
+          let outcome: HoverReadOutcome
+          try {
+            const access = hoverAccessContextOf(document)
+            outcome = await readHoverDocTarget(payload.target, access, {
+              resolveVaultFile: (rawPath) =>
+                resolveVaultLinkFile(rawPath, access.resolve, statFileRealPath),
+              openTextDocument: async (fsPath) => {
+                try {
+                  const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fsPath))
+                  return { version: doc.version, text: doc.getText() }
+                } catch {
+                  return null
+                }
+              },
+            })
+          } catch {
+            outcome = { ok: false, reason: 'read-failed' }
+          }
+          report(outcome)
+        })()
+      }
       const resolveImage = async (src: string): Promise<ImageResolution> => {
         // #208：代次在解析时取值——手动刷新后同 src 的新请求得到新代次戳
         return resolveWorkspaceImage(
@@ -1137,6 +1190,7 @@ export function createTextEditorProvider(
         send,
         openLink,
         openWikilink,
+        readHoverTarget: readHoverTargetPort,
         resolveImage,
         // #33 设置端口：工具栏 settings.open 与 init 后 settings.get 的
         // 面板级处理（与 link.activate 同模式；settings.set 只存在于
