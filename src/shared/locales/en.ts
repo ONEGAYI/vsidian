@@ -90,6 +90,9 @@ export const en = {
   'setting.readableLineWidth.title': 'Readable line width',
   'setting.readableLineWidth.description': 'Maximum width of the content column in the live preview and reading view: 0 fills the available width; a specific value caps the column, which then centers in the editor area and yields to the outline sidebar when space is tight.',
   'setting.readableLineWidthFill': 'Fill',
+  /** #222 embed card height cap (reading-view embeds scroll internally past it) */
+  'setting.embedMaxHeight.title': 'Embedded note max height',
+  'setting.embedMaxHeight.description': 'Maximum height of the reading-view embed card content area: shorter notes keep their natural height while longer content scrolls inside the card up to this limit.',
   'setting.codeblockCard.title': 'Code block card',
   'setting.codeblockCard.description': 'Collapse a fenced code block into a card when the cursor leaves it: hide the fence markers and show a language header bar. Turn off to restore the plain source fence look.',
   'setting.codeblockLineNumbers.title': 'Line numbers inside cards',
@@ -387,6 +390,11 @@ export const en = {
    *  entry, hovering the header row only reveals it) */
   'hover.content.fmExpand': 'Expand note properties',
   'hover.content.fmCollapse': 'Collapse note properties',
+  /** #222 Reading embed cards: loading line and the open-target entry in the
+   *  card header (aria-label and title share the word; opening reuses the
+   *  existing Vsidian open behavior, never edits the embed source) */
+  'embed.loading': 'Loading embedded note…',
+  'embed.openTarget': 'Open target note',
 
   /** 反链面板（#197：四态与条目；形态改版批次：工具栏/排序/搜索/页头） */
   'backlinks.label': 'Backlinks',

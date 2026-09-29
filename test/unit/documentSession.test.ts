@@ -1938,3 +1938,45 @@ describe('#220 来源资源：hover.result 来源记录与守卫路由', () => {
     expect(out.filter((m) => m.kind === 'image.result')).toHaveLength(0)
   })
 })
+
+// ---- 工单 #222：来源记录集合化（嵌入卡片与悬停浮层多目标共存） ----
+describe('#222 来源集合：嵌入与悬停多目标同面板在场', () => {
+  const B_PATH = 'D:\notes\sub\b.md'
+  const C_PATH = 'D:\notes\sub\c.md'
+
+  it('先后读取 B（嵌入）与 C（悬停）：两目标的 sourceDocUri 请求均放行（单值守卫会误杀）', async () => {
+    const s = setup()
+    const resolveCalls: Array<{ src: string; sourceDocUri?: string }> = []
+    const linkIntents: unknown[] = []
+    const out: HostToWebview[] = []
+    let serve = 0
+    const id = s.session.attachPanel({
+      send: (m) => out.push(m),
+      readHoverTarget: (_payload, report) => {
+        serve += 1
+        report(
+          serve === 1
+            ? { ok: true, fsPath: B_PATH, relPath: 'sub/b.md', version: 1, lfText: '# B\n', range: { start: 0, end: 5 }, scope: { kind: 'full' } }
+            : { ok: true, fsPath: C_PATH, relPath: 'sub/c.md', version: 1, lfText: '# C\n', range: { start: 0, end: 5 }, scope: { kind: 'full' } },
+        )
+      },
+      resolveImage: async (src, sourceDocUri) => {
+        resolveCalls.push({ src, sourceDocUri })
+        return { ok: true, src: `res://${sourceDocUri ?? 'p'}#${src}` }
+      },
+      openLink: (intent) => linkIntents.push(intent),
+    })
+    await ready10(s, id)
+    // 嵌入卡片装载 B（hover.request）→ 悬停浮层再读取 C：两个来源同时在记录
+    await s.send(id, { kind: 'hover.request', sessionId: id, docUri: DOC_URI, reqId: 1, instanceId: 'embed-1', sourceStart: 0, sourceEnd: 8, target: 'sub/b' })
+    await s.send(id, { kind: 'hover.request', sessionId: id, docUri: DOC_URI, reqId: 2, instanceId: 'hover-1', sourceStart: 10, sourceEnd: 16, target: 'sub/c' })
+    // B 内图片（嵌入卡片在场）与 C 内链接（浮层在场）同时放行
+    await s.send(id, { kind: 'image.request', sessionId: id, docUri: DOC_URI, reqId: 3, src: './b-img.png', sourceDocUri: B_PATH })
+    await s.send(id, { kind: 'link.activate', sessionId: id, docUri: DOC_URI, href: 'd.md', srcStart: 0, srcEnd: 3, sourceDocUri: C_PATH })
+    expect(resolveCalls).toEqual([{ src: './b-img.png', sourceDocUri: B_PATH }])
+    expect(linkIntents).toEqual([{ href: 'd.md', srcStart: 0, srcEnd: 3, sourceDocUri: C_PATH }])
+    // 伪造来源仍丢弃
+    await s.send(id, { kind: 'image.request', sessionId: id, docUri: DOC_URI, reqId: 4, src: './x.png', sourceDocUri: 'D:\伪造.md' })
+    expect(resolveCalls).toHaveLength(1)
+  })
+})

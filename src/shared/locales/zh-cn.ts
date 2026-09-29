@@ -75,6 +75,9 @@ export const zhCn: Record<MessageKey, string> = {
   'setting.readableLineWidth.title': '可读行宽',
   'setting.readableLineWidth.description': '实时预览与阅读模式正文列的最大宽度：0 表示铺满可用宽度；设为具体数值后正文按该宽度限宽，在主编辑区内居中，右侧大纲栏展开时自动避让收缩。',
   'setting.readableLineWidthFill': '铺满',
+  /** #222 嵌入卡片限高（阅读模式嵌入内容超出后内部滚动） */
+  'setting.embedMaxHeight.title': '嵌入内容最大高度',
+  'setting.embedMaxHeight.description': '阅读模式嵌入卡片内容区的最大高度：较短笔记保持自然高度，超出该值的内容在卡片内部滚动。',
   'setting.codeblockCard.title': '代码块卡片',
   'setting.codeblockCard.description': '围栏代码块在光标离开时收起为卡片：隐藏围栏标记，显示语言头部横带。关闭后回到朴素源码围栏外观。',
   'setting.codeblockLineNumbers.title': '卡内行号',
@@ -356,6 +359,10 @@ export const zhCn: Record<MessageKey, string> = {
    *  （aria-label 与 title 同词；按钮是唯一操作入口，标题行悬停只负责显示） */
   'hover.content.fmExpand': '展开笔记属性',
   'hover.content.fmCollapse': '收起笔记属性',
+  /** #222 Reading 嵌入卡片：装载中文案与卡片头部打开入口的无障碍文案
+   *  （aria-label 与 title 同词；打开沿用 Vsidian 既有打开行为，不改写嵌入原文） */
+  'embed.loading': '正在加载嵌入内容…',
+  'embed.openTarget': '打开目标笔记',
 
   /** 反链面板（#197：四态与条目；形态改版批次：工具栏/排序/搜索/页头） */
   'backlinks.label': '反向链接',

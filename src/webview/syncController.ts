@@ -74,6 +74,10 @@ import {
   READABLE_LINE_WIDTH_KEY,
   READABLE_LINE_WIDTH_MAX,
   READABLE_LINE_WIDTH_MIN,
+  EMBED_MAX_HEIGHT_DEFAULT,
+  EMBED_MAX_HEIGHT_KEY,
+  EMBED_MAX_HEIGHT_MAX,
+  EMBED_MAX_HEIGHT_MIN,
   SHOW_LINE_NUMBERS_DEFAULT,
   SHOW_LINE_NUMBERS_KEY,
   SYMBOL_AUTOCOMPLETE_DEFAULT,
@@ -134,6 +138,7 @@ import {
   notifyHoverResult,
   setHoverPreviewContext,
 } from './hoverPopup'
+import { EmbedCardManager } from './embedCard'
 import { GRAPHIC_LANG_ATTR, MERMAID_CLASS_NAMES, MERMAID_CODE_ATTR, MERMAID_STATE_ATTR } from '../shared/mermaid'
 import { IMAGE_CLASS_NAMES, ImageResourceManager, isDirectImageSrc } from './imageResource'
 import { ImageVerifyScheduler } from './imageVerifyScheduler'
@@ -608,6 +613,9 @@ export class WebviewSyncController {
   private anchorFlashSince = 0
   /** 阅读视图虚拟化控制器（#7：接管阅读容器的按需挂载/回收/锚点定位） */
   private readingView: VirtualReadingView | undefined
+  /** #222 嵌入卡片管理器（Reading 正文嵌入：块挂载升级/回收，与 readingView
+   *  同生命周期；live 侧嵌入属 #223，不在此装配） */
+  private embedCards: EmbedCardManager | undefined
   /** CSS 片段 <link> 装配器（#128）：只增删文档级样式链，不触碰 CM6 状态；
    *  输入/选区/撤销/模式切换与阅读虚拟化天然不受影响（重挂载块继承文档样式） */
   private readonly snippetLoader = new SnippetLoader()
@@ -1072,6 +1080,14 @@ export class WebviewSyncController {
       send: (message) => this.bridge.postMessage(message),
       codeHighlight: () => this.codeCardConfig.highlight,
     })
+    // #222 嵌入卡片管理器：会话身份 + 只读消息通道 + 高亮/限高投影
+    //（dispose 随控制器释放；与 hoverPopup 上下文同源装配）
+    this.embedCards = new EmbedCardManager({
+      session: () => ({ sessionId: this.sessionId, docUri: this.docUri }),
+      send: (message) => this.bridge.postMessage(message),
+      codeHighlight: () => this.codeCardConfig.highlight,
+      maxHeightPx: () => this.embedMaxHeightPx(),
+    })
     this.readingView = new VirtualReadingView(this.readingContainer, {
       // #10 图片生命周期：块挂载预备装载，卸载释放（src 清空、条目回收）
       // #60 Mermaid：挂载即渲染 pending 容器（DOM 随块卸载 el.remove 释放）
@@ -1088,8 +1104,14 @@ export class WebviewSyncController {
         this.decorateImageChromeBlock(el)
         // #84 阅读代码块卡片：挂载即增强（幂等；mermaid 块类不同不命中）
         this.decorateReadingCodeCardBlock(el)
+        // #222 嵌入卡片：embed 块升级为引用卡片（占位引用行在此替换；
+        // 视口回收由 onBlockUnmounted 释放 B 视图并保留实例状态）
+        this.embedCards?.mountBlock(el)
       },
-      onBlockUnmounted: (el) => this.images?.detachWithin(el),
+      onBlockUnmounted: (el) => {
+        this.images?.detachWithin(el)
+        this.embedCards?.unmountBlock(el)
+      },
     })
     // 阅读滚动更新锚点（用户滚动即改变"当前位置"语义；短文档滚不动时
     // 锚点保持进入/定位时的值——视口读取无法表达目标，modeAnchor 是权威）。
@@ -1351,6 +1373,9 @@ export class WebviewSyncController {
     closeFmPopover()
     // #218 悬停浮层随卸载退出（清空上下文，同步关浮层释放实例）
     setHoverPreviewContext(null)
+    // #222 嵌入卡片随卸载退出（释放全部卡片 DOM、B 视图与状态库）
+    this.embedCards?.dispose()
+    this.embedCards = undefined
     setDiagramExportSender(null)
     setDiagramPopupDocSource(null)
     setImagePopupContext(null)
@@ -1484,6 +1509,7 @@ export class WebviewSyncController {
         this.applySymbolSelectionWrapSetting()
         this.applyTabEscapeSetting()
         this.applyReadableLineWidthSetting()
+        this.applyEmbedMaxHeightSetting()
         break
       case 'snippets.snapshot': {
         // #128 CSS 片段装载：diff 式装配 <link>（失败保留最近成功样式、
@@ -1620,8 +1646,11 @@ export class WebviewSyncController {
       }
       case 'hover.result': {
         // #218 悬停预览结果：转发浮层模块（instanceId + reqId 双守卫在
-        // 模块内——迟到/陈旧回包丢弃，不重开已关闭浮层）
+        // 模块内——迟到/陈旧回包丢弃，不重开已关闭浮层）。#222 起嵌入
+        // 卡片同消息通道（instanceId 前缀 embed- 分流，双投递安全——
+        // 各自实例守卫丢弃不匹配回包）
         notifyHoverResult(message)
+        this.embedCards?.notifyResult(message)
         break
       }
       case 'hover.test.pointer': {
@@ -2423,6 +2452,7 @@ export class WebviewSyncController {
         // 器各自丢弃，双投递安全）
         this.images?.handleResult(message)
         notifyHoverImageResult(message)
+        this.embedCards?.notifyImageResult(message)
         break
       case 'image.invalidate':
         // #201 失效通知：作废命中条目并重发请求（新版本 URL；旧 reqId 在途
@@ -2430,6 +2460,7 @@ export class WebviewSyncController {
         // B 图片同口径失效（命中条目重发 B 身份请求）
         this.images?.invalidate(message.srcs)
         notifyHoverImageInvalidate(message.srcs)
+        this.embedCards?.notifyImageInvalidate(message.srcs)
         break
       case 'image.wake':
         // #201 及时核验：窗口焦点回归/远程重连，有活跃图源立即触发一轮
@@ -2449,6 +2480,8 @@ export class WebviewSyncController {
         this.images?.invalidateAll()
         // #220 手动刷新全局失效：浮层内 B 图片同口径全量重挂（新代次戳 URI）
         invalidateHoverPopupImages()
+        // #222 嵌入卡片内 B 图片同口径全量重挂
+        this.embedCards?.invalidateImages()
         resetMermaidLoadFailure()
         break
       case 'view.state.request': {
@@ -2637,6 +2670,8 @@ export class WebviewSyncController {
       fmPopoverOpen: isFmPopoverOpen(),
       // #218 悬停预览观测：浮层开闭、内容态与块数（集成断言用）
       hoverPreview: hoverPopupProbe(),
+      // #222 嵌入卡片观测：在场卡片的状态/目标/块数/fm/限高（集成断言用）
+      readingEmbed: this.embedCards?.probe() ?? [],
     }
     this.bridge.postMessage(state)
   }
@@ -7193,6 +7228,22 @@ export class WebviewSyncController {
     }
     this.view?.requestMeasure()
     requestAnimationFrame(() => this.view?.requestMeasure())
+  }
+
+  /** #222 嵌入限高应用（settings.snapshot / settings.changed）：缺键/
+   *  越界/非数值回默认（协议是宽标量容器，类型语义校验归宿主，webview 侧
+   *  防御——与其他设置应用器一致）；遍历在场卡片热更内联 max-height */
+  private applyEmbedMaxHeightSetting(): void {
+    this.embedCards?.setMaxHeight(this.embedMaxHeightPx())
+  }
+
+  /** 嵌入限高当前值（设置投影；消费方 EmbedCardContext.maxHeightPx） */
+  private embedMaxHeightPx(): number {
+    const raw = this.settings?.[EMBED_MAX_HEIGHT_KEY]
+    return typeof raw === 'number' && Number.isFinite(raw) &&
+      raw >= EMBED_MAX_HEIGHT_MIN && raw <= EMBED_MAX_HEIGHT_MAX
+      ? raw
+      : EMBED_MAX_HEIGHT_DEFAULT
   }
 
   /** #84 增强单个阅读代码块（挂载钩子与重装饰共用入口） */

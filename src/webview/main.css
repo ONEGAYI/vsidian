@@ -3836,17 +3836,13 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
   overflow-wrap: break-word;
 }
 
-/* 只读契约：浮层内任务 checkbox 不响应指针（JS disabled 双保险） */
-.vsidian-hover-popup input[type="checkbox"] {
-  pointer-events: none;
-}
-
 /* ---- #220 悬停浮层笔记属性区（样式契约 chrome 域 hover-fm-section 条目；
    引用专属样式入口——仅作用于浮层内 frontmatter 块，主阅读视图的属性
    呈现不受影响） ---- */
 
 /* 属性区块：标题行成为悬停热区（hover/focus 显示切换按钮——不是悬停自动
    展开；按钮是唯一操作入口） */
+.vsidian-embed-card .vsidian-hover-fm .vsidian-fm-header,
 .vsidian-hover-popup .vsidian-hover-fm .vsidian-fm-header {
   position: relative;
 }
@@ -3854,6 +3850,7 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
 /* 展开/折叠按钮：默认透明且不接指针（保留 Tab 可达性——整体隐藏类声明
    会把按钮移出 Tab 序，键盘用户将永远无法到达）；标题行 hover 或按钮
    focus-visible 时显示并接指针 */
+.vsidian-embed-card .vsidian-hover-fm-toggle,
 .vsidian-hover-popup .vsidian-hover-fm-toggle {
   position: absolute;
   right: 6px;
@@ -3876,22 +3873,27 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
   transition: opacity 0.12s ease-out;
 }
 
+.vsidian-embed-card .vsidian-hover-fm .vsidian-fm-header:hover .vsidian-hover-fm-toggle,
+.vsidian-embed-card .vsidian-hover-fm-toggle:focus-visible,
 .vsidian-hover-popup .vsidian-hover-fm .vsidian-fm-header:hover .vsidian-hover-fm-toggle,
 .vsidian-hover-popup .vsidian-hover-fm-toggle:focus-visible {
   opacity: 1;
   pointer-events: auto;
 }
 
+.vsidian-embed-card .vsidian-hover-fm-toggle:focus-visible,
 .vsidian-hover-popup .vsidian-hover-fm-toggle:focus-visible {
   outline: 1px solid var(--vscode-focusBorder, #4fc1ff);
   outline-offset: 1px;
 }
 
 /* chevron 方向：默认向下（展开态）；收起态旋转 -90° 指向右（展开方向） */
+.vsidian-embed-card .vsidian-hover-fm-toggle svg,
 .vsidian-hover-popup .vsidian-hover-fm-toggle svg {
   display: block;
 }
 
+.vsidian-embed-card .vsidian-hover-fm-collapsed .vsidian-hover-fm-toggle svg,
 .vsidian-hover-popup .vsidian-hover-fm-collapsed .vsidian-hover-fm-toggle svg {
   transform: rotate(-90deg);
 }
@@ -3900,10 +3902,106 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
    展开 = 移除修饰类，行/源码回到阅读侧既有呈现。选择器带 #app 前缀并
    叠加双类：压过 #140 阅读侧行规则的特异性（#app … .vsidian-fm-row 为
    display:grid），源序兜底之外再留余量 */
+#app .vsidian-embed-card .vsidian-hover-fm.vsidian-hover-fm-collapsed .vsidian-fm-row,
 #app .vsidian-hover-popup .vsidian-hover-fm.vsidian-hover-fm-collapsed .vsidian-fm-row {
   display: none;
 }
 
+#app .vsidian-embed-card .vsidian-hover-fm.vsidian-hover-fm-collapsed > pre,
 #app .vsidian-hover-popup .vsidian-hover-fm.vsidian-hover-fm-collapsed > pre {
   display: none;
+}
+
+/* ---- #222 Reading 正文嵌入卡片（样式契约 content 域 reading-embed-card
+   条目；占位引用行 reading-embed-ref 条目）。卡片壳挂 Obsidian 别名
+   .markdown-embed（direct 级——主题/片段的嵌入容器规则天然命中）；
+   内容容器是嵌套的 .vsidian-view-reading，#app 正文样式随嵌套命中，
+   不复制第二套主题环境 ---- */
+
+/* 卡片壳：左侧引用块样式边条 + 边框圆角 + 微底色（区分正文段落） */
+#app .vsidian-view-reading .vsidian-reading-embed .vsidian-embed-card {
+  margin: 0.5em 0;
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+  border-left: 3px solid var(--vsidian-quote-bar-color);
+  border-radius: 6px;
+  background-color: var(--vscode-textBlockQuote-background, rgba(128, 128, 128, 0.06));
+  overflow: hidden;
+}
+
+/* 顶部栏：文件名居左、打开入口居右 */
+#app .vsidian-embed-card .vsidian-embed-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
+  background: var(--vscode-editorWidget-background, rgba(128, 128, 128, 0.07));
+}
+
+/* 文件名：描述色（成功后为目标根内相对路径） */
+#app .vsidian-embed-card .vsidian-embed-card-title {
+  font-size: 0.92em;
+  color: var(--vscode-descriptionForeground, inherit);
+  overflow-wrap: anywhere;
+}
+
+/* 右上角跳转目标文档入口：图标按钮（沿用现有 Vsidian 打开行为） */
+#app .vsidian-embed-card .vsidian-embed-card-open {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--vscode-icon-foreground, inherit);
+  cursor: pointer;
+}
+
+#app .vsidian-embed-card .vsidian-embed-card-open:hover,
+#app .vsidian-embed-card .vsidian-embed-card-open:focus-visible {
+  border-color: var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
+  background: var(--vscode-editor-background, transparent);
+}
+
+#app .vsidian-embed-card .vsidian-embed-card-open:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #4fc1ff);
+  outline-offset: 1px;
+}
+
+/* 内容滚动区：长内容内部滚动。max-height 缺省 480（规格一期初值），
+   设置驱动的内联 max-height 优先（embed.maxHeight 设置项） */
+#app .vsidian-embed-card .vsidian-embed-card-scroll {
+  overflow: auto;
+  max-height: 480px;
+}
+
+/* 就地状态行（loading / 错误分态） */
+#app .vsidian-embed-card .vsidian-embed-card-state {
+  padding: 14px 12px;
+  color: var(--vscode-descriptionForeground, inherit);
+  overflow-wrap: anywhere;
+}
+
+/* 卡片内 Reading 容器贴边微收（正文样式随嵌套命中，不复制主题） */
+#app .vsidian-embed-card .vsidian-embed-card-scroll .vsidian-view-reading {
+  padding: 8px 12px;
+}
+
+/* 占位引用行（一层展开/悬停浮层内的嵌入形态）：沿用双链链接形态，
+   保留 ![[ ]] 文本可辨识；与内部 Reading 的正文点击语义同通道 */
+.vsidian-embed-ref {
+  font-family: inherit;
+}
+
+/* 只读契约：嵌入卡片内任务 checkbox 不响应指针（JS disabled 双保险；
+   与悬停浮层同款规则并列，既有浮层选择器置尾保持契约匹配） */
+.vsidian-embed-card input[type="checkbox"],
+.vsidian-hover-popup input[type="checkbox"] {
+  pointer-events: none;
 }

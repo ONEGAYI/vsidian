@@ -42,6 +42,9 @@ export const READING_CLASS_NAMES = {
   mathBlock: 'vsidian-reading-math',
   /** #60 Mermaid 围栏块（内含挂载后渲染的 .vsidian-mermaid 容器） */
   mermaidBlock: 'vsidian-reading-mermaid',
+  /** #222 嵌入块（独占行；主文档挂载时内含嵌入卡片，嵌入内容/浮层内为
+   *  占位引用行） */
+  embedBlock: 'vsidian-reading-embed',
   /** #7 视口占位 spacer（屏外块的高度占位，非内容节点） */
   spacer: 'vsidian-reading-spacer',
   spacerTop: 'vsidian-reading-spacer-top',
@@ -97,6 +100,9 @@ function blockClassNames(block: ReadingBlock): string[] {
     case 'mermaid':
       names.push(READING_CLASS_NAMES.mermaidBlock)
       break
+    case 'embed':
+      names.push(READING_CLASS_NAMES.embedBlock)
+      break
   }
   return names
 }
@@ -115,6 +121,11 @@ export function createReadingBlockElement(block: ReadingBlock, text: string): HT
   sanitizeReadingDom(el)
   if (block.kind === 'list') {
     convertTaskItems(el, text)
+  }
+  if (block.kind === 'embed' && block.embedInner !== undefined) {
+    // #222 嵌入 inner 原文随块元素携带（挂载适配层出站读取的单一来源，
+    // 与块模型同源不重复解析）
+    el.dataset['vsidianEmbedInner'] = block.embedInner
   }
   return el
 }

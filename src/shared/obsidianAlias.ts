@@ -55,6 +55,9 @@ export const OBSIDIAN_DOM_ALIASES = {
   readingFrontmatter: ['markdown-frontmatter'] as const,
   /** 阅读双链（a 级类名） */
   readingWikilink: ['internal-link'] as const,
+  /** #222 阅读嵌入卡片壳（Obsidian 嵌入容器类名——主题/片段的嵌入容器
+   *  规则天然命中；卡片在 #app 正文流内，无需复制第二套主题环境） */
+  embedCard: ['markdown-embed'] as const,
 } as const
 
 /**
@@ -175,6 +178,7 @@ const DOM_ALIAS_BY_VSIDIAN_CLASS: ReadonlyMap<string, readonly string[]> = (() =
   m.set('vsidian-wikilink', OBSIDIAN_DOM_ALIASES.wikilink)
   m.set('vsidian-reading-task', OBSIDIAN_DOM_ALIASES.readingTask)
   m.set('vsidian-reading-frontmatter', OBSIDIAN_DOM_ALIASES.readingFrontmatter)
+  m.set('vsidian-embed-card', OBSIDIAN_DOM_ALIASES.embedCard)
   return m
 })()
 

@@ -38,18 +38,21 @@
 // mount 注入、dispose 清空）。
 import {
   ImageResourceManager,
-  isDirectImageSrc,
   type ImageResultPayload,
 } from './imageResource'
-import { createReadingContainer, prepareReadingImages, READING_CLASS_NAMES } from './readingView'
+import { createReadingContainer, READING_CLASS_NAMES } from './readingView'
 import { VirtualReadingView } from './readingVirtualView'
-import { renderGraphicBlockInto } from './graphicRenderers'
-import { decorateReadingCodeCard, isReadingCodeBlock } from './readingCodeCard'
 import { claimPopup, releasePopup } from './popupMutex'
 import { WIKILINK_CLASS_NAMES } from '../shared/wikilink'
-import { buildFrontmatterHeaderHtml, escapeHtml } from '../shared/frontmatterTable'
+import {
+  createSourcedImageManager as createSourcedImageManagerImpl,
+  mountRefContentBlock,
+  refErrorText,
+  REF_FM_CLASS_NAMES,
+  type RefFmController,
+} from './refReadingContent'
 import { t } from '../shared/i18n'
-import type { HoverPreviewFailReason, HoverPreviewResult, WebviewToHost } from '../shared/protocol'
+import type { HoverPreviewResult, WebviewToHost } from '../shared/protocol'
 import {
   HOVER_POPUP_DEFAULT_WIDTH,
   HOVER_POPUP_MAX_HEIGHT,
@@ -65,26 +68,6 @@ export const HOVER_POPUP_CLASS_NAMES = {
   /** 就地状态行（loading / 错误分态） */
   state: 'vsidian-hover-popup-state',
 } as const
-
-/** #220 笔记属性区稳定类名（样式契约 chrome 域 hover-fm-section 条目同源） */
-export const HOVER_FM_CLASS_NAMES = {
-  /** 属性区修饰（挂浮层内 frontmatter 块；仅全文引用） */
-  section: 'vsidian-hover-fm',
-  /** 展开/折叠切换按钮（标题栏内；hover/focus 显示） */
-  toggle: 'vsidian-hover-fm-toggle',
-  /** 收起态修饰（行与降级源码块隐藏，标题行保留） */
-  collapsed: 'vsidian-hover-fm-collapsed',
-} as const
-
-/** 与 shared/frontmatterTable 的 buildFrontmatterHeaderHtml 同源的标题栏
- *  类名（查询用；shared 侧为内联字符串无导出常量） */
-const FM_HEADER_CLASS = 'vsidian-fm-header'
-
-/** 切换按钮 chevron（向下 = 展开；收起态 CSS 旋转 -90° 指向右） */
-const HOVER_FM_TOGGLE_ICON_SVG =
-  '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" ' +
-  'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-  '<path d="M4 6l4 4 4-4"></path></svg>'
 
 /** 工程初值（规格：悬停开闭延迟按现有约定与测量确定；#221 设置项接入后
  *  仍以此为缺省）——进入链接 300ms 后开（防指针扫过误开），离开联合域
@@ -177,7 +160,7 @@ export function hoverPopupProbe(): {
   if (!popup || popup.display !== 'content') {
     return { open: popup !== null, state: popup?.display ?? 'loading', note: popup?.note ?? '', blocks: 0, scope: popup?.scope ?? '', fm: 'none', imageSrcs: [] }
   }
-  const fmSection = popup.contentEl.querySelector(`.${HOVER_FM_CLASS_NAMES.section}`)
+  const fmSection = popup.contentEl.querySelector(`.${REF_FM_CLASS_NAMES.section}`)
   const imageSrcs: string[] = []
   for (const img of Array.from(popup.contentEl.querySelectorAll('img'))) {
     const src = img.getAttribute('src')
@@ -278,106 +261,33 @@ function applyDisplay(state: HoverPopupState, display: 'loading' | 'content' | '
   }
 }
 
-/** #220 B 身份资源管理器：请求一律附 sourceDocUri（宿主按 B 目录解析，
- *  会话守卫字段仍是面板自身）。无周期核验接线——浮层短生命周期（边界：
- *  文件变化的自动失效广播不在本票，手动刷新通道见 invalidateHoverPopupImages） */
+/** #220 B 身份资源管理器（共享工厂 refReadingContent.createSourcedImageManager；
+ *  无周期核验接线——浮层短生命周期，文件变化的自动失效广播不在本票，
+ *  手动刷新通道见 invalidateHoverPopupImages） */
 function createSourcedImageManager(state: HoverPopupState): ImageResourceManager {
-  return new ImageResourceManager({
-    isDirectSrc: isDirectImageSrc,
-    requestHost: (src, reqId) => {
-      const ctx = context
-      const session = ctx?.session()
-      if (!ctx || !session?.sessionId || !session.docUri || !state.targetFsPath) {
-        return // 无会话或无 B 身份：不发（宿主无从解析）
-      }
-      ctx.send({
-        kind: 'image.request',
-        sessionId: session.sessionId,
-        docUri: session.docUri,
-        reqId,
-        src,
-        sourceDocUri: state.targetFsPath,
-      })
-    },
+  const ctx = context
+  return createSourcedImageManagerImpl({
+    session: () => (ctx ? ctx.session() : { sessionId: undefined, docUri: undefined }),
+    send: (message) => ctx?.send(message),
+    sourceDocUri: () => state.targetFsPath,
   })
 }
 
-/** 块挂载钩子（虚拟化与无布局回退两路径共用）：只读装配 + B 身份图片 +
- *  图形块渲染 + 代码高亮 + 笔记属性区 */
+/** 块挂载钩子（虚拟化与无布局回退两路径共用）：共享只读装配（#222 提取
+ *  至 refReadingContent.mountRefContentBlock——嵌入卡片同款消费） */
 function mountBlockInto(state: HoverPopupState, el: HTMLElement): void {
-  for (const box of Array.from(el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))) {
-    box.disabled = true
-  }
-  if (state.bImages) {
-    prepareReadingImages(el, state.bImages)
-  }
-  renderGraphicBlockInto(el)
-  // #220 代码高亮：朴素形态（card=false——无头部/行号/按钮；token span 直
-  // 接注入 code）。卡片工具条不进浮层：复制按钮的会话语义（codeblock.copy
-  // 按面板文档 EOL 归一）与折叠/折行的全局联动属主视图行为
-  if (isReadingCodeBlock(el)) {
-    decorateReadingCodeCard(el, {
-      config: {
-        card: false,
-        lineNumbers: false,
-        copyButton: false,
-        highlight: context?.codeHighlight?.() ?? true,
-      },
-      folded: false,
-      onCopy: () => undefined,
-      onFoldToggle: () => undefined,
-    })
-  }
-  applyHoverFmSection(state, el)
+  mountRefContentBlock(el, {
+    images: state.bImages,
+    codeHighlight: context?.codeHighlight?.() ?? true,
+    fm: state.scope === 'full' ? fmControllerOf(state) : null,
+  })
 }
 
-/** #220 笔记属性区施加（幂等；虚拟化重挂载时按 state.fmExpanded 重建）：
- *  仅全文引用（章节/块引用不附带属性区）；成型态复用阅读侧标题栏，降级
- *  态合成同构标题栏（源码原文不丢弃，仅收起时隐藏） */
-function applyHoverFmSection(state: HoverPopupState, el: HTMLElement): void {
-  if (state.scope !== 'full' || !el.classList.contains(READING_CLASS_NAMES.frontmatter)) {
-    return
-  }
-  el.classList.add(HOVER_FM_CLASS_NAMES.section)
-  let header = el.querySelector<HTMLElement>(`.${FM_HEADER_CLASS}`)
-  if (!header) {
-    // 降级 frontmatter：合成与成型态同构的标题栏（图标 + 标题同源构件）
-    header = document.createElement('div')
-    header.className = FM_HEADER_CLASS
-    header.innerHTML = buildFrontmatterHeaderHtml(escapeHtml(t('frontmatter.title')))
-    el.insertBefore(header, el.firstChild)
-  }
-  let btn = header.querySelector<HTMLButtonElement>(`.${HOVER_FM_CLASS_NAMES.toggle}`)
-  if (!btn) {
-    btn = document.createElement('button')
-    btn.type = 'button'
-    btn.className = HOVER_FM_CLASS_NAMES.toggle
-    btn.innerHTML = HOVER_FM_TOGGLE_ICON_SVG
-    const toggleBtn = btn
-    toggleBtn.addEventListener('click', (event) => {
-      // 热区语义：按钮是唯一操作入口（标题行 hover 只负责显示按钮）；
-      // 阻断冒泡以免触发浮层级点击语义
-      event.stopPropagation()
-      state.fmExpanded = !state.fmExpanded
-      const section = toggleBtn.closest<HTMLElement>(`.${HOVER_FM_CLASS_NAMES.section}`)
-      if (section) {
-        applyFmCollapsedTo(section, state.fmExpanded)
-      }
-    })
-    header.appendChild(btn)
-  }
-  applyFmCollapsedTo(el, state.fmExpanded)
-}
-
-/** 折叠态施加到属性区块（类 + 按钮的 aria 与文案） */
-function applyFmCollapsedTo(section: HTMLElement, expanded: boolean): void {
-  section.classList.toggle(HOVER_FM_CLASS_NAMES.collapsed, !expanded)
-  const btn = section.querySelector<HTMLButtonElement>(`.${HOVER_FM_CLASS_NAMES.toggle}`)
-  if (btn) {
-    btn.setAttribute('aria-expanded', String(expanded))
-    const label = expanded ? t('hover.content.fmCollapse') : t('hover.content.fmExpand')
-    btn.setAttribute('aria-label', label)
-    btn.title = label
+/** 属性区折叠状态机（容器侧实现：fmExpanded 单一事实源在本实例 state） */
+function fmControllerOf(state: HoverPopupState): RefFmController {
+  return {
+    expanded: () => state.fmExpanded,
+    toggle: () => (state.fmExpanded = !state.fmExpanded),
   }
 }
 
@@ -631,7 +541,7 @@ export function notifyHoverResult(message: HoverPreviewResult): void {
   if (message.ok) {
     applyHoverContent(popup, message)
   } else {
-    applyDisplay(popup, 'error', hoverErrorText(message.reason, popup.anchor.getAttribute('href') ?? '', message.anchor))
+    applyDisplay(popup, 'error', refErrorText(message.reason, popup.anchor.getAttribute('href') ?? '', message.anchor))
   }
   position(popup)
 }
@@ -652,26 +562,6 @@ export function notifyHoverImageInvalidate(srcs: readonly string[]): void {
  *  （活跃槽位重新走宿主解析，新 URI 带新代次戳） */
 export function invalidateHoverPopupImages(): void {
   popup?.bImages?.invalidateAll()
-}
-
-/** 错误分态 → 就地 i18n 文案（不弹宿主通知；anchor-missing 附锚点原文） */
-function hoverErrorText(reason: HoverPreviewFailReason, target: string, anchor?: string): string {
-  switch (reason) {
-    case 'unsupported':
-      return t('hover.errorUnsupported')
-    case 'no-workspace':
-      return t('hover.errorNoWorkspace')
-    case 'escape':
-      return t('hover.errorEscape')
-    case 'not-found':
-      return t('hover.errorNotFound', { target })
-    case 'non-markdown':
-      return t('hover.errorNonMarkdown', { target })
-    case 'read-failed':
-      return t('hover.errorReadFailed')
-    case 'anchor-missing':
-      return t('hover.errorAnchorMissing', { target, anchor: anchor ?? '' })
-  }
 }
 
 /** 测试隔离：清空模块级单例状态（生产不调用） */

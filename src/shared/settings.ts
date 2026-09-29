@@ -210,6 +210,23 @@ export const READABLE_LINE_WIDTH_MAX = 1600
 export const READABLE_LINE_WIDTH_STEP = 20
 
 /**
+ * #222「嵌入最大高度」：Reading 正文嵌入卡片内容滚动区的限高（px）。
+ * 短内容自然高度不受影响；超限内容内部滚动。规格一期初值 480px（视觉
+ * 验收可校准的工程初值，不构成完成时限承诺）。键与消费方
+ * （syncController 的 applyEmbedMaxHeightSetting → EmbedCardManager）
+ * 成对导出，避免字面量漂移。
+ */
+export const EMBED_MAX_HEIGHT_KEY = 'embed.maxHeight'
+/** 默认 480px（规格一期初值） */
+export const EMBED_MAX_HEIGHT_DEFAULT = 480
+/** 值域下限：低于一屏的卡片没有阅读价值 */
+export const EMBED_MAX_HEIGHT_MIN = 160
+/** 值域上限：更高需求属全屏阅读场景（直接打开原文档） */
+export const EMBED_MAX_HEIGHT_MAX = 2000
+/** 步进 20px（滑块粒度） */
+export const EMBED_MAX_HEIGHT_STEP = 20
+
+/**
  * 语言设置键（#93 预留，#96 注册定义与「常规」分区）：值域 auto | zh-cn |
  * en（StringEnumSettingDefinition），解析与语言包装配见 shared/locales。
  * 键常量先行导出——宿主 HTML 生成点读取快照中的该键决定注入语言（缺省
@@ -380,6 +397,19 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     titleKey: 'setting.readableLineWidth.title',
     descriptionKey: 'setting.readableLineWidth.description',
     zeroLabelKey: 'setting.readableLineWidthFill',
+    unit: 'px',
+  },
+  {
+    // #222 嵌入最大高度（embed.* 域 → 编辑器页「显示」组：非 symbol/
+    // codeblock/image 前缀的 editor 域外键由 displayDefs 收纳）
+    key: EMBED_MAX_HEIGHT_KEY,
+    type: 'number',
+    default: EMBED_MAX_HEIGHT_DEFAULT,
+    min: EMBED_MAX_HEIGHT_MIN,
+    max: EMBED_MAX_HEIGHT_MAX,
+    step: EMBED_MAX_HEIGHT_STEP,
+    titleKey: 'setting.embedMaxHeight.title',
+    descriptionKey: 'setting.embedMaxHeight.description',
     unit: 'px',
   },
 ]

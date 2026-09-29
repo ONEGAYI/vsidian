@@ -1904,19 +1904,20 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "content-limits",
     "kind": "limitation",
     "target": ".markdown-embed / 嵌入结构",
-    "purpose": "嵌入（![[…]] 等）结构未提供（双链残缺形态按原文显示）；blockquote 块已支持。",
+    "purpose": "嵌入（![[…]]）的部分边界（#222 起独占正文一行的嵌入在 Reading 侧渲染为引用卡片，见 reading-embed-card）：混排（行内有其他内容）、列表/引用容器与表格格内的嵌入保留源文（1.5 期接入）；父文档 Live 侧嵌入与源码显隐未提供（#223）；递归展开不提供（一层展开内为占位引用行）；嵌入内容写入不支持。双链残缺形态按原文显示；blockquote 块已支持。",
     "views": [
       "live",
       "reading"
     ],
-    "dom": "无嵌入容器。",
+    "dom": "无嵌入容器的场景：非独占行/容器内的 ![[…]] 按原文文本呈现；live 侧嵌入行按源文。",
     "example": "",
     "obsidian": {
       "counterpart": ".markdown-embed",
       "support": "none"
     },
     "verification": [
-      "清单即边界"
+      "单元 readingBlocks：混排/容器/表格/代码区域不产 embed 块（识别矩阵）",
+      "单元 wikilinkEmbed：扫描器与独占行判定矩阵"
     ],
     "introduced": "#11（2026-09-24）"
   },
@@ -3484,7 +3485,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "hover-preview",
     "kind": "selector",
     "target": ".vsidian-hover-fm（浮层内笔记属性区修饰，挂 frontmatter 块；.vsidian-hover-fm-toggle 展开/折叠按钮；.vsidian-hover-fm-collapsed 收起态修饰）",
-    "purpose": "悬停浮层的笔记属性区（#220 引用 Reading 内容）：仅全文引用显示——默认折叠，标题整行是悬停热区（hover 或按钮 focus-visible 显示切换按钮，非悬停自动展开），点击按钮切换展开/收起；本次打开内保留展开状态（目标内容变化引发的重建不重置），重新打开恢复折叠。成型 frontmatter 复用阅读侧标题栏与键值行（呈现与类型/降级边界沿用 frontmatterTable 判定，不扩大），降级形态合成同构标题栏并保留转义源码原文（收起时隐藏）。章节/块引用与无 frontmatter 文档不显示属性区；无任何添加/删除/编辑或任务勾选写回入口。仅作用于浮层（选择器带 .vsidian-hover-popup 前缀），主阅读视图的属性呈现不受影响。",
+    "purpose": "引用内容的笔记属性区（#220 悬停浮层首创，#222 起嵌入卡片同款共用——共享装配 refReadingContent，选择器并列 .vsidian-hover-popup / .vsidian-embed-card 前缀）：仅全文引用显示——默认折叠，标题整行是悬停热区（hover 或按钮 focus-visible 显示切换按钮，非悬停自动展开），点击按钮切换展开/收起；本次打开内保留展开状态（目标内容变化引发的重建不重置），浮层重新打开恢复折叠、嵌入卡片随实例状态（视口回收不清除）。成型 frontmatter 复用阅读侧标题栏与键值行（呈现与类型/降级边界沿用 frontmatterTable 判定，不扩大），降级形态合成同构标题栏并保留转义源码原文（收起时隐藏）。章节/块引用与无 frontmatter 文档不显示属性区；无任何添加/删除/编辑或任务勾选写回入口。主阅读视图自身的属性呈现不受影响。",
     "views": [
       "reading"
     ],
@@ -3498,9 +3499,60 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "verification": [
       "单元 hoverPopupCssContract：热区/按钮透明与指针/悬停与 focus-visible 显示/收起隐藏/chevron 旋转钉规则",
       "单元 hoverPopup：属性区状态机（默认折叠/切换/刷新保留/重开复位/范围门控/降级合成标题栏）",
-      "浏览器 hoverPreview（#220）：真实指针折叠交互、键盘 Enter 操作、明暗主题下标题行与按钮可见性绘制层断言"
+      "浏览器 hoverPreview（#220）：真实指针折叠交互、键盘 Enter 操作、明暗主题下标题行与按钮可见性绘制层断言",
+      "单元 embedCard（#222）：嵌入卡片属性区状态机与视口回收重挂的状态保持"
     ],
     "introduced": "#220（2026-09-30）"
+  },
+  {
+    "id": "reading-embed-card",
+    "domain": "content",
+    "category": "link-image-wikilink",
+    "kind": "selector",
+    "target": ".vsidian-embed-card（卡片壳，挂 .markdown-embed 别名；.vsidian-embed-card-header 顶部栏 / -title 文件名 / -open 打开入口 / -scroll 内容滚动区 / -state 状态行）",
+    "purpose": "Reading 正文嵌入卡片（#222）：独占正文一行的 ![[…]] 在阅读视图替换为引用卡片——左侧引用块样式边条、顶部文件名（成功后为目标根内相对路径）、右上角跳转目标文档入口（沿用 Vsidian 既有打开行为，不改写引用原文）。内容为目标的只读 Reading 视图（复用悬停文档访问通道装载全文/章节/块）；短内容自然高度，长内容内部滚动，限高默认 480px、经设置页 embed.maxHeight 调整（内联 max-height 优先于规则缺省）。卡片在 #app 正文流内——主题变量与 CSS 片段随嵌套天然命中，卡片壳的 Obsidian 别名（.markdown-embed）让嵌入容器规则同样命中。",
+    "views": [
+      "reading"
+    ],
+    "states": "装载中（状态行文案，内容区隐藏）/ 装载成功（内容滚动区在场，任务 checkbox 禁用、属性区默认折叠）/ 失败分态（状态行就地 i18n 文案，不弹宿主通知）。视口回收：卡片 DOM 与目标内容视图释放，属性展开与滚动位置保留（重挂恢复）；父文档会话内装载缓存零重发。",
+    "dom": "挂阅读视图的嵌入块（.vsidian-reading-embed，data-vsidian-embed-inner 携带目标原文）内；卡片壳 .vsidian-embed-card 同时挂 .markdown-embed（别名桥 obsidianAlias 同源表）；内容区是嵌套的 .vsidian-view-reading 容器；打开入口为真实 <button type=\"button\">（aria-label 用 i18n 词条 embed.openTarget）。",
+    "example": "#app .vsidian-view-reading .vsidian-reading-embed .vsidian-embed-card {\n  border-left: 3px solid var(--vsidian-quote-bar-color);\n}",
+    "obsidian": {
+      "counterpart": ".markdown-embed（Obsidian 阅读嵌入容器）",
+      "support": "direct"
+    },
+    "aliasTargets": [
+      "markdown-embed"
+    ],
+    "verification": [
+      "单元 embedCardCssContract（#222）：边条/限高/占位行/只读 checkbox 规则钉住",
+      "单元 embedCard：挂载升级、装载、一层展开、状态保持、限高热更、探针",
+      "别名桥一致性：test/unit/styleContract 与 test/unit/obsidianAlias（vsidian-embed-card ↔ markdown-embed）"
+    ],
+    "introduced": "#222（2026-09-30）"
+  },
+  {
+    "id": "reading-embed-ref",
+    "domain": "content",
+    "category": "link-image-wikilink",
+    "kind": "selector",
+    "target": ".vsidian-embed-ref（占位引用行，挂阅读双链 a 级）",
+    "purpose": "嵌入占位引用行（#222 一层展开）：引用内容（悬停浮层或嵌入卡片内的 Reading 视图）中的独占行嵌入不递归装载——渲染为可打开的引用占位，文本保留 ![[显示]] 形态可辨识；点击经所在容器的链接委托按来源文档身份打开（宿主 sourceDocUri 语义）。占位目标按直接来源文档的目录解析。",
+    "views": [
+      "reading"
+    ],
+    "states": "常驻（引用内容内的嵌入行）；点击跳转、无悬停浮层叠加（嵌入内容域停止 mouseover/mouseout 冒泡）。",
+    "dom": "嵌入块 html 内的 <a class=\"vsidian-wikilink vsidian-embed-ref\" href=\"目标原文\">（href 为 | 之前原文，与阅读双链 a 同口径）；主文档的嵌入块挂载时整块替换为嵌入卡片（占位行不出现）。",
+    "example": ".vsidian-embed-ref {\n  font-family: inherit;\n}",
+    "obsidian": {
+      "counterpart": "（Obsidian 嵌入递归展开，无占位形态）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 readingBlocks：embed 块占位 html 形态（wikilink 类 + 嵌入修饰类 + href 口径）",
+      "单元 embedCard：一层展开不嵌套装载、占位点击按 B 身份出站"
+    ],
+    "introduced": "#222（2026-09-30）"
   }
 ] as readonly StyleContractEntry[]
 
@@ -4560,11 +4612,27 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "hover-fm-section": {
-    "purpose": "The note-properties section of the hover popup (#220 referenced reading content): shown for full-document references only — collapsed by default, the whole header row is the hover hot zone (hovering it or focusing the button reveals the toggle button; hovering never auto-expands), and clicking the button toggles expansion. The expanded state persists for the current open (rebuilds caused by target-content changes do not reset it); reopening the popup restores collapsed. A well-formed frontmatter reuses the reading-side header and key-value rows (presentation and type/degradation boundaries follow the frontmatterTable rules, not widened); the degraded form synthesizes a structurally identical header and keeps the escaped raw source (hidden while collapsed). Section/block references and documents without frontmatter show no properties section; there is no add/delete/edit or task-check write-back entry at all. Scoped to the popup only (selectors are prefixed with .vsidian-hover-popup) — the main reading view properties presentation is unaffected.",
+    "purpose": "The note-properties section of referenced reading content (introduced by the #220 hover popup; shared with the #222 embed cards via the common assembly in refReadingContent — selectors list both the .vsidian-hover-popup and .vsidian-embed-card scopes): shown for full-document references only — collapsed by default, the whole header row is the hover hot zone (hovering it or focusing the button reveals the toggle button; hovering never auto-expands), and clicking the button toggles expansion. The expanded state persists for the current open (rebuilds caused by target-content changes do not reset it); reopening the popup restores collapsed, and an embed card keeps it per instance state (viewport recycling does not clear it). A well-formed frontmatter reuses the reading-side header and key-value rows (presentation and type/degradation boundaries follow the frontmatterTable rules, not widened); the degraded form synthesizes a structurally identical header and keeps the escaped raw source (hidden while collapsed). Section/block references and documents without frontmatter show no properties section; there is no add/delete/edit or task-check write-back entry at all. The main reading view properties presentation is unaffected.",
     "states": "Collapsed (default, vsidian-hover-fm-collapsed — property rows and the degraded source block get display:none, the header row stays) / expanded (modifier removed); the button is opacity:0 + pointer-events:none by default (no wholesale hiding declarations — Tab reachability is preserved), shown and pointer-enabled on header :hover or button :focus-visible; the chevron points down when expanded and rotates -90° (rightward) when collapsed. Internal structure of an interaction-state popup — not part of the static probes; collapse/hot-zone/keyboard interactions and light/dark-theme visibility are verified behaviorally by the browser hoverPreview suite.",
     "dom": "Attached to the frontmatter block (.vsidian-reading-frontmatter) inside the #app popup (.vsidian-hover-popup); the toggle is a real <button type=\"button\"> (Enter/Space activate natively), with aria-expanded following the state and aria-label/title from the i18n entries (hover.content.fmExpand/fmCollapse).",
     "obsidian": {
       "counterpart": ".metadata-container and .collapse-indicator (the Obsidian properties-collapse direction; the internal structure is closed-source and not promised)"
+    }
+  },
+  "reading-embed-card": {
+    "purpose": "The reading-view embed card (#222): a line-owning ![[…]] in the reading flow is replaced by a reference card — a quote-style accent bar on the left, the file name on top (the target root-relative path once loaded), and an open-target entry at the top right (reusing the existing Vsidian open behavior, never editing the embed source). The content is a read-only reading view of the target (full document/section/block, loaded through the hover document-access channel); short content keeps its natural height while longer content scrolls internally, capped at 480px by default and adjustable via the embed.maxHeight setting (the inline max-height takes precedence over the rule default). The card lives in the #app content flow — theme variables and CSS snippets match through nesting, and the .markdown-embed alias on the card shell lets embed-container rules match as well.",
+    "states": "Loading (a state line with the i18n text, content area hidden) / loaded (the content scroll area present, task checkboxes disabled, the properties section collapsed by default) / a failure state (the state line shows the localized error text in place, no host notification). On viewport recycling the card DOM and the target content view are released while the properties expansion and scroll position are kept (restored on remount); within the parent session the loaded content is cached and never re-requested.",
+    "dom": "Inside the reading-view embed block (.vsidian-reading-embed, with data-vsidian-embed-inner carrying the raw target); the card shell .vsidian-embed-card also carries the .markdown-embed alias (same-source table in obsidianAlias); the content area is a nested .vsidian-view-reading container; the open entry is a real <button type=\"button\"> (aria-label from the i18n entry embed.openTarget).",
+    "obsidian": {
+      "counterpart": ".markdown-embed (the Obsidian reading embed container)"
+    }
+  },
+  "reading-embed-ref": {
+    "purpose": "The embed placeholder reference line (#222 one-level expansion): a line-owning embed inside referenced reading content (hover popup or embed card) is not loaded recursively — it renders as an openable reference placeholder whose text keeps the recognizable ![[display]] form; clicking goes through the containing view link delegation and opens it with the source-document identity (the host sourceDocUri semantics). The placeholder target resolves relative to the direct source document.",
+    "states": "Ever-present (the embed lines inside referenced content); click navigates, with no hover-popup stacking (the embed content domain stops mouseover/mouseout propagation).",
+    "dom": "An <a class=\"vsidian-wikilink vsidian-embed-ref\" href=\"raw target\"> inside the embed block html (the href is the raw text before |, same convention as the reading wikilink anchor); when the parent-document embed block mounts it is replaced wholesale by the embed card (the placeholder line never appears there).",
+    "obsidian": {
+      "counterpart": "(Obsidian expands embeds recursively; there is no placeholder form)"
     }
   }
 } as Readonly<Record<string, StyleContractEntryOverride>>

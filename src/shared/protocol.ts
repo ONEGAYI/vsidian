@@ -621,6 +621,18 @@ export type WebviewToHost =
         fm?: 'none' | 'collapsed' | 'expanded'
         imageSrcs?: string[]
       }
+      /** #222 嵌入卡片观测：在场卡片逐枚的嵌入目标原文、状态
+       *  （loading/content/error）、目标标识（成功为根内相对路径/失败为
+       *  错误文案）、内容块数、语义范围、属性区三态与限高（旧 webview 缺省） */
+      readingEmbed?: Array<{
+        inner: string
+        state: 'loading' | 'content' | 'error'
+        note: string
+        blocks: number
+        scope: 'full' | 'heading' | 'block' | ''
+        fm: 'none' | 'collapsed' | 'expanded'
+        maxHeightPx: number
+      }>
     }
       /** 阅读视图性能探针回报（#7）：滚动往返期间的挂载/回收与解析观测 */
   | {
@@ -2436,6 +2448,16 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
             v.hoverPreview.fm === 'collapsed' || v.hoverPreview.fm === 'expanded') &&
           (v.hoverPreview.imageSrcs === undefined ||
             (Array.isArray(v.hoverPreview.imageSrcs) && v.hoverPreview.imageSrcs.every(isString))))) &&
+        (v.readingEmbed === undefined ||
+          (Array.isArray(v.readingEmbed) && v.readingEmbed.every((e: unknown) =>
+            isObject(e) &&
+            isString(e.inner) &&
+            (e.state === 'loading' || e.state === 'content' || e.state === 'error') &&
+            isString(e.note) &&
+            isNonNegativeInt(e.blocks) &&
+            (e.scope === 'full' || e.scope === 'heading' || e.scope === 'block' || e.scope === '') &&
+            (e.fm === 'none' || e.fm === 'collapsed' || e.fm === 'expanded') &&
+            isNonNegativeInt(e.maxHeightPx)))) &&
         (v.typography === undefined || isTypographyProbe(v.typography))
       )
     case 'reading.perf.report':

@@ -205,16 +205,24 @@ interface PanelEntry {
   /** webview 曾在会话内重载（ready 重复到达，B-2）：暂停面板复制未确认
    *  输入时跳过面板查询（重载后 view.state 是权威全文，不代表冲突前输入） */
   reloaded: boolean
-  /** #220 悬停来源记录：本面板最近一次 hover.result 成功送达的目标 fsPath
-   *  ——来源资源守卫的比对基准（image.request / link.activate /
-   *  wikilink.activate 的 sourceDocUri 须与之相等才放行；一次一个浮层，
-   *  单值即够，成功送达即覆盖）。目标本身经 resolveVaultLinkFile 的
-   *  ADR-0008 根内语义解析，记录在案 = 来源已受根边界约束 */
+  /** #220/#222 悬停来源记录：本面板经 hover.request 成功读取过的目标
+   *  fsPath 集合——来源资源守卫的比对基准（image.request / link.activate /
+   *  wikilink.activate 的 sourceDocUri 须为集合成员才放行）。#220 浮层
+   *  一次一个目标时单值即够；#222 嵌入卡片与浮层共存，多目标同面板在场
+   *  ——集合化后守卫语义收窄为「本面板实际读取过的目标」（不信任前端
+   *  任意 URI 的边界不变）。目标本身经 resolveVaultLinkFile 的
+   *  ADR-0008 根内语义解析，记录在案 = 来源已受根边界约束。有界：超出
+   *  上限时按插入序淘汰最早成员 */
+  hoverSourceFsPaths: Set<string>
+  /** 最近一次成功送达的目标 fsPath（观测面；守卫用集合） */
   hoverSourceFsPath?: string
 }
 
 const ACK_CACHE_LIMIT = 64
 const VERSION_LOG_LIMIT = 256
+/** #222 悬停来源记录集合上限（面板级；嵌入卡片 + 浮层并存的会话内目标数
+ *  量级上界，超出按插入序淘汰） */
+const HOVER_SOURCES_LIMIT = 32
 
 /** 变更组相等（顺序无关）：段内区间互不重叠，排序后逐段比较。
  *  VSCode 对多段 WorkspaceEdit 的回流 contentChanges 按偏移降序到达，
@@ -302,6 +310,7 @@ export class DocumentSession {
       lastConflictRevision: 0,
       conflictNotified: false,
       reloaded: false,
+      hoverSourceFsPaths: new Set(),
     })
     return sessionId
   }
@@ -663,7 +672,7 @@ export class DocumentSession {
         if (!panel.ready || message.docUri !== this.docUri) {
           return Promise.resolve()
         }
-        if (message.sourceDocUri !== undefined && message.sourceDocUri !== panel.hoverSourceFsPath) {
+        if (message.sourceDocUri !== undefined && !panel.hoverSourceFsPaths.has(message.sourceDocUri)) {
           return Promise.resolve()
         }
         panel.port.openLink?.({
@@ -681,7 +690,7 @@ export class DocumentSession {
         if (!panel.ready || message.docUri !== this.docUri) {
           return Promise.resolve()
         }
-        if (message.sourceDocUri !== undefined && message.sourceDocUri !== panel.hoverSourceFsPath) {
+        if (message.sourceDocUri !== undefined && !panel.hoverSourceFsPaths.has(message.sourceDocUri)) {
           return Promise.resolve()
         }
         panel.port.openWikilink?.({
@@ -778,8 +787,18 @@ export class DocumentSession {
         }
         const report = (result: HoverReadOutcome): void => {
           if (result.ok) {
-            // #220 来源记录：成功送达即更新（后续本面板的 sourceDocUri
-            // 守卫以此比对；一次一个浮层，单值即够）
+            // #220/#222 来源记录：成功读取即入集合（嵌入卡片与浮层多目标
+            // 共存；有界淘汰防无界增长——过期成员最多放宽一个已不在场目标
+            // 的点击守卫，DOM 已不在则点击本就不发生）
+            if (!panel.hoverSourceFsPaths.has(result.fsPath)) {
+              if (panel.hoverSourceFsPaths.size >= HOVER_SOURCES_LIMIT) {
+                const oldest = panel.hoverSourceFsPaths.keys().next().value
+                if (oldest !== undefined) {
+                  panel.hoverSourceFsPaths.delete(oldest)
+                }
+              }
+              panel.hoverSourceFsPaths.add(result.fsPath)
+            }
             panel.hoverSourceFsPath = result.fsPath
           }
           panel.port.send(
@@ -991,8 +1010,8 @@ export class DocumentSession {
     src: string,
     sourceDocUri: string,
   ): Promise<void> {
-    if (sourceDocUri !== panel.hoverSourceFsPath) {
-      return // 来源守卫：非本面板送达过的悬停目标，静默丢弃（不信任前端任意 URI）
+    if (!panel.hoverSourceFsPaths.has(sourceDocUri)) {
+      return // 来源守卫：非本面板读取过的悬停/嵌入目标，静默丢弃（不信任前端任意 URI）
     }
     const resolver = panel.port.resolveImage
     const resolution = resolver
