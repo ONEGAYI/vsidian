@@ -1037,6 +1037,9 @@ export class VaultIndexService {
     const rel = this.relOf(state, fsPath)
     if (rel !== null) {
       state.overlay.clear(rel)
+      if (this.excludeMatcher.test(rel)) {
+        return // 排除域：与 watcher/applyUnsaved 同款口径，不入增量队列
+      }
     }
     // 保存走有界增量队列（与外部事件同域：容量/溢出/分批语义一致）
     await this.enqueueRescan(state, key)
@@ -1588,15 +1591,9 @@ export class VaultIndexService {
           await this.scan.yieldToEventLoop()
         }
       }
-      // 遍 2：抽边（resolver 可见遍 1 登记的完整新清单——批内互链不断链）
-      for (const load of mdLoads) {
-        const edges = extractVaultEdges(load.rel, load.text, {
-          docDir: this.dirname(load.fsPath),
-          rootDir: state.fsPath,
-          isWindowsHost: this.opts.isWindowsHost,
-        }, this.makeModelResolver(state))
-        state.model.edges = state.model.edges.filter((e) => e.source !== load.rel).concat(edges)
-      }
+      // 遍 1.5：asset 的 stat + 登记**先于抽边**（对齐 fullScan 两遍法次序）——
+      // 批内 md 指向同批附件的边（目录恒等平移场景）在遍 2 抽边时 resolver
+      // 已可见新位置附件，不因处理顺序产生断链
       let touched = mdLoads.length > 0
       for (const fsPath of assetPaths) {
         const rel = this.relOf(state, fsPath)
@@ -1617,6 +1614,15 @@ export class VaultIndexService {
         })
         this.ensureGeneration(fsPath)
         touched = true
+      }
+      // 遍 2：抽边（resolver 可见遍 1/1.5 登记的完整新清单——批内互链不断链）
+      for (const load of mdLoads) {
+        const edges = extractVaultEdges(load.rel, load.text, {
+          docDir: this.dirname(load.fsPath),
+          rootDir: state.fsPath,
+          isWindowsHost: this.opts.isWindowsHost,
+        }, this.makeModelResolver(state))
+        state.model.edges = state.model.edges.filter((e) => e.source !== load.rel).concat(edges)
       }
       if (touched) {
         touchedRoots.add(state)
@@ -1719,10 +1725,12 @@ export class VaultIndexService {
     return normalizeSeparators(this.ops.resolve(fsPath)).replace(/\/$/, '')
   }
 
-  /** 根内相对路径（`/` 形态）；越根 null */
+  /** 根内相对路径（`/` 形态）；越根 null（精确判定 `..`/`../` 前缀——
+   *  `..drafts.md` 这类 .. 起头的文件名不是上行，与 vaultLink.isInsideRoot
+   *  口径一致） */
   private relOf(state: RootIndexState, fsPath: string): string | null {
     const rel = this.ops.relative(this.ops.resolve(state.fsPath), this.ops.resolve(fsPath))
-    if (rel === '' || rel.startsWith('..') || this.ops.isAbsolute(rel)) {
+    if (rel === '' || rel === '..' || rel.startsWith('../') || this.ops.isAbsolute(rel)) {
       return null
     }
     return normalizeSeparators(rel)
