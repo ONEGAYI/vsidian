@@ -63,6 +63,7 @@ import {
   IMAGE_EVENT_DEBOUNCE_MS,
   IMAGE_WAKE_MIN_GAP_MS,
   IMAGE_WATCH_GLOB_SEGMENTS,
+  isFileNotFound,
   isImageFileExtension,
 } from '../shared/imageRefresh'
 import type { SnippetLinkList } from '../shared/cssSnippets'
@@ -312,8 +313,7 @@ export function createTextEditorProvider(
           }
           return { kind: 'ok', mtimeMs: st.mtime, size: st.size } as const
         } catch (err) {
-          const code = (err as { code?: string }).code
-          return code === 'FileNotFound' || code === 'ENOENT'
+          return isFileNotFound(err)
             ? ({ kind: 'missing' } as const)
             : ({ kind: 'inaccessible' } as const)
         }
@@ -2247,8 +2247,7 @@ async function resolveWorkspaceImage(
   try {
     stat = await vscode.workspace.fs.stat(uri)
   } catch (err) {
-    const code = (err as { code?: string }).code
-    if (code === 'FileNotFound' || code === 'ENOENT') {
+    if (isFileNotFound(err)) {
       versions.recordMissing(target.fsPath)
       return { ok: false, reason: 'not-found', detail: target.fsPath, fsPath: target.fsPath }
     }

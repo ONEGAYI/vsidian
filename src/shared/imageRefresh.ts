@@ -39,6 +39,19 @@ export function isImageFileExtension(fsPath: string): boolean {
   return IMAGE_WATCH_GLOB_SEGMENTS.includes(ext)
 }
 
+/**
+ * stat 探测失败错误码分类（#198/#201 三处同形判定收敛）：`FileNotFound`
+ * （vscode.workspace.fs 语义）与 `ENOENT`（node fs 透传）表示目标明确
+ * 不存在；其余失败（NoPermissions/Unavailable——SSH 断连等）为不可访问，
+ * 不得等同删除。调用点：图片解析（resolveWorkspaceImage）、图片刷新
+ * 协调（statTarget 端口）与引用索引可访问性探测（vaultIndexWiring
+ * accessOf）——三态口径同源。
+ */
+export function isFileNotFound(err: unknown): boolean {
+  const code = (err as { code?: string }).code
+  return code === 'FileNotFound' || code === 'ENOENT'
+}
+
 /** webview 上报的单条活跃图源状态（image.verify 载荷项） */
 export interface ImageVerifyItem {
   /** 文档内图源原文（normalizeImgSrc 归一后） */

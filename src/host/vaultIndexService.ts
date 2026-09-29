@@ -213,6 +213,14 @@ const ADAPTIVE_SHARDS: readonly { maxFiles: number; shards: number }[] = [
   { maxFiles: Number.MAX_SAFE_INTEGER, shards: 256 },
 ]
 
+/** 反斜杠分隔符统一为 `/`——索引抽象路径形态的原子归一步（Windows fsPath
+ *  专用；posix 路径不含反斜杠，替换为恒等）。只收敛分隔符形态这一个同形
+ *  步骤：大小写折叠（foldKey / vaultRenameWiring 的 normKeyOf）、resolve
+ *  与去尾斜杠（normKey）等调用方各自的归一范围不在此合并，语义差异保留。 */
+export function normalizeSeparators(fsPath: string): string {
+  return fsPath.replace(/\\/g, '/')
+}
+
 export class VaultIndexService {
   private readonly roots = new Map<string, RootIndexState>()
   /** 按深度降序的根键列表（最具体根优先匹配） */
@@ -1685,7 +1693,7 @@ export class VaultIndexService {
   }
 
   private normKey(fsPath: string): string {
-    return this.ops.resolve(fsPath).replace(/\\/g, '/').replace(/\/$/, '')
+    return normalizeSeparators(this.ops.resolve(fsPath)).replace(/\/$/, '')
   }
 
   /** 根内相对路径（`/` 形态）；越根 null */
@@ -1694,7 +1702,7 @@ export class VaultIndexService {
     if (rel === '' || rel.startsWith('..') || this.ops.isAbsolute(rel)) {
       return null
     }
-    return rel.replace(/\\/g, '/')
+    return normalizeSeparators(rel)
   }
 
   private absOf(state: RootIndexState, rel: string): string {
