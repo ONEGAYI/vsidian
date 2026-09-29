@@ -601,12 +601,12 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   display: block;
 }
 
-/* #158 右端组推右：margin-left:auto 由双态视图切换按钮持有，把右端组
-   （双态切换 + 侧栏开关，紧挨）推到主编辑区顶栏右端、与左侧组（设置、
-   快速操作）之间拉出弹性空隙。推右规则只落在右端组首按钮——两个按钮
-   都留 auto 会在二者之间再拉出一段空隙。收起/展开态随主编辑区右边界
-   移动由 flex 布局自然承接 */
-.vsidian-toolbar .vsidian-view-toggle {
+/* #158 右端组推右（#208 起推靠规则由双态切换迁移给刷新按钮）：margin-
+   left:auto 由刷新嵌入资源按钮持有，把右端组（刷新 + 双态切换 + 侧栏
+   开关，紧挨）推到主编辑区顶栏右端、与左侧组（设置、快速操作）之间拉出
+   弹性空隙。推右规则只落在右端组首按钮——多个按钮都留 auto 会在按钮间
+   再拉出空隙。收起/展开态随主编辑区右边界移动由 flex 布局自然承接 */
+.vsidian-toolbar .vsidian-refresh-toggle {
   margin-left: auto;
 }
 

@@ -39,13 +39,14 @@ try {
     await page.addScriptTag({ path: output })
     await page.evaluate(() => window.initDoc('# 标题\n\n正文段。'))
 
-    // ---- DOM 序：齿轮、✎、双态切换、侧栏 ----
+    // ---- DOM 序：齿轮、✎、刷新嵌入资源、双态切换、侧栏 ----
     assert.deepEqual(await page.evaluate(() => window.toolbarOrder()), [
       'vsidian-settings-toggle',
       'vsidian-quick-toggle',
+      'vsidian-refresh-toggle',
       'vsidian-view-toggle',
       'vsidian-sidebar-toggle',
-    ], '按钮序应为 齿轮、快速操作、双态切换、侧栏')
+    ], '按钮序应为 齿轮、快速操作、刷新嵌入资源、双态切换、侧栏')
 
     // ---- 绘制层可见性与图标随态（live：edit 可见、book 隐藏）----
     await page.waitForSelector('.vsidian-view-toggle')
@@ -57,8 +58,14 @@ try {
     assert.equal(paint.aria, zhCn['toolbar.switchToReading'], 'live 态 aria 表目标动作（切换到阅读）')
     assert.equal(paint.title, zhCn['toolbar.switchToReading'], 'title 与 aria 同词')
 
-    // ---- #158 右端组几何（绘制层）：按钮位于工具栏水平中点右侧，
-    //      与侧栏开关以工具栏 gap（4px）紧邻组成右端组 ----
+    // ---- #158/#208 右端组几何（绘制层）：刷新嵌入资源按钮（#208 起持有
+    //      margin-left:auto）与双态切换均位于工具栏水平中点右侧，刷新与
+    //      双态切换、双态切换与侧栏开关分别以工具栏 gap（4px）紧邻组成
+    //      右端组 ----
+    assert.ok(paint.refreshCenterX !== null && paint.refreshCenterX > paint.toolbarCenterX,
+      `刷新按钮中心应位于工具栏水平中点右侧（#208 右端组首按钮）：refreshCenterX=${paint.refreshCenterX}, toolbarCenterX=${paint.toolbarCenterX}`)
+    assert.ok(paint.refreshGapToView !== null && Math.abs(paint.refreshGapToView - 4) < 1,
+      `刷新按钮与双态切换应以工具栏 gap 紧邻（实测间距 ${paint.refreshGapToView}px）`)
     assert.ok(paint.centerX > paint.toolbarCenterX,
       `双态按钮中心应位于工具栏水平中点右侧（#158 右端组）：centerX=${paint.centerX}, toolbarCenterX=${paint.toolbarCenterX}`)
     assert.ok(paint.gapToSidebar !== null && Math.abs(paint.gapToSidebar - 4) < 1,

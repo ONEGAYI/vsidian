@@ -3121,7 +3121,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "toolbar-banner",
     "kind": "selector",
     "target": ".vsidian-toolbar",
-    "purpose": "主编辑区顶栏：设置齿轮（.vsidian-settings-toggle）、快速操作开关（.vsidian-quick-toggle）、双态视图切换（.vsidian-view-toggle，#141 起第四按钮，独立条目）、侧栏开关（.vsidian-sidebar-toggle）——#38 起三态切换（含源码）在宿主编辑器标题栏命令，不在顶栏（见 mode-toggle 移除记录）。",
+    "purpose": "主编辑区顶栏：设置齿轮（.vsidian-settings-toggle）、快速操作开关（.vsidian-quick-toggle）、刷新嵌入资源（.vsidian-refresh-toggle，#208 起第五按钮，独立条目）、双态视图切换（.vsidian-view-toggle，#141 起第四按钮，独立条目）、侧栏开关（.vsidian-sidebar-toggle）——#38 起三态切换（含源码）在宿主编辑器标题栏命令，不在顶栏（见 mode-toggle 移除记录）。",
     "views": [
       "live",
       "reading"
@@ -3150,7 +3150,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "reading"
     ],
     "states": "按钮本体常驻两模式；点击出站 view.switch.request（不本地执行），按钮态由宿主回流的 view.mode.set 驱动——aria/tooltip 表目标动作随态换词。",
-    "dom": "顶栏 .vsidian-toolbar 内 button，紧邻侧栏开关左侧；#158 起两者组成右端组——本按钮持有 margin-left:auto 推靠工具栏右端，与左侧组（设置、快速操作）间为弹性空隙；内联 SVG 两 path（book/edit 子类）。",
+    "dom": "顶栏 .vsidian-toolbar 内 button，紧邻侧栏开关左侧；#158 起与侧栏开关组成右端组，#208 起刷新按钮加入右端组并接管 margin-left:auto 推靠规则（本按钮不再持有，推右职责移交见 toolbar-refresh 条目）；与左侧组（设置、快速操作）间为弹性空隙；内联 SVG 两 path（book/edit 子类）。",
     "example": ".vsidian-view-toggle {\n  color: var(--vscode-toolbar-foreground);\n}",
     "obsidian": {
       "counterpart": "无对应物",
@@ -3161,6 +3161,31 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "浏览器套件（#141）：两图标显隐随 body 模式类切换的绘制断言"
     ],
     "introduced": "#141（2026-09-27）"
+  },
+  {
+    "id": "toolbar-refresh",
+    "domain": "chrome",
+    "category": "toolbar-banner",
+    "kind": "selector",
+    "target": ".vsidian-refresh-toggle（按钮本体；内含内联 SVG 循环箭头图标）",
+    "purpose": "刷新嵌入资源按钮（#208）：手动刷新入口——点击出站 refresh.request，宿主清图片解析缓存并推进资源代次后回发失效通知，webview 对活跃图片槽位全量失效重挂（新代次 URI 重载）并重置 Mermaid 懒加载失败终态。刷新不触碰文档内容/撤销栈/视图状态（光标、滚动、模式原样保持），与快捷键入口共用同一发送实现。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "按钮常驻两模式；未就绪（init 前）点击无操作。#158 推右规则（margin-left:auto）于 #208 自 view-toggle 迁移至本按钮——右端组首（刷新 + 双态切换 + 侧栏开关紧挨），与左侧组间弹性空隙。",
+    "dom": "顶栏 .vsidian-toolbar 内 button，紧邻双态切换左侧；内联 SVG 循环箭头（lucide refresh-cw 意象，四 path，线宽恒定 stroke-width=2，不引图标库）。",
+    "example": ".vsidian-refresh-toggle {\n  color: var(--vscode-toolbar-foreground);\n}",
+    "obsidian": {
+      "counterpart": "无对应物",
+      "support": "none"
+    },
+    "verification": [
+      "集成「界面域样式契约」：chromeSelectors[\"toolbar-refresh\"] 探针命中（真宿主渲染验证）",
+      "jsdom 控制器单测（#208）：按钮在场、点击出站 refresh.request",
+      "浏览器套件（#208）：右端组几何绘制断言（中点右侧、与双态切换以工具栏 gap 紧邻）"
+    ],
+    "introduced": "#208（2026-09-29）"
   },
   {
     "id": "mode-body",
@@ -4170,7 +4195,7 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "toolbar": {
-    "purpose": "The top toolbar of the main editing area: the settings gear (.vsidian-settings-toggle), the quick-action toggle (.vsidian-quick-toggle), the dual-state view toggle (.vsidian-view-toggle, the fourth button since #141 with its own entry) and the sidebar toggle (.vsidian-sidebar-toggle) — since #38 the three-state switch (including source mode) lives in the host editor title bar commands, not on this toolbar (see the mode-toggle removal record).",
+    "purpose": "The top toolbar of the main editing area: the settings gear (.vsidian-settings-toggle), the quick-action toggle (.vsidian-quick-toggle), the refresh-embedded-resources button (.vsidian-refresh-toggle, the fifth button since #208 with its own entry), the dual-state view toggle (.vsidian-view-toggle, the fourth button since #141 with its own entry) and the sidebar toggle (.vsidian-sidebar-toggle) — since #38 the three-state switch (including source mode) lives in the host editor title bar commands, not on this toolbar (see the mode-toggle removal record).",
     "dom": "The toolbar at the top of #app.",
     "obsidian": {
       "counterpart": "No counterpart"
@@ -4179,7 +4204,15 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
   "view-toggle": {
     "purpose": "The dual-state view toggle button (#141): one of the entries for switching between live↔reading (the in-webview entry besides the host title bar three-state command and Ctrl+Q). The icons show the current mode: a book (currently reading) / a pen (currently live) — both icons stay in the DOM permanently, and their show/hide has a single source: the body mode class rules (see the mode-body entry) — when styles fail, both icons show at once, which paint assertions can expose.",
     "states": "The button itself is persistent in both modes; a click posts a view.switch.request outbound (not applied locally), and the button state is driven by the view.mode.set flowed back from the host — the aria/tooltip names the target action and re-words as the mode changes.",
-    "dom": "A button inside the top .vsidian-toolbar, immediately to the left of the sidebar toggle; since #158 the two form the right-end group — this button holds margin-left:auto to push itself against the right end of the toolbar, leaving a flexible gap toward the left group (settings, quick actions); an inline SVG with two paths (book/edit subclasses).",
+    "dom": "A button inside the top .vsidian-toolbar, immediately to the left of the sidebar toggle; since #158 it forms the right-end group with the sidebar toggle, and since #208 the refresh button joins the group and takes over the margin-left:auto push rule (this button no longer holds it — see the toolbar-refresh entry for the handover record); a flexible gap remains toward the left group (settings, quick actions); an inline SVG with two paths (book/edit subclasses).",
+    "obsidian": {
+      "counterpart": "No counterpart"
+    }
+  },
+  "toolbar-refresh": {
+    "purpose": "The refresh-embedded-resources button (#208): the manual refresh entry — a click posts a refresh.request outbound; the host drops the image resolution cache, bumps the resource generation and replies with the invalidation notice, after which the webview remounts every active image slot for re-resolution (reloading with the new-generation URI) and resets the Mermaid lazy-load failure terminal state. Refreshing never touches the document content/undo stack/view state (cursor, scroll and mode stay as they were), and the keybinding entry shares the same send implementation.",
+    "states": "Persistent in both modes; before readiness (before init) a click is a no-op. The #158 push rule (margin-left:auto) moved from view-toggle to this button in #208 — head of the right-end group (refresh + dual-state toggle + sidebar toggle, adjacent), with a flexible gap toward the left group.",
+    "dom": "A button inside the top .vsidian-toolbar, immediately to the left of the dual-state view toggle; an inline SVG circular arrow (lucide refresh-cw motif, four paths, constant stroke-width=2, no icon library).",
     "obsidian": {
       "counterpart": "No counterpart"
     }

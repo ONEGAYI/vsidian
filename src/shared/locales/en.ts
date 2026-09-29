@@ -293,6 +293,8 @@ export const en = {
   /** #141 toolbar dual-state view toggle (aria/title names the target action) */
   'toolbar.switchToReading': 'Switch to reading view',
   'toolbar.switchToLive': 'Switch to live preview',
+  /** #208 toolbar refresh button (drop embedded-resource caches and re-render) */
+  'toolbar.refresh': 'Refresh embedded resources',
   'sidebar.resize': 'Drag to resize sidebar',
 
   /** 查找控件 */
@@ -444,6 +446,8 @@ export const en = {
   'command.ui.outlineReset.title': 'Reset outline',
   'command.ui.outlineCollapseAll.title': 'Collapse all outline headings',
   'command.ui.outlineExpandAll.title': 'Expand all outline headings',
+  /** #208 refresh embedded resources command (toolbar button and keybinding/command palette share it) */
+  'command.editor.refresh.title': 'Refresh embedded resources',
 
   // ---- #159 锚点跳转（块引用定位与本文件锚点）----
   /** 块 id 缺失提示（与标题缺失同款「打开后提示」行为） */

@@ -53,5 +53,6 @@
   "command.ui.outlineJumpBottom.title": "跳转到笔记末尾",
   "command.ui.outlineReset.title": "重置大纲",
   "command.ui.outlineCollapseAll.title": "折叠全部大纲",
-  "command.ui.outlineExpandAll.title": "展开全部大纲"
+  "command.ui.outlineExpandAll.title": "展开全部大纲",
+  "command.editor.refresh.title": "刷新嵌入资源"
 }

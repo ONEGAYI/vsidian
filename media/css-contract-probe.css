@@ -416,6 +416,11 @@
   --vsidian-chrome-probe: rgb(236, 0, 1);
 }
 
+/* 刷新嵌入资源按钮（#208 常驻本体，右端组首） */
+#app .vsidian-toolbar .vsidian-refresh-toggle {
+  --vsidian-chrome-probe: rgb(239, 0, 1);
+}
+
 /* live HTML 注释淡化 span（#139；阅读侧隐藏无对应类） */
 #app .vsidian-view-live .vsidian-html-comment {
   text-decoration-color: rgb(34, 35, 36);

@@ -9,9 +9,9 @@
 //   确有该字段时才覆盖（无值字段跳过）；
 // - 覆盖值非空字符串；
 // - 反向完整性：中文条目双语字段有值 ⇒ 英文覆盖必有对应键且非空
-//   （132 条全量；不译字段不在锁内）——防未来新增条目/字段漏翻；
+//   （133 条全量；不译字段不在锁内）——防未来新增条目/字段漏翻；
 // - content 域 76 条、chrome 域 56 条 id 全量覆盖（#179/#180 域级完整性，
-//   合计 132 条全覆盖）；
+//   合计 133 条全覆盖）；
 // - 取词纯函数行为：英文语言字段级 merge、非英文语言与覆盖表缺失条目
 //   原样返回、原条目不被改写；
 // - 生成数据模块（styleGuideData.ts，settings.js 渲染数据）携带同源双语。
@@ -96,17 +96,17 @@ describe('英文覆盖一致性契约（#178 机制 + #179 content 域全量 + #
     }
   })
 
-  it('chrome 域全部 56 条 id 均有英文覆盖（#180 全量交付 + #191 折行钮）', () => {
+  it('chrome 域全部 57 条 id 均有英文覆盖（#180 全量交付 + #191 折行钮 + #208 刷新钮）', () => {
     const chromeIds = STYLE_CONTRACT_ENTRIES.filter((e) => e.domain === 'chrome').map((e) => e.id)
-    expect(chromeIds.length).toBe(56)
+    expect(chromeIds.length).toBe(57)
     for (const id of chromeIds) {
       expect(STYLE_CONTRACT_EN_OVERRIDES[id], `chrome 条目缺英文覆盖：${id}`).toBeDefined()
     }
   })
 
-  it('两域合计 132 条全量覆盖，无覆盖表缺口（#179 + #180 收尾 + #191）', () => {
-    expect(STYLE_CONTRACT_ENTRIES.length).toBe(132)
-    expect(Object.keys(STYLE_CONTRACT_EN_OVERRIDES).length).toBe(132)
+  it('两域合计 133 条全量覆盖，无覆盖表缺口（#179 + #180 收尾 + #191 + #208）', () => {
+    expect(STYLE_CONTRACT_ENTRIES.length).toBe(133)
+    expect(Object.keys(STYLE_CONTRACT_EN_OVERRIDES).length).toBe(133)
     for (const entry of STYLE_CONTRACT_ENTRIES) {
       expect(STYLE_CONTRACT_EN_OVERRIDES[entry.id], `条目缺英文覆盖：${entry.id}`).toBeDefined()
     }

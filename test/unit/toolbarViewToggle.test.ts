@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // 工具栏双态视图切换按钮契约（#141）：
-// - DOM 序：齿轮、✎ 快速操作、双态切换、侧栏（紧邻侧栏按钮左侧）
+// - DOM 序：齿轮、✎ 快速操作、刷新嵌入资源（#208，紧邻双态切换左侧、
+//   持有 margin-left:auto 推右）、双态切换、侧栏（紧邻侧栏按钮左侧）
 // - 点击经 view.switch.request 出站（target=另一态），不本地切模式
 //   （#38 起切换收敛宿主，按钮态由 view.mode.set 回流驱动）
 // - 图标与 aria-label/title 随当前态与界面语言双变化（localeDom 注册表
@@ -48,12 +49,13 @@ function toolbarButtons(parent: HTMLElement): HTMLElement[] {
 }
 
 describe('工具栏双态视图切换按钮（#141）', () => {
-  it('DOM 序：齿轮、快速操作、双态切换、侧栏（双态紧邻侧栏左侧）', () => {
+  it('DOM 序：齿轮、快速操作、刷新、双态切换、侧栏（刷新紧邻双态左侧）', () => {
     const { c, parent } = setup()
     const buttons = toolbarButtons(parent).map((b) => b.className)
     expect(buttons).toEqual([
       'vsidian-settings-toggle',
       'vsidian-quick-toggle',
+      'vsidian-refresh-toggle',
       'vsidian-view-toggle',
       'vsidian-sidebar-toggle',
     ])

@@ -53,5 +53,6 @@
   "command.ui.outlineJumpBottom.title": "Jump to end of note",
   "command.ui.outlineReset.title": "Reset outline",
   "command.ui.outlineCollapseAll.title": "Collapse all outline headings",
-  "command.ui.outlineExpandAll.title": "Expand all outline headings"
+  "command.ui.outlineExpandAll.title": "Expand all outline headings",
+  "command.editor.refresh.title": "Refresh embedded resources"
 }

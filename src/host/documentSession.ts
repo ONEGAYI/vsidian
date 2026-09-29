@@ -220,6 +220,9 @@ export class DocumentSession {
   /** #10 图片解析：同 src 在途去重与成功结果缓存（失败不缓存，重试重解析） */
   private readonly imageInFlight = new Map<string, Promise<ImageResolution>>()
   private readonly imageCache = new Map<string, ImageResolution>()
+  /** #208 资源代次：手动刷新时自增，工作区图片 webview URI 的 ?v= 戳取
+   *  此值（缓存击穿；0 为未刷新初值，URI 不带戳——与现状形态一致） */
+  private imageGeneration = 0
 
   constructor(
     private readonly doc: HostDocumentPort,
@@ -635,6 +638,18 @@ export class DocumentSession {
         }
         return Promise.resolve()
       }
+      case 'refresh.request': {
+        // #208 手动刷新：清图片解析缓存、推进资源代次，回发失效通知
+        // （webview 据此全量失效重挂，重新解析取到带新代次戳的 URI）。
+        // 只读交互（不写文档、不入撤销栈），暂停态同样放行——与
+        // image.request 同口径的会话守卫（就绪且 docUri 匹配才放行）
+        if (!panel.ready || message.docUri !== this.docUri) {
+          return Promise.resolve()
+        }
+        const generation = this.invalidateImages()
+        panel.port.send({ kind: 'refresh.invalidated', reqId: message.reqId, generation })
+        return Promise.resolve()
+      }
       case 'perf.report':
         panel.lastPerfReport = message
         return Promise.resolve()
@@ -703,6 +718,30 @@ export class DocumentSession {
     return this.panels.get(sessionId)?.lastReadingPerfReport
   }
 
+  /** 当前资源代次（#208：provider 层图片 URI ?v= 戳的数据源；0 = 未刷新） */
+  getImageGeneration(): number {
+    return this.imageGeneration
+  }
+
+  /**
+   * #208 图片缓存运行期失效入口：清空解析缓存与在途去重表并推进资源代次
+   * （返回新代次）。手动刷新通道（refresh.request）在此闭合；后续自动核验
+   * 路径（#201）可复用同一入口对齐失效语义。
+   *
+   * 在途竞态（作废语义）：刷新瞬间的在途解析（imageInFlight）完成后仍会
+   * 走原回调——清表拦不住已注册的 then。两道防护缺一不可：其一，清空
+   * imageInFlight 让刷新后的重挂请求不与旧代次在途复用（否则经同 src 去重
+   * 直接拿到旧 URI）；其二，回调写缓存前校验发起代次（见
+   * resolveImageRequest），旧代次结果丢弃——只清表不校验，迟到的旧回调
+   * 照样把旧 URI 写回缓存，污染本轮刷新。
+   */
+  invalidateImages(): number {
+    this.imageCache.clear()
+    this.imageInFlight.clear()
+    this.imageGeneration += 1
+    return this.imageGeneration
+  }
+
   /** #10 图片解析请求处理（去重/缓存/回发） */
   private async resolveImageRequest(
     panel: PanelEntry,
@@ -729,6 +768,12 @@ export class DocumentSession {
     }
     let pending = this.imageInFlight.get(src)
     if (!pending) {
+      // 发起代次快照：回调完成时校验代次未变才写缓存（#208 在途竞态）。
+      // 刷新瞬间在途的解析携旧代次 URI，若照写缓存，重挂请求经同 src
+      // 命中旧地址、该图本轮不换新；代次已过则丢弃。发起面板仍收到其
+      // 请求当次的结果（旧 URI）——webview 条目已被失效重挂重建，未知
+      // reqId 的迟到结果在观测层丢弃，不产生污染
+      const requestGen = this.imageGeneration
       const resolver = panel.port.resolveImage
       pending = resolver
         ? resolver(src).catch((): ImageResolution => ({ ok: false, reason: 'read-error' }))
@@ -737,10 +782,14 @@ export class DocumentSession {
         : Promise.resolve({ ok: false, reason: 'read-error' } as ImageResolution)
       this.imageInFlight.set(src, pending)
       // 完成后清理在途表；成功结果进入小容量缓存（滚动回视口的重复请求
-      // 直接命中，避免反复读盘；失败不缓存，保留重试语义）
+      // 直接命中，避免反复读盘；失败不缓存，保留重试语义）。清理用同一
+      // 性判据：invalidateImages 作废在途表后，同 src 可能已有新代次的
+      // 在途条目，旧回调不得误删他人的表项
       void pending.then((resolution) => {
-        this.imageInFlight.delete(src)
-        if (resolution.ok) {
+        if (this.imageInFlight.get(src) === pending) {
+          this.imageInFlight.delete(src)
+        }
+        if (resolution.ok && requestGen === this.imageGeneration) {
           this.imageCache.set(src, resolution)
           while (this.imageCache.size > 16) {
             const oldest = this.imageCache.keys().next().value

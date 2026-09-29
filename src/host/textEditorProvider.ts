@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto'
 import * as path from 'node:path'
 import { DocumentSession, type HostDocumentPort, type SessionNotice } from './documentSession'
 import {
+  appendImageVersionStamp,
   classifyImageTarget,
   classifyLinkTarget,
   imageBlockReasonOf,
@@ -831,7 +832,8 @@ export function createTextEditorProvider(
         void executeWikilinkIntent(document, intent, entry.linkLog)
       }
       const resolveImage = async (src: string): Promise<ImageResolution> => {
-        return resolveWorkspaceImage(src, linkCtx, webviewPanel.webview)
+        // #208：代次在解析时取值——手动刷新后同 src 的新请求得到新代次戳
+        return resolveWorkspaceImage(src, linkCtx, webviewPanel.webview, entry.session.getImageGeneration())
       }
       const sessionId = entry.session.attachPanel({
         send,
@@ -1499,6 +1501,12 @@ export function createTextEditorProvider(
       return false
     }),
   )
+  // ---- 可绑定的视图中按钮动作（命令面板/快捷键共用）：校验活动面板后回发
+  //      ui.command，webview 与对应按钮共用同一实现。#208 刷新嵌入资源亦经
+  //      此注册（onegayi.vsidian.editor.refresh）——快捷键链路
+  //      keybindings.execute → executeCommand → 本循环回发 → webview 与
+  //      工具栏按钮共用同一发送实现（出站 refresh.request），宿主失效编排
+  //      在 documentSession 的 refresh.request 处理唯一，不另造路径 ----
   for (const operation of UI_OPERATIONS) {
     context.subscriptions.push(vscode.commands.registerCommand(operation.command, (): boolean => {
       for (const entry of sessions.values()) for (const [sessionId, panel] of entry.panels) {
@@ -1526,6 +1534,8 @@ export function createTextEditorProvider(
         panels: entry.session.getInfo().panels,
         version: entry.doc.version,
         appliedEdits: entry.appliedEdits,
+        // #208 资源代次（0 = 未刷新；每次手动刷新 +1，图片 URI ?v= 戳同源）
+        imageGeneration: entry.session.getImageGeneration(),
       }
     }),
     vscode.commands.registerCommand(
@@ -1975,11 +1985,15 @@ async function revealLinkAnchor(
  * 工作区图片解析（#10）：白名单分类 → 存在性探测 → asWebviewUri 转为
  * webview 可加载地址。本地与远程（SSH）工作区同通道——webview 资源服务
  * 按远程权威路由（真实远程宿主表现属 #15 人工验证项）。
+ * #208：generation 为会话资源代次（手动刷新自增；0 = 未刷新初值不戳），
+ * URI 追加 ?v= 缓存击穿参数（CSS 片段同式；CSP 匹配不含 query，不受影响）。
+ * 仅工作区相对路径图源经此通道——HTTPS 直连不经宿主，无代次语义。
  */
 async function resolveWorkspaceImage(
   src: string,
   ctx: LinkContext,
   webview: vscode.Webview,
+  generation: number,
 ): Promise<ImageResolution> {
   const target = classifyImageTarget(src, ctx)
   if (target.kind === 'blocked') {
@@ -1995,7 +2009,10 @@ async function resolveWorkspaceImage(
   } catch {
     return { ok: false, reason: 'not-found', detail: target.fsPath }
   }
-  return { ok: true, src: webview.asWebviewUri(uri).toString() }
+  return {
+    ok: true,
+    src: appendImageVersionStamp(webview.asWebviewUri(uri).toString(), generation),
+  }
 }
 
 function buildWebviewHtml(

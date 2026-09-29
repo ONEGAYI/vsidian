@@ -356,6 +356,37 @@ describe('isWebviewToHost', () => {
     expect(isHostToWebview({ kind: 'sidebar.test.clickx' })).toBe(false)
   })
 
+  it('refresh.test.click 测试钩子消息校验（#208）', () => {
+    expect(isHostToWebview({ kind: 'refresh.test.click' })).toBe(true)
+    expect(isHostToWebview({ kind: 'refresh.test.click', extra: 1 })).toBe(true)
+    expect(isHostToWebview({ kind: 'refresh.test.clickx' })).toBe(false)
+  })
+
+  it('view.state 图片槽位探针只接受契约字段（#208）', () => {
+    const base = { kind: 'view.state', text: 't', docLength: 1, lineCount: 1, renderedLines: 1 }
+    // 合法：src/naturalWidth 可空，state 限 loading/loaded/error
+    expect(isWebviewToHost({ ...base, imageProbe: [
+      { src: 'https://x/y.png?v=1', naturalWidth: 2, state: 'loaded' },
+      { src: null, naturalWidth: null, state: 'loading' },
+    ] })).toBe(true)
+    // 缺省合法（向后兼容：旧 webview / 无图片槽位）
+    expect(isWebviewToHost(base)).toBe(true)
+    // 非法：state 越界 / naturalWidth 负数与 NaN / 槽位非对象 / src 非串
+    expect(isWebviewToHost({ ...base, imageProbe: [
+      { src: 'https://x/y.png', naturalWidth: 1, state: 'gone' },
+    ] })).toBe(false)
+    expect(isWebviewToHost({ ...base, imageProbe: [
+      { src: 'https://x/y.png', naturalWidth: -1, state: 'loaded' },
+    ] })).toBe(false)
+    expect(isWebviewToHost({ ...base, imageProbe: [
+      { src: 'https://x/y.png', naturalWidth: Number.NaN, state: 'loaded' },
+    ] })).toBe(false)
+    expect(isWebviewToHost({ ...base, imageProbe: ['x'] })).toBe(false)
+    expect(isWebviewToHost({ ...base, imageProbe: [
+      { src: 3, naturalWidth: 1, state: 'loaded' },
+    ] })).toBe(false)
+  })
+
   it('sidebar.test.resize 测试钩子只接受有限数位移（负值收窄合法）', () => {
     expect(isHostToWebview({ kind: 'sidebar.test.resize', delta: 120 })).toBe(true)
     expect(isHostToWebview({ kind: 'sidebar.test.resize', delta: -60 })).toBe(true)
@@ -2005,5 +2036,51 @@ describe('图片粘贴消息协议（#161）', () => {
     expect(isHostToWebview({ kind: 'image.test.pending' })).toBe(false)
     // 方向校验
     expect(isWebviewToHost({ kind: 'image.test.pending', reqId: 1 })).toBe(false)
+  })
+})
+
+describe('手动刷新消息协议（#208）', () => {
+  it('接受合法 refresh.request（会话守卫字段 + 正整数 reqId），拒绝缺字段/非法 reqId/宿主方向', () => {
+    expect(
+      isWebviewToHost({ kind: 'refresh.request', sessionId: 'panel-1', docUri: 'file:///a.md', reqId: 1 }),
+    ).toBe(true)
+    // reqId 与 image.request 同惯例：正整数（会话面板内自增）
+    expect(
+      isWebviewToHost({ kind: 'refresh.request', sessionId: 'panel-1', docUri: 'file:///a.md', reqId: 0 }),
+    ).toBe(false)
+    expect(
+      isWebviewToHost({ kind: 'refresh.request', sessionId: 'panel-1', docUri: 'file:///a.md', reqId: -1 }),
+    ).toBe(false)
+    expect(
+      isWebviewToHost({ kind: 'refresh.request', sessionId: 'panel-1', docUri: 'file:///a.md', reqId: 1.5 }),
+    ).toBe(false)
+    expect(
+      isWebviewToHost({ kind: 'refresh.request', sessionId: 'panel-1', docUri: 'file:///a.md', reqId: '1' }),
+    ).toBe(false)
+    // 缺字段整体丢弃
+    expect(
+      isWebviewToHost({ kind: 'refresh.request', sessionId: 'panel-1', docUri: 'file:///a.md' }),
+    ).toBe(false)
+    expect(isWebviewToHost({ kind: 'refresh.request', sessionId: 'panel-1', reqId: 1 })).toBe(false)
+    // 方向校验：请求只从 webview 发出
+    expect(
+      isHostToWebview({ kind: 'refresh.request', sessionId: 'panel-1', docUri: 'file:///a.md', reqId: 1 }),
+    ).toBe(false)
+  })
+
+  it('接受合法 refresh.invalidated（正整数 reqId/generation），拒绝非法形态/webview 方向伪造', () => {
+    expect(isHostToWebview({ kind: 'refresh.invalidated', reqId: 3, generation: 1 })).toBe(true)
+    expect(isHostToWebview({ kind: 'refresh.invalidated', reqId: 3, generation: 2 })).toBe(true)
+    // generation 为宿主自增后的资源代次：恒 ≥ 1（0 是未刷新初值，不回发）
+    expect(isHostToWebview({ kind: 'refresh.invalidated', reqId: 3, generation: 0 })).toBe(false)
+    expect(isHostToWebview({ kind: 'refresh.invalidated', reqId: 3, generation: -1 })).toBe(false)
+    expect(isHostToWebview({ kind: 'refresh.invalidated', reqId: 3, generation: 1.5 })).toBe(false)
+    expect(isHostToWebview({ kind: 'refresh.invalidated', reqId: 3, generation: '1' })).toBe(false)
+    expect(isHostToWebview({ kind: 'refresh.invalidated', reqId: 0, generation: 1 })).toBe(false)
+    expect(isHostToWebview({ kind: 'refresh.invalidated', reqId: '3', generation: 1 })).toBe(false)
+    expect(isHostToWebview({ kind: 'refresh.invalidated', reqId: 3 })).toBe(false)
+    expect(isHostToWebview({ kind: 'refresh.invalidated', generation: 1 })).toBe(false)
+    // 方向校验：失效通知只从宿主发出
+    expect(isWebviewToHost({ kind: 'refresh.invalidated', reqId: 3, generation: 1 })).toBe(false)
   })
 })
