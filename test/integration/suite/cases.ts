@@ -10200,4 +10200,52 @@ export const cases: Array<[string, () => Promise<void>]> = [
       await ensureBatchFixture()
     }
   }],
+
+  ['索引维护：批量文件增删的队列收敛与索引守恒（Git 切换量级 100 文件，#202）', async () => {
+    type IndexState = {
+      available: boolean
+      rebuilding: boolean
+      roots: Array<{ fsPath: string; fileCount: number; edgeCount: number; hasData: boolean }>
+    }
+    const state = async (): Promise<IndexState> =>
+      (await vscode.commands.executeCommand('onegayi.vsidian._test.getVaultIndexState')) as IndexState
+    const rootOf = (s: IndexState) => s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir))!
+    const initial = await poll('索引就绪', async () => {
+      const s = await state()
+      return s.available && rootOf(s).hasData && rootOf(s).edgeCount > 0 ? s : undefined
+    })
+    const baseFiles = rootOf(initial).fileCount
+    const baseEdges = rootOf(initial).edgeCount
+    // Git 切换量级的批量增：常驻目标 + 100 来源文件各一条出链
+    // （watcher 事件风暴进有界队列逐批消化，不产生无界任务）
+    await mkdir(`${wsDir}/git-switch`, { recursive: true })
+    await vscode.workspace.fs.writeFile(wsUri('git-switch/git-switch-target.md'), Buffer.from('# 批量目标\n'))
+    const SWITCH_COUNT = 100
+    for (let i = 0; i < SWITCH_COUNT; i++) {
+      await vscode.workspace.fs.writeFile(
+        wsUri(`git-switch/switch-${i}.md`),
+        Buffer.from(`# 批量来源 ${i}\n\n见 [[git-switch-target]]。\n`),
+      )
+    }
+    await poll('批量增收敛', async () => {
+      const s = await state()
+      return s.available && !s.rebuilding &&
+        rootOf(s).fileCount === baseFiles + SWITCH_COUNT + 1 &&
+        rootOf(s).edgeCount === baseEdges + SWITCH_COUNT ? s : undefined
+    }, 60000)
+    // Git 切换量级的批量删（切回原分支）：逐文件删除走增量链路
+    // （单文件 delete 事件有；整目录删除不产生逐文件事件是 #198 已知边界，
+    // 此处刻意逐文件删除以走真实增量路径）
+    for (let i = 0; i < SWITCH_COUNT; i++) {
+      await vscode.workspace.fs.delete(wsUri(`git-switch/switch-${i}.md`), { useTrash: false })
+    }
+    await vscode.workspace.fs.delete(wsUri('git-switch/git-switch-target.md'), { useTrash: false })
+    await poll('批量删收敛', async () => {
+      const s = await state()
+      return s.available && rootOf(s).hasData &&
+        rootOf(s).fileCount === baseFiles && rootOf(s).edgeCount === baseEdges ? s : undefined
+    }, 60000)
+    // 兜底清理（正常路径已删净目录内容；失败路径尽力还原不抛二次错误）
+    await rm(`${wsDir}/git-switch`, { recursive: true, force: true }).catch(() => {})
+  }],
 ]

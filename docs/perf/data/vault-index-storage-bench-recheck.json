@@ -1,0 +1,472 @@
+{
+  "meta": {
+    "date": "2026-09-29T00:46:05.203Z",
+    "node": "v24.15.0",
+    "platform": "win32 x64",
+    "cpuModel": "AMD Ryzen 7 9700X 8-Core Processor             ",
+    "corpusRoot": "D:/CODE/Project/_ForExplore/vsidian-194-bench",
+    "methods": {
+      "runner": "纯 Node 直跑（非 VSCode 扩展宿主进程）",
+      "coldRestore": "新子进程加载；OS 文件缓存热（用户态不可清空），为热缓存近似",
+      "sqlite": "sql.js WASM（无 native 绑定），写入量以 export() 字节近似",
+      "extractor": "基准专用正则抽取器（覆盖语料形态），生产抽取归 #196",
+      "rounds": "各测量项轮数见各条目 rounds 字段，中位数为 median(...)"
+    }
+  },
+  "tiers": {
+    "1k": {
+      "corpus": {
+        "files": 1000,
+        "markdownFiles": 1000,
+        "attachmentFiles": 50,
+        "corpusBytes": 1705652,
+        "genLinks": {
+          "wikilink": 9830,
+          "mdlink": 2098,
+          "image": 1433,
+          "refdef": 684,
+          "attachment": 2039,
+          "https": 418,
+          "broken": 2305
+        },
+        "assetFiles": 50,
+        "contentBytes": 1704252,
+        "edgeCount": 14045,
+        "edgeKinds": {
+          "wikilink": 9830,
+          "image": 1433,
+          "mdlink": 2098,
+          "refdef": 684
+        },
+        "nonMarkdownTargets": 1933,
+        "brokenTargets": 11542,
+        "unresolvable": 418,
+        "genCrossCheck": {
+          "genTotal": 14045,
+          "extractedTotal": 14045
+        }
+      },
+      "firstBuild": {
+        "rounds": 3,
+        "snapshot": {
+          "rounds": 3,
+          "median_totalMs": 117.02969999999993,
+          "median_scanMs": 76.60640000000001,
+          "median_commitMs": 38.70839999999998,
+          "median_writeBytes": 1325739
+        },
+        "sqlite": {
+          "rounds": 3,
+          "median_totalMs": 116.43140000000005,
+          "median_scanMs": 76.60640000000001,
+          "median_commitMs": 39.825000000000045,
+          "median_writeBytes": 3096576
+        },
+        "memoryPeakSnapshot": 34584112,
+        "memoryPeakSqlite": 19044080,
+        "loopDelaySnapshot": {
+          "maxOfMeanMs": 16.2004992,
+          "maxOfP99Ms": 24.166399,
+          "maxOfMaxMs": 24.166399,
+          "maxOfStarveMs": 13.983699999999999
+        },
+        "loopDelaySqlite": {
+          "maxOfMeanMs": 17.6384,
+          "maxOfP99Ms": 23.920639,
+          "maxOfMaxMs": 23.920639,
+          "maxOfStarveMs": 47.941100000000006
+        },
+        "scanPhase": {
+          "ms": {
+            "listDir": 7.7205000000000155,
+            "readExtract": 63.97009999999989,
+            "total": 71.6905999999999
+          },
+          "contentBytes": 1704252
+        }
+      },
+      "diskAfterFirstBuild": {
+        "snapshot": {
+          "bytes": 1325739,
+          "files": 18
+        },
+        "sqlite": {
+          "bytes": 3100672,
+          "files": 1
+        }
+      },
+      "coldRestore": {
+        "rounds": 3,
+        "snapshot": {
+          "rounds": 3,
+          "median_loadMs": 18.666299999999996,
+          "median_files": 1050,
+          "median_edges": 14045,
+          "median_buildBacklinkMs": 3.650599999999997,
+          "median_rss": 95313920
+        },
+        "sqlite": {
+          "rounds": 3,
+          "median_loadMs": 91.07220000000001,
+          "median_files": 1050,
+          "median_edges": 14045,
+          "median_rss": 119676928
+        }
+      },
+      "pointUpdate": {
+        "rounds": 10,
+        "snapshot": {
+          "rounds": 10,
+          "median_ms": 22.22309999999993,
+          "median_writeBytes": 88154.5,
+          "median_rewrittenShards": 1
+        },
+        "sqlite": {
+          "rounds": 10,
+          "median_ms": 2.4879000000000815,
+          "median_writeBytes": 3108864
+        }
+      },
+      "batchUpdate": {
+        "rounds": 3,
+        "size": 500,
+        "snapshot": {
+          "rounds": 3,
+          "median_ms": 166.99090000000024,
+          "median_writeBytes": 1455584,
+          "median_rewrittenShards": 16
+        },
+        "sqlite": {
+          "rounds": 3,
+          "median_ms": 121.88970000000018,
+          "median_writeBytes": 3911680
+        }
+      },
+      "backlinkQuery": {
+        "queries": 20,
+        "backlinkBuildMs": 5.982299999999668,
+        "snapshot": {
+          "rounds": 20,
+          "median_ms": 0.00035000000002582965,
+          "median_count": 5.5
+        },
+        "sqlite": {
+          "rounds": 20,
+          "median_ms": 0.05494999999996253,
+          "median_count": 5.5
+        }
+      },
+      "shardSensitivity": [
+        {
+          "shardCount": 16,
+          "rounds": 5,
+          "median_ms": 22.23810000000003,
+          "median_writtenShards": 1,
+          "median_shardWriteBytes": 87667
+        },
+        {
+          "shardCount": 64,
+          "rounds": 5,
+          "median_ms": 18.152799999999843,
+          "median_writtenShards": 1,
+          "median_shardWriteBytes": 21092
+        },
+        {
+          "shardCount": 256,
+          "rounds": 5,
+          "median_ms": 31.132800000000316,
+          "median_writtenShards": 1,
+          "median_shardWriteBytes": 9527
+        }
+      ]
+    },
+    "10k": {
+      "corpus": {
+        "files": 10000,
+        "markdownFiles": 10000,
+        "attachmentFiles": 500,
+        "corpusBytes": 17101947,
+        "genLinks": {
+          "wikilink": 97777,
+          "mdlink": 21171,
+          "image": 14152,
+          "refdef": 7091,
+          "attachment": 20485,
+          "https": 4282,
+          "broken": 23152
+        },
+        "assetFiles": 500,
+        "contentBytes": 17087947,
+        "edgeCount": 140191,
+        "edgeKinds": {
+          "wikilink": 97777,
+          "mdlink": 21171,
+          "image": 14152,
+          "refdef": 7091
+        },
+        "nonMarkdownTargets": 19438,
+        "brokenTargets": 114780,
+        "unresolvable": 4282,
+        "genCrossCheck": {
+          "genTotal": 140191,
+          "extractedTotal": 140191
+        }
+      },
+      "firstBuild": {
+        "rounds": 3,
+        "snapshot": {
+          "rounds": 3,
+          "median_totalMs": 788.8337000000001,
+          "median_scanMs": 574.2402999999995,
+          "median_commitMs": 211.3073999999997,
+          "median_writeBytes": 13587770
+        },
+        "sqlite": {
+          "rounds": 3,
+          "median_totalMs": 959.8456999999999,
+          "median_scanMs": 574.2402999999995,
+          "median_commitMs": 385.6054000000004,
+          "median_writeBytes": 31215616
+        },
+        "memoryPeakSnapshot": 174440296,
+        "memoryPeakSqlite": 174454648,
+        "loopDelaySnapshot": {
+          "maxOfMeanMs": 14.042908444444445,
+          "maxOfP99Ms": 18.890751,
+          "maxOfMaxMs": 18.890751,
+          "maxOfStarveMs": 188.96839999999975
+        },
+        "loopDelaySqlite": {
+          "maxOfMeanMs": 15.773013333333333,
+          "maxOfP99Ms": 21.954559,
+          "maxOfMaxMs": 21.954559,
+          "maxOfStarveMs": 365.5056999999997
+        },
+        "scanPhase": {
+          "ms": {
+            "listDir": 12.642799999999625,
+            "readExtract": 555.7261999999992,
+            "total": 568.3689999999988
+          },
+          "contentBytes": 17087947
+        }
+      },
+      "diskAfterFirstBuild": {
+        "snapshot": {
+          "bytes": 13587770,
+          "files": 18
+        },
+        "sqlite": {
+          "bytes": 31215616,
+          "files": 1
+        }
+      },
+      "coldRestore": {
+        "rounds": 3,
+        "snapshot": {
+          "rounds": 3,
+          "median_loadMs": 107.9727,
+          "median_files": 10500,
+          "median_edges": 140191,
+          "median_buildBacklinkMs": 33.9289,
+          "median_rss": 196628480
+        },
+        "sqlite": {
+          "rounds": 3,
+          "median_loadMs": 486.58450000000005,
+          "median_files": 10500,
+          "median_edges": 140191,
+          "median_rss": 331292672
+        }
+      },
+      "pointUpdate": {
+        "rounds": 10,
+        "snapshot": {
+          "rounds": 10,
+          "median_ms": 157.2444000000005,
+          "median_writeBytes": 866466,
+          "median_rewrittenShards": 1
+        },
+        "sqlite": {
+          "rounds": 10,
+          "median_ms": 13.138699999999517,
+          "median_writeBytes": 31244288
+        }
+      },
+      "batchUpdate": {
+        "rounds": 3,
+        "size": 500,
+        "snapshot": {
+          "rounds": 3,
+          "median_ms": 373.16820000000007,
+          "median_writeBytes": 13788734,
+          "median_rewrittenShards": 16
+        },
+        "sqlite": {
+          "rounds": 3,
+          "median_ms": 182.30999999999767,
+          "median_writeBytes": 33218560
+        }
+      },
+      "backlinkQuery": {
+        "queries": 20,
+        "backlinkBuildMs": 54.40989999999874,
+        "snapshot": {
+          "rounds": 20,
+          "median_ms": 0.00029999999969732016,
+          "median_count": 7
+        },
+        "sqlite": {
+          "rounds": 20,
+          "median_ms": 0.04489999999896099,
+          "median_count": 7
+        }
+      },
+      "shardSensitivity": null
+    },
+    "100k": {
+      "corpus": {
+        "files": 100000,
+        "markdownFiles": 100000,
+        "attachmentFiles": 5000,
+        "corpusBytes": 171896504,
+        "genLinks": {
+          "wikilink": 980289,
+          "mdlink": 209567,
+          "image": 139367,
+          "refdef": 69967,
+          "attachment": 202155,
+          "https": 41972,
+          "broken": 230643
+        },
+        "assetFiles": 5000,
+        "contentBytes": 171756504,
+        "edgeCount": 1399190,
+        "edgeKinds": {
+          "wikilink": 980289,
+          "image": 139367,
+          "mdlink": 209567,
+          "refdef": 69967
+        },
+        "nonMarkdownTargets": 189641,
+        "brokenTargets": 1109806,
+        "unresolvable": 41972,
+        "genCrossCheck": {
+          "genTotal": 1399190,
+          "extractedTotal": 1399190
+        }
+      },
+      "firstBuild": {
+        "rounds": 3,
+        "snapshot": {
+          "rounds": 3,
+          "median_totalMs": 16080.082499999982,
+          "median_scanMs": 13651.89149999999,
+          "median_commitMs": 2352.0457000000024,
+          "median_writeBytes": 137633026
+        },
+        "sqlite": {
+          "rounds": 3,
+          "median_totalMs": 17943.748,
+          "median_scanMs": 13651.89149999999,
+          "median_commitMs": 4296.454200000007,
+          "median_writeBytes": 311947264
+        },
+        "memoryPeakSnapshot": 1100361672,
+        "memoryPeakSqlite": 786001072,
+        "loopDelaySnapshot": {
+          "maxOfMeanMs": 16.206506666666666,
+          "maxOfP99Ms": 66.584575,
+          "maxOfMaxMs": 66.584575,
+          "maxOfStarveMs": 2098.002800000002
+        },
+        "loopDelaySqlite": {
+          "maxOfMeanMs": 12.41936457142857,
+          "maxOfP99Ms": 21.741567,
+          "maxOfMaxMs": 21.741567,
+          "maxOfStarveMs": 4208.6224
+        },
+        "scanPhase": {
+          "ms": {
+            "listDir": 42.877699999997276,
+            "readExtract": 14001.335099999997,
+            "total": 14044.212799999994
+          },
+          "contentBytes": 171756504
+        }
+      },
+      "diskAfterFirstBuild": {
+        "snapshot": {
+          "bytes": 137633026,
+          "files": 18
+        },
+        "sqlite": {
+          "bytes": 311939072,
+          "files": 1
+        }
+      },
+      "coldRestore": {
+        "rounds": 3,
+        "snapshot": {
+          "rounds": 3,
+          "median_loadMs": 1098.1341,
+          "median_files": 105000,
+          "median_edges": 1399190,
+          "median_buildBacklinkMs": 646.9222000000002,
+          "median_rss": 903847936
+        },
+        "sqlite": {
+          "rounds": 3,
+          "median_loadMs": 4753.8824,
+          "median_files": 105000,
+          "median_edges": 1399190,
+          "median_rss": 1620242432
+        }
+      },
+      "pointUpdate": {
+        "rounds": 10,
+        "snapshot": {
+          "rounds": 10,
+          "median_ms": 2597.910999999993,
+          "median_writeBytes": 8581067,
+          "median_rewrittenShards": 1
+        },
+        "sqlite": {
+          "rounds": 10,
+          "median_ms": 165.32890000002226,
+          "median_writeBytes": 312037376
+        }
+      },
+      "batchUpdate": {
+        "rounds": 3,
+        "size": 500,
+        "snapshot": {
+          "rounds": 3,
+          "median_ms": 3075.766499999998,
+          "median_writeBytes": 137850377,
+          "median_rewrittenShards": 16
+        },
+        "sqlite": {
+          "rounds": 3,
+          "median_ms": 343.1676000000152,
+          "median_writeBytes": 314081280
+        }
+      },
+      "backlinkQuery": {
+        "queries": 20,
+        "backlinkBuildMs": 683.0015999999887,
+        "snapshot": {
+          "rounds": 20,
+          "median_ms": 0.0006999999895924702,
+          "median_count": 8
+        },
+        "sqlite": {
+          "rounds": 20,
+          "median_ms": 0.08179999999993015,
+          "median_count": 8
+        }
+      },
+      "shardSensitivity": null
+    }
+  }
+}
