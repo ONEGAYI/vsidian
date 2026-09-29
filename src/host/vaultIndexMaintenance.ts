@@ -70,9 +70,10 @@ export interface IndexMaintenance {
   /** 恢复默认排除模式（等价保存默认清单） */
   resetPatterns(): Promise<void>
   /** 清理当前工作区缓存（安全回收旧代际） */
-  cleanup(): Promise<{ removedDirs: number } | 'unavailable' | 'failed'>
-  /** 完整重建（进度经 getState 轮次可见） */
-  rebuild(): Promise<'done' | 'cancelled' | 'failed' | 'unavailable'>
+  /** 清理当前工作区缓存（安全回收旧代际）；busy = 已有维护操作进行中 */
+  cleanup(): Promise<{ removedDirs: number } | 'unavailable' | 'failed' | 'busy'>
+  /** 完整重建（进度经 getState 轮次可见）；busy = 已有维护操作进行中 */
+  rebuild(): Promise<'done' | 'cancelled' | 'failed' | 'unavailable' | 'busy'>
   /** 取消在途维护操作 */
   cancel(): void
   /** 原始持久化值（测试钩子） */
@@ -133,13 +134,13 @@ export function createIndexMaintenance(
     async resetPatterns(): Promise<void> {
       await this.setPatterns([...DEFAULT_EXCLUDE_PATTERNS])
     },
-    async cleanup(): Promise<{ removedDirs: number } | 'unavailable' | 'failed'> {
+    async cleanup(): Promise<{ removedDirs: number } | 'unavailable' | 'failed' | 'busy'> {
       if (!vaultIndex) {
         notice = null
         return 'unavailable'
       }
       if (status !== 'idle') {
-        return 'failed' // 重建进行中：不并行清理
+        return 'busy' // 已有维护操作进行中（不冒充失败——调用方按 busy 提示）
       }
       status = 'cleaning'
       notice = null
@@ -157,13 +158,13 @@ export function createIndexMaintenance(
         return 'failed'
       }
     },
-    async rebuild(): Promise<'done' | 'cancelled' | 'failed' | 'unavailable'> {
+    async rebuild(): Promise<'done' | 'cancelled' | 'failed' | 'unavailable' | 'busy'> {
       if (!vaultIndex) {
         notice = null
         return 'unavailable'
       }
       if (status !== 'idle') {
-        return 'failed' // 已有维护操作进行中（按钮应已禁用，此处兜底）
+        return 'busy' // 已有维护操作进行中（按钮应已禁用，此处兜底）
       }
       status = 'rebuilding'
       progress = null
@@ -182,13 +183,14 @@ export function createIndexMaintenance(
         })
         status = 'idle'
         progress = null
+        // 底层 busy（维护互斥窗口）：透传状态、不打扰（不是失败）
         notice = result === 'done'
           ? { kind: 'rebuild-done' }
           : result === 'cancelled'
             ? { kind: 'rebuild-cancelled' }
-            : { kind: 'rebuild-failed' }
+            : null
         push()
-        return result === 'busy' ? 'failed' : result
+        return result
       } catch (err) {
         status = 'idle'
         progress = null

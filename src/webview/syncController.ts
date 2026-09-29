@@ -604,6 +604,8 @@ export class WebviewSyncController {
   private backlinksPanelEl: HTMLElement | undefined
   /** 最近一次快照（四态渲染依据；面板可见即按此渲染） */
   private backlinksSnapshot: BacklinkPanelSnapshot = { state: 'loading', updating: false, items: [] }
+  /** 最近应用的本文档反链快照序号（宿主按文档单调递增；降序帧丢弃） */
+  private lastBacklinksSeq = 0
 
   // ---- 大纲面板状态（#54）----
   /** 大纲面板 active：与 sidebarOpen 同类的纯视图状态（零写回、零出站、
@@ -1329,9 +1331,17 @@ export class WebviewSyncController {
       case 'backlinks.snapshot': {
         // #197 反链快照：仅当前文档的快照生效（宿主按面板文档定向推送，
         // 多面板/文档切换期间的迟到快照按 docUri 丢弃）；面板可见时即时
-        // 重渲染，不可见时只缓存（展开时 applyBacklinksDom 渲染）
+        // 重渲染，不可见时只缓存（展开时 applyBacklinksDom 渲染）。
+        // review-loops #16：宿主按文档带单调 seq——快照应答为异步
+        // fire-and-forget，乱序到达时丢弃降序帧（缺省 seq 不丢弃，兼容）
         if (this.docUri !== message.docUri) {
           break
+        }
+        if (message.seq !== undefined) {
+          if (message.seq < this.lastBacklinksSeq) {
+            break
+          }
+          this.lastBacklinksSeq = message.seq
         }
         this.backlinksSnapshot = {
           state: message.state,

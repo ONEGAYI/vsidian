@@ -421,13 +421,13 @@ describe('缓存清理计划（#198 清理当前工作区缓存）', () => {
     expect(names).toEqual(['gen-000001-w0', 'tmp-write-9', 'not-a-gen-dir'])
   })
 
-  it('无 CURRENT（无快照）时全部 gen 目录与 tmp- 均可回收', () => {
+  it('无 CURRENT（无快照）时保留最高代目录（在途提交保守），其余 gen 与 tmp- 回收', () => {
     const names = planCleanupDirs({
       currentDirName: null,
       inheritSources: [],
       existingDirs: ['gen-000001-a', 'gen-000007-b', 'tmp-x'],
     })
-    expect(names.sort()).toEqual(['gen-000001-a', 'gen-000007-b', 'tmp-x'])
+    expect(names.sort()).toEqual(['gen-000001-a', 'tmp-x'])
   })
 
   it('同代异写者目录（并发窗口完整旧代）保守保留，仅严格更旧代回收', () => {
@@ -515,6 +515,237 @@ describe('快照格式健壮性', () => {
       v: 1, names: ['a.md'], files: [[0, 1, 2, 3]], edges: [],
     }))
     expect(await loadSnapshot(port, BASE)).toBeNull()
+  })
+})
+
+describe('review-loops 修复：增量继承链跨代与回收保留集合', () => {
+  /** 增量提交（从端口读回上一代 manifest——与生产 commitSnapshot 同源：
+   *  片校验和 + 片实体位置，继承沿用上游实体位置而非恒记 prev 目录名） */
+  async function commitInc(port: VaultIndexFsPort & { files: Map<string, string> }, model: VaultIndexModel, prevDir: string) {
+    const manifest = JSON.parse(port.files.get(`${BASE}/${prevDir}/manifest.json`)!) as {
+      generation: number
+      shards: Array<{ i: number; checksum: string; inheritedFrom: string | null }>
+    }
+    const prev = {
+      generation: manifest.generation,
+      dirName: prevDir,
+      shardChecksums: new Map(manifest.shards.map((s) => [s.i, s.checksum])),
+      shardLocations: new Map(manifest.shards.map((s) => [s.i, s.inheritedFrom ?? prevDir])),
+    }
+    const plan = await applyWrites(port, planSnapshotCommit(model, {
+      baseDir: BASE, shardCount: 2, prev,
+      existingDirs: await port.listDirs(BASE),
+    }))
+    return plan
+  }
+
+  /** 应用回收清单（模拟生产提交成功后的 removeDir） */
+  async function applyObsolete(port: VaultIndexFsPort & { files: Map<string, string> }, plan: ReturnType<typeof planSnapshotCommit>) {
+    for (const name of plan.obsoleteDirs) {
+      for (const key of [...port.files.keys()]) {
+        if (key === `${BASE}/${name}` || key.startsWith(`${BASE}/${name}/`)) port.files.delete(key)
+      }
+    }
+  }
+
+  /** 按片分组选路径：返回 shardId===want 的前 n 个（保证改动只落单一片，
+   *  其余片两代不变——制造跨代继承片的稳定构造） */
+  function pickShard(paths: string[], want: number, shardCount: number, n: number): string[] {
+    return paths.filter((p) => shardIdForPath(p, shardCount) === want).slice(0, n)
+  }
+
+  it('三连代增量提交后 CURRENT 代可加载且内容完整，gen1 实体目录仍被保留', async () => {
+    const paths = Array.from({ length: 40 }, (_, i) => `dir${i % 8}/note${i}.md`)
+    const port = makePort()
+    const model1 = modelOf(paths, 2)
+    const plan1 = await applyWrites(port, planSnapshotCommit(model1, { baseDir: BASE, shardCount: 2 }))
+    const gen1 = plan1.dirName
+    // gen2：只改片 0 的文件（片 1 继承 gen1，实体留在 gen1）
+    const shard0 = pickShard(paths, 0, 2, 2)
+    expect(shard0.length).toBe(2)
+    const model2 = modelOf(paths, 2)
+    for (const p of shard0) model2.files.get(p)!.size = 555
+    const plan2 = await commitInc(port, model2, gen1)
+    const gen2 = plan2.dirName
+    // gen3：再改片 0 的其他属性（片 1 两代未变——继承自 gen2 的继承片，
+    // 实体仍在 gen1；恒记 prev 目录名的旧实现在此断裂）
+    const model3 = modelOf(paths, 2)
+    for (const p of shard0) model3.files.get(p)!.contentVersion = 9
+    const plan3 = await commitInc(port, model3, gen2)
+    const gen3 = plan3.dirName
+    await applyObsolete(port, plan3)
+    // gen1 实体目录仍在（gen3 的片 1 继承链指向它的实体）
+    expect(port.files.get(`${BASE}/${gen1}/shard-001.json`)).toBeDefined()
+    // CURRENT 代（gen3）直接可加载且内容完整（不回退到 gen2 旧内容）
+    const loaded = await loadSnapshot(port, BASE)
+    expect(loaded).not.toBeNull()
+    expect(loaded!.usedFallback).toBe(false)
+    expect(loaded!.meta.dirName).toBe(gen3)
+    for (const p of paths) {
+      expect(loaded!.model.files.get(p)).toEqual(model3.files.get(p))
+    }
+  })
+
+  it('gen3 提交的回收清单不含其继承片实体目录（gen1 与 gen2 都保留）', async () => {
+    const paths = Array.from({ length: 40 }, (_, i) => `dir${i % 8}/note${i}.md`)
+    const port = makePort()
+    const model1 = modelOf(paths, 2)
+    const plan1 = await applyWrites(port, planSnapshotCommit(model1, { baseDir: BASE, shardCount: 2 }))
+    const gen1 = plan1.dirName
+    const shard0 = pickShard(paths, 0, 2, 2)
+    const model2 = modelOf(paths, 2)
+    for (const p of shard0) model2.files.get(p)!.size = 555
+    const plan2 = await commitInc(port, model2, gen1)
+    const model3 = modelOf(paths, 2)
+    for (const p of shard0) model3.files.get(p)!.contentVersion = 9
+    const plan3 = await commitInc(port, model3, plan2.dirName)
+    expect(plan3.obsoleteDirs).not.toContain(gen1)
+    expect(plan3.obsoleteDirs).not.toContain(plan2.dirName)
+  })
+
+  it('gen2 提交后回收：gen1 仍被 gen2 引用时保留（继承源语义回归钉住）', async () => {
+    const paths = Array.from({ length: 40 }, (_, i) => `dir${i % 8}/note${i}.md`)
+    const port = makePort()
+    const model1 = modelOf(paths, 2)
+    const plan1 = await applyWrites(port, planSnapshotCommit(model1, { baseDir: BASE, shardCount: 2 }))
+    const shard0 = pickShard(paths, 0, 2, 2)
+    const model2 = modelOf(paths, 2)
+    for (const p of shard0) model2.files.get(p)!.size = 555
+    const plan2 = await commitInc(port, model2, plan1.dirName)
+    expect(plan2.obsoleteDirs).not.toContain(plan1.dirName)
+  })
+})
+
+describe('review-loops 修复：清理计划的 CURRENT 缺失保守与 tmp 文件回收', () => {
+  it('无 CURRENT（无快照或已整体损坏）时保留最高代号 gen 目录（在途提交保守策略）', () => {
+    const names = planCleanupDirs({
+      currentDirName: null,
+      inheritSources: [],
+      existingDirs: ['gen-000001-a', 'gen-000007-b', 'gen-000003-c', 'tmp-x'],
+    })
+    // 最高代 gen-000007-b 可能是并发窗口的在途提交：保守保留
+    expect(names).not.toContain('gen-000007-b')
+    expect(names.sort()).toEqual(['gen-000001-a', 'gen-000003-c', 'tmp-x'])
+  })
+
+  it('无 CURRENT 时同最高代号多写者目录全部保守保留', () => {
+    const names = planCleanupDirs({
+      currentDirName: null,
+      inheritSources: [],
+      existingDirs: ['gen-000004-a', 'gen-000004-b', 'gen-000002-c'],
+    })
+    expect(names).toEqual(['gen-000002-c'])
+  })
+
+  it('提交回收与清理计划均回收 baseDir 直下的原子写 tmp 文件（*.json.tmp-<hex>）', () => {
+    const plan = planSnapshotCommit(modelOf(['a.md'], 1), {
+      baseDir: BASE, shardCount: 1,
+      existingDirs: [],
+      existingFiles: ['shard-000.json.tmp-deadbeef', 'manifest.json.tmp-0102030a', 'CURRENT'],
+    })
+    expect(plan.obsoleteDirs).toContain('shard-000.json.tmp-deadbeef')
+    expect(plan.obsoleteDirs).toContain('manifest.json.tmp-0102030a')
+    expect(plan.obsoleteDirs).not.toContain('CURRENT')
+    // 清理计划同域
+    const names = planCleanupDirs({
+      currentDirName: null,
+      inheritSources: [],
+      existingDirs: [],
+      existingFiles: ['shard-000.json.tmp-deadbeef', 'CURRENT.tmp-abcd1234'],
+    })
+    expect(names).toEqual(['shard-000.json.tmp-deadbeef'])
+  })
+})
+
+describe('review-loops 修复：代目录名白名单（载荷构造防路径穿越）', () => {
+  /** 解析 `..` 的 readFile 端口（贴近真 fs 语义：路径穿越会被文件系统解析） */
+  function makeNormalizingPort(initial: Record<string, string> = {}): VaultIndexFsPort & { files: Map<string, string> } {
+    const port = makePort(initial)
+    const resolve = (p: string): string => {
+      const out: string[] = []
+      for (const seg of p.split('/')) {
+        if (seg === '..') out.pop()
+        else if (seg !== '.') out.push(seg)
+      }
+      return out.join('/')
+    }
+    return {
+      files: port.files,
+      listDirs: port.listDirs,
+      async readFile(path: string) {
+        const content = port.files.get(resolve(path))
+        if (content === undefined) throw new Error(`ENOENT: ${path}`)
+        return content
+      },
+    }
+  }
+
+  it('CURRENT 内容为非法代目录名（路径穿越形态）时按缺失处理，不读取逃逸路径', async () => {
+    const port = makeNormalizingPort()
+    const model = modelOf(['a.md'], 1)
+    const plan = await applyWrites(port, planSnapshotCommit(model, { baseDir: BASE, shardCount: 1 }))
+    // 攻击载荷：CURRENT 指向 baseDir 外的伪造代（真实 fs 下 `..` 会被解析）
+    const escapeDir = plan.dirName + '/../../evil'
+    // 逃逸目标：`${BASE}/../evil/`（穿越出 baseDir 一层）
+    const baseParent = BASE.slice(0, BASE.lastIndexOf('/'))
+    port.files.set(`${baseParent}/evil/manifest.json`, port.files.get(`${BASE}/${plan.dirName}/manifest.json`)!)
+    port.files.set(`${baseParent}/evil/shard-000.json`, port.files.get(`${BASE}/${plan.dirName}/shard-000.json`)!)
+    port.files.set(`${BASE}/CURRENT`, escapeDir)
+    const loaded = await loadSnapshot(port, BASE)
+    // 白名单拒绝穿越形态 → 回退扫描真实存在的合法代（而非逃逸目录）
+    expect(loaded).not.toBeNull()
+    expect(loaded!.usedFallback).toBe(true)
+    expect(loaded!.meta.dirName).toBe(plan.dirName)
+  })
+
+  it('manifest 的 inheritedFrom 为非法目录名时该代判损坏（不拼接读取）', async () => {
+    const port = makeNormalizingPort()
+    const paths = Array.from({ length: 40 }, (_, i) => `dir${i % 8}/note${i}.md`)
+    const model1 = modelOf(paths, 2)
+    const plan1 = await applyWrites(port, planSnapshotCommit(model1, { baseDir: BASE, shardCount: 2 }))
+    // 只改片 0 的文件：片 1 继承（制造带继承片的 gen2）
+    const shard0 = paths.filter((p) => shardIdForPath(p, 2) === 0).slice(0, 2)
+    const model2 = modelOf(paths, 2)
+    for (const p of shard0) model2.files.get(p)!.size = 999
+    const shardChecksums = new Map<number, string>()
+    for (const [k, v] of port.files) {
+      const m = k.match(new RegExp(`^${BASE}/${plan1.dirName}/shard-(\\d+)\\.json$`))
+      if (m) shardChecksums.set(Number(m[1]), stableHash(v))
+    }
+    const plan2 = planSnapshotCommit(model2, {
+      baseDir: BASE, shardCount: 2,
+      prev: { generation: plan1.generation, dirName: plan1.dirName, shardChecksums },
+    })
+    await applyWrites(port, plan2)
+    // 篡改 manifest：继承片来源指向逃逸路径，并在逃逸处预置同名片
+    //（不加白名单时 normalizing fs 会解析 `..` 读到该文件——加载"成功"）
+    const manifest = JSON.parse(port.files.get(`${BASE}/${plan2.dirName}/manifest.json`)!) as {
+      shards: Array<{ i: number; inheritedFrom: string | null }>
+    }
+    const inherited = manifest.shards.find((s) => s.inheritedFrom !== null)!
+    const escapeDir = `${BASE.slice(0, BASE.lastIndexOf('/'))}/evil`
+    port.files.set(`${escapeDir}/shard-${String(inherited.i).padStart(3, '0')}.json`,
+      port.files.get(`${BASE}/${plan1.dirName}/shard-${String(inherited.i).padStart(3, '0')}.json`)!)
+    inherited.inheritedFrom = plan2.dirName + '/../../evil'
+    port.files.set(`${BASE}/${plan2.dirName}/manifest.json`, JSON.stringify(manifest))
+    const loaded = await loadSnapshot(port, BASE)
+    // gen2 判损坏 → 回退 gen1（而不是沿逃逸路径找片伪装加载成功）
+    expect(loaded!.usedFallback).toBe(true)
+    expect(loaded!.model.files.get(shard0[0])!.size).toBe(100)
+  })
+
+  it('回退扫描对 listDirs 结果同样收紧为完整白名单形态', async () => {
+    const port = makePort()
+    const model = modelOf(['a.md'], 1)
+    const plan = await applyWrites(port, planSnapshotCommit(model, { baseDir: BASE, shardCount: 1 }))
+    // 伪造一个名字不符合白名单（含特殊字符）但内容完整可加载的更高代目录：
+    // 不收紧时回退扫描会按 genNumOf 优先选中它
+    const evilDir = 'gen-000009-x!evil'
+    port.files.set(`${BASE}/${evilDir}/manifest.json`, port.files.get(`${BASE}/${plan.dirName}/manifest.json`)!)
+    port.files.set(`${BASE}/${evilDir}/shard-000.json`, port.files.get(`${BASE}/${plan.dirName}/shard-000.json`)!)
+    port.files.set(`${BASE}/CURRENT`, 'gone')
+    const loaded = await loadSnapshot(port, BASE)
+    expect(loaded!.meta.dirName).toBe(plan.dirName)
   })
 })
 

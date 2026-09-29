@@ -323,7 +323,8 @@
       },
       {
         "command": "onegayi.vsidian.ui.backlinksToggle",
-        "title": "%command.ui.backlinksToggle.title%"
+        "title": "%command.ui.backlinksToggle.title%",
+        "category": "Vsidian"
       }
     ],
     "menus": {

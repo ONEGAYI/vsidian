@@ -243,6 +243,7 @@ export const en = {
   'host.indexRebuildDone': 'Index rebuilt from disk contents.',
   'host.indexRebuildCancelled': 'Index rebuild was cancelled; the previous index stays in use.',
   'host.indexRebuildFailed': 'Index rebuild failed: {detail}',
+  'host.indexMaintenanceBusy': 'An index maintenance operation is already running. Please try again later.',
   'host.indexCleanupDone': 'Index cache cleaned; {count} obsolete generation(s) removed.',
   'host.indexCleanupFailed': 'Cache cleanup failed: {detail}',
   // ---- #199 rename/move reference auto-update (host notices; batch merged) ----
@@ -252,6 +253,8 @@ export const en = {
   'host.renameRefsIndexNotReady': 'Renamed "{file}", but the reference index is not ready yet, so references were left unchanged (rebuild the index later from the settings page if needed).',
   // ---- #200 batch/folder moves: skipped-item detail line and reasons ----
   'host.renameRefsSkippedDetail': 'Not updated: {items}',
+  'host.renameRefsSkipItem': '{file} ({reason})',
+  'host.renameRefsSkipMore': ' … {count}',
   'host.renameRefsSkipCrossRoot': 'outside its root',
   'host.renameRefsSkipEdgeStale': 'content changed',
   /** 运行时设置定义注册（测试钩子/懒注册）的拒绝原因 */
@@ -385,6 +388,7 @@ export const en = {
   'indexMaintenance.cleanup': 'Clean workspace cache',
   'indexMaintenance.cancel': 'Cancel',
   'indexMaintenance.rebuildProgress': 'Rebuilding: {done} / {total} notes',
+  'indexMaintenance.rebuilding': 'Rebuilding index…',
   'indexMaintenance.unavailable': 'No workspace is open. Patterns are still saved and will take effect once a workspace is opened.',
   'indexMaintenance.noticePatternsSaved': 'Exclude patterns saved; coverage is being recalculated.',
   'indexMaintenance.noticePatternsInvalid': 'Some patterns were rejected ({detail}); the valid ones were saved.',

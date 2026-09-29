@@ -262,6 +262,45 @@ describe('view.state 诊断', () => {
   })
 })
 
+describe('反链快照广播乱序（review-loops #16）', () => {
+  const snapshotItem = (sourceRelPath: string) => ({
+    sourceRelPath,
+    sourceFsPath: `d:/notes/${sourceRelPath}`,
+    kind: 'wikilink' as const,
+    anchor: '',
+    start: 0,
+    end: 10,
+    line: 1,
+    snippet: 'x',
+  })
+  const backlinksOfView = (c: WebviewSyncController, sent: WebviewToHost[]) => {
+    c.handleHostMessage({ kind: 'view.state.request' })
+    const msg = sent.filter((m): m is Extract<WebviewToHost, { kind: 'view.state' }> => m.kind === 'view.state').at(-1)!
+    return msg.backlinks!
+  }
+
+  it('乱序到达的降序快照被丢弃（面板保持最新序号内容）', () => {
+    const { bridge, sent } = makeBridge()
+    const c = mount(bridge)
+    init(c)
+    // seq=2 先到（来源 newer.md），seq=1 迟到（来源 older.md）→ 丢弃
+    c.handleHostMessage({ kind: 'backlinks.snapshot', docUri: DOC_URI, state: 'ready', items: [snapshotItem('newer.md')], seq: 2 })
+    c.handleHostMessage({ kind: 'backlinks.snapshot', docUri: DOC_URI, state: 'ready', items: [snapshotItem('older.md')], seq: 1 })
+    expect(backlinksOfView(c, sent).items.map((i) => i.sourceRelPath)).toEqual(['newer.md'])
+  })
+
+  it('同序号及以上快照照常应用，无序号帧不丢弃（兼容缺省）', () => {
+    const { bridge, sent } = makeBridge()
+    const c = mount(bridge)
+    init(c)
+    c.handleHostMessage({ kind: 'backlinks.snapshot', docUri: DOC_URI, state: 'ready', items: [snapshotItem('a.md')], seq: 1 })
+    c.handleHostMessage({ kind: 'backlinks.snapshot', docUri: DOC_URI, state: 'ready', items: [snapshotItem('b.md')], seq: 1 })
+    expect(backlinksOfView(c, sent).items.map((i) => i.sourceRelPath)).toEqual(['b.md'])
+    c.handleHostMessage({ kind: 'backlinks.snapshot', docUri: DOC_URI, state: 'ready', items: [snapshotItem('c.md')] })
+    expect(backlinksOfView(c, sent).items.map((i) => i.sourceRelPath)).toEqual(['c.md'])
+  })
+})
+
 describe('排版一致性探针（#32：view.state 可选字段）', () => {
   // fixture 同时覆盖标题、正文、列表与引用（表格由集成层覆盖）；
   // jsdom 无样式表层叠，computed 值不反映 main.css——此处只契约

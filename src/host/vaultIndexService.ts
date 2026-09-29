@@ -465,8 +465,9 @@ export class VaultIndexService {
 
   /**
    * 清理当前工作区索引缓存：按 planCleanupDirs 安全回收各根分区下的旧
-   * 代际与 tmp- 残留——保留 CURRENT 指向代、其继承源与更高代际（并发
-   * 窗口可能在途提交），不删活跃文件；健康缓存不按固定天数失效。
+   * 代际与 tmp- 残留——保留 CURRENT 指向代、其继承链引用的全部实体目录
+   * 与更高代际（并发窗口可能在途提交；无 CURRENT 时保留最高代号目录），
+   * 不删活跃文件；健康缓存不按固定天数失效。
    */
   async cleanupCache(): Promise<{ removedDirs: number }> {
     let removedDirs = 0
@@ -497,10 +498,12 @@ export class VaultIndexService {
         }
       }
       const dirs = await this.storage.listDirs(baseDir)
+      const files = await this.storage.listFiles?.(baseDir) ?? []
       for (const dir of planCleanupDirs({
         currentDirName: currentDir,
         inheritSources: [...inheritSources],
         existingDirs: dirs,
+        ...(files.length > 0 ? { existingFiles: files } : {}),
       })) {
         try {
           await this.storage.removeDir(`${baseDir}/${dir}`)
@@ -858,18 +861,25 @@ export class VaultIndexService {
       return
     }
     const baseDir = this.baseDirOf(state)
-    // prev 的片校验和表：读上一代 manifest（增量提交继承未变片）
-    let prev: { generation: number; dirName: string; shardChecksums: Map<number, string> } | undefined
+    // prev 的片校验和表 + 片实体位置：读上一代 manifest（增量提交继承未变
+    // 片；实体位置沿继承链回溯——孙代继承片仍指祖先目录，不恒记上一代名）
+    let prev: {
+      generation: number
+      dirName: string
+      shardChecksums: Map<number, string>
+      shardLocations: Map<number, string>
+    } | undefined
     if (state.meta) {
       try {
         const manifest = JSON.parse(await this.storage.readFile(`${baseDir}/${state.meta.dirName}/manifest.json`)) as {
           generation: number
-          shards: Array<{ i: number; checksum: string }>
+          shards: Array<{ i: number; checksum: string; inheritedFrom: string | null }>
         }
         prev = {
           generation: manifest.generation,
           dirName: state.meta.dirName,
           shardChecksums: new Map(manifest.shards.map((s) => [s.i, s.checksum])),
+          shardLocations: new Map(manifest.shards.map((s) => [s.i, s.inheritedFrom ?? state.meta!.dirName])),
         }
       } catch {
         prev = undefined // 上一代 manifest 不可读：按全新提交
@@ -878,6 +888,7 @@ export class VaultIndexService {
     const fileCount = state.model.files.size
     const shardCount = ADAPTIVE_SHARDS.find((t) => fileCount <= t.maxFiles)!.shards
     const existingDirs = await this.storage.listDirs(baseDir)
+    const existingFiles = await this.storage.listFiles?.(baseDir) ?? []
     const plan = await planSnapshotCommitChunked(
       state.model,
       {
@@ -885,15 +896,27 @@ export class VaultIndexService {
         shardCount,
         prev,
         existingDirs,
+        ...(existingFiles.length > 0 ? { existingFiles } : {}),
         writerTag: randomWriterTag(),
       },
       () => this.scan.yieldToEventLoop(),
     )
-    // writes 顺序即提交顺序：片 → manifest → CURRENT（唯一提交点）
-    for (const w of plan.writes) {
-      const dir = w.path.slice(0, Math.max(w.path.lastIndexOf('/'), 0))
-      await this.storage.ensureDir(dir)
-      await this.storage.writeFile(w.path, w.content)
+    // writes 顺序即提交顺序：片 → manifest → CURRENT（唯一提交点）。
+    // 写失败仅影响持久化：内存索引与 notify 照常（索引是可重建缓存，
+    // 磁盘快照滞后由下一轮提交兜底），不留 unhandled rejection
+    try {
+      for (const w of plan.writes) {
+        const dir = w.path.slice(0, Math.max(w.path.lastIndexOf('/'), 0))
+        await this.storage.ensureDir(dir)
+        await this.storage.writeFile(w.path, w.content)
+      }
+    } catch (err) {
+      console.warn(
+        `[vsidian] 索引快照写入失败（root=${state.fsPath} gen=${plan.generation}）：` +
+        `${err instanceof Error ? err.message : String(err)}；下一轮提交兜底`,
+      )
+      this.notify()
+      return
     }
     state.meta = {
       formatVersion: plan.formatVersion,
@@ -1014,9 +1037,38 @@ export class VaultIndexService {
     const rel = this.relOf(state, fsPath)
     if (rel !== null) {
       state.overlay.clear(rel)
+      if (this.excludeMatcher.test(rel)) {
+        return // 排除域：与 watcher/applyUnsaved 同款口径，不入增量队列
+      }
     }
     // 保存走有界增量队列（与外部事件同域：容量/溢出/分批语义一致）
     await this.enqueueRescan(state, key)
+  }
+
+  /**
+   * 文档关闭退役（review-loops #18；provider 的 onDidCloseTextDocument
+   * 驱动，调用方须确认同文档无其他打开面板）：未保存内容随面板关闭丢弃
+   * ——unsaved 全文、防抖计时器与覆盖层边一并退场，反链查询回到磁盘
+   * 基线（内存索引是可重建缓存，磁盘为事实源）。不触发重扫（磁盘未变）。
+   */
+  documentClosed(fsPath: string): void {
+    const state = this.rootOf(fsPath)
+    if (!state) {
+      return
+    }
+    const key = this.normKey(fsPath)
+    const timer = state.unsavedTimers.get(key)
+    if (timer !== undefined) {
+      clearTimeout(timer)
+      state.unsavedTimers.delete(key)
+    }
+    state.unsaved.delete(key)
+    state.unsavedSince.delete(key)
+    const rel = this.relOf(state, fsPath)
+    if (rel !== null && state.overlay.get(rel) !== undefined) {
+      state.overlay.clear(rel)
+      this.notify()
+    }
   }
 
   // ---- watcher / 增量队列 ----
@@ -1565,15 +1617,9 @@ export class VaultIndexService {
           await this.scan.yieldToEventLoop()
         }
       }
-      // 遍 2：抽边（resolver 可见遍 1 登记的完整新清单——批内互链不断链）
-      for (const load of mdLoads) {
-        const edges = extractVaultEdges(load.rel, load.text, {
-          docDir: this.dirname(load.fsPath),
-          rootDir: state.fsPath,
-          isWindowsHost: this.opts.isWindowsHost,
-        }, this.makeModelResolver(state))
-        state.model.edges = state.model.edges.filter((e) => e.source !== load.rel).concat(edges)
-      }
+      // 遍 1.5：asset 的 stat + 登记**先于抽边**（对齐 fullScan 两遍法次序）——
+      // 批内 md 指向同批附件的边（目录恒等平移场景）在遍 2 抽边时 resolver
+      // 已可见新位置附件，不因处理顺序产生断链
       let touched = mdLoads.length > 0
       for (const fsPath of assetPaths) {
         const rel = this.relOf(state, fsPath)
@@ -1594,6 +1640,15 @@ export class VaultIndexService {
         })
         this.ensureGeneration(fsPath)
         touched = true
+      }
+      // 遍 2：抽边（resolver 可见遍 1/1.5 登记的完整新清单——批内互链不断链）
+      for (const load of mdLoads) {
+        const edges = extractVaultEdges(load.rel, load.text, {
+          docDir: this.dirname(load.fsPath),
+          rootDir: state.fsPath,
+          isWindowsHost: this.opts.isWindowsHost,
+        }, this.makeModelResolver(state))
+        state.model.edges = state.model.edges.filter((e) => e.source !== load.rel).concat(edges)
       }
       if (touched) {
         touchedRoots.add(state)
@@ -1630,7 +1685,20 @@ export class VaultIndexService {
     if (rel === null) {
       return { status: 'error', reason: 'no-workspace' }
     }
-    const edges = queryBacklinks(state.backlinks, state.overlay, rel)
+    // 反链桶按磁盘真实形态聚合（resolvedTarget 原文）；查询 fsPath 的
+    // 大小写可能漂移——fold 匹配桶键后按 fold 查询（与 renameCandidatesOf
+    // 同口径；POSIX 宿主 fold 为 identity，大小写敏感语义保持）
+    let bucketKey: string | null = null
+    for (const key of state.backlinks.keys()) {
+      if (this.foldKey(key) === this.foldKey(rel)) {
+        bucketKey = key
+        break
+      }
+    }
+    const edges = queryBacklinks(
+      state.backlinks, state.overlay, bucketKey ?? rel,
+      (p) => this.foldKey(p),
+    )
     // 片段与行号：来源有未保存内容优先取其文本（覆盖层边对齐覆盖层文本），
     // 其余读盘一次（OS 缓存；CRLF 归一与抽取同口径）
     const textBySource = new Map<string, string | null>()
@@ -1696,10 +1764,12 @@ export class VaultIndexService {
     return normalizeSeparators(this.ops.resolve(fsPath)).replace(/\/$/, '')
   }
 
-  /** 根内相对路径（`/` 形态）；越根 null */
+  /** 根内相对路径（`/` 形态）；越根 null（精确判定 `..`/`../` 前缀——
+   *  `..drafts.md` 这类 .. 起头的文件名不是上行，与 vaultLink.isInsideRoot
+   *  口径一致） */
   private relOf(state: RootIndexState, fsPath: string): string | null {
     const rel = this.ops.relative(this.ops.resolve(state.fsPath), this.ops.resolve(fsPath))
-    if (rel === '' || rel.startsWith('..') || this.ops.isAbsolute(rel)) {
+    if (rel === '' || rel === '..' || rel.startsWith('../') || this.ops.isAbsolute(rel)) {
       return null
     }
     return normalizeSeparators(rel)

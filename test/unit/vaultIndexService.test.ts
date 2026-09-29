@@ -85,7 +85,16 @@ function storagePortOf(): VaultIndexStoragePort & { files: Map<string, string>; 
       for (const key of files.keys()) {
         if (!key.startsWith(baseDir + '/')) continue
         const rest = key.slice(baseDir.length + 1)
-        if (rest.includes('/')) names.add(rest.split('/')[0]!)
+        if (rest.includes('/')) names.add(rest.split('/')[0])
+      }
+      return [...names]
+    },
+    async listFiles(baseDir: string) {
+      const names = new Set<string>()
+      for (const key of files.keys()) {
+        if (!key.startsWith(baseDir + '/')) continue
+        const rest = key.slice(baseDir.length + 1)
+        if (!rest.includes('/')) names.add(rest)
       }
       return [...names]
     },
@@ -100,20 +109,21 @@ function storagePortOf(): VaultIndexStoragePort & { files: Map<string, string>; 
     },
     async removeDir(path: string) {
       for (const key of [...files.keys()]) {
-        if (key.startsWith(path + '/')) files.delete(key)
+        if (key === path || key.startsWith(path + '/')) files.delete(key)
       }
     },
     async ensureDir() {},
   }
 }
 
-function makeService(fs: FakeFs, opts: { storageRoot?: string; isWindowsHost?: boolean } = {}) {
+function makeService(fs: FakeFs, opts: { storageRoot?: string; isWindowsHost?: boolean; excludePatterns?: readonly string[] } = {}) {
   const scan = scanPortOf(fs)
   const storage = storagePortOf()
   const service = new VaultIndexService(scan, storage, {
     storageRoot: opts.storageRoot ?? 'C:/store',
     isWindowsHost: opts.isWindowsHost ?? IS_WIN,
     scanBatchFiles: 2,
+    ...(opts.excludePatterns ? { excludePatterns: opts.excludePatterns } : {}),
   })
   return { service, scan, storage, fs }
 }
@@ -1155,5 +1165,185 @@ describe('VaultIndexService：#200 批量 rename 刷新（refreshRenamedBatch）
     ])
     // 排除是位置 glob：区内不进不出；移出者在新位置入索引域
     expect(service.maintenanceInfo().roots[0]!.fileCount).toBe(before + 1)
+  })
+})
+
+describe('VaultIndexService：review-loops 批量刷新 asset 登记次序（#9）', () => {
+  it('目录恒等平移时批内 md 指向同批附件的边不断链（asset 先登记再抽边）', async () => {
+    const fs = makeFs({
+      'C:/vault/dir/a.md': '# A\n\n![图](pic.png)。\n',
+      'C:/vault/dir/pic.png': '\u0000png',
+      'C:/vault/keep.md': '# K\n',
+    })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    expect(itemsOf(await service.backlinksOf('C:/vault/dir/pic.png')).map((i) => i.sourceRelPath)).toEqual(['dir/a.md'])
+    // 磁盘完成目录平移 dir → dir2（a.md 对 pic.png 的相对路径恒等不变）
+    for (const rel of ['a.md', 'pic.png']) {
+      const oldKey = `C:/vault/dir/${rel}`
+      const content = fs.files.get(oldKey)!
+      fs.files.delete(oldKey)
+      fs.stats.delete(oldKey)
+      fs.files.set(`C:/vault/dir2/${rel}`, content)
+      fs.stats.set(`C:/vault/dir2/${rel}`, { mtimeMs: 1_700_000_011_000, size: content.length })
+    }
+    await service.refreshRenamedBatch([
+      { oldFsPath: 'C:/vault/dir/a.md', newFsPath: 'C:/vault/dir2/a.md' },
+      { oldFsPath: 'C:/vault/dir/pic.png', newFsPath: 'C:/vault/dir2/pic.png' },
+    ])
+    // 批内 md 的图片边解析到新位置附件（resolvedTarget 非空 → 反链命中）
+    expect(itemsOf(await service.backlinksOf('C:/vault/dir2/pic.png')).map((i) => i.sourceRelPath)).toEqual(['dir2/a.md'])
+  })
+})
+
+describe('VaultIndexService：review-loops 保存排除检查（#10）', () => {
+  it('排除域 .md 保存后不进 model.files（与 watcher 同款排除）', async () => {
+    const fs = makeFs({
+      'C:/vault/a.md': '# A\n',
+      'C:/vault/excluded/x.md': '# X\n',
+    })
+    const { service } = makeService(fs, { excludePatterns: ['excluded/**'] })
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    expect(service.maintenanceInfo().roots[0]!.fileCount).toBe(1)
+    // 保存事件（documentSaved）对排除域文件不得把条目带进索引
+    await service.documentSaved('C:/vault/excluded/x.md')
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(service.maintenanceInfo().roots[0]!.fileCount).toBe(1)
+  })
+})
+
+describe('VaultIndexService：review-loops relOf 上行判定（#22）', () => {
+  it('POSIX 宿主下 .. 前缀文件名（..drafts.md）不误判越根', async () => {
+    const fs = makeFs({
+      '/vault/..drafts.md': '# D\n',
+      '/vault/ok.md': '# O\n',
+    })
+    const { service } = makeService(fs, { isWindowsHost: false, storageRoot: '/store' })
+    await service.initialize([{ fsPath: '/vault', uri: 'file:///vault' }])
+    expect(service.maintenanceInfo().roots[0]!.fileCount).toBe(2)
+    // 真正的上行越根仍被拒绝
+    await service.documentSaved('/vault/../outside.md')
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(service.maintenanceInfo().roots[0]!.fileCount).toBe(2)
+  })
+})
+
+describe('VaultIndexService：review-loops 快照写失败与 tmp 回收（#13/#15）', () => {
+  it('快照写入失败不中断初始化：失败根跳过持久化，后续根照常索引', async () => {
+    const fs = makeFs({
+      'C:/vault/a.md': '# A\n',
+      'D:/other/b.md': '# B\n',
+    })
+    const { service, storage } = makeService(fs)
+    const failingRootBase = `C:/store/vsidian-index/${rootKeyOf('file:///c%3A/vault')}`
+    const originalWriteFile = storage.writeFile.bind(storage)
+    storage.writeFile = async (path: string, content: string) => {
+      if (path.startsWith(failingRootBase)) {
+        throw new Error('EACCES: disk full (simulated)')
+      }
+      return originalWriteFile(path, content)
+    }
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      // 不再 reject：写失败仅影响持久化（内存索引与 notify 照常）
+      await expect(service.initialize([
+        { fsPath: 'C:/vault', uri: 'file:///c%3A/vault' },
+        { fsPath: 'D:/other', uri: 'file:///d%3A/other' },
+      ])).resolves.toBeUndefined()
+      // 第一根内存索引照常可用
+      expect((await service.backlinksOf('C:/vault/a.md')).status).toBe('ready')
+      // 后续根照常初始化并持久化
+      expect((await service.backlinksOf('D:/other/b.md')).status).toBe('ready')
+      expect(warnSpy).toHaveBeenCalled()
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('提交后回收 baseDir 直下的原子写 tmp 文件残留', async () => {
+    const fs = makeFs({ 'C:/vault/a.md': '# A\n\n见 [[b]]。\n', 'C:/vault/b.md': '# B\n' })
+    const { service, storage } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // 模拟原子写崩溃残留（writeFile 的 <target>.tmp-<hex> 中缀形态）
+    const tmpKey = `${STORE_BASE}/shard-000.json.tmp-deadbeef`
+    storage.files.set(tmpKey, 'half-written')
+    // 变更触发一次增量提交 → 回收清单带上 tmp 文件
+    fs.files.set('C:/vault/a.md', '# A2\n\n见 [[b]]。\n')
+    fs.stats.set('C:/vault/a.md', { mtimeMs: 1_700_000_020_000, size: 16 })
+    await service.documentSaved('C:/vault/a.md')
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(storage.files.has(tmpKey)).toBe(false)
+  })
+})
+
+describe('VaultIndexService：review-loops 反链查询 fold 匹配（#11）', () => {
+  it('Windows 宿主下查询路径大小写漂移不产生假空反链（与 renameCandidatesOf 同口径）', async () => {
+    // 磁盘真实形态 Pic.png（扫描侧 rel 原样登记，resolvedTarget 同形态）
+    const fs = makeFs({
+      'C:/vault/dir/Pic.png': '\u0000png',
+      'C:/vault/dir/a.md': '# A\n\n![图](Pic.png)。\n',
+    })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // 大小写漂移的查询路径（用户/宿主传入形态）：fold 桶匹配命中
+    expect(itemsOf(await service.backlinksOf('C:/vault/dir/pic.png')).map((i) => i.sourceRelPath)).toEqual(['dir/a.md'])
+    // 原形态查询照常
+    expect(itemsOf(await service.backlinksOf('C:/vault/dir/Pic.png')).map((i) => i.sourceRelPath)).toEqual(['dir/a.md'])
+  })
+})
+
+describe('VaultIndexService：review-loops 文档关闭退役（#18）', () => {
+  it('documentClosed 退役未保存覆盖层：幽灵反链退场、基线接管查询', async () => {
+    const fs = makeFs({
+      'C:/vault/a.md': '# A\n',
+      'C:/vault/b.md': '# B\n',
+    })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // 编辑 a.md 加引用（未保存）→ 覆盖层接管，b 出现反链
+    service.applyUnsaved('C:/vault/a.md', 2, '# A\n\n见 [[b]]。\n')
+    await vi.advanceTimersByTimeAsync(600)
+    expect(itemsOf(await service.backlinksOf('C:/vault/b.md')).map((i) => i.sourceRelPath)).toEqual(['a.md'])
+    // 编辑后不保存关闭面板 → 覆盖层退役，反链回到磁盘基线（无引用）
+    service.documentClosed('C:/vault/a.md')
+    expect(itemsOf(await service.backlinksOf('C:/vault/b.md'))).toHaveLength(0)
+    // 再次编辑仍正常（退役不破坏后续覆盖层登记）
+    service.applyUnsaved('C:/vault/a.md', 3, '# A\n\n再见 [[b]]。\n')
+    await vi.advanceTimersByTimeAsync(600)
+    expect(itemsOf(await service.backlinksOf('C:/vault/b.md')).map((i) => i.sourceRelPath)).toEqual(['a.md'])
+  })
+})
+
+describe('VaultIndexService：review-loops 三连代增量快照可恢复（#17 服务层）', () => {
+  it('两轮增量提交后新实例恢复最新代内容（继承链跨两代不断裂）', async () => {
+    const initial: Record<string, string> = {}
+    for (let i = 0; i < 24; i++) initial[`C:/vault/d${i % 4}/n${i}.md`] = `# N${i}\n`
+    const fs = makeFs(initial)
+    const first = makeService(fs)
+    await first.service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // 第一轮增量：改一组文件（其余片继承 gen1）
+    fs.files.set('C:/vault/d0/n0.md', '# N0-v2\n')
+    fs.stats.set('C:/vault/d0/n0.md', { mtimeMs: 1_700_000_030_000, size: 9 })
+    await first.service.documentSaved('C:/vault/d0/n0.md')
+    await vi.advanceTimersByTimeAsync(2000)
+    // 第二轮增量：再改另一组（继承上一代的继承片——实体在 gen1）
+    fs.files.set('C:/vault/d1/n1.md', '# N1-v3\n')
+    fs.stats.set('C:/vault/d1/n1.md', { mtimeMs: 1_700_000_040_000, size: 9 })
+    await first.service.documentSaved('C:/vault/d1/n1.md')
+    await vi.advanceTimersByTimeAsync(2000)
+    // 新实例（同存储）恢复：直接拿到最新代（gen3）——若继承链断裂会回退旧代
+    const second = new VaultIndexService(first.scan, first.storage, {
+      storageRoot: 'C:/store', isWindowsHost: IS_WIN,
+    })
+    await second.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    const result = await second.backlinksOf('C:/vault/d0/n0.md')
+    expect(result.status).toBe('ready')
+    // n0 的正文在 gen2 已变（无引用来源），新实例基线应为最新内容
+    expect(itemsOf(result)).toHaveLength(0)
+    fs.files.set('C:/vault/d0/n0.md', '# N0-v2 见 [[../d1/n1]]\n')
+    fs.stats.set('C:/vault/d0/n0.md', { mtimeMs: 1_700_000_050_000, size: 22 })
+    await second.documentSaved('C:/vault/d0/n0.md')
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(itemsOf(await second.backlinksOf('C:/vault/d1/n1.md')).map((i) => i.sourceRelPath)).toEqual(['d0/n0.md'])
   })
 })

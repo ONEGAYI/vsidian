@@ -8,6 +8,7 @@ import {
   expandRenameMoves,
   lfOffsetToLineCol,
   planVaultRenameRewrites,
+  renameNoticeKeyOf,
   type RenameDocInput,
   type RenameExpandPort,
   type RenameMoveEntry,
@@ -504,6 +505,27 @@ describe('vaultRename：#200 目录移动映射展开（expandRenameMoves）', (
     ])
   })
 
+  it('review-loops #12：父子目录同批移动时最具体（子）目录先展开，父展开不吞并子映射', async () => {
+    const port = expandPort({
+      dirs: [`${WIN_ROOT}/a`, `${WIN_ROOT}/a/b`],
+      filesUnder: {
+        [`${WIN_ROOT}/a`]: [`${WIN_ROOT}/a/x.md`, `${WIN_ROOT}/a/b/y.md`],
+        [`${WIN_ROOT}/a/b`]: [`${WIN_ROOT}/a/b/y.md`],
+      },
+      indexed: {},
+    })
+    // 同批嵌套对：a → x，a/b → x/y（宿主通常只给顶级映射；此为防御形态）
+    const result = await expandRenameMoves(true, [
+      { oldFsPath: `${WIN_ROOT}/a`, newFsPath: `${WIN_ROOT}/x` },
+      { oldFsPath: `${WIN_ROOT}/a/b`, newFsPath: `${WIN_ROOT}/x/y` },
+    ], port)
+    // 子目录 b 的文件按自身映射去 x/y（而非被父展开吞到 x/b）
+    expect(movesOf(result.moves)).toEqual([
+      [`${WIN_ROOT}/a/b/y.md`, `${WIN_ROOT}/x/y/y.md`],
+      [`${WIN_ROOT}/a/x.md`, `${WIN_ROOT}/x/x.md`],
+    ])
+  })
+
   it('文件条目原样保留：目录与文件混合批（多选移动）', async () => {
     const port = expandPort({
       dirs: [`${WIN_ROOT}/dir-old`],
@@ -621,5 +643,26 @@ describe('vaultRename：#200 恒等替换滤除', () => {
     ]
     const result = planVaultRenameRewrites(winCtx(moves), docs)
     expect(applyEdits(textA, result.docs[0]!.edits)).toBe('上行 [[../../c]]。\n')
+  })
+})
+
+describe('renameNoticeKeyOf 通知文案键决策（review-loops #1）', () => {
+  const log = (plannedEdits: number, skipped: number, indexNotReady: number) => ({
+    plannedEdits,
+    skipped: Array.from({ length: skipped }, () => ({})),
+    indexNotReady,
+  })
+  it('纯索引未就绪（无编辑、无跳过）归因 host.renameRefsIndexNotReady', () => {
+    expect(renameNoticeKeyOf(log(0, 0, 2))).toBe('host.renameRefsIndexNotReady')
+  })
+  it('混合未更新（跳过与未就绪并存）沿用 host.renameRefsSkippedAll（部分更新语义不变）', () => {
+    expect(renameNoticeKeyOf(log(0, 1, 1))).toBe('host.renameRefsSkippedAll')
+    expect(renameNoticeKeyOf(log(0, 2, 0))).toBe('host.renameRefsSkippedAll')
+  })
+  it('已更新 / 部分更新 / 静默三分支保持既有语义', () => {
+    expect(renameNoticeKeyOf(log(3, 0, 0))).toBe('host.renameRefsUpdated')
+    expect(renameNoticeKeyOf(log(3, 1, 0))).toBe('host.renameRefsPartiallyUpdated')
+    expect(renameNoticeKeyOf(log(3, 0, 1))).toBe('host.renameRefsPartiallyUpdated')
+    expect(renameNoticeKeyOf(log(0, 0, 0))).toBeNull()
   })
 })

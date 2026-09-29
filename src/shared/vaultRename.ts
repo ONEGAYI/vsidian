@@ -91,13 +91,24 @@ export async function expandRenameMoves(
   const dirOldKeys = new Set<string>()
   const expanded: RenameMoveEntry[] = []
   let notReadyMoves = 0
+  // review-loops #12：目录条目按 old 路径长度降序处理（最具体的子目录先
+  // 展开）——父目录先展开会把子目录下文件映射到父新路径下，吞并同批
+  // 子目录自身的映射（子目录 rename 语义丢失）
+  const dirEntries: Array<{ move: RenameMoveEntry; oldKey: string; depth: number }> = []
   for (const move of moves) {
-    const oldKey = fold(norm(move.oldFsPath))
     const isDir = (await port.isDirectory(move.oldFsPath)) ||
       (await port.isDirectory(move.newFsPath))
     if (!isDir) {
       continue // 文件条目原样保留（已在 byOld）
     }
+    dirEntries.push({
+      move,
+      oldKey: fold(norm(move.oldFsPath)),
+      depth: norm(move.oldFsPath).length,
+    })
+  }
+  dirEntries.sort((a, b) => b.depth - a.depth)
+  for (const { move, oldKey } of dirEntries) {
     const indexed = port.indexedFilesUnder(move.oldFsPath)
     if (indexed === null) {
       // 索引未就绪：该目录整体放弃（引用者边查询与批量刷新同样无效——
@@ -550,4 +561,33 @@ function buildHrefEdit(
     end: baseOffset + destEnd,
     replacement,
   }
+}
+
+/** rename 引用更新反馈的数据面（通知文案键决策的输入；wiring 的
+ *  RenameRefLogEntry 字段子集） */
+export interface RenameNoticeInput {
+  plannedEdits: number
+  skipped: ReadonlyArray<unknown>
+  indexNotReady: number
+}
+
+/**
+ * 通知文案键决策（review-loops #1 下沉纯逻辑）：三态区分——已更新 /
+ * 部分更新 / 未更新；未更新再按构成归因——**纯索引未就绪**（无一处
+ * 编辑、无越界/漂移跳过）归因 host.renameRefsIndexNotReady（含设置页
+ * 重建指引），混合场景（跳过与未就绪并存）沿用全部跳过文案（越界/
+ * 已变化语义），不再把纯未就绪误报为「因越界或内容变化被跳过」。
+ */
+export function renameNoticeKeyOf(log: RenameNoticeInput): string | null {
+  if (log.plannedEdits > 0) {
+    return log.skipped.length > 0 || log.indexNotReady > 0
+      ? 'host.renameRefsPartiallyUpdated'
+      : 'host.renameRefsUpdated'
+  }
+  if (log.skipped.length > 0 || log.indexNotReady > 0) {
+    return log.skipped.length === 0 && log.indexNotReady > 0
+      ? 'host.renameRefsIndexNotReady'
+      : 'host.renameRefsSkippedAll'
+  }
+  return null
 }

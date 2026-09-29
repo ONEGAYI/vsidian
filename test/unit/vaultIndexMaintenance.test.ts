@@ -220,14 +220,26 @@ describe('维护接线：重建与清理', () => {
     expect(maintenance.getState().notice).toEqual({ kind: 'cleanup-done', detail: expect.any(String) })
   })
 
-  it('重建进行中重复触发返回 failed（互斥；不并行维护）', async () => {
+  it('重建进行中重复触发返回 busy（互斥；维护进行中不是失败）', async () => {
     const files: Record<string, string> = { 'C:/vault/b.md': '# B\n' }
     for (let i = 0; i < 3; i++) files[`C:/vault/a${i}.md`] = `# A${i}\n\n见 [[b]]。\n`
     const { maintenance } = await makeWiring(files)
     const first = maintenance.rebuild()
     const second = await maintenance.rebuild()
-    expect(second).toBe('failed')
+    expect(second).toBe('busy')
+    // busy 拒绝不覆盖 notice（首次操作的反馈不被误置为失败）
+    expect(maintenance.getState().notice).toBeNull()
     expect(await first).toBe('done')
+  })
+
+  it('清理进行中触发重建返回 busy（互斥；不冒充失败弹空详情）', async () => {
+    const files: Record<string, string> = { 'C:/vault/b.md': '# B\n' }
+    const { maintenance } = await makeWiring(files)
+    const first = maintenance.cleanup()
+    const second = await maintenance.rebuild()
+    expect(second).toBe('busy')
+    await first
+    expect(maintenance.getState().status).toBe('idle')
   })
 })
 
