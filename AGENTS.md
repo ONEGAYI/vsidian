@@ -104,9 +104,10 @@ vsidian/
 │   │   ├── 2026-09-title-decoration-viewport.md # 标题切片视口渲染实测数据
 │   │   ├── 2026-09-vault-index-storage.md       # 索引存储选型三档基准解读（#195）
 │   │   └── data/                                # 性能探针原始报告数据
-│   │       ├── browser-test-runner.json       # 浏览器调度实测数据
-│   │       ├── perf-report.json               # 性能探针原始报告数据
-│   │       └── vault-index-storage-bench.json # 索引存储基准原始数据（#195）
+│   │       ├── browser-test-runner.json               # 浏览器调度实测数据
+│   │       ├── perf-report.json                       # 性能探针原始报告数据
+│   │       ├── vault-index-storage-bench-recheck.json # #202 三档复测报告
+│   │       └── vault-index-storage-bench.json         # 索引存储基准原始数据（#195）
 │   ├── research/ # 技术调研报告
 │   │   ├── obsidian-live-preview-editor.md # Obsidian 技术栈与选型调研
 │   │   └── obsidian-viewport-rendering.md  # 视口渲染性能补充调研
