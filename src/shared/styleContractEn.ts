@@ -2,7 +2,7 @@
 // 域全量）：设置页「样式参考」条目文档字段的英文版单一事实源——中文清单
 // （./styleContract）保持权威基准不动，本模块按条目 id 索引、字段级覆盖；
 // 取词规则为**英文优先、条目或字段缺失回退中文基准**（规格
-// docs/specs/style-reference-i18n.md）。130 条（content 75 + chrome 55）
+// docs/specs/style-reference-i18n.md）。132 条（content 76 + chrome 56）
 // 已全量覆盖（域级完整性由 test/unit/styleContractEn.test.ts 钉住）。
 //
 // 字段分级（规格钉死）：
@@ -367,6 +367,14 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
     states: 'loading → loaded / error; clicking in the error state retries.',
     dom: 'Element-level state modifier classes on the image slot.',
     obsidian: { counterpart: 'No direct counterpart (Obsidian has no public loading state classes)' },
+  },
+  'image-solo-block': {
+    purpose:
+      'Block container variant for an image standing alone on its line in live view: when the whole line holds a single image (all remaining text is whitespace, trailing whitespace included), the widget slot switches to block layout, providing a definite width basis for sources without intrinsic dimensions (viewBox-only percentage-width SVGs, the mermaid export form) — such sources collapse to 0×0 under inline-block shrink-to-fit (the img loads successfully, so the failure is silent and shows as a blank line). Sources with intrinsic dimensions are unaffected (they still render at natural width under block layout). Known boundary: such SVGs mixed inline with other content (list prefixes, surrounding text, multiple images on one line) keep the inline form.',
+    states:
+      'Decided per line at decoration build time (same rule on the tree-driven and loose paths): the line counts as solo when all text outside the image range is whitespace; the three state modifier classes still stack on top.',
+    dom: 'Live inline widget span.vsidian-image.vsidian-image-block > img (display: block).',
+    obsidian: { counterpart: 'No direct counterpart (Obsidian has no public standalone-image layout class)' },
   },
   'live-wikilink': {
     purpose:
