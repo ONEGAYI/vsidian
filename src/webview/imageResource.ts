@@ -25,6 +25,10 @@ export type ImageSlotState = 'loading' | 'loaded' | 'error'
 export const IMAGE_CLASS_NAMES = {
   /** 图片槽位基类（阅读 img 与 live widget 容器共用） */
   image: 'vsidian-image',
+  /** 独立成行图片的块级容器修饰类（live）：viewBox-only 百分比宽 SVG
+   *  （mermaid 导出形态）无固有尺寸，inline-block shrink-to-fit 下解析为
+   *  0×0——块级布局提供确定宽度基准（样式契约 image-solo-block 条目） */
+  block: 'vsidian-image-block',
   /** 状态修饰类（与 data-vsidian-img-state 同步） */
   state: (s: ImageSlotState) => `vsidian-image-${s}`,
 } as const

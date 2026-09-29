@@ -2236,6 +2236,14 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
   max-width: 100%;
 }
 
+/* 独立成行图片（live SVG 塌缩修复）：整行仅一张图时容器取块级布局，为
+   无固有尺寸的图源给出确定宽度基准——viewBox-only 百分比宽 SVG（mermaid
+   导出形态）在 inline-block shrink-to-fit 下解析为 0×0（img 实际加载成功，
+   故静默无反馈）；有固有尺寸的图源不受影响（块级下仍按自然宽度呈现） */
+#app .cm-editor .cm-scroller .vsidian-image.vsidian-image-block {
+  display: block;
+}
+
 /* 占位（loading）：alt 文本形态，弱化呈现 */
 #app .vsidian-image.vsidian-image-loading {
   opacity: 0.65;

@@ -24,9 +24,11 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // 行号列随列/侧栏避让/片段优先序/宽块钳制——bug 修复回归本体）。
 // #189/#190/#191 合并入列：codeCardChrome（代码块卡片绘制层——围栏
 // 真实对齐、head 按钮换位与整卡恒显、折行开关与续行悬挂缩进）。
+// live SVG 塌缩修复入列：liveImageLayout（独立成行图片布局——viewBox-only
+// 百分比宽 SVG 铺满正文列、固有尺寸不拉伸、限宽联动、阅读非回归）。
 const names = ['tableCaret', 'quoteBarPaint', 'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'imagePaste', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage',
-  'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract', 'commentToggle', 'viewToggle', 'contextMenu', 'anchorFlash', 'readingWidthProbe', 'codeCardChrome']
+  'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract', 'commentToggle', 'viewToggle', 'contextMenu', 'anchorFlash', 'readingWidthProbe', 'codeCardChrome', 'liveImageLayout']
 const { workers, reuseBuilds, selected } = parseBrowserRunOptions(process.argv.slice(2), names)
 const parent = path.join(root, 'out/test/browser-runs')
 await mkdir(parent, { recursive: true })
