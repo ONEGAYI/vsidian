@@ -4176,7 +4176,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'viewport.test.position' })
     const after = await waitViewportSettled('viewport-mermaid.md')
     assert(after.selectionOffset === before.selectionOffset,
-      `纯光标移动应跨标签页恢复：${before.selectionOffset} → ${after.selectionOffset}`)
+      `纯光标移动应跨标签页恢复：${before.selectionOffset} → ${after.selectionOffset}` +
+      `（after viewMode=${String(after.viewMode)}，center ${before.liveViewportCenterLine} → ${after.liveViewportCenterLine}，` +
+      `scrollTop ${before.liveScrollTopPx} → ${after.liveScrollTopPx}，mermaid after[${mermaidProbeBrief(after)}]）`)
     assert(Math.abs((after.liveViewportCenterLine ?? 0) - (before.liveViewportCenterLine ?? 0)) <= 2,
       `Live 切标签页后中心行漂移：${before.liveViewportCenterLine} → ${after.liveViewportCenterLine}` +
       `（scrollTop ${before.liveScrollTopPx} → ${after.liveScrollTopPx}；mermaid before[${mermaidProbeBrief(before)}] after[${mermaidProbeBrief(after)}]）`)
