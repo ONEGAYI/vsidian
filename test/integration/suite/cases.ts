@@ -1029,6 +1029,25 @@ async function waitSessionReady(file: string): Promise<SessionState> {
   })
 }
 
+/** 等视口布局稳定：滚动触发围栏/图表懒渲染，容器从折叠态长高会推走
+ *  下方行——中心行连续两次采样一致才算稳定（CI 慢机上渲染可能超固定
+ *  sleep 窗口，PR #203 的后台索引首扫进一步放大争抢） */
+async function waitViewportSettled(file: string): Promise<ViewState> {
+  let stable: number | undefined
+  return poll(`${file} 视口布局稳定`, async () => {
+    const state = (await vscode.commands.executeCommand(CMD.viewState, wsUri(file).toString(), 0)) as ViewState | undefined
+    const center = state?.liveViewportCenterLine
+    if (state === undefined || center === undefined) {
+      return undefined
+    }
+    if (center === stable) {
+      return state
+    }
+    stable = center
+    return undefined
+  }, 15000)
+}
+
 async function waitViewState(
   file: string,
   match?: (v: ViewState) => boolean,
@@ -4051,8 +4070,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     })
     await vscode.commands.executeCommand(CMD.postToPanel, uri,
       { kind: 'viewport.test.position', scrollNearLine: 123, scrollBiasPx: 150 })
-    await new Promise((r) => setTimeout(r, 400))
-    const before = await waitProbe()
+    const before = await waitViewportSettled('viewport-mermaid.md')
     assert((before.liveViewportCenterLine ?? 0) >= 110 && (before.liveViewportCenterLine ?? 0) <= 123,
       `前置：视口中心须在 Mermaid 围栏附近，实际 ${before.liveViewportCenterLine}`)
     await openWithEditor('mode.md')
@@ -4063,8 +4081,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
       return state?.panels.some((p) => p.ready) ? true : undefined
     })
     await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'viewport.test.position' })
-    await new Promise((r) => setTimeout(r, 600))
-    const after = await waitProbe()
+    const after = await waitViewportSettled('viewport-mermaid.md')
     assert(after.selectionOffset === before.selectionOffset,
       `纯光标移动应跨标签页恢复：${before.selectionOffset} → ${after.selectionOffset}`)
     assert(Math.abs((after.liveViewportCenterLine ?? 0) - (before.liveViewportCenterLine ?? 0)) <= 2,
