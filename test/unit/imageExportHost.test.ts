@@ -176,6 +176,19 @@ describe('runImageExport 分支矩阵', () => {
     expect(await run()).toEqual({ ok: false, reason: 'writeFailed' })
   })
 
+  it('docUri 无目录（根路径）时 defaultUri 退为文件名本身（防御分支）', async () => {
+    statMock.mockResolvedValue({ type: 1, size: 100 })
+    readFileMock.mockResolvedValue(new Uint8Array([1]))
+    writeFileMock.mockResolvedValue(undefined)
+    showSaveDialogMock.mockResolvedValue({ scheme: 'file', path: 'D:/out/x.png' })
+    const outcomes: Outcome[] = []
+    await runImageExport(PAYLOAD, LINK_CTX as never, 'file:///img.md', (o) => {
+      outcomes.push(o)
+    })
+    expect(outcomes).toEqual([{ ok: true }])
+    expect(showSaveDialogMock.mock.calls[0]![0].defaultUri.path).toBe('pic a.png')
+  })
+
   it('含 %XX 字面文件名不再被二次解码（与 image.request 同口径）', async () => {
     // 磁盘真名 a%20b.png（字面百分号）在显示链路的身份是 a%2520b.png
     // （webview 解码一次；classify 内部再容错解码得真名）。导出通道若

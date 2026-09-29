@@ -61,11 +61,9 @@ const IMAGE_EXPORT_FILE_NAME_MAX = IMAGE_PASTE_LIMITS.fileNameHintMaxChars
  *  通道口径分叉），剥 query/fragment（定位侧同口径）与两种路径分隔符；
  *  纯点段（`.`/`..`）与超长名回退默认，与宿主 sanitize 同值 */
 export function suggestImageExportFileName(rawSrc: string): string {
-  let name = rawSrc
-  const cut = Math.max(0, ...[name.indexOf('?'), name.indexOf('#')].filter((i) => i >= 0))
-  if (cut > 0) {
-    name = name.slice(0, cut)
-  }
+  // 剥离顺序与定位侧 planPathTextOf 同口径（先 fragment 后 query，即取
+  // 较前分隔符）：a.png?v=2#sec 两层都剥净，避免预填名剩 a.png?v=2
+  let name = rawSrc.split('#')[0]!.split('?')[0]!
   const slash = Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'))
   if (slash >= 0) {
     name = name.slice(slash + 1)
@@ -247,6 +245,8 @@ export function openImagePopup(rawSrc: string, alt: string): void {
   if (!ctx) {
     return
   }
+  // 归一为解码身份（live 槽位传入源文原样；阅读 dataset 已是归一值，再
+  // 归一为幂等空操作——除非身份含合法 %XX 字面，见规格「已知边界」）
   rawSrc = normalizeImgSrc(rawSrc)
   closeImagePopup()
   closeDiagramPopup() // 互斥：同时只允许一个弹窗实例（规格）

@@ -261,8 +261,7 @@ describe('图片弹窗（契约 4–6）', () => {
     expect(popupImg!.getAttribute('src')).toBeNull()
   })
 
-  it('弹窗与图表弹窗互斥：打开图片弹窗后开图表弹窗，图片弹窗关闭', async () => {
-    __setMermaidApiForTest({
+  it('弹窗与图表弹窗互斥：打开图片弹窗后开图表弹窗，图片弹窗关闭', async () => {    __setMermaidApiForTest({
       initialize() {},
       async render() {
         return { svg: '<svg viewBox="0 0 10 10"></svg>' }
@@ -551,9 +550,11 @@ describe('纯函数矩阵', () => {
     expect(suggestImageExportFileName('https://example.com/')).toBe('image.png')
     // 含 %XX 字面的解码身份不再被二次解码（与显示通道同口径，review-loops 轮 1）
     expect(suggestImageExportFileName('assets/a%20b.png')).toBe('a%20b.png')
-    // 剥 query/fragment（定位侧同口径），不产出畸形预填名
+    // 剥 query/fragment（定位侧同口径——先 fragment 后 query 取较前分隔
+    // 符），不产出畸形预填名
     expect(suggestImageExportFileName('img.png?v=2')).toBe('img.png')
     expect(suggestImageExportFileName('img.png#sec')).toBe('img.png')
+    expect(suggestImageExportFileName('img.png?v=2#sec')).toBe('img.png')
     // 纯点段与超长名回退默认（预填不退化为父目录、不超协议限长）
     expect(suggestImageExportFileName('..')).toBe('image.png')
     expect(suggestImageExportFileName(`${'a'.repeat(256)}.png`)).toBe('image.png')
