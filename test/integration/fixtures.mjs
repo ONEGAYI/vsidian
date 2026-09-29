@@ -329,6 +329,33 @@ const BACKLINKS_TARGET_DOC = [
   '',
 ].join('\n')
 
+// 出链面板样例（出链面板批次）：源文档覆盖命中（普通/带锚点）、断链与
+// 外链四形态——出链面板条目序与锚点跳转的断言载体。
+// 出链期望（resolved 优先 → 显示名码位 → 区间；外链不进面板）：
+//   出链普通目标（resolved）、出链锚点目标（resolved，anchor=深处小节）、
+//   不存在的出链目标（断链，display 用原文）
+const OUTLINKS_SOURCE_DOC = [
+  '# 出链源',
+  '',
+  '锚点引用 [[出链锚点目标#深处小节]] 与普通引用 [[出链普通目标]]。',
+  '断链 [[不存在的出链目标]] 与外链 [外部](https://example.com)。',
+  '',
+].join('\n')
+const OUTLINKS_ANCHOR_DOC = [
+  '# 锚点目标',
+  '',
+  '## 深处小节',
+  '',
+  '深处正文。',
+  '',
+].join('\n')
+const OUTLINKS_PLAIN_DOC = [
+  '# 普通目标',
+  '',
+  '正文。',
+  '',
+].join('\n')
+
 const LINKS_DOC = [
   '# 链接样例',
   '',
@@ -895,6 +922,10 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   writeFileSync(path.join(wsDir, 'backlinks-a.md'), BACKLINKS_SOURCE_A_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'backlinks-b.md'), BACKLINKS_SOURCE_B_DOC, 'utf8')
   writeFileSync(path.join(wsDir, '反链目标.md'), BACKLINKS_TARGET_DOC, 'utf8')
+  // 出链面板批次：源文档（命中/锚点/断链/外链四形态）+ 两个目标
+  writeFileSync(path.join(wsDir, '出链源.md'), OUTLINKS_SOURCE_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, '出链锚点目标.md'), OUTLINKS_ANCHOR_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, '出链普通目标.md'), OUTLINKS_PLAIN_DOC, 'utf8')
   // review-loops #18 宿主级退役用例：独立文档组（目标基线无引用 → 空态起
   // 步；幽灵来源基线不含目标引用 → 未保存编辑制造的引用是纯覆盖层幽灵）
   writeFileSync(path.join(wsDir, 'rl18-target.md'), [

@@ -9444,8 +9444,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
       return b && b.panelPainted && b.togglePainted && b.itemPainted ? b : undefined
     })
     assert(painted.active === true, '反链面板应 active')
-    assert(painted.panelAriaLabel === editorMessages()['backlinks.label'],
-      `面板可访问名称应为「${editorMessages()['backlinks.label']}」，实际 ${String(painted.panelAriaLabel)}`)
+    assert(painted.panelAriaLabel === editorMessages()['backlinks.panelTitle'],
+      `面板可访问名称应为「${editorMessages()['backlinks.panelTitle']}」，实际 ${String(painted.panelAriaLabel)}`)
     assert(painted.toggleAriaLabel === editorMessages()['backlinks.label'], '按钮可访问名称应随语言包')
     // 互斥：反链面板 active 时大纲面板必须让位（同一面板区域单一显示）
     const outline = await vscode.commands.executeCommand(CMD.viewState, uri) as
@@ -9549,6 +9549,240 @@ export const cases: Array<[string, () => Promise<void>]> = [
       return v && v.selectionOffset === firstEdgeStart ? v : undefined
     })
     assert(located.viewMode === 'live', '跳转目标面板应为 live 模式（可编辑）')
+  }],
+
+  // ---- 出链面板批次：出链四态/绘制/互斥 + 锚点跳转 + 断链不可点；
+  //      反链面板形态改版的分组卡片/命中高亮/搜索/排序 ----
+
+  ['出链面板：条目序列与真实绘制，三面板互斥（出链面板批次）', async () => {
+    await openWithEditor('出链源.md')
+    await waitSessionReady('出链源.md')
+    const uri = wsUri('出链源.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sidebar.test.click' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'outlinks.test.click' })
+    const state = await poll('出链面板就绪', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri)) as
+        | { outlinks?: { state: string; items: Array<{ targetDisplay: string; kind: string; anchor: string; resolved: boolean }> } }
+        | undefined
+      return v?.outlinks && v.outlinks.state === 'ready' ? v : undefined
+    })
+    const items = state.outlinks!.items
+    // 稳定排序：resolved（显示名码位：普 U+666E < 锚 U+951A）→ 断链沉底；
+    // 外链（https://example.com）与危险 scheme 不进面板
+    assert(JSON.stringify(items.map((i) => [i.targetDisplay, i.resolved])) === JSON.stringify([
+      ['出链普通目标', true],
+      ['出链锚点目标', true],
+      ['不存在的出链目标', false],
+    ]), `出链序列不符：${JSON.stringify(items)}`)
+    assert(items[1]!.anchor === '深处小节', '锚点条目应携带标题锚点')
+    assert(items[1]!.kind === 'wikilink', '锚点条目应为 wikilink 边')
+    // 绘制层断言（elementFromPoint）：按钮、面板与首条目真实可见
+    const painted = await poll('出链绘制层', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri)) as
+        | { outlinks?: { togglePainted: boolean; panelPainted: boolean; itemPainted: boolean; active: boolean; toggleAriaLabel: string | null; panelAriaLabel: string | null } }
+        | undefined
+      const o = v?.outlinks
+      return o && o.togglePainted && o.panelPainted && o.itemPainted ? o : undefined
+    })
+    assert(painted.active === true, '出链面板应 active')
+    assert(painted.panelAriaLabel === editorMessages()['outlinks.panelTitle'],
+      `面板可访问名称应为「${editorMessages()['outlinks.panelTitle']}」，实际 ${String(painted.panelAriaLabel)}`)
+    assert(painted.toggleAriaLabel === editorMessages()['outlinks.label'], '按钮可访问名称应随语言包')
+    // 三面板互斥：出链 active 时大纲与反链都让位
+    const others = await vscode.commands.executeCommand(CMD.viewState, uri) as
+      | { outline?: { active: boolean; panelPainted: boolean }; backlinks?: { active: boolean; panelPainted: boolean } }
+      | undefined
+    assert(others?.outline?.active === false && others?.outline?.panelPainted === false,
+      '三面板互斥：大纲应收起且不绘制')
+    assert(others?.backlinks?.active === false && others?.backlinks?.panelPainted === false,
+      '三面板互斥：反链应收起且不绘制')
+    // 切回大纲：出链让位（三向互斥的双向验证）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'outline.test.click' })
+    const after = await vscode.commands.executeCommand(CMD.viewState, uri) as
+      | { outlinks?: { active: boolean; panelPainted: boolean }; outline?: { active: boolean; panelPainted: boolean } }
+      | undefined
+    assert(after?.outlinks?.active === false && after?.outlinks?.panelPainted === false,
+      '切回大纲后出链面板应收起且不绘制')
+    assert(after?.outline?.active === true && after?.outline?.panelPainted === true,
+      '切回大纲后大纲面板应恢复绘制')
+  }],
+
+  ['出链面板：空态与失败态（四态补全，出链面板批次）', async () => {
+    // 空态：untouched.md 无出链（索引就绪后面板为 ready + 空 + 占位绘制）
+    await openWithEditor('untouched.md')
+    await waitSessionReady('untouched.md')
+    const uri = wsUri('untouched.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sidebar.test.click' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'outlinks.test.click' })
+    const empty = await poll('出链空态就绪', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri)) as
+        | { outlinks?: { state: string; items: unknown[]; emptyPainted: boolean } }
+        | undefined
+      const o = v?.outlinks
+      return o && o.state === 'ready' && o.items.length === 0 && o.emptyPainted ? o : undefined
+    }, 20000)
+    assert(empty.emptyPainted === true, '空态占位应真实绘制（无链接）')
+    // 失败态：工作区外文档（与反链失败态用例同手法——索引域外 no-workspace）
+    const outsideUri = vscode.Uri.file(`${wsDir}-outside/出链区外.md`)
+    await vscode.workspace.fs.createDirectory(vscode.Uri.file(`${wsDir}-outside`))
+    await vscode.workspace.fs.writeFile(outsideUri, Buffer.from('# 区外文档\n\n[链接](./x.md)\n', 'utf8'))
+    await vscode.commands.executeCommand('vscode.openWith', outsideUri, VIEW_TYPE)
+    const outside = outsideUri.toString()
+    await poll('区外面板会话就绪', async () => {
+      const s = (await vscode.commands.executeCommand(CMD.sessionState, outside)) as SessionState
+      return s.found && s.panels.some((p) => p.ready) ? true : undefined
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, outside, { kind: 'sidebar.test.click' })
+    await vscode.commands.executeCommand(CMD.postToPanel, outside, { kind: 'outlinks.test.click' })
+    const failed = await poll('出链失败态到达', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, outside)) as
+        | { outlinks?: { state: string; items: unknown[] } }
+        | undefined
+      const o = v?.outlinks
+      return o && o.state === 'error' && o.items.length === 0 ? o : undefined
+    })
+    assert(failed.state === 'error', '工作区外文档的出链应为 error 态')
+  }],
+
+  ['出链条目跳转：按实际锚点定位到目标标题；断链条目不可点（出链面板批次）', async () => {
+    await openWithEditor('出链源.md')
+    await waitSessionReady('出链源.md')
+    const uri = wsUri('出链源.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sidebar.test.click' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'outlinks.test.click' })
+    await poll('出链就绪', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri)) as
+        | { outlinks?: { state: string; items: unknown[] } }
+        | undefined
+      return v?.outlinks && v.outlinks.state === 'ready' && v.outlinks.items.length > 0 ? true : undefined
+    })
+    // 锚点条目（index 1：[[出链锚点目标#深处小节]]）→ 打开目标并落到标题
+    const anchorText = ['# 锚点目标', '', '## 深处小节', '', '深处正文。', ''].join('\n')
+    const headingOffset = anchorText.indexOf('## 深处小节')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'outlinks.test.itemClick', index: 1 })
+    await poll('活动面板为锚点目标', async () => {
+      const tab = vscode.window.tabGroups.activeTabGroup.activeTab
+      return tab?.input instanceof vscode.TabInputCustom && tab.input.viewType === VIEW_TYPE &&
+        tab.input.uri.toString() === wsUri('出链锚点目标.md').toString() ? true : undefined
+    })
+    const located = await poll('光标按锚点落位到目标标题', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, wsUri('出链锚点目标.md').toString())) as
+        | { selectionOffset?: number; viewMode?: string }
+        | undefined
+      return v && v.selectionOffset === headingOffset ? v : undefined
+    })
+    assert(located.viewMode === 'live', '跳转目标面板应为 live 模式（可编辑）')
+    // 断链条目不可点：disabled 按钮不派发 click——点击后活动面板保持源文档
+    await openWithEditor('出链源.md')
+    await waitSessionReady('出链源.md')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'outlinks.test.itemClick', index: 2 })
+    await new Promise((r) => setTimeout(r, 400))
+    const tab = vscode.window.tabGroups.activeTabGroup.activeTab
+    assert(tab?.input instanceof vscode.TabInputCustom &&
+      tab.input.uri.toString() === wsUri('出链源.md').toString(),
+      '断链条目不可点：活动面板应保持源文档')
+  }],
+
+  ['反链面板新形态：分组卡片与命中高亮真实绘制（形态改版批次）', async () => {
+    await openWithEditor('反链目标.md')
+    await waitSessionReady('反链目标.md')
+    const uri = wsUri('反链目标.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sidebar.test.click' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'backlinks.test.click' })
+    await poll('反链就绪', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri)) as
+        | { backlinks?: { state: string; items: unknown[] } }
+        | undefined
+      return v?.backlinks && v.backlinks.state === 'ready' && v.backlinks.items.length > 0 ? true : undefined
+    })
+    // 绘制层断言：工具栏、命中高亮 mark 真实可见 + 黄底非透明（CSS 变量
+    // 明暗两值规则生效的 computed 证据；jsdom 无 CSS 引擎恒 null，真宿主
+    // 断言在此）
+    const probe = await poll('新形态绘制', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri)) as
+        | { backlinks?: { toolbarPainted: boolean; hitPainted: boolean; hitBg: string | null; view?: { sortMode: string; domCards: number; searchOpen: boolean } } }
+        | undefined
+      const b = v?.backlinks
+      return b && b.toolbarPainted && b.hitPainted ? b : undefined
+    }, 20000).catch(async (err) => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri)) as unknown
+      throw new Error(`${(err as Error).message}；probe=${JSON.stringify(v)}`)
+    })
+    assert(probe.view?.sortMode === 'name-asc', '默认排序应为文件名（A-Z）')
+    assert(probe.view?.domCards === 4, `四条引用应渲染四张卡片（实际 ${probe.view?.domCards}）`)
+    assert(typeof probe.hitBg === 'string' && probe.hitBg !== 'rgba(0, 0, 0, 0)' && probe.hitBg !== 'transparent',
+      `命中高亮应有非透明黄底（实际 ${String(probe.hitBg)}）——黄底 CSS 变量失效在此暴露`)
+  }],
+
+  ['反链面板交互：搜索过滤、排序切换与折叠/更多上下文（形态改版批次）', async () => {
+    await openWithEditor('反链目标.md')
+    await waitSessionReady('反链目标.md')
+    const uri = wsUri('反链目标.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'sidebar.test.click' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'backlinks.test.click' })
+    await poll('反链就绪', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri)) as
+        | { backlinks?: { state: string; items: unknown[] } }
+        | undefined
+      return v?.backlinks && v.backlinks.state === 'ready' && v.backlinks.items.length > 0 ? true : undefined
+    })
+    const viewOf = async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri)) as
+        | { backlinks?: { view?: { sortMode: string; query: string; searchOpen: boolean; contextLong: boolean; collapsedCount: number; domCards: number } } }
+        | undefined
+      return v?.backlinks?.view
+    }
+    // 搜索：开框 → 输入 'backlinks-b'（大小写不敏感命中 backlinks-b.md
+    // 文件名——注意 'b' 单字也会命中 backlinks-a.md，判别子串须区分两组）→
+    // 只剩乙组一张卡片；清空恢复四张；关闭搜索框同时清空（Esc 语义同路）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'backlinks.test.toolbarClick', action: 'search' })
+    assert((await viewOf())?.searchOpen === true, '搜索按钮应展开搜索框')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'backlinks.test.searchInput', value: 'backlinks-b' })
+    await poll('过滤生效', async () => {
+      const view = await viewOf()
+      return view && view.query === 'backlinks-b' && view.domCards === 1 ? view : undefined
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'backlinks.test.searchInput', value: '' })
+    await poll('清空恢复', async () => {
+      const view = await viewOf()
+      return view && view.query === '' && view.domCards === 4 ? view : undefined
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'backlinks.test.toolbarClick', action: 'search' })
+    const afterSearch = await viewOf()
+    assert(afterSearch?.searchOpen === false && afterSearch?.query === '', '关闭搜索框应同时清空过滤词')
+    // 排序：选择「文件名（Z-A）」→ 视图状态记住（会话内存）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'backlinks.test.sortSelect', mode: 'name-desc' })
+    await poll('排序生效', async () => {
+      const view = await viewOf()
+      return view && view.sortMode === 'name-desc' ? view : undefined
+    })
+    // 折叠全部：两组全部折叠（collapsedCount = 2）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'backlinks.test.toolbarClick', action: 'collapse' })
+    await poll('全部折叠', async () => {
+      const view = await viewOf()
+      return view && view.collapsedCount === 2 ? view : undefined
+    })
+    // 更多上下文：长片段开态（纯显示层切换）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'backlinks.test.toolbarClick', action: 'context' })
+    await poll('更多上下文开态', async () => {
+      const view = await viewOf()
+      return view && view.contextLong === true ? view : undefined
+    })
+  }],
+
+  ['设置页：索引维护分页可达（图标换链环后的导航回归，形态改版批次）', async () => {
+    // 图标 glyph 形态由单测钉住（indexMaintenanceSettings）；宿主级回归：
+    // 分页经 openWithSection 定位仍可达、ready 握手正常（导航功能不因图标
+    // 改动受损）
+    await vscode.commands.executeCommand('onegayi.vsidian.openSettings')
+    await poll('设置页就绪', async () => {
+      const i = (await vscode.commands.executeCommand(CMD.settingsPageInfo)) as
+        | { open: boolean; ready: boolean }
+        | undefined
+      return i?.open && i.ready ? true : undefined
+    })
+    await vscode.commands.executeCommand(CMD.closeSettingsPage)
+    assert(true, '设置页打开/关闭链路正常（索引维护分页随页可达）')
   }],
 
   ['反链幽灵退场：未保存编辑后关闭文档（不保存），覆盖层随关闭退役（review-loops #18）', async () => {
