@@ -1,6 +1,6 @@
 # 规格：编辑器工具栏刷新按钮与嵌入缓存手动刷新
 
-状态：已确认待实施（工单 [#208](https://github.com/ONEGAYI/vsidian/issues/208)；共识经 2026-09-29 三轮访谈确认）。本文是手动刷新入口与图片缓存失效通道的单一事实源，工单验收以此为准。
+状态：已实施（待用户人工验收；实施提交索引见文末「实施记录」）。工单 [#208](https://github.com/ONEGAYI/vsidian/issues/208)；共识经 2026-09-29 三轮访谈确认。本文是手动刷新入口与图片缓存失效通道的单一事实源，工单验收以此为准；人工验收项见 [manual-verification.md](manual-verification.md) #208 节。
 
 ## 范围
 
@@ -51,5 +51,18 @@
 - **视觉层断言**：按钮绘制层可见 + DOM 序契约钉住（评审必查：断言对象必须是用户看到的东西）。
 - **回归与文档**：compile / test:unit / test:browser / test:integration；更新 keybindings.md、README 双语、人工验证清单、CHANGELOG、文件树。
 - **用户人工验收**：右端组内第三的位置观感；同名图片被外部替换后点刷新立即显示新图；刷新后光标/滚动/视图模式原样。
+
+## 实施记录（2026-09-29）
+
+六笔实施提交（分支 `impl/208-toolbar-refresh`）：
+
+- `d5af2a3` 协议消息与宿主侧缓存失效——`refresh.request` / `refresh.invalidated` 消息与校验、documentSession 资源代次计数器与 `invalidateImages` 运行期失效入口、`resolveWorkspaceImage` URI 追加 `?v=<代次>` 换戳。
+- `1246c4c` webview 侧图片条目全量失效重挂与 Mermaid 终态重置——`ImageResourceManager.invalidateAll` 两段式重挂、`resetMermaidLoadFailure`、`refresh.invalidated` 接线。
+- `4163765` 工具栏刷新按钮主体——DOM 序（齿轮、✎、刷新、双态切换、侧栏）、内联 SVG 循环箭头图标、`sendEmbeddedRefreshRequest` 与 reqId 陈旧回执防护、推右规则自双态切换迁移、`toolbar.refresh` 双语言包。
+- `2279ccd` 样式契约登记与界面域探针——`toolbar-refresh` 独立条目（toolbar / view-toggle 条目同步修订）、`toolbar-refresh` 探针、指南产物再生（132 条目）。
+- `dc5a29e` 快捷键与命令面板注册——`refreshEditor` 操作（`onegayi.vsidian.editor.refresh`，mode both、默认未绑定）、命令标题双语言包、keybindings.md 操作表与评估记录。
+- `311d472` 集成用例与观测面扩展——`refresh.test.click` 测试钩子、`imageProbe` 图片槽位探针、外部替换同名图片后真实点击的换新重载实证用例。
+
+验证：compile / test:unit（vitest 3464 + node --test 103）/ check:stylecontract（八项零失败、零豁免）/ test:browser（33 脚本，viewToggle 五按钮序与右端组几何）/ 分片集成（193 用例，含 #208 外部替换换新重载用例）全绿；执行记录与报告路径见 [manual-verification.md](manual-verification.md) #208 节。用户人工验收未结。
 
 Blocked by: 无（合并顺序与 #201 协调，见「与 #201 的关系」）。

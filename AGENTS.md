@@ -2,7 +2,7 @@
 
 VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 
-> 当前状态：**MVP 主要功能已实施，整体验收未结**。一期双视图编辑、增量写回、任务、链接图片、双链、表格、查找、三态切换、独立设置页与源文件行号，二期公式渲染、Mermaid 图表、表格交互重做（[#72 规格](docs/specs/table-interaction-rework.md)）与大纲面板二期（#65–#70，样式透传、跳转高亮、折叠滑块、工具条搜索、右键菜单、拖拽排序）均已落地；统一右键菜单批次已落地（2026-09-28，#183 内核：Live 正文全域接管 + 注册/覆写基建 + 剪贴板四项，`blockMenu` 退役、`outlineMenu` 迁移内核并修复子菜单溢出；#184 内容接线：26 枚图标明暗资产接线 + 段落设置按行结构勾选 + 三簇命令分派核查钉住；规格 [docs/specs/context-menu.md](docs/specs/context-menu.md)）；自动化通过不等于真实 IME、物理鼠标与视觉观感已由用户验收。功能范围见 [docs/specs/mvp.md](docs/specs/mvp.md)；待验项与历轮执行记录见 [docs/specs/manual-verification.md](docs/specs/manual-verification.md)；用户可见变更见 [CHANGELOG.md](CHANGELOG.md)。本文件是项目级 agent 规则的**单一入口**：横切约定常驻于此，领域落档约定的正文在指针目标（specs 文档与项目技能）中维护——入口唯一、不另建副本，指针写明触发分支，改动正文只改指针目标。
+> 当前状态：**MVP 主要功能已实施，整体验收未结**。一期双视图编辑、增量写回、任务、链接图片、双链、表格、查找、三态切换、独立设置页与源文件行号，二期公式渲染、Mermaid 图表、表格交互重做（[#72 规格](docs/specs/table-interaction-rework.md)）与大纲面板二期（#65–#70，样式透传、跳转高亮、折叠滑块、工具条搜索、右键菜单、拖拽排序）均已落地；统一右键菜单批次已落地（2026-09-28，#183 内核：Live 正文全域接管 + 注册/覆写基建 + 剪贴板四项，`blockMenu` 退役、`outlineMenu` 迁移内核并修复子菜单溢出；#184 内容接线：26 枚图标明暗资产接线 + 段落设置按行结构勾选 + 三簇命令分派核查钉住；规格 [docs/specs/context-menu.md](docs/specs/context-menu.md)）；工具栏刷新按钮已落地（2026-09-29，#208：顶栏右端组刷新入口 + 图片缓存全局代次换戳失效通道 + Mermaid 注入失败终态重置，刷新全程状态保持零写回；规格 [docs/specs/toolbar-refresh.md](docs/specs/toolbar-refresh.md)）；自动化通过不等于真实 IME、物理鼠标与视觉观感已由用户验收。功能范围见 [docs/specs/mvp.md](docs/specs/mvp.md)；待验项与历轮执行记录见 [docs/specs/manual-verification.md](docs/specs/manual-verification.md)；用户可见变更见 [CHANGELOG.md](CHANGELOG.md)。本文件是项目级 agent 规则的**单一入口**：横切约定常驻于此，领域落档约定的正文在指针目标（specs 文档与项目技能）中维护——入口唯一、不另建副本，指针写明触发分支，改动正文只改指针目标。
 
 ## 约定
 

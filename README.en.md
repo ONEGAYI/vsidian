@@ -41,6 +41,7 @@ Vsidian brings an Obsidian-like Markdown editing experience to VS Code. After in
 | Wikilinks & anchors | Five `[[wikilink]]` forms; `#heading` and `#^block-id` jumps land on the target, with a highlight flash on arrival |
 | Copy block link | Right-click any block to copy `[[note#^block-id]]`, generating an id when missing; `Ctrl+Shift+C` shortcut |
 | Image paste | Ctrl+V saves the clipboard image and inserts the reference at the cursor; save location and subpath are configurable |
+| Embedded refresh | After an external tool replaces a same-named image, the toolbar refresh button reloads it at once; shortcut bindable (unbound by default) |
 
 ### Code blocks & diagrams
 

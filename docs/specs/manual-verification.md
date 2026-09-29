@@ -936,3 +936,15 @@ Live 渲染态经 lezer `HorizontalRule` 节点驱动：未触及该行时源文
 1. **用户原始文档复验**：`2026-08 NCTIEDA Semitronix` 工程 `docs/Agent 与系统预研/MCP 设计/MCP 概要设计 HLD.md` L441 `![案例主流程](<../架构图/mermaid/svg/mcp-case-lifecycle.svg>)`——实时预览应显示架构图（铺满正文列），阅读模式不回归。
 2. **限宽联动观感**：设置页可读行宽调至 600px 等档位时独行 SVG 随列限宽，0（铺满）档铺满可用宽度。
 3. **混排边界确认**：与文字混排同一行的 SVG 维持行内形态属已知边界（此类图源行内仍可能不可见；如需支持另行开票）。
+
+## #208 工具栏刷新按钮（2026-09-29）
+
+- 自动化已证实：协议契约（`test/unit/protocol.test.ts`——refresh.request / refresh.invalidated 校验矩阵、refresh.test.click 钩子与 imageProbe 形态校验）；宿主失效通道（`documentSession.test.ts` / `linkTarget.test.ts`——资源代次自增、imageCache 清空、会话守卫、`?v=` 换戳形态（代次 ≥1 追加、0 不戳））；webview 失效链（`imageResource.test.ts` 全量重挂的重发/去重/迟到丢弃/直连重应用、`mermaidRender.test.ts` 注入失败终态重置、`refreshInvalidation.test.ts` 面板级接线与 reqId 配对）；按钮契约（`toolbarRefresh.test.ts` 按钮存在/原生 button/图标/tooltip 换包重刷/点击出站与 reqId 自增/mousedown 防抢焦点/陈旧回执丢弃与新回执生效；`toolbarViewToggle.test.ts` 五按钮 DOM 序；`sidebarLayoutCssContract.test.ts` 推右规则迁移）；快捷键注册（`keybindingUiCommands.test.ts` ui.command 出站与按钮同序列 reqId 续接，注册表-清单一致性由既有测试自动覆盖）；样式契约 `toolbar-refresh` 条目与界面域探针（`check:stylecontract` 八项零失败、零豁免）；浏览器 `viewToggle` 套件（真实五按钮序与右端组几何——刷新按钮位于工具栏中点右侧、与双态切换以工具栏 gap 紧邻）；集成 #208 用例（真实 1.86.2 宿主：含本地图片文档装载后**外部替换磁盘同名图片**（1x1 透明 → 2x2 红），**真实点击顶栏刷新按钮**断言图片 URI 换 `?v=1`、src 实际更新、naturalWidth 1→2（浏览器实际解码新代次地址字节——HTTP 缓存击穿实证）、宿主资源代次 1、光标与视图模式保持、文档与磁盘零写回、二次刷新代次与戳续接 `?v=2`）。全量回归：`npm run test:unit` 全绿（vitest 3464 例 + node --test 启动器契约 103 项）；`npm run test:browser` 33 脚本全过（报告 `out/test/browser-runs/run-*/`）；`VSIDIAN_ITEST_SHARDS=4` 分片集成 193 用例全绿（逐片报告 `.vscode-test/integration-dev-s<片号>.log`）。首轮分片 #69/#141 两例环境偶发（并行宿主共享系统剪贴板竞态与 1.86.2 globalStorage 迟到回翻，既有记录），定向复跑与第二轮全量均通过，非本批引入。
+- 人工待验：
+  1. **位置与图标观感**：编辑器顶栏右端组从右到左为「侧栏、双态切换、刷新」，刷新按钮为循环箭头图标——位置、尺寸与既有顶栏按钮族观感一致（明暗两主题分别看）；左侧组（设置、快速操作）与右端组之间的弹性空隙正常（推右规则已自双态切换迁移到刷新按钮）。
+  2. **同名图片外部替换后的真实刷新**：文档引用本地图片，用外部工具（如画图另存覆盖）替换磁盘上的同名文件——编辑器仍显示旧图；点刷新按钮后立即显示新图（视口内图片短暂闪动属预期）；再替换再刷新可重复。Live 与阅读两模式分别操作一遍。
+  3. **状态保持体感**：在文档中部放置光标并做一段选区、滚到中部、开启查找会话后点刷新——光标与选区原样、滚动位置不跳、视图模式不变、查找会话仍在；Ctrl+Z 无可撤销项（文件不 dirty）。快捷键入口触发（绑定后）与按钮同行为。
+  4. **Mermaid 注入失败后刷新恢复（如可复现）**：制造 Mermaid 资源加载失败（图表降级为错误提示、终态不再重试）后点刷新——恢复重新注入并渲染；无法稳定复现资源失败时可跳过本项，仅确认正常图表刷新后仍正常渲染。
+  5. **快捷键绑定**：设置页「快捷键」分页为「刷新嵌入资源」绑定一组键——Live 与阅读双模式触发同款刷新；清空绑定后不因重启恢复。
+- 已知边界：刷新清理范围为图片资源链（宿主 imageCache、webview 条目、URI 全局代次换戳）与 Mermaid 注入失败终态；KaTeX/语法高亮等以源码为键的缓存不清（源码未变不过期）；HTTPS 直连图源不经宿主通道，不在刷新范围（遵循浏览器自身缓存行为）；磁盘变更**自动**监听属 #201（未合并），本按钮是当前唯一的手动刷新入口。
+- 操作入口评估：「刷新嵌入资源」为可绑定操作（`onegayi.vsidian.editor.refresh`，双模式生效、默认未绑定、只读视图操作），工具栏按钮、命令面板命令与快捷键共用同一实现；评估记录见 `docs/specs/keybindings.md`。
