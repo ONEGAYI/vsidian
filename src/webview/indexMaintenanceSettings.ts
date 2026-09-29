@@ -176,7 +176,7 @@ export class IndexMaintenanceSection implements SettingsPageSection {
           done: String(state.progress.done),
           total: String(state.progress.total),
         })
-        : t('backlinks.loading')
+        : t('indexMaintenance.rebuilding')
       actionsBlock.append(progressEl)
     }
     // 操作结果反馈（保留至下一次操作覆盖；宿主推送驱动）

@@ -551,3 +551,32 @@ function buildHrefEdit(
     replacement,
   }
 }
+
+/** rename 引用更新反馈的数据面（通知文案键决策的输入；wiring 的
+ *  RenameRefLogEntry 字段子集） */
+export interface RenameNoticeInput {
+  plannedEdits: number
+  skipped: ReadonlyArray<unknown>
+  indexNotReady: number
+}
+
+/**
+ * 通知文案键决策（review-loops #1 下沉纯逻辑）：三态区分——已更新 /
+ * 部分更新 / 未更新；未更新再按构成归因——**纯索引未就绪**（无一处
+ * 编辑、无越界/漂移跳过）归因 host.renameRefsIndexNotReady（含设置页
+ * 重建指引），混合场景（跳过与未就绪并存）沿用全部跳过文案（越界/
+ * 已变化语义），不再把纯未就绪误报为「因越界或内容变化被跳过」。
+ */
+export function renameNoticeKeyOf(log: RenameNoticeInput): string | null {
+  if (log.plannedEdits > 0) {
+    return log.skipped.length > 0 || log.indexNotReady > 0
+      ? 'host.renameRefsPartiallyUpdated'
+      : 'host.renameRefsUpdated'
+  }
+  if (log.skipped.length > 0 || log.indexNotReady > 0) {
+    return log.skipped.length === 0 && log.indexNotReady > 0
+      ? 'host.renameRefsIndexNotReady'
+      : 'host.renameRefsSkippedAll'
+  }
+  return null
+}

@@ -156,6 +156,9 @@ export function activate(context: vscode.ExtensionContext): void {
         } else if (result === 'failed') {
           const detail = indexMaintenance.getState().notice?.detail ?? ''
           void vscode.window.showWarningMessage(t('host.indexRebuildFailed', { detail }))
+        } else if (result === 'busy') {
+          // 维护进行中不是失败（不再冒充失败弹空详情）
+          void vscode.window.showInformationMessage(t('host.indexMaintenanceBusy'))
         }
       })),
     vscode.commands.registerCommand('onegayi.vsidian.index.cleanup', () =>
@@ -166,6 +169,10 @@ export function activate(context: vscode.ExtensionContext): void {
         if (result === 'failed') {
           const detail = indexMaintenance.getState().notice?.detail ?? ''
           void vscode.window.showWarningMessage(t('host.indexCleanupFailed', { detail }))
+          return
+        }
+        if (result === 'busy') {
+          void vscode.window.showInformationMessage(t('host.indexMaintenanceBusy'))
           return
         }
         void vscode.window.showInformationMessage(

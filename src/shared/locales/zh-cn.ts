@@ -227,6 +227,7 @@ export const zhCn: Record<MessageKey, string> = {
   'host.indexRebuildDone': '已按磁盘正文完整重建索引。',
   'host.indexRebuildCancelled': '索引重建已取消，继续使用原有索引。',
   'host.indexRebuildFailed': '索引重建失败：{detail}',
+  'host.indexMaintenanceBusy': '索引维护操作正在进行中，请稍后再试。',
   'host.indexCleanupDone': '索引缓存已清理，移除 {count} 个过期代际。',
   'host.indexCleanupFailed': '缓存清理失败：{detail}',
   // ---- #199 更名/移动引用自动更新（宿主通知；批量操作合并提示）----
@@ -236,6 +237,8 @@ export const zhCn: Record<MessageKey, string> = {
   'host.renameRefsIndexNotReady': '已更名「{file}」，但引用索引尚未就绪，本次未更新引用（可稍后在设置页重建索引后手动修正）。',
   // ---- #200 目录/批量移动：未更新项详情行与跳过原因 ----
   'host.renameRefsSkippedDetail': '未更新项：{items}',
+  'host.renameRefsSkipItem': '{file}（{reason}）',
+  'host.renameRefsSkipMore': ' … {count}',
   'host.renameRefsSkipCrossRoot': '越出所属根',
   'host.renameRefsSkipEdgeStale': '内容已变化',
   'host.invalidSettingDefinition': '非法定义：{definition}',
@@ -358,6 +361,7 @@ export const zhCn: Record<MessageKey, string> = {
   'indexMaintenance.cleanup': '清理当前工作区缓存',
   'indexMaintenance.cancel': '取消',
   'indexMaintenance.rebuildProgress': '重建中：{done} / {total} 篇',
+  'indexMaintenance.rebuilding': '正在重建索引…',
   'indexMaintenance.unavailable': '当前未打开工作区。模式仍会保存，打开工作区后生效。',
   'indexMaintenance.noticePatternsSaved': '排除模式已保存，正在重算覆盖范围。',
   'indexMaintenance.noticePatternsInvalid': '部分模式被拒绝（{detail}），合法项已保存。',

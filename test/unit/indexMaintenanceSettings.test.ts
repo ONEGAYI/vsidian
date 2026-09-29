@@ -151,6 +151,13 @@ describe('维护操作反馈', () => {
     expect(sent).toContainEqual({ kind: 'index.cancel' })
   })
 
+  it('重建中 progress 未到（null）：显示重建占位文案（不复用反链加载词条）', () => {
+    const { section, parent } = makeSection()
+    pushState(section, { status: 'rebuilding', progress: null })
+    expect(parent.querySelector('.vsidian-index-progress')?.textContent)
+      .toBe(zhCn['indexMaintenance.rebuilding'])
+  })
+
   it('清理中同样禁用操作；结果反馈按 notice 种类取词（拒绝项为警示基调）', () => {
     const { section, parent } = makeSection()
     pushState(section, { status: 'cleaning' })

@@ -43,6 +43,7 @@ import {
   expandRenameMoves,
   lfOffsetToLineCol,
   planVaultRenameRewrites,
+  renameNoticeKeyOf,
   type RenameDocInput,
   type RenameMoveEntry,
 } from '../shared/vaultRename'
@@ -504,26 +505,13 @@ async function applyAfterRenameBatch(
   }
 
   // 合并反馈（无候选静默；未更新/部分跳过/已更新三态区分 + 未更新项详情）
-  log.notice = noticeKeyOf(log)
+  log.notice = renameNoticeKeyOf(log)
   if (log.notice !== null || log.plannedEdits > 0) {
     notifyOf(log)
   }
   if (log.plannedEdits > 0 || log.skipped.length > 0 || log.indexNotReady > 0 || log.cancelled) {
     pushRenameLog(log)
   }
-}
-
-/** 通知文案键决策：部分跳过优先警告级；全部跳过按唯一原因 */
-function noticeKeyOf(log: RenameRefLogEntry): string | null {
-  if (log.plannedEdits > 0) {
-    return log.skipped.length > 0 || log.indexNotReady > 0
-      ? 'host.renameRefsPartiallyUpdated'
-      : 'host.renameRefsUpdated'
-  }
-  if (log.skipped.length > 0 || log.indexNotReady > 0) {
-    return 'host.renameRefsSkippedAll'
-  }
-  return null
 }
 
 /** 跳过原因的文案键（通知详情用） */
@@ -542,13 +530,19 @@ function notifyOf(log: RenameRefLogEntry): void {
     files: String(log.plannedFiles),
     skipped: String(log.skipped.length + log.indexNotReady),
   })
-  // 未更新项与原因（用户可查；cap 3 防通知过长，余量以总数概括）
+  // 未更新项与原因（用户可查；cap 3 防通知过长，余量以总数概括）。
+  // 条目与余量形态走词条（review-loops #3：全角括号/省略号不留在源码字面量）
   if (key !== 'host.renameRefsUpdated' && log.skipped.length > 0) {
     const items = log.skipped
       .slice(0, 3)
-      .map((s) => `${basenameOf(s.fsPath)}（${t(skipReasonKeyOf(s.reason))}）`)
+      .map((s) => t('host.renameRefsSkipItem', {
+        file: basenameOf(s.fsPath),
+        reason: t(skipReasonKeyOf(s.reason)),
+      }))
       .join('、')
-    const suffix = log.skipped.length > 3 ? ` … ${log.skipped.length}` : ''
+    const suffix = log.skipped.length > 3
+      ? t('host.renameRefsSkipMore', { count: String(log.skipped.length) })
+      : ''
     message += `\n${t('host.renameRefsSkippedDetail', { items: `${items}${suffix}` })}`
   }
   if (key === 'host.renameRefsUpdated') {

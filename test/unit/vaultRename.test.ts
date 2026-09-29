@@ -8,6 +8,7 @@ import {
   expandRenameMoves,
   lfOffsetToLineCol,
   planVaultRenameRewrites,
+  renameNoticeKeyOf,
   type RenameDocInput,
   type RenameExpandPort,
   type RenameMoveEntry,
@@ -621,5 +622,26 @@ describe('vaultRename：#200 恒等替换滤除', () => {
     ]
     const result = planVaultRenameRewrites(winCtx(moves), docs)
     expect(applyEdits(textA, result.docs[0]!.edits)).toBe('上行 [[../../c]]。\n')
+  })
+})
+
+describe('renameNoticeKeyOf 通知文案键决策（review-loops #1）', () => {
+  const log = (plannedEdits: number, skipped: number, indexNotReady: number) => ({
+    plannedEdits,
+    skipped: Array.from({ length: skipped }, () => ({})),
+    indexNotReady,
+  })
+  it('纯索引未就绪（无编辑、无跳过）归因 host.renameRefsIndexNotReady', () => {
+    expect(renameNoticeKeyOf(log(0, 0, 2))).toBe('host.renameRefsIndexNotReady')
+  })
+  it('混合未更新（跳过与未就绪并存）沿用 host.renameRefsSkippedAll（部分更新语义不变）', () => {
+    expect(renameNoticeKeyOf(log(0, 1, 1))).toBe('host.renameRefsSkippedAll')
+    expect(renameNoticeKeyOf(log(0, 2, 0))).toBe('host.renameRefsSkippedAll')
+  })
+  it('已更新 / 部分更新 / 静默三分支保持既有语义', () => {
+    expect(renameNoticeKeyOf(log(3, 0, 0))).toBe('host.renameRefsUpdated')
+    expect(renameNoticeKeyOf(log(3, 1, 0))).toBe('host.renameRefsPartiallyUpdated')
+    expect(renameNoticeKeyOf(log(3, 0, 1))).toBe('host.renameRefsPartiallyUpdated')
+    expect(renameNoticeKeyOf(log(0, 0, 0))).toBeNull()
   })
 })
