@@ -434,19 +434,37 @@ export function createLinksChainIcon(variant: 'in' | 'out'): SVGSVGElement {
   svg.setAttribute('stroke-linecap', 'round')
   svg.setAttribute('stroke-linejoin', 'round')
   svg.setAttribute('aria-hidden', 'true')
-  for (const d of [
-    // 链环主体（织结双环：右上环与左下环各在交叉处断口——互锁造型）
+  // 链主体（织结双环：右上环与左下环各在交叉处断口——互锁造型）。
+  // 验收微调：链主体与箭头各 ×0.95（绕各自几何中心缩放，位置不动）
+  appendScaledPathGroup(svg, [
     'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71',
     'M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71',
-    // 箭头（与链环留间隙的独立小箭头；反链朝左折返 / 出链朝右出）
+  ], 12, 12)
+  // 箭头（与链环留间隙的独立小箭头；反链朝左折返 / 出链朝右出）
+  appendScaledPathGroup(svg, [
     variant === 'in' ? 'M22 18h-7' : 'M14 18h7',
     variant === 'in' ? 'M18 15l-3 3 3 3' : 'M18 15l3 3-3 3',
-  ]) {
+  ], 18.5, 18)
+  return svg
+}
+
+/** 缩放路径组：绕 (cx, cy) 缩放（translate·scale·translate），描边属性自
+ * svg 继承；组内 stroke 随 transform 同步缩放（缩小即变细，属尺寸语义） */
+function appendScaledPathGroup(
+  svg: SVGSVGElement,
+  ds: readonly string[],
+  cx: number,
+  cy: number,
+  scale = 0.95,
+): void {
+  const g = document.createElementNS(SVG_NS, 'g')
+  g.setAttribute('transform', `translate(${cx} ${cy}) scale(${scale}) translate(${-cx} ${-cy})`)
+  for (const d of ds) {
     const path = document.createElementNS(SVG_NS, 'path')
     path.setAttribute('d', d)
-    svg.appendChild(path)
+    g.appendChild(path)
   }
-  return svg
+  svg.appendChild(g)
 }
 
 /** 反链按钮图标（链环 + 左折返箭头） */
