@@ -18,9 +18,9 @@ import {
   type VaultIndexFsPort,
   type VaultIndexModel,
 } from '../../src/shared/vaultIndexSnapshot'
-import { sortEdges } from '../../src/shared/vaultIndexModel'
+import { sortEdges, type VaultFileEntry } from '../../src/shared/vaultIndexModel'
 
-function file(path: string, size = 100, contentVersion = 1, kind: 'markdown' | 'asset' = 'markdown') {
+function file(path: string, size = 100, contentVersion = 1, kind: 'markdown' | 'asset' = 'markdown'): VaultFileEntry {
   return { path, kind, mtimeMs: 1_700_000_000_000, size, contentVersion }
 }
 
@@ -749,3 +749,31 @@ describe('review-loops 修复：代目录名白名单（载荷构造防路径穿
   })
 })
 
+
+describe('birthtimeMs 可选尾列（形态改版批次；v2 内追加不升版本）', () => {
+  it('>0 时写入并往返；0/缺省不写键（旧行形态字节不变）', async () => {
+    const port = makePort()
+    const withBirth = file('a.md')
+    withBirth.birthtimeMs = 1_600_000_000_000
+    const withoutBirth = file('b.md')
+    withoutBirth.birthtimeMs = 0
+    const model: VaultIndexModel = { files: new Map([['a.md', withBirth], ['b.md', withoutBirth]]), edges: [] }
+    await commitTo(port, model)
+    const loaded = await loadSnapshot(port, BASE)
+    expect(loaded!.model.files.get('a.md')!.birthtimeMs).toBe(1_600_000_000_000)
+    expect(loaded!.model.files.get('b.md')!.birthtimeMs).toBeUndefined()
+  })
+
+  it('旧片无第 6 列容忍（v2 加载侧缺省），未采集片继承不受扰动', async () => {
+    const port = makePort()
+    // 第一代：无 birthtime
+    const gen1 = await commitTo(port, modelOf(['a.md'], 0))
+    const noBirthShard = [...port.files.entries()].find(([k]) => k.endsWith('shard-000.json'))!
+    // 第二代：a.md 带 birthtime，同片 checksum 变化重写；此处反向构造——
+    // 直接验证旧形态（无第 6 列）可被当前加载侧读取
+    expect(noBirthShard[1]).not.toContain('1600000000000')
+    const loaded = await loadSnapshot(port, BASE)
+    expect(loaded!.meta.dirName).toBe(gen1)
+    expect(loaded!.model.files.get('a.md')!.birthtimeMs).toBeUndefined()
+  })
+})

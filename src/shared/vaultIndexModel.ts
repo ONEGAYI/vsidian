@@ -17,6 +17,10 @@ export interface VaultFileEntry {
   size: number
   /** 内容/解析版本：每次重新解析递增，旧扫描结果不得覆盖新版本。 */
   contentVersion: number
+  /** 文件创建时间（毫秒；可选）。Windows stat birthtime；POSIX 宿主常取
+   *  不到（0/缺省）——面板按创建时间排序时未知值沉底。旧快照缺字段容忍，
+   *  不升格式版本（增量重扫自愈补齐）。 */
+  birthtimeMs?: number
 }
 
 /** 出链种类：双链 / 普通内联链接 / 图片 / 引用式链接定义。 */

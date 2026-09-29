@@ -19,12 +19,12 @@ const IS_WIN = process.platform === 'win32'
 
 interface FakeFs {
   files: Map<string, string>       // 绝对路径（/ 形态）→ 内容（原样，可含 \r\n）
-  stats: Map<string, { mtimeMs: number; size: number }>
+  stats: Map<string, { mtimeMs: number; size: number; birthtimeMs?: number }>
 }
 
 function makeFs(initial: Record<string, string> = {}): FakeFs {
   const files = new Map(Object.entries(initial))
-  const stats = new Map<string, { mtimeMs: number; size: number }>()
+  const stats = new Map<string, { mtimeMs: number; size: number; birthtimeMs?: number }>()
   for (const [p, c] of files) {
     stats.set(p, { mtimeMs: 1_700_000_000_000, size: c.length })
   }
@@ -1396,5 +1396,152 @@ describe('VaultIndexService：review-loops 三连代增量快照可恢复（#17 
     await second.documentSaved('C:/vault/d0/n0.md')
     await vi.advanceTimersByTimeAsync(2000)
     expect(itemsOf(await second.backlinksOf('C:/vault/d2/n2.md')).map((i) => i.sourceRelPath)).toEqual(['d0/n0.md', 'd1/n1.md'])
+  })
+})
+
+describe('VaultIndexService：出链查询（出链面板批次）', () => {
+  const OUT_FS = {
+    'C:/vault/cur.md': [
+      '# 当前笔记',
+      '',
+      '见 [[设计笔记#标题一]] 与 [外部](https://example.com)。',
+      '还有 [文档](./docs/参考.md) 与 ![图](./assets/pic.png)。',
+      '断链 [[不存在的目标]] 与 [危险](javascript:alert(1))。',
+      '',
+    ].join('\n'),
+    'C:/vault/设计笔记.md': '# 设计\n\n## 标题一\n',
+    'C:/vault/docs/参考.md': '# 参考\n',
+    'C:/vault/assets/pic.png': '(binary)',
+  }
+
+  /** 类型收窄：非 ready 直接失败 */
+  function outItemsOf(r: Awaited<ReturnType<VaultIndexService['outlinksOf']>>) {
+    if (r.status !== 'ready') {
+      throw new Error(`期望 ready 状态，实际 ${r.status}`)
+    }
+    return r.items
+  }
+
+  it('命中/断链载荷形态与外链排除；stable 排序（resolved → 目标 → 区间）', async () => {
+    const { service } = makeService(makeFs(OUT_FS))
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    const items = outItemsOf(await service.outlinksOf('C:/vault/cur.md'))
+    expect(items.map((i) => [i.targetDisplay, i.resolved])).toEqual([
+      ['pic', true],
+      ['参考', true],
+      ['设计笔记', true],
+      ['不存在的目标', false],
+    ])
+    const design = items.find((i) => i.targetDisplay === '设计笔记')!
+    expect(design.anchor).toBe('标题一')
+    expect(design.targetRelPath).toBe('设计笔记.md')
+    // fsPath 为宿主平台分隔符形态（win32 \ / posix /）
+    expect(design.targetFsPath!.endsWith('设计笔记.md')).toBe(true)
+    expect(design.kind).toBe('wikilink')
+    // 外部 scheme 与危险 scheme 边不进面板
+    expect(items.some((i) => i.targetDisplay.includes('example.com'))).toBe(false)
+    expect(items.some((i) => i.targetDisplay.includes('javascript'))).toBe(false)
+    // 断链：rel/fsPath 为 null、display 用 target 原文
+    const broken = items.find((i) => !i.resolved)!
+    expect(broken.targetRelPath).toBeNull()
+    expect(broken.targetFsPath).toBeNull()
+  })
+
+  it('覆盖层即时性：未保存新增出链立即可查（与 queryBacklinks 同源 overlay 语义）', async () => {
+    const fs = makeFs({ 'C:/vault/cur.md': '# 无出链\n', 'C:/vault/b.md': '# B\n' })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    expect(outItemsOf(await service.outlinksOf('C:/vault/cur.md'))).toHaveLength(0)
+    service.applyUnsaved('C:/vault/cur.md', 2, '# 新出链\n\n见 [[b]]。\n')
+    await vi.advanceTimersByTimeAsync(700)
+    const items = outItemsOf(await service.outlinksOf('C:/vault/cur.md'))
+    expect(items).toHaveLength(1)
+    expect(items[0]!.targetDisplay).toBe('b')
+    expect(items[0]!.targetFsPath!.endsWith('b.md')).toBe(true)
+  })
+
+  it('四态：无工作区 error；扫描中 loading；无出链 ready + 空', async () => {
+    expect(await makeService(makeFs(OUT_FS)).service.outlinksOf('D:/other/x.md'))
+      .toMatchObject({ status: 'error', reason: 'no-workspace' })
+    const { service } = makeService(makeFs({ 'C:/vault/孤岛.md': '# 孤岛\n' }))
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    expect(await service.outlinksOf('C:/vault/孤岛.md')).toMatchObject({ status: 'ready', items: [] })
+    // loading：门闩挂起首扫（反链 loading 用例同手法）
+    let releaseScan: (() => void) | undefined
+    const gate = new Promise<void>((r) => { releaseScan = r })
+    const fs = makeFs(OUT_FS)
+    const scan = scanPortOf(fs)
+    const origList = scan.listMarkdownFiles.bind(scan)
+    scan.listMarkdownFiles = async (root: string) => {
+      await gate
+      return origList(root)
+    }
+    const gated = new VaultIndexService(scan, storagePortOf(), { storageRoot: 'C:/store', isWindowsHost: IS_WIN })
+    const init = gated.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    await Promise.resolve()
+    expect((await gated.outlinksOf('C:/vault/cur.md')).status).toBe('loading')
+    releaseScan!()
+    await init
+  })
+})
+
+describe('VaultIndexService：birthtime 与长片段（形态改版批次）', () => {
+  it('birthtimeMs 采集进文件条目并随快照往返（恢复后组排序键可用）', async () => {
+    const fs = makeFs({ 'C:/vault/a.md': '# A\n\n引用 [[目标]]。\n', 'C:/vault/目标.md': '# 目标\n' })
+    fs.stats.set('C:/vault/a.md', { mtimeMs: 1_700_000_000_000, size: 20, birthtimeMs: 1_600_000_000_000 })
+    const first = makeService(fs)
+    await first.service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    await vi.advanceTimersByTimeAsync(2000) // 快照合并提交落定
+    const items = itemsOf(await first.service.backlinksOf('C:/vault/目标.md'))
+    expect(items[0]!.sourceBirthtimeMs).toBe(1_600_000_000_000)
+    expect(items[0]!.sourceMtimeMs).toBe(1_700_000_000_000)
+    // 新实例同存储恢复：birthtime 经片序列化/反序列化往返
+    const second = new VaultIndexService(first.scan, first.storage, { storageRoot: 'C:/store', isWindowsHost: IS_WIN })
+    await second.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    const restored = itemsOf(await second.backlinksOf('C:/vault/目标.md'))
+    expect(restored[0]!.sourceBirthtimeMs).toBe(1_600_000_000_000)
+  })
+
+  it('旧快照缺 birthtime 列容忍（恢复后按 0 语义沉底）', async () => {
+    // 第一实例的 stat 无 birthtime（POSIX 语义）→ 快照行无第 6 列 → 恢复后 0
+    const fs = makeFs({ 'C:/vault/a.md': '# A\n\n引用 [[目标]]。\n', 'C:/vault/目标.md': '# 目标\n' })
+    const first = makeService(fs)
+    await first.service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    await vi.advanceTimersByTimeAsync(2000)
+    const second = new VaultIndexService(first.scan, first.storage, { storageRoot: 'C:/store', isWindowsHost: IS_WIN })
+    await second.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    const restored = itemsOf(await second.backlinksOf('C:/vault/目标.md'))
+    expect(restored[0]!.sourceBirthtimeMs).toBe(0)
+  })
+
+  it('backlinksOf 长片段：±2 行窗口与片段起点（snippetStart / snippetLongStart）', async () => {
+    const text = [
+      '前0',
+      '前1',
+      '前2',
+      '引用 [[目标]] 行',
+      '后1',
+      '后2',
+      '后3',
+    ].join('\n')
+    const { service } = makeService(makeFs({ 'C:/vault/a.md': `${text}\n`, 'C:/vault/目标.md': '# 目标\n' }))
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    const item = itemsOf(await service.backlinksOf('C:/vault/目标.md'))[0]!
+    // 短片段 = 引用行整行，起点 = 行 3 行首
+    expect(item.snippet).toBe('引用 [[目标]] 行')
+    expect(item.snippetStart).toBe('前0\n前1\n前2\n'.length)
+    // 长片段 = 行 1..5（引用行 ±2），头部截断（前 0 行被裁）加「…」
+    expect(item.snippetLong).toBe(`…前1\n前2\n引用 [[目标]] 行\n后1\n后2`)
+    expect(item.snippetLongStart).toBe('前0\n'.length)
+  })
+
+  it('backlinksOf 长片段：总长上限 300 字符，超限尾截断加「…」', async () => {
+    const long = '长'.repeat(400)
+    const text = `上\n${long} [[目标]]\n下`
+    const { service } = makeService(makeFs({ 'C:/vault/a.md': `${text}\n`, 'C:/vault/目标.md': '# 目标\n' }))
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    const item = itemsOf(await service.backlinksOf('C:/vault/目标.md'))[0]!
+    expect(item.snippetLong.length).toBe(301) // 300 + 「…」
+    expect(item.snippetLong.endsWith('…')).toBe(true)
   })
 })

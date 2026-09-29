@@ -38,7 +38,8 @@
 //   CURRENT 代、继承源与更高代际——尊重并发窗口的活跃读者/写者）；
 //   rebuildAll 全根全量重扫（重解析正文并核验资源，进度回报、可取消）
 import * as path from 'node:path'
-import { extractVaultEdges } from './vaultLinkExtract'
+import { extractVaultEdges, isVaultPanelOutlink } from './vaultLinkExtract'
+import type { LinkContext } from './linkTarget'
 import { queryBacklinks, VaultIndexOverlay } from './vaultIndexOverlay'
 import {
   buildBacklinkIndex,
@@ -74,8 +75,9 @@ export interface VaultIndexScanPort {
   listMarkdownFiles(rootFsPath: string): Promise<string[]>
   /** 读文件 utf-8 文本；失败/不存在 null（原样返回，CRLF 由服务归一） */
   readFileText(fsPath: string): Promise<string | null>
-  /** stat（mtime/size——快照条目与增量筛选）；失败 null */
-  statFile(fsPath: string): Promise<{ mtimeMs: number; size: number } | null>
+  /** stat（mtime/size——快照条目与增量筛选；birthtimeMs 可选：Windows 宿主
+   *  取创建时间，POSIX 常不可得缺省）；失败 null */
+  statFile(fsPath: string): Promise<{ mtimeMs: number; size: number; birthtimeMs?: number } | null>
   /** 可访问性探测（#198）：区分「明确不存在」与「不可访问」（SSH 断连/
    *  权限错误）——后者不得等同删除。 */
   accessOf(fsPath: string): Promise<'ok' | 'missing' | 'inaccessible'>
@@ -108,11 +110,42 @@ export interface BacklinkItem {
   line: number
   /** 引用片段（来源行文本，超长截断） */
   snippet: string
+  /** 短片段起点（LF 全文偏移；命中高亮的区间切分基准） */
+  snippetStart: number
+  /** 来源文件 mtime（毫秒；未知 0）——面板分组排序键 */
+  sourceMtimeMs: number
+  /** 来源文件创建时间（毫秒；未知 0——POSIX 常不可得，排序沉底） */
+  sourceBirthtimeMs: number
+  /** 长片段（引用行 ±2 行，总长上限约 300 字符，首尾按截断加「…」） */
+  snippetLong: string
+  /** 长片段起点（LF 全文偏移） */
+  snippetLongStart: number
+}
+
+/** 出链条目（查询结果；出链面板数据源） */
+export interface OutlinkItem {
+  /** 目标显示名：命中取 basename 去扩展名；断链用 target 原文 */
+  targetDisplay: string
+  /** 命中的根内相对路径；断链 null */
+  targetRelPath: string | null
+  /** 目标绝对 fsPath；断链 null */
+  targetFsPath: string | null
+  kind: VaultEdge['kind']
+  anchor: string
+  resolved: boolean
+  start: number
+  end: number
 }
 
 /** 反链查询结果（面板四态的数据面：loading/无引用(ready+空)/updating/error） */
 export type BacklinksResult =
   | { status: 'ready'; items: BacklinkItem[]; updating: boolean }
+  | { status: 'loading' }
+  | { status: 'error'; reason: 'no-workspace' | 'read-error' }
+
+/** 出链查询结果（面板四态数据面；形态与 BacklinksResult 镜像） */
+export type OutlinksResult =
+  | { status: 'ready'; items: OutlinkItem[]; updating: boolean }
   | { status: 'loading' }
   | { status: 'error'; reason: 'no-workspace' | 'read-error' }
 
@@ -212,6 +245,17 @@ const ADAPTIVE_SHARDS: readonly { maxFiles: number; shards: number }[] = [
   { maxFiles: 100_000, shards: 64 },
   { maxFiles: Number.MAX_SAFE_INTEGER, shards: 256 },
 ]
+
+/** 长片段（「更多上下文」态）参数：引用行 ±2 行窗口，总长上限约 300 字符 */
+const SNIPPET_LONG_CONTEXT_LINES = 2
+export const SNIPPET_LONG_LIMIT = 300
+
+/** 根内相对路径（`/` 分隔）的 basename 去扩展名（出链目标显示名） */
+function basenameNoExt(relPath: string): string {
+  const base = relPath.slice(relPath.lastIndexOf('/') + 1)
+  const dot = base.lastIndexOf('.')
+  return dot > 0 ? base.slice(0, dot) : base
+}
 
 /** 反斜杠分隔符统一为 `/`——索引抽象路径形态的原子归一步（Windows fsPath
  *  专用；posix 路径不含反斜杠，替换为恒等）。只收敛分隔符形态这一个同形
@@ -739,6 +783,7 @@ export class VaultIndexService {
           mtimeMs: stat?.mtimeMs ?? 0,
           size: stat?.size ?? 0,
           contentVersion: 1,
+          ...this.birthtimeOf(stat),
         })
         if (docEdges.some((e) => e.resolvedTarget === null)) {
           pendingSources.add(rel)
@@ -767,6 +812,7 @@ export class VaultIndexService {
         if (stat) {
           const entry: VaultFileEntry = {
             path: rel, kind: 'asset', mtimeMs: stat.mtimeMs, size: stat.size, contentVersion: 1,
+            ...this.birthtimeOf(stat),
           }
           files.set(rel, entry)
           assetFold.set(this.foldKey(rel), entry)
@@ -1215,6 +1261,7 @@ export class VaultIndexService {
       mtimeMs: stat.mtimeMs,
       size: stat.size,
       contentVersion: (prevEntry?.contentVersion ?? 0) + 1,
+      ...this.birthtimeOf(stat),
     })
     state.model.edges = state.model.edges.filter((e) => e.source !== rel).concat(edges)
     state.backlinks = buildBacklinkIndex(state.model.edges)
@@ -1609,6 +1656,7 @@ export class VaultIndexService {
             mtimeMs: stat.mtimeMs,
             size: stat.size,
             contentVersion: (state.model.files.get(rel)?.contentVersion ?? 0) + 1,
+            ...this.birthtimeOf(stat),
           })
         } else {
           assetPaths.push(fsPath)
@@ -1637,6 +1685,7 @@ export class VaultIndexService {
           mtimeMs: stat.mtimeMs,
           size: stat.size,
           contentVersion: (prev?.contentVersion ?? 0) + 1,
+          ...this.birthtimeOf(stat),
         })
         this.ensureGeneration(fsPath)
         touched = true
@@ -1719,16 +1768,42 @@ export class VaultIndexService {
       const lf = text === null ? null : normalizeLf(text)
       let line = 1
       let snippet = ''
+      let snippetStart = 0
+      let snippetLong = ''
+      let snippetLongStart = 0
       if (lf !== null && e.start <= lf.length) {
         const lineStart = lf.lastIndexOf('\n', Math.min(e.start, lf.length - 1)) + 1
         line = lf.slice(0, lineStart).split('\n').length
         const nl = lf.indexOf('\n', lineStart)
         const lineEnd = nl < 0 ? lf.length : nl
         snippet = lf.slice(lineStart, lineEnd)
+        snippetStart = lineStart
         if (snippet.length > this.snippetLimit) {
           snippet = `${snippet.slice(0, this.snippetLimit)}…`
         }
+        // 长片段（「更多上下文」态）：引用行 ±2 行窗口，总长上限约 300 字符，
+        // 首尾按截断加「…」（头部截断 = 窗口起点之前仍有内容）
+        let winStart = lineStart
+        for (let i = 0; i < SNIPPET_LONG_CONTEXT_LINES && winStart > 0; i++) {
+          const prev = lf.lastIndexOf('\n', winStart - 2)
+          winStart = prev < 0 ? 0 : prev + 1
+        }
+        let winEnd = lineEnd
+        for (let i = 0; i < SNIPPET_LONG_CONTEXT_LINES && winEnd < lf.length; i++) {
+          const nl2 = lf.indexOf('\n', winEnd + 1)
+          winEnd = nl2 < 0 ? lf.length : nl2
+        }
+        let win = lf.slice(winStart, winEnd)
+        if (win.length > SNIPPET_LONG_LIMIT) {
+          win = `${win.slice(0, SNIPPET_LONG_LIMIT)}…`
+        }
+        if (winStart > 0) {
+          win = `…${win}`
+        }
+        snippetLong = win
+        snippetLongStart = winStart
       }
+      const fileEntry = state.model?.files.get(e.source)
       return {
         sourceRelPath: e.source,
         sourceFsPath: this.absOf(state, e.source),
@@ -1738,8 +1813,73 @@ export class VaultIndexService {
         end: e.end,
         line,
         snippet,
+        snippetStart,
+        sourceMtimeMs: fileEntry?.mtimeMs ?? 0,
+        sourceBirthtimeMs: fileEntry?.birthtimeMs ?? 0,
+        snippetLong,
+        snippetLongStart,
       }
     })
+    return { status: 'ready', items, updating: state.scanning }
+  }
+
+  /** 查询文档的出链（出链面板数据源；含覆盖层未保存态，外链不进面板） */
+  async outlinksOf(fsPath: string): Promise<OutlinksResult> {
+    const state = this.rootOf(fsPath)
+    if (!state) {
+      return { status: 'error', reason: 'no-workspace' }
+    }
+    if (!state.hasData || !state.model || !state.backlinks) {
+      return state.scanning ? { status: 'loading' } : { status: 'error', reason: 'read-error' }
+    }
+    const rel = this.relOf(state, fsPath)
+    if (rel === null) {
+      return { status: 'error', reason: 'no-workspace' }
+    }
+    // 覆盖层在场用覆盖层边（未保存编辑即时反映，与 queryBacklinks 同源
+    // 语义）；否则按来源路径取基线边（fold 匹配——查询路径大小写漂移容忍）
+    const overlayEntry = state.overlay.get(rel)
+    const sourceEdges = overlayEntry
+      ? overlayEntry.edges
+      : state.model.edges.filter((e) => this.foldKey(e.source) === this.foldKey(rel))
+    // 外链排除：分类复用跳转链路同一分类器（vaultLinkExtract 帮手）
+    const ctx: LinkContext = {
+      docDir: this.dirname(this.absOf(state, rel) ?? fsPath),
+      rootDir: state.fsPath,
+      isWindowsHost: this.opts.isWindowsHost,
+    }
+    const items: OutlinkItem[] = []
+    for (const e of sourceEdges) {
+      if (!isVaultPanelOutlink(e, ctx)) {
+        continue
+      }
+      const resolved = e.resolvedTarget !== null
+      const display = resolved
+        ? basenameNoExt(e.resolvedTarget!)
+        : e.target
+      items.push({
+        targetDisplay: display,
+        targetRelPath: e.resolvedTarget,
+        targetFsPath: resolved ? this.absOf(state, e.resolvedTarget!) : null,
+        kind: e.kind,
+        anchor: e.anchor,
+        resolved,
+        start: e.start,
+        end: e.end,
+      })
+    }
+    // stable 排序：resolved（命中在前）→ 目标 → 区间
+    items.sort((a, b) =>
+      a.resolved === b.resolved
+        ? a.targetDisplay < b.targetDisplay
+          ? -1
+          : a.targetDisplay > b.targetDisplay
+            ? 1
+            : a.start - b.start || a.end - b.end
+        : a.resolved
+          ? -1
+          : 1,
+    )
     return { status: 'ready', items, updating: state.scanning }
   }
 
@@ -1752,6 +1892,14 @@ export class VaultIndexService {
       }
     }
     return undefined
+  }
+
+  /** birthtimeMs 采集帮手：>0 才写键（POSIX 取不到为 0/缺省——面板排序
+   *  沉底语义与快照缺列容忍都以「键缺省」表达） */
+  private birthtimeOf(stat: { birthtimeMs?: number } | null | undefined): { birthtimeMs?: number } {
+    return stat?.birthtimeMs !== undefined && stat.birthtimeMs > 0
+      ? { birthtimeMs: stat.birthtimeMs }
+      : {}
   }
 
   // ---- 路径工具（根内相对统一 `/` 形态；平台语义按注入配置） ----

@@ -778,18 +778,9 @@ export function createTextEditorProvider(
       state: result.status,
       updating: result.status === 'ready' ? result.updating : undefined,
       reason: result.status === 'error' ? result.reason : undefined,
-      items: result.status === 'ready'
-        ? result.items.map((item) => ({
-          sourceRelPath: item.sourceRelPath,
-          sourceFsPath: item.sourceFsPath,
-          kind: item.kind,
-          anchor: item.anchor,
-          start: item.start,
-          end: item.end,
-          line: item.line,
-          snippet: item.snippet,
-        }))
-        : [],
+      // 形态改版批次字段（snippetStart/snippetLong 等高亮与排序键载荷）随
+      // 条目透传——协议侧可选，旧 webview 忽略
+      items: result.status === 'ready' ? result.items : [],
       seq,
     })
   }
@@ -805,6 +796,81 @@ export function createTextEditorProvider(
     const ready = await waitForReadyPanel(uri)
     if (ready) {
       ready.entry.session.postToPanel(ready.sessionId, { kind: 'view.locate', offset })
+    }
+  }
+
+  // ---- 出链面板：快照应答与条目跳转（与反链镜像；锚点定位复用双链跳转
+  //      的 findHeadingOffset / findBlockOffset，不重造） ----
+
+  /** 出链广播序号：按文档单调递增（与 backlinksSeq 独立计数，webview 侧
+   *  各自比较降序帧丢弃） */
+  const outlinksSeqByDoc = new Map<string, number>()
+
+  /** 出链快照（outlinks.get 应答与 onChange 广播共用） */
+  const sendOutlinksSnapshot = async (
+    entry: SessionEntry,
+    sessionId: string,
+    docUri: vscode.Uri,
+  ): Promise<void> => {
+    const docUriStr = docUri.toString()
+    const seq = (outlinksSeqByDoc.get(docUriStr) ?? 0) + 1
+    outlinksSeqByDoc.set(docUriStr, seq)
+    if (!vaultIndex) {
+      entry.session.postToPanel(sessionId, {
+        kind: 'outlinks.snapshot',
+        docUri: docUriStr,
+        state: 'error',
+        reason: 'no-workspace',
+        items: [],
+        seq,
+      })
+      return
+    }
+    const result = await vaultIndex.outlinksOf(docUri.fsPath)
+    entry.session.postToPanel(sessionId, {
+      kind: 'outlinks.snapshot',
+      docUri: docUriStr,
+      state: result.status,
+      updating: result.status === 'ready' ? result.updating : undefined,
+      reason: result.status === 'error' ? result.reason : undefined,
+      items: result.status === 'ready' ? result.items : [],
+      seq,
+    })
+  }
+
+  /**
+   * 出链条目跳转：打开目标并按该链接的实际锚点定位。
+   * - Markdown 目标：Vsidian 面板打开（openWith 对已开面板是重显），锚点
+   *   命中（标题→findHeadingOffset、#^块id→findBlockOffset，与双链跳转同
+   *   一定位器）发 view.locate（LF 坐标换算同双链）；无锚点或未命中回落
+   *   文档顶（打开即顶部，不发 locate）。
+   * - 非 Markdown 目标（图片等附件）：vscode.open 原生打开（内置预览器），
+   *   Vsidian 自定义编辑器不接非 md 文档。
+   * targetUri 是平台分隔符 fsPath 形态（快照载荷原样回传），经 Uri.file
+   * 解析（与 openBacklinkSource 同口径）。
+   */
+  const openOutlinkTarget = async (targetUri: string, anchor: string): Promise<void> => {
+    const uri = vscode.Uri.file(targetUri)
+    if (!/\.md$/i.test(uri.path)) {
+      await vscode.commands.executeCommand('vscode.open', uri)
+      return
+    }
+    let anchorOffset: { offset: number; end: number } | null = null
+    let anchorDoc: vscode.TextDocument | undefined
+    if (anchor !== '') {
+      anchorDoc = await vscode.workspace.openTextDocument(uri)
+      const text = anchorDoc.getText()
+      anchorOffset = anchor.startsWith('^')
+        ? findBlockOffset(text, anchor.slice(1))
+        : findHeadingOffset(text, anchor)
+    }
+    await vscode.commands.executeCommand('vscode.openWith', uri, VIEW_TYPE)
+    if (anchorOffset && anchorDoc) {
+      const ready = await waitForReadyPanel(uri)
+      if (ready) {
+        const lfOffset = new NewlineCoordinator(anchorDoc.getText()).hostOffsetToLf(anchorOffset.offset)
+        ready.entry.session.postToPanel(ready.sessionId, { kind: 'view.locate', offset: lfOffset })
+      }
     }
   }
 
@@ -1128,6 +1194,16 @@ export function createTextEditorProvider(
           void openBacklinkSource(message.sourceUri, message.offset)
           return
         }
+        // 出链面板（与反链镜像）：快照拉取应答与条目跳转意图
+        if (vaultIndex && isWebviewToHost(message) && message.kind === 'outlinks.get' &&
+          message.docUri === document.uri.toString()) {
+          void sendOutlinksSnapshot(entry, sessionId, document.uri)
+          return
+        }
+        if (isWebviewToHost(message) && message.kind === 'outlink.activate') {
+          void openOutlinkTarget(message.targetUri, message.anchor)
+          return
+        }
         if (process.env.VSIDIAN_TEST_HOOKS === '1' && isWebviewToHost(message) &&
           message.kind === 'sync.test.close' && message.sessionId === sessionId &&
           message.docUri === document.uri.toString()) {
@@ -1227,6 +1303,7 @@ export function createTextEditorProvider(
           return
         }
         backlinksSeqByDoc.delete(document.uri.toString())
+        outlinksSeqByDoc.delete(document.uri.toString())
         vaultIndex.documentClosed(document.uri.fsPath)
       }),
     )
@@ -1333,13 +1410,14 @@ export function createTextEditorProvider(
   // ---- #197 反链快照广播：索引模型变化（覆盖层更新/重扫/重建完成）→
   //  全部 ready 面板各自文档的反链快照（面板按 docUri 匹配丢弃他文档快照；
   //  notify 已在服务侧合并——覆盖层 500ms 去抖、重扫 800ms 去抖、快照提交
-  //  1.5s 合并，无逐键广播）----
+  //  1.5s 合并，无逐键广播）。出链快照同点一并推送（出链面板批次） ----
   if (vaultIndex) {
     const offIndex = vaultIndex.onChange(() => {
       for (const entry of sessions.values()) {
         for (const panel of entry.session.getInfo().panels) {
           if (panel.ready) {
             void sendBacklinksSnapshot(entry, panel.sessionId, entry.doc.uri)
+            void sendOutlinksSnapshot(entry, panel.sessionId, entry.doc.uri)
           }
         }
       }

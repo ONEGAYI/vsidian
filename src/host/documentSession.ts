@@ -343,6 +343,10 @@ export class DocumentSession {
         // #197 反链面板：面板级 UI 意图，provider 层拦截消费（索引服务与
         // 跳转执行都在 provider 域）；绕过面板入口则无副作用。
         return Promise.resolve()
+      case 'outlinks.get':
+      case 'outlink.activate':
+        // 出链面板（与反链镜像）：provider 层拦截消费；绕过面板入口无副作用
+        return Promise.resolve()
       case 'settings.open':
         // #33 打开设置页：不依赖文档状态（无文档语义在宿主层闭合），
         // 暂停态同样放行（与 link.activate 同口径的只读交互）

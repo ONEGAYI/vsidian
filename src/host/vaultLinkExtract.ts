@@ -34,6 +34,23 @@ import { planVaultLinkPath, type VaultLinkPathContext } from '../shared/vaultLin
 import { sortEdges, type VaultEdge, type VaultEdgeKind } from '../shared/vaultIndexModel'
 import { chainAt, frontmatterRange, markdownTreeParser } from '../webview/markdownDoc'
 
+/**
+ * 出链面板的边准入判别（出链面板批次）：外部 scheme（https:// 等）与危险
+ * scheme（javascript: 等）边不进面板——分类复用跳转链路同一分类器
+ * （classifyLinkTarget / classifyImageTarget），与「外链白名单」的既有
+ * 口径一致。双链边为 vault 内形态，恒准入。
+ */
+export function isVaultPanelOutlink(edge: VaultEdge, ctx: LinkContext): boolean {
+  if (edge.kind === 'wikilink') {
+    return true
+  }
+  if (edge.kind === 'image') {
+    return classifyImageTarget(edge.target, ctx).kind === 'workspace'
+  }
+  const target = classifyLinkTarget(edge.target, ctx)
+  return target.kind === 'doc' || target.kind === 'anchor'
+}
+
 /** 行扫描类抽取（双链 / 宽松链接）排除的代码上下文（lezer 节点名）——
  *  与 liveLinks 的 INLINE_SCAN_CODE_CONTEXTS 同源复制（该模块带 DOM 依赖
  *  不可被宿主侧引用；集合漂移由抽取测试的代码上下文用例钉住） */

@@ -28,7 +28,9 @@ export { buildBacklinkIndex }
 export type { VaultEdge, VaultEdgeKind, VaultFileEntry, VaultFileKind, VaultIndexModel } from './vaultIndexModel'
 
 /** 快照格式版本：片/manifest 结构不兼容演进时递增，加载侧拒读异版本。
- *  v2：文件行加 kind 列（markdown/asset），边行加 resolvedTarget 列。 */
+ *  v2：文件行加 kind 列（markdown/asset），边行加 resolvedTarget 列。
+ *  v2 内追加（不升版本）：文件行第 6 列可选 birthtimeMs（>0 才写）——
+ *  旧片缺列容忍（undefined），增量重扫自愈补齐；列只追加不改语义。 */
 export const SNAPSHOT_FORMAT_VERSION = 2
 
 /** 单次提交的片数上限（shard 文件名三位补零）。 */
@@ -136,7 +138,8 @@ export interface PlanSnapshotOptions {
 interface ShardFile {
   v: 2
   names: string[]
-  /** [nameIdx, mtimeMs, size, contentVersion, kindCode] */
+  /** [nameIdx, mtimeMs, size, contentVersion, kindCode, birthtimeMs?]——
+   *  birthtimeMs 仅 >0 时写第 6 列（旧片无此列，加载侧缺省） */
   files: number[][]
   /** [srcIdx, tgtIdx, kindCode, anchorIdx(-1 无), start, end, resolvedIdx(-1 断链/未解析)] */
   edges: number[][]
@@ -157,7 +160,16 @@ function serializeShard(files: VaultFileEntry[], edges: VaultEdge[]): string {
   const fileRows = files
     .slice()
     .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
-    .map((f) => [intern(f.path), f.mtimeMs, f.size, f.contentVersion, FILE_KIND_CODE.indexOf(f.kind)])
+    .map((f) => [
+      intern(f.path),
+      f.mtimeMs,
+      f.size,
+      f.contentVersion,
+      FILE_KIND_CODE.indexOf(f.kind),
+      // birthtimeMs 可选尾列：仅 >0 时写（JSON 数组尾 undefined 会序列化成
+      // null，条件展开保持旧行形态字节不变——未采集的片继承不受扰动）
+      ...(f.birthtimeMs !== undefined && f.birthtimeMs > 0 ? [f.birthtimeMs] : []),
+    ])
   const edgeRows = sortEdges(edges).map((e) => [
     intern(e.source),
     intern(e.target),
@@ -182,10 +194,18 @@ function parseShard(content: string, dirLabel: string): { files: VaultFileEntry[
     throw new Error(`快照片结构不符（${dirLabel}）`)
   }
   const files = raw.files.map((row) => {
-    const [ni, mtimeMs, size, contentVersion, kindCode] = row
+    const [ni, mtimeMs, size, contentVersion, kindCode, birthtimeMs] = row
     const kind = FILE_KIND_BY_CODE.get(kindCode)
     if (kind === undefined) throw new Error(`快照片文件类型未知（${dirLabel}）`)
-    return { path: raw.names[ni], kind, mtimeMs, size, contentVersion }
+    return {
+      path: raw.names[ni],
+      kind,
+      mtimeMs,
+      size,
+      contentVersion,
+      // 旧片无第 6 列（undefined）；null/0/负值一律视为未知（缺省）
+      birthtimeMs: typeof birthtimeMs === 'number' && birthtimeMs > 0 ? birthtimeMs : undefined,
+    }
   })
   const edges = raw.edges.map((row) => {
     const [si, ti, kindCode, ai, start, end, ri] = row

@@ -261,6 +261,21 @@ export type HostToWebview =
   /** 测试钩子（#197）：点击第 index 个真实反链条目（与用户点击同一委托
    *  处理器；出站 backlink.activate 跳转意图，由宿主打开来源文档并定位） */
   | { kind: 'backlinks.test.itemClick'; index: number }
+  /** 测试钩子（形态改版批次）：点击工具栏四按钮之一（与用户点击同一委托
+   *  处理器；action 与按钮 data-action 一一对应） */
+  | { kind: 'backlinks.test.toolbarClick'; action: 'sort' | 'search' | 'collapse' | 'context' }
+  /** 测试钩子（形态改版批次）：设置搜索词（真实 input 事件链——值写入 +
+   *  input 事件派发，与用户键入同一处理器） */
+  | { kind: 'backlinks.test.searchInput'; value: string }
+  /** 测试钩子（形态改版批次）：选择排序项（与用户路径同链：开菜单 → 点
+   *  对应菜单项；mode 合法性经协议守卫） */
+  | { kind: 'backlinks.test.sortSelect'; mode: 'name-asc' | 'name-desc' | 'mtime-desc' | 'mtime-asc' | 'birth-desc' | 'birth-asc' }
+  /** 测试钩子（出链面板批次）：点击侧栏顶栏的出链按钮（与用户点击同一
+   *  处理器；纯视图状态翻转 + 三面板互斥切换，零写回） */
+  | { kind: 'outlinks.test.click' }
+  /** 测试钩子（出链面板批次）：点击第 index 个真实出链条目（与用户点击
+   *  同一委托处理器；出站 outlink.activate 跳转意图，断链条目不可点） */
+  | { kind: 'outlinks.test.itemClick'; index: number }
   /** 测试钩子（#21）：在真实 webview 的 CM6 中输入，验证暂停态即时留存。 */
   | { kind: 'sync.test.edit'; offset: number; text: string; closeAfter?: boolean }
   /** 测试钩子：组合候选写入首行 DOM，经过 CM6 MutationObserver 的真实输入链。 */
@@ -333,6 +348,20 @@ export type HostToWebview =
       updating?: boolean
       reason?: 'no-workspace' | 'read-error'
       items?: BacklinkItemPayload[]
+      seq?: number
+    }
+  /** 出链快照（出链面板批次，请求-响应与推送共用形态；语义与
+   *  backlinks.snapshot 镜像）：面板经 outlinks.get 拉取，宿主索引变更后
+   *  与 backlinks 同点广播。items 为当前文档的出链（含覆盖层未保存态，
+   *  外部 scheme 边不进面板），按 resolved → 目标 → 区间稳定排序；seq
+   *  为宿主按文档单调递增的广播序号（乱序到达时 webview 丢弃降序帧） */
+  | {
+      kind: 'outlinks.snapshot'
+      docUri: string
+      state: 'loading' | 'ready' | 'error'
+      updating?: boolean
+      reason?: 'no-workspace' | 'read-error'
+      items?: OutlinkItemPayload[]
       seq?: number
     }
   /** 索引维护状态（#198，设置页消费）：排除模式（当前生效 + 默认值）、
@@ -499,6 +528,8 @@ export type WebviewToHost =
       outline?: OutlineProbe
       /** 反链面板观测（#197；面板态、四态实值与绘制层证据，旧 webview 缺省） */
       backlinks?: BacklinksProbe
+      /** 出链面板观测（出链面板批次；面板态、四态实值与绘制层证据，旧 webview 缺省） */
+      outlinks?: OutlinksProbe
       /** #140 Popover 改版：frontmatter 属性编辑浮层是否打开（旧 webview 缺省） */
       fmPopoverOpen?: boolean
     }
@@ -655,6 +686,14 @@ export type WebviewToHost =
    *  面板）并定位到出链标记处。offset 为来源正文的 LF 偏移（宿主打开后
    *  经 NewlineCoordinator 换算发 view.locate，与双链跳转同链路） */
   | { kind: 'backlink.activate'; sessionId: string; docUri: string; sourceUri: string; offset: number }
+  /** 出链快照拉取（出链面板批次）：面板 init 后请求当前文档的出链；宿主
+   *  以 outlinks.snapshot 响应（索引变更后与 backlinks 同点主动推送） */
+  | { kind: 'outlinks.get'; sessionId: string; docUri: string }
+  /** 出链条目跳转意图（出链面板批次）：点击面板条目 → 宿主打开目标文档
+   *  （Vsidian 面板）并按该链接的实际锚点定位（标题/块 id，复用双链跳转
+   *  的锚点定位器；无锚点或锚点未命中回落文档顶）。targetUri 为目标绝对
+   *  fsPath（快照载荷原样回传）；anchor 空串表示无锚点 */
+  | { kind: 'outlink.activate'; sessionId: string; docUri: string; targetUri: string; anchor: string }
   /** 索引维护状态拉取（#198，设置页）：宿主以 index.state 应答；状态变更
    *  后由宿主推送（onStateChanged → settingsPage.notifyIndexChanged） */
   | { kind: 'index.get' }
@@ -691,6 +730,40 @@ export interface BacklinkItemPayload {
   line: number
   /** 引用片段（来源行文本，超长已截断） */
   snippet: string
+  /** 短片段起点（LF 全文偏移；卡片命中高亮的区间切分基准。可选：旧宿主
+   *  快照缺省，webview 侧缺省不高亮） */
+  snippetStart?: number
+  /** 来源文件 mtime（毫秒；未知 0）——面板分组排序键 */
+  sourceMtimeMs?: number
+  /** 来源文件创建时间（毫秒；未知 0——POSIX 宿主 birthtime 常不可得，
+   *  排序沉底）。可选：旧宿主快照缺省按 0 处理 */
+  sourceBirthtimeMs?: number
+  /** 长片段（「更多上下文」态：引用行 ±2 行，总长上限约 300 字符，首尾
+   *  按截断加「…」；切换纯显示层）。可选：旧宿主快照缺省回退短片段 */
+  snippetLong?: string
+  /** 长片段起点（LF 全文偏移；同 snippetStart 语义） */
+  snippetLongStart?: number
+}
+
+/** 出链面板条目载荷（outlinks.snapshot.items；形态与宿主 OutlinkItem
+ *  同构——本接口为协议层稳定契约） */
+export interface OutlinkItemPayload {
+  /** 目标显示名：解析命中取 basename 去扩展名（目录段不保留——与目标
+   *  路径行分工）；断链用 target 原文 */
+  targetDisplay: string
+  /** 解析命中的根内相对路径（`/` 分隔）；断链 null */
+  targetRelPath: string | null
+  /** 目标绝对 fsPath（跳转与打开用）；断链 null */
+  targetFsPath: string | null
+  /** 边类型（双链/内联链接/图片/引用式定义） */
+  kind: 'wikilink' | 'mdlink' | 'image' | 'refdef'
+  /** 标题/块锚点文本（空串无；#^块id 形态保留 ^ 前缀） */
+  anchor: string
+  /** 是否解析命中（断链条目弱化呈现且不可点） */
+  resolved: boolean
+  /** 出链标记在当前正文中的 LF 偏移区间 */
+  start: number
+  end: number
 }
 
 /** 性能快照（#5）：一次观测时点的 DOM 计数 */
@@ -1343,6 +1416,58 @@ export interface BacklinksProbe {
   /** 反链按钮可访问名称 */
   toggleAriaLabel: string | null
   /** 反链面板可访问名称（role=region + aria-label） */
+  panelAriaLabel: string | null
+  /** 面板视图状态摘要（形态改版批次：排序/搜索/折叠/更多上下文；旧
+   *  webview 缺省） */
+  view?: {
+    sortMode: string
+    query: string
+    searchOpen: boolean
+    contextLong: boolean
+    collapsedCount: number
+    /** 当前渲染的卡片数（DOM 层计数——搜索过滤的直接证据；旧 webview 缺省） */
+    domCards: number
+  }
+  /** 工具栏中心点命中自身（形态改版批次；旧 webview 缺省） */
+  toolbarPainted?: boolean
+  /** 首个命中高亮 mark 中心点命中自身（形态改版批次；旧 webview 缺省） */
+  hitPainted?: boolean
+  /** 首个命中高亮 mark 的 computed 背景色（形态改版批次；无高亮或 jsdom
+   *  无 CSS 引擎为 null）——黄底变量失效（明暗两值）在此暴露 */
+  hitBg?: string | null
+}
+
+/**
+ * 出链面板观测（出链面板批次）：面板态、四态实值与绘制层证据。语义与
+ * BacklinksProbe 镜像（elementFromPoint 命中类字段、jsdom 恒 false 等
+ * 口径同源，见 BacklinksProbe 注释）；items 为面板当前条目摘要。
+ */
+export interface OutlinksProbe {
+  /** 出链面板 active 态（状态机实值；与大纲/反链面板互斥） */
+  active: boolean
+  /** 出链按钮中心点 elementFromPoint 命中自身（侧栏展开 + 按钮真实绘制） */
+  togglePainted: boolean
+  /** 出链面板容器中心点命中面板内（面板内容真实绘制，非 display:none） */
+  panelPainted: boolean
+  /** 面板当前四态实值（loading/ready/error 由最近 snapshot 决定） */
+  state: 'loading' | 'ready' | 'error' | 'none'
+  /** ready 态的更新中标记（索引重建中，当前为旧数据） */
+  updating: boolean
+  /** 条目序列摘要（与渲染 DOM 同序；空列表 = 无出链或非 ready 态） */
+  items: Array<{
+    targetDisplay: string
+    targetRelPath: string | null
+    kind: OutlinkItemPayload['kind']
+    anchor: string
+    resolved: boolean
+  }>
+  /** 首个条目中心点命中自身（条目真实绘制且可点击） */
+  itemPainted: boolean
+  /** 空态占位中心点命中自身（「无链接」真实可见） */
+  emptyPainted: boolean
+  /** 出链按钮可访问名称 */
+  toggleAriaLabel: string | null
+  /** 出链面板可访问名称（role=region + aria-label） */
   panelAriaLabel: string | null
 }
 
@@ -2035,6 +2160,7 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         (v.sidebar === undefined || isSidebarProbe(v.sidebar)) &&
         (v.outline === undefined || isOutlineProbe(v.outline)) &&
         (v.backlinks === undefined || isBacklinksProbe(v.backlinks)) &&
+        (v.outlinks === undefined || isOutlinksProbe(v.outlinks)) &&
         (v.fmPopoverOpen === undefined || typeof v.fmPopoverOpen === 'boolean') &&
         (v.typography === undefined || isTypographyProbe(v.typography))
       )
@@ -2165,6 +2291,11 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'backlink.activate':
       return isString(v.sessionId) && isString(v.docUri) &&
         isString(v.sourceUri) && isNonNegativeInt(v.offset)
+    case 'outlinks.get':
+      return isString(v.sessionId) && isString(v.docUri)
+    case 'outlink.activate':
+      return isString(v.sessionId) && isString(v.docUri) &&
+        isString(v.targetUri) && isString(v.anchor)
     case 'index.get':
     case 'index.resetPatterns':
     case 'index.cleanup':
@@ -2392,6 +2523,13 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return true
     case 'backlinks.test.itemClick':
       return isNonNegativeInt(v.index)
+    case 'backlinks.test.toolbarClick':
+      return v.action === 'sort' || v.action === 'search' || v.action === 'collapse' || v.action === 'context'
+    case 'backlinks.test.searchInput':
+      return isString(v.value)
+    case 'backlinks.test.sortSelect':
+      return ['name-asc', 'name-desc', 'mtime-desc', 'mtime-asc', 'birth-desc', 'birth-asc']
+        .includes(v.mode as string)
     case 'sync.test.composition':
       return (v.phase === 'start' || v.phase === 'update' || v.phase === 'end') && isString(v.text)
     case 'link.test.mousedown':
@@ -2444,6 +2582,18 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         (v.reason === undefined || v.reason === 'no-workspace' || v.reason === 'read-error') &&
         (v.items === undefined || (Array.isArray(v.items) && v.items.every(isBacklinkItemPayload)))
       )
+    case 'outlinks.snapshot':
+      return (
+        isString(v.docUri) &&
+        (v.state === 'loading' || v.state === 'ready' || v.state === 'error') &&
+        (v.updating === undefined || typeof v.updating === 'boolean') &&
+        (v.reason === undefined || v.reason === 'no-workspace' || v.reason === 'read-error') &&
+        (v.items === undefined || (Array.isArray(v.items) && v.items.every(isOutlinkItemPayload)))
+      )
+    case 'outlinks.test.click':
+      return true
+    case 'outlinks.test.itemClick':
+      return isNonNegativeInt(v.index)
     case 'index.state':
       return (
         typeof v.available === 'boolean' &&
@@ -2471,7 +2621,7 @@ function isIndexNoticeKind(v: unknown): v is (typeof INDEX_NOTICE_KINDS)[number]
   return typeof v === 'string' && (INDEX_NOTICE_KINDS as readonly string[]).includes(v)
 }
 
-/** #197 反链条目载荷形态守卫 */
+/** #197 反链条目载荷形态守卫（新字段可选：旧宿主快照缺省容忍） */
 function isBacklinkItemPayload(v: unknown): v is BacklinkItemPayload {
   if (!isObject(v)) {
     return false
@@ -2484,7 +2634,29 @@ function isBacklinkItemPayload(v: unknown): v is BacklinkItemPayload {
     isNonNegativeInt(v.start) &&
     isNonNegativeInt(v.end) &&
     isPositiveInt(v.line) &&
-    isString(v.snippet)
+    isString(v.snippet) &&
+    (v.snippetStart === undefined || isNonNegativeInt(v.snippetStart)) &&
+    (v.sourceMtimeMs === undefined || (typeof v.sourceMtimeMs === 'number' && v.sourceMtimeMs >= 0)) &&
+    (v.sourceBirthtimeMs === undefined || (typeof v.sourceBirthtimeMs === 'number' && v.sourceBirthtimeMs >= 0)) &&
+    (v.snippetLong === undefined || isString(v.snippetLong)) &&
+    (v.snippetLongStart === undefined || isNonNegativeInt(v.snippetLongStart))
+  )
+}
+
+/** 出链条目载荷形态守卫 */
+function isOutlinkItemPayload(v: unknown): v is OutlinkItemPayload {
+  if (!isObject(v)) {
+    return false
+  }
+  return (
+    isString(v.targetDisplay) &&
+    (v.targetRelPath === null || isString(v.targetRelPath)) &&
+    (v.targetFsPath === null || isString(v.targetFsPath)) &&
+    (v.kind === 'wikilink' || v.kind === 'mdlink' || v.kind === 'image' || v.kind === 'refdef') &&
+    isString(v.anchor) &&
+    typeof v.resolved === 'boolean' &&
+    isNonNegativeInt(v.start) &&
+    isNonNegativeInt(v.end)
   )
 }
 
@@ -2504,6 +2676,40 @@ function isBacklinksProbe(v: unknown): v is BacklinksProbe {
       (item) => isObject(item) && isString(item.sourceRelPath) &&
         (item.kind === 'wikilink' || item.kind === 'mdlink' || item.kind === 'image' || item.kind === 'refdef') &&
         isPositiveInt(item.line) && isString(item.snippet),
+    ) &&
+    typeof v.itemPainted === 'boolean' &&
+    typeof v.emptyPainted === 'boolean' &&
+    (v.toggleAriaLabel === null || isString(v.toggleAriaLabel)) &&
+    (v.panelAriaLabel === null || isString(v.panelAriaLabel)) &&
+    (v.view === undefined || (isObject(v.view) && isString(v.view.sortMode) &&
+      isString(v.view.query) && typeof v.view.searchOpen === 'boolean' &&
+      typeof v.view.contextLong === 'boolean' &&
+      (v.view.collapsedCount === undefined || isNonNegativeInt(v.view.collapsedCount)) &&
+      (v.view.domCards === undefined || isNonNegativeInt(v.view.domCards)))) &&
+    (v.toolbarPainted === undefined || typeof v.toolbarPainted === 'boolean') &&
+    (v.hitPainted === undefined || typeof v.hitPainted === 'boolean') &&
+    (v.hitBg === undefined || v.hitBg === null || isString(v.hitBg))
+  )
+}
+
+/** 出链面板观测形态守卫 */
+function isOutlinksProbe(v: unknown): v is OutlinksProbe {
+  if (!isObject(v)) {
+    return false
+  }
+  return (
+    typeof v.active === 'boolean' &&
+    typeof v.togglePainted === 'boolean' &&
+    typeof v.panelPainted === 'boolean' &&
+    (v.state === 'loading' || v.state === 'ready' || v.state === 'error' || v.state === 'none') &&
+    typeof v.updating === 'boolean' &&
+    Array.isArray(v.items) &&
+    v.items.every(
+      (item) => isObject(item) && isString(item.targetDisplay) &&
+        (item.targetRelPath === null || isString(item.targetRelPath)) &&
+        (item.kind === 'wikilink' || item.kind === 'mdlink' || item.kind === 'image' || item.kind === 'refdef') &&
+        isString(item.anchor) &&
+        typeof item.resolved === 'boolean',
     ) &&
     typeof v.itemPainted === 'boolean' &&
     typeof v.emptyPainted === 'boolean' &&

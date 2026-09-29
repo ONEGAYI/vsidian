@@ -46,7 +46,11 @@ function createScanPort(): VaultIndexScanPort {
     async statFile(fsPath: string) {
       try {
         const st = await vscode.workspace.fs.stat(vscode.Uri.file(fsPath))
-        return { mtimeMs: st.mtime, size: st.size }
+        // birthtimeMs：FileStat.ctime 为创建时间（毫秒）；POSIX 宿主语义
+        // 弱（常为 0 或 mtime 回填）——0/缺省不写键，面板排序沉底
+        return st.ctime > 0
+          ? { mtimeMs: st.mtime, size: st.size, birthtimeMs: st.ctime }
+          : { mtimeMs: st.mtime, size: st.size }
       } catch {
         return null
       }
