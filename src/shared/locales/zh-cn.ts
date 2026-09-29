@@ -165,6 +165,7 @@ export const zhCn: Record<MessageKey, string> = {
   'styleRef.category.toolbarBanner': '工具栏与横幅',
   'styleRef.category.contextMenu': '正文右键菜单',
   'styleRef.category.backlinks': '反链面板',
+  'styleRef.category.outlinks': '出链面板',
   'host.styleRefExported': '样式契约 JSON 已导出：{path}',
   'host.styleRefExportFailed': '样式契约 JSON 导出失败：{reason}',
   'host.styleRefExportReasonMissingAsset': '扩展安装不完整（缺少 style-reference.json）',
@@ -337,14 +338,42 @@ export const zhCn: Record<MessageKey, string> = {
   'outlineMenu.rename': '重命名',
   'outlineMenu.delete': '删除',
 
-  /** 反链面板（#197：四态与条目） */
+  /** 反链面板（#197：四态与条目；形态改版批次：工具栏/排序/搜索/页头） */
   'backlinks.label': '反向链接',
+  'backlinks.panelTitle': '链接当前文件',
+  'backlinks.toolbarLabel': '反链面板工具栏',
+  'backlinks.sortBy': '排序',
+  'backlinks.sortNameAsc': '文件名（A-Z）',
+  'backlinks.sortNameDesc': '文件名（Z-A）',
+  'backlinks.sortMtimeDesc': '编辑时间（从新到旧）',
+  'backlinks.sortMtimeAsc': '编辑时间（从旧到新）',
+  'backlinks.sortBirthDesc': '创建时间（从新到旧）',
+  'backlinks.sortBirthAsc': '创建时间（从旧到新）',
+  'backlinks.search': '搜索',
+  'backlinks.searchPlaceholder': '搜索反链…',
+  'backlinks.searchNoMatch': '无匹配',
+  'backlinks.collapseAll': '全部折叠',
+  'backlinks.expandAll': '全部展开',
+  'backlinks.moreContext': '更多上下文',
+  'backlinks.countLabel': '{n} 条反向链接',
+  'backlinks.groupCount': '{n} 条',
   'backlinks.empty': '没有反向链接',
   'backlinks.loading': '正在加载反向链接…',
   'backlinks.updating': '索引更新中…',
   'backlinks.error': '反向链接不可用',
   'backlinks.errorNoWorkspace': '未打开工作区，无法查看反向链接',
   'backlinks.jumpTo': '跳转到 {file} 的引用处（第 {n} 行）',
+
+  /** 出链面板（出链面板批次：四态与条目） */
+  'outlinks.label': '出链',
+  'outlinks.panelTitle': '当前笔记中的链接',
+  'outlinks.countLabel': '{n} 条链接',
+  'outlinks.empty': '无链接',
+  'outlinks.loading': '正在加载链接…',
+  'outlinks.updating': '索引更新中…',
+  'outlinks.error': '出链不可用',
+  'outlinks.errorNoWorkspace': '未打开工作区，无法查看出链',
+  'outlinks.jumpTo': '打开 {target}',
 
   /** 索引维护设置分页（#198：排除模式与维护操作） */
   'indexMaintenance.title': '索引维护',
@@ -469,6 +498,8 @@ export const zhCn: Record<MessageKey, string> = {
   'command.ui.outlineExpandAll.title': '展开全部大纲',
   /** #197 反链面板：双模式 UI 操作，默认未绑定（评估记录见 keybindings.md） */
   'command.ui.backlinksToggle.title': '显示或隐藏反链面板',
+  /** 出链面板：双模式 UI 操作，默认未绑定（评估记录见 keybindings.md） */
+  'command.ui.outlinksToggle.title': '显示或隐藏出链面板',
 
   // ---- #159 锚点跳转（块引用定位与本文件锚点）----
   /** 块 id 缺失提示（与标题缺失同款「打开后提示」行为） */

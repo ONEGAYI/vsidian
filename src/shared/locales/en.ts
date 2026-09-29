@@ -181,6 +181,7 @@ export const en = {
   'styleRef.category.toolbarBanner': 'Toolbar & banner',
   'styleRef.category.contextMenu': 'Content context menu',
   'styleRef.category.backlinks': 'Backlinks panel',
+  'styleRef.category.outlinks': 'Outgoing links panel',
   'host.styleRefExported': 'Style contract JSON exported: {path}',
   'host.styleRefExportFailed': 'Failed to export style contract JSON: {reason}',
   'host.styleRefExportReasonMissingAsset': 'extension install incomplete (style-reference.json missing)',
@@ -364,14 +365,42 @@ export const en = {
   'outlineMenu.rename': 'Rename',
   'outlineMenu.delete': 'Delete',
 
-  /** 反链面板（#197：四态与条目） */
+  /** 反链面板（#197：四态与条目；形态改版批次：工具栏/排序/搜索/页头） */
   'backlinks.label': 'Backlinks',
+  'backlinks.panelTitle': 'Links to this file',
+  'backlinks.toolbarLabel': 'Backlinks toolbar',
+  'backlinks.sortBy': 'Sort',
+  'backlinks.sortNameAsc': 'File name (A-Z)',
+  'backlinks.sortNameDesc': 'File name (Z-A)',
+  'backlinks.sortMtimeDesc': 'Modified (new to old)',
+  'backlinks.sortMtimeAsc': 'Modified (old to new)',
+  'backlinks.sortBirthDesc': 'Created (new to old)',
+  'backlinks.sortBirthAsc': 'Created (old to new)',
+  'backlinks.search': 'Search',
+  'backlinks.searchPlaceholder': 'Search backlinks…',
+  'backlinks.searchNoMatch': 'No matches',
+  'backlinks.collapseAll': 'Collapse all',
+  'backlinks.expandAll': 'Expand all',
+  'backlinks.moreContext': 'More context',
+  'backlinks.countLabel': '{n} backlinks',
+  'backlinks.groupCount': '{n} links',
   'backlinks.empty': 'No backlinks',
   'backlinks.loading': 'Loading backlinks…',
   'backlinks.updating': 'Index updating…',
   'backlinks.error': 'Backlinks unavailable',
   'backlinks.errorNoWorkspace': 'Open a workspace to see backlinks',
   'backlinks.jumpTo': 'Jump to reference in {file} (line {n})',
+
+  /** 出链面板（出链面板批次：四态与条目） */
+  'outlinks.label': 'Outgoing links',
+  'outlinks.panelTitle': 'Links in current note',
+  'outlinks.countLabel': '{n} links',
+  'outlinks.empty': 'No links',
+  'outlinks.loading': 'Loading links…',
+  'outlinks.updating': 'Index updating…',
+  'outlinks.error': 'Outgoing links unavailable',
+  'outlinks.errorNoWorkspace': 'Open a workspace to see outgoing links',
+  'outlinks.jumpTo': 'Open {target}',
 
   /** 索引维护设置分页（#198：排除模式与维护操作） */
   'indexMaintenance.title': 'Index maintenance',
@@ -503,6 +532,8 @@ export const en = {
   'command.ui.outlineExpandAll.title': 'Expand all outline headings',
   /** #197 反链面板：双模式 UI 操作，默认未绑定（评估记录见 keybindings.md） */
   'command.ui.backlinksToggle.title': 'Show or hide the backlinks panel',
+  /** 出链面板：双模式 UI 操作，默认未绑定（评估记录见 keybindings.md） */
+  'command.ui.outlinksToggle.title': 'Show or hide the outgoing links panel',
 
   // ---- #159 锚点跳转（块引用定位与本文件锚点）----
   /** 块 id 缺失提示（与标题缺失同款「打开后提示」行为） */

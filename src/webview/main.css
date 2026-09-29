@@ -775,11 +775,10 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   border-radius: 4px;
 }
 
-/* ---- #197 反链面板 ----
-   显隐唯一开关是侧栏容器的 vsidian-backlinks-active 类（与大纲面板同
-   模式，二者互斥——同域面板区域同一时刻只显示一个）：默认 display:none，
-   active 时 flex 列 + 纵向滚动（滚动成立前提与大纲面板同款：flex:1 +
-   min-height:0 钳制高度，overflow-y 才有滚动余量）。 */
+/* ---- 反链面板（#197 建立；形态改版批次重做呈现）----
+   显隐唯一开关是侧栏容器的 vsidian-backlinks-active 类（与大纲/出链面板
+   同模式互斥）：默认 display:none，active 时 flex 列 + 纵向滚动（滚动成立
+   前提与大纲面板同款）。position:relative 是排序下拉菜单的 absolute 锚。 */
 #app .vsidian-sidebar .vsidian-backlink-panel {
   display: none;
 }
@@ -792,50 +791,154 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   min-height: 0;
   box-sizing: border-box;
   padding: 4px 8px;
-  gap: 2px;
+  gap: 6px;
+  position: relative;
 }
 
-/* 反链条目：来源行（文件:行号，弱化）+ 片段行（引用行文本，单行省略）；
-   按钮语义整行可点（无序列表外观重置），悬停跟随 VSCode 列表悬停色 */
-.vsidian-sidebar .vsidian-backlink-item {
-  flex: 0 0 auto;
+/* 命中高亮黄底（明暗自适应的公开变量）：light 用 #ffec99 一档；dark 用
+   可读黄系（30% 黄叠加——高亮内文字颜色不变，仅底色标记命中区间） */
+#app {
+  --vsidian-backlink-hit-bg: #ffec99;
+}
+
+body.vscode-dark #app {
+  --vsidian-backlink-hit-bg: rgba(255, 208, 0, 0.3);
+}
+
+body.vscode-high-contrast #app {
+  --vsidian-backlink-hit-bg: rgba(255, 208, 0, 0.35);
+}
+
+/* 工具栏：四枚线性图标按钮横排居中（排序/搜索/折叠全部/更多上下文）。
+   按钮形态与侧栏顶栏按钮同语言；开态（aria-pressed/expanded）以选中底
+   色标记。小图标线宽在此钉住（不写在 SVG 属性上——与侧栏图标同口径，
+   样式注入失效由契约测试与集成绘制断言暴露） */
+.vsidian-sidebar .vsidian-backlink-toolbar {
   display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding: 4px 6px;
+  justify-content: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.vsidian-sidebar .vsidian-backlink-toolbar-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  box-sizing: border-box;
+  cursor: pointer;
+  color: var(--vscode-editor-foreground);
+  background: transparent;
   border: none;
   border-radius: 4px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
 }
 
-.vsidian-sidebar .vsidian-backlink-item:hover,
-.vsidian-sidebar .vsidian-backlink-item:focus-visible {
-  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.14));
+.vsidian-sidebar .vsidian-backlink-toolbar-button:hover,
+.vsidian-sidebar .vsidian-backlink-toolbar-button:focus-visible {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.16));
   outline: none;
 }
 
-.vsidian-sidebar .vsidian-backlink-item .vsidian-backlink-item-source {
-  font-size: var(--vsidian-outline-font-size, 12px);
-  font-weight: 600;
-  opacity: 0.85;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.vsidian-sidebar .vsidian-backlink-toolbar-button[aria-pressed='true'],
+.vsidian-sidebar .vsidian-backlink-toolbar-button[aria-expanded='true'] {
+  background: var(--vscode-list-activeSelectionBackground, rgba(128, 128, 128, 0.2));
 }
 
-.vsidian-sidebar .vsidian-backlink-item .vsidian-backlink-item-snippet {
-  font-size: var(--vsidian-outline-font-size, 12px);
-  opacity: 0.75;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.vsidian-sidebar .vsidian-backlink-toolbar-button svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+  stroke-width: 1.5;
 }
 
-/* 更新中细条：索引重建中的弱化提示（ready + updating 时面板首行） */
+/* 侧栏链环图标（24 系 viewBox 显示 16px）：线宽由 CSS 钉住（公开契约） */
+.vsidian-sidebar .vsidian-sidebar-toolbar-actions button.vsidian-backlinks-toggle svg,
+.vsidian-sidebar .vsidian-sidebar-toolbar-actions button.vsidian-outlinks-toggle svg {
+  stroke-width: 2;
+}
+
+/* 搜索框：四个按钮下方、水平占满侧栏宽；显隐唯一开关 hidden 属性
+   （下方页头/分组列表随文档流自适应下移） */
+.vsidian-sidebar .vsidian-backlink-search-box {
+  display: flex;
+  width: 100%;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+}
+
+.vsidian-sidebar .vsidian-backlink-search-box[hidden] {
+  display: none;
+}
+
+.vsidian-sidebar .vsidian-backlink-search-input {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  background: var(--vscode-input-background, transparent);
+  color: var(--vscode-input-foreground, inherit);
+  border: 1px solid var(--vscode-input-border, rgba(128, 128, 128, 0.35));
+  border-radius: 2px;
+  padding: 3px 6px;
+  font: inherit;
+  font-size: var(--vsidian-outline-font-size, 12px);
+}
+
+/* 排序下拉菜单：面板内 absolute 定位（面板容器为锚），Esc/外点关闭在
+   控制器；菜单配色跟随 --vscode-menu-* 变量族（与右键菜单同族视觉语言） */
+.vsidian-sidebar .vsidian-backlink-sort-menu {
+  position: absolute;
+  top: 34px;
+  left: 8px;
+  right: 8px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background, #252526));
+  color: var(--vscode-menu-foreground, var(--vscode-editorWidget-foreground, inherit));
+  border: 1px solid var(--vscode-menu-border, rgba(128, 128, 128, 0.3));
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.vsidian-sidebar .vsidian-backlink-sort-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  font: inherit;
+  font-size: var(--vsidian-outline-font-size, 12px);
+  text-align: left;
+  padding: 4px 8px;
+  cursor: pointer;
+  color: inherit;
+}
+
+.vsidian-sidebar .vsidian-backlink-sort-item::before {
+  content: '\2003'; /* 空位占位：勾选项与非勾选项左对齐 */
+}
+
+.vsidian-sidebar .vsidian-backlink-sort-item[aria-checked='true']::before {
+  content: '\2713'; /* 勾选标记（当前排序项） */
+}
+
+.vsidian-sidebar .vsidian-backlink-sort-item:hover,
+.vsidian-sidebar .vsidian-backlink-sort-item:focus-visible {
+  background: var(--vscode-menu-selectionBackground, rgba(128, 128, 128, 0.2));
+  outline: none;
+}
+
+.vsidian-sidebar .vsidian-backlink-sort-sep {
+  height: 1px;
+  margin: 3px 4px;
+  background: var(--vscode-menu-separatorBackground, rgba(128, 128, 128, 0.25));
+}
+
+/* 更新中细条：索引重建中的弱化提示（ready + updating 时面板首位） */
 .vsidian-sidebar .vsidian-backlink-updating {
   flex: 0 0 auto;
   padding: 2px 6px;
@@ -845,15 +948,259 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   margin-bottom: 2px;
 }
 
-/* 状态占位（loading/empty/error 共用形态，文案随 locale 键变化） */
+/* 状态占位（loading/empty/error/nomatch 共用形态，文案随 locale 键变化） */
 .vsidian-sidebar .vsidian-backlink-placeholder {
   opacity: 0.7;
   padding: 8px 10px;
   font-size: var(--vsidian-outline-font-size, 12px);
 }
 
+/* 页头：「链接当前文件」+ 右对齐浅灰计数（卡片数） */
+.vsidian-sidebar .vsidian-backlink-header {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 0 2px 2px;
+}
+
+.vsidian-sidebar .vsidian-backlink-header-title {
+  font-size: var(--vsidian-outline-font-size, 12px);
+  font-weight: 600;
+  opacity: 0.9;
+}
+
+.vsidian-sidebar .vsidian-backlink-header-count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, inherit);
+  opacity: 0.75;
+}
+
+/* 折叠分组：组头（chevron + 来源名 + 右对齐计数）+ 组内卡片列 */
+.vsidian-sidebar .vsidian-backlink-group {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.vsidian-sidebar .vsidian-backlink-group-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 2px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  font: inherit;
+  text-align: left;
+  color: var(--vscode-editor-foreground);
+  cursor: pointer;
+}
+
+.vsidian-sidebar .vsidian-backlink-group-header:hover,
+.vsidian-sidebar .vsidian-backlink-group-header:focus-visible {
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.14));
+  outline: none;
+}
+
+.vsidian-sidebar .vsidian-backlink-group-name {
+  font-size: var(--vsidian-outline-font-size, 12px);
+  font-weight: 600;
+  opacity: 0.85;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vsidian-sidebar .vsidian-backlink-group-count {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.vsidian-sidebar .vsidian-backlink-chevron {
+  flex: 0 0 auto;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid currentColor;
+  opacity: 0.7;
+  transition: transform 0.1s ease-out;
+}
+
+.vsidian-sidebar .vsidian-backlink-group-collapsed .vsidian-backlink-chevron {
+  transform: rotate(-90deg);
+}
+
+/* 折叠组的卡片区隐藏（组头保留；折叠标记类是显隐唯一开关） */
+.vsidian-sidebar .vsidian-backlink-group-collapsed .vsidian-backlink-card {
+  display: none;
+}
+
+/* 上下文卡片：白色背景（编辑器底色变量——dark 主题自适应）、近似直角
+   （3px 圆角）、左右内边距约 19px、上下 14px、行高约 1.4；同组相邻卡
+   间距约 2px（group 的 gap）。#197 既有 item 类并行挂在卡片上（兼容
+   锚点），本批样式全部以 card 类书写 */
+.vsidian-sidebar .vsidian-backlink-card {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 14px 19px;
+  border: none;
+  border-radius: 3px;
+  background: var(--vscode-editor-background, #ffffff);
+  color: var(--vscode-editor-foreground, inherit);
+  font: inherit;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+}
+
+.vsidian-sidebar .vsidian-backlink-card:hover,
+.vsidian-sidebar .vsidian-backlink-card:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, rgba(128, 128, 128, 0.5));
+  outline-offset: -1px;
+}
+
+.vsidian-sidebar .vsidian-backlink-card-text {
+  display: block;
+  font-size: var(--vsidian-outline-font-size, 12px);
+  white-space: pre-line;
+  word-break: break-word;
+}
+
+/* 命中高亮：卡片内命中链接的原始 Markdown 语法整体（mark 元素）；黄底
+   变量明暗两值见上方 #app 定义，高亮内文字颜色不变、不加下划线 */
+.vsidian-sidebar mark.vsidian-backlink-hit {
+  background: var(--vsidian-backlink-hit-bg, #ffec99);
+  color: inherit;
+  text-decoration: none;
+  padding: 0 1px;
+  border-radius: 2px;
+}
+
 /* active 态的按钮高亮（与大纲按钮 active 态同模式，视觉指示当前面板） */
 #app .vsidian-sidebar.vsidian-backlinks-active .vsidian-sidebar-toolbar button.vsidian-backlinks-toggle {
+  background: var(--vscode-list-activeSelectionBackground, rgba(128, 128, 128, 0.2));
+}
+
+/* ---- 出链面板（出链面板批次；与反链面板同显隐机制，三面板互斥）---- */
+#app .vsidian-sidebar .vsidian-outlink-panel {
+  display: none;
+}
+
+#app .vsidian-sidebar.vsidian-outlinks-active .vsidian-outlink-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  gap: 2px;
+}
+
+.vsidian-sidebar .vsidian-outlink-updating {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  font-size: var(--vsidian-outline-font-size, 12px);
+  opacity: 0.7;
+  border-bottom: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.2));
+  margin-bottom: 2px;
+}
+
+.vsidian-sidebar .vsidian-outlink-placeholder {
+  opacity: 0.7;
+  padding: 8px 10px;
+  font-size: var(--vsidian-outline-font-size, 12px);
+}
+
+.vsidian-sidebar .vsidian-outlink-header {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 0 2px 4px;
+}
+
+.vsidian-sidebar .vsidian-outlink-header-title {
+  font-size: var(--vsidian-outline-font-size, 12px);
+  font-weight: 600;
+  opacity: 0.9;
+}
+
+.vsidian-sidebar .vsidian-outlink-header-count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, inherit);
+  opacity: 0.75;
+}
+
+/* 出链条目：两行（图标+目标名 / 目标路径悬挂缩进）；行距宽松（条目节距
+   由上下 padding 承担）；断链整体弱化且不可点（disabled + broken 类） */
+.vsidian-sidebar .vsidian-outlink-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 10px 6px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.vsidian-sidebar .vsidian-outlink-item:hover,
+.vsidian-sidebar .vsidian-outlink-item:focus-visible {
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.14));
+  outline: none;
+}
+
+.vsidian-sidebar .vsidian-outlink-item-name {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  font-size: var(--vsidian-outline-font-size, 12px);
+  color: var(--vscode-editor-foreground, inherit);
+}
+
+.vsidian-sidebar .vsidian-outlink-item-name svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  stroke-width: 1.5;
+  opacity: 0.75;
+}
+
+/* 路径行：与行 1 文本左对齐的悬挂缩进（16px 图标 + 4px 间距），换行不回
+   图标下；字号约主行 85% 的弱化次要色 */
+.vsidian-sidebar .vsidian-outlink-item-path {
+  display: block;
+  margin-left: 20px;
+  font-size: calc(var(--vsidian-outline-font-size, 12px) * 0.85);
+  color: var(--vscode-descriptionForeground, inherit);
+  opacity: 0.85;
+  word-break: break-all;
+}
+
+.vsidian-sidebar .vsidian-outlink-broken {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.vsidian-sidebar .vsidian-outlink-broken:hover,
+.vsidian-sidebar .vsidian-outlink-broken:focus-visible {
+  background: transparent;
+  outline: none;
+}
+
+#app .vsidian-sidebar.vsidian-outlinks-active .vsidian-sidebar-toolbar button.vsidian-outlinks-toggle {
   background: var(--vscode-list-activeSelectionBackground, rgba(128, 128, 128, 0.2));
 }
 
