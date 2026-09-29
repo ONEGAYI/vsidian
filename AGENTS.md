@@ -2,7 +2,7 @@
 
 VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 
-> 当前状态：**MVP 主要功能已实施，整体验收未结**。一期双视图编辑、增量写回、任务、链接图片、双链、表格、查找、三态切换、独立设置页与源文件行号，二期公式渲染、Mermaid 图表、表格交互重做（[#72 规格](docs/specs/table-interaction-rework.md)）与大纲面板二期（#65–#70，样式透传、跳转高亮、折叠滑块、工具条搜索、右键菜单、拖拽排序）均已落地；自动化通过不等于真实 IME、物理鼠标与视觉观感已由用户验收。2026-09 工作区引用索引批次（#195–#202 八票：根内相对路径解析、持久索引与反链面板、增量维护与排除设置、单文件/目录与批量移动的引用自动更新、图片定期刷新）已实施待用户验收，总票 #194 保持开放——含相对路径兼容变化：旧跨目录短名双链不再命中、QuickPick 同名候选已废除（见规格「相对路径兼容变化」节）。功能范围见 [docs/specs/mvp.md](docs/specs/mvp.md)；待验项与历轮执行记录见 [docs/specs/manual-verification.md](docs/specs/manual-verification.md)；用户可见变更见 [CHANGELOG.md](CHANGELOG.md)。本文件是项目级 agent 规则的**单一入口**：横切约定常驻于此，领域落档约定的正文在指针目标（specs 文档与项目技能）中维护——入口唯一、不另建副本，指针写明触发分支，改动正文只改指针目标。
+> 当前状态：**MVP 主要功能已实施，整体验收未结**。一期双视图编辑、增量写回、任务、链接图片、双链、表格、查找、三态切换、独立设置页与源文件行号，二期公式渲染、Mermaid 图表、表格交互重做（[#72 规格](docs/specs/table-interaction-rework.md)）与大纲面板二期（#65–#70，样式透传、跳转高亮、折叠滑块、工具条搜索、右键菜单、拖拽排序）均已落地；自动化通过不等于真实 IME、物理鼠标与视觉观感已由用户验收。2026-09 工作区引用索引批次（#195–#202 八票：根内相对路径解析、持久索引与反链面板、增量维护与排除设置、单文件/目录与批量移动的引用自动更新、图片定期刷新）已实施待用户验收，总票 #194 保持开放；验收反馈一轮已落地反链面板形态改版（工具栏 + 分组卡片 + 命中高亮）与新增出链面板（三面板互斥，规格见 [docs/specs/vault-index-backlinks.md](docs/specs/vault-index-backlinks.md)「反链面板形态改版与出链面板」节）——含相对路径兼容变化：旧跨目录短名双链不再命中、QuickPick 同名候选已废除（见规格「相对路径兼容变化」节）。功能范围见 [docs/specs/mvp.md](docs/specs/mvp.md)；待验项与历轮执行记录见 [docs/specs/manual-verification.md](docs/specs/manual-verification.md)；用户可见变更见 [CHANGELOG.md](CHANGELOG.md)。本文件是项目级 agent 规则的**单一入口**：横切约定常驻于此，领域落档约定的正文在指针目标（specs 文档与项目技能）中维护——入口唯一、不另建副本，指针写明触发分支，改动正文只改指针目标。
 
 ## 约定
 
@@ -92,7 +92,10 @@ vsidian/
 │   │   ├── domain.md        # 领域文档读取与维护约定
 │   │   └── issue-tracker.md # GitHub Issues 操作约定
 │   ├── design/   # 设计文档（选择器映射等）
-│   │   └── obsidian-selector-map.md # Obsidian 选择器映射表
+│   │   ├── backlinks-panel-reference.png   # 反链面板形态参考图
+│   │   ├── links-panel-icons-reference.png # 链环图标参考图（反链/出链）
+│   │   ├── obsidian-selector-map.md        # Obsidian 选择器映射表
+│   │   └── outlinks-panel-reference.png    # 出链面板形态参考图
 │   ├── perf/     # 性能实测数据与测量工具说明
 │   │   ├── 2026-09-browser-test-runner.md       # 浏览器测试调度实测
 │   │   ├── 2026-09-code-block-card.md           # 代码块卡片性能实测（#85）
@@ -228,6 +231,7 @@ vsidian/
 │   │   └── wikilink.ts           # 双链形态学单一事实源（#11）
 │   └── webview/     # webview 端实现
 │       ├── anchorFlash.ts              # 跳转目标高亮装饰状态
+│       ├── backlinkGrouping.ts         # 反链面板分组排序过滤纯函数
 │       ├── backlinkPanel.ts            # 反链面板 DOM 与四态渲染（#197）
 │       ├── blockIdStrip.ts             # 阅读渲染块标记剥离纯函数
 │       ├── blockMenu.ts                # 正文右键菜单与复制块链接
@@ -280,6 +284,7 @@ vsidian/
 │       ├── outlineMenu.ts              # 大纲右键菜单模型纯逻辑
 │       ├── outlineSearch.ts            # 大纲标题搜索纯函数
 │       ├── outlineSection.ts           # 大纲控制域纯函数
+│       ├── outlinkPanel.ts             # 出链面板 DOM 与四态渲染
 │       ├── perfProbe.ts                # webview 性能探针（#5）
 │       ├── quickActionState.ts         # 快速操作状态判定
 │       ├── readingBlocks.ts            # markdown-it 阅读块切分

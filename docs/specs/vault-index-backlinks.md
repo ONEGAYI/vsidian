@@ -298,3 +298,45 @@ webview/样式修改执行 style-contract，绘制层至少验证真实可见性
 ### 遗留与待验汇总
 
 Remote SSH 六项待验（存储落宿主侧、断连恢复、远端事件循环、图片 inaccessible 呈现、远端大目录 will 时限、watcher 端到端时延）与本机不可达场景（双窗口、跨根移动宿主操作、启动装载损坏快照）见 [manual-verification.md](manual-verification.md) 的 #202 节——均**不以本地数据冒充通过**；根增删/跨根两集成用例标注 CI Linux 执行。本票不自动授权推送或合并，总票 #194 与用户验收保持开放。
+
+## 反链面板形态改版与出链面板（验收反馈一轮，2026-09-29 落档）
+
+PR #203 用户验收反馈的一轮设计落地：反链面板形态改版（工具栏 + 分组卡片 + 命中高亮）与新增出链面板。两面板与大纲构成**三面板互斥**（沿用 `vsidian-backlinks-active` 类机制扩展出 `vsidian-outlinks-active`），恢复收敛优先级大纲 > 反链 > 出链。
+
+### 反链面板新形态
+
+- **结构**：工具栏（四按钮横排居中）→ 搜索框（按钮下方、居中、水平占满侧栏宽，显隐唯一开关 `hidden` 属性）→ 更新中细条（ready + updating 时面板首位）→ 页头（「链接当前文件」+ 右对齐卡片计数）→ 按来源分组（组头 = chevron + 来源名 + 组内计数，可点击折叠/展开该组）→ 组内白色上下文卡片（每条引用一张；卡片近似直角、行高约 1.4；`vsidian-backlink-card` 与 #197 既有 `vsidian-backlink-item` 类并挂——公开锚点兼容）。loading/error/空文档退化为纯占位（无工具栏）。
+- **排序**（工具栏「排序」下拉：六项三组、组间分隔线，Esc/外点关闭，当前项 aria-checked 勾选）：文件名（A-Z / Z-A，显示名码位）；编辑时间（从新到旧 / 从旧到新，组按来源文件 mtimeMs）；创建时间（从新到旧 / 从旧到新，组按来源文件 birthtimeMs）。未知时间（0/缺省）沉底并保持稳定序（同键按显示名码位）；组内条目固定稳定序（路径 → 区间起点）。分组纯逻辑在 `src/webview/backlinkGrouping.ts`（单测直驱）。
+- **搜索**：过滤匹配来源文件名 + 短/长片段文本，不区分大小写；Esc 关闭并清空；空结果显示「无匹配」占位（与「没有反向链接」空态区分）。
+- **折叠全部**：全部折叠/全部展开二态切换（aria-pressed）。
+- **更多上下文**：短/长片段切换（aria-pressed，纯显示层）。宿主快照同时携带两种片段：短 = 引用行截断（#197 既有），长 = 引用行 ±2 行、总长上限约 300 字符、首尾按截断加「…」。
+- **命中高亮**：卡片内命中链接的**原始 Markdown 语法整体**（`[...](...)` 或 `[[...]]` 连同括号与 URL）黄底高亮（`mark.vsidian-backlink-hit`；`--vsidian-backlink-hit-bg` 变量明暗两值：light `#ffec99`、dark/高对比约 30% 黄叠加），高亮内文字颜色不变、不加下划线。宿主载荷带 `snippetStart` / `snippetLongStart`（片段在全文中的 LF 起点），webview 按区间减起点切分文本包 mark；载荷缺省（旧宿主快照）不高亮（起点未知宁缺不错位）。
+
+### 出链面板（新增）
+
+- **结构**：页头（「当前笔记中的链接」+ 右上浅灰计数）+ 平铺两行条目（行 1 = 链形小图标 + 目标显示名；行 2 = 目标路径悬挂缩进，约主行 85% 字号）。四态与反链一致（loading / ready 空=「无链接」/ error 含 no-workspace；updating 细条）。DOM 在 `src/webview/outlinkPanel.ts`。
+- **条目语义**：目标显示名 = 解析命中目标的 basename 去扩展名；断链用 target 原文并整体弱化（`broken` 类 + `disabled`）不可点；条目点击经 `outlink.activate` 由宿主打开目标——**按该链接实际的锚点定位**（标题 → `findHeadingOffset`、`#^块id` → `findBlockOffset`，与双链跳转同一锚点定位器；无锚点或未命中回落文档顶）。非 Markdown 目标（图片附件）经 `vscode.open` 原生打开（Vsidian 自定义编辑器不接非 md）。
+- **数据面**：`VaultIndexService.outlinksOf`（含覆盖层未保存态——覆盖层在场用覆盖层边，与 queryBacklinks 同源语义）；**外部 scheme（https:// 等）与危险 scheme 边不进面板**（判别复用跳转链路同一分类器 `classifyLinkTarget` / `classifyImageTarget`，帮手 `isVaultPanelOutlink` 在 `src/host/vaultLinkExtract.ts`）；stable 排序 resolved → 目标 → 区间。
+- **协议**：`outlinks.get`（拉取）/ `outlinks.snapshot`（响应 + 索引变更推送——与 backlinks 同一 `onChange` 广播点、独立 seq）/ `outlink.activate` / `outlinks.test.*` 测试钩子（宿主侧 `VSIDIAN_TEST_HOOKS` 门控转发）。
+
+### 侧栏图标与设置页
+
+- 两枚侧栏图标（24 系 viewBox、currentColor、线宽由 CSS 契约钉住）：反链 = 织结双链环 + 左折返箭头；出链 = 织结双链环 + 右出箭头（lucide link 造型语言；参考图 `docs/design/links-panel-icons-reference.png`，面板参考图同目录）。正式管线资产化属后续批次。
+- 设置页「索引维护」分页图标自 'editor' 铅笔改为链环 glyph（`icon()` 新增 'links' kind，链环 path 与侧栏图标同形）。
+
+### 数据层增量
+
+- `VaultFileEntry` 增可选 `birthtimeMs`（Windows 取 stat birthtime；POSIX 常不可得为 0/缺省）。wiring 侧取 `vscode.workspace.fs.stat` 的 `ctime`（0/缺省不写键）。快照序列化为文件行**可选第 6 列**（>0 才写）——旧快照缺列容忍（undefined → 排序沉底），不升格式版本；未采集的片继承不受扰动，增量重扫自愈补齐。
+- `BacklinkItemPayload` 扩展：`sourceMtimeMs` / `sourceBirthtimeMs`（组排序键；未知 0）、`snippetLong` / `snippetLongStart`（长片段及其起点）、`snippetStart`（短片段起点，高亮切分基准）。新字段全部可选（旧宿主快照兼容）。
+
+### 快捷键
+
+「打开/切换出链面板」登记为双模式 UI 操作（`onegayi.vsidian.ui.outlinksToggle`，默认未绑定——与反链面板同款镜像）；面板内控件（排序/搜索/折叠/更多上下文）为面板局部交互不设全局键位（评估记录见 [keybindings.md](keybindings.md)）。
+
+### 已知边界
+
+- **排序与折叠态不持久化**（会话内存即可）：面板重载（webview reload）回到默认排序（文件名 A-Z）与全展开。
+- **birthtime 平台差异**：Windows 有真实创建时间；POSIX/部分远程语义弱（0/缺省）——按创建时间排序时未知沉底，不代表文件真的最旧。
+- **外链不进面板**：https:// 等外部 scheme 与危险 scheme 边不出现在出链面板（「保留断链及未命中引用」的可见性以断链条目承担，外链跳转仍走正文链接点击）。
+- **图标为内联 SVG 绘制**：几何按参考图规格（织结双链环 + 箭头）手绘，未经正式图标管线资产化（明暗资源、quick-actions 式 .svg 资产目录）；参考图存档于 `docs/design/`。
+- **出链面板图片附件条目**经 `vscode.open` 原生打开（无锚点定位语义）；断链图片同样弱化不可点。
