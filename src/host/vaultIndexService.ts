@@ -1045,6 +1045,32 @@ export class VaultIndexService {
     await this.enqueueRescan(state, key)
   }
 
+  /**
+   * 文档关闭退役（review-loops #18；provider 的 onDidCloseTextDocument
+   * 驱动，调用方须确认同文档无其他打开面板）：未保存内容随面板关闭丢弃
+   * ——unsaved 全文、防抖计时器与覆盖层边一并退场，反链查询回到磁盘
+   * 基线（内存索引是可重建缓存，磁盘为事实源）。不触发重扫（磁盘未变）。
+   */
+  documentClosed(fsPath: string): void {
+    const state = this.rootOf(fsPath)
+    if (!state) {
+      return
+    }
+    const key = this.normKey(fsPath)
+    const timer = state.unsavedTimers.get(key)
+    if (timer !== undefined) {
+      clearTimeout(timer)
+      state.unsavedTimers.delete(key)
+    }
+    state.unsaved.delete(key)
+    state.unsavedSince.delete(key)
+    const rel = this.relOf(state, fsPath)
+    if (rel !== null && state.overlay.get(rel) !== undefined) {
+      state.overlay.clear(rel)
+      this.notify()
+    }
+  }
+
   // ---- watcher / 增量队列 ----
 
   private onWatchEvent(state: RootIndexState, fsPath: string | null): void {
@@ -1659,7 +1685,20 @@ export class VaultIndexService {
     if (rel === null) {
       return { status: 'error', reason: 'no-workspace' }
     }
-    const edges = queryBacklinks(state.backlinks, state.overlay, rel)
+    // 反链桶按磁盘真实形态聚合（resolvedTarget 原文）；查询 fsPath 的
+    // 大小写可能漂移——fold 匹配桶键后按 fold 查询（与 renameCandidatesOf
+    // 同口径；POSIX 宿主 fold 为 identity，大小写敏感语义保持）
+    let bucketKey: string | null = null
+    for (const key of state.backlinks.keys()) {
+      if (this.foldKey(key) === this.foldKey(rel)) {
+        bucketKey = key
+        break
+      }
+    }
+    const edges = queryBacklinks(
+      state.backlinks, state.overlay, bucketKey ?? rel,
+      (p) => this.foldKey(p),
+    )
     // 片段与行号：来源有未保存内容优先取其文本（覆盖层边对齐覆盖层文本），
     // 其余读盘一次（OS 缓存；CRLF 归一与抽取同口径）
     const textBySource = new Map<string, string | null>()

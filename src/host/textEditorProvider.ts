@@ -735,6 +735,10 @@ export function createTextEditorProvider(
 
   // ---- #197 反链面板：快照应答与条目跳转（面板级 UI 意图的执行体） ----
 
+  /** 反链广播序号（review-loops #16）：按文档单调递增——快照应答为异步
+   *  fire-and-forget，乱序完成时 webview 依 seq 丢弃降序帧 */
+  const backlinksSeqByDoc = new Map<string, number>()
+
   /** 反链快照（backlinks.get 应答与 onChange 广播共用）：结果形态与
    *  backlinks.snapshot 协议一致（items 为空数组兜底） */
   const sendBacklinksSnapshot = async (
@@ -742,20 +746,24 @@ export function createTextEditorProvider(
     sessionId: string,
     docUri: vscode.Uri,
   ): Promise<void> => {
+    const docUriStr = docUri.toString()
+    const seq = (backlinksSeqByDoc.get(docUriStr) ?? 0) + 1
+    backlinksSeqByDoc.set(docUriStr, seq)
     if (!vaultIndex) {
       entry.session.postToPanel(sessionId, {
         kind: 'backlinks.snapshot',
-        docUri: docUri.toString(),
+        docUri: docUriStr,
         state: 'error',
         reason: 'no-workspace',
         items: [],
+        seq,
       })
       return
     }
     const result = await vaultIndex.backlinksOf(docUri.fsPath)
     entry.session.postToPanel(sessionId, {
       kind: 'backlinks.snapshot',
-      docUri: docUri.toString(),
+      docUri: docUriStr,
       state: result.status,
       updating: result.status === 'ready' ? result.updating : undefined,
       reason: result.status === 'error' ? result.reason : undefined,
@@ -771,6 +779,7 @@ export function createTextEditorProvider(
           snippet: item.snippet,
         }))
         : [],
+      seq,
     })
   }
 
@@ -1189,6 +1198,21 @@ export function createTextEditorProvider(
         if (document.uri.scheme === 'file' && /\.md$/i.test(document.uri.path)) {
           void vaultIndex.documentSaved(document.uri.fsPath)
         }
+      }),
+    )
+    // 文档关闭退役（review-loops #18）：编辑后不保存关闭的面板，其 unsaved
+    // 全文与覆盖层边随文档关闭退场（否则幽灵反链滞留至下次保存/重扫）。
+    // 同文档仍有 Vsidian 面板（自定义编辑器持有文档）时不退役——面板侧
+    // 仍有当前内容域；订阅随 context.subscriptions 释放
+    context.subscriptions.push(
+      vscode.workspace.onDidCloseTextDocument((document) => {
+        if (document.uri.scheme !== 'file' || !/\.md$/i.test(document.uri.path)) {
+          return
+        }
+        if (getEntry(document.uri)) {
+          return
+        }
+        vaultIndex.documentClosed(document.uri.fsPath)
       }),
     )
   }

@@ -55,16 +55,23 @@ export class VaultIndexOverlay {
  * 覆盖层在场的文档，其基线边跳过、由覆盖层该文档的边接管——未保存编辑
  * （增删引用）即时反映。结果按 sortEdges 稳定排序（来源路径 → 区间）。
  * overlay 传 null 时退化为纯基线查询。
+ *
+ * fold（review-loops #11）：目标键归一函数（Windows 宿主大小写折叠；
+ * POSIX 缺省 identity 不折叠）——查询路径与磁盘形态大小写漂移时按
+ * fold 命中桶与覆盖层边，与 renameCandidatesOf 的桶匹配同口径。
+ * 缺省严格相等（既有调用方语义不变）。
  */
 export function queryBacklinks(
   baseIndex: ReadonlyMap<string, readonly VaultEdge[]>,
   overlay: VaultIndexOverlay | null,
   targetRelPath: string,
+  fold: (relPath: string) => string = (p) => p,
 ): VaultEdge[] {
   const overlayEntries = overlay?.entriesOf()
   const out: VaultEdge[] = []
-  const matches = (e: VaultEdge): boolean => e.resolvedTarget === targetRelPath
-    || (e.resolvedTarget === null && e.target === targetRelPath)
+  const targetKey = fold(targetRelPath)
+  const matches = (e: VaultEdge): boolean => fold(e.resolvedTarget ?? '') === targetKey
+    || (e.resolvedTarget === null && fold(e.target) === targetKey)
   for (const e of baseIndex.get(targetRelPath) ?? []) {
     if (overlayEntries?.has(e.source)) {
       continue // 该文档有覆盖层：基线边由覆盖层接管

@@ -1276,6 +1276,44 @@ describe('VaultIndexService：review-loops 快照写失败与 tmp 回收（#13/#
   })
 })
 
+describe('VaultIndexService：review-loops 反链查询 fold 匹配（#11）', () => {
+  it('Windows 宿主下查询路径大小写漂移不产生假空反链（与 renameCandidatesOf 同口径）', async () => {
+    // 磁盘真实形态 Pic.png（扫描侧 rel 原样登记，resolvedTarget 同形态）
+    const fs = makeFs({
+      'C:/vault/dir/Pic.png': '\u0000png',
+      'C:/vault/dir/a.md': '# A\n\n![图](Pic.png)。\n',
+    })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // 大小写漂移的查询路径（用户/宿主传入形态）：fold 桶匹配命中
+    expect(itemsOf(await service.backlinksOf('C:/vault/dir/pic.png')).map((i) => i.sourceRelPath)).toEqual(['dir/a.md'])
+    // 原形态查询照常
+    expect(itemsOf(await service.backlinksOf('C:/vault/dir/Pic.png')).map((i) => i.sourceRelPath)).toEqual(['dir/a.md'])
+  })
+})
+
+describe('VaultIndexService：review-loops 文档关闭退役（#18）', () => {
+  it('documentClosed 退役未保存覆盖层：幽灵反链退场、基线接管查询', async () => {
+    const fs = makeFs({
+      'C:/vault/a.md': '# A\n',
+      'C:/vault/b.md': '# B\n',
+    })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // 编辑 a.md 加引用（未保存）→ 覆盖层接管，b 出现反链
+    service.applyUnsaved('C:/vault/a.md', 2, '# A\n\n见 [[b]]。\n')
+    await vi.advanceTimersByTimeAsync(600)
+    expect(itemsOf(await service.backlinksOf('C:/vault/b.md')).map((i) => i.sourceRelPath)).toEqual(['a.md'])
+    // 编辑后不保存关闭面板 → 覆盖层退役，反链回到磁盘基线（无引用）
+    service.documentClosed('C:/vault/a.md')
+    expect(itemsOf(await service.backlinksOf('C:/vault/b.md'))).toHaveLength(0)
+    // 再次编辑仍正常（退役不破坏后续覆盖层登记）
+    service.applyUnsaved('C:/vault/a.md', 3, '# A\n\n再见 [[b]]。\n')
+    await vi.advanceTimersByTimeAsync(600)
+    expect(itemsOf(await service.backlinksOf('C:/vault/b.md')).map((i) => i.sourceRelPath)).toEqual(['a.md'])
+  })
+})
+
 describe('VaultIndexService：review-loops 三连代增量快照可恢复（#17 服务层）', () => {
   it('两轮增量提交后新实例恢复最新代内容（继承链跨两代不断裂）', async () => {
     const initial: Record<string, string> = {}

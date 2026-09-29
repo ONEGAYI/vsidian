@@ -322,7 +322,10 @@ export type HostToWebview =
    *  loading（索引未就绪/首扫中）、ready（items 为反链列表，空列表=无引用；
    *  updating=true 表示索引重建中当前为旧数据）、error（读取失败，含索引
    *  不可用；reason 区分无工作区）。items 按来源路径/位置稳定排序（宿主
-   *  queryBacklinks 序）；offset 为来源正文的 LF 偏移（跳转定位用） */
+   *  queryBacklinks 序）；offset 为来源正文的 LF 偏移（跳转定位用）。
+   *  seq（review-loops #16）：宿主按文档单调递增的广播序号——快照应答为
+   *  异步 fire-and-forget，乱序到达时 webview 丢弃降序帧；缺省不丢弃
+   *  （兼容无序号的发送方） */
   | {
       kind: 'backlinks.snapshot'
       docUri: string
@@ -330,6 +333,7 @@ export type HostToWebview =
       updating?: boolean
       reason?: 'no-workspace' | 'read-error'
       items?: BacklinkItemPayload[]
+      seq?: number
     }
   /** 索引维护状态（#198，设置页消费）：排除模式（当前生效 + 默认值）、
    *  维护操作状态与进度、最近一次操作结果反馈。设置页经 index.get 拉取；
