@@ -15,7 +15,9 @@ const ROOT_KEY = rootKeyOf('file:///c%3A/vault')
 const STORE_BASE = `C:/store/vsidian-index/${ROOT_KEY}`
 
 /** 根形态：win32 语义（与本地宿主一致）；路径用 / 书写由服务归一 */
-const IS_WIN = process.platform === 'win32'
+// 测试钉住 win32 语义：fixture 路径与断言全按 win32 形态书写（C:/、大小写折叠），
+// isWindowsHost 注入即为此可测性服务——不随运行平台漂移（CI Linux 同样按 win32 语义断言）
+const IS_WIN = true
 
 interface FakeFs {
   files: Map<string, string>       // 绝对路径（/ 形态）→ 内容（原样，可含 \r\n）

@@ -46,7 +46,9 @@ function makeFs(initial: Record<string, string> = {}): FakeFs {
   return { files, stats }
 }
 
-const IS_WIN = process.platform === 'win32'
+// 测试钉住 win32 语义：fixture 路径与断言全按 win32 形态书写（C:/、大小写折叠），
+// isWindowsHost 注入即为此可测性服务——不随运行平台漂移（CI Linux 同样按 win32 语义断言）
+const IS_WIN = true
 
 function scanPortOf(fs: FakeFs): VaultIndexScanPort & { inaccessible: Set<string> } {
   const inaccessible = new Set<string>()

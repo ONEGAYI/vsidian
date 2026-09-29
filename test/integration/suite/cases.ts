@@ -1037,13 +1037,30 @@ async function waitViewState(
    *  独立桌面宿主下高负载时段的懒加载解析 + 渲染偶发击穿默认预算） */
   timeoutMs = 20000,
 ): Promise<ViewState> {
-  return poll(`视图状态 ${file}`, async () => {
-    const state = (await vscode.commands.executeCommand(CMD.viewState, wsUri(file).toString(), panelIndex)) as ViewState | undefined
-    if (state && (!match || match(state))) {
-      return state
+  let lastSeen: ViewState | undefined
+  try {
+    return await poll(`视图状态 ${file}`, async () => {
+      const state = (await vscode.commands.executeCommand(CMD.viewState, wsUri(file).toString(), panelIndex)) as ViewState | undefined
+      if (state && (!match || match(state))) {
+        return state
+      }
+      lastSeen = state
+      return undefined
+    }, timeoutMs)
+  } catch (err) {
+    // 超时附最后观测快照（关键字段）——定位「卡在哪个谓词」不再盲猜
+    if (lastSeen !== undefined) {
+      const s = lastSeen as unknown as Record<string, unknown>
+      throw new Error(`${(err as Error).message}；最后观测：${JSON.stringify({
+        viewMode: s['viewMode'],
+        selectionOffset: s['selectionOffset'],
+        liveScrollTopPx: s['liveScrollTopPx'],
+        imageStates: s['imageStates'],
+        imageProbe: s['imageProbe'],
+      })}`)
     }
-    return undefined
-  }, timeoutMs)
+    throw err
+  }
 }
 
 /** #128 CSS 片段宿主权威状态（_test 观测钩子） */
@@ -9088,13 +9105,26 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await waitSessionReady('refresh.md')
     const uri = wsUri('refresh.md').toString()
 
+    // 全文装载前置：scrollNearLine 早于 init 装载会被行数钳制回顶部，
+    // 装载完成后图片行从此不进视口（widget 不建、解析不触发）
+    await waitViewState('refresh.md', (v) => v.text === REFRESH_DOC_TEXT)
+    // 图片行滚动进视口：装载解析与 imageProbe 观测都以「视口内活跃槽位」
+    // 为源——fixture 的 24 行填充原依赖 CI xvfb 窗口高度，本地矮窗口下
+    // 图片行可能落视口外；滚动定位使装载不依赖窗口几何
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'viewport.test.position', scrollNearLine: REFRESH_IMAGE_LINE,
+    })
+
+
     // 前置：live 态初始装载——1x1 透明图经宿主通道加载成功（load 事件置
-    // loaded），URI 为 asWebviewUri 原始形态（代次 0 未刷新不戳）
+    // loaded）；#201 并入后 URI 戳 = 版本表首观测代次(1) + 会话代次(0)，
+    // 首装载即带 ?v=1（缓存击穿参数常在，仅失效后换值）
     const initial = await waitViewState('refresh.md', (v) =>
       (v.imageStates?.loaded ?? 0) >= 1 && (v.imageProbe?.length ?? 0) >= 1, 0, 30000)
     const initialSlot = initial.imageProbe![0]!
     assert(initialSlot.src !== null, `初始图片应有 src，实际 ${JSON.stringify(initialSlot)}`)
-    assert(!initialSlot.src!.includes('?v='), `初始 URI 不应带代次戳，实际 ${initialSlot.src}`)
+    assert(initialSlot.src!.includes('?v=1'),
+      `初始 URI 应带版本表首观测戳 ?v=1（融合 #201 版本表后形态），实际 ${initialSlot.src}`)
     const initialSrc = initialSlot.src!
     assert(initialSlot.naturalWidth === 1,
       `初始 1x1 图浏览器解码宽度应为 1，实际 ${initialSlot.naturalWidth}（src=${initialSlot.src}）`)
@@ -9129,13 +9159,16 @@ export const cases: Array<[string, () => Promise<void>]> = [
     // → webview 全量失效重挂）
     await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'refresh.test.click' })
 
-    // 失效重挂闭环：新 URI 带代次戳 ?v=1、src 实际更新、浏览器真实解码
-    // 了新地址的字节（naturalWidth 1 → 2——HTTP 缓存被戳击穿、用户看到
-    // 新图的绘制层证据）、槽位回到 loaded
+    // 失效重挂闭环：新 URI 带代次戳且实际更新（融合 #201 后戳为「版本表
+    // 观测代次 + 会话代次」之和——外部替换使版本表观测推进、手动刷新使
+    // 会话代次自增，具体值依两条通道到达次序（2 或 3），只断带戳与换新）、
+    // 浏览器真实解码了新地址的字节（naturalWidth 1 → 2——HTTP 缓存被戳
+    // 击穿、用户看到新图的绘制层证据）、槽位回到 loaded
     const refreshed = await waitViewState('refresh.md', (v) => {
       const slot = v.imageProbe?.[0]
       return slot?.state === 'loaded' && slot?.src != null &&
-        slot.src.includes('?v=1') && slot.naturalWidth === 2
+        slot.src.includes('?v=') && slot.src !== initialSlot.src &&
+        slot.naturalWidth === 2
     }, 0, 30000)
     const refreshedSlot = refreshed.imageProbe![0]!
     assert(refreshedSlot.src !== initialSrc,
@@ -9163,13 +9196,17 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(refreshed.cssProbe?.chromeSelectors?.['toolbar-refresh'] === 'rgb(239, 0, 1)',
       `刷新后按钮绘制层应仍命中探针，实际 ${String(refreshed.cssProbe?.chromeSelectors?.['toolbar-refresh'])}`)
 
-    // 二次刷新：代次与戳续接（?v=2、代次 2），连续点击链路健壮
-    // （reqId 陈旧回执防护的宿主/webview 汇合点）
+    // 二次刷新：连续点击链路健壮（reqId 陈旧回执防护的宿主/webview 汇合
+    // 点）。融合 #201 后戳值为「版本表观测代次 + 会话代次」之和——具体值
+    // 依赖两条失效通道的到达次序（watcher 自动 / 手动刷新叠加推进），不
+    // 钉具体数字，钉「带戳且换新且解码正常」
+    const firstRefreshedSrc = refreshedSlot.src
     await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'refresh.test.click' })
     await waitViewState('refresh.md', (v) => {
       const slot = v.imageProbe?.[0]
       return slot?.state === 'loaded' && slot?.src != null &&
-        slot.src.includes('?v=2') && slot.naturalWidth === 2
+        slot.src.includes('?v=') && slot.src !== firstRefreshedSrc &&
+        slot.naturalWidth === 2
     }, 0, 30000)
     const session2 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
     assert(session2.imageGeneration === 2, `二次刷新后资源代次应为 2，实际 ${session2.imageGeneration}`)

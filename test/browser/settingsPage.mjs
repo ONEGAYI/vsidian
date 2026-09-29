@@ -160,7 +160,8 @@ try {
     await page.keyboard.press('Control+b')
     assert.equal(await page.evaluate(() => window.sentMessages.filter(m =>
       m.kind !== 'settings.get' && m.kind !== 'settings.set' &&
-      m.kind !== 'keybindings.get' && m.kind !== 'snippets.get').length), 0)
+      m.kind !== 'keybindings.get' && m.kind !== 'snippets.get' &&
+      m.kind !== 'index.get').length), 0)
     const focus = await search.evaluate(el => ({ style: getComputedStyle(el).outlineStyle, width: getComputedStyle(el).outlineWidth }))
     assert.equal(focus.style, 'solid')
     assert.equal(focus.width, '2px')
