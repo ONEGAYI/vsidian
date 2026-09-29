@@ -412,6 +412,8 @@ export const zhCn: Record<MessageKey, string> = {
   'command.ui.outlineReset.title': '重置大纲',
   'command.ui.outlineCollapseAll.title': '折叠全部大纲',
   'command.ui.outlineExpandAll.title': '展开全部大纲',
+  /** #208 刷新嵌入资源命令（工具栏按钮与快捷键/命令面板共用） */
+  'command.editor.refresh.title': '刷新嵌入资源',
 
   // ---- #159 锚点跳转（块引用定位与本文件锚点）----
   /** 块 id 缺失提示（与标题缺失同款「打开后提示」行为） */

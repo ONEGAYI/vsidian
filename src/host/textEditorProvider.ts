@@ -1501,6 +1501,12 @@ export function createTextEditorProvider(
       return false
     }),
   )
+  // ---- 可绑定的视图中按钮动作（命令面板/快捷键共用）：校验活动面板后回发
+  //      ui.command，webview 与对应按钮共用同一实现。#208 刷新嵌入资源亦经
+  //      此注册（onegayi.vsidian.editor.refresh）——快捷键链路
+  //      keybindings.execute → executeCommand → 本循环回发 → webview 与
+  //      工具栏按钮共用同一发送实现（出站 refresh.request），宿主失效编排
+  //      在 documentSession 的 refresh.request 处理唯一，不另造路径 ----
   for (const operation of UI_OPERATIONS) {
     context.subscriptions.push(vscode.commands.registerCommand(operation.command, (): boolean => {
       for (const entry of sessions.values()) for (const [sessionId, panel] of entry.panels) {

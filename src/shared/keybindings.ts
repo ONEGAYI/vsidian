@@ -69,6 +69,11 @@ export const UI_OPERATIONS = [
   { id: 'outlineReset', command: 'onegayi.vsidian.ui.outlineReset', titleKey: 'command.ui.outlineReset.title', mode: 'both', writes: false, defaults: [] },
   { id: 'outlineCollapseAll', command: 'onegayi.vsidian.ui.outlineCollapseAll', titleKey: 'command.ui.outlineCollapseAll.title', mode: 'both', writes: false, defaults: [] },
   { id: 'outlineExpandAll', command: 'onegayi.vsidian.ui.outlineExpandAll', titleKey: 'command.ui.outlineExpandAll.title', mode: 'both', writes: false, defaults: [] },
+  // #208 刷新嵌入资源：工具栏刷新按钮的快捷键/命令面板入口（两条入口
+  // 汇合——宿主命令经 UI_OPERATIONS 注册循环回发 ui.command，webview 与
+  // 按钮共用同一发送实现，宿主编排在 documentSession 的 refresh.request
+  // 处理唯一）。只读视图操作（不写文档），双模式可用，默认不占键位
+  { id: 'refreshEditor', command: 'onegayi.vsidian.editor.refresh', titleKey: 'command.editor.refresh.title', mode: 'both', writes: false, defaults: [] },
 ] as const satisfies readonly KeybindingOperation[]
 export type UiOperationId = (typeof UI_OPERATIONS)[number]['id']
 export function isUiOperationId(value: unknown): value is UiOperationId {

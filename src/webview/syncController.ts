@@ -1484,6 +1484,10 @@ export class WebviewSyncController {
           case 'outlineReset': this.resetOutline(); break
           case 'outlineCollapseAll': this.setOutlineExpandLevel(0); break
           case 'outlineExpandAll': this.setOutlineExpandLevel(5); break
+          // #208 刷新嵌入资源：快捷键/命令面板入口（宿主命令经注册循环
+          // 回发此处）——与工具栏按钮共用同一发送实现（出站 refresh.request
+          // 后由宿主失效编排回流），不另造路径
+          case 'refreshEditor': this.sendEmbeddedRefreshRequest(); break
         }
         break
       case 'sidebar.test.click': {
