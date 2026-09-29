@@ -119,7 +119,12 @@ export const en = {
   /** 测试钩子 fixture 定义（VSIDIAN_TEST_HOOKS 注入设置页的占位开关） */
   'setting.testFlag.title': 'Test flag',
 
-  // ---- cssSnippets.（CSS 片段设置分页：目录行、状态条、按钮，#128）----
+  // ---- appearance.（#231 外观合并分页：侧栏条目标题与描述）----
+  'appearance.title': 'Appearance',
+  'appearance.description': 'Manage CSS snippets and appearance customization: snippet directory, per-file toggles, and the public style contract reference.',
+
+  // ---- styleRef.（样式参考：总表/详细查询文案与骨架标签，#132；#231 起为
+  // 外观合并分页的页签体，tabOverview/tabDetail 亦作外观页签文案沿用）----
   'styleRef.title': 'Style reference',
   'styleRef.description': 'Browse the public style contract of this installed version: selectors, CSS variables, Obsidian-name compatibility levels and limitations. Generated from the contract manifest.',
   'styleRef.versionNote': 'This reference matches the installed version {version}.',
@@ -189,7 +194,6 @@ export const en = {
   'command.exportStyleReference.title': 'Vsidian: Export style reference JSON',
   'command.openStyleReference.title': 'Vsidian: Open style reference',
   'cssSnippets.title': 'CSS snippets',
-  'cssSnippets.description': 'Load first-level .css files from a user-level folder as snippets shared across projects. New snippets start disabled; files load in deterministic filename order, so later files override earlier ones at equal specificity.',
   'cssSnippets.directoryLabel': 'Snippets directory',
   'cssSnippets.chooseDirectory': 'Choose directory…',
   'cssSnippets.chooseOpenLabel': 'Select folder',
