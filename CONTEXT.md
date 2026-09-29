@@ -4,6 +4,8 @@
 
 ## 领域语言
 
+**引用文档视图（设计中）**：在悬停浮层或正文嵌入中呈现目标文档的全文或指定范围。展示容器、Reading／Live 模式与是否可写分开建模；一期为 Markdown Reading 视图且只读，1.5 期递归及表格与其他混排，二期 Live 编辑，三期 PDF 预览与嵌入。读取与更新订阅不依赖写回，未来编辑归属目标文档。一期父文档 Live／Reading 均支持，Live 默认 Ctrl+悬停且可设置为直接悬停；父文档 Live 中引用源码随光标位置显隐，不设置“编辑引用”按钮。具体交互仍在访谈，见 [共识草案](docs/specs/hover-preview-embed.md) 与 [ADR-0009](docs/adr/0009-referenced-document-views.md)。
+
 **实时预览（Live Preview）**：允许直接编辑 Markdown 的视图；内容呈现格式效果，进入相关内容编辑时显露对应语法。
 避免称为“全程隐藏语法的富文本编辑器”，以免混淆已明确的产品方向。
 
