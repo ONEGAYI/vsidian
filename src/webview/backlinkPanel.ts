@@ -378,6 +378,9 @@ function buildSortMenu(current: BacklinkSortMode): HTMLElement {
     item.setAttribute('role', 'menuitemradio')
     item.dataset['vsidianSort'] = entry.mode
     item.setAttribute('aria-checked', String(entry.mode === current))
+    // 可见文字（对勾由 CSS ::before 承担）：按钮无其他子节点，text 目标
+    // 的 textContent 整写不吞元素；bindLocale 保证换包重刷
+    bindLocale(item, 'text', entry.key)
     bindLocaleAttrs(item, entry.key)
     menu.appendChild(item)
   }

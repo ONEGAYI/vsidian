@@ -235,6 +235,16 @@ describe('renderBacklinksState：工具栏与搜索框', () => {
     expect(menu.querySelectorAll(`.${BACKLINK_CLASS_NAMES.sortMenuSeparator}`)).toHaveLength(2)
     const checked = menu.querySelector('[aria-checked="true"]') as HTMLElement
     expect(checked.dataset['vsidianSort']).toBe('name-asc')
+    // 可见文字（验收报障回归：菜单项空白只剩对勾——DOM 存在性断言测不出，
+    // 文字必须等于字典词，随换包重刷）
+    for (const entry of BACKLINK_SORT_MENU) {
+      if ('separator' in entry) {
+        continue
+      }
+      const el = menu.querySelector(`[data-vsidian-sort="${entry.mode}"]`) as HTMLElement | null
+      expect(el, `排序项 ${entry.mode} 应存在`).not.toBeNull()
+      expect(el!.textContent, `排序项 ${entry.mode} 可见文字应为字典词`).toBe(zhCn[entry.key])
+    }
   })
 
   it('工具栏按钮 aria 状态随视图态（collapse/context pressed、sort expanded）', () => {
