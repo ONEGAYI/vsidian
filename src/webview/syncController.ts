@@ -41,6 +41,7 @@ import { CODE_CARD_CLASS_NAMES, codeCardConfigFacet, codeCardCopyRequest, codeCa
 import { decorateReadingCodeCard, isReadingCodeBlock, READING_CODE_NOWRAP_CLASS } from './readingCodeCard'
 import {
   isHostToWebview,
+  type BacklinksProbe,
   type CssProbeReport,
   type FindSessionProbe,
   type ImageSlotProbe,
@@ -48,6 +49,7 @@ import {
   type LineGutterProbe,
   type LiveSyntaxProbe,
   type OutlineProbe,
+  type OutlinksProbe,
   type PaintProbe,
   type ReadingSyntaxProbe,
   type SerChange,
@@ -116,11 +118,28 @@ import { graphicRendererFor, renderGraphicBlockInto } from './graphicRenderers'
 import { GRAPHIC_CHROME_CLASS_NAMES, wrapGraphicFrame } from './graphicBlockChrome'
 import { GRAPHIC_LANG_ATTR, MERMAID_CLASS_NAMES, MERMAID_CODE_ATTR, MERMAID_STATE_ATTR } from '../shared/mermaid'
 import { ImageResourceManager } from './imageResource'
+import { ImageVerifyScheduler } from './imageVerifyScheduler'
 import { createImagePaste, imagePasteCanInsertAt } from './imagePaste'
 import { runPerfProbe } from './perfProbe'
 import { runReadingPerfProbe } from './readingProbe'
 import { createReadingContainer, prepareReadingImages, READING_CLASS_NAMES } from './readingView'
 import { READING_MARKDOWN_CLASS_NAMES } from './readingMarkdown'
+import {
+  BACKLINK_CLASS_NAMES,
+  buildBacklinksDom,
+  defaultBacklinkView,
+  isBacklinkSortMode,
+  renderBacklinksState,
+  type BacklinkPanelSnapshot,
+  type BacklinkPanelView,
+} from './backlinkPanel'
+import { allGroupsCollapsed, backlinkGroupKeysOf, type BacklinkSortMode } from './backlinkGrouping'
+import {
+  OUTLINK_CLASS_NAMES,
+  buildOutlinksDom,
+  renderOutlinksState,
+  type OutlinkPanelSnapshot,
+} from './outlinkPanel'
 import {
   applyOutlineSliderState,
   buildOutlineDom,
@@ -306,6 +325,11 @@ interface PersistedState {
    *  全局记忆（跨文档共享），与 sidebarOpen/outlineExpandLevel 同机制 */
   sidebarWidth?: number
   quickActionsOpen?: boolean
+  /** #197 反链面板 active 态（缺省关闭——大纲仍是默认面板；与大纲面板
+   *  互斥：同域面板区域同一时刻只显示一个） */
+  backlinksActive?: boolean
+  /** 出链面板 active 态（缺省关闭；与大纲/反链面板互斥） */
+  outlinksActive?: boolean
 }
 
 /** 外部同步事务标记：updateListener 见到它即跳过（不回发）。
@@ -544,6 +568,12 @@ export class WebviewSyncController {
   private snippetFontArrival: ReturnType<typeof createFontArrivalWatch> | undefined
   /** 图片资源管理器（#10：双视图共用；经宿主通道解析工作区图源） */
   private images: ImageResourceManager | undefined
+  /** #201 图片周期核验调度器（mount 创建，dispose 释放） */
+  private imageVerify: ImageVerifyScheduler | undefined
+  /** #201 面板可见性入口（visibilitychange 绑定/摘除成对） */
+  private readonly imageVisibilityEntry = (): void => {
+    this.imageVerify?.onVisibilityChange()
+  }
   private toolbar: HTMLElement | undefined
   /** 语言切换重渲染订阅的退订句柄（#94；dispose 释放） */
   private unsubscribeLocale: (() => void) | undefined
@@ -583,6 +613,37 @@ export class WebviewSyncController {
     startWidth: number
     moved: boolean
   } | null = null
+
+  // ---- 反链面板状态（#197；形态改版批次扩出视图态）----
+  /** 反链面板 active：纯视图状态（零写回、零出站，bridge state 持久化）；
+   *  显隐唯一开关是侧栏容器的 vsidian-backlinks-active 类；与大纲/出链面板互斥 */
+  private backlinksActive: boolean
+  /** 侧栏顶栏的反链按钮 */
+  private backlinksToggleBtn: HTMLButtonElement | undefined
+  /** 反链面板容器（内容经 renderBacklinksState 维护） */
+  private backlinksPanelEl: HTMLElement | undefined
+  /** 最近一次快照（四态渲染依据；面板可见即按此渲染） */
+  private backlinksSnapshot: BacklinkPanelSnapshot = { state: 'loading', updating: false, items: [] }
+  /** 最近应用的本文档反链快照序号（宿主按文档单调递增；降序帧丢弃） */
+  private lastBacklinksSeq = 0
+  /** 面板视图状态（排序/搜索/折叠/更多上下文；会话内存即可，不持久化——
+   *  规格「已知边界」） */
+  private backlinkView: BacklinkPanelView = defaultBacklinkView()
+  /** 排序菜单外点关闭监听（菜单打开时挂、关闭时卸） */
+  private backlinkSortMenuOutside: ((event: PointerEvent) => void) | null = null
+
+  // ---- 出链面板状态（出链面板批次）----
+  /** 出链面板 active：与 backlinksActive 同类的纯视图状态；显隐唯一开关
+   *  是侧栏容器的 vsidian-outlinks-active 类；与大纲/反链面板互斥 */
+  private outlinksActive: boolean
+  /** 侧栏顶栏的出链按钮 */
+  private outlinksToggleBtn: HTMLButtonElement | undefined
+  /** 出链面板容器（内容经 renderOutlinksState 维护） */
+  private outlinksPanelEl: HTMLElement | undefined
+  /** 最近一次出链快照（镜像 backlinksSnapshot 语义） */
+  private outlinksSnapshot: OutlinkPanelSnapshot = { state: 'loading', updating: false, items: [] }
+  /** 最近应用的本文档出链快照序号（宿主按文档单调递增；降序帧丢弃） */
+  private lastOutlinksSeq = 0
 
   // ---- 大纲面板状态（#54）----
   /** 大纲面板 active：与 sidebarOpen 同类的纯视图状态（零写回、零出站、
@@ -888,6 +949,8 @@ export class WebviewSyncController {
     // 宽度恢复：非数值（含缺失）经 clampSidebarWidth 回默认；越界值钳制
     this.sidebarWidth = clampSidebarWidth(saved?.sidebarWidth ?? Number.NaN)
     this.outlineActive = saved?.outlineActive !== false
+    this.backlinksActive = saved?.backlinksActive === true
+    this.outlinksActive = saved?.outlinksActive === true
     this.outlineExpandLevel = normalizeOutlineExpandLevel(saved?.outlineExpandLevel)
     this.quickActionsOpen = saved?.quickActionsOpen === true
   }
@@ -926,7 +989,32 @@ export class WebviewSyncController {
           src,
         })
       },
+      // #201 周期核验调度：首个非直连条目起表、全回收停表
+      onBecomeActive: () => this.imageVerify?.onBecomeActive(),
+      onBecomeIdle: () => this.imageVerify?.onBecomeIdle(),
     })
+    // #201 周期核验：活跃图源合并上报（间隔约 30 秒，工程初值；无活跃停表；
+    // 面板恢复可见/宿主唤醒立即核验）。visibilitychange 常驻监听随 dispose 摘除
+    this.imageVerify = new ImageVerifyScheduler(
+      () =>
+        (this.images?.activeEntries() ?? []).map((entry) => ({
+          src: entry.src,
+          state: entry.state,
+          reason: entry.reason,
+        })),
+      (items) => {
+        if (!this.sessionId) {
+          return
+        }
+        this.bridge.postMessage({
+          kind: 'image.verify',
+          sessionId: this.sessionId,
+          docUri: this.docUri,
+          items,
+        })
+      },
+    )
+    document.addEventListener('visibilitychange', this.imageVisibilityEntry)
     this.readingView = new VirtualReadingView(this.readingContainer, {
       // #10 图片生命周期：块挂载预备装载，卸载释放（src 清空、条目回收）
       // #60 Mermaid：挂载即渲染 pending 容器（DOM 随块卸载 el.remove 释放）
@@ -1224,6 +1312,10 @@ export class WebviewSyncController {
     this.bodyEl = undefined
     this.images?.dispose()
     this.images = undefined
+    // #201 周期核验调度与可见性监听随卸载退出
+    this.imageVerify?.dispose()
+    this.imageVerify = undefined
+    document.removeEventListener('visibilitychange', this.imageVisibilityEntry)
   }
 
   /** 宿主消息入口（window message 事件转发） */
@@ -1250,6 +1342,12 @@ export class WebviewSyncController {
         // 映射经 snippets.snapshot 应答（新面板、重载面板、暂未广播的变更
         // 都在此对齐当前态）
         this.bridge.postMessage({ kind: 'snippets.get' })
+        // #197 反链快照：同「init 后拉取」模式——宿主索引权威，每次装载
+        //（含重载）对齐当前文档的反链；索引变更后宿主主动推送
+        if (this.docUri) {
+          this.bridge.postMessage({ kind: 'backlinks.get', sessionId: this.sessionId!, docUri: this.docUri })
+          this.bridge.postMessage({ kind: 'outlinks.get', sessionId: this.sessionId!, docUri: this.docUri })
+        }
         break
       case 'keybindings.snapshot':
       case 'keybindings.changed': {
@@ -1292,6 +1390,118 @@ export class WebviewSyncController {
             this.scheduleSnippetMeasureOnFontArrival()
           }
         })
+        break
+      }
+      case 'backlinks.snapshot': {
+        // #197 反链快照：仅当前文档的快照生效（宿主按面板文档定向推送，
+        // 多面板/文档切换期间的迟到快照按 docUri 丢弃）；面板可见时即时
+        // 重渲染，不可见时只缓存（展开时 applyBacklinksDom 渲染）。
+        // review-loops #16：宿主按文档带单调 seq——快照应答为异步
+        // fire-and-forget，乱序到达时丢弃降序帧（缺省 seq 不丢弃，兼容）
+        if (this.docUri !== message.docUri) {
+          break
+        }
+        if (message.seq !== undefined) {
+          if (message.seq < this.lastBacklinksSeq) {
+            break
+          }
+          this.lastBacklinksSeq = message.seq
+        }
+        this.backlinksSnapshot = {
+          state: message.state,
+          updating: message.updating ?? false,
+          reason: message.reason,
+          items: message.items ?? [],
+        }
+        if (this.backlinksVisible()) {
+          renderBacklinksState(this.backlinksPanelEl!, this.backlinksSnapshot, this.backlinkView)
+        }
+        break
+      }
+      case 'outlinks.snapshot': {
+        // 出链快照（与 backlinks.snapshot 镜像）：docUri 匹配 + seq 降序帧
+        // 丢弃 + 可见时即时重渲染
+        if (this.docUri !== message.docUri) {
+          break
+        }
+        if (message.seq !== undefined) {
+          if (message.seq < this.lastOutlinksSeq) {
+            break
+          }
+          this.lastOutlinksSeq = message.seq
+        }
+        this.outlinksSnapshot = {
+          state: message.state,
+          updating: message.updating ?? false,
+          reason: message.reason,
+          items: message.items ?? [],
+        }
+        if (this.outlinksVisible()) {
+          renderOutlinksState(this.outlinksPanelEl!, this.outlinksSnapshot)
+        }
+        break
+      }
+      case 'outlinks.test.click': {
+        // 测试钩子（出链面板批次）：点击真实出链按钮（与用户点击同一处理器）
+        this.outlinksToggleBtn?.click()
+        break
+      }
+      case 'outlinks.test.itemClick': {
+        // 测试钩子（出链面板批次）：点击第 index 个真实出链条目（与用户
+        // 点击同一委托处理器；条目 DOM 与快照 items 同序；断链条目 disabled
+        // ——按钮不派发 click，钩子同样不触发跳转）
+        const panel = this.outlinksPanelEl
+        if (!panel) {
+          break
+        }
+        const items = Array.from(panel.querySelectorAll<HTMLElement>(`.${OUTLINK_CLASS_NAMES.item}`))
+        items[message.index]?.click()
+        break
+      }
+      case 'backlinks.test.click': {
+        // 测试钩子（#197）：点击真实反链按钮（与用户点击同一处理器）
+        this.backlinksToggleBtn?.click()
+        break
+      }
+      case 'backlinks.test.itemClick': {
+        // 测试钩子（#197）：点击第 index 个真实反链条目（与用户点击同一
+        // 委托处理器；条目 DOM 与快照 items 同序）
+        const panel = this.backlinksPanelEl
+        if (!panel) {
+          break
+        }
+        const items = Array.from(panel.querySelectorAll<HTMLElement>(`.${BACKLINK_CLASS_NAMES.item}`))
+        items[Math.max(0, message.index)]?.click()
+        break
+      }
+      case 'backlinks.test.toolbarClick': {
+        // 测试钩子（形态改版批次）：点击工具栏四按钮之一（与用户点击同一
+        // 委托处理器）
+        const button = this.backlinksPanelEl?.querySelector<HTMLButtonElement>(
+          `button[data-action="${message.action}"]`,
+        )
+        button?.click()
+        break
+      }
+      case 'backlinks.test.searchInput': {
+        // 测试钩子（形态改版批次）：设置搜索词（真实 input 事件链）
+        const input = this.backlinksPanelEl?.querySelector<HTMLInputElement>(
+          `input.${BACKLINK_CLASS_NAMES.searchInput}`,
+        )
+        if (input) {
+          input.value = message.value
+          input.dispatchEvent(new Event('input', { bubbles: true }))
+        }
+        break
+      }
+      case 'backlinks.test.sortSelect': {
+        // 测试钩子（形态改版批次）：选择排序项（开菜单 → 点对应菜单项，
+        // 与用户路径同链）
+        this.setBacklinkSortMenuOpen(true)
+        const item = this.backlinksPanelEl?.querySelector<HTMLButtonElement>(
+          `.${BACKLINK_CLASS_NAMES.sortMenuItem}[data-vsidian-sort="${message.mode}"]`,
+        )
+        item?.click()
         break
       }
       case 'image.test.pending': {
@@ -1488,6 +1698,14 @@ export class WebviewSyncController {
           case 'outlineReset': this.resetOutline(); break
           case 'outlineCollapseAll': this.setOutlineExpandLevel(0); break
           case 'outlineExpandAll': this.setOutlineExpandLevel(5); break
+          case 'backlinksToggle':
+            if (!this.sidebarOpen && !this.backlinksActive) this.toggleSidebar()
+            this.toggleBacklinks()
+            break
+          case 'outlinksToggle':
+            if (!this.sidebarOpen && !this.outlinksActive) this.toggleSidebar()
+            this.toggleOutlinks()
+            break
           // #208 刷新嵌入资源：快捷键/命令面板入口（宿主命令经注册循环
           // 回发此处）——与工具栏按钮共用同一发送实现（出站 refresh.request
           // 后由宿主失效编排回流），不另造路径
@@ -2032,6 +2250,15 @@ export class WebviewSyncController {
         // #10 图片解析结果路由（只读显示通道：暂停态同样可用）
         this.images?.handleResult(message)
         break
+      case 'image.invalidate':
+        // #201 失效通知：作废命中条目并重发请求（新版本 URL；旧 reqId 在途
+        // 结果由代次守卫丢弃）。只读显示通道，暂停态同样可用
+        this.images?.invalidate(message.srcs)
+        break
+      case 'image.wake':
+        // #201 及时核验：窗口焦点回归/远程重连，有活跃图源立即触发一轮
+        this.imageVerify?.wake()
+        break
       case 'refresh.invalidated':
         // #208 手动刷新失效通知（refresh.request 的应答，宿主已清解析
         // 缓存并推进代次）：reqId 与面板最后发出的请求配对——刷新后又有
@@ -2211,6 +2438,7 @@ export class WebviewSyncController {
       // 图片状态计数按当前视图作用域（隐藏视图的槽位不计入——同一管理器
       // 服务双视图，隐藏侧的 DOM 不代表用户可见状态）
       imageStates: this.collectImageStates(),
+      imageEntries: this.images?.activeEntries(),
       imageProbe: this.collectImageProbe(),
       find: this.collectFindProbe(),
       typography: this.collectTypography(),
@@ -2224,6 +2452,9 @@ export class WebviewSyncController {
       sidebar: this.collectSidebar(),
       // #54 大纲观测（面板态、绘制层证据与全文标题序列）
       outline: this.collectOutline(),
+      // #197 反链面板观测（面板态、四态实值与绘制层证据）
+      backlinks: this.collectBacklinks(),
+      outlinks: this.collectOutlinks(),
       // #140 Popover 改版：属性编辑浮层开态（集成断言用）
       fmPopoverOpen: isFmPopoverOpen(),
     }
@@ -3193,6 +3424,8 @@ export class WebviewSyncController {
       outlineExpandLevel: this.outlineExpandLevel,
       sidebarWidth: this.sidebarWidth === SIDEBAR_WIDTH_DEFAULT ? undefined : this.sidebarWidth,
       quickActionsOpen: this.quickActionsOpen,
+      backlinksActive: this.backlinksActive,
+      outlinksActive: this.outlinksActive,
     })
   }
 
@@ -3590,6 +3823,11 @@ export class WebviewSyncController {
     const sidebar = document.createElement('div')
     sidebar.className = 'vsidian-sidebar'
     sidebar.id = 'vsidian-sidebar'
+    // 就地登记：函数末尾的恢复收敛经 applyBacklinksDom/applyOutlinksDom 落
+    // 容器类，彼时调用点（mount 的 this.sidebarEl = this.buildSidebar()）尚未
+    // 返回赋值——不在此登记则重载恢复的反链/出链类被守卫跳过（大纲无此
+    // 问题：applyOutlineDom 在 mount 后段、赋值之后才调用）
+    this.sidebarEl = sidebar
     const bar = document.createElement('div')
     bar.className = 'vsidian-sidebar-toolbar'
     const actions = document.createElement('div')
@@ -3718,6 +3956,26 @@ export class WebviewSyncController {
     this.outlineToggleBtn = toggle
     this.outlinePanelEl = panel
     actions.appendChild(toggle)
+    // #197 反链面板：与大纲同款构建器形态（{toggle, panel}）；面板事件
+    // 统一容器委托（renderBacklinksState 重建条目 DOM 不丢监听）——工具
+    // 栏按钮/排序菜单项/组头为纯视图操作，卡片点击出站 backlink.activate
+    //（宿主打开来源文档并定位），纯只读意图
+    const backlinks = buildBacklinksDom()
+    backlinks.toggle.addEventListener('click', () => this.toggleBacklinks())
+    backlinks.panel.addEventListener('click', (event) => this.handleBacklinkPanelClick(event))
+    backlinks.panel.addEventListener('input', (event) => this.handleBacklinkSearchInput(event))
+    backlinks.panel.addEventListener('keydown', (event) => this.handleBacklinkPanelKeydown(event))
+    this.backlinksToggleBtn = backlinks.toggle
+    this.backlinksPanelEl = backlinks.panel
+    actions.appendChild(backlinks.toggle)
+    // 出链面板（出链面板批次）：与反链同款构建器形态；条目点击委托发
+    // outlink.activate（断链条目 disabled 不派发）
+    const outlinks = buildOutlinksDom()
+    outlinks.toggle.addEventListener('click', () => this.toggleOutlinks())
+    outlinks.panel.addEventListener('click', (event) => this.handleOutlinkPanelClick(event))
+    this.outlinksToggleBtn = outlinks.toggle
+    this.outlinksPanelEl = outlinks.panel
+    actions.appendChild(outlinks.toggle)
     bar.appendChild(actions)
     // #67 折叠滑块行：顶栏与面板之间（结绳记事六圆点）。点击走行级 click
     // 委托（圆点冒泡；键盘激活圆点的 click 同路）；拖拽走 pointer 事件——
@@ -3782,6 +4040,8 @@ export class WebviewSyncController {
     const panelHost = document.createElement('div')
     panelHost.className = 'vsidian-sidebar-panel'
     panelHost.appendChild(panel)
+    panelHost.appendChild(this.backlinksPanelEl!)
+    panelHost.appendChild(this.outlinksPanelEl!)
     sidebar.appendChild(bar)
     sidebar.appendChild(toolbar.row)
     sidebar.appendChild(slider.row)
@@ -3894,6 +4154,17 @@ export class WebviewSyncController {
     // 陈旧起点并持久化错误宽度；任意新按下都证明上一手势已结束，先回收。
     // capture 先于句柄监听兑现，清理后本次按下照常武装新会话
     document.addEventListener('pointerdown', this.sidebarResizePointerdownEntry, true)
+    // #197 初始互斥态：持久化恢复可能多个面板都 active（旧状态组合），以
+    // 大纲 > 反链 > 出链优先收敛（出链面板的快照到达前显示 loading 占位，
+    // 切换即可见）
+    if (this.backlinksActive && this.outlineActive) {
+      this.backlinksActive = false
+    }
+    if (this.outlinksActive && (this.outlineActive || this.backlinksActive)) {
+      this.outlinksActive = false
+    }
+    this.applyBacklinksDom()
+    this.applyOutlinksDom()
     return sidebar
   }
 
@@ -4035,9 +4306,307 @@ export class WebviewSyncController {
   // 不入撤销栈），经 bridge state 持久化。数据源是 CM6 全文（含未保存编辑），
   // 与视口渲染、live/reading 模式均无关（CM6 doc 在两模式下都是权威文本模型）。
 
+  // ---- 反链面板（#197）----
+  // 与大纲面板互斥：同域面板区域（.vsidian-sidebar-panel）同一时刻只显示
+  // 一个面板——切换即互斥（开反链收大纲、开大纲收反链），侧栏开关不受影响。
+
+  /** 反链按钮点击：active 翻转 + 互斥落 DOM（纯视图状态，零写回零出站） */
+  private toggleBacklinks(): void {
+    this.backlinksActive = !this.backlinksActive
+    if (this.backlinksActive) {
+      if (this.outlineActive) {
+        this.outlineActive = false
+        this.applyOutlineDom()
+      }
+      if (this.outlinksActive) {
+        this.outlinksActive = false
+        this.applyOutlinksDom()
+      }
+    }
+    this.applyBacklinksDom()
+    // 面板展开即见：快照可能滞后（面板不可见期间宿主推送被丢弃——面板
+    // 重开重新拉取对齐）
+    if (this.backlinksActive && this.docUri && this.sessionId) {
+      this.bridge.postMessage({ kind: 'backlinks.get', sessionId: this.sessionId, docUri: this.docUri })
+    }
+  }
+
+  /** 反链状态落 DOM：侧栏容器的 backlinks-active 类是面板显隐唯一开关
+   *  （CSS 控制），按钮 aria-expanded 同步；快照内容随 active 渲染 */
+  private applyBacklinksDom(): void {
+    if (this.sidebarEl) {
+      this.sidebarEl.classList.toggle('vsidian-backlinks-active', this.backlinksActive)
+    }
+    this.backlinksToggleBtn?.setAttribute('aria-expanded', String(this.backlinksActive))
+    if (this.backlinksPanelEl && this.backlinksActive) {
+      renderBacklinksState(this.backlinksPanelEl, this.backlinksSnapshot, this.backlinkView)
+    }
+    this.persistState()
+  }
+
+  /** 反链面板当前是否用户可见 */
+  private backlinksVisible(): boolean {
+    return this.sidebarOpen && this.backlinksActive
+  }
+
+  /** 反链面板内容重渲染（视图状态或快照变化时；不可见时只改状态，重开时
+   *  applyBacklinksDom 用最新 view 渲染） */
+  private rerenderBacklinks(): void {
+    if (this.backlinksPanelEl && this.backlinksActive) {
+      renderBacklinksState(this.backlinksPanelEl, this.backlinksSnapshot, this.backlinkView)
+    }
+  }
+
+  // ---- 反链面板事件（容器统一委托；DOM 重建不丢监听） ----
+
+  /** 面板内点击分发：工具栏按钮 → 排序菜单项 → 组头 → 卡片（跳转意图） */
+  private handleBacklinkPanelClick(event: MouseEvent): void {
+    const panel = this.backlinksPanelEl
+    if (!panel || !(event.target instanceof Node)) {
+      return
+    }
+    const target = event.target as HTMLElement
+    const toolbarButton = target.closest?.(`.${BACKLINK_CLASS_NAMES.toolbarButton}`)
+    if (toolbarButton instanceof HTMLElement && panel.contains(toolbarButton)) {
+      const action = toolbarButton.dataset['action']
+      if (action === 'sort') {
+        this.setBacklinkSortMenuOpen(!this.backlinkView.sortMenuOpen)
+      } else if (action === 'search') {
+        this.setBacklinkSearchOpen(!this.backlinkView.searchOpen)
+      } else if (action === 'collapse') {
+        this.toggleBacklinkCollapseAll()
+      } else if (action === 'context') {
+        this.backlinkView.contextLong = !this.backlinkView.contextLong
+        this.rerenderBacklinks()
+      }
+      return
+    }
+    const menuItem = target.closest?.(`.${BACKLINK_CLASS_NAMES.sortMenuItem}`)
+    if (menuItem instanceof HTMLElement && panel.contains(menuItem)) {
+      const mode = menuItem.dataset['vsidianSort']
+      if (mode !== undefined && isBacklinkSortMode(mode)) {
+        this.setBacklinkSortMode(mode)
+      }
+      return
+    }
+    const groupHeader = target.closest?.(`.${BACKLINK_CLASS_NAMES.groupHeader}`)
+    if (groupHeader instanceof HTMLElement && panel.contains(groupHeader)) {
+      const source = groupHeader.dataset['vsidianSource']
+      if (source !== undefined) {
+        this.toggleBacklinkGroupCollapsed(source)
+      }
+      return
+    }
+    // 卡片点击（跳转）：card 与 #197 既有 item 类并挂，委托沿用 item 类
+    const item = target.closest?.(`.${BACKLINK_CLASS_NAMES.item}`)
+    if (!(item instanceof HTMLElement) || !panel.contains(item)) {
+      return
+    }
+    const source = item.dataset['vsidianSource']
+    const offset = Number(item.dataset['vsidianOffset'])
+    if (source === undefined || !this.sessionId || !this.docUri) {
+      return
+    }
+    // 条目载荷的 sourceFsPath 由宿主快照携带：跳转意图回源文档绝对路径
+    //（条目 DOM 只存相对路径——绝对路径从最近快照 items 取）
+    const payload = this.backlinksSnapshot.items.find(
+      (entry) => entry.sourceRelPath === source && entry.start === offset,
+    )
+    if (!payload) {
+      return
+    }
+    this.bridge.postMessage({
+      kind: 'backlink.activate',
+      sessionId: this.sessionId,
+      docUri: this.docUri,
+      sourceUri: payload.sourceFsPath,
+      offset: payload.start,
+    })
+  }
+
+  /** 搜索输入即时生效（input 事件直调，无去抖；渲染复用 input 节点不丢焦） */
+  private handleBacklinkSearchInput(event: Event): void {
+    const input = event.target
+    if (!(input instanceof HTMLInputElement) || !input.classList.contains(BACKLINK_CLASS_NAMES.searchInput)) {
+      return
+    }
+    this.backlinkView.query = input.value
+    this.rerenderBacklinks()
+  }
+
+  /** 面板内 Esc：排序菜单打开先关菜单；焦点在搜索框时关闭并清空 */
+  private handleBacklinkPanelKeydown(event: KeyboardEvent): void {
+    if (event.key !== 'Escape') {
+      return
+    }
+    if (this.backlinkView.sortMenuOpen) {
+      event.preventDefault()
+      this.setBacklinkSortMenuOpen(false)
+      return
+    }
+    if (
+      event.target instanceof HTMLInputElement &&
+      event.target.classList.contains(BACKLINK_CLASS_NAMES.searchInput)
+    ) {
+      event.preventDefault()
+      this.setBacklinkSearchOpen(false)
+    }
+  }
+
+  /** 排序下拉菜单开/关（外点关闭监听随开态挂/卸） */
+  private setBacklinkSortMenuOpen(open: boolean): void {
+    this.backlinkView.sortMenuOpen = open
+    if (open && !this.backlinkSortMenuOutside) {
+      const handler = (event: PointerEvent): void => {
+        // 菜单打开时面板外/其余区域 pointerdown 都收起；但**排序菜单与
+        // 排序按钮豁免**——收起会立即重渲动态区、菜单项在 click 派发前被
+        // 摘除，委托的 contains 判定失败导致改选失效（按钮则呈「收起又
+        // 被点击翻转重新打开」）；两者的开关语义由各自 click 处理器承担
+        const target = event.target as HTMLElement | null
+        if (target?.closest?.(
+          `.${BACKLINK_CLASS_NAMES.sortMenu}, .${BACKLINK_CLASS_NAMES.toolbarButton}[data-action="sort"]`,
+        )) {
+          return
+        }
+        if (this.backlinkView.sortMenuOpen) {
+          this.setBacklinkSortMenuOpen(false)
+        }
+      }
+      document.addEventListener('pointerdown', handler, true)
+      this.backlinkSortMenuOutside = handler
+    } else if (!open && this.backlinkSortMenuOutside) {
+      document.removeEventListener('pointerdown', this.backlinkSortMenuOutside, true)
+      this.backlinkSortMenuOutside = null
+    }
+    this.rerenderBacklinks()
+  }
+
+  /** 排序选择即生效并记住（会话内存） */
+  private setBacklinkSortMode(mode: BacklinkSortMode): void {
+    this.backlinkView.sortMode = mode
+    this.setBacklinkSortMenuOpen(false)
+  }
+
+  /** 搜索框可见性切换：关闭即清空过滤词；展开即聚焦（用户意图是输入） */
+  private setBacklinkSearchOpen(open: boolean): void {
+    this.backlinkView.searchOpen = open
+    if (!open) {
+      this.backlinkView.query = ''
+    }
+    this.rerenderBacklinks()
+    if (open && this.backlinksPanelEl) {
+      const input = this.backlinksPanelEl.querySelector<HTMLInputElement>(
+        `input.${BACKLINK_CLASS_NAMES.searchInput}`,
+      )
+      input?.focus()
+    }
+  }
+
+  /** 全部折叠/全部展开二态切换（当前全折 → 全展；否则 → 全折） */
+  private toggleBacklinkCollapseAll(): void {
+    const collapsed = new Set(this.backlinkView.collapsedGroups)
+    if (allGroupsCollapsed(this.backlinksSnapshot.items, collapsed)) {
+      collapsed.clear()
+    } else {
+      for (const key of backlinkGroupKeysOf(this.backlinksSnapshot.items)) {
+        collapsed.add(key)
+      }
+    }
+    this.backlinkView.collapsedGroups = collapsed
+    this.rerenderBacklinks()
+  }
+
+  /** 单组折叠/展开切换（组头点击） */
+  private toggleBacklinkGroupCollapsed(source: string): void {
+    const collapsed = new Set(this.backlinkView.collapsedGroups)
+    if (collapsed.has(source)) {
+      collapsed.delete(source)
+    } else {
+      collapsed.add(source)
+    }
+    this.backlinkView.collapsedGroups = collapsed
+    this.rerenderBacklinks()
+  }
+
+  // ---- 出链面板（出链面板批次）----
+  // 与大纲/反链面板互斥：同域面板区域（.vsidian-sidebar-panel）同一时刻
+  // 只显示一个面板，三选一切换即互斥，侧栏开关不受影响。
+
+  /** 出链按钮点击：active 翻转 + 三面板互斥落 DOM（纯视图状态） */
+  private toggleOutlinks(): void {
+    this.outlinksActive = !this.outlinksActive
+    if (this.outlinksActive) {
+      if (this.outlineActive) {
+        this.outlineActive = false
+        this.applyOutlineDom()
+      }
+      if (this.backlinksActive) {
+        this.backlinksActive = false
+        this.applyBacklinksDom()
+      }
+    }
+    this.applyOutlinksDom()
+    if (this.outlinksActive && this.docUri && this.sessionId) {
+      this.bridge.postMessage({ kind: 'outlinks.get', sessionId: this.sessionId, docUri: this.docUri })
+    }
+  }
+
+  /** 出链状态落 DOM：侧栏容器的 outlinks-active 类是面板显隐唯一开关 */
+  private applyOutlinksDom(): void {
+    if (this.sidebarEl) {
+      this.sidebarEl.classList.toggle('vsidian-outlinks-active', this.outlinksActive)
+    }
+    this.outlinksToggleBtn?.setAttribute('aria-expanded', String(this.outlinksActive))
+    if (this.outlinksPanelEl && this.outlinksActive) {
+      renderOutlinksState(this.outlinksPanelEl, this.outlinksSnapshot)
+    }
+    this.persistState()
+  }
+
+  /** 出链面板当前是否用户可见 */
+  private outlinksVisible(): boolean {
+    return this.sidebarOpen && this.outlinksActive
+  }
+
+  /** 出链面板条目点击：出站 outlink.activate（断链条目 disabled 不派发；
+   *  data-* 双检防御） */
+  private handleOutlinkPanelClick(event: MouseEvent): void {
+    const panel = this.outlinksPanelEl
+    if (!panel || !(event.target instanceof Node)) {
+      return
+    }
+    const item = (event.target as HTMLElement).closest?.(`.${OUTLINK_CLASS_NAMES.item}`)
+    if (!(item instanceof HTMLElement) || !panel.contains(item)) {
+      return
+    }
+    const fsPath = item.dataset['vsidianTarget']
+    const anchor = item.dataset['vsidianAnchor']
+    if (fsPath === undefined || fsPath === '' || !this.sessionId || !this.docUri) {
+      return
+    }
+    this.bridge.postMessage({
+      kind: 'outlink.activate',
+      sessionId: this.sessionId,
+      docUri: this.docUri,
+      targetUri: fsPath,
+      anchor: anchor ?? '',
+    })
+  }
+
   /** 大纲按钮点击：active 翻转后落 DOM；再激活时校准数据（隐藏期间无调度） */
   private toggleOutline(): void {
     this.outlineActive = !this.outlineActive
+    // #197 与反链面板互斥；出链面板批次扩为三面板互斥（开大纲收其余）
+    if (this.outlineActive) {
+      if (this.backlinksActive) {
+        this.backlinksActive = false
+        this.applyBacklinksDom()
+      }
+      if (this.outlinksActive) {
+        this.outlinksActive = false
+        this.applyOutlinksDom()
+      }
+    }
     this.applyOutlineDom()
     if (this.outlineActive) {
       this.outlineEnsureFresh()
@@ -7136,6 +7705,98 @@ export class WebviewSyncController {
    * 与 CSS 引擎：命中恒 false、几何度量透传 0、图标尺寸容错为 null，名称
    * 在未装配时为 null，真宿主断言见集成。
    */
+  /**
+   * #197 反链面板观测：面板态、四态实值与绘制层证据（语义见
+   * protocol.ts BacklinksProbe）。命中字段走 elementFromPoint——侧栏展开 +
+   * 面板 active + 显隐样式表规则生效时才可能命中，DOM 存在性探不出样式
+   * 失效。jsdom 无布局与 CSS 引擎：命中恒 false，真宿主断言见集成。
+   */
+  private collectBacklinks(): BacklinksProbe {
+    const panel = this.backlinksPanelEl
+    const items = this.backlinksSnapshot.items
+    return {
+      active: this.backlinksActive,
+      togglePainted: hitPaintedElement(this.backlinksToggleBtn),
+      panelPainted: hitPaintedElement(panel, panel),
+      state: this.backlinksActive ? this.backlinksSnapshot.state : 'none',
+      updating: this.backlinksActive ? this.backlinksSnapshot.updating : false,
+      items: items.map((item) => ({
+        sourceRelPath: item.sourceRelPath,
+        kind: item.kind,
+        line: item.line,
+        snippet: item.snippet,
+      })),
+      itemPainted: hitPaintedElement(
+        panel?.querySelector<HTMLElement>(`.${BACKLINK_CLASS_NAMES.item}`) ?? null,
+        panel,
+      ),
+      emptyPainted: hitPaintedElement(
+        panel?.querySelector<HTMLElement>(`.${BACKLINK_CLASS_NAMES.placeholder}`) ?? null,
+        panel,
+      ),
+      toggleAriaLabel: this.backlinksToggleBtn?.getAttribute('aria-label') ?? null,
+      panelAriaLabel: panel?.getAttribute('aria-label') ?? null,
+      view: {
+        sortMode: this.backlinkView.sortMode,
+        query: this.backlinkView.query,
+        searchOpen: this.backlinkView.searchOpen,
+        contextLong: this.backlinkView.contextLong,
+        collapsedCount: this.backlinkView.collapsedGroups.size,
+        domCards: panel?.querySelectorAll(`.${BACKLINK_CLASS_NAMES.card}`).length ?? 0,
+      },
+      toolbarPainted: hitPaintedElement(
+        panel?.querySelector<HTMLElement>(`.${BACKLINK_CLASS_NAMES.toolbar}`) ?? null,
+        panel,
+      ),
+      hitPainted: hitPaintedElement(
+        panel?.querySelector<HTMLElement>(`.${BACKLINK_CLASS_NAMES.hit}`) ?? null,
+        panel,
+      ),
+      hitBg: (() => {
+        const mark = panel?.querySelector<HTMLElement>(`.${BACKLINK_CLASS_NAMES.hit}`)
+        if (!mark) {
+          return null
+        }
+        try {
+          const value = getComputedStyle(mark).backgroundColor
+          return value === '' ? null : value
+        } catch {
+          return null
+        }
+      })(),
+    }
+  }
+
+  /** 出链面板观测（语义见 protocol.ts OutlinksProbe；口径与反链镜像） */
+  private collectOutlinks(): OutlinksProbe {
+    const panel = this.outlinksPanelEl
+    const items = this.outlinksSnapshot.items
+    return {
+      active: this.outlinksActive,
+      togglePainted: hitPaintedElement(this.outlinksToggleBtn),
+      panelPainted: hitPaintedElement(panel, panel),
+      state: this.outlinksActive ? this.outlinksSnapshot.state : 'none',
+      updating: this.outlinksActive ? this.outlinksSnapshot.updating : false,
+      items: items.map((item) => ({
+        targetDisplay: item.targetDisplay,
+        targetRelPath: item.targetRelPath,
+        kind: item.kind,
+        anchor: item.anchor,
+        resolved: item.resolved,
+      })),
+      itemPainted: hitPaintedElement(
+        panel?.querySelector<HTMLElement>(`.${OUTLINK_CLASS_NAMES.item}`) ?? null,
+        panel,
+      ),
+      emptyPainted: hitPaintedElement(
+        panel?.querySelector<HTMLElement>(`.${OUTLINK_CLASS_NAMES.placeholder}`) ?? null,
+        panel,
+      ),
+      toggleAriaLabel: this.outlinksToggleBtn?.getAttribute('aria-label') ?? null,
+      panelAriaLabel: panel?.getAttribute('aria-label') ?? null,
+    }
+  }
+
   private collectOutline(): OutlineProbe {
     this.outlineEnsureFresh()
     const iconSizeOf = (el: HTMLElement | null | undefined): number | null => {

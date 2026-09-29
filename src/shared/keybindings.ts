@@ -58,6 +58,12 @@ const extra: readonly KeybindingOperation[] = [
   // 撤下全部样式再按原配置恢复——双模式可用，默认不占键位
   { id: 'cssSnippetsPause', command: 'onegayi.vsidian.cssSnippets.pause', titleKey: 'command.cssSnippets.pause.title', mode: 'both', writes: false, defaults: [] },
   { id: 'cssSnippetsResume', command: 'onegayi.vsidian.cssSnippets.resume', titleKey: 'command.cssSnippets.resume.title', mode: 'both', writes: false, defaults: [] },
+  // #198 索引维护：宿主侧命令（设置页按钮与命令面板共用同一 wiring，
+  // 不依赖 webview 健康度）。索引维护属设置页/宿主域操作，不接管正文
+  // 输入（mode: both 只表示两模式下命令均可用）；低频操作默认不占键位，
+  // 评估记录见 docs/specs/keybindings.md
+  { id: 'indexRebuild', command: 'onegayi.vsidian.index.rebuild', titleKey: 'command.index.rebuild.title', mode: 'both', writes: false, defaults: [] },
+  { id: 'indexCleanup', command: 'onegayi.vsidian.index.cleanup', titleKey: 'command.index.cleanup.title', mode: 'both', writes: false, defaults: [] },
 ]
 
 /** 视图中已有明确目标的按钮动作：命令面板、快捷键均可调用。 */
@@ -69,6 +75,13 @@ export const UI_OPERATIONS = [
   { id: 'outlineReset', command: 'onegayi.vsidian.ui.outlineReset', titleKey: 'command.ui.outlineReset.title', mode: 'both', writes: false, defaults: [] },
   { id: 'outlineCollapseAll', command: 'onegayi.vsidian.ui.outlineCollapseAll', titleKey: 'command.ui.outlineCollapseAll.title', mode: 'both', writes: false, defaults: [] },
   { id: 'outlineExpandAll', command: 'onegayi.vsidian.ui.outlineExpandAll', titleKey: 'command.ui.outlineExpandAll.title', mode: 'both', writes: false, defaults: [] },
+  // #197 反链面板：双模式 UI 操作（面板在 Live/阅读两模式均可用，切换为
+  // 纯视图状态零写回）；默认不占键位——侧栏按钮与命令面板常驻入口，快捷键
+  // 留给用户按需绑定（评估记录见 docs/specs/keybindings.md）
+  { id: 'backlinksToggle', command: 'onegayi.vsidian.ui.backlinksToggle', titleKey: 'command.ui.backlinksToggle.title', mode: 'both', writes: false, defaults: [] },
+  // 出链面板（出链面板批次）：与反链面板同款双模式 UI 操作（三面板互斥的
+  // 纯视图状态翻转，零写回）；默认不占键位（评估记录见 docs/specs/keybindings.md）
+  { id: 'outlinksToggle', command: 'onegayi.vsidian.ui.outlinksToggle', titleKey: 'command.ui.outlinksToggle.title', mode: 'both', writes: false, defaults: [] },
   // #208 刷新嵌入资源：工具栏刷新按钮的快捷键/命令面板入口（两条入口
   // 汇合——宿主命令经 UI_OPERATIONS 注册循环回发 ui.command，webview 与
   // 按钮共用同一发送实现，宿主编排在 documentSession 的 refresh.request

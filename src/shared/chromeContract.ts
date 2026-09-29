@@ -94,4 +94,16 @@ export const CHROME_CONTRACT_PROBES: readonly ChromeContractProbe[] = [
   { id: 'live-fm-header-live', selector: '#app .vsidian-view-live .vsidian-fm-header', expected: 'rgb(237, 0, 1)' },
   // ---- 代码块卡片折行开关（#191；仅阅读侧发射，非收起块头部常驻在场） ----
   { id: 'live-code-card-wrap-reading', selector: '#app .vsidian-view-reading .vsidian-code-card-wrap', expected: 'rgb(238, 0, 1)' },
+  // ---- 反链面板（#197；面板容器 DOM 常驻侧栏（显隐由类控制），可静态
+  //      探针；条目/卡片为动态数据（宿主索引快照驱动），不伪造静态探针，
+  //      由集成 backlinks probe 的行为路径验证。形态改版批次追加工具栏
+  //      （常驻固定区，ready 态可命中）探针——合并 main 时 #191/#208 已占
+  //      238-239，本组五条顺延 240 起 ----
+  { id: 'backlink-panel', selector: '#app .vsidian-sidebar .vsidian-backlink-panel', expected: 'rgb(240, 0, 1)' },
+  { id: 'backlinks-toggle', selector: '#app .vsidian-sidebar .vsidian-sidebar-toolbar .vsidian-backlinks-toggle', expected: 'rgb(241, 0, 1)' },
+  { id: 'backlink-toolbar', selector: '#app .vsidian-sidebar .vsidian-backlink-toolbar', expected: 'rgb(242, 0, 1)' },
+  // ---- 出链面板（出链面板批次；容器与按钮常驻可静态探针；条目动态数据
+  //      由集成 outlinks probe 行为验证） ----
+  { id: 'outlink-panel', selector: '#app .vsidian-sidebar .vsidian-outlink-panel', expected: 'rgb(243, 0, 1)' },
+  { id: 'outlinks-toggle', selector: '#app .vsidian-sidebar .vsidian-sidebar-toolbar .vsidian-outlinks-toggle', expected: 'rgb(244, 0, 1)' },
 ]

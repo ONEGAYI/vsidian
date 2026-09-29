@@ -20,9 +20,11 @@ import {
 import {
   findBlockOffset,
   findHeadingOffset,
-  resolveWikilinkFile,
-  type WikilinkResolveContext,
 } from './wikilinkTarget'
+import {
+  resolveVaultLinkFile,
+  type VaultLinkResolveContext,
+} from '../shared/vaultLink'
 import { parseWikilinkInner } from '../shared/wikilink'
 import { NewlineCoordinator } from '../shared/newline'
 import { buildEditorCsp } from './editorCsp'
@@ -54,6 +56,17 @@ import {
 import type { SettingsService } from './settingsService'
 import type { KeybindingService } from './keybindingService'
 import type { CssSnippetService } from './cssSnippetService'
+import type { VaultIndexService } from './vaultIndexService'
+import type { IndexMaintenance } from './vaultIndexMaintenance'
+import { ImageRefreshCoordinator } from './imageRefreshCoordinator'
+import type { ImageVersionTable } from './imageVersioning'
+import {
+  IMAGE_EVENT_DEBOUNCE_MS,
+  IMAGE_WAKE_MIN_GAP_MS,
+  IMAGE_WATCH_GLOB_SEGMENTS,
+  isFileNotFound,
+  isImageFileExtension,
+} from '../shared/imageRefresh'
 import type { SnippetLinkList } from '../shared/cssSnippets'
 import type { SettingsPageHandle } from './settingsPage'
 import { runDiagramExport } from './diagramExportHost'
@@ -147,15 +160,15 @@ export interface LinkLogEntry {
   locate?: 'custom-panel' | 'none'
 }
 
-/** 双链跳转执行日志（#11；与 LinkLogEntry 共用 linkLog 通道） */
+/** 双链跳转执行日志（#11；与 LinkLogEntry 共用 linkLog 通道；#196 起
+ *  同名歧义条目随 QuickPick 选择废除，新增越界条目） */
 export interface WikilinkLogEntry {
   kind:
     | 'wikilink-doc'
-    | 'wikilink-ambiguous'
     | 'wikilink-not-found'
     | 'wikilink-no-workspace'
     | 'wikilink-unsupported'
-    | 'wikilink-cancelled'
+    | 'wikilink-outside-root'
   /** 上报的原始 target（| 之前） */
   target: string
   /** wikilink-doc 的目标绝对路径 */
@@ -164,8 +177,6 @@ export interface WikilinkLogEntry {
   heading?: string
   /** 请求的块引用目标（#159；与 heading 互斥） */
   blockId?: string
-  /** ambiguous 的候选绝对路径 */
-  candidates?: string[]
   /** wikilink-doc 的定位方式：custom-panel=本扩展面板挂载定位；none=无标题定位 */
   locate?: 'custom-panel' | 'none'
 }
@@ -282,10 +293,138 @@ export function createTextEditorProvider(
   context: vscode.ExtensionContext,
   settings?: SettingsWiring,
   snippets?: CssSnippetService,
+  vaultIndex?: VaultIndexService,
+  /** #198 索引维护接线（测试钩子观测持久化与生效模式用；生产由
+   *  extension.ts 注入 createIndexMaintenance 产物） */
+  indexMaintenance?: IndexMaintenance,
 ): vscode.CustomTextEditorProvider {
   const sessions = new Map<string, SessionEntry>()
   let lastClosedInput: { docUri: string; webviewText?: string; fragments: string[] } | undefined
 
+  // ---- #201 图片刷新协调器（provider 级单件：版本表与失效通道跨会话共享） ----
+  const isWindowsHost = process.platform === 'win32'
+  const imageRefreshEvents: string[] = []
+  const IMAGE_EVENT_LOG_LIMIT = 8 // 环形上限（RENAME_LOG_LIMIT 同形态）：会话生命周期内无界增长
+  const imageRefresh = new ImageRefreshCoordinator(
+    {
+      statTarget: async (fsPath) => {
+        try {
+          const st = await vscode.workspace.fs.stat(vscode.Uri.file(fsPath))
+          if ((st.type & vscode.FileType.File) === 0) {
+            return { kind: 'missing' } as const
+          }
+          return { kind: 'ok', mtimeMs: st.mtime, size: st.size } as const
+        } catch (err) {
+          return isFileNotFound(err)
+            ? ({ kind: 'missing' } as const)
+            : ({ kind: 'inaccessible' } as const)
+        }
+      },
+      resolveTarget: () => null, // 各会话按自身 linkCtx 覆盖（openEntry 注入）
+      invalidateTarget: (fsPath) => {
+        imageRefreshEvents.push(fsPath)
+        if (imageRefreshEvents.length > IMAGE_EVENT_LOG_LIMIT) {
+          imageRefreshEvents.splice(0, imageRefreshEvents.length - IMAGE_EVENT_LOG_LIMIT)
+        }
+        for (const entry of sessions.values()) {
+          entry.session.invalidateImagesByFsPath(fsPath)
+        }
+      },
+    },
+    { isWindowsHost },
+  )
+  /** 图片文件监听（#201）：图片类扩展不经索引域 watcher（只听 *.md），在
+   *  此自建。工作区根递归监听（花括号 glob 每根一个 watcher）；根增删整体
+   *  重建（先拆旧）；无工作区不建（周期核验与按需 stat 兜底）。事件去抖
+   *  归并（保存器写临时文件 + rename 会产生成组事件） */
+  const imageWatchTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  const scheduleImageEvent = (fsPath: string): void => {
+    const prev = imageWatchTimers.get(fsPath)
+    if (prev !== undefined) {
+      clearTimeout(prev)
+    }
+    imageWatchTimers.set(
+      fsPath,
+      setTimeout(() => {
+        imageWatchTimers.delete(fsPath)
+        void imageRefresh.handleTargetEvent(fsPath)
+      }, IMAGE_EVENT_DEBOUNCE_MS),
+    )
+  }
+  let imageWatchers: vscode.FileSystemWatcher[] = []
+  const teardownImageWatchers = (): void => {
+    for (const watcher of imageWatchers) {
+      watcher.dispose() // 其上的事件订阅随之释放
+    }
+    imageWatchers = []
+    // 去抖计时器随之清空（review-loops #21）：拆监听后残留计时器会在
+    // 到期时对已失效的 watcher 域发起核验
+    for (const timer of imageWatchTimers.values()) {
+      clearTimeout(timer)
+    }
+    imageWatchTimers.clear()
+  }
+  const setupImageWatchers = (): void => {
+    teardownImageWatchers()
+    const folders = vscode.workspace.workspaceFolders
+    if (!folders || folders.length === 0) {
+      return
+    }
+    const glob = `**/*.{${IMAGE_WATCH_GLOB_SEGMENTS.join(',')}}`
+    for (const folder of folders) {
+      const watcher = vscode.workspace.createFileSystemWatcher(
+        new vscode.RelativePattern(folder.uri, glob),
+      )
+      const forward = (uri: vscode.Uri | undefined): void => {
+        if (uri && isImageFileExtension(uri.fsPath)) {
+          scheduleImageEvent(uri.fsPath)
+        }
+      }
+      watcher.onDidChange(forward)
+      watcher.onDidCreate(forward)
+      watcher.onDidDelete(forward)
+      imageWatchers.push(watcher)
+    }
+  }
+  setupImageWatchers()
+  context.subscriptions.push({ dispose: teardownImageWatchers })
+  // 根增删：重挂图片监听（新增根纳入、移除根拆除）
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      setupImageWatchers()
+    }),
+  )
+  // 索引目标变化事件（#198 通道）：图片类目标即时核验（md 域事件对图片
+  // 管线无匹配登记，天然空操作；未来索引扩展到非 md 目标时自动接通）
+  if (vaultIndex) {
+    const offTargetChange = vaultIndex.onTargetChange((event) => {
+      if (isImageFileExtension(event.fsPath)) {
+        scheduleImageEvent(event.fsPath)
+      }
+    })
+    context.subscriptions.push({ dispose: offTargetChange })
+  }
+  /** 唤醒广播（#201 及时核验）：窗口焦点回归（远程重连后用户回到窗口）
+   *  节流后向全部面板广播 image.wake，webview 有活跃图源立即触发一轮核验 */
+  let lastImageWakeAt = 0
+  context.subscriptions.push(
+    vscode.window.onDidChangeWindowState((state) => {
+      if (!state.focused) {
+        return
+      }
+      const now = Date.now()
+      if (now - lastImageWakeAt < IMAGE_WAKE_MIN_GAP_MS) {
+        return
+      }
+      lastImageWakeAt = now
+      const message: HostToWebview = { kind: 'image.wake' }
+      for (const entry of sessions.values()) {
+        for (const { sessionId } of entry.session.getInfo().panels) {
+          entry.session.postToPanel(sessionId, message)
+        }
+      }
+    }),
+  )
   const getEntry = (uri: vscode.Uri): SessionEntry | undefined =>
     sessions.get(uri.toString())
 
@@ -542,10 +681,20 @@ export function createTextEditorProvider(
         return vscode.commands.executeCommand('redo').then(() => true, () => false)
       },
     }
+    // #201 图片周期核验与失效：会话按自身 linkCtx 解析图源目标（同一 src
+    // 在不同文档指向不同文件——目标解析必须按文档）；决策与版本表在协调器
     fresh.session = new DocumentSession(port, {
       docUri: key,
       onNotice: (notice) => handleNotice(key, notice),
       onViewState: (sessionId, state) => handlePanelViewState(key, sessionId, state),
+      isWindowsHost,
+      verifyImages: (items) =>
+        imageRefresh.verify(items, {
+          resolveTarget: (src) => {
+            const target = classifyImageTarget(src, linkContextOf(doc))
+            return target.kind === 'workspace' ? target.fsPath : null
+          },
+        }),
       // #96 R1 ready 即校准：每次 ready 按当前生效语言幂等补发 locale.changed。
       // 供应式注入（会话保持纯逻辑）：与 HTML 数据岛注入同一解析
       // （hostLocale(getSnapshot())），未接线 settings 时按宿主显示语言解析
@@ -596,35 +745,146 @@ export function createTextEditorProvider(
     }
   }
 
-  /** 当前工作区内（限定当前文档所属文件夹）的全部 .md 绝对路径，按需现查 */
-  const findWorkspaceMdFiles = async (folder: vscode.Uri): Promise<string[]> => {
-    const uris = await vscode.workspace.findFiles('**/*.md')
-    const rootFsPath = folder.fsPath
-    const out: string[] = []
-    for (const uri of uris) {
-      const rel = path.relative(rootFsPath, uri.fsPath)
-      // 精确越界判定（与 linkTarget 的 isInsideRoot 同口径）：`..foo.md`
-      // 是同级合法文件名，粗判 startsWith('..') 会误排除
-      if (
-        rel !== '' &&
-        (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel))
-      ) {
-        continue // 多根工作区：只取当前文档所属文件夹内的文件
-      }
-      out.push(uri.fsPath)
+  // ---- #197 反链面板：快照应答与条目跳转（面板级 UI 意图的执行体） ----
+
+  /** 反链广播序号（review-loops #16）：按文档单调递增——快照应答为异步
+   *  fire-and-forget，乱序完成时 webview 依 seq 丢弃降序帧 */
+  const backlinksSeqByDoc = new Map<string, number>()
+
+  /** 反链快照（backlinks.get 应答与 onChange 广播共用）：结果形态与
+   *  backlinks.snapshot 协议一致（items 为空数组兜底） */
+  const sendBacklinksSnapshot = async (
+    entry: SessionEntry,
+    sessionId: string,
+    docUri: vscode.Uri,
+  ): Promise<void> => {
+    const docUriStr = docUri.toString()
+    const seq = (backlinksSeqByDoc.get(docUriStr) ?? 0) + 1
+    backlinksSeqByDoc.set(docUriStr, seq)
+    if (!vaultIndex) {
+      entry.session.postToPanel(sessionId, {
+        kind: 'backlinks.snapshot',
+        docUri: docUriStr,
+        state: 'error',
+        reason: 'no-workspace',
+        items: [],
+        seq,
+      })
+      return
     }
-    return out
+    const result = await vaultIndex.backlinksOf(docUri.fsPath)
+    entry.session.postToPanel(sessionId, {
+      kind: 'backlinks.snapshot',
+      docUri: docUriStr,
+      state: result.status,
+      updating: result.status === 'ready' ? result.updating : undefined,
+      reason: result.status === 'error' ? result.reason : undefined,
+      // 形态改版批次字段（snippetStart/snippetLong 等高亮与排序键载荷）随
+      // 条目透传——协议侧可选，旧 webview 忽略
+      items: result.status === 'ready' ? result.items : [],
+      seq,
+    })
+  }
+
+  /** 反链条目跳转：打开来源文档（Vsidian 面板）并定位到出链标记——
+   *  openWith 对已开面板是重显；offset 为来源正文 LF 偏移（宿主抽取侧
+   *  已归一），直接作 view.locate 输入（webview 全程 LF 坐标）。
+   *  sourceUri 是平台分隔符 fsPath 形态（快照载荷原样回传），经
+   *  Uri.file 解析（Uri.parse 会把反斜杠当 URI 字符错误编码） */
+  const openBacklinkSource = async (sourceUri: string, offset: number): Promise<void> => {
+    const uri = vscode.Uri.file(sourceUri)
+    await vscode.commands.executeCommand('vscode.openWith', uri, VIEW_TYPE)
+    const ready = await waitForReadyPanel(uri)
+    if (ready) {
+      ready.entry.session.postToPanel(ready.sessionId, { kind: 'view.locate', offset })
+    }
+  }
+
+  // ---- 出链面板：快照应答与条目跳转（与反链镜像；锚点定位复用双链跳转
+  //      的 findHeadingOffset / findBlockOffset，不重造） ----
+
+  /** 出链广播序号：按文档单调递增（与 backlinksSeq 独立计数，webview 侧
+   *  各自比较降序帧丢弃） */
+  const outlinksSeqByDoc = new Map<string, number>()
+
+  /** 出链快照（outlinks.get 应答与 onChange 广播共用） */
+  const sendOutlinksSnapshot = async (
+    entry: SessionEntry,
+    sessionId: string,
+    docUri: vscode.Uri,
+  ): Promise<void> => {
+    const docUriStr = docUri.toString()
+    const seq = (outlinksSeqByDoc.get(docUriStr) ?? 0) + 1
+    outlinksSeqByDoc.set(docUriStr, seq)
+    if (!vaultIndex) {
+      entry.session.postToPanel(sessionId, {
+        kind: 'outlinks.snapshot',
+        docUri: docUriStr,
+        state: 'error',
+        reason: 'no-workspace',
+        items: [],
+        seq,
+      })
+      return
+    }
+    const result = await vaultIndex.outlinksOf(docUri.fsPath)
+    entry.session.postToPanel(sessionId, {
+      kind: 'outlinks.snapshot',
+      docUri: docUriStr,
+      state: result.status,
+      updating: result.status === 'ready' ? result.updating : undefined,
+      reason: result.status === 'error' ? result.reason : undefined,
+      items: result.status === 'ready' ? result.items : [],
+      seq,
+    })
   }
 
   /**
-   * 双链跳转执行（#11；#159 块引用定位与本文件锚点）：解析（按需 findFiles +
-   * 纯分类器）→ 重名 QuickPick 选择 → 打开目标并定位锚点（标题或块 id，互斥）。
-   * 空 path（[[#标题]] / [[#^块id]]）：目标即当前文档，不查文件、无 ambiguous。
+   * 出链条目跳转：打开目标并按该链接的实际锚点定位。
+   * - Markdown 目标：Vsidian 面板打开（openWith 对已开面板是重显），锚点
+   *   命中（标题→findHeadingOffset、#^块id→findBlockOffset，与双链跳转同
+   *   一定位器）发 view.locate（LF 坐标换算同双链）；无锚点或未命中回落
+   *   文档顶（打开即顶部，不发 locate）。
+   * - 非 Markdown 目标（图片等附件）：vscode.open 原生打开（内置预览器），
+   *   Vsidian 自定义编辑器不接非 md 文档。
+   * targetUri 是平台分隔符 fsPath 形态（快照载荷原样回传），经 Uri.file
+   * 解析（与 openBacklinkSource 同口径）。
+   */
+  const openOutlinkTarget = async (targetUri: string, anchor: string): Promise<void> => {
+    const uri = vscode.Uri.file(targetUri)
+    if (!/\.md$/i.test(uri.path)) {
+      await vscode.commands.executeCommand('vscode.open', uri)
+      return
+    }
+    let anchorOffset: { offset: number; end: number } | null = null
+    let anchorDoc: vscode.TextDocument | undefined
+    if (anchor !== '') {
+      anchorDoc = await vscode.workspace.openTextDocument(uri)
+      const text = anchorDoc.getText()
+      anchorOffset = anchor.startsWith('^')
+        ? findBlockOffset(text, anchor.slice(1))
+        : findHeadingOffset(text, anchor)
+    }
+    await vscode.commands.executeCommand('vscode.openWith', uri, VIEW_TYPE)
+    if (anchorOffset && anchorDoc) {
+      const ready = await waitForReadyPanel(uri)
+      if (ready) {
+        const lfOffset = new NewlineCoordinator(anchorDoc.getText()).hostOffsetToLf(anchorOffset.offset)
+        ready.entry.session.postToPanel(ready.sessionId, { kind: 'view.locate', offset: lfOffset })
+      }
+    }
+  }
+
+  /**
+   * 双链跳转执行（#11；#159 块引用定位与本文件锚点；#196 根内相对路径
+   * 解析）：目标一律按来源文档相对路径解析（shared/vaultLink，docDir 基准、
+   * 越出所属根拦截、多根互不补查），经 fs.stat 端口探测存在性后打开并定位
+   * 锚点（标题或块 id，互斥）。
+   * 空 path（[[#标题]] / [[#^块id]]）：目标即当前文档，不查文件。
    * 目标一律由 Vsidian 面板打开（vscode.openWith 对已开面板是重显），
    * 面板就绪后发 view.locate；reading 模式经 #14 的块挂载定位。
    * 全程只读：不触碰 TextDocument、不建索引、不自动创建文件。
-   * 测试钩子模式（VSIDIAN_TEST_HOOKS）下歧义只记录不弹 QuickPick（与 #10 外链
-   * 不真开浏览器同口径）。
+   * basename 全根搜索、根相对双候选与 QuickPick 同名选择已随 #196 废除。
    */
   const executeWikilinkIntent = async (
     document: vscode.TextDocument,
@@ -646,23 +906,30 @@ export function createTextEditorProvider(
       return
     }
     // #159 本文件锚点（[[#标题]] / [[#^块id]]）：path 为空串，目标即当前文档
-    // ——不查工作区文件、无 ambiguous/QuickPick（与无工作区提示无关）
+    // ——不查工作区、无候选选择（与无工作区提示无关）
     let targetPath: string
     if (parsed.path === '') {
       targetPath = document.uri.fsPath
     } else {
+      // #196 根内相对路径解析：docDir 为基准、所属根（嵌套根取最具体——
+      // getWorkspaceFolder 返回最内层 folder）为边界，越出即拦截；存在性经
+      // fs.stat 端口探测（大小写语义由宿主文件系统裁决：NTFS 不敏感/POSIX 严格）
       const folder = vscode.workspace.getWorkspaceFolder(document.uri)
-      const ctx: WikilinkResolveContext = {
+      const ctx: VaultLinkResolveContext = {
         docDir: path.dirname(document.uri.fsPath),
         rootDir: (folder ? folder.uri : vscode.Uri.joinPath(document.uri, '..')).fsPath,
         isWindowsHost: process.platform === 'win32',
         hasWorkspace: folder !== undefined,
       }
-      const mdFiles = ctx.hasWorkspace ? await findWorkspaceMdFiles(folder!.uri) : []
-      const resolution = resolveWikilinkFile({ path: parsed.path }, ctx, mdFiles)
+      const resolution = await resolveVaultLinkFile(parsed.path, ctx, statFileRealPath)
       if (resolution.kind === 'no-workspace') {
         pushLog({ kind: 'wikilink-no-workspace', target: parsed.path })
         void vscode.window.showWarningMessage(t('host.wikilinkNoWorkspace'))
+        return
+      }
+      if (resolution.kind === 'escape') {
+        pushLog({ kind: 'wikilink-outside-root', target: parsed.path })
+        void vscode.window.showWarningMessage(t('host.wikilinkOutsideRoot', { target: parsed.path }))
         return
       }
       if (resolution.kind === 'not-found') {
@@ -672,28 +939,7 @@ export function createTextEditorProvider(
         )
         return
       }
-      if (resolution.kind === 'ambiguous') {
-        const candidates = [...resolution.fsPaths]
-        pushLog({ kind: 'wikilink-ambiguous', target: parsed.path, candidates })
-        if (process.env.VSIDIAN_TEST_HOOKS === '1') {
-          return // 集成测试环境无法驱动 QuickPick：只记录候选（手感留 #15 人工验证）
-        }
-        const items = candidates.map((p) => ({
-          label: vscode.workspace.asRelativePath(vscode.Uri.file(p), false),
-          description: p,
-          fsPath: p,
-        }))
-        const pick = await vscode.window.showQuickPick(items, {
-          placeHolder: t('host.wikilinkAmbiguousPick', { target: parsed.path }),
-        })
-        if (!pick) {
-          pushLog({ kind: 'wikilink-cancelled', target: parsed.path, candidates })
-          return
-        }
-        targetPath = pick.fsPath
-      } else {
-        targetPath = resolution.fsPath
-      }
+      targetPath = resolution.fsPath
     }
 
     const targetUri = vscode.Uri.file(targetPath)
@@ -833,7 +1079,13 @@ export function createTextEditorProvider(
       }
       const resolveImage = async (src: string): Promise<ImageResolution> => {
         // #208：代次在解析时取值——手动刷新后同 src 的新请求得到新代次戳
-        return resolveWorkspaceImage(src, linkCtx, webviewPanel.webview, entry.session.getImageGeneration())
+        return resolveWorkspaceImage(
+          src,
+          linkCtx,
+          webviewPanel.webview,
+          imageRefresh.versions,
+          entry.session.getImageGeneration(),
+        )
       }
       const sessionId = entry.session.attachPanel({
         send,
@@ -958,6 +1210,27 @@ export function createTextEditorProvider(
           void runViewSwitch(message.target, document.uri)
           return
         }
+        // #197 反链面板：面板级 UI 意图在 provider 层拦截（索引服务与跳转
+        // 执行都在 provider 域；session 对这两类消息显式 return 保持穷尽）
+        if (vaultIndex && isWebviewToHost(message) && message.kind === 'backlinks.get' &&
+          message.docUri === document.uri.toString()) {
+          void sendBacklinksSnapshot(entry, sessionId, document.uri)
+          return
+        }
+        if (isWebviewToHost(message) && message.kind === 'backlink.activate') {
+          void openBacklinkSource(message.sourceUri, message.offset)
+          return
+        }
+        // 出链面板（与反链镜像）：快照拉取应答与条目跳转意图
+        if (vaultIndex && isWebviewToHost(message) && message.kind === 'outlinks.get' &&
+          message.docUri === document.uri.toString()) {
+          void sendOutlinksSnapshot(entry, sessionId, document.uri)
+          return
+        }
+        if (isWebviewToHost(message) && message.kind === 'outlink.activate') {
+          void openOutlinkTarget(message.targetUri, message.anchor)
+          return
+        }
         if (process.env.VSIDIAN_TEST_HOOKS === '1' && isWebviewToHost(message) &&
           message.kind === 'sync.test.close' && message.sessionId === sessionId &&
           message.docUri === document.uri.toString()) {
@@ -1006,6 +1279,15 @@ export function createTextEditorProvider(
   // undo/redo）的变更都进入 session 识别与广播
   context.subscriptions.push(
     vscode.workspace.onDidChangeTextDocument((event) => {
+      // #197 索引覆盖层：消费原始事件（不经 session 产物——任何编辑器打开
+      // 的 .md 都是索引来源域）；服务内做版本仲裁与去抖，未保存内容不落盘
+      if (vaultIndex && event.document.uri.scheme === 'file' && /\.md$/i.test(event.document.uri.path)) {
+        vaultIndex.applyUnsaved(
+          event.document.uri.fsPath,
+          event.document.version,
+          event.document.getText(),
+        )
+      }
       const entry = getEntry(event.document.uri)
       if (!entry) {
         return
@@ -1020,6 +1302,39 @@ export function createTextEditorProvider(
       )
     }),
   )
+
+  // ---- #197 索引：保存事件（磁盘基线重扫 + 覆盖层退役；服务内合并提交
+  //  快照）。外部修改经服务自身的 watcher 端口到达（onDidChange 对外部
+  //  工具不可见，watcher 兜底） ----
+  if (vaultIndex) {
+    context.subscriptions.push(
+      vscode.workspace.onDidSaveTextDocument((document) => {
+        if (document.uri.scheme === 'file' && /\.md$/i.test(document.uri.path)) {
+          void vaultIndex.documentSaved(document.uri.fsPath)
+        }
+      }),
+    )
+    // 文档关闭退役（review-loops #18）：编辑后不保存关闭的面板，其 unsaved
+    // 全文与覆盖层边随文档关闭退场（否则幽灵反链滞留至下次保存/重扫）。
+    // 同文档仍有 Vsidian 面板（自定义编辑器持有文档）时不退役——面板侧
+    // 仍有当前内容域；findEntry（非精确 getEntry）做 Windows 大小写容错
+    // ——URI 形态漂移时不得误判「无面板」而提前退役。退役同时清理该文档
+    // 的反链广播序号（backlinksSeqByDoc，键与 sessions 同源——面板打开时
+    // 的 uri 形态；onDidClose 的 document.uri 为同一 TextDocument，恒命中）
+    context.subscriptions.push(
+      vscode.workspace.onDidCloseTextDocument((document) => {
+        if (document.uri.scheme !== 'file' || !/\.md$/i.test(document.uri.path)) {
+          return
+        }
+        if (findEntry(document.uri)) {
+          return
+        }
+        backlinksSeqByDoc.delete(document.uri.toString())
+        outlinksSeqByDoc.delete(document.uri.toString())
+        vaultIndex.documentClosed(document.uri.fsPath)
+      }),
+    )
+  }
 
   // ---- 设置变更广播（#33）：宿主保存成功后把新快照推给全部已打开
   // Vsidian 编辑器面板（复用 toggleViewMode 的全 session 遍历样板）。
@@ -1117,6 +1432,24 @@ export function createTextEditorProvider(
       settings?.page.notifySnippetsChanged()
     })
     context.subscriptions.push({ dispose: () => offSnippets() })
+  }
+
+  // ---- #197 反链快照广播：索引模型变化（覆盖层更新/重扫/重建完成）→
+  //  全部 ready 面板各自文档的反链快照（面板按 docUri 匹配丢弃他文档快照；
+  //  notify 已在服务侧合并——覆盖层 500ms 去抖、重扫 800ms 去抖、快照提交
+  //  1.5s 合并，无逐键广播）。出链快照同点一并推送（出链面板批次） ----
+  if (vaultIndex) {
+    const offIndex = vaultIndex.onChange(() => {
+      for (const entry of sessions.values()) {
+        for (const panel of entry.session.getInfo().panels) {
+          if (panel.ready) {
+            void sendBacklinksSnapshot(entry, panel.sessionId, entry.doc.uri)
+            void sendOutlinksSnapshot(entry, panel.sessionId, entry.doc.uri)
+          }
+        }
+      }
+    })
+    context.subscriptions.push({ dispose: () => offIndex() })
   }
 
   // ---- 三态视图切换（#38）：标题栏三命令（toReading/toSource/toLive）与
@@ -1580,6 +1913,15 @@ export function createTextEditorProvider(
         return { found: true, sessionId: panel.sessionId, ...entry.session.getConflictState(panel.sessionId) }
       },
     ),
+    // #201 图片刷新观测钩子：失效事件日志（取走即清空）与版本表快照——
+    // 集成测试断言「真实文件变更 → 失效广播 → 新版本 URL」链路的宿主侧证据
+    vscode.commands.registerCommand('onegayi.vsidian._test.takeImageRefreshEvents', () => {
+      const events = [...imageRefreshEvents]
+      imageRefreshEvents.length = 0
+      return events
+    }),
+    vscode.commands.registerCommand('onegayi.vsidian._test.getImageVersions', () =>
+      imageRefresh.versions.snapshot()),
     vscode.commands.registerCommand(
       'onegayi.vsidian._test.getLastClosedInput',
       () => lastClosedInput,
@@ -1815,6 +2157,18 @@ export function createTextEditorProvider(
       globalStorageUri: context.globalStorageUri.toString(),
       workspaceTrusted: vscode.workspace.isTrusted,
     })),
+    // ---- #198 索引维护测试钩子：观测（服务权威状态 + 持久化原始值 +
+    //      快照分区根目录——集成用例直接列目录断言代际回收）----
+    vscode.commands.registerCommand('onegayi.vsidian._test.getVaultIndexState', () => ({
+      available: vaultIndex !== undefined,
+      ...(vaultIndex ? vaultIndex.maintenanceInfo() : { roots: [], rebuilding: false }),
+      persistedPatterns: indexMaintenance?.persistedRaw() ?? null,
+      storageRoot: context.storageUri ? context.storageUri.fsPath : null,
+    })),
+    vscode.commands.registerCommand(
+      'onegayi.vsidian._test.setIndexPatterns',
+      (patterns: string[]) => indexMaintenance?.setPatterns(patterns),
+    ),
   )
   }
 
@@ -1867,6 +2221,44 @@ function isBlockIdFragment(fragment: string): boolean {
  * NewlineCoordinator 转换）。全程只读：不触碰 TextDocument
  * 写路径、不建索引、不自动创建文件。
  */
+/** 文件存在性端口（fs 适配）：双链跳转链路经 shared/vaultLink 的 exists
+ *  端口注入（#196）。stat 验证存在且为普通文件；返回**磁盘真实路径**——
+ *  Windows 宿主（NTFS 不敏感）命中后逐段 readDirectory 归正大小写，
+ *  避免以注入形态建立 URI 与真实文档/面板身份漂移（集成实测教训）；
+ *  远程 POSIX 宿主 stat 严格命中即真实路径，原样返回。#197 引用索引
+ *  落地后可换传索引查询（索引持磁盘真实路径，直接返回）。 */
+async function statFileRealPath(fsPath: string): Promise<string | null> {
+  const uri = vscode.Uri.file(fsPath)
+  try {
+    const st = await vscode.workspace.fs.stat(uri)
+    if ((st.type & vscode.FileType.File) === 0) {
+      return null
+    }
+  } catch {
+    return null
+  }
+  if (process.platform !== 'win32') {
+    return fsPath
+  }
+  // Windows：逐段归正用户输入段的大小写（docDir 段来自已打开文档的真实
+  // URI，天然真实；归正从盘符根走一遍最稳——段数少，跳转单击频率可承受）
+  const ops = path.win32
+  let current = ops.parse(fsPath).root
+  for (const seg of fsPath.slice(current.length).split(/[\\/]+/)) {
+    if (seg === '') {
+      continue
+    }
+    try {
+      const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(current))
+      const hit = entries.find(([name]) => name.toLowerCase() === seg.toLowerCase())
+      current = ops.join(current, hit ? hit[0] : seg)
+    } catch {
+      return fsPath // 目录列举失败（不应发生——stat 已过）：退回注入形态
+    }
+  }
+  return current
+}
+
 async function executeLinkIntent(
   document: vscode.TextDocument,
   ctx: LinkContext,
@@ -1982,17 +2374,22 @@ async function revealLinkAnchor(
 }
 
 /**
- * 工作区图片解析（#10）：白名单分类 → 存在性探测 → asWebviewUri 转为
- * webview 可加载地址。本地与远程（SSH）工作区同通道——webview 资源服务
- * 按远程权威路由（真实远程宿主表现属 #15 人工验证项）。
- * #208：generation 为会话资源代次（手动刷新自增；0 = 未刷新初值不戳），
- * URI 追加 ?v= 缓存击穿参数（CSS 片段同式；CSP 匹配不含 query，不受影响）。
- * 仅工作区相对路径图源经此通道——HTTPS 直连不经宿主，无代次语义。
+ * 工作区图片解析（#10；#201 升级）：白名单分类 → stat 三态探测（保留
+ * mtime/size 进版本表——不再只验存在性；FileNotFound=not-found，其他失败
+ * =inaccessible 不冒充删除）→ asWebviewUri 拼 `?v=<代次>` 缓存击穿参数
+ * （版本表已观测变化代次，单调递增；webview 资源服务不承诺无缓存——
+ * buildSnippetLinkList 同款防御）。本地与远程（SSH）工作区同通道——
+ * webview 资源服务按远程权威路由（真实远程宿主表现属 #15 人工验证项）。
+ * #208：generation 为会话资源代次（手动刷新自增；0 = 未刷新初值），URI
+ * 戳取「版本表观测代次 + 会话代次」之和——两个失效源（自动观测 / 手动
+ * 刷新）任一推进，和必换新（CSP 匹配不含 query，不受影响）。仅工作区
+ * 相对路径图源经此通道——HTTPS 直连不经宿主，无代次语义。
  */
 async function resolveWorkspaceImage(
   src: string,
   ctx: LinkContext,
   webview: vscode.Webview,
+  versions: ImageVersionTable,
   generation: number,
 ): Promise<ImageResolution> {
   const target = classifyImageTarget(src, ctx)
@@ -2004,14 +2401,35 @@ async function resolveWorkspaceImage(
     }
   }
   const uri = vscode.Uri.file(target.fsPath)
+  let stat: vscode.FileStat
   try {
-    await vscode.workspace.fs.stat(uri)
-  } catch {
-    return { ok: false, reason: 'not-found', detail: target.fsPath }
+    stat = await vscode.workspace.fs.stat(uri)
+  } catch (err) {
+    if (isFileNotFound(err)) {
+      versions.recordMissing(target.fsPath)
+      return { ok: false, reason: 'not-found', detail: target.fsPath, fsPath: target.fsPath }
+    }
+    // SSH 断连/权限错误等不可访问：不得冒充文件删除（#194 图片节）
+    return { ok: false, reason: 'inaccessible', detail: target.fsPath, fsPath: target.fsPath }
   }
+  if ((stat.type & vscode.FileType.File) === 0) {
+    // 目录等非普通文件：按找不到处理（不是可呈现的图片目标）
+    versions.recordMissing(target.fsPath)
+    return { ok: false, reason: 'not-found', detail: target.fsPath, fsPath: target.fsPath }
+  }
+  const { generation: observed } = versions.recordObservation(target.fsPath, {
+    mtimeMs: stat.mtime,
+    size: stat.size,
+  })
   return {
     ok: true,
-    src: appendImageVersionStamp(webview.asWebviewUri(uri).toString(), generation),
+    // 戳 = 版本表观测代次 + 会话代次（两个单调失效源之和）：自动观测与
+    // 手动刷新任一推进，和必增大——URI 换新即击穿 webview 资源缓存
+    src: appendImageVersionStamp(
+      webview.asWebviewUri(uri).toString(),
+      observed + generation,
+    ),
+    fsPath: target.fsPath,
   }
 }
 

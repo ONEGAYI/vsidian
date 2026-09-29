@@ -95,15 +95,25 @@ export type HostToWebview =
   | { kind: 'codecard.test.fold'; index: number }
   /** 图片解析结果（#10）：reqId 对应 image.request。ok 时 src 为可直接作
    *  img.src 的地址——工作区文件经 asWebviewUri 的 webview 资源 URI
-   *  （本地与远程工作区同通道）；失败附原因码供错误态与重试呈现 */
+   *  （本地与远程工作区同通道；#201 起拼 ?v=<代次> 缓存击穿参数）；失败
+   *  附原因码供错误态与重试呈现（#201 新增 inaccessible：SSH 断连/权限
+   *  错误等不可访问，不得冒充 not-found） */
   | { kind: 'image.result'; reqId: number; ok: true; src: string }
   | {
       kind: 'image.result'
       reqId: number
       ok: false
-      reason: 'blocked' | 'outside-workspace' | 'not-found' | 'read-error'
+      reason: 'blocked' | 'outside-workspace' | 'not-found' | 'read-error' | 'inaccessible'
       detail?: string
     }
+  /** 图片失效通知（#201）：目标文件已观测变更（watcher 事件 / 索引
+   *  onTargetChange / 周期核验 refresh 决策）——作废宿主解析缓存后广播到
+   *  会话全部面板（多面板一致）。webview 对命中条目撤下旧图、作废重发
+   *  image.request（新版本 URL）；旧 reqId 在途结果被代次守卫丢弃 */
+  | { kind: 'image.invalidate'; srcs: string[] }
+  /** 图片核验唤醒（#201）：窗口焦点回归/远程重连后由宿主广播，webview
+   *  有活跃图源时立即触发一轮周期核验（及时核验，不等下一周期） */
+  | { kind: 'image.wake' }
   /** 图片粘贴落盘结果（#161）：ok 时 markdown 为宿主计算好的完整插入文本
    *  （![stem](percent-encode 相对路径)，与渲染端 normalizeImgSrc 的 decode
    *  对偶），webview 在光标处单事务插入（一笔撤销）；失败附原因码
@@ -258,6 +268,27 @@ export type HostToWebview =
   /** 测试钩子（#141）：点击顶栏双态视图切换真实按钮（与用户点击同一处理器：
    *  出站 view.switch.request，切换由宿主 runViewSwitch 编排回流驱动）。 */
   | { kind: 'view.test.click' }
+  /** 测试钩子（#197）：点击侧栏顶栏的反链按钮（与用户点击同一处理器；纯
+   *  视图状态翻转 + 面板互斥切换，零写回） */
+  | { kind: 'backlinks.test.click' }
+  /** 测试钩子（#197）：点击第 index 个真实反链条目（与用户点击同一委托
+   *  处理器；出站 backlink.activate 跳转意图，由宿主打开来源文档并定位） */
+  | { kind: 'backlinks.test.itemClick'; index: number }
+  /** 测试钩子（形态改版批次）：点击工具栏四按钮之一（与用户点击同一委托
+   *  处理器；action 与按钮 data-action 一一对应） */
+  | { kind: 'backlinks.test.toolbarClick'; action: 'sort' | 'search' | 'collapse' | 'context' }
+  /** 测试钩子（形态改版批次）：设置搜索词（真实 input 事件链——值写入 +
+   *  input 事件派发，与用户键入同一处理器） */
+  | { kind: 'backlinks.test.searchInput'; value: string }
+  /** 测试钩子（形态改版批次）：选择排序项（与用户路径同链：开菜单 → 点
+   *  对应菜单项；mode 合法性经协议守卫） */
+  | { kind: 'backlinks.test.sortSelect'; mode: 'name-asc' | 'name-desc' | 'mtime-desc' | 'mtime-asc' | 'birth-desc' | 'birth-asc' }
+  /** 测试钩子（出链面板批次）：点击侧栏顶栏的出链按钮（与用户点击同一
+   *  处理器；纯视图状态翻转 + 三面板互斥切换，零写回） */
+  | { kind: 'outlinks.test.click' }
+  /** 测试钩子（出链面板批次）：点击第 index 个真实出链条目（与用户点击
+   *  同一委托处理器；出站 outlink.activate 跳转意图，断链条目不可点） */
+  | { kind: 'outlinks.test.itemClick'; index: number }
   /** 测试钩子（#208）：点击顶栏刷新嵌入资源真实按钮（与用户点击同一
    *  处理器：出站 refresh.request，失效重挂由宿主 refresh.invalidated
    *  回流驱动）。 */
@@ -317,6 +348,58 @@ export type HostToWebview =
       version: number
       entries: Array<{ name: string; enabled: boolean }>
       rejections?: Record<string, { reason: 'path-escape' | 'symlink-escape'; path: string }>
+    }
+  /** 反链快照（#197，请求-响应与推送共用形态）：面板经 backlinks.get 拉取，
+   *  宿主索引变更（覆盖层更新/重扫/重建完成）后按面板文档广播。state 四态：
+   *  loading（索引未就绪/首扫中）、ready（items 为反链列表，空列表=无引用；
+   *  updating=true 表示索引重建中当前为旧数据）、error（读取失败，含索引
+   *  不可用；reason 区分无工作区）。items 按来源路径/位置稳定排序（宿主
+   *  queryBacklinks 序）；offset 为来源正文的 LF 偏移（跳转定位用）。
+   *  seq（review-loops #16）：宿主按文档单调递增的广播序号——快照应答为
+   *  异步 fire-and-forget，乱序到达时 webview 丢弃降序帧；缺省不丢弃
+   *  （兼容无序号的发送方） */
+  | {
+      kind: 'backlinks.snapshot'
+      docUri: string
+      state: 'loading' | 'ready' | 'error'
+      updating?: boolean
+      reason?: 'no-workspace' | 'read-error'
+      items?: BacklinkItemPayload[]
+      seq?: number
+    }
+  /** 出链快照（出链面板批次，请求-响应与推送共用形态；语义与
+   *  backlinks.snapshot 镜像）：面板经 outlinks.get 拉取，宿主索引变更后
+   *  与 backlinks 同点广播。items 为当前文档的出链（含覆盖层未保存态，
+   *  外部 scheme 边不进面板），按 resolved → 目标 → 区间稳定排序；seq
+   *  为宿主按文档单调递增的广播序号（乱序到达时 webview 丢弃降序帧） */
+  | {
+      kind: 'outlinks.snapshot'
+      docUri: string
+      state: 'loading' | 'ready' | 'error'
+      updating?: boolean
+      reason?: 'no-workspace' | 'read-error'
+      items?: OutlinkItemPayload[]
+      seq?: number
+    }
+  /** 索引维护状态（#198，设置页消费）：排除模式（当前生效 + 默认值）、
+   *  维护操作状态与进度、最近一次操作结果反馈。设置页经 index.get 拉取；
+   *  宿主状态变更（模式保存/进度推进/操作完成）后推送。available=false
+   *  表示当前窗口无工作区（索引服务未建——操作按钮禁用，模式仍可编辑
+   *  持久化，打开工作区后生效）。notice 保留至下一次操作覆盖（页面不
+   *  自行清除）；detail 为补充信息（如被拒的非法模式列表） */
+  | {
+      kind: 'index.state'
+      available: boolean
+      patterns: string[]
+      defaults: string[]
+      status: 'idle' | 'cleaning' | 'rebuilding'
+      progress: { done: number; total: number } | null
+      roots: number
+      notice: {
+        kind: 'patterns-saved' | 'patterns-invalid' | 'rebuild-done' | 'rebuild-cancelled'
+          | 'rebuild-failed' | 'cleanup-done' | 'cleanup-failed'
+        detail?: string
+      } | null
     }
 
 /** webview → 宿主消息 */
@@ -444,6 +527,8 @@ export type WebviewToHost =
       readingWikilinkCount?: number
       /** 图片槽位状态计数（#10：当前视图内 loading/loaded/error） */
       imageStates?: ImageStateCounts
+      /** 图片条目明细（#201：失效/版本刷新链路断言载体，直连外链除外） */
+      imageEntries?: ImageEntryProbe[]
       /** 图片槽位探针（#208）：当前视图内活跃槽位的最终 src 与解码尺寸
        *  ——同名图片外部替换后刷新是否真换字节的绘制层证据（src 换新 +
        *  naturalWidth 变化 = 浏览器实际解码了新地址的字节；旧 webview 缺省） */
@@ -462,6 +547,10 @@ export type WebviewToHost =
       sidebar?: SidebarProbe
       /** 大纲观测（#54；面板态、绘制层证据与标题序列，旧 webview 缺省） */
       outline?: OutlineProbe
+      /** 反链面板观测（#197；面板态、四态实值与绘制层证据，旧 webview 缺省） */
+      backlinks?: BacklinksProbe
+      /** 出链面板观测（出链面板批次；面板态、四态实值与绘制层证据，旧 webview 缺省） */
+      outlinks?: OutlinksProbe
       /** #140 Popover 改版：frontmatter 属性编辑浮层是否打开（旧 webview 缺省） */
       fmPopoverOpen?: boolean
     }
@@ -507,6 +596,16 @@ export type WebviewToHost =
   /** 图片资源解析请求（#10）：非 http(s) 直连的工作区图源经宿主解析为
    *  webview 可加载地址（reqId 会话面板内自增，对应 image.result） */
   | { kind: 'image.request'; sessionId: string; docUri: string; reqId: number; src: string }
+  /** 图片周期核验（#201）：webview 活跃挂载图源（非直连）合并上报，宿主
+   *  stat 对比版本表后对变化目标回发 image.invalidate（维持目标不响应）。
+   *  由 webview 调度器驱动：间隔约 30 秒、无活跃槽位停止、面板恢复可见/
+   *  收到 image.wake 立即触发 */
+  | {
+      kind: 'image.verify'
+      sessionId: string
+      docUri: string
+      items: Array<{ src: string; state: 'loaded' | 'loading' | 'error'; reason?: string }>
+    }
   /** 图片粘贴落盘（#161）：webview paste 拦截命中 image/* 剪贴板项后出站；
    *  mime 为 image/*、dataBase64 为严格 base64（上限见 IMAGE_PASTE_LIMITS），
    *  fileNameHint 可选（剪贴板文件的原始名，宿主判定合成名后决定沿用或
@@ -611,6 +710,92 @@ export type WebviewToHost =
    *  清单同一字节），经 showSaveDialog 另存到用户路径；成功/失败以宿主
    *  通知回报，不逐次应答（命令面板 exportStyleReference 同一实现） */
   | { kind: 'styleRef.export' }
+  /** 反链快照拉取（#197）：面板 init 后与文档切换后请求当前文档的反链；
+   *  宿主以 backlinks.snapshot 响应（索引变更后主动推送，不逐次应答） */
+  | { kind: 'backlinks.get'; sessionId: string; docUri: string }
+  /** 反链条目跳转意图（#197）：点击面板条目 → 宿主打开来源文档（Vsidian
+   *  面板）并定位到出链标记处。offset 为来源正文的 LF 偏移（宿主打开后
+   *  经 NewlineCoordinator 换算发 view.locate，与双链跳转同链路） */
+  | { kind: 'backlink.activate'; sessionId: string; docUri: string; sourceUri: string; offset: number }
+  /** 出链快照拉取（出链面板批次）：面板 init 后请求当前文档的出链；宿主
+   *  以 outlinks.snapshot 响应（索引变更后与 backlinks 同点主动推送） */
+  | { kind: 'outlinks.get'; sessionId: string; docUri: string }
+  /** 出链条目跳转意图（出链面板批次）：点击面板条目 → 宿主打开目标文档
+   *  （Vsidian 面板）并按该链接的实际锚点定位（标题/块 id，复用双链跳转
+   *  的锚点定位器；无锚点或锚点未命中回落文档顶）。targetUri 为目标绝对
+   *  fsPath（快照载荷原样回传）；anchor 空串表示无锚点 */
+  | { kind: 'outlink.activate'; sessionId: string; docUri: string; targetUri: string; anchor: string }
+  /** 索引维护状态拉取（#198，设置页）：宿主以 index.state 应答；状态变更
+   *  后由宿主推送（onStateChanged → settingsPage.notifyIndexChanged） */
+  | { kind: 'index.get' }
+  /** 保存排除模式（#198，设置页）：宿主清洗（shared/vaultIndexExclude 规
+   *  则）后持久化并触发覆盖范围重算；结果经 index.state 推送（非法项在
+   *  notice.patterns-invalid 回显，合法项照常生效） */
+  | { kind: 'index.setPatterns'; patterns: string[] }
+  /** 恢复默认排除模式（#198，设置页）：等价保存默认值清单 */
+  | { kind: 'index.resetPatterns' }
+  /** 清理当前工作区索引缓存（#198，设置页）：安全回收旧代际（进度/结果
+   *  经 index.state 推送） */
+  | { kind: 'index.cleanup' }
+  /** 完整重建索引（#198，设置页）：全根重扫 + 资源核验，进度经 index.state
+   *  推送；index.cancel 可中止 */
+  | { kind: 'index.rebuild' }
+  /** 取消在途维护操作（#198，设置页，重建/清理期间可用） */
+  | { kind: 'index.cancel' }
+
+/** 反链面板条目载荷（#197 backlinks.snapshot.items；形态与宿主
+ *  BacklinkItem 同构——本接口为协议层稳定契约） */
+export interface BacklinkItemPayload {
+  /** 来源文档根内相对路径（`/` 分隔） */
+  sourceRelPath: string
+  /** 来源文档绝对 fsPath（跳转与打开用） */
+  sourceFsPath: string
+  /** 边类型（双链/内联链接/图片/引用式定义） */
+  kind: 'wikilink' | 'mdlink' | 'image' | 'refdef'
+  /** 标题/块锚点文本（空串无） */
+  anchor: string
+  /** 出链标记在来源正文中的 LF 偏移区间 */
+  start: number
+  end: number
+  /** 来源行号（1 基） */
+  line: number
+  /** 引用片段（来源行文本，超长已截断） */
+  snippet: string
+  /** 短片段起点（LF 全文偏移；卡片命中高亮的区间切分基准。可选：旧宿主
+   *  快照缺省，webview 侧缺省不高亮） */
+  snippetStart?: number
+  /** 来源文件 mtime（毫秒；未知 0）——面板分组排序键 */
+  sourceMtimeMs?: number
+  /** 来源文件创建时间（毫秒；未知 0——POSIX 宿主 birthtime 常不可得，
+   *  排序沉底）。可选：旧宿主快照缺省按 0 处理 */
+  sourceBirthtimeMs?: number
+  /** 长片段（「更多上下文」态：引用行 ±2 行，总长上限约 300 字符，首尾
+   *  按截断加「…」；切换纯显示层）。可选：旧宿主快照缺省回退短片段 */
+  snippetLong?: string
+  /** 长片段起点（LF 全文偏移；同 snippetStart 语义） */
+  snippetLongStart?: number
+}
+
+/** 出链面板条目载荷（outlinks.snapshot.items；形态与宿主 OutlinkItem
+ *  同构——本接口为协议层稳定契约） */
+export interface OutlinkItemPayload {
+  /** 目标显示名：解析命中取 basename 去扩展名（目录段不保留——与目标
+   *  路径行分工）；断链用 target 原文 */
+  targetDisplay: string
+  /** 解析命中的根内相对路径（`/` 分隔）；断链 null */
+  targetRelPath: string | null
+  /** 目标绝对 fsPath（跳转与打开用）；断链 null */
+  targetFsPath: string | null
+  /** 边类型（双链/内联链接/图片/引用式定义） */
+  kind: 'wikilink' | 'mdlink' | 'image' | 'refdef'
+  /** 标题/块锚点文本（空串无；#^块id 形态保留 ^ 前缀） */
+  anchor: string
+  /** 是否解析命中（断链条目弱化呈现且不可点） */
+  resolved: boolean
+  /** 出链标记在当前正文中的 LF 偏移区间 */
+  start: number
+  end: number
+}
 
 /** 性能快照（#5）：一次观测时点的 DOM 计数 */
 export interface PerfSnapshot {
@@ -645,6 +830,25 @@ export interface ImageStateCounts {
   loading: number
   loaded: number
   error: number
+}
+
+/** 图片条目明细观测（#201）：view.state 的 imageEntries 数据形态——失效
+ *  与版本刷新链路的细粒度断言载体（appliedSrc 含 ?v= 代次可直接断言） */
+export interface ImageEntryProbe {
+  src: string
+  state: 'loaded' | 'loading' | 'error'
+  reason?: string
+  appliedSrc?: string
+}
+
+function isImageEntryProbe(v: unknown): v is ImageEntryProbe {
+  return (
+    isObject(v) &&
+    isString(v.src) &&
+    (v.state === 'loaded' || v.state === 'loading' || v.state === 'error') &&
+    (v.reason === undefined || isString(v.reason)) &&
+    (v.appliedSrc === undefined || isString(v.appliedSrc))
+  )
 }
 
 /** 图片槽位探针（#208：当前视图内活跃槽位的最终地址与解码观测） */
@@ -1235,6 +1439,89 @@ export interface OutlineProbe {
    *  插入线（box-shadow）或包裹高亮（outline/背景）可读（真实绘制；
    *  无拖拽或 jsdom 无布局时 false，真宿主断言见集成） */
   dropHintPainted: boolean
+}
+
+/**
+ * 反链面板观测（#197）：面板态、四态实值与绘制层证据。命中类字段
+ * （*Painted）走 elementFromPoint——面板只有真实绘制（侧栏展开 + 面板
+ * active + 显隐样式规则生效）时才可能命中，DOM 存在性探不出样式失效。
+ * items 为面板当前条目的可观测摘要（来源 + 行号 + 片段），与
+ * backlinks.snapshot 的载荷对齐；jsdom 无布局与 CSS 引擎：命中恒 false，
+ * 真宿主断言见集成。
+ */
+export interface BacklinksProbe {
+  /** 反链面板 active 态（状态机实值；与大纲面板互斥） */
+  active: boolean
+  /** 反链按钮中心点 elementFromPoint 命中自身（侧栏展开 + 按钮真实绘制） */
+  togglePainted: boolean
+  /** 反链面板容器中心点命中面板内（面板内容真实绘制，非 display:none） */
+  panelPainted: boolean
+  /** 面板当前四态实值（loading/ready/error 由最近 snapshot 决定） */
+  state: 'loading' | 'ready' | 'error' | 'none'
+  /** ready 态的更新中标记（索引重建中，当前为旧数据） */
+  updating: boolean
+  /** 条目序列摘要（与渲染 DOM 同序；空列表 = 无引用或非 ready 态） */
+  items: Array<{ sourceRelPath: string; kind: BacklinkItemPayload['kind']; line: number; snippet: string }>
+  /** 首个条目中心点命中自身（条目真实绘制且可点击） */
+  itemPainted: boolean
+  /** 空态占位中心点命中自身（「没有反向链接」真实可见） */
+  emptyPainted: boolean
+  /** 反链按钮可访问名称 */
+  toggleAriaLabel: string | null
+  /** 反链面板可访问名称（role=region + aria-label） */
+  panelAriaLabel: string | null
+  /** 面板视图状态摘要（形态改版批次：排序/搜索/折叠/更多上下文；旧
+   *  webview 缺省） */
+  view?: {
+    sortMode: string
+    query: string
+    searchOpen: boolean
+    contextLong: boolean
+    collapsedCount: number
+    /** 当前渲染的卡片数（DOM 层计数——搜索过滤的直接证据；旧 webview 缺省） */
+    domCards: number
+  }
+  /** 工具栏中心点命中自身（形态改版批次；旧 webview 缺省） */
+  toolbarPainted?: boolean
+  /** 首个命中高亮 mark 中心点命中自身（形态改版批次；旧 webview 缺省） */
+  hitPainted?: boolean
+  /** 首个命中高亮 mark 的 computed 背景色（形态改版批次；无高亮或 jsdom
+   *  无 CSS 引擎为 null）——黄底变量失效（明暗两值）在此暴露 */
+  hitBg?: string | null
+}
+
+/**
+ * 出链面板观测（出链面板批次）：面板态、四态实值与绘制层证据。语义与
+ * BacklinksProbe 镜像（elementFromPoint 命中类字段、jsdom 恒 false 等
+ * 口径同源，见 BacklinksProbe 注释）；items 为面板当前条目摘要。
+ */
+export interface OutlinksProbe {
+  /** 出链面板 active 态（状态机实值；与大纲/反链面板互斥） */
+  active: boolean
+  /** 出链按钮中心点 elementFromPoint 命中自身（侧栏展开 + 按钮真实绘制） */
+  togglePainted: boolean
+  /** 出链面板容器中心点命中面板内（面板内容真实绘制，非 display:none） */
+  panelPainted: boolean
+  /** 面板当前四态实值（loading/ready/error 由最近 snapshot 决定） */
+  state: 'loading' | 'ready' | 'error' | 'none'
+  /** ready 态的更新中标记（索引重建中，当前为旧数据） */
+  updating: boolean
+  /** 条目序列摘要（与渲染 DOM 同序；空列表 = 无出链或非 ready 态） */
+  items: Array<{
+    targetDisplay: string
+    targetRelPath: string | null
+    kind: OutlinkItemPayload['kind']
+    anchor: string
+    resolved: boolean
+  }>
+  /** 首个条目中心点命中自身（条目真实绘制且可点击） */
+  itemPainted: boolean
+  /** 空态占位中心点命中自身（「无链接」真实可见） */
+  emptyPainted: boolean
+  /** 出链按钮可访问名称 */
+  toggleAriaLabel: string | null
+  /** 出链面板可访问名称（role=region + aria-label） */
+  panelAriaLabel: string | null
 }
 
 /** 表格结构操作码校验（#13） */
@@ -1936,6 +2223,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         (v.readingImageCount === undefined || isNonNegativeInt(v.readingImageCount)) &&
         (v.readingWikilinkCount === undefined || isNonNegativeInt(v.readingWikilinkCount)) &&
         (v.imageStates === undefined || isImageStateCounts(v.imageStates)) &&
+        (v.imageEntries === undefined ||
+          (Array.isArray(v.imageEntries) && v.imageEntries.every(isImageEntryProbe))) &&
         (v.imageProbe === undefined ||
           (Array.isArray(v.imageProbe) && v.imageProbe.every(isImageSlotProbe))) &&
         (v.find === undefined || isFindSessionProbe(v.find)) &&
@@ -1944,6 +2233,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         (v.paint === undefined || isPaintProbe(v.paint)) &&
         (v.sidebar === undefined || isSidebarProbe(v.sidebar)) &&
         (v.outline === undefined || isOutlineProbe(v.outline)) &&
+        (v.backlinks === undefined || isBacklinksProbe(v.backlinks)) &&
+        (v.outlinks === undefined || isOutlinksProbe(v.outlinks)) &&
         (v.fmPopoverOpen === undefined || typeof v.fmPopoverOpen === 'boolean') &&
         (v.typography === undefined || isTypographyProbe(v.typography))
       )
@@ -1994,6 +2285,20 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         isString(v.docUri) &&
         isPositiveInt(v.reqId) &&
         isString(v.src)
+      )
+    case 'image.verify':
+      // #201 周期核验：条目形态（state 枚举 + 可选 reason 码）
+      return (
+        isString(v.sessionId) &&
+        isString(v.docUri) &&
+        Array.isArray(v.items) &&
+        v.items.every(
+          (item: unknown) =>
+            isObject(item) &&
+            isString(item.src) &&
+            (item.state === 'loaded' || item.state === 'loading' || item.state === 'error') &&
+            (item.reason === undefined || isString(item.reason)),
+        )
       )
     case 'image.paste':
       // #161 图片粘贴：mime 白名单形态（image/*）、严格 base64 + 上限、
@@ -2062,6 +2367,24 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
       return true
     case 'styleRef.export':
       return true
+    case 'backlinks.get':
+      return isString(v.sessionId) && isString(v.docUri)
+    case 'backlink.activate':
+      return isString(v.sessionId) && isString(v.docUri) &&
+        isString(v.sourceUri) && isNonNegativeInt(v.offset)
+    case 'outlinks.get':
+      return isString(v.sessionId) && isString(v.docUri)
+    case 'outlink.activate':
+      return isString(v.sessionId) && isString(v.docUri) &&
+        isString(v.targetUri) && isString(v.anchor)
+    case 'index.get':
+    case 'index.resetPatterns':
+    case 'index.cleanup':
+    case 'index.rebuild':
+    case 'index.cancel':
+      return true
+    case 'index.setPatterns':
+      return Array.isArray(v.patterns) && v.patterns.every(isString)
     default:
       return false
   }
@@ -2163,11 +2486,17 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
           (v.reason === 'blocked' ||
             v.reason === 'outside-workspace' ||
             v.reason === 'not-found' ||
-            v.reason === 'read-error') &&
+            v.reason === 'read-error' ||
+            v.reason === 'inaccessible') &&
           (v.detail === undefined || isString(v.detail))
         )
       }
       return false
+    case 'image.invalidate':
+      // #201 失效通知：src 非空数组（空批无广播意义，防御放行不收紧）
+      return Array.isArray(v.srcs) && v.srcs.every(isString)
+    case 'image.wake':
+      return true
     case 'image.paste.result':
       // #161 图片粘贴结果：ok 携完整插入文本；失败 reason 枚举
       if (!isPositiveInt(v.reqId)) {
@@ -2283,6 +2612,17 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         (v.index === undefined || isNonNegativeInt(v.index))
     case 'view.test.click':
       return true
+    case 'backlinks.test.click':
+      return true
+    case 'backlinks.test.itemClick':
+      return isNonNegativeInt(v.index)
+    case 'backlinks.test.toolbarClick':
+      return v.action === 'sort' || v.action === 'search' || v.action === 'collapse' || v.action === 'context'
+    case 'backlinks.test.searchInput':
+      return isString(v.value)
+    case 'backlinks.test.sortSelect':
+      return ['name-asc', 'name-desc', 'mtime-desc', 'mtime-asc', 'birth-desc', 'birth-asc']
+        .includes(v.mode as string)
     case 'refresh.test.click':
       return true
     case 'sync.test.composition':
@@ -2329,7 +2669,146 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         ) &&
         (v.rejections === undefined || isCssSnippetRejectionMap(v.rejections))
       )
+    case 'backlinks.snapshot':
+      return (
+        isString(v.docUri) &&
+        (v.state === 'loading' || v.state === 'ready' || v.state === 'error') &&
+        (v.updating === undefined || typeof v.updating === 'boolean') &&
+        (v.reason === undefined || v.reason === 'no-workspace' || v.reason === 'read-error') &&
+        (v.items === undefined || (Array.isArray(v.items) && v.items.every(isBacklinkItemPayload)))
+      )
+    case 'outlinks.snapshot':
+      return (
+        isString(v.docUri) &&
+        (v.state === 'loading' || v.state === 'ready' || v.state === 'error') &&
+        (v.updating === undefined || typeof v.updating === 'boolean') &&
+        (v.reason === undefined || v.reason === 'no-workspace' || v.reason === 'read-error') &&
+        (v.items === undefined || (Array.isArray(v.items) && v.items.every(isOutlinkItemPayload)))
+      )
+    case 'outlinks.test.click':
+      return true
+    case 'outlinks.test.itemClick':
+      return isNonNegativeInt(v.index)
+    case 'index.state':
+      return (
+        typeof v.available === 'boolean' &&
+        Array.isArray(v.patterns) && v.patterns.every(isString) &&
+        Array.isArray(v.defaults) && v.defaults.every(isString) &&
+        (v.status === 'idle' || v.status === 'cleaning' || v.status === 'rebuilding') &&
+        (v.progress === null || (isObject(v.progress) &&
+          isNonNegativeInt(v.progress.done) && isNonNegativeInt(v.progress.total))) &&
+        isNonNegativeInt(v.roots) &&
+        (v.notice === null || (isObject(v.notice) && isIndexNoticeKind(v.notice.kind) &&
+          (v.notice.detail === undefined || isString(v.notice.detail))))
+      )
     default:
       return false
   }
+}
+
+/** #198 索引维护操作结果反馈种类（index.state.notice.kind） */
+const INDEX_NOTICE_KINDS = [
+  'patterns-saved', 'patterns-invalid', 'rebuild-done', 'rebuild-cancelled',
+  'rebuild-failed', 'cleanup-done', 'cleanup-failed',
+] as const
+
+function isIndexNoticeKind(v: unknown): v is (typeof INDEX_NOTICE_KINDS)[number] {
+  return typeof v === 'string' && (INDEX_NOTICE_KINDS as readonly string[]).includes(v)
+}
+
+/** #197 反链条目载荷形态守卫（新字段可选：旧宿主快照缺省容忍） */
+function isBacklinkItemPayload(v: unknown): v is BacklinkItemPayload {
+  if (!isObject(v)) {
+    return false
+  }
+  return (
+    isString(v.sourceRelPath) &&
+    isString(v.sourceFsPath) &&
+    (v.kind === 'wikilink' || v.kind === 'mdlink' || v.kind === 'image' || v.kind === 'refdef') &&
+    isString(v.anchor) &&
+    isNonNegativeInt(v.start) &&
+    isNonNegativeInt(v.end) &&
+    isPositiveInt(v.line) &&
+    isString(v.snippet) &&
+    (v.snippetStart === undefined || isNonNegativeInt(v.snippetStart)) &&
+    (v.sourceMtimeMs === undefined || (typeof v.sourceMtimeMs === 'number' && v.sourceMtimeMs >= 0)) &&
+    (v.sourceBirthtimeMs === undefined || (typeof v.sourceBirthtimeMs === 'number' && v.sourceBirthtimeMs >= 0)) &&
+    (v.snippetLong === undefined || isString(v.snippetLong)) &&
+    (v.snippetLongStart === undefined || isNonNegativeInt(v.snippetLongStart))
+  )
+}
+
+/** 出链条目载荷形态守卫 */
+function isOutlinkItemPayload(v: unknown): v is OutlinkItemPayload {
+  if (!isObject(v)) {
+    return false
+  }
+  return (
+    isString(v.targetDisplay) &&
+    (v.targetRelPath === null || isString(v.targetRelPath)) &&
+    (v.targetFsPath === null || isString(v.targetFsPath)) &&
+    (v.kind === 'wikilink' || v.kind === 'mdlink' || v.kind === 'image' || v.kind === 'refdef') &&
+    isString(v.anchor) &&
+    typeof v.resolved === 'boolean' &&
+    isNonNegativeInt(v.start) &&
+    isNonNegativeInt(v.end)
+  )
+}
+
+/** #197 反链面板观测形态守卫 */
+function isBacklinksProbe(v: unknown): v is BacklinksProbe {
+  if (!isObject(v)) {
+    return false
+  }
+  return (
+    typeof v.active === 'boolean' &&
+    typeof v.togglePainted === 'boolean' &&
+    typeof v.panelPainted === 'boolean' &&
+    (v.state === 'loading' || v.state === 'ready' || v.state === 'error' || v.state === 'none') &&
+    typeof v.updating === 'boolean' &&
+    Array.isArray(v.items) &&
+    v.items.every(
+      (item) => isObject(item) && isString(item.sourceRelPath) &&
+        (item.kind === 'wikilink' || item.kind === 'mdlink' || item.kind === 'image' || item.kind === 'refdef') &&
+        isPositiveInt(item.line) && isString(item.snippet),
+    ) &&
+    typeof v.itemPainted === 'boolean' &&
+    typeof v.emptyPainted === 'boolean' &&
+    (v.toggleAriaLabel === null || isString(v.toggleAriaLabel)) &&
+    (v.panelAriaLabel === null || isString(v.panelAriaLabel)) &&
+    (v.view === undefined || (isObject(v.view) && isString(v.view.sortMode) &&
+      isString(v.view.query) && typeof v.view.searchOpen === 'boolean' &&
+      typeof v.view.contextLong === 'boolean' &&
+      (v.view.collapsedCount === undefined || isNonNegativeInt(v.view.collapsedCount)) &&
+      (v.view.domCards === undefined || isNonNegativeInt(v.view.domCards)))) &&
+    (v.toolbarPainted === undefined || typeof v.toolbarPainted === 'boolean') &&
+    (v.hitPainted === undefined || typeof v.hitPainted === 'boolean') &&
+    (v.hitBg === undefined || v.hitBg === null || isString(v.hitBg))
+  )
+}
+
+/** 出链面板观测形态守卫 */
+function isOutlinksProbe(v: unknown): v is OutlinksProbe {
+  if (!isObject(v)) {
+    return false
+  }
+  return (
+    typeof v.active === 'boolean' &&
+    typeof v.togglePainted === 'boolean' &&
+    typeof v.panelPainted === 'boolean' &&
+    (v.state === 'loading' || v.state === 'ready' || v.state === 'error' || v.state === 'none') &&
+    typeof v.updating === 'boolean' &&
+    Array.isArray(v.items) &&
+    v.items.every(
+      (item) => isObject(item) && isString(item.targetDisplay) &&
+        (item.targetRelPath === null || isString(item.targetRelPath)) &&
+        (item.kind === 'wikilink' || item.kind === 'mdlink' || item.kind === 'image' || item.kind === 'refdef') &&
+        isString(item.anchor) &&
+        typeof item.resolved === 'boolean',
+    ) &&
+    typeof v.itemPainted === 'boolean' &&
+    typeof v.emptyPainted === 'boolean' &&
+    (v.toggleAriaLabel === null || isString(v.toggleAriaLabel)) &&
+    (v.panelAriaLabel === null || isString(v.panelAriaLabel))
+  )
 }

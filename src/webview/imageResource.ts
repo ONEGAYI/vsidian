@@ -31,6 +31,10 @@ export const IMAGE_CLASS_NAMES = {
   block: 'vsidian-image-block',
   /** 状态修饰类（与 data-vsidian-img-state 同步） */
   state: (s: ImageSlotState) => `vsidian-image-${s}`,
+  /** 失败态细分（#201，叠加在 error 基类上）：明确删除（磁盘正证据 missing） */
+  notfound: 'vsidian-image-notfound',
+  /** 失败态细分（#201）：不可访问（SSH 断连/权限错误，不冒充找不到） */
+  unreachable: 'vsidian-image-unreachable',
 } as const
 
 export interface ImageManagerDeps {
@@ -38,6 +42,10 @@ export interface ImageManagerDeps {
   isDirectSrc(src: string): boolean
   /** 发起宿主解析请求（非直连图源；reqId 由管理器分配并自增） */
   requestHost(src: string, reqId: number): void
+  /** 首个非直连条目建立（#201 周期核验调度启动数据源） */
+  onBecomeActive?(): void
+  /** 非直连条目全部回收（#201「无活跃槽位则停止计时」） */
+  onBecomeIdle?(): void
 }
 
 /** 图源规范化：容错 percent-decode 一次。CommonMark 语义下链接目标就是
@@ -60,12 +68,23 @@ export interface ImageResultPayload {
   detail?: string
 }
 
+/** 活跃图源上报条目（image.verify 的数据源；直连图源除外） */
+export interface ActiveImageEntry {
+  src: string
+  state: 'loaded' | 'loading' | 'error'
+  reason?: string
+  /** 已应用的可加载地址（loading/error 时缺省） */
+  appliedSrc?: string
+}
+
 interface ImageEntry {
   status: 'pending' | 'ok' | 'error'
   /** 解析成功后的可加载地址（直连图源为原始 src） */
   src?: string
   reason?: string
   reqId?: number
+  /** 直连图源（http/https 外链）标记：不参与失效/核验管线（#201 边界） */
+  direct?: boolean
   waiters: Set<HTMLElement>
 }
 
@@ -75,8 +94,8 @@ interface SlotRecord {
   /** 实际承载图片的元素（阅读 = 槽位自身；live = render 回调创建的 img） */
   img: HTMLImageElement | null
   render?: (slot: HTMLElement, src: string) => HTMLImageElement
-  onLoad: () => void
-  onError: () => void
+  onLoad: (event: Event) => void
+  onError: (event: Event) => void
   onClick: (event: MouseEvent) => void
 }
 
@@ -85,6 +104,8 @@ export class ImageResourceManager {
   private readonly slots = new Map<HTMLElement, SlotRecord>()
   private readonly entries = new Map<string, ImageEntry>()
   private nextReqId = 0
+  /** 活跃度通知状态（防抖：状态翻转才回调） */
+  private activityNotified = false
 
   constructor(deps: ImageManagerDeps) {
     this.deps = deps
@@ -109,14 +130,15 @@ export class ImageResourceManager {
     let entry = this.entries.get(rawSrc)
     if (!entry) {
       if (this.deps.isDirectSrc(rawSrc)) {
-        entry = { status: 'ok', src: rawSrc, waiters: new Set() }
+        entry = { status: 'ok', src: rawSrc, direct: true, waiters: new Set() }
         this.entries.set(rawSrc, entry)
       } else {
         const reqId = ++this.nextReqId
-        entry = { status: 'pending', reqId, waiters: new Set() }
+        entry = { status: 'pending', reqId, direct: false, waiters: new Set() }
         // 先入表再发请求：同步实现的 requestHost（测试直驱）产出的结果
         // 才能路由回本条目
         this.entries.set(rawSrc, entry)
+        this.notifyActivity() // 首个非直连条目：启动周期核验（#201）
         this.deps.requestHost(rawSrc, reqId)
       }
     }
@@ -125,8 +147,19 @@ export class ImageResourceManager {
       entry,
       img: null,
       render,
-      onLoad: () => this.setSlotState(slot, 'loaded'),
-      onError: () => this.setSlotState(slot, 'error', 'load-failed'),
+      // #201 代次守卫：load/error 只对「当前承载图片的元素」生效（事件目标
+      // 不是 record.img 时为旧世代在途事件——阅读槽位 img 即 slot、监听与
+      // 槽位同生命周期，invalidate 撤下旧图后 slot 上迟到的旧事件须忽略）
+      onLoad: (event) => {
+        if (event.currentTarget === record.img) {
+          this.setSlotState(slot, 'loaded')
+        }
+      },
+      onError: (event) => {
+        if (event.currentTarget === record.img) {
+          this.setSlotState(slot, 'error', 'load-failed')
+        }
+      },
       onClick: (event) => this.handleRetryClick(slot, event),
     }
     this.slots.set(slot, record)
@@ -160,10 +193,13 @@ export class ImageResourceManager {
       IMAGE_CLASS_NAMES.state('loading'),
       IMAGE_CLASS_NAMES.state('loaded'),
       IMAGE_CLASS_NAMES.state('error'),
+      IMAGE_CLASS_NAMES.notfound,
+      IMAGE_CLASS_NAMES.unreachable,
     )
     if (record.entry.waiters.size === 0) {
       // 条目回收：解析结果字符串一并释放（回视口时重新请求）
       this.entries.delete(record.rawSrc)
+      this.notifyActivity() // 非直连条目可能归零：停止周期核验（#201）
     }
   }
 
@@ -217,7 +253,7 @@ export class ImageResourceManager {
       }
     }
     if (!matched) {
-      return // 未知/迟到 reqId：无在途条目，丢弃
+      return // 未知/迟到 reqId：无在途条目，丢弃（#201 代次守卫）
     }
     if (msg.ok && typeof msg.src === 'string') {
       matched.status = 'ok'
@@ -235,6 +271,43 @@ export class ImageResourceManager {
     for (const slot of matched.waiters) {
       this.setSlotState(slot, 'error', matched.reason)
     }
+  }
+
+  /**
+   * 宿主失效通知（#201 image.invalidate）：作废图源条目并重发请求。
+   * 每个槽位撤下旧图（释放解码位图）回到 loading；旧 reqId 的在途结果
+   * 因条目重建（新 reqId）被丢弃——旧版本在途响应与 load/error 事件都
+   * 不能复活旧图或覆盖新状态。直连图源（外链）与未挂载图源忽略。
+   */
+  invalidate(srcs: readonly string[]): void {
+    for (const raw of srcs) {
+      this.rebuildEntry(normalizeImgSrc(raw))
+    }
+  }
+
+  /**
+   * 活跃图源上报（#201 image.verify 的数据源）：非直连条目的
+   * src/呈现态/原因/已应用地址。条目存在 ⇔ 有活跃槽位（无 waiter 的条目
+   * 在 detach 时已回收）——空列表即「无活跃槽位」，调度器据此停止计时。
+   */
+  activeEntries(): ActiveImageEntry[] {
+    const out: ActiveImageEntry[] = []
+    for (const [src, entry] of this.entries) {
+      if (entry.direct) {
+        continue
+      }
+      const slot = entry.waiters.values().next().value as HTMLElement | undefined
+      const slotState = slot?.dataset['vsidianImgState']
+      const state: ActiveImageEntry['state'] =
+        slotState === 'loaded' || slotState === 'error' ? slotState : 'loading'
+      out.push({
+        src,
+        state,
+        reason: entry.status === 'error' ? entry.reason : undefined,
+        appliedSrc: entry.status === 'ok' ? entry.src : undefined,
+      })
+    }
+    return out
   }
 
   /** 清理已脱离文档的槽位（CM6 widget 移出视口无销毁回调的兜底）。
@@ -267,9 +340,63 @@ export class ImageResourceManager {
       this.detach(slot)
     }
     this.entries.clear()
+    this.notifyActivity()
   }
 
   // ---- 内部 ----
+
+  /** 活跃度通知（防抖语义：状态翻转才回调；重建/重试不改变计数不触发） */
+  private notifyActivity(): void {
+    let has = false
+    for (const entry of this.entries.values()) {
+      if (!entry.direct) {
+        has = true
+        break
+      }
+    }
+    if (has && !this.activityNotified) {
+      this.activityNotified = true
+      this.deps.onBecomeActive?.()
+    } else if (!has && this.activityNotified) {
+      this.activityNotified = false
+      this.deps.onBecomeIdle?.()
+    }
+  }
+
+  /**
+   * 作废并重建一个非直连条目（invalidate 与 error 重试共用的重建路径）：
+   * 槽位不解绑（click/load/error 监听保留），旧 img 释放、槽位回 loading，
+   * 新 reqId 重发请求。旧 reqId 的迟到结果匹配不到任何 pending 条目，
+   * 自然丢弃。
+   */
+  private rebuildEntry(rawSrc: string): ImageEntry | null {
+    const old = this.entries.get(rawSrc)
+    if (!old || old.direct) {
+      return null
+    }
+    this.entries.delete(rawSrc)
+    const reqId = ++this.nextReqId
+    const fresh: ImageEntry = { status: 'pending', reqId, waiters: old.waiters, direct: false }
+    for (const slot of [...fresh.waiters]) {
+      const record = this.slots.get(slot)
+      if (!record) {
+        fresh.waiters.delete(slot)
+        continue
+      }
+      record.entry = fresh
+      this.releaseImages(record)
+      this.setSlotState(slot, 'loading')
+    }
+    if (fresh.waiters.size === 0) {
+      // 重建瞬间槽位已全部离场：直接回收（notifyActivity 保持计数一致）
+      this.entries.delete(rawSrc)
+      this.notifyActivity()
+      return null
+    }
+    this.entries.set(rawSrc, fresh)
+    this.deps.requestHost(rawSrc, reqId)
+    return fresh
+  }
 
   private applyToSlot(slot: HTMLElement, record: SlotRecord, src: string): void {
     this.releaseImages(record)
@@ -287,8 +414,15 @@ export class ImageResourceManager {
 
   private releaseImages(record: SlotRecord): void {
     if (record.img) {
-      record.img.removeEventListener('load', record.onLoad)
-      record.img.removeEventListener('error', record.onError)
+      // live 槽位（有 render 回调）：img 是回调创建的内部元素，load/error
+      // 监听随 img 动态绑定，释放时解绑。阅读槽位的 img 即 slot 本身，
+      // load/error 监听绑在 slot 上与槽位同生命周期（attach/detach 管理），
+      // 这里只清 src——否则重建/重试后再应用 src 会永远停在 loading
+      // （#201 修复：原实现无条件解绑，阅读槽位 invalidate 后监听丢失）
+      if (record.render) {
+        record.img.removeEventListener('load', record.onLoad)
+        record.img.removeEventListener('error', record.onError)
+      }
       // 清空 src：释放解码位图（离开视口即不再占用内存）
       record.img.removeAttribute('src')
       record.img = null
@@ -300,9 +434,19 @@ export class ImageResourceManager {
     for (const s of ['loading', 'loaded', 'error'] as const) {
       slot.classList.toggle(IMAGE_CLASS_NAMES.state(s), s === state)
     }
+    // #201 失败态细分：明确删除与不可访问在 error 基类上叠加修饰类，
+    // 片段与测试可按细分态精确呈现/断言（不冒充彼此）
+    slot.classList.toggle(
+      IMAGE_CLASS_NAMES.notfound,
+      state === 'error' && reason === 'not-found',
+    )
+    slot.classList.toggle(
+      IMAGE_CLASS_NAMES.unreachable,
+      state === 'error' && reason === 'inaccessible',
+    )
     if (state === 'error') {
       slot.dataset['vsidianImgReason'] = reason ?? 'unknown'
-      slot.title = t('decor.imageError', { reason: reason ?? t('decor.unknownReason') })
+      slot.title = imageErrorTitle(reason)
     } else {
       delete slot.dataset['vsidianImgReason']
     }
@@ -324,12 +468,21 @@ export class ImageResourceManager {
       return
     }
     if (entry.status === 'error') {
-      // 宿主解析失败：旧条目作废（同 src 的其他槽位保持本地 error 态，
-      // 可各自重试），解绑后重新 attach 发起新请求（新 reqId）
-      this.entries.delete(record.rawSrc)
-      this.detach(slot)
-      this.attach(slot, record.rawSrc, record.render)
+      // 宿主解析失败：条目作废重建发起新请求（同 src 的其他槽位一并刷新；
+      // 旧 reqId 结果因重建被丢弃——与 #201 invalidate 同一代次守卫）
+      this.rebuildEntry(record.rawSrc)
     }
     // pending：在途请求到达后自然迁移，不重复发起
   }
+}
+
+/** 失败态提示文案：细分原因专属词条，其余沿用通用失败词条 */
+function imageErrorTitle(reason: string | undefined): string {
+  if (reason === 'not-found') {
+    return t('decor.imageNotFound')
+  }
+  if (reason === 'inaccessible') {
+    return t('decor.imageInaccessible')
+  }
+  return t('decor.imageError', { reason: reason ?? t('decor.unknownReason') })
 }

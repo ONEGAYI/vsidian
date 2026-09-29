@@ -47,6 +47,8 @@
   "command.cssSnippets.refresh.title": "CSS 片段：重新加载",
   "command.cssSnippets.pause.title": "CSS 片段：暂停全部",
   "command.cssSnippets.resume.title": "CSS 片段：恢复",
+  "command.index.rebuild.title": "索引：完整重建",
+  "command.index.cleanup.title": "索引：清理当前工作区缓存",
   "command.ui.sidebarToggle.title": "展开或收起右侧栏",
   "command.ui.outlineToggle.title": "显示或隐藏大纲",
   "command.ui.outlineSearch.title": "搜索大纲标题",
@@ -54,5 +56,7 @@
   "command.ui.outlineReset.title": "重置大纲",
   "command.ui.outlineCollapseAll.title": "折叠全部大纲",
   "command.ui.outlineExpandAll.title": "展开全部大纲",
+  "command.ui.backlinksToggle.title": "显示或隐藏反链面板",
+  "command.ui.outlinksToggle.title": "显示或隐藏出链面板",
   "command.editor.refresh.title": "刷新嵌入资源"
 }

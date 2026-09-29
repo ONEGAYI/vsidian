@@ -113,14 +113,20 @@ describe('布局结构（#53）', () => {
     expect(bar, '侧栏应有 vsidian-sidebar-toolbar 自有顶栏').toBeTruthy()
     const actions = bar!.querySelector<HTMLElement>('.vsidian-sidebar-toolbar-actions')
     expect(actions, '侧栏顶栏应有按钮容器 vsidian-sidebar-toolbar-actions').toBeTruthy()
-    // #54 起：容器内为「大纲」按钮（当前唯一一项）
-    expect(actions!.children.length).toBe(1)
+    // #54 起：容器内为「大纲」按钮；#197 起并排「反链」按钮；出链面板
+    // 批次起再并「出链」按钮（三按钮分别切换互斥面板）
+    expect(actions!.children.length).toBe(3)
     expect(actions!.firstElementChild!.classList.contains('vsidian-outline-toggle')).toBe(true)
+    expect(actions!.children[1]!.classList.contains('vsidian-backlinks-toggle')).toBe(true)
+    expect(actions!.children[2]!.classList.contains('vsidian-outlinks-toggle')).toBe(true)
     const panel = sidebar.querySelector<HTMLElement>('.vsidian-sidebar-panel')
     expect(panel, '侧栏应有 vsidian-sidebar-panel 面板容器').toBeTruthy()
-    // #54 起：面板区域内为大纲面板容器
-    expect(panel!.children.length).toBe(1)
+    // #54 起：面板区域内为大纲面板容器；#197 起并挂反链面板容器；出链
+    // 面板批次起再挂出链面板容器（互斥显隐）
+    expect(panel!.children.length).toBe(3)
     expect(panel!.firstElementChild!.classList.contains('vsidian-outline-panel')).toBe(true)
+    expect(panel!.children[1]!.classList.contains('vsidian-backlink-panel')).toBe(true)
+    expect(panel!.children[2]!.classList.contains('vsidian-outlink-panel')).toBe(true)
   })
 
   it('侧栏 DOM 不随模式显隐（布局为两模式共用，显隐只由侧栏状态控制）', () => {

@@ -108,10 +108,10 @@ describe('本地编辑 → edit.request', () => {
       ],
     })
     // ready + init 主动回报 view.state（模式缓存数据源）+ init 后拉取设置
-    // 快照的 settings.get（#33）/ 快捷键快照（#91）/ 片段清单（#128）
-    // + 一条 edit.request
+    // 快照的 settings.get（#33）/ 快捷键快照（#91）/ 片段清单（#128）/
+    // 反链快照（#197）/ 出链快照（出链面板批次）+ 一条 edit.request
     expect(sent.filter((m) => m.kind === 'edit.request')).toHaveLength(1)
-    expect(sent.filter((m) => m.kind !== 'view.state')).toHaveLength(5)
+    expect(sent.filter((m) => m.kind !== 'view.state')).toHaveLength(7)
     const req = sent.find((m): m is Extract<WebviewToHost, { kind: 'edit.request' }> => m.kind === 'edit.request')!
     expect(req.changes).toEqual([
       { offset: 0, length: 1, text: '甲' },
@@ -259,6 +259,111 @@ describe('view.state 诊断', () => {
     expect(msg.docLength).toBe('# 标题\n正文'.length)
     expect(msg.lineCount).toBe(2)
     expect(Number.isInteger(msg.renderedLines)).toBe(true)
+  })
+})
+
+describe('反链快照广播乱序（review-loops #16）', () => {
+  const snapshotItem = (sourceRelPath: string) => ({
+    sourceRelPath,
+    sourceFsPath: `d:/notes/${sourceRelPath}`,
+    kind: 'wikilink' as const,
+    anchor: '',
+    start: 0,
+    end: 10,
+    line: 1,
+    snippet: 'x',
+  })
+  const backlinksOfView = (c: WebviewSyncController, sent: WebviewToHost[]) => {
+    c.handleHostMessage({ kind: 'view.state.request' })
+    const msg = sent.filter((m): m is Extract<WebviewToHost, { kind: 'view.state' }> => m.kind === 'view.state').at(-1)!
+    return msg.backlinks!
+  }
+
+  it('乱序到达的降序快照被丢弃（面板保持最新序号内容）', () => {
+    const { bridge, sent } = makeBridge()
+    const c = mount(bridge)
+    init(c)
+    // seq=2 先到（来源 newer.md），seq=1 迟到（来源 older.md）→ 丢弃
+    c.handleHostMessage({ kind: 'backlinks.snapshot', docUri: DOC_URI, state: 'ready', items: [snapshotItem('newer.md')], seq: 2 })
+    c.handleHostMessage({ kind: 'backlinks.snapshot', docUri: DOC_URI, state: 'ready', items: [snapshotItem('older.md')], seq: 1 })
+    expect(backlinksOfView(c, sent).items.map((i) => i.sourceRelPath)).toEqual(['newer.md'])
+  })
+
+  it('同序号及以上快照照常应用，无序号帧不丢弃（兼容缺省）', () => {
+    const { bridge, sent } = makeBridge()
+    const c = mount(bridge)
+    init(c)
+    c.handleHostMessage({ kind: 'backlinks.snapshot', docUri: DOC_URI, state: 'ready', items: [snapshotItem('a.md')], seq: 1 })
+    c.handleHostMessage({ kind: 'backlinks.snapshot', docUri: DOC_URI, state: 'ready', items: [snapshotItem('b.md')], seq: 1 })
+    expect(backlinksOfView(c, sent).items.map((i) => i.sourceRelPath)).toEqual(['b.md'])
+    c.handleHostMessage({ kind: 'backlinks.snapshot', docUri: DOC_URI, state: 'ready', items: [snapshotItem('c.md')] })
+    expect(backlinksOfView(c, sent).items.map((i) => i.sourceRelPath)).toEqual(['c.md'])
+  })
+})
+
+describe('排序菜单真实点击次序（验收反馈：外点收起吞掉菜单项 click）', () => {
+  // 真实用户点击 = pointerdown（capture 层外点收起监听先派发）→ 面板重渲
+  // → click 落点元素可能已被重建摘除。合成 item.click()（无 pointerdown
+  // 前置）测不出该次序，须按真实事件序派发
+  const mtimeItem = (sourceRelPath: string, sourceMtimeMs: number) => ({
+    sourceRelPath,
+    sourceFsPath: `d:/notes/${sourceRelPath}`,
+    kind: 'wikilink' as const,
+    anchor: '',
+    start: 0,
+    end: 10,
+    line: 1,
+    snippet: 'x',
+    sourceMtimeMs,
+  })
+  const mountWithSortMenu = () => {
+    const { bridge } = makeBridge()
+    const c = new WebviewSyncController(bridge)
+    const parent = document.createElement('div')
+    // 挂进 document：外点收起监听在 document 捕获层，游离树里 pointerdown
+    // 冒泡到不了 document（首版回路假绿的根因）
+    document.body.appendChild(parent)
+    c.mount(parent)
+    c.handleHostMessage({ kind: 'init', sessionId: 's1', docUri: DOC_URI, version: 1, text: '# 标题' })
+    c.handleHostMessage({
+      kind: 'backlinks.snapshot', docUri: DOC_URI, state: 'ready',
+      items: [mtimeItem('a.md', 100), mtimeItem('b.md', 200)], seq: 1,
+    })
+    c.handleHostMessage({ kind: 'sidebar.test.click' })
+    c.handleHostMessage({ kind: 'backlinks.test.click' })
+    c.handleHostMessage({ kind: 'backlinks.test.toolbarClick', action: 'sort' })
+    const panel = parent.querySelector<HTMLElement>('.vsidian-backlink-panel')!
+    return { c, panel, parent }
+  }
+  const groupOrder = (panel: HTMLElement) =>
+    [...panel.querySelectorAll<HTMLElement>('.vsidian-backlink-group-header')]
+      .map((el) => el.dataset['vsidianSource'])
+
+  it('pointerdown → click 选择排序项：改选生效、分组重排、菜单收起', () => {
+    const { panel, parent } = mountWithSortMenu()
+    try {
+      expect(panel.querySelector('.vsidian-backlink-sort-menu'), '前置：菜单应开').not.toBeNull()
+      expect(groupOrder(panel)).toEqual(['a.md', 'b.md'])
+      const target = panel.querySelector<HTMLElement>('[data-vsidian-sort="mtime-desc"]')!
+      target.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }))
+      target.click()
+      expect(panel.querySelector('.vsidian-backlink-sort-menu'), '选择后菜单应收起').toBeNull()
+      expect(groupOrder(panel), '编辑时间降序应重排分组').toEqual(['b.md', 'a.md'])
+    } finally {
+      parent.remove()
+    }
+  })
+
+  it('pointerdown → click 排序按钮（菜单开态）：应收起菜单而非保持开', () => {
+    const { panel, parent } = mountWithSortMenu()
+    try {
+      const sortBtn = panel.querySelector<HTMLElement>('[data-action="sort"]')!
+      sortBtn.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }))
+      sortBtn.click()
+      expect(panel.querySelector('.vsidian-backlink-sort-menu'), '开态点排序按钮应收起').toBeNull()
+    } finally {
+      parent.remove()
+    }
   })
 })
 

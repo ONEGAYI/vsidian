@@ -21,7 +21,13 @@
 // 本模块不依赖 vscode（可在 node 单测直驱）；fsPath 语义由注入的
 // LinkContext 提供，vscode 层负责 Uri ↔ fsPath 的双向换算（同一扩展宿主
 // 内 round-trip，天然不混用本地与远程 URI）。
+//
+// #196 起：工作区路径解析（docDir 基准拼接、越界判别、扩展名候选）统一
+// 经 src/shared/vaultLink.ts 的 planVaultLinkPath（双链跳转与后续索引/
+// 重命名共用的同一解析器，不建重复实现）——本模块保留 scheme 白名单、
+// fragment 拆分与容错解码等链接语法层职责。
 import * as path from 'node:path'
+import { planVaultLinkPath } from '../shared/vaultLink'
 
 /** 目标解析上下文（宿主文件系统语义由注入方描述） */
 export interface LinkContext {
@@ -61,13 +67,17 @@ export type ImageTarget =
       detail?: string
     }
 
-/** 宿主图片解析结果（会话经面板端口注入实现；reason 与协议 image.result 对齐） */
+/** 宿主图片解析结果（会话经面板端口注入实现；reason 与协议 image.result 对齐）。
+ *  fsPath（#201）：解析出的目标磁盘路径（成功与失败分支都带——失败登记
+ *  反查映射后，删除→恢复的事件链路才能即时反查到 src），供会话失效通道
+ *  按归一目标登记；不带时（旧注入形态）失效按无映射处理（不产生假阳性） */
 export type ImageResolution =
-  | { ok: true; src: string }
+  | { ok: true; src: string; fsPath?: string }
   | {
       ok: false
-      reason: 'blocked' | 'outside-workspace' | 'not-found' | 'read-error'
+      reason: 'blocked' | 'outside-workspace' | 'not-found' | 'read-error' | 'inaccessible'
       detail?: string
+      fsPath?: string
     }
 
 /**
@@ -102,10 +112,10 @@ function tolerantDecode(text: string): string {
   }
 }
 
-/** 按注入语义选择路径实现：Windows/POSIX 分类不得依赖运行进程的平台
- *  （在 Windows 上跑单测也必须能验 POSIX 远程语义，反之亦然） */
-function pathOps(ctx: LinkContext) {
-  return ctx.isWindowsHost ? path.win32 : path.posix
+/** 喂给根内路径规划器的路径文本：剥 hash/query 后容错解码（trim 与
+ *  分隔符归一是规划器自身职责，此处不重复） */
+function planPathTextOf(href: string): string {
+  return tolerantDecode(href.split('#')[0]!.split('?')[0]!)
 }
 
 /**
@@ -128,43 +138,6 @@ function splitHrefFragment(
     return { pathText: href.slice(0, hashIdx), fragment: null }
   }
   return { pathText: href.slice(0, hashIdx), fragment: tolerantDecode(rawFragment) }
-}
-
-/** 解析为工作区内的绝对路径：返回绝对 fsPath；越出资源根返回 null */
-function resolveInside(href: string, ctx: LinkContext): string | null {
-  // 剥掉 #fragment 与 ?query（路径部分才参与解析；链接通道的 fragment 已
-  // 由 #160 的 splitHrefFragment 结构化保留，此处剥除对图片通道与防御性
-  // 重复剥除均为无操作——pathText 无 # 时 split('#')[0] 即原文）
-  const withoutHash = href.split('#')[0]!
-  const pathPart = withoutHash.split('?')[0]!
-  let p = tolerantDecode(pathPart.trim())
-  // Windows 宿主上统一分隔符（远程 POSIX 宿主不转换：正斜杠本就合法，
-  // 反斜杠是普通文件名字符——两类语义不得混用）
-  if (ctx.isWindowsHost) {
-    p = p.replace(/\\/g, '/')
-  }
-  if (p === '') {
-    return null
-  }
-  const ops = pathOps(ctx)
-  const absolute = ops.resolve(ctx.docDir, p)
-  if (!isInsideRoot(absolute, ctx.rootDir, ops)) {
-    return null
-  }
-  return absolute
-}
-
-/** absolute 是否位于 root 内（含 root 本身） */
-function isInsideRoot(
-  absolute: string,
-  rootDir: string,
-  ops: ReturnType<typeof pathOps>,
-): boolean {
-  const rel = ops.relative(rootDir, absolute)
-  if (rel === '') {
-    return true
-  }
-  return rel !== '..' && !rel.startsWith(`..${ops.sep}`) && !ops.isAbsolute(rel)
 }
 
 /** Windows 宿主的 Win32 规范化怪异形态：basename 含 ':'（NTFS 备用数据流，
@@ -250,18 +223,15 @@ export function classifyLinkTarget(href: string, ctx: LinkContext): LinkTarget {
   if (pre.kind !== 'path') {
     return pre
   }
-  // #160 首个 `#` 拆分：路径部分参与解析（?query 仍由 resolveInside 剥），
-  // fragment 结构化保留——含空格的宽松字面目标在此层同样拆分
+  // #160 首个 `#` 拆分：路径部分参与解析（?query 随 planPathTextOf 剥除），
+  // fragment 结构化保留——含空格的宽松字面目标在此层同样拆分。
+  // 候选规划（docDir 基准、越界判别、无扩展名补 .md）统一走 vaultLink（#196）
   const { pathText, fragment } = splitHrefFragment(pre.pathText)
-  const absolute = resolveInside(pathText, ctx)
-  if (absolute === null) {
+  const plan = planVaultLinkPath(planPathTextOf(pathText), ctx, { implicitMd: true })
+  if (plan.kind === 'escape') {
     return { kind: 'blocked', reason: 'escape', detail: pre.pathText }
   }
-  const candidates = [absolute]
-  if (!pathOps(ctx).extname(absolute)) {
-    candidates.push(`${absolute}.md`)
-  }
-  return { kind: 'doc', candidates, fragment }
+  return { kind: 'doc', candidates: plan.candidates, fragment }
 }
 
 /** 图片目标分类：仅工作区内相对路径可经宿主读取；外链/危险 scheme 拦截
@@ -278,11 +248,12 @@ export function classifyImageTarget(src: string, ctx: LinkContext): ImageTarget 
   if (pre.kind === 'blocked') {
     return pre
   }
-  const absolute = resolveInside(pre.pathText, ctx)
-  if (absolute === null) {
+  // 图片单候选精确路径（implicitMd=false：显式扩展名不补 .md）
+  const plan = planVaultLinkPath(planPathTextOf(pre.pathText), ctx, { implicitMd: false })
+  if (plan.kind === 'escape') {
     return { kind: 'blocked', reason: 'escape', detail: pre.pathText }
   }
-  return { kind: 'workspace', fsPath: absolute }
+  return { kind: 'workspace', fsPath: plan.candidates[0]! }
 }
 
 /** blocked reason → 协议 image.result 的 reason 码（vscode 层换算用） */

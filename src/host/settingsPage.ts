@@ -21,6 +21,7 @@ import { hostLocale } from './hostLocale'
 import type { SettingsService } from './settingsService'
 import type { KeybindingService } from './keybindingService'
 import type { CssSnippetState } from '../shared/cssSnippets'
+import type { IndexStateMessage } from './vaultIndexMaintenance'
 
 /** #128 CSS 片段管理接线（extension.ts 注入）：设置页面板的片段消息处理
  *  与状态推送。目录选择对话框（chooseDirectory）经回调进宿主 vscode 层——
@@ -36,6 +37,18 @@ export interface SnippetPageWiring {
   chooseDirectory(): Promise<string | null>
   /** 在系统文件管理器中打开当前片段目录 */
   openDirectory(): void
+}
+
+/** #198 索引维护接线（extension.ts 注入）：设置页面板的索引维护消息处理
+ *  与状态推送（排除模式/清理/重建/取消）。操作结果经 index.state 推送，
+ *  不逐次应答 */
+export interface IndexPageWiring {
+  getState(): IndexStateMessage
+  setPatterns(patterns: string[]): Promise<unknown>
+  resetPatterns(): Promise<unknown>
+  cleanup(): Promise<unknown>
+  rebuild(): Promise<unknown>
+  cancel(): void
 }
 
 /** 设置页面板 viewType（createWebviewPanel 无需清单声明，customEditors 才要求） */
@@ -74,6 +87,11 @@ export interface SettingsPageHandle {
    */
   notifySnippetsChanged(): void
   /**
+   * #198 索引维护：宿主维护状态变更后向已开设置页发 index.state
+   * （面板未开时 no-op——重开经 index.get 重新拉取权威状态回显）
+   */
+  notifyIndexChanged(): void
+  /**
    * #132 样式参考：打开（或 reveal）设置页并定位到指定附加分页。
    * 面板未 ready 时在握手完成后补发（webview 装载是异步的）
    */
@@ -88,6 +106,8 @@ export function createSettingsPage(
   /** #145 样式契约 JSON 导出（extension.ts 注入 runStyleReferenceExport；
    *  设置页按钮与命令面板命令共用同一入口，测试可短路） */
   styleRefExport?: () => void | Promise<void>,
+  /** #198 索引维护接线（extension.ts 注入 createIndexMaintenance 产物） */
+  index?: IndexPageWiring,
 ): SettingsPageHandle {
   let panel: vscode.WebviewPanel | undefined
   let ready = false
@@ -183,6 +203,29 @@ export function createSettingsPage(
         // #145 契约 JSON 导出：结果以宿主通知回报，不逐次应答
         void styleRefExport?.()
         return
+      case 'index.get':
+        // #198 索引维护状态拉取（设置页装载/重载的 ready 回填）
+        if (index) {
+          ready = true
+          void current?.webview.postMessage(index.getState())
+        }
+        return
+      case 'index.setPatterns':
+        // 结果（含被拒项回显）经 notifyIndexChanged 的 index.state 推送
+        void index?.setPatterns(message.patterns)
+        return
+      case 'index.resetPatterns':
+        void index?.resetPatterns()
+        return
+      case 'index.cleanup':
+        void index?.cleanup()
+        return
+      case 'index.rebuild':
+        void index?.rebuild()
+        return
+      case 'index.cancel':
+        index?.cancel()
+        return
       case 'settings.set': {
         void service.apply(message.values).then((result) => {
           // 持久化期间设置页可能已关闭或重新打开；旧面板的 webview getter
@@ -277,6 +320,12 @@ export function createSettingsPage(
       void panel.webview.postMessage({ kind: 'snippets.state', directory: state.directory,
         readError: state.readError, paused: state.paused, version: state.version,
         entries: [...state.entries], rejections: state.rejections })
+    },
+    notifyIndexChanged: () => {
+      if (!panel || !index) {
+        return
+      }
+      void panel.webview.postMessage(index.getState())
     },
   }
 }

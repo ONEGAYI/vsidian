@@ -277,6 +277,16 @@
         "category": "Vsidian"
       },
       {
+        "command": "onegayi.vsidian.index.rebuild",
+        "title": "%command.index.rebuild.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.index.cleanup",
+        "title": "%command.index.cleanup.title%",
+        "category": "Vsidian"
+      },
+      {
         "command": "onegayi.vsidian.ui.sidebarToggle",
         "title": "%command.ui.sidebarToggle.title%",
         "category": "Vsidian"
@@ -309,6 +319,16 @@
       {
         "command": "onegayi.vsidian.ui.outlineExpandAll",
         "title": "%command.ui.outlineExpandAll.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.ui.backlinksToggle",
+        "title": "%command.ui.backlinksToggle.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.ui.outlinksToggle",
+        "title": "%command.ui.outlinksToggle.title%",
         "category": "Vsidian"
       },
       {
@@ -394,6 +414,7 @@
     "esbuild": "0.28.2",
     "jsdom": "30.1.1",
     "playwright": "1.62.1",
+    "sql.js": "1.14.2",
     "typescript": "6.0.3",
     "vitest": "5.0.1"
   }

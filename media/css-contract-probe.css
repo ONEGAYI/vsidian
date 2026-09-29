@@ -456,3 +456,25 @@
 #app .vsidian-view-reading .vsidian-code-card-wrap {
   --vsidian-chrome-probe: rgb(238, 0, 1);
 }
+
+/* ---- 反链/出链面板（#197 与出链面板批次；合并 main 时 #191/#208 已占
+        238-239，本组五条与 chromeContract.ts 同步顺延 240 起） ---- */
+#app .vsidian-sidebar .vsidian-backlink-panel {
+  --vsidian-chrome-probe: rgb(240, 0, 1);
+}
+
+#app .vsidian-sidebar .vsidian-sidebar-toolbar .vsidian-backlinks-toggle {
+  --vsidian-chrome-probe: rgb(241, 0, 1);
+}
+
+#app .vsidian-sidebar .vsidian-backlink-toolbar {
+  --vsidian-chrome-probe: rgb(242, 0, 1);
+}
+
+#app .vsidian-sidebar .vsidian-outlink-panel {
+  --vsidian-chrome-probe: rgb(243, 0, 1);
+}
+
+#app .vsidian-sidebar .vsidian-sidebar-toolbar .vsidian-outlinks-toggle {
+  --vsidian-chrome-probe: rgb(244, 0, 1);
+}

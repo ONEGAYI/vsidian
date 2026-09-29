@@ -200,6 +200,162 @@ const TASK_DOC = [
 ].join('\n')
 // #10 链接样例：中文/空格目录（%20 编码形态——CommonMark 无尖括号目标
 // 不允许裸空格）、无扩展名目标、危险 scheme、自动链接与本地图片
+// #199 rename 引用改写样例：目标文档被根目录/子目录引用者以三种边型引用
+// （短名双链 / 显式路径 mdlink / 带标题锚与别名双链 / 子目录上行双链）+
+// 附件引用 + 被移动文档自身出链（改写、撤销、未保存保护与跨根断言载体）
+const RENAME_REF_A_DOC = [
+  '# 改名引用甲',
+  '',
+  '见 [[改名目标]] 与 [同目标](./改名目标.md)。',
+  '',
+  '带锚 [[改名目标#深处小节|别名]]。',
+  '',
+  '附件 ![图](assets/rename-pic.png)。',
+  '',
+].join('\n')
+const RENAME_REF_B_DOC = [
+  '# 改名引用乙',
+  '',
+  '上行 [[../改名目标]]。',
+  '',
+].join('\n')
+const RENAME_MOVED_DOC = [
+  '# 移动自测',
+  '',
+  '见 [[改名目标]] 与 [子文档](notes/rename-note.md)。',
+  '',
+].join('\n')
+const RENAME_NOTE_DOC = [
+  '# 子文档',
+  '',
+].join('\n')
+const RENAME_TARGET_DOC_WITH_ANCHOR = [
+  '# 改名目标',
+  '',
+  '## 深处小节',
+  '',
+  '小节内容。',
+  '',
+].join('\n')
+// #200 目录/批量移动样例：目录（含嵌套层与被引用附件）+ 外部引用者 +
+// 目录内互链与上行出链（目录 rename/move、批量合并反馈的断言载体）
+const DIR_INNER_A_DOC = [
+  '# 互链甲',
+  '',
+  '互链 [[inner-b]] 与上行 [[../c-out]]。',
+  '',
+].join('\n')
+const DIR_INNER_B_DOC = [
+  '# 互链乙',
+  '',
+].join('\n')
+const DIR_INNER_C_DOC = [
+  '# 嵌套丙',
+  '',
+].join('\n')
+const DIR_OUTSIDE_C_DOC = [
+  '# 目录外目标',
+  '',
+].join('\n')
+const DIR_REF_DOC = [
+  '# 目录引用者',
+  '',
+  '外部 [[dir-move/inner-a]]、[乙](dir-move/inner-b.md) 与 [丙](dir-move/deep/inner-c.md)。',
+  '',
+  '附件 ![图](dir-move/dir-pic.png)。',
+  '',
+].join('\n')
+// #200 多文件同批 rename 专属样例：与 #199 漂移保护用例共享文档会踩其
+// finally 泄漏的 dirty buffer 与覆盖层滞留（#199 已知边界——编辑即自愈，
+// 跨用例不自愈），独立文档组保证同批改写断言不受前序用例污染
+const BATCH_TARGET_DOC = [
+  '# 批目标',
+  '',
+  '## 深处小节',
+  '',
+  '小节内容。',
+  '',
+].join('\n')
+const BATCH_REF_A_DOC = [
+  '# 批引用甲',
+  '',
+  '见 [[批目标]] 与 [同目标](./批目标.md)。',
+  '',
+  '带锚 [[批目标#深处小节|别名]]。',
+  '',
+  '附件 ![图](assets/batch-pic.png)。',
+  '',
+].join('\n')
+const BATCH_REF_B_DOC = [
+  '# 批引用乙',
+  '',
+  '上行 [[../批目标]]。',
+  '',
+].join('\n')
+const BATCH_MOVED_DOC = [
+  '# 批移动自测',
+  '',
+  '见 [[批目标]]。',
+  '',
+].join('\n')
+
+// #197 反链样例：目标文档被两个引用者以三种边型引用（wikilink 短名 /
+// mdlink 显式路径 / wikilink 带标题锚）——反链面板与跳转的断言载体。
+// 目标文档的反链期望（sortEdges 序：来源路径 → 区间）：
+//   backlinks-a.md: [[反链目标]]、[同目标](./反链目标.md)、[[反链目标#深处小节]]
+//   backlinks-b.md: [[反链目标]]
+const BACKLINKS_SOURCE_A_DOC = [
+  '# 反链引用者甲',
+  '',
+  '见 [[反链目标]] 与 [同目标](./反链目标.md)。',
+  '',
+  '第二段引用 [[反链目标#深处小节]]。',
+  '',
+].join('\n')
+const BACKLINKS_SOURCE_B_DOC = [
+  '# 反链引用者乙',
+  '',
+  '上行引用 [[反链目标]]。',
+  '',
+].join('\n')
+const BACKLINKS_TARGET_DOC = [
+  '# 反链目标',
+  '',
+  '开篇段落。',
+  '',
+  '## 深处小节',
+  '',
+  '小节内容。',
+  '',
+].join('\n')
+
+// 出链面板样例（出链面板批次）：源文档覆盖命中（普通/带锚点）、断链与
+// 外链四形态——出链面板条目序与锚点跳转的断言载体。
+// 出链期望（resolved 优先 → 显示名码位 → 区间；外链不进面板）：
+//   出链普通目标（resolved）、出链锚点目标（resolved，anchor=深处小节）、
+//   不存在的出链目标（断链，display 用原文）
+const OUTLINKS_SOURCE_DOC = [
+  '# 出链源',
+  '',
+  '锚点引用 [[出链锚点目标#深处小节]] 与普通引用 [[出链普通目标]]。',
+  '断链 [[不存在的出链目标]] 与外链 [外部](https://example.com)。',
+  '',
+].join('\n')
+const OUTLINKS_ANCHOR_DOC = [
+  '# 锚点目标',
+  '',
+  '## 深处小节',
+  '',
+  '深处正文。',
+  '',
+].join('\n')
+const OUTLINKS_PLAIN_DOC = [
+  '# 普通目标',
+  '',
+  '正文。',
+  '',
+].join('\n')
+
 const LINKS_DOC = [
   '# 链接样例',
   '',
@@ -232,6 +388,12 @@ const IMAGES_DOC = [
 // 1x1 透明 PNG（合法可解码位图，供真实 webview 装载断言）
 const TINY_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
+// #201 图片刷新：1x1 纯绿 / 1x1 纯蓝 PNG（覆盖保存后内容真实不同——
+// 代次推进 + 新版本 URL 返回新内容的链路载体）
+const REFRESH_GREEN_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgaGAAAAEEAIFw9selAAAAAElFTkSuQmCC'
+const REFRESH_BLUE_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYPgPAAEDAQAIicLsAAAAAElFTkSuQmCC'
 export const LARGE_DOC_LINES = 100_000
 
 // #133 界面域样式契约样例：公式（行内/块级/错误）、mermaid（有效/无效）、
@@ -759,11 +921,68 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   ].join('\n'), 'utf8')
   mkdirSync(path.join(wsDir, 'assets'), { recursive: true })
   writeFileSync(path.join(wsDir, 'assets', '图片 一.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
+  // #201 图片刷新：初始绿图 + 备用蓝图（覆盖保存的新内容载体）+ 引用文档
+  writeFileSync(path.join(wsDir, 'assets', '刷新甲.png'), Buffer.from(REFRESH_GREEN_PNG_BASE64, 'base64'))
+  writeFileSync(path.join(wsDir, 'assets', '刷新乙.png'), Buffer.from(REFRESH_GREEN_PNG_BASE64, 'base64'))
+  writeFileSync(path.join(wsDir, 'image-refresh.md'), [
+    '# 图片刷新样例',
+    '',
+    '![刷新甲](assets/刷新甲.png)',
+    '',
+    '![刷新乙](assets/刷新乙.png)',
+    '',
+    '结尾段。',
+    '',
+  ].join('\n'), 'utf8')
   // #208 初始 1x1 透明图（刷新后用例覆写为 2x2 红色，naturalWidth 1→2
   // 证明浏览器实际解码了新代次地址的字节）
   writeFileSync(path.join(wsDir, 'assets', '刷新图.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
   // #11 双链：源文档、按名/屏外标题目标、文本编辑器 reveal 目标、重名候选
   // 与大小写目标（Windows 宿主大小写不敏感匹配的断言载体）
+  // #197 反链：两个引用者 + 被引目标（反链面板、四态与跳转断言载体）
+  writeFileSync(path.join(wsDir, 'backlinks-a.md'), BACKLINKS_SOURCE_A_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'backlinks-b.md'), BACKLINKS_SOURCE_B_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, '反链目标.md'), BACKLINKS_TARGET_DOC, 'utf8')
+  // 出链面板批次：源文档（命中/锚点/断链/外链四形态）+ 两个目标
+  writeFileSync(path.join(wsDir, '出链源.md'), OUTLINKS_SOURCE_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, '出链锚点目标.md'), OUTLINKS_ANCHOR_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, '出链普通目标.md'), OUTLINKS_PLAIN_DOC, 'utf8')
+  // review-loops #18 宿主级退役用例：独立文档组（目标基线无引用 → 空态起
+  // 步；幽灵来源基线不含目标引用 → 未保存编辑制造的引用是纯覆盖层幽灵）
+  writeFileSync(path.join(wsDir, 'rl18-target.md'), [
+    '# 退役目标',
+    '',
+    '正文。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'rl18-ghost.md'), [
+    '# 幽灵来源',
+    '',
+    '基线无引用。',
+    '',
+  ].join('\n'), 'utf8')
+  // #199 rename 引用改写：目标 + 根/子目录引用者 + 被移动文档与子文档 + 附件
+  writeFileSync(path.join(wsDir, '改名目标.md'), RENAME_TARGET_DOC_WITH_ANCHOR, 'utf8')
+  writeFileSync(path.join(wsDir, 'rename-ref-a.md'), RENAME_REF_A_DOC, 'utf8')
+  mkdirSync(path.join(wsDir, 'notes'), { recursive: true })
+  writeFileSync(path.join(wsDir, 'notes', 'rename-ref-b.md'), RENAME_REF_B_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'rename-moved.md'), RENAME_MOVED_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'notes', 'rename-note.md'), RENAME_NOTE_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'assets', 'rename-pic.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
+  // #200 目录/批量移动：目录（互链 + 嵌套 + 被引用附件）+ 外部引用者 + 上行目标
+  mkdirSync(path.join(wsDir, 'dir-move', 'deep'), { recursive: true })
+  writeFileSync(path.join(wsDir, 'dir-move', 'inner-a.md'), DIR_INNER_A_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'dir-move', 'inner-b.md'), DIR_INNER_B_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'dir-move', 'deep', 'inner-c.md'), DIR_INNER_C_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'dir-move', 'dir-pic.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
+  writeFileSync(path.join(wsDir, 'c-out.md'), DIR_OUTSIDE_C_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'dir-ref.md'), DIR_REF_DOC, 'utf8')
+  // #200 多文件同批 rename：独立文档组（目标 + 根/子目录引用者 + 附件 + 出链载体）
+  writeFileSync(path.join(wsDir, '批目标.md'), BATCH_TARGET_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'batch-ref-a.md'), BATCH_REF_A_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'notes', 'batch-ref-b.md'), BATCH_REF_B_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'batch-moved.md'), BATCH_MOVED_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'assets', 'batch-pic.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
   writeFileSync(path.join(wsDir, 'wikilinks.md'), WIKILINKS_DOC, 'utf8')
   writeFileSync(path.join(wsDir, '目标笔记.md'), TARGET_NOTE_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'wikilink-target.md'), WIKILINK_TARGET_DOC, 'utf8')

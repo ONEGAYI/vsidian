@@ -28,6 +28,7 @@ logs/
 
 # ZCode 会话状态目录（本地工具产物，不入库）
 .zcode/
+logs-203/
 .zcodeignore
 
 # 其他 agent 工具的本地附件（不入库）

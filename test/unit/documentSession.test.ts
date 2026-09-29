@@ -131,6 +131,9 @@ function setup(
     ) => void
     /** #96 R1：语言供应者（vscode 层注入 hostLocale + LOCALE_MESSAGES） */
     requestLocale?: () => { lang: string; messages: Record<string, string> } | undefined
+    /** #201：宿主文件系统语义（生产装配注入；测试缺省 Windows 语义便于
+     *  路径写法归一断言） */
+    isWindowsHost?: boolean
   },
 ) {
   const doc = new FakeDoc(text)
@@ -139,6 +142,7 @@ function setup(
     onNotice: opts?.onNotice,
     onViewState: opts?.onViewState,
     requestLocale: opts?.requestLocale,
+    isWindowsHost: opts?.isWindowsHost ?? true,
   })
   doc.onDocChanged((changes, version) => session.handleDocChanged(changes, version))
   const sent = new Map<string, HostToWebview[]>()
@@ -1135,6 +1139,227 @@ describe('#10 image.request：会话解析、去重与结果回发', () => {
     expect(results.length).toBe(1)
     expect((results[0] as { ok: boolean; reason?: string }).ok).toBe(false)
     expect((results[0] as { reason?: string }).reason).toBe('read-error')
+  })
+})
+
+// ---- 工单 #201：图片缓存失效通道与周期核验路由 ----
+
+describe('#201 图片失效通道：缓存删除与全面板广播', () => {
+  const req = (id: string, reqId: number, src: string): WebviewToHost =>
+    ({ kind: 'image.request', sessionId: id, docUri: DOC_URI, reqId, src }) as WebviewToHost
+
+  it('成功解析登记目标映射：invalidateImagesByFsPath 删缓存并广播全部面板', async () => {
+    const s = setup()
+    const calls: string[] = []
+    const panelA: HostToWebview[] = []
+    const panelB: HostToWebview[] = []
+    const mk = (out: HostToWebview[]) =>
+      s.session.attachPanel({
+        send: (m) => out.push(m),
+        resolveImage: async (src) => {
+          calls.push(src)
+          return { ok: true, src: `res://${src}?v=1`, fsPath: 'D:/notes/img/a.png' }
+        },
+      })
+    const idA = mk(panelA)
+    const idB = mk(panelB)
+    await ready10(s, idA)
+    await ready10(s, idB)
+    await s.send(idA, req(idA, 1, './a.png'))
+    expect(calls.length).toBe(1)
+    // 缓存命中：面板 B 同 src 请求不再触达解析器
+    await s.send(idB, req(idB, 2, './a.png'))
+    expect(calls.length).toBe(1)
+    // 失效（路径写法与登记不同——按归一目标匹配）
+    s.session.invalidateImagesByFsPath('d:\\notes\\IMG\\a.png')
+    expect(panelA.filter((m) => m.kind === 'image.invalidate')).toEqual([
+      { kind: 'image.invalidate', srcs: ['./a.png'] },
+    ])
+    expect(panelB.filter((m) => m.kind === 'image.invalidate')).toEqual([
+      { kind: 'image.invalidate', srcs: ['./a.png'] },
+    ])
+    // 失效后重新请求触达解析器（缓存已删）
+    await s.send(idA, req(idA, 3, './a.png'))
+    expect(calls.length).toBe(2)
+  })
+
+  it('失效只命中同目标文件：其他 src 的缓存不受影响', async () => {
+    const s = setup()
+    const calls: string[] = []
+    const out: HostToWebview[] = []
+    const id = s.session.attachPanel({
+      send: (m) => out.push(m),
+      resolveImage: async (src) => {
+        calls.push(src)
+        return {
+          ok: true,
+          src: `res://${src}`,
+          fsPath: src === './a.png' ? 'D:/notes/a.png' : 'D:/notes/b.png',
+        }
+      },
+    })
+    await ready10(s, id)
+    await s.send(id, req(id, 1, './a.png'))
+    await s.send(id, req(id, 2, './b.png'))
+    expect(calls.length).toBe(2)
+    s.session.invalidateImagesByFsPath('D:/notes/a.png')
+    // b.png 未失效：再次请求命中缓存
+    await s.send(id, req(id, 3, './b.png'))
+    expect(calls.length).toBe(2)
+    expect(out.filter((m) => m.kind === 'image.invalidate')).toEqual([
+      { kind: 'image.invalidate', srcs: ['./a.png'] },
+    ])
+  })
+
+  it('在途请求跨失效窗口完成：结果照发但不再写入缓存（迟到结果不复活旧解析）', async () => {
+    const s = setup()
+    const calls: string[] = []
+    const out: HostToWebview[] = []
+    let release: (() => void) | undefined
+    let hold = true
+    const id = s.session.attachPanel({
+      send: (m) => out.push(m),
+      resolveImage: (src) => {
+        calls.push(src)
+        if (!hold) {
+          return Promise.resolve({ ok: true as const, src: 'res://new?v=2', fsPath: 'D:/notes/a.png' })
+        }
+        return new Promise((resolvePromise) => {
+          release = () => resolvePromise({ ok: true as const, src: 'res://old?v=1', fsPath: 'D:/notes/a.png' })
+        })
+      },
+    })
+    await ready10(s, id)
+    const pending = s.send(id, req(id, 1, './a.png'))
+    // 解析在途时目标文件变更：失效先到达（在途登记未发生——反查为空，
+    // 失效时钟仍推进）
+    s.session.invalidateImagesByFsPath('D:/notes/a.png')
+    hold = false
+    release!()
+    await pending
+    // 在途结果仍回发给请求面板（webview 侧代次守卫按 reqId 丢弃），
+    // 完成时按失效时钟检出覆盖：不写缓存并补发失效广播
+    expect(out.filter((m) => m.kind === 'image.result').length).toBe(1)
+    expect(out.filter((m) => m.kind === 'image.invalidate')).toEqual([
+      { kind: 'image.invalidate', srcs: ['./a.png'] },
+    ])
+    // 补失效后缓存未写入：下一次请求重新触达解析器
+    await s.send(id, req(id, 2, './a.png'))
+    expect(calls.length).toBe(2)
+  })
+
+  it('fsPath 未随解析结果提供时（旧注入形态）：失效不产生假阳性广播', async () => {
+    const s = setup()
+    const out: HostToWebview[] = []
+    const id = s.session.attachPanel({
+      send: (m) => out.push(m),
+      resolveImage: async () => ({ ok: true, src: 'res://a' }),
+    })
+    await ready10(s, id)
+    await s.send(id, req(id, 1, './a.png'))
+    // 无 fsPath 登记：按归一 fsPath 找不到 → 不广播
+    s.session.invalidateImagesByFsPath('D:/notes/a.png')
+    expect(out.filter((m) => m.kind === 'image.invalidate').length).toBe(0)
+  })
+})
+
+describe('#201 周期核验路由（image.verify）：端口透传与串行合并', () => {
+  it('会话守卫：未 ready 的 verify 丢弃，不触达端口', async () => {
+    const seen: number[] = []
+    const session = new DocumentSession(new FakeDoc('# t'), {
+      docUri: DOC_URI,
+      verifyImages: async (items) => {
+        seen.push(items.length)
+      },
+    })
+    const out: HostToWebview[] = []
+    const id = session.attachPanel({ send: (m) => out.push(m) })
+    await session.handleWebviewMessage(
+      { kind: 'image.verify', sessionId: id, docUri: DOC_URI, items: [{ src: './a.png', state: 'loaded' }] },
+      id,
+    )
+    expect(seen).toEqual([])
+  })
+
+  it('ready 面板的 verify 经注入端口透传（决策与失效由 provider 协调器执行）', async () => {
+    const seen: Array<Array<{ src: string; state: string; reason?: string }>> = []
+    const doc = new FakeDoc('# t')
+    const session = new DocumentSession(doc, {
+      docUri: DOC_URI,
+      verifyImages: async (items) => {
+        seen.push(items.map((i) => ({ src: i.src, state: i.state, reason: i.reason })))
+      },
+    })
+    const out: HostToWebview[] = []
+    const id = session.attachPanel({ send: (m) => out.push(m) })
+    await session.handleWebviewMessage({ kind: 'ready' }, id)
+    await session.handleWebviewMessage(
+      { kind: 'image.verify', sessionId: id, docUri: DOC_URI, items: [{ src: './a.png', state: 'loaded' }] },
+      id,
+    )
+    expect(seen).toEqual([[{ src: './a.png', state: 'loaded', reason: undefined }]])
+  })
+
+  it('docUri 不匹配的 verify 丢弃', async () => {
+    const seen: number[] = []
+    const session = new DocumentSession(new FakeDoc('# t'), {
+      docUri: DOC_URI,
+      verifyImages: async (items) => {
+        seen.push(items.length)
+      },
+    })
+    const out: HostToWebview[] = []
+    const id = session.attachPanel({ send: (m) => out.push(m) })
+    await session.handleWebviewMessage({ kind: 'ready' }, id)
+    await session.handleWebviewMessage(
+      { kind: 'image.verify', sessionId: id, docUri: 'file:///other.md', items: [{ src: './a.png', state: 'loaded' }] },
+      id,
+    )
+    expect(seen).toEqual([])
+  })
+
+  it('并发 verify 串行合并（并发有界）：第二轮等第一轮端口完成', async () => {
+    const order: string[] = []
+    let releaseFirst: (() => void) | undefined
+    const session = new DocumentSession(new FakeDoc('# t'), {
+      docUri: DOC_URI,
+      verifyImages: (items) => {
+        order.push(`start-${items.length}`)
+        if (!releaseFirst) {
+          return new Promise<void>((resolvePromise) => {
+            releaseFirst = () => {
+              order.push('end-1')
+              resolvePromise()
+            }
+          })
+        }
+        order.push('end-2')
+        return Promise.resolve()
+      },
+    })
+    const out: HostToWebview[] = []
+    const id = session.attachPanel({ send: (m) => out.push(m) })
+    await session.handleWebviewMessage({ kind: 'ready' }, id)
+    const first = session.handleWebviewMessage(
+      { kind: 'image.verify', sessionId: id, docUri: DOC_URI, items: [{ src: './a.png', state: 'loaded' }] },
+      id,
+    )
+    const second = session.handleWebviewMessage(
+      {
+        kind: 'image.verify', sessionId: id, docUri: DOC_URI,
+        items: [
+          { src: './a.png', state: 'loaded' },
+          { src: './b.png', state: 'error', reason: 'not-found' },
+        ],
+      },
+      id,
+    )
+    // 第一轮挂起时第二轮不启动（串行）：让出入队微任务后首轮端口已启动
+    await Promise.resolve()
+    expect(order).toEqual(['start-1'])
+    releaseFirst!()
+    await Promise.all([first, second])
+    expect(order).toEqual(['start-1', 'end-1', 'start-2', 'end-2'])
   })
 })
 

@@ -47,6 +47,8 @@
   "command.cssSnippets.refresh.title": "CSS snippets: reload",
   "command.cssSnippets.pause.title": "CSS snippets: pause all",
   "command.cssSnippets.resume.title": "CSS snippets: resume",
+  "command.index.rebuild.title": "Index: full rebuild",
+  "command.index.cleanup.title": "Index: clean workspace cache",
   "command.ui.sidebarToggle.title": "Expand or collapse the sidebar",
   "command.ui.outlineToggle.title": "Show or hide the outline",
   "command.ui.outlineSearch.title": "Search headings",
@@ -54,5 +56,7 @@
   "command.ui.outlineReset.title": "Reset outline",
   "command.ui.outlineCollapseAll.title": "Collapse all outline headings",
   "command.ui.outlineExpandAll.title": "Expand all outline headings",
+  "command.ui.backlinksToggle.title": "Show or hide the backlinks panel",
+  "command.ui.outlinksToggle.title": "Show or hide the outgoing links panel",
   "command.editor.refresh.title": "Refresh embedded resources"
 }
