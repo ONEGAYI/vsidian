@@ -116,6 +116,12 @@ export type HostToWebview =
       ok: false
       reason: 'invalid-location' | 'write-failed' | 'invalid'
     }
+  /** #208 刷新失效通知（refresh.request 的应答，reqId 配对）：webview 收到
+   *  后全量失效图片条目并对活跃槽位重新解析（image.request 新 reqId，宿主
+   *  缓存已清、新 URI 带 ?v=<generation> 代次戳）+ 重置 Mermaid 懒加载失败
+   *  终态。generation 为自增后的资源代次（恒 ≥ 1，观测面——webview 的失效
+   *  动作无条件执行，不依赖其值做判定） */
+  | { kind: 'refresh.invalidated'; reqId: number; generation: number }
   /** 测试钩子（#161）：登记图片粘贴在途 reqId。集成测试经宿主注入
    *  image.paste（绕过 webview 的 paste 拦截，拦截侧的在途登记不会发生），
    *  以此补登记同 reqId，使结果回包能通过陈旧回包校验、走完插入往返
@@ -508,6 +514,11 @@ export type WebviewToHost =
       dataBase64: string
       fileNameHint?: string
     }
+  /** #208 手动刷新请求（工具栏刷新按钮/快捷键入口）：宿主清图片解析缓存、
+   *  推进资源代次后以 refresh.invalidated 应答（reqId 配对）。会话守卫与
+   *  image.request 同款（就绪且 docUri 匹配才放行）；只读交互，不写文档、
+   *  不入撤销栈，暂停态同样放行 */
+  | { kind: 'refresh.request'; sessionId: string; docUri: string; reqId: number }
   /** 代码块复制请求（#81）：卡片头部复制按钮点击 → 宿主剪贴板 API 写入。
    *  text 为代码体原文（两条围栏行之间，不含围栏与 info string），恒为
    *  LF（CM6 LF 模型）；宿主按文档 EOL 归一后写剪贴板（webview 不触碰
@@ -1971,6 +1982,13 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
           (typeof v.fileNameHint === 'string' &&
             v.fileNameHint.length <= IMAGE_PASTE_LIMITS.fileNameHintMaxChars))
       )
+    case 'refresh.request':
+      // #208 手动刷新请求：会话守卫字段 + 正整数 reqId（与 image.request 同惯例）
+      return (
+        isString(v.sessionId) &&
+        isString(v.docUri) &&
+        isPositiveInt(v.reqId)
+      )
     case 'perf.report':
       return (
         isNonNegativeInt(v.typingRounds) &&
@@ -2134,6 +2152,10 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'image.test.pending':
       // #161 测试钩子：补登记在途 reqId（见消息定义注释）
       return isPositiveInt(v.reqId)
+    case 'refresh.invalidated':
+      // #208 刷新失效通知：正整数 reqId（配对请求）；generation 为自增后
+      // 的资源代次，恒 ≥ 1（0 是未刷新初值，不回发）
+      return isPositiveInt(v.reqId) && isPositiveInt(v.generation)
     case 'view.find.open':
       return v.query === undefined || isString(v.query)
     case 'view.find.close':

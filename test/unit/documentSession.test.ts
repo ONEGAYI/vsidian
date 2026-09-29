@@ -1138,6 +1138,77 @@ describe('#10 image.request：会话解析、去重与结果回发', () => {
   })
 })
 
+describe('#208 手动刷新：图片缓存失效与资源代次', () => {
+  function refreshSetup() {
+    const s = setup()
+    const calls: string[] = []
+    const out: HostToWebview[] = []
+    const id = s.session.attachPanel({
+      send: (m) => out.push(m),
+      resolveImage: async (src) => {
+        calls.push(src)
+        // 每次解析产新地址：模拟刷新后宿主代次换戳的新 URI
+        return { ok: true, src: `vscode-webview://res/a.png?attempt=${calls.length}` }
+      },
+    })
+    return { s, calls, out, id }
+  }
+
+  it('初始资源代次为 0（未刷新初值：URI 不带戳的现状语义）', () => {
+    const s = setup()
+    expect(s.session.getImageGeneration()).toBe(0)
+  })
+
+  it('refresh.request 清空图片缓存、代次自增并回发 refresh.invalidated（reqId 配对）', async () => {
+    const t = refreshSetup()
+    await ready10(t.s, t.id)
+    // 先解析一次使 imageCache 有存量
+    await t.s.send(t.id, { kind: 'image.request', sessionId: t.id, docUri: DOC_URI, reqId: 1, src: './a.png' })
+    expect(t.calls.length).toBe(1)
+    await t.s.send(t.id, { kind: 'refresh.request', sessionId: t.id, docUri: DOC_URI, reqId: 5 })
+    expect(t.out).toContainEqual({ kind: 'refresh.invalidated', reqId: 5, generation: 1 })
+    expect(t.s.session.getImageGeneration()).toBe(1)
+    // 缓存已清：同 src 再请求重新触达解析器（新地址即新代次戳的替身）
+    await t.s.send(t.id, { kind: 'image.request', sessionId: t.id, docUri: DOC_URI, reqId: 2, src: './a.png' })
+    expect(t.calls.length).toBe(2)
+    // 再刷新：代次继续自增、reqId 各自配对
+    await t.s.send(t.id, { kind: 'refresh.request', sessionId: t.id, docUri: DOC_URI, reqId: 6 })
+    expect(t.out).toContainEqual({ kind: 'refresh.invalidated', reqId: 6, generation: 2 })
+    expect(t.s.session.getImageGeneration()).toBe(2)
+  })
+
+  it('未 ready 或 docUri 不符的 refresh.request 静默丢弃（会话守卫与 image.request 同款）', async () => {
+    const s = setup()
+    const out: HostToWebview[] = []
+    const id = s.session.attachPanel({ send: (m) => out.push(m) })
+    // 未 ready：丢弃
+    await s.send(id, { kind: 'refresh.request', sessionId: id, docUri: DOC_URI, reqId: 1 })
+    expect(out.filter((m) => m.kind === 'refresh.invalidated')).toEqual([])
+    expect(s.session.getImageGeneration()).toBe(0)
+    await ready10(s, id)
+    // docUri 不符：丢弃
+    await s.send(id, { kind: 'refresh.request', sessionId: id, docUri: 'file:///other.md', reqId: 2 })
+    expect(out.filter((m) => m.kind === 'refresh.invalidated')).toEqual([])
+    expect(s.session.getImageGeneration()).toBe(0)
+  })
+
+  it('暂停面板的 refresh.request 同样放行（只读交互，不写文档不入撤销栈）', async () => {
+    const t = refreshSetup()
+    await ready10(t.s, t.id)
+    // 制造冲突暂停：baseVersion 超前的请求不可安全应用
+    await t.s.send(t.id, {
+      kind: 'edit.request', sessionId: t.id, docUri: DOC_URI,
+      seq: 1, baseVersion: 99, changes: [{ offset: 0, length: 0, text: 'x' }],
+    })
+    const suspendedAck = t.out.find(
+      (m) => m.kind === 'edit.ack' && m.ok === false && m.reason === 'conflict',
+    )
+    expect(suspendedAck).toBeDefined()
+    await t.s.send(t.id, { kind: 'refresh.request', sessionId: t.id, docUri: DOC_URI, reqId: 1 })
+    expect(t.out).toContainEqual({ kind: 'refresh.invalidated', reqId: 1, generation: 1 })
+  })
+})
+
 // ---- 工单 #81：代码块复制的行尾归一（webview 出站恒为 LF） ----
 
 describe('#81 codeblock.copy：按文档 EOL 归一后交剪贴板端口', () => {

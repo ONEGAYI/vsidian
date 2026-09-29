@@ -220,6 +220,9 @@ export class DocumentSession {
   /** #10 图片解析：同 src 在途去重与成功结果缓存（失败不缓存，重试重解析） */
   private readonly imageInFlight = new Map<string, Promise<ImageResolution>>()
   private readonly imageCache = new Map<string, ImageResolution>()
+  /** #208 资源代次：手动刷新时自增，工作区图片 webview URI 的 ?v= 戳取
+   *  此值（缓存击穿；0 为未刷新初值，URI 不带戳——与现状形态一致） */
+  private imageGeneration = 0
 
   constructor(
     private readonly doc: HostDocumentPort,
@@ -635,6 +638,18 @@ export class DocumentSession {
         }
         return Promise.resolve()
       }
+      case 'refresh.request': {
+        // #208 手动刷新：清图片解析缓存、推进资源代次，回发失效通知
+        // （webview 据此全量失效重挂，重新解析取到带新代次戳的 URI）。
+        // 只读交互（不写文档、不入撤销栈），暂停态同样放行——与
+        // image.request 同口径的会话守卫（就绪且 docUri 匹配才放行）
+        if (!panel.ready || message.docUri !== this.docUri) {
+          return Promise.resolve()
+        }
+        const generation = this.invalidateImages()
+        panel.port.send({ kind: 'refresh.invalidated', reqId: message.reqId, generation })
+        return Promise.resolve()
+      }
       case 'perf.report':
         panel.lastPerfReport = message
         return Promise.resolve()
@@ -701,6 +716,24 @@ export class DocumentSession {
     sessionId: string,
   ): Extract<WebviewToHost, { kind: 'reading.perf.report' }> | undefined {
     return this.panels.get(sessionId)?.lastReadingPerfReport
+  }
+
+  /** 当前资源代次（#208：provider 层图片 URI ?v= 戳的数据源；0 = 未刷新） */
+  getImageGeneration(): number {
+    return this.imageGeneration
+  }
+
+  /**
+   * #208 图片缓存运行期失效入口：清空解析缓存并推进资源代次（返回新
+   * 代次）。手动刷新通道（refresh.request）在此闭合；后续自动核验路径
+   * （#201）可复用同一入口对齐失效语义。已知边界：刷新瞬间的在途解析
+   * （imageInFlight）完成后仍会写入缓存——旧代次 URI 短暂可命中，下一次
+   * 刷新即被清除；在途窗口毫秒级，不为它引入逐条目代次标记。
+   */
+  invalidateImages(): number {
+    this.imageCache.clear()
+    this.imageGeneration += 1
+    return this.imageGeneration
   }
 
   /** #10 图片解析请求处理（去重/缓存/回发） */
