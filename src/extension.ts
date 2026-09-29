@@ -114,9 +114,10 @@ export function activate(context: vscode.ExtensionContext): void {
     // 注册选项仅接受 retainContextWhenHidden 等（1.86 类型契约）
     vscode.window.registerCustomEditorProvider(VIEW_TYPE, provider),
     // #33 设置页入口：打开（或 reveal 已有）Vsidian 设置面板
-    // #132 样式参考：打开设置页并定位到「样式参考」分页（快捷键默认未绑定）
+    // #231 外观合并：打开外观分页并定位「样式参考」页签（entry 用总表
+    // overview；分页 id 随合并改为 appearance，命令 id 与标题不变）
     vscode.commands.registerCommand('onegayi.vsidian.openStyleReference', () => {
-      settingsPage.openWithSection('style-reference')
+      settingsPage.openWithSection('appearance', 'overview')
     }),
     // #145 导出样式参考 JSON：把 VSIX 内机器可读契约清单（与设置页「样式
     // 参考」分页同源）另存到用户路径（命令面板直接可达，无需打开设置页）

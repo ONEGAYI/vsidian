@@ -1,24 +1,21 @@
 // CSS 片段设置分页（#128）：目录选择/打开、逐片段开关、手动刷新与读取
-// 失败状态条。经 SettingsPageSection 注入设置页（与快捷键分页同模式），
-// 状态权威在宿主（snippets.state 推送回显，页面不自行推断）。
+// 失败状态条。状态权威在宿主（snippets.state 推送回显，页面不自行推断）。
 // #131 增暂停/恢复：「暂停全部」按钮与暂停状态条内的恢复入口
 // （snippets.setPaused 上送），暂停不清逐项开关。
 // 本页不加载任何用户 CSS——设置页不注入片段（spec「已确认行为」）。
+// #231 外观合并：不再作为侧栏独立分页注册（SettingsPageSection 实现与
+// 分页标题/描述退役——描述被外观合并分页的 appearance.description 替代），
+// 改为「外观」组合分页的第一页签体（mount 语义不变：挂进外壳提供的容器）。
 // 文案一律 t() 取词（cssSnippets.* 词条）。
 import { t } from '../shared/i18n'
 import { isHostToWebview } from '../shared/protocol'
 import type { CssSnippetState } from '../shared/cssSnippets'
-import type { SettingsPageBridge, SettingsPageSection } from './settingsPageView'
+import type { SettingsPageBridge } from './settingsPageView'
 
 /** 全局搜索定位用的静态入口 id（目录行；片段文件条目动态并入 entries） */
 export const SNIPPET_SECTION_DIRECTORY_ENTRY = 'directory'
 
-export class CssSnippetSettingsSection implements SettingsPageSection {
-  readonly id = 'css-snippets'
-  readonly icon = 'palette' as const
-  get title(): string { return t('cssSnippets.title') }
-  get description(): string { return t('cssSnippets.description') }
-
+export class CssSnippetSettingsSection {
   private state: CssSnippetState | undefined
   private parent: HTMLElement | undefined
 
