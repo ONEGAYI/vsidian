@@ -4141,6 +4141,12 @@ export const cases: Array<[string, () => Promise<void>]> = [
       { kind: 'viewport.test.position', cursorLine: 123 })
     await vscode.commands.executeCommand(CMD.postToPanel, uri,
       { kind: 'viewport.test.position', scrollNearLine: 123, scrollBiasPx: 150 })
+    // 等视口带内三个有效围栏（116/123/133）到 rendered 态再采样——懒加载
+    // 渲染间隙中心行可短暂不变（两次采样一致的假稳定），before/after 落在
+    // 渲染前后两种几何上即漂移（CI 实测形态：中心行 128→116、光标恢复
+    // 未完成 2029→0）
+    await waitViewState('viewport-mermaid.md',
+      (v) => (v.paint?.mermaid?.rendered ?? 0) >= 3, 0, 60000)
     const before = await waitViewportSettled('viewport-mermaid.md')
     // 前置只确认「滚到了围栏带」（文档三个 Mermaid 围栏占 116–138 行）——
     // 本地快机渲染后中心 ~118、CI xvfb 的 SVG 尺寸使稳定值可到 128，都在带内。
@@ -4155,6 +4161,13 @@ export const cases: Array<[string, () => Promise<void>]> = [
       return state?.panels.some((p) => p.ready) ? true : undefined
     })
     await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'viewport.test.position' })
+    // 切回后状态恢复（光标/滚动经 getState 重建）与围栏重渲染都是异步链路，
+    // 等「光标回到切走前值」与「围栏重渲染终态」就位后再采样；恢复到错误
+    // 值则等待超时并附最后观测快照，断言语义不弱化
+    await waitViewState('viewport-mermaid.md',
+      (v) => (v.selectionOffset ?? -1) === (before.selectionOffset ?? -2), 0, 30000)
+    await waitViewState('viewport-mermaid.md',
+      (v) => (v.paint?.mermaid?.rendered ?? 0) >= 3, 0, 60000)
     const after = await waitViewportSettled('viewport-mermaid.md')
     assert(after.selectionOffset === before.selectionOffset,
       `纯光标移动应跨标签页恢复：${before.selectionOffset} → ${after.selectionOffset}`)
