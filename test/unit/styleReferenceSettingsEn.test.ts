@@ -1,6 +1,6 @@
 // 设置页「样式参考」英文 UI 呈现（#178 试点端到端 + #179 content 域全量 +
 // #180 chrome 域全量与全局残留断言）：renderCard 按 UI 语言取词——英文环境
-// 132 条条目全部显示英文；换包后经设置页壳层重刷路径（applyLocale → render
+// 137 条条目全部显示英文；换包后经设置页壳层重刷路径（applyLocale → render
 // → section.mount 重建）跟随新语言。
 // 断言落在用户可见文本（卡片 textContent / 类目名），非 DOM 存在性
 // （PR #37 教训：样式注入失效时 DOM 存在性照样通过）。
@@ -118,7 +118,7 @@ describe('样式参考英文 UI 呈现（#178 试点）', () => {
 // - 每张条目卡片中承载翻译面的四个可见段落——purpose 段（标题后首个
 //   p）、meta 段（视图徽标 + 支持等级 + states）、Obsidian 对应段、life
 //   生命周期行（deprecated/removed 词条与英译值在此渲染）——无汉字；
-// - 搜索聚合模式对全部 132 条 id 逐一检索（子串命中放大覆盖面），聚合
+// - 搜索聚合模式对全部 137 条 id 逐一检索（子串命中放大覆盖面），聚合
 //   渲染路径（含来源类目 chip 与命中计数行）同口径断言。
 // 不译字段按规格保留中文（target / example 会出现在卡片标题 code、示例
 // pre），故不做整卡 textContent 汉字断言——那与规格字段分级冲突；段落
@@ -171,10 +171,10 @@ describe('样式参考英文 UI 全局残留断言（#180 收尾）', () => {
     expect(m, `总表面板残留汉字「${m?.[0]}」`).toBeNull()
   })
 
-  it('全部类目遍历渲染（含翻页）：双语字段段落无汉字，且 132 条全部被遍历到', () => {
+  it('全部类目遍历渲染（含翻页）：双语字段段落无汉字，且 137 条全部被遍历到', () => {
     const parent = mountDetail('overview')
     const catButtons = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-style-ref-cat')]
-    expect(catButtons.length).toBe(20)
+    expect(catButtons.length).toBe(21)
     const seen = new Set<string>()
     for (const cat of catButtons) {
       const catId = cat.dataset['category']!

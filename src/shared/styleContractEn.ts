@@ -2,7 +2,7 @@
 // 域全量）：设置页「样式参考」条目文档字段的英文版单一事实源——中文清单
 // （./styleContract）保持权威基准不动，本模块按条目 id 索引、字段级覆盖；
 // 取词规则为**英文优先、条目或字段缺失回退中文基准**（规格
-// docs/specs/style-reference-i18n.md）。130 条（content 75 + chrome 55）
+// docs/specs/style-reference-i18n.md）。137 条（content 76 + chrome 61）
 // 已全量覆盖（域级完整性由 test/unit/styleContractEn.test.ts 钉住）。
 //
 // 字段分级（规格钉死）：
@@ -924,21 +924,53 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
     obsidian: { counterpart: 'None (the Obsidian context menu is an app-native menu, not a DOM element)' },
   },
 
-  // ---- 反链面板（backlinks，2 条；#197）----
+  // ---- 反链面板（backlinks，4 条；#197 + 形态改版批次）----
   'backlink-panel': {
     purpose:
-      'The backlinks panel (#197): the reverse-link list for the current note — each item shows the source file:line (muted bold row) plus the quoting snippet (single-line ellipsis); the four-state placeholders (loading/empty/error) and the updating strip share the container. The visibility switch is the vsidian-backlinks-active class on the sidebar container (same mechanism as, and mutually exclusive with, the outline panel).',
+      'The backlinks panel (#197, reworked in the panel-rework batch): backlinks of the current note grouped by source file — a group header (chevron + source name + count, collapsible) above white context cards (card body is the quoting line; the raw Markdown syntax of the matched link is highlighted as a whole, see the backlink-hit entry); a page header shows the panel title plus the card count; four-state placeholders (loading/empty/error/no-match) and the updating strip share the container. The visibility switch is the vsidian-backlinks-active class on the sidebar container (mutually exclusive with the outline and outlinks panels).',
     states:
-      'The panel DOM is persistent in the sidebar (.vsidian-sidebar-panel), display:none by default; visible when the sidebar is expanded and the panel is active. Items are dynamic data (driven by host index snapshots); the four states follow the latest backlinks.snapshot.',
-    dom: 'In the sidebar panel area: vsidian-backlink-panel container > vsidian-backlink-updating strip (optional) + vsidian-backlink-item buttons (item-source + item-snippet), or a vsidian-backlink-placeholder.',
+      'The panel DOM is persistent in the sidebar (.vsidian-sidebar-panel), display:none by default; visible when the sidebar is expanded and the panel is active. Items are dynamic data (driven by host index snapshots); the four states follow the latest backlinks.snapshot; group collapsing is expressed by the group-collapsed class (card area hidden, header kept).',
+    dom: 'In the sidebar panel area: vsidian-backlink-panel container > persistent area (updating strip (optional) + toolbar (see the backlink-toolbar entry) + search box) + dynamic area (sort menu (when open) + header (title + count) + groups (group-header buttons + card buttons) or a placeholder). Persistent-area nodes are reused across renders (the search input keeps focus).',
     obsidian: { counterpart: 'None (the Obsidian backlinks pane is app-level DOM)' },
+  },
+  'backlink-toolbar': {
+    purpose:
+      'The backlinks panel toolbar (panel-rework batch): four linear icon buttons centered in a row — sort (a six-item, three-group dropdown with the current item checked; closes on Esc/outside click), search (toggles the full-width search box below the buttons), collapse all (two-state, aria-pressed) and more context (short/long snippet toggle, aria-pressed). Active buttons carry the selection background; the sort menu is an absolutely positioned layer inside the panel.',
+    states:
+      'Visible when ready with items (not rendered for loading/error/empty documents); the four buttons track view state via aria-pressed/expanded; the search box visibility switch is the hidden attribute; the menu mounts only while open (a dynamic state, so the probe table does not fake a static assertion for it).',
+    dom: 'Persistent area of vsidian-backlink-panel: a role=toolbar container with four buttons (inline 16-unit SVG icons); the search box follows; the menu (when open) heads the dynamic area (the panel container is its absolute anchor).',
+    obsidian: { counterpart: 'None (the Obsidian backlinks pane is app-level DOM with no such class names)' },
+  },
+  'backlink-hit': {
+    purpose:
+      'Backlink card match highlight (panel-rework batch): the raw Markdown syntax of the matched link ([...](...) or [[...]] including brackets and URL) inside a card is marked with a yellow background — light themes use #ffec99, dark/high-contrast themes use a readable yellow (about 30% yellow overlay; the text color inside the highlight is unchanged with no underline). The variable is public and can be overridden by external snippets.',
+    states: 'Defined permanently on #app; light/dark values switch with body.vscode-dark / body.vscode-high-contrast.',
+    dom: 'A custom property of #app; consumed by mark.vsidian-backlink-hit inside backlink cards (dynamic data, so the probe table does not fake per-item static assertions — the color rule is pinned by contract tests).',
+    obsidian: { counterpart: 'None (the Obsidian search-match highlight is app-internal styling)' },
   },
   'backlinks-toggle': {
     purpose:
-      'The sidebar toolbar button toggling the backlinks panel (same row as the outline button): clicking toggles the panel (mutually exclusive with the outline panel); the active-state highlight follows --vscode-list-activeSelectionBackground.',
+      'The sidebar toolbar button toggling the backlinks panel (same row as the outline and outlinks buttons): clicking toggles the panel (three-way mutual exclusion); the active-state highlight follows --vscode-list-activeSelectionBackground.',
     states: 'Visible when the sidebar is expanded; aria-expanded tracks the panel active state.',
-    dom: 'A button plus a looped-arrow SVG icon inside .vsidian-sidebar-toolbar-actions.',
+    dom: 'A button plus a chain-link SVG icon (interlocked double loop with a left-returning arrow, 24-unit viewBox; stroke width pinned via CSS) inside .vsidian-sidebar-toolbar-actions.',
     obsidian: { counterpart: 'None (the Obsidian backlinks toggle is app-level UI)' },
+  },
+
+  // ---- 出链面板（outlinks，2 条；出链面板批次）----
+  'outlink-panel': {
+    purpose:
+      'The outgoing links panel (outlinks batch): a flat list of links in the current note — a page header (title + muted count at the top right) plus two-line items (line 1: a small chain icon + target display name; line 2: the target path with hanging indent); clicking opens the target and locates the actual anchor of the link; broken-link items are globally muted (broken class + disabled) and not clickable; external-scheme edges never enter the panel. The visibility switch is the vsidian-outlinks-active class on the sidebar container (mutually exclusive with the outline and backlinks panels).',
+    states:
+      'The panel DOM is persistent in the sidebar, display:none by default; visible when the sidebar is expanded and the panel is active. Items are dynamic data (driven by host outlinks.snapshot); the four states mirror the backlinks panel.',
+    dom: 'In the sidebar panel area: vsidian-outlink-panel container > updating strip (optional) + outlink-header (title + count) + outlink-item buttons (item-name (with an inline 16-unit chain SVG) + item-path) or a placeholder.',
+    obsidian: { counterpart: 'None (the Obsidian outgoing-links pane is app-level DOM)' },
+  },
+  'outlinks-toggle': {
+    purpose:
+      'The sidebar toolbar button toggling the outgoing links panel (same row as the outline and backlinks buttons): clicking toggles the panel (three-way mutual exclusion); the active-state highlight follows --vscode-list-activeSelectionBackground.',
+    states: 'Visible when the sidebar is expanded; aria-expanded tracks the panel active state.',
+    dom: 'A button plus a chain-link SVG icon (interlocked double loop with a right-going arrow, 24-unit viewBox; stroke width pinned via CSS) inside .vsidian-sidebar-toolbar-actions.',
+    obsidian: { counterpart: 'None (the Obsidian outgoing-links toggle is app-level UI)' },
   },
 }
 

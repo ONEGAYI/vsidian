@@ -454,3 +454,15 @@
 #app .vsidian-sidebar .vsidian-sidebar-toolbar .vsidian-backlinks-toggle {
   --vsidian-chrome-probe: rgb(239, 0, 1);
 }
+
+#app .vsidian-sidebar .vsidian-backlink-toolbar {
+  --vsidian-chrome-probe: rgb(240, 0, 1);
+}
+
+#app .vsidian-sidebar .vsidian-outlink-panel {
+  --vsidian-chrome-probe: rgb(241, 0, 1);
+}
+
+#app .vsidian-sidebar .vsidian-sidebar-toolbar .vsidian-outlinks-toggle {
+  --vsidian-chrome-probe: rgb(242, 0, 1);
+}

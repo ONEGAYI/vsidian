@@ -18,7 +18,9 @@ export const INDEX_SECTION_ACTIONS_ENTRY = 'actions'
 
 export class IndexMaintenanceSection implements SettingsPageSection {
   readonly id = 'index'
-  readonly icon = 'editor' as const
+  /** 链环 glyph（形态改版批次：自 'editor' 铅笔改为链环——索引维护的
+   *  链接域意象，与侧栏反链/出链图标同形语言） */
+  readonly icon = 'links' as const
   get title(): string { return t('indexMaintenance.title') }
   get description(): string { return t('indexMaintenance.description') }
 

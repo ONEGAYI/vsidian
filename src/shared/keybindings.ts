@@ -79,6 +79,9 @@ export const UI_OPERATIONS = [
   // 纯视图状态零写回）；默认不占键位——侧栏按钮与命令面板常驻入口，快捷键
   // 留给用户按需绑定（评估记录见 docs/specs/keybindings.md）
   { id: 'backlinksToggle', command: 'onegayi.vsidian.ui.backlinksToggle', titleKey: 'command.ui.backlinksToggle.title', mode: 'both', writes: false, defaults: [] },
+  // 出链面板（出链面板批次）：与反链面板同款双模式 UI 操作（三面板互斥的
+  // 纯视图状态翻转，零写回）；默认不占键位（评估记录见 docs/specs/keybindings.md）
+  { id: 'outlinksToggle', command: 'onegayi.vsidian.ui.outlinksToggle', titleKey: 'command.ui.outlinksToggle.title', mode: 'both', writes: false, defaults: [] },
 ] as const satisfies readonly KeybindingOperation[]
 export type UiOperationId = (typeof UI_OPERATIONS)[number]['id']
 export function isUiOperationId(value: unknown): value is UiOperationId {

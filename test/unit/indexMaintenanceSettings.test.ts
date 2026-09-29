@@ -185,3 +185,20 @@ describe('维护操作反馈', () => {
     expect(notice.className).not.toContain('vsidian-index-notice-warn')
   })
 })
+
+describe('索引维护分页图标（形态改版批次）', () => {
+  it('分页图标为链环 glyph（links）：导航按钮内的 svg path 是链环双环形态', () => {
+    const section = new IndexMaintenanceSection({ postMessage: () => {} })
+    expect(section.icon).toBe('links')
+    // 经设置页渲染路径钉住形态：导航按钮内 svg 的 path 以链环双环起笔
+    //（M10 13a5 5 0 0 0 7.54…——与侧栏反链/出链链环图标同一造型语言）
+    const view = new SettingsPageView({ postMessage: () => {} }, [], [section])
+    const root = document.createElement('div')
+    view.mount(root)
+    const nav = [...root.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
+    const indexNav = nav.find((b) => b.textContent === zhCn['indexMaintenance.title'])!
+    const path = indexNav.querySelector('svg path')!
+    expect(path.getAttribute('d')!.startsWith('M10 13a5 5 0 0 0 7.54.54l3-3')).toBe(true)
+    view.dispose()
+  })
+})

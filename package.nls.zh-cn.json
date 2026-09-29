@@ -56,5 +56,6 @@
   "command.ui.outlineReset.title": "重置大纲",
   "command.ui.outlineCollapseAll.title": "折叠全部大纲",
   "command.ui.outlineExpandAll.title": "展开全部大纲",
-  "command.ui.backlinksToggle.title": "显示或隐藏反链面板"
+  "command.ui.backlinksToggle.title": "显示或隐藏反链面板",
+  "command.ui.outlinksToggle.title": "显示或隐藏出链面板"
 }

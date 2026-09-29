@@ -222,6 +222,13 @@ export const STYLE_GUIDE_CATEGORIES: readonly StyleContractCategory[] = [
     "title": "反链面板",
     "titleKey": "styleRef.category.backlinks",
     "order": 10
+  },
+  {
+    "id": "outlinks",
+    "domain": "chrome",
+    "title": "出链面板",
+    "titleKey": "styleRef.category.outlinks",
+    "order": 11
   }
 ] as readonly StyleContractCategory[]
 
@@ -3219,22 +3226,65 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "domain": "chrome",
     "category": "backlinks",
     "kind": "selector",
-    "target": ".vsidian-backlink-panel（+ .vsidian-backlink-item / -item-source / -item-snippet / -item 上 -source 类）",
-    "purpose": "反链面板（#197）：当前笔记的反向链接列表——条目 = 来源文件:行号（弱化加重行）+ 引用片段（单行省略）；四态占位（loading/empty/error）与更新中细条共用容器。显隐唯一开关是侧栏容器的 vsidian-backlinks-active 类（与大纲面板同模式且互斥）。",
+    "target": ".vsidian-backlink-panel（+ .vsidian-backlink-item / -item-source / -item-snippet / -item 上 -source 类；形态改版批次追加 -group / -group-header / -group-name / -group-count / -chevron / -group-collapsed 折叠态、-card / -card-text 上下文卡片——卡片与 #197 既有 .vsidian-backlink-item 并挂，-item-source / -item-snippet 子类随旧两行形态退役）",
+    "purpose": "反链面板（#197；形态改版批次重做呈现）：按来源文件分组展示当前笔记的反向链接——组头（chevron + 来源名 + 组内计数，可折叠）+ 组内白色上下文卡片（卡片正文为引用行文本，命中链接的原始 Markdown 语法整体黄底高亮，见 backlink-hit 条目）；页头「链接当前文件」+ 卡片计数；四态占位（loading/empty/error/nomatch）与更新中细条共用容器。显隐唯一开关是侧栏容器的 vsidian-backlinks-active 类（与大纲/出链面板互斥）。",
     "views": [],
-    "states": "面板 DOM 常驻侧栏（.vsidian-sidebar-panel 内），默认 display:none；侧栏展开 + 面板 active 时可见。条目为动态数据（宿主索引快照驱动），四态随最近 backlinks.snapshot 变化。",
-    "dom": "右侧栏面板区域：vsidian-backlink-panel 容器 > vsidian-backlink-updating（更新中细条，可选）+ vsidian-backlink-item 按钮条目（item-source + item-snippet）或 vsidian-backlink-placeholder 占位。",
-    "example": ".vsidian-backlink-item .vsidian-backlink-item-source {\n  font-weight: 600;\n}",
+    "states": "面板 DOM 常驻侧栏（.vsidian-sidebar-panel 内），默认 display:none；侧栏展开 + 面板 active 时可见。条目为动态数据（宿主索引快照驱动），四态随最近 backlinks.snapshot 变化；组折叠由 group-collapsed 类表达（卡片区隐藏、组头保留）。",
+    "dom": "右侧栏面板区域：vsidian-backlink-panel 容器 > 固定区（updating 细条（可选）+ 工具栏（见 backlink-toolbar 条目）+ 搜索框）+ 动态区（排序菜单（打开时）+ 页头 header（title + count）+ group 分组（group-header 按钮 + card 卡片按钮）或 placeholder 占位）。固定区节点跨渲染复用（搜索输入焦点不丢）。",
+    "example": ".vsidian-backlink-panel .vsidian-backlink-card {\n  background: var(--vscode-editor-background, #ffffff);\n}",
     "obsidian": {
       "counterpart": "无（Obsidian 反链为应用级侧栏 DOM）",
       "support": "none"
     },
     "verification": [
-      "单元 backlinkPanel：四态渲染与类名锚点",
-      "集成「反链面板」（#197）：backlinks.togglePainted/panelPainted/itemPainted/emptyPainted 绘制证据",
+      "单元 backlinkPanel / backlinkGrouping：四态渲染、分组排序过滤与类名锚点、命中高亮切分",
+      "集成「反链面板」（#197）：backlinks.togglePainted/panelPainted/itemPainted/emptyPainted 绘制证据（形态改版批次扩展 toolbarPainted/hitPainted）",
       "集成「界面域样式契约」（#133）：chromeSelectors[\"backlink-panel\"] 探针命中"
     ],
     "introduced": "#197（2026-09-29）"
+  },
+  {
+    "id": "backlink-toolbar",
+    "domain": "chrome",
+    "category": "backlinks",
+    "kind": "selector",
+    "target": ".vsidian-backlink-toolbar（+ -toolbar-button×4（data-action=sort/search/collapse/context）、-sort-menu / -sort-item / -sort-sep 排序下拉、-search-box / -search-input 搜索框）",
+    "purpose": "反链面板工具栏（形态改版批次）：四枚线性图标按钮横排居中——排序（六项三组下拉菜单，当前项勾选，Esc/外点关闭）、搜索（按钮下方全宽搜索框显隐切换）、折叠全部（二态，aria-pressed）、更多上下文（长/短片段切换，aria-pressed）。按钮开态以选中底色标记；排序菜单为面板内 absolute 定位浮层。",
+    "views": [],
+    "states": "ready + 有条目时可见（loading/error/空文档不渲染工具栏）；四按钮 aria-pressed/expanded 随视图态；搜索框显隐唯一开关是 hidden 属性；菜单打开时挂载（动态态，探针表不伪造静态断言）。",
+    "dom": "vsidian-backlink-panel 固定区：role=toolbar 容器 + 四按钮（内联 16 系 SVG 图标）；搜索框紧随其后；菜单（打开时）挂动态区首位（面板容器为 absolute 锚）。",
+    "example": ".vsidian-backlink-toolbar-button[aria-pressed='true'] {\n  background: var(--vscode-list-activeSelectionBackground);\n}",
+    "obsidian": {
+      "counterpart": "无（Obsidian 反链面板为应用级 DOM，无对应类名）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 backlinkPanel：工具栏四按钮、搜索框显隐与排序菜单勾选态",
+      "集成「反链面板」（形态改版批次）：toolbarPainted 绘制证据、搜索过滤与排序切换交互",
+      "探针 chromeSelectors[\"backlink-toolbar\"] 命中"
+    ],
+    "introduced": "形态改版批次（2026-09-29）"
+  },
+  {
+    "id": "backlink-hit",
+    "domain": "chrome",
+    "category": "backlinks",
+    "kind": "variable",
+    "target": "--vsidian-backlink-hit-bg（#app 层定义；mark.vsidian-backlink-hit 承接为背景）",
+    "purpose": "反链卡片命中高亮（形态改版批次）：卡片内命中链接的原始 Markdown 语法整体（[...](...) 或 [[...]] 连同括号与 URL）的黄底标记——light 用 #ffec99 一档，dark/high-contrast 用可读黄系（约 30% 黄叠加，高亮内文字颜色不变、不加下划线）。公开变量可被外部片段覆盖。",
+    "views": [],
+    "states": "常驻定义于 #app；明暗两值随 body.vscode-dark / body.vscode-high-contrast 切换。",
+    "dom": "#app 的自定义属性；消费方为反链卡片内 mark.vsidian-backlink-hit（动态数据驱动，探针表不为条目级伪造静态断言，颜色规则由契约测试钉住）。",
+    "example": "body.vscode-dark #app {\n  --vsidian-backlink-hit-bg: rgba(255, 208, 0, 0.3);\n}",
+    "obsidian": {
+      "counterpart": "无（Obsidian 搜索命中高亮为应用内部样式）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 backlinkPanel：命中区间切分（mark 类名锚点）",
+      "集成「反链面板」（形态改版批次）：hitPainted 绘制证据 + 高亮 mark 的 computed 背景色断言（明暗主题可读性）"
+    ],
+    "introduced": "形态改版批次（2026-09-29）"
   },
   {
     "id": "backlinks-toggle",
@@ -3242,10 +3292,10 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "backlinks",
     "kind": "selector",
     "target": ".vsidian-backlinks-toggle",
-    "purpose": "侧栏顶栏的反链面板切换按钮（与大纲按钮同排）：点击切换反链面板显隐（与大纲面板互斥）；active 态按钮高亮跟随 --vscode-list-activeSelectionBackground。",
+    "purpose": "侧栏顶栏的反链面板切换按钮（与大纲/出链按钮同排）：点击切换反链面板显隐（三面板互斥）；active 态按钮高亮跟随 --vscode-list-activeSelectionBackground。",
     "views": [],
     "states": "侧栏展开时可见；aria-expanded 随面板 active 同步。",
-    "dom": "侧栏顶栏工具行（.vsidian-sidebar-toolbar-actions）内按钮 + 回环箭头 SVG 图标。",
+    "dom": "侧栏顶栏工具行（.vsidian-sidebar-toolbar-actions）内按钮 + 链环折返箭头 SVG 图标（形态改版批次：织结双链环 + 左折返箭头，24 系 viewBox；线宽由 CSS 钉住——见 cssProbe）。",
     "example": ".vsidian-sidebar.vsidian-backlinks-active .vsidian-sidebar-toolbar button.vsidian-backlinks-toggle {\n  background: var(--vscode-list-activeSelectionBackground);\n}",
     "obsidian": {
       "counterpart": "无（Obsidian 反链开关为应用级 UI）",
@@ -3255,6 +3305,48 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "集成「反链面板」（#197）：backlinks.togglePainted 绘制证据与 toggleAriaLabel"
     ],
     "introduced": "#197（2026-09-29）"
+  },
+  {
+    "id": "outlink-panel",
+    "domain": "chrome",
+    "category": "outlinks",
+    "kind": "selector",
+    "target": ".vsidian-outlink-panel（+ -header / -header-title / -header-count、-item / -item-name / -item-path、-broken 断链弱化、-updating、-placeholder）",
+    "purpose": "出链面板（出链面板批次）：「当前笔记中的链接」平铺列表——页头（标题 + 右上浅灰计数）+ 两行条目（行 1 链形小图标 + 目标显示名；行 2 目标路径悬挂缩进）；点击打开目标并按链接实际锚点定位；断链条目整体弱化（broken 类 + disabled）不可点；外部 scheme 边不进面板。显隐唯一开关是侧栏容器的 vsidian-outlinks-active 类（与大纲/反链面板互斥）。",
+    "views": [],
+    "states": "面板 DOM 常驻侧栏，默认 display:none；侧栏展开 + 面板 active 时可见。条目为动态数据（宿主 outlinks.snapshot 驱动），四态与反链面板同构。",
+    "dom": "右侧栏面板区域：vsidian-outlink-panel 容器 > updating 细条（可选）+ 页头 outlink-header（title + count）+ outlink-item 按钮条目（item-name（内含 16 系链环 SVG）+ item-path）或 placeholder 占位。",
+    "example": ".vsidian-outlink-panel .vsidian-outlink-item-path {\n  margin-left: 20px;\n  font-size: calc(var(--vsidian-outline-font-size, 12px) * 0.85);\n}",
+    "obsidian": {
+      "counterpart": "无（Obsidian 出链面板为应用级侧栏 DOM）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 outlinkPanel：四态渲染、条目两行结构与断链不可点属性",
+      "集成「出链面板」（出链面板批次）：outlinks.panelPainted/itemPainted/emptyPainted 绘制证据",
+      "探针 chromeSelectors[\"outlink-panel\"] 命中"
+    ],
+    "introduced": "出链面板批次（2026-09-29）"
+  },
+  {
+    "id": "outlinks-toggle",
+    "domain": "chrome",
+    "category": "outlinks",
+    "kind": "selector",
+    "target": ".vsidian-outlinks-toggle",
+    "purpose": "侧栏顶栏的出链面板切换按钮（与大纲/反链按钮同排）：点击切出链面板显隐（三面板互斥）；active 态高亮跟随 --vscode-list-activeSelectionBackground。",
+    "views": [],
+    "states": "侧栏展开时可见；aria-expanded 随面板 active 同步。",
+    "dom": "侧栏顶栏工具行（.vsidian-sidebar-toolbar-actions）内按钮 + 链环出箭头 SVG 图标（织结双链环 + 右出箭头，24 系 viewBox；线宽由 CSS 钉住）。",
+    "example": ".vsidian-sidebar.vsidian-outlinks-active .vsidian-sidebar-toolbar button.vsidian-outlinks-toggle {\n  background: var(--vscode-list-activeSelectionBackground);\n}",
+    "obsidian": {
+      "counterpart": "无（Obsidian 出链开关为应用级 UI）",
+      "support": "none"
+    },
+    "verification": [
+      "集成「出链面板」（出链面板批次）：outlinks.togglePainted 绘制证据与 toggleAriaLabel"
+    ],
+    "introduced": "出链面板批次（2026-09-29）"
   }
 ] as readonly StyleContractEntry[]
 
@@ -4227,19 +4319,51 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "backlink-panel": {
-    "purpose": "The backlinks panel (#197): the reverse-link list for the current note — each item shows the source file:line (muted bold row) plus the quoting snippet (single-line ellipsis); the four-state placeholders (loading/empty/error) and the updating strip share the container. The visibility switch is the vsidian-backlinks-active class on the sidebar container (same mechanism as, and mutually exclusive with, the outline panel).",
-    "states": "The panel DOM is persistent in the sidebar (.vsidian-sidebar-panel), display:none by default; visible when the sidebar is expanded and the panel is active. Items are dynamic data (driven by host index snapshots); the four states follow the latest backlinks.snapshot.",
-    "dom": "In the sidebar panel area: vsidian-backlink-panel container > vsidian-backlink-updating strip (optional) + vsidian-backlink-item buttons (item-source + item-snippet), or a vsidian-backlink-placeholder.",
+    "purpose": "The backlinks panel (#197, reworked in the panel-rework batch): backlinks of the current note grouped by source file — a group header (chevron + source name + count, collapsible) above white context cards (card body is the quoting line; the raw Markdown syntax of the matched link is highlighted as a whole, see the backlink-hit entry); a page header shows the panel title plus the card count; four-state placeholders (loading/empty/error/no-match) and the updating strip share the container. The visibility switch is the vsidian-backlinks-active class on the sidebar container (mutually exclusive with the outline and outlinks panels).",
+    "states": "The panel DOM is persistent in the sidebar (.vsidian-sidebar-panel), display:none by default; visible when the sidebar is expanded and the panel is active. Items are dynamic data (driven by host index snapshots); the four states follow the latest backlinks.snapshot; group collapsing is expressed by the group-collapsed class (card area hidden, header kept).",
+    "dom": "In the sidebar panel area: vsidian-backlink-panel container > persistent area (updating strip (optional) + toolbar (see the backlink-toolbar entry) + search box) + dynamic area (sort menu (when open) + header (title + count) + groups (group-header buttons + card buttons) or a placeholder). Persistent-area nodes are reused across renders (the search input keeps focus).",
     "obsidian": {
       "counterpart": "None (the Obsidian backlinks pane is app-level DOM)"
     }
   },
+  "backlink-toolbar": {
+    "purpose": "The backlinks panel toolbar (panel-rework batch): four linear icon buttons centered in a row — sort (a six-item, three-group dropdown with the current item checked; closes on Esc/outside click), search (toggles the full-width search box below the buttons), collapse all (two-state, aria-pressed) and more context (short/long snippet toggle, aria-pressed). Active buttons carry the selection background; the sort menu is an absolutely positioned layer inside the panel.",
+    "states": "Visible when ready with items (not rendered for loading/error/empty documents); the four buttons track view state via aria-pressed/expanded; the search box visibility switch is the hidden attribute; the menu mounts only while open (a dynamic state, so the probe table does not fake a static assertion for it).",
+    "dom": "Persistent area of vsidian-backlink-panel: a role=toolbar container with four buttons (inline 16-unit SVG icons); the search box follows; the menu (when open) heads the dynamic area (the panel container is its absolute anchor).",
+    "obsidian": {
+      "counterpart": "None (the Obsidian backlinks pane is app-level DOM with no such class names)"
+    }
+  },
+  "backlink-hit": {
+    "purpose": "Backlink card match highlight (panel-rework batch): the raw Markdown syntax of the matched link ([...](...) or [[...]] including brackets and URL) inside a card is marked with a yellow background — light themes use #ffec99, dark/high-contrast themes use a readable yellow (about 30% yellow overlay; the text color inside the highlight is unchanged with no underline). The variable is public and can be overridden by external snippets.",
+    "states": "Defined permanently on #app; light/dark values switch with body.vscode-dark / body.vscode-high-contrast.",
+    "dom": "A custom property of #app; consumed by mark.vsidian-backlink-hit inside backlink cards (dynamic data, so the probe table does not fake per-item static assertions — the color rule is pinned by contract tests).",
+    "obsidian": {
+      "counterpart": "None (the Obsidian search-match highlight is app-internal styling)"
+    }
+  },
   "backlinks-toggle": {
-    "purpose": "The sidebar toolbar button toggling the backlinks panel (same row as the outline button): clicking toggles the panel (mutually exclusive with the outline panel); the active-state highlight follows --vscode-list-activeSelectionBackground.",
+    "purpose": "The sidebar toolbar button toggling the backlinks panel (same row as the outline and outlinks buttons): clicking toggles the panel (three-way mutual exclusion); the active-state highlight follows --vscode-list-activeSelectionBackground.",
     "states": "Visible when the sidebar is expanded; aria-expanded tracks the panel active state.",
-    "dom": "A button plus a looped-arrow SVG icon inside .vsidian-sidebar-toolbar-actions.",
+    "dom": "A button plus a chain-link SVG icon (interlocked double loop with a left-returning arrow, 24-unit viewBox; stroke width pinned via CSS) inside .vsidian-sidebar-toolbar-actions.",
     "obsidian": {
       "counterpart": "None (the Obsidian backlinks toggle is app-level UI)"
+    }
+  },
+  "outlink-panel": {
+    "purpose": "The outgoing links panel (outlinks batch): a flat list of links in the current note — a page header (title + muted count at the top right) plus two-line items (line 1: a small chain icon + target display name; line 2: the target path with hanging indent); clicking opens the target and locates the actual anchor of the link; broken-link items are globally muted (broken class + disabled) and not clickable; external-scheme edges never enter the panel. The visibility switch is the vsidian-outlinks-active class on the sidebar container (mutually exclusive with the outline and backlinks panels).",
+    "states": "The panel DOM is persistent in the sidebar, display:none by default; visible when the sidebar is expanded and the panel is active. Items are dynamic data (driven by host outlinks.snapshot); the four states mirror the backlinks panel.",
+    "dom": "In the sidebar panel area: vsidian-outlink-panel container > updating strip (optional) + outlink-header (title + count) + outlink-item buttons (item-name (with an inline 16-unit chain SVG) + item-path) or a placeholder.",
+    "obsidian": {
+      "counterpart": "None (the Obsidian outgoing-links pane is app-level DOM)"
+    }
+  },
+  "outlinks-toggle": {
+    "purpose": "The sidebar toolbar button toggling the outgoing links panel (same row as the outline and backlinks buttons): clicking toggles the panel (three-way mutual exclusion); the active-state highlight follows --vscode-list-activeSelectionBackground.",
+    "states": "Visible when the sidebar is expanded; aria-expanded tracks the panel active state.",
+    "dom": "A button plus a chain-link SVG icon (interlocked double loop with a right-going arrow, 24-unit viewBox; stroke width pinned via CSS) inside .vsidian-sidebar-toolbar-actions.",
+    "obsidian": {
+      "counterpart": "None (the Obsidian outgoing-links toggle is app-level UI)"
     }
   }
 } as Readonly<Record<string, StyleContractEntryOverride>>

@@ -325,6 +325,11 @@
         "command": "onegayi.vsidian.ui.backlinksToggle",
         "title": "%command.ui.backlinksToggle.title%",
         "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.ui.outlinksToggle",
+        "title": "%command.ui.outlinksToggle.title%",
+        "category": "Vsidian"
       }
     ],
     "menus": {
