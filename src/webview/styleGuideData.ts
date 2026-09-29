@@ -10,7 +10,7 @@ import type { StyleContractEntryOverride } from '../shared/styleContractEn'
 import type { ObsidianVariableAlias } from '../shared/obsidianAlias'
 
 /** 指南配套的扩展版本（与安装版本一致） */
-export const STYLE_GUIDE_VERSION = "0.5.0"
+export const STYLE_GUIDE_VERSION = "0.6.0"
 
 /** Obsidian 变量别名总表（指南总表同源） */
 export const STYLE_GUIDE_VARIABLE_ALIASES: readonly ObsidianVariableAlias[] = [
@@ -558,7 +558,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "verification": [
       "单元 liveBlockId：双形态标记区间发射契约",
       "单元 blockIdCssContract：淡化色规则钉住",
-      "浏览器 blockMenu：淡化 computed color 断言（双形态）"
+      "浏览器 contextMenu：淡化 computed color 断言（双形态 + 自定义字体色跟随 + 阅读隐藏；随 #183 菜单套件统一自 blockMenu 迁移）"
     ],
     "introduced": "#163 验收反馈（2026-09-28）"
   },
@@ -1435,6 +1435,29 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "浏览器 imageRefresh：删除可见态与不可访问区分断言"
     ],
     "introduced": "#201（2026-09-29）"
+  },
+  {
+    "id": "image-solo-block",
+    "domain": "content",
+    "category": "link-image-wikilink",
+    "kind": "selector",
+    "target": ".vsidian-image-block（live 修饰类，叠加于 .vsidian-image）",
+    "purpose": "live 独立成行图片的块级容器变体：整行仅含一张图片（其余文本全空白，含尾随空白）时 widget 槽位取块级布局，为无固有尺寸的图源（viewBox-only 百分比宽 SVG，mermaid 导出形态）提供确定宽度基准——此类图源在 inline-block shrink-to-fit 下渲染为 0×0（img 加载成功故静默无反馈，表现为空白行）；有固有尺寸的图源不受影响（块级下仍按自然宽度呈现）。已知边界：行内混排（列表前缀、混排文字、同行多图）的此类 SVG 仍为行内形态。",
+    "views": [
+      "live"
+    ],
+    "states": "装饰构建时按行判定（树驱动与宽松路径同口径）：行内 [from,to) 之外文本全空白即独立成行；三态修饰类照常叠加。",
+    "dom": "live 行内 widget span.vsidian-image.vsidian-image-block > img（display: block）。",
+    "example": ".vsidian-image-block {\n  display: block;\n}",
+    "obsidian": {
+      "counterpart": "无直接对应（Obsidian 无公开独立图片布局类）",
+      "support": "native"
+    },
+    "verification": [
+      "浏览器 liveImageLayout：真实 Chromium + 生产控制器——独行 viewBox-only SVG 渲染宽度铺满正文列（修复前 0×0）、固有尺寸图不拉伸、限宽档随列联动、阅读侧非回归",
+      "单元 linkInteraction：独立成行判定（整行/尾随空白/列表前缀/混排/同行两图/宽松路径）与 widget 形态 eq"
+    ],
+    "introduced": "live SVG 塌缩修复（2026-09-29）"
   },
   {
     "id": "live-wikilink",
@@ -2559,7 +2582,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "outline",
     "kind": "selector",
     "target": ".vsidian-outline-menu（+ -item / -host / -submenu / -danger / -cue）",
-    "purpose": "右键菜单浮层（挂侧栏内 absolute；菜单项为 button 键盘可达；子菜单显隐唯一开关是父项宿主的 :hover/:focus-within；danger 红字标删除；颜色跟随 --vscode-menu-* 变量族）。",
+    "purpose": "右键菜单浮层（挂侧栏内 absolute；菜单项为 button 键盘可达；子菜单显隐唯一开关是父项宿主的 :hover/:focus-within；danger 红字标删除；颜色跟随 --vscode-menu-* 变量族）。#183 迁移到统一菜单内核装配（描述符化，类名不变）；公用态类 vsidian-menu-open（父项点击展开兜底）与 vsidian-menu-flip（子菜单装配期左翻——大纲面板右置时不再溢出屏幕）叠加在既有子菜单类上。",
     "views": [],
     "states": "右键唤出。",
     "dom": "侧栏内浮层。",
@@ -2569,7 +2592,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "浏览器 outlineMenu",
+      "浏览器 outlineMenu（含右置子菜单翻转矩阵：装配期全翻左 + 展开后右缘不溢出视口）",
       "集成 outline.test.contextMenu/menuClick 系列"
     ],
     "introduced": "#69（2026-09-25）"
@@ -2791,6 +2814,30 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "introduced": "#79（2026-09-26）"
   },
   {
+    "id": "live-code-card-wrap",
+    "domain": "chrome",
+    "category": "code-card",
+    "kind": "selector",
+    "target": ".vsidian-code-card-wrap（+ -off 修饰，仅阅读侧发射）",
+    "purpose": "折行开关按钮（#191）：点击全文联动开/关阅读视图代码块自动折行——开启为现行 pre-wrap 折行，关闭为代码区横向滚动（行号列 sticky 钉左、头部固定）；-off 为已关闭修饰（经 filter: opacity(0.4) 弱化，与显隐 opacity 正交）。仅阅读卡片头部装配：Live 恒折行（CM6 折行是编辑器级 facet 无法按块关）。状态为视图态，不持久化、不设设置项（与折叠 chevron 同语义）。",
+    "views": [
+      "reading"
+    ],
+    "states": "折行开启（默认）/ 关闭（-off，title 提示开启）；与复制钮同口径进卡即显（默认隐藏、悬停卡片显现）；收起态不发射。",
+    "dom": "头部按钮区最左（[折行] [复制] [折叠]）。",
+    "example": ".vsidian-code-card-wrap-off {\n  filter: opacity(0.4);\n}",
+    "obsidian": {
+      "counterpart": "无对应（Obsidian 代码块无逐块折行开关）",
+      "support": "none"
+    },
+    "verification": [
+      "codeCardPaintCssContract：进卡即显显隐体系与 -off filter 弱化",
+      "浏览器 codeCardChrome：折行/nowrap 几何、sticky 行号与联动断言",
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"live-code-card-wrap-reading\"] 探针命中"
+    ],
+    "introduced": "#191（2026-09-28）"
+  },
+  {
     "id": "live-code-card-linenumber",
     "domain": "chrome",
     "category": "code-card",
@@ -2819,13 +2866,13 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "code-card",
     "kind": "selector",
     "target": "tok-* token 族（tok-keyword / tok-string 等，@lezer/highlight classHighlighter 词表）",
-    "purpose": "语法高亮 token span，两视图共用同一类名与明暗色板（Dark+/Light+ 取色，非 Obsidian 主题变量）；Prism 原名 .token-* 不提供（见 limit-prism-tokens）。",
+    "purpose": "语法高亮 token span，两视图及已注册语言共用同一类名与明暗色板；解析器已有函数标签时在旧变量/属性类上叠加 tok-function（基础色取自 VS Code 主题导出与逐词检查，函数色为用户选择的暖黄，非语义 token 逐语言复刻，也非 Obsidian 主题变量）；Prism 原名 .token-* 不提供（见 limit-prism-tokens）。",
     "views": [
       "live",
       "reading"
     ],
     "dom": "代码内容内 token span（live mark 装饰 / 阅读卡片行内 span）。",
-    "example": ".tok-keyword {\n  color: #c678dd;\n}",
+    "example": ".tok-keyword {\n  color: #af00db;\n}",
     "obsidian": {
       "counterpart": ".token-*（Prism 词表方向）/ .cm-* token 族",
       "support": "native"
@@ -3113,7 +3160,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "toolbar-banner",
     "kind": "selector",
     "target": ".vsidian-toolbar",
-    "purpose": "主编辑区顶栏：设置齿轮（.vsidian-settings-toggle）、快速操作开关（.vsidian-quick-toggle）、双态视图切换（.vsidian-view-toggle，#141 起第四按钮，独立条目）、侧栏开关（.vsidian-sidebar-toggle）——#38 起三态切换（含源码）在宿主编辑器标题栏命令，不在顶栏（见 mode-toggle 移除记录）。",
+    "purpose": "主编辑区顶栏：设置齿轮（.vsidian-settings-toggle）、快速操作开关（.vsidian-quick-toggle）、刷新嵌入资源（.vsidian-refresh-toggle，#208 起第五按钮，独立条目）、双态视图切换（.vsidian-view-toggle，#141 起第四按钮，独立条目）、侧栏开关（.vsidian-sidebar-toggle）——#38 起三态切换（含源码）在宿主编辑器标题栏命令，不在顶栏（见 mode-toggle 移除记录）。",
     "views": [
       "live",
       "reading"
@@ -3142,7 +3189,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "reading"
     ],
     "states": "按钮本体常驻两模式；点击出站 view.switch.request（不本地执行），按钮态由宿主回流的 view.mode.set 驱动——aria/tooltip 表目标动作随态换词。",
-    "dom": "顶栏 .vsidian-toolbar 内 button，紧邻侧栏开关左侧；#158 起两者组成右端组——本按钮持有 margin-left:auto 推靠工具栏右端，与左侧组（设置、快速操作）间为弹性空隙；内联 SVG 两 path（book/edit 子类）。",
+    "dom": "顶栏 .vsidian-toolbar 内 button，紧邻侧栏开关左侧；#158 起与侧栏开关组成右端组，#208 起刷新按钮加入右端组并接管 margin-left:auto 推靠规则（本按钮不再持有，推右职责移交见 toolbar-refresh 条目）；与左侧组（设置、快速操作）间为弹性空隙；内联 SVG 两 path（book/edit 子类）。",
     "example": ".vsidian-view-toggle {\n  color: var(--vscode-toolbar-foreground);\n}",
     "obsidian": {
       "counterpart": "无对应物",
@@ -3153,6 +3200,31 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "浏览器套件（#141）：两图标显隐随 body 模式类切换的绘制断言"
     ],
     "introduced": "#141（2026-09-27）"
+  },
+  {
+    "id": "toolbar-refresh",
+    "domain": "chrome",
+    "category": "toolbar-banner",
+    "kind": "selector",
+    "target": ".vsidian-refresh-toggle（按钮本体；内含内联 SVG 循环箭头图标）",
+    "purpose": "刷新嵌入资源按钮（#208）：手动刷新入口——点击出站 refresh.request，宿主清图片解析缓存并推进资源代次后回发失效通知，webview 对活跃图片槽位全量失效重挂（新代次 URI 重载）并重置 Mermaid 懒加载失败终态。刷新不触碰文档内容/撤销栈/视图状态（光标、滚动、模式原样保持），与快捷键入口共用同一发送实现。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "按钮常驻两模式；未就绪（init 前）点击无操作。#158 推右规则（margin-left:auto）于 #208 自 view-toggle 迁移至本按钮——右端组首（刷新 + 双态切换 + 侧栏开关紧挨），与左侧组间弹性空隙。",
+    "dom": "顶栏 .vsidian-toolbar 内 button，紧邻双态切换左侧；内联 SVG 循环箭头（lucide refresh-cw 意象，四 path，线宽恒定 stroke-width=2，不引图标库）。",
+    "example": ".vsidian-refresh-toggle {\n  color: var(--vscode-toolbar-foreground);\n}",
+    "obsidian": {
+      "counterpart": "无对应物",
+      "support": "none"
+    },
+    "verification": [
+      "集成「界面域样式契约」：chromeSelectors[\"toolbar-refresh\"] 探针命中（真宿主渲染验证）",
+      "jsdom 控制器单测（#208）：按钮在场、点击出站 refresh.request",
+      "浏览器套件（#208）：右端组几何绘制断言（中点右侧、与双态切换以工具栏 gap 紧邻）"
+    ],
+    "introduced": "#208（2026-09-29）"
   },
   {
     "id": "mode-body",
@@ -3199,27 +3271,28 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "removed": "#38（2026-09-24，288044d）移除且从未随任何发布版存在；旧映射表该行为陈旧数据（#133 核实纠错，依据 v0.4.0 tag 75c3df7 源码核对）"
   },
   {
-    "id": "block-menu",
+    "id": "context-menu",
     "domain": "chrome",
     "category": "context-menu",
     "kind": "selector",
-    "target": ".vsidian-block-menu（+ -item）",
-    "purpose": "正文右键菜单浮层（复制标题链接/复制块链接，#162）：挂 body 的 fixed 定位自绘菜单；菜单项为 button 键盘可达；颜色跟随 --vscode-menu-* 变量族（与大纲菜单同族视觉语言，无级联子菜单）。",
+    "target": ".vsidian-context-menu（+ -group / -separator / -host / -item / -icon / -badge / -check / -label / -hint / -submenu / -cue / -danger）",
+    "purpose": "统一右键菜单浮层（#183 Live 正文全域接管）：挂 body 的 fixed 定位自绘菜单。三簇分组线（-separator）、级联子菜单（-submenu；:hover/:focus-within 显隐 + 父项点击兜底 vsidian-menu-open 类 + 右缘放不下装配期左翻 vsidian-menu-flip 类）、图标位（-icon 以 data-icon 驱动 mask；#184 起 26 枚接线 key 经 --vsidian-context-icon 定义明暗两套资产，备用 key 资产在场不接线）、文字徽标（-badge，H1–H6）、勾选态（-check，段落设置按行结构点亮）、置灰（disabled）、danger 红字、快捷键提示列（-hint 右对齐小字低不透明度，未绑定不占位）。菜单项为 button 键盘可达；颜色跟随 --vscode-menu-* 变量族（与大纲菜单同族视觉语言）。前身 blockMenu（#162 的 .vsidian-block-menu*）退役并入——该类名从未随任何发布版存在（v0.5.0 tag 零命中），无兼容义务，清单不留条目。",
     "views": [
       "live"
     ],
-    "states": "Live 正文右键命中块（frontmatter 头区与空行不接管，原生菜单照常）。",
-    "dom": "document.body 直接子元素（视口系 fixed 定位）。",
-    "example": ".vsidian-block-menu .vsidian-block-menu-item:hover {\n  background: var(--vscode-menu-selectionBackground);\n}",
+    "states": "Live 正文右键（空行/普通文本/表格行/围栏内/图形块上均接管；frontmatter 头区与阅读态不接管，原生菜单照常）。结构敏感区（表格/围栏/图形块）写操作置灰（安全降级矩阵）。",
+    "dom": "document.body 直接子元素（视口系 fixed 定位）；子菜单嵌父项宿主内（absolute）。",
+    "example": ".vsidian-context-menu .vsidian-context-menu-hint {\n  font-size: 11px;\n  opacity: 0.65;\n}",
     "obsidian": {
       "counterpart": "无（Obsidian 右键菜单为应用原生菜单，非 DOM 内元素）",
       "support": "none"
     },
     "verification": [
-      "单元 blockMenu/blockMenuPanel：菜单装配与命令交互",
-      "集成 block.test.contextMenu/menuClick 系列钩子"
+      "单元 contextMenuDom/contextMenuPanel：菜单装配、分组线、降级矩阵与命令交互",
+      "浏览器 contextMenu：真实右键、子菜单展开与翻转、提示列绘制",
+      "集成 contextMenu.test.* 注入通道 + 绘制层断言"
     ],
-    "introduced": "#162（2026-09-28）"
+    "introduced": "#183（2026-09-28）"
   },
   {
     "id": "backlink-panel",
@@ -3731,6 +3804,14 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
       "counterpart": "No counterpart (Obsidian has no deleted/inaccessible distinction classes)"
     }
   },
+  "image-solo-block": {
+    "purpose": "Block container variant for an image standing alone on its line in live view: when the whole line holds a single image (all remaining text is whitespace, trailing whitespace included), the widget slot switches to block layout, providing a definite width basis for sources without intrinsic dimensions (viewBox-only percentage-width SVGs, the mermaid export form) — such sources collapse to 0×0 under inline-block shrink-to-fit (the img loads successfully, so the failure is silent and shows as a blank line). Sources with intrinsic dimensions are unaffected (they still render at natural width under block layout). Known boundary: such SVGs mixed inline with other content (list prefixes, surrounding text, multiple images on one line) keep the inline form.",
+    "states": "Decided per line at decoration build time (same rule on the tree-driven and loose paths): the line counts as solo when all text outside the image range is whitespace; the three state modifier classes still stack on top.",
+    "dom": "Live inline widget span.vsidian-image.vsidian-image-block > img (display: block).",
+    "obsidian": {
+      "counterpart": "No direct counterpart (Obsidian has no public standalone-image layout class)"
+    }
+  },
   "live-wikilink": {
     "purpose": "Live wikilink presentation: outside the range it is a display-text widget (replacing the whole [[…]], with the alias class on both the widget wrapper and the source mark); inside the range it becomes the source mark. The split form of Obsidian (link name / alias / formatting brackets) has no split classes here.",
     "states": "The source is revealed while the cursor is inside the wikilink range.",
@@ -4094,7 +4175,7 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "outline-menu": {
-    "purpose": "The context-menu overlay (absolutely positioned inside the sidebar; menu items are keyboard-accessible buttons; the submenu's only show/hide switch is the parent item host's :hover/:focus-within; danger marks delete in red; colors follow the --vscode-menu-* variable family).",
+    "purpose": "The context-menu overlay (absolutely positioned inside the sidebar; menu items are keyboard-accessible buttons; the submenu's only show/hide switch is the parent item host's :hover/:focus-within; danger marks delete in red; colors follow the --vscode-menu-* variable family). Since #183 it is assembled through the unified menu kernel (descriptor-driven, class names unchanged); the shared state classes vsidian-menu-open (the parent-item click fallback that pins the submenu open) and vsidian-menu-flip (the submenu flips left at assembly time when the right edge would clip) layer on top of the existing submenu classes.",
     "states": "Summoned by right-click.",
     "dom": "An overlay inside the sidebar.",
     "obsidian": {
@@ -4175,6 +4256,14 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     "dom": "The header button area.",
     "obsidian": {
       "counterpart": ".code-styler-header-container::after (the fold arrow direction)"
+    }
+  },
+  "live-code-card-wrap": {
+    "purpose": "The word-wrap toggle (#191): one click toggles auto word wrap for all reading-view code blocks at once — on is the current pre-wrap wrapping, off makes the code area scroll horizontally (the line-number column sticks to the left edge, the header stays fixed); -off is the wrapped-off modifier (weakened via filter: opacity(0.4), orthogonal to the show/hide opacity). Reading-card header only: live view always wraps (CM6 wrapping is an editor-level facet and cannot be turned off per block). A view state, not persisted and with no setting (same semantics as the fold chevron).",
+    "states": "Wrapping on (default) / off (-off, the title offers to turn it back on); revealed on card hover like the copy button (hidden by default); not emitted in the collapsed state.",
+    "dom": "The leftmost slot of the header button area ([wrap] [copy] [fold]).",
+    "obsidian": {
+      "counterpart": "No counterpart (Obsidian code blocks have no per-block wrap toggle)"
     }
   },
   "live-code-card-linenumber": {
@@ -4280,7 +4369,7 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "toolbar": {
-    "purpose": "The top toolbar of the main editing area: the settings gear (.vsidian-settings-toggle), the quick-action toggle (.vsidian-quick-toggle), the dual-state view toggle (.vsidian-view-toggle, the fourth button since #141 with its own entry) and the sidebar toggle (.vsidian-sidebar-toggle) — since #38 the three-state switch (including source mode) lives in the host editor title bar commands, not on this toolbar (see the mode-toggle removal record).",
+    "purpose": "The top toolbar of the main editing area: the settings gear (.vsidian-settings-toggle), the quick-action toggle (.vsidian-quick-toggle), the refresh-embedded-resources button (.vsidian-refresh-toggle, the fifth button since #208 with its own entry), the dual-state view toggle (.vsidian-view-toggle, the fourth button since #141 with its own entry) and the sidebar toggle (.vsidian-sidebar-toggle) — since #38 the three-state switch (including source mode) lives in the host editor title bar commands, not on this toolbar (see the mode-toggle removal record).",
     "dom": "The toolbar at the top of #app.",
     "obsidian": {
       "counterpart": "No counterpart"
@@ -4289,7 +4378,15 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
   "view-toggle": {
     "purpose": "The dual-state view toggle button (#141): one of the entries for switching between live↔reading (the in-webview entry besides the host title bar three-state command and Ctrl+Q). The icons show the current mode: a book (currently reading) / a pen (currently live) — both icons stay in the DOM permanently, and their show/hide has a single source: the body mode class rules (see the mode-body entry) — when styles fail, both icons show at once, which paint assertions can expose.",
     "states": "The button itself is persistent in both modes; a click posts a view.switch.request outbound (not applied locally), and the button state is driven by the view.mode.set flowed back from the host — the aria/tooltip names the target action and re-words as the mode changes.",
-    "dom": "A button inside the top .vsidian-toolbar, immediately to the left of the sidebar toggle; since #158 the two form the right-end group — this button holds margin-left:auto to push itself against the right end of the toolbar, leaving a flexible gap toward the left group (settings, quick actions); an inline SVG with two paths (book/edit subclasses).",
+    "dom": "A button inside the top .vsidian-toolbar, immediately to the left of the sidebar toggle; since #158 it forms the right-end group with the sidebar toggle, and since #208 the refresh button joins the group and takes over the margin-left:auto push rule (this button no longer holds it — see the toolbar-refresh entry for the handover record); a flexible gap remains toward the left group (settings, quick actions); an inline SVG with two paths (book/edit subclasses).",
+    "obsidian": {
+      "counterpart": "No counterpart"
+    }
+  },
+  "toolbar-refresh": {
+    "purpose": "The refresh-embedded-resources button (#208): the manual refresh entry — a click posts a refresh.request outbound; the host drops the image resolution cache, bumps the resource generation and replies with the invalidation notice, after which the webview remounts every active image slot for re-resolution (reloading with the new-generation URI) and resets the Mermaid lazy-load failure terminal state. Refreshing never touches the document content/undo stack/view state (cursor, scroll and mode stay as they were), and the keybinding entry shares the same send implementation.",
+    "states": "Persistent in both modes; before readiness (before init) a click is a no-op. The #158 push rule (margin-left:auto) moved from view-toggle to this button in #208 — head of the right-end group (refresh + dual-state toggle + sidebar toggle, adjacent), with a flexible gap toward the left group.",
+    "dom": "A button inside the top .vsidian-toolbar, immediately to the left of the dual-state view toggle; an inline SVG circular arrow (lucide refresh-cw motif, four paths, constant stroke-width=2, no icon library).",
     "obsidian": {
       "counterpart": "No counterpart"
     }
@@ -4310,10 +4407,10 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     },
     "removed": "Removed by #38 (2026-09-24, 288044d) and never present in any released build; the old mapping table row was stale data (corrected during the #133 verification against the v0.4.0 tag 75c3df7 source)."
   },
-  "block-menu": {
-    "purpose": "The content context-menu overlay (copy heading link / copy block link, #162): a self-drawn fixed-position menu attached to body; menu items are keyboard-accessible buttons; colors follow the --vscode-menu-* variable family (same visual language family as the outline menu, no cascading submenus).",
-    "states": "Right-clicking a block in the live body (the frontmatter header area and empty lines are not intercepted — the native menu behaves as usual).",
-    "dom": "A direct child of document.body (viewport-fixed positioning).",
+  "context-menu": {
+    "purpose": "The unified context-menu overlay (#183 takes over the whole live body): a self-drawn fixed-position menu attached to body. Three cluster separators (-separator), cascading submenus (-submenu; shown/hidden via :hover/:focus-within + the parent-item click fallback class vsidian-menu-open + the assembly-time left flip vsidian-menu-flip when the right edge would clip), the icon slot (-icon driven by data-icon through a mask; since #184 the 26 wired icon keys define light/dark assets via --vsidian-context-icon, spare keys keep assets on disk but stay unwired), text badges (-badge, H1-H6), checkmarks (-check, paragraph-style items lit per line structure), disabled greying, danger red text, and the shortcut hint column (-hint, right-aligned small text at lowered opacity, no placeholder when unbound). Menu items are keyboard-accessible buttons; colors follow the --vscode-menu-* variable family (same visual language family as the outline menu). The former blockMenu (#162, .vsidian-block-menu*) is retired and folded in — that class name never existed in any released build (zero hits in the v0.5.0 tag), so there is no compatibility obligation and the contract keeps no entry for it.",
+    "states": "Right-clicking the live body (empty lines, plain text, table rows, inside fences and graphic blocks are all intercepted; the frontmatter header area and reading mode are not — the native menu behaves as usual). Write commands are greyed out in structure-sensitive areas (the safe-degradation matrix).",
+    "dom": "A direct child of document.body (viewport-fixed positioning); submenus are nested inside their parent item host (absolute).",
     "obsidian": {
       "counterpart": "None (the Obsidian context menu is an app-native menu, not a DOM element)"
     }

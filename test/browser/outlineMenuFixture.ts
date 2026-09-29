@@ -43,6 +43,16 @@ function readMenu() {
       ? Array.from(menu.querySelectorAll<HTMLElement>('.vsidian-outline-menu-submenu'))
           .map((el) => getComputedStyle(el).display)
       : [],
+    /** 子菜单翻转几何（装配期 vsidian-menu-flip 类 + 视口矩形 + 父项宿主
+     *  矩形——大纲右置翻转矩阵断言依据） */
+    submenus: menu
+      ? Array.from(menu.querySelectorAll<HTMLElement>('.vsidian-outline-menu-submenu')).map((el) => ({
+          display: getComputedStyle(el).display,
+          flipped: el.classList.contains('vsidian-menu-flip'),
+          rect: el.getBoundingClientRect(),
+          parentRect: el.parentElement ? el.parentElement.getBoundingClientRect() : null,
+        }))
+      : [],
     /** 全部菜单命令按钮（含子菜单内的叶子命令） */
     commands: menu
       ? Array.from(menu.querySelectorAll<HTMLButtonElement>('button[data-vsidian-command]'))

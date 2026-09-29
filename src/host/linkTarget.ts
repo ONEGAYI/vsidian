@@ -80,6 +80,16 @@ export type ImageResolution =
       fsPath?: string
     }
 
+/**
+ * #208 图片 webview URI 的资源代次戳（缓存击穿参数，CSS 片段 ?v= 同式：
+ * webview 资源服务不承诺无缓存）：同名图片被外部替换后地址随代次变化。
+ * generation 取会话资源代次（getImageGeneration）——0 为未刷新初值，
+ * 不戳（URI 形态与现状一致），≥ 1 为历次手动刷新后的代次。
+ */
+export function appendImageVersionStamp(uri: string, generation: number): string {
+  return generation > 0 ? `${uri}?v=${generation}` : uri
+}
+
 /** 协议名提取（file:、javascript: 等；不含 Windows 盘符形态——盘符在
  *  Windows 宿主上先于此检查被识别为路径） */
 function schemeOf(text: string): { scheme: string; rest: string } | null {

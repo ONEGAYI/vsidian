@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Vsidian 样式参考（v0.5.0）</title>
+<title>Vsidian 样式参考（v0.6.0）</title>
 <style>
 :root { color-scheme: light dark; }
 body { font: 14px/1.65 system-ui, "Segoe UI", "Microsoft YaHei", sans-serif; margin: 0 auto; max-width: 880px; padding: 24px 20px 64px; }
@@ -30,7 +30,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 </head>
 <body>
 <h1>Vsidian 样式参考</h1>
-<p>本指南由公开样式契约清单自动生成，与已安装版本 <strong>v0.5.0</strong> 配套；清单变更随版本更新，旧版本指南不承诺长期有效。CSS 片段的加载、目录与逐片段启停见扩展设置页「CSS 片段」。机器可读的契约 JSON（结构同源）可经扩展设置页「样式参考」分页或命令面板「Vsidian: 导出样式参考 JSON」导出。</p>
+<p>本指南由公开样式契约清单自动生成，与已安装版本 <strong>v0.6.0</strong> 配套；清单变更随版本更新，旧版本指南不承诺长期有效。CSS 片段的加载、目录与逐片段启停见扩展设置页「CSS 片段」。机器可读的契约 JSON（结构同源）可经扩展设置页「样式参考」分页或命令面板「Vsidian: 导出样式参考 JSON」导出。</p>
 
 <div class="note">
 <p><strong>Obsidian 原名兼容（别名桥）</strong>：标记 <code>direct</code> 的条目，其「别名承诺」列出的 Obsidian 原名选择器/变量在本扩展实际生效——DOM 同时挂载 vsidian 稳定类与 Obsidian 原名类；变量经 <code>var(Obsidian 名, 默认值)</code> 回退链生效，<strong>vsidian 名整条覆盖严格优先于 Obsidian 名</strong>。语义对应（<code>semantic</code>）条目不能用 Obsidian 原名，请改用 vsidian 名。</p>
@@ -66,7 +66,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 </table>
 
   <section class="domain" data-domain="content">
-    <h1 style="font-size:19px;margin-bottom:4px">正文域（76 条）</h1>
+    <h1 style="font-size:19px;margin-bottom:4px">正文域（77 条）</h1>
 
     <h2>正文域 · 容器与视图（2）</h2>
     <article class="entry" id="container-live">
@@ -253,7 +253,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <pre><code>.vsidian-block-id {
   color: color-mix(in srgb, var(--vscode-editor-foreground, #808080) 45%, transparent);
 }</code></pre>
-      <p class="verify">验证：单元 liveBlockId：双形态标记区间发射契约；单元 blockIdCssContract：淡化色规则钉住；浏览器 blockMenu：淡化 computed color 断言（双形态）</p>
+      <p class="verify">验证：单元 liveBlockId：双形态标记区间发射契约；单元 blockIdCssContract：淡化色规则钉住；浏览器 contextMenu：淡化 computed color 断言（双形态 + 自定义字体色跟随 + 阅读隐藏；随 #183 菜单套件统一自 blockMenu 迁移）</p>
       <p class="life">引入：#163 验收反馈（2026-09-28）</p>
     </article>
     <h2>正文域 · 列表与任务（5）</h2>
@@ -722,7 +722,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：单元 readingViewport / readingVirtualView：挂载窗口与 spacer 契约</p>
       <p class="life">引入：#7（2026-09-24）</p>
     </article>
-    <h2>正文域 · 链接、图片与双链（8）</h2>
+    <h2>正文域 · 链接、图片与双链（9）</h2>
     <article class="entry" id="live-link">
       <h3><code>.vsidian-link</code><span class="eid">live-link</span></h3>
       <p class="purpose">live 链接**内容** span（始终标记；光标或选区进入该链接范围时显示 [ 和 ](url) 源码，同一行其他链接保持格式化）；隐藏尾部对应 Obsidian .cm-formatting-link / .cm-string.cm-url 方向——本项目以隐藏呈现，无独立样式类。</p>
@@ -795,6 +795,20 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 }</code></pre>
       <p class="verify">验证：单元 imageResource：细分类与 data 同步契约；集成 #201：删除图片后 notfound 绘制层可见；浏览器 imageRefresh：删除可见态与不可访问区分断言</p>
       <p class="life">引入：#201（2026-09-29）</p>
+    </article>
+    <article class="entry" id="image-solo-block">
+      <h3><code>.vsidian-image-block（live 修饰类，叠加于 .vsidian-image）</code><span class="eid">image-solo-block</span></h3>
+      <p class="purpose">live 独立成行图片的块级容器变体：整行仅含一张图片（其余文本全空白，含尾随空白）时 widget 槽位取块级布局，为无固有尺寸的图源（viewBox-only 百分比宽 SVG，mermaid 导出形态）提供确定宽度基准——此类图源在 inline-block shrink-to-fit 下渲染为 0×0（img 加载成功故静默无反馈，表现为空白行）；有固有尺寸的图源不受影响（块级下仍按自然宽度呈现）。已知边界：行内混排（列表前缀、混排文字、同行多图）的此类 SVG 仍为行内形态。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-native">native</span></p>
+<p class="states">状态：装饰构建时按行判定（树驱动与宽松路径同口径）：行内 [from,to) 之外文本全空白即独立成行；三态修饰类照常叠加。</p>
+      <p class="obsidian">Obsidian 对应：无直接对应（Obsidian 无公开独立图片布局类）</p>
+
+      <p class="dom">DOM 关系：live 行内 widget span.vsidian-image.vsidian-image-block &gt; img（display: block）。</p>
+      <pre><code>.vsidian-image-block {
+  display: block;
+}</code></pre>
+      <p class="verify">验证：浏览器 liveImageLayout：真实 Chromium + 生产控制器——独行 viewBox-only SVG 渲染宽度铺满正文列（修复前 0×0）、固有尺寸图不拉伸、限宽档随列联动、阅读侧非回归；单元 linkInteraction：独立成行判定（整行/尾随空白/列表前缀/混排/同行两图/宽松路径）与 widget 形态 eq</p>
+      <p class="life">引入：live SVG 塌缩修复（2026-09-29）</p>
     </article>
     <article class="entry" id="live-wikilink">
       <h3><code>.vsidian-wikilink</code><span class="eid">live-wikilink</span></h3>
@@ -1100,7 +1114,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
   </section>
   <section class="domain" data-domain="chrome">
-    <h1 style="font-size:19px;margin-bottom:4px">界面域（61 条）</h1>
+    <h1 style="font-size:19px;margin-bottom:4px">界面域（63 条）</h1>
     <p class="note">界面域条目（#133 起逐项核实）：静态入口经探针在真实渲染中断言，交互态入口由浏览器/集成套件按行为路径验证；第三方渲染器（KaTeX/Mermaid）内部 DOM 不承诺为稳定接口（见各域「限制」类目）。</p>
     <h2>界面域 · 公式（5）</h2>
     <article class="entry" id="live-math">
@@ -1259,7 +1273,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：集成「图表弹窗」（#111/#133）：cssProbe.chromePopup 打开期间样式观测 + 刷新后保持；浏览器 graphicPopup：原生键鼠路径（缩放/平移/Esc/导出）与样式保持</p>
       <p class="life">引入：#111（2026-09-26）</p>
     </article>
-    <h2>界面域 · 代码块卡片（10）</h2>
+    <h2>界面域 · 代码块卡片（11）</h2>
     <article class="entry" id="live-code-card-line">
       <h3><code>.vsidian-code-card-line</code><span class="eid">live-code-card-line</span></h3>
       <p class="purpose">卡片覆盖的行级类：live 为源行级（含被清空的围栏行与全部代码行，承载卡片底色），阅读为卡内行 span（与 live 同类名，跨视图同口径）；与正文域 live-code-line 并行（live 卡片开启时两者都在场）。</p>
@@ -1344,6 +1358,20 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：集成代码卡片用例（codecard.test.fold 折叠链路）</p>
       <p class="life">引入：#79（2026-09-26）</p>
     </article>
+    <article class="entry" id="live-code-card-wrap">
+      <h3><code>.vsidian-code-card-wrap（+ -off 修饰，仅阅读侧发射）</code><span class="eid">live-code-card-wrap</span></h3>
+      <p class="purpose">折行开关按钮（#191）：点击全文联动开/关阅读视图代码块自动折行——开启为现行 pre-wrap 折行，关闭为代码区横向滚动（行号列 sticky 钉左、头部固定）；-off 为已关闭修饰（经 filter: opacity(0.4) 弱化，与显隐 opacity 正交）。仅阅读卡片头部装配：Live 恒折行（CM6 折行是编辑器级 facet 无法按块关）。状态为视图态，不持久化、不设设置项（与折叠 chevron 同语义）。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+<p class="states">状态：折行开启（默认）/ 关闭（-off，title 提示开启）；与复制钮同口径进卡即显（默认隐藏、悬停卡片显现）；收起态不发射。</p>
+      <p class="obsidian">Obsidian 对应：无对应（Obsidian 代码块无逐块折行开关）</p>
+
+      <p class="dom">DOM 关系：头部按钮区最左（[折行] [复制] [折叠]）。</p>
+      <pre><code>.vsidian-code-card-wrap-off {
+  filter: opacity(0.4);
+}</code></pre>
+      <p class="verify">验证：codeCardPaintCssContract：进卡即显显隐体系与 -off filter 弱化；浏览器 codeCardChrome：折行/nowrap 几何、sticky 行号与联动断言；集成「界面域样式契约」（#133）：chromeSelectors[&quot;live-code-card-wrap-reading&quot;] 探针命中</p>
+      <p class="life">引入：#191（2026-09-28）</p>
+    </article>
     <article class="entry" id="live-code-card-linenumber">
       <h3><code>.vsidian-code-card-linenumber</code><span class="eid">live-code-card-linenumber</span></h3>
       <p class="purpose">卡内行号（每块从 1，围栏行不占号；大围栏分块跨片连续）；live 为行首 widget、阅读为行 span（同类名）；与文档行号槽（源文件行号）两列并存互不遮挡。</p>
@@ -1360,14 +1388,14 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
     <article class="entry" id="tok-tokens">
       <h3><code>tok-* token 族（tok-keyword / tok-string 等，@lezer/highlight classHighlighter 词表）</code><span class="eid">tok-tokens</span></h3>
-      <p class="purpose">语法高亮 token span，两视图共用同一类名与明暗色板（Dark+/Light+ 取色，非 Obsidian 主题变量）；Prism 原名 .token-* 不提供（见 limit-prism-tokens）。</p>
+      <p class="purpose">语法高亮 token span，两视图及已注册语言共用同一类名与明暗色板；解析器已有函数标签时在旧变量/属性类上叠加 tok-function（基础色取自 VS Code 主题导出与逐词检查，函数色为用户选择的暖黄，非语义 token 逐语言复刻，也非 Obsidian 主题变量）；Prism 原名 .token-* 不提供（见 limit-prism-tokens）。</p>
       <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-native">native</span></p>
 
       <p class="obsidian">Obsidian 对应：.token-*（Prism 词表方向）/ .cm-* token 族</p>
 
       <p class="dom">DOM 关系：代码内容内 token span（live mark 装饰 / 阅读卡片行内 span）。</p>
       <pre><code>.tok-keyword {
-  color: #c678dd;
+  color: #af00db;
 }</code></pre>
       <p class="verify">验证：codeHighlight 单元：词表契约（tok-* 两端共用）；集成「界面域样式契约」（#133）：chromeSelectors[&quot;tok-tokens-live&quot;/&quot;tok-tokens-reading&quot;] 探针命中</p>
       <p class="life">引入：#83（2026-09-26）</p>
@@ -1597,7 +1625,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
     <article class="entry" id="outline-menu">
       <h3><code>.vsidian-outline-menu（+ -item / -host / -submenu / -danger / -cue）</code><span class="eid">outline-menu</span></h3>
-      <p class="purpose">右键菜单浮层（挂侧栏内 absolute；菜单项为 button 键盘可达；子菜单显隐唯一开关是父项宿主的 :hover/:focus-within；danger 红字标删除；颜色跟随 --vscode-menu-* 变量族）。</p>
+      <p class="purpose">右键菜单浮层（挂侧栏内 absolute；菜单项为 button 键盘可达；子菜单显隐唯一开关是父项宿主的 :hover/:focus-within；danger 红字标删除；颜色跟随 --vscode-menu-* 变量族）。#183 迁移到统一菜单内核装配（描述符化，类名不变）；公用态类 vsidian-menu-open（父项点击展开兜底）与 vsidian-menu-flip（子菜单装配期左翻——大纲面板右置时不再溢出屏幕）叠加在既有子菜单类上。</p>
       <p class="views"><span class="badge badge-none">非编辑视图</span> <span class="support support-none">none</span></p>
 <p class="states">状态：右键唤出。</p>
       <p class="obsidian">Obsidian 对应：无（VSCode 原生上下文菜单为宿主级）</p>
@@ -1606,7 +1634,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <pre><code>.vsidian-outline-menu-danger {
   color: var(--vscode-errorForeground);
 }</code></pre>
-      <p class="verify">验证：浏览器 outlineMenu；集成 outline.test.contextMenu/menuClick 系列</p>
+      <p class="verify">验证：浏览器 outlineMenu（含右置子菜单翻转矩阵：装配期全翻左 + 展开后右缘不溢出视口）；集成 outline.test.contextMenu/menuClick 系列</p>
       <p class="life">引入：#69（2026-09-25）</p>
     </article>
     <article class="entry" id="outline-rename-input">
@@ -1710,7 +1738,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：清单即边界：第三方渲染器私有 DOM 不提升为稳定接口</p>
       <p class="life">引入：#133（2026-09-27，随界面域核实落档）</p>
     </article>
-    <h2>界面域 · 工具栏与横幅（5）</h2>
+    <h2>界面域 · 工具栏与横幅（6）</h2>
     <article class="entry" id="suspend-banner">
       <h3><code>.vsidian-suspend-banner（内含 .vsidian-suspend-banner-text）</code><span class="eid">suspend-banner</span></h3>
       <p class="purpose">写回冲突暂停横幅（本项目自有 UI）：暂停态顶栏提示 + 恢复按钮。</p>
@@ -1727,7 +1755,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
     <article class="entry" id="toolbar">
       <h3><code>.vsidian-toolbar</code><span class="eid">toolbar</span></h3>
-      <p class="purpose">主编辑区顶栏：设置齿轮（.vsidian-settings-toggle）、快速操作开关（.vsidian-quick-toggle）、双态视图切换（.vsidian-view-toggle，#141 起第四按钮，独立条目）、侧栏开关（.vsidian-sidebar-toggle）——#38 起三态切换（含源码）在宿主编辑器标题栏命令，不在顶栏（见 mode-toggle 移除记录）。</p>
+      <p class="purpose">主编辑区顶栏：设置齿轮（.vsidian-settings-toggle）、快速操作开关（.vsidian-quick-toggle）、刷新嵌入资源（.vsidian-refresh-toggle，#208 起第五按钮，独立条目）、双态视图切换（.vsidian-view-toggle，#141 起第四按钮，独立条目）、侧栏开关（.vsidian-sidebar-toggle）——#38 起三态切换（含源码）在宿主编辑器标题栏命令，不在顶栏（见 mode-toggle 移除记录）。</p>
       <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
 
       <p class="obsidian">Obsidian 对应：无对应物</p>
@@ -1746,12 +1774,26 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 <p class="states">状态：按钮本体常驻两模式；点击出站 view.switch.request（不本地执行），按钮态由宿主回流的 view.mode.set 驱动——aria/tooltip 表目标动作随态换词。</p>
       <p class="obsidian">Obsidian 对应：无对应物</p>
 
-      <p class="dom">DOM 关系：顶栏 .vsidian-toolbar 内 button，紧邻侧栏开关左侧；#158 起两者组成右端组——本按钮持有 margin-left:auto 推靠工具栏右端，与左侧组（设置、快速操作）间为弹性空隙；内联 SVG 两 path（book/edit 子类）。</p>
+      <p class="dom">DOM 关系：顶栏 .vsidian-toolbar 内 button，紧邻侧栏开关左侧；#158 起与侧栏开关组成右端组，#208 起刷新按钮加入右端组并接管 margin-left:auto 推靠规则（本按钮不再持有，推右职责移交见 toolbar-refresh 条目）；与左侧组（设置、快速操作）间为弹性空隙；内联 SVG 两 path（book/edit 子类）。</p>
       <pre><code>.vsidian-view-toggle {
   color: var(--vscode-toolbar-foreground);
 }</code></pre>
       <p class="verify">验证：集成「界面域样式契约」（#133）：chromeSelectors[&quot;view-toggle&quot;] 探针命中（真宿主渲染验证）；浏览器套件（#141）：两图标显隐随 body 模式类切换的绘制断言</p>
       <p class="life">引入：#141（2026-09-27）</p>
+    </article>
+    <article class="entry" id="toolbar-refresh">
+      <h3><code>.vsidian-refresh-toggle（按钮本体；内含内联 SVG 循环箭头图标）</code><span class="eid">toolbar-refresh</span></h3>
+      <p class="purpose">刷新嵌入资源按钮（#208）：手动刷新入口——点击出站 refresh.request，宿主清图片解析缓存并推进资源代次后回发失效通知，webview 对活跃图片槽位全量失效重挂（新代次 URI 重载）并重置 Mermaid 懒加载失败终态。刷新不触碰文档内容/撤销栈/视图状态（光标、滚动、模式原样保持），与快捷键入口共用同一发送实现。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+<p class="states">状态：按钮常驻两模式；未就绪（init 前）点击无操作。#158 推右规则（margin-left:auto）于 #208 自 view-toggle 迁移至本按钮——右端组首（刷新 + 双态切换 + 侧栏开关紧挨），与左侧组间弹性空隙。</p>
+      <p class="obsidian">Obsidian 对应：无对应物</p>
+
+      <p class="dom">DOM 关系：顶栏 .vsidian-toolbar 内 button，紧邻双态切换左侧；内联 SVG 循环箭头（lucide refresh-cw 意象，四 path，线宽恒定 stroke-width=2，不引图标库）。</p>
+      <pre><code>.vsidian-refresh-toggle {
+  color: var(--vscode-toolbar-foreground);
+}</code></pre>
+      <p class="verify">验证：集成「界面域样式契约」：chromeSelectors[&quot;toolbar-refresh&quot;] 探针命中（真宿主渲染验证）；jsdom 控制器单测（#208）：按钮在场、点击出站 refresh.request；浏览器套件（#208）：右端组几何绘制断言（中点右侧、与双态切换以工具栏 gap 紧邻）</p>
+      <p class="life">引入：#208（2026-09-29）</p>
     </article>
     <article class="entry" id="mode-body">
       <h3><code>布局根模式类 .vsidian-body.vsidian-mode-live / .vsidian-body.vsidian-mode-reading（互斥，两态必居其一）</code><span class="eid">mode-body</span></h3>
@@ -1851,19 +1893,20 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="life">引入：#140（2026-09-27 Popover 改版）</p>
     </article>
     <h2>界面域 · 正文右键菜单（1）</h2>
-    <article class="entry" id="block-menu">
-      <h3><code>.vsidian-block-menu（+ -item）</code><span class="eid">block-menu</span></h3>
-      <p class="purpose">正文右键菜单浮层（复制标题链接/复制块链接，#162）：挂 body 的 fixed 定位自绘菜单；菜单项为 button 键盘可达；颜色跟随 --vscode-menu-* 变量族（与大纲菜单同族视觉语言，无级联子菜单）。</p>
+    <article class="entry" id="context-menu">
+      <h3><code>.vsidian-context-menu（+ -group / -separator / -host / -item / -icon / -badge / -check / -label / -hint / -submenu / -cue / -danger）</code><span class="eid">context-menu</span></h3>
+      <p class="purpose">统一右键菜单浮层（#183 Live 正文全域接管）：挂 body 的 fixed 定位自绘菜单。三簇分组线（-separator）、级联子菜单（-submenu；:hover/:focus-within 显隐 + 父项点击兜底 vsidian-menu-open 类 + 右缘放不下装配期左翻 vsidian-menu-flip 类）、图标位（-icon 以 data-icon 驱动 mask；#184 起 26 枚接线 key 经 --vsidian-context-icon 定义明暗两套资产，备用 key 资产在场不接线）、文字徽标（-badge，H1–H6）、勾选态（-check，段落设置按行结构点亮）、置灰（disabled）、danger 红字、快捷键提示列（-hint 右对齐小字低不透明度，未绑定不占位）。菜单项为 button 键盘可达；颜色跟随 --vscode-menu-* 变量族（与大纲菜单同族视觉语言）。前身 blockMenu（#162 的 .vsidian-block-menu*）退役并入——该类名从未随任何发布版存在（v0.5.0 tag 零命中），无兼容义务，清单不留条目。</p>
       <p class="views"><span class="badge">实时预览</span> <span class="support support-none">none</span></p>
-<p class="states">状态：Live 正文右键命中块（frontmatter 头区与空行不接管，原生菜单照常）。</p>
+<p class="states">状态：Live 正文右键（空行/普通文本/表格行/围栏内/图形块上均接管；frontmatter 头区与阅读态不接管，原生菜单照常）。结构敏感区（表格/围栏/图形块）写操作置灰（安全降级矩阵）。</p>
       <p class="obsidian">Obsidian 对应：无（Obsidian 右键菜单为应用原生菜单，非 DOM 内元素）</p>
 
-      <p class="dom">DOM 关系：document.body 直接子元素（视口系 fixed 定位）。</p>
-      <pre><code>.vsidian-block-menu .vsidian-block-menu-item:hover {
-  background: var(--vscode-menu-selectionBackground);
+      <p class="dom">DOM 关系：document.body 直接子元素（视口系 fixed 定位）；子菜单嵌父项宿主内（absolute）。</p>
+      <pre><code>.vsidian-context-menu .vsidian-context-menu-hint {
+  font-size: 11px;
+  opacity: 0.65;
 }</code></pre>
-      <p class="verify">验证：单元 blockMenu/blockMenuPanel：菜单装配与命令交互；集成 block.test.contextMenu/menuClick 系列钩子</p>
-      <p class="life">引入：#162（2026-09-28）</p>
+      <p class="verify">验证：单元 contextMenuDom/contextMenuPanel：菜单装配、分组线、降级矩阵与命令交互；浏览器 contextMenu：真实右键、子菜单展开与翻转、提示列绘制；集成 contextMenu.test.* 注入通道 + 绘制层断言</p>
+      <p class="life">引入：#183（2026-09-28）</p>
     </article>
     <h2>界面域 · 反链面板（4）</h2>
     <article class="entry" id="backlink-panel">

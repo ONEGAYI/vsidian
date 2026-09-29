@@ -19,14 +19,18 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // #139 合并入列：commentToggle（HTML 注释 Ctrl+/ 两态、淡化绘制与阅读隐藏）。
 // #141 合并入列：viewToggle（工具栏双态切换按钮与 Ctrl+Q 快捷键入口）。
 // #161 合并入列：imagePaste（ClipboardEvent 剪贴板注入的图片粘贴拦截回归）。
-// #162 合并入列：blockMenu（正文右键菜单复制块链接、Ctrl+Shift+C 快捷键）。
+// #162 blockMenu 已随 #183 退役，场景并入 contextMenu。
 // #201 合并入列：imageRefresh（失效重发像素替换、删除/不可访问可见态、代次守卫、
 // 唤醒核验与尺寸变化的视口稳定）。
 // #174/#175 合并入列：readingWidthProbe（可读行宽双模式铺满/限宽居中/
 // 行号列随列/侧栏避让/片段优先序/宽块钳制——bug 修复回归本体）。
+// #189/#190/#191 合并入列：codeCardChrome（代码块卡片绘制层——围栏
+// 真实对齐、head 按钮换位与整卡恒显、折行开关与续行悬挂缩进）。
+// live SVG 塌缩修复入列：liveImageLayout（独立成行图片布局——viewBox-only
+// 百分比宽 SVG 铺满正文列、固有尺寸不拉伸、限宽联动、阅读非回归）。
 const names = ['tableCaret', 'quoteBarPaint', 'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'imagePaste', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage',
-  'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract', 'commentToggle', 'viewToggle', 'blockMenu', 'anchorFlash', 'readingWidthProbe', 'imageRefresh']
+  'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract', 'commentToggle', 'viewToggle', 'contextMenu', 'anchorFlash', 'readingWidthProbe', 'codeCardChrome', 'liveImageLayout', 'imageRefresh']
 const { workers, reuseBuilds, selected } = parseBrowserRunOptions(process.argv.slice(2), names)
 const parent = path.join(root, 'out/test/browser-runs')
 await mkdir(parent, { recursive: true })

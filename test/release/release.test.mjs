@@ -16,14 +16,17 @@ function katexFontEntries() {
   }))
 }
 
-// 快速操作条的两套图标：测试基线独立列出预期键，防止发布清单漏项。
+// 快速操作条与右键菜单共用的图标集：测试基线独立列出预期键，防止发布清单漏项。
 // #105/#106 起新增 highlight 与 horizontalRule 两键，fixture 当时未同步
-// （基线即失败），此处与 scripts/release.mjs 的清单对齐。
+// （基线即失败），此处与 scripts/release.mjs 的清单对齐；#185 起右键菜单
+// 新增十键（normalText 等）同规则登记。
 const QUICK_ICON_KEYS = [
   'bold', 'italic', 'strikethrough', 'inlineCode', 'heading',
   'bulletList', 'orderedList', 'taskList', 'quote', 'codeBlock',
   'link', 'clearInline', 'table', 'inlineMath', 'blockMath',
   'highlight', 'horizontalRule',
+  'normalText', 'textFormat', 'paragraphStyle', 'comment',
+  'externalLink', 'cut', 'copy', 'paste', 'selectAll', 'insertPlus',
 ]
 function quickActionIconEntries() {
   return ['light', 'dark'].flatMap((theme) => QUICK_ICON_KEYS.map((key) => ({
@@ -90,6 +93,38 @@ test('CHANGELOG 提取：最新版本与 package.json 不一致时报错', () =>
 
 test('CHANGELOG 提取：没有任何版本段落时报错', () => {
   assert.throws(() => extractLatestChangelog('# Changelog\n\n只有开头'), /未找到/)
+})
+
+test('CHANGELOG 提取：顶部常驻 Unreleased 段时跳过，取首个版本段', () => {
+  const content = [
+    '# Changelog',
+    '',
+    '## Unreleased - 开发中',
+    '',
+    '### 新增',
+    '',
+    '- 开发中条目（尚未发布）',
+    '',
+    '## 0.2.0 - 2026-10-01',
+    '',
+    '### 新增',
+    '',
+    '- B 功能',
+    '',
+    '## 0.1.0 - 2026-09-25',
+    '',
+    '- 首个版本',
+  ].join('\n')
+  const notes = extractLatestChangelog(content, '0.2.0')
+  assert.equal(notes.version, '0.2.0')
+  assert.equal(notes.date, '2026-10-01')
+  assert.doesNotMatch(notes.body, /Unreleased/, '发布说明不得混入 Unreleased 段内容')
+  assert.match(notes.body, /- B 功能/)
+})
+
+test('CHANGELOG 提取：只有 Unreleased 段而无版本段落时报错', () => {
+  const content = '# Changelog\n\n## Unreleased - 开发中\n\n- 开发中条目'
+  assert.throws(() => extractLatestChangelog(content, '0.1.0'), /未找到/)
 })
 
 test('折行合并：中文行间直接拼接不留空格，结构换行保留', () => {

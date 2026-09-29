@@ -1,6 +1,10 @@
-// 大纲右键菜单（#69）：菜单结构模型、结构命令（消费折叠状态机的展开集
-// 合操作）、菜单 DOM 装配与定位纯函数。控制器装配（contextmenu 委托、
-// 命令分派到写回管线）在 syncController；写操作的文本变换在 outlineSection。
+// 大纲右键菜单（#69；#183 迁移到统一右键菜单内核）：菜单结构模型（内核
+// 描述符化——danger/disabled/子菜单均由 shared/contextMenu 的
+// MenuItemDescriptor 字段承载）、结构命令（消费折叠状态机的展开集合操作）
+// 与定位纯函数（侧栏坐标系）。DOM 装配经 contextMenuDom.buildMenuDom（类名
+// 映射为既有 vsidian-outline-menu* 子集——行为与视觉不变、暂不配图标）；
+// 控制器装配（contextmenu 委托、命令分派到写回管线）在 syncController；
+// 写操作的文本变换在 outlineSection。
 //
 // 语义单一事实源（供契约测试 outlineMenu.test.ts 对拍）：
 //
@@ -17,22 +21,31 @@
 //    - 展开同级 = 同级组内全部父节点键加入
 //    无变化返回原集合引用（调用方零成本判无变化）。
 //
-// 3. DOM：菜单项一律 button（键盘 Tab/Enter/空格原生可达）；级联子菜单
-//    嵌套于父项的 itemHost 内，显隐由 CSS 的 :hover/:focus-within 控制
-//    （无 JS 展开状态——jsdom 无法 hover 的部分由 CSS 契约与浏览器回归
-//    钉住）；命令 id 落 data-vsidian-command（测试钩子与断言锚点）。
+// 3. DOM：经内核装配（contextMenuDom.buildMenuDom）产出既有类名——项为
+//    button（键盘 Tab/Enter/空格原生可达）；级联子菜单嵌套于父项的
+//    itemHost 内，显隐由 CSS 的 :hover/:focus-within 控制（无 JS 展开状态
+//    机——jsdom 无法 hover 的部分由 CSS 契约与浏览器回归钉住；#183 起父项
+//    点击也展开作兜底，右缘放不下由 applySubmenuFlip 装配期翻左——大纲
+//    面板右置时子菜单不再溢出屏幕）；命令 id 落 data-vsidian-command
+//    （测试钩子与断言锚点）。
 //
 // 4. 定位：侧栏坐标系内 clamp（右缘贴齐、底部上翻），点击点落在目标
 //    条目内时垂直让位到条目下方（条目保持可见——菜单不遮挡目标）；
 //    下方放不下翻到条目上方，再放不下 clamp 到侧栏内。
 import type { OutlineMenuCommand } from '../shared/protocol'
 import type { MessageKey } from '../shared/locales/en'
-import { t } from '../shared/i18n'
+import {
+  PLAIN_MENU_LINE,
+  buildMenuModel,
+  type MenuContextSnapshot,
+  type MenuItemDescriptor,
+} from '../shared/contextMenu'
+import { buildMenuDom, type MenuDomClassNames } from './contextMenuDom'
 import { outlineSiblingIndices, outlineSubtreeIndices } from './outlineSection'
 
 export type { OutlineMenuCommand }
 
-/** 大纲菜单的稳定类名（样式与断言的公共锚点） */
+/** 大纲菜单的稳定类名（样式与断言的公共锚点；内核装配的类名映射） */
 export const OUTLINE_MENU_CLASS_NAMES = {
   /** 菜单容器（侧栏内 absolute 定位） */
   menu: 'vsidian-outline-menu',
@@ -50,46 +63,83 @@ export const OUTLINE_MENU_CLASS_NAMES = {
   renameInput: 'vsidian-outline-rename-input',
 } as const
 
-/** 菜单项描述（一级与子菜单共用；children 存在即级联）。#94 起 labelKey
- *  为字典消息键（outlineMenu.*），渲染层经 t() 取词 */
-export interface OutlineMenuItemDef {
-  id: OutlineMenuCommand | 'copy' | 'level'
-  labelKey: MessageKey
-  children?: OutlineMenuItemDef[]
-  /** 渲染为 disabled（键盘跳过、点击无回调） */
-  disabled?: boolean
+/** 内核装配的类名映射（既有类名子集——迁移不改视觉；open/flip 槽位用
+ *  内核公用类名，承载点击兜底展开与子菜单左翻） */
+const OUTLINE_MENU_DOM_NAMES: Partial<MenuDomClassNames> = {
+  menu: OUTLINE_MENU_CLASS_NAMES.menu,
+  itemHost: OUTLINE_MENU_CLASS_NAMES.itemHost,
+  item: OUTLINE_MENU_CLASS_NAMES.item,
+  submenu: OUTLINE_MENU_CLASS_NAMES.submenu,
+  danger: OUTLINE_MENU_CLASS_NAMES.danger,
+  cue: OUTLINE_MENU_CLASS_NAMES.cue,
 }
 
-/** 菜单结构（hasChildren：目标条目是否父节点——决定递归展开可用性） */
-export function outlineMenuSpec(hasChildren: boolean): OutlineMenuItemDef[] {
+/** 大纲菜单的固定上下文快照（谓词不消费区域/选区/行结构——模型仅由
+ *  hasChildren 驱动；内核渲染管线要求 ctx 形参，此处为常量） */
+const OUTLINE_MENU_CONTEXT: MenuContextSnapshot = {
+  zone: 'normal',
+  hasSelection: false,
+  blockTarget: null,
+  line: PLAIN_MENU_LINE,
+}
+
+/** 描述条目（id 与命令同值；子菜单 children 级联） */
+const outlineItem = (
+  id: string,
+  labelKey: MessageKey,
+  order: number,
+  extra: Partial<MenuItemDescriptor> = {},
+): MenuItemDescriptor => ({
+  id,
+  group: 'outline',
+  order,
+  command: id,
+  labelKey,
+  ...extra,
+})
+
+/** 菜单结构（内核描述符；hasChildren：目标条目是否父节点——决定递归展开
+ *  可用性。danger/disabled/子菜单均由描述符字段承载） */
+export function outlineMenuSpec(hasChildren: boolean): MenuItemDescriptor[] {
   return [
-    { id: 'expandRecursively', labelKey: 'outlineMenu.expandRecursively', disabled: !hasChildren },
-    { id: 'collapseSiblings', labelKey: 'outlineMenu.collapseSiblings' },
-    { id: 'expandSiblings', labelKey: 'outlineMenu.expandSiblings' },
-    {
-      id: 'copy',
-      labelKey: 'outlineMenu.copy',
+    outlineItem('expandRecursively', 'outlineMenu.expandRecursively', 0,
+      hasChildren ? {} : { enable: () => false }),
+    outlineItem('collapseSiblings', 'outlineMenu.collapseSiblings', 1),
+    outlineItem('expandSiblings', 'outlineMenu.expandSiblings', 2),
+    outlineItem('copy', 'outlineMenu.copy', 3, {
       children: [
-        { id: 'copyHeading', labelKey: 'outlineMenu.copyHeading' },
-        { id: 'copySiblings', labelKey: 'outlineMenu.copySiblings' },
-        { id: 'copyChildren', labelKey: 'outlineMenu.copyChildren' },
-        { id: 'copyLink', labelKey: 'outlineMenu.copyLink' },
-        { id: 'copySection', labelKey: 'outlineMenu.copySection' },
+        outlineItem('copyHeading', 'outlineMenu.copyHeading', 0),
+        outlineItem('copySiblings', 'outlineMenu.copySiblings', 1),
+        outlineItem('copyChildren', 'outlineMenu.copyChildren', 2),
+        outlineItem('copyLink', 'outlineMenu.copyLink', 3),
+        outlineItem('copySection', 'outlineMenu.copySection', 4),
       ],
-    },
-    {
-      id: 'level',
-      labelKey: 'outlineMenu.adjustLevel',
+    }),
+    outlineItem('level', 'outlineMenu.adjustLevel', 4, {
       children: [
-        { id: 'levelUp', labelKey: 'outlineMenu.levelUp' },
-        { id: 'levelUpRecursive', labelKey: 'outlineMenu.levelUpRecursive' },
-        { id: 'levelDown', labelKey: 'outlineMenu.levelDown' },
-        { id: 'levelDownRecursive', labelKey: 'outlineMenu.levelDownRecursive' },
+        outlineItem('levelUp', 'outlineMenu.levelUp', 0),
+        outlineItem('levelUpRecursive', 'outlineMenu.levelUpRecursive', 1),
+        outlineItem('levelDown', 'outlineMenu.levelDown', 2),
+        outlineItem('levelDownRecursive', 'outlineMenu.levelDownRecursive', 3),
       ],
-    },
-    { id: 'rename', labelKey: 'outlineMenu.rename' },
-    { id: 'delete', labelKey: 'outlineMenu.delete' },
+    }),
+    outlineItem('rename', 'outlineMenu.rename', 5),
+    outlineItem('delete', 'outlineMenu.delete', 6, { danger: true }),
   ]
+}
+
+/** 菜单 DOM 装配（#183 内核装配）：容器 role=menu；项为 button
+ *  （data-vsidian-command 携带命令 id）；子菜单嵌父项内。onCommand 只接收
+ *  叶命令（父项容器无回调） */
+export function buildOutlineMenuDom(
+  hasChildren: boolean,
+  onCommand: (id: OutlineMenuCommand) => void,
+): HTMLElement {
+  return buildMenuDom(buildMenuModel(outlineMenuSpec(hasChildren), OUTLINE_MENU_CONTEXT), {
+    classNames: OUTLINE_MENU_DOM_NAMES,
+    // 协议校验器已限定合法菜单命令（isOutlineMenuCommand），收窄安全
+    onCommand: (command) => onCommand(command as OutlineMenuCommand),
+  })
 }
 
 /** 结构命令消费的条目形状（折叠状态机同款） */
@@ -143,56 +193,6 @@ export function outlineStructuralExpand(
     return next
   }
   return expanded
-}
-
-/** 菜单 DOM 装配：容器 role=menu；项为 button（data-vsidian-command 携带
- *  命令 id）；子菜单嵌套父项内。onCommand 只接收叶命令（父项容器无回调） */
-export function buildOutlineMenu(
-  spec: readonly OutlineMenuItemDef[],
-  onCommand: (id: OutlineMenuCommand) => void,
-): HTMLElement {
-  const menu = document.createElement('div')
-  menu.className = OUTLINE_MENU_CLASS_NAMES.menu
-  menu.setAttribute('role', 'menu')
-  const appendItems = (host: HTMLElement, defs: readonly OutlineMenuItemDef[]): void => {
-    for (const def of defs) {
-      const itemHost = document.createElement('div')
-      itemHost.className = OUTLINE_MENU_CLASS_NAMES.itemHost
-      const btn = document.createElement('button')
-      btn.type = 'button'
-      btn.className = OUTLINE_MENU_CLASS_NAMES.item
-      btn.dataset['vsidianCommand'] = def.id
-      if (def.disabled === true) {
-        btn.disabled = true
-      }
-      if (def.id === 'delete') {
-        btn.classList.add(OUTLINE_MENU_CLASS_NAMES.danger)
-      }
-      btn.textContent = t(def.labelKey)
-      btn.addEventListener('click', () => {
-        if (btn.disabled) {
-          return
-        }
-        onCommand(def.id as OutlineMenuCommand)
-      })
-      itemHost.appendChild(btn)
-      if (def.children && def.children.length > 0) {
-        const cue = document.createElement('span')
-        cue.className = OUTLINE_MENU_CLASS_NAMES.cue
-        cue.setAttribute('aria-hidden', 'true')
-        cue.textContent = '▸'
-        btn.appendChild(cue)
-        const submenu = document.createElement('div')
-        submenu.className = OUTLINE_MENU_CLASS_NAMES.submenu
-        submenu.setAttribute('role', 'menu')
-        appendItems(submenu, def.children)
-        itemHost.appendChild(submenu)
-      }
-      host.appendChild(itemHost)
-    }
-  }
-  appendItems(menu, spec)
-  return menu
 }
 
 /** 菜单定位（视口系 left/top）：见模块头 4。click = 点击点，menu = 菜单

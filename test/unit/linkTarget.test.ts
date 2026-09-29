@@ -14,6 +14,7 @@
 //   锚点目标；外部 scheme 的 `#` 是网页锚点语义，不接管（照旧外开）
 import { describe, it, expect } from 'vitest'
 import {
+  appendImageVersionStamp,
   classifyImageTarget,
   classifyLinkTarget,
   type LinkContext,
@@ -337,5 +338,22 @@ describe('#160 锚点 fragment：含空格路径矩阵与接管边界', () => {
     // 非白名单 scheme 照旧拦截（fragment 不改变 scheme 判定）
     const blocked = classifyLinkTarget('mailto:a@b.c#frag', WIN)
     expect(blocked.kind === 'blocked' && blocked.reason).toBe('scheme')
+  })
+})
+
+describe('#208 图片 webview URI 的资源代次戳（手动刷新缓存击穿）', () => {
+  it('代次 ≥ 1 时追加 ?v=<代次>（CSS 片段 ?v= 同式）', () => {
+    expect(appendImageVersionStamp('vscode-webview://res/a.png', 1)).toBe(
+      'vscode-webview://res/a.png?v=1',
+    )
+    expect(appendImageVersionStamp('vscode-webview://res/sub/b%20c.png', 12)).toBe(
+      'vscode-webview://res/sub/b%20c.png?v=12',
+    )
+  })
+
+  it('代次 0（未刷新初值）不戳：URI 形态与现状一致', () => {
+    expect(appendImageVersionStamp('vscode-webview://res/a.png', 0)).toBe(
+      'vscode-webview://res/a.png',
+    )
   })
 })

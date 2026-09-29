@@ -150,6 +150,24 @@ describe('菜单开合（contextmenu 弹出 / Esc / 外点 / 命令后关闭）'
     expect(menuDom(parent).menu()).toBeNull()
   })
 
+  it('还焦 prevFocus：搜索框输入中途右键再 Esc，焦点还回搜索框（review-loops 修复）', () => {
+    const h = makeBridge()
+    const { parent, c } = mountMenu(h)
+    // 本 harness 的 parent 不入文档树，而 jsdom 对脱离树的 focus() 是 no-op——
+    // 焦点链路用例需接入 body（用例结束即摘除）
+    document.body.appendChild(parent)
+    try {
+      const search = menuDom(parent).sidebar.querySelector<HTMLInputElement>('.vsidian-outline-search')!
+      search.focus()
+      contextMenuOn(parent, 1)
+      expect(document.activeElement, '打开菜单应夺焦到菜单容器').not.toBe(search)
+      c.handleHostMessage({ kind: 'outline.test.menuClose' })
+      expect(document.activeElement, '关闭应还回搜索框而非跳到编辑器').toBe(search)
+    } finally {
+      parent.remove()
+    }
+  })
+
   it('执行命令后菜单关闭（除重命名：进入编辑态）', () => {
     const h = makeBridge()
     const { parent } = mountMenu(h)

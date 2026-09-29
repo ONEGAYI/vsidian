@@ -741,6 +741,48 @@ test('负向 e：候选改 CHANGELOG 历史日期伪造弃用期限 → changelo
   }
 })
 
+test('负向 e2：候选向已发布版本段回填条目（tag 后追加）→ changelog-section-mutated', async () => {
+  // v0.5.0 实证过的回填形态：tag 后批次落地把「用户可见变更」追加进已定案
+  // 版本段——日期没改、段没删，既有 date-mismatch / release-missing 均不拦。
+  // tag 时点快照注入（模拟树无 .git，gitTagData 同法注入），篡改模拟树 CHANGELOG。
+  const snapshot = readFileSync(path.join(REPO_ROOT, 'CHANGELOG.md'), 'utf8')
+  const sim = await buildSimTree([
+    rewrite('CHANGELOG.md', (text) => text.replace('## 0.2.0 - 2026-09-26', '## 0.2.0 - 2026-09-26\n\n- 回填条目（发布后补写进已定案段落）')),
+  ])
+  try {
+    const report = await runStyleContractCheck({
+      ...SIM_OPTS(),
+      root: sim,
+      tagChangelogs: { [BASELINE.releases['0.2.0'].tag]: snapshot },
+    })
+    assert.equal(report.ok, false, '向已发布版本段回填条目必须失败')
+    assert.ok(
+      report.failures.some((f) => f.code === 'changelog-section-mutated'),
+      JSON.stringify(report.failures.map((f) => f.code)),
+    )
+  } finally {
+    rmSync(sim, { recursive: true, force: true })
+  }
+})
+
+test('正向 e3：注入 tag 快照时段落未动（正常演进）不误报 changelog-section-mutated', async () => {
+  const snapshot = readFileSync(path.join(REPO_ROOT, 'CHANGELOG.md'), 'utf8')
+  const sim = await buildSimTree()
+  try {
+    const report = await runStyleContractCheck({
+      ...SIM_OPTS(),
+      root: sim,
+      tagChangelogs: { [BASELINE.releases['0.2.0'].tag]: snapshot },
+    })
+    assert.ok(
+      !report.failures.some((f) => f.code === 'changelog-section-mutated'),
+      '段落与 tag 快照一致时不得报回填：' + JSON.stringify(report.failures.map((f) => f.code)),
+    )
+  } finally {
+    rmSync(sim, { recursive: true, force: true })
+  }
+})
+
 test('负向 f：跳版本号（声明未发布版本移除）→ removal-version-unverifiable', async () => {
   const sim = await buildSimTree([
     rewrite('src/shared/styleContract.ts', (text) =>

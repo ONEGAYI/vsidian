@@ -86,7 +86,9 @@ Object.assign(window, {
   },
   /** 绘制层探针：按钮可见性（尺寸/元素命中）与图标随态（computed display）；
    * #158 起附右端组几何字段：按钮中心/工具栏中心水平坐标、与侧栏开关的
-   * 水平间距（绘制层断言据此钉住「中点右侧 + gap 紧邻组成右端组」） */
+   * 水平间距；#208 起右端组首按钮换为刷新嵌入资源（推靠规则迁移），附
+   * 刷新按钮中心坐标与「刷新→双态切换」水平间距（绘制层断言据此钉住
+   * 「中点右侧 + gap 紧邻组成右端组」） */
   readTogglePaint() {
     const btn = document.querySelector<HTMLButtonElement>('.vsidian-view-toggle')
     if (!btn) return null
@@ -96,6 +98,8 @@ Object.assign(window, {
       : null
     const barRect = btn.closest('.vsidian-toolbar')?.getBoundingClientRect() ?? null
     const sideRect = document.querySelector('.vsidian-sidebar-toggle')
+      ?.getBoundingClientRect() ?? null
+    const refreshRect = document.querySelector('.vsidian-refresh-toggle')
       ?.getBoundingClientRect() ?? null
     const displayOf = (cls: string) => {
       const icon = btn.querySelector(`.${cls}`)
@@ -111,6 +115,8 @@ Object.assign(window, {
       centerX: rect.x + rect.width / 2,
       toolbarCenterX: barRect ? barRect.x + barRect.width / 2 : null,
       gapToSidebar: sideRect ? sideRect.left - rect.right : null,
+      refreshCenterX: refreshRect ? refreshRect.x + refreshRect.width / 2 : null,
+      refreshGapToView: refreshRect ? rect.left - refreshRect.right : null,
     }
   },
   /** 工具栏按钮序（DOM 序契约） */

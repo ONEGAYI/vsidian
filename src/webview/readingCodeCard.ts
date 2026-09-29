@@ -18,6 +18,7 @@ import {
   appendLanguageBadge,
   buildCopyButton,
   buildFoldButton,
+  buildWrapButton,
 } from './liveCodeCard'
 import type { CodeCardConfig } from './liveCodeCard'
 
@@ -54,12 +55,21 @@ export const READING_CODE_CARD_CLASS = 'vsidian-reading-code-card'
 export const READING_CODE_CARD_FOLDED_CLASS = 'vsidian-code-card-folded'
 /** 阅读代码行（行号 + 文本，卡片形态的行结构） */
 export const READING_CODE_LINE_CLASS = 'vsidian-reading-code-line'
+/** #191 阅读关闭折行的容器级状态类（挂在阅读容器上，仅关闭时添加；
+ *  内部交互态类，不入公开样式契约——门控 pre 横向滚动与 sticky 行号） */
+export const READING_CODE_NOWRAP_CLASS = 'vsidian-reading-nowrap'
 
 export interface ReadingCodeCardOptions {
   config: Pick<CodeCardConfig, 'card' | 'lineNumbers' | 'copyButton' | 'highlight'>
   folded: boolean
   onCopy: (code: string) => void
   onFoldToggle: () => void
+  /** #191 当前折行态（默认 true 折行）；仅影响折行钮呈现（-off 修饰与
+   *  文案），pre 滚动行为由容器级 READING_CODE_NOWRAP_CLASS 承担 */
+  wrap?: boolean
+  /** #191 折行开关回调（提供即装配折行钮；点击由调用方翻转全局状态并
+   *  联动重建全文头部——按钮仅是入口，不持有状态） */
+  onWrapToggle?: () => void
 }
 
 /** 块是否为可增强的围栏代码块（mermaid 走独立块类，天然不命中） */
@@ -116,11 +126,24 @@ export function decorateReadingCodeCard(block: HTMLElement, opts: ReadingCodeCar
   labelEl.appendChild(document.createTextNode(label))
   const actions = document.createElement('span')
   actions.className = CODE_CARD_CLASS_NAMES.headerActions
-  actions.appendChild(buildFoldButton(opts.folded, opts.onFoldToggle))
-  // 收起态不发射复制按钮（与 Live 的 copy = config.copyButton && !isFolded 同口径）
+  // #190 按钮区折叠钮固定最右（收起/展开位置恒定）；#191 折行钮插在复制
+  // 钮左侧：[折行] [复制] [折叠]。收起态不发射折行钮与复制钮（与 Live 的
+  // copy = config.copyButton && !isFolded 同口径，仅留折叠钮）
+  if (!opts.folded && opts.onWrapToggle) {
+    actions.appendChild(buildWrapButton(opts.wrap !== false, opts.onWrapToggle))
+  }
   if (opts.config.copyButton && !opts.folded) {
     actions.appendChild(buildCopyButton(code, opts.onCopy))
   }
+  actions.appendChild(buildFoldButton(opts.folded, opts.onFoldToggle))
+  // #190 整条折叠热区：头部横带整体可点击切换折叠，排除按钮本身（按钮
+  // click 已 stopPropagation，不会走到这里）；阅读侧无 CM6，无需拦 mousedown
+  header.addEventListener('click', (event) => {
+    if (event.target instanceof Element && event.target.closest('button') !== null) {
+      return
+    }
+    opts.onFoldToggle()
+  })
   header.append(labelEl, actions)
   block.insertBefore(header, block.firstChild)
 
@@ -136,11 +159,18 @@ export function decorateReadingCodeCard(block: HTMLElement, opts: ReadingCodeCar
   const startLine = chunkStartLineOf(codeEl)
   const totalLines = chunkTotalLinesOf(codeEl, lines.length)
   const widthCh = Math.max(2, String(totalLines).length)
+  // #191 悬挂缩进的列宽基准：与 Live 同一公式（行号列宽 + 24px 间距），
+  // 行号开启时逐行内联注入（与 ln.style.width 同处同源）；行号关闭不注入
+  // （CSS var 回落 0px，两式自动无操作——已知限制：该态续行无悬挂）
+  const indent = opts.config.lineNumbers ? `calc(${widthCh}ch + 24px)` : null
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!
     const row = document.createElement('span')
     // 行类与 Live 同名（paint 探针 cardLineCount 跨视图同口径）
     row.className = `${READING_CODE_LINE_CLASS} ${CODE_CARD_CLASS_NAMES.line}`
+    if (indent !== null) {
+      row.style.setProperty('--vsidian-code-indent', indent)
+    }
     if (opts.config.lineNumbers) {
       const ln = document.createElement('span')
       ln.className = CODE_CARD_CLASS_NAMES.linenumber

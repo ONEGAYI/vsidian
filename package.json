@@ -3,7 +3,7 @@
   "displayName": "%manifest.displayName%",
   "icon": "media/vsidian-icon-256.png",
   "description": "%manifest.description%",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "publisher": "onegayi",
   "license": "MIT",
   "keywords": [
@@ -329,6 +329,11 @@
       {
         "command": "onegayi.vsidian.ui.outlinksToggle",
         "title": "%command.ui.outlinksToggle.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.editor.refresh",
+        "title": "%command.editor.refresh.title%",
         "category": "Vsidian"
       }
     ],

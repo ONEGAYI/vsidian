@@ -1,4 +1,4 @@
-"""Build the 17 light/dark quick-action icons from one raster contact sheet.
+"""Build the 31 light/dark quick-action icons from raster AI sheets plus Pen draws.
 
 Run: python scripts/quick-action-icons.py
 Requires Pillow and the VTracer CLI (`vtracer` on PATH). SVG paths are traced
@@ -17,13 +17,24 @@ from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "media" / "quick-actions"
-AI_ICON_SOURCE = ASSETS / "highlight-horizontal-rule-source.png"
-AI_ICON_KEYS = ("highlight", "horizontalRule")
+# AI 生图源图注册表：每张源图为 96×96×N 的 RGBA 透明拼板（二值 alpha），
+# 格位顺序与对应 keys 元组一致；draw_icon 按 key 查所属源图裁切 alpha。
+AI_ICON_SOURCES: tuple[tuple[Path, tuple[str, ...]], ...] = (
+    (ASSETS / "highlight-horizontal-rule-source.png", ("highlight", "horizontalRule")),
+    (ASSETS / "context-menu-source.png", (
+        "externalLink", "textFormat", "paragraphStyle", "insertPlus",
+        "normalText", "cut", "copy", "paste", "selectAll", "comment",
+        "pastePlain", "media", "footnote", "callout",
+    )),
+)
 KEYS = (
     "bold", "italic", "strikethrough", "inlineCode", "heading",
     "bulletList", "orderedList", "taskList", "quote", "codeBlock",
     "link", "clearInline", "table", "inlineMath", "blockMath",
     "highlight", "horizontalRule",
+    "externalLink", "textFormat", "paragraphStyle", "insertPlus",
+    "normalText", "cut", "copy", "paste", "selectAll", "comment",
+    "pastePlain", "media", "footnote", "callout",
 )
 COLORS = {"light": (54, 60, 70), "dark": (210, 218, 229)}
 CELL = 96
@@ -80,11 +91,13 @@ class Pen:
 
 
 def draw_icon(key: str, rgb: tuple[int, int, int]) -> Image.Image:
-    if key in AI_ICON_KEYS:
-        with Image.open(AI_ICON_SOURCE) as sheet:
-            if sheet.size != (CELL * len(AI_ICON_KEYS), CELL) or sheet.mode != "RGBA":
-                raise ValueError(f"Wrong AI icon source geometry or mode: {AI_ICON_SOURCE}")
-            index = AI_ICON_KEYS.index(key)
+    for source, source_keys in AI_ICON_SOURCES:
+        if key not in source_keys:
+            continue
+        with Image.open(source) as sheet:
+            if sheet.size != (CELL * len(source_keys), CELL) or sheet.mode != "RGBA":
+                raise ValueError(f"Wrong AI icon source geometry or mode: {source}")
+            index = source_keys.index(key)
             alpha = sheet.crop((index * CELL, 0, (index + 1) * CELL, CELL)).getchannel("A")
         result = Image.new("RGBA", (CELL, CELL), rgb + (0,))
         result.putalpha(alpha)

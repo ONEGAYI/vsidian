@@ -448,3 +448,89 @@ describe('活跃度回调（周期核验调度启停数据源）', () => {
     expect(idle).not.toHaveBeenCalled()
   })
 })
+
+describe('#208 全量失效重挂（手动刷新通道）', () => {
+  it('invalidateAll 清条目并对活跃槽位重发解析（新 reqId），新结果换新 src', () => {
+    const { manager, posted } = makeManager()
+    const el = img()
+    manager.attach(el, './a.png')
+    manager.handleResult({ reqId: 1, ok: true, src: 'vscode-webview://res/a.png' })
+    el.dispatchEvent(new Event('load'))
+    expect(state(el)).toBe('loaded')
+    manager.invalidateAll()
+    // 条目已清：同槽位重新走宿主解析（新 reqId），回 loading 占位
+    expect(posted).toEqual([
+      { src: './a.png', reqId: 1 },
+      { src: './a.png', reqId: 2 },
+    ])
+    expect(el.getAttribute('src')).toBeNull()
+    expect(state(el)).toBe('loading')
+    // 宿主新解析（带新代次戳的 URI）到达后换新 src
+    manager.handleResult({ reqId: 2, ok: true, src: 'vscode-webview://res/a.png?v=1' })
+    expect(el.getAttribute('src')).toBe('vscode-webview://res/a.png?v=1')
+  })
+
+  it('同 src 多槽位失效后复用同一新在途请求（不重复发请求）', () => {
+    const { manager, posted } = makeManager()
+    const a = img()
+    const b = img()
+    manager.attach(a, './same.png')
+    manager.attach(b, './same.png')
+    manager.handleResult({ reqId: 1, ok: true, src: 'vscode-webview://res/same.png' })
+    manager.invalidateAll()
+    // 失效后首个重挂发起新请求，第二个槽位复用在途条目
+    expect(posted).toEqual([
+      { src: './same.png', reqId: 1 },
+      { src: './same.png', reqId: 2 },
+    ])
+    manager.handleResult({ reqId: 2, ok: true, src: 'vscode-webview://res/same.png?v=1' })
+    expect(a.getAttribute('src')).toBe('vscode-webview://res/same.png?v=1')
+    expect(b.getAttribute('src')).toBe('vscode-webview://res/same.png?v=1')
+  })
+
+  it('失效前的在途请求迟到结果被丢弃（条目已重建，未知 reqId 不路由）', () => {
+    const { manager, posted } = makeManager()
+    const el = img()
+    manager.attach(el, './a.png') // reqId 1 在途
+    manager.invalidateAll() // 重挂发 reqId 2
+    expect(posted.map((p) => p.reqId)).toEqual([1, 2])
+    // 旧 reqId 1 的迟到结果：不得应用（旧代次地址）
+    manager.handleResult({ reqId: 1, ok: true, src: 'vscode-webview://res/old.png' })
+    expect(el.getAttribute('src')).toBeNull()
+    expect(state(el)).toBe('loading')
+    // 新 reqId 2 的结果正常应用
+    manager.handleResult({ reqId: 2, ok: true, src: 'vscode-webview://res/a.png?v=1' })
+    expect(el.getAttribute('src')).toBe('vscode-webview://res/a.png?v=1')
+  })
+
+  it('直连图源失效后重新应用原始 src（不经宿主、无代次语义）', () => {
+    const { manager, posted } = makeManager()
+    const el = img()
+    manager.attach(el, 'https://example.com/x.png')
+    el.dispatchEvent(new Event('load'))
+    expect(state(el)).toBe('loaded')
+    manager.invalidateAll()
+    expect(posted).toEqual([])
+    expect(el.getAttribute('src')).toBe('https://example.com/x.png')
+    expect(state(el)).toBe('loading')
+  })
+
+  it('live 视图 render 回调槽位失效后经同一回调重建内部 img', () => {
+    const { manager, posted } = makeManager()
+    const slot = document.createElement('span')
+    const built: string[] = []
+    manager.attach(slot, './live.png', (s, src) => {
+      built.push(src)
+      const image = document.createElement('img')
+      image.setAttribute('src', src)
+      s.appendChild(image)
+      return image
+    })
+    manager.handleResult({ reqId: 1, ok: true, src: 'vscode-webview://res/live.png' })
+    expect(built).toEqual(['vscode-webview://res/live.png'])
+    manager.invalidateAll()
+    expect(posted.map((p) => p.reqId)).toEqual([1, 2])
+    manager.handleResult({ reqId: 2, ok: true, src: 'vscode-webview://res/live.png?v=1' })
+    expect(built).toEqual(['vscode-webview://res/live.png', 'vscode-webview://res/live.png?v=1'])
+  })
+})

@@ -2,7 +2,7 @@
 // 域全量）：设置页「样式参考」条目文档字段的英文版单一事实源——中文清单
 // （./styleContract）保持权威基准不动，本模块按条目 id 索引、字段级覆盖；
 // 取词规则为**英文优先、条目或字段缺失回退中文基准**（规格
-// docs/specs/style-reference-i18n.md）。137 条（content 76 + chrome 61）
+// docs/specs/style-reference-i18n.md）。140 条（content 77 + chrome 63）
 // 已全量覆盖（域级完整性由 test/unit/styleContractEn.test.ts 钉住）。
 //
 // 字段分级（规格钉死）：
@@ -375,6 +375,14 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
     dom: 'Element-level failure-reason modifier classes on the image slot.',
     obsidian: { counterpart: 'No counterpart (Obsidian has no deleted/inaccessible distinction classes)' },
   },
+  'image-solo-block': {
+    purpose:
+      'Block container variant for an image standing alone on its line in live view: when the whole line holds a single image (all remaining text is whitespace, trailing whitespace included), the widget slot switches to block layout, providing a definite width basis for sources without intrinsic dimensions (viewBox-only percentage-width SVGs, the mermaid export form) — such sources collapse to 0×0 under inline-block shrink-to-fit (the img loads successfully, so the failure is silent and shows as a blank line). Sources with intrinsic dimensions are unaffected (they still render at natural width under block layout). Known boundary: such SVGs mixed inline with other content (list prefixes, surrounding text, multiple images on one line) keep the inline form.',
+    states:
+      'Decided per line at decoration build time (same rule on the tree-driven and loose paths): the line counts as solo when all text outside the image range is whitespace; the three state modifier classes still stack on top.',
+    dom: 'Live inline widget span.vsidian-image.vsidian-image-block > img (display: block).',
+    obsidian: { counterpart: 'No direct counterpart (Obsidian has no public standalone-image layout class)' },
+  },
   'live-wikilink': {
     purpose:
       'Live wikilink presentation: outside the range it is a display-text widget (replacing the whole [[…]], with the alias class on both the widget wrapper and the source mark); inside the range it becomes the source mark. The split form of Obsidian (link name / alias / formatting brackets) has no split classes here.',
@@ -707,7 +715,7 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
   },
   'outline-menu': {
     purpose:
-      "The context-menu overlay (absolutely positioned inside the sidebar; menu items are keyboard-accessible buttons; the submenu's only show/hide switch is the parent item host's :hover/:focus-within; danger marks delete in red; colors follow the --vscode-menu-* variable family).",
+      "The context-menu overlay (absolutely positioned inside the sidebar; menu items are keyboard-accessible buttons; the submenu's only show/hide switch is the parent item host's :hover/:focus-within; danger marks delete in red; colors follow the --vscode-menu-* variable family). Since #183 it is assembled through the unified menu kernel (descriptor-driven, class names unchanged); the shared state classes vsidian-menu-open (the parent-item click fallback that pins the submenu open) and vsidian-menu-flip (the submenu flips left at assembly time when the right edge would clip) layer on top of the existing submenu classes.",
     states: 'Summoned by right-click.',
     dom: 'An overlay inside the sidebar.',
     obsidian: { counterpart: 'None (the VSCode native context menu lives at the host level)' },
@@ -781,6 +789,13 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
     states: 'Collapse/expand.',
     dom: 'The header button area.',
     obsidian: { counterpart: '.code-styler-header-container::after (the fold arrow direction)' },
+  },
+  'live-code-card-wrap': {
+    purpose:
+      'The word-wrap toggle (#191): one click toggles auto word wrap for all reading-view code blocks at once — on is the current pre-wrap wrapping, off makes the code area scroll horizontally (the line-number column sticks to the left edge, the header stays fixed); -off is the wrapped-off modifier (weakened via filter: opacity(0.4), orthogonal to the show/hide opacity). Reading-card header only: live view always wraps (CM6 wrapping is an editor-level facet and cannot be turned off per block). A view state, not persisted and with no setting (same semantics as the fold chevron).',
+    states: 'Wrapping on (default) / off (-off, the title offers to turn it back on); revealed on card hover like the copy button (hidden by default); not emitted in the collapsed state.',
+    dom: 'The leftmost slot of the header button area ([wrap] [copy] [fold]).',
+    obsidian: { counterpart: 'No counterpart (Obsidian code blocks have no per-block wrap toggle)' },
   },
   'live-code-card-linenumber': {
     purpose:
@@ -873,7 +888,7 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
     obsidian: { counterpart: 'Obsidian likewise does not promise mermaid internal structures' },
   },
 
-  // ---- 工具栏与横幅（toolbar-banner，5 条；#4/#5，本项目自有 UI）----
+  // ---- 工具栏与横幅（toolbar-banner，6 条；#4/#5，本项目自有 UI）----
   'suspend-banner': {
     purpose:
       'The write-back conflict suspension banner (vsidian-specific UI): a top-of-view notice while paused + a resume button.',
@@ -883,7 +898,7 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
   },
   'toolbar': {
     purpose:
-      'The top toolbar of the main editing area: the settings gear (.vsidian-settings-toggle), the quick-action toggle (.vsidian-quick-toggle), the dual-state view toggle (.vsidian-view-toggle, the fourth button since #141 with its own entry) and the sidebar toggle (.vsidian-sidebar-toggle) — since #38 the three-state switch (including source mode) lives in the host editor title bar commands, not on this toolbar (see the mode-toggle removal record).',
+      'The top toolbar of the main editing area: the settings gear (.vsidian-settings-toggle), the quick-action toggle (.vsidian-quick-toggle), the refresh-embedded-resources button (.vsidian-refresh-toggle, the fifth button since #208 with its own entry), the dual-state view toggle (.vsidian-view-toggle, the fourth button since #141 with its own entry) and the sidebar toggle (.vsidian-sidebar-toggle) — since #38 the three-state switch (including source mode) lives in the host editor title bar commands, not on this toolbar (see the mode-toggle removal record).',
     dom: 'The toolbar at the top of #app.',
     obsidian: { counterpart: 'No counterpart' },
   },
@@ -893,7 +908,16 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
     states:
       'The button itself is persistent in both modes; a click posts a view.switch.request outbound (not applied locally), and the button state is driven by the view.mode.set flowed back from the host — the aria/tooltip names the target action and re-words as the mode changes.',
     dom:
-      'A button inside the top .vsidian-toolbar, immediately to the left of the sidebar toggle; since #158 the two form the right-end group — this button holds margin-left:auto to push itself against the right end of the toolbar, leaving a flexible gap toward the left group (settings, quick actions); an inline SVG with two paths (book/edit subclasses).',
+      'A button inside the top .vsidian-toolbar, immediately to the left of the sidebar toggle; since #158 it forms the right-end group with the sidebar toggle, and since #208 the refresh button joins the group and takes over the margin-left:auto push rule (this button no longer holds it — see the toolbar-refresh entry for the handover record); a flexible gap remains toward the left group (settings, quick actions); an inline SVG with two paths (book/edit subclasses).',
+    obsidian: { counterpart: 'No counterpart' },
+  },
+  'toolbar-refresh': {
+    purpose:
+      'The refresh-embedded-resources button (#208): the manual refresh entry — a click posts a refresh.request outbound; the host drops the image resolution cache, bumps the resource generation and replies with the invalidation notice, after which the webview remounts every active image slot for re-resolution (reloading with the new-generation URI) and resets the Mermaid lazy-load failure terminal state. Refreshing never touches the document content/undo stack/view state (cursor, scroll and mode stay as they were), and the keybinding entry shares the same send implementation.',
+    states:
+      'Persistent in both modes; before readiness (before init) a click is a no-op. The #158 push rule (margin-left:auto) moved from view-toggle to this button in #208 — head of the right-end group (refresh + dual-state toggle + sidebar toggle, adjacent), with a flexible gap toward the left group.',
+    dom:
+      'A button inside the top .vsidian-toolbar, immediately to the left of the dual-state view toggle; an inline SVG circular arrow (lucide refresh-cw motif, four paths, constant stroke-width=2, no icon library).',
     obsidian: { counterpart: 'No counterpart' },
   },
   'mode-body': {
@@ -914,13 +938,13 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
       'Removed by #38 (2026-09-24, 288044d) and never present in any released build; the old mapping table row was stale data (corrected during the #133 verification against the v0.4.0 tag 75c3df7 source).',
   },
 
-  // ---- 正文右键菜单（context-menu，1 条；#162）----
-  'block-menu': {
+  // ---- 正文右键菜单（context-menu，1 条；#183 统一内核）----
+  'context-menu': {
     purpose:
-      'The content context-menu overlay (copy heading link / copy block link, #162): a self-drawn fixed-position menu attached to body; menu items are keyboard-accessible buttons; colors follow the --vscode-menu-* variable family (same visual language family as the outline menu, no cascading submenus).',
+      'The unified context-menu overlay (#183 takes over the whole live body): a self-drawn fixed-position menu attached to body. Three cluster separators (-separator), cascading submenus (-submenu; shown/hidden via :hover/:focus-within + the parent-item click fallback class vsidian-menu-open + the assembly-time left flip vsidian-menu-flip when the right edge would clip), the icon slot (-icon driven by data-icon through a mask; since #184 the 26 wired icon keys define light/dark assets via --vsidian-context-icon, spare keys keep assets on disk but stay unwired), text badges (-badge, H1-H6), checkmarks (-check, paragraph-style items lit per line structure), disabled greying, danger red text, and the shortcut hint column (-hint, right-aligned small text at lowered opacity, no placeholder when unbound). Menu items are keyboard-accessible buttons; colors follow the --vscode-menu-* variable family (same visual language family as the outline menu). The former blockMenu (#162, .vsidian-block-menu*) is retired and folded in — that class name never existed in any released build (zero hits in the v0.5.0 tag), so there is no compatibility obligation and the contract keeps no entry for it.',
     states:
-      'Right-clicking a block in the live body (the frontmatter header area and empty lines are not intercepted — the native menu behaves as usual).',
-    dom: 'A direct child of document.body (viewport-fixed positioning).',
+      'Right-clicking the live body (empty lines, plain text, table rows, inside fences and graphic blocks are all intercepted; the frontmatter header area and reading mode are not — the native menu behaves as usual). Write commands are greyed out in structure-sensitive areas (the safe-degradation matrix).',
+    dom: 'A direct child of document.body (viewport-fixed positioning); submenus are nested inside their parent item host (absolute).',
     obsidian: { counterpart: 'None (the Obsidian context menu is an app-native menu, not a DOM element)' },
   },
 

@@ -147,45 +147,55 @@ function inlineScanSuppressed(tree: Tree, from: number, fm: SourceRange | null):
 /** 无管理器形态（纯构建直驱）的缓存键（模块级常量对象） */
 const NO_MANAGER = {}
 
-/** live 图片 widget 装饰缓存：按管理器实例隔离（同 src/alt 复用同一实例，
- *  RangeSet.eq 成立；不同管理器/会话不得共享 widget 实例） */
+/** live 图片 widget 装饰缓存：按管理器实例隔离（同 src/alt/形态 复用同一
+ * 实例，RangeSet.eq 成立；不同管理器/会话不得共享 widget 实例） */
 const imageWidgetDecos = new WeakMap<object, Map<string, ReturnType<typeof Decoration.replace>>>()
 
-export function imageWidgetDeco(src: string, alt: string, images: ImageResourceManager | undefined) {
+export function imageWidgetDeco(
+  src: string,
+  alt: string,
+  images: ImageResourceManager | undefined,
+  block = false,
+) {
   const holder: object = images ?? NO_MANAGER
   let cache = imageWidgetDecos.get(holder)
   if (!cache) {
     cache = new Map()
     imageWidgetDecos.set(holder, cache)
   }
-  const key = `${src}\u0000${alt}`
+  const key = `${src}\u0000${alt}\u0000${block ? '1' : '0'}`
   const hit = lruGet(cache, key)
   if (hit) {
     return hit
   }
-  const deco = Decoration.replace({ widget: new LiveImageWidget(src, alt, images) })
+  const deco = Decoration.replace({ widget: new LiveImageWidget(src, alt, images, block) })
   cache.set(key, deco)
   lruEvict(cache, WIDGET_DECO_CACHE_LIMIT)
   return deco
 }
 
-/** live 图片 widget：占位（alt 文本）→ 经资源管理器装载 → 失败可重试 */
+/** live 图片 widget：占位（alt 文本）→ 经资源管理器装载 → 失败可重试。
+ *  block = 独立成行形态（该行其余文本全空白）：容器取块级布局，为无固有
+ *  尺寸的图源（viewBox-only 百分比宽 SVG）给出确定宽度基准 */
 export class LiveImageWidget extends WidgetType {
   constructor(
     readonly src: string,
     readonly alt: string,
     readonly images?: ImageResourceManager,
+    readonly block = false,
   ) {
     super()
   }
 
   eq(other: LiveImageWidget): boolean {
-    return other.src === this.src && other.alt === this.alt
+    return other.src === this.src && other.alt === this.alt && other.block === this.block
   }
 
   toDOM(): HTMLElement {
     const span = document.createElement('span')
-    span.className = IMAGE_CLASS_NAMES.image
+    span.className = this.block
+      ? `${IMAGE_CLASS_NAMES.image} ${IMAGE_CLASS_NAMES.block}`
+      : IMAGE_CLASS_NAMES.image
     span.dataset['vsidianImgState'] = 'loading'
     span.classList.add(IMAGE_CLASS_NAMES.state('loading'))
     span.title = this.alt
@@ -254,6 +264,17 @@ function linkHrefOf(doc: Text, node: SyntaxNode): string | null {
     href = href.slice(1, -1)
   }
   return href || null
+}
+
+/** 图片出现（[from, to)）所在行其余文本是否全为空白：独立成行判定——
+ *  整行仅含一张图片时 live widget 槽位取块级布局（vsidian-image-block），
+ *  为无固有尺寸图源给出确定宽度基准；列表前缀、混排文字、同行多图均
+ *  不满足（保持行内形态） */
+function soloImageLine(doc: Text, from: number, to: number): boolean {
+  const line = doc.lineAt(from)
+  const before = line.text.slice(0, from - line.from)
+  const after = line.text.slice(to - line.from)
+  return !/\S/.test(before) && !/\S/.test(after)
 }
 
 /** 区间裁剪：[from, to) 减去 cuts（互不重叠、已排序） */
@@ -368,7 +389,9 @@ export function buildLinkImageDecorationRanges(
             return
           }
           const alt = doc.sliceString(opener.to, closer.from)
-          out.push(imageWidgetDeco(src, alt, images).range(node.from, node.to))
+          out.push(
+            imageWidgetDeco(src, alt, images, soloImageLine(doc, node.from, node.to)).range(node.from, node.to),
+          )
           return
         }
         default:
@@ -486,7 +509,9 @@ export function buildLooseLinkDecorationRanges(
               continue // 光标进入该图片范围，显示源码供编辑
             }
             const alt = doc.sliceString(hit.labelFrom, hit.labelTo)
-            out.push(imageWidgetDeco(hit.dest, alt, images).range(hit.from, hit.to))
+            out.push(
+              imageWidgetDeco(hit.dest, alt, images, soloImageLine(doc, hit.from, hit.to)).range(hit.from, hit.to),
+            )
             continue
           }
           const active = selectionTouchesRange(selection, hit.from, hit.to)

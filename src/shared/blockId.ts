@@ -1,6 +1,8 @@
 // 块 id 形态学与块边界判定单一事实源（#159 宿主块定位 / #162 复制块链接
-// 入口）：宿主 wikilinkTarget.findBlockOffset 与 webview blockMenu 同源，
-// 两端对「什么算块、块 id 写在哪、已有 id 怎么认」的判定逐字节一致。
+// 入口）：宿主 wikilinkTarget.findBlockOffset 与 webview 统一右键菜单
+// （#183 起为 syncController 的 copyBlockLink 链路，前身 blockMenu 已退役
+// 并入）同源，两端对「什么算块、块 id 写在哪、已有 id 怎么认」的判定逐字
+// 节一致。
 //
 // 块 id 双形态（#163 验收反馈对齐 Obsidian；识别是增集——两形态并存，
 // 不剥夺用户手写任一形态的选择权）：

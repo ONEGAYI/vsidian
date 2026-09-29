@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto'
 import * as path from 'node:path'
 import { DocumentSession, type HostDocumentPort, type SessionNotice } from './documentSession'
 import {
+  appendImageVersionStamp,
   classifyImageTarget,
   classifyLinkTarget,
   imageBlockReasonOf,
@@ -1077,7 +1078,14 @@ export function createTextEditorProvider(
         void executeWikilinkIntent(document, intent, entry.linkLog)
       }
       const resolveImage = async (src: string): Promise<ImageResolution> => {
-        return resolveWorkspaceImage(src, linkCtx, webviewPanel.webview, imageRefresh.versions)
+        // #208：代次在解析时取值——手动刷新后同 src 的新请求得到新代次戳
+        return resolveWorkspaceImage(
+          src,
+          linkCtx,
+          webviewPanel.webview,
+          imageRefresh.versions,
+          entry.session.getImageGeneration(),
+        )
       }
       const sessionId = entry.session.attachPanel({
         send,
@@ -1097,21 +1105,40 @@ export function createTextEditorProvider(
         // env.clipboard.writeText。标题链接变体在此拼 `[[笔记名#标题]]`——
         // 笔记名 = docUri 文件名去扩展名（Obsidian 语义），标题为 webview
         // 上报的条目原文（含行内标记，与 findHeadingOffset 的字面比较同源）。
-        // #81 代码块复制同走 writeClipboard（text 已由会话按文档 EOL 归一）
+        // #81 代码块复制同走 writeClipboard（text 已由会话按文档 EOL 归一）。
+        // 写方向无回执协议（review-loops 已知边界）：写入失败仅记日志——
+        // 剪切的选区删除不等回执，失败时文档可 Ctrl+Z 恢复
         writeClipboard: (text: string) => {
-          void vscode.env.clipboard.writeText(text)
+          void vscode.env.clipboard.writeText(text).then(undefined, (error: unknown) => {
+            console.error('[vsidian] 剪贴板写入失败（text）', error)
+          })
         },
         writeHeadingLinkClipboard: (docUri: string, heading: string) => {
           void vscode.env.clipboard.writeText(
             `[[${outlineNoteNameOf(docUri)}#${outlineLinkHeading(heading)}]]`,
-          )
+          ).then(undefined, (error: unknown) => {
+            console.error('[vsidian] 剪贴板写入失败（标题链接）', error)
+          })
         },
         // #162 块链接变体：拼 `[[笔记名#^块id]]`（笔记名与标题链接同源；
         // 块 id 字符集 [A-Za-z0-9-] 不含 ] | # ^，无转义议题）
         writeBlockLinkClipboard: (docUri: string, blockId: string) => {
           void vscode.env.clipboard.writeText(
             `[[${outlineNoteNameOf(docUri)}#^${blockId}]]`,
-          )
+          ).then(undefined, (error: unknown) => {
+            console.error('[vsidian] 剪贴板写入失败（块链接）', error)
+          })
+        },
+        // #183 剪贴板读（粘贴桥）：env.clipboard.readText 读回后按 LF 归一
+        // （webview 全程 LF 坐标——Windows 剪贴板常见 CRLF；写方向由会话
+        // 按文档 EOL 归一，读方向恒 LF）；读失败返回 null（webview 静默放弃）
+        readClipboard: async () => {
+          try {
+            const text = await vscode.env.clipboard.readText()
+            return text.replace(/\r\n?/g, '\n')
+          } catch {
+            return null
+          }
         },
         // #111 图表导出端口：弹窗工具条 → 载荷校验 + showSaveDialog +
         // writeFile，结果经 diagram.export.result 回来源面板。测试钩子
@@ -1807,6 +1834,12 @@ export function createTextEditorProvider(
       return false
     }),
   )
+  // ---- 可绑定的视图中按钮动作（命令面板/快捷键共用）：校验活动面板后回发
+  //      ui.command，webview 与对应按钮共用同一实现。#208 刷新嵌入资源亦经
+  //      此注册（onegayi.vsidian.editor.refresh）——快捷键链路
+  //      keybindings.execute → executeCommand → 本循环回发 → webview 与
+  //      工具栏按钮共用同一发送实现（出站 refresh.request），宿主失效编排
+  //      在 documentSession 的 refresh.request 处理唯一，不另造路径 ----
   for (const operation of UI_OPERATIONS) {
     context.subscriptions.push(vscode.commands.registerCommand(operation.command, (): boolean => {
       for (const entry of sessions.values()) for (const [sessionId, panel] of entry.panels) {
@@ -1834,6 +1867,8 @@ export function createTextEditorProvider(
         panels: entry.session.getInfo().panels,
         version: entry.doc.version,
         appliedEdits: entry.appliedEdits,
+        // #208 资源代次（0 = 未刷新；每次手动刷新 +1，图片 URI ?v= 戳同源）
+        imageGeneration: entry.session.getImageGeneration(),
       }
     }),
     vscode.commands.registerCommand(
@@ -2343,13 +2378,19 @@ async function revealLinkAnchor(
  * mtime/size 进版本表——不再只验存在性；FileNotFound=not-found，其他失败
  * =inaccessible 不冒充删除）→ asWebviewUri 拼 `?v=<代次>` 缓存击穿参数
  * （版本表已观测变化代次，单调递增；webview 资源服务不承诺无缓存——
- * buildSnippetLinkList 同款防御）。本地与远程（SSH）工作区同通道。
+ * buildSnippetLinkList 同款防御）。本地与远程（SSH）工作区同通道——
+ * webview 资源服务按远程权威路由（真实远程宿主表现属 #15 人工验证项）。
+ * #208：generation 为会话资源代次（手动刷新自增；0 = 未刷新初值），URI
+ * 戳取「版本表观测代次 + 会话代次」之和——两个失效源（自动观测 / 手动
+ * 刷新）任一推进，和必换新（CSP 匹配不含 query，不受影响）。仅工作区
+ * 相对路径图源经此通道——HTTPS 直连不经宿主，无代次语义。
  */
 async function resolveWorkspaceImage(
   src: string,
   ctx: LinkContext,
   webview: vscode.Webview,
   versions: ImageVersionTable,
+  generation: number,
 ): Promise<ImageResolution> {
   const target = classifyImageTarget(src, ctx)
   if (target.kind === 'blocked') {
@@ -2376,13 +2417,18 @@ async function resolveWorkspaceImage(
     versions.recordMissing(target.fsPath)
     return { ok: false, reason: 'not-found', detail: target.fsPath, fsPath: target.fsPath }
   }
-  const { generation } = versions.recordObservation(target.fsPath, {
+  const { generation: observed } = versions.recordObservation(target.fsPath, {
     mtimeMs: stat.mtime,
     size: stat.size,
   })
   return {
     ok: true,
-    src: `${webview.asWebviewUri(uri).toString()}?v=${generation}`,
+    // 戳 = 版本表观测代次 + 会话代次（两个单调失效源之和）：自动观测与
+    // 手动刷新任一推进，和必增大——URI 换新即击穿 webview 资源缓存
+    src: appendImageVersionStamp(
+      webview.asWebviewUri(uri).toString(),
+      observed + generation,
+    ),
     fsPath: target.fsPath,
   }
 }

@@ -255,6 +255,13 @@ function rebuildFences(prev: MermaidFenceTable, tr: Transaction): MermaidFenceTa
   const windowEnd = doc.line(lastLine).to
   const out: FenceSpan[] = []
   for (const m of mapped) {
+    // 正常围栏 from < to 恒成立；倒挂/零宽必为映射坍缩产物（如 init 全文
+    // 替换为异长文本时 mapPos(from,+1)/mapPos(to,-1) 坍缩到替换区间两
+    // 端），保留进表会让消费侧对空行发射零宽 Decoration.replace 抛
+    // RangeError——直接丢弃（#184 浏览器场景暴露）
+    if (m.from >= m.to) {
+      continue
+    }
     if (m.to <= windowStart || m.from > windowEnd) {
       out.push({
         from: m.from,

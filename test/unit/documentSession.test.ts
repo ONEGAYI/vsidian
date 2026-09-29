@@ -1363,6 +1363,116 @@ describe('#201 周期核验路由（image.verify）：端口透传与串行合�
   })
 })
 
+describe('#208 手动刷新：图片缓存失效与资源代次', () => {
+  function refreshSetup() {
+    const s = setup()
+    const calls: string[] = []
+    const out: HostToWebview[] = []
+    const id = s.session.attachPanel({
+      send: (m) => out.push(m),
+      resolveImage: async (src) => {
+        calls.push(src)
+        // 每次解析产新地址：模拟刷新后宿主代次换戳的新 URI
+        return { ok: true, src: `vscode-webview://res/a.png?attempt=${calls.length}` }
+      },
+    })
+    return { s, calls, out, id }
+  }
+
+  it('初始资源代次为 0（未刷新初值：URI 不带戳的现状语义）', () => {
+    const s = setup()
+    expect(s.session.getImageGeneration()).toBe(0)
+  })
+
+  it('refresh.request 清空图片缓存、代次自增并回发 refresh.invalidated（reqId 配对）', async () => {
+    const t = refreshSetup()
+    await ready10(t.s, t.id)
+    // 先解析一次使 imageCache 有存量
+    await t.s.send(t.id, { kind: 'image.request', sessionId: t.id, docUri: DOC_URI, reqId: 1, src: './a.png' })
+    expect(t.calls.length).toBe(1)
+    await t.s.send(t.id, { kind: 'refresh.request', sessionId: t.id, docUri: DOC_URI, reqId: 5 })
+    expect(t.out).toContainEqual({ kind: 'refresh.invalidated', reqId: 5, generation: 1 })
+    expect(t.s.session.getImageGeneration()).toBe(1)
+    // 缓存已清：同 src 再请求重新触达解析器（新地址即新代次戳的替身）
+    await t.s.send(t.id, { kind: 'image.request', sessionId: t.id, docUri: DOC_URI, reqId: 2, src: './a.png' })
+    expect(t.calls.length).toBe(2)
+    // 再刷新：代次继续自增、reqId 各自配对
+    await t.s.send(t.id, { kind: 'refresh.request', sessionId: t.id, docUri: DOC_URI, reqId: 6 })
+    expect(t.out).toContainEqual({ kind: 'refresh.invalidated', reqId: 6, generation: 2 })
+    expect(t.s.session.getImageGeneration()).toBe(2)
+  })
+
+  it('未 ready 或 docUri 不符的 refresh.request 静默丢弃（会话守卫与 image.request 同款）', async () => {
+    const s = setup()
+    const out: HostToWebview[] = []
+    const id = s.session.attachPanel({ send: (m) => out.push(m) })
+    // 未 ready：丢弃
+    await s.send(id, { kind: 'refresh.request', sessionId: id, docUri: DOC_URI, reqId: 1 })
+    expect(out.filter((m) => m.kind === 'refresh.invalidated')).toEqual([])
+    expect(s.session.getImageGeneration()).toBe(0)
+    await ready10(s, id)
+    // docUri 不符：丢弃
+    await s.send(id, { kind: 'refresh.request', sessionId: id, docUri: 'file:///other.md', reqId: 2 })
+    expect(out.filter((m) => m.kind === 'refresh.invalidated')).toEqual([])
+    expect(s.session.getImageGeneration()).toBe(0)
+  })
+
+  it('暂停面板的 refresh.request 同样放行（只读交互，不写文档不入撤销栈）', async () => {
+    const t = refreshSetup()
+    await ready10(t.s, t.id)
+    // 制造冲突暂停：baseVersion 超前的请求不可安全应用
+    await t.s.send(t.id, {
+      kind: 'edit.request', sessionId: t.id, docUri: DOC_URI,
+      seq: 1, baseVersion: 99, changes: [{ offset: 0, length: 0, text: 'x' }],
+    })
+    const suspendedAck = t.out.find(
+      (m) => m.kind === 'edit.ack' && m.ok === false && m.reason === 'conflict',
+    )
+    expect(suspendedAck).toBeDefined()
+    await t.s.send(t.id, { kind: 'refresh.request', sessionId: t.id, docUri: DOC_URI, reqId: 1 })
+    expect(t.out).toContainEqual({ kind: 'refresh.invalidated', reqId: 1, generation: 1 })
+  })
+
+  it('在途解析回调晚于 invalidate 到达：旧代次 URI 不得写入缓存（竞态修复）', async () => {
+    // 复现路径：image.request（第一代）发起 → 解析挂起 → refresh.request
+    // （invalidate：清缓存 + 代次自增）→ 在途回调此刻才携旧代次 URI 完成。
+    // 修复前它会写回 imageCache，刷新后的重挂请求经同 src 缓存命中旧 URI，
+    // 该图本轮不换新。
+    const s = setup()
+    const calls: string[] = []
+    const gates: Array<(src: string) => void> = []
+    const out: HostToWebview[] = []
+    const id = s.session.attachPanel({
+      send: (m) => out.push(m),
+      resolveImage: (src) => {
+        calls.push(src)
+        return new Promise((resolve) => {
+          gates.push((resolved) => resolve({ ok: true, src: resolved }))
+        })
+      },
+    })
+    await ready10(s, id)
+    // 第一代请求在途（resolver 同步触达，Promise 挂起）
+    const first = s.send(id, { kind: 'image.request', sessionId: id, docUri: DOC_URI, reqId: 1, src: './a.png' })
+    expect(calls).toEqual(['./a.png'])
+    // 刷新在在途窗口内到达
+    await s.send(id, { kind: 'refresh.request', sessionId: id, docUri: DOC_URI, reqId: 9 })
+    expect(s.session.getImageGeneration()).toBe(1)
+    // 在途回调此刻完成（旧代次地址）
+    gates[0]!('vscode-webview://res/a.png')
+    await first
+    // 刷新后的重挂请求：不得命中旧代次 URI——解析器应被重新触达
+    const second = s.send(id, { kind: 'image.request', sessionId: id, docUri: DOC_URI, reqId: 2, src: './a.png' })
+    await Promise.resolve()
+    expect(calls.length, '刷新后同 src 新请求应重新解析（旧代次 URI 不得入缓存）').toBe(2)
+    gates[1]!('vscode-webview://res/a.png?v=1')
+    await second
+    const results = out.filter((m) => m.kind === 'image.result')
+    expect(results[0]).toMatchObject({ reqId: 1, ok: true, src: 'vscode-webview://res/a.png' })
+    expect(results[1]).toMatchObject({ reqId: 2, ok: true, src: 'vscode-webview://res/a.png?v=1' })
+  })
+})
+
 // ---- 工单 #81：代码块复制的行尾归一（webview 出站恒为 LF） ----
 
 describe('#81 codeblock.copy：按文档 EOL 归一后交剪贴板端口', () => {
@@ -1418,6 +1528,18 @@ describe('#69 clipboard.write：两变体路由到注入端口', () => {
     await s.send(id, { kind: 'clipboard.write', text: '标题\n多行' })
     expect(written).toEqual(['标题\n多行'])
     expect(links).toEqual([])
+  })
+
+  it('CRLF 文档的 text 变体按权威行尾归一（LF 出站转 \r\n；#81 同 codeblock.copy——review-loops 修复）', async () => {
+    const s = setup('段落一\r\n段落二')
+    s.doc.eol = 2
+    const written: string[] = []
+    const id = s.session.attachPanel({
+      send: () => undefined,
+      writeClipboard: (text) => written.push(text),
+    })
+    await s.send(id, { kind: 'clipboard.write', text: '段落一\n段落二' })
+    expect(written).toEqual(['段落一\r\n段落二'])
   })
 
   it('linkHeading 变体路由 writeHeadingLinkClipboard（docUri + 剥标记标题）', async () => {

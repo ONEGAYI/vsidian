@@ -172,6 +172,32 @@ const PASTE_PNG_BASE64 =
 function normFsPath(p: string): string {
   return p.replace(/\\/g, '/').replace(/\/$/, '').toLowerCase()
 }
+/** #208 刷新对照载荷：2x2 不透明红色 PNG（外部替换磁盘同名图片后，
+ *  刷新重载的解码尺寸 1x1 → 2x2 即「用户看到新图」的绘制层证据） */
+const REFRESH_PNG_2X2_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEklEQVR4nGP4z8DwHxkzoAsAAA8hD/EEN8afAAAAAElFTkSuQmCC'
+
+// #208 手动刷新 fixture（与 fixtures.mjs 的 refresh.md 字节一致）：图片行
+// 上方 24 行填充（图片行仍在 CM6 视口装饰范围内，装载即解析）+ 下方 40 行
+// 尾部（文档可滚动——刷新前后滚动位置保持断言需要非零 scrollTop）
+const REFRESH_DOC_TEXT = [
+  '# 刷新样例',
+  '',
+  ...Array.from({ length: 24 }, (_, i) => `刷新填充 ${i}`),
+  '',
+  '光标定位段落，刷新前后选区保持的断言载体。',
+  '',
+  '![刷新图](assets/刷新图.png)',
+  '',
+  '结尾段。',
+  '',
+  ...Array.from({ length: 40 }, (_, i) => `刷新尾部 ${i}`),
+  '',
+].join('\n')
+
+/** #208 图片行行号（1 基）：滚动定位目标——居中图片行得非零 scrollTop，
+ *  且图片槽位保持可见（widget 不因滚出视口被回收，失效重挂照常覆盖它） */
+const REFRESH_IMAGE_LINE = REFRESH_DOC_TEXT.slice(0, REFRESH_DOC_TEXT.indexOf('![刷新图]')).split('\n').length
 
 function wsUri(name: string): vscode.Uri {
   return vscode.Uri.file(`${wsDir}/${name}`)
@@ -488,6 +514,8 @@ interface SessionState {
   panels: Array<{ sessionId: string; ready: boolean }>
   version: number
   appliedEdits: number
+  /** #208 资源代次（0 = 未刷新；每次手动刷新 +1） */
+  imageGeneration?: number
 }
 
 interface ViewState {
@@ -619,6 +647,9 @@ interface ViewState {
     reason?: string
     appliedSrc?: string
   }>
+  /** #208 图片槽位探针：src 为最终应用地址（含 ?v= 代次戳），
+   *  naturalWidth 为浏览器实际解码宽度（刷新真换字节的绘制层证据） */
+  imageProbe?: Array<{ src: string | null; naturalWidth: number | null; state: string }>
   /** #14 查找会话观测（首次打开后回报；匹配集来自文本模型全量计算） */
   find?: {
     open: boolean
@@ -758,6 +789,13 @@ interface ViewState {
       boxShadowValues: string[]
       borderLeftWidthValues: string[]
     } | null
+    /** #183 统一右键菜单绘制：浮层在场时的实际可见性与降级矩阵证据 */
+    contextMenu?: {
+      visible: boolean
+      display: string | null
+      separatorCount: number
+      disabledCount: number
+    }
   }
   /** #53 右侧栏观测：布局态与绘制层证据（结构见 src/shared/protocol.ts SidebarProbe） */
   sidebar?: {
@@ -9043,6 +9081,100 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await waitLastMode('live')
   }],
 
+  // ---- #208：工具栏刷新嵌入资源（外部替换图片 → 手动刷新 → 换新重载） ----
+
+  ['工具栏刷新嵌入资源：外部替换同名图片后换新代次 URI 实际重载，选区/模式保持零写回（#208）', async () => {
+    await openWithEditor('refresh.md')
+    await waitSessionReady('refresh.md')
+    const uri = wsUri('refresh.md').toString()
+
+    // 前置：live 态初始装载——1x1 透明图经宿主通道加载成功（load 事件置
+    // loaded），URI 为 asWebviewUri 原始形态（代次 0 未刷新不戳）
+    const initial = await waitViewState('refresh.md', (v) =>
+      (v.imageStates?.loaded ?? 0) >= 1 && (v.imageProbe?.length ?? 0) >= 1, 0, 30000)
+    const initialSlot = initial.imageProbe![0]!
+    assert(initialSlot.src !== null, `初始图片应有 src，实际 ${JSON.stringify(initialSlot)}`)
+    assert(!initialSlot.src!.includes('?v='), `初始 URI 不应带代次戳，实际 ${initialSlot.src}`)
+    const initialSrc = initialSlot.src!
+    assert(initialSlot.naturalWidth === 1,
+      `初始 1x1 图浏览器解码宽度应为 1，实际 ${initialSlot.naturalWidth}（src=${initialSlot.src}）`)
+    const session0 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(session0.imageGeneration === 0, `初始资源代次应为 0，实际 ${session0.imageGeneration}`)
+    // 绘制层断言（评审必查：用户看到的按钮）：chrome 探针命中即按钮按
+    // 契约样式真实绘制（非 DOM 存在性）
+    assert(initial.cssProbe?.chromeSelectors?.['toolbar-refresh'] === 'rgb(239, 0, 1)',
+      `刷新按钮绘制层应命中探针，实际 ${String(initial.cssProbe?.chromeSelectors?.['toolbar-refresh'])}`)
+
+    // 光标落在正文段（刷新前后选区保持的断言锚点）
+    const caretOffset = REFRESH_DOC_TEXT.indexOf('选区保持')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: caretOffset })
+    const located = await waitViewState('refresh.md', (v) => v.selectionOffset === caretOffset)
+    assert(located.viewMode === 'live', `刷新前置应为 live 模式，实际 ${located.viewMode}`)
+
+    // 滚动位置保持的断言锚点：居中图片行得非零 scrollTop（viewport 探针
+    // 随 viewport.test.position 启用，liveScrollTopPx 进观测面）；图片行
+    // 居中同时保证其 widget 不滚出视口装饰范围，失效重挂照常覆盖它
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'viewport.test.position', scrollNearLine: REFRESH_IMAGE_LINE,
+    })
+    const scrolled = await waitViewState('refresh.md', (v) => (v.liveScrollTopPx ?? -1) > 0, 0, 30000)
+    const scrollTopBefore = scrolled.liveScrollTopPx!
+
+    // 外部替换磁盘同名图片：不同内容与尺寸（1x1 透明 → 2x2 不透明红）
+    await vscode.workspace.fs.writeFile(
+      wsUri('assets/刷新图.png'), Buffer.from(REFRESH_PNG_2X2_BASE64, 'base64'))
+
+    // 触发刷新：真实按钮点击路径（refresh.test.click → 按钮处理器出站
+    // refresh.request → 宿主清 imageCache + 代次自增 → refresh.invalidated
+    // → webview 全量失效重挂）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'refresh.test.click' })
+
+    // 失效重挂闭环：新 URI 带代次戳 ?v=1、src 实际更新、浏览器真实解码
+    // 了新地址的字节（naturalWidth 1 → 2——HTTP 缓存被戳击穿、用户看到
+    // 新图的绘制层证据）、槽位回到 loaded
+    const refreshed = await waitViewState('refresh.md', (v) => {
+      const slot = v.imageProbe?.[0]
+      return slot?.state === 'loaded' && slot?.src != null &&
+        slot.src.includes('?v=1') && slot.naturalWidth === 2
+    }, 0, 30000)
+    const refreshedSlot = refreshed.imageProbe![0]!
+    assert(refreshedSlot.src !== initialSrc,
+      `刷新后 img src 应实际更新（旧 ${initialSrc} → 新 ${String(refreshedSlot.src)}）`)
+
+    // 宿主侧资源代次推进到 1（URI 戳的数据源）
+    const session1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(session1.imageGeneration === 1, `刷新后资源代次应为 1，实际 ${session1.imageGeneration}`)
+
+    // 状态保持：刷新 = 清缓存重渲染，不是重开文件——光标、滚动、视图模式
+    // 原样（滚动容差 ±2px：图片重载闪动期间的测度取整，不视为位置丢失；
+    // 阅读侧滚动与查找会话保持由人工验收项覆盖）
+    assert(refreshed.selectionOffset === caretOffset,
+      `刷新后光标应保持 ${caretOffset}，实际 ${refreshed.selectionOffset}`)
+    assert(refreshed.viewMode === 'live', `刷新后视图模式应保持 live，实际 ${refreshed.viewMode}`)
+    assert(refreshed.liveScrollTopPx !== undefined && Math.abs(refreshed.liveScrollTopPx - scrollTopBefore) <= 2,
+      `刷新后滚动位置应保持 ${scrollTopBefore}，实际 ${String(refreshed.liveScrollTopPx)}`)
+
+    // 无破坏性：文档内容、写回链路、磁盘全部原样
+    assert(refreshed.text === REFRESH_DOC_TEXT, '刷新不得改写文档文本')
+    assert(session1.appliedEdits === 0, `刷新不得产生 applyEdit，实际 ${session1.appliedEdits}`)
+    assert(await readDisk('refresh.md') === REFRESH_DOC_TEXT, '刷新不得写磁盘')
+
+    // 刷新不破坏工具栏绘制层（按钮仍按契约样式绘制）
+    assert(refreshed.cssProbe?.chromeSelectors?.['toolbar-refresh'] === 'rgb(239, 0, 1)',
+      `刷新后按钮绘制层应仍命中探针，实际 ${String(refreshed.cssProbe?.chromeSelectors?.['toolbar-refresh'])}`)
+
+    // 二次刷新：代次与戳续接（?v=2、代次 2），连续点击链路健壮
+    // （reqId 陈旧回执防护的宿主/webview 汇合点）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'refresh.test.click' })
+    await waitViewState('refresh.md', (v) => {
+      const slot = v.imageProbe?.[0]
+      return slot?.state === 'loaded' && slot?.src != null &&
+        slot.src.includes('?v=2') && slot.naturalWidth === 2
+    }, 0, 30000)
+    const session2 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(session2.imageGeneration === 2, `二次刷新后资源代次应为 2，实际 ${session2.imageGeneration}`)
+  }],
+
   // ---- #160：普通链接锚点定位（fragment 结构化保留 + 打开后定位） ----
 
   ['普通链接锚点跳转（Vsidian 面板）：含空格路径矩阵；缺失标题、块 id 定位与外部 #（#160）', async () => {
@@ -9292,13 +9424,127 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await waitSettings({ 'image.paste': true, 'image.pasteLocation': 'same-dir', 'image.pasteSubpath': 'assets' })
   }],
 
-  // ---- #162 复制块链接（正文右键菜单与快捷键） ----
+  // ---- #183 统一右键菜单（Live 正文全域接管；#162 块链接两项迁入） ----
 
-  ['复制块链接：右键菜单两态、自动补写可撤销与快捷键入口（#162）', async () => {
+  ['统一右键菜单：全域接管、绘制层断言与剪贴板四项端到端（#183）', async () => {
+    // 断言口径：view.state.paint.contextMenu 是绘制层探针（elementFromPoint
+    // 命中——DOM 在场但样式注入失效时 visible=false，评审必查的视觉层断言）；
+    // 剪贴板动作走真实宿主剪贴板（vscode.env.clipboard 读写对拍）。菜单经
+    // contextMenu.test.contextMenu/menuClick 注入通道驱动（宿主测试无法向
+    // webview 派发真实右键）
+    const MENU_DOC = [
+      '---',
+      'title: 块菜单',
+      '---',
+      '',
+      '# 块菜单标题',
+      '',
+      '右键目标段落。',
+      '',
+      '| a | b |',
+      '|---|---|',
+      '| 1 | 2 |',
+      '',
+      '```js',
+      'const fence = 1',
+      '```',
+      '',
+      '已有 id 段落 ^keep9',
+      '',
+    ].join('\n')
+    await openWithEditor('block-menu.md')
+    await waitSessionReady('block-menu.md')
+    const uri = wsUri('block-menu.md').toString()
+    const post = (message: Record<string, unknown>) =>
+      vscode.commands.executeCommand(CMD.postToPanel, uri, message)
+    const clipboardText = () => vscode.env.clipboard.readText()
+
+    // 1) 普通段打开菜单：绘制层断言（可见性 + 三簇两条分组线 + display）
+    await post({ kind: 'contextMenu.test.contextMenu', pos: MENU_DOC.indexOf('右键目标段落') })
+    const normal = await waitViewState('block-menu.md', (v) => v.paint?.contextMenu != null)
+    const normalMenu = normal.paint!.contextMenu!
+    assert(normalMenu.visible === true,
+      `绘制层：菜单中心点应被命中（实际 ${JSON.stringify(normalMenu)}）`)
+    assert(normalMenu.display !== 'none', '菜单应非 display:none')
+    assert(normalMenu.separatorCount === 2,
+      `三簇应恰两条分组线（实际 ${normalMenu.separatorCount}）`)
+    // 无选区：仅剪切/复制置灰（cut/copy 两项）
+    const normalDisabled = normalMenu.disabledCount
+    assert(normalDisabled === 2, `无选区普通段：仅剪切/复制置灰（实际 ${normalDisabled}）`)
+
+    // 2) 空行接管（全域验收线）
+    await post({ kind: 'contextMenu.test.menuClose' })
+    const blankPos = MENU_DOC.split('\n').slice(0, 3).join('\n').length + 1
+    await post({ kind: 'contextMenu.test.contextMenu', pos: blankPos })
+    const blank = await waitViewState('block-menu.md', (v) => v.paint?.contextMenu != null)
+    assert(blank.paint!.contextMenu!.visible === true, '空行右键应接管（菜单真实绘制）')
+
+    // 3) frontmatter 头区：不接管（探针缺省——无菜单即链路证据）
+    await post({ kind: 'contextMenu.test.menuClose' })
+    await post({ kind: 'contextMenu.test.contextMenu', pos: MENU_DOC.indexOf('title: 块菜单') })
+    const fmState = await waitViewState('block-menu.md', (v) => v.paint != null && v.paint.contextMenu === undefined)
+    assert(fmState.paint!.contextMenu === undefined, '头区不接管：无菜单浮层')
+
+    // 4) 表格行与围栏内：安全降级矩阵（簇 1 新增两项 + 簇 2 整簇置灰）
+    await post({ kind: 'contextMenu.test.menuClose' })
+    await post({ kind: 'contextMenu.test.contextMenu', pos: MENU_DOC.indexOf('|---|---|') })
+    const table = await waitViewState('block-menu.md', (v) => v.paint?.contextMenu != null)
+    assert(table.paint!.contextMenu!.disabledCount >= normalDisabled + 20,
+      `表格行：簇 1 新增两项 + 簇 2 全簇（含子项）置灰（实际 ${table.paint!.contextMenu!.disabledCount} vs 基线 ${normalDisabled}）`)
+    await post({ kind: 'contextMenu.test.menuClose' })
+    await post({ kind: 'contextMenu.test.contextMenu', pos: MENU_DOC.indexOf('const fence') })
+    const fence = await waitViewState('block-menu.md', (v) => v.paint?.contextMenu != null)
+    assert(fence.paint!.contextMenu!.disabledCount >= normalDisabled + 20,
+      `围栏代码内：同表格降级（实际 ${fence.paint!.contextMenu!.disabledCount}）`)
+    await post({ kind: 'contextMenu.test.menuClose' })
+
+    // 5) 剪贴板四项端到端（真实宿主剪贴板对拍）：
+    //    选区（table.test.crossSelect 注入）→ copy 剪贴板成品 → cut 删除 +
+    //    单笔写回 → 宿主写剪贴板后 paste 插入 → selectAll 纯选区
+    const before = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    const selFrom = MENU_DOC.indexOf('右键目标')
+    await post({ kind: 'table.test.crossSelect', anchor: selFrom, head: selFrom + 4 })
+    await post({ kind: 'contextMenu.test.contextMenu', pos: selFrom + 1 })
+    await post({ kind: 'contextMenu.test.menuClick', command: 'copy' })
+    assert(await poll('复制剪贴板', async () =>
+      (await clipboardText()) === '右键目标' ? true : undefined),
+      `复制应写入真实宿主剪贴板（实际 ${await clipboardText()}）`)
+    const afterCopy = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(afterCopy.appliedEdits === before.appliedEdits, '复制零写回')
+
+    await post({ kind: 'table.test.crossSelect', anchor: selFrom, head: selFrom + 4 })
+    await post({ kind: 'contextMenu.test.contextMenu', pos: selFrom + 1 })
+    await post({ kind: 'contextMenu.test.menuClick', command: 'cut' })
+    assert(await poll('剪切剪贴板', async () =>
+      (await clipboardText()) === '右键目标' ? true : undefined), '剪切应先桥写选区文本')
+    const afterCut = await waitViewState('block-menu.md', (v) => !v.text.includes('右键目标'))
+    assert(afterCut.text.includes('段落。'), '剪切应删除选区保留其余正文')
+    const cutState = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(cutState.appliedEdits === before.appliedEdits + 1,
+      `剪切删除应恰一笔写回（实际 +${cutState.appliedEdits - before.appliedEdits}）`)
+
+    await vscode.env.clipboard.writeText('宿主桥粘贴文本')
+    await post({ kind: 'contextMenu.test.contextMenu', pos: afterCut.text.indexOf('段落。') })
+    await post({ kind: 'contextMenu.test.menuClick', command: 'paste' })
+    await waitViewState('block-menu.md', (v) => v.text.includes('宿主桥粘贴文本'))
+    assert((await clipboardText()) === '宿主桥粘贴文本', '粘贴不改变剪贴板内容')
+
+    await post({ kind: 'contextMenu.test.contextMenu', pos: afterCut.text.indexOf('段落。') })
+    await post({ kind: 'contextMenu.test.menuClick', command: 'selectAll' })
+    const selected = await waitViewState('block-menu.md', (v) =>
+      v.selectionOffset === 0 && v.selectionHead === v.docLength)
+    assert(selected.selectionHead === selected.docLength, '全选应为全文纯选区（零写回）')
+    const finalState = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(finalState.appliedEdits === cutState.appliedEdits + 1,
+      `全选零写回（实际 +${finalState.appliedEdits - cutState.appliedEdits}）`)
+    await post({ kind: 'contextMenu.test.menuClose' })
+  }],
+
+  ['块链接两项：统一菜单两态、自动补写可撤销与快捷键入口（#183，自 #162 迁移）', async () => {
     // 断言口径：剪贴板成品对拍（vscode.env.clipboard.readText——真实宿主
     // 权威）、磁盘文本对拍（自动补写走标准写回）与单笔写回（appliedEdits
-    // 恰 +1 = 撤销一步）。菜单经 block.test.contextMenu/menuClick 真实按钮
-    // 点击链路驱动（宿主测试无法派发真实右键）
+    // 恰 +1 = 撤销一步）。菜单经 contextMenu.test.contextMenu/menuClick
+    // 真实按钮点击链路驱动（宿主测试无法派发真实右键）
     const BLOCK_MENU_DOC = [
       '---',
       'title: 块菜单',
@@ -9312,6 +9558,10 @@ export const cases: Array<[string, () => Promise<void>]> = [
       '|---|---|',
       '| 1 | 2 |',
       '',
+      '```js',
+      'const fence = 1',
+      '```',
+      '',
       '已有 id 段落 ^keep9',
       '',
     ].join('\n')
@@ -9323,10 +9573,10 @@ export const cases: Array<[string, () => Promise<void>]> = [
 
     // 标题行：复制标题链接 → 剪贴板成品 [[笔记名#标题]]，零写回
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
-      kind: 'block.test.contextMenu', pos: BLOCK_MENU_DOC.indexOf('# 块菜单标题'),
+      kind: 'contextMenu.test.contextMenu', pos: BLOCK_MENU_DOC.indexOf('# 块菜单标题'),
     })
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
-      kind: 'block.test.menuClick', command: 'copyHeadingLink',
+      kind: 'contextMenu.test.menuClick', command: 'copyHeadingLink',
     })
     assert(await poll('标题链接剪贴板', async () =>
       (await clipboardText()) === '[[block-menu#块菜单标题]]' ? true : undefined),
@@ -9336,10 +9586,10 @@ export const cases: Array<[string, () => Promise<void>]> = [
     // 空一行恰好多出独立行 `^id`（#163 验收反馈默认形态），单笔写回
     // （appliedEdits +1 = 撤销一步）
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
-      kind: 'block.test.contextMenu', pos: BLOCK_MENU_DOC.indexOf('右键目标段落'),
+      kind: 'contextMenu.test.contextMenu', pos: BLOCK_MENU_DOC.indexOf('右键目标段落'),
     })
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
-      kind: 'block.test.menuClick', command: 'copyBlockLink',
+      kind: 'contextMenu.test.menuClick', command: 'copyBlockLink',
     })
     // 写回断言走视图文本：写回使 TextDocument dirty 不落盘（磁盘断言在仓库
     // 惯例中仅用于「不得写」场景，outline/frontmatter 写回用例同款口径）
@@ -9364,20 +9614,20 @@ export const cases: Array<[string, () => Promise<void>]> = [
     // 从最新文本动态取——前序步骤已在普通段后补写两行，旧文档偏移已失效
     const afterParaWrite = (await waitViewState('block-menu.md')).text
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
-      kind: 'block.test.contextMenu', pos: afterParaWrite.indexOf('|---|---|'),
+      kind: 'contextMenu.test.contextMenu', pos: afterParaWrite.indexOf('|---|---|'),
     })
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
-      kind: 'block.test.menuClick', command: 'copyBlockLink',
+      kind: 'contextMenu.test.menuClick', command: 'copyBlockLink',
     })
     const afterTableWrite = await waitViewState('block-menu.md', (v) =>
       /\| 1 \| 2 \|\n\n\^[a-z0-9]{6}\n/.test(v.text))
 
     // 既有 id 段：直接复制既有 id，零改写（视图文本对拍；pos 同样动态取）
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
-      kind: 'block.test.contextMenu', pos: afterTableWrite.text.indexOf('已有 id 段落'),
+      kind: 'contextMenu.test.contextMenu', pos: afterTableWrite.text.indexOf('已有 id 段落'),
     })
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
-      kind: 'block.test.menuClick', command: 'copyBlockLink',
+      kind: 'contextMenu.test.menuClick', command: 'copyBlockLink',
     })
     assert(await poll('既有 id 剪贴板', async () =>
       (await clipboardText()) === '[[block-menu#^keep9]]' ? true : undefined),
@@ -9399,10 +9649,10 @@ export const cases: Array<[string, () => Promise<void>]> = [
     // frontmatter 头区：右键不接管（原生菜单照常——钩子不开菜单即链路证据）
     const stateBefore = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
-      kind: 'block.test.contextMenu', pos: BLOCK_MENU_DOC.indexOf('title: 块菜单'),
+      kind: 'contextMenu.test.contextMenu', pos: BLOCK_MENU_DOC.indexOf('title: 块菜单'),
     })
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
-      kind: 'block.test.menuClick', command: 'copyBlockLink',
+      kind: 'contextMenu.test.menuClick', command: 'copyBlockLink',
     })
     const stateAfter = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
     assert(stateAfter.appliedEdits === stateBefore.appliedEdits && stateAfter.version === stateBefore.version,

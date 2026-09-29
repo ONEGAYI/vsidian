@@ -32,6 +32,13 @@ describe('代码块卡片 CSS 契约（#79）', () => {
       .toMatch(/border-top-left-radius:\s*6px/)
   })
 
+  it('围栏行（首/尾行）左内边距走对齐公式：行号列宽 + 24px（#189 真实对齐，值按块注入）', () => {
+    expect(rule('#app .cm-editor .cm-scroller .cm-line.vsidian-code-card-line.vsidian-code-card-edge-top'))
+      .toMatch(/padding-left:\s*var\(--vsidian-code-indent,\s*0px\)/)
+    expect(rule('#app .cm-editor .cm-scroller .cm-line.vsidian-code-card-line.vsidian-code-card-edge-bottom'))
+      .toMatch(/padding-left:\s*var\(--vsidian-code-indent,\s*0px\)/)
+  })
+
   it('头部横带：flex 布局、顶边圆角、底部分隔线、底色同源', () => {
     const header = rule('#app .vsidian-code-card-header')
     expect(header).toMatch(/display:\s*flex/)
@@ -47,12 +54,14 @@ describe('代码块卡片 CSS 契约（#79）', () => {
       .toMatch(/display:\s*inline-flex/)
   })
 
-  it('卡内行号：右对齐、颜色与文档行号槽同源、禁选（#80）', () => {
+  it('卡内行号：右对齐、颜色与文档行号槽同源、禁选（#80）；边距 8+16 重分配（左缘 8px、数字与代码 16px，总占恒定代码列不动）', () => {
     const ln = rule('#app .vsidian-code-card-linenumber')
     expect(ln).toMatch(/display:\s*inline-block/)
     expect(ln).toMatch(/text-align:\s*right/)
     expect(ln).toMatch(/color:\s*var\(--vscode-editorLineNumber-foreground/)
     expect(ln).toMatch(/user-select:\s*none/)
+    expect(ln).toMatch(/margin-left:\s*8px/)
+    expect(ln).toMatch(/margin-right:\s*16px/)
   })
 
   it('复制按钮：悬停卡片显现、✓ 反馈态切换图标（#81）', () => {
@@ -80,12 +89,23 @@ describe('代码块卡片 CSS 契约（#79）', () => {
     ).toMatch(/border-radius:\s*6px/)
   })
 
-  it('token 色板：明暗两套关键类存在（#83，VSCode Dark+/Light+ 取色）；#133 起 :where() 零特异性（用户片段裸 .tok-* 可覆盖）', () => {
-    expect(css.match(/\.tok-keyword[^{]*\{[^}]*#0000ff/)).not.toBeNull()
-    expect(css.match(/\.tok-string[^{]*\{[^}]*#a31515/)).not.toBeNull()
-    expect(css.match(/\.tok-comment[^{]*\{[^}]*#008000/)).not.toBeNull()
-    expect(css.match(/:where\(body\.vscode-dark\)[^{]*\.tok-keyword[^{]*\{[^}]*#569cd6/)).not.toBeNull()
-    expect(css.match(/:where\(body\.vscode-dark\)[^{]*\.tok-string[^{]*\{[^}]*#ce9178/)).not.toBeNull()
+  it('token 色板：两套主题色与关键词、常量、字符串、注释、属性的区分；用户片段仍可覆写', () => {
+    expect(rule('.tok-keyword', /color:\s*#af00db/i)).toMatch(/color:\s*#af00db/i)
+    expect(rule('.tok-atom', /color:\s*#0550ae/i)).toMatch(/color:\s*#0550ae/i)
+    expect(rule('.tok-string', /color:\s*#0a3069/i)).toMatch(/color:\s*#0a3069/i)
+    expect(rule('.tok-comment', /color:\s*#6e7781/i)).toMatch(/color:\s*#6e7781/i)
+    expect(rule('.tok-propertyName', /color:\s*#1f2328/i)).toMatch(/color:\s*#1f2328/i)
+    expect(rule('.tok-function', /color:\s*#806000/i)).toMatch(/color:\s*#806000/i)
+    expect(css.indexOf('.tok-function { color: #806000; }')).toBeGreaterThan(
+      css.indexOf('.tok-propertyName { color: #1f2328; }'))
+    expect(css.match(/:where\(body\.vscode-dark\) \.tok-keyword[^{]*\{[^}]*#c586c0/i)).not.toBeNull()
+    expect(css.match(/:where\(body\.vscode-dark\) \.tok-atom[^{]*\{[^}]*#79c0ff/i)).not.toBeNull()
+    expect(css.match(/:where\(body\.vscode-dark\) \.tok-string[^{]*\{[^}]*#a5d6ff/i)).not.toBeNull()
+    expect(css.match(/:where\(body\.vscode-dark\) \.tok-comment[^{]*\{[^}]*#8b949e/i)).not.toBeNull()
+    expect(css.match(/:where\(body\.vscode-dark\) \.tok-propertyName[^{]*\{[^}]*#c9d1d9/i)).not.toBeNull()
+    expect(css.match(/:where\(body\.vscode-dark\) \.tok-function[^{]*\{[^}]*#dcdcaa/i)).not.toBeNull()
+    // HC 函数色限定深色组合（评审 A-2）：浅色高对比回落浅色组 #806000
+    expect(css.match(/:where\(body\.vscode-dark\.vscode-high-contrast\) \.tok-function[^{]*\{[^}]*#dcdcaa/i)).not.toBeNull()
     // 可覆写承诺的形态前提：内置色板不得携带 ID/主题类特异性
     expect(css.includes('#app .tok-')).toBe(false)
     expect(css.includes('body.vscode-dark #app .tok-')).toBe(false)
@@ -94,5 +114,98 @@ describe('代码块卡片 CSS 契约（#79）', () => {
   it('语言徽标：头部标签左侧字形徽标（#83）', () => {
     expect(rule('.vsidian-code-card-header .vsidian-code-card-header-icon'))
       .toMatch(/font-weight:\s*700/)
+  })
+
+  it('复制按钮显现规则组（#190 整卡悬停恒显）：header:hover 保留 + live reveal 类 + 阅读块容器 hover', () => {
+    // 组内块匹配（copy 段与 wrap 段同组，选择器不以 copy 结尾，rule() 的
+    // endsWith 匹配不适用）
+    const blockHit = (sel: string) => (css.match(/[^{}]+\{[^{}]*\}/g) ?? []).filter((b) =>
+      b.split('{')[0]!.includes(sel))
+    // header:hover 直达显现保留（头部横带自身悬停仍显现）
+    const hover = blockHit('.vsidian-code-card-header:hover .vsidian-code-card-copy')
+      .filter((b) => /opacity:\s*1/.test(b.split('{')[1] ?? ''))
+    expect(hover, 'header:hover 显现规则（opacity 0→1）应存在').toHaveLength(1)
+    // live 整卡显现：头部 block widget 与卡片行无公共 DOM 祖先，JS 指针
+    // 追踪给头部挂 reveal 类（内部交互态类，不入公开样式契约）
+    const reveal = blockHit('.vsidian-code-card-header.vsidian-code-card-reveal .vsidian-code-card-copy')
+    expect(reveal, 'live reveal 显现规则组应存在').toHaveLength(1)
+    expect(reveal[0]!.split('{')[1]!).toMatch(/opacity:\s*1/)
+    expect(reveal[0]!.split('{')[1]!).toMatch(/visibility:\s*visible/)
+    // 阅读整卡显现：头部与代码同在块容器内，纯 CSS 可达
+    const reading = blockHit('.vsidian-reading-block.vsidian-reading-code-card:hover .vsidian-code-card-copy')
+    expect(reading, '阅读块容器 hover 显现规则组应存在').toHaveLength(1)
+    expect(reading[0]!.split('{')[1]!).toMatch(/opacity:\s*1/)
+    expect(reading[0]!.split('{')[1]!).toMatch(/visibility:\s*visible/)
+  })
+
+  it('头部横带整条折叠热区：cursor: pointer 视觉暗示（#190）', () => {
+    expect(rule('#app .vsidian-code-card-header')).toMatch(/cursor:\s*pointer/)
+  })
+})
+
+describe('折行窜行修复与折行开关（#191）', () => {
+  it('live 通用行悬挂缩进：padding-left 走对齐变量、text-indent 负缩进拉回首行（续行对齐文本列）', () => {
+    const line = rule('#app .cm-editor .cm-scroller .cm-line.vsidian-code-card-line')
+    expect(line).toMatch(/padding-left:\s*var\(--vsidian-code-indent,\s*0px\)/)
+    expect(line).toMatch(/text-indent:\s*calc\(-1 \* var\(--vsidian-code-indent,\s*0px\)\)/)
+  })
+
+  it('live 围栏行（首/尾）覆盖 text-indent: 0：无行号 widget，保持 #189 对齐缩进而无悬挂', () => {
+    expect(rule('#app .cm-editor .cm-scroller .cm-line.vsidian-code-card-line.vsidian-code-card-edge-top'))
+      .toMatch(/text-indent:\s*0/)
+    expect(rule('#app .cm-editor .cm-scroller .cm-line.vsidian-code-card-line.vsidian-code-card-edge-bottom'))
+      .toMatch(/text-indent:\s*0/)
+  })
+
+  it('阅读行悬挂缩进：与 live 同式（变量由行内联注入，行号关闭回落 0px）', () => {
+    const line = rule('#app .vsidian-view-reading .vsidian-reading-block.vsidian-reading-code-card .vsidian-reading-code-line')
+    expect(line).toMatch(/padding-left:\s*var\(--vsidian-code-indent,\s*0px\)/)
+    expect(line).toMatch(/text-indent:\s*calc\(-1 \* var\(--vsidian-code-indent,\s*0px\)\)/)
+  })
+
+  it('阅读关闭折行：pre 横向滚动（white-space: pre + overflow-x: auto，容器状态类门控）', () => {
+    const pre = rule('#app .vsidian-view-reading.vsidian-reading-nowrap .vsidian-reading-block.vsidian-reading-code-card > pre')
+    expect(pre).toMatch(/white-space:\s*pre\b/)
+    expect(pre).toMatch(/overflow-x:\s*auto/)
+  })
+
+  it('阅读关闭折行：行盒随内容延展（sticky 行号有全行吸附范围）', () => {
+    const line = rule('#app .vsidian-view-reading.vsidian-reading-nowrap .vsidian-reading-block.vsidian-reading-code-card .vsidian-reading-code-line')
+    expect(line).toMatch(/width:\s*max-content/)
+    expect(line).toMatch(/min-width:\s*100%/)
+  })
+
+  it('阅读关闭折行：行号 sticky 钉左 + 不透明合成遮罩（卡片色叠不透明编辑器底色）；边距 8+16 收进 padding（margin 在盒外遮不住内容）', () => {
+    const ln = rule('#app .vsidian-view-reading.vsidian-reading-nowrap .vsidian-reading-block.vsidian-reading-code-card .vsidian-code-card-linenumber')
+    expect(ln).toMatch(/position:\s*sticky/)
+    expect(ln).toMatch(/left:\s*0/)
+    expect(ln).toMatch(/margin-left:\s*0/)
+    expect(ln).toMatch(/margin-right:\s*0/)
+    expect(ln).toMatch(/padding-left:\s*8px/)
+    expect(ln).toMatch(/padding-right:\s*16px/)
+    // 上层卡片底色（可半透明）叠下层不透明编辑器底色——遮住横向滑过的文本
+    expect(ln).toMatch(/background-image:\s*linear-gradient\(var\(--vsidian-code-card-background/)
+    expect(ln).toMatch(/background-color:\s*var\(--vscode-editor-background/)
+  })
+
+  it('折行钮与复制钮同口径进卡即显：默认隐藏、三处显现组（header hover/focus、live reveal、阅读块容器 hover）；-off 经 filter 弱化（与显隐 opacity 正交）', () => {
+    const btn = rule('#app .vsidian-code-card-header .vsidian-code-card-wrap')
+    expect(btn).toMatch(/display:\s*inline-flex/)
+    expect(btn).toMatch(/opacity:\s*0;/)
+    expect(btn).toMatch(/visibility:\s*hidden/)
+    expect(btn).toMatch(/transition:\s*opacity/)
+    expect(rule('#app .vsidian-code-card-header .vsidian-code-card-wrap-off'))
+      .toMatch(/filter:\s*opacity\(0\.4\)/)
+    // 三处显现组各含 wrap 且给 opacity 1（组选择器块内命中）
+    for (const sel of [
+      '.vsidian-code-card-header:hover .vsidian-code-card-wrap',
+      '.vsidian-code-card-header.vsidian-code-card-reveal .vsidian-code-card-wrap',
+      '.vsidian-reading-block.vsidian-reading-code-card:hover .vsidian-code-card-wrap',
+    ]) {
+      const hits = (css.match(/[^{}]+\{[^{}]*\}/g) ?? []).filter((b) =>
+        b.split('{')[0]!.includes(sel) &&
+        /opacity:\s*1/.test(b.split('{')[1] ?? ''))
+      expect(hits, `显现规则 ${sel}（opacity 1）应存在`).toHaveLength(1)
+    }
   })
 })

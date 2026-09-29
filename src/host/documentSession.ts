@@ -97,6 +97,9 @@ export interface PanelPort {
    *  blockId 为 webview 侧块尾行既有 id 或刚经标准 edit.request 写入的
    *  新 id（写入与复制是两条消息，本端口只管拼接剪贴板） */
   writeBlockLinkClipboard?(docUri: string, blockId: string): void
+  /** #183 剪贴板读（粘贴桥）：vscode 层注入 env.clipboard.readText；读回
+   *  文本按 LF 归一（webview 全程 LF 坐标）；环境读失败返回 null */
+  readClipboard?(): Promise<string | null>
 }
 
 /** 会话通知（#4）：冲突暂停、复制请求、面板关闭时存在未确认输入等需要
@@ -238,6 +241,9 @@ export class DocumentSession {
   private imageClock = 0
   /** #201 周期核验串行链（并发有界：同一时刻至多一轮 verify 在途） */
   private verifyChain: Promise<void> = Promise.resolve()
+  /** #208 资源代次：手动刷新时自增，工作区图片 webview URI 的 ?v= 戳取
+   *  此值（缓存击穿；0 为未刷新初值，URI 不带戳——与现状形态一致） */
+  private imageGeneration = 0
 
   constructor(
     private readonly doc: HostDocumentPort,
@@ -430,13 +436,35 @@ export class DocumentSession {
         // 影响）；三变体（text 直写 / linkHeading 宿主拼标题链接 / linkBlock
         // 宿主拼块链接 #162）分别转发到注入端口
         if ('text' in message) {
-          panel.port.writeClipboard?.(message.text)
+          // #81 行尾契约（review-loops 修复：此前 text 变体漏归一）：webview
+          // 出站恒 LF（CM6 LF 模型），CRLF 文档按权威行尾归一后写入——与
+          // codeblock.copy 同式，剪贴板产物与文档行尾一致
+          panel.port.writeClipboard?.(
+            this.doc.eol === 2 ? message.text.replace(/\n/g, '\r\n') : message.text,
+          )
         } else if ('linkHeading' in message) {
           panel.port.writeHeadingLinkClipboard?.(message.linkHeading.docUri, message.linkHeading.heading)
         } else if ('linkBlock' in message) {
           panel.port.writeBlockLinkClipboard?.(message.linkBlock.docUri, message.linkBlock.blockId)
         }
         return Promise.resolve()
+      case 'clipboard.read': {
+        // #183 剪贴板读（粘贴桥）：只读交互（与 clipboard.write 同口径，
+        // 暂停态同样放行）；端口未接线/读失败回报 read-failed（webview 放弃
+        // 粘贴并记告警日志，不弹窗）
+        const report = (result: { ok: true; text: string } | { ok: false; reason: 'read-failed' }): void => {
+          panel.port.send(result.ok
+            ? { kind: 'clipboard.read.result', reqId: message.reqId, ok: true, text: result.text }
+            : { kind: 'clipboard.read.result', reqId: message.reqId, ok: false, reason: result.reason })
+        }
+        if (!panel.port.readClipboard) {
+          report({ ok: false, reason: 'read-failed' })
+          return Promise.resolve()
+        }
+        return panel.port.readClipboard().then((text) => {
+          report(text === null ? { ok: false, reason: 'read-failed' } : { ok: true, text })
+        })
+      }
       case 'ready': {
         const wasReady = panel.ready
         this.sendInit(panel)
@@ -657,6 +685,18 @@ export class DocumentSession {
         }
         return Promise.resolve()
       }
+      case 'refresh.request': {
+        // #208 手动刷新：清图片解析缓存、推进资源代次，回发失效通知
+        // （webview 据此全量失效重挂，重新解析取到带新代次戳的 URI）。
+        // 只读交互（不写文档、不入撤销栈），暂停态同样放行——与
+        // image.request 同口径的会话守卫（就绪且 docUri 匹配才放行）
+        if (!panel.ready || message.docUri !== this.docUri) {
+          return Promise.resolve()
+        }
+        const generation = this.invalidateImages()
+        panel.port.send({ kind: 'refresh.invalidated', reqId: message.reqId, generation })
+        return Promise.resolve()
+      }
       case 'perf.report':
         panel.lastPerfReport = message
         return Promise.resolve()
@@ -725,8 +765,33 @@ export class DocumentSession {
     return this.panels.get(sessionId)?.lastReadingPerfReport
   }
 
+  /** 当前资源代次（#208：provider 层图片 URI ?v= 戳的数据源；0 = 未刷新） */
+  getImageGeneration(): number {
+    return this.imageGeneration
+  }
+
+  /**
+   * #208 图片缓存运行期失效入口：清空解析缓存与在途去重表并推进资源代次
+   * （返回新代次）。手动刷新通道（refresh.request）在此闭合；后续自动核验
+   * 路径（#201）可复用同一入口对齐失效语义。
+   *
+   * 在途竞态（作废语义）：刷新瞬间的在途解析（imageInFlight）完成后仍会
+   * 走原回调——清表拦不住已注册的 then。两道防护缺一不可：其一，清空
+   * imageInFlight 让刷新后的重挂请求不与旧代次在途复用（否则经同 src 去重
+   * 直接拿到旧 URI）；其二，回调写缓存前校验发起代次（见
+   * resolveImageRequest），旧代次结果丢弃——只清表不校验，迟到的旧回调
+   * 照样把旧 URI 写回缓存，污染本轮刷新。
+   */
+  invalidateImages(): number {
+    this.imageCache.clear()
+    this.imageInFlight.clear()
+    this.imageGeneration += 1
+    return this.imageGeneration
+  }
+
   /** #10 图片解析请求处理（去重/缓存/回发）；#201 起成功结果登记归一目标
-   *  键并按世代防迟到回写 */
+   *  键并按世代防迟到回写；#208 起回调另校验会话代次防手动全量刷新的
+   *  迟到回写 */
   private async resolveImageRequest(
     panel: PanelEntry,
     reqId: number,
@@ -752,6 +817,12 @@ export class DocumentSession {
     }
     let pending = this.imageInFlight.get(src)
     if (!pending) {
+      // 发起代次快照：回调完成时校验代次未变才写缓存（#208 在途竞态）。
+      // 刷新瞬间在途的解析携旧代次 URI，若照写缓存，重挂请求经同 src
+      // 命中旧地址、该图本轮不换新；代次已过则丢弃。发起面板仍收到其
+      // 请求当次的结果（旧 URI）——webview 条目已被失效重挂重建，未知
+      // reqId 的迟到结果在观测层丢弃，不产生污染
+      const requestGen = this.imageGeneration
       const resolver = panel.port.resolveImage
       pending = resolver
         ? resolver(src).catch((): ImageResolution => ({ ok: false, reason: 'read-error' }))
@@ -760,15 +831,22 @@ export class DocumentSession {
         : Promise.resolve({ ok: false, reason: 'read-error' } as ImageResolution)
       this.imageInFlight.set(src, pending)
       // 完成后清理在途表；成功结果进入小容量缓存（滚动回视口的重复请求
-      // 直接命中，避免反复读盘；失败不缓存，保留重试语义）
+      // 直接命中，避免反复读盘；失败不缓存，保留重试语义）。清理用同一
+      // 性判据：invalidateImages 作废在途表后，同 src 可能已有新代次的
+      // 在途条目，旧回调不得误删他人的表项
       const epoch = this.imageEpochs.get(src) ?? 0
       const requestClock = this.imageClock
       void pending.then((resolution) => {
-        this.imageInFlight.delete(src)
-        // #201 世代守卫：解析在途期间该 src 被失效（缓存已删）——迟到结果
-        // 仍回发请求面板（webview 侧按 reqId 代次守卫丢弃），但不得回写
-        // 缓存复活旧解析
-        if ((this.imageEpochs.get(src) ?? 0) !== epoch) {
+        if (this.imageInFlight.get(src) === pending) {
+          this.imageInFlight.delete(src)
+        }
+        // 双守卫（#201 世代 + #208 代次）：解析在途期间该 src 被部分失效
+        // 或会话被手动全量刷新（缓存均已删）——迟到结果仍回发请求面板
+        // （webview 侧按 reqId 代次守卫丢弃），但不得回写缓存复活旧解析
+        if (
+          (this.imageEpochs.get(src) ?? 0) !== epoch ||
+          requestGen !== this.imageGeneration
+        ) {
           return
         }
         if (!resolution.fsPath) {

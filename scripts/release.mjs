@@ -96,6 +96,9 @@ const QUICK_ACTION_ICON_KEYS = [
   'bulletList', 'orderedList', 'taskList', 'quote', 'codeBlock',
   'link', 'clearInline', 'table', 'inlineMath', 'blockMath',
   'highlight', 'horizontalRule',
+  // #185 右键菜单图标接入同一图标集（部分复用上列既有键，此处为新增键）
+  'normalText', 'textFormat', 'paragraphStyle', 'comment',
+  'externalLink', 'cut', 'copy', 'paste', 'selectAll', 'insertPlus',
 ]
 const REQUIRED_QUICK_ACTION_SVGS = ['light', 'dark'].flatMap((theme) =>
   QUICK_ACTION_ICON_KEYS.map((key) => `out/webview/assets/${theme}-${key}.svg`),
@@ -207,7 +210,10 @@ export function mergeSoftWraps(body) {
 
 /**
  * 提取 CHANGELOG.md 最新版本段落。
- * @throws 最新段落版本与 expectedVersion 不符、或找不到版本段落时抛错。
+ * 顶部常驻的 `## Unreleased` 开发段跳过（只认 `## x.y.z` 版本段）——发版
+ * 提交可同时完成「Unreleased 转正 + 重建空 Unreleased」，发布说明不再混入
+ * 开发中内容，与 styleContractCheck.parseChangelogReleases 同一跳过语义。
+ * @throws 最新版本段落与 expectedVersion 不符、或找不到版本段落时抛错。
  */
 export function extractLatestChangelog(content, expectedVersion) {
   const lines = content.split(/\r?\n/)
@@ -216,12 +222,13 @@ export function extractLatestChangelog(content, expectedVersion) {
   let date = null
   for (let i = 0; i < lines.length; i++) {
     const m = lines[i].match(/^## (\[?[^\s\]]+\]?)\s*(?:-\s*(.*))?$/)
-    if (m) {
-      start = i
-      version = m[1].replace(/^\[|\]$/g, '')
-      date = (m[2] || '').trim() || null
-      break
-    }
+    if (!m) continue
+    const token = m[1].replace(/^\[|\]$/g, '')
+    if (!/^\d+\.\d+\.\d+$/.test(token)) continue
+    start = i
+    version = token
+    date = (m[2] || '').trim() || null
+    break
   }
   if (start < 0) throw new Error('CHANGELOG.md 中未找到任何 `## <版本>` 段落')
   if (version !== expectedVersion) {

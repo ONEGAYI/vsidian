@@ -57,5 +57,6 @@
   "command.ui.outlineCollapseAll.title": "Collapse all outline headings",
   "command.ui.outlineExpandAll.title": "Expand all outline headings",
   "command.ui.backlinksToggle.title": "Show or hide the backlinks panel",
-  "command.ui.outlinksToggle.title": "Show or hide the outgoing links panel"
+  "command.ui.outlinksToggle.title": "Show or hide the outgoing links panel",
+  "command.editor.refresh.title": "Refresh embedded resources"
 }

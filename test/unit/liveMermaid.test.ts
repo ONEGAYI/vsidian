@@ -202,6 +202,24 @@ describe('围栏表 StateField：文档编辑的增量维护', () => {
     expect(after[1]!.code).toBe('C-->D')
   })
 
+  it('全文替换为异长文本（init 重装载路径）：映射坍缩的倒挂伪 span 不进表（#184 暴露的既有缺陷）', () => {
+    const state = EditorState.create({ doc: DOC, extensions: [mermaidFencesField] })
+    expect(state.field(mermaidFencesField).spans).toHaveLength(1)
+    // init 换文档 = 全文替换（缩短）：旧围栏 mapPos(from,+1)/mapPos(to,-1)
+    // 在同一替换区间上坍缩为倒挂区间（from > to），曾被当作「窗口外」
+    // 保留进表——消费侧（buildCodeCardDecorations）对空行发射零宽
+    // Decoration.replace 直接抛 RangeError。正常围栏 from < to 恒成立，
+    // 倒挂/零宽必为映射坍缩产物，保留过滤须丢弃。
+    const tr = state.update({ changes: { from: 0, to: DOC.length, insert: '短文\n' } })
+    const spans = tr.state.field(mermaidFencesField).spans
+    expect(spans.every((s) => s.from < s.to), '表内不得存在倒挂/零宽伪 span').toBe(true)
+    expect(spans).toHaveLength(0)
+    // 变长方向同样坍缩（替换区间两侧端点），伪 span 同样不得进表
+    const tr2 = state.update({ changes: { from: 0, to: DOC.length, insert: `${DOC}\n尾段\n` } })
+    const spans2 = tr2.state.field(mermaidFencesField).spans
+    expect(spans2.every((s) => s.from < s.to)).toBe(true)
+  })
+
   it('纯选区移动不重扫（表项稳定，装饰字段随选区切换显隐）', () => {
     const state = EditorState.create({ doc: DOC, extensions: [mermaidFencesField] })
     const tr = state.update({ selection: EditorSelection.single(2) })

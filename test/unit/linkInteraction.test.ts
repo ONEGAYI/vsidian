@@ -895,3 +895,77 @@ describe('#160 普通链接锚点：webview 上报通道矩阵（含空格路径
     }
   })
 })
+
+// ---- live 独立成行图片的块级容器变体（SVG 塌缩修复）----
+// 契约：整行仅含一张图片（其余文本全空白）时 live widget 槽位取块级布局
+// （vsidian-image-block），为 viewBox-only 百分比宽 SVG 提供确定宽度基准；
+// 行内有任何非空白内容（列表前缀、混排文字、另一张图）保持行内形态。
+describe('独立成行图片的块级容器变体', () => {
+  /** 树驱动路径：返回文档中全部 LiveImageWidget（按区间序）。
+   *  追加一行放光标：单行文档里光标无论在 0（触头）还是末尾（触尾）都
+   *  算进入图片范围（active 显源码），与独立成行判定无关 */
+  const treeWidgets = (text: string): LiveImageWidget[] => {
+    const doc0 = `${text}\n尾`
+    const state = EditorState.create({
+      doc: doc0,
+      selection: { anchor: doc0.length - 1 },
+      extensions: [liveDecorationsField],
+    })
+    const set = buildLinkImageDecorations(state.doc, state.field(liveDecorationsField).tree, state.selection, [
+      { from: 0, to: doc0.length },
+    ])
+    const out: LiveImageWidget[] = []
+    set.between(0, doc0.length, (_f, _t, value) => {
+      const w = (value.spec as { widget?: unknown }).widget
+      if (w instanceof LiveImageWidget) {
+        out.push(w)
+      }
+    })
+    return out
+  }
+  /** 宽松路径（#152）：返回行扫描产出的全部 LiveImageWidget（追加行放光标同理） */
+  const looseWidgets = (text: string): LiveImageWidget[] => {
+    const doc0 = `${text}\n尾`
+    const state = EditorState.create({
+      doc: doc0,
+      selection: { anchor: doc0.length - 1 },
+      extensions: [liveDecorationsField],
+    })
+    return buildLooseLinkDecorationRanges(
+      state.doc,
+      state.field(liveDecorationsField).tree,
+      state.selection,
+      [{ from: 0, to: doc0.length }],
+      null,
+    )
+      .map((r) => (r.value.spec as { widget?: unknown }).widget)
+      .filter((w): w is LiveImageWidget => w instanceof LiveImageWidget)
+  }
+
+  it('整行仅含一张图片：块级变体（含尾随空白）', () => {
+    expect(treeWidgets('![甲](./a.svg)').map((w) => w.block)).toEqual([true])
+    expect(treeWidgets('![甲](./a.svg)  \t').map((w) => w.block)).toEqual([true])
+    expect(treeWidgets('  ![甲](./a.svg)').map((w) => w.block)).toEqual([true])
+  })
+
+  it('行内有非空白内容：保持行内形态（列表前缀/混排文字/同行两图）', () => {
+    expect(treeWidgets('- ![甲](./a.svg)').map((w) => w.block)).toEqual([false])
+    expect(treeWidgets('前 ![甲](./a.svg) 后').map((w) => w.block)).toEqual([false])
+    expect(treeWidgets('![甲](a.svg) ![乙](b.svg)').map((w) => w.block)).toEqual([false, false])
+  })
+
+  it('宽松路径（目标含空格）同样按独立成行判定', () => {
+    expect(looseWidgets('![甲](./a b.svg)').map((w) => w.block)).toEqual([true])
+    expect(looseWidgets('前 ![甲](./a b.svg)').map((w) => w.block)).toEqual([false])
+  })
+
+  it('toDOM 输出块级修饰类；eq 区分 block 形态（缓存实例不混用）', () => {
+    const block = new LiveImageWidget('./a.svg', '甲', undefined, true)
+    const inline = new LiveImageWidget('./a.svg', '甲', undefined, false)
+    const span = block.toDOM()
+    expect(span.classList.contains('vsidian-image-block')).toBe(true)
+    expect(inline.toDOM().classList.contains('vsidian-image-block')).toBe(false)
+    expect(block.eq(inline)).toBe(false)
+    expect(block.eq(new LiveImageWidget('./a.svg', '甲', undefined, true))).toBe(true)
+  })
+})

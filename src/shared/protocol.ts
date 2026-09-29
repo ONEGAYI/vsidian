@@ -126,6 +126,12 @@ export type HostToWebview =
       ok: false
       reason: 'invalid-location' | 'write-failed' | 'invalid'
     }
+  /** #208 刷新失效通知（refresh.request 的应答，reqId 配对）：webview 收到
+   *  后全量失效图片条目并对活跃槽位重新解析（image.request 新 reqId，宿主
+   *  缓存已清、新 URI 带 ?v=<generation> 代次戳）+ 重置 Mermaid 懒加载失败
+   *  终态。generation 为自增后的资源代次（恒 ≥ 1，观测面——webview 的失效
+   *  动作无条件执行，不依赖其值做判定） */
+  | { kind: 'refresh.invalidated'; reqId: number; generation: number }
   /** 测试钩子（#161）：登记图片粘贴在途 reqId。集成测试经宿主注入
    *  image.paste（绕过 webview 的 paste 拦截，拦截侧的在途登记不会发生），
    *  以此补登记同 reqId，使结果回包能通过陈旧回包校验、走完插入往返
@@ -213,16 +219,23 @@ export type HostToWebview =
   | { kind: 'outline.test.menuClick'; command: string }
   /** 测试钩子（#69）：关闭当前右键菜单（等价 Esc/外点关闭路径） */
   | { kind: 'outline.test.menuClose' }
-  /** 测试钩子（#162）：在正文 doc 偏移 pos 处打开块链接右键菜单（与用户
-   *  右键同一命中判定与装配链路——posAtCoords 的替代注入点；frontmatter
-   *  头区/空行等不接管位同样不开菜单）。宿主测试无法向 webview 派发真实
-   *  鼠标事件，以此通道验证真实宿主内的菜单装配 */
-  | { kind: 'block.test.contextMenu'; pos: number }
-  /** 测试钩子（#162）：点击菜单中 command 对应的真实按钮（与用户点击同一
-   *  处理器；command 取 blockMenu 的 BlockMenuCommand） */
-  | { kind: 'block.test.menuClick'; command: string }
-  /** 测试钩子（#162）：关闭当前块链接右键菜单（等价 Esc/外点关闭路径） */
-  | { kind: 'block.test.menuClose' }
+  /** 剪贴板读结果（#183）：ok 时 text 为 LF 归一后的剪贴板文本；失败附
+   *  原因码（read-failed = 环境读失败）。陈旧回包由 webview 按 reqId
+   *  丢弃（在途表先例见 image.paste） */
+  | { kind: 'clipboard.read.result'; reqId: number; ok: true; text: string }
+  | { kind: 'clipboard.read.result'; reqId: number; ok: false; reason: 'read-failed' }
+  /** 测试钩子（#183 统一右键菜单）：在正文 doc 偏移 pos 处打开统一右键
+   *  菜单（与用户右键同一命中判定与装配链路——posAtCoords 的替代注入点；
+   *  frontmatter 头区等不接管位同样不开菜单；空行与表格/围栏/图形块均
+   *  接管）。宿主测试无法向 webview 派发真实鼠标事件，以此通道验证真实
+   *  宿主内的菜单装配 */
+  | { kind: 'contextMenu.test.contextMenu'; pos: number }
+  /** 测试钩子（#183）：点击菜单中 command 对应的真实按钮（与用户点击同一
+   *  处理器；command 取菜单项描述符的 command——含运行期注册项，通道为
+   *  非空字符串校验） */
+  | { kind: 'contextMenu.test.menuClick'; command: string }
+  /** 测试钩子（#183）：关闭当前统一右键菜单（等价 Esc/外点关闭路径） */
+  | { kind: 'contextMenu.test.menuClose' }
   /** 测试钩子（#69）：向重命名输入框注入文本并以 Enter/Esc 收尾（真实
    *  keydown 链路；须先经 menuClick command='rename' 进入重命名态） */
   | { kind: 'outline.test.renameKey'; text: string; key: 'enter' | 'escape' }
@@ -276,6 +289,10 @@ export type HostToWebview =
   /** 测试钩子（出链面板批次）：点击第 index 个真实出链条目（与用户点击
    *  同一委托处理器；出站 outlink.activate 跳转意图，断链条目不可点） */
   | { kind: 'outlinks.test.itemClick'; index: number }
+  /** 测试钩子（#208）：点击顶栏刷新嵌入资源真实按钮（与用户点击同一
+   *  处理器：出站 refresh.request，失效重挂由宿主 refresh.invalidated
+   *  回流驱动）。 */
+  | { kind: 'refresh.test.click' }
   /** 测试钩子（#21）：在真实 webview 的 CM6 中输入，验证暂停态即时留存。 */
   | { kind: 'sync.test.edit'; offset: number; text: string; closeAfter?: boolean }
   /** 测试钩子：组合候选写入首行 DOM，经过 CM6 MutationObserver 的真实输入链。 */
@@ -512,6 +529,10 @@ export type WebviewToHost =
       imageStates?: ImageStateCounts
       /** 图片条目明细（#201：失效/版本刷新链路断言载体，直连外链除外） */
       imageEntries?: ImageEntryProbe[]
+      /** 图片槽位探针（#208）：当前视图内活跃槽位的最终 src 与解码尺寸
+       *  ——同名图片外部替换后刷新是否真换字节的绘制层证据（src 换新 +
+       *  naturalWidth 变化 = 浏览器实际解码了新地址的字节；旧 webview 缺省） */
+      imageProbe?: ImageSlotProbe[]
       /** 查找会话观测（#14）：首次打开后回报（未打开过时缺省） */
       find?: FindSessionProbe
       /** 当前生效设置快照（#33 起缓存宿主下发的值；#34 行号等设置的观测面） */
@@ -600,6 +621,11 @@ export type WebviewToHost =
       dataBase64: string
       fileNameHint?: string
     }
+  /** #208 手动刷新请求（工具栏刷新按钮/快捷键入口）：宿主清图片解析缓存、
+   *  推进资源代次后以 refresh.invalidated 应答（reqId 配对）。会话守卫与
+   *  image.request 同款（就绪且 docUri 匹配才放行）；只读交互，不写文档、
+   *  不入撤销栈，暂停态同样放行 */
+  | { kind: 'refresh.request'; sessionId: string; docUri: string; reqId: number }
   /** 代码块复制请求（#81）：卡片头部复制按钮点击 → 宿主剪贴板 API 写入。
    *  text 为代码体原文（两条围栏行之间，不含围栏与 info string），恒为
    *  LF（CM6 LF 模型）；宿主按文档 EOL 归一后写剪贴板（webview 不触碰
@@ -633,6 +659,11 @@ export type WebviewToHost =
    *  标准 edit.request 落权威文档，本消息只携最终 id；与 linkHeading
    *  同一只读交互端口） */
   | { kind: 'clipboard.write'; linkBlock: { docUri: string; blockId: string } }
+  /** 剪贴板读（#183 统一右键菜单粘贴项）：webview 无 navigator.clipboard
+   *  权限面，经宿主 env.clipboard.readText 读回（沿 clipboard.write 消息
+   *  桥先例）；结果经 clipboard.read.result 回来源面板。宿主读回文本按
+   *  LF 归一（webview 全程 LF 坐标） */
+  | { kind: 'clipboard.read'; reqId: number }
   /** 性能探针回报（#5）：快照为 DOM 计数，输入延迟含 rAF 稳定等待 */
   | {
       kind: 'perf.report'
@@ -818,6 +849,18 @@ function isImageEntryProbe(v: unknown): v is ImageEntryProbe {
     (v.reason === undefined || isString(v.reason)) &&
     (v.appliedSrc === undefined || isString(v.appliedSrc))
   )
+}
+
+/** 图片槽位探针（#208：当前视图内活跃槽位的最终地址与解码观测） */
+export interface ImageSlotProbe {
+  /** img 元素最终应用的 src 属性（宿主 webview URI 含 ?v= 代次戳；
+   *  槽位尚无 img（未解析）为 null） */
+  src: string | null
+  /** 浏览器实际解码宽度（load 后为位图宽；img 未创建/未解码为 null，
+   *  jsdom 无解码环境为 0） */
+  naturalWidth: number | null
+  /** 槽位状态（与 data-vsidian-img-state 同步） */
+  state: 'loading' | 'loaded' | 'error'
 }
 
 /** CSS 契约探针回报（#6）：一段仅经稳定类名定位的内部测试 CSS 是否生效 */
@@ -1131,6 +1174,16 @@ export interface PaintProbe {
     boxShadowValues: string[]
     borderLeftWidthValues: string[]
   } | null
+  /** #183 统一右键菜单绘制：浮层在场（瞬态挂载）时的实际可见性
+   *  （elementFromPoint 命中——样式注入失效时 DOM 在场但命中失败）、
+   *  分组线与置灰计数（安全降级矩阵的绘制层证据）；菜单关闭时缺省。
+   *  jsdom 无布局恒 false，只作真宿主集成断言依据 */
+  contextMenu?: {
+    visible: boolean
+    display: string | null
+    separatorCount: number
+    disabledCount: number
+  }
 }
 
 /** #32 排版一致性探针：正文基础排版四项样本（null = 元素缺失/不可读） */
@@ -1790,6 +1843,13 @@ function isPaintProbe(v: unknown): v is PaintProbe {
       isNonNegativeInt(v.heading.inviewCount) &&
       Array.isArray(v.heading.boxShadowValues) && v.heading.boxShadowValues.every(isString) &&
       Array.isArray(v.heading.borderLeftWidthValues) && v.heading.borderLeftWidthValues.every(isString)
+    )) &&
+    (v.contextMenu === undefined || (
+      isObject(v.contextMenu) &&
+      typeof v.contextMenu.visible === 'boolean' &&
+      isNullOrString(v.contextMenu.display) &&
+      isNonNegativeInt(v.contextMenu.separatorCount) &&
+      isNonNegativeInt(v.contextMenu.disabledCount)
     ))
   )
 }
@@ -1955,6 +2015,15 @@ function isImageStateCounts(v: unknown): v is ImageStateCounts {
   )
 }
 
+function isImageSlotProbe(v: unknown): v is ImageSlotProbe {
+  return (
+    isObject(v) &&
+    isNullOrString(v.src) &&
+    (v.naturalWidth === null || isNonNegativeInt(v.naturalWidth)) &&
+    (v.state === 'loading' || v.state === 'loaded' || v.state === 'error')
+  )
+}
+
 function isLiveSyntaxProbe(v: unknown): v is LiveSyntaxProbe {
   return (
     isObject(v) &&
@@ -2098,6 +2167,9 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         isString(v.linkBlock.docUri) &&
         isString(v.linkBlock.blockId)
       )
+    case 'clipboard.read':
+      // #183 粘贴桥：reqId 会话面板内自增（对应 clipboard.read.result）
+      return isPositiveInt(v.reqId)
     case 'conflict.action':
       return (
         isString(v.sessionId) &&
@@ -2153,6 +2225,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         (v.imageStates === undefined || isImageStateCounts(v.imageStates)) &&
         (v.imageEntries === undefined ||
           (Array.isArray(v.imageEntries) && v.imageEntries.every(isImageEntryProbe))) &&
+        (v.imageProbe === undefined ||
+          (Array.isArray(v.imageProbe) && v.imageProbe.every(isImageSlotProbe))) &&
         (v.find === undefined || isFindSessionProbe(v.find)) &&
         (v.settings === undefined || isSettingsPayload(v.settings)) &&
         (v.lineGutter === undefined || isLineGutterProbe(v.lineGutter)) &&
@@ -2243,6 +2317,13 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         (v.fileNameHint === undefined ||
           (typeof v.fileNameHint === 'string' &&
             v.fileNameHint.length <= IMAGE_PASTE_LIMITS.fileNameHintMaxChars))
+      )
+    case 'refresh.request':
+      // #208 手动刷新请求：会话守卫字段 + 正整数 reqId（与 image.request 同惯例）
+      return (
+        isString(v.sessionId) &&
+        isString(v.docUri) &&
+        isPositiveInt(v.reqId)
       )
     case 'perf.report':
       return (
@@ -2431,6 +2512,10 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'image.test.pending':
       // #161 测试钩子：补登记在途 reqId（见消息定义注释）
       return isPositiveInt(v.reqId)
+    case 'refresh.invalidated':
+      // #208 刷新失效通知：正整数 reqId（配对请求）；generation 为自增后
+      // 的资源代次，恒 ≥ 1（0 是未刷新初值，不回发）
+      return isPositiveInt(v.reqId) && isPositiveInt(v.generation)
     case 'view.find.open':
       return v.query === undefined || isString(v.query)
     case 'view.find.close':
@@ -2497,11 +2582,19 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return isOutlineMenuCommand(v.command)
     case 'outline.test.menuClose':
       return true
-    case 'block.test.contextMenu':
+    case 'clipboard.read.result':
+      if (!isPositiveInt(v.reqId)) {
+        return false
+      }
+      if (v.ok === true) {
+        return isString(v.text)
+      }
+      return v.ok === false && v.reason === 'read-failed'
+    case 'contextMenu.test.contextMenu':
       return isNonNegativeInt(v.pos)
-    case 'block.test.menuClick':
-      return v.command === 'copyHeadingLink' || v.command === 'copyBlockLink'
-    case 'block.test.menuClose':
+    case 'contextMenu.test.menuClick':
+      return typeof v.command === 'string' && v.command.length > 0
+    case 'contextMenu.test.menuClose':
       return true
     case 'outline.test.renameKey':
       return isString(v.text) && (v.key === 'enter' || v.key === 'escape')
@@ -2530,6 +2623,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'backlinks.test.sortSelect':
       return ['name-asc', 'name-desc', 'mtime-desc', 'mtime-asc', 'birth-desc', 'birth-asc']
         .includes(v.mode as string)
+    case 'refresh.test.click':
+      return true
     case 'sync.test.composition':
       return (v.phase === 'start' || v.phase === 'update' || v.phase === 'end') && isString(v.text)
     case 'link.test.mousedown':

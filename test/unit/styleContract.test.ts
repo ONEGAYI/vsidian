@@ -358,7 +358,7 @@ describe('styleContract 迁移完整性（旧映射表全集不丢）', () => {
 
 /** 每类目条目数快照（显式钉住归类：重划/迁移类目必须同步改这里，防静默漂移） */
 const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
-  // content 域（71）
+  // content 域（77）
   'view-container': 2,
   heading: 4,
   'inline-format': 7,
@@ -366,17 +366,17 @@ const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   'line-syntax': 5,
   table: 11,
   'reading-structure': 12,
-  'link-image-wikilink': 8,
+  'link-image-wikilink': 9,
   'content-variables': 11,
   'content-limits': 11,
-  // chrome 域（61）
+  // chrome 域（63）
   math: 5,
   diagram: 4,
   'graphic-interact': 2,
-  'code-card': 10,
+  'code-card': 11,
   outline: 19,
   'chrome-limits': 4,
-  'toolbar-banner': 5,
+  'toolbar-banner': 6,
   frontmatter: 5,
   'context-menu': 1,
   backlinks: 4,

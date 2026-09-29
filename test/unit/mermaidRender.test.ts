@@ -22,6 +22,7 @@ import {
   mermaidRenderStats,
   renderMermaidIn,
   renderMermaidInto,
+  resetMermaidLoadFailure,
   setMermaidDarkTheme,
   type MermaidApi,
 } from '../../src/webview/mermaidRender'
@@ -292,6 +293,39 @@ describe('主题联动', () => {
   })
 })
 
+describe('#208 刷新终态重置：已降级容器立即重画', () => {
+  it('重置后 error 态容器重新走渲染管线恢复为 SVG，正常渲染容器不动', async () => {
+    // 先正常渲染一个容器（刷新语义不该浪费重渲的对照）
+    const api1 = makeApi(SAMPLE_SVG)
+    __setMermaidApiForTest(api1)
+    const ok = makeContainer('C-->D')
+    renderMermaidInto(ok, 'C-->D')
+    await settle()
+    expect(ok.getAttribute(MERMAID_STATE_ATTR)).toBe('rendered')
+    const okSvg = ok.querySelector('svg')
+    // 制造降级：清 API 后新容器走 unavailable 降级（error 态固化）
+    __setMermaidApiForTest(null)
+    const degraded = makeContainer('A-->B')
+    renderMermaidInto(degraded, 'A-->B')
+    await settle()
+    expect(degraded.getAttribute(MERMAID_STATE_ATTR)).toBe('error')
+    expect(degraded.querySelector('svg')).toBeNull()
+    // 环境恢复（API 回来）：无既有重渲染入口，降级容器不会自行重画
+    const api2 = makeApi(SAMPLE_SVG)
+    __setMermaidApiForTest(api2)
+    await settle()
+    expect(degraded.getAttribute(MERMAID_STATE_ATTR)).toBe('error')
+    // 刷新终态重置：降级容器立即重画（无需滚动触发新 pending 容器）
+    resetMermaidLoadFailure()
+    await settle()
+    expect(degraded.getAttribute(MERMAID_STATE_ATTR)).toBe('rendered')
+    expect(degraded.querySelector('svg')).not.toBeNull()
+    // 正常渲染容器不重画：DOM 实例未重建，且新 API 只接到降级容器的源码
+    expect(ok.querySelector('svg')).toBe(okSvg)
+    expect(api2.rendered).toEqual(['A-->B'])
+  })
+})
+
 describe('挂载钩子：renderMermaidIn 扫描 pending 容器', () => {
   it('仅渲染 pending 容器；已渲染容器不重复渲染', async () => {
     __setMermaidApiForTest(makeApi(SAMPLE_SVG))
@@ -355,6 +389,31 @@ describe('懒加载：URI 注入链路', () => {
       expect(
         document.head.querySelectorAll('script[src="https://res.invalid/mermaid.js"]'),
       ).toHaveLength(1)
+    } finally {
+      delete (globalThis as Record<string, unknown>)['__vsidianMermaidUri']
+    }
+  })
+
+  it('#208 终态重置后重新允许懒加载注入（手动刷新通道）', async () => {
+    ;(globalThis as Record<string, unknown>)['__vsidianMermaidUri'] = 'https://res.invalid/mermaid.js'
+    try {
+      // 构造失败终态：注入 → onerror
+      const first = ensureMermaidApi()
+      await settle(2)
+      const script = document.head.querySelector<HTMLScriptElement>(
+        'script[src="https://res.invalid/mermaid.js"]')
+      expect(script).not.toBeNull()
+      script!.onerror?.(new Event('error') as ErrorEvent)
+      expect(await first).toBeNull()
+      // 终态下不重复注入（既有 D-5 契约）
+      expect(await ensureMermaidApi()).toBeNull()
+      // 重置终态：重新允许懒加载——注入第二个 script 并产出 pending 承诺
+      resetMermaidLoadFailure()
+      void ensureMermaidApi()
+      await settle(2)
+      expect(
+        document.head.querySelectorAll('script[src="https://res.invalid/mermaid.js"]'),
+      ).toHaveLength(2)
     } finally {
       delete (globalThis as Record<string, unknown>)['__vsidianMermaidUri']
     }

@@ -901,6 +901,24 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   mkdirSync(path.join(wsDir, '子 目录'), { recursive: true })
   writeFileSync(path.join(wsDir, '子 目录', '目标 二.md'), '# 目标 二\n含空格路径的目标文档。\n', 'utf8')
   writeFileSync(path.join(wsDir, 'images.md'), IMAGES_DOC, 'utf8')
+  // #208 手动刷新样例：图片行上方垫 24 行填充（图片行保持在 CM6 视口装饰
+  // 范围内，装载即解析），下方 40 行尾部保证文档可滚动（刷新前后滚动位置
+  // 保持断言需要非零 scrollTop）；图片资产独立文件名（用例会外部覆写该图
+  // 字节，不得与 images/links 样例共用）
+  writeFileSync(path.join(wsDir, 'refresh.md'), [
+    '# 刷新样例',
+    '',
+    ...Array.from({ length: 24 }, (_, i) => `刷新填充 ${i}`),
+    '',
+    '光标定位段落，刷新前后选区保持的断言载体。',
+    '',
+    '![刷新图](assets/刷新图.png)',
+    '',
+    '结尾段。',
+    '',
+    ...Array.from({ length: 40 }, (_, i) => `刷新尾部 ${i}`),
+    '',
+  ].join('\n'), 'utf8')
   mkdirSync(path.join(wsDir, 'assets'), { recursive: true })
   writeFileSync(path.join(wsDir, 'assets', '图片 一.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
   // #201 图片刷新：初始绿图 + 备用蓝图（覆盖保存的新内容载体）+ 引用文档
@@ -916,6 +934,9 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
     '结尾段。',
     '',
   ].join('\n'), 'utf8')
+  // #208 初始 1x1 透明图（刷新后用例覆写为 2x2 红色，naturalWidth 1→2
+  // 证明浏览器实际解码了新代次地址的字节）
+  writeFileSync(path.join(wsDir, 'assets', '刷新图.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
   // #11 双链：源文档、按名/屏外标题目标、文本编辑器 reveal 目标、重名候选
   // 与大小写目标（Windows 宿主大小写不敏感匹配的断言载体）
   // #197 反链：两个引用者 + 被引目标（反链面板、四态与跳转断言载体）
@@ -967,7 +988,8 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   writeFileSync(path.join(wsDir, 'wikilink-target.md'), WIKILINK_TARGET_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'wikilink-crlf-target.md'), WIKILINK_CRLF_TARGET_DOC, 'utf8')
   // #162 复制块链接：frontmatter 头区（不接管断言）、标题行/普通段/表格/
-  // 既有 id 段（菜单两态与零写回断言载体）
+  // 既有 id 段（菜单两态与零写回断言载体）；#183 补围栏行（统一菜单降级
+  // 矩阵的围栏区断言载体）
   writeFileSync(path.join(wsDir, 'block-menu.md'), [
     '---',
     'title: 块菜单',
@@ -980,6 +1002,10 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
     '| a | b |',
     '|---|---|',
     '| 1 | 2 |',
+    '',
+    '```js',
+    'const fence = 1',
+    '```',
     '',
     '已有 id 段落 ^keep9',
     '',

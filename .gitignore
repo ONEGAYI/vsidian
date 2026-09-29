@@ -14,6 +14,9 @@ dist/
 .DS_Store
 Thumbs.db
 
+# Python 运行时缓存（file-tree 等脚本工具）
+__pycache__/
+
 # @vscode/test-electron 下载的宿主缓存
 .vscode-test/
 
@@ -26,3 +29,7 @@ logs/
 # ZCode 会话状态目录（本地工具产物，不入库）
 .zcode/
 logs-203/
+.zcodeignore
+
+# 其他 agent 工具的本地附件（不入库）
+.codex-remote-attachments/

@@ -77,10 +77,12 @@ export const CHROME_CONTRACT_PROBES: readonly ChromeContractProbe[] = [
   { id: 'outline-toolbar', selector: '#app .vsidian-sidebar .vsidian-outline-toolbar', expected: 'rgb(225, 0, 1)' },
   { id: 'outline-toolbar-buttons', selector: '#app .vsidian-sidebar .vsidian-outline-toolbar .vsidian-outline-reset', expected: 'rgb(226, 0, 1)' },
   { id: 'outline-search', selector: '#app .vsidian-sidebar .vsidian-outline-toolbar .vsidian-outline-search', expected: 'rgb(227, 0, 1)' },
-  // ---- 编辑器顶栏（#4；#38 起模式切换迁宿主标题栏，顶栏为自有三按钮；
-  // #141 起第四按钮双态视图切换——body 模式类为模式态类，不伪造静态探针） ----
+  // ---- 编辑器顶栏（#4；#38 起模式切换迁宿主标题栏，顶栏为自有按钮组；
+  // #141 起第四按钮双态视图切换——body 模式类为模式态类，不伪造静态探针；
+  // #208 起第五按钮刷新嵌入资源，接管右端组推右规则） ----
   { id: 'toolbar', selector: '#app .vsidian-toolbar', expected: 'rgb(228, 0, 1)' },
   { id: 'view-toggle', selector: '#app .vsidian-toolbar .vsidian-view-toggle', expected: 'rgb(236, 0, 1)' },
+  { id: 'toolbar-refresh', selector: '#app .vsidian-toolbar .vsidian-refresh-toggle', expected: 'rgb(239, 0, 1)' },
   // ---- frontmatter 只读表格卡片（#140 Popover 改版；live 侧 + 阅读侧
   //      同款表格。标题栏是常驻静态入口可探针；Popover 容器为交互态
   //      （打开时挂载），不伪造静态探针，由浏览器套件行为验证） ----
@@ -90,15 +92,18 @@ export const CHROME_CONTRACT_PROBES: readonly ChromeContractProbe[] = [
   { id: 'live-fm-row-reading', selector: '#app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-row', expected: 'rgb(233, 0, 1)' },
   { id: 'live-fm-cell-reading', selector: '#app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-cell', expected: 'rgb(234, 0, 1)' },
   { id: 'live-fm-header-live', selector: '#app .vsidian-view-live .vsidian-fm-header', expected: 'rgb(237, 0, 1)' },
+  // ---- 代码块卡片折行开关（#191；仅阅读侧发射，非收起块头部常驻在场） ----
+  { id: 'live-code-card-wrap-reading', selector: '#app .vsidian-view-reading .vsidian-code-card-wrap', expected: 'rgb(238, 0, 1)' },
   // ---- 反链面板（#197；面板容器 DOM 常驻侧栏（显隐由类控制），可静态
   //      探针；条目/卡片为动态数据（宿主索引快照驱动），不伪造静态探针，
   //      由集成 backlinks probe 的行为路径验证。形态改版批次追加工具栏
-  //      （常驻固定区，ready 态可命中）探针 ----
-  { id: 'backlink-panel', selector: '#app .vsidian-sidebar .vsidian-backlink-panel', expected: 'rgb(238, 0, 1)' },
-  { id: 'backlinks-toggle', selector: '#app .vsidian-sidebar .vsidian-sidebar-toolbar .vsidian-backlinks-toggle', expected: 'rgb(239, 0, 1)' },
-  { id: 'backlink-toolbar', selector: '#app .vsidian-sidebar .vsidian-backlink-toolbar', expected: 'rgb(240, 0, 1)' },
+  //      （常驻固定区，ready 态可命中）探针——合并 main 时 #191/#208 已占
+  //      238-239，本组五条顺延 240 起 ----
+  { id: 'backlink-panel', selector: '#app .vsidian-sidebar .vsidian-backlink-panel', expected: 'rgb(240, 0, 1)' },
+  { id: 'backlinks-toggle', selector: '#app .vsidian-sidebar .vsidian-sidebar-toolbar .vsidian-backlinks-toggle', expected: 'rgb(241, 0, 1)' },
+  { id: 'backlink-toolbar', selector: '#app .vsidian-sidebar .vsidian-backlink-toolbar', expected: 'rgb(242, 0, 1)' },
   // ---- 出链面板（出链面板批次；容器与按钮常驻可静态探针；条目动态数据
   //      由集成 outlinks probe 行为验证） ----
-  { id: 'outlink-panel', selector: '#app .vsidian-sidebar .vsidian-outlink-panel', expected: 'rgb(241, 0, 1)' },
-  { id: 'outlinks-toggle', selector: '#app .vsidian-sidebar .vsidian-sidebar-toolbar .vsidian-outlinks-toggle', expected: 'rgb(242, 0, 1)' },
+  { id: 'outlink-panel', selector: '#app .vsidian-sidebar .vsidian-outlink-panel', expected: 'rgb(243, 0, 1)' },
+  { id: 'outlinks-toggle', selector: '#app .vsidian-sidebar .vsidian-sidebar-toolbar .vsidian-outlinks-toggle', expected: 'rgb(244, 0, 1)' },
 ]

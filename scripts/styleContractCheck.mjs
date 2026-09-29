@@ -44,6 +44,20 @@ export function parseChangelogReleases(md) {
   return releases
 }
 
+/** 提取 CHANGELOG 指定版本段的正文（标题行到下一个 `## ` 行或尾部
+ * `<!-- 变更链接` 注释块之间，行尾归一 LF）；段不存在返回 null。发布段落
+ * 不可变校验用它在 tag 快照与候选各取一份做逐字比对——只比日期拦不住
+ * 「向已定案段落追加条目」（v0.5.0 后回填实证）。注释块作段尾边界是
+ * 因为 tag 时点该版本常是最后一个版本段，其后直到底部注释块再无 `## `。 */
+export function extractChangelogSection(md, version) {
+  const lines = String(md).replace(/\r\n/g, '\n').split('\n')
+  const head = new RegExp(`^## ${version.replace(/\./g, '\\.')} - `)
+  const start = lines.findIndex((l) => head.test(l))
+  if (start < 0) return null
+  const end = lines.findIndex((l, i) => i > start && /^(?:## |<!-- )/.test(l))
+  return lines.slice(start + 1, end < 0 ? lines.length : end).join('\n').trim()
+}
+
 /** v0.4.0 映射表行主键规范化：去行首列分隔、定界反引号/删除线与括号注释 */
 export function normalizeRowKey(raw) {
   return String(raw)
@@ -462,16 +476,34 @@ export function readGitTags(root) {
   }
 }
 
+/** 读取 tag 时点的 CHANGELOG.md 全文（`git show <tag>:CHANGELOG.md`）；
+ *  git 失败（tag 缺失/对象不可达/工作树外）返回 null，调用方按 tag 缺席
+ *  降级 warning——与 readGitTags 同一降级语义。cwd 限定 root 且仅当
+ *  root 自带 .git 时调用，防 execFileSync 向上找到外层仓库取错快照。 */
+export function readTagChangelog(root, tag) {
+  try {
+    return execFileSync('git', ['show', `${tag}:CHANGELOG.md`], {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+  } catch {
+    return null
+  }
+}
+
 /**
  * 装配受信任发布记录：
  * - 基线固化快照是权威集合（来源固定；#135 起由受保护来源提供）；
  * - CHANGELOG：固化版本的日期不得被改（矛盾 → 失败）；
+ * - tagChangelogs（可得时）：固化版本的段落正文与 tag 时点定案内容逐字
+ *   一致（回填/删改 → 失败）；快照不可得降级 warning，不阻塞；
  * - git tag（可得时）：固化版本的 tag 指向 SHA 不得变（矛盾 → 失败）；git
  *   不可用（CI 缓存/浅克隆）不阻塞，记 warning；
  * - CHANGELOG 新增版本：git tag 佐证存在才纳入受信任集合（本地正常演进即
  *   时可用），否则仅记 warning（保守：不作为期限计算的依据）。
  */
-export function assembleTrustedReleases(baseline, changelogMd, gitTagData) {
+export function assembleTrustedReleases(baseline, changelogMd, gitTagData, tagChangelogs = null) {
   const failures = []
   const warnings = []
   const ctx = { candidateVersion: 'release-records', baselineLabel: `${baseline.meta.baselineVersion} (${baseline.meta.sourceSha.slice(0, 7)})` }
@@ -486,6 +518,23 @@ export function assembleTrustedReleases(baseline, changelogMd, gitTagData) {
     }
     if (cl.date !== snap.date) {
       failures.push(fail(ctx, 'changelog-date-mismatch', `版本 ${version} 的 CHANGELOG 日期与基线固化快照矛盾`, { id: version, target: version }, `基线固化：${snap.date}；候选 CHANGELOG：${cl.date}（改日期不能伪造弃用期限）`))
+    }
+    if (tagChangelogs) {
+      const snapshotMd = tagChangelogs[snap.tag]
+      if (snapshotMd === undefined) {
+        warnings.push(`tag ${snap.tag} 的 CHANGELOG 快照不可用：跳过段落回填校验（CI 缓存/浅克隆场景可接受）`)
+      } else {
+        const snapshotBody = extractChangelogSection(snapshotMd, version)
+        const candidateBody = extractChangelogSection(changelogMd, version)
+        if (snapshotBody === null) {
+          failures.push(fail(ctx, 'changelog-section-mutated', `版本 ${version} 的段落未见于 tag ${snap.tag} 时点快照`, { id: version, target: version }, `发布时刻经脚本强校验，tag 快照缺该版本段属异常形态`))
+        } else if (snapshotBody.replace(/\s+/g, '') !== candidateBody.replace(/\s+/g, '')) {
+          // 比对非空白字符流（排版与折行不视为篡改）：已发布段在 v0.1.0–0.3.0
+          // 实测经历过中英空格补正与全文折行重整，字节比对会误拦；条目的
+          // 增删改在字符流层面必然不等，回填防线不受影响。
+          failures.push(fail(ctx, 'changelog-section-mutated', `版本 ${version} 的 CHANGELOG 段落与 tag ${snap.tag} 定案内容不一致（回填或删改已发布段落）`, { id: version, target: version }, `已发布段落随 tag 定案：开发中条目记入顶部 Unreleased 段，发版时随新版本段落转正`))
+        }
+      }
     }
     if (gitTagData) {
       const sha = gitTagData[snap.tag]
@@ -569,6 +618,8 @@ function today() {
  * - root：候选树根（默认本仓库；#135 可指向任意候选检出）
  * - baselinePath：基线 JSON（默认本仓库基线；#135 可指向受保护来源）
  * - gitTagData：{ [tag]: sha } 注入（CI 缓存）；缺省自动读 root 的 git
+ * - tagChangelogs：{ [tag]: CHANGELOG 全文 } 注入（无 .git 候选树）；
+ *   缺省且 root 自带 .git 时按基线固化 tag 自动 git show 取快照
  * - now：期限校验时点（YYYY-MM-DD；缺省今天）
  * - reportPath：写入 JSON 报告的稳定路径
  * - skip：跳过的分项（如 'guide'）——仅限显式声明，报告记 skip
@@ -604,10 +655,19 @@ export async function runStyleContractCheck(opts = {}) {
 
   // 1. 发布记录三源交叉
   const gitTagData = opts.gitTagData !== undefined ? opts.gitTagData : readGitTags(root)
+  const tagChangelogs = opts.tagChangelogs !== undefined
+    ? opts.tagChangelogs
+    : existsSync(path.join(root, '.git'))
+      ? Object.fromEntries(
+          Object.values(baseline.releases)
+            .map((snap) => [snap.tag, readTagChangelog(root, snap.tag)])
+            .filter(([, md]) => md !== null),
+        )
+      : null
   let releaseAssembly = { trusted: {}, failures: [], warnings: [] }
   await mark('release-records', () => {
     const changelogMd = readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8')
-    releaseAssembly = assembleTrustedReleases(baseline, changelogMd, gitTagData)
+    releaseAssembly = assembleTrustedReleases(baseline, changelogMd, gitTagData, tagChangelogs)
     return releaseAssembly
   })
   checks.push({

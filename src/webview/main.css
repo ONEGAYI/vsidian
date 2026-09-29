@@ -601,12 +601,12 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   display: block;
 }
 
-/* #158 右端组推右：margin-left:auto 由双态视图切换按钮持有，把右端组
-   （双态切换 + 侧栏开关，紧挨）推到主编辑区顶栏右端、与左侧组（设置、
-   快速操作）之间拉出弹性空隙。推右规则只落在右端组首按钮——两个按钮
-   都留 auto 会在二者之间再拉出一段空隙。收起/展开态随主编辑区右边界
-   移动由 flex 布局自然承接 */
-.vsidian-toolbar .vsidian-view-toggle {
+/* #158 右端组推右（#208 起推靠规则由双态切换迁移给刷新按钮）：margin-
+   left:auto 由刷新嵌入资源按钮持有，把右端组（刷新 + 双态切换 + 侧栏
+   开关，紧挨）推到主编辑区顶栏右端、与左侧组（设置、快速操作）之间拉出
+   弹性空隙。推右规则只落在右端组首按钮——多个按钮都留 auto 会在按钮间
+   再拉出空隙。收起/展开态随主编辑区右边界移动由 flex 布局自然承接 */
+.vsidian-toolbar .vsidian-refresh-toggle {
   margin-left: auto;
 }
 
@@ -1548,13 +1548,30 @@ body.vscode-high-contrast #app {
   display: block;
 }
 
-/* ---- #162 正文右键菜单（复制块链接）：自绘浮层挂 body（fixed 定位）。
-   菜单项一律 button（键盘 Tab/Enter/空格可达）；无级联子菜单与 disabled
-   态（复制项恒可用）。颜色跟随 VSCode 菜单变量，与大纲菜单同族视觉语言 */
-.vsidian-block-menu {
+/* ---- #183 大纲菜单内核迁移增补：父项点击展开兜底（open 类，显隐主通道
+   仍是 :hover/:focus-within）与子菜单装配期左翻（大纲面板右置时不再溢出
+   屏幕——翻转判定为内核 submenuSide 纯函数，装配期一次加类） */
+.vsidian-sidebar .vsidian-outline-menu .vsidian-outline-menu-host.vsidian-menu-open .vsidian-outline-menu-submenu {
+  display: block;
+}
+
+.vsidian-sidebar .vsidian-outline-menu .vsidian-outline-menu-submenu.vsidian-menu-flip {
+  left: auto;
+  right: 100%;
+}
+
+/* ---- #183 统一右键菜单（Live 正文全域接管；blockMenu #162 退役并入）：
+   自绘浮层挂 body（fixed 定位）。三簇分组线、级联子菜单（:hover/
+   :focus-within 显隐 + 点击兜底 open 类 + 右缘放不下装配期翻左 flip 类）、
+   图标位（data-icon 驱动 mask；资产未接入时变量未定义——透明渐变回退
+   即留空，资产后补规则即生效）、文字徽标（H1–H6）、勾选态、置灰、
+   danger、提示列（label flex:1 右推——右对齐小字低不透明度，未绑定
+   不占位）。菜单项一律 button（键盘 Tab/Enter/空格可达）；颜色跟随
+   VSCode 菜单变量，与大纲菜单同族视觉语言 */
+.vsidian-context-menu {
   position: fixed;
   z-index: 40;
-  min-width: 160px;
+  min-width: 220px;
   max-width: calc(100vw - 8px);
   box-sizing: border-box;
   padding: 4px;
@@ -1565,16 +1582,34 @@ body.vscode-high-contrast #app {
   color: var(--vscode-menu-foreground, var(--vscode-editor-foreground));
 }
 
-.vsidian-block-menu .vsidian-block-menu-item {
-  display: block;
+/* 菜单容器不画焦点圈（#183 验收反馈）：容器是 tabindex=-1 的程序聚焦落点
+   （键盘导航起点），Chromium 的 :focus-visible 启发式在键盘焦点转移到容器
+   时会画出宿主 focusBorder（偶发黄圈）；键盘可达性由菜单项按钮的焦点态
+   承担，容器自身无交互语义。两类菜单容器同规则 */
+.vsidian-context-menu:focus,
+.vsidian-sidebar .vsidian-outline-menu:focus {
+  outline: none;
+}
+
+.vsidian-context-menu .vsidian-context-menu-host {
+  position: relative; /* 级联子菜单 left:100% 的定位锚 */
+}
+
+.vsidian-context-menu .vsidian-context-menu-separator {
+  margin: 4px 0;
+  border-top: 1px solid var(--vscode-menu-separatorBackground, rgba(128, 128, 128, 0.25));
+}
+
+.vsidian-context-menu .vsidian-context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   width: 100%;
   box-sizing: border-box;
   padding: 4px 10px;
   font-size: var(--vscode-font-size, 13px);
   line-height: 18px;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   text-align: left;
   cursor: pointer;
   background: transparent;
@@ -1583,11 +1618,190 @@ body.vscode-high-contrast #app {
   color: inherit;
 }
 
-.vsidian-block-menu .vsidian-block-menu-item:hover,
-.vsidian-block-menu .vsidian-block-menu-item:focus-visible {
+.vsidian-context-menu .vsidian-context-menu-item .vsidian-context-menu-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vsidian-context-menu .vsidian-context-menu-item:not(:disabled):hover {
   background: var(--vscode-menu-selectionBackground, rgba(9, 71, 113, 0.55));
   color: var(--vscode-menu-selectionForeground, inherit);
   outline: none;
+}
+
+.vsidian-context-menu .vsidian-context-menu-item:not(:disabled):focus-visible {
+  background: var(--vscode-menu-selectionBackground, rgba(9, 71, 113, 0.55));
+  color: var(--vscode-menu-selectionForeground, inherit);
+  outline: none;
+}
+
+.vsidian-context-menu .vsidian-context-menu-item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* 破坏性命令红字：danger 类是唯一差异来源（与大纲菜单同族） */
+.vsidian-context-menu .vsidian-context-menu-danger {
+  color: var(--vscode-errorForeground, #f48771);
+}
+
+/* 图标位：mask 驱动（随 currentColor 前景与明暗主题）。资产未接入时
+   --vsidian-context-icon 未定义——透明渐变回退使 mask 全透（留空占位，
+   不画实心块）；#184 资产票按 [data-icon='key'] 逐 key 定义变量即生效 */
+.vsidian-context-menu .vsidian-context-menu-icon {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  background-color: currentColor;
+  mask-image: var(--vsidian-context-icon, linear-gradient(transparent, transparent));
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+}
+
+/* #184 图标接线（26 枚 = 16 复用快速操作资产 + 10 新生成）：菜单挂 body
+   （不在 #app 内），规则不带 #app 前缀；两套资源与快速操作条同一 18px
+   画布资产族，mask 跟随前景色。备用 4 key（pastePlain/media/footnote/
+   callout）资产在场但菜单不引用——规格「扩展约定」显式记账，两表同步
+   由 test/unit/contextMenu.test.ts 钉住。 */
+.vsidian-context-menu [data-icon='link'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-link.svg'); }
+.vsidian-context-menu [data-icon='externalLink'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-externalLink.svg'); }
+.vsidian-context-menu [data-icon='textFormat'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-textFormat.svg'); }
+.vsidian-context-menu [data-icon='paragraphStyle'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-paragraphStyle.svg'); }
+.vsidian-context-menu [data-icon='insertPlus'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-insertPlus.svg'); }
+.vsidian-context-menu [data-icon='normalText'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-normalText.svg'); }
+.vsidian-context-menu [data-icon='cut'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-cut.svg'); }
+.vsidian-context-menu [data-icon='copy'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-copy.svg'); }
+.vsidian-context-menu [data-icon='paste'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-paste.svg'); }
+.vsidian-context-menu [data-icon='selectAll'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-selectAll.svg'); }
+.vsidian-context-menu [data-icon='comment'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-comment.svg'); }
+.vsidian-context-menu [data-icon='bold'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-bold.svg'); }
+.vsidian-context-menu [data-icon='italic'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-italic.svg'); }
+.vsidian-context-menu [data-icon='strikethrough'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-strikethrough.svg'); }
+.vsidian-context-menu [data-icon='highlight'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-highlight.svg'); }
+.vsidian-context-menu [data-icon='inlineCode'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-inlineCode.svg'); }
+.vsidian-context-menu [data-icon='inlineMath'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-inlineMath.svg'); }
+.vsidian-context-menu [data-icon='clearInline'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-clearInline.svg'); }
+.vsidian-context-menu [data-icon='bulletList'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-bulletList.svg'); }
+.vsidian-context-menu [data-icon='orderedList'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-orderedList.svg'); }
+.vsidian-context-menu [data-icon='taskList'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-taskList.svg'); }
+.vsidian-context-menu [data-icon='quote'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-quote.svg'); }
+.vsidian-context-menu [data-icon='table'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-table.svg'); }
+.vsidian-context-menu [data-icon='horizontalRule'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-horizontalRule.svg'); }
+.vsidian-context-menu [data-icon='codeBlock'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-codeBlock.svg'); }
+.vsidian-context-menu [data-icon='blockMath'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-blockMath.svg'); }
+
+body.vscode-dark .vsidian-context-menu [data-icon='link'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='link'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-link.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='externalLink'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='externalLink'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-externalLink.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='textFormat'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='textFormat'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-textFormat.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='paragraphStyle'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='paragraphStyle'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-paragraphStyle.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='insertPlus'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='insertPlus'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-insertPlus.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='normalText'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='normalText'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-normalText.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='cut'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='cut'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-cut.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='copy'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='copy'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-copy.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='paste'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='paste'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-paste.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='selectAll'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='selectAll'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-selectAll.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='comment'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='comment'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-comment.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='bold'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='bold'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-bold.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='italic'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='italic'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-italic.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='strikethrough'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='strikethrough'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-strikethrough.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='highlight'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='highlight'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-highlight.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='inlineCode'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='inlineCode'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-inlineCode.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='inlineMath'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='inlineMath'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-inlineMath.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='clearInline'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='clearInline'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-clearInline.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='bulletList'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='bulletList'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-bulletList.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='orderedList'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='orderedList'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-orderedList.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='taskList'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='taskList'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-taskList.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='quote'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='quote'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-quote.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='table'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='table'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-table.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='horizontalRule'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='horizontalRule'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-horizontalRule.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='codeBlock'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='codeBlock'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-codeBlock.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='blockMath'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-blockMath.svg'); }
+
+/* 文字徽标（H1–H6）：语言无关的字面，弱化一档与文案区分 */
+.vsidian-context-menu .vsidian-context-menu-badge {
+  flex: 0 0 auto;
+  min-width: 16px;
+  text-align: center;
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+/* 勾选指示（✓ 槽） */
+.vsidian-context-menu .vsidian-context-menu-check {
+  flex: 0 0 auto;
+}
+
+/* 快捷键提示列：右对齐、小字号 + 降低不透明度，不与菜单项文字抢戏；
+   未绑定项 DOM 不发射该槽（不占位） */
+.vsidian-context-menu .vsidian-context-menu-hint {
+  flex: 0 0 auto;
+  font-size: 11px;
+  opacity: 0.65;
+}
+
+/* 子菜单指示箭头（▸） */
+.vsidian-context-menu .vsidian-context-menu-cue {
+  flex: 0 0 auto;
+  opacity: 0.7;
+}
+
+/* 级联子菜单：默认隐藏，父项宿主 hover/focus-within 展开（显隐主开关）；
+   open 类为父项点击兜底通道；flip 类在装配期右缘放不下时翻到左侧；
+   max-width 与主菜单同款钳制——极窄视口下两侧都放不下时至少不被裁切
+   （review-loops 修复：此前仅 min-width，<约 400px 视口必溢出） */
+.vsidian-context-menu .vsidian-context-menu-submenu {
+  display: none;
+  position: absolute;
+  left: 100%;
+  top: -5px; /* 对齐父项宿主的菜单容器 padding（4px）+1px 边框 */
+  min-width: 170px;
+  max-width: calc(100vw - 8px);
+  box-sizing: border-box;
+  padding: 4px;
+  background: var(--vscode-menu-background, rgba(37, 37, 38, 0.98));
+  border: 1px solid var(--vscode-menu-border, rgba(128, 128, 128, 0.4));
+  border-radius: 5px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+}
+
+.vsidian-context-menu .vsidian-context-menu-host:hover .vsidian-context-menu-submenu,
+.vsidian-context-menu .vsidian-context-menu-host:focus-within .vsidian-context-menu-submenu,
+.vsidian-context-menu .vsidian-context-menu-host.vsidian-menu-open .vsidian-context-menu-submenu {
+  display: block;
+}
+
+.vsidian-context-menu .vsidian-context-menu-submenu.vsidian-menu-flip {
+  left: auto;
+  right: 100%;
 }
 
 /* 重命名行内编辑态：条目内容区被 input 替换（原文可含行内标记）。
@@ -2099,16 +2313,30 @@ body.vscode-high-contrast #app {
    圆角由头部承担）。行级类只做背景/圆角着色，不改变行高（#8 约束沿用）。 */
 #app .cm-editor .cm-scroller .cm-line.vsidian-code-card-line {
   background-color: var(--vsidian-code-card-background, rgba(128, 128, 128, 0.12));
+  /* #191 悬挂缩进修复折行窜行：续行退到内容盒左缘（x=0）窜入卡内行号区
+     ——padding-left 把内容盒推到文本列、text-indent 负值把首行拉回行盒
+     左缘。首行完全原位（行号 x=0、文本列不变，#189 决议不被破坏），
+     续行对齐文本列。变量按块注入（行号关闭/无内容行为 0px，两式无操作） */
+  padding-left: var(--vsidian-code-indent, 0px);
+  text-indent: calc(-1 * var(--vsidian-code-indent, 0px));
 }
 
 #app .cm-editor .cm-scroller .cm-line.vsidian-code-card-line.vsidian-code-card-edge-top {
   border-top-left-radius: 6px;
   border-top-right-radius: 6px;
+  /* #189 围栏行左内边距：编辑态围栏符号与代码文本列（行号列宽 + 24px）
+     同 x 真实对齐；值按块注入（--vsidian-code-indent），行号关闭时为 0。
+     #191 text-indent: 0 覆盖通用悬挂缩进——围栏行无行号 widget，保持
+     对齐缩进而无悬挂（符号从缩进列起笔，不从 x=0） */
+  padding-left: var(--vsidian-code-indent, 0px);
+  text-indent: 0;
 }
 
 #app .cm-editor .cm-scroller .cm-line.vsidian-code-card-line.vsidian-code-card-edge-bottom {
   border-bottom-left-radius: 6px;
   border-bottom-right-radius: 6px;
+  padding-left: var(--vsidian-code-indent, 0px);
+  text-indent: 0;
 }
 
 #app .vsidian-code-card-header {
@@ -2122,6 +2350,8 @@ body.vscode-high-contrast #app {
   border-radius: 6px 6px 0 0;
   border-bottom: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.35));
   color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.9));
+  /* #190 整条折叠热区：横带整体可点击切换折叠的视觉暗示（按钮仍各自 cursor:pointer） */
+  cursor: pointer;
   user-select: none;
 }
 
@@ -2137,12 +2367,15 @@ body.vscode-high-contrast #app {
 }
 
 /* 卡内行号（#80）：代码行行首右对齐数字，颜色与文档行号槽同源；与文档
-   行号槽两列并存（读图结论），user-select:none 且点击穿透编辑器 */
+   行号槽两列并存（读图结论），user-select:none 且点击穿透编辑器。
+   边距 8+16 重分配（2026-09-28 验收调整）：总占恒为列宽 + 24px——左缘
+   8px 离卡片边、数字与代码 16px；代码列 x 与悬挂缩进基准不受影响 */
 #app .vsidian-code-card-linenumber {
   display: inline-block;
   min-width: 2ch;
   text-align: right;
-  margin-right: 24px;
+  margin-left: 8px;
+  margin-right: 16px;
   color: var(--vscode-editorLineNumber-foreground, rgba(128, 128, 128, 0.8));
   user-select: none;
 }
@@ -2169,7 +2402,19 @@ body.vscode-high-contrast #app {
 }
 
 #app .vsidian-code-card-header:hover .vsidian-code-card-copy,
-#app .vsidian-code-card-header .vsidian-code-card-copy:focus-visible {
+#app .vsidian-code-card-header:hover .vsidian-code-card-wrap,
+#app .vsidian-code-card-header .vsidian-code-card-copy:focus-visible,
+#app .vsidian-code-card-header .vsidian-code-card-wrap:focus-visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* #190 整卡悬停恒显（live）：头部 block widget 与卡片行是 .cm-content 下
+   兄弟节点、无公共 DOM 祖先，纯 CSS :hover 不可达——liveCodeCard 的 JS
+   指针追踪（mouseover 反查头部）给头部挂 reveal 类（内部交互态类，不入
+   公开样式契约）；header:hover 与 :focus-visible 显现规则保留 */
+#app .vsidian-code-card-header.vsidian-code-card-reveal .vsidian-code-card-copy,
+#app .vsidian-code-card-header.vsidian-code-card-reveal .vsidian-code-card-wrap {
   opacity: 1;
   visibility: visible;
 }
@@ -2232,6 +2477,42 @@ body.vscode-high-contrast #app {
 #app .vsidian-code-card-header:has(> .vsidian-code-card-header-actions > .vsidian-code-card-fold-collapsed) {
   border-radius: 6px;
   border-bottom-color: transparent;
+}
+
+/* 折行开关（#191）：仅阅读侧头部装配（Live 恒折行——CM6 折行是编辑器级
+   facet 无法按块关，不放此钮）；点击全文联动开/关自动折行。显隐与复制钮
+   同口径（#190 决议：折叠钮常驻、其余进卡即显）——默认隐藏，三处显现
+   组（header hover/focus、live reveal、阅读块容器 hover）命中的选择器组
+   见下方显现规则（word-wrap 图标：三条横线第三条收短 + 右端折返箭头） */
+#app .vsidian-code-card-header .vsidian-code-card-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  box-sizing: border-box;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.9));
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s ease;
+}
+
+#app .vsidian-code-card-header .vsidian-code-card-wrap:hover,
+#app .vsidian-code-card-header .vsidian-code-card-wrap:focus-visible {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.16));
+}
+
+/* -off 修饰：折行已关闭（当前横向滚动），经 filter 弱化与关闭态区分（title
+   提示将触发的动作「开启自动折行」）；opacity/visibility 归显隐体系独占，
+   filter 与之正交——显现态仍保持弱化（若改用 opacity 会与显隐规则互相
+   覆盖，显现值被特异性更高的显现组压回 1，弱化失效） */
+#app .vsidian-code-card-header .vsidian-code-card-wrap-off {
+  filter: opacity(0.4);
 }
 
 /* 行内格式 span（mark 按各自范围显形；类名为稳定样式入口，Obsidian 对应
@@ -2383,6 +2664,14 @@ body.vscode-high-contrast #app {
 #app .cm-editor .cm-scroller .vsidian-image img {
   display: block;
   max-width: 100%;
+}
+
+/* 独立成行图片（live SVG 塌缩修复）：整行仅一张图时容器取块级布局，为
+   无固有尺寸的图源给出确定宽度基准——viewBox-only 百分比宽 SVG（mermaid
+   导出形态）在 inline-block shrink-to-fit 下解析为 0×0（img 实际加载成功，
+   故静默无反馈）；有固有尺寸的图源不受影响（块级下仍按自然宽度呈现） */
+#app .cm-editor .cm-scroller .vsidian-image.vsidian-image-block {
+  display: block;
 }
 
 /* 占位（loading）：alt 文本形态，弱化呈现 */
@@ -2728,15 +3017,19 @@ body.vscode-high-contrast #app {
   max-width: var(--vsidian-reading-max-width);
 }
 
-#app .vsidian-view-reading .vsidian-reading-heading-1 { font-size: 1.55em; font-weight: 600; margin: 0.6em 0 0.4em; color: var(--vsidian-heading-color-1); }
-#app .vsidian-view-reading .vsidian-reading-heading-2 { font-size: 1.35em; font-weight: 600; margin: 0.6em 0 0.4em; color: var(--vsidian-heading-color-2); }
-#app .vsidian-view-reading .vsidian-reading-heading-3 { font-size: 1.2em; font-weight: 600; margin: 0.6em 0 0.4em; color: var(--vsidian-heading-color-3); }
-#app .vsidian-view-reading .vsidian-reading-heading-4 { font-size: 1.1em; font-weight: 600; margin: 0.6em 0 0.4em; color: var(--vsidian-heading-color-4); }
-#app .vsidian-view-reading .vsidian-reading-heading-5 { font-size: 1em; font-weight: 600; margin: 0.6em 0 0.4em; color: var(--vsidian-heading-color-5); }
-#app .vsidian-view-reading .vsidian-reading-heading-6 { font-size: 1em; font-weight: 600; margin: 0.6em 0 0.4em; color: var(--vsidian-heading-color-6); }
+#app .vsidian-view-reading .vsidian-reading-heading-1 { font-size: 1.55em; font-weight: 600; margin-block: 0.6em 0.4em; color: var(--vsidian-heading-color-1); }
+#app .vsidian-view-reading .vsidian-reading-heading-2 { font-size: 1.35em; font-weight: 600; margin-block: 0.6em 0.4em; color: var(--vsidian-heading-color-2); }
+#app .vsidian-view-reading .vsidian-reading-heading-3 { font-size: 1.2em; font-weight: 600; margin-block: 0.6em 0.4em; color: var(--vsidian-heading-color-3); }
+#app .vsidian-view-reading .vsidian-reading-heading-4 { font-size: 1.1em; font-weight: 600; margin-block: 0.6em 0.4em; color: var(--vsidian-heading-color-4); }
+#app .vsidian-view-reading .vsidian-reading-heading-5 { font-size: 1em; font-weight: 600; margin-block: 0.6em 0.4em; color: var(--vsidian-heading-color-5); }
+#app .vsidian-view-reading .vsidian-reading-heading-6 { font-size: 1em; font-weight: 600; margin-block: 0.6em 0.4em; color: var(--vsidian-heading-color-6); }
 
 /* markdown-it 的语义标题保留在块内；字号与间距由阅读块统一控制，
-   避免浏览器 h1..h6 默认样式再次放大字号和上下留白。 */
+   避免浏览器 h1..h6 默认样式再次放大字号和上下留白。
+   #206：heading-N 装饰类与 .vsidian-reading-block 同挂在块 div 上且源序
+   在后，垂直间距只能走 margin-block——margin 简写（或 margin-left/right）
+   会覆盖限宽档块居中的 auto，使标题贴左而正文居中；此约束由
+   readingHeadingMarginCssContract 契约测试钉住。 */
 #app .vsidian-view-reading .vsidian-reading-block > :is(h1, h2, h3, h4, h5, h6) {
   font-size: inherit;
   font-weight: inherit;
@@ -3282,9 +3575,13 @@ body.vscode-high-contrast #app {
 
 
 /* ---- 代码块语法高亮 token 色板（#83）----
-   tok-* 为 @lezer/highlight classHighlighter 的稳定词表（两视图共用）；
-   取色参照 VSCode Dark+ / Light+，明暗随宿主 body 主题类切换
-   （vscode-dark / vscode-high-contrast 走深色组）。未列出的 tok-* 继承
+   tok-* 以 @lezer/highlight classHighlighter 的稳定词表为基础，函数修饰标签
+   额外叠加 tok-function（两视图共用）；
+   共享色板取自用户提供的 VS Code 明暗主题导出及 Python 逐词检查；函数
+   调用色按用户选择改为与紫色关键词相配的暖黄。已注册语言共用词类配色，
+   不等同 VS Code 语言服务的语义着色。
+   body.vscode-dark 启用深色组；深色高对比主题沿用淡黄函数色并保留原有的
+   关键词独立颜色。未列出的 tok-* 继承
    编辑器前景色（词表全集见 @lezer/highlight 文档）。 */
 .vsidian-code-card-header .vsidian-code-card-header-icon {
   display: inline-block;
@@ -3302,43 +3599,48 @@ body.vscode-high-contrast #app {
    组内靠顺序分层：暗组在后）——用户片段以裸 .tok-* 单类规则书写即可
    按「后加载同特异性胜出」覆盖内置色板（清单条目 tok-tokens 的可覆写
    承诺；此前 #app 前缀 (1,1,0) 会压过用户片段，属核实发现的偏差） */
-.tok-keyword,
-.tok-atom,
-.tok-bool { color: #0000ff; }
-.tok-string,
-.tok-string2 { color: #a31515; }
-.tok-comment,
-.tok-meta { color: #008000; }
+.tok-keyword { color: #af00db; }
+.tok-atom { color: #0550ae; }
+.tok-bool { color: #0550ae; }
+.tok-string { color: #0a3069; }
+.tok-string2 { color: #811f3f; }
+.tok-comment { color: #6e7781; }
+.tok-meta { color: #0550ae; }
 .tok-number { color: #098658; }
 .tok-typeName,
 .tok-className,
 .tok-namespace { color: #267f99; }
-.tok-function,
-.tok-macroName { color: #795e26; }
-.tok-variableName2,
-.tok-propertyName { color: #001080; }
+.tok-macroName { color: #8250df; }
+.tok-variableName2 { color: #0550ae; }
+.tok-propertyName { color: #1f2328; }
+.tok-function { color: #806000; }
 .tok-operator { color: inherit; }
 .tok-punctuation { color: inherit; }
-.tok-invalid { color: #cd3131; text-decoration: underline wavy #cd3131; }
+.tok-invalid { color: #82071e; text-decoration: underline wavy #82071e; }
 
-:where(body.vscode-dark) .tok-keyword,
-:where(body.vscode-dark) .tok-atom,
-:where(body.vscode-dark) .tok-bool,
-:where(body.vscode-high-contrast) .tok-keyword { color: #569cd6; }
-:where(body.vscode-dark) .tok-string,
-:where(body.vscode-dark) .tok-string2 { color: #ce9178; }
-:where(body.vscode-dark) .tok-comment,
-:where(body.vscode-dark) .tok-meta { color: #6a9955; }
+:where(body.vscode-dark) .tok-keyword { color: #c586c0; }
+:where(body.vscode-dark) .tok-atom { color: #79c0ff; }
+:where(body.vscode-dark) .tok-bool { color: #79c0ff; }
+:where(body.vscode-dark) .tok-string { color: #a5d6ff; }
+:where(body.vscode-dark) .tok-string2 { color: #d16969; }
+:where(body.vscode-dark) .tok-comment { color: #8b949e; }
+:where(body.vscode-dark) .tok-meta { color: #79c0ff; }
 :where(body.vscode-dark) .tok-number { color: #b5cea8; }
 :where(body.vscode-dark) .tok-typeName,
 :where(body.vscode-dark) .tok-className,
 :where(body.vscode-dark) .tok-namespace { color: #4ec9b0; }
-:where(body.vscode-dark) .tok-function,
-:where(body.vscode-dark) .tok-macroName { color: #dcdcaa; }
-:where(body.vscode-dark) .tok-variableName2,
-:where(body.vscode-dark) .tok-propertyName { color: #9cdcfe; }
+:where(body.vscode-dark) .tok-macroName { color: #d2a8ff; }
+:where(body.vscode-dark) .tok-variableName2 { color: #79c0ff; }
+:where(body.vscode-dark) .tok-propertyName { color: #c9d1d9; }
+:where(body.vscode-dark) .tok-function { color: #dcdcaa; }
 :where(body.vscode-dark) .tok-operator { color: #d4d4d4; }
-:where(body.vscode-dark) .tok-invalid { color: #f44747; text-decoration-color: #f44747; }
+:where(body.vscode-dark) .tok-invalid { color: #ffa198; text-decoration-color: #ffa198; }
+:where(body.vscode-high-contrast) .tok-keyword { color: #569cd6; }
+/* HC 覆盖限定深色组合（评审 A-2）：HC 浅色（vscode-light + vscode-high-
+   contrast，VS Code 1.77+ Default High Contrast Light）回落浅色组
+   #806000——不分深浅时白底取深色淡黄 #dcdcaa 难辨；keyword 行为既有
+   （旧版即不分深浅），仅修正本批新增的函数色行 */
+:where(body.vscode-dark.vscode-high-contrast) .tok-function { color: #dcdcaa; }
 
 /* ---- 阅读视图代码块卡片（#84）----
    与 Live 同类名（头部/行号/复制/折叠/徽标/tok 走上文泛化规则）；此处
@@ -3357,9 +3659,55 @@ body.vscode-high-contrast #app {
 #app .vsidian-view-reading .vsidian-reading-block.vsidian-reading-code-card .vsidian-reading-code-line {
   display: block;
   min-height: 1.5em;
+  /* #191 悬挂缩进修复折行窜行（与 live 同式）：行内联注入
+     --vsidian-code-indent（值 = 行号列宽 + 24px，行号开启时注入；关闭回
+     落 0px 两式无操作）——首行完全原位，续行对齐文本列不入行号区 */
+  padding-left: var(--vsidian-code-indent, 0px);
+  text-indent: calc(-1 * var(--vsidian-code-indent, 0px));
+}
+
+/* ---- #191 阅读关闭折行：容器级状态类（挂在阅读容器上，仅关闭时添加；
+   内部交互态类，不入公开样式契约）——pre 横向滚动、行号列 sticky 钉左、
+   头部横带不受滚动影响（在 pre 外）。大围栏 60 行分片各有独立 pre，
+   滚动条按片出现（不做跨片聚合）。---- */
+#app .vsidian-view-reading.vsidian-reading-nowrap .vsidian-reading-block.vsidian-reading-code-card > pre {
+  white-space: pre;
+  overflow-x: auto;
+}
+
+/* 行盒随内容延展：sticky 行号才有全行吸附范围（行盒宽度默认只有 pre 视
+   口宽，长行文本溢出不扩盒，行号会被推出吸附矩形）；min-width: 100% 保
+   证短行行盒至少占满 pre 视口（行号始终贴左缘） */
+#app .vsidian-view-reading.vsidian-reading-nowrap .vsidian-reading-block.vsidian-reading-code-card .vsidian-reading-code-line {
+  width: max-content;
+  min-width: 100%;
+}
+
+/* sticky 行号：钉在滚动视口左缘不随横向滚动滑走。遮罩背景两层合成——
+   上层卡片底色（可半透明的 --vsidian-code-card-background），下层不透
+   明编辑器底色（body 背景同源，真实主题中恒不透明），合成结果不透明，
+   遮住横向滑过的文本；基态的 8+16 边距整体收进 padding（margin 在盒外
+   遮不住内容；左缘 8px 同入遮罩，盒总占恒为列宽 + 24px） */
+#app .vsidian-view-reading.vsidian-reading-nowrap .vsidian-reading-block.vsidian-reading-code-card .vsidian-code-card-linenumber {
+  position: sticky;
+  left: 0;
+  margin-left: 0;
+  margin-right: 0;
+  padding-left: 8px;
+  padding-right: 16px;
+  background-image: linear-gradient(var(--vsidian-code-card-background, rgba(128, 128, 128, 0.12)), var(--vsidian-code-card-background, rgba(128, 128, 128, 0.12)));
+  background-color: var(--vscode-editor-background, #1e1e1e);
 }
 
 /* 收起态：代码体隐藏，仅留头部横带（视图态，不持久化） */
 #app .vsidian-view-reading .vsidian-reading-block.vsidian-code-card-folded > pre {
   display: none;
+}
+
+/* #190 整卡悬停恒显（阅读）：头部与代码同在块容器内，纯 CSS 可达——
+   块容器 :hover 下显现复制/折行钮（折叠钮常驻不受影响） */
+#app .vsidian-view-reading .vsidian-reading-block.vsidian-reading-code-card:hover .vsidian-code-card-copy,
+#app .vsidian-view-reading .vsidian-reading-block.vsidian-reading-code-card:hover .vsidian-code-card-wrap {
+  opacity: 1;
+  visibility: visible;
 }

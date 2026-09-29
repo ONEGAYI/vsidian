@@ -2,13 +2,18 @@
 // 用户决策：成型态不暴露源码——卡片只读，编辑收敛到修改按钮的 Popover）。
 //
 // 机制（transactionFilter 硬拦 + updateListener 兜底，两级等价）：
-// - transactionFilter：纯选区事务的主锚/拖尾落入成型头区（model.from ≤
-//   pos ≤ closeTo）时改写选区到 body 起点（闭合行之后的第一个正文位置）
-//   ——鼠标点击被替换呈现的围栏行、方向键向上走出正文、点击表格行，
-//   都在这里被一次性弹回头区外
+// - transactionFilter：纯选区事务的主锚与拖尾**都**落入成型头区
+//   （model.from ≤ pos ≤ closeTo）时改写选区到 body 起点（闭合行之后的
+//   第一个正文位置）——鼠标点击被替换呈现的围栏行、方向键向上走出正文、
+//   点击表格行，都在这里被一次性弹回头区外
+// - 「两端都在」口径（#183 修订，原为任一端）：全选/跨头区拖选（一端在
+//   头区、一端在正文）放行——全选必须产生全文选区（剪切/复制全部的语义
+//   前提，Ctrl+A 同受益），跨区选区的高亮落在呈现层（卡片行）不暴露源码
+//   编辑入口；完全落入头区的选区（双击选词、头区内拖选）仍被引导
 // - updateListener 兜底：初始选区（文档装载默认 0，恰在头区内）、带
 //   变更事务（undo 恢复的选区、外部同步映射）落回头区时补一次纯选区
-//   事务弹出——纯选区事务零写回零 dirty，不进撤销栈
+//   事务弹出——纯选区事务零写回零 dirty，不进撤销栈（同「两端都在」
+//   口径，跨区选区不弹）
 // - 豁免面：外部同步事务（externalSync，选区随映射语义不走引导）、
 //   undo/redo（filter 豁免、兜底接管）、带变更的用户事务（filter 不
 //   干涉其变更，选区由兜底判断——Popover 派发的头区写回不带选区，
@@ -44,13 +49,14 @@ function bodyStartOf(doc: Text, closeTo: number): number {
   return doc.sliceString(closeTo, closeTo + 1) === '\n' ? closeTo + 1 : closeTo
 }
 
-/** 主选区任一端落入成型头区时，收敛为 body 起点单光标（已在目标则返回
- *  null 放行，防自环） */
+/** 主选区两端都落入成型头区时，收敛为 body 起点单光标（已在目标则返回
+ *  null 放行，防自环）。跨头区选区（一端头区一端正文，含全选）放行——
+ *  见模块头「两端都在」口径 */
 function escapeSelection(tr: Transaction): TransactionSpec | null {
   const model = modelOf(tr.startState)
   if (!model) return null
   const main = tr.selection!.main
-  if (!inFmRange(model, main.anchor) && !inFmRange(model, main.head)) return null
+  if (!inFmRange(model, main.anchor) || !inFmRange(model, main.head)) return null
   const target = bodyStartOf(tr.startState.doc, model.closeTo)
   if (main.anchor === target && main.head === target) return null
   return { selection: EditorSelection.cursor(target) }
@@ -73,7 +79,9 @@ export const frontmatterEditing: Extension = [
     const model = modelOf(u.state)
     if (!model) return
     const main = u.state.selection.main
-    if (!inFmRange(model, main.anchor) && !inFmRange(model, main.head)) return
+    // 兜底同「两端都在」口径：跨头区选区（含全选）不弹（filter 已放行，
+    // 兜底再弹会与显式全选意图打架）
+    if (!inFmRange(model, main.anchor) || !inFmRange(model, main.head)) return
     // update 途中禁止再 dispatch（CM6 update-in-progress 约束）：推迟到
     // 微任务重读最新状态——选区可能已被后续事务移出头区
     queueMicrotask(() => {
