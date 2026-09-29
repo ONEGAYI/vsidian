@@ -401,6 +401,15 @@ export function mermaidDarkTheme(): boolean {
   return dark
 }
 
+/** #208 懒加载失败终态重置（手动刷新通道）：重新允许注入尝试。终态原本
+ *  的理由是「资源 URI 固定，重注入无意义」；手动刷新代表用户显式重试
+ *  意志（且刷新语义假定环境可能已恢复）。已降级容器不在此主动重画——
+ *  新的 pending 容器（滚动入视口）与 error 容器的既有重渲染入口（换语言/
+ *  主题联动）在终态重置后自然恢复注入路径 */
+export function resetMermaidLoadFailure(): void {
+  loadFailed = false
+}
+
 // ---- 测试钩子（仅单测注入 mock 与重置状态用，生产不消费） ----
 
 export function __setMermaidApiForTest(mock: MermaidApi | null): void {

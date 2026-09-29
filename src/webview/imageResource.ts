@@ -176,6 +176,37 @@ export class ImageResourceManager {
     }
   }
 
+  /**
+   * #208 全量失效重挂（手动刷新通道）：清空解析条目后对当前活跃槽位
+   * 逐一重挂——先全部 detach（释放旧图位图、解绑监听）再统一 attach 重走
+   * 解析。两段式的必要性：逐对处理时，同 src 后续槽位 detach 的条目回收
+   * （按 rawSrc 键）会误删前一对刚重建的新在途条目，导致重复请求。非直连
+   * 图源发新 reqId（宿主缓存已清、新 URI 带新代次戳），直连图源原 src
+   * 重新应用（不经宿主，无代次语义）；复用 error 态重试的 detach→attach
+   * 生命周期，不新造渲染路径。失效前在途请求的迟到结果因条目已重建而按
+   * 未知 reqId 丢弃；同 src 多槽位时首个重挂建立新在途条目，其余复用
+   * （与初次装载同一去重路径）。
+   */
+  invalidateAll(): void {
+    this.entries.clear()
+    const reattach: Array<{
+      slot: HTMLElement
+      rawSrc: string
+      render?: (slot: HTMLElement, src: string) => HTMLImageElement
+    }> = []
+    for (const slot of [...this.slots.keys()]) {
+      const record = this.slots.get(slot)
+      if (!record) {
+        continue
+      }
+      reattach.push({ slot, rawSrc: record.rawSrc, render: record.render })
+      this.detach(slot)
+    }
+    for (const item of reattach) {
+      this.attach(item.slot, item.rawSrc, item.render)
+    }
+  }
+
   /** 宿主 image.result 路由（协议层已校验的消息体） */
   handleResult(msg: ImageResultPayload): void {
     let matched: ImageEntry | undefined

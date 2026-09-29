@@ -22,6 +22,7 @@ import {
   mermaidRenderStats,
   renderMermaidIn,
   renderMermaidInto,
+  resetMermaidLoadFailure,
   setMermaidDarkTheme,
   type MermaidApi,
 } from '../../src/webview/mermaidRender'
@@ -355,6 +356,31 @@ describe('懒加载：URI 注入链路', () => {
       expect(
         document.head.querySelectorAll('script[src="https://res.invalid/mermaid.js"]'),
       ).toHaveLength(1)
+    } finally {
+      delete (globalThis as Record<string, unknown>)['__vsidianMermaidUri']
+    }
+  })
+
+  it('#208 终态重置后重新允许懒加载注入（手动刷新通道）', async () => {
+    ;(globalThis as Record<string, unknown>)['__vsidianMermaidUri'] = 'https://res.invalid/mermaid.js'
+    try {
+      // 构造失败终态：注入 → onerror
+      const first = ensureMermaidApi()
+      await settle(2)
+      const script = document.head.querySelector<HTMLScriptElement>(
+        'script[src="https://res.invalid/mermaid.js"]')
+      expect(script).not.toBeNull()
+      script!.onerror?.(new Event('error') as ErrorEvent)
+      expect(await first).toBeNull()
+      // 终态下不重复注入（既有 D-5 契约）
+      expect(await ensureMermaidApi()).toBeNull()
+      // 重置终态：重新允许懒加载——注入第二个 script 并产出 pending 承诺
+      resetMermaidLoadFailure()
+      void ensureMermaidApi()
+      await settle(2)
+      expect(
+        document.head.querySelectorAll('script[src="https://res.invalid/mermaid.js"]'),
+      ).toHaveLength(2)
     } finally {
       delete (globalThis as Record<string, unknown>)['__vsidianMermaidUri']
     }

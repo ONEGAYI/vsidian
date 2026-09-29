@@ -102,7 +102,7 @@ import { liveBlockId } from './liveBlockId'
 // #163 验收反馈：跳转目标高亮（view.locate 通道；半透黄经变量暴露，
 // 用户任意操作后消失）
 import { anchorFlash, anchorFlashClear, anchorFlashRangeOf, anchorFlashSet } from './anchorFlash'
-import { setMermaidDarkTheme } from './mermaidRender'
+import { resetMermaidLoadFailure, setMermaidDarkTheme } from './mermaidRender'
 import {
   closeDiagramPopup,
   DIAGRAM_POPUP_CLASS_NAMES,
@@ -2010,6 +2010,16 @@ export class WebviewSyncController {
       case 'image.result':
         // #10 图片解析结果路由（只读显示通道：暂停态同样可用）
         this.images?.handleResult(message)
+        break
+      case 'refresh.invalidated':
+        // #208 手动刷新失效通知（refresh.request 的应答，宿主已清解析
+        // 缓存并推进代次）：图片条目全量失效重挂——活跃槽位重新走解析
+        // （新 reqId，新 URI 带新代次戳）；Mermaid 懒加载失败终态重置
+        // （重新允许注入）。刷新不触碰文档/撤销栈/视图状态（光标、滚动、
+        // 模式原样保持）；reqId 的陈旧回执防护在发送侧接线时一并引入
+        // （工具栏按钮批次；失效动作本身幂等，迟到回执无害）
+        this.images?.invalidateAll()
+        resetMermaidLoadFailure()
         break
       case 'view.state.request': {
         // 查找观测前同步校验新鲜度（文档变化后微任务可能尚未执行）；
