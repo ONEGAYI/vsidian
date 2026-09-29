@@ -358,7 +358,7 @@ describe('styleContract 迁移完整性（旧映射表全集不丢）', () => {
 
 /** 每类目条目数快照（显式钉住归类：重划/迁移类目必须同步改这里，防静默漂移） */
 const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
-  // content 域（77）
+  // content 域（78）
   'view-container': 2,
   heading: 4,
   'inline-format': 7,
@@ -367,7 +367,7 @@ const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   table: 11,
   'reading-structure': 12,
   'link-image-wikilink': 9,
-  'content-variables': 11,
+  'content-variables': 12,
   'content-limits': 11,
   // chrome 域（63）
   math: 5,

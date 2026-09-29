@@ -9,9 +9,9 @@
 //   确有该字段时才覆盖（无值字段跳过）；
 // - 覆盖值非空字符串；
 // - 反向完整性：中文条目双语字段有值 ⇒ 英文覆盖必有对应键且非空
-//   （140 条全量；不译字段不在锁内）——防未来新增条目/字段漏翻；
-// - content 域 77 条、chrome 域 63 条 id 全量覆盖（#179/#180 域级完整性，
-//   合计 140 条全覆盖）——合并 main（#191/#201/#208/#209 并入）后基线；
+//   （141 条全量；不译字段不在锁内）——防未来新增条目/字段漏翻；
+// - content 域 78 条、chrome 域 63 条 id 全量覆盖（#179/#180 域级完整性，
+//   合计 141 条全覆盖）——合并 main（#191/#201/#208/#209 并入）+ #213 后基线；
 // - 取词纯函数行为：英文语言字段级 merge、非英文语言与覆盖表缺失条目
 //   原样返回、原条目不被改写；
 // - 生成数据模块（styleGuideData.ts，settings.js 渲染数据）携带同源双语。
@@ -88,9 +88,9 @@ describe('英文覆盖一致性契约（#178 机制 + #179 content 域全量 + #
     expect(applyStyleContractEntryOverride(entry, 'en', {})).toBe(entry)
   })
 
-  it('content 域全部 77 条 id 均有英文覆盖（#179 全量交付 + 独行图片布局 + 失败态细分）', () => {
+  it('content 域全部 78 条 id 均有英文覆盖（#179 全量交付 + 独行图片布局 + 失败态细分 + #213 行背景变量）', () => {
     const contentIds = STYLE_CONTRACT_ENTRIES.filter((e) => e.domain === 'content').map((e) => e.id)
-    expect(contentIds.length).toBe(77)
+    expect(contentIds.length).toBe(78)
     for (const id of contentIds) {
       expect(STYLE_CONTRACT_EN_OVERRIDES[id], `content 条目缺英文覆盖：${id}`).toBeDefined()
     }
@@ -104,9 +104,9 @@ describe('英文覆盖一致性契约（#178 机制 + #179 content 域全量 + #
     }
   })
 
-  it('两域合计 140 条全量覆盖，无覆盖表缺口（#179 + #180 收尾 + #191 + #201 + #208/#209 批次）', () => {
-    expect(STYLE_CONTRACT_ENTRIES.length).toBe(140)
-    expect(Object.keys(STYLE_CONTRACT_EN_OVERRIDES).length).toBe(140)
+  it('两域合计 141 条全量覆盖，无覆盖表缺口（#179 + #180 收尾 + #191 + #201 + #208/#209 + #213 批次）', () => {
+    expect(STYLE_CONTRACT_ENTRIES.length).toBe(141)
+    expect(Object.keys(STYLE_CONTRACT_EN_OVERRIDES).length).toBe(141)
     for (const entry of STYLE_CONTRACT_ENTRIES) {
       expect(STYLE_CONTRACT_EN_OVERRIDES[entry.id], `条目缺英文覆盖：${entry.id}`).toBeDefined()
     }
@@ -121,7 +121,7 @@ describe('英文覆盖一致性契约（#178 机制 + #179 content 域全量 + #
     expect(applyStyleContractEntryOverride(entry, 'zh-cn', STYLE_CONTRACT_EN_OVERRIDES)).toBe(entry)
   })
 
-  it('反向完整性：中文条目双语字段有值 ⇒ 英文覆盖必有对应键且非空（140 条全量）', () => {
+  it('反向完整性：中文条目双语字段有值 ⇒ 英文覆盖必有对应键且非空（141 条全量）', () => {
     // 双语字段反向锁（规格字段分级）：purpose/dom 为必填恒锁；states/
     // deprecated/removed 为可选，中文条目确有该字段才锁；example 等不译
     // 字段不在锁内。防未来新增条目/改写字段时英文覆盖漏跟（正向键锁

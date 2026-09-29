@@ -699,6 +699,8 @@ interface ViewState {
       caretDomColumn?: number | null
       caretNativeRectHeight?: number | null
       cellBreakDisplay?: string | null
+      /** #213 数据行/分隔行行级 computed background-color（无表格为 null） */
+      dataRowLineBackground?: string | null
       gridDisplay: string | null
       cellBorderWidth: string | null
       rowOutlineColor: string | null
@@ -4175,6 +4177,21 @@ export const cases: Array<[string, () => Promise<void>]> = [
     }
 
     assert(await readDisk('wikilinks.md') === diskBefore, '歧义/缺失链路不得改写源文档')
+  }],
+
+  ['表格数据行背景透明到编辑器背景，表头保留底色（#213）', async () => {
+    await openWithEditor('table42.md')
+    await waitSessionReady('table42.md')
+    // 绘制层断言：数据行/分隔行行级 computed 背景透明（rgba(0,0,0,0) 即
+    // transparent 的序列化），表头格仍实际着色（--vsidian-table-background）
+    const state = await waitViewState('table42.md', (v) =>
+      v.paint?.table?.dataRowLineBackground != null &&
+      (v.paint.table.headerCellBackgrounds?.length ?? 0) > 0)
+    const table = state.paint!.table!
+    assert(table.dataRowLineBackground === 'rgba(0, 0, 0, 0)',
+      `数据行/分隔行背景须透明到编辑器背景：${table.dataRowLineBackground}`)
+    assert((table.headerCellBackgrounds ?? []).every((color) => color !== 'rgba(0, 0, 0, 0)'),
+      `表头格须保留底色：${JSON.stringify(table.headerCellBackgrounds)}`)
   }],
 
   ['表格行列选中在绘制层显示完整轮廓与高亮（#43）', async () => {

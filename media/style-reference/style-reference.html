@@ -66,7 +66,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 </table>
 
   <section class="domain" data-domain="content">
-    <h1 style="font-size:19px;margin-bottom:4px">正文域（77 条）</h1>
+    <h1 style="font-size:19px;margin-bottom:4px">正文域（78 条）</h1>
 
     <h2>正文域 · 容器与视图（2）</h2>
     <article class="entry" id="container-live">
@@ -852,7 +852,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：单元 anchorFlash：目标区间推导与 StateField set/clear；单元 anchorFlashPanel：定位加类、点击/滚动/blur 消失、程序滚动时间窗不误清；单元 anchorFlashCssContract：两视图规则同引变量、变量定义于 #app；浏览器 anchorFlash：真实 view.locate 后绘制层背景断言与消失交互</p>
       <p class="life">引入：#163 验收反馈（2026-09-28）</p>
     </article>
-    <h2>正文域 · 公开 CSS 变量（11）</h2>
+    <h2>正文域 · 公开 CSS 变量（12）</h2>
     <article class="entry" id="var-anchor-flash-background">
       <h3><code>--vsidian-anchor-flash-background</code><span class="eid">var-anchor-flash-background</span></h3>
       <p class="purpose">跳转目标高亮的半透黄背景色（#163 验收反馈）：用户可覆盖的 CSS 接口，live 行级与 reading 块级两条规则同引（一处定义两视图生效）。默认 rgba(255, 213, 79, 0.25)。</p>
@@ -968,7 +968,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
     <article class="entry" id="var-table-background">
       <h3><code>--vsidian-table-background</code><span class="eid">var-table-background</span></h3>
-      <p class="purpose">live 表格行背景 / 阅读表头背景；默认 rgba(128, 128, 128, 0.05)。</p>
+      <p class="purpose">live 表头格 / 阅读表头（th）/ fm 标题栏底色（#213 起数据行透明，行背景改走 --vsidian-table-row-background）；默认 rgba(128, 128, 128, 0.05)。</p>
       <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-direct">direct</span></p>
 
       <p class="obsidian">Obsidian 对应：--table-background</p>
@@ -977,6 +977,20 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <pre><code>:root { --table-background: rgba(128, 128, 128, 0.1); }</code></pre>
       <p class="verify">验证：obsidianAliasCssContract：变量桥形态</p>
       <p class="life">引入：#12（2026-09-24）</p>
+    </article>
+    <article class="entry" id="var-table-row-background">
+      <h3><code>--vsidian-table-row-background</code><span class="eid">var-table-row-background</span></h3>
+      <p class="purpose">live 表格数据行与分隔行背景；默认 transparent（透明到编辑器背景，向阅读侧 td 对齐）。表头格底色不受本变量影响（仍走 --vsidian-table-background）。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：无（Obsidian 数据行底色由 --table-background 全表默认与 --table-row-alt-background 斑马纹差分承担，无单一数据行变量；--table-background 已桥接给 --vsidian-table-background）</p>
+
+      <p class="dom">DOM 关系：定义于 #app；消费于 .vsidian-table-line 行级规则（表头/分隔/数据行通用，表头行的格级背景覆盖其上）。片段在 #app 层或其后代元素声明即可覆盖——:root/body 声明会被 #app 层定义截断继承。</p>
+      <pre><code>#app {
+  --vsidian-table-row-background: rgba(128, 128, 128, 0.05);
+}</code></pre>
+      <p class="verify">验证：tablePaintCssContract：行级规则接线 + #app 定义唯一 + 表头格/阅读 th 保持共享变量</p>
+      <p class="life">引入：#213（2026-09-29）</p>
     </article>
     <article class="entry" id="var-heading-accent">
       <h3><code>--vsidian-heading-accent（已移除）</code><span class="eid">var-heading-accent</span></h3>

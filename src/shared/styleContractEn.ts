@@ -2,7 +2,7 @@
 // 域全量）：设置页「样式参考」条目文档字段的英文版单一事实源——中文清单
 // （./styleContract）保持权威基准不动，本模块按条目 id 索引、字段级覆盖；
 // 取词规则为**英文优先、条目或字段缺失回退中文基准**（规格
-// docs/specs/style-reference-i18n.md）。140 条（content 77 + chrome 63）
+// docs/specs/style-reference-i18n.md）。141 条（content 78 + chrome 63）
 // 已全量覆盖（域级完整性由 test/unit/styleContractEn.test.ts 钉住）。
 //
 // 字段分级（规格钉死）：
@@ -461,9 +461,18 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
   },
   'var-table-background': {
     purpose:
-      'Background of live table rows / the reading table header; defaults to rgba(128, 128, 128, 0.05).',
+      'Background of the live header cells / the reading table header (th) / the frontmatter card title bar (since #213 data rows are transparent — the row background now uses --vsidian-table-row-background); defaults to rgba(128, 128, 128, 0.05).',
     dom: 'Defined on #app (centrally defined since #132; consumer sites previously carried inline fallbacks); Obsidian alias --table-background.',
     obsidian: { counterpart: '--table-background' },
+  },
+  'var-table-row-background': {
+    purpose:
+      'Background of live table data rows and delimiter rows; defaults to transparent (blending into the editor background, aligned with the reading-side td). Header cell backgrounds are unaffected by this variable (they still use --vsidian-table-background).',
+    dom: 'Defined on #app; consumed by the .vsidian-table-line line-level rule (shared by header/delimiter/data rows — the header cell-level background paints on top of it on header rows). Snippets override it by declaring on #app or any descendant — :root/body declarations are cut off by the #app-level definition.',
+    obsidian: {
+      counterpart:
+        'None (Obsidian derives data-row backgrounds from the table-wide --table-background default plus the --table-row-alt-background zebra stripe — no single data-row variable exists, and --table-background is already bridged to --vsidian-table-background)',
+    },
   },
   'var-heading-accent': {
     purpose:

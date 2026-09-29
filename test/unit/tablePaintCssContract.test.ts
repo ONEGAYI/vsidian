@@ -3,6 +3,7 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { cssRuleExact } from './cssContract'
 
 const css = readFileSync(path.resolve(process.cwd(), 'src/webview/main.css'), 'utf8')
 
@@ -68,5 +69,37 @@ describe('表格网格与选中轮廓 CSS 契约（#42/#43）', () => {
   it('抓手悬停时绘制出来', () => {
     expect(rule('.vsidian-table-controls button.vsidian-table-control-hover'))
       .toMatch(/opacity:\s*1/)
+  })
+})
+
+describe('表格行背景透明契约（#213）', () => {
+  it('数据行/分隔行背景走独立公开变量且默认透明（行级规则不再引共享表底变量）', () => {
+    // 行级规则对表头/分隔/数据行通用；改走 --vsidian-table-row-background 后
+    // 数据行与分隔行透明到编辑器背景（向阅读侧 td 对齐）
+    const line = rule('.vsidian-table-line')
+    expect(line).toMatch(/background-color:\s*var\(--vsidian-table-row-background,\s*transparent\)/)
+    expect(line).not.toMatch(/--vsidian-table-background/)
+  })
+
+  it('行背景变量定义于 #app 层且默认 transparent，全文件定义唯一', () => {
+    // 定义点参考 --vsidian-table-background 的 #app 层模式（无 Obsidian
+    // 单一对应变量，不接别名桥；exact 取 #app 本体避免亮色分支干扰）
+    const app = cssRuleExact(css, '#app')
+    expect(app).toMatch(/--vsidian-table-row-background:\s*transparent;/)
+    const defs = css.match(/--vsidian-table-row-background:\s*[^;]+;/g) ?? []
+    expect(defs).toHaveLength(1)
+  })
+
+  it('表头保留：live 表头格与阅读 th 底色仍走共享变量 --vsidian-table-background', () => {
+    const headerCell = rule(
+      '.vsidian-table-grid-row.vsidian-table-header-line > .vsidian-table-grid-cell',
+      /background:/,
+    )
+    expect(headerCell).toMatch(/background:\s*var\(--vsidian-table-background/)
+    const readingTh = rule('.vsidian-reading-table th')
+    expect(readingTh).toMatch(/background-color:\s*var\(--vsidian-table-background/)
+    // 阅读 td 无背景（透明），阅读侧零改动
+    const readingTd = rule('.vsidian-reading-table td', /font-family/)
+    expect(readingTd).not.toMatch(/background/)
   })
 })
