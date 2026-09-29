@@ -96,6 +96,14 @@ function createStoragePort(): VaultIndexStoragePort {
         return []
       }
     },
+    async listFiles(baseDir: string) {
+      try {
+        const entries = await readdir(realPathOf(baseDir), { withFileTypes: true })
+        return entries.filter((e) => e.isFile()).map((e) => e.name)
+      } catch {
+        return []
+      }
+    },
     async readFile(path: string) {
       return readFile(realPathOf(path), 'utf8')
     },

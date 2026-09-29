@@ -112,6 +112,11 @@ export interface PrevSnapshot {
   dirName: string
   /** 上一代各片号 → 片内容校验和（读 manifest.json 即得）。 */
   shardChecksums: Map<number, string>
+  /** 上一代各片号 → 片实体所在目录（继承片 = 其上游实体目录，自带片 =
+   *  上一代目录）。缺省按 dirName。增量继承必须沿实体位置记录——跨多代
+   *  继承时若恒记上一代目录名，孙代 manifest 会指向没有片实体的目录
+   *  （加载断裂，review-loops #17）。 */
+  shardLocations?: Map<number, string>
 }
 
 export interface PlanSnapshotOptions {
@@ -121,6 +126,8 @@ export interface PlanSnapshotOptions {
   prev?: PrevSnapshot
   /** 写前调用方列出的 baseDir 现存子目录名（决定回收清单）；缺省不产出回收项。 */
   existingDirs?: string[]
+  /** baseDir 直下现存文件名（回收原子写残留的 *.json.tmp-* 文件；缺省不产出）。 */
+  existingFiles?: string[]
   /** 写者随机段（多窗口并发时代目录防撞）；缺省 w000。 */
   writerTag?: string
 }
@@ -270,7 +277,10 @@ function finishCommitPlan(
   for (const shard of planned) {
     const prevChecksum = opts.prev?.shardChecksums.get(shard.index)
     if (prevChecksum !== undefined && prevChecksum === shard.checksum) {
-      shards.push({ i: shard.index, bytes: null, checksum: shard.checksum, inheritedFrom: opts.prev!.dirName })
+      // 继承片：inheritedFrom 记片**实体所在目录**（跨代继承沿用上游位置，
+      // 不恒记上一代目录名——孙代指向无实体目录即断裂）
+      const shardDir = opts.prev?.shardLocations?.get(shard.index) ?? opts.prev!.dirName
+      shards.push({ i: shard.index, bytes: null, checksum: shard.checksum, inheritedFrom: shardDir })
       continue
     }
     writes.push({ path: shard.path, content: shard.content, atomic: true })
@@ -289,11 +299,18 @@ function finishCommitPlan(
   // CURRENT 最后写：此刻新代目录已完整，读者要么看到旧代、要么看到完整新代
   writes.push({ path: `${opts.baseDir}/CURRENT`, content: dirName, atomic: true })
 
+  // 保留集合 = 新 manifest 引用的全部实体目录 + 上一代目录（回收只删
+  // 代际号不高于新代的目录；跨代继承链的祖先实体目录被引用即保留）
+  const keepDirs = new Set<string>(shards.flatMap((s) => (s.inheritedFrom !== null ? [s.inheritedFrom] : [])))
+  if (opts.prev?.dirName) {
+    keepDirs.add(opts.prev.dirName)
+  }
   const obsoleteDirs = planObsoleteDirs({
     baseDir: opts.baseDir,
     newDirName: dirName,
-    inheritSource: opts.prev?.dirName ?? null,
+    keepDirs: [...keepDirs],
     existingDirs: opts.existingDirs ?? [],
+    existingFiles: opts.existingFiles ?? [],
   })
 
   return {
@@ -337,18 +354,39 @@ export async function planSnapshotCommitChunked(
   return finishCommitPlan(model, opts, shardCount, dirName, planned)
 }
 
-/** 回收计划：旧代（代号 ≤ 新代且非继承源）、同代号孤儿、tmp- 残留。 */
-export function planObsoleteDirs(input: { baseDir: string; newDirName: string; inheritSource: string | null; existingDirs: string[] }): string[] {
+/** 代目录名白名单：与 dirName 生成格式（gen-<代号>-<写者段>）一致。
+ *  CURRENT 内容与 manifest 的 inheritedFrom 都是外部可构造载荷，读入后
+ *  必须过白名单再拼路径（防 `..`/分隔符注入逃出 baseDir）。 */
+const GEN_DIR_RE = /^gen-\d+-[0-9a-zA-Z]+$/
+
+/** 原子写临时文件残留形态（writeFile 的 `<target>.tmp-<hex>` 中缀，落在
+ *  baseDir 直下的 *.json 写入残留）；CURRENT.tmp-* 不匹配（不回收）。 */
+const TMP_FILE_RE = /\.json\.tmp-[0-9a-f]+$/
+
+/** 回收计划：旧代（代号 ≤ 新代且不在保留集合）、同代号孤儿、tmp- 残留
+ *  与 baseDir 直下的原子写 tmp 文件。保留集合 = 新 manifest 引用的全部
+ *  实体目录与上一代目录（跨代继承链的祖先实体目录被引用即保留）。 */
+export function planObsoleteDirs(input: {
+  baseDir: string
+  newDirName: string
+  keepDirs: readonly string[]
+  existingDirs: string[]
+  existingFiles?: readonly string[]
+}): string[] {
   const newGen = genNumOf(input.newDirName)
+  const keep = new Set(input.keepDirs)
   const result: string[] = []
   for (const dir of input.existingDirs) {
-    if (dir === input.newDirName || dir === input.inheritSource || dir === 'CURRENT') continue
+    if (dir === input.newDirName || keep.has(dir) || dir === 'CURRENT') continue
     if (dir.startsWith('tmp-')) {
       result.push(dir)
       continue
     }
     const g = genNumOf(dir)
     if (newGen !== null && g !== null && g <= newGen) result.push(dir)
+  }
+  for (const file of input.existingFiles ?? []) {
+    if (TMP_FILE_RE.test(file)) result.push(file)
   }
   return result
 }
@@ -358,13 +396,28 @@ export function planObsoleteDirs(input: { baseDir: string; newDirName: string; i
  * （planObsoleteDirs）同域但**更保守**——尊重其他活跃读者/写者，不删活跃
  * 文件。保留：CURRENT 指向代、其全部继承源（读者按 manifest 回读继承片）
  * 与更高代际目录（可能是并发窗口的在途提交）。回收：严格更旧代、非继承
- * 源孤儿代、tmp- 残留与非法目录名残留。currentDirName 为 null（无
- * CURRENT——无快照或已整体损坏）时全部 gen 目录视为孤儿可回收。
+ * 源孤儿代、tmp- 残留、非法目录名残留与 baseDir 直下原子写 tmp 文件。
+ * currentDirName 为 null（无 CURRENT——无快照或已整体损坏）时**保留最高
+ * 代号目录**（端口无 mtime 能力，按「最高代可能是并发窗口在途提交」保守
+ * 跳过；同高多写者目录全部保留），其余 gen 目录视为孤儿可回收。
  * 健康缓存不按固定天数失效；清理是用户显式操作。
  */
-export function planCleanupDirs(input: { currentDirName: string | null; inheritSources: readonly string[]; existingDirs: readonly string[] }): string[] {
+export function planCleanupDirs(input: {
+  currentDirName: string | null
+  inheritSources: readonly string[]
+  existingDirs: readonly string[]
+  existingFiles?: readonly string[]
+}): string[] {
   const keep = new Set(input.inheritSources)
   const currentGen = input.currentDirName !== null ? genNumOf(input.currentDirName) : null
+  // 无 CURRENT 时的保守基线：gen 目录中的最高代号（在途提交保护）
+  let maxGen: number | null = null
+  if (currentGen === null) {
+    for (const dir of input.existingDirs) {
+      const g = genNumOf(dir)
+      if (g !== null && (maxGen === null || g > maxGen)) maxGen = g
+    }
+  }
   const out: string[] = []
   for (const dir of input.existingDirs) {
     if (dir === input.currentDirName || keep.has(dir) || dir === 'CURRENT') {
@@ -379,9 +432,16 @@ export function planCleanupDirs(input: { currentDirName: string | null; inheritS
       out.push(dir) // 非法目录名残留
       continue
     }
-    if (currentGen === null || g < currentGen) {
+    if (currentGen === null) {
+      if (maxGen === null || g < maxGen) out.push(dir)
+      continue
+    }
+    if (g < currentGen) {
       out.push(dir)
     }
+  }
+  for (const file of input.existingFiles ?? []) {
+    if (TMP_FILE_RE.test(file)) out.push(file)
   }
   return out
 }
@@ -400,6 +460,9 @@ function sanitizeTag(tag: string): string {
 export interface VaultIndexFsPort {
   /** 列出 baseDir 下的直接子目录名（不存在时返回空数组）。 */
   listDirs(baseDir: string): Promise<string[]>
+  /** 列出 baseDir 下的直接文件名（回收原子写 tmp 残留用；可选——实现
+   *  缺省时回收计划不含文件项）。 */
+  listFiles?(baseDir: string): Promise<string[]>
   readFile(path: string): Promise<string>
 }
 
@@ -426,11 +489,13 @@ export interface SnapshotLoadResult {
 export async function loadSnapshot(port: VaultIndexFsPort, baseDir: string): Promise<SnapshotLoadResult | null> {
   let currentDir: string | null = null
   try {
-    currentDir = (await port.readFile(`${baseDir}/CURRENT`)).trim() || null
+    const raw = (await port.readFile(`${baseDir}/CURRENT`)).trim()
+    // CURRENT 是外部可构造载荷：过白名单再作目录名（防 `..`/分隔符注入）
+    currentDir = GEN_DIR_RE.test(raw) ? raw : null
   } catch {
     currentDir = null
   }
-  const dirs = (await port.listDirs(baseDir)).filter((d) => /^gen-\d+/.test(d))
+  const dirs = (await port.listDirs(baseDir)).filter((d) => GEN_DIR_RE.test(d))
   const candidates: string[] = []
   if (currentDir && !candidates.includes(currentDir)) candidates.push(currentDir)
   const sorted = dirs
@@ -466,7 +531,9 @@ async function tryLoadGeneration(port: VaultIndexFsPort, baseDir: string, dirNam
   const files = new Map<string, VaultFileEntry>()
   const edges: VaultEdge[] = []
   for (const shard of manifest.shards) {
+    // inheritedFrom 同为外部可构造载荷：非法目录名按损坏处理（不拼路径）
     const shardDir = shard.inheritedFrom ?? dirName
+    if (!GEN_DIR_RE.test(shardDir)) return null
     const shardPath = `${baseDir}/${shardDir}/shard-${String(shard.i).padStart(3, '0')}.json`
     let content: string
     try {

@@ -465,8 +465,9 @@ export class VaultIndexService {
 
   /**
    * 清理当前工作区索引缓存：按 planCleanupDirs 安全回收各根分区下的旧
-   * 代际与 tmp- 残留——保留 CURRENT 指向代、其继承源与更高代际（并发
-   * 窗口可能在途提交），不删活跃文件；健康缓存不按固定天数失效。
+   * 代际与 tmp- 残留——保留 CURRENT 指向代、其继承链引用的全部实体目录
+   * 与更高代际（并发窗口可能在途提交；无 CURRENT 时保留最高代号目录），
+   * 不删活跃文件；健康缓存不按固定天数失效。
    */
   async cleanupCache(): Promise<{ removedDirs: number }> {
     let removedDirs = 0
@@ -497,10 +498,12 @@ export class VaultIndexService {
         }
       }
       const dirs = await this.storage.listDirs(baseDir)
+      const files = await this.storage.listFiles?.(baseDir) ?? []
       for (const dir of planCleanupDirs({
         currentDirName: currentDir,
         inheritSources: [...inheritSources],
         existingDirs: dirs,
+        ...(files.length > 0 ? { existingFiles: files } : {}),
       })) {
         try {
           await this.storage.removeDir(`${baseDir}/${dir}`)
@@ -858,18 +861,25 @@ export class VaultIndexService {
       return
     }
     const baseDir = this.baseDirOf(state)
-    // prev 的片校验和表：读上一代 manifest（增量提交继承未变片）
-    let prev: { generation: number; dirName: string; shardChecksums: Map<number, string> } | undefined
+    // prev 的片校验和表 + 片实体位置：读上一代 manifest（增量提交继承未变
+    // 片；实体位置沿继承链回溯——孙代继承片仍指祖先目录，不恒记上一代名）
+    let prev: {
+      generation: number
+      dirName: string
+      shardChecksums: Map<number, string>
+      shardLocations: Map<number, string>
+    } | undefined
     if (state.meta) {
       try {
         const manifest = JSON.parse(await this.storage.readFile(`${baseDir}/${state.meta.dirName}/manifest.json`)) as {
           generation: number
-          shards: Array<{ i: number; checksum: string }>
+          shards: Array<{ i: number; checksum: string; inheritedFrom: string | null }>
         }
         prev = {
           generation: manifest.generation,
           dirName: state.meta.dirName,
           shardChecksums: new Map(manifest.shards.map((s) => [s.i, s.checksum])),
+          shardLocations: new Map(manifest.shards.map((s) => [s.i, s.inheritedFrom ?? state.meta!.dirName])),
         }
       } catch {
         prev = undefined // 上一代 manifest 不可读：按全新提交
@@ -878,6 +888,7 @@ export class VaultIndexService {
     const fileCount = state.model.files.size
     const shardCount = ADAPTIVE_SHARDS.find((t) => fileCount <= t.maxFiles)!.shards
     const existingDirs = await this.storage.listDirs(baseDir)
+    const existingFiles = await this.storage.listFiles?.(baseDir) ?? []
     const plan = await planSnapshotCommitChunked(
       state.model,
       {
@@ -885,15 +896,27 @@ export class VaultIndexService {
         shardCount,
         prev,
         existingDirs,
+        ...(existingFiles.length > 0 ? { existingFiles } : {}),
         writerTag: randomWriterTag(),
       },
       () => this.scan.yieldToEventLoop(),
     )
-    // writes 顺序即提交顺序：片 → manifest → CURRENT（唯一提交点）
-    for (const w of plan.writes) {
-      const dir = w.path.slice(0, Math.max(w.path.lastIndexOf('/'), 0))
-      await this.storage.ensureDir(dir)
-      await this.storage.writeFile(w.path, w.content)
+    // writes 顺序即提交顺序：片 → manifest → CURRENT（唯一提交点）。
+    // 写失败仅影响持久化：内存索引与 notify 照常（索引是可重建缓存，
+    // 磁盘快照滞后由下一轮提交兜底），不留 unhandled rejection
+    try {
+      for (const w of plan.writes) {
+        const dir = w.path.slice(0, Math.max(w.path.lastIndexOf('/'), 0))
+        await this.storage.ensureDir(dir)
+        await this.storage.writeFile(w.path, w.content)
+      }
+    } catch (err) {
+      console.warn(
+        `[vsidian] 索引快照写入失败（root=${state.fsPath} gen=${plan.generation}）：` +
+        `${err instanceof Error ? err.message : String(err)}；下一轮提交兜底`,
+      )
+      this.notify()
+      return
     }
     state.meta = {
       formatVersion: plan.formatVersion,
