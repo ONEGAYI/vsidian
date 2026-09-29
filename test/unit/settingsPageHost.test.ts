@@ -130,4 +130,36 @@ describe('设置页异步回信与面板生命周期', () => {
     expect(localeIdx).toBeGreaterThan(snapshotIdx)
     expect(out[localeIdx]).toEqual({ kind: 'locale.changed', lang: 'zh-cn', messages: zhCn })
   })
+
+  it('openWithSection 带 entry（#231）：面板未就绪时挂起，ready 握手补发携带 entry', () => {
+    const fresh = makePanel()
+    vscodeMock.createWebviewPanel.mockReturnValue(fresh.panel)
+    const page = createSettingsPage({ extensionUri: 'extension' } as never,
+      { getSnapshot: () => ({}), apply: () => Promise.resolve({ ok: true as const, values: {} }) } as never,
+      { getSnapshot: () => ({}) } as never)
+    page.open()
+    // ready 之前定位：宿主挂起 pendingSection（openStyleReference 命令行为，
+    // 打开外观并定位「样式参考」页签——entry 用 overview）
+    page.openWithSection('appearance', 'overview')
+    expect(fresh.sent.some((m) => (m as { kind?: string }).kind === 'settings.focusSection')).toBe(false)
+    page.injectMessage({ kind: 'settings.get' })
+    expect(fresh.sent).toContainEqual({ kind: 'settings.focusSection', section: 'appearance', entry: 'overview' })
+  })
+
+  it('openWithSection：ready 后直接发送；不带 entry 时消息不含该字段（向后兼容形态）', () => {
+    const fresh = makePanel()
+    vscodeMock.createWebviewPanel.mockReturnValue(fresh.panel)
+    const page = createSettingsPage({ extensionUri: 'extension' } as never,
+      { getSnapshot: () => ({}), apply: () => Promise.resolve({ ok: true as const, values: {} }) } as never,
+      { getSnapshot: () => ({}) } as never)
+    page.open()
+    page.injectMessage({ kind: 'settings.get' })
+    fresh.sent.length = 0
+    page.openWithSection('appearance', 'overview')
+    expect(fresh.sent).toContainEqual({ kind: 'settings.focusSection', section: 'appearance', entry: 'overview' })
+    page.openWithSection('appearance')
+    expect(fresh.sent).toContainEqual({ kind: 'settings.focusSection', section: 'appearance' })
+    expect(fresh.sent.some((m) => (m as { entry?: unknown }).entry === undefined
+      && (m as { kind?: string }).kind === 'settings.focusSection')).toBe(true)
+  })
 })

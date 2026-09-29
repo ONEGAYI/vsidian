@@ -1807,6 +1807,20 @@ describe('设置消息协议（#33）', () => {
     expect(isWebviewToHost({ ...baseViewState, settings: { bad: null } })).toBe(false)
     expect(isWebviewToHost({ ...baseViewState, settings: 'x' })).toBe(false)
   })
+
+  it('settings.focusSection（#231）：section 必填，entry 可选字符串（缺省向后兼容），非法形态拒绝', () => {
+    // 缺 entry：#132 起的既有形态（向后兼容）
+    expect(isHostToWebview({ kind: 'settings.focusSection', section: 'appearance' })).toBe(true)
+    // 带 entry：#231 起定位外观页内页签（overview / 契约条目 id 等）
+    expect(isHostToWebview({ kind: 'settings.focusSection', section: 'appearance', entry: 'overview' })).toBe(true)
+    expect(isHostToWebview({ kind: 'settings.focusSection', section: 'appearance', entry: 'outline-search-hit' })).toBe(true)
+    expect(isHostToWebview({ kind: 'settings.focusSection' })).toBe(false)
+    expect(isHostToWebview({ kind: 'settings.focusSection', entry: 'overview' })).toBe(false)
+    expect(isHostToWebview({ kind: 'settings.focusSection', section: 'appearance', entry: 3 })).toBe(false)
+    expect(isHostToWebview({ kind: 'settings.focusSection', section: 'appearance', entry: null })).toBe(false)
+    // 方向校验：webview 方向不接受
+    expect(isWebviewToHost({ kind: 'settings.focusSection', section: 'appearance', entry: 'overview' })).toBe(false)
+  })
 })
 
 describe('图表导出协议校验（#111）', () => {
