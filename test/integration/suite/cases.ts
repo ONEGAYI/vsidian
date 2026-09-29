@@ -906,7 +906,7 @@ interface ViewState {
   /** #140 Popover 改版：frontmatter 属性编辑浮层开态（protocol.ts 缺省可选） */
   fmPopoverOpen?: boolean
   /** #218 悬停预览观测：浮层开闭、内容态、目标标识与内容块数 */
-  hoverPreview?: { open: boolean; state: 'loading' | 'content' | 'error'; note: string; blocks: number }
+  hoverPreview?: { open: boolean; state: 'loading' | 'content' | 'error'; note: string; blocks: number; scope: 'full' | 'heading' | 'block' | '' }
 }
 
 /** #7 阅读视图探针回报（reading.perf.report） */
@@ -11171,5 +11171,95 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await waitViewState('悬停预览.md', (v) => v.viewMode === 'live' && v.hoverPreview?.open === false)
     const finalState = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
     assert(finalState.appliedEdits === 0, `全链路零 applyEdit（实际 ${finalState.appliedEdits}）`)
+  }],
+
+  // #219 局部范围与普通链接矩阵：章节/块 scope 与块数、CRLF+中文空格路径
+  // 目标、页内锚点（目标即来源文档）、失效锚点分态、普通链接 linkHref
+  // 链路、外站预滤、零 applyEdit。目标文档「悬停 局部目标.md」全文 7 块
+  // （H1/顶部段/章节甲标题/甲段/列表/章节乙标题/乙段）；章节甲 = 3 块、
+  // 列表块 = 1 块——块数差即范围过滤的直接证据
+  ['悬停预览：局部范围与普通链接——章节/块/锚点矩阵（#219）', async () => {
+    await openWithEditor('悬停预览.md')
+    await waitSessionReady('悬停预览.md')
+    const uri = wsUri('悬停预览.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    await waitViewState('悬停预览.md', (v) => v.viewMode === 'reading' && (v.readingWikilinkCount ?? 0) >= 5)
+    const before = await readDisk('悬停 局部目标.md')
+
+    // 章节双链（index 2）：scope=heading、块数收窄到章节甲 3 块（CRLF 换算
+    // 正确时与 LF 文档同构；目标标识为中文空格路径的根内相对路径）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 2 })
+    const section = await waitViewState('悬停预览.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' && v.hoverPreview.scope === 'heading')
+    assert(section.hoverPreview?.note === '悬停 局部目标.md',
+      `章节预览目标标识应为根内相对路径（实际 ${section.hoverPreview?.note}）`)
+    assert(section.hoverPreview?.blocks === 3,
+      `章节甲应渲染 3 块（标题/段落/列表；实际 ${section.hoverPreview?.blocks}）`)
+
+    // 块引用双链（index 3）：scope=block、完整列表块 1 块（多行块不截首行
+    // ——截首行时列表块缺失、blocks 为 0）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 3 })
+    const block = await waitViewState('悬停预览.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' && v.hoverPreview.scope === 'block')
+    assert(block.hoverPreview?.blocks === 1,
+      `块引用应渲染完整列表块 1 块（实际 ${block.hoverPreview?.blocks}）`)
+
+    // 失效锚点（index 4）：anchor-missing 分态就地呈现（不以全文替代），
+    // 文案含锚点原文（note 为错误文案载体）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 4 })
+    const missing = await waitViewState('悬停预览.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'error')
+    assert(missing.hoverPreview?.note.includes('没有的标题'),
+      `锚点缺失文案应含锚点原文（实际 ${missing.hoverPreview?.note}）`)
+
+    // 普通链接全文（md index 0，href 经 markdown-it 编码——空格 %20 容错
+    // 解码矩阵）：scope=full、块数为全文 7 块
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 0, link: 'md' })
+    const mdFull = await waitViewState('悬停预览.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' && v.hoverPreview.scope === 'full')
+    assert(mdFull.hoverPreview?.blocks === 7,
+      `普通链接全文应渲染 7 块（实际 ${mdFull.hoverPreview?.blocks}）`)
+
+    // 普通链接章节（md index 1，fragment 锚点）：scope=heading、3 块
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 1, link: 'md' })
+    const mdSection = await waitViewState('悬停预览.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' && v.hoverPreview.scope === 'heading')
+    assert(mdSection.hoverPreview?.blocks === 3,
+      `链接章节应渲染 3 块（实际 ${mdSection.hoverPreview?.blocks}）`)
+
+    // 页内锚点（md index 2）：目标即来源文档自身（不跨文档），scope=heading
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 2, link: 'md' })
+    const anchor = await waitViewState('悬停预览.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' && v.hoverPreview.scope === 'heading')
+    assert(anchor.hoverPreview?.note === '悬停预览.md',
+      `页内锚点目标应为来源文档（实际 ${anchor.hoverPreview?.note}）`)
+
+    // 外站链接（md index 3）：预滤不开浮层（等待超过开延迟+读取余量后仍无）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 3, link: 'md' })
+    await new Promise((r) => setTimeout(r, 1000))
+    const external = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+    assert(external?.hoverPreview?.open === false,
+      `外部网页不得开浮层（实际 ${JSON.stringify(external?.hoverPreview)}）`)
+
+    // 零写回：目标/来源双零 dirty、磁盘不动、零 applyEdit
+    const parentDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri)
+    const targetDoc = vscode.workspace.textDocuments.find(
+      (d) => d.uri.toString() === wsUri('悬停 局部目标.md').toString())
+    assert(targetDoc, 'CRLF 目标应经 openTextDocument 装载')
+    assert(parentDoc?.isDirty === false && targetDoc?.isDirty === false, '父/目标文档双零 dirty')
+    assert(await readDisk('悬停 局部目标.md') === before, '悬停读取不得改写目标磁盘')
+    const state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state.appliedEdits === 0, `局部预览零 applyEdit（实际 ${state.appliedEdits}）`)
+
+    // 复位：切回 live（浮层随切模式释放；后续用例隔离）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    await waitViewState('悬停预览.md', (v) => v.viewMode === 'live' && v.hoverPreview?.open === false)
   }],
 ]

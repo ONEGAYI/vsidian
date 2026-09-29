@@ -985,14 +985,42 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   writeFileSync(path.join(wsDir, 'assets', 'batch-pic.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
   writeFileSync(path.join(wsDir, 'wikilinks.md'), WIKILINKS_DOC, 'utf8')
   // #218 悬停预览：独立父文档（存在目标 + 缺失目标双链；不与共享样本的
-  // 双链计数断言互相干扰——wikilinks.md 有 liveWikilinkCount===3 钉住）
+  // 双链计数断言互相干扰——wikilinks.md 有 liveWikilinkCount===3 钉住）。
+  // #219 追加局部锚点（章节/块/失效）与普通链接（全文/章节/页内/外站）
+  // 段落——前两个双链序号不变（#218 用例 index 0/1 依赖）
   writeFileSync(path.join(wsDir, '悬停预览.md'), [
     '# 悬停预览样例',
     '',
     '指向 [[目标笔记]] 与缺失目标 [[悬停缺失目标]]。',
     '',
+    '局部：[[悬停 局部目标#章节甲]]、块 [[悬停 局部目标#^hover-blk]] 与失效 [[悬停 局部目标#没有的标题]]。',
+    '',
+    '链接 [全文](悬停 局部目标.md)、[章节](悬停 局部目标.md#章节甲) 与 [页内](#悬停预览样例)。',
+    '',
+    '外部 [外站](https://example.com) 不预览。',
+    '',
   ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, '目标笔记.md'), TARGET_NOTE_DOC, 'utf8')
+  // #219 局部范围矩阵目标：文件名含中文与空格（链接 percent-decode 与
+  // 双链字面路径两种写法解析到同一目标），行尾 CRLF（宿主 LF 换算矩阵：
+  // 章节/块 range 经 NewlineCoordinator 换算后过滤结果与 LF 文档同构）
+  writeFileSync(path.join(wsDir, '悬停 局部目标.md'), [
+    '# 局部目标总览',
+    '',
+    '顶部段（章节甲外）。',
+    '',
+    '## 章节甲',
+    '',
+    '甲段一。',
+    '',
+    '- 列表项一',
+    '- 列表项二 ^hover-blk',
+    '',
+    '## 章节乙',
+    '',
+    '乙段（章节甲外）。',
+    '',
+  ].join('\r\n'), 'utf8')
   writeFileSync(path.join(wsDir, 'wikilink-target.md'), WIKILINK_TARGET_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'wikilink-crlf-target.md'), WIKILINK_CRLF_TARGET_DOC, 'utf8')
   // #162 复制块链接：frontmatter 头区（不接管断言）、标题行/普通段/表格/

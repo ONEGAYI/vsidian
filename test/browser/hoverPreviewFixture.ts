@@ -1,7 +1,8 @@
-// 悬停文档预览浏览器回归（#218）：装配生产 webview 控制器，Reading 双链
-// 悬停浮层由真实指针（Playwright hover / mouse.move / Escape）驱动——
-// 开闭时序、移入保活、滚动、四边避障与正文绘制层可见性在真实布局验证。
-// 宿主读取回包经 fixture 内伪造通道注入（与真实 handleHostMessage 同入口）。
+// 悬停文档预览浏览器回归（#218 装配基座；#219 扩展局部范围与普通链接）：
+// 装配生产 webview 控制器，Reading 双链/普通链接悬停浮层由真实指针
+// （Playwright hover / mouse.move / Escape）驱动——开闭时序、移入保活、
+// 滚动、四边避障与正文绘制层可见性在真实布局验证。宿主读取回包经
+// fixture 内伪造通道注入（与真实 handleHostMessage 同入口）。
 import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/syncController'
 import type { HostToWebview, WebviewToHost } from '../../src/shared/protocol'
 import { bootLocaleFromDocument } from '../../src/webview/localeBoot'
@@ -72,6 +73,13 @@ Object.assign(window, {
        *  指针/可见，非 display:none 或被完全遮挡） */
       hitInside: centerTopEl !== null && el.contains(centerTopEl),
       contentText: (el.querySelector('.vsidian-reading-heading-1')?.textContent ?? '').trim(),
+      /** #219 局部范围断言素材：浮层全部文本与列表项文本（块完整取证） */
+      text: (el.textContent ?? '').trim(),
+      listItems: Array.from(el.querySelectorAll('.vsidian-reading-block li')).map(
+        (li) => (li.textContent ?? '').trim(),
+      ),
+      tableRows: el.querySelectorAll('.vsidian-reading-block table tbody tr').length,
+      codeText: (el.querySelector('.vsidian-reading-block pre')?.textContent ?? '').trim(),
       blockCount: el.querySelectorAll('.vsidian-reading-block').length,
       stateText: (stateEl.textContent ?? '').trim(),
       stateVisible: getComputedStyle(stateEl).display !== 'none',
