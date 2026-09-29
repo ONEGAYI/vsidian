@@ -390,6 +390,204 @@ try {
   passed++
   console.log('[悬停预览][PASS] 锚点缺失：anchor-missing 就地提示（含锚点原文，语言包同源）')
 
+  // ---- #220 场景族：来源资源（B 身份）、浮层内链接与笔记属性区 ----
+  const B_FS_PATH = 'D:\\notes\\sub\\b.md'
+  /** B 目标文档：成型 frontmatter + 相对图片 + 双链/普通链接 + 代码块 */
+  const B_DOC = [
+    '---',
+    'title: B 笔记',
+    'tags: alpha',
+    '---',
+    '',
+    '# B 文档标题',
+    '',
+    '![B 相对图](./img.png)',
+    '',
+    '内部双链 [[C 笔记]] 与普通 [局部链接](c.md)。',
+    '',
+    '```js',
+    'const answer = 42',
+    '```',
+    '',
+  ].join('\n')
+  const respondB = (req) => page.evaluate(
+    ({ reqId, instanceId, text, fsPath }) => window.respondHoverResult({
+      kind: 'hover.result', reqId, instanceId, ok: true,
+      target: { fsPath, relPath: 'sub/b.md' },
+      version: 6, text, range: { start: 0, end: text.length }, scope: { kind: 'full' },
+    }),
+    { reqId: req.reqId, instanceId: req.instanceId, text: B_DOC, fsPath: B_FS_PATH })
+
+  // ---- 场景 N：B 相对图片以 B 为来源——image.request 附 sourceDocUri + 结果应用 ----
+  await hoverNthWikilink(0)
+  await respondB(await lastRequest())
+  await page.waitForTimeout(120)
+  const imgReqs = await page.evaluate(() =>
+    window.hoverSent().filter((m) => m.kind === 'image.request'))
+  assert.equal(imgReqs.length, 1, 'B 文档图片应发出一次 image.request')
+  const imgReq = imgReqs[0]
+  assert.equal(imgReq.sourceDocUri, B_FS_PATH,
+    `图片请求应以 B 为来源解析（实际 ${imgReq.sourceDocUri}）`)
+  assert.equal(imgReq.docUri, 'file:///d%3A/notes/parent.md', '会话守卫字段仍是面板自身文档')
+  assert.equal(imgReq.sessionId, 'hover-preview')
+  assert.equal(imgReq.src, './img.png')
+  // 宿主解析结果注入（真实 handleHostMessage 同入口）→ src 应用到浮层图片
+  await page.evaluate(({ reqId }) => window.respondHoverResult({
+    kind: 'image.result', reqId, ok: true, src: 'vscode-webview://res/sub/img.png',
+  }), { reqId: imgReq.reqId })
+  await page.waitForTimeout(80)
+  const imgs = await page.evaluate(() => window.readHoverImages())
+  assert.equal(imgs.length, 1, '浮层内应有一张图片')
+  assert.equal(imgs[0].rawSrc, './img.png', '原始地址转入 data 属性')
+  assert.equal(imgs[0].appliedSrc, 'vscode-webview://res/sub/img.png',
+    'B 身份解析结果应应用到浮层图片（src 应用）')
+  passed++
+  console.log('[悬停预览][PASS] B 相对图片以 B 为来源：sourceDocUri 载荷 + 解析结果应用')
+
+  // ---- 场景 O：浮层内链接点击跳转——既有 open 通道附 sourceDocUri，浮层关闭 ----
+  await page.locator('.vsidian-hover-popup a.vsidian-wikilink').click()
+  const wlActivates = await page.evaluate(() =>
+    window.hoverSent().filter((m) => m.kind === 'wikilink.activate'))
+  assert.equal(wlActivates.length, 1, '浮层内双链点击应发出 wikilink.activate')
+  const wl = wlActivates[0]
+  assert.equal(wl.target, 'C 笔记')
+  assert.equal(wl.sourceDocUri, B_FS_PATH, '双链跳转应以 B 为来源解析')
+  assert.equal(wl.docUri, 'file:///d%3A/notes/parent.md', '会话守卫字段仍是面板自身')
+  assert.equal((await page.evaluate(() => window.readHoverPopup())).open, false,
+    '点击跳转后浮层应关闭（上下文切换）')
+  // 重开 → 点击普通链接（link.activate 同口径）
+  await hoverNthWikilink(0)
+  await respondB(await lastRequest())
+  await page.waitForTimeout(120)
+  await page.locator('.vsidian-hover-popup a[href="c.md"]').click()
+  const linkActivates = await page.evaluate(() =>
+    window.hoverSent().filter((m) => m.kind === 'link.activate'))
+  assert.equal(linkActivates.length, 1, '浮层内普通链接点击应发出 link.activate')
+  assert.equal(linkActivates[0].href, 'c.md')
+  assert.equal(linkActivates[0].sourceDocUri, B_FS_PATH, '普通链接跳转应以 B 为来源解析')
+  assert.equal((await page.evaluate(() => window.readHoverPopup())).open, false, '跳转后浮层关闭')
+  assert.equal(await editRequests(), 0, '浮层内点击不得产生 edit.request（零写回）')
+  passed++
+  console.log('[悬停预览][PASS] 浮层内链接可点击：双链/普通链接经 open 通道（sourceDocUri）+ 零写回')
+
+  // ---- 场景 P：笔记属性区——默认折叠 + 标题行热区显示按钮 + 点击展开 ----
+  await hoverNthWikilink(0)
+  await respondB(await lastRequest())
+  await page.waitForTimeout(120)
+  let fm = await page.evaluate(() => window.readHoverFm())
+  assert.equal(fm.present, true, '全文引用（成型 frontmatter）应显示属性区')
+  assert.equal(fm.collapsed, true, '属性区默认折叠')
+  assert.equal(fm.rowDisplay, 'none', '收起态属性行不可见（display:none）')
+  assert.equal(fm.btnOpacity, '0', '切换按钮默认透明')
+  assert.equal(fm.btnPointerEvents, 'none', '切换按钮默认不接指针')
+  assert.equal(fm.btnAriaExpanded, 'false', 'aria-expanded 随态')
+  // 代码高亮：朴素形态 token span 在场（沿用现有引擎，卡片工具条不进入浮层）
+  popup = await page.evaluate(() => window.readHoverPopup())
+  assert.ok(popup.codeTokenSpans > 0, `代码块应有 token span（实际 ${popup.codeTokenSpans}）`)
+  // 标题整行是悬停热区：hover 标题行 → 按钮显示并接指针（不是悬停自动展开）
+  await page.locator('.vsidian-hover-popup .vsidian-hover-fm .vsidian-fm-header').hover()
+  await page.waitForTimeout(220) // 按钮透明度有 0.12s 过渡——等过渡完成再断言
+  fm = await page.evaluate(() => window.readHoverFm())
+  assert.equal(fm.collapsed, true, '悬停标题行不自动展开')
+  assert.equal(fm.btnOpacity, '1', '悬停标题行应显示切换按钮')
+  assert.equal(fm.btnPointerEvents, 'auto', '显示后按钮应可点击')
+  // 点击按钮展开：属性行回到可见
+  await page.locator('.vsidian-hover-fm-toggle').click()
+  fm = await page.evaluate(() => window.readHoverFm())
+  assert.equal(fm.collapsed, false, '点击按钮应展开')
+  assert.notEqual(fm.rowDisplay, 'none', '展开后属性行可见')
+  assert.equal(fm.btnAriaExpanded, 'true')
+  passed++
+  console.log('[悬停预览][PASS] 笔记属性区：默认折叠/热区显示按钮/点击展开 + 代码朴素高亮')
+
+  // ---- 场景 Q：键盘操作——键盘模态下聚焦按钮（focus-visible 显示）+ Enter/Space 切换 ----
+  // 指针挪到浮层正文标题（保活）但避开属性行——按钮显示只可能来自键盘聚焦。
+  // 说明：纯 Tab 从头遍历会先走过父文档链接并触发「父容器滚动即关闭」
+  //（#218 规则，锚点视口失效）——键盘直达浮层内部属 #221（键盘打开即
+  // 焦点进入）；本场景以一次 Tab 建立键盘模态后程序化聚焦按钮，验证
+  // :focus-visible 显示规则与 Enter/Space 原生激活（与键盘路径同一焦点态）
+  const titlePoint = await page.evaluate(() => {
+    const el = document.querySelector('.vsidian-hover-popup .vsidian-reading-heading-1')
+    const r = el.getBoundingClientRect()
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
+  })
+  await page.mouse.move(titlePoint.x, titlePoint.y, { steps: 3 })
+  await page.evaluate(() => {
+    const active = document.activeElement
+    if (active instanceof HTMLElement) {
+      active.blur()
+    }
+  })
+  await page.waitForTimeout(220) // 透明度过渡回落完成后再断言（非热区且无聚焦 = 隐藏）
+  fm = await page.evaluate(() => window.readHoverFm())
+  assert.equal(fm.btnOpacity, '0', '指针在正文（非热区）且无键盘聚焦时按钮应保持隐藏')
+  await page.keyboard.press('Tab') // 建立键盘模态（此后聚焦按 :focus-visible 呈现）
+  await page.locator('.vsidian-hover-fm-toggle').focus()
+  await page.waitForTimeout(220) // 透明度过渡完成后再断言
+  fm = await page.evaluate(() => window.readHoverFm())
+  assert.equal(fm.btnOpacity, '1', '键盘聚焦应显示按钮（focus-visible）')
+  assert.equal(fm.btnPointerEvents, 'auto', '键盘聚焦后按钮可操作')
+  const focusState = await page.evaluate(() => {
+    const btn = document.querySelector('.vsidian-hover-popup .vsidian-hover-fm-toggle')
+    return {
+      focused: document.activeElement === btn,
+      focusVisible: btn.matches(':focus-visible'),
+    }
+  })
+  assert.equal(focusState.focused, true, '按钮应持有焦点')
+  assert.equal(focusState.focusVisible, true, '焦点态应为 focus-visible（键盘模态）')
+  // Enter 原生激活 → 收起；Space 原生激活 → 展开（同一 click 处理器）
+  await page.keyboard.press('Enter')
+  fm = await page.evaluate(() => window.readHoverFm())
+  assert.equal(fm.collapsed, true, 'Enter 应切换为收起')
+  await page.keyboard.press('Space')
+  fm = await page.evaluate(() => window.readHoverFm())
+  assert.equal(fm.collapsed, false, 'Space 应切换为展开')
+  passed++
+  console.log('[悬停预览][PASS] 属性区键盘操作：键盘模态聚焦显示按钮 + Enter/Space 切换')
+
+  // ---- 场景 R：刷新保留展开状态（同实例内容重建）→ 重新打开恢复折叠 ----
+  const rReq = await lastRequest()
+  await respondB(rReq)
+  await page.waitForTimeout(120)
+  fm = await page.evaluate(() => window.readHoverFm())
+  assert.equal(fm.collapsed, false, '刷新（目标内容变化引发的重建）不得重置展开状态')
+  await page.keyboard.press('Escape')
+  await hoverNthWikilink(0)
+  await respondB(await lastRequest())
+  await page.waitForTimeout(120)
+  fm = await page.evaluate(() => window.readHoverFm())
+  assert.equal(fm.collapsed, true, '重新打开浮层应恢复默认折叠')
+  passed++
+  console.log('[悬停预览][PASS] 属性区状态保持：刷新保留展开、重开恢复折叠')
+
+  // ---- 场景 S：明暗主题下浮层与属性区跟随主题（绘制层颜色断言） ----
+  // 宿主在真实环境按主题注入 --vscode-* 变量；此处模拟明暗两套注入，验证
+  // 浮层（#220 起挂 #app，主题变量经继承链生效）与属性区标题行随主题取色
+  await page.addStyleTag({ content: [
+    'body.vscode-dark { --vscode-editor-background: #1e1e1e; --vscode-panel-border: #3c3c3c; }',
+    'body.vscode-light { --vscode-editor-background: #ffffff; --vscode-panel-border: #cccccc; }',
+  ].join('\n') })
+  await page.evaluate(() => document.body.classList.add('vscode-dark'))
+  let themed = await page.evaluate(() => window.readHoverPopup())
+  assert.equal(themed.background, 'rgb(30, 30, 30)',
+    `暗色主题浮层实底应取主题背景（实际 ${themed.background}）`)
+  fm = await page.evaluate(() => window.readHoverFm())
+  assert.equal(fm.headerVisible, true, '暗色主题下属性区标题行可见')
+  assert.equal(fm.headerBg, 'rgba(128, 128, 128, 0.05)',
+    `属性区标题行应取 #app 层微亮条变量（实际 ${fm.headerBg}——证明 #app 样式链命中浮层）`)
+  await page.evaluate(() => {
+    document.body.classList.remove('vscode-dark')
+    document.body.classList.add('vscode-light')
+  })
+  themed = await page.evaluate(() => window.readHoverPopup())
+  assert.equal(themed.background, 'rgb(255, 255, 255)',
+    `亮色主题浮层实底应取主题背景（实际 ${themed.background}）`)
+  fm = await page.evaluate(() => window.readHoverFm())
+  assert.equal(fm.headerVisible, true, '亮色主题下属性区标题行可见')
+  passed++
+  console.log('[悬停预览][PASS] 明暗主题：浮层实底与属性区标题行随主题取色（绘制层）')
+
   assert.deepEqual(errors, [], '页面无未捕获异常')
   console.log(`[悬停预览] 全部 ${passed} 组场景通过`)
 } finally {

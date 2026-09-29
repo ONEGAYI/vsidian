@@ -999,6 +999,12 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
     '',
     '外部 [外站](https://example.com) 不预览。',
     '',
+    // #220 来源资源段（追加在尾部：既有 #218/#219 用例的双链 index 0-4 与
+    // 普通链接 index 0-2 不受影响）；目标在子目录 hover-assets/ 内（双链走
+    // 根内相对路径）——其内相对图片/双链只有按 B 目录解析才能命中（按根/
+    // A 目录解析即 not-found——B 身份解析的直接证据）
+    '资源 [[hover-assets/悬停 资源目标]] 与 [资源链接](hover-assets/悬停 资源目标.md)。',
+    '',
   ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, '目标笔记.md'), TARGET_NOTE_DOC, 'utf8')
   // #219 局部范围矩阵目标：文件名含中文与空格（链接 percent-decode 与
@@ -1021,6 +1027,30 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
     '乙段（章节甲外）。',
     '',
   ].join('\r\n'), 'utf8')
+  // #220 来源资源目标：位于子目录 hover-assets/（成型 frontmatter + 相对
+  // 图片 + 内部双链）——图片 res.png 与双链目标 资源内链目标.md 都只在该
+  // 子目录内存在，按 A 目录/根解析必 not-found，B 身份解析才能命中
+  mkdirSync(path.join(wsDir, 'hover-assets'), { recursive: true })
+  writeFileSync(path.join(wsDir, 'hover-assets', '悬停 资源目标.md'), [
+    '---',
+    'title: 资源目标',
+    'kind: note',
+    '---',
+    '',
+    '# 资源目标标题',
+    '',
+    '![资源图](res.png)',
+    '',
+    '内部双链 [[资源内链目标]] 与子目录说明段。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'hover-assets', 'res.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
+  writeFileSync(path.join(wsDir, 'hover-assets', '资源内链目标.md'), [
+    '# 资源内链目标',
+    '',
+    '只在 hover-assets 子目录内存在的目标（B 身份解析的命中判据）。',
+    '',
+  ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, 'wikilink-target.md'), WIKILINK_TARGET_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'wikilink-crlf-target.md'), WIKILINK_CRLF_TARGET_DOC, 'utf8')
   // #162 复制块链接：frontmatter 头区（不接管断言）、标题行/普通段/表格/

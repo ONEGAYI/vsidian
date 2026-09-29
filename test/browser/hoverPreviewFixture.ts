@@ -1,8 +1,8 @@
-// 悬停文档预览浏览器回归（#218 装配基座；#219 扩展局部范围与普通链接）：
-// 装配生产 webview 控制器，Reading 双链/普通链接悬停浮层由真实指针
-// （Playwright hover / mouse.move / Escape）驱动——开闭时序、移入保活、
-// 滚动、四边避障与正文绘制层可见性在真实布局验证。宿主读取回包经
-// fixture 内伪造通道注入（与真实 handleHostMessage 同入口）。
+// 悬停文档预览浏览器回归（#218 装配基座；#219 扩展局部范围与普通链接；
+// #220 扩展来源资源与浮层内容）：装配生产 webview 控制器，Reading 双链/
+// 普通链接悬停浮层由真实指针（Playwright hover / mouse.move / Escape）驱动
+// ——开闭时序、移入保活、滚动、四边避障与正文绘制层可见性在真实布局验证。
+// 宿主读取回包经 fixture 内伪造通道注入（与真实 handleHostMessage 同入口）。
 import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/syncController'
 import type { HostToWebview, WebviewToHost } from '../../src/shared/protocol'
 import { bootLocaleFromDocument } from '../../src/webview/localeBoot'
@@ -38,11 +38,12 @@ Object.assign(window, {
     })
     controller.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
   },
-  /** 已出站消息快照（hover.request / edit.request 观测） */
+  /** 已出站消息快照（hover.request / image.request / *.activate / edit.request 观测） */
   hoverSent(): WebviewToHost[] {
     return [...sent]
   },
-  /** 注入宿主读取回包（与真实 handleHostMessage 同入口） */
+  /** 注入宿主消息（hover.result / image.result / image.invalidate 等与真实
+   *  handleHostMessage 同入口——#220 来源资源与属性区场景的驱动通道） */
   respondHoverResult(message: HostToWebview) {
     controller.handleHostMessage(message)
   },
@@ -80,6 +81,8 @@ Object.assign(window, {
       ),
       tableRows: el.querySelectorAll('.vsidian-reading-block table tbody tr').length,
       codeText: (el.querySelector('.vsidian-reading-block pre')?.textContent ?? '').trim(),
+      /** #220 代码高亮：朴素形态 token span 在场（卡片工具条不进入浮层） */
+      codeTokenSpans: el.querySelectorAll('.vsidian-reading-block pre code span[class^="tok-"]').length,
       blockCount: el.querySelectorAll('.vsidian-reading-block').length,
       stateText: (stateEl.textContent ?? '').trim(),
       stateVisible: getComputedStyle(stateEl).display !== 'none',
@@ -88,8 +91,49 @@ Object.assign(window, {
       clientHeight: scrollEl.clientHeight,
       checkboxCount: boxes.length,
       checkboxAllDisabled: boxes.length > 0 && boxes.every((b) => b.disabled),
-      activeElement: document.activeElement === document.body ? 'body' : document.activeElement?.tagName ?? '',
+      activeElement:
+        document.activeElement === document.body
+          ? 'body'
+          : `${document.activeElement?.tagName}.${(document.activeElement as HTMLElement | undefined)?.className ?? ''}`,
     }
+  },
+  /** #220 笔记属性区观测（绘制层：标题行可见性与底色、行的 display、按钮
+   *  透明度/指针/aria——present=false = 无属性区） */
+  readHoverFm() {
+    const section = document.querySelector<HTMLElement>('.vsidian-hover-popup .vsidian-hover-fm')
+    if (!section) {
+      return { present: false as const }
+    }
+    const header = section.querySelector<HTMLElement>('.vsidian-fm-header')
+    const btn = section.querySelector<HTMLButtonElement>('.vsidian-hover-fm-toggle')
+    const row = section.querySelector<HTMLElement>('.vsidian-fm-row') ?? section.querySelector('pre')
+    const headerRect = header?.getBoundingClientRect()
+    return {
+      present: true as const,
+      collapsed: section.classList.contains('vsidian-hover-fm-collapsed'),
+      headerVisible:
+        header !== null &&
+        headerRect !== undefined &&
+        headerRect.height > 0 &&
+        getComputedStyle(header).display !== 'none',
+      headerBg: header ? getComputedStyle(header).backgroundColor : '',
+      rowDisplay: row ? getComputedStyle(row).display : 'absent',
+      btnOpacity: btn ? getComputedStyle(btn).opacity : '',
+      btnPointerEvents: btn ? getComputedStyle(btn).pointerEvents : '',
+      btnAriaExpanded: btn?.getAttribute('aria-expanded') ?? '',
+      btnLabel: btn?.getAttribute('aria-label') ?? '',
+    }
+  },
+  /** #220 浮层内图片观测（B 身份资源：rawSrc 与已应用的 src） */
+  readHoverImages() {
+    const el = document.querySelector<HTMLElement>('.vsidian-hover-popup')
+    if (!el) {
+      return []
+    }
+    return Array.from(el.querySelectorAll<HTMLImageElement>('img')).map((img) => ({
+      rawSrc: img.dataset['vsidianImgSrc'] ?? '',
+      appliedSrc: img.getAttribute('src') ?? '',
+    }))
   },
   /** 滚动浮层内容到指定位置（保活下的滚动承载） */
   scrollHoverPopup(top: number) {

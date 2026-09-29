@@ -905,8 +905,17 @@ interface ViewState {
   }
   /** #140 Popover 改版：frontmatter 属性编辑浮层开态（protocol.ts 缺省可选） */
   fmPopoverOpen?: boolean
-  /** #218 悬停预览观测：浮层开闭、内容态、目标标识与内容块数 */
-  hoverPreview?: { open: boolean; state: 'loading' | 'content' | 'error'; note: string; blocks: number; scope: 'full' | 'heading' | 'block' | '' }
+  /** #218 悬停预览观测：浮层开闭、内容态、目标标识与内容块数；
+   *  #220 新增 fm 属性区三态与 imageSrcs 浮层内已应用图片地址（旧 webview 缺省） */
+  hoverPreview?: {
+    open: boolean
+    state: 'loading' | 'content' | 'error'
+    note: string
+    blocks: number
+    scope: 'full' | 'heading' | 'block' | ''
+    fm?: 'none' | 'collapsed' | 'expanded'
+    imageSrcs?: string[]
+  }
 }
 
 /** #7 阅读视图探针回报（reading.perf.report） */
@@ -11261,5 +11270,77 @@ export const cases: Array<[string, () => Promise<void>]> = [
     // 复位：切回 live（浮层随切模式释放；后续用例隔离）
     await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
     await waitViewState('悬停预览.md', (v) => v.viewMode === 'live' && v.hoverPreview?.open === false)
+  }],
+
+  // #220 来源资源与笔记属性：B（子目录目标）内相对图片按 B 目录解析——
+  // res.png 只存在于 hover-assets/，按根/A 目录解析必 not-found，浮层内已
+  // 应用图片地址携带子目录路径即为 B 身份解析证据；全文引用属性区默认
+  // 折叠（探针 fm）；浮层点击同款 wikilink.activate（附 sourceDocUri）注入
+  // 后按 B 目录解析打开子目录内目标；全程零写回
+  ['悬停预览：来源资源与笔记属性——B 身份解析、属性折叠与零写回（#220）', async () => {
+    await openWithEditor('悬停预览.md')
+    const session = await waitSessionReady('悬停预览.md')
+    const uri = wsUri('悬停预览.md').toString()
+    const targetUri = wsUri('hover-assets/悬停 资源目标.md')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    await waitViewState('悬停预览.md', (v) => v.viewMode === 'reading' && (v.readingWikilinkCount ?? 0) >= 6)
+    const parentBefore = await readDisk('悬停预览.md')
+    const targetBefore = await readDisk('hover-assets/悬停 资源目标.md')
+
+    // 悬停追加段的双链（wikilink index 5 = [[hover-assets/悬停 资源目标]]）：
+    // 全文预览 + 笔记属性区默认折叠（成型 frontmatter → fm=collapsed）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 5 })
+    const shown = await waitViewState('悬停预览.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' && v.hoverPreview.scope === 'full')
+    assert(shown.hoverPreview?.note === 'hover-assets/悬停 资源目标.md',
+      `目标标识应为子目录相对路径（实际 ${shown.hoverPreview?.note}）`)
+    assert(shown.hoverPreview?.fm === 'collapsed',
+      `全文引用属性区应默认折叠（实际 ${shown.hoverPreview?.fm}）`)
+
+    // B 身份图片解析：res.png 只在 hover-assets/ 内——浮层内已应用 src 携带
+    // 子目录路径（按根/A 目录解析则 not-found、无已应用地址）
+    const imaged = await waitViewState('悬停预览.md', (v) =>
+      v.hoverPreview?.imageSrcs?.some((s) => s.includes('hover-assets') && s.includes('res.png')) === true)
+    assert((imaged.hoverPreview?.imageSrcs?.length ?? 0) > 0, '浮层内应有已应用图片地址')
+
+    // 零写回：父/目标双零 dirty、磁盘不动、零 applyEdit（属性区与图片装载只读）
+    const parentDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri)
+    const targetDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())
+    assert(targetDoc, '资源目标应经 openTextDocument 装载')
+    assert(parentDoc?.isDirty === false && targetDoc?.isDirty === false, '父/目标文档双零 dirty')
+    assert(await readDisk('悬停预览.md') === parentBefore, '悬停不得改写父文档磁盘')
+    assert(await readDisk('hover-assets/悬停 资源目标.md') === targetBefore, '悬停不得改写目标磁盘')
+    let state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state.appliedEdits === 0, `悬停链路零 applyEdit（实际 ${state.appliedEdits}）`)
+
+    // 复位：切回 live（浮层随切模式释放）。须在来源双链注入**之前**——
+    // 跳转会打开新标签页，本面板 webview 随隐藏挂起（retainContextWhenHidden
+    // 关闭），此后 view.state 轮询不再有回应；来源守卫记录在面板条目上
+    //（悬停时已写入），与浮层是否在场无关，注入不受复位影响
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    await waitViewState('悬停预览.md', (v) => v.viewMode === 'live' && v.hoverPreview?.open === false)
+
+    // 来源双链：注入 webview→宿主 wikilink.activate（与浮层内点击同一消息
+    // 形态，sourceDocUri = B 的 fsPath；宿主会话守卫要求该目标为本面板送达
+    // 过的悬停目标——上面的真实悬停已记录）。资源内链目标.md 只在
+    // hover-assets/ 内：按 B 目录解析 → 打开子目录目标；按根/A 目录解析 →
+    // not-found（不打开）
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, {
+      kind: 'wikilink.activate',
+      sessionId: session.panels.find((p) => p.ready)?.sessionId ?? '',
+      docUri: uri,
+      target: '资源内链目标',
+      srcStart: 0,
+      srcEnd: 8,
+      sourceDocUri: targetUri.fsPath,
+    })
+    const entry = await waitWikilinkLog(uri, (e) =>
+      e.kind === 'wikilink-doc' && e.target === '资源内链目标')
+    assert(entry.path === wsUri('hover-assets/资源内链目标.md').fsPath,
+      `来源双链应按 B 目录解析到子目录目标（实际 ${entry.path}）`)
+    assert(await readDisk('悬停预览.md') === parentBefore, '双链跳转不得改写父文档')
+    state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state.appliedEdits === 0, `全程零 applyEdit（实际 ${state.appliedEdits}）`)
   }],
 ]
