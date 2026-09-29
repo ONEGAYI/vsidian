@@ -293,6 +293,48 @@ const DIR_REF_DOC_TEXT = [
 /** 1px PNG（与 fixtures.mjs 的 TINY_PNG_BASE64 字节一致） */
 const TINY_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
+/** #200 多文件同批 rename 专属 fixture 原文（与 fixtures.mjs 的 BATCH_*
+ *  常量字节一致——独立文档组，不与 #199 漂移保护用例共享，规避其 finally
+ *  泄漏的 dirty buffer 与覆盖层滞留对引用桶的污染） */
+const BATCH_REF_A_DOC_TEXT = [
+  '# 批引用甲',
+  '',
+  '见 [[批目标]] 与 [同目标](./批目标.md)。',
+  '',
+  '带锚 [[批目标#深处小节|别名]]。',
+  '',
+  '附件 ![图](assets/batch-pic.png)。',
+  '',
+].join('\n')
+const BATCH_REF_B_DOC_TEXT = [
+  '# 批引用乙',
+  '',
+  '上行 [[../批目标]]。',
+  '',
+].join('\n')
+const BATCH_MOVED_DOC_TEXT = [
+  '# 批移动自测',
+  '',
+  '见 [[批目标]]。',
+  '',
+].join('\n')
+
+/** #200 同批 rename fixture 幂等重建（前置与结尾共用） */
+async function ensureBatchFixture(): Promise<void> {
+  await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('批目标.md'), Buffer.from([
+    '# 批目标',
+    '',
+    '## 深处小节',
+    '',
+    '小节内容。',
+    '',
+  ].join('\n'), 'utf8'))).catch(() => {})
+  await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('batch-ref-a.md'), Buffer.from(BATCH_REF_A_DOC_TEXT, 'utf8'))).catch(() => {})
+  await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('notes/batch-ref-b.md'), Buffer.from(BATCH_REF_B_DOC_TEXT, 'utf8'))).catch(() => {})
+  await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('batch-moved.md'), Buffer.from(BATCH_MOVED_DOC_TEXT, 'utf8'))).catch(() => {})
+  await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('assets/batch-pic.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))).catch(() => {})
+  await new Promise((r) => setTimeout(r, 1400))
+}
 
 /** #200 目录 fixture 幂等重建（前置与结尾共用）：重写文件内容触发 watcher
  *  增量重扫，索引条目滞后（目录级 fs 通道无逐文件事件）在下一用例前自愈 */
@@ -305,22 +347,6 @@ async function ensureDirMoveFixture(): Promise<void> {
   await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('c-out.md'), Buffer.from(DIR_OUTSIDE_C_DOC_TEXT, 'utf8'))).catch(() => {})
   await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('dir-ref.md'), Buffer.from(DIR_REF_DOC_TEXT, 'utf8'))).catch(() => {})
   // watcher 去抖（800ms）+ 增量队列泵排空后再放行下一断言
-  await new Promise((r) => setTimeout(r, 1400))
-}
-
-/** #199 单文件族 fixture 幂等重建（#200 同批用例前置共用） */
-async function ensureRenameRefFixture(): Promise<void> {
-  await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('改名目标.md'), Buffer.from([
-    '# 改名目标',
-    '',
-    '## 深处小节',
-    '',
-    '小节内容。',
-    '',
-  ].join('\n'), 'utf8'))).catch(() => {})
-  await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('rename-ref-a.md'), Buffer.from(RENAME_REF_A_DOC_TEXT, 'utf8'))).catch(() => {})
-  await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('rename-moved.md'), Buffer.from(RENAME_MOVED_DOC_TEXT, 'utf8'))).catch(() => {})
-  await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('assets/rename-pic.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))).catch(() => {})
   await new Promise((r) => setTimeout(r, 1400))
 }
 
@@ -10022,51 +10048,40 @@ export const cases: Array<[string, () => Promise<void>]> = [
 
   ['rename 引用改写：多文件同批 rename 合并反馈与不重复编辑（#200）', async () => {
     await waitRenameIndexReady()
-    await ensureRenameRefFixture()
-    // 附件 asset 条目归位：watcher 只监听 *.md，此前用例的 fs 通道附件
-    // 移回（#199 用例 2 的还原）不会触发 asset 重登记——完整重建一次让
-    // 索引与盘一致（rename-pic.png 的引用桶就位，附件边才可查）。命令为
-    // fire-and-forget 注册，经维护状态轮询等待完成
-    await vscode.commands.executeCommand('onegayi.vsidian.index.rebuild')
-    await poll('索引重建开始', async () => {
-      const s = (await vscode.commands.executeCommand('onegayi.vsidian._test.getVaultIndexState')) as {
-        rebuilding: boolean
-      }
-      return s.rebuilding ? true : undefined
-    }, 10000).catch(() => {/* 重建极快时可能错过 rebuilding 窗口——直接等就绪 */})
-    await poll('索引重建完成', async () => {
-      const s = (await vscode.commands.executeCommand('onegayi.vsidian._test.getVaultIndexState')) as {
-        rebuilding: boolean
-        roots: Array<{ fsPath: string; hasData: boolean; scanning: boolean }>
-      }
-      const root = s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir))
-      return !s.rebuilding && root?.hasData && !root.scanning ? true : undefined
-    }, 30000)
+    await ensureBatchFixture()
     try {
       // 同批两条文件映射（一次 applyEdit、一次 will 事件）：引用甲的 4 边
-      //（3 目标边 + 1 附件边）合并为单文档单次规划；moved 出链在 did 合并
+      //（3 目标边 + 1 附件边）合并为单文档单次规划；moved 出链在 did 合并。
+      // 用 batch 专属文档组：与 #199 漂移保护用例共享文档会踩其 finally
+      // 泄漏的 dirty buffer 与覆盖层滞留（#199 已知边界——编辑即自愈，跨
+      // 用例不自愈；分片全量实测：引用者桶被滞留边带偏导致改写缺失）
       const edit = new vscode.WorkspaceEdit()
-      edit.renameFile(wsUri('改名目标.md'), wsUri('批改名目标.md'), { overwrite: false })
-      edit.renameFile(wsUri('assets/rename-pic.png'), wsUri('assets/rename-pic-batch.png'), { overwrite: false })
+      edit.renameFile(wsUri('批目标.md'), wsUri('批改名目标.md'), { overwrite: false })
+      edit.renameFile(wsUri('assets/batch-pic.png'), wsUri('assets/batch-pic-batch.png'), { overwrite: false })
       assert(await vscode.workspace.applyEdit(edit), '同批 rename 应成功应用')
       // 引用甲：目标三边型 + 附件边一次改写（同文档多目标一次 WorkspaceEdit）
       const refA = await poll('同批引用甲改写', async () => {
-        const text = (await vscode.workspace.openTextDocument(wsUri('rename-ref-a.md'))).getText()
+        const text = (await vscode.workspace.openTextDocument(wsUri('batch-ref-a.md'))).getText()
         return text.includes('[[批改名目标]]') && text.includes('[同目标](批改名目标.md)') &&
           text.includes('[[批改名目标#深处小节|别名]]') &&
-          text.includes('![图](assets/rename-pic-batch.png)') ? text : undefined
+          text.includes('![图](assets/batch-pic-batch.png)') ? text : undefined
+      }).catch(async (err) => {
+        // 诊断兜底：引用甲 dirty 状态、buffer 实况与计划日志一起重抛（定位
+        // will/did 双通道断点）
+        const doc = vscode.workspace.textDocuments.find((d) => normFsPath(d.uri.fsPath) === normFsPath(wsUri('batch-ref-a.md').fsPath))
+        throw new Error(`${(err as Error).message}；甲dirty=${doc?.isDirty}；甲实况=${JSON.stringify(doc?.getText() ?? null)}；log实况=${JSON.stringify(await vscode.commands.executeCommand('onegayi.vsidian._test.getRenameRefLog'))}`)
       })
-      assert(!refA.includes('[[改名目标') && !refA.includes('(./改名目标.md)') &&
-        !refA.includes('rename-pic.png'),
+      assert(!refA.includes('[[批目标') && !refA.includes('(./批目标.md)') &&
+        !refA.includes('batch-pic.png'),
         `同批改写应无旧目标残留（实际 ${refA}` + '）')
-      // moved 出链（did）：[[改名目标]] → [[批改名目标]]
+      // moved 出链（did）：[[批目标]] → [[批改名目标]]
       await poll('同批 moved 出链改写', async () => {
-        const text = (await vscode.workspace.openTextDocument(wsUri('rename-moved.md'))).getText()
+        const text = (await vscode.workspace.openTextDocument(wsUri('batch-moved.md'))).getText()
         return text.includes('[[批改名目标]]') ? text : undefined
       })
       // 引用乙（子目录上行边，未打开文档）也随同批改写
       await poll('同批引用乙改写', async () => {
-        const text = (await vscode.workspace.openTextDocument(wsUri('notes/rename-ref-b.md'))).getText()
+        const text = (await vscode.workspace.openTextDocument(wsUri('notes/batch-ref-b.md'))).getText()
         return text.includes('上行 [[../批改名目标]]。') ? text : undefined
       })
       // 合并反馈：will（引用甲 4 边 + 引用乙 1 边）+ did（moved 1 边）=
@@ -10082,13 +10097,13 @@ export const cases: Array<[string, () => Promise<void>]> = [
     } finally {
       // 现场还原（外部 fs 通道 + 写回原始内容）
       await Promise.resolve(vscode.commands.executeCommand('workbench.action.closeAllEditors')).catch(() => {})
-      await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('rename-ref-a.md'), Buffer.from(RENAME_REF_A_DOC_TEXT, 'utf8'))).catch(() => {})
-      await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('notes/rename-ref-b.md'), Buffer.from(RENAME_REF_B_DOC_TEXT, 'utf8'))).catch(() => {})
-      await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('rename-moved.md'), Buffer.from(RENAME_MOVED_DOC_TEXT, 'utf8'))).catch(() => {})
-      await Promise.resolve(vscode.workspace.fs.rename(wsUri('批改名目标.md'), wsUri('改名目标.md'), { overwrite: true })).catch(() => {})
-      await Promise.resolve(vscode.workspace.fs.rename(wsUri('assets/rename-pic-batch.png'), wsUri('assets/rename-pic.png'), { overwrite: true })).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('batch-ref-a.md'), Buffer.from(BATCH_REF_A_DOC_TEXT, 'utf8'))).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('notes/batch-ref-b.md'), Buffer.from(BATCH_REF_B_DOC_TEXT, 'utf8'))).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('batch-moved.md'), Buffer.from(BATCH_MOVED_DOC_TEXT, 'utf8'))).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.rename(wsUri('批改名目标.md'), wsUri('批目标.md'), { overwrite: true })).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.rename(wsUri('assets/batch-pic-batch.png'), wsUri('assets/batch-pic.png'), { overwrite: true })).catch(() => {})
       await new Promise((r) => setTimeout(r, 500))
-      await ensureRenameRefFixture()
+      await ensureBatchFixture()
     }
   }],
 ]

@@ -265,6 +265,39 @@ const DIR_REF_DOC = [
   '附件 ![图](dir-move/dir-pic.png)。',
   '',
 ].join('\n')
+// #200 多文件同批 rename 专属样例：与 #199 漂移保护用例共享文档会踩其
+// finally 泄漏的 dirty buffer 与覆盖层滞留（#199 已知边界——编辑即自愈，
+// 跨用例不自愈），独立文档组保证同批改写断言不受前序用例污染
+const BATCH_TARGET_DOC = [
+  '# 批目标',
+  '',
+  '## 深处小节',
+  '',
+  '小节内容。',
+  '',
+].join('\n')
+const BATCH_REF_A_DOC = [
+  '# 批引用甲',
+  '',
+  '见 [[批目标]] 与 [同目标](./批目标.md)。',
+  '',
+  '带锚 [[批目标#深处小节|别名]]。',
+  '',
+  '附件 ![图](assets/batch-pic.png)。',
+  '',
+].join('\n')
+const BATCH_REF_B_DOC = [
+  '# 批引用乙',
+  '',
+  '上行 [[../批目标]]。',
+  '',
+].join('\n')
+const BATCH_MOVED_DOC = [
+  '# 批移动自测',
+  '',
+  '见 [[批目标]]。',
+  '',
+].join('\n')
 
 // #197 反链样例：目标文档被两个引用者以三种边型引用（wikilink 短名 /
 // mdlink 显式路径 / wikilink 带标题锚）——反链面板与跳转的断言载体。
@@ -859,6 +892,12 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   writeFileSync(path.join(wsDir, 'dir-move', 'dir-pic.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
   writeFileSync(path.join(wsDir, 'c-out.md'), DIR_OUTSIDE_C_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'dir-ref.md'), DIR_REF_DOC, 'utf8')
+  // #200 多文件同批 rename：独立文档组（目标 + 根/子目录引用者 + 附件 + 出链载体）
+  writeFileSync(path.join(wsDir, '批目标.md'), BATCH_TARGET_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'batch-ref-a.md'), BATCH_REF_A_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'notes', 'batch-ref-b.md'), BATCH_REF_B_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'batch-moved.md'), BATCH_MOVED_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'assets', 'batch-pic.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
   writeFileSync(path.join(wsDir, 'wikilinks.md'), WIKILINKS_DOC, 'utf8')
   writeFileSync(path.join(wsDir, '目标笔记.md'), TARGET_NOTE_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'wikilink-target.md'), WIKILINK_TARGET_DOC, 'utf8')
