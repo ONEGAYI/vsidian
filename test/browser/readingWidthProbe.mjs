@@ -111,6 +111,17 @@ try {
   reading = await measureReading()
   check('A3 阅读限宽 600 居中', Math.abs(reading.blockW - 600) < 2 && Math.abs(reading.gapL - reading.gapR) < 4,
     `块宽=${reading.blockW.toFixed(1)} 左缝=${reading.gapL.toFixed(1)} 右缝=${reading.gapR.toFixed(1)}`)
+  // A3b（#206）：标题块与段落块左缘一致——heading 装饰类直接挂在块 div 上，
+  // 若其规则声明水平 margin（简写置 0），同特异性源序在后会覆盖块居中 auto，
+  // 限宽档下标题贴左而正文居中（铺满档 auto 与 0 等价，不可见）
+  const blockEdges = await page.evaluate(() => {
+    const L = (s) => document.querySelector(s)?.getBoundingClientRect().left ?? null
+    return { heading: L('.vsidian-reading-heading-1'), paragraph: L('.vsidian-reading-paragraph') }
+  })
+  check('A3b 限宽档标题块与段落块左缘一致（#206）',
+    blockEdges.heading !== null && blockEdges.paragraph !== null
+      && Math.abs(blockEdges.heading - blockEdges.paragraph) < 2,
+    `标题=${blockEdges.heading?.toFixed(1)} 段落=${blockEdges.paragraph?.toFixed(1)}`)
   await page.evaluate(() => window.setRwMode('live'))
   await page.waitForSelector('.cm-line')
   live = await measureLive()

@@ -192,6 +192,7 @@ docs/specs/viewport-width.md（分支 impl/2026-09-viewport-width）。
 - **0 = 铺满零干预**：`applyReadableLineWidthSetting`（syncController）在 0 档**移除内联**、非 0 档把 `Npx` 内联写到挂载根元素——优先序两级：根级片段需 `!important` 覆盖内联，按视图作用域声明的后代级片段常规规则即生效（差异化路径）；0 档片段全层级可定制。
 - **居中单位**：阅读块 `margin-inline auto`；Live 是 `[.cm-gutters + 间距 + .cm-content]` 整组经 scroller `justify-content: safe center` 居中（safe 防溢出裁左缘），`.cm-content` 挂 max-width。**铺满态零位移**（flex-grow 占满，justify 无剩余空间），与旧布局一致。
 - **#32 行号契约修订**：铺满态行为不变；限宽态正文列宽 = min(设定宽， 可用宽 − 行号列足迹)，行号列随列移动、间距不变。
+- **标题块水平盒禁令（#206）**：heading-N 装饰类与 `.vsidian-reading-block` 同挂在块 div 上且源序在后——其规则**不得声明任何水平 margin/padding**（margin 简写、margin-left/right、margin-inline 等会覆盖限宽档居中的 auto；铺满档不可见，限宽档标题贴左而正文居中，偏移 = (可用宽 − 设定宽) ÷ 2）；垂直间距一律 `margin-block`。契约由 `readingHeadingMarginCssContract` 与 `readingWidthProbe` A3b（限宽档标题/段落左缘一致）钉住。
 - **设置项**：`editor.readableLineWidth`（number 型，0–1600 步进 20，默认 0）；number schema 校验只管类型与范围，0 语义归消费方；设置页 0 档显示词经定义的 `zeroLabelKey` 取词（注册表驱动，渲染层无特判）。
 
 ### 验证矩阵（2026-09-28，工作树内全绿）
@@ -199,6 +200,11 @@ docs/specs/viewport-width.md（分支 impl/2026-09-viewport-width）。
 - 单测 3071（含 number schema 契约、滑块渲染/回显/上送、快照八键）+ node --test 契约检查器 99。
 - 浏览器 `readingWidthProbe` **15 项**（已注册 run.mjs）：铺满双模式、行号关一致性、限宽 600 居中、侧栏避让、行号列随列、宽块（表格/代码块）钳制、优先序三态。
 - `check:stylecontract` 8 项零失败（条目 116：var-reading-max-width 更新 + var-live-preview-max-width 新增）；`npm run compile` 类型零错。
+
+### 验证矩阵增量（#206，2026-09-29）
+
+- `readingWidthProbe` 新增 A3b 限宽档标题/段落块左缘一致（修复前红：标题 24 / 段落 340，差 316px；修复后同列），断言总数 **23→24** 条（`grep -c "check('"` 口径）——历史落档「15 项」为 #175 入列时点计数，其后 74ce73c、4fbeb7e 两批增量未同步计数导致口径漂移，此处一并修正。
+- 新增 `readingHeadingMarginCssContract` 契约测试（heading-1..6 规则水平盒禁令 + 块居中 auto 钉住 + 拦截/放行矩阵自测：物理与逻辑属性水平全家族、大小写、声明前注释）。
 
 ### 已知边界
 
