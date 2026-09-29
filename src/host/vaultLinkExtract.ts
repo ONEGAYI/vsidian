@@ -28,7 +28,7 @@
 // （宿主索引传「文件集合 + 平台大小写」实现，返回根内相对真实路径）。
 import type { SyntaxNode, Tree } from '@lezer/common'
 import { classifyImageTarget, classifyLinkTarget, type LinkContext } from './linkTarget'
-import { parseWikilinkInner, scanWikilinksInLine } from '../shared/wikilink'
+import { parseWikilinkInner, scanEmbedsInLine, scanWikilinksInLine } from '../shared/wikilink'
 import { scanLooseLinksInLine } from '../shared/looseLink'
 import { planVaultLinkPath, type VaultLinkPathContext } from '../shared/vaultLink'
 import { sortEdges, type VaultEdge, type VaultEdgeKind } from '../shared/vaultIndexModel'
@@ -38,10 +38,11 @@ import { chainAt, frontmatterRange, markdownTreeParser } from '../webview/markdo
  * 出链面板的边准入判别（出链面板批次）：外部 scheme（https:// 等）与危险
  * scheme（javascript: 等）边不进面板——分类复用跳转链路同一分类器
  * （classifyLinkTarget / classifyImageTarget），与「外链白名单」的既有
- * 口径一致。双链边为 vault 内形态，恒准入。
+ * 口径一致。双链与嵌入边为 vault 内形态，恒准入（#222 嵌入边同款——断链
+ * 嵌入保留可见性，目标原文非 URL）。
  */
 export function isVaultPanelOutlink(edge: VaultEdge, ctx: LinkContext): boolean {
-  if (edge.kind === 'wikilink') {
+  if (edge.kind === 'wikilink' || edge.kind === 'embed') {
     return true
   }
   if (edge.kind === 'image') {
@@ -292,6 +293,35 @@ export function extractVaultEdges(
         target: parsed.path,
         resolvedTarget: resolved,
         kind: 'wikilink',
+        anchor: parsed.heading ?? (parsed.blockId !== null ? `^${parsed.blockId}` : ''),
+        start: hit.from,
+        end: hit.to,
+      })
+    }
+    for (const hit of scanEmbedsInLine(line, base)) {
+      // #222 嵌入（独立语法角色，行扫描形态学）：索引不设行独占限制——
+      // 引用关系按出现抽取（行独占只属呈现侧挂载适配）；代码上下文排除
+      // 与双链同一 scanSuppressed 边界；resolve 与锚点拆列同 wikilink 口径
+      //（implicitMd 候选：显式图片等扩展名直接解析该文件）
+      if (scanSuppressed(tree, hit.from, fmEnd)) {
+        continue
+      }
+      const parsed = parseWikilinkInner(hit.inner)
+      if (!parsed) {
+        continue // 防御：扫描层已过滤非法形态
+      }
+      let resolved: string | null
+      if (parsed.path === '') {
+        resolved = sourceRelPath // 本文件锚点：自引用
+      } else {
+        const plan = planVaultLinkPath(parsed.path, ctx, { implicitMd: true })
+        resolved = plan.kind === 'inside' ? resolveDocTarget(plan.candidates) : null
+      }
+      edges.push({
+        source: sourceRelPath,
+        target: parsed.path,
+        resolvedTarget: resolved,
+        kind: 'embed',
         anchor: parsed.heading ?? (parsed.blockId !== null ? `^${parsed.blockId}` : ''),
         start: hit.from,
         end: hit.to,

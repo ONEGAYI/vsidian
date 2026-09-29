@@ -777,3 +777,46 @@ describe('birthtimeMs 可选尾列（形态改版批次；v2 内追加不升版�
     expect(loaded!.model.files.get('a.md')!.birthtimeMs).toBeUndefined()
   })
 })
+
+describe('嵌入边快照兼容（#222：EDGE_KIND_CODE 尾追 code 4）', () => {
+  it('embed 边完整往返（含锚点与断链形态）', async () => {
+    const model: VaultIndexModel = {
+      files: new Map([['a.md', file('a.md')]]),
+      edges: [
+        { source: 'a.md', target: '设计', resolvedTarget: '设计.md', kind: 'embed', anchor: '', start: 0, end: 8 },
+        { source: 'a.md', target: '设计', resolvedTarget: '设计.md', kind: 'embed', anchor: '标题', start: 10, end: 24 },
+        { source: 'a.md', target: '缺失', resolvedTarget: null, kind: 'embed', anchor: '', start: 26, end: 34 },
+      ],
+    }
+    const port = makePort()
+    await applyWrites(port, planSnapshotCommit(model, { baseDir: BASE, shardCount: 1 }))
+    const loaded = await loadSnapshot(port, BASE)
+    expect(loaded!.model.edges).toEqual(sortEdges(model.edges))
+  })
+
+  it('旧格式片段（kind 码 0–3）照常读取——码表尾追不改既有序', async () => {
+    const port = makePort()
+    port.files.set(`${BASE}/CURRENT`, 'gen-000001-w000')
+    port.files.set(`${BASE}/gen-000001-w000/manifest.json`, JSON.stringify({
+      formatVersion: 2,
+      generation: 1,
+      shardCount: 1,
+      shards: [{ i: 0, bytes: 10, checksum: 'x', inheritedFrom: null }],
+      stats: { fileCount: 1, edgeCount: 2 },
+    }))
+    // 手写旧片段：wikilink(0) 与 refdef(3) 各一条（无 code 4 的旧代形态）
+    const shardContent = JSON.stringify({
+      v: 2, names: ['a.md', 'b.md'], files: [[0, 1, 2, 3, 0]], edges: [[0, 1, 0, -1, 0, 8, -1], [0, 1, 3, -1, 9, 20, 1]],
+    })
+    port.files.set(`${BASE}/gen-000001-w000/shard-000.json`, shardContent)
+    const manifest = JSON.parse(port.files.get(`${BASE}/gen-000001-w000/manifest.json`)!)
+    manifest.shards[0].checksum = stableHash(shardContent)
+    manifest.shards[0].bytes = shardContent.length
+    port.files.set(`${BASE}/gen-000001-w000/manifest.json`, JSON.stringify(manifest))
+    const loaded = await loadSnapshot(port, BASE)
+    expect(loaded!.model.edges.map((e) => [e.kind, e.target])).toEqual([
+      ['wikilink', 'b.md'],
+      ['refdef', 'b.md'],
+    ])
+  })
+})

@@ -868,8 +868,8 @@ export interface BacklinkItemPayload {
   sourceRelPath: string
   /** 来源文档绝对 fsPath（跳转与打开用） */
   sourceFsPath: string
-  /** 边类型（双链/内联链接/图片/引用式定义） */
-  kind: 'wikilink' | 'mdlink' | 'image' | 'refdef'
+  /** 边类型（双链/内联链接/图片/引用式定义/嵌入——#222 embed 与双链同构） */
+  kind: 'wikilink' | 'mdlink' | 'image' | 'refdef' | 'embed'
   /** 标题/块锚点文本（空串无） */
   anchor: string
   /** 出链标记在来源正文中的 LF 偏移区间 */
@@ -904,8 +904,8 @@ export interface OutlinkItemPayload {
   targetRelPath: string | null
   /** 目标绝对 fsPath（跳转与打开用）；断链 null */
   targetFsPath: string | null
-  /** 边类型（双链/内联链接/图片/引用式定义） */
-  kind: 'wikilink' | 'mdlink' | 'image' | 'refdef'
+  /** 边类型（双链/内联链接/图片/引用式定义/嵌入——#222 embed 与双链同构） */
+  kind: 'wikilink' | 'mdlink' | 'image' | 'refdef' | 'embed'
   /** 标题/块锚点文本（空串无；#^块id 形态保留 ^ 前缀） */
   anchor: string
   /** 是否解析命中（断链条目弱化呈现且不可点） */
@@ -3011,7 +3011,7 @@ function isBacklinkItemPayload(v: unknown): v is BacklinkItemPayload {
   return (
     isString(v.sourceRelPath) &&
     isString(v.sourceFsPath) &&
-    (v.kind === 'wikilink' || v.kind === 'mdlink' || v.kind === 'image' || v.kind === 'refdef') &&
+    (v.kind === 'wikilink' || v.kind === 'mdlink' || v.kind === 'image' || v.kind === 'refdef' || v.kind === 'embed') &&
     isString(v.anchor) &&
     isNonNegativeInt(v.start) &&
     isNonNegativeInt(v.end) &&
@@ -3034,7 +3034,7 @@ function isOutlinkItemPayload(v: unknown): v is OutlinkItemPayload {
     isString(v.targetDisplay) &&
     (v.targetRelPath === null || isString(v.targetRelPath)) &&
     (v.targetFsPath === null || isString(v.targetFsPath)) &&
-    (v.kind === 'wikilink' || v.kind === 'mdlink' || v.kind === 'image' || v.kind === 'refdef') &&
+    (v.kind === 'wikilink' || v.kind === 'mdlink' || v.kind === 'image' || v.kind === 'refdef' || v.kind === 'embed') &&
     isString(v.anchor) &&
     typeof v.resolved === 'boolean' &&
     isNonNegativeInt(v.start) &&
@@ -3056,7 +3056,7 @@ function isBacklinksProbe(v: unknown): v is BacklinksProbe {
     Array.isArray(v.items) &&
     v.items.every(
       (item) => isObject(item) && isString(item.sourceRelPath) &&
-        (item.kind === 'wikilink' || item.kind === 'mdlink' || item.kind === 'image' || item.kind === 'refdef') &&
+        (item.kind === 'wikilink' || item.kind === 'mdlink' || item.kind === 'image' || item.kind === 'refdef' || item.kind === 'embed') &&
         isPositiveInt(item.line) && isString(item.snippet),
     ) &&
     typeof v.itemPainted === 'boolean' &&
@@ -3089,7 +3089,7 @@ function isOutlinksProbe(v: unknown): v is OutlinksProbe {
     v.items.every(
       (item) => isObject(item) && isString(item.targetDisplay) &&
         (item.targetRelPath === null || isString(item.targetRelPath)) &&
-        (item.kind === 'wikilink' || item.kind === 'mdlink' || item.kind === 'image' || item.kind === 'refdef') &&
+        (item.kind === 'wikilink' || item.kind === 'mdlink' || item.kind === 'image' || item.kind === 'refdef' || item.kind === 'embed') &&
         isString(item.anchor) &&
         typeof item.resolved === 'boolean',
     ) &&

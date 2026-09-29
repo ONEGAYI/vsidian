@@ -666,3 +666,45 @@ describe('renameNoticeKeyOf 通知文案键决策（review-loops #1）', () => {
     expect(renameNoticeKeyOf(log(0, 0, 0))).toBeNull()
   })
 })
+
+describe('vaultRename：#222 嵌入边改写（![[…]] 与 wikilink 同构）', () => {
+  it('嵌入路径段替换（![[ 后、#/| 之前），别名与锚点原样保留', () => {
+    const text = 'A ![[target]] B ![[target#标题|显示]] C ![[target#^blk1]]\n'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/target.md`, newFsPath: `${WIN_ROOT}/renamed.md` }]
+    const at = (needle: string): { start: number; end: number } => {
+      const start = text.indexOf(needle)
+      return { start, end: start + needle.length }
+    }
+    const docs = [refDoc(`${WIN_ROOT}/ref.md`, text, [
+      edge({ target: 'target', resolved: 'target.md', kind: 'embed', ...at('![[target]]') }),
+      edge({ target: 'target', resolved: 'target.md', kind: 'embed', anchor: '标题', ...at('![[target#标题|显示]]') }),
+      edge({ target: 'target', resolved: 'target.md', kind: 'embed', anchor: '^blk1', ...at('![[target#^blk1]]') }),
+    ])]
+    const result = planVaultRenameRewrites(winCtx(moves), docs)
+    expect(result.skipped).toEqual([])
+    expect(applyEdits(text, result.docs[0]!.edits))
+      .toBe('A ![[renamed]] B ![[renamed#标题|显示]] C ![[renamed#^blk1]]\n')
+  })
+
+  it('嵌入显式 .md 保持扩展名、引用者子目录重算相对段（与 wikilink 同语义）', () => {
+    const text = '见 ![[../target.md]]。\n'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/target.md`, newFsPath: `${WIN_ROOT}/notes/renamed.md` }]
+    const docs = [refDoc(`${WIN_ROOT}/notes/ref.md`, text, [
+      edge({ target: '../target.md', resolved: 'target.md', kind: 'embed', start: text.indexOf('![[../target.md]]'), end: text.indexOf('![[../target.md]]') + '![[../target.md]]'.length }),
+    ])]
+    const result = planVaultRenameRewrites(winCtx(moves), docs)
+    expect(applyEdits(text, result.docs[0]!.edits)).toBe('见 ![[renamed.md]]。\n')
+  })
+
+  it('嵌入区间漂移（形态不符）走文档级 edge-stale 跳过（过期不硬改）', () => {
+    const text = '已被改写的不相关正文。\n'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/target.md`, newFsPath: `${WIN_ROOT}/renamed.md` }]
+    const docs = [refDoc(`${WIN_ROOT}/ref.md`, text, [
+      edge({ target: 'target', resolved: 'target.md', kind: 'embed', start: 0, end: 12 }),
+    ])]
+    const result = planVaultRenameRewrites(winCtx(moves), docs)
+    expect(result.docs).toHaveLength(0)
+    expect(result.skipped).toHaveLength(1)
+    expect(result.skipped[0]).toMatchObject({ reason: 'edge-stale' })
+  })
+})
