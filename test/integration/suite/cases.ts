@@ -4067,7 +4067,10 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand(CMD.postToPanel, uri,
       { kind: 'viewport.test.position', scrollNearLine: 123, scrollBiasPx: 150 })
     const before = await waitViewportSettled('viewport-mermaid.md')
-    assert((before.liveViewportCenterLine ?? 0) >= 110 && (before.liveViewportCenterLine ?? 0) <= 123,
+    // 前置只确认「滚到了围栏带」（文档三个 Mermaid 围栏占 116–138 行）——
+    // 本地快机渲染后中心 ~118、CI xvfb 的 SVG 尺寸使稳定值可到 128，都在带内。
+    // 用例本体断言是切标签页前后中心行 ±2 与光标一致，不受带内位置影响
+    assert((before.liveViewportCenterLine ?? 0) >= 110 && (before.liveViewportCenterLine ?? 0) <= 138,
       `前置：视口中心须在 Mermaid 围栏附近，实际 ${before.liveViewportCenterLine}`)
     await openWithEditor('mode.md')
     await waitSessionReady('mode.md')
