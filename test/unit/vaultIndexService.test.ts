@@ -1226,6 +1226,48 @@ describe('VaultIndexService：review-loops relOf 上行判定（#22）', () => {
     await vi.advanceTimersByTimeAsync(2000)
     expect(service.maintenanceInfo().roots[0]!.fileCount).toBe(2)
   })
+
+  /** relOf 是 private 纵深防御内层（公开入口均被 rootOf 前置拦截，越根
+   *  行为差异不可经公开面观察）——按平台分隔符直接钉契约：win32 的
+   *  path.relative 产出 `..\` 形态，越根判定必须跟随 ops.sep（与
+   *  vaultLink.isInsideRoot 同口径），硬编码 '../' 会漏拦 */
+  function relOfProbe(service: VaultIndexService, fsPath: string): string | null {
+    const internal = service as unknown as {
+      relOf(state: unknown, p: string): string | null
+      roots: Map<string, unknown>
+    }
+    const state = internal.roots.values().next().value
+    return internal.relOf(state, fsPath)
+  }
+
+  it('Windows 宿主下多段越根（..\\ 形态）判 null，根内路径与 .. 前缀文件名不受影响', async () => {
+    const fs = makeFs({
+      'C:/vault/..drafts.md': '# D\n',
+      'C:/vault/sub/a.md': '# A\n',
+    })
+    const { service } = makeService(fs, { isWindowsHost: true, storageRoot: 'C:/store' })
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // 多段越根：win32.relative 产出 '..\outside.md'，旧实现 startsWith('../') 漏拦
+    expect(relOfProbe(service, 'C:/outside.md')).toBeNull()
+    // 纯上行到盘根（rel === '..'）两平台一致拒绝
+    expect(relOfProbe(service, 'C:/')).toBeNull()
+    // 根内路径与 .. 前缀文件名照常
+    expect(relOfProbe(service, 'C:/vault/sub/a.md')).toBe('sub/a.md')
+    expect(relOfProbe(service, 'C:/vault/..drafts.md')).toBe('..drafts.md')
+  })
+
+  it('POSIX 宿主越根判定语义保持（分隔符跟随不影响）', async () => {
+    const fs = makeFs({
+      '/vault/sub/a.md': '# A\n',
+      '/vault/..drafts.md': '# D\n',
+    })
+    const { service } = makeService(fs, { isWindowsHost: false, storageRoot: '/store' })
+    await service.initialize([{ fsPath: '/vault', uri: 'file:///vault' }])
+    expect(relOfProbe(service, '/outside.md')).toBeNull()
+    expect(relOfProbe(service, '/')).toBeNull()
+    expect(relOfProbe(service, '/vault/sub/a.md')).toBe('sub/a.md')
+    expect(relOfProbe(service, '/vault/..drafts.md')).toBe('..drafts.md')
+  })
 })
 
 describe('VaultIndexService：review-loops 快照写失败与 tmp 回收（#13/#15）', () => {
@@ -1321,29 +1363,38 @@ describe('VaultIndexService：review-loops 三连代增量快照可恢复（#17 
     const fs = makeFs(initial)
     const first = makeService(fs)
     await first.service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
-    // 第一轮增量：改一组文件（其余片继承 gen1）
-    fs.files.set('C:/vault/d0/n0.md', '# N0-v2\n')
-    fs.stats.set('C:/vault/d0/n0.md', { mtimeMs: 1_700_000_030_000, size: 9 })
+    // 第一轮增量：改一组文件（其余片继承 gen1）——n0 正文带 gen1 没有的
+    // 引用边（n0→n1，恢复代特征 A）
+    fs.files.set('C:/vault/d0/n0.md', '# N0-v2 见 [[../d1/n1]]\n')
+    fs.stats.set('C:/vault/d0/n0.md', { mtimeMs: 1_700_000_030_000, size: 22 })
     await first.service.documentSaved('C:/vault/d0/n0.md')
     await vi.advanceTimersByTimeAsync(2000)
-    // 第二轮增量：再改另一组（继承上一代的继承片——实体在 gen1）
-    fs.files.set('C:/vault/d1/n1.md', '# N1-v3\n')
-    fs.stats.set('C:/vault/d1/n1.md', { mtimeMs: 1_700_000_040_000, size: 9 })
+    // 第二轮增量：再改另一组（继承上一代的继承片——实体在 gen1）——n1
+    // 正文带 gen2 也没有的引用边（n1→n2，恢复代特征 B）
+    fs.files.set('C:/vault/d1/n1.md', '# N1-v3 见 [[../d2/n2]]\n')
+    fs.stats.set('C:/vault/d1/n1.md', { mtimeMs: 1_700_000_040_000, size: 22 })
     await first.service.documentSaved('C:/vault/d1/n1.md')
     await vi.advanceTimersByTimeAsync(2000)
-    // 新实例（同存储）恢复：直接拿到最新代（gen3）——若继承链断裂会回退旧代
+    // 新实例（同存储）恢复：直接拿到最新代（gen3）——若继承链断裂会回退旧代。
+    // 恢复代区分断言（review-loops R6 加强）：两条代特征边都在场——
+    //   特征 A（n0→n1）：回退 gen1 时缺失（n1 反链为空）
+    //   特征 B（n1→n2）：回退 gen1 或 gen2 时缺失（n2 反链无 d1/n1.md）
+    // 旧实现的「空 items」断言在新旧代都无引用时两可，无法区分代
     const second = new VaultIndexService(first.scan, first.storage, {
       storageRoot: 'C:/store', isWindowsHost: IS_WIN,
     })
     await second.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
-    const result = await second.backlinksOf('C:/vault/d0/n0.md')
-    expect(result.status).toBe('ready')
-    // n0 的正文在 gen2 已变（无引用来源），新实例基线应为最新内容
-    expect(itemsOf(result)).toHaveLength(0)
-    fs.files.set('C:/vault/d0/n0.md', '# N0-v2 见 [[../d1/n1]]\n')
+    const n1Result = await second.backlinksOf('C:/vault/d1/n1.md')
+    expect(n1Result.status).toBe('ready')
+    expect(itemsOf(n1Result).map((i) => i.sourceRelPath)).toEqual(['d0/n0.md'])
+    expect(itemsOf(await second.backlinksOf('C:/vault/d2/n2.md')).map((i) => i.sourceRelPath))
+      .toEqual(['d1/n1.md'])
+    // 恢复后的实例可继续增量提交（原尾段语义保留）：n0 改指向 n2 后，
+    // n2 的反链按来源路径序含两个引用者
+    fs.files.set('C:/vault/d0/n0.md', '# N0-v2 见 [[../d2/n2]]\n')
     fs.stats.set('C:/vault/d0/n0.md', { mtimeMs: 1_700_000_050_000, size: 22 })
     await second.documentSaved('C:/vault/d0/n0.md')
     await vi.advanceTimersByTimeAsync(2000)
-    expect(itemsOf(await second.backlinksOf('C:/vault/d1/n1.md')).map((i) => i.sourceRelPath)).toEqual(['d0/n0.md'])
+    expect(itemsOf(await second.backlinksOf('C:/vault/d2/n2.md')).map((i) => i.sourceRelPath)).toEqual(['d0/n0.md', 'd1/n1.md'])
   })
 })

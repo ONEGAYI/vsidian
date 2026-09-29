@@ -1214,15 +1214,19 @@ export function createTextEditorProvider(
     // 文档关闭退役（review-loops #18）：编辑后不保存关闭的面板，其 unsaved
     // 全文与覆盖层边随文档关闭退场（否则幽灵反链滞留至下次保存/重扫）。
     // 同文档仍有 Vsidian 面板（自定义编辑器持有文档）时不退役——面板侧
-    // 仍有当前内容域；订阅随 context.subscriptions 释放
+    // 仍有当前内容域；findEntry（非精确 getEntry）做 Windows 大小写容错
+    // ——URI 形态漂移时不得误判「无面板」而提前退役。退役同时清理该文档
+    // 的反链广播序号（backlinksSeqByDoc，键与 sessions 同源——面板打开时
+    // 的 uri 形态；onDidClose 的 document.uri 为同一 TextDocument，恒命中）
     context.subscriptions.push(
       vscode.workspace.onDidCloseTextDocument((document) => {
         if (document.uri.scheme !== 'file' || !/\.md$/i.test(document.uri.path)) {
           return
         }
-        if (getEntry(document.uri)) {
+        if (findEntry(document.uri)) {
           return
         }
+        backlinksSeqByDoc.delete(document.uri.toString())
         vaultIndex.documentClosed(document.uri.fsPath)
       }),
     )
