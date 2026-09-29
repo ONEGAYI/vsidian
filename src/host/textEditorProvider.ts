@@ -34,6 +34,7 @@ import {
   isWebviewToHost,
   type DiagramExportPayload,
   type HostToWebview,
+  type ImageExportPayload,
   type ImagePastePayload,
   type SerChange,
   type TableEditOp,
@@ -70,6 +71,7 @@ import {
 import type { SnippetLinkList } from '../shared/cssSnippets'
 import type { SettingsPageHandle } from './settingsPage'
 import { runDiagramExport } from './diagramExportHost'
+import { runImageExport } from './imageExportHost'
 import { runImagePaste, type ImagePasteOutcome } from './imagePasteHost'
 import { installHostLocale, LOCALE_MESSAGES, type LocaleCode } from '../shared/locales'
 import { buildLocaleIslandHtml } from '../shared/locales/island'
@@ -140,6 +142,12 @@ const diagramExportTestLog = new Map<string, DiagramExportPayload[]>()
  *  形态；落盘真实执行（无对话框依赖，与 diagram.export 的短路不同），
  *  集成测试另以文件系统断言落盘结果；按文档 URI 分桶，查询即取走） */
 const imagePasteTestLog = new Map<string, ImagePastePayload[]>()
+
+/** 图片导出消息日志（#212 测试钩子观测：记录宿主收到的 image.export 载荷
+ *  形态；与 diagram.export 同款短路（不弹真实另存为对话框），集成测试经
+ *  image.test.popup 的 action 驱动导出按钮后以此断言消息形态；按文档
+ *  URI 分桶，查询即取走） */
+const imageExportTestLog = new Map<string, ImageExportPayload[]>()
 
 /** 链接跳转执行日志（#10 测试钩子观测：VSIDIAN_TEST_HOOKS 下集成测试断言
  *  宿主收到的跳转意图与处置结果） */
@@ -1155,6 +1163,20 @@ export function createTextEditorProvider(
           }
           void runDiagramExport(payload, document.uri.toString(), report)
         },
+        // #212 图片导出端口：目标定位 + 读字节 + showSaveDialog + writeFile
+        //（字节级拷贝保持原格式）。测试钩子模式短路真实对话框（记录消息
+        // 形态供集成断言，与 diagram.export 同款回报 cancelled）
+        exportImage: (payload, report) => {
+          if (process.env.VSIDIAN_TEST_HOOKS === '1') {
+            const key = document.uri.toString()
+            const log = imageExportTestLog.get(key) ?? []
+            log.push(payload)
+            imageExportTestLog.set(key, log)
+            report({ ok: false, reason: 'cancelled' })
+            return
+          }
+          void runImageExport(payload, linkCtx, document.uri.toString(), report)
+        },
         // #161 图片粘贴落盘端口：读设置快照 → 目录解析（URI path 空间）→
         // 建目录/写盘 → 回发插入文本。测试钩子模式记录载荷形态但不短路
         // 落盘（无对话框依赖，真实写盘可断言）
@@ -2066,6 +2088,17 @@ export function createTextEditorProvider(
       (uriStr: string) => {
         const log = imagePasteTestLog.get(uriStr) ?? []
         imagePasteTestLog.set(uriStr, [])
+        return [...log]
+      },
+    ),
+    vscode.commands.registerCommand(
+      // #212 图片导出消息日志（取走即清空）：钩子模式下 exportImage 端口
+      // 不弹真实另存为对话框，集成测试经 image.test.popup 的 action 驱动
+      // 导出按钮后，以此断言 webview→宿主链路的消息形态
+      'onegayi.vsidian._test.takeImageExportLog',
+      (uriStr: string) => {
+        const log = imageExportTestLog.get(uriStr) ?? []
+        imageExportTestLog.set(uriStr, [])
         return [...log]
       },
     ),

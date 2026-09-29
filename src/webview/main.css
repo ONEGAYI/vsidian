@@ -3448,6 +3448,33 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
   color: var(--vscode-button-secondaryForeground, var(--vscode-editor-foreground));
 }
 
+/* ---- #212：图片挂载同款按钮组 ----
+   图片 frame = frame.vsidian-image（live 槽位 span 自任 frame；阅读 img
+   是 void 元素不能有子元素，经 frame 包裹、chrome 为 img 兄弟）：
+   - 行内形态 + 零 margin（覆盖 mermaid frame 的 block + 0.75em——行内
+     混排不被打断；live 侧 .cm-scroller 内另由既有槽位规则钉 inline-block，
+     块级独行图由 vsidian-image-block 既有规则接管）
+   - 阅读独行图（段落内唯一元素子节点）frame 取块级：viewBox-only 百分比
+     宽 SVG 在 inline-block shrink-to-fit 包含块下解析为 0×0（liveImageLayout
+     B1 塌缩问题的阅读侧变体——块级布局给 width:100% 确定基准；行内混排
+     的此类 SVG 塌缩属既有记录边界）
+   - 按钮组随 loaded 态显现（同 mermaid rendered 兄弟选择器模式；错误/
+     加载态无按钮——错误态点击重试语义照旧）；悬停显现沿用上方
+     frame:hover 通用规则（图片 frame 同类命中） */
+#app .vsidian-graphic-frame.vsidian-image {
+  display: inline-block;
+  margin: 0;
+}
+
+#app .vsidian-view-reading .vsidian-graphic-frame.vsidian-image:only-child {
+  display: block;
+}
+
+#app .vsidian-image[data-vsidian-img-state="loaded"] > .vsidian-graphic-chrome,
+#app .vsidian-image[data-vsidian-img-state="loaded"] ~ .vsidian-graphic-chrome {
+  display: flex;
+}
+
 /* ---- 图表弹窗（#111）----
    webview 内全屏模态浮层：backdrop 毛玻璃压暗、stage 平移画布（内容
    居中 + translate 摆位；缩放写 SVG 实际尺寸由 JS 承担）、底部居中
@@ -3492,6 +3519,13 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
 }
 
 .vsidian-diagram-media svg {
+  max-width: none;
+  display: block;
+}
+
+/* #212 图片弹窗：media 内容是 <img>（位图无矢量重排，缩放走 transform，
+   不写 width/height）——同 SVG 形态解除正文槽位的 max-width 限宽 */
+.vsidian-diagram-media img {
   max-width: none;
   display: block;
 }

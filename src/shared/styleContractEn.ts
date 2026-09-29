@@ -356,9 +356,10 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
   },
   'image-slot': {
     purpose:
-      'Base class of the image slot: in reading view it is the <img> element itself (Obsidian img tag selectors match naturally); in live view it is a widget container span (the inner img is loaded by the resource manager — a vsidian-specific form).',
-    states: 'Loading starts only when the slot enters the viewport; leaving the viewport unloads and releases it (src is cleared).',
-    dom: 'Reading: img.vsidian-image inside the block. Live: an inline widget span.vsidian-image > img.',
+      'Base class of the image slot: in reading view it is the <img> element itself (Obsidian img tag selectors match naturally); in live view it is a widget container span (the inner img is loaded by the resource manager — a vsidian-specific form). Since #212 images outside links and tables carry the shared button group: the live slot span doubles as vsidian-graphic-frame (the vsidian-image class stays, slot semantics unchanged); reading imgs are wrapped by the same frame span (img is a void element and cannot have children).',
+    states:
+      'Loading starts only when the slot enters the viewport; leaving the viewport unloads and releases it (src is cleared). Since #212 the button group appears in the loaded state (no buttons while error/loading — the error-state click-to-retry semantics stay), driven by sibling/descendant selectors on data-vsidian-img-state.',
+    dom: 'Reading: img.vsidian-image inside the block (since #212 optionally wrapped by span.vsidian-graphic-frame.vsidian-image). Live: an inline widget span.vsidian-image > img (with the frame class added when the button group is attached; the group is a following sibling of the img).',
     obsidian: { counterpart: '.markdown-preview-view img (reading) / .cm-image (live direction; Obsidian has no public stable class)' },
   },
   'image-states': {
@@ -618,15 +619,15 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
   // ---- 图形化按钮与弹窗（graphic-interact，2 条；#111）----
   'graphic-chrome': {
     purpose:
-      'The positioning wrapper of graphic code blocks (fences rendered as graphics) and its top-right button group: edit enters source editing (live preview only), popup opens the diagram popup; the group hover show/hide is CSS-driven (an opacity toggle; the DOM stays present in the rendered-success state).',
+      "The positioning wrapper of graphic code blocks (fences rendered as graphics) and its top-right button group: edit enters source editing (live preview only), popup opens the diagram popup; the group hover show/hide is CSS-driven (an opacity toggle; the DOM stays present in the rendered-success state). Since #212 Markdown images reuse the same button group and interaction contract (edit+popup on live / popup-only on reading; the image body swallows clicks to prevent accidental edits); images inside links or table grids do not carry it (explicitly out of scope).",
     states:
-      'The button group shows in the rendered-success state (error fallback blocks do not emit it); the edit button is assembled only on the live preview side.',
-    dom: "Live: the frame around the fence widget; reading: the frame around the mermaid/graphic container. The button group is absolutely positioned at the frame's top right.",
+      'The button group shows in the rendered-success state (error fallback blocks do not emit it); the edit button is assembled only on the live preview side. Image form: shown in the loaded state (driven by sibling/descendant selectors on data-vsidian-img-state); frame.vsidian-image takes an inline layout (inline mixed flow is not broken).',
+    dom: "Live: the frame around the fence widget; reading: the frame around the mermaid/graphic container. Image form: the live slot span doubles as the frame (vsidian-image added); reading imgs are wrapped by an inline frame span. The button group is absolutely positioned at the frame's top right.",
     obsidian: { counterpart: 'None (Obsidian diagram blocks have no public button-group structure)' },
   },
   'diagram-popup': {
     purpose:
-      'The fullscreen overlay of the diagram popup (#111): backdrop + stage (the diagram body being zoomed/panned) + toolbar (zoom/reset/refresh/export/close); the error state keeps close and refresh; note is the notice bar shown when the environment does not support PNG rasterization. Attached to document.body and present only while the popup is open.',
+      'The fullscreen overlay of the diagram popup (#111): backdrop + stage (the diagram body being zoomed/panned) + toolbar (zoom/reset/refresh/export/close); the error state keeps close and refresh; note is the notice bar shown when the environment does not support PNG rasterization. Attached to document.body and present only while the popup is open. Since #212 the image popup (view/zoom/pan/refresh/save a copy of the original image) reuses the same class family and overlay skeleton: the content is an <img> (transform-based zoom), -export-image is the image-side export button (disabled for remote images with a hover hint on a wrapper span), a mutually exclusive singleton with the diagram popup.',
     states: 'Present while opened via the popup button; dismissed by Esc, clicking the empty area or the close button.',
     dom: 'A direct child of body — the overlay (backdrop/stage/toolbar areas).',
     obsidian: { counterpart: 'None (Obsidian opens diagrams in a new tab)' },

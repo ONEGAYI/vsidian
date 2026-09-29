@@ -50,8 +50,9 @@ export interface ImageManagerDeps {
 
 /** 图源规范化：容错 percent-decode 一次。CommonMark 语义下链接目标就是
  *  解码值——live 源文原样（部分编码）与 markdown-it 全编码形态由此归一为
- *  同一逻辑图源（去重请求、同键缓存）；非法转义序列按原样保留。 */
-function normalizeImgSrc(src: string): string {
+ *  同一逻辑图源（去重请求、同键缓存）；非法转义序列按原样保留。
+ *  #212 起导出（弹窗持有/消息载荷）与宿主定位同用此口径。 */
+export function normalizeImgSrc(src: string): string {
   try {
     return decodeURIComponent(src)
   } catch {

@@ -7,6 +7,7 @@
 // PNG 光栅化失败时按规格降级为仅 SVG 并提示）。
 import { t } from '../shared/i18n'
 import { locateGraphicFenceCode } from '../shared/mermaid'
+import { claimPopup, releasePopup } from './popupMutex'
 import { graphicRendererFor } from './graphicRenderers'
 import {
   rasterizeDiagramPng,
@@ -120,6 +121,7 @@ export function closeDiagramPopup(): void {
   }
   const p = popup
   popup = null
+  releasePopup(closeDiagramPopup)
   for (const cleanup of p.cleanups) {
     cleanup()
   }
@@ -286,9 +288,11 @@ async function exportPng(p: PopupState): Promise<void> {
   sendExport('png', p.language, dataUrl.slice('data:image/png;base64,'.length))
 }
 
-/** 打开图表弹窗（单例：再次打开先关闭旧的） */
+/** 打开图表弹窗（单例：再次打开先关闭旧的；#212 起经 popupMutex 与图片
+ *  弹窗互斥——同时只允许一个弹窗实例） */
 export function openGraphicPopup(language: string, code: string): void {
   closeDiagramPopup()
+  claimPopup(closeDiagramPopup)
   const renderer = graphicRendererFor(language)
   if (!renderer) {
     return
