@@ -1080,6 +1080,15 @@ function mermaidProbeBrief(v: ViewState): string {
     : `rendered ${m.rendered}/${m.count}, error ${m.error}`
 }
 
+/** 视口内 Mermaid 围栏是否全部到达终态（rendered + error === count；
+ *  error 降级围栏的高度也是终态——用计数关系而非魔数，文档围栏数变化
+ *  不需改用例）。无容器（围栏未挂载/非 mermaid 文档）视为未终态，由
+ *  调用方的视口就绪前置保证容器已挂载 */
+function mermaidReachedTerminal(v: ViewState): boolean {
+  const m = v.paint?.mermaid
+  return m !== undefined && m.rendered + m.error === m.count && m.count > 0
+}
+
 async function waitViewState(
   file: string,
   match?: (v: ViewState) => boolean,
@@ -4160,9 +4169,14 @@ export const cases: Array<[string, () => Promise<void>]> = [
       { kind: 'viewport.test.position', cursorLine: 123 })
     await vscode.commands.executeCommand(CMD.postToPanel, uri,
       { kind: 'viewport.test.position', scrollNearLine: 123, scrollBiasPx: 150 })
+    // 等视口带内三个围栏（116/123/133）到渲染终态再采样——懒加载渲染间隙
+    // 中心行可短暂不变（两次采样一致的假稳定），before/after 落在渲染前后
+    // 两种几何上即漂移（CI 实测形态：中心行 128→116、scrollTop 2367→2490）。
+    // 终态谓词含 error 态（降级围栏高度也是终态），不硬编码围栏数
+    await waitViewState('viewport-mermaid.md', mermaidReachedTerminal, 0, 60000)
     const before = await waitViewportSettled('viewport-mermaid.md')
     // 前置只确认「滚到了围栏带」（文档三个 Mermaid 围栏占 116–138 行）——
-    // 本地快机渲染后中心 ~118、CI xvfb 的 SVG 尺寸使稳定值可到 128，都在带内。
+    // 本地快机渲染后中心 ~118、CI xvfb 的 SVG 渲染尺寸使稳定值可到 128，都在带内。
     // 用例本体断言是切标签页前后中心行 ±2 与光标一致，不受带内位置影响
     assert((before.liveViewportCenterLine ?? 0) >= 110 && (before.liveViewportCenterLine ?? 0) <= 138,
       `前置：视口中心须在 Mermaid 围栏附近，实际 ${before.liveViewportCenterLine}`)
@@ -4174,6 +4188,13 @@ export const cases: Array<[string, () => Promise<void>]> = [
       return state?.panels.some((p) => p.ready) ? true : undefined
     })
     await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'viewport.test.position' })
+    // 切回后状态恢复（光标/滚动经 getState 重建）与围栏重渲染都是异步链路，
+    // 先等「光标回到切走前值」（恢复到错误值则等待超时并附最后观测快照，
+    // 断言语义不弱化——CI 实测形态：光标恢复未完成 2029→0），再等围栏
+    // 重渲染终态，最后采落定视口
+    await waitViewState('viewport-mermaid.md',
+      (v) => (v.selectionOffset ?? -1) === (before.selectionOffset ?? -2), 0, 30000)
+    await waitViewState('viewport-mermaid.md', mermaidReachedTerminal, 0, 60000)
     const after = await waitViewportSettled('viewport-mermaid.md')
     assert(after.selectionOffset === before.selectionOffset,
       `纯光标移动应跨标签页恢复：${before.selectionOffset} → ${after.selectionOffset}` +
