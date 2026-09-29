@@ -303,6 +303,7 @@ export function createTextEditorProvider(
   // ---- #201 图片刷新协调器（provider 级单件：版本表与失效通道跨会话共享） ----
   const isWindowsHost = process.platform === 'win32'
   const imageRefreshEvents: string[] = []
+  const IMAGE_EVENT_LOG_LIMIT = 8 // 环形上限（RENAME_LOG_LIMIT 同形态）：会话生命周期内无界增长
   const imageRefresh = new ImageRefreshCoordinator(
     {
       statTarget: async (fsPath) => {
@@ -321,6 +322,9 @@ export function createTextEditorProvider(
       resolveTarget: () => null, // 各会话按自身 linkCtx 覆盖（openEntry 注入）
       invalidateTarget: (fsPath) => {
         imageRefreshEvents.push(fsPath)
+        if (imageRefreshEvents.length > IMAGE_EVENT_LOG_LIMIT) {
+          imageRefreshEvents.splice(0, imageRefreshEvents.length - IMAGE_EVENT_LOG_LIMIT)
+        }
         for (const entry of sessions.values()) {
           entry.session.invalidateImagesByFsPath(fsPath)
         }
@@ -352,6 +356,12 @@ export function createTextEditorProvider(
       watcher.dispose() // 其上的事件订阅随之释放
     }
     imageWatchers = []
+    // 去抖计时器随之清空（review-loops #21）：拆监听后残留计时器会在
+    // 到期时对已失效的 watcher 域发起核验
+    for (const timer of imageWatchTimers.values()) {
+      clearTimeout(timer)
+    }
+    imageWatchTimers.clear()
   }
   const setupImageWatchers = (): void => {
     teardownImageWatchers()
@@ -453,7 +463,8 @@ export function createTextEditorProvider(
       void vscode.window.showInformationMessage(t('host.conflictInputCopied'))
     } else {
       void vscode.window.showWarningMessage(t('host.noConflictInputToCopy'))
-    }  }
+    }
+  }
 
   /** 恢复（放弃本地修改重新同步）：二次确认避免误丢输入 */
   const confirmResume = async (uriStr: string, sessionId: string): Promise<void> => {

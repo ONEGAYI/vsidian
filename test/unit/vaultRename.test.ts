@@ -505,6 +505,27 @@ describe('vaultRename：#200 目录移动映射展开（expandRenameMoves）', (
     ])
   })
 
+  it('review-loops #12：父子目录同批移动时最具体（子）目录先展开，父展开不吞并子映射', async () => {
+    const port = expandPort({
+      dirs: [`${WIN_ROOT}/a`, `${WIN_ROOT}/a/b`],
+      filesUnder: {
+        [`${WIN_ROOT}/a`]: [`${WIN_ROOT}/a/x.md`, `${WIN_ROOT}/a/b/y.md`],
+        [`${WIN_ROOT}/a/b`]: [`${WIN_ROOT}/a/b/y.md`],
+      },
+      indexed: {},
+    })
+    // 同批嵌套对：a → x，a/b → x/y（宿主通常只给顶级映射；此为防御形态）
+    const result = await expandRenameMoves(true, [
+      { oldFsPath: `${WIN_ROOT}/a`, newFsPath: `${WIN_ROOT}/x` },
+      { oldFsPath: `${WIN_ROOT}/a/b`, newFsPath: `${WIN_ROOT}/x/y` },
+    ], port)
+    // 子目录 b 的文件按自身映射去 x/y（而非被父展开吞到 x/b）
+    expect(movesOf(result.moves)).toEqual([
+      [`${WIN_ROOT}/a/b/y.md`, `${WIN_ROOT}/x/y/y.md`],
+      [`${WIN_ROOT}/a/x.md`, `${WIN_ROOT}/x/x.md`],
+    ])
+  })
+
   it('文件条目原样保留：目录与文件混合批（多选移动）', async () => {
     const port = expandPort({
       dirs: [`${WIN_ROOT}/dir-old`],

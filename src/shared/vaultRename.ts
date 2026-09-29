@@ -91,13 +91,24 @@ export async function expandRenameMoves(
   const dirOldKeys = new Set<string>()
   const expanded: RenameMoveEntry[] = []
   let notReadyMoves = 0
+  // review-loops #12：目录条目按 old 路径长度降序处理（最具体的子目录先
+  // 展开）——父目录先展开会把子目录下文件映射到父新路径下，吞并同批
+  // 子目录自身的映射（子目录 rename 语义丢失）
+  const dirEntries: Array<{ move: RenameMoveEntry; oldKey: string; depth: number }> = []
   for (const move of moves) {
-    const oldKey = fold(norm(move.oldFsPath))
     const isDir = (await port.isDirectory(move.oldFsPath)) ||
       (await port.isDirectory(move.newFsPath))
     if (!isDir) {
       continue // 文件条目原样保留（已在 byOld）
     }
+    dirEntries.push({
+      move,
+      oldKey: fold(norm(move.oldFsPath)),
+      depth: norm(move.oldFsPath).length,
+    })
+  }
+  dirEntries.sort((a, b) => b.depth - a.depth)
+  for (const { move, oldKey } of dirEntries) {
     const indexed = port.indexedFilesUnder(move.oldFsPath)
     if (indexed === null) {
       // 索引未就绪：该目录整体放弃（引用者边查询与批量刷新同样无效——
