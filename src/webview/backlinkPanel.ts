@@ -435,16 +435,17 @@ export function createLinksChainIcon(variant: 'in' | 'out'): SVGSVGElement {
   svg.setAttribute('stroke-linejoin', 'round')
   svg.setAttribute('aria-hidden', 'true')
   // 链主体（织结双环：右上环与左下环各在交叉处断口——互锁造型）。
-  // 验收微调：链主体与箭头各 ×0.95（绕各自几何中心缩放，位置不动）
+  // 验收微调（二轮 0.95→0.85）：链主体与箭头各绕自身几何中心缩放、位置
+  // 不动——0.95 时箭头与链环仍显贴靠，0.85 拉开间隙
   appendScaledPathGroup(svg, [
     'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71',
     'M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71',
-  ], 12, 12)
+  ], 12, 12, 0.85)
   // 箭头（与链环留间隙的独立小箭头；反链朝左折返 / 出链朝右出）
   appendScaledPathGroup(svg, [
     variant === 'in' ? 'M22 18h-7' : 'M14 18h7',
     variant === 'in' ? 'M18 15l-3 3 3 3' : 'M18 15l3 3-3 3',
-  ], 18.5, 18)
+  ], 18.5, 18, 0.85)
   return svg
 }
 
@@ -455,7 +456,7 @@ function appendScaledPathGroup(
   ds: readonly string[],
   cx: number,
   cy: number,
-  scale = 0.95,
+  scale = 0.85,
 ): void {
   const g = document.createElementNS(SVG_NS, 'g')
   g.setAttribute('transform', `translate(${cx} ${cy}) scale(${scale}) translate(${-cx} ${-cy})`)
