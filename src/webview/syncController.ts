@@ -123,6 +123,14 @@ import {
   setImagePopupContext,
   IMAGE_POPUP_EXPORT_CLASS,
 } from './imagePopup'
+import {
+  closeHoverPopup,
+  hoverPopupProbe,
+  hoverPreviewAnchorEnter,
+  hoverPreviewAnchorLeave,
+  notifyHoverResult,
+  setHoverPreviewContext,
+} from './hoverPopup'
 import { GRAPHIC_LANG_ATTR, MERMAID_CLASS_NAMES, MERMAID_CODE_ATTR, MERMAID_STATE_ATTR } from '../shared/mermaid'
 import { IMAGE_CLASS_NAMES, ImageResourceManager, isDirectImageSrc } from './imageResource'
 import { ImageVerifyScheduler } from './imageVerifyScheduler'
@@ -1051,6 +1059,14 @@ export class WebviewSyncController {
       },
     )
     document.addEventListener('visibilitychange', this.imageVisibilityEntry)
+    // #218 悬停预览出站上下文：会话身份（init 后可用）+ 只读消息通道 +
+    // 父面板图片管理器（浮层内图片按现有能力装载；B 来源解析属 #220）。
+    // dispose 时清空（setHoverPreviewContext(null) 同步关浮层）
+    setHoverPreviewContext({
+      session: () => ({ sessionId: this.sessionId, docUri: this.docUri }),
+      send: (message) => this.bridge.postMessage(message),
+      images: () => this.images as ImageResourceManager | undefined,
+    })
     this.readingView = new VirtualReadingView(this.readingContainer, {
       // #10 图片生命周期：块挂载预备装载，卸载释放（src 清空、条目回收）
       // #60 Mermaid：挂载即渲染 pending 容器（DOM 随块卸载 el.remove 释放）
@@ -1147,6 +1163,33 @@ export class WebviewSyncController {
         srcStart: Number.isInteger(srcStart) ? srcStart : 0,
         srcEnd: Number.isInteger(srcEnd) ? srcEnd : srcStart,
       })
+    })
+    // #218 悬停预览（Reading 直接悬停）：同一容器上的 mouseover/mouseout
+    // 委托（与 click 委托同款 closest 命中，目标口径一致——仅双链）；命中
+    // 与否、开闭时延、保活与迟到守卫都在 hoverPopup 模块内收敛。live 侧
+    // （Ctrl+悬停）与面板入口属 #221，此处不装配
+    this.readingContainer.addEventListener('mouseover', (event) => {
+      if (this.viewMode !== 'reading') {
+        return
+      }
+      const target = event.target as HTMLElement | null
+      const anchor = target?.closest?.(`a.${WIKILINK_CLASS_NAMES.wikilink}`)
+      if (!(anchor instanceof HTMLElement) || !this.readingContainer!.contains(anchor)) {
+        return
+      }
+      hoverPreviewAnchorEnter(anchor)
+    })
+    this.readingContainer.addEventListener('mouseout', (event) => {
+      const anchor = (event.target as HTMLElement | null)?.closest?.(`a.${WIKILINK_CLASS_NAMES.wikilink}`)
+      if (!(anchor instanceof HTMLElement)) {
+        return
+      }
+      // 锚点内部移动（嵌套行内标记）不视为离开
+      const related = event.relatedTarget
+      if (related instanceof Node && anchor.contains(related)) {
+        return
+      }
+      hoverPreviewAnchorLeave(anchor)
     })
     // #53 布局骨架：#app > body(水平) > main(主编辑区：顶栏+横幅+双视图)
     // + sidebar(右侧栏)；findPanel 浮层仍直接挂 #app（以 #app 为定位包含块）
@@ -1299,6 +1342,8 @@ export class WebviewSyncController {
     closeDiagramPopup()
     closeImagePopup()
     closeFmPopover()
+    // #218 悬停浮层随卸载退出（清空上下文，同步关浮层释放实例）
+    setHoverPreviewContext(null)
     setDiagramExportSender(null)
     setDiagramPopupDocSource(null)
     setImagePopupContext(null)
@@ -1564,6 +1609,32 @@ export class WebviewSyncController {
           `.${BACKLINK_CLASS_NAMES.sortMenuItem}[data-vsidian-sort="${message.mode}"]`,
         )
         item?.click()
+        break
+      }
+      case 'hover.result': {
+        // #218 悬停预览结果：转发浮层模块（instanceId + reqId 双守卫在
+        // 模块内——迟到/陈旧回包丢弃，不重开已关闭浮层）
+        notifyHoverResult(message)
+        break
+      }
+      case 'hover.test.pointer': {
+        // #218 测试钩子：对阅读视图第 index 个真实双链派发 mouseover/
+        // mouseout（冒泡经容器委托——与用户悬停同一处理器链路）；宿主
+        // 测试无法向 webview 派发真实鼠标事件
+        const container = this.readingContainer
+        if (!container || this.viewMode !== 'reading') {
+          break
+        }
+        const anchors = Array.from(container.querySelectorAll<HTMLElement>(
+          `a.${WIKILINK_CLASS_NAMES.wikilink}`))
+        const anchor = anchors[message.index]
+        if (!anchor) {
+          break
+        }
+        anchor.dispatchEvent(new MouseEvent(
+          message.action === 'enter' ? 'mouseover' : 'mouseout',
+          { bubbles: true, relatedTarget: message.action === 'enter' ? document.body : null },
+        ))
         break
       }
       case 'image.test.pending': {
@@ -2547,6 +2618,8 @@ export class WebviewSyncController {
       outlinks: this.collectOutlinks(),
       // #140 Popover 改版：属性编辑浮层开态（集成断言用）
       fmPopoverOpen: isFmPopoverOpen(),
+      // #218 悬停预览观测：浮层开闭、内容态与块数（集成断言用）
+      hoverPreview: hoverPopupProbe(),
     }
     this.bridge.postMessage(state)
   }
@@ -2770,6 +2843,11 @@ export class WebviewSyncController {
     this.viewMode = mode
     this.closeQuickHeadingMenu(false)
     this.refreshQuickActions()
+    // #218 悬停浮层只在 Reading 挂载域内有效：切模式 = 触发上下文失效，
+    // 释放实例（规格「面板销毁、切模式等使触发上下文失效时释放实例」）
+    if (mode !== 'reading') {
+      closeHoverPopup()
+    }
     if (this.liveWrapper) {
       this.liveWrapper.style.display = mode === 'live' ? '' : 'none'
     }

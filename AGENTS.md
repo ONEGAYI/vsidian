@@ -182,6 +182,7 @@ vsidian/
 │   │   ├── documentSession.ts          # 文档会话与写回同步
 │   │   ├── editorCsp.ts                # 编辑器 CSP 装配纯模块（#130）
 │   │   ├── hostLocale.ts               # 生效语言宿主装配解析帮手
+│   │   ├── hoverDocAccess.ts           # 悬停预览文档访问纯逻辑
 │   │   ├── imageExportHost.ts          # 宿主图片导出执行壳
 │   │   ├── imagePasteHost.ts           # 图片粘贴落盘执行壳（#161）
 │   │   ├── imagePastePlan.ts           # 图片粘贴纯逻辑（#161）
@@ -263,6 +264,8 @@ vsidian/
 │       ├── frontmatterPopover.ts       # frontmatter 属性编辑浮层
 │       ├── graphicBlockChrome.ts       # 图形化块右上角按钮组
 │       ├── graphicRenderers.ts         # 图形化渲染器注册表
+│       ├── hoverPopup.ts               # 悬停预览浮层单例
+│       ├── hoverPopupGeometry.ts       # 悬停浮层几何纯函数
 │       ├── htmlComment.ts              # 阅读侧 HTML 注释剥离纯函数
 │       ├── imagePaste.ts               # 图片粘贴拦截适配层（#161）
 │       ├── imagePopup.ts               # 图片弹窗全屏浮层单例

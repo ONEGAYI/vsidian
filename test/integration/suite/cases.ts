@@ -905,6 +905,8 @@ interface ViewState {
   }
   /** #140 Popover 改版：frontmatter 属性编辑浮层开态（protocol.ts 缺省可选） */
   fmPopoverOpen?: boolean
+  /** #218 悬停预览观测：浮层开闭、内容态、目标标识与内容块数 */
+  hoverPreview?: { open: boolean; state: 'loading' | 'content' | 'error'; note: string; blocks: number }
 }
 
 /** #7 阅读视图探针回报（reading.perf.report） */
@@ -11104,5 +11106,70 @@ export const cases: Array<[string, () => Promise<void>]> = [
     }, 60000)
     // 兜底清理（正常路径已删净目录内容；失败路径尽力还原不抛二次错误）
     await rm(`${wsDir}/git-switch`, { recursive: true, force: true }).catch(() => {})
+  }],
+
+  ['悬停预览：Reading 双链读取目标全文、错误分态就地呈现与双零 dirty（#218）', async () => {
+    await openWithEditor('悬停预览.md')
+    await waitSessionReady('悬停预览.md')
+    const uri = wsUri('悬停预览.md').toString()
+    const targetUri = wsUri('目标笔记.md')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    await waitViewState('悬停预览.md', (v) => v.viewMode === 'reading' && (v.readingWikilinkCount ?? 0) >= 2)
+    const parentBefore = await readDisk('悬停预览.md')
+    const targetBefore = await readDisk('目标笔记.md')
+
+    // 悬停第 0 个双链（[[目标笔记]]）：mouseover 经容器委托（与用户悬停
+    // 同一处理器链路）→ 开延迟后出站 hover.request → 宿主无副作用读取 →
+    // hover.result → 浮层以 Reading 内容显示目标全文
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 0 })
+    const shown = await waitViewState('悬停预览.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' && v.hoverPreview.blocks > 0)
+    assert(shown.hoverPreview?.note === '目标笔记.md',
+      `浮层目标标识应为根内相对路径（实际 ${shown.hoverPreview?.note}）`)
+
+    // 双零 dirty：父/目标 TextDocument 均不脏、磁盘文本不动、无 applyEdit
+    const targetDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())
+    const parentDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri)
+    assert(targetDoc, '读取后目标文档应经 openTextDocument 装载（只装载不显示）')
+    assert(parentDoc?.isDirty === false, `父文档不得变脏（实际 dirty=${parentDoc?.isDirty}）`)
+    assert(targetDoc?.isDirty === false, `目标文档不得变脏（实际 dirty=${targetDoc?.isDirty}）`)
+    assert(await readDisk('悬停预览.md') === parentBefore, '悬停读取不得改写父文档磁盘')
+    assert(await readDisk('目标笔记.md') === targetBefore, '悬停读取不得改写目标磁盘')
+    const hoverState = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(hoverState.appliedEdits === 0, `悬停链路不得产生 applyEdit（实际 ${hoverState.appliedEdits}）`)
+
+    // 离开链接 → 延迟关闭（实例释放）；悬停第 1 个双链（[[悬停缺失目标]]）
+    // → not-found 错误分态就地呈现（浮层在场、不弹宿主通知）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 0 })
+    await waitViewState('悬停预览.md', (v) => v.hoverPreview?.open === false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 1 })
+    await waitViewState('悬停预览.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'error')
+
+    // 迟到回包守卫（真宿主）：对已关闭旧实例的成功回包不得重开/翻新
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'hover.result',
+      reqId: 1,
+      instanceId: 'itest-stale-instance',
+      ok: true,
+      target: { fsPath: targetUri.fsPath, relPath: '目标笔记.md' },
+      version: 1,
+      text: '# 迟到内容\n',
+      range: { start: 0, end: 6 },
+      scope: { kind: 'full' },
+    })
+    await new Promise((r) => setTimeout(r, 300))
+    const stale = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+    assert(stale?.hoverPreview?.open === true && stale.hoverPreview.state === 'error',
+      `旧实例迟到回包应被丢弃（实际 ${JSON.stringify(stale?.hoverPreview)}）`)
+
+    // 复位：切回 live（后续用例隔离；浮层随切模式释放）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    await waitViewState('悬停预览.md', (v) => v.viewMode === 'live' && v.hoverPreview?.open === false)
+    const finalState = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(finalState.appliedEdits === 0, `全链路零 applyEdit（实际 ${finalState.appliedEdits}）`)
   }],
 ]

@@ -984,6 +984,14 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   writeFileSync(path.join(wsDir, 'batch-moved.md'), BATCH_MOVED_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'assets', 'batch-pic.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
   writeFileSync(path.join(wsDir, 'wikilinks.md'), WIKILINKS_DOC, 'utf8')
+  // #218 悬停预览：独立父文档（存在目标 + 缺失目标双链；不与共享样本的
+  // 双链计数断言互相干扰——wikilinks.md 有 liveWikilinkCount===3 钉住）
+  writeFileSync(path.join(wsDir, '悬停预览.md'), [
+    '# 悬停预览样例',
+    '',
+    '指向 [[目标笔记]] 与缺失目标 [[悬停缺失目标]]。',
+    '',
+  ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, '目标笔记.md'), TARGET_NOTE_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'wikilink-target.md'), WIKILINK_TARGET_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'wikilink-crlf-target.md'), WIKILINK_CRLF_TARGET_DOC, 'utf8')
