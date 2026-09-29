@@ -552,3 +552,33 @@ describe('可读行宽滑块（#175：number 型渲染为 range 控件）', () =
     expect(css).toMatch(/\.vsidian-settings-range-value\s*\{[^}]*min-width/)
   })
 })
+
+describe('常规分组图标（#230：地球换双拨杆开关）', () => {
+  /** 侧栏导航按钮内 svg path 的 d（经设置页真实渲染路径取用户所见字形） */
+  function navPath(parent: HTMLElement, title: string): string {
+    const nav = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
+      .find((b) => b.textContent === title)!
+    return nav.querySelector('svg path')!.getAttribute('d')!
+  }
+
+  it('「常规」图标为双拨杆开关：两枚横杆纵列、圆点一左一右（替换地球字形）', () => {
+    const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
+    const subs = navPath(parent, zhCn['settings.generalSection']).split(/(?=M)/)
+    // 按子路径（M 起）切分：两枚开关主体胶囊 + 两枚圆点，共 4 段——
+    // 地球字形为 3 段（外圆 + 赤道线 + 经线环），段数与形态断言据此暴露换形差异
+    expect(subs).toHaveLength(4)
+    // 两枚开关主体：同宽胶囊横杆（18 宽、两段半圆端）、纵向错位上下排列
+    expect(subs[0]).toBe('M7 2h10a4 4 0 0 1 0 8H7a4 4 0 0 1 0-8Z')
+    expect(subs[2]).toBe('M7 14h10a4 4 0 0 1 0 8H7a4 4 0 0 1 0-8Z')
+    // 两枚圆点：r=2 描边小圆，上一枚偏左（圆心 x=8）、下一枚偏右（x=16），拨杆方向相反
+    expect(subs[1]).toBe('M8 4a2 2 0 1 0 0 4 2 2 0 1 0 0-4')
+    expect(subs[3]).toBe('M16 16a2 2 0 1 0 0 4 2 2 0 1 0 0-4')
+  })
+
+  it('其余条目图标不变：编辑器仍为铅笔起笔字形（与「常规」新字形可区分）', () => {
+    const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
+    const editor = navPath(parent, zhCn['settings.editorCategory'])
+    expect(editor.startsWith('M14 4l6 6')).toBe(true)
+    expect(editor).not.toBe(navPath(parent, zhCn['settings.generalSection']))
+  })
+})
