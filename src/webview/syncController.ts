@@ -115,7 +115,7 @@ import {
   setDiagramPopupDocSource,
 } from './diagramPopup'
 import { graphicRendererFor, renderGraphicBlockInto } from './graphicRenderers'
-import { GRAPHIC_CHROME_CLASS_NAMES, buildGraphicChrome, wrapGraphicFrame } from './graphicBlockChrome'
+import { GRAPHIC_CHROME_CLASS_NAMES, buildGraphicChrome, markImageFrameSized, wrapGraphicFrame } from './graphicBlockChrome'
 import {
   closeImagePopup,
   isImagePopupOpen,
@@ -8278,6 +8278,8 @@ export class WebviewSyncController {
           },
         }),
       )
+      // 贴图收缩标记（img 已入 frame、frame 已在文档，几何判定可读）
+      markImageFrameSized(frame, img)
     }
   }
 

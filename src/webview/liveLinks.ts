@@ -26,7 +26,7 @@ import type { SyntaxNode, Tree } from '@lezer/common'
 import { chainAt, visitRange, type SourceRange } from './markdownDoc'
 import { liveDecorationsField, selectionTouchesRange } from './liveDecorations'
 import { IMAGE_CLASS_NAMES, type ImageResourceManager } from './imageResource'
-import { buildGraphicChrome, GRAPHIC_CHROME_CLASS_NAMES } from './graphicBlockChrome'
+import { buildGraphicChrome, GRAPHIC_CHROME_CLASS_NAMES, markImageFrameSized } from './graphicBlockChrome'
 import { openImagePopup } from './imagePopup'
 import {
   WIKILINK_CLASS_NAMES,
@@ -223,6 +223,9 @@ export class LiveImageWidget extends WidgetType {
       const image = document.createElement('img')
       image.alt = this.alt
       image.src = src
+      // 禁原生拖拽（与阅读侧 attach 通道同源决策）：ghost 缩略图 + 复制
+      // 徽标语义错乱，且吞交互输入流
+      image.draggable = false
       slot.appendChild(image)
       if (this.chrome) {
         slot.appendChild(
@@ -241,6 +244,9 @@ export class LiveImageWidget extends WidgetType {
           }),
         )
       }
+      // 贴图收缩标记（render 每次执行处挂：img 刚建必在场；重取重建时
+      // 随新 load 重算）
+      markImageFrameSized(slot, image)
       return image
     })
     return span

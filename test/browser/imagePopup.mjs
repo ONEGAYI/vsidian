@@ -25,6 +25,12 @@ const check = (name, ok, detail) => {
 const PIC = './assets/pic.svg'
 const picData = 'data:image/svg+xml,' + encodeURIComponent(
   '<svg width="240" height="120" viewBox="0 0 240 120" xmlns="http://www.w3.org/2000/svg"><rect width="240" height="120" fill="#4488cc"/></svg>')
+// 塌缩守恒哨兵：width='100%' + viewBox 的百分比宽 SVG（mermaid 导出形态）
+// ——无固有宽，独行块级化（vsidian-image-block）为其撑满基准的既有语义
+// 不能被按钮贴图修复破坏（fit-content 化会让它回塌 0×0）
+const WIDE = './assets/wide.svg'
+const wideData = 'data:image/svg+xml,' + encodeURIComponent(
+  '<svg width="100%" viewBox="0 0 480 120" xmlns="http://www.w3.org/2000/svg"><rect width="480" height="120" fill="#8844cc"/></svg>')
 
 const DOC = [
   '# 图片弹窗',
@@ -35,6 +41,8 @@ const DOC = [
   '',
   `[![内嵌图](${PIC})](https://example.com/x)`,
   '',
+  `![宽幅图](${WIDE})`,
+  '',
 ].join('\n')
 
 try {
@@ -44,7 +52,8 @@ try {
   await page.setContent('<div id="app"></div>')
   await page.addStyleTag({ path: output.replace(/\.js$/, '.css') })
   await page.addScriptTag({ path: output })
-  await page.evaluate(([src, data]) => window.serveImg(src, data), [PIC, picData])
+  await page.evaluate(([a, da, b, db]) => { window.serveImg(a, da); window.serveImg(b, db) },
+    [PIC, picData, WIDE, wideData])
   await page.evaluate((text) => {
     window.initImgDoc(text)
     const view = window.controller.getView()
@@ -86,7 +95,7 @@ try {
   await frame.hover()
   await editBtn.click()
   await page.waitForFunction(() =>
-    document.querySelectorAll('.vsidian-graphic-frame.vsidian-image').length === 1)
+    document.querySelectorAll('.vsidian-graphic-frame.vsidian-image').length === 2) // 行内图 + 宽幅图（示例图已显源码）
   const editState = await page.evaluate(() => ({
     anchor: window.controller.getView().state.selection.main.anchor,
     text: window.controller.getView().state.doc.toString(),
@@ -217,6 +226,43 @@ try {
   })
   check('17 阅读侧 popup 打开弹窗', await page.locator('.vsidian-diagram-overlay').isVisible(), '')
   await page.keyboard.press('Escape')
+  await page.waitForFunction(() => document.querySelector('.vsidian-diagram-overlay') === null)
+
+  // 9b) 阅读侧几何：正文图禁拖拽 + 按钮组贴图右上（bug：独行块级 frame
+  //     撑满行宽，chrome absolute 贴行右缘不贴图右缘）+ 宽幅 SVG 撑满守恒
+  //     （vsidian-image-block 块级基准是 viewBox-only 百分比宽 SVG 的塌缩
+  //     修复语义，按钮贴图修复不得让它回塌）
+  const readingGeometry = await page.evaluate(() => {
+    const blockByAlt = (alt) => Array.from(
+      document.querySelectorAll('.vsidian-view-reading .vsidian-graphic-frame.vsidian-image.vsidian-image-block'))
+      .find((f) => f.querySelector('img')?.alt === alt)
+    const chromeGap = (frame) => {
+      const img = frame?.querySelector('img')
+      const chrome = frame?.querySelector('.vsidian-graphic-chrome')
+      if (!img || !chrome) return null
+      return chrome.getBoundingClientRect().right - img.getBoundingClientRect().right
+    }
+    const solo = blockByAlt('示例图')
+    const wide = blockByAlt('宽幅图')
+    const anyImg = document.querySelector('.vsidian-view-reading img.vsidian-image')
+    return {
+      imgDraggable: anyImg ? anyImg.draggable : null,
+      soloGap: chromeGap(solo),
+      wideGap: chromeGap(wide),
+      wideWidth: wide ? wide.querySelector('img').getBoundingClientRect().width : null,
+      wideNatural: wide ? wide.querySelector('img').naturalWidth : null,
+    }
+  })
+  check('17b 阅读正文图片禁原生拖拽', readingGeometry.imgDraggable === false,
+    `draggable=${readingGeometry.imgDraggable}`)
+  check('17c 阅读独行图按钮贴图右上（chrome 右缘贴图右缘 6px 内缩）',
+    readingGeometry.soloGap !== null && readingGeometry.soloGap <= 0 && readingGeometry.soloGap >= -12,
+    `gap=${readingGeometry.soloGap}`)
+  check('17d 阅读宽幅 SVG 撑满不塌（块级基准守恒）', (readingGeometry.wideWidth ?? 0) > 400,
+    `render=${readingGeometry.wideWidth} natural=${readingGeometry.wideNatural}`)
+  check('17e 阅读宽幅图按钮贴行右缘即图右缘', readingGeometry.wideGap !== null
+    && readingGeometry.wideGap <= 0 && readingGeometry.wideGap >= -12,
+    `gap=${readingGeometry.wideGap}`)
 
   // 10) 链接内嵌图片排除：无按钮组、无 frame（点击保留链接跳转语义）
   const inLink = await page.evaluate(() => {
@@ -295,6 +341,37 @@ try {
   check('22 按住拖动图片不派发 dragstart', dragStarted === 0, `dragstart×${dragStarted}`)
   await page.keyboard.press('Escape')
   await page.waitForFunction(() => document.querySelector('.vsidian-diagram-overlay') === null)
+
+  // 13) live 侧几何：正文图禁拖拽 + 按钮组贴图右上 + 宽幅 SVG 撑满守恒
+  //     （live 独行图 frame 在 .cm-scroller 内块级撑满 .cm-line 宽，同
+  //     阅读侧根因；行内混排图 inline-block 收缩本就贴齐）
+  const liveGeometry = await page.evaluate(() => {
+    const blockByAlt = (alt) => Array.from(
+      document.querySelectorAll('.cm-content .vsidian-image.vsidian-image-block'))
+      .find((f) => f.querySelector('img')?.alt === alt)
+    const chromeGap = (frame) => {
+      const img = frame?.querySelector('img')
+      const chrome = frame?.querySelector('.vsidian-graphic-chrome')
+      if (!img || !chrome) return null
+      return chrome.getBoundingClientRect().right - img.getBoundingClientRect().right
+    }
+    const solo = blockByAlt('示例图')
+    const wide = blockByAlt('宽幅图')
+    const anyImg = document.querySelector('.cm-content .vsidian-image img')
+    return {
+      imgDraggable: anyImg ? anyImg.draggable : null,
+      soloGap: chromeGap(solo),
+      wideWidth: wide ? wide.querySelector('img').getBoundingClientRect().width : null,
+      wideNatural: wide ? wide.querySelector('img').naturalWidth : null,
+    }
+  })
+  check('24 live 正文图片禁原生拖拽', liveGeometry.imgDraggable === false,
+    `draggable=${liveGeometry.imgDraggable}`)
+  check('25 live 独行图按钮贴图右上', liveGeometry.soloGap !== null
+    && liveGeometry.soloGap <= 0 && liveGeometry.soloGap >= -12,
+    `gap=${liveGeometry.soloGap}`)
+  check('26 live 宽幅 SVG 撑满不塌（块级基准守恒）', (liveGeometry.wideWidth ?? 0) > 400,
+    `render=${liveGeometry.wideWidth} natural=${liveGeometry.wideNatural}`)
 
   check('23 页面无脚本错误', errors.length === 0, JSON.stringify(errors))
   await page.close()

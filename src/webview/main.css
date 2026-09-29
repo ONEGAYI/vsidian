@@ -2682,6 +2682,14 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
   display: block;
 }
 
+/* 独行图贴图收缩（#212 按钮贴图修复）：loaded 后图渲染宽窄于行宽时
+   markImageFrameSized 挂 sized，frame 收缩贴图——按钮组（absolute 右上）
+   贴图右上而非行右缘。百分比宽 SVG 与被钳制大图（渲染宽＝行宽）不挂，
+   前者的块级撑满基准（上方塌缩修复语义）因此不受影响 */
+#app .cm-editor .cm-scroller .vsidian-image.vsidian-image-block.vsidian-image-sized {
+  width: fit-content;
+}
+
 /* 占位（loading）：alt 文本形态，弱化呈现 */
 #app .vsidian-image.vsidian-image-loading {
   opacity: 0.65;
@@ -3470,6 +3478,11 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
 
 #app .vsidian-view-reading .vsidian-graphic-frame.vsidian-image.vsidian-image-block {
   display: block;
+}
+
+/* 阅读独行图贴图收缩（同 live 侧 sized 规则，块级独行 + 收缩贴图） */
+#app .vsidian-view-reading .vsidian-graphic-frame.vsidian-image.vsidian-image-block.vsidian-image-sized {
+  width: fit-content;
 }
 
 /* 显现门槛（loaded 态）：两个分支分别承载两种宿主结构——live 侧 chrome

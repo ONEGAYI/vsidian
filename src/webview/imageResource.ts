@@ -29,6 +29,12 @@ export const IMAGE_CLASS_NAMES = {
    *  （mermaid 导出形态）无固有尺寸，inline-block shrink-to-fit 下解析为
    *  0×0——块级布局提供确定宽度基准（样式契约 image-solo-block 条目） */
   block: 'vsidian-image-block',
+  /** 独行块级图的贴图收缩修饰类（#212 按钮贴图修复）：loaded 后图渲染宽
+   *  仍窄于行宽时由 markImageFrameSized 挂上，frame 取 width:fit-content
+   *  收缩贴图——按钮组（absolute 右上）跟随贴图右上而非行右缘。百分比宽
+   *  SVG（渲染宽跟随包含块撑满）与被钳制的大图不挂：撑满即正确，且块级
+   *  撑满是前者的塌缩修复基准（样式契约 image-solo-block 条目括注） */
+  sized: 'vsidian-image-sized',
   /** 状态修饰类（与 data-vsidian-img-state 同步） */
   state: (s: ImageSlotState) => `vsidian-image-${s}`,
   /** 失败态细分（#201，叠加在 error 基类上）：明确删除（磁盘正证据 missing） */
@@ -135,6 +141,12 @@ export class ImageResourceManager {
     rawSrc = normalizeImgSrc(rawSrc)
     slot.classList.add(IMAGE_CLASS_NAMES.image)
     slot.dataset['vsidianImgSrc'] = rawSrc
+    // 禁原生拖拽（阅读槽位即 <img>；live 槽位的 img 在 render 回调里设）：
+    // img 默认 draggable=true，按住拖动启动浏览器原生 drag（ghost 缩略图 +
+    // 宿主 copy 徽标），与既有点击/编辑交互语义冲突
+    if (slot instanceof HTMLImageElement) {
+      slot.draggable = false
+    }
     let entry = this.entries.get(rawSrc)
     if (!entry) {
       if (this.deps.isDirectSrc(rawSrc)) {
