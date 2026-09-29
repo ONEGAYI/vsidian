@@ -183,10 +183,12 @@ jobs:
         # Edge 调试，不进 CI。
         run: npm run test:browser
       - name: 保存浏览器计时与失败日志
+        # 名称带 attempt 号（#164）：gh run rerun 后新 attempt 同名上传会
+        # 覆盖旧报告，失败现场丢失——按 attempt 分名后每次重跑的报告都保留
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: browser-reports
+          name: browser-reports-a${{ github.run_attempt }}
           path: |
             out/test/browser-runs/run-*/report.json
             out/test/browser-runs/run-*/report.md
