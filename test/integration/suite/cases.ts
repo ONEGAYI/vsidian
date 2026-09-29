@@ -916,6 +916,16 @@ interface ViewState {
     fm?: 'none' | 'collapsed' | 'expanded'
     imageSrcs?: string[]
   }
+  /** #222 嵌入卡片观测：在场卡片逐枚（inner/state/note/blocks/scope/fm/限高） */
+  readingEmbed?: Array<{
+    inner: string
+    state: 'loading' | 'content' | 'error'
+    note: string
+    blocks: number
+    scope: 'full' | 'heading' | 'block' | ''
+    fm: 'none' | 'collapsed' | 'expanded'
+    maxHeightPx: number
+  }>
 }
 
 /** #7 阅读视图探针回报（reading.perf.report） */
@@ -11342,5 +11352,157 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(await readDisk('悬停预览.md') === parentBefore, '双链跳转不得改写父文档')
     state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
     assert(state.appliedEdits === 0, `全程零 applyEdit（实际 ${state.appliedEdits}）`)
+  }],
+
+  // ---- #222 Reading 正文嵌入 ----
+
+  // 独占行嵌入经真实宿主读取闭环（hover.request → openTextDocument →
+  // hover.result）：全文/章节/缺失目标矩阵、属性区默认折叠、零写回。
+  // 绘制层断言在浏览器 readingEmbed 套件（真实 Chromium 布局）；此处钉
+  // 宿主读取链路与面板观测探针（view.state.readingEmbed）
+  ['嵌入：Reading 独占行嵌入卡片——目标矩阵、属性区与双零 dirty（#222）', async () => {
+    await openWithEditor('嵌入样例.md')
+    await waitSessionReady('嵌入样例.md')
+    const uri = wsUri('嵌入样例.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    await waitViewState('嵌入样例.md', (v) => v.viewMode === 'reading')
+    const parentBefore = await readDisk('嵌入样例.md')
+    const targetBefore = await readDisk('嵌入目标.md')
+
+    // 三张卡片（全文/章节/缺失目标）——真宿主读取闭环：全文卡 content
+    // 且 note 为根内相对路径、fm 默认折叠；章节卡 scope=heading；缺失卡 error
+    const shown = await waitViewState('嵌入样例.md', (v) => {
+      const cards = v.readingEmbed ?? []
+      return cards.length === 3 &&
+        cards[0]!.state === 'content' && cards[0]!.scope === 'full'
+    })
+    const cards = shown.readingEmbed!
+    assert(cards[0]!.note === '嵌入目标.md',
+      `全文嵌入目标标识应为根内相对路径（实际 ${cards[0]!.note}）`)
+    assert(cards[0]!.fm === 'collapsed', `全文嵌入属性区应默认折叠（实际 ${String(cards[0]!.fm)}）`)
+    assert(cards[0]!.blocks > 0, '全文嵌入应渲染内容块')
+    assert(cards[1]!.scope === 'heading' && cards[1]!.state === 'content',
+      `章节嵌入应为 heading 范围内容态（实际 ${JSON.stringify(cards[1])}）`)
+    assert(cards[2]!.inner === '嵌入缺失目标' && cards[2]!.state === 'error',
+      `缺失目标嵌入应为错误分态（实际 ${JSON.stringify(cards[2])}）`)
+    assert(cards[2]!.note.includes('嵌入缺失目标'), `错误文案应含目标原文（实际 ${cards[2]!.note}）`)
+
+    // 双零 dirty + 零 applyEdit：嵌入读取/渲染不写任何文档
+    const parentDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri)
+    const targetDoc = vscode.workspace.textDocuments.find(
+      (d) => d.uri.toString() === wsUri('嵌入目标.md').toString())
+    assert(targetDoc, '目标文档应经 openTextDocument 装载（只装载不显示）')
+    assert(parentDoc?.isDirty === false && targetDoc?.isDirty === false, '父/目标文档双零 dirty')
+    assert(await readDisk('嵌入样例.md') === parentBefore, '嵌入渲染不得改写父文档磁盘')
+    assert(await readDisk('嵌入目标.md') === targetBefore, '嵌入读取不得改写目标磁盘')
+    const state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state.appliedEdits === 0, `嵌入链路零 applyEdit（实际 ${state.appliedEdits}）`)
+
+    // 复位：切回 live（后续用例隔离）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    await waitViewState('嵌入样例.md', (v) => v.viewMode === 'live')
+  }],
+
+  // 嵌入边接入 rename 管线：目标更名后嵌入引用改写（路径段替换，锚点与
+  // 别名原样保留）；will edit 与 rename 同一撤销单元（一步回退）
+  ['嵌入：rename 更新嵌入引用并保持锚点别名（#222）', async () => {
+    await waitRenameIndexReady()
+    await openWithEditor('嵌入改写.md')
+    await waitSessionReady('嵌入改写.md')
+    const edit = new vscode.WorkspaceEdit()
+    edit.renameFile(wsUri('改名嵌入目标.md'), wsUri('改名嵌入目标2.md'), { overwrite: false })
+    assert(await vscode.workspace.applyEdit(edit), 'rename 应成功应用')
+    // 嵌入引用改写落盘：路径段替换，#锚点与 |别名原样
+    const rewritten = await poll('嵌入引用改写落盘', async () => {
+      const text = (await vscode.workspace.openTextDocument(wsUri('嵌入改写.md'))).getText()
+      return text.includes('![[改名嵌入目标2]]') &&
+        text.includes('![[改名嵌入目标2#章节一|别名]]') ? text : undefined
+    })
+    assert(!rewritten.includes('![[改名嵌入目标]]'), '旧嵌入目标不得残留')
+    // 撤销一步恢复（will edit 与 rename 同撤销单元）
+    await vscode.commands.executeCommand('undo')
+    await poll('撤销恢复嵌入引用', async () => {
+      const text = (await vscode.workspace.openTextDocument(wsUri('嵌入改写.md'))).getText()
+      return text.includes('![[改名嵌入目标]]') && !text.includes('改名嵌入目标2') ? text : undefined
+    })
+    await new Promise((r) => setTimeout(r, 600))
+    try {
+      await vscode.workspace.fs.stat(wsUri('改名嵌入目标2.md'))
+      await vscode.workspace.fs.rename(wsUri('改名嵌入目标2.md'), wsUri('改名嵌入目标.md'), { overwrite: true })
+    } catch {
+      // undo 已回滚文件名
+    }
+    await new Promise((r) => setTimeout(r, 400))
+  }],
+
+  // 嵌入边进入出链/反链观测：出链面板含 embed 条目；反链面板把嵌入计入
+  // 目标文档的引用来源（聚合键 resolvedTarget——嵌入与双链同构）
+  ['嵌入：出链与反链面板计入嵌入边（#222）', async () => {
+    await waitRenameIndexReady()
+    await openWithEditor('嵌入样例.md')
+    await waitSessionReady('嵌入样例.md')
+    const srcUri = wsUri('嵌入样例.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, srcUri, { kind: 'sidebar.test.click' })
+    await vscode.commands.executeCommand(CMD.postToPanel, srcUri, { kind: 'outlinks.test.click' })
+    const out = await poll('出链面板就绪且含嵌入条目', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, srcUri)) as
+        | { outlinks?: { active: boolean; state: string; items: Array<{ targetDisplay: string; kind: string; anchor: string; resolved: boolean }> } }
+        | undefined
+      const items = v?.outlinks?.state === 'ready' ? v.outlinks.items : []
+      return items.some((i) => i.kind === 'embed' && i.resolved && i.targetDisplay === '嵌入目标')
+        ? items : undefined
+    })
+    const embedOut = out.filter((i) => i.kind === 'embed')
+    assert(embedOut.length >= 2, `嵌入边应入出链面板（全文+章节，实际 ${JSON.stringify(embedOut)}）`)
+    assert(embedOut.some((i) => i.anchor === '章节一'), '嵌入锚点应拆列入出链条目')
+    // 断链嵌入保留可见性（resolved=false 的嵌入条目在场且弱化）
+    assert(out.some((i) => i.kind === 'embed' && !i.resolved && i.targetDisplay === '嵌入缺失目标'),
+      '断链嵌入应保留出链可见性')
+
+    // 反链：嵌入目标的反链面板含嵌入样例来源（kind=embed 边计入）
+    await openWithEditor('嵌入目标.md')
+    await waitSessionReady('嵌入目标.md')
+    const targetUri = wsUri('嵌入目标.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, targetUri, { kind: 'sidebar.test.click' })
+    await vscode.commands.executeCommand(CMD.postToPanel, targetUri, { kind: 'backlinks.test.click' })
+    await poll('反链面板含嵌入来源', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, targetUri)) as
+        | { backlinks?: { active: boolean; state: string; items: Array<{ sourceRelPath: string; kind: string }> } }
+        | undefined
+      const items = v?.backlinks?.state === 'ready' ? v.backlinks.items : []
+      return items.some((i) => i.sourceRelPath === '嵌入样例.md' && i.kind === 'embed') ? true : undefined
+    })
+  }],
+
+  // 嵌入限高设置闭环：宿主持久层保存/回读 → settings.changed 广播 →
+  // 在场嵌入卡片 max-height 热更（view.state.readingEmbed 观测）
+  ['嵌入：限高设置持久化、回显与卡片热更（#222）', async () => {
+    const okSet = (await vscode.commands.executeCommand(CMD.setSettings, { 'embed.maxHeight': 600 })) as { ok: boolean }
+    assert(okSet.ok === true, 'embed.maxHeight 有效值应保存成功')
+    const snap = (await vscode.commands.executeCommand(CMD.getSettings)) as Record<string, unknown>
+    assert(snap['embed.maxHeight'] === 600, `保存后回读应为 600（实际 ${String(snap['embed.maxHeight'])}）`)
+    const invalid = (await vscode.commands.executeCommand(CMD.setSettings, { 'embed.maxHeight': 99999 })) as { ok: boolean }
+    assert(invalid.ok === false, '超上限值必须被拒绝（定义域校验）')
+
+    // 打开嵌入面板：装载时 settings.get 拉取链路带上限高；卡片内联应用
+    await openWithEditor('嵌入样例.md')
+    await waitSessionReady('嵌入样例.md')
+    const uri = wsUri('嵌入样例.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    const loaded = await waitViewState('嵌入样例.md', (v) =>
+      v.viewMode === 'reading' && (v.readingEmbed ?? []).some((c) => c.state === 'content'))
+    const card = loaded.readingEmbed!.find((c) => c.state === 'content')!
+    assert(card.maxHeightPx === 600, `装载时卡片限高应为设置值 600（实际 ${String(card.maxHeightPx)}）`)
+
+    // 广播热更：保存新值 → 已开面板的卡片即时更新
+    await vscode.commands.executeCommand(CMD.setSettings, { 'embed.maxHeight': 320 })
+    const updated = await waitViewState('嵌入样例.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.state === 'content' && c.maxHeightPx === 320))
+    assert(updated.readingEmbed!.some((c) => c.maxHeightPx === 320), '设置变更应热更到场卡片限高')
+
+    // 收尾：恢复默认并切回 live
+    await vscode.commands.executeCommand(CMD.setSettings, { 'embed.maxHeight': 480 })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    await waitViewState('嵌入样例.md', (v) => v.viewMode === 'live')
   }],
 ]

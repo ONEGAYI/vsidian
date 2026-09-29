@@ -238,7 +238,7 @@ describe('嵌入卡片：一层展开与内部链接', () => {
 })
 
 describe('嵌入卡片：视口回收重挂与状态保持', () => {
-  it('回收重挂：fm 展开与滚动位置恢复、装载缓存零重发请求', () => {
+  it('回收重挂：fm 展开与滚动位置恢复、装载缓存零重发请求', async () => {
     const sent: WebviewToHost[] = []
     const manager = new EmbedCardManager(makeContext(sent))
     const text = 'A\n\n![[目标笔记]]\n\nB\n'
@@ -267,6 +267,9 @@ describe('嵌入卡片：视口回收重挂与状态保持', () => {
     const fmSection = el.querySelector('.vsidian-hover-fm')
     expect(fmSection?.classList.contains('vsidian-hover-fm-collapsed')).toBe(false)
     const scrollEl2 = el.querySelector<HTMLElement>(`.${EMBED_CARD_CLASS_NAMES.scroll}`)!
+    // 滚动恢复延迟一帧（块挂载钩子先于块入 DOM，同步赋值会被钳 0——见
+    // embedCard.applyLoaded 注释）；等待帧回调后断言
+    await new Promise((resolve) => setTimeout(resolve, 50))
     expect(scrollEl2.scrollTop).toBe(42)
     expect((el.querySelector('.vsidian-reading-heading-1')?.textContent ?? '').trim()).toBe('目标笔记')
     manager.dispose()

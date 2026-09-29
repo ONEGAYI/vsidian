@@ -13,9 +13,15 @@
 //   呈现，可点击按 B 身份打开）——不递归装载、不在嵌入内容上叠加悬停
 //   浮层（contentEl 停止 mouseover/mouseout 冒泡）。
 // - 虚拟化：嵌入块是父文档 VirtualReadingView 的普通块，随窗口挂载/回收
-//   ——本模块在回收时释放 B 视图与 B 资源管理器、保留 fm 展开与滚动
+//   ——本模块在回收时释放 B 内容 DOM 与 B 资源管理器、保留 fm 展开与滚动
 //   位置（状态库按语义键持有）；重挂优先用装载缓存（会话内零重发，
-//   #224 接变更订阅后失效重载）。
+//   #224 接变更订阅后失效重载）。「大量卡片不常驻所有目标全文 DOM」由
+//   卡片级回收承担；**卡片内部为全量渲染**（splitReadingBlocks +
+//   createReadingBlockElement 直挂，与 VirtualReadingView 无布局回退路径
+//   同构）——嵌套虚拟化要求视图监听自身容器的滚动事件，而卡片内容的
+//   滚动区是外层 .vsidian-embed-card-scroll（非视图容器），滚动链路断裂
+//   会让深部内容永不挂载；全量与卡片级回收组合不违背 U12 的 DOM 有界性
+//   （在场卡片数由视口窗口约束）。
 // - 只读契约：任务 checkbox 禁用（共享 mountRefContentBlock）、点击不
 //   写文档；卡片内点击不冒泡父容器委托（B 内链接按 B 目录解析是唯一
 //   正确语义，父容器按 A 解析的委托不得命中）。
@@ -24,8 +30,8 @@ import { parseWikilinkInner } from '../shared/wikilink'
 import { t } from '../shared/i18n'
 import { ImageResourceManager } from './imageResource'
 import { applyObsidianDomAlias } from '../shared/obsidianAlias'
-import { createReadingContainer, READING_CLASS_NAMES } from './readingView'
-import { VirtualReadingView } from './readingVirtualView'
+import { createReadingBlockElement, createReadingContainer, READING_CLASS_NAMES } from './readingView'
+import { splitReadingBlocks } from './readingBlocks'
 import {
   createSourcedImageManager,
   mountRefContentBlock,
@@ -95,7 +101,6 @@ interface EmbedCardHandle {
   scrollEl: HTMLElement
   stateEl: HTMLElement
   contentEl: HTMLElement
-  view: VirtualReadingView
   bImages: ImageResourceManager | null
   display: 'loading' | 'content' | 'error'
   note: string
@@ -201,7 +206,6 @@ export class EmbedCardManager {
       scrollEl,
       stateEl,
       contentEl,
-      view: null as unknown as VirtualReadingView,
       bImages: null,
       display: 'loading',
       note: '',
@@ -210,10 +214,6 @@ export class EmbedCardManager {
         toggle: () => (entry!.fmExpanded = !entry!.fmExpanded),
       },
     }
-    handle.view = new VirtualReadingView(contentEl, {
-      onBlockMounted: (blockEl) => this.mountContentBlock(handle, blockEl),
-      onBlockUnmounted: (blockEl) => handle.bImages?.detachWithin(blockEl),
-    })
     this.active.set(el, handle)
 
     // 卡片内交互域：点击不冒泡父容器委托（B 内链接按 B 解析）；悬停不
@@ -259,9 +259,8 @@ export class EmbedCardManager {
     }
     this.active.delete(el)
     handle.entry.scrollTop = handle.scrollEl.scrollTop
-    handle.view.dispose()
     handle.bImages?.dispose()
-    el.textContent = '' // 卡片 DOM 随块卸载丢弃（真实路径 el 随即 remove）
+    el.textContent = '' // 卡片 DOM（含 B 内容全量块）随块卸载丢弃
   }
 
   /** hover.result 路由（syncController 转发）：按 entry.lastReq 配对——
@@ -401,13 +400,21 @@ export class EmbedCardManager {
         sourceDocUri: () => handle.entry.loaded?.fsPath ?? '',
       })
     }
-    // #219 局部范围同款：全文切块后按块区间求交过滤（保留全文解析上下文）
-    handle.view.setDocument(
-      loaded.text,
-      loaded.scope === 'full' ? undefined : { range: loaded.range },
-    )
-    handle.view.updateNow()
-    // 任务 checkbox 禁用兜底（无布局回退全量渲染路径；双保险，幂等）
+    // 卡片内全量渲染（决策见模块头注释）：切块后按块区间求交过滤（#219
+    // 局部范围同款——保留全文解析上下文，范围选取在块模型上做），逐块
+    // 挂载并装配（fm/图片/图形块/代码高亮）；结构与 VirtualReadingView
+    // 的无布局回退路径同构
+    const blocks = splitReadingBlocks(loaded.text)
+    const scoped = loaded.scope === 'full'
+      ? blocks
+      : blocks.filter((b) => b.start <= loaded.range.end && b.end >= loaded.range.start)
+    handle.contentEl.textContent = ''
+    for (const block of scoped) {
+      const blockEl = createReadingBlockElement(block, loaded.text)
+      handle.contentEl.appendChild(blockEl)
+      this.mountContentBlock(handle, blockEl)
+    }
+    // 任务 checkbox 禁用兜底（幂等）
     for (const box of Array.from(handle.contentEl.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))) {
       box.disabled = true
     }
@@ -417,9 +424,18 @@ export class EmbedCardManager {
       titleEl.textContent = loaded.relPath
     }
     this.applyDisplay(handle, 'content', loaded.relPath)
-    // 滚动位置恢复（重挂路径；首载 scrollTop 为 0 无操作）
+    // 滚动位置恢复（重挂路径；首载 scrollTop 为 0 无操作）。恢复必须延迟
+    // 一帧：块挂载钩子在块元素 append 进容器**之前**触发（VirtualReadingView
+    // .mountBlock 的既定顺序），此刻 scrollEl 无布局（scrollHeight 为 0），
+    // 同步赋值会被浏览器钳到 0——下一帧块已入 DOM，布局可用
     if (handle.entry.scrollTop > 0) {
-      handle.scrollEl.scrollTop = handle.entry.scrollTop
+      const restore = handle.entry.scrollTop
+      const target = handle.scrollEl
+      requestAnimationFrame(() => {
+        if (this.active.get(target.closest<HTMLElement>('.vsidian-reading-embed') ?? target) === handle) {
+          target.scrollTop = restore
+        }
+      })
     }
   }
 

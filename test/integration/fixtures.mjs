@@ -1007,6 +1007,64 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
     '',
   ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, '目标笔记.md'), TARGET_NOTE_DOC, 'utf8')
+  // #222 嵌入：父文档（独占行全文/章节嵌入 + 混排 + 缺失目标）与目标文档
+  // （frontmatter + 任务 + 章节结构 + 二层嵌入——一层展开场景）；二层目标
+  // 文件名含空格（嵌入 inner 字面路径解析）。嵌入改写文档独立成组（rename
+  // 用例的引用者，与漂移保护用例不共享）
+  writeFileSync(path.join(wsDir, '嵌入样例.md'), [
+    '# 嵌入样例',
+    '',
+    '![[嵌入目标]]',
+    '',
+    '混排嵌入 ![[嵌入目标]] 保留源文。',
+    '',
+    '![[嵌入目标#章节一]]',
+    '',
+    '![[嵌入缺失目标]]',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, '嵌入目标.md'), [
+    '---',
+    'title: 嵌入目标',
+    '---',
+    '',
+    '# 嵌入目标总览',
+    '',
+    '- [ ] 嵌入内任务',
+    '',
+    '## 章节一',
+    '',
+    '章节一段落。',
+    '',
+    '## 章节二',
+    '',
+    '![[嵌入 二层目标]]',
+    '',
+    '乙段。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, '嵌入 二层目标.md'), [
+    '# 二层目标',
+    '',
+    '二层正文。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, '嵌入改写.md'), [
+    '# 嵌入改写',
+    '',
+    '嵌入 ![[改名嵌入目标]] 与锚点 ![[改名嵌入目标#章节一|别名]]。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, '改名嵌入目标.md'), [
+    '# 改名嵌入目标',
+    '',
+    '正文。',
+    '',
+    '## 章节一',
+    '',
+    '章节内容。',
+    '',
+  ].join('\n'), 'utf8')
   // #219 局部范围矩阵目标：文件名含中文与空格（链接 percent-decode 与
   // 双链字面路径两种写法解析到同一目标），行尾 CRLF（宿主 LF 换算矩阵：
   // 章节/块 range 经 NewlineCoordinator 换算后过滤结果与 LF 文档同构）
