@@ -261,7 +261,8 @@ describe('图片弹窗（契约 4–6）', () => {
     expect(popupImg!.getAttribute('src')).toBeNull()
   })
 
-  it('弹窗与图表弹窗互斥：打开图片弹窗后开图表弹窗，图片弹窗关闭', async () => {    __setMermaidApiForTest({
+  it('弹窗与图表弹窗互斥：打开图片弹窗后开图表弹窗，图片弹窗关闭', async () => {
+    __setMermaidApiForTest({
       initialize() {},
       async render() {
         return { svg: '<svg viewBox="0 0 10 10"></svg>' }
