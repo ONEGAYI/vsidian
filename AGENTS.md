@@ -250,7 +250,7 @@ vsidian/
 │       ├── codeHighlight.ts            # 语法高亮引擎装配与缓存
 │       ├── contextMenuDom.ts           # 统一菜单 DOM 装配与子菜单翻转
 │       ├── css.d.ts                    # CSS 导入类型声明
-│       ├── cssSnippetSettings.ts       # CSS 片段设置分页
+│       ├── cssSnippetSettings.ts       # 外观页 CSS 片段页签体
 │       ├── diagramExport.ts            # 图表导出序列化与光栅化
 │       ├── diagramPopup.ts             # 图表弹窗全屏浮层
 │       ├── diagramPopupGeometry.ts     # 弹窗几何纯函数
@@ -313,7 +313,7 @@ vsidian/
 │       ├── settingsPageView.ts         # 设置页 webview 视图
 │       ├── snippetLoader.ts            # CSS 片段 link 装配器
 │       ├── styleGuideData.ts           # 设置页样式参考数据（生成）
-│       ├── styleReferenceSettings.ts   # 设置页样式参考分页
+│       ├── styleReferenceSettings.ts   # 外观页样式参考页签体
 │       ├── symbolAutocomplete.ts       # 符号自动补全编辑器适配层（#123）
 │       ├── symbolCompositionState.ts   # IME 选区快照共享状态
 │       ├── symbolWrap.ts               # 选区包裹编辑器适配层（#124）

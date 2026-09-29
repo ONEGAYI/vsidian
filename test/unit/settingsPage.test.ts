@@ -495,7 +495,8 @@ describe('可读行宽定义（#175）', () => {
   })
 })
 
-describe('可读行宽滑块（#175：number 型渲染为 range 控件）', () => {  /** 切到编辑器分组（可读行宽落编辑器组）并取滑块/值文本 */
+describe('可读行宽滑块（#175：number 型渲染为 range 控件）', () => {
+  /** 切到编辑器分组（可读行宽落编辑器组）并取滑块/值文本 */
   function slider(parent: HTMLElement) {
     const editorNav = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
       .find((b) => b.textContent === '编辑器')!
