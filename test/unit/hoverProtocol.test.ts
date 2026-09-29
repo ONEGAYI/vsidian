@@ -71,6 +71,12 @@ describe('hover.request 校验（webview → 宿主）', () => {
     expect(isWebviewToHost({ ...validRequest(), instanceId: '' })).toBe(false)
     expect(isWebviewToHost({ ...validRequest(), target: 3 })).toBe(false)
   })
+
+  it('#219 普通链接形态：linkHref 可选字符串（缺省双链；非字符串拒绝）', () => {
+    expect(isWebviewToHost({ ...validRequest(), linkHref: 'relative.md#章' })).toBe(true)
+    expect(isWebviewToHost(validRequest()), '缺省仍为双链形态').toBe(true)
+    expect(isWebviewToHost({ ...validRequest(), linkHref: 3 })).toBe(false)
+  })
 })
 
 describe('hover.result 校验（宿主 → webview）', () => {
@@ -105,10 +111,25 @@ describe('hover.result 校验（宿主 → webview）', () => {
 
   it('失败形态 reason 限定错误分态枚举；未知 reason 拒绝', () => {
     const base = validResultFail() as unknown as Record<string, unknown>
-    for (const reason of ['unsupported', 'no-workspace', 'escape', 'not-found', 'non-markdown', 'read-failed']) {
+    for (const reason of ['unsupported', 'no-workspace', 'escape', 'not-found', 'non-markdown', 'read-failed', 'anchor-missing']) {
       expect(isHostToWebview({ ...base, reason }), `reason=${reason} 应放行`).toBe(true)
     }
     expect(isHostToWebview({ ...base, reason: 'whatever' })).toBe(false)
     expect(isHostToWebview({ ...base, ok: true, reason: 'not-found' })).toBe(false)
+  })
+
+  it('#219 失败形态 anchor（锚点原文）可选字符串；非字符串拒绝', () => {
+    const base = validResultFail() as unknown as Record<string, unknown>
+    expect(isHostToWebview({ ...base, reason: 'anchor-missing', anchor: '不存在的标题' })).toBe(true)
+    expect(isHostToWebview({ ...base, reason: 'anchor-missing' }), 'anchor 可缺省').toBe(true)
+    expect(isHostToWebview({ ...base, anchor: 3 })).toBe(false)
+  })
+
+  it('#219 成功形态 scope 三态：full / heading（附锚点）/ block（附 ^ 前缀锚点）', () => {
+    const base = validResultOk() as unknown as Record<string, unknown>
+    expect(isHostToWebview({ ...base, scope: { kind: 'heading', anchor: '章节' } })).toBe(true)
+    expect(isHostToWebview({ ...base, scope: { kind: 'block', anchor: '^blk1' } })).toBe(true)
+    expect(isHostToWebview({ ...base, scope: { kind: 'heading' } }), 'heading 缺 anchor 应拒绝').toBe(false)
+    expect(isHostToWebview({ ...base, scope: { kind: 'block', anchor: 3 } })).toBe(false)
   })
 })

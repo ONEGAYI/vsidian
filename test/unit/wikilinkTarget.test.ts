@@ -2,12 +2,17 @@
 // - findHeadingOffset：目标文档内标题定位——trim、空白折叠、大小写不敏感、
 //   剥离 ATX 收尾 #、跳过围栏代码内伪标题；setext 标题不匹配（一期规则）
 // - findBlockOffset / normalizeHeadingText：块定位与标题比较键
+// - findHeadingSectionRange / findBlockRange（#219 悬停局部预览）：章节与
+//   块的**完整范围**（跳转定位函数只给落点行区间，本组给预览所需整段）；
+//   两者共享既有匹配口径（同名取首/围栏跳过/规范化），不得各写一套
 // 文件目标解析契约（#196 根内相对路径语义）已迁移至
 // test/unit/vaultLink.test.ts（单一实现 src/shared/vaultLink.ts）。
 import { describe, it, expect } from 'vitest'
 import {
   findBlockOffset,
+  findBlockRange,
   findHeadingOffset,
+  findHeadingSectionRange,
   normalizeHeadingText,
 } from '../../src/host/wikilinkTarget'
 
@@ -253,5 +258,191 @@ describe('findBlockOffset：独立行块 id 形态（#163 验收反馈，增集�
     expect(doc.slice(hit.offset, hit.end)).toBe('段落甲')
     expect(hit.offset).toBe(0) // 块首=段落甲行首（文件头），\r 计入 end 之后各偏移
     expect(hit.end).toBe('段落甲'.length) // 行尾 \r 不计入 end（剥 \r 后行宽）
+  })
+})
+
+describe('findHeadingSectionRange：标题章节完整范围（#219 悬停预览）', () => {
+  const DOC = [
+    '# 顶级甲', // 0
+    '', // 1
+    '正文甲。', // 2
+    '', // 3
+    '## 子节 甲一', // 4
+    '', // 5
+    '子节内容。', // 6
+    '', // 7
+    '# 顶级乙', // 8（顶级甲章节止于此行前——同级终止）
+    '', // 9
+    '乙正文。', // 10
+    '', // 11
+    '### 深层', // 12
+    '', // 13
+    '深层内容', // 14
+    '', // 15
+    '## 顶级乙的子节', // 16（顶级乙章节止于此行前——同级终止；深层章节止于此行前——更高级终止）
+    '', // 17
+    '子节正文', // 18
+  ].join('\n')
+
+  it('顶级标题章节：含全部子节，止于下一个同级（#）标题行前（含末行行尾，不含换行）', () => {
+    const range = findHeadingSectionRange(DOC, '顶级甲')!
+    expect(range).not.toBeNull()
+    expect(DOC.slice(range.start, range.end)).toBe('# 顶级甲\n\n正文甲。\n\n## 子节 甲一\n\n子节内容。')
+  })
+
+  it('更深层的子标题不终止章节；仅同级或更高级标题终止（顶级乙到文件末）', () => {
+    const range = findHeadingSectionRange(DOC, '顶级乙')!
+    expect(DOC.slice(range.start, range.end)).toBe(
+      '# 顶级乙\n\n乙正文。\n\n### 深层\n\n深层内容\n\n## 顶级乙的子节\n\n子节正文',
+    )
+    // 同级（##）终止 level-2 章节
+    const doc = '## 甲\n\n甲段\n\n## 乙\n\n乙段\n'
+    const sub = findHeadingSectionRange(doc, '甲')!
+    expect(doc.slice(sub.start, sub.end)).toBe('## 甲\n\n甲段')
+  })
+
+  it('子标题章节止于下一个同级或更高级标题前', () => {
+    const sub = findHeadingSectionRange(DOC, '子节 甲一')!
+    expect(DOC.slice(sub.start, sub.end)).toBe('## 子节 甲一\n\n子节内容。')
+    const deep = findHeadingSectionRange(DOC, '深层')!
+    expect(DOC.slice(deep.start, deep.end)).toBe('### 深层\n\n深层内容')
+    const last = findHeadingSectionRange(DOC, '顶级乙的子节')!
+    expect(DOC.slice(last.start, last.end)).toBe('## 顶级乙的子节\n\n子节正文')
+  })
+
+  it('章节起点为标题行行首（与 findHeadingOffset 同一命中：同名取首、规范化）', () => {
+    const doc = '# 同名\n\n甲段\n\n## 同名\n\n乙段\n'
+    const first = findHeadingSectionRange(doc, '同名')!
+    // 同名取首：起点是首个 # 同名；其后 ## 同名更深不终止（章节到文件末）
+    expect(doc.slice(first.start, first.end)).toBe('# 同名\n\n甲段\n\n## 同名\n\n乙段')
+    // 与跳转定位同源：章节起点行 = findHeadingOffset 命中行
+    const hit = findHeadingOffset(doc, '同名')!
+    expect(first.start).toBe(hit.offset)
+    // 大小写与空白折叠口径沿用
+    const folded = findHeadingSectionRange(doc, '  同名 ')
+    expect(folded!.start).toBe(hit.offset)
+    // 第二个同名（##）的章节从其自身开始（取首只作用于同级扫描起点）
+    const second = findHeadingSectionRange(doc, '同名')!
+    expect(second.start).not.toBe(doc.indexOf('## 同名'))
+  })
+
+  it('围栏代码内的伪标题不作为章节起点也不终止章节', () => {
+    const doc = '# 甲\n\n```text\n# 围栏内伪标题\n```\n\n甲段\n\n# 乙\n\n乙段\n'
+    const range = findHeadingSectionRange(doc, '甲')!
+    expect(doc.slice(range.start, range.end)).toBe('# 甲\n\n```text\n# 围栏内伪标题\n```\n\n甲段')
+    expect(findHeadingSectionRange(doc, '围栏内伪标题')).toBeNull()
+  })
+
+  it('空章节（标题行紧跟下一标题）：范围收缩为标题行本身', () => {
+    const doc = '# 甲\n\n中间段\n\n## 乙\n# 丙\n'
+    const range = findHeadingSectionRange(doc, '乙')!
+    expect(doc.slice(range.start, range.end)).toBe('## 乙')
+  })
+
+  it('末尾章节止于文件末行（无下一标题）', () => {
+    const doc = '# 甲\n\n唯一章节\n'
+    const range = findHeadingSectionRange(doc, '甲')!
+    expect(doc.slice(range.start, range.end)).toBe('# 甲\n\n唯一章节')
+  })
+
+  it('无命中返回 null；空标题返回 null', () => {
+    expect(findHeadingSectionRange(DOC, '不存在')).toBeNull()
+    expect(findHeadingSectionRange(DOC, '')).toBeNull()
+  })
+
+  it('CRLF 行尾容错：宿主系坐标（\\r 计入前文累计，end 不含行尾）', () => {
+    const doc = '# 甲\r\n\r\n甲段\r\n\r\n# 乙\r\n\r\n乙段\r\n'
+    const range = findHeadingSectionRange(doc, '甲')!
+    expect(doc.slice(range.start, range.end)).toBe('# 甲\r\n\r\n甲段')
+    expect(range.end - range.start).toBe('# 甲\r\n\r\n甲段'.length)
+  })
+})
+
+describe('findBlockRange：块完整范围（#219 悬停预览——不能拿块首行当完整正文）', () => {
+  const DOC = [
+    '# 文档标题', // 0
+    '',
+    '开头段落末行。 ^first-blk', // 2
+    '',
+    '列表引导行：', // 4
+    '- 项目一', // 5
+    '- 项目二 ^list-blk', // 6
+    '',
+    '```js', // 8
+    'const x = 1', // 9
+    '``` ^code-blk', // 11（闭围栏行行尾 id）
+    '',
+    '| a | b |', // 13
+    '|---|---|', // 14
+    '| 1 | 2 | ^table-blk', // 15
+    '',
+    '段落乙第一行', // 17
+    '段落乙第二行 ^second-blk', // 18
+    '',
+  ].join('\n')
+
+  it('单行块：完整范围即块首行（与 findBlockOffset 同区间）', () => {
+    const range = findBlockRange(DOC, 'first-blk')!
+    expect(DOC.slice(range.start, range.end)).toBe('开头段落末行。 ^first-blk')
+  })
+
+  it('列表块：完整范围从引导行到标记行（不截首行）', () => {
+    const range = findBlockRange(DOC, 'list-blk')!
+    expect(DOC.slice(range.start, range.end)).toBe('列表引导行：\n- 项目一\n- 项目二 ^list-blk')
+  })
+
+  it('围栏块（闭围栏行行尾 id）：完整范围从开围栏行到闭围栏行', () => {
+    const range = findBlockRange(DOC, 'code-blk')!
+    expect(DOC.slice(range.start, range.end)).toBe('```js\nconst x = 1\n``` ^code-blk')
+  })
+
+  it('表格块：完整范围覆盖全部表格行', () => {
+    const range = findBlockRange(DOC, 'table-blk')!
+    expect(DOC.slice(range.start, range.end)).toBe('| a | b |\n|---|---|\n| 1 | 2 | ^table-blk')
+  })
+
+  it('多行段落：完整范围从段首行到段尾行（id 在尾行）', () => {
+    const range = findBlockRange(DOC, 'second-blk')!
+    expect(DOC.slice(range.start, range.end)).toBe('段落乙第一行\n段落乙第二行 ^second-blk')
+  })
+
+  it('独立行形态（空行隔开）：完整范围是上方块（不含 ^id 行）', () => {
+    const doc = '段落甲\n\n^std-blk\n\n尾部\n'
+    const range = findBlockRange(doc, 'std-blk')!
+    expect(doc.slice(range.start, range.end)).toBe('段落甲')
+  })
+
+  it('独立行形态（紧贴块尾）：块范围沿用 blockRangeOfLine 吞并语义（含标记行）', () => {
+    const doc = '段落甲\n^std-tight\n\n尾部\n'
+    const range = findBlockRange(doc, 'std-tight')!
+    expect(doc.slice(range.start, range.end)).toBe('段落甲\n^std-tight')
+  })
+
+  it('围栏内部的 id 不命中；未命中与空 id 返回 null', () => {
+    const doc = '```js\nconst x = 1 ^inside\n```\n'
+    expect(findBlockRange(doc, 'inside')).toBeNull()
+    expect(findBlockRange(DOC, '不存在')).toBeNull()
+    expect(findBlockRange(DOC, '')).toBeNull()
+  })
+
+  it('同 id 多命中取首（既有边界沿用）', () => {
+    const doc = '块甲 ^dup\n\n块乙 ^dup\n'
+    const range = findBlockRange(doc, 'dup')!
+    expect(doc.slice(range.start, range.end)).toBe('块甲 ^dup')
+  })
+
+  it('CRLF 行尾容错：宿主系坐标（\\r 计入 offset，end 不含行尾）', () => {
+    const doc = '列表引导：\r\n- 项一\r\n- 项二 ^crlf-blk\r\n'
+    const range = findBlockRange(doc, 'crlf-blk')!
+    expect(doc.slice(range.start, range.end)).toBe('列表引导：\r\n- 项一\r\n- 项二 ^crlf-blk')
+  })
+
+  it('与 findBlockOffset 的既有跳转契约对拍：块首行区间恒为完整范围的起点行', () => {
+    for (const id of ['first-blk', 'list-blk', 'code-blk', 'table-blk', 'second-blk']) {
+      const hit = findBlockOffset(DOC, id)!
+      const range = findBlockRange(DOC, id)!
+      expect(range.start, `${id} 完整范围起点应等于块首行行首`).toBe(hit.offset)
+      expect(range.end, `${id} 完整范围应覆盖块首行`).toBeGreaterThanOrEqual(hit.end)
+    }
   })
 })

@@ -307,8 +307,9 @@ export type HostToWebview =
   /** 测试钩子（#218）：对阅读视图第 index 个真实双链派发悬停进入/离开
    * （mouseover/mmouseout 经容器委托——与用户悬停同一处理器链路；宿主
    * 测试无法向 webview 派发真实鼠标事件，以此通道验证真实宿主内的
-   * 悬停读取与浮层开闭） */
-  | { kind: 'hover.test.pointer'; action: 'enter' | 'leave'; index: number }
+   * 悬停读取与浮层开闭）。#219 起 link='md' 对第 index 个普通 Markdown
+   * 链接（非双链 `<a>`）派发——缺省仍为双链 */
+  | { kind: 'hover.test.pointer'; action: 'enter' | 'leave'; index: number; link?: 'wikilink' | 'md' }
   /** 测试钩子（#21）：在真实 webview 的 CM6 中输入，验证暂停态即时留存。 */
   | { kind: 'sync.test.edit'; offset: number; text: string; closeAfter?: boolean }
   /** 测试钩子：组合候选写入首行 DOM，经过 CM6 MutationObserver 的真实输入链。 */
@@ -409,11 +410,11 @@ export type HostToWebview =
   /** 悬停文档预览结果（#218，hover.request 的应答，reqId+instanceId 双配对）：
    *  成功携带规范目标身份（fsPath + 所属根内相对路径）、目标版本
    *  （TextDocument.version，#224 变更刷新的版本基准）、LF UTF-16 全文与
-   *  源范围、语义范围选择器（一期恒为 full 全文——#219 扩展 heading/block；
+   *  源范围、语义范围选择器（#219 起 full 全文 / heading 章节 / block 块；
    *  全文随范围一起返回是「保留全文解析上下文再选取范围」的载荷形态，
-   *  webview 切范围在切块后做，不孤立解析截取字符串）。失败附原因码
-   *  （错误分态见 HoverPreviewFailReason）——webview 就地 i18n 呈现，
-   *  不弹宿主通知。只读消息：宿主不写任何文档 */
+   *  webview 切范围在切块后按块区间过滤，不孤立解析截取字符串）。失败附
+   *  原因码（错误分态见 HoverPreviewFailReason；anchor-missing 附锚点原文）
+   *  ——webview 就地 i18n 呈现，不弹宿主通知。只读消息：宿主不写任何文档 */
   | {
       kind: 'hover.result'
       reqId: number
@@ -431,6 +432,8 @@ export type HostToWebview =
       instanceId: string
       ok: false
       reason: HoverPreviewFailReason
+      /** anchor-missing 时的锚点原文（块 id 带 ^ 前缀），供就地提示 */
+      anchor?: string
     }
   /** 索引维护状态（#198，设置页消费）：排除模式（当前生效 + 默认值）、
    *  维护操作状态与进度、最近一次操作结果反馈。设置页经 index.get 拉取；
@@ -606,7 +609,7 @@ export type WebviewToHost =
       fmPopoverOpen?: boolean
       /** #218 悬停预览观测：浮层开闭、内容态（loading/content/error）、
        *  目标标识（成功为根内相对路径）与内容块数（旧 webview 缺省） */
-      hoverPreview?: { open: boolean; state: 'loading' | 'content' | 'error'; note: string; blocks: number }
+      hoverPreview?: { open: boolean; state: 'loading' | 'content' | 'error'; note: string; blocks: number; scope: 'full' | 'heading' | 'block' | '' }
     }
       /** 阅读视图性能探针回报（#7）：滚动往返期间的挂载/回收与解析观测 */
   | {
@@ -686,7 +689,10 @@ export type WebviewToHost =
    *  请求身份契约：instanceId 为 webview 侧浮层视图实例标识（一次打开一个
    *  实例，重开换新 id——迟到回包据此丢弃）、sourceStart/sourceEnd 为父
    *  文档内引用区间的 LF 偏移（Reading 侧为所在块源锚点）、target 为 `[[`
-   *  与 `]]` 之间 `|` 之前的原文（未 trim；宿主解析自带规范化）。只读交互：
+   *  与 `]]` 之间 `|` 之前的原文（未 trim；宿主解析自带规范化）。#219 起
+   *  普通本地 Markdown 链接接入：linkHref 存在时为 `<a>` 的 href 原文
+   *  （阅读侧可能经 markdown-it normalizeLink 编码——宿主容错解码），宿主
+   *  走普通链接解析（外部网页 webview 侧已预滤，宿主复核兜底）。只读交互：
    *  宿主只 openTextDocument+getText，不写文档、不建面板 */
   | {
       kind: 'hover.request'
@@ -697,6 +703,8 @@ export type WebviewToHost =
       sourceStart: number
       sourceEnd: number
       target: string
+      /** 普通链接形态的 href 原文（#219；缺省 = 双链形态） */
+      linkHref?: string
     }
   /** 代码块复制请求（#81）：卡片头部复制按钮点击 → 宿主剪贴板 API 写入。
    *  text 为代码体原文（两条围栏行之间，不含围栏与 info string），恒为
@@ -882,15 +890,23 @@ export interface HoverPreviewTargetIdentity {
   relPath: string
 }
 
-/** 悬停预览语义范围选择器（#218 一期恒为全文；#219 扩展标题章节与块） */
-export type HoverPreviewScope = { kind: 'full' }
+/** 悬停预览语义范围选择器（#218 一期全文；#219 扩展标题章节与块——
+ *  锚点语义与链接形态无关：双链 `[[笔记#锚]]` 与普通链接 `[x](笔记.md#锚)`
+ *  归同一选择器。anchor：标题原文或带 ^ 前缀的块 id（与
+ *  OutlinkItemPayload.anchor 同口径） */
+export type HoverPreviewScope =
+  | { kind: 'full' }
+  | { kind: 'heading'; anchor: string }
+  | { kind: 'block'; anchor: string }
 
-/** 悬停预览失败原因（#218 错误分态，就地 i18n 呈现）：
- *  unsupported=双链形态非法；no-workspace=来源不在工作区；escape=目标越出
- *  所属根；not-found=目标文件不存在；non-markdown=目标非 Markdown（一期
- *  只接 Markdown 全文）；read-failed=打开/读取目标失败 */
+/** 悬停预览失败原因（#218 错误分态，就地 i18n 呈现；#219 增锚点缺失）：
+ *  unsupported=目标形态非法/外部网页不接入；no-workspace=来源不在工作区；
+ *  escape=目标越出所属根；not-found=目标文件不存在；non-markdown=目标非
+ *  Markdown（一期只接 Markdown）；read-failed=打开/读取目标失败；
+ *  anchor-missing=目标文件在但标题/块锚点不存在（不以全文替代，附锚点
+ *  原文） */
 export type HoverPreviewFailReason =
-  'unsupported' | 'no-workspace' | 'escape' | 'not-found' | 'non-markdown' | 'read-failed'
+  'unsupported' | 'no-workspace' | 'escape' | 'not-found' | 'non-markdown' | 'read-failed' | 'anchor-missing'
 
 /** #218 悬停预览请求载荷（宿主侧消费形态） */
 export type HoverPreviewRequestPayload = Extract<WebviewToHost, { kind: 'hover.request' }>
@@ -2381,7 +2397,9 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
           typeof v.hoverPreview.open === 'boolean' &&
           (v.hoverPreview.state === 'loading' || v.hoverPreview.state === 'content' || v.hoverPreview.state === 'error') &&
           isString(v.hoverPreview.note) &&
-          isNonNegativeInt(v.hoverPreview.blocks))) &&
+          isNonNegativeInt(v.hoverPreview.blocks) &&
+          (v.hoverPreview.scope === 'full' || v.hoverPreview.scope === 'heading' ||
+            v.hoverPreview.scope === 'block' || v.hoverPreview.scope === ''))) &&
         (v.typography === undefined || isTypographyProbe(v.typography))
       )
     case 'reading.perf.report':
@@ -2486,7 +2504,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
       )
     case 'hover.request':
       // #218 悬停预览请求：会话守卫字段 + reqId 配对 + 非空实例标识 +
-      // 非负源区间 + 目标原文（字符串即可，形态合法性由宿主解析判定）
+      // 非负源区间 + 目标原文（字符串即可，形态合法性由宿主解析判定）；
+      // #219 普通链接形态的 linkHref（可选字符串，存在即走普通链接解析）
       return (
         isString(v.sessionId) &&
         isString(v.docUri) &&
@@ -2495,7 +2514,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         v.instanceId.length > 0 &&
         isNonNegativeInt(v.sourceStart) &&
         isNonNegativeInt(v.sourceEnd) &&
-        isString(v.target)
+        isString(v.target) &&
+        (v.linkHref === undefined || isString(v.linkHref))
       )
     case 'perf.report':
       return (
@@ -2812,8 +2832,10 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'refresh.test.click':
       return true
     case 'hover.test.pointer':
-      // #218 测试钩子：真实双链序号 + 进/离动作枚举
-      return (v.action === 'enter' || v.action === 'leave') && isNonNegativeInt(v.index)
+      // #218 测试钩子：真实双链序号 + 进/离动作枚举；#219 link 选择器
+      // （缺省 wikilink，'md' 对普通 Markdown 链接派发）
+      return (v.action === 'enter' || v.action === 'leave') && isNonNegativeInt(v.index) &&
+        (v.link === undefined || v.link === 'wikilink' || v.link === 'md')
     case 'sync.test.composition':
       return (v.phase === 'start' || v.phase === 'update' || v.phase === 'end') && isString(v.text)
     case 'link.test.mousedown':
@@ -2876,8 +2898,9 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       )
     case 'hover.result':
       // #218 悬停预览结果：reqId+instanceId 双配对；成功形态须携带完整
-      // 目标身份/版本/LF 全文/范围（start<=end）/范围选择器；失败形态
-      // reason 限定错误分态枚举
+      // 目标身份/版本/LF 全文/范围（start<=end）/范围选择器（#219 起
+      // heading/block 附锚点原文）；失败形态 reason 限定错误分态枚举
+      // （anchor-missing 附锚点原文）
       if (!isPositiveInt(v.reqId) ||
         typeof v.instanceId !== 'string' || v.instanceId.length === 0) {
         return false
@@ -2896,13 +2919,16 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
           isNonNegativeInt(v.range.end) &&
           v.range.start <= v.range.end &&
           isObject(v.scope) &&
-          v.scope.kind === 'full'
+          (v.scope.kind === 'full' ||
+            ((v.scope.kind === 'heading' || v.scope.kind === 'block') && isString(v.scope.anchor)))
         )
       }
       return (
         v.ok === false &&
         (v.reason === 'unsupported' || v.reason === 'no-workspace' || v.reason === 'escape' ||
-          v.reason === 'not-found' || v.reason === 'non-markdown' || v.reason === 'read-failed')
+          v.reason === 'not-found' || v.reason === 'non-markdown' || v.reason === 'read-failed' ||
+          v.reason === 'anchor-missing') &&
+        (v.anchor === undefined || isString(v.anchor))
       )
     case 'outlinks.test.click':
       return true

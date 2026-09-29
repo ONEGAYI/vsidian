@@ -71,6 +71,8 @@ interface HoverPopupState {
   /** loading → content / error（结果只接受一次：陈旧回包丢弃） */
   display: 'loading' | 'content' | 'error'
   note: string
+  /** #219 语义范围选择器探针：收到成功回包前为空串 */
+  scope: 'full' | 'heading' | 'block' | ''
   closeTimer: number | undefined
   cleanups: Array<() => void>
 }
@@ -100,15 +102,17 @@ export function hoverPopupProbe(): {
   state: 'loading' | 'content' | 'error'
   note: string
   blocks: number
+  scope: 'full' | 'heading' | 'block' | ''
 } {
   if (!popup) {
-    return { open: false, state: 'loading', note: '', blocks: 0 }
+    return { open: false, state: 'loading', note: '', blocks: 0, scope: '' }
   }
   return {
     open: true,
     state: popup.display,
     note: popup.note,
     blocks: popup.contentEl.querySelectorAll(`.${READING_CLASS_NAMES.block}`).length,
+    scope: popup.scope,
   }
 }
 
@@ -239,6 +243,7 @@ function openPopup(anchor: HTMLElement): void {
     }),
     display: 'loading',
     note: '',
+    scope: '',
     closeTimer: undefined,
     cleanups: [],
   }
@@ -366,6 +371,7 @@ export function notifyHoverResult(message: HoverPreviewResult): void {
     return
   }
   if (message.ok) {
+    popup.scope = message.scope.kind
     popup.view.setDocument(message.text)
     popup.view.updateNow()
     // 全部任务 checkbox 禁用（挂载钩子已覆盖虚拟化路径；此处为无布局
@@ -375,13 +381,13 @@ export function notifyHoverResult(message: HoverPreviewResult): void {
     }
     applyDisplay(popup, 'content', message.target.relPath)
   } else {
-    applyDisplay(popup, 'error', hoverErrorText(message.reason, popup.anchor.getAttribute('href') ?? ''))
+    applyDisplay(popup, 'error', hoverErrorText(message.reason, popup.anchor.getAttribute('href') ?? '', message.anchor))
   }
   position(popup)
 }
 
-/** 错误分态 → 就地 i18n 文案（不弹宿主通知） */
-function hoverErrorText(reason: HoverPreviewFailReason, target: string): string {
+/** 错误分态 → 就地 i18n 文案（不弹宿主通知；anchor-missing 附锚点原文） */
+function hoverErrorText(reason: HoverPreviewFailReason, target: string, anchor?: string): string {
   switch (reason) {
     case 'unsupported':
       return t('hover.errorUnsupported')
@@ -395,6 +401,8 @@ function hoverErrorText(reason: HoverPreviewFailReason, target: string): string 
       return t('hover.errorNonMarkdown', { target })
     case 'read-failed':
       return t('hover.errorReadFailed')
+    case 'anchor-missing':
+      return t('hover.errorAnchorMissing', { target, anchor: anchor ?? '' })
   }
 }
 

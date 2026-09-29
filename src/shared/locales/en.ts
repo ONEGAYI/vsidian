@@ -368,14 +368,19 @@ export const en = {
   'outlineMenu.rename': 'Rename',
   'outlineMenu.delete': 'Delete',
 
-  /** 悬停文档预览（#218：浮层就地状态行；错误分态不弹宿主通知） */
+  /** Hover document preview (#218: in-popup state line; error states never
+   *  surface host notifications. Since #219 wikilinks and Markdown links share
+   *  the states — the raw target is no longer wrapped in wikilink brackets;
+   *  anchor-missing covers missing heading/block anchors without falling back
+   *  to the full document) */
   'hover.loading': 'Loading preview…',
-  'hover.errorUnsupported': 'Unsupported link form: no preview target to show',
+  'hover.errorUnsupported': 'Unsupported link form: no preview target to show (web pages are out of scope)',
   'hover.errorNoWorkspace': 'The current document is not in any workspace folder: link targets cannot be resolved for preview',
   'hover.errorEscape': 'The link target escapes the owning workspace root and cannot be previewed',
-  'hover.errorNotFound': 'Target not found: [[{target}]] (resolved relative to the current document; files are never created automatically)',
-  'hover.errorNonMarkdown': '[[{target}]] is not a Markdown note: preview supports Markdown documents only in this phase',
+  'hover.errorNotFound': 'Target not found: {target} (resolved relative to the current document; files are never created automatically)',
+  'hover.errorNonMarkdown': '{target} is not a Markdown note: preview supports Markdown documents only in this phase',
   'hover.errorReadFailed': 'Failed to read the target document',
+  'hover.errorAnchorMissing': 'Anchor not found in the target note: {target}#{anchor} (the full document is not shown instead)',
 
   /** 反链面板（#197：四态与条目；形态改版批次：工具栏/排序/搜索/页头） */
   'backlinks.label': 'Backlinks',

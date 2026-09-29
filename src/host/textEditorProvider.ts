@@ -77,6 +77,7 @@ import { runImageExport } from './imageExportHost'
 import { runImagePaste, type ImagePasteOutcome } from './imagePasteHost'
 import {
   readHoverDocTarget,
+  readHoverMdLinkTarget,
   type HoverDocAccessContext,
   type HoverReadOutcome,
 } from './hoverDocAccess'
@@ -1149,19 +1150,21 @@ export function createTextEditorProvider(
       // #218 悬停预览文档读取端口：hoverDocAccess 无副作用路径（目标解析 +
       // openTextDocument 只装载不显示 + LF 转换）；报告回 hover.result（经
       // 会话 report 闭包回来源面板）。读取异常一律收敛为 read-failed 分态
-      // ——就地 i18n 呈现，不弹宿主通知
+      // ——就地 i18n 呈现，不弹宿主通知。#219 起按 linkHref 分流：普通本地
+      // Markdown 链接走 readHoverMdLinkTarget（外部网页 webview 已预滤，
+      // 宿主复核兜底），缺省为双链 readHoverDocTarget
       const readHoverTargetPort = (
-        payload: { target: string },
+        payload: { target: string; linkHref?: string },
         report: (result: HoverReadOutcome) => void,
       ): void => {
         void (async (): Promise<void> => {
           let outcome: HoverReadOutcome
           try {
             const access = hoverAccessContextOf(document)
-            outcome = await readHoverDocTarget(payload.target, access, {
-              resolveVaultFile: (rawPath) =>
+            const ports = {
+              resolveVaultFile: (rawPath: string) =>
                 resolveVaultLinkFile(rawPath, access.resolve, statFileRealPath),
-              openTextDocument: async (fsPath) => {
+              openTextDocument: async (fsPath: string) => {
                 try {
                   const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fsPath))
                   return { version: doc.version, text: doc.getText() }
@@ -1169,7 +1172,10 @@ export function createTextEditorProvider(
                   return null
                 }
               },
-            })
+            }
+            outcome = payload.linkHref !== undefined
+              ? await readHoverMdLinkTarget(payload.linkHref, access, ports)
+              : await readHoverDocTarget(payload.target, access, ports)
           } catch {
             outcome = { ok: false, reason: 'read-failed' }
           }

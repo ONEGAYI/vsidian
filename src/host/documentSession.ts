@@ -743,7 +743,9 @@ export class DocumentSession {
         // 先例（就绪且 docUri 匹配才放行，否则静默丢弃）；读取执行经面板
         // 端口注入（hoverDocAccess 无副作用路径），结果回来源面板（reqId +
         // instanceId 双配对——迟到回包由 webview 侧实例守卫丢弃）。只读
-        // 交互：不进 edit.request 通道、不写文档，暂停态同样放行
+        // 交互：不进 edit.request 通道、不写文档，暂停态同样放行。
+        // #219 起成功形态透传语义范围选择器（full/heading/block）、失败
+        // 形态透传锚点原文（anchor-missing 就地提示用）
         if (!panel.ready || message.docUri !== this.docUri) {
           return Promise.resolve()
         }
@@ -759,7 +761,7 @@ export class DocumentSession {
                   version: result.version,
                   text: result.lfText,
                   range: result.range,
-                  scope: { kind: 'full' },
+                  scope: result.scope,
                 }
               : {
                   kind: 'hover.result',
@@ -767,6 +769,7 @@ export class DocumentSession {
                   instanceId: message.instanceId,
                   ok: false,
                   reason: result.reason,
+                  ...(result.anchor !== undefined ? { anchor: result.anchor } : {}),
                 },
           )
         }
