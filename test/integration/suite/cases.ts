@@ -170,9 +170,13 @@ const PASTE_PNG_BASE64 =
 const REFRESH_PNG_2X2_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEklEQVR4nGP4z8DwHxkzoAsAAA8hD/EEN8afAAAAAElFTkSuQmCC'
 
-// #208 手动刷新 fixture（与 fixtures.mjs 的 refresh.md 字节一致）
+// #208 手动刷新 fixture（与 fixtures.mjs 的 refresh.md 字节一致）：图片行
+// 上方 24 行填充（图片行仍在 CM6 视口装饰范围内，装载即解析）+ 下方 40 行
+// 尾部（文档可滚动——刷新前后滚动位置保持断言需要非零 scrollTop）
 const REFRESH_DOC_TEXT = [
   '# 刷新样例',
+  '',
+  ...Array.from({ length: 24 }, (_, i) => `刷新填充 ${i}`),
   '',
   '光标定位段落，刷新前后选区保持的断言载体。',
   '',
@@ -180,7 +184,13 @@ const REFRESH_DOC_TEXT = [
   '',
   '结尾段。',
   '',
+  ...Array.from({ length: 40 }, (_, i) => `刷新尾部 ${i}`),
+  '',
 ].join('\n')
+
+/** #208 图片行行号（1 基）：滚动定位目标——居中图片行得非零 scrollTop，
+ *  且图片槽位保持可见（widget 不因滚出视口被回收，失效重挂照常覆盖它） */
+const REFRESH_IMAGE_LINE = REFRESH_DOC_TEXT.slice(0, REFRESH_DOC_TEXT.indexOf('![刷新图]')).split('\n').length
 
 function wsUri(name: string): vscode.Uri {
   return vscode.Uri.file(`${wsDir}/${name}`)
@@ -8825,6 +8835,15 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const located = await waitViewState('refresh.md', (v) => v.selectionOffset === caretOffset)
     assert(located.viewMode === 'live', `刷新前置应为 live 模式，实际 ${located.viewMode}`)
 
+    // 滚动位置保持的断言锚点：居中图片行得非零 scrollTop（viewport 探针
+    // 随 viewport.test.position 启用，liveScrollTopPx 进观测面）；图片行
+    // 居中同时保证其 widget 不滚出视口装饰范围，失效重挂照常覆盖它
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'viewport.test.position', scrollNearLine: REFRESH_IMAGE_LINE,
+    })
+    const scrolled = await waitViewState('refresh.md', (v) => (v.liveScrollTopPx ?? -1) > 0, 0, 30000)
+    const scrollTopBefore = scrolled.liveScrollTopPx!
+
     // 外部替换磁盘同名图片：不同内容与尺寸（1x1 透明 → 2x2 不透明红）
     await vscode.workspace.fs.writeFile(
       wsUri('assets/刷新图.png'), Buffer.from(REFRESH_PNG_2X2_BASE64, 'base64'))
@@ -8850,10 +8869,14 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const session1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
     assert(session1.imageGeneration === 1, `刷新后资源代次应为 1，实际 ${session1.imageGeneration}`)
 
-    // 状态保持：刷新 = 清缓存重渲染，不是重开文件——光标、视图模式原样
+    // 状态保持：刷新 = 清缓存重渲染，不是重开文件——光标、滚动、视图模式
+    // 原样（滚动容差 ±2px：图片重载闪动期间的测度取整，不视为位置丢失；
+    // 阅读侧滚动与查找会话保持由人工验收项覆盖）
     assert(refreshed.selectionOffset === caretOffset,
       `刷新后光标应保持 ${caretOffset}，实际 ${refreshed.selectionOffset}`)
     assert(refreshed.viewMode === 'live', `刷新后视图模式应保持 live，实际 ${refreshed.viewMode}`)
+    assert(refreshed.liveScrollTopPx !== undefined && Math.abs(refreshed.liveScrollTopPx - scrollTopBefore) <= 2,
+      `刷新后滚动位置应保持 ${scrollTopBefore}，实际 ${String(refreshed.liveScrollTopPx)}`)
 
     // 无破坏性：文档内容、写回链路、磁盘全部原样
     assert(refreshed.text === REFRESH_DOC_TEXT, '刷新不得改写文档文本')

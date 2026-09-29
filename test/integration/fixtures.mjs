@@ -739,16 +739,22 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   mkdirSync(path.join(wsDir, '子 目录'), { recursive: true })
   writeFileSync(path.join(wsDir, '子 目录', '目标 二.md'), '# 目标 二\n含空格路径的目标文档。\n', 'utf8')
   writeFileSync(path.join(wsDir, 'images.md'), IMAGES_DOC, 'utf8')
-  // #208 手动刷新样例：短文档（图片行必进 live 首屏视口），图片资产独立
-  // 文件名（用例会外部覆写该图字节，不得与 images/links 样例共用）
+  // #208 手动刷新样例：图片行上方垫 24 行填充（图片行保持在 CM6 视口装饰
+  // 范围内，装载即解析），下方 40 行尾部保证文档可滚动（刷新前后滚动位置
+  // 保持断言需要非零 scrollTop）；图片资产独立文件名（用例会外部覆写该图
+  // 字节，不得与 images/links 样例共用）
   writeFileSync(path.join(wsDir, 'refresh.md'), [
     '# 刷新样例',
+    '',
+    ...Array.from({ length: 24 }, (_, i) => `刷新填充 ${i}`),
     '',
     '光标定位段落，刷新前后选区保持的断言载体。',
     '',
     '![刷新图](assets/刷新图.png)',
     '',
     '结尾段。',
+    '',
+    ...Array.from({ length: 40 }, (_, i) => `刷新尾部 ${i}`),
     '',
   ].join('\n'), 'utf8')
   mkdirSync(path.join(wsDir, 'assets'), { recursive: true })

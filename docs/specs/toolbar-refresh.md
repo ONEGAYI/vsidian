@@ -65,4 +65,11 @@
 
 验证：compile / test:unit（vitest 3464 + node --test 103）/ check:stylecontract（八项零失败、零豁免）/ test:browser（33 脚本，viewToggle 五按钮序与右端组几何）/ 分片集成（193 用例，含 #208 外部替换换新重载用例）全绿；执行记录与报告路径见 [manual-verification.md](manual-verification.md) #208 节。用户人工验收未结。
 
+## 实施记录补：code-review 修复批次（2026-09-29）
+
+两笔 fix 提交（同分支）：
+
+- 代码修复：刷新重置后**已降级 Mermaid 容器立即重画**（`resetMermaidLoadFailure` 重置终态后扫描全文档 error 态容器重走渲染管线——参照 `setMermaidDarkTheme` 的全量扫描先例但只限降级态，正常渲染容器与按源码键缓存不动）；**在途解析代次竞态**修复（`invalidateImages` 作废在途去重表 + 解析回调写缓存前校验发起代次，旧代次 URI 不得入缓存/不得与新请求复用）。TDD 先红后绿：`mermaidRender.test.ts`、`refreshInvalidation.test.ts`、`documentSession.test.ts` 各一例。
+- 集成与文档：#208 集成用例补**刷新前后滚动位置保持**断言（fixture 垫高为可滚动文档，居中图片行取非零 `liveScrollTopPx`，刷新后一致 ±2px）；`manual-verification.md` #208 节补多面板窄义与滚动/查找自动化覆盖两条边界记录。
+
 Blocked by: 无（合并顺序与 #201 协调，见「与 #201 的关系」）。
