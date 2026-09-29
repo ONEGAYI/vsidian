@@ -229,6 +229,13 @@ export const STYLE_GUIDE_CATEGORIES: readonly StyleContractCategory[] = [
     "title": "出链面板",
     "titleKey": "styleRef.category.outlinks",
     "order": 11
+  },
+  {
+    "id": "hover-preview",
+    "domain": "chrome",
+    "title": "悬停预览",
+    "titleKey": "styleRef.category.hoverPreview",
+    "order": 12
   }
 ] as readonly StyleContractCategory[]
 
@@ -3446,6 +3453,30 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "集成「出链面板」（出链面板批次）：outlinks.togglePainted 绘制证据与 toggleAriaLabel"
     ],
     "introduced": "出链面板批次（2026-09-29）"
+  },
+  {
+    "id": "hover-popup",
+    "domain": "chrome",
+    "category": "hover-preview",
+    "kind": "selector",
+    "target": ".vsidian-hover-popup（浮层容器；内含 .vsidian-hover-popup-scroll 内容滚动区（承载只读 Reading 容器）与 .vsidian-hover-popup-state 就地状态行（loading/错误分态））",
+    "purpose": "悬停文档预览浮层（#218 一期首条闭环）：父文档 Reading 中悬停指向 Markdown 的双链，经文档访问通道读取目标后以只读 Reading 内容显示目标全文。默认宽 480px / 最大高 400px（小视口由 JS 几何计划四边翻转并收缩钳制）；内容只读——任务 checkbox 禁用（JS disabled + pointer-events 双保险），无任何写回通道。",
+    "views": [
+      "reading"
+    ],
+    "states": "交互态浮层（悬停延迟打开期间挂载、离开联合域延迟关闭/Esc/父容器滚动/切模式撤下）——容器本体不进静态探针，开闭、保活与绘制由浏览器 hoverPreview 套件按行为路径验证；样式入口（单类低特异性）公开供片段覆写。",
+    "dom": "document.body 直挂（不在 #app 内，故规则无 #app 前缀）；内部 Reading 容器挂 .vsidian-view-reading（含 .markdown-preview-view 别名桥，主题与片段天然命中）。",
+    "example": ".vsidian-hover-popup {\n  width: 480px;\n  max-height: 400px;\n}",
+    "obsidian": {
+      "counterpart": ".hover-popover（Obsidian 页面预览浮层方向；内部结构闭源不作承诺）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 hoverPopupCssContract：fixed/宽 480/最大高 400/实底边框投影/滚动区/状态行/checkbox pointer-events 钉规则",
+      "单元 hoverPopup + hoverPopupGeometry：生命周期契约与四边翻转数学内核",
+      "浏览器 hoverPreview（#218）：真实指针开闭/保活/滚动/Esc/边缘翻转 + 正文绘制层可见断言"
+    ],
+    "introduced": "#218（2026-09-30）"
   }
 ] as readonly StyleContractEntry[]
 
@@ -4494,6 +4525,14 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     "dom": "A button plus a chain-link SVG icon (interlocked double loop with a right-going arrow, 24-unit viewBox; stroke width pinned via CSS) inside .vsidian-sidebar-toolbar-actions.",
     "obsidian": {
       "counterpart": "None (the Obsidian outgoing-links toggle is app-level UI)"
+    }
+  },
+  "hover-popup": {
+    "purpose": "The hover document preview popup (first closing loop of phase one, #218): hover a wikilink pointing to a Markdown note in the parent reading view, and the target is read through the document-access channel and shown in full as read-only reading content. Default width 480px / max height 400px (in small viewports a JS geometry plan flips at the four edges and shrinks to fit); the content is read-only — task checkboxes are disabled (JS disabled + pointer-events double safety), with no write-back channel at all.",
+    "states": "An interaction-state floating layer (mounted after the hover open delay, dismissed by leaving the joint anchor/popup domain after a close delay, Esc, parent scroll, or mode switch) — the container itself is not part of the static probes; open/close, keep-alive and painting are verified behaviorally by the browser hoverPreview suite; the style entry point (a single low-specificity class) is public for snippet overrides.",
+    "dom": "Attached directly to document.body (outside #app, so the rules carry no #app prefix); the inner reading container carries .vsidian-view-reading (including the .markdown-preview-view alias bridge, so themes and snippets match naturally).",
+    "obsidian": {
+      "counterpart": ".hover-popover (the Obsidian page-preview popover direction; the internal structure is closed-source and not promised)"
     }
   }
 } as Readonly<Record<string, StyleContractEntryOverride>>

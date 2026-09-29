@@ -182,6 +182,7 @@ export const en = {
   'styleRef.category.contextMenu': 'Content context menu',
   'styleRef.category.backlinks': 'Backlinks panel',
   'styleRef.category.outlinks': 'Outgoing links panel',
+  'styleRef.category.hoverPreview': 'Hover preview',
   'host.styleRefExported': 'Style contract JSON exported: {path}',
   'host.styleRefExportFailed': 'Failed to export style contract JSON: {reason}',
   'host.styleRefExportReasonMissingAsset': 'extension install incomplete (style-reference.json missing)',
@@ -366,6 +367,15 @@ export const en = {
   'outlineMenu.levelDownRecursive': 'Decrease by one level recursively',
   'outlineMenu.rename': 'Rename',
   'outlineMenu.delete': 'Delete',
+
+  /** 悬停文档预览（#218：浮层就地状态行；错误分态不弹宿主通知） */
+  'hover.loading': 'Loading preview…',
+  'hover.errorUnsupported': 'Unsupported link form: no preview target to show',
+  'hover.errorNoWorkspace': 'The current document is not in any workspace folder: link targets cannot be resolved for preview',
+  'hover.errorEscape': 'The link target escapes the owning workspace root and cannot be previewed',
+  'hover.errorNotFound': 'Target not found: [[{target}]] (resolved relative to the current document; files are never created automatically)',
+  'hover.errorNonMarkdown': '[[{target}]] is not a Markdown note: preview supports Markdown documents only in this phase',
+  'hover.errorReadFailed': 'Failed to read the target document',
 
   /** 反链面板（#197：四态与条目；形态改版批次：工具栏/排序/搜索/页头） */
   'backlinks.label': 'Backlinks',

@@ -3785,3 +3785,55 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
   opacity: 1;
   visibility: visible;
 }
+
+/* ---- #218 悬停文档预览浮层（样式契约 chrome 域 hover-popup 条目；交互态
+   浮层挂 body、打开期间在场，开闭与绘制由浏览器 hoverPreview 套件验证） ---- */
+
+/* 浮层容器：fixed 定位、默认宽 480 / 最大高 400（规格一期初值；小视口由
+   JS 几何计划收缩并写内联值），实底 + 边框 + 投影保证任意主题下可辨识 */
+body > .vsidian-hover-popup {
+  position: fixed;
+  z-index: 9000;
+  box-sizing: border-box;
+  width: 480px;
+  max-height: 400px;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  background: var(--vscode-editor-background, #1e1e1e);
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.22);
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: var(--vscode-font-size, 13px);
+  color: var(--vscode-editor-foreground, inherit);
+  overflow: hidden;
+}
+
+/* 内容滚动区：移入保活后的滚动承载（长文内部滚动，不撑破浮层） */
+body > .vsidian-hover-popup .vsidian-hover-popup-scroll {
+  overflow: auto;
+  min-height: 0;
+  flex: 1;
+}
+
+/* 内部 Reading 容器：随正文排版基线与主题/片段（别名桥在容器类上） */
+.vsidian-hover-popup .vsidian-hover-popup-scroll .vsidian-view-reading {
+  font-family: var(--vsidian-content-font-family, monospace);
+  font-size: var(--vsidian-content-font-size, 14px);
+  line-height: var(--vsidian-content-line-height, 1.5);
+  padding: 10px 14px;
+  overflow-wrap: break-word;
+}
+
+/* 就地状态行（loading / 错误分态）：在场绘制，i18n 文案 */
+body > .vsidian-hover-popup .vsidian-hover-popup-state {
+  padding: 18px 14px;
+  color: var(--vscode-descriptionForeground, inherit);
+  overflow-wrap: break-word;
+}
+
+/* 只读契约：浮层内任务 checkbox 不响应指针（JS disabled 双保险） */
+.vsidian-hover-popup input[type="checkbox"] {
+  pointer-events: none;
+}

@@ -1133,7 +1133,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
   </section>
   <section class="domain" data-domain="chrome">
-    <h1 style="font-size:19px;margin-bottom:4px">界面域（63 条）</h1>
+    <h1 style="font-size:19px;margin-bottom:4px">界面域（64 条）</h1>
     <p class="note">界面域条目（#133 起逐项核实）：静态入口经探针在真实渲染中断言，交互态入口由浏览器/集成套件按行为路径验证；第三方渲染器（KaTeX/Mermaid）内部 DOM 不承诺为稳定接口（见各域「限制」类目）。</p>
     <h2>界面域 · 公式（5）</h2>
     <article class="entry" id="live-math">
@@ -2013,6 +2013,22 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 }</code></pre>
       <p class="verify">验证：集成「出链面板」（出链面板批次）：outlinks.togglePainted 绘制证据与 toggleAriaLabel</p>
       <p class="life">引入：出链面板批次（2026-09-29）</p>
+    </article>
+    <h2>界面域 · 悬停预览（1）</h2>
+    <article class="entry" id="hover-popup">
+      <h3><code>.vsidian-hover-popup（浮层容器；内含 .vsidian-hover-popup-scroll 内容滚动区（承载只读 Reading 容器）与 .vsidian-hover-popup-state 就地状态行（loading/错误分态））</code><span class="eid">hover-popup</span></h3>
+      <p class="purpose">悬停文档预览浮层（#218 一期首条闭环）：父文档 Reading 中悬停指向 Markdown 的双链，经文档访问通道读取目标后以只读 Reading 内容显示目标全文。默认宽 480px / 最大高 400px（小视口由 JS 几何计划四边翻转并收缩钳制）；内容只读——任务 checkbox 禁用（JS disabled + pointer-events 双保险），无任何写回通道。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+<p class="states">状态：交互态浮层（悬停延迟打开期间挂载、离开联合域延迟关闭/Esc/父容器滚动/切模式撤下）——容器本体不进静态探针，开闭、保活与绘制由浏览器 hoverPreview 套件按行为路径验证；样式入口（单类低特异性）公开供片段覆写。</p>
+      <p class="obsidian">Obsidian 对应：.hover-popover（Obsidian 页面预览浮层方向；内部结构闭源不作承诺）</p>
+
+      <p class="dom">DOM 关系：document.body 直挂（不在 #app 内，故规则无 #app 前缀）；内部 Reading 容器挂 .vsidian-view-reading（含 .markdown-preview-view 别名桥，主题与片段天然命中）。</p>
+      <pre><code>.vsidian-hover-popup {
+  width: 480px;
+  max-height: 400px;
+}</code></pre>
+      <p class="verify">验证：单元 hoverPopupCssContract：fixed/宽 480/最大高 400/实底边框投影/滚动区/状态行/checkbox pointer-events 钉规则；单元 hoverPopup + hoverPopupGeometry：生命周期契约与四边翻转数学内核；浏览器 hoverPreview（#218）：真实指针开闭/保活/滚动/Esc/边缘翻转 + 正文绘制层可见断言</p>
+      <p class="life">引入：#218（2026-09-30）</p>
     </article>
   </section>
 <p style="margin-top:48px;color:color-mix(in srgb, currentColor 50%, transparent);font-size:12px">由 src/shared/styleContract.ts 生成（scripts/genStyleGuide.mjs）；产物一致性由 test/unit/styleGuideGen.test.ts 钉住。</p>

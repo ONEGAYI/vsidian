@@ -166,6 +166,7 @@ export const zhCn: Record<MessageKey, string> = {
   'styleRef.category.contextMenu': '正文右键菜单',
   'styleRef.category.backlinks': '反链面板',
   'styleRef.category.outlinks': '出链面板',
+  'styleRef.category.hoverPreview': '悬停预览',
   'host.styleRefExported': '样式契约 JSON 已导出：{path}',
   'host.styleRefExportFailed': '样式契约 JSON 导出失败：{reason}',
   'host.styleRefExportReasonMissingAsset': '扩展安装不完整（缺少 style-reference.json）',
@@ -339,6 +340,15 @@ export const zhCn: Record<MessageKey, string> = {
   'outlineMenu.levelDownRecursive': '递归减少一级',
   'outlineMenu.rename': '重命名',
   'outlineMenu.delete': '删除',
+
+  /** 悬停文档预览（#218：浮层就地状态行；错误分态不弹宿主通知） */
+  'hover.loading': '正在加载预览…',
+  'hover.errorUnsupported': '不支持的目标形态：没有可预览的目标',
+  'hover.errorNoWorkspace': '当前文档不在任何工作区文件夹内：无法解析链接目标进行预览',
+  'hover.errorEscape': '目标越出来源所属的工作区根，无法预览',
+  'hover.errorNotFound': '目标不存在：[[{target}]]（按当前文档所在目录解析；不会自动创建文件）',
+  'hover.errorNonMarkdown': '[[{target}]] 不是 Markdown 笔记：本期预览仅支持 Markdown 文档',
+  'hover.errorReadFailed': '读取目标文档失败',
 
   /** 反链面板（#197：四态与条目；形态改版批次：工具栏/排序/搜索/页头） */
   'backlinks.label': '反向链接',

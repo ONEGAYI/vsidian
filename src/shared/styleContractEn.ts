@@ -1006,6 +1006,16 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
     dom: 'A button plus a chain-link SVG icon (interlocked double loop with a right-going arrow, 24-unit viewBox; stroke width pinned via CSS) inside .vsidian-sidebar-toolbar-actions.',
     obsidian: { counterpart: 'None (the Obsidian outgoing-links toggle is app-level UI)' },
   },
+
+  // ---- 悬停预览（hover-preview，#218 起 1 条）----
+  'hover-popup': {
+    purpose:
+      'The hover document preview popup (first closing loop of phase one, #218): hover a wikilink pointing to a Markdown note in the parent reading view, and the target is read through the document-access channel and shown in full as read-only reading content. Default width 480px / max height 400px (in small viewports a JS geometry plan flips at the four edges and shrinks to fit); the content is read-only — task checkboxes are disabled (JS disabled + pointer-events double safety), with no write-back channel at all.',
+    states:
+      'An interaction-state floating layer (mounted after the hover open delay, dismissed by leaving the joint anchor/popup domain after a close delay, Esc, parent scroll, or mode switch) — the container itself is not part of the static probes; open/close, keep-alive and painting are verified behaviorally by the browser hoverPreview suite; the style entry point (a single low-specificity class) is public for snippet overrides.',
+    dom: 'Attached directly to document.body (outside #app, so the rules carry no #app prefix); the inner reading container carries .vsidian-view-reading (including the .markdown-preview-view alias bridge, so themes and snippets match naturally).',
+    obsidian: { counterpart: '.hover-popover (the Obsidian page-preview popover direction; the internal structure is closed-source and not promised)' },
+  },
 }
 
 /**
