@@ -466,14 +466,22 @@ export const zhCn: Record<MessageKey, string> = {
   // ---- #97 manifest NLS（命令 title 与 displayName/description 生成源）----
   // 值即 package.json 原硬编码字面量（呈现不变）；工具条 24 条命令复用
   // format.* 既有键。command.* 键同时是快捷键页 extra/UI 源操作名的
-  // titleKey（与命令面板同源，无第二套文案）。
+  // titleKey（与命令面板同源，无第二套文案）；例外是三态切换三命令
+  // （#232）：manifest title 改归属句式，操作名拆到 operation.* 独立键。
   'manifest.displayName': 'Vsidian',
   'manifest.description': '类 Obsidian 的 Markdown 编辑体验：实时预览 + 阅读双视图',
 
   'command.toggleViewMode.title': '切换到下一视图模式',
-  'command.mode.toReading.title': '切换到阅读模式',
-  'command.mode.toSource.title': '切换到源码编辑器',
-  'command.mode.toLive.title': '切换到实时预览',
+  /** #232 归属句式：editor/title 三态切换命令的 manifest title（genNls 生成源），
+   *  与快捷键注册表的无前缀操作名键（operation.*）拆键分持 */
+  'command.mode.toReading.title': '将 Vsidian 切换到阅读模式',
+  'command.mode.toSource.title': '将 Vsidian 切换到源码编辑器',
+  'command.mode.toLive.title': '将 Vsidian 切换到实时预览',
+  /** #232 拆键：三态切换的无前缀操作名（keybindings 注册表 titleKey，
+   *  快捷键页显示不带品牌名；值即拆键前原文案） */
+  'operation.toReading': '切换到阅读模式',
+  'operation.toSource': '切换到源码编辑器',
+  'operation.toLive': '切换到实时预览',
   /** #141 双态切换（live↔reading，不含源码；工具栏按钮与 Ctrl+Q 共用） */
   'command.mode.toggleDualView.title': '切换阅读/实时预览',
   'command.find.title': '查找（编辑区）',

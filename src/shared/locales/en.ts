@@ -499,15 +499,23 @@ export const en = {
   // onegayi.vsidian.<suffix> → command.<suffix>.title（既有唯一键
   // command.table.create.title 天然吻合该规则，单轨收编，不留双轨）。
   // 这些 command.* 键同时是 KEYBINDING_OPERATIONS extra/UI 源操作名的
-  // titleKey（快捷键页与命令面板同源，无第二套文案）。
+  // titleKey（快捷键页与命令面板同源，无第二套文案）；例外是三态切换
+  // 三命令（#232）：manifest title 改归属句式，操作名拆到 operation.* 独立键。
   /** 扩展市场 displayName / description（含 customEditors displayName 同源） */
   'manifest.displayName': 'Vsidian',
   'manifest.description': 'Obsidian-like Markdown editing: live preview + reading views',
 
   'command.toggleViewMode.title': 'Switch to the next view mode',
-  'command.mode.toReading.title': 'Switch to reading view',
-  'command.mode.toSource.title': 'Switch to the source editor',
-  'command.mode.toLive.title': 'Switch to live preview',
+  /** #232 归属句式：editor/title 三态切换命令的 manifest title（genNls 生成源），
+   *  与快捷键注册表的无前缀操作名键（operation.*）拆键分持 */
+  'command.mode.toReading.title': 'Switch Vsidian to reading view',
+  'command.mode.toSource.title': 'Switch Vsidian to the source editor',
+  'command.mode.toLive.title': 'Switch Vsidian to live preview',
+  /** #232 拆键：三态切换的无前缀操作名（keybindings 注册表 titleKey，
+   *  快捷键页显示不带品牌名；值即拆键前原文案） */
+  'operation.toReading': 'Switch to reading view',
+  'operation.toSource': 'Switch to the source editor',
+  'operation.toLive': 'Switch to live preview',
   /** #141 dual-state toggle (live↔reading; shared by toolbar button and Ctrl+Q) */
   'command.mode.toggleDualView.title': 'Toggle reading/live preview',
   'command.find.title': 'Find (in the editor)',
