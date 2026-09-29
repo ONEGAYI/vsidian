@@ -293,6 +293,8 @@ export const en = {
   /** #141 toolbar dual-state view toggle (aria/title names the target action) */
   'toolbar.switchToReading': 'Switch to reading view',
   'toolbar.switchToLive': 'Switch to live preview',
+  /** #208 toolbar refresh button (drop embedded-resource caches and re-render) */
+  'toolbar.refresh': 'Refresh embedded resources',
   'sidebar.resize': 'Drag to resize sidebar',
 
   /** 查找控件 */

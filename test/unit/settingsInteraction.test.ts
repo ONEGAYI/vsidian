@@ -109,8 +109,8 @@ describe('工具栏设置入口（#33；#53 图标化）', () => {
 
   it('模式按钮已迁移，工具栏仅剩设置与侧栏切换入口（#38/#53 合并语义）', () => {
     // #33 基线上工具栏并存模式按钮与设置按钮；#38 将模式切换迁移至编辑器
-    // 标题栏三态命令；#53 增设右侧栏切换按钮，#141 增设双态视图切换按钮
-    // ——工具栏四入口，无三态模式按钮
+    // 标题栏三态命令；#53 增设右侧栏切换按钮，#141 增设双态视图切换按钮，
+    // #208 增设刷新嵌入资源按钮——工具栏五入口，无三态模式按钮
     const { bridge } = makeBridge()
     const parent = document.createElement('div')
     const c = new WebviewSyncController(bridge)
@@ -120,7 +120,8 @@ describe('工具栏设置入口（#33；#53 图标化）', () => {
     expect(parent.querySelector('.vsidian-toolbar button.vsidian-mode-toggle')).toBeNull()
     expect(parent.querySelector('.vsidian-toolbar button.vsidian-quick-toggle')).toBeTruthy()
     expect(parent.querySelector('.vsidian-toolbar button.vsidian-view-toggle')).toBeTruthy()
-    expect(parent.querySelectorAll('.vsidian-toolbar button')).toHaveLength(4)
+    expect(parent.querySelector('.vsidian-toolbar button.vsidian-refresh-toggle')).toBeTruthy()
+    expect(parent.querySelectorAll('.vsidian-toolbar button')).toHaveLength(5)
   })
 })
 

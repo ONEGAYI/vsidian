@@ -763,6 +763,12 @@ export class WebviewSyncController {
   private imagePasteReqId = 0
   private readonly imagePastePending = new Set<number>()
 
+  /** #208 手动刷新：最后发出的 refresh.request reqId（0 = 从未发起）。
+   *  宿主回发的 refresh.invalidated 以此配对——刷新后又有新请求时，旧
+   *  回执在观测层丢弃（不触发失效重挂）；失效动作本身幂等，防护只挡
+   *  迟到回执的误触发 */
+  private refreshReqId = 0
+
   /** #84 阅读侧折叠集合：键 = 块 data-vsidian-src-start（视图态，不持久化；
    *  块卸载重挂载后经此恢复收起形态） */
   private readonly readingCodeFold = new Set<number>()
@@ -2013,11 +2019,15 @@ export class WebviewSyncController {
         break
       case 'refresh.invalidated':
         // #208 手动刷新失效通知（refresh.request 的应答，宿主已清解析
-        // 缓存并推进代次）：图片条目全量失效重挂——活跃槽位重新走解析
-        // （新 reqId，新 URI 带新代次戳）；Mermaid 懒加载失败终态重置
+        // 缓存并推进代次）：reqId 与面板最后发出的请求配对——刷新后又有
+        // 新请求时，旧回执在观测层丢弃（失效动作幂等，防护只挡迟到回执
+        // 的误触发）。配对通过后：图片条目全量失效重挂——活跃槽位重新走
+        // 解析（新 reqId，新 URI 带新代次戳）；Mermaid 懒加载失败终态重置
         // （重新允许注入）。刷新不触碰文档/撤销栈/视图状态（光标、滚动、
-        // 模式原样保持）；reqId 的陈旧回执防护在发送侧接线时一并引入
-        // （工具栏按钮批次；失效动作本身幂等，迟到回执无害）
+        // 模式原样保持）
+        if (message.reqId !== this.refreshReqId) {
+          break
+        }
         this.images?.invalidateAll()
         resetMermaidLoadFailure()
         break
@@ -3434,9 +3444,10 @@ export class WebviewSyncController {
 
   /** 主编辑区顶栏（#53 图标化）：左端齿轮设置按钮（打开宿主级 Vsidian
    *  设置页面板——webview 无权自建面板，必须经 settings.open 出站），
-   *  其后快速操作 ✎；右端组（#158）= 双态视图切换（#141，持有
-   *  margin-left:auto 推靠）+ 侧栏切换按钮紧随其后，与左组间弹性空隙。
-   *  #38 起三态切换（含源码）仍在宿主标题栏命令，双态按钮不触及源码路径 */
+   *  其后快速操作 ✎；右端组（#158）= 刷新嵌入资源（#208，持有
+   *  margin-left:auto 推靠）+ 双态视图切换（#141）+ 侧栏切换按钮紧随其后，
+   *  与左组间弹性空隙。#38 起三态切换（含源码）仍在宿主标题栏命令，
+   *  双态按钮不触及源码路径 */
   private buildToolbar(): HTMLElement {
     const bar = document.createElement('div')
     bar.className = 'vsidian-toolbar'
@@ -3462,6 +3473,18 @@ export class WebviewSyncController {
       this.persistState()
     })
     this.quickToggleBtn = quickBtn
+    // #208 刷新嵌入资源按钮（双态切换左侧、右端组首按钮）：点击出站
+    // refresh.request，宿主清图片解析缓存并推进资源代次后回发
+    // refresh.invalidated，本侧全量失效重挂（图片取新代次 URI 重载、
+    // Mermaid 失败终态重置）。刷新不清文档/撤销栈/视图状态（光标、滚动、
+    // 模式原样）；未就绪（无会话）时按钮无操作
+    const refreshBtn = document.createElement('button')
+    refreshBtn.type = 'button'
+    refreshBtn.className = 'vsidian-refresh-toggle'
+    bindLocaleAttrs(refreshBtn, 'toolbar.refresh')
+    refreshBtn.appendChild(createRefreshIcon())
+    refreshBtn.addEventListener('mousedown', (event) => event.preventDefault())
+    refreshBtn.addEventListener('click', () => this.sendEmbeddedRefreshRequest())
     // #141 双态视图切换按钮（紧邻侧栏按钮左侧）：图标显当前态（阅读=
     // 书本类 / Live=编辑类，显隐由 body 模式类经 CSS 驱动），aria/tooltip
     // 表目标动作（点击切到另一态），随当前态与界面语言双变化（回调登记，
@@ -3496,9 +3519,28 @@ export class WebviewSyncController {
     this.sidebarToggleBtn = sidebarBtn
     bar.appendChild(settingsBtn)
     bar.appendChild(quickBtn)
+    bar.appendChild(refreshBtn)
     bar.appendChild(viewBtn)
     bar.appendChild(sidebarBtn)
     return bar
+  }
+
+  /** #208 手动刷新请求发送（工具栏按钮与快捷键入口共用——两条入口汇合
+   *  于此，宿主编排在 documentSession 的 refresh.request 处理唯一）：
+   *  reqId 逐次自增并记录为「最后发出的请求」，回发的 refresh.invalidated
+   *  以此配对（陈旧回执观测层丢弃）。未就绪（init 前）无会话身份，不发送 */
+  private sendEmbeddedRefreshRequest(): void {
+    if (!this.sessionId || !this.docUri) {
+      return
+    }
+    const reqId = this.refreshReqId + 1
+    this.refreshReqId = reqId
+    this.bridge.postMessage({
+      kind: 'refresh.request',
+      sessionId: this.sessionId,
+      docUri: this.docUri,
+      reqId,
+    })
   }
 
   /** 右侧栏骨架（#53）：自有顶栏（#54 起含「大纲」按钮）+ 折叠滑块行
@@ -7924,6 +7966,33 @@ function createViewToggleIcon(): SVGSVGElement {
   edit.setAttribute('d', 'M21.174 6.812a1 1 0 0 0-3.986-3.987L3.642 16.374a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z')
   svg.appendChild(book)
   svg.appendChild(edit)
+  return svg
+}
+
+/** #208 刷新嵌入资源图标（lucide refresh-cw 意象，内联 SVG，不引入图标
+ *  库）：顺时针循环双箭头（首尾相衔的圆弧 + 两个端头箭头），线宽与齿轮/
+ *  双态图标同为恒定 stroke-width=2 */
+function createRefreshIcon(): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg')
+  svg.setAttribute('viewBox', '0 0 24 24')
+  svg.setAttribute('fill', 'none')
+  svg.setAttribute('stroke', 'currentColor')
+  svg.setAttribute('stroke-width', '2')
+  svg.setAttribute('stroke-linecap', 'round')
+  svg.setAttribute('stroke-linejoin', 'round')
+  svg.setAttribute('aria-hidden', 'true')
+  const arcTop = document.createElementNS(SVG_NS, 'path')
+  arcTop.setAttribute('d', 'M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8')
+  const headTop = document.createElementNS(SVG_NS, 'path')
+  headTop.setAttribute('d', 'M21 3v5h-5')
+  const arcBottom = document.createElementNS(SVG_NS, 'path')
+  arcBottom.setAttribute('d', 'M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16')
+  const headBottom = document.createElementNS(SVG_NS, 'path')
+  headBottom.setAttribute('d', 'M8 16H3v5')
+  svg.appendChild(arcTop)
+  svg.appendChild(headTop)
+  svg.appendChild(arcBottom)
+  svg.appendChild(headBottom)
   return svg
 }
 

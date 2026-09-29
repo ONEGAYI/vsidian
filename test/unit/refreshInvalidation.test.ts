@@ -2,8 +2,9 @@
 // #208 手动刷新失效通道的面板接线契约：宿主 refresh.invalidated 到达后，
 // ImageResourceManager 全量失效重挂（活跃图片槽位重新出站 image.request，
 // 新 reqId；宿主已清缓存且新解析 URI 带新代次戳）+ Mermaid 懒加载失败
-// 终态重置（重新允许注入）。工具栏按钮/快捷键入口属后续批次，本文件只
-// 钉住"收到宿主失效通知 → 两个失效动作生效"的接收侧接线。
+// 终态重置（重新允许注入）。工具栏刷新按钮已随按钮批次落地，失效通知的
+// reqId 须与面板最后发出的 refresh.request 配对（陈旧回执观测层丢弃），
+// 故本文件用例先经按钮发出请求再回执。
 import { describe, it, expect, afterEach } from 'vitest'
 import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/syncController'
 import {
@@ -80,8 +81,11 @@ describe('#208 refresh.invalidated 面板接线', () => {
     // 首轮结果应用（旧代次地址）
     c.handleHostMessage({ kind: 'image.result', reqId: 1, ok: true, src: 'vscode-webview://res/a.png' })
     expect(imgEl!.getAttribute('src')).toBe('vscode-webview://res/a.png')
-    // 宿主失效通知（刷新完成）：全量失效重挂
-    c.handleHostMessage({ kind: 'refresh.invalidated', reqId: 9, generation: 1 })
+    // 经工具栏刷新按钮发出请求（reqId=1）后，宿主失效通知回执配对到达：
+    // 全量失效重挂
+    document.querySelector<HTMLButtonElement>('.vsidian-refresh-toggle')!.click()
+    expect(h.sent.some((m) => m.kind === 'refresh.request')).toBe(true)
+    c.handleHostMessage({ kind: 'refresh.invalidated', reqId: 1, generation: 1 })
     expect(imageRequests(h.sent)).toEqual([
       { reqId: 1, src: './a.png' },
       { reqId: 2, src: './a.png' },
@@ -106,7 +110,9 @@ describe('#208 refresh.invalidated 面板接线', () => {
     void ensureMermaidApi()
     await settle(2)
     expect(scripts().length).toBe(1)
-    // 宿主失效通知（刷新完成）：终态重置 → 重新允许注入
+    // 经按钮发出请求（reqId=1）后，宿主失效通知回执配对到达：终态重置
+    // → 重新允许注入
+    document.querySelector<HTMLButtonElement>('.vsidian-refresh-toggle')!.click()
     c.handleHostMessage({ kind: 'refresh.invalidated', reqId: 1, generation: 1 })
     void ensureMermaidApi()
     await settle(2)

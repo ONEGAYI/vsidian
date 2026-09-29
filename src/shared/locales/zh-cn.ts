@@ -271,6 +271,8 @@ export const zhCn: Record<MessageKey, string> = {
   /** #141 工具栏双态视图切换按钮（aria/title 表目标动作，随当前态换词） */
   'toolbar.switchToReading': '切换到阅读视图',
   'toolbar.switchToLive': '切换到实时预览',
+  /** #208 工具栏刷新按钮（清嵌入资源缓存重渲染：图片/图表取新解析） */
+  'toolbar.refresh': '刷新嵌入资源',
   'sidebar.resize': '拖拽调整侧栏宽度',
 
   'find.placeholder': '查找',
