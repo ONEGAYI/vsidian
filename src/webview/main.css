@@ -2567,15 +2567,19 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
   max-width: var(--vsidian-reading-max-width);
 }
 
-#app .vsidian-view-reading .vsidian-reading-heading-1 { font-size: 1.55em; font-weight: 600; margin: 0.6em 0 0.4em; color: var(--vsidian-heading-color-1); }
-#app .vsidian-view-reading .vsidian-reading-heading-2 { font-size: 1.35em; font-weight: 600; margin: 0.6em 0 0.4em; color: var(--vsidian-heading-color-2); }
-#app .vsidian-view-reading .vsidian-reading-heading-3 { font-size: 1.2em; font-weight: 600; margin: 0.6em 0 0.4em; color: var(--vsidian-heading-color-3); }
-#app .vsidian-view-reading .vsidian-reading-heading-4 { font-size: 1.1em; font-weight: 600; margin: 0.6em 0 0.4em; color: var(--vsidian-heading-color-4); }
-#app .vsidian-view-reading .vsidian-reading-heading-5 { font-size: 1em; font-weight: 600; margin: 0.6em 0 0.4em; color: var(--vsidian-heading-color-5); }
-#app .vsidian-view-reading .vsidian-reading-heading-6 { font-size: 1em; font-weight: 600; margin: 0.6em 0 0.4em; color: var(--vsidian-heading-color-6); }
+#app .vsidian-view-reading .vsidian-reading-heading-1 { font-size: 1.55em; font-weight: 600; margin-block: 0.6em 0.4em; color: var(--vsidian-heading-color-1); }
+#app .vsidian-view-reading .vsidian-reading-heading-2 { font-size: 1.35em; font-weight: 600; margin-block: 0.6em 0.4em; color: var(--vsidian-heading-color-2); }
+#app .vsidian-view-reading .vsidian-reading-heading-3 { font-size: 1.2em; font-weight: 600; margin-block: 0.6em 0.4em; color: var(--vsidian-heading-color-3); }
+#app .vsidian-view-reading .vsidian-reading-heading-4 { font-size: 1.1em; font-weight: 600; margin-block: 0.6em 0.4em; color: var(--vsidian-heading-color-4); }
+#app .vsidian-view-reading .vsidian-reading-heading-5 { font-size: 1em; font-weight: 600; margin-block: 0.6em 0.4em; color: var(--vsidian-heading-color-5); }
+#app .vsidian-view-reading .vsidian-reading-heading-6 { font-size: 1em; font-weight: 600; margin-block: 0.6em 0.4em; color: var(--vsidian-heading-color-6); }
 
 /* markdown-it 的语义标题保留在块内；字号与间距由阅读块统一控制，
-   避免浏览器 h1..h6 默认样式再次放大字号和上下留白。 */
+   避免浏览器 h1..h6 默认样式再次放大字号和上下留白。
+   #206：heading-N 装饰类与 .vsidian-reading-block 同挂在块 div 上且源序
+   在后，垂直间距只能走 margin-block——margin 简写（或 margin-left/right）
+   会覆盖限宽档块居中的 auto，使标题贴左而正文居中；此约束由
+   readingHeadingMarginCssContract 契约测试钉住。 */
 #app .vsidian-view-reading .vsidian-reading-block > :is(h1, h2, h3, h4, h5, h6) {
   font-size: inherit;
   font-weight: inherit;
