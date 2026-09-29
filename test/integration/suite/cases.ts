@@ -10199,6 +10199,16 @@ export const cases: Array<[string, () => Promise<void>]> = [
       return i?.open && i.ready ? true : undefined
     })
     await vscode.commands.executeCommand(CMD.closeSettingsPage)
+    // 等关闭落定：panel.dispose() 的 webview 实际销毁是异步的——本用例
+    // 若是片内末位，runner 紧接着返回触发宿主退出，退出与 webview 销毁
+    // 竞速在 Linux 上使测试宿主以 Canceled 收场（exit 1；四轮 CI 确定性
+    // 复现）。等 open 状态翻false 再结束，给销毁留出落定窗口
+    await poll('设置页关闭落定', async () => {
+      const i = (await vscode.commands.executeCommand(CMD.settingsPageInfo)) as
+        | { open: boolean }
+        | undefined
+      return i && !i.open ? true : undefined
+    })
     assert(true, '设置页打开/关闭链路正常（索引维护分页随页可达）')
   }],
 
