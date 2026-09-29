@@ -136,11 +136,19 @@ export class VirtualReadingView {
     }
   }
 
-  /** 全文装载/重建（init、resync、外部增量后的重建路径）：全文切块一次 */
-  setDocument(text: string): void {
+  /** 全文装载/重建（init、resync、外部增量后的重建路径）：全文切块一次。
+   *  #219 悬停局部预览：opts.range 存在时切块后按块区间**求交过滤**——
+   *  解析仍吃全文（保留全文解析上下文，不丢章节外引用式链接定义），范围
+   *  选取在块模型上做（跨界块整块保留，不孤立解析截取字符串）；range 为
+   *  LF 坐标（宿主经 NewlineCoordinator 换算后随 hover.result 下发） */
+  setDocument(text: string, opts?: { range?: { start: number; end: number } }): void {
     this.parseCount += 1
     this.text = text
     this.blocks = splitReadingBlocks(text)
+    if (opts?.range) {
+      const { start, end } = opts.range
+      this.blocks = this.blocks.filter((b) => b.start <= end && b.end >= start)
+    }
     this.heights = estimateHeights(this.blocks, text, this.calib)
     this.tops = blockTops(this.heights)
     // C-9：旧挂载元素逐个解除观察后再丢弃——ResizeObserver 对元素是

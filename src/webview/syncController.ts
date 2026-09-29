@@ -1165,26 +1165,28 @@ export class WebviewSyncController {
       })
     })
     // #218 悬停预览（Reading 直接悬停）：同一容器上的 mouseover/mouseout
-    // 委托（与 click 委托同款 closest 命中，目标口径一致——仅双链）；命中
-    // 与否、开闭时延、保活与迟到守卫都在 hoverPopup 模块内收敛。live 侧
-    // （Ctrl+悬停）与面板入口属 #221，此处不装配
+    // 委托（与 click 委托同款 closest 命中，目标口径一致）。#219 起双链与
+    // 普通本地 Markdown 链接都接入（a[href] 命中后由 hoverPopup 分流：双链
+    // 走 target 原文、普通链接走 linkHref 且外部 scheme 预滤不开浮层）；
+    // 命中与否、开闭时延、保活与迟到守卫都在 hoverPopup 模块内收敛。live
+    // 侧（Ctrl+悬停）与面板入口属 #221，此处不装配
     this.readingContainer.addEventListener('mouseover', (event) => {
       if (this.viewMode !== 'reading') {
         return
       }
       const target = event.target as HTMLElement | null
-      const anchor = target?.closest?.(`a.${WIKILINK_CLASS_NAMES.wikilink}`)
+      const anchor = target?.closest?.('a[href]')
       if (!(anchor instanceof HTMLElement) || !this.readingContainer!.contains(anchor)) {
         return
       }
       hoverPreviewAnchorEnter(anchor)
     })
     this.readingContainer.addEventListener('mouseout', (event) => {
-      const anchor = (event.target as HTMLElement | null)?.closest?.(`a.${WIKILINK_CLASS_NAMES.wikilink}`)
+      const anchor = (event.target as HTMLElement | null)?.closest?.('a[href]')
       if (!(anchor instanceof HTMLElement)) {
         return
       }
-      // 锚点内部移动（嵌套行内标记）不视为离开
+      // 锚点内部移动（嵌套行内标记/内嵌图片）不视为离开
       const related = event.relatedTarget
       if (related instanceof Node && anchor.contains(related)) {
         return
@@ -1620,13 +1622,16 @@ export class WebviewSyncController {
       case 'hover.test.pointer': {
         // #218 测试钩子：对阅读视图第 index 个真实双链派发 mouseover/
         // mouseout（冒泡经容器委托——与用户悬停同一处理器链路）；宿主
-        // 测试无法向 webview 派发真实鼠标事件
+        // 测试无法向 webview 派发真实鼠标事件。#219 起 link='md' 对第
+        // index 个普通 Markdown 链接（非双链 a[href]）派发
         const container = this.readingContainer
         if (!container || this.viewMode !== 'reading') {
           break
         }
-        const anchors = Array.from(container.querySelectorAll<HTMLElement>(
-          `a.${WIKILINK_CLASS_NAMES.wikilink}`))
+        const selector = message.link === 'md'
+          ? `a[href]:not(.${WIKILINK_CLASS_NAMES.wikilink})`
+          : `a.${WIKILINK_CLASS_NAMES.wikilink}`
+        const anchors = Array.from(container.querySelectorAll<HTMLElement>(selector))
         const anchor = anchors[message.index]
         if (!anchor) {
           break

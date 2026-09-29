@@ -1,9 +1,12 @@
 // 悬停预览浮层生命周期契约（#218，模块级 jsdom 直驱）：开闭延迟、移入
 // 保活、Esc 关闭、一次一个浮层、实例释放与迟到响应不重开、零抢焦点、
-// 只读渲染（任务禁写）。真实指针/IME/观感回归在 test/browser 与集成层。
+// 只读渲染（任务禁写）；#219 局部范围（scope/range 过滤）、普通链接入口
+// 与锚点缺失分态。真实指针/IME/观感回归在 test/browser 与集成层。
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { WebviewToHost } from '../../src/shared/protocol'
+import { installLocale } from '../../src/shared/i18n'
+import { zhCn } from '../../src/shared/locales/zh-cn'
 import {
   closeHoverPopup,
   hoverPopupProbe,
@@ -16,6 +19,10 @@ import {
   HOVER_POPUP_CLOSE_DELAY_MS,
   HOVER_POPUP_OPEN_DELAY_MS,
 } from '../../src/webview/hoverPopup'
+
+// 错误分态文案断言需要已装配语言包（生产经数据岛/locale.changed 装配；
+// 单测直接注入 zh-cn 字典——与浏览器套件 buildZhLocaleIsland 同源）
+installLocale('zh-cn', zhCn)
 
 if (Range.prototype.getClientRects === undefined) {
   Range.prototype.getClientRects = () => [] as unknown as DOMRectList
@@ -209,7 +216,7 @@ describe('内容渲染与只读契约', () => {
     expect(boxes.length).toBe(2)
     expect(boxes.every((b) => b.disabled), '任务框一律禁用').toBe(true)
     const probe = hoverPopupProbe()
-    expect(probe).toMatchObject({ open: true, state: 'content' })
+    expect(probe).toMatchObject({ open: true, state: 'content', scope: 'full' })
     expect(probe.blocks).toBe(blocks.length)
     expect(probe.note).toBe('目标笔记.md')
   })
@@ -257,5 +264,152 @@ describe('显式释放', () => {
     const req = requestOf(h)
     notifyHoverResult({ kind: 'hover.result', reqId: req.reqId, instanceId: req.instanceId, ok: true, ...RESULT_OK })
     expect(isHoverPopupOpen()).toBe(false)
+  })
+})
+
+// #219 局部范围与普通链接入口：双链按 scope/range 收窄渲染（切块后过滤，
+// 不截字符串）、普通本地 Markdown 链接走 linkHref 形态、外部网页预滤不开
+// 浮层、锚点缺失分态带锚点原文。
+describe('局部范围与普通链接入口（#219）', () => {
+  /** 章节目标：三段结构，章节甲内含列表多行块 */
+  const SECTION_TARGET = [
+    '# 目标全文标题',
+    '',
+    '顶部段。',
+    '',
+    '## 章节甲',
+    '',
+    '甲段一。',
+    '',
+    '- 列表项一',
+    '- 列表项二',
+    '',
+    '## 章节乙',
+    '',
+    '乙段。',
+    '',
+  ].join('\n')
+
+  /** 章节甲的块表对拍范围（标题块行首 → 章节乙标题块前的最后内容块行尾） */
+  function sectionRange(): { start: number; end: number } {
+    const titleStart = SECTION_TARGET.indexOf('## 章节甲')
+    const listEnd = SECTION_TARGET.indexOf('- 列表项二') + '- 列表项二'.length
+    return { start: titleStart, end: listEnd }
+  }
+
+  it('heading scope 成功结果：只渲染章节内块（切块后按 range 过滤，非截字符串）', () => {
+    vi.useFakeTimers()
+    const h = makeHarness()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    const req = requestOf(h)
+    notifyHoverResult({
+      kind: 'hover.result',
+      reqId: req.reqId,
+      instanceId: req.instanceId,
+      ok: true,
+      target: { fsPath: 'D:\notes\目标笔记.md', relPath: '目标笔记.md' },
+      version: 2,
+      text: SECTION_TARGET,
+      range: sectionRange(),
+      scope: { kind: 'heading', anchor: '章节甲' },
+    })
+    const el = popupEl()!
+    const text = el.textContent ?? ''
+    expect(text).toContain('章节甲')
+    expect(text).toContain('列表项二')
+    expect(text, '章节外的顶部段不得出现').not.toContain('顶部段')
+    expect(text, '下一章节不得出现').not.toContain('乙段')
+    expect(text, '多行列表块整取（不截首行）').toContain('列表项一')
+    const probe = hoverPopupProbe()
+    expect(probe.scope).toBe('heading')
+    expect(probe.blocks, '只渲染章节内块').toBeLessThan(
+      el ? SECTION_TARGET.split('\n').filter((l) => l.trim() !== '').length : Infinity,
+    )
+  })
+
+  it('block scope 成功结果：探针记录 block 且范围生效', () => {
+    vi.useFakeTimers()
+    const h = makeHarness()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    const req = requestOf(h)
+    const blockStart = SECTION_TARGET.indexOf('- 列表项一')
+    // 块首行为引导段（列表上方紧贴的段落属同一块——宿主 blockRangeOfLine
+    // 语义；此处直接用块表区间口径构造）
+    const headStart = SECTION_TARGET.indexOf('甲段一。')
+    notifyHoverResult({
+      kind: 'hover.result',
+      reqId: req.reqId,
+      instanceId: req.instanceId,
+      ok: true,
+      target: { fsPath: 'D:\notes\目标笔记.md', relPath: '目标笔记.md' },
+      version: 2,
+      text: SECTION_TARGET,
+      range: { start: headStart, end: SECTION_TARGET.indexOf('- 列表项二') + '- 列表项二'.length },
+      scope: { kind: 'block', anchor: '^blk1' },
+    })
+    const text = popupEl()!.textContent ?? ''
+    expect(text).toContain('列表项一')
+    expect(text, '块外内容不得出现').not.toContain('顶部段')
+    expect(hoverPopupProbe().scope).toBe('block')
+    expect(blockStart).toBeGreaterThan(0)
+  })
+
+  it('anchor-missing 错误分态：文案与语言包同源并含锚点原文', () => {
+    vi.useFakeTimers()
+    const h = makeHarness()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    const req = requestOf(h)
+    notifyHoverResult({
+      kind: 'hover.result',
+      reqId: req.reqId,
+      instanceId: req.instanceId,
+      ok: false,
+      reason: 'anchor-missing',
+      anchor: '不存在的标题',
+    })
+    const probe = hoverPopupProbe()
+    expect(probe).toMatchObject({ open: true, state: 'error' })
+    expect(probe.note).toContain('不存在的标题')
+  })
+
+  it('普通链接锚点（非双链类）：请求携带 linkHref；target 同为 href 原文', () => {
+    vi.useFakeTimers()
+    const h = makeHarness()
+    const mdAnchor = document.createElement('a')
+    mdAnchor.setAttribute('href', 'relative.md#章节甲')
+    h.block.appendChild(mdAnchor)
+    hoverPreviewAnchorEnter(mdAnchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    const req = requestOf(h)
+    expect(req.linkHref).toBe('relative.md#章节甲')
+    expect(req.target).toBe('relative.md#章节甲')
+    expect(isHoverPopupOpen()).toBe(true)
+  })
+
+  it('外部网页锚点（http/协议相对/空 href）不开浮层、不发请求', () => {
+    vi.useFakeTimers()
+    const h = makeHarness()
+    for (const href of ['https://example.com/x', 'http://example.com', '//example.com/x', 'mailto:a@b.c', '']) {
+      const a = document.createElement('a')
+      a.setAttribute('href', href)
+      h.block.appendChild(a)
+      hoverPreviewAnchorEnter(a)
+      vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS * 2)
+      expect(isHoverPopupOpen(), `${href} 不得开浮层`).toBe(false)
+      a.remove()
+    }
+    expect(h.sent.filter((m) => m.kind === 'hover.request')).toHaveLength(0)
+  })
+
+  it('双链锚点不携带 linkHref（缺省双链形态回归）', () => {
+    vi.useFakeTimers()
+    const h = makeHarness()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    const req = requestOf(h)
+    expect(req.linkHref).toBeUndefined()
   })
 })

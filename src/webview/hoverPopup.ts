@@ -24,6 +24,7 @@ import { createReadingContainer, prepareReadingImages, READING_CLASS_NAMES } fro
 import { VirtualReadingView } from './readingVirtualView'
 import { renderGraphicBlockInto } from './graphicRenderers'
 import { claimPopup, releasePopup } from './popupMutex'
+import { WIKILINK_CLASS_NAMES } from '../shared/wikilink'
 import { t } from '../shared/i18n'
 import type { HoverPreviewFailReason, HoverPreviewResult, WebviewToHost } from '../shared/protocol'
 import {
@@ -46,6 +47,21 @@ export const HOVER_POPUP_CLASS_NAMES = {
  *  350ms 后关（链接↔浮层间移动的容差） */
 export const HOVER_POPUP_OPEN_DELAY_MS = 300
 export const HOVER_POPUP_CLOSE_DELAY_MS = 350
+
+/** 普通链接可预览性预滤（#219）：外部网页（带 scheme 或协议相对地址）与
+ *  空 href 不接入悬停预览——本地相对路径与页内锚点（#frag）放行，宿主侧
+ *  classifyLinkTarget 复核兜底（预滤与宿主判定同口径，双保险）。双链不
+ *  经此判定（vsidian-wikilink 类即双链形态，目标原文不是 URL） */
+const EXTERNAL_LINK_HREF_RE = /^(?:[a-zA-Z][a-zA-Z0-9+.\-]*:|\/\/)/
+export function isHoverableMdLinkHref(href: string): boolean {
+  return href !== '' && !EXTERNAL_LINK_HREF_RE.test(href)
+}
+
+/** 锚点是否双链（vsidian-wikilink 类 = markdown-it 双链规则写入；普通
+ *  Markdown 链接是其余 a[href]） */
+function anchorIsWikilink(anchor: HTMLElement): boolean {
+  return anchor.classList.contains(WIKILINK_CLASS_NAMES.wikilink)
+}
 
 /** 出站上下文（syncController mount 注入；dispose 清空） */
 export interface HoverPreviewContext {
@@ -198,6 +214,11 @@ function openPopup(anchor: HTMLElement): void {
   if (!context || !session?.sessionId || !session.docUri || target === null) {
     return
   }
+  // #219 普通链接预滤：外部网页与空 href 不开浮层（宿主侧复核兜底）；
+  // 双链不经此判定
+  if (!anchorIsWikilink(anchor) && !isHoverableMdLinkHref(target)) {
+    return
+  }
   closeHoverPopup()
   const container = document.createElement('div')
   container.className = HOVER_POPUP_CLASS_NAMES.popup
@@ -303,7 +324,9 @@ function openPopup(anchor: HTMLElement): void {
     state.cleanups.push(() => observer.disconnect())
   }
 
-  // 出站读取请求（只读消息：不进 edit.request 通道）
+  // 出站读取请求（只读消息：不进 edit.request 通道）。#219 普通链接形态
+  // 附 linkHref（宿主走 readHoverMdLinkTarget）；target 恒为 href 原文
+  //（双链即 `|` 前原文，链接即 href——错误分态文案的目标原文来源）
   context.send({
     kind: 'hover.request',
     sessionId: session.sessionId,
@@ -313,6 +336,7 @@ function openPopup(anchor: HTMLElement): void {
     sourceStart: Number.isInteger(sourceStart) ? sourceStart : 0,
     sourceEnd: Number.isInteger(sourceEnd) ? sourceEnd : sourceStart,
     target,
+    ...(anchorIsWikilink(anchor) ? {} : { linkHref: target }),
   })
 }
 
@@ -372,7 +396,9 @@ export function notifyHoverResult(message: HoverPreviewResult): void {
   }
   if (message.ok) {
     popup.scope = message.scope.kind
-    popup.view.setDocument(message.text)
+    // #219 局部范围：全文切块后按块区间求交过滤（保留全文解析上下文，
+    // 不孤立解析截取字符串；范围选取见 VirtualReadingView.setDocument）
+    popup.view.setDocument(message.text, message.scope.kind === 'full' ? undefined : { range: message.range })
     popup.view.updateNow()
     // 全部任务 checkbox 禁用（挂载钩子已覆盖虚拟化路径；此处为无布局
     // 回退全量渲染路径的兜底——双保险，幂等）
