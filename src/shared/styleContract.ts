@@ -1223,7 +1223,7 @@ export const STYLE_CONTRACT_ENTRIES: readonly StyleContractEntry[] = [
     category: 'content-variables',
     kind: 'variable',
     target: '--vsidian-table-background',
-    purpose: 'live 表格行背景 / 阅读表头背景；默认 rgba(128, 128, 128, 0.05)。',
+    purpose: 'live 表头格 / 阅读表头（th）/ fm 标题栏底色（#213 起数据行透明，行背景改走 --vsidian-table-row-background）；默认 rgba(128, 128, 128, 0.05)。',
     views: ['live', 'reading'],
     dom: '定义于 #app（#132 起集中定义；此前消费处内联 fallback）；Obsidian 别名 --table-background。',
     example: ':root { --table-background: rgba(128, 128, 128, 0.1); }',
@@ -1231,6 +1231,24 @@ export const STYLE_CONTRACT_ENTRIES: readonly StyleContractEntry[] = [
     aliasTargets: ['--table-background'],
     verification: ['obsidianAliasCssContract：变量桥形态'],
     introduced: '#12（2026-09-24）',
+  },
+  {
+    id: 'var-table-row-background',
+    domain: 'content',
+    category: 'content-variables',
+    kind: 'variable',
+    target: '--vsidian-table-row-background',
+    purpose: 'live 表格数据行与分隔行背景；默认 transparent（透明到编辑器背景，向阅读侧 td 对齐）。表头格底色不受本变量影响（仍走 --vsidian-table-background）。',
+    views: ['live'],
+    dom: '定义于 #app；消费于 .vsidian-table-line 行级规则（表头/分隔/数据行通用，表头行的格级背景覆盖其上）。片段在 #app 层或其后代元素声明即可覆盖——:root/body 声明会被 #app 层定义截断继承。',
+    example: '#app {\n  --vsidian-table-row-background: rgba(128, 128, 128, 0.05);\n}',
+    obsidian: {
+      counterpart:
+        '无（Obsidian 数据行底色由 --table-background 全表默认与 --table-row-alt-background 斑马纹差分承担，无单一数据行变量；--table-background 已桥接给 --vsidian-table-background）',
+      support: 'none',
+    },
+    verification: ['tablePaintCssContract：行级规则接线 + #app 定义唯一 + 表头格/阅读 th 保持共享变量'],
+    introduced: '#213（2026-09-29）',
   },
   {
     id: 'var-heading-accent',

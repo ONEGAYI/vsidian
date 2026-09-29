@@ -7195,6 +7195,13 @@ export class WebviewSyncController {
       ? [...headerRow.querySelectorAll<HTMLElement>(':scope > .vsidian-table-grid-cell')]
         .map((cell) => getComputedStyle(cell).backgroundColor)
       : []
+    // #213 数据行/分隔行行级背景探针：行身份 data 属性定位（分隔行同为
+    // "row"，随数据行同透明，断言语义一致）；无网格行时为 null
+    const dataRowLine = view.contentDOM.querySelector<HTMLElement>(
+      '.vsidian-table-grid-row[data-vsidian-table-row="row"]')
+    const dataRowLineBackground = dataRowLine
+      ? getComputedStyle(dataRowLine).backgroundColor
+      : null
     const firstCell = gridRow?.querySelector<HTMLElement>(':scope > .vsidian-table-grid-cell') ?? null
     const selectedRow = view.contentDOM.querySelector<HTMLElement>(
       '.vsidian-table-grid-row.vsidian-table-row-selected',
@@ -7613,6 +7620,7 @@ export class WebviewSyncController {
         caretNativeRectHeight,
         cellBreakDisplay: view.contentDOM.querySelector('.vsidian-table-cell-break')
           ? getComputedStyle(view.contentDOM.querySelector('.vsidian-table-cell-break')!).display : null,
+        dataRowLineBackground,
         gridDisplay: gridRow ? getComputedStyle(gridRow).display : null,
         cellBorderWidth: cellStyle?.borderLeftWidth ?? null,
         rowOutlineColor: rowStyle?.outlineColor ?? null,

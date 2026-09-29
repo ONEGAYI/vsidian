@@ -40,8 +40,16 @@ body {
      lineNumberCssContract） */
   --vsidian-table-cell-shift: calc(4px + 1px);
   /* 表格行背景 / 阅读表头背景（#12 公开；#132 起集中定义并接 Obsidian
-     --table-background 别名，消费处原内联 fallback 保持同值） */
+     --table-background 别名，消费处原内联 fallback 保持同值）；#213 起
+     语义收窄为 live 表头格 / 阅读表头（th）/ fm 标题栏底色 */
   --vsidian-table-background: var(--table-background, rgba(128, 128, 128, 0.05));
+  /* #213 表格数据行/分隔行背景：独立公开变量，默认透明到编辑器背景
+     （向阅读侧 td 对齐；表头格保留 --vsidian-table-background 底色）。
+     Obsidian 无单一对应变量（其数据行底色由 --table-background 全表
+     默认与 --table-row-alt-background 斑马纹差分承担），不接别名桥；
+     片段在 #app 层或其后代元素声明即可覆盖（片段 link 后载，同特异性
+     后者胜） */
+  --vsidian-table-row-background: transparent;
   /* 代码块卡片底色（#79 起公开变量，选择器映射表登记；头部与代码区共用，
      阅读卡片同源） */
   --vsidian-code-card-background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12));
@@ -2702,10 +2710,12 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
 }
 
 /* 表格（#42）：源文本仍在 CM6；安全行始终以同列数 CSS grid 呈现。
-   活动格留在网格中直接编辑，IME、Tab 与宿主写回链路继续工作。 */
+   活动格留在网格中直接编辑，IME、Tab 与宿主写回链路继续工作。
+   #213：行级背景改走 --vsidian-table-row-background（默认透明）——
+   数据行与分隔行透明到编辑器背景，表头格底色由格级规则保留。 */
 #app .cm-editor .cm-scroller .vsidian-table-line {
   font-family: var(--vscode-editor-font-family, monospace);
-  background-color: var(--vsidian-table-background, rgba(128, 128, 128, 0.05));
+  background-color: var(--vsidian-table-row-background, transparent);
 }
 
 /* 表头行加粗 + 底缘分隔 */

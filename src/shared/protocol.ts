@@ -1028,6 +1028,9 @@ export interface PaintProbe {
     caretDomColumn?: number | null
     caretNativeRectHeight?: number | null
     cellBreakDisplay?: string | null
+    /** #213 数据行/分隔行行级 computed background-color（取首个网格数据行
+     *  [data-vsidian-table-row="row"]；无表格为 null）。默认透明断言依据。 */
+    dataRowLineBackground?: string | null
     gridDisplay: string | null
     cellBorderWidth: string | null
     rowOutlineColor: string | null
@@ -1757,6 +1760,7 @@ function isPaintProbe(v: unknown): v is PaintProbe {
       (v.table.caretDomColumn === undefined || v.table.caretDomColumn === null || isNonNegativeInt(v.table.caretDomColumn)) &&
       (v.table.caretNativeRectHeight === undefined || v.table.caretNativeRectHeight === null || isNonNegativeNumber(v.table.caretNativeRectHeight)) &&
       (v.table.cellBreakDisplay === undefined || v.table.cellBreakDisplay === null || isString(v.table.cellBreakDisplay)) &&
+      (v.table.dataRowLineBackground === undefined || isNullOrString(v.table.dataRowLineBackground)) &&
       isNullOrString(v.table.cellBorderWidth) &&
       isNullOrString(v.table.rowOutlineColor) &&
       isNullOrString(v.table.rowOutlineWidth) &&
