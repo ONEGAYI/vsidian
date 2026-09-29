@@ -31,7 +31,9 @@ describe('markImageFrameSized 事件驱动契约', () => {
     frame.classList.add(IMAGE_CLASS_NAMES.sized)
     markImageFrameSized(frame, img)
     img.dispatchEvent(new Event('load'))
-    // rect 全 0：0 < 0-1 为 false，摘除——证明 load 监听在场并驱动了 apply
+    // 无布局环境重算结果恒为摘（available 为 0 或 NaN——jsdom 的
+    // computed padding 可能返回空串走 parseFloat('')，两种路径比较
+    // 同为 false）——证明 load 监听在场并驱动了 apply
     expect(frame.classList.contains(IMAGE_CLASS_NAMES.sized)).toBe(false)
   })
 
