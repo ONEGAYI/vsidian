@@ -2053,6 +2053,18 @@ body.vscode-high-contrast #app .vsidian-quick-actions [data-icon='horizontalRule
   opacity: 0.9;
 }
 
+/* #201 失败态细分（叠加在 error 基类上，两者不冒充彼此）：
+   明确删除（磁盘正证据 missing）淡红底强调；不可访问（SSH 断连/权限
+   错误）黄系提示——用户可区分「文件没了」与「暂时读不到」 */
+#app .vsidian-image.vsidian-image-notfound {
+  background: var(--vsidian-image-notfound-background, rgba(190, 17, 0, 0.08));
+}
+
+#app .vsidian-image.vsidian-image-unreachable {
+  border-color: var(--vscode-inputValidation-warningBorder, #cca700);
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
 /* 表格（#42）：源文本仍在 CM6；安全行始终以同列数 CSS grid 呈现。
    活动格留在网格中直接编辑，IME、Tab 与宿主写回链路继续工作。 */
 #app .cm-editor .cm-scroller .vsidian-table-line {

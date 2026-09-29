@@ -46,6 +46,9 @@ const CMD = {
   diagramExportLog: 'onegayi.vsidian._test.takeDiagramExportLog',
   // #161 图片粘贴消息日志（钩子模式记录载荷形态；落盘真实执行）
   imagePasteLog: 'onegayi.vsidian._test.takeImagePasteLog',
+  // #201 图片刷新观测（失效日志与版本表快照）
+  imageRefreshEvents: 'onegayi.vsidian._test.takeImageRefreshEvents',
+  imageVersions: 'onegayi.vsidian._test.getImageVersions',
   // #38 三态记忆
   getLastMode: 'onegayi.vsidian._test.getLastMode',
   resetLastMode: 'onegayi.vsidian._test.resetLastMode',
@@ -609,6 +612,13 @@ interface ViewState {
   liveMermaidCount?: number
   readingMermaidCount?: number
   imageStates?: { loading: number; loaded: number; error: number }
+  /** #201 图片条目明细（失效/版本刷新链路断言载体，直连外链除外） */
+  imageEntries?: Array<{
+    src: string
+    state: 'loaded' | 'loading' | 'error'
+    reason?: string
+    appliedSrc?: string
+  }>
   /** #14 查找会话观测（首次打开后回报；匹配集来自文本模型全量计算） */
   find?: {
     open: boolean
@@ -2976,6 +2986,90 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
     assert(state.appliedEdits === 0, `显示链路不得产生 applyEdit，实际 ${state.appliedEdits}`)
     assert(reading.text === LINKS_DOC_TEXT, '显示链路不得改写文档文本')
+  }],
+
+  // ---- #201 图片定期刷新与删除态（真实 watcher → 失效 → 版本刷新链路） ----
+
+  ['图片定期刷新：覆盖保存经 watcher 失效重载，URL 代次推进且未变化图源稳定（#201）', async () => {
+    await openWithEditor('image-refresh.md')
+    await waitSessionReady('image-refresh.md')
+    const uri = wsUri('image-refresh.md').toString()
+    await vscode.commands.executeCommand('onegayi.vsidian.toggleViewMode')
+    const docBefore = await readDisk('image-refresh.md')
+    const first = await poll('初始装载两图', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      return v?.viewMode === 'reading' && v.imageStates?.loaded === 2 ? v : undefined
+    }, 30000)
+    const entryA = first.imageEntries?.find((e) => e.src.includes('刷新甲'))
+    assert(entryA?.state === 'loaded' && entryA.appliedSrc?.includes('?v=1'),
+      `初始 URL 应为 v=1，实际 ${JSON.stringify(entryA)}`)
+    // 真实覆盖保存（node fs 写 → 宿主 watcher 事件 → 去抖 → 无条件失效 →
+    // webview 重发 → 新版本 URL 装载新内容）
+    const bluePng = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYPgPAAEDAQAIicLsAAAAAElFTkSuQmCC',
+      'base64',
+    )
+    await writeFile(wsUri('assets/刷新甲.png').fsPath, bluePng)
+    const refreshed = await poll('失效重载（v=2）', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      const e = v?.imageEntries?.find((x) => x.src.includes('刷新甲'))
+      return e?.state === 'loaded' && e.appliedSrc?.includes('?v=2') ? v : undefined
+    }, 30000)
+    // 宿主侧证据：watcher 失效确实覆盖目标文件
+    const events = (await vscode.commands.executeCommand(CMD.imageRefreshEvents)) as string[]
+    assert(events.some((f) => f.includes('刷新甲.png')),
+      `失效日志应包含被覆盖目标，实际 ${JSON.stringify(events)}`)
+    // 未变化图源不推进代次（URI 稳定——元数据未变不强制重载）
+    const entryB = refreshed.imageEntries?.find((e) => e.src.includes('刷新乙'))
+    assert(entryB?.state === 'loaded' && entryB.appliedSrc?.includes('?v=1'),
+      `未变化图源应保持 v=1，实际 ${JSON.stringify(entryB)}`)
+    // 零写回：文本与磁盘不动、无 applyEdit
+    assert(refreshed.text === docBefore, '刷新链路不得改写文档文本')
+    assert(await readDisk('image-refresh.md') === docBefore, '刷新链路不得写磁盘')
+    const state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state.appliedEdits === 0, `刷新链路不得产生 applyEdit，实际 ${state.appliedEdits}`)
+  }],
+
+  ['图片删除与恢复：撤下旧图呈找不到态，文件恢复后经 watcher 重新显示（#201）', async () => {
+    await openWithEditor('image-refresh.md')
+    await waitSessionReady('image-refresh.md')
+    const uri = wsUri('image-refresh.md').toString()
+    // 同文档面板复用（前一用例可能已处 reading）——显式设置而非循环切换
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    const docBefore = await readDisk('image-refresh.md')
+    await poll('初始装载两图', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      return v?.viewMode === 'reading' && v.imageStates?.loaded === 2 ? v : undefined
+    }, 30000)
+    // 真实删除（磁盘正证据）：watcher → 失效 → 重发 → not-found 呈现
+    await rm(wsUri('assets/刷新乙.png').fsPath)
+    await poll('删除后进入 not-found', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      const e = v?.imageEntries?.find((x) => x.src.includes('刷新乙'))
+      return e?.state === 'error' && e.reason === 'not-found' ? v : undefined
+    }, 30000)
+    // 另一图不受影响
+    const mid = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState
+    const entryA = mid.imageEntries?.find((e) => e.src.includes('刷新甲'))
+    assert(entryA?.state === 'loaded', `未删除图源应保持 loaded，实际 ${JSON.stringify(entryA)}`)
+    // 恢复：写回文件（create 事件）→ 失效 → 重发 → 重新显示（代次推进——
+    // 删除与恢复事件各推进一次，解析完成可能再推进，断言只认 >1 不硬编码）
+    const greenPng = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgaGAAAAEEAIFw9selAAAAAElFTkSuQmCC',
+      'base64',
+    )
+    await writeFile(wsUri('assets/刷新乙.png').fsPath, greenPng)
+    const restored = await poll('恢复后重新显示（代次推进）', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      const e = v?.imageEntries?.find((x) => x.src.includes('刷新乙'))
+      const m = e?.appliedSrc?.match(/[?&]v=(\d+)/)
+      return e?.state === 'loaded' && m && Number(m[1]) > 1 ? v : undefined
+    }, 30000)
+    // 零写回
+    assert(restored.text === docBefore, '删除/恢复链路不得改写文档文本')
+    assert(await readDisk('image-refresh.md') === docBefore, '删除/恢复链路不得写磁盘')
+    const state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state.appliedEdits === 0, `删除/恢复链路不得产生 applyEdit，实际 ${state.appliedEdits}`)
   }],
 
   // ---- 工单 #12：表格单元格编辑与双视图呈现 ----

@@ -57,6 +57,14 @@ import type { KeybindingService } from './keybindingService'
 import type { CssSnippetService } from './cssSnippetService'
 import type { VaultIndexService } from './vaultIndexService'
 import type { IndexMaintenance } from './vaultIndexMaintenance'
+import { ImageRefreshCoordinator } from './imageRefreshCoordinator'
+import type { ImageVersionTable } from './imageVersioning'
+import {
+  IMAGE_EVENT_DEBOUNCE_MS,
+  IMAGE_WAKE_MIN_GAP_MS,
+  IMAGE_WATCH_GLOB_SEGMENTS,
+  isImageFileExtension,
+} from '../shared/imageRefresh'
 import type { SnippetLinkList } from '../shared/cssSnippets'
 import type { SettingsPageHandle } from './settingsPage'
 import { runDiagramExport } from './diagramExportHost'
@@ -291,6 +299,121 @@ export function createTextEditorProvider(
   const sessions = new Map<string, SessionEntry>()
   let lastClosedInput: { docUri: string; webviewText?: string; fragments: string[] } | undefined
 
+  // ---- #201 图片刷新协调器（provider 级单件：版本表与失效通道跨会话共享） ----
+  const isWindowsHost = process.platform === 'win32'
+  const imageRefreshEvents: string[] = []
+  const imageRefresh = new ImageRefreshCoordinator(
+    {
+      statTarget: async (fsPath) => {
+        try {
+          const st = await vscode.workspace.fs.stat(vscode.Uri.file(fsPath))
+          if ((st.type & vscode.FileType.File) === 0) {
+            return { kind: 'missing' } as const
+          }
+          return { kind: 'ok', mtimeMs: st.mtime, size: st.size } as const
+        } catch (err) {
+          const code = (err as { code?: string }).code
+          return code === 'FileNotFound' || code === 'ENOENT'
+            ? ({ kind: 'missing' } as const)
+            : ({ kind: 'inaccessible' } as const)
+        }
+      },
+      resolveTarget: () => null, // 各会话按自身 linkCtx 覆盖（openEntry 注入）
+      invalidateTarget: (fsPath) => {
+        imageRefreshEvents.push(fsPath)
+        for (const entry of sessions.values()) {
+          entry.session.invalidateImagesByFsPath(fsPath)
+        }
+      },
+    },
+    { isWindowsHost },
+  )
+  /** 图片文件监听（#201）：图片类扩展不经索引域 watcher（只听 *.md），在
+   *  此自建。工作区根递归监听（花括号 glob 每根一个 watcher）；根增删整体
+   *  重建（先拆旧）；无工作区不建（周期核验与按需 stat 兜底）。事件去抖
+   *  归并（保存器写临时文件 + rename 会产生成组事件） */
+  const imageWatchTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  const scheduleImageEvent = (fsPath: string): void => {
+    const prev = imageWatchTimers.get(fsPath)
+    if (prev !== undefined) {
+      clearTimeout(prev)
+    }
+    imageWatchTimers.set(
+      fsPath,
+      setTimeout(() => {
+        imageWatchTimers.delete(fsPath)
+        void imageRefresh.handleTargetEvent(fsPath)
+      }, IMAGE_EVENT_DEBOUNCE_MS),
+    )
+  }
+  let imageWatchers: vscode.FileSystemWatcher[] = []
+  const teardownImageWatchers = (): void => {
+    for (const watcher of imageWatchers) {
+      watcher.dispose() // 其上的事件订阅随之释放
+    }
+    imageWatchers = []
+  }
+  const setupImageWatchers = (): void => {
+    teardownImageWatchers()
+    const folders = vscode.workspace.workspaceFolders
+    if (!folders || folders.length === 0) {
+      return
+    }
+    const glob = `**/*.{${IMAGE_WATCH_GLOB_SEGMENTS.join(',')}}`
+    for (const folder of folders) {
+      const watcher = vscode.workspace.createFileSystemWatcher(
+        new vscode.RelativePattern(folder.uri, glob),
+      )
+      const forward = (uri: vscode.Uri | undefined): void => {
+        if (uri && isImageFileExtension(uri.fsPath)) {
+          scheduleImageEvent(uri.fsPath)
+        }
+      }
+      watcher.onDidChange(forward)
+      watcher.onDidCreate(forward)
+      watcher.onDidDelete(forward)
+      imageWatchers.push(watcher)
+    }
+  }
+  setupImageWatchers()
+  context.subscriptions.push({ dispose: teardownImageWatchers })
+  // 根增删：重挂图片监听（新增根纳入、移除根拆除）
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      setupImageWatchers()
+    }),
+  )
+  // 索引目标变化事件（#198 通道）：图片类目标即时核验（md 域事件对图片
+  // 管线无匹配登记，天然空操作；未来索引扩展到非 md 目标时自动接通）
+  if (vaultIndex) {
+    const offTargetChange = vaultIndex.onTargetChange((event) => {
+      if (isImageFileExtension(event.fsPath)) {
+        scheduleImageEvent(event.fsPath)
+      }
+    })
+    context.subscriptions.push({ dispose: offTargetChange })
+  }
+  /** 唤醒广播（#201 及时核验）：窗口焦点回归（远程重连后用户回到窗口）
+   *  节流后向全部面板广播 image.wake，webview 有活跃图源立即触发一轮核验 */
+  let lastImageWakeAt = 0
+  context.subscriptions.push(
+    vscode.window.onDidChangeWindowState((state) => {
+      if (!state.focused) {
+        return
+      }
+      const now = Date.now()
+      if (now - lastImageWakeAt < IMAGE_WAKE_MIN_GAP_MS) {
+        return
+      }
+      lastImageWakeAt = now
+      const message: HostToWebview = { kind: 'image.wake' }
+      for (const entry of sessions.values()) {
+        for (const { sessionId } of entry.session.getInfo().panels) {
+          entry.session.postToPanel(sessionId, message)
+        }
+      }
+    }),
+  )
   const getEntry = (uri: vscode.Uri): SessionEntry | undefined =>
     sessions.get(uri.toString())
 
@@ -330,8 +453,7 @@ export function createTextEditorProvider(
       void vscode.window.showInformationMessage(t('host.conflictInputCopied'))
     } else {
       void vscode.window.showWarningMessage(t('host.noConflictInputToCopy'))
-    }
-  }
+    }  }
 
   /** 恢复（放弃本地修改重新同步）：二次确认避免误丢输入 */
   const confirmResume = async (uriStr: string, sessionId: string): Promise<void> => {
@@ -547,10 +669,20 @@ export function createTextEditorProvider(
         return vscode.commands.executeCommand('redo').then(() => true, () => false)
       },
     }
+    // #201 图片周期核验与失效：会话按自身 linkCtx 解析图源目标（同一 src
+    // 在不同文档指向不同文件——目标解析必须按文档）；决策与版本表在协调器
     fresh.session = new DocumentSession(port, {
       docUri: key,
       onNotice: (notice) => handleNotice(key, notice),
       onViewState: (sessionId, state) => handlePanelViewState(key, sessionId, state),
+      isWindowsHost,
+      verifyImages: (items) =>
+        imageRefresh.verify(items, {
+          resolveTarget: (src) => {
+            const target = classifyImageTarget(src, linkContextOf(doc))
+            return target.kind === 'workspace' ? target.fsPath : null
+          },
+        }),
       // #96 R1 ready 即校准：每次 ready 按当前生效语言幂等补发 locale.changed。
       // 供应式注入（会话保持纯逻辑）：与 HTML 数据岛注入同一解析
       // （hostLocale(getSnapshot())），未接线 settings 时按宿主显示语言解析
@@ -859,7 +991,7 @@ export function createTextEditorProvider(
         void executeWikilinkIntent(document, intent, entry.linkLog)
       }
       const resolveImage = async (src: string): Promise<ImageResolution> => {
-        return resolveWorkspaceImage(src, linkCtx, webviewPanel.webview)
+        return resolveWorkspaceImage(src, linkCtx, webviewPanel.webview, imageRefresh.versions)
       }
       const sessionId = entry.session.attachPanel({
         send,
@@ -1629,6 +1761,15 @@ export function createTextEditorProvider(
         return { found: true, sessionId: panel.sessionId, ...entry.session.getConflictState(panel.sessionId) }
       },
     ),
+    // #201 图片刷新观测钩子：失效事件日志（取走即清空）与版本表快照——
+    // 集成测试断言「真实文件变更 → 失效广播 → 新版本 URL」链路的宿主侧证据
+    vscode.commands.registerCommand('onegayi.vsidian._test.takeImageRefreshEvents', () => {
+      const events = [...imageRefreshEvents]
+      imageRefreshEvents.length = 0
+      return events
+    }),
+    vscode.commands.registerCommand('onegayi.vsidian._test.getImageVersions', () =>
+      imageRefresh.versions.snapshot()),
     vscode.commands.registerCommand(
       'onegayi.vsidian._test.getLastClosedInput',
       () => lastClosedInput,
@@ -2081,14 +2222,17 @@ async function revealLinkAnchor(
 }
 
 /**
- * 工作区图片解析（#10）：白名单分类 → 存在性探测 → asWebviewUri 转为
- * webview 可加载地址。本地与远程（SSH）工作区同通道——webview 资源服务
- * 按远程权威路由（真实远程宿主表现属 #15 人工验证项）。
+ * 工作区图片解析（#10；#201 升级）：白名单分类 → stat 三态探测（保留
+ * mtime/size 进版本表——不再只验存在性；FileNotFound=not-found，其他失败
+ * =inaccessible 不冒充删除）→ asWebviewUri 拼 `?v=<代次>` 缓存击穿参数
+ * （版本表已观测变化代次，单调递增；webview 资源服务不承诺无缓存——
+ * buildSnippetLinkList 同款防御）。本地与远程（SSH）工作区同通道。
  */
 async function resolveWorkspaceImage(
   src: string,
   ctx: LinkContext,
   webview: vscode.Webview,
+  versions: ImageVersionTable,
 ): Promise<ImageResolution> {
   const target = classifyImageTarget(src, ctx)
   if (target.kind === 'blocked') {
@@ -2099,12 +2243,32 @@ async function resolveWorkspaceImage(
     }
   }
   const uri = vscode.Uri.file(target.fsPath)
+  let stat: vscode.FileStat
   try {
-    await vscode.workspace.fs.stat(uri)
-  } catch {
-    return { ok: false, reason: 'not-found', detail: target.fsPath }
+    stat = await vscode.workspace.fs.stat(uri)
+  } catch (err) {
+    const code = (err as { code?: string }).code
+    if (code === 'FileNotFound' || code === 'ENOENT') {
+      versions.recordMissing(target.fsPath)
+      return { ok: false, reason: 'not-found', detail: target.fsPath, fsPath: target.fsPath }
+    }
+    // SSH 断连/权限错误等不可访问：不得冒充文件删除（#194 图片节）
+    return { ok: false, reason: 'inaccessible', detail: target.fsPath, fsPath: target.fsPath }
   }
-  return { ok: true, src: webview.asWebviewUri(uri).toString() }
+  if ((stat.type & vscode.FileType.File) === 0) {
+    // 目录等非普通文件：按找不到处理（不是可呈现的图片目标）
+    versions.recordMissing(target.fsPath)
+    return { ok: false, reason: 'not-found', detail: target.fsPath, fsPath: target.fsPath }
+  }
+  const { generation } = versions.recordObservation(target.fsPath, {
+    mtimeMs: stat.mtime,
+    size: stat.size,
+  })
+  return {
+    ok: true,
+    src: `${webview.asWebviewUri(uri).toString()}?v=${generation}`,
+    fsPath: target.fsPath,
+  }
 }
 
 function buildWebviewHtml(

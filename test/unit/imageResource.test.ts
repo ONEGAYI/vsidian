@@ -224,3 +224,227 @@ describe('live 视图的自定义渲染回调', () => {
     expect(inner!.getAttribute('src')).toBeNull()
   })
 })
+
+// ==== #201 图片定期刷新与删除态 ====
+
+describe('失效通知（image.invalidate → 作废重发）', () => {
+  it('invalidate 已挂载图源：作废条目、撤下旧图、槽位回 loading 并重发请求', () => {
+    const { manager, posted } = makeManager()
+    const el = img()
+    manager.attach(el, './a.png')
+    manager.handleResult({ reqId: posted[0]!.reqId, ok: true, src: 'vscode-webview://res/a.png?v=1' })
+    el.dispatchEvent(new Event('load'))
+    expect(state(el)).toBe('loaded')
+    manager.invalidate(['./a.png'])
+    expect(state(el)).toBe('loading')
+    expect(el.getAttribute('src')).toBeNull() // 旧图撤下（解码位图释放）
+    expect(posted.length).toBe(2)
+    expect(posted[1]!.reqId).toBeGreaterThan(posted[0]!.reqId)
+    // 新结果（新版本 URI）到达后应用
+    manager.handleResult({ reqId: posted[1]!.reqId, ok: true, src: 'vscode-webview://res/a.png?v=2' })
+    el.dispatchEvent(new Event('load'))
+    expect(el.getAttribute('src')).toBe('vscode-webview://res/a.png?v=2')
+    expect(state(el)).toBe('loaded')
+  })
+
+  it('代次守卫：invalidate 后旧 reqId 的在途结果不复活旧图', () => {
+    const { manager, posted } = makeManager()
+    const el = img()
+    manager.attach(el, './a.png')
+    manager.invalidate(['./a.png']) // 首次请求仍在途，条目已作废重发
+    expect(posted.length).toBe(2)
+    // 旧 reqId 的迟到成功结果（旧版本 URI）必须被丢弃
+    manager.handleResult({ reqId: posted[0]!.reqId, ok: true, src: 'vscode-webview://res/a.png?v=1' })
+    expect(el.getAttribute('src')).toBeNull()
+    expect(state(el)).toBe('loading')
+    // 旧 reqId 的迟到失败结果同样不生效
+    manager.handleResult({ reqId: posted[0]!.reqId, ok: false, reason: 'not-found' })
+    expect(state(el)).toBe('loading')
+  })
+
+  it('invalidate 后旧 img 的迟到 load/error 事件不覆盖新状态', () => {
+    const { manager, posted } = makeManager()
+    const el = img()
+    manager.attach(el, './a.png')
+    manager.handleResult({ reqId: posted[0]!.reqId, ok: true, src: 'vscode-webview://res/a.png?v=1' })
+    manager.invalidate(['./a.png'])
+    // 旧 img 已解绑（releaseImages）：迟到事件不改状态
+    el.dispatchEvent(new Event('load'))
+    el.dispatchEvent(new Event('error'))
+    expect(state(el)).toBe('loading')
+  })
+
+  it('同一 src 多槽位一起刷新；同批多个 src 一次处理', () => {
+    const { manager, posted } = makeManager()
+    const a1 = img()
+    const a2 = img()
+    const b = img()
+    manager.attach(a1, './a.png')
+    manager.attach(a2, './a.png')
+    manager.attach(b, './b.png')
+    manager.handleResult({ reqId: posted[0]!.reqId, ok: true, src: 'vscode-webview://res/a.png?v=1' })
+    a1.dispatchEvent(new Event('load'))
+    a2.dispatchEvent(new Event('load'))
+    manager.invalidate(['./a.png', './b.png'])
+    expect(state(a1)).toBe('loading')
+    expect(state(a2)).toBe('loading')
+    expect(state(b)).toBe('loading')
+    expect(posted.length).toBe(4) // 初次 a(共享条目)+b 共 2 次 + a/b 各重发 1 次
+  })
+
+  it('未挂载的 src 与直连图源忽略（外链不纳入刷新；槽位离场条目已回收）', () => {
+    const { manager, posted } = makeManager()
+    const direct = img()
+    manager.attach(direct, 'https://example.com/x.png')
+    expect(() => manager.invalidate(['https://example.com/x.png', './none.png'])).not.toThrow()
+    expect(posted.length).toBe(0)
+    expect(direct.getAttribute('src')).toBe('https://example.com/x.png') // 直连不受影响
+  })
+
+  it('invalidate 匹配用 normalizeImgSrc 归一键（编码形态与原文同键）', () => {
+    const { manager, posted } = makeManager()
+    const el = img()
+    manager.attach(el, './assets/图 片.png')
+    manager.invalidate(['./assets/%E5%9B%BE%20%E7%89%87.png'])
+    expect(posted.length).toBe(2)
+  })
+
+  it('error 态条目被 invalidate 刷新（文件恢复场景：重发请求）', () => {
+    const { manager, posted } = makeManager()
+    const el = img()
+    manager.attach(el, './gone.png')
+    manager.handleResult({ reqId: posted[0]!.reqId, ok: false, reason: 'not-found' })
+    expect(state(el)).toBe('error')
+    manager.invalidate(['./gone.png'])
+    expect(state(el)).toBe('loading')
+    manager.handleResult({ reqId: posted[1]!.reqId, ok: true, src: 'vscode-webview://res/gone.png?v=2' })
+    el.dispatchEvent(new Event('load'))
+    expect(state(el)).toBe('loaded')
+    expect(el.classList.contains('vsidian-image-notfound')).toBe(false)
+  })
+})
+
+describe('失败态细分（找不到 / 不可访问）', () => {
+  it('not-found：error 基类 + notfound 修饰类 + 专属文案', () => {
+    const { manager, posted } = makeManager()
+    const el = img()
+    manager.attach(el, './missing.png')
+    manager.handleResult({ reqId: posted[0]!.reqId, ok: false, reason: 'not-found' })
+    expect(el.classList.contains('vsidian-image-error')).toBe(true)
+    expect(el.classList.contains('vsidian-image-notfound')).toBe(true)
+    expect(el.classList.contains('vsidian-image-unreachable')).toBe(false)
+    expect(el.dataset['vsidianImgReason']).toBe('not-found')
+  })
+
+  it('inaccessible：error 基类 + unreachable 修饰类（不冒充找不到）', () => {
+    const { manager, posted } = makeManager()
+    const el = img()
+    manager.attach(el, './remote.png')
+    manager.handleResult({ reqId: posted[0]!.reqId, ok: false, reason: 'inaccessible' })
+    expect(el.classList.contains('vsidian-image-error')).toBe(true)
+    expect(el.classList.contains('vsidian-image-unreachable')).toBe(true)
+    expect(el.classList.contains('vsidian-image-notfound')).toBe(false)
+  })
+
+  it('其他失败原因只有 error 基类（blocked/read-error/load-failed 维持现状）', () => {
+    const { manager, posted } = makeManager()
+    const el = img()
+    manager.attach(el, './x.png')
+    manager.handleResult({ reqId: posted[0]!.reqId, ok: false, reason: 'read-error' })
+    expect(el.classList.contains('vsidian-image-error')).toBe(true)
+    expect(el.classList.contains('vsidian-image-notfound')).toBe(false)
+    expect(el.classList.contains('vsidian-image-unreachable')).toBe(false)
+  })
+
+  it('状态迁移清干净修饰类（loaded 后不再带 notfound/unreachable）', () => {
+    const { manager, posted } = makeManager()
+    const el = img()
+    manager.attach(el, './a.png')
+    manager.handleResult({ reqId: posted[0]!.reqId, ok: false, reason: 'not-found' })
+    expect(el.classList.contains('vsidian-image-notfound')).toBe(true)
+    manager.invalidate(['./a.png'])
+    manager.handleResult({ reqId: posted[1]!.reqId, ok: true, src: 'vscode-webview://res/a.png?v=2' })
+    el.dispatchEvent(new Event('load'))
+    expect(el.classList.contains('vsidian-image-notfound')).toBe(false)
+    expect(el.classList.contains('vsidian-image-error')).toBe(false)
+  })
+
+  it('detach 清空修饰类', () => {
+    const { manager, posted } = makeManager()
+    const el = img()
+    manager.attach(el, './a.png')
+    manager.handleResult({ reqId: posted[0]!.reqId, ok: false, reason: 'inaccessible' })
+    manager.detach(el)
+    expect(el.classList.contains('vsidian-image-unreachable')).toBe(false)
+  })
+})
+
+describe('活跃图源上报（image.verify 数据源）', () => {
+  it('activeEntries 列出条目级 src/状态/原因/已应用地址', () => {
+    const { manager, posted } = makeManager()
+    const loaded = img()
+    const missing = img()
+    manager.attach(loaded, './ok.png')
+    manager.attach(missing, './miss.png')
+    manager.handleResult({ reqId: posted[0]!.reqId, ok: true, src: 'vscode-webview://res/ok.png?v=1' })
+    loaded.dispatchEvent(new Event('load'))
+    manager.handleResult({ reqId: posted[1]!.reqId, ok: false, reason: 'not-found' })
+    const entries = manager.activeEntries()
+    expect(entries).toHaveLength(2)
+    const okEntry = entries.find((e) => e.src === './ok.png')
+    expect(okEntry).toMatchObject({ state: 'loaded', appliedSrc: 'vscode-webview://res/ok.png?v=1' })
+    const missEntry = entries.find((e) => e.src === './miss.png')
+    expect(missEntry).toMatchObject({ state: 'error', reason: 'not-found' })
+  })
+
+  it('直连图源不入上报（外链不纳入核验管线）', () => {
+    const { manager } = makeManager()
+    const direct = img()
+    manager.attach(direct, 'https://example.com/x.png')
+    expect(manager.activeEntries()).toEqual([])
+  })
+})
+
+describe('活跃度回调（周期核验调度启停数据源）', () => {
+  it('首条目建立触发 onBecomeActive；条目全回收触发 onBecomeIdle', () => {
+    const active = vi.fn()
+    const idle = vi.fn()
+    const manager = new ImageResourceManager({
+      isDirectSrc: (src) => /^https?:\/\//i.test(src),
+      requestHost: () => {},
+      onBecomeActive: active,
+      onBecomeIdle: idle,
+    })
+    const a = img()
+    const b = img()
+    manager.attach(a, './a.png')
+    expect(active).toHaveBeenCalledTimes(1)
+    manager.attach(b, './b.png') // 已活跃，不重复触发
+    expect(active).toHaveBeenCalledTimes(1)
+    manager.detach(a)
+    expect(idle).not.toHaveBeenCalled() // b 仍挂载
+    manager.detach(b)
+    expect(idle).toHaveBeenCalledTimes(1)
+    // 回到活跃再回空闲：回调随状态翻转持续触发
+    manager.attach(a, './a.png')
+    expect(active).toHaveBeenCalledTimes(2)
+    manager.detach(a)
+    expect(idle).toHaveBeenCalledTimes(2)
+  })
+
+  it('直连图源不计入活跃度（外链不驱动周期核验）', () => {
+    const active = vi.fn()
+    const idle = vi.fn()
+    const manager = new ImageResourceManager({
+      isDirectSrc: (src) => /^https?:\/\//i.test(src),
+      requestHost: () => {},
+      onBecomeActive: active,
+      onBecomeIdle: idle,
+    })
+    const direct = img()
+    manager.attach(direct, 'https://example.com/x.png')
+    expect(active).not.toHaveBeenCalled()
+    manager.detach(direct)
+    expect(idle).not.toHaveBeenCalled()
+  })
+})

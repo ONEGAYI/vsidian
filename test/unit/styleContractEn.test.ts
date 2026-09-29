@@ -88,9 +88,9 @@ describe('英文覆盖一致性契约（#178 机制 + #179 content 域全量 + #
     expect(applyStyleContractEntryOverride(entry, 'en', {})).toBe(entry)
   })
 
-  it('content 域全部 75 条 id 均有英文覆盖（#179 全量交付）', () => {
+  it('content 域全部 76 条 id 均有英文覆盖（#179 全量交付，#201 起含失败态细分）', () => {
     const contentIds = STYLE_CONTRACT_ENTRIES.filter((e) => e.domain === 'content').map((e) => e.id)
-    expect(contentIds.length).toBe(75)
+    expect(contentIds.length).toBe(76)
     for (const id of contentIds) {
       expect(STYLE_CONTRACT_EN_OVERRIDES[id], `content 条目缺英文覆盖：${id}`).toBeDefined()
     }
@@ -104,9 +104,9 @@ describe('英文覆盖一致性契约（#178 机制 + #179 content 域全量 + #
     }
   })
 
-  it('两域合计 132 条全量覆盖，无覆盖表缺口（#179 + #180 收尾；#197 起含反链）', () => {
-    expect(STYLE_CONTRACT_ENTRIES.length).toBe(132)
-    expect(Object.keys(STYLE_CONTRACT_EN_OVERRIDES).length).toBe(132)
+  it('两域合计 133 条全量覆盖，无覆盖表缺口（#179 + #180 收尾；#197 起含反链，#201 起含失败态细分）', () => {
+    expect(STYLE_CONTRACT_ENTRIES.length).toBe(133)
+    expect(Object.keys(STYLE_CONTRACT_EN_OVERRIDES).length).toBe(133)
     for (const entry of STYLE_CONTRACT_ENTRIES) {
       expect(STYLE_CONTRACT_EN_OVERRIDES[entry.id], `条目缺英文覆盖：${entry.id}`).toBeDefined()
     }

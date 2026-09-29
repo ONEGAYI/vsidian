@@ -397,6 +397,8 @@ export const zhCn: Record<MessageKey, string> = {
   'decor.emptyCell': '空单元格',
   'decor.mathError': '公式解析失败：显示原文，移动光标进入可编辑',
   'decor.imageError': '图片加载失败（{reason}），点击重试',
+  'decor.imageNotFound': '图片找不到（文件不存在或已被删除），点击重试',
+  'decor.imageInaccessible': '图片暂不可访问（远程连接或权限问题），点击重试',
   'decor.unknownReason': '未知原因',
   'decor.mermaidUnavailable': '图表渲染器不可用（mermaid.js 未能加载）',
   'decor.mermaidError': '图表渲染失败：{message}',

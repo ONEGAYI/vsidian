@@ -368,6 +368,13 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
     dom: 'Element-level state modifier classes on the image slot.',
     obsidian: { counterpart: 'No direct counterpart (Obsidian has no public loading state classes)' },
   },
+  'image-failure-variants': {
+    purpose:
+      'Failure variants (#201): confirmed deletion (positive on-disk missing evidence, "not found") and inaccessibility (SSH disconnect / permission errors) never masquerade as each other — not found gets a faint red background, inaccessible a warning-yellow hint; kept in sync with data-vsidian-img-reason (not-found / inaccessible).',
+    states: 'Only applied on top of the error base class; removed when a refresh succeeds (loaded) or the slot is released.',
+    dom: 'Element-level failure-reason modifier classes on the image slot.',
+    obsidian: { counterpart: 'No counterpart (Obsidian has no deleted/inaccessible distinction classes)' },
+  },
   'live-wikilink': {
     purpose:
       'Live wikilink presentation: outside the range it is a display-text widget (replacing the whole [[…]], with the alias class on both the widget wrapper and the source mark); inside the range it becomes the source mark. The split form of Obsidian (link name / alias / formatting brackets) has no split classes here.',

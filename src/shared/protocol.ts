@@ -95,15 +95,25 @@ export type HostToWebview =
   | { kind: 'codecard.test.fold'; index: number }
   /** 图片解析结果（#10）：reqId 对应 image.request。ok 时 src 为可直接作
    *  img.src 的地址——工作区文件经 asWebviewUri 的 webview 资源 URI
-   *  （本地与远程工作区同通道）；失败附原因码供错误态与重试呈现 */
+   *  （本地与远程工作区同通道；#201 起拼 ?v=<代次> 缓存击穿参数）；失败
+   *  附原因码供错误态与重试呈现（#201 新增 inaccessible：SSH 断连/权限
+   *  错误等不可访问，不得冒充 not-found） */
   | { kind: 'image.result'; reqId: number; ok: true; src: string }
   | {
       kind: 'image.result'
       reqId: number
       ok: false
-      reason: 'blocked' | 'outside-workspace' | 'not-found' | 'read-error'
+      reason: 'blocked' | 'outside-workspace' | 'not-found' | 'read-error' | 'inaccessible'
       detail?: string
     }
+  /** 图片失效通知（#201）：目标文件已观测变更（watcher 事件 / 索引
+   *  onTargetChange / 周期核验 refresh 决策）——作废宿主解析缓存后广播到
+   *  会话全部面板（多面板一致）。webview 对命中条目撤下旧图、作废重发
+   *  image.request（新版本 URL）；旧 reqId 在途结果被代次守卫丢弃 */
+  | { kind: 'image.invalidate'; srcs: string[] }
+  /** 图片核验唤醒（#201）：窗口焦点回归/远程重连后由宿主广播，webview
+   *  有活跃图源时立即触发一轮周期核验（及时核验，不等下一周期） */
+  | { kind: 'image.wake' }
   /** 图片粘贴落盘结果（#161）：ok 时 markdown 为宿主计算好的完整插入文本
    *  （![stem](percent-encode 相对路径)，与渲染端 normalizeImgSrc 的 decode
    *  对偶），webview 在光标处单事务插入（一笔撤销）；失败附原因码
@@ -467,6 +477,8 @@ export type WebviewToHost =
       readingWikilinkCount?: number
       /** 图片槽位状态计数（#10：当前视图内 loading/loaded/error） */
       imageStates?: ImageStateCounts
+      /** 图片条目明细（#201：失效/版本刷新链路断言载体，直连外链除外） */
+      imageEntries?: ImageEntryProbe[]
       /** 查找会话观测（#14）：首次打开后回报（未打开过时缺省） */
       find?: FindSessionProbe
       /** 当前生效设置快照（#33 起缓存宿主下发的值；#34 行号等设置的观测面） */
@@ -528,6 +540,16 @@ export type WebviewToHost =
   /** 图片资源解析请求（#10）：非 http(s) 直连的工作区图源经宿主解析为
    *  webview 可加载地址（reqId 会话面板内自增，对应 image.result） */
   | { kind: 'image.request'; sessionId: string; docUri: string; reqId: number; src: string }
+  /** 图片周期核验（#201）：webview 活跃挂载图源（非直连）合并上报，宿主
+   *  stat 对比版本表后对变化目标回发 image.invalidate（维持目标不响应）。
+   *  由 webview 调度器驱动：间隔约 30 秒、无活跃槽位停止、面板恢复可见/
+   *  收到 image.wake 立即触发 */
+  | {
+      kind: 'image.verify'
+      sessionId: string
+      docUri: string
+      items: Array<{ src: string; state: 'loaded' | 'loading' | 'error'; reason?: string }>
+    }
   /** 图片粘贴落盘（#161）：webview paste 拦截命中 image/* 剪贴板项后出站；
    *  mime 为 image/*、dataBase64 为严格 base64（上限见 IMAGE_PASTE_LIMITS），
    *  fileNameHint 可选（剪贴板文件的原始名，宿主判定合成名后决定沿用或
@@ -700,6 +722,25 @@ export interface ImageStateCounts {
   loading: number
   loaded: number
   error: number
+}
+
+/** 图片条目明细观测（#201）：view.state 的 imageEntries 数据形态——失效
+ *  与版本刷新链路的细粒度断言载体（appliedSrc 含 ?v= 代次可直接断言） */
+export interface ImageEntryProbe {
+  src: string
+  state: 'loaded' | 'loading' | 'error'
+  reason?: string
+  appliedSrc?: string
+}
+
+function isImageEntryProbe(v: unknown): v is ImageEntryProbe {
+  return (
+    isObject(v) &&
+    isString(v.src) &&
+    (v.state === 'loaded' || v.state === 'loading' || v.state === 'error') &&
+    (v.reason === undefined || isString(v.reason)) &&
+    (v.appliedSrc === undefined || isString(v.appliedSrc))
+  )
 }
 
 /** CSS 契约探针回报（#6）：一段仅经稳定类名定位的内部测试 CSS 是否生效 */
@@ -1981,6 +2022,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         (v.readingImageCount === undefined || isNonNegativeInt(v.readingImageCount)) &&
         (v.readingWikilinkCount === undefined || isNonNegativeInt(v.readingWikilinkCount)) &&
         (v.imageStates === undefined || isImageStateCounts(v.imageStates)) &&
+        (v.imageEntries === undefined ||
+          (Array.isArray(v.imageEntries) && v.imageEntries.every(isImageEntryProbe))) &&
         (v.find === undefined || isFindSessionProbe(v.find)) &&
         (v.settings === undefined || isSettingsPayload(v.settings)) &&
         (v.lineGutter === undefined || isLineGutterProbe(v.lineGutter)) &&
@@ -2038,6 +2081,20 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         isString(v.docUri) &&
         isPositiveInt(v.reqId) &&
         isString(v.src)
+      )
+    case 'image.verify':
+      // #201 周期核验：条目形态（state 枚举 + 可选 reason 码）
+      return (
+        isString(v.sessionId) &&
+        isString(v.docUri) &&
+        Array.isArray(v.items) &&
+        v.items.every(
+          (item: unknown) =>
+            isObject(item) &&
+            isString(item.src) &&
+            (item.state === 'loaded' || item.state === 'loading' || item.state === 'error') &&
+            (item.reason === undefined || isString(item.reason)),
+        )
       )
     case 'image.paste':
       // #161 图片粘贴：mime 白名单形态（image/*）、严格 base64 + 上限、
@@ -2213,11 +2270,17 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
           (v.reason === 'blocked' ||
             v.reason === 'outside-workspace' ||
             v.reason === 'not-found' ||
-            v.reason === 'read-error') &&
+            v.reason === 'read-error' ||
+            v.reason === 'inaccessible') &&
           (v.detail === undefined || isString(v.detail))
         )
       }
       return false
+    case 'image.invalidate':
+      // #201 失效通知：src 非空数组（空批无广播意义，防御放行不收紧）
+      return Array.isArray(v.srcs) && v.srcs.every(isString)
+    case 'image.wake':
+      return true
     case 'image.paste.result':
       // #161 图片粘贴结果：ok 携完整插入文本；失败 reason 枚举
       if (!isPositiveInt(v.reqId)) {

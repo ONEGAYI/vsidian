@@ -67,13 +67,17 @@ export type ImageTarget =
       detail?: string
     }
 
-/** 宿主图片解析结果（会话经面板端口注入实现；reason 与协议 image.result 对齐） */
+/** 宿主图片解析结果（会话经面板端口注入实现；reason 与协议 image.result 对齐）。
+ *  fsPath（#201）：解析出的目标磁盘路径（成功与失败分支都带——失败登记
+ *  反查映射后，删除→恢复的事件链路才能即时反查到 src），供会话失效通道
+ *  按归一目标登记；不带时（旧注入形态）失效按无映射处理（不产生假阳性） */
 export type ImageResolution =
-  | { ok: true; src: string }
+  | { ok: true; src: string; fsPath?: string }
   | {
       ok: false
-      reason: 'blocked' | 'outside-workspace' | 'not-found' | 'read-error'
+      reason: 'blocked' | 'outside-workspace' | 'not-found' | 'read-error' | 'inaccessible'
       detail?: string
+      fsPath?: string
     }
 
 /** 协议名提取（file:、javascript: 等；不含 Windows 盘符形态——盘符在

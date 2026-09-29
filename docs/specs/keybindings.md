@@ -70,3 +70,5 @@
 **单文件更名/移动的引用自动更新无快捷键（#199 评估结论）**：引用改写由 `onWillRenameFiles`/`onDidRenameFiles` 事件自动驱动（用户在资源管理器/命令面板发起 rename 或 move 即触发，任何 VSCode 原生改名入口都覆盖），不是可枚举目标的用户命令、不注册操作、不占键位（通道语义与实测边界见 [vault-index-backlinks.md](vault-index-backlinks.md) 的「#199 实施落档」节）。外部工具改名不触发 VSCode rename 事件，只刷新索引不改写（「不猜测旧新身份」）。
 
 **目录/批量移动的引用更新无新增键位入口（#200 评估结论）**：与 #199 同一事件通道的批量化扩展——目录 rename/move 与多文件同批移动由同一 `onWillRenameFiles`/`onDidRenameFiles` 驱动（事件内的 files 数组即批量输入），无新的用户主动命令面、不注册操作、不占键位（展开与批量规划语义见 [vault-index-backlinks.md](vault-index-backlinks.md) 的「#200 实施落档」节）。
+
+**图片定期刷新与删除态无快捷键（#201 评估结论）**：本票全部为自动行为——文件事件即时核验（宿主图片扩展 watcher + 索引 onTargetChange 订阅）、周期核验（webview 调度器约 30 秒合并上报，常量集中可调）、失效重载（image.invalidate 广播 + `?v=` 代次击穿）与失败态呈现（找不到/不可访问细分），无任何用户主动触发的可绑定操作；失败槽位的既有「点击重试」语义不变（保留鼠标点击入口，与 #10 相同）。不占用键位。

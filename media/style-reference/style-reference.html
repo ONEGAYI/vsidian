@@ -66,7 +66,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 </table>
 
   <section class="domain" data-domain="content">
-    <h1 style="font-size:19px;margin-bottom:4px">正文域（75 条）</h1>
+    <h1 style="font-size:19px;margin-bottom:4px">正文域（76 条）</h1>
 
     <h2>正文域 · 容器与视图（2）</h2>
     <article class="entry" id="container-live">
@@ -722,7 +722,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：单元 readingViewport / readingVirtualView：挂载窗口与 spacer 契约</p>
       <p class="life">引入：#7（2026-09-24）</p>
     </article>
-    <h2>正文域 · 链接、图片与双链（7）</h2>
+    <h2>正文域 · 链接、图片与双链（8）</h2>
     <article class="entry" id="live-link">
       <h3><code>.vsidian-link</code><span class="eid">live-link</span></h3>
       <p class="purpose">live 链接**内容** span（始终标记；光标或选区进入该链接范围时显示 [ 和 ](url) 源码，同一行其他链接保持格式化）；隐藏尾部对应 Obsidian .cm-formatting-link / .cm-string.cm-url 方向——本项目以隐藏呈现，无独立样式类。</p>
@@ -778,6 +778,23 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 }</code></pre>
       <p class="verify">验证：单元 imageResource：三态状态机契约；集成 reading.test.image 注入用例</p>
       <p class="life">引入：#10（2026-09-24）</p>
+    </article>
+    <article class="entry" id="image-failure-variants">
+      <h3><code>.vsidian-image-notfound / .vsidian-image-unreachable（叠加在 error 基类上）</code><span class="eid">image-failure-variants</span></h3>
+      <p class="purpose">#201 失败态细分：明确删除（磁盘正证据 missing，找不到）与不可访问（SSH 断连/权限错误）不冒充彼此——找不到淡红底强调、不可访问黄系提示；与 data-vsidian-img-reason（not-found / inaccessible）同步。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+<p class="states">状态：仅在 error 基类上叠加出现；失效重发成功（loaded）或槽位释放时移除。</p>
+      <p class="obsidian">Obsidian 对应：无对应（Obsidian 无删除/不可访问区分类）</p>
+
+      <p class="dom">DOM 关系：图片槽位元素级失败原因修饰类。</p>
+      <pre><code>.vsidian-image-notfound {
+  background: rgba(190, 17, 0, 0.08);
+}
+.vsidian-image-unreachable {
+  border-color: #cca700;
+}</code></pre>
+      <p class="verify">验证：单元 imageResource：细分类与 data 同步契约；集成 #201：删除图片后 notfound 绘制层可见；浏览器 imageRefresh：删除可见态与不可访问区分断言</p>
+      <p class="life">引入：#201（2026-09-29）</p>
     </article>
     <article class="entry" id="live-wikilink">
       <h3><code>.vsidian-wikilink</code><span class="eid">live-wikilink</span></h3>
