@@ -1043,22 +1043,41 @@ async function waitSessionReady(file: string): Promise<SessionState> {
 }
 
 /** 等视口布局稳定：滚动触发围栏/图表懒渲染，容器从折叠态长高会推走
- *  下方行——中心行连续两次采样一致才算稳定（CI 慢机上渲染可能超固定
- *  sleep 窗口，PR #203 的后台索引首扫进一步放大争抢） */
+ *  下方行。#215 加固为状态谓词（不依赖时间窗）：稳定 = 连续两次采样
+ *  中心行与 scrollTop 均一致，且视口内 Mermaid 围栏全部到达终态
+ *  （rendered + error === count，探针现成分态字段）——CI 慢机上懒加载
+ *  注入可能落后于滚动，占位态的中心行会短暂静止，单看中心行相等会在
+ *  渲染完成后的布局变化上误判已稳定（切标签页保持断言的间歇红根源）。 */
 async function waitViewportSettled(file: string): Promise<ViewState> {
-  let stable: number | undefined
+  let stableCenter: number | undefined
+  let stableScrollTop: number | undefined
   return poll(`${file} 视口布局稳定`, async () => {
     const state = (await vscode.commands.executeCommand(CMD.viewState, wsUri(file).toString(), 0)) as ViewState | undefined
     const center = state?.liveViewportCenterLine
-    if (state === undefined || center === undefined) {
+    const scrollTop = state?.liveScrollTopPx
+    if (state === undefined || center === undefined || scrollTop === undefined) {
       return undefined
     }
-    if (center === stable) {
+    if (state.paint?.mermaid !== undefined &&
+      state.paint.mermaid.rendered + state.paint.mermaid.error !== state.paint.mermaid.count) {
+      return undefined
+    }
+    if (center === stableCenter && scrollTop === stableScrollTop) {
       return state
     }
-    stable = center
+    stableCenter = center
+    stableScrollTop = scrollTop
     return undefined
   }, 15000)
+}
+
+/** 视口诊断快照（#215：失败时区分「渲染几何差异」与「恢复时序竞速」——
+ *  中心行漂移若伴随 mermaid 分态未到终态，指向恢复竞速而非几何差异） */
+function mermaidProbeBrief(v: ViewState): string {
+  const m = v.paint?.mermaid
+  return m === undefined
+    ? 'no-probe'
+    : `rendered ${m.rendered}/${m.count}, error ${m.error}`
 }
 
 async function waitViewState(
@@ -4159,7 +4178,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(after.selectionOffset === before.selectionOffset,
       `纯光标移动应跨标签页恢复：${before.selectionOffset} → ${after.selectionOffset}`)
     assert(Math.abs((after.liveViewportCenterLine ?? 0) - (before.liveViewportCenterLine ?? 0)) <= 2,
-      `Live 切标签页后中心行漂移：${before.liveViewportCenterLine} → ${after.liveViewportCenterLine}（scrollTop ${before.liveScrollTopPx} → ${after.liveScrollTopPx}）`)
+      `Live 切标签页后中心行漂移：${before.liveViewportCenterLine} → ${after.liveViewportCenterLine}` +
+      `（scrollTop ${before.liveScrollTopPx} → ${after.liveScrollTopPx}；mermaid before[${mermaidProbeBrief(before)}] after[${mermaidProbeBrief(after)}]）`)
   }],
 
   ['定位送达后面板重载：恢复最后导航点，不重播历史定位（#163 验收反馈）', async () => {
