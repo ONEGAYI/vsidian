@@ -11,6 +11,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   LAST_MODE_KEY,
+  MODE_MEMORY_HEAL,
+  decideModeMemoryHeal,
   decideReadingRestore,
   decideResolveBehavior,
   isDiffContext,
@@ -60,6 +62,48 @@ describe('全局模式记忆读取', () => {
   it('非法值容错为 live', () => {
     expect(readRememberedMode(mementoOf({ [LAST_MODE_KEY]: 'preview' }))).toBe('live')
     expect(readRememberedMode(mementoOf({ [LAST_MODE_KEY]: 42 }))).toBe('live')
+  })
+})
+
+describe('记忆写入的写后自愈（#169：旧值迟到回翻）', () => {
+  it('值与目标一致时本拍 hold（回声可能晚于首次复查，不提前收工）', () => {
+    expect(decideModeMemoryHeal({
+      target: 'reading', current: 'reading', isLatestWrite: true, rewritesUsed: 0,
+    })).toEqual({ action: 'hold' })
+  })
+
+  it('值被翻回且本写入仍最新时指示 rewrite', () => {
+    expect(decideModeMemoryHeal({
+      target: 'reading', current: 'live', isLatestWrite: true, rewritesUsed: 0,
+    })).toEqual({ action: 'rewrite' })
+    // 已重写过但未用尽同样指示（守卫循环内逐拍判定）
+    expect(decideModeMemoryHeal({
+      target: 'reading', current: 'live', isLatestWrite: true,
+      rewritesUsed: MODE_MEMORY_HEAL.maxRewrites - 1,
+    })).toEqual({ action: 'rewrite' })
+  })
+
+  it('更新写入已接管时 yield（旧守卫不得覆盖新写入的目标值）', () => {
+    expect(decideModeMemoryHeal({
+      target: 'reading', current: 'live', isLatestWrite: false, rewritesUsed: 0,
+    })).toEqual({ action: 'yield' })
+    // 即使值碰巧一致也让位：新写入自有新守卫观察
+    expect(decideModeMemoryHeal({
+      target: 'reading', current: 'reading', isLatestWrite: false, rewritesUsed: 0,
+    })).toEqual({ action: 'yield' })
+  })
+
+  it('重写额度用尽仍翻回时 give-up（有界，不与新值拉锯）', () => {
+    expect(decideModeMemoryHeal({
+      target: 'reading', current: 'live', isLatestWrite: true,
+      rewritesUsed: MODE_MEMORY_HEAL.maxRewrites,
+    })).toEqual({ action: 'give-up' })
+  })
+
+  it('自愈节拍常量保持防御量级（间隔同 resetLastMode 稳定窗先例）', () => {
+    expect(MODE_MEMORY_HEAL.checkIntervalMs).toBe(250)
+    expect(MODE_MEMORY_HEAL.maxRewrites).toBeGreaterThan(0)
+    expect(MODE_MEMORY_HEAL.maxChecks).toBeGreaterThan(MODE_MEMORY_HEAL.maxRewrites)
   })
 })
 

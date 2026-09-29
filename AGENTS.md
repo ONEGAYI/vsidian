@@ -33,7 +33,7 @@ VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 - **webview 端**（`src/webview/`）：CM6 EditorView + `acquireVsCodeApi` 消息桥；`src/shared/` 为两端共享的消息协议单一事实源（不依赖 vscode/DOM）。协议约定 webview 全程 LF 坐标（CM6 内部把 `\r\n` 规范化为 `\n`，宿主侧 `NewlineCoordinator` 负责双向坐标与文本转换）。
 - **构建**：esbuild 多产物——宿主 `out/extension.js`（node18/cjs/external vscode）、编辑器 webview `out/webview/main.js` 与设置页 webview `out/webview/settings.js`（#33；chrome118/iife，CSS 随 import 打包为同名 `.css`）；`npm run compile` 另跑 `tsc --noEmit` 做类型检查（esbuild 不查类型）。
 - **测试**：`npm run test:unit`（vitest + `node --test` 启动器契约（testHost/release/browser 调度与 #134 历史契约检查器 `test/style-contract/checkStyleContract.test.mjs`），纯逻辑 + jsdom 的 webview 控制器，无 VSCode 宿主依赖；`VSIDIAN_TEST_HOST_MODE=foreground` 时跳过独立桌面探针）；`npm run test:browser`（Playwright headless Chromium，用原生键盘/IME 驱动生产控制器验证表格光标与输入回流——keydown 注入测不到 `input.type` 回流路径，**涉及 webview 输入/光标行为的变更合并前必跑**，首次需 `npx playwright install chromium`；CI 的 browser job 在 Linux runner 上跑同一脚本并缓存浏览器二进制，通道同为 Playwright chromium，与本地默认一致，`VSIDIAN_TEST_BROWSER_CHANNEL=msedge` 仅本机借系统 Edge 调试用，不进 CI）；`npm run test:integration`（1.86.2 真宿主，fixture 由 `test/integration/fixtures.mjs` 统一生成，开发态 `runTest.mjs` 与安装态 `runInstalled.mjs` 及空窗口激活 `runSettingsActivation.mjs` 三条路径共用 `testHost.mjs` 启动策略：Windows 默认独立桌面不抢前台，`VSIDIAN_TEST_HOST_MODE=foreground` 切前台；三条启动器都会把本次宿主的完整逐例输出与退出码自动落盘到 `.vscode-test/` 下的运行报告——`integration-dev.log` / `integration-installed.log` / `settings-activation.log`，复核结果、统计用例与追查失败优先读报告文件，不为补看信息重跑）。扩展注册 `onegayi.vsidian._test.*` 辅助命令供集成测试观测/注入（仅 `VSIDIAN_TEST_HOOKS=1` 时注册）。测试消息通道是**宿主侧门控、webview 侧被动接收**的分层设计：`_test.*` 注入命令（含向 webview 转发 `table.test.key`/`task.test.click`/`reading.test.image` 等）在宿主侧受 `VSIDIAN_TEST_HOOKS` 门控；webview 侧这些消息分支不做二次门控——webview 面板的消息源只有扩展自身（`panel.webview.postMessage`），封住注入源即封住入口，勿误判为 webview 未设防。
-- **浏览器测试调度与报告**：`npm run test:browser` 经 `test/browser/run.mjs` 默认三并发运行全部浏览器脚本（脚本清单即 run.mjs 的 `names` 数组，不在此重复记数）；`-- --workers=1` 回退串行，`-- --suite=tableCaret,graphicPopup` 定向运行，`-- --no-reuse` 禁用本轮构建复用。每轮写入独立的 `out/test/browser-runs/run-*/`，含 `report.json`、`report.md`、逐脚本日志、构建/浏览器启动阶段计时与运行产物。脚本失败后继续收集其他结果，任一失败整体非零；单脚本 120 秒超时，取消时停止已启动的子进程树。共享构建只在本轮有效，浏览器状态不共享；含插件函数的表格 fixture 保留本进程构建。CI 无论成功失败均上传报告与日志（artifact 名 `browser-reports`）——CI browser job 失败时 `gh run view` 的日志只有脚本名级结论，断言栈与逐脚本日志要先 `gh run download <run-id> -n browser-reports` 取报告，再决定是否本地复现。测量方法、收益与边界见 [浏览器测试调度实测](docs/perf/2026-09-browser-test-runner.md)。
+- **浏览器测试调度与报告**：`npm run test:browser` 经 `test/browser/run.mjs` 默认三并发运行全部浏览器脚本（脚本清单即 run.mjs 的 `names` 数组，不在此重复记数）；`-- --workers=1` 回退串行，`-- --suite=tableCaret,graphicPopup` 定向运行，`-- --no-reuse` 禁用本轮构建复用。每轮写入独立的 `out/test/browser-runs/run-*/`，含 `report.json`、`report.md`、逐脚本日志、构建/浏览器启动阶段计时与运行产物。脚本失败后继续收集其他结果，任一失败整体非零；单脚本 120 秒超时，取消时停止已启动的子进程树。共享构建只在本轮有效，浏览器状态不共享；含插件函数的表格 fixture 保留本进程构建。CI 无论成功失败均上传报告与日志（artifact 名 `browser-reports-a<attempt>`，带重跑 attempt 号——`gh run rerun` 不覆盖旧 attempt 的失败现场，#164）——CI browser job 失败时 `gh run view` 的日志只有脚本名级结论，断言栈与逐脚本日志要先 `gh run download <run-id> -n browser-reports-a<attempt>`（attempt 从 1 起，`gh run view <run-id> --json attempt` 查当前值）取报告，再决定是否本地复现。测量方法、收益与边界见 [浏览器测试调度实测](docs/perf/2026-09-browser-test-runner.md)。
 - **集成测试分片**：本地设置 `VSIDIAN_ITEST_SHARDS=4` 再运行 `npm run test:integration`，启动器共用一份 VSCode 程序，为各片创建独立临时便携目录并在全部宿主退出后清理；逐片报告写入 `.vscode-test/integration-dev-s<片号>.log`。缺省仍为单宿主全量测试。CI 使用四个 runner，各注入 `VSIDIAN_TEST_SHARD=k/4` 且只起一个宿主；`integration` 汇总检查保留分支保护所需的稳定名称。
 - **历史契约门禁 job（#135）**：ci.yml 的 `style-contract` job 跑 `npm run check:stylecontract:baseline`（git 锚定基线复验，须在契约检查**之前**——先证检查器可信，再信检查结果）+ `npm run check:stylecontract`（八项全检查），并把检查器/基线/门禁工作流文件相对 PR 基点的变更统计写入 step summary 供独立审查；报告无论成败经 artifact（`style-contract-report`）保留。checkout 须 `fetch-depth: 0` + `fetch-tags: true`（verify-baseline 与发布记录交叉验证依赖 git 对象与 refs/tags，浅克隆即缺）。job 名是远端必需检查的 context 候选，改名视同变更保护规则；远端名单现状与授权后操作步骤见 [docs/specs/style-contract-gate.md](docs/specs/style-contract-gate.md)。
 - **打包与安装态回归（#15）**：`npx @vscode/vsce package --no-dependencies` 产出 VSIX（esbuild bundle 自包含，不带 node_modules；`.vscodeignore` 排除 src/test/docs）。`node test/integration/runInstalled.mjs` 把 VSIX 经 `--install-extension` 装入隔离 profile 的 1.86.2 便携宿主（安装注册链路真实走通；1.86 测试模式要求 `--extensionTestsPath` 依赖 `--extensionDevelopmentPath` 同时存在，故 dev path 指向安装解压目录——加载代码仍是 VSIX 产物而非仓库源码树）后跑同一集成套件。
@@ -119,33 +119,34 @@ vsidian/
 │   │   ├── obsidian-live-preview-editor.md # Obsidian 技术栈与选型调研
 │   │   └── obsidian-viewport-rendering.md  # 视口渲染性能补充调研
 │   └── specs/      # 产品规格
-│       ├── anchor-navigation.md              # 锚点跳转规格（标题/块引用/复制块链接）
-│       ├── batch-2026-09-menu.md             # 右键菜单批次总览与决策回执
-│       ├── batch-2026-09.md                  # 2026-09 开票批次总览
-│       ├── blockquote-accent-bar.md          # 引用块紫色提示边条规格
-│       ├── code-block-card.md                # 代码块卡片功能规格
-│       ├── context-menu.md                   # 统一右键菜单规格（正文全域接管）
-│       ├── css-snippets.md                   # CSS片段与样式兼容规格
-│       ├── frontmatter-table.md              # frontmatter 表格化规格
-│       ├── graphic-code-block-interaction.md # 图形化代码块交互规格
-│       ├── html-comment-support.md           # HTML 注释快捷键与呈现规格
-│       ├── i18n.md                           # 全局 i18n 适配规格
-│       ├── image-paste.md                    # 图片粘贴插入与资产文件夹规格
-│       ├── image-popup.md                    # 图片弹窗查看与防误触规格
-│       ├── keybindings.md                    # 快捷键清单与默认值
-│       ├── live-table-column-width.md        # Live 表格列宽规格
-│       ├── manual-verification.md            # 人工验证清单
-│       ├── mvp-issues.md                     # MVP GitHub Issue 索引
-│       ├── mvp.md                            # MVP 规格主文档
-│       ├── settings-page-visual-refresh.md   # 设置页视觉刷新规格（#155）
-│       ├── style-contract-gate.md            # 契约门禁 CI 接线与远端配置文档
-│       ├── style-reference-i18n.md           # 样式参考条目双语化规格
-│       ├── symbol-input.md                   # 符号输入与行内围栏扩展约定落档
-│       ├── table-interaction-rework.md       # 表格交互重做规格
-│       ├── toolbar-refresh.md                # 工具栏刷新按钮与缓存刷新规格
-│       ├── toolbar-view-toggle.md            # 工具栏双态切换按钮规格
-│       ├── vault-index-backlinks.md          # 引用索引与反链实施规格
-│       └── viewport-width.md                 # 可读行宽与双模式列布局规格
+│       ├── anchor-navigation.md               # 锚点跳转规格（标题/块引用/复制块链接）
+│       ├── batch-2026-09-menu.md              # 右键菜单批次总览与决策回执
+│       ├── batch-2026-09.md                   # 2026-09 开票批次总览
+│       ├── blockquote-accent-bar.md           # 引用块紫色提示边条规格
+│       ├── code-block-card.md                 # 代码块卡片功能规格
+│       ├── context-menu.md                    # 统一右键菜单规格（正文全域接管）
+│       ├── css-snippets.md                    # CSS片段与样式兼容规格
+│       ├── frontmatter-table.md               # frontmatter 表格化规格
+│       ├── graphic-code-block-interaction.md  # 图形化代码块交互规格
+│       ├── html-comment-support.md            # HTML 注释快捷键与呈现规格
+│       ├── i18n.md                            # 全局 i18n 适配规格
+│       ├── image-paste.md                     # 图片粘贴插入与资产文件夹规格
+│       ├── image-popup.md                     # 图片弹窗查看与防误触规格
+│       ├── integration-host-teardown-noise.md # CI 收尾退出噪声边界（#211）
+│       ├── keybindings.md                     # 快捷键清单与默认值
+│       ├── live-table-column-width.md         # Live 表格列宽规格
+│       ├── manual-verification.md             # 人工验证清单
+│       ├── mvp-issues.md                      # MVP GitHub Issue 索引
+│       ├── mvp.md                             # MVP 规格主文档
+│       ├── settings-page-visual-refresh.md    # 设置页视觉刷新规格（#155）
+│       ├── style-contract-gate.md             # 契约门禁 CI 接线与远端配置文档
+│       ├── style-reference-i18n.md            # 样式参考条目双语化规格
+│       ├── symbol-input.md                    # 符号输入与行内围栏扩展约定落档
+│       ├── table-interaction-rework.md        # 表格交互重做规格
+│       ├── toolbar-refresh.md                 # 工具栏刷新按钮与缓存刷新规格
+│       ├── toolbar-view-toggle.md             # 工具栏双态切换按钮规格
+│       ├── vault-index-backlinks.md           # 引用索引与反链实施规格
+│       └── viewport-width.md                  # 可读行宽与双模式列布局规格
 ├── esbuild.mjs            # esbuild 多产物构建脚本
 ├── LICENSE                # MIT 许可证全文
 ├── media/                 # 随扩展打包的静态资源
