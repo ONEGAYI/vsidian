@@ -18,6 +18,7 @@
 //
 // 零写回：点击/hover/开关弹窗/刷新/导出均不触碰文档与撤销栈。
 import { t } from '../shared/i18n'
+import { IMAGE_PASTE_LIMITS } from '../shared/protocol'
 import { normalizeImgSrc, type ImageResourceManager } from './imageResource'
 import { closeDiagramPopup, DIAGRAM_POPUP_CLASS_NAMES } from './diagramPopup'
 import { claimPopup, releasePopup } from './popupMutex'
@@ -52,30 +53,39 @@ export function setImagePopupContext(ctx: ImagePopupContext | null): void {
   context = ctx
 }
 
-/** 导出建议文件名：rawSrc 取 basename（percent-decode 一次，与
- *  normalizeImgSrc 解码对偶），剥两种路径分隔符；空名兜底与宿主侧
- *  sanitizeImageExportFileName 同值（'image.png'，建议名只是预填） */
+/** 导出建议文件名限长（与宿主 sanitize 及粘贴 fileNameHint 同限，单一值源） */
+const IMAGE_EXPORT_FILE_NAME_MAX = IMAGE_PASTE_LIMITS.fileNameHintMaxChars
+
+/** 导出建议文件名：rawSrc 取 basename（输入已是 normalizeImgSrc 解码
+ *  形态——openImagePopup 归一后的身份，不得再 decode 一次，否则与显示
+ *  通道口径分叉），剥 query/fragment（定位侧同口径）与两种路径分隔符；
+ *  纯点段（`.`/`..`）与超长名回退默认，与宿主 sanitize 同值 */
 export function suggestImageExportFileName(rawSrc: string): string {
   let name = rawSrc
-  try {
-    name = decodeURIComponent(rawSrc)
-  } catch {
-    // 非法转义序列按原样保留（与 normalizeImgSrc 同口径）
+  const cut = Math.max(0, ...[name.indexOf('?'), name.indexOf('#')].filter((i) => i >= 0))
+  if (cut > 0) {
+    name = name.slice(0, cut)
   }
   const slash = Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'))
   if (slash >= 0) {
     name = name.slice(slash + 1)
   }
-  return name.trim() || 'image.png'
+  const cleaned = name.trim()
+  if (cleaned === '' || /^\.+$/.test(cleaned) || cleaned.length > IMAGE_EXPORT_FILE_NAME_MAX) {
+    return 'image.png'
+  }
+  return cleaned
 }
 
 /**
  * 图片出现定位（刷新重定位的形态学）：rawSrc（解码形态）在文档中以图片
- * 目标出现（`](` + 目标 + 紧随 `)` / 空白 / `>`（尖括号/标题边界））即
- * 定位到。文档存的是源文原样（可能是 %20 编码形态），解码值直接找不到时
- * 以 encodeURI 回查原文形态（markdown-it normalizeLink 同款编码面）。
- * 图片的「身份」就是 rawSrc——src 被改写即旧身份消失（新图是新弹窗语境），
- * 与图表弹窗按「语言+源码」重定位的语义对偶。
+ * 目标出现——标准形态 `](目标)`（后随 `)` / 空白 / `>` 标题边界）或尖括号
+ * 形态 `](<目标>)`（含空格路径的标准写法，live linkHrefOf 与 markdown-it
+ * 两侧均剥尖括号取内部值）即定位到。文档存的是源文原样（可能是 %20
+ * 编码形态），解码值直接找不到时以 encodeURI 回查原文形态（markdown-it
+ * normalizeLink 同款编码面）。图片的「身份」就是 rawSrc——src 被改写即
+ * 旧身份消失（新图是新弹窗语境），与图表弹窗按「语言+源码」重定位的
+ * 语义对偶。
  */
 export function locateImageOccurrence(doc: string, rawSrc: string): boolean {
   if (rawSrc.length === 0) {
@@ -91,6 +101,10 @@ export function locateImageOccurrence(doc: string, rawSrc: string): boolean {
         return true
       }
       at = doc.indexOf(`](${candidate}`, at + 1)
+    }
+    // 尖括号形态：`](<目标>)`——目标整体在尖括号内，无标题边界跟随
+    if (doc.includes(`](<${candidate}>)`)) {
+      return true
     }
   }
   return false

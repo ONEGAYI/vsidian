@@ -161,6 +161,30 @@ describe('Live 视图：按钮组构成与排除项（契约 1）', () => {
     expect(tableImg.querySelector('.vsidian-graphic-chrome')).toBeNull()
   })
 
+  it('宽松路径（目标含空格未编码）的表格内图片同样不挂 chrome（insideTableRange 分支钉住）', async () => {
+    // 宽松扫描路径不建语法节点：表格内含空格目标的图片靠 insideTableRange
+    // 区间判定排除——与树驱动 hasAncestorNamed 同语义（review-loops 轮 1 补）
+    const h = makeHarness(new Map([['./assets/pic a.png', 'https://res/pic-a.png']]))
+    const c = mountDoc(h, [
+      '| a | b |',
+      '|---|---|',
+      '| ![宽松表格图](./assets/pic a.png) | 2 |',
+      '',
+      `正文 ![宽松正文图](./assets/pic a.png)`,
+      '',
+    ].join('\n'))
+    await confirmLoads()
+    const content = c.getView()!.dom
+    const frames = liveChromeFrames(content)
+    expect(frames).toHaveLength(1)
+    expect(frames[0]!.title).toBe('宽松正文图')
+    const looseTableImg = Array.from(
+      content.querySelectorAll<HTMLElement>('.vsidian-image'),
+    ).find((el) => el.title === '宽松表格图')!
+    expect(looseTableImg.classList.contains('vsidian-graphic-frame')).toBe(false)
+    expect(looseTableImg.querySelector('.vsidian-graphic-chrome')).toBeNull()
+  })
+
   it('加载态图片无 chrome（loaded 才有按钮，同构代码块渲染成功态）', async () => {
     const h = makeHarness()
     const c = mountDoc(h, `![示例图](${PIC})
@@ -311,6 +335,45 @@ describe('图片弹窗（契约 4–6）', () => {
     expect(popupImg.getAttribute('src')).toBe('https://res/pic-a.png?v=3')
   })
 
+  it('关闭弹窗还原先前焦点（prevFocus 契约）', async () => {
+    const h = makeHarness(new Map([['./assets/pic a.png', 'https://res/pic-a.png']]))
+    const c = mountDoc(h)
+    await confirmLoads()
+    // 打开前焦点落在编辑器内容元素上（可聚焦宿主）
+    const contentHost = c.getView()!.contentDOM
+    contentHost.tabIndex = -1
+    contentHost.focus()
+    expect(document.activeElement).toBe(contentHost)
+    const frame = liveChromeFrames(c.getView()!.dom).find((el) => el.title === '示例图')!
+    ;(frame.querySelector('.vsidian-graphic-chrome-popup') as HTMLButtonElement).click()
+    await settle()
+    expect(isImagePopupOpen()).toBe(true)
+    expect(document.activeElement).not.toBe(contentHost)
+    ;(document.querySelector('.vsidian-diagram-close') as HTMLButtonElement).click()
+    await settle()
+    expect(isImagePopupOpen()).toBe(false)
+    expect(document.activeElement).toBe(contentHost)
+  })
+
+  it('外链图弹窗内刷新为 no-op：无失效语义（direct 条目不经宿主），快照与零请求保持', async () => {
+    const h = makeHarness()
+    const c = mountDoc(h, `![外链图](https://example.com/remote.png)\n`)
+    await settle()
+    // 外链直连不经宿主：无 image.request，也无解析结果——弹窗 img 走直连
+    // 地址装载（jsdom 不真正加载，状态机仍建 direct 条目）
+    const frame = liveChromeFrames(c.getView()!.dom)[0]!
+    ;(frame.querySelector('.vsidian-graphic-chrome-popup') as HTMLButtonElement).click()
+    await settle()
+    const popupImg = document.querySelector<HTMLImageElement>('.vsidian-diagram-media img')!
+    expect(popupImg.getAttribute('src')).toBe('https://example.com/remote.png')
+    const requestsBefore = h.sent.filter((m) => m.kind === 'image.request').length
+    ;(document.querySelector('.vsidian-diagram-refresh') as HTMLButtonElement).click()
+    await settle()
+    // direct 条目刷新无失效通道：不发请求、地址不变（行为现状钉住）
+    expect(h.sent.filter((m) => m.kind === 'image.request').length).toBe(requestsBefore)
+    expect(popupImg.getAttribute('src')).toBe('https://example.com/remote.png')
+  })
+
   it('导出：经桥发出 image.export（reqId/src/建议文件名/会话字段）；全程零写回', async () => {
     const h = makeHarness(new Map([['./assets/pic a.png', 'https://res/pic-a.png']]))
     const c = mountDoc(h)
@@ -425,6 +488,21 @@ describe('阅读视图：按钮组形态（契约 1 的阅读侧）', () => {
     expect(mixed.classList.contains('vsidian-image-block')).toBe(false)
   })
 
+  it('阅读侧强调包裹图不判独行（与 live 行内星号口径一致，review-loops 轮 1）', async () => {
+    const text = `*![强调图](${PIC})*\n`
+    const h = makeHarness(new Map([['./assets/pic a.png', 'https://res/pic-a.png']]))
+    const c = mountDoc(h, text)
+    c.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
+    await settle()
+    await confirmLoads()
+    const container = document.querySelector<HTMLElement>('.vsidian-view-reading')!
+    const frame = container.querySelector<HTMLElement>('.vsidian-graphic-frame.vsidian-image')!
+    // em 内 img 是段落唯一元素子节点，但 live 侧行内星号是非空白文本判
+    // 非独行——阅读侧同口径，不得挂块级修饰类
+    expect(frame.querySelector('img')?.closest('em')).not.toBeNull()
+    expect(frame.classList.contains('vsidian-image-block')).toBe(false)
+  })
+
   it('阅读侧 popup 打开同一弹窗单例；image.test.popup 钩子按 reading 视图定位', async () => {
     const h = makeHarness(new Map([['./assets/pic a.png', 'https://res/pic-a.png']]))
     const c = mountDoc(h)
@@ -441,8 +519,8 @@ describe('阅读视图：按钮组形态（契约 1 的阅读侧）', () => {
 })
 
 describe('纯函数矩阵', () => {
-  it('locateImageOccurrence：标准/尖括号/带标题边界命中；纯文本提及与改写后不命中', () => {
-    const doc = `前文 ![a](./x y.png) 中段\n[![b](<./x y.png>)](u)\n![c](./x y.png "标题")\n看 ./x y.png 提及\n![d](./z.png)\n`
+  it('locateImageOccurrence：标准/带标题边界命中；纯文本提及与改写后不命中', () => {
+    const doc = `前文 ![a](./x y.png) 中段\n![c](./x y.png "标题")\n看 ./x y.png 提及\n![d](./z.png)\n`
     expect(locateImageOccurrence(doc, './x y.png')).toBe(true)
     expect(locateImageOccurrence(doc, './z.png')).toBe(true)
     expect(locateImageOccurrence(doc, './w.png')).toBe(false)
@@ -457,11 +535,28 @@ describe('纯函数矩阵', () => {
     expect(locateImageOccurrence('![a](./assets/other.png)', './assets/pic a.png')).toBe(false)
   })
 
-  it('suggestImageExportFileName：解码 + 剥路径分隔 + 空名兜底（与宿主 sanitize 同值）', () => {
-    expect(suggestImageExportFileName('./assets/pic%20a.png')).toBe('pic a.png')
+  it('locateImageOccurrence：尖括号形态隔离断言（](<目标>) 是含空格路径的标准写法）', () => {
+    expect(locateImageOccurrence('![a](<./x y.png>)', './x y.png')).toBe(true)
+    // 编码原文的尖括号形态走 encodeURI 回查命中
+    expect(locateImageOccurrence('![a](<./assets/pic%20a.png>)', './assets/pic a.png')).toBe(true)
+    // 尖括号内是别的目标不算（子串/前缀形态防误命中）
+    expect(locateImageOccurrence('![a](<./x y.png.bak>)', './x y.png')).toBe(false)
+    expect(locateImageOccurrence('![a](<./w.png>)', './x y.png')).toBe(false)
+  })
+
+  it('suggestImageExportFileName：输入为解码形态（不再二次 decode）、剥 query/fragment、兜底与宿主同值', () => {
+    expect(suggestImageExportFileName('./assets/pic a.png')).toBe('pic a.png')
     expect(suggestImageExportFileName('D:\\photos\\图 片.png')).toBe('图 片.png')
     expect(suggestImageExportFileName('https://example.com/a/b.png')).toBe('b.png')
     expect(suggestImageExportFileName('https://example.com/')).toBe('image.png')
+    // 含 %XX 字面的解码身份不再被二次解码（与显示通道同口径，review-loops 轮 1）
+    expect(suggestImageExportFileName('assets/a%20b.png')).toBe('a%20b.png')
+    // 剥 query/fragment（定位侧同口径），不产出畸形预填名
+    expect(suggestImageExportFileName('img.png?v=2')).toBe('img.png')
+    expect(suggestImageExportFileName('img.png#sec')).toBe('img.png')
+    // 纯点段与超长名回退默认（预填不退化为父目录、不超协议限长）
+    expect(suggestImageExportFileName('..')).toBe('image.png')
+    expect(suggestImageExportFileName(`${'a'.repeat(256)}.png`)).toBe('image.png')
   })
 })
 

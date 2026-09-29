@@ -292,11 +292,13 @@ async function exportPng(p: PopupState): Promise<void> {
  *  弹窗互斥——同时只允许一个弹窗实例） */
 export function openGraphicPopup(language: string, code: string): void {
   closeDiagramPopup()
-  claimPopup(closeDiagramPopup)
   const renderer = graphicRendererFor(language)
   if (!renderer) {
     return
   }
+  // claim 在管线命中之后：早退路径不占用弹窗互斥位（claim 与弹窗实际
+  // 打开同生共死）
+  claimPopup(closeDiagramPopup)
   const overlay = document.createElement('div')
   overlay.className = DIAGRAM_POPUP_CLASS_NAMES.overlay
   overlay.setAttribute('role', 'dialog')

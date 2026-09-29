@@ -124,7 +124,7 @@ import {
   IMAGE_POPUP_EXPORT_CLASS,
 } from './imagePopup'
 import { GRAPHIC_LANG_ATTR, MERMAID_CLASS_NAMES, MERMAID_CODE_ATTR, MERMAID_STATE_ATTR } from '../shared/mermaid'
-import { IMAGE_CLASS_NAMES, ImageResourceManager } from './imageResource'
+import { IMAGE_CLASS_NAMES, ImageResourceManager, isDirectImageSrc } from './imageResource'
 import { ImageVerifyScheduler } from './imageVerifyScheduler'
 import { createImagePaste, imagePasteCanInsertAt } from './imagePaste'
 import { runPerfProbe } from './perfProbe'
@@ -361,8 +361,17 @@ function chainSections(cs: ChangeSet): ChainSection[] {
 /** 阅读侧独行图判定（#212）：img 所在父元素内它是唯一元素子节点，且
  *  前后兄弟文本节点均为纯空白——等价 live 侧 soloImageLine 的「行内除
  *  图片外全是空白」语义。:only-child 伪类只统计元素子节点（文本节点不
- *  参与），「文字+图」混排段会误命中，故在 JS 完成（P1 评审实证）。 */
+ *  参与），「文字+图」混排段会误命中，故在 JS 完成（P1 评审实证）。
+ *  强调包裹（*![图]* / **![图]** / ~~![](i)~~）判非独行——live 侧行内
+ *  星号/波浪线是非空白文本、同判非独行，两侧口径一致。 */
+const EMPHASIS_TAGS = new Set(['EM', 'STRONG', 'DEL'])
+
 function isSoloImageInParent(img: HTMLImageElement): boolean {
+  for (let el: HTMLElement | null = img.parentElement; el; el = el.parentElement) {
+    if (EMPHASIS_TAGS.has(el.tagName)) {
+      return false
+    }
+  }
   const parent = img.parentElement
   if (!parent) {
     return false
@@ -1003,7 +1012,7 @@ export class WebviewSyncController {
     this.readingContainer.style.display = 'none'
     this.images = new ImageResourceManager({
       // http/https 图源直连（可加载性由 webview CSP 决定），其余经宿主解析
-      isDirectSrc: (src) => /^https?:\/\//i.test(src),
+      isDirectSrc: isDirectImageSrc,
       requestHost: (src, reqId) => {
         if (!this.sessionId) {
           return // init 前不可能有槽位；防御
@@ -1248,7 +1257,7 @@ export class WebviewSyncController {
     setImagePopupContext({
       images: this.images!,
       docSource: () => this.view?.state.doc.toString() ?? null,
-      isDirectSrc: (src) => /^https?:\/\//i.test(src),
+      isDirectSrc: isDirectImageSrc,
       sendExport: (req) => {
         if (!this.sessionId) {
           return
@@ -8240,8 +8249,8 @@ export class WebviewSyncController {
     if (!(el instanceof HTMLElement)) {
       return
     }
-    const images = Array.from(el.querySelectorAll<HTMLImageElement>('img.vsidian-image'))
-    if (el instanceof HTMLImageElement && el.classList.contains('vsidian-image')) {
+    const images = Array.from(el.querySelectorAll<HTMLImageElement>(`img.${IMAGE_CLASS_NAMES.image}`))
+    if (el instanceof HTMLImageElement && el.classList.contains(IMAGE_CLASS_NAMES.image)) {
       images.unshift(el)
     }
     for (const img of images) {
@@ -8256,7 +8265,7 @@ export class WebviewSyncController {
         continue
       }
       const frame = document.createElement('span')
-      frame.className = `${GRAPHIC_CHROME_CLASS_NAMES.frame} vsidian-image`
+      frame.className = `${GRAPHIC_CHROME_CLASS_NAMES.frame} ${IMAGE_CLASS_NAMES.image}`
       if (isSoloImageInParent(img)) {
         frame.classList.add(IMAGE_CLASS_NAMES.block)
       }

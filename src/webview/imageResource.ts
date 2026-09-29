@@ -37,6 +37,13 @@ export const IMAGE_CLASS_NAMES = {
   unreachable: 'vsidian-image-unreachable',
 } as const
 
+/** 远程直连图源判定（http/https）的单一实现：资源管理器装配与图片弹窗
+ *  上下文注入共用（协议相对 `//host` 形态不命中——直连按字面 scheme 判，
+ *  该形态经宿主分类拦截，见 linkTarget） */
+export function isDirectImageSrc(src: string): boolean {
+  return /^https?:\/\//i.test(src)
+}
+
 export interface ImageManagerDeps {
   /** 远程直连图源判定（http/https）：true 时应用原始 src，不经宿主 */
   isDirectSrc(src: string): boolean

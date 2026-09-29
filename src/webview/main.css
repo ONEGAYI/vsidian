@@ -3472,6 +3472,11 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
   display: block;
 }
 
+/* 显现门槛（loaded 态）：两个分支分别承载两种宿主结构——live 侧 chrome
+   是槽位 span.vsidian-image（frame）的子级（> 分支），阅读侧 chrome 是
+   img.vsidian-image（markdown-it 渲染、带基类）的后置兄弟（~ 分支）；
+   live 内部 img 无基类（状态属性在 span 上），两侧互补、缺一即一侧按钮
+   永不可见（review-loops 轮 2 实证，勿当死分支删） */
 #app .vsidian-image[data-vsidian-img-state="loaded"] > .vsidian-graphic-chrome,
 #app .vsidian-image[data-vsidian-img-state="loaded"] ~ .vsidian-graphic-chrome {
   display: flex;

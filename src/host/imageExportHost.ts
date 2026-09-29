@@ -23,11 +23,12 @@ export const IMAGE_EXPORT_LIMITS = {
   fileMaxBytes: 64 * 1024 * 1024,
 } as const
 
-/** 剥离路径成分与控制字符；空/超长回退默认名（保留原扩展名，无扩展名
- *  补 .png——建议名只是对话框预填，用户可任意改名） */
+/** 剥离路径成分与控制字符；空/纯点段/超长回退默认名（保留原扩展名，无
+ *  扩展名补 .png——建议名只是对话框预填，用户可任意改名；`..` 会被
+ *  Uri.joinPath 规范化为父目录，纯点段一并回退） */
 export function sanitizeImageExportFileName(name: string): string {
   const cleaned = name.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '').trim()
-  if (cleaned === '' || cleaned === '.') {
+  if (cleaned === '' || /^\.+$/.test(cleaned)) {
     return 'image.png'
   }
   if (cleaned.length > IMAGE_EXPORT_LIMITS.fileNameMaxChars) {
@@ -46,16 +47,6 @@ export function validateImageExportPayload(payload: ImageExportPayload): boolean
     payload.fileName.length > 0 &&
     payload.fileName.length <= IMAGE_EXPORT_LIMITS.fileNameMaxChars
   )
-}
-
-/** 图源归一（webview 侧 normalizeImgSrc 的宿主对偶：容错 decode 一次）——
- *  image.request 的 src 即此形态，classifyImageTarget 沿用同一输入口径 */
-export function normalizeImageExportSrc(src: string): string {
-  try {
-    return decodeURIComponent(src)
-  } catch {
-    return src
-  }
 }
 
 /** 已知图片扩展名 → 保存对话框过滤器；其余扩展名不限定类型（VSCode 自带
@@ -91,7 +82,10 @@ export async function runImageExport(
     finish({ ok: false, reason: 'invalid' })
     return
   }
-  const target = classifyImageTarget(normalizeImageExportSrc(payload.src), linkCtx)
+  // payload.src 与 image.request 同口径（webview 侧 normalizeImgSrc 解码
+  // 一次后的身份，宿主不再 decode——否则双重解码与显示通道分叉，见
+  // review-loops 轮 1）
+  const target = classifyImageTarget(payload.src, linkCtx)
   if (target.kind !== 'workspace') {
     // 外链/逃逸/空目标：webview 侧已禁用外链按钮，到达即异常载荷
     finish({ ok: false, reason: 'invalid' })
