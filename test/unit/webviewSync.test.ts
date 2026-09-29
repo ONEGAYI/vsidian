@@ -301,6 +301,72 @@ describe('反链快照广播乱序（review-loops #16）', () => {
   })
 })
 
+describe('排序菜单真实点击次序（验收反馈：外点收起吞掉菜单项 click）', () => {
+  // 真实用户点击 = pointerdown（capture 层外点收起监听先派发）→ 面板重渲
+  // → click 落点元素可能已被重建摘除。合成 item.click()（无 pointerdown
+  // 前置）测不出该次序，须按真实事件序派发
+  const mtimeItem = (sourceRelPath: string, sourceMtimeMs: number) => ({
+    sourceRelPath,
+    sourceFsPath: `d:/notes/${sourceRelPath}`,
+    kind: 'wikilink' as const,
+    anchor: '',
+    start: 0,
+    end: 10,
+    line: 1,
+    snippet: 'x',
+    sourceMtimeMs,
+  })
+  const mountWithSortMenu = () => {
+    const { bridge } = makeBridge()
+    const c = new WebviewSyncController(bridge)
+    const parent = document.createElement('div')
+    // 挂进 document：外点收起监听在 document 捕获层，游离树里 pointerdown
+    // 冒泡到不了 document（首版回路假绿的根因）
+    document.body.appendChild(parent)
+    c.mount(parent)
+    c.handleHostMessage({ kind: 'init', sessionId: 's1', docUri: DOC_URI, version: 1, text: '# 标题' })
+    c.handleHostMessage({
+      kind: 'backlinks.snapshot', docUri: DOC_URI, state: 'ready',
+      items: [mtimeItem('a.md', 100), mtimeItem('b.md', 200)], seq: 1,
+    })
+    c.handleHostMessage({ kind: 'sidebar.test.click' })
+    c.handleHostMessage({ kind: 'backlinks.test.click' })
+    c.handleHostMessage({ kind: 'backlinks.test.toolbarClick', action: 'sort' })
+    const panel = parent.querySelector<HTMLElement>('.vsidian-backlink-panel')!
+    return { c, panel, parent }
+  }
+  const groupOrder = (panel: HTMLElement) =>
+    [...panel.querySelectorAll<HTMLElement>('.vsidian-backlink-group-header')]
+      .map((el) => el.dataset['vsidianSource'])
+
+  it('pointerdown → click 选择排序项：改选生效、分组重排、菜单收起', () => {
+    const { panel, parent } = mountWithSortMenu()
+    try {
+      expect(panel.querySelector('.vsidian-backlink-sort-menu'), '前置：菜单应开').not.toBeNull()
+      expect(groupOrder(panel)).toEqual(['a.md', 'b.md'])
+      const target = panel.querySelector<HTMLElement>('[data-vsidian-sort="mtime-desc"]')!
+      target.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }))
+      target.click()
+      expect(panel.querySelector('.vsidian-backlink-sort-menu'), '选择后菜单应收起').toBeNull()
+      expect(groupOrder(panel), '编辑时间降序应重排分组').toEqual(['b.md', 'a.md'])
+    } finally {
+      parent.remove()
+    }
+  })
+
+  it('pointerdown → click 排序按钮（菜单开态）：应收起菜单而非保持开', () => {
+    const { panel, parent } = mountWithSortMenu()
+    try {
+      const sortBtn = panel.querySelector<HTMLElement>('[data-action="sort"]')!
+      sortBtn.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }))
+      sortBtn.click()
+      expect(panel.querySelector('.vsidian-backlink-sort-menu'), '开态点排序按钮应收起').toBeNull()
+    } finally {
+      parent.remove()
+    }
+  })
+})
+
 describe('排版一致性探针（#32：view.state 可选字段）', () => {
   // fixture 同时覆盖标题、正文、列表与引用（表格由集成层覆盖）；
   // jsdom 无样式表层叠，computed 值不反映 main.css——此处只契约

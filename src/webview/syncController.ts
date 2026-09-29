@@ -623,7 +623,7 @@ export class WebviewSyncController {
    *  规格「已知边界」） */
   private backlinkView: BacklinkPanelView = defaultBacklinkView()
   /** 排序菜单外点关闭监听（菜单打开时挂、关闭时卸） */
-  private backlinkSortMenuOutside: ((event: Event) => void) | null = null
+  private backlinkSortMenuOutside: ((event: PointerEvent) => void) | null = null
 
   // ---- 出链面板状态（出链面板批次）----
   /** 出链面板 active：与 backlinksActive 同类的纯视图状态；显隐唯一开关
@@ -4319,9 +4319,17 @@ export class WebviewSyncController {
   private setBacklinkSortMenuOpen(open: boolean): void {
     this.backlinkView.sortMenuOpen = open
     if (open && !this.backlinkSortMenuOutside) {
-      const handler = (): void => {
-        // 菜单打开时任何 pointerdown 都收起：面板内点击（sort 按钮的
-        // click 翻转在其后派发，语义仍为切换）与面板外点击同收
+      const handler = (event: PointerEvent): void => {
+        // 菜单打开时面板外/其余区域 pointerdown 都收起；但**排序菜单与
+        // 排序按钮豁免**——收起会立即重渲动态区、菜单项在 click 派发前被
+        // 摘除，委托的 contains 判定失败导致改选失效（按钮则呈「收起又
+        // 被点击翻转重新打开」）；两者的开关语义由各自 click 处理器承担
+        const target = event.target as HTMLElement | null
+        if (target?.closest?.(
+          `.${BACKLINK_CLASS_NAMES.sortMenu}, .${BACKLINK_CLASS_NAMES.toolbarButton}[data-action="sort"]`,
+        )) {
+          return
+        }
         if (this.backlinkView.sortMenuOpen) {
           this.setBacklinkSortMenuOpen(false)
         }
