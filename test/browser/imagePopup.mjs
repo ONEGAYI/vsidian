@@ -390,7 +390,7 @@ try {
     /^rgb\(/.test(hoverBg.color) && hoverBg.image.includes('linear-gradient'),
     JSON.stringify(hoverBg))
 
-  check('23 页面无脚本错误', errors.length === 0, JSON.stringify(errors))
+  check('28 页面无脚本错误', errors.length === 0, JSON.stringify(errors))
   await page.close()
 
   if (failures.length > 0) {

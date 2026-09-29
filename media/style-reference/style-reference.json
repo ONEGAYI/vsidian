@@ -1528,7 +1528,7 @@
         "live",
         "reading"
       ],
-      "states": "live：装饰构建时按行判定（树驱动与宽松路径同口径），行内 [from,to) 之外文本全空白即独立成行。阅读：decorateImageChromeBlock 包 frame 时按父元素判定（唯一元素子节点 + 前后兄弟文本全空白）。三态修饰类照常叠加。sized：live 在 render 回调、阅读在包 frame 时经 markImageFrameSized 挂载——图装载完成（load 常驻重算，invalidate 重取后随新 load 收敛）且渲染宽窄于行可用宽时挂，否则摘；装载/错误态无视觉差异（按钮组随 loaded 态显现）。",
+      "states": "live：装饰构建时按行判定（树驱动与宽松路径同口径），行内 [from,to) 之外文本全空白即独立成行。阅读：decorateImageChromeBlock 包 frame 时按父元素判定（唯一元素子节点 + 前后兄弟文本全空白）。三态修饰类照常叠加。sized：仅独行块级形态挂载（live render 回调按 block+chrome 判定、阅读包 frame 时按 block 类判定——行内混排/链接内嵌/表格图不挂，无按钮贴图诉求）——图装载完成（load 常驻重算，invalidate 重取后随新 load 收敛）且渲染宽窄于行可用宽时挂，否则摘；error 态即摘（成功→失效→重取失败链上恢复撑满 error 框与重试点击目标，不因收缩残留窄化）；装载态无视觉差异（按钮组随 loaded 态显现）。",
       "dom": "live 行内 widget span.vsidian-image.vsidian-image-block > img；阅读 span.vsidian-graphic-frame.vsidian-image.vsidian-image-block > img（均 display: block）。sized 叠加时同节点加 .vsidian-image-sized（width: fit-content）。",
       "example": ".vsidian-image-block {\n  display: block;\n}\n\n/* 按钮组贴图收缩（图装载后窄于行时） */\n.vsidian-image-block.vsidian-image-sized {\n  width: fit-content;\n}",
       "obsidian": {

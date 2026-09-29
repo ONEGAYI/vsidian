@@ -8278,8 +8278,12 @@ export class WebviewSyncController {
           },
         }),
       )
-      // 贴图收缩标记（img 已入 frame、frame 已在文档，几何判定可读）
-      markImageFrameSized(frame, img)
+      // 贴图收缩标记：虚拟化主路径本钩子在块离屏构建期执行（append 在
+      // 其后 reorder），首算经 markImageFrameSized 内部 ResizeObserver
+      // 兜底；仅独行块级形态挂载（行内混排无按钮贴图诉求，不挂类）
+      if (frame.classList.contains(IMAGE_CLASS_NAMES.block)) {
+        markImageFrameSized(frame, img)
+      }
     }
   }
 

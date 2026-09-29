@@ -127,6 +127,11 @@ export function markImageFrameSized(frame: HTMLElement, img: HTMLElement): void 
   const ready = img instanceof HTMLImageElement && img.complete && img.naturalWidth > 0
   // load 常驻（invalidate 重取后新 load 重算标记；监听随 img 回收）
   img.addEventListener('load', apply)
+  // error 摘除（review-loops P3-4）：成功→失效→重取失败链上没有新
+  // load，sized 残留会让 error 呈现（src 已清、内容收缩）从撑满行窄化
+  // 成小点、重试点击目标随之缩小——error 态摘类恢复撑满框；重试成功
+  // 后随新 load 重挂
+  img.addEventListener('error', () => frame.classList.remove(IMAGE_CLASS_NAMES.sized))
   if (frame.getBoundingClientRect().width > 0) {
     if (ready) {
       apply()

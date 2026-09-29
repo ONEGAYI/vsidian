@@ -244,9 +244,12 @@ export class LiveImageWidget extends WidgetType {
           }),
         )
       }
-      // 贴图收缩标记（render 每次执行处挂：img 刚建必在场；重取重建时
-      // 随新 load 重算）
-      markImageFrameSized(slot, image)
+      // 贴图收缩标记：仅独行块级 chrome 形态挂载（行内混排/表格/内嵌
+      // 无按钮贴图诉求，不挂类留语义噪音）；render 每次执行处挂，重取
+      // 重建时随新 load 重算
+      if (this.block && this.chrome) {
+        markImageFrameSized(slot, image)
+      }
       return image
     })
     return span
