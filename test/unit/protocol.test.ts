@@ -356,6 +356,37 @@ describe('isWebviewToHost', () => {
     expect(isHostToWebview({ kind: 'sidebar.test.clickx' })).toBe(false)
   })
 
+  it('refresh.test.click 测试钩子消息校验（#208）', () => {
+    expect(isHostToWebview({ kind: 'refresh.test.click' })).toBe(true)
+    expect(isHostToWebview({ kind: 'refresh.test.click', extra: 1 })).toBe(true)
+    expect(isHostToWebview({ kind: 'refresh.test.clickx' })).toBe(false)
+  })
+
+  it('view.state 图片槽位探针只接受契约字段（#208）', () => {
+    const base = { kind: 'view.state', text: 't', docLength: 1, lineCount: 1, renderedLines: 1 }
+    // 合法：src/naturalWidth 可空，state 限 loading/loaded/error
+    expect(isWebviewToHost({ ...base, imageProbe: [
+      { src: 'https://x/y.png?v=1', naturalWidth: 2, state: 'loaded' },
+      { src: null, naturalWidth: null, state: 'loading' },
+    ] })).toBe(true)
+    // 缺省合法（向后兼容：旧 webview / 无图片槽位）
+    expect(isWebviewToHost(base)).toBe(true)
+    // 非法：state 越界 / naturalWidth 负数与 NaN / 槽位非对象 / src 非串
+    expect(isWebviewToHost({ ...base, imageProbe: [
+      { src: 'https://x/y.png', naturalWidth: 1, state: 'gone' },
+    ] })).toBe(false)
+    expect(isWebviewToHost({ ...base, imageProbe: [
+      { src: 'https://x/y.png', naturalWidth: -1, state: 'loaded' },
+    ] })).toBe(false)
+    expect(isWebviewToHost({ ...base, imageProbe: [
+      { src: 'https://x/y.png', naturalWidth: Number.NaN, state: 'loaded' },
+    ] })).toBe(false)
+    expect(isWebviewToHost({ ...base, imageProbe: ['x'] })).toBe(false)
+    expect(isWebviewToHost({ ...base, imageProbe: [
+      { src: 3, naturalWidth: 1, state: 'loaded' },
+    ] })).toBe(false)
+  })
+
   it('sidebar.test.resize 测试钩子只接受有限数位移（负值收窄合法）', () => {
     expect(isHostToWebview({ kind: 'sidebar.test.resize', delta: 120 })).toBe(true)
     expect(isHostToWebview({ kind: 'sidebar.test.resize', delta: -60 })).toBe(true)

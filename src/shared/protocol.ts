@@ -258,6 +258,10 @@ export type HostToWebview =
   /** 测试钩子（#141）：点击顶栏双态视图切换真实按钮（与用户点击同一处理器：
    *  出站 view.switch.request，切换由宿主 runViewSwitch 编排回流驱动）。 */
   | { kind: 'view.test.click' }
+  /** 测试钩子（#208）：点击顶栏刷新嵌入资源真实按钮（与用户点击同一
+   *  处理器：出站 refresh.request，失效重挂由宿主 refresh.invalidated
+   *  回流驱动）。 */
+  | { kind: 'refresh.test.click' }
   /** 测试钩子（#21）：在真实 webview 的 CM6 中输入，验证暂停态即时留存。 */
   | { kind: 'sync.test.edit'; offset: number; text: string; closeAfter?: boolean }
   /** 测试钩子：组合候选写入首行 DOM，经过 CM6 MutationObserver 的真实输入链。 */
@@ -440,6 +444,10 @@ export type WebviewToHost =
       readingWikilinkCount?: number
       /** 图片槽位状态计数（#10：当前视图内 loading/loaded/error） */
       imageStates?: ImageStateCounts
+      /** 图片槽位探针（#208）：当前视图内活跃槽位的最终 src 与解码尺寸
+       *  ——同名图片外部替换后刷新是否真换字节的绘制层证据（src 换新 +
+       *  naturalWidth 变化 = 浏览器实际解码了新地址的字节；旧 webview 缺省） */
+      imageProbe?: ImageSlotProbe[]
       /** 查找会话观测（#14）：首次打开后回报（未打开过时缺省） */
       find?: FindSessionProbe
       /** 当前生效设置快照（#33 起缓存宿主下发的值；#34 行号等设置的观测面） */
@@ -637,6 +645,18 @@ export interface ImageStateCounts {
   loading: number
   loaded: number
   error: number
+}
+
+/** 图片槽位探针（#208：当前视图内活跃槽位的最终地址与解码观测） */
+export interface ImageSlotProbe {
+  /** img 元素最终应用的 src 属性（宿主 webview URI 含 ?v= 代次戳；
+   *  槽位尚无 img（未解析）为 null） */
+  src: string | null
+  /** 浏览器实际解码宽度（load 后为位图宽；img 未创建/未解码为 null，
+   *  jsdom 无解码环境为 0） */
+  naturalWidth: number | null
+  /** 槽位状态（与 data-vsidian-img-state 同步） */
+  state: 'loading' | 'loaded' | 'error'
 }
 
 /** CSS 契约探针回报（#6）：一段仅经稳定类名定位的内部测试 CSS 是否生效 */
@@ -1708,6 +1728,15 @@ function isImageStateCounts(v: unknown): v is ImageStateCounts {
   )
 }
 
+function isImageSlotProbe(v: unknown): v is ImageSlotProbe {
+  return (
+    isObject(v) &&
+    isNullOrString(v.src) &&
+    (v.naturalWidth === null || isNonNegativeInt(v.naturalWidth)) &&
+    (v.state === 'loading' || v.state === 'loaded' || v.state === 'error')
+  )
+}
+
 function isLiveSyntaxProbe(v: unknown): v is LiveSyntaxProbe {
   return (
     isObject(v) &&
@@ -1907,6 +1936,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         (v.readingImageCount === undefined || isNonNegativeInt(v.readingImageCount)) &&
         (v.readingWikilinkCount === undefined || isNonNegativeInt(v.readingWikilinkCount)) &&
         (v.imageStates === undefined || isImageStateCounts(v.imageStates)) &&
+        (v.imageProbe === undefined ||
+          (Array.isArray(v.imageProbe) && v.imageProbe.every(isImageSlotProbe))) &&
         (v.find === undefined || isFindSessionProbe(v.find)) &&
         (v.settings === undefined || isSettingsPayload(v.settings)) &&
         (v.lineGutter === undefined || isLineGutterProbe(v.lineGutter)) &&
@@ -2251,6 +2282,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         v.action === 'popover-remove-entry' || v.action === 'popover-remove-item') &&
         (v.index === undefined || isNonNegativeInt(v.index))
     case 'view.test.click':
+      return true
+    case 'refresh.test.click':
       return true
     case 'sync.test.composition':
       return (v.phase === 'start' || v.phase === 'update' || v.phase === 'end') && isString(v.text)

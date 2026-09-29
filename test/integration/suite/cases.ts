@@ -165,6 +165,23 @@ const HIGHLIGHT_DOC_TEXT = [
 const PASTE_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
 
+/** #208 刷新对照载荷：2x2 不透明红色 PNG（外部替换磁盘同名图片后，
+ *  刷新重载的解码尺寸 1x1 → 2x2 即「用户看到新图」的绘制层证据） */
+const REFRESH_PNG_2X2_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEklEQVR4nGP4z8DwHxkzoAsAAA8hD/EEN8afAAAAAElFTkSuQmCC'
+
+// #208 手动刷新 fixture（与 fixtures.mjs 的 refresh.md 字节一致）
+const REFRESH_DOC_TEXT = [
+  '# 刷新样例',
+  '',
+  '光标定位段落，刷新前后选区保持的断言载体。',
+  '',
+  '![刷新图](assets/刷新图.png)',
+  '',
+  '结尾段。',
+  '',
+].join('\n')
+
 function wsUri(name: string): vscode.Uri {
   return vscode.Uri.file(`${wsDir}/${name}`)
 }
@@ -338,6 +355,8 @@ interface SessionState {
   panels: Array<{ sessionId: string; ready: boolean }>
   version: number
   appliedEdits: number
+  /** #208 资源代次（0 = 未刷新；每次手动刷新 +1） */
+  imageGeneration?: number
 }
 
 interface ViewState {
@@ -462,6 +481,9 @@ interface ViewState {
   liveMermaidCount?: number
   readingMermaidCount?: number
   imageStates?: { loading: number; loaded: number; error: number }
+  /** #208 图片槽位探针：src 为最终应用地址（含 ?v= 代次戳），
+   *  naturalWidth 为浏览器实际解码宽度（刷新真换字节的绘制层证据） */
+  imageProbe?: Array<{ src: string | null; naturalWidth: number | null; state: string }>
   /** #14 查找会话观测（首次打开后回报；匹配集来自文本模型全量计算） */
   find?: {
     open: boolean
@@ -8771,6 +8793,87 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(session.panels.length >= 1, '源码态双态命令应回 Vsidian 面板')
     await waitViewState('mode.md', (v) => v.viewMode === 'live')
     await waitLastMode('live')
+  }],
+
+  // ---- #208：工具栏刷新嵌入资源（外部替换图片 → 手动刷新 → 换新重载） ----
+
+  ['工具栏刷新嵌入资源：外部替换同名图片后换新代次 URI 实际重载，选区/模式保持零写回（#208）', async () => {
+    await openWithEditor('refresh.md')
+    await waitSessionReady('refresh.md')
+    const uri = wsUri('refresh.md').toString()
+
+    // 前置：live 态初始装载——1x1 透明图经宿主通道加载成功（load 事件置
+    // loaded），URI 为 asWebviewUri 原始形态（代次 0 未刷新不戳）
+    const initial = await waitViewState('refresh.md', (v) =>
+      (v.imageStates?.loaded ?? 0) >= 1 && (v.imageProbe?.length ?? 0) >= 1, 0, 30000)
+    const initialSlot = initial.imageProbe![0]!
+    assert(initialSlot.src !== null, `初始图片应有 src，实际 ${JSON.stringify(initialSlot)}`)
+    assert(!initialSlot.src!.includes('?v='), `初始 URI 不应带代次戳，实际 ${initialSlot.src}`)
+    const initialSrc = initialSlot.src!
+    assert(initialSlot.naturalWidth === 1,
+      `初始 1x1 图浏览器解码宽度应为 1，实际 ${initialSlot.naturalWidth}（src=${initialSlot.src}）`)
+    const session0 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(session0.imageGeneration === 0, `初始资源代次应为 0，实际 ${session0.imageGeneration}`)
+    // 绘制层断言（评审必查：用户看到的按钮）：chrome 探针命中即按钮按
+    // 契约样式真实绘制（非 DOM 存在性）
+    assert(initial.cssProbe?.chromeSelectors?.['toolbar-refresh'] === 'rgb(239, 0, 1)',
+      `刷新按钮绘制层应命中探针，实际 ${String(initial.cssProbe?.chromeSelectors?.['toolbar-refresh'])}`)
+
+    // 光标落在正文段（刷新前后选区保持的断言锚点）
+    const caretOffset = REFRESH_DOC_TEXT.indexOf('选区保持')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: caretOffset })
+    const located = await waitViewState('refresh.md', (v) => v.selectionOffset === caretOffset)
+    assert(located.viewMode === 'live', `刷新前置应为 live 模式，实际 ${located.viewMode}`)
+
+    // 外部替换磁盘同名图片：不同内容与尺寸（1x1 透明 → 2x2 不透明红）
+    await vscode.workspace.fs.writeFile(
+      wsUri('assets/刷新图.png'), Buffer.from(REFRESH_PNG_2X2_BASE64, 'base64'))
+
+    // 触发刷新：真实按钮点击路径（refresh.test.click → 按钮处理器出站
+    // refresh.request → 宿主清 imageCache + 代次自增 → refresh.invalidated
+    // → webview 全量失效重挂）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'refresh.test.click' })
+
+    // 失效重挂闭环：新 URI 带代次戳 ?v=1、src 实际更新、浏览器真实解码
+    // 了新地址的字节（naturalWidth 1 → 2——HTTP 缓存被戳击穿、用户看到
+    // 新图的绘制层证据）、槽位回到 loaded
+    const refreshed = await waitViewState('refresh.md', (v) => {
+      const slot = v.imageProbe?.[0]
+      return slot?.state === 'loaded' && slot?.src != null &&
+        slot.src.includes('?v=1') && slot.naturalWidth === 2
+    }, 0, 30000)
+    const refreshedSlot = refreshed.imageProbe![0]!
+    assert(refreshedSlot.src !== initialSrc,
+      `刷新后 img src 应实际更新（旧 ${initialSrc} → 新 ${String(refreshedSlot.src)}）`)
+
+    // 宿主侧资源代次推进到 1（URI 戳的数据源）
+    const session1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(session1.imageGeneration === 1, `刷新后资源代次应为 1，实际 ${session1.imageGeneration}`)
+
+    // 状态保持：刷新 = 清缓存重渲染，不是重开文件——光标、视图模式原样
+    assert(refreshed.selectionOffset === caretOffset,
+      `刷新后光标应保持 ${caretOffset}，实际 ${refreshed.selectionOffset}`)
+    assert(refreshed.viewMode === 'live', `刷新后视图模式应保持 live，实际 ${refreshed.viewMode}`)
+
+    // 无破坏性：文档内容、写回链路、磁盘全部原样
+    assert(refreshed.text === REFRESH_DOC_TEXT, '刷新不得改写文档文本')
+    assert(session1.appliedEdits === 0, `刷新不得产生 applyEdit，实际 ${session1.appliedEdits}`)
+    assert(await readDisk('refresh.md') === REFRESH_DOC_TEXT, '刷新不得写磁盘')
+
+    // 刷新不破坏工具栏绘制层（按钮仍按契约样式绘制）
+    assert(refreshed.cssProbe?.chromeSelectors?.['toolbar-refresh'] === 'rgb(239, 0, 1)',
+      `刷新后按钮绘制层应仍命中探针，实际 ${String(refreshed.cssProbe?.chromeSelectors?.['toolbar-refresh'])}`)
+
+    // 二次刷新：代次与戳续接（?v=2、代次 2），连续点击链路健壮
+    // （reqId 陈旧回执防护的宿主/webview 汇合点）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'refresh.test.click' })
+    await waitViewState('refresh.md', (v) => {
+      const slot = v.imageProbe?.[0]
+      return slot?.state === 'loaded' && slot?.src != null &&
+        slot.src.includes('?v=2') && slot.naturalWidth === 2
+    }, 0, 30000)
+    const session2 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(session2.imageGeneration === 2, `二次刷新后资源代次应为 2，实际 ${session2.imageGeneration}`)
   }],
 
   // ---- #160：普通链接锚点定位（fragment 结构化保留 + 打开后定位） ----

@@ -1534,6 +1534,8 @@ export function createTextEditorProvider(
         panels: entry.session.getInfo().panels,
         version: entry.doc.version,
         appliedEdits: entry.appliedEdits,
+        // #208 资源代次（0 = 未刷新；每次手动刷新 +1，图片 URI ?v= 戳同源）
+        imageGeneration: entry.session.getImageGeneration(),
       }
     }),
     vscode.commands.registerCommand(

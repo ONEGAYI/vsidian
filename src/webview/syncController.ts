@@ -43,6 +43,7 @@ import {
   isHostToWebview,
   type CssProbeReport,
   type FindSessionProbe,
+  type ImageSlotProbe,
   type LineGutterAlignment,
   type LineGutterProbe,
   type LiveSyntaxProbe,
@@ -550,6 +551,8 @@ export class WebviewSyncController {
   private quickToggleBtn: HTMLButtonElement | undefined
   /** #141 工具栏双态视图切换按钮（live↔reading；态随 view.mode.set 回流） */
   private viewToggleBtn: HTMLButtonElement | undefined
+  /** #208 工具栏刷新嵌入资源按钮（测试钩子 refresh.test.click 的真实点击目标） */
+  private refreshBtn: HTMLButtonElement | undefined
   private quickHeadingBtn: HTMLButtonElement | undefined
   private quickHeadingMenu: HTMLElement | undefined
   private quickActionResizeObserver: ResizeObserver | undefined
@@ -1182,6 +1185,7 @@ export class WebviewSyncController {
     this.quickActionsEl = undefined
     this.quickToggleBtn = undefined
     this.viewToggleBtn = undefined
+    this.refreshBtn = undefined
     this.quickHeadingBtn = undefined
     this.quickHeadingMenu = undefined
     this.findPanel?.remove()
@@ -1550,6 +1554,13 @@ export class WebviewSyncController {
         // 测试钩子（#141）：点击顶栏双态视图切换真实按钮（与用户点击同一
         // 处理器：出站 view.switch.request，切换由宿主编排回流驱动）
         this.viewToggleBtn?.click()
+        break
+      }
+      case 'refresh.test.click': {
+        // 测试钩子（#208）：点击顶栏刷新嵌入资源真实按钮（与用户点击同一
+        // 处理器：出站 refresh.request，失效重挂由宿主回发的
+        // refresh.invalidated 驱动）
+        this.refreshBtn?.click()
         break
       }
       case 'quick.test.click': {
@@ -2200,6 +2211,7 @@ export class WebviewSyncController {
       // 图片状态计数按当前视图作用域（隐藏视图的槽位不计入——同一管理器
       // 服务双视图，隐藏侧的 DOM 不代表用户可见状态）
       imageStates: this.collectImageStates(),
+      imageProbe: this.collectImageProbe(),
       find: this.collectFindProbe(),
       typography: this.collectTypography(),
       // #33 设置快照缓存（宿主下发过才有值；缺省向后兼容）
@@ -2693,6 +2705,28 @@ export class WebviewSyncController {
       if (s === 'loading' || s === 'loaded' || s === 'error') {
         out[s] += 1
       }
+    }
+    return out
+  }
+
+  /** 图片槽位探针（#208）：当前激活视图内活跃槽位的最终 src 与解码宽度
+   *  ——live 侧槽位为含 img 的容器 span、阅读侧槽位即 img 自身；src 为
+   *  宿主回发的最终地址（含 ?v= 代次戳），naturalWidth 在真实 webview
+   *  load 后为位图宽（jsdom 无解码恒 0）。与 imageStates 同元素集 */
+  private collectImageProbe(): ImageSlotProbe[] {
+    const scope = this.viewMode === 'reading' ? this.readingContainer : this.liveWrapper
+    if (!scope) {
+      return []
+    }
+    const out: ImageSlotProbe[] = []
+    for (const el of Array.from(scope.querySelectorAll<HTMLElement>('[data-vsidian-img-state]'))) {
+      const img = el instanceof HTMLImageElement ? el : el.querySelector('img')
+      const state = el.dataset['vsidianImgState']
+      out.push({
+        src: img?.getAttribute('src') ?? null,
+        naturalWidth: img ? img.naturalWidth : null,
+        state: state === 'loading' || state === 'loaded' || state === 'error' ? state : 'loading',
+      })
     }
     return out
   }
@@ -3489,6 +3523,7 @@ export class WebviewSyncController {
     refreshBtn.appendChild(createRefreshIcon())
     refreshBtn.addEventListener('mousedown', (event) => event.preventDefault())
     refreshBtn.addEventListener('click', () => this.sendEmbeddedRefreshRequest())
+    this.refreshBtn = refreshBtn
     // #141 双态视图切换按钮（紧邻侧栏按钮左侧）：图标显当前态（阅读=
     // 书本类 / Live=编辑类，显隐由 body 模式类经 CSS 驱动），aria/tooltip
     // 表目标动作（点击切到另一态），随当前态与界面语言双变化（回调登记，
