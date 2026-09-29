@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 import * as path from 'node:path'
 import {
   readHoverDocTarget,
+  readHoverDirectTarget,
   readHoverMdLinkTarget,
   type HoverDocAccessContext,
   type HoverDocAccessPorts,
@@ -417,6 +418,106 @@ describe('readHoverMdLinkTarget：普通本地 Markdown 链接（#219）', () =>
       ok: false,
       reason: 'anchor-missing',
       anchor: '没有的标题',
+    })
+  })
+})
+
+// #221 面板直接目标（反链/出链条目）：目标身份是宿主快照携带的绝对
+// fsPath（± 锚点），不走 target/linkHref 文本解析与根内路径探测——
+// 解析端口零调用（无 resolveVaultFile 输入），读取与范围收窄复用同一
+// readAndScope 收尾（锚点语义与链接形态无关）。
+describe('readHoverDirectTarget：面板条目直接目标（#221）', () => {
+  function directHarness(disk?: Disk): Harness {
+    return makeHarness(disk ?? new Map<string, { version: number; text: string }>([
+      ['D:\\notes\\a.md', note('x')],
+      ['D:\\notes\\来源.md', note('# 来源全文\n\n来源正文段。\n', 7)],
+      ['D:\\notes\\目标.md', note([
+        '# 目标全文',
+        '',
+        '## 章节甲',
+        '',
+        '甲段。',
+        '',
+        '- 列表项 ^direct-blk',
+        '',
+        '## 章节乙',
+        '',
+        '乙段。',
+        '',
+      ].join('\n'), 9)],
+      ['D:\\notes\\图.png', note('binary')],
+    ]))
+  }
+
+  it('无锚点 → 全文（scope=full）；反链条目形态：不查文件系统（解析端口零调用）', async () => {
+    const h = directHarness()
+    const out = await readHoverDirectTarget({ fsPath: 'D:\\notes\\来源.md' }, h.ctx, h.ports)
+    expect(out.ok).toBe(true)
+    if (!out.ok) {
+      return
+    }
+    expect(out.scope).toEqual({ kind: 'full' })
+    expect(out.relPath).toBe('来源.md')
+    expect(out.version).toBe(7)
+    expect(out.range).toEqual({ start: 0, end: out.lfText.length })
+    expect(h.resolvedCalls, '直接目标不走文本解析（resolveVaultFile 零调用）').toEqual([])
+    expect(h.opened).toEqual(['D:\\notes\\来源.md'])
+  })
+
+  it('出链条目锚点：标题原文 → heading 章节；^块id → block 完整块（与链接形态同一收窄口径）', async () => {
+    const h = directHarness()
+    const heading = await readHoverDirectTarget(
+      { fsPath: 'D:\\notes\\目标.md', anchor: '章节甲' }, h.ctx, h.ports)
+    expect(heading.ok).toBe(true)
+    if (heading.ok) {
+      expect(heading.scope).toEqual({ kind: 'heading', anchor: '章节甲' })
+      expect(heading.lfText.slice(heading.range.start, heading.range.end))
+        .toBe('## 章节甲\n\n甲段。\n\n- 列表项 ^direct-blk')
+    }
+    const block = await readHoverDirectTarget(
+      { fsPath: 'D:\\notes\\目标.md', anchor: '^direct-blk' }, h.ctx, h.ports)
+    expect(block.ok).toBe(true)
+    if (block.ok) {
+      expect(block.scope).toEqual({ kind: 'block', anchor: '^direct-blk' })
+      expect(block.lfText.slice(block.range.start, block.range.end)).toBe('- 列表项 ^direct-blk')
+    }
+  })
+
+  it('空串锚点 = 无锚点（full）；锚点缺失 → anchor-missing 附锚点原文', async () => {
+    const h = directHarness()
+    const full = await readHoverDirectTarget({ fsPath: 'D:\\notes\\目标.md', anchor: '' }, h.ctx, h.ports)
+    expect(full.ok).toBe(true)
+    if (full.ok) {
+      expect(full.scope).toEqual({ kind: 'full' })
+    }
+    expect(await readHoverDirectTarget(
+      { fsPath: 'D:\\notes\\目标.md', anchor: '不存在标题' }, h.ctx, h.ports)).toEqual({
+      ok: false,
+      reason: 'anchor-missing',
+      anchor: '不存在标题',
+    })
+  })
+
+  it('断链条目（空串 fsPath）→ not-found；非 Markdown → non-markdown；读取失败 → read-failed', async () => {
+    const h = directHarness()
+    // 断链出链条目：目标解析从未命中，无 fsPath 可读——空串入队让宿主
+    // 回 not-found 分态（条目仍可悬停显示失效占位，而非静默不发）
+    expect(await readHoverDirectTarget({ fsPath: '', anchor: 'x' }, h.ctx, h.ports)).toEqual({
+      ok: false,
+      reason: 'not-found',
+    })
+    expect(await readHoverDirectTarget({ fsPath: 'D:\\notes\\图.png' }, h.ctx, h.ports)).toEqual({
+      ok: false,
+      reason: 'non-markdown',
+    })
+    const broken = makeHarness(new Map<string, { version: number; text: string }>([
+      ['D:\\notes\\a.md', note('x')],
+      ['D:\\notes\\坏.md', note('y')],
+    ]))
+    broken.ports.openTextDocument = async () => null
+    expect(await readHoverDirectTarget({ fsPath: 'D:\\notes\\坏.md' }, broken.ctx, broken.ports)).toEqual({
+      ok: false,
+      reason: 'read-failed',
     })
   })
 })

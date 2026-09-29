@@ -216,3 +216,47 @@ describe('#220 来源资源通道：sourceDocUri 可选字段校验', () => {
     ).toBe(false)
   })
 })
+
+// #221 全入口悬停：面板条目（反链/出链）的目标身份是宿主快照携带的
+// 绝对 fsPath（± 锚点），不走 target/linkHref 文本解析——hover.request
+// 增可选 directTarget 承载；hover.test.pointer 钩子扩展 Live 与面板
+// 入口（宿主测试无法派发真实鼠标，经钩子走同一委托处理器）。
+describe('#221 全入口悬停：directTarget 与 hover.test.pointer 扩展校验', () => {
+  it('hover.request 可选 directTarget：形态合法放行、非法整体拒绝、旧形态不变', () => {
+    const base = validRequest()
+    // 反链面板条目：直接目标无锚点（来源文档全文）
+    expect(isWebviewToHost({ ...base, directTarget: { fsPath: 'D:\\notes\\来源.md' } })).toBe(true)
+    // 出链面板条目：锚点（标题原文或 ^块id）
+    expect(isWebviewToHost({ ...base, directTarget: { fsPath: 'D:\\notes\\目标.md', anchor: '^blk1' } })).toBe(true)
+    // 断链出链条目：空串 fsPath 合法（宿主回 not-found 分态，条目仍可悬停）
+    expect(isWebviewToHost({ ...base, directTarget: { fsPath: '', anchor: 'x' } })).toBe(true)
+    // anchor 可选；旧形态（无 directTarget）仍放行——Reading 双链/普通链接路径不变
+    expect(isWebviewToHost(base)).toBe(true)
+    // 非法形态：anchor 非字符串 / directTarget 非对象 / fsPath 非字符串
+    expect(isWebviewToHost({ ...base, directTarget: { fsPath: 'D:\\notes\\x.md', anchor: 3 } })).toBe(false)
+    expect(isWebviewToHost({ ...base, directTarget: 'D:\\notes\\x.md' })).toBe(false)
+    expect(isWebviewToHost({ ...base, directTarget: null })).toBe(false)
+    expect(isWebviewToHost({ ...base, directTarget: { anchor: 'x' } })).toBe(false)
+  })
+
+  it('hover.test.pointer：link 枚举扩展 Live/面板入口与 ctrlKey 修饰位', () => {
+    // 宿主 → webview 方向的注入钩子（集成测试经 postToPanel 派发真实
+    // mouseover/mouseout 的通道）
+    const base = { kind: 'hover.test.pointer', action: 'enter' as const, index: 0 }
+    // 既有枚举不回归
+    expect(isHostToWebview(base)).toBe(true)
+    expect(isHostToWebview({ ...base, link: 'wikilink' })).toBe(true)
+    expect(isHostToWebview({ ...base, link: 'md' })).toBe(true)
+    // #221 扩展：Live 双链/普通链接与反链/出链条目
+    expect(isHostToWebview({ ...base, link: 'live-wikilink' })).toBe(true)
+    expect(isHostToWebview({ ...base, link: 'live-md' })).toBe(true)
+    expect(isHostToWebview({ ...base, link: 'backlink' })).toBe(true)
+    expect(isHostToWebview({ ...base, link: 'outlink' })).toBe(true)
+    // Live Ctrl+悬停钩子的修饰位（缺省不带 = 直接悬停口径）
+    expect(isHostToWebview({ ...base, link: 'live-wikilink', ctrlKey: true })).toBe(true)
+    expect(isHostToWebview({ ...base, link: 'live-wikilink', ctrlKey: false })).toBe(true)
+    expect(isHostToWebview({ ...base, ctrlKey: 'yes' })).toBe(false)
+    // 非法枚举拒绝
+    expect(isHostToWebview({ ...base, link: 'unknown' })).toBe(false)
+  })
+})

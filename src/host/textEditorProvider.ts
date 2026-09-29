@@ -34,6 +34,7 @@ import {
   isWebviewToHost,
   type DiagramExportPayload,
   type HostToWebview,
+  type HoverPreviewRequestPayload,
   type ImageExportPayload,
   type ImagePastePayload,
   type SerChange,
@@ -77,6 +78,7 @@ import { runImageExport } from './imageExportHost'
 import { runImagePaste, type ImagePasteOutcome } from './imagePasteHost'
 import {
   readHoverDocTarget,
+  readHoverDirectTarget,
   readHoverMdLinkTarget,
   type HoverDocAccessContext,
   type HoverReadOutcome,
@@ -1213,9 +1215,11 @@ export function createTextEditorProvider(
       // 会话 report 闭包回来源面板）。读取异常一律收敛为 read-failed 分态
       // ——就地 i18n 呈现，不弹宿主通知。#219 起按 linkHref 分流：普通本地
       // Markdown 链接走 readHoverMdLinkTarget（外部网页 webview 已预滤，
-      // 宿主复核兜底），缺省为双链 readHoverDocTarget
+      // 宿主复核兜底），缺省为双链 readHoverDocTarget；#221 起 directTarget
+      // 优先（反链/出链面板条目的直接目标——宿主快照身份直读，不走文本
+      // 解析；断链条目空串 fsPath 由 readHoverDirectTarget 回 not-found）
       const readHoverTargetPort = (
-        payload: { target: string; linkHref?: string },
+        payload: Pick<HoverPreviewRequestPayload, 'target' | 'linkHref' | 'directTarget'>,
         report: (result: HoverReadOutcome) => void,
       ): void => {
         void (async (): Promise<void> => {
@@ -1234,9 +1238,11 @@ export function createTextEditorProvider(
                 }
               },
             }
-            outcome = payload.linkHref !== undefined
-              ? await readHoverMdLinkTarget(payload.linkHref, access, ports)
-              : await readHoverDocTarget(payload.target, access, ports)
+            outcome = payload.directTarget !== undefined
+              ? await readHoverDirectTarget(payload.directTarget, access, ports)
+              : payload.linkHref !== undefined
+                ? await readHoverMdLinkTarget(payload.linkHref, access, ports)
+                : await readHoverDocTarget(payload.target, access, ports)
           } catch {
             outcome = { ok: false, reason: 'read-failed' }
           }

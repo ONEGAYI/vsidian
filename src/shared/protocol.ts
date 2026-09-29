@@ -308,8 +308,19 @@ export type HostToWebview =
    * （mouseover/mmouseout 经容器委托——与用户悬停同一处理器链路；宿主
    * 测试无法向 webview 派发真实鼠标事件，以此通道验证真实宿主内的
    * 悬停读取与浮层开闭）。#219 起 link='md' 对第 index 个普通 Markdown
-   * 链接（非双链 `<a>`）派发——缺省仍为双链 */
-  | { kind: 'hover.test.pointer'; action: 'enter' | 'leave'; index: number; link?: 'wikilink' | 'md' }
+   * 链接（非双链 `<a>`）派发——缺省仍为双链；#221 起 link 枚举扩展
+   * Live 与面板入口：'live-wikilink' / 'live-md' 对 Live 正文第 index
+   * 个双链/普通链接装饰派发（ctrlKey 模拟 Ctrl+悬停修饰位，缺省不带
+   * = 直接悬停口径），'backlink' / 'outlink' 对面板第 index 个条目
+   * 派发（面板直接悬停，无修饰语义） */
+  | {
+      kind: 'hover.test.pointer'
+      action: 'enter' | 'leave'
+      index: number
+      link?: 'wikilink' | 'md' | 'live-wikilink' | 'live-md' | 'backlink' | 'outlink'
+      /** Live 入口的 Ctrl 修饰位（派发 mouseover 时透传；仅 live-* 有意义） */
+      ctrlKey?: boolean
+    }
   /** 测试钩子（#21）：在真实 webview 的 CM6 中输入，验证暂停态即时留存。 */
   | { kind: 'sync.test.edit'; offset: number; text: string; closeAfter?: boolean }
   /** 测试钩子：组合候选写入首行 DOM，经过 CM6 MutationObserver 的真实输入链。 */
@@ -749,6 +760,13 @@ export type WebviewToHost =
       target: string
       /** 普通链接形态的 href 原文（#219；缺省 = 双链形态） */
       linkHref?: string
+      /** #221 面板直接目标（反链/出链条目）：宿主快照携带的绝对 fsPath
+       *  （± 锚点——标题原文或 ^块id，与 OutlinkItemPayload.anchor 同口径），
+       *  存在时宿主不走 target/linkHref 文本解析与根内路径探测，直接按
+       *  fsPath 读取并按锚点收窄范围。空串 fsPath = 断链出链条目（宿主回
+       *  not-found 分态——条目仍可悬停显示失效占位）。target 字段此时为
+       *  条目显示名（错误分态文案的取材） */
+      directTarget?: { fsPath: string; anchor?: string }
     }
   /** 代码块复制请求（#81）：卡片头部复制按钮点击 → 宿主剪贴板 API 写入。
    *  text 为代码体原文（两条围栏行之间，不含围栏与 info string），恒为
@@ -2569,7 +2587,9 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'hover.request':
       // #218 悬停预览请求：会话守卫字段 + reqId 配对 + 非空实例标识 +
       // 非负源区间 + 目标原文（字符串即可，形态合法性由宿主解析判定）；
-      // #219 普通链接形态的 linkHref（可选字符串，存在即走普通链接解析）
+      // #219 普通链接形态的 linkHref（可选字符串，存在即走普通链接解析）；
+      // #221 面板直接目标 directTarget（可选对象：fsPath 字符串可为空串
+      // ——断链条目；anchor 可选字符串，^ 前缀 = 块锚点）
       return (
         isString(v.sessionId) &&
         isString(v.docUri) &&
@@ -2579,7 +2599,11 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         isNonNegativeInt(v.sourceStart) &&
         isNonNegativeInt(v.sourceEnd) &&
         isString(v.target) &&
-        (v.linkHref === undefined || isString(v.linkHref))
+        (v.linkHref === undefined || isString(v.linkHref)) &&
+        (v.directTarget === undefined ||
+          (isObject(v.directTarget) &&
+            isString(v.directTarget.fsPath) &&
+            (v.directTarget.anchor === undefined || isString(v.directTarget.anchor))))
       )
     case 'perf.report':
       return (
@@ -2897,9 +2921,14 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return true
     case 'hover.test.pointer':
       // #218 测试钩子：真实双链序号 + 进/离动作枚举；#219 link 选择器
-      // （缺省 wikilink，'md' 对普通 Markdown 链接派发）
+      // （缺省 wikilink，'md' 对普通 Markdown 链接派发）；#221 扩展
+      // Live（live-wikilink / live-md，ctrlKey 修饰位可选）与面板
+      // （backlink / outlink）入口
       return (v.action === 'enter' || v.action === 'leave') && isNonNegativeInt(v.index) &&
-        (v.link === undefined || v.link === 'wikilink' || v.link === 'md')
+        (v.link === undefined || v.link === 'wikilink' || v.link === 'md' ||
+          v.link === 'live-wikilink' || v.link === 'live-md' ||
+          v.link === 'backlink' || v.link === 'outlink') &&
+        (v.ctrlKey === undefined || typeof v.ctrlKey === 'boolean')
     case 'sync.test.composition':
       return (v.phase === 'start' || v.phase === 'update' || v.phase === 'end') && isString(v.text)
     case 'link.test.mousedown':

@@ -257,3 +257,28 @@ export async function readHoverMdLinkTarget(
   }
   return readAndScope(fsPath, anchorSpecOfFragment(classified.fragment), ctx, ports)
 }
+
+/**
+ * 读取面板条目的直接目标（#221 反链/出链悬停）：目标身份是宿主快照携带
+ * 的绝对 fsPath（± 锚点），**不走 target/linkHref 文本解析与根内路径探测**
+ * （解析端口零调用——条目身份在快照生成时已由宿主解析定局）。
+ *
+ * - 无锚点 / 空串锚点 → 全文（scope=full；反链条目与无锚点出链条目）；
+ * - 锚点语义与链接形态无关（`^id` 前缀 = 块引用，否则标题章节——与
+ *   OutlinkItemPayload.anchor 同口径，复用 anchorSpecOfFragment 归一）；
+ * - 空串 fsPath = 断链出链条目 → not-found 分态（条目仍可悬停显示失效
+ *   占位，而非静默不发）。
+ *
+ * 全程无副作用：不 openWith、不定位、不提示、不写文档。
+ */
+export async function readHoverDirectTarget(
+  direct: { fsPath: string; anchor?: string },
+  ctx: HoverDocAccessContext,
+  ports: HoverDocAccessPorts,
+): Promise<HoverReadOutcome> {
+  if (direct.fsPath === '') {
+    return { ok: false, reason: 'not-found' }
+  }
+  const spec = direct.anchor ? anchorSpecOfFragment(direct.anchor) : null
+  return readAndScope(direct.fsPath, spec, ctx, ports)
+}
