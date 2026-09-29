@@ -119,33 +119,34 @@ vsidian/
 │   │   ├── obsidian-live-preview-editor.md # Obsidian 技术栈与选型调研
 │   │   └── obsidian-viewport-rendering.md  # 视口渲染性能补充调研
 │   └── specs/      # 产品规格
-│       ├── anchor-navigation.md              # 锚点跳转规格（标题/块引用/复制块链接）
-│       ├── batch-2026-09-menu.md             # 右键菜单批次总览与决策回执
-│       ├── batch-2026-09.md                  # 2026-09 开票批次总览
-│       ├── blockquote-accent-bar.md          # 引用块紫色提示边条规格
-│       ├── code-block-card.md                # 代码块卡片功能规格
-│       ├── context-menu.md                   # 统一右键菜单规格（正文全域接管）
-│       ├── css-snippets.md                   # CSS片段与样式兼容规格
-│       ├── frontmatter-table.md              # frontmatter 表格化规格
-│       ├── graphic-code-block-interaction.md # 图形化代码块交互规格
-│       ├── html-comment-support.md           # HTML 注释快捷键与呈现规格
-│       ├── i18n.md                           # 全局 i18n 适配规格
-│       ├── image-paste.md                    # 图片粘贴插入与资产文件夹规格
-│       ├── image-popup.md                    # 图片弹窗查看与防误触规格
-│       ├── keybindings.md                    # 快捷键清单与默认值
-│       ├── live-table-column-width.md        # Live 表格列宽规格
-│       ├── manual-verification.md            # 人工验证清单
-│       ├── mvp-issues.md                     # MVP GitHub Issue 索引
-│       ├── mvp.md                            # MVP 规格主文档
-│       ├── settings-page-visual-refresh.md   # 设置页视觉刷新规格（#155）
-│       ├── style-contract-gate.md            # 契约门禁 CI 接线与远端配置文档
-│       ├── style-reference-i18n.md           # 样式参考条目双语化规格
-│       ├── symbol-input.md                   # 符号输入与行内围栏扩展约定落档
-│       ├── table-interaction-rework.md       # 表格交互重做规格
-│       ├── toolbar-refresh.md                # 工具栏刷新按钮与缓存刷新规格
-│       ├── toolbar-view-toggle.md            # 工具栏双态切换按钮规格
-│       ├── vault-index-backlinks.md          # 引用索引与反链实施规格
-│       └── viewport-width.md                 # 可读行宽与双模式列布局规格
+│       ├── anchor-navigation.md               # 锚点跳转规格（标题/块引用/复制块链接）
+│       ├── batch-2026-09-menu.md              # 右键菜单批次总览与决策回执
+│       ├── batch-2026-09.md                   # 2026-09 开票批次总览
+│       ├── blockquote-accent-bar.md           # 引用块紫色提示边条规格
+│       ├── code-block-card.md                 # 代码块卡片功能规格
+│       ├── context-menu.md                    # 统一右键菜单规格（正文全域接管）
+│       ├── css-snippets.md                    # CSS片段与样式兼容规格
+│       ├── frontmatter-table.md               # frontmatter 表格化规格
+│       ├── graphic-code-block-interaction.md  # 图形化代码块交互规格
+│       ├── html-comment-support.md            # HTML 注释快捷键与呈现规格
+│       ├── i18n.md                            # 全局 i18n 适配规格
+│       ├── image-paste.md                     # 图片粘贴插入与资产文件夹规格
+│       ├── image-popup.md                     # 图片弹窗查看与防误触规格
+│       ├── integration-host-teardown-noise.md # CI 收尾退出噪声边界（#211）
+│       ├── keybindings.md                     # 快捷键清单与默认值
+│       ├── live-table-column-width.md         # Live 表格列宽规格
+│       ├── manual-verification.md             # 人工验证清单
+│       ├── mvp-issues.md                      # MVP GitHub Issue 索引
+│       ├── mvp.md                             # MVP 规格主文档
+│       ├── settings-page-visual-refresh.md    # 设置页视觉刷新规格（#155）
+│       ├── style-contract-gate.md             # 契约门禁 CI 接线与远端配置文档
+│       ├── style-reference-i18n.md            # 样式参考条目双语化规格
+│       ├── symbol-input.md                    # 符号输入与行内围栏扩展约定落档
+│       ├── table-interaction-rework.md        # 表格交互重做规格
+│       ├── toolbar-refresh.md                 # 工具栏刷新按钮与缓存刷新规格
+│       ├── toolbar-view-toggle.md             # 工具栏双态切换按钮规格
+│       ├── vault-index-backlinks.md           # 引用索引与反链实施规格
+│       └── viewport-width.md                  # 可读行宽与双模式列布局规格
 ├── esbuild.mjs            # esbuild 多产物构建脚本
 ├── LICENSE                # MIT 许可证全文
 ├── media/                 # 随扩展打包的静态资源
