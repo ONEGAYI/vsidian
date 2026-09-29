@@ -44,10 +44,13 @@ describe('按钮组 CSS 契约（#111 契约 1）', () => {
     ).toMatch(/visibility:\s*visible/)
   })
 
-  it('按钮配色走 VSCode 主题变量（明暗跟随）', () => {
-    expect(rule('#app .vsidian-graphic-chrome button')).toMatch(
-      /background:\s*var\(--vscode-editorWidget-background/,
-    )
+  it('按钮配色走 VSCode 主题变量且垫实底不透内容色（明暗跟随）', () => {
+    // 双层合成（#212 图片场景，d24c72f）：主题面纯色渐变层 + 编辑器底
+    // 实垫——半透明主题变量（玻璃风主题）下按钮直浮图片等斑驳内容时
+    // 不透底；主题值为实色时渐变层全覆盖、观感与单层等同
+    const btn = rule('#app .vsidian-graphic-chrome button')
+    expect(btn).toMatch(/background:\s*linear-gradient\(var\(--vscode-editorWidget-background/)
+    expect(btn).toMatch(/var\(--vscode-editor-background,\s*#[0-9a-fA-F]{3,8}\)/)
   })
 })
 

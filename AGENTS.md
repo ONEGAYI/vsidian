@@ -2,7 +2,7 @@
 
 VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 
-> 当前状态：**MVP 主要功能已实施，整体验收未结**。一期双视图编辑、增量写回、任务、链接图片、双链、表格、查找、三态切换、独立设置页与源文件行号，二期公式渲染、Mermaid 图表、表格交互重做（[#72 规格](docs/specs/table-interaction-rework.md)）与大纲面板二期（#65–#70，样式透传、跳转高亮、折叠滑块、工具条搜索、右键菜单、拖拽排序）均已落地；统一右键菜单批次已落地（2026-09-28，#183 内核：Live 正文全域接管 + 注册/覆写基建 + 剪贴板四项，`blockMenu` 退役、`outlineMenu` 迁移内核并修复子菜单溢出；#184 内容接线：26 枚图标明暗资产接线 + 段落设置按行结构勾选 + 三簇命令分派核查钉住；规格 [docs/specs/context-menu.md](docs/specs/context-menu.md)）；工具栏刷新按钮已落地（2026-09-29，#208：顶栏右端组刷新入口 + 图片缓存全局代次换戳失效通道 + Mermaid 注入失败终态重置，刷新全程状态保持零写回；规格 [docs/specs/toolbar-refresh.md](docs/specs/toolbar-refresh.md)）；自动化通过不等于真实 IME、物理鼠标与视觉观感已由用户验收。功能范围见 [docs/specs/mvp.md](docs/specs/mvp.md)；待验项与历轮执行记录见 [docs/specs/manual-verification.md](docs/specs/manual-verification.md)；用户可见变更见 [CHANGELOG.md](CHANGELOG.md)。本文件是项目级 agent 规则的**单一入口**：横切约定常驻于此，领域落档约定的正文在指针目标（specs 文档与项目技能）中维护——入口唯一、不另建副本，指针写明触发分支，改动正文只改指针目标。
+> 当前状态：**MVP 主要功能已实施，整体验收未结**。一期双视图编辑、增量写回、任务、链接图片、双链、表格、查找、三态切换、独立设置页与源文件行号，二期公式渲染、Mermaid 图表、表格交互重做（[#72 规格](docs/specs/table-interaction-rework.md)）与大纲面板二期（#65–#70，样式透传、跳转高亮、折叠滑块、工具条搜索、右键菜单、拖拽排序）均已落地；统一右键菜单批次已落地（2026-09-28，#183 内核：Live 正文全域接管 + 注册/覆写基建 + 剪贴板四项，`blockMenu` 退役、`outlineMenu` 迁移内核并修复子菜单溢出；#184 内容接线：26 枚图标明暗资产接线 + 段落设置按行结构勾选 + 三簇命令分派核查钉住；规格 [docs/specs/context-menu.md](docs/specs/context-menu.md)）；工具栏刷新按钮已落地（2026-09-29，#208：顶栏右端组刷新入口 + 图片缓存全局代次换戳失效通道 + Mermaid 注入失败终态重置，刷新全程状态保持零写回；规格 [docs/specs/toolbar-refresh.md](docs/specs/toolbar-refresh.md)）；图片弹窗与防误触、表格数据行透明已落地（2026-09-29，#212：Markdown 图片接入代码块同款 hover 按钮组 + 本体吞点击 + 全屏弹窗（缩放/平移/刷新/原格式另存导出），链接内嵌与表格网格内图片明确排除，规格 [docs/specs/image-popup.md](docs/specs/image-popup.md)；#213：数据行与分隔行背景透明到编辑器背景、表头保留，新公开变量 `--vsidian-table-row-background`）；自动化通过不等于真实 IME、物理鼠标与视觉观感已由用户验收。功能范围见 [docs/specs/mvp.md](docs/specs/mvp.md)；待验项与历轮执行记录见 [docs/specs/manual-verification.md](docs/specs/manual-verification.md)；用户可见变更见 [CHANGELOG.md](CHANGELOG.md)。本文件是项目级 agent 规则的**单一入口**：横切约定常驻于此，领域落档约定的正文在指针目标（specs 文档与项目技能）中维护——入口唯一、不另建副本，指针写明触发分支，改动正文只改指针目标。
 
 ## 约定
 
@@ -131,6 +131,7 @@ vsidian/
 │       ├── html-comment-support.md           # HTML 注释快捷键与呈现规格
 │       ├── i18n.md                           # 全局 i18n 适配规格
 │       ├── image-paste.md                    # 图片粘贴插入与资产文件夹规格
+│       ├── image-popup.md                    # 图片弹窗查看与防误触规格
 │       ├── keybindings.md                    # 快捷键清单与默认值
 │       ├── live-table-column-width.md        # Live 表格列宽规格
 │       ├── manual-verification.md            # 人工验证清单
@@ -178,6 +179,7 @@ vsidian/
 │   │   ├── documentSession.ts          # 文档会话与写回同步
 │   │   ├── editorCsp.ts                # 编辑器 CSP 装配纯模块（#130）
 │   │   ├── hostLocale.ts               # 生效语言宿主装配解析帮手
+│   │   ├── imageExportHost.ts          # 宿主图片导出执行壳
 │   │   ├── imagePasteHost.ts           # 图片粘贴落盘执行壳（#161）
 │   │   ├── imagePastePlan.ts           # 图片粘贴纯逻辑（#161）
 │   │   ├── imageRefreshCoordinator.ts  # 图片刷新协调器（provider 级）
@@ -260,6 +262,7 @@ vsidian/
 │       ├── graphicRenderers.ts         # 图形化渲染器注册表
 │       ├── htmlComment.ts              # 阅读侧 HTML 注释剥离纯函数
 │       ├── imagePaste.ts               # 图片粘贴拦截适配层（#161）
+│       ├── imagePopup.ts               # 图片弹窗全屏浮层单例
 │       ├── imageResource.ts            # 图片资源状态机（#10）
 │       ├── imageVerifyScheduler.ts     # webview 周期核验定时器调度
 │       ├── indentEditing.ts            # Tab 通用行缩进处理器（#120）
@@ -293,6 +296,7 @@ vsidian/
 │       ├── outlineSection.ts           # 大纲控制域纯函数
 │       ├── outlinkPanel.ts             # 出链面板 DOM 与四态渲染
 │       ├── perfProbe.ts                # webview 性能探针（#5）
+│       ├── popupMutex.ts               # 图表与图片弹窗互斥
 │       ├── quickActionState.ts         # 快速操作状态判定
 │       ├── readingBlocks.ts            # markdown-it 阅读块切分
 │       ├── readingCodeCard.ts          # 阅读代码块卡片增强

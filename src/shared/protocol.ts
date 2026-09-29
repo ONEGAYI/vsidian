@@ -90,6 +90,17 @@ export type HostToWebview =
       index: number
       action?: 'export-svg' | 'export-png' | 'refresh' | 'close'
     }
+  /** 测试钩子（#212）：按序号点击图片 popup 按钮（驱动与用户点击相同的
+   *  处理器链路：打开图片弹窗）；action 存在时改为点击弹窗工具条按钮
+   *  （export 驱动导出链路的消息形态——宿主测试钩子模式下短路真实另存
+   *  为对话框；refresh 驱动弹窗按当前文档重定位重取；close 关闭）。
+   *  action 路径不重开弹窗（单例重开会清空快照） */
+  | {
+      kind: 'image.test.popup'
+      view: 'live' | 'reading'
+      index: number
+      action?: 'export' | 'refresh' | 'close'
+    }
   /** 测试钩子（#82）：按序号点击卡片头部折叠 chevron（驱动与用户点击相同
    *  的处理器链路：effect → codeCardFoldField 视图态切换） */
   | { kind: 'codecard.test.fold'; index: number }
@@ -305,6 +316,15 @@ export type HostToWebview =
   /** 图表导出结果（#111）：ok=false 时 reason 区分用户取消（cancelled）、
    *  载荷校验失败（invalid）与写盘失败（writeFailed） */
   | { kind: 'diagram.export.result'; reqId: number; ok: boolean; reason?: 'cancelled' | 'invalid' | 'writeFailed' }
+  /** 图片导出结果（#212）：ok=false 时 reason 区分用户取消（cancelled）、
+   *  载荷校验失败（invalid）、目标图不可寻址（not-found）、读字节失败
+   *  （read-failed）与写盘失败（writeFailed）；失败通知由宿主呈现 */
+  | {
+      kind: 'image.export.result'
+      reqId: number
+      ok: boolean
+      reason?: 'cancelled' | 'invalid' | 'not-found' | 'read-failed' | 'writeFailed'
+    }
   | { kind: 'settings.snapshot'; values: SettingsPayload }
   /**
    * #132 样式参考：打开设置页后定位到指定附加分页（section id）。
@@ -635,6 +655,12 @@ export type WebviewToHost =
    *  SVG 为文档文本，PNG 为 dataURL 去前缀的 base64；宿主按上限校验后
    *  showSaveDialog + writeFile，结果经 diagram.export.result 回报来源面板 */
   | { kind: 'diagram.export'; sessionId: string; docUri: string; reqId: number; format: 'svg' | 'png'; fileName: string; content: string }
+  /** 图片导出（#212）：图片弹窗工具条「另存原图副本」→ 宿主定位工作区
+   *  文件读字节 → showSaveDialog → writeFile。字节级拷贝、保持原格式，
+   *  不经 canvas 光栅化；src 为文档内图片原始地址（外链图 webview 侧
+   *  按钮已禁用，不发本消息），fileName 为建议名（basename 清洗后）；
+   *  结果经 image.export.result 回报来源面板 */
+  | { kind: 'image.export'; sessionId: string; docUri: string; reqId: number; src: string; fileName: string }
   /** 打开 Vsidian 设置页（#33）：编辑器工具栏「设置」按钮 → 宿主
    *  createWebviewPanel。无 sessionId/docUri——打开设置页不依赖任何文档
    *  会话（无文档打开时同样可用） */
@@ -1028,6 +1054,9 @@ export interface PaintProbe {
     caretDomColumn?: number | null
     caretNativeRectHeight?: number | null
     cellBreakDisplay?: string | null
+    /** #213 数据行/分隔行行级 computed background-color（取首个网格数据行
+     *  [data-vsidian-table-row="row"]；无表格为 null）。默认透明断言依据。 */
+    dataRowLineBackground?: string | null
     gridDisplay: string | null
     cellBorderWidth: string | null
     rowOutlineColor: string | null
@@ -1127,6 +1156,25 @@ export interface PaintProbe {
     overlayVisible: boolean
     /** 浮层内 SVG 已装载 */
     overlaySvg: boolean
+  }
+  /** #212 图片按钮组与图片弹窗绘制：图片挂载的同款 chrome（live 槽位内
+   *  与阅读 frame 内，排除链接内嵌/表格内不发射形态）与图片弹窗浮层
+   *  状态（document 级单例，与图表弹窗互斥）。计数只统计 loaded 态图片
+   *  （规格语义「loaded 态才有按钮」；loading/error 的 frame 类在场但
+   *  不计）。无图片时缺省。 */
+  imageChrome?: {
+    /** 当前激活视图内 loaded 图片的按钮组宿主数 */
+    frames: number
+    /** edit 按钮数（仅 live 视图发射；阅读恒 0） */
+    editButtons: number
+    /** popup 按钮数（两视图均发射） */
+    popupButtons: number
+    /** 图片弹窗浮层在场 */
+    overlay: boolean
+    /** 浮层实际遮蔽正文（jsdom 无布局恒 false，真宿主集成断言依据） */
+    overlayVisible: boolean
+    /** 浮层内图片已装载（img 元素在场且 loaded 态） */
+    overlayImgLoaded: boolean
   }
   /** #89 快速操作条的真实绘制、流内布局与已应用态。 */
   quickActions?: {
@@ -1757,6 +1805,7 @@ function isPaintProbe(v: unknown): v is PaintProbe {
       (v.table.caretDomColumn === undefined || v.table.caretDomColumn === null || isNonNegativeInt(v.table.caretDomColumn)) &&
       (v.table.caretNativeRectHeight === undefined || v.table.caretNativeRectHeight === null || isNonNegativeNumber(v.table.caretNativeRectHeight)) &&
       (v.table.cellBreakDisplay === undefined || v.table.cellBreakDisplay === null || isString(v.table.cellBreakDisplay)) &&
+      (v.table.dataRowLineBackground === undefined || isNullOrString(v.table.dataRowLineBackground)) &&
       isNullOrString(v.table.cellBorderWidth) &&
       isNullOrString(v.table.rowOutlineColor) &&
       isNullOrString(v.table.rowOutlineWidth) &&
@@ -1795,6 +1844,15 @@ function isPaintProbe(v: unknown): v is PaintProbe {
       typeof v.graphic.overlay === 'boolean' &&
       typeof v.graphic.overlayVisible === 'boolean' &&
       typeof v.graphic.overlaySvg === 'boolean'
+    )) &&
+    (v.imageChrome === undefined || (
+      isObject(v.imageChrome) &&
+      isNonNegativeInt(v.imageChrome.frames) &&
+      isNonNegativeInt(v.imageChrome.editButtons) &&
+      isNonNegativeInt(v.imageChrome.popupButtons) &&
+      typeof v.imageChrome.overlay === 'boolean' &&
+      typeof v.imageChrome.overlayVisible === 'boolean' &&
+      typeof v.imageChrome.overlayImgLoaded === 'boolean'
     )) &&
     (v.mermaid === undefined || (
       isObject(v.mermaid) &&
@@ -2093,6 +2151,14 @@ export type ImagePastePayload = Extract<WebviewToHost, { kind: 'image.paste' }>
 /** #161 图片粘贴失败原因（invalid-location=目录非法；write-failed=写盘；invalid=载荷） */
 export type ImagePasteFailReason = 'invalid-location' | 'write-failed' | 'invalid'
 
+/** #212 图片导出请求载荷（宿主侧消费形态） */
+export type ImageExportPayload = Extract<WebviewToHost, { kind: 'image.export' }>
+
+/** #212 图片导出失败原因（cancelled=取消对话框；invalid=载荷；not-found=
+ *  目标图不可寻址；read-failed=读字节；writeFailed=写盘） */
+export type ImageExportFailReason =
+  'cancelled' | 'invalid' | 'not-found' | 'read-failed' | 'writeFailed'
+
 export function isWebviewToHost(v: unknown): v is WebviewToHost {
   if (!isObject(v)) {
     return false
@@ -2279,6 +2345,19 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         isString(v.fileName) &&
         isString(v.content)
       )
+    case 'image.export':
+      // #212 图片导出：会话守卫字段对齐 image.request；src 非空、fileName
+      // 限长（与粘贴 fileNameHint 同限；非法整体丢弃）
+      return (
+        isString(v.sessionId) &&
+        isString(v.docUri) &&
+        isPositiveInt(v.reqId) &&
+        typeof v.src === 'string' &&
+        v.src.length > 0 &&
+        typeof v.fileName === 'string' &&
+        v.fileName.length > 0 &&
+        v.fileName.length <= IMAGE_PASTE_LIMITS.fileNameHintMaxChars
+      )
     case 'image.request':
       return (
         isString(v.sessionId) &&
@@ -2399,6 +2478,12 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'diagram.export.result':
       return isPositiveInt(v.reqId) && typeof v.ok === 'boolean' &&
         (v.reason === undefined || v.reason === 'cancelled' || v.reason === 'invalid' || v.reason === 'writeFailed')
+    case 'image.export.result':
+      // #212 图片导出结果：reason 枚举（not-found=目标图不可寻址；
+      // read-failed=读字节失败——均为 diagram 导出没有的图片侧场景）
+      return isPositiveInt(v.reqId) && typeof v.ok === 'boolean' &&
+        (v.reason === undefined || v.reason === 'cancelled' || v.reason === 'invalid' ||
+          v.reason === 'not-found' || v.reason === 'read-failed' || v.reason === 'writeFailed')
     case 'keybindings.snapshot':
     case 'keybindings.changed':
       return isObject(v.overrides) && Object.values(v.overrides).every((value) =>
@@ -2471,6 +2556,14 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         isNonNegativeInt(v.index) &&
         (v.action === undefined || v.action === 'export-svg' || v.action === 'export-png' ||
           v.action === 'refresh' || v.action === 'close')
+      )
+    case 'image.test.popup':
+      // #212 测试钩子：与 graphic.test.popup 同通道形态（图片按钮组按
+      // 序号点击；action 只点弹窗工具条，不重开弹窗）
+      return (
+        (v.view === 'live' || v.view === 'reading') &&
+        isNonNegativeInt(v.index) &&
+        (v.action === undefined || v.action === 'export' || v.action === 'refresh' || v.action === 'close')
       )
     case 'codecard.test.fold':
       return isNonNegativeInt(v.index)

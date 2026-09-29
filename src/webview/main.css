@@ -40,8 +40,16 @@ body {
      lineNumberCssContract） */
   --vsidian-table-cell-shift: calc(4px + 1px);
   /* 表格行背景 / 阅读表头背景（#12 公开；#132 起集中定义并接 Obsidian
-     --table-background 别名，消费处原内联 fallback 保持同值） */
+     --table-background 别名，消费处原内联 fallback 保持同值）；#213 起
+     语义收窄为 live 表头格 / 阅读表头（th）/ fm 标题栏底色 */
   --vsidian-table-background: var(--table-background, rgba(128, 128, 128, 0.05));
+  /* #213 表格数据行/分隔行背景：独立公开变量，默认透明到编辑器背景
+     （向阅读侧 td 对齐；表头格保留 --vsidian-table-background 底色）。
+     Obsidian 无单一对应变量（其数据行底色由 --table-background 全表
+     默认与 --table-row-alt-background 斑马纹差分承担），不接别名桥；
+     片段在 #app 层或其后代元素声明即可覆盖（片段 link 后载，同特异性
+     后者胜） */
+  --vsidian-table-row-background: transparent;
   /* 代码块卡片底色（#79 起公开变量，选择器映射表登记；头部与代码区共用，
      阅读卡片同源） */
   --vsidian-code-card-background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12));
@@ -2674,6 +2682,14 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
   display: block;
 }
 
+/* 独行图贴图收缩（#212 按钮贴图修复）：loaded 后图渲染宽窄于行宽时
+   markImageFrameSized 挂 sized，frame 收缩贴图——按钮组（absolute 右上）
+   贴图右上而非行右缘。百分比宽 SVG 与被钳制大图（渲染宽＝行宽）不挂，
+   前者的块级撑满基准（上方塌缩修复语义）因此不受影响 */
+#app .cm-editor .cm-scroller .vsidian-image.vsidian-image-block.vsidian-image-sized {
+  width: fit-content;
+}
+
 /* 占位（loading）：alt 文本形态，弱化呈现 */
 #app .vsidian-image.vsidian-image-loading {
   opacity: 0.65;
@@ -2702,10 +2718,12 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
 }
 
 /* 表格（#42）：源文本仍在 CM6；安全行始终以同列数 CSS grid 呈现。
-   活动格留在网格中直接编辑，IME、Tab 与宿主写回链路继续工作。 */
+   活动格留在网格中直接编辑，IME、Tab 与宿主写回链路继续工作。
+   #213：行级背景改走 --vsidian-table-row-background（默认透明）——
+   数据行与分隔行透明到编辑器背景，表头格底色由格级规则保留。 */
 #app .cm-editor .cm-scroller .vsidian-table-line {
   font-family: var(--vscode-editor-font-family, monospace);
-  background-color: var(--vsidian-table-background, rgba(128, 128, 128, 0.05));
+  background-color: var(--vsidian-table-row-background, transparent);
 }
 
 /* 表头行加粗 + 底缘分隔 */
@@ -3415,7 +3433,14 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
   border: none;
   border-radius: 4px;
   cursor: pointer;
-  background: var(--vscode-editorWidget-background, rgba(128, 128, 128, 0.16));
+  /* 底色双层合成（纯色渐变层 + 编辑器底实垫）：主题变量可能半透明
+     （如玻璃风主题的 button-secondary），按钮直浮在图片等斑驳内容上
+     时半透明面透出内容色；垫一层编辑器底实色后任何主题不透底，主题
+     值为实色时渐变层全覆盖、观感与单层等同（fallback 垫色仅无变量
+     注入的测试环境生效，真宿主恒有变量值） */
+  background:
+    linear-gradient(var(--vscode-editorWidget-background, rgba(128, 128, 128, 0.16)) 0 0),
+    var(--vscode-editor-background, #1e1e1e);
   color: var(--vscode-editor-foreground, inherit);
   pointer-events: auto;
   opacity: 0;
@@ -3434,8 +3459,50 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
 }
 
 #app .vsidian-graphic-chrome button:hover {
-  background: var(--vscode-button-secondaryBackground, rgba(128, 128, 128, 0.28));
+  /* 同常态双层合成：悬停面换 button-secondary，垫底不变 */
+  background:
+    linear-gradient(var(--vscode-button-secondaryBackground, rgba(128, 128, 128, 0.28)) 0 0),
+    var(--vscode-editor-background, #1e1e1e);
   color: var(--vscode-button-secondaryForeground, var(--vscode-editor-foreground));
+}
+
+/* ---- #212：图片挂载同款按钮组 ----
+   图片 frame = frame.vsidian-image（live 槽位 span 自任 frame；阅读 img
+   是 void 元素不能有子元素，经 frame 包裹、chrome 为 img 兄弟）：
+   - 行内形态 + 零 margin（覆盖 mermaid frame 的 block + 0.75em——行内
+     混排不被打断；live 侧 .cm-scroller 内另由既有槽位规则钉 inline-block，
+     块级独行图由 vsidian-image-block 既有规则接管）
+   - 阅读独行图由 decorateImageChromeBlock 的 JS 判定挂 vsidian-image-block
+     修饰类取块级：viewBox-only 百分比宽 SVG 在 inline-block shrink-to-fit
+     包含块下解析为 0×0（liveImageLayout B1 塌缩问题的阅读侧变体——块级
+     布局给 width:100% 确定基准；行内混排的此类 SVG 塌缩属既有记录边界）。
+     独行判定不走 :only-child 伪类——它只统计元素子节点（文本节点不参
+     与），「文字+图」混排段的 frame 同样命中，会把混排图误独占一行
+   - 按钮组随 loaded 态显现（同 mermaid rendered 兄弟选择器模式；错误/
+     加载态无按钮——错误态点击重试语义照旧）；悬停显现沿用上方
+     frame:hover 通用规则（图片 frame 同类命中） */
+#app .vsidian-graphic-frame.vsidian-image {
+  display: inline-block;
+  margin: 0;
+}
+
+#app .vsidian-view-reading .vsidian-graphic-frame.vsidian-image.vsidian-image-block {
+  display: block;
+}
+
+/* 阅读独行图贴图收缩（同 live 侧 sized 规则，块级独行 + 收缩贴图） */
+#app .vsidian-view-reading .vsidian-graphic-frame.vsidian-image.vsidian-image-block.vsidian-image-sized {
+  width: fit-content;
+}
+
+/* 显现门槛（loaded 态）：两个分支分别承载两种宿主结构——live 侧 chrome
+   是槽位 span.vsidian-image（frame）的子级（> 分支），阅读侧 chrome 是
+   img.vsidian-image（markdown-it 渲染、带基类）的后置兄弟（~ 分支）；
+   live 内部 img 无基类（状态属性在 span 上），两侧互补、缺一即一侧按钮
+   永不可见（review-loops 轮 2 实证，勿当死分支删） */
+#app .vsidian-image[data-vsidian-img-state="loaded"] > .vsidian-graphic-chrome,
+#app .vsidian-image[data-vsidian-img-state="loaded"] ~ .vsidian-graphic-chrome {
+  display: flex;
 }
 
 /* ---- 图表弹窗（#111）----
@@ -3482,6 +3549,13 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
 }
 
 .vsidian-diagram-media svg {
+  max-width: none;
+  display: block;
+}
+
+/* #212 图片弹窗：media 内容是 <img>（位图无矢量重排，缩放走 transform，
+   不写 width/height）——同 SVG 形态解除正文槽位的 max-width 限宽 */
+.vsidian-diagram-media img {
   max-width: none;
   display: block;
 }

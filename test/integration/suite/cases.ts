@@ -46,6 +46,8 @@ const CMD = {
   diagramExportLog: 'onegayi.vsidian._test.takeDiagramExportLog',
   // #161 图片粘贴消息日志（钩子模式记录载荷形态；落盘真实执行）
   imagePasteLog: 'onegayi.vsidian._test.takeImagePasteLog',
+  // #212 图片导出消息日志（钩子模式下宿主短路另存为对话框并记录）
+  imageExportLog: 'onegayi.vsidian._test.takeImageExportLog',
   // #201 图片刷新观测（失效日志与版本表快照）
   imageRefreshEvents: 'onegayi.vsidian._test.takeImageRefreshEvents',
   imageVersions: 'onegayi.vsidian._test.getImageVersions',
@@ -699,6 +701,8 @@ interface ViewState {
       caretDomColumn?: number | null
       caretNativeRectHeight?: number | null
       cellBreakDisplay?: string | null
+      /** #213 数据行/分隔行行级 computed background-color（无表格为 null） */
+      dataRowLineBackground?: string | null
       gridDisplay: string | null
       cellBorderWidth: string | null
       rowOutlineColor: string | null
@@ -754,6 +758,15 @@ interface ViewState {
       /** 浮层实际遮蔽正文（真宿主 elementFromPoint 断言依据） */
       overlayVisible: boolean
       overlaySvg: boolean
+    }
+    /** #212 图片按钮组与图片弹窗绘制（排除链接内嵌/表格内不发射形态） */
+    imageChrome?: {
+      frames: number
+      editButtons: number
+      popupButtons: number
+      overlay: boolean
+      overlayVisible: boolean
+      overlayImgLoaded: boolean
     }
     quickActions?: {
       open: boolean
@@ -3023,6 +3036,68 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(disk === IMAGES_DOC_TEXT, '图片链路不得写磁盘')
   }],
 
+  ['图片弹窗与防误触：loaded 图挂按钮组、弹窗浮层绘制可见、导出消息经宿主日志，零写回（#212）', async () => {
+    await openWithEditor('images.md')
+    await waitSessionReady('images.md')
+    const uri = wsUri('images.md').toString()
+    // live 默认模式：loaded 图挂按钮组（错误图无按钮——CSS loaded 态门槛在
+    // 浏览器层断言，此处观测 DOM 发射形态：edit+popup 各 1，仅 loaded 图）
+    const live = await poll('live 图片按钮组观测', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      const chrome = v?.paint?.imageChrome
+      return chrome && chrome.frames === 1 && chrome.editButtons === 1 && chrome.popupButtons === 1 ? v : undefined
+    }, 30000)
+    assert(
+      (live.imageStates?.loaded ?? 0) === 1 && (live.imageStates?.error ?? 0) === 1,
+      `装载形态应为 1 loaded + 1 error（错误图无按钮组），实际 ${JSON.stringify(live.imageStates)}`,
+    )
+    // 打开弹窗（钩子驱动与用户点击同一处理器）：浮层在场 + img loaded +
+    // 绘制层遮蔽正文（overlayVisible = elementFromPoint 命中浮层子树）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'image.test.popup', view: 'live', index: 0 })
+    const popup = await poll('弹窗打开且图片装载', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      const chrome = v?.paint?.imageChrome
+      return chrome && chrome.overlay && chrome.overlayImgLoaded ? v : undefined
+    }, 30000)
+    assert(popup.paint!.imageChrome!.overlayVisible, '弹窗应实际遮蔽正文（绘制层断言）')
+    // 导出钩子：action 只点工具条导出钮（不重开弹窗清快照）→ 宿主日志
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'image.test.popup', view: 'live', index: 0, action: 'export',
+    })
+    const exportLog = (await poll('图片导出日志就绪', async () => {
+      const log = (await vscode.commands.executeCommand(CMD.imageExportLog, uri)) as Array<{
+        src: string; fileName: string; reqId: number
+      }>
+      return log.length >= 1 ? log : undefined
+    }))
+    const msg = exportLog[0]!
+    assert(msg.src === 'assets/图片 一.png', `导出 src 应为解码形态图源，实际 ${JSON.stringify(msg)}`)
+    assert(msg.fileName === '图片 一.png', `导出建议名应为图源 basename，实际 ${JSON.stringify(msg)}`)
+    assert(msg.reqId > 0, '导出消息应带正整数 reqId')
+    // 关闭弹窗
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'image.test.popup', view: 'live', index: 0, action: 'close',
+    })
+    await poll('弹窗关闭', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      return v?.paint?.imageChrome && !v.paint.imageChrome.overlay ? true : undefined
+    })
+    // 阅读侧：非链接/非表格图包 frame，按钮组仅 popup 一枚（无 edit）
+    await vscode.commands.executeCommand('onegayi.vsidian.toggleViewMode')
+    const reading = await poll('阅读侧按钮组观测', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      const chrome = v?.paint?.imageChrome
+      return chrome && chrome.frames === 1 && chrome.editButtons === 0 && chrome.popupButtons === 1 ? v : undefined
+    }, 30000)
+    assert(reading.viewMode === 'reading', '应已切换到阅读模式')
+    // 全程零写回：文本不变、无 applyEdit、磁盘不变
+    assert(reading.text === IMAGES_DOC_TEXT, '图片弹窗链路不得改写文档文本')
+    const state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state.appliedEdits === 0, `图片弹窗链路不得产生 applyEdit，实际 ${state.appliedEdits}`)
+    const disk = await readDisk('images.md')
+    assert(disk === IMAGES_DOC_TEXT, '图片弹窗链路不得写磁盘')
+  }],
+
   ['live 视图链接/图片装饰与样式契约：视口内 span/widget 渲染且稳定类名可被外部片段命中（#10）', async () => {
     await openWithEditor('links.md')
     await waitSessionReady('links.md')
@@ -4175,6 +4250,21 @@ export const cases: Array<[string, () => Promise<void>]> = [
     }
 
     assert(await readDisk('wikilinks.md') === diskBefore, '歧义/缺失链路不得改写源文档')
+  }],
+
+  ['表格数据行背景透明到编辑器背景，表头保留底色（#213）', async () => {
+    await openWithEditor('table42.md')
+    await waitSessionReady('table42.md')
+    // 绘制层断言：数据行/分隔行行级 computed 背景透明（rgba(0,0,0,0) 即
+    // transparent 的序列化），表头格仍实际着色（--vsidian-table-background）
+    const state = await waitViewState('table42.md', (v) =>
+      v.paint?.table?.dataRowLineBackground != null &&
+      (v.paint.table.headerCellBackgrounds?.length ?? 0) > 0)
+    const table = state.paint!.table!
+    assert(table.dataRowLineBackground === 'rgba(0, 0, 0, 0)',
+      `数据行/分隔行背景须透明到编辑器背景：${table.dataRowLineBackground}`)
+    assert((table.headerCellBackgrounds ?? []).every((color) => color !== 'rgba(0, 0, 0, 0)'),
+      `表头格须保留底色：${JSON.stringify(table.headerCellBackgrounds)}`)
   }],
 
   ['表格行列选中在绘制层显示完整轮廓与高亮（#43）', async () => {

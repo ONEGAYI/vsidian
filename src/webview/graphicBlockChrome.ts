@@ -5,6 +5,7 @@
 // 走 t()）。按钮 DOM 是路径级通用件——语言差异只体现在回调，由注册表
 // 驱动的调用方注入。
 import { t } from '../shared/i18n'
+import { IMAGE_CLASS_NAMES } from './imageResource'
 
 export const GRAPHIC_CHROME_CLASS_NAMES = {
   /** 渲染容器与按钮组的定位包裹层（position:relative 宿主） */
@@ -87,4 +88,74 @@ export function wrapGraphicFrame(inner: HTMLElement, actions: GraphicChromeActio
   inner.replaceWith(frame)
   frame.append(inner, buildGraphicChrome(actions))
   return frame
+}
+
+/** 图片 frame 的贴图收缩标记（#212 按钮贴图修复，live/阅读两侧装配处
+ *  共用）：loaded 后按「图渲染宽窄于 frame 宽」toggle sized 修饰类——
+ *  chrome 是 absolute 右上、贴 frame 右缘，独行块级 frame 撑满行宽时
+ *  图窄于行按钮就飞离图面；sized 令 frame 收缩贴图。判定用渲染几何而
+ *  非 naturalWidth：百分比宽 SVG（width='100%'）的 naturalWidth 是 300
+ *  伪值且渲染宽跟随包含块撑满（撑满即正确），被钳制大图渲染宽也等于
+ *  行宽（收缩与否同果）——两者都不满足「窄于」条件天然不挂，前者的
+ *  块级撑满基准（塌缩修复语义）因此不被 fit-content 化破坏。load 监听
+ *  常驻（invalidate 重取后新 load 重算）随 img 生命周期回收；离屏构建
+ *  期（阅读虚拟化）rect 全 0，经 ResizeObserver 等获得布局后首算 */
+export function markImageFrameSized(frame: HTMLElement, img: HTMLElement): void {
+  // 分母用父级 content 宽（clientWidth 减水平 padding）而非 frame 自身
+  // 宽：它是 frame 撑满宽的精确对应（live 父级 .cm-line 带 2px 水平
+  // padding，直接取 rect 宽会大出 padding，撑满图被误判「窄于行」），
+  // 也不用 frame 当前宽——sized 生效后 frame 收缩贴图，用自身宽重算
+  // 「图窄于 frame」自我否定（挂上即翻转的振荡）。content 宽不受
+  // fit-content 影响，判定幂等收敛且可逆（重取后换成百分比宽 SVG 时
+  // 正确退出收缩、恢复撑满基准）。首算必须等图真装载完成：百分比宽
+  // SVG 装载前以 naturalWidth 伪值（如 300）呈现，早算会误挂 sized，
+  // fit-content 下其百分比语义随后解析为 0 且 load 后重算 0<可用宽
+  // 死锁保持挂（塌缩回归）——装载完成交由 load 监听首算
+  const apply = () => {
+    const parent = frame.parentElement
+    let available = 0
+    if (parent) {
+      const style = getComputedStyle(parent)
+      available = parent.clientWidth
+        - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight)
+    }
+    frame.classList.toggle(
+      IMAGE_CLASS_NAMES.sized,
+      img.getBoundingClientRect().width < available - 1,
+    )
+  }
+  const ready = img instanceof HTMLImageElement && img.complete && img.naturalWidth > 0
+  // load 常驻（invalidate 重取后新 load 重算标记；监听随 img 回收）
+  img.addEventListener('load', apply)
+  // error 摘除（review-loops P3-4）：成功→失效→重取失败链上没有新
+  // load，sized 残留会让 error 呈现（src 已清、内容收缩）从撑满行窄化
+  // 成小点、重试点击目标随之缩小——error 态摘类恢复撑满框；重试成功
+  // 后随新 load 重挂
+  img.addEventListener('error', () => frame.classList.remove(IMAGE_CLASS_NAMES.sized))
+  if (frame.getBoundingClientRect().width > 0) {
+    if (ready) {
+      apply()
+    }
+    return // 布局就绪但图未装载：等 load 首算
+  }
+  // 离屏构建期（阅读虚拟化块先构建后插入文档、live widget 插入前的
+  // toDOM 期）：rect 全 0，几何判定不可信且此后无触发点——ResizeObserver
+  // 等 frame 获得布局后（图已装载才）首算并撤观察（元素退场即撤）；
+  // jsdom 等无 RO 环境退化为仅 load 重算（布局后首个 load 事件兜底）
+  if (typeof ResizeObserver === 'undefined') {
+    return
+  }
+  const ro = new ResizeObserver(() => {
+    if (!frame.isConnected) {
+      ro.disconnect()
+      return
+    }
+    if (frame.getBoundingClientRect().width > 0) {
+      ro.disconnect()
+      if (img instanceof HTMLImageElement && img.complete && img.naturalWidth > 0) {
+        apply()
+      }
+    }
+  })
+  ro.observe(frame)
 }

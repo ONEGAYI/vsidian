@@ -1370,13 +1370,13 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "link-image-wikilink",
     "kind": "selector",
     "target": ".vsidian-image（双视图）",
-    "purpose": "图片槽位基类：阅读视图为 <img> 元素本体（Obsidian img 标签选择器天然命中）；live 视图为 widget 容器 span（内部 img 由资源管理器装载，本项目自有形态）。",
+    "purpose": "图片槽位基类：阅读视图为 <img> 元素本体（Obsidian img 标签选择器天然命中）；live 视图为 widget 容器 span（内部 img 由资源管理器装载，本项目自有形态）。#212 起非链接内嵌、非表格内的图片挂同款按钮组：live 槽位 span 兼任 vsidian-graphic-frame（vsidian-image 类保留，槽位语义不变）；阅读 img 经同款 frame span 包裹（img 为 void 元素不能有子元素）。",
     "views": [
       "live",
       "reading"
     ],
-    "states": "进入视口才发起装载；离开视口卸载释放（src 清空）。",
-    "dom": "阅读：块内 img.vsidian-image；live：行内 widget span.vsidian-image > img。",
+    "states": "进入视口才发起装载；离开视口卸载释放（src 清空）。#212：loaded 态按钮组显现（错误/加载态无按钮——错误态点击重试语义照旧），由 data-vsidian-img-state 的兄弟/子代选择器驱动。",
+    "dom": "阅读：块内 img.vsidian-image（#212 起外层可有 span.vsidian-graphic-frame.vsidian-image 包裹）；live：行内 widget span.vsidian-image > img（挂按钮组时叠加 frame 类，按钮组为 img 后置兄弟）。",
     "example": ".markdown-preview-view img {\n  max-width: 100%;\n}",
     "obsidian": {
       "counterpart": ".markdown-preview-view img（阅读）/ .cm-image（live 方向，Obsidian 无公开稳定类）",
@@ -1441,20 +1441,23 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "domain": "content",
     "category": "link-image-wikilink",
     "kind": "selector",
-    "target": ".vsidian-image-block（live 修饰类，叠加于 .vsidian-image）",
-    "purpose": "live 独立成行图片的块级容器变体：整行仅含一张图片（其余文本全空白，含尾随空白）时 widget 槽位取块级布局，为无固有尺寸的图源（viewBox-only 百分比宽 SVG，mermaid 导出形态）提供确定宽度基准——此类图源在 inline-block shrink-to-fit 下渲染为 0×0（img 加载成功故静默无反馈，表现为空白行）；有固有尺寸的图源不受影响（块级下仍按自然宽度呈现）。已知边界：行内混排（列表前缀、混排文字、同行多图）的此类 SVG 仍为行内形态。",
+    "target": ".vsidian-image-block（修饰类，叠加于 .vsidian-image；live 槽位与阅读 frame 两种宿主）；.vsidian-image-sized（伴随修饰类，独行图贴图收缩，#212 按钮贴图修复追加）",
+    "purpose": "独立成行图片的块级容器变体：live 侧整行仅含一张图片（其余文本全空白，含尾随空白）时 widget 槽位取块级布局；#212 起阅读侧同语义——段落内图片为唯一元素子节点且前后兄弟文本全空白时，挂载钩子包 frame 后由 JS 判定挂本类（不用 :only-child 伪类——它只统计元素子节点，「文字+图」混排段会误命中把混排图独占一行）。块级布局为无固有尺寸的图源（viewBox-only 百分比宽 SVG，mermaid 导出形态）提供确定宽度基准——此类图源在 inline-block shrink-to-fit 下渲染为 0×0（img 加载成功故静默无反馈，表现为空白行）；有固有尺寸的图源不受影响（块级下仍按自然宽度呈现）。已知边界：行内混排（列表前缀、混排文字、同行多图）的此类 SVG 仍为行内形态。伴随修饰类 vsidian-image-sized（仅独行块级形态上生效）：图装载完成后渲染宽仍窄于行可用宽（父级 content 宽）时由 markImageFrameSized 挂上，frame 取 width:fit-content 收缩贴图——按钮组（absolute 右上）跟随贴图右上而非行右缘；百分比宽 SVG 与被钳制大图（渲染宽＝行宽）不挂，前者的块级撑满基准（塌缩修复语义）因此不受 fit-content 化影响。判定分母取父级 content 宽而非 frame 当前宽（后者在收缩后自我否定）；装载前不算（百分比宽 SVG 装载前以 naturalWidth 伪值呈现，早算误挂后塌缩死锁）；离屏构建期经 ResizeObserver 等获得布局后首算。",
     "views": [
-      "live"
+      "live",
+      "reading"
     ],
-    "states": "装饰构建时按行判定（树驱动与宽松路径同口径）：行内 [from,to) 之外文本全空白即独立成行；三态修饰类照常叠加。",
-    "dom": "live 行内 widget span.vsidian-image.vsidian-image-block > img（display: block）。",
-    "example": ".vsidian-image-block {\n  display: block;\n}",
+    "states": "live：装饰构建时按行判定（树驱动与宽松路径同口径），行内 [from,to) 之外文本全空白即独立成行。阅读：decorateImageChromeBlock 包 frame 时按父元素判定（唯一元素子节点 + 前后兄弟文本全空白）。三态修饰类照常叠加。sized：仅独行块级形态挂载（live render 回调按 block+chrome 判定、阅读包 frame 时按 block 类判定——行内混排/链接内嵌/表格图不挂，无按钮贴图诉求）——图装载完成（load 常驻重算，invalidate 重取后随新 load 收敛）且渲染宽窄于行可用宽时挂，否则摘；error 态即摘（成功→失效→重取失败链上恢复撑满 error 框与重试点击目标，不因收缩残留窄化）；装载态无视觉差异（按钮组随 loaded 态显现）。",
+    "dom": "live 行内 widget span.vsidian-image.vsidian-image-block > img；阅读 span.vsidian-graphic-frame.vsidian-image.vsidian-image-block > img（均 display: block）。sized 叠加时同节点加 .vsidian-image-sized（width: fit-content）。",
+    "example": ".vsidian-image-block {\n  display: block;\n}\n\n/* 按钮组贴图收缩（图装载后窄于行时） */\n.vsidian-image-block.vsidian-image-sized {\n  width: fit-content;\n}",
     "obsidian": {
       "counterpart": "无直接对应（Obsidian 无公开独立图片布局类）",
       "support": "native"
     },
     "verification": [
       "浏览器 liveImageLayout：真实 Chromium + 生产控制器——独行 viewBox-only SVG 渲染宽度铺满正文列（修复前 0×0）、固有尺寸图不拉伸、限宽档随列联动、阅读侧非回归",
+      "浏览器 imagePopup：阅读侧独行图 frame display=block、文字混排图 display=inline-block（:only-child 误伤回归钉住）",
+      "浏览器 imagePopup（#212 按钮贴图修复）：live/阅读独行定宽图 chrome 右缘与图右缘 gap 落在 6px 内缩带、宽幅百分比 SVG 两侧撑满不塌（sized 分治守恒）",
       "单元 linkInteraction：独立成行判定（整行/尾随空白/列表前缀/混排/同行两图/宽松路径）与 widget 形态 eq"
     ],
     "introduced": "live SVG 塌缩修复（2026-09-29）"
@@ -1768,7 +1771,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "content-variables",
     "kind": "variable",
     "target": "--vsidian-table-background",
-    "purpose": "live 表格行背景 / 阅读表头背景；默认 rgba(128, 128, 128, 0.05)。",
+    "purpose": "live 表头格 / 阅读表头（th）/ fm 标题栏底色（#213 起数据行透明，行背景改走 --vsidian-table-row-background）；默认 rgba(128, 128, 128, 0.05)。",
     "views": [
       "live",
       "reading"
@@ -1786,6 +1789,27 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "obsidianAliasCssContract：变量桥形态"
     ],
     "introduced": "#12（2026-09-24）"
+  },
+  {
+    "id": "var-table-row-background",
+    "domain": "content",
+    "category": "content-variables",
+    "kind": "variable",
+    "target": "--vsidian-table-row-background",
+    "purpose": "live 表格数据行与分隔行背景；默认 transparent（透明到编辑器背景，向阅读侧 td 对齐）。表头格底色不受本变量影响（仍走 --vsidian-table-background）。",
+    "views": [
+      "live"
+    ],
+    "dom": "定义于 #app；消费于 .vsidian-table-line 行级规则（表头/分隔/数据行通用，表头行的格级背景覆盖其上）。片段在 #app 层或其后代元素声明即可覆盖——:root/body 声明会被 #app 层定义截断继承。",
+    "example": "#app {\n  --vsidian-table-row-background: rgba(128, 128, 128, 0.05);\n}",
+    "obsidian": {
+      "counterpart": "无（Obsidian 数据行底色由 --table-background 全表默认与 --table-row-alt-background 斑马纹差分承担，无单一数据行变量；--table-background 已桥接给 --vsidian-table-background）",
+      "support": "none"
+    },
+    "verification": [
+      "tablePaintCssContract：行级规则接线 + #app 定义唯一 + 表头格/阅读 th 保持共享变量"
+    ],
+    "introduced": "#213（2026-09-29）"
   },
   {
     "id": "var-heading-accent",
@@ -2249,13 +2273,13 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "graphic-interact",
     "kind": "selector",
     "target": ".vsidian-graphic-frame / .vsidian-graphic-chrome（含 -edit / -popup）",
-    "purpose": "图形化代码块（渲染成图形的围栏）定位包裹层与右上角按钮组：edit 进源码编辑（仅实时预览）、popup 打开图表弹窗；按钮组悬停显隐由 CSS 驱动（透明度切换，DOM 常驻渲染成功态）。",
+    "purpose": "图形化代码块（渲染成图形的围栏）定位包裹层与右上角按钮组：edit 进源码编辑（仅实时预览）、popup 打开图表弹窗；按钮组悬停显隐由 CSS 驱动（透明度切换，DOM 常驻渲染成功态）。#212 起 Markdown 图片复用同款按钮组与交互契约（edit+popup 双钮 / 阅读仅 popup；图片本体吞点击防误触），链接内嵌与表格网格内图片不挂（规格明确排除）。按钮底色为「主题面纯色渐变层 + 编辑器底实垫」双层合成（常态 editorWidget-background、悬停 button-secondaryBackground）：主题变量可能半透明（玻璃风主题），按钮直浮图片等斑驳内容时半透明面透出内容色，垫实底后任何主题不透底；主题值为实色时渐变层全覆盖、观感与单层等同。",
     "views": [
       "live",
       "reading"
     ],
-    "states": "渲染成功态显示按钮组（error 降级块不发射）；edit 按钮仅实时预览侧装配。",
-    "dom": "live：围栏 widget 外层 frame；阅读：mermaid/图形容器外层 frame。按钮组挂 frame 内 absolute 右上。",
+    "states": "渲染成功态显示按钮组（error 降级块不发射）；edit 按钮仅实时预览侧装配。图片形态：loaded 态显示（data-vsidian-img-state 兄弟/子代选择器驱动），frame.vsidian-image 取行内布局（不破坏行内混排）。",
+    "dom": "live：围栏 widget 外层 frame；阅读：mermaid/图形容器外层 frame。图片形态：live 槽位 span 兼任 frame（vsidian-image 叠加）；阅读 img 经 inline frame span 包裹。按钮组挂 frame 内 absolute 右上。",
     "example": ".vsidian-graphic-chrome {\n  opacity: 1;\n}",
     "obsidian": {
       "counterpart": "无（Obsidian 图表块无公开按钮组结构）",
@@ -2264,7 +2288,8 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "verification": [
       "集成「图形化代码块按钮组与图表弹窗」（#111）：paint.graphic.frames/editButtons/popupButtons",
       "浏览器 graphicPopup：悬停显隐（透明度两态）",
-      "集成「界面域样式契约」（#133）：chromeSelectors[\"graphic-chrome\"] 探针命中"
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"graphic-chrome\"] 探针命中",
+      "单元/浏览器 imagePopup（#212）：图片按钮组构成、悬停显隐与排除项；悬停按钮底色垫实底（computed backgroundColor 不透明 + 渐变面在场）"
     ],
     "introduced": "#111（2026-09-26）"
   },
@@ -2273,8 +2298,8 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "domain": "chrome",
     "category": "graphic-interact",
     "kind": "selector",
-    "target": ".vsidian-diagram-overlay / -backdrop / -stage / -media / -toolbar / -zoom-in / -zoom-out / -zoom-label / -reset / -refresh / -export-svg / -export-png / -close / -error / -note",
-    "purpose": "图表弹窗全屏浮层（#111）：遮罩 + 舞台（缩放/平移的图本体）+ 工具条（缩放/重置/刷新/导出/关闭）；error 态保留 close 与 refresh；note 为环境不支持 PNG 光栅化时的提示条。挂 document.body，仅在弹窗打开期间在场。",
+    "target": ".vsidian-diagram-overlay / -backdrop / -stage / -media / -toolbar / -zoom-in / -zoom-out / -zoom-label / -reset / -refresh / -export-svg / -export-png / -export-image / -close / -error / -note",
+    "purpose": "图表弹窗全屏浮层（#111）：遮罩 + 舞台（缩放/平移的图本体）+ 工具条（缩放/重置/刷新/导出/关闭）；error 态保留 close 与 refresh；note 为环境不支持 PNG 光栅化时的提示条。挂 document.body，仅在弹窗打开期间在场。#212 起图片弹窗（查看/缩放/平移/刷新/另存原图副本）复用同一类名族与浮层骨架：内容为 <img>（transform 缩放），-export-image 为图片侧导出钮（外链图禁用 + 外层 span 悬停提示），与图表弹窗互斥单例。",
     "views": [
       "live",
       "reading"
@@ -2288,7 +2313,8 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     },
     "verification": [
       "集成「图表弹窗」（#111/#133）：cssProbe.chromePopup 打开期间样式观测 + 刷新后保持",
-      "浏览器 graphicPopup：原生键鼠路径（缩放/平移/Esc/导出）与样式保持"
+      "浏览器 graphicPopup：原生键鼠路径（缩放/平移/Esc/导出）与样式保持",
+      "单元/浏览器 imagePopup（#212）：图片弹窗开关/缩放/刷新/导出与互斥"
     ],
     "introduced": "#111（2026-09-26）"
   },
@@ -3781,9 +3807,9 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "image-slot": {
-    "purpose": "Base class of the image slot: in reading view it is the <img> element itself (Obsidian img tag selectors match naturally); in live view it is a widget container span (the inner img is loaded by the resource manager — a vsidian-specific form).",
-    "states": "Loading starts only when the slot enters the viewport; leaving the viewport unloads and releases it (src is cleared).",
-    "dom": "Reading: img.vsidian-image inside the block. Live: an inline widget span.vsidian-image > img.",
+    "purpose": "Base class of the image slot: in reading view it is the <img> element itself (Obsidian img tag selectors match naturally); in live view it is a widget container span (the inner img is loaded by the resource manager — a vsidian-specific form). Since #212 images outside links and tables carry the shared button group: the live slot span doubles as vsidian-graphic-frame (the vsidian-image class stays, slot semantics unchanged); reading imgs are wrapped by the same frame span (img is a void element and cannot have children).",
+    "states": "Loading starts only when the slot enters the viewport; leaving the viewport unloads and releases it (src is cleared). Since #212 the button group appears in the loaded state (no buttons while error/loading — the error-state click-to-retry semantics stay), driven by sibling/descendant selectors on data-vsidian-img-state.",
+    "dom": "Reading: img.vsidian-image inside the block (since #212 optionally wrapped by span.vsidian-graphic-frame.vsidian-image). Live: an inline widget span.vsidian-image > img (with the frame class added when the button group is attached; the group is a following sibling of the img).",
     "obsidian": {
       "counterpart": ".markdown-preview-view img (reading) / .cm-image (live direction; Obsidian has no public stable class)"
     }
@@ -3805,9 +3831,9 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "image-solo-block": {
-    "purpose": "Block container variant for an image standing alone on its line in live view: when the whole line holds a single image (all remaining text is whitespace, trailing whitespace included), the widget slot switches to block layout, providing a definite width basis for sources without intrinsic dimensions (viewBox-only percentage-width SVGs, the mermaid export form) — such sources collapse to 0×0 under inline-block shrink-to-fit (the img loads successfully, so the failure is silent and shows as a blank line). Sources with intrinsic dimensions are unaffected (they still render at natural width under block layout). Known boundary: such SVGs mixed inline with other content (list prefixes, surrounding text, multiple images on one line) keep the inline form.",
-    "states": "Decided per line at decoration build time (same rule on the tree-driven and loose paths): the line counts as solo when all text outside the image range is whitespace; the three state modifier classes still stack on top.",
-    "dom": "Live inline widget span.vsidian-image.vsidian-image-block > img (display: block).",
+    "purpose": "Block container variant for an image standing alone on its line: in live view, when the whole line holds a single image (all remaining text is whitespace, trailing whitespace included), the widget slot switches to block layout; since #212 the reading view carries the same semantics — when the image is the only element child of its paragraph and the surrounding sibling text is all whitespace, the mount hook wraps the frame and a JS check adds this class (the :only-child pseudo-class is not used — it only counts element children, so a \"text + image\" mixed paragraph would falsely match and force the image onto its own line). Block layout provides a definite width basis for sources without intrinsic dimensions (viewBox-only percentage-width SVGs, the mermaid export form) — such sources collapse to 0×0 under inline-block shrink-to-fit (the img loads successfully, so the failure is silent and shows as a blank line). Sources with intrinsic dimensions are unaffected (they still render at natural width under block layout). Known boundary: such SVGs mixed inline with other content (list prefixes, surrounding text, multiple images on one line) keep the inline form. Companion modifier vsidian-image-sized (effective only on the solo block form, added by the #212 button-alignment fix): once the image finishes loading and still renders narrower than the available line width (parent content width), markImageFrameSized adds it and the frame takes width:fit-content to shrink around the image — the button group (absolute top-right) then hugs the image corner instead of the line edge. Percentage-width SVGs and clamped large images (rendered width = line width) do not get it, so the block fill basis of the former (its collapse-fix semantics) is never fit-content-ed. The comparison denominator is the parent content width, not the current frame width (the latter negates itself after shrinking); no decision before load completes (percentage-width SVGs show a bogus naturalWidth before load — an early hit deadlocks into collapse); offscreen construction defers the first computation to a ResizeObserver once the frame gains layout.",
+    "states": "Live: decided per line at decoration build time (same rule on the tree-driven and loose paths) — the line counts as solo when all text outside the image range is whitespace. Reading: decided by decorateImageChromeBlock when wrapping the frame (only element child plus all-whitespace sibling text). The three state modifier classes still stack on top. sized: attached only on the solo block form (live render callback gates on block+chrome, reading frame wrap on the block class — inline mixed, link-nested and table-grid images do not get it, no button-alignment need) — added when the image has loaded (load listener recomputes, converging after invalidate refetches) and renders narrower than the available line width, removed otherwise; removed immediately on error (the loaded→invalidated→refetch-failed chain restores the full-width error box and its retry target instead of a shrunken remnant); loading state shows no visual difference (the button group only appears in the loaded state).",
+    "dom": "Live inline widget span.vsidian-image.vsidian-image-block > img; reading span.vsidian-graphic-frame.vsidian-image.vsidian-image-block > img (both display: block). With sized stacked, the same node also carries .vsidian-image-sized (width: fit-content).",
     "obsidian": {
       "counterpart": "No direct counterpart (Obsidian has no public standalone-image layout class)"
     }
@@ -3899,10 +3925,17 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "var-table-background": {
-    "purpose": "Background of live table rows / the reading table header; defaults to rgba(128, 128, 128, 0.05).",
+    "purpose": "Background of the live header cells / the reading table header (th) / the frontmatter card title bar (since #213 data rows are transparent — the row background now uses --vsidian-table-row-background); defaults to rgba(128, 128, 128, 0.05).",
     "dom": "Defined on #app (centrally defined since #132; consumer sites previously carried inline fallbacks); Obsidian alias --table-background.",
     "obsidian": {
       "counterpart": "--table-background"
+    }
+  },
+  "var-table-row-background": {
+    "purpose": "Background of live table data rows and delimiter rows; defaults to transparent (blending into the editor background, aligned with the reading-side td). Header cell backgrounds are unaffected by this variable (they still use --vsidian-table-background).",
+    "dom": "Defined on #app; consumed by the .vsidian-table-line line-level rule (shared by header/delimiter/data rows — the header cell-level background paints on top of it on header rows). Snippets override it by declaring on #app or any descendant — :root/body declarations are cut off by the #app-level definition.",
+    "obsidian": {
+      "counterpart": "None (Obsidian derives data-row backgrounds from the table-wide --table-background default plus the --table-row-alt-background zebra stripe — no single data-row variable exists, and --table-background is already bridged to --vsidian-table-background)"
     }
   },
   "var-heading-accent": {
@@ -4056,15 +4089,15 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "graphic-chrome": {
-    "purpose": "The positioning wrapper of graphic code blocks (fences rendered as graphics) and its top-right button group: edit enters source editing (live preview only), popup opens the diagram popup; the group hover show/hide is CSS-driven (an opacity toggle; the DOM stays present in the rendered-success state).",
-    "states": "The button group shows in the rendered-success state (error fallback blocks do not emit it); the edit button is assembled only on the live preview side.",
-    "dom": "Live: the frame around the fence widget; reading: the frame around the mermaid/graphic container. The button group is absolutely positioned at the frame's top right.",
+    "purpose": "The positioning wrapper of graphic code blocks (fences rendered as graphics) and its top-right button group: edit enters source editing (live preview only), popup opens the diagram popup; the group hover show/hide is CSS-driven (an opacity toggle; the DOM stays present in the rendered-success state). Since #212 Markdown images reuse the same button group and interaction contract (edit+popup on live / popup-only on reading; the image body swallows clicks to prevent accidental edits); images inside links or table grids do not carry it (explicitly out of scope). The button background is a two-layer composite (a solid-color gradient layer of the theme face + a solid editor-background underlay; editorWidget-background at rest, button-secondaryBackground on hover): theme variables may be translucent (glass-style themes), and with the buttons floating directly over mottled content such as images a translucent face lets the content color bleed through; the solid underlay keeps the face opaque under any theme, while solid theme values are fully covered by the gradient layer with no visual change.",
+    "states": "The button group shows in the rendered-success state (error fallback blocks do not emit it); the edit button is assembled only on the live preview side. Image form: shown in the loaded state (driven by sibling/descendant selectors on data-vsidian-img-state); frame.vsidian-image takes an inline layout (inline mixed flow is not broken).",
+    "dom": "Live: the frame around the fence widget; reading: the frame around the mermaid/graphic container. Image form: the live slot span doubles as the frame (vsidian-image added); reading imgs are wrapped by an inline frame span. The button group is absolutely positioned at the frame's top right.",
     "obsidian": {
       "counterpart": "None (Obsidian diagram blocks have no public button-group structure)"
     }
   },
   "diagram-popup": {
-    "purpose": "The fullscreen overlay of the diagram popup (#111): backdrop + stage (the diagram body being zoomed/panned) + toolbar (zoom/reset/refresh/export/close); the error state keeps close and refresh; note is the notice bar shown when the environment does not support PNG rasterization. Attached to document.body and present only while the popup is open.",
+    "purpose": "The fullscreen overlay of the diagram popup (#111): backdrop + stage (the diagram body being zoomed/panned) + toolbar (zoom/reset/refresh/export/close); the error state keeps close and refresh; note is the notice bar shown when the environment does not support PNG rasterization. Attached to document.body and present only while the popup is open. Since #212 the image popup (view/zoom/pan/refresh/save a copy of the original image) reuses the same class family and overlay skeleton: the content is an <img> (transform-based zoom), -export-image is the image-side export button (disabled for remote images with a hover hint on a wrapper span), a mutually exclusive singleton with the diagram popup.",
     "states": "Present while opened via the popup button; dismissed by Esc, clicking the empty area or the close button.",
     "dom": "A direct child of body — the overlay (backdrop/stage/toolbar areas).",
     "obsidian": {

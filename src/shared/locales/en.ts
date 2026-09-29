@@ -457,6 +457,9 @@ export const en = {
   'graphic.exportFailed': 'Diagram export failed',
   'graphic.exportSvgFilter': 'SVG file',
   'graphic.exportPngFilter': 'PNG image',
+  'graphic.popupExportImage': 'Save a copy of the original image',
+  'graphic.popupExportImageDisabled': 'Remote images cannot be exported; save a workspace copy first.',
+  'graphic.imageExportFailed': 'Image export failed',
 
   /** 图片/公式/任务/Mermaid 装饰与错误占位 */
   'decor.taskCheck': 'Check task',

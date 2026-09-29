@@ -29,6 +29,12 @@ export const IMAGE_CLASS_NAMES = {
    *  （mermaid 导出形态）无固有尺寸，inline-block shrink-to-fit 下解析为
    *  0×0——块级布局提供确定宽度基准（样式契约 image-solo-block 条目） */
   block: 'vsidian-image-block',
+  /** 独行块级图的贴图收缩修饰类（#212 按钮贴图修复）：loaded 后图渲染宽
+   *  仍窄于行宽时由 markImageFrameSized 挂上，frame 取 width:fit-content
+   *  收缩贴图——按钮组（absolute 右上）跟随贴图右上而非行右缘。百分比宽
+   *  SVG（渲染宽跟随包含块撑满）与被钳制的大图不挂：撑满即正确，且块级
+   *  撑满是前者的塌缩修复基准（样式契约 image-solo-block 条目括注） */
+  sized: 'vsidian-image-sized',
   /** 状态修饰类（与 data-vsidian-img-state 同步） */
   state: (s: ImageSlotState) => `vsidian-image-${s}`,
   /** 失败态细分（#201，叠加在 error 基类上）：明确删除（磁盘正证据 missing） */
@@ -36,6 +42,13 @@ export const IMAGE_CLASS_NAMES = {
   /** 失败态细分（#201）：不可访问（SSH 断连/权限错误，不冒充找不到） */
   unreachable: 'vsidian-image-unreachable',
 } as const
+
+/** 远程直连图源判定（http/https）的单一实现：资源管理器装配与图片弹窗
+ *  上下文注入共用（协议相对 `//host` 形态不命中——直连按字面 scheme 判，
+ *  该形态经宿主分类拦截，见 linkTarget） */
+export function isDirectImageSrc(src: string): boolean {
+  return /^https?:\/\//i.test(src)
+}
 
 export interface ImageManagerDeps {
   /** 远程直连图源判定（http/https）：true 时应用原始 src，不经宿主 */
@@ -50,8 +63,9 @@ export interface ImageManagerDeps {
 
 /** 图源规范化：容错 percent-decode 一次。CommonMark 语义下链接目标就是
  *  解码值——live 源文原样（部分编码）与 markdown-it 全编码形态由此归一为
- *  同一逻辑图源（去重请求、同键缓存）；非法转义序列按原样保留。 */
-function normalizeImgSrc(src: string): string {
+ *  同一逻辑图源（去重请求、同键缓存）；非法转义序列按原样保留。
+ *  #212 起导出（弹窗持有/消息载荷）与宿主定位同用此口径。 */
+export function normalizeImgSrc(src: string): string {
   try {
     return decodeURIComponent(src)
   } catch {
@@ -127,6 +141,12 @@ export class ImageResourceManager {
     rawSrc = normalizeImgSrc(rawSrc)
     slot.classList.add(IMAGE_CLASS_NAMES.image)
     slot.dataset['vsidianImgSrc'] = rawSrc
+    // 禁原生拖拽（阅读槽位即 <img>；live 槽位的 img 在 render 回调里设）：
+    // img 默认 draggable=true，按住拖动启动浏览器原生 drag（ghost 缩略图 +
+    // 宿主 copy 徽标），与既有点击/编辑交互语义冲突
+    if (slot instanceof HTMLImageElement) {
+      slot.draggable = false
+    }
     let entry = this.entries.get(rawSrc)
     if (!entry) {
       if (this.deps.isDirectSrc(rawSrc)) {
