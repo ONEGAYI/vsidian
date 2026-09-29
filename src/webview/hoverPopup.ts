@@ -8,13 +8,28 @@
 // - 默认宽 480px / 最大高 400px；四边翻转与视口钳制见 hoverPopupGeometry；
 //   内容装载变高与窗口缩放经 ResizeObserver/resize 重定位。
 // - 一次一个浮层：经 popupMutex 与图表/图片弹窗互斥（claim 时在场的其他
-//   弹窗先关）。鼠标路径零抢焦点（不 focus 任何元素——键盘打开属 #221）。
+//   弹窗先关）。鼠标路径零抢焦点（不 focus 任何元素）。
 // - 异步迟到响应不得重开已关闭浮层：结果只作用于「在场且 instanceId 与
 //   reqId 双匹配」的实例，关闭即释放实例身份。
 // - 只读呈现：任务 checkbox 禁用（JS disabled + CSS pointer-events 双保险）
 //   ——浮层内容没有任何写回通道。
 //
-// #220 引用 Reading 内容（本工单）：
+// #221 全入口悬停（本工单）：
+// - 显式目标入口 openHoverPopupFor：Live 正文装饰 DOM 与面板条目不是
+//   `<a href>`（Live 是 CM6 mark/widget span，面板是卡片/按钮元素），目标
+//   形态由调用方组装成 HoverPopupTargetSpec（双链 target / 普通链接
+//   linkHref / 面板直接目标 directFsPath±directAnchor）——Reading 锚点
+//   路径（hoverPreviewAnchorEnter）内部提取后走同一入口，三入口共用同一
+//   开闭时序、保活与迟到守卫。
+// - 键盘模态 openHoverPopupForKeyboard：「预览当前链接」命令的手动打开
+//   路径——焦点进入浮层（容器 tabIndex=-1 可编程聚焦，不进 Tab 序），
+//   Esc 关闭后返还触发处焦点；焦点在浮层内部时不因鼠标离开或父容器滚动
+//   销毁键盘操作现场（#220 已知张力的调整——纯键盘遍历不应触发鼠标域
+//   的关闭规则）；鼠标悬停路径零抢焦点契约不变。
+// - 面板/切模式等触发上下文失效：closeHoverPopupIfAnchorWithin 按锚点
+//   所在域释放（面板重渲染 replaceChildren 后锚点脱树，不依赖迟到检测）。
+//
+// #220 引用 Reading 内容：
 // - 来源资源：浮层内容（B 文档）的图片以 **B 身份资源管理器** 装载——
 //   image.request 附 sourceDocUri（B 的 fsPath），宿主按 B 目录走同一
 //   classifyImageTarget 白名单与 asWebviewUri 机制；https 直连图源不经
@@ -90,6 +105,49 @@ function anchorIsWikilink(anchor: HTMLElement): boolean {
   return anchor.classList.contains(WIKILINK_CLASS_NAMES.wikilink)
 }
 
+/** #221 显式目标规格：Live 装饰 DOM 与面板条目不是 `<a href>`，目标形态
+ *  由调用方组装（双链 target 原文 / 普通链接 linkHref / 面板直接目标
+ *  directFsPath±directAnchor）；Reading 锚点路径由 hoverPopupSpecOfAnchor 提取后
+ *  走同一入口 */
+export interface HoverPopupTargetSpec {
+  /** 目标原文（双链 `|` 前 target / 链接 href / 面板条目显示名——错误
+   *  分态文案的目标原文取材） */
+  target: string
+  /** 普通链接形态（宿主走 readHoverMdLinkTarget）；缺省 = 双链形态 */
+  linkHref?: string
+  /** 面板直接目标 fsPath（宿主直读不走文本解析）；空串 = 断链出链条目
+   *  （宿主回 not-found 分态） */
+  directFsPath?: string
+  /** 面板直接目标锚点（标题原文或 ^块id；缺省/空串 = 全文） */
+  directAnchor?: string
+  /** 父文档内引用区间（LF 偏移；面板反链条目的引用区间在来源文档而非
+   *  当前文档，给 0/0 中性值） */
+  sourceStart: number
+  sourceEnd: number
+}
+
+/** 从 Reading 锚点提取目标规格（href 原文 + 所在块源锚点；预滤口径见
+ *  isHoverableMdLinkHref——外部链接不开浮层）；非法目标返回 null。
+ *  #221 导出：键盘命令的 Reading 分支复用同一提取（聚焦链接 → spec） */
+export function hoverPopupSpecOfAnchor(anchor: HTMLElement): HoverPopupTargetSpec | null {
+  const target = anchor.getAttribute('href')
+  if (target === null) {
+    return null
+  }
+  if (!anchorIsWikilink(anchor) && !isHoverableMdLinkHref(target)) {
+    return null
+  }
+  const block = anchor.closest<HTMLElement>('[data-vsidian-src-start]')
+  const sourceStart = Number(block?.dataset['vsidianSrcStart'] ?? 0)
+  const sourceEnd = Number(block?.dataset['vsidianSrcEnd'] ?? sourceStart)
+  return {
+    target,
+    ...(anchorIsWikilink(anchor) ? {} : { linkHref: target }),
+    sourceStart: Number.isInteger(sourceStart) ? sourceStart : 0,
+    sourceEnd: Number.isInteger(sourceEnd) ? sourceEnd : sourceStart,
+  }
+}
+
 /** 出站上下文（syncController mount 注入；dispose 清空） */
 export interface HoverPreviewContext {
   /** 会话身份（init 前为 undefined——此时不开浮层） */
@@ -113,6 +171,8 @@ interface HoverPopupState {
   /** loading → content / error（结果只接受一次：陈旧回包丢弃） */
   display: 'loading' | 'content' | 'error'
   note: string
+  /** #221 目标原文（错误分态文案取材；三入口同源——不再读锚点 href） */
+  target: string
   /** #219 语义范围选择器探针：收到成功回包前为空串 */
   scope: 'full' | 'heading' | 'block' | ''
   /** #220 当前目标 fsPath（成功回包送达；B 身份图片/链接的 sourceDocUri） */
@@ -122,13 +182,17 @@ interface HoverPopupState {
   fmExpanded: boolean
   /** #220 B 身份资源管理器（成功回包时创建；关闭随实例 dispose） */
   bImages: ImageResourceManager | null
+  /** #221 键盘模态：命令手动打开（焦点进入浮层 + Esc 返还触发处） */
+  keyboardOpened: boolean
+  /** #221 键盘打开前的焦点元素（关闭时返还；body/脱树不返还） */
+  prevFocus: HTMLElement | null
   closeTimer: number | undefined
   cleanups: Array<() => void>
 }
 
 let context: HoverPreviewContext | null = null
 let popup: HoverPopupState | null = null
-let pendingOpen: { anchor: HTMLElement; timer: number } | null = null
+let pendingOpen: { anchor: HTMLElement; timer: number; spec?: HoverPopupTargetSpec } | null = null
 let instanceSeq = 0
 let reqSeq = 0
 
@@ -197,6 +261,12 @@ function scheduleClose(): void {
   if (!popup) {
     return
   }
+  // #221 键盘模态保活：焦点在浮层内部时不因鼠标离开（联合域 mouseleave
+  // 的延迟关闭源）而销毁键盘操作现场——规格「焦点在浮层内部时不能仅因
+  // 鼠标离开而销毁」；焦点离开浮层后恢复常规鼠标关闭语义
+  if (keyboardKeepAlive()) {
+    return
+  }
   cancelCloseTimer()
   popup.closeTimer = window.setTimeout(() => {
     if (popup) {
@@ -204,6 +274,12 @@ function scheduleClose(): void {
       closeHoverPopup()
     }
   }, HOVER_POPUP_CLOSE_DELAY_MS)
+}
+
+/** #221 键盘模态在场判定：命令手动打开且焦点在浮层内（Tab 遍历浮层内容
+ *  时同样成立——focus 落在浮层内任意后代） */
+function keyboardKeepAlive(): boolean {
+  return popup !== null && popup.keyboardOpened && popup.container.contains(document.activeElement)
 }
 
 /** 锚点与浮层联合域之外的指针位置判定（保活边界） */
@@ -291,20 +367,26 @@ function fmControllerOf(state: HoverPopupState): RefFmController {
   }
 }
 
-function openPopup(anchor: HTMLElement): void {
+/** #221 打开选项：键盘模态（命令手动打开——焦点进入浮层，关闭返还） */
+interface HoverPopupOpenOptions {
+  keyboard?: boolean
+  prevFocus?: HTMLElement | null
+}
+
+/** 打开浮层（三入口共用核心）：目标规格由调用方给出——Reading 锚点路径
+ *  经 hoverPopupSpecOfAnchor 提取，Live 装饰/面板条目由 syncController 组装（见
+ *  HoverPopupTargetSpec）。非法目标（null spec）不开 */
+function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, options?: HoverPopupOpenOptions): void {
   const session = context?.session()
-  const target = anchor.getAttribute('href')
-  if (!context || !session?.sessionId || !session.docUri || target === null) {
-    return
-  }
-  // #219 普通链接预滤：外部网页与空 href 不开浮层（宿主侧复核兜底）；
-  // 双链不经此判定
-  if (!anchorIsWikilink(anchor) && !isHoverableMdLinkHref(target)) {
+  if (!context || !session?.sessionId || !session.docUri || spec === null) {
     return
   }
   closeHoverPopup()
   const container = document.createElement('div')
   container.className = HOVER_POPUP_CLASS_NAMES.popup
+  // #221 可编程聚焦锚（键盘模态 focus 进浮层；tabIndex=-1 不进 Tab 序，
+  // 鼠标路径不受影响）
+  container.tabIndex = -1
   const stateEl = document.createElement('div')
   stateEl.className = HOVER_POPUP_CLASS_NAMES.state
   const scrollEl = document.createElement('div')
@@ -321,11 +403,6 @@ function openPopup(anchor: HTMLElement): void {
 
   const instanceId = `hover-${++instanceSeq}`
   const reqId = ++reqSeq
-  // 父引用区间：锚点所在阅读块的源锚点（与点击委托同款取值）
-  const block = anchor.closest<HTMLElement>('[data-vsidian-src-start]')
-  const sourceStart = Number(block?.dataset['vsidianSrcStart'] ?? 0)
-  const sourceEnd = Number(block?.dataset['vsidianSrcEnd'] ?? sourceStart)
-
   // 钩子闭包经 stateRef 延迟取值（构造后立即赋值；挂载钩子只会在
   // setDocument 之后触发，无空窗）
   let stateRef: HoverPopupState
@@ -344,10 +421,13 @@ function openPopup(anchor: HTMLElement): void {
     view,
     display: 'loading',
     note: '',
+    target: spec.target,
     scope: '',
     targetFsPath: '',
     fmExpanded: false,
     bImages: null,
+    keyboardOpened: options?.keyboard === true,
+    prevFocus: options?.prevFocus ?? null,
     closeTimer: undefined,
     cleanups: [],
   }
@@ -356,6 +436,10 @@ function openPopup(anchor: HTMLElement): void {
   claimPopup(closeHoverPopup)
   applyDisplay(state, 'loading', t('hover.loading'))
   position(state)
+  if (state.keyboardOpened) {
+    // 键盘打开：焦点进入浮层（Esc 关闭后返还 prevFocus——见 closeHoverPopup）
+    container.focus()
+  }
 
   // #220 浮层内链接点击：B 内双链/普通链接/外链经既有 open 通道（附
   // sourceDocUri，宿主按 B 解析与分类）——preventDefault 阻断 webview
@@ -395,8 +479,8 @@ function openPopup(anchor: HTMLElement): void {
     closeHoverPopup()
   })
 
-  // 键盘：Esc 关闭（捕获阶段拦截，不外溢宿主键绑定）；键盘打开浮层属
-  // #221——当前路径零抢焦点，Esc 是唯一的键盘出口
+  // 键盘：Esc 关闭（捕获阶段拦截，不外溢宿主键绑定；关闭时键盘模态返还
+  // 触发处焦点——见 closeHoverPopup）
   const onKeydown = (event: KeyboardEvent): void => {
     if (event.key === 'Escape') {
       event.stopPropagation()
@@ -406,7 +490,8 @@ function openPopup(anchor: HTMLElement): void {
   document.addEventListener('keydown', onKeydown, true)
   state.cleanups.push(() => document.removeEventListener('keydown', onKeydown, true))
 
-  // 移入保活 / 移出延迟关闭（联合域 = 锚点 ∪ 浮层）
+  // 移入保活 / 移出延迟关闭（联合域 = 锚点 ∪ 浮层；键盘模态的保活豁免
+  // 在 scheduleClose 内判定——焦点在浮层内时鼠标离开不销毁键盘现场）
   container.addEventListener('mouseenter', () => cancelCloseTimer())
   container.addEventListener('mouseleave', () => scheduleClose())
   // 联合域内的指针按下不关闭（选字复制起点）；域外按下立即关（点击别处
@@ -419,9 +504,11 @@ function openPopup(anchor: HTMLElement): void {
   document.addEventListener('pointerdown', onPointerDown, true)
   state.cleanups.push(() => document.removeEventListener('pointerdown', onPointerDown, true))
 
-  // 父容器滚动：锚点视口位置失效，立即关闭（浮层自身滚动区在联合域内不受影响）
+  // 父容器滚动：锚点视口位置失效，立即关闭（浮层自身滚动区在联合域内不受影响）；
+  // #221 键盘模态且焦点在浮层内时豁免——Tab 遍历浮层内容触发的程序性滚动
+  // 不得销毁键盘操作现场（#220 已知张力的调整）
   const onScroll = (event: Event): void => {
-    if (popup && event.target instanceof Node && !popup.container.contains(event.target)) {
+    if (popup && event.target instanceof Node && !popup.container.contains(event.target) && !keyboardKeepAlive()) {
       closeHoverPopup()
     }
   }
@@ -447,24 +534,48 @@ function openPopup(anchor: HTMLElement): void {
   }
 
   // 出站读取请求（只读消息：不进 edit.request 通道）。#219 普通链接形态
-  // 附 linkHref（宿主走 readHoverMdLinkTarget）；target 恒为 href 原文
-  //（双链即 `|` 前原文，链接即 href——错误分态文案的目标原文来源）
+  // 附 linkHref（宿主走 readHoverMdLinkTarget）；#221 面板直接目标附
+  // directTarget（宿主直读）；target 恒为目标原文（双链即 `|` 前原文，
+  // 链接即 href，面板条目即显示名——错误分态文案的目标原文来源）
   context.send({
     kind: 'hover.request',
     sessionId: session.sessionId,
     docUri: session.docUri,
     reqId,
     instanceId,
-    sourceStart: Number.isInteger(sourceStart) ? sourceStart : 0,
-    sourceEnd: Number.isInteger(sourceEnd) ? sourceEnd : sourceStart,
-    target,
-    ...(anchorIsWikilink(anchor) ? {} : { linkHref: target }),
+    sourceStart: spec.sourceStart,
+    sourceEnd: spec.sourceEnd,
+    target: spec.target,
+    ...(spec.linkHref !== undefined ? { linkHref: spec.linkHref } : {}),
+    ...(spec.directFsPath !== undefined
+      ? {
+          directTarget: {
+            fsPath: spec.directFsPath,
+            ...(spec.directAnchor ? { anchor: spec.directAnchor } : {}),
+          },
+        }
+      : {}),
   })
 }
 
-/** 进入链接（Reading 容器 mouseover 委托转发）：同锚点重入取消待关；
- *  换锚点先关旧再延迟开新 */
-export function hoverPreviewAnchorEnter(anchor: HTMLElement): void {
+/** #221 显式目标入口（Live 装饰 / 面板条目 / 键盘命令共用）：目标形态由
+ *  调用方组装（普通链接的外部 scheme 预滤由调用方用 isHoverableMdLinkHref
+ *  判定——与 Reading 路径同口径） */
+export function openHoverPopupFor(anchor: HTMLElement, spec: HoverPopupTargetSpec): void {
+  openPopup(anchor, spec)
+}
+
+/** #221 键盘命令入口（「预览当前链接」的手动打开）：记录触发处焦点，
+ *  打开后焦点进入浮层；Esc 关闭后返还（body/脱树不返还） */
+export function openHoverPopupForKeyboard(anchor: HTMLElement, spec: HoverPopupTargetSpec): void {
+  const prev = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  openPopup(anchor, spec, { keyboard: true, prevFocus: prev })
+}
+
+/** 进入链接（Reading 容器 mouseover 委托转发；#221 Live 悬停同入口——
+ *  装饰 DOM 无 href，spec 由调用方组装传入）：同锚点重入取消待关；换
+ *  锚点先关旧再延迟开新 */
+export function hoverPreviewAnchorEnter(anchor: HTMLElement, spec?: HoverPopupTargetSpec): void {
   if (popup && popup.anchor === anchor) {
     cancelCloseTimer()
     return
@@ -475,9 +586,9 @@ export function hoverPreviewAnchorEnter(anchor: HTMLElement): void {
   }
   const timer = window.setTimeout(() => {
     pendingOpen = null
-    openPopup(anchor)
+    openPopup(anchor, spec ?? hoverPopupSpecOfAnchor(anchor))
   }, HOVER_POPUP_OPEN_DELAY_MS)
-  pendingOpen = { anchor, timer }
+  pendingOpen = { anchor, timer, spec }
 }
 
 /** 离开链接（Reading 容器 mouseout 委托转发；联合域内的移动由调用方过滤） */
@@ -490,7 +601,9 @@ export function hoverPreviewAnchorLeave(anchor: HTMLElement): void {
   }
 }
 
-/** 关闭并释放实例（显式关闭 / 上下文失效 / dispose 路径共用；幂等） */
+/** 关闭并释放实例（显式关闭 / 上下文失效 / dispose 路径共用；幂等）。
+ *  #221 键盘模态：关闭后返还触发处焦点（prevFocus 脱树或 body 不返还——
+ *  程序化打开时无真实先前焦点可回） */
 export function closeHoverPopup(): void {
   cancelPendingOpen()
   const state = popup
@@ -508,6 +621,18 @@ export function closeHoverPopup(): void {
   state.bImages?.dispose() // #220 B 管理器随实例释放（兜底；槽位已随块卸载释放）
   state.container.remove()
   releasePopup(closeHoverPopup)
+  if (state.keyboardOpened && state.prevFocus !== null && state.prevFocus.isConnected) {
+    state.prevFocus.focus()
+  }
+}
+
+/** #221 触发上下文失效的域释放（面板重渲染 replaceChildren / 面板隐藏 /
+ *  切面板）：在场浮层的锚点落在失效域内即释放实例；域外浮层不动。面板
+ *  条目 DOM 重建不派发 mouseout，依赖此处显式释放 */
+export function closeHoverPopupIfAnchorWithin(scope: ParentNode): void {
+  if (popup && scope.contains(popup.anchor)) {
+    closeHoverPopup()
+  }
 }
 
 /** #220 内容应用（成功回包 / 同实例刷新共用入口）：**不重置 fmExpanded**
@@ -541,7 +666,8 @@ export function notifyHoverResult(message: HoverPreviewResult): void {
   if (message.ok) {
     applyHoverContent(popup, message)
   } else {
-    applyDisplay(popup, 'error', refErrorText(message.reason, popup.anchor.getAttribute('href') ?? '', message.anchor))
+    // #221 目标原文取 state（三入口同源——面板条目/Live 装饰无 href 属性）
+    applyDisplay(popup, 'error', refErrorText(message.reason, popup.target, message.anchor))
   }
   position(popup)
 }

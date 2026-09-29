@@ -93,6 +93,9 @@ export const en = {
   /** #222 embed card height cap (reading-view embeds scroll internally past it) */
   'setting.embedMaxHeight.title': 'Embedded note max height',
   'setting.embedMaxHeight.description': 'Maximum height of the reading-view embed card content area: shorter notes keep their natural height while longer content scrolls inside the card up to this limit.',
+  /** #221 Live hover trigger (Ctrl+hover vs direct hover) */
+  'setting.hoverLiveDirect.title': 'Hover links directly in live preview',
+  'setting.hoverLiveDirect.description': 'Open the hover preview by just pointing at a link in the live preview. When off, hold Ctrl (Cmd on macOS) while hovering; the reading view and the link panels always preview directly.',
   'setting.codeblockCard.title': 'Code block card',
   'setting.codeblockCard.description': 'Collapse a fenced code block into a card when the cursor leaves it: hide the fence markers and show a language header bar. Turn off to restore the plain source fence look.',
   'setting.codeblockLineNumbers.title': 'Line numbers inside cards',
@@ -572,6 +575,8 @@ export const en = {
   'command.ui.outlinksToggle.title': 'Show or hide the outgoing links panel',
   /** #208 refresh embedded resources command (toolbar button and keybinding/command palette share it) */
   'command.editor.refresh.title': 'Refresh embedded resources',
+  /** #221 preview the link at the cursor/focus (manual hover-popup open; keyboard enters the popup and Esc returns) */
+  'command.ui.hoverPreviewLink.title': 'Preview the current link',
 
   // ---- #159 锚点跳转（块引用定位与本文件锚点）----
   /** 块 id 缺失提示（与标题缺失同款「打开后提示」行为） */

@@ -256,6 +256,17 @@ export type ImagePasteLocationMode = (typeof IMAGE_PASTE_LOCATION_MODES)[number]
 export const IMAGE_PASTE_LOCATION_DEFAULT: ImagePasteLocationMode = 'same-dir'
 
 /**
+ * #221「Live 直接悬停」开关：Live 正文中悬停双链/普通 Markdown 链接的
+ * 触发条件——关闭（默认）需按住 Ctrl/Cmd 再悬停（防编辑途中指针扫过链接
+ * 误开浮层），开启后无需修饰键直接悬停（与 Reading/面板一致的触发口
+ * 径）。Reading 与反链/出链面板不受本开关影响（恒直接悬停）。键与消费
+ * 方（syncController 的 Live mouseover 委托守卫）成对导出。
+ */
+export const HOVER_LIVE_DIRECT_KEY = 'hover.liveDirect'
+/** 默认 false：Live 默认 Ctrl+悬停（规格一期口径） */
+export const HOVER_LIVE_DIRECT_DEFAULT = false
+
+/**
  * #161 图片存放子路径（自由文本，默认 assets）：workspace-root /
  * relative-to-file 模式下拼在根后；same-dir 模式不生效（描述文案写明）。
  * 目录解析拒绝绝对路径与 `..` 越界（违规粘贴失败通知，不落盘）。
@@ -411,6 +422,15 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     titleKey: 'setting.embedMaxHeight.title',
     descriptionKey: 'setting.embedMaxHeight.description',
     unit: 'px',
+  },
+  {
+    // #221 Live 直接悬停（hover.* 域 → 编辑器页「显示」组：与 embed.*
+    // 同由 displayDefs 收纳）
+    key: HOVER_LIVE_DIRECT_KEY,
+    type: 'boolean',
+    default: HOVER_LIVE_DIRECT_DEFAULT,
+    titleKey: 'setting.hoverLiveDirect.title',
+    descriptionKey: 'setting.hoverLiveDirect.description',
   },
 ]
 

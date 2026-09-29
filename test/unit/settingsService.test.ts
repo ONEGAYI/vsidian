@@ -43,7 +43,7 @@ function makeStorage(writes: Array<{ key: string; value: unknown }> = []): Setti
 }
 
 describe('快照读取', () => {
-  it('生产注册表（#34 起）：快照为定义默认值（七开关均开 + 语言 auto + 可读行宽 0 + 嵌入限高 480）', () => {
+  it('生产注册表（#34 起）：快照为定义默认值（七开关均开 + 语言 auto + 可读行宽 0 + 嵌入限高 480 + Live 直接悬停关）', () => {
     const svc = new SettingsService(makeStorage(), PRODUCTION_SETTING_DEFINITIONS)
     expect(svc.getSnapshot()).toEqual({
       'general.language': 'auto',
@@ -62,6 +62,8 @@ describe('快照读取', () => {
       'editor.readableLineWidth': 0,
       // #222 嵌入限高（Reading 嵌入卡片内容滚动区上限）
       'embed.maxHeight': 480,
+      // #221 Live 直接悬停（默认关 = Ctrl+悬停）
+      'hover.liveDirect': false,
     })
   })
 

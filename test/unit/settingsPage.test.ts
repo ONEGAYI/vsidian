@@ -434,6 +434,8 @@ describe('分组重组二轮还原（#163 验收反馈：侧栏只留常规/编�
         zhCn['setting.readableLineWidth.title'],
         // #222 嵌入限高（embed.* 域落显示组）
         zhCn['setting.embedMaxHeight.title'],
+        // #221 Live 直接悬停（hover.* 域落显示组）
+        zhCn['setting.hoverLiveDirect.title'],
       ])
     expect(groupItemTitles(parent, zhCn['settings.groupSymbols'])).toEqual([
       zhCn['setting.symbolAutocomplete.title'],

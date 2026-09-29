@@ -11,6 +11,7 @@ import { installLocale } from '../../src/shared/i18n'
 import { zhCn } from '../../src/shared/locales/zh-cn'
 import {
   closeHoverPopup,
+  closeHoverPopupIfAnchorWithin,
   hoverPopupProbe,
   hoverPreviewAnchorEnter,
   hoverPreviewAnchorLeave,
@@ -19,6 +20,8 @@ import {
   notifyHoverImageInvalidate,
   notifyHoverImageResult,
   notifyHoverResult,
+  openHoverPopupFor,
+  openHoverPopupForKeyboard,
   setHoverPreviewContext,
   __resetHoverPopupForTest,
   HOVER_POPUP_CLOSE_DELAY_MS,
@@ -729,4 +732,148 @@ describe('#220 来源资源与浮层内容（B 身份）', () => {
     }
     return found
   }
+})
+
+// #221 全入口悬停：显式目标入口（Live 装饰 DOM / 面板条目无 href 属性，
+// 目标形态由调用方组装——openHoverPopupFor）与键盘模态（手动打开、焦点
+// 进入浮层、Esc 返还触发处、焦点在内不因鼠标离开销毁）；面板/切模式等
+// 触发上下文失效的锚点域释放。
+describe('#221 显式目标入口与键盘模态', () => {
+  /** 非 <a> 锚元素（Live 装饰 span / 面板条目同构）：目标经 spec 显式给出 */
+  function makeSpanHarness(): { sent: WebviewToHost[]; anchor: HTMLSpanElement } {
+    const sent: WebviewToHost[] = []
+    setHoverPreviewContext({
+      session: () => SESSION,
+      send: (message) => {
+        sent.push(message)
+      },
+      codeHighlight: () => true,
+    })
+    const anchor = document.createElement('span')
+    anchor.className = 'vsidian-wikilink'
+    document.body.appendChild(anchor)
+    return { sent, anchor }
+  }
+
+  it('openHoverPopupFor：非 <a> 锚元素按 spec 发请求（双链形态：target 原文 + 源区间）', () => {
+    const h = makeSpanHarness()
+    openHoverPopupFor(h.anchor, { target: '目标笔记', sourceStart: 12, sourceEnd: 24 })
+    expect(isHoverPopupOpen()).toBe(true)
+    const req = h.sent.find((m) => m.kind === 'hover.request')
+    if (!req || req.kind !== 'hover.request') {
+      throw new Error('hover.request 未发出')
+    }
+    expect(req.target).toBe('目标笔记')
+    expect(req.sourceStart).toBe(12)
+    expect(req.sourceEnd).toBe(24)
+    expect(req.linkHref).toBeUndefined()
+    expect(req.directTarget).toBeUndefined()
+  })
+
+  it('openHoverPopupFor：普通链接形态附 linkHref；面板直接目标附 directTarget（断链空串合法）', () => {
+    const md = makeSpanHarness()
+    openHoverPopupFor(md.anchor, { target: '目标笔记.md', linkHref: '目标笔记.md#章节', sourceStart: 0, sourceEnd: 5 })
+    const mdReq = md.sent.find((m) => m.kind === 'hover.request')
+    if (!mdReq || mdReq.kind !== 'hover.request') {
+      throw new Error('md hover.request 未发出')
+    }
+    expect(mdReq.linkHref).toBe('目标笔记.md#章节')
+    closeHoverPopup()
+
+    const panel = makeSpanHarness()
+    openHoverPopupFor(panel.anchor, {
+      target: '出链显示名',
+      sourceStart: 0,
+      sourceEnd: 0,
+      directFsPath: 'D:\notes\目标.md',
+      directAnchor: '^blk1',
+    })
+    const req = panel.sent.find((m) => m.kind === 'hover.request')
+    if (!req || req.kind !== 'hover.request') {
+      throw new Error('panel hover.request 未发出')
+    }
+    expect(req.directTarget).toEqual({ fsPath: 'D:\notes\目标.md', anchor: '^blk1' })
+    closeHoverPopup()
+
+    // 断链出链条目：空串 fsPath 仍入队（宿主回 not-found 分态）
+    const broken = makeSpanHarness()
+    openHoverPopupFor(broken.anchor, { target: '断链名', sourceStart: 0, sourceEnd: 0, directFsPath: '' })
+    const brokenReq = broken.sent.find((m) => m.kind === 'hover.request')
+    if (!brokenReq || brokenReq.kind !== 'hover.request') {
+      throw new Error('broken hover.request 未发出')
+    }
+    expect(brokenReq.directTarget).toEqual({ fsPath: '' })
+  })
+
+  it('错误分态文案取 spec.target（不依赖锚元素 href 属性）', async () => {
+    const h = makeSpanHarness()
+    openHoverPopupFor(h.anchor, { target: '显示名', sourceStart: 0, sourceEnd: 0, directFsPath: '' })
+    const req = h.sent.find((m) => m.kind === 'hover.request')
+    if (!req || req.kind !== 'hover.request') {
+      throw new Error('hover.request 未发出')
+    }
+    notifyHoverResult({ kind: 'hover.result', reqId: req.reqId, instanceId: req.instanceId, ok: false, reason: 'not-found' })
+    const el = popupEl()!
+    const stateEl = el.querySelector<HTMLElement>('.vsidian-hover-popup-state')!
+    expect(stateEl.textContent).toContain('显示名')
+  })
+
+  it('键盘打开：焦点进入浮层（可 Tab 遍历）；Esc 关闭后返还触发处焦点', () => {
+    vi.useFakeTimers()
+    const h = makeSpanHarness()
+    // 触发元素：面板条目同构 button（键盘命令的真实触发形态）
+    const trigger = document.createElement('button')
+    document.body.appendChild(trigger)
+    trigger.focus()
+    expect(document.activeElement).toBe(trigger)
+    openHoverPopupForKeyboard(h.anchor, { target: '目标笔记', sourceStart: 0, sourceEnd: 8 })
+    expect(isHoverPopupOpen()).toBe(true)
+    const el = popupEl()!
+    expect(document.activeElement, '焦点进入浮层').toBe(el)
+    // Esc 关闭：焦点返还触发元素
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(isHoverPopupOpen()).toBe(false)
+    expect(document.activeElement, 'Esc 后返还触发处').toBe(trigger)
+    vi.useRealTimers()
+  })
+
+  it('键盘模态保活：焦点在浮层内时，离开链接（鼠标路径的延迟关闭源）不销毁现场', () => {
+    vi.useFakeTimers()
+    const h = makeSpanHarness()
+    const trigger = document.createElement('button')
+    document.body.appendChild(trigger)
+    trigger.focus()
+    openHoverPopupForKeyboard(h.anchor, { target: '目标笔记', sourceStart: 0, sourceEnd: 8 })
+    const el = popupEl()!
+    // 鼠标离开链接与浮层（mouseleave → scheduleClose）：焦点在内不关闭
+    el.dispatchEvent(new MouseEvent('mouseleave', { bubbles: false }))
+    vi.advanceTimersByTime(HOVER_POPUP_CLOSE_DELAY_MS * 5)
+    expect(isHoverPopupOpen(), '键盘模态焦点在内：鼠标离开不销毁').toBe(true)
+    // 焦点离开浮层（Tab 出去）后：恢复常规鼠标关闭语义
+    trigger.focus()
+    el.dispatchEvent(new MouseEvent('mouseleave', { bubbles: false }))
+    vi.advanceTimersByTime(HOVER_POPUP_CLOSE_DELAY_MS)
+    expect(isHoverPopupOpen(), '焦点已不在浮层内：恢复延迟关闭').toBe(false)
+    vi.useRealTimers()
+  })
+
+  it('鼠标路径不抢焦点的既有契约不变（openHoverPopupFor 无键盘标记）', () => {
+    const h = makeSpanHarness()
+    const before = document.activeElement
+    openHoverPopupFor(h.anchor, { target: '目标笔记', sourceStart: 0, sourceEnd: 8 })
+    expect(document.activeElement, '鼠标路径零抢焦点').toBe(before)
+    expect(popupEl()!.tabIndex, '容器可编程聚焦但不进 Tab 序').toBe(-1)
+    closeHoverPopup()
+  })
+
+  it('closeHoverPopupIfAnchorWithin：锚点在失效域内（面板重渲染/面板隐藏）释放；域外保留', () => {
+    const h = makeSpanHarness()
+    const panelScope = h.anchor.parentElement!
+    openHoverPopupFor(h.anchor, { target: '目标笔记', sourceStart: 0, sourceEnd: 8 })
+    expect(isHoverPopupOpen()).toBe(true)
+    closeHoverPopupIfAnchorWithin(document.createElement('div'))
+    expect(isHoverPopupOpen(), '域外不动在场浮层').toBe(true)
+    closeHoverPopupIfAnchorWithin(panelScope)
+    expect(isHoverPopupOpen(), '锚点所在域失效即释放').toBe(false)
+  })
 })

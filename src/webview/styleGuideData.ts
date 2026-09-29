@@ -3461,11 +3461,12 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "hover-preview",
     "kind": "selector",
     "target": ".vsidian-hover-popup（浮层容器；内含 .vsidian-hover-popup-scroll 内容滚动区（承载只读 Reading 容器）与 .vsidian-hover-popup-state 就地状态行（loading/错误分态））",
-    "purpose": "悬停文档预览浮层（#218 一期首条闭环）：父文档 Reading 中悬停指向 Markdown 的双链/本地链接，经文档访问通道读取目标后以只读 Reading 内容显示。默认宽 480px / 最大高 400px（小视口由 JS 几何计划四边翻转并收缩钳制）；内容只读——任务 checkbox 禁用（JS disabled + pointer-events 双保险），无任何写回通道。#220 起浮层内为目标文档（B）的 Reading 内容：图片以 B 为来源解析（sourceDocUri 通道）、链接可点击跳转、代码块朴素高亮。",
+    "purpose": "悬停文档预览浮层（#218 一期首条闭环）：父文档 Reading 中悬停指向 Markdown 的双链/本地链接，经文档访问通道读取目标后以只读 Reading 内容显示。#221 全入口：Live 正文（默认 Ctrl+悬停，设置 hover.liveDirect 开启后直接悬停）与反链/出链面板条目（直接悬停）共用同一浮层。默认宽 480px / 最大高 400px（小视口由 JS 几何计划四边翻转并收缩钳制）；内容只读——任务 checkbox 禁用（JS disabled + pointer-events 双保险），无任何写回通道。#220 起浮层内为目标文档（B）的 Reading 内容：图片以 B 为来源解析（sourceDocUri 通道）、链接可点击跳转、代码块朴素高亮。",
     "views": [
+      "live",
       "reading"
     ],
-    "states": "交互态浮层（悬停延迟打开期间挂载、离开联合域延迟关闭/Esc/父容器滚动/切模式撤下）——容器本体不进静态探针，开闭、保活与绘制由浏览器 hoverPreview 套件按行为路径验证；样式入口（单类低特异性）公开供片段覆写。",
+    "states": "交互态浮层（悬停延迟打开期间挂载、离开联合域延迟关闭/Esc/父容器滚动/切模式撤下；#221 键盘命令打开时焦点进入浮层，:focus-visible 轮廓指示，焦点在内不因鼠标离开销毁）——容器本体不进静态探针，开闭、保活与绘制由浏览器 hoverPreview / hoverEntry 套件按行为路径验证；样式入口（单类低特异性）公开供片段覆写。",
     "dom": "#220 起直挂 #app 内（此前挂 body；fixed 定位不受 #app 布局影响）——#app 的主题变量与 `#app .vsidian-view-reading …` 正文样式、已启用 CSS 片段（容器类含 .markdown-preview-view 别名桥）随之天然命中，不为浮层复制第二套主题环境。内部 Reading 容器挂 .vsidian-view-reading。",
     "example": ".vsidian-hover-popup {\n  width: 480px;\n  max-height: 400px;\n}",
     "obsidian": {
@@ -4604,8 +4605,8 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "hover-popup": {
-    "purpose": "The hover document preview popup (first closing loop of phase one, #218): hover a wikilink or local Markdown link in the parent reading view, and the target is read through the document-access channel and shown as read-only reading content. Default width 480px / max height 400px (in small viewports a JS geometry plan flips at the four edges and shrinks to fit); the content is read-only — task checkboxes are disabled (JS disabled + pointer-events double safety), with no write-back channel at all. Since #220 the popup carries the target document (B) as reading content: images resolve relative to B (the sourceDocUri channel), links are clickable for navigation, and code blocks get plain syntax highlighting.",
-    "states": "An interaction-state floating layer (mounted after the hover open delay, dismissed by leaving the joint anchor/popup domain after a close delay, Esc, parent scroll, or mode switch) — the container itself is not part of the static probes; open/close, keep-alive and painting are verified behaviorally by the browser hoverPreview suite; the style entry point (a single low-specificity class) is public for snippet overrides.",
+    "purpose": "The hover document preview popup (first closing loop of phase one, #218): hover a wikilink or local Markdown link in the parent reading view, and the target is read through the document-access channel and shown as read-only reading content. Since #221 the same popup serves all entry points: the live-preview body (Ctrl+hover by default, direct hover once the hover.liveDirect setting is on) and backlink/outgoing-link panel entries (direct hover). Default width 480px / max height 400px (in small viewports a JS geometry plan flips at the four edges and shrinks to fit); the content is read-only — task checkboxes are disabled (JS disabled + pointer-events double safety), with no write-back channel at all. Since #220 the popup carries the target document (B) as reading content: images resolve relative to B (the sourceDocUri channel), links are clickable for navigation, and code blocks get plain syntax highlighting.",
+    "states": "An interaction-state floating layer (mounted after the hover open delay, dismissed by leaving the joint anchor/popup domain after a close delay, Esc, parent scroll, or mode switch; since #221 a keyboard-command open moves focus into the popup with a :focus-visible outline, and while focus stays inside the popup it is not dismissed by the mouse leaving) — the container itself is not part of the static probes; open/close, keep-alive and painting are verified behaviorally by the browser hoverPreview / hoverEntry suites; the style entry point (a single low-specificity class) is public for snippet overrides.",
     "dom": "Since #220 attached directly inside #app (previously on body; fixed positioning is unaffected by the #app layout) — the #app theme variables, the `#app .vsidian-view-reading …` content styles, and enabled CSS snippets (the container class carries the .markdown-preview-view alias bridge) therefore match naturally, without duplicating a second theme environment for the popup. The inner reading container carries .vsidian-view-reading.",
     "obsidian": {
       "counterpart": ".hover-popover (the Obsidian page-preview popover direction; the internal structure is closed-source and not promised)"

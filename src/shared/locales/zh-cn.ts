@@ -78,6 +78,9 @@ export const zhCn: Record<MessageKey, string> = {
   /** #222 嵌入卡片限高（阅读模式嵌入内容超出后内部滚动） */
   'setting.embedMaxHeight.title': '嵌入内容最大高度',
   'setting.embedMaxHeight.description': '阅读模式嵌入卡片内容区的最大高度：较短笔记保持自然高度，超出该值的内容在卡片内部滚动。',
+  /** #221 Live 悬停触发方式（Ctrl+悬停 vs 直接悬停） */
+  'setting.hoverLiveDirect.title': '实时预览中直接悬停链接',
+  'setting.hoverLiveDirect.description': '开启后在实时预览中指针悬停链接即可打开预览浮层；关闭时需按住 Ctrl（macOS 为 Cmd）再悬停。阅读模式与反链/出链面板不受影响，始终直接悬停。',
   'setting.codeblockCard.title': '代码块卡片',
   'setting.codeblockCard.description': '围栏代码块在光标离开时收起为卡片：隐藏围栏标记，显示语言头部横带。关闭后回到朴素源码围栏外观。',
   'setting.codeblockLineNumbers.title': '卡内行号',
@@ -533,6 +536,8 @@ export const zhCn: Record<MessageKey, string> = {
   'command.ui.outlinksToggle.title': '显示或隐藏出链面板',
   /** #208 刷新嵌入资源命令（工具栏按钮与快捷键/命令面板共用） */
   'command.editor.refresh.title': '刷新嵌入资源',
+  /** #221 预览当前链接（手动打开悬停浮层：键盘进入浮层、Esc 返回触发处） */
+  'command.ui.hoverPreviewLink.title': '预览当前链接',
 
   // ---- #159 锚点跳转（块引用定位与本文件锚点）----
   /** 块 id 缺失提示（与标题缺失同款「打开后提示」行为） */

@@ -2045,9 +2045,9 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     <h2>界面域 · 悬停预览（2）</h2>
     <article class="entry" id="hover-popup">
       <h3><code>.vsidian-hover-popup（浮层容器；内含 .vsidian-hover-popup-scroll 内容滚动区（承载只读 Reading 容器）与 .vsidian-hover-popup-state 就地状态行（loading/错误分态））</code><span class="eid">hover-popup</span></h3>
-      <p class="purpose">悬停文档预览浮层（#218 一期首条闭环）：父文档 Reading 中悬停指向 Markdown 的双链/本地链接，经文档访问通道读取目标后以只读 Reading 内容显示。默认宽 480px / 最大高 400px（小视口由 JS 几何计划四边翻转并收缩钳制）；内容只读——任务 checkbox 禁用（JS disabled + pointer-events 双保险），无任何写回通道。#220 起浮层内为目标文档（B）的 Reading 内容：图片以 B 为来源解析（sourceDocUri 通道）、链接可点击跳转、代码块朴素高亮。</p>
-      <p class="views"><span class="badge">阅读</span> <span class="support support-none">none</span></p>
-<p class="states">状态：交互态浮层（悬停延迟打开期间挂载、离开联合域延迟关闭/Esc/父容器滚动/切模式撤下）——容器本体不进静态探针，开闭、保活与绘制由浏览器 hoverPreview 套件按行为路径验证；样式入口（单类低特异性）公开供片段覆写。</p>
+      <p class="purpose">悬停文档预览浮层（#218 一期首条闭环）：父文档 Reading 中悬停指向 Markdown 的双链/本地链接，经文档访问通道读取目标后以只读 Reading 内容显示。#221 全入口：Live 正文（默认 Ctrl+悬停，设置 hover.liveDirect 开启后直接悬停）与反链/出链面板条目（直接悬停）共用同一浮层。默认宽 480px / 最大高 400px（小视口由 JS 几何计划四边翻转并收缩钳制）；内容只读——任务 checkbox 禁用（JS disabled + pointer-events 双保险），无任何写回通道。#220 起浮层内为目标文档（B）的 Reading 内容：图片以 B 为来源解析（sourceDocUri 通道）、链接可点击跳转、代码块朴素高亮。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+<p class="states">状态：交互态浮层（悬停延迟打开期间挂载、离开联合域延迟关闭/Esc/父容器滚动/切模式撤下；#221 键盘命令打开时焦点进入浮层，:focus-visible 轮廓指示，焦点在内不因鼠标离开销毁）——容器本体不进静态探针，开闭、保活与绘制由浏览器 hoverPreview / hoverEntry 套件按行为路径验证；样式入口（单类低特异性）公开供片段覆写。</p>
       <p class="obsidian">Obsidian 对应：.hover-popover（Obsidian 页面预览浮层方向；内部结构闭源不作承诺）</p>
 
       <p class="dom">DOM 关系：#220 起直挂 #app 内（此前挂 body；fixed 定位不受 #app 布局影响）——#app 的主题变量与 `#app .vsidian-view-reading …` 正文样式、已启用 CSS 片段（容器类含 .markdown-preview-view 别名桥）随之天然命中，不为浮层复制第二套主题环境。内部 Reading 容器挂 .vsidian-view-reading。</p>

@@ -41,6 +41,7 @@ import { CODE_CARD_CLASS_NAMES, codeCardConfigFacet, codeCardCopyRequest, codeCa
 import { decorateReadingCodeCard, isReadingCodeBlock, READING_CODE_NOWRAP_CLASS } from './readingCodeCard'
 import {
   isHostToWebview,
+  type BacklinkItemPayload,
   type BacklinksProbe,
   type CssProbeReport,
   type FindSessionProbe,
@@ -49,6 +50,7 @@ import {
   type LineGutterProbe,
   type LiveSyntaxProbe,
   type OutlineProbe,
+  type OutlinkItemPayload,
   type OutlinksProbe,
   type PaintProbe,
   type ReadingSyntaxProbe,
@@ -78,6 +80,7 @@ import {
   EMBED_MAX_HEIGHT_KEY,
   EMBED_MAX_HEIGHT_MAX,
   EMBED_MAX_HEIGHT_MIN,
+  HOVER_LIVE_DIRECT_KEY,
   SHOW_LINE_NUMBERS_DEFAULT,
   SHOW_LINE_NUMBERS_KEY,
   SYMBOL_AUTOCOMPLETE_DEFAULT,
@@ -100,7 +103,7 @@ import {
   type FindMatch,
 } from './findSession'
 import { liveDecorationsField, livePreviewDecorations, LIVE_CLASS_NAMES, tableCompositionSettled, TaskCheckboxWidget } from './liveDecorations'
-import { createLinkInteractions, WIKILINK_CLASS_NAMES } from './liveLinks'
+import { createLinkInteractions, LINK_CLASS_NAMES, WIKILINK_CLASS_NAMES, activateLinkAtPos, activateLooseLinkAtPos, activateWikilinkAtPos } from './liveLinks'
 import { liveMath } from './liveMath'
 import { MATH_CLASS_NAMES } from '../shared/math'
 import { liveMermaid } from './liveMermaid'
@@ -129,16 +132,21 @@ import {
 } from './imagePopup'
 import {
   closeHoverPopup,
+  closeHoverPopupIfAnchorWithin,
   hoverPopupProbe,
+  hoverPopupSpecOfAnchor,
   hoverPreviewAnchorEnter,
   hoverPreviewAnchorLeave,
   invalidateHoverPopupImages,
+  isHoverableMdLinkHref,
   notifyHoverImageInvalidate,
   notifyHoverImageResult,
   notifyHoverResult,
+  openHoverPopupForKeyboard,
   setHoverPreviewContext,
+  type HoverPopupTargetSpec,
 } from './hoverPopup'
-import { EmbedCardManager } from './embedCard'
+import { EmbedCardManager, EMBED_CARD_CLASS_NAMES } from './embedCard'
 import { GRAPHIC_LANG_ATTR, MERMAID_CLASS_NAMES, MERMAID_CODE_ATTR, MERMAID_STATE_ATTR } from '../shared/mermaid'
 import { IMAGE_CLASS_NAMES, ImageResourceManager, isDirectImageSrc } from './imageResource'
 import { ImageVerifyScheduler } from './imageVerifyScheduler'
@@ -981,6 +989,9 @@ export class WebviewSyncController {
       if (id === 'find') this.openFind()
       else if (id === 'findNext') this.findStep('next')
       else if (id === 'findPrevious') this.findStep('prev')
+      // #221 预览当前链接：纯 webview 域（目标判定与浮层打开都在 webview，
+      // 无宿主往返依赖），与命令面板入口（ui.command 回发）共用同一实现
+      else if (id === 'hoverPreviewLink') this.previewLinkAtFocus()
       else this.bridge.postMessage({ kind: 'keybindings.execute', id })
     })
     const saved = bridge.getState<PersistedState>()
@@ -1304,6 +1315,29 @@ export class WebviewSyncController {
     this.view.contentDOM.addEventListener('contextmenu', (event) => {
       this.onContentContextMenu(event)
     })
+    // #221 Live 悬停入口（默认 Ctrl+悬停，设置 hover.liveDirect 开启后
+    // 直接悬停）：contentDOM 上的 mouseover/mouseout 委托——目标判定与
+    // 点击同一判定族（posAtCoords → 双链 → 树驱动链接 → 宽松链接，围栏/
+    // 头区排除与图片排除同口径），开闭时序与保活收敛在 hoverPopup 模块。
+    // 锚元素归约到链接装饰 DOM（mark/widget 的 vsidian-link /
+    // vsidian-wikilink span——enter/leave 同一归约，保证联合域与重入判定
+    // 一致）。Ctrl+点击跳转等既有行为不经此路径（mousedown 通道不变）
+    this.view.contentDOM.addEventListener('mouseover', (event) => {
+      if (this.viewMode !== 'live') {
+        return
+      }
+      const withMod = event.ctrlKey || event.metaKey
+      if (!this.liveHoverDirect() && !withMod) {
+        return
+      }
+      this.handleLiveHover(event, 'enter')
+    })
+    this.view.contentDOM.addEventListener('mouseout', (event) => {
+      if (this.viewMode !== 'live') {
+        return
+      }
+      this.handleLiveHover(event, 'leave')
+    })
     // #111 图表导出通道：弹窗 → 宿主另存为（会话字段在此补齐；只读交互，
     // init 前无会话时静默丢弃——按钮在渲染成功后才可点）
     setDiagramExportSender((req) => {
@@ -1554,6 +1588,8 @@ export class WebviewSyncController {
           items: message.items ?? [],
         }
         if (this.backlinksVisible()) {
+          // #221 条目 DOM 全量重建：先释放在场悬停浮层（锚点随旧 DOM 脱树）
+          closeHoverPopupIfAnchorWithin(this.backlinksPanelEl!)
           renderBacklinksState(this.backlinksPanelEl!, this.backlinksSnapshot, this.backlinkView)
         }
         break
@@ -1577,6 +1613,8 @@ export class WebviewSyncController {
           items: message.items ?? [],
         }
         if (this.outlinksVisible()) {
+          // #221 条目 DOM 全量重建：先释放在场悬停浮层（与反链快照同款）
+          closeHoverPopupIfAnchorWithin(this.outlinksPanelEl!)
           renderOutlinksState(this.outlinksPanelEl!, this.outlinksSnapshot)
         }
         break
@@ -1658,6 +1696,51 @@ export class WebviewSyncController {
         // mouseout（冒泡经容器委托——与用户悬停同一处理器链路）；宿主
         // 测试无法向 webview 派发真实鼠标事件。#219 起 link='md' 对第
         // index 个普通 Markdown 链接（非双链 a[href]）派发
+        // #221 起 link 枚举扩展：'live-wikilink' / 'live-md' 对 Live 正文
+        // 第 index 个链接装饰派发（ctrlKey 模拟 Ctrl+悬停修饰位；事件带
+        // 装饰中心坐标——Live 判定走 posAtCoords）；'backlink' / 'outlink'
+        // 对面板第 index 个条目派发（面板直接悬停）
+        const dispatchHoverEvent = (el: HTMLElement, enter: boolean, ctrl = false): void => {
+          const rect = el.getBoundingClientRect()
+          el.dispatchEvent(new MouseEvent(
+            enter ? 'mouseover' : 'mouseout',
+            {
+              bubbles: true,
+              relatedTarget: enter ? document.body : null,
+              ctrlKey: ctrl,
+              clientX: rect.left + rect.width / 2,
+              clientY: rect.top + rect.height / 2,
+            },
+          ))
+        }
+        if (message.link === 'live-wikilink' || message.link === 'live-md') {
+          const content = this.view?.contentDOM
+          if (!content || this.viewMode !== 'live') {
+            break
+          }
+          const cls = message.link === 'live-wikilink'
+            ? `.${WIKILINK_CLASS_NAMES.wikilink}`
+            : `.${LINK_CLASS_NAMES.link}`
+          const anchors = Array.from(content.querySelectorAll<HTMLElement>(cls))
+          const anchor = anchors[message.index]
+          if (!anchor) {
+            break
+          }
+          dispatchHoverEvent(anchor, message.action === 'enter', message.ctrlKey === true)
+          break
+        }
+        if (message.link === 'backlink' || message.link === 'outlink') {
+          const panel = message.link === 'backlink' ? this.backlinksPanelEl : this.outlinksPanelEl
+          const cls = message.link === 'backlink'
+            ? `.${BACKLINK_CLASS_NAMES.item}`
+            : `.${OUTLINK_CLASS_NAMES.item}`
+          const item = panel?.querySelectorAll<HTMLElement>(cls)[message.index]
+          if (!item) {
+            break
+          }
+          dispatchHoverEvent(item, message.action === 'enter')
+          break
+        }
         const container = this.readingContainer
         if (!container || this.viewMode !== 'reading') {
           break
@@ -1882,6 +1965,9 @@ export class WebviewSyncController {
           // 回发此处）——与工具栏按钮共用同一发送实现（出站 refresh.request
           // 后由宿主失效编排回流），不另造路径
           case 'refreshEditor': this.sendEmbeddedRefreshRequest(); break
+          // #221 预览当前链接：命令面板/宿主命令入口与快捷键（keybindingRouter
+          // 本地分支）共用同一实现（目标判定在 webview，无目标静默不误开）
+          case 'hoverPreviewLink': this.previewLinkAtFocus(); break
         }
         break
       case 'sidebar.test.click': {
@@ -2895,11 +2981,10 @@ export class WebviewSyncController {
     this.viewMode = mode
     this.closeQuickHeadingMenu(false)
     this.refreshQuickActions()
-    // #218 悬停浮层只在 Reading 挂载域内有效：切模式 = 触发上下文失效，
-    // 释放实例（规格「面板销毁、切模式等使触发上下文失效时释放实例」）
-    if (mode !== 'reading') {
-      closeHoverPopup()
-    }
+    // #221 全入口后 Live 悬停与面板悬停同样可开浮层：切模式 = 触发上下文
+    // 失效，无条件释放实例（规格「面板销毁、切模式等使触发上下文失效时
+    // 释放实例」；Live 锚点几何与阅读块源锚点在模式切换后不再有效）
+    closeHoverPopup()
     if (this.liveWrapper) {
       this.liveWrapper.style.display = mode === 'live' ? '' : 'none'
     }
@@ -4185,6 +4270,11 @@ export class WebviewSyncController {
     backlinks.panel.addEventListener('click', (event) => this.handleBacklinkPanelClick(event))
     backlinks.panel.addEventListener('input', (event) => this.handleBacklinkSearchInput(event))
     backlinks.panel.addEventListener('keydown', (event) => this.handleBacklinkPanelKeydown(event))
+    // #221 面板悬停入口：条目直接悬停触发预览（面板不随正文模式改变触发
+    // 规则——正文 Live 时面板仍是直接悬停）；目标载荷与点击同源（最近快
+    // 照 items），开闭时序与保活在 hoverPopup 模块
+    backlinks.panel.addEventListener('mouseover', (event) => this.handleBacklinkHover(event, 'enter'))
+    backlinks.panel.addEventListener('mouseout', (event) => this.handleBacklinkHover(event, 'leave'))
     this.backlinksToggleBtn = backlinks.toggle
     this.backlinksPanelEl = backlinks.panel
     actions.appendChild(backlinks.toggle)
@@ -4193,6 +4283,10 @@ export class WebviewSyncController {
     const outlinks = buildOutlinksDom()
     outlinks.toggle.addEventListener('click', () => this.toggleOutlinks())
     outlinks.panel.addEventListener('click', (event) => this.handleOutlinkPanelClick(event))
+    // #221 出链面板悬停：与反链同款直接悬停（断链条目同样可悬停——
+    // 空串 fsPath 走宿主 not-found 分态显示失效占位）
+    outlinks.panel.addEventListener('mouseover', (event) => this.handleOutlinkHover(event, 'enter'))
+    outlinks.panel.addEventListener('mouseout', (event) => this.handleOutlinkHover(event, 'leave'))
     this.outlinksToggleBtn = outlinks.toggle
     this.outlinksPanelEl = outlinks.panel
     actions.appendChild(outlinks.toggle)
@@ -4558,8 +4652,13 @@ export class WebviewSyncController {
       this.sidebarEl.classList.toggle('vsidian-backlinks-active', this.backlinksActive)
     }
     this.backlinksToggleBtn?.setAttribute('aria-expanded', String(this.backlinksActive))
-    if (this.backlinksPanelEl && this.backlinksActive) {
-      renderBacklinksState(this.backlinksPanelEl, this.backlinksSnapshot, this.backlinkView)
+    if (this.backlinksPanelEl) {
+      // #221 面板状态翻转（隐藏失效/激活重建条目）都使悬停锚点失效：
+      // 锚点在本面板内的浮层先行释放
+      closeHoverPopupIfAnchorWithin(this.backlinksPanelEl)
+      if (this.backlinksActive) {
+        renderBacklinksState(this.backlinksPanelEl, this.backlinksSnapshot, this.backlinkView)
+      }
     }
     this.persistState()
   }
@@ -4573,8 +4672,252 @@ export class WebviewSyncController {
    *  applyBacklinksDom 用最新 view 渲染） */
   private rerenderBacklinks(): void {
     if (this.backlinksPanelEl && this.backlinksActive) {
+      // #221 条目 DOM 全量重建（replaceChildren）：在场悬停浮层的锚点随旧
+      // DOM 脱树，先释放再渲染（面板重渲染不派发 mouseout，不依赖迟到检测）
+      closeHoverPopupIfAnchorWithin(this.backlinksPanelEl)
       renderBacklinksState(this.backlinksPanelEl, this.backlinksSnapshot, this.backlinkView)
     }
+  }
+
+  // ---- #221 全入口悬停（Live 正文 / 反链·出链面板 / 键盘命令） ----
+  // 三入口共用 hoverPopup 的 openPopup 核心：目标规格由各入口组装
+  //（HoverPopupTargetSpec），开闭时序、保活与迟到守卫单点收敛。
+
+  /** Live 直接悬停设置（hover.liveDirect；缺省 false = 默认 Ctrl+悬停） */
+  private liveHoverDirect(): boolean {
+    return this.settings?.[HOVER_LIVE_DIRECT_KEY] === true
+  }
+
+  /** Live 悬停锚点归约：链接装饰 DOM（树驱动/宽松链接 mark 的
+   *  vsidian-link 与双链 mark/widget 的 vsidian-wikilink span）。enter 与
+   *  leave 用同一归约——联合域（锚点 ∪ 浮层）与同锚点重入判定依赖两侧
+   *  归约出同一元素。非链接装饰（正文/行号等）返回 null 不触发 */
+  private liveHoverAnchorOf(target: EventTarget | null): HTMLElement | null {
+    const el = target instanceof Element ? target : null
+    const deco = el?.closest?.(`.${LINK_CLASS_NAMES.link}, .${WIKILINK_CLASS_NAMES.wikilink}`)
+    return deco instanceof HTMLElement ? deco : null
+  }
+
+  /** Live 悬停分派（mouseover/mouseout 委托转发）：enter 判定目标并经
+   *  延迟开启入口进 hoverPopup；leave 转发锚点离开 */
+  private handleLiveHover(event: MouseEvent, phase: 'enter' | 'leave'): void {
+    const anchor = this.liveHoverAnchorOf(event.target)
+    if (!anchor) {
+      return
+    }
+    if (phase === 'leave') {
+      const related = event.relatedTarget
+      if (related instanceof Node && anchor.contains(related)) {
+        return // 装饰内部移动（嵌套行内标记）不视为离开
+      }
+      hoverPreviewAnchorLeave(anchor)
+      return
+    }
+    const view = this.view
+    if (!view) {
+      return
+    }
+    const pos = view.posAtCoords({ x: event.clientX, y: event.clientY })
+    if (pos === null) {
+      return
+    }
+    const spec = this.liveLinkSpecAt(view, pos)
+    if (!spec) {
+      return
+    }
+    hoverPreviewAnchorEnter(anchor, spec)
+  }
+
+  /** Live 目标判定（与点击 mousedown 的判定族同序同口径）：双链 → 树驱动
+   *  链接 → 宽松链接；图片形态与代码/头区上下文由判定族自身排除，嵌入
+   *  `![[…]]` 不命中（双链扫描守卫排除前置 `!`），普通链接外部 scheme 经
+   *  isHoverableMdLinkHref 预滤（与 Reading 同口径） */
+  private liveLinkSpecAt(view: EditorView, pos: number): HoverPopupTargetSpec | null {
+    let spec: HoverPopupTargetSpec | null = null
+    activateWikilinkAtPos(view, pos, (target, from, to) => {
+      spec = { target, sourceStart: from, sourceEnd: to }
+    })
+    if (!spec) {
+      activateLinkAtPos(view, pos, (href, from, to) => {
+        if (isHoverableMdLinkHref(href)) {
+          spec = { target: href, linkHref: href, sourceStart: from, sourceEnd: to }
+        }
+      })
+    }
+    if (!spec) {
+      activateLooseLinkAtPos(view, pos, (dest, from, to) => {
+        if (isHoverableMdLinkHref(dest)) {
+          spec = { target: dest, linkHref: dest, sourceStart: from, sourceEnd: to }
+        }
+      })
+    }
+    return spec
+  }
+
+  /** #221 反链面板悬停：条目直接悬停（不随正文模式改变触发规则）；目标 =
+   *  来源文档全文（directFsPath 无锚点——引用处不是标题/块语义，full 范围
+   *  呈现来源文档），载荷从最近快照 items 取（与点击同源——条目 DOM 只存
+   *  相对路径，绝对路径在快照） */
+  private handleBacklinkHover(event: MouseEvent, phase: 'enter' | 'leave'): void {
+    const panel = this.backlinksPanelEl
+    const item = (event.target as HTMLElement | null)?.closest?.(`.${BACKLINK_CLASS_NAMES.item}`)
+    if (!(item instanceof HTMLElement) || !panel?.contains(item)) {
+      return
+    }
+    if (phase === 'leave') {
+      const related = event.relatedTarget
+      if (related instanceof Node && item.contains(related)) {
+        return
+      }
+      hoverPreviewAnchorLeave(item)
+      return
+    }
+    if (!this.sessionId || !this.docUri) {
+      return
+    }
+    const payload = this.backlinkItemPayloadOf(item)
+    if (!payload) {
+      return
+    }
+    hoverPreviewAnchorEnter(item, {
+      target: payload.sourceRelPath,
+      sourceStart: 0, // 引用区间在来源文档而非当前文档，给中性值
+      sourceEnd: 0,
+      directFsPath: payload.sourceFsPath,
+    })
+  }
+
+  /** #221 出链面板悬停：与反链同款直接悬停；目标 = 条目 fsPath ± 锚点
+   *  （断链条目 targetFsPath 为 null → 空串 fsPath 入队，宿主回 not-found
+   *  分态显示失效占位）；载荷从快照 items 取（条目 DOM 的 data-* 只在
+   *  可点条目写入，统一走快照配对） */
+  private handleOutlinkHover(event: MouseEvent, phase: 'enter' | 'leave'): void {
+    const panel = this.outlinksPanelEl
+    const item = (event.target as HTMLElement | null)?.closest?.(`.${OUTLINK_CLASS_NAMES.item}`)
+    if (!(item instanceof HTMLElement) || !panel?.contains(item)) {
+      return
+    }
+    if (phase === 'leave') {
+      const related = event.relatedTarget
+      if (related instanceof Node && item.contains(related)) {
+        return
+      }
+      hoverPreviewAnchorLeave(item)
+      return
+    }
+    const payload = this.outlinkItemPayloadOf(item)
+    if (!payload) {
+      return
+    }
+    hoverPreviewAnchorEnter(item, {
+      target: payload.targetDisplay,
+      sourceStart: payload.start, // 出链标记在当前文档内的区间（语义吻合）
+      sourceEnd: payload.end,
+      directFsPath: payload.targetFsPath ?? '',
+      ...(payload.anchor ? { directAnchor: payload.anchor } : {}),
+    })
+  }
+
+  /** #221 键盘命令「预览当前链接」：手动打开浮层且焦点进入（无目标静默
+   *  不误开）。Live 以光标处合法目标为准（主光标 head）；Reading/面板以
+   *  键盘聚焦的链接/条目为准。不接管源码编辑器（源码模式不经 webview 键
+   *  路由天然不可达）与设置页输入（独立 webview 无此路由） */
+  private previewLinkAtFocus(): void {
+    if (this.viewMode === 'live' && this.view) {
+      this.previewLiveLinkAtCursor()
+      return
+    }
+    const focus = document.activeElement
+    if (!(focus instanceof HTMLElement)) {
+      return
+    }
+    // Reading 键盘聚焦链接（a[href] 天然可 Tab 聚焦）：排除嵌入卡片内的
+    // 链接——嵌入内容已有常驻 Reading 呈现，不重复弹窗（与鼠标路径的
+    // stopPropagation 口径一致）
+    const anchor = focus.closest?.('a[href]')
+    if (
+      anchor instanceof HTMLElement &&
+      this.readingContainer?.contains(anchor) &&
+      !anchor.closest(`.${EMBED_CARD_CLASS_NAMES.card}`)
+    ) {
+      const spec = hoverPopupSpecOfAnchor(anchor)
+      if (spec) {
+        openHoverPopupForKeyboard(anchor, spec)
+      }
+      return
+    }
+    // 面板条目（出链条目为 button 可 Tab 聚焦；反链卡片键盘聚焦由条目自身
+    // 可聚焦性承担——聚焦即目标）
+    if (this.backlinksPanelEl?.contains(focus)) {
+      const item = focus.closest?.(`.${BACKLINK_CLASS_NAMES.item}`)
+      if (item instanceof HTMLElement && this.backlinksPanelEl.contains(item)) {
+        const payload = this.backlinkItemPayloadOf(item)
+        if (payload) {
+          openHoverPopupForKeyboard(item, {
+            target: payload.sourceRelPath,
+            sourceStart: 0,
+            sourceEnd: 0,
+            directFsPath: payload.sourceFsPath,
+          })
+        }
+      }
+      return
+    }
+    if (this.outlinksPanelEl?.contains(focus)) {
+      const item = focus.closest?.(`.${OUTLINK_CLASS_NAMES.item}`)
+      if (item instanceof HTMLElement && this.outlinksPanelEl.contains(item)) {
+        const payload = this.outlinkItemPayloadOf(item)
+        if (payload) {
+          openHoverPopupForKeyboard(item, {
+            target: payload.targetDisplay,
+            sourceStart: payload.start,
+            sourceEnd: payload.end,
+            directFsPath: payload.targetFsPath ?? '',
+            ...(payload.anchor ? { directAnchor: payload.anchor } : {}),
+          })
+        }
+      }
+    }
+  }
+
+  /** Live 光标处预览（键盘命令的 Live 分支）：判定族同悬停路径；锚元素
+   *  取目标区间内部的 DOM（domAtPos 归约到 HTMLElement——mark 装饰 span
+   *  或所在行元素，仅用于浮层定位与联合域） */
+  private previewLiveLinkAtCursor(): void {
+    const view = this.view
+    if (!view) {
+      return
+    }
+    const pos = view.state.selection.main.head
+    const spec = this.liveLinkSpecAt(view, pos)
+    if (!spec) {
+      return
+    }
+    const domAt = view.domAtPos(Math.min(spec.sourceStart + 1, view.state.doc.length))
+    const el = domAt.node.nodeType === 1 ? (domAt.node as HTMLElement) : domAt.node.parentElement
+    if (el instanceof HTMLElement) {
+      openHoverPopupForKeyboard(el, spec)
+    }
+  }
+
+  /** 反链条目的快照载荷（悬停与键盘命令共用；条目 DOM 只存相对路径，
+   *  绝对路径从最近快照按 source + offset 配对） */
+  private backlinkItemPayloadOf(item: HTMLElement): BacklinkItemPayload | undefined {
+    const source = item.dataset['vsidianSource']
+    const offset = Number(item.dataset['vsidianOffset'])
+    if (source === undefined) {
+      return undefined
+    }
+    return this.backlinksSnapshot.items.find(
+      (entry) => entry.sourceRelPath === source && entry.start === offset,
+    )
+  }
+
+  /** 出链条目的快照载荷（悬停与键盘命令共用；按条目 data-vsidian-index
+   *  的 start 偏移配对） */
+  private outlinkItemPayloadOf(item: HTMLElement): OutlinkItemPayload | undefined {
+    const start = Number(item.dataset['vsidianIndex'])
+    return this.outlinksSnapshot.items.find((entry) => entry.start === start)
   }
 
   // ---- 反链面板事件（容器统一委托；DOM 重建不丢监听） ----
@@ -4645,8 +4988,7 @@ export class WebviewSyncController {
   }
 
   /** 搜索输入即时生效（input 事件直调，无去抖；渲染复用 input 节点不丢焦） */
-  private handleBacklinkSearchInput(event: Event): void {
-    const input = event.target
+  private handleBacklinkSearchInput(event: Event): void {    const input = event.target
     if (!(input instanceof HTMLInputElement) || !input.classList.contains(BACKLINK_CLASS_NAMES.searchInput)) {
       return
     }
@@ -4777,8 +5119,12 @@ export class WebviewSyncController {
       this.sidebarEl.classList.toggle('vsidian-outlinks-active', this.outlinksActive)
     }
     this.outlinksToggleBtn?.setAttribute('aria-expanded', String(this.outlinksActive))
-    if (this.outlinksPanelEl && this.outlinksActive) {
-      renderOutlinksState(this.outlinksPanelEl, this.outlinksSnapshot)
+    if (this.outlinksPanelEl) {
+      // #221 面板状态翻转（隐藏失效/激活重建条目）都使悬停锚点失效
+      closeHoverPopupIfAnchorWithin(this.outlinksPanelEl)
+      if (this.outlinksActive) {
+        renderOutlinksState(this.outlinksPanelEl, this.outlinksSnapshot)
+      }
     }
     this.persistState()
   }

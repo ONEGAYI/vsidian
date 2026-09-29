@@ -494,3 +494,20 @@ describe('number 设置项（#175：范围与步进内建于类型，0 为普通
     expect(applySettingsPatch([base], { n: 100 }, { n: 906 })).toEqual({ ok: true, merged: { n: 906 } })
   })
 })
+
+describe('Live 直接悬停设置（#221）', () => {
+  it('hover.liveDirect 注册为布尔项（默认 false = Ctrl+悬停）；定义恒合法', () => {
+    const def = PRODUCTION_SETTING_DEFINITIONS.find((d) => d.key === 'hover.liveDirect')
+    expect(def).toMatchObject({ type: 'boolean', default: false })
+    expect(def?.titleKey).toBe('setting.hoverLiveDirect.title')
+    expect(def?.descriptionKey).toBe('setting.hoverLiveDirect.description')
+    // 注册表整体恒合法（依赖校验 + 定义自校验兜底）
+    expect(validateSettingDependencies(PRODUCTION_SETTING_DEFINITIONS)).toEqual([])
+    // 默认快照含新键；非法存量（类型不符）恢复默认
+    expect(settingsDefaults(PRODUCTION_SETTING_DEFINITIONS)['hover.liveDirect']).toBe(false)
+    expect(sanitizeStoredSettings(PRODUCTION_SETTING_DEFINITIONS, { 'hover.liveDirect': 'yes' })['hover.liveDirect'])
+      .toBe(false)
+    expect(sanitizeStoredSettings(PRODUCTION_SETTING_DEFINITIONS, { 'hover.liveDirect': true })['hover.liveDirect'])
+      .toBe(true)
+  })
+})

@@ -58,5 +58,6 @@
   "command.ui.outlineExpandAll.title": "展开全部大纲",
   "command.ui.backlinksToggle.title": "显示或隐藏反链面板",
   "command.ui.outlinksToggle.title": "显示或隐藏出链面板",
-  "command.editor.refresh.title": "刷新嵌入资源"
+  "command.editor.refresh.title": "刷新嵌入资源",
+  "command.ui.hoverPreviewLink.title": "预览当前链接"
 }

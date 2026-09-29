@@ -3820,6 +3820,15 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
   flex: 1;
 }
 
+/* #221 键盘模态焦点轮廓：「预览当前链接」命令打开时焦点进入浮层（容器
+   tabIndex=-1 可编程聚焦），:focus-visible 提供可见焦点指示（鼠标悬停
+   路径零抢焦点不受影响——程序化 focus 不触发 :focus-visible 的浏览器
+   启发式对纯鼠标交互不生效）；浮层内链接的键盘聚焦沿用浏览器默认轮廓 */
+#app > .vsidian-hover-popup:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, rgba(128, 128, 128, 0.6));
+  outline-offset: -1px;
+}
+
 /* 内部 Reading 容器：随正文排版基线与主题/片段（别名桥在容器类上） */
 .vsidian-hover-popup .vsidian-hover-popup-scroll .vsidian-view-reading {
   font-family: var(--vsidian-content-font-family, monospace);
