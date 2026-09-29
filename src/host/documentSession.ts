@@ -23,6 +23,8 @@ import {
   type DiagramExportFailReason,
   type DiagramExportPayload,
   type HostToWebview,
+  type ImageExportFailReason,
+  type ImageExportPayload,
   type ImagePastePayload,
   type SerChange,
   type SettingsPayload,
@@ -72,6 +74,13 @@ export interface PanelPort {
   exportDiagram?(
     payload: DiagramExportPayload,
     report: (result: { ok: boolean; reason?: DiagramExportFailReason }) => void,
+  ): void
+  /** #212 图片导出（vscode 层注入：目标定位 + 读字节 + showSaveDialog +
+   *  writeFile，字节级拷贝保持原格式）；report 回报取消/载荷非法/不可寻址/
+   *  读失败/写盘失败/成功 */
+  exportImage?(
+    payload: ImageExportPayload,
+    report: (result: { ok: boolean; reason?: ImageExportFailReason }) => void,
   ): void
   /** #33 打开 Vsidian 设置页（vscode 层注入：createWebviewPanel；设置页
    *  不依赖文档会话，与 link.activate 同为面板级 UI 意图端口） */
@@ -381,6 +390,28 @@ export class DocumentSession {
         }
         if (panel.port.exportDiagram) {
           panel.port.exportDiagram(message, report)
+        } else {
+          report({ ok: false, reason: 'invalid' })
+        }
+        return Promise.resolve()
+      }
+      case 'image.export': {
+        // #212 图片导出：只读交互（不写文档、不入撤销栈），会话守卫与
+        // diagram.export 同口径（就绪且 docUri 匹配才放行，否则静默丢弃）；
+        // 结果回来源面板（宿主通知呈现，弹窗侧无 UI 反馈需求）
+        if (!panel.ready || message.docUri !== this.docUri) {
+          return Promise.resolve()
+        }
+        const report = (result: { ok: boolean; reason?: ImageExportFailReason }): void => {
+          panel.port.send({
+            kind: 'image.export.result',
+            reqId: message.reqId,
+            ok: result.ok,
+            ...(result.reason !== undefined ? { reason: result.reason } : {}),
+          })
+        }
+        if (panel.port.exportImage) {
+          panel.port.exportImage(message, report)
         } else {
           report({ ok: false, reason: 'invalid' })
         }

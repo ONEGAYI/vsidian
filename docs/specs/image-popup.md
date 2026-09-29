@@ -1,6 +1,6 @@
 # 规格：图片弹窗查看与防误触
 
-> 状态：2026-09-29 设计访谈定稿，待实施。交互契约复用图形化代码块（#111）的既有事实源 [graphic-code-block-interaction.md](graphic-code-block-interaction.md)，本规格只记图片侧的差异、边界与接入点；两文冲突时以本规格为准。
+> 状态：已实施（工单 [#212](https://github.com/ONEGAYI/vsidian/issues/212)，2026-09-29），人工验收按[人工验证清单](manual-verification.md) A11c 节逐项记录。交互契约复用图形化代码块（#111）的既有事实源 [graphic-code-block-interaction.md](graphic-code-block-interaction.md)，本规格只记图片侧的差异、边界与接入点；两文冲突时以本规格为准。
 
 ## 范围
 

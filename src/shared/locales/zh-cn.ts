@@ -428,6 +428,9 @@ export const zhCn: Record<MessageKey, string> = {
   'graphic.exportFailed': '图表导出失败',
   'graphic.exportSvgFilter': 'SVG 文件',
   'graphic.exportPngFilter': 'PNG 图片',
+  'graphic.popupExportImage': '另存原图副本',
+  'graphic.popupExportImageDisabled': '外链图片不支持导出，可先保存到工作区。',
+  'graphic.imageExportFailed': '图片导出失败',
 
   'decor.taskCheck': '勾选任务',
   'decor.taskUncheck': '取消任务勾选',

@@ -26,6 +26,8 @@ import type { SyntaxNode, Tree } from '@lezer/common'
 import { chainAt, visitRange, type SourceRange } from './markdownDoc'
 import { liveDecorationsField, selectionTouchesRange } from './liveDecorations'
 import { IMAGE_CLASS_NAMES, type ImageResourceManager } from './imageResource'
+import { buildGraphicChrome, GRAPHIC_CHROME_CLASS_NAMES } from './graphicBlockChrome'
+import { openImagePopup } from './imagePopup'
 import {
   WIKILINK_CLASS_NAMES,
   parseWikilinkInner,
@@ -148,7 +150,7 @@ function inlineScanSuppressed(tree: Tree, from: number, fm: SourceRange | null):
 const NO_MANAGER = {}
 
 /** live 图片 widget 装饰缓存：按管理器实例隔离（同 src/alt/形态 复用同一
- * 实例，RangeSet.eq 成立；不同管理器/会话不得共享 widget 实例） */
+ *  实例，RangeSet.eq 成立；不同管理器/会话不得共享 widget 实例） */
 const imageWidgetDecos = new WeakMap<object, Map<string, ReturnType<typeof Decoration.replace>>>()
 
 export function imageWidgetDeco(
@@ -156,6 +158,7 @@ export function imageWidgetDeco(
   alt: string,
   images: ImageResourceManager | undefined,
   block = false,
+  chrome = false,
 ) {
   const holder: object = images ?? NO_MANAGER
   let cache = imageWidgetDecos.get(holder)
@@ -163,12 +166,12 @@ export function imageWidgetDeco(
     cache = new Map()
     imageWidgetDecos.set(holder, cache)
   }
-  const key = `${src}\u0000${alt}\u0000${block ? '1' : '0'}`
+  const key = `${src}\u0000${alt}\u0000${block ? '1' : '0'}\u0000${chrome ? '1' : '0'}`
   const hit = lruGet(cache, key)
   if (hit) {
     return hit
   }
-  const deco = Decoration.replace({ widget: new LiveImageWidget(src, alt, images, block) })
+  const deco = Decoration.replace({ widget: new LiveImageWidget(src, alt, images, block, chrome) })
   cache.set(key, deco)
   lruEvict(cache, WIDGET_DECO_CACHE_LIMIT)
   return deco
@@ -176,26 +179,41 @@ export function imageWidgetDeco(
 
 /** live 图片 widget：占位（alt 文本）→ 经资源管理器装载 → 失败可重试。
  *  block = 独立成行形态（该行其余文本全空白）：容器取块级布局，为无固有
- *  尺寸的图源（viewBox-only 百分比宽 SVG）给出确定宽度基准 */
+ *  尺寸的图源（viewBox-only 百分比宽 SVG）给出确定宽度基准。
+ *  chrome = 挂同款 hover 按钮组（#212：edit + popup）并吞点击——图片本体
+ *  不再触发光标落位/源码显形（误触源），编辑入口收敛到 edit 按钮；链接
+ *  内嵌与表格网格内图片不挂（chrome=false 保持既有落位/跳转语义，规格
+ *  明确排除）。按钮组 DOM 是 graphicBlockChrome 通用件（代码块同款），
+ *  显现由 CSS 的 loaded 态兄弟选择器承担（错误/加载态无按钮）。 */
 export class LiveImageWidget extends WidgetType {
   constructor(
     readonly src: string,
     readonly alt: string,
     readonly images?: ImageResourceManager,
     readonly block = false,
+    readonly chrome = false,
   ) {
     super()
   }
 
   eq(other: LiveImageWidget): boolean {
-    return other.src === this.src && other.alt === this.alt && other.block === this.block
+    return (
+      other.src === this.src && other.alt === this.alt && other.block === this.block && other.chrome === this.chrome
+    )
   }
 
   toDOM(): HTMLElement {
     const span = document.createElement('span')
-    span.className = this.block
-      ? `${IMAGE_CLASS_NAMES.image} ${IMAGE_CLASS_NAMES.block}`
+    // chrome 形态槽位兼任按钮组定位宿主（vsidian-graphic-frame 的
+    // position:relative + inline-block 行内形态覆盖规则），按钮组为 img 的
+    // 后置兄弟——与 mermaid 渲染容器/chrome 的兄弟结构同构，CSS 兄弟选择
+    // 器（loaded 态显现、hover 显隐）两侧共用
+    span.className = this.chrome
+      ? `${IMAGE_CLASS_NAMES.image} ${GRAPHIC_CHROME_CLASS_NAMES.frame}`
       : IMAGE_CLASS_NAMES.image
+    if (this.block) {
+      span.classList.add(IMAGE_CLASS_NAMES.block)
+    }
     span.dataset['vsidianImgState'] = 'loading'
     span.classList.add(IMAGE_CLASS_NAMES.state('loading'))
     span.title = this.alt
@@ -206,14 +224,34 @@ export class LiveImageWidget extends WidgetType {
       image.alt = this.alt
       image.src = src
       slot.appendChild(image)
+      if (this.chrome) {
+        slot.appendChild(
+          buildGraphicChrome({
+            // 编辑源码（同代码块 edit 语义）：光标落图片源码起点 →
+            // selectionTouchesRange 命中 → widget 退场显源文
+            onEdit: () => {
+              const view = EditorView.findFromDOM(span)
+              if (view) {
+                view.dispatch({ selection: { anchor: view.posAtDOM(span) } })
+              }
+            },
+            onPopup: () => {
+              openImagePopup(this.src, this.alt)
+            },
+          }),
+        )
+      }
       return image
     })
     return span
   }
 
-  /** 图片错误态重试由管理器处理；其余事件交还编辑器（光标定位） */
+  /** 图片错误态重试由管理器处理（原生 DOM 监听不受 CM6 事件管线影响）；
+   *  chrome 形态吞掉其余事件——点击不触发光标落位/源码显形（#212 防误触），
+   *  编辑入口迁移到 edit 按钮；非 chrome 形态（链接内嵌/表格网格内）交还
+   *  编辑器（既有落位与 Ctrl+点击跳转语义，规格明确排除不改） */
   ignoreEvent(): boolean {
-    return false
+    return this.chrome
   }
 }
 
@@ -225,6 +263,36 @@ function childNamed(node: SyntaxNode, name: string): SyntaxNode | null {
     }
   }
   return null
+}
+
+/** 祖先链上是否有名为 name 的节点（#212 图片 chrome 排除判定：
+ *  Link 内嵌 / Table 网格内不挂按钮组不吞点击，规格明确排除） */
+function hasAncestorNamed(node: SyntaxNode, name: string): boolean {
+  for (let p = node.parent; p; p = p.parent) {
+    if (p.name === name) {
+      return true
+    }
+  }
+  return false
+}
+
+/** [from,to) 是否整体落在语法树的 Table 节点内（#212 宽松路径的表格
+ *  判定——行扫描无节点可查祖先，改按区间包含查询；Table 不可嵌套，
+ *  命中即唯一） */
+function insideTableRange(tree: Tree, from: number, to: number): boolean {
+  let hit = false
+  tree.iterate({
+    from,
+    to,
+    enter: (node) => {
+      if (node.name === 'Table' && node.from <= from && node.to >= to) {
+        hit = true
+        return false
+      }
+      return true
+    },
+  })
+  return hit
 }
 
 /** LinkMark 子节点序列（升序） */
@@ -389,8 +457,18 @@ export function buildLinkImageDecorationRanges(
             return
           }
           const alt = doc.sliceString(opener.to, closer.from)
+          // #212 按钮组排除：链接内嵌图片（`[![a](i)](url)`，点击保留链接
+          // 跳转语义）与表格网格内图片（点击落单元格源码）不挂 chrome、
+          // 不吞点击（规格明确排除，行为现状钉住）
+          const chrome = !hasAncestorNamed(node, 'Link') && !hasAncestorNamed(node, 'Table')
           out.push(
-            imageWidgetDeco(src, alt, images, soloImageLine(doc, node.from, node.to)).range(node.from, node.to),
+            imageWidgetDeco(
+              src,
+              alt,
+              images,
+              soloImageLine(doc, node.from, node.to),
+              chrome,
+            ).range(node.from, node.to),
           )
           return
         }
@@ -509,8 +587,16 @@ export function buildLooseLinkDecorationRanges(
               continue // 光标进入该图片范围，显示源码供编辑
             }
             const alt = doc.sliceString(hit.labelFrom, hit.labelTo)
+            // #212 宽松图片同机制：表格网格内不挂 chrome 不吞点击（宽松
+            // 形态学守卫标签不含 []，不会出现在链接内）
             out.push(
-              imageWidgetDeco(hit.dest, alt, images, soloImageLine(doc, hit.from, hit.to)).range(hit.from, hit.to),
+              imageWidgetDeco(
+                hit.dest,
+                alt,
+                images,
+                soloImageLine(doc, hit.from, hit.to),
+                !insideTableRange(tree, hit.from, hit.to),
+              ).range(hit.from, hit.to),
             )
             continue
           }

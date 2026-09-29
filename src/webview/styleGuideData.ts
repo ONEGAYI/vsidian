@@ -1370,13 +1370,13 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "link-image-wikilink",
     "kind": "selector",
     "target": ".vsidian-image（双视图）",
-    "purpose": "图片槽位基类：阅读视图为 <img> 元素本体（Obsidian img 标签选择器天然命中）；live 视图为 widget 容器 span（内部 img 由资源管理器装载，本项目自有形态）。",
+    "purpose": "图片槽位基类：阅读视图为 <img> 元素本体（Obsidian img 标签选择器天然命中）；live 视图为 widget 容器 span（内部 img 由资源管理器装载，本项目自有形态）。#212 起非链接内嵌、非表格内的图片挂同款按钮组：live 槽位 span 兼任 vsidian-graphic-frame（vsidian-image 类保留，槽位语义不变）；阅读 img 经同款 frame span 包裹（img 为 void 元素不能有子元素）。",
     "views": [
       "live",
       "reading"
     ],
-    "states": "进入视口才发起装载；离开视口卸载释放（src 清空）。",
-    "dom": "阅读：块内 img.vsidian-image；live：行内 widget span.vsidian-image > img。",
+    "states": "进入视口才发起装载；离开视口卸载释放（src 清空）。#212：loaded 态按钮组显现（错误/加载态无按钮——错误态点击重试语义照旧），由 data-vsidian-img-state 的兄弟/子代选择器驱动。",
+    "dom": "阅读：块内 img.vsidian-image（#212 起外层可有 span.vsidian-graphic-frame.vsidian-image 包裹）；live：行内 widget span.vsidian-image > img（挂按钮组时叠加 frame 类，按钮组为 img 后置兄弟）。",
     "example": ".markdown-preview-view img {\n  max-width: 100%;\n}",
     "obsidian": {
       "counterpart": ".markdown-preview-view img（阅读）/ .cm-image（live 方向，Obsidian 无公开稳定类）",
@@ -2249,13 +2249,13 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "graphic-interact",
     "kind": "selector",
     "target": ".vsidian-graphic-frame / .vsidian-graphic-chrome（含 -edit / -popup）",
-    "purpose": "图形化代码块（渲染成图形的围栏）定位包裹层与右上角按钮组：edit 进源码编辑（仅实时预览）、popup 打开图表弹窗；按钮组悬停显隐由 CSS 驱动（透明度切换，DOM 常驻渲染成功态）。",
+    "purpose": "图形化代码块（渲染成图形的围栏）定位包裹层与右上角按钮组：edit 进源码编辑（仅实时预览）、popup 打开图表弹窗；按钮组悬停显隐由 CSS 驱动（透明度切换，DOM 常驻渲染成功态）。#212 起 Markdown 图片复用同款按钮组与交互契约（edit+popup 双钮 / 阅读仅 popup；图片本体吞点击防误触），链接内嵌与表格网格内图片不挂（规格明确排除）。",
     "views": [
       "live",
       "reading"
     ],
-    "states": "渲染成功态显示按钮组（error 降级块不发射）；edit 按钮仅实时预览侧装配。",
-    "dom": "live：围栏 widget 外层 frame；阅读：mermaid/图形容器外层 frame。按钮组挂 frame 内 absolute 右上。",
+    "states": "渲染成功态显示按钮组（error 降级块不发射）；edit 按钮仅实时预览侧装配。图片形态：loaded 态显示（data-vsidian-img-state 兄弟/子代选择器驱动），frame.vsidian-image 取行内布局（不破坏行内混排）。",
+    "dom": "live：围栏 widget 外层 frame；阅读：mermaid/图形容器外层 frame。图片形态：live 槽位 span 兼任 frame（vsidian-image 叠加）；阅读 img 经 inline frame span 包裹。按钮组挂 frame 内 absolute 右上。",
     "example": ".vsidian-graphic-chrome {\n  opacity: 1;\n}",
     "obsidian": {
       "counterpart": "无（Obsidian 图表块无公开按钮组结构）",
@@ -2264,7 +2264,8 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "verification": [
       "集成「图形化代码块按钮组与图表弹窗」（#111）：paint.graphic.frames/editButtons/popupButtons",
       "浏览器 graphicPopup：悬停显隐（透明度两态）",
-      "集成「界面域样式契约」（#133）：chromeSelectors[\"graphic-chrome\"] 探针命中"
+      "集成「界面域样式契约」（#133）：chromeSelectors[\"graphic-chrome\"] 探针命中",
+      "单元/浏览器 imagePopup（#212）：图片按钮组构成、悬停显隐与排除项"
     ],
     "introduced": "#111（2026-09-26）"
   },
@@ -2273,8 +2274,8 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "domain": "chrome",
     "category": "graphic-interact",
     "kind": "selector",
-    "target": ".vsidian-diagram-overlay / -backdrop / -stage / -media / -toolbar / -zoom-in / -zoom-out / -zoom-label / -reset / -refresh / -export-svg / -export-png / -close / -error / -note",
-    "purpose": "图表弹窗全屏浮层（#111）：遮罩 + 舞台（缩放/平移的图本体）+ 工具条（缩放/重置/刷新/导出/关闭）；error 态保留 close 与 refresh；note 为环境不支持 PNG 光栅化时的提示条。挂 document.body，仅在弹窗打开期间在场。",
+    "target": ".vsidian-diagram-overlay / -backdrop / -stage / -media / -toolbar / -zoom-in / -zoom-out / -zoom-label / -reset / -refresh / -export-svg / -export-png / -export-image / -close / -error / -note",
+    "purpose": "图表弹窗全屏浮层（#111）：遮罩 + 舞台（缩放/平移的图本体）+ 工具条（缩放/重置/刷新/导出/关闭）；error 态保留 close 与 refresh；note 为环境不支持 PNG 光栅化时的提示条。挂 document.body，仅在弹窗打开期间在场。#212 起图片弹窗（查看/缩放/平移/刷新/另存原图副本）复用同一类名族与浮层骨架：内容为 <img>（transform 缩放），-export-image 为图片侧导出钮（外链图禁用 + 外层 span 悬停提示），与图表弹窗互斥单例。",
     "views": [
       "live",
       "reading"
@@ -2288,7 +2289,8 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     },
     "verification": [
       "集成「图表弹窗」（#111/#133）：cssProbe.chromePopup 打开期间样式观测 + 刷新后保持",
-      "浏览器 graphicPopup：原生键鼠路径（缩放/平移/Esc/导出）与样式保持"
+      "浏览器 graphicPopup：原生键鼠路径（缩放/平移/Esc/导出）与样式保持",
+      "单元/浏览器 imagePopup（#212）：图片弹窗开关/缩放/刷新/导出与互斥"
     ],
     "introduced": "#111（2026-09-26）"
   },
@@ -3781,9 +3783,9 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "image-slot": {
-    "purpose": "Base class of the image slot: in reading view it is the <img> element itself (Obsidian img tag selectors match naturally); in live view it is a widget container span (the inner img is loaded by the resource manager — a vsidian-specific form).",
-    "states": "Loading starts only when the slot enters the viewport; leaving the viewport unloads and releases it (src is cleared).",
-    "dom": "Reading: img.vsidian-image inside the block. Live: an inline widget span.vsidian-image > img.",
+    "purpose": "Base class of the image slot: in reading view it is the <img> element itself (Obsidian img tag selectors match naturally); in live view it is a widget container span (the inner img is loaded by the resource manager — a vsidian-specific form). Since #212 images outside links and tables carry the shared button group: the live slot span doubles as vsidian-graphic-frame (the vsidian-image class stays, slot semantics unchanged); reading imgs are wrapped by the same frame span (img is a void element and cannot have children).",
+    "states": "Loading starts only when the slot enters the viewport; leaving the viewport unloads and releases it (src is cleared). Since #212 the button group appears in the loaded state (no buttons while error/loading — the error-state click-to-retry semantics stay), driven by sibling/descendant selectors on data-vsidian-img-state.",
+    "dom": "Reading: img.vsidian-image inside the block (since #212 optionally wrapped by span.vsidian-graphic-frame.vsidian-image). Live: an inline widget span.vsidian-image > img (with the frame class added when the button group is attached; the group is a following sibling of the img).",
     "obsidian": {
       "counterpart": ".markdown-preview-view img (reading) / .cm-image (live direction; Obsidian has no public stable class)"
     }
@@ -4056,15 +4058,15 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "graphic-chrome": {
-    "purpose": "The positioning wrapper of graphic code blocks (fences rendered as graphics) and its top-right button group: edit enters source editing (live preview only), popup opens the diagram popup; the group hover show/hide is CSS-driven (an opacity toggle; the DOM stays present in the rendered-success state).",
-    "states": "The button group shows in the rendered-success state (error fallback blocks do not emit it); the edit button is assembled only on the live preview side.",
-    "dom": "Live: the frame around the fence widget; reading: the frame around the mermaid/graphic container. The button group is absolutely positioned at the frame's top right.",
+    "purpose": "The positioning wrapper of graphic code blocks (fences rendered as graphics) and its top-right button group: edit enters source editing (live preview only), popup opens the diagram popup; the group hover show/hide is CSS-driven (an opacity toggle; the DOM stays present in the rendered-success state). Since #212 Markdown images reuse the same button group and interaction contract (edit+popup on live / popup-only on reading; the image body swallows clicks to prevent accidental edits); images inside links or table grids do not carry it (explicitly out of scope).",
+    "states": "The button group shows in the rendered-success state (error fallback blocks do not emit it); the edit button is assembled only on the live preview side. Image form: shown in the loaded state (driven by sibling/descendant selectors on data-vsidian-img-state); frame.vsidian-image takes an inline layout (inline mixed flow is not broken).",
+    "dom": "Live: the frame around the fence widget; reading: the frame around the mermaid/graphic container. Image form: the live slot span doubles as the frame (vsidian-image added); reading imgs are wrapped by an inline frame span. The button group is absolutely positioned at the frame's top right.",
     "obsidian": {
       "counterpart": "None (Obsidian diagram blocks have no public button-group structure)"
     }
   },
   "diagram-popup": {
-    "purpose": "The fullscreen overlay of the diagram popup (#111): backdrop + stage (the diagram body being zoomed/panned) + toolbar (zoom/reset/refresh/export/close); the error state keeps close and refresh; note is the notice bar shown when the environment does not support PNG rasterization. Attached to document.body and present only while the popup is open.",
+    "purpose": "The fullscreen overlay of the diagram popup (#111): backdrop + stage (the diagram body being zoomed/panned) + toolbar (zoom/reset/refresh/export/close); the error state keeps close and refresh; note is the notice bar shown when the environment does not support PNG rasterization. Attached to document.body and present only while the popup is open. Since #212 the image popup (view/zoom/pan/refresh/save a copy of the original image) reuses the same class family and overlay skeleton: the content is an <img> (transform-based zoom), -export-image is the image-side export button (disabled for remote images with a hover hint on a wrapper span), a mutually exclusive singleton with the diagram popup.",
     "states": "Present while opened via the popup button; dismissed by Esc, clicking the empty area or the close button.",
     "dom": "A direct child of body — the overlay (backdrop/stage/toolbar areas).",
     "obsidian": {

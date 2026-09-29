@@ -115,7 +115,14 @@ import {
   setDiagramPopupDocSource,
 } from './diagramPopup'
 import { graphicRendererFor, renderGraphicBlockInto } from './graphicRenderers'
-import { GRAPHIC_CHROME_CLASS_NAMES, wrapGraphicFrame } from './graphicBlockChrome'
+import { GRAPHIC_CHROME_CLASS_NAMES, buildGraphicChrome, wrapGraphicFrame } from './graphicBlockChrome'
+import {
+  closeImagePopup,
+  isImagePopupOpen,
+  openImagePopup,
+  setImagePopupContext,
+  IMAGE_POPUP_EXPORT_CLASS,
+} from './imagePopup'
 import { GRAPHIC_LANG_ATTR, MERMAID_CLASS_NAMES, MERMAID_CODE_ATTR, MERMAID_STATE_ATTR } from '../shared/mermaid'
 import { ImageResourceManager } from './imageResource'
 import { ImageVerifyScheduler } from './imageVerifyScheduler'
@@ -1026,6 +1033,9 @@ export class WebviewSyncController {
         // 无管线停留 pending 降级（live 侧由发射 gate 直接降级源码+卡片）
         renderGraphicBlockInto(el)
         this.decorateGraphicChromeBlock(el)
+        // #212 图片按钮组：非链接/非表格图片包 frame 挂 popup 按钮
+        //（live 侧由 widget 装饰自带；阅读 img 不能有子元素，经 frame 包裹）
+        this.decorateImageChromeBlock(el)
         // #84 阅读代码块卡片：挂载即增强（幂等；mermaid 块类不同不命中）
         this.decorateReadingCodeCardBlock(el)
       },
@@ -1212,6 +1222,27 @@ export class WebviewSyncController {
     // #111 弹窗刷新语义：按当前文档全文重定位围栏源码（live CM6 state
     // 是文本权威，阅读视图只是呈现切换，单一注入点两侧共用）
     setDiagramPopupDocSource(() => this.view?.state.doc.toString() ?? null)
+    // #212 图片弹窗装配：资源状态机（弹窗 img 是槽位，invalidate/
+    // invalidateAll 天然联动）、刷新重定位的文档源、外链判定与导出出站
+    //（会话字段在此补齐；init 前无会话时静默丢弃——按钮在 loaded 后才可点）
+    setImagePopupContext({
+      images: this.images!,
+      docSource: () => this.view?.state.doc.toString() ?? null,
+      isDirectSrc: (src) => /^https?:\/\//i.test(src),
+      sendExport: (req) => {
+        if (!this.sessionId) {
+          return
+        }
+        this.bridge.postMessage({
+          kind: 'image.export',
+          sessionId: this.sessionId,
+          docUri: this.docUri,
+          reqId: req.reqId,
+          src: req.src,
+          fileName: req.fileName,
+        })
+      },
+    })
     this.hostDarkApplied = isVscodeDarkBody()
     // #110：初始播种 mermaid 明暗态——MutationObserver 只在 class 变化时
     // 触发，暗色环境从打开起 class 不变，不播种则首渲染按浅色主题出图
@@ -1237,9 +1268,11 @@ export class WebviewSyncController {
     // #163 验收反馈：卸载跳转目标高亮的消失监听（window 级监听防泄漏）
     this.detachAnchorFlashDismiss()
     closeDiagramPopup()
+    closeImagePopup()
     closeFmPopover()
     setDiagramExportSender(null)
     setDiagramPopupDocSource(null)
+    setImagePopupContext(null)
     this.unsubscribeLocale?.()
     this.unsubscribeLocale = undefined
     if (this.flushTimer !== undefined) {
@@ -2246,6 +2279,34 @@ export class WebviewSyncController {
         // 通知性消息（#111）：导出失败/取消由宿主通知呈现，弹窗侧无 UI
         // 反馈需求——显式消费为 no-op，避免落入未处理分支
         break
+      case 'image.export.result':
+        // 通知性消息（#212）：与 diagram.export.result 同口径——失败/取消
+        // 由宿主通知呈现，弹窗侧无 UI 反馈需求
+        break
+      case 'image.test.popup': {
+        // 测试钩子（#212）：按序号点击图片 popup 按钮（驱动与用户点击相同
+        // 的处理器链路：打开图片弹窗）；action 存在时改为点击弹窗工具条
+        // 按钮（export 驱动导出消息形态；refresh 驱动按当前文档重定位
+        // 重取）。action 路径不重开弹窗（单例重开会清空快照）。图片按钮
+        // 组宿主是 frame.vsidian-image（与 mermaid 的 frame 区分）
+        if (message.action) {
+          const cls = message.action === 'export'
+            ? IMAGE_POPUP_EXPORT_CLASS
+            : message.action === 'close'
+              ? 'vsidian-diagram-close'
+              : 'vsidian-diagram-refresh'
+          document.querySelector<HTMLButtonElement>(`.${cls}`)?.click()
+          break
+        }
+        if (this.viewMode === message.view) {
+          const scope = this.viewMode === 'reading' ? this.readingContainer : this.view?.contentDOM
+          const buttons = scope?.querySelectorAll<HTMLButtonElement>(
+            `.${GRAPHIC_CHROME_CLASS_NAMES.frame}.vsidian-image .${GRAPHIC_CHROME_CLASS_NAMES.popup}`,
+          )
+          buttons?.[message.index]?.click()
+        }
+        break
+      }
       case 'image.result':
         // #10 图片解析结果路由（只读显示通道：暂停态同样可用）
         this.images?.handleResult(message)
@@ -7493,6 +7554,30 @@ export class WebviewSyncController {
           overlaySvg: document.querySelector(`.${DIAGRAM_POPUP_CLASS_NAMES.media} svg`) !== null,
         }
       : undefined
+    // #212 图片按钮组与图片弹窗探针：图片 frame = frame.vsidian-image
+    //（与 mermaid 的 frame 类区分）；图片弹窗复用弹窗类名族，浮层可见性
+    // 与 graphic.overlayVisible 同口径（elementFromPoint 命中），img 的
+    // loaded 槽位态为装载证据
+    const imageFrameSel = `.${GRAPHIC_CHROME_CLASS_NAMES.frame}.vsidian-image`
+    const imageFrames = graphicScope?.querySelectorAll(imageFrameSel).length ?? 0
+    const imageOverlayOpen = isImagePopupOpen()
+    let imageOverlayImgLoaded = false
+    if (imageOverlayOpen) {
+      const popupImg = document.querySelector(`.${DIAGRAM_POPUP_CLASS_NAMES.media} img`)
+      imageOverlayImgLoaded =
+        popupImg instanceof HTMLImageElement &&
+        popupImg.dataset['vsidianImgState'] === 'loaded'
+    }
+    const imageChrome = imageFrames > 0 || imageOverlayOpen
+      ? {
+          frames: imageFrames,
+          editButtons: graphicScope?.querySelectorAll(`${imageFrameSel} .${GRAPHIC_CHROME_CLASS_NAMES.edit}`).length ?? 0,
+          popupButtons: graphicScope?.querySelectorAll(`${imageFrameSel} .${GRAPHIC_CHROME_CLASS_NAMES.popup}`).length ?? 0,
+          overlay: imageOverlayOpen,
+          overlayVisible: imageOverlayOpen && overlayVisible,
+          overlayImgLoaded: imageOverlayImgLoaded,
+        }
+      : undefined
     // #183 统一右键菜单绘制探针：浮层在场（瞬态挂载）时的实际可见性
     // （elementFromPoint 命中——样式注入失效时 DOM 在场但命中失败）、分组
     // 线与置灰计数（安全降级矩阵的绘制层证据）；菜单关闭时缺省。分组线
@@ -7634,6 +7719,7 @@ export class WebviewSyncController {
       hr,
       highlight,
       graphic,
+      imageChrome,
       quickActions,
       code,
       heading: headingPaint,
@@ -8087,6 +8173,45 @@ export class WebviewSyncController {
           openGraphicPopup(language, code)
         },
       })
+    }
+  }
+
+  /** #212 阅读视图图片按钮组（仅 popup，无 edit——阅读无编辑语义）：
+   *  挂载钩子把非链接内嵌、非表格内的图片槽位包进 inline frame 并挂
+   *  popup 按钮（幂等；img 是 void 元素不能有子元素，chrome 经 frame
+   *  挂为其兄弟——与 live 槽位内 chrome/img 兄弟结构同构，CSS 兄弟选择
+   *  器共用）。链接内嵌图片不接（点击保留链接跳转语义）、表格网格内
+   *  暂不接（规格明确排除）。 */
+  private decorateImageChromeBlock(el: HTMLElement): void {
+    if (!(el instanceof HTMLElement)) {
+      return
+    }
+    const images = Array.from(el.querySelectorAll<HTMLImageElement>('img.vsidian-image'))
+    if (el instanceof HTMLImageElement && el.classList.contains('vsidian-image')) {
+      images.unshift(el)
+    }
+    for (const img of images) {
+      if (img.closest('a') || img.closest('table')) {
+        continue // 链接内嵌 / 表格网格内：行为现状钉住（规格排除项）
+      }
+      if (img.parentElement?.classList.contains(GRAPHIC_CHROME_CLASS_NAMES.frame)) {
+        continue // 幂等：已包 frame
+      }
+      const rawSrc = img.dataset['vsidianImgSrc'] ?? ''
+      if (!rawSrc) {
+        continue
+      }
+      const frame = document.createElement('span')
+      frame.className = `${GRAPHIC_CHROME_CLASS_NAMES.frame} vsidian-image`
+      img.replaceWith(frame)
+      frame.append(
+        img,
+        buildGraphicChrome({
+          onPopup: () => {
+            openImagePopup(rawSrc, img.alt)
+          },
+        }),
+      )
     }
   }
 
