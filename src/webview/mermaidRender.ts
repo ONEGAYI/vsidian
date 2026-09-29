@@ -401,13 +401,27 @@ export function mermaidDarkTheme(): boolean {
   return dark
 }
 
-/** #208 懒加载失败终态重置（手动刷新通道）：重新允许注入尝试。终态原本
- *  的理由是「资源 URI 固定，重注入无意义」；手动刷新代表用户显式重试
- *  意志（且刷新语义假定环境可能已恢复）。已降级容器不在此主动重画——
- *  新的 pending 容器（滚动入视口）与 error 容器的既有重渲染入口（换语言/
- *  主题联动）在终态重置后自然恢复注入路径 */
+/** #208 懒加载失败终态重置（手动刷新通道）：重新允许注入尝试，并对
+ *  文档内已降级（error 态）的 Mermaid 容器立即重画。终态原本的理由是
+ *  「资源 URI 固定，重注入无意义」；手动刷新代表用户显式重试意志（且
+ *  刷新语义假定环境可能已恢复）。降级容器若不在此主动重画，只能等滚动
+ *  产出的新 pending 容器或换语言/主题联动的既有入口，与「点刷新立即
+ *  恢复」的直觉不符。只重画 error 态容器（与 refreshMermaidErrorLocale
+ *  同款扫描口径，但作用全文档）：正常渲染的容器缓存键为源码，刷新语义
+ *  不该浪费重渲；语法错误的缓存条目原样复用（消息与语言无关），重画
+ *  成本低。loadFailed 重置后 ensureMermaidApi 重新走注入。 */
 export function resetMermaidLoadFailure(): void {
   loadFailed = false
+  if (typeof document === 'undefined') {
+    return
+  }
+  for (const el of Array.from(
+    document.querySelectorAll<HTMLElement>(`.${MERMAID_CLASS_NAMES.diagram}[${MERMAID_CODE_ATTR}]`),
+  )) {
+    if (el.getAttribute(MERMAID_STATE_ATTR) === 'error') {
+      renderMermaidInto(el, el.getAttribute(MERMAID_CODE_ATTR)!)
+    }
+  }
 }
 
 // ---- 测试钩子（仅单测注入 mock 与重置状态用，生产不消费） ----

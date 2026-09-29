@@ -1207,6 +1207,45 @@ describe('#208 手动刷新：图片缓存失效与资源代次', () => {
     await t.s.send(t.id, { kind: 'refresh.request', sessionId: t.id, docUri: DOC_URI, reqId: 1 })
     expect(t.out).toContainEqual({ kind: 'refresh.invalidated', reqId: 1, generation: 1 })
   })
+
+  it('在途解析回调晚于 invalidate 到达：旧代次 URI 不得写入缓存（竞态修复）', async () => {
+    // 复现路径：image.request（第一代）发起 → 解析挂起 → refresh.request
+    // （invalidate：清缓存 + 代次自增）→ 在途回调此刻才携旧代次 URI 完成。
+    // 修复前它会写回 imageCache，刷新后的重挂请求经同 src 缓存命中旧 URI，
+    // 该图本轮不换新。
+    const s = setup()
+    const calls: string[] = []
+    const gates: Array<(src: string) => void> = []
+    const out: HostToWebview[] = []
+    const id = s.session.attachPanel({
+      send: (m) => out.push(m),
+      resolveImage: (src) => {
+        calls.push(src)
+        return new Promise((resolve) => {
+          gates.push((resolved) => resolve({ ok: true, src: resolved }))
+        })
+      },
+    })
+    await ready10(s, id)
+    // 第一代请求在途（resolver 同步触达，Promise 挂起）
+    const first = s.send(id, { kind: 'image.request', sessionId: id, docUri: DOC_URI, reqId: 1, src: './a.png' })
+    expect(calls).toEqual(['./a.png'])
+    // 刷新在在途窗口内到达
+    await s.send(id, { kind: 'refresh.request', sessionId: id, docUri: DOC_URI, reqId: 9 })
+    expect(s.session.getImageGeneration()).toBe(1)
+    // 在途回调此刻完成（旧代次地址）
+    gates[0]!('vscode-webview://res/a.png')
+    await first
+    // 刷新后的重挂请求：不得命中旧代次 URI——解析器应被重新触达
+    const second = s.send(id, { kind: 'image.request', sessionId: id, docUri: DOC_URI, reqId: 2, src: './a.png' })
+    await Promise.resolve()
+    expect(calls.length, '刷新后同 src 新请求应重新解析（旧代次 URI 不得入缓存）').toBe(2)
+    gates[1]!('vscode-webview://res/a.png?v=1')
+    await second
+    const results = out.filter((m) => m.kind === 'image.result')
+    expect(results[0]).toMatchObject({ reqId: 1, ok: true, src: 'vscode-webview://res/a.png' })
+    expect(results[1]).toMatchObject({ reqId: 2, ok: true, src: 'vscode-webview://res/a.png?v=1' })
+  })
 })
 
 // ---- 工单 #81：代码块复制的行尾归一（webview 出站恒为 LF） ----

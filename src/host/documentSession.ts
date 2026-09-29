@@ -724,14 +724,20 @@ export class DocumentSession {
   }
 
   /**
-   * #208 图片缓存运行期失效入口：清空解析缓存并推进资源代次（返回新
-   * 代次）。手动刷新通道（refresh.request）在此闭合；后续自动核验路径
-   * （#201）可复用同一入口对齐失效语义。已知边界：刷新瞬间的在途解析
-   * （imageInFlight）完成后仍会写入缓存——旧代次 URI 短暂可命中，下一次
-   * 刷新即被清除；在途窗口毫秒级，不为它引入逐条目代次标记。
+   * #208 图片缓存运行期失效入口：清空解析缓存与在途去重表并推进资源代次
+   * （返回新代次）。手动刷新通道（refresh.request）在此闭合；后续自动核验
+   * 路径（#201）可复用同一入口对齐失效语义。
+   *
+   * 在途竞态（作废语义）：刷新瞬间的在途解析（imageInFlight）完成后仍会
+   * 走原回调——清表拦不住已注册的 then。两道防护缺一不可：其一，清空
+   * imageInFlight 让刷新后的重挂请求不与旧代次在途复用（否则经同 src 去重
+   * 直接拿到旧 URI）；其二，回调写缓存前校验发起代次（见
+   * resolveImageRequest），旧代次结果丢弃——只清表不校验，迟到的旧回调
+   * 照样把旧 URI 写回缓存，污染本轮刷新。
    */
   invalidateImages(): number {
     this.imageCache.clear()
+    this.imageInFlight.clear()
     this.imageGeneration += 1
     return this.imageGeneration
   }
@@ -762,6 +768,12 @@ export class DocumentSession {
     }
     let pending = this.imageInFlight.get(src)
     if (!pending) {
+      // 发起代次快照：回调完成时校验代次未变才写缓存（#208 在途竞态）。
+      // 刷新瞬间在途的解析携旧代次 URI，若照写缓存，重挂请求经同 src
+      // 命中旧地址、该图本轮不换新；代次已过则丢弃。发起面板仍收到其
+      // 请求当次的结果（旧 URI）——webview 条目已被失效重挂重建，未知
+      // reqId 的迟到结果在观测层丢弃，不产生污染
+      const requestGen = this.imageGeneration
       const resolver = panel.port.resolveImage
       pending = resolver
         ? resolver(src).catch((): ImageResolution => ({ ok: false, reason: 'read-error' }))
@@ -770,10 +782,14 @@ export class DocumentSession {
         : Promise.resolve({ ok: false, reason: 'read-error' } as ImageResolution)
       this.imageInFlight.set(src, pending)
       // 完成后清理在途表；成功结果进入小容量缓存（滚动回视口的重复请求
-      // 直接命中，避免反复读盘；失败不缓存，保留重试语义）
+      // 直接命中，避免反复读盘；失败不缓存，保留重试语义）。清理用同一
+      // 性判据：invalidateImages 作废在途表后，同 src 可能已有新代次的
+      // 在途条目，旧回调不得误删他人的表项
       void pending.then((resolution) => {
-        this.imageInFlight.delete(src)
-        if (resolution.ok) {
+        if (this.imageInFlight.get(src) === pending) {
+          this.imageInFlight.delete(src)
+        }
+        if (resolution.ok && requestGen === this.imageGeneration) {
           this.imageCache.set(src, resolution)
           while (this.imageCache.size > 16) {
             const oldest = this.imageCache.keys().next().value

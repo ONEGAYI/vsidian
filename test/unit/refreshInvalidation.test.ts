@@ -118,4 +118,25 @@ describe('#208 refresh.invalidated 面板接线', () => {
     await settle(2)
     expect(scripts().length).toBe(2)
   })
+
+  it('失效通知后已降级的 Mermaid 容器立即重画（无需滚动触发新 pending 容器）', async () => {
+    ;(globalThis as Record<string, unknown>)['__vsidianMermaidUri'] = MERMAID_URI
+    const scripts = () => document.head.querySelectorAll<HTMLScriptElement>(`script[src="${MERMAID_URI}"]`)
+    const h = makeBridge()
+    const { c } = mountPanel(h, '```mermaid\nA-->B\n```\n')
+    await settle()
+    // 懒加载失败 → 容器固化 error 态（降级提示 + 源码）
+    scripts()[0]!.onerror?.(new Event('error') as ErrorEvent)
+    await settle(2)
+    const container = document.querySelector<HTMLElement>('.vsidian-mermaid')
+    expect(container).not.toBeNull()
+    expect(container!.getAttribute('data-vsidian-mermaid-state')).toBe('error')
+    // 经按钮发出请求（reqId=1）后，宿主失效通知回执配对到达：终态重置 +
+    // 已降级容器立即重新走渲染管线（重入 rendering 态、重新注入 script）
+    document.querySelector<HTMLButtonElement>('.vsidian-refresh-toggle')!.click()
+    c.handleHostMessage({ kind: 'refresh.invalidated', reqId: 1, generation: 1 })
+    await settle(2)
+    expect(scripts().length).toBe(2)
+    expect(container!.getAttribute('data-vsidian-mermaid-state')).toBe('rendering')
+  })
 })
