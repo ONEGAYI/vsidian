@@ -3460,12 +3460,12 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "hover-preview",
     "kind": "selector",
     "target": ".vsidian-hover-popup（浮层容器；内含 .vsidian-hover-popup-scroll 内容滚动区（承载只读 Reading 容器）与 .vsidian-hover-popup-state 就地状态行（loading/错误分态））",
-    "purpose": "悬停文档预览浮层（#218 一期首条闭环）：父文档 Reading 中悬停指向 Markdown 的双链，经文档访问通道读取目标后以只读 Reading 内容显示目标全文。默认宽 480px / 最大高 400px（小视口由 JS 几何计划四边翻转并收缩钳制）；内容只读——任务 checkbox 禁用（JS disabled + pointer-events 双保险），无任何写回通道。",
+    "purpose": "悬停文档预览浮层（#218 一期首条闭环）：父文档 Reading 中悬停指向 Markdown 的双链/本地链接，经文档访问通道读取目标后以只读 Reading 内容显示。默认宽 480px / 最大高 400px（小视口由 JS 几何计划四边翻转并收缩钳制）；内容只读——任务 checkbox 禁用（JS disabled + pointer-events 双保险），无任何写回通道。#220 起浮层内为目标文档（B）的 Reading 内容：图片以 B 为来源解析（sourceDocUri 通道）、链接可点击跳转、代码块朴素高亮。",
     "views": [
       "reading"
     ],
     "states": "交互态浮层（悬停延迟打开期间挂载、离开联合域延迟关闭/Esc/父容器滚动/切模式撤下）——容器本体不进静态探针，开闭、保活与绘制由浏览器 hoverPreview 套件按行为路径验证；样式入口（单类低特异性）公开供片段覆写。",
-    "dom": "document.body 直挂（不在 #app 内，故规则无 #app 前缀）；内部 Reading 容器挂 .vsidian-view-reading（含 .markdown-preview-view 别名桥，主题与片段天然命中）。",
+    "dom": "#220 起直挂 #app 内（此前挂 body；fixed 定位不受 #app 布局影响）——#app 的主题变量与 `#app .vsidian-view-reading …` 正文样式、已启用 CSS 片段（容器类含 .markdown-preview-view 别名桥）随之天然命中，不为浮层复制第二套主题环境。内部 Reading 容器挂 .vsidian-view-reading。",
     "example": ".vsidian-hover-popup {\n  width: 480px;\n  max-height: 400px;\n}",
     "obsidian": {
       "counterpart": ".hover-popover（Obsidian 页面预览浮层方向；内部结构闭源不作承诺）",
@@ -3477,6 +3477,30 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "浏览器 hoverPreview（#218）：真实指针开闭/保活/滚动/Esc/边缘翻转 + 正文绘制层可见断言"
     ],
     "introduced": "#218（2026-09-30）"
+  },
+  {
+    "id": "hover-fm-section",
+    "domain": "chrome",
+    "category": "hover-preview",
+    "kind": "selector",
+    "target": ".vsidian-hover-fm（浮层内笔记属性区修饰，挂 frontmatter 块；.vsidian-hover-fm-toggle 展开/折叠按钮；.vsidian-hover-fm-collapsed 收起态修饰）",
+    "purpose": "悬停浮层的笔记属性区（#220 引用 Reading 内容）：仅全文引用显示——默认折叠，标题整行是悬停热区（hover 或按钮 focus-visible 显示切换按钮，非悬停自动展开），点击按钮切换展开/收起；本次打开内保留展开状态（目标内容变化引发的重建不重置），重新打开恢复折叠。成型 frontmatter 复用阅读侧标题栏与键值行（呈现与类型/降级边界沿用 frontmatterTable 判定，不扩大），降级形态合成同构标题栏并保留转义源码原文（收起时隐藏）。章节/块引用与无 frontmatter 文档不显示属性区；无任何添加/删除/编辑或任务勾选写回入口。仅作用于浮层（选择器带 .vsidian-hover-popup 前缀），主阅读视图的属性呈现不受影响。",
+    "views": [
+      "reading"
+    ],
+    "states": "收起（默认，vsidian-hover-fm-collapsed——属性行/降级源码块 display:none，标题行保留）/ 展开（移除修饰类）；按钮默认 opacity:0 + pointer-events:none（不用整体隐藏类声明——保留 Tab 键可达），标题行 :hover 或按钮 :focus-visible 时显示并接指针；chevron 展开向下、收起旋转 -90° 指向右。交互态浮层的内部结构——不进静态探针，折叠/热区/键盘操作与明暗主题下的可见性由浏览器 hoverPreview 套件按行为路径验证。",
+    "dom": "挂 #app 内浮层（.vsidian-hover-popup）中的 frontmatter 块（.vsidian-reading-frontmatter）上；按钮为真实 <button type=\"button\">（Enter/Space 原生激活），aria-expanded 随态、aria-label/title 用 i18n 词条（hover.content.fmExpand/fmCollapse）。",
+    "example": "#app .vsidian-hover-popup .vsidian-hover-fm.vsidian-hover-fm-collapsed .vsidian-fm-row {\n  display: none;\n}",
+    "obsidian": {
+      "counterpart": ".metadata-container 与 .collapse-indicator（Obsidian 属性区折叠方向；内部结构闭源不作承诺）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 hoverPopupCssContract：热区/按钮透明与指针/悬停与 focus-visible 显示/收起隐藏/chevron 旋转钉规则",
+      "单元 hoverPopup：属性区状态机（默认折叠/切换/刷新保留/重开复位/范围门控/降级合成标题栏）",
+      "浏览器 hoverPreview（#220）：真实指针折叠交互、键盘 Enter 操作、明暗主题下标题行与按钮可见性绘制层断言"
+    ],
+    "introduced": "#220（2026-09-30）"
   }
 ] as readonly StyleContractEntry[]
 
@@ -4528,11 +4552,19 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "hover-popup": {
-    "purpose": "The hover document preview popup (first closing loop of phase one, #218): hover a wikilink pointing to a Markdown note in the parent reading view, and the target is read through the document-access channel and shown in full as read-only reading content. Default width 480px / max height 400px (in small viewports a JS geometry plan flips at the four edges and shrinks to fit); the content is read-only — task checkboxes are disabled (JS disabled + pointer-events double safety), with no write-back channel at all.",
+    "purpose": "The hover document preview popup (first closing loop of phase one, #218): hover a wikilink or local Markdown link in the parent reading view, and the target is read through the document-access channel and shown as read-only reading content. Default width 480px / max height 400px (in small viewports a JS geometry plan flips at the four edges and shrinks to fit); the content is read-only — task checkboxes are disabled (JS disabled + pointer-events double safety), with no write-back channel at all. Since #220 the popup carries the target document (B) as reading content: images resolve relative to B (the sourceDocUri channel), links are clickable for navigation, and code blocks get plain syntax highlighting.",
     "states": "An interaction-state floating layer (mounted after the hover open delay, dismissed by leaving the joint anchor/popup domain after a close delay, Esc, parent scroll, or mode switch) — the container itself is not part of the static probes; open/close, keep-alive and painting are verified behaviorally by the browser hoverPreview suite; the style entry point (a single low-specificity class) is public for snippet overrides.",
-    "dom": "Attached directly to document.body (outside #app, so the rules carry no #app prefix); the inner reading container carries .vsidian-view-reading (including the .markdown-preview-view alias bridge, so themes and snippets match naturally).",
+    "dom": "Since #220 attached directly inside #app (previously on body; fixed positioning is unaffected by the #app layout) — the #app theme variables, the `#app .vsidian-view-reading …` content styles, and enabled CSS snippets (the container class carries the .markdown-preview-view alias bridge) therefore match naturally, without duplicating a second theme environment for the popup. The inner reading container carries .vsidian-view-reading.",
     "obsidian": {
       "counterpart": ".hover-popover (the Obsidian page-preview popover direction; the internal structure is closed-source and not promised)"
+    }
+  },
+  "hover-fm-section": {
+    "purpose": "The note-properties section of the hover popup (#220 referenced reading content): shown for full-document references only — collapsed by default, the whole header row is the hover hot zone (hovering it or focusing the button reveals the toggle button; hovering never auto-expands), and clicking the button toggles expansion. The expanded state persists for the current open (rebuilds caused by target-content changes do not reset it); reopening the popup restores collapsed. A well-formed frontmatter reuses the reading-side header and key-value rows (presentation and type/degradation boundaries follow the frontmatterTable rules, not widened); the degraded form synthesizes a structurally identical header and keeps the escaped raw source (hidden while collapsed). Section/block references and documents without frontmatter show no properties section; there is no add/delete/edit or task-check write-back entry at all. Scoped to the popup only (selectors are prefixed with .vsidian-hover-popup) — the main reading view properties presentation is unaffected.",
+    "states": "Collapsed (default, vsidian-hover-fm-collapsed — property rows and the degraded source block get display:none, the header row stays) / expanded (modifier removed); the button is opacity:0 + pointer-events:none by default (no wholesale hiding declarations — Tab reachability is preserved), shown and pointer-enabled on header :hover or button :focus-visible; the chevron points down when expanded and rotates -90° (rightward) when collapsed. Internal structure of an interaction-state popup — not part of the static probes; collapse/hot-zone/keyboard interactions and light/dark-theme visibility are verified behaviorally by the browser hoverPreview suite.",
+    "dom": "Attached to the frontmatter block (.vsidian-reading-frontmatter) inside the #app popup (.vsidian-hover-popup); the toggle is a real <button type=\"button\"> (Enter/Space activate natively), with aria-expanded following the state and aria-label/title from the i18n entries (hover.content.fmExpand/fmCollapse).",
+    "obsidian": {
+      "counterpart": ".metadata-container and .collapse-indicator (the Obsidian properties-collapse direction; the internal structure is closed-source and not promised)"
     }
   }
 } as Readonly<Record<string, StyleContractEntryOverride>>

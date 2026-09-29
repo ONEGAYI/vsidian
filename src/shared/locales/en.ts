@@ -381,6 +381,12 @@ export const en = {
   'hover.errorNonMarkdown': '{target} is not a Markdown note: preview supports Markdown documents only in this phase',
   'hover.errorReadFailed': 'Failed to read the target document',
   'hover.errorAnchorMissing': 'Anchor not found in the target note: {target}#{anchor} (the full document is not shown instead)',
+  /** #220 referenced Reading content: accessibility labels of the expand/
+   *  collapse button of the note-properties section inside the hover popup
+   *  (aria-label and title share the word; the button is the only operable
+   *  entry, hovering the header row only reveals it) */
+  'hover.content.fmExpand': 'Expand note properties',
+  'hover.content.fmCollapse': 'Collapse note properties',
 
   /** 反链面板（#197：四态与条目；形态改版批次：工具栏/排序/搜索/页头） */
   'backlinks.label': 'Backlinks',

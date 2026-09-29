@@ -3787,11 +3787,14 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
 }
 
 /* ---- #218 悬停文档预览浮层（样式契约 chrome 域 hover-popup 条目；交互态
-   浮层挂 body、打开期间在场，开闭与绘制由浏览器 hoverPreview 套件验证） ---- */
+   浮层、打开期间在场，开闭与绘制由浏览器 hoverPreview 套件验证） ----
+   #220 起浮层挂 #app 内（fixed 定位不受 #app 布局影响）：#app 的主题变量
+   与 `#app .vsidian-view-reading …` 正文样式、CSS 片段（别名桥类名）随之
+   天然命中——不为浮层复制第二套主题环境。 */
 
 /* 浮层容器：fixed 定位、默认宽 480 / 最大高 400（规格一期初值；小视口由
    JS 几何计划收缩并写内联值），实底 + 边框 + 投影保证任意主题下可辨识 */
-body > .vsidian-hover-popup {
+#app > .vsidian-hover-popup {
   position: fixed;
   z-index: 9000;
   box-sizing: border-box;
@@ -3811,7 +3814,7 @@ body > .vsidian-hover-popup {
 }
 
 /* 内容滚动区：移入保活后的滚动承载（长文内部滚动，不撑破浮层） */
-body > .vsidian-hover-popup .vsidian-hover-popup-scroll {
+#app > .vsidian-hover-popup .vsidian-hover-popup-scroll {
   overflow: auto;
   min-height: 0;
   flex: 1;
@@ -3827,7 +3830,7 @@ body > .vsidian-hover-popup .vsidian-hover-popup-scroll {
 }
 
 /* 就地状态行（loading / 错误分态）：在场绘制，i18n 文案 */
-body > .vsidian-hover-popup .vsidian-hover-popup-state {
+#app > .vsidian-hover-popup .vsidian-hover-popup-state {
   padding: 18px 14px;
   color: var(--vscode-descriptionForeground, inherit);
   overflow-wrap: break-word;
@@ -3836,4 +3839,71 @@ body > .vsidian-hover-popup .vsidian-hover-popup-state {
 /* 只读契约：浮层内任务 checkbox 不响应指针（JS disabled 双保险） */
 .vsidian-hover-popup input[type="checkbox"] {
   pointer-events: none;
+}
+
+/* ---- #220 悬停浮层笔记属性区（样式契约 chrome 域 hover-fm-section 条目；
+   引用专属样式入口——仅作用于浮层内 frontmatter 块，主阅读视图的属性
+   呈现不受影响） ---- */
+
+/* 属性区块：标题行成为悬停热区（hover/focus 显示切换按钮——不是悬停自动
+   展开；按钮是唯一操作入口） */
+.vsidian-hover-popup .vsidian-hover-fm .vsidian-fm-header {
+  position: relative;
+}
+
+/* 展开/折叠按钮：默认透明且不接指针（保留 Tab 可达性——整体隐藏类声明
+   会把按钮移出 Tab 序，键盘用户将永远无法到达）；标题行 hover 或按钮
+   focus-visible 时显示并接指针 */
+.vsidian-hover-popup .vsidian-hover-fm-toggle {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
+  border-radius: 5px;
+  background: var(--vscode-editor-background, transparent);
+  color: var(--vscode-icon-foreground, inherit);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease-out;
+}
+
+.vsidian-hover-popup .vsidian-hover-fm .vsidian-fm-header:hover .vsidian-hover-fm-toggle,
+.vsidian-hover-popup .vsidian-hover-fm-toggle:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.vsidian-hover-popup .vsidian-hover-fm-toggle:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #4fc1ff);
+  outline-offset: 1px;
+}
+
+/* chevron 方向：默认向下（展开态）；收起态旋转 -90° 指向右（展开方向） */
+.vsidian-hover-popup .vsidian-hover-fm-toggle svg {
+  display: block;
+}
+
+.vsidian-hover-popup .vsidian-hover-fm-collapsed .vsidian-hover-fm-toggle svg {
+  transform: rotate(-90deg);
+}
+
+/* 收起态：成型表格的属性行与降级源码块隐藏（标题行保留——折叠区骨架）；
+   展开 = 移除修饰类，行/源码回到阅读侧既有呈现。选择器带 #app 前缀并
+   叠加双类：压过 #140 阅读侧行规则的特异性（#app … .vsidian-fm-row 为
+   display:grid），源序兜底之外再留余量 */
+#app .vsidian-hover-popup .vsidian-hover-fm.vsidian-hover-fm-collapsed .vsidian-fm-row {
+  display: none;
+}
+
+#app .vsidian-hover-popup .vsidian-hover-fm.vsidian-hover-fm-collapsed > pre {
+  display: none;
 }

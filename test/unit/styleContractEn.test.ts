@@ -96,17 +96,17 @@ describe('英文覆盖一致性契约（#178 机制 + #179 content 域全量 + #
     }
   })
 
-  it('chrome 域全部 64 条 id 均有英文覆盖（#180 全量交付 + #191 折行钮 + #208 刷新钮 + 面板批次 + #218 悬停浮层）', () => {
+  it('chrome 域全部 65 条 id 均有英文覆盖（#180 全量交付 + #191 折行钮 + #208 刷新钮 + 面板批次 + #218 悬停浮层 + #220 属性区）', () => {
     const chromeIds = STYLE_CONTRACT_ENTRIES.filter((e) => e.domain === 'chrome').map((e) => e.id)
-    expect(chromeIds.length).toBe(64)
+    expect(chromeIds.length).toBe(65)
     for (const id of chromeIds) {
       expect(STYLE_CONTRACT_EN_OVERRIDES[id], `chrome 条目缺英文覆盖：${id}`).toBeDefined()
     }
   })
 
-  it('两域合计 142 条全量覆盖，无覆盖表缺口（#179 + #180 收尾 + #191 + #201 + #208/#209 + #213 批次 + #218 悬停浮层）', () => {
-    expect(STYLE_CONTRACT_ENTRIES.length).toBe(142)
-    expect(Object.keys(STYLE_CONTRACT_EN_OVERRIDES).length).toBe(142)
+  it('两域合计 143 条全量覆盖，无覆盖表缺口（#179 + #180 收尾 + #191 + #201 + #208/#209 + #213 批次 + #218 悬停浮层 + #220 属性区）', () => {
+    expect(STYLE_CONTRACT_ENTRIES.length).toBe(143)
+    expect(Object.keys(STYLE_CONTRACT_EN_OVERRIDES).length).toBe(143)
     for (const entry of STYLE_CONTRACT_ENTRIES) {
       expect(STYLE_CONTRACT_EN_OVERRIDES[entry.id], `条目缺英文覆盖：${entry.id}`).toBeDefined()
     }
@@ -121,7 +121,7 @@ describe('英文覆盖一致性契约（#178 机制 + #179 content 域全量 + #
     expect(applyStyleContractEntryOverride(entry, 'zh-cn', STYLE_CONTRACT_EN_OVERRIDES)).toBe(entry)
   })
 
-  it('反向完整性：中文条目双语字段有值 ⇒ 英文覆盖必有对应键且非空（142 条全量）', () => {
+  it('反向完整性：中文条目双语字段有值 ⇒ 英文覆盖必有对应键且非空（143 条全量）', () => {
     // 双语字段反向锁（规格字段分级）：purpose/dom 为必填恒锁；states/
     // deprecated/removed 为可选，中文条目确有该字段才锁；example 等不译
     // 字段不在锁内。防未来新增条目/改写字段时英文覆盖漏跟（正向键锁

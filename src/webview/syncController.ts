@@ -128,6 +128,9 @@ import {
   hoverPopupProbe,
   hoverPreviewAnchorEnter,
   hoverPreviewAnchorLeave,
+  invalidateHoverPopupImages,
+  notifyHoverImageInvalidate,
+  notifyHoverImageResult,
   notifyHoverResult,
   setHoverPreviewContext,
 } from './hoverPopup'
@@ -1059,13 +1062,15 @@ export class WebviewSyncController {
       },
     )
     document.addEventListener('visibilitychange', this.imageVisibilityEntry)
-    // #218 悬停预览出站上下文：会话身份（init 后可用）+ 只读消息通道 +
-    // 父面板图片管理器（浮层内图片按现有能力装载；B 来源解析属 #220）。
+    // #218 悬停预览出站上下文：会话身份（init 后可用）+ 只读消息通道。
+    // #220 起：B 文档内容自带 B 身份资源管理器（hoverPopup 模块内创建，
+    // 图片经 sourceDocUri 走宿主 B 目录解析——不再注入父面板管理器）；
+    // codeHighlight 投影面板代码卡片设置的高亮开关（浮层朴素高亮形态）。
     // dispose 时清空（setHoverPreviewContext(null) 同步关浮层）
     setHoverPreviewContext({
       session: () => ({ sessionId: this.sessionId, docUri: this.docUri }),
       send: (message) => this.bridge.postMessage(message),
-      images: () => this.images as ImageResourceManager | undefined,
+      codeHighlight: () => this.codeCardConfig.highlight,
     })
     this.readingView = new VirtualReadingView(this.readingContainer, {
       // #10 图片生命周期：块挂载预备装载，卸载释放（src 清空、条目回收）
@@ -2413,13 +2418,18 @@ export class WebviewSyncController {
         break
       }
       case 'image.result':
-        // #10 图片解析结果路由（只读显示通道：暂停态同样可用）
+        // #10 图片解析结果路由（只读显示通道：暂停态同样可用）。#220 起同
+        // 步投递悬停浮层的 B 身份管理器（浮层内图片；未知 reqId 由两侧管理
+        // 器各自丢弃，双投递安全）
         this.images?.handleResult(message)
+        notifyHoverImageResult(message)
         break
       case 'image.invalidate':
         // #201 失效通知：作废命中条目并重发请求（新版本 URL；旧 reqId 在途
-        // 结果由代次守卫丢弃）。只读显示通道，暂停态同样可用
+        // 结果由代次守卫丢弃）。只读显示通道，暂停态同样可用。#220 浮层内
+        // B 图片同口径失效（命中条目重发 B 身份请求）
         this.images?.invalidate(message.srcs)
+        notifyHoverImageInvalidate(message.srcs)
         break
       case 'image.wake':
         // #201 及时核验：窗口焦点回归/远程重连，有活跃图源立即触发一轮
@@ -2437,6 +2447,8 @@ export class WebviewSyncController {
           break
         }
         this.images?.invalidateAll()
+        // #220 手动刷新全局失效：浮层内 B 图片同口径全量重挂（新代次戳 URI）
+        invalidateHoverPopupImages()
         resetMermaidLoadFailure()
         break
       case 'view.state.request': {

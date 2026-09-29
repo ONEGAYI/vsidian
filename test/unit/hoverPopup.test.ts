@@ -2,6 +2,8 @@
 // 保活、Esc 关闭、一次一个浮层、实例释放与迟到响应不重开、零抢焦点、
 // 只读渲染（任务禁写）；#219 局部范围（scope/range 过滤）、普通链接入口
 // 与锚点缺失分态。真实指针/IME/观感回归在 test/browser 与集成层。
+// #220 扩展：B 身份资源管理器（sourceDocUri 载荷与结果路由）、浮层内
+// 链接点击跳转、笔记属性区折叠状态机与代码高亮。
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { WebviewToHost } from '../../src/shared/protocol'
@@ -12,7 +14,10 @@ import {
   hoverPopupProbe,
   hoverPreviewAnchorEnter,
   hoverPreviewAnchorLeave,
+  invalidateHoverPopupImages,
   isHoverPopupOpen,
+  notifyHoverImageInvalidate,
+  notifyHoverImageResult,
   notifyHoverResult,
   setHoverPreviewContext,
   __resetHoverPopupForTest,
@@ -44,7 +49,7 @@ function makeHarness(): Harness {
     send: (message) => {
       sent.push(message)
     },
-    images: undefined,
+    codeHighlight: () => true,
   })
   const block = document.createElement('div')
   block.dataset['vsidianSrcStart'] = '10'
@@ -412,4 +417,316 @@ describe('局部范围与普通链接入口（#219）', () => {
     const req = requestOf(h)
     expect(req.linkHref).toBeUndefined()
   })
+})
+
+// ---- #220：来源资源、浮层内链接与笔记属性区 ----
+// B 文档内容以 B 为来源解析（图片经 sourceDocUri 走宿主 B 身份通道）、
+// 浮层内链接点击经既有 open 通道（附 sourceDocUri）、全文引用的属性区
+// 折叠状态机（默认折叠/热区按钮/刷新保留/重开复位）与代码高亮。
+describe('#220 来源资源与浮层内容（B 身份）', () => {
+  const B_FS_PATH = 'D:\\notes\\sub\\b.md'
+  /** 成型 frontmatter + 图片 + 双链/普通链接 + 代码块的 B 文档 */
+  const B_DOC = [
+    '---',
+    'title: B 笔记',
+    'count: 3',
+    '---',
+    '',
+    '# B 标题',
+    '',
+    '![B 图](./img.png)',
+    '',
+    '引用 [[C 笔记]] 与 [普通链接](c.md)。',
+    '',
+    '```js',
+    'const x = 1',
+    '```',
+    '',
+  ].join('\n')
+
+  /** 降级 frontmatter（嵌套映射值不受支持 → 转义源码块）的 B 文档 */
+  const B_DOC_DEGRADED_FM = [
+    '---',
+    'title: B 笔记',
+    'nested:',
+    '  key: value',
+    '---',
+    '',
+    '# B 标题',
+    '',
+  ].join('\n')
+
+  const resultOk = (text: string, scope: { kind: 'full' } | { kind: 'heading'; anchor: string } = { kind: 'full' }) => ({
+    target: { fsPath: B_FS_PATH, relPath: 'sub/b.md' },
+    version: 2,
+    text,
+    range: { start: 0, end: text.length },
+    scope,
+  })
+
+  interface Opened {
+    req: Extract<WebviewToHost, { kind: 'hover.request' }>
+    el: HTMLElement
+  }
+
+  /** 打开浮层并注入成功回包（默认 B_DOC 全文） */
+  function openWithResult(h: Harness, text = B_DOC, scope?: { kind: 'heading'; anchor: string }): Opened {
+    vi.useFakeTimers()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    const req = requestOf(h)
+    notifyHoverResult({
+      kind: 'hover.result',
+      reqId: req.reqId,
+      instanceId: req.instanceId,
+      ok: true,
+      ...resultOk(text, scope),
+    })
+    const el = popupEl()
+    if (!el) {
+      throw new Error('浮层未在场')
+    }
+    return { req, el }
+  }
+
+  it('B 内图片以 B 为来源：image.request 附 sourceDocUri（会话守卫字段仍是面板自身）', () => {
+    const h = makeHarness()
+    const { el } = openWithResult(h)
+    const img = el.querySelector<HTMLImageElement>('img')
+    expect(img, 'B 文档图片已挂载').toBeTruthy()
+    expect(img!.getAttribute('src'), '相对路径的 src 已剥离待宿主解析').toBe(null)
+    const imgReq = h.sent.find((m) => m.kind === 'image.request')
+    expect(imgReq).toBeTruthy()
+    if (imgReq && imgReq.kind === 'image.request') {
+      expect(imgReq.sourceDocUri).toBe(B_FS_PATH)
+      expect(imgReq.docUri).toBe(SESSION.docUri)
+      expect(imgReq.sessionId).toBe(SESSION.sessionId)
+      expect(imgReq.src).toBe('./img.png')
+    }
+  })
+
+  it('image.result 路由回浮层 B 管理器：src 应用到图片', () => {
+    const h = makeHarness()
+    const { el } = openWithResult(h)
+    const imgReq = h.sent.find((m) => m.kind === 'image.request')
+    if (!imgReq || imgReq.kind !== 'image.request') {
+      throw new Error('image.request 未发出')
+    }
+    notifyHoverImageResult({ reqId: imgReq.reqId, ok: true, src: 'vscode-webview://res/sub/img.png' })
+    const img = el.querySelector<HTMLImageElement>('img')
+    expect(img!.getAttribute('src')).toBe('vscode-webview://res/sub/img.png')
+  })
+
+  it('https 直连图源不经宿主：src 直接应用（无对应 image.request）', () => {
+    const h = makeHarness()
+    const doc = ['# B', '', '![外链](https://example.com/x.png)', ''].join('\n')
+    const { el } = openWithResult(h, doc)
+    const img = el.querySelector<HTMLImageElement>('img')
+    expect(img!.getAttribute('src')).toBe('https://example.com/x.png')
+    expect(h.sent.filter((m) => m.kind === 'image.request')).toHaveLength(0)
+  })
+
+  it('浮层内双链点击：wikilink.activate 附 sourceDocUri、零 edit.request、浮层关闭', () => {
+    const h = makeHarness()
+    const { el } = openWithResult(h)
+    const link = el.querySelector<HTMLAnchorElement>('a.vsidian-wikilink')
+    expect(link, 'B 内双链渲染为真实 a').toBeTruthy()
+    link!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    const activate = h.sent.find((m) => m.kind === 'wikilink.activate')
+    expect(activate).toBeTruthy()
+    if (activate && activate.kind === 'wikilink.activate') {
+      expect(activate.target).toBe('C 笔记')
+      expect(activate.sourceDocUri).toBe(B_FS_PATH)
+      expect(activate.docUri).toBe(SESSION.docUri)
+    }
+    expect(h.sent.filter((m) => m.kind === 'edit.request')).toHaveLength(0)
+    expect(isHoverPopupOpen(), '跳转即上下文切换，浮层关闭').toBe(false)
+  })
+
+  it('浮层内普通链接/外部链接点击：link.activate 附 sourceDocUri（外链经宿主分类处理）', () => {
+    const h = makeHarness()
+    const { el } = openWithResult(h)
+    const md = el.querySelector<HTMLAnchorElement>('a[href="c.md"]')
+    expect(md).toBeTruthy()
+    md!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    const activate = h.sent.find((m) => m.kind === 'link.activate')
+    if (!activate || activate.kind !== 'link.activate') {
+      throw new Error('link.activate 未发出')
+    }
+    expect(activate.href).toBe('c.md')
+    expect(activate.sourceDocUri).toBe(B_FS_PATH)
+    expect(isHoverPopupOpen()).toBe(false)
+  })
+
+  it('全文引用属性区：默认折叠（行隐藏类 + aria-expanded=false），标题行挂按钮', () => {
+    const h = makeHarness()
+    const { el } = openWithResult(h)
+    const section = el.querySelector<HTMLElement>('.vsidian-hover-fm')
+    expect(section, '成型 frontmatter 块挂属性区修饰类').toBeTruthy()
+    expect(section!.classList.contains('vsidian-hover-fm-collapsed'), '默认折叠').toBe(true)
+    const btn = section!.querySelector<HTMLButtonElement>('.vsidian-hover-fm-toggle')
+    expect(btn, '标题栏内挂展开/折叠按钮').toBeTruthy()
+    expect(btn!.getAttribute('aria-expanded')).toBe('false')
+    expect(section!.querySelectorAll('.vsidian-fm-row').length).toBeGreaterThan(0)
+    expect(hoverPopupProbe().fm).toBe('collapsed')
+  })
+
+  it('点击按钮切换展开；再点收回；按钮文案随状态换词', () => {
+    const h = makeHarness()
+    const { el } = openWithResult(h)
+    const btn = el.querySelector<HTMLButtonElement>('.vsidian-hover-fm-toggle')!
+    btn.click()
+    const section = el.querySelector<HTMLElement>('.vsidian-hover-fm')!
+    expect(section.classList.contains('vsidian-hover-fm-collapsed')).toBe(false)
+    expect(btn.getAttribute('aria-expanded')).toBe('true')
+    expect(hoverPopupProbe().fm).toBe('expanded')
+    const expandedLabel = btn.getAttribute('aria-label')
+    btn.click()
+    expect(el.querySelector<HTMLElement>('.vsidian-hover-fm')!.classList.contains('vsidian-hover-fm-collapsed')).toBe(true)
+    expect(btn.getAttribute('aria-expanded')).toBe('false')
+    expect(btn.getAttribute('aria-label')).not.toBe(expandedLabel)
+  })
+
+  it('按钮为真实 focusable button（type=button）：键盘 Enter/Space 经浏览器原生激活走同一 click 处理器（真实键序在浏览器套件验证）', () => {
+    const h = makeHarness()
+    const { el } = openWithResult(h)
+    const btn = el.querySelector<HTMLButtonElement>('.vsidian-hover-fm-toggle')!
+    expect(btn.tagName).toBe('BUTTON')
+    expect(btn.type).toBe('button')
+    btn.focus()
+    expect(document.activeElement).toBe(btn)
+    btn.click()
+    expect(hoverPopupProbe().fm).toBe('expanded')
+  })
+
+  it('刷新（同实例结果重放）保留展开状态；重新打开恢复折叠', () => {
+    const h = makeHarness()
+    const { req } = openWithResult(h)
+    el().querySelector<HTMLButtonElement>('.vsidian-hover-fm-toggle')!.click()
+    expect(hoverPopupProbe().fm).toBe('expanded')
+    // 目标内容变化引发的重建（同实例重放成功结果——#224 接入推送前以同
+    // instanceId+reqId 重放为刷新载体）：属性展开状态保持
+    notifyHoverResult({ kind: 'hover.result', reqId: req.reqId, instanceId: req.instanceId, ok: true, ...resultOk(B_DOC) })
+    expect(hoverPopupProbe().fm, '刷新不重置展开状态').toBe('expanded')
+    expect(el().querySelector<HTMLElement>('.vsidian-hover-fm')!.classList.contains('vsidian-hover-fm-collapsed')).toBe(false)
+    // 关闭重开：恢复默认折叠
+    closeHoverPopup()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    const req2 = h.sent.filter((m) => m.kind === 'hover.request').at(-1)
+    if (!req2 || req2.kind !== 'hover.request') {
+      throw new Error('第二次 hover.request 未发出')
+    }
+    notifyHoverResult({ kind: 'hover.result', reqId: req2.reqId, instanceId: req2.instanceId, ok: true, ...resultOk(B_DOC) })
+    expect(hoverPopupProbe().fm, '重开恢复折叠').toBe('collapsed')
+  })
+
+  it('章节引用不附带属性区；无 frontmatter 不显示标题行（探针 fm=none）', () => {
+    const h = makeHarness()
+    const headingStart = B_DOC.indexOf('# B 标题')
+    vi.useFakeTimers()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    const req = requestOf(h)
+    notifyHoverResult({
+      kind: 'hover.result', reqId: req.reqId, instanceId: req.instanceId, ok: true,
+      target: { fsPath: B_FS_PATH, relPath: 'sub/b.md' },
+      version: 2,
+      text: B_DOC,
+      range: { start: headingStart, end: B_DOC.length },
+      scope: { kind: 'heading', anchor: 'B 标题' },
+    })
+    expect(el().querySelector('.vsidian-hover-fm')).toBeNull()
+    expect(hoverPopupProbe().fm).toBe('none')
+
+    // 无 frontmatter 文档
+    closeHoverPopup()
+    const noFm = ['# 只有标题', '', '正文。', ''].join('\n')
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    const req2 = requestOf(h)
+    notifyHoverResult({ kind: 'hover.result', reqId: req2.reqId, instanceId: req2.instanceId, ok: true, ...resultOk(noFm) })
+    expect(el().querySelector('.vsidian-hover-fm')).toBeNull()
+    expect(el().querySelector('.vsidian-fm-header')).toBeNull()
+    expect(hoverPopupProbe().fm).toBe('none')
+  })
+
+  it('降级 frontmatter：合成标题行（同构类名）+ 默认折叠（不静默丢弃原文）', () => {
+    const h = makeHarness()
+    const { el: popup } = openWithResult(h, B_DOC_DEGRADED_FM)
+    const section = popup.querySelector<HTMLElement>('.vsidian-hover-fm')
+    expect(section).toBeTruthy()
+    expect(section!.querySelector('.vsidian-fm-header'), '降级态合成同构标题栏').toBeTruthy()
+    expect(section!.querySelector('pre'), '源码原文保留在场').toBeTruthy()
+    expect(section!.classList.contains('vsidian-hover-fm-collapsed')).toBe(true)
+    expect(hoverPopupProbe().fm).toBe('collapsed')
+  })
+
+  it('代码块沿用现有高亮引擎：tok 词表 span 注入，卡片工具条不进入浮层', () => {
+    const h = makeHarness()
+    const { el } = openWithResult(h)
+    const code = el.querySelector<HTMLElement>('pre code')
+    expect(code, 'B 文档代码块渲染').toBeTruthy()
+    expect(code!.querySelector('span[class^="tok-"]'), '朴素高亮形态（token span）').toBeTruthy()
+    expect(el.querySelector('.vsidian-code-card-header'), '卡片头部不进入浮层').toBeNull()
+  })
+
+  it('codeHighlight 上下文关闭时不注入 token（设置跟随面板配置）', () => {
+    const h = makeHarness()
+    setHoverPreviewContext({
+      session: () => SESSION,
+      send: (message) => {
+        h.sent.push(message)
+      },
+      codeHighlight: () => false,
+    })
+    const { el } = openWithResult(h)
+    const code = el.querySelector<HTMLElement>('pre code')
+    expect(code!.querySelector('span[class^="tok-"]')).toBeNull()
+    expect(code!.textContent).toContain('const x = 1')
+  })
+
+  it('失效通知路由到 B 管理器：命中条目重发新请求（新 reqId）', () => {
+    const h = makeHarness()
+    openWithResult(h)
+    const before = h.sent.filter((m) => m.kind === 'image.request')
+    expect(before).toHaveLength(1)
+    notifyHoverImageInvalidate(['./img.png'])
+    const after = h.sent.filter((m) => m.kind === 'image.request')
+    expect(after.length).toBe(2)
+    if (after[1]!.kind === 'image.request') {
+      expect(after[1]!.reqId, '新 reqId 重发').not.toBe((before[0] as { reqId: number }).reqId)
+      expect(after[1]!.sourceDocUri).toBe(B_FS_PATH)
+    }
+  })
+
+  it('手动刷新失效路由到 B 管理器：全量重挂重发（新 reqId）', () => {
+    const h = makeHarness()
+    openWithResult(h)
+    expect(h.sent.filter((m) => m.kind === 'image.request')).toHaveLength(1)
+    invalidateHoverPopupImages()
+    expect(h.sent.filter((m) => m.kind === 'image.request')).toHaveLength(2)
+  })
+
+  it('关闭浮层释放 B 管理器：迟到的 image.result 不再应用任何 DOM', () => {
+    const h = makeHarness()
+    const { el } = openWithResult(h)
+    const imgReq = h.sent.find((m) => m.kind === 'image.request')
+    if (!imgReq || imgReq.kind !== 'image.request') {
+      throw new Error('image.request 未发出')
+    }
+    closeHoverPopup()
+    expect(popupEl()).toBeNull()
+    notifyHoverImageResult({ reqId: imgReq.reqId, ok: true, src: 'vscode-webview://res/late.png' })
+    expect(el.isConnected).toBe(false)
+    expect(popupEl()).toBeNull()
+  })
+
+  function el(): HTMLElement {
+    const found = popupEl()
+    if (!found) {
+      throw new Error('浮层未在场')
+    }
+    return found
+  }
 })

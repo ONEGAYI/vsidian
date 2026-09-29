@@ -381,7 +381,7 @@ const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   'context-menu': 1,
   backlinks: 4,
   outlinks: 2,
-  'hover-preview': 1,
+  'hover-preview': 2,
 }
 
 describe('styleContract 类目体系（#145）', () => {

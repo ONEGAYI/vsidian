@@ -352,6 +352,10 @@ export const zhCn: Record<MessageKey, string> = {
   'hover.errorNonMarkdown': '{target} 不是 Markdown 笔记：本期预览仅支持 Markdown 文档',
   'hover.errorReadFailed': '读取目标文档失败',
   'hover.errorAnchorMissing': '目标笔记中不存在锚点：{target}#{anchor}（不会以全文替代显示）',
+  /** #220 引用 Reading 内容：浮层内笔记属性区展开/折叠按钮的无障碍文案
+   *  （aria-label 与 title 同词；按钮是唯一操作入口，标题行悬停只负责显示） */
+  'hover.content.fmExpand': '展开笔记属性',
+  'hover.content.fmCollapse': '收起笔记属性',
 
   /** 反链面板（#197：四态与条目；形态改版批次：工具栏/排序/搜索/页头） */
   'backlinks.label': '反向链接',
