@@ -1,6 +1,9 @@
 // 悬停预览消息协议契约（#218）：hover.request / hover.result 的运行期
 // 校验器行为——校验器与联合类型三处不同步 = 静默丢消息（protocol-notes
 // 陷阱清单），此处钉住合法形态放行、非法形态整体拒绝（不部分读取）。
+// #220 扩展：来源资源通道（image.request / link.activate / wikilink.activate
+// 的可选 sourceDocUri——B 文档身份）与 view.state hoverPreview 探针的
+// 属性区/图片观测字段。
 import { describe, expect, it } from 'vitest'
 import {
   isHostToWebview,
@@ -131,5 +134,85 @@ describe('hover.result 校验（宿主 → webview）', () => {
     expect(isHostToWebview({ ...base, scope: { kind: 'block', anchor: '^blk1' } })).toBe(true)
     expect(isHostToWebview({ ...base, scope: { kind: 'heading' } }), 'heading 缺 anchor 应拒绝').toBe(false)
     expect(isHostToWebview({ ...base, scope: { kind: 'block', anchor: 3 } })).toBe(false)
+  })
+})
+
+// #220 来源资源：悬停浮层内 B 文档的图片/链接以 B 为来源解析——webview
+// 在既有通道上附可选 sourceDocUri（B 的 fsPath；缺省 = 面板自身文档，
+// 向后兼容）。此处钉住三条消息的校验器行为。
+describe('#220 来源资源通道：sourceDocUri 可选字段校验', () => {
+  const SRC = 'D:\\notes\\sub\\b.md'
+
+  it('image.request：sourceDocUri 可选非空字符串；缺省与非法形态', () => {
+    const base = {
+      kind: 'image.request',
+      sessionId: 'panel-1',
+      docUri: 'file:///d%3A/notes/a.md',
+      reqId: 1,
+      src: './img.png',
+    } as Record<string, unknown>
+    expect(isWebviewToHost({ ...base, sourceDocUri: SRC })).toBe(true)
+    expect(isWebviewToHost(base), '缺省 = 面板自身文档（向后兼容）').toBe(true)
+    expect(isWebviewToHost({ ...base, sourceDocUri: '' }), '空串拒绝').toBe(false)
+    expect(isWebviewToHost({ ...base, sourceDocUri: 3 })).toBe(false)
+  })
+
+  it('link.activate / wikilink.activate：sourceDocUri 同一口径', () => {
+    const link = {
+      kind: 'link.activate',
+      sessionId: 'panel-1',
+      docUri: 'file:///d%3A/notes/a.md',
+      href: 'relative.md',
+      srcStart: 0,
+      srcEnd: 5,
+    } as Record<string, unknown>
+    expect(isWebviewToHost({ ...link, sourceDocUri: SRC })).toBe(true)
+    expect(isWebviewToHost(link)).toBe(true)
+    expect(isWebviewToHost({ ...link, sourceDocUri: '' })).toBe(false)
+
+    const wikilink = {
+      kind: 'wikilink.activate',
+      sessionId: 'panel-1',
+      docUri: 'file:///d%3A/notes/a.md',
+      target: '另一笔记',
+      srcStart: 0,
+      srcEnd: 5,
+    } as Record<string, unknown>
+    expect(isWebviewToHost({ ...wikilink, sourceDocUri: SRC })).toBe(true)
+    expect(isWebviewToHost(wikilink)).toBe(true)
+    expect(isWebviewToHost({ ...wikilink, sourceDocUri: null })).toBe(false)
+  })
+
+  it('view.state hoverPreview 探针：#220 新增 fm（三态枚举）与 imageSrcs（字符串数组）', () => {
+    const state = {
+      kind: 'view.state',
+      text: 'x',
+      docLength: 1,
+      lineCount: 1,
+      renderedLines: 1,
+      hoverPreview: {
+        open: true,
+        state: 'content',
+        note: 'sub/b.md',
+        blocks: 3,
+        scope: 'full',
+        fm: 'collapsed',
+        imageSrcs: ['vscode-webview://res/img.png'],
+      },
+    } as Record<string, unknown>
+    expect(isWebviewToHost(state)).toBe(true)
+    // 旧形态（无新字段）仍放行——探针字段可选，宿主侧向后兼容
+    const legacy = {
+      ...state,
+      hoverPreview: { open: false, state: 'loading', note: '', blocks: 0, scope: '' },
+    }
+    expect(isWebviewToHost(legacy)).toBe(true)
+    // 非法形态：fm 枚举外取值 / imageSrcs 非字符串数组
+    expect(
+      isWebviewToHost({ ...state, hoverPreview: { ...(state.hoverPreview as object), fm: 'half' } }),
+    ).toBe(false)
+    expect(
+      isWebviewToHost({ ...state, hoverPreview: { ...(state.hoverPreview as object), imageSrcs: ['a', 3] } }),
+    ).toBe(false)
   })
 })

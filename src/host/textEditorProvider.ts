@@ -305,6 +305,23 @@ function linkContextOf(document: vscode.TextDocument): LinkContext {
   }
 }
 
+/**
+ * #220 来源文档的解析上下文（悬停浮层 B 身份）：与 linkContextOf 同款
+ * 语义（docDir 基准、所属工作区文件夹根边界、宿主平台语义），但由 fsPath
+ * 构造——B 只经 openTextDocument 只装载，不打开面板。B 经
+ * resolveVaultLinkFile 的 ADR-0008 根内语义送达（会话侧 hoverSourceFsPath
+ * 守卫已比对），此处按其目录解析图片/链接。
+ */
+function linkContextOfPath(fsPath: string): LinkContext {
+  const uri = vscode.Uri.file(fsPath)
+  const folder = vscode.workspace.getWorkspaceFolder(uri)
+  return {
+    docDir: path.dirname(fsPath),
+    rootDir: (folder ? folder.uri : vscode.Uri.joinPath(uri, '..')).fsPath,
+    isWindowsHost: process.platform === 'win32',
+  }
+}
+
 export function createTextEditorProvider(
   context: vscode.ExtensionContext,
   settings?: SettingsWiring,
@@ -1136,15 +1153,59 @@ export function createTextEditorProvider(
       }
       // ---- #10 链接跳转与图片资源执行（面板端口注入；URI 解析在宿主侧） ----
       const linkCtx = linkContextOf(document)
-      const openLink = (intent: { href: string; srcStart: number; srcEnd: number }): void => {
+      const openLink = (
+        intent: { href: string; srcStart: number; srcEnd: number; sourceDocUri?: string },
+      ): void => {
         // #160 锚点落位的面板双路依赖（会话表 + 就绪等待）经端口注入：
-        // executeLinkIntent 保持模块级（与 vscode 层纯函数分工一致）
+        // executeLinkIntent 保持模块级（与 vscode 层纯函数分工一致）。
+        // #220 来源链接（悬停浮层内）：以 B 文档为解析语境（B 的目录/根
+        // 边界；页内 #frag 锚点目标即 B），B 打开失败（悬停后文件被删）时
+        // 静默不动作
+        const sourceFsPath = intent.sourceDocUri
+        if (sourceFsPath !== undefined) {
+          void (async () => {
+            try {
+              const sourceDoc = await vscode.workspace.openTextDocument(
+                vscode.Uri.file(sourceFsPath),
+              )
+              await executeLinkIntent(
+                sourceDoc,
+                linkContextOf(sourceDoc),
+                intent,
+                entry.linkLog,
+                { waitForReadyPanel },
+              )
+            } catch {
+              // 来源文档不可装载：跳转意图无从解析，丢弃（不回退到面板
+              // 自身文档——错误语义）
+            }
+          })()
+          return
+        }
         void executeLinkIntent(document, linkCtx, intent, entry.linkLog, {
           waitForReadyPanel,
         })
       }
-      // #11 双链跳转执行端口（按需 findFiles 解析 + 打开/定位/反馈）
-      const openWikilink = (intent: { target: string; srcStart: number; srcEnd: number }): void => {
+      // #11 双链跳转执行端口（按需 findFiles 解析 + 打开/定位/反馈）。
+      // #220 来源双链（悬停浮层内）：以 B 文档为解析基准（[[#锚点]] 自
+      // 引用 B、相对路径按 B 目录），B 打开失败时静默不动作
+      const openWikilink = (
+        intent: { target: string; srcStart: number; srcEnd: number; sourceDocUri?: string },
+      ): void => {
+        const sourceFsPath = intent.sourceDocUri
+        if (sourceFsPath !== undefined) {
+          void (async () => {
+            try {
+              const sourceDoc = await vscode.workspace.openTextDocument(
+                vscode.Uri.file(sourceFsPath),
+              )
+              await executeWikilinkIntent(sourceDoc, intent, entry.linkLog)
+            } catch {
+              // 来源文档不可装载：同 openLink 的丢弃语义
+            }
+          })()
+          return
+        }
         void executeWikilinkIntent(document, intent, entry.linkLog)
       }
       // #218 悬停预览文档读取端口：hoverDocAccess 无副作用路径（目标解析 +
@@ -1182,11 +1243,17 @@ export function createTextEditorProvider(
           report(outcome)
         })()
       }
-      const resolveImage = async (src: string): Promise<ImageResolution> => {
-        // #208：代次在解析时取值——手动刷新后同 src 的新请求得到新代次戳
+      const resolveImage = async (
+        src: string,
+        sourceDocUri?: string,
+      ): Promise<ImageResolution> => {
+        // #208：代次在解析时取值——手动刷新后同 src 的新请求得到新代次戳。
+        // #220 来源化解析（悬停浮层 B 身份图片）：以 B 的目录/根边界构造
+        // 上下文（同一 classifyImageTarget 白名单与 asWebviewUri 机制）；
+        // 缺省 = 面板自身文档
         return resolveWorkspaceImage(
           src,
-          linkCtx,
+          sourceDocUri !== undefined ? linkContextOfPath(sourceDocUri) : linkCtx,
           webviewPanel.webview,
           imageRefresh.versions,
           entry.session.getImageGeneration(),

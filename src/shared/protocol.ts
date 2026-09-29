@@ -608,8 +608,19 @@ export type WebviewToHost =
       /** #140 Popover 改版：frontmatter 属性编辑浮层是否打开（旧 webview 缺省） */
       fmPopoverOpen?: boolean
       /** #218 悬停预览观测：浮层开闭、内容态（loading/content/error）、
-       *  目标标识（成功为根内相对路径）与内容块数（旧 webview 缺省） */
-      hoverPreview?: { open: boolean; state: 'loading' | 'content' | 'error'; note: string; blocks: number; scope: 'full' | 'heading' | 'block' | '' }
+       *  目标标识（成功为根内相对路径）与内容块数（旧 webview 缺省）。
+       *  #220 新增：fm 属性区三态（none=无属性区/非全文范围，collapsed/
+       *  expanded=全文引用的折叠态）与 imageSrcs（浮层内已应用 src 的图片
+       *  地址——B 身份资源解析的观测面；字段可选，旧 webview 缺省） */
+      hoverPreview?: {
+        open: boolean
+        state: 'loading' | 'content' | 'error'
+        note: string
+        blocks: number
+        scope: 'full' | 'heading' | 'block' | ''
+        fm?: 'none' | 'collapsed' | 'expanded'
+        imageSrcs?: string[]
+      }
     }
       /** 阅读视图性能探针回报（#7）：滚动往返期间的挂载/回收与解析观测 */
   | {
@@ -627,7 +638,10 @@ export type WebviewToHost =
     }
   /** 链接跳转意图（#10）：webview 只上报原始 URI 与源位置，执行归宿主——
    *  URI 解析与路径拼接（含 Windows/远程语义）只在宿主侧进行。阅读视图
-   *  单击、实时预览 Ctrl/Cmd+单击产生；href 为源文原样（未解码/未规范化） */
+   *  单击、实时预览 Ctrl/Cmd+单击产生；href 为源文原样（未解码/未规范化）。
+   *  #220 来源资源：悬停浮层内（B 文档 Reading 内容）点击的链接附
+   *  sourceDocUri（B 的 fsPath，hover.result 成功回包送达过的目标）——宿主
+   *  按 B 目录解析并执行；缺省 = 面板自身文档（主视图点击，向后兼容） */
   | {
       kind: 'link.activate'
       sessionId: string
@@ -635,13 +649,16 @@ export type WebviewToHost =
       href: string
       srcStart: number
       srcEnd: number
+      /** #220 来源文档（悬停浮层内链接）；宿主侧与面板已送达的悬停目标比对，不匹配即丢弃 */
+      sourceDocUri?: string
     }
   /** 双链跳转意图（#11）：与 link.activate 同通道语义，但目标是 Obsidian
    *  双链（按名/按路径在工作区内解析，非 URI）——分类走 wikilinkTarget
    *  而非 #10 的 URI 白名单。target 为 `[[` 与 `]]` 之间、`|` 之前的原文
    *  （未 trim；宿主解析自带规范化）。阅读视图单击、实时预览
    *  Ctrl/Cmd+单击产生；srcStart/srcEnd 覆盖整个 `[[…]]` 出现（阅读视图
-   *  为所在块源锚点） */
+   *  为所在块源锚点）。#220 sourceDocUri 语义与 link.activate 同（浮层内
+   *  双链以 B 为来源解析） */
   | {
       kind: 'wikilink.activate'
       sessionId: string
@@ -649,10 +666,25 @@ export type WebviewToHost =
       target: string
       srcStart: number
       srcEnd: number
+      /** #220 来源文档（悬停浮层内双链）；宿主侧与面板已送达的悬停目标比对，不匹配即丢弃 */
+      sourceDocUri?: string
     }
   /** 图片资源解析请求（#10）：非 http(s) 直连的工作区图源经宿主解析为
-   *  webview 可加载地址（reqId 会话面板内自增，对应 image.result） */
-  | { kind: 'image.request'; sessionId: string; docUri: string; reqId: number; src: string }
+   *  webview 可加载地址（reqId 会话面板内自增，对应 image.result）。
+   *  #220 来源资源：悬停浮层内 B 文档的图片附 sourceDocUri（B 的 fsPath）
+   *  ——宿主按 B 目录走同一 classifyImageTarget 白名单与 asWebviewUri 机制
+   *  （会话守卫字段仍为面板自身文档；sourceDocUri 与已送达悬停目标比对，
+   *  不匹配即丢弃）；缺省 = 面板自身文档。来源化请求不进会话解析缓存/
+   *  在途去重表（浮层短生命周期；跨开缓存属 #224 有界缓存） */
+  | {
+      kind: 'image.request'
+      sessionId: string
+      docUri: string
+      reqId: number
+      src: string
+      /** #220 来源文档（悬停浮层内图片） */
+      sourceDocUri?: string
+    }
   /** 图片周期核验（#201）：webview 活跃挂载图源（非直连）合并上报，宿主
    *  stat 对比版本表后对变化目标回发 image.invalidate（维持目标不响应）。
    *  由 webview 调度器驱动：间隔约 30 秒、无活跃槽位停止、面板恢复可见/
@@ -2399,7 +2431,11 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
           isString(v.hoverPreview.note) &&
           isNonNegativeInt(v.hoverPreview.blocks) &&
           (v.hoverPreview.scope === 'full' || v.hoverPreview.scope === 'heading' ||
-            v.hoverPreview.scope === 'block' || v.hoverPreview.scope === ''))) &&
+            v.hoverPreview.scope === 'block' || v.hoverPreview.scope === '') &&
+          (v.hoverPreview.fm === undefined || v.hoverPreview.fm === 'none' ||
+            v.hoverPreview.fm === 'collapsed' || v.hoverPreview.fm === 'expanded') &&
+          (v.hoverPreview.imageSrcs === undefined ||
+            (Array.isArray(v.hoverPreview.imageSrcs) && v.hoverPreview.imageSrcs.every(isString))))) &&
         (v.typography === undefined || isTypographyProbe(v.typography))
       )
     case 'reading.perf.report':
@@ -2413,20 +2449,24 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         typeof v.ok === 'boolean'
       )
     case 'link.activate':
+      // #220 sourceDocUri（悬停浮层内链接的来源文档）：可选非空字符串
       return (
         isString(v.sessionId) &&
         isString(v.docUri) &&
         isString(v.href) &&
         isNonNegativeInt(v.srcStart) &&
-        isNonNegativeInt(v.srcEnd)
+        isNonNegativeInt(v.srcEnd) &&
+        (v.sourceDocUri === undefined || (typeof v.sourceDocUri === 'string' && v.sourceDocUri.length > 0))
       )
     case 'wikilink.activate':
+      // #220 sourceDocUri 语义与 link.activate 同
       return (
         isString(v.sessionId) &&
         isString(v.docUri) &&
         isString(v.target) &&
         isNonNegativeInt(v.srcStart) &&
-        isNonNegativeInt(v.srcEnd)
+        isNonNegativeInt(v.srcEnd) &&
+        (v.sourceDocUri === undefined || (typeof v.sourceDocUri === 'string' && v.sourceDocUri.length > 0))
       )
     case 'codeblock.copy':
       return (
@@ -2457,11 +2497,13 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         v.fileName.length <= IMAGE_PASTE_LIMITS.fileNameHintMaxChars
       )
     case 'image.request':
+      // #220 sourceDocUri（悬停浮层内图片的来源文档）：可选非空字符串
       return (
         isString(v.sessionId) &&
         isString(v.docUri) &&
         isPositiveInt(v.reqId) &&
-        isString(v.src)
+        isString(v.src) &&
+        (v.sourceDocUri === undefined || (typeof v.sourceDocUri === 'string' && v.sourceDocUri.length > 0))
       )
     case 'image.verify':
       // #201 周期核验：条目形态（state 枚举 + 可选 reason 码）

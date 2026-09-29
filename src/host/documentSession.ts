@@ -58,11 +58,13 @@ export interface HostDocumentPort {
 export interface PanelPort {
   send(message: HostToWebview): void
   /** #10 链接跳转执行（vscode 层注入：URI 解析白名单 + openExternal/
-   *  showTextDocument/用户反馈）；只读交互，暂停态同样放行 */
-  openLink?(intent: { href: string; srcStart: number; srcEnd: number }): void
+   *  showTextDocument/用户反馈）；只读交互，暂停态同样放行。#220 起 intent
+   *  可携 sourceDocUri（悬停浮层内链接以 B 文档为来源解析执行） */
+  openLink?(intent: { href: string; srcStart: number; srcEnd: number; sourceDocUri?: string }): void
   /** #11 双链跳转执行（vscode 层注入：wikilinkTarget 按需解析 + 打开/
-   *  定位/用户反馈）；只读交互，暂停态同样放行 */
-  openWikilink?(intent: { target: string; srcStart: number; srcEnd: number }): void
+   *  定位/用户反馈）；只读交互，暂停态同样放行。#220 起 intent 可携
+   *  sourceDocUri（语义与 openLink 同） */
+  openWikilink?(intent: { target: string; srcStart: number; srcEnd: number; sourceDocUri?: string }): void
   /** #218 悬停预览文档读取（vscode 层注入：hoverDocAccess 无副作用读取——
    *  目标解析 + openTextDocument + LF 转换）；report 回报 hover.result 载荷
    *  （成功携带身份/版本/全文/范围，失败为错误分态）。只读交互，不进
@@ -71,8 +73,10 @@ export interface PanelPort {
     payload: HoverPreviewRequestPayload,
     report: (result: HoverReadOutcome) => void,
   ): void
-  /** #10 图片资源解析（vscode 层注入：classifyImageTarget + asWebviewUri） */
-  resolveImage?(src: string): Promise<ImageResolution>
+  /** #10 图片资源解析（vscode 层注入：classifyImageTarget + asWebviewUri）。
+   *  #220 起第二可选参 sourceDocUri：悬停浮层内 B 文档图片的来源上下文
+   *  （vscode 层按 B 目录构造 LinkContext）；缺省 = 面板自身文档 */
+  resolveImage?(src: string, sourceDocUri?: string): Promise<ImageResolution>
   /** #161 图片粘贴落盘（vscode 层注入：设置读取 + 目录解析 + writeFile）；
    *  report 回报成功（携插入文本）/ 目录非法 / 写入失败 */
   pasteImage?(
@@ -201,6 +205,12 @@ interface PanelEntry {
   /** webview 曾在会话内重载（ready 重复到达，B-2）：暂停面板复制未确认
    *  输入时跳过面板查询（重载后 view.state 是权威全文，不代表冲突前输入） */
   reloaded: boolean
+  /** #220 悬停来源记录：本面板最近一次 hover.result 成功送达的目标 fsPath
+   *  ——来源资源守卫的比对基准（image.request / link.activate /
+   *  wikilink.activate 的 sourceDocUri 须与之相等才放行；一次一个浮层，
+   *  单值即够，成功送达即覆盖）。目标本身经 resolveVaultLinkFile 的
+   *  ADR-0008 根内语义解析，记录在案 = 来源已受根边界约束 */
+  hoverSourceFsPath?: string
 }
 
 const ACK_CACHE_LIMIT = 64
@@ -647,27 +657,38 @@ export class DocumentSession {
         return Promise.resolve()
       case 'link.activate': {
         // #10 链接跳转意图：校验归属与 ready 后交面板端口执行。只读交互，
-        // 不受写回暂停影响（暂停面板照样可以点链接）
+        // 不受写回暂停影响（暂停面板照样可以点链接）。#220 sourceDocUri
+        //（悬停浮层内链接）：与面板已送达的悬停来源比对，不匹配即丢弃
+        //——B 内链接按 A 目录解析是错误语义，宁可不动作（不回落）
         if (!panel.ready || message.docUri !== this.docUri) {
+          return Promise.resolve()
+        }
+        if (message.sourceDocUri !== undefined && message.sourceDocUri !== panel.hoverSourceFsPath) {
           return Promise.resolve()
         }
         panel.port.openLink?.({
           href: message.href,
           srcStart: message.srcStart,
           srcEnd: message.srcEnd,
+          ...(message.sourceDocUri !== undefined ? { sourceDocUri: message.sourceDocUri } : {}),
         })
         return Promise.resolve()
       }
       case 'wikilink.activate': {
         // #11 双链跳转意图：与 link.activate 同校验口径（归属 + ready），
-        // 执行（按名/路径解析、打开与定位）归宿主 vscode 层
+        // 执行（按名/路径解析、打开与定位）归宿主 vscode 层。#220
+        // sourceDocUri（悬停浮层内双链）守卫与 link.activate 同
         if (!panel.ready || message.docUri !== this.docUri) {
+          return Promise.resolve()
+        }
+        if (message.sourceDocUri !== undefined && message.sourceDocUri !== panel.hoverSourceFsPath) {
           return Promise.resolve()
         }
         panel.port.openWikilink?.({
           target: message.target,
           srcStart: message.srcStart,
           srcEnd: message.srcEnd,
+          ...(message.sourceDocUri !== undefined ? { sourceDocUri: message.sourceDocUri } : {}),
         })
         return Promise.resolve()
       }
@@ -684,9 +705,15 @@ export class DocumentSession {
       }
       case 'image.request': {
         // #10 图片解析请求：同 src 在途去重 + 成功缓存（失败重试重解析）。
-        // 返回完成 Promise（image.result 已回发才算处理完，调用方可等待）
+        // 返回完成 Promise（image.result 已回发才算处理完，调用方可等待）。
+        // #220 来源化请求（sourceDocUri = 悬停浮层 B 文档身份）：守卫通过
+        // 后走独立解析路径——不进会话缓存/在途去重表（键为裸 src，跨来源
+        // 会串台；浮层短生命周期，跨开缓存属 #224 有界缓存）
         if (!panel.ready || message.docUri !== this.docUri) {
           return Promise.resolve()
+        }
+        if (message.sourceDocUri !== undefined) {
+          return this.resolveSourcedImageRequest(panel, message.reqId, message.src, message.sourceDocUri)
         }
         return this.resolveImageRequest(panel, message.reqId, message.src)
       }
@@ -750,6 +777,11 @@ export class DocumentSession {
           return Promise.resolve()
         }
         const report = (result: HoverReadOutcome): void => {
+          if (result.ok) {
+            // #220 来源记录：成功送达即更新（后续本面板的 sourceDocUri
+            // 守卫以此比对；一次一个浮层，单值即够）
+            panel.hoverSourceFsPath = result.fsPath
+          }
           panel.port.send(
             result.ok
               ? {
@@ -944,6 +976,39 @@ export class DocumentSession {
       })
     }
     send(await pending)
+  }
+
+  /**
+   * #220 来源化图片解析（悬停浮层内 B 文档图片）：守卫（sourceDocUri 须为
+   * 本面板已送达 hover.result 成功回包的目标）通过后直连解析端口——不进
+   * 会话缓存/在途去重表/失效反查登记（键均为裸 src，跨来源会串台；浮层
+   * 短生命周期，重复请求的代价是重复 stat，跨开缓存与失效登记属 #224 有
+   * 界缓存）。解析异常收敛 read-error 回发（浮层内图片可见失败可重试）。
+   */
+  private async resolveSourcedImageRequest(
+    panel: PanelEntry,
+    reqId: number,
+    src: string,
+    sourceDocUri: string,
+  ): Promise<void> {
+    if (sourceDocUri !== panel.hoverSourceFsPath) {
+      return // 来源守卫：非本面板送达过的悬停目标，静默丢弃（不信任前端任意 URI）
+    }
+    const resolver = panel.port.resolveImage
+    const resolution = resolver
+      ? await resolver(src, sourceDocUri).catch((): ImageResolution => ({ ok: false, reason: 'read-error' }))
+      : { ok: false, reason: 'read-error' } as ImageResolution
+    if (resolution.ok) {
+      panel.port.send({ kind: 'image.result', reqId, ok: true, src: resolution.src })
+    } else {
+      panel.port.send({
+        kind: 'image.result',
+        reqId,
+        ok: false,
+        reason: resolution.reason,
+        detail: resolution.detail,
+      })
+    }
   }
 
   /** 结果落库（#201）：登记反查映射；被失效覆盖（overshadowKey 非空）时
