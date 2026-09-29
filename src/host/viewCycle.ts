@@ -35,6 +35,47 @@ export function readRememberedMode(get: <T>(key: string) => T | undefined): TriV
   return value === 'reading' || value === 'source' ? value : 'live'
 }
 
+// ---- 记忆写入的写后自愈（#169）----
+// 1.86.2 的 globalState 存在旧值迟到回翻：update 确认且读回正确后，
+// 前一次写入的迟到 storage 广播仍可把值盖回旧值（集成宿主实测时间线：
+// ack 后 ~0–200ms 内被翻回、无任何扩展侧写入参与，settingsService 的
+// 已知环境特性注释记录过同类现象）。守卫在写后的稳定窗内复查，
+// 翻回且期间没有更新写入（代数未前移）时重写目标值。
+
+/** 自愈节拍常量（宿主接线与单测同源）：检查间隔与回声延迟同量级
+ *  （复用 resetLastMode 稳定窗的 250ms 先例），复查窗口约 2s */
+export const MODE_MEMORY_HEAL = {
+  checkIntervalMs: 250,
+  maxChecks: 8,
+  maxRewrites: 3,
+} as const
+
+/** 自愈决策（纯函数，宿主层注入定时与读写；守卫循环在整个复查窗口内
+ *  逐拍调用——回声可能晚于首次复查，值正确只是本拍无事）：
+ *  - hold：值与目标一致，本拍不动作（窗口未尽继续观察）
+ *  - rewrite：值被翻回且本写入仍是最新（无让位），指示重写
+ *  - yield：期间出现了更新的写入——旧守卫让位（新写入自带新守卫）
+ *  - give-up：重写次数用尽仍被翻回（异常态，宿主层留痕放行） */
+export type ModeMemoryHealStep = { action: 'hold' | 'rewrite' | 'yield' | 'give-up' }
+
+export function decideModeMemoryHeal(probe: {
+  target: TriViewMode
+  current: TriViewMode
+  isLatestWrite: boolean
+  rewritesUsed: number
+}): ModeMemoryHealStep {
+  if (!probe.isLatestWrite) {
+    return { action: 'yield' }
+  }
+  if (probe.current === probe.target) {
+    return { action: 'hold' }
+  }
+  if (probe.rewritesUsed >= MODE_MEMORY_HEAL.maxRewrites) {
+    return { action: 'give-up' }
+  }
+  return { action: 'rewrite' }
+}
+
 /** resolveCustomTextEditor 阶段的装配行为（记忆 + diff 防御 → 决策）：
  *  - bounce-to-source：priority=default 下 VSCode 把 .md 交给本扩展，记忆为
  *    source 时立即弹回原生编辑器（不装配任何 webview 内容）；

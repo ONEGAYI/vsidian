@@ -41,11 +41,13 @@ import {
   type WebviewToHost,
 } from '../shared/protocol'
 import {
+  decideModeMemoryHeal,
   decideReadingRestore,
   decideResolveBehavior,
   isDiffContext,
   isUriInDiffContext,
   LAST_MODE_KEY,
+  MODE_MEMORY_HEAL,
   nextTriMode,
   planViewSwitch,
   readRememberedMode,
@@ -546,11 +548,47 @@ export function createTextEditorProvider(
    *  面板就绪后首份 view.state 到达即消费（见 handlePanelViewState） */
   const pendingReadingRestore = new Set<string>()
 
-  /** 记忆读取/写入（context.globalState；只在成功切换后写入，无历史不写入） */
+  /** 记忆读取/写入（context.globalState；只在成功切换后写入，无历史不写入）。
+   *  #169 写后自愈：1.86.2 storage 的旧值迟到回翻会把刚确认的值盖回旧值
+   *  （集成宿主仪表化时间线：ack 后被前次写入的迟到回声覆盖、无扩展侧
+   *  写入参与）。所有写入方（切换链路与 _test.resetLastMode）统一走
+   *  writeRemembered 入口：每次写入前移代数并启动守卫，稳定窗内复查、
+   *  翻回且未被更新写入取代时重写（决策纯函数见 viewCycle）。 */
   const readRemembered = (): TriViewMode =>
     readRememberedMode(context.globalState.get.bind(context.globalState))
+  let rememberedWriteGeneration = 0
+  const healRememberedWrite = (mode: TriViewMode, generation: number): void => {
+    let rewritesUsed = 0
+    let checksLeft = MODE_MEMORY_HEAL.maxChecks
+    const tick = async (): Promise<void> => {
+      if (checksLeft <= 0) {
+        return
+      }
+      checksLeft -= 1
+      const step = decideModeMemoryHeal({
+        target: mode,
+        current: readRemembered(),
+        isLatestWrite: generation === rememberedWriteGeneration,
+        rewritesUsed,
+      })
+      if (step.action === 'yield' || step.action === 'give-up') {
+        if (step.action === 'give-up') {
+          console.warn(`[vsidian] mode memory self-heal gave up: target=${mode} current=${readRemembered()}`)
+        }
+        return
+      }
+      if (step.action === 'rewrite') {
+        rewritesUsed += 1
+        await context.globalState.update(LAST_MODE_KEY, mode)
+      }
+      setTimeout(() => void tick(), MODE_MEMORY_HEAL.checkIntervalMs)
+    }
+    setTimeout(() => void tick(), MODE_MEMORY_HEAL.checkIntervalMs)
+  }
   const writeRemembered = async (mode: TriViewMode): Promise<void> => {
+    const generation = ++rememberedWriteGeneration
     await context.globalState.update(LAST_MODE_KEY, mode)
+    healRememberedWrite(mode, generation)
   }
 
   /** vsidian.activeMode context（'live'|'reading'）：只反映活动 tab 的实际
@@ -2116,7 +2154,7 @@ export function createTextEditorProvider(
       // 等价且无竞态
       'onegayi.vsidian._test.resetLastMode',
       async () => {
-        await context.globalState.update(LAST_MODE_KEY, 'live')
+        await writeRemembered('live')
         return true
       },
     ),
