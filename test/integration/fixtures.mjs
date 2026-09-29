@@ -237,6 +237,34 @@ const RENAME_TARGET_DOC_WITH_ANCHOR = [
   '小节内容。',
   '',
 ].join('\n')
+// #200 目录/批量移动样例：目录（含嵌套层与被引用附件）+ 外部引用者 +
+// 目录内互链与上行出链（目录 rename/move、批量合并反馈的断言载体）
+const DIR_INNER_A_DOC = [
+  '# 互链甲',
+  '',
+  '互链 [[inner-b]] 与上行 [[../c-out]]。',
+  '',
+].join('\n')
+const DIR_INNER_B_DOC = [
+  '# 互链乙',
+  '',
+].join('\n')
+const DIR_INNER_C_DOC = [
+  '# 嵌套丙',
+  '',
+].join('\n')
+const DIR_OUTSIDE_C_DOC = [
+  '# 目录外目标',
+  '',
+].join('\n')
+const DIR_REF_DOC = [
+  '# 目录引用者',
+  '',
+  '外部 [[dir-move/inner-a]]、[乙](dir-move/inner-b.md) 与 [丙](dir-move/deep/inner-c.md)。',
+  '',
+  '附件 ![图](dir-move/dir-pic.png)。',
+  '',
+].join('\n')
 
 // #197 反链样例：目标文档被两个引用者以三种边型引用（wikilink 短名 /
 // mdlink 显式路径 / wikilink 带标题锚）——反链面板与跳转的断言载体。
@@ -823,6 +851,14 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   writeFileSync(path.join(wsDir, 'rename-moved.md'), RENAME_MOVED_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'notes', 'rename-note.md'), RENAME_NOTE_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'assets', 'rename-pic.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
+  // #200 目录/批量移动：目录（互链 + 嵌套 + 被引用附件）+ 外部引用者 + 上行目标
+  mkdirSync(path.join(wsDir, 'dir-move', 'deep'), { recursive: true })
+  writeFileSync(path.join(wsDir, 'dir-move', 'inner-a.md'), DIR_INNER_A_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'dir-move', 'inner-b.md'), DIR_INNER_B_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'dir-move', 'deep', 'inner-c.md'), DIR_INNER_C_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'dir-move', 'dir-pic.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
+  writeFileSync(path.join(wsDir, 'c-out.md'), DIR_OUTSIDE_C_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'dir-ref.md'), DIR_REF_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'wikilinks.md'), WIKILINKS_DOC, 'utf8')
   writeFileSync(path.join(wsDir, '目标笔记.md'), TARGET_NOTE_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'wikilink-target.md'), WIKILINK_TARGET_DOC, 'utf8')
