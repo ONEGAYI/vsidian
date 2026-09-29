@@ -264,8 +264,39 @@ try {
   check('19 弹窗刷新按文档重定位走失效重取', true,
     `image.request ${reqBefore} → ${await page.evaluate(() => window.imgSent().filter((m) => m.kind === 'image.request').length)}`)
   await page.keyboard.press('Escape')
+  await page.waitForFunction(() => document.querySelector('.vsidian-diagram-overlay') === null)
 
-  check('20 页面无脚本错误', errors.length === 0, JSON.stringify(errors))
+  // 12) 原生拖拽禁用回归：弹窗图片按住拖动不得启动浏览器原生 drag（img
+  //     默认 draggable=true——ghost 缩略图跟随鼠标 + Windows 复制加号徽标
+  //     的根源，且吞掉拖拽平移手势的 pointermove 流）。headless 合成输入
+  //     下 ghost 渲染层无可靠信号，回归钉在原生 drag 的启动机制上：
+  //     draggable 属性（Chromium 启动判定源）+ document 级 dragstart 零派发
+  await frame.hover()
+  await popupBtn.click()
+  await page.waitForFunction(() => {
+    const img = document.querySelector('.vsidian-diagram-media img')
+    return img && img.getAttribute('data-vsidian-img-state') === 'loaded'
+  })
+  const imgDraggable = await page.evaluate(() => {
+    window.__imgDragStart = 0
+    document.addEventListener('dragstart', () => { window.__imgDragStart += 1 }, { capture: true })
+    const img = document.querySelector('.vsidian-diagram-media img')
+    return img ? img.draggable : null
+  })
+  const popupImgBox = await page.locator('.vsidian-diagram-media img').boundingBox()
+  await page.mouse.move(popupImgBox.x + popupImgBox.width / 2, popupImgBox.y + popupImgBox.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(
+    popupImgBox.x + popupImgBox.width / 2 + 140, popupImgBox.y + popupImgBox.height / 2 + 80, { steps: 6 })
+  await page.mouse.up()
+  await page.waitForTimeout(100)
+  const dragStarted = await page.evaluate(() => window.__imgDragStart)
+  check('21 弹窗图片禁用原生拖拽（draggable=false）', imgDraggable === false, `img.draggable=${imgDraggable}`)
+  check('22 按住拖动图片不派发 dragstart', dragStarted === 0, `dragstart×${dragStarted}`)
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => document.querySelector('.vsidian-diagram-overlay') === null)
+
+  check('23 页面无脚本错误', errors.length === 0, JSON.stringify(errors))
   await page.close()
 
   if (failures.length > 0) {

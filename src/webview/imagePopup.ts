@@ -265,6 +265,9 @@ export function openImagePopup(rawSrc: string, alt: string): void {
   media.className = DIAGRAM_POPUP_CLASS_NAMES.media
   const img = document.createElement('img')
   img.alt = alt
+  // 禁原生拖拽：img 默认 draggable=true，按住拖动会启动浏览器原生 drag
+  // （ghost 缩略图跟随鼠标 + 宿主 copy 徽标），并吞掉平移手势的输入流
+  img.draggable = false
   media.appendChild(img)
   stage.appendChild(media)
   const toolbar = document.createElement('div')
