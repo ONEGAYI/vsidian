@@ -53,7 +53,8 @@ export function setImagePopupContext(ctx: ImagePopupContext | null): void {
 }
 
 /** 导出建议文件名：rawSrc 取 basename（percent-decode 一次，与
- *  normalizeImgSrc 解码对偶），剥两种路径分隔符；空名兜底 'image' */
+ *  normalizeImgSrc 解码对偶），剥两种路径分隔符；空名兜底与宿主侧
+ *  sanitizeImageExportFileName 同值（'image.png'，建议名只是预填） */
 export function suggestImageExportFileName(rawSrc: string): string {
   let name = rawSrc
   try {
@@ -65,7 +66,7 @@ export function suggestImageExportFileName(rawSrc: string): string {
   if (slash >= 0) {
     name = name.slice(slash + 1)
   }
-  return name.trim() || 'image'
+  return name.trim() || 'image.png'
 }
 
 /**

@@ -1159,9 +1159,11 @@ export interface PaintProbe {
   }
   /** #212 图片按钮组与图片弹窗绘制：图片挂载的同款 chrome（live 槽位内
    *  与阅读 frame 内，排除链接内嵌/表格内不发射形态）与图片弹窗浮层
-   *  状态（document 级单例，与图表弹窗互斥）。无图片时缺省。 */
+   *  状态（document 级单例，与图表弹窗互斥）。计数只统计 loaded 态图片
+   *  （规格语义「loaded 态才有按钮」；loading/error 的 frame 类在场但
+   *  不计）。无图片时缺省。 */
   imageChrome?: {
-    /** 当前激活视图内图片按钮组数 */
+    /** 当前激活视图内 loaded 图片的按钮组宿主数 */
     frames: number
     /** edit 按钮数（仅 live 视图发射；阅读恒 0） */
     editButtons: number

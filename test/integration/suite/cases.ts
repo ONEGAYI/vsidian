@@ -3069,7 +3069,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
         src: string; fileName: string; reqId: number
       }>
       return log.length >= 1 ? log : undefined
-    })) 
+    }))
     const msg = exportLog[0]!
     assert(msg.src === 'assets/图片 一.png', `导出 src 应为解码形态图源，实际 ${JSON.stringify(msg)}`)
     assert(msg.fileName === '图片 一.png', `导出建议名应为图源 basename，实际 ${JSON.stringify(msg)}`)

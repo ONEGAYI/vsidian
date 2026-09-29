@@ -400,6 +400,31 @@ describe('阅读视图：按钮组形态（契约 1 的阅读侧）', () => {
     expect(inTableImg.parentElement?.classList.contains('vsidian-graphic-frame')).toBe(false)
   })
 
+  it('阅读侧独行图 frame 挂块级修饰类，文字混排图不挂（:only-child 误伤回归钉住）', async () => {
+    const text = [
+      `![独行图](${PIC})`,
+      '',
+      `文字前缀 ![混排图](${PIC}) 文字后缀`,
+      '',
+    ].join('\n')
+    const h = makeHarness(new Map([['./assets/pic a.png', 'https://res/pic-a.png']]))
+    const c = mountDoc(h, text)
+    c.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
+    await settle()
+    await confirmLoads()
+    const container = document.querySelector<HTMLElement>('.vsidian-view-reading')!
+    const frames = Array.from(
+      container.querySelectorAll<HTMLElement>('.vsidian-graphic-frame.vsidian-image'),
+    )
+    expect(frames.length).toBe(2)
+    const solo = frames.find((f) => f.querySelector('img')?.alt === '独行图')!
+    const mixed = frames.find((f) => f.querySelector('img')?.alt === '混排图')!
+    expect(solo.classList.contains('vsidian-image-block')).toBe(true)
+    // 混排段的 frame 虽是段落唯一元素子节点（文本节点不参与 :only-child
+    // 伪类），JS 判定看到非空白文本——不得块级化，否则混排图被误独占一行
+    expect(mixed.classList.contains('vsidian-image-block')).toBe(false)
+  })
+
   it('阅读侧 popup 打开同一弹窗单例；image.test.popup 钩子按 reading 视图定位', async () => {
     const h = makeHarness(new Map([['./assets/pic a.png', 'https://res/pic-a.png']]))
     const c = mountDoc(h)
@@ -432,11 +457,11 @@ describe('纯函数矩阵', () => {
     expect(locateImageOccurrence('![a](./assets/other.png)', './assets/pic a.png')).toBe(false)
   })
 
-  it('suggestImageExportFileName：解码 + 剥路径分隔 + 空名兜底', () => {
+  it('suggestImageExportFileName：解码 + 剥路径分隔 + 空名兜底（与宿主 sanitize 同值）', () => {
     expect(suggestImageExportFileName('./assets/pic%20a.png')).toBe('pic a.png')
     expect(suggestImageExportFileName('D:\\photos\\图 片.png')).toBe('图 片.png')
     expect(suggestImageExportFileName('https://example.com/a/b.png')).toBe('b.png')
-    expect(suggestImageExportFileName('https://example.com/')).toBe('image')
+    expect(suggestImageExportFileName('https://example.com/')).toBe('image.png')
   })
 })
 

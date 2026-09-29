@@ -187,6 +187,24 @@ try {
   check('16 阅读侧按钮组仅 popup（无 edit）',
     readingButtons.total >= 2 && readingButtons.edits === 0 && readingButtons.popups === readingButtons.total,
     JSON.stringify(readingButtons))
+  // 阅读独行/混排 display 计算值（:only-child 误伤回归钉住——混排段的
+  // frame 是段落唯一元素子节点，伪类只统计元素子节点会误命中块级化）
+  const readingLayout = await page.evaluate(() => {
+    const frames = document.querySelectorAll('.vsidian-reading-block .vsidian-graphic-frame.vsidian-image')
+    const byAlt = (alt) => Array.from(frames).find((f) => f.querySelector('img')?.alt === alt)
+    const solo = byAlt('示例图')
+    const mixed = byAlt('行内图')
+    return {
+      solo: solo ? getComputedStyle(solo).display : null,
+      mixed: mixed ? getComputedStyle(mixed).display : null,
+      soloClass: solo?.classList.contains('vsidian-image-block') ?? false,
+      mixedClass: mixed?.classList.contains('vsidian-image-block') ?? false,
+    }
+  })
+  check('16b 阅读独行图块级、混排图行内（display 计算值）',
+    readingLayout.solo === 'block' && readingLayout.mixed === 'inline-block'
+      && readingLayout.soloClass && !readingLayout.mixedClass,
+    JSON.stringify(readingLayout))
   // 真实用户路径：悬停 frame 使按钮显现后再点击
   const readingFrame = page.locator('.vsidian-reading-block .vsidian-graphic-frame.vsidian-image').first()
   await readingFrame.hover()

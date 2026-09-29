@@ -7,7 +7,7 @@
 import * as vscode from 'vscode'
 
 import { t } from '../shared/i18n'
-import type { ImageExportFailReason, ImageExportPayload } from '../shared/protocol'
+import { IMAGE_PASTE_LIMITS, type ImageExportFailReason, type ImageExportPayload } from '../shared/protocol'
 import { classifyImageTarget, type LinkContext } from './linkTarget'
 
 export interface ImageExportOutcome {
@@ -15,9 +15,10 @@ export interface ImageExportOutcome {
   reason?: ImageExportFailReason
 }
 
-/** 图片导出载荷上限（单一事实源；fileName 与粘贴 fileNameHint 同限） */
+/** 图片导出载荷上限（单一事实源；fileName 与粘贴 fileNameHint 同限，
+ *  上限值直接引用粘贴通道常量，两处不再各写一份） */
 export const IMAGE_EXPORT_LIMITS = {
-  fileNameMaxChars: 255,
+  fileNameMaxChars: IMAGE_PASTE_LIMITS.fileNameHintMaxChars,
   /** 字节数上限（与 diagram.export PNG 档同量级的防御上限） */
   fileMaxBytes: 64 * 1024 * 1024,
 } as const
@@ -97,16 +98,24 @@ export async function runImageExport(
     return
   }
   const source = vscode.Uri.file(target.fsPath)
-  let data: Uint8Array
+  let stat: vscode.FileStat
   try {
-    const stat = await vscode.workspace.fs.stat(source)
-    if ((stat.type & vscode.FileType.File) === 0 || stat.size > IMAGE_EXPORT_LIMITS.fileMaxBytes) {
-      finish({ ok: false, reason: 'not-found' })
-      return
-    }
-    data = await vscode.workspace.fs.readFile(source)
+    stat = await vscode.workspace.fs.stat(source)
   } catch {
     finish({ ok: false, reason: 'not-found' })
+    return
+  }
+  if ((stat.type & vscode.FileType.File) === 0 || stat.size > IMAGE_EXPORT_LIMITS.fileMaxBytes) {
+    finish({ ok: false, reason: 'not-found' })
+    return
+  }
+  let data: Uint8Array
+  try {
+    data = await vscode.workspace.fs.readFile(source)
+  } catch {
+    // stat 已成功而字节读取失败（并发删除/权限/IO）——与目标不存在区分，
+    // 兑现协议 read-failed 枚举的承诺
+    finish({ ok: false, reason: 'read-failed' })
     return
   }
   const fileName = sanitizeImageExportFileName(payload.fileName)

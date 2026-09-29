@@ -3454,10 +3454,12 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
    - 行内形态 + 零 margin（覆盖 mermaid frame 的 block + 0.75em——行内
      混排不被打断；live 侧 .cm-scroller 内另由既有槽位规则钉 inline-block，
      块级独行图由 vsidian-image-block 既有规则接管）
-   - 阅读独行图（段落内唯一元素子节点）frame 取块级：viewBox-only 百分比
-     宽 SVG 在 inline-block shrink-to-fit 包含块下解析为 0×0（liveImageLayout
-     B1 塌缩问题的阅读侧变体——块级布局给 width:100% 确定基准；行内混排
-     的此类 SVG 塌缩属既有记录边界）
+   - 阅读独行图由 decorateImageChromeBlock 的 JS 判定挂 vsidian-image-block
+     修饰类取块级：viewBox-only 百分比宽 SVG 在 inline-block shrink-to-fit
+     包含块下解析为 0×0（liveImageLayout B1 塌缩问题的阅读侧变体——块级
+     布局给 width:100% 确定基准；行内混排的此类 SVG 塌缩属既有记录边界）。
+     独行判定不走 :only-child 伪类——它只统计元素子节点（文本节点不参
+     与），「文字+图」混排段的 frame 同样命中，会把混排图误独占一行
    - 按钮组随 loaded 态显现（同 mermaid rendered 兄弟选择器模式；错误/
      加载态无按钮——错误态点击重试语义照旧）；悬停显现沿用上方
      frame:hover 通用规则（图片 frame 同类命中） */
@@ -3466,7 +3468,7 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
   margin: 0;
 }
 
-#app .vsidian-view-reading .vsidian-graphic-frame.vsidian-image:only-child {
+#app .vsidian-view-reading .vsidian-graphic-frame.vsidian-image.vsidian-image-block {
   display: block;
 }
 

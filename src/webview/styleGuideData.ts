@@ -1441,13 +1441,14 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "domain": "content",
     "category": "link-image-wikilink",
     "kind": "selector",
-    "target": ".vsidian-image-block（live 修饰类，叠加于 .vsidian-image）",
-    "purpose": "live 独立成行图片的块级容器变体：整行仅含一张图片（其余文本全空白，含尾随空白）时 widget 槽位取块级布局，为无固有尺寸的图源（viewBox-only 百分比宽 SVG，mermaid 导出形态）提供确定宽度基准——此类图源在 inline-block shrink-to-fit 下渲染为 0×0（img 加载成功故静默无反馈，表现为空白行）；有固有尺寸的图源不受影响（块级下仍按自然宽度呈现）。已知边界：行内混排（列表前缀、混排文字、同行多图）的此类 SVG 仍为行内形态。",
+    "target": ".vsidian-image-block（修饰类，叠加于 .vsidian-image；live 槽位与阅读 frame 两种宿主）",
+    "purpose": "独立成行图片的块级容器变体：live 侧整行仅含一张图片（其余文本全空白，含尾随空白）时 widget 槽位取块级布局；#212 起阅读侧同语义——段落内图片为唯一元素子节点且前后兄弟文本全空白时，挂载钩子包 frame 后由 JS 判定挂本类（不用 :only-child 伪类——它只统计元素子节点，「文字+图」混排段会误命中把混排图独占一行）。块级布局为无固有尺寸的图源（viewBox-only 百分比宽 SVG，mermaid 导出形态）提供确定宽度基准——此类图源在 inline-block shrink-to-fit 下渲染为 0×0（img 加载成功故静默无反馈，表现为空白行）；有固有尺寸的图源不受影响（块级下仍按自然宽度呈现）。已知边界：行内混排（列表前缀、混排文字、同行多图）的此类 SVG 仍为行内形态。",
     "views": [
-      "live"
+      "live",
+      "reading"
     ],
-    "states": "装饰构建时按行判定（树驱动与宽松路径同口径）：行内 [from,to) 之外文本全空白即独立成行；三态修饰类照常叠加。",
-    "dom": "live 行内 widget span.vsidian-image.vsidian-image-block > img（display: block）。",
+    "states": "live：装饰构建时按行判定（树驱动与宽松路径同口径），行内 [from,to) 之外文本全空白即独立成行。阅读：decorateImageChromeBlock 包 frame 时按父元素判定（唯一元素子节点 + 前后兄弟文本全空白）。三态修饰类照常叠加。",
+    "dom": "live 行内 widget span.vsidian-image.vsidian-image-block > img；阅读 span.vsidian-graphic-frame.vsidian-image.vsidian-image-block > img（均 display: block）。",
     "example": ".vsidian-image-block {\n  display: block;\n}",
     "obsidian": {
       "counterpart": "无直接对应（Obsidian 无公开独立图片布局类）",
@@ -1455,6 +1456,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     },
     "verification": [
       "浏览器 liveImageLayout：真实 Chromium + 生产控制器——独行 viewBox-only SVG 渲染宽度铺满正文列（修复前 0×0）、固有尺寸图不拉伸、限宽档随列联动、阅读侧非回归",
+      "浏览器 imagePopup：阅读侧独行图 frame display=block、文字混排图 display=inline-block（:only-child 误伤回归钉住）",
       "单元 linkInteraction：独立成行判定（整行/尾随空白/列表前缀/混排/同行两图/宽松路径）与 widget 形态 eq"
     ],
     "introduced": "live SVG 塌缩修复（2026-09-29）"
@@ -3828,9 +3830,9 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "image-solo-block": {
-    "purpose": "Block container variant for an image standing alone on its line in live view: when the whole line holds a single image (all remaining text is whitespace, trailing whitespace included), the widget slot switches to block layout, providing a definite width basis for sources without intrinsic dimensions (viewBox-only percentage-width SVGs, the mermaid export form) — such sources collapse to 0×0 under inline-block shrink-to-fit (the img loads successfully, so the failure is silent and shows as a blank line). Sources with intrinsic dimensions are unaffected (they still render at natural width under block layout). Known boundary: such SVGs mixed inline with other content (list prefixes, surrounding text, multiple images on one line) keep the inline form.",
-    "states": "Decided per line at decoration build time (same rule on the tree-driven and loose paths): the line counts as solo when all text outside the image range is whitespace; the three state modifier classes still stack on top.",
-    "dom": "Live inline widget span.vsidian-image.vsidian-image-block > img (display: block).",
+    "purpose": "Block container variant for an image standing alone on its line: in live view, when the whole line holds a single image (all remaining text is whitespace, trailing whitespace included), the widget slot switches to block layout; since #212 the reading view carries the same semantics — when the image is the only element child of its paragraph and the surrounding sibling text is all whitespace, the mount hook wraps the frame and a JS check adds this class (the :only-child pseudo-class is not used — it only counts element children, so a \"text + image\" mixed paragraph would falsely match and force the image onto its own line). Block layout provides a definite width basis for sources without intrinsic dimensions (viewBox-only percentage-width SVGs, the mermaid export form) — such sources collapse to 0×0 under inline-block shrink-to-fit (the img loads successfully, so the failure is silent and shows as a blank line). Sources with intrinsic dimensions are unaffected (they still render at natural width under block layout). Known boundary: such SVGs mixed inline with other content (list prefixes, surrounding text, multiple images on one line) keep the inline form.",
+    "states": "Live: decided per line at decoration build time (same rule on the tree-driven and loose paths) — the line counts as solo when all text outside the image range is whitespace. Reading: decided by decorateImageChromeBlock when wrapping the frame (only element child plus all-whitespace sibling text). The three state modifier classes still stack on top.",
+    "dom": "Live inline widget span.vsidian-image.vsidian-image-block > img; reading span.vsidian-graphic-frame.vsidian-image.vsidian-image-block > img (both display: block).",
     "obsidian": {
       "counterpart": "No direct counterpart (Obsidian has no public standalone-image layout class)"
     }
