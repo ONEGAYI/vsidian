@@ -255,6 +255,7 @@ vsidian/
 │       ├── diagramExport.ts            # 图表导出序列化与光栅化
 │       ├── diagramPopup.ts             # 图表弹窗全屏浮层
 │       ├── diagramPopupGeometry.ts     # 弹窗几何纯函数
+│       ├── embedCard.ts                # Reading 嵌入卡片管理器
 │       ├── fenceEscape.ts              # 围栏 Tab 越界适配层（#125）
 │       ├── findSession.ts              # 查找匹配纯函数（#14）
 │       ├── fontArrival.ts              # 字体晚到监听（#130）
@@ -311,6 +312,7 @@ vsidian/
 │       ├── readingView.ts              # 阅读视图 DOM 构建与锚点定位
 │       ├── readingViewport.ts          # 阅读视口挂载窗口纯函数
 │       ├── readingVirtualView.ts       # 阅读视图虚拟化装配层
+│       ├── refReadingContent.ts        # 引用内容只读 Reading 装配
 │       ├── settingsMain.ts             # 设置页 webview 入口
 │       ├── settingsPage.css            # 设置页样式
 │       ├── settingsPageView.ts         # 设置页 webview 视图
