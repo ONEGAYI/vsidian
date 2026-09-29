@@ -1764,12 +1764,13 @@ export class VaultIndexService {
     return normalizeSeparators(this.ops.resolve(fsPath)).replace(/\/$/, '')
   }
 
-  /** 根内相对路径（`/` 形态）；越根 null（精确判定 `..`/`../` 前缀——
-   *  `..drafts.md` 这类 .. 起头的文件名不是上行，与 vaultLink.isInsideRoot
-   *  口径一致） */
+  /** 根内相对路径（`/` 形态）；越根 null（精确判定 `..`/`..` + 平台分隔符
+   *  前缀——`..drafts.md` 这类 .. 起头的文件名不是上行，与 vaultLink.
+   *  isInsideRoot 口径一致；越根前缀跟随 ops.sep：win32 的 relative 产出
+   *  `..\` 形态，硬编码 '../' 会漏拦多段越根） */
   private relOf(state: RootIndexState, fsPath: string): string | null {
     const rel = this.ops.relative(this.ops.resolve(state.fsPath), this.ops.resolve(fsPath))
-    if (rel === '' || rel === '..' || rel.startsWith('../') || this.ops.isAbsolute(rel)) {
+    if (rel === '' || rel === '..' || rel.startsWith(`..${this.ops.sep}`) || this.ops.isAbsolute(rel)) {
       return null
     }
     return normalizeSeparators(rel)

@@ -9551,6 +9551,69 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(located.viewMode === 'live', '跳转目标面板应为 live 模式（可编辑）')
   }],
 
+  ['反链幽灵退场：未保存编辑后关闭文档（不保存），覆盖层随关闭退役（review-loops #18）', async () => {
+    // 独立文档组（rl18-*，#200 教训：覆盖层跨用例滞留会污染后续 rename 漂移
+    // 断言——不与既有反链 fixture 共享）。链路：applyUnsaved 防抖登记覆盖层
+    // 幽灵边 → 反链面板广播可见 → closeActiveEditor 关闭 dirty custom tab
+    // （1.86.2 实测裁决：直接 revert 回磁盘、无保存确认弹窗——#38 用例 A
+    // 同款路径）→ onDidCloseTextDocument → findEntry 守卫放行 →
+    // documentClosed 退役 → 反链回磁盘基线（空态）。
+    // 检测力边界（如实记录）：关闭时的 revert 也触发 onDidChange →
+    // applyUnsaved(基线) 自愈路径；本用例钉「未保存关闭后幽灵不滞留」的
+    // 用户可见契约，两路清理（revert 自愈 / documentClosed 退役）在此形态
+    // 下收敛同一终态——纯接线删除的回归由服务层单测（documentClosed 契约）
+    // 与此处行为断言共同覆盖。
+    await openWithEditor('rl18-target.md')
+    await waitSessionReady('rl18-target.md')
+    const targetUri = wsUri('rl18-target.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, targetUri, { kind: 'sidebar.test.click' })
+    await vscode.commands.executeCommand(CMD.postToPanel, targetUri, { kind: 'backlinks.test.click' })
+    // 前置：目标文档磁盘基线无引用 → 空态起步（同时证明索引就绪）
+    await poll('基线空态', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, targetUri)) as
+        | { backlinks?: { state: string; items: unknown[] } }
+        | undefined
+      const b = v?.backlinks
+      return b && b.state === 'ready' && b.items.length === 0 ? b : undefined
+    })
+    // 幽灵来源面板 Beside 打开（双列并排：目标面板保持可见——webview
+    // retainContextWhenHidden 关闭，隐藏即卸载会使 viewState 请求无响应；
+    // splitconflict 用例同款双面板驱动）
+    await openWithEditor('rl18-ghost.md', true)
+    await waitSessionReady('rl18-ghost.md')
+    const ghostDoc = await vscode.workspace.openTextDocument(wsUri('rl18-ghost.md'))
+    const ghostEdit = new vscode.WorkspaceEdit()
+    ghostEdit.replace(wsUri('rl18-ghost.md'), new vscode.Range(0, 0, 0, 0), '幽灵引用 [[rl18-target]]\n\n')
+    assert(await vscode.workspace.applyEdit(ghostEdit), '未保存编辑应成功')
+    await poll('编辑生效且 dirty', () => ghostDoc.isDirty &&
+      ghostDoc.getText().includes('[[rl18-target]]') ? true : undefined)
+    // 幽灵在场：覆盖层防抖 flush（500ms 级）→ notify → 全面板广播 →
+    // 目标面板反链出现未保存来源条目
+    await poll('幽灵反链在场', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, targetUri)) as
+        | { backlinks?: { state: string; items: Array<{ sourceRelPath: string; kind: string }> } }
+        | undefined
+      const b = v?.backlinks
+      return b && b.state === 'ready' &&
+        b.items.some((i) => i.sourceRelPath === 'rl18-ghost.md') ? b : undefined
+    })
+    // 关闭幽灵面板（活动 tab；dirty 不保存 → revert + onDidCloseTextDocument）
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    // 幽灵退场：反链回磁盘基线空态（documentClosed 退役覆盖层 + revert 自愈
+    // 两路收敛的同一终态）
+    await poll('幽灵反链退场', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, targetUri)) as
+        | { backlinks?: { state: string; items: Array<{ sourceRelPath: string }> } }
+        | undefined
+      const b = v?.backlinks
+      return b && b.state === 'ready' &&
+        !b.items.some((i) => i.sourceRelPath === 'rl18-ghost.md') ? b : undefined
+    })
+    // 关闭不保存：磁盘基线原样（revert 不写盘）
+    assert(await readDisk('rl18-ghost.md') === '# 幽灵来源\n\n基线无引用。\n',
+      '未保存关闭不得写磁盘')
+  }],
+
   // ---- #198 索引维护：排除模式设置、增量与重建、清理回收、根增删 ----
 
   ['索引维护：排除模式保存/持久化/恢复默认与覆盖范围重算（#198）', async () => {

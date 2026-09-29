@@ -895,6 +895,20 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   writeFileSync(path.join(wsDir, 'backlinks-a.md'), BACKLINKS_SOURCE_A_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'backlinks-b.md'), BACKLINKS_SOURCE_B_DOC, 'utf8')
   writeFileSync(path.join(wsDir, '反链目标.md'), BACKLINKS_TARGET_DOC, 'utf8')
+  // review-loops #18 宿主级退役用例：独立文档组（目标基线无引用 → 空态起
+  // 步；幽灵来源基线不含目标引用 → 未保存编辑制造的引用是纯覆盖层幽灵）
+  writeFileSync(path.join(wsDir, 'rl18-target.md'), [
+    '# 退役目标',
+    '',
+    '正文。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'rl18-ghost.md'), [
+    '# 幽灵来源',
+    '',
+    '基线无引用。',
+    '',
+  ].join('\n'), 'utf8')
   // #199 rename 引用改写：目标 + 根/子目录引用者 + 被移动文档与子文档 + 附件
   writeFileSync(path.join(wsDir, '改名目标.md'), RENAME_TARGET_DOC_WITH_ANCHOR, 'utf8')
   writeFileSync(path.join(wsDir, 'rename-ref-a.md'), RENAME_REF_A_DOC, 'utf8')
