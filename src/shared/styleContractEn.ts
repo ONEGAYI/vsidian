@@ -881,7 +881,7 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
     obsidian: { counterpart: 'Obsidian likewise does not promise mermaid internal structures' },
   },
 
-  // ---- 工具栏与横幅（toolbar-banner，5 条；#4/#5，本项目自有 UI）----
+  // ---- 工具栏与横幅（toolbar-banner，6 条；#4/#5，本项目自有 UI）----
   'suspend-banner': {
     purpose:
       'The write-back conflict suspension banner (vsidian-specific UI): a top-of-view notice while paused + a resume button.',
@@ -891,7 +891,7 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
   },
   'toolbar': {
     purpose:
-      'The top toolbar of the main editing area: the settings gear (.vsidian-settings-toggle), the quick-action toggle (.vsidian-quick-toggle), the dual-state view toggle (.vsidian-view-toggle, the fourth button since #141 with its own entry) and the sidebar toggle (.vsidian-sidebar-toggle) — since #38 the three-state switch (including source mode) lives in the host editor title bar commands, not on this toolbar (see the mode-toggle removal record).',
+      'The top toolbar of the main editing area: the settings gear (.vsidian-settings-toggle), the quick-action toggle (.vsidian-quick-toggle), the refresh-embedded-resources button (.vsidian-refresh-toggle, the fifth button since #208 with its own entry), the dual-state view toggle (.vsidian-view-toggle, the fourth button since #141 with its own entry) and the sidebar toggle (.vsidian-sidebar-toggle) — since #38 the three-state switch (including source mode) lives in the host editor title bar commands, not on this toolbar (see the mode-toggle removal record).',
     dom: 'The toolbar at the top of #app.',
     obsidian: { counterpart: 'No counterpart' },
   },
@@ -901,7 +901,16 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
     states:
       'The button itself is persistent in both modes; a click posts a view.switch.request outbound (not applied locally), and the button state is driven by the view.mode.set flowed back from the host — the aria/tooltip names the target action and re-words as the mode changes.',
     dom:
-      'A button inside the top .vsidian-toolbar, immediately to the left of the sidebar toggle; since #158 the two form the right-end group — this button holds margin-left:auto to push itself against the right end of the toolbar, leaving a flexible gap toward the left group (settings, quick actions); an inline SVG with two paths (book/edit subclasses).',
+      'A button inside the top .vsidian-toolbar, immediately to the left of the sidebar toggle; since #158 it forms the right-end group with the sidebar toggle, and since #208 the refresh button joins the group and takes over the margin-left:auto push rule (this button no longer holds it — see the toolbar-refresh entry for the handover record); a flexible gap remains toward the left group (settings, quick actions); an inline SVG with two paths (book/edit subclasses).',
+    obsidian: { counterpart: 'No counterpart' },
+  },
+  'toolbar-refresh': {
+    purpose:
+      'The refresh-embedded-resources button (#208): the manual refresh entry — a click posts a refresh.request outbound; the host drops the image resolution cache, bumps the resource generation and replies with the invalidation notice, after which the webview remounts every active image slot for re-resolution (reloading with the new-generation URI) and resets the Mermaid lazy-load failure terminal state. Refreshing never touches the document content/undo stack/view state (cursor, scroll and mode stay as they were), and the keybinding entry shares the same send implementation.',
+    states:
+      'Persistent in both modes; before readiness (before init) a click is a no-op. The #158 push rule (margin-left:auto) moved from view-toggle to this button in #208 — head of the right-end group (refresh + dual-state toggle + sidebar toggle, adjacent), with a flexible gap toward the left group.',
+    dom:
+      'A button inside the top .vsidian-toolbar, immediately to the left of the dual-state view toggle; an inline SVG circular arrow (lucide refresh-cw motif, four paths, constant stroke-width=2, no icon library).',
     obsidian: { counterpart: 'No counterpart' },
   },
   'mode-body': {

@@ -376,7 +376,7 @@ const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   'code-card': 11,
   outline: 19,
   'chrome-limits': 4,
-  'toolbar-banner': 5,
+  'toolbar-banner': 6,
   frontmatter: 5,
   'context-menu': 1,
 }

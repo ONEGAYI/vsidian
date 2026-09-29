@@ -1097,7 +1097,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
   </section>
   <section class="domain" data-domain="chrome">
-    <h1 style="font-size:19px;margin-bottom:4px">界面域（56 条）</h1>
+    <h1 style="font-size:19px;margin-bottom:4px">界面域（57 条）</h1>
     <p class="note">界面域条目（#133 起逐项核实）：静态入口经探针在真实渲染中断言，交互态入口由浏览器/集成套件按行为路径验证；第三方渲染器（KaTeX/Mermaid）内部 DOM 不承诺为稳定接口（见各域「限制」类目）。</p>
     <h2>界面域 · 公式（5）</h2>
     <article class="entry" id="live-math">
@@ -1721,7 +1721,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：清单即边界：第三方渲染器私有 DOM 不提升为稳定接口</p>
       <p class="life">引入：#133（2026-09-27，随界面域核实落档）</p>
     </article>
-    <h2>界面域 · 工具栏与横幅（5）</h2>
+    <h2>界面域 · 工具栏与横幅（6）</h2>
     <article class="entry" id="suspend-banner">
       <h3><code>.vsidian-suspend-banner（内含 .vsidian-suspend-banner-text）</code><span class="eid">suspend-banner</span></h3>
       <p class="purpose">写回冲突暂停横幅（本项目自有 UI）：暂停态顶栏提示 + 恢复按钮。</p>
@@ -1738,7 +1738,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
     <article class="entry" id="toolbar">
       <h3><code>.vsidian-toolbar</code><span class="eid">toolbar</span></h3>
-      <p class="purpose">主编辑区顶栏：设置齿轮（.vsidian-settings-toggle）、快速操作开关（.vsidian-quick-toggle）、双态视图切换（.vsidian-view-toggle，#141 起第四按钮，独立条目）、侧栏开关（.vsidian-sidebar-toggle）——#38 起三态切换（含源码）在宿主编辑器标题栏命令，不在顶栏（见 mode-toggle 移除记录）。</p>
+      <p class="purpose">主编辑区顶栏：设置齿轮（.vsidian-settings-toggle）、快速操作开关（.vsidian-quick-toggle）、刷新嵌入资源（.vsidian-refresh-toggle，#208 起第五按钮，独立条目）、双态视图切换（.vsidian-view-toggle，#141 起第四按钮，独立条目）、侧栏开关（.vsidian-sidebar-toggle）——#38 起三态切换（含源码）在宿主编辑器标题栏命令，不在顶栏（见 mode-toggle 移除记录）。</p>
       <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
 
       <p class="obsidian">Obsidian 对应：无对应物</p>
@@ -1757,12 +1757,26 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 <p class="states">状态：按钮本体常驻两模式；点击出站 view.switch.request（不本地执行），按钮态由宿主回流的 view.mode.set 驱动——aria/tooltip 表目标动作随态换词。</p>
       <p class="obsidian">Obsidian 对应：无对应物</p>
 
-      <p class="dom">DOM 关系：顶栏 .vsidian-toolbar 内 button，紧邻侧栏开关左侧；#158 起两者组成右端组——本按钮持有 margin-left:auto 推靠工具栏右端，与左侧组（设置、快速操作）间为弹性空隙；内联 SVG 两 path（book/edit 子类）。</p>
+      <p class="dom">DOM 关系：顶栏 .vsidian-toolbar 内 button，紧邻侧栏开关左侧；#158 起与侧栏开关组成右端组，#208 起刷新按钮加入右端组并接管 margin-left:auto 推靠规则（本按钮不再持有，推右职责移交见 toolbar-refresh 条目）；与左侧组（设置、快速操作）间为弹性空隙；内联 SVG 两 path（book/edit 子类）。</p>
       <pre><code>.vsidian-view-toggle {
   color: var(--vscode-toolbar-foreground);
 }</code></pre>
       <p class="verify">验证：集成「界面域样式契约」（#133）：chromeSelectors[&quot;view-toggle&quot;] 探针命中（真宿主渲染验证）；浏览器套件（#141）：两图标显隐随 body 模式类切换的绘制断言</p>
       <p class="life">引入：#141（2026-09-27）</p>
+    </article>
+    <article class="entry" id="toolbar-refresh">
+      <h3><code>.vsidian-refresh-toggle（按钮本体；内含内联 SVG 循环箭头图标）</code><span class="eid">toolbar-refresh</span></h3>
+      <p class="purpose">刷新嵌入资源按钮（#208）：手动刷新入口——点击出站 refresh.request，宿主清图片解析缓存并推进资源代次后回发失效通知，webview 对活跃图片槽位全量失效重挂（新代次 URI 重载）并重置 Mermaid 懒加载失败终态。刷新不触碰文档内容/撤销栈/视图状态（光标、滚动、模式原样保持），与快捷键入口共用同一发送实现。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+<p class="states">状态：按钮常驻两模式；未就绪（init 前）点击无操作。#158 推右规则（margin-left:auto）于 #208 自 view-toggle 迁移至本按钮——右端组首（刷新 + 双态切换 + 侧栏开关紧挨），与左侧组间弹性空隙。</p>
+      <p class="obsidian">Obsidian 对应：无对应物</p>
+
+      <p class="dom">DOM 关系：顶栏 .vsidian-toolbar 内 button，紧邻双态切换左侧；内联 SVG 循环箭头（lucide refresh-cw 意象，四 path，线宽恒定 stroke-width=2，不引图标库）。</p>
+      <pre><code>.vsidian-refresh-toggle {
+  color: var(--vscode-toolbar-foreground);
+}</code></pre>
+      <p class="verify">验证：集成「界面域样式契约」：chromeSelectors[&quot;toolbar-refresh&quot;] 探针命中（真宿主渲染验证）；jsdom 控制器单测（#208）：按钮在场、点击出站 refresh.request；浏览器套件（#208）：右端组几何绘制断言（中点右侧、与双态切换以工具栏 gap 紧邻）</p>
+      <p class="life">引入：#208（2026-09-29）</p>
     </article>
     <article class="entry" id="mode-body">
       <h3><code>布局根模式类 .vsidian-body.vsidian-mode-live / .vsidian-body.vsidian-mode-reading（互斥，两态必居其一）</code><span class="eid">mode-body</span></h3>
