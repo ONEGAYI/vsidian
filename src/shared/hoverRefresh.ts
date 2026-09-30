@@ -59,22 +59,32 @@ export function shouldApplyHoverVersion(applied: number | null, incoming: number
  * 停留最后快照；重开/重挂重新订阅自愈）。
  */
 export class HoverWatchRegistry {
-  /** fsPath → Map<sessionKey, Set<instanceId>>（Map 插入序 = 触达序） */
+  /** 归一键 → Map<sessionKey, Set<instanceId>>（Map 插入序 = 触达序） */
   private readonly table = new Map<string, Map<string, Set<string>>>()
+  /** 归一键 → 最近登记的原始形态（推送载荷用——与 webview 侧 loaded.fsPath
+   *  同源；Windows 宿主下事件源（编辑器/索引）与读取归正的形态可能仅
+   *  大小写不同，内部键归一、载荷保持登记形态） */
+  private readonly canonical = new Map<string, string>()
 
-  constructor(private readonly targetLimit: number = HOVER_REFRESH_DEFAULTS.watchTargetLimit) {}
+  constructor(
+    private readonly targetLimit: number = HOVER_REFRESH_DEFAULTS.watchTargetLimit,
+    /** 键归一（Windows 宿主折叠大小写；缺省恒等——POSIX 语义） */
+    private readonly keyOf: (fsPath: string) => string = (fsPath) => fsPath,
+  ) {}
 
   /** 登记订阅（幂等：同实例重复登记不虚增计数） */
   watch(sessionKey: string, fsPath: string, instanceId: string): void {
-    let sessions = this.table.get(fsPath)
+    const key = this.keyOf(fsPath)
+    this.canonical.set(key, fsPath)
+    let sessions = this.table.get(key)
     if (!sessions) {
       this.evictIfNeeded()
       sessions = new Map()
-      this.table.set(fsPath, sessions)
+      this.table.set(key, sessions)
     } else {
       // 触达：移到 MRU（Map 插入序语义）
-      this.table.delete(fsPath)
-      this.table.set(fsPath, sessions)
+      this.table.delete(key)
+      this.table.set(key, sessions)
     }
     let instances = sessions.get(sessionKey)
     if (!instances) {
@@ -86,7 +96,8 @@ export class HoverWatchRegistry {
 
   /** 释放单实例订阅；目标内最后一个实例退场时撤目标 */
   unwatch(sessionKey: string, fsPath: string, instanceId: string): void {
-    const sessions = this.table.get(fsPath)
+    const key = this.keyOf(fsPath)
+    const sessions = this.table.get(key)
     if (!sessions) {
       return
     }
@@ -99,39 +110,50 @@ export class HoverWatchRegistry {
       sessions.delete(sessionKey)
     }
     if (sessions.size === 0) {
-      this.table.delete(fsPath)
+      this.table.delete(key)
+      this.canonical.delete(key)
     } else {
-      this.touch(fsPath)
+      this.touch(key)
     }
   }
 
   /** 会话整体释放（面板销毁：订阅计数回落）；返回因本次释放而退场的
-   *  目标清单（调用方据此清理挂起任务，如防抖定时器） */
+   *  目标清单（原始形态——调用方据此清理挂起任务，如防抖定时器） */
   releaseSession(sessionKey: string): string[] {
     const retired: string[] = []
-    for (const [fsPath, sessions] of [...this.table.entries()]) {
+    for (const [key, sessions] of [...this.table.entries()]) {
       if (!sessions.delete(sessionKey)) {
         continue
       }
       if (sessions.size === 0) {
-        this.table.delete(fsPath)
-        retired.push(fsPath)
+        this.table.delete(key)
+        const form = this.canonical.get(key)
+        this.canonical.delete(key)
+        if (form !== undefined) {
+          retired.push(form)
+        }
       } else {
-        this.touch(fsPath)
+        this.touch(key)
       }
     }
     return retired
   }
 
-  /** 目标是否有任何订阅 */
+  /** 目标是否有任何订阅（键归一匹配） */
   has(fsPath: string): boolean {
-    return (this.table.get(fsPath)?.size ?? 0) > 0
+    return (this.table.get(this.keyOf(fsPath))?.size ?? 0) > 0
   }
 
-  /** 订阅该目标的会话键列表（失效推送路由） */
+  /** 订阅该目标的会话键列表（失效推送路由；键归一匹配） */
   subscribersOf(fsPath: string): string[] {
-    const sessions = this.table.get(fsPath)
+    const sessions = this.table.get(this.keyOf(fsPath))
     return sessions ? [...sessions.keys()] : []
+  }
+
+  /** 最近登记的原始形态（推送载荷——与 webview 侧 loaded.fsPath 同源）；
+   *  未登记目标原样返回 */
+  canonicalOf(fsPath: string): string {
+    return this.canonical.get(this.keyOf(fsPath)) ?? fsPath
   }
 
   /** 目标数（观测探针） */
@@ -153,14 +175,15 @@ export class HoverWatchRegistry {
   /** 全量清空（协调器 dispose：订阅与目标一并退场） */
   clear(): void {
     this.table.clear()
+    this.canonical.clear()
   }
 
   /** 触达目标（LRU 移到队尾） */
-  private touch(fsPath: string): void {
-    const sessions = this.table.get(fsPath)
+  private touch(key: string): void {
+    const sessions = this.table.get(key)
     if (sessions) {
-      this.table.delete(fsPath)
-      this.table.set(fsPath, sessions)
+      this.table.delete(key)
+      this.table.set(key, sessions)
     }
   }
 
@@ -172,6 +195,7 @@ export class HoverWatchRegistry {
         break
       }
       this.table.delete(oldest)
+      this.canonical.delete(oldest)
     }
   }
 }

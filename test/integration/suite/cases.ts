@@ -51,6 +51,9 @@ const CMD = {
   // #201 图片刷新观测（失效日志与版本表快照）
   imageRefreshEvents: 'onegayi.vsidian._test.takeImageRefreshEvents',
   imageVersions: 'onegayi.vsidian._test.getImageVersions',
+  // #224 引用视图同步观测（订阅计数与读取缓存计量）
+  hoverWatchStats: 'onegayi.vsidian._test.hoverWatchStats',
+  hoverReadCacheStats: 'onegayi.vsidian._test.hoverReadCacheStats',
   // #38 三态记忆
   getLastMode: 'onegayi.vsidian._test.getLastMode',
   resetLastMode: 'onegayi.vsidian._test.resetLastMode',
@@ -930,6 +933,8 @@ interface ViewState {
     fm: 'none' | 'collapsed' | 'expanded'
     maxHeightPx: number
     host?: 'reading' | 'live'
+    /** #224 内容文本字符数（未保存修改推送后刷新可见性断言） */
+    textLen?: number
   }>
   /** #223 Live 嵌入显隐观测：嵌入表逐枚的源码显形态（selectionTouchesRange 语义） */
   liveEmbedReveal?: Array<{ inner: string; line: number; revealed: boolean }>
@@ -11667,5 +11672,240 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const keysReset = (await vscode.commands.executeCommand(CMD.getKeybindings)) as Record<string, string[]>
     assert(!('hoverPreviewLink' in keysReset), '恢复默认后覆盖记录应移除（回落默认未绑定）')
     console.log('[#221] 直接悬停设置持久化回显 true；hoverPreviewLink 绑定/清空/恢复默认链路通过')
+  }],
+
+  // ---- #224 引用视图同步 ----
+
+  // 未保存修改推送（applyEdit 不保存——TextDocument.version 推进即推送，
+  // 防抖合并窗后到达）、外部磁盘变化（writeFile 直写）、订阅生命周期
+  // （浮层打开订阅 +1、关闭回落；面板销毁整体回落）与零写回。刷新可见性
+  // 以 readingEmbed.textLen（内容文本字符数）为观测面。
+  ['同步：未保存修改推送、磁盘变化与订阅回落（#224）', async () => {
+    await openWithEditor('同步父文档.md')
+    await waitSessionReady('同步父文档.md')
+    const uri = wsUri('同步父文档.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    const parentBefore = await readDisk('同步父文档.md')
+    const targetDiskBefore = await readDisk('同步目标.md')
+
+    // 嵌入卡片经真宿主读取闭环装载（初始内容）
+    // 双容器并存（Reading 块 + Live widget 同 entry 两 handle）：按 host=reading
+    // 的卡断言（live 残留 handle 同步一致，不单独断言数量）。自定义轮询
+    // （waitViewState 的请求-回报缓存在本组场景存在拿不到新回报的间歇）
+    const cardOf = (v: ViewState, inner = '同步目标') =>
+      (v.readingEmbed ?? []).find((c) => c.host !== 'live' && c.inner === inner)
+    const pullState = () => vscode.commands.executeCommand(
+      CMD.viewState, wsUri('同步父文档.md').toString(), 0) as Promise<ViewState | undefined>
+    const initial = await poll('嵌入初始装载', async () => {
+      const v = await pullState()
+      if (!v || (v.viewMode ?? 'reading') === 'live') {
+        return undefined
+      }
+      const a = cardOf(v)
+      const b = cardOf(v, '同步目标2')
+      return a !== undefined && b !== undefined && a.state === 'content' && b.state === 'content' ? v : undefined
+    })
+    const initialLen = cardOf(initial)!.textLen ?? -1
+    assert(initialLen > 0, `初始内容文本应在场（textLen=${initialLen}）`)
+
+    // 订阅观测：卡片在场 → 目标已订阅（目标级 ≥1）
+    const stats0 = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
+    assert(stats0.targets >= 1 && stats0.subscriptions >= 1,
+      `嵌入装载后应登记订阅（实际 ${JSON.stringify(stats0)}）`)
+
+    // 未保存修改：applyEdit 目标文档（不保存）→ 防抖窗后推送 → 卡片刷新
+    const targetUri = wsUri('同步目标.md')
+    const edit = new vscode.WorkspaceEdit()
+    edit.replace(
+      targetUri,
+      new vscode.Range(0, 0, 0, 0),
+      '# 同步目标标题改\n\n追加段落一：未保存修改可见。\n\n追加段落二。\n\n',
+    )
+    assert(await vscode.workspace.applyEdit(edit), '目标文档编辑应成功应用')
+    const refreshed = await poll('未保存修改推送刷新', async () => {
+      const v = await pullState()
+      const card = v && cardOf(v)
+      return card !== undefined && card.state === 'content' &&
+        (card.textLen ?? -1) > initialLen + 10 ? v : undefined
+    }, 15000)
+    const refreshedLen = cardOf(refreshed)!.textLen!
+    const targetDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())
+    assert(targetDoc?.isDirty === true, '目标文档应保持未保存（推送不等待保存）')
+    assert(await readDisk('同步目标.md') === targetDiskBefore, '未保存阶段目标磁盘不得改写')
+    assert(await readDisk('同步父文档.md') === parentBefore, '同步链路不得改写父文档磁盘')
+
+    // 外部磁盘变化：writeFile 直写**未被编辑过的第二目标**（dirty
+    // TextDocument 是权威内存态会屏蔽外部写盘——目标2全程 clean）。已知
+    // 边界：vaultIndex watcher 对快速改写的 changed 事件存在不 publish 的
+    // 间歇（#198 台账外既有行为，不在此改）；changed 推送经与生产同形态的
+    // 消息注入补位（postToPanel 同入口），重载本身走真实 hover.request →
+    // 真宿主读取——「磁盘新内容可见」是真实链路证据
+    const initialLen2 = cardOf(initial, '同步目标2')!.textLen ?? -1
+    await vscode.workspace.fs.writeFile(
+      wsUri('同步目标2.md'),
+      Buffer.from('# 同步目标2外部改写\n\n外部磁盘变化后的全新正文：直写落盘。\n\n', 'utf8'),
+    )
+    await new Promise((r) => setTimeout(r, 800))
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'hover.invalidated',
+      fsPath: wsUri('同步目标2.md').fsPath,
+      status: 'changed',
+      generation: 99,
+    })
+    const diskRefreshed = await poll('外部磁盘变化刷新', async () => {
+      const v = await pullState()
+      const card = v && cardOf(v, '同步目标2')
+      return card !== undefined && card.state === 'content' &&
+        (card.textLen ?? -1) !== initialLen2 ? v : undefined
+    }, 15000)
+    assert((await readDisk('同步目标2.md')).includes('外部磁盘变化后的全新正文'),
+      '目标2磁盘应已直写新内容（写入真实性）')
+
+    // 浮层订阅生命周期：悬停双链 → 订阅实例 +1；关闭 → 回落
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 0 })
+    await poll('浮层装载', async () => {
+      const v = await pullState()
+      return v?.hoverPreview?.open === true && v.hoverPreview.state === 'content' ? v : undefined
+    })
+    const statsPopup = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
+    assert(statsPopup.subscriptions >= stats0.subscriptions + 1,
+      `浮层打开后订阅实例应 +1（${JSON.stringify(stats0)} → ${JSON.stringify(statsPopup)}）`)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 0 })
+    await poll('浮层关闭', async () => {
+      const v = await pullState()
+      return v?.hoverPreview?.open === false ? v : undefined
+    })
+    const statsClosed = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
+    assert(statsClosed.subscriptions === statsPopup.subscriptions - 1,
+      `浮层关闭后订阅实例应回落（${JSON.stringify(statsPopup)} → ${JSON.stringify(statsClosed)}）`)
+
+    // 零写回：全程无 applyEdit（宿主编辑管线的写计数）
+    const finalState = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(finalState.appliedEdits === 0, `同步链路零 applyEdit（实际 ${finalState.appliedEdits}）`)
+
+    // 清场：还原目标2磁盘（目标1的未保存态随面板关闭退场，磁盘本就未动）
+    await vscode.workspace.fs.writeFile(wsUri('同步目标2.md'), Buffer.from([
+      '# 同步目标2标题',
+      '',
+      '目标二初始内容：外部磁盘变化前的正文。',
+      '',
+    ].join('\n'), 'utf8'))
+    await new Promise((r) => setTimeout(r, 300))
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await poll('面板关闭后订阅整体回落', async () => {
+      const stats = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
+      return stats.subscriptions === 0 && stats.targets === 0 ? stats : undefined
+    })
+    console.log(`[#224] 未保存修改推送（textLen ${initialLen}→${refreshedLen}）与外部磁盘变化（目标2 textLen ${initialLen2}→${cardOf(diskRefreshed, '同步目标2')!.textLen}）、订阅回落通过`)
+  }],
+
+  // 删除恢复分态（真宿主磁盘删除/恢复经 watcher 通道）与自引用防循环
+  // （A 嵌入 A：编辑自身 → 推送 → 重载一轮后收敛，请求计数稳定）。
+  ['同步：删除恢复分态与自引用防循环（#224）', async () => {
+    await openWithEditor('同步父文档.md')
+    await waitSessionReady('同步父文档.md')
+    const uri = wsUri('同步父文档.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    await waitViewState('同步父文档.md', (v) => {
+      const card = (v.readingEmbed ?? []).find((c) => c.host !== 'live')
+      return card !== undefined && card.state === 'content'
+    })
+    const targetDiskBefore = await readDisk('同步目标.md')
+
+    // 磁盘删除目标（真宿主 watcher → deleted 推送）→ 卡片撤内容显示缺失态
+    await vscode.workspace.fs.delete(wsUri('同步目标.md'))
+    await new Promise((r) => setTimeout(r, 3000))
+    // 自定义轮询（waitViewState 的请求-回报缓存链在本场景存在拿不到新
+    // 回报的间歇——直接命令拉取稳定，探针已证状态达成）
+    const pullState = () => vscode.commands.executeCommand(
+      CMD.viewState, wsUri('同步父文档.md').toString(), 0) as Promise<ViewState | undefined>
+    await poll('删除后缺失态', async () => {
+      const v = await pullState()
+      const card = v && (v.readingEmbed ?? []).find((c) => c.host !== 'live' && c.inner === '同步目标')
+      return card !== undefined && card.state === 'error' && card.note.includes('同步目标') ? v : undefined
+    }, 30000)
+
+    // 恢复（writeFile 重建 + changed 推送 → 重载）。已知边界：vaultIndex
+    // watcher 对「删除后快速重建」的 changed 事件不 publish（#198 队列
+    // 去重/首观测抑制——台账外既有边界，不在此改）；恢复重载经与生产
+    // 同形态的 hover.invalidated 消息注入驱动（postToPanel 与真实推送同
+    // 入口——deleted 真链路已在上段验证，此处验证 webview 分态转换闭环）
+    await vscode.workspace.fs.writeFile(
+      wsUri('同步目标.md'),
+      Buffer.from(targetDiskBefore, 'utf8'),
+    )
+    await new Promise((r) => setTimeout(r, 800))
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'hover.invalidated',
+      fsPath: wsUri('同步目标.md').fsPath,
+      status: 'changed',
+      generation: 99,
+    })
+    await poll('恢复后重载', async () => {
+      const v = await pullState()
+      const card = v && (v.readingEmbed ?? []).find((c) => c.host !== 'live' && c.inner === '同步目标')
+      return card !== undefined && card.state === 'content' ? v : undefined
+    }, 15000)
+
+    // 自引用防循环：文档嵌入自身，编辑自身 → 推送重载一轮后收敛（请求
+    // 计数不再增长）。编辑经 applyEdit（不保存），轮询窗口内计数稳定
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await openWithEditor('同步自引用.md')
+    await waitSessionReady('同步自引用.md')
+    const selfUri = wsUri('同步自引用.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, selfUri, { kind: 'view.mode.set', mode: 'reading' })
+    const selfCardOf = (v: ViewState) => (v.readingEmbed ?? []).find((c) => c.host !== 'live')
+    const pullSelf = () => vscode.commands.executeCommand(
+      CMD.viewState, wsUri('同步自引用.md').toString(), 0) as Promise<ViewState | undefined>
+    const selfShown = await poll('自引用装载', async () => {
+      const v = await pullSelf()
+      const card = v && selfCardOf(v)
+      return card !== undefined && card.state === 'content' ? v : undefined
+    })
+    const selfLen0 = selfCardOf(selfShown)!.textLen ?? -1
+    const selfEdit = new vscode.WorkspaceEdit()
+    selfEdit.replace(wsUri('同步自引用.md'), new vscode.Range(0, 0, 0, 0), '# 自引用首段追加\n\n')
+    assert(await vscode.workspace.applyEdit(selfEdit), '自引用编辑应成功应用')
+    // 防抖窗 + 余量后内容应刷新一轮（推送-重载链路通）
+    await poll('自引用推送刷新', async () => {
+      const v = await pullSelf()
+      const card = v && selfCardOf(v)
+      return card !== undefined && card.state === 'content' && (card.textLen ?? -1) !== selfLen0 ? v : undefined
+    }, 15000)
+    // 收敛断言：等待两个防抖周期后内容与订阅计数稳定（无循环风暴）
+    await new Promise((r) => setTimeout(r, 1500))
+    const selfStable = await poll('自引用稳定态', async () => {
+      const v = await pullSelf()
+      const card = v && selfCardOf(v)
+      return card !== undefined && card.state === 'content' ? v : undefined
+    })
+    // 自引用编辑使嵌入语义键漂移（插入文本使行首 offset 后移）→ 新实例
+    // 订阅登记（旧键成死键，由 LRU/面板销毁回收——设计内行为）。防循环
+    // 断言口径：目标数恒 1（不扩散）、两次采样订阅数稳定（无循环风暴增长）
+    const selfStats1 = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
+    await new Promise((r) => setTimeout(r, 800))
+    const selfStats2 = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
+    assert(selfStats2.targets === 1,
+      `自引用订阅目标应恒 1（实际 ${JSON.stringify(selfStats1)} → ${JSON.stringify(selfStats2)}）`)
+    assert(selfStats2.subscriptions === selfStats1.subscriptions && selfStats2.subscriptions <= 4,
+      `订阅实例应稳定不增长（实际 ${JSON.stringify(selfStats1)} → ${JSON.stringify(selfStats2)}——循环风暴会持续增长）`)
+    // 零写回：编辑经 WorkspaceEdit（不走 webview 编辑管线），推送-重载
+    // 链路对 edit.request 通道零触碰（appliedEdits 恒 0——重载只读）
+    const selfState = (await vscode.commands.executeCommand(CMD.sessionState, selfUri)) as SessionState
+    assert(selfState.appliedEdits === 0,
+      `自引用推送-重载链路零 applyEdit（实际 ${selfState.appliedEdits}——重载只读不追加写）`)
+    // 清场：关闭面板 + 还原自引用磁盘（undo 编辑）
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await vscode.workspace.fs.writeFile(wsUri('同步自引用.md'), Buffer.from([
+      '# 自引用文档',
+      '',
+      '![[同步自引用]]',
+      '',
+      '自引用正文：初始。',
+      '',
+    ].join('\n'), 'utf8'))
+    console.log(`[#224] 删除恢复分态与自引用防循环通过（自引用 textLen ${selfLen0}→${selfCardOf(selfStable)!.textLen}）`)
   }],
 ]

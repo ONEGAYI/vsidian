@@ -659,6 +659,9 @@ export type WebviewToHost =
         fm: 'none' | 'collapsed' | 'expanded'
         maxHeightPx: number
         host?: 'reading' | 'live'
+        /** #224 内容文本字符数（未保存修改推送后刷新可见性的观测面：
+         *  目标内容变化 → textLen 变化；旧 webview 缺省） */
+        textLen?: number
       }>
       /** #223 Live 嵌入显隐观测：嵌入表逐枚的源码显形态（目标原文、行号、
        *  光标/选区是否触及源码区间——selectionTouchesRange 语义；旧 webview
@@ -2517,7 +2520,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
             isNonNegativeInt(e.blocks) &&
             (e.scope === 'full' || e.scope === 'heading' || e.scope === 'block' || e.scope === '') &&
             (e.fm === 'none' || e.fm === 'collapsed' || e.fm === 'expanded') &&
-            isNonNegativeInt(e.maxHeightPx)))) &&
+            isNonNegativeInt(e.maxHeightPx) &&
+            (e.textLen === undefined || isNonNegativeInt(e.textLen))))) &&
         (v.typography === undefined || isTypographyProbe(v.typography))
       )
     case 'reading.perf.report':

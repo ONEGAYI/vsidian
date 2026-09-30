@@ -1065,6 +1065,41 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
     '章节内容。',
     '',
   ].join('\n'), 'utf8')
+  // #224 引用视图同步：独立父文档组（嵌入 + 悬停双链）与目标文档——
+  // 未保存修改推送（applyEdit 不保存）、外部磁盘变化（writeFile/unlink/
+  // 恢复）、订阅计数回落与自引用防循环的观测素材。目标正文含可断言的
+  // 修改前/后标记文本
+  writeFileSync(path.join(wsDir, '同步父文档.md'), [
+    '# 同步父文档',
+    '',
+    '悬停 [[同步目标]] 与嵌入：',
+    '',
+    '![[同步目标]]',
+    '',
+    '![[同步目标2]]',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, '同步目标.md'), [
+    '# 同步目标标题',
+    '',
+    '修改前正文：同步目标初始内容。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, '同步目标2.md'), [
+    '# 同步目标2标题',
+    '',
+    '目标二初始内容：外部磁盘变化前的正文。',
+    '',
+  ].join('\n'), 'utf8')
+  // 自引用：文档嵌入自身（A 嵌入 A——编辑自身后推送-重载不得循环）
+  writeFileSync(path.join(wsDir, '同步自引用.md'), [
+    '# 自引用文档',
+    '',
+    '![[同步自引用]]',
+    '',
+    '自引用正文：初始。',
+    '',
+  ].join('\n'), 'utf8')
   // #219 局部范围矩阵目标：文件名含中文与空格（链接 percent-decode 与
   // 双链字面路径两种写法解析到同一目标），行尾 CRLF（宿主 LF 换算矩阵：
   // 章节/块 range 经 NewlineCoordinator 换算后过滤结果与 LF 文档同构）

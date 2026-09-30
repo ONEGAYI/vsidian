@@ -137,6 +137,8 @@ export interface EmbedCardProbe {
   maxHeightPx: number
   /** 容器来源（#223 Live 挂载与 Reading 块挂载的观测区分） */
   host: 'reading' | 'live'
+  /** #224 内容文本字符数（未保存修改推送后刷新可见性的观测面） */
+  textLen: number
 }
 
 /** 目标原文（`|` 之前——与阅读双链 a 的 href 同口径） */
@@ -418,8 +420,11 @@ export class EmbedCardManager {
       entry.lastReq = null
       const handles = [...this.active.values()].filter((h) => h.entry === entry)
       if (message.status === 'changed') {
-        for (const handle of handles) {
-          this.requestLoad(handle, { silent: true })
+        // 每 entry 单笔重发（lastReq 是 entry 级共享——同 entry 的双容器
+        // handle 不重复请求，回包对全部配对 handle 渲染，与首载同构）
+        const first = handles[0]
+        if (first) {
+          this.requestLoad(first, { silent: true })
         }
         this.touchEntry(entry) // 刷新中仍是有效实例
       } else {
@@ -472,6 +477,8 @@ export class EmbedCardManager {
         fm: fmSection ? (handle.entry.fmExpanded ? 'expanded' : 'collapsed') : 'none',
         maxHeightPx: Number.parseInt(handle.scrollEl.style.maxHeight, 10) || 0,
         host: handle.host,
+        // #224 内容文本字符数（集成断言未保存修改推送后的刷新可见性）
+        textLen: (handle.contentEl.textContent ?? '').length,
       })
     }
     return out

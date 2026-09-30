@@ -52,18 +52,18 @@ describe('目标内容版本仲裁矩阵（旧响应不覆盖新目标或更新�
 describe('订阅注册表：相同目标合并订阅、实例独立释放', () => {
   it('多实例订阅同一目标合并为目标级订阅；任一实例在场即保持订阅', () => {
     const reg = new HoverWatchRegistry()
-    reg.watch('s1', 'D:\\notes\\b.md', 'embed-1')
-    reg.watch('s1', 'D:\\notes\\b.md', 'embed-2')
-    reg.watch('s2', 'D:\\notes\\b.md', 'hover-1')
-    expect(reg.has('D:\\notes\\b.md')).toBe(true)
+    reg.watch('s1', 'D:\\\\notes\\b.md', 'embed-1')
+    reg.watch('s1', 'D:\\\\notes\\b.md', 'embed-2')
+    reg.watch('s2', 'D:\\\\notes\\b.md', 'hover-1')
+    expect(reg.has('D:\\\\notes\\b.md')).toBe(true)
     expect(reg.targets()).toBe(1) // 三实例合并为一个目标
     expect(reg.totalSubscriptions()).toBe(3)
     // 独立释放：逐个退订，最后一个退完目标才退场
-    reg.unwatch('s1', 'D:\\notes\\b.md', 'embed-1')
-    expect(reg.has('D:\\notes\\b.md')).toBe(true)
-    reg.unwatch('s2', 'D:\\notes\\b.md', 'hover-1')
-    reg.unwatch('s1', 'D:\\notes\\b.md', 'embed-2')
-    expect(reg.has('D:\\notes\\b.md')).toBe(false)
+    reg.unwatch('s1', 'D:\\\\notes\\b.md', 'embed-1')
+    expect(reg.has('D:\\\\notes\\b.md')).toBe(true)
+    reg.unwatch('s2', 'D:\\\\notes\\b.md', 'hover-1')
+    reg.unwatch('s1', 'D:\\\\notes\\b.md', 'embed-2')
+    expect(reg.has('D:\\\\notes\\b.md')).toBe(false)
     expect(reg.totalSubscriptions()).toBe(0)
   })
 
@@ -123,5 +123,31 @@ describe('订阅注册表：相同目标合并订阅、实例独立释放', () =
     expect(reg.has('t0.md')).toBe(true)
     expect(reg.has('new.md')).toBe(true)
     expect(reg.has('t1.md')).toBe(false)
+  })
+})
+
+describe('订阅注册表：Windows 键归一（大小写形态漂移）', () => {
+  const fold = (fsPath: string): string => fsPath.replaceAll('\\', '/').toLowerCase()
+  const CANON = 'D:\\Notes\\Target.md'
+  const EDITOR_FORM = 'd:\\notes\\TARGET.md'
+
+  it('编辑器事件形态与读取归正形态仅大小写不同仍命中同一目标', () => {
+    const reg = new HoverWatchRegistry(HOVER_REFRESH_DEFAULTS.watchTargetLimit, fold)
+    reg.watch('s1', CANON, 'e1') // 读取归正形态（大小写混合）
+    expect(reg.has(EDITOR_FORM)).toBe(true) // 编辑器事件形态
+    expect(reg.subscribersOf('D:/NOTES/target.MD')).toEqual(['s1'])
+    // 推送载荷保持登记形态（与 webview 侧 loaded.fsPath 同源）
+    expect(reg.canonicalOf(EDITOR_FORM)).toBe(CANON)
+    // 退订也走归一键
+    reg.unwatch('s1', 'D:/NOTES/TARGET.MD', 'e1')
+    expect(reg.has(CANON)).toBe(false)
+  })
+
+  it('归一键下重复 watch 同目标不同形态不产生第二目标', () => {
+    const reg = new HoverWatchRegistry(HOVER_REFRESH_DEFAULTS.watchTargetLimit, fold)
+    reg.watch('s1', CANON, 'e1')
+    reg.watch('s2', EDITOR_FORM, 'e2')
+    expect(reg.targets()).toBe(1) // 同一目标（两实例合并）
+    expect(reg.totalSubscriptions()).toBe(2)
   })
 })

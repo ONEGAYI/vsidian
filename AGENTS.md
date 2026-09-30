@@ -113,6 +113,7 @@ vsidian/
 │   │   ├── 2026-09-vault-index-storage.md       # 索引存储选型三档基准解读（#195）
 │   │   └── data/                                # 性能探针原始报告数据
 │   │       ├── browser-test-runner.json               # 浏览器调度实测数据
+│   │       ├── hover-refresh.json                     # #224 引用视图同步定向测量数据
 │   │       ├── perf-report.json                       # 性能探针原始报告数据
 │   │       ├── vault-index-storage-bench-recheck.json # #202 三档复测报告
 │   │       └── vault-index-storage-bench.json         # 索引存储基准原始数据（#195）
@@ -183,6 +184,7 @@ vsidian/
 │   │   ├── editorCsp.ts                # 编辑器 CSP 装配纯模块（#130）
 │   │   ├── hostLocale.ts               # 生效语言宿主装配解析帮手
 │   │   ├── hoverDocAccess.ts           # 悬停预览文档访问纯逻辑
+│   │   ├── hoverRefreshCoordinator.ts  # 引用视图刷新协调器（宿主）
 │   │   ├── imageExportHost.ts          # 宿主图片导出执行壳
 │   │   ├── imagePasteHost.ts           # 图片粘贴落盘执行壳（#161）
 │   │   ├── imagePastePlan.ts           # 图片粘贴纯逻辑（#161）
@@ -214,6 +216,7 @@ vsidian/
 │   │   ├── cssSnippets.ts        # CSS 片段纯逻辑单一事实源
 │   │   ├── formatOperations.ts   # 格式操作注册清单
 │   │   ├── frontmatterTable.ts   # frontmatter 表格化纯逻辑
+│   │   ├── hoverRefresh.ts       # 引用视图同步参数与订阅注册表
 │   │   ├── i18n.ts               # t() 取词与语言包装配状态模块
 │   │   ├── imageRefresh.ts       # 图片刷新共享常量与核验决策
 │   │   ├── keybindings.ts        # 快捷键操作与冲突模型

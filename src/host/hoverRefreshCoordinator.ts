@@ -61,10 +61,12 @@ interface PendingFlush {
  */
 export class HoverRefreshCoordinator {
   private readonly registry: HoverWatchRegistry
-  /** fsPath → 防抖窗状态 */
+  /** 归一键 → 防抖窗状态（编辑器事件与磁盘事件可能仅大小写不同——键归一
+   *  保证两路径的 pending 互相可见，磁盘直通能正确取消防抖 pending） */
   private readonly pending = new Map<string, PendingFlush>()
-  /** fsPath → 失效代次（单调递增；首观测为 1——与 vaultIndex generation 口径一致） */
+  /** 归一键 → 失效代次（单调递增；首观测为 1——与 vaultIndex generation 口径一致） */
   private readonly generations = new Map<string, number>()
+  private readonly keyOf: (fsPath: string) => string
   private disposed = false
 
   constructor(
@@ -73,9 +75,15 @@ export class HoverRefreshCoordinator {
       debounceMs?: number
       maxWaitMs?: number
       targetLimit?: number
+      /** Windows 宿主文件系统语义（注册表键折叠大小写——编辑器事件与
+       *  读取归正的 fsPath 可能仅大小写不同，精确匹配会漏推送） */
+      isWindowsHost?: boolean
     },
   ) {
-    this.registry = new HoverWatchRegistry(options?.targetLimit)
+    this.keyOf = options?.isWindowsHost
+      ? (fsPath) => fsPath.replaceAll('\\', '/').toLowerCase()
+      : (fsPath) => fsPath
+    this.registry = new HoverWatchRegistry(options?.targetLimit, this.keyOf)
   }
 
   /** 登记实例订阅（幂等；sessionKey = docUri::sessionId） */
@@ -109,8 +117,9 @@ export class HoverRefreshCoordinator {
     if (this.disposed || !this.registry.has(fsPath)) {
       return
     }
+    const key = this.keyOf(fsPath)
     const now = Date.now()
-    const prev = this.pending.get(fsPath)
+    const prev = this.pending.get(key)
     if (prev) {
       clearTimeout(prev.timer)
     }
@@ -119,10 +128,10 @@ export class HoverRefreshCoordinator {
     const maxWaitMs = this.options?.maxWaitMs ?? HOVER_REFRESH_DEFAULTS.maxWaitMs
     const flushAt = planFlushAt(firstAt, now, debounceMs, maxWaitMs)
     const timer = setTimeout(() => {
-      this.pending.delete(fsPath)
+      this.pending.delete(key)
       this.push(fsPath, 'changed')
     }, Math.max(0, flushAt - now))
-    this.pending.set(fsPath, { firstAt, lastAt: now, timer })
+    this.pending.set(key, { firstAt, lastAt: now, timer })
   }
 
   /**
@@ -140,7 +149,7 @@ export class HoverRefreshCoordinator {
 
   /** 目标当前失效代次（观测面；未观测为 0） */
   generationOf(fsPath: string): number {
-    return this.generations.get(fsPath) ?? 0
+    return this.generations.get(this.keyOf(fsPath)) ?? 0
   }
 
   /** 订阅观测（集成断言订阅计数回落） */
@@ -166,15 +175,24 @@ export class HoverRefreshCoordinator {
     if (sessionKeys.length === 0) {
       return // 推送瞬间订阅已退场（unwatch 竞态）：静默
     }
-    this.generations.set(fsPath, (this.generations.get(fsPath) ?? 0) + 1)
-    this.ports.pushInvalidation(sessionKeys, fsPath, status, this.generations.get(fsPath)!)
+    const key = this.keyOf(fsPath)
+    this.generations.set(key, (this.generations.get(key) ?? 0) + 1)
+    // 载荷用登记形态（canonicalOf）——与 webview 侧 loaded.fsPath 同源，
+    // 事件源形态（编辑器/索引）仅大小写不同也能命中
+    this.ports.pushInvalidation(
+      sessionKeys,
+      this.registry.canonicalOf(fsPath),
+      status,
+      this.generations.get(key)!,
+    )
   }
 
   private cancelPending(fsPath: string): void {
-    const pending = this.pending.get(fsPath)
+    const key = this.keyOf(fsPath)
+    const pending = this.pending.get(key)
     if (pending) {
       clearTimeout(pending.timer)
-      this.pending.delete(fsPath)
+      this.pending.delete(key)
     }
   }
 }

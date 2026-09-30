@@ -470,22 +470,25 @@ export function createTextEditorProvider(
   //  未保存防抖与 vaultIndex.onTargetChange 的磁盘分态直通） ----
   /** sessionKey 编码（docUri 与 sessionId 以 \n 分隔——file URI 不含换行） */
   const hoverSessionKeyOf = (docUri: string, sessionId: string): string => `${docUri}\n${sessionId}`
-  const hoverRefresh = new HoverRefreshCoordinator({
-    pushInvalidation: (sessionKeys, fsPath, status, generation) => {
-      // 只出站消息与清缓存——不得触发宿主事件源（自引用防循环的结构前提）
-      for (const sessionKey of sessionKeys) {
-        const newlineAt = sessionKey.indexOf('\n')
-        const docUri = newlineAt >= 0 ? sessionKey.slice(0, newlineAt) : sessionKey
-        const sessionId = newlineAt >= 0 ? sessionKey.slice(newlineAt + 1) : ''
-        const entry = sessions.get(docUri)
-        if (!entry) {
-          continue
+  const hoverRefresh = new HoverRefreshCoordinator(
+    {
+      pushInvalidation: (sessionKeys, fsPath, status, generation) => {
+        // 只出站消息与清缓存——不得触发宿主事件源（自引用防循环的结构前提）
+        for (const sessionKey of sessionKeys) {
+          const newlineAt = sessionKey.indexOf('\n')
+          const docUri = newlineAt >= 0 ? sessionKey.slice(0, newlineAt) : sessionKey
+          const sessionId = newlineAt >= 0 ? sessionKey.slice(newlineAt + 1) : ''
+          const entry = sessions.get(docUri)
+          if (!entry) {
+            continue
+          }
+          entry.session.invalidateHoverReads(fsPath)
+          entry.session.postToPanel(sessionId, { kind: 'hover.invalidated', fsPath, status, generation })
         }
-        entry.session.invalidateHoverReads(fsPath)
-        entry.session.postToPanel(sessionId, { kind: 'hover.invalidated', fsPath, status, generation })
-      }
+      },
     },
-  })
+    { isWindowsHost },
+  )
   context.subscriptions.push({ dispose: () => hoverRefresh.dispose() })
   const getEntry = (uri: vscode.Uri): SessionEntry | undefined =>
     sessions.get(uri.toString())
