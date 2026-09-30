@@ -236,3 +236,15 @@ export function soleEmbedOfLine(line: string): EmbedOccurrence | null {
   const hit = hits[0]!
   return hit.from === 0 && hit.to === trimmed.length ? hit : null
 }
+
+/** 找包含 col（from <= col < to）的嵌入出现；未命中返回 null（#217 验收
+ *  反馈：嵌入源码恢复链接跳转语义——点击命中判定与 wikilinkAtCol 镜像；
+ *  两扫描器命中集合互斥，判定次序无关） */
+export function embedAtCol(line: string, col: number): EmbedOccurrence | null {
+  for (const hit of scanEmbedsInLine(line)) {
+    if (hit.from <= col && col < hit.to) {
+      return hit
+    }
+  }
+  return null
+}

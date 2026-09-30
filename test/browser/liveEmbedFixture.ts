@@ -131,24 +131,50 @@ Object.assign(window, {
   liveEmbedCount(): number {
     return document.querySelectorAll('.vsidian-live-embed').length
   },
-  /** 源文绘制层可见性（文本节点判据）：lineText（trim 后整行/整段）是否
-   *  仍以真实文本盒子渲染在 cm-content——隐形态整行被 replace widget 替换
-   *  后源文文本节点缺席；显形态文本盒子在场。文本节点全等匹配（非包含），
-   *  避免混排行/行号 widget 的子串与污染文本误判 */
+  /** 源文绘制层可见性（行级判据）：lineText（trim 后整行文本）是否仍作为
+   *  .cm-line 的行级文本渲染——隐形态整行被 replace widget 替换后行
+   *  textContent 为卡片内容，行级全等失败即未绘制；显形态行文本全等命中
+   *  且行内有文本盒子。行级而非文本节点级：嵌入 mark（#217 验收反馈起
+   *  混排/显形源文挂链接 span）会把一行切成多段文本节点，节点级全等对
+   *  mark 命中的行天然失效（且嵌入 span 的文本恰为嵌入原文，会误命中
+   *  其他行的断言） */
   liveLinePainted(lineText: string): boolean {
     const wanted = lineText.trim()
     for (const line of Array.from(document.querySelectorAll<HTMLElement>('.cm-content .cm-line'))) {
+      if ((line.textContent ?? '').trim() !== wanted) {
+        continue
+      }
       const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT)
       let node: Node | null = null
       while ((node = walker.nextNode()) !== null) {
-        if ((node.textContent ?? '').trim() !== wanted) {
-          continue
-        }
         const range = document.createRange()
         range.selectNodeContents(node)
         if (range.getClientRects().length > 0) {
           return true
         }
+      }
+    }
+    return false
+  },
+  /** 文本节点级绘制判据（.cm-content 内任意深度）：代码块卡片等非
+   *  .cm-line 容器内的字面文本可见性（围栏内容行由代码卡片渲染，不在
+   *  行结构内——行级判据覆盖不到） */
+  liveTextPainted(text: string): boolean {
+    const wanted = text.trim()
+    const content = document.querySelector('.cm-content')
+    if (!content) {
+      return false
+    }
+    const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT)
+    let node: Node | null = null
+    while ((node = walker.nextNode()) !== null) {
+      if ((node.textContent ?? '').trim() !== wanted) {
+        continue
+      }
+      const range = document.createRange()
+      range.selectNodeContents(node)
+      if (range.getClientRects().length > 0) {
+        return true
       }
     }
     return false

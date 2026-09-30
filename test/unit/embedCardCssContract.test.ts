@@ -93,12 +93,24 @@ describe('错误分态样式区分（验收反馈）', () => {
 })
 
 describe('Live 隐形态呈现（验收反馈：不留隐形源码行）', () => {
-  it('宿主块级化 + 隐藏 inline replace 前后的 cm-widgetBuffer（frontmatter 标题栏行先例）', () => {
+  it('宿主块级化 + 零高块级化 inline replace 前后的 cm-widgetBuffer（垂直导航坐标锚）', () => {
     const host = rule('#app .cm-editor .cm-content .vsidian-live-embed')
     expect(host).toMatch(/display:\s*block/)
-    // buffer 隐藏是一条双选择器组规则（前后 buffer 各一），按选择器与
-    // display:none 联合断言（跨行组文本不做整串匹配）
-    const hasLeading = /#app \.cm-editor \.cm-content \.cm-line > \.cm-widgetBuffer:has\(\+ \.vsidian-live-embed\),\s*\n#app \.cm-editor \.cm-content \.cm-line > \.vsidian-live-embed \+ \.cm-widgetBuffer\s*\{\s*\n\s*display:\s*none;\s*\n\}/
-    expect(css.match(hasLeading), 'buffer 前后隐藏组规则应在场').not.toBeNull()
+    // buffer 零高块级化是一条双选择器组规则（前后 buffer 各一）：不能
+    // display:none——完全摘除布局盒会破坏 CM6 行内块坐标锚（posAtCoords
+    // 垂直探测在区间尾拿不到 rect 直接跳过整块，方向键从上向下越过嵌入
+    // 行）；零高块级保留布局盒且不占行位，观感与隐藏等同（验收反馈实测）
+    const hasLeading = /#app \.cm-editor \.cm-content \.cm-line > \.cm-widgetBuffer:has\(\+ \.vsidian-live-embed\),\s*\n#app \.cm-editor \.cm-content \.cm-line > \.vsidian-live-embed \+ \.cm-widgetBuffer\s*\{\s*\n\s*display:\s*block;\s*\n\s*height:\s*0;\s*\n\}/
+    expect(css.match(hasLeading), 'buffer 前后零高块级化组规则应在场').not.toBeNull()
+  })
+
+  it('Live 宿主间距 padding 化 + 卡片壳 margin 清零（高度记账与渲染一致）', () => {
+    // 卡片壳 margin 折叠出行盒，CM6 高度记账（行号 gutter/视口测算依据）
+    // 不含它——每卡漏记上下 margin 合量导致行号错位逐卡累积（验收反馈
+    // 实测）；间距由宿主 padding 承担（计入盒子高，记账与渲染一致）
+    const host = rule('#app .cm-editor .cm-content .vsidian-live-embed')
+    expect(host).toMatch(/padding:\s*7px 0/)
+    const card = rule('#app .cm-editor .cm-content .vsidian-live-embed > .vsidian-embed-card')
+    expect(card).toMatch(/margin:\s*0/)
   })
 })

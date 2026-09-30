@@ -9,6 +9,7 @@
 //   包裹不独占）。行独占限制只属挂载适配，索引抽取不设此限
 import { describe, it, expect } from 'vitest'
 import {
+  embedAtCol,
   parseWikilinkInner,
   scanEmbedsInLine,
   scanWikilinksInLine,
@@ -71,6 +72,17 @@ describe('scanEmbedsInLine：嵌入单行出现扫描（独立语法角色）', 
   it('无嵌入子串的行零命中且不误报', () => {
     expect(scanEmbedsInLine('普通文本 [[双链]] 与 [链接](url)')).toHaveLength(0)
     expect(scanEmbedsInLine('')).toHaveLength(0)
+  })
+})
+
+describe('embedAtCol：col 命中查找（#217 验收反馈——嵌入链接跳转判定）', () => {
+  it('col 落在 ![[…]] 区间内命中（含 ! 前缀端）；双链位置不命中', () => {
+    const line = '看 [[双链]] 与 ![[嵌入目标]]'
+    const at = line.indexOf('![[嵌入目标]]')
+    expect(embedAtCol(line, at)?.inner).toBe('嵌入目标')
+    expect(embedAtCol(line, at + 4)?.inner).toBe('嵌入目标')
+    expect(embedAtCol(line, at + '![[嵌入目标]]'.length)).toBeNull() // 右端点外
+    expect(embedAtCol(line, line.indexOf('双链'))).toBeNull()
   })
 })
 

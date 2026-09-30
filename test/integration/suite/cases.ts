@@ -3935,9 +3935,10 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const diskBefore = await readDisk('wikilinks.md')
 
     // live 默认模式：视口内 3 处合法双链（按名/别名/标题）为 widget；
-    // 降级形态与代码上下文不装饰
-    const live = await waitViewState('wikilinks.md', (v) => (v.liveWikilinkCount ?? -1) === 3)
-    assert(live.liveWikilinkCount === 3, `live 双链数应为 3，实际 ${live.liveWikilinkCount}`)
+    // #217 验收反馈起混排嵌入挂双链类 mark（恢复链接色），DOM 级计数计入
+    // ——3 双链 + 1 混排嵌入 = 4；降级形态与代码上下文不装饰
+    const live = await waitViewState('wikilinks.md', (v) => (v.liveWikilinkCount ?? -1) === 4)
+    assert(live.liveWikilinkCount === 4, `live 双链数应为 4，实际 ${live.liveWikilinkCount}`)
     assert(
       live.cssProbe!.liveWikilinkDecorationColor === 'rgb(28, 29, 30)',
       `live 双链应被测试片段命中 rgb(28, 29, 30)，实际 ${live.cssProbe!.liveWikilinkDecorationColor}`,

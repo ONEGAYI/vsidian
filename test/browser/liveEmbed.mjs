@@ -107,7 +107,7 @@ try {
   assert.equal(hosts[0].stateText, zhCn['embed.loading'], '装载中就地 loading 文案')
   assert.equal(await linePainted(EMBED_LINE), false, '隐形态源文不绘制（整行替换）')
   assert.equal(await linePainted('混排嵌入 ![[目标笔记]] 不成卡片。'), true, '混排行保留源文')
-  assert.equal(await linePainted('![[围栏内不挂载]]'), true, '围栏内保留源文（字面文本）')
+  assert.equal(await page.evaluate((n) => window.liveTextPainted(n), '![[围栏内不挂载]]'), true, '围栏内保留源文（字面文本——代码卡片容器，节点级判据）')
   assert.equal(await linePainted('![[未闭合锚'), true, '未闭合行保留可编辑源文')
   passed++
   console.log('[Live嵌入][PASS] 隐形态挂载 + 载荷契约 + 混排/围栏/未闭合保留源文')
@@ -124,13 +124,20 @@ try {
   // ---- 场景 C：真实方向键进出（光标驱动显隐 + 显形时卡片仍可见） ----
   await page.evaluate((p2) => window.setLiveCursor(p2), EMBED_TO + 1 + 3) // 嵌入行下两段（中间段落行）
   await page.evaluate(() => window.focusLiveEmbed())
-  // 中间段落 → ArrowUp 逐键核对：装载卡片高占视口时垂直步进会一次跨到
-  // 区间端点（块级化宿主的行内几何，实测落点 = EMBED_FROM），进入即显形
+  // 中间段落 → ArrowUp 逐键核对：高度记账修复（宿主 padding 化）后垂直
+  // 步进恢复正常逐行——第一次落嵌入行与中间段落之间的空行（区间外），
+  // 第二次进入区间端点显形；此前的「一次跨到区间端点」是记账偏差的
+  // 副作用（跨过了空行）
   await page.keyboard.press('ArrowUp')
   await page.waitForTimeout(60)
   let entered = await page.evaluate(() => window.liveEmbedSelection())
+  assert.ok(entered.length === 1 && entered[0].head === EMBED_TO + 1,
+    `第一次 ArrowUp 落区间后空行（实际 ${JSON.stringify(entered)}，期望 ${EMBED_TO + 1}）`)
+  await page.keyboard.press('ArrowUp')
+  await page.waitForTimeout(60)
+  entered = await page.evaluate(() => window.liveEmbedSelection())
   assert.ok(entered.length === 1 && entered[0].head >= EMBED_FROM && entered[0].head <= EMBED_TO,
-    `第一次 ArrowUp 应进入嵌入区间（实际 ${JSON.stringify(entered)}）`)
+    `第二次 ArrowUp 应进入嵌入区间（实际 ${JSON.stringify(entered)}）`)
   hosts = await reads()
   assert.equal(hosts.length, 1, '显形态宿主在场（below 形态）')
   assert.equal(hosts[0].below, true, '光标进入区间 → 下方形态')
@@ -145,6 +152,31 @@ try {
   assert.equal(await linePainted(EMBED_LINE), false, '源文重新退场')
   passed++
   console.log('[Live嵌入][PASS] 方向键进出：显形（源文+下方卡片）与恢复隐藏')
+
+  // ---- 场景 C2：ArrowDown 从上方进入（验收反馈：曾被越过直达卡片后） ----
+  // buffer 零高块级化（保留 CM6 行内块坐标锚）后，向下逐键可停进源码行
+  await page.evaluate((p2) => window.setLiveCursor(p2), PARENT_DOC.indexOf('开篇正文段。') + 2)
+  await page.evaluate(() => window.focusLiveEmbed())
+  await page.keyboard.press('ArrowDown')
+  await page.waitForTimeout(60)
+  const down1 = await page.evaluate(() => window.liveEmbedSelection()[0].head)
+  assert.ok(down1 < EMBED_FROM, `第一次 ArrowDown 落嵌入行上方（实际 ${down1} < ${EMBED_FROM}）`)
+  await page.keyboard.press('ArrowDown')
+  await page.waitForTimeout(60)
+  const down2 = await page.evaluate(() => window.liveEmbedSelection()[0].head)
+  assert.ok(down2 >= EMBED_FROM && down2 <= EMBED_TO,
+    `第二次 ArrowDown 应进入嵌入区间（实际 ${down2}，区间 [${EMBED_FROM}, ${EMBED_TO}]）`)
+  hosts = await reads()
+  assert.equal(hosts[0].below, true, '向下进入区间 → 显形态')
+  assert.equal(await linePainted(EMBED_LINE), true, '向下进入源码显形')
+  await page.keyboard.press('ArrowDown')
+  await page.waitForTimeout(60)
+  const down3 = await page.evaluate(() => window.liveEmbedSelection()[0].head)
+  assert.ok(down3 > EMBED_TO, `第三次 ArrowDown 离开区间向下（实际 ${down3} > ${EMBED_TO}）`)
+  hosts = await reads()
+  assert.equal(hosts[0].below, false, '向下离开 → 恢复隐藏')
+  passed++
+  console.log('[Live嵌入][PASS] ArrowDown 从上方进入：停进源码行（不越过卡片）')
 
   // ---- 场景 D：鼠标点击卡片不落光标（ignoreEvent 选区隔离） ----
   await page.evaluate(() => window.setLiveCursor(0))
@@ -330,6 +362,95 @@ try {
   assert.deepEqual(errors, [], '无页面错误')
   passed++
   console.log('[Live嵌入][PASS] 高度变动滚动稳定 + 零写回 + 无页面错误')
+
+  console.log(`\n[Live嵌入] 基础场景 ${passed} 个通过`)
+
+  // ---- 场景 M：行号 gutter 跨卡对齐（验收反馈：逐卡错位累积） ----
+  // Live 宿主间距 padding 化（卡片壳 margin 清零）后，gutter 相对正文行的
+  // 偏移应全程恒定（基线偏移），跨卡不累积；按行号文本配对非空唯一行
+  const MULTI_DOC = ['# 多卡文档', '',
+    '![[目标笔记]]', '', '甲间段落。', '',
+    '![[目标笔记]]', '', '乙间段落。', '',
+    '![[目标笔记]]', '', '丙尾段落。', ''].join('\n')
+  await page.evaluate((t) => window.initLiveEmbedDoc(t), MULTI_DOC)
+  await page.waitForTimeout(150)
+  const multiReqs = await page.evaluate(() =>
+    window.liveEmbedSent().filter((m) => m.kind === 'hover.request').slice(-3))
+  for (const r of multiReqs) {
+    await respondOk(r)
+  }
+  await page.waitForTimeout(250)
+  const gutterRows = await page.evaluate((docText) => {
+    const docLines = docText.split('\n')
+    const lineByNo = new Map()
+    for (const line of Array.from(document.querySelectorAll('.cm-content .cm-line'))) {
+      const text = (line.textContent ?? '').trim()
+      if (!text) continue // 空行文本不唯一（配对歧义），跳过
+      const idx = docLines.indexOf(text)
+      if (idx >= 0 && !lineByNo.has(idx + 1)) lineByNo.set(idx + 1, line)
+    }
+    const out = []
+    for (const g of Array.from(document.querySelectorAll('.cm-lineNumbers .cm-gutterElement'))) {
+      const n = parseInt(g.textContent.trim(), 10)
+      const line = lineByNo.get(n)
+      if (!line || Number.isNaN(n)) continue
+      out.push({ n, dTop: g.getBoundingClientRect().top - line.getBoundingClientRect().top })
+    }
+    return out
+  }, MULTI_DOC)
+  assert.ok(gutterRows.length >= 4, `gutter 配对行充足（实际 ${JSON.stringify(gutterRows)}）`)
+  const spread = Math.max(...gutterRows.map((r) => r.dTop)) - Math.min(...gutterRows.map((r) => r.dTop))
+  assert.ok(spread < 1.5, `跨卡 gutter 偏移极差 < 1.5px（实际 ${JSON.stringify(gutterRows.map((r) => ({ n: r.n, d: +r.dTop.toFixed(1) })))}）`)
+  passed++
+  console.log('[Live嵌入][PASS] 行号 gutter 跨三卡对齐无累积')
+
+  // ---- 场景 N：右上角打开入口有可见图标（验收反馈：按钮空壳透明） ----
+  const openIcon = await page.evaluate(() => {
+    const btn = document.querySelector('.vsidian-embed-card .vsidian-embed-card-open')
+    const svg = btn?.querySelector('svg') ?? null
+    return {
+      present: btn !== null,
+      svg: svg !== null,
+      stroke: svg?.getAttribute('stroke') ?? '',
+      box: svg?.getAttribute('viewBox') ?? '',
+    }
+  })
+  assert.equal(openIcon.present, true, '打开入口按钮在场')
+  assert.equal(openIcon.svg, true, '打开入口有 svg 图标（非空壳）')
+  assert.equal(openIcon.stroke, 'currentColor', '图标 stroke currentColor（随按钮 icon-foreground 着色）')
+  assert.equal(openIcon.box, '0 0 16 16', '图标 viewBox 16 网格（graphicBlockChrome 同款风格）')
+  passed++
+  console.log('[Live嵌入][PASS] 卡片右上角打开入口图标在场')
+
+  // ---- 场景 O：嵌入源码恢复链接语义（验收反馈：高亮与跳转） ----
+  // 显形态源文挂双链类（链接色）；Ctrl+单击源文上报 wikilink.activate
+  const firstEmbedFrom = MULTI_DOC.indexOf('![[目标笔记]]')
+  await page.evaluate((p2) => window.setLiveCursor(p2 + 4), firstEmbedFrom)
+  await page.waitForTimeout(120)
+  hosts = await reads()
+  assert.equal(hosts[0].below, true, '链接语义场景前置：显形态')
+  const linkSpan = await page.evaluate(() => {
+    const line = Array.from(document.querySelectorAll('.cm-content .cm-line'))
+      .find((l) => (l.textContent ?? '').includes('![[目标笔记]]'))
+    return line ? line.querySelectorAll('.vsidian-wikilink').length : -1
+  })
+  assert.ok(linkSpan >= 1, `显形态源文挂双链类 span（实际 ${linkSpan}）`)
+  const activateBefore = await page.evaluate(() =>
+    window.liveEmbedSent().filter((m) => m.kind === 'wikilink.activate').length)
+  const srcTop = await page.evaluate(() => window.liveEmbedTextTop('![[目'))
+  assert.ok(srcTop > 0, '源文文本在场可定位（点击目标）')
+  await page.keyboard.down('Control')
+  await page.mouse.click(100, srcTop + 8)
+  await page.keyboard.up('Control')
+  await page.waitForTimeout(80)
+  const activates = await page.evaluate(() =>
+    window.liveEmbedSent().filter((m) => m.kind === 'wikilink.activate'))
+  assert.ok(activates.length > activateBefore,
+    `Ctrl+单击嵌入源文上报 wikilink.activate（前 ${activateBefore} 后 ${activates.length}）`)
+  assert.equal(activates[activates.length - 1].target, '目标笔记', '上报 target 为嵌入目标原文')
+  assert.deepEqual(errors, [], '场景 M/N/O 无页面错误')
+  passed++
+  console.log('[Live嵌入][PASS] 嵌入源码链接语义：双链类高亮 + Ctrl+单击跳转上报')
 
   console.log(`\n[Live嵌入] 全部 ${passed} 个场景通过`)
 } finally {

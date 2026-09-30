@@ -30,8 +30,11 @@ import { buildGraphicChrome, GRAPHIC_CHROME_CLASS_NAMES, markImageFrameSized } f
 import { openImagePopup } from './imagePopup'
 import {
   WIKILINK_CLASS_NAMES,
+  embedAtCol,
   parseWikilinkInner,
+  scanEmbedsInLine,
   scanWikilinksInLine,
+  soleEmbedOfLine,
   wikilinkAtCol,
 } from '../shared/wikilink'
 import { looseLinkAtCol, scanLooseLinksInLine } from '../shared/looseLink'
@@ -509,6 +512,14 @@ export function buildLinkImageDecorations(
  * - 光标进入该双链范围：mark 标记整个出现（源码可编辑）
  * - 代码上下文（围栏/缩进/行内代码）与 frontmatter 内不装饰（源码降级）
  * 纯数据输入，可单测直驱。
+ *
+ * #217 验收反馈：嵌入 `![[…]]` 与双链并行消费同一扫描循环（scanEmbedsInLine
+ * ——形态学镜像、命中互斥）。嵌入只发射 mark（链接高亮），且**接管行归
+ * 接管方**：独占行嵌入在光标未及时由 liveEmbed 整行 replace 接管（此处
+ * 零发射——mark 与整行 replace 重叠会同帧渲染出被替换的源文，浏览器
+ * 实测；显形态（触及）时 liveEmbed 撤 replace、源文在场，此处发射 mark
+ * 保有链接色）；混排/容器内嵌入 liveEmbed 永不接管，mark 常驻（源文
+ * 常驻即有链接色）。
  */
 export function buildWikilinkDecorationRanges(
   doc: Text,
@@ -538,6 +549,19 @@ export function buildWikilinkDecorationRanges(
               ? wikilinkMarkDeco.range(hit.from, hit.to)
               : wikilinkWidgetDeco(parsed.display).range(hit.from, hit.to),
           )
+        }
+        for (const hit of scanEmbedsInLine(line.text, line.from)) {
+          if (inlineScanSuppressed(tree, hit.from, fm)) {
+            continue
+          }
+          // 独占行嵌入：仅光标/选区触及（显形态——liveEmbed 已撤整行
+          // replace、源文在场）时发射 mark；未及时该行由 liveEmbed 的
+          // replace 接管，零发射避免重叠渲染冲突。混排行永不接管，常驻
+          const sole = soleEmbedOfLine(line.text) !== null
+          if (sole && !selectionTouchesRange(selection, hit.from, hit.to)) {
+            continue
+          }
+          out.push(wikilinkMarkDeco.range(hit.from, hit.to))
         }
       }
       if (line.to >= range.to) {
@@ -679,7 +703,8 @@ export function activateLooseLinkAtPos(
 
 /** 激活指定源位置的双链：命中即上报意图（原始 target：`|` 之前原文）并
  *  返回 true。替换区间（光标在范围外时的 widget）仍有文档坐标，命中判定与源码态
- *  一致。#11。 */
+ *  一致。#11。不含嵌入（`![[…]]` 走 activateEmbedAtPos——悬停预览判定族
+ *  复用本函数且嵌入保持「常驻卡片不弹浮层」守卫，两语义分层）。 */
 export function activateWikilinkAtPos(
   view: EditorView,
   pos: number,
@@ -709,6 +734,38 @@ export function activateWikilinkAtPos(
   return true
 }
 
+/** 激活指定源位置的嵌入（#217 验收反馈：嵌入源码恢复 Ctrl+点击跳转
+ *  语义——与卡片右上角 open 入口同款 wikilink.activate 消息；与
+ *  activateWikilinkAtPos 分层：悬停预览判定族只消费双链版，嵌入保持
+ *  「常驻卡片不弹浮层」守卫，本函数仅由跳转事件路径串联）。命中上报
+ *  原始 target（`|` 之前原文）与完整 `![[…]]` 区间并返回 true。 */
+export function activateEmbedAtPos(
+  view: EditorView,
+  pos: number,
+  postActivate: (target: string, srcStart: number, srcEnd: number) => void,
+): boolean {
+  const state = view.state
+  const field = state.field(liveDecorationsField, false)
+  if (!field) {
+    return false
+  }
+  const clamped = Math.max(0, Math.min(pos, state.doc.length))
+  const line = state.doc.lineAt(clamped)
+  const hit = embedAtCol(line.text, clamped - line.from)
+  if (!hit) {
+    return false
+  }
+  const from = line.from + hit.from
+  const to = line.from + hit.to
+  if (inlineScanSuppressed(field.tree, from, field.fm)) {
+    return false
+  }
+  const pipeAt = hit.inner.indexOf('|')
+  const target = pipeAt >= 0 ? hit.inner.slice(0, pipeAt) : hit.inner
+  postActivate(target, from, to)
+  return true
+}
+
 /** Ctrl/Cmd+mousedown 直接激活；普通单击在 mouseup 才确认，以免拖选时跳转。
  *  #11：双链先于普通链接判定（两者语法不重叠，先后仅是判定次序）；
  *  #152：树驱动链接之后是宽松链接（行扫描判定，语法不重叠） */
@@ -723,7 +780,9 @@ export function makeLinkMouseDownHandler(
     if (pos === null) {
       return false
     }
-    if (postActivateWikilink && activateWikilinkAtPos(view, pos, postActivateWikilink)) {
+    if (postActivateWikilink &&
+        (activateWikilinkAtPos(view, pos, postActivateWikilink) ||
+          activateEmbedAtPos(view, pos, postActivateWikilink))) {
       event.preventDefault()
       return true
     }
@@ -818,14 +877,18 @@ export function createLinkInteractions(opts: {
           pendingClick = null
           if (!pending || event.button !== 0 ||
             Math.hypot(event.clientX - pending.x, event.clientY - pending.y) > 5) return false
-          // #152：树驱动链接未命中再试宽松链接（行扫描；含 pos-1 边界重试）
+          // #152：树驱动链接未命中再试宽松链接（行扫描；含 pos-1 边界重试）。
+          // 嵌入（#217）与双链共享 wikilink 渲染类——渲染态点击目标同族，
+          // 双链未命中再试嵌入激活
           const activateLink = (pos: number) =>
             activateLinkAtPos(view, pos, opts.postActivate) ||
             activateLooseLinkAtPos(view, pos, opts.postActivate)
+          const activateWl = (pos: number) =>
+            activateWikilinkAtPos(view, pos, opts.postActivateWikilink!) ||
+            activateEmbedAtPos(view, pos, opts.postActivateWikilink!)
           const hit = pending.target === 'wikilink'
             ? Boolean(opts.postActivateWikilink &&
-              (activateWikilinkAtPos(view, pending.pos, opts.postActivateWikilink) ||
-                (pending.pos > 0 && activateWikilinkAtPos(view, pending.pos - 1, opts.postActivateWikilink))))
+              (activateWl(pending.pos) || (pending.pos > 0 && activateWl(pending.pos - 1))))
             : activateLink(pending.pos) || (pending.pos > 0 && activateLink(pending.pos - 1))
           if (hit) event.preventDefault()
           return hit

@@ -128,7 +128,13 @@ describe('嵌入卡片：挂载升级与装载请求', () => {
     expect(boxes.length).toBeGreaterThan(0)
     expect(boxes.every((b) => b.disabled)).toBe(true)
     expect(card.querySelector(`.${EMBED_CARD_CLASS_NAMES.title}`)?.textContent).toContain('目标笔记.md')
-    expect(card.querySelector(`.${EMBED_CARD_CLASS_NAMES.open}`)).not.toBeNull()
+    // 打开入口有可见图标（验收反馈：按钮本体空壳透明不可见——svg 子元素
+    // 在场且 stroke currentColor 随按钮 icon-foreground 着色）
+    const openBtn = card.querySelector<HTMLElement>(`.${EMBED_CARD_CLASS_NAMES.open}`)!
+    const openSvg = openBtn.querySelector('svg')
+    expect(openSvg).not.toBeNull()
+    expect(openSvg?.getAttribute('stroke')).toBe('currentColor')
+    expect(openSvg?.getAttribute('viewBox')).toBe('0 0 16 16')
     manager.dispose()
   })
 

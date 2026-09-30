@@ -15,6 +15,7 @@ import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/sync
 import {
   WIKILINK_CLASS_NAMES,
   LiveWikilinkWidget,
+  activateEmbedAtPos,
   activateWikilinkAtPos,
   buildWikilinkDecorationRanges,
   makeLinkMouseDownHandler,
@@ -155,15 +156,53 @@ describe('实时预览：双链间接装饰（视口内按各自范围切换）'
     expect(widgets(second + 1)).toEqual([first])
   })
 
-  it('降级形态不装饰：嵌入 ![[…]]、块引用 ^、空标题；代码上下文不装饰', () => {
+  it('降级形态不装饰：块引用 ^、空标题；代码上下文不装饰', () => {
     const ranges = liveRanges(WIKILINK_DOC)
     for (const r of ranges) {
       const text = WIKILINK_DOC.slice(r.from, r.to)
-      expect(text).not.toContain('嵌入目标')
       expect(text).not.toContain('目标笔记^块')
       expect(text).not.toContain('坏#')
       expect(text).not.toContain('不装饰')
     }
+  })
+
+  it('嵌入 ![[…]] 恢复链接装饰（#217 验收反馈）：混排常驻 mark、完整区间、代码上下文抑制', () => {
+    // 混排嵌入 liveEmbed 永不接管，mark 常驻（源文常驻即有链接色）
+    const ranges = liveRanges(WIKILINK_DOC)
+    const marks = ranges.filter((r) =>
+      String(r.value.spec['class'] ?? '').split(' ').includes(WIKILINK_CLASS_NAMES.wikilink) &&
+      WIKILINK_DOC.slice(r.from, r.to).includes('嵌入目标'),
+    )
+    expect(marks.length).toBe(1)
+    expect(WIKILINK_DOC.slice(marks[0]!.from, marks[0]!.to)).toBe('![[嵌入目标]]')
+    // 无替换 widget 发射（嵌入呈现归 liveEmbed；渲染态替换文字属双链语义）
+    expect(ranges.some((r) =>
+      r.value.spec.widget instanceof LiveWikilinkWidget &&
+      WIKILINK_DOC.slice(r.from, r.to).includes('嵌入目标'),
+    )).toBe(false)
+    // 围栏内嵌入字面文本不装饰（代码上下文抑制与双链同款）
+    const fenced = liveRanges('```text\n![[围栏嵌入]]\n```\n')
+    expect(fenced.some((r) =>
+      String(r.value.spec['class'] ?? '').split(' ').includes(WIKILINK_CLASS_NAMES.wikilink),
+    )).toBe(false)
+  })
+
+  it('独占行嵌入的 mark 发射跟随显隐（接管行归接管方）', () => {
+    // 未触及（隐形态）：liveEmbed 整行 replace 接管，此处零发射——mark 与
+    // 整行 replace 重叠会同帧渲染出被替换的源文（浏览器实测）
+    const doc = '段落\n\n![[嵌入目标]]\n\n结尾'
+    const at = doc.indexOf('![[嵌入目标]]')
+    const hidden = liveRanges(doc)
+    expect(hidden.some((r) =>
+      String(r.value.spec['class'] ?? '').split(' ').includes(WIKILINK_CLASS_NAMES.wikilink) &&
+      doc.slice(r.from, r.to).includes('嵌入目标'),
+    )).toBe(false)
+    // 触及（显形态）：liveEmbed 撤 replace、源文在场，mark 发射保有链接色
+    const revealed = liveRanges(doc, { anchor: at + 4 })
+    expect(revealed.some((r) =>
+      String(r.value.spec['class'] ?? '').split(' ').includes(WIKILINK_CLASS_NAMES.wikilink) &&
+      doc.slice(r.from, r.to) === '![[嵌入目标]]',
+    )).toBe(true)
   })
 })
 
@@ -269,11 +308,33 @@ describe('实时预览：渲染态双链单击跳转，源码态普通单击编�
     try {
       const posted: string[] = []
       const cb = (target: string) => posted.push(target)
-      expect(activateWikilinkAtPos(view, WIKILINK_DOC.indexOf('嵌入目标'), cb)).toBe(false)
       expect(activateWikilinkAtPos(view, WIKILINK_DOC.indexOf('目标笔记^块'), cb)).toBe(false)
       expect(activateWikilinkAtPos(view, WIKILINK_DOC.indexOf('围栏内不装饰'), cb)).toBe(false)
       expect(activateWikilinkAtPos(view, WIKILINK_DOC.indexOf('双链样例'), cb)).toBe(false)
       expect(posted).toEqual([])
+    } finally {
+      view.destroy()
+      parent.remove()
+    }
+  })
+
+  it('嵌入位置 Ctrl+点击上报（#217 验收反馈）：activateEmbedAtPos 分层——跳转路径命中、悬停判定族不命中', () => {
+    const { view, parent } = liveWithDoc()
+    try {
+      // 跳转路径（activateEmbedAtPos，makeLinkMouseDownHandler 串联消费）
+      const posted: Array<{ target: string; from: number; to: number }> = []
+      const at = WIKILINK_DOC.indexOf('![[嵌入目标]]')
+      expect(
+        activateEmbedAtPos(view, at + 4, (target, from, to) => posted.push({ target, from, to })),
+      ).toBe(true)
+      expect(posted).toEqual([{ target: '嵌入目标', from: at, to: at + '![[嵌入目标]]'.length }])
+      // 悬停判定族守卫（activateWikilinkAtPos 不含嵌入——嵌入已有常驻
+      // 卡片不弹浮层；liveLinkSpecAt 消费双链版）
+      expect(activateWikilinkAtPos(view, at + 4, () => {})).toBe(false)
+      // Ctrl+mousedown 处理器路径：嵌入位置经 wikilink 分支串联命中
+      const handler = makeLinkMouseDownHandler(() => {}, (target) => posted.push({ target, from: 0, to: 0 }))
+      const hitView = { posAtCoords: () => at + 4, state: view.state } as unknown as EditorView
+      expect(handler(new MouseEvent('mousedown', { ctrlKey: true, bubbles: true, cancelable: true }), hitView)).toBe(true)
     } finally {
       view.destroy()
       parent.remove()
@@ -358,7 +419,10 @@ describe('阅读视图：双链渲染为 a.vsidian-wikilink 与单击上报', ()
     const h = makeBridge()
     const c = mount(h)
     const live = viewState(c, h)
-    expect(live.liveWikilinkCount).toBe(3)
+    // 3 处合法双链（widget/mark）+ 1 处混排嵌入 mark（#217 验收反馈起
+    // 嵌入挂双链类恢复链接色，DOM 级计数随之计入；被整行 replace 吞没的
+    // 独占行嵌入无 DOM 文本不命中）
+    expect(live.liveWikilinkCount).toBe(4)
     expect(live.liveLinkCount ?? 0).toBe(0) // 样例不含普通链接
     c.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
     const reading = viewState(c, h)

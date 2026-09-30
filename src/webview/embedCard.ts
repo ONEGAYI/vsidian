@@ -47,6 +47,15 @@ import {
 } from './refReadingContent'
 import { WIKILINK_CLASS_NAMES } from '../shared/wikilink'
 
+/** 右上角打开入口图标（验收反馈：按钮本体空壳无图标——外部跳转形态，
+ *  graphicBlockChrome 同款内联 SVG 风格；stroke currentColor 随按钮
+ *  --vscode-icon-foreground 着色） */
+const OPEN_ICON =
+  '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M9 2.5h4.5V7"></path><path d="M13.5 2.5L7.5 8.5"></path>' +
+  '<path d="M11.5 9v3.5a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1H6"></path></svg>'
+
 /** 嵌入卡片稳定类名（样式契约 content 域 reading-embed-card 条目同源） */
 export const EMBED_CARD_CLASS_NAMES = {
   /** 卡片壳（左引用边条 + 边框；挂 Obsidian 别名 .markdown-embed） */
@@ -253,6 +262,7 @@ export class EmbedCardManager {
     const openLabel = t('embed.openTarget')
     openBtn.setAttribute('aria-label', openLabel)
     openBtn.title = openLabel
+    openBtn.innerHTML = OPEN_ICON
     header.appendChild(titleEl)
     header.appendChild(openBtn)
     const scrollEl = document.createElement('div')

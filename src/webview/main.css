@@ -4073,9 +4073,21 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
    会被 CM6 跳过整行），呈现目标全部由本段规则承担 */
 #app .cm-editor .cm-content .vsidian-live-embed {
   display: block;
+  /* Live 侧上下间距由宿主 padding 承担（卡片壳 margin 清零见下条）：
+     margin 折叠出行盒，CM6 高度记账（gutter/视口测算依据）不含它，
+     每卡漏记上下 margin 合量会造成行号与正文的错位逐卡累积；
+     padding 计入盒子高，记账与渲染一致 */
+  padding: 7px 0;
+}
+
+/* Live 宿主内卡片壳间距归零（间距已由宿主 padding 承担；Reading 侧
+   文档流不受此规则影响，保留原 margin 折叠语义） */
+#app .cm-editor .cm-content .vsidian-live-embed > .vsidian-embed-card {
+  margin: 0;
 }
 
 #app .cm-editor .cm-content .cm-line > .cm-widgetBuffer:has(+ .vsidian-live-embed),
 #app .cm-editor .cm-content .cm-line > .vsidian-live-embed + .cm-widgetBuffer {
-  display: none;
+  display: block;
+  height: 0;
 }

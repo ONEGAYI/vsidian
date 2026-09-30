@@ -985,7 +985,8 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   writeFileSync(path.join(wsDir, 'assets', 'batch-pic.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
   writeFileSync(path.join(wsDir, 'wikilinks.md'), WIKILINKS_DOC, 'utf8')
   // #218 悬停预览：独立父文档（存在目标 + 缺失目标双链；不与共享样本的
-  // 双链计数断言互相干扰——wikilinks.md 有 liveWikilinkCount===3 钉住）。
+  // 双链计数断言互相干扰——wikilinks.md 有 liveWikilinkCount===4 钉住（3 双链
+  // + 1 混排嵌入 mark，#217 验收反馈起嵌入挂双链类））。
   // #219 追加局部锚点（章节/块/失效）与普通链接（全文/章节/页内/外站）
   // 段落——前两个双链序号不变（#218 用例 index 0/1 依赖）
   writeFileSync(path.join(wsDir, '悬停预览.md'), [
