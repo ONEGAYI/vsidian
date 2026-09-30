@@ -1186,3 +1186,31 @@ Live 渲染态经 lezer `HorizontalRule` 节点驱动：未触及该行时源文
   4. **自引用**：文档嵌入自身后编辑该文档——嵌入内容一轮刷新后稳定（无循环刷新风暴）。
   5. **浮层订阅回落**：悬停打开浮层后关闭——扩展宿主日志无残留报错（订阅回落由 `_test.hoverWatchStats` 集成钉住，人工验证无异常即可）。
 - 已知边界与衔接：**vaultIndex watcher 对「删除后快速重建/改写」的 changed 事件存在不 publish 的间歇**（#198 队列去重与首观测抑制的既有行为，台账外不改——集成用例对恢复/外部改写段以与生产同形态的 `hover.invalidated` 注入补位推送，重载本身走真实 hover.request 真宿主读取，「磁盘新内容可见」是真实链路）；dirty TextDocument 是权威内存态、屏蔽外部写盘（外部磁盘变化用例选全程 clean 的第二目标）；首载失败（文件本就缺失）无目标身份不订阅，文件创建后不自动恢复（重开/刷新可用——U8「恢复后可用」的该子路径记录在案）；waitViewState 测试基建在删除场景存在拿不到新回报的间歇（用例改直接命令轮询，非产品缺陷）；**#225 衔接**——全量性能报告（编辑阻塞与长文档多嵌入）在收口票执行，本票定向数据已落 `docs/perf/data/hover-refresh.json`（100 请求 1 次读取 + 50 命中、2MiB 字节边界、dispose 回收）。
+
+## 一期收口——U1–U12 核对、全量回归与人工验收总清单（#225，2026-09-30）
+
+- 职责边界：本节是**一期纵向核对与收口记录**，不替代各功能票自身测试——#218–#224 各节的自动化矩阵仍然有效，人工待验明细也以各节为准，本节只做汇总索引与跨路径补充。
+- **U1–U12 核对结论**（证据指针：代码模块 / 浏览器场景 / 集成用例；逐项明细见 #225 收口提交简报）：
+  - **U1 悬停触发（正文/双链/普通链接/面板 + Live 修饰键与设置）**：达成。Reading 正文（hoverPreview A–M）、Live Ctrl+悬停与直接悬停开关（hoverEntry A/D/E、集成「悬停全入口」设置持久化）、面板直接悬停（hoverEntry F/G/N）。
+  - **U2 键盘（可绑操作默认未绑定、命中、焦点往返、无目标不误开）**：达成。`hoverPreviewLink` 注册（keybindings.md 33/84 行、单测 keybindings）、键盘模态焦点进入/Esc 返还（hoverEntry H/I/L/K）、无目标与嵌入区间静默（hoverEntry J）。
+  - **U3 引用全文/章节/块（两父模式一致、源文不改写）**：达成。范围选择器与完整块/章节函数（hoverDocAccess + wikilinkTarget 20 用例）、切块过滤（hoverPreview H/I/K）、Reading 卡片与 Live 卡片同一装载（liveEmbed K、readingEmbed A/B）、rename 改写只动路径段（集成「嵌入：rename」）。
+  - **U4 源码显隐与编辑（跨区选区、内容保留、IME 不跳动）**：达成。selectionTouchesRange 语义矩阵（liveEmbed 单测 21 例）、真实方向键/shift+click/IME/Backspace（liveEmbed C/E/G/H）、显形态卡片保留（liveEmbed C、#223 集成）。
+  - **U5 属性区（默认折叠、热区与键盘、刷新保留、重开复位）**：达成。状态机与热区（refReadingContent + hoverPopup 单测 14 例）、hoverPreview P/Q/R、hoverRefresh B（changed 刷新 fm 保持）。
+  - **U6 小窗口（四边翻转/钳制、滚动、入口不裁切）**：达成。几何四边矩阵（hoverPopupGeometry 单测 9 例）、小视口绘制层（hoverPreview G）。
+  - **U7 目标修改同步（未保存/磁盘、旧响应丢弃、滚动保持）**：达成。hoverRefresh A–E、集成「同步」两用例（#224）。
+  - **U8 失效原因（无效输入/缺文件锚点/拒绝读取、恢复后可用）**：达成。错误分态 i18n（refReadingContent.refErrorText）、hoverPreview E/M、readingEmbed G、liveEmbed J；首载即失败文件不订阅、创建后不自动恢复的子路径已在 #224 节记录在案（重开/刷新可用）。
+  - **U9 B 内部资源与跳转（相对 B、既有锚点语义）**：达成。sourceDocUri 通道与来源守卫（documentSession 单测）、hoverPreview N/O、集成「悬停预览：来源资源」（子目录目标按 B 解析）。
+  - **U10 多层引用（一层占位可跳转、不递归、不叠浮层）**：达成。占位引用行按直接来源解析（readingEmbed D）、浮层不叠加（hoverPopup 结构：浮层不在委托域）。
+  - **U11 主题/片段一致与专属入口（绘制层验证）**：达成。#app 内挂载天然命中主题与片段（hoverPreview S 明暗主题绘制层断言）、专属样式入口四个契约条目（hover-popup / hover-fm-section / reading-embed-card / live-embed-widget，146 条目八项零失败）。
+  - **U12 零写回与不拖慢（任务/属性零写回、按需挂载、释放无残留）**：达成。checkbox 禁用与无 fm 编辑入口（refReadingContent）、各浏览器套件零 edit.request 断言与集成双零 dirty/零 applyEdit；性能实测见下条。
+- **性能实测**（数据 [data/hover-embed-perf.json](../perf/data/hover-embed-perf.json) + [data/hover-embed-perf-host.json](../perf/data/hover-embed-perf-host.json)，报告 [2026-09-hover-preview-embed-performance.md](../perf/2026-09-hover-preview-embed-performance.md)）：状态层——10k 行 + 200 嵌入在场时单字编辑净开销 +0.9 ms（对照同体量纯文基线）、嵌入源码内编辑 +6.9 ms、光标进出显隐翻转 avg 0.151 ms/次、装饰实例 LRU 同键复用与超限淘汰正确；真宿主——1 万段落 + 200 嵌入较纯文基线输入延迟 avg +4.6 ms / max +18.5 ms（含 rAF 稳定等待地板），Reading 挂载 50/10000 块随视口不随体量，面板关闭后订阅 0/0 回落。不设虚构阈值。
+- **全量回归记录**（2026-09-30，工作树 `codex/hover-preview-embed`，报告均在 logs/ 与 .vscode-test/ 下）：`compile` 通过（logs/225-compile.log）；`test:unit` 198 文件 4154 项全绿（logs/225-unit.log）；`test:browser` 41/41 套件全绿（logs/225-browser.log，报告 out/test/browser-runs/run-*/）；集成分片全量（VSIDIAN_ITEST_SHARDS=4）**227 项 PASS / 0 项 FAIL**（logs/225-integration.log + .vscode-test/integration-dev-s1..4.log；片 1 宿主退出码 1 为 #211 收尾退出噪声、报告零失败，与 #223 节记录同款）；`check:stylecontract` 八项零失败（logs/225-stylecontract.log）+ `check:stylecontract:baseline` 通过（logs/225-stylecontract-baseline.log）；file-tree `check --strict` 通过（分支累计新增 33 文件全部在册，独立磁盘对照零缺漏）。#219/#222 节记录的剪贴板独占环境故障本轮**未复现**（227/0 全过，无需按基线放行）。
+- **一期边界核查**：递归、混排/容器嵌入、Live 编辑、PDF 均未提前实现——引用内容视图无 EditorView 创建点（全仓 `new EditorView` 仅 syncController 一处）、文档访问层仅接 Markdown（non-markdown 分态拒绝）、嵌入扫描与挂载适配按容器无关分层（1.5 期接入面保留）；所有引用内容 Reading 禁写（checkbox 禁用、fm 无编辑入口、只读消息不进 edit.request）。
+- **一期人工验收总清单**（汇总索引——明细在各票节，以下按主题归类；**全部未执行、待用户人工验收**）：
+  1. **悬停手感与观感**：#218 节 1（Reading 悬停开闭手感）、#221 节 1/3（Live Ctrl+悬停、面板悬停）、#219 节 1/4（章节/块观感、锚点缺失提示）、#220 节 2/3（浮层内链接跳转、属性区手感）。
+  2. **嵌入卡片与源码显隐**：#222 节 1/2/3（卡片观感、限高滚动、一层展开）、#223 节 1/2/3/6（显隐手感、IME 修改、未闭合恢复、跨模式与观感）。
+  3. **同步跟随与失效恢复**：#224 节 1/2/3/4/5（未保存跟随、刷新状态保持、删除恢复、自引用、订阅回落无报错）、#222 节 4（重挂状态保持）、#220 节 1（B 来源资源与 Mermaid/公式）。
+  4. **键盘与设置**：#221 节 2/4/5（直接悬停开关回显、键盘命令绑定与保活）、#222 节 5（嵌入限高设置持久化）。
+  5. **零误写体感**：#218 节 3（悬停后双文档无 dirty、无可撤销项）、#223 节 4（卡片内交互隔离）。
+  6. **Remote SSH（单列，未执行）**：一期全部链路（悬停读取、嵌入装载、订阅刷新、索引/rename）在远程 Windows→CentOS 7 环境的行为待验——历史批次 remote 兼容面由 ADR-0001 保障，本期未新增 Remote 专属通道，但**未经远程实测**。
+  7. **物理鼠标与视觉观感（单列，未执行）**：真实鼠标的悬停开闭节奏、四边翻转观感、嵌入卡片边条与显隐过渡、明暗主题与已启用 CSS 片段下的浮层/卡片观感——自动化只断终态与绘制层证据，手感与观感须用户验收。

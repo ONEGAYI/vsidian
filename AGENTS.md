@@ -2,7 +2,7 @@
 
 VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 
-> 当前状态：**MVP 主要功能已实施，整体验收未结**。一期双视图编辑、增量写回、任务、链接图片、双链、表格、查找、三态切换、独立设置页与源文件行号，二期公式渲染、Mermaid 图表、表格交互重做（[#72 规格](docs/specs/table-interaction-rework.md)）与大纲面板二期（#65–#70，样式透传、跳转高亮、折叠滑块、工具条搜索、右键菜单、拖拽排序）均已落地；统一右键菜单批次已落地（2026-09-28，#183 内核：Live 正文全域接管 + 注册/覆写基建 + 剪贴板四项，`blockMenu` 退役、`outlineMenu` 迁移内核并修复子菜单溢出；#184 内容接线：26 枚图标明暗资产接线 + 段落设置按行结构勾选 + 三簇命令分派核查钉住；规格 [docs/specs/context-menu.md](docs/specs/context-menu.md)）；工具栏刷新按钮已落地（2026-09-29，#208：顶栏右端组刷新入口 + 图片缓存全局代次换戳失效通道 + Mermaid 注入失败终态重置，刷新全程状态保持零写回；规格 [docs/specs/toolbar-refresh.md](docs/specs/toolbar-refresh.md)）；图片弹窗与防误触、表格数据行透明已落地（2026-09-29，#212：Markdown 图片接入代码块同款 hover 按钮组 + 本体吞点击 + 全屏弹窗（缩放/平移/刷新/原格式另存导出），链接内嵌与表格网格内图片明确排除，规格 [docs/specs/image-popup.md](docs/specs/image-popup.md)；#213：数据行与分隔行背景透明到编辑器背景、表头保留，新公开变量 `--vsidian-table-row-background`）；自动化通过不等于真实 IME、物理鼠标与视觉观感已由用户验收。功能范围见 [docs/specs/mvp.md](docs/specs/mvp.md)；待验项与历轮执行记录见 [docs/specs/manual-verification.md](docs/specs/manual-verification.md)；用户可见变更见 [CHANGELOG.md](CHANGELOG.md)。本文件是项目级 agent 规则的**单一入口**：横切约定常驻于此，领域落档约定的正文在指针目标（specs 文档与项目技能）中维护——入口唯一、不另建副本，指针写明触发分支，改动正文只改指针目标。
+> 当前状态：**MVP 主要功能已实施，整体验收未结**。一期双视图编辑、增量写回、任务、链接图片、双链、表格、查找、三态切换、独立设置页与源文件行号，二期公式渲染、Mermaid 图表、表格交互重做（[#72 规格](docs/specs/table-interaction-rework.md)）与大纲面板二期（#65–#70，样式透传、跳转高亮、折叠滑块、工具条搜索、右键菜单、拖拽排序）均已落地；统一右键菜单批次已落地（2026-09-28，#183 内核：Live 正文全域接管 + 注册/覆写基建 + 剪贴板四项，`blockMenu` 退役、`outlineMenu` 迁移内核并修复子菜单溢出；#184 内容接线：26 枚图标明暗资产接线 + 段落设置按行结构勾选 + 三簇命令分派核查钉住；规格 [docs/specs/context-menu.md](docs/specs/context-menu.md)）；工具栏刷新按钮已落地（2026-09-29，#208：顶栏右端组刷新入口 + 图片缓存全局代次换戳失效通道 + Mermaid 注入失败终态重置，刷新全程状态保持零写回；规格 [docs/specs/toolbar-refresh.md](docs/specs/toolbar-refresh.md)）；图片弹窗与防误触、表格数据行透明已落地（2026-09-29，#212：Markdown 图片接入代码块同款 hover 按钮组 + 本体吞点击 + 全屏弹窗（缩放/平移/刷新/原格式另存导出），链接内嵌与表格网格内图片明确排除，规格 [docs/specs/image-popup.md](docs/specs/image-popup.md)；#213：数据行与分隔行背景透明到编辑器背景、表头保留，新公开变量 `--vsidian-table-row-background`）；悬停预览与文档嵌入一期已落地（2026-09-30，#218–#225：Reading/Live 双侧悬停浮层（全文/章节/块范围 + B 身份来源资源与属性区）与正文嵌入卡片（一层展开、索引/rename 接线、光标驱动源码显隐）、目标变更订阅同步与有界缓存，引用内容全程只读；规格 [docs/specs/hover-preview-embed.md](docs/specs/hover-preview-embed.md)，性能实测见 [docs/perf/2026-09-hover-preview-embed-performance.md](docs/perf/2026-09-hover-preview-embed-performance.md)）；自动化通过不等于真实 IME、物理鼠标与视觉观感已由用户验收。功能范围见 [docs/specs/mvp.md](docs/specs/mvp.md)；待验项与历轮执行记录见 [docs/specs/manual-verification.md](docs/specs/manual-verification.md)；用户可见变更见 [CHANGELOG.md](CHANGELOG.md)。本文件是项目级 agent 规则的**单一入口**：横切约定常驻于此，领域落档约定的正文在指针目标（specs 文档与项目技能）中维护——入口唯一、不另建副本，指针写明触发分支，改动正文只改指针目标。
 
 ## 约定
 
@@ -101,18 +101,21 @@ vsidian/
 │   │   └── outlinks-panel-reference.png    # 出链面板形态参考图
 │   ├── features.md # README 功能与设置详解下沉页
 │   ├── perf/       # 性能实测数据与测量工具说明
-│   │   ├── 2026-09-browser-test-runner.md       # 浏览器测试调度实测
-│   │   ├── 2026-09-code-block-card.md           # 代码块卡片性能实测（#85）
-│   │   ├── 2026-09-live-syntax-decorations.md   # 语法树装饰与大围栏细分实测（#8）
-│   │   ├── 2026-09-math-rendering.md            # 公式渲染性能实测（#59）
-│   │   ├── 2026-09-mermaid-rendering.md         # Mermaid 性能与边界（#60）
-│   │   ├── 2026-09-mvp-performance-summary.md   # MVP 性能档位汇总
-│   │   ├── 2026-09-reading-viewport-mount.md    # 阅读按需挂载实测数据
-│   │   ├── 2026-09-table-cell-editing.md        # 表格单元格编辑性能实测（#12）
-│   │   ├── 2026-09-title-decoration-viewport.md # 标题切片视口渲染实测数据
-│   │   ├── 2026-09-vault-index-storage.md       # 索引存储选型三档基准解读（#195）
-│   │   └── data/                                # 性能探针原始报告数据
+│   │   ├── 2026-09-browser-test-runner.md             # 浏览器测试调度实测
+│   │   ├── 2026-09-code-block-card.md                 # 代码块卡片性能实测（#85）
+│   │   ├── 2026-09-hover-preview-embed-performance.md # 悬停与嵌入一期性能实测（#225）
+│   │   ├── 2026-09-live-syntax-decorations.md         # 语法树装饰与大围栏细分实测（#8）
+│   │   ├── 2026-09-math-rendering.md                  # 公式渲染性能实测（#59）
+│   │   ├── 2026-09-mermaid-rendering.md               # Mermaid 性能与边界（#60）
+│   │   ├── 2026-09-mvp-performance-summary.md         # MVP 性能档位汇总
+│   │   ├── 2026-09-reading-viewport-mount.md          # 阅读按需挂载实测数据
+│   │   ├── 2026-09-table-cell-editing.md              # 表格单元格编辑性能实测（#12）
+│   │   ├── 2026-09-title-decoration-viewport.md       # 标题切片视口渲染实测数据
+│   │   ├── 2026-09-vault-index-storage.md             # 索引存储选型三档基准解读（#195）
+│   │   └── data/                                      # 性能探针原始报告数据
 │   │       ├── browser-test-runner.json               # 浏览器调度实测数据
+│   │       ├── hover-embed-perf-host.json             # #225 真宿主编辑阻塞实测数据
+│   │       ├── hover-embed-perf.json                  # #225 状态层嵌入装饰实测数据
 │   │       ├── hover-refresh.json                     # #224 引用视图同步定向测量数据
 │   │       ├── perf-report.json                       # 性能探针原始报告数据
 │   │       ├── vault-index-storage-bench-recheck.json # #202 三档复测报告

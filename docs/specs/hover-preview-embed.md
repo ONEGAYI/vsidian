@@ -1,6 +1,6 @@
 # 悬停预览与文档嵌入
 
-状态：一期产品共识已确认，规格整理于 2026-09-30；同日用户授权并已开一期实施票及后续跟踪票，尚未授权编码或推送。本文是本功能的单一规格入口。技术设计由现有源码与已确认行为推导，不表示已实现或已验收。
+状态：**一期已实施（2026-09-30，工单 #218–#225 全部落地）**。规格整理于 2026-09-30 并经用户确认，同日授权开票与实施。本文是本功能的单一规格入口；架构方向见 [ADR-0009](../adr/0009-referenced-document-views.md)。一期各票交付与验证记录见文末「一期落地索引」；用户故事 U1–U12 的逐项核对结论随 #225 收口提交记录于人工验证清单。后续阶段（1.5 期递归与混排、二期 Live 编辑、三期 PDF）未实施、未混入。
 
 工作树：`C:/Users/64487/.codex/worktrees/hover-preview-embed/vscode-obsidian-like-editor`；分支：`codex/hover-preview-embed`。后续实施沿用该树。架构方向见 [ADR-0009](../adr/0009-referenced-document-views.md)。
 
@@ -165,6 +165,23 @@ A 嵌入 B：显示 B；B 内的 `![[C]]` 只显示可打开的引用占位，�
 - [#228](https://github.com/ONEGAYI/vsidian/issues/228)：三期 PDF 预览与嵌入，阶段前置 #227；阶段排序不代表 PDF 技术上依赖 Live 写回。
 
 工程参数（悬停开闭延迟、刷新合并间隔、缓存容量、设置数值有效范围）在实现时依据现有约定与测量确定，需集中定义并测试；不冒称访谈已确认这些数字。离屏 DOM 回收不应清除当前实例的属性展开和滚动状态。
+
+## 一期落地索引（2026-09-30）
+
+一期八票全部落地于分支 `codex/hover-preview-embed`，各票交付、自动化记录与人工待验明细见 [manual-verification.md](manual-verification.md) 各节；用户可见变更见 [CHANGELOG.md](../../CHANGELOG.md) 的 Unreleased 段；性能实测见 [2026-09-hover-preview-embed-performance.md](../perf/2026-09-hover-preview-embed-performance.md)。
+
+| 工单 | 交付 | 主要模块 |
+| --- | --- | --- |
+| #218 | Reading 双链全文悬停首条闭环与无副作用文档访问通道 | `host/hoverDocAccess`、`webview/hoverPopup` + `hoverPopupGeometry`、协议 hover.request/result |
+| #219 | 局部范围：标题章节、块引用与普通 Markdown 链接 | `host/wikilinkTarget`（完整范围函数）、webview 切块后范围过滤 |
+| #220 | B 身份来源资源、浮层内链接、笔记属性区与主题片段 | `webview/refReadingContent`（后提取共享）、来源守卫 `hoverSourceFsPath(s)` |
+| #221 | 全入口：Live Ctrl+悬停、面板直接悬停、键盘命令与直接悬停设置 | `webview/hoverPopup` 入口装配、`directTarget` 协议、设置 `hover.liveDirect`、操作 `hoverPreviewLink` |
+| #222 | Reading 正文嵌入卡片、一层展开与索引/rename 闭环 | `shared/wikilink`（scanEmbedsInLine）、`webview/embedCard`、embed 边种与 `vaultRename` 改写 |
+| #223 | 父文档 Live 嵌入挂载与光标驱动源码显隐 | `webview/liveEmbed`（spans/装饰 StateField + widget LRU）、共用 EmbedCardManager |
+| #224 | 目标变更订阅、失效恢复与有界缓存 | `shared/hoverRefresh`、`host/hoverRefreshCoordinator`、`hoverReadCache`、消息 hover.watch/invalidated |
+| #225 | 一期整体验证（U1–U12 核对、全量回归、性能实测）与交付文档收口 | 本节与 manual-verification 一期总清单 |
+
+一期边界核对结论（#225）：递归展开、混排/列表/引用/表格容器内嵌入、引用内容 Live 编辑与 PDF 均未提前实现（嵌入内容视图无 EditorView 创建点；文档访问层仅接 Markdown 并以 non-markdown 分态拒绝；嵌入扫描器与挂载适配按容器无关分层保留 1.5 期接入面）；所有引用内容 Reading 禁写（任务 checkbox 禁用、frontmatter 无编辑入口、只读消息不进 edit.request 通道——各票集成用例以双零 dirty 与零 applyEdit 钉住）。
 
 ## 外部参照与证据边界
 

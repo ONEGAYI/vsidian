@@ -1,0 +1,70 @@
+{
+  "ticket": "#225",
+  "date": "2026-09-30",
+  "kind": "host",
+  "startedAt": "2026-09-30T04:31:47.760Z",
+  "scenarios": [
+    {
+      "name": "真宿主：1 万段落（约 2 万行）+ 200 嵌入（Live）——打开、嵌入表与编辑阻塞",
+      "data": {
+        "openToReadyMs": 358,
+        "liveEmbedRevealCount": 200,
+        "revealedInitially": 0,
+        "contentDomCount": 80,
+        "inputDelayAvgMs": 16.76,
+        "inputDelayMaxMs": 33.3,
+        "longTasks": null,
+        "docLines": 20001,
+        "watchAfterScrollRounds20": {
+          "targets": 1,
+          "subscriptions": 1
+        }
+      }
+    },
+    {
+      "name": "真宿主：读取缓存（视口内嵌入装载后）",
+      "data": {
+        "watchStats": {
+          "targets": 1,
+          "subscriptions": 1
+        },
+        "readCacheStats": {
+          "entries": 1,
+          "bytes": 178,
+          "hits": 0,
+          "misses": 1,
+          "entryLimit": 24,
+          "byteLimit": 2097152
+        }
+      }
+    },
+    {
+      "name": "真宿主：1 万段落 + 200 嵌入（Reading）——按需挂载有界性",
+      "data": {
+        "readingTotalBlocks": 10000,
+        "readingMountedBlocks": 50,
+        "readingContentDomCount": 108
+      }
+    },
+    {
+      "name": "真宿主：面板关闭后订阅回落",
+      "data": {
+        "watchStatsAfterClose": {
+          "targets": 0,
+          "subscriptions": 0
+        }
+      }
+    },
+    {
+      "name": "真宿主：1 万段落纯文基线（Live，同体量）——编辑阻塞对照",
+      "data": {
+        "openToReadyMs": 188,
+        "contentDomCount": 89,
+        "inputDelayAvgMs": 12.16,
+        "inputDelayMaxMs": 14.8,
+        "longTasks": null,
+        "docLines": 20001
+      }
+    }
+  ]
+}
