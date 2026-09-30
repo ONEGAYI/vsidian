@@ -68,5 +68,9 @@
   "command.wordMotion.cursorLeft.title": "Move left by one word (CJK-aware)",
   "command.wordMotion.selectLeft.title": "Select left by one word (CJK-aware)",
   "command.wordMotion.cursorRight.title": "Move right by one word (CJK-aware)",
-  "command.wordMotion.selectRight.title": "Select right by one word (CJK-aware)"
+  "command.wordMotion.selectRight.title": "Select right by one word (CJK-aware)",
+  "command.find.selectNext.title": "Select Next Occurrence",
+  "command.find.selectPrevious.title": "Select Previous Occurrence",
+  "command.find.skipCurrent.title": "Skip and Select Next Occurrence",
+  "command.find.allOccurrences.title": "Select All Occurrences"
 }

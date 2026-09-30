@@ -349,6 +349,8 @@ export const en = {
   'find.prev': 'Previous match',
   'find.next': 'Next match',
   'find.close': 'Close find',
+  /** #238 查找选项条（Ctrl+D 会话期间的迷你三按钮）容器可访问名称 */
+  'find.optionsBar': 'Find options',
 
   /** 外部修改冲突横幅 */
   'conflict.bannerText':
@@ -658,6 +660,11 @@ export const en = {
   'command.wordMotion.cursorRight.title': 'Move right by one word (CJK-aware)',
   'command.wordMotion.selectLeft.title': 'Select left by one word (CJK-aware)',
   'command.wordMotion.selectRight.title': 'Select right by one word (CJK-aware)',
+  // ---- #238 select-next-occurrence family（操作注册表 titleKey） ----
+  'command.find.selectNext.title': 'Select Next Occurrence',
+  'command.find.selectPrevious.title': 'Select Previous Occurrence',
+  'command.find.skipCurrent.title': 'Skip and Select Next Occurrence',
+  'command.find.allOccurrences.title': 'Select All Occurrences',
   /** 设置项：分词引擎（呈现归「中文分词」附加分页） */
   'setting.wordSegmentEngine.title': 'Word segmentation engine',
   'setting.wordSegmentEngine.description': 'Engine used to split continuous CJK text for word-wise Ctrl+Left/Right motion. Latin and digit runs always keep the built-in group semantics.',

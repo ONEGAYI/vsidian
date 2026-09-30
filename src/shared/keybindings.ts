@@ -129,6 +129,17 @@ export const UI_OPERATIONS = [
   { id: 'selectWordLeft', command: 'onegayi.vsidian.wordMotion.selectLeft', titleKey: 'command.wordMotion.selectLeft.title', mode: 'live', writes: true, defaults: ['ctrl+shift+left', 'alt+shift+left'] },
   { id: 'cursorWordRight', command: 'onegayi.vsidian.wordMotion.cursorRight', titleKey: 'command.wordMotion.cursorRight.title', mode: 'live', writes: true, defaults: ['ctrl+right', 'alt+right'] },
   { id: 'selectWordRight', command: 'onegayi.vsidian.wordMotion.selectRight', titleKey: 'command.wordMotion.selectRight.title', mode: 'live', writes: true, defaults: ['ctrl+shift+right', 'alt+shift+right'] },
+  // #238 选下一处相同词族（批次 D3）：匹配选项与查找面板三开关同源
+  //（shared/findOptions），Live 编辑能力（writes=true 走 router 焦点门控）。
+  // 默认键对齐 VSCode：ctrl+d（选下一处）、ctrl+k ctrl+d（两段弦——跳过
+  // 当前；router 整串 chord 匹配与 1.2s 前缀超时已有基建）、ctrl+shift+l
+  // （全选）。「选上一处」对齐 VSCode 无默认键位（命令面板入口可达）。
+  // defaultKeymap/searchKeymap 均未绑定这三键（searchKeymap 不装配），
+  // 无内建绑定复活问题，不需吞键接管；冲突核对记录见 keybindings.md
+  { id: 'findSelectNext', command: 'onegayi.vsidian.find.selectNext', titleKey: 'command.find.selectNext.title', mode: 'live', writes: true, defaults: ['ctrl+d'] },
+  { id: 'findSelectPrevious', command: 'onegayi.vsidian.find.selectPrevious', titleKey: 'command.find.selectPrevious.title', mode: 'live', writes: true, defaults: [] },
+  { id: 'findSkipCurrent', command: 'onegayi.vsidian.find.skipCurrent', titleKey: 'command.find.skipCurrent.title', mode: 'live', writes: true, defaults: ['ctrl+k ctrl+d'] },
+  { id: 'findAllOccurrences', command: 'onegayi.vsidian.find.allOccurrences', titleKey: 'command.find.allOccurrences.title', mode: 'live', writes: true, defaults: ['ctrl+shift+l'] },
 ] as const satisfies readonly KeybindingOperation[]
 export type UiOperationId = (typeof UI_OPERATIONS)[number]['id']
 export function isUiOperationId(value: unknown): value is UiOperationId {

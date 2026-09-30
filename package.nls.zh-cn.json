@@ -68,5 +68,9 @@
   "command.wordMotion.cursorLeft.title": "按词左移（中文分词）",
   "command.wordMotion.selectLeft.title": "按词向左扩展选区（中文分词）",
   "command.wordMotion.cursorRight.title": "按词右移（中文分词）",
-  "command.wordMotion.selectRight.title": "按词向右扩展选区（中文分词）"
+  "command.wordMotion.selectRight.title": "按词向右扩展选区（中文分词）",
+  "command.find.selectNext.title": "选下一处相同词",
+  "command.find.selectPrevious.title": "选上一处相同词",
+  "command.find.skipCurrent.title": "跳过当前，选下一处相同词",
+  "command.find.allOccurrences.title": "选中全部相同词"
 }

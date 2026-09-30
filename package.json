@@ -385,6 +385,26 @@
         "command": "onegayi.vsidian.wordMotion.selectRight",
         "title": "%command.wordMotion.selectRight.title%",
         "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.find.selectNext",
+        "title": "%command.find.selectNext.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.find.selectPrevious",
+        "title": "%command.find.selectPrevious.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.find.skipCurrent",
+        "title": "%command.find.skipCurrent.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.find.allOccurrences",
+        "title": "%command.find.allOccurrences.title%",
+        "category": "Vsidian"
       }
     ],
     "menus": {

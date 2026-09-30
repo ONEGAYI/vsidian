@@ -49,6 +49,7 @@ import {
   type LineGutterAlignment,
   type LineGutterProbe,
   type LiveSyntaxProbe,
+  type OccurrenceProbe,
   type OutlineProbe,
   type OutlinkItemPayload,
   type OutlinksProbe,
@@ -113,6 +114,18 @@ import {
 // 不叠加），replaceNext/replaceAll 命令供替换栏走标准出站链路
 import { replaceAll, replaceNext, search, setSearchQuery } from '@codemirror/search'
 import { FIND_OPTIONS_DEFAULT, findOptionsEqual, type FindOptions } from '../shared/findOptions'
+import {
+  OCCURRENCE_CLASS_NAMES,
+  planExpandWords,
+  planSelectAllOccurrences,
+  planSelectNext,
+  planSelectPrevious,
+  planSkipCurrent,
+  resolveOccurrenceSeed,
+  type OccurrencePlan,
+  type OccurrenceRange,
+  type OccurrenceSeed,
+} from './nextOccurrence'
 import { liveDecorationsField, livePreviewDecorations, LIVE_CLASS_NAMES, selectionTouchesRange, tableCompositionSettled, TaskCheckboxWidget } from './liveDecorations'
 import { LINK_MOD_CLASS, createLinkInteractions, LINK_CLASS_NAMES, WIKILINK_CLASS_NAMES, activateLinkAtPos, activateLooseLinkAtPos, activateWikilinkAtPos } from './liveLinks'
 import { liveMath } from './liveMath'
@@ -394,6 +407,10 @@ interface PersistedState {
 /** 外部同步事务标记：updateListener 见到它即跳过（不回发）。
  *  性能探针（#5）复用同一注解——探针编辑走渲染路径但不写回宿主 */
 export const externalSync = Annotation.define<boolean>()
+
+/** #238「选下一处相同词」命令事务标记：会话簿记的 updateListener 见到
+ *  它即跳过（命令自身改选区不算「选区被外部改变」，不算会话结束信号） */
+const occurrenceCmd = Annotation.define<{ occurrence: true }>()
 
 /** ChangeSet 展开的段表（定义域系坐标）：fromA/toA 为定义域区间，insLen 插入长度 */
 interface ChainSection {
@@ -884,9 +901,30 @@ export class WebviewSyncController {
   /** #217 验收反馈：Ctrl/Cmd 修饰键 keyup 监听（状态类维护；keydown 复用 docKeydown） */
   private docKeyup: ((e: KeyboardEvent) => void) | undefined
   private readonly keybindingRouter: KeybindingRouter
+  // ---- #238 选下一处相同词：查找选项条（迷你三按钮）与会话簿记 ----
+  /** 选项条 DOM（常驻，显隐由 -open 类控制；非模态：不抢焦点不占弹窗槽） */
+  private occurrenceBarEl: HTMLElement | undefined
+  private occurrenceCaseBtnEl: HTMLButtonElement | undefined
+  private occurrenceWordBtnEl: HTMLButtonElement | undefined
+  private occurrenceRegexpBtnEl: HTMLButtonElement | undefined
+  /** 会话（对齐 VSCode MultiCursorSession 生命周期）：匹配档与种子词在
+   *  创建时决定、存续期间沿用（空选区种子的 override 档不随选区出现漂
+   *  移）；ranges 为命令后选区快照——updateListener 检测到非命令事务的
+   *  选区变化即结束会话（选项条淡出，下一次按下按新状态重建）。
+   *  kind：'add' = Ctrl+D 族（切换开关重建种子）；'all' = 全选型（切换
+   *  开关立即按新档重选全部） */
+  private occurrenceSession: {
+    kind: 'add' | 'all'
+    seed: OccurrenceSeed
+    ranges: readonly OccurrenceRange[]
+  } | null = null
+  /** 主面板开关闪烁计时（重复按下重启动画；dispose 时清理） */
+  private findFlashTimer: ReturnType<typeof setTimeout> | undefined
   private readonly cancelKeybindingOnBlur = () => {
     this.keybindingRouter.cancel()
     this.setLinkModActive(false) // 窗口失焦：修饰键态不可信，回落（keyup 可能丢失）
+    // #238 编辑器失焦结束会话（VSCode 口径）：选项条随会话淡出
+    this.endOccurrenceSession()
   }
 
   /** #217 验收反馈：Ctrl/Cmd 修饰键激活态类维护（body.vsidian-mod-link）
@@ -1078,6 +1116,13 @@ export class WebviewSyncController {
       else if (id === 'cursorWordRight') this.runWordMotion(cursorWordRight)
       else if (id === 'selectWordLeft') this.runWordMotion(selectWordLeft)
       else if (id === 'selectWordRight') this.runWordMotion(selectWordRight)
+      // #238 选下一处相同词族：同「本地消化不转发宿主」先例（选区计划在
+      // webview 的 CM6 上执行，与命令面板 ui.command 回发入口共用
+      // runOccurrenceSelect）；仅 Live 正文（router writes 门控 + 守卫）
+      else if (id === 'findSelectNext') this.runOccurrenceSelect('next')
+      else if (id === 'findSelectPrevious') this.runOccurrenceSelect('prev')
+      else if (id === 'findSkipCurrent') this.runOccurrenceSelect('skip')
+      else if (id === 'findAllOccurrences') this.runOccurrenceSelect('all')
       else this.bridge.postMessage({ kind: 'keybindings.execute', id })
     })
     const saved = bridge.getState<PersistedState>()
@@ -1340,6 +1385,10 @@ export class WebviewSyncController {
     this.bodyEl.appendChild(this.sidebarEl)
     parent.appendChild(this.bodyEl)
     parent.appendChild(this.findPanel)
+    // #238 查找选项条：与查找面板同定位包含块（parent）、同右上角位——与
+    // 面板互斥出现（面板开时代之以面板开关闪烁，见 flashFindToggles）
+    this.occurrenceBarEl = this.buildOccurrenceBar()
+    parent.appendChild(this.occurrenceBarEl)
     // 侧栏初始态（持久化恢复）落到 DOM 类与按钮可访问名称
     this.applySidebarDom()
     // 大纲面板初始态（持久化恢复）落到侧栏容器类与按钮 aria-expanded
@@ -1391,6 +1440,15 @@ export class WebviewSyncController {
         this.closeFind()
         return
       }
+      // #238 查找选项条 Esc：会话结束、选项条淡出（选区保持——多光标收
+      // 敛由下一次 Esc 落到 CM6 simplifySelection，一层消费一次，与浮层
+      // 队列同款节奏）。非模态条不抢焦点，Esc 从编辑器正常抵达此处
+      if (this.occurrenceSession && e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+        this.endOccurrenceSession()
+        return
+      }
     }
     document.addEventListener('keydown', this.docKeydown, true)
     this.docKeyup = (e: KeyboardEvent) => {
@@ -1421,6 +1479,15 @@ export class WebviewSyncController {
     // 空行等不接管位不 preventDefault，浏览器原生菜单照常
     this.view.contentDOM.addEventListener('contextmenu', (event) => {
       this.onContentContextMenu(event)
+    })
+    // #238 编辑器失焦结束会话：焦点确实离开正文（relatedTarget 不在
+    // contentDOM 内——选项条按钮 mousedown 已 preventDefault 保焦，点击
+    // 开关不算失焦）；view destroy 时 contentDOM 随之移除，无需解绑
+    this.view.contentDOM.addEventListener('focusout', (event) => {
+      const next = event.relatedTarget
+      if (!(next instanceof Node) || !this.view?.contentDOM.contains(next)) {
+        this.endOccurrenceSession()
+      }
     })
     // #221 Live 悬停入口（默认 Ctrl+悬停，设置 hover.liveDirect 开启后
     // 直接悬停）：contentDOM 上的 mouseover/mouseout 委托——目标判定与
@@ -1517,6 +1584,12 @@ export class WebviewSyncController {
 
   dispose(): void {
     this.flushPendingViewState()
+    // #238 会话与闪烁计时清理（选项条 DOM 随 parent 移除）
+    this.endOccurrenceSession()
+    if (this.findFlashTimer) {
+      clearTimeout(this.findFlashTimer)
+      this.findFlashTimer = undefined
+    }
     document.removeEventListener('visibilitychange', this.flushViewportOnHide)
     window.removeEventListener('pagehide', this.flushViewportOnPageHide)
     // #163 验收反馈：卸载跳转目标高亮的消失监听（window 级监听防泄漏）
@@ -1707,6 +1780,9 @@ export class WebviewSyncController {
             this.findRender()
             this.findLocate()
           }
+          // #238 开关切换结束当前会话并按新档重建（选项条在场则保持在场，
+          // 按钮态同步刷新）——下一次 Ctrl+D 匹配行为即时随动
+          this.rebuildOccurrenceSessionAfterOptionChange()
         }
         break
       }
@@ -2168,6 +2244,12 @@ export class WebviewSyncController {
           case 'cursorWordRight': this.runWordMotion(cursorWordRight); break
           case 'selectWordLeft': this.runWordMotion(selectWordLeft); break
           case 'selectWordRight': this.runWordMotion(selectWordRight); break
+          // #238 选下一处相同词族：命令面板入口（快捷键走 router 本地分支
+          // 直达），与 addCursorAbove 同款「本地消化」链路
+          case 'findSelectNext': this.runOccurrenceSelect('next'); break
+          case 'findSelectPrevious': this.runOccurrenceSelect('prev'); break
+          case 'findSkipCurrent': this.runOccurrenceSelect('skip'); break
+          case 'findAllOccurrences': this.runOccurrenceSelect('all'); break
         }
         break
       case 'sidebar.test.click': {
@@ -2938,6 +3020,8 @@ export class WebviewSyncController {
       imageEntries: this.images?.activeEntries(),
       imageProbe: this.collectImageProbe(),
       find: this.collectFindProbe(),
+      // #238 选词会话观测：选项条在场态与三开关（与 findOptions 同源）
+      occurrence: this.collectOccurrenceProbe(),
       typography: this.collectTypography(),
       // #33 设置快照缓存（宿主下发过才有值；缺省向后兼容）
       settings: this.settings,
@@ -3121,6 +3205,8 @@ export class WebviewSyncController {
    *  与命令面板命令编排，webview 工具栏已移除） */
   private setViewMode(target: 'live' | 'reading' | 'toggle'): void {
     this.keybindingRouter.cancel()
+    // #238 切换模式 = 离开 Live 编辑域，选词会话结束（选项条淡出）
+    this.endOccurrenceSession()
     const next: ViewMode =
       target === 'toggle' ? (this.viewMode === 'live' ? 'reading' : 'live') : target
     if (next === this.viewMode) {
@@ -7058,6 +7144,9 @@ export class WebviewSyncController {
    *  并全选查询 */
   private openFind(query?: string, opts: { replace?: boolean; replacement?: string } = {}): void {
     this.findTouched = true
+    // #238 面板打开：选项条让位（UI 互斥——面板在场时由面板开关闪烁承担
+    // 选项提示），选词会话结束（下一次 Ctrl+D 按面板态重新决策）
+    this.endOccurrenceSession()
     let effective = query
     if (typeof effective !== 'string') {
       const seed = this.findSeedFromSelection()
@@ -7302,6 +7391,249 @@ export class WebviewSyncController {
       index: this.findMatches.length > 0 ? this.findIndex + 1 : 0,
       currentFrom: cur?.from ?? null,
       currentTo: cur?.to ?? null,
+    }
+  }
+
+  // ---- #238 选下一处相同词（Ctrl+D 族）与查找选项条 ----
+  // 匹配语义（nextOccurrence 纯函数单一事实源，对齐 VSCode 1.86.2
+  // MultiCursorSession.create）：面板开且词非空沿用面板三开关；面板未开
+  // + 无选区以 override 档（敏感+全字）种子选词；面板未开 + 有选区沿用
+  // 面板开关记忆档、选区文本为搜索词。会话档在创建时决定、存续期间沿用；
+  // 选项条（用户决策：每次按下直接打开的三按钮迷你条）非模态——不抢
+  // 编辑器焦点、不占 popupMutex 模态槽位（无互斥、无 Esc 插队，其 Esc
+  // 在 find 面板之后消费一次）
+
+  /** 查找选项条 DOM：仅三开关按钮（Aa/ab/.*），无搜索框无计数。按钮态
+   *  与主面板开关同源（aria-pressed = this.findOptions）；mousedown
+   *  preventDefault 保编辑器焦点（点击开关不算失焦，会话不被打断） */
+  private buildOccurrenceBar(): HTMLElement {
+    const bar = document.createElement('div')
+    bar.className = OCCURRENCE_CLASS_NAMES.bar
+    bindLocale(bar, 'aria-label', 'find.optionsBar')
+    const mkToggle = (
+      cls: string, icon: string, key: 'find.matchCase' | 'find.wholeWord' | 'find.regexp',
+      flip: (o: FindOptions) => FindOptions,
+    ): HTMLButtonElement => {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.className = cls
+      b.textContent = icon
+      bindLocale(b, 'aria-label', key)
+      bindLocale(b, 'title', key)
+      b.addEventListener('mousedown', (e) => e.preventDefault())
+      b.addEventListener('click', () => {
+        this.findOptions = flip(this.findOptions)
+        // 会话按新档重建（选项条保持在场；全选型立即重选全部）后经
+        // findOptions.set 上送宿主持久化（与面板开关同一通道）
+        this.rebuildOccurrenceSessionAfterOptionChange()
+        this.bridge.postMessage({ kind: 'findOptions.set', options: { ...this.findOptions } })
+      })
+      return b
+    }
+    this.occurrenceCaseBtnEl = mkToggle(OCCURRENCE_CLASS_NAMES.caseToggle, 'Aa', 'find.matchCase',
+      (o) => ({ ...o, matchCase: !o.matchCase }))
+    this.occurrenceWordBtnEl = mkToggle(OCCURRENCE_CLASS_NAMES.wordToggle, 'ab', 'find.wholeWord',
+      (o) => ({ ...o, wholeWord: !o.wholeWord }))
+    this.occurrenceRegexpBtnEl = mkToggle(OCCURRENCE_CLASS_NAMES.regexpToggle, '.*', 'find.regexp',
+      (o) => ({ ...o, regexp: !o.regexp }))
+    bar.appendChild(this.occurrenceCaseBtnEl)
+    bar.appendChild(this.occurrenceWordBtnEl)
+    bar.appendChild(this.occurrenceRegexpBtnEl)
+    return bar
+  }
+
+  /** 选项条按钮态同步（与主面板开关同源——aria-pressed = this.findOptions） */
+  private syncOccurrenceBarDom(): void {
+    const sync = (btn: HTMLButtonElement | undefined, activeCls: string, on: boolean): void => {
+      btn?.classList.toggle(activeCls, on)
+      btn?.setAttribute('aria-pressed', String(on))
+    }
+    sync(this.occurrenceCaseBtnEl, OCCURRENCE_CLASS_NAMES.caseActive, this.findOptions.matchCase)
+    sync(this.occurrenceWordBtnEl, OCCURRENCE_CLASS_NAMES.wordActive, this.findOptions.wholeWord)
+    sync(this.occurrenceRegexpBtnEl, OCCURRENCE_CLASS_NAMES.regexpActive, this.findOptions.regexp)
+  }
+
+  /** 会话在场即显示选项条（每次 Ctrl+D 按下都会走到；主面板打开时改走
+   *  flashFindToggles，本方法不被调用——UI 互斥） */
+  private showOccurrenceBar(): void {
+    this.occurrenceBarEl?.classList.add(OCCURRENCE_CLASS_NAMES.barOpen)
+    this.syncOccurrenceBarDom()
+  }
+
+  /** 结束会话：簿记清空、选项条淡出（选区保持——多光标收敛交给 CM6） */
+  private endOccurrenceSession(): void {
+    this.occurrenceSession = null
+    this.occurrenceBarEl?.classList.remove(OCCURRENCE_CLASS_NAMES.barOpen)
+  }
+
+  /** 开关切换后的会话重建（用户决策「切换即按新选项重建会话」，选项条
+   *  在场不打断）：add 型以当前选区为种子换新档；all 型立即按新档重选
+   *  全部；无会话/无法重建则结束（淡出） */
+  private rebuildOccurrenceSessionAfterOptionChange(): void {
+    this.syncOccurrenceBarDom()
+    const session = this.occurrenceSession
+    if (!session) {
+      return
+    }
+    if (session.kind === 'all') {
+      // 全选型：选区本就是命令产物，重建 = 直接按新档重选全部
+      this.endOccurrenceSession()
+      this.runOccurrenceSelect('all')
+      return
+    }
+    const view = this.view
+    if (!view || this.viewMode !== 'live') {
+      this.endOccurrenceSession()
+      return
+    }
+    const text = view.state.doc.toString()
+    const selection = this.occurrenceSelection()
+    const decided = resolveOccurrenceSeed({
+      panelOpen: this.findOpen,
+      panelQuery: this.findQuery,
+      panelOptions: this.findOptions,
+      text,
+      selection,
+      wordAt: (pos) => this.occurrenceWordAt(pos),
+    })
+    if (decided === null || decided === 'inconsistent') {
+      this.endOccurrenceSession()
+      return
+    }
+    this.occurrenceSession = { kind: 'add', seed: decided, ranges: view.state.selection.ranges }
+  }
+
+  /** 当前选区（OccurrenceRange 形态；OccurrenceSeed/计划函数输入） */
+  private occurrenceSelection(): OccurrenceRange[] {
+    const view = this.view
+    if (!view) {
+      return []
+    }
+    return view.state.selection.ranges.map((range) => ({ from: range.from, to: range.to }))
+  }
+
+  /** CM6 词边界适配（wordAt 注入；pos 所在词或 null） */
+  private occurrenceWordAt(pos: number): OccurrenceRange | null {
+    const word = this.view?.state.wordAt(pos)
+    return word ? { from: word.from, to: word.to } : null
+  }
+
+  /** 主面板打开时的替代提示：闪烁「生效档与面板显示脱节」的开关按钮
+   *  （VSCode highlightFindOptions 语义——面板开 + 词非空时生效档 = 面板
+   *  档，无脱节不闪；词空空选区时 override 档与面板记忆可能脱节） */
+  private flashFindToggles(effective: FindOptions): void {
+    const buttons: Array<[HTMLButtonElement | undefined, boolean]> = [
+      [this.findCaseBtnEl, effective.matchCase !== this.findOptions.matchCase],
+      [this.findWordBtnEl, effective.wholeWord !== this.findOptions.wholeWord],
+      [this.findRegexpBtnEl, effective.regexp !== this.findOptions.regexp],
+    ]
+    let flashed = false
+    for (const [btn, diverged] of buttons) {
+      if (!diverged) {
+        continue
+      }
+      btn?.classList.remove(FIND_CLASS_NAMES.flash)
+      btn?.classList.add(FIND_CLASS_NAMES.flash)
+      flashed = true
+    }
+    if (this.findFlashTimer) {
+      clearTimeout(this.findFlashTimer)
+    }
+    if (flashed) {
+      // 短促在场后移除（连按时重启：先移除再加类，CSS 动画重放）
+      this.findFlashTimer = setTimeout(() => {
+        this.findCaseBtnEl?.classList.remove(FIND_CLASS_NAMES.flash)
+        this.findWordBtnEl?.classList.remove(FIND_CLASS_NAMES.flash)
+        this.findRegexpBtnEl?.classList.remove(FIND_CLASS_NAMES.flash)
+      }, 450)
+    }
+  }
+
+  /** #238 命令族执行体（快捷键本地分支与 ui.command 两入口共用）：
+   *  会话在场则沿用会话档（VSCode 会话语义——档与种子词不随选区漂移）；
+   *  否则按面板/选区状态决策种子；多选区文本不一致时只扩词不加选。
+   *  生效（选区变化）才会话簿记 + 选项条/面板闪烁呈现 */
+  private runOccurrenceSelect(op: 'next' | 'prev' | 'skip' | 'all'): void {
+    const view = this.view
+    if (!view || this.viewMode !== 'live' || this.suspended) {
+      return
+    }
+    const text = view.state.doc.toString()
+    const selection = this.occurrenceSelection()
+    const excludeEnd = this.findExcludeEnd()
+    let seed: OccurrenceSeed | null = this.occurrenceSession?.seed ?? null
+    if (!seed) {
+      const decided = resolveOccurrenceSeed({
+        panelOpen: this.findOpen,
+        panelQuery: this.findQuery,
+        panelOptions: this.findOptions,
+        text,
+        selection,
+        wordAt: (pos) => this.occurrenceWordAt(pos),
+      })
+      if (decided === null) {
+        return
+      }
+      if (decided === 'inconsistent') {
+        // 多选区文本不一致（按会话 matchCase 比较）：不加选，把各空光标
+        // 扩为词（无空光标则无操作）；不建会话不显示选项条
+        const plan = planExpandWords(selection, (pos) => this.occurrenceWordAt(pos))
+        this.dispatchOccurrencePlan(plan)
+        return
+      }
+      seed = decided
+    }
+    const wordAt = (pos: number) => this.occurrenceWordAt(pos)
+    const plan: OccurrencePlan = op === 'next'
+      ? planSelectNext(text, selection, seed, excludeEnd, wordAt)
+      : op === 'prev'
+        ? planSelectPrevious(text, selection, seed, excludeEnd, wordAt)
+        : op === 'skip'
+          ? planSkipCurrent(text, selection, seed, excludeEnd, wordAt)
+          : planSelectAllOccurrences(text, selection, seed, excludeEnd, wordAt)
+    if (!this.dispatchOccurrencePlan(plan)) {
+      return
+    }
+    // 会话簿记（命令产物选区快照；updateListener 见 occurrenceCmd 注解
+    // 跳过结束检测）与呈现（面板开时闪烁，否则选项条在场）
+    this.occurrenceSession = {
+      kind: op === 'all' ? 'all' : 'add',
+      seed,
+      ranges: view.state.selection.ranges,
+    }
+    if (this.findOpen) {
+      this.flashFindToggles(seed.options)
+    } else {
+      this.showOccurrenceBar()
+    }
+  }
+
+  /** 计划落地：CM6 选区事务（occurrenceCmd 注解 + 主光标滚动跟随）。
+   *  返回是否实际生效（none 不派发不算按下生效——不显示选项条） */
+  private dispatchOccurrencePlan(plan: OccurrencePlan): boolean {
+    const view = this.view
+    if (plan.kind !== 'select' || !view || !plan.ranges.length) {
+      return false
+    }
+    const ranges = plan.ranges.map((range) => EditorSelection.range(range.from, range.to))
+    const mainIndex = Math.min(Math.max(plan.mainIndex, 0), ranges.length - 1)
+    view.dispatch({
+      selection: EditorSelection.create(ranges, mainIndex),
+      annotations: occurrenceCmd.of({ occurrence: true }),
+      effects: EditorView.scrollIntoView(ranges[mainIndex]!.from, { y: 'center' }),
+    })
+    return true
+  }
+
+  /** #238 选词会话观测（view.state）：选项条在场（= 会话在场）与三开关
+   *  按钮态（与 findOptions 同源；override 会话档不在此暴露——按钮显示
+   *  的始终是面板开关记忆档） */
+  private collectOccurrenceProbe(): OccurrenceProbe {
+    return {
+      barOpen: this.occurrenceSession !== null,
+      matchCase: this.findOptions.matchCase,
+      wholeWord: this.findOptions.wholeWord,
+      regexp: this.findOptions.regexp,
     }
   }
 
@@ -8238,6 +8570,23 @@ export class WebviewSyncController {
             if (eff.is(codeCardCopyRequest)) {
               this.postCodeCopy(eff.value)
             }
+          }
+        }
+      }),
+      // #238 会话生命周期：选区被外部改变（非本命令事务的选区设置/
+      //  docChanged——用户点击/键盘移动/输入/外部同步映射）即结束会话，
+      //  选项条淡出（下一次按下按新状态重建）。命令自身事务带
+      //  occurrenceCmd 注解，见 dispatchOccurrencePlan
+      EditorView.updateListener.of((update) => {
+        if (!this.occurrenceSession) {
+          return
+        }
+        for (const tr of update.transactions) {
+          // Transaction 无 selectionSet 字段：选区设置与否以 selection
+          // 非 null 判定（docChanged 为 getter）
+          if ((tr.selection !== null || tr.docChanged) && !tr.annotation(occurrenceCmd)) {
+            this.endOccurrenceSession()
+            return
           }
         }
       }),

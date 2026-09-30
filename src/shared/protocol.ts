@@ -652,6 +652,8 @@ export type WebviewToHost =
       imageProbe?: ImageSlotProbe[]
       /** 查找会话观测（#14）：首次打开后回报（未打开过时缺省） */
       find?: FindSessionProbe
+      /** #238 选词会话观测（选项条在场态与三开关；旧 webview 缺省） */
+      occurrence?: OccurrenceProbe
       /** 当前生效设置快照（#33 起缓存宿主下发的值；#34 行号等设置的观测面） */
       settings?: SettingsPayload
       /** #34 行号栏观测（设置开关态与视口内渲染结果；旧 webview 缺省） */
@@ -1591,6 +1593,18 @@ export interface FindSessionProbe {
   /** 当前匹配区间（UTF-16 offset；无匹配为 null） */
   currentFrom: number | null
   currentTo: number | null
+}
+
+/** #238「选下一处相同词」会话观测：查找选项条在场态（= 会话在场）与
+ *  三开关按钮态（与 findOptions 单一事实源同源——显示的是面板开关记忆
+ *  档，会话 override 档不在此暴露） */
+export interface OccurrenceProbe {
+  /** 查找选项条是否在场（会话存续；主面板打开时恒 false——面板开关闪烁
+   *  承担选项提示） */
+  barOpen: boolean
+  matchCase: boolean
+  wholeWord: boolean
+  regexp: boolean
 }
 
 /**
