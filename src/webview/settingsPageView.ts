@@ -245,7 +245,10 @@ export class SettingsPageView {
       (d) => !d.key.startsWith('editor.symbol') && !d.key.startsWith('codeblock.') && !d.key.startsWith('image.'))
   }
   private editorDefs(): readonly SettingDefinition[] {
-    return this.defs.filter((d) => !d.key.startsWith('general.'))
+    // #239 分词三键（editor.wordSegment*）呈现归「中文分词」附加分页
+    //（wordSegmentSettings 同页渲染选择与下载管理，值仍走标准保存链路），
+    // 编辑器页与搜索内建分组不重复呈现
+    return this.defs.filter((d) => !d.key.startsWith('general.') && !d.key.startsWith('editor.wordSegment'))
   }
   /** 编辑器页内小节（顺序即渲染顺序）；空小节由调用方跳过不渲染 */
   private editorSectionDefs(): Array<{ titleKey: MessageKey; defs: () => readonly SettingDefinition[] }> {

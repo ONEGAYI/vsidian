@@ -59,5 +59,9 @@
   "command.ui.backlinksToggle.title": "显示或隐藏反链面板",
   "command.ui.outlinksToggle.title": "显示或隐藏出链面板",
   "command.editor.refresh.title": "刷新嵌入资源",
-  "command.ui.hoverPreviewLink.title": "预览当前链接"
+  "command.ui.hoverPreviewLink.title": "预览当前链接",
+  "command.wordMotion.cursorLeft.title": "按词左移（中文分词）",
+  "command.wordMotion.selectLeft.title": "按词向左扩展选区（中文分词）",
+  "command.wordMotion.cursorRight.title": "按词右移（中文分词）",
+  "command.wordMotion.selectRight.title": "按词向右扩展选区（中文分词）"
 }

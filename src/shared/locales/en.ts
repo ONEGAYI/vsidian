@@ -630,6 +630,56 @@ export const en = {
   'contextMenu.selectAll': 'Select all',
   /** 命令面板/快捷键页操作名（keybindings 注册表 titleKey） */
   'command.block.copyLink.title': 'Copy link to current block',
+
+  // ---- #239 中文分词词级移动（操作注册表 + 设置页分页 + 宿主通知）----
+  /** 词级移动四操作（默认 ctrl+方向 / alt+方向（mac 词移动惯例）；
+   *  Shift 变体单列操作——扩选注册） */
+  'command.wordMotion.cursorLeft.title': 'Move left by one word (CJK-aware)',
+  'command.wordMotion.cursorRight.title': 'Move right by one word (CJK-aware)',
+  'command.wordMotion.selectLeft.title': 'Select left by one word (CJK-aware)',
+  'command.wordMotion.selectRight.title': 'Select right by one word (CJK-aware)',
+  /** 设置项：分词引擎（呈现归「中文分词」附加分页） */
+  'setting.wordSegmentEngine.title': 'Word segmentation engine',
+  'setting.wordSegmentEngine.description': 'Engine used to split continuous CJK text for word-wise Ctrl+Left/Right motion. Latin and digit runs always keep the built-in group semantics.',
+  'setting.wordSegmentEngineBuiltin': 'Built-in (Intl.Segmenter)',
+  'setting.wordSegmentEngineJieba': 'jieba-wasm (dictionary segmentation)',
+  /** 设置项：jieba 下载源 */
+  'setting.wordSegmentSource.title': 'jieba download source',
+  'setting.wordSegmentSource.description': 'Where the jieba-wasm resources are downloaded from. Resources are stored in the extension storage after a locked-version sha256 check; the download runs on the extension host (on the remote machine for Remote SSH).',
+  'setting.wordSegmentSourceJsdelivr': 'jsDelivr CDN (default)',
+  'setting.wordSegmentSourceNpmmirror': 'npmmirror (China mirror)',
+  'setting.wordSegmentSourceCustom': 'Custom URL',
+  /** 设置项：自定义下载源基址 */
+  'setting.wordSegmentCustomUrl.title': 'Custom source base URL',
+  'setting.wordSegmentCustomUrl.description': 'HTTPS directory URL used in the custom mode — the two locked files are fetched as baseURL/jieba_rs_wasm.js and baseURL/jieba_rs_wasm_bg.wasm. Plain HTTP is rejected.',
+  /** 设置页「中文分词」分页框架与资源管理 */
+  'wordSegment.title': 'Word Segmentation',
+  'wordSegment.description': 'Word-wise Ctrl+Left/Right motion for continuous CJK text, plus jieba resource management.',
+  'wordSegment.engineLabel': 'Segmentation engine',
+  'wordSegment.engineDescription': 'Controls how continuous Chinese text is split when moving by words. Switching takes effect immediately.',
+  'wordSegment.engineBuiltinHint': 'Browser built-in ICU segmentation; no download, always available.',
+  'wordSegment.engineJiebaHint': 'Better dictionary quality; requires a one-time resource download, falls back to the built-in engine when unavailable.',
+  'wordSegment.sourceLabel': 'Download source',
+  'wordSegment.sourceDescription': 'Applies only when the jieba engine is selected.',
+  'wordSegment.customUrlPlaceholder': 'https://example.com/jieba/',
+  'wordSegment.resourceLabel': 'jieba resources',
+  'wordSegment.resourceDescription': 'Downloaded on demand into the extension storage (about 4 MB); never bundled with the extension. Deleting falls back to the built-in engine.',
+  'wordSegment.installed': 'jieba-wasm {version} installed and verified.',
+  'wordSegment.notInstalled': 'Not installed. The built-in engine is active.',
+  'wordSegment.downloading': 'Downloading and verifying…',
+  'wordSegment.download': 'Download',
+  'wordSegment.deleteResource': 'Delete resources',
+  'wordSegment.noticeDownloaded': 'Downloaded and verified.',
+  'wordSegment.noticeDownloadFailed': 'Download failed: {detail}',
+  'wordSegment.noticeDeleted': 'Resources deleted; the built-in engine is active.',
+  'wordSegment.noticeDeleteFailed': 'Delete failed: {detail}',
+  'wordSegment.noticeLoadFailed': 'Failed to load the downloaded resources in the editor; the built-in engine is active. {detail}',
+  /** 宿主通知（下载/删除结果） */
+  'host.jiebaDownloaded': 'jieba-wasm {version} downloaded and verified. Word motion now uses jieba.',
+  'host.jiebaDownloadFailed': 'Failed to download jieba resources: {detail}. Word motion keeps using the built-in engine.',
+  'host.jiebaDeleted': 'jieba resources deleted. Word motion falls back to the built-in engine.',
+  'host.jiebaDeleteFailed': 'Failed to delete jieba resources: {detail}.',
+  'host.jiebaLoadFailed': 'Failed to load jieba in the editor: {detail}. The built-in engine stays active.',
 } as const satisfies Record<string, string>
 
 /** 字典键：点分扁平键，以本包为类型基准（编译期检查 t() 取词键） */

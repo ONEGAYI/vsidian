@@ -15,6 +15,8 @@
 | 插入分割线（#106） | Live | 无 |
 | HTML 注释（#139，两态切换：包裹/取消） | Live | Ctrl+/ |
 | 复制块链接（2026-09-28 批次：光标在标题行=复制标题链接） | Live | Ctrl+Shift+C |
+| 按词左移；按词右移（#239，中文分词词级移动） | Live | Ctrl+Left / Ctrl+Right（mac Alt+方向） |
+| 按词向左/向右扩展选区（#239，Shift 变体单列） | Live | Ctrl+Shift+Left / Ctrl+Shift+Right（mac Alt+Shift+方向） |
 | 创建表格；上方/下方插入行；删除行 | Live | 无 |
 | 左侧/右侧插入列；删除列 | Live | 无 |
 | 查找 | Live、阅读 | Ctrl+F / Cmd+F |
@@ -87,3 +89,5 @@
 **Reading 正文嵌入的卡片内交互无快捷键（#222 评估结论）**：嵌入卡片（独占行 `![[…]]` 在阅读视图升级为引用卡片）的全部交互——右上角「打开目标笔记」入口、内部 Reading 的链接与一层展开占位点击、笔记属性区折叠按钮、内容滚动——均为**卡片容器局部交互**（目标由点击位置即时推导，无卡片时无目标，与出链面板局部控件同判定口径），不注册 `UI_OPERATIONS`、不占键位。键盘可达性由元素自身承担（打开入口与 fm 折叠按钮为真实 `<button>`，Tab 可达、Enter/Space 原生激活；嵌入内容为只读 Reading，选字复制走浏览器原生选区）。目标打开复用正文双链跳转的既有命令族（`wikilink.activate`，无新命令面）；嵌入限高为设置项（`embed.maxHeight`，设置页可调）而非操作。Live 侧嵌入（#223）的源码显隐属光标位置驱动的自动行为，届时另行评估。
 
 **Live 正文嵌入的源码显隐无快捷键（#223 评估结论）**：实时预览中独占行嵌入的**源码显/隐不是操作**——由光标/选区是否触及引用源码区间（`![[` 到 `]]`，含两端）自动驱动（复用 `selectionTouchesRange` 语义，与 Mermaid 图、代码块卡片的编辑态切换同一交互族，均无键位），方向键、鼠标点击与选区移动的既有键位即全部入口；卡片本身无「编辑引用」按钮（规格明确不设）。卡片内交互（打开入口、链接、属性折叠、滚动）沿用 #222 评估结论（容器局部交互、真实 button 键盘可达）。零新增操作注册与键位。
+
+**中文分词词级移动注册为四个可绑定操作（#239 评估结论）**：Ctrl+Left/Right 及 Shift 变体对连续中文段按分词结果逐词切分（引擎可切换：预设 Intl.Segmenter，可选 jieba-wasm 按需下载——设置页「中文分词」分页管理），拉丁与数字段**逐字节沿用 CM6 既有 group 语义**（无 CJK 细化时整笔委托原生命令，回归断言钉住）。四个操作**单列注册**（`wordMotion.cursorLeft/Right`、`wordMotion.selectLeft/Right`，Live 编辑正文生效 `mode: live`、写类 `writes: true`——router 的 allowWrites 门控据此在 find 输入框等非正文焦点不劫持；Shift 变体独立注册——router 按整串 chord 精确匹配，ctrl+left 不隐含 shift 扩选）。默认绑定 ctrl+方向（Windows/Linux）与 alt+方向（mac 词移动惯例；Cmd+方向不注册——mac 行首/行尾惯例不被覆盖）。执行装配在 **keybindingRouter 的 document 捕获层本地分支**（词移动高频按键，同步直达不出站宿主往返）；命令面板经 UI_OPERATIONS 注册循环 → `ui.command` 回流。不选 CM6 keymap 派生替换 defaultKeymap 的 Mod-Arrow：路由层已有注册表改绑/清空/恢复默认全链路，且「注册表只登记带修饰键方向键」天然保证与表格裸方向键格导航共存（tableEditing 只绑裸 ArrowLeft/Right，browser 测试钉住 Tab 格导航与格内词移动并存）。

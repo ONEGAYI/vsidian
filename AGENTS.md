@@ -128,6 +128,7 @@ vsidian/
 │       ├── appearance-merge.md                # 外观合并分页规格
 │       ├── batch-2026-09-menu.md              # 右键菜单批次总览与决策回执
 │       ├── batch-2026-09.md                   # 2026-09 开票批次总览
+│       ├── batch-2026-10-vscode-ops.md        # 2026-10 编辑器操作批次实施树
 │       ├── blockquote-accent-bar.md           # 引用块紫色提示边条规格
 │       ├── code-block-card.md                 # 代码块卡片功能规格
 │       ├── context-menu.md                    # 统一右键菜单规格（正文全域接管）
@@ -194,6 +195,9 @@ vsidian/
 │   │   ├── imagePastePlan.ts           # 图片粘贴纯逻辑（#161）
 │   │   ├── imageRefreshCoordinator.ts  # 图片刷新协调器（provider 级）
 │   │   ├── imageVersioning.ts          # 图片资源版本表纯逻辑
+│   │   ├── jiebaResourceService.ts     # jieba 资源宿主服务（端口注入）
+│   │   ├── jiebaResourceWiring.ts      # jieba 资源 vscode 层装配
+│   │   ├── jiebaTar.ts                 # npm tarball 最小提取器
 │   │   ├── keybindingService.ts        # 快捷键全局存储服务
 │   │   ├── linkTarget.ts               # 宿主侧链接目标分类纯逻辑（#10）
 │   │   ├── settingsPage.ts             # 独立设置页面板装配
@@ -223,6 +227,7 @@ vsidian/
 │   │   ├── hoverRefresh.ts       # 引用视图同步参数与订阅注册表
 │   │   ├── i18n.ts               # t() 取词与语言包装配状态模块
 │   │   ├── imageRefresh.ts       # 图片刷新共享常量与核验决策
+│   │   ├── jiebaManifest.ts      # jieba 锁定版本与下载源清单
 │   │   ├── keybindings.ts        # 快捷键操作与冲突模型
 │   │   ├── listPrefix.ts         # 列表引用前缀形态学（#119）
 │   │   ├── locales/              # 语言包字典单一事实源
@@ -248,7 +253,8 @@ vsidian/
 │   │   ├── vaultIndexSnapshot.ts # 分片快照存储纯逻辑（#195 选型基线）
 │   │   ├── vaultLink.ts          # 根内相对路径解析单一事实源（#196）
 │   │   ├── vaultRename.ts        # 引用改写计划纯逻辑（#199）
-│   │   └── wikilink.ts           # 双链形态学单一事实源（#11）
+│   │   ├── wikilink.ts           # 双链形态学单一事实源（#11）
+│   │   └── wordSegment.ts        # 中文分词形态学与移动规划纯函数
 │   └── webview/     # webview 端实现
 │       ├── anchorFlash.ts              # 跳转目标高亮装饰状态
 │       ├── appearanceSettings.ts       # 外观合并分页
@@ -341,7 +347,9 @@ vsidian/
 │       ├── tableRegionField.ts         # 表格格区选区状态单一事实源
 │       ├── tableRegionSelection.ts     # 表格格区拖选指针交互
 │       ├── tableStructure.ts           # 表格导航与增删行列纯函数（#13）
-│       └── taskToggle.ts               # 任务勾选解析纯函数（#9）
+│       ├── taskToggle.ts               # 任务勾选解析纯函数（#9）
+│       ├── wordMotion.ts               # 词级移动命令与引擎配置
+│       └── wordSegmentSettings.ts      # 设置页中文分词分页
 ├── test/…                 # 测试根
 ├── tsconfig.json          # TypeScript 类型检查配置
 └── vitest.config.ts       # vitest 单元测试配置

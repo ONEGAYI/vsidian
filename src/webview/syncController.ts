@@ -89,6 +89,8 @@ import {
   SYMBOL_SELECTION_WRAP_KEY,
   SYMBOL_TAB_ESCAPE_DEFAULT,
   SYMBOL_TAB_ESCAPE_KEY,
+  WORD_SEGMENT_ENGINE_DEFAULT,
+  WORD_SEGMENT_ENGINE_KEY,
   type SettingsPayload,
 } from '../shared/settings'
 import { onLocaleChanged, t } from '../shared/i18n'
@@ -260,6 +262,17 @@ import { blankRowInputPlan, runCreateTable, runTableEdit, tableEditing, tableRow
 import { symbolAutocomplete } from './symbolAutocomplete'
 import { symbolSelectionWrap } from './symbolWrap'
 import { fenceEscape } from './fenceEscape'
+// #239 中文分词词级移动：命令与引擎配置（router 本地分支与 ui.command
+// 共用同一命令对象；引擎状态由 settings 快照与 wordSegment.state 两通道
+// 汇流驱动）
+import {
+  configureWordSegment,
+  cursorWordLeft,
+  cursorWordRight,
+  selectWordLeft,
+  selectWordRight,
+  type JiebaResources,
+} from './wordMotion'
 import { frontmatterEditing } from './frontmatterEditing'
 import { FM_CARD_CLASS_NAMES } from './frontmatterDecorations'
 import { FM_POPOVER_CLASS_NAMES, closeFmPopover, isFmPopoverOpen } from './frontmatterPopover'
@@ -925,6 +938,11 @@ export class WebviewSyncController {
    *  lineWrapping 是编辑器级 facet，无法按块关），不放开关 */
   private readingCodeWrapOn = true
 
+  /** #239 分词引擎资源（wordSegment.state 携带，installed 时非空）：与
+   *  settings 快照的引擎选择两通道汇流到 configureWordSegment——到达
+   *  顺序不定（设置先到/资源先到都成立），汇流点统一重算 */
+  private wordSegmentResources: JiebaResources | null = null
+
   // ---- 宿主主题明暗自适应（不硬编码 dark，也不硬编码颜色）----
   /** CM6 明暗声明通道：跟随 webview body 的主题 class（vscode-dark 等），
    *  激活 baseTheme 内建变体（light: caret black / dark: caret white 等），
@@ -1010,6 +1028,13 @@ export class WebviewSyncController {
       // #221 预览当前链接：纯 webview 域（目标判定与浮层打开都在 webview，
       // 无宿主往返依赖），与命令面板入口（ui.command 回发）共用同一实现
       else if (id === 'hoverPreviewLink') this.previewLinkAtFocus()
+      // #239 词级移动：本地同步执行（词移动高频按键，不出站宿主往返；
+      // 命令内部仅 Live 正文可作用——router 的 writes 门控已保证焦点域，
+      // 此处只看当前模式）
+      else if (id === 'cursorWordLeft') this.runWordMotion(cursorWordLeft)
+      else if (id === 'cursorWordRight') this.runWordMotion(cursorWordRight)
+      else if (id === 'selectWordLeft') this.runWordMotion(selectWordLeft)
+      else if (id === 'selectWordRight') this.runWordMotion(selectWordRight)
       else this.bridge.postMessage({ kind: 'keybindings.execute', id })
     })
     const saved = bridge.getState<PersistedState>()
@@ -1570,6 +1595,9 @@ export class WebviewSyncController {
         // 装载（含重载）都拉取；宿主以 settings.snapshot 响应
         this.bridge.postMessage({ kind: 'settings.get' })
         this.bridge.postMessage({ kind: 'keybindings.get' })
+        // #239 分词资源状态：同「init 后拉取」模式——宿主按面板回发
+        // wordSegment.state（installed 时携带本面板的 jieba 资源 URI）
+        this.bridge.postMessage({ kind: 'wordSegment.get' })
         // #128 CSS 片段清单：同「init 后拉取」模式——宿主权威扫描 × 开关
         // 映射经 snippets.snapshot 应答（新面板、重载面板、暂未广播的变更
         // 都在此对齐当前态）
@@ -1603,7 +1631,18 @@ export class WebviewSyncController {
         this.applyTabEscapeSetting()
         this.applyReadableLineWidthSetting()
         this.applyEmbedMaxHeightSetting()
+        this.applyWordSegmentEngineSetting()
         break
+      case 'wordSegment.state': {
+        // #239 jieba 资源状态（宿主下载/删除后推送）：资源 URI 变化驱动
+        // wordMotion 重新评估加载；引擎选择仍在 settings 快照（两通道汇流）
+        const resources = message.resources
+        this.wordSegmentResources = resources && resources.js && resources.wasm
+          ? { js: resources.js, wasm: resources.wasm }
+          : null
+        this.applyWordSegmentEngineSetting()
+        break
+      }
       case 'snippets.snapshot': {
         // #128 CSS 片段装载：diff 式装配 <link>（失败保留最近成功样式、
         // 停用立即撤下）；装载结果回报宿主（入口级成败可观测），样式落地
@@ -2043,6 +2082,13 @@ export class WebviewSyncController {
           // #221 预览当前链接：命令面板/宿主命令入口与快捷键（keybindingRouter
           // 本地分支）共用同一实现（目标判定在 webview，无目标静默不误开）
           case 'hoverPreviewLink': this.previewLinkAtFocus(); break
+          // #239 词级移动：命令面板入口（快捷键走 router 本地分支直达，
+          // 此处是 keybindings.execute → executeCommand → ui.command 回流
+          // 的命令面板路径），同一命令对象
+          case 'cursorWordLeft': this.runWordMotion(cursorWordLeft); break
+          case 'cursorWordRight': this.runWordMotion(cursorWordRight); break
+          case 'selectWordLeft': this.runWordMotion(selectWordLeft); break
+          case 'selectWordRight': this.runWordMotion(selectWordRight); break
         }
         break
       case 'sidebar.test.click': {
@@ -7718,6 +7764,34 @@ export class WebviewSyncController {
     this.view?.dispatch({
       effects: this.tabEscapeCompartment.reconfigure(on ? fenceEscape : []),
     })
+  }
+
+  /**
+   * 应用分词引擎设置（#239；settings 快照与 wordSegment.state 任一到达
+   * 时汇流重算）：引擎选择读设置快照（缺键/非法回 builtin），jieba 资源
+   * 由 wordSegment.state 维护。engine=jieba 且资源在场时 wordMotion 按
+   * 需异步加载（加载完成前命令同步回退 builtin；失败回报宿主通知）。
+   */
+  private applyWordSegmentEngineSetting(): void {
+    const raw = this.settings?.[WORD_SEGMENT_ENGINE_KEY]
+    const engine = raw === 'jieba' ? 'jieba' : WORD_SEGMENT_ENGINE_DEFAULT
+    configureWordSegment({
+      engine,
+      resources: this.wordSegmentResources,
+      onReportLoadResult: (ok, detail) => {
+        if (!ok) {
+          this.bridge.postMessage({ kind: 'wordSegment.loadResult', ok: false, detail })
+        }
+      },
+    })
+  }
+
+  /** #239 词级移动命令执行口：仅 Live 正文（router 的 writes 门控已限焦
+   *  点域；阅读模式只读静默不接管，与格式命令同口径） */
+  private runWordMotion(command: (view: EditorView) => boolean): void {
+    if (this.view && this.viewMode === 'live') {
+      command(this.view)
+    }
   }
 
   /**

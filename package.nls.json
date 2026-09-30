@@ -59,5 +59,9 @@
   "command.ui.backlinksToggle.title": "Show or hide the backlinks panel",
   "command.ui.outlinksToggle.title": "Show or hide the outgoing links panel",
   "command.editor.refresh.title": "Refresh embedded resources",
-  "command.ui.hoverPreviewLink.title": "Preview the current link"
+  "command.ui.hoverPreviewLink.title": "Preview the current link",
+  "command.wordMotion.cursorLeft.title": "Move left by one word (CJK-aware)",
+  "command.wordMotion.selectLeft.title": "Select left by one word (CJK-aware)",
+  "command.wordMotion.cursorRight.title": "Move right by one word (CJK-aware)",
+  "command.wordMotion.selectRight.title": "Select right by one word (CJK-aware)"
 }
