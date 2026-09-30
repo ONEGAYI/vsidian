@@ -58,6 +58,7 @@ import {
 import { createReadingContainer, READING_CLASS_NAMES } from './readingView'
 import { VirtualReadingView } from './readingVirtualView'
 import { claimPopup, releasePopup } from './popupMutex'
+import { OPEN_ICON } from './embedCard'
 import { WIKILINK_CLASS_NAMES } from '../shared/wikilink'
 import {
   createSourcedImageManager as createSourcedImageManagerImpl,
@@ -79,6 +80,12 @@ import {
 export const HOVER_POPUP_CLASS_NAMES = {
   /** 浮层容器（fixed 定位，挂 #app） */
   popup: 'vsidian-hover-popup',
+  /** 标题条（目标显示名 + 跳转入口；嵌入卡片同款，浮层生命周期常驻） */
+  header: 'vsidian-hover-popup-header',
+  /** 标题（目标显示名 = spec.target，不随回包换） */
+  title: 'vsidian-hover-popup-title',
+  /** 跳转入口（打开目标文档；嵌入卡片打开按钮同款图标与语义） */
+  open: 'vsidian-hover-popup-open',
   /** 内容滚动区（移入保活后的滚动承载） */
   scroll: 'vsidian-hover-popup-scroll',
   /** 就地状态行（loading / 错误分态） */
@@ -128,6 +135,11 @@ export interface HoverPopupTargetSpec {
    *  当前文档，给 0/0 中性值） */
   sourceStart: number
   sourceEnd: number
+  /** 标题条跳转入口的调用方通道（面板形态专用）：反链/出链条目的跳转
+   *  语义与条目点击同源（backlink.activate 定位引用处 / outlink.activate
+   *  带锚点），载荷由 syncController 组装闭包自带——浮层侧不重复发默认
+   *  激活消息；缺省按双链/linkHref 形态分派（验收反馈 2026-09-30） */
+  openAction?: () => void
 }
 
 /** 从 Reading 锚点提取目标规格（href 原文 + 所在块源锚点；预滤口径见
@@ -443,6 +455,23 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
   scrollEl.className = HOVER_POPUP_CLASS_NAMES.scroll
   const contentEl = createReadingContainer()
   scrollEl.appendChild(contentEl)
+  // 标题条（验收反馈 2026-09-30：嵌入卡片同款 header——目标显示名常驻
+  // 不随回包换；跳转按钮与嵌入打开入口同图标同语义）
+  const header = document.createElement('div')
+  header.className = HOVER_POPUP_CLASS_NAMES.header
+  const titleEl = document.createElement('span')
+  titleEl.className = HOVER_POPUP_CLASS_NAMES.title
+  titleEl.textContent = spec.target
+  const openBtn = document.createElement('button')
+  openBtn.type = 'button'
+  openBtn.className = HOVER_POPUP_CLASS_NAMES.open
+  const openLabel = t('embed.openTarget')
+  openBtn.setAttribute('aria-label', openLabel)
+  openBtn.title = openLabel
+  openBtn.innerHTML = OPEN_ICON
+  header.appendChild(titleEl)
+  header.appendChild(openBtn)
+  container.appendChild(header)
   container.appendChild(stateEl)
   container.appendChild(scrollEl)
   // #220 主题与片段：挂 #app 内（生产 webview 恒有 #app；jsdom 测试环境
@@ -528,6 +557,42 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
       ctx.send({ kind: 'wikilink.activate', target: href, ...base })
     } else {
       ctx.send({ kind: 'link.activate', href, ...base })
+    }
+    closeHoverPopup()
+  })
+
+  // 标题条跳转入口（验收反馈 2026-09-30）：打开浮层预览的目标文档。
+  // 分派按 spec 形态：openAction（面板形态，调用方闭包自带通道——反链
+  // 定位引用处/出链带锚点）→ linkHref（普通链接）→ 双链默认；与嵌入卡片
+  // 打开入口同语义（不带 sourceDocUri，按父文档身份解析）。点击即上下文
+  // 切换，浮层关闭（与浮层内链接点击同款）
+  openBtn.addEventListener('click', (event) => {
+    event.stopPropagation()
+    const ctx = context
+    const session = ctx?.session()
+    if (!ctx || !session?.sessionId || !session.docUri) {
+      return
+    }
+    if (spec.openAction) {
+      spec.openAction()
+    } else if (spec.linkHref !== undefined) {
+      ctx.send({
+        kind: 'link.activate',
+        sessionId: session.sessionId,
+        docUri: session.docUri,
+        href: spec.linkHref,
+        srcStart: spec.sourceStart,
+        srcEnd: spec.sourceEnd,
+      })
+    } else {
+      ctx.send({
+        kind: 'wikilink.activate',
+        sessionId: session.sessionId,
+        docUri: session.docUri,
+        target: spec.target,
+        srcStart: spec.sourceStart,
+        srcEnd: spec.sourceEnd,
+      })
     }
     closeHoverPopup()
   })

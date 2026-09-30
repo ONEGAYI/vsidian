@@ -2088,8 +2088,8 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
     <h2>界面域 · 悬停预览（2）</h2>
     <article class="entry" id="hover-popup">
-      <h3><code>.vsidian-hover-popup（浮层容器；内含 .vsidian-hover-popup-scroll 内容滚动区（承载只读 Reading 容器）与 .vsidian-hover-popup-state 就地状态行（loading/错误分态；错误分态追加 .vsidian-hover-popup-state-error 修饰——主题错误色，验收反馈与普通文字区分））</code><span class="eid">hover-popup</span></h3>
-      <p class="purpose">悬停文档预览浮层（#218 一期首条闭环）：父文档 Reading 中悬停指向 Markdown 的双链/本地链接，经文档访问通道读取目标后以只读 Reading 内容显示。#221 全入口：Live 正文（默认 Ctrl+悬停，设置 hover.liveDirect 开启后直接悬停）与反链/出链面板条目（直接悬停）共用同一浮层。默认宽 480px / 最大高 400px（小视口由 JS 几何计划四边翻转并收缩钳制）；内容只读——任务 checkbox 禁用（JS disabled + pointer-events 双保险），无任何写回通道。#220 起浮层内为目标文档（B）的 Reading 内容：图片以 B 为来源解析（sourceDocUri 通道）、链接可点击跳转、代码块朴素高亮。</p>
+      <h3><code>.vsidian-hover-popup（浮层容器；内含 .vsidian-hover-popup-header 标题条（目标显示名 + .vsidian-hover-popup-title 与 .vsidian-hover-popup-open 跳转入口——嵌入卡片同款，#217 验收跟进）、.vsidian-hover-popup-scroll 内容滚动区（承载只读 Reading 容器）与 .vsidian-hover-popup-state 就地状态行（loading/错误分态；错误分态追加 .vsidian-hover-popup-state-error 修饰——主题错误色，验收反馈与普通文字区分））</code><span class="eid">hover-popup</span></h3>
+      <p class="purpose">悬停文档预览浮层（#218 一期首条闭环）：父文档 Reading 中悬停指向 Markdown 的双链/本地链接，经文档访问通道读取目标后以只读 Reading 内容显示。#221 全入口：Live 正文（默认 Ctrl+悬停，设置 hover.liveDirect 开启后直接悬停）与反链/出链面板条目（直接悬停）共用同一浮层。默认宽 480px / 最大高 400px（小视口由 JS 几何计划四边翻转并收缩钳制）；内容只读——任务 checkbox 禁用（JS disabled + pointer-events 双保险），无任何写回通道。#220 起浮层内为目标文档（B）的 Reading 内容：图片以 B 为来源解析（sourceDocUri 通道）、链接可点击跳转、代码块朴素高亮。#217 验收跟进：标题条与嵌入卡片同款——目标显示名（spec.target）常驻不随回包换，右上角跳转入口按目标形态分派到既有激活消息族（双链/普通链接直发、面板形态经 openAction 闭包走条目点击同通道），点击即上下文切换关闭。</p>
       <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
 <p class="states">状态：交互态浮层（悬停延迟打开期间挂载、离开联合域延迟关闭/Esc/父容器滚动/切模式撤下；#221 键盘命令打开时焦点进入浮层，:focus-visible 轮廓指示，焦点在内不因鼠标离开销毁）——容器本体不进静态探针，开闭、保活与绘制由浏览器 hoverPreview / hoverEntry 套件按行为路径验证；样式入口（单类低特异性）公开供片段覆写。</p>
       <p class="obsidian">Obsidian 对应：.hover-popover（Obsidian 页面预览浮层方向；内部结构闭源不作承诺）</p>
@@ -2098,8 +2098,16 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <pre><code>.vsidian-hover-popup {
   width: 480px;
   max-height: 400px;
+}
+
+/* 标题条与跳转入口（嵌入卡片同款规则并列，浮层选择器置首） */
+#app &gt; .vsidian-hover-popup .vsidian-hover-popup-header,
+#app .vsidian-embed-card .vsidian-embed-card-header {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 10px;
 }</code></pre>
-      <p class="verify">验证：单元 hoverPopupCssContract：fixed/宽 480/最大高 400/实底边框投影/滚动区/状态行/checkbox pointer-events 钉规则；单元 hoverPopup + hoverPopupGeometry：生命周期契约与四边翻转数学内核；浏览器 hoverPreview（#218）：真实指针开闭/保活/滚动/Esc/边缘翻转 + 正文绘制层可见断言</p>
+      <p class="verify">验证：单元 hoverPopupCssContract：fixed/宽 480/最大高 400/实底边框投影/滚动区/状态行/checkbox pointer-events 钉规则；#217 验收跟进加标题条与跳转按钮并列组（组文本含嵌入与浮层两侧选择器）；单元 hoverPopup + hoverPopupGeometry：生命周期契约与四边翻转数学内核；浏览器 hoverPreview（#218）：真实指针开闭/保活/滚动/Esc/边缘翻转 + 正文绘制层可见断言；浏览器 hoverEntry 场景 P（#217 验收跟进）：标题条显示名常驻 + 跳转图标 + 双链/链接分派与点击关闭</p>
       <p class="life">引入：#218（2026-09-30）</p>
     </article>
     <article class="entry" id="hover-fm-section">

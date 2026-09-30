@@ -49,8 +49,9 @@ import { WIKILINK_CLASS_NAMES } from '../shared/wikilink'
 
 /** 右上角打开入口图标（验收反馈：按钮本体空壳无图标——外部跳转形态，
  *  graphicBlockChrome 同款内联 SVG 风格；stroke currentColor 随按钮
- *  --vscode-icon-foreground 着色） */
-const OPEN_ICON =
+ *  --vscode-icon-foreground 着色）。#217 验收跟进：悬停浮层 header 的
+ *  跳转按钮同款复用（导出共享） */
+export const OPEN_ICON =
   '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" ' +
   'stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
   '<path d="M9 2.5h4.5V7"></path><path d="M13.5 2.5L7.5 8.5"></path>' +

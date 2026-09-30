@@ -4918,7 +4918,42 @@ export class WebviewSyncController {
       sourceStart: 0, // 引用区间在来源文档而非当前文档，给中性值
       sourceEnd: 0,
       directFsPath: payload.sourceFsPath,
+      openAction: this.backlinkOpenAction(payload),
     })
+  }
+
+  /** #217 验收跟进：面板形态浮层 header 跳转——与条目点击同通道同载荷
+   *  （反链定位引用处 / 出链带锚点），经 spec.openAction 闭包交给浮层
+   *  （浮层侧不再按双链/linkHref 默认形态分派） */
+  private backlinkOpenAction(payload: BacklinkItemPayload): () => void {
+    return () => {
+      if (!this.sessionId || !this.docUri) {
+        return
+      }
+      this.bridge.postMessage({
+        kind: 'backlink.activate',
+        sessionId: this.sessionId,
+        docUri: this.docUri,
+        sourceUri: payload.sourceFsPath,
+        offset: payload.start,
+      })
+    }
+  }
+
+  private outlinkOpenAction(payload: OutlinkItemPayload): () => void {
+    return () => {
+      // 断链条目无目标（与条目点击同守卫不派发）
+      if (!this.sessionId || !this.docUri || !payload.targetFsPath) {
+        return
+      }
+      this.bridge.postMessage({
+        kind: 'outlink.activate',
+        sessionId: this.sessionId,
+        docUri: this.docUri,
+        targetUri: payload.targetFsPath,
+        anchor: payload.anchor ?? '',
+      })
+    }
   }
 
   /** #221 出链面板悬停：与反链同款直接悬停；目标 = 条目 fsPath ± 锚点
@@ -4949,6 +4984,7 @@ export class WebviewSyncController {
       sourceEnd: payload.end,
       directFsPath: payload.targetFsPath ?? '',
       ...(payload.anchor ? { directAnchor: payload.anchor } : {}),
+      openAction: this.outlinkOpenAction(payload),
     })
   }
 
@@ -4993,6 +5029,7 @@ export class WebviewSyncController {
             sourceStart: 0,
             sourceEnd: 0,
             directFsPath: payload.sourceFsPath,
+            openAction: this.backlinkOpenAction(payload),
           })
         }
       }
@@ -5009,6 +5046,7 @@ export class WebviewSyncController {
             sourceEnd: payload.end,
             directFsPath: payload.targetFsPath ?? '',
             ...(payload.anchor ? { directAnchor: payload.anchor } : {}),
+            openAction: this.outlinkOpenAction(payload),
           })
         }
       }

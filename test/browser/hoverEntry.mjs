@@ -473,6 +473,57 @@ try {
   passed++
   console.log('[全入口][PASS] 窗口失焦释放浮层 + 切回重开正常')
 
+  // ---- 场景 P：浮层标题条（#217 验收跟进：嵌入卡片同款 header）----
+  // 标题为目标显示名常驻（loading 态即有）、跳转按钮带图标；点击按形态
+  // 分派（双链 wikilink.activate / 普通链接 link.activate），点击即关闭
+  await page.keyboard.down('Control')
+  await wikilinkDeco().hover()
+  await page.waitForTimeout(OPEN_WAIT)
+  const headerInfo = await page.evaluate(() => {
+    const header = document.querySelector('.vsidian-hover-popup-header')
+    if (!header) return null
+    return {
+      title: header.querySelector('.vsidian-hover-popup-title')?.textContent ?? '',
+      hasIcon: !!header.querySelector('.vsidian-hover-popup-open svg'),
+      aria: header.querySelector('.vsidian-hover-popup-open')?.getAttribute('aria-label') ?? '',
+    }
+  })
+  assert.ok(headerInfo, '标题条在场（loading 态即有）')
+  assert.equal(headerInfo.title, '目标笔记', '标题为目标显示名')
+  assert.ok(headerInfo.hasIcon, '跳转按钮带外部跳转图标（嵌入打开入口同款）')
+  assert.equal(headerInfo.aria, zhCn['embed.openTarget'], '可访问名走语言包')
+  const countBeforeOpen = (await hoverRequests()).length
+  const wikiActivateBefore = await page.evaluate(() =>
+    window.hoverSent().filter((m) => m.kind === 'wikilink.activate').length)
+  await page.locator('.vsidian-hover-popup-open').click()
+  await page.waitForTimeout(120)
+  const openMsgs = await page.evaluate(() =>
+    window.hoverSent().filter((m) => m.kind === 'wikilink.activate'))
+  assert.equal(openMsgs.length, wikiActivateBefore + 1,
+    'header 跳转发 wikilink.activate（父文档身份；增量计，不叠历史场景）')
+  assert.equal(openMsgs.at(-1).target, '目标笔记')
+  assert.equal(openMsgs[0].sourceDocUri, undefined, '不带来源文档（与嵌入打开入口同语义）')
+  popup = await page.evaluate(() => window.readHoverPopup())
+  assert.equal(popup.open, false, '点击跳转即上下文切换关闭')
+  assert.equal((await hoverRequests()).length, countBeforeOpen, '跳转不发读取请求')
+  // 普通链接形态分派 link.activate
+  await mdLinkDeco().hover()
+  await page.waitForTimeout(OPEN_WAIT)
+  const linkActivateBefore = await page.evaluate(() =>
+    window.hoverSent().filter((m) => m.kind === 'link.activate').length)
+  await page.locator('.vsidian-hover-popup-open').click()
+  await page.waitForTimeout(120)
+  const linkMsgs = await page.evaluate(() =>
+    window.hoverSent().filter((m) => m.kind === 'link.activate'))
+  assert.equal(linkMsgs.length, linkActivateBefore + 1,
+    '普通链接形态 header 跳转发 link.activate（增量计）')
+  assert.equal(linkMsgs.at(-1).href, '目标笔记.md')
+  await page.keyboard.up('Control')
+  await page.mouse.move(60, 500)
+  await page.waitForTimeout(CLOSE_WAIT)
+  passed++
+  console.log('[全入口][PASS] 浮层标题条：显示名常驻 + 跳转分派（双链/链接）+ 点击关闭')
+
   // ---- 收尾：零写回 ----
   assert.equal(await editRequestCount(), 0, '全场景零 edit.request（悬停/命令不写文档）')
   passed++

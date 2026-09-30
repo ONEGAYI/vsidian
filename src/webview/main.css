@@ -3983,7 +3983,9 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
 }
 
 /* 顶部栏：文件名居左、打开入口居右（#217 验收反馈：去底色融入白底，
-   保留下分隔线区分文件名与内容） */
+   保留下分隔线区分文件名与内容；验收跟进：悬停浮层同款 header 并列，
+   浮层选择器置首、嵌入既有选择器置尾保持契约 endsWith 匹配） */
+#app > .vsidian-hover-popup .vsidian-hover-popup-header,
 #app .vsidian-embed-card .vsidian-embed-card-header {
   display: flex;
   align-items: center;
@@ -3994,6 +3996,7 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
 }
 
 /* 文件名：描述色（成功后为目标根内相对路径） */
+#app > .vsidian-hover-popup .vsidian-hover-popup-title,
 #app .vsidian-embed-card .vsidian-embed-card-title {
   font-size: 0.92em;
   color: var(--vscode-descriptionForeground, inherit);
@@ -4001,6 +4004,7 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
 }
 
 /* 右上角跳转目标文档入口：图标按钮（沿用现有 Vsidian 打开行为） */
+#app > .vsidian-hover-popup .vsidian-hover-popup-open,
 #app .vsidian-embed-card .vsidian-embed-card-open {
   display: inline-flex;
   align-items: center;
@@ -4017,12 +4021,15 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   cursor: pointer;
 }
 
+#app > .vsidian-hover-popup .vsidian-hover-popup-open:hover,
+#app > .vsidian-hover-popup .vsidian-hover-popup-open:focus-visible,
 #app .vsidian-embed-card .vsidian-embed-card-open:hover,
 #app .vsidian-embed-card .vsidian-embed-card-open:focus-visible {
   border-color: var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
   background: var(--vscode-editor-background, transparent);
 }
 
+#app > .vsidian-hover-popup .vsidian-hover-popup-open:focus-visible,
 #app .vsidian-embed-card .vsidian-embed-card-open:focus-visible {
   outline: 1px solid var(--vscode-focusBorder, #4fc1ff);
   outline-offset: 1px;

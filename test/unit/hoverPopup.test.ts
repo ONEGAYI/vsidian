@@ -250,6 +250,79 @@ describe('窗口失焦与不可见释放', () => {
   })
 })
 
+describe('标题条与跳转入口（嵌入卡片同款 header）', () => {
+  // 验收反馈（2026-09-30）：浮层加嵌入同款标题+跳转按钮 header——标题为
+  // 目标显示名（spec.target 常驻，不随回包换），跳转按钮按 spec 形态分派
+  // 到既有激活消息族（双链 wikilink.activate / 普通链接 link.activate /
+  // 面板形态调用方经 openAction 闭包自带通道），点击即上下文切换关闭
+  it('header 在场（loading 态即有）：标题为目标显示名，跳转按钮带图标与可访问名', () => {
+    vi.useFakeTimers()
+    const h = makeHarness()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    const el = popupEl()!
+    const header = el.querySelector<HTMLElement>('.vsidian-hover-popup-header')
+    expect(header, '标题条在场（浮层生命周期常驻）').not.toBeNull()
+    const title = header!.querySelector<HTMLElement>('.vsidian-hover-popup-title')
+    expect(title!.textContent).toBe('目标笔记')
+    const open = header!.querySelector<HTMLButtonElement>('.vsidian-hover-popup-open')
+    expect(open, '跳转按钮在场').not.toBeNull()
+    expect(open!.innerHTML).toContain('<svg')
+    expect(open!.getAttribute('aria-label')).toBe(zhCn['embed.openTarget'])
+  })
+
+  it('双链形态点击跳转按钮：wikilink.activate 载荷（父文档身份解析）且浮层关闭', () => {
+    vi.useFakeTimers()
+    const h = makeHarness()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    const open = popupEl()!.querySelector<HTMLButtonElement>('.vsidian-hover-popup-open')!
+    open.click()
+    const msg = h.sent.find((m) => m.kind === 'wikilink.activate')
+    expect(msg, '应发 wikilink.activate').toBeDefined()
+    if (msg && msg.kind === 'wikilink.activate') {
+      expect(msg.target).toBe('目标笔记')
+      expect(msg.srcStart).toBe(10)
+      expect(msg.srcEnd).toBe(30)
+      expect(msg.sourceDocUri, 'header 跳转按父文档解析（不带来源文档）').toBeUndefined()
+    }
+    expect(isHoverPopupOpen(), '点击即上下文切换关闭').toBe(false)
+    expect(popupEl()).toBeNull()
+  })
+
+  it('普通链接形态点击跳转按钮：link.activate 附 href 原文', () => {
+    vi.useFakeTimers()
+    const h = makeHarness()
+    h.anchor.classList.remove('vsidian-wikilink')
+    hoverPreviewAnchorEnter(h.anchor, { target: '笔记.md', linkHref: '笔记.md', sourceStart: 10, sourceEnd: 30 })
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    popupEl()!.querySelector<HTMLButtonElement>('.vsidian-hover-popup-open')!.click()
+    const msg = h.sent.find((m) => m.kind === 'link.activate')
+    expect(msg, '应发 link.activate').toBeDefined()
+    if (msg && msg.kind === 'link.activate') {
+      expect(msg.href).toBe('笔记.md')
+    }
+  })
+
+  it('面板形态（openAction 闭包）：跳转走调用方通道，回调后同样关闭', () => {
+    vi.useFakeTimers()
+    const h = makeHarness()
+    const opened: string[] = []
+    hoverPreviewAnchorEnter(h.anchor, {
+      target: '来源笔记',
+      sourceStart: 0,
+      sourceEnd: 0,
+      openAction: () => opened.push('backlink'),
+    })
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    popupEl()!.querySelector<HTMLButtonElement>('.vsidian-hover-popup-open')!.click()
+    expect(opened).toEqual(['backlink'])
+    expect(h.sent.filter((m) => m.kind === 'wikilink.activate'),
+      'openAction 形态不重复发默认通道').toHaveLength(0)
+    expect(isHoverPopupOpen()).toBe(false)
+  })
+})
+
 describe('Esc 与焦点', () => {
   it('Esc 关闭浮层（捕获阶段拦截，不外溢）', () => {
     vi.useFakeTimers()

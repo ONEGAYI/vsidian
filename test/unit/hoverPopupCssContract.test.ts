@@ -35,6 +35,34 @@ describe('悬停预览浮层 CSS 契约（#218）', () => {
     expect(scroll).toMatch(/overflow:\s*auto/)
   })
 
+  it('标题条：嵌入卡片同款规则并列（横排布局 + 下分隔线；组文本含两侧选择器）', () => {
+    // #217 验收跟进：header/title/open 三组规则浮层选择器置首、嵌入
+    // 既有选择器置尾（两组测试的 endsWith 匹配各取所需——本侧以嵌入
+    // 选择器取块再验 contains 浮层选择器）
+    const header = rule('#app .vsidian-embed-card .vsidian-embed-card-header')
+    expect(header).toMatch(/display:\s*flex/)
+    expect(header).toMatch(/justify-content:\s*space-between/)
+    expect(header).toMatch(/border-bottom:/)
+    expect(header.split('{')[0])
+      .toContain('#app > .vsidian-hover-popup .vsidian-hover-popup-header')
+    const title = rule('#app .vsidian-embed-card .vsidian-embed-card-title')
+    expect(title).toMatch(/color:\s*var\(--vscode-descriptionForeground/)
+    expect(title.split('{')[0])
+      .toContain('#app > .vsidian-hover-popup .vsidian-hover-popup-title')
+  })
+
+  it('跳转按钮：图标按钮尺寸与 hover/focus 可见反馈（与嵌入打开入口同款并列）', () => {
+    const open = rule('#app .vsidian-embed-card .vsidian-embed-card-open')
+    expect(open).toMatch(/cursor:\s*pointer/)
+    expect(open).toMatch(/width:\s*22px/)
+    expect(open.split('{')[0])
+      .toContain('#app > .vsidian-hover-popup .vsidian-hover-popup-open')
+    const hover = rule(
+      '#app > .vsidian-hover-popup .vsidian-hover-popup-open:hover,\n#app > .vsidian-hover-popup .vsidian-hover-popup-open:focus-visible,\n#app .vsidian-embed-card .vsidian-embed-card-open:hover,\n#app .vsidian-embed-card .vsidian-embed-card-open:focus-visible',
+    )
+    expect(hover).toMatch(/border-color:/)
+  })
+
   it('就地状态行（loading/error）在场绘制，不使用 display:none 隐藏整个浮层', () => {
     const state = rule('#app > .vsidian-hover-popup .vsidian-hover-popup-state')
     expect(state).not.toMatch(/display:\s*none/)
