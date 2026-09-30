@@ -25,6 +25,7 @@ import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet } fr
 import type { SyntaxNode, Tree } from '@lezer/common'
 import { chainAt, visitRange, type SourceRange } from './markdownDoc'
 import { liveDecorationsField, selectionTouchesRange } from './liveDecorations'
+import { hitIntersectsRange, hitRangesOf, hitRevealField, type HitRange } from './hitReveal'
 import { IMAGE_CLASS_NAMES, type ImageResourceManager } from './imageResource'
 import { buildGraphicChrome, GRAPHIC_CHROME_CLASS_NAMES, markImageFrameSized } from './graphicBlockChrome'
 import { openImagePopup } from './imagePopup'
@@ -397,6 +398,7 @@ export function buildLinkImageDecorationRanges(
   selection: EditorSelection,
   visibleRanges: ReadonlyArray<{ from: number; to: number }>,
   images?: ImageResourceManager,
+  hits: readonly HitRange[] = [],
 ): Array<Range<Decoration>> {
   const out: Array<Range<Decoration>> = []
   const seen = new Set<SyntaxNode>()
@@ -463,7 +465,12 @@ export function buildLinkImageDecorationRanges(
           if (!isInlineForm(node, doc)) {
             return // 引用式：源码降级
           }
-          if (active) {
+          // #251 命中显形：独行图片的替换区间与活跃命中相交时回源码
+          // （widget 上的命中 mark 画不出来）。行内混排图片刻意不参与
+          // （票面覆盖清单钉住独行形态，不顺手放宽）
+          if (active ||
+              (soloImageLine(doc, node.from, node.to) &&
+                hitIntersectsRange(hits, node.from, node.to))) {
             return // 光标进入该图片范围，显示源码供编辑
           }
           seen.add(node)
@@ -505,9 +512,10 @@ export function buildLinkImageDecorations(
   selection: EditorSelection,
   visibleRanges: ReadonlyArray<{ from: number; to: number }>,
   images?: ImageResourceManager,
+  hits: readonly HitRange[] = [],
 ): DecorationSet {
   return RangeSet.of(
-    buildLinkImageDecorationRanges(doc, tree, selection, visibleRanges, images),
+    buildLinkImageDecorationRanges(doc, tree, selection, visibleRanges, images, hits),
     true,
   )
 }
@@ -608,6 +616,7 @@ export function buildLooseLinkDecorationRanges(
   visibleRanges: ReadonlyArray<{ from: number; to: number }>,
   fm: SourceRange | null,
   images?: ImageResourceManager,
+  hits: readonly HitRange[] = [],
 ): Array<Range<Decoration>> {
   const out: Array<Range<Decoration>> = []
   const seenLines = new Set<number>()
@@ -622,7 +631,10 @@ export function buildLooseLinkDecorationRanges(
             continue
           }
           if (hit.image) {
-            if (selectionTouchesRange(selection, hit.from, hit.to)) {
+            // #251 命中显形：独行图片命中相交回源（与树驱动路径同口径）
+            if (selectionTouchesRange(selection, hit.from, hit.to) ||
+                (soloImageLine(doc, hit.from, hit.to) &&
+                  hitIntersectsRange(hits, hit.from, hit.to))) {
               continue // 光标进入该图片范围，显示源码供编辑
             }
             const alt = doc.sliceString(hit.labelFrom, hit.labelTo)
@@ -816,7 +828,8 @@ export function createLinkInteractions(opts: {
         this.decorations = this.build(view)
       }
       update(update: import('@codemirror/view').ViewUpdate) {
-        if (update.docChanged || update.selectionSet || update.viewportChanged) {
+        if (update.docChanged || update.selectionSet || update.viewportChanged ||
+            update.startState.field(hitRevealField, false) !== update.state.field(hitRevealField, false)) {
           this.decorations = this.build(update.view)
         }
         // 视口外移除的 widget 无销毁回调：以 isConnected 兜底释放图片槽位
@@ -827,6 +840,7 @@ export function createLinkInteractions(opts: {
         if (!field) {
           return RangeSet.empty
         }
+        const hits = hitRangesOf(view.state)
         // #11：链接/图片（树驱动）与双链（行扫描）的区间合并为同一装饰集
         // ——两类语法不重叠，RangeSet.of 排序去重即可；#152 宽松链接同为
         // 行扫描来源，与树驱动/双链语法均不重叠（仅接管标准层拒绝的形态）
@@ -838,6 +852,7 @@ export function createLinkInteractions(opts: {
               view.state.selection,
               view.visibleRanges,
               opts.images,
+              hits,
             ),
             ...buildWikilinkDecorationRanges(
               view.state.doc,
@@ -853,6 +868,7 @@ export function createLinkInteractions(opts: {
               view.visibleRanges,
               field.fm,
               opts.images,
+              hits,
             ),
           ],
           true,

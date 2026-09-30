@@ -25,6 +25,7 @@ import { RangeSet, StateField, type Extension, type Range, type Text } from '@co
 import type { EditorSelection } from '@codemirror/state'
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet } from '@codemirror/view'
 import { liveDecorationsField, selectionTouchesRange } from './liveDecorations'
+import { hitIntersectsRange, hitRangesOf, hitRevealField, type HitRange } from './hitReveal'
 import { mermaidFencesField } from './liveMermaid'
 import { RENDERED_FENCE_LABELS, type FenceSpan } from '../shared/mermaid'
 import { graphicRendererFor } from './graphicRenderers'
@@ -473,13 +474,17 @@ export function buildCodeCardDecorations(
     highlight: true,
   },
   folded: ReadonlySet<number> = new Set<number>(),
+  hits: readonly HitRange[] = [],
 ): Array<Range<Decoration>> {
   const out: Array<Range<Decoration>> = []
   for (const fence of fences) {
     if (fm && fence.from < fm.end) {
       continue
     }
-    const editing = selectionTouchesRange(selection, fence.from, fence.to)
+    // #251 命中显形：替换区间（含被清空的围栏行）与活跃命中相交时按
+    // 编辑态处理——围栏行源码可见，命中 mark 随之可画（块级回源）
+    const editing = selectionTouchesRange(selection, fence.from, fence.to) ||
+      hitIntersectsRange(hits, fence.from, fence.to)
     // 折叠收起（#82）：光标在块内时临时展开；收起态无复制按钮（规格）。
     // 折叠只在卡片开启时呈现（朴素围栏无头部可挂 chevron）
     const isFolded = config.card && folded.has(fence.from) && !editing
@@ -566,6 +571,7 @@ export const codeCardDecorations = StateField.define<DecorationSet>({
       buildCodeCardDecorations(
         state.doc, state.selection, decoField.fm, fences.spans,
         state.facet(codeCardConfigFacet), state.field(codeCardFoldField, false) ?? new Set<number>(),
+        hitRangesOf(state),
       ),
       true,
     )
@@ -577,7 +583,9 @@ export const codeCardDecorations = StateField.define<DecorationSet>({
     }
     const configChanged = tr.startState.facet(codeCardConfigFacet) !== tr.state.facet(codeCardConfigFacet)
     const foldChanged = tr.startState.field(codeCardFoldField, false) !== tr.state.field(codeCardFoldField, false)
-    if (!tr.docChanged && tr.selection === undefined && !configChanged && !foldChanged) {
+    // #251 命中集变化（hitRevealField 值引用）同列重建触发
+    if (!tr.docChanged && tr.selection === undefined && !configChanged && !foldChanged &&
+        tr.startState.field(hitRevealField, false) === tr.state.field(hitRevealField, false)) {
       return value
     }
     const decoField = tr.state.field(liveDecorationsField, false)
@@ -589,6 +597,7 @@ export const codeCardDecorations = StateField.define<DecorationSet>({
       buildCodeCardDecorations(
         tr.state.doc, tr.state.selection, decoField.fm, fences.spans,
         tr.state.facet(codeCardConfigFacet), tr.state.field(codeCardFoldField, false) ?? new Set<number>(),
+        hitRangesOf(tr.state),
       ),
       true,
     )

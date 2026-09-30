@@ -124,6 +124,7 @@ import {
   type OccurrenceSeed,
 } from './nextOccurrence'
 import { liveDecorationsField, livePreviewDecorations, LIVE_CLASS_NAMES, selectionTouchesRange, tableCompositionSettled, TaskCheckboxWidget } from './liveDecorations'
+import { setOccurrenceHitActive } from './hitReveal'
 import { LINK_MOD_CLASS, createLinkInteractions, LINK_CLASS_NAMES, WIKILINK_CLASS_NAMES, activateLinkAtPos, activateLooseLinkAtPos, activateWikilinkAtPos } from './liveLinks'
 import { liveMath } from './liveMath'
 import { MATH_CLASS_NAMES } from '../shared/math'
@@ -7534,10 +7535,16 @@ export class WebviewSyncController {
     this.syncOccurrenceBarDom()
   }
 
-  /** 结束会话：簿记清空、选项条淡出（选区保持——多光标收敛交给 CM6） */
+  /** 结束会话：簿记清空、选项条淡出（选区保持——多光标收敛交给 CM6）；
+   *  #251 命中显形：会话选区退出活跃命中集（纯 effect 事务零写回；清空
+   *  瞬间选区仍触界的旧显形行由 hitRevealField 的停驻机制接管） */
   private endOccurrenceSession(): void {
+    const had = this.occurrenceSession !== null
     this.occurrenceSession = null
     this.occurrenceBarEl?.classList.remove(OCCURRENCE_CLASS_NAMES.barOpen)
+    if (had) {
+      this.view?.dispatch({ effects: setOccurrenceHitActive.of(false) })
+    }
   }
 
   /** 开关切换后的会话重建（用户决策「切换即按新选项重建会话」，选项条
@@ -7669,12 +7676,15 @@ export class WebviewSyncController {
       return
     }
     // 会话簿记（命令产物选区快照；updateListener 见 occurrenceCmd 注解
-    // 跳过结束检测）与呈现（面板开时闪烁，否则选项条在场）
+    // 跳过结束检测）与呈现（面板开时闪烁，否则选项条在场）。
+    // #251 命中显形：会话在场即选区计入活跃命中集（纯 effect 事务零写回；
+    // 幂等——会话续期时 field 值无实质变化不触发下游重建）
     this.occurrenceSession = {
       kind: op === 'all' ? 'all' : 'add',
       seed,
       ranges: view.state.selection.ranges,
     }
+    this.view?.dispatch({ effects: setOccurrenceHitActive.of(true) })
     if (this.findOpen) {
       this.flashFindToggles(seed.options)
     } else {
@@ -8650,15 +8660,23 @@ export class WebviewSyncController {
       // #238 会话生命周期：选区被外部改变（非本命令事务的选区设置/
       //  docChanged——用户点击/键盘移动/输入/外部同步映射）即结束会话，
       //  选项条淡出（下一次按下按新状态重建）。命令自身事务带
-      //  occurrenceCmd 注解，见 dispatchOccurrencePlan
+      //  occurrenceCmd 注解，见 dispatchOccurrencePlan。
+      //  判据修正（#251 实证）：Transaction.selection 无显式设置时也非 null
+      //  （CM6 沿用/映射当前选区，每次新对象）——纯 effect 事务（setFindMatches、
+      //  setOccurrenceHitActive 等）不得按「selection 非 null」误判为选区变化；
+      //  以 EditorSelection.eq 的内容比较识别真实选区变化（内容未变即无外部改变）
       EditorView.updateListener.of((update) => {
         if (!this.occurrenceSession) {
           return
         }
         for (const tr of update.transactions) {
-          // Transaction 无 selectionSet 字段：选区设置与否以 selection
-          // 非 null 判定（docChanged 为 getter）
-          if ((tr.selection !== null || tr.docChanged) && !tr.annotation(occurrenceCmd)) {
+          // Transaction.selection 类型为 EditorSelection | undefined（未显式
+          // 设置即 undefined——不是 null；旧判据 !== null 恒真，纯 effect 事务
+          // 会被误判为选区变化）。
+          const sel = tr.selection
+          if ((tr.docChanged ||
+                (sel !== undefined && !tr.startState.selection.eq(sel))) &&
+              !tr.annotation(occurrenceCmd)) {
             this.endOccurrenceSession()
             return
           }

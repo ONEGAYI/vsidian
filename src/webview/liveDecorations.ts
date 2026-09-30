@@ -58,6 +58,7 @@ import {
 import { resolveTaskToggleAtMarker } from './taskToggle'
 import { t } from '../shared/i18n'
 import { applyObsidianDomAlias } from '../shared/obsidianAlias'
+import { hitRevealContextOf, hitRevealField, hitRevealTouchesLine, type HitRevealContext } from './hitReveal'
 import { collectColumnSamples, tableGridTemplate } from './tableColumnWidth'
 import { sameTableRegion, tableRegionField } from './tableRegionField'
 import type { TableRegion } from './tableRegion'
@@ -665,6 +666,7 @@ function emitForRange(
   gridPlans: Map<number, TableGridPlan | null> = new Map(),
   fmModel: FmTableModel | null = null,
   region: TableRegion | null = null,
+  hitReveal: HitRevealContext | null = null,
 ): Array<Range<Decoration>> {
   const out: Array<Range<Decoration>> = []
   const lineCls: Array<Set<string> | undefined> = new Array(toLine - fromLine + 1).fill(undefined)
@@ -779,15 +781,27 @@ function emitForRange(
           for (let lineNo = first; lineNo <= last; lineNo++) {
             const kind = plan.rows.get(lineNo)
             if (!kind) continue
+            // #251 命中显形：活跃命中/停驻触界的网格行回源（行不加网格
+            // 行类、不进 gridLines——竖线等结构源码可见、命中 mark 可画，
+            // 与分隔行光标停驻同款「类缺席」机制）。编辑选区刻意不参与
+            // （表格网格核心体验），显形只认命中触界
+            if (hitRevealTouchesLine(hitReveal, lineNo, doc.line(lineNo))) {
+              continue
+            }
             addLineCls(lineNo, LIVE_CLASS_NAMES.tableGridRow)
             gridLines.set(lineNo, { kind, plan })
           }
           // 只有光标直接停在分隔行才显露可编辑源码。跨行选区即使覆盖该行，
           // 也继续隐藏结构标记，避免把 `| --- |` 当可选正文显示。
+          // #251：命中触界/停驻的分隔行同款显露（命中里的分隔行内容可
+          // 见——命中集与停驻是除光标外的第二显形来源）
           const editingDelimiter = selection.ranges.some((range) => range.empty &&
             doc.lineAt(range.head).number === plan.delimiterLine)
+          const delimiterLine = doc.line(plan.delimiterLine)
+          const delimiterRevealed = !editingDelimiter &&
+            hitRevealTouchesLine(hitReveal, plan.delimiterLine, delimiterLine)
           if (plan.delimiterLine >= fromLine && plan.delimiterLine <= toLine &&
-              !editingDelimiter) {
+              !editingDelimiter && !delimiterRevealed) {
             addLineCls(plan.delimiterLine, LIVE_CLASS_NAMES.tableGridDelimiter)
           }
         }
@@ -838,8 +852,13 @@ function emitForRange(
         }
         const line = doc.lineAt(node.from)
         if (line.number >= fromLine && line.number <= toLine) {
+          // #251 触界来源推广：命中触界该行同样显形（与光标/选区触界并集；
+          // 行外命中不显形——最小回显）
           out.push(
-            (touches(line.from, line.to) ? escapeRevealDeco : escapeDeco)
+            (touches(line.from, line.to) ||
+              (hitReveal ? hitRevealTouchesLine(hitReveal, line.number, line) : false)
+                ? escapeRevealDeco
+                : escapeDeco)
               .range(node.from, node.from + 1),
           )
         }
@@ -1165,12 +1184,12 @@ function headText(doc: Text): string {
 
 /** 全量构建（create / 全文替换 / 探针对拍） */
 export function buildLivePreviewDecorations(doc: Text, selection: EditorSelection,
-  region: TableRegion | null = null): DecorationSet {
+  region: TableRegion | null = null, hitReveal: HitRevealContext | null = null): DecorationSet {
   const tree = parseTree(doc)
   const fm = frontmatterOf(doc)
   stats.fullBuildLines = doc.lines
   return RangeSet.of(
-    emitForRange(tree, doc, selection, fm, 1, doc.lines, new Map(), frontmatterModelOf(doc, fm), region),
+    emitForRange(tree, doc, selection, fm, 1, doc.lines, new Map(), frontmatterModelOf(doc, fm), region, hitReveal),
     true,
   )
 }
@@ -1214,6 +1233,47 @@ function regionSpans(tr: Transaction, doc: Text): LineSpan[] {
     const first = headerNo + region.rowFrom + (region.rowFrom > 0 ? 1 : 0)
     const last = Math.min(headerNo + region.rowTo + (region.rowTo > 0 ? 1 : 0), doc.lines)
     if (last >= first) spans.push({ fromLine: first, toLine: last })
+  }
+  return spans
+}
+
+/** 命中显形驱动的重建行（#251）：hitRevealField 值变化时，新旧命中与
+ *  停驻触界的行都要重发射（旧行撤显形/新行上显形；停驻行号在各自事务
+ *  坐标系，旧侧经 changes 映射到新坐标）。纯选区事务下 changes 恒等，
+ *  映射零成本 */
+function hitRevealSpans(tr: Transaction, doc: Text): LineSpan[] {
+  const before = tr.startState.field(hitRevealField, false)
+  const after = tr.state.field(hitRevealField, false)
+  if (!before || !after || before === after) {
+    return []
+  }
+  const spans: LineSpan[] = []
+  const pushPos = (from: number, to: number): void => {
+    if (to < from || from > doc.length) {
+      return
+    }
+    spans.push({
+      fromLine: doc.lineAt(Math.min(from, doc.length)).number,
+      toLine: doc.lineAt(Math.min(Math.max(to, from), doc.length)).number,
+    })
+  }
+  for (const hit of after.hits) {
+    pushPos(hit.from, hit.to)
+  }
+  for (const n of after.stickyLines) {
+    if (n >= 1 && n <= doc.lines) {
+      pushPos(doc.line(n).from, doc.line(n).to)
+    }
+  }
+  const oldDoc = tr.startState.doc
+  for (const hit of before.hits) {
+    pushPos(tr.changes.mapPos(hit.from, -1), tr.changes.mapPos(hit.to, 1))
+  }
+  for (const n of before.stickyLines) {
+    if (n >= 1 && n <= oldDoc.lines) {
+      const pos = tr.changes.mapPos(oldDoc.line(n).from, -1)
+      pushPos(pos, pos)
+    }
   }
   return spans
 }
@@ -1433,7 +1493,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
     const gridPlans = new Map<number, TableGridPlan | null>()
     const decos = RangeSet.of(
       emitForRange(tree, state.doc, state.selection, fm, 1, state.doc.lines, gridPlans, fmModel,
-        state.field(tableRegionField, false)), true)
+        state.field(tableRegionField, false), hitRevealContextOf(state)), true)
     return {
       decos,
       tree,
@@ -1446,7 +1506,10 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
     }
   },
   update(value, tr) {
-    if (!tr.docChanged && tr.selection === undefined &&
+    // #251 命中显形：hitRevealField 值变化（命中集增删/停驻种入收缩）也
+    // 是重建触发源——依赖读取（下方 hitRevealSpans）保证该 field 先更新
+    const hitRevealChanged = tr.startState.field(hitRevealField, false) !== tr.state.field(hitRevealField, false)
+    if (!tr.docChanged && tr.selection === undefined && !hitRevealChanged &&
         sameTableRegion(tr.startState.field(tableRegionField, false), tr.state.field(tableRegionField, false))) {
       return value
     }
@@ -1476,7 +1539,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
               const row = rowNo === lineNo ? freshRow : widths
               for (let col = 0; col < oldPlan.columns; col++) {
                 if (row[col]! > merged[col]!) {
-                  merged[col] = row[col]!
+                  merged[col]! = row[col]!
                 }
               }
             }
@@ -1486,7 +1549,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
                 filterTo: currentLine.to,
                 filter: () => false,
                 add: emitForRange(value.tree, doc, tr.state.selection, value.fm, lineNo, lineNo, value.gridPlans, value.fmModel,
-                  tr.state.field(tableRegionField, false)),
+                  tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state)),
                 sort: true,
               })
               return {
@@ -1511,7 +1574,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
             filterTo: doc.line(last).to,
             filter: () => false,
             add: emitForRange(value.tree, doc, tr.state.selection, value.fm, first, last, gridPlans, value.fmModel,
-              tr.state.field(tableRegionField, false)),
+              tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state)),
             sort: true,
           })
           return {
@@ -1530,7 +1593,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
       let decos = value.decos
       let scanned = 0
       const rebuilt: Array<{ from: number; to: number }> = []
-      for (const span of [...selectionSpans(tr), ...regionSpans(tr, doc)]) {
+      for (const span of [...selectionSpans(tr), ...regionSpans(tr, doc), ...hitRevealSpans(tr, doc)]) {
         const from = doc.line(span.fromLine).from
         const to = doc.line(span.toLine).to
         rebuilt.push({ from, to })
@@ -1539,7 +1602,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
           filterTo: to,
           filter: () => false,
           add: emitForRange(value.tree, doc, tr.state.selection, value.fm, span.fromLine, span.toLine, value.gridPlans, value.fmModel,
-            tr.state.field(tableRegionField, false)),
+            tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state)),
           sort: true,
         })
         scanned += span.toLine - span.fromLine + 1
@@ -1587,7 +1650,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
       }
     }
     const spans = [...planRebuildSpans(tr, value.tree, tree, changed, value.fm, fm, fmTouched),
-      ...regionSpans(tr, doc)]
+      ...regionSpans(tr, doc), ...hitRevealSpans(tr, doc)]
     const gridPlans = new Map<number, TableGridPlan | null>()
     let decos = value.decos.map(tr.changes)
     let scanned = 0
@@ -1601,7 +1664,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
         filterTo: to,
         filter: () => false,
         add: emitForRange(tree, doc, tr.state.selection, fm, span.fromLine, span.toLine, gridPlans, fmModel,
-          tr.state.field(tableRegionField, false)),
+          tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state)),
         sort: true,
       })
       scanned += span.toLine - span.fromLine + 1
@@ -1888,4 +1951,11 @@ const viewportLivePlugin = ViewPlugin.fromClass(
 )
 
 /** Live Preview 装饰装配：直接（StateField）+ 间接（ViewPlugin） */
-export const livePreviewDecorations: Extension = [liveDecorationsField, gridCellMouseSelection, viewportLivePlugin]
+export const livePreviewDecorations: Extension = [
+  // #251 命中显形状态源（依赖 findStateField 的 matches——findDecorations
+  // 缺席的裸装配场景由 field 读取容错为空集，行为不变）
+  hitRevealField,
+  liveDecorationsField,
+  gridCellMouseSelection,
+  viewportLivePlugin,
+]

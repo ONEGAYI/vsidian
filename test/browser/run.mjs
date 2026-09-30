@@ -43,9 +43,12 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // #238 合并入列：occurrence（选下一处相同词——真实键盘 Ctrl+D 连按与
 // wrap、Ctrl+K Ctrl+D 两段弦、Ctrl+Shift+L 全选与多光标编辑回流、
 // 选项条点击切换重建会话与 Esc 两段层级，非模态与绘制层证据）。
+// #251 合并入列：hitReveal（命中显形——真实键盘搜索/Ctrl+D 命中落在
+// grid 行与分隔行回源、关面板恢复与停驻、块级公式回源、编辑选区硬边界）
+// 紧随 occurrence（同查找/选词族）。
 const names = ['tableCaret', 'quoteBarPaint', 'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'wordMotion', 'imagePaste', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage',
-  'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract', 'commentToggle', 'viewToggle', 'contextMenu', 'anchorFlash', 'readingWidthProbe', 'codeCardChrome', 'liveImageLayout', 'imageRefresh', 'imagePopup', 'hoverPreview', 'readingEmbed', 'liveEmbed', 'hoverEntry', 'hoverRefresh', 'multicursor', 'multicursorWrite', 'findPanel', 'occurrence']
+  'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract', 'commentToggle', 'viewToggle', 'contextMenu', 'anchorFlash', 'readingWidthProbe', 'codeCardChrome', 'liveImageLayout', 'imageRefresh', 'imagePopup', 'hoverPreview', 'readingEmbed', 'liveEmbed', 'hoverEntry', 'hoverRefresh', 'multicursor', 'multicursorWrite', 'findPanel', 'occurrence', 'hitReveal']
 const { workers, reuseBuilds, selected } = parseBrowserRunOptions(process.argv.slice(2), names)
 const parent = path.join(root, 'out/test/browser-runs')
 await mkdir(parent, { recursive: true })

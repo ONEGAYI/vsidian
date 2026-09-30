@@ -281,6 +281,7 @@ vsidian/
 │       ├── frontmatterPopover.ts       # frontmatter 属性编辑浮层
 │       ├── graphicBlockChrome.ts       # 图形化块右上角按钮组
 │       ├── graphicRenderers.ts         # 图形化渲染器注册表
+│       ├── hitReveal.ts                # 命中显形活跃命中集单一事实源
 │       ├── hoverPopup.ts               # 悬停预览浮层单例
 │       ├── hoverPopupGeometry.ts       # 悬停浮层几何纯函数
 │       ├── htmlComment.ts              # 阅读侧 HTML 注释剥离纯函数

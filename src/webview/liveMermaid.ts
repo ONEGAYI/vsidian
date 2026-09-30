@@ -22,6 +22,7 @@
 import { RangeSet, StateField, type Extension, type Range, type Text, type Transaction } from '@codemirror/state'
 import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view'
 import { liveDecorationsField, selectionTouchesRange } from './liveDecorations'
+import { hitIntersectsRange, hitRangesOf, hitRevealField, type HitRange } from './hitReveal'
 import { codeCardFoldField } from './codeCardState'
 import { graphicRendererFor } from './graphicRenderers'
 import { buildGraphicChrome, GRAPHIC_CHROME_CLASS_NAMES } from './graphicBlockChrome'
@@ -298,15 +299,17 @@ export const mermaidFencesField = StateField.define<MermaidFenceTable>({
 /**
  * mermaid 围栏装饰构建（#60 契约入口；纯数据输入，可单测直驱）：
  * 光标/选区触及围栏区间 → 不发射（源码显形，代码块卡片接管编辑态外壳）；
- * 范围外 → replace widget。折叠收起的围栏不发射（卡片收起形态接管，
- * 避免 replace 重叠；card 关闭时折叠集已清空，不会走到让位分支）。
- * frontmatter 内围栏抑制（源码降级边界）。
+ * 范围外 → replace widget。#251 命中显形：替换区间与活跃命中相交时
+ * 同款不发射（回源码行——widget 上的命中 mark 画不出来）。折叠收起的
+ * 围栏不发射（卡片收起形态接管，避免 replace 重叠；card 关闭时折叠集
+ * 已清空，不会走到让位分支）。frontmatter 内围栏抑制（源码降级边界）。
  */
 export function buildMermaidDecorationRanges(
   selection: import('@codemirror/state').EditorSelection,
   fm: { end: number } | null,
   fences: readonly FenceSpan[],
   folded: ReadonlySet<number> = new Set<number>(),
+  hits: readonly HitRange[] = [],
 ): Array<Range<Decoration>> {
   const out: Array<Range<Decoration>> = []
   for (const fence of fences) {
@@ -319,6 +322,9 @@ export function buildMermaidDecorationRanges(
       continue
     }
     if (selectionTouchesRange(selection, fence.from, fence.to)) {
+      continue
+    }
+    if (hitIntersectsRange(hits, fence.from, fence.to)) {
       continue
     }
     if (folded.has(fence.from)) {
@@ -345,15 +351,18 @@ export const mermaidDecorations = StateField.define<DecorationSet>({
         field.fm,
         state.field(mermaidFencesField).spans,
         state.field(codeCardFoldField, false) ?? new Set<number>(),
+        hitRangesOf(state),
       ),
       true,
     )
   },
   update(value, tr) {
     // Transaction 没有 selectionSet（那是 ViewUpdate 的属性）：以显式
-    // selection 判定选区变化（liveDecorationsField/liveMath 同款口径）
+    // selection 判定选区变化（liveDecorationsField/liveMath 同款口径）；
+    // #251 命中集变化（hitRevealField 值引用）同列重建触发
     const foldChanged = tr.startState.field(codeCardFoldField, false) !== tr.state.field(codeCardFoldField, false)
-    if (!tr.docChanged && tr.selection === undefined && !foldChanged) {
+    if (!tr.docChanged && tr.selection === undefined && !foldChanged &&
+        tr.startState.field(hitRevealField, false) === tr.state.field(hitRevealField, false)) {
       return value
     }
     const field = tr.state.field(liveDecorationsField, false)
@@ -366,6 +375,7 @@ export const mermaidDecorations = StateField.define<DecorationSet>({
         field.fm,
         tr.state.field(mermaidFencesField).spans,
         tr.state.field(codeCardFoldField, false) ?? new Set<number>(),
+        hitRangesOf(tr.state),
       ),
       true,
     )
