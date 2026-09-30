@@ -6,6 +6,7 @@
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { writeFile } from 'node:fs/promises'
 import { build, artifactPath, chromium } from './runtime.mjs'
 import { buildZhLocaleIsland } from './localeIsland.mjs'
 
@@ -220,6 +221,110 @@ try {
   assert.deepEqual(errors, [], '无页面错误')
   passed++
   console.log('[正文嵌入][PASS] 零写回 + 无页面错误')
+
+  // ---- #243：1000 块 B 文档由卡片自己的真实 scrollport 驱动 ----
+  const longPage = await browser.newPage({ viewport: { width: 900, height: 640 } })
+  const longErrors = []
+  longPage.on('pageerror', (error) => longErrors.push(error.message))
+  await longPage.setContent(`<html lang="zh-CN"><body>${islandHtml}<div id="app"></div></body></html>`)
+  await longPage.addStyleTag({ content: 'html, body { margin: 0; height: 100%; } #app { height: 100vh; }' })
+  await longPage.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
+  await longPage.addScriptTag({ path: bundle })
+  await longPage.evaluate((text) => window.initEmbedDoc(text), '# 引用父文档\n\n![[长文]]\n')
+  const longTarget = Array.from({ length: 1000 }, (_, i) => `长文段落 ${String(i).padStart(4, '0')}：引用内容按内部视口挂载。`).join('\n\n')
+  const longReq = await longPage.evaluate(() => window.embedSent().find((m) => m.kind === 'hover.request'))
+  const startMs = performance.now()
+  await longPage.evaluate(({ reqId, instanceId, text }) => window.respondEmbed({
+    kind: 'hover.result', reqId, instanceId, ok: true,
+    target: { fsPath: 'D:\\notes\\long-243.md', relPath: 'long-243.md' },
+    version: 1, text, range: { start: 0, end: text.length }, scope: { kind: 'full' },
+  }), { reqId: longReq.reqId, instanceId: longReq.instanceId, text: longTarget })
+  await longPage.waitForTimeout(120)
+  const first = await longPage.evaluate(() => ({
+    stats: window.embedVirtualStats(0), viewport: window.embedViewportSnapshot(0),
+    cache: window.refCacheStats(), lifecycle: window.refLifecycleStats(),
+  }))
+  const responseToFirstPaintMs = Math.round(performance.now() - startMs)
+  assert.equal(first.stats.totalBlocks, 1000)
+  assert.equal(first.stats.virtualized, true)
+  assert.ok(first.stats.maxMountedBlocks < 100, `首载峰值 ${first.stats.maxMountedBlocks}，不得先全文建 DOM`)
+  assert.ok(first.stats.mountedEver < 100, `首载累计创建 ${first.stats.mountedEver}，不得先全文创建再回收`)
+  assert.equal(first.cache.parses, 1, '同目标 Live/Reading 两实例共用一次全文解析')
+  assert.ok(first.viewport.visible.some((b) => b.text.includes('0000') && b.painted), '首屏实际绘制长文开头')
+  const middle = await longPage.evaluate(async () => {
+    const start = performance.now()
+    const initial = window.embedViewportSnapshot(0)
+    window.scrollEmbedCard(0, Math.round((initial.scrollHeight - initial.clientHeight) / 2))
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    return { stats: window.embedVirtualStats(0), viewport: window.embedViewportSnapshot(0), lifecycle: window.refLifecycleStats(),
+      scrollToPaintMs: Math.round(performance.now() - start) }
+  })
+  const midIndexes = middle.viewport.visible.map((b) => /长文段落 (\d{4})/.exec(b.text)?.[1]).filter(Boolean).map(Number)
+  assert.ok(midIndexes.some((i) => i > 200 && i < 800), `中部应有真实内容（${midIndexes.join(',')}）`)
+  assert.ok(middle.viewport.visible.some((b) => b.painted), '中部内容在绘制层可命中')
+  assert.ok(middle.stats.unmountedEver > 0, `中部滚动回收首屏块（${JSON.stringify({ first: first.stats, middle: middle.stats })}）`)
+  assert.ok(middle.stats.mountedBlocks < 100, '中部窗口有界')
+  const last = await longPage.evaluate(async () => {
+    const start = performance.now()
+    window.scrollEmbedCard(0, 999999)
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    return { stats: window.embedVirtualStats(0), viewport: window.embedViewportSnapshot(0), lifecycle: window.refLifecycleStats(),
+      scrollToPaintMs: Math.round(performance.now() - start) }
+  })
+  assert.ok(last.viewport.visible.some((b) => b.text.includes('0999') && b.painted),
+    `末段 0999 在绘制层可见（${JSON.stringify({ viewport: last.viewport, stats: last.stats })}）`)
+  assert.ok(last.stats.mountedBlocks < 100, '末端窗口有界')
+  assert.equal(last.stats.parseCount, first.stats.parseCount, '往返滚动不增加实例解析次数')
+  await longPage.evaluate(() => window.scrollEmbedCard(0, 0))
+  await longPage.waitForTimeout(80)
+  const back = await longPage.evaluate(() => window.embedVirtualStats(0))
+  assert.equal(back.parseCount, first.stats.parseCount, '回到首屏仍不重复解析')
+  const beforeDispose = await longPage.evaluate(() => window.refLifecycleStats())
+  await longPage.evaluate(() => window.respondEmbed({ kind: 'view.mode.set', mode: 'live' }))
+  await longPage.locator('.cm-content').first().click()
+  await longPage.evaluate(() => window.startInputProbe())
+  await longPage.keyboard.type('x')
+  await longPage.waitForTimeout(80)
+  const inputToEditRequestMs = await longPage.evaluate(() => window.inputProbeMs())
+  const parentEdits = await longPage.evaluate(() => window.embedSent().filter((m) => m.kind === 'edit.request'))
+  assert.ok(inputToEditRequestMs !== null, '父文档 Live 输入须出站供延迟测量')
+  assert.ok(parentEdits.every((m) => m.docUri === 'file:///d%3A/notes/parent.md'), '长 B 在场时输入只写父文档')
+  await longPage.evaluate(() => window.disposeEmbedController())
+  const afterDispose = await longPage.evaluate(() => window.refLifecycleStats())
+  assert.ok(beforeDispose.activeBlocks > 0, '释放前有真实引用块')
+  assert.equal(afterDispose.activeBlocks, 0, '关闭面板后配对释放引用块')
+  assert.deepEqual(longErrors, [], '长文页无未捕获异常')
+  const longReport = { targetBlocks: 1000, first, middle, last, back, beforeDispose, afterDispose,
+    responseToFirstPaintMs, inputToEditRequestMs }
+  await longPage.close()
+
+  // 一个超长列表仍是单个挂载块：记录 DOM 下界，不将多块窗口数据泛化。
+  const singlePage = await browser.newPage({ viewport: { width: 900, height: 640 } })
+  await singlePage.setContent(`<html lang="zh-CN"><body>${islandHtml}<div id="app"></div></body></html>`)
+  await singlePage.addStyleTag({ content: 'html, body { margin: 0; height: 100%; } #app { height: 100vh; }' })
+  await singlePage.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
+  await singlePage.addScriptTag({ path: bundle })
+  await singlePage.evaluate((text) => window.initEmbedDoc(text), '# 引用父文档\n\n![[巨大列表]]\n')
+  const singleReq = await singlePage.evaluate(() => window.embedSent().find((m) => m.kind === 'hover.request'))
+  const singleTarget = Array.from({ length: 1000 }, (_, i) => `- 列表项 ${i}`).join('\n')
+  await singlePage.evaluate(({ reqId, instanceId, text }) => window.respondEmbed({
+    kind: 'hover.result', reqId, instanceId, ok: true,
+    target: { fsPath: 'D:\\notes\\single-block-243.md', relPath: 'single-block-243.md' },
+    version: 1, text, range: { start: 0, end: text.length }, scope: { kind: 'full' },
+  }), { reqId: singleReq.reqId, instanceId: singleReq.instanceId, text: singleTarget })
+  await singlePage.waitForTimeout(120)
+  const singleBlock = await singlePage.evaluate(() => ({ stats: window.embedVirtualStats(0),
+    liCount: document.querySelectorAll('.vsidian-embed-card-scroll li').length }))
+  assert.equal(singleBlock.stats.totalBlocks, 1, '1000 项列表保持一个原有分块')
+  assert.equal(singleBlock.liCount, 1000, '单块内部仍创建全部列表项')
+  assert.ok(singleBlock.stats.contentDomCount > 1000, '单个巨大块不受块级窗口上限约束')
+  longReport.singleBlock = singleBlock
+  await singlePage.close()
+  if (process.env.VSIDIAN_REF_PERF_REPORT) {
+    await writeFile(process.env.VSIDIAN_REF_PERF_REPORT, JSON.stringify(longReport, null, 2) + '\n')
+  }
+  passed++
+  console.log('[正文嵌入][PASS] 1000 块首中末绘制、峰值有界、回收与零重解析；巨大单块实测边界')
 
   console.log(`\n[正文嵌入] 全部 ${passed} 个场景通过`)
 } finally {

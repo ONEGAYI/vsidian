@@ -494,3 +494,76 @@ describe('VirtualReadingView：局部范围装载（#219 悬停预览）', () =>
     expect(mountedStarts(container).length).toBe(splitReadingBlocks(SECTION_TEXT).length)
   })
 })
+
+describe('VirtualReadingView：外部滚动宿主（#243）', () => {
+  it('外层滚动区内已测块的图片迟到增高，保持下方锚点', async () => {
+    const heightSpy = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      const img = this.querySelector?.('img') as HTMLElement | null
+      return 36 + (img ? Number.parseFloat(img.style.height) || 0 : 0)
+    })
+    try {
+      const scrollEl = document.createElement('div')
+      const contentEl = createReadingContainer()
+      scrollEl.appendChild(contentEl)
+      stubClientHeight(scrollEl, 400)
+      const view = new VirtualReadingView(contentEl, { scrollEl, bufferPx: 600 })
+      const text = makeDoc(400)
+      const blocks = splitReadingBlocks(text)
+      view.setDocument(text)
+      view.scrollToSrcStart(blocks[201]!.start)
+      const before = scrollEl.scrollTop
+      expect(view.injectTestImage(blocks[191]!.start, 20, 240, 20)).toBe(true)
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      expect(scrollEl.scrollTop).toBeCloseTo(before + 240, 0)
+      expect(view.currentAnchor()).toBe(blocks[201]!.start)
+      view.dispose()
+    } finally {
+      heightSpy.mockRestore()
+    }
+  })
+
+  it('外层宿主尚未入布局时延迟挂载，出现视口后只创建首屏窗口', () => {
+    const heightSpy = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(36)
+    try {
+      const scrollEl = document.createElement('div')
+      const contentEl = createReadingContainer()
+      scrollEl.appendChild(contentEl)
+      stubClientHeight(scrollEl, 0)
+      const view = new VirtualReadingView(contentEl, { scrollEl })
+      view.setDocument(makeDoc(1000))
+      expect(view.getStats().mountedBlocks).toBe(0)
+      stubClientHeight(scrollEl, 400)
+      view.updateNow()
+      expect(view.getStats().virtualized).toBe(true)
+      expect(view.getStats().mountedBlocks).toBeLessThan(100)
+      view.dispose()
+    } finally {
+      heightSpy.mockRestore()
+    }
+  })
+
+  it('内容容器无独立视口时由外层滚动宿主驱动中段窗口，滚动不重新解析', () => {
+    const heightSpy = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(36)
+    try {
+      const scrollEl = document.createElement('div')
+      const contentEl = createReadingContainer()
+      scrollEl.appendChild(contentEl)
+      stubClientHeight(scrollEl, 400)
+      stubClientHeight(contentEl, 0)
+      const view = new VirtualReadingView(contentEl, { scrollEl, bufferPx: 100 })
+      const text = makeDoc(1000)
+      const target = splitReadingBlocks(text)[500]!
+      view.setDocument(text)
+      expect(view.getStats().virtualized).toBe(true)
+      expect(view.getStats().mountedBlocks).toBeLessThan(100)
+      scrollEl.scrollTop = 500 * 36
+      view.updateNow()
+      expect(mountedStarts(contentEl)).toContain(String(target.start))
+      expect(view.getStats().parseCount).toBe(1)
+      expect(view.getScrollObservation().scrollTop).toBe(scrollEl.scrollTop)
+      view.dispose()
+    } finally {
+      heightSpy.mockRestore()
+    }
+  })
+})

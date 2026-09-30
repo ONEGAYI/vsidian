@@ -54,6 +54,7 @@
 import type { ImageResultPayload } from './imageResource'
 import { RefContentInstance, type RefContentMount } from './refContentInstance'
 import { createReadingContainer, READING_CLASS_NAMES } from './readingView'
+import type { ReadingViewStats } from './readingVirtualView'
 import { claimPopup, releasePopup } from './popupMutex'
 import { OPEN_ICON } from './embedCard'
 import { WIKILINK_CLASS_NAMES } from '../shared/wikilink'
@@ -271,9 +272,10 @@ export function hoverPopupProbe(): {
   fm: 'none' | 'collapsed' | 'expanded'
   /** #220 浮层内已应用 src 的图片地址（B 身份资源解析观测面） */
   imageSrcs: string[]
+  viewStats: ReadingViewStats | null
 } {
   if (!popup || popup.display !== 'content') {
-    return { open: popup !== null, state: popup?.display ?? 'loading', note: popup?.note ?? '', blocks: 0, scope: popup?.scope ?? '', fm: 'none', imageSrcs: [] }
+    return { open: popup !== null, state: popup?.display ?? 'loading', note: popup?.note ?? '', blocks: 0, scope: popup?.scope ?? '', fm: 'none', imageSrcs: [], viewStats: null }
   }
   const fmSection = popup.contentEl.querySelector(`.${REF_FM_CLASS_NAMES.section}`)
   const imageSrcs: string[] = []
@@ -291,6 +293,7 @@ export function hoverPopupProbe(): {
     scope: popup.scope,
     fm: fmSection ? (popup.instance.fmExpanded ? 'expanded' : 'collapsed') : 'none',
     imageSrcs,
+    viewStats: popup.content.getStats(),
   }
 }
 
@@ -383,6 +386,7 @@ function applyDisplay(state: HoverPopupState, display: 'loading' | 'content' | '
   if (display === 'content') {
     state.stateEl.style.display = 'none'
     state.scrollEl.style.display = ''
+    state.content.updateNow()
   } else {
     state.stateEl.style.display = ''
     state.scrollEl.style.display = 'none'
@@ -746,6 +750,7 @@ function applyHoverContent(state: HoverPopupState, message: Extract<HoverPreview
   // #224 滚动位置恢复（刷新路径：内容重建后回写；内容缩短合法钳制）
   if (keepScroll > 0) {
     state.scrollEl.scrollTop = keepScroll
+    state.content.updateNow()
   }
   ensureWatch(state, message.target.fsPath, message.sourceLeaseId)
 }

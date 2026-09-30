@@ -1259,3 +1259,13 @@ Live 渲染态经 lezer `HorizontalRule` 节点驱动：未触及该行时源文
 生产请求 opt-in 来源租约，每次成功送达独立 token，watch 原子转交到 occurrence，未消费回包及同目标刷新显式 release。校验与契约覆盖跨目标／会话拒绝、已消耗 token 不能跨位置重用、重复释放幂等、同份读取缓存两次送达的租约独立、错误不授予租约、面板销毁迟到回包不登记。生产 `syncController` 分派覆盖卡片与浮层，先确定消费者再统一释放未消费结果；没有让一个容器提前释放另一个容器的 token。共享读取数据和 `RefLoadedContent` 不携带租约。
 
 修复后的最终证据均在 `out/test/ticket242/`：`review-compile.log` EXIT=0；`review-unit.log` 为 **204 文件、4259 项 Vitest + 103 项 Node 契约全部通过**；`review-integration.log`／`review-integration-dev.log` 为 #218–#224 的 **11 项 PASS、零 FAIL、宿主退出码 0**；`review-browser.log` 五套全部通过，完整报告 `out/test/browser-runs/run-fBwxNP/`。前一节 4252 项及 run-GWQq4C 为第一次冻结点历史记录，最终交付按本节。预算、递归及全局订阅容量仍由 #244 处理，人工待验清单不变。
+
+## #243 引用长文内部滚动与资源回收（2026-09-30）
+
+**自动化证据**：浏览器 `readingEmbed` 以 1000 段长目标核对首／中／末真实绘制、首载累计创建量、窗口回收、同目标解析复用、回顶与面板关闭释放；`hoverPreview` 对 1000 段浮层做同样的首／中／末和 Esc 释放。卡片还测出 1000 项单列表的 1004 个 DOM 节点边界。数据见 [性能记录](../perf/2026-09-hover-preview-embed-performance.md)；定向单测覆盖外层滚动宿主、零高度外壳、滚动恢复被用户输入打断、图片迟到锚定、图片卸载与迟到结果、语言切换缓存失效及字节上限。最终 `compile` EXIT0、Vitest **4272/4272** 与 Node 契约 **103/103**（`out/test/ticket243/full-vitest-final-fixed.json`、`full-node-contracts-final-fixed.log`）；相关五套浏览器全绿（`out/test/browser-runs/run-FCc4F5/`）；真宿主筛选 **12/12 PASS、0 FAIL、退出码 0**（`.vscode-test/integration-dev.log`、`out/test/ticket243/integration-reference-fixed.log`）；样式历史基线及八项契约、file-tree 严格检查均通过。首轮宿主曾在 content 态读到 `textLen=0`，保留 `integration-reference-cached.log` 失败证据；补隐藏→显示公共红测后，显示态同步建立首屏窗口并通过同组宿主复测。以下仍是**用户待验**，不因自动化通过而勾选。
+
+1. **长文与兄弟实例**：在同一笔记放两处指向同一篇至少 1000 段的引用，分别滚到中部和末尾，确认两卡片显示真实内容、位置互不串用；从 Live 切 Reading 再切回，确认各自位置和属性展开态恢复。浮层打开同一长目标并滚到末尾，确认仍可复制只读文字、Esc 和键盘焦点返回正常。
+2. **回收与异步尺寸**：把父文档滚到卡片离开视口再滚回，确认滚动位置恢复且不闪出全文；在卡片上方图片迟到或加载失败、代码／公式／Mermaid 块完成渲染后，检查当前段落不跳失、深部不长期空白，滚轮到子滚动区边界后可继续滚父区。关闭面板重开，观察资源与图片重新装载正常。
+3. **范围与环境**：章节／块范围引用只呈目标范围，同时保留全文引用定义的解析效果；短目标维持自然高度。分别在明暗主题、已启用 CSS 片段、Remote SSH 和物理鼠标滚轮下检查可见性、裁切、焦点与滚动手感。1000 项单一巨大列表仍会一次创建全部列表项，遇到卡顿时记录目标结构与环境。
+
+本票未新增可绑定操作，沿用预览当前链接和打开目标入口；自动化未代替真实 IME、物理设备或用户视觉验收。

@@ -622,6 +622,53 @@ try {
   passed++
   console.log('[悬停预览][PASS] 浮层文末紧凑留白：两种视口高度 + 文末绘制可见 + 主阅读留白保持')
 
+  // ---- #243：浮层自己的 scrollport 驱动长 B 文档有限窗口 ----
+  const longPage = await browser.newPage({ viewport: { width: 900, height: 640 } })
+  const longErrors = []
+  longPage.on('pageerror', (error) => longErrors.push(error.message))
+  await longPage.setContent(`<html lang="zh-CN"><body>${islandHtml}<div id="app"></div></body></html>`)
+  await longPage.addStyleTag({ content: 'html, body { margin: 0; height: 100%; }' })
+  await longPage.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
+  await longPage.addScriptTag({ path: bundle })
+  await longPage.evaluate((text) => window.initHoverDoc(text), '# 父文档\n\n[[长文]]\n')
+  await longPage.locator('a.vsidian-wikilink').first().hover()
+  await longPage.waitForTimeout(OPEN_WAIT)
+  const longReq = await longPage.evaluate(() => window.hoverSent().find((m) => m.kind === 'hover.request'))
+  const longTarget = Array.from({ length: 1000 }, (_, i) => `浮层段落 ${String(i).padStart(4, '0')}：长引用独立滚动。`).join('\n\n')
+  await longPage.evaluate(({ reqId, instanceId, text }) => window.respondHoverResult({
+    kind: 'hover.result', reqId, instanceId, ok: true,
+    target: { fsPath: 'D:\\notes\\hover-long-243.md', relPath: 'hover-long-243.md' },
+    version: 1, text, range: { start: 0, end: text.length }, scope: { kind: 'full' },
+  }), { reqId: longReq.reqId, instanceId: longReq.instanceId, text: longTarget })
+  await longPage.waitForTimeout(120)
+  const firstLong = await longPage.evaluate(() => ({ stats: window.hoverVirtualStats(), viewport: window.hoverViewportSnapshot() }))
+  assert.equal(firstLong.stats.totalBlocks, 1000)
+  assert.ok(firstLong.stats.maxMountedBlocks < 100 && firstLong.stats.mountedEver < 100,
+    `浮层首载不可全量创建（${JSON.stringify(firstLong.stats)}）`)
+  assert.ok(firstLong.viewport.visible.some((b) => b.text.includes('0000') && b.painted), '浮层开头绘制可见')
+  const middleLong = await longPage.evaluate(async () => {
+    const box = window.hoverViewportSnapshot()
+    window.scrollHoverPopup(Math.round((box.scrollHeight - box.clientHeight) / 2))
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    return { stats: window.hoverVirtualStats(), viewport: window.hoverViewportSnapshot() }
+  })
+  const middleIndexes = middleLong.viewport.visible.map((b) => /浮层段落 (\d{4})/.exec(b.text)?.[1]).filter(Boolean).map(Number)
+  assert.ok(middleIndexes.some((i) => i > 200 && i < 800), `浮层中部内容可见（${middleIndexes.join(',')}）`)
+  assert.ok(middleLong.viewport.visible.some((b) => b.painted), '浮层中部绘制可命中')
+  const lastLong = await longPage.evaluate(async () => {
+    window.scrollHoverPopup(999999)
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    return { stats: window.hoverVirtualStats(), viewport: window.hoverViewportSnapshot() }
+  })
+  assert.ok(lastLong.viewport.visible.some((b) => b.text.includes('0999') && b.painted), '浮层末段绘制可见')
+  assert.equal(lastLong.stats.parseCount, firstLong.stats.parseCount, '浮层滚动不重复解析')
+  await longPage.keyboard.press('Escape')
+  assert.equal((await longPage.evaluate(() => window.refLifecycleStats())).activeBlocks, 0, 'Esc 关闭后释放浮层块')
+  assert.deepEqual(longErrors, [], '长文浮层无页面错误')
+  await longPage.close()
+  passed++
+  console.log('[悬停预览][PASS] 1000 块独立滚动首中末绘制、首载峰值与 Esc 释放')
+
   assert.deepEqual(errors, [], '页面无未捕获异常')
   console.log(`[悬停预览] 全部 ${passed} 组场景通过`)
 } finally {

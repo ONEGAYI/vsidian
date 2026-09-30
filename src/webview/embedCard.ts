@@ -21,13 +21,9 @@
 // - 虚拟化：嵌入块是父文档 VirtualReadingView 的普通块，随窗口挂载/回收
 //   ——本模块在回收时释放 B 内容 DOM 与 B 资源管理器、保留 fm 展开与滚动
 //   位置（状态库按语义键持有）；重挂优先用装载缓存（会话内零重发，
-//   #224 接变更订阅后失效重载）。「大量卡片不常驻所有目标全文 DOM」由
-//   卡片级回收承担；**卡片内部为全量渲染**（splitReadingBlocks +
-//   createReadingBlockElement 直挂，与 VirtualReadingView 无布局回退路径
-//   同构）——嵌套虚拟化要求视图监听自身容器的滚动事件，而卡片内容的
-//   滚动区是外层 .vsidian-embed-card-scroll（非视图容器），滚动链路断裂
-//   会让深部内容永不挂载；全量与卡片级回收组合不违背 U12 的 DOM 有界性
-//   （在场卡片数由视口窗口约束）。
+//   #224 接变更订阅后失效重载）。#243 起卡片内部也按外层
+//   .vsidian-embed-card-scroll 的真实视口挂载有限块窗口；未入布局时
+//   先由两个 spacer 撑开外壳，随后测量。父视口回收与子窗口回收独立。
 // - 只读契约：任务 checkbox 禁用（共享 mountRefContentBlock）、点击不
 //   写文档；卡片内点击不冒泡父容器委托（B 内链接按 B 目录解析是唯一
 //   正确语义，父容器按 A 解析的委托不得命中）。
@@ -38,6 +34,7 @@ import { HOVER_REFRESH_DEFAULTS } from '../shared/hoverRefresh'
 import { RefContentInstance, type RefContentMount, type RefLoadedContent, type RefSourceContext } from './refContentInstance'
 import { applyObsidianDomAlias } from '../shared/obsidianAlias'
 import { createReadingContainer, READING_CLASS_NAMES } from './readingView'
+import type { ReadingViewStats } from './readingVirtualView'
 import { refErrorText, releaseRefSourceLease } from './refReadingContent'
 import { WIKILINK_CLASS_NAMES } from '../shared/wikilink'
 
@@ -144,6 +141,7 @@ export interface EmbedCardProbe {
   host: 'reading' | 'live'
   /** #224 内容文本字符数（未保存修改推送后刷新可见性的观测面） */
   textLen: number
+  viewStats: ReadingViewStats | null
 }
 
 /** 目标原文（`|` 之前——与阅读双链 a 的 href 同口径） */
@@ -280,7 +278,7 @@ export class EmbedCardManager {
       stateEl,
       contentEl,
       content: entry.content.mount({
-        contentEl, scrollEl, strategy: 'full',
+        contentEl, scrollEl, strategy: 'virtual',
         session: () => this.context.session(),
         send: (message) => this.context.send(message),
         codeHighlight: () => this.context.codeHighlight?.() ?? true,
@@ -546,6 +544,7 @@ export class EmbedCardManager {
         host: handle.host,
         // #224 内容文本字符数（集成断言未保存修改推送后的刷新可见性）
         textLen: (handle.contentEl.textContent ?? '').length,
+        viewStats: handle.content.getStats(),
       })
     }
     return out
@@ -743,6 +742,9 @@ export class EmbedCardManager {
     if (display === 'content') {
       handle.stateEl.style.display = 'none'
       handle.scrollEl.style.display = ''
+      // loading 期间外层滚动区无视口，内容只放轻量 spacer；显示后
+      // 同步建立首屏窗口，保证紧随其后的 view.state 读到实际内容。
+      handle.content.updateNow()
     } else {
       handle.stateEl.style.display = ''
       handle.scrollEl.style.display = 'none'

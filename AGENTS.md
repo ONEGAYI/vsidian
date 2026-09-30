@@ -118,6 +118,7 @@ vsidian/
 │   │       ├── hover-embed-perf.json                  # #225 状态层嵌入装饰实测数据
 │   │       ├── hover-refresh.json                     # #224 引用视图同步定向测量数据
 │   │       ├── perf-report.json                       # 性能探针原始报告数据
+│   │       ├── ref-virtual-243.json                   # 引用长文虚拟挂载原始数据
 │   │       ├── vault-index-storage-bench-recheck.json # #202 三档复测报告
 │   │       └── vault-index-storage-bench.json         # 索引存储基准原始数据（#195）
 │   ├── research/   # 技术调研报告

@@ -9,14 +9,21 @@ import { bootLocaleFromDocument } from '../../src/webview/localeBoot'
 import { keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
 import '../../src/webview/main.css'
+import { getRefContentLifecycleStats, getRefReadingBlockCacheStats } from '../../src/webview/refContentInstance'
 
 bootLocaleFromDocument()
 
 /** 出站消息观测（hover.request 载荷断言 + 零写回断言的 edit.request 计数） */
 const sent: WebviewToHost[] = []
+let inputProbeStart = 0
+let inputProbeEditAt = 0
 const bridge: VsCodeBridge = {
   postMessage(message) {
-    sent.push(message as WebviewToHost)
+    const typed = message as WebviewToHost
+    sent.push(typed)
+    if (typed.kind === 'edit.request' && inputProbeStart > 0 && inputProbeEditAt === 0) {
+      inputProbeEditAt = performance.now()
+    }
   },
   getState() {
     return undefined
@@ -39,6 +46,58 @@ function mainReading(): HTMLElement | null {
 }
 
 Object.assign(window, {
+  startInputProbe() { inputProbeStart = performance.now(); inputProbeEditAt = 0 },
+  inputProbeMs() { return inputProbeEditAt > 0 ? Math.round(inputProbeEditAt - inputProbeStart) : null },
+  refCacheStats() { return getRefReadingBlockCacheStats() },
+  refLifecycleStats() { return getRefContentLifecycleStats() },
+  embedVirtualStats(index: number) {
+    const before = sent.length
+    controller.handleHostMessage({ kind: 'view.state.request' })
+    const state = sent.slice(before).find((message) => message.kind === 'view.state')
+    return state?.kind === 'view.state'
+      ? state.readingEmbed?.filter((card) => card.host === 'reading')[index]?.viewStats ?? null : null
+  },
+  embedVisibleBlock(index: number, needle: string) {
+    const card = (mainReading() ?? document).querySelectorAll<HTMLElement>('.vsidian-embed-card')[index]
+    const scrollEl = card?.querySelector<HTMLElement>('.vsidian-embed-card-scroll')
+    const block = Array.from(scrollEl?.querySelectorAll<HTMLElement>('.vsidian-reading-block') ?? [])
+      .find((el) => (el.textContent ?? '').includes(needle))
+    if (!scrollEl || !block) return { present: false, visible: false, hit: false }
+    const box = block.getBoundingClientRect()
+    const clip = scrollEl.getBoundingClientRect()
+    const y = Math.max(box.top + 2, clip.top + 2)
+    const x = Math.min(box.left + 8, clip.right - 2)
+    const hit = document.elementFromPoint(x, y)
+    const style = getComputedStyle(block)
+    return {
+      present: true,
+      visible: box.bottom > clip.top + 1 && box.top < clip.bottom - 1 &&
+        style.display !== 'none' && style.visibility === 'visible' && style.opacity !== '0',
+      hit: hit !== null && block.contains(hit),
+      top: box.top, clipTop: clip.top, clipBottom: clip.bottom,
+    }
+  },
+  embedViewportSnapshot(index: number) {
+    const card = (mainReading() ?? document).querySelectorAll<HTMLElement>('.vsidian-embed-card')[index]
+    const scrollEl = card?.querySelector<HTMLElement>('.vsidian-embed-card-scroll')
+    if (!scrollEl) return { visible: [], scrollTop: 0, scrollHeight: 0, clientHeight: 0 }
+    const clip = scrollEl.getBoundingClientRect()
+    const visible = Array.from(scrollEl.querySelectorAll<HTMLElement>('.vsidian-reading-block'))
+      .flatMap((block) => {
+        const box = block.getBoundingClientRect()
+        const top = Math.max(box.top, clip.top)
+        const bottom = Math.min(box.bottom, clip.bottom)
+        if (bottom - top < 3) return []
+        const hit = document.elementFromPoint(Math.min(box.left + 8, clip.right - 2), (top + bottom) / 2)
+        const style = getComputedStyle(block)
+        return [{ text: (block.textContent ?? '').trim(), painted:
+          style.visibility === 'visible' && style.display !== 'none' && style.opacity !== '0' &&
+          hit !== null && block.contains(hit) }]
+      })
+    return { visible, scrollTop: scrollEl.scrollTop, scrollHeight: scrollEl.scrollHeight,
+      clientHeight: scrollEl.clientHeight }
+  },
+  disposeEmbedController() { controller.dispose() },
   /** 装配父文档并切 Reading（宿主消息与生产同入口；嵌入卡片随挂载自动升级） */
   initEmbedDoc(text: string) {
     controller.handleHostMessage({

@@ -4,7 +4,7 @@
 // 状态保持（fm 展开/滚动位置，装载结果会话内缓存零重发）、限高设置与
 // 错误分态。真实指针/观感/视口回收回归在 test/browser 与集成层。
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HoverPreviewResult, WebviewToHost } from '../../src/shared/protocol'
 import { installLocale } from '../../src/shared/i18n'
 import { zhCn } from '../../src/shared/locales/zh-cn'
@@ -17,6 +17,14 @@ import { createReadingBlockElement } from '../../src/webview/readingView'
 import { splitReadingBlocks } from '../../src/webview/readingBlocks'
 
 installLocale('zh-cn', zhCn)
+
+// jsdom 没有布局；这些行为测试给真实外层 scrollport 一个可见高度。
+// 零高度首载与实际窗口是否可见由 readingVirtualView 单测和 Chromium 验证。
+beforeEach(() => {
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+    return this.classList.contains(EMBED_CARD_CLASS_NAMES.scroll) ? 400 : 0
+  })
+})
 
 const SESSION = { sessionId: 'panel-1', docUri: 'file:///d%3A/notes/a.md' }
 
@@ -87,9 +95,25 @@ function resultOk(req: { reqId: number; instanceId: string }, text: string): Hov
 
 afterEach(() => {
   document.body.innerHTML = ''
+  vi.restoreAllMocks()
 })
 
 describe('嵌入卡片：挂载升级与装载请求', () => {
+  it('外层滚动区在 loading 时隐藏：切到 content 同步建立首屏窗口', () => {
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains(EMBED_CARD_CLASS_NAMES.scroll) && this.style.display !== 'none' ? 400 : 0
+    })
+    const sent: WebviewToHost[] = []
+    const manager = new EmbedCardManager(makeContext(sent))
+    const el = mountEmbedBlock(manager, '![[目标笔记]]\n')
+    const scrollEl = el.querySelector<HTMLElement>(`.${EMBED_CARD_CLASS_NAMES.scroll}`)!
+    expect(scrollEl.style.display).toBe('none')
+    manager.notifyResult(resultOk(hoverRequestOf(sent), TARGET_TEXT))
+    expect(scrollEl.style.display).toBe('')
+    expect((el.querySelector('.vsidian-reading-heading-1')?.textContent ?? '').trim()).toBe('目标笔记')
+    manager.dispose()
+  })
+
   it('embed 块挂载升级为卡片：出站 hover.request（embed- 实例前缀 + 嵌入 inner + 行区间）', () => {
     const sent: WebviewToHost[] = []
     const manager = new EmbedCardManager(makeContext(sent))
