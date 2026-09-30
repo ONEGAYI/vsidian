@@ -337,6 +337,16 @@
         "category": "Vsidian"
       },
       {
+        "command": "onegayi.vsidian.editor.addCursorAbove",
+        "title": "%command.editor.addCursorAbove.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.editor.addCursorBelow",
+        "title": "%command.editor.addCursorBelow.title%",
+        "category": "Vsidian"
+      },
+      {
         "command": "onegayi.vsidian.ui.hoverPreviewLink",
         "title": "%command.ui.hoverPreviewLink.title%",
         "category": "Vsidian"

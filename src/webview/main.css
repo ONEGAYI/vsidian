@@ -131,6 +131,21 @@ body.vscode-light #app {
   outline: none;
 }
 
+/* ---- #237 多光标：drawSelection 绘制层接管选区背景与光标 ----
+   选区背景以 VSCode 主题变量落色（聚焦取编辑器选区色、失焦取非活动选区
+   色），覆盖 CM6 内建硬编码色（#d9d9d9 / #d7d4f0 / #222 / #233 一族）；
+   回退值近似 VSCode 默认主题。ID 特异性高于 baseTheme 类级规则、聚焦
+   规则（多一类 .cm-focused）高于本组失焦规则，两态均稳定生效。绘制光标
+   颜色不在本文件落规则——仍由 baseTheme 明暗变体接管（light=black /
+   dark=#ddd，与原生 caret 时代同口径，见 editorChromeCssContract 契约）。 */
+#app .cm-editor .cm-selectionLayer .cm-selectionBackground {
+  background: var(--vscode-editor-inactiveSelectionBackground, rgba(117, 117, 117, 0.35));
+}
+
+#app .cm-editor.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground {
+  background: var(--vscode-editor-selectionBackground, rgba(38, 79, 120, 0.45));
+}
+
 /* ---- #34 行号列：流内布局（用户修订 #32 旧契约）----
    行号列 + 固定间距（--vsidian-ln-gap，响应 UI 字号）+ 主体文字的总宽 =
    行号关闭时的正文宽度：列在 scroller 内容流内、随位数自适应宽度，
@@ -2790,6 +2805,16 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
    隐去，并在目标格内绘制同色光标。输入仍由 CM6 源文本管线处理。 */
 #app .cm-editor .cm-content:has(.vsidian-table-grid-empty-active) {
   caret-color: transparent;
+}
+
+/* #237 多光标开启（drawSelection）后，绘制光标与零宽活动格的 ::after
+   假光标会重叠：隐藏绘制光标，格内光标呈现维持既有假光标（对齐/边框
+   语义完整、非聚焦态不显形口径不变）；多光标关闭时 .cm-cursor 元素不在
+   场，本规则自然失效。已知边界：多光标下若一条光标在活动空格内、另一
+   条在其余正文，其余位置的绘制光标也被一并隐藏（:has 无法按行关联
+   覆盖层元素；与上方 caret-color 全局透明规则同一取舍口径，#240 复核） */
+#app .cm-editor:has(.vsidian-table-grid-empty-active) .cm-cursorLayer .cm-cursor {
+  display: none;
 }
 
 #app .cm-editor .cm-scroller .vsidian-table-grid-empty-active {

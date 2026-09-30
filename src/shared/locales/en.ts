@@ -36,6 +36,8 @@ export const en = {
     'Adjust basic Vsidian behavior. Changes save automatically.',
   /** Editor-page section: editor.symbol* input behaviors */
   'settings.groupSymbols': 'Symbols',
+  /** Editor-page section: editing capabilities (multi-cursor, #237) */
+  'settings.groupEditing': 'Editing',
   /** Editor-page section: codeblock.* presentation */
   'settings.groupCodeblock': 'Code blocks',
   /** Editor-page section: image.* paste settings */
@@ -116,6 +118,10 @@ export const en = {
   'setting.symbolTabEscape.title': 'Tab escapes symbol fences',
   'setting.symbolTabEscape.description':
     'With the cursor inside a paired symbol fence (brackets, quotes, or inline Markdown structures) and no text selected, Tab first moves to the left edge of the closing marker, then jumps over it; nested fences exit innermost first. Tab moves the cursor only and never edits text. Outside fences, Tab keeps the existing behavior (table cell navigation or line indent); Shift+Tab is unaffected. Independent from the two symbol settings above.',
+  /** 设置项「多光标」（#237 editor.multicursor） */
+  'setting.multicursor.title': 'Multiple cursors',
+  'setting.multicursor.description':
+    'Enable multiple cursors and secondary selections in live preview: Alt+click adds or removes a cursor at the pointer, Ctrl+Alt+Up/Down adds a cursor on the line above or below, and Esc collapses back to the main cursor. Turn off to restore single-selection editing. Independent from "Wrap selection with symbols".',
   /** 设置项「界面语言」（#96 general.language，经 titleKey/descriptionKey 取词） */
   'setting.language.title': 'Interface language',
   'setting.language.description':
@@ -587,6 +593,9 @@ export const en = {
   'command.ui.outlinksToggle.title': 'Show or hide the outgoing links panel',
   /** #208 refresh embedded resources command (toolbar button and keybinding/command palette share it) */
   'command.editor.refresh.title': 'Refresh embedded resources',
+  /** #237 multi-cursor: add a cursor on the line above/below (live preview only; Alt+click adds at the pointer) */
+  'command.editor.addCursorAbove.title': 'Add cursor above',
+  'command.editor.addCursorBelow.title': 'Add cursor below',
   /** #221 preview the link at the cursor/focus (manual hover-popup open; keyboard enters the popup and Esc returns) */
   'command.ui.hoverPreviewLink.title': 'Preview the current link',
 

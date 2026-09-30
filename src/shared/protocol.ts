@@ -1276,10 +1276,16 @@ export interface PaintProbe {
    *  body 主题 class 动态跟随；激活后 baseTheme 内建变体接管 caret 等
    *  颜色——本扩展不硬编码光标色（深色主题黑底黑光标回归的观测位） */
   darkTheme: boolean
-  /** `.cm-content` computed caret-color（'rgb(...)' 文本）。未启用
-   *  drawSelection 时 CM6 光标即原生 caret，颜色由 baseTheme 明暗变体
-   *  决定（light=black / dark=white）；jsdom 无 CSS 引擎为 null */
+  /** `.cm-content` computed caret-color（'rgb(...)' 文本）。#237 多光标
+   *  开启时 drawSelection 隐藏原生 caret（恒 transparent），光标颜色证据
+   *  移至 drawnCursorColor；关闭多光标时 CM6 光标即原生 caret，颜色由
+   *  baseTheme 明暗变体决定（light=black / dark=white）；jsdom 无 CSS
+   *  引擎为 null */
   caretColor: string | null
+  /** #237 绘制光标 `.cm-cursor` 的 computed borderLeftColor（'rgb(...)'
+   *  文本；多光标开→drawSelection 绘制，baseTheme 明暗变体 light=black /
+   *  dark=#ddd）。元素不在场（多光标关、未聚焦或 jsdom）为 null */
+  drawnCursorColor?: string | null
   /** #42/#43 表格绘制：真宿主文本命中与计算样式；无表格/未选中为 null。 */
   table?: {
     cellVisible: boolean
@@ -2018,7 +2024,8 @@ export function isOutlineMenuCommand(v: unknown): v is OutlineMenuCommand {
   )
 }
 
-/** 绘制层探针校验：textVisible/darkTheme 布尔；display/userSelect/caretColor 字符串或 null */
+/** 绘制层探针校验：textVisible/darkTheme 布尔；display/userSelect/caretColor/
+ *  drawnCursorColor 字符串或 null（#237 绘制光标色可缺省） */
 function isPaintProbe(v: unknown): v is PaintProbe {
   return (
     isObject(v) &&
@@ -2029,6 +2036,7 @@ function isPaintProbe(v: unknown): v is PaintProbe {
       v.visibleLineNumbers.every((number) => typeof number === 'string'))) &&
     typeof v.darkTheme === 'boolean' &&
     isNullOrString(v.caretColor) &&
+    (v.drawnCursorColor === undefined || isNullOrString(v.drawnCursorColor)) &&
     (v.table === undefined || (
       isObject(v.table) &&
       typeof v.table.cellVisible === 'boolean' &&

@@ -700,6 +700,8 @@ interface ViewState {
     visibleLineNumbers?: string[]
     darkTheme: boolean
     caretColor: string | null
+    /** #237 绘制光标 .cm-cursor 的 borderLeftColor（多光标开时在场；不在场为 null） */
+    drawnCursorColor?: string | null
     table?: {
       cellVisible: boolean
       caretGridColumn?: number | null
@@ -5408,20 +5410,29 @@ export const cases: Array<[string, () => Promise<void>]> = [
         '若为 block 说明 CSP 拦截了 style-mod 注入的样式表）')
     assert(on.paint?.gutterUserSelect === 'none',
       `行号栏应禁选（user-select 应为 none，实际 ${String(on.paint?.gutterUserSelect)}）`)
-    // 光标明暗自适应（深色主题黑底黑光标回归）：断言 dark 声明与 caret
-    // 变体联动，不依赖测试宿主默认主题——浅色/深色宿主下均自洽成立
+    // 光标明暗自适应（深色主题黑底黑光标回归）：断言 dark 声明与光标
+    // 变体联动，不依赖测试宿主默认主题——浅色/深色宿主下均自洽成立。
+    // #237 起多光标默认开启：drawSelection 隐藏原生 caret（caretColor 恒
+    // transparent），光标颜色证据移至绘制层 .cm-cursor 的 borderLeftColor
+    // （baseTheme 明暗变体 light=black / dark=#ddd）
     const dark = on.paint?.darkTheme
     const caret = on.paint?.caretColor ?? null
-    console.log(`[P0] darkTheme=${String(dark)}，caret-color=${String(caret)}`)
+    const drawn = on.paint?.drawnCursorColor ?? null
+    console.log(`[P0] darkTheme=${String(dark)}，caret-color=${String(caret)}，drawn-cursor=${String(drawn)}`)
     assert(typeof dark === 'boolean', `dark 声明应为布尔（实际 ${String(dark)}）`)
     assert(caret !== null, 'caret-color 计算值应可读（caretColor 不应为 null）')
+    assert(caret === 'transparent' || caret === 'rgba(0, 0, 0, 0)',
+      `多光标开启时原生 caret 应被 drawSelection 隐藏为 transparent（实际 ${caret}；` +
+        '非透明说明 hideNativeSelection 主题未生效——原生 caret 与绘制光标并存）')
+    assert(drawn !== null, '绘制光标 .cm-cursor 应在场（drawnCursorColor 不应为 null；' +
+      '多光标默认开启时 drawSelection 必须装配）')
     if (dark) {
-      assert(caret === 'rgb(255, 255, 255)' || caret === '#ffffff' || caret === '#fff',
-        `dark 声明激活时 caret 应为 baseTheme dark 变体 white（实际 ${caret}；` +
-          '非白说明明暗声明未接管 caret 颜色——黑底黑光标回归）')
+      assert(drawn === 'rgb(221, 221, 221)' || drawn === '#ddd',
+        `dark 声明激活时绘制光标应为 baseTheme dark 变体 #ddd（实际 ${drawn}；` +
+          '非 #ddd 说明明暗声明未接管绘制光标颜色——黑底黑光标回归）')
     } else {
-      assert(caret === 'rgb(0, 0, 0)' || caret === '#000000' || caret === '#000',
-        `light 声明时 caret 应为 baseTheme light 变体 black（实际 ${caret}）`)
+      assert(drawn === 'rgb(0, 0, 0)' || drawn === '#000000' || drawn === '#000',
+        `light 声明时绘制光标应为 baseTheme light 变体 black（实际 ${drawn}）`)
     }
 
     // 差分自证：关闭行号后正文仍可见（度量在两态下均有效）
