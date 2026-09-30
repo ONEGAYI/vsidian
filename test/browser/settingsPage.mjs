@@ -165,24 +165,31 @@ try {
     const focus = await search.evaluate(el => ({ style: getComputedStyle(el).outlineStyle, width: getComputedStyle(el).outlineWidth }))
     assert.equal(focus.style, 'solid')
     assert.equal(focus.width, '2px')
-    // #145 样式参考分页：#155 小改起为总分页签——默认「样式参考」总表，
-    // 点「详细查询」进小类分栏（类目 + 分页 + 跨类目聚合搜索 + 导出）
-    await page.getByRole('button', { name: zhCn['styleRef.title'], exact: true }).click()
+    // #231 外观合并分页：侧栏入口改「外观」，页签机制扩为三页签——
+    // CSS 片段（默认）/ 样式参考总表 / 详细查询（类目 + 分页 + 聚合搜索 + 导出）
+    await page.getByRole('button', { name: zhCn['appearance.title'], exact: true }).click()
     const refTabs = page.locator('.vsidian-style-ref-tab')
     await refTabs.first().waitFor()
-    assert.equal(await refTabs.count(), 2)
-    assert.equal(await refTabs.nth(0).textContent(), zhCn['styleRef.tabOverview'])
-    assert.equal(await refTabs.nth(1).textContent(), zhCn['styleRef.tabDetail'])
-    // 默认总表可见、详细查询隐藏；页签 pill 形态、激活态为主题选中色（绘制层）
-    assert.equal(await page.locator('.vsidian-style-ref-overview').isVisible(), true)
+    assert.equal(await refTabs.count(), 3)
+    assert.equal(await refTabs.nth(0).textContent(), zhCn['cssSnippets.title'])
+    assert.equal(await refTabs.nth(1).textContent(), zhCn['styleRef.tabOverview'])
+    assert.equal(await refTabs.nth(2).textContent(), zhCn['styleRef.tabDetail'])
+    // 默认落 CSS 片段页签：总表与详细查询面板均隐藏；进「样式参考」总表后
+    // 总表可见、详细查询仍隐藏；页签 pill 形态（绘制层）
+    assert.equal(await page.locator('.vsidian-style-ref-overview').isVisible(), false)
     assert.equal(await page.locator('.vsidian-style-ref-detail').isVisible(), false)
-    const tabPaint = await refTabs.nth(0).evaluate(el => ({ radius: getComputedStyle(el).borderRadius }))
+    const tabPaint = await refTabs.nth(1).evaluate(el => ({ radius: getComputedStyle(el).borderRadius }))
     assert.equal(tabPaint.radius, '999px')
     await refTabs.nth(1).click()
     assert.equal(await refTabs.nth(1).getAttribute('aria-selected'), 'true')
     assert.equal(await refTabs.nth(0).getAttribute('aria-selected'), 'false')
+    assert.equal(await page.locator('.vsidian-style-ref-overview').isVisible(), true)
+    assert.equal(await page.locator('.vsidian-style-ref-detail').isVisible(), false)
+    await refTabs.nth(2).click()
+    assert.equal(await refTabs.nth(2).getAttribute('aria-selected'), 'true')
+    assert.equal(await refTabs.nth(1).getAttribute('aria-selected'), 'false')
     assert.equal(await page.locator('.vsidian-style-ref-overview').isVisible(), false)
-    const activeTabPaint = await refTabs.nth(1).evaluate(el => getComputedStyle(el).backgroundColor)
+    const activeTabPaint = await refTabs.nth(2).evaluate(el => getComputedStyle(el).backgroundColor)
     assert.equal(activeTabPaint, theme === 'light' ? 'rgb(224, 228, 235)' : 'rgb(55, 61, 73)')
     // #155 跟进（绘制层）：详细查询页签下主区收起滚动，类目栏与条目列表各自
     // 独立 overflow；过滤/搜索/导出工具行固定在列表滚动区之外
@@ -203,10 +210,10 @@ try {
     assert.equal(refScrollProbe.listOverflow, 'auto')
     assert.equal(refScrollProbe.barAboveList, true, '工具行应固定在列表滚动区之外')
     // 页签往返：切回总表主区恢复整块滚动，再进详细查询恢复内部滚动
-    await refTabs.nth(0).click()
+    await refTabs.nth(1).click()
     assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.vsidian-settings-main')).overflowY), 'auto')
     assert.equal(await page.locator('.vsidian-style-ref-overview').isVisible(), true)
-    await refTabs.nth(1).click()
+    await refTabs.nth(2).click()
     assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.vsidian-settings-main')).overflowY), 'hidden')
     const catsNav = page.locator('.vsidian-style-ref-cats')
     await catsNav.waitFor()
@@ -247,8 +254,9 @@ try {
     await page.getByRole('button', { name: zhCn['styleRef.exportJson'], exact: true }).click()
     assert.equal(await page.evaluate(() => window.sentMessages.some(m => m.kind === 'styleRef.export')), true)
     await page.screenshot({ path: path.join(artifacts, `settings-${theme}-style-ref.png`) })
-    // #155 小改：CSS 片段远程缓存说明为 callout 形态（左强调条 + 圆角色底，绘制层）
-    await page.getByRole('button', { name: zhCn['cssSnippets.title'], exact: true }).click()
+    // #231：CSS 片段为外观分页第一页签（侧栏点「外观」默认即落此页签）；
+    // 远程缓存说明为 callout 形态（左强调条 + 圆角色底，绘制层）
+    await page.getByRole('button', { name: zhCn['appearance.title'], exact: true }).click()
     const remoteNote = page.locator('.vsidian-css-snippets-remote-note')
     await remoteNote.waitFor()
     const calloutPaint = await remoteNote.evaluate(el => {
@@ -270,8 +278,8 @@ try {
       sidebar: getComputedStyle(document.querySelector('.vsidian-settings-sidebar')).overflowY,
       main: getComputedStyle(document.querySelector('.vsidian-settings-main')).overflowY,
     })), { sidebar: 'visible', main: 'auto' })
-    await page.getByRole('button', { name: zhCn['styleRef.title'], exact: true }).click()
-    await page.locator('.vsidian-style-ref-tab').nth(1).click()
+    await page.getByRole('button', { name: zhCn['appearance.title'], exact: true }).click()
+    await page.locator('.vsidian-style-ref-tab').nth(2).click()
     assert.equal(await page.evaluate(() =>
       getComputedStyle(document.querySelector('.vsidian-settings-main')).overflowY), 'auto',
     '窄屏下详细查询页签应恢复整页滚动')
