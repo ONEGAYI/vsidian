@@ -4820,11 +4820,12 @@ export class WebviewSyncController {
 
   /** #221 键盘命令「预览当前链接」：手动打开浮层且焦点进入（无目标静默
    *  不误开）。Live 以光标处合法目标为准（主光标 head）；Reading/面板以
-   *  键盘聚焦的链接/条目为准。不接管源码编辑器（源码模式不经 webview 键
-   *  路由天然不可达）与设置页输入（独立 webview 无此路由） */
+   *  键盘聚焦的链接/条目为准。面板入口不随正文模式改变触发规则——Live
+   *  光标无目标时继续检查聚焦元素（面板条目在 Live 下同样可达）。不接
+   *  管源码编辑器（源码模式不经 webview 键路由天然不可达）与设置页输入
+   *  （独立 webview 无此路由） */
   private previewLinkAtFocus(): void {
-    if (this.viewMode === 'live' && this.view) {
-      this.previewLiveLinkAtCursor()
+    if (this.viewMode === 'live' && this.view && this.previewLiveLinkAtCursor()) {
       return
     }
     const focus = document.activeElement
@@ -4882,22 +4883,29 @@ export class WebviewSyncController {
 
   /** Live 光标处预览（键盘命令的 Live 分支）：判定族同悬停路径；锚元素
    *  取目标区间内部的 DOM（domAtPos 归约到 HTMLElement——mark 装饰 span
-   *  或所在行元素，仅用于浮层定位与联合域） */
-  private previewLiveLinkAtCursor(): void {
+   *  或所在行元素，仅用于浮层定位与联合域）。命令面板路径下 webview 可
+   *  能暂无真实焦点——先确保编辑器聚焦（触发处语义），浮层关闭时焦点
+   *  返还编辑器（光标原位恢复）。返回是否命中目标（未命中时调用方落到
+   *  聚焦元素检查） */
+  private previewLiveLinkAtCursor(): boolean {
     const view = this.view
     if (!view) {
-      return
+      return false
     }
-    const pos = view.state.selection.main.head
-    const spec = this.liveLinkSpecAt(view, pos)
+    const spec = this.liveLinkSpecAt(view, view.state.selection.main.head)
     if (!spec) {
-      return
+      return false
+    }
+    if (!view.hasFocus) {
+      view.focus()
     }
     const domAt = view.domAtPos(Math.min(spec.sourceStart + 1, view.state.doc.length))
     const el = domAt.node.nodeType === 1 ? (domAt.node as HTMLElement) : domAt.node.parentElement
     if (el instanceof HTMLElement) {
       openHoverPopupForKeyboard(el, spec)
+      return true
     }
+    return false
   }
 
   /** 反链条目的快照载荷（悬停与键盘命令共用；条目 DOM 只存相对路径，

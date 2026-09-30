@@ -65,6 +65,10 @@ const CMD = {
   snippetState: 'onegayi.vsidian._test.getSnippetState',
   setSnippetDirectory: 'onegayi.vsidian._test.setSnippetDirectory',
   setSnippetEnabled: 'onegayi.vsidian._test.setSnippetEnabled',
+  // 快捷键链路（正式 KeybindingService 通道：快照直读存储层）
+  getKeybindings: 'onegayi.vsidian._test.getKeybindings',
+  setKeybindings: 'onegayi.vsidian._test.setKeybindings',
+  resetKeybindings: 'onegayi.vsidian._test.resetKeybindings',
 }
 
 const wsDir = process.env['WORKSPACE_DIR'] ?? ''
@@ -11504,5 +11508,60 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand(CMD.setSettings, { 'embed.maxHeight': 480 })
     await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
     await waitViewState('嵌入样例.md', (v) => v.viewMode === 'live')
+  }],
+
+  // #221 全入口悬停的真宿主定向：Live 直接悬停设置的保存/广播/持久化
+  // 回显（webview 行为面由浏览器 hoverEntry 套件钉住），与「预览当前链
+  // 接」操作绑定/清空/恢复默认的存储保留（清空 = 显式空记录，不因缺省
+  // 回默认；真实重启读取同一 globalState 键）。Ctrl+点击跳转回归由既有
+  // 跳转用例族（链接跳转/双链跳转）持续钉住，此处不重复。
+  ['悬停全入口：直接悬停设置持久化回显与预览链接键位绑定清空保留（#221）', async () => {
+    // hover.liveDirect 默认 false（Ctrl+悬停必须）→ 保存 true → 宿主回读
+    const base = (await vscode.commands.executeCommand(CMD.getSettings)) as Record<string, unknown>
+    assert(base['hover.liveDirect'] === false,
+      `默认应为 false（Ctrl+悬停），实际 ${String(base['hover.liveDirect'])}`)
+    const okSet = (await vscode.commands.executeCommand(CMD.setSettings, { 'hover.liveDirect': true })) as { ok: boolean }
+    assert(okSet.ok === true, 'hover.liveDirect 有效值应保存成功')
+    const snap = (await vscode.commands.executeCommand(CMD.getSettings)) as Record<string, unknown>
+    assert(snap['hover.liveDirect'] === true, `保存后回读应为 true（实际 ${String(snap['hover.liveDirect'])}）`)
+
+    // 新面板装载拉取（init 后 settings.get 链路带上直接悬停开关）
+    await openWithEditor('untouched.md')
+    await waitSessionReady('untouched.md')
+    const pulled = await waitViewState('untouched.md', (v) => v.settings?.['hover.liveDirect'] === true)
+    assert(pulled.settings?.['hover.liveDirect'] === true, '新面板装载应拉取到直接悬停设置')
+
+    // 广播链路：保存 false → 已开面板即时收到（触发条件切换的宿主侧推送面）
+    await vscode.commands.executeCommand(CMD.setSettings, { 'hover.liveDirect': false })
+    await waitViewState('untouched.md', (v) => v.settings?.['hover.liveDirect'] === false)
+
+    // 持久化口径：关闭全部面板后重开——新面板经 settings.get 拉到持久值
+    // （真实重启读取的是同一 globalState 键，与 #34 行号用例同口径）
+    await vscode.commands.executeCommand(CMD.setSettings, { 'hover.liveDirect': true })
+    await waitViewState('untouched.md', (v) => v.settings?.['hover.liveDirect'] === true)
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors')
+    await openWithEditor('untouched.md')
+    await waitSessionReady('untouched.md')
+    const reopened = await waitViewState('untouched.md', (v) => v.settings?.['hover.liveDirect'] === true)
+    assert(reopened.settings?.['hover.liveDirect'] === true, '重开面板应拉取到持久化的直接悬停开关')
+    await vscode.commands.executeCommand(CMD.setSettings, { 'hover.liveDirect': false })
+
+    // hoverPreviewLink：默认未绑定 → 绑定 → 清空（显式空记录保留）→ 恢复默认
+    const keysBase = (await vscode.commands.executeCommand(CMD.getKeybindings)) as Record<string, string[]>
+    assert(!('hoverPreviewLink' in keysBase), `默认应未绑定（无覆盖记录），实际 ${JSON.stringify(keysBase)}`)
+    const bind = (await vscode.commands.executeCommand(CMD.setKeybindings, 'hoverPreviewLink', ['ctrl+alt+p'])) as { ok: boolean }
+    assert(bind.ok === true, '绑定 ctrl+alt+p 应保存成功（无默认冲突）')
+    const keysBound = (await vscode.commands.executeCommand(CMD.getKeybindings)) as Record<string, string[]>
+    assert(JSON.stringify(keysBound['hoverPreviewLink']) === JSON.stringify(['ctrl+alt+p']),
+      `存储层读回应含新绑定，实际 ${JSON.stringify(keysBound['hoverPreviewLink'])}`)
+    const clear = (await vscode.commands.executeCommand(CMD.setKeybindings, 'hoverPreviewLink', [])) as { ok: boolean }
+    assert(clear.ok === true, '清空键位应保存成功')
+    const keysCleared = (await vscode.commands.executeCommand(CMD.getKeybindings)) as Record<string, string[]>
+    assert(JSON.stringify(keysCleared['hoverPreviewLink']) === JSON.stringify([]),
+      `清空应持久为显式空记录（不因缺省回默认），实际 ${JSON.stringify(keysCleared['hoverPreviewLink'])}`)
+    await vscode.commands.executeCommand(CMD.resetKeybindings)
+    const keysReset = (await vscode.commands.executeCommand(CMD.getKeybindings)) as Record<string, string[]>
+    assert(!('hoverPreviewLink' in keysReset), '恢复默认后覆盖记录应移除（回落默认未绑定）')
+    console.log('[#221] 直接悬停设置持久化回显 true；hoverPreviewLink 绑定/清空/恢复默认链路通过')
   }],
 ]
