@@ -1239,3 +1239,15 @@ Live 渲染态经 lezer `HorizontalRule` 节点驱动：未触及该行时源文
 - 不修（review 记录在案，建议后续票）：P2-1 大小写形态漂移推送 miss（窄场景有自愈，修复涉及跨层形态协议改造）；P3-3 Map 无界、P3-4 sourceDocUri 命名、P3-6 理论负高度（理论边界项，无实际触发路径）。
 - 全量验证记录（2026-09-30，工作树 `codex/hover-preview-embed`）：merge 后 `compile` 通过、`test:unit` 199 文件 4173 项全绿（logs/merge-unit.log）；修复批 `compile` 通过（logs/fix-compile.log）；`test:unit` 199 文件 4186 项 + node --test 103 项全绿（logs/fix-unit.log）；`test:browser` 41/41 套件全绿（logs/fix-browser.log，报告 out/test/browser-runs/run-r1r44P）；集成分片全量（VSIDIAN_ITEST_SHARDS=4）**227 项 PASS / 0 项 FAIL**（logs/fix-integration.log + .vscode-test/integration-dev-s1..4.log，剪贴板环境故障未复现）；`check:stylecontract` 八项零失败 + `check:stylecontract:baseline` 通过（logs/fix-stylecontract*.log）；file-tree `check --strict` 通过（本批零新文件，源码与测试修改均在册条目内）。
 - 人工待验：无新增（全部为内部加固，正常链路行为不变——悬停/嵌入既有各节人工清单继续有效）。
+
+## 2026-10 编辑器操作批次（#236–#240，2026-09-30 实施收口）
+
+查找替换重做、多光标、选下一处相同词、中文分词词级移动四族能力与多光标写操作兼容的整体验证条目。自动化矩阵见各票实现（`find.test.ts` / `findOptions.test.ts` / `formatInteraction.test.ts` 多 range 节 / `formatOperations.test.ts` 多 range 节 / browser `multicursor` / `multicursorWrite` / `wordMotion` / `findPanel` 套件）；以下人工待验以真实 IME、物理键盘与鼠标路径为准。
+
+- 人工待验：
+  1. **查找替换全链路（#236）**：Ctrl+F 开面板、Ctrl+H 展开替换栏——三开关（大小写/全字/正则）切换后匹配计数与高亮即时变化；替换下一个（Enter）光标落到下一处、全部替换整批完成且**宿主撤销一次全部回退**；非法正则输入框红边不崩溃；F3/Shift+F3 跨越全文循环；阅读模式同样可查找、替换栏不展开（只读）；选项状态关闭重开 VSCode 后保留（工作区级记忆）。
+  2. **多光标基础（#237）**：Alt+点击在任意正文处添加/移除副光标（点击已有光标处移除）；Ctrl+Alt+Up/Down 逐行添加（短行钳制到行尾）；多条光标同时键入（含中文 IME 逐字上屏各光标同步）；Esc 一次收敛回单光标；链接文字上 Alt+点击不触发跳转（只加光标）；表格格内 Alt+点击不进格区拖选（altKey 让路）；设置页关闭「多光标」后 Alt+点击回到普通单击跳转光标。
+  3. **选下一处相同词（#238，按票面预写、待合并对齐）**：无选区按 Ctrl+D 先选中光标所在词，连按逐处追加选区并成为活动光标；会话期间**查找选项条**在场可点击切换（切换即按新选项重建会话）；Ctrl+K Ctrl+D 跳过当前；Ctrl+Shift+L 一次选中全部相同词；主查找面板打开时不出选项条（闪烁面板开关替代）。
+  4. **中文分词词级移动（#239）**：Ctrl+Left/Right 在连续中文段按词切分逐词跳转（预设 Intl.Segmenter），英文数字段移动与 VSCode 原生一致；Shift 变体逐词扩选；设置页「中文分词」分页切换 jieba 引擎（按需下载，失败回退 Intl.Segmenter 并提示）后移动粒度变化；表格格内词移动与 Tab 格导航共存。
+  5. **多光标写操作兼容（#240）**：多选区下按 Ctrl+B（或点快速操作条粗体）各选区独立包裹/取消——一处加粗一处取消可并存；**宿主撤销一次整批回退**；跨行选区包裹逐段语义与单选区一致；多光标下标题/列表等结构操作只作用主光标行、其余光标保持；Tab 多光标行并集缩进、Shift+Tab 回退；列表行 Enter 延续与退格清层在多光标时不接管（走默认行为）。
+- 已知边界与衔接：多光标修饰键恒为 Alt 无切换（Ctrl+点击为链接跳转，CONTEXT.md 产品边界）；表格格区 region 与 CM6 多 range 正交，region 存在时多光标操作退化为单选区语义；frontmatter 成型头区不进入多光标（选区引导既有边界）；独行块级图片吞指针（含 Alt+点击）；格式操作多 range 下变更重叠的选区保守丢弃（同一行内两处独立计划的重写区间交叠时，后者不变更、选区原样保留——罕见边界，产物可预期）；选词族条目按 #238 票面预写，若实现偏离以合并对齐为准。
