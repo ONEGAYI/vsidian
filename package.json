@@ -87,6 +87,21 @@
         "title": "%command.find.previous.title%",
         "category": "Vsidian"
       },
+        {
+          "command": "onegayi.vsidian.find.replace",
+          "title": "%command.find.replace.title%",
+          "category": "Vsidian"
+        },
+        {
+          "command": "onegayi.vsidian.find.replaceNext",
+          "title": "%command.find.replaceNext.title%",
+          "category": "Vsidian"
+        },
+        {
+          "command": "onegayi.vsidian.find.replaceAll",
+          "title": "%command.find.replaceAll.title%",
+          "category": "Vsidian"
+        },
       {
         "command": "onegayi.vsidian.table.create",
         "title": "%command.table.create.title%",
@@ -401,6 +416,7 @@
     "@codemirror/lang-sql": "6.10.0",
     "@codemirror/language": "6.12.4",
     "@codemirror/legacy-modes": "6.5.4",
+    "@codemirror/search": "6.7.2",
     "@codemirror/state": "6.7.6",
     "@codemirror/view": "6.43.13",
     "@lezer/common": "1.5.2",

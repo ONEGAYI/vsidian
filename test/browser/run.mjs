@@ -34,9 +34,11 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // 修改引用、未闭合撤卡恢复、内部选区隔离与绘制断言）紧随 readingEmbed。
 // #224 合并入列：hoverRefresh（引用视图同步——目标失效推送驱动嵌入/浮层
 // 刷新、fm/滚动保持、快速更新无旧冒充、删除恢复分态与订阅生命周期）。
+// #236 合并入列：findPanel（查找面板——真实键盘 Ctrl+F/Ctrl+H/Enter/Esc，
+// 三开关语义与点亮、非法正则红边、替换写回单笔/整批一笔、阅读替换栏不展开）。
 const names = ['tableCaret', 'quoteBarPaint', 'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'imagePaste', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage',
-  'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract', 'commentToggle', 'viewToggle', 'contextMenu', 'anchorFlash', 'readingWidthProbe', 'codeCardChrome', 'liveImageLayout', 'imageRefresh', 'imagePopup', 'hoverPreview', 'readingEmbed', 'liveEmbed', 'hoverEntry', 'hoverRefresh']
+  'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract', 'commentToggle', 'viewToggle', 'contextMenu', 'anchorFlash', 'readingWidthProbe', 'codeCardChrome', 'liveImageLayout', 'imageRefresh', 'imagePopup', 'hoverPreview', 'readingEmbed', 'liveEmbed', 'hoverEntry', 'hoverRefresh', 'findPanel']
 const { workers, reuseBuilds, selected } = parseBrowserRunOptions(process.argv.slice(2), names)
 const parent = path.join(root, 'out/test/browser-runs')
 await mkdir(parent, { recursive: true })

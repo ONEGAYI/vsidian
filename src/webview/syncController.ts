@@ -96,12 +96,19 @@ import { bindLocale, bindLocaleAttrs, bindLocaleFnAttrs, refreshElementLocale } 
 import { refreshOnDemandControlLocale } from './localeOnDemand'
 import {
   FIND_CLASS_NAMES,
+  buildSearchQuery,
   computeFindMatches,
   findDecorations,
+  isFindQueryValid,
   matchIndexFrom,
   setFindMatches,
   type FindMatch,
 } from './findSession'
+// #236 查找引擎：@codemirror/search 外部驱动——search() 只装引擎状态
+// （官方面板与 keymap 不装；高亮自绘见 findDecorations，与官方面板高亮
+// 不叠加），replaceNext/replaceAll 命令供替换栏走标准出站链路
+import { replaceAll, replaceNext, search, setSearchQuery } from '@codemirror/search'
+import { FIND_OPTIONS_DEFAULT, findOptionsEqual, type FindOptions } from '../shared/findOptions'
 import { liveDecorationsField, livePreviewDecorations, LIVE_CLASS_NAMES, selectionTouchesRange, tableCompositionSettled, TaskCheckboxWidget } from './liveDecorations'
 import { LINK_MOD_CLASS, createLinkInteractions, LINK_CLASS_NAMES, WIKILINK_CLASS_NAMES, activateLinkAtPos, activateLooseLinkAtPos, activateWikilinkAtPos } from './liveLinks'
 import { liveMath } from './liveMath'
@@ -822,18 +829,32 @@ export class WebviewSyncController {
   /** #70 拖拽收尾后吞一次面板 click（位移超阈值的拖拽后补发 click 不触发跳转） */
   private outlineSuppressClick = false
 
-  // ---- 查找会话状态（#14）----
-  /** 查找是纯只读视图状态：不写 TextDocument、不入撤销栈、零出站消息。
-   *  匹配基于 webview 全文文本模型（CM6 doc），屏外内容同样命中 */
+  // ---- 查找会话状态（#14；#236 起三开关/替换栏）----
+  /** 查找是纯只读视图状态：不写 TextDocument、不入撤销栈；替换是显式
+   *  写操作（#236 修订）——经 CM6 事务走标准出站链路（一笔 edit.request =
+   *  宿主撤销一次）。匹配基于 webview 全文文本模型（CM6 doc），屏外内容
+   *  同样命中 */
   private findPanel: HTMLElement | undefined
   private findInputEl: HTMLInputElement | undefined
   private findCountEl: HTMLElement | undefined
+  private findToggleEl: HTMLButtonElement | undefined
+  private findCaseBtnEl: HTMLButtonElement | undefined
+  private findWordBtnEl: HTMLButtonElement | undefined
+  private findRegexpBtnEl: HTMLButtonElement | undefined
+  private findReplaceRowEl: HTMLElement | undefined
   private findOpen = false
   /** 首次打开后置位：view.state 从此回报 find 观测（含关闭态 open:false） */
   private findTouched = false
   private findQuery = ''
-  /** 大小写语义固定：默认区分；UI 切换后全程保持所选语义 */
-  private findCaseSensitive = true
+  /** 三开关（#236 单一事实源 shared/findOptions；经 findOptions.snapshot
+   *  与宿主 workspace 级记忆同步，#238 选下一处相同词同源消费） */
+  private findOptions: FindOptions = { ...FIND_OPTIONS_DEFAULT }
+  /** 查询有效性（正则语法；非法时无匹配、面板红边反馈、替换命令不执行） */
+  private findValid = true
+  /** 替换栏展开态（替换是 Live 编辑能力：阅读模式恒 false） */
+  private findReplaceOpen = false
+  /** 替换文本（随引擎 query 的 replace 字段更新，供官方替换命令展开 $n） */
+  private findReplaceText = ''
   private findMatches: FindMatch[] = []
   /** 0 基当前序号（无匹配时无意义） */
   private findIndex = 0
@@ -1007,6 +1028,11 @@ export class WebviewSyncController {
       if (id === 'find') this.openFind()
       else if (id === 'findNext') this.findStep('next')
       else if (id === 'findPrevious') this.findStep('prev')
+      // #236 查找替换：Ctrl+H 打开面板并展开替换栏；替换操作是面板会话
+      // 命令（仅面板开 + live + 合法 query 时执行，本地消化不转发宿主）
+      else if (id === 'findReplace') this.openFind(undefined, { replace: true })
+      else if (id === 'findReplaceNext') this.runFindReplace('next')
+      else if (id === 'findReplaceAll') this.runFindReplace('all')
       // #221 预览当前链接：纯 webview 域（目标判定与浮层打开都在 webview，
       // 无宿主往返依赖），与命令面板入口（ui.command 回发）共用同一实现
       else if (id === 'hoverPreviewLink') this.previewLinkAtFocus()
@@ -1512,6 +1538,11 @@ export class WebviewSyncController {
     this.findPanel = undefined
     this.findInputEl = undefined
     this.findCountEl = undefined
+    this.findToggleEl = undefined
+    this.findCaseBtnEl = undefined
+    this.findWordBtnEl = undefined
+    this.findRegexpBtnEl = undefined
+    this.findReplaceRowEl = undefined
     this.liveWrapper?.remove()
     this.liveWrapper = undefined
     this.readingView?.dispose()
@@ -1570,6 +1601,8 @@ export class WebviewSyncController {
         // 装载（含重载）都拉取；宿主以 settings.snapshot 响应
         this.bridge.postMessage({ kind: 'settings.get' })
         this.bridge.postMessage({ kind: 'keybindings.get' })
+        // #236 查找选项（workspace 级记忆）：权威在宿主，每次装载拉取
+        this.bridge.postMessage({ kind: 'findOptions.get' })
         // #128 CSS 片段清单：同「init 后拉取」模式——宿主权威扫描 × 开关
         // 映射经 snippets.snapshot 应答（新面板、重载面板、暂未广播的变更
         // 都在此对齐当前态）
@@ -1604,6 +1637,22 @@ export class WebviewSyncController {
         this.applyReadableLineWidthSetting()
         this.applyEmbedMaxHeightSetting()
         break
+      case 'findOptions.snapshot': {
+        // #236 查找选项（宿主权威回流：get 应答与 set 广播共用形态）。
+        // 应用为当前匹配选项并重算（面板按钮态随 findRender 同步）；与
+        // #238 选下一处相同词同源——后续消费方经同一通道取选项
+        const next = message.options
+        if (!findOptionsEqual(next, this.findOptions)) {
+          this.findOptions = { ...next }
+          this.findDoc = null
+          if (this.findOpen) {
+            this.findRecompute(this.findReferencePos())
+            this.findRender()
+            this.findLocate()
+          }
+        }
+        break
+      }
       case 'snippets.snapshot': {
         // #128 CSS 片段装载：diff 式装配 <link>（失败保留最近成功样式、
         // 停用立即撤下）；装载结果回报宿主（入口级成败可观测），样式落地
@@ -1975,14 +2024,22 @@ export class WebviewSyncController {
         this.clearAnchorFlash()
         break
       case 'view.find.open':
-        // 查找会话（#14）：webview 内浮动面板；纯只读视图操作
-        this.openFind(message.query)
+        // 查找会话（#14）：webview 内浮动面板；open/step 为纯只读视图操作
+        this.openFind(message.query, {
+          replace: message.replace === true,
+          replacement: typeof message.replacement === 'string' ? message.replacement : undefined,
+        })
         break
       case 'view.find.close':
         this.closeFind()
         break
       case 'view.find.step':
         this.findStep(message.direction)
+        break
+      case 'view.find.replace':
+        // #236 替换（显式写操作）：仅 live 执行（阅读只读）；经 CM6 事务
+        // 走标准出站链路（一笔 edit.request = 宿主撤销一次）
+        this.runFindReplace(message.op)
         break
       case 'table.command': {
         // 表格增删行列（#13）：仅 live 模式执行（阅读除勾选任务外只读）；
@@ -6736,17 +6793,35 @@ export class WebviewSyncController {
     this.setOutlineExpandLevel(OUTLINE_EXPAND_LEVEL_DEFAULT)
   }
 
-  // ---- 查找会话（#14）----
+  // ---- 查找会话（#14；#236 起三开关面板与替换栏）----
   // UI 形态：webview 内浮动层（custom editor webview 不可用 VSCode 原生
-  // find 控件）。入口：Mod-F 拦截、宿主 view.find.open（命令面板共用）、
-  // 输入框 Enter/Shift-Enter、F3 循环导航；Esc 关闭归还焦点。
-  // 匹配集基于 CM6 doc 全文文本模型；文档变化经 Text 引用比较判过期。
+  // find 控件，2026-10 批次四路核实）。入口：Mod-F 拦截、宿主
+  // view.find.open（命令面板共用）、输入框 Enter/Shift-Enter、F3 循环
+  // 导航；Ctrl+H（findReplace）打开并展开替换栏；Esc 关闭归还焦点。
+  // 匹配引擎（#236）：@codemirror/search 的 SearchQuery（三开关 +
+  // literal 字面量口径），匹配集基于 CM6 doc 全文文本模型，文档变化经
+  // Text 引用比较判过期；高亮自绘（官方面板未装配，见 findSession
+  // 模块头）；替换命令（replaceNext/replaceAll）走官方命令 + 标准出站
+  // 链路，引擎 query 经 setSearchQuery 与面板状态同步。
 
-  /** 查找面板 DOM（稳定类名见 FIND_CLASS_NAMES；默认隐藏，open 类控制显隐） */
+  /** 查找面板 DOM（稳定类名见 FIND_CLASS_NAMES；默认隐藏，open 类控制显隐；
+   *  #236 起 column 布局：toggle + 主行（输入/计数/三开关/导航）+ 替换行） */
   private buildFindPanel(): HTMLElement {
     const panel = document.createElement('div')
     panel.className = FIND_CLASS_NAMES.panel
     panel.setAttribute('role', 'search')
+    // 替换栏展开/收起切换（左缘 v 形；aria-expanded 与替换行 open 类同步）
+    const toggle = document.createElement('button')
+    toggle.type = 'button'
+    toggle.className = FIND_CLASS_NAMES.toggle
+    toggle.textContent = '⌄'
+    bindLocale(toggle, 'aria-label', 'find.toggleReplace')
+    toggle.addEventListener('click', () => {
+      this.setFindReplaceOpen(!(this.findReplaceOpen && this.viewMode === 'live'))
+    })
+    this.findToggleEl = toggle
+    const row = document.createElement('div')
+    row.className = FIND_CLASS_NAMES.row
     const input = document.createElement('input')
     input.type = 'text'
     input.className = FIND_CLASS_NAMES.input
@@ -6768,8 +6843,44 @@ export class WebviewSyncController {
     const count = document.createElement('span')
     count.className = FIND_CLASS_NAMES.count
     count.textContent = '0/0'
-    // 按钮文案与可访问名称同键：创建与换包重写共用一次登记
-    const mkBtn = (cls: string, key: 'find.caseToggle' | 'find.prev' | 'find.next' | 'find.close',
+    row.appendChild(input)
+    row.appendChild(count)
+    // 三开关（Aa/ab/.*；点亮 = 选项开启）：切换即重算匹配并把新选项经
+    // findOptions.set 上送宿主持久化（workspace 级记忆，多面板广播一致）
+    const mkToggle = (
+      cls: string, icon: string, key: 'find.matchCase' | 'find.wholeWord' | 'find.regexp',
+      flip: (o: FindOptions) => FindOptions,
+    ): HTMLButtonElement => {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.className = cls
+      b.textContent = icon
+      bindLocale(b, 'aria-label', key)
+      bindLocale(b, 'title', key)
+      b.addEventListener('click', () => {
+        this.findOptions = flip(this.findOptions)
+        this.findDoc = null
+        this.findRecompute(this.findReferencePos())
+        this.findRender()
+        this.findLocate()
+        this.bridge.postMessage({ kind: 'findOptions.set', options: { ...this.findOptions } })
+      })
+      return b
+    }
+    const caseBtn = mkToggle(FIND_CLASS_NAMES.caseToggle, 'Aa', 'find.matchCase',
+      (o) => ({ ...o, matchCase: !o.matchCase }))
+    const wordBtn = mkToggle(FIND_CLASS_NAMES.wordToggle, 'ab', 'find.wholeWord',
+      (o) => ({ ...o, wholeWord: !o.wholeWord }))
+    const regexpBtn = mkToggle(FIND_CLASS_NAMES.regexpToggle, '.*', 'find.regexp',
+      (o) => ({ ...o, regexp: !o.regexp }))
+    this.findCaseBtnEl = caseBtn
+    this.findWordBtnEl = wordBtn
+    this.findRegexpBtnEl = regexpBtn
+    row.appendChild(caseBtn)
+    row.appendChild(wordBtn)
+    row.appendChild(regexpBtn)
+    // 文字按钮（导航与关闭）：文案与可访问名称同键，创建与换包重写共用一次登记
+    const mkBtn = (cls: string, key: 'find.prev' | 'find.next' | 'find.close',
       onClick: () => void): HTMLButtonElement => {
       const b = document.createElement('button')
       b.type = 'button'
@@ -6779,36 +6890,92 @@ export class WebviewSyncController {
       b.addEventListener('click', onClick)
       return b
     }
-    // 大小写切换按钮：语义为「忽略大小写」开关——active 类与 aria-pressed
-    // 同步表示「忽略生效」，默认区分大小写（未激活、未按下）
-    const caseBtn = mkBtn(FIND_CLASS_NAMES.caseToggle, 'find.caseToggle', () => {
-      this.findCaseSensitive = !this.findCaseSensitive
-      caseBtn.classList.toggle(FIND_CLASS_NAMES.caseActive, !this.findCaseSensitive)
-      caseBtn.setAttribute('aria-pressed', String(!this.findCaseSensitive))
-      this.findDoc = null
-      this.findRecompute(this.findReferencePos())
-      this.findRender()
-      this.findLocate()
+    row.appendChild(mkBtn(FIND_CLASS_NAMES.prev, 'find.prev', () => this.findStep('prev')))
+    row.appendChild(mkBtn(FIND_CLASS_NAMES.next, 'find.next', () => this.findStep('next')))
+    row.appendChild(mkBtn(FIND_CLASS_NAMES.close, 'find.close', () => this.closeFind()))
+    // 替换行：输入框（Enter = 替换下一个，面板局部键）+ 替换/全部替换按钮
+    const replaceRow = document.createElement('div')
+    replaceRow.className = FIND_CLASS_NAMES.replace
+    const replaceInput = document.createElement('input')
+    replaceInput.type = 'text'
+    replaceInput.className = FIND_CLASS_NAMES.replaceInput
+    bindLocale(replaceInput, 'placeholder', 'find.replaceLabel')
+    bindLocale(replaceInput, 'aria-label', 'find.replaceLabel')
+    replaceInput.addEventListener('input', () => {
+      this.findReplaceText = replaceInput.value
+      this.syncSearchQuery() // 引擎 query 的 replace 字段随输入更新（$n 展开用）
     })
-    caseBtn.setAttribute('aria-pressed', 'false')
+    replaceInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        this.runFindReplace('next')
+      }
+    })
+    const replaceNextBtn = document.createElement('button')
+    replaceNextBtn.type = 'button'
+    replaceNextBtn.className = FIND_CLASS_NAMES.replaceNext
+    bindLocale(replaceNextBtn, 'text', 'find.replaceNext')
+    bindLocale(replaceNextBtn, 'aria-label', 'find.replaceNext')
+    replaceNextBtn.addEventListener('click', () => this.runFindReplace('next'))
+    const replaceAllBtn = document.createElement('button')
+    replaceAllBtn.type = 'button'
+    replaceAllBtn.className = FIND_CLASS_NAMES.replaceAll
+    bindLocale(replaceAllBtn, 'text', 'find.replaceAll')
+    bindLocale(replaceAllBtn, 'aria-label', 'find.replaceAll')
+    replaceAllBtn.addEventListener('click', () => this.runFindReplace('all'))
+    replaceRow.appendChild(replaceInput)
+    replaceRow.appendChild(replaceNextBtn)
+    replaceRow.appendChild(replaceAllBtn)
+    this.findReplaceRowEl = replaceRow
     this.findInputEl = input
     this.findCountEl = count
-    panel.appendChild(input)
-    panel.appendChild(count)
-    panel.appendChild(caseBtn)
-    panel.appendChild(mkBtn(FIND_CLASS_NAMES.prev, 'find.prev', () => this.findStep('prev')))
-    panel.appendChild(mkBtn(FIND_CLASS_NAMES.next, 'find.next', () => this.findStep('next')))
-    panel.appendChild(mkBtn(FIND_CLASS_NAMES.close, 'find.close', () => this.closeFind()))
+    panel.appendChild(toggle)
+    panel.appendChild(row)
+    panel.appendChild(replaceRow)
     return panel
   }
 
-  /** 打开查找面板（可预置查询词；重复打开重新聚焦输入框并全选查询） */
-  private openFind(query?: string): void {
+  /** 替换栏展开/收起（open 为 false 时收起；阅读模式强制收起——替换是
+   *  Live 编辑能力，模式切换保活时替换行不进入阅读视图） */
+  private setFindReplaceOpen(open: boolean): void {
+    this.findReplaceOpen = open && this.viewMode === 'live'
+    this.findRender()
+  }
+
+  /** Ctrl+F 种子行为（#236 对齐 VSCode）：live 单行非空选区文本填为搜索
+   *  词；无选区/多行选区/阅读模式返回 null（保持既有查询词） */
+  private findSeedFromSelection(): string | null {
+    if (this.viewMode !== 'live' || !this.view) {
+      return null
+    }
+    const sel = this.view.state.selection.main
+    if (sel.empty) {
+      return null
+    }
+    const text = this.view.state.sliceDoc(sel.from, sel.to)
+    if (text === '' || text.includes('\n')) {
+      return null
+    }
+    return text
+  }
+
+  /** 打开查找面板（可预置查询词；#236：无预置时按 VSCode 口径取单行选区
+   *  作种子；replace=true 展开替换栏——仅 live，阅读只开面板；replacement
+   *  随 replace 预置替换词——与预置查询词同语义）。重复打开重新聚焦输入框
+   *  并全选查询 */
+  private openFind(query?: string, opts: { replace?: boolean; replacement?: string } = {}): void {
     this.findTouched = true
-    if (typeof query === 'string' && query !== this.findQuery) {
-      this.findQuery = query
+    let effective = query
+    if (typeof effective !== 'string') {
+      const seed = this.findSeedFromSelection()
+      if (seed !== null) {
+        effective = seed
+      }
+    }
+    if (typeof effective === 'string' && effective !== this.findQuery) {
+      this.findQuery = effective
       if (this.findInputEl) {
-        this.findInputEl.value = query
+        this.findInputEl.value = effective
       }
       this.findDoc = null
       this.findRecompute(this.findReferencePos())
@@ -6816,6 +6983,19 @@ export class WebviewSyncController {
       this.findEnsureFresh()
     }
     this.findOpen = true
+    if (opts.replace === true && this.viewMode === 'live') {
+      this.findReplaceOpen = true
+    }
+    // 预置替换词：输入框与引擎 query 的 replace 字段同步（后续 runFindReplace
+    // 消费；findRender 只管显隐，值在装配件上）
+    if (typeof opts.replacement === 'string') {
+      this.findReplaceText = opts.replacement
+      const input = this.findPanel?.querySelector<HTMLInputElement>(`.${FIND_CLASS_NAMES.replaceInput}`)
+      if (input) {
+        input.value = opts.replacement
+      }
+      this.syncSearchQuery()
+    }
     this.findPanel?.classList.add(FIND_CLASS_NAMES.open)
     this.findRender()
     this.findLocate()
@@ -6832,6 +7012,7 @@ export class WebviewSyncController {
       return
     }
     this.findOpen = false
+    this.findReplaceOpen = false
     this.findPanel?.classList.remove(FIND_CLASS_NAMES.open)
     this.findMatches = []
     this.findIndex = 0
@@ -6868,14 +7049,32 @@ export class WebviewSyncController {
     return this.view?.state.selection.main.from ?? 0
   }
 
+  /** 成型头区排除（#236 批次已定边界：搜索不进入头区）：成型 frontmatter
+   *  以只读表格呈现、源文本不可见，命中无落点；降级/无头区不排除 */
+  private findExcludeEnd(): number {
+    const model = this.view?.state.field(liveDecorationsField, false)?.fmModel ?? null
+    return model ? model.closeTo + 1 : 0
+  }
+
+  /** 把当前查找状态同步给引擎（@codemirror/search 的 search state）：官方
+   *  替换命令从 search state 取 query；无效 query 不执行命令（runFindReplace
+   *  守卫）——规避「命令在 query 无效时 fallback 打开官方面板」的坑 */
+  private syncSearchQuery(): void {
+    const query = buildSearchQuery(this.findQuery, this.findOptions, this.findReplaceText)
+    this.view?.dispatch({ effects: setSearchQuery.of(query) })
+  }
+
   /** 无条件重算匹配集（查询/选项变化路径）：当前匹配取参考位置后首个 */
   private findRecompute(ref: number): void {
     const doc = this.view?.state.doc
     this.findDoc = doc ?? null
-    this.findMatches = doc
-      ? computeFindMatches(doc.toString(), this.findQuery, this.findCaseSensitive)
-      : []
+    this.findValid = isFindQueryValid(this.findQuery, this.findOptions)
+    this.findMatches =
+      doc && this.findValid
+        ? computeFindMatches(doc.toString(), this.findQuery, this.findOptions, this.findExcludeEnd())
+        : []
     this.findIndex = matchIndexFrom(this.findMatches, ref)
+    this.syncSearchQuery()
   }
 
   /** 按需重算（导航/渲染前调用）：文档未变化时零开销；
@@ -6889,7 +7088,8 @@ export class WebviewSyncController {
     this.findRecompute(prevFrom ?? this.findReferencePos())
   }
 
-  /** 重绘可观测状态：live 装饰效应、计数文本、阅读命中块（不改滚动位置） */
+  /** 重绘可观测状态：live 装饰效应、计数文本、开关按钮态、替换行显隐、
+   *  阅读命中块（不改滚动位置） */
   private findRender(): void {
     this.view?.dispatch({
       effects: setFindMatches.of({ matches: this.findMatches, index: this.findIndex }),
@@ -6900,6 +7100,27 @@ export class WebviewSyncController {
       this.findCountEl.textContent = `${total > 0 ? this.findIndex + 1 : 0}/${total}`
       this.findCountEl.classList.toggle(FIND_CLASS_NAMES.countEmpty, total === 0)
     }
+    // 非法正则可见反馈：输入框红边 + title 提示（不崩、无匹配 0/0）
+    const invalid = this.findOpen && !this.findValid
+    if (this.findInputEl) {
+      this.findInputEl.classList.toggle(FIND_CLASS_NAMES.inputInvalid, invalid)
+      this.findInputEl.title = invalid ? t('find.invalid') : ''
+    }
+    // 三开关按钮态：active 类与 aria-pressed 同步表示「选项开启」
+    const syncToggle = (
+      btn: HTMLButtonElement | undefined, activeCls: string, on: boolean,
+    ): void => {
+      btn?.classList.toggle(activeCls, on)
+      btn?.setAttribute('aria-pressed', String(on))
+    }
+    syncToggle(this.findCaseBtnEl, FIND_CLASS_NAMES.caseActive, this.findOptions.matchCase)
+    syncToggle(this.findWordBtnEl, FIND_CLASS_NAMES.wordActive, this.findOptions.wholeWord)
+    syncToggle(this.findRegexpBtnEl, FIND_CLASS_NAMES.regexpActive, this.findOptions.regexp)
+    // 替换行显隐（阅读模式恒收起——替换是 Live 编辑能力）；toggle 的
+    // aria-expanded 与展开态同步
+    const replaceVisible = this.findReplaceOpen && this.viewMode === 'live'
+    this.findReplaceRowEl?.classList.toggle(FIND_CLASS_NAMES.replaceOpen, replaceVisible)
+    this.findToggleEl?.setAttribute('aria-expanded', String(replaceVisible))
     if (this.readingView) {
       // 块级高亮只在阅读模式生效（live 容器隐藏期不占用 DOM 类）
       const start =
@@ -6908,6 +7129,30 @@ export class WebviewSyncController {
           : null
       this.readingView.highlightBlock(start)
     }
+  }
+
+  /** 替换执行（#236：显式写操作）：官方 replaceNext/replaceAll 命令（单事务
+   *  = 单笔 edit.request = 宿主撤销一次；next 替换当前匹配并把选区移到下一
+   *  处，all 整批一笔）。仅 live（阅读只读）；无效 query 不执行。命令事务
+   *  走 updateListener 的标准出站链路（暂停态与 live 输入同语义） */
+  private runFindReplace(op: 'next' | 'all'): void {
+    const view = this.view
+    if (!this.findOpen || !view || this.viewMode !== 'live') {
+      return
+    }
+    if (!this.findValid) {
+      return
+    }
+    this.syncSearchQuery()
+    const ok = (op === 'next' ? replaceNext : replaceAll)(view)
+    if (!ok) {
+      return
+    }
+    // 替换改变了文档：以新选区（next 已移到下一处）为参考重算并重绘
+    const ref = op === 'next' ? view.state.selection.main.from : this.findReferencePos()
+    this.findRecompute(ref)
+    this.findRender()
+    this.findLocate()
   }
 
   /** 定位当前匹配（屏外内容同样定位；与视口/模式位置恢复协同）：
@@ -6946,7 +7191,7 @@ export class WebviewSyncController {
     }
   }
 
-  /** view.state 查找观测（#14）：首次打开后回报（含关闭态） */
+  /** view.state 查找观测（#14；#236 起三开关/替换栏/有效性）：首次打开后回报（含关闭态） */
   private collectFindProbe(): FindSessionProbe | undefined {
     if (!this.findTouched) {
       return undefined
@@ -6955,7 +7200,11 @@ export class WebviewSyncController {
     return {
       open: this.findOpen,
       query: this.findQuery,
-      caseSensitive: this.findCaseSensitive,
+      matchCase: this.findOptions.matchCase,
+      wholeWord: this.findOptions.wholeWord,
+      regexp: this.findOptions.regexp,
+      valid: this.findValid,
+      replaceOpen: this.findReplaceOpen && this.viewMode === 'live',
       total: this.findMatches.length,
       index: this.findMatches.length > 0 ? this.findIndex + 1 : 0,
       currentFrom: cur?.from ?? null,
@@ -9100,8 +9349,13 @@ export class WebviewSyncController {
           this.bridge.postMessage(message)
         },
       }),
-      // 查找装饰（#14）：当前匹配（直接）+ 全部匹配（视口内间接）
+      // 查找装饰（#14）：当前匹配（直接）+ 全部匹配（视口内间接）。
+      // #236 引擎状态：search() 只装 @codemirror/search 的 query 存储
+      // （官方面板与 searchKeymap 不装——高亮自绘，见 findSession 模块头；
+      // 引擎 query 由 syncSearchQuery 经 setSearchQuery 外部驱动，供
+      // replaceNext/replaceAll 官方替换命令消费）
       findDecorations,
+      search(),
       ...this.extraExtensions,
       EditorView.updateListener.of((update) => {
         if (this.quickActionsOpen && (update.docChanged || update.selectionSet)) {

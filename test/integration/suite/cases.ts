@@ -659,11 +659,17 @@ interface ViewState {
   /** #208 图片槽位探针：src 为最终应用地址（含 ?v= 代次戳），
    *  naturalWidth 为浏览器实际解码宽度（刷新真换字节的绘制层证据） */
   imageProbe?: Array<{ src: string | null; naturalWidth: number | null; state: string }>
-  /** #14 查找会话观测（首次打开后回报；匹配集来自文本模型全量计算） */
+  /** #14 查找会话观测（首次打开后回报；匹配集来自文本模型全量计算；
+   *  #236 起三开关/有效性/替换栏展开态随会话回报，形态对齐协议
+   *  FindSessionProbe——此处为消费侧局部类型，不 import webview 模块） */
   find?: {
     open: boolean
     query: string
-    caseSensitive: boolean
+    matchCase: boolean
+    wholeWord: boolean
+    regexp: boolean
+    valid: boolean
+    replaceOpen: boolean
     total: number
     index: number
     currentFrom: number | null
@@ -3807,6 +3813,24 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(none.index === 0, `无匹配时序号应为 0，实际 ${none.index}`)
     assert(none.currentFrom === null, '无匹配时当前区间为 null')
 
+    // #236 三开关默认档（对齐 VSCode）：大小写不敏感、非全字、字面量——
+    // 中文查询无大小写变体，'目标词' 4 次计数在默认档不变即为不敏感语义在场的证据
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.find.open', query: '目标词' })
+    v = await waitViewState('find.md', (s) => s.find?.total === 4)
+    assert(v.find!.matchCase === false, '默认档 matchCase 应为 false（大小写不敏感）')
+    assert(v.find!.wholeWord === false, '默认档 wholeWord 应为 false')
+    assert(v.find!.regexp === false, '默认档 regexp 应为 false（字面量）')
+    assert(v.find!.valid === true, '合法查询 valid 应为 true')
+
+    // 非法正则：不崩、valid 可见反馈、无匹配；后续合法查询恢复
+    // （断言走独立取值变量——assert 的类型收窄不跨赋值残留）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.find.open', query: '[未闭合' })
+    const invalid = await waitViewState('find.md', (s) => s.find?.valid === false)
+    assert(invalid.find!.total === 0, '非法正则应无匹配')
+    assert(invalid.find!.open === true, '非法正则不得关闭面板（不崩）')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.find.open', query: '目标词' })
+    v = await waitViewState('find.md', (s) => s.find?.valid === true && s.find?.total === 4)
+
     // 关闭：会话回报关闭态
     await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.find.close' })
     v = await waitViewState('find.md', (s) => s.find?.open === false)
@@ -3924,6 +3948,91 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const session = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
     assert(session.appliedEdits === 0, `查找与模式切换不得产生写回，实际 ${session.appliedEdits}`)
     assert(await readDisk('find.md') === diskBefore, '查找与模式切换后磁盘字节不变')
+  }],
+
+  ['编辑区查找：替换写回、撤销粒度与阅读只读（#236）', async () => {
+    await openWithEditor('find.md')
+    await waitSessionReady('find.md')
+    const uri = wsUri('find.md').toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri('find.md'))
+    const text = doc.getText()
+    const session0 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+
+    // 打开并预置替换词：替换栏展开（live），观测 replaceOpen
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'view.find.open', query: '目标词', replace: true, replacement: '替换词',
+    })
+    let v = await waitViewState('find.md', (s) => s.find?.open === true && s.find?.total === 4)
+    assert(v.find!.replaceOpen === true, 'live 模式打开（replace）应展开替换栏')
+
+    // 替换下一个：单笔写回（一笔 edit.request = 宿主撤销一次）；
+    // 第 1 处被替换、会话移到下一处（total 递减、序号语义保持）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.find.replace', op: 'next' })
+    await poll('替换下一个写回', async () => {
+      const s = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      return s?.text === text.replace('目标词', '替换词') ? s : undefined
+    })
+    let session1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(session1.appliedEdits === session0.appliedEdits + 1, `替换下一个应恰为一笔写回，实际 ${session0.appliedEdits} → ${session1.appliedEdits}`)
+    assert(doc.isDirty, '替换后文档应 dirty')
+    // 关闭面板归还焦点后再 undo（undo 作用于活跃编辑器，焦点不应留在
+    // webview 输入框）；一次撤销恢复整笔替换（撤销粒度契约）。
+    // appliedEdits 是累计计数（undo 不回退），撤销后重读作全部替换段基准
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.find.close' })
+    await waitViewState('find.md', (s) => s.find?.open === false)
+    await vscode.commands.executeCommand('undo')
+    await poll('撤销替换下一个', async () => {
+      const s = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      return s?.text === text ? s : undefined
+    })
+    session1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+
+    // 全部替换：整批一笔写回（一笔撤销）——重开面板（重预置替换词）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'view.find.open', query: '目标词', replace: true, replacement: '替换词',
+    })
+    await waitViewState('find.md', (s) => s.find?.open === true && s.find?.total === 4)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.find.replace', op: 'all' })
+    const allReplaced = text.split('目标词').join('替换词')
+    await poll('全部替换写回', async () => {
+      const s = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      return s?.text === allReplaced ? s : undefined
+    })
+    const session2 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(session2.appliedEdits === session1.appliedEdits + 1, `全部替换应整批恰为一笔写回，实际 ${session1.appliedEdits} → ${session2.appliedEdits}`)
+    // 归还焦点后一次撤销恢复整批（整批一笔撤销）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.find.close' })
+    await waitViewState('find.md', (s) => s.find?.open === false)
+    await vscode.commands.executeCommand('undo')
+    await poll('撤销全部替换', async () => {
+      const s = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      return s?.text === text ? s : undefined
+    })
+
+    // 恢复原样并保存：磁盘与 dirty 归零（不残留测试痕迹）
+    await doc.save()
+    assert(await readDisk('find.md') === text, '撤销后保存应恢复原磁盘内容')
+
+    // 阅读模式：替换栏不展开（Ctrl+H 语义在 webview 收窄为只开面板）、
+    // 替换指令静默忽略（只读）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'view.find.open', query: '目标词', replace: true, replacement: '替换词',
+    })
+    await waitViewState('find.md', (s) => s.find?.open === true && s.find?.total === 4)
+    await vscode.commands.executeCommand('onegayi.vsidian.toggleViewMode')
+    const afterReading = await poll('切阅读', async () => {
+      const s = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      return s?.viewMode === 'reading' && s.find?.open === true ? s : undefined
+    })
+    assert(afterReading.find!.replaceOpen === false, '阅读模式替换栏恒不展开（替换是 Live 编辑能力）')
+    const session3 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.find.replace', op: 'all' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.find.close' })
+    await waitViewState('find.md', (s) => s.find?.open === false)
+    const session4 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(session4.appliedEdits === session3.appliedEdits, `阅读模式不得执行替换（${session3.appliedEdits} → ${session4.appliedEdits}）`)
+    const docFinal = await vscode.workspace.openTextDocument(wsUri('find.md'))
+    assert(docFinal.getText() === text, '阅读模式替换指令后权威文本不变')
   }],
 
   // ---- 工单 #11：双链解析并跳转笔记与标题 ----

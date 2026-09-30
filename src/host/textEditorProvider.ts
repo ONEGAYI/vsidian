@@ -87,6 +87,8 @@ import {
 import { installHostLocale, LOCALE_MESSAGES, type LocaleCode } from '../shared/locales'
 import { buildLocaleIslandHtml } from '../shared/locales/island'
 import { hostLocale } from './hostLocale'
+import type { FindOptionsStore } from './findOptionsStore'
+import { sanitizeFindOptions, type FindOptions } from '../shared/findOptions'
 import { t } from '../shared/i18n'
 
 export const VIEW_TYPE = 'onegayi.vsidian.editor'
@@ -100,6 +102,9 @@ export interface SettingsWiring {
   service: SettingsService
   keybindings: KeybindingService
   page: SettingsPageHandle
+  /** #236 查找选项持久化（workspaceState 工作区级记忆）：get 应答与
+   *  set 保存后广播的存储权威 */
+  findOptions: FindOptionsStore
 }
 
 /** .md / .markdown 判定（#38）：与 customEditors selector 及标题栏 when 子句
@@ -1425,6 +1430,34 @@ export function createTextEditorProvider(
           })
           return
         }
+        // #236 查找选项：get 按面板应答（每次装载拉取）；set 清洗后持久化
+        // （workspaceState 工作区级记忆）并广播全部 ready 编辑器面板——
+        // 选项是共享状态（多面板一致，#238 选下一处相同词同源消费）
+        if (isWebviewToHost(message) && message.kind === 'findOptions.get') {
+          void webviewPanel.webview.postMessage({
+            kind: 'findOptions.snapshot',
+            options: sanitizeFindOptions(settings?.findOptions.load()),
+          })
+          return
+        }
+        if (isWebviewToHost(message) && message.kind === 'findOptions.set') {
+          if (settings) {
+            const options: FindOptions = sanitizeFindOptions(message.options)
+            void settings.findOptions.save(options).then(() => {
+              for (const entry of sessions.values()) {
+                for (const panel of entry.session.getInfo().panels) {
+                  if (panel.ready) {
+                    void entry.session.postToPanel(panel.sessionId, {
+                      kind: 'findOptions.snapshot',
+                      options: { ...options },
+                    })
+                  }
+                }
+              }
+            })
+          }
+          return
+        }
         if (isWebviewToHost(message) && message.kind === 'keybindings.execute') {
           const operation = KEYBINDING_OPERATIONS.find((op) => op.id === message.id)
           const mode = entry.session.getViewState(sessionId)?.viewMode ?? 'live'
@@ -2018,6 +2051,48 @@ export function createTextEditorProvider(
         if (panel.active && entry.session.getInfo().panels.some((p) =>
           p.sessionId === sessionId && p.ready)) {
           entry.session.postToPanel(sessionId, { kind: 'view.find.step', direction })
+          return true
+        }
+      }
+      return false
+    }))
+  }
+
+  // ---- #236 查找替换命令：find.replace 打开面板并展开替换栏（活动 tab
+  //  为本扩展 custom editor 时向其面板发送；阅读模式由 webview 侧收窄为
+  //  只开面板——替换是 Live 编辑能力）。替换执行命令复用活动面板查找
+  //  命令的定向逻辑（view.find.replace；webview 侧守卫面板开 + live +
+  //  合法 query，阅读/未开会话时静默忽略）----
+  context.subscriptions.push(
+    vscode.commands.registerCommand('onegayi.vsidian.find.replace', async () => {
+      const tab = vscode.window.tabGroups.activeTabGroup.activeTab
+      const input = tab?.input
+      if (
+        input instanceof vscode.TabInputCustom &&
+        input.viewType === VIEW_TYPE
+      ) {
+        const entry = getEntry(input.uri)
+        const panels = entry?.session.getInfo().panels.filter((p) => p.ready) ?? []
+        if (panels.length > 0) {
+          for (const panel of panels) {
+            entry!.session.postToPanel(panel.sessionId, { kind: 'view.find.open', replace: true })
+          }
+          return true
+        }
+      }
+      await vscode.window.showWarningMessage(t('host.noPanelForFind'))
+      return false
+    }),
+  )
+  for (const [command, op] of [
+    ['onegayi.vsidian.find.replaceNext', 'next'],
+    ['onegayi.vsidian.find.replaceAll', 'all'],
+  ] as const) {
+    context.subscriptions.push(vscode.commands.registerCommand(command, (): boolean => {
+      for (const entry of sessions.values()) for (const [sessionId, panel] of entry.panels) {
+        if (panel.active && entry.session.getInfo().panels.some((p) =>
+          p.sessionId === sessionId && p.ready)) {
+          entry.session.postToPanel(sessionId, { kind: 'view.find.replace', op })
           return true
         }
       }

@@ -470,6 +470,11 @@ export class DocumentSession {
           panel.port.send({ kind: 'settings.snapshot', values: panel.port.requestSettings() })
         }
         return Promise.resolve()
+      case 'findOptions.get':
+      case 'findOptions.set':
+        // #236 查找选项：provider 层拦截消费（持久化与广播在 provider
+        // 域）；绕过面板入口则无副作用
+        return Promise.resolve()
       case 'diagram.export': {
         // #111 图表导出：只读交互（不写文档、不入撤销栈），暂停态同样
         // 放行（与 clipboard.write 同口径）；结果回来源面板。会话守卫
