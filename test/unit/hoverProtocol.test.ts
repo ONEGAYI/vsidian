@@ -77,6 +77,12 @@ describe('hover.request 校验（webview → 宿主）', () => {
     expect(isWebviewToHost({ ...validRequest(), target: 3 })).toBe(false)
   })
 
+  it('P3-5 源区间有序：sourceStart 不得大于 sourceEnd（两字段同在时拒绝倒置）', () => {
+    expect(isWebviewToHost({ ...validRequest(), sourceStart: 20, sourceEnd: 12 })).toBe(false)
+    // 相等合法（空区间/中性值——反链悬停的 sourceStart=sourceEnd=0 先例）
+    expect(isWebviewToHost({ ...validRequest(), sourceStart: 12, sourceEnd: 12 })).toBe(true)
+  })
+
   it('#219 普通链接形态：linkHref 可选字符串（缺省双链；非字符串拒绝）', () => {
     expect(isWebviewToHost({ ...validRequest(), linkHref: 'relative.md#章' })).toBe(true)
     expect(isWebviewToHost(validRequest()), '缺省仍为双链形态').toBe(true)

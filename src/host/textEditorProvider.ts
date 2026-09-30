@@ -470,6 +470,9 @@ export function createTextEditorProvider(
   //  未保存防抖与 vaultIndex.onTargetChange 的磁盘分态直通） ----
   /** sessionKey 编码（docUri 与 sessionId 以 \n 分隔——file URI 不含换行） */
   const hoverSessionKeyOf = (docUri: string, sessionId: string): string => `${docUri}\n${sessionId}`
+  /** P2-2（review 修复）越界 hover.watch 忽略计数（debug 日志观测面；
+   *  正常链路 watch 总在成功装载后，非零即前端异常或攻陷迹象） */
+  let hoverWatchRejected = 0
   const hoverRefresh = new HoverRefreshCoordinator(
     {
       pushInvalidation: (sessionKeys, fsPath, status, generation) => {
@@ -1456,16 +1459,26 @@ export function createTextEditorProvider(
         }
         // #224 引用视图订阅：provider 层拦截（协调器与订阅表在 provider 域，
         // 与 backlinks 先例同位）。会话守卫：docUri 归属本面板文档且 sessionId
-        // 为本面板（不信任前端任意身份）；watch 的 fsPath 合法性由协议校验器
-        // 把关（非空字符串），来源边界由 hover.request 读取链路（ADR-0008
-        // 根内解析）先行约束——watch 只对「已成功送达过的目标」生效由 webview
-        // 侧装配保证（applyLoaded/applyHoverContent 后才发）
+        // 为本面板（不信任前端任意身份）；P2-2（review 修复）watch 的 fsPath
+        // 须为该会话 hoverSourceFsPaths 集合成员（watch 总在成功装载后，集合
+        // 已含目标——被攻陷 webview 伪造的越界 watch 静默忽略并计数），与
+        // #220 来源资源守卫同一信任边界；unwatch 只释放既有登记，无越界增益
+        // 不设校验
         if (isWebviewToHost(message) &&
           (message.kind === 'hover.watch' || message.kind === 'hover.unwatch') &&
           message.docUri === document.uri.toString() && message.sessionId === sessionId) {
           const sessionKey = hoverSessionKeyOf(message.docUri, message.sessionId)
           if (message.kind === 'hover.watch') {
-            hoverRefresh.watch(sessionKey, message.fsPath, message.instanceId)
+            if (entry.session.hasHoverSource(sessionId, message.fsPath)) {
+              hoverRefresh.watch(sessionKey, message.fsPath, message.instanceId)
+            } else {
+              hoverWatchRejected += 1
+              console.debug(
+                '[vsidian] hover.watch 目标不在本面板来源集合，已忽略',
+                message.fsPath,
+                `累计 ${hoverWatchRejected} 次`,
+              )
+            }
           } else {
             hoverRefresh.unwatch(sessionKey, message.fsPath, message.instanceId)
           }

@@ -421,6 +421,14 @@ export class DocumentSession {
     this.imageCache.clear()
   }
 
+  /** P2-2（review 修复）来源集合查询面：fsPath 是否为本面板实际送达过
+   *  hover.result 成功回包的目标——provider 层 hover.watch 登记前的校验
+   *  基准（不信任前端任意路径；watch 总在成功装载后，集合已含目标）。
+   *  未知会话一律 false */
+  hasHoverSource(sessionId: string, fsPath: string): boolean {
+    return this.panels.get(sessionId)?.hoverSourceFsPaths.has(fsPath) ?? false
+  }
+
   /** webview 消息入口（provider 接到 webview.onDidReceiveMessage 后调用） */
   handleWebviewMessage(message: unknown, sessionId: string): Promise<void> {
     if (this.disposed) {
@@ -849,16 +857,19 @@ export class DocumentSession {
           if (result.ok) {
             // #220/#222 来源记录：成功读取即入集合（嵌入卡片与浮层多目标
             // 共存；有界淘汰防无界增长——过期成员最多放宽一个已不在场目标
-            // 的点击守卫，DOM 已不在则点击本就不发生）
-            if (!panel.hoverSourceFsPaths.has(result.fsPath)) {
-              if (panel.hoverSourceFsPaths.size >= HOVER_SOURCES_LIMIT) {
-                const oldest = panel.hoverSourceFsPaths.keys().next().value
-                if (oldest !== undefined) {
-                  panel.hoverSourceFsPaths.delete(oldest)
-                }
+            // 的点击守卫，DOM 已不在则点击本就不发生）。P3-2（review 修复）：
+            // 已存在成员重读时移到队尾（插入序 = 淘汰序改最近读取序）——
+            // 活跃目标持续触达不被 32 上限淘汰（watch 校验的放行基准随之
+            // 保持在场）
+            if (panel.hoverSourceFsPaths.has(result.fsPath)) {
+              panel.hoverSourceFsPaths.delete(result.fsPath)
+            } else if (panel.hoverSourceFsPaths.size >= HOVER_SOURCES_LIMIT) {
+              const oldest = panel.hoverSourceFsPaths.keys().next().value
+              if (oldest !== undefined) {
+                panel.hoverSourceFsPaths.delete(oldest)
               }
-              panel.hoverSourceFsPaths.add(result.fsPath)
             }
+            panel.hoverSourceFsPaths.add(result.fsPath)
             panel.hoverSourceFsPath = result.fsPath
           }
           panel.port.send(

@@ -454,7 +454,9 @@ export type HostToWebview =
    *  据此对在场浮层/嵌入卡片撤旧重载（changed）、撤下内容显示缺失态
    *  （deleted，不无限保留旧内容）或呈现读取失败（stale：权限/断连，不等同
    *  删除）。status 三态与 vaultIndex onTargetChange 同口径；generation 为
-   *  同一目标的失效代次（单调递增，首观测为 1）——晚到推送可据此丢弃。
+   *  同一目标的失效代次（单调递增，首观测为 1）。P3-1（review 修订）：当前
+   *  单面板消息通道为 FIFO 保序，webview **不消费 generation 做乱序丢弃**
+   *  ——代次仅作观测与单调性事实保留（跨通道/多宿主场景若引入再启用）。
    *  未保存修改经短暂合并（防抖窗）后以 changed 推送；deleted/stale 直通。
    *  只读推送：不携带正文（webview 重发 hover.request 读取），宿主不写文档 */
   | {
@@ -2635,7 +2637,9 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
       )
     case 'hover.request':
       // #218 悬停预览请求：会话守卫字段 + reqId 配对 + 非空实例标识 +
-      // 非负源区间 + 目标原文（字符串即可，形态合法性由宿主解析判定）；
+      // 非负源区间（P3-5：sourceStart 不得大于 sourceEnd——两字段同时
+      // 存在，倒置即整体拒绝） + 目标原文（字符串即可，形态合法性由宿主
+      // 解析判定）；
       // #219 普通链接形态的 linkHref（可选字符串，存在即走普通链接解析）；
       // #221 面板直接目标 directTarget（可选对象：fsPath 字符串可为空串
       // ——断链条目；anchor 可选字符串，^ 前缀 = 块锚点）
@@ -2647,6 +2651,7 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         v.instanceId.length > 0 &&
         isNonNegativeInt(v.sourceStart) &&
         isNonNegativeInt(v.sourceEnd) &&
+        (v.sourceStart as number) <= (v.sourceEnd as number) &&
         isString(v.target) &&
         (v.linkHref === undefined || isString(v.linkHref)) &&
         (v.directTarget === undefined ||

@@ -71,6 +71,29 @@ function note(text: string, version = 1): { version: number; text: string } {
   return { version, text }
 }
 
+/** #221 directTarget 专用盘面：来源/目标/锚点矩阵与断链分态的公共数据 */
+function directHarness(disk?: Disk): Harness {
+  return makeHarness(disk ?? new Map<string, { version: number; text: string }>([
+    ['D:\\notes\\a.md', note('x')],
+    ['D:\\notes\\来源.md', note('# 来源全文\n\n来源正文段。\n', 7)],
+    ['D:\\notes\\目标.md', note([
+      '# 目标全文',
+      '',
+      '## 章节甲',
+      '',
+      '甲段。',
+      '',
+      '- 列表项 ^direct-blk',
+      '',
+      '## 章节乙',
+      '',
+      '乙段。',
+      '',
+    ].join('\n'), 9)],
+    ['D:\\notes\\图.png', note('binary')],
+  ]))
+}
+
 describe('readHoverDocTarget：成功路径（身份/版本/LF 契约）', () => {
   it('解析命中的 Markdown 目标：返回规范身份 + 版本 + LF 全文与全文范围', async () => {
     const disk = new Map<string, { version: number; text: string }>([
@@ -427,27 +450,6 @@ describe('readHoverMdLinkTarget：普通本地 Markdown 链接（#219）', () =>
 // 解析端口零调用（无 resolveVaultFile 输入），读取与范围收窄复用同一
 // readAndScope 收尾（锚点语义与链接形态无关）。
 describe('readHoverDirectTarget：面板条目直接目标（#221）', () => {
-  function directHarness(disk?: Disk): Harness {
-    return makeHarness(disk ?? new Map<string, { version: number; text: string }>([
-      ['D:\\notes\\a.md', note('x')],
-      ['D:\\notes\\来源.md', note('# 来源全文\n\n来源正文段。\n', 7)],
-      ['D:\\notes\\目标.md', note([
-        '# 目标全文',
-        '',
-        '## 章节甲',
-        '',
-        '甲段。',
-        '',
-        '- 列表项 ^direct-blk',
-        '',
-        '## 章节乙',
-        '',
-        '乙段。',
-        '',
-      ].join('\n'), 9)],
-      ['D:\\notes\\图.png', note('binary')],
-    ]))
-  }
 
   it('无锚点 → 全文（scope=full）；反链条目形态：不查文件系统（解析端口零调用）', async () => {
     const h = directHarness()
@@ -519,5 +521,65 @@ describe('readHoverDirectTarget：面板条目直接目标（#221）', () => {
       ok: false,
       reason: 'read-failed',
     })
+  })
+})
+
+// P1-1（review 修复）：directTarget 的 fsPath 来自前端消息，被攻陷 webview
+// 可伪造任意路径——双链/普通链接路径经 resolveVaultLinkFile 根内边界（escape
+// 拦截），directTarget 必须补齐同一静态边界：fsPath 须在所属根内（ADR-0008
+// 语义：当前文档所属 workspaceFolder——索引按根分区、跨根目标不解析，面板
+// 快照身份恒在所属根内，合法条目不受影响）且 .md 后缀；越界归 escape 分态。
+describe('readHoverDirectTarget：宿主侧静态边界（P1-1，不信任前端任意路径）', () => {
+  it('工作区外绝对路径 → escape，且读取端口零调用（不装载越界文件）', async () => {
+    const h = directHarness(new Map<string, { version: number; text: string }>([
+      ['D:\\notes\\a.md', note('x')],
+      ['D:\\outside\\机密.md', note('secret')],
+      ['E:\\别的盘\\目标.md', note('y')],
+    ]))
+    // 同盘越界（..\ 上行出根）
+    expect(await readHoverDirectTarget({ fsPath: 'D:\\outside\\机密.md' }, h.ctx, h.ports)).toEqual({
+      ok: false,
+      reason: 'escape',
+    })
+    // 跨盘符（Windows 语义下相对结果是绝对路径 → 越界）
+    expect(await readHoverDirectTarget({ fsPath: 'E:\\别的盘\\目标.md' }, h.ctx, h.ports)).toEqual({
+      ok: false,
+      reason: 'escape',
+    })
+    expect(h.opened, '越界路径不得触达读取端口').toEqual([])
+    expect(h.resolvedCalls).toEqual([])
+  })
+
+  it('相对形态 fsPath（非绝对路径）→ escape（不可信形态不做 cwd 依赖解析）', async () => {
+    const h = directHarness()
+    expect(await readHoverDirectTarget({ fsPath: '机密.md' }, h.ctx, h.ports)).toEqual({
+      ok: false,
+      reason: 'escape',
+    })
+    expect(h.opened).toEqual([])
+  })
+
+  it('根内子目录合法路径 → 放行（多根架构下面板快照身份恒在所属根内，合法条目不受影响）', async () => {
+    const h = directHarness(new Map<string, { version: number; text: string }>([
+      ['D:\\notes\\a.md', note('x')],
+      ['D:\\notes\\sub\\目标.md', note('# 子目录目标\n', 3)],
+    ]))
+    const out = await readHoverDirectTarget({ fsPath: 'D:\\notes\\sub\\目标.md' }, h.ctx, h.ports)
+    expect(out.ok).toBe(true)
+    if (!out.ok) {
+      return
+    }
+    expect(out.relPath).toBe('sub/目标.md')
+    expect(out.version).toBe(3)
+    expect(h.opened).toEqual(['D:\\notes\\sub\\目标.md'])
+  })
+
+  it('根内但非 .md 后缀 → non-markdown（既有分态，边界后复核）', async () => {
+    const h = directHarness()
+    expect(await readHoverDirectTarget({ fsPath: 'D:\\notes\\图.png' }, h.ctx, h.ports)).toEqual({
+      ok: false,
+      reason: 'non-markdown',
+    })
+    expect(h.opened).toEqual([])
   })
 })

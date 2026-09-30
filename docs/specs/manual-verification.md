@@ -1228,3 +1228,14 @@ Live 渲染态经 lezer `HorizontalRule` 节点驱动：未触及该行时源文
   5. **既有能力抽验**：片段目录选择/打开/刷新/暂停恢复、逐项开关；契约导出 JSON、支持等级过滤、条目内搜索——行为与合并前一致。
   6. **「常规」图标观感（#230）**：设置页侧栏「常规」为双拨杆开关线性图标（两枚横杆纵列、圆点一左一右），明暗两主题下笔画清晰、与相邻图标视觉同重。
 - 已知边界：样式参考独立两态页签的 `mount` 形态保留为类自包含消费形态（设置页生产路径不再使用）；设置页类名均不在公开样式契约清单内（零契约条目变更）。
+
+## 悬停/嵌入 review 修复批——directTarget 边界、entry 级版本仲裁与 watch 校验（2026-09-30）
+
+- 背景：一期 #218–#225 整体 code review 修复批（随 origin/main #230–#232 设置批次的 merge 一并落地，merge 提交后单列修复提交）。两项 P1、一项 P2 与三项 P3 顺手项，全部 TDD 先红后绿；均为内部加固，正常链路无用户可见行为变化（CHANGELOG 不新增条目——所修条目均在 Unreleased 段内）。
+- **P1-1 directTarget 通道宿主边界**：反链/出链面板直接目标（前端直供 fsPath）此前直接 openTextDocument——被攻陷 webview 可读工作区外任意 .md（双链/普通链接路径经 resolveVaultLinkFile 根内边界，directTarget 完全绕过）。修复：`readHoverDirectTarget` 入口补静态边界——新增 `isVaultPathInsideRoot`（vaultLink 根内语义导出复用）：fsPath 须为绝对路径且在当前文档所属根内（索引按根分区、跨根目标不解析，面板快照身份恒在所属根内，合法条目不受影响），越界/相对形态归 escape 分态；非 .md 维持既有 non-markdown。单测：越界绝对路径（同盘/跨盘）零读取端口触达、相对形态、根内子目录合法放行、非 .md 四形态（hoverDocAccess）+ Windows/POSIX 双语义判定矩阵（vaultLink）。
+- **P1-2 嵌入卡片 entry 级版本仲裁**：版本仲裁原为全局粒度（任一 entry 已持同目标更新版本即整体丢弃回包）——同目标多 entry（`![[B]]` 与 `![[B|别名]]` 语义键不同独立读取）交错时后到首载回包被丢弃且无重试无自愈（lastReq 悬挂 → 永久卡 loading）；`notifyInvalidated` 对首载在途 entry（loaded 与 watchedFsPath 皆空）被 skip 收不到重发。修复：仲裁改 per-entry（新鲜度参照 = 全库同目标已知最新版本，entry 新增 `lastKnown`——changed 失效清 loaded 后仍持有版本）；过期回包按命中 entry 丢弃并清 lastReq 后**自愈重发一次**（heal 回包仍过期视为版本谱系断点——如目标关闭重开后 version 重置——终态落地不循环）；`notifyInvalidated` 增首载在途前置重发（在途回包可能是变更前旧内容且目标身份未知，无条件重发一次幂等读取）。单测钉跨 entry 交错时序（两 entry 同目标、中途版本推进、双方终态达最新）、首载在途失效重发、静默重载旧回包不覆盖+自愈、循环防护四场景（embedCard）。
+- **P2-2 hover.watch 来源校验**：watch 的 fsPath 须为该会话 `hoverSourceFsPaths` 集合成员（watch 总在成功装载后，集合已含目标）——`DocumentSession` 新增 `hasHoverSource` 查询面，provider 层 watch 登记前校验，伪造越界 watch 静默忽略并计数（debug 日志）；unwatch 只释放既有登记无越界增益，不设校验。单测：未读取 false / 成功读取 true / 失败读取不记录 / 未知会话 false（documentSession）。
+- **P3 顺手项**：`hover.invalidated.generation` 协议注释如实化（当前单面板 FIFO 不做乱序丢弃，代次仅观测与单调性事实保留——hoverPopup 侧注释本已如实）；`hoverSourceFsPaths` 重读触达（已存在成员重读移到队尾，活跃目标不被 32 上限淘汰——与 watch 校验的放行基准联动）；`hover.request` 校验器补 `sourceStart <= sourceEnd`（相等合法，倒置整体拒绝）。
+- 不修（review 记录在案，建议后续票）：P2-1 大小写形态漂移推送 miss（窄场景有自愈，修复涉及跨层形态协议改造）；P3-3 Map 无界、P3-4 sourceDocUri 命名、P3-6 理论负高度（理论边界项，无实际触发路径）。
+- 全量验证记录（2026-09-30，工作树 `codex/hover-preview-embed`）：merge 后 `compile` 通过、`test:unit` 199 文件 4173 项全绿（logs/merge-unit.log）；修复批 `compile` 通过（logs/fix-compile.log）；`test:unit` 199 文件 4186 项 + node --test 103 项全绿（logs/fix-unit.log）；`test:browser` 41/41 套件全绿（logs/fix-browser.log，报告 out/test/browser-runs/run-r1r44P）；集成分片全量（VSIDIAN_ITEST_SHARDS=4）**227 项 PASS / 0 项 FAIL**（logs/fix-integration.log + .vscode-test/integration-dev-s1..4.log，剪贴板环境故障未复现）；`check:stylecontract` 八项零失败 + `check:stylecontract:baseline` 通过（logs/fix-stylecontract*.log）；file-tree `check --strict` 通过（本批零新文件，源码与测试修改均在册条目内）。
+- 人工待验：无新增（全部为内部加固，正常链路行为不变——悬停/嵌入既有各节人工清单继续有效）。

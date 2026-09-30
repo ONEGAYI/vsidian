@@ -1980,3 +1980,85 @@ describe('#222 来源集合：嵌入与悬停多目标同面板在场', () => {
     expect(resolveCalls).toHaveLength(1)
   })
 })
+
+// ---- P2-2 / P3-2（review 修复）：hover.watch 来源校验查询面与集合触达序 ----
+// P2-2：provider 层 watch 登记前校验 fsPath ∈ 该会话 hoverSourceFsPaths（watch
+// 总在成功装载后，集合已含目标）——本 describe 钉查询面语义（伪造越界 watch
+// 的判定基准）；provider 接线为薄 if。P3-2：已存在成员重读时移到队尾（插入
+// 序 = 淘汰序改最近读取序），活跃目标不被 32 上限淘汰。
+describe('#224 P2-2/P3-2：来源集合查询面与重读触达', () => {
+  interface HoverSetup {
+    s: ReturnType<typeof setup>
+    id: string
+    served: string[]
+  }
+
+  /** readHoverTarget 按 target 原文直供对应 fsPath（b1 → D:\notes\b1.md） */
+  function hoverByTargetSetup(): HoverSetup {
+    const s = setup()
+    const served: string[] = []
+    const id = s.session.attachPanel({
+      send: () => {},
+      readHoverTarget: (payload, report) => {
+        const target = payload.target
+        served.push(target)
+        report({
+          ok: true,
+          fsPath: `D:\\notes\\${target}.md`,
+          relPath: `${target}.md`,
+          version: 1,
+          lfText: '# t\n',
+          range: { start: 0, end: 4 },
+          scope: { kind: 'full' },
+        })
+      },
+    })
+    return { s, id, served }
+  }
+
+  async function readTarget(t: HoverSetup, seq: number, target: string): Promise<void> {
+    await t.s.send(t.id, {
+      kind: 'hover.request', sessionId: t.id, docUri: DOC_URI,
+      reqId: seq, instanceId: `inst-${seq}`, sourceStart: 0, sourceEnd: 4, target,
+    })
+  }
+
+  it('P2-2 hasHoverSource：未读取过为 false、成功读取后为 true、失败读取不记录、未知会话为 false', async () => {
+    const t = hoverByTargetSetup()
+    await ready10(t.s, t.id)
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\b.md')).toBe(false) // 未读取
+    expect(t.s.session.hasHoverSource('unknown-session', 'D:\\notes\\b.md')).toBe(false)
+    await readTarget(t, 1, 'b')
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\b.md')).toBe(true)
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\伪造.md')).toBe(false)
+    // 失败读取不记录（read-failed 端口）
+    const s2 = setup()
+    const id2 = s2.session.attachPanel({
+      send: () => {},
+      readHoverTarget: (_p, report) => report({ ok: false, reason: 'read-failed' }),
+    })
+    await ready10(s2, id2)
+    await s2.send(id2, {
+      kind: 'hover.request', sessionId: id2, docUri: DOC_URI,
+      reqId: 1, instanceId: 'x', sourceStart: 0, sourceEnd: 4, target: 'missing',
+    })
+    expect(s2.session.hasHoverSource(id2, 'D:\\notes\\missing.md')).toBe(false)
+  })
+
+  it('P3-2 重读触达：已存在成员重读后移到队尾，超限淘汰按最近读取序（活跃目标不被淘汰）', async () => {
+    const t = hoverByTargetSetup()
+    await ready10(t.s, t.id)
+    // 装满 32 个不同目标（t01..t32，插入序 t01 最旧）
+    for (let i = 1; i <= 32; i++) {
+      await readTarget(t, i, `t${String(i).padStart(2, '0')}`)
+    }
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\t01.md')).toBe(true)
+    // 重读 t01（活跃目标触达 → 移到队尾）
+    await readTarget(t, 33, 't01')
+    // 新目标 t33 入集合：淘汰的应是最久未读的 t02（而非触达过的 t01）
+    await readTarget(t, 34, 't33')
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\t01.md')).toBe(true)
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\t02.md')).toBe(false)
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\t33.md')).toBe(true)
+  })
+})

@@ -35,7 +35,7 @@
 import * as path from 'node:path'
 import { NewlineCoordinator } from '../shared/newline'
 import { parseWikilinkInner } from '../shared/wikilink'
-import type { VaultLinkFileResolution, VaultLinkResolveContext } from '../shared/vaultLink'
+import { isVaultPathInsideRoot, type VaultLinkFileResolution, type VaultLinkResolveContext } from '../shared/vaultLink'
 import { classifyLinkTarget, planPathTextOf, splitHrefFragment } from './linkTarget'
 import { findBlockRange, findHeadingSectionRange } from './wikilinkTarget'
 import type { HoverPreviewFailReason, HoverPreviewScope } from '../shared/protocol'
@@ -278,6 +278,14 @@ export async function readHoverDirectTarget(
 ): Promise<HoverReadOutcome> {
   if (direct.fsPath === '') {
     return { ok: false, reason: 'not-found' }
+  }
+  // P1-1 宿主侧静态边界：fsPath 来自前端消息（正常来源是宿主快照的身份
+  // 直读，但被攻陷 webview 可伪造任意路径）——文本解析路径经
+  // resolveVaultFile 的 escape 拦截天然带界，直供身份在此补同一根内语义
+  // （所属根 = 当前文档的 workspaceFolder；索引按根分区、跨根目标不解析，
+  // 面板快照身份恒在所属根内，合法条目不受影响）。越界/相对形态归 escape。
+  if (!isVaultPathInsideRoot(direct.fsPath, ctx.resolve)) {
+    return { ok: false, reason: 'escape' }
   }
   const spec = direct.anchor ? anchorSpecOfFragment(direct.anchor) : null
   return readAndScope(direct.fsPath, spec, ctx, ports)

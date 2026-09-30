@@ -34,7 +34,7 @@
 import type { HoverPreviewResult, WebviewToHost } from '../shared/protocol'
 import { parseWikilinkInner } from '../shared/wikilink'
 import { t } from '../shared/i18n'
-import { HOVER_REFRESH_DEFAULTS, shouldApplyHoverVersion } from '../shared/hoverRefresh'
+import { HOVER_REFRESH_DEFAULTS } from '../shared/hoverRefresh'
 import { ImageResourceManager } from './imageResource'
 import { applyObsidianDomAlias } from '../shared/obsidianAlias'
 import { createReadingBlockElement, createReadingContainer, READING_CLASS_NAMES } from './readingView'
@@ -98,8 +98,17 @@ interface EmbedEntry {
   sourceStart: number
   sourceEnd: number
   loaded: EmbedLoaded | null
+  /** P1-2（review 修复）最近已应用的目标版本（fsPath + version；成功应用
+   *  时更新，**不随 loaded 清空**——changed 失效清 loaded 后仍作为回包
+   *  新鲜度参照，慢响应旧内容不得覆盖已知更新版本）。TextDocument.version
+   *  按文档单调，同目标跨 entry 同一版本空间，可比 */
+  lastKnown: { fsPath: string; version: number } | null
   /** 在途请求配对（卸载后的迟到回包仍写入缓存） */
   lastReq: { instanceId: string; reqId: number } | null
+  /** P1-2 循环防护：最近一次自愈重发发出的 reqId（该请求的回包若仍过期，
+   *  视为版本谱系断点——如目标文档关闭重开后 TextDocument.version 重置
+   *  ——终态落地不再重发，避免无限循环；正常请求路径置回 null） */
+  healReqId: number | null
   fmExpanded: boolean
   scrollTop: number
   /** #224 已登记订阅的目标（hover.watch；与 loaded 解耦——deleted 清
@@ -211,7 +220,9 @@ export class EmbedCardManager {
         sourceStart: Number.isInteger(sourceStart) ? sourceStart : 0,
         sourceEnd: Number.isInteger(sourceEnd) ? sourceEnd : sourceStart,
         loaded: null,
+        lastKnown: null,
         lastReq: null,
+        healReqId: null,
         fmExpanded: false,
         scrollTop: 0,
         watchedFsPath: null,
@@ -330,41 +341,70 @@ export class EmbedCardManager {
    *  同一 entry 的全部在场 handle（Reading 块与 Live widget 双容器并存）
    *  逐个渲染（先收集后应用：applyResult/applyError 会清空共享的 lastReq，
    *  边清边配对会漏掉同 entry 的其余容器）；已卸载的迟到回包写入缓存供
-   *  重挂使用。#224 版本仲裁：entry 已持有更新版本时旧回包丢弃（慢响应
-   *  旧内容不冒充新目标——请求代次守卫之外的第二道防线） */
+   *  重挂使用。#224 版本仲裁（P1-2 改 per-entry）：新鲜度参照 = 全库同目标
+   *  已知最新版本（loaded + lastKnown——后者在 changed 失效清 loaded 后
+   *  仍持有版本）；回包版本低于参照时**按命中 entry 丢弃并清其 lastReq 后
+   *  自愈重发一次**（原全局早退会把同目标其他 entry 的首载回包一并丢弃且
+   *  无重试，lastReq 悬挂 → 永久卡 loading；宿主读取缓存按目标失效，重发
+   *  读到当前内容，版本单调保证收敛不循环——请求代次守卫之外的第二道
+   *  防线） */
   notifyResult(message: HoverPreviewResult): void {
+    let reference: number | null = null
     if (message.ok) {
-      for (const entry of this.entries.values()) {
-        if (entry.loaded !== null && entry.loaded.fsPath === message.target.fsPath &&
-          !shouldApplyHoverVersion(entry.loaded.version, message.version)) {
-          return // 目标同身份但版本更旧：整体丢弃（各容器一致）
+      for (const other of this.entries.values()) {
+        if (other.loaded !== null && other.loaded.fsPath === message.target.fsPath) {
+          reference = Math.max(reference ?? 0, other.loaded.version)
+        }
+        if (other.lastKnown !== null && other.lastKnown.fsPath === message.target.fsPath) {
+          reference = Math.max(reference ?? 0, other.lastKnown.version)
         }
       }
     }
+    const stale = message.ok && reference !== null && message.version < reference
     const matched: EmbedCardHandle[] = []
+    const matchedEntries = new Set<EmbedEntry>()
     for (const handle of this.active.values()) {
       if (handle.entry.lastReq !== null &&
           handle.entry.lastReq.instanceId === message.instanceId &&
           handle.entry.lastReq.reqId === message.reqId) {
         matched.push(handle)
+        matchedEntries.add(handle.entry)
       }
     }
-    if (matched.length > 0) {
-      for (const handle of matched) {
-        if (message.ok) {
-          this.applyResult(handle, message)
-        } else {
-          this.applyError(handle, message.reason, message.anchor)
+    if (matchedEntries.size > 0) {
+      for (const entry of matchedEntries) {
+        if (stale && entry.healReqId !== message.reqId) {
+          // 过期回包按 entry 丢弃：清在途配对并自愈重发一次（有已渲染内容
+          // 时静默——不闪 loading；首载无内容则如实 loading）。heal 回包若
+          // 仍过期（版本谱系断点）走下方终态落地，不无限重发
+          entry.lastReq = null
+          const first = matched.find((h) => h.entry === entry)!
+          this.requestLoad(first, {
+            silent: matched.some((h) => h.entry === entry && h.display === 'content'),
+            heal: true,
+          })
+          continue
+        }
+        for (const handle of matched) {
+          if (handle.entry !== entry) {
+            continue
+          }
+          if (message.ok) {
+            this.applyResult(handle, message)
+          } else {
+            this.applyError(handle, message.reason, message.anchor)
+          }
         }
       }
       return
     }
-    // 卸载后在途：同配对写入缓存（重挂直接用）
+    // 卸载后在途：同配对写入缓存（重挂直接用）；过期回包只清 lastReq
+    //（缓存不得写入旧版本——重挂会绕过仲裁直接渲染）
     for (const entry of this.entries.values()) {
       if (entry.lastReq !== null &&
           entry.lastReq.instanceId === message.instanceId &&
           entry.lastReq.reqId === message.reqId) {
-        if (message.ok) {
+        if (!stale && message.ok) {
           entry.loaded = {
             fsPath: message.target.fsPath,
             relPath: message.target.relPath,
@@ -373,6 +413,7 @@ export class EmbedCardManager {
             text: message.text,
             range: message.range,
           }
+          entry.lastKnown = { fsPath: message.target.fsPath, version: message.version }
           this.watchEntry(entry)
         }
         entry.lastReq = null
@@ -403,6 +444,22 @@ export class EmbedCardManager {
     status: 'changed' | 'deleted' | 'stale'
     generation: number
   }): void {
+    // P1-2（review 修复）首载在途前置处理：lastReq 在途但 loaded 与
+    // watchedFsPath 皆空的 entry 拿不到下方目标匹配（目标身份要等回包才可
+    // 知）——原实现被「未 watch 即 skip」排除，在途回包可能是变更前旧内容
+    // 且无重发。失效推送到达时无条件重发一次（幂等读取；新 reqId 覆盖
+    // lastReq，旧回包按配对守卫自然丢弃——与本次失效目标无关的在途首载
+    // 顶多多一次等价读取）；卸载在途只清 lastReq（重挂路径重载）。
+    for (const entry of [...this.entries.values()]) {
+      if (entry.lastReq === null || entry.loaded !== null || entry.watchedFsPath !== null) {
+        continue
+      }
+      entry.lastReq = null
+      const first = [...this.active.values()].find((h) => h.entry === entry)
+      if (first) {
+        this.requestLoad(first)
+      }
+    }
     for (const entry of [...this.entries.values()]) {
       // 目标匹配：装载在场的按 loaded，deleted 已清 loaded 的按订阅记录
       //（watchedFsPath——恢复 changed 推送仍能命中）
@@ -582,8 +639,11 @@ export class EmbedCardManager {
 
   /** 发起装载请求（复用悬停文档访问通道；只读消息不进 edit.request）。
    *  silent = #224 变更刷新的静默重载：不切 loading 态（旧内容保留到新
-   *  回包重建，无闪烁） */
-  private requestLoad(handle: EmbedCardHandle, opts?: { silent?: boolean }): void {
+   *  回包重建，无闪烁）；heal = P1-2 过期回包的自愈重发（循环防护标记） */
+  private requestLoad(
+    handle: EmbedCardHandle,
+    opts?: { silent?: boolean; heal?: boolean },
+  ): void {
     const session = this.context.session()
     if (!session.sessionId || !session.docUri) {
       // 会话未就绪：保持壳与 loading 文案（init 后视图重建触发重挂载发请求）
@@ -592,6 +652,7 @@ export class EmbedCardManager {
     }
     const reqId = ++this.reqSeq
     handle.entry.lastReq = { instanceId: handle.instanceId, reqId }
+    handle.entry.healReqId = opts?.heal === true ? reqId : null
     if (!opts?.silent) {
       this.applyDisplay(handle, 'loading', t('embed.loading'))
     }
@@ -618,6 +679,7 @@ export class EmbedCardManager {
       range: message.range,
     }
     handle.entry.lastReq = null
+    handle.entry.lastKnown = { fsPath: loaded.fsPath, version: loaded.version }
     this.applyLoaded(handle, loaded)
   }
 

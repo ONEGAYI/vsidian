@@ -528,4 +528,108 @@ describe('#224 嵌入卡片：订阅、失效分态与有界状态库', () => {
     expect(sent.filter((m) => m.kind === 'hover.request')).toHaveLength(requestsBefore)
     manager.dispose()
   })
+
+  // ---- P1-2（review 修复）：版本仲裁 per-entry 化与在途自愈 ----
+  // 原缺陷：notifyResult 开头的版本检查是全局粒度——同目标多 entry（不同
+  // 语义键独立读取）交错时，后到首载回包被整体丢弃且无重试无自愈（lastReq
+  // 悬挂 → 永久卡 loading）；notifyInvalidated 对首载在途 entry（loaded 与
+  // watchedFsPath 皆空）被 skip 收不到重发。
+
+  /** 挂载一个含两个同目标嵌入（不同语义键：inner 不同）的文档，返回两个宿主元素 */
+  function mountTwoEmbeds(manager: EmbedCardManager): [HTMLElement, HTMLElement] {
+    const doc = '![[目标笔记]]\n\n![[目标笔记|别名]]\n'
+    const embeds = splitReadingBlocks(doc).filter((b) => b.kind === 'embed')
+    expect(embeds).toHaveLength(2)
+    const els = embeds.map((b) => {
+      const el = createReadingBlockElement(b, doc)
+      document.body.appendChild(el)
+      manager.mountBlock(el)
+      return el
+    })
+    return [els[0]!, els[1]!]
+  }
+
+  function requestCount(sent: WebviewToHost[]): number {
+    return sent.filter((m) => m.kind === 'hover.request').length
+  }
+
+  it('P1-2 跨 entry 交错时序：后到首载回包版本过期 → 按 entry 自愈重发，双方终态达最新（不永久卡 loading）', () => {
+    const sent: WebviewToHost[] = []
+    const manager = new EmbedCardManager(makeContext(sent))
+    const [el1, el2] = mountTwoEmbeds(manager)
+    const requests = sent.filter((m): m is Extract<WebviewToHost, { kind: 'hover.request' }> => m.kind === 'hover.request')
+    expect(requests).toHaveLength(2)
+    const [req1, req2] = requests
+    const resultAt = (req: { reqId: number; instanceId: string }, text: string, version: number) =>
+      ({ ...resultOk(req, text), version }) as HoverPreviewResult
+    // entry1 先装载 v8（版本较新——例如读取缓存已见变更后内容）
+    manager.notifyResult(resultAt(req1!, `${TARGET_TEXT}\n新段。`, 8))
+    expect(el1.textContent).toContain('新段')
+    // entry2 首载回包（v6，变更前旧读取）迟到到达：不得因 entry1 已持 v8
+    // 被整体丢弃——按 entry 丢弃旧回包并自愈重发一次
+    manager.notifyResult(resultAt(req2!, TARGET_TEXT, 6))
+    expect(el2.textContent).not.toContain('目标正文一段') // 旧内容不得应用
+    expect(requestCount(sent)).toBe(3) // 自愈重发恰好一笔
+    // 重发回包（v8）到达：entry2 终态与 entry1 一致
+    manager.notifyResult(resultAt(hoverRequestOf(sent), `${TARGET_TEXT}\n新段。`, 8))
+    const probes = manager.probe()
+    expect(probes).toHaveLength(2)
+    for (const p of probes) {
+      expect(p.state).toBe('content')
+    }
+    expect(el2.textContent).toContain('新段')
+    manager.dispose()
+  })
+
+  it('P1-2 首载在途收到目标失效推送：重发一次（不被「未 watch」skip 悬挂在途）', () => {
+    const sent: WebviewToHost[] = []
+    const manager = new EmbedCardManager(makeContext(sent))
+    mountEmbedBlock(manager, '![[目标笔记]]\n') // 首载在途（loading，未 watch）
+    const before = requestCount(sent)
+    invalidate(manager, 'D:\\notes\\目标笔记.md', 'changed')
+    expect(requestCount(sent)).toBe(before + 1) // 在途未 watch 也重发
+    manager.notifyResult(resultOk(hoverRequestOf(sent), TARGET_TEXT))
+    expect(manager.probe()[0]!.state).toBe('content')
+    manager.dispose()
+  })
+
+  it('P1-2 静默重载在途的旧版本回包：内容不覆盖 + 清 lastReq 自愈重发（新回包到达终态最新）', () => {
+    const sent: WebviewToHost[] = []
+    const manager = new EmbedCardManager(makeContext(sent))
+    const el = mountEmbedBlock(manager, '![[目标笔记]]\n')
+    const resultAt = (req: { reqId: number; instanceId: string }, text: string, version: number) =>
+      ({ ...resultOk(req, text), version }) as HoverPreviewResult
+    manager.notifyResult(resultAt(hoverRequestOf(sent), TARGET_TEXT, 7))
+    invalidate(manager, 'D:\\notes\\目标笔记.md', 'changed') // 静默重载在途
+    const reload = hoverRequestOf(sent)
+    const afterReload = requestCount(sent)
+    manager.notifyResult(resultAt(reload, '# 旧版本\n', 6)) // 旧版本迟到
+    expect(el.textContent).not.toContain('旧版本') // 不覆盖已渲染内容
+    expect(el.textContent).toContain('目标笔记')
+    expect(requestCount(sent)).toBe(afterReload + 1) // 清 lastReq 并自愈重发
+    manager.notifyResult(resultAt(hoverRequestOf(sent), `${TARGET_TEXT}\n新段。`, 8))
+    expect(el.textContent).toContain('新段')
+    expect(manager.probe()[0]!.state).toBe('content')
+    manager.dispose()
+  })
+
+  it('P1-2 循环防护：自愈重发的回包仍过期 → 终态落地不再重发（版本谱系断点不无限循环）', () => {
+    const sent: WebviewToHost[] = []
+    const manager = new EmbedCardManager(makeContext(sent))
+    const el = mountEmbedBlock(manager, '![[目标笔记]]\n')
+    const resultAt = (req: { reqId: number; instanceId: string }, text: string, version: number) =>
+      ({ ...resultOk(req, text), version }) as HoverPreviewResult
+    manager.notifyResult(resultAt(hoverRequestOf(sent), TARGET_TEXT, 7))
+    invalidate(manager, 'D:\\notes\\目标笔记.md', 'changed') // 静默重载在途
+    const reload = hoverRequestOf(sent)
+    manager.notifyResult(resultAt(reload, '# 重开内容\n', 1)) // 版本谱系断点（如重开重置）→ 自愈一次
+    const afterHeal = requestCount(sent)
+    const heal = hoverRequestOf(sent)
+    // heal 回包仍"更旧"（同一断点）：终态落地（当前磁盘真值），不再重发
+    manager.notifyResult(resultAt(heal, '# 重开内容\n', 1))
+    expect(requestCount(sent)).toBe(afterHeal)
+    expect(el.textContent).toContain('重开内容')
+    expect(manager.probe()[0]!.state).toBe('content')
+    manager.dispose()
+  })
 })
