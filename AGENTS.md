@@ -280,6 +280,7 @@ vsidian/
 │       ├── liveBlockId.ts              # 块 id 标记 live 淡化装饰
 │       ├── liveCodeCard.ts             # Live 代码块卡片装饰
 │       ├── liveDecorations.ts          # 语法树驱动 Live 装饰（#8）
+│       ├── liveEmbed.ts                # Live 嵌入装饰与源码显隐
 │       ├── liveLineNumbers.ts          # 表格段首行号与绘制探针
 │       ├── liveLinks.ts                # live 链接装饰与跳转（#10）
 │       ├── liveMath.ts                 # 行内与块级公式 live 装饰（#59）
