@@ -239,6 +239,11 @@ export type HostToWebview =
   | { kind: 'outline.test.menuClick'; command: string }
   /** 测试钩子（#69）：关闭当前右键菜单（等价 Esc/外点关闭路径） */
   | { kind: 'outline.test.menuClose' }
+  /** 测试钩子（#14/#236）：点击查找面板三开关（Aa/ab/.*）中 key 对应的
+   *  真实按钮，驱动与用户点击同一处理器（本地翻转 + 重算 + findOptions.set
+   *  上送宿主持久化，snapshot 广播回流）；宿主测试无法向 webview 派发真实
+   *  鼠标事件，以此通道驱动真实宿主内的选项链路 */
+  | { kind: 'find.test.toggle'; key: 'matchCase' | 'wholeWord' | 'regexp' }
   /** 剪贴板读结果（#183）：ok 时 text 为 LF 归一后的剪贴板文本；失败附
    *  原因码（read-failed = 环境读失败）。陈旧回包由 webview 按 reqId
    *  丢弃（在途表先例见 image.paste） */
@@ -3046,6 +3051,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return isOutlineMenuCommand(v.command)
     case 'outline.test.menuClose':
       return true
+    case 'find.test.toggle':
+      return v.key === 'matchCase' || v.key === 'wholeWord' || v.key === 'regexp'
     case 'clipboard.read.result':
       if (!isPositiveInt(v.reqId)) {
         return false

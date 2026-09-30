@@ -6,13 +6,13 @@
 // VSIDIAN_TEST_SHARD=k/N，并以独立便携目录隔离用户数据、扩展与主进程 IPC。
 // 缺省 N=1 保持原有单宿主行为与 integration-dev.log 报告名。
 import { downloadAndUnzipVSCode } from '@vscode/test-electron'
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { generatePerfSample, generateReadingSample, generateMermaidDenseSample } from '../perf/gen-sample.mjs'
 import { writeFixtures, LARGE_DOC_LINES } from './fixtures.mjs'
-import { buildTestHostArgs, cleanupTestDirs, createPortableShardHost, resolveTestHostMode, runTestHost } from './testHost.mjs'
+import { buildTestHostArgs, cleanupTestDirs, createPortableShardHost, resolveTestHostMode, runTestHost, writeTestWorkspaceFile } from './testHost.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
@@ -34,6 +34,7 @@ if (process.env.VSIDIAN_TEST_CASES) {
 }
 
 const wsDirs = []
+const wsFiles = []
 const portableDirs = []
 const testCacheDir = path.join(root, '.vscode-test')
 const started = Date.now()
@@ -45,13 +46,19 @@ try {
       const wsDir = mkdtempSync(path.join(tmpdir(), `vsidian-itest-s${shard}-`))
       wsDirs.push(wsDir)
       writeFixtures(wsDir, { generatePerfSample, generateReadingSample, generateMermaidDenseSample })
+      // 以单 folder 的 .code-workspace 启动（multi-root 形态起步）：1.86.2 上
+      // 目录（single-folder）启动时 updateWorkspaceFolders 增根触发 window
+      // reload（ext host 退出、suite 中断，#198 用例确定性复现）；multi-root
+      // 形态下根增删是纯 folders 更新
+      const wsFile = writeTestWorkspaceFile(wsDir)
+      wsFiles.push(wsFile)
       // 每次运行一律独立便携目录（#198 教训：非分片模式共享 user-data 会把
       // 「工作区根增删」用例留下的多根窗口状态泄漏给后续运行——失效根被
       // 恢复、宿主多开、fixture 交叉污染；隔离的便携目录随 finally 清理）
       const portable = createPortableShardHost(testCacheDir, shard)
       portableDirs.push(portable.portableDir)
       const args = buildTestHostArgs({
-        workspaceDir: wsDir,
+        workspaceDir: wsFile,
         testsPath: path.join(root, 'out', 'test', 'integration', 'suite', 'index.js'),
         extensionPath: root,
         extensionsDir: portable.extensionsDir,
@@ -90,13 +97,21 @@ try {
     // 退出码非零时以报告为准：Linux 宿主收尾存在「全部用例 PASS 后退
     // 出码 1」的退出竞速噪声（Extension host Canceled 特征，CI 五轮确
     // 定性复现且与用例成败无关；本地 Windows 不复现）——报告内 FAIL
-    // 行数为零时放行该噪声，非零照常判败（不掩盖真实失败）
+    // 行数为零且计划用例已全部执行时放行该噪声，非零照常判败（不掩盖
+    // 真实失败）。执行计数核对（2026-10 批次加固）：此前只数 FAIL 行，
+    // 放行过「宿主中途截断」形态（少跑用例、零 FAIL、退出码 1，实测
+    // 计划 59 项只执行 53 项被静默放行）——#211 噪声边界是「全部用例
+    // PASS 后」的收尾竞速，未跑完的计划项不属于该边界，须照常判败
     const report = path.join(testCacheDir, sharded ? `integration-dev-s${i + 1}.log` : 'integration-dev.log')
     try {
-      const failCount = readFileSync(report, 'utf8').split('\n')
-        .filter((line) => line.includes('[集成测试][FAIL]')).length
-      if (failCount === 0) {
-        console.warn(`[runTest] 片 ${i + 1} 宿主退出码 ${result.value} 但报告零失败（收尾退出噪声放行，详见 ${report}）`)
+      const lines = readFileSync(report, 'utf8').split('\n')
+      const failCount = lines.filter((line) => line.includes('[集成测试][FAIL]')).length
+      const doneCount = lines.filter((line) => line.includes('[集成测试][TIME]')).length
+      const planMatch = /\[集成测试\] 执行 (\d+)\/\d+ 项/
+        .exec(lines.find((line) => line.includes('[集成测试] 执行')) ?? '')
+      const planned = planMatch ? Number(planMatch[1]) : 0
+      if (failCount === 0 && planned > 0 && doneCount >= planned) {
+        console.warn(`[runTest] 片 ${i + 1} 宿主退出码 ${result.value} 但报告零失败且 ${doneCount}/${planned} 项全部执行（收尾退出噪声放行，详见 ${report}）`)
         return []
       }
     } catch {
@@ -111,6 +126,15 @@ try {
   console.error('[runTest] 运行失败', err)
   process.exitCode = 1
 } finally {
+  // workspace 文件随工作区目录一并清理（兄弟文件，cleanupTestDirs 只收目录）
+  for (const wsFile of wsFiles) {
+    try {
+      rmSync(wsFile, { force: true })
+    } catch {
+      // 与目录清理同口径：失败不中断，仅留痕
+      console.error(`[runTest] 清理 ${wsFile} 失败`)
+    }
+  }
   const cleanupFailures = [
     ...cleanupTestDirs(wsDirs, tmpdir()),
     ...cleanupTestDirs(portableDirs, testCacheDir),

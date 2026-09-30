@@ -1155,7 +1155,7 @@ async function waitViewState(
       throw new Error(`${(err as Error).message}；最后观测：${JSON.stringify({
         viewMode: s['viewMode'],
         selectionOffset: s['selectionOffset'],
-        liveScrollTopPx: s['liveScrollTopPx'],
+        find: s['find'],
         imageStates: s['imageStates'],
         imageProbe: s['imageProbe'],
         readingEmbed: s['readingEmbed'],
@@ -3826,10 +3826,19 @@ export const cases: Array<[string, () => Promise<void>]> = [
 
     // 非法正则：不崩、valid 可见反馈、无匹配；后续合法查询恢复
     // （断言走独立取值变量——assert 的类型收窄不跨赋值残留）
+    // 默认档为字面量（regexp=false，#236 对齐 VSCode）：'[未闭合' 是合法
+    // 字面量查询，valid=false 反馈只在正则开关开启时可达。经真实开关点击
+    // 链路（find.test.toggle → 本地翻转 + findOptions.set 上送宿主持久化
+    // → snapshot 广播回流）打开 regexp 开关再验证；结束后恢复默认档——
+    // findOptions 是 workspace 级记忆，不恢复会污染同宿主后续用例
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'find.test.toggle', key: 'regexp' })
+    await waitViewState('find.md', (s) => s.find?.regexp === true)
     await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.find.open', query: '[未闭合' })
     const invalid = await waitViewState('find.md', (s) => s.find?.valid === false)
     assert(invalid.find!.total === 0, '非法正则应无匹配')
     assert(invalid.find!.open === true, '非法正则不得关闭面板（不崩）')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'find.test.toggle', key: 'regexp' })
+    await waitViewState('find.md', (s) => s.find?.regexp === false)
     await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.find.open', query: '目标词' })
     v = await waitViewState('find.md', (s) => s.find?.valid === true && s.find?.total === 4)
 
@@ -6377,11 +6386,21 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await waitViewState('outline-menu.md',
       (v) => v.sidebar?.open === true && v.outline?.panelPainted === true && v.outline.items.length === 7)
     const copy = async (index: number, command: string): Promise<string> => {
+      // 竞速防御（#69 时序抖动）：菜单关闭（menuOpen=false）只代表 webview
+      // 命令已执行，clipboard.write 经消息桥到宿主 writeText 仍在途——
+      // 高负载（多片并发）下立即 readText 会读到上一次的剪贴板内容。
+      // 等待谓词改为「剪贴板内容相对上次复制发生变化」：五项复制载荷两两
+      // 不同（相邻调用亦不同），变化即代表本次写已落地，端到端对拍语义
+      // 不变（读取的仍是系统剪贴板实值）
+      const before = await vscode.env.clipboard.readText()
       await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'outline.test.contextMenu', index })
       await waitViewState('outline-menu.md', (v) => v.outline?.menuOpen === true)
       await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'outline.test.menuClick', command })
       await waitViewState('outline-menu.md', (v) => v.outline?.menuOpen === false)
-      return vscode.env.clipboard.readText()
+      return poll('剪贴板更新', async () => {
+        const text = await vscode.env.clipboard.readText()
+        return text !== before ? text : undefined
+      })
     }
     // 标题（plainText：**加粗** 标记不透出）
     assert(await copy(1, 'copyHeading') === '加粗 Alpha', '复制标题应为剥标记可见文本')
@@ -6404,7 +6423,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(setextLink === '[[outline-menu#Setext 标题]]',
       `Setext 标题链接应为标题原文，实际 ${setextLink}`)
     // 该段内容（整控制域源文含标题行，标记原样）
-    assert(await copy(3, 'copySection') === '## Beta\n\nBeta 内容。\n\n#### Beta 深\n\n深内容。', '该段内容为整控制域源文')
+    const sectionText = await copy(3, 'copySection')
+    assert(sectionText === '## Beta\n\nBeta 内容。\n\n#### Beta 深\n\n深内容。',
+      `该段内容为整控制域源文，实际 ${JSON.stringify(sectionText)}`)
     // Setext 标题的复制（plainText）
     assert(await copy(5, 'copyHeading') === 'Setext 标题', 'Setext 标题复制为可见文本')
 
@@ -10728,11 +10749,15 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await writeFile(`${secondDir}/second-target.md`, '# 二根目标\n', 'utf8')
     await writeFile(`${nestedDir}/nested-a.md`, '# 嵌套来源\n\n见 [[nested-target]]。\n', 'utf8')
     await writeFile(`${nestedDir}/nested-target.md`, '# 嵌套目标\n', 'utf8')
-    // 增根（一次调用插入两个，尾部连续——还原时可一次删除）
+    // 增根（一次调用插入两个，尾部连续——还原时可一次删除）。
+    // 留痕：single-folder workspace 上这一步触发 window reload（ext host
+    // 退出、suite 中断）——启动器已改用单 folder 的 .code-workspace（multi-root
+    // 形态起步）规避；此行日志是「回归时快速判界」的锚点
     const added = vscode.workspace.updateWorkspaceFolders(
       vscode.workspace.workspaceFolders!.length, 0,
       { uri: vscode.Uri.file(secondDir) }, { uri: vscode.Uri.file(nestedDir) },
     )
+    console.log(`[#198] updateWorkspaceFolders 返回 ${String(added)}（此后 ext host 存活 = multi-root 启动形态未被回退）`)
     assert(added === true, 'updateWorkspaceFolders 应接受新增')
     try {
       const after = await poll('新根纳入并完成覆盖范围重算', async () => {

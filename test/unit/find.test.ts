@@ -314,6 +314,27 @@ describe('匹配计算与反馈（基于文本模型，含中文与 emoji）', (
     expect(state.find?.currentFrom).toBe(1)
   })
 
+  it('find.test.toggle 测试钩子：点击三开关真实按钮，驱动与用户点击同一链路', () => {
+    const h = makeBridge()
+    const c = mountFind(h, 'a1b2c3\n')
+    c.handleHostMessage({ kind: 'view.find.open', query: '\\d' })
+    // 字面量模式：不命中
+    expect(viewState(c, h).find?.total).toBe(0)
+    // 钩子驱动 regexp 开关（与用户点击同一按钮同一处理器）
+    c.handleHostMessage({ kind: 'find.test.toggle', key: 'regexp' })
+    const btn = parent!.querySelector<HTMLButtonElement>('.vsidian-find-regexp')!
+    expect(btn.classList.contains('vsidian-find-regexp-active')).toBe(true)
+    const state = viewState(c, h)
+    expect(state.find?.regexp).toBe(true)
+    expect(state.find?.total).toBe(3)
+    // 开关切换经 findOptions.set 上送宿主（持久化通道不因钩子路径旁路）
+    expect(h.sent.some((m) => m.kind === 'findOptions.set' && m.options.regexp === true)).toBe(true)
+    // 再切一次回到字面量：匹配随之回落
+    c.handleHostMessage({ kind: 'find.test.toggle', key: 'regexp' })
+    expect(viewState(c, h).find?.regexp).toBe(false)
+    expect(viewState(c, h).find?.total).toBe(0)
+  })
+
   it('非法正则不崩且有可见反馈：输入框 invalid 类 + 0/0 计数 + valid=false', () => {
     const h = makeBridge()
     const c = mountFind(h)

@@ -913,6 +913,15 @@ describe('isWebviewToHost', () => {
     expect(isHostToWebview({ kind: 'outline.test.renameKey', key: 'enter' })).toBe(false)
   })
 
+  it('find.test.toggle 测试钩子消息校验（#14/#236）：三开关键枚举', () => {
+    expect(isHostToWebview({ kind: 'find.test.toggle', key: 'matchCase' })).toBe(true)
+    expect(isHostToWebview({ kind: 'find.test.toggle', key: 'wholeWord' })).toBe(true)
+    expect(isHostToWebview({ kind: 'find.test.toggle', key: 'regexp' })).toBe(true)
+    expect(isHostToWebview({ kind: 'find.test.toggle', key: 'case' })).toBe(false)
+    expect(isHostToWebview({ kind: 'find.test.toggle', key: 7 })).toBe(false)
+    expect(isHostToWebview({ kind: 'find.test.toggle' })).toBe(false)
+  })
+
   it('outline.test.drag 测试钩子消息校验（#70）：非负索引 + 三态 + 三动作', () => {
     for (const position of ['before', 'after', 'inside'] as const) {
       for (const action of ['hover', 'drop', 'escape'] as const) {

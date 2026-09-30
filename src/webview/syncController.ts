@@ -2324,6 +2324,15 @@ export class WebviewSyncController {
         this.closeOutlineMenu()
         break
       }
+      case 'find.test.toggle': {
+        // 测试钩子（#14/#236）：点击查找面板三开关的真实按钮（与用户点击
+        // 同一处理器：本地翻转 + 重算 + findOptions.set 上送宿主持久化）
+        const el = message.key === 'matchCase' ? this.findCaseBtnEl
+          : message.key === 'wholeWord' ? this.findWordBtnEl
+            : this.findRegexpBtnEl
+        el?.click()
+        break
+      }
       case 'contextMenu.test.contextMenu': {
         // 测试钩子（#183）：在正文 doc 偏移 pos 处打开统一菜单（与用户右键
         // 同一命中判定与装配链路——posAtCoords 的替代注入点；宿主测试无法
