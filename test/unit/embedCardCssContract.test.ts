@@ -18,16 +18,32 @@ function rule(selector: string, declaration?: RegExp): string {
 }
 
 describe('嵌入卡片 CSS 契约（#222；#223 起卡片壳规则并列 Live 宿主）', () => {
-  it('卡片壳：左引用边条 + 边框 + 圆角 + 微底色（引用块样式边条的可辨识绘制）', () => {
+  it('卡片壳：只保留左引用竖条（#217 验收反馈——无底色/无边框/无圆角，与 Reading 正文观感对齐）', () => {
     // #223 两选择器并列（Reading 块 + Live widget 宿主同款绘制）；组以
     // Live 选择器置尾，断言组文本同时包含两侧选择器
     const card = rule('#app .cm-editor .cm-content .vsidian-live-embed .vsidian-embed-card')
     expect(card).toMatch(/border-left:\s*3px solid var\(--vsidian-quote-bar-color\)/)
-    expect(card).toMatch(/border:\s*1px solid var\(--vscode-panel-border/)
-    expect(card).toMatch(/border-radius:/)
-    expect(card).toMatch(/background-color:\s*var\(--vscode-textBlockQuote-background/)
+    // 验收反馈改版：整圈边框取消（border: none 后仅左边条重立）、底色透明、
+    // 圆角规则不再发射（默认直角）
+    expect(card).toMatch(/border:\s*none/)
+    expect(card).toMatch(/background-color:\s*transparent/)
+    expect(card).not.toMatch(/border-radius/)
     expect(card.split('{')[0])
       .toContain('#app .vsidian-view-reading .vsidian-reading-embed .vsidian-embed-card')
+  })
+
+  it('Live 嵌套 Reading 容器重置 white-space（#217 验收反馈：行距对齐）', () => {
+    // CM6 .cm-content 的 white-space: pre 级联会把块 innerHTML 尾部换行
+    // 渲染成幽灵行盒（每块撑高约一行、列表逐项翻倍——浏览器实测）；
+    // 嵌套容器重置回 normal
+    const nested = rule('#app .cm-editor .cm-content .vsidian-live-embed .vsidian-view-reading')
+    expect(nested).toMatch(/white-space:\s*normal/)
+  })
+
+  it('顶部栏无底色（#217 验收反馈：融入白底，保留下分隔线区分文件名）', () => {
+    const header = rule('#app .vsidian-embed-card .vsidian-embed-card-header')
+    expect(header).not.toMatch(/background/)
+    expect(header).toMatch(/border-bottom:/)
   })
 
   it('#223 Live 下方形态宿主：块级呈现（显形态源文行下方的独立块）', () => {
@@ -41,6 +57,11 @@ describe('嵌入卡片 CSS 契约（#222；#223 起卡片壳规则并列 Live �
     expect(header).toMatch(/justify-content:\s*space-between/)
     const title = rule('#app .vsidian-embed-card .vsidian-embed-card-title')
     expect(title).toMatch(/color:\s*var\(--vscode-descriptionForeground/)
+  })
+
+  it('内容滚动区内 Reading 容器贴边微收（嵌套正文不贴卡片边缘）', () => {
+    const nested = rule('#app .vsidian-embed-card .vsidian-embed-card-scroll .vsidian-view-reading')
+    expect(nested).toMatch(/padding:/)
   })
 
   it('右上角打开入口：图标按钮尺寸与 hover/focus 可见反馈', () => {

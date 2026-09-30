@@ -46,6 +46,12 @@ export const LINK_CLASS_NAMES = {
   link: 'vsidian-link',
 } as const
 
+/** Ctrl/Cmd 修饰键激活态类（挂 body；#217 验收反馈：按住 Ctrl/Cmd 悬停
+ *  可跳转链接时加下划线与可点击光标——修饰键悬停的可发现性反馈，样式
+ *  契约 content 域 mod-link-hover 条目同源；由 syncController 的
+ *  keydown/keyup/blur 维护） */
+export const LINK_MOD_CLASS = 'vsidian-mod-link'
+
 export { WIKILINK_CLASS_NAMES }
 
 // #132 别名桥：链接/双链装饰类经别名表加工（vsidian 名 + Obsidian 原名同挂）

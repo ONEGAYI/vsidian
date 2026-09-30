@@ -2653,6 +2653,19 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
   cursor: pointer;
 }
 
+/* ---- #217 验收反馈：Ctrl/Cmd 修饰键激活态（body.vsidian-mod-link）——
+   按住修饰键悬停可跳转链接的可发现性反馈（下划线 + 可点击光标）。
+   覆盖源码态 mark（双链/嵌入/普通链接——光标在范围内时源文上的链接，
+   平时无任何反馈）与渲染态 widget；Reading 侧 a 同款（悬停预览不需要
+   修饰键，但修饰键态下的可点击提示两侧一致）。渲染态的常驻
+   cursor:pointer（上方两条规则）保持不变 */
+body.vsidian-mod-link #app .cm-editor .cm-scroller .vsidian-wikilink:hover,
+body.vsidian-mod-link #app .cm-editor .cm-scroller .vsidian-link:hover,
+body.vsidian-mod-link #app .vsidian-view-reading a:hover {
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 /* ---- #10：图片槽位（双视图共用 vsidian-image + 状态修饰类）----
    阅读视图：槽位即 <img>（块挂载时创建，卸载释放）；
    live 视图：槽位为 widget 容器 span（内部 <img> 由资源管理器装载）。
@@ -3955,21 +3968,22 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
    不复制第二套主题环境。#223 起卡片壳规则并列 Live 宿主
    （.vsidian-live-embed，见下方 #223 段——两容器同款绘制） ---- */
 
-/* 卡片壳：左侧引用块样式边条 + 边框圆角 + 微底色（区分正文段落）。
+/* 卡片壳：只保留左侧引用竖条（#217 验收反馈：与 Reading 正观感对齐——
+   去整圈边框/圆角/灰底，白底直角 + 紫竖条，同正文引用块方向）。
    #223 Live 挂载的宿主（.cm-content 内 widget）同款命中；display:block
    使 inline 替换形态（span 宿主）内的卡片独立成块占满行宽 */
 #app .vsidian-view-reading .vsidian-reading-embed .vsidian-embed-card,
 #app .cm-editor .cm-content .vsidian-live-embed .vsidian-embed-card {
   display: block;
   margin: 0.5em 0;
-  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+  border: none;
   border-left: 3px solid var(--vsidian-quote-bar-color);
-  border-radius: 6px;
-  background-color: var(--vscode-textBlockQuote-background, rgba(128, 128, 128, 0.06));
+  background-color: transparent;
   overflow: hidden;
 }
 
-/* 顶部栏：文件名居左、打开入口居右 */
+/* 顶部栏：文件名居左、打开入口居右（#217 验收反馈：去底色融入白底，
+   保留下分隔线区分文件名与内容） */
 #app .vsidian-embed-card .vsidian-embed-card-header {
   display: flex;
   align-items: center;
@@ -3977,7 +3991,6 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
   gap: 8px;
   padding: 4px 10px;
   border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
-  background: var(--vscode-editorWidget-background, rgba(128, 128, 128, 0.07));
 }
 
 /* 文件名：描述色（成功后为目标根内相对路径） */
@@ -4038,6 +4051,15 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
 /* 卡片内 Reading 容器贴边微收（正文样式随嵌套命中，不复制主题） */
 #app .vsidian-embed-card .vsidian-embed-card-scroll .vsidian-view-reading {
   padding: 8px 12px;
+}
+
+/* #217 验收反馈（行距对齐）：Live 卡片在 .cm-content 内，CM6 的
+   white-space: pre 级联进嵌套 Reading 容器——块 innerHTML 尾部的换行
+   文本节点被渲染为幽灵行盒（实测每块撑高约一行、列表逐项翻倍）。
+   嵌套容器重置回 normal（Reading 侧卡片与悬停浮层不在 .cm-content
+   内，天然无此问题） */
+#app .cm-editor .cm-content .vsidian-live-embed .vsidian-view-reading {
+  white-space: normal;
 }
 
 /* 占位引用行（一层展开/悬停浮层内的嵌入形态）：沿用双链链接形态，

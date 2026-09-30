@@ -103,7 +103,7 @@ import {
   type FindMatch,
 } from './findSession'
 import { liveDecorationsField, livePreviewDecorations, LIVE_CLASS_NAMES, selectionTouchesRange, tableCompositionSettled, TaskCheckboxWidget } from './liveDecorations'
-import { createLinkInteractions, LINK_CLASS_NAMES, WIKILINK_CLASS_NAMES, activateLinkAtPos, activateLooseLinkAtPos, activateWikilinkAtPos } from './liveLinks'
+import { LINK_MOD_CLASS, createLinkInteractions, LINK_CLASS_NAMES, WIKILINK_CLASS_NAMES, activateLinkAtPos, activateLooseLinkAtPos, activateWikilinkAtPos } from './liveLinks'
 import { liveMath } from './liveMath'
 import { MATH_CLASS_NAMES } from '../shared/math'
 import { liveMermaid } from './liveMermaid'
@@ -841,8 +841,24 @@ export class WebviewSyncController {
   private findDoc: Text | null = null
   /** document 级键盘拦截（Mod-F 打开 / Esc 关闭），dispose 时移除 */
   private docKeydown: ((e: KeyboardEvent) => void) | undefined
+  /** #217 验收反馈：Ctrl/Cmd 修饰键 keyup 监听（状态类维护；keydown 复用 docKeydown） */
+  private docKeyup: ((e: KeyboardEvent) => void) | undefined
   private readonly keybindingRouter: KeybindingRouter
-  private readonly cancelKeybindingOnBlur = () => this.keybindingRouter.cancel()
+  private readonly cancelKeybindingOnBlur = () => {
+    this.keybindingRouter.cancel()
+    this.setLinkModActive(false) // 窗口失焦：修饰键态不可信，回落（keyup 可能丢失）
+  }
+
+  /** #217 验收反馈：Ctrl/Cmd 修饰键激活态类维护（body.vsidian-mod-link）
+   *  ——按住修饰键悬停可跳转链接的下划线与可点击光标反馈。getModifierState
+   *  精确处理左右 Ctrl/Cmd 同按与交替（单个 keyup 不代表修饰键全放） */
+  private updateLinkModState(e: KeyboardEvent): void {
+    this.setLinkModActive(e.getModifierState('Control') || e.getModifierState('Meta'))
+  }
+
+  private setLinkModActive(active: boolean): void {
+    document.body.classList.toggle(LINK_MOD_CLASS, active)
+  }
 
   // ---- 设置状态（#33）----
   /** 宿主下发的当前设置快照缓存（#34 行号等设置的消费源）；webview 不
@@ -1266,8 +1282,12 @@ export class WebviewSyncController {
       // Ctrl/Cmd 按下（非重复）：Live 悬停补触发——指针已在链接上时开浮层
       // （不 preventDefault/stopPropagation：修饰键本身不是键绑定，其余
       // 路由照常）
-      if ((e.key === 'Control' || e.key === 'Meta') && !e.repeat) {
-        this.onLiveHoverModifierDown()
+      if (e.key === 'Control' || e.key === 'Meta') {
+        // 修饰键激活态类（下划线/光标反馈）随每次按下重算（repeat 亦幂等）
+        this.updateLinkModState(e)
+        if (!e.repeat) {
+          this.onLiveHoverModifierDown()
+        }
       }
       if (e.key === 'Escape' && this.quickHeadingMenu && !this.quickHeadingMenu.hidden) {
         e.preventDefault()
@@ -1305,6 +1325,12 @@ export class WebviewSyncController {
       }
     }
     document.addEventListener('keydown', this.docKeydown, true)
+    this.docKeyup = (e: KeyboardEvent) => {
+      if (e.key === 'Control' || e.key === 'Meta') {
+        this.updateLinkModState(e)
+      }
+    }
+    document.addEventListener('keyup', this.docKeyup, true)
     window.addEventListener('blur', this.cancelKeybindingOnBlur)
     // 宿主明暗主题热跟随：body class 由 VSCode 随主题实时更新
     this.hostThemeObserver = new MutationObserver(() => this.applyHostTheme())
@@ -1462,6 +1488,11 @@ export class WebviewSyncController {
       document.removeEventListener('keydown', this.docKeydown, true)
       this.docKeydown = undefined
     }
+    if (this.docKeyup) {
+      document.removeEventListener('keyup', this.docKeyup, true)
+      this.docKeyup = undefined
+    }
+    this.setLinkModActive(false)
     window.removeEventListener('blur', this.cancelKeybindingOnBlur)
     this.keybindingRouter.cancel()
     this.view?.destroy()

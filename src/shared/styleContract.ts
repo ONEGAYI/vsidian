@@ -731,6 +731,25 @@ export const STYLE_CONTRACT_ENTRIES: readonly StyleContractEntry[] = [
     ],
     introduced: '#217 验收反馈（2026-09-30）',
   },
+  {
+    id: 'mod-link-hover',
+    domain: 'content',
+    category: 'link-image-wikilink',
+    kind: 'selector',
+    target: 'body.vsidian-mod-link（Ctrl/Cmd 修饰键激活态，挂 body 的全局状态类）',
+    purpose: '修饰键悬停反馈（#217 验收反馈：Ctrl+悬停可跳转链接但无任何样式提示，可发现性缺失）：按住 Ctrl/Cmd 时悬停可跳转的链接（双链/嵌入引用/普通链接——源码态 mark 与渲染态 widget，Reading 侧 a 同款）加下划线并显示可点击光标（替代文本光标竖条）。状态类由 syncController 的 document 级 keydown/keyup（getModifierState 精确处理左右修饰键同按与交替）与窗口 blur 回落维护；渲染态 widget 的常驻可点击光标（既有规则）不受影响。',
+    views: ['live', 'reading'],
+    states: '激活（Ctrl/Cmd 按住——body 挂类，悬停链接命中下划线 + cursor:pointer）/ 未激活（无类，链接呈现同既有）；窗口失焦强制回落（keyup 可能丢失）。',
+    dom: 'body 上的类；规则选择器覆盖 .vsidian-wikilink / .vsidian-link / Reading a 的 :hover。',
+    example: 'body.vsidian-mod-link #app .cm-editor .cm-scroller .vsidian-wikilink:hover { text-decoration: underline; cursor: pointer; }',
+    obsidian: { counterpart: 'Obsidian 按住 Ctrl 悬停内部链接的指针与下划线反馈方向', support: 'semantic' },
+    verification: [
+      '单元 syncController 修饰键状态类：keydown 挂类 / keyup 摘类 / blur 回落',
+      '单元链接 CSS 契约：状态类规则（underline + cursor）钉住',
+      '浏览器：真实键盘 Ctrl 按下/抬起 + 悬停链接的 computed 样式断言',
+    ],
+    introduced: '#217 验收反馈（2026-09-30）',
+  },
 
   // ==== 阅读视图块级结构 ====
   {
@@ -2556,7 +2575,7 @@ export const STYLE_CONTRACT_ENTRIES: readonly StyleContractEntry[] = [
     category: 'link-image-wikilink',
     kind: 'selector',
     target: '.vsidian-embed-card（卡片壳，挂 .markdown-embed 别名；.vsidian-embed-card-header 顶部栏 / -title 文件名 / -open 打开入口 / -scroll 内容滚动区 / -state 状态行；错误分态追加 .vsidian-embed-card-state-error 修饰——主题错误色，与悬停浮层同口径）',
-    purpose: '正文嵌入卡片（#222 Reading 侧首创，#223 起 Live 侧同款挂载——两容器共用同一卡片装配与状态库）：独占正文一行的 ![[…]] 替换为引用卡片——左侧引用块样式边条、顶部文件名（成功后为目标根内相对路径）、右上角跳转目标文档入口（沿用 Vsidian 既有打开行为，不改写引用原文；内联 SVG 图形图标 stroke currentColor 随 --vscode-icon-foreground 着色——#217 验收反馈补齐，此前按钮为空壳不可见）。内容为目标的只读 Reading 视图（复用悬停文档访问通道装载全文/章节/块）；短内容自然高度，长内容内部滚动，限高默认 480px、经设置页 embed.maxHeight 调整（内联 max-height 优先于规则缺省）。卡片在 #app 正文流内——主题变量与 CSS 片段随嵌套天然命中，卡片壳的 Obsidian 别名（.markdown-embed）让嵌入容器规则同样命中。Live 侧的挂载形态与源码显隐见 live-embed-widget（Live 宿主内卡片壳 margin 清零、间距由宿主 padding 承担——高度记账语义）。',
+    purpose: '正文嵌入卡片（#222 Reading 侧首创，#223 起 Live 侧同款挂载——两容器共用同一卡片装配与状态库）：独占正文一行的 ![[…]] 替换为引用卡片——观感与 Reading 正文对齐（#217 验收反馈：只保留左侧引用竖条，无底色、无整圈边框、无圆角，白底直角同正文引用块方向）、顶部文件名（成功后为目标根内相对路径）、右上角跳转目标文档入口（沿用 Vsidian 既有打开行为，不改写引用原文；内联 SVG 图形图标 stroke currentColor 随 --vscode-icon-foreground 着色——#217 验收反馈补齐，此前按钮为空壳不可见）。内容为目标的只读 Reading 视图（复用悬停文档访问通道装载全文/章节/块）；短内容自然高度，长内容内部滚动，限高默认 480px、经设置页 embed.maxHeight 调整（内联 max-height 优先于规则缺省）。卡片在 #app 正文流内——主题变量与 CSS 片段随嵌套天然命中，卡片壳的 Obsidian 别名（.markdown-embed）让嵌入容器规则同样命中。Live 侧的挂载形态与源码显隐见 live-embed-widget（Live 宿主内卡片壳 margin 清零、间距由宿主 padding 承担——高度记账语义）。',
     views: ['reading', 'live'],
     states: '装载中（状态行文案，内容区隐藏）/ 装载成功（内容滚动区在场，任务 checkbox 禁用、属性区默认折叠）/ 失败分态（状态行就地 i18n 文案，不弹宿主通知）。视口回收（Reading）与装饰退场（Live）：卡片 DOM 与目标内容视图释放，属性展开与滚动位置保留（重挂恢复）；父文档会话内装载缓存零重发；Live↔Reading 模式切换共享同一实例状态（语义键 = 嵌入行行首 + 目标原文）。',
     dom: 'Reading：挂阅读视图的嵌入块（.vsidian-reading-embed，data-vsidian-embed-inner 携带目标原文）内。Live（#223）：挂 .vsidian-live-embed 宿主 widget（隐形态 inline 替换 / 显形态行下方 block widget）。卡片壳 .vsidian-embed-card 同时挂 .markdown-embed（别名桥 obsidianAlias 同源表）；内容区是嵌套的 .vsidian-view-reading 容器；打开入口为真实 <button type="button">（aria-label 用 i18n 词条 embed.openTarget；内联 SVG 图标 aria-hidden，16 网格 stroke currentColor——#217 验收反馈补齐）。',
@@ -2579,7 +2598,7 @@ export const STYLE_CONTRACT_ENTRIES: readonly StyleContractEntry[] = [
     purpose: '父文档 Live 正文嵌入的挂载宿主（#223）：独占正文一行的 ![[…]] 经 CM6 装饰挂载 reading-embed-card 同款卡片——隐形态（光标/选区未触及源码区间）整行 inline 替换为卡片（源文视觉退场；宿主经 CSS 块级化直接从源码行对齐，replace 前后的 cm-widgetBuffer 零高块级化——验收反馈「不留隐形源码行」，且保留布局盒作为 CM6 行内块坐标锚：完全摘除（display:none）会让 posAtCoords 垂直探测在区间尾拿不到 rect 直接跳过整块，方向键从上向下越过嵌入行——#217 验收实测；保持 inline 替换是键盘垂直导航可进入嵌入行的前提，块级替换会被 CM6 跳过整行）；显形态（selectionTouchesRange 语义命中：折叠光标在区间内部或两端、非空选区严格重叠、任一选区命中）源文可见可编辑、卡片移至行下方继续显示（动态下移一行给源码让位；显隐只作用于源文文本的视觉呈现，不是撤卡片）。宿主上下间距由自身 padding 承担、宿主内卡片壳 margin 清零——margin 折叠出行盒、CM6 高度记账（行号 gutter 与视口测算依据）不含它，曾致行号与正文错位逐卡累积（#217 验收实测，padding 计入盒子高使记账与渲染一致）。宿主吞事件（ignoreEvent=true）：卡片点击不落父编辑器光标、卡片内浏览器选区不被误当作父文档 CM6 源码选区；卡片内交互（滚动/选字复制/链接/属性按钮）走嵌入卡片自身监听。未闭合引用保留可编辑原文并撤下卡片；围栏/frontmatter 内与混排/容器形态不挂载（源文呈现，1.5 期接入）。',
     views: ['live'],
     states: '隐藏态（整行 inline 替换 widget，行结构保留——键盘垂直导航双向可进入；卡片从源码行对齐与 buffer 零高块级化由 CSS 承担）/ 显形态（行下方 block widget .vsidian-live-embed-below，源文在场，动态下移一行给源码让位）；两态切换经装饰重建（卡片实例状态由嵌入卡片状态库保持）；装载中/成功/失败分态沿用卡片状态行。',
-    dom: 'Live 视图 .cm-content 内：隐形态宿主 div 在 .cm-line 内（inline replace 的替换物，经 CSS display:block 块级化，前后 cm-widgetBuffer 零高块级化 display:block + height:0——观感等同隐藏，布局盒保留作坐标锚）；显形态为行尾后 block widget。卡片壳 .vsidian-embed-card（挂 .markdown-embed 别名）在内。卡片高度异步变动（内容装载/图片晚到）经 ResizeObserver → view.requestMeasure 唤醒 CM6 布局。',
+    dom: 'Live 视图 .cm-content 内：隐形态宿主 div 在 .cm-line 内（inline replace 的替换物，经 CSS display:block 块级化，前后 cm-widgetBuffer 零高块级化 display:block + height:0——观感等同隐藏，布局盒保留作坐标锚）；显形态为行尾后 block widget。卡片壳 .vsidian-embed-card（挂 .markdown-embed 别名）在内；嵌套 Reading 容器重置 white-space: normal（#217 验收实测：CM6 .cm-content 的 white-space: pre 级联会使块 innerHTML 尾部换行渲染为幽灵行盒，卡片行距成倍增大）。卡片高度异步变动（内容装载/图片晚到）经 ResizeObserver → view.requestMeasure 唤醒 CM6 布局。',
     example: '#app .cm-editor .cm-content .vsidian-live-embed-below {\n  display: block;\n}',
     obsidian: { counterpart: '.cm-embed-block（Obsidian Live 嵌入容器方向；内部结构闭源不作承诺）', support: 'none' },
     verification: [

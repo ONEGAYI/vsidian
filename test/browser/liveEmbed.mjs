@@ -452,6 +452,81 @@ try {
   passed++
   console.log('[Live嵌入][PASS] 嵌入源码链接语义：双链类高亮 + Ctrl+单击跳转上报')
 
+  // ---- 场景 P：卡片观感对齐 Reading 正文（#217 验收反馈：去灰底、行距一致） ----
+  // 观感：只保留左侧紫色引用竖条（无底色/整圈边框/圆角，标题条无底色）；
+  // 行距：嵌套容器重置 white-space 后块高与内容行高一致（pre 级联的
+  // 幽灵行盒消除——此前每块撑高约一行、列表逐项翻倍）
+  const look = await page.evaluate(() => {
+    const card = document.querySelector('.vsidian-embed-card')
+    const header = document.querySelector('.vsidian-embed-card-header')
+    const para = document.querySelector('.vsidian-embed-card .vsidian-reading-block.vsidian-reading-paragraph')
+    const pEl = para?.querySelector('p') ?? null
+    if (!card || !header || !para || !pEl) return null
+    const cs = getComputedStyle(card)
+    return {
+      bg: cs.backgroundColor,
+      borderLeft: cs.borderLeftWidth,
+      borderTop: cs.borderTopWidth,
+      radius: cs.borderRadius,
+      headerBg: getComputedStyle(header).backgroundColor,
+      blockH: para.getBoundingClientRect().height,
+      pH: pEl.getBoundingClientRect().height,
+    }
+  })
+  assert.ok(look, '观感测量目标在场（卡片/标题条/段落块）')
+  assert.equal(look.bg, 'rgba(0, 0, 0, 0)', '卡片壳底色透明（无灰底）')
+  assert.ok(parseFloat(look.borderLeft) >= 3, `左侧引用竖条在场（实际 ${look.borderLeft}）`)
+  assert.equal(parseFloat(look.borderTop), 0, '无整圈边框（顶边宽 0）')
+  assert.equal(look.radius, '0px', '无圆角（直角，与正文引用块方向一致）')
+  assert.equal(look.headerBg, 'rgba(0, 0, 0, 0)', '标题条无底色（白底融合）')
+  assert.ok(look.blockH <= look.pH * 1.5,
+    `块高与内容行高一致（块 ${look.blockH} vs P ${look.pH}——幽灵行盒消除）`)
+  passed++
+  console.log('[Live嵌入][PASS] 卡片观感对齐：无灰底/无边框/无圆角 + 行距与正文一致')
+
+  // ---- 场景 Q：Ctrl+悬停反馈（#217 验收反馈：下划线 + 可点击光标） ----
+  const modClass = 'vsidian-mod-link'
+  // 自足前置：光标进第一卡区间（显形态——源文与链接 mark 在场）
+  const qEmbedFrom = MULTI_DOC.indexOf('![[目标笔记]]')
+  await page.evaluate((p2) => window.setLiveCursor(p2 + 4), qEmbedFrom)
+  await page.waitForTimeout(120)
+  hosts = await reads()
+  assert.equal(hosts[0].below, true, 'Ctrl 态场景前置：显形态在场')
+  await page.keyboard.down('Control')
+  await page.waitForTimeout(60)
+  assert.equal(await page.evaluate((c) => document.body.classList.contains(c), modClass),
+    true, 'Ctrl 按下挂修饰键状态类')
+  // 显形态源文上的双链类 mark（源码态——平时无反馈的形态）
+  const srcTop2 = await page.evaluate(() => window.liveEmbedTextTop('![[目'))
+  assert.ok(srcTop2 > 0, '源文在场（悬停目标）')
+  await page.mouse.move(100, srcTop2 + 8)
+  await page.waitForTimeout(80)
+  const hoverStyle = await page.evaluate(() => {
+    const line = Array.from(document.querySelectorAll('.cm-content .cm-line'))
+      .find((l) => (l.textContent ?? '').includes('![[目标笔记]]'))
+    const mark = line ? line.querySelector('.vsidian-wikilink') : null
+    if (!mark) return null
+    const cs = getComputedStyle(mark)
+    // 强制 :hover 匹配态读取（Chromium computed 已含 hover 态；直接读）
+    return { cursor: cs.cursor, deco: cs.textDecorationLine }
+  })
+  assert.ok(hoverStyle, '源码态链接 mark 在场')
+  assert.equal(hoverStyle.cursor, 'pointer', 'Ctrl 态悬停显示可点击光标（非文本竖条）')
+  assert.equal(hoverStyle.deco, 'underline', 'Ctrl 态悬停加下划线')
+  await page.keyboard.up('Control')
+  await page.waitForTimeout(60)
+  assert.equal(await page.evaluate((c) => document.body.classList.contains(c), modClass),
+    false, 'Ctrl 抬起摘修饰键状态类')
+  const hoverStyle2 = await page.evaluate(() => {
+    const line = Array.from(document.querySelectorAll('.cm-content .cm-line'))
+      .find((l) => (l.textContent ?? '').includes('![[目标笔记]]'))
+    const mark = line ? line.querySelector('.vsidian-wikilink') : null
+    return mark ? getComputedStyle(mark).cursor : ''
+  })
+  assert.notEqual(hoverStyle2, 'pointer', '状态类摘除后光标回落（反馈随修饰键态）')
+  passed++
+  console.log('[Live嵌入][PASS] Ctrl+悬停：下划线 + 可点击光标，抬起回落')
+
   console.log(`\n[Live嵌入] 全部 ${passed} 个场景通过`)
 } finally {
   await browser.close()
