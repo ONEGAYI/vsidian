@@ -4,6 +4,8 @@
 // #220 扩展：来源资源通道（image.request / link.activate / wikilink.activate
 // 的可选 sourceDocUri——B 文档身份）与 view.state hoverPreview 探针的
 // 属性区/图片观测字段。
+// #224 扩展：订阅与推送消息族（hover.watch / hover.unwatch /
+// hover.invalidated——引用视图跟随目标变更的通道）。
 import { describe, expect, it } from 'vitest'
 import {
   isHostToWebview,
@@ -258,5 +260,56 @@ describe('#221 全入口悬停：directTarget 与 hover.test.pointer 扩展校�
     expect(isHostToWebview({ ...base, ctrlKey: 'yes' })).toBe(false)
     // 非法枚举拒绝
     expect(isHostToWebview({ ...base, link: 'unknown' })).toBe(false)
+  })
+})
+
+// #224 引用视图同步：订阅（webview → 宿主）与失效推送（宿主 → webview）
+// 消息族。watch 的 fsPath 为 hover.result 成功回包送达的目标身份（webview
+// 不自行解析路径）；invalidated 的 status 三态与 vaultIndex onTargetChange
+// 同口径（changed/deleted/stale），generation 单调递增。
+describe('#224 订阅与推送：hover.watch / hover.unwatch / hover.invalidated', () => {
+  const baseWatch = {
+    kind: 'hover.watch',
+    sessionId: 'panel-1',
+    docUri: 'file:///d%3A/notes/a.md',
+    fsPath: 'D:\\notes\\b.md',
+    instanceId: 'embed-1',
+  } as Record<string, unknown>
+
+  it('hover.watch / hover.unwatch：合法形态放行；缺任一字段整体拒绝', () => {
+    expect(isWebviewToHost(baseWatch)).toBe(true)
+    expect(isWebviewToHost({ ...baseWatch, kind: 'hover.unwatch' })).toBe(true)
+    for (const key of ['sessionId', 'docUri', 'fsPath', 'instanceId']) {
+      for (const kind of ['hover.watch', 'hover.unwatch']) {
+        const broken: Record<string, unknown> = { ...baseWatch, kind }
+        delete broken[key]
+        expect(isWebviewToHost(broken), `${kind} 缺 ${key} 应拒绝`).toBe(false)
+      }
+    }
+    // 空串拒绝（fsPath/instanceId 是身份字段；docUri/sessionId 同既有口径）
+    expect(isWebviewToHost({ ...baseWatch, fsPath: '' })).toBe(false)
+    expect(isWebviewToHost({ ...baseWatch, instanceId: '' })).toBe(false)
+    expect(isWebviewToHost({ ...baseWatch, fsPath: 3 })).toBe(false)
+  })
+
+  it('hover.invalidated：status 三态放行、generation 非负整数；非法形态拒绝', () => {
+    const base = {
+      kind: 'hover.invalidated',
+      fsPath: 'D:\\notes\\b.md',
+      status: 'changed',
+      generation: 1,
+    } as Record<string, unknown>
+    expect(isHostToWebview(base)).toBe(true)
+    expect(isHostToWebview({ ...base, status: 'deleted' })).toBe(true)
+    expect(isHostToWebview({ ...base, status: 'stale' })).toBe(true)
+    for (const key of ['fsPath', 'status', 'generation']) {
+      const broken: Record<string, unknown> = { ...base }
+      delete broken[key]
+      expect(isHostToWebview(broken), `缺 ${key} 应拒绝`).toBe(false)
+    }
+    expect(isHostToWebview({ ...base, status: 'whatever' })).toBe(false)
+    expect(isHostToWebview({ ...base, generation: -1 })).toBe(false)
+    expect(isHostToWebview({ ...base, generation: 1.5 })).toBe(false)
+    expect(isHostToWebview({ ...base, fsPath: '' })).toBe(false)
   })
 })

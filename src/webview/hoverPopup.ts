@@ -67,6 +67,7 @@ import {
   type RefFmController,
 } from './refReadingContent'
 import { t } from '../shared/i18n'
+import { shouldApplyHoverVersion } from '../shared/hoverRefresh'
 import type { HoverPreviewResult, WebviewToHost } from '../shared/protocol'
 import {
   HOVER_POPUP_DEFAULT_WIDTH,
@@ -173,10 +174,17 @@ interface HoverPopupState {
   note: string
   /** #221 目标原文（错误分态文案取材；三入口同源——不再读锚点 href） */
   target: string
+  /** #224 打开时的目标规格（订阅刷新重发 hover.request 的载荷来源） */
+  spec: HoverPopupTargetSpec
   /** #219 语义范围选择器探针：收到成功回包前为空串 */
   scope: 'full' | 'heading' | 'block' | ''
   /** #220 当前目标 fsPath（成功回包送达；B 身份图片/链接的 sourceDocUri） */
   targetFsPath: string
+  /** #224 已应用的目标内容版本（-1 = 从未应用；旧回包按版本仲裁丢弃） */
+  appliedVersion: number
+  /** #224 订阅目标（hover.watch 登记后的 fsPath；null = 未订阅——成功
+   *  装载前无目标身份。变更刷新经 hover.invalidated 推送，关闭即 unwatch） */
+  watchedFsPath: string | null
   /** #220 笔记属性区展开状态：实例内保持（刷新不重置），重开复位（openPopup
    *  置 false）。属性区状态机的单一事实源，DOM 只读此值施加 */
   fmExpanded: boolean
@@ -422,8 +430,11 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
     display: 'loading',
     note: '',
     target: spec.target,
+    spec,
     scope: '',
     targetFsPath: '',
+    appliedVersion: -1,
+    watchedFsPath: null,
     fmExpanded: false,
     bImages: null,
     keyboardOpened: options?.keyboard === true,
@@ -614,6 +625,10 @@ export function closeHoverPopup(): void {
   if (state.closeTimer !== undefined) {
     window.clearTimeout(state.closeTimer)
   }
+  // #224 订阅随实例释放（关闭浮层 = 订阅计数回落；宿主侧按实例退订）
+  if (state.watchedFsPath !== null) {
+    sendWatchMessage(state.watchedFsPath, state.instanceId, 'hover.unwatch')
+  }
   for (const cleanup of state.cleanups) {
     cleanup()
   }
@@ -636,11 +651,15 @@ export function closeHoverPopupIfAnchorWithin(scope: ParentNode): void {
 }
 
 /** #220 内容应用（成功回包 / 同实例刷新共用入口）：**不重置 fmExpanded**
- *  ——刷新（目标内容变化引发的重建，#224 接入推送前以同 instanceId+reqId
- *  重放为载体）保留属性展开状态；重开（新实例）才恢复默认折叠 */
+ *  ——刷新（目标内容变化引发的重建，#224 经 hover.invalidated 驱动同实例
+ *  重发请求）保留属性展开状态；重开（新实例）才恢复默认折叠。#224 起
+ *  刷新保持滚动位置（内容重建前保存 scrollTop、重建后回写——内容缩短时
+ *  浏览器按 scrollHeight 合法钳制）并登记目标订阅（hover.watch） */
 function applyHoverContent(state: HoverPopupState, message: Extract<HoverPreviewResult, { ok: true }>): void {
+  const keepScroll = state.scrollEl.scrollTop // #224 刷新前保存（首载为 0）
   state.scope = message.scope.kind
   state.targetFsPath = message.target.fsPath
+  state.appliedVersion = message.version
   if (!state.bImages) {
     state.bImages = createSourcedImageManager(state)
   }
@@ -654,13 +673,47 @@ function applyHoverContent(state: HoverPopupState, message: Extract<HoverPreview
     box.disabled = true
   }
   applyDisplay(state, 'content', message.target.relPath)
+  // #224 滚动位置恢复（刷新路径：内容重建后回写；内容缩短合法钳制）
+  if (keepScroll > 0) {
+    state.scrollEl.scrollTop = keepScroll
+  }
+  ensureWatch(state, message.target.fsPath)
+}
+
+/** #224 登记目标订阅（成功装载后；目标身份变化先释放旧订阅） */
+function ensureWatch(state: HoverPopupState, fsPath: string): void {
+  if (state.watchedFsPath === fsPath) {
+    return
+  }
+  if (state.watchedFsPath !== null) {
+    sendWatchMessage(state.watchedFsPath, state.instanceId, 'hover.unwatch')
+  }
+  state.watchedFsPath = fsPath
+  sendWatchMessage(fsPath, state.instanceId, 'hover.watch')
+}
+
+/** #224 订阅消息出站（会话守卫字段与 hover.request 同款） */
+function sendWatchMessage(
+  fsPath: string,
+  instanceId: string,
+  kind: 'hover.watch' | 'hover.unwatch',
+): void {
+  const session = context?.session()
+  if (!context || !session?.sessionId || !session.docUri) {
+    return
+  }
+  context.send({ kind, sessionId: session.sessionId, docUri: session.docUri, fsPath, instanceId })
 }
 
 /** 宿主读取结果（syncController handleHostMessage 转发）：
  *  仅当场内实例、instanceId 与 reqId 双匹配的结果生效——迟到/陈旧回包
- *  丢弃，绝不重开已关闭浮层 */
+ *  丢弃，绝不重开已关闭浮层。#224 版本仲裁：成功回包的目标版本低于已
+ *  应用版本（慢响应旧内容）整体丢弃，不冒充新目标 */
 export function notifyHoverResult(message: HoverPreviewResult): void {
   if (!popup || message.instanceId !== popup.instanceId || message.reqId !== popup.reqId) {
+    return
+  }
+  if (message.ok && !shouldApplyHoverVersion(popup.appliedVersion, message.version)) {
     return
   }
   if (message.ok) {
@@ -670,6 +723,68 @@ export function notifyHoverResult(message: HoverPreviewResult): void {
     applyDisplay(popup, 'error', refErrorText(message.reason, popup.target, message.anchor))
   }
   position(popup)
+}
+
+/**
+ * #224 目标失效推送（syncController 转发 hover.invalidated）：仅作用于
+ * 订阅该目标的在场浮层实例。分态：
+ * - changed：同实例新 reqId 重发读取（迟到的旧 reqId 回包被守卫丢弃）；
+ *   刷新期间保留当前内容与滚动（不闪 loading），回包到达重建。
+ * - deleted：确认删除撤下内容（清空视图 + not-found 分态就地呈现），
+ *   不无限保留旧内容；订阅保持（恢复 changed 推送可重载）。
+ * - stale：权限/断连读取失败分态（read-failed 文案；不等同删除）。
+ * 同面板消息 FIFO，代次单调由宿主协调器保证——不做乱序丢弃。
+ */
+export function notifyHoverInvalidated(message: {
+  fsPath: string
+  status: 'changed' | 'deleted' | 'stale'
+  generation: number
+}): void {
+  const state = popup
+  if (!state || state.watchedFsPath !== message.fsPath) {
+    return
+  }
+  if (message.status === 'changed') {
+    const session = context?.session()
+    if (!context || !session?.sessionId || !session.docUri) {
+      return
+    }
+    state.reqId = ++reqSeq // 新请求代次：旧 reqId 迟到回包因配对失败丢弃
+    context.send({
+      kind: 'hover.request',
+      sessionId: session.sessionId,
+      docUri: session.docUri,
+      reqId: state.reqId,
+      instanceId: state.instanceId,
+      sourceStart: state.spec.sourceStart,
+      sourceEnd: state.spec.sourceEnd,
+      target: state.spec.target,
+      ...(state.spec.linkHref !== undefined ? { linkHref: state.spec.linkHref } : {}),
+      ...(state.spec.directFsPath !== undefined
+        ? {
+            directTarget: {
+              fsPath: state.spec.directFsPath,
+              ...(state.spec.directAnchor ? { anchor: state.spec.directAnchor } : {}),
+            },
+          }
+        : {}),
+    })
+    return
+  }
+  // deleted / stale：撤下内容显示分态（视图清空防 display 反转后旧内容
+  // 闪现；fm/滚动状态在实例 state 保留，恢复重载后无需重取）
+  state.view.setDocument('')
+  state.view.updateNow()
+  state.bImages?.dispose()
+  state.bImages = null
+  state.targetFsPath = ''
+  state.scope = ''
+  applyDisplay(
+    state,
+    'error',
+    refErrorText(message.status === 'deleted' ? 'not-found' : 'read-failed', state.target),
+  )
+  position(state)
 }
 
 /** #220 image.result 路由（syncController 转发）：作用于在场浮层的 B 管理

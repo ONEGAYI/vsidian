@@ -6,11 +6,15 @@
 //
 // 分层契约（#223/#224 的衔接边界）：
 // - 本模块做 **Reading 侧挂载适配与容器生命周期**；目标解析与内容服务
-//   在 hoverDocAccess（宿主）与 refReadingContent（共享装配）；未保存变更
-//   刷新（#224）不在此实现，接口已按容器无关设计（实例身份 = 嵌入行区间
-//   + 目标原文，与容器类型无绑定）。#223 起 Live widget（liveEmbed.ts 的
-//   LiveEmbedWidget）经 mountCardInto 以同一状态库挂载——语义键同源使
-//   模式切换（Live↔Reading）共享装载缓存、fm 展开与滚动状态。
+//   在 hoverDocAccess（宿主）与 refReadingContent（共享装配）；#224 起
+//   未保存变更刷新接入：装载成功登记目标订阅（hover.watch，宿主协调器
+//   防抖合并推送），hover.invalidated 到达按分态处理（changed 静默重载、
+//   deleted/stale 撤内容显示分态）。接口按容器无关设计（实例身份 = 嵌入
+//   行区间 + 目标原文，与容器类型无绑定）。#223 起 Live widget
+//   （liveEmbed.ts 的 LiveEmbedWidget）经 mountCardInto 以同一状态库挂载
+//   ——语义键同源使模式切换（Live↔Reading）共享装载缓存、fm 展开与
+//   滚动状态。#224 起状态库有界（LRU 淘汰死键——父文档文本变更后漂移
+//   的旧语义键；仍挂载实例不淘汰），被淘汰条目配对释放订阅。
 // - 一层展开：B 内容内的 embed 块**不升级**（readingBlocks 的占位引用行
 //   呈现，可点击按 B 身份打开）——不递归装载、不在嵌入内容上叠加悬停
 //   浮层（contentEl 停止 mouseover/mouseout 冒泡）。
@@ -30,6 +34,7 @@
 import type { HoverPreviewResult, WebviewToHost } from '../shared/protocol'
 import { parseWikilinkInner } from '../shared/wikilink'
 import { t } from '../shared/i18n'
+import { HOVER_REFRESH_DEFAULTS, shouldApplyHoverVersion } from '../shared/hoverRefresh'
 import { ImageResourceManager } from './imageResource'
 import { applyObsidianDomAlias } from '../shared/obsidianAlias'
 import { createReadingBlockElement, createReadingContainer, READING_CLASS_NAMES } from './readingView'
@@ -73,11 +78,13 @@ export interface EmbedCardContext {
   requestMeasure?(): void
 }
 
-/** 装载结果缓存（父文档会话内；#224 变更订阅接入前的首载快照） */
+/** 装载结果缓存（父文档会话内；#224 变更订阅推送后按目标失效清除） */
 interface EmbedLoaded {
   fsPath: string
   relPath: string
   scope: 'full' | 'heading' | 'block'
+  /** #224 目标内容版本（TextDocument.version；旧回包按版本仲裁丢弃） */
+  version: number
   text: string
   range: { start: number; end: number }
 }
@@ -85,7 +92,7 @@ interface EmbedLoaded {
 /** 嵌入实例状态（跨挂载保持——视口回收不清除仍可见实例的状态） */
 interface EmbedEntry {
   /** 语义键：嵌入行区间 + 目标原文（父文档文本不变则稳定；文本变更后
-   *  键漂移自然开新实例，旧键随会话 dispose 回收） */
+   *  键漂移自然开新实例，旧键随 LRU 淘汰回收） */
   key: string
   inner: string
   sourceStart: number
@@ -95,6 +102,9 @@ interface EmbedEntry {
   lastReq: { instanceId: string; reqId: number } | null
   fmExpanded: boolean
   scrollTop: number
+  /** #224 已登记订阅的目标（hover.watch；与 loaded 解耦——deleted 清
+   *  loaded 后订阅保持以感知恢复，dispose/淘汰时据此配对 unwatch） */
+  watchedFsPath: string | null
 }
 
 /** 挂载中的卡片实例（DOM 生命周期 = 宿主元素在场期间——Reading 块元素
@@ -202,9 +212,13 @@ export class EmbedCardManager {
         lastReq: null,
         fmExpanded: false,
         scrollTop: 0,
+        watchedFsPath: null,
       }
       this.entries.set(key, entry)
+    } else {
+      this.touchEntry(entry) // LRU 触达（重挂载 = 仍有效实例）
     }
+    this.evictEntriesIfNeeded()
 
     // 卡片壳 DOM（替换块内占位引用行；块元素的源锚点 dataset 保持）
     el.textContent = ''
@@ -314,8 +328,17 @@ export class EmbedCardManager {
    *  同一 entry 的全部在场 handle（Reading 块与 Live widget 双容器并存）
    *  逐个渲染（先收集后应用：applyResult/applyError 会清空共享的 lastReq，
    *  边清边配对会漏掉同 entry 的其余容器）；已卸载的迟到回包写入缓存供
-   *  重挂使用 */
+   *  重挂使用。#224 版本仲裁：entry 已持有更新版本时旧回包丢弃（慢响应
+   *  旧内容不冒充新目标——请求代次守卫之外的第二道防线） */
   notifyResult(message: HoverPreviewResult): void {
+    if (message.ok) {
+      for (const entry of this.entries.values()) {
+        if (entry.loaded !== null && entry.loaded.fsPath === message.target.fsPath &&
+          !shouldApplyHoverVersion(entry.loaded.version, message.version)) {
+          return // 目标同身份但版本更旧：整体丢弃（各容器一致）
+        }
+      }
+    }
     const matched: EmbedCardHandle[] = []
     for (const handle of this.active.values()) {
       if (handle.entry.lastReq !== null &&
@@ -344,9 +367,11 @@ export class EmbedCardManager {
             fsPath: message.target.fsPath,
             relPath: message.target.relPath,
             scope: message.scope.kind,
+            version: message.version,
             text: message.text,
             range: message.range,
           }
+          this.watchEntry(entry)
         }
         entry.lastReq = null
         return
@@ -358,6 +383,57 @@ export class EmbedCardManager {
   notifyImageResult(msg: { reqId: number; ok: boolean; src?: string; reason?: string }): void {
     for (const handle of this.active.values()) {
       handle.bImages?.handleResult(msg)
+    }
+  }
+
+  /**
+   * #224 目标失效推送路由（syncController 转发 hover.invalidated）：命中
+   * loaded 目标的全部 entry（同目标多实例一致处理）。
+   * - changed：清 loaded（重挂路径重载）+ 在场 handle 静默重发请求（不闪
+   *   loading——旧内容保留到新回包重建，滚动位置先保存在场值）。
+   * - deleted：撤下内容（清 loaded 与 B 视图 DOM、not-found 分态就地呈现）
+   *   ，不无限保留旧内容；订阅保持（恢复 changed 推送可重载）。
+   * - stale：读取失败分态（read-failed 文案；权限/断连不等同删除）。
+   * fm 展开与滚动状态保留在 entry（有效实例状态不因失效重置）。
+   */
+  notifyInvalidated(message: {
+    fsPath: string
+    status: 'changed' | 'deleted' | 'stale'
+    generation: number
+  }): void {
+    for (const entry of [...this.entries.values()]) {
+      // 目标匹配：装载在场的按 loaded，deleted 已清 loaded 的按订阅记录
+      //（watchedFsPath——恢复 changed 推送仍能命中）
+      const entryTarget = entry.loaded?.fsPath ?? entry.watchedFsPath
+      if (entryTarget !== message.fsPath || entry.watchedFsPath === null) {
+        continue
+      }
+      // 在场滚动位置先保存（重建后恢复；离屏 entry 保留旧值）
+      for (const handle of this.active.values()) {
+        if (handle.entry === entry && handle.scrollEl.scrollTop > 0) {
+          entry.scrollTop = handle.scrollEl.scrollTop
+        }
+      }
+      entry.loaded = null
+      entry.lastReq = null
+      const handles = [...this.active.values()].filter((h) => h.entry === entry)
+      if (message.status === 'changed') {
+        for (const handle of handles) {
+          this.requestLoad(handle, { silent: true })
+        }
+        this.touchEntry(entry) // 刷新中仍是有效实例
+      } else {
+        const note = refErrorText(
+          message.status === 'deleted' ? 'not-found' : 'read-failed',
+          targetOfInner(entry.inner),
+        )
+        for (const handle of handles) {
+          handle.bImages?.dispose()
+          handle.bImages = null
+          handle.contentEl.textContent = '' // 旧内容撤下（防 display 反转闪现）
+          this.applyDisplay(handle, 'error', note)
+        }
+      }
     }
   }
 
@@ -406,14 +482,101 @@ export class EmbedCardManager {
     for (const el of Array.from(this.active.keys())) {
       this.unmountBlock(el)
     }
+    // #224 订阅随状态库整体释放（实例订阅计数回落）
+    for (const entry of this.entries.values()) {
+      this.unwatchEntry(entry)
+    }
     this.entries.clear()
     this.heightObserver?.disconnect()
   }
 
   // ---- 内部 ----
 
-  /** 发起装载请求（复用悬停文档访问通道；只读消息不进 edit.request） */
-  private requestLoad(handle: EmbedCardHandle): void {
+  /** LRU 触达：重插到 Map 尾部（插入序 = 淘汰序，hoverSourceFsPaths 先例） */
+  private touchEntry(entry: EmbedEntry): void {
+    this.entries.delete(entry.key)
+    this.entries.set(entry.key, entry)
+  }
+
+  /**
+   * 状态库有界淘汰（#224）：语义键条目超上限时按最近触达淘汰死键——
+   * 父文档文本变更后漂移的旧键（无在场 handle、长期未挂载）。**仍有效
+   * 实例不淘汰**（在场挂载或最近挂载过的 entry 位于 MRU 端；防御性跳过
+   * 仍有在场 handle 的条目——视口内的实例状态不受离屏回收与淘汰影响）。
+   * 被淘汰条目的目标订阅配对释放。
+   */
+  private evictEntriesIfNeeded(): void {
+    while (this.entries.size > HOVER_REFRESH_DEFAULTS.embedEntryLimit) {
+      const victim = this.entries.keys().next().value
+      if (victim === undefined) {
+        break
+      }
+      const entry = this.entries.get(victim)!
+      const mounted = [...this.active.values()].some((h) => h.entry === entry)
+      if (mounted) {
+        // 队首仍挂载（全部条目在场的极端文档）：不淘汰有效实例，容忍
+        // 超限（在场卡片数由视口窗口约束，实际上界远低于上限）
+        break
+      }
+      this.entries.delete(victim)
+      this.unwatchEntry(entry)
+    }
+  }
+
+  /** #224 目标订阅登记（幂等；成功装载后调用。目标身份变化先释放旧订阅） */
+  private watchEntry(entry: EmbedEntry): void {
+    if (!entry.loaded) {
+      return
+    }
+    if (entry.watchedFsPath === entry.loaded.fsPath) {
+      return
+    }
+    const session = this.context.session()
+    if (!session.sessionId || !session.docUri) {
+      return
+    }
+    if (entry.watchedFsPath !== null) {
+      this.sendUnwatch(entry.watchedFsPath, entry.key)
+    }
+    entry.watchedFsPath = entry.loaded.fsPath
+    this.context.send({
+      kind: 'hover.watch',
+      sessionId: session.sessionId,
+      docUri: session.docUri,
+      fsPath: entry.watchedFsPath,
+      instanceId: entry.key,
+    })
+  }
+
+  /** #224 目标订阅释放（dispose / LRU 淘汰；幂等） */
+  private unwatchEntry(entry: EmbedEntry): void {
+    if (entry.watchedFsPath === null) {
+      return
+    }
+    const fsPath = entry.watchedFsPath
+    entry.watchedFsPath = null
+    this.sendUnwatch(fsPath, entry.key)
+  }
+
+  /** #224 订阅释放消息出站 */
+  private sendUnwatch(fsPath: string, instanceId: string): void {
+    const session = this.context.session()
+    if (!session.sessionId || !session.docUri) {
+      return
+    }
+    this.context.send({
+      kind: 'hover.unwatch',
+      sessionId: session.sessionId,
+      docUri: session.docUri,
+      fsPath,
+      instanceId,
+    })
+  }
+
+  /** 发起装载请求（复用悬停文档访问通道；只读消息不进 edit.request）。
+   *  silent = #224 变更刷新的静默重载：不切 loading 态（旧内容保留到新
+   *  回包重建，无闪烁） */
+  private requestLoad(handle: EmbedCardHandle, opts?: { silent?: boolean }): void {
     const session = this.context.session()
     if (!session.sessionId || !session.docUri) {
       // 会话未就绪：保持壳与 loading 文案（init 后视图重建触发重挂载发请求）
@@ -422,7 +585,9 @@ export class EmbedCardManager {
     }
     const reqId = ++this.reqSeq
     handle.entry.lastReq = { instanceId: handle.instanceId, reqId }
-    this.applyDisplay(handle, 'loading', t('embed.loading'))
+    if (!opts?.silent) {
+      this.applyDisplay(handle, 'loading', t('embed.loading'))
+    }
     this.context.send({
       kind: 'hover.request',
       sessionId: session.sessionId,
@@ -441,6 +606,7 @@ export class EmbedCardManager {
       fsPath: message.target.fsPath,
       relPath: message.target.relPath,
       scope: message.scope.kind,
+      version: message.version,
       text: message.text,
       range: message.range,
     }
@@ -448,9 +614,15 @@ export class EmbedCardManager {
     this.applyLoaded(handle, loaded)
   }
 
-  /** 装载结果渲染（首载与缓存重挂共用）：B Reading 视图 + 状态恢复 */
+  /** 装载结果渲染（首载与缓存重挂共用）：B Reading 视图 + 状态恢复。
+   *  #224 刷新路径（在场 handle）：滚动位置先取当前值（重挂路径 scrollEl
+   *  新建为 0，保留 entry 旧值），重建后经既有 rAF 恢复；目标订阅登记 */
   private applyLoaded(handle: EmbedCardHandle, loaded: EmbedLoaded): void {
+    if (handle.scrollEl.scrollTop > 0) {
+      handle.entry.scrollTop = handle.scrollEl.scrollTop // 刷新前保存
+    }
     handle.entry.loaded = loaded
+    this.touchEntry(handle.entry) // LRU 触达（仍有效实例）
     if (!handle.bImages) {
       handle.bImages = createSourcedImageManager({
         session: () => this.context.session(),
@@ -489,7 +661,9 @@ export class EmbedCardManager {
     // 滚动位置恢复（重挂路径；首载 scrollTop 为 0 无操作）。恢复必须延迟
     // 一帧：宿主元素可能尚未进 DOM（Reading 侧块挂载钩子先于 append、
     // Live 侧 widget toDOM 后续才插入），此刻 scrollEl 无布局（scrollHeight
-    // 为 0），同步赋值会被浏览器钳到 0——下一帧宿主已入 DOM，布局可用
+    // 为 0），同步赋值会被浏览器钳到 0——下一帧宿主已入 DOM，布局可用。
+    // 刷新路径（在场 handle）本可同步恢复，但内容重建后的布局重排与
+    // rAF 同帧完成，统一走延迟一帧保持两路径一致
     if (handle.entry.scrollTop > 0) {
       const restore = handle.entry.scrollTop
       const target = handle.scrollEl
@@ -499,6 +673,8 @@ export class EmbedCardManager {
         }
       })
     }
+    // #224 目标订阅（成功装载后；幂等——目标身份变化时先释放旧订阅）
+    this.watchEntry(handle.entry)
   }
 
   /** 错误分态：就地 i18n 文案（不弹宿主通知；anchor-missing 附锚点原文） */

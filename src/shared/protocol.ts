@@ -446,6 +446,20 @@ export type HostToWebview =
       /** anchor-missing 时的锚点原文（块 id 带 ^ 前缀），供就地提示 */
       anchor?: string
     }
+  /** 悬停目标失效推送（#224 引用视图同步）：宿主观测到被订阅目标（hover.watch
+   *  登记）的内容或磁盘状态变化后，向订阅该目标的全部面板推送——webview
+   *  据此对在场浮层/嵌入卡片撤旧重载（changed）、撤下内容显示缺失态
+   *  （deleted，不无限保留旧内容）或呈现读取失败（stale：权限/断连，不等同
+   *  删除）。status 三态与 vaultIndex onTargetChange 同口径；generation 为
+   *  同一目标的失效代次（单调递增，首观测为 1）——晚到推送可据此丢弃。
+   *  未保存修改经短暂合并（防抖窗）后以 changed 推送；deleted/stale 直通。
+   *  只读推送：不携带正文（webview 重发 hover.request 读取），宿主不写文档 */
+  | {
+      kind: 'hover.invalidated'
+      fsPath: string
+      status: 'changed' | 'deleted' | 'stale'
+      generation: number
+    }
   /** 索引维护状态（#198，设置页消费）：排除模式（当前生效 + 默认值）、
    *  维护操作状态与进度、最近一次操作结果反馈。设置页经 index.get 拉取；
    *  宿主状态变更（模式保存/进度推进/操作完成）后推送。available=false
@@ -773,6 +787,28 @@ export type WebviewToHost =
        *  not-found 分态——条目仍可悬停显示失效占位）。target 字段此时为
        *  条目显示名（错误分态文案的取材） */
       directTarget?: { fsPath: string; anchor?: string }
+    }
+  /** 悬停目标订阅（#224 引用视图同步，只读消息）：webview 侧视图实例
+   *  （浮层/嵌入卡片）成功装载目标后登记——宿主对该目标的文档修改与磁盘
+   *  变化经 hover.invalidated 推送。fsPath 恒为 hover.result 成功回包送达
+   *  的目标身份（webview 不自行解析路径）；instanceId 为视图实例标识
+   *  （浮层 instanceId / 嵌入 entry 语义键）——同一目标多实例合并订阅
+   *  （目标级推送），各实例独立释放（hover.unwatch 归零才退订） */
+  | {
+      kind: 'hover.watch'
+      sessionId: string
+      docUri: string
+      fsPath: string
+      instanceId: string
+    }
+  /** 悬停目标订阅释放（hover.watch 的配对消息）：实例关闭/回收时释放其
+   *  订阅；面板销毁由宿主侧整体释放（releaseSession），不依赖逐实例消息 */
+  | {
+      kind: 'hover.unwatch'
+      sessionId: string
+      docUri: string
+      fsPath: string
+      instanceId: string
     }
   /** 代码块复制请求（#81）：卡片头部复制按钮点击 → 宿主剪贴板 API 写入。
    *  text 为代码体原文（两条围栏行之间，不含围栏与 info string），恒为
@@ -2611,6 +2647,18 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
             isString(v.directTarget.fsPath) &&
             (v.directTarget.anchor === undefined || isString(v.directTarget.anchor))))
       )
+    case 'hover.watch':
+    case 'hover.unwatch':
+      // #224 目标订阅：会话守卫字段 + 非空目标路径与实例标识（身份字段，
+      // 空串即语义缺失——整体拒绝）
+      return (
+        isString(v.sessionId) &&
+        isString(v.docUri) &&
+        typeof v.fsPath === 'string' &&
+        v.fsPath.length > 0 &&
+        typeof v.instanceId === 'string' &&
+        v.instanceId.length > 0
+      )
     case 'perf.report':
       return (
         isNonNegativeInt(v.typingRounds) &&
@@ -3028,6 +3076,15 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
           v.reason === 'not-found' || v.reason === 'non-markdown' || v.reason === 'read-failed' ||
           v.reason === 'anchor-missing') &&
         (v.anchor === undefined || isString(v.anchor))
+      )
+    case 'hover.invalidated':
+      // #224 失效推送：非空目标路径 + status 三态（vaultIndex onTargetChange
+      // 同口径）+ 非负整数代次（单调递增；首观测为 1）
+      return (
+        typeof v.fsPath === 'string' &&
+        v.fsPath.length > 0 &&
+        (v.status === 'changed' || v.status === 'deleted' || v.status === 'stale') &&
+        isNonNegativeInt(v.generation)
       )
     case 'outlinks.test.click':
       return true

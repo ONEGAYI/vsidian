@@ -138,6 +138,7 @@ import {
   hoverPopupSpecOfAnchor,
   hoverPreviewAnchorEnter,
   hoverPreviewAnchorLeave,
+  notifyHoverInvalidated,
   invalidateHoverPopupImages,
   isHoverableMdLinkHref,
   notifyHoverImageInvalidate,
@@ -1698,6 +1699,14 @@ export class WebviewSyncController {
         // 各自实例守卫丢弃不匹配回包）
         notifyHoverResult(message)
         this.embedCards?.notifyResult(message)
+        break
+      }
+      case 'hover.invalidated': {
+        // #224 引用视图同步：宿主对订阅目标的失效推送（未保存修改防抖
+        // 合并 / 磁盘事件分态直通）。转发浮层与嵌入卡片——各自按订阅目标
+        // 匹配（watchedFsPath / entry.loaded.fsPath），未订阅目标零动作
+        notifyHoverInvalidated(message)
+        this.embedCards?.notifyInvalidated(message)
         break
       }
       case 'hover.test.pointer': {

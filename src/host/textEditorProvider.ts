@@ -63,6 +63,7 @@ import type { CssSnippetService } from './cssSnippetService'
 import type { VaultIndexService } from './vaultIndexService'
 import type { IndexMaintenance } from './vaultIndexMaintenance'
 import { ImageRefreshCoordinator } from './imageRefreshCoordinator'
+import { HoverRefreshCoordinator } from './hoverRefreshCoordinator'
 import type { ImageVersionTable } from './imageVersioning'
 import {
   IMAGE_EVENT_DEBOUNCE_MS,
@@ -430,12 +431,15 @@ export function createTextEditorProvider(
     }),
   )
   // 索引目标变化事件（#198 通道）：图片类目标即时核验（md 域事件对图片
-  // 管线无匹配登记，天然空操作；未来索引扩展到非 md 目标时自动接通）
+  // 管线无匹配登记，天然空操作；未来索引扩展到非 md 目标时自动接通）。
+  // #224 引用视图同步：md 域事件直通刷新协调器（changed/deleted/stale
+  // 分态——vaultIndex 侧已去抖，deleted 不等防抖窗）
   if (vaultIndex) {
     const offTargetChange = vaultIndex.onTargetChange((event) => {
       if (isImageFileExtension(event.fsPath)) {
         scheduleImageEvent(event.fsPath)
       }
+      hoverRefresh.handleDiskEvent(event.fsPath, event.status)
     })
     context.subscriptions.push({ dispose: offTargetChange })
   }
@@ -460,6 +464,29 @@ export function createTextEditorProvider(
       }
     }),
   )
+
+  // ---- #224 引用视图刷新协调器（provider 级单件：悬停/嵌入目标订阅与
+  //  失效推送跨会话共享；事件源在本文件接线——onDidChangeTextDocument 的
+  //  未保存防抖与 vaultIndex.onTargetChange 的磁盘分态直通） ----
+  /** sessionKey 编码（docUri 与 sessionId 以 \n 分隔——file URI 不含换行） */
+  const hoverSessionKeyOf = (docUri: string, sessionId: string): string => `${docUri}\n${sessionId}`
+  const hoverRefresh = new HoverRefreshCoordinator({
+    pushInvalidation: (sessionKeys, fsPath, status, generation) => {
+      // 只出站消息与清缓存——不得触发宿主事件源（自引用防循环的结构前提）
+      for (const sessionKey of sessionKeys) {
+        const newlineAt = sessionKey.indexOf('\n')
+        const docUri = newlineAt >= 0 ? sessionKey.slice(0, newlineAt) : sessionKey
+        const sessionId = newlineAt >= 0 ? sessionKey.slice(newlineAt + 1) : ''
+        const entry = sessions.get(docUri)
+        if (!entry) {
+          continue
+        }
+        entry.session.invalidateHoverReads(fsPath)
+        entry.session.postToPanel(sessionId, { kind: 'hover.invalidated', fsPath, status, generation })
+      }
+    },
+  })
+  context.subscriptions.push({ dispose: () => hoverRefresh.dispose() })
   const getEntry = (uri: vscode.Uri): SessionEntry | undefined =>
     sessions.get(uri.toString())
 
@@ -1424,6 +1451,23 @@ export function createTextEditorProvider(
           void openOutlinkTarget(message.targetUri, message.anchor)
           return
         }
+        // #224 引用视图订阅：provider 层拦截（协调器与订阅表在 provider 域，
+        // 与 backlinks 先例同位）。会话守卫：docUri 归属本面板文档且 sessionId
+        // 为本面板（不信任前端任意身份）；watch 的 fsPath 合法性由协议校验器
+        // 把关（非空字符串），来源边界由 hover.request 读取链路（ADR-0008
+        // 根内解析）先行约束——watch 只对「已成功送达过的目标」生效由 webview
+        // 侧装配保证（applyLoaded/applyHoverContent 后才发）
+        if (isWebviewToHost(message) &&
+          (message.kind === 'hover.watch' || message.kind === 'hover.unwatch') &&
+          message.docUri === document.uri.toString() && message.sessionId === sessionId) {
+          const sessionKey = hoverSessionKeyOf(message.docUri, message.sessionId)
+          if (message.kind === 'hover.watch') {
+            hoverRefresh.watch(sessionKey, message.fsPath, message.instanceId)
+          } else {
+            hoverRefresh.unwatch(sessionKey, message.fsPath, message.instanceId)
+          }
+          return
+        }
         if (process.env.VSIDIAN_TEST_HOOKS === '1' && isWebviewToHost(message) &&
           message.kind === 'sync.test.close' && message.sessionId === sessionId &&
           message.docUri === document.uri.toString()) {
@@ -1443,6 +1487,8 @@ export function createTextEditorProvider(
         entry.session.detachPanel(sessionId)
         entry.panels.delete(sessionId)
         pendingReadingRestore.delete(panelStateKey(document.uri.toString(), sessionId))
+        // #224 引用视图订阅随面板销毁整体释放（订阅计数回落）
+        hoverRefresh.releaseSession(hoverSessionKeyOf(document.uri.toString(), sessionId))
         messageSub.dispose()
         viewStateSub.dispose()
         closeSub.dispose()
@@ -1480,6 +1526,13 @@ export function createTextEditorProvider(
           event.document.version,
           event.document.getText(),
         )
+      }
+      // #224 引用视图跟随：被订阅目标的未保存修改进防抖窗（短暂合并刷新；
+      // 空 contentChanges 是 dirty 状态事件，无内容变更不触发）。目标自
+      // 引用（A 嵌入 A）同链路收敛：推送只读重载，不产生新事件
+      if (event.contentChanges.length > 0 &&
+        event.document.uri.scheme === 'file' && /\.md$/i.test(event.document.uri.path)) {
+        hoverRefresh.handleDocChanged(event.document.uri.fsPath)
       }
       const entry = getEntry(event.document.uri)
       if (!entry) {
@@ -2115,6 +2168,15 @@ export function createTextEditorProvider(
     }),
     vscode.commands.registerCommand('onegayi.vsidian._test.getImageVersions', () =>
       imageRefresh.versions.snapshot()),
+    // #224 引用视图订阅与读取缓存观测钩子：订阅计数（目标数/实例数——
+    // 集成断言「面板销毁/浮层关闭后订阅计数回落」）与宿主读取缓存计量
+    //（条目/字节/命中/未命中——重复引用合并读取的性能证据）
+    vscode.commands.registerCommand('onegayi.vsidian._test.hoverWatchStats', () =>
+      hoverRefresh.stats()),
+    vscode.commands.registerCommand('onegayi.vsidian._test.hoverReadCacheStats', (uriStr: string) => {
+      const entry = getEntry(vscode.Uri.parse(uriStr))
+      return entry ? entry.session.hoverReadCacheStats() : { found: false }
+    }),
     vscode.commands.registerCommand(
       'onegayi.vsidian._test.getLastClosedInput',
       () => lastClosedInput,

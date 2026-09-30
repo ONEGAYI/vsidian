@@ -19,6 +19,7 @@ import {
   isHoverPopupOpen,
   notifyHoverImageInvalidate,
   notifyHoverImageResult,
+  notifyHoverInvalidated,
   notifyHoverResult,
   openHoverPopupFor,
   openHoverPopupForKeyboard,
@@ -875,5 +876,176 @@ describe('#221 显式目标入口与键盘模态', () => {
     expect(isHoverPopupOpen(), '域外不动在场浮层').toBe(true)
     closeHoverPopupIfAnchorWithin(panelScope)
     expect(isHoverPopupOpen(), '锚点所在域失效即释放').toBe(false)
+  })
+})
+
+// ---- #224 引用视图同步：目标订阅、失效分态与版本仲裁 ----
+// 订阅生命周期（成功装载登记 hover.watch、关闭配对 hover.unwatch）、
+// hover.invalidated 三分态（changed 同实例静默重载 / deleted 撤内容显示
+// 缺失态 / stale 读取失败分态）、目标内容版本仲裁（旧回包不冒充）与
+// 刷新状态保持（fm 展开、滚动位置）。
+describe('#224 引用视图同步：订阅、失效分态与版本仲裁', () => {
+  interface Loaded {
+    req: { reqId: number; instanceId: string }
+  }
+
+  function openAndLoad(h: Harness, opts?: { version?: number; text?: string }): Loaded {
+    openHoverPopupFor(h.anchor, { target: '目标笔记', sourceStart: 10, sourceEnd: 30 })
+    const req = requestOf(h)
+    notifyHoverResult({
+      kind: 'hover.result',
+      reqId: req.reqId,
+      instanceId: req.instanceId,
+      ok: true,
+      ...RESULT_OK,
+      version: opts?.version ?? RESULT_OK.version,
+      ...(opts?.text !== undefined ? { text: opts.text, range: { start: 0, end: opts.text.length } } : {}),
+    })
+    return { req: { reqId: req.reqId, instanceId: req.instanceId } }
+  }
+
+  function pushInvalidation(fsPath: string, status: 'changed' | 'deleted' | 'stale', generation: number): void {
+    notifyHoverInvalidated({ fsPath, status, generation })
+  }
+
+  it('成功装载登记订阅（hover.watch 携带目标与实例身份）；关闭配对释放', () => {
+    const h = makeHarness()
+    openAndLoad(h)
+    const watch = h.sent.find((m) => m.kind === 'hover.watch')
+    expect(watch).toMatchObject({
+      sessionId: SESSION.sessionId,
+      docUri: SESSION.docUri,
+      fsPath: RESULT_OK.target.fsPath,
+    })
+    expect(watch && watch.kind === 'hover.watch' && watch.instanceId).toMatch(/^hover-/)
+    closeHoverPopup()
+    const unwatch = h.sent.find((m) => m.kind === 'hover.unwatch')
+    expect(unwatch).toMatchObject({
+      fsPath: RESULT_OK.target.fsPath,
+      instanceId: watch && watch.kind === 'hover.watch' ? watch.instanceId : '',
+    })
+  })
+
+  it('装载失败（not-found）不订阅；关闭零 unwatch', () => {
+    const h = makeHarness()
+    openHoverPopupFor(h.anchor, { target: '目标笔记', sourceStart: 10, sourceEnd: 30 })
+    const req = requestOf(h)
+    notifyHoverResult({ kind: 'hover.result', reqId: req.reqId, instanceId: req.instanceId, ok: false, reason: 'not-found' })
+    expect(h.sent.some((m) => m.kind === 'hover.watch')).toBe(false)
+    closeHoverPopup()
+    expect(h.sent.some((m) => m.kind === 'hover.unwatch')).toBe(false)
+  })
+
+  it('changed 推送：同实例新 reqId 静默重发（不闪 loading）；新内容到达刷新、fm 展开保持', () => {
+    const h = makeHarness()
+    // 带 frontmatter 的目标（fm 展开状态断言素材）
+    const fmText = ['---', 'title: 目标笔记', '---', '', '# 目标笔记', '', '- [ ] 任务一', ''].join('\n')
+    const { req } = openAndLoad(h, { text: fmText, version: 3 })
+    // 展开 fm（默认折叠）
+    const fmBtn = popupEl()!.querySelector<HTMLElement>('.vsidian-hover-fm-toggle')
+    expect(fmBtn, '全文引用应带属性区').not.toBeNull()
+    fmBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    const requestsBefore = h.sent.filter((m) => m.kind === 'hover.request').length
+    pushInvalidation(RESULT_OK.target.fsPath, 'changed', 1)
+    // 旧 reqId 迟到回包丢弃（新 reqId 已更新）
+    notifyHoverResult({
+      kind: 'hover.result', reqId: req.reqId, instanceId: req.instanceId, ok: true,
+      ...RESULT_OK, text: '# 旧内容\n', range: { start: 0, end: 6 },
+    })
+    expect(hoverPopupProbe().note).toBe('目标笔记.md') // 旧内容未覆盖
+    const requests = h.sent.filter((m) => m.kind === 'hover.request')
+    expect(requests.length).toBe(requestsBefore + 1)
+    const refresh = requests.at(-1)!
+    if (refresh.kind !== 'hover.request') {
+      throw new Error('刷新请求未发出')
+    }
+    expect(refresh.instanceId).toBe(req.instanceId) // 同实例
+    expect(refresh.reqId).toBeGreaterThan(req.reqId) // 新请求代次
+    // 装载中保持内容态（不闪 loading）
+    expect(hoverPopupProbe().state).toBe('content')
+    // 新内容到达（带 frontmatter——刷新后属性区仍应在场）
+    const fmText2 = ['---', 'title: 目标笔记', '---', '', '# 新内容', ''].join('\n')
+    notifyHoverResult({
+      kind: 'hover.result', reqId: refresh.reqId, instanceId: refresh.instanceId, ok: true,
+      ...RESULT_OK, version: 4, text: fmText2, range: { start: 0, end: fmText2.length },
+    })
+    expect(hoverPopupProbe().state).toBe('content')
+    expect(popupEl()!.textContent).toContain('新内容')
+    // fm 展开保持（刷新不重置）
+    expect(hoverPopupProbe().fm).toBe('expanded')
+  })
+
+  it('deleted 推送：撤下内容显示缺失态（不无限保留旧内容）；恢复 changed 重载', () => {
+    const h = makeHarness()
+    openAndLoad(h)
+    pushInvalidation(RESULT_OK.target.fsPath, 'deleted', 1)
+    const probe = hoverPopupProbe()
+    expect(probe.state).toBe('error')
+    expect(probe.note).toContain('目标笔记') // not-found 文案含目标原文
+    expect(popupEl()!.textContent).not.toContain('任务一') // 旧内容已撤下
+    // 恢复：changed 推送 → 重发请求 → 装载
+    pushInvalidation(RESULT_OK.target.fsPath, 'changed', 2)
+    const requests = h.sent.filter((m) => m.kind === 'hover.request')
+    const refresh = requests.at(-1)!
+    if (refresh.kind !== 'hover.request') {
+      throw new Error('恢复重载请求未发出')
+    }
+    notifyHoverResult({
+      kind: 'hover.result', reqId: refresh.reqId, instanceId: refresh.instanceId, ok: true,
+      ...RESULT_OK, version: 5,
+    })
+    expect(hoverPopupProbe().state).toBe('content')
+  })
+
+  it('stale 推送：读取失败分态（不等同删除——恢复 changed 同链路）', () => {
+    const h = makeHarness()
+    openAndLoad(h)
+    pushInvalidation(RESULT_OK.target.fsPath, 'stale', 1)
+    expect(hoverPopupProbe().state).toBe('error')
+    expect(hoverPopupProbe().fm).toBe('none') // 内容已撤（属性区随内容退场）
+  })
+
+  it('版本仲裁：reqId 配对通过但版本更旧的回包丢弃（慢响应旧内容不冒充）', () => {
+    const h = makeHarness()
+    openAndLoad(h, { version: 5 })
+    pushInvalidation(RESULT_OK.target.fsPath, 'changed', 1)
+    const requests = h.sent.filter((m) => m.kind === 'hover.request')
+    const refresh = requests.at(-1)!
+    if (refresh.kind !== 'hover.request') {
+      throw new Error('刷新请求未发出')
+    }
+    // 慢响应回包（reqId 新但版本旧——模拟读旧了）：丢弃
+    notifyHoverResult({
+      kind: 'hover.result', reqId: refresh.reqId, instanceId: refresh.instanceId, ok: true,
+      ...RESULT_OK, version: 3, text: '# 旧版本\n', range: { start: 0, end: 6 },
+    })
+    expect(popupEl()!.textContent).not.toContain('旧版本')
+    expect(hoverPopupProbe().state).toBe('content') // 已应用内容不被破坏
+  })
+
+  it('未订阅目标的推送零动作（他目标失效不影响在场浮层）', () => {
+    const h = makeHarness()
+    openAndLoad(h)
+    pushInvalidation('D:\notes\其他.md', 'deleted', 1)
+    expect(hoverPopupProbe().state).toBe('content')
+    expect(h.sent.filter((m) => m.kind === 'hover.request')).toHaveLength(1)
+  })
+
+  it('刷新保持滚动位置（内容缩短合法钳制由浏览器承担，此处钉回写语义）', () => {
+    const h = makeHarness()
+    openAndLoad(h)
+    const scrollEl = popupEl()!.querySelector<HTMLElement>('.vsidian-hover-popup-scroll')!
+    scrollEl.scrollTop = 28
+    pushInvalidation(RESULT_OK.target.fsPath, 'changed', 1)
+    const requests = h.sent.filter((m) => m.kind === 'hover.request')
+    const refresh = requests.at(-1)!
+    if (refresh.kind !== 'hover.request') {
+      throw new Error('刷新请求未发出')
+    }
+    notifyHoverResult({
+      kind: 'hover.result', reqId: refresh.reqId, instanceId: refresh.instanceId, ok: true,
+      ...RESULT_OK, version: 4, text: '# 变长的新内容\n\n更多段落\n', range: { start: 0, end: 16 },
+    })
+    expect(scrollEl.scrollTop).toBe(28) // 刷新后回写原滚动位置
   })
 })
