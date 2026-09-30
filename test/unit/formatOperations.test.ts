@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import MarkdownIt from 'markdown-it'
-import { planFormatOperation } from '../../src/webview/formatOperations'
+import { isInlineFormatOp, planFormatOperation, planFormatOperationRanges } from '../../src/webview/formatOperations'
 
 function apply(text: string, op: Parameters<typeof planFormatOperation>[1], from: number, to = from,
   region?: Parameters<typeof planFormatOperation>[3], action?: Parameters<typeof planFormatOperation>[4]) {
@@ -375,5 +375,113 @@ describe('HTML 注释操作（#139）', () => {
     const table = '| A | B |\n| --- | --- |\n| x | y |'
     const region = { tableFrom: 0, rowFrom: 0, rowTo: 0, columnFrom: 0, columnTo: 0 }
     expect(apply(table, 'htmlComment', 2, 3, region).text).toBe(table)
+  })
+})
+
+describe('多 range 逐段规划（#240）', () => {
+  /** 多 range 应用：变更按原文坐标展开为终文（产物选区映射归生产链路测试） */
+  function applyRanges(text: string, op: Parameters<typeof planFormatOperation>[1],
+    ranges: Array<{ from: number; to: number }>) {
+    const plan = planFormatOperationRanges(text, op, ranges)
+    if (!plan) return null
+    let next = text
+    for (const change of [...plan.changes].sort((a, b) => a.from - b.from).reverse()) {
+      next = next.slice(0, change.from) + change.insert + next.slice(change.to)
+    }
+    return { text: next, selections: plan.selections, changes: plan.changes }
+  }
+
+  it('分类谓词：行内包裹类与格区白名单同源（INLINE 表 + clearInline/link/inlineMath/wikilink）', () => {
+    for (const op of ['bold', 'italic', 'strikethrough', 'inlineCode', 'highlight',
+      'clearInline', 'link', 'inlineMath', 'wikilink'] as const) {
+      expect(isInlineFormatOp(op), op).toBe(true)
+    }
+    for (const op of ['heading1', 'headingNone', 'bulletList', 'orderedList', 'taskList', 'quote',
+      'codeBlock', 'blockMath', 'horizontalRule', 'htmlComment'] as const) {
+      expect(isInlineFormatOp(op), op).toBe(false)
+    }
+  })
+
+  it('两非空选区各自包裹：两次独立计划合入一份变更组（原文坐标）', () => {
+    const plan = planFormatOperationRanges('甲乙 丙丁', 'bold', [{ from: 0, to: 2 }, { from: 3, to: 5 }])
+    expect(plan).not.toBeNull()
+    expect(plan!.changes).toEqual([
+      { from: 0, to: 2, insert: '**甲乙**' },
+      { from: 3, to: 5, insert: '**丙丁**' },
+    ])
+    // 非空选区包裹无独立产物选区（null = 保持原选区语义，调用方映射原 range）
+    expect(plan!.selections).toEqual([null, null])
+  })
+
+  it('两空光标各自扩词包裹：产物选区各自给出（原文坐标，互不加 delta）', () => {
+    const plan = planFormatOperationRanges('中文 English 别的', 'bold',
+      [{ from: 0, to: 0 }, { from: 3, to: 3 }])
+    expect(plan!.changes).toEqual([
+      { from: 0, to: 2, insert: '**中文**' },
+      { from: 3, to: 10, insert: '**English**' },
+    ])
+    expect(plan!.selections).toEqual([
+      { anchor: 2 },
+      { anchor: 3 + 2 + 4 },
+    ])
+  })
+
+  it('混合形态独立判定：一 range 在围栏内取消、一 range 普通扩词包裹', () => {
+    const text = '**加粗** 普通'
+    const plan = planFormatOperationRanges(text, 'bold', [{ from: 3, to: 3 }, { from: 8, to: 8 }])
+    expect(plan!.changes).toEqual([
+      { from: 0, to: 6, insert: '加粗' },
+      { from: 7, to: 9, insert: '**普通**' },
+    ])
+    // 取消分支无 selection；扩词包裹给出光标（终文坐标：本 range 产物
+    // 7+2 再叠加 range0 取消的净 -4）
+    expect(plan!.selections).toEqual([null, { anchor: 7 + 2 - 4 }])
+  })
+
+  it('跨行选区逐段包裹：与单 range 路径同语义（逐行包裹、跳过前缀）', () => {
+    const doc = '- 甲乙\n- 丙丁'
+    const single = apply(doc, 'bold', 2, 9)
+    const multi = applyRanges(doc, 'bold', [{ from: 2, to: 9 }])
+    expect(multi!.text).toBe(single.text)
+  })
+
+  it('变更与已收集区间重叠的 range 丢弃变更：产物选区退化为原 range 映射', () => {
+    // range 0 空光标取消整段围栏（变更区间 [0,6]），range 1 非空选区 [2,4] 落在
+    // 其中——独立计划的包裹变更与取消变更重叠，保守丢弃后者
+    const text = '**加粗** 尾巴'
+    const plan = planFormatOperationRanges(text, 'bold', [{ from: 3, to: 3 }, { from: 2, to: 4 }])
+    expect(plan!.changes).toEqual([{ from: 0, to: 6, insert: '加粗' }])
+    expect(plan!.selections).toEqual([null, null])
+  })
+
+  it('相邻不重叠：选区端点相接（前 to === 后 from）不视为重叠', () => {
+    const plan = planFormatOperationRanges('甲乙丙', 'bold', [{ from: 0, to: 2 }, { from: 2, to: 3 }])
+    expect(plan!.changes).toEqual([
+      { from: 0, to: 2, insert: '**甲乙**' },
+      { from: 2, to: 3, insert: '**丙**' },
+    ])
+  })
+
+  it('link/inlineMath/wikilink 插入型同走逐 range：产物选区独立偏移（原文坐标）', () => {
+    const plan = planFormatOperationRanges('甲乙 丙丁', 'link', [{ from: 0, to: 2 }, { from: 3, to: 5 }])
+    expect(plan!.changes).toEqual([
+      { from: 0, to: 2, insert: '[甲乙]()' },
+      { from: 3, to: 5, insert: '[丙丁]()' },
+    ])
+    // link 产物选区 = 替换括号内（终文坐标：range0 产物 () 间 5；
+    // range1 产物 8 叠加 range0 的 +4 净位移 = 12）
+    expect(plan!.selections).toEqual([{ anchor: 5 }, { anchor: 12 }])
+  })
+
+  it('全部 range 无变更返回 null（如都落在代码上下文）', () => {
+    expect(planFormatOperationRanges('`甲` 乙', 'bold', [{ from: 1, to: 2 }])).toBeNull()
+    expect(planFormatOperationRanges('', 'bold', [])).toBeNull()
+  })
+
+  it('部分 range 无变更不拖累其他 range（null 产物选区补位对齐）', () => {
+    const plan = planFormatOperationRanges('`甲` 乙 丙', 'bold', [{ from: 1, to: 2 }, { from: 4, to: 5 }])
+    expect(plan!.changes).toEqual([{ from: 4, to: 5, insert: '**乙**' }])
+    expect(plan!.selections).toHaveLength(2)
+    expect(plan!.selections[0]).toBeNull()
   })
 })

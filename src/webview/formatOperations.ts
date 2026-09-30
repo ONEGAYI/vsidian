@@ -636,7 +636,7 @@ export function planFormatOperation(
   // Highlight 扩展）：两态切换按节点命中依赖同一语义源
   const root = markdownTreeParser.parse(text).topNode
   if (region) {
-    if (!INLINE[op] && op !== 'clearInline' && op !== 'link' && op !== 'inlineMath' && op !== 'wikilink') return null
+    if (!isInlineFormatOp(op)) return null
     const offsets: number[] = []
     let cursor = region.tableFrom
     while (cursor <= text.length && offsets.length < region.rowTo + 3) {
@@ -716,4 +716,83 @@ export function planFormatOperation(
         : { anchor: from + open.length } }
   }
   return null
+}
+
+/** 行内包裹类格式操作判定（#240）：INLINE 表五项 + 清除行内格式 + 三种
+ *  插入型行内包裹（link / inlineMath / wikilink）。与表格格区白名单
+ *  同源（格区批量路径即「逐格逐 range 应用」的既有先例）——多选区下
+ *  这类操作逐 range 应用；标题、列表、引用、围栏、分割线、HTML 注释
+ *  等结构性操作退化主 range（planOnlyIndex 指向主 range）。 */
+export function isInlineFormatOp(op: FormatOperationId): boolean {
+  return !!INLINE[op] || op === 'clearInline' || op === 'link' ||
+    op === 'inlineMath' || op === 'wikilink'
+}
+
+/** 多 range 逐段规划产物（#240）：changes 为原文坐标；selections 与入参
+ *  ranges 按下标对齐且坐标为**终文坐标**（已叠加该 range 之前全部已接受
+ *  变更的净位移），可直接落入产物选区。null 表示该 range 无独立产物选区
+ *  （未参与规划、无变更或变更被重叠保护丢弃）——调用方以原生选区 range
+ *  经 ChangeSet 映射（等价复刻单 range 路径「不带 selection 时 CM6 自动
+ *  映射」的语义）。 */
+export interface MultiFormatPlan {
+  changes: FormatChange[]
+  selections: Array<{ anchor: number; head?: number } | null>
+}
+
+/** 多选区逐 range 规划（#240）：行内包裹类操作的多光标形态——每个
+ *  range 独立走 planFormatOperation 单 range 语义（扩词、两态取消、
+ *  逐行包裹等互不干扰），变更合入一份组（单事务 = 一笔 edit.request =
+ *  宿主撤销一次整批回退，与 #124 跨段包裹同构）。
+ *  planOnlyIndex（结构性操作退化主 range）：只规划该下标的 range，其余
+ *  range 保持原样（selections 记 null，调用方原样映射——多光标形态
+ *  不因退化而收敛）。
+ *  边界：变更与已收集区间**严格重叠**（from < 占用区 to）的 range 丢弃
+ *  其变更（同一行内独立计划的重写区间可能交叠，无从可靠合并——保守
+ *  跳过，产物选区退化为原 range 映射）；端点相接（前 to === 后 from）
+ *  不算重叠。格区 region 与多 range 互斥（region 状态机维持单选区），
+ *  本函数不接收 region。 */
+export function planFormatOperationRanges(
+  text: string, op: FormatOperationId, ranges: readonly FormatSelection[],
+  action: FormatAction = 'toggle',
+  planOnlyIndex?: number,
+): MultiFormatPlan | null {
+  if (ranges.length === 0) return null
+  const changes: FormatChange[] = []
+  const selections: Array<{ anchor: number; head?: number } | null> =
+    new Array(ranges.length).fill(null)
+  // 已收集变更的占用右边界（原文坐标，粗粒度：同一 range 内部变更由
+  // 单 range 计划自洽，跨 range 只需防交叠——处理序按 range from 升序，
+  // 记录已接受变更的最大 to 即可）
+  let usedTo = -Infinity
+  // 已接受变更的累计净位移：把「仅本 range 变更」视角的产物选区换算成
+  // 全部变更依序应用后的终文坐标（不重叠保证：此前 range 的变更区间
+  // 都在本 range 之前，位移直接累加）
+  let deltaBefore = 0
+  const order = ranges.map((range, index) => ({ range, index }))
+    .sort((a, b) => a.range.from - b.range.from)
+  for (const { range, index } of order) {
+    if (planOnlyIndex !== undefined && index !== planOnlyIndex) continue
+    const plan = planFormatOperation(text, op, range, null, action)
+    if (!plan || !plan.changes.length) continue
+    const from = Math.min(...plan.changes.map((change) => change.from))
+    const to = Math.max(...plan.changes.map((change) => change.to))
+    if (from < usedTo) {
+      // 与已收集区间重叠：丢弃本 range 变更（保守），选区保持 null
+      continue
+    }
+    changes.push(...plan.changes)
+    if (plan.selection) {
+      const spec = plan.selection
+      selections[index] = {
+        anchor: spec.anchor + deltaBefore,
+        ...(spec.head !== undefined ? { head: spec.head + deltaBefore } : {}),
+      }
+    }
+    usedTo = Math.max(usedTo, to)
+    deltaBefore += plan.changes.reduce(
+      (sum, change) => sum + change.insert.length - (change.to - change.from), 0)
+  }
+  if (!changes.length) return null
+  changes.sort((a, b) => a.from - b.from)
+  return { changes, selections }
 }
