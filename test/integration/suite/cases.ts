@@ -11384,14 +11384,15 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const parentBefore = await readDisk('嵌入样例.md')
     const targetBefore = await readDisk('嵌入目标.md')
 
-    // 三张卡片（全文/章节/缺失目标）——真宿主读取闭环：全文卡 content
-    // 且 note 为根内相对路径、fm 默认折叠；章节卡 scope=heading；缺失卡 error
+    // Reading 宿主的三张卡片（全文/章节/缺失目标）。#223 后探针同时包含
+    // 隐藏 Live 宿主的卡片，按 host 定位；保留三张数量与各卡内容的严格断言。
+    // 全文卡 content、根内相对路径与 fm 默认折叠；章节卡 heading；缺失卡 error。
     const shown = await waitViewState('嵌入样例.md', (v) => {
-      const cards = v.readingEmbed ?? []
+      const cards = (v.readingEmbed ?? []).filter((card) => card.host === 'reading')
       return cards.length === 3 &&
         cards[0]!.state === 'content' && cards[0]!.scope === 'full'
     })
-    const cards = shown.readingEmbed!
+    const cards = shown.readingEmbed!.filter((card) => card.host === 'reading')
     assert(cards[0]!.note === '嵌入目标.md',
       `全文嵌入目标标识应为根内相对路径（实际 ${cards[0]!.note}）`)
     assert(cards[0]!.fm === 'collapsed', `全文嵌入属性区应默认折叠（实际 ${String(cards[0]!.fm)}）`)

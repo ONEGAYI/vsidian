@@ -1369,7 +1369,7 @@ export class WebviewSyncController {
       // 是否开浮层——「按住 Ctrl 再进入」与「进入后按 Ctrl」两条路径等价
       const hoverAnchor = this.liveHoverAnchorOf(event.target)
       if (hoverAnchor) {
-        this.lastLiveHover = { anchor: hoverAnchor, x: event.clientX, y: event.clientY }
+        this.lastLiveHover = { anchor: hoverAnchor }
       }
       const withMod = event.ctrlKey || event.metaKey
       if (!this.liveHoverDirect() && !withMod) {
@@ -4786,14 +4786,14 @@ export class WebviewSyncController {
     return this.settings?.[HOVER_LIVE_DIRECT_KEY] === true
   }
 
-  /** 指针当前悬停的 Live 链接装饰（含派发时坐标）：mouseover 时总在记录
+  /** 指针当前悬停的 Live 链接装饰：mouseover 时总在记录
    *  （修饰位不足也不丢——「先悬停、后按 Ctrl」补触发的现场），mouseout
-   *  / 模式切换时清空；坐标仅作装饰矩形不可得时的回退定位 */
-  private lastLiveHover: { anchor: HTMLElement; x: number; y: number } | null = null
+   *  / 模式切换时清空；目标经装饰 DOM 映射到源码，不依赖指针坐标 */
+  private lastLiveHover: { anchor: HTMLElement } | null = null
 
   /** Ctrl/Cmd 按下补触发（验收反馈：指针已在链接上再按修饰键同样开浮层
    *  ——mouseover 时刻判修饰位只覆盖「按住再进入」，此路径覆盖「进入后
-   *  按下」）。锚点用实时矩形中心重定位（滚动后旧坐标失效）；同锚已开
+   *  按下」）。锚点经 DOM 映射到实时源码位置；同锚已开
    *  浮层时 enter 幂等（取消待关计时），不同锚换锚重开 */
   private onLiveHoverModifierDown(): void {
     if (this.viewMode !== 'live' || this.liveHoverDirect()) {
@@ -4808,20 +4808,22 @@ export class WebviewSyncController {
     if (!view) {
       return
     }
-    // 多行装饰取中间矩形（单行也适用）；无矩形（jsdom/未布局）回退记录坐标
-    const rects = pending.anchor.getClientRects()
-    const rect = rects.length > 0 ? rects[Math.floor(rects.length / 2)]! : null
-    const x = rect ? rect.left + rect.width / 2 : pending.x
-    const y = rect ? rect.top + rect.height / 2 : pending.y
-    const pos = view.posAtCoords({ x, y })
-    if (pos === null) {
-      return
-    }
-    const spec = this.liveLinkSpecAt(view, pos)
+    const spec = this.liveLinkSpecOfAnchor(view, pending.anchor)
     if (!spec) {
       return
     }
     hoverPreviewAnchorEnter(pending.anchor, spec)
+  }
+
+  /** 鼠标已命中链接装饰，按该 DOM 的起点解析目标。替换 widget 的
+   *  posAtCoords 在右半段返回源码结束位置（区间外），不能据此缩小热区；
+   *  posAtDOM 保留整段可见文字的命中语义，也不会把相邻链接串成另一个
+   *  目标。键盘命令仍走 liveLinkSpecAt 的精确源码位置与原有半开区间。 */
+  private liveLinkSpecOfAnchor(view: EditorView, anchor: HTMLElement): HoverPopupTargetSpec | null {
+    if (!view.contentDOM.contains(anchor)) {
+      return null
+    }
+    return this.liveLinkSpecAt(view, view.posAtDOM(anchor, 0))
   }
 
   /** Live 悬停锚点归约：链接装饰 DOM（树驱动/宽松链接 mark 的
@@ -4853,11 +4855,7 @@ export class WebviewSyncController {
     if (!view) {
       return
     }
-    const pos = view.posAtCoords({ x: event.clientX, y: event.clientY })
-    if (pos === null) {
-      return
-    }
-    const spec = this.liveLinkSpecAt(view, pos)
+    const spec = this.liveLinkSpecOfAnchor(view, anchor)
     if (!spec) {
       return
     }

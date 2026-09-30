@@ -3863,8 +3863,9 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   outline-offset: -1px;
 }
 
-/* 内部 Reading 容器：随正文排版基线与主题/片段（别名桥在容器类上） */
-.vsidian-hover-popup .vsidian-hover-popup-scroll .vsidian-view-reading {
+/* 内部 Reading 容器：随正文排版基线与主题/片段（别名桥在容器类上）。
+   同属 #app 作用域，覆盖主阅读容器的 40vh 文末留白，浮层用紧凑内边距。 */
+#app > .vsidian-hover-popup .vsidian-hover-popup-scroll .vsidian-view-reading {
   font-family: var(--vsidian-content-font-family, monospace);
   font-size: var(--vsidian-content-font-size, 14px);
   line-height: var(--vsidian-content-line-height, 1.5);

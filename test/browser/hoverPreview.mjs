@@ -588,6 +588,40 @@ try {
   passed++
   console.log('[悬停预览][PASS] 明暗主题：浮层实底与属性区标题行随主题取色（绘制层）')
 
+  // ---- 场景 T：短文末尾紧凑留白，不能继承主阅读视图的 40vh ----
+  const shortDoc = '正文第一段。\n\n本文正文结束。\n'
+  for (const height of [640, 1000]) {
+    await page.keyboard.press('Escape')
+    await page.setViewportSize({ width: 900, height })
+    await page.mouse.move(60, 500)
+    await hoverLink()
+    await page.waitForTimeout(OPEN_WAIT)
+    const shortReq = await lastRequest()
+    await page.evaluate(({ req, text }) => window.respondHoverResult({
+      kind: 'hover.result', reqId: req.reqId, instanceId: req.instanceId, ok: true,
+      target: { fsPath: 'D:\\notes\\短文.md', relPath: '短文.md' }, version: 1,
+      text, range: { start: 0, end: text.length }, scope: { kind: 'full' },
+    }), { req: shortReq, text: shortDoc })
+    await page.waitForTimeout(120)
+    const spacing = await page.evaluate(() => {
+      const content = document.querySelector('.vsidian-hover-popup .vsidian-view-reading')
+      const last = [...content.querySelectorAll('.vsidian-reading-block')].at(-1)
+      const lastRect = last.getBoundingClientRect()
+      return {
+        paddingBottom: getComputedStyle(content).paddingBottom,
+        trailingGap: content.getBoundingClientRect().bottom - lastRect.bottom,
+        endVisible: document.elementFromPoint(lastRect.left + 5, lastRect.top + 5)?.closest('.vsidian-reading-block') === last,
+        mainPaddingBottom: getComputedStyle(document.querySelector('.vsidian-main > .vsidian-view-reading')).paddingBottom,
+      }
+    })
+    assert.equal(spacing.paddingBottom, '10px', '浮层内容应使用紧凑内边距')
+    assert.ok(spacing.trailingGap < 40, `文末不得多出大截空白（实际 ${spacing.trailingGap}px）`)
+    assert.equal(spacing.endVisible, true, '文末内容须在绘制层可见')
+    assert.equal(spacing.mainPaddingBottom, `${height * 0.4}px`, '主阅读视图保留原有 40vh 文末留白')
+  }
+  passed++
+  console.log('[悬停预览][PASS] 浮层文末紧凑留白：两种视口高度 + 文末绘制可见 + 主阅读留白保持')
+
   assert.deepEqual(errors, [], '页面无未捕获异常')
   console.log(`[悬停预览] 全部 ${passed} 组场景通过`)
 } finally {

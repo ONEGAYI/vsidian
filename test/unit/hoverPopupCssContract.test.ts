@@ -75,6 +75,11 @@ describe('悬停预览浮层 CSS 契约（#218）', () => {
     expect(content).toMatch(/font-size:\s*var\(--vsidian-content-font-size/)
   })
 
+  it('内部 Reading 容器的紧凑留白覆盖带 #app 的正文规则', () => {
+    const content = rule('#app > .vsidian-hover-popup .vsidian-hover-popup-scroll .vsidian-view-reading')
+    expect(content).toMatch(/padding:\s*10px 14px/)
+  })
+
   it('任务禁写呈现：浮层内 checkbox 不响应指针（只读契约的样式侧）', () => {
     const box = rule('.vsidian-hover-popup input\[type="checkbox"\]')
     expect(box).toMatch(/pointer-events:\s*none/)

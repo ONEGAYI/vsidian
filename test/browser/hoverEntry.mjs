@@ -524,6 +524,59 @@ try {
   passed++
   console.log('[全入口][PASS] 浮层标题条：显示名常驻 + 跳转分派（双链/链接）+ 点击关闭')
 
+  // ---- 场景 Q：长双链全宽命中（替换 widget 的右半段不能按源码结束位置漏判）----
+  const wideLinkDoc = '# 热区\n\n指向 [[target/T1-全文与属性]]。\n\n' +
+    '相邻：[[left|左侧的很长显示别名]][[right|右侧的很长显示别名]]。\n\n' +
+    '普通：[本地链接的较长显示文字](target/T1-全文与属性.md)。\n'
+  await page.evaluate(text => window.initHoverEntryDoc(text), wideLinkDoc)
+  const wideLinks = [
+    { selector: '.cm-content .vsidian-wikilink', index: 0, target: 'target/T1-全文与属性' },
+    { selector: '.cm-content .vsidian-wikilink', index: 1, target: 'left' },
+    { selector: '.cm-content .vsidian-wikilink', index: 2, target: 'right' },
+    { selector: '.cm-content .vsidian-link', index: 0, target: 'target/T1-全文与属性.md' },
+  ]
+  for (const direct of [false, true]) {
+    await page.evaluate(direct => window.applyEntrySettings({ 'hover.liveDirect': direct }), direct)
+    if (!direct) await page.keyboard.down('Control')
+    for (const { selector, index, target } of wideLinks) {
+      const link = page.locator(selector).nth(index)
+      const rect = await link.boundingBox()
+      assert.ok(rect, '长链接应在视口内可见')
+      for (const fraction of [0.15, 0.5, 0.85]) {
+        await escClose()
+        await page.mouse.move(60, 500)
+        const before = (await hoverRequests()).length
+        await page.mouse.move(rect.x + rect.width * fraction, rect.y + rect.height / 2)
+        await page.waitForTimeout(OPEN_WAIT)
+        assert.equal((await hoverRequests()).length, before + 1,
+          `${direct ? '直接' : 'Ctrl'}悬停 ${target} 的 ${fraction} 宽度处应产生一次请求`)
+        assert.equal((await lastRequest()).target, target, '别名与相邻链接不得把目标串到另一链接')
+      }
+    }
+    if (!direct) await page.keyboard.up('Control')
+  }
+  // 先悬停右半段再按 Ctrl 的补触发同样应命中；键盘光标目标仍按源码范围判定。
+  await escClose()
+  await page.mouse.move(60, 500)
+  await page.evaluate(() => window.applyEntrySettings({ 'hover.liveDirect': false }))
+  const wideRect = await page.locator(wideLinks[0].selector).first().boundingBox()
+  await page.mouse.move(wideRect.x + wideRect.width * 0.85, wideRect.y + wideRect.height / 2)
+  const beforeModifier = (await hoverRequests()).length
+  await page.keyboard.down('Control')
+  await page.waitForTimeout(OPEN_WAIT)
+  assert.equal((await hoverRequests()).length, beforeModifier + 1, '先悬停长链接右半段再按 Ctrl 也应开浮层')
+  assert.equal((await lastRequest()).target, 'target/T1-全文与属性')
+  await page.keyboard.up('Control')
+  await escClose()
+  await page.mouse.move(60, 500)
+  await page.evaluate(pos => window.setLiveCursor(pos), wideLinkDoc.indexOf(']]') + 2)
+  const beforeBoundaryCommand = (await hoverRequests()).length
+  await page.evaluate(() => window.runPreviewCommand())
+  assert.equal((await hoverRequests()).length, beforeBoundaryCommand,
+    '键盘光标在双链源码结束边界之外，不得借用鼠标全宽命中规则误开')
+  passed++
+  console.log('[全入口][PASS] 长链接全宽：Ctrl/直接悬停 + 别名与相邻目标 + 修饰键后按 + 键盘边界')
+
   // ---- 收尾：零写回 ----
   assert.equal(await editRequestCount(), 0, '全场景零 edit.request（悬停/命令不写文档）')
   passed++
