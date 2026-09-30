@@ -124,18 +124,20 @@ try {
   // ---- 场景 C：真实方向键进出（光标驱动显隐 + 显形时卡片仍可见） ----
   await page.evaluate((p2) => window.setLiveCursor(p2), EMBED_TO + 1 + 3) // 嵌入行下两段（中间段落行）
   await page.evaluate(() => window.focusLiveEmbed())
-  // 中间段落 → 逐次 ArrowUp 进入嵌入行区间
-  await page.keyboard.press('ArrowUp')
+  // 中间段落 → ArrowUp 逐键核对：装载卡片高占视口时垂直步进会一次跨到
+  // 区间端点（块级化宿主的行内几何，实测落点 = EMBED_FROM），进入即显形
   await page.keyboard.press('ArrowUp')
   await page.waitForTimeout(60)
+  let entered = await page.evaluate(() => window.liveEmbedSelection())
+  assert.ok(entered.length === 1 && entered[0].head >= EMBED_FROM && entered[0].head <= EMBED_TO,
+    `第一次 ArrowUp 应进入嵌入区间（实际 ${JSON.stringify(entered)}）`)
   hosts = await reads()
   assert.equal(hosts.length, 1, '显形态宿主在场（below 形态）')
   assert.equal(hosts[0].below, true, '光标进入区间 → 下方形态')
   assert.equal(await linePainted(EMBED_LINE), true, '源码显形（源文真实文本盒子）')
   assert.ok(hosts[0].cardHeight > 20, `显形态卡片继续显示（高度 ${hosts[0].cardHeight}）`)
   assert.equal(hosts[0].stateVisible, false, '内容区在场')
-  // 行尾再 ArrowUp 离开区间（进入上段落）→ 恢复隐藏
-  await page.keyboard.press('ArrowUp')
+  // 再 ArrowUp 离开区间（进入上段落）→ 恢复隐藏
   await page.keyboard.press('ArrowUp')
   await page.waitForTimeout(60)
   hosts = await reads()

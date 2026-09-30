@@ -3,13 +3,18 @@
 // 挂载适配语义：混排/列表/引用/表格格保留源文，1.5 期接入）在 Live 视图
 // 以 CM6 装饰挂载共用 Reading 嵌入卡片（EmbedCardManager 装配，容器无关）。
 //
-// 装饰双形态（光标驱动源码显隐，规格「正文嵌入与源码显隐」节）：
-// - 隐形态（光标/选区未触及源码区间）：整行 [lineFrom, lineTo] 替换为
-//   inline replace widget——源文文本视觉退场，卡片占据行位。
+// 装饰双形态（光标驱动源码显隐，规格「正文嵌入与源码显隐」节；验收反馈
+// 后隐形态的呈现由 CSS 块级化承担）：
+// - 隐形态（光标/选区未触及源码区间）：整行 [lineFrom, lineTo] inline
+//   replace widget——源文文本视觉退场；「卡片从源码行对齐、不留隐形源码
+//   行」由 CSS 承担（宿主 display:block + 隐藏 replace 前后的
+//   cm-widgetBuffer），保持 inline replace 是为了键盘垂直导航可进入嵌入
+//   行（块级 replace 会被 CM6 跳过整行，实测 ArrowUp 落点越过区间）。
 // - 显形态（触及区间，selectionTouchesRange 语义：折叠光标命中内部或
 //   两端、非空选区严格重叠、任一 range 命中）：替换撤下、源文可见可编辑，
-//   卡片移至行下方 block widget 继续显示——显隐只作用于源文的视觉呈现，
-//   不是撤卡片（与 liveMermaid 显源时撤图的取舍不同，按规格共识保留内容）。
+//   卡片移至行下方 block widget 继续显示（动态下移一行给源码让位）——
+//   显隐只作用于源文的视觉呈现，不是撤卡片（与 liveMermaid 显源时撤图
+//   的取舍不同，按规格共识保留内容）。
 //
 // 分层契约（#222 衔接）：
 // - 表构建层不排除代码区域：嵌入表是「候选嵌入行」（行局部扫描 + 增量
@@ -38,7 +43,7 @@ import type { EmbedCardManager } from './embedCard'
 
 /** #223 Live 嵌入宿主稳定类名（样式契约 content 域 live-embed-widget 条目同源） */
 export const LIVE_EMBED_CLASS_NAMES = {
-  /** widget 根宿主（卡片壳挂在内；inline 替换形态为 span、下方形态为 div） */
+  /** widget 根宿主（卡片壳挂在内；两形态均为块级 div） */
   host: 'vsidian-live-embed',
   /** 下方形态修饰（显形态——源文可见，卡片在行下方独立块） */
   below: 'vsidian-live-embed-below',
@@ -184,9 +189,11 @@ function fenceContains(fences: readonly FenceSpan[], lineFrom: number, lineTo: n
 /**
  * 嵌入装饰构建（#223 契约入口；纯数据输入，可单测直驱）：
  * 逐 span 发射——触及源码区间 → 行下方 block widget（源文显形）；未触及
- * → 整行 inline replace widget（源文退场，卡片占位）。排除：frontmatter
- * 内（头区不产正文嵌入）、已闭合围栏内与文末开放围栏后（代码区域字面
- * 文本不作为嵌入——与阅读侧 markdown-it 块语义对齐）。
+ * → 整行 inline replace widget（源文退场；卡片块级对齐与 buffer 隐藏由
+ * CSS 承担，见 main.css 的 live-embed 段——验收反馈「不留隐形源码行」的
+ * 呈现修复）。排除：frontmatter 内（头区不产正文嵌入）、已闭合围栏内与
+ * 文末开放围栏后（代码区域字面文本不作为嵌入——与阅读侧 markdown-it
+ * 块语义对齐）。
  */
 export function buildLiveEmbedDecorationRanges(
   selection: import('@codemirror/state').EditorSelection,
@@ -228,8 +235,9 @@ export function setLiveEmbedCards(manager: EmbedCardManager | null): void {
  * 语义键——与 Reading 侧同一 entry 状态库），destroy 随装饰退场卸载（实例
  * 状态保留，重挂优先装载缓存）。ignoreEvent=true 吞事件——点击不落父
  * 编辑器光标、CM6 忽略卡片内选区变化（选区隔离），卡片交互走 embedCard
- * 自有监听器。lineBreaks=1 声明视觉行（inline 形态的高度估算初值，实际
- * 高度由 CM6 测量 + ResizeObserver→requestMeasure 兜底回填）。
+ * 自有监听器。两形态均为块级（隐形态 = 块级整行 replace 的替换物，显形态
+ * = 行下方 block widget）；高度由 CM6 测量 + ResizeObserver→requestMeasure
+ * 兜底回填。
  */
 export class LiveEmbedWidget extends WidgetType {
   constructor(
@@ -253,7 +261,10 @@ export class LiveEmbedWidget extends WidgetType {
   }
 
   toDOM(): HTMLElement {
-    const host = document.createElement(this.below ? 'div' : 'span')
+    // 两形态宿主均为块级 div：显形态是 .cm-content 直接子块；隐形态是块级
+    // replace 的替换物（验收反馈：块级宿主独占行位，不留 inline 宿主的
+    // 隐形源码行）
+    const host = document.createElement('div')
     host.className = this.below
       ? `${LIVE_EMBED_CLASS_NAMES.host} ${LIVE_EMBED_CLASS_NAMES.below}`
       : LIVE_EMBED_CLASS_NAMES.host
@@ -288,6 +299,10 @@ export function liveEmbedWidgetDeco(
   }
   const deco = below
     ? Decoration.widget({ widget: new LiveEmbedWidget(inner, lineFrom, lineTo, true), block: true, side: 1 })
+    // 隐形态保持 inline replace（行结构保留——键盘垂直导航可进入嵌入行，
+    // 块级 replace 会被 CM6 当不可停靠块直接跳过，实测 ArrowUp 越过整行）；
+    // 「不留隐形源码行」由 CSS 承担：宿主块级化 + 隐藏 replace widget 前后
+    // 的 cm-widgetBuffer（frontmatter 标题栏行同款先例）
     : Decoration.replace({ widget: new LiveEmbedWidget(inner, lineFrom, lineTo, false) })
   decoCache.set(key, deco)
   while (decoCache.size > liveEmbedDecoCacheLimit) {

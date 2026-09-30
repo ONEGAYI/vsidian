@@ -362,7 +362,7 @@ const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   // content 域（81；#222 增嵌入卡片与占位行两条，#223 增 Live 嵌入宿主）
   'view-container': 2,
   heading: 4,
-  'inline-format': 7,
+  'inline-format': 8,
   'list-task': 5,
   'line-syntax': 5,
   table: 11,

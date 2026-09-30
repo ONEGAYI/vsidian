@@ -61,6 +61,9 @@ export const EMBED_CARD_CLASS_NAMES = {
   scroll: 'vsidian-embed-card-scroll',
   /** 就地状态行（loading / 错误分态） */
   state: 'vsidian-embed-card-state',
+  /** 错误分态修饰（验收反馈：错误文案与普通文字区分——主题错误色；
+   *  loading 不挂，与悬停浮层 stateError 同口径） */
+  stateError: 'vsidian-embed-card-state-error',
 } as const
 
 /** 出站上下文（syncController mount 注入；dispose 清空） */
@@ -756,6 +759,8 @@ export class EmbedCardManager {
   private applyDisplay(handle: EmbedCardHandle, display: 'loading' | 'content' | 'error', note: string): void {
     handle.display = display
     handle.note = note
+    // 错误分态挂错误修饰类（主题错误色），loading/content 摘除
+    handle.stateEl.classList.toggle(EMBED_CARD_CLASS_NAMES.stateError, display === 'error')
     if (display === 'content') {
       handle.stateEl.style.display = 'none'
       handle.scrollEl.style.display = ''

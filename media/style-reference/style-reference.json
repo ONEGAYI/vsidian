@@ -3,7 +3,7 @@
     "schemaVersion": 1,
     "vsidianVersion": "0.7.0",
     "generatedAt": "2026-09-29",
-    "entryCount": 146,
+    "entryCount": 147,
     "source": "src/shared/styleContract.ts",
     "generator": "scripts/genStyleGuide.mjs",
     "determinism": "generatedAt 取当前版本在 CHANGELOG.md 的发布日期（无段落时取最新已发布版本日期），同源再生成字节一致。",
@@ -100,7 +100,7 @@
       "title": "行内格式",
       "titleKey": "styleRef.category.inlineFormat",
       "order": 3,
-      "count": 7
+      "count": 8
     },
     {
       "id": "list-task",
@@ -1131,6 +1131,29 @@
         "单元 tableCells：转义管道拆分契约"
       ],
       "introduced": "#42（2026-09-24）"
+    },
+    {
+      "id": "live-escape",
+      "domain": "content",
+      "category": "inline-format",
+      "kind": "selector",
+      "target": ".vsidian-escape（Markdown 转义符反斜杠隐藏类；.vsidian-escape-reveal 为触及行显形类）",
+      "purpose": "转义符通用显隐（验收反馈通用化，Obsidian 对齐）：Live 正文中 Markdown 转义序列（反斜杠 + ASCII 标点，树驱动 Escape 节点）的反斜杠默认隐藏——所见为字面字符（\\* 渲染为 *，\\\\ 渲染为 \\）；光标/选区触及该行时换挂显形类，反斜杠以正文前景低混入浅色呈现（暴露源码，口径同块 id 淡化）。表格行内的 \\| 不经此类（#42 live-table-escaped-pipe 专用发射与规则；降级表格源文原文呈现）。代码块/行内代码内不生效（无 Escape 节点）。只改显示，不改原文。",
+      "views": [
+        "live"
+      ],
+      "states": "隐藏（默认——反斜杠 display:none）/ 显形（触及行换挂 reveal 类：display:inline + 正文前景 45% 低混入色，跟随明暗主题与自定义字体色）；显隐切换随选区事务重建，与标题/双链 mark 显隐同一谓词语义（折叠光标含行两端、非空选区严格重叠）。",
+      "dom": "行内 mark span（树驱动 Escape 节点首字符单位）；与双链/强调等行内 mark 可嵌套共存。",
+      "example": "#app .cm-editor .cm-scroller .vsidian-escape {\n  display: none;\n}\n#app .cm-editor .cm-scroller .vsidian-escape-reveal {\n  color: color-mix(in srgb, var(--vscode-editor-foreground, #808080) 45%, transparent);\n}",
+      "obsidian": {
+        "counterpart": "Obsidian Live Preview 转义符行内源码暴露（光标行显示浅色反斜杠）",
+        "support": "semantic"
+      },
+      "verification": [
+        "单元 liveEscape：构建层（隐藏/显形/选区/代码 span 排除/表格排除）与 DOM 层（真实 EditorView 类名挂载）",
+        "单元 escapeCssContract：隐藏与显形色规则（color-mix 低混入）钉住"
+      ],
+      "introduced": "#217 验收反馈（2026-09-30）"
     },
     {
       "id": "reading-block",
@@ -3542,7 +3565,7 @@
       "domain": "chrome",
       "category": "hover-preview",
       "kind": "selector",
-      "target": ".vsidian-hover-popup（浮层容器；内含 .vsidian-hover-popup-scroll 内容滚动区（承载只读 Reading 容器）与 .vsidian-hover-popup-state 就地状态行（loading/错误分态））",
+      "target": ".vsidian-hover-popup（浮层容器；内含 .vsidian-hover-popup-scroll 内容滚动区（承载只读 Reading 容器）与 .vsidian-hover-popup-state 就地状态行（loading/错误分态；错误分态追加 .vsidian-hover-popup-state-error 修饰——主题错误色，验收反馈与普通文字区分））",
       "purpose": "悬停文档预览浮层（#218 一期首条闭环）：父文档 Reading 中悬停指向 Markdown 的双链/本地链接，经文档访问通道读取目标后以只读 Reading 内容显示。#221 全入口：Live 正文（默认 Ctrl+悬停，设置 hover.liveDirect 开启后直接悬停）与反链/出链面板条目（直接悬停）共用同一浮层。默认宽 480px / 最大高 400px（小视口由 JS 几何计划四边翻转并收缩钳制）；内容只读——任务 checkbox 禁用（JS disabled + pointer-events 双保险），无任何写回通道。#220 起浮层内为目标文档（B）的 Reading 内容：图片以 B 为来源解析（sourceDocUri 通道）、链接可点击跳转、代码块朴素高亮。",
       "views": [
         "live",
@@ -3592,7 +3615,7 @@
       "domain": "content",
       "category": "link-image-wikilink",
       "kind": "selector",
-      "target": ".vsidian-embed-card（卡片壳，挂 .markdown-embed 别名；.vsidian-embed-card-header 顶部栏 / -title 文件名 / -open 打开入口 / -scroll 内容滚动区 / -state 状态行）",
+      "target": ".vsidian-embed-card（卡片壳，挂 .markdown-embed 别名；.vsidian-embed-card-header 顶部栏 / -title 文件名 / -open 打开入口 / -scroll 内容滚动区 / -state 状态行；错误分态追加 .vsidian-embed-card-state-error 修饰——主题错误色，与悬停浮层同口径）",
       "purpose": "正文嵌入卡片（#222 Reading 侧首创，#223 起 Live 侧同款挂载——两容器共用同一卡片装配与状态库）：独占正文一行的 ![[…]] 替换为引用卡片——左侧引用块样式边条、顶部文件名（成功后为目标根内相对路径）、右上角跳转目标文档入口（沿用 Vsidian 既有打开行为，不改写引用原文）。内容为目标的只读 Reading 视图（复用悬停文档访问通道装载全文/章节/块）；短内容自然高度，长内容内部滚动，限高默认 480px、经设置页 embed.maxHeight 调整（内联 max-height 优先于规则缺省）。卡片在 #app 正文流内——主题变量与 CSS 片段随嵌套天然命中，卡片壳的 Obsidian 别名（.markdown-embed）让嵌入容器规则同样命中。Live 侧的挂载形态与源码显隐见 live-embed-widget。",
       "views": [
         "reading",
@@ -3621,12 +3644,12 @@
       "category": "link-image-wikilink",
       "kind": "selector",
       "target": ".vsidian-live-embed（Live 嵌入宿主 widget；.vsidian-live-embed-below 为显形态下方修饰）",
-      "purpose": "父文档 Live 正文嵌入的挂载宿主（#223）：独占正文一行的 ![[…]] 经 CM6 装饰挂载 reading-embed-card 同款卡片——隐形态（光标/选区未触及源码区间）整行替换为卡片（源文视觉退场）；显形态（selectionTouchesRange 语义命中：折叠光标在区间内部或两端、非空选区严格重叠、任一选区命中）源文可见可编辑、卡片移至行下方继续显示（显隐只作用于源文文本的视觉呈现，不是撤卡片）。宿主吞事件（ignoreEvent=true）：卡片点击不落父编辑器光标、卡片内浏览器选区不被误当作父文档 CM6 源码选区；卡片内交互（滚动/选字复制/链接/属性按钮）走嵌入卡片自身监听。未闭合引用保留可编辑原文并撤下卡片；围栏/frontmatter 内与混排/容器形态不挂载（源文呈现，1.5 期接入）。",
+      "purpose": "父文档 Live 正文嵌入的挂载宿主（#223）：独占正文一行的 ![[…]] 经 CM6 装饰挂载 reading-embed-card 同款卡片——隐形态（光标/选区未触及源码区间）整行 inline 替换为卡片（源文视觉退场；宿主经 CSS 块级化直接从源码行对齐，replace 前后的 cm-widgetBuffer 隐藏——验收反馈「不留隐形源码行」；保持 inline 替换是键盘垂直导航可进入嵌入行的前提，块级替换会被 CM6 跳过整行）；显形态（selectionTouchesRange 语义命中：折叠光标在区间内部或两端、非空选区严格重叠、任一选区命中）源文可见可编辑、卡片移至行下方继续显示（动态下移一行给源码让位；显隐只作用于源文文本的视觉呈现，不是撤卡片）。宿主吞事件（ignoreEvent=true）：卡片点击不落父编辑器光标、卡片内浏览器选区不被误当作父文档 CM6 源码选区；卡片内交互（滚动/选字复制/链接/属性按钮）走嵌入卡片自身监听。未闭合引用保留可编辑原文并撤下卡片；围栏/frontmatter 内与混排/容器形态不挂载（源文呈现，1.5 期接入）。",
       "views": [
         "live"
       ],
-      "states": "隐藏态（整行 inline 替换 widget，卡片占位）/ 显形态（行下方 block widget .vsidian-live-embed-below，源文在场）；两态切换经装饰重建（卡片实例状态由嵌入卡片状态库保持）；装载中/成功/失败分态沿用卡片状态行。",
-      "dom": "Live 视图 .cm-content 内：隐藏态 widget 根为 span、显形态为 div（block widget，挂行尾后）；卡片壳 .vsidian-embed-card（挂 .markdown-embed 别名）在内。卡片高度异步变动（内容装载/图片晚到）经 ResizeObserver → view.requestMeasure 唤醒 CM6 布局。",
+      "states": "隐藏态（整行 inline 替换 widget，行结构保留——键盘垂直导航可进入；卡片从源码行对齐与 buffer 隐藏由 CSS 承担）/ 显形态（行下方 block widget .vsidian-live-embed-below，源文在场，动态下移一行给源码让位）；两态切换经装饰重建（卡片实例状态由嵌入卡片状态库保持）；装载中/成功/失败分态沿用卡片状态行。",
+      "dom": "Live 视图 .cm-content 内：隐形态宿主 div 在 .cm-line 内（inline replace 的替换物，经 CSS display:block 块级化并隐藏前后 cm-widgetBuffer——frontmatter 标题栏行同款先例）；显形态为行尾后 block widget。卡片壳 .vsidian-embed-card（挂 .markdown-embed 别名）在内。卡片高度异步变动（内容装载/图片晚到）经 ResizeObserver → view.requestMeasure 唤醒 CM6 布局。",
       "example": "#app .cm-editor .cm-content .vsidian-live-embed-below {\n  display: block;\n}",
       "obsidian": {
         "counterpart": ".cm-embed-block（Obsidian Live 嵌入容器方向；内部结构闭源不作承诺）",

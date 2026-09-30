@@ -83,6 +83,9 @@ export const HOVER_POPUP_CLASS_NAMES = {
   scroll: 'vsidian-hover-popup-scroll',
   /** 就地状态行（loading / 错误分态） */
   state: 'vsidian-hover-popup-state',
+  /** 错误分态修饰（验收反馈：错误文案与普通文字区分——主题错误色，
+   *  一眼可辨「文件问题」而非正文内容；loading 不挂） */
+  stateError: 'vsidian-hover-popup-state-error',
 } as const
 
 /** 工程初值（规格：悬停开闭延迟按现有约定与测量确定；#221 设置项接入后
@@ -335,6 +338,8 @@ function position(state: HoverPopupState): void {
 function applyDisplay(state: HoverPopupState, display: 'loading' | 'content' | 'error', note: string): void {
   state.display = display
   state.note = note
+  // 错误分态挂错误修饰类（主题错误色），loading/content 摘除
+  state.stateEl.classList.toggle(HOVER_POPUP_CLASS_NAMES.stateError, display === 'error')
   if (display === 'content') {
     state.stateEl.style.display = 'none'
     state.scrollEl.style.display = ''

@@ -312,10 +312,12 @@ export type HostToWebview =
    * Live 与面板入口：'live-wikilink' / 'live-md' 对 Live 正文第 index
    * 个双链/普通链接装饰派发（ctrlKey 模拟 Ctrl+悬停修饰位，缺省不带
    * = 直接悬停口径），'backlink' / 'outlink' 对面板第 index 个条目
-   * 派发（面板直接悬停，无修饰语义） */
+   * 派发（面板直接悬停，无修饰语义）。action='modkey' 对 document 派发
+   * 真实 keydown Control（先 enter 后 modkey 走「悬停后再按 Ctrl」的
+   * 补触发路径；index/link 忽略） */
   | {
       kind: 'hover.test.pointer'
-      action: 'enter' | 'leave'
+      action: 'enter' | 'leave' | 'modkey'
       index: number
       link?: 'wikilink' | 'md' | 'live-wikilink' | 'live-md' | 'backlink' | 'outlink'
       /** Live 入口的 Ctrl 修饰位（派发 mouseover 时透传；仅 live-* 有意义） */
@@ -2992,8 +2994,9 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       // #218 测试钩子：真实双链序号 + 进/离动作枚举；#219 link 选择器
       // （缺省 wikilink，'md' 对普通 Markdown 链接派发）；#221 扩展
       // Live（live-wikilink / live-md，ctrlKey 修饰位可选）与面板
-      // （backlink / outlink）入口
-      return (v.action === 'enter' || v.action === 'leave') && isNonNegativeInt(v.index) &&
+      // （backlink / outlink）入口；'modkey' 对 document 派发 keydown
+      // Control（「悬停后按 Ctrl」补触发路径）
+      return (v.action === 'enter' || v.action === 'leave' || v.action === 'modkey') && isNonNegativeInt(v.index) &&
         (v.link === undefined || v.link === 'wikilink' || v.link === 'md' ||
           v.link === 'live-wikilink' || v.link === 'live-md' ||
           v.link === 'backlink' || v.link === 'outlink') &&

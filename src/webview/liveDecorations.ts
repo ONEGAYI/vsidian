@@ -143,6 +143,12 @@ export const LIVE_CLASS_NAMES = {
   /** 转义管道的反斜杠在光标/选区触及该行时的显形类（Obsidian 对齐：
    *  默认隐藏渲染为 |，触及行浅色显形暴露源码——与标题 mark 显隐同语义） */
   tableEscapedPipeReveal: 'vsidian-table-escaped-pipe-reveal',
+  /** Markdown 转义符的反斜杠（表格外，树驱动 Escape 节点）：默认隐藏
+   *  （所见 = 字面字符），光标/选区触及该行浅色显形（Obsidian 转义符
+   *  行内源码暴露语义，验收反馈通用化）。表格行内 \| 走上方专用类 */
+  escape: 'vsidian-escape',
+  /** 转义符反斜杠触及行的显形类（与 escape 成对，语义同上） */
+  escapeReveal: 'vsidian-escape-reveal',
   /** 矩形格区蒙版（#73）：并入网格格装饰的 class 托管——外部贴类会与
    *  列把手高亮、CM6 mark 重写互抹（2026-09-28 拖选断裂实测） */
   tableRegionCell: 'vsidian-table-region-cell',
@@ -278,6 +284,9 @@ const hrRuleDeco = Decoration.replace({ widget: new HorizontalRuleWidget() })
 const tablePipeDeco = Decoration.mark({ class: LIVE_CLASS_NAMES.tablePipe })
 const tableEscapedPipeDeco = Decoration.mark({ class: LIVE_CLASS_NAMES.tableEscapedPipe })
 const tableEscapedPipeRevealDeco = Decoration.mark({ class: LIVE_CLASS_NAMES.tableEscapedPipeReveal })
+// 转义符通用显隐（表格外）：默认隐藏 / 触及行浅色显形，色口径同块 id 淡化
+const escapeDeco = Decoration.mark({ class: LIVE_CLASS_NAMES.escape })
+const escapeRevealDeco = Decoration.mark({ class: LIVE_CLASS_NAMES.escapeReveal })
 // 行尾一个 Markdown 填充空格保留文字节点供原生输入/IME 使用，但不参与
 // 可见排版。不要替换成零宽 widget：删空格再输入曾使光标显示在后一列。
 const tableGridPaddingDeco = Decoration.mark({ class: 'vsidian-table-grid-padding' })
@@ -818,6 +827,24 @@ function emitForRange(
         // lezer 的 cell 切分不识别 \| 与代码内管道，装饰用 emitTableRowMarks
         // 的自研拆分；此处跳过（cell 内行内节点经 visitRange 递归照常发射）
         return
+      case 'Escape': {
+        // Markdown 转义符通用显隐（验收反馈：不限于表格——Obsidian 对齐，
+        // 转义符在任何位置语义一致）：反斜杠（Escape 节点首字符）默认隐藏、
+        // 光标/选区触及该行浅色显形。表格行内排除——grid 态的 \| 由
+        // emitTableRowMarks 走 live-table-escaped-pipe 专用发射（#42 契约），
+        // 降级态源文原文呈现，双路径重复发射会以 mark 叠类互抹。
+        if (path.some((p) => p.name === 'Table')) {
+          return
+        }
+        const line = doc.lineAt(node.from)
+        if (line.number >= fromLine && line.number <= toLine) {
+          out.push(
+            (touches(line.from, line.to) ? escapeRevealDeco : escapeDeco)
+              .range(node.from, node.from + 1),
+          )
+        }
+        return
+      }
       case 'ListItem': {
         const depth = 1 + path.filter((p) => p.name === 'ListItem').length
         const nearestList = [...path].reverse().find((p) => p.name === 'BulletList' || p.name === 'OrderedList')

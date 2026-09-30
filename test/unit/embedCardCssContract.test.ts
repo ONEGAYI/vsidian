@@ -84,3 +84,21 @@ describe('嵌入卡片 CSS 契约（#222；#223 起卡片壳规则并列 Live �
     expect(toggle.split('{')[0]).toContain('.vsidian-embed-card .vsidian-hover-fm-toggle')
   })
 })
+
+describe('错误分态样式区分（验收反馈）', () => {
+  it('卡片错误状态行挂错误修饰类：主题错误色（与 loading 描述色区分）', () => {
+    const error = rule('#app .vsidian-embed-card .vsidian-embed-card-state-error')
+    expect(error).toMatch(/color:\s*var\(--vscode-errorForeground/)
+  })
+})
+
+describe('Live 隐形态呈现（验收反馈：不留隐形源码行）', () => {
+  it('宿主块级化 + 隐藏 inline replace 前后的 cm-widgetBuffer（frontmatter 标题栏行先例）', () => {
+    const host = rule('#app .cm-editor .cm-content .vsidian-live-embed')
+    expect(host).toMatch(/display:\s*block/)
+    // buffer 隐藏是一条双选择器组规则（前后 buffer 各一），按选择器与
+    // display:none 联合断言（跨行组文本不做整串匹配）
+    const hasLeading = /#app \.cm-editor \.cm-content \.cm-line > \.cm-widgetBuffer:has\(\+ \.vsidian-live-embed\),\s*\n#app \.cm-editor \.cm-content \.cm-line > \.vsidian-live-embed \+ \.cm-widgetBuffer\s*\{\s*\n\s*display:\s*none;\s*\n\}/
+    expect(css.match(hasLeading), 'buffer 前后隐藏组规则应在场').not.toBeNull()
+  })
+})

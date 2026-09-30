@@ -264,6 +264,9 @@ describe('#221 全入口悬停：directTarget 与 hover.test.pointer 扩展校�
     expect(isHostToWebview({ ...base, link: 'live-wikilink', ctrlKey: true })).toBe(true)
     expect(isHostToWebview({ ...base, link: 'live-wikilink', ctrlKey: false })).toBe(true)
     expect(isHostToWebview({ ...base, ctrlKey: 'yes' })).toBe(false)
+    // 补触发路径（验收反馈：指针已在链接上再按 Ctrl）——modkey 动作
+    expect(isHostToWebview({ ...base, action: 'modkey' })).toBe(true)
+    expect(isHostToWebview({ ...base, action: 'unknown' })).toBe(false)
     // 非法枚举拒绝
     expect(isHostToWebview({ ...base, link: 'unknown' })).toBe(false)
   })

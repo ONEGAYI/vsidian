@@ -11674,6 +11674,40 @@ export const cases: Array<[string, () => Promise<void>]> = [
     console.log('[#221] 直接悬停设置持久化回显 true；hoverPreviewLink 绑定/清空/恢复默认链路通过')
   }],
 
+  // 验收反馈：Live 悬停触发只认 mouseover 时刻的修饰位——「先悬停在链接
+  // 上、再按下 Ctrl」不触发（用户自然操作序）。补触发路径：mouseover 总是
+  // 记录现场（修饰位不足也记），keydown Control 经 document 捕获路由补开
+  // 浮层。经 hover.test.pointer 的 modkey 动作派发真实 keydown（与用户
+  // 按键同一监听器链路）
+  ['悬停全入口：Live 先悬停再按 Ctrl 补触发浮层（验收反馈）', async () => {
+    await openWithEditor('悬停预览.md')
+    await waitSessionReady('悬停预览.md')
+    const uri = wsUri('悬停预览.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    await waitViewState('悬停预览.md', (v) => v.viewMode === 'live')
+
+    // 进入链接（无 Ctrl）：不弹（默认 Ctrl+悬停语义不回归），但现场已记录
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 0, link: 'live-wikilink' })
+    await new Promise((r) => setTimeout(r, 500))
+    const idle = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+    assert(idle?.hoverPreview?.open !== true,
+      `无修饰位悬停不应开浮层（实际 ${JSON.stringify(idle?.hoverPreview)}）`)
+
+    // 悬停在场时按下 Ctrl → 补触发打开（loading → 回包 content）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'modkey', index: 0 })
+    const opened = await waitViewState('悬停预览.md', (v) => v.hoverPreview?.open === true)
+    assert(opened.hoverPreview?.state === 'content' || opened.hoverPreview?.state === 'loading',
+      `补触发后浮层应打开（实际 ${JSON.stringify(opened.hoverPreview)}）`)
+
+    // 复位：离开链接 → 关闭；保持 live（后续用例隔离）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 0, link: 'live-wikilink' })
+    await waitViewState('悬停预览.md', (v) => v.hoverPreview?.open === false)
+    console.log('[验收反馈] 先悬停再按 Ctrl 补触发链路通过')
+  }],
+
   // ---- #224 引用视图同步 ----
 
   // 未保存修改推送（applyEdit 不保存——TextDocument.version 推进即推送，

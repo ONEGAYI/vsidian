@@ -6,6 +6,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import { EditorSelection, EditorState } from '@codemirror/state'
+import { EditorView } from '@codemirror/view'
 import {
   LIVE_EMBED_CLASS_NAMES,
   LiveEmbedWidget,
@@ -20,11 +21,14 @@ import { liveDecorationsField } from '../../src/webview/liveDecorations'
 import { mermaidFencesField } from '../../src/webview/liveMermaid'
 import type { EmbedCardManager } from '../../src/webview/embedCard'
 
-/** 装饰观测：StateField 直驱（跨行/block 装饰来自 StateField 的 CM6 约束） */
+/** 装饰观测：StateField 直驱（跨行/block 装饰来自 StateField 的 CM6 约束）。
+ *  hidden = 隐形态（块级整行 replace，from<to 区间）；显形态是行下方
+ *  block widget（from===to 点位 + widget.below）——两形态块级化后以
+ *  区间形态而非 block 位区分 */
 function buildDecos(
   text: string,
   selection: EditorSelection,
-): Array<{ from: number; to: number; block: boolean; widget: LiveEmbedWidget }> {
+): Array<{ from: number; to: number; block: boolean; hidden: boolean; widget: LiveEmbedWidget }> {
   const state = EditorState.create({
     doc: text,
     extensions: [
@@ -38,11 +42,11 @@ function buildDecos(
     selection,
   })
   const decos = state.field(liveEmbedDecorations)
-  const out: Array<{ from: number; to: number; block: boolean; widget: LiveEmbedWidget }> = []
+  const out: Array<{ from: number; to: number; block: boolean; hidden: boolean; widget: LiveEmbedWidget }> = []
   decos.between(0, text.length, (from, to, value) => {
     const spec = value.spec as { widget?: LiveEmbedWidget; block?: boolean }
     if (spec.widget) {
-      out.push({ from, to, block: Boolean(spec.block), widget: spec.widget })
+      out.push({ from, to, block: Boolean(spec.block), hidden: from < to, widget: spec.widget })
     }
   })
   return out.sort((a, b) => a.from - b.from)
@@ -66,6 +70,9 @@ describe('Live 嵌入装饰：显隐切换', () => {
     expect(items).toHaveLength(1)
     expect(items[0]!.from).toBe(LINE_FROM)
     expect(items[0]!.to).toBe(LINE_TO)
+    expect(items[0]!.hidden).toBe(true)
+    // inline replace（非 block）：行结构保留是键盘垂直导航可进入嵌入行的
+    // 前提（块级 replace 被 CM6 跳过整行，实测 ArrowUp 落点越过区间）
     expect(items[0]!.block).toBe(false)
     expect(items[0]!.widget).toBeInstanceOf(LiveEmbedWidget)
     expect(items[0]!.widget!.inner).toBe('目标笔记')
@@ -76,7 +83,7 @@ describe('Live 嵌入装饰：显隐切换', () => {
     for (const at of [LINE_FROM, LINE_FROM + 3, EMBED_TO]) {
       const items = buildDecos(DOC, EditorSelection.single(at))
       expect(items, `at=${at}`).toHaveLength(1)
-      expect(items[0]!.block, `at=${at}`).toBe(true)
+      expect(items[0]!.hidden, `at=${at}`).toBe(false)
       expect(items[0]!.from, `at=${at}`).toBe(LINE_TO)
       expect(items[0]!.to, `at=${at}`).toBe(LINE_TO)
       expect(items[0]!.widget!.below, `at=${at}`).toBe(true)
@@ -85,18 +92,18 @@ describe('Live 嵌入装饰：显隐切换', () => {
 
   it('光标在区间相邻位置（! 前一格 / ]] 后一格）不显形（保持替换隐藏）', () => {
     const before = buildDecos(DOC, EditorSelection.single(LINE_FROM - 1))
-    expect(before[0]!.block).toBe(false)
+    expect(before[0]!.hidden).toBe(true)
     const after = buildDecos(DOC, EditorSelection.single(EMBED_TO + 1))
-    expect(after[0]!.block).toBe(false)
+    expect(after[0]!.hidden).toBe(true)
   })
 
   it('非空选区与区间严格重叠才显形：端点相接不重叠保持隐藏', () => {
     // 选区 [0, LINE_FROM)——止于区间左端（不含端点）：不重叠 → 隐藏
     const touching = buildDecos(DOC, EditorSelection.create([EditorSelection.range(0, LINE_FROM)]))
-    expect(touching[0]!.block).toBe(false)
+    expect(touching[0]!.hidden).toBe(true)
     // 选区 [0, LINE_FROM + 1)——跨过左端：严格重叠 → 显形
     const overlap = buildDecos(DOC, EditorSelection.create([EditorSelection.range(0, LINE_FROM + 1)]))
-    expect(overlap[0]!.block).toBe(true)
+    expect(overlap[0]!.hidden).toBe(false)
   })
 
   it('多选区任一 range 命中即显形', () => {
@@ -108,7 +115,7 @@ describe('Live 嵌入装饰：显隐切换', () => {
       ]),
     )
     expect(items).toHaveLength(1)
-    expect(items[0]!.block).toBe(true)
+    expect(items[0]!.hidden).toBe(false)
   })
 
   it('多枚嵌入：光标在第一枚内 → 其余保持隐藏形态（各自独立显隐）', () => {
@@ -116,9 +123,9 @@ describe('Live 嵌入装饰：显隐切换', () => {
     const first = text.indexOf('![[A]]')
     const items = buildDecos(text, EditorSelection.single(first + 3))
     expect(items).toHaveLength(2)
-    expect(items.filter((i) => i.block)).toHaveLength(1)
-    expect(items[0]!.block).toBe(true)
-    expect(items[1]!.block).toBe(false)
+    expect(items.filter((i) => !i.hidden)).toHaveLength(1)
+    expect(items[0]!.hidden).toBe(false)
+    expect(items[1]!.hidden).toBe(true)
   })
 
   it('行前缩进（≤3 空格）与尾随空白容忍：替换覆盖整行（含缩进）', () => {
@@ -168,6 +175,27 @@ describe('Live 嵌入装饰：抑制边界（表构建层不排除、发射层�
     // 行首插入 ``` 开启围栏（未闭合）→ 嵌入行落入开放围栏内容区
     state = state.update({ changes: { from: 0, insert: '```\n' } }).state
     expect(state.field(liveEmbedDecorations).size).toBe(0)
+  })
+
+  it('DOM 层：隐形态整行替换（源文文本退场，宿主块级 div 在行内）', () => {
+    const view = new EditorView({
+      parent: document.body.appendChild(document.createElement('div')),
+      state: EditorState.create({
+        doc: DOC,
+        extensions: [liveDecorationsField, mermaidFencesField, liveEmbed],
+        selection: EditorSelection.single(0), // 未触及 → 隐形态
+      }),
+    })
+    const host = view.contentDOM.querySelector('.vsidian-live-embed')
+    expect(host).not.toBeNull()
+    // inline replace：宿主在 .cm-line 内（行结构保留——键盘垂直导航前提），
+    // 块级对齐与 buffer 隐藏由 CSS 承担（embedCardCssContract 钉住规则）
+    expect(host!.tagName).toBe('DIV')
+    expect(host!.classList.contains('vsidian-live-embed-below')).toBe(false)
+    const embedLine = Array.from(view.contentDOM.querySelectorAll('.cm-line'))
+      .find((line) => line.textContent?.includes('目标笔记') && !line.contains(host))
+    expect(embedLine).toBeUndefined()
+    view.destroy()
   })
 })
 

@@ -95,3 +95,10 @@ describe('悬停浮层笔记属性区 CSS 契约（#220）', () => {
     expect(chevron).toMatch(/rotate\(-90deg\)/)
   })
 })
+
+describe('错误分态样式区分（验收反馈）', () => {
+  it('错误状态行挂错误修饰类：主题错误色（与 loading 描述色区分）', () => {
+    const error = rule('#app > .vsidian-hover-popup .vsidian-hover-popup-state-error')
+    expect(error).toMatch(/color:\s*var\(--vscode-errorForeground/)
+  })
+})

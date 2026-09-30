@@ -236,11 +236,16 @@ describe('内容渲染与只读契约', () => {
     hoverPreviewAnchorEnter(h.anchor)
     vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
     expect(hoverPopupProbe()).toMatchObject({ open: true, state: 'loading' })
+    // loading 不挂错误修饰类（验收反馈：错误文案与普通文字区分）
+    const stateEl = popupEl()!.querySelector('.vsidian-hover-popup-state')
+    expect(stateEl!.classList.contains('vsidian-hover-popup-state-error')).toBe(false)
     const req = requestOf(h)
     notifyHoverResult({ kind: 'hover.result', reqId: req.reqId, instanceId: req.instanceId, ok: false, reason: 'not-found' })
     const probe = hoverPopupProbe()
     expect(probe).toMatchObject({ open: true, state: 'error' })
     expect(popupEl()!.textContent).not.toBe('')
+    // 错误分态挂错误修饰类（主题错误色的 DOM 载体）
+    expect(stateEl!.classList.contains('vsidian-hover-popup-state-error')).toBe(true)
   })
 
   it('陈旧回包（instanceId 或 reqId 不匹配）不覆盖当前内容', () => {

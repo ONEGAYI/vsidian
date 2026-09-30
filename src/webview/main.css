@@ -2863,6 +2863,19 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
   color: color-mix(in srgb, var(--vscode-editor-foreground, #808080) 45%, transparent);
 }
 
+/* Markdown 转义符通用显隐（表格外，验收反馈通用化）：反斜杠默认隐藏
+   （所见 = 字面字符，如 \* 渲染为 *）；光标/选区触及该行时换挂显形类
+   浅色暴露源码——口径与上表格规则一致（表格行内 \| 由上方专用规则
+   承担，#42 契约不变）。 */
+#app .cm-editor .cm-scroller .vsidian-escape {
+  display: none;
+}
+
+#app .cm-editor .cm-scroller .vsidian-escape-reveal {
+  display: inline;
+  color: color-mix(in srgb, var(--vscode-editor-foreground, #808080) 45%, transparent);
+}
+
 /* #43 悬停控件位于 CM6 文本层之上，只为视口内网格行建立 DOM。 */
 #app .cm-editor .vsidian-table-controls {
   position: absolute;
@@ -3853,6 +3866,12 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
   overflow-wrap: break-word;
 }
 
+/* 错误分态修饰（验收反馈：与普通文字区分——主题错误色，一眼可辨
+   「文件问题」；loading 保持描述色） */
+#app > .vsidian-hover-popup .vsidian-hover-popup-state-error {
+  color: var(--vscode-errorForeground, #f14c4c);
+}
+
 /* ---- #220 悬停浮层笔记属性区（样式契约 chrome 域 hover-fm-section 条目；
    引用专属样式入口——仅作用于浮层内 frontmatter 块，主阅读视图的属性
    呈现不受影响） ---- */
@@ -4010,6 +4029,12 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
   overflow-wrap: anywhere;
 }
 
+/* 错误分态修饰（验收反馈：与普通文字区分——主题错误色，与悬停浮层
+   state-error 同口径） */
+#app .vsidian-embed-card .vsidian-embed-card-state-error {
+  color: var(--vscode-errorForeground, #f14c4c);
+}
+
 /* 卡片内 Reading 容器贴边微收（正文样式随嵌套命中，不复制主题） */
 #app .vsidian-embed-card .vsidian-embed-card-scroll .vsidian-view-reading {
   padding: 8px 12px;
@@ -4038,4 +4063,19 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
    margin 承担（相邻块级 margin 折叠，不叠加），此处仅钉住可定位性 */
 #app .cm-editor .cm-content .vsidian-live-embed-below {
   display: block;
+}
+
+/* 隐形态呈现（验收反馈：不留隐形源码行）：宿主 span 块级化使卡片占满
+   行宽、直接从源码行对齐；inline replace widget 前后各一枚
+   cm-widgetBuffer（默认各占一行文字高）按 frontmatter 标题栏行先例隐藏
+   ——二者合起来消除「卡片与源码行之间错开一层」的观感。保持 inline
+   replace（行结构保留）是键盘垂直导航可进入嵌入行的前提（块级 replace
+   会被 CM6 跳过整行），呈现目标全部由本段规则承担 */
+#app .cm-editor .cm-content .vsidian-live-embed {
+  display: block;
+}
+
+#app .cm-editor .cm-content .cm-line > .cm-widgetBuffer:has(+ .vsidian-live-embed),
+#app .cm-editor .cm-content .cm-line > .vsidian-live-embed + .cm-widgetBuffer {
+  display: none;
 }

@@ -1263,6 +1263,12 @@ export class WebviewSyncController {
     this.applyQuickActionsDom()
     // document 捕获先于 VS Code webview 预加载脚本的 window 冒泡转发。
     this.docKeydown = (e: KeyboardEvent) => {
+      // Ctrl/Cmd 按下（非重复）：Live 悬停补触发——指针已在链接上时开浮层
+      // （不 preventDefault/stopPropagation：修饰键本身不是键绑定，其余
+      // 路由照常）
+      if ((e.key === 'Control' || e.key === 'Meta') && !e.repeat) {
+        this.onLiveHoverModifierDown()
+      }
       if (e.key === 'Escape' && this.quickHeadingMenu && !this.quickHeadingMenu.hidden) {
         e.preventDefault()
         e.stopPropagation()
@@ -1333,6 +1339,12 @@ export class WebviewSyncController {
       if (this.viewMode !== 'live') {
         return
       }
+      // 修饰位不足也先记录现场（Ctrl 后按下的补触发依赖它），再决定本次
+      // 是否开浮层——「按住 Ctrl 再进入」与「进入后按 Ctrl」两条路径等价
+      const hoverAnchor = this.liveHoverAnchorOf(event.target)
+      if (hoverAnchor) {
+        this.lastLiveHover = { anchor: hoverAnchor, x: event.clientX, y: event.clientY }
+      }
       const withMod = event.ctrlKey || event.metaKey
       if (!this.liveHoverDirect() && !withMod) {
         return
@@ -1342,6 +1354,12 @@ export class WebviewSyncController {
     this.view.contentDOM.addEventListener('mouseout', (event) => {
       if (this.viewMode !== 'live') {
         return
+      }
+      if (this.lastLiveHover) {
+        const leaving = this.liveHoverAnchorOf(event.target)
+        if (leaving && this.lastLiveHover.anchor === leaving) {
+          this.lastLiveHover = null
+        }
       }
       this.handleLiveHover(event, 'leave')
     })
@@ -1730,6 +1748,12 @@ export class WebviewSyncController {
               clientY: rect.top + rect.height / 2,
             },
           ))
+        }
+        if (message.action === 'modkey') {
+          // 真实 keydown Control 经 document 捕获路由（与用户按键同链路，
+          // 走 onLiveHoverModifierDown 补触发——「先悬停、后按 Ctrl」路径）
+          document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Control', bubbles: true }))
+          break
         }
         if (message.link === 'live-wikilink' || message.link === 'live-md') {
           const content = this.view?.contentDOM
@@ -3018,6 +3042,8 @@ export class WebviewSyncController {
       this.clearViewport()
     }
     this.viewMode = mode
+    // Live 悬停现场随模式切换作废（装饰 DOM 随重建脱树，补触发不得复活旧锚）
+    this.lastLiveHover = null
     this.closeQuickHeadingMenu(false)
     this.refreshQuickActions()
     // #221 全入口后 Live 悬停与面板悬停同样可开浮层：切模式 = 触发上下文
@@ -4725,6 +4751,44 @@ export class WebviewSyncController {
   /** Live 直接悬停设置（hover.liveDirect；缺省 false = 默认 Ctrl+悬停） */
   private liveHoverDirect(): boolean {
     return this.settings?.[HOVER_LIVE_DIRECT_KEY] === true
+  }
+
+  /** 指针当前悬停的 Live 链接装饰（含派发时坐标）：mouseover 时总在记录
+   *  （修饰位不足也不丢——「先悬停、后按 Ctrl」补触发的现场），mouseout
+   *  / 模式切换时清空；坐标仅作装饰矩形不可得时的回退定位 */
+  private lastLiveHover: { anchor: HTMLElement; x: number; y: number } | null = null
+
+  /** Ctrl/Cmd 按下补触发（验收反馈：指针已在链接上再按修饰键同样开浮层
+   *  ——mouseover 时刻判修饰位只覆盖「按住再进入」，此路径覆盖「进入后
+   *  按下」）。锚点用实时矩形中心重定位（滚动后旧坐标失效）；同锚已开
+   *  浮层时 enter 幂等（取消待关计时），不同锚换锚重开 */
+  private onLiveHoverModifierDown(): void {
+    if (this.viewMode !== 'live' || this.liveHoverDirect()) {
+      return
+    }
+    const pending = this.lastLiveHover
+    if (!pending || !pending.anchor.isConnected) {
+      this.lastLiveHover = null
+      return
+    }
+    const view = this.view
+    if (!view) {
+      return
+    }
+    // 多行装饰取中间矩形（单行也适用）；无矩形（jsdom/未布局）回退记录坐标
+    const rects = pending.anchor.getClientRects()
+    const rect = rects.length > 0 ? rects[Math.floor(rects.length / 2)]! : null
+    const x = rect ? rect.left + rect.width / 2 : pending.x
+    const y = rect ? rect.top + rect.height / 2 : pending.y
+    const pos = view.posAtCoords({ x, y })
+    if (pos === null) {
+      return
+    }
+    const spec = this.liveLinkSpecAt(view, pos)
+    if (!spec) {
+      return
+    }
+    hoverPreviewAnchorEnter(pending.anchor, spec)
   }
 
   /** Live 悬停锚点归约：链接装饰 DOM（树驱动/宽松链接 mark 的
