@@ -548,6 +548,17 @@ export class DocumentSession {
         // #198 索引维护只在设置页 webview 链路（settingsPage 模块）处理，
         // 编辑器面板不会发出；到达此处无副作用（保持协议穷尽）
         return Promise.resolve()
+      case 'wordSegment.get':
+      case 'wordSegment.loadResult':
+        // #239 分词资源状态：wordSegment.get 的应答在 provider 层处理
+        //（资源 URI 逐面板经 asWebviewUri 构造）；loadResult 由 provider
+        // 转发宿主通知。此处仅保持协议穷尽
+        return Promise.resolve()
+      case 'wordSegment.download':
+      case 'wordSegment.delete':
+        // #239 下载/删除只在设置页 webview 链路（settingsPage 模块）处理，
+        // 编辑器面板不会发出；到达此处无副作用（保持协议穷尽）
+        return Promise.resolve()
       case 'keybindings.get':
       case 'keybindings.set':
       case 'keybindings.reset':

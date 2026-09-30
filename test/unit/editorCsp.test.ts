@@ -59,13 +59,13 @@ describe('编辑器 CSP 装配（#130 HTTPS 样式导入与联网字体）', () 
     expect(tokens.filter((tok) => tok === 'http:')).toEqual([])
   })
 
-  it('不以宿主代理绕过 CORS：无 connect-src（default-src none 下 fetch/XHR 全禁）', () => {
-    expect([...directives.keys()]).not.toContain('connect-src')
+  it('connect-src 仅放行 cspSource（#239 jieba wasm 经 init(url) 内部 fetch 装载；不开 https:/http: 外网）', () => {
+    expect(directives.get('connect-src')).toEqual(['https://vscode-webview.test-origin'])
   })
 
   it('指令集穷举（新增指令须随测试更新语义说明）', () => {
     expect([...directives.keys()].sort()).toEqual(
-      ['default-src', 'font-src', 'img-src', 'script-src', 'style-src'],
+      ['connect-src', 'default-src', 'font-src', 'img-src', 'script-src', 'style-src'],
     )
   })
 

@@ -99,6 +99,18 @@ export const UI_OPERATIONS = [
   // 生效（mode: both 只表示两模式下命令均可用——目标判定各自实现）；
   // 默认不占键位，键位留给用户按需绑定（评估记录见 docs/specs/keybindings.md）
   { id: 'hoverPreviewLink', command: 'onegayi.vsidian.ui.hoverPreviewLink', titleKey: 'command.ui.hoverPreviewLink.title', mode: 'both', writes: false, defaults: [] },
+  // #239 中文分词词级移动四操作（批次文档 §3 钉住：Live 编辑能力，
+  // writes=true 类——据此走 router 的 allowWrites 焦点门控，find 输入框
+  // 等非正文焦点不劫持）。默认 ctrl+方向（Windows/Linux）与 alt+方向
+  // （mac 词移动惯例；meta+left/right 不注册——mac Cmd+方向为行首/行尾
+  // 惯例不被覆盖）。Shift 变体单列操作（router 按整串 chord 精确匹配，
+  // ctrl+left 不含 shift——扩选必须独立注册）。执行装配在
+  // keybindingRouter 本地分支（同步直达，不出站宿主往返）；命令面板经
+  // UI_OPERATIONS 注册循环 → ui.command 回流（评估记录见 keybindings.md）
+  { id: 'cursorWordLeft', command: 'onegayi.vsidian.wordMotion.cursorLeft', titleKey: 'command.wordMotion.cursorLeft.title', mode: 'live', writes: true, defaults: ['ctrl+left', 'alt+left'] },
+  { id: 'selectWordLeft', command: 'onegayi.vsidian.wordMotion.selectLeft', titleKey: 'command.wordMotion.selectLeft.title', mode: 'live', writes: true, defaults: ['ctrl+shift+left', 'alt+shift+left'] },
+  { id: 'cursorWordRight', command: 'onegayi.vsidian.wordMotion.cursorRight', titleKey: 'command.wordMotion.cursorRight.title', mode: 'live', writes: true, defaults: ['ctrl+right', 'alt+right'] },
+  { id: 'selectWordRight', command: 'onegayi.vsidian.wordMotion.selectRight', titleKey: 'command.wordMotion.selectRight.title', mode: 'live', writes: true, defaults: ['ctrl+shift+right', 'alt+shift+right'] },
 ] as const satisfies readonly KeybindingOperation[]
 export type UiOperationId = (typeof UI_OPERATIONS)[number]['id']
 export function isUiOperationId(value: unknown): value is UiOperationId {

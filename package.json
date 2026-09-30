@@ -340,6 +340,26 @@
         "command": "onegayi.vsidian.ui.hoverPreviewLink",
         "title": "%command.ui.hoverPreviewLink.title%",
         "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.wordMotion.cursorLeft",
+        "title": "%command.wordMotion.cursorLeft.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.wordMotion.selectLeft",
+        "title": "%command.wordMotion.selectLeft.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.wordMotion.cursorRight",
+        "title": "%command.wordMotion.cursorRight.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.wordMotion.selectRight",
+        "title": "%command.wordMotion.selectRight.title%",
+        "category": "Vsidian"
       }
     ],
     "menus": {

@@ -34,7 +34,9 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // 修改引用、未闭合撤卡恢复、内部选区隔离与绘制断言）紧随 readingEmbed。
 // #224 合并入列：hoverRefresh（引用视图同步——目标失效推送驱动嵌入/浮层
 // 刷新、fm/滚动保持、快速更新无旧冒充、删除恢复分态与订阅生命周期）。
-const names = ['tableCaret', 'quoteBarPaint', 'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'imagePaste', 'outlineJump', 'outlineCollapse', 'outlineHover',
+// #239 合并入列：wordMotion（中文分词词级移动——Ctrl+方向真实键盘、
+// 拉丁回归、Intl 动态边界步进、jieba 注入、表格格导航共存）。
+const names = ['tableCaret', 'quoteBarPaint', 'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'wordMotion', 'imagePaste', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage',
   'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract', 'commentToggle', 'viewToggle', 'contextMenu', 'anchorFlash', 'readingWidthProbe', 'codeCardChrome', 'liveImageLayout', 'imageRefresh', 'imagePopup', 'hoverPreview', 'readingEmbed', 'liveEmbed', 'hoverEntry', 'hoverRefresh']
 const { workers, reuseBuilds, selected } = parseBrowserRunOptions(process.argv.slice(2), names)

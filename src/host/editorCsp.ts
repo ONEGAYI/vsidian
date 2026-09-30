@@ -14,12 +14,19 @@
 // - 远程样式表内的相对字体 URL 由浏览器按「该远程 CSS 的 URL」解析锚定
 //   （与本地片段的相对路径同一浏览器语义，无需扩展参与）。
 //
+// #239 变更（jieba wasm 按需加载）：connect-src 追加 `${cspSource}`——
+// jieba-wasm 浏览器产物的 init(url) 内部经 fetch 拉取 wasm（宿主已下载
+// 到 globalStorage 并 sha256 校验，经 asWebviewUri 转入本资源域）。只放
+// 行 webview 自有资源域，不开 https:/http: 外网——「CSP 不开外网」红线
+// 维持（下载在宿主侧 Node fetch 执行，不经 webview）。
+//
 // 不放宽的面（验收红线）：
 // - script-src 维持 nonce 门控——不因字体/样式需求扩大脚本权限，不放
 //   https:/unsafe-inline/unsafe-eval；
 // - 明文 `http:` 源不放行（样式与字体都只认 https）；
-// - 无 connect-src（default-src 'none' 兜底）——webview JS 不经 fetch/XHR
-//   拉取远程资源，全部远程装载走浏览器原生管线，CSP 逐源把关。
+// - connect-src 仅 cspSource（自有资源域）——除 jieba wasm 的装载外，
+//   webview JS 不经 fetch/XHR 拉取任何远程资源，其余远程装载走浏览器
+//   原生管线，CSP 逐源把关。
 export function buildEditorCsp(cspSource: string, nonce: string): string {
   return [
     `default-src 'none'`,
@@ -34,5 +41,7 @@ export function buildEditorCsp(cspSource: string, nonce: string): string {
     `style-src ${cspSource} 'unsafe-inline' https:`,
     // https: 为 #130 远程 @font-face 字体（CORS 由字体服务侧回应，见文件头）
     `font-src ${cspSource} https:`,
+    // #239 jieba wasm：init(url) 的 fetch 只指向 cspSource 资源域
+    `connect-src ${cspSource}`,
   ].join('; ')
 }

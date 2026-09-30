@@ -88,6 +88,7 @@ import { installHostLocale, LOCALE_MESSAGES, type LocaleCode } from '../shared/l
 import { buildLocaleIslandHtml } from '../shared/locales/island'
 import { hostLocale } from './hostLocale'
 import { t } from '../shared/i18n'
+import type { JiebaWiring } from './jiebaResourceWiring'
 
 export const VIEW_TYPE = 'onegayi.vsidian.editor'
 
@@ -333,6 +334,9 @@ export function createTextEditorProvider(
   /** #198 索引维护接线（测试钩子观测持久化与生效模式用；生产由
    *  extension.ts 注入 createIndexMaintenance 产物） */
   indexMaintenance?: IndexMaintenance,
+  /** #239 分词资源接线（jieba 下载/删除宿主权威；编辑器面板消费
+   *  wordSegment.get 应答与 loadResult 转发、状态变化广播） */
+  jieba?: JiebaWiring,
 ): vscode.CustomTextEditorProvider {
   const sessions = new Map<string, SessionEntry>()
   let lastClosedInput: { docUri: string; webviewText?: string; fragments: string[] } | undefined
@@ -1436,6 +1440,20 @@ export function createTextEditorProvider(
           }
           return
         }
+        // #239 分词资源状态：面板装载时拉取（应答逐面板构造资源 URI——
+        // asWebviewUri 前缀面板私有）；loadResult 为 webview 侧 jieba 动态
+        // 加载失败回报（宿主校验通过但 webview 运行时不兼容的场景），
+        // 转服务记 notice 并通知用户
+        if (jieba && isWebviewToHost(message) && message.kind === 'wordSegment.get') {
+          void webviewPanel.webview.postMessage({ kind: 'wordSegment.state', ...jieba.stateFor(webviewPanel.webview) })
+          return
+        }
+        if (jieba && isWebviewToHost(message) && message.kind === 'wordSegment.loadResult') {
+          if (!message.ok) {
+            jieba.service.reportLoadFailed(message.detail)
+          }
+          return
+        }
         // #141 工具栏双态切换按钮：target 由 webview 按自身 viewMode 求值
         // （另一态），宿主复用 runViewSwitch 全套编排（模式记忆、diff 防御、
         // context 刷新、view.mode.set 回流驱动按钮态）。双态裁剪即 target
@@ -1655,6 +1673,26 @@ export function createTextEditorProvider(
       }
     })
     context.subscriptions.push({ dispose: () => offKeys() })
+  }
+
+  // ---- #239 分词资源状态广播（照 settings.changed 全面板遍历样板）：
+  //      下载/删除完成后推送（installed 与资源 URI 变化驱动编辑器侧
+  //      wordMotion 重评估加载）。资源 URI 逐面板构造（asWebviewUri
+  //      前缀面板私有），故不能复用单条消息的 postToPanel 广播 ----
+  if (jieba) {
+    const offJieba = jieba.service.onStateChanged(() => {
+      for (const entry of sessions.values()) {
+        for (const [sessionId, panel] of entry.panels) {
+          if (entry.session.getInfo().panels.some((p) => p.sessionId === sessionId && p.ready)) {
+            void panel.webview.postMessage({
+              kind: 'wordSegment.state',
+              ...jieba.stateFor(panel.webview),
+            })
+          }
+        }
+      }
+    })
+    context.subscriptions.push({ dispose: () => offJieba() })
   }
 
   // ---- #128 CSS 片段：装载失败提示（按 片段+版本 去重——多面板各自回报

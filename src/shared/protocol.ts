@@ -487,6 +487,23 @@ export type HostToWebview =
         detail?: string
       } | null
     }
+  /** #239 分词资源状态（jieba-wasm 按需下载，宿主权威）：设置页「中文
+   *  分词」分页与编辑器面板消费。installed = 锁定版本资源在场且 sha256
+   *  校验通过；resources 仅在 installed 时携带（globalStorage 文件经
+   *  asWebviewUri 的 webview 资源 URI，编辑器侧按需动态 import 加载，
+   *  逐面板 URI 前缀私有故不缓存在宿主）。status:downloading 期间按钮
+   *  禁用；notice 保留至下一次操作覆盖（页面不自行清除）。 */
+  | {
+      kind: 'wordSegment.state'
+      installed: boolean
+      version: string
+      status: 'idle' | 'downloading'
+      notice: {
+        kind: 'downloaded' | 'download-failed' | 'deleted' | 'delete-failed' | 'load-failed'
+        detail?: string
+      } | null
+      resources: { js: string; wasm: string } | null
+    }
 
 /** webview → 宿主消息 */
 export type WebviewToHost =
@@ -942,6 +959,20 @@ export type WebviewToHost =
   | { kind: 'index.rebuild' }
   /** 取消在途维护操作（#198，设置页，重建/清理期间可用） */
   | { kind: 'index.cancel' }
+  /** 分词资源状态拉取（#239，设置页与编辑器面板装载时）：宿主以
+   *  wordSegment.state 应答（含已安装资源的 webview URI——逐面板私有） */
+  | { kind: 'wordSegment.get' }
+  /** 请求下载 jieba 资源（#239，设置页）：宿主按当前下载源设置执行——
+   *  下载 → sha256 校验 → 落 globalStorage，失败清理不留半成品文件；
+   *  全程经 wordSegment.state 推送（downloading → idle/notice） */
+  | { kind: 'wordSegment.download' }
+  /** 删除已下载 jieba 资源（#239，设置页）：删除后引擎回退 builtin，
+   *  结果经 wordSegment.state 推送 */
+  | { kind: 'wordSegment.delete' }
+  /** 编辑器侧 jieba 加载结果回报（#239）：宿主已确认资源就绪但 webview
+   *  动态 import/init 失败时上报（CSP/运行时不兼容等宿主不可见场景），
+   *  宿主通知用户并记录 notice.load-failed；成功不回报 */
+  | { kind: 'wordSegment.loadResult'; ok: boolean; detail?: string }
 
 /** 反链面板条目载荷（#197 backlinks.snapshot.items；形态与宿主
  *  BacklinkItem 同构——本接口为协议层稳定契约） */
@@ -2733,7 +2764,13 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'index.cleanup':
     case 'index.rebuild':
     case 'index.cancel':
+    case 'wordSegment.get':
+    case 'wordSegment.download':
+    case 'wordSegment.delete':
       return true
+    case 'wordSegment.loadResult':
+      return typeof v.ok === 'boolean' &&
+        (v.detail === undefined || isString(v.detail))
     case 'index.setPatterns':
       return Array.isArray(v.patterns) && v.patterns.every(isString)
     default:
@@ -3121,6 +3158,18 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         (v.notice === null || (isObject(v.notice) && isIndexNoticeKind(v.notice.kind) &&
           (v.notice.detail === undefined || isString(v.notice.detail))))
       )
+    case 'wordSegment.state':
+      // #239 分词资源状态：installed/version/status/notice 形态 + resources
+      // 仅 installed 时携带（js/wasm 两个 webview 资源 URI）
+      return (
+        typeof v.installed === 'boolean' &&
+        isString(v.version) &&
+        (v.status === 'idle' || v.status === 'downloading') &&
+        (v.notice === null || (isObject(v.notice) && isWordSegmentNoticeKind(v.notice.kind) &&
+          (v.notice.detail === undefined || isString(v.notice.detail)))) &&
+        (v.resources === null || (isObject(v.resources) &&
+          isString(v.resources.js) && isString(v.resources.wasm)))
+      )
     default:
       return false
   }
@@ -3134,6 +3183,15 @@ const INDEX_NOTICE_KINDS = [
 
 function isIndexNoticeKind(v: unknown): v is (typeof INDEX_NOTICE_KINDS)[number] {
   return typeof v === 'string' && (INDEX_NOTICE_KINDS as readonly string[]).includes(v)
+}
+
+/** #239 分词资源操作结果反馈种类（wordSegment.state.notice.kind） */
+const WORD_SEGMENT_NOTICE_KINDS = [
+  'downloaded', 'download-failed', 'deleted', 'delete-failed', 'load-failed',
+] as const
+
+function isWordSegmentNoticeKind(v: unknown): v is (typeof WORD_SEGMENT_NOTICE_KINDS)[number] {
+  return typeof v === 'string' && (WORD_SEGMENT_NOTICE_KINDS as readonly string[]).includes(v)
 }
 
 /** #197 反链条目载荷形态守卫（新字段可选：旧宿主快照缺省容忍） */

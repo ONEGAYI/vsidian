@@ -591,4 +591,54 @@ export const zhCn: Record<MessageKey, string> = {
   'contextMenu.selectAll': '全选',
   /** 命令面板/快捷键页操作名（keybindings 注册表 titleKey） */
   'command.block.copyLink.title': '复制当前块链接',
+
+  // ---- #239 中文分词词级移动（操作注册表 + 设置页分页 + 宿主通知）----
+  /** 词级移动四操作（默认 ctrl+方向 / alt+方向（mac 词移动惯例）；
+   *  Shift 变体单列操作——扩选注册） */
+  'command.wordMotion.cursorLeft.title': '按词左移（中文分词）',
+  'command.wordMotion.cursorRight.title': '按词右移（中文分词）',
+  'command.wordMotion.selectLeft.title': '按词向左扩展选区（中文分词）',
+  'command.wordMotion.selectRight.title': '按词向右扩展选区（中文分词）',
+  /** 设置项：分词引擎（呈现归「中文分词」附加分页） */
+  'setting.wordSegmentEngine.title': '分词引擎',
+  'setting.wordSegmentEngine.description': 'Ctrl+左/右箭头按词移动时对连续中文段的切分引擎。英文与数字段始终沿用内置分组语义。',
+  'setting.wordSegmentEngineBuiltin': '内置（Intl.Segmenter）',
+  'setting.wordSegmentEngineJieba': 'jieba-wasm（词典分词）',
+  /** 设置项：jieba 下载源 */
+  'setting.wordSegmentSource.title': 'jieba 下载源',
+  'setting.wordSegmentSource.description': 'jieba-wasm 资源的下载来源。资源经锁定版本 sha256 校验后存入扩展存储；下载在扩展宿主侧执行（Remote SSH 场景在远程机下载）。',
+  'setting.wordSegmentSourceJsdelivr': 'jsDelivr CDN（默认）',
+  'setting.wordSegmentSourceNpmmirror': 'npmmirror（国内镜像）',
+  'setting.wordSegmentSourceCustom': '自定义 URL',
+  /** 设置项：自定义下载源基址 */
+  'setting.wordSegmentCustomUrl.title': '自定义源基址',
+  'setting.wordSegmentCustomUrl.description': '自定义模式使用的 HTTPS 目录地址——两个锁定文件按 基址/jieba_rs_wasm.js 与 基址/jieba_rs_wasm_bg.wasm 下载。明文 HTTP 会被拒绝。',
+  /** 设置页「中文分词」分页框架与资源管理 */
+  'wordSegment.title': '中文分词',
+  'wordSegment.description': 'Ctrl+左/右箭头对连续中文段按词移动，以及 jieba 资源管理。',
+  'wordSegment.engineLabel': '分词引擎',
+  'wordSegment.engineDescription': '决定按词移动时连续中文的切分方式，切换即时生效。',
+  'wordSegment.engineBuiltinHint': '浏览器内置 ICU 分词，无需下载、始终可用。',
+  'wordSegment.engineJiebaHint': '词典质量更好；需一次性下载资源，不可用时自动回退内置引擎。',
+  'wordSegment.sourceLabel': '下载源',
+  'wordSegment.sourceDescription': '仅在选择 jieba 引擎时生效。',
+  'wordSegment.customUrlPlaceholder': 'https://example.com/jieba/',
+  'wordSegment.resourceLabel': 'jieba 资源',
+  'wordSegment.resourceDescription': '按需下载到扩展存储（约 4 MB），不随扩展打包。删除后回退内置引擎。',
+  'wordSegment.installed': '已安装并校验通过（jieba-wasm {version}）。',
+  'wordSegment.notInstalled': '未安装，当前使用内置引擎。',
+  'wordSegment.downloading': '下载并校验中…',
+  'wordSegment.download': '下载',
+  'wordSegment.deleteResource': '删除资源',
+  'wordSegment.noticeDownloaded': '下载并校验完成。',
+  'wordSegment.noticeDownloadFailed': '下载失败：{detail}',
+  'wordSegment.noticeDeleted': '资源已删除，回退内置引擎。',
+  'wordSegment.noticeDeleteFailed': '删除失败：{detail}',
+  'wordSegment.noticeLoadFailed': '已下载资源在编辑器中加载失败，回退内置引擎。{detail}',
+  /** 宿主通知（下载/删除结果） */
+  'host.jiebaDownloaded': 'jieba-wasm {version} 已下载并校验通过，按词移动已切换为 jieba。',
+  'host.jiebaDownloadFailed': 'jieba 资源下载失败：{detail}。按词移动继续使用内置引擎。',
+  'host.jiebaDeleted': 'jieba 资源已删除，按词移动回退内置引擎。',
+  'host.jiebaDeleteFailed': 'jieba 资源删除失败：{detail}。',
+  'host.jiebaLoadFailed': 'jieba 在编辑器中加载失败：{detail}。内置引擎保持生效。',
 }
