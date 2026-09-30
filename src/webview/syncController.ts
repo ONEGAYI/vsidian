@@ -31,7 +31,7 @@
 //   关闭导致的状态重建）后继续编号，宿主按 seq 幂等去重
 import { Annotation, ChangeSet, Compartment, EditorSelection, EditorState, Prec, type Extension, type Text } from '@codemirror/state'
 import { EditorView, ViewPlugin, keymap } from '@codemirror/view'
-import { planFormatOperation } from './formatOperations'
+import { isInlineFormatOp, planFormatOperation, planFormatOperationRanges } from './formatOperations'
 import { createQuickActionStateReader } from './quickActionState'
 import { FORMAT_OPERATIONS, isFormatOperationId, type FormatOperationId } from '../shared/formatOperations'
 import { getEffectiveBindings, type KeybindingOverrides } from '../shared/keybindings'
@@ -3968,9 +3968,43 @@ export class WebviewSyncController {
     const view = this.view
     if (!view || this.viewMode !== 'live' || this.suspended ||
         view.state.readOnly || !view.state.facet(EditorView.editable)) return
-    const range = view.state.selection.main
+    const selection = view.state.selection
+    const region = view.state.field(tableRegionField, false)
+    // 多选区（#240，多光标设置开时可达；格区 region 与多 range 互斥）：
+    // 行内包裹类逐 range 应用；结构性操作（标题/列表/引用/围栏/分割线/
+    // HTML 注释）退化主 range（planOnlyIndex 指向主 range，其余 range
+    // 原样保留——多光标形态不因退化而收敛）
+    if (!region && selection.ranges.length > 1) {
+      const ranges = selection.ranges.map((range) => ({ from: range.from, to: range.to }))
+      const plan = isInlineFormatOp(op)
+        ? planFormatOperationRanges(view.state.doc.toString(), op, ranges)
+        : planFormatOperationRanges(view.state.doc.toString(), op, ranges,
+          'toggle', selection.mainIndex)
+      if (plan) {
+        const changeSet = view.state.changes(plan.changes)
+        const nextRanges = ranges.map((_, index) => {
+          const spec = plan.selections[index]
+          // 独立产物选区为终文坐标，直接落入；head 缺失为光标形态。null
+          // （未参与规划/无变更/重叠保护丢弃）以原生选区 range 经
+          // ChangeSet 映射——与单 range 路径不带 selection 时 CM6 的
+          // 自动映射同语义
+          if (spec) {
+            return spec.head === undefined
+              ? EditorSelection.cursor(spec.anchor)
+              : EditorSelection.range(spec.anchor, spec.head)
+          }
+          return selection.ranges[index]!.map(changeSet)
+        })
+        view.dispatch({ changes: plan.changes,
+          selection: EditorSelection.create(nextRanges, selection.mainIndex) })
+      }
+      view.focus()
+      this.refreshQuickActions()
+      return
+    }
+    const range = selection.main
     const plan = planFormatOperation(view.state.doc.toString(), op,
-      { from: range.from, to: range.to }, view.state.field(tableRegionField, false))
+      { from: range.from, to: range.to }, region)
     if (plan?.changes.length) {
       view.dispatch({ changes: plan.changes,
         ...(plan.selection ? { selection: plan.selection } : {}) })
