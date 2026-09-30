@@ -103,7 +103,12 @@ export const zhCn: Record<MessageKey, string> = {
   'setting.languageAuto': '自动',
   'setting.testFlag.title': '测试开关',
 
-  // ---- cssSnippets.（CSS 片段设置分页：目录行、状态条、按钮，#128）----
+  // ---- appearance.（#231 外观合并分页：侧栏条目标题与描述）----
+  'appearance.title': '外观',
+  'appearance.description': '管理 CSS 片段与外观定制：片段目录、逐项开关与公开样式契约参考。',
+
+  // ---- styleRef.（样式参考：总表/详细查询文案与骨架标签，#132；#231 起为
+  // 外观合并分页的页签体，tabOverview/tabDetail 亦作外观页签文案沿用）----
   'styleRef.title': '样式参考',
   'styleRef.description': '查阅当前安装版本的公开样式契约：选择器、CSS 变量、Obsidian 原名兼容等级与限制项。内容随版本由契约清单生成。',
   'styleRef.versionNote': '本参考与安装版本 {version} 配套。',
@@ -173,7 +178,6 @@ export const zhCn: Record<MessageKey, string> = {
   'command.exportStyleReference.title': 'Vsidian：导出样式参考 JSON',
   'command.openStyleReference.title': 'Vsidian：打开样式参考',
   'cssSnippets.title': 'CSS 片段',
-  'cssSnippets.description': '从用户级目录加载第一层 .css 文件作为跨项目共享的片段。新片段默认关闭；片段按确定的文件名顺序加载，同层叠优先级下后加载者覆盖。',
   'cssSnippets.directoryLabel': '片段目录',
   'cssSnippets.chooseDirectory': '选择目录…',
   'cssSnippets.chooseOpenLabel': '选择文件夹',
@@ -466,14 +470,22 @@ export const zhCn: Record<MessageKey, string> = {
   // ---- #97 manifest NLS（命令 title 与 displayName/description 生成源）----
   // 值即 package.json 原硬编码字面量（呈现不变）；工具条 24 条命令复用
   // format.* 既有键。command.* 键同时是快捷键页 extra/UI 源操作名的
-  // titleKey（与命令面板同源，无第二套文案）。
+  // titleKey（与命令面板同源，无第二套文案）；例外是三态切换三命令
+  // （#232）：manifest title 改归属句式，操作名拆到 operation.* 独立键。
   'manifest.displayName': 'Vsidian',
   'manifest.description': '类 Obsidian 的 Markdown 编辑体验：实时预览 + 阅读双视图',
 
   'command.toggleViewMode.title': '切换到下一视图模式',
-  'command.mode.toReading.title': '切换到阅读模式',
-  'command.mode.toSource.title': '切换到源码编辑器',
-  'command.mode.toLive.title': '切换到实时预览',
+  /** #232 归属句式：editor/title 三态切换命令的 manifest title（genNls 生成源），
+   *  与快捷键注册表的无前缀操作名键（operation.*）拆键分持 */
+  'command.mode.toReading.title': '将 Vsidian 切换到阅读模式',
+  'command.mode.toSource.title': '将 Vsidian 切换到源码编辑器',
+  'command.mode.toLive.title': '将 Vsidian 切换到实时预览',
+  /** #232 拆键：三态切换的无前缀操作名（keybindings 注册表 titleKey，
+   *  快捷键页显示不带品牌名；值即拆键前原文案） */
+  'operation.toReading': '切换到阅读模式',
+  'operation.toSource': '切换到源码编辑器',
+  'operation.toLive': '切换到实时预览',
   /** #141 双态切换（live↔reading，不含源码；工具栏按钮与 Ctrl+Q 共用） */
   'command.mode.toggleDualView.title': '切换阅读/实时预览',
   'command.find.title': '查找（编辑区）',

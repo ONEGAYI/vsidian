@@ -71,6 +71,30 @@ describe('快捷键契约', () => {
   })
 })
 
+describe('三态切换命令标题句式（#232）', () => {
+  it('操作名与 manifest title 拆键：注册表持无前缀操作名键（原文案），manifest title 键句式化', () => {
+    const titleKeyOf = (id: string) =>
+      KEYBINDING_OPERATIONS.find((op) => op.id === id)!.titleKey
+    // 快捷键注册表换指新增的无前缀操作名键：设置页操作名不带品牌名
+    expect(titleKeyOf('toReading')).toBe('operation.toReading')
+    expect(titleKeyOf('toSource')).toBe('operation.toSource')
+    expect(titleKeyOf('toLive')).toBe('operation.toLive')
+    expect(en['operation.toReading']).toBe('Switch to reading view')
+    expect(en['operation.toSource']).toBe('Switch to the source editor')
+    expect(en['operation.toLive']).toBe('Switch to live preview')
+    expect(zhCn['operation.toReading']).toBe('切换到阅读模式')
+    expect(zhCn['operation.toSource']).toBe('切换到源码编辑器')
+    expect(zhCn['operation.toLive']).toBe('切换到实时预览')
+    // manifest title 键（genNls 生成源）改写为归属明确的句式文案
+    expect(en['command.mode.toReading.title']).toBe('Switch Vsidian to reading view')
+    expect(en['command.mode.toSource.title']).toBe('Switch Vsidian to the source editor')
+    expect(en['command.mode.toLive.title']).toBe('Switch Vsidian to live preview')
+    expect(zhCn['command.mode.toReading.title']).toBe('将 Vsidian 切换到阅读模式')
+    expect(zhCn['command.mode.toSource.title']).toBe('将 Vsidian 切换到源码编辑器')
+    expect(zhCn['command.mode.toLive.title']).toBe('将 Vsidian 切换到实时预览')
+  })
+})
+
 describe('快捷键筛选签（#155）', () => {
   it('冲突集合：生效模式可交叠且键位重叠的双方都计入；互斥模式与无绑定不计', () => {
     expect(findConflictedOperationIds({}).size).toBe(0)

@@ -24,10 +24,12 @@ export interface SettingsPageSection {
   id: string
   title: string
   description: string
-  /** 分页图标（侧栏导航与搜索分组共用；'palette' 为 #128 CSS 片段分页新增；
-   *  'book' 为 #132 样式参考分页；'links' 为索引维护分页的链环 glyph——
-   *  形态改版批次自 'editor' 铅笔改为链环（与侧栏反链图标同形语言） */
-  icon: 'keyboard' | 'editor' | 'palette' | 'book' | 'links'
+  /** 分页图标（侧栏导航与搜索分组共用）。#231 外观合并：'palette' 由
+   *  CSS 片段分页槽位改为调色板字形并被「外观」合并分页沿用（画笔字形
+   *  退役）；'book'（#132 样式参考分页）随侧栏条目合并一并退役；
+   *  'links' 为索引维护分页的链环 glyph——形态改版批次自 'editor' 铅笔
+   *  改为链环（与侧栏反链图标同形语言） */
+  icon: 'keyboard' | 'editor' | 'palette' | 'links'
   entries: readonly { id: string; title: string; description?: string }[]
   /** 返回清理函数；focusEntry 为全局搜索定位到的入口。 */
   mount(parent: HTMLElement, focusEntry?: string): void | (() => void)
@@ -52,18 +54,24 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, tex
   if (text) el.textContent = text
   return el
 }
-function icon(kind: 'editor' | 'keyboard' | 'search' | 'general' | 'palette' | 'book' | 'links'): SVGSVGElement {
+function icon(kind: 'editor' | 'keyboard' | 'search' | 'general' | 'palette' | 'links'): SVGSVGElement {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
   svg.setAttribute('viewBox', '0 0 24 24')
   svg.setAttribute('aria-hidden', 'true')
   const path = document.createElementNS(svg.namespaceURI, 'path')
-  // general（#96「常规」分组）：地球——语言设置的通用意象（lucide globe 形）；
-  // palette（#128 CSS 片段分页）：画笔（lucide paintbrush 形，取样式定制的意象）。
+  // general（#96「常规」分组；#230 换形）：双拨杆开关——通用偏好开关的
+  // 惯用意象（上枚圆点居左、下枚圆点居右；lucide toggle-left/right 的纵排
+  // 同构，替换原地球字形的「语言/网络」语义）；
+  // palette（#231 外观合并分页）：调色板——带颜料孔圆点与拇指孔内凹的画板
+  // （lucide palette 主体轮廓线性化，颜料孔以 stroke-linecap 圆点子路径
+  //  表达，仍为单 path 线性风格；#128 起槽位沿用的「样式定制」意象不变，
+  //  原画笔字形随合并退役）。
   // #163 一轮曾为符号/代码块/图片三组新增 keyboard 复用与 code/image 形，
   // 二轮还原为页内小节后侧栏不再使用，已随分支退役。
+  // book（#132 样式参考分页）随 #231 侧栏条目合并退役。
   // links（形态改版批次）：互锁双链环（lucide link 形）——与侧栏反链/出链
   // 链环图标同一造型语言（索引维护分页的链接域意象）
-  path.setAttribute('d', kind === 'search' ? 'M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0' : kind === 'keyboard' ? 'M3 5h18v14H3zM6 9h1m3 0h1m3 0h1m3 0h1M6 12h1m3 0h1m3 0h1m3 0h1M7 16h10' : kind === 'general' ? 'M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10' : kind === 'palette' ? 'M14.6 3.4l6 6L11 19H5v-6L14.6 3.4zM3 21h18' : kind === 'book' ? 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z' : kind === 'links' ? 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71' : 'M14 4l6 6M3 21l5-1L21 7a2 2 0 0 0-4-4L4 16z')
+  path.setAttribute('d', kind === 'search' ? 'M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0' : kind === 'keyboard' ? 'M3 5h18v14H3zM6 9h1m3 0h1m3 0h1m3 0h1M6 12h1m3 0h1m3 0h1m3 0h1M7 16h10' : kind === 'general' ? 'M7 2h10a4 4 0 0 1 0 8H7a4 4 0 0 1 0-8ZM8 4a2 2 0 1 0 0 4 2 2 0 1 0 0-4M7 14h10a4 4 0 0 1 0 8H7a4 4 0 0 1 0-8ZM16 16a2 2 0 1 0 0 4 2 2 0 1 0 0-4' : kind === 'palette' ? 'M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z M13.5 6.5h.01 M17.5 10.5h.01 M8.5 7.5h.01 M6.5 12.5h.01' : kind === 'links' ? 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71' : 'M14 4l6 6M3 21l5-1L21 7a2 2 0 0 0-4-4L4 16z')
   svg.append(path)
   return svg
 }
@@ -145,19 +153,21 @@ export class SettingsPageView {
     this.offLocale = undefined
   }
 
-  /** 切换到指定分类（附加分页或内建分组）；整页重渲染（#132） */
-  selectSection(id: string): void {
+  /** 切换到指定分类（附加分页或内建分组）；entry（#231）为分页内进一步
+   *  定位的条目 id（外观分页按归属路由页内页签）；整页重渲染（#132） */
+  selectSection(id: string, entry?: string): void {
     const known = this.categories().some((c) => c.id === id)
     if (!known) return
     this.active = id
-    this.render()
+    this.render(entry)
   }
 
   handleHostMessage(message: unknown): void {
     if (!isHostToWebview(message)) return
-    // #132 样式参考：宿主命令定位到指定附加分页（未知 id 忽略）
+    // #132 样式参考：宿主命令定位到指定附加分页（未知 id 忽略）；
+    // #231 外观合并：entry 可选透传（分页内定位）
     if (message.kind === 'settings.focusSection') {
-      this.selectSection(message.section)
+      this.selectSection(message.section, message.entry)
       return
     }
     if (message.kind === 'settings.snapshot' || message.kind === 'settings.changed') {

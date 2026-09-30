@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 // #95 i18n：分页文案经 t() 取词——装配生产 zh-cn 语言包，断言与字典同源。
 // #93 收尾：全部操作名（含 extra/UI 源）经 titleKey 直取字典（command.* 与
-// manifest NLS 同源），不再持字面量存量。
+// manifest NLS 同源；#232 起三态切换三操作例外，持独立 operation.* 键），
+// 不再持字面量存量。
 // #155 视觉刷新：筛选签过滤、捕获签（＋原位变 ✓、Enter/✓ 提交、Esc/失焦
 // 取消）、⋯ 菜单（清空/恢复默认）与按键捕获过滤模式的 DOM 契约。
 import { describe, expect, it } from 'vitest'
@@ -29,6 +30,10 @@ describe('快捷键设置页', () => {
       ['find', 'command.find.title'],
       ['toggleViewMode', 'command.toggleViewMode.title'],
       ['outlineSearch', 'command.ui.outlineSearch.title'],
+      // #232 拆键：三态切换操作名持无前缀键，设置页操作名维持原文案
+      ['toReading', 'operation.toReading'],
+      ['toSource', 'operation.toSource'],
+      ['toLive', 'operation.toLive'],
     ] as const) {
       const row = root.querySelector<HTMLElement>(`[data-operation-id="${id}"]`)!
       expect(row.querySelector('strong')?.textContent, id).toBe(zhCn[key])

@@ -13,6 +13,12 @@ import {
 import { PRODUCTION_SETTING_DEFINITIONS, type SettingDefinition } from '../../src/shared/settings'
 import { installLocale } from '../../src/shared/i18n'
 import { zhCn } from '../../src/shared/locales/zh-cn'
+import { AppearanceSection } from '../../src/webview/appearanceSettings'
+import { CssSnippetSettingsSection } from '../../src/webview/cssSnippetSettings'
+import { StyleReferenceSection } from '../../src/webview/styleReferenceSettings'
+import { KeybindingSettingsSection } from '../../src/webview/keybindingSettings'
+import { IndexMaintenanceSection } from '../../src/webview/indexMaintenanceSettings'
+import { STYLE_GUIDE_ENTRIES } from '../../src/webview/styleGuideData'
 
 installLocale('zh-cn', zhCn)
 
@@ -550,5 +556,133 @@ describe('可读行宽滑块（#175：number 型渲染为 range 控件）', () =
     const css = readFileSync('src/webview/settingsPage.css', 'utf8')
     expect(css).toMatch(/\.vsidian-settings-range\s*\{[^}]*accent-color/)
     expect(css).toMatch(/\.vsidian-settings-range-value\s*\{[^}]*min-width/)
+  })
+})
+
+describe('常规分组图标（#230：地球换双拨杆开关）', () => {
+  /** 侧栏导航按钮内 svg path 的 d（经设置页真实渲染路径取用户所见字形） */
+  function navPath(parent: HTMLElement, title: string): string {
+    const nav = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
+      .find((b) => b.textContent === title)!
+    return nav.querySelector('svg path')!.getAttribute('d')!
+  }
+
+  it('「常规」图标为双拨杆开关：两枚横杆纵列、圆点一左一右（替换地球字形）', () => {
+    const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
+    const subs = navPath(parent, zhCn['settings.generalSection']).split(/(?=M)/)
+    // 按子路径（M 起）切分：两枚开关主体胶囊 + 两枚圆点，共 4 段——
+    // 地球字形为 3 段（外圆 + 赤道线 + 经线环），段数与形态断言据此暴露换形差异
+    expect(subs).toHaveLength(4)
+    // 两枚开关主体：同宽胶囊横杆（18 宽、两段半圆端）、纵向错位上下排列
+    expect(subs[0]).toBe('M7 2h10a4 4 0 0 1 0 8H7a4 4 0 0 1 0-8Z')
+    expect(subs[2]).toBe('M7 14h10a4 4 0 0 1 0 8H7a4 4 0 0 1 0-8Z')
+    // 两枚圆点：r=2 描边小圆，上一枚偏左（圆心 x=8）、下一枚偏右（x=16），拨杆方向相反
+    expect(subs[1]).toBe('M8 4a2 2 0 1 0 0 4 2 2 0 1 0 0-4')
+    expect(subs[3]).toBe('M16 16a2 2 0 1 0 0 4 2 2 0 1 0 0-4')
+  })
+
+  it('其余条目图标不变：编辑器仍为铅笔起笔字形（与「常规」新字形可区分）', () => {
+    const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
+    const editor = navPath(parent, zhCn['settings.editorCategory'])
+    expect(editor.startsWith('M14 4l6 6')).toBe(true)
+    expect(editor).not.toBe(navPath(parent, zhCn['settings.generalSection']))
+  })
+})
+
+describe('外观合并分页（#231）', () => {
+  /** 完整装配（生产注册口径）：快捷键 + 外观（组合分页）+ 索引维护 */
+  function makeFullView(): {
+    view: SettingsPageView
+    parent: HTMLElement
+    snippets: CssSnippetSettingsSection
+  } {
+    const snippets = new CssSnippetSettingsSection({ postMessage() {} })
+    const appearance = new AppearanceSection(
+      snippets, new StyleReferenceSection({ postMessage() {} }))
+    const view = new SettingsPageView({ postMessage() {} }, PRODUCTION_SETTING_DEFINITIONS, [
+      new KeybindingSettingsSection({ postMessage() {} }),
+      appearance,
+      new IndexMaintenanceSection({ postMessage() {} }),
+    ])
+    const parent = document.createElement('div')
+    view.mount(parent)
+    return { view, parent, snippets }
+  }
+
+  function navItems(parent: HTMLElement): HTMLButtonElement[] {
+    return [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
+  }
+  function tabOf(parent: HTMLElement, id: string): HTMLButtonElement {
+    const tab = parent.querySelector<HTMLButtonElement>(`.vsidian-style-ref-tab[data-tab="${id}"]`)
+    expect(tab, `页签 ${id} 应已渲染`).toBeTruthy()
+    return tab!
+  }
+  /** 点击全局搜索结果（外观分组、条目文本匹配） */
+  function clickAppearanceResult(parent: HTMLElement, text: string): void {
+    const result = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-result')]
+      .find((b) => b.querySelector('.vsidian-settings-result-category')?.textContent === zhCn['appearance.title']
+        && (b.textContent ?? '').includes(text))
+    expect(result, `外观分组应命中「${text}」`).toBeTruthy()
+    result!.click()
+  }
+
+  it('侧栏五条：常规、编辑器、快捷键、外观、索引维护；「外观」为调色板图标', () => {
+    const { parent } = makeFullView()
+    expect(navItems(parent).map((b) => b.textContent)).toEqual([
+      zhCn['settings.generalSection'],
+      zhCn['settings.editorCategory'],
+      zhCn['keybindingSettings.title'],
+      zhCn['appearance.title'],
+      zhCn['indexMaintenance.title'],
+    ])
+    // 外观条目 icon 是调色板：主体轮廓（lucide palette 形）+ 颜料孔圆点子路径
+    const appearanceNav = navItems(parent).find((b) => b.textContent === zhCn['appearance.title'])!
+    const d = appearanceNav.querySelector('svg path')!.getAttribute('d')!
+    expect(d).toContain('M12 2C6.5 2 2 6.5 2 12')
+    expect(d).toContain('M17.5 10.5h.01')
+    // book 字形随样式参考侧栏条目退役：全部侧栏条目不再出现书本轮廓
+    expect(navItems(parent).some((b) =>
+      b.querySelector('svg path')?.getAttribute('d')?.startsWith('M4 19.5A2.5'))).toBe(false)
+  })
+
+  it('focusSection 带 entry（#231）：宿主命令直达外观指定页签（overview → 样式参考）', () => {
+    const { view, parent } = makeFullView()
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', entry: 'overview' })
+    expect(parent.querySelector('.vsidian-settings-heading')?.textContent).toBe(zhCn['appearance.title'])
+    expect(tabOf(parent, 'overview').getAttribute('aria-selected')).toBe('true')
+    expect(parent.querySelector('.vsidian-style-ref-overview')!.hasAttribute('hidden')).toBe(false)
+    expect(parent.querySelector('.vsidian-style-ref-detail')!.hasAttribute('hidden')).toBe(true)
+  })
+
+  it('全局搜索路由：片段条目落 CSS 片段页签、契约条目落详细查询、总表落样式参考', () => {
+    const { parent, snippets } = makeFullView()
+    // 片段条目进搜索索引（宿主状态直连实例）
+    snippets.handleHostMessage({
+      kind: 'snippets.state', directory: 'D:/s', readError: false, paused: false, version: 1,
+      entries: [{ name: 'github.css', enabled: false }],
+    })
+    const search = parent.querySelector<HTMLInputElement>('input[type=search]')!
+    // 片段文件命中 → 落 CSS 片段页签（可见目录行）
+    search.value = 'github.css'
+    search.dispatchEvent(new Event('input'))
+    clickAppearanceResult(parent, 'github.css')
+    expect(search.value).toBe('')
+    expect(tabOf(parent, 'cssSnippets').getAttribute('aria-selected')).toBe('true')
+    expect(parent.querySelector('.vsidian-appearance-snippets')!.hasAttribute('hidden')).toBe(false)
+    // 契约条目命中 → 落详细查询页签（条目卡片定位高亮）
+    const wikilink = STYLE_GUIDE_ENTRIES.find((e) => e.id === 'live-wikilink')!
+    search.value = wikilink.target
+    search.dispatchEvent(new Event('input'))
+    clickAppearanceResult(parent, wikilink.target)
+    expect(tabOf(parent, 'detail').getAttribute('aria-selected')).toBe('true')
+    expect(parent.querySelector('.vsidian-style-ref-detail')!.hasAttribute('hidden')).toBe(false)
+    expect(parent.querySelector('[data-entry="live-wikilink"]')!.classList
+      .contains('vsidian-settings-item-located')).toBe(true)
+    // 总表命中 → 落样式参考页签（版本说明可见）
+    search.value = zhCn['styleRef.title']
+    search.dispatchEvent(new Event('input'))
+    clickAppearanceResult(parent, zhCn['styleRef.title'])
+    expect(tabOf(parent, 'overview').getAttribute('aria-selected')).toBe('true')
+    expect(parent.querySelector('.vsidian-style-ref-overview')!.hasAttribute('hidden')).toBe(false)
   })
 })

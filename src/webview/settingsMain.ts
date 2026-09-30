@@ -8,6 +8,7 @@ import { PRODUCTION_SETTING_DEFINITIONS } from '../shared/settings'
 import { KeybindingSettingsSection } from './keybindingSettings'
 import { CssSnippetSettingsSection } from './cssSnippetSettings'
 import { StyleReferenceSection } from './styleReferenceSettings'
+import { AppearanceSection } from './appearanceSettings'
 import { IndexMaintenanceSection } from './indexMaintenanceSettings'
 import { bootLocaleFromDocument, handleLocaleChangedMessage } from './localeBoot'
 import './settingsPage.css'
@@ -25,13 +26,17 @@ const snippets = new CssSnippetSettingsSection({ postMessage: (message) => vscod
 // #132 样式参考：离线渲染公开样式契约指南（数据模块随版本生成）；
 // #145 契约 JSON 导出：工具区按钮经消息桥请求宿主另存
 const styleRef = new StyleReferenceSection({ postMessage: (message) => vscode.postMessage(message) })
+// #231 外观合并：CSS 片段与样式参考合并为一条「外观」（扁平三页签，组合
+// 复用上述两个分页作为页签体；侧栏取 CSS 片段原槽位，位于快捷键与索引维护
+// 之间）
+const appearance = new AppearanceSection(snippets, styleRef)
 // #198 索引维护：排除模式编辑与清理/重建操作（状态权威在宿主，index.state 推送回显）
 const indexMaintenance = new IndexMaintenanceSection({ postMessage: (message) => vscode.postMessage(message) })
 
 const view = new SettingsPageView(
   { postMessage: (message) => vscode.postMessage(message) },
   PRODUCTION_SETTING_DEFINITIONS,
-  [keybindings, snippets, styleRef, indexMaintenance],
+  [keybindings, appearance, indexMaintenance],
 )
 view.mount(document.getElementById('app') ?? document.body)
 vscode.postMessage({ kind: 'settings.get' })

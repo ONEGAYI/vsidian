@@ -4,6 +4,8 @@
 // 搜索 entries 动态并入，以及「设置页不注入用户 CSS」（不创建任何片段链）。
 import { describe, it, expect, beforeEach } from 'vitest'
 import { CssSnippetSettingsSection } from '../../src/webview/cssSnippetSettings'
+import { AppearanceSection } from '../../src/webview/appearanceSettings'
+import { StyleReferenceSection } from '../../src/webview/styleReferenceSettings'
 import { SettingsPageView } from '../../src/webview/settingsPageView'
 import { installLocale } from '../../src/shared/i18n'
 import { zhCn } from '../../src/shared/locales/zh-cn'
@@ -46,18 +48,28 @@ beforeEach(() => {
 })
 
 describe('分页注册与空状态', () => {
-  it('作为附加分页进设置页：侧栏出现分类（palette 图标），正文标题与字典同源', () => {
+  // #231 外观合并：CSS 片段不再作为独立侧栏分类注册，改为外观分页的第一
+  // 页签体（heading/subtitle 呈现外观标题与描述，默认页签即本页内容）
+  it('外观合并后（#231）：侧栏无独立「CSS 片段」分类，内容作为外观分页默认页签呈现', () => {
     const sent: unknown[] = []
-    const section = new CssSnippetSettingsSection({ postMessage: (m) => sent.push(m) })
-    const view = new SettingsPageView({ postMessage: (m) => sent.push(m) }, [], [section])
+    const bridge = { postMessage: (m: unknown) => { sent.push(m) } }
+    const appearance = new AppearanceSection(
+      new CssSnippetSettingsSection(bridge), new StyleReferenceSection(bridge))
+    const view = new SettingsPageView({ postMessage: (m) => { sent.push(m) } }, [], [appearance])
     const root = document.createElement('div')
     view.mount(root)
     const nav = [...root.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
-    const cssNav = nav.find((b) => b.textContent === zhCn['cssSnippets.title'])
-    expect(cssNav, '侧栏应出现 CSS 片段分类').toBeTruthy()
-    cssNav!.click()
-    expect(root.querySelector('.vsidian-settings-heading')?.textContent).toBe(zhCn['cssSnippets.title'])
-    expect(root.querySelector('.vsidian-settings-subtitle')?.textContent).toBe(zhCn['cssSnippets.description'])
+    expect(nav.find((b) => b.textContent === zhCn['cssSnippets.title']))
+      .toBeUndefined()
+    const appearanceNav = nav.find((b) => b.textContent === zhCn['appearance.title'])
+    expect(appearanceNav, '侧栏应出现「外观」分类').toBeTruthy()
+    appearanceNav!.click()
+    expect(root.querySelector('.vsidian-settings-heading')?.textContent).toBe(zhCn['appearance.title'])
+    expect(root.querySelector('.vsidian-settings-subtitle')?.textContent).toBe(zhCn['appearance.description'])
+    // 默认页签 = CSS 片段：目录行与动作按钮对用户可见
+    expect(root.querySelector('.vsidian-appearance-snippets')!.hasAttribute('hidden')).toBe(false)
+    expect(root.querySelector('.vsidian-css-snippets-actions')!.textContent)
+      .toContain(zhCn['cssSnippets.chooseDirectory'])
   })
 
   it('#130 远程缓存说明常驻渲染，并以 callout 形态呈现（#155 小改）', () => {
