@@ -5,10 +5,12 @@
 // 文档访问通道 hover.request/result 装载全文/章节/块）。
 //
 // 分层契约（#223/#224 的衔接边界）：
-// - 本模块只做 **Reading 侧挂载适配与容器生命周期**；目标解析与内容服务
-//   在 hoverDocAccess（宿主）与 refReadingContent（共享装配），Live 侧
-//   嵌入（#223）与未保存变更刷新（#224）不在此实现，接口已按容器无关
-//   设计（实例身份 = 嵌入行区间 + 目标原文，与容器类型无绑定）。
+// - 本模块做 **Reading 侧挂载适配与容器生命周期**；目标解析与内容服务
+//   在 hoverDocAccess（宿主）与 refReadingContent（共享装配）；未保存变更
+//   刷新（#224）不在此实现，接口已按容器无关设计（实例身份 = 嵌入行区间
+//   + 目标原文，与容器类型无绑定）。#223 起 Live widget（liveEmbed.ts 的
+//   LiveEmbedWidget）经 mountCardInto 以同一状态库挂载——语义键同源使
+//   模式切换（Live↔Reading）共享装载缓存、fm 展开与滚动状态。
 // - 一层展开：B 内容内的 embed 块**不升级**（readingBlocks 的占位引用行
 //   呈现，可点击按 B 身份打开）——不递归装载、不在嵌入内容上叠加悬停
 //   浮层（contentEl 停止 mouseover/mouseout 冒泡）。
@@ -66,6 +68,9 @@ export interface EmbedCardContext {
   codeHighlight?(): boolean
   /** 嵌入限高设置（px；设置页 embed.maxHeight 投影） */
   maxHeightPx(): number
+  /** #223 Live 挂载的布局通知（view.requestMeasure）：卡片高度异步变动
+   *  （内容装载、图片晚到）须唤醒 CM6 视口测量；Reading 侧无需提供 */
+  requestMeasure?(): void
 }
 
 /** 装载结果缓存（父文档会话内；#224 变更订阅接入前的首载快照） */
@@ -92,7 +97,8 @@ interface EmbedEntry {
   scrollTop: number
 }
 
-/** 挂载中的卡片实例（DOM 生命周期 = 块元素在场期间） */
+/** 挂载中的卡片实例（DOM 生命周期 = 宿主元素在场期间——Reading 块元素
+ *  或 Live widget 根，#223 起两容器同款 handle） */
 interface EmbedCardHandle {
   entry: EmbedEntry
   instanceId: string
@@ -104,6 +110,8 @@ interface EmbedCardHandle {
   bImages: ImageResourceManager | null
   display: 'loading' | 'content' | 'error'
   note: string
+  /** 容器来源（探针观测面；行为路径不分叉——两容器共用装配） */
+  host: 'reading' | 'live'
   /** fm 控制器（容器状态机实现，entry 为单一事实源） */
   fm: RefFmController
 }
@@ -117,6 +125,8 @@ export interface EmbedCardProbe {
   scope: 'full' | 'heading' | 'block' | ''
   fm: 'none' | 'collapsed' | 'expanded'
   maxHeightPx: number
+  /** 容器来源（#223 Live 挂载与 Reading 块挂载的观测区分） */
+  host: 'reading' | 'live'
 }
 
 /** 目标原文（`|` 之前——与阅读双链 a 的 href 同口径） */
@@ -134,13 +144,22 @@ export class EmbedCardManager {
   private readonly context: EmbedCardContext
   /** 父文档会话内状态库（语义键 → 实例状态；dispose 清空） */
   private readonly entries = new Map<string, EmbedEntry>()
-  /** 挂载中卡片（块元素 → handle；块卸载即移除） */
+  /** 挂载中卡片（宿主元素 → handle；宿主卸载即移除。#223 起宿主可为
+   *  Reading 块元素或 Live widget 根，同一 entry 可双容器并存（模式切换
+   *  期间视图互不销毁），notifyResult 对全部配对 handle 渲染） */
   private readonly active = new Map<HTMLElement, EmbedCardHandle>()
+  /** #223 卡片高度观测（Live 挂载的布局联动）：内容装载/图片晚到改变
+   *  cardEl 高度时唤醒 CM6 测量；Reading 侧容器滚动自适应无需通知。
+   *  requestMeasure 只读测量不写布局，无 RO 自激发循环风险 */
+  private readonly heightObserver: ResizeObserver | null
   private seq = 0
   private reqSeq = 0
 
   constructor(context: EmbedCardContext) {
     this.context = context
+    this.heightObserver = typeof ResizeObserver === 'function'
+      ? new ResizeObserver(() => this.context.requestMeasure?.())
+      : null
   }
 
   /** 父文档块挂载钩子：embed 块（data-vsidian-embed-inner 在场）升级为卡片 */
@@ -151,6 +170,26 @@ export class EmbedCardManager {
     }
     const sourceStart = Number(el.dataset['vsidianSrcStart'] ?? 0)
     const sourceEnd = Number(el.dataset['vsidianSrcEnd'] ?? sourceStart)
+    this.mountCardInto(el, inner, sourceStart, sourceEnd, 'reading')
+  }
+
+  /**
+   * 容器无关挂载（#223 Live widget 消费）：宿主元素内置卡片壳与交互域，
+   * entry 按语义键（行首 offset + 目标原文）取用——Reading 块与 Live
+   * widget 对同一嵌入共享装载缓存、fm 展开与滚动状态。装载判定三态：
+   * 已装载直接渲染、在途请求显示 loading 等回包（双容器并存不重发）、
+   * 其余发起新请求。
+   */
+  mountCardInto(
+    el: HTMLElement,
+    inner: string,
+    sourceStart: number,
+    sourceEnd: number,
+    host: 'reading' | 'live',
+  ): void {
+    if (this.active.has(el)) {
+      return
+    }
     const key = `${Number.isInteger(sourceStart) ? sourceStart : 0}::${inner}`
     let entry = this.entries.get(key)
     if (!entry) {
@@ -209,12 +248,14 @@ export class EmbedCardManager {
       bImages: null,
       display: 'loading',
       note: '',
+      host,
       fm: {
         expanded: () => entry!.fmExpanded,
         toggle: () => (entry!.fmExpanded = !entry!.fmExpanded),
       },
     }
     this.active.set(el, handle)
+    this.heightObserver?.observe(cardEl)
 
     // 卡片内交互域：点击不冒泡父容器委托（B 内链接按 B 解析）；悬停不
     // 叠加浮层（阻断 readingContainer 的 mouseover/mouseout 委托）
@@ -246,37 +287,52 @@ export class EmbedCardManager {
     if (entry.loaded) {
       // 重挂载：装载缓存直接渲染，恢复 fm/滚动状态（零新请求）
       this.applyLoaded(handle, entry.loaded)
+    } else if (entry.lastReq !== null) {
+      // 在途请求：显示 loading 等回包（双容器并存不重发——notifyResult
+      // 对全部配对 handle 渲染）
+      this.applyDisplay(handle, 'loading', t('embed.loading'))
     } else {
       this.requestLoad(handle)
     }
   }
 
-  /** 父文档块卸载钩子：保存状态、释放 B 视图与资源管理器（实例状态保留） */
+  /** 宿主卸载钩子（Reading 块卸载 / Live widget destroy）：保存状态、释放
+   *  B 视图与资源管理器（实例状态保留在 entry 状态库） */
   unmountBlock(el: HTMLElement): void {
     const handle = this.active.get(el)
     if (!handle) {
       return
     }
     this.active.delete(el)
+    this.heightObserver?.unobserve(handle.cardEl)
     handle.entry.scrollTop = handle.scrollEl.scrollTop
     handle.bImages?.dispose()
-    el.textContent = '' // 卡片 DOM（含 B 内容全量块）随块卸载丢弃
+    el.textContent = '' // 卡片 DOM（含 B 内容全量块）随宿主卸载丢弃
   }
 
   /** hover.result 路由（syncController 转发）：按 entry.lastReq 配对——
-   *  在场卡片立即渲染；已卸载的迟到回包写入缓存供重挂使用 */
+   *  同一 entry 的全部在场 handle（Reading 块与 Live widget 双容器并存）
+   *  逐个渲染（先收集后应用：applyResult/applyError 会清空共享的 lastReq，
+   *  边清边配对会漏掉同 entry 的其余容器）；已卸载的迟到回包写入缓存供
+   *  重挂使用 */
   notifyResult(message: HoverPreviewResult): void {
+    const matched: EmbedCardHandle[] = []
     for (const handle of this.active.values()) {
       if (handle.entry.lastReq !== null &&
           handle.entry.lastReq.instanceId === message.instanceId &&
           handle.entry.lastReq.reqId === message.reqId) {
+        matched.push(handle)
+      }
+    }
+    if (matched.length > 0) {
+      for (const handle of matched) {
         if (message.ok) {
           this.applyResult(handle, message)
         } else {
           this.applyError(handle, message.reason, message.anchor)
         }
-        return
       }
+      return
     }
     // 卸载后在途：同配对写入缓存（重挂直接用）
     for (const entry of this.entries.values()) {
@@ -326,7 +382,7 @@ export class EmbedCardManager {
     }
   }
 
-  /** 观测探针（view.state.readingEmbed 的数据源） */
+  /** 观测探针（view.state.readingEmbed 的数据源；host 区分容器） */
   probe(): EmbedCardProbe[] {
     const out: EmbedCardProbe[] = []
     for (const handle of this.active.values()) {
@@ -339,6 +395,7 @@ export class EmbedCardManager {
         scope: handle.entry.loaded?.scope ?? '',
         fm: fmSection ? (handle.entry.fmExpanded ? 'expanded' : 'collapsed') : 'none',
         maxHeightPx: Number.parseInt(handle.scrollEl.style.maxHeight, 10) || 0,
+        host: handle.host,
       })
     }
     return out
@@ -350,6 +407,7 @@ export class EmbedCardManager {
       this.unmountBlock(el)
     }
     this.entries.clear()
+    this.heightObserver?.disconnect()
   }
 
   // ---- 内部 ----
@@ -424,15 +482,19 @@ export class EmbedCardManager {
       titleEl.textContent = loaded.relPath
     }
     this.applyDisplay(handle, 'content', loaded.relPath)
+    // #223 布局联动：loading→content 的高度跳变立即唤醒 CM6 测量（Live
+    // 挂载的行高/block widget 高度缓存）；后续异步变化（图片晚到）由
+    // ResizeObserver 兜底通知
+    this.context.requestMeasure?.()
     // 滚动位置恢复（重挂路径；首载 scrollTop 为 0 无操作）。恢复必须延迟
-    // 一帧：块挂载钩子在块元素 append 进容器**之前**触发（VirtualReadingView
-    // .mountBlock 的既定顺序），此刻 scrollEl 无布局（scrollHeight 为 0），
-    // 同步赋值会被浏览器钳到 0——下一帧块已入 DOM，布局可用
+    // 一帧：宿主元素可能尚未进 DOM（Reading 侧块挂载钩子先于 append、
+    // Live 侧 widget toDOM 后续才插入），此刻 scrollEl 无布局（scrollHeight
+    // 为 0），同步赋值会被浏览器钳到 0——下一帧宿主已入 DOM，布局可用
     if (handle.entry.scrollTop > 0) {
       const restore = handle.entry.scrollTop
       const target = handle.scrollEl
       requestAnimationFrame(() => {
-        if (this.active.get(target.closest<HTMLElement>('.vsidian-reading-embed') ?? target) === handle) {
+        if (this.active.get(handle.hostEl) === handle) {
           target.scrollTop = restore
         }
       })

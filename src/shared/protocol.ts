@@ -634,7 +634,8 @@ export type WebviewToHost =
       }
       /** #222 嵌入卡片观测：在场卡片逐枚的嵌入目标原文、状态
        *  （loading/content/error）、目标标识（成功为根内相对路径/失败为
-       *  错误文案）、内容块数、语义范围、属性区三态与限高（旧 webview 缺省） */
+       *  错误文案）、内容块数、语义范围、属性区三态与限高（旧 webview 缺省）。
+       *  #223 起 host 区分容器（reading 块挂载 / live widget 挂载） */
       readingEmbed?: Array<{
         inner: string
         state: 'loading' | 'content' | 'error'
@@ -643,7 +644,12 @@ export type WebviewToHost =
         scope: 'full' | 'heading' | 'block' | ''
         fm: 'none' | 'collapsed' | 'expanded'
         maxHeightPx: number
+        host?: 'reading' | 'live'
       }>
+      /** #223 Live 嵌入显隐观测：嵌入表逐枚的源码显形态（目标原文、行号、
+       *  光标/选区是否触及源码区间——selectionTouchesRange 语义；旧 webview
+       *  缺省为空数组） */
+      liveEmbedReveal?: Array<{ inner: string; line: number; revealed: boolean }>
     }
       /** 阅读视图性能探针回报（#7）：滚动往返期间的挂载/回收与解析观测 */
   | {

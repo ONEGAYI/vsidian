@@ -88,9 +88,9 @@ describe('英文覆盖一致性契约（#178 机制 + #179 content 域全量 + #
     expect(applyStyleContractEntryOverride(entry, 'en', {})).toBe(entry)
   })
 
-  it('content 域全部 80 条 id 均有英文覆盖（#179 全量交付 + 独行图片布局 + 失败态细分 + #213 行背景变量 + #222 嵌入）', () => {
+  it('content 域全部 81 条 id 均有英文覆盖（#179 全量交付 + 独行图片布局 + 失败态细分 + #213 行背景变量 + #222 嵌入 + #223 Live 嵌入宿主）', () => {
     const contentIds = STYLE_CONTRACT_ENTRIES.filter((e) => e.domain === 'content').map((e) => e.id)
-    expect(contentIds.length).toBe(80)
+    expect(contentIds.length).toBe(81)
     for (const id of contentIds) {
       expect(STYLE_CONTRACT_EN_OVERRIDES[id], `content 条目缺英文覆盖：${id}`).toBeDefined()
     }
@@ -104,9 +104,9 @@ describe('英文覆盖一致性契约（#178 机制 + #179 content 域全量 + #
     }
   })
 
-  it('两域合计 145 条全量覆盖，无覆盖表缺口（#179 + #180 收尾 + #191 + #201 + #208/#209 + #213 批次 + #218 悬停浮层 + #220 属性区 + #222 嵌入）', () => {
-    expect(STYLE_CONTRACT_ENTRIES.length).toBe(145)
-    expect(Object.keys(STYLE_CONTRACT_EN_OVERRIDES).length).toBe(145)
+  it('两域合计 146 条全量覆盖，无覆盖表缺口（#179 + #180 收尾 + #191 + #201 + #208/#209 + #213 批次 + #218 悬停浮层 + #220 属性区 + #222 嵌入 + #223 Live 嵌入）', () => {
+    expect(STYLE_CONTRACT_ENTRIES.length).toBe(146)
+    expect(Object.keys(STYLE_CONTRACT_EN_OVERRIDES).length).toBe(146)
     for (const entry of STYLE_CONTRACT_ENTRIES) {
       expect(STYLE_CONTRACT_EN_OVERRIDES[entry.id], `条目缺英文覆盖：${entry.id}`).toBeDefined()
     }

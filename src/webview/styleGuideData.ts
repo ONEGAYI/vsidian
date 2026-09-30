@@ -1904,12 +1904,12 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "content-limits",
     "kind": "limitation",
     "target": ".markdown-embed / 嵌入结构",
-    "purpose": "嵌入（![[…]]）的部分边界（#222 起独占正文一行的嵌入在 Reading 侧渲染为引用卡片，见 reading-embed-card）：混排（行内有其他内容）、列表/引用容器与表格格内的嵌入保留源文（1.5 期接入）；父文档 Live 侧嵌入与源码显隐未提供（#223）；递归展开不提供（一层展开内为占位引用行）；嵌入内容写入不支持。双链残缺形态按原文显示；blockquote 块已支持。",
+    "purpose": "嵌入（![[…]]）的部分边界（#222 起独占正文一行的嵌入在 Reading 侧渲染为引用卡片、#223 起在 Live 侧挂载同款卡片并支持光标驱动源码显隐，见 reading-embed-card / live-embed-widget）：混排（行内有其他内容）、列表/引用容器与表格格内的嵌入保留源文（1.5 期接入）；递归展开不提供（一层展开内为占位引用行）；嵌入内容写入不支持。双链残缺形态按原文显示；blockquote 块已支持。",
     "views": [
       "live",
       "reading"
     ],
-    "dom": "无嵌入容器的场景：非独占行/容器内的 ![[…]] 按原文文本呈现；live 侧嵌入行按源文。",
+    "dom": "无嵌入容器的场景：非独占行/容器内的 ![[…]] 按原文文本呈现（两种视图一致）。",
     "example": "",
     "obsidian": {
       "counterpart": ".markdown-embed",
@@ -3511,13 +3511,14 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "link-image-wikilink",
     "kind": "selector",
     "target": ".vsidian-embed-card（卡片壳，挂 .markdown-embed 别名；.vsidian-embed-card-header 顶部栏 / -title 文件名 / -open 打开入口 / -scroll 内容滚动区 / -state 状态行）",
-    "purpose": "Reading 正文嵌入卡片（#222）：独占正文一行的 ![[…]] 在阅读视图替换为引用卡片——左侧引用块样式边条、顶部文件名（成功后为目标根内相对路径）、右上角跳转目标文档入口（沿用 Vsidian 既有打开行为，不改写引用原文）。内容为目标的只读 Reading 视图（复用悬停文档访问通道装载全文/章节/块）；短内容自然高度，长内容内部滚动，限高默认 480px、经设置页 embed.maxHeight 调整（内联 max-height 优先于规则缺省）。卡片在 #app 正文流内——主题变量与 CSS 片段随嵌套天然命中，卡片壳的 Obsidian 别名（.markdown-embed）让嵌入容器规则同样命中。",
+    "purpose": "正文嵌入卡片（#222 Reading 侧首创，#223 起 Live 侧同款挂载——两容器共用同一卡片装配与状态库）：独占正文一行的 ![[…]] 替换为引用卡片——左侧引用块样式边条、顶部文件名（成功后为目标根内相对路径）、右上角跳转目标文档入口（沿用 Vsidian 既有打开行为，不改写引用原文）。内容为目标的只读 Reading 视图（复用悬停文档访问通道装载全文/章节/块）；短内容自然高度，长内容内部滚动，限高默认 480px、经设置页 embed.maxHeight 调整（内联 max-height 优先于规则缺省）。卡片在 #app 正文流内——主题变量与 CSS 片段随嵌套天然命中，卡片壳的 Obsidian 别名（.markdown-embed）让嵌入容器规则同样命中。Live 侧的挂载形态与源码显隐见 live-embed-widget。",
     "views": [
-      "reading"
+      "reading",
+      "live"
     ],
-    "states": "装载中（状态行文案，内容区隐藏）/ 装载成功（内容滚动区在场，任务 checkbox 禁用、属性区默认折叠）/ 失败分态（状态行就地 i18n 文案，不弹宿主通知）。视口回收：卡片 DOM 与目标内容视图释放，属性展开与滚动位置保留（重挂恢复）；父文档会话内装载缓存零重发。",
-    "dom": "挂阅读视图的嵌入块（.vsidian-reading-embed，data-vsidian-embed-inner 携带目标原文）内；卡片壳 .vsidian-embed-card 同时挂 .markdown-embed（别名桥 obsidianAlias 同源表）；内容区是嵌套的 .vsidian-view-reading 容器；打开入口为真实 <button type=\"button\">（aria-label 用 i18n 词条 embed.openTarget）。",
-    "example": "#app .vsidian-view-reading .vsidian-reading-embed .vsidian-embed-card {\n  border-left: 3px solid var(--vsidian-quote-bar-color);\n}",
+    "states": "装载中（状态行文案，内容区隐藏）/ 装载成功（内容滚动区在场，任务 checkbox 禁用、属性区默认折叠）/ 失败分态（状态行就地 i18n 文案，不弹宿主通知）。视口回收（Reading）与装饰退场（Live）：卡片 DOM 与目标内容视图释放，属性展开与滚动位置保留（重挂恢复）；父文档会话内装载缓存零重发；Live↔Reading 模式切换共享同一实例状态（语义键 = 嵌入行行首 + 目标原文）。",
+    "dom": "Reading：挂阅读视图的嵌入块（.vsidian-reading-embed，data-vsidian-embed-inner 携带目标原文）内。Live（#223）：挂 .vsidian-live-embed 宿主 widget（隐形态 inline 替换 / 显形态行下方 block widget）。卡片壳 .vsidian-embed-card 同时挂 .markdown-embed（别名桥 obsidianAlias 同源表）；内容区是嵌套的 .vsidian-view-reading 容器；打开入口为真实 <button type=\"button\">（aria-label 用 i18n 词条 embed.openTarget）。",
+    "example": "#app .vsidian-view-reading .vsidian-reading-embed .vsidian-embed-card,\n#app .cm-editor .cm-content .vsidian-live-embed .vsidian-embed-card {\n  border-left: 3px solid var(--vsidian-quote-bar-color);\n}",
     "obsidian": {
       "counterpart": ".markdown-embed（Obsidian 阅读嵌入容器）",
       "support": "direct"
@@ -3526,11 +3527,35 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "markdown-embed"
     ],
     "verification": [
-      "单元 embedCardCssContract（#222）：边条/限高/占位行/只读 checkbox 规则钉住",
-      "单元 embedCard：挂载升级、装载、一层展开、状态保持、限高热更、探针",
+      "单元 embedCardCssContract（#222/#223）：边条/限高/占位行/只读 checkbox 规则钉住（卡片壳规则含 Live 宿主并列选择器）",
+      "单元 embedCard：挂载升级、装载、一层展开、状态保持、限高热更、探针（host 容器标记）与双容器并存渲染",
       "别名桥一致性：test/unit/styleContract 与 test/unit/obsidianAlias（vsidian-embed-card ↔ markdown-embed）"
     ],
     "introduced": "#222（2026-09-30）"
+  },
+  {
+    "id": "live-embed-widget",
+    "domain": "content",
+    "category": "link-image-wikilink",
+    "kind": "selector",
+    "target": ".vsidian-live-embed（Live 嵌入宿主 widget；.vsidian-live-embed-below 为显形态下方修饰）",
+    "purpose": "父文档 Live 正文嵌入的挂载宿主（#223）：独占正文一行的 ![[…]] 经 CM6 装饰挂载 reading-embed-card 同款卡片——隐形态（光标/选区未触及源码区间）整行替换为卡片（源文视觉退场）；显形态（selectionTouchesRange 语义命中：折叠光标在区间内部或两端、非空选区严格重叠、任一选区命中）源文可见可编辑、卡片移至行下方继续显示（显隐只作用于源文文本的视觉呈现，不是撤卡片）。宿主吞事件（ignoreEvent=true）：卡片点击不落父编辑器光标、卡片内浏览器选区不被误当作父文档 CM6 源码选区；卡片内交互（滚动/选字复制/链接/属性按钮）走嵌入卡片自身监听。未闭合引用保留可编辑原文并撤下卡片；围栏/frontmatter 内与混排/容器形态不挂载（源文呈现，1.5 期接入）。",
+    "views": [
+      "live"
+    ],
+    "states": "隐藏态（整行 inline 替换 widget，卡片占位）/ 显形态（行下方 block widget .vsidian-live-embed-below，源文在场）；两态切换经装饰重建（卡片实例状态由嵌入卡片状态库保持）；装载中/成功/失败分态沿用卡片状态行。",
+    "dom": "Live 视图 .cm-content 内：隐藏态 widget 根为 span、显形态为 div（block widget，挂行尾后）；卡片壳 .vsidian-embed-card（挂 .markdown-embed 别名）在内。卡片高度异步变动（内容装载/图片晚到）经 ResizeObserver → view.requestMeasure 唤醒 CM6 布局。",
+    "example": "#app .cm-editor .cm-content .vsidian-live-embed-below {\n  display: block;\n}",
+    "obsidian": {
+      "counterpart": ".cm-embed-block（Obsidian Live 嵌入容器方向；内部结构闭源不作承诺）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 liveEmbed（#223）：显隐谓词矩阵（端点/内部/严格重叠/多选区）、抑制边界（围栏/开放围栏/frontmatter/混排）、增量表与装饰实例缓存",
+      "单元 embedCardCssContract：Live 宿主下方形态块级规则钉住",
+      "浏览器 liveEmbed（#223）：真实键盘/鼠标/IME/拖选驱动显隐切换、源码显形时卡片仍可见的绘制断言、内部选区隔离"
+    ],
+    "introduced": "#223（2026-09-30）"
   },
   {
     "id": "reading-embed-ref",
@@ -4076,8 +4101,8 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "limit-markdown-embed": {
-    "purpose": "Embed (![[…]] etc.) structures are not provided (incomplete wikilink forms are shown as-is); blockquote blocks are already supported.",
-    "dom": "No embed containers exist.",
+    "purpose": "Partial boundary for embeds (![[…]]): a line-owning embed renders as the reference card in the reading view (#222) and mounts the same card in the live view with cursor-driven source reveal (#223) — see reading-embed-card / live-embed-widget. Mixed-run lines (other content on the line), list/blockquote containers, and table cells keep the raw source (1.5-phase scope); recursive expansion is not provided (one-level expansion shows a placeholder reference line); writing into embedded content is not supported. Incomplete wikilink forms are shown as-is; blockquote blocks are already supported.",
+    "dom": "Where no embed container applies: ![[…]] on non-owning lines or inside containers renders as raw text (consistent across both views).",
     "obsidian": {
       "counterpart": ".markdown-embed"
     }
@@ -4621,11 +4646,19 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "reading-embed-card": {
-    "purpose": "The reading-view embed card (#222): a line-owning ![[…]] in the reading flow is replaced by a reference card — a quote-style accent bar on the left, the file name on top (the target root-relative path once loaded), and an open-target entry at the top right (reusing the existing Vsidian open behavior, never editing the embed source). The content is a read-only reading view of the target (full document/section/block, loaded through the hover document-access channel); short content keeps its natural height while longer content scrolls internally, capped at 480px by default and adjustable via the embed.maxHeight setting (the inline max-height takes precedence over the rule default). The card lives in the #app content flow — theme variables and CSS snippets match through nesting, and the .markdown-embed alias on the card shell lets embed-container rules match as well.",
-    "states": "Loading (a state line with the i18n text, content area hidden) / loaded (the content scroll area present, task checkboxes disabled, the properties section collapsed by default) / a failure state (the state line shows the localized error text in place, no host notification). On viewport recycling the card DOM and the target content view are released while the properties expansion and scroll position are kept (restored on remount); within the parent session the loaded content is cached and never re-requested.",
-    "dom": "Inside the reading-view embed block (.vsidian-reading-embed, with data-vsidian-embed-inner carrying the raw target); the card shell .vsidian-embed-card also carries the .markdown-embed alias (same-source table in obsidianAlias); the content area is a nested .vsidian-view-reading container; the open entry is a real <button type=\"button\"> (aria-label from the i18n entry embed.openTarget).",
+    "purpose": "The in-flow embed card (created for the reading view in #222, mounted identically in the live view since #223 — both containers share the same card assembly and state store): a line-owning ![[…]] is replaced by a reference card — a quote-style accent bar on the left, the file name on top (the target root-relative path once loaded), and an open-target entry at the top right (reusing the existing Vsidian open behavior, never editing the embed source). The content is a read-only reading view of the target (full document/section/block, loaded through the hover document-access channel); short content keeps its natural height while longer content scrolls internally, capped at 480px by default and adjustable via the embed.maxHeight setting (the inline max-height takes precedence over the rule default). The card lives in the #app content flow — theme variables and CSS snippets match through nesting, and the .markdown-embed alias on the card shell lets embed-container rules match as well. For the live-side mount forms and source reveal, see live-embed-widget.",
+    "states": "Loading (a state line with the i18n text, content area hidden) / loaded (the content scroll area present, task checkboxes disabled, the properties section collapsed by default) / a failure state (the state line shows the localized error text in place, no host notification). On viewport recycling (reading) and decoration teardown (live) the card DOM and the target content view are released while the properties expansion and scroll position are kept (restored on remount); within the parent session the loaded content is cached and never re-requested; live↔reading mode switches share the same per-instance state (the semantic key is the embed line start plus the raw target).",
+    "dom": "Reading: inside the reading-view embed block (.vsidian-reading-embed, with data-vsidian-embed-inner carrying the raw target). Live (#223): inside a .vsidian-live-embed host widget (hidden form = inline replacement, revealed form = a below-line block widget). The card shell .vsidian-embed-card also carries the .markdown-embed alias (same-source table in obsidianAlias); the content area is a nested .vsidian-view-reading container; the open entry is a real <button type=\"button\"> (aria-label from the i18n entry embed.openTarget).",
     "obsidian": {
       "counterpart": ".markdown-embed (the Obsidian reading embed container)"
+    }
+  },
+  "live-embed-widget": {
+    "purpose": "The live-view embed host widget (#223): a line-owning ![[…]] in the live document mounts the same card as reading-embed-card via a CodeMirror decoration — hidden form (cursor/selection not touching the source range) replaces the whole line with the card (the source text leaves the visual flow); revealed form (per the selectionTouchesRange semantics: a collapsed cursor inside or on either end of the range, a non-empty selection strictly overlapping it, or any one selection range hitting it) shows the editable source with the card moved below the line (reveal only affects the visual presentation of the source text — the card is not dismissed). The host swallows events (ignoreEvent=true): clicks inside the card never place the parent editor cursor, and browser text selections inside the card are never mistaken for parent-document CM6 source selections; in-card interactions (scrolling/text-selection copy/links/properties buttons) go through the embed card own listeners. An unclosed reference keeps the editable raw text and dismisses the old card; embeds inside code fences/frontmatter and mixed-run/container forms do not mount (raw source shown, 1.5-phase scope).",
+    "states": "Hidden (a whole-line inline replace widget holding the card) / revealed (a below-line block widget .vsidian-live-embed-below with the source present); the switch rebuilds the decoration (per-instance card state is kept by the embed-card state store); loading/loaded/failure states reuse the card state line.",
+    "dom": "Inside the live view .cm-content: the hidden-form widget root is a span, the revealed form a div (a block widget attached after the line end); the card shell .vsidian-embed-card (carrying the .markdown-embed alias) sits inside. Async card height changes (content loading, late images) wake the CM6 layout via ResizeObserver → view.requestMeasure.",
+    "obsidian": {
+      "counterpart": ".cm-embed-block (the Obsidian live embed container direction; the internal structure is closed-source and not promised)"
     }
   },
   "reading-embed-ref": {

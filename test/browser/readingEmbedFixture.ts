@@ -26,6 +26,18 @@ const bridge: VsCodeBridge = {
 const controller = new WebviewSyncController(bridge)
 controller.mount(document.getElementById('app')!, [keymap.of(defaultKeymap)])
 
+/** 主 Reading 容器（#223 起嵌入卡片/Live widget 内有嵌套同名容器——观测
+ *  面限定主文档正文容器，排除嵌套与 hidden 的 Live 侧残留） */
+function mainReading(): HTMLElement | null {
+  for (const el of Array.from(document.querySelectorAll<HTMLElement>('.vsidian-view-reading'))) {
+    if (!el.closest('.vsidian-embed-card') && !el.closest('.vsidian-hover-popup') &&
+        !el.closest('.vsidian-live-embed')) {
+      return el
+    }
+  }
+  return null
+}
+
 Object.assign(window, {
   /** 装配父文档并切 Reading（宿主消息与生产同入口；嵌入卡片随挂载自动升级） */
   initEmbedDoc(text: string) {
@@ -48,7 +60,7 @@ Object.assign(window, {
   },
   /** 嵌入卡片观测（绘制层：可见性、边条、限高、标题、占位行与禁写态） */
   readEmbedCards() {
-    const els = Array.from(document.querySelectorAll<HTMLElement>('.vsidian-embed-card'))
+    const els = Array.from((mainReading() ?? document).querySelectorAll<HTMLElement>('.vsidian-embed-card'))
     return els.map((card) => {
       const rect = card.getBoundingClientRect()
       const style = getComputedStyle(card)
@@ -91,11 +103,11 @@ Object.assign(window, {
   },
   /** 嵌入卡片数（父文档正文流内；视口回收后应为 0 或不含目标块） */
   embedCardCount(): number {
-    return document.querySelectorAll('.vsidian-embed-card').length
+    return (mainReading() ?? document).querySelectorAll('.vsidian-embed-card').length
   },
   /** 滚动第 idx 张卡片的内容区（限高内部滚动承载） */
   scrollEmbedCard(index: number, top: number): number {
-    const scrollEl = document.querySelectorAll<HTMLElement>('.vsidian-embed-card-scroll')[index]
+    const scrollEl = (mainReading() ?? document).querySelectorAll<HTMLElement>('.vsidian-embed-card-scroll')[index]
     if (!scrollEl) {
       return -1
     }
@@ -104,12 +116,12 @@ Object.assign(window, {
   },
   /** 卡片内容滚动位置观测（回收重挂的状态保持断言） */
   embedCardScrollTop(index: number): number {
-    const scrollEl = document.querySelectorAll<HTMLElement>('.vsidian-embed-card-scroll')[index]
+    const scrollEl = (mainReading() ?? document).querySelectorAll<HTMLElement>('.vsidian-embed-card-scroll')[index]
     return scrollEl ? scrollEl.scrollTop : -1
   },
   /** 点击卡片内一层展开占位引用行（真实指针坐标点击） */
   clickEmbedRef(index: number): boolean {
-    const ref = document.querySelectorAll<HTMLElement>('a.vsidian-embed-ref')[index]
+    const ref = (mainReading() ?? document).querySelectorAll<HTMLElement>('a.vsidian-embed-ref')[index]
     if (!ref) {
       return false
     }
@@ -123,7 +135,7 @@ Object.assign(window, {
   },
   /** 卡片 fm 展开切换按钮点击（真实 DOM 点击事件） */
   clickEmbedFmToggle(index: number): boolean {
-    const btn = document.querySelectorAll<HTMLElement>('.vsidian-embed-card .vsidian-hover-fm-toggle')[index]
+    const btn = (mainReading() ?? document).querySelectorAll<HTMLElement>('.vsidian-embed-card .vsidian-hover-fm-toggle')[index]
     if (!btn) {
       return false
     }
@@ -132,7 +144,7 @@ Object.assign(window, {
   },
   /** 父文档阅读容器滚动到指定偏移（视口回收场景驱动） */
   scrollReadingTo(top: number): number {
-    const container = document.querySelector<HTMLElement>('.vsidian-view-reading')
+    const container = mainReading()
     if (!container) {
       return -1
     }
@@ -141,7 +153,7 @@ Object.assign(window, {
   },
   /** 在卡片内容文本上建立选区（选字复制能力的 Selection 层证据） */
   selectEmbedText(index: number, needle: string): string {
-    const card = document.querySelectorAll<HTMLElement>('.vsidian-embed-card')[index]
+    const card = (mainReading() ?? document).querySelectorAll<HTMLElement>('.vsidian-embed-card')[index]
     if (!card) {
       return ''
     }

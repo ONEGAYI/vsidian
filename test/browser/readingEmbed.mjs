@@ -69,7 +69,7 @@ try {
   await page.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
   await page.addScriptTag({ path: bundle })
   await page.evaluate((text) => window.initEmbedDoc(text), PARENT_DOC)
-  await page.locator('.vsidian-embed-card').first().waitFor({ timeout: 5000 })
+  await page.locator('.vsidian-view-reading .vsidian-embed-card').first().waitFor({ timeout: 5000 })
 
   const sent = () => page.evaluate(() => window.embedSent())
   const hoverRequests = () => page.evaluate(() =>
@@ -108,7 +108,8 @@ try {
   assert.ok(cards[0].openPresent, '右上角打开入口在场')
   // 混排：主文档中的混排嵌入不成卡片，正文保留源文（占位引用行也不出现——它是 paragraph 文本）
   const inlineMention = await page.evaluate(() =>
-    (document.querySelector('.vsidian-view-reading')?.textContent ?? '').includes('混排嵌入 ![[目标笔记]] 不成卡片'))
+    (Array.from(document.querySelectorAll('.vsidian-view-reading'))
+      .find((el) => !el.closest('.vsidian-embed-card') && !el.closest('.vsidian-hover-popup'))?.textContent ?? '').includes('混排嵌入 ![[目标笔记]] 不成卡片'))
   assert.ok(inlineMention, '混排嵌入行应保留源文文本')
   passed++
   console.log('[正文嵌入][PASS] 独占行挂载升级 + 载荷契约 + 混排保留源文')

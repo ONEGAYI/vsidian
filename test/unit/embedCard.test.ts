@@ -291,6 +291,55 @@ describe('嵌入卡片：视口回收重挂与状态保持', () => {
   })
 })
 
+describe('嵌入卡片：Live 挂载双容器并存（#223 容器无关化）', () => {
+  it('Live widget 宿主挂载与 Reading 块同 entry：回包对两容器都渲染', () => {
+    const sent: WebviewToHost[] = []
+    const manager = new EmbedCardManager(makeContext(sent))
+    const el = mountEmbedBlock(manager, '![[目标笔记]]\n')
+    // Live 宿主（同嵌入行 lineFrom=0、同 inner → 同语义键）
+    const liveHost = document.createElement('span')
+    document.body.appendChild(liveHost)
+    manager.mountCardInto(liveHost, '目标笔记', 0, '![[目标笔记]]'.length, 'live')
+    const req = hoverRequestOf(sent)
+    // 双容器并存期间只有一笔在途请求（不重发）
+    expect(sent.filter((m) => m.kind === 'hover.request')).toHaveLength(1)
+    manager.notifyResult(resultOk(req, TARGET_TEXT))
+    expect(el.querySelector('.vsidian-reading-heading-1')).not.toBeNull()
+    expect(liveHost.querySelector('.vsidian-reading-heading-1')).not.toBeNull()
+    const probe = manager.probe()
+    expect(probe).toHaveLength(2)
+    expect(probe.map((p) => p.host).sort()).toEqual(['live', 'reading'])
+    // 单边卸载不影响另一容器
+    manager.unmountBlock(liveHost)
+    expect(el.querySelector('.vsidian-reading-heading-1')).not.toBeNull()
+    manager.dispose()
+  })
+
+  it('Live 宿主重挂恢复滚动与 fm 状态（跨模式切换的状态保持语义）', async () => {
+    const sent: WebviewToHost[] = []
+    const manager = new EmbedCardManager(makeContext(sent))
+    const liveHost = document.createElement('span')
+    document.body.appendChild(liveHost)
+    manager.mountCardInto(liveHost, '目标笔记', 0, 11, 'live')
+    manager.notifyResult(resultOk(hoverRequestOf(sent), TARGET_TEXT))
+    const fmBtn = liveHost.querySelector<HTMLElement>('.vsidian-hover-fm-toggle')!
+    fmBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    const scrollEl = liveHost.querySelector<HTMLElement>('.vsidian-embed-card-scroll')!
+    scrollEl.scrollTop = 21
+    const requestsBefore = sent.filter((m) => m.kind === 'hover.request').length
+    manager.unmountBlock(liveHost)
+    const host2 = document.createElement('span')
+    document.body.appendChild(host2)
+    manager.mountCardInto(host2, '目标笔记', 0, 11, 'live')
+    expect(sent.filter((m) => m.kind === 'hover.request')).toHaveLength(requestsBefore) // 缓存零重发
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const scrollEl2 = host2.querySelector<HTMLElement>('.vsidian-embed-card-scroll')!
+    expect(scrollEl2.scrollTop).toBe(21)
+    expect(host2.querySelector('.vsidian-hover-fm')!.classList.contains('vsidian-hover-fm-collapsed')).toBe(false)
+    manager.dispose()
+  })
+})
+
 describe('嵌入卡片：限高设置与观测探针', () => {
   it('限高应用到内容滚动区（默认 480；设置热更遍历在场卡片）', () => {
     const sent: WebviewToHost[] = []

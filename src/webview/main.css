@@ -3925,10 +3925,15 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
    条目；占位引用行 reading-embed-ref 条目）。卡片壳挂 Obsidian 别名
    .markdown-embed（direct 级——主题/片段的嵌入容器规则天然命中）；
    内容容器是嵌套的 .vsidian-view-reading，#app 正文样式随嵌套命中，
-   不复制第二套主题环境 ---- */
+   不复制第二套主题环境。#223 起卡片壳规则并列 Live 宿主
+   （.vsidian-live-embed，见下方 #223 段——两容器同款绘制） ---- */
 
-/* 卡片壳：左侧引用块样式边条 + 边框圆角 + 微底色（区分正文段落） */
-#app .vsidian-view-reading .vsidian-reading-embed .vsidian-embed-card {
+/* 卡片壳：左侧引用块样式边条 + 边框圆角 + 微底色（区分正文段落）。
+   #223 Live 挂载的宿主（.cm-content 内 widget）同款命中；display:block
+   使 inline 替换形态（span 宿主）内的卡片独立成块占满行宽 */
+#app .vsidian-view-reading .vsidian-reading-embed .vsidian-embed-card,
+#app .cm-editor .cm-content .vsidian-live-embed .vsidian-embed-card {
+  display: block;
   margin: 0.5em 0;
   border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
   border-left: 3px solid var(--vsidian-quote-bar-color);
@@ -4013,4 +4018,16 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
 .vsidian-embed-card input[type="checkbox"],
 .vsidian-hover-popup input[type="checkbox"] {
   pointer-events: none;
+}
+
+/* ---- #223 Live 正文嵌入宿主（样式契约 content 域 live-embed-widget
+   条目）。卡片壳复用上方 reading-embed-card 的并列规则（两容器同款
+   绘制：边条/边框/限高/状态行与 fm 折叠键规则随 #app .vsidian-embed-card
+   前缀天然命中）；宿主类是 Live 侧的片段定位入口 ---- */
+
+/* 下方形态（.vsidian-live-embed-below）：源码显形时卡片挂在源文行后的
+   block widget 宿主上——块级宿主独立成行、与源文行的间距由卡片壳的
+   margin 承担（相邻块级 margin 折叠，不叠加），此处仅钉住可定位性 */
+#app .cm-editor .cm-content .vsidian-live-embed-below {
+  display: block;
 }

@@ -102,11 +102,12 @@ import {
   setFindMatches,
   type FindMatch,
 } from './findSession'
-import { liveDecorationsField, livePreviewDecorations, LIVE_CLASS_NAMES, tableCompositionSettled, TaskCheckboxWidget } from './liveDecorations'
+import { liveDecorationsField, livePreviewDecorations, LIVE_CLASS_NAMES, selectionTouchesRange, tableCompositionSettled, TaskCheckboxWidget } from './liveDecorations'
 import { createLinkInteractions, LINK_CLASS_NAMES, WIKILINK_CLASS_NAMES, activateLinkAtPos, activateLooseLinkAtPos, activateWikilinkAtPos } from './liveLinks'
 import { liveMath } from './liveMath'
 import { MATH_CLASS_NAMES } from '../shared/math'
 import { liveMermaid } from './liveMermaid'
+import { liveEmbed, liveEmbedSpansField, setLiveEmbedCards } from './liveEmbed'
 // #163 验收反馈：块 id 标记 live 淡化（行尾/独立行双形态 mark 装饰）
 import { liveBlockId } from './liveBlockId'
 // #163 验收反馈：跳转目标高亮（view.locate 通道；半透黄经变量暴露，
@@ -1092,13 +1093,18 @@ export class WebviewSyncController {
       codeHighlight: () => this.codeCardConfig.highlight,
     })
     // #222 嵌入卡片管理器：会话身份 + 只读消息通道 + 高亮/限高投影
-    //（dispose 随控制器释放；与 hoverPopup 上下文同源装配）
+    //（dispose 随控制器释放；与 hoverPopup 上下文同源装配）。#223 起
+    // requestMeasure 供 Live 挂载的卡片高度联动（内容装载/图片晚到唤醒
+    // CM6 视口测量）
     this.embedCards = new EmbedCardManager({
       session: () => ({ sessionId: this.sessionId, docUri: this.docUri }),
       send: (message) => this.bridge.postMessage(message),
       codeHighlight: () => this.codeCardConfig.highlight,
       maxHeightPx: () => this.embedMaxHeightPx(),
+      requestMeasure: () => this.view?.requestMeasure(),
     })
+    // #223 Live 嵌入 widget 接线（liveEmbed 装饰的 widget 经此挂载共用卡片）
+    setLiveEmbedCards(this.embedCards)
     this.readingView = new VirtualReadingView(this.readingContainer, {
       // #10 图片生命周期：块挂载预备装载，卸载释放（src 清空、条目回收）
       // #60 Mermaid：挂载即渲染 pending 容器（DOM 随块卸载 el.remove 释放）
@@ -1407,6 +1413,9 @@ export class WebviewSyncController {
     closeFmPopover()
     // #218 悬停浮层随卸载退出（清空上下文，同步关浮层释放实例）
     setHoverPreviewContext(null)
+    // #223 Live 嵌入 widget 先断开卡片接线（后续 view 销毁触发 widget
+    // destroy 时 no-op；卡片 DOM 已由 embedCards.dispose 统一释放）
+    setLiveEmbedCards(null)
     // #222 嵌入卡片随卸载退出（释放全部卡片 DOM、B 视图与状态库）
     this.embedCards?.dispose()
     this.embedCards = undefined
@@ -2758,8 +2767,29 @@ export class WebviewSyncController {
       hoverPreview: hoverPopupProbe(),
       // #222 嵌入卡片观测：在场卡片的状态/目标/块数/fm/限高（集成断言用）
       readingEmbed: this.embedCards?.probe() ?? [],
+      // #223 Live 嵌入显隐观测：嵌入表逐枚的源码显形态（集成断言用）
+      liveEmbedReveal: this.collectLiveEmbedReveal(),
     }
     this.bridge.postMessage(state)
+  }
+
+  /** #223 Live 嵌入显隐探针：嵌入表 + 当前选区按 selectionTouchesRange 语义
+   *  计算的源码显形态（发射层围栏/fm 排除由单测与浏览器套件钉住，此处为
+   *  宿主可观测的显隐面） */
+  private collectLiveEmbedReveal(): Array<{ inner: string; line: number; revealed: boolean }> {
+    const view = this.view
+    if (!view || this.viewMode !== 'live') {
+      return []
+    }
+    const spans = view.state.field(liveEmbedSpansField, false)
+    if (!spans) {
+      return []
+    }
+    return spans.map((s) => ({
+      inner: s.inner,
+      line: view.state.doc.lineAt(Math.min(s.lineFrom, view.state.doc.length)).number,
+      revealed: selectionTouchesRange(view.state.selection, s.from, s.to),
+    }))
   }
 
   /**
@@ -8861,6 +8891,11 @@ export class WebviewSyncController {
       // #60 Mermaid：围栏表 + 跨行块 replace 装饰（光标进入围栏显源码、
       // 离开恢复渲染图；渲染容器与阅读侧共用 mermaidRender 管线）
       liveMermaid,
+      // #223 Live 正文嵌入：嵌入表 + 双形态装饰（隐形态整行替换卡片 /
+      // 显形态源文可见 + 行下方卡片；光标/选区触及源码区间显形，离开
+      // 隐藏）。纯装饰 StateField 无键位语义；卡片内容经 embedCards
+      // （EmbedCardManager）与 Reading 侧同状态库装载
+      liveEmbed,
       // #163 验收反馈：块 id 标记淡化（行尾 ` ^id` 与独立行 `^id` 双形态
       // mark 装饰；围栏内部不命中；docChanged 全量行扫描重建）
       liveBlockId,

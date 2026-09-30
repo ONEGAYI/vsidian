@@ -17,13 +17,22 @@ function rule(selector: string, declaration?: RegExp): string {
   return found[0]!
 }
 
-describe('嵌入卡片 CSS 契约（#222）', () => {
+describe('嵌入卡片 CSS 契约（#222；#223 起卡片壳规则并列 Live 宿主）', () => {
   it('卡片壳：左引用边条 + 边框 + 圆角 + 微底色（引用块样式边条的可辨识绘制）', () => {
-    const card = rule('#app .vsidian-view-reading .vsidian-reading-embed .vsidian-embed-card')
+    // #223 两选择器并列（Reading 块 + Live widget 宿主同款绘制）；组以
+    // Live 选择器置尾，断言组文本同时包含两侧选择器
+    const card = rule('#app .cm-editor .cm-content .vsidian-live-embed .vsidian-embed-card')
     expect(card).toMatch(/border-left:\s*3px solid var\(--vsidian-quote-bar-color\)/)
     expect(card).toMatch(/border:\s*1px solid var\(--vscode-panel-border/)
     expect(card).toMatch(/border-radius:/)
     expect(card).toMatch(/background-color:\s*var\(--vscode-textBlockQuote-background/)
+    expect(card.split('{')[0])
+      .toContain('#app .vsidian-view-reading .vsidian-reading-embed .vsidian-embed-card')
+  })
+
+  it('#223 Live 下方形态宿主：块级呈现（显形态源文行下方的独立块）', () => {
+    const below = rule('#app .cm-editor .cm-content .vsidian-live-embed-below')
+    expect(below).toMatch(/display:\s*block/)
   })
 
   it('顶部栏与文件名：横排布局（标题居左、入口居右）、文件名走描述色', () => {

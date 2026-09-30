@@ -929,7 +929,10 @@ interface ViewState {
     scope: 'full' | 'heading' | 'block' | ''
     fm: 'none' | 'collapsed' | 'expanded'
     maxHeightPx: number
+    host?: 'reading' | 'live'
   }>
+  /** #223 Live 嵌入显隐观测：嵌入表逐枚的源码显形态（selectionTouchesRange 语义） */
+  liveEmbedReveal?: Array<{ inner: string; line: number; revealed: boolean }>
 }
 
 /** #7 阅读视图探针回报（reading.perf.report） */
@@ -1142,6 +1145,8 @@ async function waitViewState(
         liveScrollTopPx: s['liveScrollTopPx'],
         imageStates: s['imageStates'],
         imageProbe: s['imageProbe'],
+        readingEmbed: s['readingEmbed'],
+        liveEmbedReveal: s['liveEmbedReveal'],
       })}`)
     }
     throw err
@@ -11437,6 +11442,105 @@ export const cases: Array<[string, () => Promise<void>]> = [
       // undo 已回滚文件名
     }
     await new Promise((r) => setTimeout(r, 400))
+  }],
+
+  // ---- #223 父文档 Live 正文嵌入与源码显隐 ----
+
+  // Live 模式嵌入卡片经真实宿主读取闭环挂载（host=live 探针）、光标驱动
+  // 源码显隐（liveEmbedReveal 探针按 selectionTouchesRange 语义）、合成
+  // IME 修改引用 inner + 宿主撤销栈闭环（新目标缺失 → 错误分态；撤销 →
+  // 原卡恢复）、模式切换不丢源码、双零 dirty 与目标磁盘保真。绘制层断言
+  // 在浏览器 liveEmbed 套件（真实 Chromium 布局）。
+  ['嵌入：Live 挂载与源码显隐——IME 编辑撤销闭环与双零 dirty（#223）', async () => {
+    await openWithEditor('嵌入样例.md')
+    await waitSessionReady('嵌入样例.md')
+    const uri = wsUri('嵌入样例.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    const parentBefore = await readDisk('嵌入样例.md')
+    const targetBefore = await readDisk('嵌入目标.md')
+    const doc = await vscode.workspace.openTextDocument(wsUri('嵌入样例.md'))
+
+    // 三张 Live 卡片（host=live）经真宿主读取闭环：两张 content（全文/章节）
+    // + 缺失目标 error（Live widget 惰性物化——短文档全在视口）
+    const shown = await waitViewState('嵌入样例.md', (v) => {
+      const live = (v.readingEmbed ?? []).filter((c) => c.host === 'live')
+      return v.viewMode === 'live' && live.length === 3 &&
+        live.filter((c) => c.state === 'content').length === 2
+    })
+    const liveCards = shown.readingEmbed!.filter((c) => c.host === 'live')
+    const fullCard = liveCards.find((c) => c.inner === '嵌入目标')
+    assert(fullCard && fullCard.scope === 'full' && fullCard.note === '嵌入目标.md',
+      `全文 Live 卡应为 content + 根内相对路径（实际 ${JSON.stringify(fullCard)}）`)
+    const missing = liveCards.find((c) => c.inner === '嵌入缺失目标')
+    assert(missing && missing.state === 'error' && missing.note.includes('嵌入缺失目标'),
+      `缺失目标 Live 卡应为就地错误分态（实际 ${JSON.stringify(missing)}）`)
+
+    // 光标驱动显隐：光标在文首（未触及）→ 三枚全部隐藏形态
+    const reveal0 = shown.liveEmbedReveal ?? []
+    assert(reveal0.length === 3 && reveal0.every((r) => !r.revealed),
+      `光标未触及区间 → 全部隐藏形态（实际 ${JSON.stringify(reveal0)}）`)
+    // 光标进第一枚源码区间（inner 内）→ 仅该枚显形
+    const embedFrom = parentBefore.indexOf('![[嵌入目标]]')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'table.test.crossSelect', anchor: embedFrom + 5, head: embedFrom + 5,
+    })
+    const revealedState = await waitViewState('嵌入样例.md', (v) => {
+      const hits = (v.liveEmbedReveal ?? []).filter((r) => r.revealed)
+      return hits.length === 1 && hits[0]!.inner === '嵌入目标'
+    })
+    assert(revealedState !== undefined, '恰命中区间的嵌入显形（其余隐藏）')
+    // 光标回文首 → 恢复隐藏
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'table.test.crossSelect', anchor: 0, head: 0,
+    })
+    const hiddenOk = await waitViewState('嵌入样例.md', (v) =>
+      (v.liveEmbedReveal ?? []).length === 3 && (v.liveEmbedReveal ?? []).every((r) => !r.revealed))
+    assert(hiddenOk, '光标离开后恢复隐藏形态')
+
+    // 合成 IME 修改引用 inner（组合序列经 deferredLocal 出站宿主）→ 宿主
+    // 权威文本更新 → 新目标 ![[嵌入改目标]] 缺失 → Live 卡就地错误分态
+    const state0 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'table.test.compose', from: embedFrom + 5, text: '改',
+    })
+    // 先确认 webview 本地文本已含组合输入（deferredLocal 暂缓中的净输入）
+    await waitViewState('嵌入样例.md', (v) => v.text.includes('![[嵌入改目标]]'))
+    await poll('IME 修改写入宿主文档', () => (doc.getText().includes('![[嵌入改目标]]') ? true : undefined))
+    const afterEdit = await waitViewState('嵌入样例.md', (v) => {
+      const live = (v.readingEmbed ?? []).filter((c) => c.host === 'live')
+      return live.some((c) => c.inner === '嵌入改目标' && c.state === 'error')
+    })
+    assert(afterEdit !== undefined, '修改后的新目标（缺失）应重挂为错误分态')
+    assert(doc.isDirty, 'IME 修改后父文档应 dirty（未保存）')
+
+    // 宿主撤销栈一步回退（真撤销链路；外部增量广播回 webview）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.history', op: 'undo' })
+    await poll('撤销恢复引用原文', () => (doc.getText() === parentBefore ? true : undefined))
+    const afterUndo = await waitViewState('嵌入样例.md', (v) => {
+      const live = (v.readingEmbed ?? []).filter((c) => c.host === 'live')
+      return live.some((c) => c.inner === '嵌入目标' && c.state === 'content')
+    })
+    assert(afterUndo, '撤销后原目标卡片恢复装载')
+    assert(!doc.isDirty, '撤销后父文档零 dirty')
+
+    // 模式切换不丢源码：live → reading（Reading 侧卡片在场）→ live（回挂）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    await waitViewState('嵌入样例.md', (v) => v.viewMode === 'reading' &&
+      (v.readingEmbed ?? []).some((c) => c.host === 'reading' && c.state === 'content'))
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    const backLive = await waitViewState('嵌入样例.md', (v) => v.viewMode === 'live' &&
+      (v.readingEmbed ?? []).some((c) => c.host === 'live' && c.state === 'content'))
+    assert(backLive !== undefined, '切回 Live 后卡片回挂（源文经宿主权威同步不丢）')
+
+    // 双零 dirty + 磁盘保真：编辑已撤销回原样；目标文档只读未动
+    const targetDoc = vscode.workspace.textDocuments.find(
+      (d) => d.uri.toString() === wsUri('嵌入目标.md').toString())
+    assert(doc.isDirty === false && targetDoc?.isDirty !== true, '父/目标文档双零 dirty')
+    assert(await readDisk('嵌入目标.md') === targetBefore, '嵌入读取不得改写目标磁盘')
+    const state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state.appliedEdits === state0.appliedEdits + 1,
+      `IME 修改恰一笔 applyEdit（实际 ${state.appliedEdits}，基线 ${state0.appliedEdits}）`)
+    await doc.save()
   }],
 
   // 嵌入边进入出链/反链观测：出链面板含 embed 条目；反链面板把嵌入计入
