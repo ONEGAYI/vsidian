@@ -128,6 +128,7 @@ vsidian/
 │       ├── appearance-merge.md                # 外观合并分页规格
 │       ├── batch-2026-09-menu.md              # 右键菜单批次总览与决策回执
 │       ├── batch-2026-09.md                   # 2026-09 开票批次总览
+│       ├── batch-2026-10-vscode-ops.md        # 2026-10 编辑器操作批次实施树
 │       ├── blockquote-accent-bar.md           # 引用块紫色提示边条规格
 │       ├── code-block-card.md                 # 代码块卡片功能规格
 │       ├── context-menu.md                    # 统一右键菜单规格（正文全域接管）
@@ -186,6 +187,7 @@ vsidian/
 │   │   ├── diagramExportValidate.ts    # 图表导出载荷校验
 │   │   ├── documentSession.ts          # 文档会话与写回同步
 │   │   ├── editorCsp.ts                # 编辑器 CSP 装配纯模块（#130）
+│   │   ├── findOptionsStore.ts         # 查找选项持久化存取
 │   │   ├── hostLocale.ts               # 生效语言宿主装配解析帮手
 │   │   ├── hoverDocAccess.ts           # 悬停预览文档访问纯逻辑
 │   │   ├── hoverRefreshCoordinator.ts  # 引用视图刷新协调器（宿主）
@@ -218,6 +220,7 @@ vsidian/
 │   │   ├── cssSnippetEnv.ts      # CSS 片段环境身份与分桶戳（#131）
 │   │   ├── cssSnippetImports.ts  # CSS 片段依赖导入形态学单一事实源
 │   │   ├── cssSnippets.ts        # CSS 片段纯逻辑单一事实源
+│   │   ├── findOptions.ts        # 查找选项三开关单一事实源
 │   │   ├── formatOperations.ts   # 格式操作注册清单
 │   │   ├── frontmatterTable.ts   # frontmatter 表格化纯逻辑
 │   │   ├── hoverRefresh.ts       # 引用视图同步参数与订阅注册表
