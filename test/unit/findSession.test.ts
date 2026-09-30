@@ -12,7 +12,9 @@ import { describe, it, expect } from 'vitest'
 import { EditorState } from '@codemirror/state'
 import {
   computeFindMatches,
+  computeFindReplaceMatches,
   findStateField,
+  planReplaceNext,
   setFindMatches,
 } from '../../src/webview/findSession'
 
@@ -141,6 +143,16 @@ describe('三开关语义（#236，@codemirror/search 引擎）', () => {
       .map((m) => m.from)).toEqual([0, 4])
   })
 
+  it('正则长模式短文本：长度快速排除不适用（模式长度≠命中长度，#241）', () => {
+    const re = { matchCase: true, wholeWord: false, regexp: true }
+    // '(\d+)-(\d+)-(\d+)' 长 17、文本长 11——此前被字面量守卫误判为 0 命中，
+    // 查找计数与替换目标脱节；regexp 模式必须照常匹配
+    expect(computeFindMatches('2026-09-30', '(\\d+)-(\\d+)-(\\d+)', re).map((m) => [m.from, m.to]))
+      .toEqual([[0, 10]])
+    // 字面量守卫保持：查询长于文本必无命中
+    expect(computeFindMatches('短', '比文本更长 的查询', CASE)).toEqual([])
+  })
+
   it('非法正则不抛错、无匹配', () => {
     const re = { matchCase: true, wholeWord: false, regexp: true }
     expect(computeFindMatches('任意文本', '(', re)).toEqual([])
@@ -166,6 +178,85 @@ describe('成型头区排除（#236）', () => {
     expect(ms.map((m) => m.from)).toEqual([text.indexOf('目标词', headEnd)])
     // 无排除时全命中（2 处）
     expect(computeFindMatches(text, '目标词', CASE)).toHaveLength(2)
+  })
+})
+
+describe('替换匹配（#241 评审修复 P0-2：替换与查找同源，头区排除）', () => {
+  const FM_TEXT = '---\ntitle: 头区目标词\ntags:\n  - 目标词\n---\n\n正文目标词一\n中间目标词二\n'
+  const headEnd = FM_TEXT.indexOf('正文目标词一')
+
+  it('替换匹配与查找匹配同源：同区间、同头区排除', () => {
+    const ms = computeFindReplaceMatches(FM_TEXT, '目标词', CASE, '替换词', headEnd)
+    expect(ms.map((m) => [m.from, m.to])).toEqual(
+      computeFindMatches(FM_TEXT, '目标词', CASE, headEnd).map((m) => [m.from, m.to]),
+    )
+    expect(ms).toHaveLength(2) // 头区 2 处命中被排除，正文 2 处保留
+    // 正常文本的 precise 恒 true（官方归一化安全标记在场）
+    expect(ms.every((m) => m.precise)).toBe(true)
+    // 字面量替换：replacement 为替换串本身
+    expect(ms.every((m) => m.replacement === '替换词')).toBe(true)
+  })
+
+  it('正则替换：$n 组展开按各命中分别进行（官方展开器语义）', () => {
+    const ms = computeFindReplaceMatches('2026-09-30 与 2027-01-05', '(\\d+)-(\\d+)-(\\d+)',
+      { matchCase: true, wholeWord: false, regexp: true }, '$3/$2/$1')
+    expect(ms.map((m) => m.replacement)).toEqual(['30/09/2026', '05/01/2027'])
+  })
+
+  it('空查询/非法正则/无命中返回空数组（与查找同一守卫）', () => {
+    expect(computeFindReplaceMatches(FM_TEXT, '', CASE, 'x', headEnd)).toEqual([])
+    expect(computeFindReplaceMatches(FM_TEXT, '(', { matchCase: true, wholeWord: false, regexp: true }, 'x'))
+      .toEqual([])
+    expect(computeFindReplaceMatches(FM_TEXT, '不存在', CASE, 'x', headEnd)).toEqual([])
+  })
+
+  it('头区独有的查询：替换匹配为空（「面板 0 命中」时替换无目标）', () => {
+    // P0 场景钉住：头区源文本含命中但排除后为空——官方 replaceAll 的
+    // 全文扫描会改写头区；自研路径的匹配集在此必须为空
+    expect(computeFindReplaceMatches(FM_TEXT, '头区目标词', CASE, 'x', headEnd)).toEqual([])
+  })
+})
+
+describe('replaceNext 推进计划（planReplaceNext，官方命令语义同构）', () => {
+  const CASE_MO = { matchCase: true, wholeWord: false, regexp: false }
+  const text = 'foo bar foo baz foo'
+  const matches = computeFindReplaceMatches(text, 'foo', CASE_MO, 'qux')
+
+  it('无匹配：两者皆 -1（命令不执行）', () => {
+    expect(planReplaceNext([], 0, 0)).toEqual({ replaceIndex: -1, selectIndex: -1 })
+  })
+
+  it('选区恰覆盖命中：替换它，选区移到下一处', () => {
+    expect(planReplaceNext(matches, 0, 3)).toEqual({ replaceIndex: 0, selectIndex: 1 })
+    expect(planReplaceNext(matches, 8, 11)).toEqual({ replaceIndex: 1, selectIndex: 2 })
+  })
+
+  it('选区未覆盖命中：不替换，选区移到参考位置后的首个命中（先选中）', () => {
+    expect(planReplaceNext(matches, 5, 7)).toEqual({ replaceIndex: -1, selectIndex: 1 })
+    // 光标在 0（空选区）：首个命中按「先选中」处理（官方两段式手感）
+    expect(planReplaceNext(matches, 0, 0)).toEqual({ replaceIndex: -1, selectIndex: 0 })
+  })
+
+  it('替换末个后 wrap：选区回绕到首个命中', () => {
+    expect(planReplaceNext(matches, 16, 19)).toEqual({ replaceIndex: 2, selectIndex: 0 })
+  })
+
+  it('参考位置在末个之后：回绕取首个（循环导航语义）', () => {
+    expect(planReplaceNext(matches, 100, 100)).toEqual({ replaceIndex: -1, selectIndex: 0 })
+  })
+
+  it('不精确命中（归一化劈开）：不替换，推进到下一处（官方 !precise 分支）', () => {
+    const imprecise = [
+      { from: 0, to: 3, precise: false },
+      { from: 4, to: 7, precise: true },
+    ]
+    expect(planReplaceNext(imprecise, 0, 3)).toEqual({ replaceIndex: -1, selectIndex: 1 })
+    expect(planReplaceNext(imprecise, 0, 0)).toEqual({ replaceIndex: -1, selectIndex: 1 })
+  })
+
+  it('唯一命中被替换后 wrap 回自身序号（选区映射由调用方随变更处理）', () => {
+    const single = [{ from: 0, to: 3, precise: true }]
+    expect(planReplaceNext(single, 0, 3)).toEqual({ replaceIndex: 0, selectIndex: 0 })
   })
 })
 

@@ -101,18 +101,15 @@ import { bindLocale, bindLocaleAttrs, bindLocaleFnAttrs, refreshElementLocale } 
 import { refreshOnDemandControlLocale } from './localeOnDemand'
 import {
   FIND_CLASS_NAMES,
-  buildSearchQuery,
   computeFindMatches,
+  computeFindReplaceMatches,
   findDecorations,
   isFindQueryValid,
   matchIndexFrom,
+  planReplaceNext,
   setFindMatches,
   type FindMatch,
 } from './findSession'
-// #236 查找引擎：@codemirror/search 外部驱动——search() 只装引擎状态
-// （官方面板与 keymap 不装；高亮自绘见 findDecorations，与官方面板高亮
-// 不叠加），replaceNext/replaceAll 命令供替换栏走标准出站链路
-import { replaceAll, replaceNext, search, setSearchQuery } from '@codemirror/search'
 import { FIND_OPTIONS_DEFAULT, findOptionsEqual, type FindOptions } from '../shared/findOptions'
 import {
   OCCURRENCE_CLASS_NAMES,
@@ -889,7 +886,7 @@ export class WebviewSyncController {
   private findValid = true
   /** 替换栏展开态（替换是 Live 编辑能力：阅读模式恒 false） */
   private findReplaceOpen = false
-  /** 替换文本（随引擎 query 的 replace 字段更新，供官方替换命令展开 $n） */
+  /** 替换文本（runFindReplace 经 computeFindReplaceMatches 交给官方展开器展开 $n） */
   private findReplaceText = ''
   private findMatches: FindMatch[] = []
   /** 0 基当前序号（无匹配时无意义） */
@@ -2974,6 +2971,7 @@ export class WebviewSyncController {
       viewMode: this.viewMode,
       selectionOffset: this.view?.state.selection.main.from ?? 0,
       wordSegmenter: typeof Intl.Segmenter === 'function',
+      wasmCompile: probeWebviewWasmCompile(),
       selectionHead: this.view?.state.selection.main.head ?? 0,
       selectionAssoc: this.view?.state.selection.main.assoc ?? 0,
       liveViewportCenterLine: liveCenterPos === null ? undefined : liveView?.state.doc.lineAt(liveCenterPos).number,
@@ -7023,8 +7021,9 @@ export class WebviewSyncController {
   // 匹配引擎（#236）：@codemirror/search 的 SearchQuery（三开关 +
   // literal 字面量口径），匹配集基于 CM6 doc 全文文本模型，文档变化经
   // Text 引用比较判过期；高亮自绘（官方面板未装配，见 findSession
-  // 模块头）；替换命令（replaceNext/replaceAll）走官方命令 + 标准出站
-  // 链路，引擎 query 经 setSearchQuery 与面板状态同步。
+  // 模块头）；替换（#241 评审修复 P0-2）走自研路径——与查找同源的
+  // 头区排除匹配集生成 changes 单事务 dispatch，经标准出站链路写回
+  // （官方 replaceNext/replaceAll 全文扫描不排除头区，已退役）。
 
   /** 查找面板 DOM（稳定类名见 FIND_CLASS_NAMES；默认隐藏，open 类控制显隐；
    *  #236 起 column 布局：toggle + 主行（输入/计数/三开关/导航）+ 替换行） */
@@ -7125,7 +7124,6 @@ export class WebviewSyncController {
     bindLocale(replaceInput, 'aria-label', 'find.replaceLabel')
     replaceInput.addEventListener('input', () => {
       this.findReplaceText = replaceInput.value
-      this.syncSearchQuery() // 引擎 query 的 replace 字段随输入更新（$n 展开用）
     })
     replaceInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
@@ -7211,15 +7209,14 @@ export class WebviewSyncController {
     if (opts.replace === true && this.viewMode === 'live') {
       this.findReplaceOpen = true
     }
-    // 预置替换词：输入框与引擎 query 的 replace 字段同步（后续 runFindReplace
-    // 消费；findRender 只管显隐，值在装配件上）
+    // 预置替换词：输入框同步（后续 runFindReplace 消费；findRender 只管
+    // 显隐，值在装配件上）
     if (typeof opts.replacement === 'string') {
       this.findReplaceText = opts.replacement
       const input = this.findPanel?.querySelector<HTMLInputElement>(`.${FIND_CLASS_NAMES.replaceInput}`)
       if (input) {
         input.value = opts.replacement
       }
-      this.syncSearchQuery()
     }
     this.findPanel?.classList.add(FIND_CLASS_NAMES.open)
     this.findRender()
@@ -7281,14 +7278,6 @@ export class WebviewSyncController {
     return model ? model.closeTo + 1 : 0
   }
 
-  /** 把当前查找状态同步给引擎（@codemirror/search 的 search state）：官方
-   *  替换命令从 search state 取 query；无效 query 不执行命令（runFindReplace
-   *  守卫）——规避「命令在 query 无效时 fallback 打开官方面板」的坑 */
-  private syncSearchQuery(): void {
-    const query = buildSearchQuery(this.findQuery, this.findOptions, this.findReplaceText)
-    this.view?.dispatch({ effects: setSearchQuery.of(query) })
-  }
-
   /** 无条件重算匹配集（查询/选项变化路径）：当前匹配取参考位置后首个 */
   private findRecompute(ref: number): void {
     const doc = this.view?.state.doc
@@ -7299,7 +7288,6 @@ export class WebviewSyncController {
         ? computeFindMatches(doc.toString(), this.findQuery, this.findOptions, this.findExcludeEnd())
         : []
     this.findIndex = matchIndexFrom(this.findMatches, ref)
-    this.syncSearchQuery()
   }
 
   /** 按需重算（导航/渲染前调用）：文档未变化时零开销；
@@ -7356,10 +7344,16 @@ export class WebviewSyncController {
     }
   }
 
-  /** 替换执行（#236：显式写操作）：官方 replaceNext/replaceAll 命令（单事务
-   *  = 单笔 edit.request = 宿主撤销一次；next 替换当前匹配并把选区移到下一
-   *  处，all 整批一笔）。仅 live（阅读只读）；无效 query 不执行。命令事务
-   *  走 updateListener 的标准出站链路（暂停态与 live 输入同语义） */
+  /** 替换执行（#236：显式写操作；#241 评审修复 P0-2 改自研）：匹配集与
+   *  查找同源（computeFindReplaceMatches：同引擎、同成型头区排除、同码
+   *  点过滤），官方 replaceNext/replaceAll 因内部 query.matchAll/
+   *  nextMatch 全文扫描会改写成型头区源文本而退役（面板 0 命中时「全部
+   *  替换」仍写回头区，违反批次规格「搜索替换不进入头区」）。推进语义
+   *  与官方命令同构（planReplaceNext：未覆盖先选中、替换后移到下一处含
+   *  wrap；$n 组展开复用官方引擎 getReplacement）。单次 dispatch = 单笔
+   *  edit.request = 宿主撤销一次（next 一笔、all 整批一笔——粒度契约与
+   *  官方命令一致），事务走 updateListener 的标准出站链路（暂停态与
+   *  live 输入同语义）；仅 live（阅读只读）；无效 query 不执行 */
   private runFindReplace(op: 'next' | 'all'): void {
     const view = this.view
     if (!this.findOpen || !view || this.viewMode !== 'live') {
@@ -7368,10 +7362,47 @@ export class WebviewSyncController {
     if (!this.findValid) {
       return
     }
-    this.syncSearchQuery()
-    const ok = (op === 'next' ? replaceNext : replaceAll)(view)
-    if (!ok) {
-      return
+    const matches = computeFindReplaceMatches(
+      view.state.doc.toString(),
+      this.findQuery,
+      this.findOptions,
+      this.findReplaceText,
+      this.findExcludeEnd(),
+    )
+    if (op === 'all') {
+      // 整批单事务：排除后匹配集逐条生成变更（precise 过滤与官方
+      // replaceAll 同款——归一化劈开的命中不整段改写），一次 dispatch
+      const changes: { from: number; to: number; insert: string }[] = []
+      for (const m of matches) {
+        if (!m.precise) {
+          continue
+        }
+        changes.push({ from: m.from, to: m.to, insert: m.replacement })
+      }
+      if (changes.length === 0) {
+        return
+      }
+      view.dispatch({ changes, userEvent: 'input.replace.all' })
+    } else {
+      const plan = planReplaceNext(
+        matches,
+        view.state.selection.main.from,
+        view.state.selection.main.to,
+      )
+      if (plan.selectIndex < 0) {
+        return
+      }
+      const changes: { from: number; to: number; insert: string }[] = []
+      if (plan.replaceIndex >= 0) {
+        const m = matches[plan.replaceIndex]!
+        changes.push({ from: m.from, to: m.to, insert: m.replacement })
+      }
+      // 选区落点随变更映射（官方 replaceNext 的 map(changeSet) 同构：
+      // 替换发生在落点之前时位移补偿，wrap 回文档头也正确）
+      const changeSet = view.state.changes(changes)
+      const target = matches[plan.selectIndex]!
+      const selection = EditorSelection.single(target.from, target.to).map(changeSet)
+      view.dispatch({ changes: changeSet, selection, userEvent: 'input.replace' })
     }
     // 替换改变了文档：以新选区（next 已移到下一处）为参考重算并重绘
     const ref = op === 'next' ? view.state.selection.main.from : this.findReferencePos()
@@ -9901,12 +9932,12 @@ export class WebviewSyncController {
         },
       }),
       // 查找装饰（#14）：当前匹配（直接）+ 全部匹配（视口内间接）。
-      // #236 引擎状态：search() 只装 @codemirror/search 的 query 存储
-      // （官方面板与 searchKeymap 不装——高亮自绘，见 findSession 模块头；
-      // 引擎 query 由 syncSearchQuery 经 setSearchQuery 外部驱动，供
-      // replaceNext/replaceAll 官方替换命令消费）
+      // #236 引擎：@codemirror/search 的 SearchQuery 作匹配引擎（findSession
+      // 内构造，官方面板与 searchKeymap 不装——高亮自绘）；#241 评审修复
+      // 起官方 replaceNext/replaceAll 命令与 search() query 状态整体退役，
+      // 替换走 computeFindReplaceMatches/planReplaceNext 自研路径（头区
+      // 排除，见 runFindReplace）
       findDecorations,
-      search(),
       ...this.extraExtensions,
       EditorView.updateListener.of((update) => {
         if (this.quickActionsOpen && (update.docChanged || update.selectionSet)) {
@@ -10382,4 +10413,22 @@ function createRefreshIcon(): SVGSVGElement {
 export function isVscodeDarkBody(body: HTMLElement = document.body): boolean {
   const cl = body.classList
   return cl.contains('vscode-dark') || cl.contains('vscode-high-contrast')
+}
+
+/** webview CSP 下 WebAssembly 编译能力探针（#241 评审修复 P0-1）：8 字节
+ *  空模块（\0asm 版本 1）同步编译——CSP script-src 无 'wasm-unsafe-eval'
+ *  时同步抛错。结果缓存（能力不随文档变化）；在真实宿主 webview 内执行，
+ *  为 jieba wasm 实例化路径提供词法断言之外的行为级证据（#37 教训：
+ *  CSP 边界必须在真实 webview 宿主验证）。 */
+let webviewWasmCompileCapable: boolean | null = null
+function probeWebviewWasmCompile(): boolean {
+  if (webviewWasmCompileCapable === null) {
+    try {
+      void new WebAssembly.Module(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]))
+      webviewWasmCompileCapable = true
+    } catch {
+      webviewWasmCompileCapable = false
+    }
+  }
+  return webviewWasmCompileCapable
 }

@@ -600,6 +600,10 @@ export type WebviewToHost =
       liveScrollTopPx?: number
       /** webview 实际运行时能否使用词级分段器（#88）。 */
       wordSegmenter?: boolean
+      /** webview 实际运行时 CSP 是否放行 WebAssembly 编译（#241 评审修复：
+       *  8 字节空模块同步编译探针——jieba wasm 实例化的 CSP 前置条件，
+       *  在真实宿主 webview 内验证，词法断言之外的行为级证据） */
+      wasmCompile?: boolean
       /** 阅读容器内块元素数（#6；#7 起为挂载块数，屏外块不创建） */
       readingBlockCount?: number
       /** 当前阅读锚点块的源 start（源码位置锚点，非滚动百分比） */
@@ -2577,6 +2581,7 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         (v.liveViewportCenterLine === undefined || isNonNegativeInt(v.liveViewportCenterLine)) &&
         (v.liveScrollTopPx === undefined || isNonNegativeNumber(v.liveScrollTopPx)) &&
         (v.wordSegmenter === undefined || typeof v.wordSegmenter === 'boolean') &&
+        (v.wasmCompile === undefined || typeof v.wasmCompile === 'boolean') &&
         (v.readingBlockCount === undefined || isNonNegativeInt(v.readingBlockCount)) &&
         (v.readingAnchorStart === undefined || isNonNegativeInt(v.readingAnchorStart)) &&
         (v.readingTotalBlocks === undefined || isNonNegativeInt(v.readingTotalBlocks)) &&

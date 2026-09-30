@@ -807,6 +807,22 @@ const HR_DOC = [
 export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample, generateMermaidDenseSample }) {
   writeFileSync(path.join(wsDir, 'lf.md'), LF_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'find.md'), FIND_DOC, 'utf8')
+  // #241 替换头区排除样例：成型 frontmatter（title 值与 tags 项各含一次
+  // 「目标词」——头区命中载体）与正文 3 处命中（替换排除断言载体）
+  writeFileSync(path.join(wsDir, 'find-fm.md'), [
+    '---',
+    'title: 头区目标词样本',
+    'tags:',
+    '  - 目标词',
+    '---',
+    '',
+    '第一段：这里有一个目标词，后续还有。',
+    '',
+    '第二段：又出现目标词了。',
+    '',
+    '结尾目标词三。',
+    '',
+  ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, 'style-contract.md'), STYLE_CONTRACT_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'chrome-contract.md'), CHROME_CONTRACT_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'untouched.md'), '未触碰文档\n保持原样\n', 'utf8')

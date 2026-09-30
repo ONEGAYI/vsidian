@@ -546,6 +546,8 @@ interface ViewState {
   liveViewportCenterLine?: number
   liveScrollTopPx?: number
   wordSegmenter?: boolean
+  /** #241 评审修复：webview CSP 下 WebAssembly 编译探针（jieba 前置条件） */
+  wasmCompile?: boolean
   readingBlockCount?: number
   readingAnchorStart?: number
   /** #7 按需挂载观测 */
@@ -4046,6 +4048,86 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(docFinal.getText() === text, '阅读模式替换指令后权威文本不变')
   }],
 
+  ['编辑区查找：替换的成型头区排除——头区零写回与计数一致（#241 评审修复 P0-2）', async () => {
+    await openWithEditor('find-fm.md')
+    await waitSessionReady('find-fm.md')
+    const uri = wsUri('find-fm.md').toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri('find-fm.md'))
+    const text = doc.getText()
+    const diskBefore = await readDisk('find-fm.md')
+    const bodyStart = text.indexOf('第一段')
+    assert(bodyStart > 0, 'fixture 正文起点应存在')
+    const headText = text.slice(0, bodyStart)
+    // 头区命中载体自检：title 值与 tags 项各一次「目标词」，正文 3 次
+    assert(text.split('目标词').length - 1 === 5, `fixture 应共 5 处「目标词」（头区 2 + 正文 3），实际 ${text.split('目标词').length - 1}`)
+    const session0 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+
+    // 打开替换：面板计数排除头区（仅正文 3 处）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'view.find.open', query: '目标词', replace: true, replacement: '替换词',
+    })
+    let v = await waitViewState('find-fm.md', (s) => s.find?.open === true && s.find?.total === 3)
+    assert(v.find!.replaceOpen === true, 'live 打开（replace）应展开替换栏')
+
+    // 替换下一个：单笔写回只改正文首个命中；头区源文本逐字节不变
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.find.replace', op: 'next' })
+    const afterNext = text.replace('这里有一个目标词', '这里有一个替换词')
+    v = await poll('替换下一个写回', async () => {
+      const s = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      return s?.text === afterNext ? s : undefined
+    })
+    let session = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(session.appliedEdits === session0.appliedEdits + 1, `替换下一个应恰为一笔写回，实际 ${session0.appliedEdits} → ${session.appliedEdits}`)
+    assert(v.text.slice(0, bodyStart) === headText, '替换下一个后头区源文本逐字节不变')
+    assert(v.liveSyntax?.frontmatterLines === 5, `头区仍按成型 frontmatter 渲染（5 行），实际 ${v.liveSyntax?.frontmatterLines}`)
+    assert(doc.getText().slice(0, bodyStart) === headText, '权威文本头区同步不变')
+
+    // 全部替换（同一会话，余下 2 处正文命中）：整批恰一笔，头区仍零写回
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.find.replace', op: 'all' })
+    const allReplaced = afterNext.replace('又出现目标词了', '又出现替换词了').replace('结尾目标词三', '结尾替换词三')
+    v = await poll('全部替换写回', async () => {
+      const s = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      return s?.text === allReplaced ? s : undefined
+    })
+    session = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(session.appliedEdits === session0.appliedEdits + 2, `全部替换应整批恰为一笔写回，实际累计 ${session.appliedEdits}`)
+    // 面板计数与实际替换数一致：初始面板 3 命中 → 全文恰 3 处「替换词」
+    assert(v.text.split('替换词').length - 1 === 3, `替换数应与面板初始计数一致（3），实际 ${v.text.split('替换词').length - 1}`)
+    assert(v.find?.total === 0, `全部替换后应 0 命中，实际 ${v.find?.total}`)
+    assert(v.text.slice(0, bodyStart) === headText, '全部替换后头区源文本逐字节不变（头区 2 处命中不被触碰）')
+    assert(v.liveSyntax?.frontmatterLines === 5, `全部替换后头区仍成型渲染，实际 ${v.liveSyntax?.frontmatterLines}`)
+
+    // 头区独有查询（面板 0 命中）：替换下一个/全部替换均零写回——官方
+    // replaceAll 全文扫描会改写头区源文本的 P0 缺陷场景，自研路径必须空转
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'view.find.open', query: '头区目标词样本', replacement: '改写',
+    })
+    v = await waitViewState('find-fm.md', (s) => s.find?.query === '头区目标词样本' && s.find?.total === 0)
+    const beforeInert = ((await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState).appliedEdits
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.find.replace', op: 'next' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.find.replace', op: 'all' })
+    session = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(session.appliedEdits === beforeInert, `面板 0 命中时替换不得写回（${beforeInert} → ${session.appliedEdits}）`)
+    const docInert = await vscode.workspace.openTextDocument(wsUri('find-fm.md'))
+    assert(docInert.getText() === allReplaced, '面板 0 命中时替换指令后权威文本不变')
+
+    // 归还焦点后逐笔撤销（两笔替换两笔撤销），保存恢复磁盘原样
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.find.close' })
+    await waitViewState('find-fm.md', (s) => s.find?.open === false)
+    await vscode.commands.executeCommand('undo')
+    await poll('撤销全部替换', async () => {
+      const s = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      return s?.text === afterNext ? s : undefined
+    })
+    await vscode.commands.executeCommand('undo')
+    await poll('撤销替换下一个', async () => {
+      const s = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+      return s?.text === text ? s : undefined
+    })
+    await doc.save()
+    assert(await readDisk('find-fm.md') === diskBefore, '两笔撤销后保存应恢复原磁盘内容')
+  }],
+
   // ---- 工单 #11：双链解析并跳转笔记与标题 ----
 
   ['双链显示：live widget/mark 与阅读 a 渲染，降级形态源码保真，稳定类名可被外部片段命中（#11）', async () => {
@@ -7149,6 +7231,12 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const before = doc.getText()
     const probe = await waitViewState('lf.md', (v) => v.wordSegmenter !== undefined)
     assert(probe.wordSegmenter === true, 'VSCode 1.86 webview 应提供 Intl.Segmenter 中文分词')
+    // #241 评审修复 P0-1：真实宿主 CSP 下 WebAssembly 编译探针——8 字节空
+    // 模块同步编译。CSP script-src 缺 'wasm-unsafe-eval' 时此探针为 false
+    // （jieba wasm 实例化必被拒、恒回退 builtin 的 P0 根因），词法断言之外
+    // 的行为级证据
+    const wasm = await waitViewState('lf.md', (v) => v.wasmCompile !== undefined)
+    assert(wasm.wasmCompile === true, '编辑器 webview CSP 应放行 WebAssembly 编译（wasm-unsafe-eval，jieba 前置条件）')
     await vscode.commands.executeCommand(CMD.postToPanel, uri,
       { kind: 'table.test.crossSelect', anchor: 0, head: 2 })
     await waitViewState('lf.md', (v) => v.selectionOffset === 0 && v.selectionHead === 2)

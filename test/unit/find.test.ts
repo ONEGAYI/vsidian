@@ -711,6 +711,94 @@ describe('成型头区排除（#236 已定边界：搜索不进入头区）', ()
     expect(state.find?.total).toBe(1)
     expect(state.find?.currentFrom).toBe(FM_DOC.indexOf('目标词', FM_DOC.indexOf('正文目标词')))
   })
+
+  // #241 评审修复 P0-2：替换不得进入头区（与查找同源的排除匹配集）。
+  // 头区 2 处命中（title 值 + tags 项）、正文 3 处命中
+  const FM_REPLACE_DOC =
+    '---\ntitle: 头区目标词\ntags:\n  - 目标词\n---\n\n正文目标词一。\n\n中间段落。\n\n结尾目标词二与目标词三。\n'
+  const FM_BODY_START = FM_REPLACE_DOC.indexOf('正文目标词一')
+
+  function headSlice(text: string): string {
+    return text.slice(0, FM_BODY_START)
+  }
+
+  it('替换下一个：正文首个命中被替换（单笔写回），头区源文本逐字节不变', () => {
+    const h = makeBridge()
+    const c = mountFind(h, FM_REPLACE_DOC)
+    c.handleHostMessage({
+      kind: 'view.find.open', query: '目标词', replace: true, replacement: '替换词',
+    })
+    expect(viewState(c, h).find?.total).toBe(3) // 计数即正文命中（头区排除）
+    const before = editRequestCount(h)
+    c.handleHostMessage({ kind: 'view.find.replace', op: 'next' })
+    expect(editRequestCount(h)).toBe(before + 1)
+    const after = viewState(c, h)
+    // 正文替换正确：首个正文命中被替换（官方命令先选中当前命中的语义——
+    // 打开面板已定位选区到首个命中，next 即替换）
+    expect(after.text).toBe(FM_REPLACE_DOC.replace('正文目标词一', '正文替换词一'))
+    // 头区零写回：逐字节不变
+    expect(headSlice(after.text!)).toBe(headSlice(FM_REPLACE_DOC))
+    // 会话就近保持：total 递减、当前移到下一处正文命中（indexOf 从正文
+    // 起点找——头区仍含命中，不得作为期望来源）
+    expect(after.find?.total).toBe(2)
+    expect(after.find?.currentFrom).toBe(after.text!.indexOf('目标词', FM_BODY_START))
+  })
+
+  it('全部替换：整批单笔写回只改正文，头区源文本逐字节不变', () => {
+    const h = makeBridge()
+    const c = mountFind(h, FM_REPLACE_DOC)
+    c.handleHostMessage({
+      kind: 'view.find.open', query: '目标词', replace: true, replacement: '替换词',
+    })
+    const totalBefore = viewState(c, h).find?.total
+    expect(totalBefore).toBe(3)
+    const before = editRequestCount(h)
+    c.handleHostMessage({ kind: 'view.find.replace', op: 'all' })
+    expect(editRequestCount(h)).toBe(before + 1) // 整批一笔（一笔撤销）
+    const after = viewState(c, h)
+    // 面板计数与实际替换数一致：3 处正文命中各被替换一次
+    expect(after.text!.split('替换词').length - 1).toBe(totalBefore)
+    // 头区 2 处命中不被触碰
+    expect(headSlice(after.text!)).toBe(headSlice(FM_REPLACE_DOC))
+    expect(after.text).toBe(FM_REPLACE_DOC.split('目标词一').join('替换词一')
+      .split('目标词二').join('替换词二').split('目标词三').join('替换词三'))
+    expect(after.find?.total).toBe(0)
+  })
+
+  it('头区独有命中（面板 0 命中）：替换下一个/全部替换均零写回', () => {
+    const h = makeBridge()
+    const c = mountFind(h, FM_DOC)
+    c.handleHostMessage({
+      kind: 'view.find.open', query: '头区目标词', replace: true, replacement: '改写',
+    })
+    // 面板 0 命中：头区命中被排除、正文无命中（官方 replaceAll 全文扫描
+    // 会改写头区源文本——P0 缺陷场景）
+    expect(viewState(c, h).find?.total).toBe(0)
+    const before = editRequestCount(h)
+    c.handleHostMessage({ kind: 'view.find.replace', op: 'next' })
+    c.handleHostMessage({ kind: 'view.find.replace', op: 'all' })
+    expect(editRequestCount(h)).toBe(before)
+    expect(viewState(c, h).text).toBe(FM_DOC)
+  })
+
+  it('replaceNext wrap 推进不落入头区：末个正文命中替换后回绕到首个正文命中', () => {
+    const h = makeBridge()
+    const c = mountFind(h, FM_REPLACE_DOC)
+    c.handleHostMessage({
+      kind: 'view.find.open', query: '目标词', replace: true, replacement: '替换词',
+    })
+    // 连续替换 3 次（每次替换当前并推进）：3 处正文命中全替换、头区不变
+    for (let i = 0; i < 3; i++) {
+      c.handleHostMessage({ kind: 'view.find.replace', op: 'next' })
+    }
+    const allBodyReplaced = FM_REPLACE_DOC.split('目标词一').join('替换词一')
+      .split('目标词二').join('替换词二').split('目标词三').join('替换词三')
+    const after = viewState(c, h)
+    expect(editRequestCount(h)).toBe(3)
+    expect(after.text).toBe(allBodyReplaced)
+    expect(headSlice(after.text!)).toBe(headSlice(FM_REPLACE_DOC))
+    expect(after.find?.total).toBe(0)
+  })
 })
 
 describe('短文档锚点权威性（定位锚点不被视口读数覆盖）', () => {
