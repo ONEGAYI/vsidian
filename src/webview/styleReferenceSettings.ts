@@ -10,13 +10,17 @@
 // #155 小改：总分页签两态——「样式参考」总表（版本说明、别名桥要点、变量
 // 别名总表）与「详细查询」（类目分栏 + 过滤搜索 + 分页）；全局搜索定位条目
 // 时直接落入详细查询页签。
-// UI 文案一律 t() 取词（styleRef.* 词条）；条目内容是文档数据（中文基准），
+// #231 外观合并：本分页不再作为侧栏独立分页注册（SettingsPageSection 实现
+// 与侧栏 book 图标退役），改为「外观」组合分页的页签体——mountPanels 把
+// 总表/详细查询两面板内容构建进外壳提供的容器（外壳三页签统一控制显隐，
+// 扁平三页签不加嵌套层级）；mount 保留为独立两态页签形态（自包含消费与
+// 回归网）。UI 文案一律 t() 取词（styleRef.* 词条）；条目内容是文档数据
+// （中文基准），
 // #178 起按 UI 语言取词——英文环境应用条目英文覆盖（字段级，未覆盖字段
 // 回退中文基准；换包跟随经壳层 applyLocale → render → mount 重建）。
 import { currentLocaleLang, t } from '../shared/i18n'
 import { applyStyleContractEntryOverride } from '../shared/styleContractEn'
 import type { StyleContractCategory, StyleContractEntry } from '../shared/styleContract'
-import type { SettingsPageSection } from './settingsPageView'
 import {
   STYLE_GUIDE_CATEGORIES,
   STYLE_GUIDE_EN_OVERRIDES,
@@ -56,12 +60,7 @@ function orderedCategories(categories: readonly StyleContractCategory[]): StyleC
 
 export interface StyleReferenceBridge { postMessage(message: unknown): void }
 
-export class StyleReferenceSection implements SettingsPageSection {
-  readonly id = 'style-reference'
-  readonly icon = 'book' as const
-  get title(): string { return t('styleRef.title') }
-  get description(): string { return t('styleRef.description') }
-
+export class StyleReferenceSection {
   constructor(private readonly bridge?: StyleReferenceBridge) {}
 
   get entries() {
@@ -72,6 +71,12 @@ export class StyleReferenceSection implements SettingsPageSection {
     ]
   }
 
+  /**
+   * 独立呈现形态（#155 总分页签保留）：页内自带总表/详细查询两态页签，
+   * 内容构建委托 mountPanels。#231 起设置页侧栏不再注册本分页（合并进
+   * 「外观」组合分页的页签体），此形态保留为该类的自包含消费形态（页签
+   * 机制与 focusEntry 页签路由回归网）。
+   */
   mount(parent: HTMLElement, focusEntry?: string): () => void {
     parent.replaceChildren()
 
@@ -108,6 +113,19 @@ export class StyleReferenceSection implements SettingsPageSection {
       tabbar.append(button)
     }
     parent.append(tabbar)
+    this.mountPanels(overviewPanel, detailPanel, focusEntry)
+    parent.append(overviewPanel, detailPanel)
+    setTab(initialTab)
+    return () => undefined
+  }
+
+  /**
+   * 页签体形态（#231 外观合并）：把总表/详细查询两面板内容构建进外部提供
+   * 的容器，不创建页签条、不接管面板显隐（外观外壳的三页签 tablist 统一
+   * 控制 hidden）——条目数据、类目分栏、等级过滤、跨类目搜索、分页导航、
+   * focusEntry 跳页定位与独立形态同源，不重写。
+   */
+  mountPanels(overviewPanel: HTMLElement, detailPanel: HTMLElement, focusEntry?: string): void {
 
     // 总表面板：版本配套说明 + 别名桥要点（callout 形态，文档内容直接呈现）。
     // 分页标题由设置页壳层呈现，此处不再重复 h2。
@@ -238,8 +256,6 @@ export class StyleReferenceSection implements SettingsPageSection {
     main.append(bar, list, pager)
     layout.append(catNav, main)
     detailPanel.append(layout)
-    parent.append(overviewPanel, detailPanel)
-    setTab(initialTab)
 
     const render = (): void => {
       const support = supportSel.value as SupportFilter
@@ -343,7 +359,6 @@ export class StyleReferenceSection implements SettingsPageSection {
         target.scrollIntoView?.({ block: 'start' }) // jsdom 无布局实现（可选调用，与 cssSnippetSettings 同口径）
       }
     }
-    return () => undefined
   }
 
   private renderCard(entry: StyleContractEntry, opts: { withCategory: boolean }): HTMLElement {

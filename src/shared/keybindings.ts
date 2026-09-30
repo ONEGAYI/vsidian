@@ -8,7 +8,9 @@ export interface KeybindingOperation {
   command: string
   /** 操作显示名的字典消息键：format 源持 format.*（工具条/快捷键页/manifest
    *  三面同源），extra/UI 源持 command.*（快捷键页与 manifest NLS 同源，
-   *  键名按 command id 推导，与 genNls 的映射规则一致——无第二套文案） */
+   *  键名按 command id 推导，与 genNls 的映射规则一致——无第二套文案；
+   *  例外：#232 起三态切换三操作持独立 operation.* 键，操作名与 manifest
+   *  归属句式 title 拆键分持） */
   titleKey: MessageKey
   mode: BindingMode
   writes: boolean
@@ -20,9 +22,12 @@ const extra: readonly KeybindingOperation[] = [
   { id: 'findNext', command: 'onegayi.vsidian.find.next', titleKey: 'command.find.next.title', mode: 'both', writes: false, defaults: ['f3'] },
   { id: 'findPrevious', command: 'onegayi.vsidian.find.previous', titleKey: 'command.find.previous.title', mode: 'both', writes: false, defaults: ['shift+f3'] },
   { id: 'toggleViewMode', command: 'onegayi.vsidian.toggleViewMode', titleKey: 'command.toggleViewMode.title', mode: 'both', writes: false, defaults: [] },
-  { id: 'toReading', command: 'onegayi.vsidian.mode.toReading', titleKey: 'command.mode.toReading.title', mode: 'live', writes: false, defaults: [] },
-  { id: 'toLive', command: 'onegayi.vsidian.mode.toLive', titleKey: 'command.mode.toLive.title', mode: 'reading', writes: false, defaults: [] },
-  { id: 'toSource', command: 'onegayi.vsidian.mode.toSource', titleKey: 'command.mode.toSource.title', mode: 'both', writes: false, defaults: [] },
+  // #232 拆键：三态切换的 titleKey 持独立无前缀操作名键（operation.*），
+  // 与 manifest title 键（command.mode.to*.title，归属句式「将 Vsidian
+  // 切换到 xx」）分离——快捷键页操作名维持原文案、不带品牌名
+  { id: 'toReading', command: 'onegayi.vsidian.mode.toReading', titleKey: 'operation.toReading', mode: 'live', writes: false, defaults: [] },
+  { id: 'toLive', command: 'onegayi.vsidian.mode.toLive', titleKey: 'operation.toLive', mode: 'reading', writes: false, defaults: [] },
+  { id: 'toSource', command: 'onegayi.vsidian.mode.toSource', titleKey: 'operation.toSource', mode: 'both', writes: false, defaults: [] },
   // #141 双态切换（live↔reading，不含源码）：工具栏按钮与快捷键共用
   // 同一目标推导（当前态取反）。双模式可触发（源码模式不经 webview 键
   // 路由天然不涉及）；默认 ctrl+q（2026-09-27 用户指示，全仓与宿主

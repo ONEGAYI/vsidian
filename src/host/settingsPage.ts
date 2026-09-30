@@ -93,9 +93,11 @@ export interface SettingsPageHandle {
   notifyIndexChanged(): void
   /**
    * #132 样式参考：打开（或 reveal）设置页并定位到指定附加分页。
-   * 面板未 ready 时在握手完成后补发（webview 装载是异步的）
+   * 面板未 ready 时在握手完成后补发（webview 装载是异步的）。
+   * #231：entry 可选——分页内进一步定位的条目 id（外观分页按条目归属
+   * 路由页内页签），缺省时消息不带该字段（向后兼容）
    */
-  openWithSection(section: string): void
+  openWithSection(section: string, entry?: string): void
 }
 
 export function createSettingsPage(
@@ -111,8 +113,9 @@ export function createSettingsPage(
 ): SettingsPageHandle {
   let panel: vscode.WebviewPanel | undefined
   let ready = false
-  // #132：ready 前收到的分页定位请求（settings.get 应答后补发）
-  let pendingSection: string | undefined
+  // #132：ready 前收到的分页定位请求（settings.get 应答后补发）；
+  // #231：定位携带可选 entry（外观分页内页签/条目路由），挂起与补发同形态
+  let pendingSection: { section: string; entry?: string } | undefined
 
   /** 设置页 webview 消息处理（onDidReceiveMessage 与测试注入共用入口） */
   const handleMessage = (message: unknown): void => {
@@ -151,9 +154,13 @@ export function createSettingsPage(
         })
         // #132 补发分页定位（openWithSection 先于 ready 到达时）
         if (pendingSection !== undefined) {
-          const section = pendingSection
+          const pending = pendingSection
           pendingSection = undefined
-          void current?.webview.postMessage({ kind: 'settings.focusSection', section })
+          void current?.webview.postMessage({
+            kind: 'settings.focusSection',
+            section: pending.section,
+            ...(pending.entry !== undefined ? { entry: pending.entry } : {}),
+          })
         }
         // #96 R1 ready 即校准（设置页路径）：settings.get 是设置页的 ready
         // 握手——应答链附带当前语言包（幂等补发，复用 locale.changed 消息，
@@ -279,14 +286,23 @@ export function createSettingsPage(
     })
   }
 
-  const openWithSection = (section: string): void => {
+  /**
+   * 打开设置页并定位到指定附加分页；entry（#231 外观合并，可选）为分页内
+   * 进一步定位的条目 id（外观分页按条目归属路由页内页签）。entry 缺省时
+   * 消息不带该字段（#132 起的既有形态，向后兼容）
+   */
+  const openWithSection = (section: string, entry?: string): void => {
     open()
     const current = panel
     if (!current) return
     if (ready) {
-      void current.webview.postMessage({ kind: 'settings.focusSection', section })
+      void current.webview.postMessage({
+        kind: 'settings.focusSection',
+        section,
+        ...(entry !== undefined ? { entry } : {}),
+      })
     } else {
-      pendingSection = section
+      pendingSection = { section, entry }
     }
   }
 

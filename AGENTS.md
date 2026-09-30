@@ -125,6 +125,7 @@ vsidian/
 │   │   └── obsidian-viewport-rendering.md  # 视口渲染性能补充调研
 │   └── specs/      # 产品规格
 │       ├── anchor-navigation.md               # 锚点跳转规格（标题/块引用/复制块链接）
+│       ├── appearance-merge.md                # 外观合并分页规格
 │       ├── batch-2026-09-menu.md              # 右键菜单批次总览与决策回执
 │       ├── batch-2026-09.md                   # 2026-09 开票批次总览
 │       ├── blockquote-accent-bar.md           # 引用块紫色提示边条规格
@@ -250,6 +251,7 @@ vsidian/
 │   │   └── wikilink.ts           # 双链形态学单一事实源（#11）
 │   └── webview/     # webview 端实现
 │       ├── anchorFlash.ts              # 跳转目标高亮装饰状态
+│       ├── appearanceSettings.ts       # 外观合并分页
 │       ├── backlinkGrouping.ts         # 反链面板分组排序过滤纯函数
 │       ├── backlinkPanel.ts            # 反链面板 DOM 与四态渲染（#197）
 │       ├── blockIdStrip.ts             # 阅读渲染块标记剥离纯函数
@@ -257,7 +259,7 @@ vsidian/
 │       ├── codeHighlight.ts            # 语法高亮引擎装配与缓存
 │       ├── contextMenuDom.ts           # 统一菜单 DOM 装配与子菜单翻转
 │       ├── css.d.ts                    # CSS 导入类型声明
-│       ├── cssSnippetSettings.ts       # CSS 片段设置分页
+│       ├── cssSnippetSettings.ts       # 外观页 CSS 片段页签体
 │       ├── diagramExport.ts            # 图表导出序列化与光栅化
 │       ├── diagramPopup.ts             # 图表弹窗全屏浮层
 │       ├── diagramPopupGeometry.ts     # 弹窗几何纯函数
@@ -325,7 +327,7 @@ vsidian/
 │       ├── settingsPageView.ts         # 设置页 webview 视图
 │       ├── snippetLoader.ts            # CSS 片段 link 装配器
 │       ├── styleGuideData.ts           # 设置页样式参考数据（生成）
-│       ├── styleReferenceSettings.ts   # 设置页样式参考分页
+│       ├── styleReferenceSettings.ts   # 外观页样式参考页签体
 │       ├── symbolAutocomplete.ts       # 符号自动补全编辑器适配层（#123）
 │       ├── symbolCompositionState.ts   # IME 选区快照共享状态
 │       ├── symbolWrap.ts               # 选区包裹编辑器适配层（#124）

@@ -345,9 +345,12 @@ export type HostToWebview =
   | { kind: 'settings.snapshot'; values: SettingsPayload }
   /**
    * #132 样式参考：打开设置页后定位到指定附加分页（section id）。
-   * 面板未加载完成时由宿主在 ready 握手后补发；未知分页 id 时 webview 忽略
+   * 面板未加载完成时由宿主在 ready 握手后补发；未知分页 id 时 webview 忽略。
+   * entry（#231 外观合并，可选）：分页内进一步定位的条目 id——外观分页按
+   * 条目归属路由到页内页签（片段目录/文件 → CSS 片段；overview → 样式参考；
+   * 契约条目 → 详细查询）。缺省时目标分页按自身默认形态呈现（向后兼容）
    */
-  | { kind: 'settings.focusSection'; section: string }
+  | { kind: 'settings.focusSection'; section: string; entry?: string }
   /** 设置变更通知（#33）：任一设置项保存成功后广播到全部已打开 Vsidian
    *  编辑器面板与设置页（含变更发起页面）。values 仍为全量快照；消费方按
    *  需读取关心的键（#34 场景：editor.lineNumbers 触发 CM6 扩展热重配） */
@@ -2995,7 +2998,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'settings.snapshot':
       return isSettingsPayload(v.values)
     case 'settings.focusSection':
-      return isString(v.section)
+      // #231：entry 可选字符串（缺省 = 无分页内定位，向后兼容）
+      return isString(v.section) && (v.entry === undefined || isString(v.entry))
     case 'settings.changed':
       return isSettingsPayload(v.values)
     case 'locale.changed':
