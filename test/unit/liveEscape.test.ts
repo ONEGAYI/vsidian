@@ -79,6 +79,27 @@ describe('转义符通用显隐（构建层）', () => {
     const tableLineFrom = DOC.indexOf('| [[x')
     expect(build(tableLineFrom + 2).reveal).toEqual([])
   })
+
+  it('grid 表格内非管道转义（\\* 等）零发射：反斜杠常驻原文可见（降级口径钉住）', () => {
+    // 已知降级边界（表格 path 整体排除通用发射，专用通道只认 \|）：
+    // 格内 \* 的反斜杠不做任何显隐装饰——常驻原文可见、无触及切换，
+    // 与表格外的通用显隐不同。若未来收窄（格内转义符也走通用类），
+    // 本用例与 live-escape 契约条目的降级口径须同笔更新
+    const tableDoc = Text.of([
+      '| a | b |',
+      '| --- | --- |',
+      '| x\\*y | c |',
+    ])
+    const set = buildLivePreviewDecorations(tableDoc, EditorSelection.single(tableDoc.length))
+    const hits: string[] = []
+    set.between(0, tableDoc.length, (_from, _to, deco) => {
+      const cls = deco.spec.class ?? ''
+      if (cls.split(' ').some((c: string) => c === LIVE_CLASS_NAMES.escape || c === LIVE_CLASS_NAMES.escapeReveal)) {
+        hits.push(cls)
+      }
+    })
+    expect(hits).toEqual([])
+  })
 })
 
 describe('转义符通用显隐（DOM 层）', () => {
@@ -97,6 +118,30 @@ describe('转义符通用显隐（DOM 层）', () => {
     const codeLine = view.contentDOM.querySelectorAll('.cm-line')[1]!
     expect(codeLine.querySelectorAll(`.${LIVE_CLASS_NAMES.escape}, .${LIVE_CLASS_NAMES.escapeReveal}`))
       .toHaveLength(0)
+    view.destroy()
+  })
+
+  it('已知边界钉住：跨行 code span 开启后行内装饰残留，触及该行即自愈', () => {
+    // 增量重建边界（liveDecorations planRebuildSpans）：在能跨行配对的
+    // 反引号结构上追加 ` 开启 code span 吞掉下一行时，变更行与被吞行
+    // 之间没有种子表节点牵连、InlineCode 不属容器差异探测分类——被吞行
+    // 不进重建区间，旧 escape 装饰短暂残留；光标/选区触及该行（选区
+    // 种子重算）即刻清除。修法提示：若把 InlineCode 纳入容器探测或补
+    // 牵连，第一条断言（残留）会转红，届时与本用例的边界标注同笔更新
+    const view = new EditorView({
+      parent: document.body.appendChild(document.createElement('div')),
+      state: EditorState.create({
+        doc: 'text\ncontaining \\* escaped\n`x`\n',
+        extensions: [livePreviewDecorations],
+      }),
+    })
+    const line2 = () => view.contentDOM.querySelectorAll('.cm-line')[1]!
+    expect(line2().querySelectorAll(`.${LIVE_CLASS_NAMES.escape}`)).toHaveLength(1)
+    view.dispatch({ changes: { from: 4, insert: '`' } }) // 行 1 尾 `，闭合于行 3 首个反引号
+    expect(line2().querySelectorAll(`.${LIVE_CLASS_NAMES.escape}`)).toHaveLength(1) // 残留（已知边界）
+    view.dispatch({ selection: { anchor: 6 } }) // 光标进入行 2（插入后行 2 起点）
+    expect(line2().querySelectorAll(`.${LIVE_CLASS_NAMES.escape}, .${LIVE_CLASS_NAMES.escapeReveal}`))
+      .toHaveLength(0) // 触及自愈
     view.destroy()
   })
 })

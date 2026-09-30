@@ -502,7 +502,7 @@ try {
   assert.equal(openMsgs.length, wikiActivateBefore + 1,
     'header 跳转发 wikilink.activate（父文档身份；增量计，不叠历史场景）')
   assert.equal(openMsgs.at(-1).target, '目标笔记')
-  assert.equal(openMsgs[0].sourceDocUri, undefined, '不带来源文档（与嵌入打开入口同语义）')
+  assert.equal(openMsgs.at(-1).sourceDocUri, undefined, '不带来源文档（与嵌入打开入口同语义；断本次消息）')
   popup = await page.evaluate(() => window.readHoverPopup())
   assert.equal(popup.open, false, '点击跳转即上下文切换关闭')
   assert.equal((await hoverRequests()).length, countBeforeOpen, '跳转不发读取请求')

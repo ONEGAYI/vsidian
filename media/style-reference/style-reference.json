@@ -1138,7 +1138,7 @@
       "category": "inline-format",
       "kind": "selector",
       "target": ".vsidian-escape（Markdown 转义符反斜杠隐藏类；.vsidian-escape-reveal 为触及行显形类）",
-      "purpose": "转义符通用显隐（验收反馈通用化，Obsidian 对齐）：Live 正文中 Markdown 转义序列（反斜杠 + ASCII 标点，树驱动 Escape 节点）的反斜杠默认隐藏——所见为字面字符（\\* 渲染为 *，\\\\ 渲染为 \\）；光标/选区触及该行时换挂显形类，反斜杠以正文前景低混入浅色呈现（暴露源码，口径同块 id 淡化）。表格行内的 \\| 不经此类（#42 live-table-escaped-pipe 专用发射与规则；降级表格源文原文呈现）。代码块/行内代码内不生效（无 Escape 节点）。只改显示，不改原文。",
+      "purpose": "转义符通用显隐（验收反馈通用化，Obsidian 对齐）：Live 正文中 Markdown 转义序列（反斜杠 + ASCII 标点，树驱动 Escape 节点）的反斜杠默认隐藏——所见为字面字符（\\* 渲染为 *，\\\\ 渲染为 \\）；光标/选区触及该行时换挂显形类，反斜杠以正文前景低混入浅色呈现（暴露源码，口径同块 id 淡化）。表格行内的转义符不经此类：\\| 走 #42 live-table-escaped-pipe 专用发射与规则（降级表格源文原文呈现）；格内其他转义符（\\* 等）零发射、反斜杠常驻原文可见——降级口径：表格自研拆分与通用发射双路径互斥（叠类互抹），钉住在 liveEscape 用例。代码块/行内代码内不生效（无 Escape 节点）。只改显示，不改原文。",
       "views": [
         "live"
       ],

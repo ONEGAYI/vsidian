@@ -1782,8 +1782,10 @@ export class WebviewSyncController {
         }
         if (message.action === 'modkey') {
           // 真实 keydown Control 经 document 捕获路由（与用户按键同链路，
-          // 走 onLiveHoverModifierDown 补触发——「先悬停、后按 Ctrl」路径）
-          document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Control', bubbles: true }))
+          // 走 onLiveHoverModifierDown 补触发——「先悬停、后按 Ctrl」路径；
+          // ctrlKey 修饰位必带：合成事件的 getModifierState 只认 init 字典，
+          // 缺位会把 vsidian-mod-link 状态类反向摘除）
+          document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Control', ctrlKey: true, bubbles: true }))
           break
         }
         if (message.link === 'live-wikilink' || message.link === 'live-md') {

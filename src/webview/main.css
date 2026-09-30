@@ -4094,9 +4094,11 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   display: block;
 }
 
-/* 隐形态呈现（验收反馈：不留隐形源码行）：宿主 span 块级化使卡片占满
-   行宽、直接从源码行对齐；inline replace widget 前后各一枚
-   cm-widgetBuffer（默认各占一行文字高）按 frontmatter 标题栏行先例隐藏
+/* 隐形态呈现（验收反馈：不留隐形源码行）：宿主为块级 div（两形态一致），
+   卡片占满行宽、直接从源码行对齐；inline replace widget 前后各一枚
+   cm-widgetBuffer（默认各占一行文字高）改零高块级（display:block +
+   height:0，观感等同隐藏、布局盒保留作 posAtCoords 垂直坐标锚——
+   display:none 会摘除布局盒，ArrowDown 从上进入会越过嵌入行）
    ——二者合起来消除「卡片与源码行之间错开一层」的观感。保持 inline
    replace（行结构保留）是键盘垂直导航可进入嵌入行的前提（块级 replace
    会被 CM6 跳过整行），呈现目标全部由本段规则承担 */

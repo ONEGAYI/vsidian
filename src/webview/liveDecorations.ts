@@ -1228,7 +1228,14 @@ const SEED_NODE_NAMES = new Set([
   'Table', 'TableHeader', 'TableRow', 'TableCell', 'TableDelimiter',
 ])
 
-/** 分类容器（尾部差异探测用） */
+/**
+ * 分类容器（尾部差异探测用）。行内节点（InlineCode 等）刻意不入表：
+ * 容器探测按块级结构扩展，行内节点高频、纳入会放宽每次重建的扩展面。
+ * 已知边界（review 增量轮落档）：在能跨行配对的反引号结构上追加 `
+ * 开启跨行 code span 吞掉下方行时，被吞行不进重建区间（变更行与它之间
+ * 无种子表节点牵连、InlineCode 非容器分类），行内装饰（转义符等）短暂
+ * 残留，选区触及该行即自愈——钉住在 liveEscape.test.ts「已知边界」用例。
+ */
 const CONTAINER_NAMES = new Set(['FencedCode', 'CodeBlock', 'Blockquote', 'ListItem', 'Table'])
 
 /**
