@@ -2,7 +2,7 @@
 // 域全量）：设置页「样式参考」条目文档字段的英文版单一事实源——中文清单
 // （./styleContract）保持权威基准不动，本模块按条目 id 索引、字段级覆盖；
 // 取词规则为**英文优先、条目或字段缺失回退中文基准**（规格
-// docs/specs/style-reference-i18n.md）。141 条（content 78 + chrome 63）
+// docs/specs/style-reference-i18n.md）。152 条（content 83 + chrome 69）
 // 已全量覆盖（域级完整性由 test/unit/styleContractEn.test.ts 钉住）。
 //
 // 字段分级（规格钉死）：
@@ -1065,6 +1065,36 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
       'Ever-present (the embed lines inside referenced content); click navigates, with no hover-popup stacking (the embed content domain stops mouseover/mouseout propagation).',
     dom: 'An <a class="vsidian-wikilink vsidian-embed-ref" href="raw target"> inside the embed block html (the href is the raw text before |, same convention as the reading wikilink anchor); when the parent-document embed block mounts it is replaced wholesale by the embed card (the placeholder line never appears there).',
     obsidian: { counterpart: '(Obsidian expands embeds recursively; there is no placeholder form)' },
+  },
+  'find-panel': {
+    purpose:
+      'Floating find panel over the editing area (three-toggle panel since #236, powered by the @codemirror/search engine in external-drive mode): column layout — main row (input, N:M counter, the case/whole-word/regexp toggles, previous/next/close) plus the left-edge replace-bar expander. The three toggles are the find-options single source of truth (shared/findOptions; also consumed by #238 "select next same word") and persist per workspace across sessions; the panel is available in both live and reading views (reading keeps block-level hits and positioning).',
+    states:
+      'The panel DOM is always present; visibility is controlled by .vsidian-find-open (display:none when closed, so probes are unaffected). A lit toggle means the option is on (e.g. Aa lit when match-case is enabled). An invalid regexp shows a red border on the input (.vsidian-find-input-invalid; no crash, counter shows 0/0). Open/close and toggle interactions are verified by the browser suite along behavior paths.',
+    dom: 'Attached inside the editor container (position:relative containing block), below #app; buttons are real <button type="button"> elements (aria-pressed/aria-expanded follow state; aria-label/title from the find.* i18n entries).',
+    obsidian: { counterpart: 'None (the Obsidian find widget is an application-level part, not a document styling surface)' },
+  },
+  'find-panel-replace': {
+    purpose:
+      'The expandable replace bar of the find panel (#236): collapsed by default, expanded via the left-edge toggle (find-panel entry, .vsidian-find-toggle) or Ctrl+H (the findReplace operation); "Replace" replaces the current match and moves to the next one, "Replace All" replaces the whole batch — both are explicit write operations (a single CM6 transaction through the standard write-back chain; one edit.request = one host undo). Replacing is a live-editing capability: in reading view the panel works but the replace bar never expands.',
+    states:
+      'The replace-row DOM is always present; visibility is controlled by .vsidian-find-replace-open (display:none by default; permanently collapsed in reading view). The expanded state is observable via FindSessionProbe.replaceOpen.',
+    dom: 'Third section inside the panel (.vsidian-find); Enter in the input is a panel-local key (replace next); buttons are real <button type="button"> elements (i18n entries find.replaceNext / find.replaceAll).',
+    obsidian: { counterpart: 'None (the Obsidian replace widget is application-level)' },
+  },
+  'find-match-highlight': {
+    purpose:
+      'Find match highlighting (structure from #14; since #236 the match set comes from the @codemirror/search engine and the highlight is self-drawn — the official panel is not installed and its highlight only renders while that panel exists): live side is dual-track — the current match via a StateField direct decoration (stays visible after scrolling) plus all matches via in-viewport indirect decorations; the reading side highlights at block level (only the block containing the current match). The match set is computed over the full-text model, so off-screen content is counted and located as well.',
+    states:
+      'Interactive-state decoration (present only while a find session is open and has hits) — excluded from static probes; hit counting, the current index and positioning are verified by the integration find cases along behavior paths.',
+    dom: 'live: inline decorations inside #app .cm-editor .cm-content; reading: the hit block inside #app .vsidian-view-reading (.vsidian-reading-block carrying .vsidian-reading-find-hit).',
+    obsidian: { counterpart: 'None (Obsidian match highlighting is application-level)' },
+  },
+  'var-find-highlight': {
+    purpose:
+      'The four find-highlight variables (from #14): --match-background is the background of all matches (semi-transparent yellow by default); --match-current-background the current-match background (orange by default, shared by the live inline decoration and the reading hit-block left bar); --match-current-outline the current-match outline; --hit-block-background the reading hit-block background.',
+    dom: 'Consumed by the live match decorations and the reading hit-block rules; defaults are inlined as var() fallbacks in the rules (no root value defined on #app — a snippet overriding at :root takes effect globally).',
+    obsidian: { counterpart: 'None (Obsidian highlight colors are application settings, not CSS variables)' },
   },
 }
 

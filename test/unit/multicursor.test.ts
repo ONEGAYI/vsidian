@@ -159,10 +159,13 @@ describe('Esc 收敛（#237：simplifySelection 排浮层之后，不插队）',
 
   it('查找面板打开时 Esc 先关面板、不收敛选区（浮层优先消费）', () => {
     const { controller, view, host, findPanelOpen } = setup('aaa\nbbb')
+    // 两个空 range 光标（非空选区会被 #236 的 openFind 取为查找种子并经
+    // findLocate 把选区定位到匹配处——那是查找票的主语义，非本用例对象）
     view.dispatch({ selection: EditorSelection.create(
-      [EditorSelection.range(0, 3), EditorSelection.range(4, 7)], 0) })
+      [EditorSelection.cursor(0), EditorSelection.cursor(4)], 0) })
     controller.handleHostMessage({ kind: 'view.find.open' })
     expect(findPanelOpen()).toBe(true)
+    expect(ranges(view), '面板打开不收敛多光标选区').toHaveLength(2)
     // 面板打开后焦点在查找输入框：Esc 从输入框冒泡（真实焦点路径）
     const input = host.querySelector<HTMLInputElement>('.vsidian-find-input')!
     input.focus()

@@ -106,4 +106,9 @@ export const CHROME_CONTRACT_PROBES: readonly ChromeContractProbe[] = [
   //      由集成 outlinks probe 行为验证） ----
   { id: 'outlink-panel', selector: '#app .vsidian-sidebar .vsidian-outlink-panel', expected: 'rgb(243, 0, 1)' },
   { id: 'outlinks-toggle', selector: '#app .vsidian-sidebar .vsidian-sidebar-toolbar .vsidian-outlinks-toggle', expected: 'rgb(244, 0, 1)' },
+  // ---- 查找面板（#236；DOM 常驻、显隐由 CSS 类控制（面板 -open / 替换行
+  //      -replace-open），display:none 不影响探针级联读取；开合/三开关/
+  //      替换行为由浏览器 findPanel 套件按行为路径验证） ----
+  { id: 'find-panel', selector: '#app .vsidian-find', expected: 'rgb(245, 0, 1)' },
+  { id: 'find-panel-replace', selector: '#app .vsidian-find .vsidian-find-replace', expected: 'rgb(246, 0, 1)' },
 ]

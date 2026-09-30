@@ -3267,9 +3267,12 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   color: var(--vscode-button-secondaryForeground);
 }
 
-/* ---- 编辑区查找（#14）：webview 内浮动查找面板 ----
+/* ---- 编辑区查找（#14；#236 起三开关面板与可展开替换栏）：webview 内浮动查找面板 ----
    稳定样式入口（ADR-0004）：面板与匹配高亮均经 vsidian-find-* 类定位；
    custom editor webview 不可用 VSCode 原生 find 控件，此为自有 UI。
+   面板为 column 布局：左缘替换栏展开/收起切换（vsidian-find-toggle）+
+   主行（vsidian-find-row：输入/计数/三开关/导航/关闭）+ 替换行
+   （vsidian-find-replace，-open 类控制显隐——显隐纯 CSS，无 JS 内联）。
    --vsidian-find-match-background / -current-background 为可覆盖变量入口 */
 .vsidian-find {
   position: absolute;
@@ -3277,7 +3280,7 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   right: 14px;
   z-index: 40;
   display: none;
-  align-items: center;
+  flex-direction: column;
   gap: 4px;
   padding: 4px 6px;
   box-sizing: border-box;
@@ -3291,7 +3294,42 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   display: flex;
 }
 
-.vsidian-find .vsidian-find-input {
+/* 替换栏展开/收起切换：左缘垂直居中（不占行内位），展开时箭头翻转 */
+.vsidian-find .vsidian-find-toggle {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  margin-top: -11px;
+  min-width: 18px;
+  padding: 3px 2px;
+}
+
+.vsidian-find .vsidian-find-toggle[aria-expanded='true'] {
+  transform: rotate(180deg);
+}
+
+/* 主行：输入 + 计数 + 三开关（Aa/ab/.*) + 上一个/下一个/关闭 */
+.vsidian-find .vsidian-find-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 20px;
+}
+
+/* 替换行：默认收起，-open 类展开（阅读模式恒收起——替换是 Live 编辑能力） */
+.vsidian-find .vsidian-find-replace {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  padding-left: 20px;
+}
+
+.vsidian-find .vsidian-find-replace.vsidian-find-replace-open {
+  display: flex;
+}
+
+.vsidian-find .vsidian-find-input,
+.vsidian-find .vsidian-find-replace-input {
   width: 180px;
   box-sizing: border-box;
   padding: 2px 6px;
@@ -3301,6 +3339,11 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   background-color: var(--vscode-input-background);
   border: 1px solid var(--vscode-input-border, rgba(128, 128, 128, 0.35));
   outline: none;
+}
+
+/* 非法正则反馈：输入框红边（不崩；计数区同时显示空态 0/0） */
+.vsidian-find .vsidian-find-input.vsidian-find-input-invalid {
+  border-color: var(--vscode-inputValidation-errorBorder, #be1100);
 }
 
 .vsidian-find .vsidian-find-count {
@@ -3328,8 +3371,10 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   border-radius: 3px;
 }
 
-/* 大小写切换的激活态（不区分大小写时点亮） */
-.vsidian-find .vsidian-find-case-active {
+/* 三开关激活态（开启时点亮；Aa/ab/.* 同款规则） */
+.vsidian-find .vsidian-find-case-active,
+.vsidian-find .vsidian-find-word-active,
+.vsidian-find .vsidian-find-regexp-active {
   color: var(--vscode-button-foreground);
   background-color: var(--vscode-button-background);
 }

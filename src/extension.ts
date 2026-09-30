@@ -24,6 +24,7 @@ import { createVaultIndexService, currentRootRefs } from './host/vaultIndexWirin
 import { installRenameRefUpdater } from './host/vaultRenameWiring'
 import { createIndexMaintenance, createIndexSettingsStore, initialExcludePatterns } from './host/vaultIndexMaintenance'
 import { createJiebaWiring } from './host/jiebaResourceWiring'
+import { createFindOptionsStore } from './host/findOptionsStore'
 import { t } from './shared/i18n'
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -97,6 +98,9 @@ export function activate(context: vscode.ExtensionContext): void {
     service: settingsService,
     keybindings: keybindingService,
     page: settingsPage,
+    // #236 查找选项持久化：workspaceState（工作区级记忆——对齐 VSCode
+    // storageService WORKSPACE 级口径；各工作区独立记忆）
+    findOptions: createFindOptionsStore(context.workspaceState),
   }, snippetService, vaultIndex, indexMaintenance, jieba)
   void snippetService.initialize()
   if (vaultIndex) {

@@ -8,9 +8,11 @@
 import type { SettingsPayload } from './settings'
 import { isFormatOperationId, type FormatOperationId } from './formatOperations'
 import { isKeybindingOperationId, isUiOperationId, type KeybindingOverrides, type UiOperationId } from './keybindings'
+import { sanitizeFindOptions, type FindOptions } from './findOptions'
 
 /** 设置快照类型随协议消息透出（载荷单一事实源仍在 shared/settings） */
 export type { SettingsPayload }
+export type { FindOptions }
 
 /** 一次变更：把全文 [offset, offset+length) 替换为 text（与 contentChanges 同构） */
 export interface SerChange {
@@ -148,12 +150,19 @@ export type HostToWebview =
    *  以此补登记同 reqId，使结果回包能通过陈旧回包校验、走完插入往返
    *  （与真实粘贴同一在途表同一插入路径） */
   | { kind: 'image.test.pending'; reqId: number }
-  /** 查找会话指令（#14）：open 打开 webview 内浮动查找面板（可预置查询词，
-   *  焦点进输入框）；close 关闭并归还焦点；step 循环定位上一/下一匹配。
-   *  查找是纯只读视图操作：不写文档、不产生编辑历史、无 webview→宿主消息 */
-  | { kind: 'view.find.open'; query?: string }
+  /** 查找会话指令（#14；#236 起三开关/替换栏）：open 打开 webview 内浮动
+   *  查找面板（可预置查询词，焦点进输入框；replace=true 同时展开替换栏
+   *  ——阅读模式只开面板不展开，替换是 Live 编辑能力；replacement 随
+   *  replace 预置替换词——与预置查询词同语义，宿主命令与测试注入共用）；
+   *  close 关闭并归还焦点；step 循环定位上一/下一匹配。open/step/close
+   *  为纯只读视图操作：不写文档、不产生编辑历史。replace（#236）执行
+   *  替换——next 替换当前匹配并移到下一处、all 全部替换，经 webview 的
+   *  CM6 事务走标准出站链路（一笔 edit.request = 宿主撤销一次），仅
+   *  live 模式执行 */
+  | { kind: 'view.find.open'; query?: string; replace?: boolean; replacement?: string }
   | { kind: 'view.find.close' }
   | { kind: 'view.find.step'; direction: 'next' | 'prev' }
+  | { kind: 'view.find.replace'; op: 'next' | 'all' }
   /** 表格结构操作（#13）：在面板光标处执行增删行列（仅 live 模式；阅读
    *  模式只读忽略）。变更经 webview 的 CM6 事务走标准出站链路
    *  （edit.request 一笔 = 宿主撤销一次） */
@@ -357,6 +366,11 @@ export type HostToWebview =
    *  编辑器面板与设置页（含变更发起页面）。values 仍为全量快照；消费方按
    *  需读取关心的键（#34 场景：editor.lineNumbers 触发 CM6 扩展热重配） */
   | { kind: 'settings.changed'; values: SettingsPayload }
+  /** 查找选项快照（#236，请求-响应与推送共用形态）：三开关完整对象
+   *  （matchCase/wholeWord/regexp）。findOptions.get 的应答与 set 保存后的
+   *  广播共用；编辑器面板据此装配查找面板开关态与引擎匹配语义（#238
+   *  「选下一处相同词」同源消费） */
+  | { kind: 'findOptions.snapshot'; options: FindOptions }
   /** 语言包切换（#93 i18n）：携带新语言代码与完整新语言包，host→webview。
    *  语言变化不走 settings.changed 附带（语言包体积大，随每次设置变更附带
    *  是浪费）；宿主检测到 general.language 变化时发送。webview 收到后原子
@@ -863,6 +877,13 @@ export type WebviewToHost =
    *  校验：通过才持久化并广播 settings.changed；拒绝时向来源设置页回
    *  settings.snapshot 以权威值恢复显示 */
   | { kind: 'settings.set'; values: SettingsPayload }
+  /** 请求查找选项快照（#236）：编辑器面板 init 后拉取当前三开关状态，
+   *  宿主以 findOptions.snapshot 响应（workspace 级记忆权威在宿主） */
+  | { kind: 'findOptions.get' }
+  /** 保存查找选项（#236）：查找面板切换开关后上送完整三开关。宿主清洗
+   *  校验后持久化（workspaceState）并广播 findOptions.snapshot 到全部
+   *  编辑器面板（多面板一致；选项是共享状态，非面板私有） */
+  | { kind: 'findOptions.set'; options: FindOptions }
   /** #69 剪贴板写（直写）：webview 环境无 navigator.clipboard 权限面，
    *  经宿主 env.clipboard.writeText。只读交互，暂停态同样放行 */
   | { kind: 'clipboard.write'; text: string }
@@ -1549,13 +1570,20 @@ export interface ReadingSyntaxProbe {
   tables: number
 }
 
-/** 查找会话观测（#14）：匹配集来自 webview 全文文本模型（屏外内容同样计数） */
+/** 查找会话观测（#14；#236 起三开关与替换栏）：匹配集来自 webview 全文
+ *  文本模型（屏外内容同样计数）；三开关与替换栏展开态随会话回报 */
 export interface FindSessionProbe {
   /** 面板当前是否打开（关闭后仍回报 open:false） */
   open: boolean
   query: string
-  /** 大小写语义：默认 true（区分） */
-  caseSensitive: boolean
+  /** 三开关（#236，单一事实源见 shared/findOptions）：matchCase 区分大小写 */
+  matchCase: boolean
+  wholeWord: boolean
+  regexp: boolean
+  /** 查询有效性（正则语法；非法时无匹配，面板有可见反馈） */
+  valid: boolean
+  /** 替换栏展开态（替换为 Live 编辑能力，阅读模式恒 false） */
+  replaceOpen: boolean
   /** 匹配总数（文本模型全量计算） */
   total: number
   /** 当前匹配序号（1 基；无匹配为 0） */
@@ -1831,11 +1859,29 @@ function isFindSessionProbe(v: unknown): v is FindSessionProbe {
     isObject(v) &&
     typeof v.open === 'boolean' &&
     isString(v.query) &&
-    typeof v.caseSensitive === 'boolean' &&
+    typeof v.matchCase === 'boolean' &&
+    typeof v.wholeWord === 'boolean' &&
+    typeof v.regexp === 'boolean' &&
+    typeof v.valid === 'boolean' &&
+    typeof v.replaceOpen === 'boolean' &&
     isNonNegativeInt(v.total) &&
     isNonNegativeInt(v.index) &&
     (v.currentFrom === null || isNonNegativeInt(v.currentFrom)) &&
     (v.currentTo === null || isNonNegativeInt(v.currentTo))
+  )
+}
+
+/** #236 查找选项载荷校验：sanitize 后仍是原值（三布尔齐全）才放行——
+ *  set/snapshot 拒绝缺字段或类型不符的载荷（宿主侧持久化前同样清洗） */
+function isFindOptions(v: unknown): v is FindOptions {
+  if (!isObject(v)) {
+    return false
+  }
+  const cleaned = sanitizeFindOptions(v)
+  return (
+    typeof v.matchCase === 'boolean' && cleaned.matchCase === v.matchCase &&
+    typeof v.wholeWord === 'boolean' && cleaned.wholeWord === v.wholeWord &&
+    typeof v.regexp === 'boolean' && cleaned.regexp === v.regexp
   )
 }
 
@@ -2457,6 +2503,10 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
       return true
     case 'settings.set':
       return isSettingsPayload(v.values)
+    case 'findOptions.get':
+      return true
+    case 'findOptions.set':
+      return isFindOptions(v.options)
     case 'clipboard.write':
       // #69 两变体：text 直写 / linkHeading 由宿主拼标题链接；
       // #162 第三变体 linkBlock 由宿主拼块链接 [[笔记名#^id]]
@@ -2927,11 +2977,15 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       // 的资源代次，恒 ≥ 1（0 是未刷新初值，不回发）
       return isPositiveInt(v.reqId) && isPositiveInt(v.generation)
     case 'view.find.open':
-      return v.query === undefined || isString(v.query)
+      return (v.query === undefined || isString(v.query)) &&
+        (v.replace === undefined || typeof v.replace === 'boolean') &&
+        (v.replacement === undefined || isString(v.replacement))
     case 'view.find.close':
       return true
     case 'view.find.step':
       return v.direction === 'next' || v.direction === 'prev'
+    case 'view.find.replace':
+      return v.op === 'next' || v.op === 'all'
     case 'table.command':
       return isTableEditOp(v.op)
     case 'table.create':
@@ -3058,6 +3112,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return isString(v.section) && (v.entry === undefined || isString(v.entry))
     case 'settings.changed':
       return isSettingsPayload(v.values)
+    case 'findOptions.snapshot':
+      return isFindOptions(v.options)
     case 'locale.changed':
       // #93 语言包切换：形态校验（非空语言代码 + 全字符串词条的完整包）；
       // 语言代码是否在支持清单内由宿主发送侧保证（解析见 locales/resolveLocale）

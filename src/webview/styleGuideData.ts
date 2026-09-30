@@ -236,6 +236,13 @@ export const STYLE_GUIDE_CATEGORIES: readonly StyleContractCategory[] = [
     "title": "悬停预览",
     "titleKey": "styleRef.category.hoverPreview",
     "order": 12
+  },
+  {
+    "id": "find-panel",
+    "domain": "chrome",
+    "title": "查找面板",
+    "titleKey": "styleRef.category.findPanel",
+    "order": 13
   }
 ] as readonly StyleContractCategory[]
 
@@ -3628,6 +3635,100 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "单元 embedCard：一层展开不嵌套装载、占位点击按 B 身份出站"
     ],
     "introduced": "#222（2026-09-30）"
+  },
+  {
+    "id": "find-panel",
+    "domain": "chrome",
+    "category": "find-panel",
+    "kind": "selector",
+    "target": ".vsidian-find（浮动面板容器；.vsidian-find-open 展开态）—— 内部 .vsidian-find-row 主行（.vsidian-find-input 输入框 / .vsidian-find-count 计数（-empty 零命中）/.vsidian-find-case（Aa）/ -word（ab）/ -regexp（.*）三开关（各自 -active 点亮态）/ .vsidian-find-prev / -next / -close 导航与关闭）与 .vsidian-find-toggle 左缘替换栏展开切换（aria-expanded 随态）",
+    "purpose": "编辑区浮动查找面板（#236 起三开关面板，引擎 @codemirror/search 外部驱动）：column 布局——主行（输入/N:M 计数/大小写-全字-正则三开关/上一个/下一个/关闭）+ 左缘替换栏展开切换。三开关为查找选项单一事实源（shared/findOptions，#238「选下一处相同词」同源消费），workspace 级记忆跨会话保留；面板在 Live 与阅读两模式均可用（阅读保留块级命中与定位）。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "面板 DOM 常驻、显隐由 .vsidian-find-open 控制（关闭时 display:none，探针不受影响）；三开关点亮为对应 -active 类（开启=点亮，如 matchCase 开启时 Aa 点亮）；非法正则输入框红边反馈（.vsidian-find-input-invalid，不崩、计数 0/0）；开合与开关交互由浏览器套件按行为路径验证。",
+    "dom": "挂编辑器容器（position:relative 定位包含块）内、#app 之下；按钮均为真实 <button type=\"button\">（aria-pressed/aria-expanded 随态，aria-label/title 用 i18n 词条 find.*）。",
+    "example": ".vsidian-find {\n  border-radius: 6px;\n}\n.vsidian-find .vsidian-find-case-active {\n  color: #f14c4c;\n}",
+    "obsidian": {
+      "counterpart": "无（Obsidian 查找为应用级部件，不作用于文档样式面）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 findPanelCssContract：显隐对/column 布局/三开关点亮/红边规则钉住",
+      "单元 find：面板开合、三开关重算与替换行为（jsdom 控制器）",
+      "浏览器 findPanel（#236）：真实键盘路径"
+    ],
+    "introduced": "#14（面板）；#236（三开关面板与列布局，2026-10 批次）"
+  },
+  {
+    "id": "find-panel-replace",
+    "domain": "chrome",
+    "category": "find-panel",
+    "kind": "selector",
+    "target": ".vsidian-find-replace（替换行容器；.vsidian-find-replace-open 展开态）—— 内部 .vsidian-find-replace-input 替换输入框 / .vsidian-find-replace-next「替换」/ .vsidian-find-replace-all「全部替换」按钮",
+    "purpose": "查找面板的可展开替换栏（#236）：替换行默认收起，左缘 toggle（find-panel 条目的 .vsidian-find-toggle）或 Ctrl+H（findReplace 操作）展开；「替换」替换当前匹配并移到下一处、「全部替换」整批替换——两者均为显式写操作（经 CM6 事务走标准写回链路，一笔 edit.request = 宿主撤销一次）。替换是 Live 编辑能力：阅读模式面板可用但替换行恒不展开。",
+    "views": [
+      "live"
+    ],
+    "states": "替换行 DOM 常驻、显隐由 .vsidian-find-replace-open 控制（默认收起 display:none；阅读模式恒收起）；展开态由 FindSessionProbe.replaceOpen 观测。",
+    "dom": "面板（.vsidian-find）内第三段；输入框 Enter 为面板局部键（替换下一个）；按钮为真实 <button type=\"button\">（i18n 词条 find.replaceNext / find.replaceAll）。",
+    "example": ".vsidian-find .vsidian-find-replace.vsidian-find-replace-open {\n  gap: 8px;\n}",
+    "obsidian": {
+      "counterpart": "无（Obsidian 替换为应用级部件）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 findPanelCssContract：替换行显隐对规则钉住",
+      "单元 find（#236）：替换下一个/全部替换各单笔 edit.request、$n 捕获组展开、阅读不执行"
+    ],
+    "introduced": "#236（2026-10 批次）"
+  },
+  {
+    "id": "find-match-highlight",
+    "domain": "chrome",
+    "category": "find-panel",
+    "kind": "selector",
+    "target": ".vsidian-find-match（全部匹配装饰）与 .vsidian-find-match-current（当前匹配装饰，live 行内）；.vsidian-reading-find-hit（阅读命中块，块级）",
+    "purpose": "查找匹配高亮（#14 既有结构，#236 起匹配集来自 @codemirror/search 引擎、高亮自绘——官方面板不装配，其高亮仅在面板存在时渲染）：live 侧双轨——当前匹配 StateField 直接装饰（滚动后始终可见）+ 全部匹配视口内间接装饰；阅读侧块级命中（只高亮当前匹配所在块）。匹配集基于全文文本模型，屏外内容同样计数与定位。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "交互态装饰（查找会话打开且有命中时在场）——不进静态探针；命中计数、当前序号与定位由集成 find 用例按行为路径验证。",
+    "dom": "live：#app .cm-editor .cm-content 内行内装饰；reading：#app .vsidian-view-reading 的命中块（.vsidian-reading-block 挂 .vsidian-reading-find-hit）。",
+    "example": "#app .cm-editor .cm-content .vsidian-find-match {\n  background-color: rgba(234, 179, 8, 0.4);\n}",
+    "obsidian": {
+      "counterpart": "无（Obsidian 命中高亮为应用级）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 findSession：匹配集与装饰类名（引擎包裹层）",
+      "集成 find 用例（#14/#236）：命中计数、序号与屏外定位"
+    ],
+    "introduced": "#14；#236（引擎迁移）"
+  },
+  {
+    "id": "var-find-highlight",
+    "domain": "chrome",
+    "category": "find-panel",
+    "kind": "variable",
+    "target": "--vsidian-find-match-background / --vsidian-find-match-current-background / --vsidian-find-match-current-outline / --vsidian-find-hit-block-background",
+    "purpose": "查找高亮四变量（#14 既有）：--match-background 全部匹配底色（默认黄系半透）；--match-current-background 当前匹配底色（默认橙系，live 行内与阅读命中块左边条同引）；--match-current-outline 当前匹配描边；--hit-block-background 阅读命中块底色。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "消费于 live 匹配装饰与阅读命中块规则；默认值以 var() 回落值内联在规则里（未在 #app 定义根值——片段在 :root 覆盖即整体生效）。",
+    "example": ":root {\n  --vsidian-find-match-background: rgba(234, 179, 8, 0.4);\n  --vsidian-find-match-current-background: rgba(255, 141, 55, 0.7);\n}",
+    "obsidian": {
+      "counterpart": "无（Obsidian 高亮色为应用设置项非 CSS 变量）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 findPanelCssContract：变量消费规则存在（回落值内联形态）"
+    ],
+    "introduced": "#14"
   }
 ] as readonly StyleContractEntry[]
 
@@ -4732,6 +4833,37 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     "dom": "An <a class=\"vsidian-wikilink vsidian-embed-ref\" href=\"raw target\"> inside the embed block html (the href is the raw text before |, same convention as the reading wikilink anchor); when the parent-document embed block mounts it is replaced wholesale by the embed card (the placeholder line never appears there).",
     "obsidian": {
       "counterpart": "(Obsidian expands embeds recursively; there is no placeholder form)"
+    }
+  },
+  "find-panel": {
+    "purpose": "Floating find panel over the editing area (three-toggle panel since #236, powered by the @codemirror/search engine in external-drive mode): column layout — main row (input, N:M counter, the case/whole-word/regexp toggles, previous/next/close) plus the left-edge replace-bar expander. The three toggles are the find-options single source of truth (shared/findOptions; also consumed by #238 \"select next same word\") and persist per workspace across sessions; the panel is available in both live and reading views (reading keeps block-level hits and positioning).",
+    "states": "The panel DOM is always present; visibility is controlled by .vsidian-find-open (display:none when closed, so probes are unaffected). A lit toggle means the option is on (e.g. Aa lit when match-case is enabled). An invalid regexp shows a red border on the input (.vsidian-find-input-invalid; no crash, counter shows 0/0). Open/close and toggle interactions are verified by the browser suite along behavior paths.",
+    "dom": "Attached inside the editor container (position:relative containing block), below #app; buttons are real <button type=\"button\"> elements (aria-pressed/aria-expanded follow state; aria-label/title from the find.* i18n entries).",
+    "obsidian": {
+      "counterpart": "None (the Obsidian find widget is an application-level part, not a document styling surface)"
+    }
+  },
+  "find-panel-replace": {
+    "purpose": "The expandable replace bar of the find panel (#236): collapsed by default, expanded via the left-edge toggle (find-panel entry, .vsidian-find-toggle) or Ctrl+H (the findReplace operation); \"Replace\" replaces the current match and moves to the next one, \"Replace All\" replaces the whole batch — both are explicit write operations (a single CM6 transaction through the standard write-back chain; one edit.request = one host undo). Replacing is a live-editing capability: in reading view the panel works but the replace bar never expands.",
+    "states": "The replace-row DOM is always present; visibility is controlled by .vsidian-find-replace-open (display:none by default; permanently collapsed in reading view). The expanded state is observable via FindSessionProbe.replaceOpen.",
+    "dom": "Third section inside the panel (.vsidian-find); Enter in the input is a panel-local key (replace next); buttons are real <button type=\"button\"> elements (i18n entries find.replaceNext / find.replaceAll).",
+    "obsidian": {
+      "counterpart": "None (the Obsidian replace widget is application-level)"
+    }
+  },
+  "find-match-highlight": {
+    "purpose": "Find match highlighting (structure from #14; since #236 the match set comes from the @codemirror/search engine and the highlight is self-drawn — the official panel is not installed and its highlight only renders while that panel exists): live side is dual-track — the current match via a StateField direct decoration (stays visible after scrolling) plus all matches via in-viewport indirect decorations; the reading side highlights at block level (only the block containing the current match). The match set is computed over the full-text model, so off-screen content is counted and located as well.",
+    "states": "Interactive-state decoration (present only while a find session is open and has hits) — excluded from static probes; hit counting, the current index and positioning are verified by the integration find cases along behavior paths.",
+    "dom": "live: inline decorations inside #app .cm-editor .cm-content; reading: the hit block inside #app .vsidian-view-reading (.vsidian-reading-block carrying .vsidian-reading-find-hit).",
+    "obsidian": {
+      "counterpart": "None (Obsidian match highlighting is application-level)"
+    }
+  },
+  "var-find-highlight": {
+    "purpose": "The four find-highlight variables (from #14): --match-background is the background of all matches (semi-transparent yellow by default); --match-current-background the current-match background (orange by default, shared by the live inline decoration and the reading hit-block left bar); --match-current-outline the current-match outline; --hit-block-background the reading hit-block background.",
+    "dom": "Consumed by the live match decorations and the reading hit-block rules; defaults are inlined as var() fallbacks in the rules (no root value defined on #app — a snippet overriding at :root takes effect globally).",
+    "obsidian": {
+      "counterpart": "None (Obsidian highlight colors are application settings, not CSS variables)"
     }
   }
 } as Readonly<Record<string, StyleContractEntryOverride>>

@@ -1,4 +1,5 @@
-// 编辑区查找：匹配计算与 Live 侧装饰（工单 #14）。
+// 编辑区查找：匹配计算与 Live 侧装饰（工单 #14；#236 起匹配引擎换
+// @codemirror/search 的 SearchQuery，外部驱动装配见 syncController）。
 //
 // 架构（依据 ADR-0005 / mvp.md「查找与跳转必须定位屏外内容」）：
 // - 匹配基于 webview 全文文本模型（CM6 doc 的字符串形态）计算——纯数据，
@@ -6,12 +7,18 @@
 // - 不为查找常驻全文 DOM：匹配数是数据不是 DOM；渲染高亮只做视口内——
 //   当前匹配为直接装饰（StateField，保证滚动后始终可见），全部匹配为
 //   间接装饰（ViewPlugin 按 visibleRanges 过滤，与 liveDecorations 同构）
-// - 码点语义：匹配起止不得落在代理对中间（emoji 安全）；坐标为 LF 全文
-//   UTF-16 code unit offset（与协议 SerChange / CM6 同构）
-// - 大小写语义固定：默认区分大小写；大小写不敏感是显式选项（UI 切换），
-//   不做改变区间长度的跨形态折叠（'ß'≠'SS'）
-// - 查找是纯只读操作：会话不 dispatch 文本变更、不发出站消息（#14 契约）
-import { RangeSet, StateEffect, StateField, type Extension, type Range } from '@codemirror/state'
+// - 引擎（#236）：SearchQuery 承载三开关（caseSensitive=matchCase /
+//   wholeWord / regexp）+ literal 字面量口径（\n 不转义，对齐 VSCode）；
+//   官方面板不装配（外部驱动），高亮经下方双轨自绘——search() 扩展的
+//   高亮仅在官方面板存在时渲染，不与其叠加
+// - 码点语义（引擎之上包裹层）：匹配起止不得落在代理对中间（emoji 安全）；
+//   坐标为 LF 全文 UTF-16 code unit offset（与协议 SerChange / CM6 同构）
+// - 成型头区排除（#236 批次边界）：搜索不进入 frontmatter 成型头区——
+//   excludeEnd 之前的匹配不进结果（成型判定在调用方，见 syncController）
+// - 查找是纯只读操作：会话不 dispatch 文本变更、不发出站消息（#14 契约，
+//   #236 修订：替换为显式写操作，由 syncController 经标准出站链路执行，
+//   不在本模块）
+import { RangeSet, StateEffect, StateField, Text, type Extension, type Range } from '@codemirror/state'
 import {
   Decoration,
   EditorView,
@@ -19,6 +26,8 @@ import {
   type DecorationSet,
   type ViewUpdate,
 } from '@codemirror/view'
+import { SearchQuery } from '@codemirror/search'
+import type { FindOptions } from '../shared/findOptions'
 
 /** 一个匹配：全文 UTF-16 code unit 的 [from, to) 区间 */
 export interface FindMatch {
@@ -26,16 +35,34 @@ export interface FindMatch {
   to: number
 }
 
-/** 查找稳定类名（ADR-0004 稳定样式入口；`vsidian-` 前缀） */
+/** 查找稳定类名（ADR-0004 稳定样式入口；`vsidian-` 前缀；契约登记见
+ *  shared/styleContract 的 chrome-find 类目） */
 export const FIND_CLASS_NAMES = {
   /** 浮动查找面板容器（webview 内，非 VSCode 原生 find） */
   panel: 'vsidian-find',
   open: 'vsidian-find-open',
+  /** 主行（查找输入 + 计数 + 三开关 + 导航）：面板 column 布局的行容器 */
+  row: 'vsidian-find-row',
+  /** 替换栏展开/收起切换按钮（面板左缘 v 形） */
+  toggle: 'vsidian-find-toggle',
+  /** 替换行容器（open 类控制显隐） */
+  replace: 'vsidian-find-replace',
+  replaceOpen: 'vsidian-find-replace-open',
+  replaceInput: 'vsidian-find-replace-input',
+  replaceNext: 'vsidian-find-replace-next',
+  replaceAll: 'vsidian-find-replace-all',
   input: 'vsidian-find-input',
+  /** 非法正则反馈（输入框红边；计数区同时显示空态） */
+  inputInvalid: 'vsidian-find-input-invalid',
   count: 'vsidian-find-count',
   countEmpty: 'vsidian-find-count-empty',
+  /** 三开关：点亮（*-active）= 该选项开启 */
   caseToggle: 'vsidian-find-case',
   caseActive: 'vsidian-find-case-active',
+  wordToggle: 'vsidian-find-word',
+  wordActive: 'vsidian-find-word-active',
+  regexpToggle: 'vsidian-find-regexp',
+  regexpActive: 'vsidian-find-regexp-active',
   prev: 'vsidian-find-prev',
   next: 'vsidian-find-next',
   close: 'vsidian-find-close',
@@ -47,7 +74,7 @@ export const FIND_CLASS_NAMES = {
   readingHit: 'vsidian-reading-find-hit',
 } as const
 
-// ---- 码点边界工具 ----
+// ---- 码点边界工具（引擎输出之上的包裹层过滤） ----
 
 function isHighSurrogate(code: number): boolean {
   return code >= 0xd800 && code <= 0xdbff
@@ -65,73 +92,75 @@ function isCodePointBoundary(text: string, p: number): boolean {
   return !(isHighSurrogate(text.charCodeAt(p - 1)) && isLowSurrogate(text.charCodeAt(p)))
 }
 
-/** 正则元字符转义（字面量查找语义） */
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+/** 由三开关构造引擎查询（literal=true：字符串模式按字面量处理，\n 不
+ *  转义——VSCode 口径，转义开关不对用户面暴露）；replace 由调用方补充 */
+export function buildSearchQuery(
+  search: string,
+  options: Pick<FindOptions, 'matchCase' | 'wholeWord' | 'regexp'>,
+  replace = '',
+): SearchQuery {
+  return new SearchQuery({
+    search,
+    replace,
+    caseSensitive: options.matchCase,
+    wholeWord: options.wholeWord,
+    regexp: options.regexp,
+    literal: true,
+  })
+}
+
+/** 查询有效性（空查询与非法正则都无效：无匹配、命令不执行） */
+export function isFindQueryValid(search: string, options: Pick<FindOptions, 'regexp'>): boolean {
+  if (search === '') {
+    return false
+  }
+  if (!options.regexp) {
+    return true
+  }
+  try {
+    // 构造成功即合法（test('') 对 '.' 等模式返回 false，不能作判据）
+    void new RegExp(search)
+    return true
+  } catch {
+    return false
+  }
 }
 
 /**
- * 全文匹配计算（纯函数）：
- * - 空查询 / 无命中返回 []
- * - 从左到右、非重叠（下一轮从当前匹配 to 起扫）
- * - 匹配起止必须在码点边界上：命中落在代理对中间时丢弃该命中并前进
- *   一个单元继续扫（emoji 安全；行为由测试锁定）
- * - caseSensitive=false 时按 'i' 正则做大小写不敏感匹配，区间长度与
- *   原文本一致（不做 'ß'/'SS' 类跨形态折叠）
+ * 全文匹配计算（纯函数，引擎 = @codemirror/search 的 SearchQuery）：
+ * - 空查询 / 非法正则 / 无命中返回 []
+ * - 从左到右、非重叠（引擎 next 语义）
+ * - 匹配起止必须在码点边界上：引擎命中劈开代理对时丢弃（防御层——
+ *   引擎的字符串与 u-flag 正则路径自身码点安全，此过滤兜底自定义
+ *   pattern 的边缘形态；行为由测试锁定）
+ * - excludeEnd（#236 成型头区排除）：起点 < excludeEnd 的命中不进结果
  */
 export function computeFindMatches(
   text: string,
   query: string,
-  caseSensitive: boolean,
+  options: FindOptions,
+  excludeEnd = 0,
 ): FindMatch[] {
-  if (query === '' || query.length > text.length) {
+  if (query === '' || query.length > text.length || !isFindQueryValid(query, options)) {
     return []
   }
+  const engine = buildSearchQuery(query, options)
+  if (!engine.valid) {
+    return []
+  }
+  const doc = Text.of(text.split('\n'))
   const out: FindMatch[] = []
-  if (caseSensitive) {
-    // 快路径：原生 indexOf（UTF-16 精确匹配）+ 边界校验
-    let at = text.indexOf(query)
-    while (at !== -1) {
-      if (isCodePointBoundary(text, at) && isCodePointBoundary(text, at + query.length)) {
-        out.push({ from: at, to: at + query.length })
-        at = text.indexOf(query, at + query.length)
-      } else {
-        // 命中劈开代理对：丢弃，前进一个单元重扫
-        at = text.indexOf(query, at + 1)
-      }
+  const cursor = engine.getCursor(doc)
+  for (let step = cursor.next(); !step.done; step = cursor.next()) {
+    const { from, to } = step.value
+    if (from < excludeEnd) {
+      continue
     }
-    return out
+    if (isCodePointBoundary(text, from) && isCodePointBoundary(text, to)) {
+      out.push({ from, to })
+    }
   }
-  // 大小写不敏感：'iu' 正则按码点迭代（构造失败——如查询含孤代理——
-  // 退化为小写化 indexOf 路径，保持可用）
-  try {
-    const re = new RegExp(escapeRegExp(query), 'giu')
-    for (let m = re.exec(text); m !== null; m = re.exec(text)) {
-      const from = m.index
-      const to = from + m[0].length
-      if (isCodePointBoundary(text, from) && isCodePointBoundary(text, to)) {
-        out.push({ from, to })
-      }
-      re.lastIndex = to
-    }
-    return out
-  } catch {
-    const lowerText = text.toLowerCase()
-    const lowerQuery = query.toLowerCase()
-    if (lowerQuery === '') {
-      return []
-    }
-    let at = lowerText.indexOf(lowerQuery)
-    while (at !== -1) {
-      if (isCodePointBoundary(text, at) && isCodePointBoundary(text, at + query.length)) {
-        out.push({ from: at, to: at + query.length })
-        at = lowerText.indexOf(lowerQuery, at + query.length)
-      } else {
-        at = lowerText.indexOf(lowerQuery, at + 1)
-      }
-    }
-    return out
-  }
+  return out
 }
 
 /**
