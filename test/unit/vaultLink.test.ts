@@ -295,4 +295,34 @@ describe('isVaultPathInsideRoot：绝对路径根内判定（P1-1 静态边界�
     expect(isVaultPathInsideRoot('/home/u/notes/../outside.md', POSIX)).toBe(false)
     expect(isVaultPathInsideRoot('a.md', POSIX)).toBe(false)
   })
+
+  // 修 8（review 第二轮）：directTarget 的 UNC 形态回归报警——语义与
+  // Node 24 实测对齐（当前实现正确；跨宿主/越根上行拒绝的边界此前不在
+  // 此前不在矩阵内，防未来改动回退）。UNC 的「宿主+共享」段是路径身份
+  // 的一部分：win32.relative 对不同宿主返回绝对形态（isAbsolute 拒绝），
+  // 同宿主上行以 `..` 前缀拒绝
+  it('UNC 语义：同宿主根内放行；跨 UNC 宿主（server-a vs server-b）拒绝', () => {
+    const UNC: VaultLinkResolveContext = {
+      docDir: '\\\\server\\share\\notes\\sub',
+      rootDir: '\\\\server\\share\\notes',
+      isWindowsHost: true,
+      hasWorkspace: true,
+    }
+    expect(isVaultPathInsideRoot('\\\\server\\share\\notes\\sub\\a.md', UNC)).toBe(true)
+    expect(isVaultPathInsideRoot('\\\\SERVER\\share\\notes\\sub\\a.md', UNC)).toBe(true) // 大小写不敏感
+    expect(isVaultPathInsideRoot('\\\\server-b\\share\\notes\\sub\\a.md', UNC)).toBe(false)
+    expect(isVaultPathInsideRoot('//server-b/share/notes/sub/a.md', UNC)).toBe(false)
+  })
+
+  it('UNC 语义：同宿主越根上行（.. 逃出 share 内根）拒绝', () => {
+    const UNC: VaultLinkResolveContext = {
+      docDir: '\\\\server\\share\\notes\\sub',
+      rootDir: '\\\\server\\share\\notes',
+      isWindowsHost: true,
+      hasWorkspace: true,
+    }
+    expect(isVaultPathInsideRoot('\\\\server\\share\\notes\\..\\outside.md', UNC)).toBe(false)
+    expect(isVaultPathInsideRoot('\\\\server\\share\\x\\..\\..\\outside.md', UNC)).toBe(false)
+    expect(isVaultPathInsideRoot('\\\\server\\share\\notes', UNC)).toBe(true) // 根本身算根内
+  })
 })

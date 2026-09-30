@@ -319,3 +319,42 @@ describe('#224 订阅与推送：hover.watch / hover.unwatch / hover.invalidated
     expect(isHostToWebview({ ...base, fsPath: '' })).toBe(false)
   })
 })
+
+// ---- 修 2（review 第二轮 P3）：view.state readingEmbed 观测条目的 host 字段 ----
+// #223 起 host 区分容器（reading 块挂载 / live widget 挂载），类型已声明
+// host?: 'reading' | 'live' 但校验器未跟随——非法 host 值（联合外字符串/
+// 非字符串）会被放行进宿主，观测面与联合类型三处不同步即静默脏数据。
+describe('view.state readingEmbed 探针：host 字段入校验器', () => {
+  function stateWithEmbed(entry: Record<string, unknown>): Record<string, unknown> {
+    return {
+      kind: 'view.state',
+      text: '# t',
+      docLength: 4,
+      lineCount: 1,
+      renderedLines: 1,
+      readingEmbed: [
+        {
+          inner: '![[x]]',
+          state: 'content',
+          note: 'x.md',
+          blocks: 2,
+          scope: 'full',
+          fm: 'none',
+          maxHeightPx: 200,
+          ...entry,
+        },
+      ],
+    }
+  }
+
+  it('合法形态放行（host 缺省 / reading / live）', () => {
+    expect(isWebviewToHost(stateWithEmbed({}))).toBe(true)
+    expect(isWebviewToHost(stateWithEmbed({ host: 'reading' }))).toBe(true)
+    expect(isWebviewToHost(stateWithEmbed({ host: 'live' }))).toBe(true)
+  })
+
+  it('host 非法值整体拒绝（联合外字符串 / 非字符串）', () => {
+    expect(isWebviewToHost(stateWithEmbed({ host: 'panel' }))).toBe(false)
+    expect(isWebviewToHost(stateWithEmbed({ host: 42 }))).toBe(false)
+  })
+})

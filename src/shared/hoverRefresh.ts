@@ -18,15 +18,17 @@ export const HOVER_REFRESH_DEFAULTS = {
    *  unsavedMaxWaitMs 的 2s 先例——长输入会话不无限推迟刷新） */
   maxWaitMs: 2000,
   /** 宿主读取缓存条目上限（按请求形态区分；插入序淘汰——imageCache 16
-   *  与 hoverSourceFsPaths 32 先例之间取 24：嵌入卡片 + 浮层并存的活跃
-   *  目标数量级） */
+   *  与来源集合上限 64 之间取 24：嵌入卡片 + 浮层并存的活跃目标数量级） */
   cacheEntryLimit: 24,
   /** 宿主读取缓存字节上限（LF 全文累计；超出按插入序淘汰——「容量/
    *  内存有界」的字节维度） */
   cacheByteLimit: 2 * 1024 * 1024,
   /** 订阅注册表目标数上限（全局；按最近触达淘汰整目标） */
   watchTargetLimit: 128,
-  /** webview 嵌入实例状态库上限（语义键条目；LRU 淘汰） */
+  /** webview 嵌入实例状态库上限（语义键条目；LRU 淘汰）。修 4（review
+   *  第二轮）：宿主侧 hoverSourceFsPaths 来源集合上限（documentSession
+   *  的 HOVER_SOURCES_LIMIT）与本值对齐同为 64——同一会话内两套目标
+   *  登记同容量基准，不对称会在并存的卡片/浮层目标数上先后触顶淘汰 */
   embedEntryLimit: 64,
 } as const
 

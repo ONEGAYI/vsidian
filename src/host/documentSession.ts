@@ -228,8 +228,11 @@ interface PanelEntry {
 const ACK_CACHE_LIMIT = 64
 const VERSION_LOG_LIMIT = 256
 /** #222 悬停来源记录集合上限（面板级；嵌入卡片 + 浮层并存的会话内目标数
- * 量级上界，超出按插入序淘汰） */
-const HOVER_SOURCES_LIMIT = 32
+ * 量级上界，超出按插入序淘汰）。修 4（review 第二轮）：与
+ * HOVER_REFRESH_DEFAULTS.embedEntryLimit（webview 嵌入实例状态库上限 64）
+ * 对齐——同一会话内「嵌入卡片 + 浮层」的目标集合与嵌入实例库同容量基准，
+ * 两侧不再不对称 */
+const HOVER_SOURCES_LIMIT = 64
 
 /** #224 图源反查登记上限（会话级；#201 建立时无界，来源化路径并入登记
  * 后补上界——条目为小字符串对，条目数计量足够） */
@@ -859,8 +862,8 @@ export class DocumentSession {
             // 共存；有界淘汰防无界增长——过期成员最多放宽一个已不在场目标
             // 的点击守卫，DOM 已不在则点击本就不发生）。P3-2（review 修复）：
             // 已存在成员重读时移到队尾（插入序 = 淘汰序改最近读取序）——
-            // 活跃目标持续触达不被 32 上限淘汰（watch 校验的放行基准随之
-            // 保持在场）
+            // 活跃目标持续触达不被上限淘汰（watch 校验的放行基准随之
+            // 保持在场；上限 64 与 embedEntryLimit 对齐，修 4）
             if (panel.hoverSourceFsPaths.has(result.fsPath)) {
               panel.hoverSourceFsPaths.delete(result.fsPath)
             } else if (panel.hoverSourceFsPaths.size >= HOVER_SOURCES_LIMIT) {
@@ -1231,27 +1234,41 @@ export class DocumentSession {
   // ---- #224 悬停读取缓存 ----
 
   /**
-   * 按目标 fsPath 失效悬停读取（provider 刷新协调器调用：目标修改/磁盘
-   * 变化事件路径）：反查该目标的全部请求形态，清缓存与在途表并推进世代
-   * ——在途读取完成后不回写缓存（迟到旧文不复活），请求面板照收回包
-   * （webview 侧 reqId/版本仲裁丢弃）。无登记（该目标未被读取过）时零
-   * 副作用。
+   * 按目标 fsPath 失效悬停读取（provider 事件路径调用——修 1 起经
+   * connectHoverEvents 无条件广播，不依赖订阅在场）：反查该目标的全部
+   * 请求形态，清缓存与在途表并推进世代——在途读取完成后不回写缓存
+   * （迟到旧文不复活），请求面板照收回包（webview 侧 reqId/版本仲裁
+   * 丢弃）。无登记（该目标未被读取过且无在途读取）时零副作用。
+   *
+   * 修 3（review 第二轮）：失效钟条目只在「有在途读取」时写入——其唯一
+   * 消费方是读取完成回调的竞态补校验（发起时形态→fsPath 登记尚未发生、
+   * 反查为空的窗口）；无在途时本目标条目无未来读者，顺带清理（否则随
+   * 事件广播只写不删、无界积累）。世代条目同样只读后清（evictHoverRead
+   * 同步删除），按清理前的值推进保证形态键内单调不回退——在途快照不因
+   * 清理误配对。
    */
   invalidateHoverReads(fsPath: string): void {
-    this.hoverClock++
-    this.hoverInvalidatedAt.set(fsPath, this.hoverClock)
+    const hasInFlight = this.hoverReadInFlight.size > 0
+    if (hasInFlight) {
+      this.hoverClock++
+      this.hoverInvalidatedAt.set(fsPath, this.hoverClock)
+    } else {
+      this.hoverInvalidatedAt.delete(fsPath)
+    }
     const keys = this.hoverShapeTargets.get(fsPath)
     if (!keys) {
       return
     }
     for (const shapeKey of [...keys]) {
+      const nextEpoch = (this.hoverEpochs.get(shapeKey) ?? 0) + 1
       this.evictHoverRead(shapeKey)
       this.hoverReadInFlight.delete(shapeKey)
-      this.hoverEpochs.set(shapeKey, (this.hoverEpochs.get(shapeKey) ?? 0) + 1)
+      this.hoverEpochs.set(shapeKey, nextEpoch)
     }
   }
 
-  /** 悬停读取缓存观测（测试钩子与性能计量：条目/字节/命中/未命中） */
+  /** 悬停读取缓存观测（测试钩子与性能计量：条目/字节/命中/未命中与
+   *  辅助索引条目数——修 3 清理行为的行为断言面） */
   hoverReadCacheStats(): {
     entries: number
     bytes: number
@@ -1259,6 +1276,10 @@ export class DocumentSession {
     misses: number
     entryLimit: number
     byteLimit: number
+    /** 失效钟条目数（仅在途窗口内有登记；quiescent 失效后为 0） */
+    invalidatedAtEntries: number
+    /** 世代表条目数（随缓存条目淘汰同步清理；失效推进后保留至再淘汰） */
+    epochEntries: number
   } {
     return {
       entries: this.hoverReadCache.size,
@@ -1267,6 +1288,8 @@ export class DocumentSession {
       misses: this.hoverCacheMisses,
       entryLimit: this.hoverCacheLimits.entryLimit,
       byteLimit: this.hoverCacheLimits.byteLimit,
+      invalidatedAtEntries: this.hoverInvalidatedAt.size,
+      epochEntries: this.hoverEpochs.size,
     }
   }
 
@@ -1301,7 +1324,9 @@ export class DocumentSession {
     }
   }
 
-  /** 淘汰单条缓存条目（字节与反查登记一并回收） */
+  /** 淘汰单条缓存条目（字节与反查登记一并回收；修 3：世代表条目随缓存
+   *  条目淘汰同步清理——失效路径的世代推进按清理前的值计算，键内单调
+   *  不回退） */
   private evictHoverRead(shapeKey: string): void {
     const hit = this.hoverReadCache.get(shapeKey)
     if (!hit) {
@@ -1316,6 +1341,7 @@ export class DocumentSession {
         this.hoverShapeTargets.delete(hit.fsPath)
       }
     }
+    this.hoverEpochs.delete(shapeKey)
   }
 
   /** #201 周期核验串行入链（并发有界：同会话至多一轮 verify 在途） */

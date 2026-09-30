@@ -2526,6 +2526,9 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
             (e.scope === 'full' || e.scope === 'heading' || e.scope === 'block' || e.scope === '') &&
             (e.fm === 'none' || e.fm === 'collapsed' || e.fm === 'expanded') &&
             isNonNegativeInt(e.maxHeightPx) &&
+            // 修 2（review 第二轮）：#223 host 字段入校验器（与联合类型
+            // 同步——缺省 / reading 块挂载 / live widget 挂载）
+            (e.host === undefined || e.host === 'reading' || e.host === 'live') &&
             (e.textLen === undefined || isNonNegativeInt(e.textLen))))) &&
         (v.typography === undefined || isTypographyProbe(v.typography))
       )

@@ -63,7 +63,7 @@ import type { CssSnippetService } from './cssSnippetService'
 import type { VaultIndexService } from './vaultIndexService'
 import type { IndexMaintenance } from './vaultIndexMaintenance'
 import { ImageRefreshCoordinator } from './imageRefreshCoordinator'
-import { HoverRefreshCoordinator } from './hoverRefreshCoordinator'
+import { connectHoverEvents, HoverRefreshCoordinator } from './hoverRefreshCoordinator'
 import type { ImageVersionTable } from './imageVersioning'
 import {
   IMAGE_EVENT_DEBOUNCE_MS,
@@ -433,13 +433,16 @@ export function createTextEditorProvider(
   // 索引目标变化事件（#198 通道）：图片类目标即时核验（md 域事件对图片
   // 管线无匹配登记，天然空操作；未来索引扩展到非 md 目标时自动接通）。
   // #224 引用视图同步：md 域事件直通刷新协调器（changed/deleted/stale
-  // 分态——vaultIndex 侧已去抖，deleted 不等防抖窗）
+  // 分态——vaultIndex 侧已去抖，deleted 不等防抖窗）；修 1（review 第二轮
+  // P2）起经 connectHoverEvents 接线：转发协调器的同时无条件广播全部活跃
+  // session 的悬停读取缓存失效（未订阅期间目标修改不留陈旧缓存）——
+  // 回调闭包引用 hoverEvents（下方声明），事件触发恒晚于注册
   if (vaultIndex) {
     const offTargetChange = vaultIndex.onTargetChange((event) => {
       if (isImageFileExtension(event.fsPath)) {
         scheduleImageEvent(event.fsPath)
       }
-      hoverRefresh.handleDiskEvent(event.fsPath, event.status)
+      hoverEvents.onDiskEvent(event.fsPath, event.status)
     })
     context.subscriptions.push({ dispose: offTargetChange })
   }
@@ -493,6 +496,11 @@ export function createTextEditorProvider(
     { isWindowsHost },
   )
   context.subscriptions.push({ dispose: () => hoverRefresh.dispose() })
+  // 修 1（review 第二轮 P2）：事件接线——两条事件源经此转发，缓存失效
+  // 无条件广播全部活跃 session（不依赖订阅在场），推送门控仍在协调器内
+  const hoverEvents = connectHoverEvents(hoverRefresh, () =>
+    Array.from(sessions.values(), (entry) => entry.session),
+  )
   const getEntry = (uri: vscode.Uri): SessionEntry | undefined =>
     sessions.get(uri.toString())
 
@@ -1545,10 +1553,11 @@ export function createTextEditorProvider(
       }
       // #224 引用视图跟随：被订阅目标的未保存修改进防抖窗（短暂合并刷新；
       // 空 contentChanges 是 dirty 状态事件，无内容变更不触发）。目标自
-      // 引用（A 嵌入 A）同链路收敛：推送只读重载，不产生新事件
+      // 引用（A 嵌入 A）同链路收敛：推送只读重载，不产生新事件。修 1 起
+      // 经 connectHoverEvents 接线：未订阅目标同时广播 session 缓存失效
       if (event.contentChanges.length > 0 &&
         event.document.uri.scheme === 'file' && /\.md$/i.test(event.document.uri.path)) {
-        hoverRefresh.handleDocChanged(event.document.uri.fsPath)
+        hoverEvents.onDocChanged(event.document.uri.fsPath)
       }
       const entry = getEntry(event.document.uri)
       if (!entry) {

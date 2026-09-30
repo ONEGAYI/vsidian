@@ -4,6 +4,7 @@
 // 权威文档通过 HostDocumentPort 注入（vscode 层实现），此处用假文档驱动。
 import { describe, it, expect } from 'vitest'
 import { DocumentSession, type HostDocumentPort, type SessionNotice } from '../../src/host/documentSession'
+import { HOVER_REFRESH_DEFAULTS } from '../../src/shared/hoverRefresh'
 import type { HostToWebview, SerChange, WebviewToHost } from '../../src/shared/protocol'
 
 function applyToText(text: string, changes: SerChange[]): string {
@@ -1985,7 +1986,8 @@ describe('#222 来源集合：嵌入与悬停多目标同面板在场', () => {
 // P2-2：provider 层 watch 登记前校验 fsPath ∈ 该会话 hoverSourceFsPaths（watch
 // 总在成功装载后，集合已含目标）——本 describe 钉查询面语义（伪造越界 watch
 // 的判定基准）；provider 接线为薄 if。P3-2：已存在成员重读时移到队尾（插入
-// 序 = 淘汰序改最近读取序），活跃目标不被 32 上限淘汰。
+// 序 = 淘汰序改最近读取序），活跃目标不被上限淘汰（上限对齐
+// HOVER_REFRESH_DEFAULTS.embedEntryLimit——嵌入实例状态库同容量，修 4）。
 describe('#224 P2-2/P3-2：来源集合查询面与重读触达', () => {
   interface HoverSetup {
     s: ReturnType<typeof setup>
@@ -2048,17 +2050,19 @@ describe('#224 P2-2/P3-2：来源集合查询面与重读触达', () => {
   it('P3-2 重读触达：已存在成员重读后移到队尾，超限淘汰按最近读取序（活跃目标不被淘汰）', async () => {
     const t = hoverByTargetSetup()
     await ready10(t.s, t.id)
-    // 装满 32 个不同目标（t01..t32，插入序 t01 最旧）
-    for (let i = 1; i <= 32; i++) {
+    // 装满上限个不同目标（t01..tNN，插入序 t01 最旧；上限与嵌入实例
+    // 状态库 embedEntryLimit 对齐——修 4）
+    const limit = HOVER_REFRESH_DEFAULTS.embedEntryLimit
+    for (let i = 1; i <= limit; i++) {
       await readTarget(t, i, `t${String(i).padStart(2, '0')}`)
     }
     expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\t01.md')).toBe(true)
     // 重读 t01（活跃目标触达 → 移到队尾）
-    await readTarget(t, 33, 't01')
-    // 新目标 t33 入集合：淘汰的应是最久未读的 t02（而非触达过的 t01）
-    await readTarget(t, 34, 't33')
+    await readTarget(t, limit + 1, 't01')
+    // 新目标入集合：淘汰的应是最久未读的 t02（而非触达过的 t01）
+    await readTarget(t, limit + 2, 't99')
     expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\t01.md')).toBe(true)
     expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\t02.md')).toBe(false)
-    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\t33.md')).toBe(true)
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\t99.md')).toBe(true)
   })
 })

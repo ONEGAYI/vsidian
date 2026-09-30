@@ -1005,18 +1005,13 @@ describe('#224 引用视图同步：订阅、失效分态与版本仲裁', () =>
     expect(hoverPopupProbe().fm).toBe('none') // 内容已撤（属性区随内容退场）
   })
 
-  it('版本仲裁：reqId 配对通过但版本更旧的回包丢弃（慢响应旧内容不冒充）', () => {
+  it('版本仲裁：同 reqId 重复投递的更旧版本回包丢弃（慢响应旧内容不冒充）', () => {
     const h = makeHarness()
-    openAndLoad(h, { version: 5 })
-    pushInvalidation(RESULT_OK.target.fsPath, 'changed', 1)
-    const requests = h.sent.filter((m) => m.kind === 'hover.request')
-    const refresh = requests.at(-1)!
-    if (refresh.kind !== 'hover.request') {
-      throw new Error('刷新请求未发出')
-    }
-    // 慢响应回包（reqId 新但版本旧——模拟读旧了）：丢弃
+    const { req } = openAndLoad(h, { version: 5 })
+    // 同 reqId 的重复/迟到投递携带更旧版本：版本防线拒绝（changed 重发
+    // 路径的谱系让位语义见「版本谱系断点自愈」两则——修 7）
     notifyHoverResult({
-      kind: 'hover.result', reqId: refresh.reqId, instanceId: refresh.instanceId, ok: true,
+      kind: 'hover.result', reqId: req.reqId, instanceId: req.instanceId, ok: true,
       ...RESULT_OK, version: 3, text: '# 旧版本\n', range: { start: 0, end: 6 },
     })
     expect(popupEl()!.textContent).not.toContain('旧版本')
@@ -1047,5 +1042,73 @@ describe('#224 引用视图同步：订阅、失效分态与版本仲裁', () =>
       ...RESULT_OK, version: 4, text: '# 变长的新内容\n\n更多段落\n', range: { start: 0, end: 16 },
     })
     expect(scrollEl.scrollTop).toBe(28) // 刷新后回写原滚动位置
+  })
+
+  it('版本谱系断点自愈：changed 重发后 version 变小的回包被应用（宿主释放重开重置 version）', () => {
+    const h = makeHarness()
+    openAndLoad(h, { version: 9 })
+    pushInvalidation(RESULT_OK.target.fsPath, 'changed', 1)
+    const requests = h.sent.filter((m) => m.kind === 'hover.request')
+    const refresh = requests.at(-1)!
+    if (refresh.kind !== 'hover.request') {
+      throw new Error('刷新请求未发出')
+    }
+    // 宿主释放重开目标文档：version 从 9 重置为 2（谱系断点）——若版本
+    // 防线不让位，此回包被恒拒且无重发通道，旧内容滞留
+    notifyHoverResult({
+      kind: 'hover.result', reqId: refresh.reqId, instanceId: refresh.instanceId, ok: true,
+      ...RESULT_OK, version: 2, text: '# 重开后的新内容\n', range: { start: 0, end: 9 },
+    })
+    expect(hoverPopupProbe().state).toBe('content')
+    expect(popupEl()!.textContent).toContain('重开后的新内容')
+  })
+
+  it('谱系让位期间迟到旧 reqId 回包仍被拒（instanceId+reqId 配对守卫兜底）', () => {
+    const h = makeHarness()
+    const { req } = openAndLoad(h, { version: 9 })
+    pushInvalidation(RESULT_OK.target.fsPath, 'changed', 1) // reqId 前进 + 谱系让位
+    // 迟到的旧 reqId 回包（重发前发起的慢响应）：配对失败丢弃
+    notifyHoverResult({
+      kind: 'hover.result', reqId: req.reqId, instanceId: req.instanceId, ok: true,
+      ...RESULT_OK, version: 1, text: '# 旧响应内容\n', range: { start: 0, end: 7 },
+    })
+    expect(popupEl()!.textContent).not.toContain('旧响应内容')
+    expect(hoverPopupProbe().state).toBe('content') // 已应用内容不被破坏
+  })
+})
+
+// ---- 修 6（review 第二轮 P3）：同锚点重复进入不重置开设计时 ----
+// 嵌套行内标记链接（如 [**粗体**](x.md)）内跨子元素移动触发多次
+// mouseover（联合域内移动的 mouseout 被调用方过滤，无对应 leave）：
+// popup 未开时每次 enter 都 cancelPendingOpen 重建 300ms timer，
+// 浮层被推迟到指针静止才开。守卫：同一 anchor 已有 pendingOpen 时
+// 不重建（保留首次进入起算的计时）。
+describe('嵌套行内标记内的重复进入（同锚点不重置开设计时）', () => {
+  it('同一锚点 pendingOpen 期间的重复 enter 不重建计时器（按首次进入起算延迟打开）', () => {
+    vi.useFakeTimers()
+    const h = makeHarness()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS - 100)
+    hoverPreviewAnchorEnter(h.anchor) // 子元素间移动的重复 mouseover
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(100) // 距首次进入满 300ms
+    expect(isHoverPopupOpen()).toBe(true)
+  })
+
+  it('换锚点仍先取消旧 pending（不同目标不受同锚点守卫影响）', () => {
+    vi.useFakeTimers()
+    const h = makeHarness()
+    const anchor2 = document.createElement('a')
+    anchor2.className = 'vsidian-wikilink'
+    anchor2.setAttribute('href', '另一个笔记')
+    h.block.appendChild(anchor2)
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS - 100)
+    hoverPreviewAnchorEnter(anchor2) // 换锚点：旧 pending 取消、新计时起算
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS - 100)
+    expect(isHoverPopupOpen(), '旧锚点的 pending 已取消不打开').toBe(false)
+    vi.advanceTimersByTime(100) // 新锚点满 300ms
+    expect(isHoverPopupOpen()).toBe(true)
+    expect(requestOf(h).target).toBe('另一个笔记')
   })
 })

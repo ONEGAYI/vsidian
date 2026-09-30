@@ -585,11 +585,17 @@ export function openHoverPopupForKeyboard(anchor: HTMLElement, spec: HoverPopupT
 
 /** 进入链接（Reading 容器 mouseover 委托转发；#221 Live 悬停同入口——
  *  装饰 DOM 无 href，spec 由调用方组装传入）：同锚点重入取消待关；换
- *  锚点先关旧再延迟开新 */
+ *  锚点先关旧再延迟开新。修 6（review 第二轮）：同一锚点已有 pendingOpen
+ *  时不重建开设计时——嵌套行内标记链接（如 [**粗体**](x.md)）内跨子
+ *  元素移动触发多次 mouseover（联合域内移动的 mouseout 被调用方过滤，
+ *  无对应 leave），每次重建 300ms timer 会把浮层推迟到指针静止 */
 export function hoverPreviewAnchorEnter(anchor: HTMLElement, spec?: HoverPopupTargetSpec): void {
   if (popup && popup.anchor === anchor) {
     cancelCloseTimer()
     return
+  }
+  if (pendingOpen && pendingOpen.anchor === anchor) {
+    return // 同锚点待开：保留首次进入起算的计时（目标由锚点身份决定）
   }
   cancelPendingOpen()
   if (popup) {
@@ -750,6 +756,12 @@ export function notifyHoverInvalidated(message: {
       return
     }
     state.reqId = ++reqSeq // 新请求代次：旧 reqId 迟到回包因配对失败丢弃
+    // 修 7（review 第二轮）：版本谱系断点自愈——watch 目标文档被宿主
+    // 释放重开（TextDocument.version 重置变小）时，回包 version <
+    // appliedVersion 会被版本仲裁恒拒且无重发通道，旧内容滞留。changed
+    // 重发前置 appliedVersion = -1 让版本防线短暂让位：迟到的旧回包仍由
+    // instanceId + reqId 配对守卫拦截（上一行已推进 reqId），安全
+    state.appliedVersion = -1
     context.send({
       kind: 'hover.request',
       sessionId: session.sessionId,
