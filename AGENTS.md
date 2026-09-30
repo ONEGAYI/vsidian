@@ -321,6 +321,7 @@ vsidian/
 │       ├── readingView.ts              # 阅读视图 DOM 构建与锚点定位
 │       ├── readingViewport.ts          # 阅读视口挂载窗口纯函数
 │       ├── readingVirtualView.ts       # 阅读视图虚拟化装配层
+│       ├── refContentInstance.ts       # 引用内容实例与挂载生命周期
 │       ├── refReadingContent.ts        # 引用内容只读 Reading 装配
 │       ├── settingsMain.ts             # 设置页 webview 入口
 │       ├── settingsPage.css            # 设置页样式

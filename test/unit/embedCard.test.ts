@@ -639,3 +639,36 @@ describe('#224 嵌入卡片：订阅、失效分态与有界状态库', () => {
     manager.dispose()
   })
 })
+
+// #242：卸载必须释放交互监听器；保留旧 DOM 引用不能再激活目标。
+describe('引用挂载释放', () => {
+  it('已卸载卡片的旧打开按钮不再发出消息', () => {
+    const sent: WebviewToHost[] = []
+    const manager = new EmbedCardManager(makeContext(sent))
+    const el = mountEmbedBlock(manager, '![[目标笔记]]\n')
+    const open = el.querySelector<HTMLButtonElement>(`.${EMBED_CARD_CLASS_NAMES.open}`)!
+    manager.unmountBlock(el)
+    const before = sent.length
+    open.click()
+    expect(sent.length).toBe(before)
+    manager.dispose()
+  })
+})
+
+it('#242 在场卡片滚回顶部后刷新，不恢复旧非零位置', async () => {
+  const sent: WebviewToHost[] = []
+  const manager = new EmbedCardManager(makeContext(sent))
+  const el = mountEmbedBlock(manager, '![[目标笔记]]\n')
+  manager.notifyResult(resultOk(hoverRequestOf(sent), TARGET_TEXT))
+  const scroll = el.querySelector<HTMLElement>('.vsidian-embed-card-scroll')!
+  scroll.scrollTop = 41
+  manager.notifyInvalidated({ fsPath: 'D:\\notes\\目标笔记.md', status: 'changed', generation: 1 })
+  manager.notifyResult(resultOk(hoverRequestOf(sent), TARGET_TEXT))
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  scroll.scrollTop = 0
+  manager.notifyInvalidated({ fsPath: 'D:\\notes\\目标笔记.md', status: 'changed', generation: 2 })
+  manager.notifyResult(resultOk(hoverRequestOf(sent), TARGET_TEXT))
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  expect(scroll.scrollTop).toBe(0)
+  manager.dispose()
+})

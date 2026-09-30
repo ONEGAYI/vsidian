@@ -1993,14 +1993,16 @@ describe('#224 P2-2/P3-2：来源集合查询面与重读触达', () => {
     s: ReturnType<typeof setup>
     id: string
     served: string[]
+    results: HostToWebview[]
   }
 
   /** readHoverTarget 按 target 原文直供对应 fsPath（b1 → D:\notes\b1.md） */
   function hoverByTargetSetup(): HoverSetup {
     const s = setup()
     const served: string[] = []
+    const results: HostToWebview[] = []
     const id = s.session.attachPanel({
-      send: () => {},
+      send: (message) => { results.push(message) },
       readHoverTarget: (payload, report) => {
         const target = payload.target
         served.push(target)
@@ -2015,7 +2017,7 @@ describe('#224 P2-2/P3-2：来源集合查询面与重读触达', () => {
         })
       },
     })
-    return { s, id, served }
+    return { s, id, served, results }
   }
 
   async function readTarget(t: HoverSetup, seq: number, target: string): Promise<void> {
@@ -2045,6 +2047,167 @@ describe('#224 P2-2/P3-2：来源集合查询面与重读触达', () => {
       reqId: 1, instanceId: 'x', sourceStart: 0, sourceEnd: 4, target: 'missing',
     })
     expect(s2.session.hasHoverSource(id2, 'D:\\notes\\missing.md')).toBe(false)
+  })
+
+  async function retained(t: HoverSetup, seq: number, target: string): Promise<string | undefined> {
+    await t.s.send(t.id, {
+      kind: 'hover.request', sessionId: t.id, docUri: DOC_URI,
+      reqId: seq, instanceId: `read-${seq}`, sourceStart: 0, sourceEnd: 4, target,
+      retainSource: true,
+    } as WebviewToHost)
+    const result = t.results.at(-1) as { sourceLeaseId?: string }
+    return result.sourceLeaseId
+  }
+
+  it('#242 相同缓存内容的两次成功送达生成独立租约，释放其中一个不释放另一个', async () => {
+    const t = hoverByTargetSetup()
+    await ready10(t.s, t.id)
+    const one = await retained(t, 1, 'B')
+    const two = await retained(t, 2, 'B')
+    expect(one).not.toBe(two)
+    expect(t.served).toEqual(['B']) // 读取缓存共享，租约不共享。
+    await t.s.send(t.id, { kind: 'hover.source.release', sessionId: t.id, docUri: DOC_URI, sourceLeaseId: one! })
+    for (let i = 3; i <= 70; i++) await readTarget(t, i, `fresh${i}`)
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\B.md')).toBe(true)
+    expect(t.s.session.retainHoverSource(t.id, 'D:\\notes\\B.md', 'second', two)).toBe(true)
+    expect(t.s.session.retainHoverSource(t.id, 'D:\\notes\\B.md', 'first', one)).toBe(false)
+  })
+
+  it('#242 租约只转交到配对目标及会话；消耗后不能跨 occurrence 重用，release幂等', async () => {
+    const t = hoverByTargetSetup()
+    await ready10(t.s, t.id)
+    const lease = await retained(t, 1, 'B')
+    expect(lease).toBeDefined()
+    await readTarget(t, 2, 'C')
+    expect(t.s.session.retainHoverSource(t.id, 'D:\\notes\\C.md', 'wrong', lease)).toBe(false)
+    expect(t.s.session.retainHoverSource('foreign-panel', 'D:\\notes\\B.md', 'wrong', lease)).toBe(false)
+    expect(t.s.session.retainHoverSource(t.id, 'D:\\notes\\B.md', 'owner', lease)).toBe(true)
+    expect(t.s.session.retainHoverSource(t.id, 'D:\\notes\\B.md', 'owner', lease)).toBe(true)
+    expect(t.s.session.retainHoverSource(t.id, 'D:\\notes\\B.md', 'other-occurrence', lease)).toBe(false)
+    for (let i = 0; i < 2; i++) await t.s.send(t.id, { kind: 'hover.source.release', sessionId: t.id,
+      docUri: DOC_URI, sourceLeaseId: lease! })
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\B.md')).toBe(true)
+    await t.s.send(t.id, { kind: 'hover.unwatch', sessionId: t.id, docUri: DOC_URI,
+      fsPath: 'D:\\notes\\B.md', instanceId: 'owner' })
+    for (let i = 3; i <= 70; i++) await readTarget(t, i, `fresh${i}`)
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\B.md')).toBe(false)
+    expect(t.s.session.retainHoverSource(t.id, 'D:\\notes\\B.md', 'owner', lease)).toBe(false)
+  })
+
+  it('#242 待订阅租约显式释放后恢复可淘汰，错误结果不授予租约', async () => {
+    const t = hoverByTargetSetup()
+    await ready10(t.s, t.id)
+    const lease = await retained(t, 1, 'B')
+    for (let i = 2; i <= 70; i++) await readTarget(t, i, `fresh${i}`)
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\B.md')).toBe(true)
+    await t.s.send(t.id, { kind: 'hover.source.release', sessionId: t.id, docUri: DOC_URI, sourceLeaseId: lease! })
+    await readTarget(t, 71, 'fresh71')
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\B.md')).toBe(false)
+    const s = setup()
+    const results: HostToWebview[] = []
+    const id = s.session.attachPanel({ send: (m) => { results.push(m) },
+      readHoverTarget: (_payload, report) => report({ ok: false, reason: 'not-found' }) })
+    await ready10(s, id)
+    await s.send(id, { kind: 'hover.request', sessionId: id, docUri: DOC_URI, reqId: 1,
+      instanceId: 'missing', sourceStart: 0, sourceEnd: 1, target: 'missing', retainSource: true })
+    expect(results.find((m) => m.kind === 'hover.result')).not.toHaveProperty('sourceLeaseId')
+  })
+
+  it('#242 审查修复：旧目标退订不能撤销已送达新目标的待订阅租约', async () => {
+    const t = hoverByTargetSetup()
+    await ready10(t.s, t.id)
+    for (let i = 1; i <= 65; i++) {
+      await readTarget(t, i, `old${i}`)
+      await t.s.send(t.id, { kind: 'hover.watch', sessionId: t.id, docUri: DOC_URI,
+        fsPath: `D:\\notes\\old${i}.md`, instanceId: `occ-${i}` })
+    }
+    const sourceLeaseId = await retained(t, 100, 'new')
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\new.md')).toBe(true)
+    await t.s.send(t.id, { kind: 'hover.unwatch', sessionId: t.id, docUri: DOC_URI,
+      fsPath: 'D:\\notes\\old65.md', instanceId: 'occ-65' })
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\new.md')).toBe(true)
+    await t.s.send(t.id, { kind: 'hover.watch', sessionId: t.id, docUri: DOC_URI,
+      fsPath: 'D:\\notes\\new.md', instanceId: 'occ-65', sourceLeaseId } as WebviewToHost)
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\new.md')).toBe(true)
+  })
+
+  it('#242 审查修复：两个成功回包待订阅时，后一个读取不能回收前一个来源', async () => {
+    const t = hoverByTargetSetup()
+    await ready10(t.s, t.id)
+    for (let i = 1; i <= 64; i++) {
+      await readTarget(t, i, `active${i}`)
+      await t.s.send(t.id, { kind: 'hover.watch', sessionId: t.id, docUri: DOC_URI,
+        fsPath: `D:\\notes\\active${i}.md`, instanceId: `occ-${i}` })
+    }
+    const sourceLeaseId = await retained(t, 100, 'pendingB')
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\pendingB.md')).toBe(true)
+    await retained(t, 101, 'pendingC')
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\pendingB.md')).toBe(true)
+    await t.s.send(t.id, { kind: 'hover.watch', sessionId: t.id, docUri: DOC_URI,
+      fsPath: 'D:\\notes\\pendingB.md', instanceId: 'pending-B', sourceLeaseId } as WebviewToHost)
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\pendingB.md')).toBe(true)
+  })
+
+  it('#242 全部来源仍活跃时，新送达目标保留授权直到订阅，不能立即被容量回收', async () => {
+    const t = hoverByTargetSetup()
+    await ready10(t.s, t.id)
+    for (let i = 0; i < 65; i++) {
+      await readTarget(t, i + 1, `active${i}`)
+      await t.s.send(t.id, { kind: 'hover.watch', sessionId: t.id, docUri: DOC_URI,
+        fsPath: `D:\\notes\\active${i}.md`, instanceId: `inst-${i}` })
+    }
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\active64.md')).toBe(true)
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\active0.md')).toBe(true)
+    t.s.session.dispose()
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\active0.md')).toBe(false)
+  })
+
+  it('#242 已释放面板的迟到成功读取不发送结果或重新持有来源', async () => {
+    const s = setup()
+    const sent: HostToWebview[] = []
+    let deliver = (): void => {}
+    const id = s.session.attachPanel({
+      send: (msg) => { sent.push(msg) },
+      readHoverTarget: (_payload, report) => {
+        deliver = () => report({ ok: true, fsPath: 'D:\\notes\\late.md', relPath: 'late.md',
+          version: 1, lfText: '# late', range: { start: 0, end: 6 }, scope: { kind: 'full' } })
+      },
+    })
+    await ready10(s, id)
+    const pending = s.send(id, { kind: 'hover.request', sessionId: id, docUri: DOC_URI,
+      reqId: 1, instanceId: 'late', sourceStart: 0, sourceEnd: 1, target: 'late' })
+    s.session.detachPanel(id)
+    deliver()
+    await pending
+    expect(sent.some((m) => m.kind === 'hover.result')).toBe(false)
+    expect(s.session.hasHoverSource(id, 'D:\\notes\\late.md')).toBe(false)
+  })
+
+  it('#242 活跃来源按 occurrence 固定，容量只淘汰未订阅目标，最终释放恢复可淘汰', async () => {
+    const t = hoverByTargetSetup()
+    await ready10(t.s, t.id)
+    await readTarget(t, 1, 'active')
+    for (const instanceId of ['left', 'right']) {
+      await t.s.send(t.id, { kind: 'hover.watch', sessionId: t.id, docUri: DOC_URI,
+        fsPath: 'D:\\notes\\active.md', instanceId })
+    }
+    const fill = async (base: number): Promise<void> => {
+      for (let i = 0; i < 66; i++) await readTarget(t, base + i, `fresh${base + i}`)
+    }
+    await fill(10)
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\active.md')).toBe(true)
+    for (let i = 0; i < 2; i++) {
+      await t.s.send(t.id, { kind: 'hover.unwatch', sessionId: t.id, docUri: DOC_URI,
+        fsPath: 'D:\\notes\\active.md', instanceId: 'left' })
+    }
+    await fill(100)
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\active.md')).toBe(true)
+    await t.s.send(t.id, { kind: 'hover.unwatch', sessionId: t.id, docUri: DOC_URI,
+      fsPath: 'D:\\notes\\active.md', instanceId: 'right' })
+    await fill(200)
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\active.md')).toBe(false)
+    t.s.session.detachPanel(t.id)
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\active.md')).toBe(false)
   })
 
   it('P3-2 重读触达：已存在成员重读后移到队尾，超限淘汰按最近读取序（活跃目标不被淘汰）', async () => {

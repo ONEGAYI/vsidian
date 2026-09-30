@@ -51,21 +51,16 @@
 // 代次守卫参照 diagramPopup（loadSeq），互斥经 popupMutex，出站上下文经
 // setter 注入（imagePopup 的 setImagePopupContext 形态；syncController
 // mount 注入、dispose 清空）。
-import {
-  ImageResourceManager,
-  type ImageResultPayload,
-} from './imageResource'
+import type { ImageResultPayload } from './imageResource'
+import { RefContentInstance, type RefContentMount } from './refContentInstance'
 import { createReadingContainer, READING_CLASS_NAMES } from './readingView'
-import { VirtualReadingView } from './readingVirtualView'
 import { claimPopup, releasePopup } from './popupMutex'
 import { OPEN_ICON } from './embedCard'
 import { WIKILINK_CLASS_NAMES } from '../shared/wikilink'
 import {
-  createSourcedImageManager as createSourcedImageManagerImpl,
-  mountRefContentBlock,
   refErrorText,
+  releaseRefSourceLease,
   REF_FM_CLASS_NAMES,
-  type RefFmController,
 } from './refReadingContent'
 import { t } from '../shared/i18n'
 import { shouldApplyHoverVersion } from '../shared/hoverRefresh'
@@ -183,7 +178,8 @@ interface HoverPopupState {
   scrollEl: HTMLElement
   stateEl: HTMLElement
   contentEl: HTMLElement
-  view: VirtualReadingView
+  instance: RefContentInstance
+  content: RefContentMount
   /** loading → content / error（结果只接受一次：陈旧回包丢弃） */
   display: 'loading' | 'content' | 'error'
   note: string
@@ -200,11 +196,6 @@ interface HoverPopupState {
   /** #224 订阅目标（hover.watch 登记后的 fsPath；null = 未订阅——成功
    *  装载前无目标身份。变更刷新经 hover.invalidated 推送，关闭即 unwatch） */
   watchedFsPath: string | null
-  /** #220 笔记属性区展开状态：实例内保持（刷新不重置），重开复位（openPopup
-   *  置 false）。属性区状态机的单一事实源，DOM 只读此值施加 */
-  fmExpanded: boolean
-  /** #220 B 身份资源管理器（成功回包时创建；关闭随实例 dispose） */
-  bImages: ImageResourceManager | null
   /** #221 键盘模态：命令手动打开（焦点进入浮层 + Esc 返还触发处） */
   keyboardOpened: boolean
   /** #221 键盘打开前的焦点元素（关闭时返还；body/脱树不返还） */
@@ -298,7 +289,7 @@ export function hoverPopupProbe(): {
     note: popup.note,
     blocks: popup.contentEl.querySelectorAll(`.${READING_CLASS_NAMES.block}`).length,
     scope: popup.scope,
-    fm: fmSection ? (popup.fmExpanded ? 'expanded' : 'collapsed') : 'none',
+    fm: fmSection ? (popup.instance.fmExpanded ? 'expanded' : 'collapsed') : 'none',
     imageSrcs,
   }
 }
@@ -399,36 +390,6 @@ function applyDisplay(state: HoverPopupState, display: 'loading' | 'content' | '
   }
 }
 
-/** #220 B 身份资源管理器（共享工厂 refReadingContent.createSourcedImageManager；
- *  无周期核验接线——浮层短生命周期，文件变化的自动失效广播不在本票，
- *  手动刷新通道见 invalidateHoverPopupImages） */
-function createSourcedImageManager(state: HoverPopupState): ImageResourceManager {
-  const ctx = context
-  return createSourcedImageManagerImpl({
-    session: () => (ctx ? ctx.session() : { sessionId: undefined, docUri: undefined }),
-    send: (message) => ctx?.send(message),
-    sourceDocUri: () => state.targetFsPath,
-  })
-}
-
-/** 块挂载钩子（虚拟化与无布局回退两路径共用）：共享只读装配（#222 提取
- *  至 refReadingContent.mountRefContentBlock——嵌入卡片同款消费） */
-function mountBlockInto(state: HoverPopupState, el: HTMLElement): void {
-  mountRefContentBlock(el, {
-    images: state.bImages,
-    codeHighlight: context?.codeHighlight?.() ?? true,
-    fm: state.scope === 'full' ? fmControllerOf(state) : null,
-  })
-}
-
-/** 属性区折叠状态机（容器侧实现：fmExpanded 单一事实源在本实例 state） */
-function fmControllerOf(state: HoverPopupState): RefFmController {
-  return {
-    expanded: () => state.fmExpanded,
-    toggle: () => (state.fmExpanded = !state.fmExpanded),
-  }
-}
-
 /** #221 打开选项：键盘模态（命令手动打开——焦点进入浮层，关闭返还） */
 interface HoverPopupOpenOptions {
   keyboard?: boolean
@@ -482,12 +443,18 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
 
   const instanceId = `hover-${++instanceSeq}`
   const reqId = ++reqSeq
-  // 钩子闭包经 stateRef 延迟取值（构造后立即赋值；挂载钩子只会在
-  // setDocument 之后触发，无空窗）
-  let stateRef: HoverPopupState
-  const view = new VirtualReadingView(contentEl, {
-    onBlockMounted: (el) => mountBlockInto(stateRef, el),
-    onBlockUnmounted: (el) => stateRef.bImages?.detachWithin(el),
+  const instance = new RefContentInstance({
+    panelDocUri: session.docUri,
+    sourceDocUri: session.docUri,
+    range: { start: spec.sourceStart, end: spec.sourceEnd },
+    occurrence: instanceId,
+  })
+  const ctx = context
+  const content = instance.mount({
+    contentEl, scrollEl, strategy: 'virtual',
+    session: () => ctx.session(),
+    send: (message) => ctx.send(message),
+    codeHighlight: () => ctx.codeHighlight?.() ?? true,
   })
   const state: HoverPopupState = {
     instanceId,
@@ -497,7 +464,8 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
     scrollEl,
     stateEl,
     contentEl,
-    view,
+    instance,
+    content,
     display: 'loading',
     note: '',
     target: spec.target,
@@ -506,14 +474,19 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
     targetFsPath: '',
     appliedVersion: -1,
     watchedFsPath: null,
-    fmExpanded: false,
-    bImages: null,
     keyboardOpened: options?.keyboard === true,
     prevFocus: options?.prevFocus ?? null,
     closeTimer: undefined,
     cleanups: [],
   }
-  stateRef = state
+  instance.onDispose(() => {
+    if (state.closeTimer !== undefined) window.clearTimeout(state.closeTimer)
+    if (state.watchedFsPath !== null) {
+      sendWatchMessage(state.watchedFsPath, state.instanceId, 'hover.unwatch')
+      state.watchedFsPath = null
+    }
+    for (const cleanup of state.cleanups.splice(0)) cleanup()
+  })
   popup = state
   claimPopup(closeHoverPopup)
   applyDisplay(state, 'loading', t('hover.loading'))
@@ -527,7 +500,7 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
   // sourceDocUri，宿主按 B 解析与分类）——preventDefault 阻断 webview
   // 原生导航（与主视图点击委托同口径）；点击即上下文切换，浮层关闭。
   // 浮层不在 readingContainer 委托域内：悬停不叠加新浮层（规格一期）
-  contentEl.addEventListener('click', (event) => {
+  content.listen(contentEl, 'click', (event) => {
     const hit = event.target as HTMLElement | null
     const linkAnchor = hit?.closest?.('a')
     if (!(linkAnchor instanceof HTMLElement) || !contentEl.contains(linkAnchor)) {
@@ -566,7 +539,7 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
   // 定位引用处/出链带锚点）→ linkHref（普通链接）→ 双链默认；与嵌入卡片
   // 打开入口同语义（不带 sourceDocUri，按父文档身份解析）。点击即上下文
   // 切换，浮层关闭（与浮层内链接点击同款）
-  openBtn.addEventListener('click', (event) => {
+  content.listen(openBtn, 'click', (event) => {
     event.stopPropagation()
     const ctx = context
     const session = ctx?.session()
@@ -610,8 +583,8 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
 
   // 移入保活 / 移出延迟关闭（联合域 = 锚点 ∪ 浮层；键盘模态的保活豁免
   // 在 scheduleClose 内判定——焦点在浮层内时鼠标离开不销毁键盘现场）
-  container.addEventListener('mouseenter', () => cancelCloseTimer())
-  container.addEventListener('mouseleave', () => scheduleClose())
+  content.listen(container, 'mouseenter', () => cancelCloseTimer())
+  content.listen(container, 'mouseleave', () => scheduleClose())
   // 联合域内的指针按下不关闭（选字复制起点）；域外按下立即关（点击别处
   // = 明确的上下文切换）
   const onPointerDown = (event: PointerEvent): void => {
@@ -658,6 +631,7 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
   // 链接即 href，面板条目即显示名——错误分态文案的目标原文来源）
   context.send({
     kind: 'hover.request',
+    retainSource: true,
     sessionId: session.sessionId,
     docUri: session.docUri,
     reqId,
@@ -736,18 +710,7 @@ export function closeHoverPopup(): void {
     return
   }
   popup = null
-  if (state.closeTimer !== undefined) {
-    window.clearTimeout(state.closeTimer)
-  }
-  // #224 订阅随实例释放（关闭浮层 = 订阅计数回落；宿主侧按实例退订）
-  if (state.watchedFsPath !== null) {
-    sendWatchMessage(state.watchedFsPath, state.instanceId, 'hover.unwatch')
-  }
-  for (const cleanup of state.cleanups) {
-    cleanup()
-  }
-  state.view.dispose() // 卸载块 → onBlockUnmounted 释放图片槽位
-  state.bImages?.dispose() // #220 B 管理器随实例释放（兜底；槽位已随块卸载释放）
+  state.instance.dispose()
   state.container.remove()
   releasePopup(closeHoverPopup)
   if (state.keyboardOpened && state.prevFocus !== null && state.prevFocus.isConnected) {
@@ -774,36 +737,30 @@ function applyHoverContent(state: HoverPopupState, message: Extract<HoverPreview
   state.scope = message.scope.kind
   state.targetFsPath = message.target.fsPath
   state.appliedVersion = message.version
-  if (!state.bImages) {
-    state.bImages = createSourcedImageManager(state)
-  }
-  // #219 局部范围：全文切块后按块区间求交过滤（保留全文解析上下文，
-  // 不孤立解析截取字符串；范围选取见 VirtualReadingView.setDocument）
-  state.view.setDocument(message.text, message.scope.kind === 'full' ? undefined : { range: message.range })
-  state.view.updateNow()
-  // 全部任务 checkbox 禁用（挂载钩子已覆盖虚拟化路径；此处为无布局
-  // 回退全量渲染路径的兜底——双保险，幂等）
-  for (const box of Array.from(state.contentEl.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))) {
-    box.disabled = true
-  }
+  state.content.render({
+    fsPath: message.target.fsPath, relPath: message.target.relPath,
+    scope: message.scope.kind, selector: message.scope, range: message.range,
+    version: message.version, text: message.text,
+  })
   applyDisplay(state, 'content', message.target.relPath)
   // #224 滚动位置恢复（刷新路径：内容重建后回写；内容缩短合法钳制）
   if (keepScroll > 0) {
     state.scrollEl.scrollTop = keepScroll
   }
-  ensureWatch(state, message.target.fsPath)
+  ensureWatch(state, message.target.fsPath, message.sourceLeaseId)
 }
 
 /** #224 登记目标订阅（成功装载后；目标身份变化先释放旧订阅） */
-function ensureWatch(state: HoverPopupState, fsPath: string): void {
+function ensureWatch(state: HoverPopupState, fsPath: string, sourceLeaseId?: string): void {
   if (state.watchedFsPath === fsPath) {
+    if (context) releaseRefSourceLease(context, sourceLeaseId)
     return
   }
   if (state.watchedFsPath !== null) {
     sendWatchMessage(state.watchedFsPath, state.instanceId, 'hover.unwatch')
   }
   state.watchedFsPath = fsPath
-  sendWatchMessage(fsPath, state.instanceId, 'hover.watch')
+  sendWatchMessage(fsPath, state.instanceId, 'hover.watch', sourceLeaseId)
 }
 
 /** #224 订阅消息出站（会话守卫字段与 hover.request 同款） */
@@ -811,24 +768,28 @@ function sendWatchMessage(
   fsPath: string,
   instanceId: string,
   kind: 'hover.watch' | 'hover.unwatch',
+  sourceLeaseId?: string,
 ): void {
   const session = context?.session()
   if (!context || !session?.sessionId || !session.docUri) {
     return
   }
-  context.send({ kind, sessionId: session.sessionId, docUri: session.docUri, fsPath, instanceId })
+  context.send({ kind, sessionId: session.sessionId, docUri: session.docUri, fsPath, instanceId,
+    ...(kind === 'hover.watch' && sourceLeaseId !== undefined ? { sourceLeaseId } : {}),
+  })
 }
 
 /** 宿主读取结果（syncController handleHostMessage 转发）：
  *  仅当场内实例、instanceId 与 reqId 双匹配的结果生效——迟到/陈旧回包
  *  丢弃，绝不重开已关闭浮层。#224 版本仲裁：成功回包的目标版本低于已
  *  应用版本（慢响应旧内容）整体丢弃，不冒充新目标 */
-export function notifyHoverResult(message: HoverPreviewResult): void {
+export function notifyHoverResult(message: HoverPreviewResult): boolean {
   if (!popup || message.instanceId !== popup.instanceId || message.reqId !== popup.reqId) {
-    return
+    return false
   }
   if (message.ok && !shouldApplyHoverVersion(popup.appliedVersion, message.version)) {
-    return
+    if (context) releaseRefSourceLease(context, message.sourceLeaseId)
+    return true
   }
   if (message.ok) {
     applyHoverContent(popup, message)
@@ -837,6 +798,7 @@ export function notifyHoverResult(message: HoverPreviewResult): void {
     applyDisplay(popup, 'error', refErrorText(message.reason, popup.target, message.anchor))
   }
   position(popup)
+  return true
 }
 
 /**
@@ -872,6 +834,7 @@ export function notifyHoverInvalidated(message: {
     state.appliedVersion = -1
     context.send({
       kind: 'hover.request',
+      retainSource: true,
       sessionId: session.sessionId,
       docUri: session.docUri,
       reqId: state.reqId,
@@ -893,10 +856,7 @@ export function notifyHoverInvalidated(message: {
   }
   // deleted / stale：撤下内容显示分态（视图清空防 display 反转后旧内容
   // 闪现；fm/滚动状态在实例 state 保留，恢复重载后无需重取）
-  state.view.setDocument('')
-  state.view.updateNow()
-  state.bImages?.dispose()
-  state.bImages = null
+  state.content.clear()
   state.targetFsPath = ''
   state.scope = ''
   applyDisplay(
@@ -910,19 +870,19 @@ export function notifyHoverInvalidated(message: {
 /** #220 image.result 路由（syncController 转发）：作用于在场浮层的 B 管理
  *  器——未知 reqId 由管理器自身丢弃（主面板管理器同款守卫，双投递安全） */
 export function notifyHoverImageResult(msg: ImageResultPayload): void {
-  popup?.bImages?.handleResult(msg)
+  popup?.content.notifyImageResult(msg)
 }
 
 /** #220 image.invalidate 路由（syncController 转发）：命中条目撤旧图重发
  *  （B 身份新请求；未命中条目由管理器忽略） */
 export function notifyHoverImageInvalidate(srcs: readonly string[]): void {
-  popup?.bImages?.invalidate(srcs)
+  popup?.content.invalidateImages(srcs)
 }
 
 /** #220 手动刷新失效（refresh.invalidated 路由）：B 管理器全量失效重挂
  *  （活跃槽位重新走宿主解析，新 URI 带新代次戳） */
 export function invalidateHoverPopupImages(): void {
-  popup?.bImages?.invalidateAll()
+  popup?.content.invalidateImages()
 }
 
 /** 测试隔离：清空模块级单例状态（生产不调用） */

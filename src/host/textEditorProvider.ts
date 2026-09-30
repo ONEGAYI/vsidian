@@ -1477,7 +1477,7 @@ export function createTextEditorProvider(
           message.docUri === document.uri.toString() && message.sessionId === sessionId) {
           const sessionKey = hoverSessionKeyOf(message.docUri, message.sessionId)
           if (message.kind === 'hover.watch') {
-            if (entry.session.hasHoverSource(sessionId, message.fsPath)) {
+            if (entry.session.retainHoverSource(sessionId, message.fsPath, message.instanceId, message.sourceLeaseId)) {
               hoverRefresh.watch(sessionKey, message.fsPath, message.instanceId)
             } else {
               hoverWatchRejected += 1
@@ -1488,6 +1488,7 @@ export function createTextEditorProvider(
               )
             }
           } else {
+            void entry.session.handleWebviewMessage(message, sessionId)
             hoverRefresh.unwatch(sessionKey, message.fsPath, message.instanceId)
           }
           return

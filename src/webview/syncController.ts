@@ -1744,10 +1744,13 @@ export class WebviewSyncController {
       case 'hover.result': {
         // #218 悬停预览结果：转发浮层模块（instanceId + reqId 双守卫在
         // 模块内——迟到/陈旧回包丢弃，不重开已关闭浮层）。#222 起嵌入
-        // 卡片同消息通道（instanceId 前缀 embed- 分流，双投递安全——
-        // 各自实例守卫丢弃不匹配回包）
-        notifyHoverResult(message)
-        this.embedCards?.notifyResult(message)
+        // 卡片同消息通道。消费者回报是否消费；两者均未命中才释放来源
+        // 租约，避免未命中的浮层提前释放仍应交给卡片的成功回包。
+        const consumed = notifyHoverResult(message) || this.embedCards?.notifyResult(message)
+        if (!consumed && message.ok && message.sourceLeaseId !== undefined && this.sessionId && this.docUri) {
+          this.bridge.postMessage({ kind: 'hover.source.release', sessionId: this.sessionId, docUri: this.docUri,
+            sourceLeaseId: message.sourceLeaseId })
+        }
         break
       }
       case 'hover.invalidated': {

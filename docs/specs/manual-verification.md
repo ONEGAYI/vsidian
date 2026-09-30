@@ -1239,3 +1239,23 @@ Live 渲染态经 lezer `HorizontalRule` 节点驱动：未触及该行时源文
 - 不修（review 记录在案，建议后续票）：P2-1 大小写形态漂移推送 miss（窄场景有自愈，修复涉及跨层形态协议改造）；P3-3 Map 无界、P3-4 sourceDocUri 命名、P3-6 理论负高度（理论边界项，无实际触发路径）。
 - 全量验证记录（2026-09-30，工作树 `codex/hover-preview-embed`）：merge 后 `compile` 通过、`test:unit` 199 文件 4173 项全绿（logs/merge-unit.log）；修复批 `compile` 通过（logs/fix-compile.log）；`test:unit` 199 文件 4186 项 + node --test 103 项全绿（logs/fix-unit.log）；`test:browser` 41/41 套件全绿（logs/fix-browser.log，报告 out/test/browser-runs/run-r1r44P）；集成分片全量（VSIDIAN_ITEST_SHARDS=4）**227 项 PASS / 0 项 FAIL**（logs/fix-integration.log + .vscode-test/integration-dev-s1..4.log，剪贴板环境故障未复现）；`check:stylecontract` 八项零失败 + `check:stylecontract:baseline` 通过（logs/fix-stylecontract*.log）；file-tree `check --strict` 通过（本批零新文件，源码与测试修改均在册条目内）。
 - 人工待验：无新增（全部为内部加固，正常链路行为不变——悬停/嵌入既有各节人工清单继续有效）。
+
+## #242 引用内容实例、来源与挂载生命周期解耦（2026-09-30）
+
+本票完成内部重构及释放修复，**未开启递归或混排**。卡片与浮层共用 `RefContentInstance`／`RefContentMount`；引用位置的 UI 状态独立，Live／Reading 同一位置继续恢复。内容挂载释放图片、属性按钮及容器监听器、延迟恢复帧和虚拟视图排队测量帧；实例释放配对目标订阅。活跃来源按 occurrence 固定，最后退订后才可缓存淘汰，已销毁面板的迟到回包不登记或出站。
+
+- **TDD 证据**：旧卡片／浮层打开按钮在卸载后仍可出站、旧属性按钮仍改变状态、卡片滚回顶部后刷新被拉回 41px、活跃来源超容量失去授权、面板销毁后迟到读取仍回发、虚拟视图排队帧未取消，均以公共入口红测固定后修复。红绿日志保存在 `out/test/ticket242/`（`red-release`／`red-hover-release`／`red-block-release`／`red-scroll-zero`／`red-source-pin`／`red-source-active-late-corrected`／`red-virtual-frame-corrected` 及对应 green 日志）。虚拟帧红测先校正无布局环境未产生帧的前置，再以 ResizeObserver 回调排队测量验证取消；不把前置失败计作目标缺口证据。
+- **最终自动化**：`compile-verified.log` 通过；`unit-serial-verified.log` 为 204 文件、4252 项 Vitest 和 103 项 node 契约全部通过；`browser-verified.log` 五套（hoverPreview／readingEmbed／liveEmbed／hoverEntry／hoverRefresh）全部通过，报告 `out/test/browser-runs/run-GWQq4C/`；`integration-dev-verified.log` 为 #218–#224 的 11 项真宿主用例通过、零失败、宿主退出码 0，覆盖禁写、来源、范围、跨模式、IME、未保存同步及订阅回落。所有这些报告在 `out/test/ticket242/`，没有将定向宿主结果记为全量 233 项通过。
+- **检查与失败归因**：历史样式基线及八项契约检查通过（`style-baseline-verified.log`／`style-contract-verified.log`），file-tree 严格检查通过（`file-tree-final.log`）。首轮全量单测因尚未 compile 缺少 bundle 发生四项前置失败；编译后通过。最后一轮并行验证出现生成指南测试的 5000ms 超时、其他 4251 项通过；再执行全量验证零失败。保留原日志，未修改测试超时或降低断言。
+- **样式兼容**：hover-popup／hover-fm-section／reading-embed-card／live-embed-widget／reading-embed-ref 原类名、DOM 关系和变量不变；发布基线 v0.7.0（c85d244）与本期固定基点 82d7883。五套浏览器继续覆盖明暗主题的属性区、卡片边条、正文可见性和旧片段实际绘制，无契约基线或清单修改。
+- **人工待验**：同文档两处 `![[B]]` 分别展开属性、滚动并切 Live／Reading，确认互不串用及各自恢复；在场卡片滚回顶部后修改 B，确认仍停在顶部；切窗、关闭面板后重新打开并抽验图片和属性区；物理鼠标滚动手感、明暗主题与用户 CSS 片段观感沿用一期待验清单。Remote SSH 未实测。代理自检不代表用户验收。
+- **后续边界**：实际内部滚动视口挂载在 #243；全局 HoverWatchRegistry 容量与整树预算、递归来源闭环在 #244；混排／列表／引用／表格、目标 Live 写回及 PDF 均未提前实施。无新增可绑定操作，复用已有预览与打开入口。
+
+
+### #242 独立审查来源租约修复与最终增量复核
+
+双轴各复现一条 P2 来源交接时序：65 个持有目标下，旧目标退订先于新目标订阅会撤销新来源；64 个持有目标下，两个成功回包等待订阅时后一个读取会回收前一个。两条公共 `DocumentSession` 红测见 `out/test/ticket242/review-red-source-lease.log` 与 JSON，修复后已绿。
+
+生产请求 opt-in 来源租约，每次成功送达独立 token，watch 原子转交到 occurrence，未消费回包及同目标刷新显式 release。校验与契约覆盖跨目标／会话拒绝、已消耗 token 不能跨位置重用、重复释放幂等、同份读取缓存两次送达的租约独立、错误不授予租约、面板销毁迟到回包不登记。生产 `syncController` 分派覆盖卡片与浮层，先确定消费者再统一释放未消费结果；没有让一个容器提前释放另一个容器的 token。共享读取数据和 `RefLoadedContent` 不携带租约。
+
+修复后的最终证据均在 `out/test/ticket242/`：`review-compile.log` EXIT=0；`review-unit.log` 为 **204 文件、4259 项 Vitest + 103 项 Node 契约全部通过**；`review-integration.log`／`review-integration-dev.log` 为 #218–#224 的 **11 项 PASS、零 FAIL、宿主退出码 0**；`review-browser.log` 五套全部通过，完整报告 `out/test/browser-runs/run-fBwxNP/`。前一节 4252 项及 run-GWQq4C 为第一次冻结点历史记录，最终交付按本节。预算、递归及全局订阅容量仍由 #244 处理，人工待验清单不变。

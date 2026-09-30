@@ -10,6 +10,7 @@ import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/sync
 import { __resetMermaidRenderStateForTest, mermaidDarkTheme } from '../../src/webview/mermaidRender'
 import { DocumentSession, type HostDocumentPort } from '../../src/host/documentSession'
 import type { HostToWebview, SerChange, WebviewToHost } from '../../src/shared/protocol'
+import { closeHoverPopup, openHoverPopupForKeyboard } from '../../src/webview/hoverPopup'
 
 const DOC_URI = 'file:///d%3A/notes/a.md'
 
@@ -956,4 +957,48 @@ describe('宿主明暗主题初始装配（#110）', () => {
     }
     expect(mermaidDarkTheme()).toBe(false)
   })
+})
+
+// #242 来源租约经过生产分派链：未命中的消费者不得提前释放其他容器的回包。
+it('#242 源租约先交到实际容器；双方均未命中的迟到回包只释放一次', () => {
+  const { bridge, sent } = makeBridge()
+  const c = mount(bridge)
+  init(c, '![[B]]\n\n正文\n')
+  c.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
+  const req = sent.find((m): m is Extract<WebviewToHost, { kind: 'hover.request' }> => m.kind === 'hover.request')!
+  expect(req.retainSource).toBe(true)
+  const result: HostToWebview = { kind: 'hover.result', instanceId: req.instanceId, reqId: req.reqId,
+    ok: true, sourceLeaseId: 'embed-lease', target: { fsPath: 'D:/notes/b.md', relPath: 'b.md' },
+    version: 1, text: '# B\n', range: { start: 0, end: 4 }, scope: { kind: 'full' } }
+  c.handleHostMessage(result)
+  const transfer = sent.filter((m) => (m.kind === 'hover.watch' || m.kind === 'hover.source.release') && m.sourceLeaseId === 'embed-lease')
+  expect(transfer[0]?.kind).toBe('hover.watch')
+  c.handleHostMessage({ kind: 'hover.invalidated', fsPath: 'D:/notes/b.md', status: 'changed', generation: 1 })
+  const refreshReq = [...sent].reverse().find((m): m is Extract<WebviewToHost, { kind: 'hover.request' }> => m.kind === 'hover.request')!
+  c.handleHostMessage({ ...result, reqId: refreshReq.reqId, instanceId: refreshReq.instanceId,
+    version: 2, sourceLeaseId: 'same-target-refresh' })
+  const refreshed = sent.filter((m) => (m.kind === 'hover.watch' || m.kind === 'hover.source.release') && m.sourceLeaseId === 'same-target-refresh')
+  expect(refreshed.length).toBeGreaterThan(0)
+  expect(refreshed.every((m) => m.kind === 'hover.source.release')).toBe(true)
+  const anchor = document.createElement('a')
+  document.body.appendChild(anchor)
+  openHoverPopupForKeyboard(anchor, { target: 'B', sourceStart: 0, sourceEnd: 1 })
+  const hoverReq = sent.find((m): m is Extract<WebviewToHost, { kind: 'hover.request' }> =>
+    m.kind === 'hover.request' && m.instanceId.startsWith('hover-'))!
+  expect(hoverReq.retainSource).toBe(true)
+  const hoverResult = { ...result, instanceId: hoverReq.instanceId, reqId: hoverReq.reqId, sourceLeaseId: 'hover-lease' }
+  c.handleHostMessage(hoverResult)
+  const hoverTransfer = sent.filter((m) => (m.kind === 'hover.watch' || m.kind === 'hover.source.release') && m.sourceLeaseId === 'hover-lease')
+  expect(hoverTransfer[0]?.kind).toBe('hover.watch')
+  closeHoverPopup()
+  const before = sent.length
+  c.handleHostMessage({ ...result, reqId: req.reqId + 100, sourceLeaseId: 'late-lease' })
+  expect(sent.slice(before).filter((m) => m.kind === 'hover.source.release')).toEqual([
+    { kind: 'hover.source.release', sessionId: 's1', docUri: DOC_URI, sourceLeaseId: 'late-lease' },
+  ])
+  const cancelled = sent.length
+  c.handleHostMessage({ ...hoverResult, sourceLeaseId: 'closed-hover-lease' })
+  expect(sent.slice(cancelled).filter((m) => m.kind === 'hover.source.release')).toHaveLength(1)
+  anchor.remove()
+  c.dispose()
 })

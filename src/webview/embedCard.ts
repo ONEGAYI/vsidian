@@ -35,16 +35,10 @@ import type { HoverPreviewResult, WebviewToHost } from '../shared/protocol'
 import { parseWikilinkInner } from '../shared/wikilink'
 import { t } from '../shared/i18n'
 import { HOVER_REFRESH_DEFAULTS } from '../shared/hoverRefresh'
-import { ImageResourceManager } from './imageResource'
+import { RefContentInstance, type RefContentMount, type RefLoadedContent, type RefSourceContext } from './refContentInstance'
 import { applyObsidianDomAlias } from '../shared/obsidianAlias'
-import { createReadingBlockElement, createReadingContainer, READING_CLASS_NAMES } from './readingView'
-import { splitReadingBlocks } from './readingBlocks'
-import {
-  createSourcedImageManager,
-  mountRefContentBlock,
-  refErrorText,
-  type RefFmController,
-} from './refReadingContent'
+import { createReadingContainer, READING_CLASS_NAMES } from './readingView'
+import { refErrorText, releaseRefSourceLease } from './refReadingContent'
 import { WIKILINK_CLASS_NAMES } from '../shared/wikilink'
 
 /** 右上角打开入口图标（验收反馈：按钮本体空壳无图标——外部跳转形态，
@@ -92,15 +86,7 @@ export interface EmbedCardContext {
 }
 
 /** 装载结果缓存（父文档会话内；#224 变更订阅推送后按目标失效清除） */
-interface EmbedLoaded {
-  fsPath: string
-  relPath: string
-  scope: 'full' | 'heading' | 'block'
-  /** #224 目标内容版本（TextDocument.version；旧回包按版本仲裁丢弃） */
-  version: number
-  text: string
-  range: { start: number; end: number }
-}
+type EmbedLoaded = RefLoadedContent
 
 /** 嵌入实例状态（跨挂载保持——视口回收不清除仍可见实例的状态） */
 interface EmbedEntry {
@@ -122,8 +108,7 @@ interface EmbedEntry {
    *  视为版本谱系断点——如目标文档关闭重开后 TextDocument.version 重置
    *  ——终态落地不再重发，避免无限循环；正常请求路径置回 null） */
   healReqId: number | null
-  fmExpanded: boolean
-  scrollTop: number
+  content: RefContentInstance
   /** #224 已登记订阅的目标（hover.watch；与 loaded 解耦——deleted 清
    *  loaded 后订阅保持以感知恢复，dispose/淘汰时据此配对 unwatch） */
   watchedFsPath: string | null
@@ -139,13 +124,11 @@ interface EmbedCardHandle {
   scrollEl: HTMLElement
   stateEl: HTMLElement
   contentEl: HTMLElement
-  bImages: ImageResourceManager | null
+  content: RefContentMount
   display: 'loading' | 'content' | 'error'
   note: string
   /** 容器来源（探针观测面；行为路径不分叉——两容器共用装配） */
   host: 'reading' | 'live'
-  /** fm 控制器（容器状态机实现，entry 为单一事实源） */
-  fm: RefFmController
 }
 
 /** 嵌入卡片观测探针形态（view.state.readingEmbed 数据源） */
@@ -220,11 +203,12 @@ export class EmbedCardManager {
     sourceStart: number,
     sourceEnd: number,
     host: 'reading' | 'live',
+    source?: RefSourceContext,
   ): void {
     if (this.active.has(el)) {
       return
     }
-    const key = `${Number.isInteger(sourceStart) ? sourceStart : 0}::${inner}`
+    const key = source?.occurrence ?? `${Number.isInteger(sourceStart) ? sourceStart : 0}::${inner}`
     let entry = this.entries.get(key)
     if (!entry) {
       entry = {
@@ -236,11 +220,20 @@ export class EmbedCardManager {
         lastKnown: null,
         lastReq: null,
         healReqId: null,
-        fmExpanded: false,
-        scrollTop: 0,
+        content: new RefContentInstance(source ?? {
+          panelDocUri: this.context.session().docUri ?? '',
+          sourceDocUri: this.context.session().docUri ?? '',
+          range: { start: sourceStart, end: sourceEnd },
+          occurrence: key,
+        }),
         watchedFsPath: null,
       }
       this.entries.set(key, entry)
+      const owned = entry
+      entry.content.onDispose(() => {
+        owned.lastReq = null
+        this.unwatchEntry(owned)
+      })
     } else {
       this.touchEntry(entry) // LRU 触达（重挂载 = 仍有效实例）
     }
@@ -286,30 +279,32 @@ export class EmbedCardManager {
       scrollEl,
       stateEl,
       contentEl,
-      bImages: null,
+      content: entry.content.mount({
+        contentEl, scrollEl, strategy: 'full',
+        session: () => this.context.session(),
+        send: (message) => this.context.send(message),
+        codeHighlight: () => this.context.codeHighlight?.() ?? true,
+      }),
       display: 'loading',
       note: '',
       host,
-      fm: {
-        expanded: () => entry!.fmExpanded,
-        toggle: () => (entry!.fmExpanded = !entry!.fmExpanded),
-      },
     }
     this.active.set(el, handle)
     this.heightObserver?.observe(cardEl)
+    handle.content.onDispose(() => this.heightObserver?.unobserve(cardEl))
 
     // 卡片内交互域：点击不冒泡父容器委托（B 内链接按 B 解析）；悬停不
     // 叠加浮层（阻断 readingContainer 的 mouseover/mouseout 委托）
-    contentEl.addEventListener('click', (event) => {
+    handle.content.listen(contentEl, 'click', (event) => {
       event.stopPropagation() // 全部点击停在卡片域内（含 fm 按钮冒泡）
       this.handleContentClick(handle, event)
     })
-    contentEl.addEventListener('mouseover', (event) => event.stopPropagation())
-    contentEl.addEventListener('mouseout', (event) => event.stopPropagation())
+    handle.content.listen(contentEl, 'mouseover', (event) => event.stopPropagation())
+    handle.content.listen(contentEl, 'mouseout', (event) => event.stopPropagation())
 
     // 右上角打开入口：按父文档身份解析（不带 sourceDocUri，与正文双链
     // 点击同语义）；打开不改写引用原文
-    openBtn.addEventListener('click', (event) => {
+    handle.content.listen(openBtn, 'click', (event) => {
       event.stopPropagation()
       const session = this.context.session()
       if (!session.sessionId || !session.docUri) {
@@ -345,9 +340,7 @@ export class EmbedCardManager {
       return
     }
     this.active.delete(el)
-    this.heightObserver?.unobserve(handle.cardEl)
-    handle.entry.scrollTop = handle.scrollEl.scrollTop
-    handle.bImages?.dispose()
+    handle.content.dispose()
     el.textContent = '' // 卡片 DOM（含 B 内容全量块）随宿主卸载丢弃
   }
 
@@ -362,7 +355,7 @@ export class EmbedCardManager {
    *  无重试，lastReq 悬挂 → 永久卡 loading；宿主读取缓存按目标失效，重发
    *  读到当前内容，版本单调保证收敛不循环——请求代次守卫之外的第二道
    *  防线） */
-  notifyResult(message: HoverPreviewResult): void {
+  notifyResult(message: HoverPreviewResult): boolean {
     let reference: number | null = null
     if (message.ok) {
       for (const other of this.entries.values()) {
@@ -388,6 +381,7 @@ export class EmbedCardManager {
     if (matchedEntries.size > 0) {
       for (const entry of matchedEntries) {
         if (stale && entry.healReqId !== message.reqId) {
+          if (message.ok) releaseRefSourceLease(this.context, message.sourceLeaseId)
           // 过期回包按 entry 丢弃：清在途配对并自愈重发一次（有已渲染内容
           // 时静默——不闪 loading；首载无内容则如实 loading）。heal 回包若
           // 仍过期（版本谱系断点）走下方终态落地，不无限重发
@@ -410,7 +404,7 @@ export class EmbedCardManager {
           }
         }
       }
-      return
+      return true
     }
     // 卸载后在途：同配对写入缓存（重挂直接用）；过期回包只清 lastReq
     //（缓存不得写入旧版本——重挂会绕过仲裁直接渲染）
@@ -423,23 +417,26 @@ export class EmbedCardManager {
             fsPath: message.target.fsPath,
             relPath: message.target.relPath,
             scope: message.scope.kind,
+            selector: message.scope,
             version: message.version,
             text: message.text,
             range: message.range,
           }
           entry.lastKnown = { fsPath: message.target.fsPath, version: message.version }
-          this.watchEntry(entry)
+          this.watchEntry(entry, message.sourceLeaseId)
         }
         entry.lastReq = null
-        return
+        if (stale && message.ok) releaseRefSourceLease(this.context, message.sourceLeaseId)
+        return true
       }
     }
+    return false
   }
 
   /** image.result 路由：作用于在场卡片的 B 管理器（reqId 由管理器自守卫） */
   notifyImageResult(msg: { reqId: number; ok: boolean; src?: string; reason?: string }): void {
     for (const handle of this.active.values()) {
-      handle.bImages?.handleResult(msg)
+      handle.content.notifyImageResult(msg)
     }
   }
 
@@ -484,7 +481,7 @@ export class EmbedCardManager {
       // 在场滚动位置先保存（重建后恢复；离屏 entry 保留旧值）
       for (const handle of this.active.values()) {
         if (handle.entry === entry && handle.scrollEl.scrollTop > 0) {
-          entry.scrollTop = handle.scrollEl.scrollTop
+          entry.content.scrollTop = handle.scrollEl.scrollTop
         }
       }
       entry.loaded = null
@@ -504,8 +501,7 @@ export class EmbedCardManager {
           targetOfInner(entry.inner),
         )
         for (const handle of handles) {
-          handle.bImages?.dispose()
-          handle.bImages = null
+          handle.content.clear()
           handle.contentEl.textContent = '' // 旧内容撤下（防 display 反转闪现）
           this.applyDisplay(handle, 'error', note)
         }
@@ -516,14 +512,14 @@ export class EmbedCardManager {
   /** image.invalidate 路由：全部在场 B 管理器按 srcs 失效重发 */
   notifyImageInvalidate(srcs: readonly string[]): void {
     for (const handle of this.active.values()) {
-      handle.bImages?.invalidate(srcs)
+      handle.content.invalidateImages(srcs)
     }
   }
 
   /** 手动刷新（refresh.invalidated）：全部在场 B 管理器全量失效重挂 */
   invalidateImages(): void {
     for (const handle of this.active.values()) {
-      handle.bImages?.invalidateAll()
+      handle.content.invalidateImages()
     }
   }
 
@@ -545,7 +541,7 @@ export class EmbedCardManager {
         note: handle.note,
         blocks: handle.contentEl.querySelectorAll(`.${READING_CLASS_NAMES.block}`).length,
         scope: handle.entry.loaded?.scope ?? '',
-        fm: fmSection ? (handle.entry.fmExpanded ? 'expanded' : 'collapsed') : 'none',
+        fm: fmSection ? (handle.entry.content.fmExpanded ? 'expanded' : 'collapsed') : 'none',
         maxHeightPx: Number.parseInt(handle.scrollEl.style.maxHeight, 10) || 0,
         host: handle.host,
         // #224 内容文本字符数（集成断言未保存修改推送后的刷新可见性）
@@ -562,7 +558,7 @@ export class EmbedCardManager {
     }
     // #224 订阅随状态库整体释放（实例订阅计数回落）
     for (const entry of this.entries.values()) {
-      this.unwatchEntry(entry)
+      entry.content.dispose()
     }
     this.entries.clear()
     this.heightObserver?.disconnect()
@@ -597,16 +593,17 @@ export class EmbedCardManager {
         break
       }
       this.entries.delete(victim)
-      this.unwatchEntry(entry)
+      entry.content.dispose()
     }
   }
 
   /** #224 目标订阅登记（幂等；成功装载后调用。目标身份变化先释放旧订阅） */
-  private watchEntry(entry: EmbedEntry): void {
+  private watchEntry(entry: EmbedEntry, sourceLeaseId?: string): void {
     if (!entry.loaded) {
       return
     }
     if (entry.watchedFsPath === entry.loaded.fsPath) {
+      releaseRefSourceLease(this.context, sourceLeaseId)
       return
     }
     const session = this.context.session()
@@ -623,6 +620,7 @@ export class EmbedCardManager {
       docUri: session.docUri,
       fsPath: entry.watchedFsPath,
       instanceId: entry.key,
+      ...(sourceLeaseId !== undefined ? { sourceLeaseId } : {}),
     })
   }
 
@@ -672,6 +670,7 @@ export class EmbedCardManager {
     }
     this.context.send({
       kind: 'hover.request',
+      retainSource: true,
       sessionId: session.sessionId,
       docUri: session.docUri,
       reqId,
@@ -688,49 +687,26 @@ export class EmbedCardManager {
       fsPath: message.target.fsPath,
       relPath: message.target.relPath,
       scope: message.scope.kind,
+      selector: message.scope,
       version: message.version,
       text: message.text,
       range: message.range,
     }
     handle.entry.lastReq = null
     handle.entry.lastKnown = { fsPath: loaded.fsPath, version: loaded.version }
-    this.applyLoaded(handle, loaded)
+    this.applyLoaded(handle, loaded, message.sourceLeaseId)
   }
 
   /** 装载结果渲染（首载与缓存重挂共用）：B Reading 视图 + 状态恢复。
    *  #224 刷新路径（在场 handle）：滚动位置先取当前值（重挂路径 scrollEl
    *  新建为 0，保留 entry 旧值），重建后经既有 rAF 恢复；目标订阅登记 */
-  private applyLoaded(handle: EmbedCardHandle, loaded: EmbedLoaded): void {
+  private applyLoaded(handle: EmbedCardHandle, loaded: EmbedLoaded, sourceLeaseId?: string): void {
     if (handle.scrollEl.scrollTop > 0) {
-      handle.entry.scrollTop = handle.scrollEl.scrollTop // 刷新前保存
+      handle.entry.content.scrollTop = handle.scrollEl.scrollTop // 刷新前保存
     }
     handle.entry.loaded = loaded
     this.touchEntry(handle.entry) // LRU 触达（仍有效实例）
-    if (!handle.bImages) {
-      handle.bImages = createSourcedImageManager({
-        session: () => this.context.session(),
-        send: (message) => this.context.send(message),
-        sourceDocUri: () => handle.entry.loaded?.fsPath ?? '',
-      })
-    }
-    // 卡片内全量渲染（决策见模块头注释）：切块后按块区间求交过滤（#219
-    // 局部范围同款——保留全文解析上下文，范围选取在块模型上做），逐块
-    // 挂载并装配（fm/图片/图形块/代码高亮）；结构与 VirtualReadingView
-    // 的无布局回退路径同构
-    const blocks = splitReadingBlocks(loaded.text)
-    const scoped = loaded.scope === 'full'
-      ? blocks
-      : blocks.filter((b) => b.start <= loaded.range.end && b.end >= loaded.range.start)
-    handle.contentEl.textContent = ''
-    for (const block of scoped) {
-      const blockEl = createReadingBlockElement(block, loaded.text)
-      handle.contentEl.appendChild(blockEl)
-      this.mountContentBlock(handle, blockEl)
-    }
-    // 任务 checkbox 禁用兜底（幂等）
-    for (const box of Array.from(handle.contentEl.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))) {
-      box.disabled = true
-    }
+    handle.content.render(loaded)
     // 顶部文件名：装载后为目标根内相对路径
     const titleEl = handle.cardEl.querySelector<HTMLElement>(`.${EMBED_CARD_CLASS_NAMES.title}`)
     if (titleEl) {
@@ -747,17 +723,9 @@ export class EmbedCardManager {
     // 为 0），同步赋值会被浏览器钳到 0——下一帧宿主已入 DOM，布局可用。
     // 刷新路径（在场 handle）本可同步恢复，但内容重建后的布局重排与
     // rAF 同帧完成，统一走延迟一帧保持两路径一致
-    if (handle.entry.scrollTop > 0) {
-      const restore = handle.entry.scrollTop
-      const target = handle.scrollEl
-      requestAnimationFrame(() => {
-        if (this.active.get(handle.hostEl) === handle) {
-          target.scrollTop = restore
-        }
-      })
-    }
+    handle.content.restoreScroll(true)
     // #224 目标订阅（成功装载后；幂等——目标身份变化时先释放旧订阅）
-    this.watchEntry(handle.entry)
+    this.watchEntry(handle.entry, sourceLeaseId)
   }
 
   /** 错误分态：就地 i18n 文案（不弹宿主通知；anchor-missing 附锚点原文） */
@@ -780,17 +748,6 @@ export class EmbedCardManager {
       handle.scrollEl.style.display = 'none'
       handle.stateEl.textContent = note
     }
-  }
-
-  /** B 内容块挂载钩子：共享只读装配 + fm 属性区（仅全文引用）。
-   *  一层展开：B 内 embed 块不在此升级（占位引用行由块 html 呈现） */
-  private mountContentBlock(handle: EmbedCardHandle, el: HTMLElement): void {
-    const loaded = handle.entry.loaded
-    mountRefContentBlock(el, {
-      images: handle.bImages,
-      codeHighlight: this.context.codeHighlight?.() ?? true,
-      fm: loaded !== null && loaded.scope === 'full' ? handle.fm : null,
-    })
   }
 
   /** 卡片内容点击：B 内链接经既有 open 通道（附 sourceDocUri=B——宿主按

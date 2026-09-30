@@ -1250,3 +1250,15 @@ describe('嵌套行内标记内的重复进入（同锚点不重置开设计时�
     expect(requestOf(h).target).toBe('另一个笔记')
   })
 })
+
+describe('#242 浮层挂载释放', () => {
+  it('关闭后保留的旧打开按钮不能激活目标', () => {
+    const h = makeHarness()
+    openHoverPopupForKeyboard(h.anchor, { target: '目标笔记', sourceStart: 10, sourceEnd: 30 })
+    const open = popupEl()!.querySelector<HTMLButtonElement>('.vsidian-hover-popup-open')!
+    closeHoverPopup()
+    const before = h.sent.length
+    open.click()
+    expect(h.sent.length).toBe(before)
+  })
+})

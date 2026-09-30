@@ -76,11 +76,13 @@ function outerHeight(el: HTMLElement): number {
 }
 
 /** rAF 不可用环境（旧 jsdom）退化为短超时 */
-function scheduleFrame(fn: () => void): void {
+function scheduleFrame(fn: () => void): () => void {
   if (typeof requestAnimationFrame === 'function') {
-    requestAnimationFrame(() => fn())
+    const id = requestAnimationFrame(() => fn())
+    return () => cancelAnimationFrame(id)
   } else {
-    setTimeout(fn, 16)
+    const id = setTimeout(fn, 16)
+    return () => clearTimeout(id)
   }
 }
 
@@ -117,6 +119,8 @@ export class VirtualReadingView {
   private spacerBottom: HTMLElement
   private observer: ResizeObserver | null = null
   private pendingFrame = false
+  private cancelFrame: (() => void) | null = null
+  private disposed = false
   /** #10 图片生命周期钩子（构造注入） */
   private hooks: VirtualReadingViewOptions
 /** 最近一次有效视口高度（隐藏期保持虚拟模式用） */
@@ -142,6 +146,7 @@ export class VirtualReadingView {
    *  选取在块模型上做（跨界块整块保留，不孤立解析截取字符串）；range 为
    *  LF 坐标（宿主经 NewlineCoordinator 换算后随 hover.result 下发） */
   setDocument(text: string, opts?: { range?: { start: number; end: number } }): void {
+    if (this.disposed) return
     this.parseCount += 1
     this.text = text
     this.blocks = splitReadingBlocks(text)
@@ -187,6 +192,7 @@ export class VirtualReadingView {
 
   /** 立即重算窗口（同步；测试与 handleScroll 的落点） */
   updateNow(): void {
+    if (this.disposed) return
     if (this.blocks.length === 0) {
       this.clearAll()
       return
@@ -450,6 +456,11 @@ export class VirtualReadingView {
   }
 
   dispose(): void {
+    if (this.disposed) return
+    this.disposed = true
+    this.cancelFrame?.()
+    this.cancelFrame = null
+    this.pendingFrame = false
     this.observer?.disconnect()
     this.observer = null
     this.clearAll()
@@ -458,13 +469,14 @@ export class VirtualReadingView {
   // ---- 内部 ----
 
   private scheduleUpdate(): void {
-    if (this.pendingFrame) {
+    if (this.disposed || this.pendingFrame) {
       return
     }
     this.pendingFrame = true
-    scheduleFrame(() => {
+    this.cancelFrame = scheduleFrame(() => {
+      this.cancelFrame = null
       this.pendingFrame = false
-      this.updateNow()
+      if (!this.disposed) this.updateNow()
     })
   }
 

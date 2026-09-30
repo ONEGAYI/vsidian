@@ -441,6 +441,8 @@ export type HostToWebview =
       text: string
       range: { start: number; end: number }
       scope: HoverPreviewScope
+      /** #242 每次成功送达的来源租约；不能作为共享内容缓存身份。 */
+      sourceLeaseId?: string
     }
   | {
       kind: 'hover.result'
@@ -788,6 +790,8 @@ export type WebviewToHost =
       sourceStart: number
       sourceEnd: number
       target: string
+      /** #242 成功送达后保留来源，直到 watch 转交或显式 release。 */
+      retainSource?: boolean
       /** 普通链接形态的 href 原文（#219；缺省 = 双链形态） */
       linkHref?: string
       /** #221 面板直接目标（反链/出链条目）：宿主快照携带的绝对 fsPath
@@ -810,6 +814,7 @@ export type WebviewToHost =
       docUri: string
       fsPath: string
       instanceId: string
+      sourceLeaseId?: string
     }
   /** 悬停目标订阅释放（hover.watch 的配对消息）：实例关闭/回收时释放其
    *  订阅；面板销毁由宿主侧整体释放（releaseSession），不依赖逐实例消息 */
@@ -820,6 +825,7 @@ export type WebviewToHost =
       fsPath: string
       instanceId: string
     }
+  | { kind: 'hover.source.release'; sessionId: string; docUri: string; sourceLeaseId: string }
   /** 代码块复制请求（#81）：卡片头部复制按钮点击 → 宿主剪贴板 API 写入。
    *  text 为代码体原文（两条围栏行之间，不含围栏与 info string），恒为
    *  LF（CM6 LF 模型）；宿主按文档 EOL 归一后写剪贴板（webview 不触碰
@@ -2658,6 +2664,7 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         isNonNegativeInt(v.sourceEnd) &&
         (v.sourceStart as number) <= (v.sourceEnd as number) &&
         isString(v.target) &&
+        (v.retainSource === undefined || typeof v.retainSource === 'boolean') &&
         (v.linkHref === undefined || isString(v.linkHref)) &&
         (v.directTarget === undefined ||
           (isObject(v.directTarget) &&
@@ -2674,8 +2681,12 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         typeof v.fsPath === 'string' &&
         v.fsPath.length > 0 &&
         typeof v.instanceId === 'string' &&
-        v.instanceId.length > 0
+        v.instanceId.length > 0 &&
+        (v.sourceLeaseId === undefined || (typeof v.sourceLeaseId === 'string' && v.sourceLeaseId.length > 0))
       )
+    case 'hover.source.release':
+      return isString(v.sessionId) && isString(v.docUri) &&
+        typeof v.sourceLeaseId === 'string' && v.sourceLeaseId.length > 0
     case 'perf.report':
       return (
         isNonNegativeInt(v.typingRounds) &&
@@ -3078,6 +3089,7 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
           isString(v.target.relPath) &&
           isNonNegativeInt(v.version) &&
           isString(v.text) &&
+          (v.sourceLeaseId === undefined || (typeof v.sourceLeaseId === 'string' && v.sourceLeaseId.length > 0)) &&
           isObject(v.range) &&
           typeof v.range.start === 'number' &&
           typeof v.range.end === 'number' &&
