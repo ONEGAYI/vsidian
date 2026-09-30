@@ -3379,6 +3379,64 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   background-color: var(--vscode-button-background);
 }
 
+/* #238 主面板开关闪烁态：会话生效档与面板显示脱节时的短促提示
+   （面板打开时 Ctrl+D 的 FindOptionsWidget 等价物——450ms 内移除，连按
+   重启动画；动画只做不透明度脉冲，不改变布局） */
+.vsidian-find .vsidian-find-flash {
+  animation: vsidian-find-flash 0.45s ease-in-out;
+}
+
+@keyframes vsidian-find-flash {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+/* ---- #238 查找选项条：Ctrl+D 会话期间的迷你三按钮浮动条 ----
+   仅大小写/全字/正则三开关（无搜索框无计数），非模态：不抢编辑器焦点
+   （按钮 mousedown preventDefault 保焦）、不占弹窗互斥槽位、Esc 在
+   find 面板之后消费一次（只关条不收敛选区）。与主面板同右上角位、
+   互斥出现（面板开时由面板开关闪烁承担提示，条不出场）。按钮态与
+   主面板开关同源（aria-pressed = findOptions 记忆档，非会话 override） */
+.vsidian-occurrence-bar {
+  position: absolute;
+  top: 36px;
+  right: 14px;
+  z-index: 39;
+  display: none;
+  gap: 2px;
+  padding: 3px 4px;
+  box-sizing: border-box;
+  border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.4));
+  border-radius: 4px;
+  background-color: var(--vscode-editorWidget-background, #252526);
+  box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36));
+}
+
+.vsidian-occurrence-bar.vsidian-occurrence-bar-open {
+  display: flex;
+}
+
+.vsidian-occurrence-bar button {
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size, 12px);
+  line-height: 1;
+  min-width: 22px;
+  padding: 3px 4px;
+  cursor: pointer;
+  color: var(--vscode-button-secondaryForeground);
+  background-color: var(--vscode-button-secondaryBackground);
+  border: none;
+  border-radius: 3px;
+}
+
+/* 三开关点亮态（与主面板同款点亮语言） */
+.vsidian-occurrence-bar .vsidian-occurrence-case-active,
+.vsidian-occurrence-bar .vsidian-occurrence-word-active,
+.vsidian-occurrence-bar .vsidian-occurrence-regexp-active {
+  color: var(--vscode-button-foreground);
+  background-color: var(--vscode-button-background);
+}
+
 /* Live 匹配装饰：全部匹配（视口内间接装饰）与当前匹配（直接装饰）。
    --vsidian-find-* 为稳定 CSS 变量入口，外部片段可覆盖 */
 #app .cm-editor .cm-content .vsidian-find-match {

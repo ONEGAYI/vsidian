@@ -23,9 +23,6 @@
 | 下一个/上一个查找结果 | Live、阅读 | F3 / Shift+F3 |
 | 替换（编辑区）（#236，打开查找面板并展开替换栏；阅读模式只开面板） | Live、阅读 | Ctrl+H |
 | 替换下一个匹配；全部替换匹配（#236，面板会话命令：面板开 + Live + 合法查询时执行） | Live | 无 |
-| 选下一处相同词（#238，无选区先选当前词；会话期间显示查找选项条；**条目按票面预写，待 #238 合并对齐**） | Live | Ctrl+D |
-| 跳过当前并选下一处相同词（#238，末位选区移到下一处；**按票面预写，待 #238 合并对齐**） | Live | Ctrl+K Ctrl+D |
-| 选中全部相同词（#238，一次全选所有匹配为多光标；**按票面预写，待 #238 合并对齐**） | Live | Ctrl+Shift+L |
 | 切换视图；转阅读；转 Live；转源码 | 双模式、Live、阅读、双模式，依次对应 | 无 |
 | 双态切换（#141，阅读↔实时预览，不含源码） | Live、阅读 | Ctrl+Q |
 | 打开设置 | Live、阅读 | 无 |
@@ -39,6 +36,10 @@
 | 刷新嵌入资源（#208，图片缓存失效与代次换戳、图表失败终态重置） | Live、阅读 | 无 |
 | 预览当前链接（#221，悬停浮层的键盘入口：Live 光标处/Reading·面板聚焦链接为目标） | Live、阅读 | 无 |
 | 在上方/下方添加光标（#237 多光标；Alt+点击添加为指针手势，不入注册表） | Live | Ctrl+Alt+Up / Ctrl+Alt+Down |
+| 选下一处相同词（#238，Ctrl+D 族：空光标先选词、逐次追加、文档尾回绕） | Live | Ctrl+D |
+| 跳过当前，选下一处相同词（#238，去最后加的选区、光标移到其后匹配） | Live | Ctrl+K Ctrl+D（两段弦） |
+| 选中全部相同词（#238，一次转多光标；匹配选项与查找面板三开关同源） | Live | Ctrl+Shift+L |
+| 选上一处相同词（#238，对称操作；对齐 VSCode 无默认键位，命令面板可达） | Live | 无 |
 
 **作用域**：写操作只在可编辑的 Live 正文获得焦点时拦截按键。阅读容器可执行只读视图操作；查找输入框仅允许只读操作；源码编辑器和设置页输入不装配正文按键路由。模式切换、失焦、超时（1.2 秒）或 Escape 会取消待输入的两段键。内部冲突包含完全相同的键位，以及重叠模式中的单段键与两段键首段；模式互斥时可复用键位。
 
@@ -98,8 +99,10 @@
 
 **多光标「在上方/下方添加光标」注册为 UI 操作、默认 Ctrl+Alt+Up/Down（#237 评估结论）**：多光标三入口中的两条命令（`onegayi.vsidian.editor.addCursorAbove` / `addCursorBelow`，@codemirror/commands 内置实现，webview 本地消化）**单列为可绑定操作**（仅 Live 编辑正文生效 `mode: live`、写操作 `writes: true`——本表首个 live+writes 的 UI 操作；阅读只读不接管，源码与设置页输入不装配）。默认绑定对齐 VSCode（Ctrl+Alt+Up / Ctrl+Alt+Down）；键位所有权归注册表——defaultKeymap 的内建同键位绑定由多光标扩展组的接管 keymap 退役（吞键不执行），用户清空/改绑后内建绑定不得复活，实际执行经 keybindingRouter 本地分支按注册表当前生效绑定分发；命令面板经 UI_OPERATIONS 注册循环回发 `ui.command`，两入口共用 `runCursorAdd` 同一实现（`src/webview/syncController.ts`）。边界：多光标设置（`editor.multicursor`，默认开）关闭时不接管（键位仍由注册表持有）；表格格区 region 存在时不接管（region 状态机维持单选区语义，批次 §3 已定边界）；frontmatter 成型头区由 frontmatterEditing 选区引导兜底。**第三入口 Alt+点击是指针手势不是命令**（`EditorView.clickAddsSelectionRange.of(e => e.altKey)`，CM6 默认 Ctrl/Cmd 显式改 Alt——Ctrl+点击已被 Live 链接跳转占用，CONTEXT.md 产品边界钉死，恒为 Alt 无切换空间）：不注册操作、不占键位、不可改绑，与表格格内拖选（altKey 让路先例）同属指针路径。Esc 收敛多选区由 defaultKeymap 的 `simplifySelection` 既有绑定承担（排全部浮层 Esc 之后，浮窗打开期间键位被浮窗消费不达 CM6，天然不插队）。Ctrl+Alt+Up/Down 冲突核对（#237）：操作表与 keybindingRouter 零占用（表内既有方向键绑定均为单修饰或无 Alt 组合）。
 
+**「选下一处相同词」族注册为四个可绑定操作、默认 Ctrl+D / Ctrl+K Ctrl+D / Ctrl+Shift+L（#238 评估结论）**：多光标三入口的第三条命令族（`onegayi.vsidian.find.selectNext` / `selectPrevious` / `skipCurrent` / `allOccurrences`，选区计划在 webview 本地消化，`src/webview/nextOccurrence.ts` 纯函数 + `runOccurrenceSelect` 适配层）**单列为可绑定操作**（Live 编辑正文生效 `mode: live`、写类 `writes: true`——选区操作与 #237 addCursor 同口径，router 的 allowWrites 门控据此在查找输入框等非正文焦点不劫持；阅读只读不接管）。默认绑定对齐 VSCode：Ctrl+D（选下一处——连按逐次追加、文档尾回绕）、Ctrl+K Ctrl+D（跳过链，**两段弦**——router 的整串 chord 匹配与 1.2 秒前缀超时/Escape 取消为既有基建，键位冲突检测含弦首段前缀重叠）、Ctrl+Shift+L（全选相同词转多光标）；「选上一处」对齐 VSCode 无默认键位（命令面板入口可达，不做不视为缺口——批次文档 §4 钉住）。匹配选项与查找面板三开关**同源消费**（`shared/findOptions` 单一事实源，workspace 级记忆）：面板开且搜索词非空沿用面板档；面板未开 + 空选区以「敏感+全字」override 档种子选词（会话级、不写回记忆档）；面板未开 + 有选区沿用面板记忆档、选区文本为搜索词——会话档在创建时决定、存续期间不漂移。**无内建绑定需接管**：defaultKeymap 不绑定这三键，searchKeymap 的 Mod-d（selectNextOccurrence）随官方面板一并不装配，故无需吞键 keymap；用户清空/改绑后按键自然落穿（浏览器无对应默认行为）。原生 `selectNextOccurrence`（恒敏感、无选项联动）由本票计划函数 + 控制器 dispatch 取代。配套「查找选项条」（Ctrl+D 会话期的迷你三按钮）非模态——不抢编辑器焦点、不占弹窗互斥槽位、Esc 在查找面板之后消费一次（只关条不收敛选区，收敛由下一次 Esc 经 CM6 `simplifySelection`），详见 `docs/specs/batch-2026-10-vscode-ops.md` §3「查找选项条细节」。Ctrl+D / Ctrl+K Ctrl+D / Ctrl+Shift+L 冲突核对（#238）：操作表与 keybindingRouter 零占用（表内无 ctrl+d、无 ctrl+k 起始弦、无 ctrl+shift+l）。
+
 **中文分词词级移动注册为四个可绑定操作（#239 评估结论）**：Ctrl+Left/Right 及 Shift 变体对连续中文段按分词结果逐词切分（引擎可切换：预设 Intl.Segmenter，可选 jieba-wasm 按需下载——设置页「中文分词」分页管理），拉丁与数字段**逐字节沿用 CM6 既有 group 语义**（无 CJK 细化时整笔委托原生命令，回归断言钉住）。四个操作**单列注册**（`wordMotion.cursorLeft/Right`、`wordMotion.selectLeft/Right`，Live 编辑正文生效 `mode: live`、写类 `writes: true`——router 的 allowWrites 门控据此在 find 输入框等非正文焦点不劫持；Shift 变体独立注册——router 按整串 chord 精确匹配，ctrl+left 不隐含 shift 扩选）。默认绑定 ctrl+方向（Windows/Linux）与 alt+方向（mac 词移动惯例；Cmd+方向不注册——mac 行首/行尾惯例不被覆盖）。执行装配在 **keybindingRouter 的 document 捕获层本地分支**（词移动高频按键，同步直达不出站宿主往返）；命令面板经 UI_OPERATIONS 注册循环 → `ui.command` 回流。不选 CM6 keymap 派生替换 defaultKeymap 的 Mod-Arrow：路由层已有注册表改绑/清空/恢复默认全链路，且「注册表只登记带修饰键方向键」天然保证与表格裸方向键格导航共存（tableEditing 只绑裸 ArrowLeft/Right，browser 测试钉住 Tab 格导航与格内词移动并存）。
 
-**2026-10 编辑器操作批次键位冲突核对（#240 收口记录，AGENTS.md 快捷键约定的评估记录）**：本批次新增键位逐键核对操作注册表与 keybindingRouter 占用，结论如下——`Ctrl+H`（替换，#236）：注册表内此前无占用（粗体 Ctrl+B / HTML 注释 Ctrl+/ 均不同键），CM6 defaultKeymap 无内建绑定；`Ctrl+Alt+Up/Down`（添加光标，#237）：表内既有方向键绑定均为单修饰或无 Alt 组合，defaultKeymap 内建同键位绑定由多光标扩展组的接管 keymap 退役（吞键不执行，键位所有权归注册表）；`Ctrl+D` / `Ctrl+K Ctrl+D` / `Ctrl+Shift+L`（选词族，#238 按票面预写，待合并对齐）：注册表与 CM6 内建均无占用，`Ctrl+K` 两段键首段与既有两段键（待输入超时 1.2 秒取消）无首段重叠冲突；`Ctrl+Left/Right` 与 Shift 变体（词级移动，#239）：注册表此前无占用，defaultKeymap 的 Mod-Arrow group 移动由路由层本地分支接管（注册表只登记带修饰键方向键，与表格裸方向键格导航共存，browser 测试钉住）；`Alt+Left/Right`（mac 词移动惯例默认）：与浏览器后退/前进手势在同一 webview 上下文由编辑器消费，不透传。批次内互检：六族键位两两无重叠（Ctrl+D 与 Ctrl+Alt+方向、Ctrl+Shift+L 与 Ctrl+Shift+Left/Right 修饰组合不同）；与批次外既有绑定的唯一交叉面是 Ctrl+方向键从「CM6 内建 group 移动」转为「注册表命令」（行为超集：拉丁语义不变，CJK 段分词细化）。
+**2026-10 编辑器操作批次键位冲突核对（#240 收口记录，AGENTS.md 快捷键约定的评估记录）**：本批次新增键位逐键核对操作注册表与 keybindingRouter 占用，结论如下——`Ctrl+H`（替换，#236）：注册表内此前无占用（粗体 Ctrl+B / HTML 注释 Ctrl+/ 均不同键），CM6 defaultKeymap 无内建绑定；`Ctrl+Alt+Up/Down`（添加光标，#237）：表内既有方向键绑定均为单修饰或无 Alt 组合，defaultKeymap 内建同键位绑定由多光标扩展组的接管 keymap 退役（吞键不执行，键位所有权归注册表）；`Ctrl+D` / `Ctrl+K Ctrl+D` / `Ctrl+Shift+L`（选词族，#238，合并后键位与票面一致）：注册表与 CM6 内建均无占用，`Ctrl+K` 两段键首段与既有两段键（待输入超时 1.2 秒取消）无首段重叠冲突；`Ctrl+Left/Right` 与 Shift 变体（词级移动，#239）：注册表此前无占用，defaultKeymap 的 Mod-Arrow group 移动由路由层本地分支接管（注册表只登记带修饰键方向键，与表格裸方向键格导航共存，browser 测试钉住）；`Alt+Left/Right`（mac 词移动惯例默认）：与浏览器后退/前进手势在同一 webview 上下文由编辑器消费，不透传。批次内互检：六族键位两两无重叠（Ctrl+D 与 Ctrl+Alt+方向、Ctrl+Shift+L 与 Ctrl+Shift+Left/Right 修饰组合不同）；与批次外既有绑定的唯一交叉面是 Ctrl+方向键从「CM6 内建 group 移动」转为「注册表命令」（行为超集：拉丁语义不变，CJK 段分词细化）。
 
 **多光标下格式操作的键位语义（#240 评估结论）**：格式操作（粗体/斜体/标题等注册表操作）在多光标形态下的作用域由操作类别决定，不改键位注册——**行内包裹类**（粗体/斜体/删除线/行内代码/高亮/清除行内格式/链接/行内公式/双链）逐 range 应用（每条选区独立两态判定，一笔撤销整批回退）；**结构性操作**（标题/列表/引用/代码块/块级公式/分割线/HTML 注释）退化主选区（其余选区原样保留，多光标形态不收敛）。表格格区（矩形多格选区）与多 range 互斥（region 状态机维持单选区，批次实施树 §3 已定边界），表格增删行列命令按既有契约在选区中不执行。Tab/Shift+Tab 行缩进取各 range 覆盖行并集（#120 既有口径，与 Enter/Backspace 的「多光标不接管」不同：行集合命令的自然泛化），Tab 越界对多 range 显式不接管（#125 既有决策）。

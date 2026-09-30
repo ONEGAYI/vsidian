@@ -1205,7 +1205,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
   </section>
   <section class="domain" data-domain="chrome">
-    <h1 style="font-size:19px;margin-bottom:4px">界面域（69 条）</h1>
+    <h1 style="font-size:19px;margin-bottom:4px">界面域（70 条）</h1>
     <p class="note">界面域条目（#133 起逐项核实）：静态入口经探针在真实渲染中断言，交互态入口由浏览器/集成套件按行为路径验证；第三方渲染器（KaTeX/Mermaid）内部 DOM 不承诺为稳定接口（见各域「限制」类目）。</p>
     <h2>界面域 · 公式（5）</h2>
     <article class="entry" id="live-math">
@@ -2124,7 +2124,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：单元 hoverPopupCssContract：热区/按钮透明与指针/悬停与 focus-visible 显示/收起隐藏/chevron 旋转钉规则；单元 hoverPopup：属性区状态机（默认折叠/切换/刷新保留/重开复位/范围门控/降级合成标题栏）；浏览器 hoverPreview（#220）：真实指针折叠交互、键盘 Enter 操作、明暗主题下标题行与按钮可见性绘制层断言；单元 embedCard（#222）：嵌入卡片属性区状态机与视口回收重挂的状态保持</p>
       <p class="life">引入：#220（2026-09-30）</p>
     </article>
-    <h2>界面域 · 查找面板（4）</h2>
+    <h2>界面域 · 查找面板（5）</h2>
     <article class="entry" id="find-panel">
       <h3><code>.vsidian-find（浮动面板容器；.vsidian-find-open 展开态）—— 内部 .vsidian-find-row 主行（.vsidian-find-input 输入框 / .vsidian-find-count 计数（-empty 零命中）/.vsidian-find-case（Aa）/ -word（ab）/ -regexp（.*）三开关（各自 -active 点亮态）/ .vsidian-find-prev / -next / -close 导航与关闭）与 .vsidian-find-toggle 左缘替换栏展开切换（aria-expanded 随态）</code><span class="eid">find-panel</span></h3>
       <p class="purpose">编辑区浮动查找面板（#236 起三开关面板，引擎 @codemirror/search 外部驱动）：column 布局——主行（输入/N:M 计数/大小写-全字-正则三开关/上一个/下一个/关闭）+ 左缘替换栏展开切换。三开关为查找选项单一事实源（shared/findOptions，#238「选下一处相同词」同源消费），workspace 级记忆跨会话保留；面板在 Live 与阅读两模式均可用（阅读保留块级命中与定位）。</p>
@@ -2184,6 +2184,23 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 }</code></pre>
       <p class="verify">验证：单元 findPanelCssContract：变量消费规则存在（回落值内联形态）</p>
       <p class="life">引入：#14</p>
+    </article>
+    <article class="entry" id="find-options-bar">
+      <h3><code>.vsidian-occurrence-bar（迷你浮动条容器；.vsidian-occurrence-bar-open 显示态）—— 内部 .vsidian-occurrence-case（Aa）/ -word（ab）/ -regexp（.*）三开关（各自 -active 点亮态）</code><span class="eid">find-options-bar</span></h3>
+      <p class="purpose">查找选项条（#238）：「选下一处相同词」会话期间在场的迷你浮动条——仅三个开关按钮，无搜索框无计数（用户决策：每次 Ctrl+D 按下都直接打开）。按钮态与主面板开关记忆同源（shared/findOptions，aria-pressed 同步），点击即切换并按新选项重建会话；非模态——不抢编辑器焦点（按钮 mousedown preventDefault 保焦）、不占弹窗互斥槽位，Esc 在查找面板之后消费一次（只关条不收敛选区）；主查找面板打开时不出现（改由 .vsidian-find-flash 闪烁面板开关按钮承担提示）；会话结束（选区外部变化/失焦/Esc/切模式）淡出。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-none">none</span></p>
+<p class="states">状态：DOM 常驻、显隐由 .vsidian-occurrence-bar-open 控制（默认 display:none，探针不受影响）；三开关点亮为对应 -active 类（与主面板 -active 同款点亮语言）；面板开关闪烁态 .vsidian-find-flash（0.45s 不透明度脉冲动画，非本条目选择器——挂在 find-panel 域的面板按钮上）。</p>
+      <p class="obsidian">Obsidian 对应：无（Obsidian 的 Ctrl+D 选项提示为应用级部件，不作用于文档样式面）</p>
+
+      <p class="dom">DOM 关系：挂编辑器容器（与 .vsidian-find 同定位包含块、同右上角位、互斥出现）；按钮为真实 &lt;button type=&quot;button&quot;&gt;（aria-pressed 随态、aria-label/title 复用 find.matchCase / find.wholeWord / find.regexp 词条，容器 aria-label 用 find.optionsBar）。</p>
+      <pre><code>.vsidian-occurrence-bar {
+  border-radius: 4px;
+}
+.vsidian-occurrence-bar .vsidian-occurrence-case-active {
+  color: #f14c4c;
+}</code></pre>
+      <p class="verify">验证：单元 occurrenceCssContract：选项条显隐对与三开关点亮规则钉住；单元 occurrence（#238）：显示/在场/淡出/切换重建/闪烁替代的完整行为路径；浏览器 occurrence（#238）：真实键盘 Ctrl+D 连按与弦键位</p>
+      <p class="life">引入：#238（2026-10 批次）</p>
     </article>
   </section>
 <p style="margin-top:48px;color:color-mix(in srgb, currentColor 50%, transparent);font-size:12px">由 src/shared/styleContract.ts 生成（scripts/genStyleGuide.mjs）；产物一致性由 test/unit/styleGuideGen.test.ts 钉住。</p>

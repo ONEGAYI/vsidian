@@ -66,6 +66,9 @@ export const FIND_CLASS_NAMES = {
   prev: 'vsidian-find-prev',
   next: 'vsidian-find-next',
   close: 'vsidian-find-close',
+  /** 三开关闪烁态（#238：主面板打开时 Ctrl+D 的会话生效档与面板显示
+   *  脱节的提示——VSCode highlightFindOptions 语义，CSS 动画短促在场） */
+  flash: 'vsidian-find-flash',
   /** Live 全部匹配装饰（视口内间接装饰） */
   match: 'vsidian-find-match',
   /** Live 当前匹配装饰（直接装饰） */

@@ -3729,6 +3729,30 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "单元 findPanelCssContract：变量消费规则存在（回落值内联形态）"
     ],
     "introduced": "#14"
+  },
+  {
+    "id": "find-options-bar",
+    "domain": "chrome",
+    "category": "find-panel",
+    "kind": "selector",
+    "target": ".vsidian-occurrence-bar（迷你浮动条容器；.vsidian-occurrence-bar-open 显示态）—— 内部 .vsidian-occurrence-case（Aa）/ -word（ab）/ -regexp（.*）三开关（各自 -active 点亮态）",
+    "purpose": "查找选项条（#238）：「选下一处相同词」会话期间在场的迷你浮动条——仅三个开关按钮，无搜索框无计数（用户决策：每次 Ctrl+D 按下都直接打开）。按钮态与主面板开关记忆同源（shared/findOptions，aria-pressed 同步），点击即切换并按新选项重建会话；非模态——不抢编辑器焦点（按钮 mousedown preventDefault 保焦）、不占弹窗互斥槽位，Esc 在查找面板之后消费一次（只关条不收敛选区）；主查找面板打开时不出现（改由 .vsidian-find-flash 闪烁面板开关按钮承担提示）；会话结束（选区外部变化/失焦/Esc/切模式）淡出。",
+    "views": [
+      "live"
+    ],
+    "states": "DOM 常驻、显隐由 .vsidian-occurrence-bar-open 控制（默认 display:none，探针不受影响）；三开关点亮为对应 -active 类（与主面板 -active 同款点亮语言）；面板开关闪烁态 .vsidian-find-flash（0.45s 不透明度脉冲动画，非本条目选择器——挂在 find-panel 域的面板按钮上）。",
+    "dom": "挂编辑器容器（与 .vsidian-find 同定位包含块、同右上角位、互斥出现）；按钮为真实 <button type=\"button\">（aria-pressed 随态、aria-label/title 复用 find.matchCase / find.wholeWord / find.regexp 词条，容器 aria-label 用 find.optionsBar）。",
+    "example": ".vsidian-occurrence-bar {\n  border-radius: 4px;\n}\n.vsidian-occurrence-bar .vsidian-occurrence-case-active {\n  color: #f14c4c;\n}",
+    "obsidian": {
+      "counterpart": "无（Obsidian 的 Ctrl+D 选项提示为应用级部件，不作用于文档样式面）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 occurrenceCssContract：选项条显隐对与三开关点亮规则钉住",
+      "单元 occurrence（#238）：显示/在场/淡出/切换重建/闪烁替代的完整行为路径",
+      "浏览器 occurrence（#238）：真实键盘 Ctrl+D 连按与弦键位"
+    ],
+    "introduced": "#238（2026-10 批次）"
   }
 ] as readonly StyleContractEntry[]
 
@@ -4841,6 +4865,14 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     "dom": "Attached inside the editor container (position:relative containing block), below #app; buttons are real <button type=\"button\"> elements (aria-pressed/aria-expanded follow state; aria-label/title from the find.* i18n entries).",
     "obsidian": {
       "counterpart": "None (the Obsidian find widget is an application-level part, not a document styling surface)"
+    }
+  },
+  "find-options-bar": {
+    "purpose": "The find options bar (#238): a mini floating strip present while a \"select next occurrence\" session is active — just the three toggle buttons, no search box and no counter (user decision: every Ctrl+D press opens it directly). The button states share the main panel toggle memory (shared/findOptions; aria-pressed in sync); clicking toggles and rebuilds the session with the new options. Non-modal: it never takes editor focus (button mousedown is preventDefault-ed to keep focus), never claims the popup mutex slot, and Esc is consumed once after the find panel (closes the bar only, leaving selections intact). While the main find panel is open it does not appear (the panel toggle buttons blink via .vsidian-find-flash instead); the session end (external selection change / focus loss / Esc / mode switch) fades it out.",
+    "states": "The bar DOM is always present; visibility is controlled by .vsidian-occurrence-bar-open (display:none by default, so probes are unaffected). A lit toggle means the option is on (same lit language as the main panel -active states). The panel toggle blink state is .vsidian-find-flash (a 0.45s opacity pulse animation; it lives on the find-panel buttons, not on the selectors of this entry).",
+    "dom": "Attached inside the editor container (same positioning containing block and top-right corner as .vsidian-find; the two appear exclusively); buttons are real <button type=\"button\"> elements (aria-pressed follows state; aria-label/title reuse the find.matchCase / find.wholeWord / find.regexp entries, the container aria-label uses find.optionsBar).",
+    "obsidian": {
+      "counterpart": "None (the Obsidian Ctrl+D option hint is an application-level part, not a document styling surface)"
     }
   },
   "find-panel-replace": {

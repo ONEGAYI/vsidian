@@ -326,6 +326,8 @@ export const zhCn: Record<MessageKey, string> = {
   'find.prev': '上一个匹配',
   'find.next': '下一个匹配',
   'find.close': '关闭查找',
+  /** #238 查找选项条（Ctrl+D 会话期间的迷你三按钮）容器可访问名称 */
+  'find.optionsBar': '查找选项',
 
   'conflict.bannerText': '检测到无法安全同步的外部修改：写回已暂停，本地输入已保留，不会被覆盖。',
   'conflict.copyUnconfirmed': '复制未确认输入',
@@ -619,6 +621,11 @@ export const zhCn: Record<MessageKey, string> = {
   'command.wordMotion.cursorRight.title': '按词右移（中文分词）',
   'command.wordMotion.selectLeft.title': '按词向左扩展选区（中文分词）',
   'command.wordMotion.selectRight.title': '按词向右扩展选区（中文分词）',
+  // ---- #238 选下一处相同词族（操作注册表 titleKey） ----
+  'command.find.selectNext.title': '选下一处相同词',
+  'command.find.selectPrevious.title': '选上一处相同词',
+  'command.find.skipCurrent.title': '跳过当前，选下一处相同词',
+  'command.find.allOccurrences.title': '选中全部相同词',
   /** 设置项：分词引擎（呈现归「中文分词」附加分页） */
   'setting.wordSegmentEngine.title': '分词引擎',
   'setting.wordSegmentEngine.description': 'Ctrl+左/右箭头按词移动时对连续中文段的切分引擎。英文与数字段始终沿用内置分组语义。',
