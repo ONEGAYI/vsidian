@@ -304,6 +304,25 @@ export type HostToWebview =
    *  处理器：出站 refresh.request，失效重挂由宿主 refresh.invalidated
    *  回流驱动）。 */
   | { kind: 'refresh.test.click' }
+  /** 测试钩子（#218）：对阅读视图第 index 个真实双链派发悬停进入/离开
+   * （mouseover/mmouseout 经容器委托——与用户悬停同一处理器链路；宿主
+   * 测试无法向 webview 派发真实鼠标事件，以此通道验证真实宿主内的
+   * 悬停读取与浮层开闭）。#219 起 link='md' 对第 index 个普通 Markdown
+   * 链接（非双链 `<a>`）派发——缺省仍为双链；#221 起 link 枚举扩展
+   * Live 与面板入口：'live-wikilink' / 'live-md' 对 Live 正文第 index
+   * 个双链/普通链接装饰派发（ctrlKey 模拟 Ctrl+悬停修饰位，缺省不带
+   * = 直接悬停口径），'backlink' / 'outlink' 对面板第 index 个条目
+   * 派发（面板直接悬停，无修饰语义）。action='modkey' 对 document 派发
+   * 真实 keydown Control（先 enter 后 modkey 走「悬停后再按 Ctrl」的
+   * 补触发路径；index/link 忽略） */
+  | {
+      kind: 'hover.test.pointer'
+      action: 'enter' | 'leave' | 'modkey'
+      index: number
+      link?: 'wikilink' | 'md' | 'live-wikilink' | 'live-md' | 'backlink' | 'outlink'
+      /** Live 入口的 Ctrl 修饰位（派发 mouseover 时透传；仅 live-* 有意义） */
+      ctrlKey?: boolean
+    }
   /** 测试钩子（#21）：在真实 webview 的 CM6 中输入，验证暂停态即时留存。 */
   | { kind: 'sync.test.edit'; offset: number; text: string; closeAfter?: boolean }
   /** 测试钩子：组合候选写入首行 DOM，经过 CM6 MutationObserver 的真实输入链。 */
@@ -403,6 +422,50 @@ export type HostToWebview =
       reason?: 'no-workspace' | 'read-error'
       items?: OutlinkItemPayload[]
       seq?: number
+    }
+  /** 悬停文档预览结果（#218，hover.request 的应答，reqId+instanceId 双配对）：
+   *  成功携带规范目标身份（fsPath + 所属根内相对路径）、目标版本
+   *  （TextDocument.version，#224 变更刷新的版本基准）、LF UTF-16 全文与
+   *  源范围、语义范围选择器（#219 起 full 全文 / heading 章节 / block 块；
+   *  全文随范围一起返回是「保留全文解析上下文再选取范围」的载荷形态，
+   *  webview 切范围在切块后按块区间过滤，不孤立解析截取字符串）。失败附
+   *  原因码（错误分态见 HoverPreviewFailReason；anchor-missing 附锚点原文）
+   *  ——webview 就地 i18n 呈现，不弹宿主通知。只读消息：宿主不写任何文档 */
+  | {
+      kind: 'hover.result'
+      reqId: number
+      instanceId: string
+      ok: true
+      target: HoverPreviewTargetIdentity
+      version: number
+      text: string
+      range: { start: number; end: number }
+      scope: HoverPreviewScope
+    }
+  | {
+      kind: 'hover.result'
+      reqId: number
+      instanceId: string
+      ok: false
+      reason: HoverPreviewFailReason
+      /** anchor-missing 时的锚点原文（块 id 带 ^ 前缀），供就地提示 */
+      anchor?: string
+    }
+  /** 悬停目标失效推送（#224 引用视图同步）：宿主观测到被订阅目标（hover.watch
+   *  登记）的内容或磁盘状态变化后，向订阅该目标的全部面板推送——webview
+   *  据此对在场浮层/嵌入卡片撤旧重载（changed）、撤下内容显示缺失态
+   *  （deleted，不无限保留旧内容）或呈现读取失败（stale：权限/断连，不等同
+   *  删除）。status 三态与 vaultIndex onTargetChange 同口径；generation 为
+   *  同一目标的失效代次（单调递增，首观测为 1）。P3-1（review 修订）：当前
+   *  单面板消息通道为 FIFO 保序，webview **不消费 generation 做乱序丢弃**
+   *  ——代次仅作观测与单调性事实保留（跨通道/多宿主场景若引入再启用）。
+   *  未保存修改经短暂合并（防抖窗）后以 changed 推送；deleted/stale 直通。
+   *  只读推送：不携带正文（webview 重发 hover.request 读取），宿主不写文档 */
+  | {
+      kind: 'hover.invalidated'
+      fsPath: string
+      status: 'changed' | 'deleted' | 'stale'
+      generation: number
     }
   /** 索引维护状态（#198，设置页消费）：排除模式（当前生效 + 默认值）、
    *  维护操作状态与进度、最近一次操作结果反馈。设置页经 index.get 拉取；
@@ -576,6 +639,41 @@ export type WebviewToHost =
       outlinks?: OutlinksProbe
       /** #140 Popover 改版：frontmatter 属性编辑浮层是否打开（旧 webview 缺省） */
       fmPopoverOpen?: boolean
+      /** #218 悬停预览观测：浮层开闭、内容态（loading/content/error）、
+       *  目标标识（成功为根内相对路径）与内容块数（旧 webview 缺省）。
+       *  #220 新增：fm 属性区三态（none=无属性区/非全文范围，collapsed/
+       *  expanded=全文引用的折叠态）与 imageSrcs（浮层内已应用 src 的图片
+       *  地址——B 身份资源解析的观测面；字段可选，旧 webview 缺省） */
+      hoverPreview?: {
+        open: boolean
+        state: 'loading' | 'content' | 'error'
+        note: string
+        blocks: number
+        scope: 'full' | 'heading' | 'block' | ''
+        fm?: 'none' | 'collapsed' | 'expanded'
+        imageSrcs?: string[]
+      }
+      /** #222 嵌入卡片观测：在场卡片逐枚的嵌入目标原文、状态
+       *  （loading/content/error）、目标标识（成功为根内相对路径/失败为
+       *  错误文案）、内容块数、语义范围、属性区三态与限高（旧 webview 缺省）。
+       *  #223 起 host 区分容器（reading 块挂载 / live widget 挂载） */
+      readingEmbed?: Array<{
+        inner: string
+        state: 'loading' | 'content' | 'error'
+        note: string
+        blocks: number
+        scope: 'full' | 'heading' | 'block' | ''
+        fm: 'none' | 'collapsed' | 'expanded'
+        maxHeightPx: number
+        host?: 'reading' | 'live'
+        /** #224 内容文本字符数（未保存修改推送后刷新可见性的观测面：
+         *  目标内容变化 → textLen 变化；旧 webview 缺省） */
+        textLen?: number
+      }>
+      /** #223 Live 嵌入显隐观测：嵌入表逐枚的源码显形态（目标原文、行号、
+       *  光标/选区是否触及源码区间——selectionTouchesRange 语义；旧 webview
+       *  缺省为空数组） */
+      liveEmbedReveal?: Array<{ inner: string; line: number; revealed: boolean }>
     }
       /** 阅读视图性能探针回报（#7）：滚动往返期间的挂载/回收与解析观测 */
   | {
@@ -593,7 +691,10 @@ export type WebviewToHost =
     }
   /** 链接跳转意图（#10）：webview 只上报原始 URI 与源位置，执行归宿主——
    *  URI 解析与路径拼接（含 Windows/远程语义）只在宿主侧进行。阅读视图
-   *  单击、实时预览 Ctrl/Cmd+单击产生；href 为源文原样（未解码/未规范化） */
+   *  单击、实时预览 Ctrl/Cmd+单击产生；href 为源文原样（未解码/未规范化）。
+   *  #220 来源资源：悬停浮层内（B 文档 Reading 内容）点击的链接附
+   *  sourceDocUri（B 的 fsPath，hover.result 成功回包送达过的目标）——宿主
+   *  按 B 目录解析并执行；缺省 = 面板自身文档（主视图点击，向后兼容） */
   | {
       kind: 'link.activate'
       sessionId: string
@@ -601,13 +702,16 @@ export type WebviewToHost =
       href: string
       srcStart: number
       srcEnd: number
+      /** #220 来源文档（悬停浮层内链接）；宿主侧与面板已送达的悬停目标比对，不匹配即丢弃 */
+      sourceDocUri?: string
     }
   /** 双链跳转意图（#11）：与 link.activate 同通道语义，但目标是 Obsidian
    *  双链（按名/按路径在工作区内解析，非 URI）——分类走 wikilinkTarget
    *  而非 #10 的 URI 白名单。target 为 `[[` 与 `]]` 之间、`|` 之前的原文
    *  （未 trim；宿主解析自带规范化）。阅读视图单击、实时预览
    *  Ctrl/Cmd+单击产生；srcStart/srcEnd 覆盖整个 `[[…]]` 出现（阅读视图
-   *  为所在块源锚点） */
+   *  为所在块源锚点）。#220 sourceDocUri 语义与 link.activate 同（浮层内
+   *  双链以 B 为来源解析） */
   | {
       kind: 'wikilink.activate'
       sessionId: string
@@ -615,10 +719,25 @@ export type WebviewToHost =
       target: string
       srcStart: number
       srcEnd: number
+      /** #220 来源文档（悬停浮层内双链）；宿主侧与面板已送达的悬停目标比对，不匹配即丢弃 */
+      sourceDocUri?: string
     }
   /** 图片资源解析请求（#10）：非 http(s) 直连的工作区图源经宿主解析为
-   *  webview 可加载地址（reqId 会话面板内自增，对应 image.result） */
-  | { kind: 'image.request'; sessionId: string; docUri: string; reqId: number; src: string }
+   *  webview 可加载地址（reqId 会话面板内自增，对应 image.result）。
+   *  #220 来源资源：悬停浮层内 B 文档的图片附 sourceDocUri（B 的 fsPath）
+   *  ——宿主按 B 目录走同一 classifyImageTarget 白名单与 asWebviewUri 机制
+   *  （会话守卫字段仍为面板自身文档；sourceDocUri 与已送达悬停目标比对，
+   *  不匹配即丢弃）；缺省 = 面板自身文档。来源化请求不进会话解析缓存/
+   *  在途去重表（浮层短生命周期；跨开缓存属 #224 有界缓存） */
+  | {
+      kind: 'image.request'
+      sessionId: string
+      docUri: string
+      reqId: number
+      src: string
+      /** #220 来源文档（悬停浮层内图片） */
+      sourceDocUri?: string
+    }
   /** 图片周期核验（#201）：webview 活跃挂载图源（非直连）合并上报，宿主
    *  stat 对比版本表后对变化目标回发 image.invalidate（维持目标不响应）。
    *  由 webview 调度器驱动：间隔约 30 秒、无活跃槽位停止、面板恢复可见/
@@ -649,6 +768,58 @@ export type WebviewToHost =
    *  image.request 同款（就绪且 docUri 匹配才放行）；只读交互，不写文档、
    *  不入撤销栈，暂停态同样放行 */
   | { kind: 'refresh.request'; sessionId: string; docUri: string; reqId: number }
+  /** 悬停文档预览请求（#218，只读引用消息——**不进 edit.request 通道**）：
+   *  webview 悬停 Reading 双链时请求宿主无副作用读取目标并以 hover.result
+   *  回包（reqId 配对）。会话守卫字段（sessionId/docUri）与其余请求同款；
+   *  请求身份契约：instanceId 为 webview 侧浮层视图实例标识（一次打开一个
+   *  实例，重开换新 id——迟到回包据此丢弃）、sourceStart/sourceEnd 为父
+   *  文档内引用区间的 LF 偏移（Reading 侧为所在块源锚点）、target 为 `[[`
+   *  与 `]]` 之间 `|` 之前的原文（未 trim；宿主解析自带规范化）。#219 起
+   *  普通本地 Markdown 链接接入：linkHref 存在时为 `<a>` 的 href 原文
+   *  （阅读侧可能经 markdown-it normalizeLink 编码——宿主容错解码），宿主
+   *  走普通链接解析（外部网页 webview 侧已预滤，宿主复核兜底）。只读交互：
+   *  宿主只 openTextDocument+getText，不写文档、不建面板 */
+  | {
+      kind: 'hover.request'
+      sessionId: string
+      docUri: string
+      reqId: number
+      instanceId: string
+      sourceStart: number
+      sourceEnd: number
+      target: string
+      /** 普通链接形态的 href 原文（#219；缺省 = 双链形态） */
+      linkHref?: string
+      /** #221 面板直接目标（反链/出链条目）：宿主快照携带的绝对 fsPath
+       *  （± 锚点——标题原文或 ^块id，与 OutlinkItemPayload.anchor 同口径），
+       *  存在时宿主不走 target/linkHref 文本解析与根内路径探测，直接按
+       *  fsPath 读取并按锚点收窄范围。空串 fsPath = 断链出链条目（宿主回
+       *  not-found 分态——条目仍可悬停显示失效占位）。target 字段此时为
+       *  条目显示名（错误分态文案的取材） */
+      directTarget?: { fsPath: string; anchor?: string }
+    }
+  /** 悬停目标订阅（#224 引用视图同步，只读消息）：webview 侧视图实例
+   *  （浮层/嵌入卡片）成功装载目标后登记——宿主对该目标的文档修改与磁盘
+   *  变化经 hover.invalidated 推送。fsPath 恒为 hover.result 成功回包送达
+   *  的目标身份（webview 不自行解析路径）；instanceId 为视图实例标识
+   *  （浮层 instanceId / 嵌入 entry 语义键）——同一目标多实例合并订阅
+   *  （目标级推送），各实例独立释放（hover.unwatch 归零才退订） */
+  | {
+      kind: 'hover.watch'
+      sessionId: string
+      docUri: string
+      fsPath: string
+      instanceId: string
+    }
+  /** 悬停目标订阅释放（hover.watch 的配对消息）：实例关闭/回收时释放其
+   *  订阅；面板销毁由宿主侧整体释放（releaseSession），不依赖逐实例消息 */
+  | {
+      kind: 'hover.unwatch'
+      sessionId: string
+      docUri: string
+      fsPath: string
+      instanceId: string
+    }
   /** 代码块复制请求（#81）：卡片头部复制按钮点击 → 宿主剪贴板 API 写入。
    *  text 为代码体原文（两条围栏行之间，不含围栏与 info string），恒为
    *  LF（CM6 LF 模型）；宿主按文档 EOL 归一后写剪贴板（webview 不触碰
@@ -779,8 +950,8 @@ export interface BacklinkItemPayload {
   sourceRelPath: string
   /** 来源文档绝对 fsPath（跳转与打开用） */
   sourceFsPath: string
-  /** 边类型（双链/内联链接/图片/引用式定义） */
-  kind: 'wikilink' | 'mdlink' | 'image' | 'refdef'
+  /** 边类型（双链/内联链接/图片/引用式定义/嵌入——#222 embed 与双链同构） */
+  kind: 'wikilink' | 'mdlink' | 'image' | 'refdef' | 'embed'
   /** 标题/块锚点文本（空串无） */
   anchor: string
   /** 出链标记在来源正文中的 LF 偏移区间 */
@@ -815,8 +986,8 @@ export interface OutlinkItemPayload {
   targetRelPath: string | null
   /** 目标绝对 fsPath（跳转与打开用）；断链 null */
   targetFsPath: string | null
-  /** 边类型（双链/内联链接/图片/引用式定义） */
-  kind: 'wikilink' | 'mdlink' | 'image' | 'refdef'
+  /** 边类型（双链/内联链接/图片/引用式定义/嵌入——#222 embed 与双链同构） */
+  kind: 'wikilink' | 'mdlink' | 'image' | 'refdef' | 'embed'
   /** 标题/块锚点文本（空串无；#^块id 形态保留 ^ 前缀） */
   anchor: string
   /** 是否解析命中（断链条目弱化呈现且不可点） */
@@ -825,6 +996,37 @@ export interface OutlinkItemPayload {
   start: number
   end: number
 }
+
+/** 悬停预览规范目标身份（#218 hover.result.ok）：fsPath 为宿主侧真实
+ *  路径（大小写归正后形态），relPath 为所属根内相对路径（`/` 分隔） */
+export interface HoverPreviewTargetIdentity {
+  fsPath: string
+  relPath: string
+}
+
+/** 悬停预览语义范围选择器（#218 一期全文；#219 扩展标题章节与块——
+ *  锚点语义与链接形态无关：双链 `[[笔记#锚]]` 与普通链接 `[x](笔记.md#锚)`
+ *  归同一选择器。anchor：标题原文或带 ^ 前缀的块 id（与
+ *  OutlinkItemPayload.anchor 同口径） */
+export type HoverPreviewScope =
+  | { kind: 'full' }
+  | { kind: 'heading'; anchor: string }
+  | { kind: 'block'; anchor: string }
+
+/** 悬停预览失败原因（#218 错误分态，就地 i18n 呈现；#219 增锚点缺失）：
+ *  unsupported=目标形态非法/外部网页不接入；no-workspace=来源不在工作区；
+ *  escape=目标越出所属根；not-found=目标文件不存在；non-markdown=目标非
+ *  Markdown（一期只接 Markdown）；read-failed=打开/读取目标失败；
+ *  anchor-missing=目标文件在但标题/块锚点不存在（不以全文替代，附锚点
+ *  原文） */
+export type HoverPreviewFailReason =
+  'unsupported' | 'no-workspace' | 'escape' | 'not-found' | 'non-markdown' | 'read-failed' | 'anchor-missing'
+
+/** #218 悬停预览请求载荷（宿主侧消费形态） */
+export type HoverPreviewRequestPayload = Extract<WebviewToHost, { kind: 'hover.request' }>
+
+/** #218 悬停预览结果消息（webview 侧消费形态） */
+export type HoverPreviewResult = Extract<HostToWebview, { kind: 'hover.result' }>
 
 /** 性能快照（#5）：一次观测时点的 DOM 计数 */
 export interface PerfSnapshot {
@@ -2305,6 +2507,31 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         (v.backlinks === undefined || isBacklinksProbe(v.backlinks)) &&
         (v.outlinks === undefined || isOutlinksProbe(v.outlinks)) &&
         (v.fmPopoverOpen === undefined || typeof v.fmPopoverOpen === 'boolean') &&
+        (v.hoverPreview === undefined || (isObject(v.hoverPreview) &&
+          typeof v.hoverPreview.open === 'boolean' &&
+          (v.hoverPreview.state === 'loading' || v.hoverPreview.state === 'content' || v.hoverPreview.state === 'error') &&
+          isString(v.hoverPreview.note) &&
+          isNonNegativeInt(v.hoverPreview.blocks) &&
+          (v.hoverPreview.scope === 'full' || v.hoverPreview.scope === 'heading' ||
+            v.hoverPreview.scope === 'block' || v.hoverPreview.scope === '') &&
+          (v.hoverPreview.fm === undefined || v.hoverPreview.fm === 'none' ||
+            v.hoverPreview.fm === 'collapsed' || v.hoverPreview.fm === 'expanded') &&
+          (v.hoverPreview.imageSrcs === undefined ||
+            (Array.isArray(v.hoverPreview.imageSrcs) && v.hoverPreview.imageSrcs.every(isString))))) &&
+        (v.readingEmbed === undefined ||
+          (Array.isArray(v.readingEmbed) && v.readingEmbed.every((e: unknown) =>
+            isObject(e) &&
+            isString(e.inner) &&
+            (e.state === 'loading' || e.state === 'content' || e.state === 'error') &&
+            isString(e.note) &&
+            isNonNegativeInt(e.blocks) &&
+            (e.scope === 'full' || e.scope === 'heading' || e.scope === 'block' || e.scope === '') &&
+            (e.fm === 'none' || e.fm === 'collapsed' || e.fm === 'expanded') &&
+            isNonNegativeInt(e.maxHeightPx) &&
+            // 修 2（review 第二轮）：#223 host 字段入校验器（与联合类型
+            // 同步——缺省 / reading 块挂载 / live widget 挂载）
+            (e.host === undefined || e.host === 'reading' || e.host === 'live') &&
+            (e.textLen === undefined || isNonNegativeInt(e.textLen))))) &&
         (v.typography === undefined || isTypographyProbe(v.typography))
       )
     case 'reading.perf.report':
@@ -2318,20 +2545,24 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         typeof v.ok === 'boolean'
       )
     case 'link.activate':
+      // #220 sourceDocUri（悬停浮层内链接的来源文档）：可选非空字符串
       return (
         isString(v.sessionId) &&
         isString(v.docUri) &&
         isString(v.href) &&
         isNonNegativeInt(v.srcStart) &&
-        isNonNegativeInt(v.srcEnd)
+        isNonNegativeInt(v.srcEnd) &&
+        (v.sourceDocUri === undefined || (typeof v.sourceDocUri === 'string' && v.sourceDocUri.length > 0))
       )
     case 'wikilink.activate':
+      // #220 sourceDocUri 语义与 link.activate 同
       return (
         isString(v.sessionId) &&
         isString(v.docUri) &&
         isString(v.target) &&
         isNonNegativeInt(v.srcStart) &&
-        isNonNegativeInt(v.srcEnd)
+        isNonNegativeInt(v.srcEnd) &&
+        (v.sourceDocUri === undefined || (typeof v.sourceDocUri === 'string' && v.sourceDocUri.length > 0))
       )
     case 'codeblock.copy':
       return (
@@ -2362,11 +2593,13 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         v.fileName.length <= IMAGE_PASTE_LIMITS.fileNameHintMaxChars
       )
     case 'image.request':
+      // #220 sourceDocUri（悬停浮层内图片的来源文档）：可选非空字符串
       return (
         isString(v.sessionId) &&
         isString(v.docUri) &&
         isPositiveInt(v.reqId) &&
-        isString(v.src)
+        isString(v.src) &&
+        (v.sourceDocUri === undefined || (typeof v.sourceDocUri === 'string' && v.sourceDocUri.length > 0))
       )
     case 'image.verify':
       // #201 周期核验：条目形态（state 枚举 + 可选 reason 码）
@@ -2406,6 +2639,42 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         isString(v.sessionId) &&
         isString(v.docUri) &&
         isPositiveInt(v.reqId)
+      )
+    case 'hover.request':
+      // #218 悬停预览请求：会话守卫字段 + reqId 配对 + 非空实例标识 +
+      // 非负源区间（P3-5：sourceStart 不得大于 sourceEnd——两字段同时
+      // 存在，倒置即整体拒绝） + 目标原文（字符串即可，形态合法性由宿主
+      // 解析判定）；
+      // #219 普通链接形态的 linkHref（可选字符串，存在即走普通链接解析）；
+      // #221 面板直接目标 directTarget（可选对象：fsPath 字符串可为空串
+      // ——断链条目；anchor 可选字符串，^ 前缀 = 块锚点）
+      return (
+        isString(v.sessionId) &&
+        isString(v.docUri) &&
+        isPositiveInt(v.reqId) &&
+        typeof v.instanceId === 'string' &&
+        v.instanceId.length > 0 &&
+        isNonNegativeInt(v.sourceStart) &&
+        isNonNegativeInt(v.sourceEnd) &&
+        (v.sourceStart as number) <= (v.sourceEnd as number) &&
+        isString(v.target) &&
+        (v.linkHref === undefined || isString(v.linkHref)) &&
+        (v.directTarget === undefined ||
+          (isObject(v.directTarget) &&
+            isString(v.directTarget.fsPath) &&
+            (v.directTarget.anchor === undefined || isString(v.directTarget.anchor))))
+      )
+    case 'hover.watch':
+    case 'hover.unwatch':
+      // #224 目标订阅：会话守卫字段 + 非空目标路径与实例标识（身份字段，
+      // 空串即语义缺失——整体拒绝）
+      return (
+        isString(v.sessionId) &&
+        isString(v.docUri) &&
+        typeof v.fsPath === 'string' &&
+        v.fsPath.length > 0 &&
+        typeof v.instanceId === 'string' &&
+        v.instanceId.length > 0
       )
     case 'perf.report':
       return (
@@ -2721,6 +2990,17 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         .includes(v.mode as string)
     case 'refresh.test.click':
       return true
+    case 'hover.test.pointer':
+      // #218 测试钩子：真实双链序号 + 进/离动作枚举；#219 link 选择器
+      // （缺省 wikilink，'md' 对普通 Markdown 链接派发）；#221 扩展
+      // Live（live-wikilink / live-md，ctrlKey 修饰位可选）与面板
+      // （backlink / outlink）入口；'modkey' 对 document 派发 keydown
+      // Control（「悬停后按 Ctrl」补触发路径）
+      return (v.action === 'enter' || v.action === 'leave' || v.action === 'modkey') && isNonNegativeInt(v.index) &&
+        (v.link === undefined || v.link === 'wikilink' || v.link === 'md' ||
+          v.link === 'live-wikilink' || v.link === 'live-md' ||
+          v.link === 'backlink' || v.link === 'outlink') &&
+        (v.ctrlKey === undefined || typeof v.ctrlKey === 'boolean')
     case 'sync.test.composition':
       return (v.phase === 'start' || v.phase === 'update' || v.phase === 'end') && isString(v.text)
     case 'link.test.mousedown':
@@ -2782,6 +3062,49 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         (v.reason === undefined || v.reason === 'no-workspace' || v.reason === 'read-error') &&
         (v.items === undefined || (Array.isArray(v.items) && v.items.every(isOutlinkItemPayload)))
       )
+    case 'hover.result':
+      // #218 悬停预览结果：reqId+instanceId 双配对；成功形态须携带完整
+      // 目标身份/版本/LF 全文/范围（start<=end）/范围选择器（#219 起
+      // heading/block 附锚点原文）；失败形态 reason 限定错误分态枚举
+      // （anchor-missing 附锚点原文）
+      if (!isPositiveInt(v.reqId) ||
+        typeof v.instanceId !== 'string' || v.instanceId.length === 0) {
+        return false
+      }
+      if (v.ok === true) {
+        return (
+          isObject(v.target) &&
+          isString(v.target.fsPath) &&
+          isString(v.target.relPath) &&
+          isNonNegativeInt(v.version) &&
+          isString(v.text) &&
+          isObject(v.range) &&
+          typeof v.range.start === 'number' &&
+          typeof v.range.end === 'number' &&
+          isNonNegativeInt(v.range.start) &&
+          isNonNegativeInt(v.range.end) &&
+          v.range.start <= v.range.end &&
+          isObject(v.scope) &&
+          (v.scope.kind === 'full' ||
+            ((v.scope.kind === 'heading' || v.scope.kind === 'block') && isString(v.scope.anchor)))
+        )
+      }
+      return (
+        v.ok === false &&
+        (v.reason === 'unsupported' || v.reason === 'no-workspace' || v.reason === 'escape' ||
+          v.reason === 'not-found' || v.reason === 'non-markdown' || v.reason === 'read-failed' ||
+          v.reason === 'anchor-missing') &&
+        (v.anchor === undefined || isString(v.anchor))
+      )
+    case 'hover.invalidated':
+      // #224 失效推送：非空目标路径 + status 三态（vaultIndex onTargetChange
+      // 同口径）+ 非负整数代次（单调递增；首观测为 1）
+      return (
+        typeof v.fsPath === 'string' &&
+        v.fsPath.length > 0 &&
+        (v.status === 'changed' || v.status === 'deleted' || v.status === 'stale') &&
+        isNonNegativeInt(v.generation)
+      )
     case 'outlinks.test.click':
       return true
     case 'outlinks.test.itemClick':
@@ -2821,7 +3144,7 @@ function isBacklinkItemPayload(v: unknown): v is BacklinkItemPayload {
   return (
     isString(v.sourceRelPath) &&
     isString(v.sourceFsPath) &&
-    (v.kind === 'wikilink' || v.kind === 'mdlink' || v.kind === 'image' || v.kind === 'refdef') &&
+    (v.kind === 'wikilink' || v.kind === 'mdlink' || v.kind === 'image' || v.kind === 'refdef' || v.kind === 'embed') &&
     isString(v.anchor) &&
     isNonNegativeInt(v.start) &&
     isNonNegativeInt(v.end) &&
@@ -2844,7 +3167,7 @@ function isOutlinkItemPayload(v: unknown): v is OutlinkItemPayload {
     isString(v.targetDisplay) &&
     (v.targetRelPath === null || isString(v.targetRelPath)) &&
     (v.targetFsPath === null || isString(v.targetFsPath)) &&
-    (v.kind === 'wikilink' || v.kind === 'mdlink' || v.kind === 'image' || v.kind === 'refdef') &&
+    (v.kind === 'wikilink' || v.kind === 'mdlink' || v.kind === 'image' || v.kind === 'refdef' || v.kind === 'embed') &&
     isString(v.anchor) &&
     typeof v.resolved === 'boolean' &&
     isNonNegativeInt(v.start) &&
@@ -2866,7 +3189,7 @@ function isBacklinksProbe(v: unknown): v is BacklinksProbe {
     Array.isArray(v.items) &&
     v.items.every(
       (item) => isObject(item) && isString(item.sourceRelPath) &&
-        (item.kind === 'wikilink' || item.kind === 'mdlink' || item.kind === 'image' || item.kind === 'refdef') &&
+        (item.kind === 'wikilink' || item.kind === 'mdlink' || item.kind === 'image' || item.kind === 'refdef' || item.kind === 'embed') &&
         isPositiveInt(item.line) && isString(item.snippet),
     ) &&
     typeof v.itemPainted === 'boolean' &&
@@ -2899,7 +3222,7 @@ function isOutlinksProbe(v: unknown): v is OutlinksProbe {
     v.items.every(
       (item) => isObject(item) && isString(item.targetDisplay) &&
         (item.targetRelPath === null || isString(item.targetRelPath)) &&
-        (item.kind === 'wikilink' || item.kind === 'mdlink' || item.kind === 'image' || item.kind === 'refdef') &&
+        (item.kind === 'wikilink' || item.kind === 'mdlink' || item.kind === 'image' || item.kind === 'refdef' || item.kind === 'embed') &&
         isString(item.anchor) &&
         typeof item.resolved === 'boolean',
     ) &&

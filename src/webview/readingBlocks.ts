@@ -22,6 +22,7 @@ import { maskCodeSpanPipes } from './tableCells'
 import { stripHtmlComments } from './htmlComment'
 // #163 验收反馈：块 id 标记阅读隐藏（渲染前剥离，行数不变保锚点坐标系）
 import { stripBlockIdMarks } from './blockIdStrip'
+import { parseWikilinkInner, soleEmbedOfLine } from '../shared/wikilink'
 import { isRenderedFenceInfo } from '../shared/mermaid'
 import { codeInfoFirstWord } from '../shared/codeLangs'
 import { buildFrontmatterTableHtml, escapeHtml, parseFrontmatterTable } from '../shared/frontmatterTable'
@@ -35,7 +36,7 @@ import {
 import type { Env, Token } from 'markdown-it'
 
 /** 阅读块种类（#8：完整 Markdown 语义；#12 表格独立成块；#59 公式块；
- *  #60 Mermaid 围栏整块成块） */
+ *  #60 Mermaid 围栏整块成块；#222 嵌入独占行成块） */
 export type ReadingBlockKind =
   | 'frontmatter'
   | 'heading'
@@ -47,6 +48,7 @@ export type ReadingBlockKind =
   | 'table'
   | 'math'
   | 'mermaid'
+  | 'embed'
 
 /** 一个阅读块：源文本的 [start, end) 区间、渲染身份与内部 HTML */
 export interface ReadingBlock {
@@ -60,6 +62,8 @@ export interface ReadingBlock {
   /** 块内子锚点（升序；列表块为各 li 的源 start）：锚点映射按最细粒度
    *  归位（live↔reading 光标恢复到项级），挂载单位仍是整块（#7 语义） */
   itemAnchors?: number[]
+  /** #222 embed 专用：`![[` 与 `]]` 之间的原文（挂载适配层出站读取用） */
+  embedInner?: string
 }
 
 /** 超过该行数的围栏代码块按行细分为多个挂载单位（#7 超大单块缓解） */
@@ -139,6 +143,61 @@ function fenceChunkHtml(
     `<pre data-vsidian-code-start="${startLine}" data-vsidian-code-total="${totalLines}">` +
     `<code${cls}>${escapeHtml(text.slice(from, to))}</code></pre>`
   )
+}
+
+/** #222 嵌入占位引用行类名（稳定样式入口）：主文档挂载时整块替换为嵌入
+ *  卡片；嵌入内容/悬停浮层内（一层展开）保留本占位行为可点击引用入口 */
+const EMBED_REF_CLASS = 'vsidian-embed-ref'
+
+/** #222 嵌入占位引用行 HTML：与阅读双链 a 同构（wikilink 类 + href 为 `|`
+ *  前目标原文），文本保留 `![[显示]]` 形态可辨识；点击语义由所在容器的
+ *  链接委托承接（主文档按 A 目录、嵌入内容/浮层内按来源文档） */
+function embedRefHtml(inner: string): string {
+  const parsed = parseWikilinkInner(inner)
+  if (!parsed) {
+    return escapeHtml(`![[${inner}]]`) // 防御：切块判定已过滤非法形态
+  }
+  const pipeAt = inner.indexOf('|')
+  const target = pipeAt >= 0 ? inner.slice(0, pipeAt) : inner
+  return (
+    `<a class="vsidian-wikilink ${EMBED_REF_CLASS}" href="${escapeHtml(target)}">` +
+    `![[${escapeHtml(parsed.display)}]]</a>`
+  )
+}
+
+/** #222 段落内逐行嵌入块定位（inner + 行区间） */
+interface EmbedLine {
+  inner: string
+  start: number
+  end: number
+}
+
+/**
+ * 段落区间是否全由独占行嵌入组成（#222 挂载适配判定），命中返回逐行定位：
+ * - 单行段落整行为单个嵌入 → 一块（常见形态）
+ * - 连续多行嵌入（`![[A]]\n![[B]]`，markdown-it 合并为一个段落 token）逐行
+ *   成块——Obsidian 同款行级替换语义
+ * - 混排/懒续行（部分行非嵌入）不命中：整段保留段落源文（1.5 期接入；
+ *   不做部分拆分——避免破坏跨行 inline 语义）
+ * 列表/引用/表格/围栏内的嵌入不进入本判定（它们不是顶层 paragraph 块）。
+ */
+function embedLinesOfParagraph(text: string, start: number, end: number): EmbedLine[] | null {
+  const slice = text.slice(start, end)
+  if (!slice.includes('![')) {
+    return null
+  }
+  const lines = slice.split('\n')
+  let lineStart = start
+  const out: EmbedLine[] = []
+  for (const line of lines) {
+    const sole = soleEmbedOfLine(line)
+    if (sole === null) {
+      return null
+    }
+    out.push({ inner: sole.inner, start: lineStart, end: lineStart + line.length })
+    lineStart += line.length + 1
+  }
+  return out
 }
 
 /**
@@ -299,9 +358,24 @@ function pushBlock(
       blocks.push({ kind: 'heading', start, end, level: level ?? 1, html: renderTokenHtml(md, group, env) })
       return
     }
-    case 'paragraph_open':
+    case 'paragraph_open': {
+      // #222 独占行嵌入优先于段落（挂载适配限制：混排/容器内不在此路径）
+      const embedLines = embedLinesOfParagraph(text, start, end)
+      if (embedLines !== null) {
+        for (const line of embedLines) {
+          blocks.push({
+            kind: 'embed',
+            start: line.start,
+            end: line.end,
+            html: embedRefHtml(line.inner),
+            embedInner: line.inner,
+          })
+        }
+        return
+      }
       blocks.push({ kind: 'paragraph', start, end, html: renderTokenHtml(md, group, env) })
       return
+    }
     case 'blockquote_open':
       blocks.push({ kind: 'blockquote', start, end, html: renderTokenHtml(md, group, env) })
       return

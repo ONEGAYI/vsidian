@@ -195,3 +195,34 @@ describe('复制块链接快捷键（#162）', () => {
     expect([...findConflictedOperationIds({})]).toEqual([])
   })
 })
+
+describe('预览当前链接快捷键（#221）', () => {
+  it('UI 操作登记：默认未绑定、双模式生效、非写操作；manifest 命令已登记', () => {
+    const manifest = JSON.parse(readFileSync('package.json', 'utf8'))
+    const op = KEYBINDING_OPERATIONS.find((item) => item.id === 'hoverPreviewLink')
+    expect(op).toMatchObject({
+      mode: 'both',
+      writes: false,
+      command: 'onegayi.vsidian.ui.hoverPreviewLink',
+      titleKey: 'command.ui.hoverPreviewLink.title',
+    })
+    // 默认未绑定：键位留给用户按需绑定（目标判定依赖光标/聚焦上下文）
+    expect(getEffectiveBindings({}, 'hoverPreviewLink')).toEqual([])
+    expect(manifest.contributes.commands.some(
+      (item: { command: string }) => item.command === 'onegayi.vsidian.ui.hoverPreviewLink')).toBe(true)
+    // 用户可绑定：绑定后在两模式均解析命中（只读操作不受写门影响）
+    expect(resolveKeybinding({ hoverPreviewLink: ['ctrl+alt+p'] }, 'live', 'ctrl+alt+p'))
+      .toEqual({ kind: 'command', id: 'hoverPreviewLink' })
+    expect(resolveKeybinding({ hoverPreviewLink: ['ctrl+alt+p'] }, 'reading', 'ctrl+alt+p'))
+      .toEqual({ kind: 'command', id: 'hoverPreviewLink' })
+    expect(resolveKeybinding({ hoverPreviewLink: ['ctrl+alt+p'] }, 'live', 'ctrl+alt+p', false))
+      .toEqual({ kind: 'command', id: 'hoverPreviewLink' })
+    // 显式清空 = 禁用（清空不因升级恢复——存储语义由 overrides 承担）
+    expect(resolveKeybinding({ hoverPreviewLink: [] }, 'live', 'ctrl+alt+p')).toEqual({ kind: 'none' })
+  })
+
+  it('默认零键位与既有操作零冲突（冲突核对钉住）', () => {
+    expect(findBindingConflicts({}, 'hoverPreviewLink', 'ctrl+alt+p')).toEqual([])
+    expect([...findConflictedOperationIds({})]).toEqual([])
+  })
+})

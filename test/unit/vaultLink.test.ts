@@ -19,6 +19,7 @@
 // wikilinkTarget 回归锚点定位单一职责）。
 import { describe, it, expect } from 'vitest'
 import {
+  isVaultPathInsideRoot,
   planVaultLinkPath,
   resolveVaultLinkFile,
   type VaultLinkResolveContext,
@@ -267,5 +268,61 @@ describe('resolveVaultLinkFile：存在性解析（exists 端口注入）', () =
       kind: 'target',
       fsPath: '/home/u/notes/sub/CaseNote.md',
     })
+  })
+})
+
+// P1-1（review 修复）新增导出：前端直供绝对路径身份的静态边界复核入口
+// （host 侧 directTarget 通道复用同一根内语义，不建第二套边界判定）。
+describe('isVaultPathInsideRoot：绝对路径根内判定（P1-1 静态边界复用入口）', () => {
+  it('Windows 语义：根内/子目录/大小写漂移放行，上行出根/跨盘符/相对形态拒绝', () => {
+    expect(isVaultPathInsideRoot('d:\\notes\\a.md', WIN)).toBe(true)
+    expect(isVaultPathInsideRoot('d:\\notes\\子目录\\deep\\x.md', WIN)).toBe(true)
+    // win32.relative 大小写不敏感比较——注入形态与根仅大小写不同仍属根内
+    expect(isVaultPathInsideRoot('D:\\Notes\\a.md', WIN)).toBe(true)
+    expect(isVaultPathInsideRoot('d:\\notes\\..\\outside.md', WIN)).toBe(false)
+    expect(isVaultPathInsideRoot('e:\\notes\\a.md', WIN)).toBe(false)
+    // 相对路径不做 cwd 依赖解析（path.relative 会按 process.cwd() 补全，
+    // cwd 恰在根内时会误放行）
+    expect(isVaultPathInsideRoot('a.md', WIN)).toBe(false)
+    expect(isVaultPathInsideRoot('.\\a.md', WIN)).toBe(false)
+  })
+
+  it('POSIX 语义：根内放行，上行出根/绝对形态差异拒绝；根本身算根内', () => {
+    expect(isVaultPathInsideRoot('/home/u/notes/a.md', POSIX)).toBe(true)
+    expect(isVaultPathInsideRoot('/home/u/notes', POSIX)).toBe(true)
+    // POSIX 大小写敏感：/home/u/Notes 不在 /home/u/notes 内
+    expect(isVaultPathInsideRoot('/home/u/Notes/a.md', POSIX)).toBe(false)
+    expect(isVaultPathInsideRoot('/home/u/notes/../outside.md', POSIX)).toBe(false)
+    expect(isVaultPathInsideRoot('a.md', POSIX)).toBe(false)
+  })
+
+  // 修 8（review 第二轮）：directTarget 的 UNC 形态回归报警——语义与
+  // Node 24 实测对齐（当前实现正确；跨宿主/越根上行拒绝的边界此前不在
+  // 此前不在矩阵内，防未来改动回退）。UNC 的「宿主+共享」段是路径身份
+  // 的一部分：win32.relative 对不同宿主返回绝对形态（isAbsolute 拒绝），
+  // 同宿主上行以 `..` 前缀拒绝
+  it('UNC 语义：同宿主根内放行；跨 UNC 宿主（server-a vs server-b）拒绝', () => {
+    const UNC: VaultLinkResolveContext = {
+      docDir: '\\\\server\\share\\notes\\sub',
+      rootDir: '\\\\server\\share\\notes',
+      isWindowsHost: true,
+      hasWorkspace: true,
+    }
+    expect(isVaultPathInsideRoot('\\\\server\\share\\notes\\sub\\a.md', UNC)).toBe(true)
+    expect(isVaultPathInsideRoot('\\\\SERVER\\share\\notes\\sub\\a.md', UNC)).toBe(true) // 大小写不敏感
+    expect(isVaultPathInsideRoot('\\\\server-b\\share\\notes\\sub\\a.md', UNC)).toBe(false)
+    expect(isVaultPathInsideRoot('//server-b/share/notes/sub/a.md', UNC)).toBe(false)
+  })
+
+  it('UNC 语义：同宿主越根上行（.. 逃出 share 内根）拒绝', () => {
+    const UNC: VaultLinkResolveContext = {
+      docDir: '\\\\server\\share\\notes\\sub',
+      rootDir: '\\\\server\\share\\notes',
+      isWindowsHost: true,
+      hasWorkspace: true,
+    }
+    expect(isVaultPathInsideRoot('\\\\server\\share\\notes\\..\\outside.md', UNC)).toBe(false)
+    expect(isVaultPathInsideRoot('\\\\server\\share\\x\\..\\..\\outside.md', UNC)).toBe(false)
+    expect(isVaultPathInsideRoot('\\\\server\\share\\notes', UNC)).toBe(true) // 根本身算根内
   })
 })

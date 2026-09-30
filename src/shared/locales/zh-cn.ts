@@ -75,6 +75,12 @@ export const zhCn: Record<MessageKey, string> = {
   'setting.readableLineWidth.title': '可读行宽',
   'setting.readableLineWidth.description': '实时预览与阅读模式正文列的最大宽度：0 表示铺满可用宽度；设为具体数值后正文按该宽度限宽，在主编辑区内居中，右侧大纲栏展开时自动避让收缩。',
   'setting.readableLineWidthFill': '铺满',
+  /** #222 嵌入卡片限高（阅读模式嵌入内容超出后内部滚动） */
+  'setting.embedMaxHeight.title': '嵌入内容最大高度',
+  'setting.embedMaxHeight.description': '阅读模式嵌入卡片内容区的最大高度：较短笔记保持自然高度，超出该值的内容在卡片内部滚动。',
+  /** #221 Live 悬停触发方式（Ctrl+悬停 vs 直接悬停） */
+  'setting.hoverLiveDirect.title': '实时预览中直接悬停链接',
+  'setting.hoverLiveDirect.description': '开启后在实时预览中指针悬停链接即可打开预览浮层；关闭时需按住 Ctrl（macOS 为 Cmd）再悬停。阅读模式与反链/出链面板不受影响，始终直接悬停。',
   'setting.codeblockCard.title': '代码块卡片',
   'setting.codeblockCard.description': '围栏代码块在光标离开时收起为卡片：隐藏围栏标记，显示语言头部横带。关闭后回到朴素源码围栏外观。',
   'setting.codeblockLineNumbers.title': '卡内行号',
@@ -171,6 +177,7 @@ export const zhCn: Record<MessageKey, string> = {
   'styleRef.category.contextMenu': '正文右键菜单',
   'styleRef.category.backlinks': '反链面板',
   'styleRef.category.outlinks': '出链面板',
+  'styleRef.category.hoverPreview': '悬停预览',
   'host.styleRefExported': '样式契约 JSON 已导出：{path}',
   'host.styleRefExportFailed': '样式契约 JSON 导出失败：{reason}',
   'host.styleRefExportReasonMissingAsset': '扩展安装不完整（缺少 style-reference.json）',
@@ -343,6 +350,26 @@ export const zhCn: Record<MessageKey, string> = {
   'outlineMenu.levelDownRecursive': '递归减少一级',
   'outlineMenu.rename': '重命名',
   'outlineMenu.delete': '删除',
+
+  /** 悬停文档预览（#218：浮层就地状态行；错误分态不弹宿主通知。#219 起
+   *  双链与普通链接共用分态——目标原文不再裹双链括号；anchor-missing 为
+   *  锚点缺失分态，不以全文替代） */
+  'hover.loading': '正在加载预览…',
+  'hover.errorUnsupported': '不支持的目标形态：没有可预览的目标（外部网页不在预览范围）',
+  'hover.errorNoWorkspace': '当前文档不在任何工作区文件夹内：无法解析链接目标进行预览',
+  'hover.errorEscape': '目标越出来源所属的工作区根，无法预览',
+  'hover.errorNotFound': '目标不存在：{target}（按当前文档所在目录解析；不会自动创建文件）',
+  'hover.errorNonMarkdown': '{target} 不是 Markdown 笔记：本期预览仅支持 Markdown 文档',
+  'hover.errorReadFailed': '读取目标文档失败',
+  'hover.errorAnchorMissing': '目标笔记中不存在锚点：{target}#{anchor}（不会以全文替代显示）',
+  /** #220 引用 Reading 内容：浮层内笔记属性区展开/折叠按钮的无障碍文案
+   *  （aria-label 与 title 同词；按钮是唯一操作入口，标题行悬停只负责显示） */
+  'hover.content.fmExpand': '展开笔记属性',
+  'hover.content.fmCollapse': '收起笔记属性',
+  /** #222 Reading 嵌入卡片：装载中文案与卡片头部打开入口的无障碍文案
+   *  （aria-label 与 title 同词；打开沿用 Vsidian 既有打开行为，不改写嵌入原文） */
+  'embed.loading': '正在加载嵌入内容…',
+  'embed.openTarget': '打开目标笔记',
 
   /** 反链面板（#197：四态与条目；形态改版批次：工具栏/排序/搜索/页头） */
   'backlinks.label': '反向链接',
@@ -521,6 +548,8 @@ export const zhCn: Record<MessageKey, string> = {
   'command.ui.outlinksToggle.title': '显示或隐藏出链面板',
   /** #208 刷新嵌入资源命令（工具栏按钮与快捷键/命令面板共用） */
   'command.editor.refresh.title': '刷新嵌入资源',
+  /** #221 预览当前链接（手动打开悬停浮层：键盘进入浮层、Esc 返回触发处） */
+  'command.ui.hoverPreviewLink.title': '预览当前链接',
 
   // ---- #159 锚点跳转（块引用定位与本文件锚点）----
   /** 块 id 缺失提示（与标题缺失同款「打开后提示」行为） */

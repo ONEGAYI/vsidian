@@ -73,8 +73,8 @@ describe('extractVaultEdges：双链', () => {
     expect(edges[0]).toMatchObject({ kind: 'wikilink', resolvedTarget: 'notes/源.md', anchor: '本节标题' })
   })
 
-  it('嵌入 ![[…]] 与降级形态不产边（二期/降级语义，与呈现侧一致）', () => {
-    const text = '嵌入 ![[设计]] 与降级 [[坏#]] 与空 [[]]。\n'
+  it('降级形态不产边（嵌入产边语义 #222 起迁移——详见嵌入 describe；此处只钉降级）', () => {
+    const text = '降级 [[坏#]] 与空 [[]] 与嵌入残缺 ![[坏#]]。\n'
     expect(extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))).toHaveLength(0)
   })
 })
@@ -210,5 +210,79 @@ describe('extractVaultEdges：POSIX 宿主语义', () => {
     expect(edges.map((e) => e.resolvedTarget)).toEqual(['notes/设计.md', 'notes/a.md'])
     const edgesCase = extractVaultEdges('notes/源.md', '[[设计.MD]]。\n', posixCtx, resolve)
     expect(edgesCase[0]!.resolvedTarget).toBeNull()
+  })
+})
+
+describe('extractVaultEdges：嵌入（#222 独立扫描器接入）', () => {
+  it('独占行嵌入产 embed 边：区间含 !、anchor 拆列、目标解析与双链同源', () => {
+    const text = '看嵌入：\n\n![[设计]]\n'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    const embed = edges.find((e) => e.kind === 'embed')
+    expect(embed).toBeDefined()
+    expect(embed).toMatchObject({
+      source: 'notes/源.md',
+      target: '设计',
+      resolvedTarget: 'notes/设计.md',
+      anchor: '',
+      start: text.indexOf('![[设计]]'),
+      end: text.indexOf('![[设计]]') + '![[设计]]'.length,
+    })
+    // 双链扫描器不重复计边（同一处只有一个 embed 边，无 wikilink 边）
+    expect(edges.filter((e) => e.start === embed!.start)).toHaveLength(1)
+  })
+
+  it('嵌入章节/块锚点拆列（与 wikilink 边同口径：target 为路径部分）', () => {
+    const text = '![[设计#章节甲]] 与 ![[目标笔记#^b1]]\n'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    expect(edges.filter((e) => e.kind === 'embed').map((e) => [e.target, e.anchor])).toEqual([
+      ['设计', '章节甲'],
+      ['目标笔记', '^b1'],
+    ])
+  })
+
+  it('混排嵌入同样产边（索引不设行独占限制——行独占只属挂载适配）', () => {
+    const text = '前缀 ![[设计]] 后缀\n'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    expect(edges.filter((e) => e.kind === 'embed')).toHaveLength(1)
+  })
+
+  it('嵌入显式图片扩展目标解析到该文件（引用关系对附件成立）', () => {
+    const text = '![[assets/图片 一.png]]\n'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    expect(edges.filter((e) => e.kind === 'embed').map((e) => e.resolvedTarget))
+      .toEqual(['notes/assets/图片 一.png'])
+  })
+
+  it('断链/越界/本文件锚点嵌入：断链保留边、本文件锚点自引用', () => {
+    const text = '![[不存在的目标]] 与 ![[../设计]] 与 ![[#本文件锚]]\n'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    expect(edges.filter((e) => e.kind === 'embed').map((e) => [e.target, e.anchor, e.resolvedTarget])).toEqual([
+      // 本文件锚点与双链同构：path 空串 + anchor 拆列，resolved 自引用
+      ['不存在的目标', '', null],
+      ['../设计', '', null], // 越出所属根（notes/../设计 落根外解析失败为断链形态）
+      ['', '本文件锚', 'notes/源.md'],
+    ])
+  })
+
+  it('围栏/行内代码内的嵌入不产边（代码上下文排除与双链同源）', () => {
+    const text = [
+      '```text',
+      '![[设计]]',
+      '```',
+      '',
+      '`![[设计]]` 行内代码。',
+      '',
+    ].join('\n')
+    expect(extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))).toHaveLength(0)
+  })
+
+  it('嵌入与双链/普通链接并存：排序与互斥（![[x]] 不产 wikilink 边）', () => {
+    const text = '[[设计]] ![[目标笔记]] [链](./设计.md)\n'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    expect(edges.map((e) => [e.kind, e.target])).toEqual([
+      ['wikilink', '设计'],
+      ['embed', '目标笔记'],
+      ['mdlink', './设计.md'],
+    ])
   })
 })

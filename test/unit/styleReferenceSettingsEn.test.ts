@@ -171,10 +171,10 @@ describe('样式参考英文 UI 全局残留断言（#180 收尾）', () => {
     expect(m, `总表面板残留汉字「${m?.[0]}」`).toBeNull()
   })
 
-  it('全部类目遍历渲染（含翻页）：双语字段段落无汉字，且 140 条全部被遍历到', () => {
+  it('全部类目遍历渲染（含翻页）：双语字段段落无汉字，且全部条目被遍历到', () => {
     const parent = mountDetail('overview')
     const catButtons = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-style-ref-cat')]
-    expect(catButtons.length).toBe(21)
+    expect(catButtons.length).toBe(22)
     const seen = new Set<string>()
     for (const cat of catButtons) {
       const catId = cat.dataset['category']!

@@ -23,6 +23,7 @@ import {
   type DiagramExportFailReason,
   type DiagramExportPayload,
   type HostToWebview,
+  type HoverPreviewRequestPayload,
   type ImageExportFailReason,
   type ImageExportPayload,
   type ImagePastePayload,
@@ -30,12 +31,14 @@ import {
   type SettingsPayload,
   type WebviewToHost,
 } from '../shared/protocol'
+import type { HoverReadOutcome } from './hoverDocAccess'
 import type { ImagePasteOutcome } from './imagePasteHost'
 import { mapChangeThroughChanges } from '../shared/changeMapping'
 import { NewlineCoordinator } from '../shared/newline'
 import type { ImageResolution } from './linkTarget'
 import { imageFsKey } from './imageVersioning'
 import type { ImageVerifyItem } from '../shared/imageRefresh'
+import { HOVER_REFRESH_DEFAULTS } from '../shared/hoverRefresh'
 
 /** 权威文档适配器：vscode 层实现 */
 export interface HostDocumentPort {
@@ -56,13 +59,25 @@ export interface HostDocumentPort {
 export interface PanelPort {
   send(message: HostToWebview): void
   /** #10 链接跳转执行（vscode 层注入：URI 解析白名单 + openExternal/
-   *  showTextDocument/用户反馈）；只读交互，暂停态同样放行 */
-  openLink?(intent: { href: string; srcStart: number; srcEnd: number }): void
+   *  showTextDocument/用户反馈）；只读交互，暂停态同样放行。#220 起 intent
+   *  可携 sourceDocUri（悬停浮层内链接以 B 文档为来源解析执行） */
+  openLink?(intent: { href: string; srcStart: number; srcEnd: number; sourceDocUri?: string }): void
   /** #11 双链跳转执行（vscode 层注入：wikilinkTarget 按需解析 + 打开/
-   *  定位/用户反馈）；只读交互，暂停态同样放行 */
-  openWikilink?(intent: { target: string; srcStart: number; srcEnd: number }): void
-  /** #10 图片资源解析（vscode 层注入：classifyImageTarget + asWebviewUri） */
-  resolveImage?(src: string): Promise<ImageResolution>
+   *  定位/用户反馈）；只读交互，暂停态同样放行。#220 起 intent 可携
+   *  sourceDocUri（语义与 openLink 同） */
+  openWikilink?(intent: { target: string; srcStart: number; srcEnd: number; sourceDocUri?: string }): void
+  /** #218 悬停预览文档读取（vscode 层注入：hoverDocAccess 无副作用读取——
+   *  目标解析 + openTextDocument + LF 转换）；report 回报 hover.result 载荷
+   *  （成功携带身份/版本/全文/范围，失败为错误分态）。只读交互，不进
+   *  edit.request 通道，暂停态同样放行 */
+  readHoverTarget?(
+    payload: HoverPreviewRequestPayload,
+    report: (result: HoverReadOutcome) => void,
+  ): void
+  /** #10 图片资源解析（vscode 层注入：classifyImageTarget + asWebviewUri）。
+   *  #220 起第二可选参 sourceDocUri：悬停浮层内 B 文档图片的来源上下文
+   *  （vscode 层按 B 目录构造 LinkContext）；缺省 = 面板自身文档 */
+  resolveImage?(src: string, sourceDocUri?: string): Promise<ImageResolution>
   /** #161 图片粘贴落盘（vscode 层注入：设置读取 + 目录解析 + writeFile）；
    *  report 回报成功（携插入文本）/ 目录非法 / 写入失败 */
   pasteImage?(
@@ -149,6 +164,12 @@ export interface DocumentSessionOptions {
   /** #201 宿主文件系统语义（vscode 层注入 process.platform === 'win32'）：
    *  归一目标键的大小写与分隔符行为。缺省 false（纯逻辑 POSIX 语义） */
   isWindowsHost?: boolean
+  /** #224 悬停读取缓存上限覆盖（测试注入用；缺省取共享参数
+   *  HOVER_REFRESH_DEFAULTS——条目与字节双上限集中定义） */
+  hoverReadCache?: {
+    entryLimit?: number
+    byteLimit?: number
+  }
 }
 
 interface PendingEdit {
@@ -191,10 +212,46 @@ interface PanelEntry {
   /** webview 曾在会话内重载（ready 重复到达，B-2）：暂停面板复制未确认
    *  输入时跳过面板查询（重载后 view.state 是权威全文，不代表冲突前输入） */
   reloaded: boolean
+  /** #220/#222 悬停来源记录：本面板经 hover.request 成功读取过的目标
+   *  fsPath 集合——来源资源守卫的比对基准（image.request / link.activate /
+   *  wikilink.activate 的 sourceDocUri 须为集合成员才放行）。#220 浮层
+   *  一次一个目标时单值即够；#222 嵌入卡片与浮层共存，多目标同面板在场
+   *  ——集合化后守卫语义收窄为「本面板实际读取过的目标」（不信任前端
+   *  任意 URI 的边界不变）。目标本身经 resolveVaultLinkFile 的
+   *  ADR-0008 根内语义解析，记录在案 = 来源已受根边界约束。有界：超出
+   *  上限时按插入序淘汰最早成员 */
+  hoverSourceFsPaths: Set<string>
+  /** 最近一次成功送达的目标 fsPath（观测面；守卫用集合） */
+  hoverSourceFsPath?: string
 }
 
 const ACK_CACHE_LIMIT = 64
 const VERSION_LOG_LIMIT = 256
+/** #222 悬停来源记录集合上限（面板级；嵌入卡片 + 浮层并存的会话内目标数
+ * 量级上界，超出按插入序淘汰）。修 4（review 第二轮）：与
+ * HOVER_REFRESH_DEFAULTS.embedEntryLimit（webview 嵌入实例状态库上限 64）
+ * 对齐——同一会话内「嵌入卡片 + 浮层」的目标集合与嵌入实例库同容量基准，
+ * 两侧不再不对称 */
+const HOVER_SOURCES_LIMIT = 64
+
+/** #224 图源反查登记上限（会话级；#201 建立时无界，来源化路径并入登记
+ * 后补上界——条目为小字符串对，条目数计量足够） */
+const IMAGE_SRC_TARGET_LIMIT = 256
+
+/** #224 悬停读取缓存的请求形态键（「按规范目标、范围区分」的形态近似：
+ * 三种目标形态互斥——直接目标 / 普通链接 href / 双链 target 原文；范围
+ * 锚点已含在各自原文内） */
+function hoverShapeKeyOf(
+  message: Pick<HoverPreviewRequestPayload, 'target' | 'linkHref' | 'directTarget'>,
+): string {
+  if (message.directTarget !== undefined) {
+    return `d:${message.directTarget.fsPath}\n${message.directTarget.anchor ?? ''}`
+  }
+  if (message.linkHref !== undefined) {
+    return `h:${message.linkHref}`
+  }
+  return `w:${message.target}`
+}
 
 /** 变更组相等（顺序无关）：段内区间互不重叠，排序后逐段比较。
  *  VSCode 对多段 WorkspaceEdit 的回流 contentChanges 按偏移降序到达，
@@ -239,7 +296,9 @@ export class DocumentSession {
   /** #10 图片解析：同 src 在途去重与成功结果缓存（失败不缓存，重试重解析） */
   private readonly imageInFlight = new Map<string, Promise<ImageResolution>>()
   private readonly imageCache = new Map<string, ImageResolution>()
-  /** #201 图源 → 归一目标键登记（失效通道反查：按文件目标找 src 集合） */
+  /** #201 图源 → 归一目标键登记（失效通道反查：按文件目标找 src 集合）。
+   *  #224 起来源化请求（悬停/嵌入 B 图片）同样登记（registerImageSrcTarget
+   *  统一入口，有界）——B 图片文件变化经反查命中，广播 image.invalidate */
   private readonly imageSrcTarget = new Map<string, string>()
   /** #201 缓存世代（失效时推进）：在途请求跨失效窗口完成后不得回写缓存 */
   private readonly imageEpochs = new Map<string, number>()
@@ -253,12 +312,36 @@ export class DocumentSession {
   /** #208 资源代次：手动刷新时自增，工作区图片 webview URI 的 ?v= 戳取
    *  此值（缓存击穿；0 为未刷新初值，URI 不带戳——与现状形态一致） */
   private imageGeneration = 0
+  /** #224 悬停读取缓存（按请求形态区分：双链 target / 普通链接 href /
+   *  面板直接目标——「按规范目标、版本、范围区分」的形态近似；范围已含
+   *  在形态内（锚点在 target/href/anchor 原文中）。成功缓存 + 在途合并
+   *  （同形态并发共享一次读取）+ 世代守卫（失效窗口内完成不回写），
+   *  先例：imageCache/imageInFlight/imageEpochs（#201/#208 同构） */
+  private readonly hoverReadCache = new Map<string, Extract<HoverReadOutcome, { ok: true }>>()
+  private readonly hoverReadInFlight = new Map<string, Promise<HoverReadOutcome>>()
+  /** 目标 fsPath → 形态键集合（失效反查：版本变更按目标清缓存） */
+  private readonly hoverShapeTargets = new Map<string, Set<string>>()
+  /** 形态键 → 失效世代（单调；在途发起时快照、完成时比对） */
+  private readonly hoverEpochs = new Map<string, number>()
+  /** #224 失效时钟（单调）：目标 fsPath → 最近失效时刻。在途读取发起时
+   *  记当前时钟，完成时对比——失效先于完成（此时形态→fsPath 登记尚未
+   *  发生、反查为空的竞态窗口）也能检出并放弃缓存写入（imageClock 先例） */
+  private readonly hoverInvalidatedAt = new Map<string, number>()
+  private hoverClock = 0
+  private hoverCacheBytes = 0
+  private hoverCacheHits = 0
+  private hoverCacheMisses = 0
+  private readonly hoverCacheLimits: { entryLimit: number; byteLimit: number }
 
   constructor(
     private readonly doc: HostDocumentPort,
     private readonly options: DocumentSessionOptions = {},
   ) {
     this.newline.rebuild(doc.getText())
+    this.hoverCacheLimits = {
+      entryLimit: options.hoverReadCache?.entryLimit ?? HOVER_REFRESH_DEFAULTS.cacheEntryLimit,
+      byteLimit: options.hoverReadCache?.byteLimit ?? HOVER_REFRESH_DEFAULTS.cacheByteLimit,
+    }
   }
 
   private get docUri(): string {
@@ -282,6 +365,7 @@ export class DocumentSession {
       lastConflictRevision: 0,
       conflictNotified: false,
       reloaded: false,
+      hoverSourceFsPaths: new Set(),
     })
     return sessionId
   }
@@ -340,6 +424,14 @@ export class DocumentSession {
     this.imageCache.clear()
   }
 
+  /** P2-2（review 修复）来源集合查询面：fsPath 是否为本面板实际送达过
+   *  hover.result 成功回包的目标——provider 层 hover.watch 登记前的校验
+   *  基准（不信任前端任意路径；watch 总在成功装载后，集合已含目标）。
+   *  未知会话一律 false */
+  hasHoverSource(sessionId: string, fsPath: string): boolean {
+    return this.panels.get(sessionId)?.hoverSourceFsPaths.has(fsPath) ?? false
+  }
+
   /** webview 消息入口（provider 接到 webview.onDidReceiveMessage 后调用） */
   handleWebviewMessage(message: unknown, sessionId: string): Promise<void> {
     if (this.disposed) {
@@ -361,6 +453,11 @@ export class DocumentSession {
       case 'outlinks.get':
       case 'outlink.activate':
         // 出链面板（与反链镜像）：provider 层拦截消费；绕过面板入口无副作用
+        return Promise.resolve()
+      case 'hover.watch':
+      case 'hover.unwatch':
+        // #224 引用视图订阅：provider 层拦截消费（协调器与订阅表在
+        // provider 域）；绕过面板入口则无副作用
         return Promise.resolve()
       case 'settings.open':
         // #33 打开设置页：不依赖文档状态（无文档语义在宿主层闭合），
@@ -637,27 +734,38 @@ export class DocumentSession {
         return Promise.resolve()
       case 'link.activate': {
         // #10 链接跳转意图：校验归属与 ready 后交面板端口执行。只读交互，
-        // 不受写回暂停影响（暂停面板照样可以点链接）
+        // 不受写回暂停影响（暂停面板照样可以点链接）。#220 sourceDocUri
+        //（悬停浮层内链接）：与面板已送达的悬停来源比对，不匹配即丢弃
+        //——B 内链接按 A 目录解析是错误语义，宁可不动作（不回落）
         if (!panel.ready || message.docUri !== this.docUri) {
+          return Promise.resolve()
+        }
+        if (message.sourceDocUri !== undefined && !panel.hoverSourceFsPaths.has(message.sourceDocUri)) {
           return Promise.resolve()
         }
         panel.port.openLink?.({
           href: message.href,
           srcStart: message.srcStart,
           srcEnd: message.srcEnd,
+          ...(message.sourceDocUri !== undefined ? { sourceDocUri: message.sourceDocUri } : {}),
         })
         return Promise.resolve()
       }
       case 'wikilink.activate': {
         // #11 双链跳转意图：与 link.activate 同校验口径（归属 + ready），
-        // 执行（按名/路径解析、打开与定位）归宿主 vscode 层
+        // 执行（按名/路径解析、打开与定位）归宿主 vscode 层。#220
+        // sourceDocUri（悬停浮层内双链）守卫与 link.activate 同
         if (!panel.ready || message.docUri !== this.docUri) {
+          return Promise.resolve()
+        }
+        if (message.sourceDocUri !== undefined && !panel.hoverSourceFsPaths.has(message.sourceDocUri)) {
           return Promise.resolve()
         }
         panel.port.openWikilink?.({
           target: message.target,
           srcStart: message.srcStart,
           srcEnd: message.srcEnd,
+          ...(message.sourceDocUri !== undefined ? { sourceDocUri: message.sourceDocUri } : {}),
         })
         return Promise.resolve()
       }
@@ -674,9 +782,15 @@ export class DocumentSession {
       }
       case 'image.request': {
         // #10 图片解析请求：同 src 在途去重 + 成功缓存（失败重试重解析）。
-        // 返回完成 Promise（image.result 已回发才算处理完，调用方可等待）
+        // 返回完成 Promise（image.result 已回发才算处理完，调用方可等待）。
+        // #220 来源化请求（sourceDocUri = 悬停浮层 B 文档身份）：守卫通过
+        // 后走独立解析路径——不进会话缓存/在途去重表（键为裸 src，跨来源
+        // 会串台；浮层短生命周期，跨开缓存属 #224 有界缓存）
         if (!panel.ready || message.docUri !== this.docUri) {
           return Promise.resolve()
+        }
+        if (message.sourceDocUri !== undefined) {
+          return this.resolveSourcedImageRequest(panel, message.reqId, message.src, message.sourceDocUri)
         }
         return this.resolveImageRequest(panel, message.reqId, message.src)
       }
@@ -726,6 +840,107 @@ export class DocumentSession {
         }
         const generation = this.invalidateImages()
         panel.port.send({ kind: 'refresh.invalidated', reqId: message.reqId, generation })
+        return Promise.resolve()
+      }
+      case 'hover.request': {
+        // #218 悬停预览文档读取：会话守卫对齐 image.request / diagram.export
+        // 先例（就绪且 docUri 匹配才放行，否则静默丢弃）；读取执行经面板
+        // 端口注入（hoverDocAccess 无副作用路径），结果回来源面板（reqId +
+        // instanceId 双配对——迟到回包由 webview 侧实例守卫丢弃）。只读
+        // 交互：不进 edit.request 通道、不写文档，暂停态同样放行。
+        // #219 起成功形态透传语义范围选择器（full/heading/block）、失败
+        // 形态透传锚点原文（anchor-missing 就地提示用）。
+        // #224 读取缓存：同形态合并读取（在途共享）+ 成功缓存（有界双上
+        // 限）+ 失效按目标 fsPath 反查清理（invalidateHoverReads，事件通
+        // 道由 provider 协调器调用）；失败不缓存（保留重试语义）
+        if (!panel.ready || message.docUri !== this.docUri) {
+          return Promise.resolve()
+        }
+        const report = (result: HoverReadOutcome): void => {
+          if (result.ok) {
+            // #220/#222 来源记录：成功读取即入集合（嵌入卡片与浮层多目标
+            // 共存；有界淘汰防无界增长——过期成员最多放宽一个已不在场目标
+            // 的点击守卫，DOM 已不在则点击本就不发生）。P3-2（review 修复）：
+            // 已存在成员重读时移到队尾（插入序 = 淘汰序改最近读取序）——
+            // 活跃目标持续触达不被上限淘汰（watch 校验的放行基准随之
+            // 保持在场；上限 64 与 embedEntryLimit 对齐，修 4）
+            if (panel.hoverSourceFsPaths.has(result.fsPath)) {
+              panel.hoverSourceFsPaths.delete(result.fsPath)
+            } else if (panel.hoverSourceFsPaths.size >= HOVER_SOURCES_LIMIT) {
+              const oldest = panel.hoverSourceFsPaths.keys().next().value
+              if (oldest !== undefined) {
+                panel.hoverSourceFsPaths.delete(oldest)
+              }
+            }
+            panel.hoverSourceFsPaths.add(result.fsPath)
+            panel.hoverSourceFsPath = result.fsPath
+          }
+          panel.port.send(
+            result.ok
+              ? {
+                  kind: 'hover.result',
+                  reqId: message.reqId,
+                  instanceId: message.instanceId,
+                  ok: true,
+                  target: { fsPath: result.fsPath, relPath: result.relPath },
+                  version: result.version,
+                  text: result.lfText,
+                  range: result.range,
+                  scope: result.scope,
+                }
+              : {
+                  kind: 'hover.result',
+                  reqId: message.reqId,
+                  instanceId: message.instanceId,
+                  ok: false,
+                  reason: result.reason,
+                  ...(result.anchor !== undefined ? { anchor: result.anchor } : {}),
+                },
+          )
+        }
+        const port = panel.port.readHoverTarget
+        if (!port) {
+          report({ ok: false, reason: 'read-failed' })
+          return Promise.resolve()
+        }
+        const shapeKey = hoverShapeKeyOf(message)
+        const cached = this.hoverReadCache.get(shapeKey)
+        if (cached) {
+          this.hoverCacheHits++
+          report(cached)
+          return Promise.resolve()
+        }
+        this.hoverCacheMisses++
+        let pending = this.hoverReadInFlight.get(shapeKey)
+        if (!pending) {
+          // 发起世代快照：完成时校验（失效窗口内完成不回写缓存——回包
+          // 照发请求面板，webview 侧按 reqId/版本仲裁丢弃旧内容）。发起
+          // 时钟同步记录：目标 fsPath 在发起时未知（解析在读取端口内），
+          // 失效时钟补齐「登记尚未发生」的竞态窗口
+          const epoch = this.hoverEpochs.get(shapeKey) ?? 0
+          const requestClock = this.hoverClock
+          pending = new Promise<HoverReadOutcome>((resolve) => {
+            port(message, resolve)
+          })
+          this.hoverReadInFlight.set(shapeKey, pending)
+          void pending.then((outcome) => {
+            if (this.hoverReadInFlight.get(shapeKey) === pending) {
+              this.hoverReadInFlight.delete(shapeKey)
+            }
+            if ((this.hoverEpochs.get(shapeKey) ?? 0) !== epoch) {
+              return // 世代已过：迟到结果不复活旧缓存
+            }
+            if (outcome.ok) {
+              // 在途竞态补校验：读取期间该目标被失效过（当时形态→fsPath
+              // 登记未发生、反查为空）——不写缓存
+              const invalidatedAt = this.hoverInvalidatedAt.get(outcome.fsPath) ?? 0
+              if (invalidatedAt <= requestClock) {
+                this.commitHoverRead(shapeKey, outcome)
+              }
+            }
+          })
+        }
+        void pending.then(report)
         return Promise.resolve()
       }
       case 'perf.report':
@@ -894,6 +1109,63 @@ export class DocumentSession {
     send(await pending)
   }
 
+  /**
+   * #220 来源化图片解析（悬停浮层/嵌入卡片内 B 文档图片）：守卫
+   * （sourceDocUri 须为本面板已送达 hover.result 成功回包的目标）通过后
+   * 直连解析端口——不进会话缓存/在途去重表（键均为裸 src，跨来源会串
+   * 台；重复请求的代价是重复 stat，跨开缓存不属本通道）。#224 起成功
+   * 结果登记失效反查（B 图片文件变化 → invalidateImagesByFsPath 命中 →
+   * image.invalidate 广播 → B 管理器失效重挂；键为裸 src，跨来源同 src
+   * 指向不同文件时后登记覆盖前者——失效广播是「无条件失效重取」语义，
+   * 多杀自愈，见 imageSrcTarget 注释）。解析异常收敛 read-error 回发。
+   */
+  private async resolveSourcedImageRequest(
+    panel: PanelEntry,
+    reqId: number,
+    src: string,
+    sourceDocUri: string,
+  ): Promise<void> {
+    if (!panel.hoverSourceFsPaths.has(sourceDocUri)) {
+      return // 来源守卫：非本面板读取过的悬停/嵌入目标，静默丢弃（不信任前端任意 URI）
+    }
+    const resolver = panel.port.resolveImage
+    const resolution = resolver
+      ? await resolver(src, sourceDocUri).catch((): ImageResolution => ({ ok: false, reason: 'read-error' }))
+      : { ok: false, reason: 'read-error' } as ImageResolution
+    if (resolution.fsPath) {
+      this.registerImageSrcTarget(src, resolution.fsPath)
+    }
+    if (resolution.ok) {
+      panel.port.send({ kind: 'image.result', reqId, ok: true, src: resolution.src })
+    } else {
+      panel.port.send({
+        kind: 'image.result',
+        reqId,
+        ok: false,
+        reason: resolution.reason,
+        detail: resolution.detail,
+      })
+    }
+  }
+
+  /** 图源 → 归一目标键登记（#201 反查；#224 起来源化路径同样登记并有界：
+   *  条目数上限按插入序淘汰，被淘汰 src 失去失效反查——重挂/重开重新
+   *  登记自愈） */
+  private registerImageSrcTarget(src: string, fsPath: string): void {
+    const key = imageFsKey(fsPath, this.options.isWindowsHost ?? false)
+    if (this.imageSrcTarget.get(src) === key) {
+      this.imageSrcTarget.delete(src) // 重复登记同目标：移到 MRU（插入序语义）
+    }
+    this.imageSrcTarget.set(src, key)
+    while (this.imageSrcTarget.size > IMAGE_SRC_TARGET_LIMIT) {
+      const oldest = this.imageSrcTarget.keys().next().value
+      if (oldest === undefined) {
+        break
+      }
+      this.imageSrcTarget.delete(oldest)
+    }
+  }
+
   /** 结果落库（#201）：登记反查映射；被失效覆盖（overshadowKey 非空）时
    *  不写缓存并对该 src 补失效广播，成功结果照常仅作登记 */
   private commitImageResult(
@@ -902,10 +1174,7 @@ export class DocumentSession {
     overshadowKey: string | null,
   ): void {
     if (resolution.fsPath) {
-      this.imageSrcTarget.set(
-        src,
-        imageFsKey(resolution.fsPath, this.options.isWindowsHost ?? false),
-      )
+      this.registerImageSrcTarget(src, resolution.fsPath)
     }
     if (resolution.ok && !overshadowKey) {
       this.imageCache.set(src, resolution)
@@ -960,6 +1229,119 @@ export class DocumentSession {
     for (const panel of this.panels.values()) {
       panel.port.send(message)
     }
+  }
+
+  // ---- #224 悬停读取缓存 ----
+
+  /**
+   * 按目标 fsPath 失效悬停读取（provider 事件路径调用——修 1 起经
+   * connectHoverEvents 无条件广播，不依赖订阅在场）：反查该目标的全部
+   * 请求形态，清缓存与在途表并推进世代——在途读取完成后不回写缓存
+   * （迟到旧文不复活），请求面板照收回包（webview 侧 reqId/版本仲裁
+   * 丢弃）。无登记（该目标未被读取过且无在途读取）时零副作用。
+   *
+   * 修 3（review 第二轮）：失效钟条目只在「有在途读取」时写入——其唯一
+   * 消费方是读取完成回调的竞态补校验（发起时形态→fsPath 登记尚未发生、
+   * 反查为空的窗口）；无在途时本目标条目无未来读者，顺带清理（否则随
+   * 事件广播只写不删、无界积累）。世代条目同样只读后清（evictHoverRead
+   * 同步删除），按清理前的值推进保证形态键内单调不回退——在途快照不因
+   * 清理误配对。
+   */
+  invalidateHoverReads(fsPath: string): void {
+    const hasInFlight = this.hoverReadInFlight.size > 0
+    if (hasInFlight) {
+      this.hoverClock++
+      this.hoverInvalidatedAt.set(fsPath, this.hoverClock)
+    } else {
+      this.hoverInvalidatedAt.delete(fsPath)
+    }
+    const keys = this.hoverShapeTargets.get(fsPath)
+    if (!keys) {
+      return
+    }
+    for (const shapeKey of [...keys]) {
+      const nextEpoch = (this.hoverEpochs.get(shapeKey) ?? 0) + 1
+      this.evictHoverRead(shapeKey)
+      this.hoverReadInFlight.delete(shapeKey)
+      this.hoverEpochs.set(shapeKey, nextEpoch)
+    }
+  }
+
+  /** 悬停读取缓存观测（测试钩子与性能计量：条目/字节/命中/未命中与
+   *  辅助索引条目数——修 3 清理行为的行为断言面） */
+  hoverReadCacheStats(): {
+    entries: number
+    bytes: number
+    hits: number
+    misses: number
+    entryLimit: number
+    byteLimit: number
+    /** 失效钟条目数（仅在途窗口内有登记；quiescent 失效后为 0） */
+    invalidatedAtEntries: number
+    /** 世代表条目数（随缓存条目淘汰同步清理；失效推进后保留至再淘汰） */
+    epochEntries: number
+  } {
+    return {
+      entries: this.hoverReadCache.size,
+      bytes: this.hoverCacheBytes,
+      hits: this.hoverCacheHits,
+      misses: this.hoverCacheMisses,
+      entryLimit: this.hoverCacheLimits.entryLimit,
+      byteLimit: this.hoverCacheLimits.byteLimit,
+      invalidatedAtEntries: this.hoverInvalidatedAt.size,
+      epochEntries: this.hoverEpochs.size,
+    }
+  }
+
+  /** 成功结果入缓存（字节按 LF 全文 UTF-16 code unit ×2 近似计量；
+   *  条目/字节双上限按插入序淘汰——单条超字节上限不入缓存） */
+  private commitHoverRead(shapeKey: string, outcome: Extract<HoverReadOutcome, { ok: true }>): void {
+    const bytes = outcome.lfText.length * 2
+    if (bytes > this.hoverCacheLimits.byteLimit) {
+      return
+    }
+    if (this.hoverReadCache.has(shapeKey)) {
+      this.evictHoverRead(shapeKey) // 覆盖写：先计回旧条目字节
+    }
+    this.hoverReadCache.set(shapeKey, outcome)
+    let keys = this.hoverShapeTargets.get(outcome.fsPath)
+    if (!keys) {
+      keys = new Set()
+      this.hoverShapeTargets.set(outcome.fsPath, keys)
+    }
+    keys.add(shapeKey)
+    this.hoverCacheBytes += bytes
+    while (
+      (this.hoverReadCache.size > this.hoverCacheLimits.entryLimit ||
+        this.hoverCacheBytes > this.hoverCacheLimits.byteLimit) &&
+      this.hoverReadCache.size > 0
+    ) {
+      const oldest = this.hoverReadCache.keys().next().value
+      if (oldest === undefined) {
+        break
+      }
+      this.evictHoverRead(oldest)
+    }
+  }
+
+  /** 淘汰单条缓存条目（字节与反查登记一并回收；修 3：世代表条目随缓存
+   *  条目淘汰同步清理——失效路径的世代推进按清理前的值计算，键内单调
+   *  不回退） */
+  private evictHoverRead(shapeKey: string): void {
+    const hit = this.hoverReadCache.get(shapeKey)
+    if (!hit) {
+      return
+    }
+    this.hoverReadCache.delete(shapeKey)
+    this.hoverCacheBytes -= hit.lfText.length * 2
+    const keys = this.hoverShapeTargets.get(hit.fsPath)
+    if (keys) {
+      keys.delete(shapeKey)
+      if (keys.size === 0) {
+        this.hoverShapeTargets.delete(hit.fsPath)
+      }
+    }
+    this.hoverEpochs.delete(shapeKey)
   }
 
   /** #201 周期核验串行入链（并发有界：同会话至多一轮 verify 在途） */

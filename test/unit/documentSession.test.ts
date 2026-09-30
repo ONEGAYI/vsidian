@@ -4,6 +4,7 @@
 // 权威文档通过 HostDocumentPort 注入（vscode 层实现），此处用假文档驱动。
 import { describe, it, expect } from 'vitest'
 import { DocumentSession, type HostDocumentPort, type SessionNotice } from '../../src/host/documentSession'
+import { HOVER_REFRESH_DEFAULTS } from '../../src/shared/hoverRefresh'
 import type { HostToWebview, SerChange, WebviewToHost } from '../../src/shared/protocol'
 
 function applyToText(text: string, changes: SerChange[]): string {
@@ -1739,5 +1740,329 @@ describe('定位意图送达确认与补发边界（#163 验收反馈：已送�
     s.session.postToPanel(id, { kind: 'view.locate', offset: 12 })
     await s.send(id, { kind: 'ready' })
     expect(locateOffsets(s, id)).toEqual([7, 12, 12])
+  })
+})
+
+// ---- 工单 #220：悬停浮层的来源资源路由（B 身份图片解析与链接跳转） ----
+// A 悬停查看 B 时，B 内图片/链接以 B 为来源目录解析：webview 在既有
+// image.request / link.activate / wikilink.activate 通道上附 sourceDocUri
+//（B 的 fsPath）。会话侧守卫：只有本面板**实际送达过 hover.result 成功
+// 回包**的目标才能作为来源（不信任前端任意 URI）；来源化图片解析不进
+// 主缓存/去重表（浮层短生命周期，跨开缓存属 #224 有界缓存）。
+describe('#220 来源资源：hover.result 来源记录与守卫路由', () => {
+  const B_PATH = 'D:\\notes\\sub\\b.md'
+
+  interface SourcedHarness {
+    s: ReturnType<typeof setup>
+    id: string
+    resolveCalls: Array<{ src: string; sourceDocUri?: string }>
+    linkIntents: unknown[]
+    wikilinkIntents: unknown[]
+    out: HostToWebview[]
+  }
+
+  function sourcedSetup(): SourcedHarness {
+    const s = setup()
+    const resolveCalls: SourcedHarness['resolveCalls'] = []
+    const linkIntents: unknown[] = []
+    const wikilinkIntents: unknown[] = []
+    const out: HostToWebview[] = []
+    const id = s.session.attachPanel({
+      send: (m) => out.push(m),
+      readHoverTarget: (_payload, report) => {
+        report({
+          ok: true,
+          fsPath: B_PATH,
+          relPath: 'sub/b.md',
+          version: 1,
+          lfText: '# B\n',
+          range: { start: 0, end: 5 },
+          scope: { kind: 'full' },
+        })
+      },
+      resolveImage: async (src, sourceDocUri) => {
+        resolveCalls.push({ src, sourceDocUri })
+        return { ok: true, src: `res://${sourceDocUri ?? 'panel'}#${src}` }
+      },
+      openLink: (intent) => linkIntents.push(intent),
+      openWikilink: (intent) => wikilinkIntents.push(intent),
+    })
+    return { s, id, resolveCalls, linkIntents, wikilinkIntents, out }
+  }
+
+  async function hoverServeB(t: SourcedHarness): Promise<void> {
+    await ready10(t.s, t.id)
+    await t.s.send(t.id, {
+      kind: 'hover.request', sessionId: t.id, docUri: DOC_URI,
+      reqId: 1, instanceId: 'hover-1', sourceStart: 0, sourceEnd: 5, target: 'sub/b',
+    })
+  }
+
+  it('hover.result 成功送达后记录来源：sourceDocUri 匹配的 image.request 透传给解析器', async () => {
+    const t = sourcedSetup()
+    await hoverServeB(t)
+    await t.s.send(t.id, {
+      kind: 'image.request', sessionId: t.id, docUri: DOC_URI,
+      reqId: 7, src: './img.png', sourceDocUri: B_PATH,
+    })
+    expect(t.resolveCalls).toEqual([{ src: './img.png', sourceDocUri: B_PATH }])
+    expect(t.out.filter((m) => m.kind === 'image.result')).toEqual([
+      { kind: 'image.result', reqId: 7, ok: true, src: `res://${B_PATH}#./img.png` },
+    ])
+  })
+
+  it('来源守卫：未送达过该目标的 sourceDocUri 请求静默丢弃（不触达解析器不回发）', async () => {
+    const t = sourcedSetup()
+    await ready10(t.s, t.id)
+    // 未 hover：任意 sourceDocUri 丢弃
+    await t.s.send(t.id, {
+      kind: 'image.request', sessionId: t.id, docUri: DOC_URI,
+      reqId: 1, src: './img.png', sourceDocUri: B_PATH,
+    })
+    expect(t.resolveCalls).toEqual([])
+    // hover 成功后：不匹配的来源（前端伪造任意路径）丢弃
+    await hoverServeB(t)
+    await t.s.send(t.id, {
+      kind: 'image.request', sessionId: t.id, docUri: DOC_URI,
+      reqId: 2, src: './img.png', sourceDocUri: 'C:\\任意\\目录.md',
+    })
+    expect(t.resolveCalls).toEqual([])
+    expect(t.out.filter((m) => m.kind === 'image.result')).toHaveLength(0)
+  })
+
+  it('来源化图片解析不进主缓存/去重表：同 src 重复请求每次触达解析器', async () => {
+    const t = sourcedSetup()
+    await hoverServeB(t)
+    for (const reqId of [1, 2]) {
+      await t.s.send(t.id, {
+        kind: 'image.request', sessionId: t.id, docUri: DOC_URI,
+        reqId, src: './img.png', sourceDocUri: B_PATH,
+      })
+    }
+    expect(t.resolveCalls, '来源化路径无会话缓存（浮层短生命周期）').toHaveLength(2)
+    // 主文档路径（无 sourceDocUri）缓存语义不受影响：同 src 两次只解析一次
+    for (const reqId of [3, 4]) {
+      await t.s.send(t.id, {
+        kind: 'image.request', sessionId: t.id, docUri: DOC_URI,
+        reqId, src: './img.png',
+      })
+    }
+    expect(t.resolveCalls).toHaveLength(3)
+  })
+
+  it('来源化解析异常收敛 read-error 回发（不静默吞掉浮层内图片）', async () => {
+    const s = setup()
+    const out: HostToWebview[] = []
+    const id = s.session.attachPanel({
+      send: (m) => out.push(m),
+      readHoverTarget: (_payload, report) => {
+        report({
+          ok: true, fsPath: B_PATH, relPath: 'sub/b.md', version: 1,
+          lfText: '# B\n', range: { start: 0, end: 5 }, scope: { kind: 'full' },
+        })
+      },
+      resolveImage: async () => {
+        throw new Error('boom')
+      },
+    })
+    await ready10(s, id)
+    await s.send(id, {
+      kind: 'hover.request', sessionId: id, docUri: DOC_URI,
+      reqId: 1, instanceId: 'hover-1', sourceStart: 0, sourceEnd: 5, target: 'sub/b',
+    })
+    await s.send(id, {
+      kind: 'image.request', sessionId: id, docUri: DOC_URI,
+      reqId: 9, src: './img.png', sourceDocUri: B_PATH,
+    })
+    expect(out.filter((m) => m.kind === 'image.result')).toEqual([
+      { kind: 'image.result', reqId: 9, ok: false, reason: 'read-error', detail: undefined },
+    ])
+  })
+
+  it('link.activate / wikilink.activate：sourceDocUri 匹配来源记录时透传；不匹配丢弃', async () => {
+    const t = sourcedSetup()
+    await hoverServeB(t)
+    await t.s.send(t.id, {
+      kind: 'link.activate', sessionId: t.id, docUri: DOC_URI,
+      href: 'c.md', srcStart: 0, srcEnd: 3, sourceDocUri: B_PATH,
+    })
+    await t.s.send(t.id, {
+      kind: 'wikilink.activate', sessionId: t.id, docUri: DOC_URI,
+      target: 'C 笔记', srcStart: 0, srcEnd: 3, sourceDocUri: B_PATH,
+    })
+    expect(t.linkIntents).toEqual([
+      { href: 'c.md', srcStart: 0, srcEnd: 3, sourceDocUri: B_PATH },
+    ])
+    expect(t.wikilinkIntents).toEqual([
+      { target: 'C 笔记', srcStart: 0, srcEnd: 3, sourceDocUri: B_PATH },
+    ])
+    // 不匹配的来源：丢弃（不回落到面板自身文档解析——B 内链接按 A 目录
+    // 解析是错误语义，宁可不动作）
+    await t.s.send(t.id, {
+      kind: 'link.activate', sessionId: t.id, docUri: DOC_URI,
+      href: 'c.md', srcStart: 0, srcEnd: 3, sourceDocUri: 'C:\\伪造.md',
+    })
+    expect(t.linkIntents).toHaveLength(1)
+    // 无 sourceDocUri 的常规链接（主视图点击）不受影响
+    await t.s.send(t.id, {
+      kind: 'link.activate', sessionId: t.id, docUri: DOC_URI,
+      href: 'a-dir.md', srcStart: 0, srcEnd: 3,
+    })
+    expect(t.linkIntents).toHaveLength(2)
+    expect(t.linkIntents[1]).toEqual({ href: 'a-dir.md', srcStart: 0, srcEnd: 3 })
+  })
+
+  it('hover.result 失败不记录来源：其后 sourced 请求丢弃', async () => {
+    const s = setup()
+    const resolveCalls: unknown[] = []
+    const out: HostToWebview[] = []
+    const id = s.session.attachPanel({
+      send: (m) => out.push(m),
+      readHoverTarget: (_payload, report) => {
+        report({ ok: false, reason: 'not-found' })
+      },
+      resolveImage: async (src) => {
+        resolveCalls.push(src)
+        return { ok: true, src: 'res://x' }
+      },
+    })
+    await ready10(s, id)
+    await s.send(id, {
+      kind: 'hover.request', sessionId: id, docUri: DOC_URI,
+      reqId: 1, instanceId: 'hover-1', sourceStart: 0, sourceEnd: 5, target: 'missing',
+    })
+    await s.send(id, {
+      kind: 'image.request', sessionId: id, docUri: DOC_URI,
+      reqId: 2, src: './img.png', sourceDocUri: B_PATH,
+    })
+    expect(resolveCalls).toEqual([])
+    expect(out.filter((m) => m.kind === 'image.result')).toHaveLength(0)
+  })
+})
+
+// ---- 工单 #222：来源记录集合化（嵌入卡片与悬停浮层多目标共存） ----
+describe('#222 来源集合：嵌入与悬停多目标同面板在场', () => {
+  const B_PATH = 'D:\notes\sub\b.md'
+  const C_PATH = 'D:\notes\sub\c.md'
+
+  it('先后读取 B（嵌入）与 C（悬停）：两目标的 sourceDocUri 请求均放行（单值守卫会误杀）', async () => {
+    const s = setup()
+    const resolveCalls: Array<{ src: string; sourceDocUri?: string }> = []
+    const linkIntents: unknown[] = []
+    const out: HostToWebview[] = []
+    let serve = 0
+    const id = s.session.attachPanel({
+      send: (m) => out.push(m),
+      readHoverTarget: (_payload, report) => {
+        serve += 1
+        report(
+          serve === 1
+            ? { ok: true, fsPath: B_PATH, relPath: 'sub/b.md', version: 1, lfText: '# B\n', range: { start: 0, end: 5 }, scope: { kind: 'full' } }
+            : { ok: true, fsPath: C_PATH, relPath: 'sub/c.md', version: 1, lfText: '# C\n', range: { start: 0, end: 5 }, scope: { kind: 'full' } },
+        )
+      },
+      resolveImage: async (src, sourceDocUri) => {
+        resolveCalls.push({ src, sourceDocUri })
+        return { ok: true, src: `res://${sourceDocUri ?? 'p'}#${src}` }
+      },
+      openLink: (intent) => linkIntents.push(intent),
+    })
+    await ready10(s, id)
+    // 嵌入卡片装载 B（hover.request）→ 悬停浮层再读取 C：两个来源同时在记录
+    await s.send(id, { kind: 'hover.request', sessionId: id, docUri: DOC_URI, reqId: 1, instanceId: 'embed-1', sourceStart: 0, sourceEnd: 8, target: 'sub/b' })
+    await s.send(id, { kind: 'hover.request', sessionId: id, docUri: DOC_URI, reqId: 2, instanceId: 'hover-1', sourceStart: 10, sourceEnd: 16, target: 'sub/c' })
+    // B 内图片（嵌入卡片在场）与 C 内链接（浮层在场）同时放行
+    await s.send(id, { kind: 'image.request', sessionId: id, docUri: DOC_URI, reqId: 3, src: './b-img.png', sourceDocUri: B_PATH })
+    await s.send(id, { kind: 'link.activate', sessionId: id, docUri: DOC_URI, href: 'd.md', srcStart: 0, srcEnd: 3, sourceDocUri: C_PATH })
+    expect(resolveCalls).toEqual([{ src: './b-img.png', sourceDocUri: B_PATH }])
+    expect(linkIntents).toEqual([{ href: 'd.md', srcStart: 0, srcEnd: 3, sourceDocUri: C_PATH }])
+    // 伪造来源仍丢弃
+    await s.send(id, { kind: 'image.request', sessionId: id, docUri: DOC_URI, reqId: 4, src: './x.png', sourceDocUri: 'D:\伪造.md' })
+    expect(resolveCalls).toHaveLength(1)
+  })
+})
+
+// ---- P2-2 / P3-2（review 修复）：hover.watch 来源校验查询面与集合触达序 ----
+// P2-2：provider 层 watch 登记前校验 fsPath ∈ 该会话 hoverSourceFsPaths（watch
+// 总在成功装载后，集合已含目标）——本 describe 钉查询面语义（伪造越界 watch
+// 的判定基准）；provider 接线为薄 if。P3-2：已存在成员重读时移到队尾（插入
+// 序 = 淘汰序改最近读取序），活跃目标不被上限淘汰（上限对齐
+// HOVER_REFRESH_DEFAULTS.embedEntryLimit——嵌入实例状态库同容量，修 4）。
+describe('#224 P2-2/P3-2：来源集合查询面与重读触达', () => {
+  interface HoverSetup {
+    s: ReturnType<typeof setup>
+    id: string
+    served: string[]
+  }
+
+  /** readHoverTarget 按 target 原文直供对应 fsPath（b1 → D:\notes\b1.md） */
+  function hoverByTargetSetup(): HoverSetup {
+    const s = setup()
+    const served: string[] = []
+    const id = s.session.attachPanel({
+      send: () => {},
+      readHoverTarget: (payload, report) => {
+        const target = payload.target
+        served.push(target)
+        report({
+          ok: true,
+          fsPath: `D:\\notes\\${target}.md`,
+          relPath: `${target}.md`,
+          version: 1,
+          lfText: '# t\n',
+          range: { start: 0, end: 4 },
+          scope: { kind: 'full' },
+        })
+      },
+    })
+    return { s, id, served }
+  }
+
+  async function readTarget(t: HoverSetup, seq: number, target: string): Promise<void> {
+    await t.s.send(t.id, {
+      kind: 'hover.request', sessionId: t.id, docUri: DOC_URI,
+      reqId: seq, instanceId: `inst-${seq}`, sourceStart: 0, sourceEnd: 4, target,
+    })
+  }
+
+  it('P2-2 hasHoverSource：未读取过为 false、成功读取后为 true、失败读取不记录、未知会话为 false', async () => {
+    const t = hoverByTargetSetup()
+    await ready10(t.s, t.id)
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\b.md')).toBe(false) // 未读取
+    expect(t.s.session.hasHoverSource('unknown-session', 'D:\\notes\\b.md')).toBe(false)
+    await readTarget(t, 1, 'b')
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\b.md')).toBe(true)
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\伪造.md')).toBe(false)
+    // 失败读取不记录（read-failed 端口）
+    const s2 = setup()
+    const id2 = s2.session.attachPanel({
+      send: () => {},
+      readHoverTarget: (_p, report) => report({ ok: false, reason: 'read-failed' }),
+    })
+    await ready10(s2, id2)
+    await s2.send(id2, {
+      kind: 'hover.request', sessionId: id2, docUri: DOC_URI,
+      reqId: 1, instanceId: 'x', sourceStart: 0, sourceEnd: 4, target: 'missing',
+    })
+    expect(s2.session.hasHoverSource(id2, 'D:\\notes\\missing.md')).toBe(false)
+  })
+
+  it('P3-2 重读触达：已存在成员重读后移到队尾，超限淘汰按最近读取序（活跃目标不被淘汰）', async () => {
+    const t = hoverByTargetSetup()
+    await ready10(t.s, t.id)
+    // 装满上限个不同目标（t01..tNN，插入序 t01 最旧；上限与嵌入实例
+    // 状态库 embedEntryLimit 对齐——修 4）
+    const limit = HOVER_REFRESH_DEFAULTS.embedEntryLimit
+    for (let i = 1; i <= limit; i++) {
+      await readTarget(t, i, `t${String(i).padStart(2, '0')}`)
+    }
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\t01.md')).toBe(true)
+    // 重读 t01（活跃目标触达 → 移到队尾）
+    await readTarget(t, limit + 1, 't01')
+    // 新目标入集合：淘汰的应是最久未读的 t02（而非触达过的 t01）
+    await readTarget(t, limit + 2, 't99')
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\t01.md')).toBe(true)
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\t02.md')).toBe(false)
+    expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\t99.md')).toBe(true)
   })
 })

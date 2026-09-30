@@ -229,6 +229,13 @@ export const STYLE_GUIDE_CATEGORIES: readonly StyleContractCategory[] = [
     "title": "出链面板",
     "titleKey": "styleRef.category.outlinks",
     "order": 11
+  },
+  {
+    "id": "hover-preview",
+    "domain": "chrome",
+    "title": "悬停预览",
+    "titleKey": "styleRef.category.hoverPreview",
+    "order": 12
   }
 ] as readonly StyleContractCategory[]
 
@@ -1042,6 +1049,54 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "单元 tableCells：转义管道拆分契约"
     ],
     "introduced": "#42（2026-09-24）"
+  },
+  {
+    "id": "live-escape",
+    "domain": "content",
+    "category": "inline-format",
+    "kind": "selector",
+    "target": ".vsidian-escape（Markdown 转义符反斜杠隐藏类；.vsidian-escape-reveal 为触及行显形类）",
+    "purpose": "转义符通用显隐（验收反馈通用化，Obsidian 对齐）：Live 正文中 Markdown 转义序列（反斜杠 + ASCII 标点，树驱动 Escape 节点）的反斜杠默认隐藏——所见为字面字符（\\* 渲染为 *，\\\\ 渲染为 \\）；光标/选区触及该行时换挂显形类，反斜杠以正文前景低混入浅色呈现（暴露源码，口径同块 id 淡化）。表格行内的转义符不经此类：\\| 走 #42 live-table-escaped-pipe 专用发射与规则（降级表格源文原文呈现）；格内其他转义符（\\* 等）零发射、反斜杠常驻原文可见——降级口径：表格自研拆分与通用发射双路径互斥（叠类互抹），钉住在 liveEscape 用例。代码块/行内代码内不生效（无 Escape 节点）。只改显示，不改原文。",
+    "views": [
+      "live"
+    ],
+    "states": "隐藏（默认——反斜杠 display:none）/ 显形（触及行换挂 reveal 类：display:inline + 正文前景 45% 低混入色，跟随明暗主题与自定义字体色）；显隐切换随选区事务重建，与标题/双链 mark 显隐同一谓词语义（折叠光标含行两端、非空选区严格重叠）。",
+    "dom": "行内 mark span（树驱动 Escape 节点首字符单位）；与双链/强调等行内 mark 可嵌套共存。",
+    "example": "#app .cm-editor .cm-scroller .vsidian-escape {\n  display: none;\n}\n#app .cm-editor .cm-scroller .vsidian-escape-reveal {\n  color: color-mix(in srgb, var(--vscode-editor-foreground, #808080) 45%, transparent);\n}",
+    "obsidian": {
+      "counterpart": "Obsidian Live Preview 转义符行内源码暴露（光标行显示浅色反斜杠）",
+      "support": "semantic"
+    },
+    "verification": [
+      "单元 liveEscape：构建层（隐藏/显形/选区/代码 span 排除/表格排除）与 DOM 层（真实 EditorView 类名挂载）",
+      "单元 escapeCssContract：隐藏与显形色规则（color-mix 低混入）钉住"
+    ],
+    "introduced": "#217 验收反馈（2026-09-30）"
+  },
+  {
+    "id": "mod-link-hover",
+    "domain": "content",
+    "category": "link-image-wikilink",
+    "kind": "selector",
+    "target": "body.vsidian-mod-link（Ctrl/Cmd 修饰键激活态，挂 body 的全局状态类）",
+    "purpose": "修饰键悬停反馈（#217 验收反馈：Ctrl+悬停可跳转链接但无任何样式提示，可发现性缺失）：按住 Ctrl/Cmd 时悬停可跳转的链接（双链/嵌入引用/普通链接——源码态 mark 与渲染态 widget，Reading 侧 a 同款）加下划线并显示可点击光标（替代文本光标竖条）。状态类由 syncController 的 document 级 keydown/keyup（getModifierState 精确处理左右修饰键同按与交替）与窗口 blur 回落维护；渲染态 widget 的常驻可点击光标（既有规则）不受影响。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "激活（Ctrl/Cmd 按住——body 挂类，悬停链接命中下划线 + cursor:pointer）/ 未激活（无类，链接呈现同既有）；窗口失焦强制回落（keyup 可能丢失）。",
+    "dom": "body 上的类；规则选择器覆盖 .vsidian-wikilink / .vsidian-link / Reading a 的 :hover。",
+    "example": "body.vsidian-mod-link #app .cm-editor .cm-scroller .vsidian-wikilink:hover { text-decoration: underline; cursor: pointer; }",
+    "obsidian": {
+      "counterpart": "Obsidian 按住 Ctrl 悬停内部链接的指针与下划线反馈方向",
+      "support": "semantic"
+    },
+    "verification": [
+      "单元 syncController 修饰键状态类：keydown 挂类 / keyup 摘类 / blur 回落",
+      "单元链接 CSS 契约：状态类规则（underline + cursor）钉住",
+      "浏览器：真实键盘 Ctrl 按下/抬起 + 悬停链接的 computed 样式断言"
+    ],
+    "introduced": "#217 验收反馈（2026-09-30）"
   },
   {
     "id": "reading-block",
@@ -1897,19 +1952,20 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "content-limits",
     "kind": "limitation",
     "target": ".markdown-embed / 嵌入结构",
-    "purpose": "嵌入（![[…]] 等）结构未提供（双链残缺形态按原文显示）；blockquote 块已支持。",
+    "purpose": "嵌入（![[…]]）的部分边界（#222 起独占正文一行的嵌入在 Reading 侧渲染为引用卡片、#223 起在 Live 侧挂载同款卡片并支持光标驱动源码显隐，见 reading-embed-card / live-embed-widget）：混排（行内有其他内容）、列表/引用容器与表格格内的嵌入保留源文（1.5 期接入）；递归展开不提供（一层展开内为占位引用行）；嵌入内容写入不支持。双链残缺形态按原文显示；blockquote 块已支持。",
     "views": [
       "live",
       "reading"
     ],
-    "dom": "无嵌入容器。",
+    "dom": "无嵌入容器的场景：非独占行/容器内的 ![[…]] 按原文文本呈现（两种视图一致）。",
     "example": "",
     "obsidian": {
       "counterpart": ".markdown-embed",
       "support": "none"
     },
     "verification": [
-      "清单即边界"
+      "单元 readingBlocks：混排/容器/表格/代码区域不产 embed 块（识别矩阵）",
+      "单元 wikilinkEmbed：扫描器与独占行判定矩阵"
     ],
     "introduced": "#11（2026-09-24）"
   },
@@ -3446,6 +3502,132 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "集成「出链面板」（出链面板批次）：outlinks.togglePainted 绘制证据与 toggleAriaLabel"
     ],
     "introduced": "出链面板批次（2026-09-29）"
+  },
+  {
+    "id": "hover-popup",
+    "domain": "chrome",
+    "category": "hover-preview",
+    "kind": "selector",
+    "target": ".vsidian-hover-popup（浮层容器；内含 .vsidian-hover-popup-header 标题条（目标显示名 + .vsidian-hover-popup-title 与 .vsidian-hover-popup-open 跳转入口——嵌入卡片同款，#217 验收跟进）、.vsidian-hover-popup-scroll 内容滚动区（承载只读 Reading 容器）与 .vsidian-hover-popup-state 就地状态行（loading/错误分态；错误分态追加 .vsidian-hover-popup-state-error 修饰——主题错误色，验收反馈与普通文字区分））",
+    "purpose": "悬停文档预览浮层（#218 一期首条闭环）：父文档 Reading 中悬停指向 Markdown 的双链/本地链接，经文档访问通道读取目标后以只读 Reading 内容显示。#221 全入口：Live 正文（默认 Ctrl+悬停，设置 hover.liveDirect 开启后直接悬停）与反链/出链面板条目（直接悬停）共用同一浮层。默认宽 480px / 最大高 400px（小视口由 JS 几何计划四边翻转并收缩钳制）；内容只读——任务 checkbox 禁用（JS disabled + pointer-events 双保险），无任何写回通道。#220 起浮层内为目标文档（B）的 Reading 内容：图片以 B 为来源解析（sourceDocUri 通道）、链接可点击跳转、代码块朴素高亮。#217 验收跟进：标题条与嵌入卡片同款——目标显示名（spec.target）常驻不随回包换，右上角跳转入口按目标形态分派到既有激活消息族（双链/普通链接直发、面板形态经 openAction 闭包走条目点击同通道），点击即上下文切换关闭。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "交互态浮层（悬停延迟打开期间挂载、离开联合域延迟关闭/Esc/父容器滚动/切模式撤下；#221 键盘命令打开时焦点进入浮层，:focus-visible 轮廓指示，焦点在内不因鼠标离开销毁）——容器本体不进静态探针，开闭、保活与绘制由浏览器 hoverPreview / hoverEntry 套件按行为路径验证；样式入口（单类低特异性）公开供片段覆写。",
+    "dom": "#220 起直挂 #app 内（此前挂 body；fixed 定位不受 #app 布局影响）——#app 的主题变量与 `#app .vsidian-view-reading …` 正文样式、已启用 CSS 片段（容器类含 .markdown-preview-view 别名桥）随之天然命中，不为浮层复制第二套主题环境。内部 Reading 容器挂 .vsidian-view-reading。",
+    "example": ".vsidian-hover-popup {\n  width: 480px;\n  max-height: 400px;\n}\n\n/* 标题条与跳转入口（嵌入卡片同款规则并列，浮层选择器置首） */\n#app > .vsidian-hover-popup .vsidian-hover-popup-header,\n#app .vsidian-embed-card .vsidian-embed-card-header {\n  display: flex;\n  justify-content: space-between;\n  padding: 4px 10px;\n}",
+    "obsidian": {
+      "counterpart": ".hover-popover（Obsidian 页面预览浮层方向；内部结构闭源不作承诺）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 hoverPopupCssContract：fixed/宽 480/最大高 400/实底边框投影/滚动区/状态行/checkbox pointer-events 钉规则；#217 验收跟进加标题条与跳转按钮并列组（组文本含嵌入与浮层两侧选择器）",
+      "单元 hoverPopup + hoverPopupGeometry：生命周期契约与四边翻转数学内核",
+      "浏览器 hoverPreview（#218）：真实指针开闭/保活/滚动/Esc/边缘翻转 + 正文绘制层可见断言",
+      "浏览器 hoverEntry 场景 P（#217 验收跟进）：标题条显示名常驻 + 跳转图标 + 双链/链接分派与点击关闭"
+    ],
+    "introduced": "#218（2026-09-30）"
+  },
+  {
+    "id": "hover-fm-section",
+    "domain": "chrome",
+    "category": "hover-preview",
+    "kind": "selector",
+    "target": ".vsidian-hover-fm（浮层内笔记属性区修饰，挂 frontmatter 块；.vsidian-hover-fm-toggle 展开/折叠按钮；.vsidian-hover-fm-collapsed 收起态修饰）",
+    "purpose": "引用内容的笔记属性区（#220 悬停浮层首创，#222 起嵌入卡片同款共用——共享装配 refReadingContent，选择器并列 .vsidian-hover-popup / .vsidian-embed-card 前缀）：仅全文引用显示——默认折叠，标题整行是悬停热区（hover 或按钮 focus-visible 显示切换按钮，非悬停自动展开），点击按钮切换展开/收起；本次打开内保留展开状态（目标内容变化引发的重建不重置），浮层重新打开恢复折叠、嵌入卡片随实例状态（视口回收不清除）。成型 frontmatter 复用阅读侧标题栏与键值行（呈现与类型/降级边界沿用 frontmatterTable 判定，不扩大），降级形态合成同构标题栏并保留转义源码原文（收起时隐藏）。章节/块引用与无 frontmatter 文档不显示属性区；无任何添加/删除/编辑或任务勾选写回入口。主阅读视图自身的属性呈现不受影响。",
+    "views": [
+      "reading"
+    ],
+    "states": "收起（默认，vsidian-hover-fm-collapsed——属性行/降级源码块 display:none，标题行保留）/ 展开（移除修饰类）；按钮默认 opacity:0 + pointer-events:none（不用整体隐藏类声明——保留 Tab 键可达），标题行 :hover 或按钮 :focus-visible 时显示并接指针；chevron 展开向下、收起旋转 -90° 指向右。交互态浮层的内部结构——不进静态探针，折叠/热区/键盘操作与明暗主题下的可见性由浏览器 hoverPreview 套件按行为路径验证。",
+    "dom": "挂 #app 内浮层（.vsidian-hover-popup）中的 frontmatter 块（.vsidian-reading-frontmatter）上；按钮为真实 <button type=\"button\">（Enter/Space 原生激活），aria-expanded 随态、aria-label/title 用 i18n 词条（hover.content.fmExpand/fmCollapse）。",
+    "example": "#app .vsidian-hover-popup .vsidian-hover-fm.vsidian-hover-fm-collapsed .vsidian-fm-row {\n  display: none;\n}",
+    "obsidian": {
+      "counterpart": ".metadata-container 与 .collapse-indicator（Obsidian 属性区折叠方向；内部结构闭源不作承诺）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 hoverPopupCssContract：热区/按钮透明与指针/悬停与 focus-visible 显示/收起隐藏/chevron 旋转钉规则",
+      "单元 hoverPopup：属性区状态机（默认折叠/切换/刷新保留/重开复位/范围门控/降级合成标题栏）",
+      "浏览器 hoverPreview（#220）：真实指针折叠交互、键盘 Enter 操作、明暗主题下标题行与按钮可见性绘制层断言",
+      "单元 embedCard（#222）：嵌入卡片属性区状态机与视口回收重挂的状态保持"
+    ],
+    "introduced": "#220（2026-09-30）"
+  },
+  {
+    "id": "reading-embed-card",
+    "domain": "content",
+    "category": "link-image-wikilink",
+    "kind": "selector",
+    "target": ".vsidian-embed-card（卡片壳，挂 .markdown-embed 别名；.vsidian-embed-card-header 顶部栏 / -title 文件名 / -open 打开入口 / -scroll 内容滚动区 / -state 状态行；错误分态追加 .vsidian-embed-card-state-error 修饰——主题错误色，与悬停浮层同口径）",
+    "purpose": "正文嵌入卡片（#222 Reading 侧首创，#223 起 Live 侧同款挂载——两容器共用同一卡片装配与状态库）：独占正文一行的 ![[…]] 替换为引用卡片——观感与 Reading 正文对齐（#217 验收反馈：只保留左侧引用竖条，无底色、无整圈边框、无圆角，白底直角同正文引用块方向）、顶部文件名（成功后为目标根内相对路径）、右上角跳转目标文档入口（沿用 Vsidian 既有打开行为，不改写引用原文；内联 SVG 图形图标 stroke currentColor 随 --vscode-icon-foreground 着色——#217 验收反馈补齐，此前按钮为空壳不可见）。内容为目标的只读 Reading 视图（复用悬停文档访问通道装载全文/章节/块）；短内容自然高度，长内容内部滚动，限高默认 480px、经设置页 embed.maxHeight 调整（内联 max-height 优先于规则缺省）。卡片在 #app 正文流内——主题变量与 CSS 片段随嵌套天然命中，卡片壳的 Obsidian 别名（.markdown-embed）让嵌入容器规则同样命中。Live 侧的挂载形态与源码显隐见 live-embed-widget（Live 宿主内卡片壳 margin 清零、间距由宿主 padding 承担——高度记账语义）。",
+    "views": [
+      "reading",
+      "live"
+    ],
+    "states": "装载中（状态行文案，内容区隐藏）/ 装载成功（内容滚动区在场，任务 checkbox 禁用、属性区默认折叠）/ 失败分态（状态行就地 i18n 文案，不弹宿主通知）。视口回收（Reading）与装饰退场（Live）：卡片 DOM 与目标内容视图释放，属性展开与滚动位置保留（重挂恢复）；父文档会话内装载缓存零重发；Live↔Reading 模式切换共享同一实例状态（语义键 = 嵌入行行首 + 目标原文）。",
+    "dom": "Reading：挂阅读视图的嵌入块（.vsidian-reading-embed，data-vsidian-embed-inner 携带目标原文）内。Live（#223）：挂 .vsidian-live-embed 宿主 widget（隐形态 inline 替换 / 显形态行下方 block widget）。卡片壳 .vsidian-embed-card 同时挂 .markdown-embed（别名桥 obsidianAlias 同源表）；内容区是嵌套的 .vsidian-view-reading 容器；打开入口为真实 <button type=\"button\">（aria-label 用 i18n 词条 embed.openTarget；内联 SVG 图标 aria-hidden，16 网格 stroke currentColor——#217 验收反馈补齐）。",
+    "example": "#app .vsidian-view-reading .vsidian-reading-embed .vsidian-embed-card,\n#app .cm-editor .cm-content .vsidian-live-embed .vsidian-embed-card {\n  border-left: 3px solid var(--vsidian-quote-bar-color);\n}",
+    "obsidian": {
+      "counterpart": ".markdown-embed（Obsidian 阅读嵌入容器）",
+      "support": "direct"
+    },
+    "aliasTargets": [
+      "markdown-embed"
+    ],
+    "verification": [
+      "单元 embedCardCssContract（#222/#223）：边条/限高/占位行/只读 checkbox 规则钉住（卡片壳规则含 Live 宿主并列选择器）",
+      "单元 embedCard：挂载升级、装载、一层展开、状态保持、限高热更、探针（host 容器标记）与双容器并存渲染",
+      "别名桥一致性：test/unit/styleContract 与 test/unit/obsidianAlias（vsidian-embed-card ↔ markdown-embed）"
+    ],
+    "introduced": "#222（2026-09-30）"
+  },
+  {
+    "id": "live-embed-widget",
+    "domain": "content",
+    "category": "link-image-wikilink",
+    "kind": "selector",
+    "target": ".vsidian-live-embed（Live 嵌入宿主 widget；.vsidian-live-embed-below 为显形态下方修饰）",
+    "purpose": "父文档 Live 正文嵌入的挂载宿主（#223）：独占正文一行的 ![[…]] 经 CM6 装饰挂载 reading-embed-card 同款卡片——隐形态（光标/选区未触及源码区间）整行 inline 替换为卡片（源文视觉退场；宿主经 CSS 块级化直接从源码行对齐，replace 前后的 cm-widgetBuffer 零高块级化——验收反馈「不留隐形源码行」，且保留布局盒作为 CM6 行内块坐标锚：完全摘除（display:none）会让 posAtCoords 垂直探测在区间尾拿不到 rect 直接跳过整块，方向键从上向下越过嵌入行——#217 验收实测；保持 inline 替换是键盘垂直导航可进入嵌入行的前提，块级替换会被 CM6 跳过整行）；显形态（selectionTouchesRange 语义命中：折叠光标在区间内部或两端、非空选区严格重叠、任一选区命中）源文可见可编辑、卡片移至行下方继续显示（动态下移一行给源码让位；显隐只作用于源文文本的视觉呈现，不是撤卡片）。宿主上下间距由自身 padding 承担、宿主内卡片壳 margin 清零——margin 折叠出行盒、CM6 高度记账（行号 gutter 与视口测算依据）不含它，曾致行号与正文错位逐卡累积（#217 验收实测，padding 计入盒子高使记账与渲染一致）。宿主吞事件（ignoreEvent=true）：卡片点击不落父编辑器光标、卡片内浏览器选区不被误当作父文档 CM6 源码选区；卡片内交互（滚动/选字复制/链接/属性按钮）走嵌入卡片自身监听。未闭合引用保留可编辑原文并撤下卡片；围栏/frontmatter 内与混排/容器形态不挂载（源文呈现，1.5 期接入）。",
+    "views": [
+      "live"
+    ],
+    "states": "隐藏态（整行 inline 替换 widget，行结构保留——键盘垂直导航双向可进入；卡片从源码行对齐与 buffer 零高块级化由 CSS 承担）/ 显形态（行下方 block widget .vsidian-live-embed-below，源文在场，动态下移一行给源码让位）；两态切换经装饰重建（卡片实例状态由嵌入卡片状态库保持）；装载中/成功/失败分态沿用卡片状态行。",
+    "dom": "Live 视图 .cm-content 内：隐形态宿主 div 在 .cm-line 内（inline replace 的替换物，经 CSS display:block 块级化，前后 cm-widgetBuffer 零高块级化 display:block + height:0——观感等同隐藏，布局盒保留作坐标锚）；显形态为行尾后 block widget。卡片壳 .vsidian-embed-card（挂 .markdown-embed 别名）在内；嵌套 Reading 容器重置 white-space: normal（#217 验收实测：CM6 .cm-content 的 white-space: pre 级联会使块 innerHTML 尾部换行渲染为幽灵行盒，卡片行距成倍增大）。卡片高度异步变动（内容装载/图片晚到）经 ResizeObserver → view.requestMeasure 唤醒 CM6 布局。",
+    "example": "#app .cm-editor .cm-content .vsidian-live-embed-below {\n  display: block;\n}",
+    "obsidian": {
+      "counterpart": ".cm-embed-block（Obsidian Live 嵌入容器方向；内部结构闭源不作承诺）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 liveEmbed（#223）：显隐谓词矩阵（端点/内部/严格重叠/多选区）、抑制边界（围栏/开放围栏/frontmatter/混排）、增量表与装饰实例缓存",
+      "单元 embedCardCssContract：Live 宿主下方形态块级规则钉住；buffer 前后零高块级化组规则与宿主 padding / 卡片壳 margin 清零规则钉住（#217 验收反馈）",
+      "浏览器 liveEmbed（#223）：真实键盘/鼠标/IME/拖选驱动显隐切换、源码显形时卡片仍可见的绘制断言、内部选区隔离；#217 验收反馈补场景 C2（ArrowDown 从上方停进源码行，双向导航对称）与场景 M（行号 gutter 跨三卡对齐极差 < 1.5px）"
+    ],
+    "introduced": "#223（2026-09-30）"
+  },
+  {
+    "id": "reading-embed-ref",
+    "domain": "content",
+    "category": "link-image-wikilink",
+    "kind": "selector",
+    "target": ".vsidian-embed-ref（占位引用行，挂阅读双链 a 级）",
+    "purpose": "嵌入占位引用行（#222 一层展开）：引用内容（悬停浮层或嵌入卡片内的 Reading 视图）中的独占行嵌入不递归装载——渲染为可打开的引用占位，文本保留 ![[显示]] 形态可辨识；点击经所在容器的链接委托按来源文档身份打开（宿主 sourceDocUri 语义）。占位目标按直接来源文档的目录解析。",
+    "views": [
+      "reading"
+    ],
+    "states": "常驻（引用内容内的嵌入行）；点击跳转、无悬停浮层叠加（嵌入内容域停止 mouseover/mouseout 冒泡）。",
+    "dom": "嵌入块 html 内的 <a class=\"vsidian-wikilink vsidian-embed-ref\" href=\"目标原文\">（href 为 | 之前原文，与阅读双链 a 同口径）；主文档的嵌入块挂载时整块替换为嵌入卡片（占位行不出现）。",
+    "example": ".vsidian-embed-ref {\n  font-family: inherit;\n}",
+    "obsidian": {
+      "counterpart": "（Obsidian 嵌入递归展开，无占位形态）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 readingBlocks：embed 块占位 html 形态（wikilink 类 + 嵌入修饰类 + href 口径）",
+      "单元 embedCard：一层展开不嵌套装载、占位点击按 B 身份出站"
+    ],
+    "introduced": "#222（2026-09-30）"
   }
 ] as readonly StyleContractEntry[]
 
@@ -3968,8 +4150,8 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "limit-markdown-embed": {
-    "purpose": "Embed (![[…]] etc.) structures are not provided (incomplete wikilink forms are shown as-is); blockquote blocks are already supported.",
-    "dom": "No embed containers exist.",
+    "purpose": "Partial boundary for embeds (![[…]]): a line-owning embed renders as the reference card in the reading view (#222) and mounts the same card in the live view with cursor-driven source reveal (#223) — see reading-embed-card / live-embed-widget. Mixed-run lines (other content on the line), list/blockquote containers, and table cells keep the raw source (1.5-phase scope); recursive expansion is not provided (one-level expansion shows a placeholder reference line); writing into embedded content is not supported. Incomplete wikilink forms are shown as-is; blockquote blocks are already supported.",
+    "dom": "Where no embed container applies: ![[…]] on non-owning lines or inside containers renders as raw text (consistent across both views).",
     "obsidian": {
       "counterpart": ".markdown-embed"
     }
@@ -4494,6 +4676,62 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     "dom": "A button plus a chain-link SVG icon (interlocked double loop with a right-going arrow, 24-unit viewBox; stroke width pinned via CSS) inside .vsidian-sidebar-toolbar-actions.",
     "obsidian": {
       "counterpart": "None (the Obsidian outgoing-links toggle is app-level UI)"
+    }
+  },
+  "hover-popup": {
+    "purpose": "The hover document preview popup (first closing loop of phase one, #218): hover a wikilink or local Markdown link in the parent reading view, and the target is read through the document-access channel and shown as read-only reading content. Since #221 the same popup serves all entry points: the live-preview body (Ctrl+hover by default, direct hover once the hover.liveDirect setting is on) and backlink/outgoing-link panel entries (direct hover). Default width 480px / max height 400px (in small viewports a JS geometry plan flips at the four edges and shrinks to fit); the content is read-only — task checkboxes are disabled (JS disabled + pointer-events double safety), with no write-back channel at all. Since #220 the popup carries the target document (B) as reading content: images resolve relative to B (the sourceDocUri channel), links are clickable for navigation, and code blocks get plain syntax highlighting. #217 acceptance follow-up: a header bar shared with the embed cards — the target display name (spec.target) stays constant regardless of the result payload, and the top-right open button dispatches to the existing activation message family by target shape (wikilink/plain-link sent directly; panel shapes go through an openAction closure along the same channel as the entry click); clicking closes the popup as a context switch.",
+    "states": "An interaction-state floating layer (mounted after the hover open delay, dismissed by leaving the joint anchor/popup domain after a close delay, Esc, parent scroll, or mode switch; since #221 a keyboard-command open moves focus into the popup with a :focus-visible outline, and while focus stays inside the popup it is not dismissed by the mouse leaving) — the container itself is not part of the static probes; open/close, keep-alive and painting are verified behaviorally by the browser hoverPreview / hoverEntry suites; the style entry point (a single low-specificity class) is public for snippet overrides.",
+    "dom": "Since #220 attached directly inside #app (previously on body; fixed positioning is unaffected by the #app layout) — the #app theme variables, the `#app .vsidian-view-reading …` content styles, and enabled CSS snippets (the container class carries the .markdown-preview-view alias bridge) therefore match naturally, without duplicating a second theme environment for the popup. The inner reading container carries .vsidian-view-reading. The header bar (target display name plus open button) lists its rules together with the embed-card header selectors (popup selector first, embed selector last).",
+    "obsidian": {
+      "counterpart": ".hover-popover (the Obsidian page-preview popover direction; the internal structure is closed-source and not promised)"
+    }
+  },
+  "hover-fm-section": {
+    "purpose": "The note-properties section of referenced reading content (introduced by the #220 hover popup; shared with the #222 embed cards via the common assembly in refReadingContent — selectors list both the .vsidian-hover-popup and .vsidian-embed-card scopes): shown for full-document references only — collapsed by default, the whole header row is the hover hot zone (hovering it or focusing the button reveals the toggle button; hovering never auto-expands), and clicking the button toggles expansion. The expanded state persists for the current open (rebuilds caused by target-content changes do not reset it); reopening the popup restores collapsed, and an embed card keeps it per instance state (viewport recycling does not clear it). A well-formed frontmatter reuses the reading-side header and key-value rows (presentation and type/degradation boundaries follow the frontmatterTable rules, not widened); the degraded form synthesizes a structurally identical header and keeps the escaped raw source (hidden while collapsed). Section/block references and documents without frontmatter show no properties section; there is no add/delete/edit or task-check write-back entry at all. The main reading view properties presentation is unaffected.",
+    "states": "Collapsed (default, vsidian-hover-fm-collapsed — property rows and the degraded source block get display:none, the header row stays) / expanded (modifier removed); the button is opacity:0 + pointer-events:none by default (no wholesale hiding declarations — Tab reachability is preserved), shown and pointer-enabled on header :hover or button :focus-visible; the chevron points down when expanded and rotates -90° (rightward) when collapsed. Internal structure of an interaction-state popup — not part of the static probes; collapse/hot-zone/keyboard interactions and light/dark-theme visibility are verified behaviorally by the browser hoverPreview suite.",
+    "dom": "Attached to the frontmatter block (.vsidian-reading-frontmatter) inside the #app popup (.vsidian-hover-popup); the toggle is a real <button type=\"button\"> (Enter/Space activate natively), with aria-expanded following the state and aria-label/title from the i18n entries (hover.content.fmExpand/fmCollapse).",
+    "obsidian": {
+      "counterpart": ".metadata-container and .collapse-indicator (the Obsidian properties-collapse direction; the internal structure is closed-source and not promised)"
+    }
+  },
+  "reading-embed-card": {
+    "purpose": "The in-flow embed card (created for the reading view in #222, mounted identically in the live view since #223 — both containers share the same card assembly and state store): a line-owning ![[…]] is replaced by a reference card — visually aligned with the reading prose (#217 acceptance feedback: only the left accent bar remains; no fill, no full border, no rounding — white background with square corners, the same direction as an in-prose quote block), the file name on top (the target root-relative path once loaded), and an open-target entry at the top right (reusing the existing Vsidian open behavior, never editing the embed source; an inline SVG icon stroked with currentColor so it inherits --vscode-icon-foreground — added by the #217 acceptance feedback, the button used to be an invisible empty shell). The content is a read-only reading view of the target (full document/section/block, loaded through the hover document-access channel); short content keeps its natural height while longer content scrolls internally, capped at 480px by default and adjustable via the embed.maxHeight setting (the inline max-height takes precedence over the rule default). The card lives in the #app content flow — theme variables and CSS snippets match through nesting, and the .markdown-embed alias on the card shell lets embed-container rules match as well. For the live-side mount forms and source reveal, see live-embed-widget (inside the live host the card shell margin is zeroed and spacing is carried by the host padding — the height-accounting semantics).",
+    "states": "Loading (a state line with the i18n text, content area hidden) / loaded (the content scroll area present, task checkboxes disabled, the properties section collapsed by default) / a failure state (the state line shows the localized error text in place, no host notification). On viewport recycling (reading) and decoration teardown (live) the card DOM and the target content view are released while the properties expansion and scroll position are kept (restored on remount); within the parent session the loaded content is cached and never re-requested; live↔reading mode switches share the same per-instance state (the semantic key is the embed line start plus the raw target).",
+    "dom": "Reading: inside the reading-view embed block (.vsidian-reading-embed, with data-vsidian-embed-inner carrying the raw target). Live (#223): inside a .vsidian-live-embed host widget (hidden form = a block-level whole-line replacement, revealed form = a below-line block widget). The card shell .vsidian-embed-card also carries the .markdown-embed alias (same-source table in obsidianAlias); the content area is a nested .vsidian-view-reading container; the open entry is a real <button type=\"button\"> (aria-label from the i18n entry embed.openTarget; the inline SVG icon is aria-hidden, 16-grid, stroked with currentColor — added by the #217 acceptance feedback).",
+    "obsidian": {
+      "counterpart": ".markdown-embed (the Obsidian reading embed container)"
+    }
+  },
+  "live-embed-widget": {
+    "purpose": "The live-view embed host widget (#223): a line-owning ![[…]] in the live document mounts the same card as reading-embed-card via a CodeMirror decoration — hidden form (cursor/selection not touching the source range) replaces the whole line with an inline replacement (the source text leaves the visual flow; the host is block-levelized via CSS so the card aligns with the source line, and the cm-widgetBuffer pair around the replacement is zero-height block-levelized — the acceptance-feedback \"no invisible source line\" fix that also keeps the layout boxes as CM6 inline-block coordinate anchors: fully removing them (display:none) starves posAtCoords vertical probing at the range end of any rect, so the probing skips the whole block and ArrowDown from above jumps past the embed line — measured during the #217 acceptance round; keeping the replacement inline is the prerequisite for keyboard vertical navigation to enter the embed line, as a block-level replacement gets skipped wholesale by CM6); revealed form (per the selectionTouchesRange semantics: a collapsed cursor inside or on either end of the range, a non-empty selection strictly overlapping it, or any one selection range hitting it) shows the editable source with the card moved below the line (dynamically shifting down one line to make room; reveal only affects the visual presentation of the source text — the card is not dismissed). The host vertical spacing is carried by its own padding with the in-host card shell margin zeroed — margins collapse out of the line box and CM6 height accounting (which drives the line-number gutter and viewport math) excludes them, which used to accumulate a per-card gutter misalignment (#217 acceptance measurement; padding counts into the box height so accounting matches rendering). The host swallows events (ignoreEvent=true): clicks inside the card never place the parent editor cursor, and browser text selections inside the card are never mistaken for parent-document CM6 source selections; in-card interactions (scrolling/text-selection copy/links/properties buttons) go through the embed card own listeners. An unclosed reference keeps the editable raw text and dismisses the old card; embeds inside code fences/frontmatter and mixed-run/container forms do not mount (raw source shown, 1.5-phase scope).",
+    "states": "Hidden (a whole-line inline replace widget — the line structure is kept so keyboard vertical navigation can enter from both directions; the source-line alignment and buffer zero-height block-levelization are carried by CSS) / revealed (a below-line block widget .vsidian-live-embed-below with the source present, dynamically shifting down one line to make room); the switch rebuilds the decoration (per-instance card state is kept by the embed-card state store); loading/loaded/failure states reuse the card state line.",
+    "dom": "Inside the live view .cm-content: the hidden-form host div sits inside .cm-line (the replacement of an inline replace, block-levelized via CSS display:block, with the surrounding cm-widgetBuffer pair zero-height block-levelized via display:block + height:0 — visually equivalent to hidden while the layout boxes remain as coordinate anchors); the revealed form is a block widget after the line end. The card shell .vsidian-embed-card (carrying the .markdown-embed alias) sits inside; the nested reading container resets white-space: normal (#217 acceptance measurement: the CM6 .cm-content white-space: pre cascade renders the trailing newline of each block innerHTML as a ghost line box, inflating card line spacing). Async card height changes (content loading, late images) wake the CM6 layout via ResizeObserver → view.requestMeasure.",
+    "obsidian": {
+      "counterpart": ".cm-embed-block (the Obsidian live embed container direction; the internal structure is closed-source and not promised)"
+    }
+  },
+  "live-escape": {
+    "purpose": "Universal escape reveal/hide (generalized from acceptance feedback, Obsidian-aligned): in the live view the backslash of a Markdown escape sequence (backslash + ASCII punctuation, tree-driven Escape nodes) is hidden by default — what you see is the literal character (\\* renders as *, \\\\ renders as \\); when the cursor or a selection touches the line, the reveal class takes over and the backslash is shown in a low-mix tint of the editor foreground (exposing the source, same tint as the block-id dimming). Escapes inside table rows do not use this class: an escaped pipe (\\|) goes through the #42 live-table-escaped-pipe dedicated emission and rules (a degraded table keeps the raw source), while other escapes inside a cell (\\* and the like) get no emission at all — their backslash stays visible in the raw text (a deliberate degraded boundary: the table's own cell splitting and this generic emission are mutually exclusive to avoid class collisions), pinned by a liveEscape unit case. No effect inside code blocks/inline code (no Escape nodes). Display only — the source text is never changed.",
+    "states": "Hidden (default — the backslash is display:none) / revealed (touching the line swaps in the reveal class: display:inline plus a 45% low-mix tint of the editor foreground, following light/dark themes and custom font colors); the switch rebuilds with selection transactions, sharing the same predicate semantics as the heading/wikilink mark reveal (a collapsed cursor includes both line ends, a non-empty selection strictly overlaps).",
+    "dom": "An inline mark span (covering the first character of the tree-driven Escape node); nests freely with wikilink/emphasis and other inline marks.",
+    "obsidian": {
+      "counterpart": "the Obsidian live preview inline source exposure of escapes (the touching line shows the backslash in a light tint)"
+    }
+  },
+  "mod-link-hover": {
+    "purpose": "Modifier-key hover feedback (#217 acceptance feedback: Ctrl+hover over a jumpable link gave no visual cue at all — a discoverability gap): while Ctrl/Cmd is held, hovering a jumpable link (wikilink/embed reference/plain link — source-form marks and rendered widgets alike, reading-view anchors included) underlines it and shows the clickable pointer cursor (instead of the text caret). The state class is maintained by the syncController document-level keydown/keyup (getModifierState handles left/right modifier pairs and alternation precisely) plus a window-blur fallback; the rendered widgets own standing clickable-cursor rule (pre-existing) is unaffected.",
+    "states": "Active (Ctrl/Cmd held — the body carries the class, hovering a link picks up underline + cursor:pointer) / inactive (no class, links render exactly as before); window blur forces the fallback (a keyup may have been lost).",
+    "dom": "A class on body; the rule selectors cover .vsidian-wikilink / .vsidian-link / reading anchors under :hover.",
+    "obsidian": {
+      "counterpart": "the Obsidian pointer and underline feedback while holding Ctrl over internal links"
+    }
+  },
+  "reading-embed-ref": {
+    "purpose": "The embed placeholder reference line (#222 one-level expansion): a line-owning embed inside referenced reading content (hover popup or embed card) is not loaded recursively — it renders as an openable reference placeholder whose text keeps the recognizable ![[display]] form; clicking goes through the containing view link delegation and opens it with the source-document identity (the host sourceDocUri semantics). The placeholder target resolves relative to the direct source document.",
+    "states": "Ever-present (the embed lines inside referenced content); click navigates, with no hover-popup stacking (the embed content domain stops mouseover/mouseout propagation).",
+    "dom": "An <a class=\"vsidian-wikilink vsidian-embed-ref\" href=\"raw target\"> inside the embed block html (the href is the raw text before |, same convention as the reading wikilink anchor); when the parent-document embed block mounts it is replaced wholesale by the embed card (the placeholder line never appears there).",
+    "obsidian": {
+      "counterpart": "(Obsidian expands embeds recursively; there is no placeholder form)"
     }
   }
 } as Readonly<Record<string, StyleContractEntryOverride>>

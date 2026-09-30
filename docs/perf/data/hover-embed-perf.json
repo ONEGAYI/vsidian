@@ -1,0 +1,68 @@
+{
+  "ticket": "#225",
+  "date": "2026-09-30",
+  "note": "状态层定向测量（真实 CM6 状态机：EditorState + liveEmbed 全装配 + jsdom；无 EditorView 布局与绘制）。测量脚本为临时文件（跑完已删），方法与断言口径记录于 docs/perf/2026-09-hover-preview-embed-performance.md。",
+  "scenarios": [
+    {
+      "name": "初始构建（EditorState.create，含嵌入表 + 装饰首建）",
+      "data": {
+        "plain10kMs": 73,
+        "embeds10k_200Ms": 71,
+        "embeds100k_2000Ms": 515
+      },
+      "reading": "同体量下嵌入版与纯文版的差值即嵌入表扫描与装饰首建成本；100k 档验证线性外推无超线性拐点"
+    },
+    {
+      "name": "增量编辑基线：纯文 10k 行同位插入+删除（120 轮）",
+      "data": {
+        "avgMs": 28.657,
+        "p95Ms": 34.092,
+        "rounds": 120
+      },
+      "reading": "liveDecorations/mermaidFences 依赖场的既有成本；嵌入版与它的差值即嵌入增量开销"
+    },
+    {
+      "name": "增量编辑：普通段内单字插入+删除（120 轮，10k 行 + 200 嵌入在场）",
+      "data": {
+        "avgMs": 29.638,
+        "p95Ms": 37.552,
+        "rounds": 120
+      },
+      "reading": "每轮含嵌入表增量重建与装饰集全量重建（200 条目 RangeSet.of）"
+    },
+    {
+      "name": "增量编辑：嵌入源码内单字插入+删除（120 轮，显形态）",
+      "data": {
+        "avgMs": 36.519,
+        "p95Ms": 39.126,
+        "rounds": 120
+      },
+      "reading": "显形态下每轮重建该嵌入的 span 与双装饰（替换消失 + below widget）"
+    },
+    {
+      "name": "选区翻转：光标进出嵌入区间（400 次事务，10k 行 + 200 嵌入在场）",
+      "data": {
+        "avgMs": 0.151,
+        "p95Ms": 0.264,
+        "flips": 400
+      },
+      "reading": "选区变化触发装饰集全量重建——显隐切换的每帧成本上界"
+    },
+    {
+      "name": "装饰实例缓存：隐→显→隐同键复用（40 枚 ≤ 上限，LRU 命中）",
+      "data": {
+        "sameInstance": true,
+        "cacheLimit": 64
+      },
+      "reading": "同键 widget 装饰实例跨翻转复用（RangeSet.eq 前提）；缓存上限 64 钉住，超限旧键按 LRU 淘汰"
+    },
+    {
+      "name": "缓存上限：65 枚嵌入顺序翻转",
+      "data": {
+        "embeds": 64,
+        "cacheLimit": 64
+      },
+      "reading": "超过上限的旧装饰实例按 LRU 淘汰（decoCache while 循环钉住），状态正确性不受影响"
+    }
+  ]
+}

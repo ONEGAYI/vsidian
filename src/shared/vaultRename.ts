@@ -5,8 +5,9 @@
 //
 // 规划语义（规格硬约束）：
 // - **目标子串替换**：别名、标题/块锚点、URL 编码与无关正文原样保留——
-//   wikilink 只替换 `[[` 后的路径段（`#`/`|` 之前），mdlink/image/refdef
-//   只替换 href 的路径部分（首个 `#`/`?` 之前），query/fragment 原样
+//   wikilink 只替换 `[[` 后的路径段（`#`/`|` 之前），embed 只替换 `![[`
+//   后的路径段（#222，与 wikilink 同构），mdlink/image/refdef 只替换
+//   href 的路径部分（首个 `#`/`?` 之前），query/fragment 原样
 // - **相对路径重算**：按改写应用文档的目录（引用者=原目录；被移动文档
 //   =新目录）与目标新位置计算（#196 planVaultLinkPath 的对偶生成侧）
 // - **扩展名语义**：双链省略扩展名维持省略（新路径去 .md 尾）；显式
@@ -461,6 +462,10 @@ function buildEdit(
   if (edge.kind === 'wikilink') {
     return buildWikilinkEdit(edge, s, newRel, baseOffset)
   }
+  if (edge.kind === 'embed') {
+    // #222 嵌入：`![[` 后路径段替换——与 wikilink 同构（别名/锚点原样）
+    return buildEmbedEdit(edge, s, newRel, baseOffset)
+  }
   return buildHrefEdit(edge, s, newRel, baseOffset)
 }
 
@@ -471,10 +476,33 @@ function buildWikilinkEdit(
   newRel: string,
   baseOffset: number,
 ): RenameTextEdit | null {
-  if (!s.startsWith('[[') || !s.endsWith(']]')) {
+  return buildBracketPathEdit(edge, s, newRel, baseOffset, 2)
+}
+
+/** embed：替换 `![[` 后的路径段（首个 `#`/`|` 之前，含首尾空白）——与
+ *  wikilink 同一子串定位语义（#222），仅开标记多一个 `!` 前缀字符 */
+function buildEmbedEdit(
+  edge: VaultEdge,
+  s: string,
+  newRel: string,
+  baseOffset: number,
+): RenameTextEdit | null {
+  return buildBracketPathEdit(edge, s, newRel, baseOffset, 3)
+}
+
+/** 双链/嵌入共用：`[[`（或 `![[`，openLen 为开标记长）后路径段替换 */
+function buildBracketPathEdit(
+  edge: VaultEdge,
+  s: string,
+  newRel: string,
+  baseOffset: number,
+  openLen: number,
+): RenameTextEdit | null {
+  const open = openLen === 3 ? '![[' : '[['
+  if (!s.startsWith(open) || !s.endsWith(']]')) {
     return null
   }
-  const inner = s.slice(2, -2)
+  const inner = s.slice(openLen, -2)
   const pipeAt = inner.indexOf('|')
   const targetPart = pipeAt >= 0 ? inner.slice(0, pipeAt) : inner
   const hashAt = targetPart.indexOf('#')
@@ -484,8 +512,8 @@ function buildWikilinkEdit(
   }
   // 双链形态学不做 URL 编码（字面直写）；省略扩展名已在主流程剥除
   return {
-    start: baseOffset + 2,
-    end: baseOffset + 2 + pathRaw.length,
+    start: baseOffset + openLen,
+    end: baseOffset + openLen + pathRaw.length,
     replacement: newRel,
   }
 }

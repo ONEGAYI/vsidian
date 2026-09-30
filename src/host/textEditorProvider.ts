@@ -34,6 +34,7 @@ import {
   isWebviewToHost,
   type DiagramExportPayload,
   type HostToWebview,
+  type HoverPreviewRequestPayload,
   type ImageExportPayload,
   type ImagePastePayload,
   type SerChange,
@@ -62,6 +63,7 @@ import type { CssSnippetService } from './cssSnippetService'
 import type { VaultIndexService } from './vaultIndexService'
 import type { IndexMaintenance } from './vaultIndexMaintenance'
 import { ImageRefreshCoordinator } from './imageRefreshCoordinator'
+import { connectHoverEvents, HoverRefreshCoordinator } from './hoverRefreshCoordinator'
 import type { ImageVersionTable } from './imageVersioning'
 import {
   IMAGE_EVENT_DEBOUNCE_MS,
@@ -75,6 +77,13 @@ import type { SettingsPageHandle } from './settingsPage'
 import { runDiagramExport } from './diagramExportHost'
 import { runImageExport } from './imageExportHost'
 import { runImagePaste, type ImagePasteOutcome } from './imagePasteHost'
+import {
+  readHoverDocTarget,
+  readHoverDirectTarget,
+  readHoverMdLinkTarget,
+  type HoverDocAccessContext,
+  type HoverReadOutcome,
+} from './hoverDocAccess'
 import { installHostLocale, LOCALE_MESSAGES, type LocaleCode } from '../shared/locales'
 import { buildLocaleIslandHtml } from '../shared/locales/island'
 import { hostLocale } from './hostLocale'
@@ -299,6 +308,23 @@ function linkContextOf(document: vscode.TextDocument): LinkContext {
   }
 }
 
+/**
+ * #220 来源文档的解析上下文（悬停浮层 B 身份）：与 linkContextOf 同款
+ * 语义（docDir 基准、所属工作区文件夹根边界、宿主平台语义），但由 fsPath
+ * 构造——B 只经 openTextDocument 只装载，不打开面板。B 经
+ * resolveVaultLinkFile 的 ADR-0008 根内语义送达（会话侧 hoverSourceFsPath
+ * 守卫已比对），此处按其目录解析图片/链接。
+ */
+function linkContextOfPath(fsPath: string): LinkContext {
+  const uri = vscode.Uri.file(fsPath)
+  const folder = vscode.workspace.getWorkspaceFolder(uri)
+  return {
+    docDir: path.dirname(fsPath),
+    rootDir: (folder ? folder.uri : vscode.Uri.joinPath(uri, '..')).fsPath,
+    isWindowsHost: process.platform === 'win32',
+  }
+}
+
 export function createTextEditorProvider(
   context: vscode.ExtensionContext,
   settings?: SettingsWiring,
@@ -405,12 +431,18 @@ export function createTextEditorProvider(
     }),
   )
   // 索引目标变化事件（#198 通道）：图片类目标即时核验（md 域事件对图片
-  // 管线无匹配登记，天然空操作；未来索引扩展到非 md 目标时自动接通）
+  // 管线无匹配登记，天然空操作；未来索引扩展到非 md 目标时自动接通）。
+  // #224 引用视图同步：md 域事件直通刷新协调器（changed/deleted/stale
+  // 分态——vaultIndex 侧已去抖，deleted 不等防抖窗）；修 1（review 第二轮
+  // P2）起经 connectHoverEvents 接线：转发协调器的同时无条件广播全部活跃
+  // session 的悬停读取缓存失效（未订阅期间目标修改不留陈旧缓存）——
+  // 回调闭包引用 hoverEvents（下方声明），事件触发恒晚于注册
   if (vaultIndex) {
     const offTargetChange = vaultIndex.onTargetChange((event) => {
       if (isImageFileExtension(event.fsPath)) {
         scheduleImageEvent(event.fsPath)
       }
+      hoverEvents.onDiskEvent(event.fsPath, event.status)
     })
     context.subscriptions.push({ dispose: offTargetChange })
   }
@@ -434,6 +466,40 @@ export function createTextEditorProvider(
         }
       }
     }),
+  )
+
+  // ---- #224 引用视图刷新协调器（provider 级单件：悬停/嵌入目标订阅与
+  //  失效推送跨会话共享；事件源在本文件接线——onDidChangeTextDocument 的
+  //  未保存防抖与 vaultIndex.onTargetChange 的磁盘分态直通） ----
+  /** sessionKey 编码（docUri 与 sessionId 以 \n 分隔——file URI 不含换行） */
+  const hoverSessionKeyOf = (docUri: string, sessionId: string): string => `${docUri}\n${sessionId}`
+  /** P2-2（review 修复）越界 hover.watch 忽略计数（debug 日志观测面；
+   *  正常链路 watch 总在成功装载后，非零即前端异常或攻陷迹象） */
+  let hoverWatchRejected = 0
+  const hoverRefresh = new HoverRefreshCoordinator(
+    {
+      pushInvalidation: (sessionKeys, fsPath, status, generation) => {
+        // 只出站消息与清缓存——不得触发宿主事件源（自引用防循环的结构前提）
+        for (const sessionKey of sessionKeys) {
+          const newlineAt = sessionKey.indexOf('\n')
+          const docUri = newlineAt >= 0 ? sessionKey.slice(0, newlineAt) : sessionKey
+          const sessionId = newlineAt >= 0 ? sessionKey.slice(newlineAt + 1) : ''
+          const entry = sessions.get(docUri)
+          if (!entry) {
+            continue
+          }
+          entry.session.invalidateHoverReads(fsPath)
+          entry.session.postToPanel(sessionId, { kind: 'hover.invalidated', fsPath, status, generation })
+        }
+      },
+    },
+    { isWindowsHost },
+  )
+  context.subscriptions.push({ dispose: () => hoverRefresh.dispose() })
+  // 修 1（review 第二轮 P2）：事件接线——两条事件源经此转发，缓存失效
+  // 无条件广播全部活跃 session（不依赖订阅在场），推送门控仍在协调器内
+  const hoverEvents = connectHoverEvents(hoverRefresh, () =>
+    Array.from(sessions.values(), (entry) => entry.session),
   )
   const getEntry = (uri: vscode.Uri): SessionEntry | undefined =>
     sessions.get(uri.toString())
@@ -1046,6 +1112,24 @@ export function createTextEditorProvider(
     }
   }
 
+  /** #218 悬停预览读取上下文：与 executeWikilinkIntent 同款解析语境
+   *  （docDir 基准、所属根边界、无工作区判定），供 hoverDocAccess 纯逻辑
+   *  装配——读取不依赖写入，不触碰编辑会话 */
+  const hoverAccessContextOf = (document: vscode.TextDocument): HoverDocAccessContext => {
+    const folder = vscode.workspace.getWorkspaceFolder(document.uri)
+    const rootDir = (folder ? folder.uri : vscode.Uri.joinPath(document.uri, '..')).fsPath
+    return {
+      resolve: {
+        docDir: path.dirname(document.uri.fsPath),
+        rootDir,
+        isWindowsHost: process.platform === 'win32',
+        hasWorkspace: folder !== undefined,
+      },
+      sourceFsPath: document.uri.fsPath,
+      rootFsPath: rootDir,
+    }
+  }
+
   const provider: vscode.CustomTextEditorProvider = {
     resolveCustomTextEditor(document, webviewPanel, _token): void {
       // #38：全局记忆为 source 时弹回原生编辑器——priority=default 后 VSCode
@@ -1112,22 +1196,111 @@ export function createTextEditorProvider(
       }
       // ---- #10 链接跳转与图片资源执行（面板端口注入；URI 解析在宿主侧） ----
       const linkCtx = linkContextOf(document)
-      const openLink = (intent: { href: string; srcStart: number; srcEnd: number }): void => {
+      const openLink = (
+        intent: { href: string; srcStart: number; srcEnd: number; sourceDocUri?: string },
+      ): void => {
         // #160 锚点落位的面板双路依赖（会话表 + 就绪等待）经端口注入：
-        // executeLinkIntent 保持模块级（与 vscode 层纯函数分工一致）
+        // executeLinkIntent 保持模块级（与 vscode 层纯函数分工一致）。
+        // #220 来源链接（悬停浮层内）：以 B 文档为解析语境（B 的目录/根
+        // 边界；页内 #frag 锚点目标即 B），B 打开失败（悬停后文件被删）时
+        // 静默不动作
+        const sourceFsPath = intent.sourceDocUri
+        if (sourceFsPath !== undefined) {
+          void (async () => {
+            try {
+              const sourceDoc = await vscode.workspace.openTextDocument(
+                vscode.Uri.file(sourceFsPath),
+              )
+              await executeLinkIntent(
+                sourceDoc,
+                linkContextOf(sourceDoc),
+                intent,
+                entry.linkLog,
+                { waitForReadyPanel },
+              )
+            } catch {
+              // 来源文档不可装载：跳转意图无从解析，丢弃（不回退到面板
+              // 自身文档——错误语义）
+            }
+          })()
+          return
+        }
         void executeLinkIntent(document, linkCtx, intent, entry.linkLog, {
           waitForReadyPanel,
         })
       }
-      // #11 双链跳转执行端口（按需 findFiles 解析 + 打开/定位/反馈）
-      const openWikilink = (intent: { target: string; srcStart: number; srcEnd: number }): void => {
+      // #11 双链跳转执行端口（按需 findFiles 解析 + 打开/定位/反馈）。
+      // #220 来源双链（悬停浮层内）：以 B 文档为解析基准（[[#锚点]] 自
+      // 引用 B、相对路径按 B 目录），B 打开失败时静默不动作
+      const openWikilink = (
+        intent: { target: string; srcStart: number; srcEnd: number; sourceDocUri?: string },
+      ): void => {
+        const sourceFsPath = intent.sourceDocUri
+        if (sourceFsPath !== undefined) {
+          void (async () => {
+            try {
+              const sourceDoc = await vscode.workspace.openTextDocument(
+                vscode.Uri.file(sourceFsPath),
+              )
+              await executeWikilinkIntent(sourceDoc, intent, entry.linkLog)
+            } catch {
+              // 来源文档不可装载：同 openLink 的丢弃语义
+            }
+          })()
+          return
+        }
         void executeWikilinkIntent(document, intent, entry.linkLog)
       }
-      const resolveImage = async (src: string): Promise<ImageResolution> => {
-        // #208：代次在解析时取值——手动刷新后同 src 的新请求得到新代次戳
+      // #218 悬停预览文档读取端口：hoverDocAccess 无副作用路径（目标解析 +
+      // openTextDocument 只装载不显示 + LF 转换）；报告回 hover.result（经
+      // 会话 report 闭包回来源面板）。读取异常一律收敛为 read-failed 分态
+      // ——就地 i18n 呈现，不弹宿主通知。#219 起按 linkHref 分流：普通本地
+      // Markdown 链接走 readHoverMdLinkTarget（外部网页 webview 已预滤，
+      // 宿主复核兜底），缺省为双链 readHoverDocTarget；#221 起 directTarget
+      // 优先（反链/出链面板条目的直接目标——宿主快照身份直读，不走文本
+      // 解析；断链条目空串 fsPath 由 readHoverDirectTarget 回 not-found）
+      const readHoverTargetPort = (
+        payload: Pick<HoverPreviewRequestPayload, 'target' | 'linkHref' | 'directTarget'>,
+        report: (result: HoverReadOutcome) => void,
+      ): void => {
+        void (async (): Promise<void> => {
+          let outcome: HoverReadOutcome
+          try {
+            const access = hoverAccessContextOf(document)
+            const ports = {
+              resolveVaultFile: (rawPath: string) =>
+                resolveVaultLinkFile(rawPath, access.resolve, statFileRealPath),
+              openTextDocument: async (fsPath: string) => {
+                try {
+                  const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fsPath))
+                  return { version: doc.version, text: doc.getText() }
+                } catch {
+                  return null
+                }
+              },
+            }
+            outcome = payload.directTarget !== undefined
+              ? await readHoverDirectTarget(payload.directTarget, access, ports)
+              : payload.linkHref !== undefined
+                ? await readHoverMdLinkTarget(payload.linkHref, access, ports)
+                : await readHoverDocTarget(payload.target, access, ports)
+          } catch {
+            outcome = { ok: false, reason: 'read-failed' }
+          }
+          report(outcome)
+        })()
+      }
+      const resolveImage = async (
+        src: string,
+        sourceDocUri?: string,
+      ): Promise<ImageResolution> => {
+        // #208：代次在解析时取值——手动刷新后同 src 的新请求得到新代次戳。
+        // #220 来源化解析（悬停浮层 B 身份图片）：以 B 的目录/根边界构造
+        // 上下文（同一 classifyImageTarget 白名单与 asWebviewUri 机制）；
+        // 缺省 = 面板自身文档
         return resolveWorkspaceImage(
           src,
-          linkCtx,
+          sourceDocUri !== undefined ? linkContextOfPath(sourceDocUri) : linkCtx,
           webviewPanel.webview,
           imageRefresh.versions,
           entry.session.getImageGeneration(),
@@ -1137,6 +1310,7 @@ export function createTextEditorProvider(
         send,
         openLink,
         openWikilink,
+        readHoverTarget: readHoverTargetPort,
         resolveImage,
         // #33 设置端口：工具栏 settings.open 与 init 后 settings.get 的
         // 面板级处理（与 link.activate 同模式；settings.set 只存在于
@@ -1291,6 +1465,33 @@ export function createTextEditorProvider(
           void openOutlinkTarget(message.targetUri, message.anchor)
           return
         }
+        // #224 引用视图订阅：provider 层拦截（协调器与订阅表在 provider 域，
+        // 与 backlinks 先例同位）。会话守卫：docUri 归属本面板文档且 sessionId
+        // 为本面板（不信任前端任意身份）；P2-2（review 修复）watch 的 fsPath
+        // 须为该会话 hoverSourceFsPaths 集合成员（watch 总在成功装载后，集合
+        // 已含目标——被攻陷 webview 伪造的越界 watch 静默忽略并计数），与
+        // #220 来源资源守卫同一信任边界；unwatch 只释放既有登记，无越界增益
+        // 不设校验
+        if (isWebviewToHost(message) &&
+          (message.kind === 'hover.watch' || message.kind === 'hover.unwatch') &&
+          message.docUri === document.uri.toString() && message.sessionId === sessionId) {
+          const sessionKey = hoverSessionKeyOf(message.docUri, message.sessionId)
+          if (message.kind === 'hover.watch') {
+            if (entry.session.hasHoverSource(sessionId, message.fsPath)) {
+              hoverRefresh.watch(sessionKey, message.fsPath, message.instanceId)
+            } else {
+              hoverWatchRejected += 1
+              console.debug(
+                '[vsidian] hover.watch 目标不在本面板来源集合，已忽略',
+                message.fsPath,
+                `累计 ${hoverWatchRejected} 次`,
+              )
+            }
+          } else {
+            hoverRefresh.unwatch(sessionKey, message.fsPath, message.instanceId)
+          }
+          return
+        }
         if (process.env.VSIDIAN_TEST_HOOKS === '1' && isWebviewToHost(message) &&
           message.kind === 'sync.test.close' && message.sessionId === sessionId &&
           message.docUri === document.uri.toString()) {
@@ -1310,6 +1511,8 @@ export function createTextEditorProvider(
         entry.session.detachPanel(sessionId)
         entry.panels.delete(sessionId)
         pendingReadingRestore.delete(panelStateKey(document.uri.toString(), sessionId))
+        // #224 引用视图订阅随面板销毁整体释放（订阅计数回落）
+        hoverRefresh.releaseSession(hoverSessionKeyOf(document.uri.toString(), sessionId))
         messageSub.dispose()
         viewStateSub.dispose()
         closeSub.dispose()
@@ -1347,6 +1550,14 @@ export function createTextEditorProvider(
           event.document.version,
           event.document.getText(),
         )
+      }
+      // #224 引用视图跟随：被订阅目标的未保存修改进防抖窗（短暂合并刷新；
+      // 空 contentChanges 是 dirty 状态事件，无内容变更不触发）。目标自
+      // 引用（A 嵌入 A）同链路收敛：推送只读重载，不产生新事件。修 1 起
+      // 经 connectHoverEvents 接线：未订阅目标同时广播 session 缓存失效
+      if (event.contentChanges.length > 0 &&
+        event.document.uri.scheme === 'file' && /\.md$/i.test(event.document.uri.path)) {
+        hoverEvents.onDocChanged(event.document.uri.fsPath)
       }
       const entry = getEntry(event.document.uri)
       if (!entry) {
@@ -1982,6 +2193,15 @@ export function createTextEditorProvider(
     }),
     vscode.commands.registerCommand('onegayi.vsidian._test.getImageVersions', () =>
       imageRefresh.versions.snapshot()),
+    // #224 引用视图订阅与读取缓存观测钩子：订阅计数（目标数/实例数——
+    // 集成断言「面板销毁/浮层关闭后订阅计数回落」）与宿主读取缓存计量
+    //（条目/字节/命中/未命中——重复引用合并读取的性能证据）
+    vscode.commands.registerCommand('onegayi.vsidian._test.hoverWatchStats', () =>
+      hoverRefresh.stats()),
+    vscode.commands.registerCommand('onegayi.vsidian._test.hoverReadCacheStats', (uriStr: string) => {
+      const entry = getEntry(vscode.Uri.parse(uriStr))
+      return entry ? entry.session.hoverReadCacheStats() : { found: false }
+    }),
     vscode.commands.registerCommand(
       'onegayi.vsidian._test.getLastClosedInput',
       () => lastClosedInput,

@@ -341,3 +341,72 @@ describe('块 id 标记隐藏（#163 验收反馈）：阅读渲染输入先剥�
     expect(text.slice(para.start, para.end)).toBe('段乙 ^b1')
   })
 })
+
+describe('splitReadingBlocks：嵌入块（#222 独占行挂载适配）', () => {
+  it('独占正文一行的 ![[…]] 切为 embed 块：区间为该行、inner 携带原文', () => {
+    const text = '前文\n\n![[目标笔记]]\n\n后文\n'
+    const blocks = splitReadingBlocks(text)
+    const embed = blocks.find((b) => b.kind === 'embed')
+    expect(embed).toBeDefined()
+    expect(embed!.start).toBe(text.indexOf('![[目标笔记]]'))
+    expect(embed!.end).toBe(text.indexOf('![[目标笔记]]') + '![[目标笔记]]'.length)
+    expect(embed!.embedInner).toBe('目标笔记')
+    // 相邻段落不受影响
+    expect(blocks.map((b) => b.kind)).toEqual(['paragraph', 'embed', 'paragraph'])
+  })
+
+  it('带缩进（≤3 空格）与行尾空白的独占行照常成块；标题/块/别名目标同样成块', () => {
+    const text = '  ![[目标#章节]]  \n![[笔记#^b1]]\n![[目标|显示别名]]\n'
+    const blocks = splitReadingBlocks(text)
+    expect(blocks.filter((b) => b.kind === 'embed').map((b) => b.embedInner))
+      .toEqual(['目标#章节', '笔记#^b1', '目标|显示别名'])
+  })
+
+  it('混排（行内有其他内容）保留段落源文，不产 embed 块', () => {
+    const text = '前缀 ![[目标]] 后缀\n'
+    expect(splitReadingBlocks(text).some((b) => b.kind === 'embed')).toBe(false)
+    expect(splitReadingBlocks(text)[0]!.kind).toBe('paragraph')
+  })
+
+  it('围栏代码与行内代码内的 ![[…]] 不命中（代码区域字面文本）', () => {
+    const text = ['```text', '![[目标]]', '```', '', '`![[目标]]` 行内代码', ''].join('\n')
+    expect(splitReadingBlocks(text).some((b) => b.kind === 'embed')).toBe(false)
+  })
+
+  it('表格格内的 ![[…]] 不命中（表格块整体保留）', () => {
+    const text = '| 列甲 | 列乙 |\n| --- | --- |\n| ![[目标]] | b |\n'
+    const blocks = splitReadingBlocks(text)
+    expect(blocks.some((b) => b.kind === 'embed')).toBe(false)
+    expect(blocks.some((b) => b.kind === 'table')).toBe(true)
+  })
+
+  it('列表项与引用块内的 ![[…]] 不命中（容器内嵌入 1.5 期接入）', () => {
+    const text = '- 项目 ![[目标]]\n\n> 引用 ![[目标]]\n'
+    const blocks = splitReadingBlocks(text)
+    expect(blocks.some((b) => b.kind === 'embed')).toBe(false)
+    expect(blocks.map((b) => b.kind)).toEqual(['list', 'blockquote'])
+  })
+
+  it('多行段落（嵌入行 + 懒续行）不命中——非独占行', () => {
+    const text = '![[目标]]\n续行文本\n'
+    expect(splitReadingBlocks(text).some((b) => b.kind === 'embed')).toBe(false)
+  })
+
+  it('非法/残缺嵌入形态保留段落源文（空目标、多级标题、未闭合）', () => {
+    for (const line of ['![[ ]]', '![[a#b#c]]', '![[未闭合']) {
+      const blocks = splitReadingBlocks(`${line}\n`)
+      expect(blocks.some((b) => b.kind === 'embed'), line).toBe(false)
+      expect(blocks[0]!.kind, line).toBe('paragraph')
+    }
+  })
+
+  it('embed 块占位 html 为可点击引用行（wikilink 类 + 嵌入修饰类；主文档挂载时替换为卡片）', () => {
+    const text = '![[目标#章节|别名]]\n'
+    const embed = splitReadingBlocks(text).find((b) => b.kind === 'embed')!
+    expect(embed.html).toContain('vsidian-wikilink')
+    expect(embed.html).toContain('vsidian-embed-ref')
+    // href 为 | 之前目标原文（与双链 a 同口径）；文本保留嵌入形态可辨识
+    expect(embed.html).toContain('href="目标#章节"')
+    expect(embed.html).toContain('![[别名]]')
+  })
+})

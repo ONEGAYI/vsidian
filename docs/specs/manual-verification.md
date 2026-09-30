@@ -1089,6 +1089,132 @@ Live 渲染态经 lezer `HorizontalRule` 节点驱动：未触及该行时源文
   2. **滚动/查找保持的自动化覆盖**：Live 侧滚动位置保持已入集成用例（刷新前后 `liveScrollTopPx` 一致断言，fixture 已垫高为可滚动文档）；阅读侧滚动与查找会话保持未建自动化断言（阅读滚动观测虽已有 `readingScrollTopPx` 面，但刷新用例固定在 live 模式，再扩阅读态用例收益有限），由人工验收项 3 覆盖。
 - 操作入口评估：「刷新嵌入资源」为可绑定操作（`onegayi.vsidian.editor.refresh`，双模式生效、默认未绑定、只读视图操作），工具栏按钮、命令面板命令与快捷键共用同一实现；评估记录见 `docs/specs/keybindings.md`。
 
+## 悬停文档预览一期首条闭环（#218，2026-09-30）
+
+- 交付范围：父文档 **Reading** 视图中悬停指向 Markdown 的双链，浮层（默认宽 480px / 最大高 400px）以只读 Reading 内容显示目标**全文**；移入保活可滚动、离开联合域延迟关闭、Esc 关闭、四边翻转与视口钳制、迟到回包不重开、悬停零抢焦点、任务/属性零写回、父/目标文档零 dirty、错误分态就地 i18n 呈现（缺失/越界/不支持/无工作区/读取失败）。带标题/块锚点的双链同样显示全文（章节/块范围属 #219）；浮层内图片按现有能力经父面板资源通道装载（以 B 文档为来源的解析强化属 #220）；浮层内链接暂不可点击跳转（#220 随来源解析一并接入）。
+- 自动化记录（2026-09-30，工作树 `codex/hover-preview-embed`）：新增单测 5 文件（协议校验 / hoverDocAccess 身份版本错误分态 / 几何四边翻转 / jsdom 生命周期 / CSS 契约，TDD 先红后绿）；浏览器 `hoverPreview` 7 场景（真实指针开闭时序与请求身份、绘制层可见（实底 + elementFromPoint 命中 + 标题文本）、保活滚动、Esc 与迟到回包守卫、错误文案与语言包同源、零 edit.request、小视口贴底翻上方与宽度收缩）；集成「悬停预览」用例（真实宿主：悬停读取目标全文、双零 dirty、零 applyEdit、错误分态、迟到回包丢弃、切模式释放）。
+- 人工待验：
+  1. **真实鼠标悬停手感**：Reading 视图悬停双链约 0.3s 后浮层出现；指针扫过链接不误开；移入浮层可停留滚动、移出链接与浮层后约 0.35s 关闭；Esc 立即关闭；父文档滚动时浮层即时消失。
+  2. **观感**：浮层 480px 宽、内容超过 400px 高时内部滚动；窗口边缘（贴底/贴右/小窗口）翻转与收缩观感；明暗两主题下实底、边框与投影可辨识；loading 与错误文案呈现。
+  3. **零误写体感**：悬停/滚动浮层内含任务列表的目标文档后，父文档与目标文档标签页均无 dirty 圆点，Ctrl+Z 无可撤销项。
+  4. **错误分态**：悬停指向不存在笔记、越出工作区根、非 Markdown 目标（如 `[[图.png]]`）与图片扩展名目标——浮层就地呈现对应提示，无宿主通知弹窗。
+- 已知边界（一期首票）：Live 视图与反链/出链面板入口、Ctrl+悬停与直接悬停设置项、「预览当前链接」键盘命令均属 #221（本票未装配，Live 悬停无反应属预期）；章节/块局部范围与普通链接目标属 #219；浮层内图片以父文档身份解析（跨目录目标的相对图片可能显示为错误态占位）与浮层内链接点击属 #220；目标文档后续变更的自动刷新与版本订阅属 #224（重开浮层重新读取始终拿到最新内容）。
+
+## 悬停局部预览——标题章节、块引用与普通链接（#219，2026-09-30）
+
+- 交付范围：Reading 悬停入口从「双链全文」扩展到**局部范围**——`[[笔记#标题]]` 显示该标题章节（标题行起、止于下一个同级或更高级标题前，含更深层子标题；同名取首沿用跳转口径）；`[[笔记#^块id]]` 显示完整块（列表/表格/围栏多行块整取，不截首行；复用既有块 id 双形态与归属逻辑）；`[text](relative.md)` / `[text](note.md#锚)` 普通本地 Markdown 链接接入全文/章节/块预览（`#^id` 为块引用，与跳转链路同口径）；`[text](#锚)` 页内锚点以**来源文档**为目标（页内锚点不跨文档）；目标文件在但标题/块 id 不存在 → 就地 anchor-missing 提示（含锚点原文，不以全文替代）；外部网页（http/https 等带 scheme 与协议相对地址）webview 侧预滤不开浮层。结果携带语义范围选择器（scope：full/heading/block）+ LF UTF-16 源范围（CRLF 目标经宿主 LF 化）；全文随范围一起返回，范围选取在 webview 切块后按块区间求交过滤（保留全文解析上下文，不丢章节外引用式链接定义）。
+- 与跳转语义的隔离：跳转定位函数（findHeadingOffset/findBlockOffset——标题行/块首行落点）契约不变，新增完整范围函数（findHeadingSectionRange/findBlockRange）共享匹配口径（同名取首、围栏跳过、规范化）但互不替代；块扫描核心提炼 locateBlockAnchor 两函数共用，既有跳转回归（单测 47 项 + 集成 8 用例）全绿把关。
+- 自动化记录（2026-09-30，工作树 `codex/hover-preview-embed`）：单测新增 26 用例（wikilinkTarget 章节/块范围 20、hoverDocAccess 局部/mdlink 矩阵、hoverProtocol scope/linkHref 校验、hoverPopup 范围过滤与普通链接、readingVirtualView range 过滤 5；CRLF、中文空格路径 percent-decode、重复标题取首、无效锚点、块多行完整取矩阵）；浏览器 `hoverPreview` 扩至 13 场景（章节双链章节内块渲染与章节外过滤、块引用多行块整取、普通链接 linkHref 载荷与 DOM href 保真、链接章节锚点、外站预滤零浮层零请求、锚点缺失文案语言包同源）；集成「悬停预览：局部范围与普通链接」用例（真实宿主：章节/块 scope 与块数收窄、CRLF+中文空格路径目标、页内锚点、失效锚点文案、外站预滤、双零 dirty、零 applyEdit）；跳转回归红线（双链 6 用例 + 普通链接 2 用例 + live 链接单击）全绿。
+- 全量验证记录（2026-09-30）：`compile` 通过；`test:unit` 191 文件 3967 项全绿；`test:browser` 37 套件全过（hoverPreview 13 场景）；`check:stylecontract` 八项零失败。集成 4 分片全量中 5 个**剪贴板对拍**用例（#69 大纲复制、#183 右键菜单剪贴板四项/块链接、#79/#84 代码块复制）失败——经基线复核（81fd5cf 上同样 5 用例全失败）与系统通道验证（`clip.exe` 报 `Access is denied`、PowerShell `Set-Clipboard` 失败）确认为本机剪贴板被某进程独占锁死的环境故障，**非本票回归**；悬停与跳转相关的全部集成用例不受影响（定向 12 用例全绿）。剪贴板解锁后可用 `VSIDIAN_TEST_CASES="大纲复制五项,块链接两项,统一右键菜单：全域接管,live 代码块卡片：呈现态,阅读模式代码块卡片" npm run test:integration` 复跑验证。
+- 人工待验：
+  1. **章节预览观感**：悬停 `[[笔记#标题]]` 显示的章节内容是否完整（含子标题与列表/表格）、是否不含下一章节内容；重复标题笔记取首个同名章节是否符合预期。
+  2. **块预览多行完整**：列表块（含项内多行）、表格块、围栏代码块的悬停预览是否整块显示（不被截成首行）。
+  3. **普通链接体验**：带空格/中文路径的相对链接、`#^块id` 链接、页内锚点链接的悬停预览；外站链接悬停无反应。
+  4. **锚点缺失提示**：悬停指向不存在的标题/块 id 时浮层就地提示含锚点原文（不以全文替代）。
+- 已知边界：Live 悬停入口与设置项属 #221（Live 悬停无反应属预期）；浮层内图片仍以父文档身份解析、浮层内链接仍不可点击（#220）；目标变更自动刷新属 #224；章节边界以 ATX 标题行判定（setext 标题不作为章节边界，与跳转定位同口径）；`![[…]]` 嵌入仍不经悬停（#222）；普通链接的 `#锚点` 仅支持标题与 `^块id` 形态（与跳转链路一致）。
+
+## 悬停引用 Reading 内容——来源资源、笔记属性与主题片段（#220，2026-09-30）
+
+- 交付范围：悬停浮层内 **B 文档内容以 B 为来源解析与呈现**——① 来源资源：B 内图片经 `image.request` 附 `sourceDocUri`（B 的 fsPath）走宿主同一 `classifyImageTarget` 白名单与 `asWebviewUri` 机制（按 B 目录解析；https 直连图源不经宿主；B 管理器随浮层实例创建/释放，无残留订阅）；Mermaid/公式/代码高亮沿用现有阅读能力（代码块取朴素高亮形态——token span 注入、卡片工具条不进浮层）。② 浮层内链接可点击：B 内双链/普通链接/外链经既有 `wikilink.activate` / `link.activate` 通道（附 `sourceDocUri`，宿主按 B 目录解析、页内锚点目标即 B、外链走既有分类外开），点击即跳转并关闭浮层；浮层不在阅读容器委托域内，悬停不叠加新浮层。③ 笔记属性区（仅全文引用）：默认折叠、标题整行是悬停热区（hover / 按钮 focus-visible 显示切换按钮，非悬停自动展开）、点击按钮切换、本次打开内保留展开状态（同实例内容重放 = 刷新不重置）、重新打开恢复折叠；降级 frontmatter 合成同构标题栏并保留转义源码原文；无 frontmatter 或章节/块引用不显示属性区；无任何属性编辑/任务勾选写回入口。④ 主题与片段：浮层自本票起挂 **#app 内**（此前挂 body）——#app 主题变量与 `#app .vsidian-view-reading …` 正文样式、已启用 CSS 片段（别名桥类名）随之天然命中，不为浮层复制第二套主题环境；引用专属样式入口为公开类名族 `vsidian-hover-fm` / `-toggle` / `-collapsed`（样式契约 `hover-preview` 类目新条目 `hover-fm-section`）。
+- 顺手修复（#218 遗留缺陷，本票浏览器场景暴露）：`position()` 此前把**加载期实测高度**（约 55px）当期望高度传给几何计划，inline `maxHeight` 被冻结——内容装载后 `offsetHeight` 又被自身 maxHeight 钳住，重定位永远读到冻结值，浮层在内容装载后塌缩成 loading 态高度（既有 13 场景只断言高度上限，未暴露）。修复为按几何模块的 400 上限常量规划（内容更矮时 max-height 不抬高度、自然高度不受影响；翻转决策取最坏情况，内容长高不再跳变）。
+- 宿主来源守卫（信任边界）：`sourceDocUri` 须为该面板**实际送达过 hover.result 成功回包**的目标 fsPath（会话在成功回包时记录 `hoverSourceFsPath`，一次一浮层单值即够）——不匹配即静默丢弃，不回落到面板自身文档解析（B 内链接按 A 目录解析是错误语义）；来源化图片解析不进会话缓存/在途去重表（键为裸 src 跨来源会串台；浮层短生命周期，跨开缓存属 #224）。
+- 自动化记录（2026-09-30，工作树 `codex/hover-preview-embed`，TDD 先红后绿）：单测——协议校验扩 sourceDocUri 与 view.state 探针（fm 三态/imageSrcs）矩阵（hoverProtocol）、会话来源记录/守卫/来源化解析路由与链接透传 6 用例（documentSession）、浮层 B 身份资源/链接点击/属性区状态机/代码高亮/失效路由 14 用例（hoverPopup）、属性区 CSS 契约 6 组（hoverPopupCssContract，热区/按钮透明与指针/悬停与 focus-visible 显示/收起隐藏/chevron 旋转）；浏览器 `hoverPreview` 扩至 **19 场景**（B 相对图片 sourceDocUri 载荷与解析结果应用、浮层内双链/普通链接点击跳转与零写回、属性区默认折叠/热区显示按钮/点击展开/代码朴素高亮、键盘模态聚焦 focus-visible 显示与 Enter/Space 切换、刷新保留与重开复位、明暗主题浮层实底与属性区标题行随主题取色）；集成「悬停预览：来源资源与笔记属性」用例（真实宿主：子目录目标的相对图片按 B 目录解析——res.png 只存在于该子目录，按根/A 目录解析必 not-found、属性区默认折叠探针、浮层点击同款 wikilink.activate 注入按 B 目录解析打开子目录内目标、双零 dirty、零 applyEdit）。
+- 全量验证记录（2026-09-30）：`compile` 通过；`test:unit` 191 文件 3998 项全绿；`test:browser` 全量与 `hoverPreview` 19 场景通过（报告 `out/test/browser-runs/run-*/`）；`check:stylecontract` 八项零失败（143 条目：hover-preview 类目 2 条，英文覆盖与类目计数快照同步）；集成定向「悬停」4 用例全绿（#218/#219 既有用例不受影响）。
+- 人工待验：
+  1. **B 来源资源观感**：父文档悬停指向**子目录**笔记（其内有相对图片）——浮层内图片应正常显示（按目标目录解析）；目标内 Mermaid 图表渲染正常、公式正常；关闭浮层后无异常（资源释放无残留）。
+  2. **浮层内链接跳转**：浮层内点击双链/普通链接/外链——分别打开目标笔记（锚点定位沿用既有行为）/外开浏览器；浮层随之关闭；浮层内链接悬停**不**再叠加新浮层。
+  3. **属性区交互手感**：悬停带 frontmatter 的笔记全文——默认只见标题行；悬停标题行出现展开按钮，点击展开属性行、再点收起；键盘（Tab 后）聚焦按钮时按钮可见、Enter/Space 可切换；滚动浮层离开属性区再回来展开状态保持；关闭重开恢复折叠。章节/块引用与无 frontmatter 笔记无属性区。
+  4. **主题一致性**：明暗主题与已启用 CSS 片段下，浮层内标题/代码块/表格/属性区观感与主阅读视图一致（浮层挂 #app 后同源取色）。
+  5. **浮层高度修复确认**：长内容目标的浮层应为约 400px 高内部滚动（不再塌缩成一小条）。
+- 已知边界：目标文档后续变更的**自动**刷新与版本订阅属 #224（当前刷新载体为同实例结果重放——属性展开状态已按「刷新不重置」结构化保持，#224 接推送后同一入口）；B 图片的**文件变化自动失效**未接入（宿主失效反查按裸 src 键登记、跨来源会串台，来源化路径不进登记——手动刷新按钮的失效通道已接：`refresh.invalidated` 路由到 B 管理器全量重挂）；鼠标打开的浮层上纯 Tab 从头遍历会先走过父文档链接并触发「父容器滚动即关闭」规则（键盘直达浮层内部属 #221 键盘打开路径——键盘打开即焦点进入浮层）；浮层内代码块为朴素高亮形态（无复制/折叠/折行按钮——复制按钮的会话语义与全局折行联动属主视图行为，如需浮层内卡片工具条另行开票）；Live 悬停入口与设置项属 #221。
+
+## Reading 正文嵌入——引用卡片、一层展开与索引闭环（#222，2026-09-30）
+
+- 交付范围：父文档 Reading 正文流中**独占一行的 `![[…]]`** 升级为引用卡片——左侧引用块样式边条、顶部文件名（成功后为目标根内相对路径）、右上角打开入口（沿用 Vsidian 既有打开行为，按父文档目录解析，不改写引用原文）。内容经悬停文档访问通道（`hover.request`/`hover.result` 复用）装载目标的只读 Reading 视图（全文/标题章节/块，目标语法与双链同源）。短内容自然高度、长内容内部滚动（默认限高 480px，设置页 `embed.maxHeight` 可调并热更）；任务 checkbox 禁用、属性区默认折叠（#220 状态机同款，嵌入实例独立状态）；卡片域点击/悬停不冒泡父容器委托（B 内链接按 B 目录解析是唯一语义，不在嵌入内容上叠加悬停浮层）。**一层展开**：嵌入内容内的独占行嵌入不递归装载，渲染为可点击占位引用行（按直接来源文档身份 `sourceDocUri` 打开）。**虚拟化**：嵌入块是父文档虚拟化的普通块——视口滚离回收（B 内容 DOM 与资源管理器释放）、滚回重挂（fm 展开与滚动位置恢复、装载缓存零重发）；**卡片内部为全量渲染**（嵌套虚拟化的滚动链路在卡片内断裂——滚动区是外层 `.vsidian-embed-card-scroll` 非视图容器，「不常驻所有目标全文 DOM」由卡片级回收承担）。**索引/rename 闭环**：嵌入边（`kind='embed'`）进出链/反链面板（断链保留可见性）与 rename 改写（`![[` 后路径段替换，锚点/别名原样；快照码表尾追 code 4，旧码序不变）。宿主来源守卫**集合化**：`hoverSourceFsPaths`（上限 32）——嵌入卡片与悬停浮层多目标同面板共存，「不信任前端任意 URI」边界不变。
+- 结构性修复（开发中发现）：块挂载钩子在块元素 append 进容器**之前**触发（VirtualReadingView.mountBlock 既定顺序）——嵌入卡片重挂时同步恢复 scrollTop 被浏览器钳 0（scrollHeight 未布局）；修复为恢复延迟一帧并在回调内校验实例仍在场。
+- 自动化记录（2026-09-30，工作树 `codex/hover-preview-embed`，TDD 先红后绿）：单测——嵌入扫描器与独占行判定 15 例（wikilinkEmbed：守卫/双链互斥/非法形态/base 偏移/混排/行内代码/多嵌入）、嵌入抽取 7 例（vaultLinkExtract：混排产边/图片目标/断链/代码排除/本文件锚点）、嵌入 rename 改写 3 例（vaultRename）、快照 embed 往返与旧码兼容 2 例（vaultIndexSnapshot）、来源集合化 1 例（documentSession：多目标共存与伪造丢弃）、嵌入块识别矩阵 9 例（readingBlocks：独占/缩进/混排/围栏/行内代码/表格格/列表/引用/多行段落/占位 html）、嵌入卡片生命周期 13 例（embedCard：挂载升级/装载/迟到守卫/错误分态/一层展开/占位点击 B 身份/右上角父身份/不冒泡/回收重挂状态保持/缓存零重发/dispose/限高热更/探针）、嵌入 CSS 契约 7 组（embedCardCssContract：边条/顶栏/入口反馈/限高/状态行/只读 checkbox/fm 折叠作用域）、设置注册表与分组快照更新（settingsService/settingsPage）；浏览器 `readingEmbed` 8 场景（独占行挂载与载荷契约/混排保留源文/内容绘制与限高 480/选字复制 Selection 层/一层展开占位点击 B 身份出站/视口回收重挂状态保持与缓存零重发/限高设置热更 300/错误分态与零写回）；集成 4 用例（嵌入卡片目标矩阵+双零 dirty、rename 嵌入引用改写与锚点别名保持+同撤销单元、出链/反链面板计入嵌入边+断链可见、限高设置持久化回显与在场卡片热更）。
+- 全量验证记录（2026-09-30）：`compile` 通过；`test:unit` 194 文件 4055 项 + node --test 103 项全绿（logs/unit-222-final.log）；`test:browser` **38/38 脚本全绿**含新 `readingEmbed` 与既有 `hoverPreview` 19 场景（logs/browser-222-full.log）；`check:stylecontract` 八项零失败（145 条目；logs/stylecontract-222-final.log）；集成分片全量 **219 项 PASS / 5 项 FAIL**（logs/integration-222-full.log + `.vscode-test/integration-dev-s*.log`）——5 例失败全为剪贴板对拍族（#69 大纲复制、#183 右键菜单剪贴板四项/块链接两项、#79/#84 代码块复制），与 #219 节记录的基线证据（81fd5cf 上同 5 用例全败 + `clip.exe` 独占锁死）逐字对应；本轮单跑复现非间歇（logs/integration-222-clip-rerun.log / -rerun2.log / -codecard-rerun.log），系统通道 `clip.exe` 仍报 `Access is denied`（logs/clipboard-channel-check-222.log）——**环境故障持续在场，非本票回归**。嵌入域全部用例（本票 4 例 + rename 族 7 例 + 出链/反链 + 悬停 3 例 + 设置链路）分片内全绿。
+- 人工待验：
+  1. **嵌入卡片观感**：阅读视图打开含 `![[笔记]]` 独占行的文档——卡片左侧紫色引用边条、顶部文件名、右上角打开入口；点击入口跳转目标（锚点定位沿用既有行为）；明暗主题与已启用 CSS 片段下卡片观感与正文一致（`.markdown-embed` 别名让主题嵌入规则命中）。
+  2. **限高与滚动**：长内容卡片内部滚动（默认 480px）；设置页「嵌入内容最大高度」调整后在场卡片即时生效、重开编辑器回显。
+  3. **一层展开**：A 嵌入 B、B 内有 `![[C]]`——卡片内 C 呈占位引用行（不递归）；点击按 B 目录解析打开 C；嵌入内容上悬停不叠加浮层。
+  4. **状态保持**：展开卡片属性区并滚动内容后把卡片滚出视口再滚回——属性展开与滚动位置保持；会话内滚回不重新请求（#224 接变更刷新前，目标磁盘修改需重开面板可见）。
+  5. **索引/rename**：嵌入目标在资源管理器改名后嵌入引用自动改写（`Ctrl+Z` 一步回退）；出链面板含嵌入条目、反链面板把嵌入计入目标来源；混排/列表/引用/表格内嵌入保持原文显示。
+- 已知边界：**Live 侧嵌入与源码显隐属 #223**（Live 中嵌入行按源文显示；挂载适配与内容服务已分离——识别器/装载/状态库均容器无关，Live 挂载可复用 `EmbedCardManager` 的 entry/loaded 结构另接装饰层）；**未保存目标变更的自动刷新与失效恢复属 #224**（当前装载缓存会话内有效，目标磁盘/未保存修改不自动回流——重挂零重发是有意行为）；重挂时**在途请求**（回包未达）会以新身份重发（幂等读取重试，旧回包按实例身份守卫丢弃）；**悬停浮层内的深部内容**与本票修复同源的滚动链路问题在浮层上依然存在（`hoverPopup` 的嵌套 VirtualReadingView 同样不随浮层滚动更新窗口——#218-#220 既有现状，浮层默认 400px 限高下首窗覆盖绝大多数目标，留 #224/#225 与卡片内全量渲染方案合并评估）；递归展开与混排/容器内嵌入属 1.5 期（#226）；嵌入目标为图片/PDF 等非 Markdown 呈 not-found 语义（`hoverDocAccess` 一期只接 Markdown，三层 PDF 属 #228）。
+
+## 父文档 Live 正文嵌入——源码显隐、IME 闭环与选区隔离（#223，2026-09-30）
+
+- 交付范围：父文档**实时预览**中独占一行的 `![[…]]`（与 Reading 侧 #222 同一挂载适配语义——混排/列表/引用/表格格保留源文，代码围栏与 frontmatter 内不命中）经 CM6 装饰挂载共用嵌入卡片。**光标驱动源码显隐**（selectionTouchesRange 语义原样复用：折叠光标命中源码区间内部或两端、非空选区与区间严格重叠、任一 CM6 range 命中即显形）：隐形态整行替换为卡片（源文视觉退场、卡片占行位）；显形态源文可见可编辑、卡片移至行下方 block widget **继续显示**（显隐只作用于源文文本的视觉呈现，不是撤卡片——与 liveMermaid 显源撤图的取舍不同，按规格共识保留内容）。实例身份容器无关：Live widget 与 Reading 块挂载共用 EmbedCardManager 同一 entry 状态库（语义键 = 嵌入行行首 offset + 目标原文）——模式切换（Live↔Reading）共享装载缓存、fm 展开与滚动位置；双容器并存时 notifyResult 对全部配对 handle 渲染（在途请求不重发）。**选区隔离**：widget `ignoreEvent=true`——CM6 对卡片内选区变化直接忽略（`onSelectionChange` 的 widget ignoreEvent 分支，本地 node_modules 源码核对），点击卡片不落父编辑器光标；卡片内交互走 embedCard 自有监听器（stopPropagation，#222 同款）。**分态**：未闭合引用保留可编辑原文并撤下旧卡（扫描器语义天然满足）；目标/锚点缺失就地错误分态（复用既有文案面）；源码修正（含 IME）后新语义键自动重新装载、宿主撤销栈一步恢复原卡。**布局联动**：卡片壳 ResizeObserver → `view.requestMeasure()`（内容装载直调 + 图片晚到等一切异步高度变动兜底）；装饰退场/重挂的滚动恢复沿用 #222 的延迟一帧守卫（守卫改按 handle 宿主元素判定，容器无关）。
+- 装饰设计（CM6 结构，给后续票参考）：`liveEmbedSpansField`（嵌入表 StateField——行局部扫描无跨行状态，增量重建＝变更区间 ∪ 相交旧条目行窗口，坍缩丢弃）+ `liveEmbedDecorations`（装饰 StateField——block widget 与跨行 replace 均须来自 StateField 的 CM6 硬约束）；**表构建层不排除代码区域、发射层排除**（消费 mermaidFencesField 的全语言围栏表与文末开放围栏锚、liveDecorationsField 的 fm 区间）——围栏编辑（含上方开栏使下方嵌入落入开放围栏）即时联动，无需差集窗口。装饰实例 LRU 缓存（64，键 = 形态+行区间+目标原文）保 RangeSet.eq。装配位置：extensions 数组 liveMermaid 之后（纯装饰无键位/filter 语义，不涉 symbol-input 装配顺序陷阱）。
+- 契约演进（随票落档）：样式契约新增 `live-embed-widget` 条目（content 域 link-image-wikilink 类目，146 条目）；`reading-embed-card` 条目扩双容器（views 加 live、卡片壳规则并列 Live 宿主选择器）、`limit-markdown-embed` 条目更新（Live 侧已提供）；英文覆盖（styleContractEn）同步、类目计数快照 11→12、样式指南产物重生成。CSS：卡片壳规则两选择器并列（`#app .vsidian-view-reading .vsidian-reading-embed` 与 `#app .cm-editor .cm-content .vsidian-live-embed`）+ display:block（inline 替换形态的卡片独立成块）；下方形态宿主 `.vsidian-live-embed-below` 块级规则钉住。快捷键评估：源码显隐是光标位置驱动的自动行为非操作，零新增注册（keybindings.md 落档）。
+- 既有测试适配（非功能性）：`readingEmbed` 浏览器套件的观测面收窄到主 Reading 容器——#223 起 Live widget 内也有同名卡片壳与嵌套 `.vsidian-view-reading`（模式切换 hidden 残留），全局选择器/`locator.first()` 会误命中（`mainReading()` scoper：排除嵌入卡片、悬停浮层与 Live 宿主内的嵌套容器）；场景断言的混排行文本同样改主容器读取。
+- 自动化记录（2026-09-30，工作树 `codex/hover-preview-embed`，TDD 先红后绿）：单测——liveEmbed 新文件 21 例（显隐谓词矩阵：两端/内部/相邻不显/严格重叠端点相接/多选区任一命中/多嵌入独立显隐/缩进尾空白、抑制边界：闭合围栏/文末开放围栏/frontmatter/混排列表引用表格未闭合、围栏编辑联动撤下、增量表：编辑 inner/删闭合/窗口外映射/输入闭合新增、装饰实例缓存与 eq、widget 吞事件/toDOM 挂载卸载/空接线防御）；embedCard 扩 2 例（Live+Reading 双容器并存渲染与在途不重发、Live 宿主重挂状态保持与缓存零重发）；embedCardCssContract 扩 2 断言（卡片壳规则并列 Live 选择器、below 块级规则）；styleContractEn/styleContract 计数快照更新（81/146）。浏览器 **`liveEmbed` 新脚本 12 场景**（隐形态挂载+载荷契约+混排/围栏/未闭合保留源文、成功回包内容绘制+源文保持隐藏、**真实方向键**进出显隐（源文+下方卡片双绘制断言）、鼠标点击卡片光标不动、**真实 shift+click 跨区选**显形与离开恢复、多选区任一命中、**真实 IME**（CDP imeSetComposition 候选 + insertText 提交）修改源码→新目标自动重载、真实 Backspace 未闭合撤卡+重输闭合重挂、内部选字复制不改父选区零新增写回、目标缺失错误分态、模式切换两侧卡片在场源文不丢、高度变动滚动稳定+零写回+无页面错误）；run.mjs names 登记（紧随 readingEmbed）。集成新增 **「嵌入：Live 挂载与源码显隐——IME 编辑撤销闭环与双零 dirty（#223）」**（host=live 三卡真宿主读取闭环矩阵、liveEmbedReveal 探针光标进出显隐、table.test.compose 合成 IME 修改 inner→宿主落盘→新目标缺失错误分态、table.test.history 真撤销栈一步恢复原卡与零 dirty、模式切换不丢源码、双零 dirty 与目标磁盘保真、applyEdit 恰一笔）；view.state 探针扩 `liveEmbedReveal`（协议与集成类型同步）与 readingEmbed 的 `host` 容器标记。
+- 全量验证记录（2026-09-30）：`compile` 通过（tsc 零错）；`test:unit` **195 文件 4095 项全绿**；`test:browser` **40/40 脚本全绿**（含新 `liveEmbed` 12 场景与红线 `hoverPreview` 19、`readingEmbed` 8、`hoverEntry` 15；logs `out/test/browser-runs/run-kZVxlY/`）；集成分片全量 **225 项 PASS / 0 项 FAIL**（片 1 宿主退出码 1 为收尾退出噪声按 #211 边界放行，报告零失败；/tmp/itest-full-223.log + `.vscode-test/integration-dev-s*.log`）；`check:stylecontract` 八项零失败（146 条目）；file-tree 四新文件登记、`check --strict` 通过。
+- 人工待验：
+  1. **显隐手感**：实时预览打开含 `![[笔记]]` 独占行的文档——光标用方向键移入引用源码（区间内或紧贴 `![[`/`]]`）：源文出现、卡片在该行下方；移开（上/下一行）后源文隐藏、卡片回到行位。鼠标点击/拖选跨过嵌入行的显隐同语义。
+  2. **IME 修改引用**：光标进区间后用真实中文输入法改目标名——候选期源文跟随、提交后卡片按新目标重新装载（新目标缺失显示就地错误）；`Ctrl+Z` 一步恢复原卡。
+  3. **未闭合与恢复**：删掉 `]]` 两键——卡片撤下、源文保留可编辑；重新输入 `]]` 后卡片自动重挂装载。
+  4. **内部交互隔离**：卡片内选字复制（Ctrl+C 复制的是卡片内容）、滚动、点击链接与右上角入口、fm 折叠——父文档光标不动、无编辑、菜单操作不误触嵌入内容选区。
+  5. **跨模式状态**：展开属性区并滚动卡片内容后切阅读再切实时预览——卡片在两侧都在场、属性展开与滚动位置保持、源文不丢。
+  6. **观感**：明暗主题与 CSS 片段下，Live 卡片与 Reading 卡片观感一致（`.markdown-embed` 别名两容器同命中）；显形态源文行与下方卡片的间距观感。
+- 已知边界与衔接：**目标未保存内容订阅与磁盘变化失效属 #224**（本票的「恢复」指用户修正源码后重载与重挂重试；错误态卡片光标离开再回来会重发请求——幂等读取）；**递归与混排/容器内嵌入属 1.5 期（#226）**（Live 与 Reading 同一识别器语义，两侧一致保留源文）；显形态切换经装饰重建（卡片 DOM 销毁重建、装载缓存与状态恢复，图片重挂有一帧重载——与 #222 视口回收重挂同路径）；拖选路径穿过卡片区域时父文档选区不越过卡片（widget 吞事件——跨区选择经 shift+click 或从卡片外起手拖选覆盖，浏览器套件按后两路径验证）；卡片内点选后直接打字仍落入父文档既有光标位置（CM6 ignoreEvent widget 的通病，mermaid 图形同款，本票未收窄）；**#224 衔接**——Live/Reading 双容器并存的 notifyResult 多 handle 渲染与在途不重发已就位（目标变更广播只需驱动 entry 失效重载）；**#225 衔接**——全量性能实测（长文档多嵌入的装饰重建成本）在收口票统一执行。
+
+## 悬停全入口——Live、面板、键盘与直接悬停设置（#221，2026-09-30）
+
+- 交付范围：悬停预览从 Reading 正文扩展到**三入口**——① 实时预览正文：contentDOM mouseover/mouseout 委托，默认 **Ctrl+悬停**（目标判定与 Ctrl+点击同一判定族：posAtCoords → 双链 → 树驱动 → 宽松链接；https 等外部链接预滤），设置页「实时预览中直接悬停链接」（`hover.liveDirect`，默认 false）开启后直接悬停、保存即广播生效；② 反链/出链面板条目：**始终直接悬停**（不随正文模式改变），载荷走宿主直读通道（`directTarget` fsPath±锚点，从最近面板快照取，断链条目空串 fsPath 入队呈 not-found 占位）；③ 键盘命令**「预览当前链接」**（`hoverPreviewLink`，`onegayi.vsidian.ui.hoverPreviewLink`，双模式、非写、默认未绑定）：Live 光标处判定 / Reading 键盘聚焦链接（排除嵌入卡片内）/ 面板聚焦条目，**Live 光标未命中时落到聚焦元素检查**（面板入口模式无关），无目标静默不误开、嵌入 `![[…]]` 区间不弹窗；命令面板（ui.command）与 keybindingRouter 本地分支两入口。键盘模态（`openHoverPopupForKeyboard`）：焦点进浮层容器（tabIndex=-1 + focus-visible 轮廓）、Esc 返还触发处、焦点在内不因鼠标离开/父容器滚动销毁现场；鼠标路径零抢焦点不变。域释放：面板快照到达/重渲染/隐藏按锚点域、切模式无条件释放；单例浮层（换目标先关旧再开新）。
+- 接力修复（实施者中途交接，三处）：① 浏览器 fixture 访问控制器私有 `view`（tsc 报错）——改 `EditorView.findFromDOM` 公开 API（outlineJumpFixture 先例）；② 场景脚本两处笔误——焦点基线在浮层打开后读取（应先取触发处焦点再开浮层）、`.mjs` 内 `querySelector<HTMLElement>` TS 泛型被解析为比较表达式链（返回布尔值致 `focus is not a function`）；③ **产品行为缺陷**：`previewLinkAtFocus` 的 Live 分支光标未命中时无条件返回，面板聚焦条目在 Live 模式下永远不可达（票面「面板不随正文模式改变触发规则」的键盘面被截断）——改为未命中落到聚焦元素检查，`previewLiveLinkAtCursor` 改返回命中布尔。
+- 自动化记录（2026-09-30，工作树 `codex/hover-preview-embed`）：单测（fe76f89 落地）——hoverPopup 显式目标/键盘模态/域释放七组、keybindings hoverPreviewLink 登记与冲突钉住、settings hover.liveDirect 注册、settingsPage/settingsService/nlsManifest 快照同步（59 命令）；浏览器 **`hoverEntry` 15 场景**（Live Ctrl+悬停开闭/双链 linkHref 载荷/零抢焦点/内容绘制、离开延迟关闭、默认设置无 Ctrl 不开、直接悬停开关即时生效与关闭恢复、普通链接 linkHref 与外链预滤、反链面板直接悬停/直接目标载荷/单例/重渲染释放、出链锚点载荷/断链失效占位、键盘命令 ui.command 与真实按键两路径/焦点进入/Esc 返还编辑器、无目标不误开（普通文本+嵌入区间）、键盘模态保活（鼠标离开/父容器滚动/焦点离场恢复）、Reading 聚焦链接、Ctrl+点击跳转回归（wikilink.activate/link.activate 各一）、面板键盘聚焦目标+面板隐藏释放、零写回）；集成新增 **「悬停全入口：直接悬停设置持久化回显与预览链接键位绑定清空保留」**（hover.liveDirect 默认 false→保存→回读→新面板拉取→广播→关面板重开回显；hoverPreviewLink 默认未绑定→绑定 ctrl+alt+p→清空持久为显式空记录（不因缺省回默认）→恢复默认移除覆盖记录；存储层经正式 KeybindingService/globalState 读回）。
+- 全量验证记录（2026-09-30）：`compile` 通过；`test:unit` vitest 194 文件 4071 项全绿（回落修复后复跑，logs/unit-221-final.log）+ node --test 启动器契约 103 项全绿（45+58 分段补跑，logs/unit-221-nodetest.log——首跑被前任会话 09-28 起挂起两天的僵尸 `npm run test:unit` 进程树拖停在 testHost 段，清理后分段补跑与全量等价）；`test:browser` **39/39 脚本全绿**含新 `hoverEntry` 15 场景与既有 `hoverPreview` 19、`readingEmbed` 8 红线（logs/browser-full-221.log）；真宿主定向集成 **6/6 PASS**（#221 新用例 + 链接跳转 #10 + 双链跳转 #11/#196 回归 + 悬停 #218/#219/#220 族，logs/integ-221-targeted.log）；`check:stylecontract` 八项零失败（145 条目，logs/stylecontract-221.log）；file-tree 登记两新测试资产、`check --strict` 通过。剪贴板对拍族已知环境故障（clip.exe 独占）沿用 #219/#222 节基线证据放行（本轮未触及该族用例）。
+- 人工待验：
+  1. **Live Ctrl+悬停观感**：真实鼠标 + 真实 Ctrl 键悬停双链/普通链接——浮层延迟开（约 300ms）、内容与 Reading 悬停同款；Ctrl+点击仍直接跳转（不弹浮层不误跳）。
+  2. **直接悬停开关**：设置页「实时预览中直接悬停链接」开启——无需修饰键直接悬停即开；关闭后恢复 Ctrl 必须；重开编辑器/重启 VSCode 回显。
+  3. **面板悬停**：反链/出链面板真实条目直接悬停（Live 与 Reading 两正文模式下一致）；断链条目呈失效占位；换悬停条目只有一个浮层。
+  4. **键盘命令**：设置页快捷键分页为「预览当前链接」绑定键位——Live 光标在链接上按键打开、焦点在浮层、Esc 回到光标处；Reading Tab 聚焦链接后按键同效；光标在普通文本/嵌入行上按键静默。
+  5. **键盘保活体感**：键盘打开浮层后鼠标移开浮层与链接——不关闭；Tab/点击把焦点移出浮层后恢复鼠标离开延迟关闭语义。
+- 已知边界与衔接：悬停浮层内深部内容的滚动链路问题为 #218–#220 既有现状（与 #222 节记录同源，浮层默认 400px 限高下首窗覆盖绝大多数目标，留 #224/#225 合并评估）；键盘模态的保活语义是对 #220 已知张力（浮层不随父容器滚动更新）的**调整**而非修复——键盘现场销毁条件收窄为「焦点离开浮层」，深部滚动更新仍不触发；快捷键「清空重启后保留」的存储证据为 globalState 显式空记录 + 单测钉住（真实进程重启由人工待验 2 覆盖）；**#223 衔接**——Live 嵌入源码显隐不与本票键盘命令冲突（光标在嵌入源码区间时 `previewLinkAtFocus` 静默，显形语义由 #223 的 selectionTouchesRange 承担）；**#224 衔接**——悬停浮层目标的未保存修改/磁盘变化自动刷新属 #224（当前浮层内容为打开时快照，迟到回包按代次守卫不重开已关闭浮层）；**#225 衔接**——全量集成分片回归与性能实测在收口票统一执行。
+
+## 引用视图同步——未保存内容、失效恢复与有界缓存（#224，2026-09-30）
+
+- 交付范围：悬停浮层与嵌入卡片（Reading/Live 双容器）**订阅目标变更并自动刷新**——装载成功后登记 `hover.watch`（实例级订阅、宿主目标级合并）；宿主协调器对被订阅目标的**未保存修改**（TextDocument 变更，防抖 350ms + 连续输入 2s 强制合并）与**磁盘事件**（vaultIndex onTargetChange 三态直通；deleted 不等防抖并取消 pending）推送 `hover.invalidated`（changed/deleted/stale + 单调代次）。webview 分态：changed 同实例新请求代次**静默重载**（不闪 loading、fm 展开与滚动保持）；deleted 撤内容显示缺失态（订阅保持以感知恢复）；stale 读取失败分态。**双重仲裁**：请求代次（instanceId+reqId）与目标内容版本（shouldApplyHoverVersion——旧版本回包丢弃，慢响应旧内容不冒充新目标）。**有界缓存**：宿主读取缓存（同形态在途合并 + 成功缓存，条目 24/字节 2MiB 双上限插入序淘汰，fsPath 反查失效 + 世代守卫与失效时钟防在途迟到回写）；嵌入状态库 LRU（64，死键淘汰配对 unwatch，仍挂载实例不淘汰）；订阅目标 128（LRU 整目标淘汰）。**订阅生命周期**：浮层关闭/面板销毁配对回落（`_test.hoverWatchStats` 观测）。#220 遗留补接：来源化图片（B 身份）进失效反查登记（B 图片文件变化自动失效重挂，imageSrcTarget 有界 256）。
+- 协议与架构（给后续票参考）：消息族 `hover.watch`/`hover.unwatch`（webview→宿主，会话守卫+实例身份）与 `hover.invalidated`（宿主→webview，三态+代次）；协调器 `src/host/hoverRefreshCoordinator.ts`（provider 级单件，pending 防抖与 generations 键统一 **Windows 折叠归一**——编辑器事件形态与 statFileRealPath 归正形态可能仅大小写不同，精确匹配会漏推送；推送载荷用登记形态 canonicalOf，与 webview loaded.fsPath 同源）。自引用防循环为结构性保证：推送只出站消息，webview 重载经 hover.request 只读（openTextDocument 无副作用），编辑→推送→重读即收敛。
+- 自动化记录（2026-09-30，工作树 `codex/hover-preview-embed`，TDD 先红后绿）：单测新 3 文件 40 例（hoverRefresh 15：参数量级/版本仲裁矩阵/订阅注册表含 Windows 键归一；hoverRefreshCoordinator 16：防抖合并/强制上限/deleted 取消 pending/多会话路由/生命周期回落/自引用收敛；hoverReadCache 11：并发合并/命中/失败不缓存/fsPath 反查/世代守卫/双上限）+ hoverPopup 扩 8 例 + embedCard 扩 6 例（订阅登记释放/changed 静默重载 fm 滚动保持/deleted 撤内容恢复重载/版本仲裁/离屏失效状态保留）+ hoverProtocol 扩 3 例；协议 view.state 的 readingEmbed 探针扩 `textLen`（内容刷新可见性观测）。浏览器新 `hoverRefresh` 套件 5 场景（装载订阅契约/changed 静默重载 fm 滚动保持绘制层/快速连续更新旧回包丢弃终态可见/删除分态恢复重载/浮层订阅刷新滚动保持关闭配对 unwatch），run.mjs 登记。集成新 2 用例（未保存修改推送 textLen 23→53 与外部磁盘变化目标2 28→29、浮层开订阅 +1 关回落、面板销毁整体回落、零 applyEdit；删除真宿主 watcher deleted→缺失态、恢复注入同形态消息重载、自引用 textLen 26→34 一轮收敛订阅稳定）。全量：单测 4154 绿（198 文件）、浏览器 41/41 套件、style-contract 八项零失败、集成分片全量见执行记录。
+- 修复过程暴露的真缺陷（均有先红证据）：① 嵌入 changed 刷新对同 entry 双容器 handle 各发一笔请求（改每 entry 单笔，浏览器场景 B 暴露）；② deleted 清 loaded 后恢复 changed 的目标匹配落空（回退 watchedFsPath 匹配，集成删除用例暴露）；③ Windows 大小写形态漂移使协调器注册表精确匹配漏推送（键归一修复，集成未保存用例暴露）。
+- 人工待验：
+  1. **未保存跟随体感**：打开含 `![[目标]]` 嵌入的文档，在另一编辑器改目标笔记打字——停顿约三分之一秒后卡片/浮层换新内容（连续打字不逐字刷新）；改动期间父文档不 dirty。
+  2. **刷新状态保持**：展开嵌入属性区并把卡片内容滚到中部，改目标笔记——刷新后属性区仍展开、滚动位置保持；改短内容后滚动被钳制到合法范围。
+  3. **删除与恢复**：资源管理器删除目标文件——卡片/浮层立即变缺失提示（无旧内容残留）；恢复文件后自动重载。
+  4. **自引用**：文档嵌入自身后编辑该文档——嵌入内容一轮刷新后稳定（无循环刷新风暴）。
+  5. **浮层订阅回落**：悬停打开浮层后关闭——扩展宿主日志无残留报错（订阅回落由 `_test.hoverWatchStats` 集成钉住，人工验证无异常即可）。
+- 已知边界与衔接：**vaultIndex watcher 对「删除后快速重建/改写」的 changed 事件存在不 publish 的间歇**（#198 队列去重与首观测抑制的既有行为，台账外不改——集成用例对恢复/外部改写段以与生产同形态的 `hover.invalidated` 注入补位推送，重载本身走真实 hover.request 真宿主读取，「磁盘新内容可见」是真实链路）；dirty TextDocument 是权威内存态、屏蔽外部写盘（外部磁盘变化用例选全程 clean 的第二目标）；首载失败（文件本就缺失）无目标身份不订阅，文件创建后不自动恢复（重开/刷新可用——U8「恢复后可用」的该子路径记录在案）；waitViewState 测试基建在删除场景存在拿不到新回报的间歇（用例改直接命令轮询，非产品缺陷）；**#225 衔接**——全量性能报告（编辑阻塞与长文档多嵌入）在收口票执行，本票定向数据已落 `docs/perf/data/hover-refresh.json`（100 请求 1 次读取 + 50 命中、2MiB 字节边界、dispose 回收）。
+
+## 一期收口——U1–U12 核对、全量回归与人工验收总清单（#225，2026-09-30）
+
+- 职责边界：本节是**一期纵向核对与收口记录**，不替代各功能票自身测试——#218–#224 各节的自动化矩阵仍然有效，人工待验明细也以各节为准，本节只做汇总索引与跨路径补充。
+- **U1–U12 核对结论**（证据指针：代码模块 / 浏览器场景 / 集成用例；逐项明细见 #225 收口提交简报）：
+  - **U1 悬停触发（正文/双链/普通链接/面板 + Live 修饰键与设置）**：达成。Reading 正文（hoverPreview A–M）、Live Ctrl+悬停与直接悬停开关（hoverEntry A/D/E、集成「悬停全入口」设置持久化）、面板直接悬停（hoverEntry F/G/N）。
+  - **U2 键盘（可绑操作默认未绑定、命中、焦点往返、无目标不误开）**：达成。`hoverPreviewLink` 注册（keybindings.md 33/84 行、单测 keybindings）、键盘模态焦点进入/Esc 返还（hoverEntry H/I/L/K）、无目标与嵌入区间静默（hoverEntry J）。
+  - **U3 引用全文/章节/块（两父模式一致、源文不改写）**：达成。范围选择器与完整块/章节函数（hoverDocAccess + wikilinkTarget 20 用例）、切块过滤（hoverPreview H/I/K）、Reading 卡片与 Live 卡片同一装载（liveEmbed K、readingEmbed A/B）、rename 改写只动路径段（集成「嵌入：rename」）。
+  - **U4 源码显隐与编辑（跨区选区、内容保留、IME 不跳动）**：达成。selectionTouchesRange 语义矩阵（liveEmbed 单测 21 例）、真实方向键/shift+click/IME/Backspace（liveEmbed C/E/G/H）、显形态卡片保留（liveEmbed C、#223 集成）。
+  - **U5 属性区（默认折叠、热区与键盘、刷新保留、重开复位）**：达成。状态机与热区（refReadingContent + hoverPopup 单测 14 例）、hoverPreview P/Q/R、hoverRefresh B（changed 刷新 fm 保持）。
+  - **U6 小窗口（四边翻转/钳制、滚动、入口不裁切）**：达成。几何四边矩阵（hoverPopupGeometry 单测 9 例）、小视口绘制层（hoverPreview G）。
+  - **U7 目标修改同步（未保存/磁盘、旧响应丢弃、滚动保持）**：达成。hoverRefresh A–E、集成「同步」两用例（#224）。
+  - **U8 失效原因（无效输入/缺文件锚点/拒绝读取、恢复后可用）**：达成。错误分态 i18n（refReadingContent.refErrorText）、hoverPreview E/M、readingEmbed G、liveEmbed J；首载即失败文件不订阅、创建后不自动恢复的子路径已在 #224 节记录在案（重开/刷新可用）。
+  - **U9 B 内部资源与跳转（相对 B、既有锚点语义）**：达成。sourceDocUri 通道与来源守卫（documentSession 单测）、hoverPreview N/O、集成「悬停预览：来源资源」（子目录目标按 B 解析）。
+  - **U10 多层引用（一层占位可跳转、不递归、不叠浮层）**：达成。占位引用行按直接来源解析（readingEmbed D）、浮层不叠加（hoverPopup 结构：浮层不在委托域）。
+  - **U11 主题/片段一致与专属入口（绘制层验证）**：达成。#app 内挂载天然命中主题与片段（hoverPreview S 明暗主题绘制层断言）、专属样式入口四个契约条目（hover-popup / hover-fm-section / reading-embed-card / live-embed-widget，146 条目八项零失败）。
+  - **U12 零写回与不拖慢（任务/属性零写回、按需挂载、释放无残留）**：达成。checkbox 禁用与无 fm 编辑入口（refReadingContent）、各浏览器套件零 edit.request 断言与集成双零 dirty/零 applyEdit；性能实测见下条。
+- **性能实测**（数据 [data/hover-embed-perf.json](../perf/data/hover-embed-perf.json) + [data/hover-embed-perf-host.json](../perf/data/hover-embed-perf-host.json)，报告 [2026-09-hover-preview-embed-performance.md](../perf/2026-09-hover-preview-embed-performance.md)）：状态层——10k 行 + 200 嵌入在场时单字编辑净开销 +0.9 ms（对照同体量纯文基线）、嵌入源码内编辑 +6.9 ms、光标进出显隐翻转 avg 0.151 ms/次、装饰实例 LRU 同键复用与超限淘汰正确；真宿主——1 万段落 + 200 嵌入较纯文基线输入延迟 avg +4.6 ms / max +18.5 ms（含 rAF 稳定等待地板），Reading 挂载 50/10000 块随视口不随体量，面板关闭后订阅 0/0 回落。不设虚构阈值。
+- **全量回归记录**（2026-09-30，工作树 `codex/hover-preview-embed`，报告均在 logs/ 与 .vscode-test/ 下）：`compile` 通过（logs/225-compile.log）；`test:unit` 198 文件 4154 项全绿（logs/225-unit.log）；`test:browser` 41/41 套件全绿（logs/225-browser.log，报告 out/test/browser-runs/run-*/）；集成分片全量（VSIDIAN_ITEST_SHARDS=4）**227 项 PASS / 0 项 FAIL**（logs/225-integration.log + .vscode-test/integration-dev-s1..4.log；片 1 宿主退出码 1 为 #211 收尾退出噪声、报告零失败，与 #223 节记录同款）；`check:stylecontract` 八项零失败（logs/225-stylecontract.log）+ `check:stylecontract:baseline` 通过（logs/225-stylecontract-baseline.log）；file-tree `check --strict` 通过（分支累计新增 33 文件全部在册，独立磁盘对照零缺漏）。#219/#222 节记录的剪贴板独占环境故障本轮**未复现**（227/0 全过，无需按基线放行）。
+- **一期边界核查**：递归、混排/容器嵌入、Live 编辑、PDF 均未提前实现——引用内容视图无 EditorView 创建点（全仓 `new EditorView` 仅 syncController 一处）、文档访问层仅接 Markdown（non-markdown 分态拒绝）、嵌入扫描与挂载适配按容器无关分层（1.5 期接入面保留）；所有引用内容 Reading 禁写（checkbox 禁用、fm 无编辑入口、只读消息不进 edit.request）。
+- **一期人工验收总清单**（汇总索引——明细在各票节，以下按主题归类；**全部未执行、待用户人工验收**）：
+  1. **悬停手感与观感**：#218 节 1（Reading 悬停开闭手感）、#221 节 1/3（Live Ctrl+悬停、面板悬停）、#219 节 1/4（章节/块观感、锚点缺失提示）、#220 节 2/3（浮层内链接跳转、属性区手感）。
+  2. **嵌入卡片与源码显隐**：#222 节 1/2/3（卡片观感、限高滚动、一层展开）、#223 节 1/2/3/6（显隐手感、IME 修改、未闭合恢复、跨模式与观感）。
+  3. **同步跟随与失效恢复**：#224 节 1/2/3/4/5（未保存跟随、刷新状态保持、删除恢复、自引用、订阅回落无报错）、#222 节 4（重挂状态保持）、#220 节 1（B 来源资源与 Mermaid/公式）。
+  4. **键盘与设置**：#221 节 2/4/5（直接悬停开关回显、键盘命令绑定与保活）、#222 节 5（嵌入限高设置持久化）。
+  5. **零误写体感**：#218 节 3（悬停后双文档无 dirty、无可撤销项）、#223 节 4（卡片内交互隔离）。
+  6. **Remote SSH（单列，未执行）**：一期全部链路（悬停读取、嵌入装载、订阅刷新、索引/rename）在远程 Windows→CentOS 7 环境的行为待验——历史批次 remote 兼容面由 ADR-0001 保障，本期未新增 Remote 专属通道，但**未经远程实测**。
+  7. **物理鼠标与视觉观感（单列，未执行）**：真实鼠标的悬停开闭节奏、四边翻转观感、嵌入卡片边条与显隐过渡、明暗主题与已启用 CSS 片段下的浮层/卡片观感——自动化只断终态与绘制层证据，手感与观感须用户验收。
+
 ## #231 设置页「外观」合并分页（2026-09-30）
 
 侧栏「CSS 片段」与「样式参考」合并为一条「外观」（调色板图标，取 CSS 片段原槽位），扁平三页签：CSS 片段 / 样式参考 / 详细查询，默认落在「CSS 片段」；搜索定位按条目归属落页签；`openStyleReference` 命令打开外观并定位「样式参考」页签。规格见 [appearance-merge.md](appearance-merge.md)。
@@ -1102,3 +1228,14 @@ Live 渲染态经 lezer `HorizontalRule` 节点驱动：未触及该行时源文
   5. **既有能力抽验**：片段目录选择/打开/刷新/暂停恢复、逐项开关；契约导出 JSON、支持等级过滤、条目内搜索——行为与合并前一致。
   6. **「常规」图标观感（#230）**：设置页侧栏「常规」为双拨杆开关线性图标（两枚横杆纵列、圆点一左一右），明暗两主题下笔画清晰、与相邻图标视觉同重。
 - 已知边界：样式参考独立两态页签的 `mount` 形态保留为类自包含消费形态（设置页生产路径不再使用）；设置页类名均不在公开样式契约清单内（零契约条目变更）。
+
+## 悬停/嵌入 review 修复批——directTarget 边界、entry 级版本仲裁与 watch 校验（2026-09-30）
+
+- 背景：一期 #218–#225 整体 code review 修复批（随 origin/main #230–#232 设置批次的 merge 一并落地，merge 提交后单列修复提交）。两项 P1、一项 P2 与三项 P3 顺手项，全部 TDD 先红后绿；均为内部加固，正常链路无用户可见行为变化（CHANGELOG 不新增条目——所修条目均在 Unreleased 段内）。
+- **P1-1 directTarget 通道宿主边界**：反链/出链面板直接目标（前端直供 fsPath）此前直接 openTextDocument——被攻陷 webview 可读工作区外任意 .md（双链/普通链接路径经 resolveVaultLinkFile 根内边界，directTarget 完全绕过）。修复：`readHoverDirectTarget` 入口补静态边界——新增 `isVaultPathInsideRoot`（vaultLink 根内语义导出复用）：fsPath 须为绝对路径且在当前文档所属根内（索引按根分区、跨根目标不解析，面板快照身份恒在所属根内，合法条目不受影响），越界/相对形态归 escape 分态；非 .md 维持既有 non-markdown。单测：越界绝对路径（同盘/跨盘）零读取端口触达、相对形态、根内子目录合法放行、非 .md 四形态（hoverDocAccess）+ Windows/POSIX 双语义判定矩阵（vaultLink）。
+- **P1-2 嵌入卡片 entry 级版本仲裁**：版本仲裁原为全局粒度（任一 entry 已持同目标更新版本即整体丢弃回包）——同目标多 entry（`![[B]]` 与 `![[B|别名]]` 语义键不同独立读取）交错时后到首载回包被丢弃且无重试无自愈（lastReq 悬挂 → 永久卡 loading）；`notifyInvalidated` 对首载在途 entry（loaded 与 watchedFsPath 皆空）被 skip 收不到重发。修复：仲裁改 per-entry（新鲜度参照 = 全库同目标已知最新版本，entry 新增 `lastKnown`——changed 失效清 loaded 后仍持有版本）；过期回包按命中 entry 丢弃并清 lastReq 后**自愈重发一次**（heal 回包仍过期视为版本谱系断点——如目标关闭重开后 version 重置——终态落地不循环）；`notifyInvalidated` 增首载在途前置重发（在途回包可能是变更前旧内容且目标身份未知，无条件重发一次幂等读取）。单测钉跨 entry 交错时序（两 entry 同目标、中途版本推进、双方终态达最新）、首载在途失效重发、静默重载旧回包不覆盖+自愈、循环防护四场景（embedCard）。
+- **P2-2 hover.watch 来源校验**：watch 的 fsPath 须为该会话 `hoverSourceFsPaths` 集合成员（watch 总在成功装载后，集合已含目标）——`DocumentSession` 新增 `hasHoverSource` 查询面，provider 层 watch 登记前校验，伪造越界 watch 静默忽略并计数（debug 日志）；unwatch 只释放既有登记无越界增益，不设校验。单测：未读取 false / 成功读取 true / 失败读取不记录 / 未知会话 false（documentSession）。
+- **P3 顺手项**：`hover.invalidated.generation` 协议注释如实化（当前单面板 FIFO 不做乱序丢弃，代次仅观测与单调性事实保留——hoverPopup 侧注释本已如实）；`hoverSourceFsPaths` 重读触达（已存在成员重读移到队尾，活跃目标不被 32 上限淘汰——与 watch 校验的放行基准联动）；`hover.request` 校验器补 `sourceStart <= sourceEnd`（相等合法，倒置整体拒绝）。
+- 不修（review 记录在案，建议后续票）：P2-1 大小写形态漂移推送 miss（窄场景有自愈，修复涉及跨层形态协议改造）；P3-3 Map 无界、P3-4 sourceDocUri 命名、P3-6 理论负高度（理论边界项，无实际触发路径）。
+- 全量验证记录（2026-09-30，工作树 `codex/hover-preview-embed`）：merge 后 `compile` 通过、`test:unit` 199 文件 4173 项全绿（logs/merge-unit.log）；修复批 `compile` 通过（logs/fix-compile.log）；`test:unit` 199 文件 4186 项 + node --test 103 项全绿（logs/fix-unit.log）；`test:browser` 41/41 套件全绿（logs/fix-browser.log，报告 out/test/browser-runs/run-r1r44P）；集成分片全量（VSIDIAN_ITEST_SHARDS=4）**227 项 PASS / 0 项 FAIL**（logs/fix-integration.log + .vscode-test/integration-dev-s1..4.log，剪贴板环境故障未复现）；`check:stylecontract` 八项零失败 + `check:stylecontract:baseline` 通过（logs/fix-stylecontract*.log）；file-tree `check --strict` 通过（本批零新文件，源码与测试修改均在册条目内）。
+- 人工待验：无新增（全部为内部加固，正常链路行为不变——悬停/嵌入既有各节人工清单继续有效）。

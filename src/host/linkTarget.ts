@@ -113,8 +113,11 @@ function tolerantDecode(text: string): string {
 }
 
 /** 喂给根内路径规划器的路径文本：剥 hash/query 后容错解码（trim 与
- *  分隔符归一是规划器自身职责，此处不重复） */
-function planPathTextOf(href: string): string {
+ *  分隔符归一是规划器自身职责，此处不重复）。#219 起公开导出——
+ *  hoverDocAccess 的普通链接读取入口复用同一剥取口径（阅读侧 href 经
+ *  markdown-it normalizeLink 编码、字面原文两种写法解析到同一目标），
+ *  不另建第二套 fragment 拆分 */
+export function planPathTextOf(href: string): string {
   return tolerantDecode(href.split('#')[0]!.split('?')[0]!)
 }
 
@@ -125,8 +128,10 @@ function planPathTextOf(href: string): string {
  * （阅读侧 href 经 markdown-it normalizeLink 编码、live 侧为字面原文，
  * 两种写法须解析到同一锚点——与路径同口径）；空 fragment 解码后回空串
  * 交由调用方按「无可定位目标」处置。
+ * #219 起公开导出（消费方：hoverDocAccess 普通链接读取——fragment 拆分
+ * 与 classifyLinkTarget 同一实现，不建副本）。
  */
-function splitHrefFragment(
+export function splitHrefFragment(
   href: string,
 ): { pathText: string; fragment: string | null } {
   const hashIdx = href.indexOf('#')

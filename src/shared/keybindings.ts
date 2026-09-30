@@ -92,6 +92,13 @@ export const UI_OPERATIONS = [
   // 按钮共用同一发送实现，宿主编排在 documentSession 的 refresh.request
   // 处理唯一）。只读视图操作（不写文档），双模式可用，默认不占键位
   { id: 'refreshEditor', command: 'onegayi.vsidian.editor.refresh', titleKey: 'command.editor.refresh.title', mode: 'both', writes: false, defaults: [] },
+  // #221 预览当前链接：悬停浮层的键盘入口（手动打开——焦点进入浮层、Esc
+  // 返回触发处；Live 以光标处合法双链/普通链接为目标，Reading/面板以键盘
+  // 聚焦的链接/条目为目标，无目标静默不误开；嵌入 ![[…]] 已有常驻内容不
+  // 重复弹窗）。纯 webview 域只读操作（不写文档、无宿主往返），双模式
+  // 生效（mode: both 只表示两模式下命令均可用——目标判定各自实现）；
+  // 默认不占键位，键位留给用户按需绑定（评估记录见 docs/specs/keybindings.md）
+  { id: 'hoverPreviewLink', command: 'onegayi.vsidian.ui.hoverPreviewLink', titleKey: 'command.ui.hoverPreviewLink.title', mode: 'both', writes: false, defaults: [] },
 ] as const satisfies readonly KeybindingOperation[]
 export type UiOperationId = (typeof UI_OPERATIONS)[number]['id']
 export function isUiOperationId(value: unknown): value is UiOperationId {

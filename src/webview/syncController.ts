@@ -41,6 +41,7 @@ import { CODE_CARD_CLASS_NAMES, codeCardConfigFacet, codeCardCopyRequest, codeCa
 import { decorateReadingCodeCard, isReadingCodeBlock, READING_CODE_NOWRAP_CLASS } from './readingCodeCard'
 import {
   isHostToWebview,
+  type BacklinkItemPayload,
   type BacklinksProbe,
   type CssProbeReport,
   type FindSessionProbe,
@@ -49,6 +50,7 @@ import {
   type LineGutterProbe,
   type LiveSyntaxProbe,
   type OutlineProbe,
+  type OutlinkItemPayload,
   type OutlinksProbe,
   type PaintProbe,
   type ReadingSyntaxProbe,
@@ -74,6 +76,11 @@ import {
   READABLE_LINE_WIDTH_KEY,
   READABLE_LINE_WIDTH_MAX,
   READABLE_LINE_WIDTH_MIN,
+  EMBED_MAX_HEIGHT_DEFAULT,
+  EMBED_MAX_HEIGHT_KEY,
+  EMBED_MAX_HEIGHT_MAX,
+  EMBED_MAX_HEIGHT_MIN,
+  HOVER_LIVE_DIRECT_KEY,
   SHOW_LINE_NUMBERS_DEFAULT,
   SHOW_LINE_NUMBERS_KEY,
   SYMBOL_AUTOCOMPLETE_DEFAULT,
@@ -95,11 +102,12 @@ import {
   setFindMatches,
   type FindMatch,
 } from './findSession'
-import { liveDecorationsField, livePreviewDecorations, LIVE_CLASS_NAMES, tableCompositionSettled, TaskCheckboxWidget } from './liveDecorations'
-import { createLinkInteractions, WIKILINK_CLASS_NAMES } from './liveLinks'
+import { liveDecorationsField, livePreviewDecorations, LIVE_CLASS_NAMES, selectionTouchesRange, tableCompositionSettled, TaskCheckboxWidget } from './liveDecorations'
+import { LINK_MOD_CLASS, createLinkInteractions, LINK_CLASS_NAMES, WIKILINK_CLASS_NAMES, activateLinkAtPos, activateLooseLinkAtPos, activateWikilinkAtPos } from './liveLinks'
 import { liveMath } from './liveMath'
 import { MATH_CLASS_NAMES } from '../shared/math'
 import { liveMermaid } from './liveMermaid'
+import { liveEmbed, liveEmbedSpansField, setLiveEmbedCards } from './liveEmbed'
 // #163 验收反馈：块 id 标记 live 淡化（行尾/独立行双形态 mark 装饰）
 import { liveBlockId } from './liveBlockId'
 // #163 验收反馈：跳转目标高亮（view.locate 通道；半透黄经变量暴露，
@@ -123,6 +131,24 @@ import {
   setImagePopupContext,
   IMAGE_POPUP_EXPORT_CLASS,
 } from './imagePopup'
+import {
+  closeHoverPopup,
+  closeHoverPopupIfAnchorWithin,
+  hoverPopupProbe,
+  hoverPopupSpecOfAnchor,
+  hoverPreviewAnchorEnter,
+  hoverPreviewAnchorLeave,
+  notifyHoverInvalidated,
+  invalidateHoverPopupImages,
+  isHoverableMdLinkHref,
+  notifyHoverImageInvalidate,
+  notifyHoverImageResult,
+  notifyHoverResult,
+  openHoverPopupForKeyboard,
+  setHoverPreviewContext,
+  type HoverPopupTargetSpec,
+} from './hoverPopup'
+import { EmbedCardManager, EMBED_CARD_CLASS_NAMES } from './embedCard'
 import { GRAPHIC_LANG_ATTR, MERMAID_CLASS_NAMES, MERMAID_CODE_ATTR, MERMAID_STATE_ATTR } from '../shared/mermaid'
 import { IMAGE_CLASS_NAMES, ImageResourceManager, isDirectImageSrc } from './imageResource'
 import { ImageVerifyScheduler } from './imageVerifyScheduler'
@@ -597,6 +623,9 @@ export class WebviewSyncController {
   private anchorFlashSince = 0
   /** 阅读视图虚拟化控制器（#7：接管阅读容器的按需挂载/回收/锚点定位） */
   private readingView: VirtualReadingView | undefined
+  /** #222 嵌入卡片管理器（Reading 正文嵌入：块挂载升级/回收，与 readingView
+   *  同生命周期；live 侧嵌入属 #223，不在此装配） */
+  private embedCards: EmbedCardManager | undefined
   /** CSS 片段 <link> 装配器（#128）：只增删文档级样式链，不触碰 CM6 状态；
    *  输入/选区/撤销/模式切换与阅读虚拟化天然不受影响（重挂载块继承文档样式） */
   private readonly snippetLoader = new SnippetLoader()
@@ -812,8 +841,24 @@ export class WebviewSyncController {
   private findDoc: Text | null = null
   /** document 级键盘拦截（Mod-F 打开 / Esc 关闭），dispose 时移除 */
   private docKeydown: ((e: KeyboardEvent) => void) | undefined
+  /** #217 验收反馈：Ctrl/Cmd 修饰键 keyup 监听（状态类维护；keydown 复用 docKeydown） */
+  private docKeyup: ((e: KeyboardEvent) => void) | undefined
   private readonly keybindingRouter: KeybindingRouter
-  private readonly cancelKeybindingOnBlur = () => this.keybindingRouter.cancel()
+  private readonly cancelKeybindingOnBlur = () => {
+    this.keybindingRouter.cancel()
+    this.setLinkModActive(false) // 窗口失焦：修饰键态不可信，回落（keyup 可能丢失）
+  }
+
+  /** #217 验收反馈：Ctrl/Cmd 修饰键激活态类维护（body.vsidian-mod-link）
+   *  ——按住修饰键悬停可跳转链接的下划线与可点击光标反馈。getModifierState
+   *  精确处理左右 Ctrl/Cmd 同按与交替（单个 keyup 不代表修饰键全放） */
+  private updateLinkModState(e: KeyboardEvent): void {
+    this.setLinkModActive(e.getModifierState('Control') || e.getModifierState('Meta'))
+  }
+
+  private setLinkModActive(active: boolean): void {
+    document.body.classList.toggle(LINK_MOD_CLASS, active)
+  }
 
   // ---- 设置状态（#33）----
   /** 宿主下发的当前设置快照缓存（#34 行号等设置的消费源）；webview 不
@@ -962,6 +1007,9 @@ export class WebviewSyncController {
       if (id === 'find') this.openFind()
       else if (id === 'findNext') this.findStep('next')
       else if (id === 'findPrevious') this.findStep('prev')
+      // #221 预览当前链接：纯 webview 域（目标判定与浮层打开都在 webview，
+      // 无宿主往返依赖），与命令面板入口（ui.command 回发）共用同一实现
+      else if (id === 'hoverPreviewLink') this.previewLinkAtFocus()
       else this.bridge.postMessage({ kind: 'keybindings.execute', id })
     })
     const saved = bridge.getState<PersistedState>()
@@ -1051,6 +1099,29 @@ export class WebviewSyncController {
       },
     )
     document.addEventListener('visibilitychange', this.imageVisibilityEntry)
+    // #218 悬停预览出站上下文：会话身份（init 后可用）+ 只读消息通道。
+    // #220 起：B 文档内容自带 B 身份资源管理器（hoverPopup 模块内创建，
+    // 图片经 sourceDocUri 走宿主 B 目录解析——不再注入父面板管理器）；
+    // codeHighlight 投影面板代码卡片设置的高亮开关（浮层朴素高亮形态）。
+    // dispose 时清空（setHoverPreviewContext(null) 同步关浮层）
+    setHoverPreviewContext({
+      session: () => ({ sessionId: this.sessionId, docUri: this.docUri }),
+      send: (message) => this.bridge.postMessage(message),
+      codeHighlight: () => this.codeCardConfig.highlight,
+    })
+    // #222 嵌入卡片管理器：会话身份 + 只读消息通道 + 高亮/限高投影
+    //（dispose 随控制器释放；与 hoverPopup 上下文同源装配）。#223 起
+    // requestMeasure 供 Live 挂载的卡片高度联动（内容装载/图片晚到唤醒
+    // CM6 视口测量）
+    this.embedCards = new EmbedCardManager({
+      session: () => ({ sessionId: this.sessionId, docUri: this.docUri }),
+      send: (message) => this.bridge.postMessage(message),
+      codeHighlight: () => this.codeCardConfig.highlight,
+      maxHeightPx: () => this.embedMaxHeightPx(),
+      requestMeasure: () => this.view?.requestMeasure(),
+    })
+    // #223 Live 嵌入 widget 接线（liveEmbed 装饰的 widget 经此挂载共用卡片）
+    setLiveEmbedCards(this.embedCards)
     this.readingView = new VirtualReadingView(this.readingContainer, {
       // #10 图片生命周期：块挂载预备装载，卸载释放（src 清空、条目回收）
       // #60 Mermaid：挂载即渲染 pending 容器（DOM 随块卸载 el.remove 释放）
@@ -1067,8 +1138,14 @@ export class WebviewSyncController {
         this.decorateImageChromeBlock(el)
         // #84 阅读代码块卡片：挂载即增强（幂等；mermaid 块类不同不命中）
         this.decorateReadingCodeCardBlock(el)
+        // #222 嵌入卡片：embed 块升级为引用卡片（占位引用行在此替换；
+        // 视口回收由 onBlockUnmounted 释放 B 视图并保留实例状态）
+        this.embedCards?.mountBlock(el)
       },
-      onBlockUnmounted: (el) => this.images?.detachWithin(el),
+      onBlockUnmounted: (el) => {
+        this.images?.detachWithin(el)
+        this.embedCards?.unmountBlock(el)
+      },
     })
     // 阅读滚动更新锚点（用户滚动即改变"当前位置"语义；短文档滚不动时
     // 锚点保持进入/定位时的值——视口读取无法表达目标，modeAnchor 是权威）。
@@ -1148,6 +1225,35 @@ export class WebviewSyncController {
         srcEnd: Number.isInteger(srcEnd) ? srcEnd : srcStart,
       })
     })
+    // #218 悬停预览（Reading 直接悬停）：同一容器上的 mouseover/mouseout
+    // 委托（与 click 委托同款 closest 命中，目标口径一致）。#219 起双链与
+    // 普通本地 Markdown 链接都接入（a[href] 命中后由 hoverPopup 分流：双链
+    // 走 target 原文、普通链接走 linkHref 且外部 scheme 预滤不开浮层）；
+    // 命中与否、开闭时延、保活与迟到守卫都在 hoverPopup 模块内收敛。live
+    // 侧（Ctrl+悬停）与面板入口属 #221，此处不装配
+    this.readingContainer.addEventListener('mouseover', (event) => {
+      if (this.viewMode !== 'reading') {
+        return
+      }
+      const target = event.target as HTMLElement | null
+      const anchor = target?.closest?.('a[href]')
+      if (!(anchor instanceof HTMLElement) || !this.readingContainer!.contains(anchor)) {
+        return
+      }
+      hoverPreviewAnchorEnter(anchor)
+    })
+    this.readingContainer.addEventListener('mouseout', (event) => {
+      const anchor = (event.target as HTMLElement | null)?.closest?.('a[href]')
+      if (!(anchor instanceof HTMLElement)) {
+        return
+      }
+      // 锚点内部移动（嵌套行内标记/内嵌图片）不视为离开
+      const related = event.relatedTarget
+      if (related instanceof Node && anchor.contains(related)) {
+        return
+      }
+      hoverPreviewAnchorLeave(anchor)
+    })
     // #53 布局骨架：#app > body(水平) > main(主编辑区：顶栏+横幅+双视图)
     // + sidebar(右侧栏)；findPanel 浮层仍直接挂 #app（以 #app 为定位包含块）
     this.sidebarEl = this.buildSidebar()
@@ -1173,6 +1279,16 @@ export class WebviewSyncController {
     this.applyQuickActionsDom()
     // document 捕获先于 VS Code webview 预加载脚本的 window 冒泡转发。
     this.docKeydown = (e: KeyboardEvent) => {
+      // Ctrl/Cmd 按下（非重复）：Live 悬停补触发——指针已在链接上时开浮层
+      // （不 preventDefault/stopPropagation：修饰键本身不是键绑定，其余
+      // 路由照常）
+      if (e.key === 'Control' || e.key === 'Meta') {
+        // 修饰键激活态类（下划线/光标反馈）随每次按下重算（repeat 亦幂等）
+        this.updateLinkModState(e)
+        if (!e.repeat) {
+          this.onLiveHoverModifierDown()
+        }
+      }
       if (e.key === 'Escape' && this.quickHeadingMenu && !this.quickHeadingMenu.hidden) {
         e.preventDefault()
         e.stopPropagation()
@@ -1209,6 +1325,12 @@ export class WebviewSyncController {
       }
     }
     document.addEventListener('keydown', this.docKeydown, true)
+    this.docKeyup = (e: KeyboardEvent) => {
+      if (e.key === 'Control' || e.key === 'Meta') {
+        this.updateLinkModState(e)
+      }
+    }
+    document.addEventListener('keyup', this.docKeyup, true)
     window.addEventListener('blur', this.cancelKeybindingOnBlur)
     // 宿主明暗主题热跟随：body class 由 VSCode 随主题实时更新
     this.hostThemeObserver = new MutationObserver(() => this.applyHostTheme())
@@ -1231,6 +1353,41 @@ export class WebviewSyncController {
     // 空行等不接管位不 preventDefault，浏览器原生菜单照常
     this.view.contentDOM.addEventListener('contextmenu', (event) => {
       this.onContentContextMenu(event)
+    })
+    // #221 Live 悬停入口（默认 Ctrl+悬停，设置 hover.liveDirect 开启后
+    // 直接悬停）：contentDOM 上的 mouseover/mouseout 委托——目标判定与
+    // 点击同一判定族（posAtCoords → 双链 → 树驱动链接 → 宽松链接，围栏/
+    // 头区排除与图片排除同口径），开闭时序与保活收敛在 hoverPopup 模块。
+    // 锚元素归约到链接装饰 DOM（mark/widget 的 vsidian-link /
+    // vsidian-wikilink span——enter/leave 同一归约，保证联合域与重入判定
+    // 一致）。Ctrl+点击跳转等既有行为不经此路径（mousedown 通道不变）
+    this.view.contentDOM.addEventListener('mouseover', (event) => {
+      if (this.viewMode !== 'live') {
+        return
+      }
+      // 修饰位不足也先记录现场（Ctrl 后按下的补触发依赖它），再决定本次
+      // 是否开浮层——「按住 Ctrl 再进入」与「进入后按 Ctrl」两条路径等价
+      const hoverAnchor = this.liveHoverAnchorOf(event.target)
+      if (hoverAnchor) {
+        this.lastLiveHover = { anchor: hoverAnchor }
+      }
+      const withMod = event.ctrlKey || event.metaKey
+      if (!this.liveHoverDirect() && !withMod) {
+        return
+      }
+      this.handleLiveHover(event, 'enter')
+    })
+    this.view.contentDOM.addEventListener('mouseout', (event) => {
+      if (this.viewMode !== 'live') {
+        return
+      }
+      if (this.lastLiveHover) {
+        const leaving = this.liveHoverAnchorOf(event.target)
+        if (leaving && this.lastLiveHover.anchor === leaving) {
+          this.lastLiveHover = null
+        }
+      }
+      this.handleLiveHover(event, 'leave')
     })
     // #111 图表导出通道：弹窗 → 宿主另存为（会话字段在此补齐；只读交互，
     // init 前无会话时静默丢弃——按钮在渲染成功后才可点）
@@ -1299,6 +1456,14 @@ export class WebviewSyncController {
     closeDiagramPopup()
     closeImagePopup()
     closeFmPopover()
+    // #218 悬停浮层随卸载退出（清空上下文，同步关浮层释放实例）
+    setHoverPreviewContext(null)
+    // #223 Live 嵌入 widget 先断开卡片接线（后续 view 销毁触发 widget
+    // destroy 时 no-op；卡片 DOM 已由 embedCards.dispose 统一释放）
+    setLiveEmbedCards(null)
+    // #222 嵌入卡片随卸载退出（释放全部卡片 DOM、B 视图与状态库）
+    this.embedCards?.dispose()
+    this.embedCards = undefined
     setDiagramExportSender(null)
     setDiagramPopupDocSource(null)
     setImagePopupContext(null)
@@ -1323,6 +1488,11 @@ export class WebviewSyncController {
       document.removeEventListener('keydown', this.docKeydown, true)
       this.docKeydown = undefined
     }
+    if (this.docKeyup) {
+      document.removeEventListener('keyup', this.docKeyup, true)
+      this.docKeyup = undefined
+    }
+    this.setLinkModActive(false)
     window.removeEventListener('blur', this.cancelKeybindingOnBlur)
     this.keybindingRouter.cancel()
     this.view?.destroy()
@@ -1432,6 +1602,7 @@ export class WebviewSyncController {
         this.applySymbolSelectionWrapSetting()
         this.applyTabEscapeSetting()
         this.applyReadableLineWidthSetting()
+        this.applyEmbedMaxHeightSetting()
         break
       case 'snippets.snapshot': {
         // #128 CSS 片段装载：diff 式装配 <link>（失败保留最近成功样式、
@@ -1476,6 +1647,8 @@ export class WebviewSyncController {
           items: message.items ?? [],
         }
         if (this.backlinksVisible()) {
+          // #221 条目 DOM 全量重建：先释放在场悬停浮层（锚点随旧 DOM 脱树）
+          closeHoverPopupIfAnchorWithin(this.backlinksPanelEl!)
           renderBacklinksState(this.backlinksPanelEl!, this.backlinksSnapshot, this.backlinkView)
         }
         break
@@ -1499,6 +1672,8 @@ export class WebviewSyncController {
           items: message.items ?? [],
         }
         if (this.outlinksVisible()) {
+          // #221 条目 DOM 全量重建：先释放在场悬停浮层（与反链快照同款）
+          closeHoverPopupIfAnchorWithin(this.outlinksPanelEl!)
           renderOutlinksState(this.outlinksPanelEl!, this.outlinksSnapshot)
         }
         break
@@ -1564,6 +1739,99 @@ export class WebviewSyncController {
           `.${BACKLINK_CLASS_NAMES.sortMenuItem}[data-vsidian-sort="${message.mode}"]`,
         )
         item?.click()
+        break
+      }
+      case 'hover.result': {
+        // #218 悬停预览结果：转发浮层模块（instanceId + reqId 双守卫在
+        // 模块内——迟到/陈旧回包丢弃，不重开已关闭浮层）。#222 起嵌入
+        // 卡片同消息通道（instanceId 前缀 embed- 分流，双投递安全——
+        // 各自实例守卫丢弃不匹配回包）
+        notifyHoverResult(message)
+        this.embedCards?.notifyResult(message)
+        break
+      }
+      case 'hover.invalidated': {
+        // #224 引用视图同步：宿主对订阅目标的失效推送（未保存修改防抖
+        // 合并 / 磁盘事件分态直通）。转发浮层与嵌入卡片——各自按订阅目标
+        // 匹配（watchedFsPath / entry.loaded.fsPath），未订阅目标零动作
+        notifyHoverInvalidated(message)
+        this.embedCards?.notifyInvalidated(message)
+        break
+      }
+      case 'hover.test.pointer': {
+        // #218 测试钩子：对阅读视图第 index 个真实双链派发 mouseover/
+        // mouseout（冒泡经容器委托——与用户悬停同一处理器链路）；宿主
+        // 测试无法向 webview 派发真实鼠标事件。#219 起 link='md' 对第
+        // index 个普通 Markdown 链接（非双链 a[href]）派发
+        // #221 起 link 枚举扩展：'live-wikilink' / 'live-md' 对 Live 正文
+        // 第 index 个链接装饰派发（ctrlKey 模拟 Ctrl+悬停修饰位；事件带
+        // 装饰中心坐标——Live 判定走 posAtCoords）；'backlink' / 'outlink'
+        // 对面板第 index 个条目派发（面板直接悬停）
+        const dispatchHoverEvent = (el: HTMLElement, enter: boolean, ctrl = false): void => {
+          const rect = el.getBoundingClientRect()
+          el.dispatchEvent(new MouseEvent(
+            enter ? 'mouseover' : 'mouseout',
+            {
+              bubbles: true,
+              relatedTarget: enter ? document.body : null,
+              ctrlKey: ctrl,
+              clientX: rect.left + rect.width / 2,
+              clientY: rect.top + rect.height / 2,
+            },
+          ))
+        }
+        if (message.action === 'modkey') {
+          // 真实 keydown Control 经 document 捕获路由（与用户按键同链路，
+          // 走 onLiveHoverModifierDown 补触发——「先悬停、后按 Ctrl」路径；
+          // ctrlKey 修饰位必带：合成事件的 getModifierState 只认 init 字典，
+          // 缺位会把 vsidian-mod-link 状态类反向摘除）
+          document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Control', ctrlKey: true, bubbles: true }))
+          break
+        }
+        if (message.link === 'live-wikilink' || message.link === 'live-md') {
+          const content = this.view?.contentDOM
+          if (!content || this.viewMode !== 'live') {
+            break
+          }
+          const cls = message.link === 'live-wikilink'
+            ? `.${WIKILINK_CLASS_NAMES.wikilink}`
+            : `.${LINK_CLASS_NAMES.link}`
+          const anchors = Array.from(content.querySelectorAll<HTMLElement>(cls))
+          const anchor = anchors[message.index]
+          if (!anchor) {
+            break
+          }
+          dispatchHoverEvent(anchor, message.action === 'enter', message.ctrlKey === true)
+          break
+        }
+        if (message.link === 'backlink' || message.link === 'outlink') {
+          const panel = message.link === 'backlink' ? this.backlinksPanelEl : this.outlinksPanelEl
+          const cls = message.link === 'backlink'
+            ? `.${BACKLINK_CLASS_NAMES.item}`
+            : `.${OUTLINK_CLASS_NAMES.item}`
+          const item = panel?.querySelectorAll<HTMLElement>(cls)[message.index]
+          if (!item) {
+            break
+          }
+          dispatchHoverEvent(item, message.action === 'enter')
+          break
+        }
+        const container = this.readingContainer
+        if (!container || this.viewMode !== 'reading') {
+          break
+        }
+        const selector = message.link === 'md'
+          ? `a[href]:not(.${WIKILINK_CLASS_NAMES.wikilink})`
+          : `a.${WIKILINK_CLASS_NAMES.wikilink}`
+        const anchors = Array.from(container.querySelectorAll<HTMLElement>(selector))
+        const anchor = anchors[message.index]
+        if (!anchor) {
+          break
+        }
+        anchor.dispatchEvent(new MouseEvent(
+          message.action === 'enter' ? 'mouseover' : 'mouseout',
+          { bubbles: true, relatedTarget: message.action === 'enter' ? document.body : null },
+        ))
         break
       }
       case 'image.test.pending': {
@@ -1772,6 +2040,9 @@ export class WebviewSyncController {
           // 回发此处）——与工具栏按钮共用同一发送实现（出站 refresh.request
           // 后由宿主失效编排回流），不另造路径
           case 'refreshEditor': this.sendEmbeddedRefreshRequest(); break
+          // #221 预览当前链接：命令面板/宿主命令入口与快捷键（keybindingRouter
+          // 本地分支）共用同一实现（目标判定在 webview，无目标静默不误开）
+          case 'hoverPreviewLink': this.previewLinkAtFocus(); break
         }
         break
       case 'sidebar.test.click': {
@@ -2337,13 +2608,20 @@ export class WebviewSyncController {
         break
       }
       case 'image.result':
-        // #10 图片解析结果路由（只读显示通道：暂停态同样可用）
+        // #10 图片解析结果路由（只读显示通道：暂停态同样可用）。#220 起同
+        // 步投递悬停浮层的 B 身份管理器（浮层内图片；未知 reqId 由两侧管理
+        // 器各自丢弃，双投递安全）
         this.images?.handleResult(message)
+        notifyHoverImageResult(message)
+        this.embedCards?.notifyImageResult(message)
         break
       case 'image.invalidate':
         // #201 失效通知：作废命中条目并重发请求（新版本 URL；旧 reqId 在途
-        // 结果由代次守卫丢弃）。只读显示通道，暂停态同样可用
+        // 结果由代次守卫丢弃）。只读显示通道，暂停态同样可用。#220 浮层内
+        // B 图片同口径失效（命中条目重发 B 身份请求）
         this.images?.invalidate(message.srcs)
+        notifyHoverImageInvalidate(message.srcs)
+        this.embedCards?.notifyImageInvalidate(message.srcs)
         break
       case 'image.wake':
         // #201 及时核验：窗口焦点回归/远程重连，有活跃图源立即触发一轮
@@ -2361,6 +2639,10 @@ export class WebviewSyncController {
           break
         }
         this.images?.invalidateAll()
+        // #220 手动刷新全局失效：浮层内 B 图片同口径全量重挂（新代次戳 URI）
+        invalidateHoverPopupImages()
+        // #222 嵌入卡片内 B 图片同口径全量重挂
+        this.embedCards?.invalidateImages()
         resetMermaidLoadFailure()
         break
       case 'view.state.request': {
@@ -2547,8 +2829,33 @@ export class WebviewSyncController {
       outlinks: this.collectOutlinks(),
       // #140 Popover 改版：属性编辑浮层开态（集成断言用）
       fmPopoverOpen: isFmPopoverOpen(),
+      // #218 悬停预览观测：浮层开闭、内容态与块数（集成断言用）
+      hoverPreview: hoverPopupProbe(),
+      // #222 嵌入卡片观测：在场卡片的状态/目标/块数/fm/限高（集成断言用）
+      readingEmbed: this.embedCards?.probe() ?? [],
+      // #223 Live 嵌入显隐观测：嵌入表逐枚的源码显形态（集成断言用）
+      liveEmbedReveal: this.collectLiveEmbedReveal(),
     }
     this.bridge.postMessage(state)
+  }
+
+  /** #223 Live 嵌入显隐探针：嵌入表 + 当前选区按 selectionTouchesRange 语义
+   *  计算的源码显形态（发射层围栏/fm 排除由单测与浏览器套件钉住，此处为
+   *  宿主可观测的显隐面） */
+  private collectLiveEmbedReveal(): Array<{ inner: string; line: number; revealed: boolean }> {
+    const view = this.view
+    if (!view || this.viewMode !== 'live') {
+      return []
+    }
+    const spans = view.state.field(liveEmbedSpansField, false)
+    if (!spans) {
+      return []
+    }
+    return spans.map((s) => ({
+      inner: s.inner,
+      line: view.state.doc.lineAt(Math.min(s.lineFrom, view.state.doc.length)).number,
+      revealed: selectionTouchesRange(view.state.selection, s.from, s.to),
+    }))
   }
 
   /**
@@ -2768,8 +3075,14 @@ export class WebviewSyncController {
       this.clearViewport()
     }
     this.viewMode = mode
+    // Live 悬停现场随模式切换作废（装饰 DOM 随重建脱树，补触发不得复活旧锚）
+    this.lastLiveHover = null
     this.closeQuickHeadingMenu(false)
     this.refreshQuickActions()
+    // #221 全入口后 Live 悬停与面板悬停同样可开浮层：切模式 = 触发上下文
+    // 失效，无条件释放实例（规格「面板销毁、切模式等使触发上下文失效时
+    // 释放实例」；Live 锚点几何与阅读块源锚点在模式切换后不再有效）
+    closeHoverPopup()
     if (this.liveWrapper) {
       this.liveWrapper.style.display = mode === 'live' ? '' : 'none'
     }
@@ -4055,6 +4368,11 @@ export class WebviewSyncController {
     backlinks.panel.addEventListener('click', (event) => this.handleBacklinkPanelClick(event))
     backlinks.panel.addEventListener('input', (event) => this.handleBacklinkSearchInput(event))
     backlinks.panel.addEventListener('keydown', (event) => this.handleBacklinkPanelKeydown(event))
+    // #221 面板悬停入口：条目直接悬停触发预览（面板不随正文模式改变触发
+    // 规则——正文 Live 时面板仍是直接悬停）；目标载荷与点击同源（最近快
+    // 照 items），开闭时序与保活在 hoverPopup 模块
+    backlinks.panel.addEventListener('mouseover', (event) => this.handleBacklinkHover(event, 'enter'))
+    backlinks.panel.addEventListener('mouseout', (event) => this.handleBacklinkHover(event, 'leave'))
     this.backlinksToggleBtn = backlinks.toggle
     this.backlinksPanelEl = backlinks.panel
     actions.appendChild(backlinks.toggle)
@@ -4063,6 +4381,10 @@ export class WebviewSyncController {
     const outlinks = buildOutlinksDom()
     outlinks.toggle.addEventListener('click', () => this.toggleOutlinks())
     outlinks.panel.addEventListener('click', (event) => this.handleOutlinkPanelClick(event))
+    // #221 出链面板悬停：与反链同款直接悬停（断链条目同样可悬停——
+    // 空串 fsPath 走宿主 not-found 分态显示失效占位）
+    outlinks.panel.addEventListener('mouseover', (event) => this.handleOutlinkHover(event, 'enter'))
+    outlinks.panel.addEventListener('mouseout', (event) => this.handleOutlinkHover(event, 'leave'))
     this.outlinksToggleBtn = outlinks.toggle
     this.outlinksPanelEl = outlinks.panel
     actions.appendChild(outlinks.toggle)
@@ -4428,8 +4750,13 @@ export class WebviewSyncController {
       this.sidebarEl.classList.toggle('vsidian-backlinks-active', this.backlinksActive)
     }
     this.backlinksToggleBtn?.setAttribute('aria-expanded', String(this.backlinksActive))
-    if (this.backlinksPanelEl && this.backlinksActive) {
-      renderBacklinksState(this.backlinksPanelEl, this.backlinksSnapshot, this.backlinkView)
+    if (this.backlinksPanelEl) {
+      // #221 面板状态翻转（隐藏失效/激活重建条目）都使悬停锚点失效：
+      // 锚点在本面板内的浮层先行释放
+      closeHoverPopupIfAnchorWithin(this.backlinksPanelEl)
+      if (this.backlinksActive) {
+        renderBacklinksState(this.backlinksPanelEl, this.backlinksSnapshot, this.backlinkView)
+      }
     }
     this.persistState()
   }
@@ -4443,8 +4770,334 @@ export class WebviewSyncController {
    *  applyBacklinksDom 用最新 view 渲染） */
   private rerenderBacklinks(): void {
     if (this.backlinksPanelEl && this.backlinksActive) {
+      // #221 条目 DOM 全量重建（replaceChildren）：在场悬停浮层的锚点随旧
+      // DOM 脱树，先释放再渲染（面板重渲染不派发 mouseout，不依赖迟到检测）
+      closeHoverPopupIfAnchorWithin(this.backlinksPanelEl)
       renderBacklinksState(this.backlinksPanelEl, this.backlinksSnapshot, this.backlinkView)
     }
+  }
+
+  // ---- #221 全入口悬停（Live 正文 / 反链·出链面板 / 键盘命令） ----
+  // 三入口共用 hoverPopup 的 openPopup 核心：目标规格由各入口组装
+  //（HoverPopupTargetSpec），开闭时序、保活与迟到守卫单点收敛。
+
+  /** Live 直接悬停设置（hover.liveDirect；缺省 false = 默认 Ctrl+悬停） */
+  private liveHoverDirect(): boolean {
+    return this.settings?.[HOVER_LIVE_DIRECT_KEY] === true
+  }
+
+  /** 指针当前悬停的 Live 链接装饰：mouseover 时总在记录
+   *  （修饰位不足也不丢——「先悬停、后按 Ctrl」补触发的现场），mouseout
+   *  / 模式切换时清空；目标经装饰 DOM 映射到源码，不依赖指针坐标 */
+  private lastLiveHover: { anchor: HTMLElement } | null = null
+
+  /** Ctrl/Cmd 按下补触发（验收反馈：指针已在链接上再按修饰键同样开浮层
+   *  ——mouseover 时刻判修饰位只覆盖「按住再进入」，此路径覆盖「进入后
+   *  按下」）。锚点经 DOM 映射到实时源码位置；同锚已开
+   *  浮层时 enter 幂等（取消待关计时），不同锚换锚重开 */
+  private onLiveHoverModifierDown(): void {
+    if (this.viewMode !== 'live' || this.liveHoverDirect()) {
+      return
+    }
+    const pending = this.lastLiveHover
+    if (!pending || !pending.anchor.isConnected) {
+      this.lastLiveHover = null
+      return
+    }
+    const view = this.view
+    if (!view) {
+      return
+    }
+    const spec = this.liveLinkSpecOfAnchor(view, pending.anchor)
+    if (!spec) {
+      return
+    }
+    hoverPreviewAnchorEnter(pending.anchor, spec)
+  }
+
+  /** 鼠标已命中链接装饰，按该 DOM 的起点解析目标。替换 widget 的
+   *  posAtCoords 在右半段返回源码结束位置（区间外），不能据此缩小热区；
+   *  posAtDOM 保留整段可见文字的命中语义，也不会把相邻链接串成另一个
+   *  目标。键盘命令仍走 liveLinkSpecAt 的精确源码位置与原有半开区间。 */
+  private liveLinkSpecOfAnchor(view: EditorView, anchor: HTMLElement): HoverPopupTargetSpec | null {
+    if (!view.contentDOM.contains(anchor)) {
+      return null
+    }
+    return this.liveLinkSpecAt(view, view.posAtDOM(anchor, 0))
+  }
+
+  /** Live 悬停锚点归约：链接装饰 DOM（树驱动/宽松链接 mark 的
+   *  vsidian-link 与双链 mark/widget 的 vsidian-wikilink span）。enter 与
+   *  leave 用同一归约——联合域（锚点 ∪ 浮层）与同锚点重入判定依赖两侧
+   *  归约出同一元素。非链接装饰（正文/行号等）返回 null 不触发 */
+  private liveHoverAnchorOf(target: EventTarget | null): HTMLElement | null {
+    const el = target instanceof Element ? target : null
+    const deco = el?.closest?.(`.${LINK_CLASS_NAMES.link}, .${WIKILINK_CLASS_NAMES.wikilink}`)
+    return deco instanceof HTMLElement ? deco : null
+  }
+
+  /** Live 悬停分派（mouseover/mouseout 委托转发）：enter 判定目标并经
+   *  延迟开启入口进 hoverPopup；leave 转发锚点离开 */
+  private handleLiveHover(event: MouseEvent, phase: 'enter' | 'leave'): void {
+    const anchor = this.liveHoverAnchorOf(event.target)
+    if (!anchor) {
+      return
+    }
+    if (phase === 'leave') {
+      const related = event.relatedTarget
+      if (related instanceof Node && anchor.contains(related)) {
+        return // 装饰内部移动（嵌套行内标记）不视为离开
+      }
+      hoverPreviewAnchorLeave(anchor)
+      return
+    }
+    const view = this.view
+    if (!view) {
+      return
+    }
+    const spec = this.liveLinkSpecOfAnchor(view, anchor)
+    if (!spec) {
+      return
+    }
+    hoverPreviewAnchorEnter(anchor, spec)
+  }
+
+  /** Live 目标判定（与点击 mousedown 的判定族同序同口径）：双链 → 树驱动
+   *  链接 → 宽松链接；图片形态与代码/头区上下文由判定族自身排除，嵌入
+   *  `![[…]]` 不命中（双链扫描守卫排除前置 `!`），普通链接外部 scheme 经
+   *  isHoverableMdLinkHref 预滤（与 Reading 同口径） */
+  private liveLinkSpecAt(view: EditorView, pos: number): HoverPopupTargetSpec | null {
+    let spec: HoverPopupTargetSpec | null = null
+    activateWikilinkAtPos(view, pos, (target, from, to) => {
+      spec = { target, sourceStart: from, sourceEnd: to }
+    })
+    if (!spec) {
+      activateLinkAtPos(view, pos, (href, from, to) => {
+        if (isHoverableMdLinkHref(href)) {
+          spec = { target: href, linkHref: href, sourceStart: from, sourceEnd: to }
+        }
+      })
+    }
+    if (!spec) {
+      activateLooseLinkAtPos(view, pos, (dest, from, to) => {
+        if (isHoverableMdLinkHref(dest)) {
+          spec = { target: dest, linkHref: dest, sourceStart: from, sourceEnd: to }
+        }
+      })
+    }
+    return spec
+  }
+
+  /** #221 反链面板悬停：条目直接悬停（不随正文模式改变触发规则）；目标 =
+   *  来源文档全文（directFsPath 无锚点——引用处不是标题/块语义，full 范围
+   *  呈现来源文档），载荷从最近快照 items 取（与点击同源——条目 DOM 只存
+   *  相对路径，绝对路径在快照） */
+  private handleBacklinkHover(event: MouseEvent, phase: 'enter' | 'leave'): void {
+    const panel = this.backlinksPanelEl
+    const item = (event.target as HTMLElement | null)?.closest?.(`.${BACKLINK_CLASS_NAMES.item}`)
+    if (!(item instanceof HTMLElement) || !panel?.contains(item)) {
+      return
+    }
+    if (phase === 'leave') {
+      const related = event.relatedTarget
+      if (related instanceof Node && item.contains(related)) {
+        return
+      }
+      hoverPreviewAnchorLeave(item)
+      return
+    }
+    if (!this.sessionId || !this.docUri) {
+      return
+    }
+    const payload = this.backlinkItemPayloadOf(item)
+    if (!payload) {
+      return
+    }
+    hoverPreviewAnchorEnter(item, {
+      target: payload.sourceRelPath,
+      sourceStart: 0, // 引用区间在来源文档而非当前文档，给中性值
+      sourceEnd: 0,
+      directFsPath: payload.sourceFsPath,
+      openAction: this.backlinkOpenAction(payload),
+    })
+  }
+
+  /** #217 验收跟进：面板形态浮层 header 跳转——与条目点击同通道同载荷
+   *  （反链定位引用处 / 出链带锚点），经 spec.openAction 闭包交给浮层
+   *  （浮层侧不再按双链/linkHref 默认形态分派） */
+  private backlinkOpenAction(payload: BacklinkItemPayload): () => void {
+    return () => {
+      if (!this.sessionId || !this.docUri) {
+        return
+      }
+      this.bridge.postMessage({
+        kind: 'backlink.activate',
+        sessionId: this.sessionId,
+        docUri: this.docUri,
+        sourceUri: payload.sourceFsPath,
+        offset: payload.start,
+      })
+    }
+  }
+
+  private outlinkOpenAction(payload: OutlinkItemPayload): () => void {
+    return () => {
+      // 断链条目无目标（与条目点击同守卫不派发）
+      if (!this.sessionId || !this.docUri || !payload.targetFsPath) {
+        return
+      }
+      this.bridge.postMessage({
+        kind: 'outlink.activate',
+        sessionId: this.sessionId,
+        docUri: this.docUri,
+        targetUri: payload.targetFsPath,
+        anchor: payload.anchor ?? '',
+      })
+    }
+  }
+
+  /** #221 出链面板悬停：与反链同款直接悬停；目标 = 条目 fsPath ± 锚点
+   *  （断链条目 targetFsPath 为 null → 空串 fsPath 入队，宿主回 not-found
+   *  分态显示失效占位）；载荷从快照 items 取（条目 DOM 的 data-* 只在
+   *  可点条目写入，统一走快照配对） */
+  private handleOutlinkHover(event: MouseEvent, phase: 'enter' | 'leave'): void {
+    const panel = this.outlinksPanelEl
+    const item = (event.target as HTMLElement | null)?.closest?.(`.${OUTLINK_CLASS_NAMES.item}`)
+    if (!(item instanceof HTMLElement) || !panel?.contains(item)) {
+      return
+    }
+    if (phase === 'leave') {
+      const related = event.relatedTarget
+      if (related instanceof Node && item.contains(related)) {
+        return
+      }
+      hoverPreviewAnchorLeave(item)
+      return
+    }
+    const payload = this.outlinkItemPayloadOf(item)
+    if (!payload) {
+      return
+    }
+    hoverPreviewAnchorEnter(item, {
+      target: payload.targetDisplay,
+      sourceStart: payload.start, // 出链标记在当前文档内的区间（语义吻合）
+      sourceEnd: payload.end,
+      directFsPath: payload.targetFsPath ?? '',
+      ...(payload.anchor ? { directAnchor: payload.anchor } : {}),
+      openAction: this.outlinkOpenAction(payload),
+    })
+  }
+
+  /** #221 键盘命令「预览当前链接」：手动打开浮层且焦点进入（无目标静默
+   *  不误开）。Live 以光标处合法目标为准（主光标 head）；Reading/面板以
+   *  键盘聚焦的链接/条目为准。面板入口不随正文模式改变触发规则——Live
+   *  光标无目标时继续检查聚焦元素（面板条目在 Live 下同样可达）。不接
+   *  管源码编辑器（源码模式不经 webview 键路由天然不可达）与设置页输入
+   *  （独立 webview 无此路由） */
+  private previewLinkAtFocus(): void {
+    if (this.viewMode === 'live' && this.view && this.previewLiveLinkAtCursor()) {
+      return
+    }
+    const focus = document.activeElement
+    if (!(focus instanceof HTMLElement)) {
+      return
+    }
+    // Reading 键盘聚焦链接（a[href] 天然可 Tab 聚焦）：排除嵌入卡片内的
+    // 链接——嵌入内容已有常驻 Reading 呈现，不重复弹窗（与鼠标路径的
+    // stopPropagation 口径一致）
+    const anchor = focus.closest?.('a[href]')
+    if (
+      anchor instanceof HTMLElement &&
+      this.readingContainer?.contains(anchor) &&
+      !anchor.closest(`.${EMBED_CARD_CLASS_NAMES.card}`)
+    ) {
+      const spec = hoverPopupSpecOfAnchor(anchor)
+      if (spec) {
+        openHoverPopupForKeyboard(anchor, spec)
+      }
+      return
+    }
+    // 面板条目（出链条目为 button 可 Tab 聚焦；反链卡片键盘聚焦由条目自身
+    // 可聚焦性承担——聚焦即目标）
+    if (this.backlinksPanelEl?.contains(focus)) {
+      const item = focus.closest?.(`.${BACKLINK_CLASS_NAMES.item}`)
+      if (item instanceof HTMLElement && this.backlinksPanelEl.contains(item)) {
+        const payload = this.backlinkItemPayloadOf(item)
+        if (payload) {
+          openHoverPopupForKeyboard(item, {
+            target: payload.sourceRelPath,
+            sourceStart: 0,
+            sourceEnd: 0,
+            directFsPath: payload.sourceFsPath,
+            openAction: this.backlinkOpenAction(payload),
+          })
+        }
+      }
+      return
+    }
+    if (this.outlinksPanelEl?.contains(focus)) {
+      const item = focus.closest?.(`.${OUTLINK_CLASS_NAMES.item}`)
+      if (item instanceof HTMLElement && this.outlinksPanelEl.contains(item)) {
+        const payload = this.outlinkItemPayloadOf(item)
+        if (payload) {
+          openHoverPopupForKeyboard(item, {
+            target: payload.targetDisplay,
+            sourceStart: payload.start,
+            sourceEnd: payload.end,
+            directFsPath: payload.targetFsPath ?? '',
+            ...(payload.anchor ? { directAnchor: payload.anchor } : {}),
+            openAction: this.outlinkOpenAction(payload),
+          })
+        }
+      }
+    }
+  }
+
+  /** Live 光标处预览（键盘命令的 Live 分支）：判定族同悬停路径；锚元素
+   *  取目标区间内部的 DOM（domAtPos 归约到 HTMLElement——mark 装饰 span
+   *  或所在行元素，仅用于浮层定位与联合域）。命令面板路径下 webview 可
+   *  能暂无真实焦点——先确保编辑器聚焦（触发处语义），浮层关闭时焦点
+   *  返还编辑器（光标原位恢复）。返回是否命中目标（未命中时调用方落到
+   *  聚焦元素检查） */
+  private previewLiveLinkAtCursor(): boolean {
+    const view = this.view
+    if (!view) {
+      return false
+    }
+    const spec = this.liveLinkSpecAt(view, view.state.selection.main.head)
+    if (!spec) {
+      return false
+    }
+    if (!view.hasFocus) {
+      view.focus()
+    }
+    const domAt = view.domAtPos(Math.min(spec.sourceStart + 1, view.state.doc.length))
+    const el = domAt.node.nodeType === 1 ? (domAt.node as HTMLElement) : domAt.node.parentElement
+    if (el instanceof HTMLElement) {
+      openHoverPopupForKeyboard(el, spec)
+      return true
+    }
+    return false
+  }
+
+  /** 反链条目的快照载荷（悬停与键盘命令共用；条目 DOM 只存相对路径，
+   *  绝对路径从最近快照按 source + offset 配对） */
+  private backlinkItemPayloadOf(item: HTMLElement): BacklinkItemPayload | undefined {
+    const source = item.dataset['vsidianSource']
+    const offset = Number(item.dataset['vsidianOffset'])
+    if (source === undefined) {
+      return undefined
+    }
+    return this.backlinksSnapshot.items.find(
+      (entry) => entry.sourceRelPath === source && entry.start === offset,
+    )
+  }
+
+  /** 出链条目的快照载荷（悬停与键盘命令共用；按条目 data-vsidian-index
+   *  的 start 偏移配对） */
+  private outlinkItemPayloadOf(item: HTMLElement): OutlinkItemPayload | undefined {
+    const start = Number(item.dataset['vsidianIndex'])
+    return this.outlinksSnapshot.items.find((entry) => entry.start === start)
   }
 
   // ---- 反链面板事件（容器统一委托；DOM 重建不丢监听） ----
@@ -4515,8 +5168,7 @@ export class WebviewSyncController {
   }
 
   /** 搜索输入即时生效（input 事件直调，无去抖；渲染复用 input 节点不丢焦） */
-  private handleBacklinkSearchInput(event: Event): void {
-    const input = event.target
+  private handleBacklinkSearchInput(event: Event): void {    const input = event.target
     if (!(input instanceof HTMLInputElement) || !input.classList.contains(BACKLINK_CLASS_NAMES.searchInput)) {
       return
     }
@@ -4647,8 +5299,12 @@ export class WebviewSyncController {
       this.sidebarEl.classList.toggle('vsidian-outlinks-active', this.outlinksActive)
     }
     this.outlinksToggleBtn?.setAttribute('aria-expanded', String(this.outlinksActive))
-    if (this.outlinksPanelEl && this.outlinksActive) {
-      renderOutlinksState(this.outlinksPanelEl, this.outlinksSnapshot)
+    if (this.outlinksPanelEl) {
+      // #221 面板状态翻转（隐藏失效/激活重建条目）都使悬停锚点失效
+      closeHoverPopupIfAnchorWithin(this.outlinksPanelEl)
+      if (this.outlinksActive) {
+        renderOutlinksState(this.outlinksPanelEl, this.outlinksSnapshot)
+      }
     }
     this.persistState()
   }
@@ -7100,6 +7756,22 @@ export class WebviewSyncController {
     requestAnimationFrame(() => this.view?.requestMeasure())
   }
 
+  /** #222 嵌入限高应用（settings.snapshot / settings.changed）：缺键/
+   *  越界/非数值回默认（协议是宽标量容器，类型语义校验归宿主，webview 侧
+   *  防御——与其他设置应用器一致）；遍历在场卡片热更内联 max-height */
+  private applyEmbedMaxHeightSetting(): void {
+    this.embedCards?.setMaxHeight(this.embedMaxHeightPx())
+  }
+
+  /** 嵌入限高当前值（设置投影；消费方 EmbedCardContext.maxHeightPx） */
+  private embedMaxHeightPx(): number {
+    const raw = this.settings?.[EMBED_MAX_HEIGHT_KEY]
+    return typeof raw === 'number' && Number.isFinite(raw) &&
+      raw >= EMBED_MAX_HEIGHT_MIN && raw <= EMBED_MAX_HEIGHT_MAX
+      ? raw
+      : EMBED_MAX_HEIGHT_DEFAULT
+  }
+
   /** #84 增强单个阅读代码块（挂载钩子与重装饰共用入口） */
   private decorateReadingCodeCardBlock(block: HTMLElement): void {
     if (!isReadingCodeBlock(block)) {
@@ -8361,6 +9033,11 @@ export class WebviewSyncController {
       // #60 Mermaid：围栏表 + 跨行块 replace 装饰（光标进入围栏显源码、
       // 离开恢复渲染图；渲染容器与阅读侧共用 mermaidRender 管线）
       liveMermaid,
+      // #223 Live 正文嵌入：嵌入表 + 双形态装饰（隐形态整行替换卡片 /
+      // 显形态源文可见 + 行下方卡片；光标/选区触及源码区间显形，离开
+      // 隐藏）。纯装饰 StateField 无键位语义；卡片内容经 embedCards
+      // （EmbedCardManager）与 Reading 侧同状态库装载
+      liveEmbed,
       // #163 验收反馈：块 id 标记淡化（行尾 ` ^id` 与独立行 `^id` 双形态
       // mark 装饰；围栏内部不命中；docChanged 全量行扫描重建）
       liveBlockId,

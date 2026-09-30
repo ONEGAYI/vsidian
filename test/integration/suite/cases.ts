@@ -51,6 +51,9 @@ const CMD = {
   // #201 图片刷新观测（失效日志与版本表快照）
   imageRefreshEvents: 'onegayi.vsidian._test.takeImageRefreshEvents',
   imageVersions: 'onegayi.vsidian._test.getImageVersions',
+  // #224 引用视图同步观测（订阅计数与读取缓存计量）
+  hoverWatchStats: 'onegayi.vsidian._test.hoverWatchStats',
+  hoverReadCacheStats: 'onegayi.vsidian._test.hoverReadCacheStats',
   // #38 三态记忆
   getLastMode: 'onegayi.vsidian._test.getLastMode',
   resetLastMode: 'onegayi.vsidian._test.resetLastMode',
@@ -65,6 +68,10 @@ const CMD = {
   snippetState: 'onegayi.vsidian._test.getSnippetState',
   setSnippetDirectory: 'onegayi.vsidian._test.setSnippetDirectory',
   setSnippetEnabled: 'onegayi.vsidian._test.setSnippetEnabled',
+  // 快捷键链路（正式 KeybindingService 通道：快照直读存储层）
+  getKeybindings: 'onegayi.vsidian._test.getKeybindings',
+  setKeybindings: 'onegayi.vsidian._test.setKeybindings',
+  resetKeybindings: 'onegayi.vsidian._test.resetKeybindings',
 }
 
 const wsDir = process.env['WORKSPACE_DIR'] ?? ''
@@ -905,6 +912,32 @@ interface ViewState {
   }
   /** #140 Popover 改版：frontmatter 属性编辑浮层开态（protocol.ts 缺省可选） */
   fmPopoverOpen?: boolean
+  /** #218 悬停预览观测：浮层开闭、内容态、目标标识与内容块数；
+   *  #220 新增 fm 属性区三态与 imageSrcs 浮层内已应用图片地址（旧 webview 缺省） */
+  hoverPreview?: {
+    open: boolean
+    state: 'loading' | 'content' | 'error'
+    note: string
+    blocks: number
+    scope: 'full' | 'heading' | 'block' | ''
+    fm?: 'none' | 'collapsed' | 'expanded'
+    imageSrcs?: string[]
+  }
+  /** #222 嵌入卡片观测：在场卡片逐枚（inner/state/note/blocks/scope/fm/限高） */
+  readingEmbed?: Array<{
+    inner: string
+    state: 'loading' | 'content' | 'error'
+    note: string
+    blocks: number
+    scope: 'full' | 'heading' | 'block' | ''
+    fm: 'none' | 'collapsed' | 'expanded'
+    maxHeightPx: number
+    host?: 'reading' | 'live'
+    /** #224 内容文本字符数（未保存修改推送后刷新可见性断言） */
+    textLen?: number
+  }>
+  /** #223 Live 嵌入显隐观测：嵌入表逐枚的源码显形态（selectionTouchesRange 语义） */
+  liveEmbedReveal?: Array<{ inner: string; line: number; revealed: boolean }>
 }
 
 /** #7 阅读视图探针回报（reading.perf.report） */
@@ -1117,6 +1150,8 @@ async function waitViewState(
         liveScrollTopPx: s['liveScrollTopPx'],
         imageStates: s['imageStates'],
         imageProbe: s['imageProbe'],
+        readingEmbed: s['readingEmbed'],
+        liveEmbedReveal: s['liveEmbedReveal'],
       })}`)
     }
     throw err
@@ -3900,9 +3935,10 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const diskBefore = await readDisk('wikilinks.md')
 
     // live 默认模式：视口内 3 处合法双链（按名/别名/标题）为 widget；
-    // 降级形态与代码上下文不装饰
-    const live = await waitViewState('wikilinks.md', (v) => (v.liveWikilinkCount ?? -1) === 3)
-    assert(live.liveWikilinkCount === 3, `live 双链数应为 3，实际 ${live.liveWikilinkCount}`)
+    // #217 验收反馈起混排嵌入挂双链类 mark（恢复链接色），DOM 级计数计入
+    // ——3 双链 + 1 混排嵌入 = 4；降级形态与代码上下文不装饰
+    const live = await waitViewState('wikilinks.md', (v) => (v.liveWikilinkCount ?? -1) === 4)
+    assert(live.liveWikilinkCount === 4, `live 双链数应为 4，实际 ${live.liveWikilinkCount}`)
     assert(
       live.cssProbe!.liveWikilinkDecorationColor === 'rgb(28, 29, 30)',
       `live 双链应被测试片段命中 rgb(28, 29, 30)，实际 ${live.cssProbe!.liveWikilinkDecorationColor}`,
@@ -11104,5 +11140,808 @@ export const cases: Array<[string, () => Promise<void>]> = [
     }, 60000)
     // 兜底清理（正常路径已删净目录内容；失败路径尽力还原不抛二次错误）
     await rm(`${wsDir}/git-switch`, { recursive: true, force: true }).catch(() => {})
+  }],
+
+  ['悬停预览：Reading 双链读取目标全文、错误分态就地呈现与双零 dirty（#218）', async () => {
+    await openWithEditor('悬停预览.md')
+    await waitSessionReady('悬停预览.md')
+    const uri = wsUri('悬停预览.md').toString()
+    const targetUri = wsUri('目标笔记.md')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    await waitViewState('悬停预览.md', (v) => v.viewMode === 'reading' && (v.readingWikilinkCount ?? 0) >= 2)
+    const parentBefore = await readDisk('悬停预览.md')
+    const targetBefore = await readDisk('目标笔记.md')
+
+    // 悬停第 0 个双链（[[目标笔记]]）：mouseover 经容器委托（与用户悬停
+    // 同一处理器链路）→ 开延迟后出站 hover.request → 宿主无副作用读取 →
+    // hover.result → 浮层以 Reading 内容显示目标全文
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 0 })
+    const shown = await waitViewState('悬停预览.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' && v.hoverPreview.blocks > 0)
+    assert(shown.hoverPreview?.note === '目标笔记.md',
+      `浮层目标标识应为根内相对路径（实际 ${shown.hoverPreview?.note}）`)
+
+    // 双零 dirty：父/目标 TextDocument 均不脏、磁盘文本不动、无 applyEdit
+    const targetDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())
+    const parentDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri)
+    assert(targetDoc, '读取后目标文档应经 openTextDocument 装载（只装载不显示）')
+    assert(parentDoc?.isDirty === false, `父文档不得变脏（实际 dirty=${parentDoc?.isDirty}）`)
+    assert(targetDoc?.isDirty === false, `目标文档不得变脏（实际 dirty=${targetDoc?.isDirty}）`)
+    assert(await readDisk('悬停预览.md') === parentBefore, '悬停读取不得改写父文档磁盘')
+    assert(await readDisk('目标笔记.md') === targetBefore, '悬停读取不得改写目标磁盘')
+    const hoverState = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(hoverState.appliedEdits === 0, `悬停链路不得产生 applyEdit（实际 ${hoverState.appliedEdits}）`)
+
+    // 离开链接 → 延迟关闭（实例释放）；悬停第 1 个双链（[[悬停缺失目标]]）
+    // → not-found 错误分态就地呈现（浮层在场、不弹宿主通知）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 0 })
+    await waitViewState('悬停预览.md', (v) => v.hoverPreview?.open === false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 1 })
+    await waitViewState('悬停预览.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'error')
+
+    // 迟到回包守卫（真宿主）：对已关闭旧实例的成功回包不得重开/翻新
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'hover.result',
+      reqId: 1,
+      instanceId: 'itest-stale-instance',
+      ok: true,
+      target: { fsPath: targetUri.fsPath, relPath: '目标笔记.md' },
+      version: 1,
+      text: '# 迟到内容\n',
+      range: { start: 0, end: 6 },
+      scope: { kind: 'full' },
+    })
+    await new Promise((r) => setTimeout(r, 300))
+    const stale = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+    assert(stale?.hoverPreview?.open === true && stale.hoverPreview.state === 'error',
+      `旧实例迟到回包应被丢弃（实际 ${JSON.stringify(stale?.hoverPreview)}）`)
+
+    // 复位：切回 live（后续用例隔离；浮层随切模式释放）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    await waitViewState('悬停预览.md', (v) => v.viewMode === 'live' && v.hoverPreview?.open === false)
+    const finalState = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(finalState.appliedEdits === 0, `全链路零 applyEdit（实际 ${finalState.appliedEdits}）`)
+  }],
+
+  // #219 局部范围与普通链接矩阵：章节/块 scope 与块数、CRLF+中文空格路径
+  // 目标、页内锚点（目标即来源文档）、失效锚点分态、普通链接 linkHref
+  // 链路、外站预滤、零 applyEdit。目标文档「悬停 局部目标.md」全文 7 块
+  // （H1/顶部段/章节甲标题/甲段/列表/章节乙标题/乙段）；章节甲 = 3 块、
+  // 列表块 = 1 块——块数差即范围过滤的直接证据
+  ['悬停预览：局部范围与普通链接——章节/块/锚点矩阵（#219）', async () => {
+    await openWithEditor('悬停预览.md')
+    await waitSessionReady('悬停预览.md')
+    const uri = wsUri('悬停预览.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    await waitViewState('悬停预览.md', (v) => v.viewMode === 'reading' && (v.readingWikilinkCount ?? 0) >= 5)
+    const before = await readDisk('悬停 局部目标.md')
+
+    // 章节双链（index 2）：scope=heading、块数收窄到章节甲 3 块（CRLF 换算
+    // 正确时与 LF 文档同构；目标标识为中文空格路径的根内相对路径）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 2 })
+    const section = await waitViewState('悬停预览.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' && v.hoverPreview.scope === 'heading')
+    assert(section.hoverPreview?.note === '悬停 局部目标.md',
+      `章节预览目标标识应为根内相对路径（实际 ${section.hoverPreview?.note}）`)
+    assert(section.hoverPreview?.blocks === 3,
+      `章节甲应渲染 3 块（标题/段落/列表；实际 ${section.hoverPreview?.blocks}）`)
+
+    // 块引用双链（index 3）：scope=block、完整列表块 1 块（多行块不截首行
+    // ——截首行时列表块缺失、blocks 为 0）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 3 })
+    const block = await waitViewState('悬停预览.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' && v.hoverPreview.scope === 'block')
+    assert(block.hoverPreview?.blocks === 1,
+      `块引用应渲染完整列表块 1 块（实际 ${block.hoverPreview?.blocks}）`)
+
+    // 失效锚点（index 4）：anchor-missing 分态就地呈现（不以全文替代），
+    // 文案含锚点原文（note 为错误文案载体）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 4 })
+    const missing = await waitViewState('悬停预览.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'error')
+    assert(missing.hoverPreview?.note.includes('没有的标题'),
+      `锚点缺失文案应含锚点原文（实际 ${missing.hoverPreview?.note}）`)
+
+    // 普通链接全文（md index 0，href 经 markdown-it 编码——空格 %20 容错
+    // 解码矩阵）：scope=full、块数为全文 7 块
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 0, link: 'md' })
+    const mdFull = await waitViewState('悬停预览.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' && v.hoverPreview.scope === 'full')
+    assert(mdFull.hoverPreview?.blocks === 7,
+      `普通链接全文应渲染 7 块（实际 ${mdFull.hoverPreview?.blocks}）`)
+
+    // 普通链接章节（md index 1，fragment 锚点）：scope=heading、3 块
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 1, link: 'md' })
+    const mdSection = await waitViewState('悬停预览.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' && v.hoverPreview.scope === 'heading')
+    assert(mdSection.hoverPreview?.blocks === 3,
+      `链接章节应渲染 3 块（实际 ${mdSection.hoverPreview?.blocks}）`)
+
+    // 页内锚点（md index 2）：目标即来源文档自身（不跨文档），scope=heading
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 2, link: 'md' })
+    const anchor = await waitViewState('悬停预览.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' && v.hoverPreview.scope === 'heading')
+    assert(anchor.hoverPreview?.note === '悬停预览.md',
+      `页内锚点目标应为来源文档（实际 ${anchor.hoverPreview?.note}）`)
+
+    // 外站链接（md index 3）：预滤不开浮层（等待超过开延迟+读取余量后仍无）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 3, link: 'md' })
+    await new Promise((r) => setTimeout(r, 1000))
+    const external = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+    assert(external?.hoverPreview?.open === false,
+      `外部网页不得开浮层（实际 ${JSON.stringify(external?.hoverPreview)}）`)
+
+    // 零写回：目标/来源双零 dirty、磁盘不动、零 applyEdit
+    const parentDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri)
+    const targetDoc = vscode.workspace.textDocuments.find(
+      (d) => d.uri.toString() === wsUri('悬停 局部目标.md').toString())
+    assert(targetDoc, 'CRLF 目标应经 openTextDocument 装载')
+    assert(parentDoc?.isDirty === false && targetDoc?.isDirty === false, '父/目标文档双零 dirty')
+    assert(await readDisk('悬停 局部目标.md') === before, '悬停读取不得改写目标磁盘')
+    const state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state.appliedEdits === 0, `局部预览零 applyEdit（实际 ${state.appliedEdits}）`)
+
+    // 复位：切回 live（浮层随切模式释放；后续用例隔离）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    await waitViewState('悬停预览.md', (v) => v.viewMode === 'live' && v.hoverPreview?.open === false)
+  }],
+
+  // #220 来源资源与笔记属性：B（子目录目标）内相对图片按 B 目录解析——
+  // res.png 只存在于 hover-assets/，按根/A 目录解析必 not-found，浮层内已
+  // 应用图片地址携带子目录路径即为 B 身份解析证据；全文引用属性区默认
+  // 折叠（探针 fm）；浮层点击同款 wikilink.activate（附 sourceDocUri）注入
+  // 后按 B 目录解析打开子目录内目标；全程零写回
+  ['悬停预览：来源资源与笔记属性——B 身份解析、属性折叠与零写回（#220）', async () => {
+    await openWithEditor('悬停预览.md')
+    const session = await waitSessionReady('悬停预览.md')
+    const uri = wsUri('悬停预览.md').toString()
+    const targetUri = wsUri('hover-assets/悬停 资源目标.md')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    await waitViewState('悬停预览.md', (v) => v.viewMode === 'reading' && (v.readingWikilinkCount ?? 0) >= 6)
+    const parentBefore = await readDisk('悬停预览.md')
+    const targetBefore = await readDisk('hover-assets/悬停 资源目标.md')
+
+    // 悬停追加段的双链（wikilink index 5 = [[hover-assets/悬停 资源目标]]）：
+    // 全文预览 + 笔记属性区默认折叠（成型 frontmatter → fm=collapsed）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 5 })
+    const shown = await waitViewState('悬停预览.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' && v.hoverPreview.scope === 'full')
+    assert(shown.hoverPreview?.note === 'hover-assets/悬停 资源目标.md',
+      `目标标识应为子目录相对路径（实际 ${shown.hoverPreview?.note}）`)
+    assert(shown.hoverPreview?.fm === 'collapsed',
+      `全文引用属性区应默认折叠（实际 ${shown.hoverPreview?.fm}）`)
+
+    // B 身份图片解析：res.png 只在 hover-assets/ 内——浮层内已应用 src 携带
+    // 子目录路径（按根/A 目录解析则 not-found、无已应用地址）
+    const imaged = await waitViewState('悬停预览.md', (v) =>
+      v.hoverPreview?.imageSrcs?.some((s) => s.includes('hover-assets') && s.includes('res.png')) === true)
+    assert((imaged.hoverPreview?.imageSrcs?.length ?? 0) > 0, '浮层内应有已应用图片地址')
+
+    // 零写回：父/目标双零 dirty、磁盘不动、零 applyEdit（属性区与图片装载只读）
+    const parentDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri)
+    const targetDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())
+    assert(targetDoc, '资源目标应经 openTextDocument 装载')
+    assert(parentDoc?.isDirty === false && targetDoc?.isDirty === false, '父/目标文档双零 dirty')
+    assert(await readDisk('悬停预览.md') === parentBefore, '悬停不得改写父文档磁盘')
+    assert(await readDisk('hover-assets/悬停 资源目标.md') === targetBefore, '悬停不得改写目标磁盘')
+    let state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state.appliedEdits === 0, `悬停链路零 applyEdit（实际 ${state.appliedEdits}）`)
+
+    // 复位：切回 live（浮层随切模式释放）。须在来源双链注入**之前**——
+    // 跳转会打开新标签页，本面板 webview 随隐藏挂起（retainContextWhenHidden
+    // 关闭），此后 view.state 轮询不再有回应；来源守卫记录在面板条目上
+    //（悬停时已写入），与浮层是否在场无关，注入不受复位影响
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    await waitViewState('悬停预览.md', (v) => v.viewMode === 'live' && v.hoverPreview?.open === false)
+
+    // 来源双链：注入 webview→宿主 wikilink.activate（与浮层内点击同一消息
+    // 形态，sourceDocUri = B 的 fsPath；宿主会话守卫要求该目标为本面板送达
+    // 过的悬停目标——上面的真实悬停已记录）。资源内链目标.md 只在
+    // hover-assets/ 内：按 B 目录解析 → 打开子目录目标；按根/A 目录解析 →
+    // not-found（不打开）
+    await vscode.commands.executeCommand(CMD.injectMessage, uri, {
+      kind: 'wikilink.activate',
+      sessionId: session.panels.find((p) => p.ready)?.sessionId ?? '',
+      docUri: uri,
+      target: '资源内链目标',
+      srcStart: 0,
+      srcEnd: 8,
+      sourceDocUri: targetUri.fsPath,
+    })
+    const entry = await waitWikilinkLog(uri, (e) =>
+      e.kind === 'wikilink-doc' && e.target === '资源内链目标')
+    assert(entry.path === wsUri('hover-assets/资源内链目标.md').fsPath,
+      `来源双链应按 B 目录解析到子目录目标（实际 ${entry.path}）`)
+    assert(await readDisk('悬停预览.md') === parentBefore, '双链跳转不得改写父文档')
+    state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state.appliedEdits === 0, `全程零 applyEdit（实际 ${state.appliedEdits}）`)
+  }],
+
+  // ---- #222 Reading 正文嵌入 ----
+
+  // 独占行嵌入经真实宿主读取闭环（hover.request → openTextDocument →
+  // hover.result）：全文/章节/缺失目标矩阵、属性区默认折叠、零写回。
+  // 绘制层断言在浏览器 readingEmbed 套件（真实 Chromium 布局）；此处钉
+  // 宿主读取链路与面板观测探针（view.state.readingEmbed）
+  ['嵌入：Reading 独占行嵌入卡片——目标矩阵、属性区与双零 dirty（#222）', async () => {
+    await openWithEditor('嵌入样例.md')
+    await waitSessionReady('嵌入样例.md')
+    const uri = wsUri('嵌入样例.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    await waitViewState('嵌入样例.md', (v) => v.viewMode === 'reading')
+    const parentBefore = await readDisk('嵌入样例.md')
+    const targetBefore = await readDisk('嵌入目标.md')
+
+    // Reading 宿主的三张卡片（全文/章节/缺失目标）。#223 后探针同时包含
+    // 隐藏 Live 宿主的卡片，按 host 定位；保留三张数量与各卡内容的严格断言。
+    // 全文卡 content、根内相对路径与 fm 默认折叠；章节卡 heading；缺失卡 error。
+    const shown = await waitViewState('嵌入样例.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((card) => card.host === 'reading')
+      return cards.length === 3 &&
+        cards[0]!.state === 'content' && cards[0]!.scope === 'full'
+    })
+    const cards = shown.readingEmbed!.filter((card) => card.host === 'reading')
+    assert(cards[0]!.note === '嵌入目标.md',
+      `全文嵌入目标标识应为根内相对路径（实际 ${cards[0]!.note}）`)
+    assert(cards[0]!.fm === 'collapsed', `全文嵌入属性区应默认折叠（实际 ${String(cards[0]!.fm)}）`)
+    assert(cards[0]!.blocks > 0, '全文嵌入应渲染内容块')
+    assert(cards[1]!.scope === 'heading' && cards[1]!.state === 'content',
+      `章节嵌入应为 heading 范围内容态（实际 ${JSON.stringify(cards[1])}）`)
+    assert(cards[2]!.inner === '嵌入缺失目标' && cards[2]!.state === 'error',
+      `缺失目标嵌入应为错误分态（实际 ${JSON.stringify(cards[2])}）`)
+    assert(cards[2]!.note.includes('嵌入缺失目标'), `错误文案应含目标原文（实际 ${cards[2]!.note}）`)
+
+    // 双零 dirty + 零 applyEdit：嵌入读取/渲染不写任何文档
+    const parentDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri)
+    const targetDoc = vscode.workspace.textDocuments.find(
+      (d) => d.uri.toString() === wsUri('嵌入目标.md').toString())
+    assert(targetDoc, '目标文档应经 openTextDocument 装载（只装载不显示）')
+    assert(parentDoc?.isDirty === false && targetDoc?.isDirty === false, '父/目标文档双零 dirty')
+    assert(await readDisk('嵌入样例.md') === parentBefore, '嵌入渲染不得改写父文档磁盘')
+    assert(await readDisk('嵌入目标.md') === targetBefore, '嵌入读取不得改写目标磁盘')
+    const state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state.appliedEdits === 0, `嵌入链路零 applyEdit（实际 ${state.appliedEdits}）`)
+
+    // 复位：切回 live（后续用例隔离）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    await waitViewState('嵌入样例.md', (v) => v.viewMode === 'live')
+  }],
+
+  // 嵌入边接入 rename 管线：目标更名后嵌入引用改写（路径段替换，锚点与
+  // 别名原样保留）；will edit 与 rename 同一撤销单元（一步回退）
+  ['嵌入：rename 更新嵌入引用并保持锚点别名（#222）', async () => {
+    await waitRenameIndexReady()
+    await openWithEditor('嵌入改写.md')
+    await waitSessionReady('嵌入改写.md')
+    const edit = new vscode.WorkspaceEdit()
+    edit.renameFile(wsUri('改名嵌入目标.md'), wsUri('改名嵌入目标2.md'), { overwrite: false })
+    assert(await vscode.workspace.applyEdit(edit), 'rename 应成功应用')
+    // 嵌入引用改写落盘：路径段替换，#锚点与 |别名原样
+    const rewritten = await poll('嵌入引用改写落盘', async () => {
+      const text = (await vscode.workspace.openTextDocument(wsUri('嵌入改写.md'))).getText()
+      return text.includes('![[改名嵌入目标2]]') &&
+        text.includes('![[改名嵌入目标2#章节一|别名]]') ? text : undefined
+    })
+    assert(!rewritten.includes('![[改名嵌入目标]]'), '旧嵌入目标不得残留')
+    // 撤销一步恢复（will edit 与 rename 同撤销单元）
+    await vscode.commands.executeCommand('undo')
+    await poll('撤销恢复嵌入引用', async () => {
+      const text = (await vscode.workspace.openTextDocument(wsUri('嵌入改写.md'))).getText()
+      return text.includes('![[改名嵌入目标]]') && !text.includes('改名嵌入目标2') ? text : undefined
+    })
+    await new Promise((r) => setTimeout(r, 600))
+    try {
+      await vscode.workspace.fs.stat(wsUri('改名嵌入目标2.md'))
+      await vscode.workspace.fs.rename(wsUri('改名嵌入目标2.md'), wsUri('改名嵌入目标.md'), { overwrite: true })
+    } catch {
+      // undo 已回滚文件名
+    }
+    await new Promise((r) => setTimeout(r, 400))
+  }],
+
+  // ---- #223 父文档 Live 正文嵌入与源码显隐 ----
+
+  // Live 模式嵌入卡片经真实宿主读取闭环挂载（host=live 探针）、光标驱动
+  // 源码显隐（liveEmbedReveal 探针按 selectionTouchesRange 语义）、合成
+  // IME 修改引用 inner + 宿主撤销栈闭环（新目标缺失 → 错误分态；撤销 →
+  // 原卡恢复）、模式切换不丢源码、双零 dirty 与目标磁盘保真。绘制层断言
+  // 在浏览器 liveEmbed 套件（真实 Chromium 布局）。
+  ['嵌入：Live 挂载与源码显隐——IME 编辑撤销闭环与双零 dirty（#223）', async () => {
+    await openWithEditor('嵌入样例.md')
+    await waitSessionReady('嵌入样例.md')
+    const uri = wsUri('嵌入样例.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    const parentBefore = await readDisk('嵌入样例.md')
+    const targetBefore = await readDisk('嵌入目标.md')
+    const doc = await vscode.workspace.openTextDocument(wsUri('嵌入样例.md'))
+
+    // 三张 Live 卡片（host=live）经真宿主读取闭环：两张 content（全文/章节）
+    // + 缺失目标 error（Live widget 惰性物化——短文档全在视口）
+    const shown = await waitViewState('嵌入样例.md', (v) => {
+      const live = (v.readingEmbed ?? []).filter((c) => c.host === 'live')
+      return v.viewMode === 'live' && live.length === 3 &&
+        live.filter((c) => c.state === 'content').length === 2
+    })
+    const liveCards = shown.readingEmbed!.filter((c) => c.host === 'live')
+    const fullCard = liveCards.find((c) => c.inner === '嵌入目标')
+    assert(fullCard && fullCard.scope === 'full' && fullCard.note === '嵌入目标.md',
+      `全文 Live 卡应为 content + 根内相对路径（实际 ${JSON.stringify(fullCard)}）`)
+    const missing = liveCards.find((c) => c.inner === '嵌入缺失目标')
+    assert(missing && missing.state === 'error' && missing.note.includes('嵌入缺失目标'),
+      `缺失目标 Live 卡应为就地错误分态（实际 ${JSON.stringify(missing)}）`)
+
+    // 光标驱动显隐：光标在文首（未触及）→ 三枚全部隐藏形态
+    const reveal0 = shown.liveEmbedReveal ?? []
+    assert(reveal0.length === 3 && reveal0.every((r) => !r.revealed),
+      `光标未触及区间 → 全部隐藏形态（实际 ${JSON.stringify(reveal0)}）`)
+    // 光标进第一枚源码区间（inner 内）→ 仅该枚显形
+    const embedFrom = parentBefore.indexOf('![[嵌入目标]]')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'table.test.crossSelect', anchor: embedFrom + 5, head: embedFrom + 5,
+    })
+    const revealedState = await waitViewState('嵌入样例.md', (v) => {
+      const hits = (v.liveEmbedReveal ?? []).filter((r) => r.revealed)
+      return hits.length === 1 && hits[0]!.inner === '嵌入目标'
+    })
+    assert(revealedState !== undefined, '恰命中区间的嵌入显形（其余隐藏）')
+    // 光标回文首 → 恢复隐藏
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'table.test.crossSelect', anchor: 0, head: 0,
+    })
+    const hiddenOk = await waitViewState('嵌入样例.md', (v) =>
+      (v.liveEmbedReveal ?? []).length === 3 && (v.liveEmbedReveal ?? []).every((r) => !r.revealed))
+    assert(hiddenOk, '光标离开后恢复隐藏形态')
+
+    // 合成 IME 修改引用 inner（组合序列经 deferredLocal 出站宿主）→ 宿主
+    // 权威文本更新 → 新目标 ![[嵌入改目标]] 缺失 → Live 卡就地错误分态
+    const state0 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'table.test.compose', from: embedFrom + 5, text: '改',
+    })
+    // 先确认 webview 本地文本已含组合输入（deferredLocal 暂缓中的净输入）
+    await waitViewState('嵌入样例.md', (v) => v.text.includes('![[嵌入改目标]]'))
+    await poll('IME 修改写入宿主文档', () => (doc.getText().includes('![[嵌入改目标]]') ? true : undefined))
+    const afterEdit = await waitViewState('嵌入样例.md', (v) => {
+      const live = (v.readingEmbed ?? []).filter((c) => c.host === 'live')
+      return live.some((c) => c.inner === '嵌入改目标' && c.state === 'error')
+    })
+    assert(afterEdit !== undefined, '修改后的新目标（缺失）应重挂为错误分态')
+    assert(doc.isDirty, 'IME 修改后父文档应 dirty（未保存）')
+
+    // 宿主撤销栈一步回退（真撤销链路；外部增量广播回 webview）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.history', op: 'undo' })
+    await poll('撤销恢复引用原文', () => (doc.getText() === parentBefore ? true : undefined))
+    const afterUndo = await waitViewState('嵌入样例.md', (v) => {
+      const live = (v.readingEmbed ?? []).filter((c) => c.host === 'live')
+      return live.some((c) => c.inner === '嵌入目标' && c.state === 'content')
+    })
+    assert(afterUndo, '撤销后原目标卡片恢复装载')
+    assert(!doc.isDirty, '撤销后父文档零 dirty')
+
+    // 模式切换不丢源码：live → reading（Reading 侧卡片在场）→ live（回挂）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    await waitViewState('嵌入样例.md', (v) => v.viewMode === 'reading' &&
+      (v.readingEmbed ?? []).some((c) => c.host === 'reading' && c.state === 'content'))
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    const backLive = await waitViewState('嵌入样例.md', (v) => v.viewMode === 'live' &&
+      (v.readingEmbed ?? []).some((c) => c.host === 'live' && c.state === 'content'))
+    assert(backLive !== undefined, '切回 Live 后卡片回挂（源文经宿主权威同步不丢）')
+
+    // 双零 dirty + 磁盘保真：编辑已撤销回原样；目标文档只读未动
+    const targetDoc = vscode.workspace.textDocuments.find(
+      (d) => d.uri.toString() === wsUri('嵌入目标.md').toString())
+    assert(doc.isDirty === false && targetDoc?.isDirty !== true, '父/目标文档双零 dirty')
+    assert(await readDisk('嵌入目标.md') === targetBefore, '嵌入读取不得改写目标磁盘')
+    const state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state.appliedEdits === state0.appliedEdits + 1,
+      `IME 修改恰一笔 applyEdit（实际 ${state.appliedEdits}，基线 ${state0.appliedEdits}）`)
+    await doc.save()
+  }],
+
+  // 嵌入边进入出链/反链观测：出链面板含 embed 条目；反链面板把嵌入计入
+  // 目标文档的引用来源（聚合键 resolvedTarget——嵌入与双链同构）
+  ['嵌入：出链与反链面板计入嵌入边（#222）', async () => {
+    await waitRenameIndexReady()
+    await openWithEditor('嵌入样例.md')
+    await waitSessionReady('嵌入样例.md')
+    const srcUri = wsUri('嵌入样例.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, srcUri, { kind: 'sidebar.test.click' })
+    await vscode.commands.executeCommand(CMD.postToPanel, srcUri, { kind: 'outlinks.test.click' })
+    const out = await poll('出链面板就绪且含嵌入条目', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, srcUri)) as
+        | { outlinks?: { active: boolean; state: string; items: Array<{ targetDisplay: string; kind: string; anchor: string; resolved: boolean }> } }
+        | undefined
+      const items = v?.outlinks?.state === 'ready' ? v.outlinks.items : []
+      return items.some((i) => i.kind === 'embed' && i.resolved && i.targetDisplay === '嵌入目标')
+        ? items : undefined
+    })
+    const embedOut = out.filter((i) => i.kind === 'embed')
+    assert(embedOut.length >= 2, `嵌入边应入出链面板（全文+章节，实际 ${JSON.stringify(embedOut)}）`)
+    assert(embedOut.some((i) => i.anchor === '章节一'), '嵌入锚点应拆列入出链条目')
+    // 断链嵌入保留可见性（resolved=false 的嵌入条目在场且弱化）
+    assert(out.some((i) => i.kind === 'embed' && !i.resolved && i.targetDisplay === '嵌入缺失目标'),
+      '断链嵌入应保留出链可见性')
+
+    // 反链：嵌入目标的反链面板含嵌入样例来源（kind=embed 边计入）
+    await openWithEditor('嵌入目标.md')
+    await waitSessionReady('嵌入目标.md')
+    const targetUri = wsUri('嵌入目标.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, targetUri, { kind: 'sidebar.test.click' })
+    await vscode.commands.executeCommand(CMD.postToPanel, targetUri, { kind: 'backlinks.test.click' })
+    await poll('反链面板含嵌入来源', async () => {
+      const v = (await vscode.commands.executeCommand(CMD.viewState, targetUri)) as
+        | { backlinks?: { active: boolean; state: string; items: Array<{ sourceRelPath: string; kind: string }> } }
+        | undefined
+      const items = v?.backlinks?.state === 'ready' ? v.backlinks.items : []
+      return items.some((i) => i.sourceRelPath === '嵌入样例.md' && i.kind === 'embed') ? true : undefined
+    })
+  }],
+
+  // 嵌入限高设置闭环：宿主持久层保存/回读 → settings.changed 广播 →
+  // 在场嵌入卡片 max-height 热更（view.state.readingEmbed 观测）
+  ['嵌入：限高设置持久化、回显与卡片热更（#222）', async () => {
+    const okSet = (await vscode.commands.executeCommand(CMD.setSettings, { 'embed.maxHeight': 600 })) as { ok: boolean }
+    assert(okSet.ok === true, 'embed.maxHeight 有效值应保存成功')
+    const snap = (await vscode.commands.executeCommand(CMD.getSettings)) as Record<string, unknown>
+    assert(snap['embed.maxHeight'] === 600, `保存后回读应为 600（实际 ${String(snap['embed.maxHeight'])}）`)
+    const invalid = (await vscode.commands.executeCommand(CMD.setSettings, { 'embed.maxHeight': 99999 })) as { ok: boolean }
+    assert(invalid.ok === false, '超上限值必须被拒绝（定义域校验）')
+
+    // 打开嵌入面板：装载时 settings.get 拉取链路带上限高；卡片内联应用
+    await openWithEditor('嵌入样例.md')
+    await waitSessionReady('嵌入样例.md')
+    const uri = wsUri('嵌入样例.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    const loaded = await waitViewState('嵌入样例.md', (v) =>
+      v.viewMode === 'reading' && (v.readingEmbed ?? []).some((c) => c.state === 'content'))
+    const card = loaded.readingEmbed!.find((c) => c.state === 'content')!
+    assert(card.maxHeightPx === 600, `装载时卡片限高应为设置值 600（实际 ${String(card.maxHeightPx)}）`)
+
+    // 广播热更：保存新值 → 已开面板的卡片即时更新
+    await vscode.commands.executeCommand(CMD.setSettings, { 'embed.maxHeight': 320 })
+    const updated = await waitViewState('嵌入样例.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.state === 'content' && c.maxHeightPx === 320))
+    assert(updated.readingEmbed!.some((c) => c.maxHeightPx === 320), '设置变更应热更到场卡片限高')
+
+    // 收尾：恢复默认并切回 live
+    await vscode.commands.executeCommand(CMD.setSettings, { 'embed.maxHeight': 480 })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    await waitViewState('嵌入样例.md', (v) => v.viewMode === 'live')
+  }],
+
+  // #221 全入口悬停的真宿主定向：Live 直接悬停设置的保存/广播/持久化
+  // 回显（webview 行为面由浏览器 hoverEntry 套件钉住），与「预览当前链
+  // 接」操作绑定/清空/恢复默认的存储保留（清空 = 显式空记录，不因缺省
+  // 回默认；真实重启读取同一 globalState 键）。Ctrl+点击跳转回归由既有
+  // 跳转用例族（链接跳转/双链跳转）持续钉住，此处不重复。
+  ['悬停全入口：直接悬停设置持久化回显与预览链接键位绑定清空保留（#221）', async () => {
+    // hover.liveDirect 默认 false（Ctrl+悬停必须）→ 保存 true → 宿主回读
+    const base = (await vscode.commands.executeCommand(CMD.getSettings)) as Record<string, unknown>
+    assert(base['hover.liveDirect'] === false,
+      `默认应为 false（Ctrl+悬停），实际 ${String(base['hover.liveDirect'])}`)
+    const okSet = (await vscode.commands.executeCommand(CMD.setSettings, { 'hover.liveDirect': true })) as { ok: boolean }
+    assert(okSet.ok === true, 'hover.liveDirect 有效值应保存成功')
+    const snap = (await vscode.commands.executeCommand(CMD.getSettings)) as Record<string, unknown>
+    assert(snap['hover.liveDirect'] === true, `保存后回读应为 true（实际 ${String(snap['hover.liveDirect'])}）`)
+
+    // 新面板装载拉取（init 后 settings.get 链路带上直接悬停开关）
+    await openWithEditor('untouched.md')
+    await waitSessionReady('untouched.md')
+    const pulled = await waitViewState('untouched.md', (v) => v.settings?.['hover.liveDirect'] === true)
+    assert(pulled.settings?.['hover.liveDirect'] === true, '新面板装载应拉取到直接悬停设置')
+
+    // 广播链路：保存 false → 已开面板即时收到（触发条件切换的宿主侧推送面）
+    await vscode.commands.executeCommand(CMD.setSettings, { 'hover.liveDirect': false })
+    await waitViewState('untouched.md', (v) => v.settings?.['hover.liveDirect'] === false)
+
+    // 持久化口径：关闭全部面板后重开——新面板经 settings.get 拉到持久值
+    // （真实重启读取的是同一 globalState 键，与 #34 行号用例同口径）
+    await vscode.commands.executeCommand(CMD.setSettings, { 'hover.liveDirect': true })
+    await waitViewState('untouched.md', (v) => v.settings?.['hover.liveDirect'] === true)
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors')
+    await openWithEditor('untouched.md')
+    await waitSessionReady('untouched.md')
+    const reopened = await waitViewState('untouched.md', (v) => v.settings?.['hover.liveDirect'] === true)
+    assert(reopened.settings?.['hover.liveDirect'] === true, '重开面板应拉取到持久化的直接悬停开关')
+    await vscode.commands.executeCommand(CMD.setSettings, { 'hover.liveDirect': false })
+
+    // hoverPreviewLink：默认未绑定 → 绑定 → 清空（显式空记录保留）→ 恢复默认
+    const keysBase = (await vscode.commands.executeCommand(CMD.getKeybindings)) as Record<string, string[]>
+    assert(!('hoverPreviewLink' in keysBase), `默认应未绑定（无覆盖记录），实际 ${JSON.stringify(keysBase)}`)
+    const bind = (await vscode.commands.executeCommand(CMD.setKeybindings, 'hoverPreviewLink', ['ctrl+alt+p'])) as { ok: boolean }
+    assert(bind.ok === true, '绑定 ctrl+alt+p 应保存成功（无默认冲突）')
+    const keysBound = (await vscode.commands.executeCommand(CMD.getKeybindings)) as Record<string, string[]>
+    assert(JSON.stringify(keysBound['hoverPreviewLink']) === JSON.stringify(['ctrl+alt+p']),
+      `存储层读回应含新绑定，实际 ${JSON.stringify(keysBound['hoverPreviewLink'])}`)
+    const clear = (await vscode.commands.executeCommand(CMD.setKeybindings, 'hoverPreviewLink', [])) as { ok: boolean }
+    assert(clear.ok === true, '清空键位应保存成功')
+    const keysCleared = (await vscode.commands.executeCommand(CMD.getKeybindings)) as Record<string, string[]>
+    assert(JSON.stringify(keysCleared['hoverPreviewLink']) === JSON.stringify([]),
+      `清空应持久为显式空记录（不因缺省回默认），实际 ${JSON.stringify(keysCleared['hoverPreviewLink'])}`)
+    await vscode.commands.executeCommand(CMD.resetKeybindings)
+    const keysReset = (await vscode.commands.executeCommand(CMD.getKeybindings)) as Record<string, string[]>
+    assert(!('hoverPreviewLink' in keysReset), '恢复默认后覆盖记录应移除（回落默认未绑定）')
+    console.log('[#221] 直接悬停设置持久化回显 true；hoverPreviewLink 绑定/清空/恢复默认链路通过')
+  }],
+
+  // 验收反馈：Live 悬停触发只认 mouseover 时刻的修饰位——「先悬停在链接
+  // 上、再按下 Ctrl」不触发（用户自然操作序）。补触发路径：mouseover 总是
+  // 记录现场（修饰位不足也记），keydown Control 经 document 捕获路由补开
+  // 浮层。经 hover.test.pointer 的 modkey 动作派发真实 keydown（与用户
+  // 按键同一监听器链路）
+  ['悬停全入口：Live 先悬停再按 Ctrl 补触发浮层（验收反馈）', async () => {
+    await openWithEditor('悬停预览.md')
+    await waitSessionReady('悬停预览.md')
+    const uri = wsUri('悬停预览.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    await waitViewState('悬停预览.md', (v) => v.viewMode === 'live')
+
+    // 进入链接（无 Ctrl）：不弹（默认 Ctrl+悬停语义不回归），但现场已记录
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 0, link: 'live-wikilink' })
+    await new Promise((r) => setTimeout(r, 500))
+    const idle = (await vscode.commands.executeCommand(CMD.viewState, uri, 0)) as ViewState | undefined
+    assert(idle?.hoverPreview?.open !== true,
+      `无修饰位悬停不应开浮层（实际 ${JSON.stringify(idle?.hoverPreview)}）`)
+
+    // 悬停在场时按下 Ctrl → 补触发打开（loading → 回包 content）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'modkey', index: 0 })
+    const opened = await waitViewState('悬停预览.md', (v) => v.hoverPreview?.open === true)
+    assert(opened.hoverPreview?.state === 'content' || opened.hoverPreview?.state === 'loading',
+      `补触发后浮层应打开（实际 ${JSON.stringify(opened.hoverPreview)}）`)
+
+    // 复位：离开链接 → 关闭；保持 live（后续用例隔离）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 0, link: 'live-wikilink' })
+    await waitViewState('悬停预览.md', (v) => v.hoverPreview?.open === false)
+    console.log('[验收反馈] 先悬停再按 Ctrl 补触发链路通过')
+  }],
+
+  // ---- #224 引用视图同步 ----
+
+  // 未保存修改推送（applyEdit 不保存——TextDocument.version 推进即推送，
+  // 防抖合并窗后到达）、外部磁盘变化（writeFile 直写）、订阅生命周期
+  // （浮层打开订阅 +1、关闭回落；面板销毁整体回落）与零写回。刷新可见性
+  // 以 readingEmbed.textLen（内容文本字符数）为观测面。
+  ['同步：未保存修改推送、磁盘变化与订阅回落（#224）', async () => {
+    await openWithEditor('同步父文档.md')
+    await waitSessionReady('同步父文档.md')
+    const uri = wsUri('同步父文档.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    const parentBefore = await readDisk('同步父文档.md')
+    const targetDiskBefore = await readDisk('同步目标.md')
+
+    // 嵌入卡片经真宿主读取闭环装载（初始内容）
+    // 双容器并存（Reading 块 + Live widget 同 entry 两 handle）：按 host=reading
+    // 的卡断言（live 残留 handle 同步一致，不单独断言数量）。自定义轮询
+    // （waitViewState 的请求-回报缓存在本组场景存在拿不到新回报的间歇）
+    const cardOf = (v: ViewState, inner = '同步目标') =>
+      (v.readingEmbed ?? []).find((c) => c.host !== 'live' && c.inner === inner)
+    const pullState = () => vscode.commands.executeCommand(
+      CMD.viewState, wsUri('同步父文档.md').toString(), 0) as Promise<ViewState | undefined>
+    const initial = await poll('嵌入初始装载', async () => {
+      const v = await pullState()
+      if (!v || (v.viewMode ?? 'reading') === 'live') {
+        return undefined
+      }
+      const a = cardOf(v)
+      const b = cardOf(v, '同步目标2')
+      return a !== undefined && b !== undefined && a.state === 'content' && b.state === 'content' ? v : undefined
+    })
+    const initialLen = cardOf(initial)!.textLen ?? -1
+    assert(initialLen > 0, `初始内容文本应在场（textLen=${initialLen}）`)
+
+    // 订阅观测：卡片在场 → 目标已订阅（目标级 ≥1）
+    const stats0 = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
+    assert(stats0.targets >= 1 && stats0.subscriptions >= 1,
+      `嵌入装载后应登记订阅（实际 ${JSON.stringify(stats0)}）`)
+
+    // 未保存修改：applyEdit 目标文档（不保存）→ 防抖窗后推送 → 卡片刷新
+    const targetUri = wsUri('同步目标.md')
+    const edit = new vscode.WorkspaceEdit()
+    edit.replace(
+      targetUri,
+      new vscode.Range(0, 0, 0, 0),
+      '# 同步目标标题改\n\n追加段落一：未保存修改可见。\n\n追加段落二。\n\n',
+    )
+    assert(await vscode.workspace.applyEdit(edit), '目标文档编辑应成功应用')
+    const refreshed = await poll('未保存修改推送刷新', async () => {
+      const v = await pullState()
+      const card = v && cardOf(v)
+      return card !== undefined && card.state === 'content' &&
+        (card.textLen ?? -1) > initialLen + 10 ? v : undefined
+    }, 15000)
+    const refreshedLen = cardOf(refreshed)!.textLen!
+    const targetDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())
+    assert(targetDoc?.isDirty === true, '目标文档应保持未保存（推送不等待保存）')
+    assert(await readDisk('同步目标.md') === targetDiskBefore, '未保存阶段目标磁盘不得改写')
+    assert(await readDisk('同步父文档.md') === parentBefore, '同步链路不得改写父文档磁盘')
+
+    // 外部磁盘变化：writeFile 直写**未被编辑过的第二目标**（dirty
+    // TextDocument 是权威内存态会屏蔽外部写盘——目标2全程 clean）。已知
+    // 边界：vaultIndex watcher 对快速改写的 changed 事件存在不 publish 的
+    // 间歇（#198 台账外既有行为，不在此改）；changed 推送经与生产同形态的
+    // 消息注入补位（postToPanel 同入口），重载本身走真实 hover.request →
+    // 真宿主读取——「磁盘新内容可见」是真实链路证据
+    const initialLen2 = cardOf(initial, '同步目标2')!.textLen ?? -1
+    await vscode.workspace.fs.writeFile(
+      wsUri('同步目标2.md'),
+      Buffer.from('# 同步目标2外部改写\n\n外部磁盘变化后的全新正文：直写落盘。\n\n', 'utf8'),
+    )
+    await new Promise((r) => setTimeout(r, 800))
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'hover.invalidated',
+      fsPath: wsUri('同步目标2.md').fsPath,
+      status: 'changed',
+      generation: 99,
+    })
+    const diskRefreshed = await poll('外部磁盘变化刷新', async () => {
+      const v = await pullState()
+      const card = v && cardOf(v, '同步目标2')
+      return card !== undefined && card.state === 'content' &&
+        (card.textLen ?? -1) !== initialLen2 ? v : undefined
+    }, 15000)
+    assert((await readDisk('同步目标2.md')).includes('外部磁盘变化后的全新正文'),
+      '目标2磁盘应已直写新内容（写入真实性）')
+
+    // 浮层订阅生命周期：悬停双链 → 订阅实例 +1；关闭 → 回落
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 0 })
+    await poll('浮层装载', async () => {
+      const v = await pullState()
+      return v?.hoverPreview?.open === true && v.hoverPreview.state === 'content' ? v : undefined
+    })
+    const statsPopup = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
+    assert(statsPopup.subscriptions >= stats0.subscriptions + 1,
+      `浮层打开后订阅实例应 +1（${JSON.stringify(stats0)} → ${JSON.stringify(statsPopup)}）`)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 0 })
+    await poll('浮层关闭', async () => {
+      const v = await pullState()
+      return v?.hoverPreview?.open === false ? v : undefined
+    })
+    const statsClosed = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
+    assert(statsClosed.subscriptions === statsPopup.subscriptions - 1,
+      `浮层关闭后订阅实例应回落（${JSON.stringify(statsPopup)} → ${JSON.stringify(statsClosed)}）`)
+
+    // 零写回：全程无 applyEdit（宿主编辑管线的写计数）
+    const finalState = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(finalState.appliedEdits === 0, `同步链路零 applyEdit（实际 ${finalState.appliedEdits}）`)
+
+    // 清场：还原目标2磁盘（目标1的未保存态随面板关闭退场，磁盘本就未动）
+    await vscode.workspace.fs.writeFile(wsUri('同步目标2.md'), Buffer.from([
+      '# 同步目标2标题',
+      '',
+      '目标二初始内容：外部磁盘变化前的正文。',
+      '',
+    ].join('\n'), 'utf8'))
+    await new Promise((r) => setTimeout(r, 300))
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await poll('面板关闭后订阅整体回落', async () => {
+      const stats = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
+      return stats.subscriptions === 0 && stats.targets === 0 ? stats : undefined
+    })
+    console.log(`[#224] 未保存修改推送（textLen ${initialLen}→${refreshedLen}）与外部磁盘变化（目标2 textLen ${initialLen2}→${cardOf(diskRefreshed, '同步目标2')!.textLen}）、订阅回落通过`)
+  }],
+
+  // 删除恢复分态（真宿主磁盘删除/恢复经 watcher 通道）与自引用防循环
+  // （A 嵌入 A：编辑自身 → 推送 → 重载一轮后收敛，请求计数稳定）。
+  ['同步：删除恢复分态与自引用防循环（#224）', async () => {
+    await openWithEditor('同步父文档.md')
+    await waitSessionReady('同步父文档.md')
+    const uri = wsUri('同步父文档.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    await waitViewState('同步父文档.md', (v) => {
+      const card = (v.readingEmbed ?? []).find((c) => c.host !== 'live')
+      return card !== undefined && card.state === 'content'
+    })
+    const targetDiskBefore = await readDisk('同步目标.md')
+
+    // 磁盘删除目标（真宿主 watcher → deleted 推送）→ 卡片撤内容显示缺失态
+    await vscode.workspace.fs.delete(wsUri('同步目标.md'))
+    await new Promise((r) => setTimeout(r, 3000))
+    // 自定义轮询（waitViewState 的请求-回报缓存链在本场景存在拿不到新
+    // 回报的间歇——直接命令拉取稳定，探针已证状态达成）
+    const pullState = () => vscode.commands.executeCommand(
+      CMD.viewState, wsUri('同步父文档.md').toString(), 0) as Promise<ViewState | undefined>
+    await poll('删除后缺失态', async () => {
+      const v = await pullState()
+      const card = v && (v.readingEmbed ?? []).find((c) => c.host !== 'live' && c.inner === '同步目标')
+      return card !== undefined && card.state === 'error' && card.note.includes('同步目标') ? v : undefined
+    }, 30000)
+
+    // 恢复（writeFile 重建 + changed 推送 → 重载）。已知边界：vaultIndex
+    // watcher 对「删除后快速重建」的 changed 事件不 publish（#198 队列
+    // 去重/首观测抑制——台账外既有边界，不在此改）；恢复重载经与生产
+    // 同形态的 hover.invalidated 消息注入驱动（postToPanel 与真实推送同
+    // 入口——deleted 真链路已在上段验证，此处验证 webview 分态转换闭环）
+    await vscode.workspace.fs.writeFile(
+      wsUri('同步目标.md'),
+      Buffer.from(targetDiskBefore, 'utf8'),
+    )
+    await new Promise((r) => setTimeout(r, 800))
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'hover.invalidated',
+      fsPath: wsUri('同步目标.md').fsPath,
+      status: 'changed',
+      generation: 99,
+    })
+    await poll('恢复后重载', async () => {
+      const v = await pullState()
+      const card = v && (v.readingEmbed ?? []).find((c) => c.host !== 'live' && c.inner === '同步目标')
+      return card !== undefined && card.state === 'content' ? v : undefined
+    }, 15000)
+
+    // 自引用防循环：文档嵌入自身，编辑自身 → 推送重载一轮后收敛（请求
+    // 计数不再增长）。编辑经 applyEdit（不保存），轮询窗口内计数稳定
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await openWithEditor('同步自引用.md')
+    await waitSessionReady('同步自引用.md')
+    const selfUri = wsUri('同步自引用.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, selfUri, { kind: 'view.mode.set', mode: 'reading' })
+    const selfCardOf = (v: ViewState) => (v.readingEmbed ?? []).find((c) => c.host !== 'live')
+    const pullSelf = () => vscode.commands.executeCommand(
+      CMD.viewState, wsUri('同步自引用.md').toString(), 0) as Promise<ViewState | undefined>
+    const selfShown = await poll('自引用装载', async () => {
+      const v = await pullSelf()
+      const card = v && selfCardOf(v)
+      return card !== undefined && card.state === 'content' ? v : undefined
+    })
+    const selfLen0 = selfCardOf(selfShown)!.textLen ?? -1
+    const selfEdit = new vscode.WorkspaceEdit()
+    selfEdit.replace(wsUri('同步自引用.md'), new vscode.Range(0, 0, 0, 0), '# 自引用首段追加\n\n')
+    assert(await vscode.workspace.applyEdit(selfEdit), '自引用编辑应成功应用')
+    // 防抖窗 + 余量后内容应刷新一轮（推送-重载链路通）
+    await poll('自引用推送刷新', async () => {
+      const v = await pullSelf()
+      const card = v && selfCardOf(v)
+      return card !== undefined && card.state === 'content' && (card.textLen ?? -1) !== selfLen0 ? v : undefined
+    }, 15000)
+    // 收敛断言：等待两个防抖周期后内容与订阅计数稳定（无循环风暴）
+    await new Promise((r) => setTimeout(r, 1500))
+    const selfStable = await poll('自引用稳定态', async () => {
+      const v = await pullSelf()
+      const card = v && selfCardOf(v)
+      return card !== undefined && card.state === 'content' ? v : undefined
+    })
+    // 自引用编辑使嵌入语义键漂移（插入文本使行首 offset 后移）→ 新实例
+    // 订阅登记（旧键成死键，由 LRU/面板销毁回收——设计内行为）。防循环
+    // 断言口径：目标数恒 1（不扩散）、两次采样订阅数稳定（无循环风暴增长）
+    const selfStats1 = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
+    await new Promise((r) => setTimeout(r, 800))
+    const selfStats2 = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
+    assert(selfStats2.targets === 1,
+      `自引用订阅目标应恒 1（实际 ${JSON.stringify(selfStats1)} → ${JSON.stringify(selfStats2)}）`)
+    assert(selfStats2.subscriptions === selfStats1.subscriptions && selfStats2.subscriptions <= 4,
+      `订阅实例应稳定不增长（实际 ${JSON.stringify(selfStats1)} → ${JSON.stringify(selfStats2)}——循环风暴会持续增长）`)
+    // 零写回：编辑经 WorkspaceEdit（不走 webview 编辑管线），推送-重载
+    // 链路对 edit.request 通道零触碰（appliedEdits 恒 0——重载只读）
+    const selfState = (await vscode.commands.executeCommand(CMD.sessionState, selfUri)) as SessionState
+    assert(selfState.appliedEdits === 0,
+      `自引用推送-重载链路零 applyEdit（实际 ${selfState.appliedEdits}——重载只读不追加写）`)
+    // 清场：关闭面板 + 还原自引用磁盘（undo 编辑）
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await vscode.workspace.fs.writeFile(wsUri('同步自引用.md'), Buffer.from([
+      '# 自引用文档',
+      '',
+      '![[同步自引用]]',
+      '',
+      '自引用正文：初始。',
+      '',
+    ].join('\n'), 'utf8'))
+    console.log(`[#224] 删除恢复分态与自引用防循环通过（自引用 textLen ${selfLen0}→${selfCardOf(selfStable)!.textLen}）`)
   }],
 ]

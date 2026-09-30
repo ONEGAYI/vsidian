@@ -134,6 +134,7 @@ const EXPECTED_DOM_ALIAS_TARGETS: Record<string, string[]> = {
   'reading-task': ['task-list-item'],
   'reading-frontmatter': ['markdown-frontmatter'],
   'reading-wikilink': ['internal-link'],
+  'reading-embed-card': ['markdown-embed'],
 }
 
 describe('styleContract 别名桥同源', () => {
@@ -358,18 +359,19 @@ describe('styleContract 迁移完整性（旧映射表全集不丢）', () => {
 
 /** 每类目条目数快照（显式钉住归类：重划/迁移类目必须同步改这里，防静默漂移） */
 const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
-  // content 域（78）
+  // content 域（82；#222 增嵌入卡片与占位行两条，#223 增 Live 嵌入宿主，
+  // #217 验收反馈增 mod-link-hover）
   'view-container': 2,
   heading: 4,
-  'inline-format': 7,
+  'inline-format': 8,
   'list-task': 5,
   'line-syntax': 5,
   table: 11,
   'reading-structure': 12,
-  'link-image-wikilink': 9,
+  'link-image-wikilink': 13,
   'content-variables': 12,
   'content-limits': 11,
-  // chrome 域（63）
+  // chrome 域（64）
   math: 5,
   diagram: 4,
   'graphic-interact': 2,
@@ -381,6 +383,7 @@ const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   'context-menu': 1,
   backlinks: 4,
   outlinks: 2,
+  'hover-preview': 2,
 }
 
 describe('styleContract 类目体系（#145）', () => {

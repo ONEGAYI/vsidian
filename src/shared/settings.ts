@@ -210,6 +210,23 @@ export const READABLE_LINE_WIDTH_MAX = 1600
 export const READABLE_LINE_WIDTH_STEP = 20
 
 /**
+ * #222「嵌入最大高度」：Reading 正文嵌入卡片内容滚动区的限高（px）。
+ * 短内容自然高度不受影响；超限内容内部滚动。规格一期初值 480px（视觉
+ * 验收可校准的工程初值，不构成完成时限承诺）。键与消费方
+ * （syncController 的 applyEmbedMaxHeightSetting → EmbedCardManager）
+ * 成对导出，避免字面量漂移。
+ */
+export const EMBED_MAX_HEIGHT_KEY = 'embed.maxHeight'
+/** 默认 480px（规格一期初值） */
+export const EMBED_MAX_HEIGHT_DEFAULT = 480
+/** 值域下限：低于一屏的卡片没有阅读价值 */
+export const EMBED_MAX_HEIGHT_MIN = 160
+/** 值域上限：更高需求属全屏阅读场景（直接打开原文档） */
+export const EMBED_MAX_HEIGHT_MAX = 2000
+/** 步进 20px（滑块粒度） */
+export const EMBED_MAX_HEIGHT_STEP = 20
+
+/**
  * 语言设置键（#93 预留，#96 注册定义与「常规」分区）：值域 auto | zh-cn |
  * en（StringEnumSettingDefinition），解析与语言包装配见 shared/locales。
  * 键常量先行导出——宿主 HTML 生成点读取快照中的该键决定注入语言（缺省
@@ -237,6 +254,17 @@ export const IMAGE_PASTE_LOCATION_KEY = 'image.pasteLocation'
 export const IMAGE_PASTE_LOCATION_MODES = ['same-dir', 'workspace-root', 'relative-to-file'] as const
 export type ImagePasteLocationMode = (typeof IMAGE_PASTE_LOCATION_MODES)[number]
 export const IMAGE_PASTE_LOCATION_DEFAULT: ImagePasteLocationMode = 'same-dir'
+
+/**
+ * #221「Live 直接悬停」开关：Live 正文中悬停双链/普通 Markdown 链接的
+ * 触发条件——关闭（默认）需按住 Ctrl/Cmd 再悬停（防编辑途中指针扫过链接
+ * 误开浮层），开启后无需修饰键直接悬停（与 Reading/面板一致的触发口
+ * 径）。Reading 与反链/出链面板不受本开关影响（恒直接悬停）。键与消费
+ * 方（syncController 的 Live mouseover 委托守卫）成对导出。
+ */
+export const HOVER_LIVE_DIRECT_KEY = 'hover.liveDirect'
+/** 默认 false：Live 默认 Ctrl+悬停（规格一期口径） */
+export const HOVER_LIVE_DIRECT_DEFAULT = false
 
 /**
  * #161 图片存放子路径（自由文本，默认 assets）：workspace-root /
@@ -381,6 +409,28 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     descriptionKey: 'setting.readableLineWidth.description',
     zeroLabelKey: 'setting.readableLineWidthFill',
     unit: 'px',
+  },
+  {
+    // #222 嵌入最大高度（embed.* 域 → 编辑器页「显示」组：非 symbol/
+    // codeblock/image 前缀的 editor 域外键由 displayDefs 收纳）
+    key: EMBED_MAX_HEIGHT_KEY,
+    type: 'number',
+    default: EMBED_MAX_HEIGHT_DEFAULT,
+    min: EMBED_MAX_HEIGHT_MIN,
+    max: EMBED_MAX_HEIGHT_MAX,
+    step: EMBED_MAX_HEIGHT_STEP,
+    titleKey: 'setting.embedMaxHeight.title',
+    descriptionKey: 'setting.embedMaxHeight.description',
+    unit: 'px',
+  },
+  {
+    // #221 Live 直接悬停（hover.* 域 → 编辑器页「显示」组：与 embed.*
+    // 同由 displayDefs 收纳）
+    key: HOVER_LIVE_DIRECT_KEY,
+    type: 'boolean',
+    default: HOVER_LIVE_DIRECT_DEFAULT,
+    titleKey: 'setting.hoverLiveDirect.title',
+    descriptionKey: 'setting.hoverLiveDirect.description',
   },
 ]
 

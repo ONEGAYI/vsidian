@@ -2,7 +2,7 @@
 
 VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 
-> 当前状态：**MVP 主要功能已实施，整体验收未结**。一期双视图编辑、增量写回、任务、链接图片、双链、表格、查找、三态切换、独立设置页与源文件行号，二期公式渲染、Mermaid 图表、表格交互重做（[#72 规格](docs/specs/table-interaction-rework.md)）与大纲面板二期（#65–#70，样式透传、跳转高亮、折叠滑块、工具条搜索、右键菜单、拖拽排序）均已落地；统一右键菜单批次已落地（2026-09-28，#183 内核：Live 正文全域接管 + 注册/覆写基建 + 剪贴板四项，`blockMenu` 退役、`outlineMenu` 迁移内核并修复子菜单溢出；#184 内容接线：26 枚图标明暗资产接线 + 段落设置按行结构勾选 + 三簇命令分派核查钉住；规格 [docs/specs/context-menu.md](docs/specs/context-menu.md)）；工具栏刷新按钮已落地（2026-09-29，#208：顶栏右端组刷新入口 + 图片缓存全局代次换戳失效通道 + Mermaid 注入失败终态重置，刷新全程状态保持零写回；规格 [docs/specs/toolbar-refresh.md](docs/specs/toolbar-refresh.md)）；图片弹窗与防误触、表格数据行透明已落地（2026-09-29，#212：Markdown 图片接入代码块同款 hover 按钮组 + 本体吞点击 + 全屏弹窗（缩放/平移/刷新/原格式另存导出），链接内嵌与表格网格内图片明确排除，规格 [docs/specs/image-popup.md](docs/specs/image-popup.md)；#213：数据行与分隔行背景透明到编辑器背景、表头保留，新公开变量 `--vsidian-table-row-background`）；自动化通过不等于真实 IME、物理鼠标与视觉观感已由用户验收。功能范围见 [docs/specs/mvp.md](docs/specs/mvp.md)；待验项与历轮执行记录见 [docs/specs/manual-verification.md](docs/specs/manual-verification.md)；用户可见变更见 [CHANGELOG.md](CHANGELOG.md)。本文件是项目级 agent 规则的**单一入口**：横切约定常驻于此，领域落档约定的正文在指针目标（specs 文档与项目技能）中维护——入口唯一、不另建副本，指针写明触发分支，改动正文只改指针目标。
+> 当前状态：**MVP 主要功能已实施，整体验收未结**。一期双视图编辑、增量写回、任务、链接图片、双链、表格、查找、三态切换、独立设置页与源文件行号，二期公式渲染、Mermaid 图表、表格交互重做（[#72 规格](docs/specs/table-interaction-rework.md)）与大纲面板二期（#65–#70，样式透传、跳转高亮、折叠滑块、工具条搜索、右键菜单、拖拽排序）均已落地；统一右键菜单批次已落地（2026-09-28，#183 内核：Live 正文全域接管 + 注册/覆写基建 + 剪贴板四项，`blockMenu` 退役、`outlineMenu` 迁移内核并修复子菜单溢出；#184 内容接线：26 枚图标明暗资产接线 + 段落设置按行结构勾选 + 三簇命令分派核查钉住；规格 [docs/specs/context-menu.md](docs/specs/context-menu.md)）；工具栏刷新按钮已落地（2026-09-29，#208：顶栏右端组刷新入口 + 图片缓存全局代次换戳失效通道 + Mermaid 注入失败终态重置，刷新全程状态保持零写回；规格 [docs/specs/toolbar-refresh.md](docs/specs/toolbar-refresh.md)）；图片弹窗与防误触、表格数据行透明已落地（2026-09-29，#212：Markdown 图片接入代码块同款 hover 按钮组 + 本体吞点击 + 全屏弹窗（缩放/平移/刷新/原格式另存导出），链接内嵌与表格网格内图片明确排除，规格 [docs/specs/image-popup.md](docs/specs/image-popup.md)；#213：数据行与分隔行背景透明到编辑器背景、表头保留，新公开变量 `--vsidian-table-row-background`）；悬停预览与文档嵌入一期已落地（2026-09-30，#218–#225：Reading/Live 双侧悬停浮层（全文/章节/块范围 + B 身份来源资源与属性区）与正文嵌入卡片（一层展开、索引/rename 接线、光标驱动源码显隐）、目标变更订阅同步与有界缓存，引用内容全程只读；规格 [docs/specs/hover-preview-embed.md](docs/specs/hover-preview-embed.md)，性能实测见 [docs/perf/2026-09-hover-preview-embed-performance.md](docs/perf/2026-09-hover-preview-embed-performance.md)）；自动化通过不等于真实 IME、物理鼠标与视觉观感已由用户验收。功能范围见 [docs/specs/mvp.md](docs/specs/mvp.md)；待验项与历轮执行记录见 [docs/specs/manual-verification.md](docs/specs/manual-verification.md)；用户可见变更见 [CHANGELOG.md](CHANGELOG.md)。本文件是项目级 agent 规则的**单一入口**：横切约定常驻于此，领域落档约定的正文在指针目标（specs 文档与项目技能）中维护——入口唯一、不另建副本，指针写明触发分支，改动正文只改指针目标。
 
 ## 约定
 
@@ -89,7 +89,8 @@ vsidian/
 │   │   ├── 0005-viewport-rendering.md            # 全文模型与视口渲染分离
 │   │   ├── 0006-rebrand-to-vsidian.md            # 统一更名为 vsidian 的映射记录
 │   │   ├── 0007-css-snippet-env-isolation.md     # CSS 片段环境隔离决策记录（#131）
-│   │   └── 0008-workspace-reference-index.md     # 工作区引用索引架构与存储选型
+│   │   ├── 0008-workspace-reference-index.md     # 工作区引用索引架构与存储选型
+│   │   └── 0009-referenced-document-views.md     # 引用文档视图读写分离决策
 │   ├── agents/     # agent 操作约定
 │   │   ├── domain.md        # 领域文档读取与维护约定
 │   │   └── issue-tracker.md # GitHub Issues 操作约定
@@ -100,18 +101,22 @@ vsidian/
 │   │   └── outlinks-panel-reference.png    # 出链面板形态参考图
 │   ├── features.md # README 功能与设置详解下沉页
 │   ├── perf/       # 性能实测数据与测量工具说明
-│   │   ├── 2026-09-browser-test-runner.md       # 浏览器测试调度实测
-│   │   ├── 2026-09-code-block-card.md           # 代码块卡片性能实测（#85）
-│   │   ├── 2026-09-live-syntax-decorations.md   # 语法树装饰与大围栏细分实测（#8）
-│   │   ├── 2026-09-math-rendering.md            # 公式渲染性能实测（#59）
-│   │   ├── 2026-09-mermaid-rendering.md         # Mermaid 性能与边界（#60）
-│   │   ├── 2026-09-mvp-performance-summary.md   # MVP 性能档位汇总
-│   │   ├── 2026-09-reading-viewport-mount.md    # 阅读按需挂载实测数据
-│   │   ├── 2026-09-table-cell-editing.md        # 表格单元格编辑性能实测（#12）
-│   │   ├── 2026-09-title-decoration-viewport.md # 标题切片视口渲染实测数据
-│   │   ├── 2026-09-vault-index-storage.md       # 索引存储选型三档基准解读（#195）
-│   │   └── data/                                # 性能探针原始报告数据
+│   │   ├── 2026-09-browser-test-runner.md             # 浏览器测试调度实测
+│   │   ├── 2026-09-code-block-card.md                 # 代码块卡片性能实测（#85）
+│   │   ├── 2026-09-hover-preview-embed-performance.md # 悬停与嵌入一期性能实测（#225）
+│   │   ├── 2026-09-live-syntax-decorations.md         # 语法树装饰与大围栏细分实测（#8）
+│   │   ├── 2026-09-math-rendering.md                  # 公式渲染性能实测（#59）
+│   │   ├── 2026-09-mermaid-rendering.md               # Mermaid 性能与边界（#60）
+│   │   ├── 2026-09-mvp-performance-summary.md         # MVP 性能档位汇总
+│   │   ├── 2026-09-reading-viewport-mount.md          # 阅读按需挂载实测数据
+│   │   ├── 2026-09-table-cell-editing.md              # 表格单元格编辑性能实测（#12）
+│   │   ├── 2026-09-title-decoration-viewport.md       # 标题切片视口渲染实测数据
+│   │   ├── 2026-09-vault-index-storage.md             # 索引存储选型三档基准解读（#195）
+│   │   └── data/                                      # 性能探针原始报告数据
 │   │       ├── browser-test-runner.json               # 浏览器调度实测数据
+│   │       ├── hover-embed-perf-host.json             # #225 真宿主编辑阻塞实测数据
+│   │       ├── hover-embed-perf.json                  # #225 状态层嵌入装饰实测数据
+│   │       ├── hover-refresh.json                     # #224 引用视图同步定向测量数据
 │   │       ├── perf-report.json                       # 性能探针原始报告数据
 │   │       ├── vault-index-storage-bench-recheck.json # #202 三档复测报告
 │   │       └── vault-index-storage-bench.json         # 索引存储基准原始数据（#195）
@@ -129,6 +134,7 @@ vsidian/
 │       ├── css-snippets.md                    # CSS片段与样式兼容规格
 │       ├── frontmatter-table.md               # frontmatter 表格化规格
 │       ├── graphic-code-block-interaction.md  # 图形化代码块交互规格
+│       ├── hover-preview-embed.md             # 悬停预览与文档嵌入规格
 │       ├── html-comment-support.md            # HTML 注释快捷键与呈现规格
 │       ├── i18n.md                            # 全局 i18n 适配规格
 │       ├── image-paste.md                     # 图片粘贴插入与资产文件夹规格
@@ -181,6 +187,8 @@ vsidian/
 │   │   ├── documentSession.ts          # 文档会话与写回同步
 │   │   ├── editorCsp.ts                # 编辑器 CSP 装配纯模块（#130）
 │   │   ├── hostLocale.ts               # 生效语言宿主装配解析帮手
+│   │   ├── hoverDocAccess.ts           # 悬停预览文档访问纯逻辑
+│   │   ├── hoverRefreshCoordinator.ts  # 引用视图刷新协调器（宿主）
 │   │   ├── imageExportHost.ts          # 宿主图片导出执行壳
 │   │   ├── imagePasteHost.ts           # 图片粘贴落盘执行壳（#161）
 │   │   ├── imagePastePlan.ts           # 图片粘贴纯逻辑（#161）
@@ -212,6 +220,7 @@ vsidian/
 │   │   ├── cssSnippets.ts        # CSS 片段纯逻辑单一事实源
 │   │   ├── formatOperations.ts   # 格式操作注册清单
 │   │   ├── frontmatterTable.ts   # frontmatter 表格化纯逻辑
+│   │   ├── hoverRefresh.ts       # 引用视图同步参数与订阅注册表
 │   │   ├── i18n.ts               # t() 取词与语言包装配状态模块
 │   │   ├── imageRefresh.ts       # 图片刷新共享常量与核验决策
 │   │   ├── keybindings.ts        # 快捷键操作与冲突模型
@@ -254,6 +263,7 @@ vsidian/
 │       ├── diagramExport.ts            # 图表导出序列化与光栅化
 │       ├── diagramPopup.ts             # 图表弹窗全屏浮层
 │       ├── diagramPopupGeometry.ts     # 弹窗几何纯函数
+│       ├── embedCard.ts                # Reading 嵌入卡片管理器
 │       ├── fenceEscape.ts              # 围栏 Tab 越界适配层（#125）
 │       ├── findSession.ts              # 查找匹配纯函数（#14）
 │       ├── fontArrival.ts              # 字体晚到监听（#130）
@@ -263,6 +273,8 @@ vsidian/
 │       ├── frontmatterPopover.ts       # frontmatter 属性编辑浮层
 │       ├── graphicBlockChrome.ts       # 图形化块右上角按钮组
 │       ├── graphicRenderers.ts         # 图形化渲染器注册表
+│       ├── hoverPopup.ts               # 悬停预览浮层单例
+│       ├── hoverPopupGeometry.ts       # 悬停浮层几何纯函数
 │       ├── htmlComment.ts              # 阅读侧 HTML 注释剥离纯函数
 │       ├── imagePaste.ts               # 图片粘贴拦截适配层（#161）
 │       ├── imagePopup.ts               # 图片弹窗全屏浮层单例
@@ -276,6 +288,7 @@ vsidian/
 │       ├── liveBlockId.ts              # 块 id 标记 live 淡化装饰
 │       ├── liveCodeCard.ts             # Live 代码块卡片装饰
 │       ├── liveDecorations.ts          # 语法树驱动 Live 装饰（#8）
+│       ├── liveEmbed.ts                # Live 嵌入装饰与源码显隐
 │       ├── liveLineNumbers.ts          # 表格段首行号与绘制探针
 │       ├── liveLinks.ts                # live 链接装饰与跳转（#10）
 │       ├── liveMath.ts                 # 行内与块级公式 live 装饰（#59）
@@ -308,6 +321,7 @@ vsidian/
 │       ├── readingView.ts              # 阅读视图 DOM 构建与锚点定位
 │       ├── readingViewport.ts          # 阅读视口挂载窗口纯函数
 │       ├── readingVirtualView.ts       # 阅读视图虚拟化装配层
+│       ├── refReadingContent.ts        # 引用内容只读 Reading 装配
 │       ├── settingsMain.ts             # 设置页 webview 入口
 │       ├── settingsPage.css            # 设置页样式
 │       ├── settingsPageView.ts         # 设置页 webview 视图

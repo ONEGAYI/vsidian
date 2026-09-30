@@ -90,6 +90,12 @@ export const en = {
   'setting.readableLineWidth.title': 'Readable line width',
   'setting.readableLineWidth.description': 'Maximum width of the content column in the live preview and reading view: 0 fills the available width; a specific value caps the column, which then centers in the editor area and yields to the outline sidebar when space is tight.',
   'setting.readableLineWidthFill': 'Fill',
+  /** #222 embed card height cap (reading-view embeds scroll internally past it) */
+  'setting.embedMaxHeight.title': 'Embedded note max height',
+  'setting.embedMaxHeight.description': 'Maximum height of the reading-view embed card content area: shorter notes keep their natural height while longer content scrolls inside the card up to this limit.',
+  /** #221 Live hover trigger (Ctrl+hover vs direct hover) */
+  'setting.hoverLiveDirect.title': 'Hover links directly in live preview',
+  'setting.hoverLiveDirect.description': 'Open the hover preview by just pointing at a link in the live preview. When off, hold Ctrl (Cmd on macOS) while hovering; the reading view and the link panels always preview directly.',
   'setting.codeblockCard.title': 'Code block card',
   'setting.codeblockCard.description': 'Collapse a fenced code block into a card when the cursor leaves it: hide the fence markers and show a language header bar. Turn off to restore the plain source fence look.',
   'setting.codeblockLineNumbers.title': 'Line numbers inside cards',
@@ -187,6 +193,7 @@ export const en = {
   'styleRef.category.contextMenu': 'Content context menu',
   'styleRef.category.backlinks': 'Backlinks panel',
   'styleRef.category.outlinks': 'Outgoing links panel',
+  'styleRef.category.hoverPreview': 'Hover preview',
   'host.styleRefExported': 'Style contract JSON exported: {path}',
   'host.styleRefExportFailed': 'Failed to export style contract JSON: {reason}',
   'host.styleRefExportReasonMissingAsset': 'extension install incomplete (style-reference.json missing)',
@@ -370,6 +377,31 @@ export const en = {
   'outlineMenu.levelDownRecursive': 'Decrease by one level recursively',
   'outlineMenu.rename': 'Rename',
   'outlineMenu.delete': 'Delete',
+
+  /** Hover document preview (#218: in-popup state line; error states never
+   *  surface host notifications. Since #219 wikilinks and Markdown links share
+   *  the states — the raw target is no longer wrapped in wikilink brackets;
+   *  anchor-missing covers missing heading/block anchors without falling back
+   *  to the full document) */
+  'hover.loading': 'Loading preview…',
+  'hover.errorUnsupported': 'Unsupported link form: no preview target to show (web pages are out of scope)',
+  'hover.errorNoWorkspace': 'The current document is not in any workspace folder: link targets cannot be resolved for preview',
+  'hover.errorEscape': 'The link target escapes the owning workspace root and cannot be previewed',
+  'hover.errorNotFound': 'Target not found: {target} (resolved relative to the current document; files are never created automatically)',
+  'hover.errorNonMarkdown': '{target} is not a Markdown note: preview supports Markdown documents only in this phase',
+  'hover.errorReadFailed': 'Failed to read the target document',
+  'hover.errorAnchorMissing': 'Anchor not found in the target note: {target}#{anchor} (the full document is not shown instead)',
+  /** #220 referenced Reading content: accessibility labels of the expand/
+   *  collapse button of the note-properties section inside the hover popup
+   *  (aria-label and title share the word; the button is the only operable
+   *  entry, hovering the header row only reveals it) */
+  'hover.content.fmExpand': 'Expand note properties',
+  'hover.content.fmCollapse': 'Collapse note properties',
+  /** #222 Reading embed cards: loading line and the open-target entry in the
+   *  card header (aria-label and title share the word; opening reuses the
+   *  existing Vsidian open behavior, never edits the embed source) */
+  'embed.loading': 'Loading embedded note…',
+  'embed.openTarget': 'Open target note',
 
   /** 反链面板（#197：四态与条目；形态改版批次：工具栏/排序/搜索/页头） */
   'backlinks.label': 'Backlinks',
@@ -555,6 +587,8 @@ export const en = {
   'command.ui.outlinksToggle.title': 'Show or hide the outgoing links panel',
   /** #208 refresh embedded resources command (toolbar button and keybinding/command palette share it) */
   'command.editor.refresh.title': 'Refresh embedded resources',
+  /** #221 preview the link at the cursor/focus (manual hover-popup open; keyboard enters the popup and Esc returns) */
+  'command.ui.hoverPreviewLink.title': 'Preview the current link',
 
   // ---- #159 锚点跳转（块引用定位与本文件锚点）----
   /** 块 id 缺失提示（与标题缺失同款「打开后提示」行为） */

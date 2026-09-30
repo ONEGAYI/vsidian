@@ -39,6 +39,18 @@ describe('表格网格与选中轮廓 CSS 契约（#42/#43）', () => {
     expect(hidden).toContain('.vsidian-table-grid-row > .cm-widgetBuffer')
   })
 
+  it('转义管道反斜杠默认隐藏、光标行浅色显形（Obsidian 对齐）', () => {
+    // 默认隐藏：渲染为 |，所见即渲染结果
+    expect(rule('.vsidian-table-escaped-pipe', /display:\s*none/)).toContain('display: none')
+    // 光标/选区触及该行时换挂显形类：恢复文本流 + 正文前景低混入浅色
+    // （口径同 .vsidian-block-id：color-mix 跟随明暗主题与自定义字体色）
+    const reveal = rule('.vsidian-table-escaped-pipe-reveal')
+    expect(reveal).toMatch(/display:\s*inline/)
+    expect(reveal).toMatch(
+      /color:\s*color-mix\(in srgb, var\(--vscode-editor-foreground, #[0-9a-fA-F]{6}\) 4[0-9]%, transparent\)/,
+    )
+  })
+
   it('GFM 列对齐三态规则齐全（应用到该列全部单元格，空格占位同构）', () => {
     expect(rule('#app .cm-editor .cm-scroller .vsidian-table-grid-align-left', /text-align/))
       .toMatch(/text-align:\s*left/)

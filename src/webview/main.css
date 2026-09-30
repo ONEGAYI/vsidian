@@ -2653,6 +2653,19 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
   cursor: pointer;
 }
 
+/* ---- #217 验收反馈：Ctrl/Cmd 修饰键激活态（body.vsidian-mod-link）——
+   按住修饰键悬停可跳转链接的可发现性反馈（下划线 + 可点击光标）。
+   覆盖源码态 mark（双链/嵌入/普通链接——光标在范围内时源文上的链接，
+   平时无任何反馈）与渲染态 widget；Reading 侧 a 同款（悬停预览不需要
+   修饰键，但修饰键态下的可点击提示两侧一致）。渲染态的常驻
+   cursor:pointer（上方两条规则）保持不变 */
+body.vsidian-mod-link #app .cm-editor .cm-scroller .vsidian-wikilink:hover,
+body.vsidian-mod-link #app .cm-editor .cm-scroller .vsidian-link:hover,
+body.vsidian-mod-link #app .vsidian-view-reading a:hover {
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 /* ---- #10：图片槽位（双视图共用 vsidian-image + 状态修饰类）----
    阅读视图：槽位即 <img>（块挂载时创建，卸载释放）；
    live 视图：槽位为 widget 容器 span（内部 <img> 由资源管理器装载）。
@@ -2853,6 +2866,27 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
 
 #app .cm-editor .cm-scroller .vsidian-table-grid-row .vsidian-table-escaped-pipe {
   display: none;
+}
+
+/* 转义管道的反斜杠默认隐藏（渲染为 |）；光标/选区触及该行时换挂显形类：
+   恢复文本流并以正文前景低混入浅色呈现（口径同 .vsidian-block-id，对齐
+   Obsidian 的转义符行内源码暴露——所见即所得由选区控制）。 */
+#app .cm-editor .cm-scroller .vsidian-table-grid-row .vsidian-table-escaped-pipe-reveal {
+  display: inline;
+  color: color-mix(in srgb, var(--vscode-editor-foreground, #808080) 45%, transparent);
+}
+
+/* Markdown 转义符通用显隐（表格外，验收反馈通用化）：反斜杠默认隐藏
+   （所见 = 字面字符，如 \* 渲染为 *）；光标/选区触及该行时换挂显形类
+   浅色暴露源码——口径与上表格规则一致（表格行内 \| 由上方专用规则
+   承担，#42 契约不变）。 */
+#app .cm-editor .cm-scroller .vsidian-escape {
+  display: none;
+}
+
+#app .cm-editor .cm-scroller .vsidian-escape-reveal {
+  display: inline;
+  color: color-mix(in srgb, var(--vscode-editor-foreground, #808080) 45%, transparent);
 }
 
 /* #43 悬停控件位于 CM6 文本层之上，只为视口内网格行建立 DOM。 */
@@ -3784,4 +3818,308 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
 #app .vsidian-view-reading .vsidian-reading-block.vsidian-reading-code-card:hover .vsidian-code-card-wrap {
   opacity: 1;
   visibility: visible;
+}
+
+/* ---- #218 悬停文档预览浮层（样式契约 chrome 域 hover-popup 条目；交互态
+   浮层、打开期间在场，开闭与绘制由浏览器 hoverPreview 套件验证） ----
+   #220 起浮层挂 #app 内（fixed 定位不受 #app 布局影响）：#app 的主题变量
+   与 `#app .vsidian-view-reading …` 正文样式、CSS 片段（别名桥类名）随之
+   天然命中——不为浮层复制第二套主题环境。 */
+
+/* 浮层容器：fixed 定位、默认宽 480 / 最大高 400（规格一期初值；小视口由
+   JS 几何计划收缩并写内联值），实底 + 边框 + 投影保证任意主题下可辨识 */
+#app > .vsidian-hover-popup {
+  position: fixed;
+  z-index: 9000;
+  box-sizing: border-box;
+  width: 480px;
+  max-height: 400px;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  background: var(--vscode-editor-background, #1e1e1e);
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.22);
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: var(--vscode-font-size, 13px);
+  color: var(--vscode-editor-foreground, inherit);
+  overflow: hidden;
+}
+
+/* 内容滚动区：移入保活后的滚动承载（长文内部滚动，不撑破浮层） */
+#app > .vsidian-hover-popup .vsidian-hover-popup-scroll {
+  overflow: auto;
+  min-height: 0;
+  flex: 1;
+}
+
+/* #221 键盘模态焦点轮廓：「预览当前链接」命令打开时焦点进入浮层（容器
+   tabIndex=-1 可编程聚焦），:focus-visible 提供可见焦点指示（鼠标悬停
+   路径零抢焦点不受影响——程序化 focus 不触发 :focus-visible 的浏览器
+   启发式对纯鼠标交互不生效）；浮层内链接的键盘聚焦沿用浏览器默认轮廓 */
+#app > .vsidian-hover-popup:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, rgba(128, 128, 128, 0.6));
+  outline-offset: -1px;
+}
+
+/* 内部 Reading 容器：随正文排版基线与主题/片段（别名桥在容器类上）。
+   同属 #app 作用域，覆盖主阅读容器的 40vh 文末留白，浮层用紧凑内边距。 */
+#app > .vsidian-hover-popup .vsidian-hover-popup-scroll .vsidian-view-reading {
+  font-family: var(--vsidian-content-font-family, monospace);
+  font-size: var(--vsidian-content-font-size, 14px);
+  line-height: var(--vsidian-content-line-height, 1.5);
+  padding: 10px 14px;
+  overflow-wrap: break-word;
+}
+
+/* 就地状态行（loading / 错误分态）：在场绘制，i18n 文案 */
+#app > .vsidian-hover-popup .vsidian-hover-popup-state {
+  padding: 18px 14px;
+  color: var(--vscode-descriptionForeground, inherit);
+  overflow-wrap: break-word;
+}
+
+/* 错误分态修饰（验收反馈：与普通文字区分——主题错误色，一眼可辨
+   「文件问题」；loading 保持描述色） */
+#app > .vsidian-hover-popup .vsidian-hover-popup-state-error {
+  color: var(--vscode-errorForeground, #f14c4c);
+}
+
+/* ---- #220 悬停浮层笔记属性区（样式契约 chrome 域 hover-fm-section 条目；
+   引用专属样式入口——仅作用于浮层内 frontmatter 块，主阅读视图的属性
+   呈现不受影响） ---- */
+
+/* 属性区块：标题行成为悬停热区（hover/focus 显示切换按钮——不是悬停自动
+   展开；按钮是唯一操作入口） */
+.vsidian-embed-card .vsidian-hover-fm .vsidian-fm-header,
+.vsidian-hover-popup .vsidian-hover-fm .vsidian-fm-header {
+  position: relative;
+}
+
+/* 展开/折叠按钮：默认透明且不接指针（保留 Tab 可达性——整体隐藏类声明
+   会把按钮移出 Tab 序，键盘用户将永远无法到达）；标题行 hover 或按钮
+   focus-visible 时显示并接指针 */
+.vsidian-embed-card .vsidian-hover-fm-toggle,
+.vsidian-hover-popup .vsidian-hover-fm-toggle {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
+  border-radius: 5px;
+  background: var(--vscode-editor-background, transparent);
+  color: var(--vscode-icon-foreground, inherit);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease-out;
+}
+
+.vsidian-embed-card .vsidian-hover-fm .vsidian-fm-header:hover .vsidian-hover-fm-toggle,
+.vsidian-embed-card .vsidian-hover-fm-toggle:focus-visible,
+.vsidian-hover-popup .vsidian-hover-fm .vsidian-fm-header:hover .vsidian-hover-fm-toggle,
+.vsidian-hover-popup .vsidian-hover-fm-toggle:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.vsidian-embed-card .vsidian-hover-fm-toggle:focus-visible,
+.vsidian-hover-popup .vsidian-hover-fm-toggle:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #4fc1ff);
+  outline-offset: 1px;
+}
+
+/* chevron 方向：默认向下（展开态）；收起态旋转 -90° 指向右（展开方向） */
+.vsidian-embed-card .vsidian-hover-fm-toggle svg,
+.vsidian-hover-popup .vsidian-hover-fm-toggle svg {
+  display: block;
+}
+
+.vsidian-embed-card .vsidian-hover-fm-collapsed .vsidian-hover-fm-toggle svg,
+.vsidian-hover-popup .vsidian-hover-fm-collapsed .vsidian-hover-fm-toggle svg {
+  transform: rotate(-90deg);
+}
+
+/* 收起态：成型表格的属性行与降级源码块隐藏（标题行保留——折叠区骨架）；
+   展开 = 移除修饰类，行/源码回到阅读侧既有呈现。选择器带 #app 前缀并
+   叠加双类：压过 #140 阅读侧行规则的特异性（#app … .vsidian-fm-row 为
+   display:grid），源序兜底之外再留余量 */
+#app .vsidian-embed-card .vsidian-hover-fm.vsidian-hover-fm-collapsed .vsidian-fm-row,
+#app .vsidian-hover-popup .vsidian-hover-fm.vsidian-hover-fm-collapsed .vsidian-fm-row {
+  display: none;
+}
+
+#app .vsidian-embed-card .vsidian-hover-fm.vsidian-hover-fm-collapsed > pre,
+#app .vsidian-hover-popup .vsidian-hover-fm.vsidian-hover-fm-collapsed > pre {
+  display: none;
+}
+
+/* ---- #222 Reading 正文嵌入卡片（样式契约 content 域 reading-embed-card
+   条目；占位引用行 reading-embed-ref 条目）。卡片壳挂 Obsidian 别名
+   .markdown-embed（direct 级——主题/片段的嵌入容器规则天然命中）；
+   内容容器是嵌套的 .vsidian-view-reading，#app 正文样式随嵌套命中，
+   不复制第二套主题环境。#223 起卡片壳规则并列 Live 宿主
+   （.vsidian-live-embed，见下方 #223 段——两容器同款绘制） ---- */
+
+/* 卡片壳：只保留左侧引用竖条（#217 验收反馈：与 Reading 正观感对齐——
+   去整圈边框/圆角/灰底，白底直角 + 紫竖条，同正文引用块方向）。
+   #223 Live 挂载的宿主（.cm-content 内 widget）同款命中；display:block
+   使 inline 替换形态（span 宿主）内的卡片独立成块占满行宽 */
+#app .vsidian-view-reading .vsidian-reading-embed .vsidian-embed-card,
+#app .cm-editor .cm-content .vsidian-live-embed .vsidian-embed-card {
+  display: block;
+  margin: 0.5em 0;
+  border: none;
+  border-left: 3px solid var(--vsidian-quote-bar-color);
+  background-color: transparent;
+  overflow: hidden;
+}
+
+/* 顶部栏：文件名居左、打开入口居右（#217 验收反馈：去底色融入白底，
+   保留下分隔线区分文件名与内容；验收跟进：悬停浮层同款 header 并列，
+   浮层选择器置首、嵌入既有选择器置尾保持契约 endsWith 匹配） */
+#app > .vsidian-hover-popup .vsidian-hover-popup-header,
+#app .vsidian-embed-card .vsidian-embed-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
+}
+
+/* 文件名：描述色（成功后为目标根内相对路径） */
+#app > .vsidian-hover-popup .vsidian-hover-popup-title,
+#app .vsidian-embed-card .vsidian-embed-card-title {
+  font-size: 0.92em;
+  color: var(--vscode-descriptionForeground, inherit);
+  overflow-wrap: anywhere;
+}
+
+/* 右上角跳转目标文档入口：图标按钮（沿用现有 Vsidian 打开行为） */
+#app > .vsidian-hover-popup .vsidian-hover-popup-open,
+#app .vsidian-embed-card .vsidian-embed-card-open {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--vscode-icon-foreground, inherit);
+  cursor: pointer;
+}
+
+#app > .vsidian-hover-popup .vsidian-hover-popup-open:hover,
+#app > .vsidian-hover-popup .vsidian-hover-popup-open:focus-visible,
+#app .vsidian-embed-card .vsidian-embed-card-open:hover,
+#app .vsidian-embed-card .vsidian-embed-card-open:focus-visible {
+  border-color: var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
+  background: var(--vscode-editor-background, transparent);
+}
+
+#app > .vsidian-hover-popup .vsidian-hover-popup-open:focus-visible,
+#app .vsidian-embed-card .vsidian-embed-card-open:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #4fc1ff);
+  outline-offset: 1px;
+}
+
+/* 内容滚动区：长内容内部滚动。max-height 缺省 480（规格一期初值），
+   设置驱动的内联 max-height 优先（embed.maxHeight 设置项） */
+#app .vsidian-embed-card .vsidian-embed-card-scroll {
+  overflow: auto;
+  max-height: 480px;
+}
+
+/* 就地状态行（loading / 错误分态） */
+#app .vsidian-embed-card .vsidian-embed-card-state {
+  padding: 14px 12px;
+  color: var(--vscode-descriptionForeground, inherit);
+  overflow-wrap: anywhere;
+}
+
+/* 错误分态修饰（验收反馈：与普通文字区分——主题错误色，与悬停浮层
+   state-error 同口径） */
+#app .vsidian-embed-card .vsidian-embed-card-state-error {
+  color: var(--vscode-errorForeground, #f14c4c);
+}
+
+/* 卡片内 Reading 容器贴边微收（正文样式随嵌套命中，不复制主题） */
+#app .vsidian-embed-card .vsidian-embed-card-scroll .vsidian-view-reading {
+  padding: 8px 12px;
+}
+
+/* #217 验收反馈（行距对齐）：Live 卡片在 .cm-content 内，CM6 的
+   white-space: pre 级联进嵌套 Reading 容器——块 innerHTML 尾部的换行
+   文本节点被渲染为幽灵行盒（实测每块撑高约一行、列表逐项翻倍）。
+   嵌套容器重置回 normal（Reading 侧卡片与悬停浮层不在 .cm-content
+   内，天然无此问题） */
+#app .cm-editor .cm-content .vsidian-live-embed .vsidian-view-reading {
+  white-space: normal;
+}
+
+/* 占位引用行（一层展开/悬停浮层内的嵌入形态）：沿用双链链接形态，
+   保留 ![[ ]] 文本可辨识；与内部 Reading 的正文点击语义同通道 */
+.vsidian-embed-ref {
+  font-family: inherit;
+}
+
+/* 只读契约：嵌入卡片内任务 checkbox 不响应指针（JS disabled 双保险；
+   与悬停浮层同款规则并列，既有浮层选择器置尾保持契约匹配） */
+.vsidian-embed-card input[type="checkbox"],
+.vsidian-hover-popup input[type="checkbox"] {
+  pointer-events: none;
+}
+
+/* ---- #223 Live 正文嵌入宿主（样式契约 content 域 live-embed-widget
+   条目）。卡片壳复用上方 reading-embed-card 的并列规则（两容器同款
+   绘制：边条/边框/限高/状态行与 fm 折叠键规则随 #app .vsidian-embed-card
+   前缀天然命中）；宿主类是 Live 侧的片段定位入口 ---- */
+
+/* 下方形态（.vsidian-live-embed-below）：源码显形时卡片挂在源文行后的
+   block widget 宿主上——块级宿主独立成行、与源文行的间距由卡片壳的
+   margin 承担（相邻块级 margin 折叠，不叠加），此处仅钉住可定位性 */
+#app .cm-editor .cm-content .vsidian-live-embed-below {
+  display: block;
+}
+
+/* 隐形态呈现（验收反馈：不留隐形源码行）：宿主为块级 div（两形态一致），
+   卡片占满行宽、直接从源码行对齐；inline replace widget 前后各一枚
+   cm-widgetBuffer（默认各占一行文字高）改零高块级（display:block +
+   height:0，观感等同隐藏、布局盒保留作 posAtCoords 垂直坐标锚——
+   display:none 会摘除布局盒，ArrowDown 从上进入会越过嵌入行）
+   ——二者合起来消除「卡片与源码行之间错开一层」的观感。保持 inline
+   replace（行结构保留）是键盘垂直导航可进入嵌入行的前提（块级 replace
+   会被 CM6 跳过整行），呈现目标全部由本段规则承担 */
+#app .cm-editor .cm-content .vsidian-live-embed {
+  display: block;
+  /* Live 侧上下间距由宿主 padding 承担（卡片壳 margin 清零见下条）：
+     margin 折叠出行盒，CM6 高度记账（gutter/视口测算依据）不含它，
+     每卡漏记上下 margin 合量会造成行号与正文的错位逐卡累积；
+     padding 计入盒子高，记账与渲染一致 */
+  padding: 7px 0;
+}
+
+/* Live 宿主内卡片壳间距归零（间距已由宿主 padding 承担；Reading 侧
+   文档流不受此规则影响，保留原 margin 折叠语义） */
+#app .cm-editor .cm-content .vsidian-live-embed > .vsidian-embed-card {
+  margin: 0;
+}
+
+#app .cm-editor .cm-content .cm-line > .cm-widgetBuffer:has(+ .vsidian-live-embed),
+#app .cm-editor .cm-content .cm-line > .vsidian-live-embed + .cm-widgetBuffer {
+  display: block;
+  height: 0;
 }

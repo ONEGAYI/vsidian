@@ -91,6 +91,22 @@ function isInsideRoot(
 }
 
 /**
+ * 判定绝对路径是否位于根内（ADR-0008 边界的独立复用入口）：非绝对路径
+ * 一律不在根内（不可信形态不做 cwd 依赖解析——`path.relative` 会把相对
+ * 输入按 process.cwd() 补全，cwd 恰在根内时会误放行）。供 host 侧对
+ * **前端直供的绝对路径身份**做静态边界复核（#221 directTarget，P1-1
+ * review 修复）：文本解析路径经 planVaultLinkPath 规划天然带界，直供
+ * 身份必须显式过同一根内语义。
+ */
+export function isVaultPathInsideRoot(absolute: string, ctx: VaultLinkPathContext): boolean {
+  const ops = pathOps(ctx)
+  if (!ops.isAbsolute(absolute)) {
+    return false
+  }
+  return isInsideRoot(absolute, ctx.rootDir, ops)
+}
+
+/**
  * 规划根内相对目标的候选绝对路径（纯路径计算，无 IO）。
  *
  * 输入 rawPath 为**已解码**的路径文本（percent-decode、fragment/query

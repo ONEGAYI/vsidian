@@ -15,7 +15,9 @@
 // 降级规则（不支持即按原文显示，不改写源文——源码保真）：
 // - 路径裸含 ^（Obsidian 文件名非法字符）、标题文本含 ^（非 #^ 开头）、
 //   空/越集块 ID、多级标题 [[a#b#c]]、空锚点 [[#]]：parse 返回 null
-// - 嵌入 ![[…]]、残缺嵌套（前置 [ 或内部含 [ ]）：扫描层不命中
+// - 嵌入 ![[…]]、残缺嵌套（前置 [ 或内部含 [ ]）：双链扫描层不命中
+//   （#222 起嵌入由独立扫描器 scanEmbedsInLine 识别——语法角色分离，
+//   守卫不动；嵌入内部解析复用本模块 parseWikilinkInner）
 // - 扩展名省略按 Markdown 处理（宿主补 .md 候选，本模块不管文件系统）
 //
 // 规范化契约（写入测试固定）：
@@ -157,6 +159,89 @@ export function scanWikilinksInLine(line: string, base = 0): WikilinkOccurrence[
 /** 找包含 col（from <= col < to）的出现；未命中返回 null */
 export function wikilinkAtCol(line: string, col: number): WikilinkOccurrence | null {
   for (const hit of scanWikilinksInLine(line)) {
+    if (hit.from <= col && col < hit.to) {
+      return hit
+    }
+  }
+  return null
+}
+
+/** 一次嵌入出现（全文 offset 语义；from 含 `!`，to 含 `]]`） */
+export interface EmbedOccurrence {
+  from: number
+  to: number
+  /** `![[` 与 `]]` 之间的原文（未 trim——宿主解析自带规范化） */
+  inner: string
+}
+
+/**
+ * 扫描单行文本中的全部合法嵌入（`![[…]]`）出现（工单 #222；base 为该行
+ * 首的全文 offset，缺省 0）。与 scanWikilinksInLine 互为镜像的**独立语法
+ * 角色**：双链扫描器的前置 `!` 守卫保持不动，嵌入经本扫描器识别——两者
+ * 对同一文本的命中集合互斥（`[[x]]` 不被本函数命中、`![[x]]` 不被双链
+ * 扫描命中）。
+ *
+ * 守卫：`!` 前为 `[`（`[![[x]]](url)` 链接域嵌套）或 `!`（`!![[x]]` 字面
+ * 前缀）不命中；内部含 `[`/`]`/换行或形态非法（parseWikilinkInner 同源
+ * 降级）不命中。内部目标解析与双链完全同源（复用 parseWikilinkInner：
+ * 全文/标题章节/块/别名、本文件锚点 `![[#锚]]`）。扫描从命中尾部继续
+ * （不重叠）；未闭合/残缺只推进到本 `![[` 之后，其后的合法嵌入照常命中。
+ */
+export function scanEmbedsInLine(line: string, base = 0): EmbedOccurrence[] {
+  if (!line.includes('![[')) {
+    return [] // 快速预检（绝大多数行零嵌入）
+  }
+  const out: EmbedOccurrence[] = []
+  let at = 0
+  for (;;) {
+    const open = line.indexOf('![[', at)
+    if (open < 0) {
+      return out
+    }
+    const prev = open > 0 ? line[open - 1] : ''
+    if (prev === '[' || prev === '!') {
+      at = open + 1 // 前置换过守卫字符，继续找下一处 ![[（不吞后续合法嵌入）
+      continue
+    }
+    const close = line.indexOf(']]', open + 3)
+    const inner = close >= 0 ? line.slice(open + 3, close) : null
+    if (inner !== null && !/[\[\]\n]/.test(inner) && parseWikilinkInner(inner) !== null) {
+      out.push({ from: base + open, to: base + close + 2, inner })
+      at = close + 2 // 命中：后续扫描不与自身重叠
+      continue
+    }
+    // 未闭合/内部残缺/形态非法：推进到本 ![[ 之后（同双链扫描的容错语义）
+    at = open + 3
+  }
+}
+
+/**
+ * 判定整行是否恰为**单个独占嵌入**（工单 #222 阅读挂载适配的行独占判定）：
+ * trim 后整行从 `![[` 到 `]]`、无其他内容（首尾空白容忍——≤3 空格缩进在
+ * Markdown 中仍是段落；行内代码反引号包裹因是行内容的一部分而不独占）。
+ * 命中返回该出现；混排/多嵌入/残缺形态返回 null（按源文降级，1.5 期再接）。
+ *
+ * 行独占限制**只属挂载适配**（Reading 正文流替换该行）：索引抽取
+ * （vaultLinkExtract）与目标解析（hoverDocAccess）不设此限。
+ */
+export function soleEmbedOfLine(line: string): EmbedOccurrence | null {
+  const trimmed = line.trim()
+  if (!trimmed.startsWith('![[')) {
+    return null
+  }
+  const hits = scanEmbedsInLine(trimmed)
+  if (hits.length !== 1) {
+    return null
+  }
+  const hit = hits[0]!
+  return hit.from === 0 && hit.to === trimmed.length ? hit : null
+}
+
+/** 找包含 col（from <= col < to）的嵌入出现；未命中返回 null（#217 验收
+ *  反馈：嵌入源码恢复链接跳转语义——点击命中判定与 wikilinkAtCol 镜像；
+ *  两扫描器命中集合互斥，判定次序无关） */
+export function embedAtCol(line: string, col: number): EmbedOccurrence | null {
+  for (const hit of scanEmbedsInLine(line)) {
     if (hit.from <= col && col < hit.to) {
       return hit
     }

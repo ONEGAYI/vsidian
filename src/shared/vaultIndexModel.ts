@@ -23,8 +23,10 @@ export interface VaultFileEntry {
   birthtimeMs?: number
 }
 
-/** 出链种类：双链 / 普通内联链接 / 图片 / 引用式链接定义。 */
-export type VaultEdgeKind = 'wikilink' | 'mdlink' | 'image' | 'refdef'
+/** 出链种类：双链 / 普通内联链接 / 图片 / 引用式链接定义 / 嵌入（#222：
+ *  `![[…]]` 独立语法角色——解析锚点拆列与改写语义同 wikilink，快照码表
+ *  尾追 code 4 兼容旧快照）。 */
+export type VaultEdgeKind = 'wikilink' | 'mdlink' | 'image' | 'refdef' | 'embed'
 
 /** 一条出链：来源文档 → 目标（保留断链原样，未命中也入索引）。
  *  target 为链接原文的目标形态（含省略扩展名、相对段等）；

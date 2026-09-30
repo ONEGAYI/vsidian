@@ -30,13 +30,15 @@ export type { VaultEdge, VaultEdgeKind, VaultFileEntry, VaultFileKind, VaultInde
 /** 快照格式版本：片/manifest 结构不兼容演进时递增，加载侧拒读异版本。
  *  v2：文件行加 kind 列（markdown/asset），边行加 resolvedTarget 列。
  *  v2 内追加（不升版本）：文件行第 6 列可选 birthtimeMs（>0 才写）——
- *  旧片缺列容忍（undefined），增量重扫自愈补齐；列只追加不改语义。 */
+ *  旧片缺列容忍（undefined），增量重扫自愈补齐；列只追加不改语义。
+ *  边 kind 码表尾追 'embed'（#222，code 4）：旧代码读写 0–3 不受影响；
+ *  旧代码读到 code 4 抛错走损坏重建兜底（降级方向安全）。 */
 export const SNAPSHOT_FORMAT_VERSION = 2
 
 /** 单次提交的片数上限（shard 文件名三位补零）。 */
 export const MAX_SHARD_COUNT = 1000
 
-const EDGE_KIND_CODE: readonly VaultEdgeKind[] = ['wikilink', 'mdlink', 'image', 'refdef']
+const EDGE_KIND_CODE: readonly VaultEdgeKind[] = ['wikilink', 'mdlink', 'image', 'refdef', 'embed']
 const KIND_BY_CODE = new Map(EDGE_KIND_CODE.map((k, i) => [i, k] as const))
 const FILE_KIND_CODE: readonly VaultFileKind[] = ['markdown', 'asset']
 const FILE_KIND_BY_CODE = new Map(FILE_KIND_CODE.map((k, i) => [i, k] as const))

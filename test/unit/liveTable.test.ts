@@ -341,6 +341,29 @@ describe('live 表格装饰', () => {
       .toHaveLength(2)
   })
 
+  it('转义管道反斜杠随光标行显隐——触及该行浅色显形，离开隐藏（Obsidian 对齐）', () => {
+    const safe = '| A | B |\n| --- | :---: |\n| | x\\|y |\n| `a|b` | z |\n'
+    // 光标在文末（不在含 \| 的行）：隐藏版命中、显形版为空
+    const away = build(safe, { anchor: safe.length })
+    expect(textsFor(away, LIVE_CLASS_NAMES.tableEscapedPipe, safe)).toEqual(['\\'])
+    expect(textsFor(away, LIVE_CLASS_NAMES.tableEscapedPipeReveal, safe)).toEqual([])
+    // 光标在含 \| 行内：显形版命中同一字符、隐藏版为空
+    const caret = safe.indexOf('x\\') + 1
+    const touch = build(safe, { anchor: caret })
+    expect(textsFor(touch, LIVE_CLASS_NAMES.tableEscapedPipe, safe)).toEqual([])
+    expect(textsFor(touch, LIVE_CLASS_NAMES.tableEscapedPipeReveal, safe)).toEqual(['\\'])
+    // 非空选区与该行严格重叠：显形（任一 range 命中即可）
+    const overlap = buildLivePreviewDecorations(
+      Text.of(safe.split('\n')),
+      EditorSelection.single(safe.indexOf('x\\'), safe.length),
+    )
+    expect(textsFor(overlap, LIVE_CLASS_NAMES.tableEscapedPipeReveal, safe)).toEqual(['\\'])
+    // 光标在相邻的分隔行：不显形，保持隐藏
+    const prev = build(safe, { anchor: safe.indexOf(':---:') })
+    expect(textsFor(prev, LIVE_CLASS_NAMES.tableEscapedPipeReveal, safe)).toEqual([])
+    expect(textsFor(prev, LIVE_CLASS_NAMES.tableEscapedPipe, safe)).toEqual(['\\'])
+  })
+
   it.each([
     ['a|b', '---|---', ' | ', 2],
     ['a|b|c', '---|---|---', ' | | ', 3],

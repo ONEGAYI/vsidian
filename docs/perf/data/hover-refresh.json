@@ -1,0 +1,57 @@
+{
+  "ticket": "#224",
+  "date": "2026-09-30",
+  "note": "引用视图同步定向测量（#225 全量报告的素材）。环境：vitest + jsdom（node 直驱 DocumentSession / EmbedCardManager，非真宿主时序）；测量脚本为临时文件（跑完已删），方法与断言口径在此记录。",
+  "params": {
+    "debounceMs": 350,
+    "maxWaitMs": 2000,
+    "cacheEntryLimit": 24,
+    "cacheByteLimit": 2097152,
+    "watchTargetLimit": 128,
+    "embedEntryLimit": 64
+  },
+  "measurements": [
+    {
+      "name": "读取通道：并发合并 + 缓存命中（重复引用）",
+      "setup": "同请求形态 100 笔：前 50 并发（重复引用首载形态）、后 50 顺次（缓存命中路径）",
+      "data": {
+        "requests": 100,
+        "reads": 1,
+        "hits": 50,
+        "misses": 50,
+        "cacheEntries": 1,
+        "cacheBytes": 440,
+        "results": 100,
+        "elapsedMs": 6.9
+      },
+      "reading": "并发 50 笔同形态请求合并为 1 次读取（在途去重）；后续 50 笔全部缓存命中（读取端口零触达）；100 笔回包全部送达"
+    },
+    {
+      "name": "缓存字节边界：大文多形态写入",
+      "setup": "12 个形态各读 120KB 全文（UTF-16 计 240KB/条），写入默认 2MiB 上限缓存",
+      "data": {
+        "written": 12,
+        "entries": 8,
+        "bytes": 1966080,
+        "bytesMiB": 1.88
+      },
+      "reading": "12 条写入后字节 1.88MiB ≤ 2MiB 上限（按插入序淘汰 4 条）；条目数 8 ≤ 24 上限"
+    },
+    {
+      "name": "嵌入状态库：80 实例挂载与 dispose 回收",
+      "setup": "80 个不同语义键挂载 + 全量装载回包 + dispose（jsdom）",
+      "data": {
+        "mounted": 80,
+        "requests": 80,
+        "domCards": 80,
+        "elapsedMs": 154.1,
+        "domCardsAfterDispose": 0
+      },
+      "reading": "全部在场时条目数超上限（64）不淘汰仍有效实例（设计内容忍——在场卡片数实际由视口窗口约束）；dispose 后卡片 DOM 归零、订阅整体释放"
+    }
+  ],
+  "evidenceElsewhere": {
+    "离屏回收不重置状态": "test/unit/embedCard.test.ts「离屏 entry 失效」用例（fm 展开/滚动保留 + 重挂重载）与浏览器 readingEmbed 场景 F（视口回收重挂状态保持）",
+    "编辑无明显阻塞": "协调器事件入口对未订阅目标 O(1) 早退（has 检查）；防抖窗内高频输入合并一轮（coordinator 测试钉住）；#225 全量编辑阻塞测量"
+  }
+}

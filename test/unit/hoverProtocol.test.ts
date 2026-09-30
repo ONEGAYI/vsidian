@@ -1,0 +1,363 @@
+// 悬停预览消息协议契约（#218）：hover.request / hover.result 的运行期
+// 校验器行为——校验器与联合类型三处不同步 = 静默丢消息（protocol-notes
+// 陷阱清单），此处钉住合法形态放行、非法形态整体拒绝（不部分读取）。
+// #220 扩展：来源资源通道（image.request / link.activate / wikilink.activate
+// 的可选 sourceDocUri——B 文档身份）与 view.state hoverPreview 探针的
+// 属性区/图片观测字段。
+// #224 扩展：订阅与推送消息族（hover.watch / hover.unwatch /
+// hover.invalidated——引用视图跟随目标变更的通道）。
+import { describe, expect, it } from 'vitest'
+import {
+  isHostToWebview,
+  isWebviewToHost,
+  type HostToWebview,
+  type WebviewToHost,
+} from '../../src/shared/protocol'
+
+/** 合法 hover.request 基线（会话守卫字段 + 实例身份 + 源位置 + 目标原文） */
+function validRequest(): WebviewToHost {
+  return {
+    kind: 'hover.request',
+    sessionId: 'panel-1',
+    docUri: 'file:///d%3A/notes/a.md',
+    reqId: 1,
+    instanceId: 'hover-1',
+    sourceStart: 12,
+    sourceEnd: 24,
+    target: '目标笔记',
+  }
+}
+
+/** 合法 hover.result 成功形态基线（规范目标身份 + 版本 + LF 全文 + 范围） */
+function validResultOk(): HostToWebview {
+  return {
+    kind: 'hover.result',
+    reqId: 1,
+    instanceId: 'hover-1',
+    ok: true,
+    target: { fsPath: 'D:\\notes\\目标笔记.md', relPath: '目标笔记.md' },
+    version: 3,
+    text: '# 标题\n\n正文\n',
+    range: { start: 0, end: 13 },
+    scope: { kind: 'full' },
+  }
+}
+
+/** 合法 hover.result 失败形态基线（就地错误分态） */
+function validResultFail(): HostToWebview {
+  return {
+    kind: 'hover.result',
+    reqId: 1,
+    instanceId: 'hover-1',
+    ok: false,
+    reason: 'not-found',
+  }
+}
+
+describe('hover.request 校验（webview → 宿主）', () => {
+  it('合法形态放行', () => {
+    expect(isWebviewToHost(validRequest())).toBe(true)
+  })
+
+  it('缺任一会话守卫/身份字段整体拒绝', () => {
+    const base = validRequest() as Record<string, unknown>
+    for (const key of ['sessionId', 'docUri', 'reqId', 'instanceId', 'sourceStart', 'sourceEnd', 'target']) {
+      const broken: Record<string, unknown> = { ...base }
+      delete broken[key]
+      expect(isWebviewToHost(broken), `缺 ${key} 应拒绝`).toBe(false)
+    }
+  })
+
+  it('reqId 须为正整数；offset 与身份须为非负整数/非空字符串', () => {
+    expect(isWebviewToHost({ ...validRequest(), reqId: 0 })).toBe(false)
+    expect(isWebviewToHost({ ...validRequest(), reqId: 1.5 })).toBe(false)
+    expect(isWebviewToHost({ ...validRequest(), sourceStart: -1 })).toBe(false)
+    expect(isWebviewToHost({ ...validRequest(), sourceEnd: -1 })).toBe(false)
+    expect(isWebviewToHost({ ...validRequest(), instanceId: '' })).toBe(false)
+    expect(isWebviewToHost({ ...validRequest(), target: 3 })).toBe(false)
+  })
+
+  it('P3-5 源区间有序：sourceStart 不得大于 sourceEnd（两字段同在时拒绝倒置）', () => {
+    expect(isWebviewToHost({ ...validRequest(), sourceStart: 20, sourceEnd: 12 })).toBe(false)
+    // 相等合法（空区间/中性值——反链悬停的 sourceStart=sourceEnd=0 先例）
+    expect(isWebviewToHost({ ...validRequest(), sourceStart: 12, sourceEnd: 12 })).toBe(true)
+  })
+
+  it('#219 普通链接形态：linkHref 可选字符串（缺省双链；非字符串拒绝）', () => {
+    expect(isWebviewToHost({ ...validRequest(), linkHref: 'relative.md#章' })).toBe(true)
+    expect(isWebviewToHost(validRequest()), '缺省仍为双链形态').toBe(true)
+    expect(isWebviewToHost({ ...validRequest(), linkHref: 3 })).toBe(false)
+  })
+})
+
+describe('hover.result 校验（宿主 → webview）', () => {
+  it('成功与失败两形态均放行', () => {
+    expect(isHostToWebview(validResultOk())).toBe(true)
+    expect(isHostToWebview(validResultFail())).toBe(true)
+  })
+
+  it('reqId/instanceId 缺失或非法整体拒绝', () => {
+    expect(isHostToWebview({ ...validResultOk(), reqId: 0 } as unknown as Record<string, unknown>)).toBe(false)
+    expect(isHostToWebview({ ...validResultOk(), instanceId: '' } as unknown as Record<string, unknown>)).toBe(false)
+    const noReq: Record<string, unknown> = { ...(validResultOk() as unknown as Record<string, unknown>) }
+    delete noReq['reqId']
+    expect(isHostToWebview(noReq)).toBe(false)
+  })
+
+  it('成功形态须携带完整目标身份/版本/全文/范围/范围选择器', () => {
+    const base = validResultOk() as unknown as Record<string, unknown>
+    for (const key of ['target', 'version', 'text', 'range', 'scope']) {
+      const broken: Record<string, unknown> = { ...base }
+      delete broken[key]
+      expect(isHostToWebview(broken), `成功形态缺 ${key} 应拒绝`).toBe(false)
+    }
+    expect(isHostToWebview({ ...base, version: -1 })).toBe(false)
+    expect(isHostToWebview({ ...base, range: { start: 5, end: 2 } })).toBe(false)
+    expect(isHostToWebview({ ...base, scope: { kind: 'unknown' } })).toBe(false)
+    expect(
+      isHostToWebview({ ...base, target: { fsPath: 'x.md' } }),
+      '目标身份缺 relPath 应拒绝',
+    ).toBe(false)
+  })
+
+  it('失败形态 reason 限定错误分态枚举；未知 reason 拒绝', () => {
+    const base = validResultFail() as unknown as Record<string, unknown>
+    for (const reason of ['unsupported', 'no-workspace', 'escape', 'not-found', 'non-markdown', 'read-failed', 'anchor-missing']) {
+      expect(isHostToWebview({ ...base, reason }), `reason=${reason} 应放行`).toBe(true)
+    }
+    expect(isHostToWebview({ ...base, reason: 'whatever' })).toBe(false)
+    expect(isHostToWebview({ ...base, ok: true, reason: 'not-found' })).toBe(false)
+  })
+
+  it('#219 失败形态 anchor（锚点原文）可选字符串；非字符串拒绝', () => {
+    const base = validResultFail() as unknown as Record<string, unknown>
+    expect(isHostToWebview({ ...base, reason: 'anchor-missing', anchor: '不存在的标题' })).toBe(true)
+    expect(isHostToWebview({ ...base, reason: 'anchor-missing' }), 'anchor 可缺省').toBe(true)
+    expect(isHostToWebview({ ...base, anchor: 3 })).toBe(false)
+  })
+
+  it('#219 成功形态 scope 三态：full / heading（附锚点）/ block（附 ^ 前缀锚点）', () => {
+    const base = validResultOk() as unknown as Record<string, unknown>
+    expect(isHostToWebview({ ...base, scope: { kind: 'heading', anchor: '章节' } })).toBe(true)
+    expect(isHostToWebview({ ...base, scope: { kind: 'block', anchor: '^blk1' } })).toBe(true)
+    expect(isHostToWebview({ ...base, scope: { kind: 'heading' } }), 'heading 缺 anchor 应拒绝').toBe(false)
+    expect(isHostToWebview({ ...base, scope: { kind: 'block', anchor: 3 } })).toBe(false)
+  })
+})
+
+// #220 来源资源：悬停浮层内 B 文档的图片/链接以 B 为来源解析——webview
+// 在既有通道上附可选 sourceDocUri（B 的 fsPath；缺省 = 面板自身文档，
+// 向后兼容）。此处钉住三条消息的校验器行为。
+describe('#220 来源资源通道：sourceDocUri 可选字段校验', () => {
+  const SRC = 'D:\\notes\\sub\\b.md'
+
+  it('image.request：sourceDocUri 可选非空字符串；缺省与非法形态', () => {
+    const base = {
+      kind: 'image.request',
+      sessionId: 'panel-1',
+      docUri: 'file:///d%3A/notes/a.md',
+      reqId: 1,
+      src: './img.png',
+    } as Record<string, unknown>
+    expect(isWebviewToHost({ ...base, sourceDocUri: SRC })).toBe(true)
+    expect(isWebviewToHost(base), '缺省 = 面板自身文档（向后兼容）').toBe(true)
+    expect(isWebviewToHost({ ...base, sourceDocUri: '' }), '空串拒绝').toBe(false)
+    expect(isWebviewToHost({ ...base, sourceDocUri: 3 })).toBe(false)
+  })
+
+  it('link.activate / wikilink.activate：sourceDocUri 同一口径', () => {
+    const link = {
+      kind: 'link.activate',
+      sessionId: 'panel-1',
+      docUri: 'file:///d%3A/notes/a.md',
+      href: 'relative.md',
+      srcStart: 0,
+      srcEnd: 5,
+    } as Record<string, unknown>
+    expect(isWebviewToHost({ ...link, sourceDocUri: SRC })).toBe(true)
+    expect(isWebviewToHost(link)).toBe(true)
+    expect(isWebviewToHost({ ...link, sourceDocUri: '' })).toBe(false)
+
+    const wikilink = {
+      kind: 'wikilink.activate',
+      sessionId: 'panel-1',
+      docUri: 'file:///d%3A/notes/a.md',
+      target: '另一笔记',
+      srcStart: 0,
+      srcEnd: 5,
+    } as Record<string, unknown>
+    expect(isWebviewToHost({ ...wikilink, sourceDocUri: SRC })).toBe(true)
+    expect(isWebviewToHost(wikilink)).toBe(true)
+    expect(isWebviewToHost({ ...wikilink, sourceDocUri: null })).toBe(false)
+  })
+
+  it('view.state hoverPreview 探针：#220 新增 fm（三态枚举）与 imageSrcs（字符串数组）', () => {
+    const state = {
+      kind: 'view.state',
+      text: 'x',
+      docLength: 1,
+      lineCount: 1,
+      renderedLines: 1,
+      hoverPreview: {
+        open: true,
+        state: 'content',
+        note: 'sub/b.md',
+        blocks: 3,
+        scope: 'full',
+        fm: 'collapsed',
+        imageSrcs: ['vscode-webview://res/img.png'],
+      },
+    } as Record<string, unknown>
+    expect(isWebviewToHost(state)).toBe(true)
+    // 旧形态（无新字段）仍放行——探针字段可选，宿主侧向后兼容
+    const legacy = {
+      ...state,
+      hoverPreview: { open: false, state: 'loading', note: '', blocks: 0, scope: '' },
+    }
+    expect(isWebviewToHost(legacy)).toBe(true)
+    // 非法形态：fm 枚举外取值 / imageSrcs 非字符串数组
+    expect(
+      isWebviewToHost({ ...state, hoverPreview: { ...(state.hoverPreview as object), fm: 'half' } }),
+    ).toBe(false)
+    expect(
+      isWebviewToHost({ ...state, hoverPreview: { ...(state.hoverPreview as object), imageSrcs: ['a', 3] } }),
+    ).toBe(false)
+  })
+})
+
+// #221 全入口悬停：面板条目（反链/出链）的目标身份是宿主快照携带的
+// 绝对 fsPath（± 锚点），不走 target/linkHref 文本解析——hover.request
+// 增可选 directTarget 承载；hover.test.pointer 钩子扩展 Live 与面板
+// 入口（宿主测试无法派发真实鼠标，经钩子走同一委托处理器）。
+describe('#221 全入口悬停：directTarget 与 hover.test.pointer 扩展校验', () => {
+  it('hover.request 可选 directTarget：形态合法放行、非法整体拒绝、旧形态不变', () => {
+    const base = validRequest()
+    // 反链面板条目：直接目标无锚点（来源文档全文）
+    expect(isWebviewToHost({ ...base, directTarget: { fsPath: 'D:\\notes\\来源.md' } })).toBe(true)
+    // 出链面板条目：锚点（标题原文或 ^块id）
+    expect(isWebviewToHost({ ...base, directTarget: { fsPath: 'D:\\notes\\目标.md', anchor: '^blk1' } })).toBe(true)
+    // 断链出链条目：空串 fsPath 合法（宿主回 not-found 分态，条目仍可悬停）
+    expect(isWebviewToHost({ ...base, directTarget: { fsPath: '', anchor: 'x' } })).toBe(true)
+    // anchor 可选；旧形态（无 directTarget）仍放行——Reading 双链/普通链接路径不变
+    expect(isWebviewToHost(base)).toBe(true)
+    // 非法形态：anchor 非字符串 / directTarget 非对象 / fsPath 非字符串
+    expect(isWebviewToHost({ ...base, directTarget: { fsPath: 'D:\\notes\\x.md', anchor: 3 } })).toBe(false)
+    expect(isWebviewToHost({ ...base, directTarget: 'D:\\notes\\x.md' })).toBe(false)
+    expect(isWebviewToHost({ ...base, directTarget: null })).toBe(false)
+    expect(isWebviewToHost({ ...base, directTarget: { anchor: 'x' } })).toBe(false)
+  })
+
+  it('hover.test.pointer：link 枚举扩展 Live/面板入口与 ctrlKey 修饰位', () => {
+    // 宿主 → webview 方向的注入钩子（集成测试经 postToPanel 派发真实
+    // mouseover/mouseout 的通道）
+    const base = { kind: 'hover.test.pointer', action: 'enter' as const, index: 0 }
+    // 既有枚举不回归
+    expect(isHostToWebview(base)).toBe(true)
+    expect(isHostToWebview({ ...base, link: 'wikilink' })).toBe(true)
+    expect(isHostToWebview({ ...base, link: 'md' })).toBe(true)
+    // #221 扩展：Live 双链/普通链接与反链/出链条目
+    expect(isHostToWebview({ ...base, link: 'live-wikilink' })).toBe(true)
+    expect(isHostToWebview({ ...base, link: 'live-md' })).toBe(true)
+    expect(isHostToWebview({ ...base, link: 'backlink' })).toBe(true)
+    expect(isHostToWebview({ ...base, link: 'outlink' })).toBe(true)
+    // Live Ctrl+悬停钩子的修饰位（缺省不带 = 直接悬停口径）
+    expect(isHostToWebview({ ...base, link: 'live-wikilink', ctrlKey: true })).toBe(true)
+    expect(isHostToWebview({ ...base, link: 'live-wikilink', ctrlKey: false })).toBe(true)
+    expect(isHostToWebview({ ...base, ctrlKey: 'yes' })).toBe(false)
+    // 补触发路径（验收反馈：指针已在链接上再按 Ctrl）——modkey 动作
+    expect(isHostToWebview({ ...base, action: 'modkey' })).toBe(true)
+    expect(isHostToWebview({ ...base, action: 'unknown' })).toBe(false)
+    // 非法枚举拒绝
+    expect(isHostToWebview({ ...base, link: 'unknown' })).toBe(false)
+  })
+})
+
+// #224 引用视图同步：订阅（webview → 宿主）与失效推送（宿主 → webview）
+// 消息族。watch 的 fsPath 为 hover.result 成功回包送达的目标身份（webview
+// 不自行解析路径）；invalidated 的 status 三态与 vaultIndex onTargetChange
+// 同口径（changed/deleted/stale），generation 单调递增。
+describe('#224 订阅与推送：hover.watch / hover.unwatch / hover.invalidated', () => {
+  const baseWatch = {
+    kind: 'hover.watch',
+    sessionId: 'panel-1',
+    docUri: 'file:///d%3A/notes/a.md',
+    fsPath: 'D:\\notes\\b.md',
+    instanceId: 'embed-1',
+  } as Record<string, unknown>
+
+  it('hover.watch / hover.unwatch：合法形态放行；缺任一字段整体拒绝', () => {
+    expect(isWebviewToHost(baseWatch)).toBe(true)
+    expect(isWebviewToHost({ ...baseWatch, kind: 'hover.unwatch' })).toBe(true)
+    for (const key of ['sessionId', 'docUri', 'fsPath', 'instanceId']) {
+      for (const kind of ['hover.watch', 'hover.unwatch']) {
+        const broken: Record<string, unknown> = { ...baseWatch, kind }
+        delete broken[key]
+        expect(isWebviewToHost(broken), `${kind} 缺 ${key} 应拒绝`).toBe(false)
+      }
+    }
+    // 空串拒绝（fsPath/instanceId 是身份字段；docUri/sessionId 同既有口径）
+    expect(isWebviewToHost({ ...baseWatch, fsPath: '' })).toBe(false)
+    expect(isWebviewToHost({ ...baseWatch, instanceId: '' })).toBe(false)
+    expect(isWebviewToHost({ ...baseWatch, fsPath: 3 })).toBe(false)
+  })
+
+  it('hover.invalidated：status 三态放行、generation 非负整数；非法形态拒绝', () => {
+    const base = {
+      kind: 'hover.invalidated',
+      fsPath: 'D:\\notes\\b.md',
+      status: 'changed',
+      generation: 1,
+    } as Record<string, unknown>
+    expect(isHostToWebview(base)).toBe(true)
+    expect(isHostToWebview({ ...base, status: 'deleted' })).toBe(true)
+    expect(isHostToWebview({ ...base, status: 'stale' })).toBe(true)
+    for (const key of ['fsPath', 'status', 'generation']) {
+      const broken: Record<string, unknown> = { ...base }
+      delete broken[key]
+      expect(isHostToWebview(broken), `缺 ${key} 应拒绝`).toBe(false)
+    }
+    expect(isHostToWebview({ ...base, status: 'whatever' })).toBe(false)
+    expect(isHostToWebview({ ...base, generation: -1 })).toBe(false)
+    expect(isHostToWebview({ ...base, generation: 1.5 })).toBe(false)
+    expect(isHostToWebview({ ...base, fsPath: '' })).toBe(false)
+  })
+})
+
+// ---- 修 2（review 第二轮 P3）：view.state readingEmbed 观测条目的 host 字段 ----
+// #223 起 host 区分容器（reading 块挂载 / live widget 挂载），类型已声明
+// host?: 'reading' | 'live' 但校验器未跟随——非法 host 值（联合外字符串/
+// 非字符串）会被放行进宿主，观测面与联合类型三处不同步即静默脏数据。
+describe('view.state readingEmbed 探针：host 字段入校验器', () => {
+  function stateWithEmbed(entry: Record<string, unknown>): Record<string, unknown> {
+    return {
+      kind: 'view.state',
+      text: '# t',
+      docLength: 4,
+      lineCount: 1,
+      renderedLines: 1,
+      readingEmbed: [
+        {
+          inner: '![[x]]',
+          state: 'content',
+          note: 'x.md',
+          blocks: 2,
+          scope: 'full',
+          fm: 'none',
+          maxHeightPx: 200,
+          ...entry,
+        },
+      ],
+    }
+  }
+
+  it('合法形态放行（host 缺省 / reading / live）', () => {
+    expect(isWebviewToHost(stateWithEmbed({}))).toBe(true)
+    expect(isWebviewToHost(stateWithEmbed({ host: 'reading' }))).toBe(true)
+    expect(isWebviewToHost(stateWithEmbed({ host: 'live' }))).toBe(true)
+  })
+
+  it('host 非法值整体拒绝（联合外字符串 / 非字符串）', () => {
+    expect(isWebviewToHost(stateWithEmbed({ host: 'panel' }))).toBe(false)
+    expect(isWebviewToHost(stateWithEmbed({ host: 42 }))).toBe(false)
+  })
+})

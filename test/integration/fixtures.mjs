@@ -984,7 +984,167 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   writeFileSync(path.join(wsDir, 'batch-moved.md'), BATCH_MOVED_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'assets', 'batch-pic.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
   writeFileSync(path.join(wsDir, 'wikilinks.md'), WIKILINKS_DOC, 'utf8')
+  // #218 悬停预览：独立父文档（存在目标 + 缺失目标双链；不与共享样本的
+  // 双链计数断言互相干扰——wikilinks.md 有 liveWikilinkCount===4 钉住（3 双链
+  // + 1 混排嵌入 mark，#217 验收反馈起嵌入挂双链类））。
+  // #219 追加局部锚点（章节/块/失效）与普通链接（全文/章节/页内/外站）
+  // 段落——前两个双链序号不变（#218 用例 index 0/1 依赖）
+  writeFileSync(path.join(wsDir, '悬停预览.md'), [
+    '# 悬停预览样例',
+    '',
+    '指向 [[目标笔记]] 与缺失目标 [[悬停缺失目标]]。',
+    '',
+    '局部：[[悬停 局部目标#章节甲]]、块 [[悬停 局部目标#^hover-blk]] 与失效 [[悬停 局部目标#没有的标题]]。',
+    '',
+    '链接 [全文](悬停 局部目标.md)、[章节](悬停 局部目标.md#章节甲) 与 [页内](#悬停预览样例)。',
+    '',
+    '外部 [外站](https://example.com) 不预览。',
+    '',
+    // #220 来源资源段（追加在尾部：既有 #218/#219 用例的双链 index 0-4 与
+    // 普通链接 index 0-2 不受影响）；目标在子目录 hover-assets/ 内（双链走
+    // 根内相对路径）——其内相对图片/双链只有按 B 目录解析才能命中（按根/
+    // A 目录解析即 not-found——B 身份解析的直接证据）
+    '资源 [[hover-assets/悬停 资源目标]] 与 [资源链接](hover-assets/悬停 资源目标.md)。',
+    '',
+  ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, '目标笔记.md'), TARGET_NOTE_DOC, 'utf8')
+  // #222 嵌入：父文档（独占行全文/章节嵌入 + 混排 + 缺失目标）与目标文档
+  // （frontmatter + 任务 + 章节结构 + 二层嵌入——一层展开场景）；二层目标
+  // 文件名含空格（嵌入 inner 字面路径解析）。嵌入改写文档独立成组（rename
+  // 用例的引用者，与漂移保护用例不共享）
+  writeFileSync(path.join(wsDir, '嵌入样例.md'), [
+    '# 嵌入样例',
+    '',
+    '![[嵌入目标]]',
+    '',
+    '混排嵌入 ![[嵌入目标]] 保留源文。',
+    '',
+    '![[嵌入目标#章节一]]',
+    '',
+    '![[嵌入缺失目标]]',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, '嵌入目标.md'), [
+    '---',
+    'title: 嵌入目标',
+    '---',
+    '',
+    '# 嵌入目标总览',
+    '',
+    '- [ ] 嵌入内任务',
+    '',
+    '## 章节一',
+    '',
+    '章节一段落。',
+    '',
+    '## 章节二',
+    '',
+    '![[嵌入 二层目标]]',
+    '',
+    '乙段。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, '嵌入 二层目标.md'), [
+    '# 二层目标',
+    '',
+    '二层正文。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, '嵌入改写.md'), [
+    '# 嵌入改写',
+    '',
+    '嵌入 ![[改名嵌入目标]] 与锚点 ![[改名嵌入目标#章节一|别名]]。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, '改名嵌入目标.md'), [
+    '# 改名嵌入目标',
+    '',
+    '正文。',
+    '',
+    '## 章节一',
+    '',
+    '章节内容。',
+    '',
+  ].join('\n'), 'utf8')
+  // #224 引用视图同步：独立父文档组（嵌入 + 悬停双链）与目标文档——
+  // 未保存修改推送（applyEdit 不保存）、外部磁盘变化（writeFile/unlink/
+  // 恢复）、订阅计数回落与自引用防循环的观测素材。目标正文含可断言的
+  // 修改前/后标记文本
+  writeFileSync(path.join(wsDir, '同步父文档.md'), [
+    '# 同步父文档',
+    '',
+    '悬停 [[同步目标]] 与嵌入：',
+    '',
+    '![[同步目标]]',
+    '',
+    '![[同步目标2]]',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, '同步目标.md'), [
+    '# 同步目标标题',
+    '',
+    '修改前正文：同步目标初始内容。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, '同步目标2.md'), [
+    '# 同步目标2标题',
+    '',
+    '目标二初始内容：外部磁盘变化前的正文。',
+    '',
+  ].join('\n'), 'utf8')
+  // 自引用：文档嵌入自身（A 嵌入 A——编辑自身后推送-重载不得循环）
+  writeFileSync(path.join(wsDir, '同步自引用.md'), [
+    '# 自引用文档',
+    '',
+    '![[同步自引用]]',
+    '',
+    '自引用正文：初始。',
+    '',
+  ].join('\n'), 'utf8')
+  // #219 局部范围矩阵目标：文件名含中文与空格（链接 percent-decode 与
+  // 双链字面路径两种写法解析到同一目标），行尾 CRLF（宿主 LF 换算矩阵：
+  // 章节/块 range 经 NewlineCoordinator 换算后过滤结果与 LF 文档同构）
+  writeFileSync(path.join(wsDir, '悬停 局部目标.md'), [
+    '# 局部目标总览',
+    '',
+    '顶部段（章节甲外）。',
+    '',
+    '## 章节甲',
+    '',
+    '甲段一。',
+    '',
+    '- 列表项一',
+    '- 列表项二 ^hover-blk',
+    '',
+    '## 章节乙',
+    '',
+    '乙段（章节甲外）。',
+    '',
+  ].join('\r\n'), 'utf8')
+  // #220 来源资源目标：位于子目录 hover-assets/（成型 frontmatter + 相对
+  // 图片 + 内部双链）——图片 res.png 与双链目标 资源内链目标.md 都只在该
+  // 子目录内存在，按 A 目录/根解析必 not-found，B 身份解析才能命中
+  mkdirSync(path.join(wsDir, 'hover-assets'), { recursive: true })
+  writeFileSync(path.join(wsDir, 'hover-assets', '悬停 资源目标.md'), [
+    '---',
+    'title: 资源目标',
+    'kind: note',
+    '---',
+    '',
+    '# 资源目标标题',
+    '',
+    '![资源图](res.png)',
+    '',
+    '内部双链 [[资源内链目标]] 与子目录说明段。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'hover-assets', 'res.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
+  writeFileSync(path.join(wsDir, 'hover-assets', '资源内链目标.md'), [
+    '# 资源内链目标',
+    '',
+    '只在 hover-assets 子目录内存在的目标（B 身份解析的命中判据）。',
+    '',
+  ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, 'wikilink-target.md'), WIKILINK_TARGET_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'wikilink-crlf-target.md'), WIKILINK_CRLF_TARGET_DOC, 'utf8')
   // #162 复制块链接：frontmatter 头区（不接管断言）、标题行/普通段/表格/

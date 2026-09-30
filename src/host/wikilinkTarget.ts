@@ -2,6 +2,13 @@
 // 目标文档内标题（findHeadingOffset）与块（findBlockOffset）的偏移计算，
 // 供跳转链路（textEditorProvider）与链接锚点定位共用。
 //
+// #219 起补两个**完整范围**函数（悬停局部预览用）：
+// - findHeadingSectionRange：标题章节（标题行起、止于下一同级或更高级标题前）
+// - findBlockRange：块 id 归属块的完整区间（块首行到块尾行）
+// 跳转与预览的范围需求不同——跳转要落点位置（标题行/块首行），预览要
+// 完整区间；两组函数共享同一匹配口径（同名取首、围栏跳过、规范化），
+// 不得各写一套。
+//
 // 文件目标解析已随 #196 迁出：双链文件目标一律按来源文档相对路径解析
 // （docDir 基准、越出所属根 escape、多根互不补查），单一实现在
 // src/shared/vaultLink.ts（与普通链接/图片及后续 #197 索引、#199/#200
@@ -93,11 +100,41 @@ export function findHeadingOffset(
  *   （Obsidian 形态），块首=开围栏行；开围栏行的 `^` 属 info string
  * - 同 id 多命中取首；未命中返回 null；CRLF 行尾容错（offset 为宿主系，
  *   \r 计入行宽）
+ *
+ * #219 起扫描核心提炼为 locateBlockAnchor（与 findBlockRange 共享——
+ * 同一块归属判定不建两套），本函数返回值契约不变（既有跳转回归把关）。
  */
 export function findBlockOffset(
   text: string,
   blockId: string,
 ): { offset: number; end: number } | null {
+  const scan = locateBlockAnchor(text, blockId)
+  if (!scan) {
+    return null
+  }
+  const range = blockRangeOfLine(scan.lines, scan.anchorLine)
+  if (!range) {
+    return null
+  }
+  const start = scan.lineStarts[range.start]!
+  return { offset: start, end: start + scan.lines[range.start]!.length }
+}
+
+/** 块锚定行定位结果：行数组（剥 \r）、宿主系行首表与归属行索引 */
+interface BlockAnchorScan {
+  lines: string[]
+  lineStarts: number[]
+  /** 归属行（blockRangeOfLine 的输入行）：行尾形态=命中行自身（块内任意
+   *  行），独立行形态=跨空行回溯到的上方非空行，闭围栏行标记=开围栏行 */
+  anchorLine: number
+}
+
+/**
+ * 块 id 归属行扫描核心（#219 提炼自 findBlockOffset，行为逐字节一致）：
+ * 双形态标记扫描 + 围栏跟踪，返回「块归属判定所依据的行」；完整块区间
+ * 由调用方经 blockRangeOfLine 统一判定（前后扩展到空行/围栏边界）。
+ */
+function locateBlockAnchor(text: string, blockId: string): BlockAnchorScan | null {
   if (blockId === '') {
     return null
   }
@@ -110,10 +147,6 @@ export function findBlockOffset(
     lineStarts.push(offset)
     offset += rawLine.length + 1
   }
-  const anchorOf = (idx: number): { offset: number; end: number } => ({
-    offset: lineStarts[idx]!,
-    end: lineStarts[idx]! + lines[idx]!.length,
-  })
   let fenceChar: string | null = null
   let fenceHead = -1 // 开围栏行 idx（闭围栏行命中时的块首）
   for (let i = 0; i < lines.length; i++) {
@@ -123,7 +156,7 @@ export function findBlockOffset(
       if (marker === fenceChar) {
         // 闭围栏行：Obsidian 允许行尾 ` ^id` 标记整个围栏代码块
         if (blockIdOfLine(line) === blockId) {
-          return anchorOf(fenceHead)
+          return { lines, lineStarts, anchorLine: fenceHead }
         }
         fenceChar = null
       }
@@ -135,18 +168,7 @@ export function findBlockOffset(
       continue // 开围栏行的 ^ 属 info string
     }
     if (blockIdOfLine(line) === blockId) {
-      let head = i
-      // 块边界=空行或围栏行（围栏行是 fenceMarkerOf 命中行；命中行必在围栏
-      // 外，回溯首遇的围栏行必为闭围栏行）；到文件头自然停——与
-      // blockRangeOfLine 的回溯条件同源
-      while (
-        head > 0 &&
-        lines[head - 1]!.trim() !== '' &&
-        fenceMarkerOf(lines[head - 1]!) === null
-      ) {
-        head--
-      }
-      return anchorOf(head)
+      return { lines, lineStarts, anchorLine: i }
     }
     if (standaloneBlockIdOf(line) === blockId) {
       // 独立行标记归属上方块：跨空行回溯第一个非空行，其所属块即目标
@@ -158,11 +180,117 @@ export function findBlockOffset(
       if (above < 0) {
         continue // 文件头悬挂：上方无块，不是有效块标记
       }
-      const range = blockRangeOfLine(lines, above)
-      if (range !== null) {
-        return anchorOf(range.start)
-      }
+      return { lines, lineStarts, anchorLine: above }
     }
   }
   return null
+}
+
+/**
+ * 目标文档内块 id 归属块的**完整范围**（#219 悬停局部预览）：块首行行首
+ * 到块尾行行尾（不含换行）——列表、表格、围栏等多行块整取，不能拿块首
+ * 行当完整正文。块归属判定与 findBlockOffset 同源（locateBlockAnchor +
+ * blockRangeOfLine），两者对同一文档同一 id 的块首行恒一致；未命中与
+ * 空 id 返回 null；CRLF 行尾容错（offset 为宿主系）。
+ */
+export function findBlockRange(
+  text: string,
+  blockId: string,
+): { start: number; end: number } | null {
+  const scan = locateBlockAnchor(text, blockId)
+  if (!scan) {
+    return null
+  }
+  const range = blockRangeOfLine(scan.lines, scan.anchorLine)
+  if (!range) {
+    return null
+  }
+  return {
+    start: scan.lineStarts[range.start]!,
+    end: scan.lineStarts[range.end]! + scan.lines[range.end]!.length,
+  }
+}
+
+/**
+ * 目标文档内标题**章节**的完整范围（#219 悬停局部预览）：目标标题行行首
+ * 起、止于下一个**同级或更高级** ATX 标题行之前（含目标标题行；其后无
+ * 更高标题则到文件末个非空行行尾；尾随空行不属章节内容）。匹配口径与
+ * findHeadingOffset 同源（ATX、normalizeHeadingText 规范化、围栏内伪
+ * 标题跳过、同名取首）——章节起点恒为 findHeadingOffset 的命中行，
+ * 跳转侧契约不受本函数影响。未命中与空标题返回 null；CRLF 行尾容错
+ * （offset 为宿主系，\r 计入前文累计，end 不含行尾）。
+ */
+export function findHeadingSectionRange(
+  text: string,
+  heading: string,
+): { start: number; end: number } | null {
+  const want = normalizeHeadingText(heading)
+  if (want === '') {
+    return null
+  }
+  const lines: string[] = []
+  const lineStarts: number[] = []
+  let offset = 0
+  for (const rawLine of text.split('\n')) {
+    lines.push(rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine)
+    lineStarts.push(offset)
+    offset += rawLine.length + 1
+  }
+  // 第一阶段：定位目标标题行（与 findHeadingOffset 同口径；围栏跟踪状态
+  // 延续到第二阶段——章节内的围栏由同一状态机覆盖）
+  let fenceChar: string | null = null
+  let head = -1
+  let level = 0
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!
+    const marker = fenceMarkerOf(line)
+    if (fenceChar !== null) {
+      if (marker === fenceChar) {
+        fenceChar = null // 闭围栏
+      }
+    } else if (marker !== null) {
+      fenceChar = marker // 开围栏：其后内容直到闭围栏都不是标题
+    } else {
+      const m = ATX_HEADING_RE.exec(line)
+      if (m && normalizeHeadingText(m[2]!) === want) {
+        head = i
+        level = m[1]!.length
+        break
+      }
+    }
+  }
+  if (head < 0) {
+    return null
+  }
+  // 第二阶段：向后扫描到下一个同级或更高级标题行前（更深层的子标题
+  // 属于本章节不终止）
+  let endLine = lines.length - 1
+  for (let i = head + 1; i < lines.length; i++) {
+    const line = lines[i]!
+    const marker = fenceMarkerOf(line)
+    if (fenceChar !== null) {
+      if (marker === fenceChar) {
+        fenceChar = null
+      }
+      continue
+    }
+    if (marker !== null) {
+      fenceChar = marker
+      continue
+    }
+    const m = ATX_HEADING_RE.exec(line)
+    if (m && m[1]!.length <= level) {
+      endLine = i - 1
+      break
+    }
+  }
+  // 尾随空行收缩：章节内容止于最后非空行行尾（空行是块间缝隙，与
+  // ReadingBlock「end 不含块尾换行」坐标契约对齐）
+  while (endLine > head && lines[endLine]!.trim() === '') {
+    endLine--
+  }
+  return {
+    start: lineStarts[head]!,
+    end: lineStarts[endLine]! + lines[endLine]!.length,
+  }
 }
