@@ -1074,6 +1074,14 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
     dom: 'Attached inside the editor container (position:relative containing block), below #app; buttons are real <button type="button"> elements (aria-pressed/aria-expanded follow state; aria-label/title from the find.* i18n entries).',
     obsidian: { counterpart: 'None (the Obsidian find widget is an application-level part, not a document styling surface)' },
   },
+  'find-options-bar': {
+    purpose:
+      'The find options bar (#238): a mini floating strip present while a "select next occurrence" session is active — just the three toggle buttons, no search box and no counter (user decision: every Ctrl+D press opens it directly). The button states share the main panel toggle memory (shared/findOptions; aria-pressed in sync); clicking toggles and rebuilds the session with the new options. Non-modal: it never takes editor focus (button mousedown is preventDefault-ed to keep focus), never claims the popup mutex slot, and Esc is consumed once after the find panel (closes the bar only, leaving selections intact). While the main find panel is open it does not appear (the panel toggle buttons blink via .vsidian-find-flash instead); the session end (external selection change / focus loss / Esc / mode switch) fades it out.',
+    states:
+      'The bar DOM is always present; visibility is controlled by .vsidian-occurrence-bar-open (display:none by default, so probes are unaffected). A lit toggle means the option is on (same lit language as the main panel -active states). The panel toggle blink state is .vsidian-find-flash (a 0.45s opacity pulse animation; it lives on the find-panel buttons, not on the selectors of this entry).',
+    dom: 'Attached inside the editor container (same positioning containing block and top-right corner as .vsidian-find; the two appear exclusively); buttons are real <button type="button"> elements (aria-pressed follows state; aria-label/title reuse the find.matchCase / find.wholeWord / find.regexp entries, the container aria-label uses find.optionsBar).',
+    obsidian: { counterpart: 'None (the Obsidian Ctrl+D option hint is an application-level part, not a document styling surface)' },
+  },
   'find-panel-replace': {
     purpose:
       'The expandable replace bar of the find panel (#236): collapsed by default, expanded via the left-edge toggle (find-panel entry, .vsidian-find-toggle) or Ctrl+H (the findReplace operation); "Replace" replaces the current match and moves to the next one, "Replace All" replaces the whole batch — both are explicit write operations (a single CM6 transaction through the standard write-back chain; one edit.request = one host undo). Replacing is a live-editing capability: in reading view the panel works but the replace bar never expands.',
