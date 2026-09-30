@@ -227,6 +227,17 @@ export const EMBED_MAX_HEIGHT_MAX = 2000
 export const EMBED_MAX_HEIGHT_STEP = 20
 
 /**
+ * #237「多光标」开关：Live 正文多选区/副光标能力（Alt+点击添加光标、
+ * Ctrl+Alt+Up/Down 上下添加光标、Esc 收敛）的总开关。开启时装配
+ * allowMultipleSelections + drawSelection + clickAddsSelectionRange(alt)
+ * 扩展组；关闭后整组退出——多 range 被折回主 range、绘制层撤下、副光标
+ * 不可见，回到单选区行为。**独立于 #124 选区包裹**：包裹开关不再影响
+ * 多选区可用性（关闭本项时跨段包裹文本仍生效，仅选区保持降级为单 range）。
+ */
+export const MULTI_CURSOR_KEY = 'editor.multicursor'
+export const MULTI_CURSOR_DEFAULT = true
+
+/**
  * 语言设置键（#93 预留，#96 注册定义与「常规」分区）：值域 auto | zh-cn |
  * en（StringEnumSettingDefinition），解析与语言包装配见 shared/locales。
  * 键常量先行导出——宿主 HTML 生成点读取快照中的该键决定注入语言（缺省
@@ -358,6 +369,15 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     default: SYMBOL_TAB_ESCAPE_DEFAULT,
     titleKey: 'setting.symbolTabEscape.title',
     descriptionKey: 'setting.symbolTabEscape.description',
+  },
+  {
+    // #237 多光标（editor.multicursor 域 → 编辑器页「编辑」组：与 symbol/
+    // codeblock/image 前缀并列的编辑行为组，editingDefs 收纳）
+    key: MULTI_CURSOR_KEY,
+    type: 'boolean',
+    default: MULTI_CURSOR_DEFAULT,
+    titleKey: 'setting.multicursor.title',
+    descriptionKey: 'setting.multicursor.description',
   },
   // #161 图片粘贴：总开关 + 存放模式枚举 + 子路径自由文本（首个
   // StringTextSettingDefinition——设置页 text input 控件分支随本批接入）

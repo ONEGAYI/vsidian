@@ -59,5 +59,7 @@
   "command.ui.backlinksToggle.title": "显示或隐藏反链面板",
   "command.ui.outlinksToggle.title": "显示或隐藏出链面板",
   "command.editor.refresh.title": "刷新嵌入资源",
+  "command.editor.addCursorAbove.title": "在上方添加光标",
+  "command.editor.addCursorBelow.title": "在下方添加光标",
   "command.ui.hoverPreviewLink.title": "预览当前链接"
 }

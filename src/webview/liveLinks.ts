@@ -866,6 +866,10 @@ export function createLinkInteractions(opts: {
           pendingClick = null
           if (event.ctrlKey || event.metaKey) return onMouseDown(event, view)
           if (event.button !== 0) return false
+          // #237 多光标：Alt+点击是「在指针处添加光标」手势（clickAdds
+          // SelectionRange），不是链接激活——按下与抬起双侧排除，防止
+          // 按下无修饰、抬起带 Alt（或反之）的混合手势误触发跳转
+          if (event.altKey) return false
           const target = event.target instanceof Element ? event.target : null
           // #42 网格中的普通单击先进入对应单元格源码；显式 Ctrl/Cmd
           // 仍按上方分支跳转，避免整格都是链接时失去点击编辑入口。
@@ -881,7 +885,7 @@ export function createLinkInteractions(opts: {
         mouseup(event: MouseEvent, view: EditorView) {
           const pending = pendingClick
           pendingClick = null
-          if (!pending || event.button !== 0 ||
+          if (!pending || event.button !== 0 || event.altKey ||
             Math.hypot(event.clientX - pending.x, event.clientY - pending.y) > 5) return false
           // #152：树驱动链接未命中再试宽松链接（行扫描；含 pos-1 边界重试）。
           // 嵌入（#217）与双链共享 wikilink 渲染类——渲染态点击目标同族，

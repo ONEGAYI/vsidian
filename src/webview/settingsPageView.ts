@@ -233,6 +233,11 @@ export class SettingsPageView {
   private symbolDefs(): readonly SettingDefinition[] {
     return this.defs.filter((d) => d.key.startsWith('editor.symbol'))
   }
+  /** 编辑器页「编辑」小节：编辑能力类（#237 多光标 editor.multicursor；
+   *  批次后续票的选词/分词设置同归此节） */
+  private editingDefs(): readonly SettingDefinition[] {
+    return this.defs.filter((d) => d.key.startsWith('editor.multicursor'))
+  }
   private codeblockDefs(): readonly SettingDefinition[] {
     return this.defs.filter((d) => d.key.startsWith('codeblock.'))
   }
@@ -242,7 +247,8 @@ export class SettingsPageView {
   /** 编辑器页「显示」小节：非 general 且不属其他小节的 editor.* 定义 */
   private displayDefs(): readonly SettingDefinition[] {
     return this.editorDefs().filter(
-      (d) => !d.key.startsWith('editor.symbol') && !d.key.startsWith('codeblock.') && !d.key.startsWith('image.'))
+      (d) => !d.key.startsWith('editor.symbol') && !d.key.startsWith('editor.multicursor') &&
+      !d.key.startsWith('codeblock.') && !d.key.startsWith('image.'))
   }
   private editorDefs(): readonly SettingDefinition[] {
     return this.defs.filter((d) => !d.key.startsWith('general.'))
@@ -251,6 +257,7 @@ export class SettingsPageView {
   private editorSectionDefs(): Array<{ titleKey: MessageKey; defs: () => readonly SettingDefinition[] }> {
     return [
       { titleKey: 'settings.groupDisplay', defs: () => this.displayDefs() },
+      { titleKey: 'settings.groupEditing', defs: () => this.editingDefs() },
       { titleKey: 'settings.groupSymbols', defs: () => this.symbolDefs() },
       { titleKey: 'settings.groupCodeblock', defs: () => this.codeblockDefs() },
       { titleKey: 'settings.groupImage', defs: () => this.imageDefs() },

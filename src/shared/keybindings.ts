@@ -99,6 +99,16 @@ export const UI_OPERATIONS = [
   // 生效（mode: both 只表示两模式下命令均可用——目标判定各自实现）；
   // 默认不占键位，键位留给用户按需绑定（评估记录见 docs/specs/keybindings.md）
   { id: 'hoverPreviewLink', command: 'onegayi.vsidian.ui.hoverPreviewLink', titleKey: 'command.ui.hoverPreviewLink.title', mode: 'both', writes: false, defaults: [] },
+  // #237 多光标·上下添加光标：@codemirror/commands 内置命令，webview 本地
+  // 消化（快捷键经 keybindingRouter 本地分支，命令面板经 ui.command 回发，
+  // 两条入口共用 webview 同一实现，不做出站宿主往返）。仅 Live 正文生效
+  // （阅读只读；写操作类——批次 D4「多光标为 Live 编辑能力」口径，本表
+  // 首个 mode live + writes 的 UI 操作）。默认 ctrl+alt+up/down（对齐
+  // VSCode；与操作表现有键位零冲突）；defaultKeymap 同键位内建绑定由
+  // multicursor 扩展组的接管 keymap 退役——键位所有权归注册表（用户清空/
+  // 改绑后内建绑定不得复活）
+  { id: 'addCursorAbove', command: 'onegayi.vsidian.editor.addCursorAbove', titleKey: 'command.editor.addCursorAbove.title', mode: 'live', writes: true, defaults: ['ctrl+alt+up'] },
+  { id: 'addCursorBelow', command: 'onegayi.vsidian.editor.addCursorBelow', titleKey: 'command.editor.addCursorBelow.title', mode: 'live', writes: true, defaults: ['ctrl+alt+down'] },
 ] as const satisfies readonly KeybindingOperation[]
 export type UiOperationId = (typeof UI_OPERATIONS)[number]['id']
 export function isUiOperationId(value: unknown): value is UiOperationId {

@@ -89,6 +89,8 @@ import {
   SYMBOL_SELECTION_WRAP_KEY,
   SYMBOL_TAB_ESCAPE_DEFAULT,
   SYMBOL_TAB_ESCAPE_KEY,
+  MULTI_CURSOR_DEFAULT,
+  MULTI_CURSOR_KEY,
   type SettingsPayload,
 } from '../shared/settings'
 import { onLocaleChanged, t } from '../shared/i18n'
@@ -259,6 +261,10 @@ import { VirtualReadingView } from './readingVirtualView'
 import { blankRowInputPlan, runCreateTable, runTableEdit, tableEditing, tableRowsAt } from './tableEditing'
 import { symbolAutocomplete } from './symbolAutocomplete'
 import { symbolSelectionWrap } from './symbolWrap'
+import { multicursorExtensions } from './multicursor'
+// #237 多光标：上下添加光标命令（@codemirror/commands 内置，webview 本地
+// 执行——快捷键路由本地分支与 ui.command 两入口共用 runCursorAdd）
+import { addCursorAbove, addCursorBelow } from '@codemirror/commands'
 import { fenceEscape } from './fenceEscape'
 import { frontmatterEditing } from './frontmatterEditing'
 import { FM_CARD_CLASS_NAMES } from './frontmatterDecorations'
@@ -892,10 +898,18 @@ export class WebviewSyncController {
   private symbolAutocompleteOn = SYMBOL_AUTOCOMPLETE_DEFAULT
   private readonly symbolAutocloseCompartment = new Compartment()
 
-  /** #124 选区包裹开关（与 #123 相互独立；关闭时包裹 filter 与
-   *  allowMultipleSelections 一并退出装配，键入回到普通替换选区语义） */
+  /** #124 选区包裹开关（与 #123 相互独立；关闭时包裹 filter 退出装配，
+   *  键入回到普通替换选区语义。#237 起 allowMultipleSelections 不再随本
+   *  组装配——多选区可用性由多光标设置独立承载） */
   private symbolSelectionWrapOn = SYMBOL_SELECTION_WRAP_DEFAULT
   private readonly symbolSelectionWrapCompartment = new Compartment()
+
+  /** #237 多光标开关（与 #123/#124/#125 相互独立）：allowMultipleSelections
+   *  + drawSelection + alt+click 装配与 defaultKeymap 内建 Ctrl+Alt+方向键
+   *  接管的单一通道；关闭时整组退出——多 range 折回主 range、绘制层撤下，
+   *  回到单选区行为 */
+  private multicursorOn = MULTI_CURSOR_DEFAULT
+  private readonly multicursorCompartment = new Compartment()
 
   /** #125 符号 Tab 越界开关（与前两项相互独立；关闭时越界 keymap 退出
    *  装配，Tab 回落既有表格导航/整行缩进行为） */
@@ -1010,6 +1024,9 @@ export class WebviewSyncController {
       // #221 预览当前链接：纯 webview 域（目标判定与浮层打开都在 webview，
       // 无宿主往返依赖），与命令面板入口（ui.command 回发）共用同一实现
       else if (id === 'hoverPreviewLink') this.previewLinkAtFocus()
+      // #237 上下添加光标：同「本地消化不转发宿主」先例——命令在 webview
+      // 的 CM6 上执行（与命令面板 ui.command 回发入口共用 runCursorAdd）
+      else if (id === 'addCursorAbove' || id === 'addCursorBelow') this.runCursorAdd(id)
       else this.bridge.postMessage({ kind: 'keybindings.execute', id })
     })
     const saved = bridge.getState<PersistedState>()
@@ -1601,6 +1618,7 @@ export class WebviewSyncController {
         this.applySymbolAutocompleteSetting()
         this.applySymbolSelectionWrapSetting()
         this.applyTabEscapeSetting()
+        this.applyMulticursorSetting()
         this.applyReadableLineWidthSetting()
         this.applyEmbedMaxHeightSetting()
         break
@@ -2043,6 +2061,10 @@ export class WebviewSyncController {
           // #221 预览当前链接：命令面板/宿主命令入口与快捷键（keybindingRouter
           // 本地分支）共用同一实现（目标判定在 webview，无目标静默不误开）
           case 'hoverPreviewLink': this.previewLinkAtFocus(); break
+          // #237 上下添加光标：命令面板/宿主命令入口与快捷键（keybindingRouter
+          // 本地分支）共用同一实现（仅 Live 正文生效，边界见 runCursorAdd）
+          case 'addCursorAbove': this.runCursorAdd('addCursorAbove'); break
+          case 'addCursorBelow': this.runCursorAdd('addCursorBelow'); break
         }
         break
       case 'sidebar.test.click': {
@@ -5053,6 +5075,31 @@ export class WebviewSyncController {
     }
   }
 
+  /** #237 上下添加光标（快捷键本地分支与 ui.command 回发共用）：CM6
+   *  addCursorAbove/Below 在当前全部 range 上逐行加光标（goal column 由
+   *  moveVertically 保持）。边界：仅 Live 正文（阅读只读、暂停面板无输入
+   *  语义）；多光标设置关闭时不接管（键位仍由注册表持有）；表格格区
+   *  region 存在时不接管——region 状态机与多 range 正交，格区维持单选区
+   *  语义（批次 §3 已定边界）。frontmatter 成型头区由 frontmatterEditing
+   *  的选区引导兜底（加出的 range 双端落头区即被弹回 body 起点） */
+  private runCursorAdd(op: 'addCursorAbove' | 'addCursorBelow'): void {
+    const view = this.view
+    if (!view || this.viewMode !== 'live' || this.suspended) {
+      return
+    }
+    if (!this.multicursorOn) {
+      return
+    }
+    if (view.state.field(tableRegionField, false)) {
+      return
+    }
+    if (op === 'addCursorAbove') {
+      addCursorAbove(view)
+    } else {
+      addCursorBelow(view)
+    }
+  }
+
   /** Live 光标处预览（键盘命令的 Live 分支）：判定族同悬停路径；锚元素
    *  取目标区间内部的 DOM（domAtPos 归约到 HTMLElement——mark 装饰 span
    *  或所在行元素，仅用于浮层定位与联合域）。命令面板路径下 webview 可
@@ -7686,8 +7733,8 @@ export class WebviewSyncController {
   /**
    * 应用选区包裹设置（#124；settings.snapshot / settings.changed 到达时）：
    * 缺键回定义默认、非布尔忽略（与 #123 同口径）。经 Compartment.reconfigure
-   * 增删 symbolSelectionWrap 扩展组——关闭时包裹 filter 与
-   * allowMultipleSelections 退出装配，EditorView 不重建。
+   * 增删 symbolSelectionWrap 扩展组——关闭时包裹 filter 退出装配，EditorView
+   * 不重建。#237 起 allowMultipleSelections 不在本组（归多光标独立设置项）。
    */
   private applySymbolSelectionWrapSetting(): void {
     const raw = this.settings?.[SYMBOL_SELECTION_WRAP_KEY]
@@ -7698,6 +7745,26 @@ export class WebviewSyncController {
     this.symbolSelectionWrapOn = on
     this.view?.dispatch({
       effects: this.symbolSelectionWrapCompartment.reconfigure(on ? symbolSelectionWrap : []),
+    })
+  }
+
+  /**
+   * 应用多光标设置（#237；settings.snapshot / settings.changed 到达时）：
+   * 缺键回定义默认、非布尔忽略（与 #123/#124/#125 同口径）。经
+   * Compartment.reconfigure 增删 multicursorExtensions 扩展组——关闭时
+   * allowMultipleSelections、drawSelection、alt+click 与 defaultKeymap
+   * 内建键位接管一并退出装配，EditorView 不重建；关闭瞬间已存在的多 range
+   * 选区在下笔事务被 asSingle 折回主 range（无需主动收敛）。
+   */
+  private applyMulticursorSetting(): void {
+    const raw = this.settings?.[MULTI_CURSOR_KEY]
+    const on = typeof raw === 'boolean' ? raw : MULTI_CURSOR_DEFAULT
+    if (on === this.multicursorOn) {
+      return
+    }
+    this.multicursorOn = on
+    this.view?.dispatch({
+      effects: this.multicursorCompartment.reconfigure(on ? multicursorExtensions : []),
     })
   }
 
@@ -8095,14 +8162,25 @@ export class WebviewSyncController {
         borderLeftWidthValues: [...borderLeftWidthValues].sort(),
       }
     }
-    // 光标取证：本扩展未启用 drawSelection，CM6 光标即原生 caret，颜色
-    // 由 baseTheme 明暗变体决定（light=black / dark=white）。darkTheme 取
-    // facet 实值（jsdom 可读），caretColor 取计算值（jsdom 无 CSS 引擎为 null）
+    // 光标取证：#237 多光标开启时 drawSelection 接管光标绘制——原生 caret
+    // 被 hideNativeSelection 隐藏（caret-color transparent !important，全
+    // 编辑器恒透明，不再随明暗变化），光标颜色证据移至绘制层 .cm-cursor 的
+    // borderLeftColor（baseTheme 明暗变体：light=black / dark=#ddd）。关闭
+    // 多光标时回退原生 caret（baseTheme caretColor 明暗变体：light=black /
+    // dark=white）。darkTheme 取 facet 实值（jsdom 可读），两色取计算值
+    // （jsdom 无 CSS 引擎为 null；无 .cm-cursor 元素亦为 null）
     let caretColor: string | null = null
     try {
       caretColor = getComputedStyle(contentEl).caretColor || null
     } catch {
       caretColor = null
+    }
+    let drawnCursorColor: string | null = null
+    try {
+      const cursorEl = view.dom.querySelector<HTMLElement>('.cm-cursorLayer .cm-cursor')
+      drawnCursorColor = cursorEl ? getComputedStyle(cursorEl).borderLeftColor || null : null
+    } catch {
+      drawnCursorColor = null
     }
     // #59 公式绘制探针：按当前激活视图取首个公式元素（隐藏侧 display:none
     // 的 rect 全 0 不作依据）；rect 有面积且 elementFromPoint 命中才算画出来
@@ -8418,6 +8496,7 @@ export class WebviewSyncController {
       visibleLineNumbers: paintedLineNumbers(view),
       darkTheme: view.state.facet(EditorView.darkTheme),
       caretColor,
+      drawnCursorColor,
       table: {
         cellVisible,
         caretGridColumn,
@@ -9071,9 +9150,15 @@ export class WebviewSyncController {
       this.symbolAutocloseCompartment.of(this.symbolAutocompleteOn ? symbolAutocomplete : []),
       // #124 选区包裹：置于 symbolAutocomplete 之后（靠后者先过滤）——
       // 包裹只认非空选区（与补全分支互斥），改写后补全 filter 按
-      // startState 选区门控自然放行；多 range 原文选区依赖随组装配的
-      // allowMultipleSelections；关闭时经 compartment 整组退出
+      // startState 选区门控自然放行；多 range 原文选区的存续依赖
+      // #237 多光标组的 allowMultipleSelections（独立设置，默认开）；
+      // 关闭时经 compartment 整组退出
       this.symbolSelectionWrapCompartment.of(this.symbolSelectionWrapOn ? symbolSelectionWrap : []),
+      // #237 多光标：allowMultipleSelections + drawSelection（副光标/多选区
+      // 可见）+ alt+click 添加选区 + defaultKeymap 内建 Ctrl+Alt+方向键接管
+      // （键位所有权归操作注册表）。组内无 keymap/filter 顺序语义（facet/
+      // 绘制层/吞键 keymap 与其他扩展不竞争事务），关闭时整组退出装配
+      this.multicursorCompartment.of(this.multicursorOn ? multicursorExtensions : []),
       // #119 列表/引用 Enter 前缀延续与退格清层：必须排在 tableEditing
       // 之后（表格上下文优先，格内 Enter 仍为 <br>）、extraExtensions 的
       // defaultKeymap 之前（先于通用键位拦截）

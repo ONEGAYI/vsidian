@@ -29,6 +29,8 @@ export const zhCn: Record<MessageKey, string> = {
   'settings.generalSectionDescription': '调整 Vsidian 的基础行为。更改会自动保存。',
   /** 编辑器页内小节（#163 二轮还原）：editor.symbol* 输入行为类 */
   'settings.groupSymbols': '符号输入',
+  /** 编辑器页内小节：编辑能力类（多光标，#237） */
+  'settings.groupEditing': '编辑',
   /** 编辑器页内小节：codeblock.* 呈现类 */
   'settings.groupCodeblock': '代码块',
   /** 编辑器页内小节：image.* 图片粘贴设置 */
@@ -101,6 +103,10 @@ export const zhCn: Record<MessageKey, string> = {
   'setting.symbolTabEscape.title': '符号 Tab 越界',
   'setting.symbolTabEscape.description':
     '实时预览中光标位于成对符号围栏内部（括号、引号或行内 Markdown 结构）且未选中文字时，Tab 先移到闭合标记左边界，再按一次越过整个闭合标记；嵌套围栏从最内层逐层退出。Tab 仅移动光标，不改动文本。围栏外保持既有行为（表格切格或整行缩进）；Shift+Tab 不受影响。本开关与前两项符号设置相互独立。',
+  /** 设置项「多光标」（#237 editor.multicursor） */
+  'setting.multicursor.title': '多光标',
+  'setting.multicursor.description':
+    '在实时预览中启用多条光标与副选区：按住 Alt 点击可在指针处添加（或移除）光标，Ctrl+Alt+Up/Down 在上方或下方行添加光标，Esc 一次收敛回主光标。关闭后回到单选区编辑。与「选区符号包裹」相互独立。',
   /** 设置项「界面语言」（#96 general.language，经 titleKey/descriptionKey 取词） */
   'setting.language.title': '界面语言',
   'setting.language.description':
@@ -548,6 +554,9 @@ export const zhCn: Record<MessageKey, string> = {
   'command.ui.outlinksToggle.title': '显示或隐藏出链面板',
   /** #208 刷新嵌入资源命令（工具栏按钮与快捷键/命令面板共用） */
   'command.editor.refresh.title': '刷新嵌入资源',
+  /** #237 多光标：在上方/下方行添加光标（仅实时预览；Alt+点击在指针处添加） */
+  'command.editor.addCursorAbove.title': '在上方添加光标',
+  'command.editor.addCursorBelow.title': '在下方添加光标',
   /** #221 预览当前链接（手动打开悬停浮层：键盘进入浮层、Esc 返回触发处） */
   'command.ui.hoverPreviewLink.title': '预览当前链接',
 

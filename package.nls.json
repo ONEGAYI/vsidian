@@ -59,5 +59,7 @@
   "command.ui.backlinksToggle.title": "Show or hide the backlinks panel",
   "command.ui.outlinksToggle.title": "Show or hide the outgoing links panel",
   "command.editor.refresh.title": "Refresh embedded resources",
+  "command.editor.addCursorAbove.title": "Add cursor above",
+  "command.editor.addCursorBelow.title": "Add cursor below",
   "command.ui.hoverPreviewLink.title": "Preview the current link"
 }
