@@ -190,6 +190,66 @@ describe('保活与单例', () => {
   })
 })
 
+describe('窗口失焦与不可见释放', () => {
+  // 验收反馈（2026-09-30 切窗失效）：Chromium 对未聚焦窗口不派发 mouseout
+  //（electron#45246），切窗期间 mouseleave 缺失 → 关闭计时永不启动 → 浮层
+  // 滞留后台遮挡正文（fixed 480×400 拦截 mouseover，悬停完全失效，点侧栏
+  // /切页才恢复）。瞬态 UI 失焦即关——与宿主 hover 语义一致
+  it('窗口失焦（blur）即刻关闭在场浮层并释放 DOM', () => {
+    vi.useFakeTimers()
+    const h = makeHarness()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    notifyHoverResult({ kind: 'hover.result', reqId: requestOf(h).reqId, instanceId: requestOf(h).instanceId, ok: true, ...RESULT_OK })
+    expect(isHoverPopupOpen()).toBe(true)
+    window.dispatchEvent(new Event('blur'))
+    expect(isHoverPopupOpen(), '失焦即关（不待关闭延迟）').toBe(false)
+    expect(popupEl()).toBeNull()
+  })
+
+  it('窗口失焦同时取消待开计时（开前切窗不留悬空浮层）', () => {
+    vi.useFakeTimers()
+    const h = makeHarness()
+    hoverPreviewAnchorEnter(h.anchor)
+    window.dispatchEvent(new Event('blur'))
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS * 2)
+    expect(isHoverPopupOpen()).toBe(false)
+    expect(h.sent).toEqual([])
+  })
+
+  it('文档不可见（最小化/后台标签）同样即刻关闭', () => {
+    vi.useFakeTimers()
+    const h = makeHarness()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    expect(isHoverPopupOpen()).toBe(true)
+    // 实例属性遮蔽原型 hidden（jsdom 原型取值），finally 删除还原
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true })
+    try {
+      document.dispatchEvent(new Event('visibilitychange'))
+    } finally {
+      delete (document as { hidden?: boolean }).hidden
+    }
+    expect(isHoverPopupOpen(), '不可见即关').toBe(false)
+    expect(popupEl()).toBeNull()
+  })
+
+  it('失焦关闭不影响后续正常开闭（切回后再悬停可重新触发）', () => {
+    vi.useFakeTimers()
+    const h = makeHarness()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    window.dispatchEvent(new Event('blur'))
+    expect(isHoverPopupOpen()).toBe(false)
+    window.dispatchEvent(new Event('focus'))
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    expect(isHoverPopupOpen(), '切回后可再开').toBe(true)
+    const reqs = h.sent.filter((m) => m.kind === 'hover.request')
+    expect(reqs).toHaveLength(2)
+  })
+})
+
 describe('Esc 与焦点', () => {
   it('Esc 关闭浮层（捕获阶段拦截，不外溢）', () => {
     vi.useFakeTimers()

@@ -441,6 +441,38 @@ try {
   passed++
   console.log('[全入口][PASS] 面板键盘聚焦目标 + 面板隐藏释放')
 
+  // ---- 场景 O：窗口失焦释放（验收反馈 2026-09-30 切窗失效）----
+  // 切窗（Alt+Tab）时 webview 收 blur 且 Chromium 对未聚焦窗口不派发
+  // mouseout（electron/electron#45246）——修复前浮层滞留后台遮挡正文
+  // （fixed 480×400 拦截 mouseover），切回后悬停完全失效，点侧栏/切页
+  // 才恢复。修复语义：失焦即关（内容装载态同关，滞留载体不存在），
+  // 切回后再悬停可正常重开
+  await page.keyboard.down('Control')
+  await wikilinkDeco().hover()
+  await page.waitForTimeout(OPEN_WAIT)
+  req = await lastRequest()
+  await respondOk(req, TARGET_DOC)
+  await page.waitForTimeout(120)
+  popup = await page.evaluate(() => window.readHoverPopup())
+  assert.ok(popup.open && !popup.stateVisible, '前置：内容装载态浮层在场')
+  const requestsBeforeBlur = (await hoverRequests()).length
+  await page.evaluate(() => window.dispatchEvent(new FocusEvent('blur')))
+  popup = await page.evaluate(() => window.readHoverPopup())
+  assert.equal(popup.open, false, '窗口失焦即刻关闭浮层（不待关闭延迟）')
+  await page.evaluate(() => window.dispatchEvent(new FocusEvent('focus')))
+  // 指针先移开再悬停（切窗期间指针未动，无 mouseover 可言——真实用户
+  // 切回后会移动鼠标；同坐标 no-op 移动不产生事件）
+  await page.mouse.move(60, 500)
+  await wikilinkDeco().hover()
+  await page.waitForTimeout(OPEN_WAIT)
+  assert.equal((await hoverRequests()).length, requestsBeforeBlur + 1,
+    '切回后再悬停正常重开（滞留失效不复现）')
+  await page.keyboard.up('Control')
+  await page.mouse.move(60, 500)
+  await page.waitForTimeout(CLOSE_WAIT)
+  passed++
+  console.log('[全入口][PASS] 窗口失焦释放浮层 + 切回重开正常')
+
   // ---- 收尾：零写回 ----
   assert.equal(await editRequestCount(), 0, '全场景零 edit.request（悬停/命令不写文档）')
   passed++

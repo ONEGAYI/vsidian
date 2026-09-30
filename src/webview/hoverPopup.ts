@@ -210,10 +210,47 @@ let reqSeq = 0
 /** 注入/清空出站上下文（syncController mount/dispose） */
 export function setHoverPreviewContext(ctx: HoverPreviewContext | null): void {
   context = ctx
-  if (!ctx) {
+  if (ctx) {
+    ensureInactiveListener()
+  } else {
+    cancelPendingOpen()
+    closeHoverPopup()
+    releaseInactiveListener()
+  }
+}
+
+// 窗口失焦 / 文档不可见即刻释放（验收反馈 2026-09-30 切窗失效）：
+// Chromium 对未聚焦窗口不派发 mouseout（electron/electron#45246），切窗
+// 期间 mouseleave 缺失会让关闭计时永不启动——浮层滞留后台，fixed
+// 480×400 遮挡正文拦截 mouseover，切回后悬停完全失效（点侧栏/切页释放
+// 才恢复）。瞬态 UI 失焦即关（在场实例与待开计时一并清），与宿主 hover
+// 语义一致；键盘模态不豁免——窗口失焦时键盘现场已断，关闭返还 prevFocus
+// 无副作用。监听随上下文装配惰性挂载（模块顶层 DOM 访问会炸 node 环境的
+// 纯逻辑测试 import 链），卸载幂等
+let inactiveListenerCleanup: (() => void) | null = null
+function ensureInactiveListener(): void {
+  if (inactiveListenerCleanup) {
+    return
+  }
+  const release = (): void => {
     cancelPendingOpen()
     closeHoverPopup()
   }
+  const onVisibilityChange = (): void => {
+    if (document.hidden) {
+      release()
+    }
+  }
+  window.addEventListener('blur', release)
+  document.addEventListener('visibilitychange', onVisibilityChange)
+  inactiveListenerCleanup = () => {
+    window.removeEventListener('blur', release)
+    document.removeEventListener('visibilitychange', onVisibilityChange)
+    inactiveListenerCleanup = null
+  }
+}
+function releaseInactiveListener(): void {
+  inactiveListenerCleanup?.()
 }
 
 export function isHoverPopupOpen(): boolean {
@@ -539,6 +576,7 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
   }
   window.addEventListener('resize', onResize)
   state.cleanups.push(() => window.removeEventListener('resize', onResize))
+
   if (typeof ResizeObserver === 'function') {
     const observer = new ResizeObserver(() => {
       if (popup) {
@@ -825,6 +863,7 @@ export function invalidateHoverPopupImages(): void {
 /** 测试隔离：清空模块级单例状态（生产不调用） */
 export function __resetHoverPopupForTest(): void {
   closeHoverPopup()
+  releaseInactiveListener()
   context = null
   instanceSeq = 0
   reqSeq = 0
