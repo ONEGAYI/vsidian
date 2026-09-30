@@ -128,6 +128,7 @@ vsidian/
 │       ├── appearance-merge.md                # 外观合并分页规格
 │       ├── batch-2026-09-menu.md              # 右键菜单批次总览与决策回执
 │       ├── batch-2026-09.md                   # 2026-09 开票批次总览
+│       ├── batch-2026-10-vscode-ops.md        # 2026-10 编辑器操作批次实施树
 │       ├── blockquote-accent-bar.md           # 引用块紫色提示边条规格
 │       ├── code-block-card.md                 # 代码块卡片功能规格
 │       ├── context-menu.md                    # 统一右键菜单规格（正文全域接管）
@@ -303,6 +304,7 @@ vsidian/
 │       ├── mermaidEntry.ts             # Mermaid 独立产物入口（#60）
 │       ├── mermaidRender.ts            # Mermaid 渲染管线（#60）
 │       ├── mermaidTheme.ts             # Mermaid 暗色主题装配
+│       ├── multicursor.ts              # 多光标扩展组单一事实源（#237）
 │       ├── outline.ts                  # 大纲全文解析与面板装配
 │       ├── outlineCollapse.ts          # 大纲折叠状态机纯函数
 │       ├── outlineDrag.ts              # 大纲拖拽移动计划纯函数
