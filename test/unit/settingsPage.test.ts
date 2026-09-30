@@ -425,11 +425,12 @@ describe('分组重组二轮还原（#163 验收反馈：侧栏只留常规/编�
     ])
   })
 
-  it('编辑器页内小节为显示/符号输入/代码块/图片，条目按前缀归节', () => {
+  it('编辑器页内小节为显示/编辑/符号输入/代码块/图片，条目按前缀归节', () => {
     const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
     clickNav(parent, zhCn['settings.editorCategory'])
     expect(sectionTitles(parent)).toEqual([
       zhCn['settings.groupDisplay'],
+      zhCn['settings.groupEditing'],
       zhCn['settings.groupSymbols'],
       zhCn['settings.groupCodeblock'],
       zhCn['settings.groupImage'],
@@ -443,6 +444,9 @@ describe('分组重组二轮还原（#163 验收反馈：侧栏只留常规/编�
         // #221 Live 直接悬停（hover.* 域落显示组）
         zhCn['setting.hoverLiveDirect.title'],
       ])
+    // #237 多光标（editor.multicursor 域落编辑组）
+    expect(groupItemTitles(parent, zhCn['settings.groupEditing']))
+      .toEqual([zhCn['setting.multicursor.title']])
     expect(groupItemTitles(parent, zhCn['settings.groupSymbols'])).toEqual([
       zhCn['setting.symbolAutocomplete.title'],
       zhCn['setting.symbolSelectionWrap.title'],
