@@ -2855,6 +2855,14 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
   display: none;
 }
 
+/* 转义管道的反斜杠默认隐藏（渲染为 |）；光标/选区触及该行时换挂显形类：
+   恢复文本流并以正文前景低混入浅色呈现（口径同 .vsidian-block-id，对齐
+   Obsidian 的转义符行内源码暴露——所见即所得由选区控制）。 */
+#app .cm-editor .cm-scroller .vsidian-table-grid-row .vsidian-table-escaped-pipe-reveal {
+  display: inline;
+  color: color-mix(in srgb, var(--vscode-editor-foreground, #808080) 45%, transparent);
+}
+
 /* #43 悬停控件位于 CM6 文本层之上，只为视口内网格行建立 DOM。 */
 #app .cm-editor .vsidian-table-controls {
   position: absolute;

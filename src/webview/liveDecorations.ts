@@ -140,6 +140,9 @@ export const LIVE_CLASS_NAMES = {
   tableGridEmpty: 'vsidian-table-grid-empty',
   tableGridDelimiter: 'vsidian-table-grid-delimiter',
   tableEscapedPipe: 'vsidian-table-escaped-pipe',
+  /** 转义管道的反斜杠在光标/选区触及该行时的显形类（Obsidian 对齐：
+   *  默认隐藏渲染为 |，触及行浅色显形暴露源码——与标题 mark 显隐同语义） */
+  tableEscapedPipeReveal: 'vsidian-table-escaped-pipe-reveal',
   /** 矩形格区蒙版（#73）：并入网格格装饰的 class 托管——外部贴类会与
    *  列把手高亮、CM6 mark 重写互抹（2026-09-28 拖选断裂实测） */
   tableRegionCell: 'vsidian-table-region-cell',
@@ -274,6 +277,7 @@ const hrRuleDeco = Decoration.replace({ widget: new HorizontalRuleWidget() })
 
 const tablePipeDeco = Decoration.mark({ class: LIVE_CLASS_NAMES.tablePipe })
 const tableEscapedPipeDeco = Decoration.mark({ class: LIVE_CLASS_NAMES.tableEscapedPipe })
+const tableEscapedPipeRevealDeco = Decoration.mark({ class: LIVE_CLASS_NAMES.tableEscapedPipeReveal })
 // 行尾一个 Markdown 填充空格保留文字节点供原生输入/IME 使用，但不参与
 // 可见排版。不要替换成零宽 widget：删空格再输入曾使光标显示在后一列。
 const tableGridPaddingDeco = Decoration.mark({ class: 'vsidian-table-grid-padding' })
@@ -567,8 +571,13 @@ function emitTableRowMarks(
     }
   }
   if (grid) {
+    // 转义管道的反斜杠：光标/选区触及该行时浅色显形（暴露源码），离开隐藏。
+    // 行级判定与标题 mark 显隐同谓词——折叠光标含行两端，非空选区严格重叠。
+    const escapedPipeDeco = selectionTouchesRange(selection, line.from, line.to)
+      ? tableEscapedPipeRevealDeco
+      : tableEscapedPipeDeco
     for (const pos of escapedPipeBackslashes(line.text)) {
-      out.push(tableEscapedPipeDeco.range(line.from + pos, line.from + pos + 1))
+      out.push(escapedPipeDeco.range(line.from + pos, line.from + pos + 1))
     }
   }
   emitTablePipeMarks(out, doc, line.from)
