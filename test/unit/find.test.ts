@@ -7,7 +7,7 @@
 //   零 edit.request、文本逐字节不变；替换是显式写操作（一笔 edit.request）
 // - 三开关（matchCase/wholeWord/regexp）：面板按钮点亮=选项开启；切换
 //   即重算匹配并出站 findOptions.set 持久化（workspace 级记忆通道）
-// - 非法正则不崩且有可见反馈（输入框 invalid 类 + 0/0 计数）
+// - 非法正则不崩且有可见反馈（输入框 invalid 类 + 「无结果」计数）
 // - 替换栏：Ctrl+H / view.find.open{replace:true} 展开；替换下一个与
 //   全部替换各为单笔写回（一笔撤销）；阅读模式只读不执行替换
 // - Ctrl+F 种子行为对齐 VSCode：单行非空选区填入搜索词
@@ -219,6 +219,28 @@ describe('打开与关闭（焦点契约）', () => {
   })
 })
 
+describe('图标按钮形态（对齐 VSCode 原生浮层）', () => {
+  it('导航与替换按钮为图标占位：字形本体 + aria-label/title 承载功能词', () => {
+    const h = makeBridge()
+    const c = mountFind(h)
+    c.handleHostMessage({ kind: 'view.find.open', query: '目标词' })
+    const cases: Array<{ cls: string; glyph: string; word: string }> = [
+      { cls: '.vsidian-find-prev', glyph: '↑', word: '上一个匹配' },
+      { cls: '.vsidian-find-next', glyph: '↓', word: '下一个匹配' },
+      { cls: '.vsidian-find-close', glyph: '✕', word: '关闭查找' },
+      { cls: '.vsidian-find-replace-next', glyph: '⇄', word: '替换' },
+      { cls: '.vsidian-find-replace-all', glyph: '⇉', word: '全部替换' },
+    ]
+    for (const { cls, glyph, word } of cases) {
+      const btn = parent!.querySelector<HTMLButtonElement>(cls)!
+      expect(btn, cls).toBeDefined()
+      expect(btn.textContent, `${cls} 字形占位`).toBe(glyph)
+      expect(btn.getAttribute('aria-label'), `${cls} 可访问名称`).toBe(word)
+      expect(btn.getAttribute('title'), `${cls} 悬停提示`).toBe(word)
+    }
+  })
+})
+
 describe('匹配计算与反馈（基于文本模型，含中文与 emoji）', () => {
   it('open 带 query：total 与文本模型一致（中文+emoji 文档），当前匹配为参考位置后首个', () => {
     const h = makeBridge()
@@ -234,17 +256,17 @@ describe('匹配计算与反馈（基于文本模型，含中文与 emoji）', (
     expect(state.find?.valid).toBe(true)
   })
 
-  it('计数显示 当前/总数；无匹配显示 0/0 且带空态类', () => {
+  it('计数显示「第 n 项，共 total 项」；无匹配显示「无结果」且带空态类', () => {
     const h = makeBridge()
     const c = mountFind(h)
     c.handleHostMessage({ kind: 'view.find.open', query: '目标词' })
     const count = parent!.querySelector<HTMLElement>('.vsidian-find-count')!
-    expect(count.textContent).toBe(`1/${HIT_OFFSETS.length}`)
+    expect(count.textContent).toBe(`第 1 项，共 ${HIT_OFFSETS.length} 项`)
     // 输入不存在的词
     const input = findInput()!
     input.value = '不存在的词'
     input.dispatchEvent(new Event('input', { bubbles: true }))
-    expect(count.textContent).toBe('0/0')
+    expect(count.textContent).toBe('无结果')
     expect(count.classList.contains('vsidian-find-count-empty')).toBe(true)
     const state = viewState(c, h)
     expect(state.find?.total).toBe(0)
@@ -335,7 +357,7 @@ describe('匹配计算与反馈（基于文本模型，含中文与 emoji）', (
     expect(viewState(c, h).find?.total).toBe(0)
   })
 
-  it('非法正则不崩且有可见反馈：输入框 invalid 类 + 0/0 计数 + valid=false', () => {
+  it('非法正则不崩且有可见反馈：输入框 invalid 类 + 「无结果」计数 + valid=false', () => {
     const h = makeBridge()
     const c = mountFind(h)
     c.handleHostMessage({ kind: 'view.find.open', query: '(' })
@@ -343,7 +365,7 @@ describe('匹配计算与反馈（基于文本模型，含中文与 emoji）', (
     regBtn.click()
     const input = findInput()!
     const count = parent!.querySelector<HTMLElement>('.vsidian-find-count')!
-    expect(count.textContent).toBe('0/0')
+    expect(count.textContent).toBe('无结果')
     expect(count.classList.contains('vsidian-find-count-empty')).toBe(true)
     expect(input.classList.contains('vsidian-find-input-invalid')).toBe(true)
     const state = viewState(c, h)

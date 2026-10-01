@@ -349,6 +349,9 @@ export const en = {
   'find.prev': 'Previous match',
   'find.next': 'Next match',
   'find.close': 'Close find',
+  /** Count form (VSCode-style): {n} current index, {total} match total */
+  'find.count': '{n} of {total}',
+  'find.noResults': 'No results',
   /** #238 查找选项条（Ctrl+D 会话期间的迷你三按钮）容器可访问名称 */
   'find.optionsBar': 'Find options',
 

@@ -96,6 +96,7 @@ vsidian/
 │   │   └── issue-tracker.md # GitHub Issues 操作约定
 │   ├── design/     # 设计文档（选择器映射等）
 │   │   ├── backlinks-panel-reference.png   # 反链面板形态参考图
+│   │   ├── find-panel-icons-reference.png  # 查找面板图标参考图
 │   │   ├── links-panel-icons-reference.png # 链环图标参考图（反链/出链）
 │   │   ├── obsidian-selector-map.md        # Obsidian 选择器映射表
 │   │   └── outlinks-panel-reference.png    # 出链面板形态参考图

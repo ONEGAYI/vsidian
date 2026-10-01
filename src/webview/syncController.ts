@@ -97,7 +97,7 @@ import {
   type SettingsPayload,
 } from '../shared/settings'
 import { onLocaleChanged, t } from '../shared/i18n'
-import { bindLocale, bindLocaleAttrs, bindLocaleFnAttrs, refreshElementLocale } from './localeDom'
+import { bindLocale, bindLocaleAttrs, bindLocaleFn, bindLocaleFnAttrs, refreshElementLocale } from './localeDom'
 import { refreshOnDemandControlLocale } from './localeOnDemand'
 import {
   FIND_CLASS_NAMES,
@@ -7037,7 +7037,7 @@ export class WebviewSyncController {
     toggle.type = 'button'
     toggle.className = FIND_CLASS_NAMES.toggle
     toggle.textContent = '⌄'
-    bindLocale(toggle, 'aria-label', 'find.toggleReplace')
+    bindLocaleAttrs(toggle, 'find.toggleReplace')
     toggle.addEventListener('click', () => {
       this.setFindReplaceOpen(!(this.findReplaceOpen && this.viewMode === 'live'))
     })
@@ -7064,9 +7064,11 @@ export class WebviewSyncController {
     })
     const count = document.createElement('span')
     count.className = FIND_CLASS_NAMES.count
-    count.textContent = '0/0'
+    // 计数文案随命中状态变化：登记回调型换包重刷（求值统一走
+    // findCountText，findRender 状态更新与 locale.changed 重刷同源）。
+    // 位置在输入行三开关之后（VSCode 原生同序）
+    bindLocaleFn(count, 'text', () => this.findCountText())
     row.appendChild(input)
-    row.appendChild(count)
     // 三开关（Aa/ab/.*；点亮 = 选项开启）：切换即重算匹配并把新选项经
     // findOptions.set 上送宿主持久化（workspace 级记忆，多面板广播一致）
     const mkToggle = (
@@ -7101,20 +7103,23 @@ export class WebviewSyncController {
     row.appendChild(caseBtn)
     row.appendChild(wordBtn)
     row.appendChild(regexpBtn)
-    // 文字按钮（导航与关闭）：文案与可访问名称同键，创建与换包重写共用一次登记
-    const mkBtn = (cls: string, key: 'find.prev' | 'find.next' | 'find.close',
+    row.appendChild(count)
+    // 图标按钮（导航与关闭，#241 对齐 VSCode 原生浮层）：按钮本体只呈
+    // 占位字形（SVG 资产就绪后换 light/dark 图标），功能词在 aria-label
+    // 与 hover title（i18n 同键，bindLocaleAttrs 一次登记双目标）
+    const mkIconBtn = (cls: string, glyph: string, key: 'find.prev' | 'find.next' | 'find.close',
       onClick: () => void): HTMLButtonElement => {
       const b = document.createElement('button')
       b.type = 'button'
       b.className = cls
-      bindLocale(b, 'text', key)
-      bindLocale(b, 'aria-label', key)
+      b.textContent = glyph
+      bindLocaleAttrs(b, key)
       b.addEventListener('click', onClick)
       return b
     }
-    row.appendChild(mkBtn(FIND_CLASS_NAMES.prev, 'find.prev', () => this.findStep('prev')))
-    row.appendChild(mkBtn(FIND_CLASS_NAMES.next, 'find.next', () => this.findStep('next')))
-    row.appendChild(mkBtn(FIND_CLASS_NAMES.close, 'find.close', () => this.closeFind()))
+    row.appendChild(mkIconBtn(FIND_CLASS_NAMES.prev, '↑', 'find.prev', () => this.findStep('prev')))
+    row.appendChild(mkIconBtn(FIND_CLASS_NAMES.next, '↓', 'find.next', () => this.findStep('next')))
+    row.appendChild(mkIconBtn(FIND_CLASS_NAMES.close, '✕', 'find.close', () => this.closeFind()))
     // 替换行：输入框（Enter = 替换下一个，面板局部键）+ 替换/全部替换按钮
     const replaceRow = document.createElement('div')
     replaceRow.className = FIND_CLASS_NAMES.replace
@@ -7135,14 +7140,14 @@ export class WebviewSyncController {
     const replaceNextBtn = document.createElement('button')
     replaceNextBtn.type = 'button'
     replaceNextBtn.className = FIND_CLASS_NAMES.replaceNext
-    bindLocale(replaceNextBtn, 'text', 'find.replaceNext')
-    bindLocale(replaceNextBtn, 'aria-label', 'find.replaceNext')
+    replaceNextBtn.textContent = '⇄'
+    bindLocaleAttrs(replaceNextBtn, 'find.replaceNext')
     replaceNextBtn.addEventListener('click', () => this.runFindReplace('next'))
     const replaceAllBtn = document.createElement('button')
     replaceAllBtn.type = 'button'
     replaceAllBtn.className = FIND_CLASS_NAMES.replaceAll
-    bindLocale(replaceAllBtn, 'text', 'find.replaceAll')
-    bindLocale(replaceAllBtn, 'aria-label', 'find.replaceAll')
+    replaceAllBtn.textContent = '⇉'
+    bindLocaleAttrs(replaceAllBtn, 'find.replaceAll')
     replaceAllBtn.addEventListener('click', () => this.runFindReplace('all'))
     replaceRow.appendChild(replaceInput)
     replaceRow.appendChild(replaceNextBtn)
@@ -7302,6 +7307,17 @@ export class WebviewSyncController {
     this.findRecompute(prevFrom ?? this.findReferencePos())
   }
 
+  /** 计数文案（VSCode 形态）：「第 n 项，共 total 项」；零命中/非法正则
+   *  显示「无结果」。findRender 的状态刷新与 bindLocaleFn 的换包重刷共用
+   *  同一求值，杜绝双写漂移 */
+  private findCountText(): string {
+    const total = this.findMatches.length
+    if (total === 0) {
+      return t('find.noResults')
+    }
+    return t('find.count', { n: this.findIndex + 1, total })
+  }
+
   /** 重绘可观测状态：live 装饰效应、计数文本、开关按钮态、替换行显隐、
    *  阅读命中块（不改滚动位置） */
   private findRender(): void {
@@ -7311,10 +7327,10 @@ export class WebviewSyncController {
     const total = this.findMatches.length
     const cur = this.findMatches[this.findIndex]
     if (this.findCountEl) {
-      this.findCountEl.textContent = `${total > 0 ? this.findIndex + 1 : 0}/${total}`
+      this.findCountEl.textContent = this.findCountText()
       this.findCountEl.classList.toggle(FIND_CLASS_NAMES.countEmpty, total === 0)
     }
-    // 非法正则可见反馈：输入框红边 + title 提示（不崩、无匹配 0/0）
+    // 非法正则可见反馈：输入框红边 + title 提示（不崩、计数显示「无结果」）
     const invalid = this.findOpen && !this.findValid
     if (this.findInputEl) {
       this.findInputEl.classList.toggle(FIND_CLASS_NAMES.inputInvalid, invalid)

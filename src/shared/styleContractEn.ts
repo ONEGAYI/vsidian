@@ -1068,10 +1068,10 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
   },
   'find-panel': {
     purpose:
-      'Floating find panel over the editing area (three-toggle panel since #236, powered by the @codemirror/search engine in external-drive mode): column layout — main row (input, N:M counter, the case/whole-word/regexp toggles, previous/next/close) plus the left-edge replace-bar expander. The three toggles are the find-options single source of truth (shared/findOptions; also consumed by #238 "select next same word") and persist per workspace across sessions; the panel is available in both live and reading views (reading keeps block-level hits and positioning).',
+      'Floating find panel over the editing area (three-toggle panel since #236, powered by the @codemirror/search engine in external-drive mode): column layout — main row (input, the case/whole-word/regexp toggles, the "n of total / No results" counter, previous/next/close — same order as the native VSCode widget) plus the left-edge replace-bar expander. The three toggles are the find-options single source of truth (shared/findOptions; also consumed by #238 "select next same word") and persist per workspace across sessions; the panel is available in both live and reading views (reading keeps block-level hits and positioning).',
     states:
-      'The panel DOM is always present; visibility is controlled by .vsidian-find-open (display:none when closed, so probes are unaffected). A lit toggle means the option is on (e.g. Aa lit when match-case is enabled). An invalid regexp shows a red border on the input (.vsidian-find-input-invalid; no crash, counter shows 0/0). Open/close and toggle interactions are verified by the browser suite along behavior paths.',
-    dom: 'Attached inside the editor container (position:relative containing block), below #app; buttons are real <button type="button"> elements (aria-pressed/aria-expanded follow state; aria-label/title from the find.* i18n entries).',
+      'The panel DOM is always present; visibility is controlled by .vsidian-find-open (display:none when closed, so probes are unaffected). A lit toggle means the option is on (e.g. Aa lit when match-case is enabled). An invalid regexp shows a red border on the input (.vsidian-find-input-invalid; no crash, counter reads "No results"). Open/close and toggle interactions are verified by the browser suite along behavior paths.',
+    dom: 'Attached inside the editor container (position:relative containing block), below #app; buttons are real <button type="button"> elements (aria-pressed/aria-expanded follow state; aria-label/title from the find.* i18n entries). Since #241 the navigate/close/replace buttons are icon-shaped — the button body carries only the glyph (a placeholder until the SVG assets land), while the words live solely in aria-label and the hover title.',
     obsidian: { counterpart: 'None (the Obsidian find widget is an application-level part, not a document styling surface)' },
   },
   'find-options-bar': {
@@ -1087,7 +1087,7 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
       'The expandable replace bar of the find panel (#236): collapsed by default, expanded via the left-edge toggle (find-panel entry, .vsidian-find-toggle) or Ctrl+H (the findReplace operation); "Replace" replaces the current match and moves to the next one, "Replace All" replaces the whole batch — both are explicit write operations (a single CM6 transaction through the standard write-back chain; one edit.request = one host undo). Replacing is a live-editing capability: in reading view the panel works but the replace bar never expands.',
     states:
       'The replace-row DOM is always present; visibility is controlled by .vsidian-find-replace-open (display:none by default; permanently collapsed in reading view). The expanded state is observable via FindSessionProbe.replaceOpen.',
-    dom: 'Third section inside the panel (.vsidian-find); Enter in the input is a panel-local key (replace next); buttons are real <button type="button"> elements (i18n entries find.replaceNext / find.replaceAll).',
+    dom: 'Third section inside the panel (.vsidian-find); Enter in the input is a panel-local key (replace next); buttons are real <button type="button"> elements (icon-shaped since #241 — the words live in aria-label/title, i18n entries find.replaceNext / find.replaceAll).',
     obsidian: { counterpart: 'None (the Obsidian replace widget is application-level)' },
   },
   'find-match-highlight': {

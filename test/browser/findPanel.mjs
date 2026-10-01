@@ -65,30 +65,30 @@ try {
     await page.keyboard.press('Control+f')
     let panel = await waitPanel(page, (p) => p.open && p.activeIsInput, 'Ctrl+F 打开聚焦')
     await page.keyboard.type('foo')
-    panel = await waitPanel(page, (p) => p.count === '1/4', '默认档键入计数 1/4')
+    panel = await waitPanel(page, (p) => p.count === '第 1 项，共 4 项', '默认档键入计数 第1项共4项')
     assert.ok(panel.matchMarks >= 1, `全部匹配装饰应在场，实际 ${panel.matchMarks}`)
     assert.equal(panel.currentMarks, 1, '当前匹配装饰应恰 1 处')
 
     // ---- 场景 2：Enter/Shift+Enter 导航（序号推进与回退，选区跟随）----
     await page.keyboard.press('Enter')
-    panel = await waitPanel(page, (p) => p.count === '2/4', 'Enter 下一处')
+    panel = await waitPanel(page, (p) => p.count === '第 2 项，共 4 项', 'Enter 下一处')
     await page.keyboard.press('Shift+Enter')
-    panel = await waitPanel(page, (p) => p.count === '1/4', 'Shift+Enter 上一处')
+    panel = await waitPanel(page, (p) => p.count === '第 1 项，共 4 项', 'Shift+Enter 上一处')
     const editor0 = await page.evaluate(() => window.readEditor())
     assert.equal(editor0.from, 0, '当前匹配 Foo 应被选中（选区跟随）')
 
     // ---- 场景 3：三开关真实点击（点亮态 + 计数 + findOptions.set 出站）----
     await page.click('.vsidian-find-case')
-    panel = await waitPanel(page, (p) => p.caseActive && p.count === '1/3', 'matchCase 开：3 处')
+    panel = await waitPanel(page, (p) => p.caseActive && p.count === '第 1 项，共 3 项', 'matchCase 开：3 处')
     let setCount = await page.evaluate(() =>
       window.readHostMessages().filter((m) => m.kind === 'findOptions.set').length)
     assert.equal(setCount, 1, '切开关应出站 findOptions.set')
     await page.click('.vsidian-find-word')
-    panel = await waitPanel(page, (p) => p.wordActive && p.count === '1/2', 'matchCase+wholeWord：2 处')
+    panel = await waitPanel(page, (p) => p.wordActive && p.count === '第 1 项，共 2 项', 'matchCase+wholeWord：2 处')
     // 开关持久化应答回环（snapshot 同值），面板状态不跳变
     await page.click('.vsidian-find-regexp')
     // 正则模式：'foo' 作为正则合法且等价字面量，计数仍 2
-    panel = await waitPanel(page, (p) => p.regexpActive && p.count === '1/2', 'regexp 开：等价计数')
+    panel = await waitPanel(page, (p) => p.regexpActive && p.count === '第 1 项，共 2 项', 'regexp 开：等价计数')
     setCount = await page.evaluate(() =>
       window.readHostMessages().filter((m) => m.kind === 'findOptions.set').length)
     assert.equal(setCount, 3, '三次切换应出站三笔 findOptions.set')
@@ -98,7 +98,7 @@ try {
     await page.click('.vsidian-find-input')
     await page.keyboard.press('Control+a')
     await page.keyboard.type('[bad')
-    panel = await waitPanel(page, (p) => p.invalid && p.count === '0/0', '非法正则 0/0')
+    panel = await waitPanel(page, (p) => p.invalid && p.count === '无结果', '非法正则无结果')
     assert.ok(panel.countEmpty, '零命中计数应为错误色类')
     const invalidBorder = await page.evaluate(() => {
       const input = document.querySelector('.vsidian-find-input.vsidian-find-input-invalid')
@@ -115,12 +115,12 @@ try {
     await page.click('.vsidian-find-input')
     await page.keyboard.press('Control+a')
     await page.keyboard.type('f.o')
-    panel = await waitPanel(page, (p) => !p.invalid && p.count === '1/2', '合法正则恢复 2 处')
+    panel = await waitPanel(page, (p) => !p.invalid && p.count === '第 1 项，共 2 项', '合法正则恢复 2 处')
     const beforeEdits = (await editRequests(page)).length
     await page.click('.vsidian-find-replace-input')
     await page.keyboard.type('baz')
     await page.click('.vsidian-find-replace-next')
-    await waitPanel(page, (p) => p.count === '1/1', '替换下一个后余 1 处')
+    await waitPanel(page, (p) => p.count === '第 1 项，共 1 项', '替换下一个后余 1 处')
     let edits = await editRequests(page)
     assert.equal(edits.length, beforeEdits + 1, '替换下一个应恰一笔 edit.request')
     let editor = await page.evaluate(() => window.readEditor())
@@ -129,7 +129,7 @@ try {
 
     // ---- 场景 6：全部替换（整批一笔）----
     await page.click('.vsidian-find-replace-all')
-    await waitPanel(page, (p) => p.count === '0/0', '全部替换后 0/0')
+    await waitPanel(page, (p) => p.count === '无结果', '全部替换后无结果')
     edits = await editRequests(page)
     assert.equal(edits.length, beforeEdits + 2, '全部替换应整批恰一笔 edit.request')
     editor = await page.evaluate(() => window.readEditor())

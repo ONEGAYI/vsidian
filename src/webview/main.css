@@ -3341,7 +3341,7 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   outline: none;
 }
 
-/* 非法正则反馈：输入框红边（不崩；计数区同时显示空态 0/0） */
+/* 非法正则反馈：输入框红边（不崩；计数区同时显示空态「无结果」） */
 .vsidian-find .vsidian-find-input.vsidian-find-input-invalid {
   border-color: var(--vscode-inputValidation-errorBorder, #be1100);
 }
@@ -3358,25 +3358,37 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   color: var(--vscode-errorForeground, #f48771);
 }
 
+/* 图标按钮基线（#241 对齐 VSCode 原生浮层）：透明底 + hover 淡入底色，
+   功能词只在 aria-label/title（hover tooltip），按钮本体只呈字形；
+   SVG 图标资产就绪后字形位换 light/dark 图标（占位见 buildFindPanel） */
 .vsidian-find button {
-  font-family: var(--vscode-font-family);
-  font-size: var(--vscode-font-size, 12px);
-  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
   min-width: 22px;
-  padding: 3px 4px;
+  height: 22px;
+  padding: 0 4px;
+  font-family: var(--vscode-font-family);
+  font-size: 14px;
+  line-height: 1;
   cursor: pointer;
-  color: var(--vscode-button-secondaryForeground);
-  background-color: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-foreground, #cccccc);
+  background-color: transparent;
   border: none;
   border-radius: 3px;
 }
 
-/* 三开关激活态（开启时点亮；Aa/ab/.* 同款规则） */
+.vsidian-find button:hover {
+  background-color: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.25));
+}
+
+/* 三开关激活态（开启时点亮；Aa/ab/.* 同款规则；VSCode inputOption 激活族） */
 .vsidian-find .vsidian-find-case-active,
 .vsidian-find .vsidian-find-word-active,
 .vsidian-find .vsidian-find-regexp-active {
-  color: var(--vscode-button-foreground);
-  background-color: var(--vscode-button-background);
+  color: var(--vscode-inputOption-activeForeground, #ffffff);
+  background-color: var(--vscode-inputOption-activeBackground, #0078d4);
 }
 
 /* #238 主面板开关闪烁态：会话生效档与面板显示脱节时的短促提示

@@ -37,9 +37,15 @@ describe('查找面板 CSS 契约（#236）', () => {
     expect(rule('.vsidian-find .vsidian-find-replace', /padding-left:\s*20px/)).toBeTruthy()
   })
 
-  it('三开关激活态点亮规则覆盖 Aa/ab/.* 三类（合并选择器同款样式）', () => {
+  it('三开关激活态点亮规则覆盖 Aa/ab/.* 三类（VSCode inputOption 激活族）', () => {
     const active = rule('.vsidian-find .vsidian-find-case-active,\n.vsidian-find .vsidian-find-word-active,\n.vsidian-find .vsidian-find-regexp-active')
-    expect(active).toMatch(/background-color:\s*var\(--vscode-button-background/)
+    expect(active).toMatch(/background-color:\s*var\(--vscode-inputOption-activeBackground/)
+    expect(active).toMatch(/color:\s*var\(--vscode-inputOption-activeForeground/)
+  })
+
+  it('图标按钮基线：透明底 + hover 淡入底色（功能词只在 aria-label/title）', () => {
+    expect(rule('.vsidian-find button', /background-color:\s*transparent/)).toBeTruthy()
+    expect(rule('.vsidian-find button:hover', /background-color:\s*var\(--vscode-toolbar-hoverBackground/)).toBeTruthy()
   })
 
   it('非法正则反馈：输入框 invalid 类红边（inputValidation 错误色）', () => {
