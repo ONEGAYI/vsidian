@@ -34,13 +34,16 @@ const appearance = new AppearanceSection(snippets, styleRef)
 // #198 索引维护：排除模式编辑与清理/重建操作（状态权威在宿主，index.state 推送回显）
 const indexMaintenance = new IndexMaintenanceSection({ postMessage: (message) => vscode.postMessage(message) })
 // #239 中文分词：引擎选择与 jieba 资源下载管理（设置值与资源状态权威
-// 都在宿主，settings.* / wordSegment.state 推送回显）
+// 都在宿主，settings.* / wordSegment.state 推送回显）。#264 起分词分页
+// 退役：以编辑器页尾二级组委托装配（侧栏无分词入口，focusSection
+// 'wordSegment' 兼容路由到编辑器页分词组）
 const wordSegment = new WordSegmentSection({ postMessage: (message) => vscode.postMessage(message) })
 
 const view = new SettingsPageView(
   { postMessage: (message) => vscode.postMessage(message) },
   PRODUCTION_SETTING_DEFINITIONS,
-  [keybindings, appearance, indexMaintenance, wordSegment],
+  [keybindings, appearance, indexMaintenance],
+  [wordSegment],
 )
 view.mount(document.getElementById('app') ?? document.body)
 vscode.postMessage({ kind: 'settings.get' })

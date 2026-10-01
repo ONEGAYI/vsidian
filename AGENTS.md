@@ -135,6 +135,7 @@ vsidian/
 │       ├── appearance-merge.md                # 外观合并分页规格
 │       ├── batch-2026-09-menu.md              # 右键菜单批次总览与决策回执
 │       ├── batch-2026-09.md                   # 2026-09 开票批次总览
+│       ├── batch-2026-10-settings-sections.md # 2026-10 设置页批次实施树
 │       ├── batch-2026-10-vscode-ops.md        # 2026-10 编辑器操作批次实施树
 │       ├── blockquote-accent-bar.md           # 引用块紫色提示边条规格
 │       ├── code-block-card.md                 # 代码块卡片功能规格

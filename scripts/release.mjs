@@ -103,6 +103,8 @@ const QUICK_ACTION_ICON_KEYS = [
   'findPrev', 'findNext', 'findClose', 'replaceOne', 'replaceAll', 'findInSelection',
   // 2026-10 查找面板替换栏切换 chevron（Pen 直绘）
   'chevronRight',
+  // #265 设置页二级标题组的两枚生图资产
+  'typewriter', 'wordSegment',
 ]
 const REQUIRED_QUICK_ACTION_SVGS = ['light', 'dark'].flatMap((theme) =>
   QUICK_ACTION_ICON_KEYS.map((key) => `out/webview/assets/${theme}-${key}.svg`),

@@ -28,12 +28,46 @@ export interface SettingsPageSection {
    *  CSS 片段分页槽位改为调色板字形并被「外观」合并分页沿用（画笔字形
    *  退役）；'book'（#132 样式参考分页）随侧栏条目合并一并退役；
    *  'links' 为索引维护分页的链环 glyph——形态改版批次自 'editor' 铅笔
-   *  改为链环（与侧栏反链图标同形语言） */
+   *  改为链环（与侧栏反链图标同形语言）；'keyboard' 为快捷键分页的字形
+   *  （#264 中文分词分页退役——其曾占位借用的 keyboard 槽位随之消失） */
   icon: 'keyboard' | 'editor' | 'palette' | 'links'
   entries: readonly { id: string; title: string; description?: string }[]
   /** 返回清理函数；focusEntry 为全局搜索定位到的入口。 */
   mount(parent: HTMLElement, focusEntry?: string): void | (() => void)
 }
+
+/**
+ * 编辑器分页内的二级标题组委托（#264）：分词分页退役为编辑器页尾组。
+ * 组内容与组内定位由实现自行装配（承载标准设置行之外的呈现形态），条目
+ * 进全局搜索索引（归编辑器分组命中）；与 SettingsPageSection 互斥——
+ * 本接口不产生侧栏分页槽位，也不得以此新增分页形态。
+ */
+export interface SettingsPageEditorGroup {
+  /** 组标题语言键（h3 二级标题，t(titleKey) 取词） */
+  readonly titleKey: MessageKey
+  /** 兼容路由：宿主按退役分页 id 发起 settings.focusSection 时打开编辑器
+   *  页并定位到本组（entry 原样透传给 mount，语义不变） */
+  readonly legacySectionId?: string
+  /** 组标题图标槽位（SettingsGroupIcon 注册表驱动，与 defs 组同一 h3
+   *  路径：内联字形与 #265 生图资产同槽）：缺省 = 槽位空缺，标题文字
+   *  起点不变（分词组的 wordSegment 已随 #265 生图接线登记） */
+  readonly icon?: SettingsGroupIcon
+  /** 全局搜索条目（id = mount 的 focusEntry 定位键） */
+  readonly entries: readonly { id: string; title: string; description?: string }[]
+  /** 组内容装配进容器（vsidian-settings-group）；返回的清理函数于分页
+   *  重渲染/切换时调用（释放内部 parent 引用） */
+  mount(parent: HTMLElement, focusEntry?: string): void | (() => void)
+}
+
+/**
+ * 编辑器页小节（editorSectionDefs 的元素）：defs 标准组与 group 委托组
+ * 互斥——标准臂有 defs 无 group，委托臂有 group 无 defs（对侧属性以
+ * `?: undefined` 钉成可辨识联合，互斥靠类型不靠约定）。icon 为二级组
+ * 标题图标槽（标准臂四枚内联字形，委托臂生图资产或空缺）。
+ */
+type EditorSection =
+  | { titleKey: MessageKey; icon: SettingsGroupIcon; defs: () => readonly SettingDefinition[]; group?: undefined }
+  | { titleKey: MessageKey; icon?: SettingsGroupIcon; defs?: undefined; group: SettingsPageEditorGroup }
 
 export const SETTINGS_PAGE_CLASS_NAMES = {
   root: 'vsidian-settings', title: 'vsidian-settings-title',
@@ -54,26 +88,61 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, tex
   if (text) el.textContent = text
   return el
 }
-function icon(kind: 'editor' | 'keyboard' | 'search' | 'general' | 'palette' | 'links'): SVGSVGElement {
+
+/** 字形 path 注册表（24 viewBox 单 path；icon() 单表的数据源，装配仍只走
+ *  icon() 一条路径，新增 kind = 联合类型加名 + 本表加行）。
+ *  search：放大镜（侧栏搜索框前缀）；
+ *  keyboard：键盘（快捷键分页）；
+ *  general（#96「常规」分组；#230 换形）：双拨杆开关——通用偏好开关的
+ *  惯用意象（上枚圆点居左、下枚圆点居右；lucide toggle-left/right 的纵排
+ *  同构，替换原地球字形的「语言/网络」语义）；
+ *  palette（#231 外观合并分页）：调色板——带颜料孔圆点与拇指孔内凹的画板
+ *  （lucide palette 主体轮廓线性化，颜料孔以 stroke-linecap 圆点子路径
+ *  表达，仍为单 path 线性风格；#128 起槽位沿用的「样式定制」意象不变，
+ *  原画笔字形随合并退役）；
+ *  editor：铅笔起笔（「编辑器」分组）；
+ *  links（形态改版批次）：互锁双链环（lucide link 形）——与侧栏反链/出链
+ *  链环图标同一造型语言（索引维护分页的链接域意象）；
+ *  display/editing/codeblock/image（#263 编辑器页二级组标题四枚，v2 拍板
+ *  清单原样 path）：显示 = 显示器、编辑 = 双 I 光标、代码块 = 尖括号、
+ *  图片 = 山形相框（#265 生图两枚从独立 SVG 资产加载，不在本表）。
+ *  book（#132 样式参考分页）随 #231 侧栏条目合并退役；
+ *  #163 一轮曾为符号/代码块/图片三组新增 keyboard 复用与 code/image 形，
+ *  二轮还原为页内小节后侧栏不再使用，已随分支退役。 */
+const ICON_PATHS = {
+  search: 'M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0',
+  keyboard: 'M3 5h18v14H3zM6 9h1m3 0h1m3 0h1m3 0h1m3 0h1M6 12h1m3 0h1m3 0h1m3 0h1M7 16h10',
+  general: 'M7 2h10a4 4 0 0 1 0 8H7a4 4 0 0 1 0-8ZM8 4a2 2 0 1 0 0 4 2 2 0 1 0 0-4M7 14h10a4 4 0 0 1 0 8H7a4 4 0 0 1 0-8ZM16 16a2 2 0 1 0 0 4 2 2 0 1 0 0-4',
+  palette: 'M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z M13.5 6.5h.01 M17.5 10.5h.01 M8.5 7.5h.01 M6.5 12.5h.01',
+  editor: 'M14 4l6 6M3 21l5-1L21 7a2 2 0 0 0-4-4L4 16z',
+  links: 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71',
+  display: 'M4 3h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2ZM8 21h8M12 17v4',
+  editing: 'M7 4v16M5 4h4M5 20h4M17 4v16M15 4h4M15 20h4',
+  codeblock: 'M8 7l-5 5 5 5M16 7l5 5-5 5',
+  image: 'M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2ZM11 9a2 2 0 1 1-4 0 2 2 0 0 1 4 0M21 15l-3.09-3.09a2 2 0 0 0-2.82 0L6 21',
+} as const
+
+function icon(kind: keyof typeof ICON_PATHS): SVGSVGElement {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
   svg.setAttribute('viewBox', '0 0 24 24')
   svg.setAttribute('aria-hidden', 'true')
   const path = document.createElementNS(svg.namespaceURI, 'path')
-  // general（#96「常规」分组；#230 换形）：双拨杆开关——通用偏好开关的
-  // 惯用意象（上枚圆点居左、下枚圆点居右；lucide toggle-left/right 的纵排
-  // 同构，替换原地球字形的「语言/网络」语义）；
-  // palette（#231 外观合并分页）：调色板——带颜料孔圆点与拇指孔内凹的画板
-  // （lucide palette 主体轮廓线性化，颜料孔以 stroke-linecap 圆点子路径
-  //  表达，仍为单 path 线性风格；#128 起槽位沿用的「样式定制」意象不变，
-  //  原画笔字形随合并退役）。
-  // #163 一轮曾为符号/代码块/图片三组新增 keyboard 复用与 code/image 形，
-  // 二轮还原为页内小节后侧栏不再使用，已随分支退役。
-  // book（#132 样式参考分页）随 #231 侧栏条目合并退役。
-  // links（形态改版批次）：互锁双链环（lucide link 形）——与侧栏反链/出链
-  // 链环图标同一造型语言（索引维护分页的链接域意象）
-  path.setAttribute('d', kind === 'search' ? 'M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0' : kind === 'keyboard' ? 'M3 5h18v14H3zM6 9h1m3 0h1m3 0h1m3 0h1M6 12h1m3 0h1m3 0h1m3 0h1M7 16h10' : kind === 'general' ? 'M7 2h10a4 4 0 0 1 0 8H7a4 4 0 0 1 0-8ZM8 4a2 2 0 1 0 0 4 2 2 0 1 0 0-4M7 14h10a4 4 0 0 1 0 8H7a4 4 0 0 1 0-8ZM16 16a2 2 0 1 0 0 4 2 2 0 1 0 0-4' : kind === 'palette' ? 'M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z M13.5 6.5h.01 M17.5 10.5h.01 M8.5 7.5h.01 M6.5 12.5h.01' : kind === 'links' ? 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71' : 'M14 4l6 6M3 21l5-1L21 7a2 2 0 0 0-4-4L4 16z')
+  path.setAttribute('d', ICON_PATHS[kind])
   svg.append(path)
   return svg
+}
+
+/** 编辑器页二级组标题图标：四枚内联线性字形与 #265 两枚生图资产。 */
+export type SettingsGroupIcon = 'display' | 'editing' | 'codeblock' | 'image' | 'typewriter' | 'wordSegment'
+
+function groupIcon(kind: SettingsGroupIcon): SVGSVGElement | HTMLSpanElement {
+  if (kind === 'typewriter' || kind === 'wordSegment') {
+    const glyph = element('span', 'vsidian-settings-generated-icon')
+    glyph.dataset.icon = kind
+    glyph.setAttribute('aria-hidden', 'true')
+    return glyph
+  }
+  return icon(kind)
 }
 
 export class SettingsPageView {
@@ -91,12 +160,16 @@ export class SettingsPageView {
   private active: string | undefined
   private pending = 0
   private saveFailed = false
-  private disposeSection: (() => void) | undefined
+  /** 当前分页内容卸载器集合（标准分页 mount 与编辑器页委托组 mount 的
+   *  清理函数逐个收集）：编辑器页多委托组并存，重渲染/切页时全部执行 */
+  private sectionDisposers: Array<() => void> = []
   private offLocale: (() => void) | undefined
 
   constructor(private readonly bridge: SettingsPageBridge,
     private readonly defs: readonly SettingDefinition[],
-    private readonly sections: readonly SettingsPageSection[] = []) {}
+    private readonly sections: readonly SettingsPageSection[] = [],
+    /** #264 编辑器页二级组委托（分词）：挂编辑器页尾，不占侧栏槽位 */
+    private readonly editorGroups: readonly SettingsPageEditorGroup[] = []) {}
 
   mount(parent: HTMLElement): void {
     const root = element('div', SETTINGS_PAGE_CLASS_NAMES.root)
@@ -154,8 +227,11 @@ export class SettingsPageView {
   }
 
   /** 切换到指定分类（附加分页或内建分组）；entry（#231）为分页内进一步
-   *  定位的条目 id（外观分页按归属路由页内页签）；整页重渲染（#132） */
+   *  定位的条目 id（外观分页按归属路由页内页签）；整页重渲染（#132）。
+   *  #264 兼容路由：宿主按退役分页 id（legacySectionId，如分词
+   *  'wordSegment'）发起定位时打开编辑器页，entry 透传给对应委托组 */
   selectSection(id: string, entry?: string): void {
+    if (this.editorGroups.some((g) => g.legacySectionId === id)) id = 'editor'
     const known = this.categories().some((c) => c.id === id)
     if (!known) return
     this.active = id
@@ -251,19 +327,26 @@ export class SettingsPageView {
       !d.key.startsWith('codeblock.') && !d.key.startsWith('image.'))
   }
   private editorDefs(): readonly SettingDefinition[] {
-    // #239 分词三键（editor.wordSegment*）呈现归「中文分词」附加分页
-    //（wordSegmentSettings 同页渲染选择与下载管理，值仍走标准保存链路），
-    // 编辑器页与搜索内建分组不重复呈现
+    // #239 分词三键（editor.wordSegment*）不由本表渲染；#264 起呈现归编辑
+    // 器页尾「中文分词」委托组（wordSegmentSettings 同组渲染选择与下载管
+    // 理，值仍走标准保存链路），排除保留防止标准设置行与搜索内建分组重复
+    // 呈现（搜索条目由委托组 entries 提供）
     return this.defs.filter((d) => !d.key.startsWith('general.') && !d.key.startsWith('editor.wordSegment'))
   }
-  /** 编辑器页内小节（顺序即渲染顺序）；空小节由调用方跳过不渲染 */
-  private editorSectionDefs(): Array<{ titleKey: MessageKey; defs: () => readonly SettingDefinition[] }> {
+  /** 编辑器页内小节（顺序即渲染顺序）；空小节由调用方跳过不渲染。
+   *  icon 为二级组标题图标，注册表驱动（#263 内联四枚 + #265 生图两枚）。
+   *  #264 起尾部追加委托组（分词）：组内容非标准设置行，经 group.mount
+   *  装配，图标经组对象 icon 槽登记、走与 defs 组同一 h3 容器路径（结构
+   *  不加特判；未登记 = 槽位空缺，布局机制对其无差别）。
+   *  标准组/委托组互斥由 EditorSection 可辨识联合钉住。 */
+  private editorSectionDefs(): EditorSection[] {
     return [
-      { titleKey: 'settings.groupDisplay', defs: () => this.displayDefs() },
-      { titleKey: 'settings.groupEditing', defs: () => this.editingDefs() },
-      { titleKey: 'settings.groupSymbols', defs: () => this.symbolDefs() },
-      { titleKey: 'settings.groupCodeblock', defs: () => this.codeblockDefs() },
-      { titleKey: 'settings.groupImage', defs: () => this.imageDefs() },
+      { titleKey: 'settings.groupDisplay', icon: 'display', defs: () => this.displayDefs() },
+      { titleKey: 'settings.groupEditing', icon: 'editing', defs: () => this.editingDefs() },
+      { titleKey: 'settings.groupSymbols', icon: 'typewriter', defs: () => this.symbolDefs() },
+      { titleKey: 'settings.groupCodeblock', icon: 'codeblock', defs: () => this.codeblockDefs() },
+      { titleKey: 'settings.groupImage', icon: 'image', defs: () => this.imageDefs() },
+      ...this.editorGroups.map((group): EditorSection => ({ titleKey: group.titleKey, icon: group.icon, group })),
     ]
   }
   private categories() {
@@ -287,8 +370,8 @@ export class SettingsPageView {
     const contextChanged = renderKey !== this.lastRenderKey
     this.lastRenderKey = renderKey
     if (contextChanged && this.mainEl) this.mainEl.scrollTop = 0
-    this.disposeSection?.()
-    this.disposeSection = undefined
+    for (const dispose of this.sectionDisposers) dispose()
+    this.sectionDisposers = []
     // #96 默认分组 = 首个分类（有常规定义时即「常规」）；active 指向已
     // 消失的分类时回落首个（定义表运行时可变：测试 fixture 注册/注销）
     const active = this.categories().find((c) => c.id === this.active) ?? this.categories()[0]
@@ -322,7 +405,12 @@ export class SettingsPageView {
         }))
       const groups = [
         { id: 'general', title: t('settings.generalSection'), entries: toEntries(this.generalDefs()) },
-        { id: 'editor', title: t('settings.editorCategory'), entries: toEntries(this.editorDefs()) },
+        // #264 委托组条目（分词 engine/resource）随编辑器分组命中：点击进
+        // 编辑器页并以条目 id 定位组内对应块
+        { id: 'editor', title: t('settings.editorCategory'), entries: [
+          ...toEntries(this.editorDefs()),
+          ...this.editorGroups.flatMap((g) => g.entries),
+        ] },
         ...this.sections,
       ]
       let count = 0
@@ -356,7 +444,8 @@ export class SettingsPageView {
         element('p', SETTINGS_PAGE_CLASS_NAMES.subtitle, section.description))
       const content = element('div', 'vsidian-settings-section-content')
       list.append(content)
-      this.disposeSection = section.mount(content, focusEntry) ?? undefined
+      const dispose = section.mount(content, focusEntry)
+      if (dispose) this.sectionDisposers.push(dispose)
       return
     }
     // 编辑器分组（#163 二轮还原）：页内按组内标题分小节（显示/符号输入/
@@ -376,12 +465,27 @@ export class SettingsPageView {
       element('p', SETTINGS_PAGE_CLASS_NAMES.subtitle, t('settings.editorSubtitle')))
     let rendered = false
     for (const section of this.editorSectionDefs()) {
-      const defs = section.defs()
-      if (!defs.length) continue
+      const defs = section.defs?.() ?? []
+      // 委托组（#264 分词）不由 defs 驱动：条目呈现在组内，恒渲染
+      if (!defs.length && !section.group) continue
       const container = element('div', 'vsidian-settings-group')
-      container.append(element('h3', 'vsidian-settings-group-title', t(section.titleKey)))
+      // #263/#265 组标题图标：h3 保持 flex + gap 布局（图标置左 padding
+      // 缘、文字右移），内联字形和生图资产同占 16px；委托组（#264）走
+      // 同一 h3 容器路径，图标随组对象槽位登记，未登记则槽位空缺。
+      const title = element('h3', 'vsidian-settings-group-title')
+      if (section.icon) title.append(groupIcon(section.icon))
+      title.append(document.createTextNode(t(section.titleKey)))
+      container.append(title)
       list.append(container)
-      this.renderDefItems(container, defs, focusEntry)
+      if (section.group) {
+        // 委托组：内容与组内定位（focusEntry = 组条目 id）由组自行装配；
+        // 清理函数收进卸载器集合（重渲染/切页时释放内部 parent 引用；
+        // 多委托组并存时逐个收集，不相互覆盖）
+        const dispose = section.group.mount(container, focusEntry)
+        if (dispose) this.sectionDisposers.push(dispose)
+      } else {
+        this.renderDefItems(container, defs, focusEntry)
+      }
       rendered = true
     }
     if (!rendered) {

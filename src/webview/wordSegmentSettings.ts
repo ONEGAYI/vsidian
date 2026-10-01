@@ -1,9 +1,9 @@
-// 设置页「中文分词」分页（#239）：分词引擎选择（builtin Intl/jieba）、
-// jieba 下载源选择（jsdelivr/npmmirror/自定义 URL）与资源下载/删除管理。
-// 经 SettingsPageSection 注入设置页（与索引维护分页同模式）；设置值权威
-// 在宿主（settings.snapshot/changed 回显），资源状态权威在宿主
-//（wordSegment.state 推送），页面不自行推断。文案一律 t() 取词
-//（wordSegment.* / setting.* 词条）。
+// 设置页「中文分词」二级组（#239 分词分页；#264 起退役为编辑器页尾组）：
+// 分词引擎选择（builtin Intl/jieba）、jieba 下载源选择（jsdelivr/npmmirror/
+// 自定义 URL）与资源下载/删除管理。经 SettingsPageEditorGroup 委托装配进
+// 编辑器分页（不占侧栏分页槽位）；设置值权威在宿主（settings.snapshot/
+// changed 回显），资源状态权威在宿主（wordSegment.state 推送），组不自行
+// 推断。文案一律 t() 取词（wordSegment.* / setting.* 词条）。
 import { t } from '../shared/i18n'
 import { isHostToWebview } from '../shared/protocol'
 import {
@@ -15,7 +15,7 @@ import {
   WORD_SEGMENT_SOURCE_KEY,
   type SettingsPayload,
 } from '../shared/settings'
-import type { SettingsPageBridge, SettingsPageSection } from './settingsPageView'
+import type { SettingsPageBridge, SettingsPageEditorGroup, SettingsGroupIcon } from './settingsPageView'
 
 type WordSegmentStateMessage = Extract<import('../shared/protocol').HostToWebview, { kind: 'wordSegment.state' }>
 
@@ -23,11 +23,16 @@ type WordSegmentStateMessage = Extract<import('../shared/protocol').HostToWebvie
 export const WORD_SEGMENT_SECTION_ENGINE_ENTRY = 'engine'
 export const WORD_SEGMENT_SECTION_RESOURCE_ENTRY = 'resource'
 
-export class WordSegmentSection implements SettingsPageSection {
-  readonly id = 'wordSegment'
-  readonly icon = 'keyboard' as const
-  get title(): string { return t('wordSegment.title') }
-  get description(): string { return t('wordSegment.description') }
+export class WordSegmentSection implements SettingsPageEditorGroup {
+  /** 组标题语言键（编辑器页内 h3 二级标题，复用原分词分页标题词条） */
+  readonly titleKey = 'wordSegment.title' as const
+  /** #264 兼容路由：宿主按退役分页 id 发起 settings.focusSection 时路由
+   *  回编辑器页本组（openWithSection 通道对外行为不变） */
+  readonly legacySectionId = 'wordSegment'
+  /** #265 生图接线：组标题图标槽位登记——分词 A 方案生图资产（明暗两套
+   *  SVG 经 .vsidian-settings-generated-icon 按主题加载），走与 defs 组
+   *  同一 h3 容器路径 */
+  readonly icon: SettingsGroupIcon = 'wordSegment'
 
   private values: SettingsPayload | undefined
   private resourceState: WordSegmentStateMessage | undefined
@@ -86,10 +91,22 @@ export class WordSegmentSection implements SettingsPageSection {
     return el
   }
 
+  /** 组内块定位（引擎/资源两处同形）：focusEntry 命中条目 id 时加定位类
+   *  并滚动到位。定位在入文档后执行：游离节点上 scrollIntoView 是 no-op
+   *（renderDefItems 同款约束——容器先入文档、条目再定位） */
+  private locateBlock(block: HTMLElement, focusEntry: string | undefined, entryId: string): void {
+    if (focusEntry !== entryId) return
+    block.classList.add('vsidian-settings-item-located')
+    block.scrollIntoView?.({ block: 'nearest' })
+  }
+
   private render(focusEntry?: string): void {
     const parent = this.parent
     if (!parent) return
-    parent.replaceChildren()
+    // #264 组容器归设置页视图所有（h3 组标题同住容器内）：render 只替换
+    // 本组的两块内容，不清空容器——原分页形态的整容器 replaceChildren
+    // 会连带清掉组标题
+    parent.querySelectorAll(':scope > .vsidian-wordseg-block').forEach((el) => el.remove())
     const state = this.resourceState
     const busy = state?.status === 'downloading'
     const engine = this.valueOf(WORD_SEGMENT_ENGINE_KEY, WORD_SEGMENT_ENGINE_DEFAULT)
@@ -99,10 +116,6 @@ export class WordSegmentSection implements SettingsPageSection {
     // ---- 引擎与下载源 ----
     const engineBlock = document.createElement('div')
     engineBlock.className = 'vsidian-wordseg-block'
-    if (focusEntry === WORD_SEGMENT_SECTION_ENGINE_ENTRY) {
-      engineBlock.classList.add('vsidian-settings-item-located')
-      engineBlock.scrollIntoView?.({ block: 'nearest' })
-    }
     const engineLabel = document.createElement('label')
     engineLabel.className = 'vsidian-wordseg-label'
     const caption = document.createElement('span')
@@ -154,14 +167,11 @@ export class WordSegmentSection implements SettingsPageSection {
     customRow.append(customInput)
     engineBlock.append(customRow)
     parent.append(engineBlock)
+    this.locateBlock(engineBlock, focusEntry, WORD_SEGMENT_SECTION_ENGINE_ENTRY)
 
     // ---- 资源管理 ----
     const resourceBlock = document.createElement('div')
     resourceBlock.className = 'vsidian-wordseg-block'
-    if (focusEntry === WORD_SEGMENT_SECTION_RESOURCE_ENTRY) {
-      resourceBlock.classList.add('vsidian-settings-item-located')
-      resourceBlock.scrollIntoView?.({ block: 'nearest' })
-    }
     const resourceCaption = document.createElement('span')
     resourceCaption.className = 'vsidian-wordseg-caption'
     resourceCaption.textContent = t('wordSegment.resourceLabel')
@@ -204,6 +214,7 @@ export class WordSegmentSection implements SettingsPageSection {
       resourceBlock.append(noticeEl)
     }
     parent.append(resourceBlock)
+    this.locateBlock(resourceBlock, focusEntry, WORD_SEGMENT_SECTION_RESOURCE_ENTRY)
   }
 
   /** 单选行：radio + 名称（+ 可选说明）；点击即保存该键值 */
