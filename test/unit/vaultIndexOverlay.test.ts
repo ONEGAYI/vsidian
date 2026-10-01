@@ -35,6 +35,18 @@ describe('VaultIndexOverlay：版本淘汰', () => {
     expect(overlay.get('a.md')).toBeUndefined()
     expect(() => overlay.clear('a.md')).not.toThrow()
   })
+
+  it('reapply 世界重算：同版本可采信、迟到旧扫描（更低版本）仍拒绝（#269）', () => {
+    const overlay = new VaultIndexOverlay()
+    overlay.apply('a.md', 5, [edge('a.md', '改名目标2', null)])
+    // rename 批末按新清单重算同 buffer（版本未变）：断链边接通，须采信——
+    // apply 的同版本拒绝会把「冲刷早于登记」的断链边永久钉死
+    expect(overlay.reapply('a.md', 5, [edge('a.md', '改名目标2', '改名目标2.md')])).toBe(true)
+    expect(overlay.get('a.md')?.edges).toEqual([edge('a.md', '改名目标2', '改名目标2.md')])
+    // 迟到旧扫描（文档已推进后的低版本结果）不因世界重算入口放行
+    expect(overlay.reapply('a.md', 4, [edge('a.md', '旧', null)])).toBe(false)
+    expect(overlay.get('a.md')?.contentVersion).toBe(5)
+  })
 })
 
 describe('queryBacklinks：基线 × 覆盖层合成查询', () => {

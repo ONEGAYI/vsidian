@@ -1040,13 +1040,26 @@ export class VaultIndexService {
   }
 
   private async flushUnsaved(state: RootIndexState, key: string): Promise<void> {
+    if (this.recomputeUnsaved(state, key, false)) {
+      this.notify()
+    }
+  }
+
+  /** 按当前世界（resolver 快照）重算 key 的未保存文本边。写入入口由
+   *  worldReapply 决定：false=flushUnsaved 常规冲刷（apply，版本严格递增，
+   *  迟到同版本扫描被拒）；true=rename 批末世界重算（reapply，同版本可
+   *  采信——「冲刷早于新路径登记」的断链边无后续冲刷时机，见 #269 落档）。
+   *  排除复检（applyUnsaved 同口径）：排除变更后 pending 与在途定时器可
+   *  残留，两条通道不得复活已排除来源的覆盖层条目（#198 排除语义）。
+   *  返回是否采信。 */
+  private recomputeUnsaved(state: RootIndexState, key: string, worldReapply: boolean): boolean {
     const pending = state.unsaved.get(key)
     if (!pending || !state.hasData) {
-      return
+      return false
     }
     const rel = this.relOf(state, key)
-    if (rel === null) {
-      return
+    if (rel === null || this.excludeMatcher.test(rel)) {
+      return false
     }
     const text = normalizeLf(pending.text)
     const modelResolver = this.makeModelResolver(state)
@@ -1064,9 +1077,9 @@ export class VaultIndexService {
       const target = this.relOf(state, abs)
       return target !== null && this.foldKey(target) === this.foldKey(rel) ? rel : null
     })
-    if (state.overlay.apply(rel, pending.version, edges)) {
-      this.notify()
-    }
+    return worldReapply
+      ? state.overlay.reapply(rel, pending.version, edges)
+      : state.overlay.apply(rel, pending.version, edges)
   }
 
   /** 文档保存：覆盖层退役 + 增量队列重扫（有界；等待排空） */
@@ -1811,6 +1824,12 @@ export class VaultIndexService {
     for (const state of touchedRoots) {
       if (!state.model) {
         continue
+      }
+      // #269 慢时序兜底：覆盖层冲刷早于本批新路径登记（大批量/慢盘下 did
+      // 登记 > 500ms 防抖）时，断链边按当时世界落层且无后续冲刷时机——
+      // 批末按完整新清单重算现存未保存条目（同版本世界重算，reapply）
+      for (const key of state.unsaved.keys()) {
+        this.recomputeUnsaved(state, key, true)
       }
       state.backlinks = buildBacklinkIndex(state.model.edges)
       this.notify()

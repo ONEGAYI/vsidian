@@ -1679,9 +1679,10 @@ export function createTextEditorProvider(
           event.document.getText(),
         )
         // #270：转 clean 的 dirty-state 事件（空 contentChanges）= 未保存
-        // 内容终结（丢弃/还原/undo 回保存态/保存）——调度覆盖层退役；反之
-        //（内容事件或转 dirty）作废在途信号——文档再入未保存态，先前的
-        // clean 信号已过期（否则丢弃后排定的退役会误清紧随的新编辑暂存）
+        // 内容终结（丢弃/还原实测必发；undo 回保存态时若宿主另发该信号
+        // 同样覆盖——undo 自身是内容事件，走作废分支）——调度覆盖层退役；
+        // 反之（内容事件或转 dirty）作废在途信号——文档再入未保存态，先前
+        // 的 clean 信号已过期（否则丢弃后排定的退役会误清紧随的新编辑暂存）
         if (event.contentChanges.length === 0 && !event.document.isDirty) {
           scheduleCleanRetire(event.document.uri.fsPath)
         } else {

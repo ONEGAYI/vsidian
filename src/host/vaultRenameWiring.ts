@@ -447,6 +447,47 @@ async function applyAfterRenameBatch(
     const expand = await expandRenameMoves(isWindowsHost, rawMoves, expandPortOf(vaultIndex))
     expandedMoves = expand.moves
   }
+
+  // dirty 引用者的候选与文本采集须先于 refreshRenamedBatch：批末的覆盖层
+  // 世界重算（#269 慢时序兜底）会按新世界（旧目标已删）把 dirty 引用者的
+  // 边重算成断链——之后再查旧路径 incoming 将失去该来源，叠加改写被静默
+  // 跳过（连续 rename 以另一形态回归漏改，集成 #269 第二段钉住）。did 时刻
+  // 基于当前 buffer（含未保存内容）采集——常规 applyEdit 对 dirty 文档按
+  // buffer 叠加（不回滚未保存内容）；边数据查旧路径桶（引用者基线边按旧
+  // 目标聚合，不受本批刷新影响）；整批合并一次规划、一次 applyEdit
+  const dirtyDocsByKey = new Map<string, RenameDocInput & { hostText: string }>()
+  if (pending && pending.dirtyRefs.length > 0) {
+    for (const move of expandedMoves) {
+      const candidates = vaultIndex.renameCandidatesOf(move.oldFsPath)
+      if (candidates.status !== 'ready') {
+        continue
+      }
+      for (const group of candidates.incoming) {
+        if (!pending.dirtyRefs.includes(normKeyOf(group.fsPath))) {
+          continue
+        }
+        const mergeKey = `${normKeyOf(group.fsPath)}@${normKeyOf(candidates.rootFsPath!)}`
+        const merged = dirtyDocsByKey.get(mergeKey)
+        if (merged) {
+          merged.edges = [...merged.edges, ...group.edges]
+          continue
+        }
+        const text = await textOf(vscode.Uri.file(group.fsPath), didRewrittenDocs)
+        if (text === null) {
+          pending.log.skipped.push({ fsPath: group.fsPath, reason: 'edge-stale' })
+          continue
+        }
+        dirtyDocsByKey.set(mergeKey, {
+          fsPath: group.fsPath,
+          text: text.lf,
+          edges: [...group.edges],
+          edgeRootFsPath: candidates.rootFsPath!,
+          hostText: text.host,
+        })
+      }
+    }
+  }
+
   await vaultIndex.refreshRenamedBatch(expandedMoves)
 
   if (!pending) {
@@ -456,7 +497,6 @@ async function applyAfterRenameBatch(
     return
   }
   const log = pending.log
-  const dirtyRefs = pending.dirtyRefs
 
   try {
     // 被移动 Markdown 自身的出链：用 will 暂存的旧目录解析边规划（rename
@@ -498,63 +538,31 @@ async function applyAfterRenameBatch(
       }
     }
 
-    // dirty 引用者的延迟改写：did 时刻基于当前 buffer（含未保存内容）重新
-    // 规划——常规 applyEdit 对 dirty 文档按 buffer 叠加（不回滚未保存内容）。
-    // 边数据查旧路径桶（refreshRenamedBatch 移除的是被移动文件自身条目，
-    // 引用者边仍按旧目标聚合可查）；整批合并一次规划、一次 applyEdit
-    if (dirtyRefs.length > 0) {
-      const docsByKey = new Map<string, RenameDocInput & { hostText: string }>()
-      for (const move of expandedMoves) {
-        const candidates = vaultIndex.renameCandidatesOf(move.oldFsPath)
-        if (candidates.status !== 'ready') {
-          continue
+    // dirty 引用者的延迟改写（候选与文本已先于索引刷新采集，见函数前段；
+    // 边记录与采集之间 buffer 再变由区间验证按 stale 跳过；采集→应用的
+    // 窗口漂移无防线，属既有接受的风险类——窗口含 refresh 时长）：
+    // 整批合并一次规划、一次 applyEdit
+    if (dirtyDocsByKey.size > 0) {
+      const docs = [...dirtyDocsByKey.values()].map(({ hostText, ...doc }) => {
+        void hostText
+        return doc
+      })
+      const hostTexts = new Map<string, string>(
+        [...dirtyDocsByKey.values()].map((d) => [d.fsPath, d.hostText]),
+      )
+      const plan = planVaultRenameRewrites({ rootFsPaths, isWindowsHost, moves: expandedMoves }, docs)
+      if (plan.docs.length > 0) {
+        const dirtyEdit = new vscode.WorkspaceEdit()
+        for (const docPlan of plan.docs) {
+          fillEdit(dirtyEdit, docPlan, hostTexts)
         }
-        for (const group of candidates.incoming) {
-          if (!dirtyRefs.includes(normKeyOf(group.fsPath))) {
-            continue
-          }
-          const mergeKey = `${normKeyOf(group.fsPath)}@${normKeyOf(candidates.rootFsPath!)}`
-          const merged = docsByKey.get(mergeKey)
-          if (merged) {
-            merged.edges = [...merged.edges, ...group.edges]
-            continue
-          }
-          const text = await textOf(vscode.Uri.file(group.fsPath), didRewrittenDocs)
-          if (text === null) {
-            log.skipped.push({ fsPath: group.fsPath, reason: 'edge-stale' })
-            continue
-          }
-          docsByKey.set(mergeKey, {
-            fsPath: group.fsPath,
-            text: text.lf,
-            edges: [...group.edges],
-            edgeRootFsPath: candidates.rootFsPath!,
-            hostText: text.host,
-          })
+        const applied = await vscode.workspace.applyEdit(dirtyEdit)
+        if (applied) {
+          log.plannedEdits += plan.docs.reduce((sum, d) => sum + d.edits.length, 0)
+          log.plannedFiles += plan.docs.length
         }
       }
-      if (docsByKey.size > 0) {
-        const docs = [...docsByKey.values()].map(({ hostText, ...doc }) => {
-          void hostText
-          return doc
-        })
-        const hostTexts = new Map<string, string>(
-          [...docsByKey.values()].map((d) => [d.fsPath, d.hostText]),
-        )
-        const plan = planVaultRenameRewrites({ rootFsPaths, isWindowsHost, moves: expandedMoves }, docs)
-        if (plan.docs.length > 0) {
-          const dirtyEdit = new vscode.WorkspaceEdit()
-          for (const docPlan of plan.docs) {
-            fillEdit(dirtyEdit, docPlan, hostTexts)
-          }
-          const applied = await vscode.workspace.applyEdit(dirtyEdit)
-          if (applied) {
-            log.plannedEdits += plan.docs.reduce((sum, d) => sum + d.edits.length, 0)
-            log.plannedFiles += plan.docs.length
-          }
-        }
-        log.skipped.push(...plan.skipped.map((s) => ({ fsPath: s.fsPath, reason: s.reason })))
-      }
+      log.skipped.push(...plan.skipped.map((s) => ({ fsPath: s.fsPath, reason: s.reason })))
     }
 
     // 合并反馈（无候选静默；未更新/部分跳过/已更新三态区分 + 未更新项详情）

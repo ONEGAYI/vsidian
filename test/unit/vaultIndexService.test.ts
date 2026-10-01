@@ -730,6 +730,30 @@ describe('VaultIndexService：#198 排除语义', () => {
     expect(itemsOf(await service.backlinksOf('C:/vault/ex/秘密.md')).map((i) => i.sourceRelPath)).toEqual(['a.md'])
   })
 
+  it('排除变更后已登记的未保存暂存不得经冲刷或 rename 批末重算复活（#269 review 轮）', async () => {
+    const fs = makeFs(EXCLUDED_FS)
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // 未排除时编辑 ex/秘密.md：pending 登记 + 布防冲刷（在途定时器）
+    service.applyUnsaved('C:/vault/ex/秘密.md', 3, '# 秘密\n\n见 [[../b]] 再见 [[b]]。\n')
+    // 排除命中该文档：setExcludePatterns 清覆盖层条目但 pending 与在途
+    // 定时器残留——冲刷/批末重算通道须自行复检排除，不得复活
+    await service.setExcludePatterns(['ex/**'])
+    expect(itemsOf(await service.backlinksOf('C:/vault/b.md'))).toHaveLength(0)
+    await vi.advanceTimersByTimeAsync(600) // 在途冲刷定时器到期（flush 通道）
+    expect(itemsOf(await service.backlinksOf('C:/vault/b.md'))).toHaveLength(0)
+    // rename 批末世界重算通道（批末遍历 unsaved 现存条目）同口径不复活
+    fs.files.delete('C:/vault/b.md')
+    fs.stats.delete('C:/vault/b.md')
+    fs.files.set('C:/vault/b2.md', '# B\n')
+    fs.stats.set('C:/vault/b2.md', { mtimeMs: 1_700_000_011_000, size: 4 })
+    await service.refreshRenamedBatch([
+      { oldFsPath: 'C:/vault/b.md', newFsPath: 'C:/vault/b2.md' },
+    ])
+    expect(itemsOf(await service.backlinksOf('C:/vault/b2.md'))).toHaveLength(0)
+    expect(itemsOf(await service.backlinksOf('C:/vault/b.md'))).toHaveLength(0)
+  })
+
   it('getExcludePatterns / maintenanceInfo 回读当前模式', async () => {
     const { service } = makeService(makeFs(EXCLUDED_FS))
     await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
@@ -1164,10 +1188,12 @@ describe('VaultIndexService：#199 rename 后索引刷新（refreshRenamed）', 
 })
 
 // ---- #269 rename 后新目标反链桶空窗：连续 rename 静默漏改写的契约 ----
-// 时序复刻（真实通道语义，见 vaultRenameWiring 模块头）：引用者的 will edit
-// 先于 rename 应用落盘，watcher 重扫时新目标尚不存在 → 断链边入基线；did
-// 通道 refreshRenamedBatch 只登记新路径不重抽依赖者 → 新目标桶在依赖者
-// 重抽前恒空（链接文本与 rel 恰同形的回退桶除外）。
+// 通道时序基线（见 vaultRenameWiring 模块头与本票落档）：引用者的 will edit
+// 只作用 buffer 不落盘（1.86 实测），其可见性走 dirty 豁免 + 覆盖层冲刷
+// （冲刷晚于 did 登记时边即解析）；断链边入基线的真实可达时序是「引用者
+// 落盘（用户保存）+ watcher 重扫早于本批登记」的泵竞态。第一例复刻后者
+// 钉遍 3 的结构性契约，第二例复刻 buffer-only 改写钉桶外兜底，第三例钉
+// 冲刷早于登记的慢时序（大批量/慢盘 rename）下覆盖层的批末重算。
 
 describe('VaultIndexService：#269 目标归位重抽依赖者与桶兜底', () => {
   function makeWatcherService(fs: FakeFs) {
@@ -1241,6 +1267,36 @@ describe('VaultIndexService：#269 目标归位重抽依赖者与桶兜底', () 
     await vi.advanceTimersByTimeAsync(600)
     // 断言：盘面基线仍指旧名（依赖者重抽无从接通），唯一来源是覆盖层——
     // 桶缺失时 renameCandidatesOf 不得整段跳过（桶外覆盖层兜底）
+    const after = service.renameCandidatesOf('C:/vault/改名目标2.md')
+    expect(after.status).toBe('ready')
+    expect(after.incoming.map((g) => g.fsPath)).toEqual(['C:\\vault\\rename-ref-a.md'])
+    expect(after.incoming[0]!.edges[0]).toMatchObject({ kind: 'wikilink', target: '改名目标2', resolvedTarget: '改名目标2.md' })
+  })
+
+  it('覆盖层冲刷早于新路径登记时，批末按新清单重算接通断链边（#269 慢时序兜底）', async () => {
+    const fs = makeFs({
+      'C:/vault/改名目标.md': '# 目标\n',
+      'C:/vault/rename-ref-a.md': '# 引用甲\n\n见 [[改名目标]]。\n',
+    })
+    const { service } = makeWatcherService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    expect(service.renameCandidatesOf('C:/vault/改名目标.md').incoming).toHaveLength(1)
+    // 1. will edit 只作用面板 buffer；大批量/慢盘 rename 时 did 的登记晚于
+    //    500ms 防抖冲刷——冲刷时刻新路径未登记，覆盖层边按断链落层
+    service.applyUnsaved('C:/vault/rename-ref-a.md', 2, '# 引用甲\n\n见 [[改名目标2]]。\n')
+    await vi.advanceTimersByTimeAsync(600)
+    expect(service.renameCandidatesOf('C:/vault/改名目标.md').incoming).toHaveLength(0) // 旧目标已查不到（buffer 改走，覆盖层接管）
+    // 2. rename 应用 + did 通道登记新路径——冲刷定时器已消费、无后续冲刷
+    //    时机，批末须对现存未保存条目按完整新清单重算，否则断链边滞留、
+    //    连续 rename 静默漏改（省扩展名双链的断链 target 与 rel 不同形，
+    //    桶外兜底的 fold 匹配救不回）
+    fs.files.delete('C:/vault/改名目标.md')
+    fs.stats.delete('C:/vault/改名目标.md')
+    fs.files.set('C:/vault/改名目标2.md', '# 目标\n')
+    fs.stats.set('C:/vault/改名目标2.md', { mtimeMs: 1_700_000_011_000, size: 7 })
+    await service.refreshRenamedBatch([
+      { oldFsPath: 'C:/vault/改名目标.md', newFsPath: 'C:/vault/改名目标2.md' },
+    ])
     const after = service.renameCandidatesOf('C:/vault/改名目标2.md')
     expect(after.status).toBe('ready')
     expect(after.incoming.map((g) => g.fsPath)).toEqual(['C:\\vault\\rename-ref-a.md'])

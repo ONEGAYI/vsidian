@@ -11314,21 +11314,24 @@ export const cases: Array<[string, () => Promise<void>]> = [
     }
   }],
 
-  ['rename 引用改写：连续 rename 新目标桶空窗——rename 后立即查 incoming 含面板与落盘引用者（#269）', async () => {
+  ['rename 引用改写：连续 rename 新目标桶空窗——rename 后立即查 incoming 含面板与装载引用者（#269）', async () => {
     await waitRenameIndexReady()
     await openWithEditor('rename-ref-a.md')
     await waitSessionReady('rename-ref-a.md')
     const refAUri = wsUri('rename-ref-a.md').toString()
     try {
-      // 第一次 rename：改名目标 → 改名目标2（引用甲=面板打开、引用乙=落盘）
+      // 第一次 rename：改名目标 → 改名目标2（引用甲=面板打开；引用乙=
+      // openTextDocument 装载的无标签 dirty 实例——will edit 只进 buffer，
+      // 磁盘保持旧文，见 vault-index-backlinks 规格 #269 落档的机制再实证）
       const edit = new vscode.WorkspaceEdit()
       edit.renameFile(wsUri('改名目标.md'), wsUri('改名目标2.md'), { overwrite: false })
       assert(await vscode.workspace.applyEdit(edit), 'rename 应成功应用')
-      // 验收断言（#269）：rename 完成后立即查新目标 incoming——已落盘引用者
-      //（引用乙，经依赖者重抽/桶重建）与面板打开引用者（引用甲，经覆盖层
-      // 桶外兜底）都必须在场。修复前：反链桶按基线边聚合、新目标桶空窗 +
-      // 覆盖层边桶外不可达 → incoming 恒空，本轮询超时转红。
-      await poll('rename 后新目标 incoming 含面板与落盘引用者', async () => {
+      // 验收断言（#269）：rename 完成后立即查新目标 incoming——装载引用者
+      //（引用乙，经 did 收尾 dirty 豁免保住 buffer 载体 + 覆盖层冲刷解析 +
+      // 桶外兜底）与面板打开引用者（引用甲，同走覆盖层桶外兜底）都必须
+      // 在场。修复前：反链桶按基线边聚合、新目标桶空窗 + 收尾退役清掉
+      // 引用乙的暂存与冲刷定时器 → incoming 恒空，本轮询超时转红。
+      await poll('rename 后新目标 incoming 含面板与装载引用者', async () => {
         const c = (await vscode.commands.executeCommand(
           'onegayi.vsidian._test.getRenameCandidates', wsUri('改名目标2.md').fsPath,
         )) as { status: string; incomingFsPaths: string[] } | undefined
