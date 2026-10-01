@@ -3389,8 +3389,7 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
 }
 
 /* 图标按钮基线（#241 对齐 VSCode 原生浮层）：透明底 + hover 淡入底色，
-   功能词只在 aria-label/title（hover tooltip），按钮本体只呈字形；
-   SVG 图标资产就绪后字形位换 light/dark 图标（占位见 buildFindPanel） */
+   功能词只在 aria-label/title（hover tooltip），按钮本体显示主题匹配的 SVG 图标。 */
 .vsidian-find button {
   display: inline-flex;
   align-items: center;
@@ -3412,6 +3411,34 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
 .vsidian-find button:hover {
   background-color: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.25));
 }
+
+/* 导航与替换按钮使用按主题切换的 16px SVG；备用 findInSelection 暂不接线。 */
+.vsidian-find .vsidian-find-prev,
+.vsidian-find .vsidian-find-next,
+.vsidian-find .vsidian-find-close,
+.vsidian-find .vsidian-find-replace-next,
+.vsidian-find .vsidian-find-replace-all {
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 16px 16px;
+}
+
+#app .vsidian-find .vsidian-find-prev { background-image: url('../../media/quick-actions/light/light-findPrev.svg'); }
+#app .vsidian-find .vsidian-find-next { background-image: url('../../media/quick-actions/light/light-findNext.svg'); }
+#app .vsidian-find .vsidian-find-close { background-image: url('../../media/quick-actions/light/light-findClose.svg'); }
+#app .vsidian-find .vsidian-find-replace-next { background-image: url('../../media/quick-actions/light/light-replaceOne.svg'); }
+#app .vsidian-find .vsidian-find-replace-all { background-image: url('../../media/quick-actions/light/light-replaceAll.svg'); }
+
+body.vscode-dark #app .vsidian-find .vsidian-find-prev,
+body.vscode-high-contrast #app .vsidian-find .vsidian-find-prev { background-image: url('../../media/quick-actions/dark/dark-findPrev.svg'); }
+body.vscode-dark #app .vsidian-find .vsidian-find-next,
+body.vscode-high-contrast #app .vsidian-find .vsidian-find-next { background-image: url('../../media/quick-actions/dark/dark-findNext.svg'); }
+body.vscode-dark #app .vsidian-find .vsidian-find-close,
+body.vscode-high-contrast #app .vsidian-find .vsidian-find-close { background-image: url('../../media/quick-actions/dark/dark-findClose.svg'); }
+body.vscode-dark #app .vsidian-find .vsidian-find-replace-next,
+body.vscode-high-contrast #app .vsidian-find .vsidian-find-replace-next { background-image: url('../../media/quick-actions/dark/dark-replaceOne.svg'); }
+body.vscode-dark #app .vsidian-find .vsidian-find-replace-all,
+body.vscode-high-contrast #app .vsidian-find .vsidian-find-replace-all { background-image: url('../../media/quick-actions/dark/dark-replaceAll.svg'); }
 
 /* 三开关激活态（开启时点亮；Aa/ab/.* 同款规则；VSCode inputOption 激活族） */
 .vsidian-find .vsidian-find-case-active,

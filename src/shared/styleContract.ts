@@ -2637,7 +2637,7 @@ export const STYLE_CONTRACT_ENTRIES: readonly StyleContractEntry[] = [
     purpose: '编辑区浮动查找面板（#236 起三开关面板，引擎 @codemirror/search 外部驱动）：column 布局——主行（输入/大小写-全字-正则三开关/「第 n 项，共 total 项·无结果」计数/上一个/下一个/关闭，同序对齐 VSCode 原生浮层）+ 左缘替换栏展开切换。三开关为查找选项单一事实源（shared/findOptions，#238「选下一处相同词」同源消费），workspace 级记忆跨会话保留；面板在 Live 与阅读两模式均可用（阅读保留块级命中与定位）。',
     views: ['live', 'reading'],
     states: '面板 DOM 常驻、显隐由 .vsidian-find-open 控制（关闭时 display:none，探针不受影响）；三开关点亮为对应 -active 类（开启=点亮，如 matchCase 开启时 Aa 点亮）；非法正则输入容器红边反馈（invalid 类标在输入框上作状态源，:has 上探容器着色；空查询不算非法不标红；不崩、计数显示「无结果」）；开合与开关交互由浏览器套件按行为路径验证。',
-    dom: '挂编辑器容器（position:relative 定位包含块）内、#app 之下；按钮均为真实 <button type="button">（aria-pressed/aria-expanded 随态，aria-label/title 用 i18n 词条 find.*）；#241 起导航/关闭/替换按钮为图标形态——本体只呈字形（SVG 资产就绪前为占位字形），功能词只在 aria-label 与 hover title。',
+    dom: '挂编辑器容器（position:relative 定位包含块）内、#app 之下；按钮均为真实 <button type="button">（aria-pressed/aria-expanded 随态，aria-label/title 用 i18n 词条 find.*）；#241 起导航/关闭/替换按钮为图标形态——本体显示随主题切换的 SVG 图标，功能词只在 aria-label 与 hover title。',
     example: '.vsidian-find {\n  border-radius: 6px;\n}\n.vsidian-find .vsidian-find-case-active {\n  color: #f14c4c;\n}',
     obsidian: { counterpart: '无（Obsidian 查找为应用级部件，不作用于文档样式面）', support: 'none' },
     verification: [

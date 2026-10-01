@@ -2132,7 +2132,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 <p class="states">状态：面板 DOM 常驻、显隐由 .vsidian-find-open 控制（关闭时 display:none，探针不受影响）；三开关点亮为对应 -active 类（开启=点亮，如 matchCase 开启时 Aa 点亮）；非法正则输入容器红边反馈（invalid 类标在输入框上作状态源，:has 上探容器着色；空查询不算非法不标红；不崩、计数显示「无结果」）；开合与开关交互由浏览器套件按行为路径验证。</p>
       <p class="obsidian">Obsidian 对应：无（Obsidian 查找为应用级部件，不作用于文档样式面）</p>
 
-      <p class="dom">DOM 关系：挂编辑器容器（position:relative 定位包含块）内、#app 之下；按钮均为真实 &lt;button type=&quot;button&quot;&gt;（aria-pressed/aria-expanded 随态，aria-label/title 用 i18n 词条 find.*）；#241 起导航/关闭/替换按钮为图标形态——本体只呈字形（SVG 资产就绪前为占位字形），功能词只在 aria-label 与 hover title。</p>
+      <p class="dom">DOM 关系：挂编辑器容器（position:relative 定位包含块）内、#app 之下；按钮均为真实 &lt;button type=&quot;button&quot;&gt;（aria-pressed/aria-expanded 随态，aria-label/title 用 i18n 词条 find.*）；#241 起导航/关闭/替换按钮为图标形态——本体显示随主题切换的 SVG 图标，功能词只在 aria-label 与 hover title。</p>
       <pre><code>.vsidian-find {
   border-radius: 6px;
 }

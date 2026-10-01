@@ -7110,22 +7110,21 @@ export class WebviewSyncController {
     inputWrap.appendChild(wordBtn)
     inputWrap.appendChild(regexpBtn)
     row.appendChild(count)
-    // 图标按钮（导航与关闭，#241 对齐 VSCode 原生浮层）：按钮本体只呈
-    // 占位字形（SVG 资产就绪后换 light/dark 图标），功能词在 aria-label
-    // 与 hover title（i18n 同键，bindLocaleAttrs 一次登记双目标）
-    const mkIconBtn = (cls: string, glyph: string, key: 'find.prev' | 'find.next' | 'find.close',
+    // 图标按钮（导航与关闭，#241 对齐 VSCode 原生浮层）：图形由 CSS 按主题载入
+    // light/dark SVG；功能词仍在 aria-label 与 hover title（i18n 同键，
+    // bindLocaleAttrs 一次登记双目标）
+    const mkIconBtn = (cls: string, key: 'find.prev' | 'find.next' | 'find.close',
       onClick: () => void): HTMLButtonElement => {
       const b = document.createElement('button')
       b.type = 'button'
       b.className = cls
-      b.textContent = glyph
       bindLocaleAttrs(b, key)
       b.addEventListener('click', onClick)
       return b
     }
-    row.appendChild(mkIconBtn(FIND_CLASS_NAMES.prev, '↑', 'find.prev', () => this.findStep('prev')))
-    row.appendChild(mkIconBtn(FIND_CLASS_NAMES.next, '↓', 'find.next', () => this.findStep('next')))
-    row.appendChild(mkIconBtn(FIND_CLASS_NAMES.close, '✕', 'find.close', () => this.closeFind()))
+    row.appendChild(mkIconBtn(FIND_CLASS_NAMES.prev, 'find.prev', () => this.findStep('prev')))
+    row.appendChild(mkIconBtn(FIND_CLASS_NAMES.next, 'find.next', () => this.findStep('next')))
+    row.appendChild(mkIconBtn(FIND_CLASS_NAMES.close, 'find.close', () => this.closeFind()))
     // 替换行：输入框（Enter = 替换下一个，面板局部键）+ 替换/全部替换按钮
     const replaceRow = document.createElement('div')
     replaceRow.className = FIND_CLASS_NAMES.replace
@@ -7146,13 +7145,11 @@ export class WebviewSyncController {
     const replaceNextBtn = document.createElement('button')
     replaceNextBtn.type = 'button'
     replaceNextBtn.className = FIND_CLASS_NAMES.replaceNext
-    replaceNextBtn.textContent = '⇄'
     bindLocaleAttrs(replaceNextBtn, 'find.replaceNext')
     replaceNextBtn.addEventListener('click', () => this.runFindReplace('next'))
     const replaceAllBtn = document.createElement('button')
     replaceAllBtn.type = 'button'
     replaceAllBtn.className = FIND_CLASS_NAMES.replaceAll
-    replaceAllBtn.textContent = '⇉'
     bindLocaleAttrs(replaceAllBtn, 'find.replaceAll')
     replaceAllBtn.addEventListener('click', () => this.runFindReplace('all'))
     replaceRow.appendChild(replaceInput)

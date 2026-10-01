@@ -48,6 +48,22 @@ describe('查找面板 CSS 契约（#236）', () => {
     expect(rule('.vsidian-find button:hover', /background-color:\s*var\(--vscode-toolbar-hoverBackground/)).toBeTruthy()
   })
 
+  it('导航与替换图标在浅色、深色主题下都指向同名 SVG 资产', () => {
+    const icons = [
+      ['vsidian-find-prev', 'findPrev'],
+      ['vsidian-find-next', 'findNext'],
+      ['vsidian-find-close', 'findClose'],
+      ['vsidian-find-replace-next', 'replaceOne'],
+      ['vsidian-find-replace-all', 'replaceAll'],
+    ] as const
+    for (const [className, key] of icons) {
+      const selector = `.vsidian-find .${className}`
+      expect(rule(selector, new RegExp(`light/light-${key}`))).toContain(`light/light-${key}.svg`)
+      const darkSelector = `body.vscode-high-contrast #app .vsidian-find .${className}`
+      expect(rule(darkSelector, new RegExp(`dark/dark-${key}`))).toContain(`dark/dark-${key}.svg`)
+    }
+  })
+
   it('替换输入框与主输入框共用基础排版（合并选择器）', () => {
     expect(rule('.vsidian-find .vsidian-find-input,\n.vsidian-find .vsidian-find-replace-input', /color:\s*var\(--vscode-input-foreground/)).toBeTruthy()
   })
