@@ -58,7 +58,13 @@ export function createJiebaWiring(
       await vscode.workspace.fs.createDirectory(toRelative(root, relativePath))
     },
     async rmdir(relativePath) {
-      await vscode.workspace.fs.delete(toRelative(root, relativePath), { recursive: true, useTrash: false })
+      try {
+        await vscode.workspace.fs.delete(toRelative(root, relativePath), { recursive: true, useTrash: false })
+      } catch (error) {
+        // 端口契约「不存在视为成功」：stat→rmdir 竞态窗口下仍可能对已
+        // 消失目标删除，FileNotFound 吞掉，其余错误透传
+        if ((error as { code?: string }).code !== 'FileNotFound') throw error
+      }
     },
     rename: (fromPath, toPath) => vscode.workspace.fs.rename(
       toRelative(root, fromPath), toRelative(root, toPath), { overwrite: true }),
