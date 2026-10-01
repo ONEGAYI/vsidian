@@ -96,17 +96,17 @@ describe('英文覆盖一致性契约（#178 机制 + #179 content 域全量 + #
     }
   })
 
-  it('chrome 域全部 65 条 id 均有英文覆盖（#180 全量交付 + #191 折行钮 + #208 刷新钮 + 面板批次 + #218 悬停浮层 + #220 属性区）', () => {
+  it('chrome 域全部 66 条 id 均有英文覆盖（#180 全量交付 + #191 折行钮 + #208 刷新钮 + 面板批次 + #218 悬停浮层 + #220 属性区 + 2026-10 FM 折叠）', () => {
     const chromeIds = STYLE_CONTRACT_ENTRIES.filter((e) => e.domain === 'chrome').map((e) => e.id)
-    expect(chromeIds.length).toBe(65)
+    expect(chromeIds.length).toBe(66)
     for (const id of chromeIds) {
       expect(STYLE_CONTRACT_EN_OVERRIDES[id], `chrome 条目缺英文覆盖：${id}`).toBeDefined()
     }
   })
 
-  it('两域合计 148 条全量覆盖，无覆盖表缺口（#179 + #180 收尾 + #191 + #201 + #208/#209 + #213 批次 + #218 悬停浮层 + #220 属性区 + #222 嵌入 + #223 Live 嵌入 + #217 验收反馈转义符与修饰键悬停）', () => {
-    expect(STYLE_CONTRACT_ENTRIES.length).toBe(148)
-    expect(Object.keys(STYLE_CONTRACT_EN_OVERRIDES).length).toBe(148)
+  it('两域合计 149 条全量覆盖，无覆盖表缺口（#179 + #180 收尾 + #191 + #201 + #208/#209 + #213 批次 + #218 悬停浮层 + #220 属性区 + #222 嵌入 + #223 Live 嵌入 + #217 验收反馈转义符与修饰键悬停 + 2026-10 FM 折叠）', () => {
+    expect(STYLE_CONTRACT_ENTRIES.length).toBe(149)
+    expect(Object.keys(STYLE_CONTRACT_EN_OVERRIDES).length).toBe(149)
     for (const entry of STYLE_CONTRACT_ENTRIES) {
       expect(STYLE_CONTRACT_EN_OVERRIDES[entry.id], `条目缺英文覆盖：${entry.id}`).toBeDefined()
     }

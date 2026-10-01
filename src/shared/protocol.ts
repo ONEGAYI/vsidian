@@ -269,11 +269,14 @@ export type HostToWebview =
    *  popover-close = 关闭浮层（与 Esc 同一关闭函数）；popover-add-entry =
    *  浮层「添加属性」；popover-add-item = 第 index 个条目的「添加列表项」；
    *  popover-remove-entry = 第 index 个条目的删行按钮；popover-remove-item =
-   *  第 index 个删项按钮（跨条目按项行文档序累计） */
+   *  第 index 个删项按钮（跨条目按项行文档序累计）；fold-button = 标题栏
+   *  折叠 chevron（2026-10 折叠批次，零写回视图态切换）；fold-hotspot =
+   *  标题栏热区（标题文字节点，与整卡头部热区同一处理器） */
   | {
       kind: 'fm.test.click'
       action: 'edit-button' | 'popover-close' | 'popover-add-entry' | 'popover-add-item'
         | 'popover-remove-entry' | 'popover-remove-item'
+        | 'fold-button' | 'fold-hotspot'
       index?: number
     }
   /** 测试钩子（#141）：点击顶栏双态视图切换真实按钮（与用户点击同一处理器：
@@ -1418,6 +1421,17 @@ export interface PaintProbe {
     /** 全部头部语言标签序列（DOM 顺序；渲染型围栏接入后断言 Mermaid 标签在场） */
     labels?: string[]
   }
+  /** frontmatter 卡片绘制观测（折叠链路）：当前激活视图内标题栏在场时
+   *  提供——rowCount 键值行数（收起态归零）、foldedCount 收起态 chevron
+   *  数、editCount 修改按钮数（收起态不发射）、cardFoldedCount live
+   *  收起首行类数、tableFoldedCount 阅读收起表格类数 */
+  fm?: {
+    rowCount: number
+    foldedCount: number
+    editCount: number
+    cardFoldedCount: number
+    tableFoldedCount: number
+  }
   /** #55 标题行绘制观测：视口内已挂载的 .vsidian-heading-inview 行的
    *  distinct 计算值（box-shadow 应为 'none'、border-left-width 应为
    *  '0px'——标题行不得绘制左缘竖线）；无挂载标题行为 null。
@@ -2100,6 +2114,14 @@ function isPaintProbe(v: unknown): v is PaintProbe {
       (v.code.tokenCount === undefined || isNonNegativeInt(v.code.tokenCount)) &&
       (v.code.labels === undefined ||
         (Array.isArray(v.code.labels) && v.code.labels.every(isString)))
+    )) &&
+    (v.fm === undefined || v.fm === null || (
+      isObject(v.fm) &&
+      isNonNegativeInt(v.fm.rowCount) &&
+      isNonNegativeInt(v.fm.foldedCount) &&
+      isNonNegativeInt(v.fm.editCount) &&
+      isNonNegativeInt(v.fm.cardFoldedCount) &&
+      isNonNegativeInt(v.fm.tableFoldedCount)
     )) &&
     (v.heading === undefined || v.heading === null || (
       isObject(v.heading) &&
@@ -2973,7 +2995,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'fm.test.click':
       return (v.action === 'edit-button' || v.action === 'popover-close' ||
         v.action === 'popover-add-entry' || v.action === 'popover-add-item' ||
-        v.action === 'popover-remove-entry' || v.action === 'popover-remove-item') &&
+        v.action === 'popover-remove-entry' || v.action === 'popover-remove-item' ||
+        v.action === 'fold-button' || v.action === 'fold-hotspot') &&
         (v.index === undefined || isNonNegativeInt(v.index))
     case 'view.test.click':
       return true

@@ -62,7 +62,7 @@ import { collectColumnSamples, tableGridTemplate } from './tableColumnWidth'
 import { sameTableRegion, tableRegionField } from './tableRegionField'
 import type { TableRegion } from './tableRegion'
 import { parseFrontmatterTable, type FmTableModel } from '../shared/frontmatterTable'
-import { buildFrontmatterCardPlan } from './frontmatterDecorations'
+import { buildFrontmatterCardPlan, fmFoldField } from './frontmatterDecorations'
 import {
   barePipeAt,
   escapedPipeBackslashes,
@@ -665,6 +665,7 @@ function emitForRange(
   gridPlans: Map<number, TableGridPlan | null> = new Map(),
   fmModel: FmTableModel | null = null,
   region: TableRegion | null = null,
+  fmFolded = false,
 ): Array<Range<Decoration>> {
   const out: Array<Range<Decoration>> = []
   const lineCls: Array<Set<string> | undefined> = new Array(toLine - fromLine + 1).fill(undefined)
@@ -687,8 +688,9 @@ function emitForRange(
   if (fm) {
     const fmLast = doc.lineAt(Math.min(fm.end, doc.length)).number
     if (fmModel) {
-      // 卡片常驻呈现、不随光标位置变化（光标引导在 frontmatterEditing）
-      const plan = buildFrontmatterCardPlan(doc, fmModel)
+      // 卡片常驻呈现、不随光标位置变化（光标引导在 frontmatterEditing）；
+      // 折叠态（视图态 field）决定整块收起形态
+      const plan = buildFrontmatterCardPlan(doc, fmModel, fmFolded)
       for (const [lineNo, cls] of plan.lineClasses) {
         if (lineNo >= fromLine && lineNo <= toLine) {
           for (const c of cls) {
@@ -1165,12 +1167,12 @@ function headText(doc: Text): string {
 
 /** 全量构建（create / 全文替换 / 探针对拍） */
 export function buildLivePreviewDecorations(doc: Text, selection: EditorSelection,
-  region: TableRegion | null = null): DecorationSet {
+  region: TableRegion | null = null, fmFolded = false): DecorationSet {
   const tree = parseTree(doc)
   const fm = frontmatterOf(doc)
   stats.fullBuildLines = doc.lines
   return RangeSet.of(
-    emitForRange(tree, doc, selection, fm, 1, doc.lines, new Map(), frontmatterModelOf(doc, fm), region),
+    emitForRange(tree, doc, selection, fm, 1, doc.lines, new Map(), frontmatterModelOf(doc, fm), region, fmFolded),
     true,
   )
 }
@@ -1433,7 +1435,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
     const gridPlans = new Map<number, TableGridPlan | null>()
     const decos = RangeSet.of(
       emitForRange(tree, state.doc, state.selection, fm, 1, state.doc.lines, gridPlans, fmModel,
-        state.field(tableRegionField, false)), true)
+        state.field(tableRegionField, false), state.field(fmFoldField, false) ?? false), true)
     return {
       decos,
       tree,
@@ -1446,11 +1448,38 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
     }
   },
   update(value, tr) {
-    if (!tr.docChanged && tr.selection === undefined &&
+    // 折叠切换检测（零写回 effect 事务）：头区装饰随折叠态重建
+    const fmFoldChanged =
+      (tr.startState.field(fmFoldField, false) ?? false) !== (tr.state.field(fmFoldField, false) ?? false)
+    if (!tr.docChanged && tr.selection === undefined && !fmFoldChanged &&
         sameTableRegion(tr.startState.field(tableRegionField, false), tr.state.field(tableRegionField, false))) {
       return value
     }
     if (!tr.docChanged) {
+      // 折叠切换：头区行（1..fm 末行）整体重发射——卡片装饰不随选区变，
+      // 但随折叠态变；独立于选区/表格路径，组合预览期间不写文档同样生效。
+      // 组合冻结态（compositionPreview）刻意随值保留：折叠重建走本分支的
+      // 显式发射，不得因此提前解除组合期「装饰冻结」守卫（解除归
+      // settled/正常写事务），否则后续组合期选区事务会以陈旧 fmModel 重算
+      if (fmFoldChanged) {
+        const doc = tr.state.doc
+        const fmLast = doc.lineAt(Math.min(value.fm ? value.fm.end : 0, doc.length)).number
+        const fmFolded = tr.state.field(fmFoldField, false) ?? false
+        const decos = value.decos.update({
+          filterFrom: doc.line(1).from,
+          filterTo: doc.line(fmLast).to,
+          filter: () => false,
+          add: emitForRange(value.tree, doc, tr.state.selection, value.fm, 1, fmLast, value.gridPlans,
+            value.fmModel, tr.state.field(tableRegionField, false), fmFolded),
+          sort: true,
+        })
+        return {
+          ...value,
+          decos,
+          gridSegments: updateGridSegments(value.gridSegments, tr.changes,
+            [{ from: doc.line(1).from, to: doc.line(fmLast).to }], decos, doc),
+        }
+      }
       if (tr.annotation(tableCompositionSettled)) {
         const doc = tr.state.doc
         const lineNo = doc.lineAt(tr.state.selection.main.head).number
@@ -1539,7 +1568,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
           filterTo: to,
           filter: () => false,
           add: emitForRange(value.tree, doc, tr.state.selection, value.fm, span.fromLine, span.toLine, value.gridPlans, value.fmModel,
-            tr.state.field(tableRegionField, false)),
+            tr.state.field(tableRegionField, false), tr.state.field(fmFoldField, false) ?? false),
           sort: true,
         })
         scanned += span.toLine - span.fromLine + 1
@@ -1601,7 +1630,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
         filterTo: to,
         filter: () => false,
         add: emitForRange(tree, doc, tr.state.selection, fm, span.fromLine, span.toLine, gridPlans, fmModel,
-          tr.state.field(tableRegionField, false)),
+          tr.state.field(tableRegionField, false), tr.state.field(fmFoldField, false) ?? false),
         sort: true,
       })
       scanned += span.toLine - span.fromLine + 1
@@ -1888,4 +1917,4 @@ const viewportLivePlugin = ViewPlugin.fromClass(
 )
 
 /** Live Preview 装饰装配：直接（StateField）+ 间接（ViewPlugin） */
-export const livePreviewDecorations: Extension = [liveDecorationsField, gridCellMouseSelection, viewportLivePlugin]
+export const livePreviewDecorations: Extension = [fmFoldField, liveDecorationsField, gridCellMouseSelection, viewportLivePlugin]

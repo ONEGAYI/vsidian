@@ -653,21 +653,23 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "list-task",
     "kind": "selector",
     "target": ".vsidian-list-bullet",
-    "purpose": "无序列表行修饰：标记隐藏后以 ::before 圆点呈现。",
+    "purpose": "无序列表行修饰：标记隐藏后以 ::before 圆点呈现；圆点按嵌套深度分级（与阅读侧 marker 语义对齐）：一级实心 •、二级空心 ◦、三级起实心方块 ▪——空心专表二级子列表（此前全层级实心与阅读视图不一致已修复）。阅读侧同语义经显式 list-style-type 钉住（disc/circle/square，不依赖 UA 默认）。",
     "views": [
-      "live"
+      "live",
+      "reading"
     ],
-    "states": "与 .vsidian-list-marker-visible 互斥（源码标记显形时抑制伪圆点）。",
-    "dom": "列表行级叠加类；圆点绘制在 ::before。",
+    "states": "与 .vsidian-list-marker-visible 互斥（源码标记显形时抑制伪圆点）；深度分级随 -d{1..8} 行类组合。",
+    "dom": "live：列表行级叠加类，圆点绘制在 ::before；阅读：浏览器原生 li::marker。",
     "example": ".vsidian-list-line.vsidian-list-bullet::before {\n  color: #61afef;\n}",
     "obsidian": {
       "counterpart": "无直接对应（Obsidian 由 .cm-formatting-list 隐藏 + 原生列表样式承担）",
       "support": "native"
     },
     "verification": [
-      "单元 liveDecorations：bullet/ordered 修饰契约"
+      "单元 liveDecorations：bullet/ordered 修饰契约",
+      "单元 listMarkerCssContract：双视图层级字形钉规则"
     ],
-    "introduced": "#8（2026-09-24）"
+    "introduced": "#8（2026-09-24；层级分级 2026-10 修复）"
   },
   {
     "id": "live-list-ordered",
@@ -3015,12 +3017,12 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "domain": "chrome",
     "category": "frontmatter",
     "kind": "selector",
-    "target": ".vsidian-fm-card-line（+ -edge-top / -edge-bottom 首尾围栏行修饰）",
-    "purpose": "frontmatter 只读表格卡片的行级类：合法简单头区（标量 + 字符串数组）成型时覆盖头区全部行（含首尾围栏行与杂项行），承载左右边线（行区透明，撞色边界感由边框与标题栏微亮条承担），首尾围栏行补横线并做圆角修饰，拼装为完整边框圆角卡片。卡片行同时承载 vsidian-frontmatter-line（别名桥 direct 级承诺 .cm-hmd-frontmatter 在成型形态下保持命中，降透明副作用由卡片规则重置）。复杂类型/解析失败时整卡降级为 frontmatter-line 源码形态（见 limit-fm-complex-types）。",
+    "target": ".vsidian-fm-card-line（+ -edge-top / -edge-bottom 首尾围栏行修饰 / -folded 收起态首行修饰）",
+    "purpose": "frontmatter 只读表格卡片的行级类：合法简单头区（标量 + 字符串数组）成型时覆盖头区全部行（含首尾围栏行与杂项行），承载左右边线（行区透明，撞色边界感由边框与标题栏微亮条承担），首尾围栏行补横线并做圆角修饰，拼装为完整边框圆角卡片。折叠收起时键值/项/杂项行连同闭合行整块隐藏，首行改携 -folded 修饰兼任卡片底边（补底边框与四角圆角）。卡片行同时承载 vsidian-frontmatter-line（别名桥 direct 级承诺 .cm-hmd-frontmatter 在成型形态下保持命中，降透明副作用由卡片规则重置）。复杂类型/解析失败时整卡降级为 frontmatter-line 源码形态（见 limit-fm-complex-types）。",
     "views": [
       "live"
     ],
-    "states": "常驻卡片（光标位置无关——成型态不暴露源码，光标进入头区被引导至闭合行后）；格不可点击编辑，编辑收敛到标题栏「修改」按钮的 Popover。",
+    "states": "常驻卡片（光标位置无关——成型态不暴露源码，光标进入头区被引导至闭合行后）；格不可点击编辑，编辑收敛到标题栏「修改」按钮的 Popover；折叠为视图态（零写回、不跨会话持久化，重开文档全展开——与代码卡折叠同语义）。",
     "dom": "live 视图 .cm-line 行元素（头区行）。",
     "example": ".vsidian-fm-card-line {\n  background: var(--vsidian-table-background);\n}",
     "obsidian": {
@@ -3082,13 +3084,13 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "domain": "chrome",
     "category": "frontmatter",
     "kind": "selector",
-    "target": ".vsidian-fm-header（标题栏容器；内含 .vsidian-fm-header-icon 图标 / .vsidian-fm-header-title 标题 / button.vsidian-fm-edit「修改」按钮）",
-    "purpose": "卡片标题栏（首围栏行 replace widget）：微亮底色条（与透明行区形成撞色边界感）+ 列表图标 + Properties 标题（600 字重次级前景灰）+ 右上角圆角描边「修改」按钮（铅笔图标，hover/聚焦高亮）。行内前后 cm-widgetBuffer 隐藏（inline replace 的光标停靠点各占一行文字高，成型态光标不进头区无消费者）使头部行高收敛到约 1.2 倍正文行高。按钮点击开关属性编辑 Popover。阅读侧同容器内同类名同布局（无按钮，只读）。",
+    "target": ".vsidian-fm-header（标题栏容器；内含 .vsidian-fm-header-icon 图标 / .vsidian-fm-header-title 标题 / button.vsidian-fm-edit「修改」按钮 / button.vsidian-fm-fold 折叠 chevron）",
+    "purpose": "卡片标题栏（首围栏行 replace widget）：微亮底色条（与透明行区形成撞色边界感）+ 列表图标 + Properties 标题（600 字重次级前景灰）+ 右上角圆角描边「修改」按钮（铅笔图标，hover/聚焦高亮）+ 最右折叠 chevron（与代码卡同交互：整条标题栏为折叠热区，排除按钮本身）。行内前后 cm-widgetBuffer 隐藏（inline replace 的光标停靠点各占一行文字高，成型态光标不进头区无消费者）使头部行高收敛到约 1.2 倍正文行高。修改按钮点击开关属性编辑 Popover；折叠收起时打开中的 Popover 自动关闭。阅读侧同容器内同类名同布局（只读，修改按钮不发射；折叠 chevron 与热区经挂载装饰在场）。",
     "views": [
       "live",
       "reading"
     ],
-    "states": "标题栏常驻两视图；按钮仅 live（阅读侧不发射）。",
+    "states": "标题栏常驻两视图；修改按钮仅 live 且收起态不发射（编辑入口随表格让位，与代码卡收起态不发射复制钮同口径）；折叠 chevron 两态常驻（收起态转向 -90°）。",
     "dom": "live：首围栏行 replace widget 内容；阅读：.vsidian-fm-table 首子元素。",
     "example": "#app .vsidian-fm-header {\n  display: flex;\n}",
     "obsidian": {
@@ -3123,6 +3125,31 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "浏览器 frontmatterTable 套件（真实键鼠开闭、输入即时写回、焦点管理）"
     ],
     "introduced": "#140（2026-09-27 Popover 改版）"
+  },
+  {
+    "id": "live-fm-fold",
+    "domain": "chrome",
+    "category": "frontmatter",
+    "kind": "selector",
+    "target": ".vsidian-fm-fold（+ -collapsed 收起态修饰；live 收起另有首行级 vsidian-fm-card-folded、阅读收起另有表格级 vsidian-fm-folded 修饰）",
+    "purpose": "折叠 chevron（与代码卡折叠同交互：右上折叠钮 + 标题栏整条热区）：点击收起/展开键值行区——live 侧整块隐藏（标题栏行兼任卡片底边）、阅读侧表格行区整体隐藏（表壳边框圆角保留）。折叠为视图态不写源文件、不跨会话持久化（重开文档全展开）；live 与阅读各持折叠态不互通（与代码卡同口径）。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "折叠/展开（chevron 转向）；收起态 live 不发射修改按钮、阅读行 display:none。",
+    "dom": "标题栏按钮区最右（修改按钮右侧）。",
+    "example": ".vsidian-fm-fold-collapsed svg { transform: rotate(-90deg); }",
+    "obsidian": {
+      "counterpart": ".metadata-container 标题栏折叠方向（Obsidian 属性面板可收起）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 frontmatterInteraction / readingFrontmatterFold：折叠交互契约",
+      "浏览器 frontmatterTable 套件（真实鼠标折叠/展开/热区/浮层联动）",
+      "集成 frontmatter 卡片折叠用例（paint.fm 绘制层探针）"
+    ],
+    "introduced": "2026-10（折叠批次）"
   },
   {
     "id": "limit-fm-complex-types",
@@ -3780,9 +3807,9 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "live-list-bullet": {
-    "purpose": "Modifier for unordered list lines: once the source marker is hidden, a ::before bullet takes its place.",
-    "states": "Mutually exclusive with .vsidian-list-marker-visible (the pseudo-bullet is suppressed while the source marker is revealed).",
-    "dom": "A line-level modifier class on list lines; the bullet is drawn on ::before.",
+    "purpose": "Modifier for unordered list lines: once the source marker is hidden, a ::before bullet takes its place; the bullet glyph is graded by nesting depth (aligned with the reading-side marker semantics): level 1 filled disc, level 2 hollow circle, level 3 and deeper filled square — the hollow shape is reserved for second-level sublists (the previous all-filled rendering that disagreed with the reading view has been fixed). The reading side pins the same semantics with explicit list-style-type (disc/circle/square, no reliance on UA defaults).",
+    "states": "Mutually exclusive with .vsidian-list-marker-visible (the pseudo-bullet is suppressed while the source marker is revealed); the depth grading combines with the -d{1..8} line classes.",
+    "dom": "Live: a line-level modifier class on list lines, the bullet drawn on ::before; reading: the native li::marker.",
     "obsidian": {
       "counterpart": "No direct counterpart (Obsidian relies on .cm-formatting-list hiding plus native list styles)"
     }
@@ -4510,8 +4537,8 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "live-fm-card-line": {
-    "purpose": "Line-level class of the read-only frontmatter table card: when a legal simple header block (scalars + string arrays) is well-formed, it covers every line of the header block (including the opening/closing fence lines and stray lines) and carries the left/right border lines (the row area stays transparent — the contrasting boundary feel comes from the card border and the slightly brighter header strip); the opening/closing fence lines add horizontal rules and corner rounding, assembling a full bordered rounded card. Card lines also carry vsidian-frontmatter-line (the alias bridge promises at the direct level that .cm-hmd-frontmatter keeps matching in the well-formed shape; its transparency-lowering side effect is reset by the card rules). Complex types / parse failures degrade the whole card back to the frontmatter-line raw-source shape (see limit-fm-complex-types).",
-    "states": "Persistent card (independent of cursor position — the well-formed state never exposes the raw source, and a cursor entering the header area is guided to just after the closing line); cells are not click-to-edit — editing is funneled into the Popover opened by the header bar Edit button.",
+    "purpose": "Line-level class of the read-only frontmatter table card: when a legal simple header block (scalars + string arrays) is well-formed, it covers every line of the header block (including the opening/closing fence lines and stray lines) and carries the left/right border lines (the row area stays transparent — the contrasting boundary feel comes from the card border and the slightly brighter header strip); the opening/closing fence lines add horizontal rules and corner rounding, assembling a full bordered rounded card. When collapsed, the key-value/item/stray lines together with the closing line are hidden as a whole, and the first line instead carries the -folded modifier to double as the card bottom edge (adding the bottom border and four-corner rounding). Card lines also carry vsidian-frontmatter-line (the alias bridge promises at the direct level that .cm-hmd-frontmatter keeps matching in the well-formed shape; its transparency-lowering side effect is reset by the card rules). Complex types / parse failures degrade the whole card back to the frontmatter-line raw-source shape (see limit-fm-complex-types).",
+    "states": "Persistent card (independent of cursor position — the well-formed state never exposes the raw source, and a cursor entering the header area is guided to just after the closing line); cells are not click-to-edit — editing is funneled into the Popover opened by the header bar Edit button; folding is a view state (zero write-back, not persisted across sessions — a reopened document starts expanded, the same semantics as the code card fold).",
     "dom": "A .cm-line line element in the live view (header block lines).",
     "obsidian": {
       "counterpart": ".metadata-container (the Obsidian properties panel direction; the table card shape is vsidian-specific)"
@@ -4532,8 +4559,8 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "live-fm-header": {
-    "purpose": "The card header bar (a replace widget on the opening fence line): a slightly brighter background strip (creating the contrasting boundary feel against the transparent row area) + a list icon + a Properties title (600 weight, secondary-foreground gray) + a rounded outlined Edit button at the top right (pencil icon, highlighted on hover/focus). The cm-widgetBuffers before and after the inline replacement are hidden (the cursor parking spots of the inline replace each take one line of text height, and in the well-formed state the cursor never enters the header area so there are no consumers), pulling the header row height down to about 1.2x the body line height. Clicking the button toggles the property-editing Popover. The reading side renders the same container, class names and layout (no button, read-only).",
-    "states": "The header bar is persistent in both views; the button exists only in live (not emitted on the reading side).",
+    "purpose": "The card header bar (a replace widget on the opening fence line): a slightly brighter background strip (creating the contrasting boundary feel against the transparent row area) + a list icon + a Properties title (600 weight, secondary-foreground gray) + a rounded outlined Edit button at the top right (pencil icon, highlighted on hover/focus) + a fold chevron at the far right (the same interaction as the code card: the whole header bar is the fold hotspot, excluding the buttons themselves). The cm-widgetBuffers before and after the inline replacement are hidden (the cursor parking spots of the inline replace each take one line of text height, and in the well-formed state the cursor never enters the header area so there are no consumers), pulling the header row height down to about 1.2x the body line height. The Edit button toggles the property-editing Popover; a Popover left open closes automatically when the card is collapsed. The reading side renders the same container, class names and layout (read-only, the Edit button is not emitted; the fold chevron and hotspot are attached by the mount-time decoration).",
+    "states": "The header bar is persistent in both views; the Edit button exists only in live and is not emitted while collapsed (the editing entry gives way with the table, the same convention as the code card not emitting the copy button when collapsed); the fold chevron is persistent in both states (rotated -90 when collapsed).",
     "dom": "Live: the content of the replace widget on the opening fence line; reading: the first child of .vsidian-fm-table.",
     "obsidian": {
       "counterpart": ".metadata-container heading (direction)"
@@ -4545,6 +4572,14 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     "dom": "Attached directly to document.body (outside #app, so the rules carry no #app prefix).",
     "obsidian": {
       "counterpart": ".metadata-property-editor (the Obsidian property editor overlay direction)"
+    }
+  },
+  "live-fm-fold": {
+    "purpose": "The fold chevron (the same interaction as the code card fold: a top-right fold button + the whole header bar as the hotspot): clicking collapses/expands the key-value row area — on the live side the block is hidden as a whole (the header line doubles as the card bottom edge), on the reading side the table row area is hidden as a whole (the table shell keeps its border and rounding). Folding is a view state: it never writes the source file and is not persisted across sessions (a reopened document starts expanded); live and reading each hold their own fold state, not shared (the same convention as the code card).",
+    "states": "Collapsed/expanded (chevron rotated); while collapsed live does not emit the Edit button and reading rows are display:none.",
+    "dom": "The rightmost slot of the header button area (to the right of the Edit button).",
+    "obsidian": {
+      "counterpart": "The .metadata-container header collapse direction (the Obsidian properties panel is collapsible)"
     }
   },
   "limit-fm-complex-types": {

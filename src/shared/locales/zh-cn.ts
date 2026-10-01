@@ -479,6 +479,9 @@ export const zhCn: Record<MessageKey, string> = {
   'frontmatter.title': '属性',
   /** 标题栏右上角「修改」按钮（打开属性编辑 Popover） */
   'frontmatter.edit': '修改',
+  /** 标题栏折叠 chevron：收起键值行区（与代码块折叠同交互） */
+  'frontmatter.collapse': '折叠属性',
+  'frontmatter.expand': '展开属性',
   /** Popover 容器 aria 标签 */
   'frontmatter.popoverAriaLabel': '修改属性',
   /** Popover 内键名输入框 aria 标签 */

@@ -261,7 +261,7 @@ import { symbolAutocomplete } from './symbolAutocomplete'
 import { symbolSelectionWrap } from './symbolWrap'
 import { fenceEscape } from './fenceEscape'
 import { frontmatterEditing } from './frontmatterEditing'
-import { FM_CARD_CLASS_NAMES } from './frontmatterDecorations'
+import { decorateReadingFrontmatterCard, FM_CARD_CLASS_NAMES } from './frontmatterDecorations'
 import { FM_POPOVER_CLASS_NAMES, closeFmPopover, isFmPopoverOpen } from './frontmatterPopover'
 import { listEditing } from './listEditing'
 import { indentEditing } from './indentEditing'
@@ -918,6 +918,11 @@ export class WebviewSyncController {
    *  块卸载重挂载后经此恢复收起形态） */
   private readonly readingCodeFold = new Set<number>()
 
+  /** frontmatter 阅读侧折叠态（视图态，不持久化；FM 单块恒文档首，布尔
+   *  承载——live 侧等价物是 CM6 fmFoldField，两视图各自持有不互通，与
+   *  代码块折叠同口径） */
+  private readingFmFolded = false
+
   /** #191 阅读侧全文折行开关状态：默认折行（现行行为）；视图态、不跨会话
    *  持久化、不新增设置项（与折叠 chevron 同语义）。关闭态经容器类
    *  vsidian-reading-nowrap 门控 pre 横向滚动；任一块的开关翻转即全文
@@ -1138,6 +1143,8 @@ export class WebviewSyncController {
         this.decorateImageChromeBlock(el)
         // #84 阅读代码块卡片：挂载即增强（幂等；mermaid 块类不同不命中）
         this.decorateReadingCodeCardBlock(el)
+        // frontmatter 折叠：标题栏热区 + chevron（幂等；非 FM 块安全不作为）
+        this.decorateReadingFrontmatterBlock(el)
         // #222 嵌入卡片：embed 块升级为引用卡片（占位引用行在此替换；
         // 视口回收由 onBlockUnmounted 释放 B 视图并保留实例状态）
         this.embedCards?.mountBlock(el)
@@ -2067,6 +2074,18 @@ export class WebviewSyncController {
           [...document.querySelectorAll<T>(sel)]
         if (message.action === 'edit-button') {
           all<HTMLButtonElement>(`.${FM_CARD_CLASS_NAMES.edit}`)[0]?.click()
+          break
+        }
+        if (message.action === 'fold-button' || message.action === 'fold-hotspot') {
+          // 折叠链路驱动（与用户点击同一处理器）：fold-button 点 chevron；
+          // fold-hotspot 点标题文字（热区非按钮区域，验证整条热区入口）
+          const scope = this.viewMode === 'reading' ? this.readingContainer : this.view?.contentDOM
+          const target = message.action === 'fold-button'
+            ? scope?.querySelector<HTMLButtonElement>(`.${FM_CARD_CLASS_NAMES.fold}`)
+            : scope?.querySelector<HTMLElement>(
+              `.${FM_CARD_CLASS_NAMES.header} .${FM_CARD_CLASS_NAMES.headerTitle}`,
+            )
+          target?.click()
           break
         }
         if (message.action === 'popover-close') {
@@ -7772,6 +7791,17 @@ export class WebviewSyncController {
       : EMBED_MAX_HEIGHT_DEFAULT
   }
 
+  /** frontmatter 阅读块折叠装饰（挂载钩子与切换重装饰共用入口） */
+  private decorateReadingFrontmatterBlock(block: HTMLElement): void {
+    decorateReadingFrontmatterCard(block, {
+      folded: this.readingFmFolded,
+      onFoldToggle: () => {
+        this.readingFmFolded = !this.readingFmFolded
+        this.decorateReadingFrontmatterBlock(block)
+      },
+    })
+  }
+
   /** #84 增强单个阅读代码块（挂载钩子与重装饰共用入口） */
   private decorateReadingCodeCardBlock(block: HTMLElement): void {
     if (!isReadingCodeBlock(block)) {
@@ -8375,6 +8405,25 @@ export class WebviewSyncController {
     const tokenCount = codeScope
       ? codeScope.querySelectorAll('[class*="tok-"]').length
       : 0
+    // frontmatter 卡片绘制探针（折叠链路断言）：当前激活视图取卡片行数与
+    // 折叠/编辑控件在场数（收起态 rowCount 归零、editCount 归零、collapsed
+    // chevron 在场——与代码卡 foldedCount 同口径）。rowCount 取**绘制层
+    // 口径**（过滤 display:none）：live 收起行从 DOM 消失、阅读收起行由
+    // CSS 隐藏，两视图都以「用户可见行数」计数
+    const fmScope = this.viewMode === 'reading' ? this.readingContainer : view.contentDOM
+    const fmHeaderEl = fmScope?.querySelector<HTMLElement>(`.${FM_CARD_CLASS_NAMES.header}`) ?? null
+    const fm = fmHeaderEl
+      ? {
+        rowCount: fmScope
+          ? [...fmScope.querySelectorAll<HTMLElement>(`.${FM_CARD_CLASS_NAMES.row}`)]
+            .filter((el) => getComputedStyle(el).display !== 'none').length
+          : 0,
+        foldedCount: fmScope?.querySelectorAll(`.${FM_CARD_CLASS_NAMES.foldCollapsed}`).length ?? 0,
+        editCount: fmScope?.querySelectorAll(`.${FM_CARD_CLASS_NAMES.edit}`).length ?? 0,
+        cardFoldedCount: fmScope?.querySelectorAll(`.${FM_CARD_CLASS_NAMES.cardFolded}`).length ?? 0,
+        tableFoldedCount: fmScope?.querySelectorAll(`.${FM_CARD_CLASS_NAMES.tableFolded}`).length ?? 0,
+      }
+      : undefined
     const code = cardHeader || tokenCount > 0
       ? {
         visible: codeCardVisible,
@@ -8452,6 +8501,7 @@ export class WebviewSyncController {
       imageChrome,
       quickActions,
       code,
+      fm,
       heading: headingPaint,
       ...(contextMenu ? { contextMenu } : {}),
     }

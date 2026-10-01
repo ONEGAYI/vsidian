@@ -18,6 +18,54 @@ it('DOM 组合测试钩子只接受明确阶段和字符串候选', () => {
 })
 
 describe('isWebviewToHost', () => {
+  it('fm.test.click 动作白名单校验（2026-10 折叠链路）：类型联合与运行时校验器同步', () => {
+    // 教训钉子：折叠动作进了类型联合但漏了校验器白名单时，宿主侧静默拒绝、
+    // 集成用例超时难定位——此处钉住两侧同步（fm.test.click 是宿主→面板
+    // 消息，校验器在 isHostToWebview）
+    expect(isHostToWebview({ kind: 'fm.test.click', action: 'fold-button' })).toBe(true)
+    expect(isHostToWebview({ kind: 'fm.test.click', action: 'fold-hotspot' })).toBe(true)
+    expect(isHostToWebview({ kind: 'fm.test.click', action: 'edit-button' })).toBe(true)
+    expect(isHostToWebview({ kind: 'fm.test.click', action: 'fold' })).toBe(false)
+    expect(isHostToWebview({ kind: 'fm.test.click', action: 'fold-button', index: -1 })).toBe(false)
+  })
+
+  it('view.state.paint.fm 探针字段校验（2026-10 折叠链路）：五计数非负整数，缺一即拒', () => {
+    // isPaintProbe 为模块私有，经外层 view.state 校验间接触达；fm 分支
+    // 校验回退时集成侧表现为探针缺失（waitViewState 拿不到值），此处
+    // 正负样本钉住字段契约（对齐 fm.test.click 白名单钉子的动机）
+    const base = {
+      kind: 'view.state',
+      text: '---\ntitle: a\n---\n',
+      docLength: 17,
+      lineCount: 4,
+      renderedLines: 4,
+      paint: {
+        textVisible: true,
+        scrollerDisplay: 'block',
+        gutterUserSelect: null,
+        darkTheme: false,
+        caretColor: null,
+        fm: { rowCount: 2, foldedCount: 1, editCount: 0, cardFoldedCount: 1, tableFoldedCount: 0 },
+      },
+    }
+    expect(isWebviewToHost(base)).toBe(true)
+    expect(isWebviewToHost({ ...base, paint: { ...base.paint, fm: null } })).toBe(true)
+    expect(isWebviewToHost({ ...base, paint: { ...base.paint, fm: undefined } })).toBe(true)
+    expect(isWebviewToHost({
+      ...base,
+      paint: { ...base.paint, fm: { ...base.paint.fm, rowCount: -1 } },
+    })).toBe(false)
+    expect(isWebviewToHost({
+      ...base,
+      paint: { ...base.paint, fm: { rowCount: 2, foldedCount: 1 } },
+    })).toBe(false)
+    expect(isWebviewToHost({ ...base, paint: { ...base.paint, fm: 'folded' } })).toBe(false)
+    expect(isWebviewToHost({
+      ...base,
+      paint: { ...base.paint, fm: { ...base.paint.fm, cardFoldedCount: 1.5 } },
+    })).toBe(false)
+  })
+
   it('view.switch.request 消息校验（#141）：target 仅 live/reading（双态裁剪，源码路径不可达）', () => {
     expect(isWebviewToHost({ kind: 'view.switch.request', target: 'live' })).toBe(true)
     expect(isWebviewToHost({ kind: 'view.switch.request', target: 'reading' })).toBe(true)

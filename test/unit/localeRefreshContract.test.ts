@@ -20,6 +20,7 @@ import { installLocale } from '../../src/shared/i18n'
 import { zhCn } from '../../src/shared/locales/zh-cn'
 import { en } from '../../src/shared/locales/en'
 import { CodeCardHeaderWidget } from '../../src/webview/liveCodeCard'
+import { FmCardHeaderWidget } from '../../src/webview/frontmatterDecorations'
 import { buildGraphicChrome } from '../../src/webview/graphicBlockChrome'
 import { LiveMathWidget } from '../../src/webview/liveMath'
 import { EmptyTableCellWidget, LIVE_CLASS_NAMES } from '../../src/webview/liveDecorations'
@@ -273,6 +274,8 @@ describe('按需控件换包后就地重刷（#101 第三部分契约）', () =>
       host.append(
         new CodeCardHeaderWidget('ts', 'ts', true, 'const x = 1', false).toDOM(),
         new CodeCardHeaderWidget('ts', 'ts', true, 'const x = 1', true).toDOM(),
+        new FmCardHeaderWidget(false).toDOM(),
+        new FmCardHeaderWidget(true).toDOM(),
         buildGraphicChrome({ onEdit: () => {}, onPopup: () => {} }),
         new LiveMathWidget('\\bad', false).toDOM(),
       )
@@ -290,6 +293,16 @@ describe('按需控件换包后就地重刷（#101 第三部分契约）', () =>
       const folds = [...host.querySelectorAll<HTMLElement>('.vsidian-code-card-fold')]
       expect(folds.map((btn) => btn.title))
         .toEqual([zhCn['codeblock.collapse'], zhCn['codeblock.expand']])
+      // fm 标题栏三件套（2026-10 折叠批次）：标题文本节点、修改按钮、
+      // 折叠 chevron 两态——换包就地重刷接入清单钉住
+      const fmTitles = [...host.querySelectorAll<HTMLElement>('.vsidian-fm-header-title')]
+      expect(fmTitles.map((el) => el.textContent))
+        .toEqual([zhCn['frontmatter.title'], zhCn['frontmatter.title']])
+      expect(host.querySelector<HTMLElement>('.vsidian-fm-edit')!.title)
+        .toBe(zhCn['frontmatter.edit'])
+      const fmFolds = [...host.querySelectorAll<HTMLElement>('.vsidian-fm-fold')]
+      expect(fmFolds.map((btn) => btn.title))
+        .toEqual([zhCn['frontmatter.collapse'], zhCn['frontmatter.expand']])
       expect(host.querySelector<HTMLElement>('.vsidian-graphic-chrome-edit')!.title)
         .toBe(zhCn['graphic.editSource'])
       expect(host.querySelector<HTMLElement>('.vsidian-graphic-chrome-popup')!.title)
@@ -304,6 +317,13 @@ describe('按需控件换包后就地重刷（#101 第三部分契约）', () =>
       expect(copy.getAttribute('aria-label')).toBe(en['codeblock.copy'])
       expect(folds.map((btn) => btn.title))
         .toEqual([en['codeblock.collapse'], en['codeblock.expand']])
+      expect(fmTitles.map((el) => el.textContent))
+        .toEqual([en['frontmatter.title'], en['frontmatter.title']])
+      expect(host.querySelector<HTMLElement>('.vsidian-fm-edit')!.title)
+        .toBe(en['frontmatter.edit'])
+      expect(fmFolds.map((btn) => btn.title))
+        .toEqual([en['frontmatter.collapse'], en['frontmatter.expand']])
+      expect(fmFolds[0]!.getAttribute('aria-label')).toBe(en['frontmatter.collapse'])
       expect(host.querySelector<HTMLElement>('.vsidian-graphic-chrome-edit')!.title)
         .toBe(en['graphic.editSource'])
       expect(host.querySelector<HTMLElement>('.vsidian-graphic-chrome-popup')!.title)

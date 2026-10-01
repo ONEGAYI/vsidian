@@ -1239,3 +1239,13 @@ Live 渲染态经 lezer `HorizontalRule` 节点驱动：未触及该行时源文
 - 不修（review 记录在案，建议后续票）：P2-1 大小写形态漂移推送 miss（窄场景有自愈，修复涉及跨层形态协议改造）；P3-3 Map 无界、P3-4 sourceDocUri 命名、P3-6 理论负高度（理论边界项，无实际触发路径）。
 - 全量验证记录（2026-09-30，工作树 `codex/hover-preview-embed`）：merge 后 `compile` 通过、`test:unit` 199 文件 4173 项全绿（logs/merge-unit.log）；修复批 `compile` 通过（logs/fix-compile.log）；`test:unit` 199 文件 4186 项 + node --test 103 项全绿（logs/fix-unit.log）；`test:browser` 41/41 套件全绿（logs/fix-browser.log，报告 out/test/browser-runs/run-r1r44P）；集成分片全量（VSIDIAN_ITEST_SHARDS=4）**227 项 PASS / 0 项 FAIL**（logs/fix-integration.log + .vscode-test/integration-dev-s1..4.log，剪贴板环境故障未复现）；`check:stylecontract` 八项零失败 + `check:stylecontract:baseline` 通过（logs/fix-stylecontract*.log）；file-tree `check --strict` 通过（本批零新文件，源码与测试修改均在册条目内）。
 - 人工待验：无新增（全部为内部加固，正常链路行为不变——悬停/嵌入既有各节人工清单继续有效）。
+
+## frontmatter 卡片折叠与列表点号层级（2026-10 验收反馈修复）
+
+两项用户报告缺陷：① frontmatter 属性卡片此前无折叠能力（用户要求与代码块同交互：整卡头部热区 + 右上折叠按钮）；② 实时预览无序列表点号全层级实心，与阅读视图的层级点号（二级空心、三级方块）不一致。修复规格见 [frontmatter-table.md](frontmatter-table.md)「卡片折叠」节。
+
+- 自动化已证实（2026-10，独立工作树 `codex/fm-fold-list-bullets`）：折叠交互与装饰语义（frontmatterInteraction / liveDecorations / readingFrontmatterFold 单测）、双视图折叠 CSS 规则钉住（frontmatterPaintCssContract / listMarkerCssContract）、真实鼠标折叠链路（浏览器 frontmatterTable 套件——chevron/热区/浮层联动/阅读收起）、真宿主绘制层探针（集成「frontmatter 卡片折叠」用例 paint.fm——行数归零/收起计数/双视图各持/零写回）。
+- 人工待验：
+  1. **折叠手感（双视图）**：实时预览中点击属性卡片标题栏空白处或右上 chevron 收起——只剩标题栏一条且自身带完整边框圆角，正文紧跟其后无缝隙；再点展开恢复表格。阅读视图同款操作。收起状态不写文件（切回源码模式/重开文件恢复展开），两视图折叠状态互不影响。
+  2. **收起态让位**：收起后「修改」按钮消失（只剩折叠钮）；先打开属性编辑浮层再折叠，浮层自动关闭。
+  3. **点号层级观感（双视图对照）**：同一份含三级嵌套无序列表的文档，实时预览与阅读视图点号一致——一级实心圆点、二级空心圆点、三级起实心方块；光标进入实时预览列表行时源码标记显形、伪点号让位的既有手感不变。
