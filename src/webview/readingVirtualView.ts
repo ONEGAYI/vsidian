@@ -252,8 +252,11 @@ export class VirtualReadingView {
     }
     const viewport = this.effectiveViewport()
     const scrollTop = this.contentScrollTop()
-    const atBottom = this.scrollEl !== this.container &&
-      this.scrollEl.scrollHeight > this.scrollEl.clientHeight &&
+    // 末尾意图保持（#259 起主视图同享）：进入本轮时已滚到滚动末端的，
+    // 尾部窗口推进中的回收-占位中间态会让布局短暂变矮、浏览器把
+    // scrollTop clamp 压低，之后 spacer 恢复总高但损失无人补回——主
+    // 视图与外部宿主（#243）同样需要把「滚到末尾」的意图顶回末端。
+    const atBottom = this.scrollEl.scrollHeight > this.scrollEl.clientHeight &&
       this.scrollEl.scrollTop >= this.scrollEl.scrollHeight - this.scrollEl.clientHeight - 2
     const next = computeMountWindow(this.heights, scrollTop, viewport, this.bufferPx())
     const { mount, recycle } = diffWindow(this.mounted, next)
@@ -750,10 +753,13 @@ export class VirtualReadingView {
       const drift = Math.abs(next.lineHeightPx / this.calib.lineHeightPx - 1)
       this.calib = next
       if (drift > 0.02) {
-        // 重估全部未挂载块：同构文档的未测前缀误差收敛到个位百分比，
-        // 挂载块保留实测值不受影响
+        // 重估全部「从未实测」的块（#259：判 measured 而非 elements）：
+        // 已实测但被窗口回收的块必须保留实测值——若按「当前未挂载」判，
+        // 标定中位数随窗口样本摆动时，回收带的实测值被换回估计值再随
+        // 下一轮窗口实测换回，形成估计↔实测翻转的自持闭环，稳定化平移
+        // 把翻转转译成对用户滚轮的回吐（长文档滚不到底的恒差根因）
         for (let i = 0; i < this.blocks.length; i++) {
-          if (!this.elements.has(i)) {
+          if (!this.measured.has(i)) {
             this.heights[i] = estimateBlockHeightPx(this.blocks[i]!, this.text, this.calib)
           }
         }
