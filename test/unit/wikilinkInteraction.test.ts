@@ -91,7 +91,12 @@ function viewState(c: WebviewSyncController, h: Harness) {
 }
 
 function readingContainer(): HTMLElement {
-  return host.querySelector<HTMLElement>('.vsidian-view-reading')!
+  // #247 起混排嵌入在 Live 侧同样挂卡（隐藏的 Live DOM 内嵌卡片壳带
+  // 同名 .vsidian-view-reading 容器）——观测面限定主文档阅读容器，
+  // 排除 Live 残留与嵌套卡片（readingEmbedFixture.mainReading 同款先例）
+  return Array.from(host.querySelectorAll<HTMLElement>('.vsidian-view-reading'))
+    .find((el) => !el.closest('.vsidian-live-embed') && !el.closest('.vsidian-embed-card') &&
+      !el.closest('.vsidian-hover-popup'))!
 }
 
 describe('实时预览：双链间接装饰（视口内按各自范围切换）', () => {
@@ -421,10 +426,10 @@ describe('阅读视图：双链渲染为 a.vsidian-wikilink 与单击上报', ()
     const h = makeBridge()
     const c = mount(h)
     const live = viewState(c, h)
-    // 3 处合法双链（widget/mark）+ 1 处混排嵌入 mark（#217 验收反馈起
-    // 嵌入挂双链类恢复链接色，DOM 级计数随之计入；被整行 replace 吞没的
-    // 独占行嵌入无 DOM 文本不命中）
-    expect(live.liveWikilinkCount).toBe(4)
+    // 3 处合法双链（widget/mark）。#247 起混排嵌入 occurrence 同样被精确
+    // 区间 replace 挂卡（源文文本退场）——嵌入 mark 不再有 DOM 文本，
+    // DOM 级计数不再计入（与独占行嵌入整行替换吞没同款语义）
+    expect(live.liveWikilinkCount).toBe(3)
     expect(live.liveLinkCount ?? 0).toBe(0) // 样例不含普通链接
     c.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
     const reading = viewState(c, h)

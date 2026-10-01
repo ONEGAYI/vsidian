@@ -90,15 +90,23 @@ try {
     await page.waitForTimeout(150)
   }
 
-  // ---- 场景 A：隐形态挂载 + 载荷契约 + 抑制边界（混排/围栏/未闭合保留源文） ----
+  // ---- 场景 A：隐形态挂载 + 载荷契约 + 抑制边界（围栏/未闭合保留源文） ----
+  // #247 起混排 occurrence 同样挂卡（精确区间替换，前后文保留）——独占行
+  // 与混排各发请求；围栏内与未闭合仍不请求
   const reqsA = await hoverRequests()
-  assert.equal(reqsA.length, 1, '仅独占行嵌入发装载请求（混排/围栏/未闭合不请求）')
+  assert.equal(reqsA.length, 2, '独占行 + 混排嵌入各发装载请求（围栏/未闭合不请求）')
   assert.match(reqsA[0].instanceId, /^embed-/, '嵌入实例前缀')
   assert.equal(reqsA[0].target, '目标笔记', 'target 为嵌入 inner 原文')
   assert.equal(reqsA[0].sourceStart, EMBED_FROM, 'sourceStart 为嵌入行区间起点')
   assert.equal(reqsA[0].sourceEnd, EMBED_TO, 'sourceEnd 为嵌入行区间终点')
+  const MIX_LINE = '混排嵌入 ![[目标笔记]] 不成卡片。'
+  const mixReq = reqsA[1]
+  assert.equal(mixReq.sourceStart, PARENT_DOC.indexOf('![[目标笔记]]', PARENT_DOC.indexOf(MIX_LINE.slice(0, 4))),
+    '混排请求区间为嵌入精确起点（#247 occurrence 语义）')
+  assert.equal(PARENT_DOC.slice(mixReq.sourceStart, mixReq.sourceEnd), '![[目标笔记]]',
+    '混排请求区间恰为嵌入原文（精确边界）')
   let hosts = await reads()
-  assert.equal(hosts.length, 1, '恰一个 Live 嵌入宿主')
+  assert.equal(hosts.length, 2, '独占行 + 混排各一 Live 嵌入宿主')
   assert.equal(hosts[0].below, false, '隐形态（无 below 修饰）')
   assert.equal(hosts[0].cardPresent, true, '卡片壳在场')
   assert.ok(hosts[0].cardHeight > 20, `卡片有真实高度（实际 ${hosts[0].cardHeight}）`)
@@ -106,11 +114,23 @@ try {
   assert.notEqual(hosts[0].barColor, 'rgba(0, 0, 0, 0)', '边条颜色非透明')
   assert.equal(hosts[0].stateText, zhCn['embed.loading'], '装载中就地 loading 文案')
   assert.equal(await linePainted(EMBED_LINE), false, '隐形态源文不绘制（整行替换）')
-  assert.equal(await linePainted('混排嵌入 ![[目标笔记]] 不成卡片。'), true, '混排行保留源文')
+  const mixLineKept = await page.evaluate((n) => {
+    const line = Array.from(document.querySelectorAll('.cm-content .cm-line'))
+      .find((l) => (l.textContent ?? '').includes('混排嵌入'))
+    if (!line) return null
+    return { before: (line.textContent ?? '').includes('混排嵌入'),
+      after: (line.textContent ?? '').includes('不成卡片。'),
+      srcGone: !(line.textContent ?? '').includes('![[目标笔记]]'),
+      host: line.querySelector('.vsidian-live-embed') !== null }
+  }, MIX_LINE)
+  assert.ok(mixLineKept, '混排行在场')
+  assert.ok(mixLineKept.before && mixLineKept.after, '混排行前后文保留（#247 精确区间替换不吞字）')
+  assert.equal(mixLineKept.srcGone, true, '混排嵌入源文退场（挂卡）')
+  assert.equal(mixLineKept.host, true, '混排行内卡片宿主在场')
   assert.equal(await page.evaluate((n) => window.liveTextPainted(n), '![[围栏内不挂载]]'), true, '围栏内保留源文（字面文本——代码卡片容器，节点级判据）')
   assert.equal(await linePainted('![[未闭合锚'), true, '未闭合行保留可编辑源文')
   passed++
-  console.log('[Live嵌入][PASS] 隐形态挂载 + 载荷契约 + 混排/围栏/未闭合保留源文')
+  console.log('[Live嵌入][PASS] 隐形态挂载 + 载荷契约 + 混排挂卡/围栏/未闭合边界')
 
   // ---- 场景 B：成功回包 → 卡片内容绘制（限高内部滚动 + 源文保持隐藏） ----
   await respondOk(reqsA[0])
@@ -139,7 +159,7 @@ try {
   assert.ok(entered.length === 1 && entered[0].head >= EMBED_FROM && entered[0].head <= EMBED_TO,
     `第二次 ArrowUp 应进入嵌入区间（实际 ${JSON.stringify(entered)}）`)
   hosts = await reads()
-  assert.equal(hosts.length, 1, '显形态宿主在场（below 形态）')
+  assert.equal(hosts.length, 2, '显形态宿主在场（below 形态 + 混排隐藏卡，#247）')
   assert.equal(hosts[0].below, true, '光标进入区间 → 下方形态')
   assert.equal(await linePainted(EMBED_LINE), true, '源码显形（源文真实文本盒子）')
   assert.ok(hosts[0].cardHeight > 20, `显形态卡片继续显示（高度 ${hosts[0].cardHeight}）`)
@@ -261,7 +281,7 @@ try {
   assert.ok(reqsG.some((r) => r.target.includes('笔')), `新请求目标含 IME 文本（实际 ${reqsG.map((r) => r.target)}）`)
   await respondOk(reqsG[reqsG.length - 1])
   hosts = await reads()
-  assert.ok(hosts.length === 1, '修改后的嵌入仍单卡片（显形态）')
+  assert.ok(hosts.length === 2, '修改后的嵌入仍两卡（显形态 + 混排隐藏卡，#247）')
   assert.equal(await linePainted(EMBED_LINE), false, '原文 ![[目标笔记]] 行已被修改（不再存在）')
   passed++
   console.log('[Live嵌入][PASS] 真实 IME 修改引用源码 → 新目标自动重载')
@@ -275,14 +295,14 @@ try {
   await page.keyboard.press('Backspace')
   await page.keyboard.press('Backspace')
   await page.waitForTimeout(80)
-  assert.equal(await page.evaluate(() => window.liveEmbedCount()), 0, '未闭合后卡片撤下')
+  assert.equal(await page.evaluate(() => window.liveEmbedCount()), 1, '未闭合后该卡撤下（混排卡保留，#247）')
   const unclosed = (await page.evaluate(() => window.liveEmbedDocText())).slice(nowFrom, nowFrom + embedNow.length - 2)
   assert.ok(unclosed.startsWith('![[') && !unclosed.includes(']]'),
     `未闭合源文保留可编辑（实际 ${unclosed}）`)
   // 重新输入闭合（真实键盘）→ 自动重新挂载装载
   await page.keyboard.type(']]')
   await page.waitForTimeout(80)
-  assert.equal(await page.evaluate(() => window.liveEmbedCount()), 1, '闭合后卡片重挂')
+  assert.equal(await page.evaluate(() => window.liveEmbedCount()), 2, '闭合后卡片重挂（+ 混排卡，#247）')
   const reqsH = await hoverRequests()
   const lastReq = reqsH[reqsH.length - 1]
   await respondOk(lastReq)
@@ -300,8 +320,28 @@ try {
   // 「嵌入链路（装载/点击/选字）不新增写回」为准
   const editsBefore = await editRequestCount()
   assert.ok(editsBefore >= 0, '编辑基线在场')
-  const picked = await page.evaluate(() => window.selectLiveEmbedText(0, '目标笔记第 3 段正文'))
-  assert.equal(picked, '目标笔记第 3 段正文', '卡片内可建立浏览器文本选区（选字复制能力）')
+  // #247 起文档含独占行 + 混排两卡：选字目标自动定位「已装载到目标正文」
+  // 的卡（IME/撤销链路后首卡可能仍 loading——装载竞态与选区能力无关）
+  const picked = await page.evaluate(() => {
+    const hosts = Array.from(document.querySelectorAll('.vsidian-live-embed'))
+    for (const host of hosts) {
+      const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT)
+      let node = null
+      while ((node = walker.nextNode()) !== null) {
+        if ((node.textContent ?? '').includes('目标笔记标题')) {
+          const range = document.createRange()
+          range.setStart(node, 0)
+          range.setEnd(node, '目标笔记标题'.length)
+          const selection = window.getSelection()
+          selection?.removeAllRanges()
+          selection?.addRange(range)
+          return selection?.toString() ?? ''
+        }
+      }
+    }
+    return ''
+  })
+  assert.equal(picked, '目标笔记标题', '卡片内可建立浏览器文本选区（选字复制能力）')
   await page.waitForTimeout(60)
   const selI2 = await selection()
   assert.deepEqual(selI2, selI, '内部选字不改父文档 CM6 选区')
@@ -320,16 +360,18 @@ try {
   await page.keyboard.type('缺') // 新目标「缺…」：预期 not-found
   await page.waitForTimeout(100)
   const reqsJ = await hoverRequests()
-  const errReq = reqsJ[reqsJ.length - 1]
+  // #247 起多卡场景请求序列含 heal/装载笔——按新目标精确匹配（取末笔
+  // 会把错误回包发给无关实例）
+  const errReq = [...reqsJ].reverse().find((r) => r.target.includes('缺')) ?? reqsJ[reqsJ.length - 1]
   await page.evaluate(({ reqId, instanceId }) => window.respondLiveEmbed({
     kind: 'hover.result', reqId, instanceId, ok: false, reason: 'not-found',
   }), { reqId: errReq.reqId, instanceId: errReq.instanceId })
   await page.waitForTimeout(120)
   hosts = await reads()
-  assert.equal(hosts.length, 1, '错误态卡片壳保留')
-  assert.ok(hosts[0].stateText.includes(zhCn['hover.errorNotFound'].split('{target}')[0]),
-    `错误分态就地呈现（实际 ${hosts[0].stateText}）`)
-  assert.equal(hosts[0].stateVisible, true, '错误态状态行可见')
+  const errHost = hosts.find((h) => h.stateVisible && h.stateText.length > 0)
+  assert.equal(hosts.length, 2, '错误态卡片壳保留（+ 混排卡，#247）')
+  assert.ok(errHost !== undefined && errHost.stateText.includes(zhCn['hover.errorNotFound'].split('{target}')[0]),
+    `错误分态就地呈现（实际 ${hosts.map((h) => h.stateText.slice(0, 24))}）`)
   passed++
   console.log('[Live嵌入][PASS] 目标缺失错误分态就地呈现')
 
@@ -343,7 +385,7 @@ try {
   await page.evaluate(() => window.setLiveEmbedMode('live'))
   await page.waitForTimeout(200)
   assert.equal(await page.evaluate(() => window.liveEmbedDocText()), docBefore, '切回 Live 源文不丢')
-  assert.equal(await page.evaluate(() => window.liveEmbedCount()), 1, '切回 Live 卡片重挂')
+  assert.equal(await page.evaluate(() => window.liveEmbedCount()), 2, '切回 Live 卡片重挂（+ 混排卡，#247）')
   passed++
   console.log('[Live嵌入][PASS] 模式切换：卡片两侧在场、源文不丢')
 

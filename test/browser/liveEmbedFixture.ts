@@ -9,6 +9,8 @@ import { bootLocaleFromDocument } from '../../src/webview/localeBoot'
 import { EditorSelection, EditorState } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
+import { liveEmbedSpansField } from '../../src/webview/liveEmbed'
+import { selectionTouchesRange } from '../../src/webview/liveDecorations'
 import '../../src/webview/main.css'
 
 bootLocaleFromDocument()
@@ -130,6 +132,28 @@ Object.assign(window, {
   /** 嵌入宿主计数 */
   liveEmbedCount(): number {
     return document.querySelectorAll('.vsidian-live-embed').length
+  },
+  /** 嵌入表 StateField 计数（无视口依赖——DOM widget 只在视口内行实例化，
+   *  回包后卡片限高使视口外卡不出 DOM；表层数据不受影响） */
+  liveEmbedSpanCount(): number {
+    const spans = liveView()?.state.field(liveEmbedSpansField, false)
+    return spans ? spans.length : -1
+  },
+  /** 嵌入表逐枚显隐（selectionTouchesRange 同语义，StateField 层观测） */
+  liveEmbedRevealStates(): Array<{ inner: string; from: number; to: number; revealed: boolean }> {
+    const view = liveView()
+    const state = view?.state
+    const spans = state?.field(liveEmbedSpansField, false)
+    if (!state || !spans) {
+      return []
+    }
+    const selection = state.selection
+    return spans.map((s) => ({
+      inner: s.inner,
+      from: s.from,
+      to: s.to,
+      revealed: selectionTouchesRange(selection, s.from, s.to),
+    }))
   },
   /** 源文绘制层可见性（行级判据）：lineText（trim 后整行文本）是否仍作为
    *  .cm-line 的行级文本渲染——隐形态整行被 replace widget 替换后行

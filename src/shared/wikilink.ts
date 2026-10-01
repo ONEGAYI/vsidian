@@ -280,3 +280,46 @@ export function embedAtPosition(text: string, start: number, limit: number, base
   }
   return { from: base + start, to: base + close + 2, inner }
 }
+
+/**
+ * 行内「链接/图片文字域」区间（#247 Live 嵌入发射排除）：保守方括号配对
+ * 形态学——`[`（前缀非 `\`）压栈、`]` 弹栈，弹出后**紧邻** `(`（内联目标）
+ * 或 `[`（引用式）的配对域记为链接文字域，区间 = 括号内文字（不含两侧
+ * 括号字符）。双链/嵌入自身的 `[[`…`]]` 按普通括号计数（压二弹二自平衡，
+ * 不产域）；嵌套括号域取外层闭合配对。
+ *
+ * 与 markdown-it 链接识别同向（Reading 侧 #246 钉住：链接文字域内嵌入
+ * 产占位但不升级，Live 侧镜像为不挂卡保持源文）；边缘形态分叉方向是
+ * 「误判为链接域 → 保持源文」，属安全降级（宁可少挂卡不误挂）。图片形态
+ * `![alt](url)` 的 alt 域同样命中（markdown-it 图片 alt 内不产卡片 DOM，
+ * Live 侧同向保持源文）。
+ */
+export function linkLabelRangesInLine(line: string, base = 0): Array<{ from: number; to: number }> {
+  if (!line.includes('[')) {
+    return []
+  }
+  const stack: number[] = []
+  const out: Array<{ from: number; to: number }> = []
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i]!
+    if (ch === '\\') {
+      i += 1 // 反斜杠转义下一字符（含 `[`/`]`）——保守跳过
+      continue
+    }
+    if (ch === '[') {
+      stack.push(i)
+      continue
+    }
+    if (ch === ']') {
+      const open = stack.pop()
+      if (open === undefined) {
+        continue
+      }
+      const next = line[i + 1]
+      if (next === '(' || next === '[') {
+        out.push({ from: base + open + 1, to: base + i })
+      }
+    }
+  }
+  return out
+}

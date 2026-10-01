@@ -9065,9 +9065,10 @@ export class WebviewSyncController {
       // #60 Mermaid：围栏表 + 跨行块 replace 装饰（光标进入围栏显源码、
       // 离开恢复渲染图；渲染容器与阅读侧共用 mermaidRender 管线）
       liveMermaid,
-      // #223 Live 正文嵌入：嵌入表 + 双形态装饰（隐形态整行替换卡片 /
-      // 显形态源文可见 + 行下方卡片；光标/选区触及源码区间显形，离开
-      // 隐藏）。纯装饰 StateField 无键位语义；卡片内容经 embedCards
+      // #223/#247 Live 正文嵌入：嵌入表 + 双形态装饰（隐形态只替换嵌入
+      // 精确区间 [from, to] 呈卡片——#247 起不再整行替换，前后文与父结构
+      // 保留 / 显形态源文可见 + 行下方卡片；光标/选区触及源码区间显形，
+      // 离开隐藏）。纯装饰 StateField 无键位语义；卡片内容经 embedCards
       // （EmbedCardManager）与 Reading 侧同状态库装载
       liveEmbed,
       // #163 验收反馈：块 id 标记淡化（行尾 ` ^id` 与独立行 `^id` 双形态

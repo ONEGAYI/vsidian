@@ -218,7 +218,7 @@ CodeMirror 官网本次读取遇到 403；本规格显隐规则已核对本地�
 | #244 | 卡片递归、来源校验、循环与预算、深度设置 | #243 | 已实施，待用户验收 |
 | #245 | 浮层递归、单浮窗、焦点与边界接续 | #244 | 本工作树已实施，待独立审查与用户验收 |
 | #246 | Reading 混排、列表和引用容器 | #244 | 已实施，待用户验收 |
-| #247 | Live 混排、精确源码显隐和输入保真 | #246 | 待实施 |
+| #247 | Live 混排、精确源码显隐和输入保真 | #246 | 本工作树已实施，待独立审查与用户验收 |
 | #248 | 表格格内嵌入、转义映射和格区交互隔离 | #247 | 待实施 |
 | #249 | 组合验证、资源实测与交付收口 | #245、#248 | 待实施 |
 
@@ -313,3 +313,31 @@ Reading 侧（主文档正文、卡片内容与悬停内容三处同一装配）
 **公开样式入口**：新增 `reading-embed-mixed`（流内宿主修饰类，卡片壳规则随 `#app .vsidian-view-reading .vsidian-reading-embed .vsidian-embed-card` 后代选择器天然命中）与 `embed-slot`（行内占位 span，未升级时按正文文字 + 描述色呈现）两条 content 域条目；`limit-markdown-embed` 边界条目随实际能力更新。基线对照 v0.7.0（`c85d244`）：无既有入口破坏（`check:stylecontract` 八项零失败）。本票无新增用户可见文字（沿用既有 embed 词条）、无新增可绑定操作（复用「预览当前链接」与打开目标入口，评估记录见 keybindings.md）；新增设置无。
 
 自动化证据与人工待验见 [manual-verification.md](manual-verification.md) 的 #246 节。
+
+### #247 Live 混排、列表与引用容器的精确源码显隐（2026-10-01）
+
+Live 侧（父文档第 0 层）的 `![[…]]` 不再要求独占正文一行：段落混排、无序/有序/任务列表项、列表懒续行、blockquote 及其组合内的嵌入经 #246 同源识别（`scanEmbedsInLine` occurrence——Live 嵌入表 `liveEmbedSpansField` 从 `soleEmbedOfLine` 扩展为逐行全部 occurrence，`sole` 标记随行判定）挂载共用卡片；实际源文不插入换行。
+
+**精确替换与前后文保真**：隐形态只对嵌入精确区间 `[from, to]`（`![[…]]` 本身，#223/#224 的整行替换退役）做 inline replace——前后文字、列表标记/编号、任务控件、引用前缀与既有缩进保留在行内；宿主为 CSS 块级化的 div（行内块级打断呈现「前文 → 卡片 → 后文」，与 Reading 混排拆段同观感），replace 前后的 cm-widgetBuffer 零高块级化沿用。保持 inline replace（而非块级 replace）仍是键盘垂直导航可进入嵌入行的前提（ArrowUp/Down 逐行落点不越过区间）。
+
+**精确显隐**：显隐谓词沿用 selectionTouchesRange——折叠光标含区间两端、非空选区严格相交、任一 CM6 range 命中即显形；**不扩大到相邻文字或整行**：光标在前后文/相邻文字上不显形（反例钉住）。显形态为行下方 block widget（below 卡），源文可见可编辑，兄弟卡片独立显隐（同行双嵌入互不牵连）。未闭合引用撤下旧目标卡片、保留可编辑原文；恢复闭合按新引用重载（增量表在编辑/换行/合行/撤销/外部同步下按 occurrence 精确区间重建，窗口外条目以行内重扫精确对齐校验）。
+
+**发射层排除（与 #246 同源集合）**：表构建层仍不排除（候选表含排除位——探针 `liveEmbedReveal` 含链接域/表格候选 7 枚即彼故）；发射层在围栏表/文末开放围栏/frontmatter 既有排除之外新增 lezer 语法上下文（行内代码/HTML 块/注释/表格——`embedSlots.OCCURRENCE_EXCLUDED` 同集合，表格 #248 前排除）与**行内链接/图片文字域**（`shared/wikilink` 新增 `linkLabelRangesInLine` 保守方括号配对形态学：`[`（前缀非 `\`）压栈、`]` 弹栈后紧邻 `(` 或 `[` 的配对域为链接文字域；lezer 把 `![[x]]` 解析为 Image 节点无法区分链接域，形态学误判方向为「保持源文」的安全降级——与 Reading 侧「链接域占位不升级」呈现对齐）。
+
+**跨模式状态共享的 key 口径**：独占行嵌入宿主 key = 行区间（`lineFrom..lineTo`，Reading 独占行 embed 块同口径）；混排/容器 occurrence 宿主 key = 嵌入精确区间（`from..to`，Reading #246 混排提升宿主同口径）——同一嵌入在 Live↔Reading 切换时共享 fm 展开与滚动状态。Live 根请求的 `sourceStart/sourceEnd` 按同口径（宿主对根面板请求不设区间校验）。
+
+**交互隔离与输入保真**：宿主 `ignoreEvent=true` 沿用——卡片内浏览器选区、滚动、复制、内部链接、任务控件（禁写 disabled）与右键不冒泡为父编辑器输入/选区/写操作；源码编辑走正常 edit.request。动态子卡/图片高度经 ResizeObserver → requestMeasure 回填（卡片滚动壳限高 480px 与 Reading 侧同源 EmbedCardManager）。引用内容内部始终禁写 Reading（目标 Live 编辑仍属 #227）。
+
+**支持/降级矩阵（Live 侧）**：
+
+| 位置 | 呈现 |
+| --- | --- |
+| 段落混排（单/多嵌入、软换行） | 精确区间替换挂卡；前后文保留，流断行呈现 |
+| 无序/有序/任务列表项、懒续行、嵌套列表、blockquote 与组合 | 挂卡；标记/编号/checkbox/前缀保留 |
+| 同行多嵌入 | 各按 occurrence 独立替换、独立显隐 |
+| 独占行（含缩进/尾随空白） | 挂卡（缩进与尾随空白保留——不再整行吞没） |
+| 链接文字域 / 表格格内 / 行内代码 / 注释 / 围栏 / frontmatter | 源文呈现（发射层排除；表格 #248 接入） |
+
+**公开样式入口**：无新增类名或变量——复用 `live-embed-widget` 条目（`live-embed-mixed` 无对应类；混排与独占行同宿主类，仅替换区间不同）；`limit-markdown-embed` 与 `live-embed-widget` 两条目的 purpose/states/dom 随实际能力更新（双语），指南产物经 `gen:styleguide` 重生成。本票无新增用户可见文字（沿用既有 embed 词条）、无新增可绑定操作（复用「预览当前链接」与打开目标入口，评估记录见 keybindings.md）；新增设置无。
+
+自动化证据与人工待验见 [manual-verification.md](manual-verification.md) 的 #247 节。
