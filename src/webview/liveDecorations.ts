@@ -1243,8 +1243,9 @@ function regionSpans(tr: Transaction, doc: Text): LineSpan[] {
  * 映射零成本。
  * 预算钳制（大文档多命中时查找键入路径的成本上界）：
  * - 本 field 只拥有行级类别装饰（grid 行/分隔行/转义符）——命中行文本
- *   无 `|` 与 `\` 时重发射必为空转，按文本过滤（块级公式/Mermaid/代码
- *   卡/独行图片的回源由各自 ViewPlugin 视口内消费，不经此 span）
+ *   无 `|` 与 `\` 时重发射必为空转，按文本过滤（块级公式/Mermaid/代码卡
+ *   的回源由各自 StateField、独行图片与行内公式由各自 ViewPlugin 消费，
+ *   不经此 span）
  * - span 就地合并（相邻/重叠），合并后总覆盖行数达全文档量级时退为
  *   一次全量重发射（一次 emitForRange 优于数千次逐 span update）
  * - 坐标不可信窗口（docChanged 后 find/occ 来源引用都未刷新——

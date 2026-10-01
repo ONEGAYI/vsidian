@@ -13,9 +13,11 @@
 // - 查找部分只读 findStateField.matches（不重算、不改计数语义）；面板
 //   关闭时 closeFind 已整组清空 matches，命中集随之清空
 // - 选词部分经 setOccurrenceHitActive 由 syncController 会话簿记驱动
-//   （会话在场 = 选区计入；五通道结束 = 退出），会话中的命令事务
-//   （携带 active 效果——生产链路 dispatchOccurrencePlan 把效果搭乘在
-//   计划事务上）吸收新选区，选区追加自然并入；**外部选区/编辑事务不
+//   （会话在场 = 选区计入；五通道结束 = 退出）。生产链路两段式：
+//   dispatchOccurrencePlan 计划事务（选区 + occurrenceCmd 注解）→
+//   runOccurrenceSelect 紧随的独立 active 效果事务；CM6 纯效果事务下
+//   tr.state.selection 保持计划选区引用，携带 active 效果的事务吸收的
+//   即命令产物选区，选区追加自然并入；**外部选区/编辑事务不
 //   吸收**（冻结旧选区）——updateListener 结束通道的两事务序列里，事务 1
 //   （点击/键入/Esc 收敛）的终态选区若并入会把会话外的编辑选区污染成
 //   命中、误种停驻（「编辑选区触界不引发显形」硬边界）

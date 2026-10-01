@@ -229,7 +229,8 @@ describe('活跃命中集状态机（StateField）', () => {
       selection: EditorSelection.range(lineFrom(2), lineFrom(2) + 1),
       effects: setOccurrenceHitActive.of(true),
     }).state
-    // 追加经计划事务（携带 active 效果——生产链路 dispatchOccurrencePlan 同款）
+    // 追加经效果事务吸收（生产链路：计划事务后紧随的独立
+    // setOccurrenceHitActive 效果事务——tr.state.selection 保持计划选区）
     s = s.update({
       selection: EditorSelection.create([
         EditorSelection.range(lineFrom(2), lineFrom(2) + 1),
