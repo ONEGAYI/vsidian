@@ -7087,14 +7087,25 @@ export class WebviewSyncController {
     const panel = document.createElement('div')
     panel.className = FIND_CLASS_NAMES.panel
     panel.setAttribute('role', 'search')
-    // 替换栏展开/收起切换（左缘竖条；字符图标在 CSS ::before——收起态
-    // 旋 -90° 呈 >、展开态回正呈 ⌄，aria-expanded 与替换行 open 类同步）
+    // 替换栏展开/收起切换（左缘竖条；图标为自绘 SVG 挂内嵌 glyph——
+    // aria-expanded 翻转经 CSS 旋转 90° 呈现 > / ⌄，与替换行 open 类同步；
+    // 点击后焦点归还输入框，浮层内焦点圈互斥——对齐 VSCode 原生）
     const toggle = document.createElement('button')
     toggle.type = 'button'
     toggle.className = FIND_CLASS_NAMES.toggle
+    const toggleGlyph = document.createElement('span')
+    toggleGlyph.className = FIND_CLASS_NAMES.toggleGlyph
+    toggle.appendChild(toggleGlyph)
     bindLocaleAttrs(toggle, 'find.toggleReplace')
     toggle.addEventListener('click', () => {
       this.setFindReplaceOpen(!(this.findReplaceOpen && this.viewMode === 'live'))
+      // 焦点归还输入框（toggle 不驻留焦点圈；输入框 focus 圈与 toggle
+      // focus 圈天然互斥）
+      if (this.viewMode === 'live') {
+        this.findInputEl?.focus()
+      } else {
+        this.findInputEl?.blur()
+      }
     })
     this.findToggleEl = toggle
     const row = document.createElement('div')

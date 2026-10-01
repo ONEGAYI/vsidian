@@ -56,8 +56,9 @@ describe('查找面板 CSS 契约（#236）', () => {
     expect(rule('.vsidian-find .vsidian-find-replace', /grid-column:\s*2/)).toBeTruthy()
   })
 
-  it('toggle 常态强调色边框（VSCode 同款轮廓）', () => {
-    expect(rule('.vsidian-find .vsidian-find-toggle', /border:\s*1px solid var\(--vscode-focusBorder/)).toBeTruthy()
+  it('toggle 常态透明占位边框，focus-visible 才出强调色圈（焦点圈与输入框互斥）', () => {
+    expect(rule('.vsidian-find .vsidian-find-toggle', /border:\s*1px solid transparent/)).toBeTruthy()
+    expect(rule('.vsidian-find .vsidian-find-toggle:focus-visible', /border-color:\s*var\(--vscode-focusBorder/)).toBeTruthy()
   })
 
   it('toggle 高度随内容行：收起占首行，替换栏展开经 :has 跨两行', () => {
@@ -65,9 +66,12 @@ describe('查找面板 CSS 契约（#236）', () => {
     expect(rule('.vsidian-find:has(.vsidian-find-replace-open) .vsidian-find-toggle', /grid-row:\s*1\s*\/\s*3/)).toBeTruthy()
   })
 
-  it('切换图标在 ::before：收起旋 -90° 呈 >，展开随 aria-expanded 回正呈 ⌄', () => {
-    expect(rule('.vsidian-find .vsidian-find-toggle::before', /transform:\s*rotate\(-90deg\)/)).toBeTruthy()
-    expect(rule('.vsidian-find .vsidian-find-toggle[aria-expanded=\'true\']::before', /transform:\s*none/)).toBeTruthy()
+  it('切换图标为内嵌 glyph 层：自绘 chevron SVG 双主题，展开随 aria-expanded 旋转 90°', () => {
+    expect(rule('.vsidian-find .vsidian-find-toggle[aria-expanded=\'true\'] .vsidian-find-toggle-glyph', /transform:\s*rotate\(90deg\)/)).toBeTruthy()
+    expect(rule('#app .vsidian-find .vsidian-find-toggle-glyph', /light\/light-chevronRight/))
+      .toContain('light/light-chevronRight.svg')
+    expect(rule('body.vscode-high-contrast #app .vsidian-find .vsidian-find-toggle-glyph', /dark\/dark-chevronRight/))
+      .toContain('dark/dark-chevronRight.svg')
   })
 
   it('三开关激活态点亮规则覆盖 Aa/ab/.*/☰ 四类（VSCode inputOption 激活族）', () => {

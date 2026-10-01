@@ -3408,8 +3408,10 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
 
 /* 替换栏展开/收起切换（2026-10 对齐 VSCode 原生）：grid 左列竖条——
    收起时与主行等高（替换行收起即无第二行轨道）、展开时经 :has 跨两行
-   与面板主体等高；常态强调色边框（VSCode 同款轮廓，对齐验收参考图）。
-   字符图标在 ::before：收起旋 -90° 呈 >（指向展开方向），展开回正呈 ⌄ */
+   与面板主体等高。常态无边框（透明占位防高度跳动），focus 态才出强调
+   色圈——与输入框 focus-within 圈互斥（浏览器焦点语义 + 点击后焦点
+   归还输入框），不再有「永不消失的焦点圈」；图标为自绘 SVG 挂内嵌
+   glyph 层，展开随 aria-expanded 旋转 90°（> → ⌄，对齐原生动画语义） */
 .vsidian-find .vsidian-find-toggle {
   grid-row: 1 / 2;
   grid-column: 1;
@@ -3417,20 +3419,39 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   height: auto;
   align-self: stretch;
   padding: 0;
-  border: 1px solid var(--vscode-focusBorder, #007fd4);
+  border: 1px solid transparent;
 }
 
 .vsidian-find:has(.vsidian-find-replace-open) .vsidian-find-toggle {
   grid-row: 1 / 3;
 }
 
-.vsidian-find .vsidian-find-toggle::before {
-  content: '⌄';
-  transform: rotate(-90deg);
+/* 切换按钮键盘聚焦圈（鼠标点击不触发 focus-visible，不驻留） */
+.vsidian-find .vsidian-find-toggle:focus-visible {
+  border-color: var(--vscode-focusBorder, #007fd4);
 }
 
-.vsidian-find .vsidian-find-toggle[aria-expanded='true']::before {
-  transform: none;
+.vsidian-find .vsidian-find-toggle-glyph {
+  display: block;
+  width: 16px;
+  height: 16px;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 16px 16px;
+  transition: transform 0.12s ease;
+}
+
+.vsidian-find .vsidian-find-toggle[aria-expanded='true'] .vsidian-find-toggle-glyph {
+  transform: rotate(90deg);
+}
+
+#app .vsidian-find .vsidian-find-toggle-glyph {
+  background-image: url('../../media/quick-actions/light/light-chevronRight.svg');
+}
+
+body.vscode-dark #app .vsidian-find .vsidian-find-toggle-glyph,
+body.vscode-high-contrast #app .vsidian-find .vsidian-find-toggle-glyph {
+  background-image: url('../../media/quick-actions/dark/dark-chevronRight.svg');
 }
 
 /* 主行：输入 + 计数 + 三开关（Aa/ab/.*) + 上一个/下一个/关闭（右列首行） */
