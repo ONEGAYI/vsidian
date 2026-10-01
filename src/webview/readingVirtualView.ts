@@ -702,19 +702,37 @@ export class VirtualReadingView {
     }
   }
 
-  /** 窗口元素按块序重排到两个 spacer 之间（appendChild 移动既有节点，不重建） */
+  /** 窗口元素按块序最小移动到两个 spacer 之间（reconciliation 式）：
+   *  期望序 [spacerTop, first..last, spacerBottom] 游标对位——节点已在
+   *  游标紧后（同父且 previousSibling 命中）则零移动，块集合与块序不变
+   *  的窗口平移不再触碰既有块节点。#258 根因侧：此前无条件 appendChild
+   *  全部挂载块会移动表格块根 div，Chromium 表格布局重排静默重置 td 内
+   *  滚动容器的 scrollTop（无 scroll 事件、无 JS 写入；table-layout:fixed
+   *  / contain / will-change 等 CSS 缓解实测全部无效）——最小移动后表格
+   *  块只要留在窗口内就不被移动，格内嵌入卡的内层滚动全程稳定（第一轮
+   *  的 120ms 停歇恢复兜底保留为受害者侧防线）。mountBlock 创建的块是
+   *  游离节点（不预先插入），游离节点 parentElement 非本容器，必然走
+   *  insertBefore 入位；cursor 为 null 时插入参照取 firstChild。窗口
+   *  不变路径不进本方法（零 DOM 写、防 RO 空转的既有约定不变）。 */
   private reorderChildren(): void {
     if (this.mounted === null) {
       return
     }
-    this.container.appendChild(this.spacerTop)
+    let cursor: ChildNode | null = null
+    const place = (el: HTMLElement): void => {
+      if (el.parentElement !== this.container || el.previousSibling !== cursor) {
+        this.container.insertBefore(el, cursor === null ? this.container.firstChild : cursor.nextSibling)
+      }
+      cursor = el
+    }
+    place(this.spacerTop)
     for (let i = this.mounted.first; i <= this.mounted.last; i++) {
       const el = this.elements.get(i)
       if (el) {
-        this.container.appendChild(el)
+        place(el)
       }
     }
-    this.container.appendChild(this.spacerBottom)
+    place(this.spacerBottom)
   }
 
   /**

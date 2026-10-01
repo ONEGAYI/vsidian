@@ -1052,11 +1052,41 @@ try {
       return main ? { top: main.scrollTop, height: main.scrollHeight } : null
     })
     const readingWheelAway = async () => {
+      // #258b 根因侧逐轮断言：滚轮进行中（每轮仅歇 25ms，第一轮兜底的
+      // 120ms 停歇恢复未及运行）读两卡内层 scrollTop。根因（reorderChildren
+      // 无条件移动表格块 → Chromium 表格布局重排静默重置 td 内滚动）未除
+      // 时逐轮必见 0；最小移动修复后表格块留窗期间零移动、不触发表格重
+      // 排，在场期间内层保持初值（甲 180 / 乙 60），离屏回收后 present=
+      // false 不再断言。第一轮兜底保留不动，终态恢复断言仍由其守护。
+      let roundsInPlace = 0
       for (let i = 0; i < 140; i += 1) {
         await page.mouse.move(430, 320)
         await page.mouse.wheel(0, 240)
         await page.waitForTimeout(25)
+        const tops = await page.evaluate(() => {
+          const hosts = [...document.querySelectorAll('.vsidian-reading-embed-mixed')]
+            .filter((el) => !el.closest('.vsidian-embed-card') && !el.closest('.vsidian-hover-popup'))
+          const read = (n) => {
+            const host = hosts.find((h) => (h.textContent ?? '').includes(n))
+            const s = host?.querySelector('.vsidian-embed-card-scroll')
+            return s ? { present: true, top: s.scrollTop } : { present: false, top: -1 }
+          }
+          return { jia: read('甲 标题'), yi: read('乙 标题') }
+        })
+        if (tops.jia.present || tops.yi.present) {
+          roundsInPlace += 1
+          if (tops.jia.present) {
+            assert.ok(tops.jia.top > 60,
+              `#258b 第 ${i} 轮甲卡在场期间内层滚动被静默重置（top=${tops.jia.top}，期望保持 ~180 不归 0）`)
+          }
+          if (tops.yi.present) {
+            assert.ok(tops.yi.top > 30,
+              `#258b 第 ${i} 轮乙卡在场期间内层滚动被静默重置（top=${tops.yi.top}，期望保持 ~60 不归 0）`)
+          }
+        }
       }
+      assert.ok(roundsInPlace >= 2,
+        `#258b 逐轮断言确覆盖在场阶段（实际在场轮次 ${roundsInPlace}）`)
       await page.waitForTimeout(400)
     }
     const readingScrollTop = async (top) => {

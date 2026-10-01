@@ -904,3 +904,131 @@ describe('VirtualReadingView：长文档滚动到底（#259 恒差）', () => {
     }
   })
 })
+
+// #258 根因侧契约：reorderChildren 必须是最小移动（reconciliation 式）。
+// 根因（第一轮七轮浏览器取证实证）：外层滚轮 → 主视图窗口差分
+// windowChanged → reorderChildren 无条件 appendChild 全部挂载块（含
+// spacer）→ 表格块根 div 被移动 → Chromium 表格布局重排静默重置 td 内
+// 滚动容器的 scrollTop（无 scroll 事件、无 JS 写入；table-layout:fixed /
+// contain / will-change 等 CSS 缓解全部实测无效）。最小移动后，块集合
+// 与块序不变的窗口平移不再移动既有块 → 不触发表格重排 → 格内嵌入卡
+// 内层滚动全程稳定（不再依赖第一轮 120ms 停歇恢复兜底）。
+// 断言方式：spy container 的 appendChild/insertBefore 计数。同序
+// appendChild 后每个节点的兄弟引用不变，「兄弟链不变」式断言抓不住
+// 重排——移动动作本身（每次移动都可能触发 Chromium 表格重排）才是
+// 要消灭的对象，必须数 DOM 移动次数。
+describe('VirtualReadingView：窗口差分重排最小移动（#258）', () => {
+  let heightSpy: ReturnType<typeof vi.spyOn>
+  beforeEach(() => {
+    heightSpy = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(36)
+  })
+  afterEach(() => {
+    heightSpy.mockRestore()
+  })
+
+  function setup(text: string) {
+    const container = createReadingContainer()
+    stubClientHeight(container, 400)
+    const view = new VirtualReadingView(container, { bufferPx: 600 })
+    view.setDocument(text)
+    const appendSpy = vi.spyOn(container, 'appendChild')
+    const insertSpy = vi.spyOn(container, 'insertBefore')
+    /** 清零移动计数（多段滚动的用例在断言目标轮之前调用） */
+    const resetMoves = (): void => {
+      appendSpy.mockClear()
+      insertSpy.mockClear()
+    }
+    /** els 中任一节点被 appendChild/insertBefore 移动的次数 */
+    const movedInto = (els: HTMLElement[]): number => {
+      let n = 0
+      for (const [node] of appendSpy.mock.calls) {
+        if (els.includes(node as HTMLElement)) n += 1
+      }
+      for (const [node] of insertSpy.mock.calls) {
+        if (els.includes(node as HTMLElement)) n += 1
+      }
+      return n
+    }
+    const blockEls = (): HTMLElement[] =>
+      Array.from(container.querySelectorAll<HTMLElement>(`.${READING_CLASS_NAMES.block}`))
+    const spacerTop = (): HTMLElement =>
+      container.querySelector<HTMLElement>(`.${READING_CLASS_NAMES.spacerTop}`)!
+    const spacerBottom = (): HTMLElement =>
+      container.querySelector<HTMLElement>(`.${READING_CLASS_NAMES.spacerBottom}`)!
+    return { container, view, movedInto, resetMoves, blockEls, spacerTop, spacerBottom }
+  }
+
+  /** 终态 DOM 结构钉：块按序 + spacerTop 恒在首、spacerBottom 恒在末 */
+  function expectLayout(container: HTMLElement, text: string, first: number, last: number) {
+    const blocks = splitReadingBlocks(text)
+    expect(mountedStarts(container)).toEqual(
+      blocks.slice(first, last + 1).map((b) => String(b.start)),
+    )
+    const children = Array.from(container.children)
+    expect(children[0]!.classList.contains(READING_CLASS_NAMES.spacerTop)).toBe(true)
+    expect(children[children.length - 1]!.classList.contains(READING_CLASS_NAMES.spacerBottom)).toBe(true)
+  }
+
+  it('仅尾部追加：既有块与 spacerTop 零移动，新块按块序入位（first 钳在 0）', () => {
+    const text = makeDoc(100)
+    const { container, view, movedInto, blockEls, spacerTop } = setup(text)
+    const kept = blockEls() // 块 0..27（首窗）
+    const st = spacerTop()
+    container.scrollTop = 500 // 窗口 [0,1500)：块 0..41，尾部追加 28..41
+    view.updateNow()
+    expect(movedInto([...kept, st])).toBe(0)
+    expectLayout(container, text, 0, 41)
+    view.dispose()
+  })
+
+  it('平移（头部回收 + 尾部追加同帧）：保留中段块零移动', () => {
+    const text = makeDoc(100)
+    const { container, view, movedInto, resetMoves, blockEls } = setup(text)
+    container.scrollTop = 2000 // 窗口 [1400,3000)：块 38..83
+    view.updateNow()
+    const prevAll = blockEls()
+    resetMoves() // 只统计目标轮（上一轮新挂块的入位是必要移动）
+    container.scrollTop = 2120 // 窗口 [1520,3120)：块 42..86——回收 38..41、挂载 84..86
+    view.updateNow()
+    const blocks = splitReadingBlocks(text)
+    // 保留块 = 上一轮在场且本轮仍在 DOM 的块（42..83）
+    const keptStart = Number(blocks[42]!.start)
+    const kept = prevAll.filter((el) =>
+      container.contains(el) && Number(el.dataset['vsidianSrcStart']) >= keptStart)
+    expect(kept.length).toBe(42)
+    expect(movedInto(kept)).toBe(0)
+    expectLayout(container, text, 42, 86)
+    view.dispose()
+  })
+
+  it('双向同帧（头部追加 + 尾部回收，视口增高）：保留块零移动，新块入 spacerTop 之后', () => {
+    const text = makeDoc(100)
+    const { container, view, movedInto, resetMoves, blockEls } = setup(text)
+    container.scrollTop = 2000 // 窗口 [1400,3000)：块 38..83（viewport 400）
+    view.updateNow()
+    const prevAll = blockEls()
+    resetMoves() // 只统计目标轮（上一轮新挂块的入位是必要移动）
+    stubClientHeight(container, 800)
+    container.scrollTop = 1400 // 窗口 [800,2800)：块 22..77——头部 22..37 进、尾部 78..83 出
+    view.updateNow()
+    const blocks = splitReadingBlocks(text)
+    const keptFrom = Number(blocks[38]!.start)
+    const keptTo = Number(blocks[77]!.start)
+    const kept = prevAll.filter((el) => {
+      const s = Number(el.dataset['vsidianSrcStart'])
+      return container.contains(el) && s >= keptFrom && s <= keptTo
+    })
+    expect(kept.length).toBe(40)
+    expect(movedInto(kept)).toBe(0)
+    expectLayout(container, text, 22, 77)
+    view.dispose()
+  })
+
+  it('窗口不变：container 零 DOM 写（防 RO 空转契约保持）', () => {
+    const text = makeDoc(100)
+    const { view, movedInto, blockEls, spacerTop, spacerBottom } = setup(text)
+    view.updateNow() // scrollTop 未变 → 窗口不变
+    expect(movedInto([...blockEls(), spacerTop(), spacerBottom()])).toBe(0)
+    view.dispose()
+  })
+})
