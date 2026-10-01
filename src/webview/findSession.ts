@@ -64,6 +64,12 @@ export const FIND_CLASS_NAMES = {
   countEmpty: 'vsidian-find-count-empty',
   /** 空查询收起态（未搜索不预留「当前/总数」占位，display:none） */
   countHidden: 'vsidian-find-count-hidden',
+  /** 在选定内容中查找（#241 资产接线：VSCode ☰）：范围开关按钮与点亮态，
+   *  范围淡底 mark 见 selectionRange */
+  inSelection: 'vsidian-find-in-selection',
+  inSelectionActive: 'vsidian-find-in-selection-active',
+  /** 查找范围淡底 mark（开启 inSelection 时标记选区范围） */
+  selectionRange: 'vsidian-find-selection-range',
   /** 三开关：点亮（*-active）= 该选项开启 */
   caseToggle: 'vsidian-find-case',
   caseActive: 'vsidian-find-case-active',
@@ -304,11 +310,17 @@ export interface FindDecoState {
   decos: DecorationSet
 }
 
-/** 匹配集替换效应（整组替换；空集即清空装饰） */
-export const setFindMatches = StateEffect.define<{ matches: readonly FindMatch[]; index: number }>()
+/** 匹配集替换效应（整组替换；空集即清空装饰）。#241 资产接线起携带
+ *  selectionRange：「在选定内容中查找」开启时的范围淡底 mark（null 无） */
+export const setFindMatches = StateEffect.define<{
+  matches: readonly FindMatch[]
+  index: number
+  selectionRange?: { from: number; to: number } | null
+}>()
 
 const currentMatchDeco = Decoration.mark({ class: FIND_CLASS_NAMES.matchCurrent })
 const allMatchDeco = Decoration.mark({ class: FIND_CLASS_NAMES.match })
+const selectionRangeDeco = Decoration.mark({ class: FIND_CLASS_NAMES.selectionRange })
 
 /** 当前匹配 mark（跨行匹配不可能出现：查询不含换行；防御性截到行尾） */
 function currentMatchRanges(
@@ -334,10 +346,16 @@ export const findStateField = StateField.define<FindDecoState>({
   update(value, tr) {
     for (const e of tr.effects) {
       if (e.is(setFindMatches)) {
+        // 范围 mark（可跨行，CM6 按行拆分绘制）；空/无效区间不发射
+        const ranges = currentMatchRanges(tr.state.doc, e.value)
+        const r = e.value.selectionRange
+        if (r && r.to > r.from && r.to <= tr.state.doc.length) {
+          ranges.push(selectionRangeDeco.range(r.from, r.to))
+        }
         return {
           matches: e.value.matches,
           index: e.value.index,
-          decos: RangeSet.of(currentMatchRanges(tr.state.doc, e.value), true),
+          decos: RangeSet.of(ranges, true),
         }
       }
     }

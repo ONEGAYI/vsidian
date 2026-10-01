@@ -1597,6 +1597,9 @@ export interface FindSessionProbe {
   regexp: boolean
   /** 查询有效性（正则语法；非法时无匹配，面板有可见反馈） */
   valid: boolean
+  /** 在选定内容中查找开启态（#241 资产接线：面板局部、非持久化，关闭
+   *  面板或进入阅读即复位；旧 webview 缺省） */
+  inSelection?: boolean
   /** 替换栏展开态（替换为 Live 编辑能力，阅读模式恒 false） */
   replaceOpen: boolean
   /** 匹配总数（文本模型全量计算） */
@@ -1889,6 +1892,7 @@ function isFindSessionProbe(v: unknown): v is FindSessionProbe {
     typeof v.matchCase === 'boolean' &&
     typeof v.wholeWord === 'boolean' &&
     typeof v.regexp === 'boolean' &&
+    (v.inSelection === undefined || typeof v.inSelection === 'boolean') &&
     typeof v.valid === 'boolean' &&
     typeof v.replaceOpen === 'boolean' &&
     isNonNegativeInt(v.total) &&

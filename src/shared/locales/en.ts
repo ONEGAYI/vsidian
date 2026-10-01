@@ -349,6 +349,7 @@ export const en = {
   'find.prev': 'Previous match',
   'find.next': 'Next match',
   'find.close': 'Close find',
+  'find.inSelection': 'Find in selection',
   /** Count form (VSCode-style): {n} current index, {total} match total */
   'find.count': '{n} of {total}',
   'find.noResults': 'No results',

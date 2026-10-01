@@ -40,6 +40,10 @@ Object.assign(window, {
   focusEditor() {
     EditorView.findFromDOM(document.querySelector('.cm-editor')!)!.focus()
   },
+  locate(offset: number) {
+    EditorView.findFromDOM(document.querySelector('.cm-editor')!)!
+      .dispatch({ selection: { anchor: offset } })
+  },
   setViewMode(mode: 'live' | 'reading') {
     controller.handleHostMessage({ kind: 'view.mode.set', mode })
   },
@@ -75,6 +79,9 @@ Object.assign(window, {
       caseActive: panel.querySelector('.vsidian-find-case')?.classList.contains('vsidian-find-case-active') ?? false,
       wordActive: panel.querySelector('.vsidian-find-word')?.classList.contains('vsidian-find-word-active') ?? false,
       regexpActive: panel.querySelector('.vsidian-find-regexp')?.classList.contains('vsidian-find-regexp-active') ?? false,
+      inSelectionActive: panel.querySelector('.vsidian-find-in-selection')?.classList.contains('vsidian-find-in-selection-active') ?? false,
+      inSelectionDisabled: (panel.querySelector('.vsidian-find-in-selection') as HTMLButtonElement | null)?.disabled ?? null,
+      selectionRangeMarks: document.querySelectorAll('.cm-content .vsidian-find-selection-range').length,
       replaceOpen: replaceRow?.classList.contains('vsidian-find-replace-open') ?? false,
       replaceInput: panel.querySelector<HTMLInputElement>('.vsidian-find-replace-input')?.value ?? '',
       /** live 视口内全部匹配装饰数（当前匹配装饰另计） */

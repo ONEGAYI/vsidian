@@ -892,6 +892,17 @@ export class WebviewSyncController {
   private findMatches: FindMatch[] = []
   /** 0 基当前序号（无匹配时无意义） */
   private findIndex = 0
+  /** 在选定内容中查找（#241 资产接线：VSCode ☰）：面板局部态、非持久化
+   *  （不进 findOptions 三开关通道）——关闭面板或进入阅读即复位；开启时
+   *  匹配/导航/替换全部限制在 findRange 内（编辑随文档映射、用户重选跟随） */
+  private findInSelection = false
+  /** 查找范围（开启时捕获的主选区区间；随 docChanged 映射、select 事务跟随） */
+  private findRange: { from: number; to: number } | null = null
+  /** 最近一次用户选区（打开面板时的选区 + select 事务更新；findLocate 的
+   *  定位选区不计——它是查找自身的产物，不是用户意图）。☰ 的可用性与
+   *  范围捕获都以它为准 */
+  private findSelectionAnchor: { from: number; to: number } | null = null
+  private findInSelectionBtnEl: HTMLButtonElement | undefined
   /** 匹配计算时的文档快照（Text 不可变，引用比较即版本失效判定） */
   private findDoc: Text | null = null
   /** document 级键盘拦截（Mod-F 打开 / Esc 关闭），dispose 时移除 */
@@ -1651,6 +1662,7 @@ export class WebviewSyncController {
     this.findPanel = undefined
     this.findInputEl = undefined
     this.findCountEl = undefined
+    this.findInSelectionBtnEl = undefined
     this.findToggleEl = undefined
     this.findCaseBtnEl = undefined
     this.findWordBtnEl = undefined
@@ -3234,6 +3246,11 @@ export class WebviewSyncController {
     closeFmPopover()
     if (this.view) selectTableRegion(this.view, null)
     if (next === 'reading') {
+      // 在选定内容中查找是 live 选区语义（阅读只读无选区交互）：进入即复位
+      if (this.findInSelection) {
+        this.resetFindInSelection(true)
+        this.findRecompute(this.findReferencePos())
+      }
       const editorHadFocus = document.activeElement === this.view?.contentDOM
       // #84 切回阅读模式：已挂载块补卡片增强（常驻块不经挂载钩子）
       this.decorateMountedReadingCodeCards()
@@ -7127,6 +7144,16 @@ export class WebviewSyncController {
     }
     row.appendChild(mkIconBtn(FIND_CLASS_NAMES.prev, 'find.prev', () => this.findStep('prev')))
     row.appendChild(mkIconBtn(FIND_CLASS_NAMES.next, 'find.next', () => this.findStep('next')))
+    // 在选定内容中查找（#241 资产接线，原生同位：next 与 close 之间）。
+    // 面板局部态（非持久化、不出站 findOptions.set）：开启 = 捕获当前主
+    // 选区为查找范围，匹配/导航/替换全部限内；无选区时禁用（原生同款）
+    const inSelectionBtn = document.createElement('button')
+    inSelectionBtn.type = 'button'
+    inSelectionBtn.className = FIND_CLASS_NAMES.inSelection
+    bindLocaleAttrs(inSelectionBtn, 'find.inSelection')
+    inSelectionBtn.addEventListener('click', () => this.toggleFindInSelection())
+    this.findInSelectionBtnEl = inSelectionBtn
+    row.appendChild(inSelectionBtn)
     row.appendChild(mkIconBtn(FIND_CLASS_NAMES.close, 'find.close', () => this.closeFind()))
     // 替换行：输入框（Enter = 替换下一个，面板局部键）+ 替换/全部替换按钮
     const replaceRow = document.createElement('div')
@@ -7197,6 +7224,7 @@ export class WebviewSyncController {
    *  并全选查询 */
   private openFind(query?: string, opts: { replace?: boolean; replacement?: string } = {}): void {
     this.findTouched = true
+    const wasOpen = this.findOpen
     // #238 面板打开：选项条让位（UI 互斥——面板在场时由面板开关闪烁承担
     // 选项提示），选词会话结束（下一次 Ctrl+D 按面板态重新决策）
     this.endOccurrenceSession()
@@ -7218,6 +7246,13 @@ export class WebviewSyncController {
       this.findEnsureFresh()
     }
     this.findOpen = true
+    // #241 在选定内容中查找：真正打开（此前关闭）才复位范围——Ctrl+H 在
+    // 已开面板上是"展开替换栏"语义，不得复位开启中的范围；用户选区锚点
+    // 由 select 事务监听全程维护（跨开关），此处不重建
+    if (!wasOpen) {
+      this.findInSelection = false
+      this.findRange = null
+    }
     if (opts.replace === true && this.viewMode === 'live') {
       this.findReplaceOpen = true
     }
@@ -7247,9 +7282,13 @@ export class WebviewSyncController {
     }
     this.findOpen = false
     this.findReplaceOpen = false
+    this.resetFindInSelection(false)
     this.findPanel?.classList.remove(FIND_CLASS_NAMES.open)
     this.findMatches = []
     this.findIndex = 0
+    // 关闭即失效文档快照：重开同查询也按全新会话重算（旧实现保留引用，
+    // freshness 判定跳过重算，重开后计数残留为 0）
+    this.findDoc = null
     // 纯 effect 事务：不带 changes，无编辑历史、无出站
     this.view?.dispatch({ effects: setFindMatches.of({ matches: [], index: 0 }) })
     this.readingView?.highlightBlock(null)
@@ -7260,9 +7299,56 @@ export class WebviewSyncController {
     }
   }
 
+  /** 在选定内容中查找开关（#241 资产接线）：开启 = 捕获当前主选区（非空）
+   *  为范围并重算（匹配限内）；关闭 = 清范围重算回全量。开启前提是 live
+   *  且有活动选区（禁用态由 findRender 维护，此处防御性再判） */
+  private toggleFindInSelection(): void {
+    const view = this.view
+    if (!view || this.viewMode !== 'live') {
+      return
+    }
+    if (this.findInSelection) {
+      this.findInSelection = false
+      this.findRange = null
+    } else {
+      // 范围捕获以最近一次用户选区为准（findLocate 的定位选区是查找自身
+      // 产物，不得作为范围来源）
+      const anchor = this.findSelectionAnchor
+      if (!anchor || anchor.to <= anchor.from) {
+        return
+      }
+      this.findInSelection = true
+      this.findRange = { ...anchor }
+    }
+    this.findDoc = null
+    this.findRecompute(this.findReferencePos())
+    this.findRender()
+    this.findLocate()
+  }
+
+  /** 复位「在选定内容中查找」（关闭面板 / 进入阅读：面板局部态不跨会话）。
+   *  锚点由 select 事务监听全程维护（跨面板开关），此处不清——重开面板
+   *  时 ☰ 的可用性仍反映「最近一次用户选区」；进入阅读时全清（阅读无
+   *  选区交互语义） */
+  private resetFindInSelection(clearAnchor: boolean): void {
+    this.findInSelection = false
+    this.findRange = null
+    if (clearAnchor) {
+      this.findSelectionAnchor = null
+    }
+  }
+
+  /** 范围过滤（开启时命中必须完整落在范围内；闭区间语义 [from, to]） */
+  private findMatchesIn<T extends { from: number; to: number }>(matches: readonly T[]): T[] {
+    const range = this.findRange
+    if (!this.findInSelection || !range) {
+      return matches as T[]
+    }
+    return matches.filter((m) => m.from >= range.from && m.to <= range.to)
+  }
+
   /** 循环导航（上一项/下一项）：步进后重绘并定位到新当前匹配 */
-  private findStep(direction: 'next' | 'prev'): void {
-    if (!this.findOpen) {
+  private findStep(direction: 'next' | 'prev'): void {    if (!this.findOpen) {
       return
     }
     this.findEnsureFresh()
@@ -7297,7 +7383,8 @@ export class WebviewSyncController {
     this.findValid = isFindQueryValid(this.findQuery, this.findOptions)
     this.findMatches =
       doc && this.findValid
-        ? computeFindMatches(doc.toString(), this.findQuery, this.findOptions, this.findExcludeEnd())
+        ? this.findMatchesIn(computeFindMatches(
+            doc.toString(), this.findQuery, this.findOptions, this.findExcludeEnd()))
         : []
     this.findIndex = matchIndexFrom(this.findMatches, ref)
   }
@@ -7332,7 +7419,11 @@ export class WebviewSyncController {
    *  阅读命中块（不改滚动位置） */
   private findRender(): void {
     this.view?.dispatch({
-      effects: setFindMatches.of({ matches: this.findMatches, index: this.findIndex }),
+      effects: setFindMatches.of({
+        matches: this.findMatches,
+        index: this.findIndex,
+        selectionRange: this.findInSelection ? this.findRange : null,
+      }),
     })
     const total = this.findMatches.length
     const cur = this.findMatches[this.findIndex]
@@ -7362,6 +7453,15 @@ export class WebviewSyncController {
     syncToggle(this.findCaseBtnEl, FIND_CLASS_NAMES.caseActive, this.findOptions.matchCase)
     syncToggle(this.findWordBtnEl, FIND_CLASS_NAMES.wordActive, this.findOptions.wholeWord)
     syncToggle(this.findRegexpBtnEl, FIND_CLASS_NAMES.regexpActive, this.findOptions.regexp)
+    // 在选定内容中查找：点亮态 + 禁用态（无用户选区锚点时禁用；开启中
+    // 保持可用——导航选区即当前匹配，不能因它禁用）
+    if (this.findInSelectionBtnEl) {
+      const btn = this.findInSelectionBtnEl
+      btn.classList.toggle(FIND_CLASS_NAMES.inSelectionActive, this.findInSelection)
+      btn.setAttribute('aria-pressed', String(this.findInSelection))
+      btn.disabled = !this.findInSelection &&
+        (this.viewMode !== 'live' || this.findSelectionAnchor === null)
+    }
     // 替换行显隐（阅读模式恒收起——替换是 Live 编辑能力）；toggle 的
     // aria-expanded 与展开态同步
     const replaceVisible = this.findReplaceOpen && this.viewMode === 'live'
@@ -7395,13 +7495,13 @@ export class WebviewSyncController {
     if (!this.findValid) {
       return
     }
-    const matches = computeFindReplaceMatches(
+    const matches = this.findMatchesIn(computeFindReplaceMatches(
       view.state.doc.toString(),
       this.findQuery,
       this.findOptions,
       this.findReplaceText,
       this.findExcludeEnd(),
-    )
+    ))
     if (op === 'all') {
       // 整批单事务：排除后匹配集逐条生成变更（precise 过滤与官方
       // replaceAll 同款——归一化劈开的命中不整段改写），一次 dispatch
@@ -7493,6 +7593,7 @@ export class WebviewSyncController {
       wholeWord: this.findOptions.wholeWord,
       regexp: this.findOptions.regexp,
       valid: this.findValid,
+      inSelection: this.findInSelection,
       replaceOpen: this.findReplaceOpen && this.viewMode === 'live',
       total: this.findMatches.length,
       index: this.findMatches.length > 0 ? this.findIndex + 1 : 0,
@@ -8687,6 +8788,66 @@ export class WebviewSyncController {
               this.postCodeCopy(eff.value)
             }
           }
+        }
+      }),
+      // #241 在选定内容中查找：用户选区锚点与开启范围的生命周期——
+      // select 事务（鼠标/键盘重选；findLocate 的定位事务不带 userEvent，
+      // 不会误跟）更新锚点并在开启中跟随为新范围；docChanged 把锚点与
+      // 范围随文档映射（mapPos 钳制到新文档长；编辑把范围吃掉时塌缩区间
+      // 自然滤空匹配）。范围变化后重算重绘（findDoc 引用在 docChanged
+      // 路径同步失效，findEnsureFresh 按需重算同样吃到新范围——此处统一
+      // 主动一次，保证 select 跟随即时可见；未开启时只维护锚点，禁用态
+      // 与开启捕获都依赖它）
+      EditorView.updateListener.of((update) => {
+        if (!this.view) {
+          return
+        }
+        let rangeChanged = false
+        let anchorTouched = false
+        for (const tr of update.transactions) {
+          if (tr.docChanged) {
+            const len = this.view.state.doc.length
+            const mapClamped = (pos: number, assoc: number) =>
+              Math.max(0, Math.min(tr.changes.mapPos(pos, assoc), len))
+            if (this.findSelectionAnchor) {
+              this.findSelectionAnchor = {
+                from: mapClamped(this.findSelectionAnchor.from, -1),
+                to: mapClamped(this.findSelectionAnchor.to, 1),
+              }
+            }
+            if (this.findInSelection && this.findRange) {
+              const from = mapClamped(this.findRange.from, -1)
+              const to = mapClamped(this.findRange.to, 1)
+              if (from !== this.findRange.from || to !== this.findRange.to) {
+                this.findRange = { from, to }
+                rangeChanged = true
+              }
+            }
+          } else if (tr.isUserEvent('select') && this.viewMode === 'live') {
+            const sel = tr.state.selection.main
+            if (!sel.empty) {
+              if (!this.findSelectionAnchor ||
+                  sel.from !== this.findSelectionAnchor.from || sel.to !== this.findSelectionAnchor.to) {
+                this.findSelectionAnchor = { from: sel.from, to: sel.to }
+                anchorTouched = true
+              }
+              if (this.findInSelection && this.findRange &&
+                  (sel.from !== this.findRange.from || sel.to !== this.findRange.to)) {
+                this.findRange = { from: sel.from, to: sel.to }
+                rangeChanged = true
+              }
+            } else if (this.findSelectionAnchor) {
+              this.findSelectionAnchor = null
+              anchorTouched = true
+            }
+          }
+        }
+        if (rangeChanged && this.findOpen) {
+          this.findRecompute(this.findReferencePos())
+          this.findRender()
+        }
+        if (anchorTouched && this.findOpen) {
+          this.findRender()
         }
       }),
       // #238 会话生命周期：选区被外部改变（非本命令事务的选区设置/

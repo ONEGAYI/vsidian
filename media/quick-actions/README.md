@@ -22,7 +22,7 @@ AI 生图源图有三张，均保留最终原图与裁切源图：`highlight-hor
 | 20 | `paragraphStyle` | 24 | `copy` | 28 | `pastePlain` | | |
 | 21 | `insertPlus` | 25 | `paste` | 29 | `media` | | |
 
-查找面板图标（#241，32–37 列；`findInSelection` 预留且暂不接线）：
+查找面板图标（#241，32–37 列；全部已接线，`findInSelection` 为「在选定内容中查找」☰ 开关）：
 
 | 列 | 图标 key | 列 | 图标 key | 列 | 图标 key |
 | --- | --- | --- | --- | --- | --- |

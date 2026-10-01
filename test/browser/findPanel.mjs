@@ -199,6 +199,50 @@ try {
     await page.keyboard.press('Escape')
     await waitPanel(page, (p) => !p.open, '阅读模式 Esc 关闭')
 
+    // ---- 场景 7.7：在选定内容中查找（#241 资产接线：真实键盘选区 + ☰）----
+    await page.evaluate(() => window.setViewMode('live'))
+    await page.evaluate(() => window.initDoc('foo foo foo\nbar foo\n'))
+    // initDoc 后定位到文档头（切 live 的锚点恢复不保证行位置）
+    await page.evaluate(() => window.locate?.(0))
+    await page.evaluate(() => window.focusEditor())
+    // 光标落第一行行首，Shift+End 选中整行（三处 foo 的范围）
+    await page.keyboard.press('Home')
+    await page.keyboard.press('Shift+End')
+    await page.keyboard.press('Control+f')
+    panel = await waitPanel(page, (p) => p.open && p.activeIsInput, '7.7 前置：选区后 Ctrl+F')
+    assert.equal(panel.inSelectionDisabled, false, '有用户选区锚点时 ☰ 应可用')
+    await page.click('.vsidian-find-input')
+    await page.keyboard.press('Control+a')
+    await page.keyboard.type('foo')
+    panel = await waitPanel(page, (p) => /共 4 项$/.test(p.count), '全量计数 4 处')
+    await page.click('.vsidian-find-in-selection')
+    panel = await waitPanel(page, (p) => p.inSelectionActive && /共 3 项$/.test(p.count), '限选区后 3 处')
+    assert.ok(panel.selectionRangeMarks >= 1, '范围淡底装饰应在场')
+    // 全部替换只动范围内（第一行三处；bar 行第四处不动）
+    await page.keyboard.press('Control+h')
+    panel = await waitPanel(page, (p) => p.replaceOpen, '7.7 替换栏展开')
+    await page.click('.vsidian-find-replace-input')
+    await page.keyboard.press('Control+a')
+    await page.keyboard.type('baz')
+    await page.click('.vsidian-find-replace-all')
+    panel = await waitPanel(page, (p) => p.count === '无结果', '范围内全部替换后无结果')
+    editor = await page.evaluate(() => window.readEditor())
+    assert.equal(editor.text, 'baz baz baz\nbar foo\n', '范围外命中不得被替换')
+    await page.evaluate(() => window.ackLastEdit(2))
+    // Esc 关闭后重开：复位（全量语义，范围装饰退场）
+    await page.keyboard.press('Escape')
+    await waitPanel(page, (p) => !p.open, '7.7 Esc 关闭')
+    const cleared = await page.evaluate(() =>
+      document.querySelectorAll('.cm-content .vsidian-find-selection-range').length)
+    assert.equal(cleared, 0, '关闭后范围淡底应退场')
+    await page.keyboard.press('Control+f')
+    panel = await waitPanel(page, (p) => p.open && !p.inSelectionActive, '重开面板复位')
+    // 锚点跨面板开关保持（最近一次用户选区仍有效）：☰ 保持可用；点击
+    // 正文落下光标（空选区事务）后锚点清空、☰ 转禁用
+    assert.equal(panel.inSelectionDisabled, false, '用户选区锚点跨开关保持，☰ 应可用')
+    await page.click('.cm-content', { position: { x: 10, y: 10 } })
+    panel = await waitPanel(page, (p) => p.inSelectionDisabled === true, '空选区事务后 ☰ 禁用')
+
     // ---- 场景 8：阅读模式 Ctrl+H：面板开但替换栏不展开（只读）----
     await page.evaluate(() => window.setViewMode('reading'))
     // 键路由要求焦点在阅读容器内（readingFocused 判定）

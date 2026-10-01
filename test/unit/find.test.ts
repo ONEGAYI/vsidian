@@ -713,6 +713,126 @@ describe('替换栏与替换写回（#236：替换为显式写操作）', () => 
   })
 })
 
+describe('在选定内容中查找（#241 资产接线：findInSelection）', () => {
+  function inSelectionBtn(): HTMLButtonElement {
+    return parent!.querySelector<HTMLButtonElement>('.vsidian-find-in-selection')!
+  }
+
+  it('无选区时按钮禁用；选中后可开启，匹配只计范围内（计数/当前项随之）', () => {
+    const h = makeBridge()
+    const c = mountFind(h)
+    c.handleHostMessage({ kind: 'view.find.open', query: '目标词' })
+    const btn = inSelectionBtn()
+    expect(btn.disabled).toBe(true)
+    // 选中覆盖第 2、3 处命中的区间（第二段起 → 列表项命中结尾）
+    const view = c.getView()!
+    const from = HIT_OFFSETS[1]!
+    const to = HIT_OFFSETS[2]! + 3
+    view.dispatch({ selection: { anchor: from, head: to }, userEvent: 'select.pointer' })
+    c.handleHostMessage({ kind: 'view.state.request' })
+    expect(btn.disabled).toBe(false)
+    btn.click()
+    const state = viewState(c, h)
+    expect(state.find?.inSelection).toBe(true)
+    expect(state.find?.total).toBe(2)
+    expect(state.find?.currentFrom).toBe(HIT_OFFSETS[1])
+    expect(btn.classList.contains('vsidian-find-in-selection-active')).toBe(true)
+    // 范围装饰在场（标记查找范围的淡底 mark）
+    expect(view.contentDOM.querySelector('.vsidian-find-selection-range')).not.toBeNull()
+    // 再次点击关闭：回到全量计数
+    btn.click()
+    expect(viewState(c, h).find?.total).toBe(HIT_OFFSETS.length)
+    expect(view.contentDOM.querySelector('.vsidian-find-selection-range')).toBeNull()
+  })
+
+  it('开启中导航只在范围内循环；替换下一个与全部替换不动范围外', () => {
+    const h = makeBridge()
+    const c = mountFind(h, 'foo foo foo\nbar foo\n')
+    const view = c.getView()!
+    // 选中第一行（前三处命中）
+    view.dispatch({ selection: { anchor: 0, head: 'foo foo foo'.length }, userEvent: 'select.pointer' })
+    c.handleHostMessage({ kind: 'view.find.open', query: 'foo', replace: true, replacement: 'baz' })
+    inSelectionBtn().click()
+    let state = viewState(c, h)
+    expect(state.find?.total).toBe(3)
+    // 循环不越出范围：步进 3 次回到范围内首个
+    for (let i = 0; i < 3; i++) {
+      c.handleHostMessage({ kind: 'view.find.step', direction: 'next' })
+    }
+    state = viewState(c, h)
+    expect(state.find?.currentFrom).toBe(0)
+    // 全部替换：只动第一行三处，bar 行不动
+    c.handleHostMessage({ kind: 'view.find.replace', op: 'all' })
+    state = viewState(c, h)
+    expect(state.text).toBe('baz baz baz\nbar foo\n')
+    // 编辑请求一笔整批（范围内三处）
+    const reqs = h.sent.filter((m) => m.kind === 'edit.request') as Array<{ changes: unknown[] }>
+    expect(reqs[reqs.length - 1]!.changes.length).toBe(3)
+  })
+
+  it('关闭面板复位（重开不全量受限）；阅读模式进入即复位并禁用', () => {
+    const h = makeBridge()
+    const c = mountFind(h)
+    const view = c.getView()!
+    view.dispatch({ selection: { anchor: HIT_OFFSETS[1]!, head: HIT_OFFSETS[2]! + 3 }, userEvent: 'select.pointer' })
+    c.handleHostMessage({ kind: 'view.find.open', query: '目标词' })
+    inSelectionBtn().click()
+    expect(viewState(c, h).find?.total).toBe(2)
+    c.handleHostMessage({ kind: 'view.find.close' })
+    c.handleHostMessage({ kind: 'view.find.open', query: '目标词' })
+    expect(viewState(c, h).find?.inSelection).toBe(false)
+    expect(viewState(c, h).find?.total).toBe(HIT_OFFSETS.length)
+    // 阅读模式：开启中切入即复位
+    view.dispatch({ selection: { anchor: HIT_OFFSETS[1]!, head: HIT_OFFSETS[2]! + 3 } })
+    c.handleHostMessage({ kind: 'view.state.request' })
+    inSelectionBtn().click()
+    expect(viewState(c, h).find?.inSelection).toBe(true)
+    c.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
+    const state = viewState(c, h)
+    expect(state.find?.inSelection).toBe(false)
+    expect(state.find?.total).toBe(HIT_OFFSETS.length)
+  })
+
+  it('开启中编辑文档：范围随变更映射（插入/删除后过滤仍正确）', () => {
+    const h = makeBridge()
+    const c = mountFind(h, 'foo foo\nbar foo\n')
+    const view = c.getView()!
+    view.dispatch({ selection: { anchor: 0, head: 'foo foo'.length }, userEvent: 'select.pointer' })
+    c.handleHostMessage({ kind: 'view.find.open', query: 'foo' })
+    inSelectionBtn().click()
+    expect(viewState(c, h).find?.total).toBe(2)
+    // 文档头插入 5 字符：范围应平移（仍覆盖第一行两处）
+    view.dispatch({ changes: { from: 0, insert: '12345' } })
+    const state = viewState(c, h)
+    expect(state.find?.total).toBe(2)
+    expect(state.find?.currentFrom).toBe(5)
+  })
+
+  it('开启中用户重选：范围跟随新选区（select 事务）', () => {
+    const h = makeBridge()
+    const c = mountFind(h, 'foo foo\nbar foo\n')
+    const view = c.getView()!
+    view.dispatch({ selection: { anchor: 0, head: 'foo foo'.length }, userEvent: 'select.pointer' })
+    c.handleHostMessage({ kind: 'view.find.open', query: 'foo' })
+    inSelectionBtn().click()
+    expect(viewState(c, h).find?.total).toBe(2)
+    // 重选第二行（第四处命中）
+    view.dispatch({ selection: { anchor: 'foo foo\n'.length, head: 'foo foo\nbar foo'.length }, userEvent: 'select.pointer' })
+    expect(viewState(c, h).find?.total).toBe(1)
+    expect(viewState(c, h).find?.currentFrom).toBe('foo foo\nbar '.length)
+  })
+
+  it('按钮形态：SVG 图标类名在册、aria-label/title 走 i18n', () => {
+    const h = makeBridge()
+    const c = mountFind(h)
+    c.handleHostMessage({ kind: 'view.find.open', query: '目标词' })
+    const btn = inSelectionBtn()
+    expect(btn.getAttribute('aria-label')).toBe('在选定内容中查找')
+    expect(btn.getAttribute('title')).toBe('在选定内容中查找')
+    expect(btn.textContent).toBe('')
+  })
+})
+
 describe('只读契约修订（#236）：纯查找零写回，替换显式写', () => {
   it('打开/查询/导航/开关切换/关闭全程：零 edit.request，文本逐字节不变', () => {
     const h = makeBridge()

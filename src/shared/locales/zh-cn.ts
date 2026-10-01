@@ -326,6 +326,7 @@ export const zhCn: Record<MessageKey, string> = {
   'find.prev': '上一个匹配',
   'find.next': '下一个匹配',
   'find.close': '关闭查找',
+  'find.inSelection': '在选定内容中查找',
   /** 计数形态（VSCode 同款）：{n} 当前序号、{total} 命中总数 */
   'find.count': '第 {n} 项，共 {total} 项',
   'find.noResults': '无结果',

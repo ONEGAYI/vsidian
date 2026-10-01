@@ -37,8 +37,8 @@ describe('查找面板 CSS 契约（#236）', () => {
     expect(rule('.vsidian-find .vsidian-find-replace', /padding-left:\s*20px/)).toBeTruthy()
   })
 
-  it('三开关激活态点亮规则覆盖 Aa/ab/.* 三类（VSCode inputOption 激活族）', () => {
-    const active = rule('.vsidian-find .vsidian-find-case-active,\n.vsidian-find .vsidian-find-word-active,\n.vsidian-find .vsidian-find-regexp-active')
+  it('三开关激活态点亮规则覆盖 Aa/ab/.*/☰ 四类（VSCode inputOption 激活族）', () => {
+    const active = rule('.vsidian-find .vsidian-find-case-active,\n.vsidian-find .vsidian-find-word-active,\n.vsidian-find .vsidian-find-regexp-active,\n.vsidian-find .vsidian-find-in-selection-active')
     expect(active).toMatch(/background-color:\s*var\(--vscode-inputOption-activeBackground/)
     expect(active).toMatch(/color:\s*var\(--vscode-inputOption-activeForeground/)
   })
@@ -55,6 +55,7 @@ describe('查找面板 CSS 契约（#236）', () => {
       ['vsidian-find-close', 'findClose'],
       ['vsidian-find-replace-next', 'replaceOne'],
       ['vsidian-find-replace-all', 'replaceAll'],
+      ['vsidian-find-in-selection', 'findInSelection'],
     ] as const
     for (const [className, key] of icons) {
       const selector = `.vsidian-find .${className}`
@@ -90,5 +91,12 @@ describe('查找面板 CSS 契约（#236）', () => {
 
   it('空查询计数收起：hidden 类 display:none（不预留「当前/总数」占位）', () => {
     expect(rule('.vsidian-find .vsidian-find-count-hidden', /display:\s*none/)).toBeTruthy()
+  })
+
+  it('在选定内容中查找：禁用态灰化不响应 hover；范围淡底走 inactiveSelection', () => {
+    expect(rule('.vsidian-find .vsidian-find-in-selection:disabled', /opacity:\s*0\.4/)).toBeTruthy()
+    expect(rule('.vsidian-find .vsidian-find-in-selection:disabled:hover', /background-color:\s*transparent/)).toBeTruthy()
+    expect(rule('#app .cm-editor .cm-content .vsidian-find-selection-range',
+      /background-color:\s*var\(--vscode-editor-inactiveSelectionBackground/)).toBeTruthy()
   })
 })
