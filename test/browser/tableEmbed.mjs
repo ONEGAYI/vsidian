@@ -1114,23 +1114,23 @@ try {
     assert.equal(readingBack, 2, `V3 Reading 滚回重挂（实际 ${readingBack}）`)
     const rjia = await readingInner('甲 标题')
     const ryi = await readingInner('乙 标题')
-    // 已知缺陷（#249 实测钉住，2026-10-01）：Reading 侧表格格内卡的内层
-    // 滚动位置在外层滚轮滚动时被卡内虚拟化的高度稳定化平移吃掉（甲 180
-    // 在外层滚至 ~745px 时归 0，逐轮滚轮诊断实证），离屏重挂后自然恢复
-    // 0。对照：Live 侧同链路（直设外层滚动 + widget 回收重挂）恢复
-    // 220/110 正常；普通 Reading 独占行嵌入块（readingEmbed 场景 E）恢复
-    // 160 正常——缺陷限定在「表格格内 Reading 卡 × 外层滚轮滚动」组合，
-    // 根因在卡内虚拟化 spacer 修正（#243 视口机制）与 #248 表格卡组合
-    // 边界，修复需专项，此处不断言失败、以观测记录留证（交付报告与
-    // 人工验证清单同步登记）
-    console.log(`V3-OBSERVE reading-scroll-restore jia=${rjia.top}（期望 180） yi=${ryi.top}（期望 60）——已知缺陷观测记录`)
-    assert.ok(rjia.present && ryi.present, 'V3 Reading 双卡重挂在场（滚动恢复见观测记录）')
+    // #258 修复断言（原 V3-OBSERVE 观测行升级）：根因是主视图窗口差分
+    // 后的 reorder 移动表格块时，Chromium 表格布局重排静默重置 td 内滚
+    // 动容器的 scrollTop（无 scroll 事件、无 JS 写入、元素与内容高度不
+    // 变——七轮浏览器取证实证；此前误记为稳定化平移）。RefContentMount
+    // 以最后已知值见证 + 外层滚动停歇核对 + 回收保存兜底恢复。滚轮全程
+    // 未落在卡上（target 为表头/正文段落），内层不被物理滚动，终态应为
+    // 保存值；重挂恢复走 restoreScroll，离屏保存经 dispose 兜底。
+    assert.ok(rjia.present && Math.abs(rjia.top - 180) <= 8,
+      `V3 Reading 甲卡滚动位置恢复（实际 top=${rjia.top}，期望 ~180）`)
+    assert.ok(ryi.present && Math.abs(ryi.top - 60) <= 8,
+      `V3 Reading 乙卡滚动位置恢复（实际 top=${ryi.top}，期望 ~60——不串甲的 180）`)
     assert.equal(await editCount6(), 0, 'V3 全程零写回')
     assert.deepEqual(errors, [], `V3 无页面错误（实际 ${JSON.stringify(errors)}）`)
     await page.close()
   }
   passed++
-  console.log('[表格嵌入][PASS] V3 离屏重挂：双侧回收/重挂 + Live 侧滚动恢复断言（Reading 侧滚动恢复因已知缺陷仅观测留证，见 V3-OBSERVE）')
+  console.log('[表格嵌入][PASS] V3 离屏重挂：双侧回收/重挂 + 双侧滚动恢复断言（Reading 侧静默重置修复见 #258）')
 } finally {
   await browser.close()
 }
