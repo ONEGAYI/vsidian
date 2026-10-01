@@ -10,7 +10,7 @@ Vsidian brings an Obsidian-like Markdown editing experience to VS Code. After in
 
 ## Installation
 
-**Marketplace (recommended)**: search for **Vsidian** in the Extensions view of VS Code (1.86+), or open the [Marketplace page](https://marketplace.visualstudio.com/items?itemName=onegayi.vsidian); reload after installing.
+**Marketplace (recommended)**: search for **Vsidian** in the Extensions view of VS Code (1.82+), or open the [Marketplace page](https://marketplace.visualstudio.com/items?itemName=onegayi.vsidian); reload after installing.
 
 **Manual VSIX**: download `vsidian-*.vsix` from [GitHub Releases](https://github.com/ONEGAYI/vsidian/releases), then Command Palette → "Extensions: Install from VSIX…", pick the file and reload. For Remote SSH, install the same VSIX in the remote extension host.
 

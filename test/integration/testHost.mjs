@@ -47,7 +47,8 @@ export function buildTestHostArgs({ workspaceDir, testsPath, extensionPath, exte
 
 /**
  * 生成单 folder 的 .code-workspace 文件并返回其路径（2026-10 批次）：
- * VSCode 1.86.2 上以**目录**（single-folder workspace）启动时，
+ * VSCode 1.86.2 上以**目录**（single-folder workspace）启动时（1.82.3 下界
+ * 矩阵沿用同型装配，未另测目录形态），
  * updateWorkspaceFolders 增根要走 enterMultiRootWorkspace 的 workspace
  * 身份转换——触发 window reload、ext host 随之退出，跑在 ext host 里的
  * 集成 suite 当场中断（#198「工作区根增删」用例确定性复现：返回 true

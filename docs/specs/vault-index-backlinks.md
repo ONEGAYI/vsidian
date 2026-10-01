@@ -88,7 +88,7 @@ webview/样式修改执行 style-contract，绘制层至少验证真实可见性
 
 [ADR-0008](../adr/0008-workspace-reference-index.md) 替代 [ADR-0002](../adr/0002-wikilink-on-demand-resolution.md) 的按需查找/同名选择范围；旧 ADR 保留历史。当前实现事实来自 `src/host/wikilinkTarget.ts`、`textEditorProvider.ts`、`documentSession.ts`、`src/webview/imageResource.ts`。
 
-官方依据：[VSCode API](https://code.visualstudio.com/api/references/vscode-api)、[Node.js SQLite](https://nodejs.org/api/sqlite.html)。实施以仓库锁定的 VSCode 1.86 类型及真实宿主为准。
+官方依据：[VSCode API](https://code.visualstudio.com/api/references/vscode-api)、[Node.js SQLite](https://nodejs.org/api/sqlite.html)。实施以仓库锁定的 VSCode 类型（#255 起随 engines 下界取 `@types/vscode` 1.82.0）及真实宿主为准。
 
 ## #198 实施落档（2026-09-29）
 

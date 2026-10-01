@@ -4,7 +4,7 @@
 
 ## 问题与目标
 
-在 VSCode 内直接编辑现有 Markdown，提供类 Obsidian 的 Live Preview 和可切换阅读模式；支持真实文档所需的表格与双链，并兼容 Windows VSCode 1.86 和 Remote SSH 到 CentOS 7。
+在 VSCode 内直接编辑现有 Markdown，提供类 Obsidian 的 Live Preview 和可切换阅读模式；支持真实文档所需的表格与双链，并兼容 Windows VSCode（承诺下界 1.82.3，见 ADR 0001 增补）和 Remote SSH 到 CentOS 7。
 
 ## 用户故事
 
@@ -74,7 +74,7 @@
 
 一期样式要求：为两种模式的标题、任务、链接、表格等建立稳定类名/变量，核对 Obsidian 同款选择器并公布映射、验证样例与未覆盖项。不得仅在外围添加一个类就宣称全部兼容；也不要求兼容整个 Obsidian 应用 DOM。一期只用内部测试片段验证入口，不提供用户 CSS 加载界面。
 
-最低宿主 VSCode 1.86；依赖锁定且前端产物满足该版本，运行期不依赖 CDN 或新系统原生库。以 Windows 便携版 1.86 为主要验收环境，Remote SSH 到 CentOS 7 做最小验证；环境不可用时记录未验证项。
+最低宿主 VSCode 1.82.3（#255 起下界实测降版，口径为「最低已验证版本」；原基线 1.86 见 ADR 0001）；依赖锁定且前端产物满足该版本，运行期不依赖 CDN 或新系统原生库。以 Windows 便携版 1.82.3 为主要验收环境（验证矩阵钉在承诺下界），Remote SSH 到 CentOS 7 做最小验证；环境不可用时记录未验证项。
 
 ## 验证与交付
 

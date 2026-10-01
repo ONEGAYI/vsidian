@@ -10,7 +10,7 @@ Vsidian 在 VSCode 里提供接近 Obsidian 的 Markdown 编辑体验。安装�
 
 ## 安装
 
-**扩展市场（推荐）**：VSCode（1.86+）扩展面板搜索 **Vsidian**，或打开 [Marketplace 页面](https://marketplace.visualstudio.com/items?itemName=onegayi.vsidian)，安装后重启。
+**扩展市场（推荐）**：VSCode（1.82+）扩展面板搜索 **Vsidian**，或打开 [Marketplace 页面](https://marketplace.visualstudio.com/items?itemName=onegayi.vsidian)，安装后重启。
 
 **VSIX 手动安装**：从 [GitHub Releases](https://github.com/ONEGAYI/vsidian/releases) 下载 `vsidian-*.vsix`，命令面板 →「Extensions: Install from VSIX…」选择该文件并重启。Remote SSH 场景在远端扩展目录安装同一 VSIX。
 

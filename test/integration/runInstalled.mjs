@@ -1,16 +1,19 @@
 // 安装态集成回归启动器（工单 #15）：把 vsce 产物 VSIX 经 CLI
-// --install-extension 安装进 @vscode/test-electron 下载的 VSCode 1.86.2
+// --install-extension 安装进 @vscode/test-electron 下载的 VSCode 1.82.3
 // 便携宿主的隔离 extensions 目录，再以测试模式启动并运行与 runTest.mjs
 // 完全相同的集成套件——加载的扩展代码是安装解压出的 VSIX 产物
 // （extensionDevelopmentPath 指向安装解压目录，受 .vscodeignore 过滤后的
 // 真实文件集合），安装注册链路由 CLI 安装步骤单独验证。
 //
-// 覆盖验收：VSIX 在 Windows 1.86 宿主的安装、打开（Reopen With 装载全文）、
-// 编辑、保存与重开（磁盘回读）链路以安装产物跑通；套件与开发模式同一份，
+// 覆盖验收：VSIX 在 Windows 宿主（#255 起矩阵钉在承诺下界 1.82.3）的
+// 安装、打开（Reopen With 装载全文）、编辑、保存与重开（磁盘回读）链路
+// 以安装产物跑通；套件与开发模式同一份，
 // 结果差异只能来自打包清单缺漏（.vscodeignore 或产物路径问题）。
 //
 // 用法：node test/integration/runInstalled.mjs [VSIX 路径=根目录下最新 vsix]
 // 前提：npm run compile（suite 产物）与 npx @vscode/vsce package（VSIX）。
+// VSIDIAN_TEST_VSCODE_PATH 指向已解压宿主可执行文件时跳过默认宿主下载，
+// 用于 #255 兼容下界（如 1.82.3）的安装态回归验证。
 import { downloadAndUnzipVSCode } from '@vscode/test-electron'
 import { spawn } from 'node:child_process'
 import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
@@ -42,7 +45,13 @@ const wsDir = mkdtempSync(path.join(tmpdir(), 'vsidian-inst-'))
 try {
   const vsix = resolveVsix()
   writeFixtures(wsDir, { generatePerfSample, generateReadingSample, generateMermaidDenseSample })
-  const vscodeExecutablePath = await downloadAndUnzipVSCode({ version: '1.86.2' })
+  // VSIDIAN_TEST_VSCODE_PATH：指向已解压宿主可执行文件（如 1.82.3 下界
+  // 验证）时跳过默认宿主下载直接使用——#255 下界安装态回归通道；后续
+  // bin/code CLI 推导与测试宿主启动均基于同一 vscodeExecutablePath，
+  // override 路径须为标准解压布局（exe 同级有 bin/ 子目录）
+  const overrideExecutable = process.env.VSIDIAN_TEST_VSCODE_PATH
+  const vscodeExecutablePath = overrideExecutable || await downloadAndUnzipVSCode({ version: '1.82.3' })
+  console.log(`[runInstalled] 测试宿主：${vscodeExecutablePath}${overrideExecutable ? '（VSIDIAN_TEST_VSCODE_PATH 覆盖）' : ''}`)
 
   console.log(`[runInstalled] VSIX：${vsix}`)
   console.log(`[runInstalled] fixture 工作区：${wsDir}`)
@@ -79,8 +88,9 @@ try {
   }
   console.log(`[runInstalled] VSIX 已安装到 ${extensionsDir}`)
 
-  // 第二步：测试模式启动。VSCode 1.86 的 --extensionTestsPath 依赖
-  // --extensionDevelopmentPath 同时存在（否则实测宿主静默挂起不进入 runner），
+  // 第二步：测试模式启动。VSCode 宿主的 --extensionTestsPath 依赖
+  // --extensionDevelopmentPath 同时存在（1.86.2 实测缺则静默挂起不进入
+  // runner，1.82.3 同型装配），
   // 故把 dev path 指向上一步安装解压出的扩展目录——加载的代码仍是 VSIX
   // 解压产物（受 .vscodeignore 过滤后的真实文件集合），而非仓库源码树；
   // 安装注册链路（清单解析/目录注册）已由第一步 CLI 安装单独验证。
@@ -93,7 +103,8 @@ try {
   const installedExt = path.join(extensionsDir, installedDirs[installedDirs.length - 1])
   // 以单 folder 的 .code-workspace 启动（multi-root 形态起步）：1.86.2 上目录
   // （single-folder）启动时 updateWorkspaceFolders 增根触发 window reload
-  // （ext host 退出、suite 中断，#198 用例确定性复现），见 testHost.mjs
+  // （ext host 退出、suite 中断，#198 用例确定性复现；1.82.3 下界矩阵沿用
+  // 同型装配，未另测目录形态），见 testHost.mjs
   const wsFile = writeTestWorkspaceFile(wsDir)
   const args = buildTestHostArgs({
     workspaceDir: wsFile,

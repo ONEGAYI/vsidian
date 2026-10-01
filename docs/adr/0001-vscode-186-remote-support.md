@@ -19,3 +19,16 @@
 ## 技术核对
 
 VSCode 1.86.0 官方类型定义已包含 `CustomTextEditorProvider`、`Webview.asWebviewUri` 与 `workspace.fs`，因此此前建议架构的这些基础接口不要求升级到新版。依赖、运行时及实际输入行为仍需原型验证。[1.86.0 API 源码](https://github.com/microsoft/vscode/blob/1.86.0/src/vscode-dts/vscode.d.ts#L8991)、[远程扩展指南](https://code.visualstudio.com/api/advanced-topics/remote-extensions)
+
+## 2026-10 增补：承诺下界降至 1.82.3（#255）
+
+**已接受，2026-10-01，由用户在 #255 验证轮后决策。** 上文 1.86 决策原文保留（当时的 Remote SSH 使用环境与验收口径不变）；本次只把**已承诺最低版本**从 `^1.86.0` 下调为 `^1.82.3`，验证矩阵随之切换到 1.82.3（放弃 1.86.2 矩阵，用户决策）。
+
+**主张口径：最低已验证版本 1.82.3**——1.82.0–1.82.2 与 1.81 系列未实测，不主张「真实最低」。分层证据（全部基于 2026-10-01 当前 main）：
+
+- 安装门槛：engines `^1.82.3` 的 VSIX 经 CLI 实装进 1.82.3 Windows 宿主，安装态全量集成回归 **244/244 全绿、244 项全部取得终态**（打开/编辑/保存/重开/设置页/绘制链路）；1.86.2 安装态对照复跑同样全绿。
+- 公开 API：`@types/vscode` 降至 1.82.0 后全源码 typecheck 通过；vsce 打包门禁强制 types ≤ engines，矩阵与 engines 同版由 testHost 契约测试钉住。
+- 宿主运行时：1.82.3 搭载 Node 18 / Chromium 114，全量用例（含 KaTeX/Mermaid/图片绘制探针）通过；空窗口 `contributes.commands` 自动派生激活生效。
+- 历史基线：ADR 0001 的 1.86 选择是按当时环境主动选定的支持基线（非技术下限）；1.86 与 1.82.3 均满足 `^1.82.3`，既有用户不受影响。
+
+**未验证项（如实标注）**：1.82.3 客户端 + Remote SSH 组合（用户真实环境为 1.86 客户端，不受本次降版影响；如需主张请在真实环境补打开/编辑/保存/图片/双链跳转最小烟测）；真实 IME/物理鼠标在 1.82.3 真装环境的手工烟测（清单见 manual-verification.md）；CI Linux runner 上的 1.82.3 首跑。
