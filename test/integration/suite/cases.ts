@@ -11085,6 +11085,12 @@ export const cases: Array<[string, () => Promise<void>]> = [
       return undefined
     }, 5000).catch(async () => {
       await Promise.resolve(restoreRename(wsUri('改名目标2.md'), wsUri('改名目标.md'))).catch(() => {})
+      // 兜底后仍须收敛：超时兜底若也落空（源不在且旧名未落 = 文件真丢），
+      // 本用例 FAIL 暴露，不得静默泄漏给后续用例（漂移用例 finally 同型）
+      const oldExists = await vscode.workspace.fs.stat(wsUri('改名目标.md')).then(() => true, () => false)
+      if (!oldExists) {
+        throw new Error('undo 回滚与兜底移回均未落定：改名目标.md 缺失，不得静默泄漏给后续用例')
+      }
     })
     await new Promise((r) => setTimeout(r, 400))
   }],
@@ -11266,12 +11272,16 @@ export const cases: Array<[string, () => Promise<void>]> = [
     } finally {
       // 现场还原：外部 fs 通道移回（不触发 will），按身份移除第二根，等索引稳定
       await Promise.resolve(restoreRename(vscode.Uri.file(`${secondDir}/改名目标.md`), wsUri('改名目标.md'))).catch(() => {})
-      await poll('还原后主根就绪', async () => {
+      // 还原判据须含文件级终态：只查索引就绪时，restoreRename 失败被
+      // catch 吞掉会静默放过（改名目标.md 仍滞留 secondDir），随后
+      // rm(secondDir) 连唯一副本一起删掉、泄漏给后续用例——本用例 FAIL
+      await poll('还原后主根就绪（含改名目标归位）', async () => {
         const s = (await vscode.commands.executeCommand('onegayi.vsidian._test.getVaultIndexState')) as {
           roots: Array<{ fsPath: string; hasData: boolean; scanning: boolean }>
         }
         const main = s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir))
-        return main?.hasData && !main.scanning ? true : undefined
+        const oldExists = await vscode.workspace.fs.stat(wsUri('改名目标.md')).then(() => true, () => false)
+        return main?.hasData && !main.scanning && oldExists ? true : undefined
       })
       for (let round = 0; round < 3; round++) {
         const folders = vscode.workspace.workspaceFolders ?? []
@@ -11350,8 +11360,11 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await new Promise((r) => setTimeout(r, 600))
     try {
       await vscode.workspace.fs.stat(wsUri('dir-moved'))
-      // undo 未回滚目录名：外部 fs 通道显式移回（引用文本已恢复，无改写）
-      await Promise.resolve(restoreRename(wsUri('dir-moved'), wsUri('dir-move'))).catch(() => {})
+      // undo 未回滚目录名：外部 fs 通道显式移回（引用文本已恢复，无改写）。
+      // 移回未执行或失败不静默留痕（残留目录会进索引，ensureDirMoveFixture
+      // 只幂等重建 dir-move 不清理残留——放弃时不静默惯例）
+      const moved = await Promise.resolve(restoreRename(wsUri('dir-moved'), wsUri('dir-move'))).catch(() => false)
+      if (!moved) console.warn('[#200] 兜底移回 dir-moved 未执行或失败，残留目录可能污染后续索引')
     } catch {
       // undo 已回滚目录名
     }
@@ -11813,8 +11826,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
     })
     await new Promise((r) => setTimeout(r, 600))
     try {
-      await vscode.workspace.fs.stat(wsUri('改名嵌入目标2.md'))
-      await vscode.workspace.fs.rename(wsUri('改名嵌入目标2.md'), wsUri('改名嵌入目标.md'), { overwrite: true })
+      // stat 前置防误删 + 源缺失静默跳过（restoreRename 统一口径；裸
+      // overwrite rename 在 stat 后的 undo 竞态窗口里会抛 EntryNotFound 误报）
+      await Promise.resolve(restoreRename(wsUri('改名嵌入目标2.md'), wsUri('改名嵌入目标.md'))).catch(() => {})
     } catch {
       // undo 已回滚文件名
     }

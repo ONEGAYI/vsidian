@@ -118,7 +118,10 @@ export function resolveTestHostMode(platform = process.platform, env = process.e
  */
 export function evaluateHostReport(lines, exitCode) {
   const failCount = lines.filter((line) => line.includes('[集成测试][FAIL]')).length
-  const doneCount = lines.filter((line) => line.includes('[集成测试][TIME]')).length
+  // 终态计数与点名同用严格口径：畸形行（正文引用 "[集成测试][TIME] 非
+  // 数字" 形态）不得计入放行计数（宽松 includes 计数会虚增 doneCount、
+  // 放过截断宿主；全仓现无此类打印，属防御性统一）
+  const doneCount = lines.filter((line) => /\[集成测试\]\[TIME\] \d+ms .+$/.test(line)).length
   const startNames = []
   const doneNames = new Set()
   for (const line of lines) {
@@ -127,7 +130,8 @@ export function evaluateHostReport(lines, exitCode) {
     const done = /\[集成测试\]\[TIME\] \d+ms (.+)$/.exec(line)
     if (done) doneNames.add(done[1])
   }
-  const planMatch = /\[集成测试\] 执行 (\d+)\/\d+ 项/.exec(lines.find((line) => line.includes('[集成测试] 执行')) ?? '')
+  const planLine = lines.find((line) => line.includes('[集成测试] 执行')) ?? ''
+  const planMatch = /\[集成测试\] 执行 (\d+)\/\d+ 项/.exec(planLine)
   const planned = planMatch ? Number(planMatch[1]) : 0
   const missing = startNames.filter((name) => !doneNames.has(name))
   const notStarted = Math.max(0, planned - startNames.length)
@@ -136,7 +140,9 @@ export function evaluateHostReport(lines, exitCode) {
     return { ...verdict, ok: true, reason: '宿主退出码 0' }
   }
   if (planned === 0) {
-    return { ...verdict, reason: '报告未见计划行（[集成测试] 执行 N/M 项），不能按收尾噪声放行' }
+    return { ...verdict, reason: planMatch
+      ? `报告计划执行 0 项（${planLine.trim()}），空片或零计划不能按收尾噪声放行`
+      : '报告未见计划行（[集成测试] 执行 N/M 项），不能按收尾噪声放行' }
   }
   if (failCount > 0) {
     return { ...verdict, reason: `报告 FAIL ${failCount} 项` }

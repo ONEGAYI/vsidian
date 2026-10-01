@@ -208,7 +208,7 @@ test('报告判定：存在 FAIL 行时无论终态计数如何都判败；退�
   assert.equal(zeroExit.pardon, false)
 })
 
-test('报告判定：报告缺计划行（执行 N/M）时不得放行非零退出', () => {
+test('报告判定：报告缺计划行（执行 N/M）时不得放行非零退出；空片计划 0 同样判败且措辞区分', () => {
   const verdict = evaluateHostReport([
     '[testHost] 运行报告 2026-10-01T00:00:00.000Z',
     '[testHost] 宿主退出码 1',
@@ -216,6 +216,16 @@ test('报告判定：报告缺计划行（执行 N/M）时不得放行非零退�
   assert.equal(verdict.ok, false)
   assert.equal(verdict.planned, 0)
   assert.match(verdict.reason, /计划行/)
+
+  // 空片（分片允许「筛选结果少于片数」）：计划行在但为 0——判败不放行，
+  // 措辞不得误报「未见计划行」
+  const emptyShard = evaluateHostReport(reportLines({
+    plan: { executed: 0, total: 234, detail: '（分片 3/4，本片 0 项）' },
+  }), 1)
+  assert.equal(emptyShard.ok, false)
+  assert.equal(emptyShard.planned, 0)
+  assert.match(emptyShard.reason, /计划执行 0 项/)
+  assert.doesNotMatch(emptyShard.reason, /未见计划行/)
 })
 
 test('runTest 非零退出的放行判定经 evaluateHostReport 而非内联数行', () => {

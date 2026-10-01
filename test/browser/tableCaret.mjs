@@ -433,14 +433,15 @@ try {
           assert.equal(settled.fake, 'none', `零宽锚点格的假光标应让位: ${JSON.stringify(settled)}`)
         }
         // 恢复：单击非锚点格清除格区（onDown 清场 + CM6 原生点击设选区），
-        // 绘制光标回到可见（编辑器仍聚焦）
+        // 绘制光标回到可见。轮询等待到「格区消失且光标真实可见」为止——
+        // click 后立即检查会撞上光标元素重挂的 rAF 窗口（瞬态 absent），
+        // 立即断言可能空转通过；轮询把恢复显示钉成实锤
         await cell(2, 1).click()
-        const restored = await caretState()
-        assert.equal(restored.region, 0, `单击清除后格区应消失: ${JSON.stringify(restored)}`)
-        // 恢复检验的是「CSS 压制解除」：drawn 为 'none'（元素在场但被规则
-        // 压制）才失败；'absent'（CM6 自身未绘制，零宽 fixture 拖选后的
-        // 点击态）与本规则的过度隐藏无关
-        assert.notEqual(restored.drawn, 'none', `格区消失后绘制光标不得仍被压制: ${JSON.stringify(restored)}`)
+        await page.waitForFunction(() => {
+          if (document.querySelectorAll('.vsidian-table-region-cell').length !== 0) return false
+          const drawn = document.querySelector('.cm-cursorLayer .cm-cursor')
+          return drawn ? getComputedStyle(drawn).display !== 'none' : false
+        }, undefined, { timeout: 5000, polling: 100 })
         if (scenario === 'region-drag-caret-yield') {
           // 多光标关闭形态：drawSelection 退出装配、折叠单光标回退原生
           // caret 呈现——格区在场时经 caret-color 透明让位（原生 caret 无
