@@ -1919,11 +1919,27 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
   padding-left: 0;
 }
 
-/* 无序列表：标记隐藏后以圆点呈现；源码显形时抑制伪圆点 */
+/* 无序列表：标记隐藏后以圆点呈现；源码显形时抑制伪圆点。
+   点号按嵌套深度分级（与阅读侧 marker 语义对齐）：一级实心 •（基线）、
+   二级空心 ◦、三级起实心方块 ▪——空心专表二级子列表，修复此前全层级
+   实心与阅读视图不一致的问题 */
 #app .cm-editor .cm-scroller .vsidian-list-line.vsidian-list-bullet:not(.vsidian-list-marker-visible)::before {
   content: '•';
   margin-right: 7px;
   color: var(--vscode-editorLineNumber-foreground, rgba(128, 128, 128, 0.8));
+}
+
+#app .cm-editor .cm-scroller .vsidian-list-line.vsidian-list-line-d2.vsidian-list-bullet:not(.vsidian-list-marker-visible)::before {
+  content: '◦';
+}
+
+#app .cm-editor .cm-scroller .vsidian-list-line.vsidian-list-line-d3.vsidian-list-bullet:not(.vsidian-list-marker-visible)::before,
+#app .cm-editor .cm-scroller .vsidian-list-line.vsidian-list-line-d4.vsidian-list-bullet:not(.vsidian-list-marker-visible)::before,
+#app .cm-editor .cm-scroller .vsidian-list-line.vsidian-list-line-d5.vsidian-list-bullet:not(.vsidian-list-marker-visible)::before,
+#app .cm-editor .cm-scroller .vsidian-list-line.vsidian-list-line-d6.vsidian-list-bullet:not(.vsidian-list-marker-visible)::before,
+#app .cm-editor .cm-scroller .vsidian-list-line.vsidian-list-line-d7.vsidian-list-bullet:not(.vsidian-list-marker-visible)::before,
+#app .cm-editor .cm-scroller .vsidian-list-line.vsidian-list-line-d8.vsidian-list-bullet:not(.vsidian-list-marker-visible)::before {
+  content: '▪';
 }
 
 #app .cm-editor .cm-scroller .vsidian-list-line-d2 { padding-left: 1.6em; }
@@ -2007,9 +2023,17 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
   border-radius: 0 0 6px 6px;
 }
 
+/* 折叠收起态（live）：标题栏行兼任卡片底边——复合选择器叠于 edge-top
+   的顶边圆角之上补底边框与四角圆角（闭合行已并入隐藏区，无底边行） */
+#app .cm-editor .cm-scroller .vsidian-fm-card-edge-top.vsidian-fm-card-folded {
+  border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
+  border-radius: 6px;
+}
+
 /* 标题栏（live 首围栏行 replace widget 与阅读侧容器内同构，#app 下两
    视图同类名同布局）：微亮条与正文区分（撞色边界感的第二来源，参考图
-   头部条形态），高度紧凑（padding 收敛，总高约 1.2 倍正文行高） */
+   头部条形态），高度紧凑（padding 收敛，总高约 1.2 倍正文行高）。
+   整条标题栏为折叠热区（与代码卡 #190 同口径）：指针形态 + 禁选中 */
 #app .vsidian-fm-header {
   display: flex;
   align-items: center;
@@ -2018,6 +2042,8 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
   padding: 3px 10px;
   background: var(--vsidian-table-background, rgba(128, 128, 128, 0.05));
   font-family: var(--vscode-font-family, sans-serif);
+  cursor: pointer;
+  user-select: none;
 }
 
 #app .vsidian-fm-header-icon {
@@ -2051,6 +2077,38 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
 #app button.vsidian-fm-edit:hover,
 #app button.vsidian-fm-edit:focus-visible {
   background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.2));
+}
+
+/* 折叠 chevron（与代码卡 vsidian-code-card-fold 同形态）：无边框幽灵按钮
+   两态常驻，收起态转向 -90°；点击经回调切换折叠（标题栏热区共用入口） */
+#app .vsidian-fm-header .vsidian-fm-fold {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  box-sizing: border-box;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.9));
+  opacity: 0.7;
+}
+
+#app .vsidian-fm-header .vsidian-fm-fold:hover,
+#app .vsidian-fm-header .vsidian-fm-fold:focus-visible {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.16));
+  opacity: 1;
+}
+
+#app .vsidian-fm-header .vsidian-fm-fold svg {
+  transition: transform 0.12s ease;
+}
+
+#app .vsidian-fm-header .vsidian-fm-fold-collapsed svg {
+  transform: rotate(-90deg);
 }
 
 /* 键值行行级 grid：撑满内容区（不限宽——行级类直接作用于 .cm-line，
@@ -2131,6 +2189,12 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
 #app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-row {
   display: grid;
   grid-template-columns: minmax(120px, 32%) 1fr;
+}
+
+/* 阅读折叠收起态：行区整体隐藏（含空态行），表壳边框圆角由容器保留——
+   与 live 的整块隐藏同语义（行从可读 DOM 消失而非仅视觉折叠） */
+#app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-table.vsidian-fm-folded .vsidian-fm-row {
+  display: none;
 }
 
 #app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-row > .vsidian-fm-cell {
@@ -3164,6 +3228,21 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
 
 #app .vsidian-view-reading .vsidian-reading-block li {
   margin: 0.15em 0;
+}
+
+/* 阅读列表点号层级显式钉住（不依赖 UA 默认样式表；外部片段重置容器
+   list-style 时层级语义不漂移）：一级 disc 实心 / 二级 circle 空心 /
+   三级起 square 方块——与 Live 侧 ::before 分级字形同语义（见上） */
+#app .vsidian-view-reading .vsidian-reading-block ul {
+  list-style-type: disc;
+}
+
+#app .vsidian-view-reading .vsidian-reading-block :is(ul, ol) ul {
+  list-style-type: circle;
+}
+
+#app .vsidian-view-reading .vsidian-reading-block :is(ul, ol) :is(ul, ol) ul {
+  list-style-type: square;
 }
 
 #app .vsidian-view-reading .vsidian-reading-hr hr {

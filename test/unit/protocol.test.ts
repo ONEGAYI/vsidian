@@ -18,6 +18,17 @@ it('DOM 组合测试钩子只接受明确阶段和字符串候选', () => {
 })
 
 describe('isWebviewToHost', () => {
+  it('fm.test.click 动作白名单校验（2026-10 折叠链路）：类型联合与运行时校验器同步', () => {
+    // 教训钉子：折叠动作进了类型联合但漏了校验器白名单时，宿主侧静默拒绝、
+    // 集成用例超时难定位——此处钉住两侧同步（fm.test.click 是宿主→面板
+    // 消息，校验器在 isHostToWebview）
+    expect(isHostToWebview({ kind: 'fm.test.click', action: 'fold-button' })).toBe(true)
+    expect(isHostToWebview({ kind: 'fm.test.click', action: 'fold-hotspot' })).toBe(true)
+    expect(isHostToWebview({ kind: 'fm.test.click', action: 'edit-button' })).toBe(true)
+    expect(isHostToWebview({ kind: 'fm.test.click', action: 'fold' })).toBe(false)
+    expect(isHostToWebview({ kind: 'fm.test.click', action: 'fold-button', index: -1 })).toBe(false)
+  })
+
   it('view.switch.request 消息校验（#141）：target 仅 live/reading（双态裁剪，源码路径不可达）', () => {
     expect(isWebviewToHost({ kind: 'view.switch.request', target: 'live' })).toBe(true)
     expect(isWebviewToHost({ kind: 'view.switch.request', target: 'reading' })).toBe(true)

@@ -505,3 +505,75 @@ describe('出站链路（控制器级）', () => {
     linked.controller.dispose()
   })
 })
+
+describe('卡片折叠（与代码块同交互：整卡头部热区 + 右上折叠按钮）', () => {
+  it('展开态：标题栏带折叠 chevron（可收起提示、aria-expanded）；修改按钮在场', () => {
+    const view = makeFmView(FM_DOC)
+    const fold = view.contentDOM.querySelector<HTMLButtonElement>('.vsidian-fm-fold')
+    if (!fold) throw new Error('折叠 chevron 不在场')
+    expect(fold.classList.contains('vsidian-fm-fold-collapsed')).toBe(false)
+    expect(fold.getAttribute('aria-expanded')).toBe('true')
+    expect(fold.title).toContain('折叠')
+    expect(view.contentDOM.querySelector('.vsidian-fm-edit')).not.toBeNull()
+    expect(view.contentDOM.querySelectorAll('.vsidian-fm-row').length).toBeGreaterThan(0)
+    view.destroy()
+  })
+
+  it('点 chevron 折叠：行级收起类上首行、键值行从 DOM 消失、修改按钮让位、文档字节不变', () => {
+    const view = makeFmView(FM_DOC)
+    const fold = view.contentDOM.querySelector<HTMLButtonElement>('.vsidian-fm-fold')!
+    fold.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    const line = view.contentDOM.querySelector('.vsidian-fm-card-folded')
+    expect(line, '首围栏行应携带收起类').not.toBeNull()
+    expect(view.contentDOM.querySelectorAll('.vsidian-fm-row')).toHaveLength(0)
+    expect(view.contentDOM.querySelector('.vsidian-fm-edit')).toBeNull()
+    const collapsedBtn = view.contentDOM.querySelector<HTMLButtonElement>('.vsidian-fm-fold')!
+    expect(collapsedBtn.classList.contains('vsidian-fm-fold-collapsed')).toBe(true)
+    expect(collapsedBtn.getAttribute('aria-expanded')).toBe('false')
+    expect(collapsedBtn.title).toContain('展开')
+    // 折叠是视图态：零写回
+    expect(view.state.doc.toString()).toBe(FM_DOC)
+    // 标题栏仍在场（折叠的承载面）
+    expect(view.contentDOM.querySelector('.vsidian-fm-header')).not.toBeNull()
+    view.destroy()
+  })
+
+  it('再点展开：键值行恢复、收起类消失', () => {
+    const view = makeFmView(FM_DOC)
+    const fold = view.contentDOM.querySelector<HTMLButtonElement>('.vsidian-fm-fold')!
+    fold.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    view.contentDOM.querySelector<HTMLButtonElement>('.vsidian-fm-fold')!
+      .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    expect(view.contentDOM.querySelector('.vsidian-fm-card-folded')).toBeNull()
+    expect(view.contentDOM.querySelectorAll('.vsidian-fm-row').length).toBeGreaterThan(0)
+    expect(view.contentDOM.querySelector('.vsidian-fm-edit')).not.toBeNull()
+    view.destroy()
+  })
+
+  it('标题栏空白热区点击切换折叠；按钮点击不冒泡触发热区', () => {
+    const view = makeFmView(FM_DOC)
+    // 热区：点击标题文字（非按钮）同样折叠
+    const title = view.contentDOM.querySelector<HTMLElement>('.vsidian-fm-header-title')!
+    title.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    expect(view.contentDOM.querySelector('.vsidian-fm-card-folded')).not.toBeNull()
+    // 展开：热区再点一次
+    view.contentDOM.querySelector<HTMLElement>('.vsidian-fm-header-title')!
+      .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    expect(view.contentDOM.querySelector('.vsidian-fm-card-folded')).toBeNull()
+    // 修改按钮点击只开浮层，不折叠（按钮 stopPropagation 不冒泡到热区）
+    clickEditButton(view)
+    expect(popoverEl()).not.toBeNull()
+    expect(view.contentDOM.querySelector('.vsidian-fm-card-folded')).toBeNull()
+    view.destroy()
+  })
+
+  it('折叠时打开中的 Popover 自动关闭', () => {
+    const view = makeFmView(FM_DOC)
+    clickEditButton(view)
+    expect(popoverEl()).not.toBeNull()
+    view.contentDOM.querySelector<HTMLButtonElement>('.vsidian-fm-fold')!
+      .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    expect(popoverEl()).toBeNull()
+    view.destroy()
+  })
+})
