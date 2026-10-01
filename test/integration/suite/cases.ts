@@ -11314,6 +11314,89 @@ export const cases: Array<[string, () => Promise<void>]> = [
     }
   }],
 
+  ['rename 引用改写：连续 rename 新目标桶空窗——rename 后立即查 incoming 含面板与落盘引用者（#269）', async () => {
+    await waitRenameIndexReady()
+    await openWithEditor('rename-ref-a.md')
+    await waitSessionReady('rename-ref-a.md')
+    const refAUri = wsUri('rename-ref-a.md').toString()
+    try {
+      // 第一次 rename：改名目标 → 改名目标2（引用甲=面板打开、引用乙=落盘）
+      const edit = new vscode.WorkspaceEdit()
+      edit.renameFile(wsUri('改名目标.md'), wsUri('改名目标2.md'), { overwrite: false })
+      assert(await vscode.workspace.applyEdit(edit), 'rename 应成功应用')
+      // 验收断言（#269）：rename 完成后立即查新目标 incoming——已落盘引用者
+      //（引用乙，经依赖者重抽/桶重建）与面板打开引用者（引用甲，经覆盖层
+      // 桶外兜底）都必须在场。修复前：反链桶按基线边聚合、新目标桶空窗 +
+      // 覆盖层边桶外不可达 → incoming 恒空，本轮询超时转红。
+      await poll('rename 后新目标 incoming 含面板与落盘引用者', async () => {
+        const c = (await vscode.commands.executeCommand(
+          'onegayi.vsidian._test.getRenameCandidates', wsUri('改名目标2.md').fsPath,
+        )) as { status: string; incomingFsPaths: string[] } | undefined
+        const paths = (c?.incomingFsPaths ?? []).map(normFsPath)
+        const wantA = normFsPath(wsUri('rename-ref-a.md').fsPath)
+        const wantB = normFsPath(wsUri('notes/rename-ref-b.md').fsPath)
+        return c && paths.includes(wantA) && paths.includes(wantB) ? c : undefined
+      }).catch(async (err) => {
+        const raw = await vscode.commands.executeCommand(
+          'onegayi.vsidian._test.getRenameCandidates', wsUri('改名目标2.md').fsPath,
+        )
+        const oldPath = await vscode.commands.executeCommand(
+          'onegayi.vsidian._test.getRenameCandidates', wsUri('改名目标.md').fsPath,
+        )
+        const overlayA = await vscode.commands.executeCommand(
+          'onegayi.vsidian._test.getRenameOverlay', wsUri('rename-ref-a.md').fsPath,
+        )
+        const overlayB = await vscode.commands.executeCommand(
+          'onegayi.vsidian._test.getRenameOverlay', wsUri('notes/rename-ref-b.md').fsPath,
+        )
+        const refBText = (await vscode.workspace.openTextDocument(wsUri('notes/rename-ref-b.md'))).getText()
+        const refBDisk = await readDisk('notes/rename-ref-b.md')
+        const log = await lastRenameRefLog()
+        throw new Error(`${(err as Error).message}；candidates实况=${JSON.stringify(raw)}；` +
+          `旧路径candidates=${JSON.stringify(oldPath)}；` +
+          `overlayA=${JSON.stringify(overlayA)}；overlayB=${JSON.stringify(overlayB)}；` +
+          `refB缓冲=${JSON.stringify(refBText)}；refB磁盘=${JSON.stringify(refBDisk)}；log=${JSON.stringify(log)}`)
+      })
+      // 用户故事闭环：立即第二次 rename（改名目标2 → 改名目标3），引用者必须
+      // 被改写而非静默漏改（修复前该 rename 的候选 incoming 为空、无候选即
+      // 静默跳过，两引用文本原地不动）
+      const edit2 = new vscode.WorkspaceEdit()
+      edit2.renameFile(wsUri('改名目标2.md'), wsUri('改名目标3.md'), { overwrite: false })
+      assert(await vscode.workspace.applyEdit(edit2), '第二次 rename 应成功应用')
+      await poll('连续 rename 引用乙改写', async () => {
+        const text = (await vscode.workspace.openTextDocument(wsUri('notes/rename-ref-b.md'))).getText()
+        return text.includes('[[../改名目标3]]') ? text : undefined
+      })
+      await poll('连续 rename 引用甲面板同步', async () => {
+        const v = (await vscode.commands.executeCommand(CMD.viewState, refAUri)) as { text?: string } | undefined
+        return v?.text && v.text.includes('[[改名目标3]]') ? v : undefined
+      })
+    } finally {
+      // 现场还原（漂移用例同款强兜底）：关面板丢弃 dirty buffer、写回两引用
+      // 原文（引用甲盘面本就未动，写回为幂等保险）、多候选名收敛归位
+      // 改名目标.md；未收敛让本用例 FAIL，不静默泄漏给后续用例
+      await Promise.resolve(vscode.commands.executeCommand('workbench.action.closeAllEditors')).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('rename-ref-a.md'), Buffer.from(RENAME_REF_A_DOC_TEXT, 'utf8'))).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('notes/rename-ref-b.md'), Buffer.from(RENAME_REF_B_DOC_TEXT, 'utf8'))).catch(() => {})
+      let restored = false
+      for (let attempt = 0; attempt < 10 && !restored; attempt++) {
+        for (const name of ['改名目标3.md', '改名目标2.md']) {
+          await Promise.resolve(restoreRename(wsUri(name), wsUri('改名目标.md'))).catch(() => {})
+        }
+        restored = await Promise.resolve(vscode.workspace.fs.stat(wsUri('改名目标.md'))).then(() => true, () => false)
+        if (!restored) await new Promise((r) => setTimeout(r, 200))
+      }
+      if (!restored) {
+        const probe: Record<string, boolean> = {}
+        for (const name of ['改名目标.md', '改名目标2.md', '改名目标3.md']) {
+          probe[name] = await Promise.resolve(vscode.workspace.fs.stat(wsUri(name))).then(() => true, () => false)
+        }
+        throw new Error(`兜底归位未收敛（候选名实况 ${JSON.stringify(probe)}），不得静默泄漏给后续用例`)
+      }
+      await new Promise((r) => setTimeout(r, 400))
+    }
+  }],
+
   ['rename 引用改写：跨根移动不改写并明确报告（#199）', async () => {
     await waitRenameIndexReady()
     const secondDir = `${wsDir}-rename-second`
@@ -13020,5 +13103,63 @@ export const cases: Array<[string, () => Promise<void>]> = [
     }
     await new Promise((r) => setTimeout(r, 400))
     console.log('[#248] 表格格内 rename 转义保真与撤销恢复通过')
+  }],
+
+  // #270 dirty「主动丢弃未保存内容」的覆盖层通用退役信号。1.86 事件面实证
+  //（探针轮落 .vscode-test 报告）：Vsidian 面板丢弃有 tabClosed+close 事件
+  //（既有 onDidClose 接线已退役，本例 A 段回归钉）；普通文本编辑器丢弃
+  // **无 close 事件、文档滞留 textDocuments**——唯一宿主广播是「空
+  // contentChanges 且转 clean」的 dirty-state 事件（B 段主战场）；显式
+  // revert 另有真内容 change + 同款 clean 事件（C 段）。三段共同契约：
+  // 丢弃/还原后覆盖层退役（getRenameOverlay → undefined），反链回基线。
+  ['#270 dirty 丢弃与还原的覆盖层通用退役（面板/普通编辑器/revert）', async () => {
+    await waitRenameIndexReady()
+    const uri = wsUri('rename-ref-a.md')
+    const overlayOf = () => vscode.commands.executeCommand(
+      'onegayi.vsidian._test.getRenameOverlay', uri.fsPath,
+    ) as Thenable<string[] | undefined>
+    const waitOverlayLink = (label: string) => poll(`${label}：覆盖层登记丢弃链接`, async () => {
+      const edges = await overlayOf()
+      return edges && edges.some((e) => e === 'rename-moved.md') ? edges : undefined
+    })
+    const waitOverlayRetired = (label: string) => poll(`${label}：丢弃/还原后覆盖层退役`, async () => {
+      const edges = await overlayOf()
+      return edges === undefined ? true : undefined
+    })
+    const insertLinkLine = async () => {
+      const edit = new vscode.WorkspaceEdit()
+      edit.insert(uri, new vscode.Position(0, 0), '丢弃链接 [[rename-moved]]\n')
+      assert(await vscode.workspace.applyEdit(edit), '插行应成功')
+    }
+    try {
+      // ---- A：Vsidian 面板 dirty 丢弃（close 事件路径——既有行为回归钉）----
+      await openWithEditor('rename-ref-a.md')
+      await waitSessionReady('rename-ref-a.md')
+      await insertLinkLine()
+      await waitOverlayLink('A 段')
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors')
+      await waitOverlayRetired('A 段')
+
+      // ---- B：普通文本编辑器 dirty 丢弃（无 close 事件——通用信号主战场）----
+      await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri))
+      await insertLinkLine()
+      await waitOverlayLink('B 段')
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors')
+      // 丢弃无保存/关闭事件：唯一退役通道是「转 clean 的 dirty-state 事件」
+      //（#270 修复）——修复前覆盖层持弃置链接残渣滞留，本断言超时转红
+      await waitOverlayRetired('B 段')
+
+      // ---- C：普通文本编辑器显式还原（revert：真内容 change + clean 事件）----
+      await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri))
+      await insertLinkLine()
+      await waitOverlayLink('C 段')
+      await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor')
+      await waitOverlayRetired('C 段')
+    } finally {
+      // 现场还原：关全部编辑器、写回原文（watcher 重扫归位盘面与索引）
+      await Promise.resolve(vscode.commands.executeCommand('workbench.action.closeAllEditors')).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.writeFile(uri, Buffer.from(RENAME_REF_A_DOC_TEXT, 'utf8'))).catch(() => {})
+      await new Promise((r) => setTimeout(r, 1400))
+    }
   }],
 ]

@@ -1163,6 +1163,91 @@ describe('VaultIndexService：#199 rename 后索引刷新（refreshRenamed）', 
   })
 })
 
+// ---- #269 rename 后新目标反链桶空窗：连续 rename 静默漏改写的契约 ----
+// 时序复刻（真实通道语义，见 vaultRenameWiring 模块头）：引用者的 will edit
+// 先于 rename 应用落盘，watcher 重扫时新目标尚不存在 → 断链边入基线；did
+// 通道 refreshRenamedBatch 只登记新路径不重抽依赖者 → 新目标桶在依赖者
+// 重抽前恒空（链接文本与 rel 恰同形的回退桶除外）。
+
+describe('VaultIndexService：#269 目标归位重抽依赖者与桶兜底', () => {
+  function makeWatcherService(fs: FakeFs) {
+    let notify: ((p: string | null) => void) | undefined
+    const scan = scanPortOf(fs)
+    scan.watchRoot = (_root, onEvent) => {
+      notify = onEvent
+      return () => {}
+    }
+    const service = new VaultIndexService(scan, storagePortOf(), { storageRoot: 'C:/store', isWindowsHost: IS_WIN })
+    return {
+      service,
+      fire: (p: string) => notify!(p),
+    }
+  }
+
+  it('rename 后新目标 incoming 含已落盘引用者（依赖者重抽、桶随归位重建，#269）', async () => {
+    const fs = makeFs({
+      'C:/vault/改名目标.md': '# 目标\n',
+      'C:/vault/rename-ref-a.md': '# 引用甲\n\n见 [[改名目标]]。\n',
+      'C:/vault/notes/rename-ref-b.md': '# 引用乙\n\n上行 [[../改名目标]]。\n',
+    })
+    const { service, fire } = makeWatcherService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    const before = service.renameCandidatesOf('C:/vault/改名目标.md')
+    expect(before.incoming).toHaveLength(2) // 基线：旧目标桶含两个引用者
+    // 1. will edit 落盘（引用者文本改写为新名；新目标此刻尚不存在）
+    fs.files.set('C:/vault/rename-ref-a.md', '# 引用甲\n\n见 [[改名目标2]]。\n')
+    fs.stats.set('C:/vault/rename-ref-a.md', { mtimeMs: 1_700_000_010_000, size: 20 })
+    fs.files.set('C:/vault/notes/rename-ref-b.md', '# 引用乙\n\n上行 [[../改名目标2]]。\n')
+    fs.stats.set('C:/vault/notes/rename-ref-b.md', { mtimeMs: 1_700_000_010_000, size: 22 })
+    fire('C:/vault/rename-ref-a.md')
+    fire('C:/vault/notes/rename-ref-b.md')
+    await vi.advanceTimersByTimeAsync(1200) // watcher 去抖 800ms + 增量泵
+    // 2. rename 应用（磁盘旧名消失、新名就位）+ did 通道刷新登记新路径
+    fs.files.delete('C:/vault/改名目标.md')
+    fs.stats.delete('C:/vault/改名目标.md')
+    fs.files.set('C:/vault/改名目标2.md', '# 目标\n')
+    fs.stats.set('C:/vault/改名目标2.md', { mtimeMs: 1_700_000_011_000, size: 7 })
+    await service.refreshRenamedBatch([
+      { oldFsPath: 'C:/vault/改名目标.md', newFsPath: 'C:/vault/改名目标2.md' },
+    ])
+    // 断言：新目标 incoming 含两个已落盘引用者（连续 rename 的改写依据）
+    const after = service.renameCandidatesOf('C:/vault/改名目标2.md')
+    expect(after.status).toBe('ready')
+    expect(after.incoming.map((g) => g.fsPath).sort()).toEqual([
+      'C:\\vault\\notes\\rename-ref-b.md',
+      'C:\\vault\\rename-ref-a.md',
+    ])
+  })
+
+  it('rename 后新目标 incoming 含面板打开引用者（覆盖层边桶外兜底，#269）', async () => {
+    const fs = makeFs({
+      'C:/vault/改名目标.md': '# 目标\n',
+      'C:/vault/rename-ref-a.md': '# 引用甲\n\n见 [[改名目标]]。\n',
+    })
+    const { service } = makeWatcherService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    expect(service.renameCandidatesOf('C:/vault/改名目标.md').incoming).toHaveLength(1)
+    // 1. will edit 只作用面板 buffer（盘面保持旧名文本，不落盘、无 watcher）
+    service.applyUnsaved('C:/vault/rename-ref-a.md', 2, '# 引用甲\n\n见 [[改名目标2]]。\n')
+    // 2. rename 应用 + did 通道登记新路径（真实时序：防抖冲刷晚于 did）
+    fs.files.delete('C:/vault/改名目标.md')
+    fs.stats.delete('C:/vault/改名目标.md')
+    fs.files.set('C:/vault/改名目标2.md', '# 目标\n')
+    fs.stats.set('C:/vault/改名目标2.md', { mtimeMs: 1_700_000_011_000, size: 7 })
+    await service.refreshRenamedBatch([
+      { oldFsPath: 'C:/vault/改名目标.md', newFsPath: 'C:/vault/改名目标2.md' },
+    ])
+    // 3. 覆盖层防抖冲刷（新名已登记，buffer 边解析命中新目标）
+    await vi.advanceTimersByTimeAsync(600)
+    // 断言：盘面基线仍指旧名（依赖者重抽无从接通），唯一来源是覆盖层——
+    // 桶缺失时 renameCandidatesOf 不得整段跳过（桶外覆盖层兜底）
+    const after = service.renameCandidatesOf('C:/vault/改名目标2.md')
+    expect(after.status).toBe('ready')
+    expect(after.incoming.map((g) => g.fsPath)).toEqual(['C:\\vault\\rename-ref-a.md'])
+    expect(after.incoming[0]!.edges[0]).toMatchObject({ kind: 'wikilink', target: '改名目标2', resolvedTarget: '改名目标2.md' })
+  })
+})
+
 // ---- #200 目录/批量移动：索引清单查询与批量刷新 ----
 
 describe('VaultIndexService：#200 目录前缀清单（indexedFilesUnder）', () => {

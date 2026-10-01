@@ -383,12 +383,53 @@ PR #203 用户验收反馈的一轮设计落地：反链面板形态改版（工
 
 ### 已知边界（残余）
 
-- **dirty 面板残渣的产品侧根治未做**：打开文档带未保存编辑时被外部还原磁盘，反链按设计显示未保存编辑的链接（正确语义）；「用户主动丢弃未保存内容」的回滚事件 1.86 不广播，产品侧无通用退役信号——真实用户场景存在自愈路径（编辑/保存/关闭-重开该文档），测试场景经缺席自愈绕开。若后续真实场景出现反链长期滞留反馈，再评估 onDidClose 竞态加固（面板 dispose 与文档关闭事件的顺序保证）。
-- **增量重扫的断链边无依赖者传播**：`rescanFile(a)` 早于目标归位时抽出的断链边进基线后，目标登记不会重抽 a（fullScan 才全量重算）——跨根用例的等待探针已覆盖该窗口；「目标归位重抽依赖者」属增量维护的结构性增强，另票评估。
+- **dirty 面板残渣的产品侧根治未做（→ #270 收口）**：打开文档带未保存编辑时被外部还原磁盘，反链按设计显示未保存编辑的链接（正确语义）；「用户主动丢弃未保存内容」的回滚事件 1.86 不广播，产品侧无通用退役信号——真实用户场景存在自愈路径（编辑/保存/关闭-重开该文档），测试场景经缺席自愈绕开。若后续真实场景出现反链长期滞留反馈，再评估 onDidClose 竞态加固（面板 dispose 与文档关闭事件的顺序保证）。【#270 落档：「转 clean 的 dirty-state 事件」即通用退役信号，本条收口；onDidClose 竞态由双保险覆盖，见 #270 节】
+- **增量重扫的断链边无依赖者传播（→ #269 部分收口）**：`rescanFile(a)` 早于目标归位时抽出的断链边进基线后，目标登记不会重抽 a（fullScan 才全量重算）——跨根用例的等待探针已覆盖该窗口；「目标归位重抽依赖者」属增量维护的结构性增强，另票评估。【#269 落档：rename 通道（refreshRenamedBatch）侧已做目标归位重抽（遍 3）；纯 watcher 增量域（外部改名等不经 rename 事件的归位）仍无传播，维持本条语义】
 - **批次上限淘汰会连带丢弃回收清单（review 轮确认，接受）**：`PENDING_BATCH_LIMIT=8` 淘汰最旧批次时其 `loadedDocs`/`rewrittenDocs` 一并丢弃——需 8 连 will 无 did（用户连续取消 rename）才触发，装载子集仍有盘=暂存收敛兜底，概率与影响均极低，不为此加复杂度。
 - **跨根集成用例对服务收敛块的回归检测力有限（review 轮确认，证明力分工）**：缺席自愈的两条退场路径（save→documentSaved 退役、writeFile→watcher 重扫）都不经过 `rescanFile` 的收敛块——禁用服务收敛时该用例大概率仍被自愈救活；服务级回归的实际防线是 `vaultIndexService.test.ts` 的契约用例（含 review 轮补的 missing 两例），集成用例守护的是编排层顺序缺陷本身。
-- **renameCandidatesOf 的桶依赖：rename 后新目标的 incoming 在依赖者重抽前近乎恒空（review 轮实测确认，与「目标归位重抽依赖者」同根，另票）**：反链桶按**基线边**聚合——引用者的 will edit 落盘触发重扫时新目标尚不存在（edit 先于 rename 应用），抽出断链边聚合不进新目标桶；覆盖层边不建桶（queryBacklinks 的 overlay 段独立遍历，但 renameCandidatesOf 仅在桶存在时进入查询）。例外：断链边回退按 target 原文聚合（`resolvedTarget ?? target`），链接文本与目标 rel 恰同形（如 `[[改名目标2.md]]`）时可命中回退桶。用户可见后果：rename X→Y 后立刻 rename Y→Z，Y 的引用者（含面板打开与已落盘者）在该窗口内静默漏改写——#199 时代即存在（与本票退役行为无关），修复需「目标归位重抽依赖者」或桶查询 fallback 扫覆盖层，属增量维护的结构性增强，另票评估。本轮豁免保住面板引用者的覆盖层载体（桶外查询路径与反链面板的即时反映不受退役破坏）。
+- **renameCandidatesOf 的桶依赖：rename 后新目标的 incoming 在依赖者重抽前近乎恒空（review 轮实测确认，与「目标归位重抽依赖者」同根，→ #269 收口）**：反链桶按**基线边**聚合——引用者的 will edit 落盘触发重扫时新目标尚不存在（edit 先于 rename 应用），抽出断链边聚合不进新目标桶；覆盖层边不建桶（queryBacklinks 的 overlay 段独立遍历，但 renameCandidatesOf 仅在桶存在时进入查询）。例外：断链边回退按 target 原文聚合（`resolvedTarget ?? target`），链接文本与目标 rel 恰同形（如 `[[改名目标2.md]]`）时可命中回退桶。用户可见后果：rename X→Y 后立刻 rename Y→Z，Y 的引用者（含面板打开与已落盘者）在该窗口内静默漏改写——#199 时代即存在（与本票退役行为无关），修复需「目标归位重抽依赖者」或桶查询 fallback 扫覆盖层，属增量维护的结构性增强，另票评估。本轮豁免保住面板引用者的覆盖层载体（桶外查询路径与反链面板的即时反映不受退役破坏）。【#269 落档：桶外覆盖层兜底 + 目标归位重抽 + dirty 缓存豁免三枚修复收口本条；「已落盘引用者」的机制认知经实证修正（will edit 对装载引用者不落盘），见 #269 节】
 
 ### 与 #199 已知边界的关系
 
 #199「已知边界（覆盖层断链滞留）」描述的**未保存引用文档**（用户面板 dirty 文档）滞留仍在——其退场路径（编辑重抽/面板关闭退役）健在，「编辑即自愈」语义不变；本票根治的是另三个**无编辑即永不自愈**的入口（装载态、外部写回流、关闭竞态残渣）。
+
+## #269 实施落档（2026-10-01）
+
+工单 #269（rename 后新目标反链桶空窗：连续 rename 静默漏改写引用者）——#256 挂账「桶依赖」边界的收口。集成三轮取证两度修正机制认知后，以三枚修复落地。
+
+### 机制再实证（推翻 #256 的一个落档假设）
+
+- **will edit 对装载引用者不落盘（1.86 实测）**：will 阶段 `textOf` 经 `openTextDocument` 装载的引用者（无标签），其实改只作用 buffer——文档转 dirty 滞留 `textDocuments`，**磁盘保持旧文**（集成取证：缓冲为新名链接、磁盘为旧名链接并存 20s+）。#256 落档「装载子集 will edit 随宿主落盘」的表述不成立——该假设从未被集成直接钉住，跨根用例的「缺席自愈（打开并保存）」恰以装载引用者**不**自动落盘为前提。
+- **did 收尾退役丢失改写载体**：`retireLoadedDocs` 按「无标签即残渣」对装载引用者执行 `documentClosed`——清掉 unsaved 暂存与冲刷定时器，覆盖层从未诞生，索引回落旧盘面。第二 rename 的 will 段（dirty 分流）与 did 段（查新目标桶/覆盖层）双双找不到该引用者，静默漏改写实锤于此，而非桶聚合时序。
+- 面板引用者路径与 #256 认知一致（buffer 接管 + tab 豁免），本轮无变。
+
+### 修复（三枚，各钉一个断点）
+
+- **桶外覆盖层兜底（`renameCandidatesOf`）**：桶缺失不再整段跳过——与 `backlinksOf` 同口径按 `bucketKey ?? rel` 查询（fold 同传），覆盖层段独立遍历命中「覆盖层在场、基线无桶」的来源。面板引用者与 dirty 装载引用者同由此路径可见；链接文本与 rel 恰同形的断链回退桶例外形态不变。
+- **目标归位重抽依赖者（`refreshRenamedBatch` 遍 3）**：批内新登记位置（.md 与 asset）登记完成后，对基线**断链边**按边型同口径重解析（`vaultLinkExtract.reresolveVaultEdgeTarget`：wikilink/embed 走 `planVaultLinkPath` 候选序、mdlink/refdef 走 `classifyLinkTarget` doc 分支、image 走 `classifyImageTarget` workspace 单候选；external/blocked 恒不可接通），命中新位置者重扫该来源（盘面已是改写后文本，重抽即接通、桶随归位重建）；本批被移动文件不重扫（遍 2 已按完整新清单抽边）。注：装载引用者不落盘 → 通道流内极少出现「断链边在基线」的时序，本遍钉住的是结构性语义（快照恢复态断链、泵竞态等真重排时序）。
+- **did 收尾豁免 dirty 缓存实例（`retireLoadedDocs`）**：与 tab 豁免同一原则加宽一档——did 时刻仍为 `textDocuments` 中 dirty 实例的文档（`isDirtyCached`）不退役。装载引用者的 will edit 只在 buffer，退役即丢失改写的唯一载体；豁免后 500ms 冲刷照常落覆盖层（新目标已登记、边解析命中），桶外兜底即可见，连续 rename 的 dirtyRefs 段按 buffer 叠加改写。退场路径与面板豁免同款：保存（documentSaved）→ 关闭（onDidClose）→ isDocOpen 兜底 → **#270 的 clean 退役信号**。
+
+### 验证
+
+- 单测：`test/unit/vaultIndexService.test.ts`「#269 目标归位重抽依赖者与桶兜底」两例——落盘引用者变体（fake fs + watcher 事件复刻「重扫早于登记」时序）与面板引用者变体（applyUnsaved 复刻 buffer-only 改写）；red 能力分别经禁用遍 3、恢复桶门控实测（各自只红对应变体）。
+- 集成：`#269` 用例（rename 后立即查新目标 incoming 含面板与装载引用者 + 连续 rename 用户故事闭环——第二 rename 两引用者均改写）。三轮取证 dump（candidates/overlay/缓冲与磁盘双读/通道日志）存 `.vscode-test/integration-dev.log`，运行脚本日志 `269-integration*.log` 随工单过程存档后清理。
+
+## #270 实施落档（2026-10-01）
+
+工单 #270（dirty 面板残渣的产品侧根治：丢弃未保存内容无回滚事件的通用退役信号）——评估票，先实证事件面再定方案。
+
+### 事件面实证（1.86 真宿主探针轮，观测行存 `.vscode-test/integration-dev.log`）
+
+- **Vsidian 面板丢弃（closeAllEditors）**：空 contentChanges 的转 clean dirty-state 事件 → tabClosed → **`onDidCloseTextDocument` 触发**、文档离场 `textDocuments`——既有 onDidClose 接线即退役覆盖层。#256「丢弃不广播、onDidClose 不触发」的观察在面板流不成立（其场景应为装载文档/多文档竞态，装载文档无标签确不触发 close）。
+- **普通文本编辑器丢弃**：**无 close 事件、文档滞留 `textDocuments`**，且呈「clean 但 buffer 残留弃置文本」怪象（`getText` 仍含弃置行、isDirty=false）；唯一宿主广播是转 clean 的空 change 事件——修复前该终态无任何退役通道，弃置链接的覆盖层残渣（幽灵反链）窗口实体化。
+- **显式还原（revertAndCloseActiveEditor）**：真内容 change（version 跃升、整行删除）+ 同款转 clean 事件。
+
+### 修复：转 clean 的 dirty-state 事件 = 通用退役信号
+
+provider 的 `onDidChangeTextDocument` 索引接线内：**空 contentChanges 且 `!document.isDirty` → 800ms 宽限后 `documentClosed`（幂等）**；**反之（内容事件或转 dirty）作废在途信号**——文档再入未保存态时先前的 clean 信号已过期（首轮集成实测教训：丢弃后排定的退役误清了紧随的新编辑暂存与冲刷定时器）。语义不变量：`isDirty === false` ⇒ 覆盖层与 unsaved 暂存的存在前提（未保存内容）已失——保存/丢弃/还原/undo 回保存态四流终态一致，退役恒正确；保存流另有 `documentSaved` 先行/后至皆幂等，宽限只为合并；面板 close 路径与本信号双保险，#256 挂账的「面板 dispose 与 onDidClose 顺序无保证」竞态不再单点依赖。
+
+### 契约与残余
+
+- 集成契约：`#270` 用例三段（Vsidian 面板丢弃=close 路径回归钉 / 普通编辑器丢弃=通用信号主战场，修复前红 / revert）断言丢弃与还原后 `getRenameOverlay` → undefined（反链回基线）。红态形态经修复前运行实测（A 段绿、B 段超时红）。
+- 残余边界：「clean 但 buffer 陈旧」的滞留实例若被用户再次编辑，applyUnsaved 会从陈旧 buffer 重新登记覆盖层——宿主模型怪象，索引按「未保存内容即时反映」跟随 buffer，重开文件即自愈；不为它加复杂度。
+- #256「已知边界（残余）」的「dirty 面板残渣产品侧根治未做」条目由本票关闭。

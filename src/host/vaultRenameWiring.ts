@@ -580,19 +580,35 @@ async function applyAfterRenameBatch(
 }
 
 /** rename 通道触达文档的索引覆盖层退役（谁改写谁回收，见 textOf 注释）。
- *  豁免（#256 review 轮）：did 收尾时刻仍被编辑器标签持有的文档不退役——
- *  面板打开的引用者经 will edit 改写后只转 buffer 脏不落盘，其覆盖层=
- *  buffer 现状是合法接管（#199「未保存内容即时反映」），退役会使索引回落
- *  旧盘面基线，连续 rename（对新目标再 rename）将静默漏发现该引用者。
- *  豁免者的退场走正常文档生命周期：面板关闭（provider onDidClose）→ 保存
- *  （documentSaved）→ isDocOpen 兜底（标签关闭后残渣随重扫退役）。 */
+ *  豁免（#256 review 轮 + #269）：did 收尾时刻仍被**编辑器标签持有**或仍为
+ *  **dirty 缓存实例**的文档不退役——活 buffer 的未保存内容是合法接管
+ *  （#199「未保存内容即时反映」），退役会使索引回落旧盘面基线，连续
+ *  rename（对新目标再 rename）将静默漏发现该引用者。两类豁免同一原则：
+ *  面板引用者经 will 改写只转 buffer 脏不落盘；装载引用者实测同款语义
+ *  （#269 集成实证：will edit 只作用 buffer、磁盘保持旧文，dirty buffer 是
+ *  改写的唯一载体）。豁免者的退场走正常文档生命周期：面板关闭（provider
+ *  onDidClose）→ 保存（documentSaved）→ isDocOpen 兜底（标签关闭后残渣随
+ *  重扫退役）。 */
 function retireLoadedDocs(vaultIndex: VaultIndexService, fsPaths: readonly string[]): void {
   for (const fsPath of fsPaths) {
-    if (isTabHeld(fsPath)) {
+    if (isTabHeld(fsPath) || isDirtyCached(fsPath)) {
       continue
     }
     vaultIndex.documentClosed(fsPath)
   }
+}
+
+/** did 收尾时刻该文档是否仍为宿主 textDocuments 中的 dirty 缓存实例（无
+ *  标签的装载文档经通道改写后即此态——buffer 持改写文而磁盘未落盘）。
+ *  与 isTabHeld 同一归一体系（normKeyOf）。 */
+function isDirtyCached(fsPath: string): boolean {
+  const key = normKeyOf(fsPath)
+  for (const doc of vscode.workspace.textDocuments) {
+    if (doc.isDirty && doc.uri.scheme === 'file' && normKeyOf(doc.uri.fsPath) === key) {
+      return true
+    }
+  }
+  return false
 }
 
 /** did 收尾时刻该文档是否仍被任一编辑器标签持有（Vsidian 面板、普通文本
