@@ -87,4 +87,8 @@ describe('查找面板 CSS 契约（#236）', () => {
   it('替换栏展开切换箭头随 aria-expanded 翻转（180 度）', () => {
     expect(rule('.vsidian-find .vsidian-find-toggle[aria-expanded=\'true\']', /rotate\(180deg\)/)).toBeTruthy()
   })
+
+  it('空查询计数收起：hidden 类 display:none（不预留「当前/总数」占位）', () => {
+    expect(rule('.vsidian-find .vsidian-find-count-hidden', /display:\s*none/)).toBeTruthy()
+  })
 })

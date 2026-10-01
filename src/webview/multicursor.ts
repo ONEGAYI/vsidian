@@ -28,10 +28,32 @@
 import { EditorState } from '@codemirror/state'
 import { drawSelection, EditorView, keymap } from '@codemirror/view'
 
+/** Windows 宿主防 Alt 夺焦（#241 验收实测）：真宿主里 Alt+mousedown 的
+ *  默认行为会把窗口焦点交给宿主菜单层——光标虽已设好（mousedown 事件
+ *  照常送达 CM6），但 webview 随即失焦且 Alt 的 keyup 被吞（修饰键粘滞），
+ *  后续键入全部落在宿主快捷键层（光标在、无法打字、字母变 Alt 快捷键）。
+ *  不阻断 mousedown 默认流程（preventDefault 会连带废掉
+ *  clickAddsSelectionRange 的多光标添加），只在 mouseup 事后自愈：焦点
+ *  已不在编辑器内时追回（headless 浏览器无此宿主行为，该防御只在实际
+ *  宿主环境生效）。 */
+const altClickFocusGuard = EditorView.domEventHandlers({
+  mouseup(event: MouseEvent, view: EditorView) {
+    if (!event.altKey || event.button !== 0) {
+      return false
+    }
+    const dom = view.contentDOM
+    if (document.activeElement !== dom && !dom.contains(document.activeElement)) {
+      view.focus()
+    }
+    return false
+  },
+})
+
 export const multicursorExtensions = [
   EditorState.allowMultipleSelections.of(true),
   drawSelection(),
   EditorView.clickAddsSelectionRange.of((event: MouseEvent) => event.altKey),
+  altClickFocusGuard,
   keymap.of([
     // 吞键不执行：执行路径唯一（路由本地分支按注册表绑定分发）。返回
     // true 阻止 defaultKeymap 的内建 addCursorAbove/Below 落穿

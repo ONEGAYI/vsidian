@@ -114,6 +114,11 @@ export function boundariesFromTokens(text: string, tokens: readonly string[]): n
  * 语义：offset 邻近（移动方向一侧）字符属分词域时，取该侧连续域段的
  * 分词边界中距 offset 最近的一个；段内无更细边界时即段界（等同原生整
  * 段跳过，引擎词典未收录的退化形态）。
+ * 域外补充（#241 验收修订）：方向一侧是 ASCII 词字符（字母/数字/下划
+ * 线）且其连续词段与分词域粘连（无空白/标点分隔）时，目标截断在词段
+ * 与域段的交界——原生 word 语义把中英连排吞成整词（CM6 wordChar 覆盖
+ * CJK），从拉丁侧发起的移动必须在此切开，中文段留给后续步骤按分词逐
+ * 词走；词段与域段间有任何分隔时不切（交原生）。
  */
 export function planCjkWordTarget(
   lineText: string,
@@ -124,11 +129,16 @@ export function planCjkWordTarget(
   if (!Number.isInteger(offset) || offset < 0 || offset > lineText.length) return null
   if (forward) {
     if (offset === lineText.length) return null
-    if (!isCjkTextChar(codePointAt(lineText, offset))) return null
+    const cp = codePointAt(lineText, offset)
+    if (!isCjkTextChar(cp)) {
+      return asciiRunToCjkSeamForward(lineText, offset)
+    }
   } else {
     if (offset === 0) return null
     const prevStart = prevCodePointStart(lineText, offset)
-    if (!isCjkTextChar(codePointAt(lineText, prevStart))) return null
+    if (!isCjkTextChar(codePointAt(lineText, prevStart))) {
+      return asciiRunToCjkSeamBackward(lineText, prevStart)
+    }
   }
   const [segStart, segEnd] = cjkSegmentAround(lineText, offset, forward)
   if (segEnd <= segStart) return null
@@ -152,6 +162,46 @@ export function planCjkWordTarget(
 function codePointAt(text: string, index: number): number {
   const value = text.codePointAt(index)
   return value === undefined ? Number.NaN : value
+}
+
+/** ASCII 词字符（字母/数字/下划线——CM6 wordSeparators 默认的词面） */
+function isAsciiWordChar(codePoint: number): boolean {
+  return (codePoint >= 0x30 && codePoint <= 0x39) ||
+    (codePoint >= 0x41 && codePoint <= 0x5a) ||
+    (codePoint >= 0x61 && codePoint <= 0x7a) ||
+    codePoint === 0x5f
+}
+
+/** 前向域外分支：offset 起（含）的 ASCII 词段终点若紧邻分词域，返回
+ *  终点（交界）；否则 null（交原生）。 */
+function asciiRunToCjkSeamForward(lineText: string, offset: number): number | null {
+  if (!isAsciiWordChar(codePointAt(lineText, offset))) {
+    return null
+  }
+  let end = offset
+  while (end < lineText.length && isAsciiWordChar(codePointAt(lineText, end))) {
+    end++
+  }
+  if (end < lineText.length && isCjkTextChar(codePointAt(lineText, end))) {
+    return end
+  }
+  return null
+}
+
+/** 后向域外分支：start 处（含）向前延伸的 ASCII 词段起点若紧邻分词域，
+ *  返回起点（交界）；否则 null（交原生）。start 是 offset 的前一码点。 */
+function asciiRunToCjkSeamBackward(lineText: string, start: number): number | null {
+  if (!isAsciiWordChar(codePointAt(lineText, start))) {
+    return null
+  }
+  let from = start
+  while (from > 0 && isAsciiWordChar(codePointAt(lineText, prevCodePointStart(lineText, from)))) {
+    from = prevCodePointStart(lineText, from)
+  }
+  if (from > 0 && isCjkTextChar(codePointAt(lineText, prevCodePointStart(lineText, from)))) {
+    return from
+  }
+  return null
 }
 
 /** offset 前一个码点的起始索引（代理对不劈开） */

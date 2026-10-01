@@ -62,6 +62,8 @@ export const FIND_CLASS_NAMES = {
   inputInvalid: 'vsidian-find-input-invalid',
   count: 'vsidian-find-count',
   countEmpty: 'vsidian-find-count-empty',
+  /** 空查询收起态（未搜索不预留「当前/总数」占位，display:none） */
+  countHidden: 'vsidian-find-count-hidden',
   /** 三开关：点亮（*-active）= 该选项开启 */
   caseToggle: 'vsidian-find-case',
   caseActive: 'vsidian-find-case-active',

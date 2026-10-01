@@ -71,6 +71,7 @@ Object.assign(window, {
       invalid: input?.classList.contains('vsidian-find-input-invalid') ?? false,
       count: count?.textContent ?? '',
       countEmpty: count?.classList.contains('vsidian-find-count-empty') ?? false,
+      countHidden: count?.classList.contains('vsidian-find-count-hidden') ?? false,
       caseActive: panel.querySelector('.vsidian-find-case')?.classList.contains('vsidian-find-case-active') ?? false,
       wordActive: panel.querySelector('.vsidian-find-word')?.classList.contains('vsidian-find-word-active') ?? false,
       regexpActive: panel.querySelector('.vsidian-find-regexp')?.classList.contains('vsidian-find-regexp-active') ?? false,

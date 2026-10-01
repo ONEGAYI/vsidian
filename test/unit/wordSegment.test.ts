@@ -164,13 +164,33 @@ describe('planCjkWordTarget 移动规划矩阵（注入确定性边界）', () =
       expect(planCjkWordTarget(line, offset, forward, boundaries)).toBeNull()
     }
   })
-  it('中英混排：域外起点 null、域内起点进入中文段', () => {
+  it('中英混排：域内起点进入中文段；拉丁词与 CJK 粘连时一步停在交界（#241 验收修订）', () => {
     const mixed = 'abc中文def'
     const mixedBounds = boundariesOfWords(['中文'])
-    expect(planCjkWordTarget(mixed, 0, true, mixedBounds)).toBeNull() // 'a' 域外
+    // 'a' 侧：拉丁词尾紧贴中文——一步停在交界（原生 word 语义会把
+    // 'abc中文' 吞成整词，用户验收反馈要求切开）
+    expect(planCjkWordTarget(mixed, 0, true, mixedBounds)).toBe(3)
+    expect(planCjkWordTarget(mixed, 1, true, mixedBounds)).toBe(3)
     expect(planCjkWordTarget(mixed, 3, true, mixedBounds)).toBe(5) // '中' 段尾
     expect(planCjkWordTarget(mixed, 5, false, mixedBounds)).toBe(3) // 左移入段首
-    expect(planCjkWordTarget(mixed, 5, true, mixedBounds)).toBeNull() // 'd' 域外
+    expect(planCjkWordTarget(mixed, 5, true, mixedBounds)).toBeNull() // 'd' 后无 CJK 粘连
+    // 后向对称：'d' 前是 '文'——左移一步停在中文段尾（不吞中文段）
+    expect(planCjkWordTarget(mixed, 5, false, boundariesOfWords(['中文']))).toBe(3)
+    const zhFirst = '中文abc'
+    const zhBounds = boundariesOfWords(['中文'])
+    expect(planCjkWordTarget(zhFirst, 5, false, zhBounds)).toBe(2) // 'c' 左移停中文段尾
+    expect(planCjkWordTarget(zhFirst, 3, false, zhBounds)).toBe(2) // 'a' 左移同停段尾
+    expect(planCjkWordTarget(zhFirst, 2, true, zhBounds)).toBeNull() // 'a' 后无 CJK 粘连（行尾）
+  })
+  it('拉丁词与 CJK 之间有分隔（空白/标点）时不切开（无粘连，交原生）', () => {
+    const b = boundariesOfWords(['中文'])
+    expect(planCjkWordTarget('abc 中文', 0, true, b)).toBeNull()
+    expect(planCjkWordTarget('abc,中文', 1, true, b)).toBeNull()
+    expect(planCjkWordTarget('中文 abc', 6, false, b)).toBeNull()
+    // '数字' 域内起点（数 0 字 1）：域内路径细化到段尾 2；随后 2 处 '1'
+    // 是 ASCII 词段 '123'（2..5）且尾端与 '中' 粘连 → 交界 5
+    expect(planCjkWordTarget('数字123中文', 0, true, b)).toBe(2)
+    expect(planCjkWordTarget('数字123中文', 2, true, b)).toBe(5)
   })
   it('中文标点独立边界（注入 [0,2,3,5]：好的|，|继续）', () => {
     const punct = '好的，继续'

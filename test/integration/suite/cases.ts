@@ -559,6 +559,8 @@ interface ViewState {
   readingAnchorTopPx?: number
   readingScrollTopPx?: number
   readingScrollHeightPx?: number
+  /** #241 验收回归：阅读容器内查找命中块元素数（块级高亮的绘制层证据） */
+  readingFindHitBlocks?: number
   cssProbe?: {
     liveHeadingDecorationColor: string | null
     readingHeadingDecorationColor: string | null
@@ -3945,6 +3947,10 @@ export const cases: Array<[string, () => Promise<void>]> = [
     })
     assert(v.find!.index === 2, `会话保活：当前序号仍为 2，实际 ${v.find!.index}`)
     assert(v.readingAnchorStart === para2Start, `阅读锚点应为当前匹配块 start，实际 ${v.readingAnchorStart}`)
+    // #241 验收回归钉住：块级命中高亮必须落在 DOM（绘制层证据——状态级
+    // total/anchor 正确不保证 .vsidian-reading-find-hit 类挂上）
+    assert((v.readingFindHitBlocks ?? 0) >= 1,
+      `阅读模式查找命中块应有 find-hit DOM 类，实际 ${v.readingFindHitBlocks ?? 0}`)
 
     // 切回 live：选区恢复到当前匹配（源锚点映射，非块首；#38 起回 live 用
     // 显式命令，循环命令在 reading 态会切源码编辑器）

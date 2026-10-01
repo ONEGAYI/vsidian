@@ -220,21 +220,23 @@ describe('打开与关闭（焦点契约）', () => {
 })
 
 describe('图标按钮形态（对齐 VSCode 原生浮层）', () => {
-  it('导航与替换按钮为图标占位：字形本体 + aria-label/title 承载功能词', () => {
+  it('导航与替换按钮为图标形态：本体无文字（CSS 背景图标），aria-label/title 承载功能词', () => {
     const h = makeBridge()
     const c = mountFind(h)
     c.handleHostMessage({ kind: 'view.find.open', query: '目标词' })
-    const cases: Array<{ cls: string; glyph: string; word: string }> = [
-      { cls: '.vsidian-find-prev', glyph: '↑', word: '上一个匹配' },
-      { cls: '.vsidian-find-next', glyph: '↓', word: '下一个匹配' },
-      { cls: '.vsidian-find-close', glyph: '✕', word: '关闭查找' },
-      { cls: '.vsidian-find-replace-next', glyph: '⇄', word: '替换' },
-      { cls: '.vsidian-find-replace-all', glyph: '⇉', word: '全部替换' },
+    const cases: Array<{ cls: string; word: string }> = [
+      { cls: '.vsidian-find-prev', word: '上一个匹配' },
+      { cls: '.vsidian-find-next', word: '下一个匹配' },
+      { cls: '.vsidian-find-close', word: '关闭查找' },
+      { cls: '.vsidian-find-replace-next', word: '替换' },
+      { cls: '.vsidian-find-replace-all', word: '全部替换' },
     ]
-    for (const { cls, glyph, word } of cases) {
+    for (const { cls, word } of cases) {
       const btn = parent!.querySelector<HTMLButtonElement>(cls)!
       expect(btn, cls).toBeDefined()
-      expect(btn.textContent, `${cls} 字形占位`).toBe(glyph)
+      // SVG 资产经 CSS 背景呈现（规则由 findPanelCssContract 钉住），按钮
+      // 本体不得残留占位字形或任何文字
+      expect(btn.textContent, `${cls} 本体应为纯图标（无文字）`).toBe('')
       expect(btn.getAttribute('aria-label'), `${cls} 可访问名称`).toBe(word)
       expect(btn.getAttribute('title'), `${cls} 悬停提示`).toBe(word)
     }
@@ -256,7 +258,7 @@ describe('主行布局（三开关嵌入输入框容器）', () => {
     expect(wrap.querySelector('.vsidian-find-prev')).toBeNull()
   })
 
-  it('空查询不标红：输入框无 invalid 类、计数空白不带空态类', () => {
+  it('空查询不标红不占位：计数收起（隐藏类），键入后展开', () => {
     const h = makeBridge()
     const c = mountFind(h)
     c.handleHostMessage({ kind: 'view.find.open' })
@@ -264,6 +266,17 @@ describe('主行布局（三开关嵌入输入框容器）', () => {
     const count = parent!.querySelector<HTMLElement>('.vsidian-find-count')!
     expect(count.textContent).toBe('')
     expect(count.classList.contains('vsidian-find-count-empty')).toBe(false)
+    // 空查询是未搜索：计数区域整体收起（不预留「当前/总数」空白）
+    expect(count.classList.contains('vsidian-find-count-hidden')).toBe(true)
+    // 键入查询后展开回计数形态
+    findInput()!.value = '目'
+    findInput()!.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(count.classList.contains('vsidian-find-count-hidden')).toBe(false)
+    expect(count.classList.contains('vsidian-find-count-empty')).toBe(false)
+    // 清空回未搜索态：再次收起
+    findInput()!.value = ''
+    findInput()!.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(count.classList.contains('vsidian-find-count-hidden')).toBe(true)
   })
 })
 
@@ -650,6 +663,25 @@ describe('替换栏与替换写回（#236：替换为显式写操作）', () => 
     regBtn.click()
     c.handleHostMessage({ kind: 'view.find.replace', op: 'all' })
     expect(viewState(c, h).text).toBe('30/09/2026\n')
+  })
+
+  it('正则全部替换（多处）：整批替换、计数清零、装饰清空（#241 验收实测回归）', () => {
+    const h = makeBridge()
+    const c = mountFind(h, 'a1 a22 a333\n')
+    openReplace(c, 'a\\d+', 'z')
+    const regBtn = parent!.querySelector<HTMLButtonElement>('.vsidian-find-regexp')!
+    regBtn.click()
+    expect(viewState(c, h).find?.total).toBe(3)
+    const before = editRequestCount(h)
+    c.handleHostMessage({ kind: 'view.find.replace', op: 'all' })
+    expect(editRequestCount(h)).toBe(before + 1)
+    const after = viewState(c, h)
+    expect(after.text).toBe('z z z\n')
+    expect(after.find?.total).toBe(0)
+    // 单笔 edit.request 携带整批变更（三条，非只第一条）
+    const req = h.sent.slice(before).find((m) => m.kind === 'edit.request') as
+      Extract<WebviewToHost, { kind: 'edit.request' }>
+    expect(req.changes.length).toBe(3)
   })
 
   it('替换在阅读模式不执行（只读）；替换栏不展开', () => {

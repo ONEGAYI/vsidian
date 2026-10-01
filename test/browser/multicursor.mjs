@@ -190,6 +190,14 @@ try {
       let state = await read(page)
       assert.equal(state.ranges.length, 2,
         `格内 Alt+点击应添加光标: ${JSON.stringify(state)}`)
+      // 焦点保持（#241 验收回归）：Alt+click 后焦点必须仍在编辑器内，
+      // 否则真宿主里键入落宿主快捷键层（altClickFocusGuard 的防御前提）
+      const focused = await page.evaluate(() => {
+        const dom = document.querySelector('.cm-content')
+        return !!dom && document.activeElement !== null &&
+          (dom === document.activeElement || dom.contains(document.activeElement))
+      })
+      assert.ok(focused, 'Alt+click 后焦点应保持在编辑器内')
       await page.keyboard.type('x')
       state = await read(page)
       assert.equal(state.text, '| ax | b |\n| --- | --- |\n| 1x | 2 |\npara',
@@ -199,6 +207,24 @@ try {
       // 呈现；这里断言光标层数与 range 数的对应不被破坏）
       const drawn = await paint(page)
       assert.ok(drawn.cursorLayerPresent, '光标层应在场')
+
+      // 两个数据行格各放一光标（#241 验收实测形态：两格同步键入）——
+      // Esc 收敛后重摆，覆盖「双格内光标」的组合路径（offset 按已写入
+      // 'x' 的当前文本求值；Esc 后主光标停在 '1x' 后）
+      await page.keyboard.press('Escape')
+      state = await read(page)
+      assert.equal(state.ranges.length, 1, 'Esc 收敛回单光标')
+      const cur = state.text
+      await altClick(page, cur.indexOf('b') + 1) // 表头 'b' 后
+      await altClick(page, cur.indexOf('2') + 1) // 数据行 '2' 后
+      state = await read(page)
+      assert.equal(state.ranges.length, 3,
+        `两次格内 Alt+点击应三光标: ${JSON.stringify(state)}`)
+      await page.keyboard.type('y')
+      state = await read(page)
+      assert.equal(state.text,
+        cur.replace('b ', 'by ').replace('1x ', '1xy ').replace('2 ', '2y '),
+        `三光标（含两格内）键入应各落: ${JSON.stringify(state)}`)
     })
 
   // ---- 场景 D：Ctrl+Alt+Down/Up 逐行添加光标（目标列保持与短行钳制）----

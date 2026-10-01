@@ -136,20 +136,25 @@ describe('中文段逐词移动（注入 mock 边界 = jieba 注入路径）', (
     expect(view.state.selection.main.to).toBe(2)
   })
 
-  it('中英混排：中文段细化、域外起点与原生逐字节一致', () => {
+  it('中英混排：中文段细化；拉丁词与 CJK 粘连时一步停在交界（#241 验收修订）', () => {
     __setJiebaBoundariesForTest(words(['中文', '更多']))
     configureWordSegment({ engine: 'jieba', resources: null })
     const mixed = 'abc中文def更多'
     const view = makeView(mixed, { anchor: 3 })
     cursorWordRight(view)
     expect(view.state.selection.main.head).toBe(5) // '中文' 段尾（词收录整段）
-    // head=5 右侧是拉丁（域外）→ 委托原生：CM6 把 'def更多' 视为同一
-    // Word 类整块跳过（中英混排的原生行为，改动前后一致——拉丁行为
-    // 不变即钉住此点），用原生对照断言而非硬编码
-    const nativeProbe = makeView(mixed, { anchor: 5 })
-    cursorGroupRight(nativeProbe)
+    // head=5 右侧是拉丁 'def' 且与 '更多' 粘连：一步停在交界 8（不再把
+    // 'def更多' 视为同一 Word 整块跳过——用户验收实测的原生行为已修订）
     cursorWordRight(view)
-    expect(view.state.selection.main.head).toBe(nativeProbe.state.selection.main.head)
+    expect(view.state.selection.main.head).toBe(8)
+    // 再一步进入 '更多' 段尾；后续拉丁域外（行尾）交原生
+    cursorWordRight(view)
+    expect(view.state.selection.main.head).toBe(10)
+    // 拉丁侧发起（无粘连分隔时不切，交原生）：' ' 隔开的拉丁词照旧
+    const spaced = 'abc 中文'
+    const spacedView = makeView(spaced, { anchor: 0 })
+    cursorWordRight(spacedView)
+    expect(spacedView.state.selection.main.head).toBe(3)
   })
 
   it('多 range：中文 range 细化与拉丁 range 原生目标同事务并存', () => {

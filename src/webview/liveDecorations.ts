@@ -1279,8 +1279,14 @@ function hitRevealSpans(tr: Transaction, doc: Text): LineSpan[] {
     pushHit(hit.from, hit.to)
   }
   const oldDoc = tr.startState.doc
+  // 旧命中坐标可能来自更早的文档（docChanged 后 findStale 漂移窗口内
+  // 引用未变，如替换事务后的清空事务）：超出本事务 changeset 覆盖长度
+  // （= oldDoc.length）时 mapPos 抛 RangeError，中断整笔 dispatch——
+  // 钳到旧文档尾再映射（行级消费语义下无损：该命中即将被重算落位替换）
+  const mapOldPos = (pos: number, assoc: number): number =>
+    tr.changes.mapPos(Math.min(pos, oldDoc.length), assoc)
   for (const hit of before.hits) {
-    pushHit(tr.changes.mapPos(hit.from, -1), tr.changes.mapPos(hit.to, 1))
+    pushHit(mapOldPos(hit.from, -1), mapOldPos(hit.to, 1))
   }
   for (const n of after.stickyLines) {
     if (n >= 1 && n <= doc.lines) {

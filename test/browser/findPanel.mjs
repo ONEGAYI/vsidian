@@ -64,8 +64,11 @@ try {
     // ---- 场景 1：真实 Ctrl+F 打开；焦点进输入框；键入查询计数 ----
     await page.keyboard.press('Control+f')
     let panel = await waitPanel(page, (p) => p.open && p.activeIsInput, 'Ctrl+F 打开聚焦')
+    // 空查询未搜索：计数区收起（display:none，不预留「当前/总数」占位）
+    assert.ok(panel.countHidden, '空查询计数应收起（count-hidden 类）')
     await page.keyboard.type('foo')
     panel = await waitPanel(page, (p) => p.count === '第 1 项，共 4 项', '默认档键入计数 第1项共4项')
+    assert.ok(!panel.countHidden, '键入后计数应展开')
     assert.ok(panel.matchMarks >= 1, `全部匹配装饰应在场，实际 ${panel.matchMarks}`)
     assert.equal(panel.currentMarks, 1, '当前匹配装饰应恰 1 处')
 
@@ -145,6 +148,56 @@ try {
         (view === document.activeElement || view.contains(document.activeElement))
     })
     assert.ok(focusedEditor, 'Esc 后焦点应归还编辑器')
+
+    // ---- 场景 7.5：正则全部替换后高亮清空（#241 验收实测回归：替换后残余）----
+    await page.evaluate(() => window.initDoc('a1 a22 a333\n'))
+    await page.evaluate(() => window.focusEditor())
+    await page.keyboard.press('Control+f')
+    panel = await waitPanel(page, (p) => p.open && p.activeIsInput, '正则复现前置：Ctrl+F')
+    // 正则未开则点开（沿上一场景开关档，init 不重置 findOptions）
+    if (!(await page.evaluate(() =>
+      document.querySelector('.vsidian-find-regexp')?.classList.contains('vsidian-find-regexp-active')))) {
+      await page.click('.vsidian-find-regexp')
+    }
+    await page.keyboard.press('Control+h')
+    panel = await waitPanel(page, (p) => p.replaceOpen, '正则复现：替换栏展开')
+    // Ctrl+H 会从选区播种查询词（原生同款），展开后重输目标正则
+    await page.click('.vsidian-find-input')
+    await page.keyboard.press('Control+a')
+    await page.keyboard.type('a\\d+')
+    panel = await waitPanel(page, (p) => p.regexpActive && p.count === '第 1 项，共 3 项', '正则 3 处命中')
+    await page.click('.vsidian-find-replace-input')
+    await page.keyboard.press('Control+a')
+    await page.keyboard.type('z')
+    await page.click('.vsidian-find-replace-all')
+    panel = await waitPanel(page, (p) => p.count === '无结果', '全部替换后应无结果')
+    assert.equal(panel.matchMarks, 0, `全部替换后不得残余匹配装饰，实际 ${panel.matchMarks}`)
+    assert.equal(panel.currentMarks, 0, `全部替换后不得残余当前匹配装饰，实际 ${panel.currentMarks}`)
+    editor = await page.evaluate(() => window.readEditor())
+    assert.equal(editor.text, 'z z z\n', '正则全部替换文本应正确')
+    await page.evaluate(() => window.ackLastEdit(2))
+    await page.keyboard.press('Escape')
+    await waitPanel(page, (p) => !p.open, '正则复现收尾：Esc 关闭')
+
+    // ---- 场景 7.6：阅读模式查找块级高亮（#241 验收实测回归：阅读无搜索高亮）----
+    await page.evaluate(() => window.initDoc('alpha 开头段。\n\n表格外的普通段落 beta。\n'))
+    await page.evaluate(() => window.setViewMode('reading'))
+    // 键路由要求焦点在阅读容器内（readingFocused 判定）
+    await page.evaluate(() => {
+      const container = document.querySelector('.vsidian-view-reading')
+      if (container instanceof HTMLElement) container.focus()
+    })
+    await page.keyboard.press('Control+f')
+    panel = await waitPanel(page, (p) => p.open && p.activeIsInput, '阅读模式 Ctrl+F')
+    await page.click('.vsidian-find-input')
+    await page.keyboard.press('Control+a')
+    await page.keyboard.type('beta')
+    panel = await waitPanel(page, (p) => p.count === '第 1 项，共 1 项', '阅读模式计数')
+    const hitBlocks = await page.evaluate(() =>
+      document.querySelectorAll('.vsidian-reading-find-hit').length)
+    assert.ok(hitBlocks >= 1, `阅读模式查找应有命中块高亮，实际 ${hitBlocks}`)
+    await page.keyboard.press('Escape')
+    await waitPanel(page, (p) => !p.open, '阅读模式 Esc 关闭')
 
     // ---- 场景 8：阅读模式 Ctrl+H：面板开但替换栏不展开（只读）----
     await page.evaluate(() => window.setViewMode('reading'))

@@ -3384,6 +3384,11 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   white-space: nowrap;
 }
 
+/* 空查询 = 未搜索：计数区整体收起，不预留「当前/总数」占位（原生同款） */
+.vsidian-find .vsidian-find-count-hidden {
+  display: none;
+}
+
 .vsidian-find .vsidian-find-count-empty {
   color: var(--vscode-errorForeground, #f48771);
 }

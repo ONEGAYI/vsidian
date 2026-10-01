@@ -2988,6 +2988,9 @@ export class WebviewSyncController {
       readingAnchorTopPx,
       readingScrollTopPx: rScroll?.scrollTop,
       readingScrollHeightPx: rScroll?.scrollHeight,
+      readingFindHitBlocks: readingActive && this.readingContainer
+        ? this.readingContainer.querySelectorAll('.vsidian-reading-find-hit').length
+        : undefined,
       cssProbe: this.collectCssProbe(),
       liveSyntax: this.collectLiveSyntax(),
       tableGrid,
@@ -7338,6 +7341,9 @@ export class WebviewSyncController {
       // 空态类仅在「查询非空而零命中」时点亮（空查询是未搜索，不是无结果）
       this.findCountEl.classList.toggle(
         FIND_CLASS_NAMES.countEmpty, total === 0 && this.findQuery !== '')
+      // 空查询整体收起（未搜索不预留「当前/总数」空白——min-width 不占位）
+      this.findCountEl.classList.toggle(
+        FIND_CLASS_NAMES.countHidden, this.findQuery === '')
     }
     // 非法正则可见反馈：输入框红边 + title 提示（不崩、计数显示「无结果」）；
     // 空查询不算非法（未搜索，不给红边）

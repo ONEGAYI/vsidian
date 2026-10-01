@@ -623,6 +623,10 @@ export type WebviewToHost =
       /** 阅读容器滚动位置与内容总高（#7：px） */
       readingScrollTopPx?: number
       readingScrollHeightPx?: number
+      /** 阅读容器内查找命中块元素数（#241 验收回归观测：块级命中高亮的
+       *  绘制层证据——状态级 total 不保证 DOM 类落地；仅 reading 模式上报，
+       *  旧 webview 缺省） */
+      readingFindHitBlocks?: number
       /** 稳定样式契约探针（#6 内部测试 CSS 验证入口）：目标元素不存在时字段为 null */
       cssProbe?: CssProbeReport
       /** live 侧语法装饰统计（#8 双视图语义一致性观测；装饰集合级计数，非 DOM） */
@@ -2592,6 +2596,7 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         (v.readingAnchorTopPx === undefined || isNonNegativeNumber(v.readingAnchorTopPx)) &&
         (v.readingScrollTopPx === undefined || isNonNegativeNumber(v.readingScrollTopPx)) &&
         (v.readingScrollHeightPx === undefined || isNonNegativeNumber(v.readingScrollHeightPx)) &&
+        (v.readingFindHitBlocks === undefined || isNonNegativeInt(v.readingFindHitBlocks)) &&
         (v.cssProbe === undefined || isCssProbeReport(v.cssProbe)) &&
         (v.liveSyntax === undefined || isLiveSyntaxProbe(v.liveSyntax)) &&
         (v.tableGrid === undefined || isTableGridProbe(v.tableGrid)) &&

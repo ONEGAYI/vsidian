@@ -148,14 +148,19 @@ try {
     const expected = 3 + (segBoundaries[1] ?? 2)
     assert.equal(st.head, expected,
       `mixed 中文段细化落点（段边界 ${JSON.stringify(segBoundaries)}）: ${JSON.stringify(st)}`)
-    // 落点 5 右侧 'd' 拉丁域 → Ctrl+Right 与原生 group 语义一致（跳过
-    // 'def更多' 整块——CM6 把 CJK 与拉丁同归 Word 类）
+    // 落点 5 右侧 'd' 拉丁域且 'def' 与 '更多' 粘连：Ctrl+Right 一步停在
+    // 交界 8（#241 验收修订——不再把 'def更多' 当同一 Word 整块跳过），
+    // 再一步落 '更多' 段尾 10（段内词整段）
     await page.keyboard.press('Control+ArrowRight')
-    const st2 = await page.evaluate(() => window.readEditor())
+    let st2 = await page.evaluate(() => window.readEditor())
+    assert.equal(st2.head, 8,
+      `mixed 拉丁词与 CJK 粘连停在交界: ${JSON.stringify(st2)}`)
+    await page.keyboard.press('Control+ArrowRight')
+    st2 = await page.evaluate(() => window.readEditor())
     assert.equal(st2.head, MIXED_DOC.length,
-      `mixed 拉丁段跳到行尾: ${JSON.stringify(st2)}`)
+      `mixed 交界后再进中文段尾: ${JSON.stringify(st2)}`)
     await page.close()
-    await check(errors, '中英混排：中文段细化、拉丁段原生整块')
+    await check(errors, '中英混排：中文段细化、拉丁粘连停在交界')
   }
 
   // ---- jieba 注入路径：真实键盘 + 确定性词表 ----
