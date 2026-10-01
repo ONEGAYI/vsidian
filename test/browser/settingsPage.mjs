@@ -84,6 +84,51 @@ try {
     // #163 二轮还原：分类收敛为编辑器页内小节——codeblock.* 控件在
     // 「编辑器」分组页的「代码块」小节内，先进组再取控件
     await page.getByRole('button', { name: zhCn['settings.editorCategory'], exact: true }).click()
+    // #263 组标题图标（绘制层）：四组标题图标 16px 渲染盒可见、图标左缘贴
+    // 左 padding 缘、标题文字起点右移；符号输入组无图标、文字起点不变；
+    // 图标 stroke 随主题前景色（currentColor 生效）；有/无图标组行高一致
+    const iconPaint = await page.evaluate(() => {
+      const textStart = (h3) => {
+        for (const node of h3.childNodes) {
+          if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) {
+            const range = document.createRange()
+            range.selectNodeContents(node)
+            return range.getBoundingClientRect().left
+          }
+        }
+        return NaN
+      }
+      return [...document.querySelectorAll('.vsidian-settings-group-title')].map((h3) => {
+        const box = h3.getBoundingClientRect()
+        const svg = h3.querySelector('svg')
+        const r = svg?.getBoundingClientRect()
+        return {
+          icon: !!svg,
+          width: r?.width ?? 0,
+          height: r?.height ?? 0,
+          iconLeft: r ? r.left - box.left : NaN,
+          textLeft: textStart(h3) - box.left,
+          stroke: svg ? getComputedStyle(svg).stroke : '',
+          fill: svg ? getComputedStyle(svg).fill : '',
+          rowHeight: box.height,
+        }
+      })
+    })
+    const expectedFg = theme === 'light' ? 'rgb(48, 52, 59)' : 'rgb(221, 221, 221)'
+    assert.equal(iconPaint.length, 5, '编辑器页应有五个二级组标题')
+    const withIcon = iconPaint.filter((g) => g.icon)
+    assert.equal(withIcon.length, 4, '显示/编辑/代码块/图片四组应有图标')
+    for (const g of withIcon) {
+      assert.equal(g.width, 16, '图标渲染盒应为 16px（绘制层：样式未注入时退默认尺寸即失败）')
+      assert.equal(g.height, 16)
+      assert.equal(Math.round(g.iconLeft), 20, '图标应贴左 padding 缘')
+      assert.equal(Math.round(g.textLeft), 44, '标题文字应右移（20 padding + 16 图标 + 8 gap）')
+      assert.equal(g.stroke, expectedFg, '图标描边应随主题前景色（currentColor）')
+      assert.equal(g.fill, 'none')
+    }
+    assert.equal(iconPaint[2].icon, false, '符号输入组不应有图标（生图票 #265 接入）')
+    assert.equal(Math.round(iconPaint[2].textLeft), 20, '无图标组文字起点应保持左 padding 缘')
+    assert.equal(new Set(iconPaint.map((g) => g.rowHeight)).size, 1, '有/无图标组标题行高应一致（图标不撑行）')
     const cardBox = page.getByRole('checkbox', { name: zhCn['setting.codeblockCard.title'], exact: true })
     const lineNumbersBox = page.getByRole('checkbox', { name: zhCn['setting.codeblockLineNumbers.title'], exact: true })
     const copyButtonBox = page.getByRole('checkbox', { name: zhCn['setting.codeblockCopyButton.title'], exact: true })

@@ -89,7 +89,11 @@ button:focus-visible, input:focus-visible {
 /* #163 二轮还原：编辑器页按小节分多个容器纵向排布，容器间留呼吸间距 */
 .vsidian-settings-list .vsidian-settings-group + .vsidian-settings-group { margin-top: 20px; }
 .vsidian-settings-section-content { padding: 16px 20px; }
-.vsidian-settings-group-title { font-size: 13px; font-weight: 600; margin: 0 -20px; padding: 12px 20px; border-bottom: 1px solid var(--vscode-panel-border, #d9dde3); }
+/* #263 组标题图标布局：flex + gap——图标置左 padding 缘、标题文字右移；
+ * 行级 margin、padding、border-bottom 视觉规则不变（「对齐方式不变」口径），
+ * 无图标组同规则、视觉不变（符号输入组待生图票接入） */
+.vsidian-settings-group-title { font-size: 13px; font-weight: 600; margin: 0 -20px; padding: 12px 20px; border-bottom: 1px solid var(--vscode-panel-border, #d9dde3); display: flex; align-items: center; gap: 8px; }
+.vsidian-settings-group-title svg { width: 16px; height: 16px; }
 .vsidian-settings-item { padding: 18px 0; border-bottom: 1px solid color-mix(in srgb, var(--vsidian-settings-tint) 8%, transparent); }
 .vsidian-settings-item:last-child { border-bottom: 0; }
 /* 依赖灰化（#155 跟进）：dependsOn 依赖关闭时整行降不透明度、控件禁用；

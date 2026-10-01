@@ -493,6 +493,58 @@ describe('分组重组二轮还原（#163 验收反馈：侧栏只留常规/编�
   })
 })
 
+describe('组标题图标机制（#263：编辑器页二级 h3 组字形）', () => {
+  /** 编辑器页五组 h3 标题元素（editorSectionDefs 顺序即渲染顺序） */
+  function groupTitleEls(parent: HTMLElement): HTMLElement[] {
+    clickNav(parent, zhCn['settings.editorCategory'])
+    return [...parent.querySelectorAll<HTMLElement>('.vsidian-settings-group-title')]
+  }
+
+  it('显示/编辑/代码块/图片四组标题渲染图标且图标在前；符号输入组不加（生图票 #265 接入）', () => {
+    const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
+    const titles = groupTitleEls(parent)
+    expect(titles).toHaveLength(5)
+    const withIcon = [0, 1, 3, 4]
+    for (const i of withIcon) {
+      const svg = titles[i]!.querySelector('svg')
+      expect(svg, `第 ${i} 组标题应带图标`).toBeTruthy()
+      // 图标在前、纯装饰（文字节点随后）
+      expect(titles[i]!.firstElementChild).toBe(svg)
+      expect(svg!.getAttribute('aria-hidden')).toBe('true')
+    }
+    expect(titles[2]!.querySelector('svg')).toBeNull()
+    expect(titles[2]!.textContent).toBe(zhCn['settings.groupSymbols'])
+  })
+
+  it('字形与 v2 拍板清单一致：显示器/双 I 光标/尖括号/山形相框（24 viewBox 单 path）', () => {
+    const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
+    const titles = groupTitleEls(parent)
+    const dOf = (i: number) => titles[i]!.querySelector('svg path')!.getAttribute('d')!
+    expect(dOf(0)).toBe('M4 3h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2ZM8 21h8M12 17v4')
+    expect(dOf(1)).toBe('M7 4v16M5 4h4M5 20h4M17 4v16M15 4h4M15 20h4')
+    expect(dOf(3)).toBe('M8 7l-5 5 5 5M16 7l5 5-5 5')
+    expect(dOf(4)).toBe('M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2ZM11 9a2 2 0 1 1-4 0 2 2 0 0 1 4 0M21 15l-3.09-3.09a2 2 0 0 0-2.82 0L6 21')
+  })
+
+  it('样式契约：h3 flex+gap 布局、图标 16px 覆盖、行级 margin/padding/border 规则不变', async () => {
+    const { readFileSync } = await import('node:fs')
+    const css = readFileSync('src/webview/settingsPage.css', 'utf8')
+    // 布局机制：flex + gap（图标置左 padding 缘、文字右移；无图标组同规则、视觉不变）
+    const title = css.match(/\.vsidian-settings-group-title\s*\{[^}]*\}/)![0]
+    expect(title).toContain('display: flex')
+    expect(title).toContain('align-items: center')
+    expect(title).toMatch(/gap:\s*\d+px/)
+    // 「对齐方式不变」验收口径：行级 margin、padding、border-bottom 视觉规则原样保留
+    expect(title).toContain('margin: 0 -20px')
+    expect(title).toContain('padding: 12px 20px')
+    expect(title).toContain('border-bottom: 1px solid')
+    // 图标视觉尺寸 16px（覆盖设置页统一 20px 规则）
+    expect(css).toMatch(/\.vsidian-settings-group-title svg\s*\{[^}]*width:\s*16px[^}]*height:\s*16px/)
+    // 统一渲染规则仍为字形族共本（fill:none、stroke:currentColor、1.7 圆角线帽）
+    expect(css).toMatch(/\.vsidian-settings svg\s*\{[^}]*fill:\s*none[^}]*stroke:\s*currentColor[^}]*stroke-width:\s*1\.7/)
+  })
+})
+
 describe('可读行宽定义（#175）', () => {
   it('注册「可读行宽」：number 定义带 zeroLabelKey/unit（0 档显示词走注册表，渲染层无特判）', () => {
     const def = PRODUCTION_SETTING_DEFINITIONS.find((d) => d.key === 'editor.readableLineWidth')

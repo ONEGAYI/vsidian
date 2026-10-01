@@ -54,27 +54,53 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, tex
   if (text) el.textContent = text
   return el
 }
-function icon(kind: 'editor' | 'keyboard' | 'search' | 'general' | 'palette' | 'links'): SVGSVGElement {
+
+/** 字形 path 注册表（24 viewBox 单 path；icon() 单表的数据源，装配仍只走
+ *  icon() 一条路径，新增 kind = 联合类型加名 + 本表加行）。
+ *  search：放大镜（侧栏搜索框前缀）；
+ *  keyboard：键盘（快捷键分页；#239 起兼作中文分词分页占位）；
+ *  general（#96「常规」分组；#230 换形）：双拨杆开关——通用偏好开关的
+ *  惯用意象（上枚圆点居左、下枚圆点居右；lucide toggle-left/right 的纵排
+ *  同构，替换原地球字形的「语言/网络」语义）；
+ *  palette（#231 外观合并分页）：调色板——带颜料孔圆点与拇指孔内凹的画板
+ *  （lucide palette 主体轮廓线性化，颜料孔以 stroke-linecap 圆点子路径
+ *  表达，仍为单 path 线性风格；#128 起槽位沿用的「样式定制」意象不变，
+ *  原画笔字形随合并退役）；
+ *  editor：铅笔起笔（「编辑器」分组）；
+ *  links（形态改版批次）：互锁双链环（lucide link 形）——与侧栏反链/出链
+ *  链环图标同一造型语言（索引维护分页的链接域意象）；
+ *  display/editing/codeblock/image（#263 编辑器页二级组标题四枚，v2 拍板
+ *  清单原样 path）：显示 = 显示器、编辑 = 双 I 光标、代码块 = 尖括号、
+ *  图片 = 山形相框（符号输入组待生图票 #265 接入，不在本表）。
+ *  book（#132 样式参考分页）随 #231 侧栏条目合并退役；
+ *  #163 一轮曾为符号/代码块/图片三组新增 keyboard 复用与 code/image 形，
+ *  二轮还原为页内小节后侧栏不再使用，已随分支退役。 */
+const ICON_PATHS = {
+  search: 'M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0',
+  keyboard: 'M3 5h18v14H3zM6 9h1m3 0h1m3 0h1m3 0h1m3 0h1M6 12h1m3 0h1m3 0h1m3 0h1M7 16h10',
+  general: 'M7 2h10a4 4 0 0 1 0 8H7a4 4 0 0 1 0-8ZM8 4a2 2 0 1 0 0 4 2 2 0 1 0 0-4M7 14h10a4 4 0 0 1 0 8H7a4 4 0 0 1 0-8ZM16 16a2 2 0 1 0 0 4 2 2 0 1 0 0-4',
+  palette: 'M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z M13.5 6.5h.01 M17.5 10.5h.01 M8.5 7.5h.01 M6.5 12.5h.01',
+  editor: 'M14 4l6 6M3 21l5-1L21 7a2 2 0 0 0-4-4L4 16z',
+  links: 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71',
+  display: 'M4 3h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2ZM8 21h8M12 17v4',
+  editing: 'M7 4v16M5 4h4M5 20h4M17 4v16M15 4h4M15 20h4',
+  codeblock: 'M8 7l-5 5 5 5M16 7l5 5-5 5',
+  image: 'M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2ZM11 9a2 2 0 1 1-4 0 2 2 0 0 1 4 0M21 15l-3.09-3.09a2 2 0 0 0-2.82 0L6 21',
+} as const
+
+function icon(kind: keyof typeof ICON_PATHS): SVGSVGElement {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
   svg.setAttribute('viewBox', '0 0 24 24')
   svg.setAttribute('aria-hidden', 'true')
   const path = document.createElementNS(svg.namespaceURI, 'path')
-  // general（#96「常规」分组；#230 换形）：双拨杆开关——通用偏好开关的
-  // 惯用意象（上枚圆点居左、下枚圆点居右；lucide toggle-left/right 的纵排
-  // 同构，替换原地球字形的「语言/网络」语义）；
-  // palette（#231 外观合并分页）：调色板——带颜料孔圆点与拇指孔内凹的画板
-  // （lucide palette 主体轮廓线性化，颜料孔以 stroke-linecap 圆点子路径
-  //  表达，仍为单 path 线性风格；#128 起槽位沿用的「样式定制」意象不变，
-  //  原画笔字形随合并退役）。
-  // #163 一轮曾为符号/代码块/图片三组新增 keyboard 复用与 code/image 形，
-  // 二轮还原为页内小节后侧栏不再使用，已随分支退役。
-  // book（#132 样式参考分页）随 #231 侧栏条目合并退役。
-  // links（形态改版批次）：互锁双链环（lucide link 形）——与侧栏反链/出链
-  // 链环图标同一造型语言（索引维护分页的链接域意象）
-  path.setAttribute('d', kind === 'search' ? 'M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0' : kind === 'keyboard' ? 'M3 5h18v14H3zM6 9h1m3 0h1m3 0h1m3 0h1M6 12h1m3 0h1m3 0h1m3 0h1M7 16h10' : kind === 'general' ? 'M7 2h10a4 4 0 0 1 0 8H7a4 4 0 0 1 0-8ZM8 4a2 2 0 1 0 0 4 2 2 0 1 0 0-4M7 14h10a4 4 0 0 1 0 8H7a4 4 0 0 1 0-8ZM16 16a2 2 0 1 0 0 4 2 2 0 1 0 0-4' : kind === 'palette' ? 'M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z M13.5 6.5h.01 M17.5 10.5h.01 M8.5 7.5h.01 M6.5 12.5h.01' : kind === 'links' ? 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71' : 'M14 4l6 6M3 21l5-1L21 7a2 2 0 0 0-4-4L4 16z')
+  path.setAttribute('d', ICON_PATHS[kind])
   svg.append(path)
   return svg
 }
+
+/** #263 编辑器页二级组标题字形 kind（icon() 单表子集；#265 生图两枚接入
+ *  时扩展符号输入/分词两 kind 并回填 editorSectionDefs） */
+export type SettingsGroupIcon = 'display' | 'editing' | 'codeblock' | 'image'
 
 export class SettingsPageView {
   private values: SettingsPayload | undefined
@@ -256,14 +282,16 @@ export class SettingsPageView {
     // 编辑器页与搜索内建分组不重复呈现
     return this.defs.filter((d) => !d.key.startsWith('general.') && !d.key.startsWith('editor.wordSegment'))
   }
-  /** 编辑器页内小节（顺序即渲染顺序）；空小节由调用方跳过不渲染 */
-  private editorSectionDefs(): Array<{ titleKey: MessageKey; defs: () => readonly SettingDefinition[] }> {
+  /** 编辑器页内小节（顺序即渲染顺序）；空小节由调用方跳过不渲染。
+   *  #263：icon 为二级组标题字形（icon() 单表 kind，注册表驱动；缺省 =
+   *  无图标——符号输入组待生图票 #265 接入，布局机制对其无差别） */
+  private editorSectionDefs(): Array<{ titleKey: MessageKey; icon?: SettingsGroupIcon; defs: () => readonly SettingDefinition[] }> {
     return [
-      { titleKey: 'settings.groupDisplay', defs: () => this.displayDefs() },
-      { titleKey: 'settings.groupEditing', defs: () => this.editingDefs() },
+      { titleKey: 'settings.groupDisplay', icon: 'display', defs: () => this.displayDefs() },
+      { titleKey: 'settings.groupEditing', icon: 'editing', defs: () => this.editingDefs() },
       { titleKey: 'settings.groupSymbols', defs: () => this.symbolDefs() },
-      { titleKey: 'settings.groupCodeblock', defs: () => this.codeblockDefs() },
-      { titleKey: 'settings.groupImage', defs: () => this.imageDefs() },
+      { titleKey: 'settings.groupCodeblock', icon: 'codeblock', defs: () => this.codeblockDefs() },
+      { titleKey: 'settings.groupImage', icon: 'image', defs: () => this.imageDefs() },
     ]
   }
   private categories() {
@@ -379,7 +407,12 @@ export class SettingsPageView {
       const defs = section.defs()
       if (!defs.length) continue
       const container = element('div', 'vsidian-settings-group')
-      container.append(element('h3', 'vsidian-settings-group-title', t(section.titleKey)))
+      // #263 组标题图标：h3 为 flex + gap 布局（图标置左 padding 缘、文字
+      // 右移；无图标组同规则，视觉不变），图标沿用设置页统一 svg 渲染规则
+      const title = element('h3', 'vsidian-settings-group-title')
+      if (section.icon) title.append(icon(section.icon))
+      title.append(document.createTextNode(t(section.titleKey)))
+      container.append(title)
       list.append(container)
       this.renderDefItems(container, defs, focusEntry)
       rendered = true
