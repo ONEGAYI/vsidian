@@ -110,6 +110,16 @@ export class JiebaResourceService {
     return installed
   }
 
+  /** 目录删除（不存在视为成功——幂等清理）。幂等由两侧兑现：服务层
+   *  stat 前检避免常规路径对不存在目标发起删除（首次下载 staging/版本
+   *  目录均不存在，直接 rmdir 会以 ENOENT 误报下载失败）；实现侧仍须
+   *  容忍 FileNotFound（覆盖 stat→rmdir 竞态窗口）。 */
+  private async rmdirIfExists(path: string): Promise<void> {
+    if (await this.port.stat(path)) {
+      await this.port.rmdir(path)
+    }
+  }
+
   private async verifyFiles(): Promise<boolean> {
     for (const file of this.manifest) {
       const path = `${JIEBA_INSTALL_DIR}/${file.name}`
@@ -132,7 +142,7 @@ export class JiebaResourceService {
     this.changed()
     try {
       const { mode, customUrl } = this.sourceOf()
-      const plan = planJiebaDownload(mode, customUrl)
+      const plan = planJiebaDownload(mode, customUrl, this.manifest)
       if (!plan.ok) {
         throw new Error(`invalid download source: ${plan.reason}`)
       }
@@ -154,12 +164,12 @@ export class JiebaResourceService {
           files.set(file.name, bytes)
         }
       }
-      await this.port.rmdir(JIEBA_STAGING_DIR)
+      await this.rmdirIfExists(JIEBA_STAGING_DIR)
       await this.port.mkdirp(JIEBA_STAGING_DIR)
       for (const [name, bytes] of files) {
         await this.port.write(`${JIEBA_STAGING_DIR}/${name}`, bytes)
       }
-      await this.port.rmdir(JIEBA_INSTALL_DIR)
+      await this.rmdirIfExists(JIEBA_INSTALL_DIR)
       await this.port.rename(JIEBA_STAGING_DIR, JIEBA_INSTALL_DIR)
       this.state = { ...this.state, installed: true, notice: { kind: 'downloaded', version: JIEBA_WASM_VERSION } }
     } catch (error) {
@@ -183,7 +193,7 @@ export class JiebaResourceService {
   async delete(): Promise<void> {
     if (this.state.status === 'downloading') return
     try {
-      await this.port.rmdir(JIEBA_INSTALL_DIR)
+      await this.rmdirIfExists(JIEBA_INSTALL_DIR)
       this.state = { ...this.state, installed: false, notice: { kind: 'deleted' } }
     } catch (error) {
       this.state = { ...this.state, notice: { kind: 'delete-failed', detail: errorMessage(error) } }

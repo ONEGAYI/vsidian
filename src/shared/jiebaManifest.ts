@@ -65,10 +65,13 @@ export type JiebaDownloadPlan =
 /**
  * 解析下载源 → 下载计划。custom 源 URL 形态 = 基址（去尾斜杠）+ '/' +
  * 文件名（用户自托管目录内含两个同名文件；文案写明该约定）。
+ * manifest 缺省用锁定清单；服务层透传自身清单注入（单测以小清单通过
+ * files 分支校验——锁定 sha256 无法反向构造测试字节）。
  */
 export function planJiebaDownload(
   mode: JiebaSourceMode,
   customBaseUrl: string,
+  manifest: readonly JiebaManifestFile[] = JIEBA_MANIFEST_FILES,
 ): JiebaDownloadPlan {
   if (mode === 'npmmirror') {
     return { ok: true, kind: 'tarball', tarballUrl: jiebaTarballUrl('npmmirror')! }
@@ -87,6 +90,6 @@ export function planJiebaDownload(
   return {
     ok: true,
     kind: 'files',
-    files: JIEBA_MANIFEST_FILES.map((file) => ({ file, url: resolveFile(file) })),
+    files: manifest.map((file) => ({ file, url: resolveFile(file) })),
   }
 }
