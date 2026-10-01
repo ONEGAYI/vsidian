@@ -236,22 +236,41 @@ test('runTest 非零退出的放行判定经 evaluateHostReport 而非内联数�
 test('runTest 支持 VSIDIAN_TEST_VSCODE_PATH 指定已解压宿主跳过下载（下界验证通道）', () => {
   const source = readFileSync(path.join(here, 'runTest.mjs'), 'utf8')
   assert.match(source, /VSIDIAN_TEST_VSCODE_PATH/)
-  // 有 override 时不得仍触发 1.86.2 下载（短路在 downloadAndUnzipVSCode 之前）
+  // 有 override 时不得仍触发默认宿主下载（短路在 downloadAndUnzipVSCode 之前）
   assert.match(source, /overrideExecutable \|\| await downloadAndUnzipVSCode/)
 })
 
 test('runInstalled 支持 VSIDIAN_TEST_VSCODE_PATH 指定已解压宿主跳过下载（#255 下界安装态回归）', () => {
   const source = readFileSync(path.join(here, 'runInstalled.mjs'), 'utf8')
   assert.match(source, /VSIDIAN_TEST_VSCODE_PATH/)
-  // 有 override 时不得仍触发 1.86.2 下载（短路在 downloadAndUnzipVSCode 之前）
+  // 有 override 时不得仍触发默认宿主下载（短路在 downloadAndUnzipVSCode 之前）
   assert.match(source, /overrideExecutable \|\| await downloadAndUnzipVSCode/)
 })
 
 test('runSettingsActivation 支持 VSIDIAN_TEST_VSCODE_PATH 指定已解压宿主跳过下载（#255 下界空窗口激活复验）', () => {
   const source = readFileSync(path.join(here, 'runSettingsActivation.mjs'), 'utf8')
   assert.match(source, /VSIDIAN_TEST_VSCODE_PATH/)
-  // 有 override 时不得仍触发 1.86.2 下载（短路在 downloadAndUnzipVSCode 之前）
+  // 有 override 时不得仍触发默认宿主下载（短路在 downloadAndUnzipVSCode 之前）
   assert.match(source, /overrideExecutable \|\| await downloadAndUnzipVSCode/)
+})
+
+test('三个集成启动器的默认下载宿主钉在 engines 承诺下界（#255 矩阵钉住）', () => {
+  const pkg = JSON.parse(readFileSync(path.join(here, '..', '..', 'package.json'), 'utf8'))
+  const engines = pkg.engines?.vscode ?? ''
+  const m = /^\^?(\d+\.\d+\.\d+)$/.exec(engines)
+  assert.ok(m, `engines.vscode 形态异常：${JSON.stringify(engines)}`)
+  const floor = m[1]
+  const pattern = new RegExp(
+    `downloadAndUnzipVSCode\\(\\{ version: '${floor.replace(/\./g, '\\.')}' \\}\\)`,
+  )
+  for (const launcher of ['runTest.mjs', 'runInstalled.mjs', 'runSettingsActivation.mjs']) {
+    const source = readFileSync(path.join(here, launcher), 'utf8')
+    assert.match(
+      source,
+      pattern,
+      `${launcher} 默认宿主须与 engines 下界 ${floor} 同版（#255 决策：验证矩阵钉在承诺下界）`,
+    )
+  }
 })
 
 test('临时目录清理遇到占用仍继续清理其余目录，并拒绝越界目标', () => {

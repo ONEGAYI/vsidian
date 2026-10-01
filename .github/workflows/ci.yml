@@ -1,8 +1,8 @@
 # CI：push(main)、PR 与手动触发的持续集成。
 # unit 跑构建、类型检查与单元契约测试；integration 在 xvfb 虚拟显示下经
-# @vscode/test-electron 以真实 VSCode 1.86.2 宿主跑集成套件；四个 runner
-# 各跑 core 一片、每个 runner 仍只启动一个宿主；第五组独立运行敏感用例；
-# browser 用 Playwright chromium 跑 test:browser 原生输入回归（#50）。
+# @vscode/test-electron 以真实 VSCode 1.82.3 宿主（#255 承诺下界）跑集成
+# 套件；四个 runner 各跑 core 一片、每个 runner 仍只启动一个宿主；第五组
+# 独立运行敏感用例；# browser 用 Playwright chromium 跑 test:browser 原生输入回归（#50）。
 # job 名 unit / integration 同时是 main 分支保护的必需状态检查。
 # integration_shard 为矩阵 job，integration 汇总四片并保留稳定检查名；
 # 改名、增删必需检查前需同步分支保护规则，否则保护会因找不到检查而挂起。
@@ -134,7 +134,7 @@ jobs:
           # ubuntu 24.04 起 ALSA/GTK/ATK 库迁入 *t64 实体包，旧名只剩虚包无法安装
           sudo apt-get install -y xvfb libnss3 libatk-bridge2.0-0t64 libdrm2 \
             libxkbcommon0 libgbm1 libasound2t64 libgtk-3-0t64 libsecret-1-0 libxkbfile1
-      - name: 集成测试（真实 1.86.2 宿主）
+      - name: 集成测试（真实 1.82.3 宿主）
         env:
           VSIDIAN_TEST_GROUP: core
           VSIDIAN_TEST_SHARD: ${{ matrix.shard }}/4
@@ -164,7 +164,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y xvfb libnss3 libatk-bridge2.0-0t64 libdrm2 \
             libxkbcommon0 libgbm1 libasound2t64 libgtk-3-0t64 libsecret-1-0 libxkbfile1
-      - name: 第五组敏感用例（真实 1.86.2 宿主）
+      - name: 第五组敏感用例（真实 1.82.3 宿主）
         env:
           VSIDIAN_TEST_GROUP: sensitive
         run: xvfb-run -a npm run test:integration

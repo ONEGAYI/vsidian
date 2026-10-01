@@ -103,7 +103,7 @@ npm run compile                 # esbuild 双产物 + tsc 类型检查
 npm run watch                   # esbuild watch
 npm run test:unit               # vitest 与启动器契约测试（无 VSCode 宿主依赖）
 npm run test:browser            # Playwright 原生键盘/IME 表格光标回归（首次需 npx playwright install chromium）
-npm run test:integration        # 1.86.2 真宿主集成测试（可设 VSIDIAN_ITEST_SHARDS=4 分片）
+npm run test:integration        # 1.82.3 真宿主集成测试（#255 起矩阵钉在承诺下界）（可设 VSIDIAN_ITEST_SHARDS=4 分片）
 node test/integration/runInstalled.mjs  # VSIX 安装态回归（先 package 出 VSIX）
 node test/perf/runPerf.mjs      # 性能档位测量（报告写 docs/perf/data/）
 npm run release:check           # 打包 + 发布前包内容与体积检查
