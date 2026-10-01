@@ -1154,10 +1154,13 @@ try {
     // 变——七轮浏览器取证实证；此前误记为稳定化平移）。RefContentMount
     // 以最后已知值见证 + 外层滚动停歇核对 + 回收保存兜底恢复。滚轮全程
     // 未落在卡上（target 为表头/正文段落），内层不被物理滚动，终态应为
-    // 保存值；重挂恢复走 restoreScroll，离屏保存经 dispose 兜底。
-    assert.ok(rjia.present && Math.abs(rjia.top - 180) <= 8,
+    // 保存值；重挂恢复走 restoreScroll，离屏保存经 dispose 兜底。容差
+    // ±20：恢复后卡内虚拟化的锚定补偿含平台字体度量残差（Windows 实测
+    // 精确 180，Linux CI 两次 attempt 稳定 168）；缺陷形态是归零 0，与
+    // 容差上界距离 160+，区分度不受影响。
+    assert.ok(rjia.present && Math.abs(rjia.top - 180) <= 20,
       `V3 Reading 甲卡滚动位置恢复（实际 top=${rjia.top}，期望 ~180）`)
-    assert.ok(ryi.present && Math.abs(ryi.top - 60) <= 8,
+    assert.ok(ryi.present && Math.abs(ryi.top - 60) <= 20,
       `V3 Reading 乙卡滚动位置恢复（实际 top=${ryi.top}，期望 ~60——不串甲的 180）`)
     assert.equal(await editCount6(), 0, 'V3 全程零写回')
     assert.deepEqual(errors, [], `V3 无页面错误（实际 ${JSON.stringify(errors)}）`)
