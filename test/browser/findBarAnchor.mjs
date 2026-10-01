@@ -50,13 +50,17 @@ try {
     const panel = document.querySelector('.vsidian-find')
     const bar = document.querySelector('.vsidian-occurrence-bar')
     const content = document.querySelector('.cm-content')
-    const block = document.querySelector('.vsidian-view-reading .vsidian-reading-block, .vsidian-view-reading .vsidian-reading-spacer')
+    // 只取真实限宽块——视口占位 spacer 是 margin 0 靠左条，右缘与块差
+    // 整个右侧留白，混入测量会令断言测错对象仍全绿（review B-2）
+    const block = document.querySelector('.vsidian-view-reading .vsidian-reading-block')
+    const spacer = document.querySelector('.vsidian-view-reading .vsidian-reading-spacer')
     return {
       appRight: rect(document.getElementById('app')).right,
       panel: panel ? { ...rect(panel), styleRight: panel.style.right, open: panel.classList.contains('vsidian-find-open') } : null,
       bar: bar ? { ...rect(bar), styleRight: bar.style.right, open: bar.classList.contains('vsidian-occurrence-bar-open') } : null,
       contentRight: content ? rect(content).right : null,
       blockRight: block ? rect(block).right : null,
+      spacerRight: spacer ? rect(spacer).right : null,
     }
   })
 
@@ -86,6 +90,11 @@ try {
   check('B3 阅读模式面板右缘咬合限宽块', m3.blockRight !== null &&
     Math.abs(m3.panel.right - m3.blockRight) <= EPS,
     `面板右=${m3.panel.right.toFixed(1)} 限宽块右=${m3.blockRight?.toFixed(1)}`)
+  check('B3b 面板右缘不取靠左 spacer（spacer 与块右缘不同时守卫生效）',
+    m3.spacerRight === null || m3.blockRight === null ||
+    Math.abs(m3.spacerRight - m3.blockRight) <= EPS ||
+    Math.abs(m3.panel.right - m3.spacerRight) > EPS,
+    `面板右=${m3.panel.right.toFixed(1)} spacer右=${m3.spacerRight?.toFixed(1)} 块右=${m3.blockRight?.toFixed(1)}`)
 
   // —— B4：选词选项条同锚咬合（回 live，真实键盘 Ctrl+D）——
   await page.evaluate(() => window.setMode('live'))

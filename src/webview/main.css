@@ -3390,6 +3390,9 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
 .vsidian-find {
   position: absolute;
   top: 36px;
+  /* 静态兜底：syncOverlayAnchors 防御分支提前 return 时浮层仍有右上角
+     定位（内联值优先级更高，正常路径被动态 right 覆盖） */
+  right: 14px;
   z-index: 40;
   display: none;
   grid-template-columns: auto 1fr;
@@ -3420,6 +3423,11 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   align-self: stretch;
   padding: 0;
   border: 1px solid transparent;
+  /* glyph 为块级子元素，居中必须显式 flex（与 quick-actions 按钮同款）——
+     button UA 的 text-align 对块盒不生效，垂直居中也非标准保证 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .vsidian-find:has(.vsidian-find-replace-open) .vsidian-find-toggle {
@@ -3645,6 +3653,8 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
 .vsidian-occurrence-bar {
   position: absolute;
   top: 36px;
+  /* 静态兜底：同 .vsidian-find（内联值优先级更高，正常路径被动态覆盖） */
+  right: 14px;
   z-index: 39;
   display: none;
   gap: 2px;

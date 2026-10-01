@@ -194,7 +194,7 @@ docs/specs/viewport-width.md（分支 impl/2026-09-viewport-width）。
 - **#32 行号契约修订**：铺满态行为不变；限宽态正文列宽 = min(设定宽， 可用宽 − 行号列足迹)，行号列随列移动、间距不变。
 - **标题块水平盒禁令（#206）**：heading-N 装饰类与 `.vsidian-reading-block` 同挂在块 div 上且源序在后——其规则**不得声明任何水平 margin/padding**（margin 简写、margin-left/right、margin-inline 等会覆盖限宽档居中的 auto；铺满档不可见，限宽档标题贴左而正文居中，偏移 = (可用宽 − 设定宽) ÷ 2）；垂直间距一律 `margin-block`。契约由 `readingHeadingMarginCssContract` 与 `readingWidthProbe` A3b（限宽档标题/段落左缘一致）钉住。
 - **设置项**：`editor.readableLineWidth`（number 型，0–1600 步进 20，默认 0）；number schema 校验只管类型与范围，0 语义归消费方；设置页 0 档显示词经定义的 `zeroLabelKey` 取词（注册表驱动，渲染层无特判）。
-- **浮层锚点跟随（2026-10）**：查找面板（`.vsidian-find`）与选词选项条（`.vsidian-occurrence-bar`）的 `right` 不再静态钉视口 14px，由控制器按「#app 右缘 − 正文列右缘」测算写内联（`overlayAnchor.ts` 的 `planOverlayAnchorRight`，下限 14px）——限宽档浮层右缘贴正文列右缘；铺满档差值计入滚动条与内容边距余量（经典滚动条平台实测 ≈24px），面板同样贴正文右缘。测量源：live 为 `.cm-content`（整组居中含行号列参与，其右缘即正文列真实右缘）、reading 为任一限宽块/视口 spacer（同宽居中右缘一致）。跟随通道：ResizeObserver（`.vsidian-main` + 正文列元素，侧栏开合过渡动画逐帧跟随）+ 打开/模式切换主动同步 + live 编辑事务兜底；两浮层全不在场即断开观察。
+- **浮层锚点跟随（2026-10）**：查找面板（`.vsidian-find`）与选词选项条（`.vsidian-occurrence-bar`）的 `right` 不再静态钉视口 14px，由控制器按「#app 右缘 − 正文列右缘」测算写内联（`overlayAnchor.ts` 的 `planOverlayAnchorRight`，下限 14px）——限宽档浮层右缘贴正文列右缘；铺满档差值计入滚动条与内容边距余量（经典滚动条平台实测 ≈24px），面板同样贴正文右缘。测量源：live 为 `.cm-content`（整组居中含行号列参与，其右缘即正文列真实右缘）、reading **只认限宽块**（margin auto 居中，任意块右缘一致；视口占位 spacer 是 `margin: 0` 靠左的高度占位条，右缘与限宽块差整个右侧留白，不得作测量源——review B-1 实证修正）。跟随通道：ResizeObserver（`.vsidian-main` + 正文列元素，侧栏开合过渡动画逐帧跟随）+ 打开/模式切换主动同步 + live 编辑事务兜底；两浮层全不在场即断开观察。
 
 ### 验证矩阵（2026-09-28，工作树内全绿）
 

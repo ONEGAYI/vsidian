@@ -72,6 +72,9 @@ describe('查找面板 CSS 契约（#236）', () => {
       .toContain('light/light-chevronRight.svg')
     expect(rule('body.vscode-high-contrast #app .vsidian-find .vsidian-find-toggle-glyph', /dark\/dark-chevronRight/))
       .toContain('dark/dark-chevronRight.svg')
+    // 双主题变体同块（body.vscode-dark 与 high-contrast 逗号并列）——
+    // 误删 vscode-dark 选择器时此断言拦截
+    expect(css).toContain('body.vscode-dark #app .vsidian-find .vsidian-find-toggle-glyph,')
   })
 
   it('三开关激活态点亮规则覆盖 Aa/ab/.*/☰ 四类（VSCode inputOption 激活族）', () => {

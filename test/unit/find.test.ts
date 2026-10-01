@@ -612,8 +612,11 @@ describe('替换栏与替换写回（#236：替换为显式写操作）', () => 
     const toggle = parent!.querySelector<HTMLButtonElement>('.vsidian-find-toggle')!
     toggle.click()
     expect(viewState(c, h).find?.replaceOpen).toBe(false)
+    // 焦点归还输入框（toggle 不驻留焦点圈；与输入框 focus 圈互斥）
+    expect(document.activeElement).toBe(parent!.querySelector('.vsidian-find-input'))
     toggle.click()
     expect(viewState(c, h).find?.replaceOpen).toBe(true)
+    expect(document.activeElement).toBe(parent!.querySelector('.vsidian-find-input'))
   })
 
   it('替换下一个：当前匹配被替换（单笔 edit.request），会话就近保持', () => {

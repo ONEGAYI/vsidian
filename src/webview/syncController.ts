@@ -7100,12 +7100,9 @@ export class WebviewSyncController {
     toggle.addEventListener('click', () => {
       this.setFindReplaceOpen(!(this.findReplaceOpen && this.viewMode === 'live'))
       // 焦点归还输入框（toggle 不驻留焦点圈；输入框 focus 圈与 toggle
-      // focus 圈天然互斥）
-      if (this.viewMode === 'live') {
-        this.findInputEl?.focus()
-      } else {
-        this.findInputEl?.blur()
-      }
+      // focus 圈天然互斥）。阅读模式的查找输入框同样真实可聚焦（openFind
+      // 同样 focus 它），两模式统一归还
+      this.findInputEl?.focus()
     })
     this.findToggleEl = toggle
     const row = document.createElement('div')
@@ -7733,19 +7730,21 @@ export class WebviewSyncController {
 
   /** 锚点测量源：当前模式的正文列元素。live 为 .cm-content——#175 整组
    *  居中单位是 [行号列+间距+正文列]，contentDOM 的右缘即正文列真实右缘；
-   *  reading 为任一限宽块/视口占位 spacer（同宽 margin auto 居中，右缘
-   *  一致），空文档降级容器（铺满语义，right 落保底 14px） */
+   *  reading 只认限宽块（margin auto 居中，任意块右缘一致）——视口占位
+   *  spacer 是 margin 0 靠左的高度占位条，右缘与限宽块差整个右侧留白，
+   *  不得作为测量源（review B-1）；空文档/无挂载块降级容器（铺满语义，
+   *  right 落保底 14px） */
   private overlayAnchorContentEl(): HTMLElement | null {
     if (this.viewMode === 'reading') {
-      const block = this.readingContainer?.querySelector<HTMLElement>(
-        '.vsidian-reading-block, .vsidian-reading-spacer',
-      )
+      const block = this.readingContainer?.querySelector<HTMLElement>('.vsidian-reading-block')
       return block ?? this.readingContainer ?? null
     }
     return this.view?.contentDOM ?? null
   }
 
-  /** 按当前几何同步两个浮层的 style.right（两浮层互斥在场，同值都写无妨） */
+  /** 按当前几何同步两个浮层的 style.right（两浮层互斥在场，同值都写无妨；
+   *  值未变化时跳过——编辑事务路径每键调用，同字符串赋值也会失效 inline
+   *  style 触发下一帧重算，短路消除） */
   private syncOverlayAnchors(): void {
     const root = this.rootEl
     const contentEl = this.overlayAnchorContentEl()
@@ -7756,11 +7755,12 @@ export class WebviewSyncController {
       appRight: root.getBoundingClientRect().right,
       contentRight: contentEl.getBoundingClientRect().right,
     })
-    if (this.findPanel) {
-      this.findPanel.style.right = `${right}px`
+    const value = `${right}px`
+    if (this.findPanel && this.findPanel.style.right !== value) {
+      this.findPanel.style.right = value
     }
-    if (this.occurrenceBarEl) {
-      this.occurrenceBarEl.style.right = `${right}px`
+    if (this.occurrenceBarEl && this.occurrenceBarEl.style.right !== value) {
+      this.occurrenceBarEl.style.right = value
     }
   }
 
