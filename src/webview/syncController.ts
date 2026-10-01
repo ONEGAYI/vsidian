@@ -7274,8 +7274,10 @@ export class WebviewSyncController {
   }
 
   /** 打开查找面板（可预置查询词；#236：无预置时按 VSCode 口径取单行选区
-   *  作种子；replace=true 展开替换栏——仅 live，阅读只开面板；replacement
-   *  随 replace 预置替换词——与预置查询词同语义）。重复打开重新聚焦输入框
+   *  作种子；replace=true 展开替换栏——调用方须保证 live（2026-10 阅读模式
+   *  整体禁用替换：键位 mode 过滤与 view.find.open 的阅读守卫已把带
+   *  replace 的打开收窄到 live，此处条件仅作冗余防御）；replacement 随
+   *  replace 预置替换词——与预置查询词同语义）。重复打开重新聚焦输入框
    *  并全选查询 */
   private openFind(query?: string, opts: { replace?: boolean; replacement?: string } = {}): void {
     this.findTouched = true
@@ -7308,6 +7310,8 @@ export class WebviewSyncController {
       this.findInSelection = false
       this.findRange = null
     }
+    // 冗余防御（2026-10）：带 replace 的入口已在 case 守卫与键位 mode 过滤
+    // 处收窄到 live，此处条件正常路径恒与调用方语义一致
     if (opts.replace === true && this.viewMode === 'live') {
       this.findReplaceOpen = true
     }

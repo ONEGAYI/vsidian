@@ -2674,7 +2674,7 @@ export const STYLE_CONTRACT_ENTRIES: readonly StyleContractEntry[] = [
     category: 'find-panel',
     kind: 'selector',
     target: '.vsidian-find-replace（替换行容器；.vsidian-find-replace-open 展开态）—— 内部 .vsidian-find-replace-input 替换输入框 / .vsidian-find-replace-next「替换」/ .vsidian-find-replace-all「全部替换」按钮',
-    purpose: '查找面板的可展开替换栏（#236）：替换行默认收起，左缘 toggle（find-panel 条目的 .vsidian-find-toggle）或 Ctrl+H（findReplace 操作）展开；「替换」替换当前匹配并移到下一处、「全部替换」整批替换——两者均为显式写操作（经 CM6 事务走标准写回链路，一笔 edit.request = 宿主撤销一次）。替换是 Live 编辑能力，阅读模式整体禁用（2026-10 用户决策）：带 replace 的打开指令不开面板（静默忽略）、Ctrl+H 键位不消费（注册表生效模式 Live）、toggle disabled 灰化；live 侧展开记忆不被阅读侧触碰，切回 live 原样恢复。',
+    purpose: '查找面板的可展开替换栏（#236）：替换行默认收起，左缘 toggle（find-panel 条目的 .vsidian-find-toggle）或 Ctrl+H（findReplace 操作）展开；「替换」替换当前匹配并移到下一处、「全部替换」整批替换——两者均为显式写操作（经 CM6 事务走标准写回链路，一笔 edit.request = 宿主撤销一次）。替换是 Live 编辑能力，阅读模式整体禁用（2026-10 用户决策）：带 replace 的打开指令不开面板（静默忽略）、Ctrl+H 键位不消费（注册表生效模式 Live）、toggle disabled 灰化；live 侧展开记忆不被阅读侧触碰，切回 live 原样恢复（关闭面板即终结会话，两模式同口径）。',
     views: ['live'],
     states: '替换行 DOM 常驻、显隐由 .vsidian-find-replace-open 控制（默认收起 display:none；阅读模式恒收起且 toggle 禁用）；展开态由 FindSessionProbe.replaceOpen 观测。',
     dom: '面板（.vsidian-find）内第三段；输入框 Enter 为面板局部键（替换下一个）；按钮为真实 <button type="button">（#241 起图标形态，功能词在 aria-label/title，i18n 词条 find.replaceNext / find.replaceAll）。',

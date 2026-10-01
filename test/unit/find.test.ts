@@ -637,6 +637,20 @@ describe('替换栏与替换写回（#236：替换为显式写操作）', () => 
     expect(viewState(c, h).find?.replaceOpen).toBe(true)
   })
 
+  it('阅读模式 toggle 处理链守卫独立可达：陈旧 DOM 解禁后点击仍不触碰 live 记忆', () => {
+    const h = makeBridge()
+    const c = mountFind(h)
+    c.handleHostMessage({ kind: 'view.find.open', replace: true })
+    c.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
+    const toggle = parent!.querySelector<HTMLButtonElement>('.vsidian-find-toggle')!
+    // jsdom 对 disabled button 的 .click() 不派发事件（上一用例走 disabled
+    // 层）；手动解禁模拟 findRender 同步前的陈旧 DOM，钉住处理链守卫本身
+    toggle.disabled = false
+    toggle.click()
+    c.handleHostMessage({ kind: 'view.mode.set', mode: 'live' })
+    expect(viewState(c, h).find?.replaceOpen).toBe(true)
+  })
+
   it('阅读模式 view.find.open {replace:true} 整体不开面板（Ctrl+H 同命令阅读禁用）', () => {
     const h = makeBridge()
     const c = mountFind(h)

@@ -3696,7 +3696,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "find-panel",
     "kind": "selector",
     "target": ".vsidian-find-replace（替换行容器；.vsidian-find-replace-open 展开态）—— 内部 .vsidian-find-replace-input 替换输入框 / .vsidian-find-replace-next「替换」/ .vsidian-find-replace-all「全部替换」按钮",
-    "purpose": "查找面板的可展开替换栏（#236）：替换行默认收起，左缘 toggle（find-panel 条目的 .vsidian-find-toggle）或 Ctrl+H（findReplace 操作）展开；「替换」替换当前匹配并移到下一处、「全部替换」整批替换——两者均为显式写操作（经 CM6 事务走标准写回链路，一笔 edit.request = 宿主撤销一次）。替换是 Live 编辑能力，阅读模式整体禁用（2026-10 用户决策）：带 replace 的打开指令不开面板（静默忽略）、Ctrl+H 键位不消费（注册表生效模式 Live）、toggle disabled 灰化；live 侧展开记忆不被阅读侧触碰，切回 live 原样恢复。",
+    "purpose": "查找面板的可展开替换栏（#236）：替换行默认收起，左缘 toggle（find-panel 条目的 .vsidian-find-toggle）或 Ctrl+H（findReplace 操作）展开；「替换」替换当前匹配并移到下一处、「全部替换」整批替换——两者均为显式写操作（经 CM6 事务走标准写回链路，一笔 edit.request = 宿主撤销一次）。替换是 Live 编辑能力，阅读模式整体禁用（2026-10 用户决策）：带 replace 的打开指令不开面板（静默忽略）、Ctrl+H 键位不消费（注册表生效模式 Live）、toggle disabled 灰化；live 侧展开记忆不被阅读侧触碰，切回 live 原样恢复（关闭面板即终结会话，两模式同口径）。",
     "views": [
       "live"
     ],
@@ -4939,7 +4939,7 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "find-panel-replace": {
-    "purpose": "The expandable replace bar of the find panel (#236): collapsed by default, expanded via the left-edge toggle (find-panel entry, .vsidian-find-toggle) or Ctrl+H (the findReplace operation); \"Replace\" replaces the current match and moves to the next one, \"Replace All\" replaces the whole batch — both are explicit write operations (a single CM6 transaction through the standard write-back chain; one edit.request = one host undo). Replacing is a live-editing capability, disabled entirely in reading view (2026-10 user decision): an open instruction carrying replace does not open the panel (silently ignored), Ctrl+H is not consumed (the registry lists the operation as live-only), and the toggle is disabled and grayed; the live-side expanded state is untouched by reading view and restored as-is when switching back to live.",
+    "purpose": "The expandable replace bar of the find panel (#236): collapsed by default, expanded via the left-edge toggle (find-panel entry, .vsidian-find-toggle) or Ctrl+H (the findReplace operation); \"Replace\" replaces the current match and moves to the next one, \"Replace All\" replaces the whole batch — both are explicit write operations (a single CM6 transaction through the standard write-back chain; one edit.request = one host undo). Replacing is a live-editing capability, disabled entirely in reading view (2026-10 user decision): an open instruction carrying replace does not open the panel (silently ignored), Ctrl+H is not consumed (the registry lists the operation as live-only), and the toggle is disabled and grayed; the live-side expanded state is untouched by reading view and restored as-is when switching back to live (closing the panel ends the session in either mode alike).",
     "states": "The replace-row DOM is always present; visibility is controlled by .vsidian-find-replace-open (display:none by default; permanently collapsed in reading view, where the toggle is also disabled). The expanded state is observable via FindSessionProbe.replaceOpen.",
     "dom": "Third section inside the panel (.vsidian-find); Enter in the input is a panel-local key (replace next); buttons are real <button type=\"button\"> elements (icon-shaped since #241 — the words live in aria-label/title, i18n entries find.replaceNext / find.replaceAll).",
     "obsidian": {
