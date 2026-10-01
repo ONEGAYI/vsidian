@@ -5,12 +5,11 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { mkdir } from 'node:fs/promises'
-import { build, artifactPath, chromium } from './runtime.mjs'
+import { artifactPath, chromium } from './runtime.mjs'
 import { buildZhLocaleIsland } from './localeIsland.mjs'
+import { buildSettingsMain } from './settingsBundle.mjs'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
-const output = artifactPath(root, 'settings/main.js')
-await build({ entryPoints: [path.join(root, 'src/webview/settingsMain.ts')], bundle: true, outfile: output, format: 'iife',
-  loader: { '.svg': 'dataurl' } })
+const output = await buildSettingsMain(root)
 const artifacts = artifactPath(root, 'screenshots/settingsPage')
 await mkdir(artifacts, { recursive: true })
 // 数据岛与宿主生成点同源；zhCn 为断言取词别名
