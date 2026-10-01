@@ -9,7 +9,7 @@ description: 在 vsidian 仓库准备或执行版本发布时使用：升版本�
 
 ## 体积红线
 
-VSIX 解压总量警告 6.5 MB / 上限 7.5 MB（#85 代码块高亮后基线约 4.45 MB 时首次上调；v0.5.0 后基线约 5.44 MB，距警告线 5.5 MB 仅约 66 KB，用户决策两条线再次各上调 1 MB），一般单文件警告 3 MB / 上限 4 MB，图标上限 100 KB（256×256）。阈值定义在 `scripts/release.mjs` 的 `SIZE_LIMITS`；修改阈值视同变更本约定，需同步本技能。#60 起基线含 mermaid 独立产物 `out/webview/mermaid.js`（minify 后约 2.6 MB，刻意 vendored 的按需懒加载渲染器，单文件与总量阈值据此上调）；主 bundle main.js 现约 1.65 MB（v0.5.0 实测，含 CM6 + KaTeX 与 Lezer 语言表），不触发单文件警告——其增长由总量线约束，属已接受取舍。
+VSIX 解压总量警告 8.5 MB / 上限 9.5 MB（#85 代码块高亮后基线约 4.45 MB 时首次上调；v0.5.0 后基线约 5.44 MB，距警告线 5.5 MB 仅约 66 KB，用户决策两条线各上调 1 MB；v0.8.0 批次（查找引擎、悬停预览、文档嵌入与中文分词）后基线约 6.54 MB，距警告线 6.5 MB 仅约 109 KB，用户决策两条线各上调 2 MB），一般单文件警告 3 MB / 上限 4 MB，图标上限 100 KB（256×256）。阈值定义在 `scripts/release.mjs` 的 `SIZE_LIMITS`；修改阈值视同变更本约定，需同步本技能。#60 起基线含 mermaid 独立产物 `out/webview/mermaid.js`（minify 后约 2.6 MB，刻意 vendored 的按需懒加载渲染器，单文件与总量阈值据此上调）；主 bundle main.js 现约 1.94 MB（v0.8.0 实测，含 CM6 + KaTeX、Lezer 语言表、查找引擎、悬停/嵌入与分词），不触发单文件警告——其增长由总量线约束，属已接受取舍。
 
 ## 双重防线
 

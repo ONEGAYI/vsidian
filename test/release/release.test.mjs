@@ -368,22 +368,16 @@ test('VSIX 检查：缺少 mermaid.js 报错（#60 图表渲染器懒加载产�
 })
 
 test('VSIX 检查：解压总体积与单文件双阈值（警告线与失败线）', () => {
-  // 总量恰过警告线：增量摊到 mermaid.js 与 main.js 两个条目（各约一半，
-  // 增量后均 < 4MB 单文件上限，只触发总量警告不触发失败）。#85 后总量
-  // 两线上调 1MB，增量已大于任一单文件距 4MB 上限的余量——全压单个
-  // 条目会先触发单文件失败，断言语义就变了。
+  // 总量恰过警告线：增量均摊到全部条目。#85 后单次上调 1MB 时摊两条
+  // 够用；0.8.0 起两线各上调 2MB，溢出增量的一半已超过 mermaid.js 距
+  // 4MB 单文件上限的余量（约 1.4MB）——摊两条会先触发单文件失败，
+  // 断言语义就变了，故改为全条目均摊（每条约 +30KB，无一超单文件线）。
   const base = makeEntries()
   const baseTotal = base.reduce((sum, e) => sum + e.size, 0)
   const overflow = Math.floor(SIZE_LIMITS.totalWarnBytes) - baseTotal + 1
-  const warnEntries = base.map((e) => {
-    if (e.name === 'extension/out/webview/mermaid.js') {
-      return { ...e, size: e.size + Math.ceil(overflow / 2) }
-    }
-    if (e.name === 'extension/out/webview/main.js') {
-      return { ...e, size: e.size + Math.floor(overflow / 2) }
-    }
-    return e
-  })
+  const per = Math.floor(overflow / base.length)
+  const rem = overflow - per * base.length
+  const warnEntries = base.map((e, i) => ({ ...e, size: e.size + per + (i < rem ? 1 : 0) }))
   const warn = inspectVsixEntries(warnEntries)
   assert.equal(warn.ok, true)
   assert.ok(warn.warnings.some((w) => w.includes('警告线')), '总量过警告线应有警告不失败')
