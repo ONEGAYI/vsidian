@@ -36,7 +36,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // 刷新、fm/滚动保持、快速更新无旧冒充、删除恢复分态与订阅生命周期）。
 const names = ['tableCaret', 'quoteBarPaint', 'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'imagePaste', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage',
-  'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract', 'commentToggle', 'viewToggle', 'contextMenu', 'anchorFlash', 'readingWidthProbe', 'codeCardChrome', 'liveImageLayout', 'imageRefresh', 'imagePopup', 'hoverPreview', 'readingEmbed', 'liveEmbed', 'hoverEntry', 'hoverRefresh']
+  'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract', 'commentToggle', 'viewToggle', 'contextMenu', 'anchorFlash', 'readingWidthProbe', 'codeCardChrome', 'liveImageLayout', 'imageRefresh', 'imagePopup', 'hoverPreview', 'readingEmbed', 'recursiveEmbed', 'liveEmbed', 'hoverEntry', 'hoverRefresh']
 const { workers, reuseBuilds, selected } = parseBrowserRunOptions(process.argv.slice(2), names)
 const parent = path.join(root, 'out/test/browser-runs')
 await mkdir(parent, { recursive: true })

@@ -24,6 +24,8 @@ import {
   type DiagramExportPayload,
   type HostToWebview,
   type HoverPreviewRequestPayload,
+  type HoverPreviewFailReason,
+  type HoverPreviewScope,
   type ImageExportFailReason,
   type ImageExportPayload,
   type ImagePastePayload,
@@ -39,6 +41,8 @@ import type { ImageResolution } from './linkTarget'
 import { imageFsKey } from './imageVersioning'
 import type { ImageVerifyItem } from '../shared/imageRefresh'
 import { HOVER_REFRESH_DEFAULTS } from '../shared/hoverRefresh'
+import { REF_EXPANSION_LIMITS, RefExpansionBudget, canonicalRefTargetKey, inExpansionPath,
+  validChildSource } from '../shared/refExpansion'
 
 /** 权威文档适配器：vscode 层实现 */
 export interface HostDocumentPort {
@@ -71,9 +75,10 @@ export interface PanelPort {
    *  （成功携带身份/版本/全文/范围，失败为错误分态）。只读交互，不进
    *  edit.request 通道，暂停态同样放行 */
   readHoverTarget?(
-    payload: HoverPreviewRequestPayload,
+    payload: HoverPreviewRequestPayload & { verifiedSource?: { fsPath: string; version: number } },
     report: (result: HoverReadOutcome) => void,
   ): void
+  readHoverSource?(fsPath: string): Promise<{ version: number; text: string } | null>
   /** #10 图片资源解析（vscode 层注入：classifyImageTarget + asWebviewUri）。
    *  #220 起第二可选参 sourceDocUri：悬停浮层内 B 文档图片的来源上下文
    *  （vscode 层按 B 目录构造 LinkContext）；缺省 = 面板自身文档 */
@@ -143,6 +148,9 @@ export type SessionNotice =
 
 export interface DocumentSessionOptions {
   docUri?: string
+  /** Root A's filesystem identity, supplied by the provider rather than webview. */
+  rootFsPath?: string
+  getEmbedDepthLimit?: () => number
   onNotice?: (notice: SessionNotice) => void
   /** #38 面板视图状态回报回调：view.state 缓存后触发（宿主维护
    *  vsidian.activeMode context 与初始 reading 恢复决策的数据源） */
@@ -225,8 +233,22 @@ interface PanelEntry {
   hoverSourcePins: Map<string, Set<string>>
   /** 每次成功送达独立；待订阅租约不属于共享读取缓存。 */
   hoverSourceLeases: Map<string, string>
+  hoverLeaseGrants: Map<string, HoverSourceGrant>
+  hoverParentGrants: Map<string, HoverSourceGrant>
+  expansionBudget: RefExpansionBudget
   /** 最近一次成功送达的目标 fsPath（观测面；守卫用集合） */
   hoverSourceFsPath?: string
+}
+
+interface HoverSourceGrant {
+  fsPath: string
+  version: number
+  range: { start: number; end: number }
+  scope: HoverPreviewScope
+  path: string[]
+  depth: number
+  treeId: string
+  occurrenceId: string
 }
 
 const ACK_CACHE_LIMIT = 64
@@ -247,14 +269,16 @@ const IMAGE_SRC_TARGET_LIMIT = 256
  * 锚点已含在各自原文内） */
 function hoverShapeKeyOf(
   message: Pick<HoverPreviewRequestPayload, 'target' | 'linkHref' | 'directTarget'>,
+  source?: { fsPath: string; version: number },
 ): string {
+  const prefix = source ? `s:${source.fsPath}\n${source.version}\n` : ''
   if (message.directTarget !== undefined) {
-    return `d:${message.directTarget.fsPath}\n${message.directTarget.anchor ?? ''}`
+    return `${prefix}d:${message.directTarget.fsPath}\n${message.directTarget.anchor ?? ''}`
   }
   if (message.linkHref !== undefined) {
-    return `h:${message.linkHref}`
+    return `${prefix}h:${message.linkHref}`
   }
-  return `w:${message.target}`
+  return `${prefix}w:${message.target}`
 }
 
 /** 变更组相等（顺序无关）：段内区间互不重叠，排序后逐段比较。
@@ -373,6 +397,9 @@ export class DocumentSession {
       hoverSourceFsPaths: new Set(),
       hoverSourcePins: new Map(),
       hoverSourceLeases: new Map(),
+      hoverLeaseGrants: new Map(),
+      hoverParentGrants: new Map(),
+      expansionBudget: new RefExpansionBudget(),
     })
     return sessionId
   }
@@ -447,12 +474,18 @@ export class DocumentSession {
     if (sourceLeaseId !== undefined && panel.hoverSourceLeases.get(sourceLeaseId) !== fsPath) {
       return pins?.has(instanceId) ?? false // 已持有者重复 watch 不增权限。
     }
+    const grant = sourceLeaseId !== undefined ? panel.hoverLeaseGrants.get(sourceLeaseId) : undefined
+    if (grant?.occurrenceId && grant.occurrenceId !== instanceId) return false
     if (!pins) {
       pins = new Set()
       panel.hoverSourcePins.set(fsPath, pins)
     }
     pins.add(instanceId)
-    if (sourceLeaseId !== undefined) panel.hoverSourceLeases.delete(sourceLeaseId)
+    if (sourceLeaseId !== undefined) {
+      if (grant) panel.hoverParentGrants.set(instanceId, grant)
+      panel.hoverLeaseGrants.delete(sourceLeaseId)
+      panel.hoverSourceLeases.delete(sourceLeaseId)
+    }
     this.trimHoverSources(panel)
     return true
   }
@@ -470,7 +503,7 @@ export class DocumentSession {
   }
 
   /** webview 消息入口（provider 接到 webview.onDidReceiveMessage 后调用） */
-  handleWebviewMessage(message: unknown, sessionId: string): Promise<void> {
+  async handleWebviewMessage(message: unknown, sessionId: string): Promise<void> {
     if (this.disposed) {
       return Promise.resolve()
     }
@@ -503,12 +536,22 @@ export class DocumentSession {
           const pins = panel.hoverSourcePins.get(message.fsPath)
           pins?.delete(message.instanceId)
           if (pins?.size === 0) panel.hoverSourcePins.delete(message.fsPath)
+          panel.hoverParentGrants.delete(message.instanceId)
+          panel.expansionBudget.release(message.instanceId)
           this.trimHoverSources(panel)
         }
         return Promise.resolve()
       case 'hover.source.release':
         if (panel.ready && message.docUri === this.docUri && message.sessionId === sessionId) {
+          const grant = panel.hoverLeaseGrants.get(message.sourceLeaseId)
+          const otherLease = grant?.occurrenceId && [...panel.hoverLeaseGrants].some(([token, other]) =>
+            token !== message.sourceLeaseId && other.occurrenceId === grant.occurrenceId)
+          if (grant?.occurrenceId && !panel.hoverParentGrants.has(grant.occurrenceId) &&
+            !panel.expansionBudget.hasActiveRead(grant.occurrenceId) && !otherLease) {
+            panel.expansionBudget.release(grant.occurrenceId)
+          }
           panel.hoverSourceLeases.delete(message.sourceLeaseId)
+          panel.hoverLeaseGrants.delete(message.sourceLeaseId)
           this.trimHoverSources(panel)
         }
         return Promise.resolve()
@@ -909,12 +952,69 @@ export class DocumentSession {
         if (!panel.ready || message.docUri !== this.docUri) {
           return Promise.resolve()
         }
+        const reject = (reason: HoverPreviewFailReason): void => panel.port.send({
+          kind: 'hover.result', reqId: message.reqId, instanceId: message.instanceId, ok: false, reason,
+        })
+        let parent: HoverSourceGrant | undefined
+        let verifiedSource: { fsPath: string; version: number } | undefined
+        if (message.source !== undefined) {
+          parent = panel.hoverParentGrants.get(message.source.parentInstanceId)
+          if (!parent || parent.fsPath !== message.source.sourceDocUri ||
+            !panel.hoverSourcePins.get(parent.fsPath)?.has(message.source.parentInstanceId) ||
+            message.directTarget !== undefined || message.linkHref !== undefined) {
+            reject('source-expired')
+            return
+          }
+          const current = await panel.port.readHoverSource?.(parent.fsPath)
+          if (!current || !validChildSource(parent, current, message.sourceStart, message.sourceEnd, message.target)) {
+            reject('source-expired')
+            return
+          }
+          verifiedSource = { fsPath: parent.fsPath, version: parent.version }
+        }
+        const depth = parent ? parent.depth + 1 : 1
+        const treeId = parent?.treeId ?? message.occurrenceId ?? message.instanceId
+        const occurrenceId = message.occurrenceId
+        const readToken = Symbol('hover-read')
+        if (occurrenceId !== undefined) {
+          panel.expansionBudget.setDepthLimit(this.options.getEmbedDepthLimit?.() ?? REF_EXPANSION_LIMITS.defaultDepth)
+          const admission = panel.expansionBudget.admitRead(treeId, occurrenceId, depth, readToken)
+          if (admission !== 'ok') {
+            reject(admission === 'depth' ? 'depth' : 'budget')
+            return
+          }
+        }
         const report = (result: HoverReadOutcome): void => {
+          const currentRead = occurrenceId === undefined ||
+            panel.expansionBudget.isCurrentRead(occurrenceId, readToken)
+          if (occurrenceId !== undefined) panel.expansionBudget.finishRead(occurrenceId, readToken)
           if (this.disposed || this.panels.get(sessionId) !== panel) return
+          if (!currentRead) result = { ok: false, reason: 'source-expired' }
+          if (message.source !== undefined && panel.hoverParentGrants.get(message.source.parentInstanceId) !== parent) {
+            result = { ok: false, reason: 'source-expired' }
+          }
+          const pathToParent = parent?.path ?? [canonicalRefTargetKey(
+            this.options.rootFsPath ?? this.docUri, { kind: 'full' }, this.options.isWindowsHost ?? false)]
+          if (result.ok) {
+            const key = canonicalRefTargetKey(result.fsPath, result.scope, this.options.isWindowsHost ?? false)
+            if (occurrenceId !== undefined && inExpansionPath(pathToParent, key)) result = { ok: false, reason: 'cycle' }
+            else if (occurrenceId !== undefined && panel.expansionBudget.attachContent(
+              occurrenceId, `${occurrenceId}\n${result.fsPath}\n${result.version}`,
+              result.lfText.length * 2 + 128) !== 'ok') {
+              result = { ok: false, reason: 'budget' }
+            }
+          }
           const sourceLeaseId = result.ok && message.retainSource
             ? `${sessionId}:source-${++this.hoverSourceLeaseSeq}` : undefined
           if (result.ok) {
-            if (sourceLeaseId !== undefined) panel.hoverSourceLeases.set(sourceLeaseId, result.fsPath)
+            if (sourceLeaseId !== undefined) {
+              panel.hoverSourceLeases.set(sourceLeaseId, result.fsPath)
+              panel.hoverLeaseGrants.set(sourceLeaseId, {
+                fsPath: result.fsPath, version: result.version, range: result.range, scope: result.scope,
+                path: [...pathToParent, canonicalRefTargetKey(result.fsPath, result.scope, this.options.isWindowsHost ?? false)],
+                depth, treeId, occurrenceId: occurrenceId ?? '',
+              })
+            }
             // #220/#222 来源记录：成功读取即入集合（嵌入卡片与浮层多目标
             // 共存；有界淘汰防无界增长——过期成员最多放宽一个已不在场目标
             // 的点击守卫，DOM 已不在则点击本就不发生）。P3-2（review 修复）：
@@ -927,6 +1027,10 @@ export class DocumentSession {
             panel.hoverSourceFsPaths.add(result.fsPath)
             this.trimHoverSources(panel, result.fsPath)
             panel.hoverSourceFsPath = result.fsPath
+          } else if (occurrenceId !== undefined && !panel.hoverParentGrants.has(occurrenceId) &&
+            !panel.expansionBudget.hasActiveRead(occurrenceId) &&
+            ![...panel.hoverLeaseGrants.values()].some((grant) => grant.occurrenceId === occurrenceId)) {
+            panel.expansionBudget.release(occurrenceId)
           }
           panel.port.send(
             result.ok
@@ -940,6 +1044,9 @@ export class DocumentSession {
                   text: result.lfText,
                   range: result.range,
                   scope: result.scope,
+                  expansionPath: [...pathToParent, canonicalRefTargetKey(result.fsPath, result.scope,
+                    this.options.isWindowsHost ?? false)],
+                  depth,
                   ...(sourceLeaseId !== undefined ? { sourceLeaseId } : {}),
                 }
               : {
@@ -957,7 +1064,7 @@ export class DocumentSession {
           report({ ok: false, reason: 'read-failed' })
           return Promise.resolve()
         }
-        const shapeKey = hoverShapeKeyOf(message)
+        const shapeKey = hoverShapeKeyOf(message, verifiedSource)
         const cached = this.hoverReadCache.get(shapeKey)
         if (cached) {
           this.hoverCacheHits++
@@ -974,7 +1081,7 @@ export class DocumentSession {
           const epoch = this.hoverEpochs.get(shapeKey) ?? 0
           const requestClock = this.hoverClock
           pending = new Promise<HoverReadOutcome>((resolve) => {
-            port(message, resolve)
+            port({ ...message, ...(verifiedSource ? { verifiedSource } : {}) }, resolve)
           })
           this.hoverReadInFlight.set(shapeKey, pending)
           void pending.then((outcome) => {

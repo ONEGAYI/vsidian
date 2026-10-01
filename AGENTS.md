@@ -112,12 +112,14 @@ vsidian/
 │   │   ├── 2026-09-table-cell-editing.md              # 表格单元格编辑性能实测（#12）
 │   │   ├── 2026-09-title-decoration-viewport.md       # 标题切片视口渲染实测数据
 │   │   ├── 2026-09-vault-index-storage.md             # 索引存储选型三档基准解读（#195）
+│   │   ├── 2026-10-ref-expansion-244.md               # 递归引用驻留实测
 │   │   └── data/                                      # 性能探针原始报告数据
 │   │       ├── browser-test-runner.json               # 浏览器调度实测数据
 │   │       ├── hover-embed-perf-host.json             # #225 真宿主编辑阻塞实测数据
 │   │       ├── hover-embed-perf.json                  # #225 状态层嵌入装饰实测数据
 │   │       ├── hover-refresh.json                     # #224 引用视图同步定向测量数据
 │   │       ├── perf-report.json                       # 性能探针原始报告数据
+│   │       ├── ref-expansion-244.json                 # 递归引用实测原始数据
 │   │       ├── ref-virtual-243.json                   # 引用长文虚拟挂载原始数据
 │   │       ├── vault-index-storage-bench-recheck.json # #202 三档复测报告
 │   │       └── vault-index-storage-bench.json         # 索引存储基准原始数据（#195）
@@ -237,6 +239,7 @@ vsidian/
 │   │   ├── newline.ts            # CRLF/LF 换行协调器
 │   │   ├── obsidianAlias.ts      # Obsidian 别名桥实现同源表
 │   │   ├── protocol.ts           # 消息协议单一事实源
+│   │   ├── refExpansion.ts       # 引用递归路径与容量预算
 │   │   ├── settings.ts           # 设置定义与读写纯逻辑
 │   │   ├── styleContract.ts      # 公开样式契约清单单一事实源
 │   │   ├── styleContractEn.ts    # 样式参考条目英文覆盖单一事实源

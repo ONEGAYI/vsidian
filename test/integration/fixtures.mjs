@@ -1092,6 +1092,16 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
     '目标二初始内容：外部磁盘变化前的正文。',
     '',
   ].join('\n'), 'utf8')
+  // #244 真宿主递归：B/C 分别位于不同目录，下一层同名相对链接只能
+  // 从直接父文件目录解析；D 的 E 为第四层深度占位。
+  mkdirSync(path.join(wsDir, 'ref-depth', 'one'), { recursive: true })
+  mkdirSync(path.join(wsDir, 'ref-depth', 'two'), { recursive: true })
+  mkdirSync(path.join(wsDir, 'ref-depth', 'three'), { recursive: true })
+  writeFileSync(path.join(wsDir, '递归父文档.md'), '![[ref-depth/one/B]]\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'ref-depth', 'one', 'B.md'), '# B 一层\n\n![[../two/C]]\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'ref-depth', 'two', 'C.md'), '# C 二层\n\n![[../three/D]]\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'ref-depth', 'three', 'D.md'), '# D 三层\n\n![[E]]\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'ref-depth', 'three', 'E.md'), '# E 四层\n', 'utf8')
   // 自引用：文档嵌入自身（A 嵌入 A——编辑自身后推送-重载不得循环）
   writeFileSync(path.join(wsDir, '同步自引用.md'), [
     '# 自引用文档',

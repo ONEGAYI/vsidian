@@ -978,8 +978,8 @@ it('#242 源租约先交到实际容器；双方均未命中的迟到回包只�
   c.handleHostMessage({ ...result, reqId: refreshReq.reqId, instanceId: refreshReq.instanceId,
     version: 2, sourceLeaseId: 'same-target-refresh' })
   const refreshed = sent.filter((m) => (m.kind === 'hover.watch' || m.kind === 'hover.source.release') && m.sourceLeaseId === 'same-target-refresh')
-  expect(refreshed.length).toBeGreaterThan(0)
-  expect(refreshed.every((m) => m.kind === 'hover.source.release')).toBe(true)
+  // #244 同 fsPath 的新版本须续交来源关系，后续子引用才可验证新的 B 快照。
+  expect(refreshed.map((m) => m.kind)).toEqual(['hover.watch'])
   const anchor = document.createElement('a')
   document.body.appendChild(anchor)
   openHoverPopupForKeyboard(anchor, { target: 'B', sourceStart: 0, sourceEnd: 1 })

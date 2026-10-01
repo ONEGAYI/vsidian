@@ -78,6 +78,10 @@ import {
   READABLE_LINE_WIDTH_MIN,
   EMBED_MAX_HEIGHT_DEFAULT,
   EMBED_MAX_HEIGHT_KEY,
+  EMBED_MAX_DEPTH_KEY,
+  EMBED_MAX_DEPTH_DEFAULT,
+  EMBED_MAX_DEPTH_MIN,
+  EMBED_MAX_DEPTH_MAX,
   EMBED_MAX_HEIGHT_MAX,
   EMBED_MAX_HEIGHT_MIN,
   HOVER_LIVE_DIRECT_KEY,
@@ -144,6 +148,7 @@ import {
   notifyHoverImageInvalidate,
   notifyHoverImageResult,
   notifyHoverResult,
+  notifyHoverWatchRejected,
   openHoverPopupForKeyboard,
   setHoverPreviewContext,
   type HoverPopupTargetSpec,
@@ -1118,6 +1123,7 @@ export class WebviewSyncController {
       send: (message) => this.bridge.postMessage(message),
       codeHighlight: () => this.codeCardConfig.highlight,
       maxHeightPx: () => this.embedMaxHeightPx(),
+      maxDepth: () => this.embedMaxDepth(),
       requestMeasure: () => this.view?.requestMeasure(),
     })
     // #223 Live 嵌入 widget 接线（liveEmbed 装饰的 widget 经此挂载共用卡片）
@@ -1603,6 +1609,7 @@ export class WebviewSyncController {
         this.applyTabEscapeSetting()
         this.applyReadableLineWidthSetting()
         this.applyEmbedMaxHeightSetting()
+        this.embedCards?.setMaxDepth(this.embedMaxDepth())
         break
       case 'snippets.snapshot': {
         // #128 CSS 片段装载：diff 式装配 <link>（失败保留最近成功样式、
@@ -1759,6 +1766,11 @@ export class WebviewSyncController {
         // 匹配（watchedFsPath / entry.loaded.fsPath），未订阅目标零动作
         notifyHoverInvalidated(message)
         this.embedCards?.notifyInvalidated(message)
+        break
+      }
+      case 'hover.watch.rejected': {
+        notifyHoverWatchRejected(message)
+        this.embedCards?.notifyWatchRejected(message)
         break
       }
       case 'hover.test.pointer': {
@@ -7773,6 +7785,13 @@ export class WebviewSyncController {
       raw >= EMBED_MAX_HEIGHT_MIN && raw <= EMBED_MAX_HEIGHT_MAX
       ? raw
       : EMBED_MAX_HEIGHT_DEFAULT
+  }
+
+  private embedMaxDepth(): number {
+    const raw = this.settings?.[EMBED_MAX_DEPTH_KEY]
+    return typeof raw === 'number' && Number.isInteger(raw) &&
+      raw >= EMBED_MAX_DEPTH_MIN && raw <= EMBED_MAX_DEPTH_MAX
+      ? raw : EMBED_MAX_DEPTH_DEFAULT
   }
 
   /** #84 增强单个阅读代码块（挂载钩子与重装饰共用入口） */

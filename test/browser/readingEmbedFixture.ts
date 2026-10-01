@@ -32,6 +32,7 @@ const bridge: VsCodeBridge = {
 }
 const controller = new WebviewSyncController(bridge)
 controller.mount(document.getElementById('app')!, [keymap.of(defaultKeymap)])
+let disposedEmbedBudget: unknown
 
 /** 主 Reading 容器（#223 起嵌入卡片/Live widget 内有嵌套同名容器——观测
  *  面限定主文档正文容器，排除嵌套与 hidden 的 Live 侧残留） */
@@ -50,6 +51,10 @@ Object.assign(window, {
   inputProbeMs() { return inputProbeEditAt > 0 ? Math.round(inputProbeEditAt - inputProbeStart) : null },
   refCacheStats() { return getRefReadingBlockCacheStats() },
   refLifecycleStats() { return getRefContentLifecycleStats() },
+  embedBudgetStats() {
+    return (controller as unknown as { embedCards?: { budgetStats(): unknown } }).embedCards?.budgetStats()
+      ?? disposedEmbedBudget
+  },
   embedVirtualStats(index: number) {
     const before = sent.length
     controller.handleHostMessage({ kind: 'view.state.request' })
@@ -97,7 +102,11 @@ Object.assign(window, {
     return { visible, scrollTop: scrollEl.scrollTop, scrollHeight: scrollEl.scrollHeight,
       clientHeight: scrollEl.clientHeight }
   },
-  disposeEmbedController() { controller.dispose() },
+  disposeEmbedController() {
+    const manager = (controller as unknown as { embedCards?: { budgetStats(): unknown } }).embedCards
+    controller.dispose()
+    disposedEmbedBudget = manager?.budgetStats()
+  },
   /** 装配父文档并切 Reading（宿主消息与生产同入口；嵌入卡片随挂载自动升级） */
   initEmbedDoc(text: string) {
     controller.handleHostMessage({
@@ -123,10 +132,10 @@ Object.assign(window, {
     return els.map((card) => {
       const rect = card.getBoundingClientRect()
       const style = getComputedStyle(card)
-      const scrollEl = card.querySelector<HTMLElement>('.vsidian-embed-card-scroll')!
-      const stateEl = card.querySelector<HTMLElement>('.vsidian-embed-card-state')!
-      const titleEl = card.querySelector<HTMLElement>('.vsidian-embed-card-title')
-      const openBtn = card.querySelector<HTMLElement>('.vsidian-embed-card-open')
+      const scrollEl = card.querySelector<HTMLElement>(':scope > .vsidian-embed-card-scroll')!
+      const stateEl = card.querySelector<HTMLElement>(':scope > .vsidian-embed-card-state')!
+      const titleEl = card.querySelector<HTMLElement>(':scope > .vsidian-embed-card-header .vsidian-embed-card-title')
+      const openBtn = card.querySelector<HTMLElement>(':scope > .vsidian-embed-card-header .vsidian-embed-card-open')
       const boxes = Array.from(card.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
       const centerEl = document.elementFromPoint(
         rect.left + Math.min(rect.width / 2, 80),

@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { HOVER_REFRESH_DEFAULTS } from '../../src/shared/hoverRefresh'
 import {
+  admitHoverWatch,
   HoverRefreshCoordinator,
   type HoverInvalidationStatus,
 } from '../../src/host/hoverRefreshCoordinator'
@@ -28,6 +29,33 @@ function makeCoordinator() {
 
 beforeEach(() => {
   vi.useFakeTimers()
+})
+
+describe('#244 provider 订阅准入与来源原子交接', () => {
+  it('跨面板满槽拒绝新目标；来源拒绝不撤已在场同目标订阅并释放待用租约', () => {
+    const coordinator = new HoverRefreshCoordinator({ pushInvalidation: () => {} }, { targetLimit: 1 })
+    const pins = new Set<string>()
+    const source = { retainHoverSource: (_sessionId: string, _fsPath: string,
+      instanceId: string, sourceLeaseId?: string) => {
+      if (sourceLeaseId === 'bad') return false
+      pins.add(instanceId)
+      return true
+    } }
+    const released: string[] = []
+    const admit = (sessionKey: string, fsPath: string, instanceId: string, lease: string) =>
+      admitHoverWatch(coordinator, source, { sessionKey, sessionId: sessionKey,
+        fsPath, instanceId, sourceLeaseId: lease }, () => released.push(lease))
+    expect(admit('panel-A', 'old.md', 'a', 'a-lease')).toBe('ok')
+    expect(admit('panel-B', 'old.md', 'b', 'b-lease')).toBe('ok')
+    expect(admit('panel-C', 'new.md', 'c', 'c-lease')).toBe('capacity')
+    expect(admit('panel-C', 'old.md', 'bad', 'bad')).toBe('source')
+    expect(coordinator.stats()).toEqual({ targets: 1, subscriptions: 2 })
+    expect(pins).toEqual(new Set(['a', 'b']))
+    expect(released).toEqual(['c-lease', 'bad'])
+    coordinator.handleDiskEvent('old.md', 'changed')
+    expect(coordinator.stats().subscriptions).toBe(2)
+    coordinator.dispose()
+  })
 })
 
 afterEach(() => {

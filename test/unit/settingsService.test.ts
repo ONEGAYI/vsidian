@@ -62,6 +62,7 @@ describe('快照读取', () => {
       'editor.readableLineWidth': 0,
       // #222 嵌入限高（Reading 嵌入卡片内容滚动区上限）
       'embed.maxHeight': 480,
+      'embed.maxDepth': 3,
       // #221 Live 直接悬停（默认关 = Ctrl+悬停）
       'hover.liveDirect': false,
     })
@@ -77,6 +78,16 @@ describe('快照读取', () => {
 })
 
 describe('补丁保存（apply）', () => {
+  it('#244 引用深度在自有设置中保存 1/3 并重开回显，越界值拒绝', async () => {
+    const storage = makeStorage()
+    const first = new SettingsService(storage, PRODUCTION_SETTING_DEFINITIONS)
+    expect((await first.apply({ 'embed.maxDepth': 1 })).ok).toBe(true)
+    const reopened = new SettingsService(storage, PRODUCTION_SETTING_DEFINITIONS)
+    expect(reopened.getSnapshot()['embed.maxDepth']).toBe(1)
+    expect((await reopened.apply({ 'embed.maxDepth': 3 })).ok).toBe(true)
+    expect(reopened.getSnapshot()['embed.maxDepth']).toBe(3)
+    expect((await reopened.apply({ 'embed.maxDepth': 7 })).ok).toBe(false)
+  })
   it('有效值保存成功并可回读；持久层收到 overlay 写入', async () => {
     const storage = makeStorage()
     const svc = new SettingsService(storage, FIXTURE_DEFS)

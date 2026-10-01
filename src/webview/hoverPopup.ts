@@ -197,6 +197,7 @@ interface HoverPopupState {
   /** #224 订阅目标（hover.watch 登记后的 fsPath；null = 未订阅——成功
    *  装载前无目标身份。变更刷新经 hover.invalidated 推送，关闭即 unwatch） */
   watchedFsPath: string | null
+  watchLeaseId: string | null
   /** #221 键盘模态：命令手动打开（焦点进入浮层 + Esc 返还触发处） */
   keyboardOpened: boolean
   /** #221 键盘打开前的焦点元素（关闭时返还；body/脱树不返还） */
@@ -478,6 +479,7 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
     targetFsPath: '',
     appliedVersion: -1,
     watchedFsPath: null,
+    watchLeaseId: null,
     keyboardOpened: options?.keyboard === true,
     prevFocus: options?.prevFocus ?? null,
     closeTimer: undefined,
@@ -757,14 +759,14 @@ function applyHoverContent(state: HoverPopupState, message: Extract<HoverPreview
 
 /** #224 登记目标订阅（成功装载后；目标身份变化先释放旧订阅） */
 function ensureWatch(state: HoverPopupState, fsPath: string, sourceLeaseId?: string): void {
-  if (state.watchedFsPath === fsPath) {
-    if (context) releaseRefSourceLease(context, sourceLeaseId)
+  if (state.watchedFsPath === fsPath && sourceLeaseId === undefined) {
     return
   }
-  if (state.watchedFsPath !== null) {
+  if (state.watchedFsPath !== null && state.watchedFsPath !== fsPath) {
     sendWatchMessage(state.watchedFsPath, state.instanceId, 'hover.unwatch')
   }
   state.watchedFsPath = fsPath
+  state.watchLeaseId = sourceLeaseId ?? null
   sendWatchMessage(fsPath, state.instanceId, 'hover.watch', sourceLeaseId)
 }
 
@@ -804,6 +806,20 @@ export function notifyHoverResult(message: HoverPreviewResult): boolean {
   }
   position(popup)
   return true
+}
+
+/** 订阅容量／来源校验失败时，立即撤掉不能再获得失效推送的正文。 */
+export function notifyHoverWatchRejected(message: {
+  fsPath: string; instanceId: string; reason: 'capacity' | 'source'; sourceLeaseId?: string
+}): void {
+  const state = popup
+  if (!state || state.instanceId !== message.instanceId || state.watchedFsPath !== message.fsPath ||
+    (message.sourceLeaseId !== undefined && state.watchLeaseId !== message.sourceLeaseId)) return
+  state.watchedFsPath = null
+  state.watchLeaseId = null
+  state.content.clear()
+  applyDisplay(state, 'error', t(message.reason === 'capacity' ? 'hover.errorWatchCapacity' : 'hover.errorSourceExpired'))
+  position(state)
 }
 
 /**

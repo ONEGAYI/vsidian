@@ -230,6 +230,239 @@ describe('ready 握手与 init', () => {
   })
 })
 
+describe('#244 宿主直接父来源与当前路径', () => {
+  it('只接已送达且仍订阅的 B；版本、范围、原文与回指 A 分别验证', async () => {
+    const bPath = 'D:\\notes\\b.md'
+    const aPath = 'D:\\notes\\a.md'
+    const b = { version: 1, text: '![[C]]\n![[A]]' }
+    const doc = new FakeDoc('![[B]]')
+    const session = new DocumentSession(doc, { docUri: DOC_URI, rootFsPath: aPath, isWindowsHost: true })
+    const out: HostToWebview[] = []
+    const reads: Array<{ target: string; source?: string }> = []
+    const id = session.attachPanel({
+      send: (m) => out.push(m),
+      readHoverSource: async (fsPath) => fsPath === bPath ? b : null,
+      readHoverTarget: (payload, report) => {
+        reads.push({ target: payload.target, source: payload.verifiedSource?.fsPath })
+        const fsPath = payload.target === 'B' ? bPath : payload.target === 'A' ? aPath : 'D:\\notes\\c.md'
+        const text = payload.target === 'B' ? b.text : '# target'
+        report({ ok: true, fsPath, relPath: `${payload.target}.md`, version: 1,
+          lfText: text, range: { start: 0, end: text.length }, scope: { kind: 'full' } })
+      },
+    })
+    await session.handleWebviewMessage({ kind: 'ready' }, id)
+    const request = async (reqId: number, target: string, start: number, end: number) => {
+      await session.handleWebviewMessage({ kind: 'hover.request', sessionId: id, docUri: DOC_URI,
+        reqId, instanceId: `mount-${reqId}`, occurrenceId: `child-${reqId}`,
+        sourceStart: start, sourceEnd: end, target,
+        source: { parentInstanceId: 'root-b', sourceDocUri: bPath }, retainSource: true }, id)
+      return out.at(-1) as Extract<HostToWebview, { kind: 'hover.result' }>
+    }
+    await session.handleWebviewMessage({ kind: 'hover.request', sessionId: id, docUri: DOC_URI,
+      reqId: 1, instanceId: 'mount-b', occurrenceId: 'root-b', sourceStart: 0, sourceEnd: 6,
+      target: 'B', retainSource: true }, id)
+    const first = out.at(-1) as Extract<HostToWebview, { kind: 'hover.result'; ok: true }>
+    expect(first).toMatchObject({ ok: true, depth: 1 })
+    expect(session.retainHoverSource(id, bPath, 'root-b', first.sourceLeaseId)).toBe(true)
+    expect(await request(2, 'C', 0, 6)).toMatchObject({ ok: true, depth: 2 })
+    expect(reads.at(-1)).toEqual({ target: 'C', source: bPath })
+    expect(await request(3, 'A', 7, 13)).toMatchObject({ ok: false, reason: 'cycle' })
+    expect(await request(4, 'Wrong', 0, 6)).toMatchObject({ ok: false, reason: 'source-expired' })
+    expect(await request(5, 'C', 7, 13)).toMatchObject({ ok: false, reason: 'source-expired' })
+    b.version = 2
+    expect(await request(6, 'C', 0, 6)).toMatchObject({ ok: false, reason: 'source-expired' })
+    await session.handleWebviewMessage({ kind: 'hover.unwatch', sessionId: id, docUri: DOC_URI,
+      fsPath: bPath, instanceId: 'root-b' }, id)
+    expect(await request(7, 'C', 0, 6)).toMatchObject({ ok: false, reason: 'source-expired' })
+  })
+
+  it('两个目录的同名 C 按各自 B 来源读，缓存形态不跨来源命中', async () => {
+    const doc = new FakeDoc('![[one/B]]\n![[two/B]]')
+    const session = new DocumentSession(doc, { docUri: DOC_URI, rootFsPath: 'D:\\notes\\a.md', isWindowsHost: true })
+    const out: HostToWebview[] = []
+    const served: string[] = []
+    const bText = '![[C]]'
+    const id = session.attachPanel({
+      send: (m) => out.push(m),
+      readHoverSource: async () => ({ version: 1, text: bText }),
+      readHoverTarget: (payload, report) => {
+        const source = payload.verifiedSource?.fsPath ?? ''
+        served.push(`${source}:${payload.target}`)
+        const fsPath = payload.target === 'C' ? source.replace('B.md', 'C.md')
+          : `D:\\notes\\${payload.target.replaceAll('/', '\\')}.md`
+        const text = payload.target === 'C' ? '# C' : bText
+        report({ ok: true, fsPath, relPath: `${payload.target}.md`, version: 1,
+          lfText: text, range: { start: 0, end: text.length }, scope: { kind: 'full' } })
+      },
+    })
+    await session.handleWebviewMessage({ kind: 'ready' }, id)
+    for (const [index, parent] of ['one/B', 'two/B'].entries()) {
+      await session.handleWebviewMessage({ kind: 'hover.request', sessionId: id, docUri: DOC_URI,
+        reqId: index + 1, instanceId: `mount-${index}`, occurrenceId: `parent-${index}`,
+        sourceStart: 0, sourceEnd: 10, target: parent, retainSource: true }, id)
+      const result = out.at(-1) as Extract<HostToWebview, { kind: 'hover.result'; ok: true }>
+      expect(session.retainHoverSource(id, result.target.fsPath, `parent-${index}`, result.sourceLeaseId)).toBe(true)
+    }
+    for (const index of [0, 1, 0]) {
+      const sourceDocUri = `D:\\notes\\${index === 0 ? 'one' : 'two'}\\B.md`
+      await session.handleWebviewMessage({ kind: 'hover.request', sessionId: id, docUri: DOC_URI,
+        reqId: index + 10, instanceId: `child-${index}`, occurrenceId: `occ-${index}`,
+        sourceStart: 0, sourceEnd: 6, target: 'C',
+        source: { parentInstanceId: `parent-${index}`, sourceDocUri } }, id)
+      expect(out.at(-1)).toMatchObject({ ok: true, target: { fsPath: sourceDocUri.replace('B.md', 'C.md') } })
+    }
+    expect(served.filter((x) => x.endsWith(':C'))).toEqual([
+      'D:\\notes\\one\\B.md:C', 'D:\\notes\\two\\B.md:C',
+    ])
+  })
+
+  it('B 同 fsPath 未保存版本前移后旧子拒绝；新租约更新父关系且新子可读', async () => {
+    const bPath = 'D:\\notes\\b.md'
+    const b = { version: 1, text: '![[Old]]' }
+    const session = new DocumentSession(new FakeDoc('![[B]]'),
+      { docUri: DOC_URI, rootFsPath: 'D:\\notes\\a.md', isWindowsHost: true })
+    const out: HostToWebview[] = []
+    const id = session.attachPanel({
+      send: (m) => out.push(m),
+      readHoverSource: async () => b,
+      readHoverTarget: (payload, report) => {
+        const text = payload.target === 'B' ? b.text : '# leaf'
+        report({ ok: true, fsPath: payload.target === 'B' ? bPath : `D:\\notes\\${payload.target}.md`,
+          relPath: `${payload.target}.md`, version: payload.target === 'B' ? b.version : 1,
+          lfText: text, range: { start: 0, end: text.length }, scope: { kind: 'full' } })
+      },
+    })
+    await session.handleWebviewMessage({ kind: 'ready' }, id)
+    const loadB = async (reqId: number): Promise<string> => {
+      await session.handleWebviewMessage({ kind: 'hover.request', sessionId: id, docUri: DOC_URI,
+        reqId, instanceId: `mount-b-${reqId}`, occurrenceId: 'root-b',
+        sourceStart: 0, sourceEnd: 6, target: 'B', retainSource: true }, id)
+      const result = out.at(-1) as Extract<HostToWebview, { kind: 'hover.result'; ok: true }>
+      expect(result.ok).toBe(true)
+      return result.sourceLeaseId!
+    }
+    const child = async (reqId: number, target: string) => {
+      await session.handleWebviewMessage({ kind: 'hover.request', sessionId: id, docUri: DOC_URI,
+        reqId, instanceId: `child-${reqId}`, occurrenceId: `child-occ-${reqId}`,
+        sourceStart: 0, sourceEnd: b.text.length, target,
+        source: { parentInstanceId: 'root-b', sourceDocUri: bPath } }, id)
+      return out.at(-1)
+    }
+    expect(session.retainHoverSource(id, bPath, 'root-b', await loadB(1))).toBe(true)
+    expect(await child(2, 'Old')).toMatchObject({ ok: true })
+    b.version = 2
+    b.text = '![[New]]'
+    session.invalidateHoverReads(bPath)
+    expect(await child(3, 'New')).toMatchObject({ ok: false, reason: 'source-expired' })
+    expect(session.retainHoverSource(id, bPath, 'root-b', await loadB(4))).toBe(true)
+    expect(await child(5, 'Old')).toMatchObject({ ok: false, reason: 'source-expired' })
+    expect(await child(6, 'New')).toMatchObject({ ok: true, depth: 2 })
+  })
+
+  it('同 occurrence 多笔在途读取按请求实数限 8，旧回报不能结算其他请求', async () => {
+    const session = new DocumentSession(new FakeDoc('![[B]]'),
+      { docUri: DOC_URI, rootFsPath: 'D:\\notes\\a.md', isWindowsHost: true })
+    const out: HostToWebview[] = []
+    const complete: Array<() => void> = []
+    const id = session.attachPanel({
+      send: (m) => out.push(m),
+      readHoverTarget: (_payload, report) => {
+        complete.push(() => report({ ok: true, fsPath: 'D:\\notes\\b.md', relPath: 'b.md',
+          version: 1, lfText: '# B', range: { start: 0, end: 3 }, scope: { kind: 'full' } }))
+      },
+    })
+    await session.handleWebviewMessage({ kind: 'ready' }, id)
+    const request = async (n: number) => session.handleWebviewMessage({ kind: 'hover.request',
+      sessionId: id, docUri: DOC_URI, reqId: n, instanceId: `request-${n}`,
+      occurrenceId: 'same-occurrence', sourceStart: 0, sourceEnd: 6,
+      target: `target-${n}`, retainSource: true }, id)
+    for (let i = 1; i <= 12; i++) await request(i)
+    expect(complete).toHaveLength(8)
+    expect(out.filter((m) => m.kind === 'hover.result' && !m.ok && m.reason === 'budget')).toHaveLength(4)
+    complete[0]!()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await request(13)
+    expect(complete).toHaveLength(9)
+    complete[0]!() // 同一个回报重复送达，不得再结算第 13 笔的槽。
+    await request(14)
+    expect(complete).toHaveLength(9)
+    expect(out.at(-1)).toMatchObject({ kind: 'hover.result', ok: false, reason: 'budget' })
+  })
+
+  it('失效刷新后 unwatch 仍按真实端口在途数限 8，直到回报才还槽', async () => {
+    const session = new DocumentSession(new FakeDoc('![[B]]'),
+      { docUri: DOC_URI, rootFsPath: 'D:\\notes\\a.md', isWindowsHost: true })
+    const out: HostToWebview[] = []
+    const held: Array<() => void> = []
+    const first = new Set<string>()
+    const id = session.attachPanel({
+      send: (m) => out.push(m),
+      readHoverTarget: (payload, report) => {
+        const fsPath = `D:\\notes\\${payload.target}.md`
+        const done = () => report({ ok: true, fsPath, relPath: `${payload.target}.md`,
+          version: 1, lfText: '# B', range: { start: 0, end: 3 }, scope: { kind: 'full' } })
+        if (!first.has(payload.target)) {
+          first.add(payload.target)
+          done()
+        } else held.push(done)
+      },
+    })
+    await session.handleWebviewMessage({ kind: 'ready' }, id)
+    const request = (n: number, refresh: boolean) => session.handleWebviewMessage({ kind: 'hover.request',
+      sessionId: id, docUri: DOC_URI, reqId: refresh ? n + 100 : n,
+      instanceId: `request-${n}`, occurrenceId: `root-${n}`,
+      sourceStart: 0, sourceEnd: 6, target: `B${n}`, retainSource: true }, id)
+    for (let i = 0; i < 10; i++) {
+      await request(i, false)
+      const result = out.at(-1) as Extract<HostToWebview, { kind: 'hover.result'; ok: true }>
+      const fsPath = `D:\\notes\\B${i}.md`
+      await session.handleWebviewMessage({ kind: 'hover.watch', sessionId: id, docUri: DOC_URI,
+        fsPath, instanceId: `root-${i}`, sourceLeaseId: result.sourceLeaseId }, id)
+      session.invalidateHoverReads(fsPath)
+      await request(i, true)
+      await session.handleWebviewMessage({ kind: 'hover.unwatch', sessionId: id, docUri: DOC_URI,
+        fsPath, instanceId: `root-${i}` }, id)
+    }
+    expect(held).toHaveLength(8)
+    expect(out.filter((m) => m.kind === 'hover.result' && !m.ok && m.reason === 'budget')).toHaveLength(2)
+    held[0]!()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await request(10, false)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(out.at(-1)).toMatchObject({ kind: 'hover.result', ok: true })
+  })
+
+  it('同 occurrence 旧回包 lease 释放不撤销仍在途的新读取预算', async () => {
+    const session = new DocumentSession(new FakeDoc('![[B]]'),
+      { docUri: DOC_URI, rootFsPath: 'D:\\notes\\a.md', isWindowsHost: true })
+    const out: HostToWebview[] = []
+    const complete: Array<() => void> = []
+    const id = session.attachPanel({
+      send: (m) => out.push(m),
+      readHoverTarget: (payload, report) => {
+        complete.push(() => report({ ok: true, fsPath: `D:\\notes\\${payload.target}.md`,
+          relPath: `${payload.target}.md`, version: 1, lfText: '# target',
+          range: { start: 0, end: 8 }, scope: { kind: 'full' } }))
+      },
+    })
+    await session.handleWebviewMessage({ kind: 'ready' }, id)
+    for (const reqId of [1, 2]) await session.handleWebviewMessage({ kind: 'hover.request',
+      sessionId: id, docUri: DOC_URI, reqId, instanceId: `request-${reqId}`,
+      occurrenceId: 'same', sourceStart: 0, sourceEnd: 6,
+      target: `B${reqId}`, retainSource: true }, id)
+    complete[0]!()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const old = out.find((m) => m.kind === 'hover.result' && m.reqId === 1)
+    expect(old).toMatchObject({ ok: true })
+    if (!old || old.kind !== 'hover.result' || !old.ok || !old.sourceLeaseId) throw new Error('missing old lease')
+    await session.handleWebviewMessage({ kind: 'hover.source.release', sessionId: id,
+      docUri: DOC_URI, sourceLeaseId: old.sourceLeaseId }, id)
+    complete[1]!()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(out.find((m) => m.kind === 'hover.result' && m.reqId === 2)).toMatchObject({ ok: true })
+  })
+})
+
 describe('ready 即语言校准（#96 R1：每次 ready 幂等补发 locale.changed）', () => {
   it('首次 ready：init 之后补发 locale.changed（携供应者当前生效语言）', async () => {
     const s = setup('# a\n', {

@@ -206,5 +206,13 @@ export function refErrorText(reason: HoverPreviewFailReason, target: string, anc
       return t('hover.errorReadFailed')
     case 'anchor-missing':
       return t('hover.errorAnchorMissing', { target, anchor: anchor ?? '' })
+    case 'source-expired':
+      return t('hover.errorSourceExpired')
+    case 'cycle':
+      return t('hover.errorCycle')
+    case 'depth':
+      return t('hover.errorDepth')
+    case 'budget':
+      return t('hover.errorBudget')
   }
 }

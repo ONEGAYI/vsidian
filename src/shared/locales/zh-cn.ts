@@ -78,6 +78,8 @@ export const zhCn: Record<MessageKey, string> = {
   /** #222 嵌入卡片限高（阅读模式嵌入内容超出后内部滚动） */
   'setting.embedMaxHeight.title': '嵌入内容最大高度',
   'setting.embedMaxHeight.description': '阅读模式嵌入卡片内容区的最大高度：较短笔记保持自然高度，超出该值的内容在卡片内部滚动。',
+  'setting.embedMaxDepth.title': '嵌入笔记展开层级',
+  'setting.embedMaxDepth.description': '自动展开嵌入内容中的引用。来源笔记是第 0 层；设为 1 只显示直接嵌入，设为 3 再显示后续两层。',
   /** #221 Live 悬停触发方式（Ctrl+悬停 vs 直接悬停） */
   'setting.hoverLiveDirect.title': '实时预览中直接悬停链接',
   'setting.hoverLiveDirect.description': '开启后在实时预览中指针悬停链接即可打开预览浮层；关闭时需按住 Ctrl（macOS 为 Cmd）再悬停。阅读模式与反链/出链面板不受影响，始终直接悬停。',
@@ -362,6 +364,11 @@ export const zhCn: Record<MessageKey, string> = {
   'hover.errorNonMarkdown': '{target} 不是 Markdown 笔记：本期预览仅支持 Markdown 文档',
   'hover.errorReadFailed': '读取目标文档失败',
   'hover.errorAnchorMissing': '目标笔记中不存在锚点：{target}#{anchor}（不会以全文替代显示）',
+  'hover.errorWatchCapacity': '同时打开的引用笔记过多。请关闭其他预览或卡片后重新打开。',
+  'hover.errorSourceExpired': '来源笔记已变更或关闭。请重新打开此引用。',
+  'hover.errorCycle': '当前引用路径中已包含这篇笔记。',
+  'hover.errorDepth': '已达到引用展开的最大层级。',
+  'hover.errorBudget': '当前引用树已达到资源上限。',
   /** #220 引用 Reading 内容：浮层内笔记属性区展开/折叠按钮的无障碍文案
    *  （aria-label 与 title 同词；按钮是唯一操作入口，标题行悬停只负责显示） */
   'hover.content.fmExpand': '展开笔记属性',

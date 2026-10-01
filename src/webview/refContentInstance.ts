@@ -32,13 +32,13 @@ function discardCached(path: string): void {
   cacheBytes -= entry.bytes
 }
 
-function parsedBlocksFor(loaded: RefLoadedContent): { blocks: ReadingBlock[]; parsedNow: boolean } {
+function parsedBlocksFor(loaded: RefLoadedContent): { blocks: ReadingBlock[]; parsedNow: boolean; bytes: number } {
   const cached = parsedBlockCache.get(loaded.fsPath)
   if (cached?.version === loaded.version && cached.text === loaded.text) {
     parsedBlockCache.delete(loaded.fsPath)
     parsedBlockCache.set(loaded.fsPath, cached)
     sharedHits++
-    return { blocks: cached.blocks, parsedNow: false }
+    return { blocks: cached.blocks, parsedNow: false, bytes: cached.bytes }
   }
   const blocks = splitReadingBlocks(loaded.text)
   sharedParses++
@@ -47,7 +47,7 @@ function parsedBlocksFor(loaded: RefLoadedContent): { blocks: ReadingBlock[]; pa
   const bytes = 2 * (loaded.text.length + blocks.reduce((sum, block) => sum + block.html.length, 0)) + blocks.length * 128
   if (bytes > CACHE_MAX_ENTRY_BYTES) {
     oversizeSkips++
-    return { blocks, parsedNow: true }
+    return { blocks, parsedNow: true, bytes }
   }
   while (parsedBlockCache.size >= CACHE_MAX_ENTRIES || cacheBytes + bytes > CACHE_MAX_BYTES) {
     discardCached(parsedBlockCache.keys().next().value!)
@@ -55,7 +55,7 @@ function parsedBlocksFor(loaded: RefLoadedContent): { blocks: ReadingBlock[]; pa
   }
   parsedBlockCache.set(loaded.fsPath, { version: loaded.version, text: loaded.text, blocks, bytes })
   cacheBytes += bytes
-  return { blocks, parsedNow: true }
+  return { blocks, parsedNow: true, bytes }
 }
 
 /** 引用解析缓存统计，用于性能测量；缓存仅持有块数据，不持有实例资源。 */
@@ -82,6 +82,8 @@ export interface RefSourceContext {
   range: { start: number; end: number }
   occurrence: string
   parentInstanceId?: string
+  depth?: number
+  treeId?: string
   expansionPath?: readonly RefTargetIdentity[]
   /** 后续预算控制器的注入点，本票不作展开或预算判定。 */
   budget?: { acquire(identity: RefTargetIdentity): (() => void) | null }
@@ -99,6 +101,8 @@ export interface RefLoadedContent extends RefTargetIdentity {
   relPath: string
   version: number
   text: string
+  depth?: number
+  expansionPath?: readonly string[]
 }
 
 /** 每个引用位置独立；数据可共享，挂载、滚动、属性状态不跨 occurrence。 */
@@ -142,6 +146,8 @@ export interface RefMountOptions {
   session(): { sessionId: string | undefined; docUri: string | undefined }
   send(message: WebviewToHost): void
   codeHighlight(): boolean
+  onEmbedBlockMounted?(el: HTMLElement, target: RefLoadedContent): void
+  onEmbedBlockUnmounted?(el: HTMLElement): void
 }
 
 /** 窄挂载接口：容器负责位置、可用空间、requestMeasure 与请求仲裁。 */
@@ -200,20 +206,24 @@ export class RefContentMount {
     this.onDispose(() => el.removeEventListener(type, listener))
   }
 
-  render(loaded: RefLoadedContent): void {
-    if (this.released) return
+  render(loaded: RefLoadedContent, beforeMount?: (bytes: number) => boolean): boolean {
+    if (this.released) return false
     // 刷新前保存真实当前位置，重挂的新壳为 0 时沿用 occurrence 保存值。
     if (this.target !== null || this.options.scrollEl.scrollTop > 0) {
       this.instance.scrollTop = this.options.scrollEl.scrollTop
     }
     this.clear()
     this.target = loaded
+    const parsed = parsedBlocksFor(loaded)
+    if (beforeMount && !beforeMount(parsed.bytes)) {
+      this.target = null
+      return false
+    }
     this.images = createSourcedImageManager({
       session: this.options.session,
       send: this.options.send,
       sourceDocUri: () => this.target?.fsPath ?? '',
     })
-    const parsed = parsedBlocksFor(loaded)
     if (this.view) {
       this.view.setDocument(loaded.text, {
         blocks: parsed.blocks, parsedNow: parsed.parsedNow,
@@ -230,6 +240,7 @@ export class RefContentMount {
         this.mountBlock(el)
       }
     }
+    return true
   }
 
   restoreScroll(deferred: boolean): void {
@@ -301,10 +312,14 @@ export class RefContentMount {
       } : null,
       onDispose: (cleanup) => cleanups.push(cleanup),
     })
+    if (this.target && el.dataset['vsidianEmbedInner'] !== undefined) {
+      this.options.onEmbedBlockMounted?.(el, this.target)
+    }
   }
 
   private unmountBlock(el: HTMLElement): void {
     if (!this.blocks.has(el)) return
+    this.options.onEmbedBlockUnmounted?.(el)
     this.images?.detachWithin(el)
     for (const cleanup of this.blocks.get(el) ?? []) cleanup()
     this.blocks.delete(el)

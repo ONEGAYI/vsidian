@@ -63,7 +63,7 @@ import type { CssSnippetService } from './cssSnippetService'
 import type { VaultIndexService } from './vaultIndexService'
 import type { IndexMaintenance } from './vaultIndexMaintenance'
 import { ImageRefreshCoordinator } from './imageRefreshCoordinator'
-import { connectHoverEvents, HoverRefreshCoordinator } from './hoverRefreshCoordinator'
+import { admitHoverWatch, connectHoverEvents, HoverRefreshCoordinator } from './hoverRefreshCoordinator'
 import type { ImageVersionTable } from './imageVersioning'
 import {
   IMAGE_EVENT_DEBOUNCE_MS,
@@ -88,6 +88,7 @@ import { installHostLocale, LOCALE_MESSAGES, type LocaleCode } from '../shared/l
 import { buildLocaleIslandHtml } from '../shared/locales/island'
 import { hostLocale } from './hostLocale'
 import { t } from '../shared/i18n'
+import { EMBED_MAX_DEPTH_DEFAULT, EMBED_MAX_DEPTH_KEY } from '../shared/settings'
 
 export const VIEW_TYPE = 'onegayi.vsidian.editor'
 
@@ -797,6 +798,11 @@ export function createTextEditorProvider(
     // 在不同文档指向不同文件——目标解析必须按文档）；决策与版本表在协调器
     fresh.session = new DocumentSession(port, {
       docUri: key,
+      rootFsPath: doc.uri.fsPath,
+      getEmbedDepthLimit: () => {
+        const value = settings?.service.getSnapshot()[EMBED_MAX_DEPTH_KEY]
+        return typeof value === 'number' ? value : EMBED_MAX_DEPTH_DEFAULT
+      },
       onNotice: (notice) => handleNotice(key, notice),
       onViewState: (sessionId, state) => handlePanelViewState(key, sessionId, state),
       isWindowsHost,
@@ -1260,13 +1266,25 @@ export function createTextEditorProvider(
       // 优先（反链/出链面板条目的直接目标——宿主快照身份直读，不走文本
       // 解析；断链条目空串 fsPath 由 readHoverDirectTarget 回 not-found）
       const readHoverTargetPort = (
-        payload: Pick<HoverPreviewRequestPayload, 'target' | 'linkHref' | 'directTarget'>,
+        payload: HoverPreviewRequestPayload & { verifiedSource?: { fsPath: string; version: number } },
         report: (result: HoverReadOutcome) => void,
       ): void => {
         void (async (): Promise<void> => {
           let outcome: HoverReadOutcome
           try {
-            const access = hoverAccessContextOf(document)
+            let sourceDoc = document
+            if (payload.source !== undefined) {
+              if (!payload.verifiedSource || payload.verifiedSource.fsPath !== payload.source.sourceDocUri) {
+                report({ ok: false, reason: 'source-expired' })
+                return
+              }
+              sourceDoc = await vscode.workspace.openTextDocument(vscode.Uri.file(payload.verifiedSource.fsPath))
+              if (sourceDoc.version !== payload.verifiedSource.version) {
+                report({ ok: false, reason: 'source-expired' })
+                return
+              }
+            }
+            const access = hoverAccessContextOf(sourceDoc)
             const ports = {
               resolveVaultFile: (rawPath: string) =>
                 resolveVaultLinkFile(rawPath, access.resolve, statFileRealPath),
@@ -1311,6 +1329,15 @@ export function createTextEditorProvider(
         openLink,
         openWikilink,
         readHoverTarget: readHoverTargetPort,
+        readHoverSource: async (fsPath) => {
+          try {
+            const source = await vscode.workspace.openTextDocument(vscode.Uri.file(fsPath))
+            const text = source.getText()
+            return { version: source.version, text: new NewlineCoordinator(text).toLfText(text) }
+          } catch {
+            return null
+          }
+        },
         resolveImage,
         // #33 设置端口：工具栏 settings.open 与 init 后 settings.get 的
         // 面板级处理（与 link.activate 同模式；settings.set 只存在于
@@ -1477,9 +1504,18 @@ export function createTextEditorProvider(
           message.docUri === document.uri.toString() && message.sessionId === sessionId) {
           const sessionKey = hoverSessionKeyOf(message.docUri, message.sessionId)
           if (message.kind === 'hover.watch') {
-            if (entry.session.retainHoverSource(sessionId, message.fsPath, message.instanceId, message.sourceLeaseId)) {
-              hoverRefresh.watch(sessionKey, message.fsPath, message.instanceId)
-            } else {
+            const admitted = admitHoverWatch(hoverRefresh, entry.session,
+              { sessionKey, sessionId, fsPath: message.fsPath, instanceId: message.instanceId,
+                sourceLeaseId: message.sourceLeaseId }, () => {
+              if (message.sourceLeaseId !== undefined) {
+                void entry.session.handleWebviewMessage({ kind: 'hover.source.release',
+                  sessionId, docUri: message.docUri, sourceLeaseId: message.sourceLeaseId }, sessionId)
+              }
+              })
+            if (admitted !== 'ok') {
+              send({ kind: 'hover.watch.rejected', fsPath: message.fsPath,
+                instanceId: message.instanceId, reason: admitted,
+                ...(message.sourceLeaseId !== undefined ? { sourceLeaseId: message.sourceLeaseId } : {}) })
               hoverWatchRejected += 1
               console.debug(
                 '[vsidian] hover.watch 目标不在本面板来源集合，已忽略',

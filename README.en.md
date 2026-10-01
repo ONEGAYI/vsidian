@@ -50,6 +50,7 @@ Vsidian brings an Obsidian-like Markdown editing experience to VS Code. After in
 | --- | --- |
 | Backlink panel | The sidebar shows which documents reference the current note: context cards grouped by source with the matched link highlighted, sortable and searchable, click to jump to the reference |
 | Outgoing links panel | The sidebar lists every link in the current note (wikilinks, links, images, reference definitions); click lands on the link's actual anchor, broken links dim |
+| Recursive note embeds | Standalone `![[note]]` cards expand nested notes read-only, up to three levels by default; set the limit from one to six in Vsidian settings, with an open-target action at limits or cycles |
 | Reference updates on rename | Renaming or moving files and folders inside VS Code rewrites wikilinks, links, and image references to the new locations; one undo reverts the whole rewrite |
 
 ### Code blocks & diagrams

@@ -225,6 +225,11 @@ export const EMBED_MAX_HEIGHT_MIN = 160
 export const EMBED_MAX_HEIGHT_MAX = 2000
 /** 步进 20px（滑块粒度） */
 export const EMBED_MAX_HEIGHT_STEP = 20
+/** #244 A is depth 0; B/C/D are depths 1/2/3. */
+export const EMBED_MAX_DEPTH_KEY = 'embed.maxDepth'
+export const EMBED_MAX_DEPTH_DEFAULT = 3
+export const EMBED_MAX_DEPTH_MIN = 1
+export const EMBED_MAX_DEPTH_MAX = 6
 
 /**
  * 语言设置键（#93 预留，#96 注册定义与「常规」分区）：值域 auto | zh-cn |
@@ -409,6 +414,16 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     descriptionKey: 'setting.readableLineWidth.description',
     zeroLabelKey: 'setting.readableLineWidthFill',
     unit: 'px',
+  },
+  {
+    key: EMBED_MAX_DEPTH_KEY,
+    type: 'number',
+    default: EMBED_MAX_DEPTH_DEFAULT,
+    min: EMBED_MAX_DEPTH_MIN,
+    max: EMBED_MAX_DEPTH_MAX,
+    step: 1,
+    titleKey: 'setting.embedMaxDepth.title',
+    descriptionKey: 'setting.embedMaxDepth.description',
   },
   {
     // #222 嵌入最大高度（embed.* 域 → 编辑器页「显示」组：非 symbol/

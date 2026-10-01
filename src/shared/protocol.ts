@@ -441,6 +441,9 @@ export type HostToWebview =
       text: string
       range: { start: number; end: number }
       scope: HoverPreviewScope
+      /** #244 Host-authenticated expansion ancestry, including root A. */
+      expansionPath?: string[]
+      depth?: number
       /** #242 每次成功送达的来源租约；不能作为共享内容缓存身份。 */
       sourceLeaseId?: string
     }
@@ -469,6 +472,7 @@ export type HostToWebview =
       status: 'changed' | 'deleted' | 'stale'
       generation: number
     }
+  | { kind: 'hover.watch.rejected'; fsPath: string; instanceId: string; reason: 'capacity' | 'source'; sourceLeaseId?: string }
   /** 索引维护状态（#198，设置页消费）：排除模式（当前生效 + 默认值）、
    *  维护操作状态与进度、最近一次操作结果反馈。设置页经 index.get 拉取；
    *  宿主状态变更（模式保存/进度推进/操作完成）后推送。available=false
@@ -802,6 +806,10 @@ export type WebviewToHost =
       sourceStart: number
       sourceEnd: number
       target: string
+      /** Stable card occurrence; request instanceId may change on remount. */
+      occurrenceId?: string
+      /** Child references use the delivered, still-watched parent occurrence. */
+      source?: { parentInstanceId: string; sourceDocUri: string }
       /** #242 成功送达后保留来源，直到 watch 转交或显式 release。 */
       retainSource?: boolean
       /** 普通链接形态的 href 原文（#219；缺省 = 双链形态） */
@@ -1038,7 +1046,8 @@ export type HoverPreviewScope =
  *  anchor-missing=目标文件在但标题/块锚点不存在（不以全文替代，附锚点
  *  原文） */
 export type HoverPreviewFailReason =
-  'unsupported' | 'no-workspace' | 'escape' | 'not-found' | 'non-markdown' | 'read-failed' | 'anchor-missing'
+  'unsupported' | 'no-workspace' | 'escape' | 'not-found' | 'non-markdown' | 'read-failed' | 'anchor-missing' |
+  'source-expired' | 'cycle' | 'depth' | 'budget'
 
 /** #218 悬停预览请求载荷（宿主侧消费形态） */
 export type HoverPreviewRequestPayload = Extract<WebviewToHost, { kind: 'hover.request' }>
@@ -2676,6 +2685,10 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         isNonNegativeInt(v.sourceEnd) &&
         (v.sourceStart as number) <= (v.sourceEnd as number) &&
         isString(v.target) &&
+        (v.occurrenceId === undefined || (typeof v.occurrenceId === 'string' && v.occurrenceId.length > 0)) &&
+        (v.source === undefined || (isObject(v.source) &&
+          typeof v.source.parentInstanceId === 'string' && v.source.parentInstanceId.length > 0 &&
+          typeof v.source.sourceDocUri === 'string' && v.source.sourceDocUri.length > 0)) &&
         (v.retainSource === undefined || typeof v.retainSource === 'boolean') &&
         (v.linkHref === undefined || isString(v.linkHref)) &&
         (v.directTarget === undefined ||
@@ -3101,6 +3114,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
           isString(v.target.relPath) &&
           isNonNegativeInt(v.version) &&
           isString(v.text) &&
+          (v.expansionPath === undefined || (Array.isArray(v.expansionPath) && v.expansionPath.every(isString))) &&
+          (v.depth === undefined || isPositiveInt(v.depth)) &&
           (v.sourceLeaseId === undefined || (typeof v.sourceLeaseId === 'string' && v.sourceLeaseId.length > 0)) &&
           isObject(v.range) &&
           typeof v.range.start === 'number' &&
@@ -3117,7 +3132,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         v.ok === false &&
         (v.reason === 'unsupported' || v.reason === 'no-workspace' || v.reason === 'escape' ||
           v.reason === 'not-found' || v.reason === 'non-markdown' || v.reason === 'read-failed' ||
-          v.reason === 'anchor-missing') &&
+          v.reason === 'anchor-missing' || v.reason === 'source-expired' || v.reason === 'cycle' ||
+          v.reason === 'depth' || v.reason === 'budget') &&
         (v.anchor === undefined || isString(v.anchor))
       )
     case 'hover.invalidated':
@@ -3129,6 +3145,11 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         (v.status === 'changed' || v.status === 'deleted' || v.status === 'stale') &&
         isNonNegativeInt(v.generation)
       )
+    case 'hover.watch.rejected':
+      return typeof v.fsPath === 'string' && v.fsPath.length > 0 &&
+        typeof v.instanceId === 'string' && v.instanceId.length > 0 &&
+        (v.sourceLeaseId === undefined || (typeof v.sourceLeaseId === 'string' && v.sourceLeaseId.length > 0)) &&
+        (v.reason === 'capacity' || v.reason === 'source')
     case 'outlinks.test.click':
       return true
     case 'outlinks.test.itemClick':

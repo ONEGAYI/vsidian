@@ -70,6 +70,8 @@ try {
   await page.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
   await page.addScriptTag({ path: bundle })
   await page.evaluate((text) => window.initEmbedDoc(text), PARENT_DOC)
+  // 保留一期单层回归：新深度设置置 1，B 内引用显示有界深度卡片。
+  await page.evaluate(() => window.respondEmbed({ kind: 'settings.snapshot', values: { 'embed.maxDepth': 1 } }))
   await page.locator('.vsidian-view-reading .vsidian-embed-card').first().waitFor({ timeout: 5000 })
 
   const sent = () => page.evaluate(() => window.embedSent())
@@ -136,24 +138,23 @@ try {
   passed++
   console.log('[正文嵌入][PASS] 内部 Reading 可选字复制（Selection 层）')
 
-  // ---- 场景 D：一层展开——B 内嵌入为占位引用行，点击按 B 身份出站 ----
-  assert.equal(cards[0].nestedCards, 0, 'B 内嵌入不嵌套装载卡片（一层展开）')
-  assert.deepEqual(cards[0].embedRefs, ['![[内层目标]]'], 'B 内嵌入呈占位引用行（保留 ![[ ]] 形态）')
+  // ---- 场景 D：深度 1——B 内引用显示深度卡片，打开仍按 B 身份 ----
+  assert.equal(cards[0].nestedCards, 1, '深度 1 时 B 内引用有明确的深度卡片')
+  assert.ok(cards[0].text.includes(zhCn['hover.errorDepth']), '深度占位说明可见')
   const reqCountBefore = (await hoverRequests()).length
-  // 占位行在 40 段正文之后：先滚动卡片内容使占位行进入可视区（真实指针点击前提）
+  // 深度卡片在 40 段正文之后：先滚动卡片内容使打开入口进入可视区。
   await page.evaluate(() => window.scrollEmbedCard(0, 999999))
   await page.waitForTimeout(60)
-  const refClicked = await page.evaluate(() => window.clickEmbedRef(0))
-  assert.ok(refClicked, '占位引用行应可被真实指针命中并点击')
+  await page.locator('.vsidian-view-reading .vsidian-embed-card .vsidian-embed-card .vsidian-embed-card-open').first().click()
   const activates = await page.evaluate(() =>
     window.embedSent().filter((m) => m.kind === 'wikilink.activate'))
   assert.equal(activates.length, 1, '占位点击应出站 wikilink.activate')
-  assert.equal(activates[0].target, '内层目标', '占位目标为内层嵌入原文（| 前）')
+  assert.equal(activates[0].target, '内层目标', '深度卡片目标为内层嵌入原文（| 前）')
   assert.equal(activates[0].sourceDocUri, 'D:\\notes\\目标笔记.md',
     '按 B 身份出站（sourceDocUri=B）')
-  assert.equal((await hoverRequests()).length, reqCountBefore, '点击占位不触发新装载请求（不递归）')
+  assert.equal((await hoverRequests()).length, reqCountBefore, '点击深度卡片不绕过预算装载')
   passed++
-  console.log('[正文嵌入][PASS] 一层展开占位呈现 + 点击按 B 身份出站（不递归装载）')
+  console.log('[正文嵌入][PASS] 深度 1 占位呈现 + 打开按 B 身份出站')
 
   // ---- 场景 E：fm 折叠交互与回收重挂状态保持（fm 展开 + 滚动位置）----
   assert.equal(cards[0].fmCollapsed, true, '全文嵌入属性区默认折叠')

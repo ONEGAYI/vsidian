@@ -31,6 +31,7 @@ import type { HoverPreviewResult, WebviewToHost } from '../shared/protocol'
 import { parseWikilinkInner } from '../shared/wikilink'
 import { t } from '../shared/i18n'
 import { HOVER_REFRESH_DEFAULTS } from '../shared/hoverRefresh'
+import { REF_EXPANSION_LIMITS, RefExpansionBudget } from '../shared/refExpansion'
 import { RefContentInstance, type RefContentMount, type RefLoadedContent, type RefSourceContext } from './refContentInstance'
 import { applyObsidianDomAlias } from '../shared/obsidianAlias'
 import { createReadingContainer, READING_CLASS_NAMES } from './readingView'
@@ -77,6 +78,7 @@ export interface EmbedCardContext {
   codeHighlight?(): boolean
   /** 嵌入限高设置（px；设置页 embed.maxHeight 投影） */
   maxHeightPx(): number
+  maxDepth?(): number
   /** #223 Live 挂载的布局通知（view.requestMeasure）：卡片高度异步变动
    *  （内容装载、图片晚到）须唤醒 CM6 视口测量；Reading 侧无需提供 */
   requestMeasure?(): void
@@ -109,6 +111,8 @@ interface EmbedEntry {
   /** #224 已登记订阅的目标（hover.watch；与 loaded 解耦——deleted 清
    *  loaded 后订阅保持以感知恢复，dispose/淘汰时据此配对 unwatch） */
   watchedFsPath: string | null
+  watchLeaseId: string | null
+  parseBytes: number
 }
 
 /** 挂载中的卡片实例（DOM 生命周期 = 宿主元素在场期间——Reading 块元素
@@ -159,6 +163,7 @@ export class EmbedCardManager {
   private readonly context: EmbedCardContext
   /** 父文档会话内状态库（语义键 → 实例状态；dispose 清空） */
   private readonly entries = new Map<string, EmbedEntry>()
+  private readonly budget = new RefExpansionBudget()
   /** 挂载中卡片（宿主元素 → handle；宿主卸载即移除。#223 起宿主可为
    *  Reading 块元素或 Live widget 根，同一 entry 可双容器并存（模式切换
    *  期间视图互不销毁），notifyResult 对全部配对 handle 渲染） */
@@ -223,8 +228,12 @@ export class EmbedCardManager {
           sourceDocUri: this.context.session().docUri ?? '',
           range: { start: sourceStart, end: sourceEnd },
           occurrence: key,
+          depth: 1,
+          treeId: key,
         }),
         watchedFsPath: null,
+        watchLeaseId: null,
+        parseBytes: 0,
       }
       this.entries.set(key, entry)
       const owned = entry
@@ -282,6 +291,8 @@ export class EmbedCardManager {
         session: () => this.context.session(),
         send: (message) => this.context.send(message),
         codeHighlight: () => this.context.codeHighlight?.() ?? true,
+        onEmbedBlockMounted: (block, target) => this.mountChildBlock(entry!, block, target),
+        onEmbedBlockUnmounted: (block) => this.unmountBlock(block),
       }),
       display: 'loading',
       note: '',
@@ -291,6 +302,9 @@ export class EmbedCardManager {
     this.heightObserver?.observe(cardEl)
     handle.content.onDispose(() => this.heightObserver?.unobserve(cardEl))
 
+    // 引用正文只读：原生右键停在本卡，不让父 Live/Reading 按 A 的坐标
+    // 打开写操作菜单；保留浏览器默认选字/复制菜单。
+    handle.content.listen(cardEl, 'contextmenu', (event) => event.stopPropagation())
     // 卡片内交互域：点击不冒泡父容器委托（B 内链接按 B 解析）；悬停不
     // 叠加浮层（阻断 readingContainer 的 mouseover/mouseout 委托）
     handle.content.listen(contentEl, 'click', (event) => {
@@ -299,6 +313,24 @@ export class EmbedCardManager {
     })
     handle.content.listen(contentEl, 'mouseover', (event) => event.stopPropagation())
     handle.content.listen(contentEl, 'mouseout', (event) => event.stopPropagation())
+    handle.content.listen(scrollEl, 'wheel', (event) => {
+      // Chromium/VSCode 的嵌套滚动区到边界时不总会原生接续外层。
+      // 只由命中的最内层处理；内层仍有余量时交给浏览器正常滚动。
+      if ((event.target as HTMLElement).closest(`.${EMBED_CARD_CLASS_NAMES.scroll}`) !== scrollEl) return
+      const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? scrollEl.clientHeight : 1)
+      if (delta === 0 || (delta > 0 && scrollEl.scrollTop + scrollEl.clientHeight < scrollEl.scrollHeight - 1) ||
+        (delta < 0 && scrollEl.scrollTop > 1)) return
+      let outer = scrollEl.parentElement?.closest<HTMLElement>(`.${EMBED_CARD_CLASS_NAMES.scroll}`) ?? null
+      while (outer) {
+        const before = outer.scrollTop
+        outer.scrollTop += delta
+        if (outer.scrollTop !== before) {
+          event.preventDefault()
+          return
+        }
+        outer = outer.parentElement?.closest<HTMLElement>(`.${EMBED_CARD_CLASS_NAMES.scroll}`) ?? null
+      }
+    })
 
     // 右上角打开入口：按父文档身份解析（不带 sourceDocUri，与正文双链
     // 点击同语义）；打开不改写引用原文
@@ -315,6 +347,8 @@ export class EmbedCardManager {
         target: targetOfInner(entry!.inner),
         srcStart: entry!.sourceStart,
         srcEnd: entry!.sourceEnd,
+        ...(entry!.content.source.parentInstanceId !== undefined
+          ? { sourceDocUri: entry!.content.source.sourceDocUri } : {}),
       })
     })
 
@@ -330,6 +364,24 @@ export class EmbedCardManager {
     }
   }
 
+  private mountChildBlock(parent: EmbedEntry, el: HTMLElement, target: RefLoadedContent): void {
+    const inner = el.dataset['vsidianEmbedInner']
+    if (inner === undefined) return
+    const start = Number(el.dataset['vsidianSrcStart'] ?? -1)
+    const end = Number(el.dataset['vsidianSrcEnd'] ?? -1)
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start) return
+    const source: RefSourceContext = {
+      panelDocUri: this.context.session().docUri ?? '',
+      sourceDocUri: target.fsPath,
+      range: { start, end },
+      occurrence: `${parent.key}/${start}::${inner}`,
+      parentInstanceId: parent.key,
+      depth: (target.depth ?? parent.content.source.depth ?? 1) + 1,
+      treeId: parent.content.source.treeId ?? parent.key,
+    }
+    this.mountCardInto(el, inner, start, end, 'reading', source)
+  }
+
   /** 宿主卸载钩子（Reading 块卸载 / Live widget destroy）：保存状态、释放
    *  B 视图与资源管理器（实例状态保留在 entry 状态库） */
   unmountBlock(el: HTMLElement): void {
@@ -339,6 +391,18 @@ export class EmbedCardManager {
     }
     this.active.delete(el)
     handle.content.dispose()
+    const remaining = [...this.active.values()].filter((h) => h.entry === handle.entry).length
+    if (handle.entry.content.source.parentInstanceId !== undefined && remaining === 0) {
+      // 子实例仅随父块在场；回收后保留 occurrence 滚动状态，但释放授权
+      // 与旧正文。重挂重新读当前父版本，不复活已退订的缓存快照。
+      handle.entry.loaded = null
+      handle.entry.lastReq = null
+      this.unwatchEntry(handle.entry)
+      this.budget.release(handle.entry.key)
+    } else if (remaining > 0 && handle.entry.loaded && handle.entry.parseBytes > 0) {
+      this.budget.attachContent(handle.entry.key,
+        this.dataKey(handle.entry, handle.entry.loaded), handle.entry.parseBytes * remaining)
+    }
     el.textContent = '' // 卡片 DOM（含 B 内容全量块）随宿主卸载丢弃
   }
 
@@ -419,6 +483,8 @@ export class EmbedCardManager {
             version: message.version,
             text: message.text,
             range: message.range,
+            depth: message.depth,
+            expansionPath: message.expansionPath,
           }
           entry.lastKnown = { fsPath: message.target.fsPath, version: message.version }
           this.watchEntry(entry, message.sourceLeaseId)
@@ -484,6 +550,7 @@ export class EmbedCardManager {
       }
       entry.loaded = null
       entry.lastReq = null
+      if (message.status !== 'changed') this.budget.clearContent(entry.key)
       const handles = [...this.active.values()].filter((h) => h.entry === entry)
       if (message.status === 'changed') {
         // 每 entry 单笔重发（lastReq 是 entry 级共享——同 entry 的双容器
@@ -507,6 +574,23 @@ export class EmbedCardManager {
     }
   }
 
+  /** 宿主拒绝订阅时撤下已送达正文，避免留下无法刷新的在场快照。 */
+  notifyWatchRejected(message: { fsPath: string; instanceId: string; reason: 'capacity' | 'source'; sourceLeaseId?: string }): void {
+    const entry = this.entries.get(message.instanceId)
+    if (!entry || entry.watchedFsPath !== message.fsPath ||
+      (message.sourceLeaseId !== undefined && entry.watchLeaseId !== message.sourceLeaseId)) return
+    entry.loaded = null
+    entry.lastReq = null
+    this.unwatchEntry(entry)
+    this.budget.release(entry.key)
+    const note = t(message.reason === 'capacity' ? 'hover.errorWatchCapacity' : 'hover.errorSourceExpired')
+    for (const handle of this.active.values()) {
+      if (handle.entry !== entry) continue
+      handle.content.clear()
+      this.applyDisplay(handle, 'error', note)
+    }
+  }
+
   /** image.invalidate 路由：全部在场 B 管理器按 srcs 失效重发 */
   notifyImageInvalidate(srcs: readonly string[]): void {
     for (const handle of this.active.values()) {
@@ -525,6 +609,26 @@ export class EmbedCardManager {
   setMaxHeight(px: number): void {
     for (const handle of this.active.values()) {
       handle.scrollEl.style.maxHeight = `${px}px`
+    }
+  }
+
+  /** 设置即时生效：缩小时撤销深层来源与正文，放大时重试深度占位。 */
+  setMaxDepth(depth: number): void {
+    const handles = [...this.active.values()].sort((a, b) =>
+      (b.entry.content.source.depth ?? 1) - (a.entry.content.source.depth ?? 1))
+    for (const handle of handles) {
+      const level = handle.entry.content.source.depth ?? 1
+      if (level > depth) {
+        handle.entry.lastReq = null
+        handle.entry.loaded = null
+        handle.content.clear()
+        this.unwatchEntry(handle.entry)
+        this.budget.release(handle.entry.key)
+        this.applyDisplay(handle, 'error', t('hover.errorDepth'))
+      } else if (handle.display === 'error' && handle.note === t('hover.errorDepth') &&
+        handle.entry.lastReq === null && handle.entry.loaded === null) {
+        this.requestLoad(handle)
+      }
     }
   }
 
@@ -550,6 +654,10 @@ export class EmbedCardManager {
     return out
   }
 
+  budgetStats(): ReturnType<RefExpansionBudget['snapshot']> {
+    return this.budget.snapshot()
+  }
+
   /** 全部释放（syncController dispose）：卡片 DOM、B 视图与状态库 */
   dispose(): void {
     for (const el of Array.from(this.active.keys())) {
@@ -558,6 +666,7 @@ export class EmbedCardManager {
     // #224 订阅随状态库整体释放（实例订阅计数回落）
     for (const entry of this.entries.values()) {
       entry.content.dispose()
+      this.budget.release(entry.key)
     }
     this.entries.clear()
     this.heightObserver?.disconnect()
@@ -569,6 +678,11 @@ export class EmbedCardManager {
   private touchEntry(entry: EmbedEntry): void {
     this.entries.delete(entry.key)
     this.entries.set(entry.key, entry)
+  }
+
+  /** 物理驻留按 occurrence 分开收费；同目标解析缓存命中只省计算与读。 */
+  private dataKey(entry: EmbedEntry, loaded: EmbedLoaded): string {
+    return `${entry.key}\n${loaded.fsPath}\n${loaded.version}`
   }
 
   /**
@@ -593,6 +707,7 @@ export class EmbedCardManager {
       }
       this.entries.delete(victim)
       entry.content.dispose()
+      this.budget.release(entry.key)
     }
   }
 
@@ -601,18 +716,20 @@ export class EmbedCardManager {
     if (!entry.loaded) {
       return
     }
-    if (entry.watchedFsPath === entry.loaded.fsPath) {
-      releaseRefSourceLease(this.context, sourceLeaseId)
+    // 同一回包会应用到 Reading/Live 两个 handle；同一 lease 只交接一次。
+    if (entry.watchedFsPath === entry.loaded.fsPath &&
+      (sourceLeaseId === undefined || entry.watchLeaseId === sourceLeaseId)) {
       return
     }
     const session = this.context.session()
     if (!session.sessionId || !session.docUri) {
       return
     }
-    if (entry.watchedFsPath !== null) {
+    if (entry.watchedFsPath !== null && entry.watchedFsPath !== entry.loaded.fsPath) {
       this.sendUnwatch(entry.watchedFsPath, entry.key)
     }
     entry.watchedFsPath = entry.loaded.fsPath
+    entry.watchLeaseId = sourceLeaseId ?? null
     this.context.send({
       kind: 'hover.watch',
       sessionId: session.sessionId,
@@ -630,6 +747,7 @@ export class EmbedCardManager {
     }
     const fsPath = entry.watchedFsPath
     entry.watchedFsPath = null
+    entry.watchLeaseId = null
     this.sendUnwatch(fsPath, entry.key)
   }
 
@@ -656,6 +774,17 @@ export class EmbedCardManager {
     opts?: { silent?: boolean; heal?: boolean },
   ): void {
     const session = this.context.session()
+    if ((handle.entry.content.source.depth ?? 1) > (this.context.maxDepth?.() ?? REF_EXPANSION_LIMITS.defaultDepth)) {
+      this.applyDisplay(handle, 'error', t('hover.errorDepth'))
+      return
+    }
+    this.budget.setDepthLimit(this.context.maxDepth?.() ?? REF_EXPANSION_LIMITS.defaultDepth)
+    const admission = this.budget.reserve(handle.entry.content.source.treeId ?? handle.entry.key,
+      handle.entry.key, handle.entry.content.source.depth ?? 1)
+    if (admission !== 'ok') {
+      this.applyDisplay(handle, 'error', t(admission === 'depth' ? 'hover.errorDepth' : 'hover.errorBudget'))
+      return
+    }
     if (!session.sessionId || !session.docUri) {
       // 会话未就绪：保持壳与 loading 文案（init 后视图重建触发重挂载发请求）
       this.applyDisplay(handle, 'loading', t('embed.loading'))
@@ -677,11 +806,22 @@ export class EmbedCardManager {
       sourceStart: handle.entry.sourceStart,
       sourceEnd: handle.entry.sourceEnd,
       target: handle.entry.inner,
+      occurrenceId: handle.entry.key,
+      ...(handle.entry.content.source.parentInstanceId !== undefined ? { source: {
+        parentInstanceId: handle.entry.content.source.parentInstanceId,
+        sourceDocUri: handle.entry.content.source.sourceDocUri,
+      } } : {}),
     })
   }
 
   /** 成功回包：缓存 + 渲染（在场路径） */
   private applyResult(handle: EmbedCardHandle, message: Extract<HoverPreviewResult, { ok: true }>): void {
+    if ((handle.entry.content.source.depth ?? 1) > (this.context.maxDepth?.() ?? REF_EXPANSION_LIMITS.defaultDepth)) {
+      releaseRefSourceLease(this.context, message.sourceLeaseId)
+      handle.entry.lastReq = null
+      this.applyDisplay(handle, 'error', t('hover.errorDepth'))
+      return
+    }
     const loaded: EmbedLoaded = {
       fsPath: message.target.fsPath,
       relPath: message.target.relPath,
@@ -690,6 +830,8 @@ export class EmbedCardManager {
       version: message.version,
       text: message.text,
       range: message.range,
+      depth: message.depth,
+      expansionPath: message.expansionPath,
     }
     handle.entry.lastReq = null
     handle.entry.lastKnown = { fsPath: loaded.fsPath, version: loaded.version }
@@ -705,7 +847,23 @@ export class EmbedCardManager {
     }
     handle.entry.loaded = loaded
     this.touchEntry(handle.entry) // LRU 触达（仍有效实例）
-    handle.content.render(loaded)
+    const mounted = handle.content.render(loaded, (bytes) => {
+      const borrowers = [...this.active.values()].filter((h) => h.entry === handle.entry).length
+      if (this.budget.attachContent(handle.entry.key, this.dataKey(handle.entry, loaded),
+        bytes * Math.max(1, borrowers)) !== 'ok') return false
+      handle.entry.parseBytes = bytes
+      // 先交接新版本来源，再挂子块；宿主 FIFO 消息中 C 读取不能先于 B 的
+      // 新版本关系登记（同 fsPath 未保存刷新尤其需要此顺序）。
+      this.watchEntry(handle.entry, sourceLeaseId)
+      return true
+    })
+    if (!mounted) {
+      releaseRefSourceLease(this.context, sourceLeaseId)
+      handle.entry.loaded = null
+      this.budget.release(handle.entry.key)
+      this.applyDisplay(handle, 'error', t('hover.errorBudget'))
+      return
+    }
     // 顶部文件名：装载后为目标根内相对路径
     const titleEl = handle.cardEl.querySelector<HTMLElement>(`.${EMBED_CARD_CLASS_NAMES.title}`)
     if (titleEl) {
@@ -724,7 +882,6 @@ export class EmbedCardManager {
     // rAF 同帧完成，统一走延迟一帧保持两路径一致
     handle.content.restoreScroll(true)
     // #224 目标订阅（成功装载后；幂等——目标身份变化时先释放旧订阅）
-    this.watchEntry(handle.entry, sourceLeaseId)
   }
 
   /** 错误分态：就地 i18n 文案（不弹宿主通知；anchor-missing 附锚点原文） */

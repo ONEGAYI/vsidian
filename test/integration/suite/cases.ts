@@ -935,6 +935,8 @@ interface ViewState {
     host?: 'reading' | 'live'
     /** #224 内容文本字符数（未保存修改推送后刷新可见性断言） */
     textLen?: number
+    /** #243 现有虚拟窗口观测；仅取目标自身块数，排除子卡正文长度。 */
+    viewStats?: { totalBlocks: number; mountedBlocks: number } | null
   }>
   /** #223 Live 嵌入显隐观测：嵌入表逐枚的源码显形态（selectionTouchesRange 语义） */
   liveEmbedReveal?: Array<{ inner: string; line: number; revealed: boolean }>
@@ -11384,15 +11386,19 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const parentBefore = await readDisk('嵌入样例.md')
     const targetBefore = await readDisk('嵌入目标.md')
 
-    // Reading 宿主的三张卡片（全文/章节/缺失目标）。#223 后探针同时包含
-    // 隐藏 Live 宿主的卡片，按 host 定位；保留三张数量与各卡内容的严格断言。
+    // A 正文的三张根卡片（全文/章节/缺失目标）。#223 后探针同时包含
+    // 隐藏 Live 宿主；#244 后 Reading 宿主还包含 B 内递归子卡。
+    // 按 host + 根引用原文定位，保留三张根卡数量与内容的严格断言。
     // 全文卡 content、根内相对路径与 fm 默认折叠；章节卡 heading；缺失卡 error。
+    const rootInners = new Set(['嵌入目标', '嵌入目标#章节一', '嵌入缺失目标'])
     const shown = await waitViewState('嵌入样例.md', (v) => {
-      const cards = (v.readingEmbed ?? []).filter((card) => card.host === 'reading')
+      const cards = (v.readingEmbed ?? []).filter((card) =>
+        card.host === 'reading' && rootInners.has(card.inner))
       return cards.length === 3 &&
         cards[0]!.state === 'content' && cards[0]!.scope === 'full'
     })
-    const cards = shown.readingEmbed!.filter((card) => card.host === 'reading')
+    const cards = shown.readingEmbed!.filter((card) =>
+      card.host === 'reading' && rootInners.has(card.inner))
     assert(cards[0]!.note === '嵌入目标.md',
       `全文嵌入目标标识应为根内相对路径（实际 ${cards[0]!.note}）`)
     assert(cards[0]!.fm === 'collapsed', `全文嵌入属性区应默认折叠（实际 ${String(cards[0]!.fm)}）`)
@@ -11739,8 +11745,10 @@ export const cases: Array<[string, () => Promise<void>]> = [
       }
       const a = cardOf(v)
       const b = cardOf(v, '同步目标2')
-      return a !== undefined && b !== undefined && a.state === 'content' && b.state === 'content' ? v : undefined
-    })
+      // content 是回包已接纳；虚拟视口的 RO/rAF 可在下一帧才挂真实正文。
+      return a !== undefined && b !== undefined && a.state === 'content' && b.state === 'content' &&
+        (a.textLen ?? 0) > 0 && (b.textLen ?? 0) > 0 ? v : undefined
+    }, 15000)
     const initialLen = cardOf(initial)!.textLen ?? -1
     assert(initialLen > 0, `初始内容文本应在场（textLen=${initialLen}）`)
 
@@ -11777,6 +11785,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     // 消息注入补位（postToPanel 同入口），重载本身走真实 hover.request →
     // 真宿主读取——「磁盘新内容可见」是真实链路证据
     const initialLen2 = cardOf(initial, '同步目标2')!.textLen ?? -1
+    assert(initialLen2 > 0, `第二目标初始内容文本应在场（textLen=${initialLen2}）`)
     await vscode.workspace.fs.writeFile(
       wsUri('同步目标2.md'),
       Buffer.from('# 同步目标2外部改写\n\n外部磁盘变化后的全新正文：直写落盘。\n\n', 'utf8'),
@@ -11885,8 +11894,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
       return card !== undefined && card.state === 'content' ? v : undefined
     }, 15000)
 
-    // 自引用防循环：文档嵌入自身，编辑自身 → 推送重载一轮后收敛（请求
-    // 计数不再增长）。编辑经 applyEdit（不保存），轮询窗口内计数稳定
+    // #244 自引用沿当前路径截断：A→A 直接显示循环分态；编辑 A 后
+    // 新实例仍在读取前截断，零订阅、零写回。
     await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
     await openWithEditor('同步自引用.md')
     await waitSessionReady('同步自引用.md')
@@ -11895,38 +11904,29 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const selfCardOf = (v: ViewState) => (v.readingEmbed ?? []).find((c) => c.host !== 'live')
     const pullSelf = () => vscode.commands.executeCommand(
       CMD.viewState, wsUri('同步自引用.md').toString(), 0) as Promise<ViewState | undefined>
-    const selfShown = await poll('自引用装载', async () => {
+    await poll('自引用循环分态', async () => {
       const v = await pullSelf()
       const card = v && selfCardOf(v)
-      return card !== undefined && card.state === 'content' ? v : undefined
+      return card !== undefined && card.state === 'error' &&
+        card.note === editorMessages()['hover.errorCycle'] ? v : undefined
     })
-    const selfLen0 = selfCardOf(selfShown)!.textLen ?? -1
     const selfEdit = new vscode.WorkspaceEdit()
     selfEdit.replace(wsUri('同步自引用.md'), new vscode.Range(0, 0, 0, 0), '# 自引用首段追加\n\n')
     assert(await vscode.workspace.applyEdit(selfEdit), '自引用编辑应成功应用')
-    // 防抖窗 + 余量后内容应刷新一轮（推送-重载链路通）
-    await poll('自引用推送刷新', async () => {
+    await poll('编辑后自引用仍截断', async () => {
       const v = await pullSelf()
       const card = v && selfCardOf(v)
-      return card !== undefined && card.state === 'content' && (card.textLen ?? -1) !== selfLen0 ? v : undefined
+      return card !== undefined && card.state === 'error' &&
+        card.note === editorMessages()['hover.errorCycle'] ? v : undefined
     }, 15000)
-    // 收敛断言：等待两个防抖周期后内容与订阅计数稳定（无循环风暴）
+    // 收敛断言：两个防抖周期后没有建立任何自引用目标订阅。
     await new Promise((r) => setTimeout(r, 1500))
-    const selfStable = await poll('自引用稳定态', async () => {
-      const v = await pullSelf()
-      const card = v && selfCardOf(v)
-      return card !== undefined && card.state === 'content' ? v : undefined
-    })
-    // 自引用编辑使嵌入语义键漂移（插入文本使行首 offset 后移）→ 新实例
-    // 订阅登记（旧键成死键，由 LRU/面板销毁回收——设计内行为）。防循环
-    // 断言口径：目标数恒 1（不扩散）、两次采样订阅数稳定（无循环风暴增长）
     const selfStats1 = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
     await new Promise((r) => setTimeout(r, 800))
     const selfStats2 = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
-    assert(selfStats2.targets === 1,
-      `自引用订阅目标应恒 1（实际 ${JSON.stringify(selfStats1)} → ${JSON.stringify(selfStats2)}）`)
-    assert(selfStats2.subscriptions === selfStats1.subscriptions && selfStats2.subscriptions <= 4,
-      `订阅实例应稳定不增长（实际 ${JSON.stringify(selfStats1)} → ${JSON.stringify(selfStats2)}——循环风暴会持续增长）`)
+    assert(selfStats1.targets === 0 && selfStats1.subscriptions === 0 &&
+      selfStats2.targets === 0 && selfStats2.subscriptions === 0,
+    `自引用读取前截断、无订阅（实际 ${JSON.stringify(selfStats1)} → ${JSON.stringify(selfStats2)}）`)
     // 零写回：编辑经 WorkspaceEdit（不走 webview 编辑管线），推送-重载
     // 链路对 edit.request 通道零触碰（appliedEdits 恒 0——重载只读）
     const selfState = (await vscode.commands.executeCommand(CMD.sessionState, selfUri)) as SessionState
@@ -11942,6 +11942,98 @@ export const cases: Array<[string, () => Promise<void>]> = [
       '自引用正文：初始。',
       '',
     ].join('\n'), 'utf8'))
-    console.log(`[#224] 删除恢复分态与自引用防循环通过（自引用 textLen ${selfLen0}→${selfCardOf(selfStable)!.textLen}）`)
+    console.log('[#224/#244] 删除恢复分态与 A→A 循环截断通过')
+  }],
+  ['递归：真宿主直接来源、三层、设置热更与未保存刷新（#244）', async () => {
+    await vscode.commands.executeCommand(CMD.setSettings, { 'embed.maxDepth': 3 })
+    const parentName = '递归父文档.md'
+    const parentUri = wsUri(parentName).toString()
+    const parentDisk = await readDisk(parentName)
+    const bUri = wsUri('ref-depth/one/B.md')
+    const cUri = wsUri('ref-depth/two/C.md')
+    const bDisk = await readDisk('ref-depth/one/B.md')
+    const cDisk = await readDisk('ref-depth/two/C.md')
+    await openWithEditor(parentName)
+    await waitSessionReady(parentName)
+    await vscode.commands.executeCommand(CMD.postToPanel, parentUri, { kind: 'view.mode.set', mode: 'reading' })
+    const pull = () => vscode.commands.executeCommand(CMD.viewState, parentUri, 0) as Promise<ViewState | undefined>
+    const card = (v: ViewState | undefined, inner: string) =>
+      (v?.readingEmbed ?? []).find((item) => item.host !== 'live' && item.inner === inner)
+    const initial = await poll('三层真实内容与第四层占位', async () => {
+      const v = await pull()
+      return card(v, 'ref-depth/one/B')?.state === 'content' &&
+        card(v, '../two/C')?.state === 'content' &&
+        card(v, '../three/D')?.state === 'content' &&
+        card(v, 'E')?.state === 'error' ? v : undefined
+    }, 20000)
+    assert(card(initial, 'E')?.note === editorMessages()['hover.errorDepth'], 'E 是第四层深度占位')
+    // textLen 会包含 D 子卡正文，其视口挂载可独立变化；C 新增尾段以
+    // C 自身解析块数增加并实际挂载为准，避免把 D 离屏回收误判成 C 未刷新。
+    const cBlocks = card(initial, '../two/C')!.viewStats?.totalBlocks ?? 0
+    assert(cBlocks > 0, 'C 初始正文应已解析')
+    const watch0 = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
+    assert(watch0.targets >= 3 && watch0.subscriptions >= 3,
+      `B/C/D 真宿主目标均已订阅（实际 ${JSON.stringify(watch0)}）`)
+
+    // 未保存 C 编辑使叶内容变化；B 持续作为 C 的真实直接来源。
+    const cDoc = await vscode.workspace.openTextDocument(cUri)
+    const cEdit = new vscode.WorkspaceEdit()
+    cEdit.insert(cUri, cDoc.positionAt(cDoc.getText().length), '\nC 未保存尾注。')
+    assert(await vscode.workspace.applyEdit(cEdit), 'C 未保存编辑应成功')
+    await poll('C 未保存刷新', async () => {
+      const v = await pull()
+      const current = card(v, '../two/C')
+      return current?.state === 'content' &&
+        (current.viewStats?.totalBlocks ?? 0) > cBlocks &&
+        (current.viewStats?.mountedBlocks ?? 0) > 0 &&
+        (current.textLen ?? 0) > 0 ? v : undefined
+    }, 20000)
+    assert(cDoc.isDirty, 'C 是未保存权威文档')
+
+    const bDoc = await vscode.workspace.openTextDocument(bUri)
+    const replaceLink = async (oldLine: string, newLine: string) => {
+      const line = bDoc.lineAt(2)
+      assert(line.text === oldLine, `B 预期引用行 ${oldLine}，实际 ${line.text}`)
+      const edit = new vscode.WorkspaceEdit()
+      edit.replace(bUri, line.range, newLine)
+      assert(await vscode.workspace.applyEdit(edit), 'B 未保存目标改写应成功')
+    }
+    await replaceLink('![[../two/C]]', '![[Missing]]')
+    await poll('B 改掉 C 后旧子树撤销', async () => {
+      const v = await pull()
+      return card(v, 'Missing')?.state === 'error' &&
+        card(v, '../two/C') === undefined && card(v, '../three/D') === undefined ? v : undefined
+    }, 20000)
+    await replaceLink('![[Missing]]', '![[../two/C]]')
+    await poll('B 同路径新版本恢复 C/D', async () => {
+      const v = await pull()
+      return card(v, '../two/C')?.state === 'content' &&
+        card(v, '../three/D')?.state === 'content' ? v : undefined
+    }, 20000)
+
+    await vscode.commands.executeCommand(CMD.setSettings, { 'embed.maxDepth': 1 })
+    await poll('深度 1 当场撤销后代', async () => {
+      const v = await pull()
+      return card(v, '../two/C')?.state === 'error' &&
+        card(v, '../two/C')?.note === editorMessages()['hover.errorDepth'] &&
+        card(v, '../three/D') === undefined ? v : undefined
+    })
+    await vscode.commands.executeCommand(CMD.setSettings, { 'embed.maxDepth': 3 })
+    await poll('深度 3 当场恢复后代', async () => {
+      const v = await pull()
+      return card(v, '../two/C')?.state === 'content' &&
+        card(v, '../three/D')?.state === 'content' ? v : undefined
+    }, 20000)
+    assert((await readDisk(parentName)) === parentDisk &&
+      (await readDisk('ref-depth/one/B.md')) === bDisk &&
+      (await readDisk('ref-depth/two/C.md')) === cDisk, '引用刷新不落盘未保存的 A/B/C')
+    const parentState = (await vscode.commands.executeCommand(CMD.sessionState, parentUri)) as SessionState
+    assert(parentState.appliedEdits === 0, '递归引用没有进入父文档写回通道')
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await poll('递归面板关闭订阅回落', async () => {
+      const stats = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
+      return stats.targets === 0 && stats.subscriptions === 0 ? stats : undefined
+    })
+    console.log('[#244] A→B→C→D、直接来源、未保存 B/C 更新、深度热更与零写回通过')
   }],
 ]
