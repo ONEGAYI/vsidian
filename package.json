@@ -17,7 +17,7 @@
     "table"
   ],
   "engines": {
-    "vscode": "^1.86.0"
+    "vscode": "^1.82.3"
   },
   "extensionKind": [
     "workspace"
@@ -480,7 +480,7 @@
   },
   "devDependencies": {
     "@types/node": "22.20.4",
-    "@types/vscode": "1.86.0",
+    "@types/vscode": "1.82.0",
     "@vscode/test-electron": "3.1.0",
     "esbuild": "0.28.2",
     "jsdom": "30.1.1",
