@@ -29,6 +29,43 @@ describe('isWebviewToHost', () => {
     expect(isHostToWebview({ kind: 'fm.test.click', action: 'fold-button', index: -1 })).toBe(false)
   })
 
+  it('view.state.paint.fm 探针字段校验（2026-10 折叠链路）：五计数非负整数，缺一即拒', () => {
+    // isPaintProbe 为模块私有，经外层 view.state 校验间接触达；fm 分支
+    // 校验回退时集成侧表现为探针缺失（waitViewState 拿不到值），此处
+    // 正负样本钉住字段契约（对齐 fm.test.click 白名单钉子的动机）
+    const base = {
+      kind: 'view.state',
+      text: '---\ntitle: a\n---\n',
+      docLength: 17,
+      lineCount: 4,
+      renderedLines: 4,
+      paint: {
+        textVisible: true,
+        scrollerDisplay: 'block',
+        gutterUserSelect: null,
+        darkTheme: false,
+        caretColor: null,
+        fm: { rowCount: 2, foldedCount: 1, editCount: 0, cardFoldedCount: 1, tableFoldedCount: 0 },
+      },
+    }
+    expect(isWebviewToHost(base)).toBe(true)
+    expect(isWebviewToHost({ ...base, paint: { ...base.paint, fm: null } })).toBe(true)
+    expect(isWebviewToHost({ ...base, paint: { ...base.paint, fm: undefined } })).toBe(true)
+    expect(isWebviewToHost({
+      ...base,
+      paint: { ...base.paint, fm: { ...base.paint.fm, rowCount: -1 } },
+    })).toBe(false)
+    expect(isWebviewToHost({
+      ...base,
+      paint: { ...base.paint, fm: { rowCount: 2, foldedCount: 1 } },
+    })).toBe(false)
+    expect(isWebviewToHost({ ...base, paint: { ...base.paint, fm: 'folded' } })).toBe(false)
+    expect(isWebviewToHost({
+      ...base,
+      paint: { ...base.paint, fm: { ...base.paint.fm, cardFoldedCount: 1.5 } },
+    })).toBe(false)
+  })
+
   it('view.switch.request 消息校验（#141）：target 仅 live/reading（双态裁剪，源码路径不可达）', () => {
     expect(isWebviewToHost({ kind: 'view.switch.request', target: 'live' })).toBe(true)
     expect(isWebviewToHost({ kind: 'view.switch.request', target: 'reading' })).toBe(true)

@@ -1457,7 +1457,10 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
     }
     if (!tr.docChanged) {
       // 折叠切换：头区行（1..fm 末行）整体重发射——卡片装饰不随选区变，
-      // 但随折叠态变；独立于选区/表格路径，组合预览期间不写文档同样生效
+      // 但随折叠态变；独立于选区/表格路径，组合预览期间不写文档同样生效。
+      // 组合冻结态（compositionPreview）刻意随值保留：折叠重建走本分支的
+      // 显式发射，不得因此提前解除组合期「装饰冻结」守卫（解除归
+      // settled/正常写事务），否则后续组合期选区事务会以陈旧 fmModel 重算
       if (fmFoldChanged) {
         const doc = tr.state.doc
         const fmLast = doc.lineAt(Math.min(value.fm ? value.fm.end : 0, doc.length)).number
@@ -1475,7 +1478,6 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
           decos,
           gridSegments: updateGridSegments(value.gridSegments, tr.changes,
             [{ from: doc.line(1).from, to: doc.line(fmLast).to }], decos, doc),
-          compositionPreview: false,
         }
       }
       if (tr.annotation(tableCompositionSettled)) {

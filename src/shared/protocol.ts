@@ -269,7 +269,9 @@ export type HostToWebview =
    *  popover-close = 关闭浮层（与 Esc 同一关闭函数）；popover-add-entry =
    *  浮层「添加属性」；popover-add-item = 第 index 个条目的「添加列表项」；
    *  popover-remove-entry = 第 index 个条目的删行按钮；popover-remove-item =
-   *  第 index 个删项按钮（跨条目按项行文档序累计） */
+   *  第 index 个删项按钮（跨条目按项行文档序累计）；fold-button = 标题栏
+   *  折叠 chevron（2026-10 折叠批次，零写回视图态切换）；fold-hotspot =
+   *  标题栏热区（标题文字节点，与整卡头部热区同一处理器） */
   | {
       kind: 'fm.test.click'
       action: 'edit-button' | 'popover-close' | 'popover-add-entry' | 'popover-add-item'

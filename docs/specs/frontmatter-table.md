@@ -41,6 +41,7 @@
 4. **状态承载**：live 为 CM6 视图态 field（`fmFoldField`，frontmatter 单块恒在文档首，布尔承载）；阅读为控制器布尔（`readingFmFolded`，挂载装饰按态重建）。均为**视图态**：不写源文件、不跨会话持久化（重开文档全展开）；两视图各持折叠态不互通（与代码卡 live `codeCardFoldField` / 阅读 `readingCodeFold` 分持同口径）。
 5. **快捷键评估**（操作注册约定要求的记录）：折叠为纯指针交互，与代码卡折叠一致**不提供快捷键入口、无默认绑定**——折叠对象是视觉卡片而非文本操作，键位无落点；如未来需要可按快捷键注册表模式接入（mode live/reading 双模式）。
 6. **样式契约**：新增公开条目 `live-fm-fold`（含 -collapsed / 首行级 -card-folded / 表格级 -folded 修饰）；`live-fm-header` / `live-fm-card-line` 条目随更新；探针走 `paint.fm` 绘制层（行数/收起计数），行为路径经浏览器与集成验证。
+7. **文案随语言切换刷新**：标题栏三件套（标题文字、「修改」按钮、折叠 chevron 两态提示）经按需控件换包就地重刷接入（`localeOnDemand`，代码卡折叠钮同款登记——widget 实例缓存 `eq` 短路使已物化 DOM 不重建，就地改写是唯一换词路径；契约测试 `localeRefreshContract` 钉住）。
 
 ## 交互契约
 
