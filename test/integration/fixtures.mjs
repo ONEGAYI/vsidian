@@ -1122,6 +1122,32 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
     '目标二初始内容：外部磁盘变化前的正文。',
     '',
   ].join('\n'), 'utf8')
+  // #249 引用组合链：生命周期串联（未保存编辑推送×浮层快速目标切换×
+  // 模式切换往返×面板销毁）的独立观测素材——不与 #224 文档共用（共用
+  // 样本会被早期用例修改保存，SYMBOL_WRAP_CRLF_DOC 教训）。正文含可
+  // 断言的修改前标记文本；父文档两个普通双链作浮层快速切换的目标序列
+  writeFileSync(path.join(wsDir, '组合链父文档.md'), [
+    '# 组合链父文档',
+    '',
+    '悬停目标序列：[[组合链目标A]] 与 [[组合链目标B]]。',
+    '',
+    '![[组合链目标A]]',
+    '',
+    '![[组合链目标B]]',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, '组合链目标A.md'), [
+    '# 组合链目标A标题',
+    '',
+    '组合链A初始正文段：修改前标记。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, '组合链目标B.md'), [
+    '# 组合链目标B标题',
+    '',
+    '组合链B初始正文段。',
+    '',
+  ].join('\n'), 'utf8')
   // #244 真宿主递归：B/C 分别位于不同目录，下一层同名相对链接只能
   // 从直接父文件目录解析；D 的 E 为第四层深度占位。
   mkdirSync(path.join(wsDir, 'ref-depth', 'one'), { recursive: true })

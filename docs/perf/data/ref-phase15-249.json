@@ -1,0 +1,216 @@
+{
+  "executedAt": "2026-10-01T10:51:20.679Z",
+  "ticket": "#249",
+  "scenarios": {
+    "wide": {
+      "targets": 12,
+      "readRequests": 12,
+      "loadMs": 526,
+      "peakConcurrent": 12,
+      "budget": {
+        "panelInstances": 12,
+        "panelBytes": 30264,
+        "treeBytes": {
+          "12::宽目标0": 3552,
+          "23::宽目标1": 3552,
+          "34::宽目标2": 3552,
+          "45::宽目标3": 3552,
+          "56::宽目标4": 3552,
+          "67::宽目标5": 1776,
+          "78::宽目标6": 1776,
+          "89::宽目标7": 1776,
+          "100::宽目标8": 1776,
+          "111::宽目标9": 1776,
+          "122::宽目标10": 1812,
+          "134::宽目标11": 1812
+        },
+        "inFlight": 0
+      },
+      "cache": {
+        "parses": 12,
+        "hits": 5,
+        "entries": 4,
+        "blocks": 36,
+        "bytes": 7176,
+        "evictions": 8,
+        "oversizeSkips": 0
+      },
+      "lifecycle": {
+        "mounts": 45,
+        "releases": 0,
+        "activeBlocks": 45
+      },
+      "cardsDom": 5,
+      "domBlocks": 45,
+      "visibleCards": 5,
+      "scrollableCards": 0,
+      "afterDispose": {
+        "budget": {
+          "panelInstances": 0,
+          "panelBytes": 0,
+          "treeBytes": {},
+          "inFlight": 0
+        },
+        "cache": {
+          "parses": 12,
+          "hits": 5,
+          "entries": 4,
+          "blocks": 36,
+          "bytes": 7176,
+          "evictions": 8,
+          "oversizeSkips": 0
+        },
+        "lifecycle": {
+          "mounts": 45,
+          "releases": 45,
+          "activeBlocks": 0
+        },
+        "cards": 0
+      }
+    },
+    "repeat": {
+      "occurrences": 40,
+      "readRequests": 40,
+      "loadMs": 1552,
+      "budget": {
+        "panelInstances": 40,
+        "panelBytes": 34692,
+        "treeBytes": {
+          "20::同目标": 3304,
+          "39::同目标": 3304,
+          "58::同目标": 3304,
+          "77::同目标": 3304,
+          "96::同目标": 1652,
+          "115::同目标": 1652,
+          "134::同目标": 1652,
+          "153::同目标": 1652,
+          "172::同目标": 1652,
+          "191::同目标": 1652,
+          "211::同目标": 1652,
+          "231::同目标": 1652,
+          "251::同目标": 1652,
+          "271::同目标": 1652,
+          "291::同目标": 1652,
+          "311::同目标": 1652,
+          "331::同目标": 1652
+        },
+        "inFlight": 0
+      },
+      "cache": {
+        "parses": 1,
+        "hits": 21,
+        "entries": 1,
+        "blocks": 9,
+        "bytes": 1652,
+        "evictions": 0,
+        "oversizeSkips": 0
+      },
+      "lifecycle": {
+        "mounts": 45,
+        "releases": 9,
+        "activeBlocks": 36
+      },
+      "mountedCards": 4,
+      "paintedCards": 4,
+      "afterDispose": {
+        "budget": {
+          "panelInstances": 0,
+          "panelBytes": 0,
+          "treeBytes": {},
+          "inFlight": 0
+        },
+        "cache": {
+          "parses": 1,
+          "hits": 21,
+          "entries": 1,
+          "blocks": 9,
+          "bytes": 1652,
+          "evictions": 0,
+          "oversizeSkips": 0
+        },
+        "lifecycle": {
+          "mounts": 45,
+          "releases": 45,
+          "activeBlocks": 0
+        },
+        "cards": 0
+      }
+    },
+    "rapidToggle": {
+      "cycles": 10,
+      "cyclesMs": 1521,
+      "readRequestsAfterLoad": 2,
+      "readRequestsFinal": 2,
+      "reloadStorm": 0,
+      "budgetAfterLoad": {
+        "panelInstances": 2,
+        "panelBytes": 1416,
+        "treeBytes": {
+          "11::快目标一": 708,
+          "22::快目标二": 708
+        },
+        "inFlight": 0
+      },
+      "budgetFinal": {
+        "panelInstances": 2,
+        "panelBytes": 1416,
+        "treeBytes": {
+          "11::快目标一": 708,
+          "22::快目标二": 708
+        },
+        "inFlight": 0
+      },
+      "cacheFinal": {
+        "parses": 2,
+        "hits": 22,
+        "entries": 2,
+        "blocks": 4,
+        "bytes": 708,
+        "evictions": 0,
+        "oversizeSkips": 0
+      },
+      "lifecycleFinal": {
+        "mounts": 48,
+        "releases": 40,
+        "activeBlocks": 8
+      },
+      "cardsFinal": 2
+    },
+    "scroll": {
+      "initial": {
+        "scrollTop": 0,
+        "scrollHeight": 3892,
+        "clientHeight": 480
+      },
+      "end": {
+        "scrollTop": 3310,
+        "scrollHeight": 3853,
+        "visible": 16
+      },
+      "maxVisibleWindow": 16,
+      "wheelCount": 200,
+      "reloadDuringScroll": 0,
+      "budget": {
+        "panelInstances": 1,
+        "panelBytes": 46520,
+        "treeBytes": {
+          "9::长滚动目标": 46520
+        },
+        "inFlight": 0
+      }
+    },
+    "parentInputLatency": {
+      "cardsBefore": 3,
+      "latencyMs": [
+        5,
+        null,
+        null,
+        null,
+        null
+      ],
+      "editRequests": 1,
+      "cardsAfter": 3,
+      "anchorLineFound": true
+    }
+  }
+}

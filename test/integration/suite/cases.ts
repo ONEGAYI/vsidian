@@ -12185,6 +12185,128 @@ export const cases: Array<[string, () => Promise<void>]> = [
     console.log(`[#224] 未保存修改推送（textLen ${initialLen}→${refreshedLen}）与外部磁盘变化（目标2 textLen ${initialLen2}→${cardOf(diskRefreshed, '同步目标2')!.textLen}）、订阅回落通过`)
   }],
 
+  // #249 引用组合链：把「未保存编辑推送 → 浮层快速目标切换 → 模式切换
+  // 往返 → 面板销毁」串进同一会话——单票用例各自覆盖单环节（#224 未保存、
+  // #242 悬停、#247 模式切换），本链验证串联形态下兄弟卡不串、浮层身份
+  // 不串、订阅随销毁整体回落、父/目标零误写。fixture 独立（组合链*）。
+  ['引用组合链：未保存×快速切换×模式往返×销毁串联（#249）', async () => {
+    await openWithEditor('组合链父文档.md')
+    await waitSessionReady('组合链父文档.md')
+    const uri = wsUri('组合链父文档.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    const parentDisk = await readDisk('组合链父文档.md')
+    const cardOf = (v: ViewState | undefined, inner: string) =>
+      (v?.readingEmbed ?? []).find((c) => c.host !== 'live' && c.inner === inner)
+    const pullState = () => vscode.commands.executeCommand(
+      CMD.viewState, wsUri('组合链父文档.md').toString(), 0) as Promise<ViewState | undefined>
+
+    // 1) 双卡初始装载
+    const initial = await poll('组合链初始装载', async () => {
+      const v = await pullState()
+      if (!v || (v.viewMode ?? 'reading') === 'live') {
+        return undefined
+      }
+      const a = cardOf(v, '组合链目标A')
+      const b = cardOf(v, '组合链目标B')
+      return a !== undefined && b !== undefined && a.state === 'content' && b.state === 'content' &&
+        (a.textLen ?? 0) > 0 && (b.textLen ?? 0) > 0 ? v : undefined
+    }, 15000)
+    const lenA0 = cardOf(initial, '组合链目标A')!.textLen ?? -1
+    const lenB0 = cardOf(initial, '组合链目标B')!.textLen ?? -1
+
+    // 2) 未保存编辑目标A（用例侧 applyEdit 不保存）→ 防抖推送仅刷新 A 卡，
+    //    同会话兄弟卡 B 的 textLen 不得被牵连（组合：编辑同步×兄弟隔离）
+    const edit = new vscode.WorkspaceEdit()
+    edit.replace(
+      wsUri('组合链目标A.md'),
+      new vscode.Range(0, 0, 0, 0),
+      '# 组合链目标A标题改\n\n未保存追加段：组合链编辑推送正文。\n\n组合链追加段二。\n\n',
+    )
+    assert(await vscode.workspace.applyEdit(edit), '目标A编辑应成功应用')
+    const afterEdit = await poll('组合链未保存推送（A 刷新 B 不串）', async () => {
+      const v = await pullState()
+      const a = v && cardOf(v, '组合链目标A')
+      const b = v && cardOf(v, '组合链目标B')
+      return a !== undefined && (a.textLen ?? -1) > lenA0 + 10 &&
+        b !== undefined && b.textLen === lenB0 ? v : undefined
+    }, 15000)
+    const lenA1 = cardOf(afterEdit, '组合链目标A')!.textLen!
+
+    // 3) 浮层快速目标切换（同一面板会话内 A→B 两次悬停）：装载身份按
+    //    note 区分不串档，订阅实例随关闭回落（组合：悬停×快速切换×订阅）
+    const statsBase = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 0 })
+    const popupA = await poll('组合链浮层A装载', async () => {
+      const v = await pullState()
+      return v?.hoverPreview?.open === true && v.hoverPreview.state === 'content' &&
+        (v.hoverPreview.blocks ?? 0) > 0 ? v : undefined
+    }, 15000)
+    const noteA = popupA.hoverPreview!.note
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 0 })
+    await poll('组合链浮层A关闭', async () => {
+      const v = await pullState()
+      return v?.hoverPreview?.open === false ? v : undefined
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 1 })
+    const popupB = await poll('组合链浮层B装载', async () => {
+      const v = await pullState()
+      return v?.hoverPreview?.open === true && v.hoverPreview.state === 'content' &&
+        (v.hoverPreview.blocks ?? 0) > 0 ? v : undefined
+    }, 15000)
+    assert(popupB.hoverPreview!.note !== noteA,
+      `快速切换后浮层身份应换目标（${noteA} → ${popupB.hoverPreview!.note}）`)
+    // 卡片在浮层开合期间保持装载（组合：浮层×嵌入卡共存不互扰）
+    const duringPopup = cardOf(await pullState(), '组合链目标A')
+    assert(duringPopup?.state === 'content' && duringPopup.textLen === lenA1,
+      `浮层期间嵌入卡不被扰（实际 ${JSON.stringify(duringPopup)}）`)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 1 })
+    await poll('组合链浮层B关闭', async () => {
+      const v = await pullState()
+      return v?.hoverPreview?.open === false ? v : undefined
+    })
+    const statsAfterPopups = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
+    assert(statsAfterPopups.subscriptions <= statsBase.subscriptions,
+      `浮层关闭后订阅应回落到卡片基线（${JSON.stringify(statsBase)} → ${JSON.stringify(statsAfterPopups)}）`)
+
+    // 4) 模式切换往返（reading→live→reading）：嵌入跨模式状态共享，回到
+    //    阅读态后 A 卡恢复编辑后的内容（组合：模式切换×编辑同步状态）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    await poll('组合链切 live', async () => {
+      const v = await pullState()
+      return (v?.viewMode ?? '') === 'live' ? v : undefined
+    }, 10000)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    const backReading = await poll('组合链回 reading 且状态保持', async () => {
+      const v = await pullState()
+      if (!v || (v.viewMode ?? 'reading') === 'live') {
+        return undefined
+      }
+      const a = cardOf(v, '组合链目标A')
+      const b = cardOf(v, '组合链目标B')
+      return a !== undefined && a.state === 'content' && a.textLen === lenA1 &&
+        b !== undefined && b.state === 'content' ? v : undefined
+    }, 15000)
+    assert(cardOf(backReading, '组合链目标B')!.textLen === lenB0, '往返后 B 卡内容保持')
+
+    // 5) 零误写与磁盘保真：扩展编辑管线零写、父文档与目标B磁盘不动
+    const finalState = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(finalState.appliedEdits === 0, `组合链扩展管线零 applyEdit（实际 ${finalState.appliedEdits}）`)
+    assert(await readDisk('组合链父文档.md') === parentDisk, '组合链不得改写父文档磁盘')
+    assert((await readDisk('组合链目标B.md')).includes('组合链B初始正文段'), '组合链不得改写目标B磁盘')
+
+    // 6) 面板销毁：订阅整体回落（组合终点：生命周期无泄漏）
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await poll('组合链面板销毁订阅回落', async () => {
+      const stats = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
+      return stats.subscriptions === 0 && stats.targets === 0 ? stats : undefined
+    }, 15000)
+    console.log(`[#249] 组合链通过：A 卡 textLen ${lenA0}→${lenA1}（B 恒 ${lenB0}）、浮层 ${noteA}→${popupB.hoverPreview!.note} 快速切换不串、模式往返状态保持、销毁订阅归零`)
+  }],
+
   // 删除恢复分态（真宿主磁盘删除/恢复经 watcher 通道）与自引用防循环
   // （A 嵌入 A：编辑自身 → 推送 → 重载一轮后收敛，请求计数稳定）。
   ['同步：删除恢复分态与自引用防循环（#224）', async () => {
