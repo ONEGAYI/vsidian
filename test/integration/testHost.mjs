@@ -108,6 +108,48 @@ export function resolveTestHostMode(platform = process.platform, env = process.e
   return requested ?? (platform === 'win32' ? 'desktop' : 'foreground')
 }
 
+/**
+ * 宿主非零退出时的报告判定（#254 抽出为可测纯函数）：放行前必须核对
+ * 每个计划用例都取得终态（[TIME] 行）且零 FAIL。#211 的收尾噪声边界是
+ * 「全部用例 PASS 后」的退出竞速；宿主中途截断（零 FAIL 但计划项未跑完，
+ * 实测计划 59 项只执行 53 项曾被静默放行）不属于该边界，判败并点名缺失
+ * 身份：有 START 无终态的用例名（missing）与未开始数量（notStarted）。
+ * 未开始的用例在报告中无任何行，名称不可得，notStarted 即其计数。
+ */
+export function evaluateHostReport(lines, exitCode) {
+  const failCount = lines.filter((line) => line.includes('[集成测试][FAIL]')).length
+  const doneCount = lines.filter((line) => line.includes('[集成测试][TIME]')).length
+  const startNames = []
+  const doneNames = new Set()
+  for (const line of lines) {
+    const start = /\[集成测试\]\[START\] (.+)$/.exec(line)
+    if (start) startNames.push(start[1])
+    const done = /\[集成测试\]\[TIME\] \d+ms (.+)$/.exec(line)
+    if (done) doneNames.add(done[1])
+  }
+  const planMatch = /\[集成测试\] 执行 (\d+)\/\d+ 项/.exec(lines.find((line) => line.includes('[集成测试] 执行')) ?? '')
+  const planned = planMatch ? Number(planMatch[1]) : 0
+  const missing = startNames.filter((name) => !doneNames.has(name))
+  const notStarted = Math.max(0, planned - startNames.length)
+  const verdict = { ok: false, pardon: false, failCount, planned, doneCount, missing, notStarted, reason: '' }
+  if (exitCode === 0) {
+    return { ...verdict, ok: true, reason: '宿主退出码 0' }
+  }
+  if (planned === 0) {
+    return { ...verdict, reason: '报告未见计划行（[集成测试] 执行 N/M 项），不能按收尾噪声放行' }
+  }
+  if (failCount > 0) {
+    return { ...verdict, reason: `报告 FAIL ${failCount} 项` }
+  }
+  if (doneCount >= planned) {
+    return { ...verdict, ok: true, pardon: true, reason: `报告零失败且 ${doneCount}/${planned} 项全部取得终态（收尾退出噪声放行）` }
+  }
+  const parts = []
+  if (missing.length > 0) parts.push(`${missing.length} 项有始无终（${missing.join('；')}）`)
+  if (notStarted > 0) parts.push(`${notStarted} 项未开始`)
+  return { ...verdict, reason: `计划 ${planned} 项仅 ${doneCount} 项取得终态：${parts.join('，')}` }
+}
+
 export function runTestHost({ executable, args, env, mode = resolveTestHostMode(), timeoutMs = 15 * 60_000, stdout = process.stdout, stderr = process.stderr, reportPath }) {
   if (mode === 'desktop' && process.platform !== 'win32') {
     throw new Error('独立桌面仅支持 Windows')

@@ -239,6 +239,18 @@ const TABLE13_DOC_TEXT = [
   '',
 ].join('\n')
 
+/** 还原通道的防误删 rename：源不存在时跳过（还原语义 = 已还原/未移动，
+ *  本就该不动）。不得让「源缺失的 overwrite rename」执行——VSCode 磁盘
+ *  provider 的 overwrite 实现是「先删目标再移源」两步，源缺失时目标已被
+ *  删掉才抛 EntryNotFound（#199 单宿主全量实测：漂移用例兜底把刚归位的
+ *  改名目标.md 又被同轮下一候选的失败 rename 删掉，泄漏给跨根用例）。 */
+async function restoreRename(from: vscode.Uri, to: vscode.Uri): Promise<boolean> {
+  const sourceExists = await Promise.resolve(vscode.workspace.fs.stat(from)).then(() => true, () => false)
+  if (!sourceExists) return false
+  await vscode.workspace.fs.rename(from, to, { overwrite: true })
+  return true
+}
+
 async function poll<T>(
   label: string,
   fn: () => T | undefined | Promise<T | undefined>,
@@ -11059,16 +11071,21 @@ export const cases: Array<[string, () => Promise<void>]> = [
       return text.includes('[[../改名目标]]') && !text.includes('改名目标2') ? true : undefined
     })
     // undo 文件名回滚落定等待（撤销队列串行；抢跑会与兜底 rename 竞态出
-    // 双文件并存）。旧名存在且新名消失 = undo 已回滚 rename
-    await new Promise((r) => setTimeout(r, 600))
-    try {
-      await vscode.workspace.fs.stat(wsUri('改名目标2.md'))
-      // undo 未回滚文件名（拆分撤销单元的宿主行为）：外部 fs 通道显式移回
-      // （不触发 will——引用文本已回旧名，无改写）
-      await vscode.workspace.fs.rename(wsUri('改名目标2.md'), wsUri('改名目标.md'), { overwrite: true })
-    } catch {
-      // undo 已回滚文件名
-    }
+    // 双文件并存）。终态 = 旧名存在且新名消失。1.82.3 上 undo 的文件回滚
+    // 实测可慢于固定等待窗（快照落在「新名已消失、旧名未落」的中间态时，
+    // 旧实现静默放过、文件丢失，后续跨根用例 EntryNotFound）——改为
+    // 轮询终态；超时（撤销单元被宿主拆开不回滚文件名）才显式移回
+    // （外部 fs 通道，不触发 will——引用文本已回旧名，无改写）
+    await poll('undo 回滚落定（旧名在、新名不在）', async () => {
+      const oldExists = await vscode.workspace.fs.stat(wsUri('改名目标.md')).then(() => true, () => false)
+      if (oldExists) {
+        const newExists = await vscode.workspace.fs.stat(wsUri('改名目标2.md')).then(() => true, () => false)
+        if (!newExists) return true
+      }
+      return undefined
+    }, 5000).catch(async () => {
+      await Promise.resolve(restoreRename(wsUri('改名目标2.md'), wsUri('改名目标.md'))).catch(() => {})
+    })
     await new Promise((r) => setTimeout(r, 400))
   }],
 
@@ -11103,9 +11120,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
     } finally {
       // 现场还原（外部 fs 通道 + 覆盖写回原始内容，索引经 watcher 自愈）
       await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('rename-ref-a.md'), Buffer.from(RENAME_REF_A_DOC_TEXT, 'utf8'))).catch(() => {})
-      await Promise.resolve(vscode.workspace.fs.rename(wsUri('notes/deep/moved-2.md'), wsUri('rename-moved.md'), { overwrite: true })).catch(() => {})
+      await Promise.resolve(restoreRename(wsUri('notes/deep/moved-2.md'), wsUri('rename-moved.md'))).catch(() => {})
       await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('rename-moved.md'), Buffer.from(RENAME_MOVED_DOC_TEXT, 'utf8'))).catch(() => {})
-      await Promise.resolve(vscode.workspace.fs.rename(wsUri('assets/rename-pic2.png'), wsUri('assets/rename-pic.png'), { overwrite: true })).catch(() => {})
+      await Promise.resolve(restoreRename(wsUri('assets/rename-pic2.png'), wsUri('assets/rename-pic.png'))).catch(() => {})
       await Promise.resolve(vscode.workspace.fs.delete(wsUri('notes/deep'), { recursive: true })).catch(() => {})
       await new Promise((r) => setTimeout(r, 400))
     }
@@ -11141,7 +11158,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
       // 非受影响焦点文档的撤销栈顶，undo 会误撤引用乙的漂移行——实测教训）----
       await Promise.resolve(vscode.commands.executeCommand('workbench.action.closeAllEditors')).catch(() => {})
       await Promise.resolve(vscode.workspace.fs.writeFile(bUri, Buffer.from(RENAME_REF_B_DOC_TEXT, 'utf8'))).catch(() => {})
-      await Promise.resolve(vscode.workspace.fs.rename(wsUri('改名目标2.md'), wsUri('改名目标.md'), { overwrite: true })).catch(() => {})
+      await Promise.resolve(restoreRename(wsUri('改名目标2.md'), wsUri('改名目标.md'))).catch(() => {})
       // 等索引重扫（watcher 去抖 + 增量队列）
       await new Promise((r) => setTimeout(r, 1800))
       // ---- B 段（叠加改写）：漂移行（未保存）+ 覆盖层边对齐当前文本 →
@@ -11177,12 +11194,27 @@ export const cases: Array<[string, () => Promise<void>]> = [
       })
     } finally {
       // 强兜底还原（断言失败也不泄漏现场）：关面板丢弃 dirty buffer，外部
-      // fs 通道归位文件并写回引用文档原文（索引经 watcher 自愈）
+      // fs 通道归位文件并写回引用文档原文（索引经 watcher 自愈）。归位走
+      // restoreRename（源不存在跳过——overwrite rename 在源缺失时仍会先删
+      // 目标再抛错，单宿主全量实测会把刚归位的文件删掉泄漏给后续用例），
+      // 并收敛到终态断言：未收敛则让本用例 FAIL（暴露在正确的用例）
       await Promise.resolve(vscode.commands.executeCommand('workbench.action.closeAllEditors')).catch(() => {})
       await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('rename-ref-a.md'), Buffer.from(RENAME_REF_A_DOC_TEXT, 'utf8'))).catch(() => {})
       await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('notes/rename-ref-b.md'), Buffer.from(RENAME_REF_B_DOC_TEXT, 'utf8'))).catch(() => {})
-      for (const name of ['改名目标3.md', '改名目标2.md']) {
-        await Promise.resolve(vscode.workspace.fs.rename(wsUri(name), wsUri('改名目标.md'), { overwrite: true })).catch(() => {})
+      let restored = false
+      for (let attempt = 0; attempt < 10 && !restored; attempt++) {
+        for (const name of ['改名目标3.md', '改名目标2.md']) {
+          await Promise.resolve(restoreRename(wsUri(name), wsUri('改名目标.md'))).catch(() => {})
+        }
+        restored = await Promise.resolve(vscode.workspace.fs.stat(wsUri('改名目标.md'))).then(() => true, () => false)
+        if (!restored) await new Promise((r) => setTimeout(r, 200))
+      }
+      if (!restored) {
+        const probe: Record<string, boolean> = {}
+        for (const name of ['改名目标.md', '改名目标2.md', '改名目标3.md']) {
+          probe[name] = await Promise.resolve(vscode.workspace.fs.stat(wsUri(name))).then(() => true, () => false)
+        }
+        throw new Error(`兜底归位未收敛（候选名实况 ${JSON.stringify(probe)}），不得静默泄漏给后续用例`)
       }
       await new Promise((r) => setTimeout(r, 400))
     }
@@ -11210,9 +11242,14 @@ export const cases: Array<[string, () => Promise<void>]> = [
       const edit = new vscode.WorkspaceEdit()
       edit.renameFile(wsUri('改名目标.md'), vscode.Uri.file(`${secondDir}/改名目标.md`), { overwrite: false })
       assert(await vscode.workspace.applyEdit(edit), '跨根 rename 应成功应用')
-      // 引用者文本原样（不生成 ../.. 跨根相对引用）
-      const textA = (await vscode.workspace.openTextDocument(wsUri('rename-ref-a.md'))).getText()
-      const textB = (await vscode.workspace.openTextDocument(wsUri('notes/rename-ref-b.md'))).getText()
+      // 引用者文本原样（不生成 ../.. 跨根相对引用）。断言语义是磁盘落盘
+      // 文本：直读盘（fs.readFile），不经 openTextDocument——前序 rename
+      // 用例改写过的文档缓存 reconcile 异步，单宿主全量下（多边型/漂移与
+      // 本用例同宿主先后跑）缓存里还是改写后的旧文本，会误报为跨根改写
+      const readDisk = (rel: string) => Promise.resolve(vscode.workspace.fs.readFile(wsUri(rel)))
+        .then((data) => Buffer.from(data).toString('utf8'))
+      const textA = await readDisk('rename-ref-a.md')
+      const textB = await readDisk('notes/rename-ref-b.md')
       assert(textA.includes('[同目标](./改名目标.md)') && !textA.includes('rename-second'),
         `跨根不得改写引用甲（实际 ${textA}` + '）')
       assert(textB.includes('[[../改名目标]]'), `跨根不得改写引用乙（实际 ${textB}` + '）')
@@ -11222,10 +11259,13 @@ export const cases: Array<[string, () => Promise<void>]> = [
         return last && last.plannedEdits === 0 && last.skipped.length >= 2 &&
           last.skipped.every((s) => s.reason === 'cross-root') &&
           last.notice === 'host.renameRefsSkippedAll' ? last : undefined
+      }).catch(async (err) => {
+        const log = await vscode.commands.executeCommand('onegayi.vsidian._test.getRenameRefLog')
+        throw new Error(`${(err as Error).message}；log实况=${JSON.stringify(log)}`)
       })
     } finally {
       // 现场还原：外部 fs 通道移回（不触发 will），按身份移除第二根，等索引稳定
-      await vscode.workspace.fs.rename(vscode.Uri.file(`${secondDir}/改名目标.md`), wsUri('改名目标.md'), { overwrite: true })
+      await Promise.resolve(restoreRename(vscode.Uri.file(`${secondDir}/改名目标.md`), wsUri('改名目标.md'))).catch(() => {})
       await poll('还原后主根就绪', async () => {
         const s = (await vscode.commands.executeCommand('onegayi.vsidian._test.getVaultIndexState')) as {
           roots: Array<{ fsPath: string; hasData: boolean; scanning: boolean }>
@@ -11311,7 +11351,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     try {
       await vscode.workspace.fs.stat(wsUri('dir-moved'))
       // undo 未回滚目录名：外部 fs 通道显式移回（引用文本已恢复，无改写）
-      await vscode.workspace.fs.rename(wsUri('dir-moved'), wsUri('dir-move'), { overwrite: true })
+      await Promise.resolve(restoreRename(wsUri('dir-moved'), wsUri('dir-move'))).catch(() => {})
     } catch {
       // undo 已回滚目录名
     }
@@ -11355,7 +11395,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
       // 现场还原（外部 fs 通道 + 覆盖写回原始内容，索引经 watcher 自愈）
       await Promise.resolve(vscode.commands.executeCommand('workbench.action.closeAllEditors')).catch(() => {})
       await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('dir-ref.md'), Buffer.from(DIR_REF_DOC_TEXT, 'utf8'))).catch(() => {})
-      await Promise.resolve(vscode.workspace.fs.rename(wsUri('sub/dir-move'), wsUri('dir-move'), { overwrite: true })).catch(() => {})
+      await Promise.resolve(restoreRename(wsUri('sub/dir-move'), wsUri('dir-move'))).catch(() => {})
       await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('dir-move/inner-a.md'), Buffer.from(DIR_INNER_A_DOC_TEXT, 'utf8'))).catch(() => {})
       await Promise.resolve(vscode.workspace.fs.delete(wsUri('sub'), { recursive: true })).catch(() => {})
       await new Promise((r) => setTimeout(r, 500))
@@ -11417,8 +11457,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
       await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('batch-ref-a.md'), Buffer.from(BATCH_REF_A_DOC_TEXT, 'utf8'))).catch(() => {})
       await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('notes/batch-ref-b.md'), Buffer.from(BATCH_REF_B_DOC_TEXT, 'utf8'))).catch(() => {})
       await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('batch-moved.md'), Buffer.from(BATCH_MOVED_DOC_TEXT, 'utf8'))).catch(() => {})
-      await Promise.resolve(vscode.workspace.fs.rename(wsUri('批改名目标.md'), wsUri('批目标.md'), { overwrite: true })).catch(() => {})
-      await Promise.resolve(vscode.workspace.fs.rename(wsUri('assets/batch-pic-batch.png'), wsUri('assets/batch-pic.png'), { overwrite: true })).catch(() => {})
+      await Promise.resolve(restoreRename(wsUri('批改名目标.md'), wsUri('批目标.md'))).catch(() => {})
+      await Promise.resolve(restoreRename(wsUri('assets/batch-pic-batch.png'), wsUri('assets/batch-pic.png'))).catch(() => {})
       await new Promise((r) => setTimeout(r, 500))
       await ensureBatchFixture()
     }
