@@ -146,6 +146,12 @@ export class VirtualReadingView {
   private hooks: VirtualReadingViewOptions
 /** 最近一次有效视口高度（隐藏期保持虚拟模式用） */
   private lastViewportHeight = 0
+  /** RO 观测到的容器最近内容宽度（0 = 尚未记录） */
+  private lastContainerWidth = 0
+  /** 容器横向宽度显著变化待处理旗（RO 回调只置旗，清空动作在
+   *  measureAndStabilize 内消费——回调内直接改共享状态与「update 途中
+   *  不得同步改」同族，避免重入） */
+  private widthDriftPending = false
 
   constructor(container: HTMLElement, options: VirtualReadingViewOptions = {}) {
     this.container = container ?? createReadingContainer()
@@ -158,7 +164,10 @@ export class VirtualReadingView {
     this.spacerBottom = document.createElement('div')
     this.spacerBottom.className = `${READING_CLASS_NAMES.spacer} ${READING_CLASS_NAMES.spacerBottom}`
     if (typeof ResizeObserver === 'function') {
-      this.observer = new ResizeObserver(() => this.scheduleUpdate())
+      this.observer = new ResizeObserver((entries) => {
+        this.noteWidthDrift(entries)
+        this.scheduleUpdate()
+      })
       this.observer.observe(this.container)
       if (this.scrollEl !== this.container) this.observer.observe(this.scrollEl)
     }
@@ -252,8 +261,11 @@ export class VirtualReadingView {
     }
     const viewport = this.effectiveViewport()
     const scrollTop = this.contentScrollTop()
-    const atBottom = this.scrollEl !== this.container &&
-      this.scrollEl.scrollHeight > this.scrollEl.clientHeight &&
+    // 末尾意图保持（#259 起主视图同享）：进入本轮时已滚到滚动末端的，
+    // 尾部窗口推进中的回收-占位中间态会让布局短暂变矮、浏览器把
+    // scrollTop clamp 压低，之后 spacer 恢复总高但损失无人补回——主
+    // 视图与外部宿主（#243）同样需要把「滚到末尾」的意图顶回末端。
+    const atBottom = this.scrollEl.scrollHeight > this.scrollEl.clientHeight &&
       this.scrollEl.scrollTop >= this.scrollEl.scrollHeight - this.scrollEl.clientHeight - 2
     const next = computeMountWindow(this.heights, scrollTop, viewport, this.bufferPx())
     const { mount, recycle } = diffWindow(this.mounted, next)
@@ -593,6 +605,30 @@ export class VirtualReadingView {
     })
   }
 
+  /** RO 回调同步路径只做标记（PR #268 审查 P1-2）：容器内容宽度相对变化
+   *  超过 2%（与 drift 阈值同族）时置旗，实测集的清空推迟到
+   *  measureAndStabilize 消费——拆分窗口/侧栏开合/可读行宽变更会改变全部
+   *  块的真实高度，旧宽度的实测值不再可信。只比宽度：纵向尺寸变化（窗口
+   *  差分、图片晚到的既有通道）不置旗，纯滚动路径零影响；宽度非正（隐藏）
+   *  忽略不入册，显示/隐藏周期不把同宽复原误判为漂移。只看容器条目——
+   *  外部宿主形态下 scrollEl 与容器宽度本就不同（滚动条），跨目标比较会
+   *  把固定差误判成漂移。 */
+  private noteWidthDrift(entries: ResizeObserverEntry[]): void {
+    for (const entry of entries) {
+      if (entry.target !== this.container) {
+        continue
+      }
+      const w = entry.contentRect.width
+      if (w <= 0) {
+        continue
+      }
+      if (this.lastContainerWidth > 0 && Math.abs(w / this.lastContainerWidth - 1) > 0.02) {
+        this.widthDriftPending = true
+      }
+      this.lastContainerWidth = w
+    }
+  }
+
   private layoutAvailable(): boolean {
     return this.scrollEl.clientHeight > 0 || this.lastViewportHeight > 0
   }
@@ -699,19 +735,37 @@ export class VirtualReadingView {
     }
   }
 
-  /** 窗口元素按块序重排到两个 spacer 之间（appendChild 移动既有节点，不重建） */
+  /** 窗口元素按块序最小移动到两个 spacer 之间（reconciliation 式）：
+   *  期望序 [spacerTop, first..last, spacerBottom] 游标对位——节点已在
+   *  游标紧后（同父且 previousSibling 命中）则零移动，块集合与块序不变
+   *  的窗口平移不再触碰既有块节点。#258 根因侧：此前无条件 appendChild
+   *  全部挂载块会移动表格块根 div，Chromium 表格布局重排静默重置 td 内
+   *  滚动容器的 scrollTop（无 scroll 事件、无 JS 写入；table-layout:fixed
+   *  / contain / will-change 等 CSS 缓解实测全部无效）——最小移动后表格
+   *  块只要留在窗口内就不被移动，格内嵌入卡的内层滚动全程稳定（第一轮
+   *  的 120ms 停歇恢复兜底保留为受害者侧防线）。mountBlock 创建的块是
+   *  游离节点（不预先插入），游离节点 parentElement 非本容器，必然走
+   *  insertBefore 入位；cursor 为 null 时插入参照取 firstChild。窗口
+   *  不变路径不进本方法（零 DOM 写、防 RO 空转的既有约定不变）。 */
   private reorderChildren(): void {
     if (this.mounted === null) {
       return
     }
-    this.container.appendChild(this.spacerTop)
+    let cursor: ChildNode | null = null
+    const place = (el: HTMLElement): void => {
+      if (el.parentElement !== this.container || el.previousSibling !== cursor) {
+        this.container.insertBefore(el, cursor === null ? this.container.firstChild : cursor.nextSibling)
+      }
+      cursor = el
+    }
+    place(this.spacerTop)
     for (let i = this.mounted.first; i <= this.mounted.last; i++) {
       const el = this.elements.get(i)
       if (el) {
-        this.container.appendChild(el)
+        place(el)
       }
     }
-    this.container.appendChild(this.spacerBottom)
+    place(this.spacerBottom)
   }
 
   /**
@@ -721,6 +775,13 @@ export class VirtualReadingView {
    * 重估引起的上方内容位移同样被锚定补偿。
    */
   private measureAndStabilize(prevScrollTop: number, allowStabilize: boolean): void {
+    if (this.widthDriftPending) {
+      // 容器横向宽度已显著变化：旧宽度的实测值不再可信，清空实测集——
+      // 本轮窗口内块照常实测回填，回收块交由下方 drift 重估刷成新标定
+      // 估计（宽度变化通常改变行数分布，标定随之漂移触发重估）
+      this.widthDriftPending = false
+      this.measured.clear()
+    }
     const oldTops = this.tops
     const refIdx = anchorIndexAtScroll(oldTops, this.heights, prevScrollTop)
     const samples: HeightSample[] = []
@@ -750,10 +811,13 @@ export class VirtualReadingView {
       const drift = Math.abs(next.lineHeightPx / this.calib.lineHeightPx - 1)
       this.calib = next
       if (drift > 0.02) {
-        // 重估全部未挂载块：同构文档的未测前缀误差收敛到个位百分比，
-        // 挂载块保留实测值不受影响
+        // 重估全部「从未实测」的块（#259：判 measured 而非 elements）：
+        // 已实测但被窗口回收的块必须保留实测值——若按「当前未挂载」判，
+        // 标定中位数随窗口样本摆动时，回收带的实测值被换回估计值再随
+        // 下一轮窗口实测换回，形成估计↔实测翻转的自持闭环，稳定化平移
+        // 把翻转转译成对用户滚轮的回吐（长文档滚不到底的恒差根因）
         for (let i = 0; i < this.blocks.length; i++) {
-          if (!this.elements.has(i)) {
+          if (!this.measured.has(i)) {
             this.heights[i] = estimateBlockHeightPx(this.blocks[i]!, this.text, this.calib)
           }
         }
@@ -801,9 +865,16 @@ export class VirtualReadingView {
       const h = outerHeight(el)
       if (h > 0 && idx < this.heights.length) {
         this.heights[idx] = h
+        // 与 measureAndStabilize 实测路径成对回填：heights 为实测 ⟺
+        // measured 有记录（#259 判据的不变量）。缺此回填时，隐藏期全量
+        // 渲染 → 可见晋升的块在 heights 持实测值、measured 无记录，其后
+        // 首次 drift 重估会把实测值换回估计值。
+        this.measured.add(idx)
       }
       idx += 1
     }
+    // 晋升实测发生在可见后的当前宽度：实测值即新宽度真值，无需宽度清空
+    this.widthDriftPending = false
     this.tops = blockTops(this.heights)
     // 全量块退场：释放图片槽位（后续由窗口挂载路径重新预备）
     this.releaseAllBlocks()

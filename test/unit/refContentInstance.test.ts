@@ -27,7 +27,9 @@ function fixture(occurrence: string, start: number, sent: WebviewToHost[], strat
   })
   return { instance, mount, contentEl, scrollEl }
 }
-afterEach(() => { document.body.textContent = ''; vi.restoreAllMocks(); vi.unstubAllGlobals() })
+// useRealTimers 兜底：「外部滚动后卡内滚动被宿主重排静默重置」用例启用
+// fake timers，vitest 不自动还原——文件级配对还原，防泄漏到后续用例
+afterEach(() => { document.body.textContent = ''; vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
 it('已卸载块的属性按钮不再改变 occurrence 状态', () => {
   const a = fixture('first', 0, [])
@@ -151,7 +153,7 @@ it('恢复帧执行前已有外层滚动，取消恢复并保存新的 occurrenc
   a.instance.dispose()
 })
 
-it('恢复帧前用户用滚轮回到顶部，零位也是新阅读意图', () => {
+it('恢复帧前用户用滚轮回顶且内层真实滚动证实，零位也是新阅读意图', () => {
   const frames = new Map<number, FrameRequestCallback>()
   let seq = 0
   vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((cb) => { frames.set(++seq, cb); return seq })
@@ -160,6 +162,8 @@ it('恢复帧前用户用滚轮回到顶部，零位也是新阅读意图', () =
   a.mount.render(loaded)
   a.instance.scrollTop = 100
   a.mount.restoreScroll(true)
+  // #258 修订口径：wheel 只是见证（滚轮可能仅驱动外层），取消与覆写
+  // 由内层真实滚动（scroll 事件）证实——滚轮回顶的零位是新阅读意图
   a.scrollEl.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -80 }))
   a.scrollEl.scrollTop = 0
   a.scrollEl.dispatchEvent(new Event('scroll'))
@@ -167,6 +171,53 @@ it('恢复帧前用户用滚轮回到顶部，零位也是新阅读意图', () =
   expect(a.scrollEl.scrollTop).toBe(0)
   expect(a.instance.scrollTop).toBe(0)
   a.instance.dispose()
+})
+
+it('滚轮事件穿过卡域但内层未实际滚动时，不丢弃待恢复位置（#258）', () => {
+  const frames = new Map<number, FrameRequestCallback>()
+  let seq = 0
+  vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((cb) => { frames.set(++seq, cb); return seq })
+  vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation((id) => { frames.delete(id) })
+  const a = fixture('restore-wheel-pass', 0, [], 'virtual')
+  a.mount.render(loaded)
+  a.instance.scrollTop = 180
+  a.mount.restoreScroll(true)
+  // 滚轮事件落在卡 scrollEl 上（外层滚动意图，或卡已到边由滚动链接续外层），
+  // 但内层 scrollTop 未被实际改变——事件穿过不构成新阅读意图
+  a.scrollEl.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 240 }))
+  expect(a.scrollEl.scrollTop).toBe(0)
+  for (const [id, cb] of [...frames]) { frames.delete(id); cb(0) }
+  expect(a.scrollEl.scrollTop).toBe(180)
+  expect(a.instance.scrollTop).toBe(180)
+  a.instance.dispose()
+})
+
+it('外部滚动后卡内滚动被宿主重排静默重置，停歇后按最后已知值恢复（#258）', () => {
+  vi.useFakeTimers()
+  const a = fixture('silent-reset', 0, [], 'virtual')
+  a.mount.render(loaded)
+  // 用户滚到中段（scroll 见证同步最后已知值）
+  a.scrollEl.scrollTop = 180
+  a.scrollEl.dispatchEvent(new Event('scroll'))
+  // 宿主块被重排：引擎静默重置内层滚动（无 scroll 事件见证）
+  a.scrollEl.scrollTop = 0
+  // 外层滚动（target 为其他元素）触发停歇核对
+  const outer = document.createElement('div')
+  document.body.appendChild(outer)
+  outer.dispatchEvent(new Event('scroll'))
+  vi.advanceTimersByTime(120)
+  expect(a.scrollEl.scrollTop).toBe(180)
+  a.instance.dispose()
+})
+
+it('卡内滚动被静默重置后回收，occurrence 保存最后已知值（#258）', () => {
+  const a = fixture('silent-reset-dispose', 0, [], 'virtual')
+  a.mount.render(loaded)
+  a.scrollEl.scrollTop = 180
+  a.scrollEl.dispatchEvent(new Event('scroll'))
+  a.scrollEl.scrollTop = 0 // 引擎静默重置（无 scroll 事件）
+  a.instance.dispose()
+  expect(a.instance.scrollTop).toBe(180)
 })
 
 it('长引用使用外层滚动区：首屏有界，滚到中段回收旧块，恢复位置后窗口同步', () => {

@@ -1052,11 +1052,45 @@ try {
       return main ? { top: main.scrollTop, height: main.scrollHeight } : null
     })
     const readingWheelAway = async () => {
+      // #258b 根因侧逐轮断言：滚轮进行中（每轮仅歇 25ms，第一轮兜底的
+      // 120ms 停歇恢复未及运行）读两卡内层 scrollTop。根因（reorderChildren
+      // 无条件移动表格块 → Chromium 表格布局重排静默重置 td 内滚动）未除
+      // 时逐轮必见 0；最小移动修复后表格块留窗期间零移动、不触发表格重
+      // 排，在场期间内层保持初值（甲 180 / 乙 60），离屏回收后 present=
+      // false 不再断言。第一轮兜底保留不动，终态恢复断言仍由其守护。
+      let roundsInPlace = 0
       for (let i = 0; i < 140; i += 1) {
         await page.mouse.move(430, 320)
         await page.mouse.wheel(0, 240)
         await page.waitForTimeout(25)
+        const tops = await page.evaluate(() => {
+          const hosts = [...document.querySelectorAll('.vsidian-reading-embed-mixed')]
+            .filter((el) => !el.closest('.vsidian-embed-card') && !el.closest('.vsidian-hover-popup'))
+          const read = (n) => {
+            const host = hosts.find((h) => (h.textContent ?? '').includes(n))
+            const s = host?.querySelector('.vsidian-embed-card-scroll')
+            return s ? { present: true, top: s.scrollTop } : { present: false, top: -1 }
+          }
+          return { jia: read('甲 标题'), yi: read('乙 标题') }
+        })
+        if (tops.jia.present || tops.yi.present) {
+          roundsInPlace += 1
+          if (tops.jia.present) {
+            assert.ok(tops.jia.top > 60,
+              `#258b 第 ${i} 轮甲卡在场期间内层滚动被静默重置（top=${tops.jia.top}，期望保持 ~180 不归 0）`)
+          }
+          if (tops.yi.present) {
+            assert.ok(tops.yi.top > 30,
+              `#258b 第 ${i} 轮乙卡在场期间内层滚动被静默重置（top=${tops.yi.top}，期望保持 ~60 不归 0）`)
+          }
+        }
       }
+      // 门限 5：按 fixture 几何（表格在文档中部、缓冲 600 + 视口高）卡在
+      // 场轮次应达数十轮，门限 2 只证明逐轮断言非空转——fixture 重排导致
+      // 卡只闪现两轮时覆盖面会静默变薄而测试仍绿（PR #268 审查 P2-5）
+      assert.ok(roundsInPlace >= 5,
+        `#258b 逐轮断言确覆盖在场阶段（实际在场轮次 ${roundsInPlace}，门限 5）`)
+      console.log('V3-OBSERVE-rounds-in-place', roundsInPlace)
       await page.waitForTimeout(400)
     }
     const readingScrollTop = async (top) => {
@@ -1114,23 +1148,26 @@ try {
     assert.equal(readingBack, 2, `V3 Reading 滚回重挂（实际 ${readingBack}）`)
     const rjia = await readingInner('甲 标题')
     const ryi = await readingInner('乙 标题')
-    // 已知缺陷（#249 实测钉住，2026-10-01）：Reading 侧表格格内卡的内层
-    // 滚动位置在外层滚轮滚动时被卡内虚拟化的高度稳定化平移吃掉（甲 180
-    // 在外层滚至 ~745px 时归 0，逐轮滚轮诊断实证），离屏重挂后自然恢复
-    // 0。对照：Live 侧同链路（直设外层滚动 + widget 回收重挂）恢复
-    // 220/110 正常；普通 Reading 独占行嵌入块（readingEmbed 场景 E）恢复
-    // 160 正常——缺陷限定在「表格格内 Reading 卡 × 外层滚轮滚动」组合，
-    // 根因在卡内虚拟化 spacer 修正（#243 视口机制）与 #248 表格卡组合
-    // 边界，修复需专项，此处不断言失败、以观测记录留证（交付报告与
-    // 人工验证清单同步登记）
-    console.log(`V3-OBSERVE reading-scroll-restore jia=${rjia.top}（期望 180） yi=${ryi.top}（期望 60）——已知缺陷观测记录`)
-    assert.ok(rjia.present && ryi.present, 'V3 Reading 双卡重挂在场（滚动恢复见观测记录）')
+    // #258 修复断言（原 V3-OBSERVE 观测行升级）：根因是主视图窗口差分
+    // 后的 reorder 移动表格块时，Chromium 表格布局重排静默重置 td 内滚
+    // 动容器的 scrollTop（无 scroll 事件、无 JS 写入、元素与内容高度不
+    // 变——七轮浏览器取证实证；此前误记为稳定化平移）。RefContentMount
+    // 以最后已知值见证 + 外层滚动停歇核对 + 回收保存兜底恢复。滚轮全程
+    // 未落在卡上（target 为表头/正文段落），内层不被物理滚动，终态应为
+    // 保存值；重挂恢复走 restoreScroll，离屏保存经 dispose 兜底。容差
+    // ±20：恢复后卡内虚拟化的锚定补偿含平台字体度量残差（Windows 实测
+    // 精确 180，Linux CI 两次 attempt 稳定 168）；缺陷形态是归零 0，与
+    // 容差上界距离 160+，区分度不受影响。
+    assert.ok(rjia.present && Math.abs(rjia.top - 180) <= 20,
+      `V3 Reading 甲卡滚动位置恢复（实际 top=${rjia.top}，期望 ~180）`)
+    assert.ok(ryi.present && Math.abs(ryi.top - 60) <= 20,
+      `V3 Reading 乙卡滚动位置恢复（实际 top=${ryi.top}，期望 ~60——不串甲的 180）`)
     assert.equal(await editCount6(), 0, 'V3 全程零写回')
     assert.deepEqual(errors, [], `V3 无页面错误（实际 ${JSON.stringify(errors)}）`)
     await page.close()
   }
   passed++
-  console.log('[表格嵌入][PASS] V3 离屏重挂：双侧回收/重挂 + Live 侧滚动恢复断言（Reading 侧滚动恢复因已知缺陷仅观测留证，见 V3-OBSERVE）')
+  console.log('[表格嵌入][PASS] V3 离屏重挂：双侧回收/重挂 + 双侧滚动恢复断言（Reading 侧静默重置修复见 #258）')
 } finally {
   await browser.close()
 }

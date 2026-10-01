@@ -24,6 +24,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // 唤醒核验与尺寸变化的视口稳定）。
 // #174/#175 合并入列：readingWidthProbe（可读行宽双模式铺满/限宽居中/
 // 行号列随列/侧栏避让/片段优先序/宽块钳制——bug 修复回归本体）。
+// #259 合并入列：readingBottomReach（长文档滚轮滚动到底——漂移重估不
+// 覆写已实测块、末尾意图保持，恒差修复回归本体）紧随 readingWidthProbe。
 // #189/#190/#191 合并入列：codeCardChrome（代码块卡片绘制层——围栏
 // 真实对齐、head 按钮换位与整卡恒显、折行开关与续行悬挂缩进）。
 // live SVG 塌缩修复入列：liveImageLayout（独立成行图片布局——viewBox-only
@@ -53,7 +55,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // 紧随 hitReveal（同查找/选词族）。
 const names = ['tableCaret', 'quoteBarPaint', 'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'wordMotion', 'imagePaste', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage',
-  'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract', 'commentToggle', 'viewToggle', 'contextMenu', 'anchorFlash', 'readingWidthProbe', 'codeCardChrome', 'liveImageLayout', 'imageRefresh', 'imagePopup', 'hoverPreview', 'hoverRecursive', 'readingEmbed', 'recursiveEmbed', 'liveEmbed', 'hoverEntry', 'hoverRefresh', 'multicursor', 'multicursorWrite', 'findPanel', 'occurrence', 'hitReveal', 'findBarAnchor', 'mixedEmbed', 'liveEmbedMixed', 'tableEmbed', 'refCombination']
+  'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract', 'commentToggle', 'viewToggle', 'contextMenu', 'anchorFlash', 'readingWidthProbe', 'readingBottomReach', 'codeCardChrome', 'liveImageLayout', 'imageRefresh', 'imagePopup', 'hoverPreview', 'hoverRecursive', 'readingEmbed', 'recursiveEmbed', 'liveEmbed', 'hoverEntry', 'hoverRefresh', 'multicursor', 'multicursorWrite', 'findPanel', 'occurrence', 'hitReveal', 'findBarAnchor', 'mixedEmbed', 'liveEmbedMixed', 'tableEmbed', 'refCombination']
 const { workers, reuseBuilds, selected } = parseBrowserRunOptions(process.argv.slice(2), names)
 const parent = path.join(root, 'out/test/browser-runs')
 await mkdir(parent, { recursive: true })
