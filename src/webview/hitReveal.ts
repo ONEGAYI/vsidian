@@ -14,7 +14,13 @@
 //   关闭时 closeFind 已整组清空 matches，命中集随之清空
 // - 选词部分经 setOccurrenceHitActive 由 syncController 会话簿记驱动
 //   （会话在场 = 选区计入；五通道结束 = 退出），会话中的命令事务
-//   （occurrenceCmd 注解）不改 active，选区追加自然并入
+//   （携带 active 效果——生产链路 dispatchOccurrencePlan 把效果搭乘在
+//   计划事务上）吸收新选区，选区追加自然并入；**外部选区/编辑事务不
+//   吸收**（冻结旧选区）——updateListener 结束通道的两事务序列里，事务 1
+//   （点击/键入/Esc 收敛）的终态选区若并入会把会话外的编辑选区污染成
+//   命中、误种停驻（「编辑选区触界不引发显形」硬边界）
+// - 选词部分坐标新鲜度（occStale，与 findStale 同款）：外部 docChanged
+//   事务冻结会话选区后坐标随文档漂移——过期期间不种停驻（宁可少显形）
 // - 恢复时机：随命中集清空即恢复（零粘滞零记忆）；唯一例外是停驻
 //   （sticky）——清空瞬间选区/光标恰好触界旧显形行时该行保持显形
 //   （沿用分隔行「光标停驻显形」先例，避免关面板后光标落在隐形文本
@@ -79,15 +85,19 @@ function rangesTouchLine(ranges: readonly HitRange[], line: { from: number; to: 
   return false
 }
 
-/** 行读取面（doc.line 的最小结构；StateField 内用 Text，纯函数测试用
- *  轻量模拟——planStickyLines/shrinkStickyLines 只读行号与行区间） */
+/** 行读取面（doc.line/lineAt 的最小结构；StateField 内用 Text，纯函数测试
+ *  用轻量模拟——planStickyLines 按命中反查行，只读行号、行区间与总长） */
 export interface LineReader {
   lines: number
+  length: number
   line(n: number): { from: number; to: number }
+  lineAt(pos: number): { number: number; from: number; to: number }
 }
 
 /** 停驻种子（命中集清空瞬间）：旧命中触界的行 ∩ 当前选区触界行。
- *  只从「曾经显形」的行里筛——正常编辑选区从未显形，不进停驻 */
+ *  只从「曾经显形」的行里筛——正常编辑选区从未显形，不进停驻。
+ *  按命中反查行（命中数 × 跨行数），不逐行扫全文档——大文档多命中
+ *  时清空事务的扫描成本与文档行数解耦 */
 export function planStickyLines(
   prevHits: readonly HitRange[],
   selectionRanges: readonly HitRange[],
@@ -97,10 +107,15 @@ export function planStickyLines(
   if (prevHits.length === 0) {
     return out
   }
-  for (let n = 1; n <= doc.lines; n++) {
-    const line = doc.line(n)
-    if (hitTouchesLine(prevHits, line) && rangesTouchLine(selectionRanges, line)) {
-      out.add(n)
+  for (const hit of prevHits) {
+    const posFrom = Math.max(0, Math.min(hit.from, doc.length))
+    const posTo = Math.max(hit.from, Math.min(hit.to, doc.length))
+    const first = doc.lineAt(posFrom).number
+    const last = doc.lineAt(Math.max(posFrom, posTo - 1)).number
+    for (let n = first; n <= last; n++) {
+      if (!out.has(n) && rangesTouchLine(selectionRanges, doc.line(n))) {
+        out.add(n)
+      }
     }
   }
   return out
@@ -149,12 +164,16 @@ export interface HitRevealState {
   stickyLines: ReadonlySet<number>
   /** find 部分来源引用（findStateField.matches；引用比较驱动 hits 重建） */
   findSource: readonly HitRange[] | null
-  /** 选区部分来源引用（occurrenceActive 时的 selection 对象；null = 无。
-   *  Selection 引用在无选区变化的事务间稳定，比较语义与 matches 同构） */
+  /** 选区部分来源引用（occurrenceActive 时的会话选区对象；null = 无。
+ *    只在携带 active 效果的会话命令事务上吸收——外部选区事务冻结不变，
+ *    终态选区不污染命中集；Selection 引用稳定，比较语义与 matches 同构） */
   occSelection: { ranges: readonly { from: number; to: number }[] } | null
   /** find 匹配坐标过期标记：docChanged 后引用未变（重算未到）时置位，
-   *  新引用（重算落位）时复位；stale 期间不种停驻 */
+ *  新引用（重算落位）时复位；stale 期间不种停驻 */
   findStale: boolean
+  /** 会话选区坐标过期标记：外部 docChanged 冻结会话选区后随文档漂移，
+ *  下次吸收（active 效果事务）或清空时复位；stale 期间不种停驻 */
+  occStale: boolean
 }
 
 export const hitRevealField = StateField.define<HitRevealState>({
@@ -167,17 +186,27 @@ export const hitRevealField = StateField.define<HitRevealState>({
       findSource,
       occSelection: null,
       findStale: false,
+      occStale: false,
     }
   },
   update(value, tr) {
     let occurrenceActive = value.occurrenceActive
+    let activeTrue = false
     for (const e of tr.effects) {
       if (e.is(setOccurrenceHitActive)) {
         occurrenceActive = e.value
+        if (e.value) {
+          activeTrue = true
+        }
       }
     }
     const findSource = tr.state.field(findStateField, false)?.matches ?? EMPTY_HITS
-    const occSelection = occurrenceActive ? tr.state.selection : null
+    // 会话命令事务（携带 active 效果）吸收新选区；外部选区事务冻结旧选区
+    // （终态选区不并入——见模块头「硬边界」）。null 兜底：active 但从未
+    // 吸收过的防御路径（生产链路 establishment 即效果事务）
+    const occSelection = occurrenceActive
+      ? (activeTrue || value.occSelection === null ? tr.state.selection : value.occSelection)
+      : null
 
     // find 匹配坐标新鲜度：编辑后引用未变 = 旧坐标漂移窗口（微任务重算
     // 落位后恢复 fresh）；新引用 = 重算已落位
@@ -187,6 +216,14 @@ export const hitRevealField = StateField.define<HitRevealState>({
     }
     if (findSource !== value.findSource) {
       findStale = false
+    }
+    // 会话选区坐标新鲜度：冻结引用跨过 docChanged = 坐标随文档漂移
+    let occStale = value.occStale
+    if (occSelection === value.occSelection && occSelection !== null && tr.docChanged) {
+      occStale = true
+    }
+    if (occSelection !== value.occSelection) {
+      occStale = false
     }
 
     const hitsUnchanged = findSource === value.findSource && occSelection === value.occSelection
@@ -206,8 +243,8 @@ export const hitRevealField = StateField.define<HitRevealState>({
         sticky = EMPTY_LINES
       }
     } else if (value.hits.length > 0) {
-      // 命中集清空瞬间（面板关闭/会话结束且 find 坐标可信）
-      sticky = value.findStale
+      // 命中集清空瞬间（面板关闭/会话结束且两侧坐标可信）
+      sticky = value.findStale || value.occStale
         ? EMPTY_LINES
         : planStickyLines(value.hits, tr.state.selection.ranges, tr.state.doc)
     } else if (sticky.size > 0 && tr.selection !== undefined) {
@@ -215,10 +252,10 @@ export const hitRevealField = StateField.define<HitRevealState>({
     }
 
     if (hitsUnchanged && occurrenceActive === value.occurrenceActive &&
-        sticky === value.stickyLines && findStale === value.findStale) {
+        sticky === value.stickyLines && findStale === value.findStale && occStale === value.occStale) {
       return value
     }
-    return { hits, occurrenceActive, stickyLines: sticky, findSource, occSelection, findStale }
+    return { hits, occurrenceActive, stickyLines: sticky, findSource, occSelection, findStale, occStale }
   },
 })
 

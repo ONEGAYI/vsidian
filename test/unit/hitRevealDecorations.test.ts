@@ -295,4 +295,75 @@ describe('替换块命中回源（DOM 层）', () => {
     expect(view.contentDOM.querySelector('img')).not.toBeNull()
     view.destroy()
   })
+
+  // ---- 负向边界（票面钉住：行内公式/行内混排图片不计入回源） ----
+
+  it('行内公式命中：渲染装饰保持（不回源——票面块级口径）', async () => {
+    const { liveMath } = await import('../../src/webview/liveMath')
+    const { MATH_CLASS_NAMES } = await import('../../src/shared/math')
+    const doc = ['前文 $x + 1$ 后文', ''].join('\n')
+    const view = makeView(doc, [liveMath])
+    expect(view.contentDOM.querySelector(`.${MATH_CLASS_NAMES.math}`)).not.toBeNull()
+    const x = doc.indexOf('x')
+    view.dispatch({ effects: setFindMatches.of({ matches: [{ from: x, to: x + 1 }], index: 0 }) })
+    // 行内命中不触发回源：渲染装饰在场、源码 mark 不出现
+    expect(view.contentDOM.querySelector(`.${MATH_CLASS_NAMES.math}`)).not.toBeNull()
+    expect(view.contentDOM.querySelector(`.${MATH_CLASS_NAMES.mathSource}`)).toBeNull()
+    view.destroy()
+  })
+
+  it('行内混排图片命中：图片 widget 保持（不回源——独行口径）', async () => {
+    const { createLinkInteractions } = await import('../../src/webview/liveLinks')
+    const { ImageResourceManager } = await import('../../src/webview/imageResource')
+    const images = new ImageResourceManager({
+      isDirectSrc: () => true,
+      requestHost: () => {},
+    })
+    const doc = ['文字 ![alt](pic.png) 后文', ''].join('\n')
+    const view = makeView(doc, [
+      createLinkInteractions({ postActivate: () => {}, images, postActivateWikilink: () => {} }),
+    ])
+    expect(view.contentDOM.querySelector('img')).not.toBeNull()
+    const alt = doc.indexOf('alt')
+    view.dispatch({ effects: setFindMatches.of({ matches: [{ from: alt, to: alt + 3 }], index: 0 }) })
+    expect(view.contentDOM.querySelector('img')).not.toBeNull()
+    view.destroy()
+  })
+})
+
+// ---- span 预算（大文档多命中时查找键入路径的成本上界） ----
+
+describe('命中显形重建预算（纯文本命中零重发射）', () => {
+  it('大量纯文本命中：行级类别零触界 → 零行重发射（文本过滤）；grid 行命中恰增一行', async () => {
+    const { getHeadingStats } = await import('../../src/webview/liveDecorations')
+    const doc = ['# 标题', '', '正文甲', '正文甲', '正文甲', ''].join('\n')
+    const view = makeView(doc)
+    // 基线：空 matches 事务只重发射选区行（selectionSpans 既有行为）
+    view.dispatch({ effects: setFindMatches.of({ matches: [], index: 0 }) })
+    const baseline = getHeadingStats().lastUpdateScannedLines
+    expect(baseline).toBeGreaterThanOrEqual(1)
+    // 30 处纯文本命中（行内无 | 与 \）：重发射必为空转 → 过滤后不增扫描行
+    const matches: Array<{ from: number; to: number }> = []
+    let at = doc.indexOf('正文甲')
+    while (at >= 0) {
+      for (let i = 0; i < 10; i++) {
+        matches.push({ from: at + (i % 3), to: at + (i % 3) + 1 })
+      }
+      at = doc.indexOf('正文甲', at + 1)
+    }
+    expect(matches.length).toBeGreaterThanOrEqual(30)
+    view.dispatch({ effects: setFindMatches.of({ matches, index: 0 }) })
+    expect(getHeadingStats().lastUpdateScannedLines).toBe(baseline)
+    view.destroy()
+    // 对照：命中落在 grid 行（含 |）→ 恰增该行重发射
+    const tableView = makeView(TABLE_DOC)
+    tableView.dispatch({ effects: setFindMatches.of({ matches: [], index: 0 }) })
+    const tableBaseline = getHeadingStats().lastUpdateScannedLines
+    const tableRow = lineOf(TABLE_DOC, 5)
+    tableView.dispatch({
+      effects: setFindMatches.of({ matches: [{ from: tableRow.from + 2, to: tableRow.from + 4 }], index: 0 }),
+    })
+    expect(getHeadingStats().lastUpdateScannedLines).toBe(tableBaseline + 1)
+    tableView.destroy()
+  })
 })

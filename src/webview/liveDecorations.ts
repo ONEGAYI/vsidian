@@ -1238,42 +1238,67 @@ function regionSpans(tr: Transaction, doc: Text): LineSpan[] {
 }
 
 /** 命中显形驱动的重建行（#251）：hitRevealField 值变化时，新旧命中与
- *  停驻触界的行都要重发射（旧行撤显形/新行上显形；停驻行号在各自事务
- *  坐标系，旧侧经 changes 映射到新坐标）。纯选区事务下 changes 恒等，
- *  映射零成本 */
+ * 停驻触界的行都要重发射（旧行撤显形/新行上显形；停驻行号在各自事务
+ * 坐标系，旧侧经 changes 映射到新坐标）。纯选区事务下 changes 恒等，
+ * 映射零成本。
+ * 预算钳制（大文档多命中时查找键入路径的成本上界）：
+ * - 本 field 只拥有行级类别装饰（grid 行/分隔行/转义符）——命中行文本
+ *   无 `|` 与 `\` 时重发射必为空转，按文本过滤（块级公式/Mermaid/代码
+ *   卡/独行图片的回源由各自 ViewPlugin 视口内消费，不经此 span）
+ * - span 就地合并（相邻/重叠），合并后总覆盖行数达全文档量级时退为
+ *   一次全量重发射（一次 emitForRange 优于数千次逐 span update）
+ * - 坐标不可信窗口（docChanged 后 find/occ 来源引用都未刷新——
+ *   findStale/occStale 暂态）跳过：装饰随 decos.update 的变更映射自然
+ *   移动，重算落位的引用变化事务再按新坐标重发射 */
 function hitRevealSpans(tr: Transaction, doc: Text): LineSpan[] {
   const before = tr.startState.field(hitRevealField, false)
   const after = tr.state.field(hitRevealField, false)
   if (!before || !after || before === after) {
     return []
   }
+  if (tr.docChanged && after.findSource === before.findSource &&
+      after.occSelection === before.occSelection) {
+    return []
+  }
   const spans: LineSpan[] = []
-  const pushPos = (from: number, to: number): void => {
+  const pushHit = (from: number, to: number): void => {
     if (to < from || from > doc.length) {
       return
     }
-    spans.push({
-      fromLine: doc.lineAt(Math.min(from, doc.length)).number,
-      toLine: doc.lineAt(Math.min(Math.max(to, from), doc.length)).number,
-    })
+    const firstLine = doc.lineAt(Math.min(from, doc.length)).number
+    const lastLine = doc.lineAt(Math.min(Math.max(to - 1, from), doc.length)).number
+    for (let lineNo = firstLine; lineNo <= lastLine; lineNo++) {
+      const text = doc.line(lineNo).text
+      if (text.includes('|') || text.includes('\\')) {
+        spans.push({ fromLine: lineNo, toLine: lineNo })
+      }
+    }
   }
   for (const hit of after.hits) {
-    pushPos(hit.from, hit.to)
-  }
-  for (const n of after.stickyLines) {
-    if (n >= 1 && n <= doc.lines) {
-      pushPos(doc.line(n).from, doc.line(n).to)
-    }
+    pushHit(hit.from, hit.to)
   }
   const oldDoc = tr.startState.doc
   for (const hit of before.hits) {
-    pushPos(tr.changes.mapPos(hit.from, -1), tr.changes.mapPos(hit.to, 1))
+    pushHit(tr.changes.mapPos(hit.from, -1), tr.changes.mapPos(hit.to, 1))
+  }
+  for (const n of after.stickyLines) {
+    if (n >= 1 && n <= doc.lines) {
+      spans.push({ fromLine: n, toLine: n })
+    }
   }
   for (const n of before.stickyLines) {
     if (n >= 1 && n <= oldDoc.lines) {
-      const pos = tr.changes.mapPos(oldDoc.line(n).from, -1)
-      pushPos(pos, pos)
+      const pos = Math.min(tr.changes.mapPos(oldDoc.line(n).from, -1), doc.length)
+      spans.push({ fromLine: doc.lineAt(pos).number, toLine: doc.lineAt(pos).number })
     }
+  }
+  mergeSpans(spans, doc.lines)
+  let covered = 0
+  for (const s of spans) {
+    covered += s.toLine - s.fromLine + 1
+  }
+  if (covered >= doc.lines) {
+    return [{ fromLine: 1, toLine: doc.lines }]
   }
   return spans
 }

@@ -71,7 +71,23 @@ describe('命中相交判定（纯函数）', () => {
 })
 
 describe('停驻计划（纯函数）', () => {
-  const doc = { line: (n: number) => ({ from: lineFrom(n), to: lineFrom(n) + DOC_LINES[n - 1]!.length }), lines: DOC_LINES.length }
+  const doc = {
+    lines: DOC_LINES.length,
+    length: DOC.length,
+    line: (n: number) => ({ from: lineFrom(n), to: lineFrom(n) + DOC_LINES[n - 1]!.length }),
+    lineAt: (pos: number): { number: number; from: number; to: number } => {
+      const clamped = Math.max(0, Math.min(pos, DOC.length))
+      for (let n = 1; n <= DOC_LINES.length; n++) {
+        const from = lineFrom(n)
+        const to = from + DOC_LINES[n - 1]!.length
+        if (clamped <= to) {
+          return { number: n, from, to }
+        }
+      }
+      const n = DOC_LINES.length
+      return { number: n, from: lineFrom(n), to: lineFrom(n) + DOC_LINES[n - 1]!.length }
+    },
+  }
 
   it('清空瞬间：旧命中行 ∩ 选区触界行 → 停驻行号集合', () => {
     // 命中覆盖第 2、3 行（grid 表头与分隔行）；选区触界第 3 行 → 只停驻第 3 行
@@ -213,15 +229,59 @@ describe('活跃命中集状态机（StateField）', () => {
       selection: EditorSelection.range(lineFrom(2), lineFrom(2) + 1),
       effects: setOccurrenceHitActive.of(true),
     }).state
+    // 追加经计划事务（携带 active 效果——生产链路 dispatchOccurrencePlan 同款）
     s = s.update({
       selection: EditorSelection.create([
         EditorSelection.range(lineFrom(2), lineFrom(2) + 1),
         EditorSelection.range(lineFrom(5), lineFrom(5) + 1),
       ], 1),
+      effects: setOccurrenceHitActive.of(true),
     }).state
     expect(hitsOf(s)).toEqual([
       { from: lineFrom(2), to: lineFrom(2) + 1 },
       { from: lineFrom(5), to: lineFrom(5) + 1 },
     ])
+  })
+
+  // ---- 会话结束的两事务序列（updateListener 通道）----
+  // 生产时序：事务 1 = 外部选区变化/编辑（点击、Esc 收敛、键入——此刻
+  // 会话仍在场），updateListener 随后 dispatch 事务 2（active=false）。
+  // 终态选区不得经事务 1 污染命中集（否则其所在行被误种停驻——违反
+  // 「编辑选区触界不引发显形」硬边界）。
+
+  it('会话中点击别处结束：点击目标不进命中集、不种停驻（硬边界）', () => {
+    let s = state0().update({
+      selection: EditorSelection.range(lineFrom(2), lineFrom(2) + 2),
+      effects: setOccurrenceHitActive.of(true),
+    }).state
+    // 点击第 5 行（外部选区事务，无效果——会话将随后结束）
+    s = s.update({ selection: EditorSelection.single(lineFrom(5) + 1) }).state
+    // 冻结：终态选区不并入命中集（保持会话选区）
+    expect(hitsOf(s)).toEqual([{ from: lineFrom(2), to: lineFrom(2) + 2 }])
+    s = s.update({ effects: setOccurrenceHitActive.of(false) }).state
+    expect(hitsOf(s)).toEqual([])
+    expect(stickyOf(s)).toEqual([])
+  })
+
+  it('会话结束时光标收敛在会话选区行上：停驻保持（Esc 收敛先例）', () => {
+    let s = state0().update({
+      selection: EditorSelection.create([EditorSelection.range(lineFrom(3), lineFrom(3) + 3)], 0),
+      effects: setOccurrenceHitActive.of(true),
+    }).state
+    // Esc 收敛：外部选区事务把多选区收敛为空光标（仍在第 3 行内）
+    s = s.update({ selection: EditorSelection.single(lineFrom(3) + 1) }).state
+    s = s.update({ effects: setOccurrenceHitActive.of(false) }).state
+    expect(stickyOf(s)).toEqual([3])
+  })
+
+  it('会话中编辑结束：过期选区坐标不种停驻（occStale）', () => {
+    let s = state0().update({
+      selection: EditorSelection.range(lineFrom(3), lineFrom(3) + 2),
+      effects: setOccurrenceHitActive.of(true),
+    }).state
+    // 编辑（外部 docChanged）：会话选区坐标已漂移（会话将随后结束）
+    s = s.update({ changes: { from: lineFrom(1), insert: 'z' } }).state
+    s = s.update({ effects: setOccurrenceHitActive.of(false) }).state
+    expect(stickyOf(s)).toEqual([])
   })
 })

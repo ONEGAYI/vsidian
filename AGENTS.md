@@ -112,6 +112,7 @@ vsidian/
 │   │   ├── 2026-09-table-cell-editing.md              # 表格单元格编辑性能实测（#12）
 │   │   ├── 2026-09-title-decoration-viewport.md       # 标题切片视口渲染实测数据
 │   │   ├── 2026-09-vault-index-storage.md             # 索引存储选型三档基准解读（#195）
+│   │   ├── 2026-10-hit-reveal-budget.md               # 命中显形重建预算实测（#251）
 │   │   └── data/                                      # 性能探针原始报告数据
 │   │       ├── browser-test-runner.json               # 浏览器调度实测数据
 │   │       ├── hover-embed-perf-host.json             # #225 真宿主编辑阻塞实测数据
