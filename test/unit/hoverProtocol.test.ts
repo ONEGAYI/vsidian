@@ -361,3 +361,18 @@ describe('view.state readingEmbed 探针：host 字段入校验器', () => {
     expect(isWebviewToHost(stateWithEmbed({ host: 42 }))).toBe(false)
   })
 })
+
+it('#242 来源租约字段兼容旧协议，非法token与retainSource整体拒绝', () => {
+  expect(isWebviewToHost({ ...validRequest(), retainSource: true })).toBe(true)
+  expect(isWebviewToHost({ ...validRequest(), retainSource: 'true' })).toBe(false)
+  expect(isHostToWebview({ ...validResultOk(), sourceLeaseId: 'lease-1' })).toBe(true)
+  expect(isHostToWebview({ ...validResultOk(), sourceLeaseId: '' })).toBe(false)
+  const release = { kind: 'hover.source.release', sessionId: 'panel', docUri: 'file:///a.md', sourceLeaseId: 'lease-1' }
+  expect(isWebviewToHost(release)).toBe(true)
+  expect(isWebviewToHost({ ...release, sourceLeaseId: null })).toBe(false)
+  expect(isWebviewToHost({ ...release, sourceLeaseId: '' })).toBe(false)
+  const watch = { kind: 'hover.watch', sessionId: 'panel', docUri: 'file:///a.md', instanceId: 'occ', fsPath: 'D:/notes/b.md' }
+  expect(isWebviewToHost(watch)).toBe(true)
+  expect(isWebviewToHost({ ...watch, sourceLeaseId: 'lease-1' })).toBe(true)
+  expect(isWebviewToHost({ ...watch, sourceLeaseId: {} })).toBe(false)
+})

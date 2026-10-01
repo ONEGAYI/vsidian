@@ -397,3 +397,53 @@ describe('convertTaskItems：任务项 checkbox（#9：启用可交互）', () =
     expect(src.slice(s, s + 3)).toBe('[x]')
   })
 })
+
+describe('#248 表格格内嵌入占位（转义管道解码重解析）', () => {
+  it('格内 \\| 别名形态产占位：data-vsidian-embed-inner 为解码语义（B|别名）', () => {
+    const md = createMarkdownRenderer()
+    const src = '| a | ![[B\\|别名]] |\n| --- | --- |\n| c | d |'
+    const host = renderToDom(md, src)
+    const slot = host.querySelector('span[data-vsidian-embed-inner]')
+    expect(slot).not.toBeNull()
+    expect(slot!.getAttribute('data-vsidian-embed-inner')).toBe('B|别名')
+  })
+
+  it('格内无管道形态照常产占位（回归）', () => {
+    const md = createMarkdownRenderer()
+    const src = '| ![[甲]] | b |\n| --- | --- |\n| c | d |'
+    const host = renderToDom(md, src)
+    expect(host.querySelector('span[data-vsidian-embed-inner]')!.getAttribute('data-vsidian-embed-inner')).toBe('甲')
+  })
+
+  it('格内锚点 + 转义别名组合形态产占位', () => {
+    const md = createMarkdownRenderer()
+    const src = '| ![[B#标题\\|别名]] | b |\n| --- | --- |\n| c | d |'
+    const host = renderToDom(md, src)
+    expect(host.querySelector('span[data-vsidian-embed-inner]')!.getAttribute('data-vsidian-embed-inner')).toBe('B#标题|别名')
+  })
+
+  it('格内行内代码中的嵌入字面量不产占位；code span 渲染按既有 tokenizer 语义（\\| 已解码为 |）', () => {
+    const md = createMarkdownRenderer()
+    const src = '| `![[B]]` | `a\\|b` |\n| --- | --- |\n| c | d |'
+    const host = renderToDom(md, src)
+    expect(host.querySelector('span[data-vsidian-embed-inner]')).toBeNull()
+    // markdown-it 表格 tokenizer 切格时无差别解码 \\|（不感知 code span），
+    // code span 内容按渲染文字呈现 `a|b`——既有行为，本票不改变
+    expect(host.textContent).toContain('a|b')
+  })
+
+  it('格内多引用按源顺序产占位（混排 + 转义别名并存）', () => {
+    const md = createMarkdownRenderer()
+    const src = '| 一 ![[甲]] 二 ![[乙\\|e]] |\n| --- |\n| c |'
+    const host = renderToDom(md, src)
+    const slots = host.querySelectorAll('span[data-vsidian-embed-inner]')
+    expect(Array.from(slots).map((s) => s.getAttribute('data-vsidian-embed-inner'))).toEqual(['甲', '乙|e'])
+  })
+
+  it('跨格伪形态不产占位（开闭标记跨 cell 边界）', () => {
+    const md = createMarkdownRenderer()
+    const src = '| a ![[x | y]] b |\n| --- | --- |\n| c | d |'
+    const host = renderToDom(md, src)
+    expect(host.querySelector('span[data-vsidian-embed-inner]')).toBeNull()
+  })
+})

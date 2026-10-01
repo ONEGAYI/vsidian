@@ -79,6 +79,10 @@ import {
   READABLE_LINE_WIDTH_MIN,
   EMBED_MAX_HEIGHT_DEFAULT,
   EMBED_MAX_HEIGHT_KEY,
+  EMBED_MAX_DEPTH_KEY,
+  EMBED_MAX_DEPTH_DEFAULT,
+  EMBED_MAX_DEPTH_MIN,
+  EMBED_MAX_DEPTH_MAX,
   EMBED_MAX_HEIGHT_MAX,
   EMBED_MAX_HEIGHT_MIN,
   HOVER_LIVE_DIRECT_KEY,
@@ -168,6 +172,7 @@ import {
   notifyHoverImageInvalidate,
   notifyHoverImageResult,
   notifyHoverResult,
+  notifyHoverWatchRejected,
   openHoverPopupForKeyboard,
   setHoverPreviewContext,
   type HoverPopupTargetSpec,
@@ -1242,6 +1247,13 @@ export class WebviewSyncController {
       session: () => ({ sessionId: this.sessionId, docUri: this.docUri }),
       send: (message) => this.bridge.postMessage(message),
       codeHighlight: () => this.codeCardConfig.highlight,
+      mountEmbedChild: (parentInstanceId, block, target) =>
+        this.embedCards?.mountPopupChild(parentInstanceId, block, target),
+      unmountEmbedChild: (block) => this.embedCards?.unmountBlock(block),
+      admitRootContent: (instanceId, target, bytes) =>
+        this.embedCards?.admitPopupRoot(instanceId, target, bytes) ?? false,
+      clearRootContent: (instanceId) => this.embedCards?.clearPopupRoot(instanceId),
+      releaseRootContent: (instanceId) => this.embedCards?.releasePopupRoot(instanceId),
     })
     // #222 嵌入卡片管理器：会话身份 + 只读消息通道 + 高亮/限高投影
     //（dispose 随控制器释放；与 hoverPopup 上下文同源装配）。#223 起
@@ -1252,7 +1264,11 @@ export class WebviewSyncController {
       send: (message) => this.bridge.postMessage(message),
       codeHighlight: () => this.codeCardConfig.highlight,
       maxHeightPx: () => this.embedMaxHeightPx(),
+      maxDepth: () => this.embedMaxDepth(),
       requestMeasure: () => this.view?.requestMeasure(),
+      // #246 混排占位提升的父文档全文（主文档 Reading 块挂载路径；与
+      // readingView.setDocument 同源——CM6 文档即权威文本，LF 坐标一致）
+      sourceText: () => this.view?.state.doc.toString() ?? null,
     })
     // #223 Live 嵌入 widget 接线（liveEmbed 装饰的 widget 经此挂载共用卡片）
     setLiveEmbedCards(this.embedCards)
@@ -1783,6 +1799,7 @@ export class WebviewSyncController {
         this.applyMulticursorSetting()
         this.applyReadableLineWidthSetting()
         this.applyEmbedMaxHeightSetting()
+        this.embedCards?.setMaxDepth(this.embedMaxDepth())
         this.applyWordSegmentEngineSetting()
         break
       case 'wordSegment.state': {
@@ -1954,10 +1971,13 @@ export class WebviewSyncController {
       case 'hover.result': {
         // #218 悬停预览结果：转发浮层模块（instanceId + reqId 双守卫在
         // 模块内——迟到/陈旧回包丢弃，不重开已关闭浮层）。#222 起嵌入
-        // 卡片同消息通道（instanceId 前缀 embed- 分流，双投递安全——
-        // 各自实例守卫丢弃不匹配回包）
-        notifyHoverResult(message)
-        this.embedCards?.notifyResult(message)
+        // 卡片同消息通道。消费者回报是否消费；两者均未命中才释放来源
+        // 租约，避免未命中的浮层提前释放仍应交给卡片的成功回包。
+        const consumed = notifyHoverResult(message) || this.embedCards?.notifyResult(message)
+        if (!consumed && message.ok && message.sourceLeaseId !== undefined && this.sessionId && this.docUri) {
+          this.bridge.postMessage({ kind: 'hover.source.release', sessionId: this.sessionId, docUri: this.docUri,
+            sourceLeaseId: message.sourceLeaseId })
+        }
         break
       }
       case 'hover.invalidated': {
@@ -1966,6 +1986,11 @@ export class WebviewSyncController {
         // 匹配（watchedFsPath / entry.loaded.fsPath），未订阅目标零动作
         notifyHoverInvalidated(message)
         this.embedCards?.notifyInvalidated(message)
+        break
+      }
+      case 'hover.watch.rejected': {
+        notifyHoverWatchRejected(message)
+        this.embedCards?.notifyWatchRejected(message)
         break
       }
       case 'hover.test.pointer': {
@@ -8860,6 +8885,13 @@ export class WebviewSyncController {
       : EMBED_MAX_HEIGHT_DEFAULT
   }
 
+  private embedMaxDepth(): number {
+    const raw = this.settings?.[EMBED_MAX_DEPTH_KEY]
+    return typeof raw === 'number' && Number.isInteger(raw) &&
+      raw >= EMBED_MAX_DEPTH_MIN && raw <= EMBED_MAX_DEPTH_MAX
+      ? raw : EMBED_MAX_DEPTH_DEFAULT
+  }
+
   /** frontmatter 阅读块折叠装饰（挂载钩子与切换重装饰共用入口） */
   private decorateReadingFrontmatterBlock(block: HTMLElement): void {
     decorateReadingFrontmatterCard(block, {
@@ -10268,9 +10300,10 @@ export class WebviewSyncController {
       // #60 Mermaid：围栏表 + 跨行块 replace 装饰（光标进入围栏显源码、
       // 离开恢复渲染图；渲染容器与阅读侧共用 mermaidRender 管线）
       liveMermaid,
-      // #223 Live 正文嵌入：嵌入表 + 双形态装饰（隐形态整行替换卡片 /
-      // 显形态源文可见 + 行下方卡片；光标/选区触及源码区间显形，离开
-      // 隐藏）。纯装饰 StateField 无键位语义；卡片内容经 embedCards
+      // #223/#247 Live 正文嵌入：嵌入表 + 双形态装饰（隐形态只替换嵌入
+      // 精确区间 [from, to] 呈卡片——#247 起不再整行替换，前后文与父结构
+      // 保留 / 显形态源文可见 + 行下方卡片；光标/选区触及源码区间显形，
+      // 离开隐藏）。纯装饰 StateField 无键位语义；卡片内容经 embedCards
       // （EmbedCardManager）与 Reading 侧同状态库装载
       liveEmbed,
       // #163 验收反馈：块 id 标记淡化（行尾 ` ^id` 与独立行 `^id` 双形态

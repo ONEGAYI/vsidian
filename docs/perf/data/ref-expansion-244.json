@@ -1,0 +1,102 @@
+{
+  "sample": {
+    "source": "A→B→C→D→E",
+    "bChars": 401,
+    "cChars": 401,
+    "dChars": 11,
+    "budgetUnit": "estimated UTF-16 bytes plus 128 bytes per block"
+  },
+  "active": {
+    "budget": {
+      "panelInstances": 3,
+      "panelBytes": 15616,
+      "treeBytes": {
+        "0::B": 15616
+      },
+      "inFlight": 0
+    },
+    "cache": {
+      "parses": 3,
+      "hits": 1,
+      "entries": 3,
+      "blocks": 50,
+      "bytes": 10554,
+      "evictions": 0,
+      "oversizeSkips": 0
+    },
+    "lifecycle": {
+      "mounts": 50,
+      "releases": 0,
+      "activeBlocks": 50
+    },
+    "visibleCards": 4
+  },
+  "reduced": {
+    "budget": {
+      "panelInstances": 1,
+      "panelBytes": 10124,
+      "treeBytes": {
+        "0::B": 10124
+      },
+      "inFlight": 0
+    },
+    "cache": {
+      "parses": 3,
+      "hits": 1,
+      "entries": 3,
+      "blocks": 50,
+      "bytes": 10554,
+      "evictions": 0,
+      "oversizeSkips": 0
+    },
+    "lifecycle": {
+      "mounts": 50,
+      "releases": 26,
+      "activeBlocks": 24
+    },
+    "visibleCards": 2
+  },
+  "disposed": {
+    "budget": {
+      "panelInstances": 0,
+      "panelBytes": 0,
+      "treeBytes": {},
+      "inFlight": 0
+    },
+    "cache": {
+      "parses": 3,
+      "hits": 1,
+      "entries": 3,
+      "blocks": 50,
+      "bytes": 10554,
+      "evictions": 0,
+      "oversizeSkips": 0
+    },
+    "lifecycle": {
+      "mounts": 50,
+      "releases": 50,
+      "activeBlocks": 0
+    }
+  },
+  "oversize": {
+    "inputChars": 614400,
+    "elapsedMs": 19,
+    "budget": {
+      "panelInstances": 0,
+      "panelBytes": 0,
+      "treeBytes": {},
+      "inFlight": 0
+    },
+    "cache": {
+      "parses": 2,
+      "hits": 0,
+      "entries": 0,
+      "blocks": 0,
+      "bytes": 0,
+      "evictions": 0,
+      "oversizeSkips": 2
+    },
+    "watchCount": 0,
+    "state": "budget"
+  }
+}

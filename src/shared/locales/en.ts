@@ -95,6 +95,8 @@ export const en = {
   /** #222 embed card height cap (reading-view embeds scroll internally past it) */
   'setting.embedMaxHeight.title': 'Embedded note max height',
   'setting.embedMaxHeight.description': 'Maximum height of the reading-view embed card content area: shorter notes keep their natural height while longer content scrolls inside the card up to this limit.',
+  'setting.embedMaxDepth.title': 'Embedded note depth',
+  'setting.embedMaxDepth.description': 'Automatically expand references inside embedded notes. The source note is depth 0; 1 shows only direct embeds, and 3 also shows the next two levels.',
   /** #221 Live hover trigger (Ctrl+hover vs direct hover) */
   'setting.hoverLiveDirect.title': 'Hover links directly in live preview',
   'setting.hoverLiveDirect.description': 'Open the hover preview by just pointing at a link in the live preview. When off, hold Ctrl (Cmd on macOS) while hovering; the reading view and the link panels always preview directly.',
@@ -414,6 +416,11 @@ export const en = {
   'hover.errorNonMarkdown': '{target} is not a Markdown note: preview supports Markdown documents only in this phase',
   'hover.errorReadFailed': 'Failed to read the target document',
   'hover.errorAnchorMissing': 'Anchor not found in the target note: {target}#{anchor} (the full document is not shown instead)',
+  'hover.errorWatchCapacity': 'Too many referenced notes are open. Close another preview or card, then reopen this one.',
+  'hover.errorSourceExpired': 'The source note changed or closed. Reopen this reference to refresh it.',
+  'hover.errorCycle': 'This note is already in the current reference path.',
+  'hover.errorDepth': 'The reference depth limit has been reached.',
+  'hover.errorBudget': 'The reference tree has reached its resource limit.',
   /** #220 referenced Reading content: accessibility labels of the expand/
    *  collapse button of the note-properties section inside the hover popup
    *  (aria-label and title share the word; the button is the only operable

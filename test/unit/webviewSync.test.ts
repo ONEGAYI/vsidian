@@ -5,11 +5,12 @@
 // - 外部 doc.changed → 单事务应用且不再回发 edit.request（防回环）
 // - edit.ack ok 推进 baseVersion；fail 附全文时重置文档
 // - seq 经 bridge.setState 持久化，webview 重载后继续编号（宿主按 seq 去重）
-import { afterEach, describe, it, expect } from 'vitest'
+import { afterEach, describe, it, expect, vi } from 'vitest'
 import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/syncController'
 import { __resetMermaidRenderStateForTest, mermaidDarkTheme } from '../../src/webview/mermaidRender'
 import { DocumentSession, type HostDocumentPort } from '../../src/host/documentSession'
 import type { HostToWebview, SerChange, WebviewToHost } from '../../src/shared/protocol'
+import { closeHoverPopup, hoverPopupProbe, openHoverPopupForKeyboard } from '../../src/webview/hoverPopup'
 
 const DOC_URI = 'file:///d%3A/notes/a.md'
 
@@ -958,4 +959,196 @@ describe('宿主明暗主题初始装配（#110）', () => {
     }
     expect(mermaidDarkTheme()).toBe(false)
   })
+})
+
+// #242 来源租约经过生产分派链：未命中的消费者不得提前释放其他容器的回包。
+it('#242 源租约先交到实际容器；双方均未命中的迟到回包只释放一次', () => {
+  const { bridge, sent } = makeBridge()
+  const c = mount(bridge)
+  init(c, '![[B]]\n\n正文\n')
+  c.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
+  const req = sent.find((m): m is Extract<WebviewToHost, { kind: 'hover.request' }> => m.kind === 'hover.request')!
+  expect(req.retainSource).toBe(true)
+  const result: HostToWebview = { kind: 'hover.result', instanceId: req.instanceId, reqId: req.reqId,
+    ok: true, sourceLeaseId: 'embed-lease', target: { fsPath: 'D:/notes/b.md', relPath: 'b.md' },
+    version: 1, text: '# B\n', range: { start: 0, end: 4 }, scope: { kind: 'full' } }
+  c.handleHostMessage(result)
+  const transfer = sent.filter((m) => (m.kind === 'hover.watch' || m.kind === 'hover.source.release') && m.sourceLeaseId === 'embed-lease')
+  expect(transfer[0]?.kind).toBe('hover.watch')
+  c.handleHostMessage({ kind: 'hover.invalidated', fsPath: 'D:/notes/b.md', status: 'changed', generation: 1 })
+  const refreshReq = [...sent].reverse().find((m): m is Extract<WebviewToHost, { kind: 'hover.request' }> => m.kind === 'hover.request')!
+  c.handleHostMessage({ ...result, reqId: refreshReq.reqId, instanceId: refreshReq.instanceId,
+    version: 2, sourceLeaseId: 'same-target-refresh' })
+  const refreshed = sent.filter((m) => (m.kind === 'hover.watch' || m.kind === 'hover.source.release') && m.sourceLeaseId === 'same-target-refresh')
+  // #244 同 fsPath 的新版本须续交来源关系，后续子引用才可验证新的 B 快照。
+  expect(refreshed.map((m) => m.kind)).toEqual(['hover.watch'])
+  const anchor = document.createElement('a')
+  document.body.appendChild(anchor)
+  openHoverPopupForKeyboard(anchor, { target: 'B', sourceStart: 0, sourceEnd: 1 })
+  const hoverReq = sent.find((m): m is Extract<WebviewToHost, { kind: 'hover.request' }> =>
+    m.kind === 'hover.request' && m.instanceId.startsWith('hover-'))!
+  expect(hoverReq.retainSource).toBe(true)
+  const hoverResult = { ...result, instanceId: hoverReq.instanceId, reqId: hoverReq.reqId, sourceLeaseId: 'hover-lease' }
+  c.handleHostMessage(hoverResult)
+  const hoverTransfer = sent.filter((m) => (m.kind === 'hover.watch' || m.kind === 'hover.source.release') && m.sourceLeaseId === 'hover-lease')
+  expect(hoverTransfer[0]?.kind).toBe('hover.watch')
+  closeHoverPopup()
+  const before = sent.length
+  c.handleHostMessage({ ...result, reqId: req.reqId + 100, sourceLeaseId: 'late-lease' })
+  expect(sent.slice(before).filter((m) => m.kind === 'hover.source.release')).toEqual([
+    { kind: 'hover.source.release', sessionId: 's1', docUri: DOC_URI, sourceLeaseId: 'late-lease' },
+  ])
+  const cancelled = sent.length
+  c.handleHostMessage({ ...hoverResult, sourceLeaseId: 'closed-hover-lease' })
+  expect(sent.slice(cancelled).filter((m) => m.kind === 'hover.source.release')).toHaveLength(1)
+  anchor.remove()
+  c.dispose()
+})
+
+it('#245 悬停 B 内独占 C 递归请求沿 B 来源且仍只有一个浮窗', () => {
+  const height = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+    return this.classList.contains('vsidian-hover-popup-scroll') ? 400 : 0
+  })
+  const { bridge, sent } = makeBridge()
+  const c = mount(bridge)
+  init(c, '[[B]]\n')
+  const anchor = document.createElement('a')
+  document.body.appendChild(anchor)
+  try {
+    openHoverPopupForKeyboard(anchor, { target: 'B', sourceStart: 0, sourceEnd: 5 })
+    const root = sent.find((m): m is Extract<WebviewToHost, { kind: 'hover.request' }> =>
+      m.kind === 'hover.request' && m.target === 'B')!
+    expect(root.occurrenceId).toBe(root.instanceId)
+    c.handleHostMessage({ kind: 'hover.result', instanceId: root.instanceId, reqId: root.reqId,
+      ok: true, sourceLeaseId: 'popup-b-lease', target: { fsPath: 'D:/notes/B.md', relPath: 'B.md' },
+      version: 1, text: '![[C]]\n', range: { start: 0, end: 7 }, scope: { kind: 'full' },
+      depth: 1, expansionPath: ['A', 'B'] })
+    const child = sent.find((m): m is Extract<WebviewToHost, { kind: 'hover.request' }> =>
+      m.kind === 'hover.request' && m.target === 'C')
+    expect(child).toMatchObject({ docUri: DOC_URI, sourceStart: 0, sourceEnd: 6,
+      source: { parentInstanceId: root.occurrenceId, sourceDocUri: 'D:/notes/B.md' } })
+    const watchIndex = sent.findIndex((m) => m.kind === 'hover.watch' && m.sourceLeaseId === 'popup-b-lease')
+    const childIndex = sent.indexOf(child!)
+    expect(watchIndex).toBeGreaterThan(-1)
+    expect(watchIndex).toBeLessThan(childIndex)
+    expect(document.querySelectorAll('.vsidian-hover-popup')).toHaveLength(1)
+  } finally {
+    closeHoverPopup()
+    c.dispose()
+    anchor.remove()
+    height.mockRestore()
+  }
+})
+
+it('#245 悬停根目标解析超树预算时挂载前拒绝并释放来源租约', () => {
+  const { bridge, sent } = makeBridge()
+  const c = mount(bridge)
+  init(c, '[[Huge]]\n')
+  const anchor = document.createElement('a')
+  document.body.appendChild(anchor)
+  try {
+    openHoverPopupForKeyboard(anchor, { target: 'Huge', sourceStart: 0, sourceEnd: 8 })
+    const root = sent.find((m): m is Extract<WebviewToHost, { kind: 'hover.request' }> =>
+      m.kind === 'hover.request' && m.target === 'Huge')!
+    const huge = 'x'.repeat(600 * 1024)
+    c.handleHostMessage({ kind: 'hover.result', instanceId: root.instanceId, reqId: root.reqId,
+      ok: true, sourceLeaseId: 'huge-popup-lease',
+      target: { fsPath: 'D:/notes/Huge.md', relPath: 'Huge.md' }, version: 1,
+      text: huge, range: { start: 0, end: huge.length }, scope: { kind: 'full' }, depth: 1 })
+    expect(hoverPopupProbe()).toMatchObject({ open: true, state: 'error' })
+    expect(sent.filter((m) => m.kind === 'hover.watch' && m.fsPath === 'D:/notes/Huge.md')).toHaveLength(0)
+    expect(sent.filter((m) => m.kind === 'hover.source.release' &&
+      m.sourceLeaseId === 'huge-popup-lease')).toHaveLength(1)
+  } finally {
+    closeHoverPopup()
+    c.dispose()
+    anchor.remove()
+  }
+})
+
+it('#245 悬停 B→C→D 递归并在关闭时退订整树，迟到叶回包只释放一次', () => {
+  const height = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+    return this.classList.contains('vsidian-hover-popup-scroll') ||
+      this.classList.contains('vsidian-embed-card-scroll') ? 400 : 0
+  })
+  const { bridge, sent } = makeBridge()
+  const c = mount(bridge)
+  init(c, '[[B]]\n')
+  const anchor = document.createElement('a')
+  document.body.appendChild(anchor)
+  try {
+    openHoverPopupForKeyboard(anchor, { target: 'B', sourceStart: 0, sourceEnd: 5 })
+    const request = (target: string) => sent.find((m): m is Extract<WebviewToHost, { kind: 'hover.request' }> =>
+      m.kind === 'hover.request' && m.target === target)!
+    const respond = (target: string, text: string, depth: number) => {
+      const req = request(target)
+      c.handleHostMessage({ kind: 'hover.result', instanceId: req.instanceId, reqId: req.reqId,
+        ok: true, sourceLeaseId: `lease-${target}`,
+        target: { fsPath: `D:/notes/${target}.md`, relPath: `${target}.md` },
+        version: 1, text, range: { start: 0, end: text.length }, scope: { kind: 'full' }, depth })
+    }
+    respond('B', '![[C]]\n', 1)
+    expect(request('C').source).toEqual({ parentInstanceId: request('B').occurrenceId,
+      sourceDocUri: 'D:/notes/B.md' })
+    respond('C', '![[D]]\n', 2)
+    expect(request('D').source).toEqual({ parentInstanceId: request('C').occurrenceId,
+      sourceDocUri: 'D:/notes/C.md' })
+    respond('D', '![[E]]\n', 3)
+    expect(sent.some((m) => m.kind === 'hover.request' && m.target === 'E')).toBe(false)
+    expect(document.querySelectorAll('.vsidian-hover-popup')).toHaveLength(1)
+    expect(document.querySelectorAll('.vsidian-embed-card')).toHaveLength(3)
+    closeHoverPopup()
+    expect(document.querySelectorAll('.vsidian-hover-popup, .vsidian-embed-card')).toHaveLength(0)
+    expect(sent.filter((m) => m.kind === 'hover.unwatch').map((m) => m.fsPath).sort())
+      .toEqual(['D:/notes/B.md', 'D:/notes/C.md', 'D:/notes/D.md'])
+    const beforeLate = sent.length
+    const stale = request('D')
+    c.handleHostMessage({ kind: 'hover.result', instanceId: stale.instanceId, reqId: stale.reqId,
+      ok: true, sourceLeaseId: 'late-d', target: { fsPath: 'D:/notes/D.md', relPath: 'D.md' },
+      version: 2, text: '# Late', range: { start: 0, end: 6 }, scope: { kind: 'full' } })
+    expect(sent.slice(beforeLate).filter((m) => m.kind === 'hover.source.release' &&
+      m.sourceLeaseId === 'late-d')).toHaveLength(1)
+    expect(document.querySelectorAll('.vsidian-hover-popup')).toHaveLength(0)
+  } finally {
+    closeHoverPopup()
+    c.dispose()
+    anchor.remove()
+    height.mockRestore()
+  }
+})
+
+it.each(['heading', 'block'] as const)('#245 悬停 B 的 %s 范围只挂范围内 C，仍带全文来源坐标', (scope) => {
+  const height = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+    return this.classList.contains('vsidian-hover-popup-scroll') ? 400 : 0
+  })
+  const { bridge, sent } = makeBridge()
+  const c = mount(bridge)
+  init(c, '[[B]]\n')
+  const anchor = document.createElement('a')
+  document.body.appendChild(anchor)
+  try {
+    openHoverPopupForKeyboard(anchor, { target: 'B', sourceStart: 0, sourceEnd: 5 })
+    const root = sent.find((m): m is Extract<WebviewToHost, { kind: 'hover.request' }> =>
+      m.kind === 'hover.request' && m.target === 'B')!
+    const text = '# One\n\n![[C]]\n\n# Two\n\n![[D]]\n'
+    const start = text.indexOf('![[C]]')
+    c.handleHostMessage({ kind: 'hover.result', instanceId: root.instanceId, reqId: root.reqId,
+      ok: true, sourceLeaseId: `scope-${scope}`,
+      target: { fsPath: 'D:/notes/B.md', relPath: 'B.md' },
+      version: 1, text, range: scope === 'heading'
+        ? { start: 0, end: text.indexOf('# Two') }
+        : { start, end: start + 6 },
+      scope: scope === 'heading' ? { kind: 'heading', anchor: 'One' }
+        : { kind: 'block', anchor: 'one-block' }, depth: 1 })
+    const children = sent.filter((m): m is Extract<WebviewToHost, { kind: 'hover.request' }> =>
+      m.kind === 'hover.request' && m.target !== 'B')
+    expect(children.map((m) => m.target)).toEqual(['C'])
+    expect(children[0]).toMatchObject({ sourceStart: start, sourceEnd: start + 6,
+      source: { parentInstanceId: root.occurrenceId, sourceDocUri: 'D:/notes/B.md' } })
+  } finally {
+    closeHoverPopup()
+    c.dispose()
+    anchor.remove()
+    height.mockRestore()
+  }
 })

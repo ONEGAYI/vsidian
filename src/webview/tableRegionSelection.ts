@@ -83,8 +83,16 @@ export function createTableRegionPointer(tableRowsAt: (view: EditorView, pos: nu
       this.view.dispatch({ selection: EditorSelection.single(cell.contentFrom), effects: setTableRegion.of(region) })
     }
 
-    private hit(event: MouseEvent) {
+    /** 格命中：DOM 可见坐标 → 格坐标。excludeCardDomain 为 true 时命中点
+     *  落在嵌入卡片域内不算格命中（#248 交互隔离：onDown 起点锚定用——
+     *  卡内选字/复制不启动父矩形格区选取）；onMove 的路径命中不排除
+     *  （从格/把手开始的拖选经过卡片时仍按所在格扩展）。 */
+    private hit(event: MouseEvent, excludeCardDomain = false) {
       const target = document.elementFromPoint(event.clientX, event.clientY) ?? event.target as Element
+      if (excludeCardDomain && target instanceof Element &&
+          (target.closest('.vsidian-embed-card') !== null || target.closest('.vsidian-live-embed') !== null)) {
+        return null
+      }
       const cell = target instanceof Element ? target.closest<HTMLElement>('.vsidian-table-grid-cell') : null
       const row = cell?.closest<HTMLElement>('.vsidian-table-grid-row')
       if (!cell || !row || !this.view.contentDOM.contains(row)) return null
@@ -108,7 +116,8 @@ export function createTableRegionPointer(tableRowsAt: (view: EditorView, pos: nu
 
     private readonly onDown = (event: PointerEvent): void => {
       if (event.button !== 0 || this.view.compositionStarted) return
-      this.anchor = this.hit(event)
+      // #248：起点锚定排除嵌入卡域（卡内 pointerdown 不启动格区选取）
+      this.anchor = this.hit(event, true)
       if (this.view.state.field(tableRegionField)) selectTableRegion(this.view, null)
     }
 

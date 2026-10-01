@@ -37,6 +37,13 @@
 - **装饰层**：`tableGridPlan` 旁新增共享列宽计划；行装饰从内联 `--vsidian-table-columns` 迁移为内联 `grid-template-columns`（已实施形态：逐行内联相同计划）。**等分规则不退场，降为 CSS 缺省回退**——无列宽计划（计划缺失的行）时由等分 `repeat(var(--vsidian-table-columns), minmax(0,1fr))` 兜底；契约钉住等分不再是列宽的唯一来源。
 - **CSS 契约**：更新契约测试钉住新机制，防等分规则回潮为唯一来源。
 
+## #248 格内嵌入兼容边界（2026-10-01 落档）
+
+表格单元格内的 `![[…]]` 嵌入卡片（#248，规格见 [hover-preview-embed.md](hover-preview-embed.md)）与列宽机制的职责分界：
+
+- **列宽计划不受格内卡影响**：格内卡是网格格 mark span 内部的挂载（CM6 inline replace widget 不切开 mark），含卡格仍是单 grid item——采样、分配与重算时机（计算契约 1–3）不变；卡被限高滚动约束在格盒内（`max-width:100%` + 卡壳 overflow:hidden + 内层横向滚动），不因内层最小宽度（长文件名/长代码块）撑破列宽或挤掉邻格（浏览器 tableEmbed 场景断言卡不越格）。
+- **格内宿主的内边距收窄**：格内 `vsidian-live-embed` 宿主 padding 收紧为 `3px 0`（行级宿主的 `7px 0` 是行语义间距，格内由格自身 padding 承担）——CSS 契约由 `embedCardCssContract` 钉住，列宽计算不感知该 padding（采样按字符宽度，不含卡）。
+
 ## 验证与完成条件
 
 - **测试**：列宽纯函数单测（占比分配、最小下限、极端列、总和恒等、跨行一致）；表格输入 / 光标行为变更，合并前必跑 `npm run test:browser`。

@@ -1,29 +1,35 @@
-// 父文档 Live 正文嵌入装饰（工单 #223，ADR-0009「展示容器」层的 Live 侧）：
-// 独占正文一行的 `![[…]]`（soleEmbedOfLine 识别——与 Reading 侧 #222 同一
-// 挂载适配语义：混排/列表/引用/表格格保留源文，1.5 期接入）在 Live 视图
-// 以 CM6 装饰挂载共用 Reading 嵌入卡片（EmbedCardManager 装配，容器无关）。
+// 父文档 Live 正文嵌入装饰（工单 #223/#247，ADR-0009「展示容器」层的
+// Live 侧）：正文任意容器（段落混排/无序/有序/任务列表/懒续行/引用及组
+// 合）内的 `![[…]]` occurrence（#246 的 scanEmbedsInLine 识别——两视图
+// 同源）在 Live 视图以 CM6 装饰挂载共用 Reading 嵌入卡片（EmbedCardManager
+// 装配，容器无关）。
 //
-// 装饰双形态（光标驱动源码显隐，规格「正文嵌入与源码显隐」节；验收反馈
-// 后隐形态的呈现由 CSS 块级化承担）：
-// - 隐形态（光标/选区未触及源码区间）：整行 [lineFrom, lineTo] inline
-//   replace widget——源文文本视觉退场；「卡片从源码行对齐、不留隐形源码
-//   行」由 CSS 承担（宿主 display:block + 隐藏 replace 前后的
-//   cm-widgetBuffer），保持 inline replace 是为了键盘垂直导航可进入嵌入
-//   行（块级 replace 会被 CM6 跳过整行，实测 ArrowUp 落点越过区间）。
+// 装饰双形态（光标驱动源码显隐，规格「正文嵌入与源码显隐」节）：
+// - 隐形态（光标/选区未触及源码区间）：**只替换嵌入精确区间 [from, to]**
+//   （`![[…]]` 本身，#247 起不再整行替换）——前后文字、列表标记/编号、
+//   任务控件、引用前缀与既有缩进保留在行内，宿主为块级 div（CSS 承担
+//   「前文 → 块级卡片 → 后文」的流断行呈现，与 Reading 混排拆段同观感）；
+//   保持 inline replace 是为了键盘垂直导航可进入嵌入行（块级 replace 会被
+//   CM6 跳过整行，实测 ArrowUp 落点越过区间）。实际源文不插入换行。
 // - 显形态（触及区间，selectionTouchesRange 语义：折叠光标命中内部或
 //   两端、非空选区严格重叠、任一 range 命中）：替换撤下、源文可见可编辑，
-//   卡片移至行下方 block widget 继续显示（动态下移一行给源码让位）——
-//   显隐只作用于源文的视觉呈现，不是撤卡片（与 liveMermaid 显源时撤图
-//   的取舍不同，按规格共识保留内容）。
+//   卡片移至行下方 block widget 继续显示——显隐只作用于源文的视觉呈现，
+//   不是撤卡片；**不扩大到相邻文字/整行**，兄弟卡片独立显隐。
 //
-// 分层契约（#222 衔接）：
-// - 表构建层不排除代码区域：嵌入表是「候选嵌入行」（行局部扫描 + 增量
-//   重建，无跨行状态）；围栏/frontmatter 排除在**发射层**做（消费
-//   mermaidFencesField 的全语言围栏表与文末开放围栏锚、liveDecorationsField
-//   的 fm 区间）——围栏编辑（含上方开栏）即时联动，无需差集窗口。
-// - 实例身份与 Reading 侧同源：entry key = 嵌入行行首 offset + 目标原文
-//   （EmbedCardManager 状态库语义键）——模式切换（Live↔Reading）时同一
-//   嵌入共享 fm 展开与滚动状态；卡片 DOM/装载由 EmbedCardManager 承担
+// 分层契约（#222/#246 衔接）：
+// - 表构建层不排除代码区域：嵌入表是「候选嵌入 occurrence」（行局部扫描 +
+//   增量重建，无跨行状态）；围栏/frontmatter/代码/行内代码/注释/表格/
+//   链接文字域排除在**发射层**做（消费 mermaidFencesField 的全语言围栏表
+//   与文末开放围栏锚、liveDecorationsField 的 fm 区间与 lezer 语法树、
+//   wikilink.linkLabelRangesInLine 的行内链接域形态学）——与 #246
+//   embedSlots.OCCURRENCE_EXCLUDED、refExpansion.validChildSource 同源
+//   边界（表格 #248 前排除、链接域与 Reading 呈现对齐不升级）。
+// - 实例身份与 Reading 侧同源：entry key = 宿主区间起点 + 目标原文
+//   （EmbedCardManager 状态库语义键）——**独占行嵌入取行首..行尾**
+//   （Reading 独占行 embed 块的 data-vsidian-src-start/end 同口径），
+//   **混排/容器 occurrence 取嵌入精确区间**（Reading #246 混排提升宿主
+//   的 occ.start/end 同口径）——模式切换（Live↔Reading）时同一嵌入共享
+//   fm 展开与滚动状态；卡片 DOM/装载由 EmbedCardManager 承担
 //   （hover.request/result 通道复用），本模块只做 CM6 挂载与显隐。
 // - widget 吞事件（ignoreEvent=true）：卡片点击不落父编辑器光标（CM6
 //   onSelectionChange 对 ignoreEvent widget 内的选区变化直接忽略——内部
@@ -37,8 +43,11 @@ import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemir
 import { selectionTouchesRange } from './liveDecorations'
 import { liveDecorationsField } from './liveDecorations'
 import { mermaidFencesField } from './liveMermaid'
+import { chainAt } from './markdownDoc'
+import { scanEmbedsInTableRow } from './tableCellEmbed'
+import type { Tree } from '@lezer/common'
 import type { FenceSpan } from '../shared/mermaid'
-import { soleEmbedOfLine } from '../shared/wikilink'
+import { linkLabelRangesInLine, scanEmbedsInLine, soleEmbedOfLine } from '../shared/wikilink'
 import type { EmbedCardManager } from './embedCard'
 
 /** #223 Live 嵌入宿主稳定类名（样式契约 content 域 live-embed-widget 条目同源） */
@@ -49,13 +58,15 @@ export const LIVE_EMBED_CLASS_NAMES = {
   below: 'vsidian-live-embed-below',
 } as const
 
-/** 装饰实例缓存上限（键 = 形态 + 行区间 + 目标原文；与卡片渲染缓存同量级） */
+/** 装饰实例缓存上限（键 = 形态 + 行区间 + 宿主区间 + 目标原文；与卡片渲染缓存同量级） */
 export const liveEmbedDecoCacheLimit = 64
 
-/** 一次独占行嵌入（LF 全文 offset）：行区间（装饰覆盖与 entry key 的
- *  sourceStart/End 同源）+ 嵌入文本区间（显隐谓词判定域，含 `![[` 到 `]]`） */
+/** 一次嵌入 occurrence（LF 全文 offset）：行区间（独占行 key 源与 below
+ *  形态锚）+ 嵌入文本区间（替换与显隐谓词判定域，含 `![[` 到 `]]`）+
+ *  独占行标记（宿主 key 区间选择——独占行取行区间与 Reading 独占行块
+ *  同源，混排取精确区间与 Reading #246 混排提升宿主同源） */
 export interface LiveEmbedSpan {
-  /** 嵌入行行首（LF offset；Reading 侧 data-vsidian-src-start 同口径——跨模式实例键同源） */
+  /** 嵌入行行首（LF offset） */
   lineFrom: number
   /** 嵌入行行尾（不含换行） */
   lineTo: number
@@ -65,29 +76,62 @@ export interface LiveEmbedSpan {
   to: number
   /** `![[` 与 `]]` 之间的原文 */
   inner: string
+  /** 该行是否为独占嵌入行（soleEmbedOfLine 语义：trim 后整行恰为该嵌入） */
+  sole: boolean
+}
+
+/** 发射层语法排除上下文（lezer 节点名）——与 #246 embedSlots 的
+ *  OCCURRENCE_EXCLUDED、refExpansion.validChildSource 同源集合：
+ *  代码族（围栏/缩进/行内）、HTML 块/注释。#248 起 Table 退役——表格
+ *  内容行（TableRow/TableHeader）的格内嵌入经 scanEmbedsInTableRow 的
+ *  格内解码扫描挂载（inner 解码语义、替换区间为源文精确区间）。
+ *  注意：lezer 把 `![[x]]` 解析为 Image 节点（所有嵌入的公共祖先），
+ *  Image/LinkMark 不在排除集——否则全部嵌入被排除 */
+const EMIT_EXCLUDED = new Set([
+  'FencedCode', 'CodeBlock', 'CodeText', 'CodeMark', 'CodeInfo', 'InlineCode',
+  'HTMLBlock', 'Comment', 'CommentBlock',
+])
+
+/** 表格内容行节点名（#248：spans 表的格内解码扫描行分类） */
+const TABLE_ROW_NODE_NAMES = new Set(['TableRow', 'TableHeader'])
+
+/** 单行的嵌入 occurrence（表格内容行走格内解码扫描——inner 解码语义、
+ *  区间源文；其余行走原始行扫描）。sole 随行判定。 */
+function embedSpansOfLine(line: { text: string; from: number; to: number }, tree: Tree | null): LiveEmbedSpan[] {
+  const sole = soleEmbedOfLine(line.text) !== null
+  const isTableRow = tree !== null &&
+    chainAt(tree, line.from).some((node) => TABLE_ROW_NODE_NAMES.has(node.name))
+  const hits = isTableRow ? scanEmbedsInTableRow(line.text, line.from) : scanEmbedsInLine(line.text, line.from)
+  return hits.map((hit) => ({
+    lineFrom: line.from,
+    lineTo: line.to,
+    from: hit.from,
+    to: hit.to,
+    inner: hit.inner,
+    sole,
+  }))
 }
 
 /**
  * 行窗口嵌入扫描（create 全量 / 增量重建共用；纯数据输入可单测直驱）：
- * 逐行 soleEmbedOfLine（混排/列表/引用/表格格/未闭合不命中——shared 识别
- * 器语义，两视图同源）。本层不做围栏/frontmatter 排除（发射层职责）。
+ * 逐行全部 occurrence（#246 识别、#248 起表格内容行走格内解码扫描——
+ * inner 为解码语义）；tree 提供表格行分类（缺省 null 时全部按原始行扫描
+ * ——嵌入表只作候选，发射层仍有语法排除兜底）。sole 标记随行判定
+ * （soleEmbedOfLine——宿主 key 区间选择）。本层不做语法排除。
  */
-export function scanEmbedSpansInLines(doc: Text, firstLine: number, lastLine: number): LiveEmbedSpan[] {
+export function scanEmbedSpansInLines(
+  doc: Text,
+  firstLine: number,
+  lastLine: number,
+  tree: Tree | null = null,
+): LiveEmbedSpan[] {
   const out: LiveEmbedSpan[] = []
   for (let n = firstLine; n <= lastLine; n += 1) {
     const line = doc.line(n)
-    const sole = soleEmbedOfLine(line.text)
-    if (sole === null) {
+    if (!line.text.includes('![[')) {
       continue
     }
-    const indent = line.text.length - line.text.trimStart().length
-    out.push({
-      lineFrom: line.from,
-      lineTo: line.to,
-      from: line.from + indent + sole.from,
-      to: line.from + indent + sole.to,
-      inner: sole.inner,
-    })
+    out.push(...embedSpansOfLine(line, tree))
   }
   return out
 }
@@ -96,12 +140,15 @@ export function scanEmbedSpansInLines(doc: Text, firstLine: number, lastLine: nu
  * 嵌入表增量重建：种子 = 变更区间（新坐标）∪ 映射后与之相交（含相邻行
  * 边界放宽 1，合行/拆行场景）的旧条目；窗口内重扫、窗口外映射保留；
  * 坍缩条目（整行被删映射出倒挂区间）丢弃——嵌入是行局部语法，无跨行
- * 状态（对照 mermaid 围栏表的开放状态锚，此处无此复杂度）。
+ * 状态（对照 mermaid 围栏表的开放状态锚，此处无此复杂度）。窗口外条目
+ * 以行内 occurrence 重扫精确对齐校验（from/to/inner 全匹配才保留——
+ * 同行多嵌入互不串位；表格行按格内解码扫描同款对齐）。
  */
 export function rebuildEmbedSpans(
   doc: Text,
   tr: Transaction,
   prev: readonly LiveEmbedSpan[],
+  tree: Tree | null = null,
 ): LiveEmbedSpan[] {
   const changes = tr.changes
   let seedFrom = doc.length + 1
@@ -116,7 +163,10 @@ export function rebuildEmbedSpans(
   const mapped = prev.map((s) => ({
     lineFrom: changes.mapPos(s.lineFrom, 1),
     lineTo: changes.mapPos(s.lineTo, -1),
+    from: changes.mapPos(s.from, 1),
+    to: changes.mapPos(s.to, -1),
     inner: s.inner,
+    sole: s.sole,
   }))
   for (const m of mapped) {
     if (m.lineTo + 1 >= seedFrom && m.lineFrom <= seedTo + 1) {
@@ -134,37 +184,38 @@ export function rebuildEmbedSpans(
       continue // 坍缩产物（整行删除；mermaid 表同款防御）
     }
     if (m.lineTo < windowStart || m.lineFrom > windowEnd) {
-      // 窗口外保留：重取精确文本区间（inner 与行内容一致，映射行区间足够）
+      // 窗口外保留：重扫该行 occurrence，精确对齐（from/to/inner）才保留
+      //（同行多嵌入按精确区间配对，不吞位、不漂移；表格行解码扫描同款）
       const line = doc.lineAt(m.lineFrom)
-      const sole = soleEmbedOfLine(line.text)
-      if (sole !== null && sole.inner === m.inner) {
-        const indent = line.text.length - line.text.trimStart().length
-        out.push({
-          lineFrom: line.from,
-          lineTo: line.to,
-          from: line.from + indent + sole.from,
-          to: line.from + indent + sole.to,
-          inner: sole.inner,
-        })
+      if (line.from === m.lineFrom) {
+        const hit = embedSpansOfLine(line, tree)
+          .find((h) => h.from === m.from && h.to === m.to && h.inner === m.inner)
+        if (hit) {
+          out.push({ ...hit })
+        }
       }
-      // 行内容已非该嵌入（异校验失败丢弃——理论不可达，防御漂移）
+      // 行边界漂移（理论不可达，防御丢弃）
     }
   }
-  out.push(...scanEmbedSpansInLines(doc, firstLine, lastLine))
-  out.sort((a, b) => a.lineFrom - b.lineFrom)
+  out.push(...scanEmbedSpansInLines(doc, firstLine, lastLine, tree))
+  out.sort((a, b) => a.lineFrom - b.lineFrom || a.from - b.from)
   return out
 }
 
-/** 全文档嵌入表（#223）：docChanged 时增量重建；选区/视口变化零成本 */
+/** 全文档嵌入表（#223）：docChanged 时增量重建；选区/视口变化零成本。
+ *  树取自 liveDecorationsField（装配序在其后，增量解析与 state.doc 同步
+ *  ——表格行的格内解码扫描行分类来源） */
 export const liveEmbedSpansField = StateField.define<readonly LiveEmbedSpan[]>({
   create(state) {
-    return scanEmbedSpansInLines(state.doc, 1, state.doc.lines)
+    return scanEmbedSpansInLines(state.doc, 1, state.doc.lines,
+      state.field(liveDecorationsField, false)?.tree ?? null)
   },
   update(value, tr) {
     if (!tr.docChanged) {
       return value
     }
-    return rebuildEmbedSpans(tr.state.doc, tr, value)
+    return rebuildEmbedSpans(tr.state.doc, tr, value,
+      tr.state.field(liveDecorationsField, false)?.tree ?? null)
   },
 })
 
@@ -187,13 +238,17 @@ function fenceContains(fences: readonly FenceSpan[], lineFrom: number, lineTo: n
 }
 
 /**
- * 嵌入装饰构建（#223 契约入口；纯数据输入，可单测直驱）：
- * 逐 span 发射——触及源码区间 → 行下方 block widget（源文显形）；未触及
- * → 整行 inline replace widget（源文退场；卡片块级对齐与 buffer 隐藏由
- * CSS 承担，见 main.css 的 live-embed 段——验收反馈「不留隐形源码行」的
- * 呈现修复）。排除：frontmatter 内（头区不产正文嵌入）、已闭合围栏内与
- * 文末开放围栏后（代码区域字面文本不作为嵌入——与阅读侧 markdown-it
- * 块语义对齐）。
+ * 嵌入装饰构建（#223/#247/#248 契约入口；纯数据输入，可单测直驱）：
+ * 逐 occurrence 发射——触及源码区间 → 行下方 block widget（源码显形）；
+ * 未触及 → **嵌入精确区间** [from, to] inline replace widget（#247：前后
+ * 文/列表标记/任务控件/引用前缀/缩进保留，卡片块级断行呈现由 CSS 承担，
+ * 见 main.css 的 live-embed 段；#248 起表格内容行同款——widget 嵌在网格
+ * 格 mark span 内（CM6 inline replace widget 不切开 mark），网格列布局
+ * 不因格内卡破坏）。排除（发射层）：frontmatter 内（头区不产正文嵌入）、
+ * 已闭合围栏内与文末开放围栏后（代码区域字面文本不作为嵌入——与阅读侧
+ * markdown-it 块语义对齐）、lezer 语法上下文（行内代码/HTML 块/注释——
+ * #246 同源排除集合；#248 起 Table 开放为格内挂载）、行内链接/图片文字域
+ * （与 Reading 呈现对齐：链接域内嵌入不升级）。
  */
 export function buildLiveEmbedDecorationRanges(
   selection: import('@codemirror/state').EditorSelection,
@@ -201,6 +256,8 @@ export function buildLiveEmbedDecorationRanges(
   fences: readonly FenceSpan[],
   trailingOpenStart: number | null,
   fm: { end: number } | null,
+  doc: Text,
+  tree: Tree | null,
 ): Array<Range<Decoration>> {
   const out: Array<Range<Decoration>> = []
   for (const span of spans) {
@@ -213,9 +270,21 @@ export function buildLiveEmbedDecorationRanges(
     if (fenceContains(fences, span.lineFrom, span.lineTo)) {
       continue
     }
+    if (tree !== null && chainAt(tree, span.from).some((node) => EMIT_EXCLUDED.has(node.name))) {
+      continue
+    }
+    // 行内链接/图片文字域排除（保守形态学——误判方向为保持源文）
+    const line = doc.lineAt(span.lineFrom)
+    const inLinkLabel = linkLabelRangesInLine(line.text, line.from)
+      .some((r) => span.from >= r.from && span.from < r.to)
+    if (inLinkLabel) {
+      continue
+    }
+    const keyFrom = span.sole ? span.lineFrom : span.from
+    const keyTo = span.sole ? span.lineTo : span.to
     const touched = selectionTouchesRange(selection, span.from, span.to)
-    const deco = liveEmbedWidgetDeco(span.inner, span.lineFrom, span.lineTo, touched)
-    out.push(touched ? deco.range(span.lineTo) : deco.range(span.lineFrom, span.lineTo))
+    const deco = liveEmbedWidgetDeco(span.inner, span.lineFrom, span.lineTo, keyFrom, keyTo, touched)
+    out.push(touched ? deco.range(span.lineTo) : deco.range(span.from, span.to))
   }
   return out
 }
@@ -235,15 +304,18 @@ export function setLiveEmbedCards(manager: EmbedCardManager | null): void {
  * 语义键——与 Reading 侧同一 entry 状态库），destroy 随装饰退场卸载（实例
  * 状态保留，重挂优先装载缓存）。ignoreEvent=true 吞事件——点击不落父
  * 编辑器光标、CM6 忽略卡片内选区变化（选区隔离），卡片交互走 embedCard
- * 自有监听器。两形态均为块级（隐形态 = 块级整行 replace 的替换物，显形态
- * = 行下方 block widget）；高度由 CM6 测量 + ResizeObserver→requestMeasure
- * 兜底回填。
+ * 自有监听器。两形态均为块级（隐形态 = 嵌入精确区间 inline replace 的
+ * 替换物，流断行呈现「前文 → 卡片 → 后文」；显形态 = 行下方 block
+ * widget）；高度由 CM6 测量 + ResizeObserver→requestMeasure 兜底回填。
  */
 export class LiveEmbedWidget extends WidgetType {
   constructor(
     readonly inner: string,
     readonly lineFrom: number,
     readonly lineTo: number,
+    /** 宿主 key 区间（独占行 = 行区间，混排 = 嵌入精确区间——跨模式状态共享口径） */
+    readonly keyFrom: number,
+    readonly keyTo: number,
     readonly below: boolean,
   ) {
     super()
@@ -252,7 +324,8 @@ export class LiveEmbedWidget extends WidgetType {
   eq(other: LiveEmbedWidget): boolean {
     return (
       other.inner === this.inner && other.lineFrom === this.lineFrom &&
-      other.lineTo === this.lineTo && other.below === this.below
+      other.lineTo === this.lineTo && other.keyFrom === this.keyFrom &&
+      other.keyTo === this.keyTo && other.below === this.below
     )
   }
 
@@ -262,13 +335,12 @@ export class LiveEmbedWidget extends WidgetType {
 
   toDOM(): HTMLElement {
     // 两形态宿主均为块级 div：显形态是 .cm-content 直接子块；隐形态是块级
-    // replace 的替换物（验收反馈：块级宿主独占行位，不留 inline 宿主的
-    // 隐形源码行）
+    // 替换物（嵌入精确区间——#247 前后文保留在行内，块级宿主断行呈现）
     const host = document.createElement('div')
     host.className = this.below
       ? `${LIVE_EMBED_CLASS_NAMES.host} ${LIVE_EMBED_CLASS_NAMES.below}`
       : LIVE_EMBED_CLASS_NAMES.host
-    cards?.mountCardInto(host, this.inner, this.lineFrom, this.lineTo, 'live')
+    cards?.mountCardInto(host, this.inner, this.keyFrom, this.keyTo, 'live')
     return host
   }
 
@@ -288,9 +360,11 @@ export function liveEmbedWidgetDeco(
   inner: string,
   lineFrom: number,
   lineTo: number,
+  keyFrom: number,
+  keyTo: number,
   below: boolean,
 ): ReturnType<typeof Decoration.replace> | ReturnType<typeof Decoration.widget> {
-  const key = `${below ? 1 : 0}::${lineFrom}::${lineTo}::${inner}`
+  const key = `${below ? 1 : 0}::${lineFrom}::${lineTo}::${keyFrom}::${keyTo}::${inner}`
   const hit = decoCache.get(key)
   if (hit) {
     decoCache.delete(key)
@@ -298,12 +372,13 @@ export function liveEmbedWidgetDeco(
     return hit
   }
   const deco = below
-    ? Decoration.widget({ widget: new LiveEmbedWidget(inner, lineFrom, lineTo, true), block: true, side: 1 })
+    ? Decoration.widget({ widget: new LiveEmbedWidget(inner, lineFrom, lineTo, keyFrom, keyTo, true), block: true, side: 1 })
     // 隐形态保持 inline replace（行结构保留——键盘垂直导航可进入嵌入行，
     // 块级 replace 会被 CM6 当不可停靠块直接跳过，实测 ArrowUp 越过整行）；
-    // 「不留隐形源码行」由 CSS 承担：宿主块级化 + 隐藏 replace widget 前后
-    // 的 cm-widgetBuffer（frontmatter 标题栏行同款先例）
-    : Decoration.replace({ widget: new LiveEmbedWidget(inner, lineFrom, lineTo, false) })
+    // #247 起替换区间为嵌入精确区间（前后文/标记/缩进保留），「前文 →
+    // 卡片 → 后文」的流断行呈现由 CSS 承担（宿主块级化 + 隐藏 replace
+    // widget 前后的 cm-widgetBuffer）
+    : Decoration.replace({ widget: new LiveEmbedWidget(inner, lineFrom, lineTo, keyFrom, keyTo, false) })
   decoCache.set(key, deco)
   while (decoCache.size > liveEmbedDecoCacheLimit) {
     const oldest = decoCache.keys().next().value
@@ -316,8 +391,8 @@ export function liveEmbedWidgetDeco(
 }
 
 /** 嵌入装饰（StateField，#223）：block widget 与跨行 replace 均须来自
- *  StateField（CM6 硬约束）；表/围栏/frontmatter 任一变化或选区变化时
- *  全量重建（装饰实例缓存使 RangeSet.eq 可命中） */
+ *  StateField（CM6 硬约束）；表/围栏/frontmatter/语法树任一变化或选区
+ *  变化时全量重建（装饰实例缓存使 RangeSet.eq 可命中） */
 export const liveEmbedDecorations = StateField.define<DecorationSet>({
   create(state) {
     const deco = state.field(liveDecorationsField, false)
@@ -332,6 +407,8 @@ export const liveEmbedDecorations = StateField.define<DecorationSet>({
         fences?.spans ?? [],
         fences?.trailingOpenStart ?? null,
         deco.fm,
+        state.doc,
+        deco.tree,
       ),
       true,
     )
@@ -358,6 +435,8 @@ export const liveEmbedDecorations = StateField.define<DecorationSet>({
         fences?.spans ?? [],
         fences?.trailingOpenStart ?? null,
         deco.fm,
+        tr.state.doc,
+        deco.tree,
       ),
       true,
     )

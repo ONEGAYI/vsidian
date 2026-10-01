@@ -708,3 +708,46 @@ describe('vaultRename：#222 嵌入边改写（![[…]] 与 wikilink 同构）',
     expect(result.skipped[0]).toMatchObject({ reason: 'edge-stale' })
   })
 })
+
+describe('#248 表格格内嵌入边的改写（转义管道保真）', () => {
+  it('格内 \\| 别名嵌入：只替换路径段，\\| 别名与列结构保留', () => {
+    const text = '| a | ![[target\\|别名]] |\n| --- | --- |\n| b | c |'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/target.md`, newFsPath: `${WIN_ROOT}/renamed.md` }]
+    const at = text.indexOf('![[target\\|别名]]')
+    const docs = [refDoc(`${WIN_ROOT}/ref.md`, text, [
+      // 索引边 target 为解码路径（vaultLinkExtract #248 解码语义）
+      edge({ target: 'target', resolved: 'target.md', kind: 'embed', start: at, end: at + '![[target\\|别名]]'.length }),
+    ])]
+    const result = planVaultRenameRewrites(winCtx(moves), docs)
+    expect(result.skipped).toEqual([])
+    expect(result.docs[0]!.edits).toHaveLength(1)
+    const edited = applyEdits(text, result.docs[0]!.edits)
+    expect(edited).toBe('| a | ![[renamed\\|别名]] |\n| --- | --- |\n| b | c |')
+    // 列数不变（转义管道仍在——不因改写裸化）
+    expect(edited.split('\n')[0]).toContain('\\|')
+  })
+
+  it('格内锚点 + 别名组合：锚点保留在路径段之后', () => {
+    const text = '| ![[target#标题\\|显]] | b |\n| --- | --- |\n| c | d |'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/target.md`, newFsPath: `${WIN_ROOT}/renamed.md` }]
+    const at = text.indexOf('![[target#标题\\|显]]')
+    const docs = [refDoc(`${WIN_ROOT}/ref.md`, text, [
+      edge({ target: 'target', resolved: 'target.md', kind: 'embed', start: at, end: at + '![[target#标题\\|显]]'.length, anchor: '标题' }),
+    ])]
+    const result = planVaultRenameRewrites(winCtx(moves), docs)
+    expect(applyEdits(text, result.docs[0]!.edits)).toBe('| ![[renamed#标题\\|显]] | b |\n| --- | --- |\n| c | d |')
+  })
+
+  it('普通段落的 \\| 形态边（target 含 \\ 的原文字面）不受转义尝试影响', () => {
+    // 非表格行索引边按原文字面：target 为 `target\\`——现有首个 | 分割命中
+    const text = '段 ![[target\\|x]] 段\n'
+    const moves = [{ oldFsPath: `${WIN_ROOT}/target.md`, newFsPath: `${WIN_ROOT}/renamed.md` }]
+    const at = text.indexOf('![[target\\|x]]')
+    const docs = [refDoc(`${WIN_ROOT}/ref.md`, text, [
+      edge({ target: 'target\\', resolved: null, kind: 'embed', start: at, end: at + '![[target\\|x]]'.length }),
+    ])]
+    // resolved=null 不构成 rename 映射命中：无编辑（断链边按原文保留）
+    const result = planVaultRenameRewrites(winCtx(moves), docs)
+    expect(result.docs[0]?.edits ?? []).toHaveLength(0)
+  })
+})

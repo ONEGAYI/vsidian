@@ -110,19 +110,22 @@ describe('订阅注册表：相同目标合并订阅、实例独立释放', () =
     expect(reg.has('b.md')).toBe(false)
   })
 
-  it('目标数上限：超出按最近触达淘汰整目标（有界）', () => {
+  it('跨面板第 129 个目标被拒绝；既有面板订阅不失效，同目标复用槽位', () => {
     const reg = new HoverWatchRegistry(HOVER_REFRESH_DEFAULTS.watchTargetLimit)
-    for (let i = 0; i < HOVER_REFRESH_DEFAULTS.watchTargetLimit; i++) {
-      reg.watch('s1', `t${i}.md`, 'e')
+    expect(reg.watch('panel-a', 'old.md', 'a')).toBe(true)
+    expect(reg.watch('panel-b', 'old.md', 'b')).toBe(true)
+    for (let i = 1; i < HOVER_REFRESH_DEFAULTS.watchTargetLimit; i++) {
+      expect(reg.watch('panel-b', `t${i}.md`, 'e')).toBe(true)
     }
     expect(reg.targets()).toBe(HOVER_REFRESH_DEFAULTS.watchTargetLimit)
-    // 触达 t0（最近使用）后再加新目标：淘汰的是最久未触达的 t1
-    reg.watch('s1', 't0.md', 'e2')
-    reg.watch('s1', 'new.md', 'e')
+    expect(reg.watch('panel-c', 'new.md', 'c')).toBe(false)
     expect(reg.targets()).toBe(HOVER_REFRESH_DEFAULTS.watchTargetLimit)
-    expect(reg.has('t0.md')).toBe(true)
-    expect(reg.has('new.md')).toBe(true)
-    expect(reg.has('t1.md')).toBe(false)
+    expect(reg.subscribersOf('old.md')).toEqual(['panel-a', 'panel-b'])
+    expect(reg.has('new.md')).toBe(false)
+    expect(reg.watch('panel-c', 'old.md', 'c')).toBe(true)
+    expect(reg.totalSubscriptions()).toBe(HOVER_REFRESH_DEFAULTS.watchTargetLimit + 2)
+    reg.unwatch('panel-b', 't1.md', 'e')
+    expect(reg.watch('panel-c', 'new.md', 'c')).toBe(true)
   })
 })
 
