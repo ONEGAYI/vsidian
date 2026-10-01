@@ -38,7 +38,6 @@ review-loops 审查循环第 4 轮（2026-09-26，分支 `feature/65-70-outline-
 
 jieba webview 装载修复（2026-10-01，`wt-jieba-roots` 工作树，用户真机报障「已下载资源在编辑器中加载失败，回退内置引擎」）：根因是 webview 资源服务的 localResourceRoots 许可面从未包含 globalStorage——`asWebviewUri` 生成的资源 URL 被 VSCode 资源服务 AccessDenied 拒绝（1.86.2 实测 globalStorageUri 即 `vscode-userdata:` scheme，与宿主版本无关），#239 的装载路径自落地起在任何宿主下均未真正走通。修复为 `editorResourceRoots` 常驻放行 `globalStorage/jieba-wasm` 子树。验证（TDD 先红后绿）：新增集成用例「jieba 端到端：globalStorage 资源经 webview 资源服务装载生效」走真实链路（设置页消息触发宿主 jsdelivr 下载 + sha256 校验落盘 → wordSegment.state 广播 → webview 动态 import + wasm init → `view.state.jiebaEngine === 'jieba'`），红灯期失败信息与用户症状逐字一致（`Failed to fetch dynamically imported module: https://vscode-userdata+...jieba_rs_wasm.js`），修复后定向用例通过（22.7s）；全量 Vitest 单测、编译与类型检查结果见当轮提交正文。**此前 #239 真机「切换 jieba 引擎」的人工验证结论需作废重验**（彼时引擎恒回退 builtin，粒度变化从未真实发生）；用户真机复验路径：设置页切 jieba 引擎 → 等待下载完成通知 → Ctrl+Left/Right 在连续中文段逐词跳转（粒度应与 builtin 不同）。
 
-
 | 项目 | 状态 | 当前证据或缺失条件 |
 | --- | --- | --- |
 | A1 | 用户复验发现中文误暂停，已修复并补自动回归；待真实 IME 复验 | 2026-09-25，联合工作树 F5 中文确认后误报外部修改；已忽略 VSCode 无内容变更的脏状态事件。真实 DOM 候选经 WorkspaceEdit 保存回读在 1.86.2 与本机 1.139.0 定向验证通过；物理候选窗和 Esc 仍待复验 |

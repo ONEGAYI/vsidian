@@ -1186,6 +1186,7 @@ async function waitViewState(
       throw new Error(`${(err as Error).message}；最后观测：${JSON.stringify({
         viewMode: s['viewMode'],
         selectionOffset: s['selectionOffset'],
+        jiebaEngine: s['jiebaEngine'],
         find: s['find'],
         imageStates: s['imageStates'],
         imageProbe: s['imageProbe'],
@@ -7363,9 +7364,12 @@ export const cases: Array<[string, () => Promise<void>]> = [
       // 经 wordSegment.state 到达后按需装载）
       await vscode.commands.executeCommand(CMD.setSettings, { 'editor.wordSegmentEngine': 'jieba' })
       // 走产品消息触发宿主真实下载（jsdelivr 直下 + sha256 校验 + 落
-      // globalStorage）——集成宿主便携目录每次全新，必为未安装态起步。
-      // wordSegment.download 是设置页域消息（编辑器面板分派不含它），经
-      // 设置页注入钩子走同一处理入口（handleMessage 不依赖面板在场）
+      // globalStorage）——集成宿主便携目录每次全新，必为未安装态起步，
+      // 每轮真实拉取约 4MB（**本套件唯一的外网下载依赖**：jsdelivr 不可达
+      // 时下载段超时失败，失败信息附宿主 notice 可归因）。wordSegment.download
+      // 是设置页域消息（编辑器面板分派对其为显式 no-op——真实处理入口在
+      // 设置页链路），经设置页注入钩子走同一处理入口（handleMessage 不
+      // 依赖面板在场）
       await vscode.commands.executeCommand(CMD.injectSettingsPageMessage, { kind: 'wordSegment.download' })
       try {
         await poll('jieba 资源下载安装完成', async () => {

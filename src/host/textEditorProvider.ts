@@ -92,6 +92,7 @@ import { sanitizeFindOptions, type FindOptions } from '../shared/findOptions'
 import { t } from '../shared/i18n'
 import { EMBED_MAX_DEPTH_DEFAULT, EMBED_MAX_DEPTH_KEY } from '../shared/settings'
 import type { JiebaWiring } from './jiebaResourceWiring'
+import { JIEBA_WASM_VERSION } from '../shared/jiebaManifest'
 
 export const VIEW_TYPE = 'onegayi.vsidian.editor'
 
@@ -2556,7 +2557,7 @@ export function createTextEditorProvider(
     // detail）——集成用例等待下载就绪与红灯诊断输出
     vscode.commands.registerCommand('onegayi.vsidian._test.getJiebaState', () =>
       jieba ? jieba.service.getState()
-        : { installed: false, version: '', status: 'idle', notice: null }),
+        : { installed: false, version: JIEBA_WASM_VERSION, status: 'idle', notice: null }),
     vscode.commands.registerCommand('onegayi.vsidian._test.getKeybindings', () =>
       settings ? settings.keybindings.getSnapshot() : {},
     ),
