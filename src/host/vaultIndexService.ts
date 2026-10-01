@@ -238,6 +238,9 @@ export interface VaultIndexServiceOptions {
   verifyFocusRegainMinGapMs?: number
   /** 初始排除模式（activate 从持久化读入；缺省不排除） */
   excludePatterns?: readonly string[]
+  /** 文档是否打开（宿主 textDocuments 在场探测）；缺省视为在场（不启用
+   *  关闭残渣兜底——node 单测无宿主文档概念，行为与历史一致） */
+  isDocOpen?: (fsPath: string) => boolean
 }
 
 const ADAPTIVE_SHARDS: readonly { maxFiles: number; shards: number }[] = [
@@ -1249,6 +1252,26 @@ export class VaultIndexService {
       return
     }
     const text = normalizeLf(raw)
+    // 外部变更回流收敛（#256）：「未保存」暂存若与磁盘文本一致（外部工具把
+    // 盘面写成 buffer 同款——writeFile/外部保存经宿主回流登记的暂存），覆盖
+    // 层使命已结束（基线即真相），此时退役——否则回流时刻早于目标文件归位
+    // 基线的话，覆盖层会持有断链边并无事件可退役（外部写无保存/关闭事件），
+    // 永久遮蔽已自愈的基线。盘≠暂存（真实未保存编辑）不动，覆盖层继续接管。
+    // 关闭残渣兜底（同票）：文档已不在宿主 textDocuments 时覆盖层同样退役——
+    // 覆盖层的存在前提是「文档打开且有未保存内容」，文档不在则必为残渣
+    // （onDidCloseTextDocument 漏触发时的兜底退役路径）
+    const pendingUnsaved = state.unsaved.get(this.normKey(fsPath))
+    const docAbsent = this.opts.isDocOpen !== undefined && !this.opts.isDocOpen(fsPath)
+    if (docAbsent || (pendingUnsaved !== undefined && normalizeLf(pendingUnsaved.text) === text)) {
+      const timer = state.unsavedTimers.get(this.normKey(fsPath))
+      if (timer !== undefined) {
+        clearTimeout(timer)
+        state.unsavedTimers.delete(this.normKey(fsPath))
+      }
+      state.unsaved.delete(this.normKey(fsPath))
+      state.unsavedSince.delete(this.normKey(fsPath))
+      state.overlay.clear(rel)
+    }
     const prevEntry = state.model.files.get(rel)
     const edges = extractVaultEdges(rel, text, {
       docDir: this.dirname(fsPath),

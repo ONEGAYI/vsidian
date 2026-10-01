@@ -106,6 +106,13 @@ interface PendingRenameBatch {
   dirtyRefs: string[]
   /** 被移动文档出链（did 阶段按新路径文本统一规划） */
   outgoing: PendingMovedOutgoing[]
+  /** will 阶段装载取文本的文档（did 收尾退役覆盖层，见 textOf） */
+  loadedDocs: string[]
+  /** will 阶段经 docsByKey 读文本的引用者（open 装载混合、全非 dirty——
+   *  dirty 者已分流 dirtyRefs）。will edit 改写后其覆盖层=改写后文本=盘面
+   *  （宿主随 rename 保存），did 收尾退役归基线（#256：无 tab 的缓存实例
+   *  惰性重载不广播事件、onDidClose 不触发，覆盖层无退场路径） */
+  rewrittenDocs: string[]
 }
 const pendingBatches = new Map<string, PendingRenameBatch>()
 const PENDING_BATCH_LIMIT = 8
@@ -135,8 +142,16 @@ function normalizeLf(text: string): string {
   return text.includes('\r') ? text.replace(/\r\n?/g, '\n') : text
 }
 
-/** 文档当前文本：已打开优先（含未保存内容），否则装载磁盘文本 */
-async function textOf(uri: vscode.Uri): Promise<{ host: string; lf: string } | null> {
+/** 文档当前文本：已打开优先（含未保存内容），否则装载磁盘文本。
+ *  装载态文档（openTextDocument 只装载不显示）经 loadedDocs 登记——它没有
+ *  编辑器标签，后续 will/did 的 applyEdit 改写会经 onDidChangeTextDocument
+ *  登记索引覆盖层，而 onDidCloseTextDocument 对装载文档永不触发（无标签
+ *  可关），覆盖层边会永久滞留遮蔽基线（#256 幽灵反链）——did 收尾按清单
+ *  统一退役（谁装载谁回收）。 */
+async function textOf(
+  uri: vscode.Uri,
+  loadedDocs?: string[],
+): Promise<{ host: string; lf: string } | null> {
   const open = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri.toString())
   let doc = open ?? null
   if (!doc) {
@@ -145,6 +160,7 @@ async function textOf(uri: vscode.Uri): Promise<{ host: string; lf: string } | n
     } catch {
       return null
     }
+    loadedDocs?.push(doc.uri.fsPath)
   }
   const host = doc.getText()
   return { host, lf: normalizeLf(host) }
@@ -233,6 +249,13 @@ export function installRenameRefUpdater(
   if (process.env.VSIDIAN_TEST_HOOKS === '1') {
     subs.push(
       vscode.commands.registerCommand('onegayi.vsidian._test.getRenameRefLog', () => getRenameRefLog()),
+      vscode.commands.registerCommand('onegayi.vsidian._test.getRenameCandidates', (fsPath: string) => {
+        const c = vaultIndex.renameCandidatesOf(fsPath)
+        return {
+          status: c.status,
+          incomingFsPaths: c.incoming.map((g) => g.fsPath),
+        }
+      }),
     )
   }
   return subs
@@ -281,6 +304,8 @@ async function buildWillRenameEdit(
   const docsByKey = new Map<string, RenameDocInput & { hostText: string }>()
   const dirtyRefs: string[] = []
   const outgoingStash: PendingMovedOutgoing[] = []
+  const loadedDocs: string[] = []
+  const rewrittenDocs: string[] = []
   let hasCandidates = false
 
   for (const move of moves) {
@@ -333,7 +358,7 @@ async function buildWillRenameEdit(
         dirtyRefs.push(normKeyOf(group.fsPath))
         continue
       }
-      const text = await textOf(uri)
+      const text = await textOf(uri, loadedDocs)
       if (text === null) {
         log.skipped.push({ fsPath: group.fsPath, reason: 'edge-stale' })
         continue
@@ -345,6 +370,7 @@ async function buildWillRenameEdit(
         edgeRootFsPath: candidates.rootFsPath!,
         hostText: text.host,
       })
+      rewrittenDocs.push(group.fsPath)
     }
   }
 
@@ -365,10 +391,18 @@ async function buildWillRenameEdit(
     log.skipped.push(...plan.skipped.map((s) => ({ fsPath: s.fsPath, reason: s.reason })))
   }
   // 暂存至 did：rename 实际发生后合并出链与 dirty 引用者部分，统一落日志
-  // 与通知（will 后用户取消 rename 时 did 不到来，暂存悬挂由上限淘汰）
+  // 与通知（will 后用户取消 rename 时 did 不到来，暂存悬挂由上限淘汰）。
+  // loadedDocs 计入暂存条件：装载清单须随批次到 did 才能退役覆盖层
   if (log.plannedEdits > 0 || log.skipped.length > 0 || log.indexNotReady > 0 ||
-    dirtyRefs.length > 0 || outgoingStash.length > 0) {
-    stashBatch(batchKeyOf(files), { log: { ...log, moves: rawMoves }, expandedMoves: moves, dirtyRefs, outgoing: outgoingStash })
+    dirtyRefs.length > 0 || outgoingStash.length > 0 || loadedDocs.length > 0) {
+    stashBatch(batchKeyOf(files), {
+      log: { ...log, moves: rawMoves },
+      expandedMoves: moves,
+      dirtyRefs,
+      outgoing: outgoingStash,
+      loadedDocs,
+      rewrittenDocs,
+    })
   }
   return edit
 }
@@ -406,6 +440,9 @@ async function applyAfterRenameBatch(
   }
   const log = pending.log
   const dirtyRefs = pending.dirtyRefs
+  /** did 出链通道触达的文档（open 装载混合——did applyEdit 改写它们，收尾
+   *  退役覆盖层归基线；dirtyRefs 段的叠加改写是真实未保存内容，不在此列） */
+  const didRewrittenDocs: string[] = []
 
   // 被移动 Markdown 自身的出链：用 will 暂存的旧目录解析边规划（rename
   // 已完成，新路径存在，applyEdit 安全）；文本取 did 时刻新路径内容（与
@@ -415,7 +452,7 @@ async function applyAfterRenameBatch(
     const docs: RenameDocInput[] = []
     const hostTexts = new Map<string, string>()
     for (const item of pending.outgoing) {
-      const text = await textOf(vscode.Uri.file(item.newFsPath))
+      const text = await textOf(vscode.Uri.file(item.newFsPath), didRewrittenDocs)
       if (text === null) {
         log.skipped.push({ fsPath: item.newFsPath, reason: 'edge-stale' })
         continue
@@ -427,6 +464,7 @@ async function applyAfterRenameBatch(
         edgeRootFsPath: item.edgeRootFsPath,
       })
       hostTexts.set(item.newFsPath, text.host)
+      didRewrittenDocs.push(item.newFsPath)
     }
     if (docs.length > 0) {
       const plan = planVaultRenameRewrites({ rootFsPaths, isWindowsHost, moves: expandedMoves }, docs)
@@ -511,6 +549,21 @@ async function applyAfterRenameBatch(
   }
   if (log.plannedEdits > 0 || log.skipped.length > 0 || log.indexNotReady > 0 || log.cancelled) {
     pushRenameLog(log)
+  }
+  // 覆盖层回收（#256）：本批 will/did 触达并改写的文档（装载清单 + 引用者
+  // rewrittenDocs + did 出链清单——全非 dirty，dirty 者走 dirtyRefs 其覆盖层
+  // 是真实未保存内容），其文本变更（will edit / did applyEdit，含宿主 bulk
+  // edit 的短暂 dirty 态）已登记覆盖层，而无 tab 的缓存文档实例没有退场事件
+  // （onDidCloseTextDocument 永不触发、惰性重载不广播）——不退役会永久遮蔽
+  // 基线（外部还原后反链/rename 候选读到幽灵边）。此时退役无损：非 dirty
+  // 文档的覆盖层退役即归基线（documentSaved 同款语义）
+  retireLoadedDocs(vaultIndex, [...pending.loadedDocs, ...pending.rewrittenDocs, ...didRewrittenDocs])
+}
+
+/** rename 通道触达文档的索引覆盖层退役（谁改写谁回收，见 textOf 注释） */
+function retireLoadedDocs(vaultIndex: VaultIndexService, fsPaths: readonly string[]): void {
+  for (const fsPath of fsPaths) {
+    vaultIndex.documentClosed(fsPath)
   }
 }
 

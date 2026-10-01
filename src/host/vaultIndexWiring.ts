@@ -10,7 +10,7 @@ import * as vscode from 'vscode'
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'fs/promises'
 import * as path from 'node:path'
 import { randomBytes } from 'node:crypto'
-import { VaultIndexService, type VaultIndexScanPort, type VaultIndexStoragePort, type VaultRootRef } from './vaultIndexService'
+import { VaultIndexService, normalizeSeparators, type VaultIndexScanPort, type VaultIndexStoragePort, type VaultRootRef } from './vaultIndexService'
 import { isFileNotFound } from '../shared/imageRefresh'
 
 /** 抽象路径（`/` 拼接）→ 宿主平台真实路径 */
@@ -168,6 +168,15 @@ export function createVaultIndexService(
     storageRoot: context.storageUri ? context.storageUri.fsPath : path.join(context.globalStorageUri.fsPath, 'ws-fallback'),
     isWindowsHost: process.platform === 'win32',
     excludePatterns,
+    // 文档在场探测（#256 关闭残渣兜底）：rescanFile 时文档已不在
+    // textDocuments → 其覆盖层/未保存暂存必为残渣（onDidCloseTextDocument
+    // 漏触发的兜底退役）。比较用 normKey 同款折叠（Windows 大小写漂移）
+    isDocOpen: (fsPath) => {
+      const fold = normalizeSeparators(fsPath).toLowerCase()
+      return vscode.workspace.textDocuments.some(
+        (d) => normalizeSeparators(d.uri.fsPath).toLowerCase() === fold,
+      )
+    },
   })
   return service
 }

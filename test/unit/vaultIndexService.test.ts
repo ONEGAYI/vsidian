@@ -314,6 +314,114 @@ describe('VaultIndexService：覆盖层与保存', () => {
     const gen2 = currentOf()
     expect(gen2).not.toBe(gen1) // 新代提交
   })
+
+  it('外部写回流的覆盖层在盘面一致时退役，断链快照不永久遮蔽基线（#256）', async () => {
+    // 复刻跨根用例的微观时序：rename 期间目标退场基线 → 打开文档被外部
+    // 写盘（宿主回流把盘面内容灌进未保存暂存）→ flush 抽边时目标不在基线
+    // → 覆盖层持断链边；随后目标归位、盘面重扫——盘=暂存时覆盖层须退役
+    // （基线即真相），否则断链边永久遮蔽已自愈的基线（外部写无保存/关闭
+    // 事件，没有其他退场路径）
+    const fs = makeFs({
+      'C:/vault/a.md': '# A\n\n引用 [[目标]]。\n',
+      'C:/vault/目标.md': '# 目标\n',
+    })
+    let notify: ((p: string | null) => void) | undefined
+    const scan = scanPortOf(fs)
+    scan.watchRoot = (_root, onEvent) => {
+      notify = onEvent
+      return () => {}
+    }
+    const service = new VaultIndexService(scan, storagePortOf(), { storageRoot: 'C:/store', isWindowsHost: IS_WIN })
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    expect(itemsOf(await service.backlinksOf('C:/vault/目标.md'))).toHaveLength(1)
+    // rename 中间态：目标退场（watcher 重扫 missing → 基线条目移除）
+    fs.files.delete('C:/vault/目标.md')
+    fs.stats.delete('C:/vault/目标.md')
+    notify!('C:/vault/目标.md')
+    await vi.advanceTimersByTimeAsync(1200)
+    // 外部写回 a 原文：磁盘已落新内容，宿主回流把盘面内容登记为「未保存」
+    const restored = '# A\n\n引用 [[目标]]。\n'
+    fs.files.set('C:/vault/a.md', restored)
+    fs.stats.set('C:/vault/a.md', { mtimeMs: 1_700_000_020_000, size: restored.length })
+    service.applyUnsaved('C:/vault/a.md', 9, restored)
+    await vi.advanceTimersByTimeAsync(700) // flush：目标不在基线 → 断链边落覆盖层
+    // 目标归位 + a 的盘面变更经 watcher 重扫（盘=暂存 → 覆盖层退役）
+    fs.files.set('C:/vault/目标.md', '# 目标\n')
+    fs.stats.set('C:/vault/目标.md', { mtimeMs: 1_700_000_021_000, size: 7 })
+    notify!('C:/vault/目标.md')
+    notify!('C:/vault/a.md')
+    await vi.advanceTimersByTimeAsync(1200)
+    // 基线接管：目标反链恢复（覆盖层断链残渣不再遮蔽）
+    expect(itemsOf(await service.backlinksOf('C:/vault/目标.md'))).toHaveLength(1)
+  })
+
+  it('真实未保存编辑不受回流收敛影响（盘≠暂存时覆盖层继续接管）', async () => {
+    const fs = makeFs({
+      'C:/vault/a.md': '# A\n\n引用 [[目标]]。\n',
+      'C:/vault/目标.md': '# 目标\n',
+    })
+    const { service } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // 用户编辑（未保存，盘面未变）：覆盖层必须继续遮蔽旧盘面基线
+    service.applyUnsaved('C:/vault/a.md', 2, '# A\n\n引用消失。\n')
+    await vi.advanceTimersByTimeAsync(700)
+    expect(itemsOf(await service.backlinksOf('C:/vault/目标.md'))).toHaveLength(0)
+  })
+
+  it('文档不在场的关闭残渣经重扫兜底退役（isDocOpen=false，#256）', async () => {
+    // onDidCloseTextDocument 漏触发时覆盖层滞留（面板文档关闭竞态）——
+    // watcher 重扫时文档已不在 textDocuments → 覆盖层必为残渣，兜底退役
+    const fs = makeFs({
+      'C:/vault/a.md': '# A\n\n引用 [[目标]]。\n',
+      'C:/vault/目标.md': '# 目标\n',
+    })
+    let notify: ((p: string | null) => void) | undefined
+    const scan = scanPortOf(fs)
+    scan.watchRoot = (_root, onEvent) => {
+      notify = onEvent
+      return () => {}
+    }
+    const service = new VaultIndexService(scan, storagePortOf(), {
+      storageRoot: 'C:/store', isWindowsHost: IS_WIN,
+      isDocOpen: () => false, // 文档从不在场（模拟关闭后残留）
+    })
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // 面板期幽灵登记：未保存文本指向别处（盘≠暂存，回流收敛不命中）
+    service.applyUnsaved('C:/vault/a.md', 5, '# A\n\n引用 [[其他]]。\n')
+    await vi.advanceTimersByTimeAsync(700)
+    expect(itemsOf(await service.backlinksOf('C:/vault/目标.md'))).toHaveLength(0)
+    // 磁盘变更触发重扫：文档不在场 → 覆盖层兜底退役 → 基线接管
+    fs.files.set('C:/vault/a.md', '# A\n\n引用 [[目标]] 与新文 [[目标]]。\n')
+    fs.stats.set('C:/vault/a.md', { mtimeMs: 1_700_000_030_000, size: 30 })
+    notify!('C:/vault/a.md')
+    await vi.advanceTimersByTimeAsync(1200)
+    expect(itemsOf(await service.backlinksOf('C:/vault/目标.md'))).toHaveLength(2)
+  })
+
+  it('文档在场时不触发关闭残渣兜底（isDocOpen=true，覆盖层继续接管）', async () => {
+    const fs = makeFs({
+      'C:/vault/a.md': '# A\n\n引用 [[目标]]。\n',
+      'C:/vault/目标.md': '# 目标\n',
+    })
+    let notify: ((p: string | null) => void) | undefined
+    const scan = scanPortOf(fs)
+    scan.watchRoot = (_root, onEvent) => {
+      notify = onEvent
+      return () => {}
+    }
+    const service = new VaultIndexService(scan, storagePortOf(), {
+      storageRoot: 'C:/store', isWindowsHost: IS_WIN,
+      isDocOpen: () => true, // 文档始终在场（打开编辑中）
+    })
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    service.applyUnsaved('C:/vault/a.md', 2, '# A\n\n引用消失。\n')
+    await vi.advanceTimersByTimeAsync(700)
+    // 其他文件事件引起的本文件重扫（盘≠暂存且文档在场）不得退役覆盖层
+    fs.stats.set('C:/vault/a.md', { mtimeMs: 1_700_000_030_000, size: 14 })
+    notify!('C:/vault/a.md')
+    await vi.advanceTimersByTimeAsync(1200)
+    expect(itemsOf(await service.backlinksOf('C:/vault/目标.md'))).toHaveLength(0)
+  })
 })
 
 describe('VaultIndexService：多根与附件', () => {

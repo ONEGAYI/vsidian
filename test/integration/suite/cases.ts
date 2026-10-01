@@ -11260,6 +11260,53 @@ export const cases: Array<[string, () => Promise<void>]> = [
         const second = s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(secondDir))
         return second?.hasData ? true : undefined
       }, 30000)
+      // 等主根「改名目标.md 的引用边」自愈完成（#256）：waitRenameIndexReady 只等
+      // hasData && !scanning——观测不到前序用例残留的自愈进度。漂移用例把索引边
+      // 挪到改名目标3.md 桶后经外部 fs 通道还原，watcher 增量重扫异步恢复；加根的
+      // setRoots 又会中止在途增量改走 fullScan，而「第二根纳入」的满足点恰早于主根
+      // fullScan——不在此等边恢复，跨根 rename 的 will 会读到 incoming 缺失（改名
+      // 目标.md 桶 0~1 条引用者），暂存缺失或 skipped<2，「跨根跳过上报」必然超时
+      // （单宿主全量稳定复现、四分片因用例分属不同宿主而被掩盖）。等两个基线引用
+      // 者都在场即视自愈完成（rename-moved.md 同为引用者但不在断言语义内）。
+      // 缺席自愈（节流）：前序用例可把引用甲的面板以 dirty 态遗留（will edit 对
+      // 打开文档只作用 buffer 不落盘），closeAllEditors 丢弃 dirty 不广播回滚、
+      // 文档实例滞留缓存无退场事件——其「未保存」覆盖层残渣遮蔽基线。自愈动作=
+      // 打开并保存（save 落盘触发 onDidSaveTextDocument → 覆盖层随 documentSaved
+      // 退役+重扫）再外部写回原文（watcher 重扫、基线归位）——全走产品正道事件
+      let healKick = 0
+      await poll('跨根 rename 前索引边自愈', async () => {
+        const c = (await vscode.commands.executeCommand(
+          'onegayi.vsidian._test.getRenameCandidates', wsUri('改名目标.md').fsPath,
+        )) as { status: string; incomingFsPaths: string[] } | undefined
+        const aIn = c?.incomingFsPaths.some((p) => normFsPath(p) === normFsPath(wsUri('rename-ref-a.md').fsPath))
+        const bIn = c?.incomingFsPaths.some((p) => normFsPath(p) === normFsPath(wsUri('notes/rename-ref-b.md').fsPath))
+        if (c?.status === 'ready' && aIn && bIn) {
+          return true
+        }
+        if (c?.status === 'ready' && healKick++ % 6 === 0) {
+          const targets: Array<[vscode.Uri, string]> = []
+          if (!aIn) {
+            targets.push([wsUri('rename-ref-a.md'), RENAME_REF_A_DOC_TEXT])
+          }
+          if (!bIn) {
+            targets.push([wsUri('notes/rename-ref-b.md'), RENAME_REF_B_DOC_TEXT])
+          }
+          for (const [uri, text] of targets) {
+            const doc = await vscode.workspace.openTextDocument(uri)
+            await Promise.resolve(doc.save()).catch(() => {})
+            await Promise.resolve(vscode.workspace.fs.writeFile(uri, Buffer.from(text, 'utf8'))).catch(() => {})
+          }
+        }
+        return undefined
+      }).catch(async (err) => {
+        const c = (await vscode.commands.executeCommand(
+          'onegayi.vsidian._test.getRenameCandidates', wsUri('改名目标.md').fsPath,
+        )) as { status: string; incomingFsPaths: string[] } | undefined
+        const s = (await vscode.commands.executeCommand('onegayi.vsidian._test.getVaultIndexState')) as {
+          roots: Array<{ fsPath: string; hasData: boolean; scanning: boolean; queued: number; fileCount: number; edgeCount: number }>
+        }
+        throw new Error(`${(err as Error).message}；candidates实况=${JSON.stringify(c)}；主根实况=${JSON.stringify(s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir)))}`)
+      })
       // 跨根移动：改名目标.md → 第二根（跨根移动不被拦截，但不得生成跨根引用）
       const edit = new vscode.WorkspaceEdit()
       edit.renameFile(wsUri('改名目标.md'), vscode.Uri.file(`${secondDir}/改名目标.md`), { overwrite: false })
