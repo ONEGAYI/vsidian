@@ -88,7 +88,7 @@ const KATEX_FONT_FAMILIES = [
 const REQUIRED_KATEX_FONTS = KATEX_FONT_FAMILIES.map(
   (family) => `out/webview/assets/${family}.woff2`,
 )
-// 快速操作条 CSS 引用的 17 项 × 明暗主题 SVG，经 esbuild file loader
+// 快速操作条与查找面板 CSS 引用的明暗主题 SVG，经 esbuild file loader
 // 从 media/quick-actions 制作源搬入 out/webview/assets；全部是运行必需项。
 // #105/#106 起新增 highlight 与 horizontalRule 两键。
 const QUICK_ACTION_ICON_KEYS = [
@@ -99,6 +99,10 @@ const QUICK_ACTION_ICON_KEYS = [
   // #185 右键菜单图标接入同一图标集（部分复用上列既有键，此处为新增键）
   'normalText', 'textFormat', 'paragraphStyle', 'comment',
   'externalLink', 'cut', 'copy', 'paste', 'selectAll', 'insertPlus',
+  // #236 查找面板六键（0.7.0 后未发布批次引入，此前发布检查未跑过）
+  'findPrev', 'findNext', 'findClose', 'replaceOne', 'replaceAll', 'findInSelection',
+  // 2026-10 查找面板替换栏切换 chevron（Pen 直绘）
+  'chevronRight',
 ]
 const REQUIRED_QUICK_ACTION_SVGS = ['light', 'dark'].flatMap((theme) =>
   QUICK_ACTION_ICON_KEYS.map((key) => `out/webview/assets/${theme}-${key}.svg`),

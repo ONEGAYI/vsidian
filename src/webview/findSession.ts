@@ -47,8 +47,10 @@ export const FIND_CLASS_NAMES = {
   open: 'vsidian-find-open',
   /** 主行（查找输入 + 计数 + 三开关 + 导航）：面板 column 布局的行容器 */
   row: 'vsidian-find-row',
-  /** 替换栏展开/收起切换按钮（面板左缘 v 形） */
+  /** 替换栏展开/收起切换按钮（面板左缘竖条；2026-10 起 grid 左列全高） */
   toggle: 'vsidian-find-toggle',
+  /** 切换按钮内嵌图标载体（SVG 背景图挂此层，aria-expanded 旋转 90°） */
+  toggleGlyph: 'vsidian-find-toggle-glyph',
   /** 替换行容器（open 类控制显隐） */
   replace: 'vsidian-find-replace',
   replaceOpen: 'vsidian-find-replace-open',

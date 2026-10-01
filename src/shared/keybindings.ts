@@ -21,12 +21,13 @@ const extra: readonly KeybindingOperation[] = [
   { id: 'find', command: 'onegayi.vsidian.find', titleKey: 'command.find.title', mode: 'both', writes: false, defaults: ['ctrl+f', 'meta+f'] },
   { id: 'findNext', command: 'onegayi.vsidian.find.next', titleKey: 'command.find.next.title', mode: 'both', writes: false, defaults: ['f3'] },
   { id: 'findPrevious', command: 'onegayi.vsidian.find.previous', titleKey: 'command.find.previous.title', mode: 'both', writes: false, defaults: ['shift+f3'] },
-  // #236 查找替换：findReplace 打开面板并展开替换栏（双模式命令均可用
-  // ——阅读模式只开面板不展开，替换是 Live 编辑能力）；替换操作是面板
+  // #236 查找替换：findReplace 打开面板并展开替换栏（2026-10 用户决策：
+  // 阅读模式整体禁用替换——生效模式收窄到 Live，Ctrl+H 在阅读不消费不
+  // 响应，替换栏 toggle 同步 disabled；替换操作是面板
   // 会话命令（仅面板开 + live + 合法 query 时执行，webview 本地消化），
   // 默认不占键位——面板内替换输入框 Enter 与按钮是主入口（VSCode
   // Windows 档替换下一个亦无全局默认键），键位留给用户按需绑定
-  { id: 'findReplace', command: 'onegayi.vsidian.find.replace', titleKey: 'command.find.replace.title', mode: 'both', writes: false, defaults: ['ctrl+h'] },
+  { id: 'findReplace', command: 'onegayi.vsidian.find.replace', titleKey: 'command.find.replace.title', mode: 'live', writes: false, defaults: ['ctrl+h'] },
   { id: 'findReplaceNext', command: 'onegayi.vsidian.find.replaceNext', titleKey: 'command.find.replaceNext.title', mode: 'live', writes: false, defaults: [] },
   { id: 'findReplaceAll', command: 'onegayi.vsidian.find.replaceAll', titleKey: 'command.find.replaceAll.title', mode: 'live', writes: false, defaults: [] },
   { id: 'toggleViewMode', command: 'onegayi.vsidian.toggleViewMode', titleKey: 'command.toggleViewMode.title', mode: 'both', writes: false, defaults: [] },

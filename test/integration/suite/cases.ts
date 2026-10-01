@@ -4084,7 +4084,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await doc.save()
     assert(await readDisk('find.md') === text, '撤销后保存应恢复原磁盘内容')
 
-    // 阅读模式：替换栏不展开（Ctrl+H 语义在 webview 收窄为只开面板）、
+    // 阅读模式：替换整体禁用（2026-10）——面板保活收起替换栏、toggle 禁用，
     // 替换指令静默忽略（只读）
     await vscode.commands.executeCommand(CMD.postToPanel, uri, {
       kind: 'view.find.open', query: '目标词', replace: true, replacement: '替换词',
@@ -4104,6 +4104,15 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(session4.appliedEdits === session3.appliedEdits, `阅读模式不得执行替换（${session3.appliedEdits} → ${session4.appliedEdits}）`)
     const docFinal = await vscode.workspace.openTextDocument(wsUri('find.md'))
     assert(docFinal.getText() === text, '阅读模式替换指令后权威文本不变')
+
+    // 面板已关：阅读模式带 replace 的打开指令不开面板（2026-10 整体禁用）。
+    // 先留消息回路窗口再断言关闭态——守卫失效时面板在窗口内打开，
+    // open===false 轮询恒不满足即超时失败，断言具备真实回归能力
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'view.find.open', query: '目标词', replace: true, replacement: '替换词',
+    })
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    await waitViewState('find.md', (s) => s.find?.open === false)
   }],
 
   ['编辑区查找：替换的成型头区排除——头区零写回与计数一致（#241 评审修复 P0-2）', async () => {
