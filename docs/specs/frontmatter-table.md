@@ -53,6 +53,17 @@
 6. **围栏行的源码显形（已随 Popover 改版退役）**：首版「光标触及首行 / 闭合行时撤下装饰、源码显形」语义被「成型态不暴露源码 + 光标引导」替代——光标进入头区任何位置（含围栏行）都被引导至闭合行后，编辑经浮层完成；源码形态仅降级出现（可编辑）。
 7. **卡片折叠（2026-10）**：标题栏热区 + 右上折叠 chevron 收起/展开键值行区，零写回、视图态不持久化、双视图各持（详见「卡片折叠」节）。
 
+## 实施落档约定（扩展与修改前必读）
+
+本节是 AGENTS.md 指针目标的正文：修改 frontmatter 相关行为前必读，台账外边界不得顺手改。
+
+- **成型/降级判定单一事实源**：`src/shared/frontmatterTable.ts`——自研行级形态学定位区间（tableCells 先例）+ `yaml` 包 parseDocument 兜底合法性与类型，双层各司其职；新增支持类型只改该模块，并在 `test/unit/frontmatterTable.test.ts` 补降级矩阵。
+- **观感硬约束**（验收二轮实测教训，改版须保持）：**行级 grid 不限宽**——`vsidian-fm-row` 是行级类（直接作用于 .cm-line），任何 width 上限都会把行级背景/边框一并收窄、与头部行（widget 撑满）错位，右侧形成编辑器底色空洞与断边；**行区透明**（撞色边界感 = 卡片边框 + 标题栏微亮条，不铺底色）；标题栏行的 cm-widgetBuffer 隐藏（inline replace 前后各一个、各占一行文字高，头部行曾被撑到 1.7 倍正文行高）；键名弱化 opacity 0.7 + ::before 类型图标（标量 T / 数组宿主行 `vsidian-fm-list-row` 列表形 ≡，两侧同类名同规则）。
+- **光标引导口径（#183 收窄）**：transactionFilter 硬拦 + updateListener 微任务兜底的引导，仅当**选区两端都在头区**时触发（全选/跨头区拖选放行——统一菜单剪贴板全选的语义前提）；完全落入头区的选区仍被引导。`externalSync` 与 undo/redo 事务豁免 filter；头区重析与 `fmModel` 的 fmTouched 增量重析不受影响（头块重建区间仍须 `tr.changes.mapPos` 映射；update 途中不得同步 dispatch 是 CM6 约束，兜底必须延迟重读最新状态）。
+- **浮层同步**：文档变更经 updateListener 通知浮层按最新模型全量重建行 DOM，焦点与光标位按行标识（`data-entry-from` + role）还原；外部同步改写头区同样回流；头区降级瞬间浮层自动关闭。
+- **行类与别名桥**：成型卡片行保留 `vsidian-frontmatter-line` 行类（Obsidian 别名桥 `.cm-hmd-frontmatter` direct 级在成型形态保持命中，降透明副作用由卡片规则重置）。
+- **一期边界**（`limit-fm-complex-types` 条目钉住）：flow 数组 Popover 内值整框编辑、无项级拆分（阅读侧仍拆项呈现）；行内注释卡片内绘制层隐藏；零缩进 block 序列降级源码。
+
 ## 用户故事
 
 1. 作为编辑者，我在文档头手打 `---` 与几行键值后，头区自动变成表格卡片，不需要记语法细节。

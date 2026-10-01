@@ -53,6 +53,10 @@ Remove-Item Env:VSIDIAN_ITEST_SHARDS
 
 `all` 为默认组，显式组名只接受 `all / core / sensitive`。定向筛选未命中当前组即报错；切片后合法的空片仍允许。开发态 all/core 的报告沿用 `.vscode-test/integration-dev.log` 或 `integration-dev-s<片号>.log`；sensitive 使用 `integration-sensitive.log` 或 `integration-sensitive-s<片号>.log`。报告记录分组、计划数量、逐项 START/PASS/FAIL/TIME 和宿主退出码；首次运行即落盘，复核只读报告。
 
+## 测试钩子与消息通道门控（`_test.*`）
+
+扩展注册 `onegayi.vsidian._test.*` 辅助命令供集成测试观测/注入，仅 `VSIDIAN_TEST_HOOKS=1` 时注册。测试消息通道是**宿主侧门控、webview 侧被动接收**的分层设计：`_test.*` 注入命令（含向 webview 转发 `table.test.key` / `task.test.click` / `reading.test.image` 等）在宿主侧受 `VSIDIAN_TEST_HOOKS` 门控；webview 侧这些消息分支不做二次门控——webview 面板的消息源只有扩展自身（`panel.webview.postMessage`），封住注入源即封住入口。**勿误判为 webview 未设防**：这不是漏加门控，而是分层设计的既定边界。
+
 ## 门禁调整与兼容证据
 
 本次 CI 修改的理由是把用户批准的四项临时豁免显式隔离，同时保留检测、失败信号和报告。#129 只迁移上述动态刷新用例，其余 CSS 导入、历史片段绘制与兼容检查仍在 core。独立 `style-contract` job 的基线复验、检查器变更暴露、全量检查、报告上传及发布链路均保持原有语义。
