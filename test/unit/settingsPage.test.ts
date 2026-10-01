@@ -500,7 +500,7 @@ describe('组标题图标机制（#263：编辑器页二级 h3 组字形）', ()
     return [...parent.querySelectorAll<HTMLElement>('.vsidian-settings-group-title')]
   }
 
-  it('显示/编辑/代码块/图片四组标题渲染图标且图标在前；符号输入组不加（生图票 #265 接入）', () => {
+  it('五组标题均渲染图标：四枚内联字形与符号输入打字机资产都在文字前', () => {
     const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
     const titles = groupTitleEls(parent)
     expect(titles).toHaveLength(5)
@@ -512,7 +512,11 @@ describe('组标题图标机制（#263：编辑器页二级 h3 组字形）', ()
       expect(titles[i]!.firstElementChild).toBe(svg)
       expect(svg!.getAttribute('aria-hidden')).toBe('true')
     }
-    expect(titles[2]!.querySelector('svg')).toBeNull()
+    const generated = titles[2]!.querySelector<HTMLElement>('.vsidian-settings-generated-icon')
+    expect(generated).toBeTruthy()
+    expect(titles[2]!.firstElementChild).toBe(generated)
+    expect(generated!.dataset.icon).toBe('typewriter')
+    expect(generated!.getAttribute('aria-hidden')).toBe('true')
     expect(titles[2]!.textContent).toBe(zhCn['settings.groupSymbols'])
   })
 
@@ -540,6 +544,9 @@ describe('组标题图标机制（#263：编辑器页二级 h3 组字形）', ()
     expect(title).toContain('border-bottom: 1px solid')
     // 图标视觉尺寸 16px（覆盖设置页统一 20px 规则）
     expect(css).toMatch(/\.vsidian-settings-group-title svg\s*\{[^}]*width:\s*16px[^}]*height:\s*16px/)
+    expect(css).toMatch(/\.vsidian-settings-group-title \.vsidian-settings-generated-icon\s*\{[^}]*width:\s*16px[^}]*height:\s*16px/)
+    expect(css).toContain('light-typewriter.svg')
+    expect(css).toContain('dark-typewriter.svg')
     // 统一渲染规则仍为字形族共本（fill:none、stroke:currentColor、1.7 圆角线帽）
     expect(css).toMatch(/\.vsidian-settings svg\s*\{[^}]*fill:\s*none[^}]*stroke:\s*currentColor[^}]*stroke-width:\s*1\.7/)
   })

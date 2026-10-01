@@ -30,6 +30,7 @@ const QUICK_ICON_KEYS = [
   'externalLink', 'cut', 'copy', 'paste', 'selectAll', 'insertPlus',
   'findPrev', 'findNext', 'findClose', 'replaceOne', 'replaceAll', 'findInSelection',
   'chevronRight',
+  'typewriter', 'wordSegment',
 ]
 function quickActionIconEntries() {
   return ['light', 'dark'].flatMap((theme) => QUICK_ICON_KEYS.map((key) => ({

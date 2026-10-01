@@ -71,7 +71,7 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, tex
  *  链环图标同一造型语言（索引维护分页的链接域意象）；
  *  display/editing/codeblock/image（#263 编辑器页二级组标题四枚，v2 拍板
  *  清单原样 path）：显示 = 显示器、编辑 = 双 I 光标、代码块 = 尖括号、
- *  图片 = 山形相框（符号输入组待生图票 #265 接入，不在本表）。
+ *  图片 = 山形相框（#265 生图两枚从独立 SVG 资产加载，不在本表）。
  *  book（#132 样式参考分页）随 #231 侧栏条目合并退役；
  *  #163 一轮曾为符号/代码块/图片三组新增 keyboard 复用与 code/image 形，
  *  二轮还原为页内小节后侧栏不再使用，已随分支退役。 */
@@ -98,9 +98,18 @@ function icon(kind: keyof typeof ICON_PATHS): SVGSVGElement {
   return svg
 }
 
-/** #263 编辑器页二级组标题字形 kind（icon() 单表子集；#265 生图两枚接入
- *  时扩展符号输入/分词两 kind 并回填 editorSectionDefs） */
-export type SettingsGroupIcon = 'display' | 'editing' | 'codeblock' | 'image'
+/** 编辑器页二级组标题图标：四枚内联线性字形与 #265 两枚生图资产。 */
+export type SettingsGroupIcon = 'display' | 'editing' | 'codeblock' | 'image' | 'typewriter' | 'wordSegment'
+
+function groupIcon(kind: SettingsGroupIcon): SVGSVGElement | HTMLSpanElement {
+  if (kind === 'typewriter' || kind === 'wordSegment') {
+    const glyph = element('span', 'vsidian-settings-generated-icon')
+    glyph.dataset.icon = kind
+    glyph.setAttribute('aria-hidden', 'true')
+    return glyph
+  }
+  return icon(kind)
+}
 
 export class SettingsPageView {
   private values: SettingsPayload | undefined
@@ -283,13 +292,12 @@ export class SettingsPageView {
     return this.defs.filter((d) => !d.key.startsWith('general.') && !d.key.startsWith('editor.wordSegment'))
   }
   /** 编辑器页内小节（顺序即渲染顺序）；空小节由调用方跳过不渲染。
-   *  #263：icon 为二级组标题字形（icon() 单表 kind，注册表驱动；缺省 =
-   *  无图标——符号输入组待生图票 #265 接入，布局机制对其无差别） */
+   *  icon 为二级组标题图标，注册表驱动。 */
   private editorSectionDefs(): Array<{ titleKey: MessageKey; icon?: SettingsGroupIcon; defs: () => readonly SettingDefinition[] }> {
     return [
       { titleKey: 'settings.groupDisplay', icon: 'display', defs: () => this.displayDefs() },
       { titleKey: 'settings.groupEditing', icon: 'editing', defs: () => this.editingDefs() },
-      { titleKey: 'settings.groupSymbols', defs: () => this.symbolDefs() },
+      { titleKey: 'settings.groupSymbols', icon: 'typewriter', defs: () => this.symbolDefs() },
       { titleKey: 'settings.groupCodeblock', icon: 'codeblock', defs: () => this.codeblockDefs() },
       { titleKey: 'settings.groupImage', icon: 'image', defs: () => this.imageDefs() },
     ]
@@ -407,10 +415,9 @@ export class SettingsPageView {
       const defs = section.defs()
       if (!defs.length) continue
       const container = element('div', 'vsidian-settings-group')
-      // #263 组标题图标：h3 为 flex + gap 布局（图标置左 padding 缘、文字
-      // 右移；无图标组同规则，视觉不变），图标沿用设置页统一 svg 渲染规则
+      // 组标题图标：h3 保持 flex + gap 布局；内联字形和生图资产同占 16px。
       const title = element('h3', 'vsidian-settings-group-title')
-      if (section.icon) title.append(icon(section.icon))
+      if (section.icon) title.append(groupIcon(section.icon))
       title.append(document.createTextNode(t(section.titleKey)))
       container.append(title)
       list.append(container)
