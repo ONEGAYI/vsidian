@@ -23,8 +23,11 @@ Vsidian brings an Obsidian-like Markdown editing experience to VS Code. After in
 | Three view states | Cycle live preview, reading, and the source editor; the last mode and scroll position are remembered across windows |
 | Unified context menu | Right-click anywhere in the live preview body for link, formatting, and clipboard clusters, with cascading submenus, icons, and shortcut hints |
 | Text formatting | Command palette and quick-action bar cover bold, italic, highlight, headings, inline code, and more; every action is rebindable |
+| Multi-cursor editing | Alt+click and Ctrl+Alt+Up/Down add cursors; type and format across selections in parallel, Esc collapses back to one cursor (toggle in settings) |
+| Select next occurrence | Ctrl+D adds each next match as a selection; Ctrl+Shift+L selects all occurrences |
+| Chinese word-wise motion | Ctrl+arrows step through Chinese text word by word; optional jieba engine (downloaded on demand) falls back to the built-in segmenter |
+| Find & replace | Case, whole-word, and regex toggles; find in selection; Ctrl+H expands the replace bar; reading mode highlights matches per character |
 | Keybindings | Every action rebinds in one place (chords supported) with conflict detection, clear, and reset to defaults |
-| Find | Ctrl+F / Cmd+F (when the editor is active) |
 
 ### Structured content
 
@@ -48,9 +51,10 @@ Vsidian brings an Obsidian-like Markdown editing experience to VS Code. After in
 
 | Feature | Description |
 | --- | --- |
+| Hover document preview | Ctrl+hover a link to preview the target note — full text, a heading section, or a block reference; available in live preview, reading mode, and the link panels, with a direct-hover option in settings |
+| Document embeds | `![[note]]` mounts a read-only card in both views, source shows for editing at the cursor; inline, list, quote, and table-cell positions all render, with recursive expansion (three levels by default) |
 | Backlink panel | The sidebar shows which documents reference the current note: context cards grouped by source with the matched link highlighted, sortable and searchable, click to jump to the reference |
 | Outgoing links panel | The sidebar lists every link in the current note (wikilinks, links, images, reference definitions); click lands on the link's actual anchor, broken links dim |
-| Recursive note embeds | Standalone `![[note]]` cards expand nested notes read-only, up to three levels by default; set the limit from one to six in Vsidian settings, with an open-target action at limits or cycles |
 | Reference updates on rename | Renaming or moving files and folders inside VS Code rewrites wikilinks, links, and image references to the new locations; one undo reverts the whole rewrite |
 
 ### Code blocks & diagrams
@@ -70,8 +74,8 @@ Vsidian brings an Obsidian-like Markdown editing experience to VS Code. After in
 
 | Feature | Description |
 | --- | --- |
-| CSS snippets | First-level `.css` files in a user folder become cross-project snippets with per-file toggles, nested `@import`, and HTTPS remote styles and fonts |
-| Style reference | The public style contract browses offline with search; the contract JSON exports for AI assistants and external tools |
+| CSS snippets | The "Appearance" page in Vsidian settings manages user-folder `.css` snippets with per-file toggles, nested `@import`, and HTTPS remote styles and fonts |
+| Style reference | The "Appearance" page browses the public style contract offline with search; the contract JSON exports for AI assistants and external tools |
 | Readable line width | One slider constrains the body column in both views; 0 fills the available width, the column centers and yields to the outline panel |
 | Interface language | English and 简体中文 switch instantly, following the VS Code display language by default |
 
