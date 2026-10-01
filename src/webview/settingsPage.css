@@ -319,6 +319,33 @@ button:focus-visible, input:focus-visible {
   color: var(--vscode-inputValidation-warningForeground, inherit);
   background: var(--vscode-inputValidation-warningBackground, transparent); }
 
+/* ---- #239 中文分词分页（引擎选择、下载源与资源管理） ---- */
+.vsidian-wordseg-block { padding: 10px 0 6px; display: flex; flex-direction: column; gap: 6px; }
+.vsidian-wordseg-label { display: flex; flex-direction: column; gap: 3px; min-width: 0; margin-top: 4px; }
+.vsidian-wordseg-caption { font-weight: 600; }
+.vsidian-wordseg-description { color: var(--vscode-descriptionForeground, #666); }
+.vsidian-wordseg-option { display: flex; align-items: flex-start; gap: 8px; padding: 2px 0; cursor: pointer; }
+.vsidian-wordseg-option:has(input:disabled) { cursor: default; opacity: 0.55; }
+.vsidian-wordseg-option input { margin-top: 3px; flex: none; }
+.vsidian-wordseg-option-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.vsidian-wordseg-option-hint { color: var(--vscode-descriptionForeground, #666); }
+.vsidian-wordseg-custom-row { display: flex; margin-top: 2px; }
+.vsidian-wordseg-custom-url { flex: 1 1 auto; min-width: 0;
+  font-family: var(--vscode-editor-font-family, inherit); }
+.vsidian-wordseg-custom-url:disabled { opacity: 0.55; }
+.vsidian-wordseg-status { min-height: 20px; margin: 4px 0 0; color: var(--vscode-descriptionForeground, #666); }
+.vsidian-wordseg-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.vsidian-wordseg-actions button { min-height: 26px; padding: 3px 10px;
+  border: 1px solid var(--vscode-button-border, var(--vscode-panel-border, #cbd0d8)); border-radius: 6px;
+  color: var(--vscode-button-secondaryForeground, inherit);
+  background: var(--vscode-button-secondaryBackground, transparent); cursor: pointer; }
+.vsidian-wordseg-actions button:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground, #e9ebef)); }
+.vsidian-wordseg-actions button.vsidian-index-primary {
+  color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-background, #0078d4);
+  border-color: transparent; }
+.vsidian-wordseg-actions button.vsidian-index-primary:hover { background: var(--vscode-button-hoverBackground, #006ab8); }
+.vsidian-wordseg-actions button:disabled { opacity: 0.55; cursor: default; }
+
 
 /* ---- #132 样式参考分页（styleReferenceSettings；条目卡片与过滤工具行） ---- */
 /* #155 跟进：详细查询页签可见时主区收起滚动（:has 联动，切回总表自动恢复）

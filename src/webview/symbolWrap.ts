@@ -15,10 +15,10 @@
 //      机制）。跨段包裹第一轮后选区即多 range（各段原文），第二轮键入
 //      走本形态，标记不进原文。
 // - 多 range 选区依赖 allowMultipleSelections facet（EditorState 否则会
-//      把任何事务选区 asSingle 砍成单 range）；随本扩展组装配，关闭
-//      「选区包裹」设置即整组退出。已知视觉边界：本扩展未启用
-//      drawSelection，多 range 只有 main range 反映为 DOM 原生选区高亮
-//      （功能不受影响——继续键入经 replaceSelection 覆盖全部 range）。
+//      把任何事务选区 asSingle 砍成单 range）；#237 起该 facet 由多光标
+//      扩展组（multicursor.ts，独立设置默认开）装配并随 drawSelection 呈现
+//      多 range 选区/副光标——多光标关闭时跨段包裹文本仍生效，产物选区
+//      被折回主 range（降级边界，规格 keybindings.md #237 节）。
 // - 门控链：input 类事务 → 非粘贴/拖放 → 非组合（input.type.compose 涵盖
 //   组合中间与定稿窗口，filter 一律不改写；IME 选区的包裹重建不走 filter，
 //   由下方 wrapCompositionTracker 在定稿后主动派发）→ 变更形态与选区对齐
@@ -317,12 +317,12 @@ const wrapCompositionTracker = EditorView.domEventHandlers({
 
 /**
  * 装配入口（syncController 经 Compartment 按设置热重配；顺序约束见
- * 文件头——置于 symbolAutocomplete 之后）。allowMultipleSelections 随组
- * 装配：多 range 原文选区的存续前提（也顺带启用 CM6 原生 Ctrl/Cmd+click
- * 多光标，属已接受的伴生行为）。
+ * 文件头——置于 symbolAutocomplete 之后）。#237 起 allowMultipleSelections
+ * 不再随本组装配——多选区存续由多光标扩展组（multicursor.ts，独立设置
+ * 默认开）承载，符号包裹开关不影响多选区可用性；多光标关闭时跨段包裹
+ * 的文本改写仍生效，仅产物选区被 asSingle 折回主 range（降级边界）。
  */
 export const symbolSelectionWrap = [
-  EditorState.allowMultipleSelections.of(true),
   selectionWrapFilter,
   wrapCompositionCapture,
   wrapCompositionTracker,

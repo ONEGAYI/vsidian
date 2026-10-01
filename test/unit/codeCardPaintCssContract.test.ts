@@ -16,6 +16,12 @@ function rule(selector: string, declaration?: RegExp): string {
 }
 
 describe('代码块卡片 CSS 契约（#79）', () => {
+  it('代码内选区在 drawSelection 开启时补绘，聚焦/失焦颜色与宿主同源', () => {
+    expect(rule('#app .cm-editor:has(.cm-selectionLayer) .cm-content .vsidian-code-selection'))
+      .toMatch(/background-color:\s*var\(--vscode-editor-inactiveSelectionBackground/)
+    expect(rule('#app .cm-editor.cm-focused:has(.cm-selectionLayer) .cm-content .vsidian-code-selection'))
+      .toMatch(/background-color:\s*var\(--vscode-editor-selectionBackground/)
+  })
   it('卡片行底色走公开变量 --vsidian-code-card-background（回落主题变量）', () => {
     expect(rule('#app .cm-editor .cm-scroller .cm-line.vsidian-code-card-line'))
       .toMatch(/background-color:\s*var\(--vsidian-code-card-background/)

@@ -131,6 +131,30 @@ body.vscode-light #app {
   outline: none;
 }
 
+/* ---- #237 多光标：drawSelection 绘制层接管选区背景与光标 ----
+   选区背景以 VSCode 主题变量落色（聚焦取编辑器选区色、失焦取非活动选区
+   色），覆盖 CM6 内建硬编码色（#d9d9d9 / #d7d4f0 / #222 / #233 一族）；
+   回退值近似 VSCode 默认主题。ID 特异性高于 baseTheme 类级规则、聚焦
+   规则（多一类 .cm-focused）高于本组失焦规则，两态均稳定生效。绘制光标
+   颜色不在本文件落规则——仍由 baseTheme 明暗变体接管（light=black /
+   dark=#ddd，与原生 caret 时代同口径，见 editorChromeCssContract 契约）。 */
+#app .cm-editor .cm-selectionLayer .cm-selectionBackground {
+  background: var(--vscode-editor-inactiveSelectionBackground, rgba(117, 117, 117, 0.35));
+}
+
+#app .cm-editor.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground {
+  background: var(--vscode-editor-selectionBackground, rgba(38, 79, 120, 0.45));
+}
+
+/* 代码行允许不透明底色；文字层补绘选区。多光标关闭时仍用原生选区。 */
+#app .cm-editor:has(.cm-selectionLayer) .cm-content .vsidian-code-selection {
+  background-color: var(--vscode-editor-inactiveSelectionBackground, rgba(117, 117, 117, 0.35));
+}
+
+#app .cm-editor.cm-focused:has(.cm-selectionLayer) .cm-content .vsidian-code-selection {
+  background-color: var(--vscode-editor-selectionBackground, rgba(38, 79, 120, 0.45));
+}
+
 /* ---- #34 行号列：流内布局（用户修订 #32 旧契约）----
    行号列 + 固定间距（--vsidian-ln-gap，响应 UI 字号）+ 主体文字的总宽 =
    行号关闭时的正文宽度：列在 scroller 内容流内、随位数自适应宽度，
@@ -1919,11 +1943,27 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
   padding-left: 0;
 }
 
-/* 无序列表：标记隐藏后以圆点呈现；源码显形时抑制伪圆点 */
+/* 无序列表：标记隐藏后以圆点呈现；源码显形时抑制伪圆点。
+   点号按嵌套深度分级（与阅读侧 marker 语义对齐）：一级实心 •（基线）、
+   二级空心 ◦、三级起实心方块 ▪——空心专表二级子列表，修复此前全层级
+   实心与阅读视图不一致的问题 */
 #app .cm-editor .cm-scroller .vsidian-list-line.vsidian-list-bullet:not(.vsidian-list-marker-visible)::before {
   content: '•';
   margin-right: 7px;
   color: var(--vscode-editorLineNumber-foreground, rgba(128, 128, 128, 0.8));
+}
+
+#app .cm-editor .cm-scroller .vsidian-list-line.vsidian-list-line-d2.vsidian-list-bullet:not(.vsidian-list-marker-visible)::before {
+  content: '◦';
+}
+
+#app .cm-editor .cm-scroller .vsidian-list-line.vsidian-list-line-d3.vsidian-list-bullet:not(.vsidian-list-marker-visible)::before,
+#app .cm-editor .cm-scroller .vsidian-list-line.vsidian-list-line-d4.vsidian-list-bullet:not(.vsidian-list-marker-visible)::before,
+#app .cm-editor .cm-scroller .vsidian-list-line.vsidian-list-line-d5.vsidian-list-bullet:not(.vsidian-list-marker-visible)::before,
+#app .cm-editor .cm-scroller .vsidian-list-line.vsidian-list-line-d6.vsidian-list-bullet:not(.vsidian-list-marker-visible)::before,
+#app .cm-editor .cm-scroller .vsidian-list-line.vsidian-list-line-d7.vsidian-list-bullet:not(.vsidian-list-marker-visible)::before,
+#app .cm-editor .cm-scroller .vsidian-list-line.vsidian-list-line-d8.vsidian-list-bullet:not(.vsidian-list-marker-visible)::before {
+  content: '▪';
 }
 
 #app .cm-editor .cm-scroller .vsidian-list-line-d2 { padding-left: 1.6em; }
@@ -2007,9 +2047,17 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
   border-radius: 0 0 6px 6px;
 }
 
+/* 折叠收起态（live）：标题栏行兼任卡片底边——复合选择器叠于 edge-top
+   的顶边圆角之上补底边框与四角圆角（闭合行已并入隐藏区，无底边行） */
+#app .cm-editor .cm-scroller .vsidian-fm-card-edge-top.vsidian-fm-card-folded {
+  border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
+  border-radius: 6px;
+}
+
 /* 标题栏（live 首围栏行 replace widget 与阅读侧容器内同构，#app 下两
    视图同类名同布局）：微亮条与正文区分（撞色边界感的第二来源，参考图
-   头部条形态），高度紧凑（padding 收敛，总高约 1.2 倍正文行高） */
+   头部条形态），高度紧凑（padding 收敛，总高约 1.2 倍正文行高）。
+   整条标题栏为折叠热区（与代码卡 #190 同口径）：指针形态 + 禁选中 */
 #app .vsidian-fm-header {
   display: flex;
   align-items: center;
@@ -2018,6 +2066,8 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
   padding: 3px 10px;
   background: var(--vsidian-table-background, rgba(128, 128, 128, 0.05));
   font-family: var(--vscode-font-family, sans-serif);
+  cursor: pointer;
+  user-select: none;
 }
 
 #app .vsidian-fm-header-icon {
@@ -2051,6 +2101,38 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
 #app button.vsidian-fm-edit:hover,
 #app button.vsidian-fm-edit:focus-visible {
   background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.2));
+}
+
+/* 折叠 chevron（与代码卡 vsidian-code-card-fold 同形态）：无边框幽灵按钮
+   两态常驻，收起态转向 -90°；点击经回调切换折叠（标题栏热区共用入口） */
+#app .vsidian-fm-header .vsidian-fm-fold {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  box-sizing: border-box;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.9));
+  opacity: 0.7;
+}
+
+#app .vsidian-fm-header .vsidian-fm-fold:hover,
+#app .vsidian-fm-header .vsidian-fm-fold:focus-visible {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.16));
+  opacity: 1;
+}
+
+#app .vsidian-fm-header .vsidian-fm-fold svg {
+  transition: transform 0.12s ease;
+}
+
+#app .vsidian-fm-header .vsidian-fm-fold-collapsed svg {
+  transform: rotate(-90deg);
 }
 
 /* 键值行行级 grid：撑满内容区（不限宽——行级类直接作用于 .cm-line，
@@ -2131,6 +2213,12 @@ body.vscode-high-contrast .vsidian-context-menu [data-icon='blockMath'] { --vsid
 #app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-row {
   display: grid;
   grid-template-columns: minmax(120px, 32%) 1fr;
+}
+
+/* 阅读折叠收起态：行区整体隐藏（含空态行），表壳边框圆角由容器保留——
+   与 live 的整块隐藏同语义（行从可读 DOM 消失而非仅视觉折叠） */
+#app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-table.vsidian-fm-folded .vsidian-fm-row {
+  display: none;
 }
 
 #app .vsidian-view-reading .vsidian-reading-frontmatter .vsidian-fm-row > .vsidian-fm-cell {
@@ -2792,6 +2880,16 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   caret-color: transparent;
 }
 
+/* #237 多光标开启（drawSelection）后，绘制光标与零宽活动格的 ::after
+   假光标会重叠：隐藏绘制光标，格内光标呈现维持既有假光标（对齐/边框
+   语义完整、非聚焦态不显形口径不变）；多光标关闭时 .cm-cursor 元素不在
+   场，本规则自然失效。已知边界：多光标下若一条光标在活动空格内、另一
+   条在其余正文，其余位置的绘制光标也被一并隐藏（:has 无法按行关联
+   覆盖层元素；与上方 caret-color 全局透明规则同一取舍口径，#240 复核） */
+#app .cm-editor:has(.vsidian-table-grid-empty-active) .cm-cursorLayer .cm-cursor {
+  display: none;
+}
+
 #app .cm-editor .cm-scroller .vsidian-table-grid-empty-active {
   position: relative;
 }
@@ -3166,6 +3264,21 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   margin: 0.15em 0;
 }
 
+/* 阅读列表点号层级显式钉住（不依赖 UA 默认样式表；外部片段重置容器
+   list-style 时层级语义不漂移）：一级 disc 实心 / 二级 circle 空心 /
+   三级起 square 方块——与 Live 侧 ::before 分级字形同语义（见上） */
+#app .vsidian-view-reading .vsidian-reading-block ul {
+  list-style-type: disc;
+}
+
+#app .vsidian-view-reading .vsidian-reading-block :is(ul, ol) ul {
+  list-style-type: circle;
+}
+
+#app .vsidian-view-reading .vsidian-reading-block :is(ul, ol) :is(ul, ol) ul {
+  list-style-type: square;
+}
+
 #app .vsidian-view-reading .vsidian-reading-hr hr {
   border: none;
   border-top: 2px solid var(--vsidian-hr-color);
@@ -3242,9 +3355,12 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   color: var(--vscode-button-secondaryForeground);
 }
 
-/* ---- 编辑区查找（#14）：webview 内浮动查找面板 ----
+/* ---- 编辑区查找（#14；#236 起三开关面板与可展开替换栏）：webview 内浮动查找面板 ----
    稳定样式入口（ADR-0004）：面板与匹配高亮均经 vsidian-find-* 类定位；
    custom editor webview 不可用 VSCode 原生 find 控件，此为自有 UI。
+   面板为 column 布局：左缘替换栏展开/收起切换（vsidian-find-toggle）+
+   主行（vsidian-find-row：输入/计数/三开关/导航/关闭）+ 替换行
+   （vsidian-find-replace，-open 类控制显隐——显隐纯 CSS，无 JS 内联）。
    --vsidian-find-match-background / -current-background 为可覆盖变量入口 */
 .vsidian-find {
   position: absolute;
@@ -3252,7 +3368,7 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   right: 14px;
   z-index: 40;
   display: none;
-  align-items: center;
+  flex-direction: column;
   gap: 4px;
   padding: 4px 6px;
   box-sizing: border-box;
@@ -3266,16 +3382,86 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   display: flex;
 }
 
-.vsidian-find .vsidian-find-input {
-  width: 180px;
+/* 替换栏展开/收起切换：左缘垂直居中（不占行内位），展开时箭头翻转 */
+.vsidian-find .vsidian-find-toggle {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  margin-top: -11px;
+  min-width: 18px;
+  padding: 3px 2px;
+}
+
+.vsidian-find .vsidian-find-toggle[aria-expanded='true'] {
+  transform: rotate(180deg);
+}
+
+/* 主行：输入 + 计数 + 三开关（Aa/ab/.*) + 上一个/下一个/关闭 */
+.vsidian-find .vsidian-find-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 20px;
+}
+
+/* 替换行：默认收起，-open 类展开（阅读模式恒收起——替换是 Live 编辑能力） */
+.vsidian-find .vsidian-find-replace {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  padding-left: 20px;
+}
+
+.vsidian-find .vsidian-find-replace.vsidian-find-replace-open {
+  display: flex;
+}
+
+.vsidian-find .vsidian-find-input,
+.vsidian-find .vsidian-find-replace-input {
   box-sizing: border-box;
   padding: 2px 6px;
   font-family: var(--vscode-font-family);
   font-size: var(--vscode-font-size, 13px);
   color: var(--vscode-input-foreground);
+  outline: none;
+}
+
+/* 主输入容器（#241 对齐原生）：边框/背景挂容器，三开关嵌入右缘；
+   聚焦环与非法态红边都落在容器上（invalid 类仍标在 input 上作状态源，
+   :has 上探容器着色——类不挪节点，契约不受扰） */
+.vsidian-find .vsidian-find-inputwrap {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  width: 220px;
+  padding: 1px 2px 1px 4px;
   background-color: var(--vscode-input-background);
   border: 1px solid var(--vscode-input-border, rgba(128, 128, 128, 0.35));
-  outline: none;
+  border-radius: 2px;
+}
+
+.vsidian-find .vsidian-find-inputwrap:focus-within {
+  border-color: var(--vscode-focusBorder, #007fd4);
+}
+
+/* 非法正则反馈：容器红边（不崩；计数区同时显示「无结果」） */
+.vsidian-find .vsidian-find-inputwrap:has(.vsidian-find-input-invalid) {
+  border-color: var(--vscode-inputValidation-errorBorder, #be1100);
+}
+
+/* 主输入本体透明无边框（宽度随容器分摊给三开关后的余量） */
+.vsidian-find .vsidian-find-input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px;
+  background-color: transparent;
+  border: none;
+}
+
+.vsidian-find .vsidian-find-replace-input {
+  width: 180px;
+  background-color: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, rgba(128, 128, 128, 0.35));
 }
 
 .vsidian-find .vsidian-find-count {
@@ -3286,11 +3472,136 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   white-space: nowrap;
 }
 
+/* 空查询 = 未搜索：计数区整体收起，不预留「当前/总数」占位（原生同款） */
+.vsidian-find .vsidian-find-count-hidden {
+  display: none;
+}
+
 .vsidian-find .vsidian-find-count-empty {
   color: var(--vscode-errorForeground, #f48771);
 }
 
+/* 图标按钮基线（#241 对齐 VSCode 原生浮层）：透明底 + hover 淡入底色，
+   功能词只在 aria-label/title（hover tooltip），按钮本体显示主题匹配的 SVG 图标。 */
 .vsidian-find button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 4px;
+  font-family: var(--vscode-font-family);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--vscode-foreground, #cccccc);
+  background-color: transparent;
+  border: none;
+  border-radius: 3px;
+}
+
+.vsidian-find button:hover {
+  background-color: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.25));
+}
+
+/* 导航、替换与「在选定内容中查找」按钮使用按主题切换的 16px SVG。 */
+.vsidian-find .vsidian-find-prev,
+.vsidian-find .vsidian-find-next,
+.vsidian-find .vsidian-find-close,
+.vsidian-find .vsidian-find-replace-next,
+.vsidian-find .vsidian-find-replace-all,
+.vsidian-find .vsidian-find-in-selection {
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 16px 16px;
+}
+
+#app .vsidian-find .vsidian-find-prev { background-image: url('../../media/quick-actions/light/light-findPrev.svg'); }
+#app .vsidian-find .vsidian-find-next { background-image: url('../../media/quick-actions/light/light-findNext.svg'); }
+#app .vsidian-find .vsidian-find-close { background-image: url('../../media/quick-actions/light/light-findClose.svg'); }
+#app .vsidian-find .vsidian-find-replace-next { background-image: url('../../media/quick-actions/light/light-replaceOne.svg'); }
+#app .vsidian-find .vsidian-find-replace-all { background-image: url('../../media/quick-actions/light/light-replaceAll.svg'); }
+#app .vsidian-find .vsidian-find-in-selection { background-image: url('../../media/quick-actions/light/light-findInSelection.svg'); }
+
+body.vscode-dark #app .vsidian-find .vsidian-find-prev,
+body.vscode-high-contrast #app .vsidian-find .vsidian-find-prev { background-image: url('../../media/quick-actions/dark/dark-findPrev.svg'); }
+body.vscode-dark #app .vsidian-find .vsidian-find-next,
+body.vscode-high-contrast #app .vsidian-find .vsidian-find-next { background-image: url('../../media/quick-actions/dark/dark-findNext.svg'); }
+body.vscode-dark #app .vsidian-find .vsidian-find-close,
+body.vscode-high-contrast #app .vsidian-find .vsidian-find-close { background-image: url('../../media/quick-actions/dark/dark-findClose.svg'); }
+body.vscode-dark #app .vsidian-find .vsidian-find-replace-next,
+body.vscode-high-contrast #app .vsidian-find .vsidian-find-replace-next { background-image: url('../../media/quick-actions/dark/dark-replaceOne.svg'); }
+body.vscode-dark #app .vsidian-find .vsidian-find-replace-all,
+body.vscode-high-contrast #app .vsidian-find .vsidian-find-replace-all { background-image: url('../../media/quick-actions/dark/dark-replaceAll.svg'); }
+body.vscode-dark #app .vsidian-find .vsidian-find-in-selection,
+body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { background-image: url('../../media/quick-actions/dark/dark-findInSelection.svg'); }
+
+/* 在选定内容中查找（#241）：禁用态（无用户选区锚点/阅读模式——原生
+   同款只读灰态，hover 不响应）；点亮态并入三开关激活族（视觉一致） */
+.vsidian-find .vsidian-find-in-selection:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.vsidian-find .vsidian-find-in-selection:disabled:hover {
+  background-color: transparent;
+}
+
+/* 三开关激活态（开启时点亮；Aa/ab/.* 与「在选定内容中查找」同款规则；
+   VSCode inputOption 激活族） */
+.vsidian-find .vsidian-find-case-active,
+.vsidian-find .vsidian-find-word-active,
+.vsidian-find .vsidian-find-regexp-active,
+.vsidian-find .vsidian-find-in-selection-active {
+  color: var(--vscode-inputOption-activeForeground, #ffffff);
+  background-color: var(--vscode-inputOption-activeBackground, #0078d4);
+}
+
+/* 查找范围淡底（开启「在选定内容中查找」时标记范围；非活动选区同款底色，
+   可跨行——CM6 按行拆分绘制） */
+#app .cm-editor .cm-content .vsidian-find-selection-range {
+  background-color: var(--vscode-editor-inactiveSelectionBackground, rgba(128, 128, 128, 0.2));
+}
+
+/* #238 主面板开关闪烁态：会话生效档与面板显示脱节时的短促提示
+   （面板打开时 Ctrl+D 的 FindOptionsWidget 等价物——450ms 内移除，连按
+   重启动画；动画只做不透明度脉冲，不改变布局） */
+.vsidian-find .vsidian-find-flash {
+  animation: vsidian-find-flash 0.45s ease-in-out;
+}
+
+@keyframes vsidian-find-flash {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+/* ---- #238 查找选项条：Ctrl+D 会话期间的迷你三按钮浮动条 ----
+   仅大小写/全字/正则三开关（无搜索框无计数），非模态：不抢编辑器焦点
+   （按钮 mousedown preventDefault 保焦）、不占弹窗互斥槽位、Esc 在
+   find 面板之后消费一次（只关条不收敛选区）。与主面板同右上角位、
+   互斥出现（面板开时由面板开关闪烁承担提示，条不出场）。按钮态与
+   主面板开关同源（aria-pressed = findOptions 记忆档，非会话 override） */
+.vsidian-occurrence-bar {
+  position: absolute;
+  top: 36px;
+  right: 14px;
+  z-index: 39;
+  display: none;
+  gap: 2px;
+  padding: 3px 4px;
+  box-sizing: border-box;
+  border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.4));
+  border-radius: 4px;
+  background-color: var(--vscode-editorWidget-background, #252526);
+  box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36));
+}
+
+.vsidian-occurrence-bar.vsidian-occurrence-bar-open {
+  display: flex;
+}
+
+.vsidian-occurrence-bar button {
   font-family: var(--vscode-font-family);
   font-size: var(--vscode-font-size, 12px);
   line-height: 1;
@@ -3303,29 +3614,90 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   border-radius: 3px;
 }
 
-/* 大小写切换的激活态（不区分大小写时点亮） */
-.vsidian-find .vsidian-find-case-active {
+/* 三开关点亮态（与主面板同款点亮语言） */
+.vsidian-occurrence-bar .vsidian-occurrence-case-active,
+.vsidian-occurrence-bar .vsidian-occurrence-word-active,
+.vsidian-occurrence-bar .vsidian-occurrence-regexp-active {
   color: var(--vscode-button-foreground);
   background-color: var(--vscode-button-background);
 }
 
 /* Live 匹配装饰：全部匹配（视口内间接装饰）与当前匹配（直接装饰）。
    --vsidian-find-* 为稳定 CSS 变量入口，外部片段可覆盖 */
-#app .cm-editor .cm-content .vsidian-find-match {
+#app .cm-editor .cm-content .vsidian-find-match,
+:where(#app .vsidian-reading-find-source .vsidian-find-match),
+#app .vsidian-view-reading .vsidian-find-match {
   background-color: var(--vsidian-find-match-background, rgba(234, 179, 8, 0.28));
   border-radius: 2px;
 }
 
-#app .cm-editor .cm-content .vsidian-find-match-current {
+#app .cm-editor .cm-content .vsidian-find-match-current,
+:where(#app .vsidian-reading-find-source .vsidian-find-match-current),
+#app .vsidian-view-reading .vsidian-find-match-current {
   background-color: var(--vsidian-find-match-current-background, rgba(255, 141, 55, 0.65));
   outline: 1px solid var(--vsidian-find-match-current-outline, rgba(255, 141, 55, 0.9));
   border-radius: 2px;
 }
 
-/* 阅读视图命中块高亮（块级：只高亮当前匹配所在块） */
+/* Find-owned source feedback is outside the reading scroll layout. */
+:where(#app .vsidian-reading-find-source) {
+  position: fixed;
+  z-index: 8500;
+  box-sizing: border-box;
+  width: 420px;
+  max-width: calc(100vw - 16px);
+  max-height: 160px;
+  overflow: auto;
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background, #1e1e1e));
+  color: var(--vscode-editorWidget-foreground, var(--vscode-editor-foreground, inherit));
+  border: 1px solid var(--vscode-editorWidget-border, rgba(128, 128, 128, 0.45));
+  border-radius: 5px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: var(--vscode-font-size, 13px);
+}
+
+:where(#app .vsidian-reading-find-source[hidden]) {
+  display: none;
+}
+
+:where(#app .vsidian-reading-find-source-header) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--vscode-editorWidget-border, rgba(128, 128, 128, 0.35));
+}
+
+:where(#app .vsidian-reading-find-source-location) {
+  color: var(--vscode-descriptionForeground);
+}
+
+:where(#app .vsidian-reading-find-source-readonly) {
+  margin-left: auto;
+  color: var(--vscode-descriptionForeground);
+}
+
+:where(#app .vsidian-reading-find-source-code) {
+  margin: 0;
+  padding: 10px 12px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--vscode-editor-font-size, 13px);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+:where(#app .vsidian-reading-find-source-code code) {
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+/* 旧命中块入口保留给片段；默认视觉由字符装饰承担，不铺整块底色。 */
 #app .vsidian-view-reading .vsidian-reading-block.vsidian-reading-find-hit {
-  box-shadow: inset 3px 0 0 var(--vsidian-find-match-current-background, rgba(255, 141, 55, 0.85));
-  background-color: var(--vsidian-find-hit-block-background, rgba(255, 141, 55, 0.08));
+  background-color: var(--vsidian-find-hit-block-background, transparent);
   border-radius: 2px;
 }
 

@@ -226,3 +226,32 @@ describe('预览当前链接快捷键（#221）', () => {
     expect([...findConflictedOperationIds({})]).toEqual([])
   })
 })
+
+describe('查找替换快捷键（#236）', () => {
+  it('findReplace 默认 ctrl+h 双模式非写；替换操作默认未绑定仅 Live', () => {
+    const replace = KEYBINDING_OPERATIONS.find((op) => op.id === 'findReplace')
+    expect(replace).toMatchObject({ mode: 'both', writes: false })
+    expect(getEffectiveBindings({}, 'findReplace')).toEqual(['ctrl+h'])
+    const next = KEYBINDING_OPERATIONS.find((op) => op.id === 'findReplaceNext')
+    expect(next).toMatchObject({ mode: 'live' })
+    expect(getEffectiveBindings({}, 'findReplaceNext')).toEqual([])
+    const all = KEYBINDING_OPERATIONS.find((op) => op.id === 'findReplaceAll')
+    expect(all).toMatchObject({ mode: 'live' })
+    expect(getEffectiveBindings({}, 'findReplaceAll')).toEqual([])
+  })
+
+  it('与全部既有默认键位零冲突（ctrl+h 冲突核对 2026-09-30）', () => {
+    const conflicted = findConflictedOperationIds({})
+    expect(conflicted.has('findReplace')).toBe(false)
+    expect(conflicted.has('findReplaceNext')).toBe(false)
+    expect(conflicted.has('findReplaceAll')).toBe(false)
+  })
+
+  it('manifest 命令已登记（三面同源）', () => {
+    const manifest = JSON.parse(readFileSync('package.json', 'utf8'))
+    const commands = manifest.contributes.commands.map((item: { command: string }) => item.command)
+    expect(commands).toContain('onegayi.vsidian.find.replace')
+    expect(commands).toContain('onegayi.vsidian.find.replaceNext')
+    expect(commands).toContain('onegayi.vsidian.find.replaceAll')
+  })
+})

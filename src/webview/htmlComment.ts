@@ -76,7 +76,7 @@ function indentedCodeLine(line: string): boolean {
 
 /** 阅读渲染输入的注释剥离：全文（body 切片）→ 删除注释（仅保留换行）。
  *  代码上下文与未闭合残缺保留原样。纯函数，无副作用。 */
-export function stripHtmlComments(text: string): string {
+export function stripHtmlComments(text: string, onRemoved?: (from: number, to: number) => void): string {
   if (!text.includes(OPEN)) return text
   // 逐行掩码：围栏/缩进行整行掩码，其余行掩码行内代码区（\0 占位）
   const lines = text.split('\n')
@@ -114,6 +114,7 @@ export function stripHtmlComments(text: string): string {
       continue
     }
     const end = close + CLOSE.length
+    onRemoved?.(at, end)
     // 整段删除，仅保留换行（行数不变是锚点坐标系承诺，见文件头）
     out.push(text.slice(at, end).replace(/[^\n]/gu, ''))
     i = end

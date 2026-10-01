@@ -34,11 +34,23 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // 修改引用、未闭合撤卡恢复、内部选区隔离与绘制断言）紧随 readingEmbed。
 // #224 合并入列：hoverRefresh（引用视图同步——目标失效推送驱动嵌入/浮层
 // 刷新、fm/滚动保持、快速更新无旧冒充、删除恢复分态与订阅生命周期）。
+// #239 合并入列：wordMotion（中文分词词级移动——Ctrl+方向真实键盘、
+// 拉丁回归、Intl 动态边界步进、jieba 注入、表格格导航共存）。
+// #237 合并入列：multicursor（多光标基础设施——Alt+点击三场景、
+// Ctrl+Alt+方向键、Esc 收敛、键位所有权与设置开关的绘制层证据）。
+// #236 合并入列：findPanel（查找面板——真实键盘 Ctrl+F/Ctrl+H/Enter/Esc，
+// 三开关语义与点亮、非法正则红边、替换写回单笔/整批一笔、阅读替换栏不展开）。
+// #238 合并入列：occurrence（选下一处相同词——真实键盘 Ctrl+D 连按与
+// wrap、Ctrl+K Ctrl+D 两段弦、Ctrl+Shift+L 全选与多光标编辑回流、
+// 选项条点击切换重建会话与 Esc 两段层级，非模态与绘制层证据）。
+// #251 合并入列：hitReveal（命中显形——真实键盘搜索/Ctrl+D 命中落在
+// grid 行与分隔行回源、关面板恢复与停驻、块级公式回源、编辑选区硬边界）
+// 紧随 occurrence（同查找/选词族）。
 // #245 合并入列：hoverRecursive（悬停根与内层来源、独立滚轮、异步定位、
 // 键盘焦点和面板 openAction 的原生 Chromium 回归）。
-const names = ['tableCaret', 'quoteBarPaint', 'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'imagePaste', 'outlineJump', 'outlineCollapse', 'outlineHover',
+const names = ['tableCaret', 'quoteBarPaint', 'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'wordMotion', 'imagePaste', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage',
-  'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract', 'commentToggle', 'viewToggle', 'contextMenu', 'anchorFlash', 'readingWidthProbe', 'codeCardChrome', 'liveImageLayout', 'imageRefresh', 'imagePopup', 'hoverPreview', 'hoverRecursive', 'readingEmbed', 'recursiveEmbed', 'liveEmbed', 'hoverEntry', 'hoverRefresh', 'mixedEmbed', 'liveEmbedMixed']
+  'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract', 'commentToggle', 'viewToggle', 'contextMenu', 'anchorFlash', 'readingWidthProbe', 'codeCardChrome', 'liveImageLayout', 'imageRefresh', 'imagePopup', 'hoverPreview', 'hoverRecursive', 'readingEmbed', 'recursiveEmbed', 'liveEmbed', 'hoverEntry', 'hoverRefresh', 'multicursor', 'multicursorWrite', 'findPanel', 'occurrence', 'hitReveal', 'mixedEmbed', 'liveEmbedMixed']
 const { workers, reuseBuilds, selected } = parseBrowserRunOptions(process.argv.slice(2), names)
 const parent = path.join(root, 'out/test/browser-runs')
 await mkdir(parent, { recursive: true })

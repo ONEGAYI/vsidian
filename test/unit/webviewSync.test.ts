@@ -110,9 +110,11 @@ describe('本地编辑 → edit.request', () => {
     })
     // ready + init 主动回报 view.state（模式缓存数据源）+ init 后拉取设置
     // 快照的 settings.get（#33）/ 快捷键快照（#91）/ 片段清单（#128）/
-    // 反链快照（#197）/ 出链快照（出链面板批次）+ 一条 edit.request
+    // 反链快照（#197）/ 出链快照（出链面板批次）/ 分词资源状态（#239）/
+    // 查找选项（#236）
+    // + 一条 edit.request
     expect(sent.filter((m) => m.kind === 'edit.request')).toHaveLength(1)
-    expect(sent.filter((m) => m.kind !== 'view.state')).toHaveLength(7)
+    expect(sent.filter((m) => m.kind !== 'view.state')).toHaveLength(9)
     const req = sent.find((m): m is Extract<WebviewToHost, { kind: 'edit.request' }> => m.kind === 'edit.request')!
     expect(req.changes).toEqual([
       { offset: 0, length: 1, text: '甲' },

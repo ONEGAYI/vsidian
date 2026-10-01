@@ -18,6 +18,54 @@ it('DOM 组合测试钩子只接受明确阶段和字符串候选', () => {
 })
 
 describe('isWebviewToHost', () => {
+  it('fm.test.click 动作白名单校验（2026-10 折叠链路）：类型联合与运行时校验器同步', () => {
+    // 教训钉子：折叠动作进了类型联合但漏了校验器白名单时，宿主侧静默拒绝、
+    // 集成用例超时难定位——此处钉住两侧同步（fm.test.click 是宿主→面板
+    // 消息，校验器在 isHostToWebview）
+    expect(isHostToWebview({ kind: 'fm.test.click', action: 'fold-button' })).toBe(true)
+    expect(isHostToWebview({ kind: 'fm.test.click', action: 'fold-hotspot' })).toBe(true)
+    expect(isHostToWebview({ kind: 'fm.test.click', action: 'edit-button' })).toBe(true)
+    expect(isHostToWebview({ kind: 'fm.test.click', action: 'fold' })).toBe(false)
+    expect(isHostToWebview({ kind: 'fm.test.click', action: 'fold-button', index: -1 })).toBe(false)
+  })
+
+  it('view.state.paint.fm 探针字段校验（2026-10 折叠链路）：五计数非负整数，缺一即拒', () => {
+    // isPaintProbe 为模块私有，经外层 view.state 校验间接触达；fm 分支
+    // 校验回退时集成侧表现为探针缺失（waitViewState 拿不到值），此处
+    // 正负样本钉住字段契约（对齐 fm.test.click 白名单钉子的动机）
+    const base = {
+      kind: 'view.state',
+      text: '---\ntitle: a\n---\n',
+      docLength: 17,
+      lineCount: 4,
+      renderedLines: 4,
+      paint: {
+        textVisible: true,
+        scrollerDisplay: 'block',
+        gutterUserSelect: null,
+        darkTheme: false,
+        caretColor: null,
+        fm: { rowCount: 2, foldedCount: 1, editCount: 0, cardFoldedCount: 1, tableFoldedCount: 0 },
+      },
+    }
+    expect(isWebviewToHost(base)).toBe(true)
+    expect(isWebviewToHost({ ...base, paint: { ...base.paint, fm: null } })).toBe(true)
+    expect(isWebviewToHost({ ...base, paint: { ...base.paint, fm: undefined } })).toBe(true)
+    expect(isWebviewToHost({
+      ...base,
+      paint: { ...base.paint, fm: { ...base.paint.fm, rowCount: -1 } },
+    })).toBe(false)
+    expect(isWebviewToHost({
+      ...base,
+      paint: { ...base.paint, fm: { rowCount: 2, foldedCount: 1 } },
+    })).toBe(false)
+    expect(isWebviewToHost({ ...base, paint: { ...base.paint, fm: 'folded' } })).toBe(false)
+    expect(isWebviewToHost({
+      ...base,
+      paint: { ...base.paint, fm: { ...base.paint.fm, cardFoldedCount: 1.5 } },
+    })).toBe(false)
+  })
+
   it('view.switch.request 消息校验（#141）：target 仅 live/reading（双态裁剪，源码路径不可达）', () => {
     expect(isWebviewToHost({ kind: 'view.switch.request', target: 'live' })).toBe(true)
     expect(isWebviewToHost({ kind: 'view.switch.request', target: 'reading' })).toBe(true)
@@ -278,6 +326,40 @@ describe('isWebviewToHost', () => {
         },
       }),
     ).toBe(true)
+    // #237 绘制光标色：字符串或 null 合法、缺省合法（多光标关/元素不在场）
+    expect(isWebviewToHost({ ...base, paint: {
+      textVisible: true, scrollerDisplay: 'flex', gutterUserSelect: 'none', darkTheme: false, caretColor: null,
+      readingFindSource: { visible: 'yes', text: '| a |', current: '|', background: 'rgb(20, 120, 200)' },
+    } })).toBe(false)
+    expect(isWebviewToHost({ ...base, paint: {
+      textVisible: true, scrollerDisplay: 'flex', gutterUserSelect: 'none', darkTheme: false, caretColor: null,
+      readingFindSource: { visible: true, text: '| a |', current: '|', background: 'rgb(20, 120, 200)' },
+    } })).toBe(true)
+    expect(
+      isWebviewToHost({
+        ...base,
+        paint: {
+          textVisible: true,
+          scrollerDisplay: 'flex',
+          gutterUserSelect: 'none',
+          darkTheme: true,
+          caretColor: 'transparent',
+          drawnCursorColor: 'rgb(221, 221, 221)',
+        },
+      }),
+    ).toBe(true)
+    expect(
+      isWebviewToHost({
+        ...base,
+        paint: { textVisible: true, scrollerDisplay: 'flex', gutterUserSelect: 'none', darkTheme: false, caretColor: null, drawnCursorColor: null },
+      }),
+    ).toBe(true)
+    expect(
+      isWebviewToHost({
+        ...base,
+        paint: { textVisible: true, scrollerDisplay: 'flex', gutterUserSelect: 'none', darkTheme: false, caretColor: null, drawnCursorColor: 0 },
+      }),
+    ).toBe(false)
     // 非法：textVisible 非布尔 / scrollerDisplay 非字符串非 null / darkTheme 非布尔 / caretColor 非字符串非 null
     expect(
       isWebviewToHost({ ...base, paint: { textVisible: 1, scrollerDisplay: 'flex', gutterUserSelect: 'none', darkTheme: false, caretColor: null } }),
@@ -885,6 +967,15 @@ describe('isWebviewToHost', () => {
     expect(isHostToWebview({ kind: 'outline.test.renameKey', text: 'x', key: 'tab' })).toBe(false)
     expect(isHostToWebview({ kind: 'outline.test.renameKey', text: 7, key: 'enter' })).toBe(false)
     expect(isHostToWebview({ kind: 'outline.test.renameKey', key: 'enter' })).toBe(false)
+  })
+
+  it('find.test.toggle 测试钩子消息校验（#14/#236）：三开关键枚举', () => {
+    expect(isHostToWebview({ kind: 'find.test.toggle', key: 'matchCase' })).toBe(true)
+    expect(isHostToWebview({ kind: 'find.test.toggle', key: 'wholeWord' })).toBe(true)
+    expect(isHostToWebview({ kind: 'find.test.toggle', key: 'regexp' })).toBe(true)
+    expect(isHostToWebview({ kind: 'find.test.toggle', key: 'case' })).toBe(false)
+    expect(isHostToWebview({ kind: 'find.test.toggle', key: 7 })).toBe(false)
+    expect(isHostToWebview({ kind: 'find.test.toggle' })).toBe(false)
   })
 
   it('outline.test.drag 测试钩子消息校验（#70）：非负索引 + 三态 + 三动作', () => {

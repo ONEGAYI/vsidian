@@ -12,7 +12,7 @@ VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 - **图形化代码块扩展约定（#111 落档）**：新增或修改「渲染成图形的围栏代码块」的语言支持、按钮组、图表弹窗或导出行为前，必读 [docs/specs/graphic-code-block-interaction.md](docs/specs/graphic-code-block-interaction.md) 的「扩展约定（落档）」节——注册表两表（`RENDERED_FENCE_LABELS` 与 `graphicRenderers.ts`）必须同步登记，三步接入清单与降级边界在其中。
 - **符号输入与行内围栏扩展约定（#103/#107/#123/#124/#125 落档）**：新增符号对、新增成对行内标记操作（粗体/斜体/删除线/行内代码类）、调整选区包裹、Tab 越界、IME 组合期输入行为或 CM6 扩展装配顺序前，必读 [docs/specs/symbol-input.md](docs/specs/symbol-input.md)——注册表驱动路径、装配顺序陷阱、「既有边界不得顺手放宽」清单与测试惯例均在其中。
 
-- **frontmatter 表格扩展约定（#140 落档；2026-09-27 验收反馈改版为「只读表格 + Popover 编辑」）**：YAML 头「成型/降级」判定的单一事实源在 `src/shared/frontmatterTable.ts`——自研行级形态学定位区间（tableCells 先例）+ `yaml` 包 parseDocument 兜底合法性与类型，双层各司其职；新增支持类型只改该模块，并在 `test/unit/frontmatterTable.test.ts` 补降级矩阵。成型头区在 live 侧呈现为**只读键值两列表格**（格不可点击编辑，行内 ×/＋、闭合行整行「添加属性」按钮、Tab/Enter 格导航键位均已随格内编辑方案退役），编辑收敛到标题栏「修改」按钮（`frontmatterDecorations.ts` 的 FmCardHeaderWidget，replace 首围栏行）打开的 **Popover**（`frontmatterPopover.ts`：贴按钮 fixed 定位小浮层挂 body，非全屏；结构化输入行 + 底部「添加属性」主按钮）。**编辑链路**：文本输入即时写回（planSetFmKey / planSetFmValue（flow 值整框）/ planSetFmArrayItem）与按钮操作（删行/删项/加项/添加属性，planRemoveFmEntry 等）各为单笔事务走标准出站；浮层事务不带 CM6 选区（键名选中等价物是浮层内 input 全选），**一笔操作 = 一笔 edit.request = 撤销一步**。**成型态不暴露源码**（用户决策）：光标/选区进入成型头区即被引导至闭合行后正文起点——`frontmatterEditing` 的 transactionFilter 硬拦纯选区事务 + updateListener 微任务兜底（初始光标、undo 恢复选区；update 途中不得同步 dispatch 是 CM6 约束，兜底必须延迟重读最新状态）；#183 起引导口径收窄为**选区两端都在头区**（全选/跨头区拖选放行——统一菜单剪贴板全选的语义前提，`Ctrl+A` 在带头区文档的既存缺陷同修复；完全落入头区的选区仍被引导）；`externalSync` 与 undo/redo 事务豁免 filter，头区重析与 `fmModel` 的 fmTouched 增量重析不受影响（头块重建区间仍须 `tr.changes.mapPos` 映射）。**浮层同步**：文档变更经 updateListener 通知浮层按最新模型全量重建行 DOM、焦点与光标位按行标识（`data-entry-from` + role）还原，外部同步改写头区同样回流；头区降级瞬间浮层自动关闭（回源码可编辑），键名空/重复不写回只红边标记（写回即降级），flow 数组为值整框原文编辑。**焦点管理**照 diagramPopup 的 prevFocus 模式（body 不算先前焦点、此时返还按钮），Esc/外点关闭、切阅读或 dispose 关闭；禁止 window.alert。阅读侧合法头区在 `splitReadingBlocks` 产同构表格 HTML（含标题栏、无按钮、值全转义）。成型卡片行同时保留 `vsidian-frontmatter-line` 行类（Obsidian 别名桥 `.cm-hmd-frontmatter` direct 级在成型形态保持命中，降透明副作用由卡片规则重置）。观感硬约束（验收二轮实测教训，改版须保持）：**行级 grid 不限宽**——`vsidian-fm-row` 是行级类（直接作用于 .cm-line），任何 width 上限都会把行级背景/边框一并收窄、与头部行（widget 撑满）错位，右侧形成编辑器底色空洞与断边；**行区透明**（撞色边界感 = 卡片边框 + 标题栏微亮条，不铺底色）；标题栏行的 cm-widgetBuffer 隐藏（inline replace 前后各一个、各占一行文字高，头部行曾被撑到 1.7 倍正文行高）；键名弱化 opacity 0.7 + ::before 类型图标（标量 T / 数组宿主行 `vsidian-fm-list-row` 列表形 ≡，两侧同类名同规则）。样式契约：live-fm-header 为静态探针（chromeSelectors["live-fm-header-live"]），live-fm-popover 为交互态条目（豁免分工表钉住，行为路径验证）；live-fm-controls / live-fm-add-entry 条目与四个行内控件类名已退役。一期边界（`limit-fm-complex-types` 条目钉住）：flow 数组 Popover 内值整框编辑、无项级拆分（阅读侧仍拆项呈现）；行内注释卡片内绘制层隐藏；零缩进 block 序列降级源码。
+- **frontmatter 表格扩展约定（#140 落档；2026-09-27 验收反馈改版为「只读表格 + Popover 编辑」）**：YAML 头「成型/降级」判定的单一事实源在 `src/shared/frontmatterTable.ts`——自研行级形态学定位区间（tableCells 先例）+ `yaml` 包 parseDocument 兜底合法性与类型，双层各司其职；新增支持类型只改该模块，并在 `test/unit/frontmatterTable.test.ts` 补降级矩阵。成型头区在 live 侧呈现为**只读键值两列表格**（格不可点击编辑，行内 ×/＋、闭合行整行「添加属性」按钮、Tab/Enter 格导航键位均已随格内编辑方案退役），编辑收敛到标题栏「修改」按钮（`frontmatterDecorations.ts` 的 FmCardHeaderWidget，replace 首围栏行）打开的 **Popover**（`frontmatterPopover.ts`：贴按钮 fixed 定位小浮层挂 body，非全屏；结构化输入行 + 底部「添加属性」主按钮）。**编辑链路**：文本输入即时写回（planSetFmKey / planSetFmValue（flow 值整框）/ planSetFmArrayItem）与按钮操作（删行/删项/加项/添加属性，planRemoveFmEntry 等）各为单笔事务走标准出站；浮层事务不带 CM6 选区（键名选中等价物是浮层内 input 全选），**一笔操作 = 一笔 edit.request = 撤销一步**。**成型态不暴露源码**（用户决策）：光标/选区进入成型头区即被引导至闭合行后正文起点——`frontmatterEditing` 的 transactionFilter 硬拦纯选区事务 + updateListener 微任务兜底（初始光标、undo 恢复选区；update 途中不得同步 dispatch 是 CM6 约束，兜底必须延迟重读最新状态）；#183 起引导口径收窄为**选区两端都在头区**（全选/跨头区拖选放行——统一菜单剪贴板全选的语义前提，`Ctrl+A` 在带头区文档的既存缺陷同修复；完全落入头区的选区仍被引导）；`externalSync` 与 undo/redo 事务豁免 filter，头区重析与 `fmModel` 的 fmTouched 增量重析不受影响（头块重建区间仍须 `tr.changes.mapPos` 映射）。**浮层同步**：文档变更经 updateListener 通知浮层按最新模型全量重建行 DOM、焦点与光标位按行标识（`data-entry-from` + role）还原，外部同步改写头区同样回流；头区降级瞬间浮层自动关闭（回源码可编辑），键名空/重复不写回只红边标记（写回即降级），flow 数组为值整框原文编辑。**焦点管理**照 diagramPopup 的 prevFocus 模式（body 不算先前焦点、此时返还按钮），Esc/外点关闭、切阅读或 dispose 关闭；禁止 window.alert。阅读侧合法头区在 `splitReadingBlocks` 产同构表格 HTML（含标题栏、无按钮、值全转义）。成型卡片行同时保留 `vsidian-frontmatter-line` 行类（Obsidian 别名桥 `.cm-hmd-frontmatter` direct 级在成型形态保持命中，降透明副作用由卡片规则重置）。观感硬约束（验收二轮实测教训，改版须保持）：**行级 grid 不限宽**——`vsidian-fm-row` 是行级类（直接作用于 .cm-line），任何 width 上限都会把行级背景/边框一并收窄、与头部行（widget 撑满）错位，右侧形成编辑器底色空洞与断边；**行区透明**（撞色边界感 = 卡片边框 + 标题栏微亮条，不铺底色）；标题栏行的 cm-widgetBuffer 隐藏（inline replace 前后各一个、各占一行文字高，头部行曾被撑到 1.7 倍正文行高）；键名弱化 opacity 0.7 + ::before 类型图标（标量 T / 数组宿主行 `vsidian-fm-list-row` 列表形 ≡，两侧同类名同规则）。样式契约：live-fm-header 为静态探针（chromeSelectors["live-fm-header-live"]），live-fm-popover 与 live-fm-fold 为交互态条目（豁免分工表钉住，行为路径验证）；live-fm-controls / live-fm-add-entry 条目与四个行内控件类名已退役。**卡片折叠（2026-10，与代码卡同交互）**：标题栏整条热区 + 右上折叠 chevron；live 折叠态 = `fmFoldField`（CM6 视图态零写回，切换经零写回 effect 事务触发 liveDecorations 头区行整体重发射），收起 = 键值/项/杂项行连同闭合行整块隐藏、首行携 `vsidian-fm-card-folded` 兼任底边；阅读侧经 `decorateReadingFrontmatterCard`（syncController 挂载钩子注入，布尔态各视图分持）；收起态不发射修改按钮、打开中的 Popover 随折叠关闭；纯指针交互不设快捷键（评估记录在规格）。规格见 [docs/specs/frontmatter-table.md](docs/specs/frontmatter-table.md)「卡片折叠」节。一期边界（`limit-fm-complex-types` 条目钉住）：flow 数组 Popover 内值整框编辑、无项级拆分（阅读侧仍拆项呈现）；行内注释卡片内绘制层隐藏；零缩进 block 序列降级源码。
 - **视觉层断言（评审必查）**：webview/样式/渲染类变更，评审必须核对断言对象是"用户看到的东西"（可见性、对齐、颜色）而非 DOM 存在性或几何坐标——样式注入失效时后者照样通过（PR #37 P0 实证：CSP 拦截 CM6 注入样式后 74 集成用例仍全绿，正文实际不可见）。涉及呈现的新特性至少一条集成断言落在绘制层（现有 `view.state.paint` 探针），CSS 关键规则由契约测试钉住。
 - **大纲样式设计哲学（#65 落档）**：大纲条目的呈现遵循三条原则，后续大纲呈现类变更不得违背。其一，**结构装饰与正文主题同源**——层级颜色等主题性装饰不复制读值，而是与正文标题引用同一 CSS 变量族（`--vsidian-heading-color-1..6`，定义于 `#app`，live 标题行级、阅读标题块级、大纲条目级三侧同引），主题分级着色一处定义多处生效。其二，**强调语义只认显式标记**——条目一律常规字重（400），不继承标题级别的结构性加粗；仅显式 `**粗体**` 段加重，斜体/行内代码/删除线同理只由标记触发。其三，**透传集合 = 正文已支持的行内标记子集**——当前白名单为粗体/斜体/高亮/行内代码/删除线（`OutlineSpanKind`，提取与校验同源；#105 高亮已按同一机制接入），公式/行内颜色待正文支持后按同一白名单机制接入（提取处 `SPAN_KIND_BY_NODE` 加映射即可），大纲侧零额外设计；双链/链接显示别名/链接文字的纯文本，不可点。
 - **CSS 片段导入与界面域样式约定（#129/#130/#133 落档）**：修改 CSS 片段依赖导入分析、远程（HTTPS）样式加载、CSP 装配或界面域样式入口前，必读 [docs/specs/css-snippets.md](docs/specs/css-snippets.md) 的「实施落档约定」节——导入形态学与 CSSOM 对齐、远程引用「完全不进本地面」语义、内置样式 `:where()` 零特异性等硬边界在其中。
@@ -96,6 +96,7 @@ vsidian/
 │   │   └── issue-tracker.md # GitHub Issues 操作约定
 │   ├── design/     # 设计文档（选择器映射等）
 │   │   ├── backlinks-panel-reference.png   # 反链面板形态参考图
+│   │   ├── find-panel-icons-reference.png  # 查找面板图标参考图
 │   │   ├── links-panel-icons-reference.png # 链环图标参考图（反链/出链）
 │   │   ├── obsidian-selector-map.md        # Obsidian 选择器映射表
 │   │   └── outlinks-panel-reference.png    # 出链面板形态参考图
@@ -112,6 +113,7 @@ vsidian/
 │   │   ├── 2026-09-table-cell-editing.md              # 表格单元格编辑性能实测（#12）
 │   │   ├── 2026-09-title-decoration-viewport.md       # 标题切片视口渲染实测数据
 │   │   ├── 2026-09-vault-index-storage.md             # 索引存储选型三档基准解读（#195）
+│   │   ├── 2026-10-hit-reveal-budget.md               # 命中显形重建预算实测（#251）
 │   │   ├── 2026-10-ref-expansion-244.md               # 递归引用驻留实测
 │   │   └── data/                                      # 性能探针原始报告数据
 │   │       ├── browser-test-runner.json               # 浏览器调度实测数据
@@ -131,6 +133,7 @@ vsidian/
 │       ├── appearance-merge.md                # 外观合并分页规格
 │       ├── batch-2026-09-menu.md              # 右键菜单批次总览与决策回执
 │       ├── batch-2026-09.md                   # 2026-09 开票批次总览
+│       ├── batch-2026-10-vscode-ops.md        # 2026-10 编辑器操作批次实施树
 │       ├── blockquote-accent-bar.md           # 引用块紫色提示边条规格
 │       ├── code-block-card.md                 # 代码块卡片功能规格
 │       ├── context-menu.md                    # 统一右键菜单规格（正文全域接管）
@@ -189,6 +192,7 @@ vsidian/
 │   │   ├── diagramExportValidate.ts    # 图表导出载荷校验
 │   │   ├── documentSession.ts          # 文档会话与写回同步
 │   │   ├── editorCsp.ts                # 编辑器 CSP 装配纯模块（#130）
+│   │   ├── findOptionsStore.ts         # 查找选项持久化存取
 │   │   ├── hostLocale.ts               # 生效语言宿主装配解析帮手
 │   │   ├── hoverDocAccess.ts           # 悬停预览文档访问纯逻辑
 │   │   ├── hoverRefreshCoordinator.ts  # 引用视图刷新协调器（宿主）
@@ -197,6 +201,9 @@ vsidian/
 │   │   ├── imagePastePlan.ts           # 图片粘贴纯逻辑（#161）
 │   │   ├── imageRefreshCoordinator.ts  # 图片刷新协调器（provider 级）
 │   │   ├── imageVersioning.ts          # 图片资源版本表纯逻辑
+│   │   ├── jiebaResourceService.ts     # jieba 资源宿主服务（端口注入）
+│   │   ├── jiebaResourceWiring.ts      # jieba 资源 vscode 层装配
+│   │   ├── jiebaTar.ts                 # npm tarball 最小提取器
 │   │   ├── keybindingService.ts        # 快捷键全局存储服务
 │   │   ├── linkTarget.ts               # 宿主侧链接目标分类纯逻辑（#10）
 │   │   ├── settingsPage.ts             # 独立设置页面板装配
@@ -221,11 +228,13 @@ vsidian/
 │   │   ├── cssSnippetEnv.ts      # CSS 片段环境身份与分桶戳（#131）
 │   │   ├── cssSnippetImports.ts  # CSS 片段依赖导入形态学单一事实源
 │   │   ├── cssSnippets.ts        # CSS 片段纯逻辑单一事实源
+│   │   ├── findOptions.ts        # 查找选项三开关单一事实源
 │   │   ├── formatOperations.ts   # 格式操作注册清单
 │   │   ├── frontmatterTable.ts   # frontmatter 表格化纯逻辑
 │   │   ├── hoverRefresh.ts       # 引用视图同步参数与订阅注册表
 │   │   ├── i18n.ts               # t() 取词与语言包装配状态模块
 │   │   ├── imageRefresh.ts       # 图片刷新共享常量与核验决策
+│   │   ├── jiebaManifest.ts      # jieba 锁定版本与下载源清单
 │   │   ├── keybindings.ts        # 快捷键操作与冲突模型
 │   │   ├── listPrefix.ts         # 列表引用前缀形态学（#119）
 │   │   ├── locales/              # 语言包字典单一事实源
@@ -252,7 +261,8 @@ vsidian/
 │   │   ├── vaultIndexSnapshot.ts # 分片快照存储纯逻辑（#195 选型基线）
 │   │   ├── vaultLink.ts          # 根内相对路径解析单一事实源（#196）
 │   │   ├── vaultRename.ts        # 引用改写计划纯逻辑（#199）
-│   │   └── wikilink.ts           # 双链形态学单一事实源（#11）
+│   │   ├── wikilink.ts           # 双链形态学单一事实源（#11）
+│   │   └── wordSegment.ts        # 中文分词形态学与移动规划纯函数
 │   └── webview/     # webview 端实现
 │       ├── anchorFlash.ts              # 跳转目标高亮装饰状态
 │       ├── appearanceSettings.ts       # 外观合并分页
@@ -278,6 +288,7 @@ vsidian/
 │       ├── frontmatterPopover.ts       # frontmatter 属性编辑浮层
 │       ├── graphicBlockChrome.ts       # 图形化块右上角按钮组
 │       ├── graphicRenderers.ts         # 图形化渲染器注册表
+│       ├── hitReveal.ts                # 命中显形活跃命中集单一事实源
 │       ├── hoverPopup.ts               # 悬停预览浮层单例
 │       ├── hoverPopupGeometry.ts       # 悬停浮层几何纯函数
 │       ├── htmlComment.ts              # 阅读侧 HTML 注释剥离纯函数
@@ -308,6 +319,8 @@ vsidian/
 │       ├── mermaidEntry.ts             # Mermaid 独立产物入口（#60）
 │       ├── mermaidRender.ts            # Mermaid 渲染管线（#60）
 │       ├── mermaidTheme.ts             # Mermaid 暗色主题装配
+│       ├── multicursor.ts              # 多光标扩展组单一事实源（#237）
+│       ├── nextOccurrence.ts           # 选下一处相同词选区计划纯函数
 │       ├── outline.ts                  # 大纲全文解析与面板装配
 │       ├── outlineCollapse.ts          # 大纲折叠状态机纯函数
 │       ├── outlineDrag.ts              # 大纲拖拽移动计划纯函数
@@ -321,6 +334,8 @@ vsidian/
 │       ├── quickActionState.ts         # 快速操作状态判定
 │       ├── readingBlocks.ts            # markdown-it 阅读块切分
 │       ├── readingCodeCard.ts          # 阅读代码块卡片增强
+│       ├── readingFind.ts              # 阅读查找源坐标与字符高亮
+│       ├── readingFindSource.ts        # 阅读查找只读源码浮层
 │       ├── readingMarkdown.ts          # markdown-it 安全渲染层
 │       ├── readingProbe.ts             # 阅读视图性能探针
 │       ├── readingView.ts              # 阅读视图 DOM 构建与锚点定位
@@ -347,7 +362,9 @@ vsidian/
 │       ├── tableRegionField.ts         # 表格格区选区状态单一事实源
 │       ├── tableRegionSelection.ts     # 表格格区拖选指针交互
 │       ├── tableStructure.ts           # 表格导航与增删行列纯函数（#13）
-│       └── taskToggle.ts               # 任务勾选解析纯函数（#9）
+│       ├── taskToggle.ts               # 任务勾选解析纯函数（#9）
+│       ├── wordMotion.ts               # 词级移动命令与引擎配置
+│       └── wordSegmentSettings.ts      # 设置页中文分词分页
 ├── test/…                 # 测试根
 ├── tsconfig.json          # TypeScript 类型检查配置
 └── vitest.config.ts       # vitest 单元测试配置

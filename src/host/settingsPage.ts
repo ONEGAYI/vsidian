@@ -22,6 +22,7 @@ import type { SettingsService } from './settingsService'
 import type { KeybindingService } from './keybindingService'
 import type { CssSnippetState } from '../shared/cssSnippets'
 import type { IndexStateMessage } from './vaultIndexMaintenance'
+import type { JiebaWiring } from './jiebaResourceWiring'
 
 /** #128 CSS 片段管理接线（extension.ts 注入）：设置页面板的片段消息处理
  *  与状态推送。目录选择对话框（chooseDirectory）经回调进宿主 vscode 层——
@@ -92,6 +93,11 @@ export interface SettingsPageHandle {
    */
   notifyIndexChanged(): void
   /**
+   * #239 分词资源：宿主下载/删除状态变更后向已开设置页发 wordSegment.state
+   * （面板未开时 no-op——重开经 wordSegment.get 重新拉取权威状态回显）
+   */
+  notifyWordSegmentChanged(): void
+  /**
    * #132 样式参考：打开（或 reveal）设置页并定位到指定附加分页。
    * 面板未 ready 时在握手完成后补发（webview 装载是异步的）。
    * #231：entry 可选——分页内进一步定位的条目 id（外观分页按条目归属
@@ -110,6 +116,9 @@ export function createSettingsPage(
   styleRefExport?: () => void | Promise<void>,
   /** #198 索引维护接线（extension.ts 注入 createIndexMaintenance 产物） */
   index?: IndexPageWiring,
+  /** #239 分词资源接线（extension.ts 注入 createJiebaWiring 产物）：
+   *  设置页「中文分词」分页的状态拉取与下载/删除操作 */
+  jieba?: JiebaWiring,
 ): SettingsPageHandle {
   let panel: vscode.WebviewPanel | undefined
   let ready = false
@@ -217,6 +226,25 @@ export function createSettingsPage(
           void current?.webview.postMessage(index.getState())
         }
         return
+      case 'wordSegment.get':
+        // #239 分词资源状态拉取（设置页装载回填；结果经 notifyWordSegmentChanged
+        // 同款推送——下载/删除完成后服务 onStateChanged 广播）
+        if (jieba) {
+          void current?.webview.postMessage({
+            kind: 'wordSegment.state',
+            ...jieba.stateFor(current.webview),
+          })
+        }
+        return
+      case 'wordSegment.download':
+        // 结果经服务 onStateChanged → notifyWordSegmentChanged 推送
+        void jieba?.service.download()
+        return
+      case 'wordSegment.delete':
+        void jieba?.service.delete()
+        return
+      case 'wordSegment.loadResult':
+        return // 编辑器面板链路（provider 消费），设置页不会发出
       case 'index.setPatterns':
         // 结果（含被拒项回显）经 notifyIndexChanged 的 index.state 推送
         void index?.setPatterns(message.patterns)
@@ -342,6 +370,17 @@ export function createSettingsPage(
         return
       }
       void panel.webview.postMessage(index.getState())
+    },
+    // #239 分词资源状态推送（服务 onStateChanged → extension.ts 接线）：
+    // 面板未开时 no-op（重开经 wordSegment.get 重新拉取）
+    notifyWordSegmentChanged: () => {
+      if (!panel || !jieba) {
+        return
+      }
+      void panel.webview.postMessage({
+        kind: 'wordSegment.state',
+        ...jieba.stateFor(panel.webview),
+      })
     },
   }
 }

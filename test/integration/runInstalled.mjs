@@ -19,7 +19,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { generatePerfSample, generateReadingSample, generateMermaidDenseSample } from '../perf/gen-sample.mjs'
 import { writeFixtures, LARGE_DOC_LINES } from './fixtures.mjs'
-import { buildTestHostArgs, resolveTestHostMode, runTestHost } from './testHost.mjs'
+import { buildTestHostArgs, resolveTestHostMode, runTestHost, writeTestWorkspaceFile } from './testHost.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
@@ -91,8 +91,12 @@ try {
     throw new Error(`安装目录中未找到扩展：${extensionsDir}`)
   }
   const installedExt = path.join(extensionsDir, installedDirs[installedDirs.length - 1])
+  // 以单 folder 的 .code-workspace 启动（multi-root 形态起步）：1.86.2 上目录
+  // （single-folder）启动时 updateWorkspaceFolders 增根触发 window reload
+  // （ext host 退出、suite 中断，#198 用例确定性复现），见 testHost.mjs
+  const wsFile = writeTestWorkspaceFile(wsDir)
   const args = buildTestHostArgs({
-    workspaceDir: wsDir,
+    workspaceDir: wsFile,
     testsPath: path.join(root, 'out', 'test', 'integration', 'suite', 'index.js'),
     extensionPath: installedExt,
     extensionsDir,
@@ -120,5 +124,6 @@ try {
   console.error('[runInstalled] 运行失败', err)
   process.exitCode = 1
 } finally {
+  rmSync(`${wsDir}.code-workspace`, { force: true })
   rmSync(wsDir, { recursive: true, force: true })
 }

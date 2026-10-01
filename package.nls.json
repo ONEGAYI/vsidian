@@ -9,6 +9,9 @@
   "command.find.title": "Find (in the editor)",
   "command.find.next.title": "Next match",
   "command.find.previous.title": "Previous match",
+  "command.find.replace.title": "Replace (in the editor)",
+  "command.find.replaceNext.title": "Replace next match",
+  "command.find.replaceAll.title": "Replace all matches",
   "command.table.create.title": "Create a table",
   "command.table.insertRowAbove.title": "Table: insert row above",
   "command.table.insertRowBelow.title": "Table: insert row below",
@@ -59,5 +62,15 @@
   "command.ui.backlinksToggle.title": "Show or hide the backlinks panel",
   "command.ui.outlinksToggle.title": "Show or hide the outgoing links panel",
   "command.editor.refresh.title": "Refresh embedded resources",
-  "command.ui.hoverPreviewLink.title": "Preview the current link"
+  "command.editor.addCursorAbove.title": "Add cursor above",
+  "command.editor.addCursorBelow.title": "Add cursor below",
+  "command.ui.hoverPreviewLink.title": "Preview the current link",
+  "command.wordMotion.cursorLeft.title": "Move left by one word (CJK-aware)",
+  "command.wordMotion.selectLeft.title": "Select left by one word (CJK-aware)",
+  "command.wordMotion.cursorRight.title": "Move right by one word (CJK-aware)",
+  "command.wordMotion.selectRight.title": "Select right by one word (CJK-aware)",
+  "command.find.selectNext.title": "Select Next Occurrence",
+  "command.find.selectPrevious.title": "Select Previous Occurrence",
+  "command.find.skipCurrent.title": "Skip and Select Next Occurrence",
+  "command.find.allOccurrences.title": "Select All Occurrences"
 }

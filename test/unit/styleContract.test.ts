@@ -379,11 +379,12 @@ const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   outline: 19,
   'chrome-limits': 4,
   'toolbar-banner': 6,
-  frontmatter: 5,
+  frontmatter: 6,
   'context-menu': 1,
   backlinks: 4,
   outlinks: 2,
   'hover-preview': 2,
+  'find-panel': 6,
 }
 
 describe('styleContract 类目体系（#145）', () => {

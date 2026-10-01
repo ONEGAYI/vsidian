@@ -19,13 +19,16 @@ import {
 } from '../shared/blockId'
 
 /** 阅读渲染输入的块 id 标记剥离：全文（body 切片）→ 删除标记。纯函数 */
-export function stripBlockIdMarks(text: string): string {
+export function stripBlockIdMarks(text: string, onRemoved?: (from: number, to: number) => void): string {
   if (!text.includes('^')) {
     return text
   }
   const out: string[] = []
   let fenceChar: string | null = null
+  let at = 0
   for (const line of text.split('\n')) {
+    const lineFrom = at
+    at += line.length + 1
     const marker = fenceMarkerOf(line)
     if (fenceChar !== null) {
       if (marker === fenceChar) {
@@ -40,10 +43,12 @@ export function stripBlockIdMarks(text: string): string {
       continue
     }
     if (STANDALONE_BLOCK_ID_RE.test(line)) {
+      onRemoved?.(lineFrom, lineFrom + line.length)
       out.push('') // 独立行：整行内容删除，保留换行
       continue
     }
     const m = BLOCK_ID_LINE_RE.exec(line)
+    if (m !== null) onRemoved?.(lineFrom + m.index, lineFrom + line.length)
     out.push(m !== null ? line.slice(0, m.index) : line)
   }
   return out.join('\n')

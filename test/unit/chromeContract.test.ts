@@ -69,12 +69,15 @@ const DYNAMIC_STATE_ENTRIES: ReadonlySet<string> = new Set([
   'live-code-card-fold', // 折叠 chevron
   'live-code-card-edge', // 首末行修饰（首行由头部覆盖，CSS 契约钉）
   'live-fm-popover', // #140 Popover 改版：属性编辑浮层（打开时挂载 body，开闭与写回由浏览器套件验证）
+  'live-fm-fold', // 2026-10 卡片折叠：chevron 两态常驻但收起态形态由行为切换，折叠/热区/浮层联动由浏览器与集成套件验证
   'suspend-banner', // 暂停态横幅
   'diagram-popup', // 弹窗在场期间（chromePopup 观测）
   'hover-popup', // #218 悬停预览浮层（悬停延迟打开期间挂载，开闭/保活/绘制由浏览器 hoverPreview 套件验证）
   'hover-fm-section', // #220 悬停浮层笔记属性区（浮层在场期间的结构；折叠/热区/键盘由浏览器套件验证）
   'mode-toggle', // 已移除（历史记录条目）
   'mode-body', // 模式态类（live/reading 互斥，两态必居其一——无静态单值可断言）
+  'find-match-highlight', // #236 匹配装饰（查找会话打开且命中时在场；计数/序号/定位由集成 find 用例按行为路径验证）
+  'reading-find-source', // 隐藏源码当前命中时挂载；浏览器像素与真宿主 paint 探针验证。
 ])
 
 describe('chromeContract 覆盖分工', () => {

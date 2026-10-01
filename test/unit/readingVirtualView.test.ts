@@ -17,6 +17,265 @@ import { createReadingContainer, READING_CLASS_NAMES } from '../../src/webview/r
 import { splitReadingBlocks } from '../../src/webview/readingBlocks'
 import { computeMountWindow } from '../../src/webview/readingViewport'
 
+describe('阅读查找：源区间映射到可见文字', () => {
+  it('隐藏的表格分隔符以只读源码行显形，当前命中精确标记，清除与销毁释放浮层', () => {
+    const root = document.createElement('div')
+    root.id = 'app'
+    const container = createReadingContainer()
+    root.append(container)
+    document.body.append(root)
+    const view = new VirtualReadingView(container)
+    try {
+      view.setDocument('| name | state |\n| --- | --- |\n| build | ok |\n\nbelow')
+      view.highlightMatches([{ from: 0, to: 1 }, { from: 7, to: 8 }], 0)
+      const popup = root.querySelector('.vsidian-reading-find-source')
+      expect(popup).not.toBeNull()
+      expect(popup?.querySelector('code')?.textContent).toBe('| name | state |')
+      expect(popup?.querySelector('.vsidian-find-match-current')?.textContent).toBe('|')
+      expect(container.contains(popup)).toBe(false)
+      expect(popup?.querySelector('input, textarea, [contenteditable]')).toBeNull()
+      view.highlightMatches([{ from: 0, to: 1 }, { from: 7, to: 8 }], 1)
+      expect(root.querySelectorAll('.vsidian-reading-find-source')).toHaveLength(1)
+      expect(root.querySelector('.vsidian-find-match-current')?.getAttribute('data-vsidian-find-index')).toBe('1')
+      view.highlightMatches([], 0)
+      expect(root.querySelector('.vsidian-reading-find-source')).toBeNull()
+      view.highlightMatches([{ from: 0, to: 1 }], 0)
+      view.dispose()
+      expect(root.querySelector('.vsidian-reading-find-source')).toBeNull()
+    } finally {
+      view.dispose()
+      root.remove()
+    }
+  })
+
+  function setupFind(text: string, word: string, index = 0) {
+    const container = createReadingContainer()
+    const view = new VirtualReadingView(container)
+    view.setDocument(text)
+    const matches = Array.from(text.matchAll(new RegExp(word, 'g')), m => ({ from: m.index, to: m.index + m[0].length }))
+    view.highlightMatches(matches, index)
+    return { container, view, matches }
+  }
+
+  it('围栏语言名与正文相同时，隐藏 info 不得挪用可见代码作高亮', () => {
+    const { container, view, matches } = setupFind('```js\njs\n```', 'js')
+    expect(container.querySelector('.vsidian-find-match-current')).toBeNull()
+    view.highlightMatches(matches, 1)
+    expect(container.querySelector('.vsidian-find-match-current')?.textContent).toBe('js')
+    view.dispose()
+  })
+
+  it('长代码块后续分片的字面围栏仍按代码正文高亮', () => {
+    const text = '````js\n' + Array(59).fill('plain').join('\n') + '\n```\nhit\n````'
+    const { container, view } = setupFind(text, '```', 1)
+    expect(container.querySelector('pre[data-vsidian-code-start="59"] .vsidian-find-match-current')?.textContent).toBe('```')
+    view.dispose()
+  })
+
+  it('降级 frontmatter 的可见源码参与精确高亮，成型头区仍不染合成文字', () => {
+    const { container, view } = setupFind('---\nnested:\n  child: hit\n---\n\nvisible', 'hit')
+    expect(container.querySelector('pre .vsidian-find-match-current')?.textContent).toBe('hit')
+    view.dispose()
+    const formed = setupFind('---\ntitle: hit\n---\n\nvisible', 'hit')
+    expect(formed.container.querySelector('.vsidian-find-match')).toBeNull()
+    formed.view.dispose()
+  })
+
+  it('未解析的引用式链接仍是可见原文，不得导致后续普通文字映射失败', () => {
+    const { container, view } = setupFind('[foo][missing] hit', 'hit')
+    expect(container.querySelector('.vsidian-find-match-current')?.textContent).toBe('hit')
+    view.dispose()
+  })
+
+  it('拒绝的引用定义按可见原文高亮，同名合法定义不能替它显形', () => {
+    for (const text of ['[ref]: javascript:alert(hit)', '[ref]: note.md\n\n[ref]: javascript:alert(hit)']) {
+      const { container, view } = setupFind(text, 'hit')
+      expect(container.querySelector('.vsidian-find-match-current')?.textContent).toBe('hit')
+      view.dispose()
+    }
+  })
+
+  it('同名已解析/未解析引用并存，全文定义与归一化不能靠 DOM 链接文字猜测', () => {
+    const { container, view, matches } = setupFind('[foo][ref] [foo][missing] hit\n\n[REF]: note.md', 'foo')
+    expect(container.querySelector('a .vsidian-find-match-current')?.textContent).toBe('foo')
+    view.highlightMatches(matches, 1)
+    expect(container.querySelector('.vsidian-find-match-current')?.textContent).toBe('foo')
+    expect(container.querySelector('a .vsidian-find-match-current')).toBeNull()
+    view.dispose()
+    const collapsed = setupFind('[foo][] [foo] hit\n\n[FOO]: note.md', 'foo')
+    expect(collapsed.container.querySelectorAll('a .vsidian-find-match')).toHaveLength(2)
+    collapsed.view.dispose()
+  })
+
+  it('已解析 shortcut 引用的隐藏括号不得冒充后面的可见括号', () => {
+    const { container, view, matches } = setupFind('[foo]] hit\n\n[foo]: hit.md', '\\]')
+    expect(container.querySelector('.vsidian-find-match-current')).toBeNull()
+    view.highlightMatches(matches, 1)
+    expect(container.querySelector('.vsidian-find-match-current')?.textContent).toBe(']')
+    view.dispose()
+  })
+
+  it('部分隐藏的匹配显示完整源码；普通文字命中不保留浮层', () => {
+    const root = document.createElement('div')
+    root.id = 'app'
+    const container = createReadingContainer()
+    root.append(container)
+    document.body.append(root)
+    const view = new VirtualReadingView(container)
+    try {
+      view.setDocument('**hit** and tail')
+      view.highlightMatches([{ from: 0, to: 7 }], 0)
+      expect(container.querySelector('.vsidian-find-match-current')?.textContent).toBe('hit')
+      expect(root.querySelector('.vsidian-reading-find-source .vsidian-find-match-current')?.textContent).toBe('**hit**')
+      view.highlightMatches([{ from: 2, to: 5 }], 0)
+      expect(root.querySelector('.vsidian-reading-find-source')).toBeNull()
+    } finally { view.dispose(); root.remove() }
+  })
+
+  it('转义后的可见表格竖线直接高亮，不把正文字符当成隐藏分隔符', () => {
+    const root = document.createElement('div')
+    root.id = 'app'
+    const container = createReadingContainer()
+    root.append(container)
+    document.body.append(root)
+    const view = new VirtualReadingView(container)
+    try {
+      const text = '| A | B |\n| --- | --- |\n| \\| | keep |'
+      const from = text.indexOf('\\|') + 1
+      view.setDocument(text)
+      view.highlightMatches([{ from, to: from + 1 }], 0)
+      expect(container.querySelector('td .vsidian-find-match-current')?.textContent).toBe('|')
+      expect(root.querySelector('.vsidian-reading-find-source')).toBeNull()
+    } finally { view.dispose(); root.remove() }
+  })
+
+  it('源码浮层仅写入文本，隐藏注释内的 HTML 不生成元素或可执行属性', () => {
+    const root = document.createElement('div')
+    root.id = 'app'
+    const container = createReadingContainer()
+    root.append(container)
+    document.body.append(root)
+    const view = new VirtualReadingView(container)
+    try {
+      const text = 'visible <!-- <img src=x onerror=alert(1)> hidden --> tail'
+      const from = text.indexOf('hidden')
+      view.setDocument(text)
+      view.highlightMatches([{ from, to: from + 6 }], 0)
+      const popup = root.querySelector('.vsidian-reading-find-source')
+      expect(popup?.querySelector('code')?.textContent).toBe(text)
+      expect(popup?.querySelector('img, script, [onerror]')).toBeNull()
+      expect(popup?.querySelector('.vsidian-find-match-current')?.textContent).toBe('hidden')
+    } finally { view.dispose(); root.remove() }
+  })
+
+  it('长源码行的反馈有界，emoji 不因截断变成半个代理对', () => {
+    const root = document.createElement('div')
+    root.id = 'app'
+    const container = createReadingContainer()
+    root.append(container)
+    document.body.append(root)
+    const view = new VirtualReadingView(container)
+    try {
+      const text = `visible <!-- ${'😀'.repeat(501)}hidden${'😀'.repeat(501)} --> tail`
+      const from = text.indexOf('hidden')
+      view.setDocument(text)
+      view.highlightMatches([{ from, to: from + 6 }], 0)
+      const code = root.querySelector('.vsidian-reading-find-source code')?.textContent ?? ''
+      expect(code.length).toBeLessThanOrEqual(328)
+      expect(code).toContain('hidden')
+      expect(code).toMatch(/^\.\.\./)
+      expect(code).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u)
+    } finally { view.dispose(); root.remove() }
+  })
+
+  it('整篇只有隐藏注释时仍提供源码命中反馈，不依赖可见块存在', () => {
+    const root = document.createElement('div')
+    root.id = 'app'
+    const container = createReadingContainer()
+    root.append(container)
+    document.body.append(root)
+    const view = new VirtualReadingView(container)
+    try {
+      view.setDocument('<!-- hidden -->')
+      view.highlightMatches([{ from: 5, to: 11 }], 0)
+      expect(container.querySelector('.vsidian-reading-block')).toBeNull()
+      expect(root.querySelector('.vsidian-reading-find-source code')?.textContent).toBe('<!-- hidden -->')
+      expect(root.querySelector('.vsidian-reading-find-source .vsidian-find-match-current')?.textContent).toBe('hidden')
+    } finally { view.dispose(); root.remove() }
+  })
+
+  it('callout 只标记命中文字，全部命中与当前命中区分；导航不嵌套包裹', () => {
+    const { container, view, matches } = setupFind('> [!note] Title\n> alpha hit\n> **hit** beta', 'hit')
+    expect(Array.from(container.querySelectorAll('.vsidian-find-match'), el => el.textContent)).toEqual(['hit', 'hit'])
+    expect(container.querySelector('.vsidian-find-match-current')?.textContent).toBe('hit')
+    view.highlightMatches(matches, 1)
+    expect(container.querySelector('strong .vsidian-find-match-current')?.textContent).toBe('hit')
+    expect(container.querySelector('.vsidian-find-match .vsidian-find-match')).toBeNull()
+    view.highlightMatches([], 0)
+    expect(container.querySelector('.vsidian-find-match')).toBeNull()
+    expect(container.querySelector('strong')?.textContent).toBe('hit')
+    view.dispose()
+  })
+
+  it('隐藏的链接目标、双链目标、图片 alt 与公式不得误标相同的可见文字', () => {
+    const text = '[link](hit.md) hit [[hit|alias]] hit ![hit](hit.png) $hit$ hit'
+    const { container, view, matches } = setupFind(text, 'hit', 0)
+    expect(Array.from(container.querySelectorAll('.vsidian-find-match'), el => el.textContent)).toEqual(['hit', 'hit', 'hit'])
+    expect(container.querySelector('.vsidian-find-match-current')).toBeNull()
+    view.highlightMatches(matches, 1)
+    expect(container.querySelector('.vsidian-find-match-current')?.textContent).toBe('hit')
+    expect(container.querySelector('a .vsidian-find-match')).toBeNull()
+    expect(container.querySelector('.katex .vsidian-find-match')).toBeNull()
+    view.dispose()
+  })
+
+  it('跨行内标记的源码匹配只包裹可见部分，保留链接与强调元素身份', () => {
+    const text = 'left **hit** [alias](note.md) right'
+    const { container, view } = setupFind(text, 'left \\*\\*hit\\*\\* \\[alias\\]')
+    expect(Array.from(container.querySelectorAll('.vsidian-find-match'), el => el.textContent).join('')).toBe('left hit alias')
+    expect(container.querySelector('a')?.getAttribute('href')).toBe('note.md')
+    view.dispose()
+  })
+
+  it('列表、表格与代码内命中精确落在正文，emoji 不拆分代理对', () => {
+    const text = '- [x] hit\n\n| key | value |\n| --- | --- |\n| hit | `hit` |\n\n```js\nconst hit = "😀";\n```'
+    const { container, view } = setupFind(text, 'hit')
+    expect(container.querySelectorAll('.vsidian-find-match')).toHaveLength(4)
+    expect(container.querySelector('input[type=checkbox]')).toBeTruthy()
+    const from = text.indexOf('😀')
+    view.highlightMatches([{ from, to: from + 2 }], 0)
+    expect(container.querySelector('.vsidian-find-match-current')?.textContent).toBe('😀')
+    view.dispose()
+  })
+
+  it('HTML 实体的源码区间指向解码后的字符，隐藏注释里的命中不串位', () => {
+    const text = '&amp; <!-- hit --> hit'
+    const { container, view } = setupFind(text, 'hit')
+    expect(container.querySelectorAll('.vsidian-find-match')).toHaveLength(1)
+    expect(container.querySelector('.vsidian-find-match-current')).toBeNull()
+    view.highlightMatches([{ from: 0, to: 5 }], 0)
+    expect(container.querySelector('.vsidian-find-match-current')?.textContent).toBe('&')
+    view.dispose()
+  })
+
+  it('虚拟窗口重挂载后恢复文字高亮，导航与清除不重解析全文', () => {
+    const text = Array.from({ length: 100 }, (_, i) => `hit ${i}`).join('\n\n')
+    const container = createReadingContainer()
+    stubClientHeight(container, 400)
+    const view = new VirtualReadingView(container, { bufferPx: 100 })
+    view.setDocument(text)
+    const matches = Array.from(text.matchAll(/hit/g), m => ({ from: m.index, to: m.index + 3 }))
+    view.highlightMatches(matches, 50)
+    view.scrollToOffset(matches[50]!.from)
+    expect(container.querySelector('.vsidian-find-match-current')?.textContent).toBe('hit')
+    view.scrollToOffset(0)
+    view.scrollToOffset(matches[50]!.from)
+    expect(container.querySelectorAll('.vsidian-find-match-current')).toHaveLength(1)
+    expect(view.getStats().parseCount).toBe(1)
+    view.dispose()
+  })
+})
+
 /** 生成 n 个单行段落块（空行分隔） */
 function makeDoc(n: number): string {
   const lines: string[] = []

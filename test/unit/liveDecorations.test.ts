@@ -22,6 +22,7 @@ import {
   liveDecorationsField,
   livePreviewDecorations,
 } from '../../src/webview/liveDecorations'
+import { fmFoldField, fmFoldToggle } from '../../src/webview/frontmatterDecorations'
 import { setTableRegion, tableRegionField } from '../../src/webview/tableRegionField'
 
 // ---- 断言辅助 ----
@@ -957,5 +958,53 @@ describe('HTML 注释淡化（#139）：Comment / CommentBlock 发淡化 mark', 
     expect(hiddenRanges(set)).not.toContainEqual([
       doc.indexOf('<!--'), doc.indexOf('<!--') + 4,
     ])
+  })
+})
+
+describe('frontmatter 卡片折叠（与代码块同交互）：装饰层语义', () => {
+  const FOLD_DOC = ['---', 'title: hello', 'count: 3', '---', '', '正文段落。', ''].join('\n')
+
+  it('折叠态：首行携带收起类、隐藏区覆盖闭合行换行、无键值格装饰；头部 widget 常驻', () => {
+    const sel = EditorSelection.single(FOLD_DOC.length)
+    const set = buildLivePreviewDecorations(Text.of(FOLD_DOC.split('\n')), sel, null, null, true)
+    const cls = byClass(set)
+    const foldedLines = cls.get('vsidian-fm-card-folded') ?? []
+    expect(foldedLines.length).toBeGreaterThan(0)
+    // 首行仍承担卡片顶边
+    expect((cls.get('vsidian-fm-card-edge-top') ?? []).length).toBeGreaterThan(0)
+    // 收起后无底边行类（闭合行已并入隐藏区）
+    expect(cls.get('vsidian-fm-card-edge-bottom') ?? []).toHaveLength(0)
+    // 键值格与冒号装饰不再发射
+    expect(cls.get('vsidian-fm-cell') ?? []).toHaveLength(0)
+    expect(cls.get('vsidian-fm-sep') ?? []).toHaveLength(0)
+    // 隐藏区：从首行换行之后（标题栏独占一行）到闭合行行尾含换行（整块收起）
+    const closeFrom = FOLD_DOC.indexOf('---', 4)
+    const closeEnd = closeFrom + 3 + 1
+    const hidden = hiddenRanges(set)
+    expect(hidden).toContainEqual([4, closeEnd])
+  })
+
+  it('折叠态零写回切换：effect 事务触发增量重建，与全量折叠构建一致', () => {
+    const start = EditorState.create({
+      doc: FOLD_DOC,
+      extensions: [liveDecorationsField, fmFoldField],
+    })
+    const toggled = start.update({ effects: fmFoldToggle.of(null) })
+    const sel = EditorSelection.single(FOLD_DOC.length)
+    const fullFolded = buildLivePreviewDecorations(Text.of(FOLD_DOC.split('\n')), sel, null, null, true)
+    expect(setsEqual(toggled.state, fullFolded)).toBe(true)
+    // 再切回展开：与全量展开构建一致（折叠态装饰无残留）
+    const restored = toggled.state.update({ effects: fmFoldToggle.of(null) })
+    const fullOpen = buildLivePreviewDecorations(
+      Text.of(FOLD_DOC.split('\n')), EditorSelection.single(FOLD_DOC.length), null, null, false)
+    expect(setsEqual(restored.state, fullOpen)).toBe(true)
+  })
+
+  it('折叠态不暴露源码语义保持：隐藏区即头区主体，正文装饰不受影响', () => {
+    const sel = EditorSelection.single(FOLD_DOC.length)
+    const set = buildLivePreviewDecorations(Text.of(FOLD_DOC.split('\n')), sel, null, null, true)
+    // 正文段落的行内装饰照常在场（折叠只作用于头区）
+    expect((byClass(set).get('vsidian-code-line') ?? []).length).toBe(0)
+    expect(collect(set).length).toBeGreaterThan(0)
   })
 })

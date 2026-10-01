@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { EditorState, StateEffect } from '@codemirror/state'
+import { EditorSelection, EditorState, StateEffect } from '@codemirror/state'
 import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/syncController'
 import { FORMAT_OPERATIONS } from '../../src/shared/formatOperations'
 import { selectTableRegion } from '../../src/webview/tableRegionSelection'
@@ -252,5 +252,84 @@ describe('格式命令生产链路', () => {
     expect(sent.at(-1)).toMatchObject({ kind: 'edit.request', changes: [
       { offset: 0, length: 2, text: '==中文==' },
     ] })
+  })
+
+  it('多选区包裹逐 range 应用：单事务一笔写回，产物选区保持多 range 原文选中（#240）', () => {
+    const { controller, sent, view } = setup('甲乙 丙丁')
+    view.dispatch({ selection: EditorSelection.create([
+      EditorSelection.range(0, 2),
+      EditorSelection.range(3, 5),
+    ], 1) })
+    controller.handleHostMessage({ kind: 'format.command', op: 'bold' })
+    expect(view.state.doc.toString()).toBe('**甲乙** **丙丁**')
+    // 单笔事务 = 一笔 edit.request = 宿主撤销一次整批回退
+    expect(sent.filter((m) => m.kind === 'edit.request')).toHaveLength(1)
+    expect(sent.at(-1)).toMatchObject({ kind: 'edit.request', changes: [
+      { offset: 0, length: 2, text: '**甲乙**' },
+      { offset: 3, length: 2, text: '**丙丁**' },
+    ] })
+    // 产物选区仍为两 range、mainIndex 保持；端点映射沿用 CM6 原生语义
+    // （替换边界贴外侧 = 选区含标记，与单 range 路径不带 selection 的
+    // 自动映射一致——探针 test 实测钉住该基准，多 range 不引入新语义）
+    const ranges = view.state.selection.ranges
+    expect(ranges).toHaveLength(2)
+    expect([ranges[0]!.from, ranges[0]!.to]).toEqual([0, 6])
+    expect([ranges[1]!.from, ranges[1]!.to]).toEqual([7, 13])
+    expect(view.state.selection.mainIndex).toBe(1)
+    controller.dispose()
+  })
+
+  it('多空光标扩词包裹：各 range 独立取词，产物为各开围栏内侧的光标（#240）', () => {
+    const { controller, view } = setup('中文 English')
+    view.dispatch({ selection: EditorSelection.create([
+      EditorSelection.cursor(0),
+      EditorSelection.cursor(3),
+    ]) })
+    controller.handleHostMessage({ kind: 'format.command', op: 'bold' })
+    expect(view.state.doc.toString()).toBe('**中文** **English**')
+    const ranges = view.state.selection.ranges
+    expect(ranges).toHaveLength(2)
+    expect(ranges[0]!.head).toBe(2)
+    expect(ranges[1]!.head).toBe(9)
+    controller.dispose()
+  })
+
+  it('多 range 混合形态独立判定：取消与包裹并存（#240）', () => {
+    const { controller, view } = setup('**加粗** 普通')
+    view.dispatch({ selection: EditorSelection.create([
+      EditorSelection.cursor(3),
+      EditorSelection.cursor(8),
+    ]) })
+    controller.handleHostMessage({ kind: 'format.command', op: 'bold' })
+    expect(view.state.doc.toString()).toBe('加粗 **普通**')
+    const ranges = view.state.selection.ranges
+    expect(ranges).toHaveLength(2)
+    controller.dispose()
+  })
+
+  it('结构性操作多 range 退化主 range：标题只作用主选区行（#240）', () => {
+    const { controller, sent, view } = setup('第一行\n第二行\n第三行')
+    // 主 range（mainIndex 1）在第三行：仅第三行加标题，副 range 所在行不变
+    view.dispatch({ selection: EditorSelection.create([
+      EditorSelection.cursor(4),
+      EditorSelection.cursor(9),
+    ], 1) })
+    controller.handleHostMessage({ kind: 'format.command', op: 'heading1' })
+    expect(view.state.doc.toString()).toBe('第一行\n第二行\n# 第三行')
+    expect(sent.filter((m) => m.kind === 'edit.request')).toHaveLength(1)
+    controller.dispose()
+  })
+
+  it('行内代码多选区逐 range：普通文字包裹、完整行内代码两态取消并存（#240）', () => {
+    const { controller, view } = setup('a `x` b\ntail')
+    // 选区一为普通文字（包裹），选区二恰为完整行内代码（独立命中两态
+    // 取消分支——逐 range 判定与单选区一致）
+    view.dispatch({ selection: EditorSelection.create([
+      EditorSelection.range(0, 1),
+      EditorSelection.range(2, 5),
+    ]) })
+    controller.handleHostMessage({ kind: 'format.command', op: 'inlineCode' })
+    expect(view.state.doc.toString()).toBe('`a` x b\ntail')
+    controller.dispose()
   })
 })

@@ -64,6 +64,10 @@ export interface ReadingBlock {
   itemAnchors?: number[]
   /** #222 embed 专用：`![[` 与 `]]` 之间的原文（挂载适配层出站读取用） */
   embedInner?: string
+  /** 文档级有效引用标签（markdown-it 归一化；全体块共用同一集合）。 */
+  references?: ReadonlySet<string>
+  /** 渲染器接受且隐藏的引用定义区间；同名非法定义不在其中。 */
+  referenceDefinitions?: readonly { from: number; to: number }[]
 }
 
 /** 超过该行数的围栏代码块按行细分为多个挂载单位（#7 超大单块缓解） */
@@ -71,6 +75,10 @@ export const FENCE_CHUNK_LINES = 60
 
 /** 单例渲染器（规则链一次装配；渲染是同步纯函数，实例可安全复用） */
 const md = createMarkdownRenderer()
+
+export function hasReadingReference(block: ReadingBlock, label: string): boolean {
+  return block.references?.has(md.utils.normalizeReference(label)) ?? false
+}
 
 /** 表格块规则早于 inline code 切格；等长替身避免改变 token.map 与源锚点。 */
 function protectCodePipes(body: string): { parseText: string; marker: string | null } {
@@ -294,6 +302,13 @@ function splitBody(
     }
     i += 1
   }
+  const references = new Set(Object.keys(env.references ?? {}))
+  if (references.size) for (const block of blocks) block.references = references
+  const definitions = tokens.filter(token => token.type === 'reference_definition' && token.map).map(token => ({
+    from: env.lineStarts[token.map![0] + baseLine]!,
+    to: env.lineEnds[token.map![1] - 1 + baseLine]!,
+  }))
+  if (definitions.length) for (const block of blocks) block.referenceDefinitions = definitions
   return blocks
 }
 

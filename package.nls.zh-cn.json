@@ -9,6 +9,9 @@
   "command.find.title": "查找（编辑区）",
   "command.find.next.title": "下一个查找结果",
   "command.find.previous.title": "上一个查找结果",
+  "command.find.replace.title": "替换（编辑区）",
+  "command.find.replaceNext.title": "替换下一个匹配",
+  "command.find.replaceAll.title": "全部替换匹配",
   "command.table.create.title": "创建表格",
   "command.table.insertRowAbove.title": "表格：上方插入行",
   "command.table.insertRowBelow.title": "表格：下方插入行",
@@ -59,5 +62,15 @@
   "command.ui.backlinksToggle.title": "显示或隐藏反链面板",
   "command.ui.outlinksToggle.title": "显示或隐藏出链面板",
   "command.editor.refresh.title": "刷新嵌入资源",
-  "command.ui.hoverPreviewLink.title": "预览当前链接"
+  "command.editor.addCursorAbove.title": "在上方添加光标",
+  "command.editor.addCursorBelow.title": "在下方添加光标",
+  "command.ui.hoverPreviewLink.title": "预览当前链接",
+  "command.wordMotion.cursorLeft.title": "按词左移（中文分词）",
+  "command.wordMotion.selectLeft.title": "按词向左扩展选区（中文分词）",
+  "command.wordMotion.cursorRight.title": "按词右移（中文分词）",
+  "command.wordMotion.selectRight.title": "按词向右扩展选区（中文分词）",
+  "command.find.selectNext.title": "选下一处相同词",
+  "command.find.selectPrevious.title": "选上一处相同词",
+  "command.find.skipCurrent.title": "跳过当前，选下一处相同词",
+  "command.find.allOccurrences.title": "选中全部相同词"
 }
