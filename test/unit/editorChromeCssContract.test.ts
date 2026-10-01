@@ -110,10 +110,19 @@ describe('CM6 dark 声明随宿主主题热跟随', () => {
 })
 
 describe('光标与选区颜色按主题适配（main.css 源文本；#237 起 drawSelection 在场）', () => {
-  it('原生 caret 只允许零宽格隐藏；绘制光标颜色归 baseTheme，选区背景归 VSCode 主题变量', () => {
-    expect(css.match(/caret-color\s*:/g)).toHaveLength(1)
+  it('原生 caret 只允许零宽格与格区让位两处隐藏；绘制光标颜色归 baseTheme，选区背景归 VSCode 主题变量', () => {
+    // 两处合法透明：#237 零宽活动格隐藏原生 caret；#252 格区在场让位
+    //（折叠单光标在多光标关闭时的原生 caret 呈现路径）——此外不得新增
+    expect(css.match(/caret-color\s*:/g)).toHaveLength(2)
     expect(css).toMatch(/#app \.cm-editor \.cm-content:has\(\.vsidian-table-grid-empty-active\)\s*\{\s*caret-color:\s*transparent;/)
+    expect(css).toMatch(/#app \.cm-editor \.cm-content:has\(\.vsidian-table-region-cell\)\s*\{\s*caret-color:\s*transparent;/)
     expect(css).toMatch(/\.vsidian-table-grid-empty-active::after[\s\S]*?border-left:\s*1px solid currentColor;/)
+    // #252 格区在场时锚点格光标让位的三条规则：绘制光标隐藏、原生 caret
+    // 透明（上一条 toMatch）、零宽假光标隐藏（特异性 1 id + 5 class，须
+    // 盖过假光标聚焦显示规则的 1 id + 4 class——回归用 display:none 裸
+    // 规则会在特异性对决中静默失效）
+    expect(css).toMatch(/#app \.cm-editor:has\(\.vsidian-table-region-cell\) \.cm-cursorLayer \.cm-cursor\s*\{\s*display:\s*none;/)
+    expect(css).toMatch(/#app \.cm-editor:has\(\.vsidian-table-region-cell\) \.cm-scroller \.cm-content \.vsidian-table-grid-empty-active::after\s*\{\s*display:\s*none;/)
     // #237 绘制光标（.cm-cursor）：main.css 只允许几何规则（空格活动格
     // 去重的 display:none），颜色（border/caret/background）仍由 baseTheme
     // 明暗变体接管——防硬编码颜色回潮（只查规则体，注释文字不参与匹配）

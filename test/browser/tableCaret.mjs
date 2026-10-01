@@ -156,7 +156,7 @@ try {
     }
   }
   const navigationFailures = []
-  for (const scenario of ['horizontal-wrap', 'horizontal-wrap-empty', 'vertical-inside', 'vertical-outside', 'vertical-empty', 'vertical-wrapped', 'enter-cell', 'enter-empty', 'enter-body', 'enter-middle', 'enter-repeat', 'enter-code', 'enter-code-start', 'enter-code-end', 'enter-ime', 'drag-row', 'drag-column', 'region-copy', 'region-exit-outside', 'region-drag-live-selection', 'region-drag-fulltable-mask', 'region-type', 'region-paste', 'region-paste-grid', 'region-ime', 'region-zero-width', 'region-zero-width-ime', 'region-padded-drag', 'header-clear', 'empty-row-backspace', 'empty-row-realclick', 'empty-cell-padding', 'handle-row', 'handle-column', 'handle-cross-row', 'handle-cross-column', 'handle-hover', 'column-width', 'drag-table-outside']) {
+  for (const scenario of ['horizontal-wrap', 'horizontal-wrap-empty', 'vertical-inside', 'vertical-outside', 'vertical-empty', 'vertical-wrapped', 'enter-cell', 'enter-empty', 'enter-body', 'enter-middle', 'enter-repeat', 'enter-code', 'enter-code-start', 'enter-code-end', 'enter-ime', 'drag-row', 'drag-column', 'region-copy', 'region-exit-outside', 'region-drag-live-selection', 'region-drag-fulltable-mask', 'region-drag-caret-yield', 'region-drag-caret-yield-empty', 'region-type', 'region-paste', 'region-paste-grid', 'region-ime', 'region-zero-width', 'region-zero-width-ime', 'region-padded-drag', 'header-clear', 'empty-row-backspace', 'empty-row-realclick', 'empty-cell-padding', 'handle-row', 'handle-column', 'handle-cross-row', 'handle-cross-column', 'handle-hover', 'column-width', 'drag-table-outside']) {
     const page = await browser.newPage()
     try {
       await page.setContent('<div id="app"></div>')
@@ -173,6 +173,7 @@ try {
       if (scenario === 'handle-column') source = source.replace('| --- | --- |', '| :--- | ---: |')
       if (scenario.startsWith('region-zero-width')) source = 'BEFORE\n\n|H1|H2|\n|---|---|\n||B2|\n|C1|C2|\n\nAFTER'
       if (scenario === 'region-padded-drag') source = 'BEFORE\n\n|H1|H2|\n|---|---|\n| |B2|\n|C1|C2|\n\nAFTER'
+      if (scenario === 'region-drag-caret-yield-empty') source = 'BEFORE\n\n|H1|H2|\n|---|---|\n||B2|\n|C1|C2|\n\nAFTER'
       if (scenario === 'column-width') source = 'BEFORE\n\n| 短 | 这是一个内容比较长的表头列 |\n| --- | --- |\n| a | 这一列内容明显更长更长更长 |\n| b | 短 |\n\nAFTER'
       if (scenario.startsWith('handle-cross-')) source += '\n\n| X1 | X2 |\n| --- | --- |\n| Y1 | Y2 |'
       if (scenario === 'enter-empty') source = source.replace('H2', '')
@@ -392,6 +393,74 @@ try {
         assert.equal(frames.at(-1).region, 4, '松手前 2×2 矩形已就位')
         const after = await page.evaluate(() => window.readEditor())
         assert.equal(after.from, after.to, '松手后光标保持折叠')
+      } else if (scenario.startsWith('region-drag-caret-yield')) {
+        // #252 格区在场时左上锚点格的光标让位：跨格接管的折叠单光标（防
+        // pointerup 原生线性选区结算的既定形态）由 drawSelection 的
+        // .cm-cursor 绘制、零宽锚点格点亮 ::after 假光标——与格区蒙版叠加
+        // 即「左上格多一枚光标」的视觉残留。断言落在绘制层（computed
+        // display）：蒙版呈现期（拖动中，region>0 即跨格接管已发生）与
+        // 落定期（松手后）两态让位；零宽 fixture（||B2|）另断言假光标
+        // 让位；单击清除格区后绘制光标恢复显示（不过度隐藏）。
+        const caretState = () => page.evaluate(() => {
+          const drawn = document.querySelector('.cm-cursorLayer .cm-cursor')
+          const fake = document.querySelector('.vsidian-table-grid-empty-active')
+          return {
+            region: document.querySelectorAll('.vsidian-table-region-cell').length,
+            drawn: drawn ? getComputedStyle(drawn).display : 'absent',
+            fake: fake ? getComputedStyle(fake, '::after').display : 'absent',
+          }
+        })
+        const a = await cell(1, 0).boundingBox()
+        const b = await cell(2, 1).boundingBox()
+        await page.mouse.move(a.x + 14, a.y + a.height / 2)
+        await page.mouse.down()
+        let during = null
+        for (let step = 1; step <= 6; step++) {
+          await page.mouse.move(a.x + 14 + (b.x + 26 - a.x - 14) * step / 6,
+            a.y + a.height / 2 + (b.y + b.height / 2 - a.y - a.height / 2) * step / 6)
+          if (step === 4) during = await caretState()
+        }
+        await page.mouse.up()
+        const settled = await caretState()
+        assert(during && during.region > 0, `拖动中应已跨格接管: ${JSON.stringify(during)}`)
+        assert.ok(during.drawn === 'none' || during.drawn === 'absent',
+          `拖动中左上格绘制光标应让位（压制或不在场）: ${JSON.stringify(during)}`)
+        assert.equal(settled.region, 4, `落定后 2×2 格区应就位: ${JSON.stringify(settled)}`)
+        assert.ok(settled.drawn === 'none' || settled.drawn === 'absent',
+          `落定后左上格绘制光标应让位（压制或不在场）: ${JSON.stringify(settled)}`)
+        if (scenario === 'region-drag-caret-yield-empty') {
+          assert.notEqual(settled.fake, 'absent', '零宽锚点格的假光标装饰应在场（active 仍发射）')
+          assert.equal(settled.fake, 'none', `零宽锚点格的假光标应让位: ${JSON.stringify(settled)}`)
+        }
+        // 恢复：单击非锚点格清除格区（onDown 清场 + CM6 原生点击设选区），
+        // 绘制光标回到可见（编辑器仍聚焦）
+        await cell(2, 1).click()
+        const restored = await caretState()
+        assert.equal(restored.region, 0, `单击清除后格区应消失: ${JSON.stringify(restored)}`)
+        // 恢复检验的是「CSS 压制解除」：drawn 为 'none'（元素在场但被规则
+        // 压制）才失败；'absent'（CM6 自身未绘制，零宽 fixture 拖选后的
+        // 点击态）与本规则的过度隐藏无关
+        assert.notEqual(restored.drawn, 'none', `格区消失后绘制光标不得仍被压制: ${JSON.stringify(restored)}`)
+        if (scenario === 'region-drag-caret-yield') {
+          // 多光标关闭形态：drawSelection 退出装配、折叠单光标回退原生
+          // caret 呈现——格区在场时经 caret-color 透明让位（原生 caret 无
+          // DOM，断言取计算值），cursorLayer 不在场
+          await page.evaluate(() => window.controller.handleHostMessage(
+            { kind: 'settings.changed', values: { 'editor.multicursor': false } }))
+          await page.mouse.move(a.x + 14, a.y + a.height / 2)
+          await page.mouse.down()
+          await page.mouse.move(b.x + 26, b.y + b.height / 2, { steps: 6 })
+          await page.mouse.up()
+          const nativeCaret = await page.evaluate(() => ({
+            caret: getComputedStyle(document.querySelector('.cm-content')).caretColor,
+            layer: document.querySelector('.cm-cursorLayer') ? 'present' : 'absent',
+            region: document.querySelectorAll('.vsidian-table-region-cell').length,
+          }))
+          assert.equal(nativeCaret.region, 4, `关闭多光标后格区拖选应照常: ${JSON.stringify(nativeCaret)}`)
+          assert.equal(nativeCaret.layer, 'absent', '多光标关闭时绘制层不应在场')
+          assert.equal(nativeCaret.caret, 'rgba(0, 0, 0, 0)',
+            `格区在场时原生 caret 应透明让位: ${JSON.stringify(nativeCaret)}`)
+        }
       } else if (scenario === 'region-paste-grid') {
         // 格对格粘贴（2026-09-28 决策）：格区复制产物（带表头包装的表格）
         // 粘回格区须逐格铺开替换，不再整段落左上格；表头包装剥掉、结构
