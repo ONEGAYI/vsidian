@@ -691,7 +691,6 @@ export const en = {
   'setting.wordSegmentCustomUrl.description': 'HTTPS directory URL used in the custom mode — the two locked files are fetched as baseURL/jieba_rs_wasm.js and baseURL/jieba_rs_wasm_bg.wasm. Plain HTTP is rejected.',
   /** 设置页「中文分词」分页框架与资源管理 */
   'wordSegment.title': 'Word Segmentation',
-  'wordSegment.description': 'Word-wise Ctrl+Left/Right motion for continuous CJK text, plus jieba resource management.',
   'wordSegment.engineLabel': 'Segmentation engine',
   'wordSegment.engineDescription': 'Controls how continuous Chinese text is split when moving by words. Switching takes effect immediately.',
   'wordSegment.engineBuiltinHint': 'Browser built-in ICU segmentation; no download, always available.',

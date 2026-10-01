@@ -50,7 +50,7 @@ export interface SettingsPageEditorGroup {
   readonly legacySectionId?: string
   /** 组标题图标槽位（SettingsGroupIcon 注册表驱动，与 defs 组同一 h3
    *  路径：内联字形与 #265 生图资产同槽）：缺省 = 槽位空缺，标题文字
-   *  起点不变（分词组的 wordSegment 登记随 #265 生图接线落地） */
+   *  起点不变（分词组的 wordSegment 已随 #265 生图接线登记） */
   readonly icon?: SettingsGroupIcon
   /** 全局搜索条目（id = mount 的 focusEntry 定位键） */
   readonly entries: readonly { id: string; title: string; description?: string }[]
@@ -58,6 +58,16 @@ export interface SettingsPageEditorGroup {
    *  重渲染/切换时调用（释放内部 parent 引用） */
   mount(parent: HTMLElement, focusEntry?: string): void | (() => void)
 }
+
+/**
+ * 编辑器页小节（editorSectionDefs 的元素）：defs 标准组与 group 委托组
+ * 互斥——标准臂有 defs 无 group，委托臂有 group 无 defs（对侧属性以
+ * `?: undefined` 钉成可辨识联合，互斥靠类型不靠约定）。icon 为二级组
+ * 标题图标槽（标准臂四枚内联字形，委托臂生图资产或空缺）。
+ */
+type EditorSection =
+  | { titleKey: MessageKey; icon: SettingsGroupIcon; defs: () => readonly SettingDefinition[]; group?: undefined }
+  | { titleKey: MessageKey; icon?: SettingsGroupIcon; defs?: undefined; group: SettingsPageEditorGroup }
 
 export const SETTINGS_PAGE_CLASS_NAMES = {
   root: 'vsidian-settings', title: 'vsidian-settings-title',
@@ -82,7 +92,7 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, tex
 /** 字形 path 注册表（24 viewBox 单 path；icon() 单表的数据源，装配仍只走
  *  icon() 一条路径，新增 kind = 联合类型加名 + 本表加行）。
  *  search：放大镜（侧栏搜索框前缀）；
- *  keyboard：键盘（快捷键分页；#239 起兼作中文分词分页占位）；
+ *  keyboard：键盘（快捷键分页）；
  *  general（#96「常规」分组；#230 换形）：双拨杆开关——通用偏好开关的
  *  惯用意象（上枚圆点居左、下枚圆点居右；lucide toggle-left/right 的纵排
  *  同构，替换原地球字形的「语言/网络」语义）；
@@ -150,7 +160,9 @@ export class SettingsPageView {
   private active: string | undefined
   private pending = 0
   private saveFailed = false
-  private disposeSection: (() => void) | undefined
+  /** 当前分页内容卸载器集合（标准分页 mount 与编辑器页委托组 mount 的
+   *  清理函数逐个收集）：编辑器页多委托组并存，重渲染/切页时全部执行 */
+  private sectionDisposers: Array<() => void> = []
   private offLocale: (() => void) | undefined
 
   constructor(private readonly bridge: SettingsPageBridge,
@@ -325,20 +337,16 @@ export class SettingsPageView {
    *  icon 为二级组标题图标，注册表驱动（#263 内联四枚 + #265 生图两枚）。
    *  #264 起尾部追加委托组（分词）：组内容非标准设置行，经 group.mount
    *  装配，图标经组对象 icon 槽登记、走与 defs 组同一 h3 容器路径（结构
-   *  不加特判；未登记 = 槽位空缺，布局机制对其无差别）。 */
-  private editorSectionDefs(): Array<{
-    titleKey: MessageKey
-    icon?: SettingsGroupIcon
-    defs?: () => readonly SettingDefinition[]
-    group?: SettingsPageEditorGroup
-  }> {
+   *  不加特判；未登记 = 槽位空缺，布局机制对其无差别）。
+   *  标准组/委托组互斥由 EditorSection 可辨识联合钉住。 */
+  private editorSectionDefs(): EditorSection[] {
     return [
       { titleKey: 'settings.groupDisplay', icon: 'display', defs: () => this.displayDefs() },
       { titleKey: 'settings.groupEditing', icon: 'editing', defs: () => this.editingDefs() },
       { titleKey: 'settings.groupSymbols', icon: 'typewriter', defs: () => this.symbolDefs() },
       { titleKey: 'settings.groupCodeblock', icon: 'codeblock', defs: () => this.codeblockDefs() },
       { titleKey: 'settings.groupImage', icon: 'image', defs: () => this.imageDefs() },
-      ...this.editorGroups.map((group) => ({ titleKey: group.titleKey, icon: group.icon, group })),
+      ...this.editorGroups.map((group): EditorSection => ({ titleKey: group.titleKey, icon: group.icon, group })),
     ]
   }
   private categories() {
@@ -362,8 +370,8 @@ export class SettingsPageView {
     const contextChanged = renderKey !== this.lastRenderKey
     this.lastRenderKey = renderKey
     if (contextChanged && this.mainEl) this.mainEl.scrollTop = 0
-    this.disposeSection?.()
-    this.disposeSection = undefined
+    for (const dispose of this.sectionDisposers) dispose()
+    this.sectionDisposers = []
     // #96 默认分组 = 首个分类（有常规定义时即「常规」）；active 指向已
     // 消失的分类时回落首个（定义表运行时可变：测试 fixture 注册/注销）
     const active = this.categories().find((c) => c.id === this.active) ?? this.categories()[0]
@@ -436,7 +444,8 @@ export class SettingsPageView {
         element('p', SETTINGS_PAGE_CLASS_NAMES.subtitle, section.description))
       const content = element('div', 'vsidian-settings-section-content')
       list.append(content)
-      this.disposeSection = section.mount(content, focusEntry) ?? undefined
+      const dispose = section.mount(content, focusEntry)
+      if (dispose) this.sectionDisposers.push(dispose)
       return
     }
     // 编辑器分组（#163 二轮还原）：页内按组内标题分小节（显示/符号输入/
@@ -470,8 +479,10 @@ export class SettingsPageView {
       list.append(container)
       if (section.group) {
         // 委托组：内容与组内定位（focusEntry = 组条目 id）由组自行装配；
-        // 清理函数并入 disposeSection（重渲染/切页时释放内部 parent 引用）
-        this.disposeSection = section.group.mount(container, focusEntry) ?? undefined
+        // 清理函数收进卸载器集合（重渲染/切页时释放内部 parent 引用；
+        // 多委托组并存时逐个收集，不相互覆盖）
+        const dispose = section.group.mount(container, focusEntry)
+        if (dispose) this.sectionDisposers.push(dispose)
       } else {
         this.renderDefItems(container, defs, focusEntry)
       }

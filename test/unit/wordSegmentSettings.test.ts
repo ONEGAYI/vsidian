@@ -198,6 +198,33 @@ describe('快照回显与操作上送（路径保持现状）', () => {
     })
   })
 
+  it('下载/删除按钮点击上送 wordSegment.download / wordSegment.delete（禁用态不点送）', () => {
+    const { sent, wordSegment, parent } = makeProductionView()
+    clickNav(parent, zhCn['settings.editorCategory'])
+    const buttonOf = (label: string) =>
+      [...wordSegmentGroup(parent).querySelectorAll<HTMLButtonElement>('button')]
+        .find((b) => b.textContent === label)!
+    // 未安装初始态：下载可用并上送；删除禁用，jsdom 对 disabled 按钮不派发 click
+    expect(buttonOf(zhCn['wordSegment.download']).disabled).toBe(false)
+    expect(buttonOf(zhCn['wordSegment.deleteResource']).disabled).toBe(true)
+    buttonOf(zhCn['wordSegment.deleteResource']).click()
+    expect(sent).not.toContainEqual({ kind: 'wordSegment.delete' })
+    buttonOf(zhCn['wordSegment.download']).click()
+    expect(sent).toContainEqual({ kind: 'wordSegment.download' })
+    // 下载中（busy）：下载禁用，点击不新增任何上送
+    pushState(wordSegment, { status: 'downloading' })
+    const downloading = buttonOf(zhCn['wordSegment.download'])
+    expect(downloading.disabled).toBe(true)
+    const sentCount = sent.length
+    downloading.click()
+    expect(sent).toHaveLength(sentCount)
+    // 已安装：删除可用并上送
+    pushState(wordSegment, { installed: true, version: '0.1.0' })
+    expect(buttonOf(zhCn['wordSegment.deleteResource']).disabled).toBe(false)
+    buttonOf(zhCn['wordSegment.deleteResource']).click()
+    expect(sent).toContainEqual({ kind: 'wordSegment.delete' })
+  })
+
   it('wordSegment.state 回显：已安装状态文本与按钮态、下载中禁用、notice 基调', () => {
     const { wordSegment, parent } = makeProductionView()
     clickNav(parent, zhCn['settings.editorCategory'])

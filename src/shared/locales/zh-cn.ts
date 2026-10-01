@@ -652,7 +652,6 @@ export const zhCn: Record<MessageKey, string> = {
   'setting.wordSegmentCustomUrl.description': '自定义模式使用的 HTTPS 目录地址——两个锁定文件按 基址/jieba_rs_wasm.js 与 基址/jieba_rs_wasm_bg.wasm 下载。明文 HTTP 会被拒绝。',
   /** 设置页「中文分词」分页框架与资源管理 */
   'wordSegment.title': '中文分词',
-  'wordSegment.description': 'Ctrl+左/右箭头对连续中文段按词移动，以及 jieba 资源管理。',
   'wordSegment.engineLabel': '分词引擎',
   'wordSegment.engineDescription': '决定按词移动时连续中文的切分方式，切换即时生效。',
   'wordSegment.engineBuiltinHint': '浏览器内置 ICU 分词，无需下载、始终可用。',

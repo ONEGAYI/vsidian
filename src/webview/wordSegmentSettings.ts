@@ -91,6 +91,15 @@ export class WordSegmentSection implements SettingsPageEditorGroup {
     return el
   }
 
+  /** 组内块定位（引擎/资源两处同形）：focusEntry 命中条目 id 时加定位类
+   *  并滚动到位。定位在入文档后执行：游离节点上 scrollIntoView 是 no-op
+   *（renderDefItems 同款约束——容器先入文档、条目再定位） */
+  private locateBlock(block: HTMLElement, focusEntry: string | undefined, entryId: string): void {
+    if (focusEntry !== entryId) return
+    block.classList.add('vsidian-settings-item-located')
+    block.scrollIntoView?.({ block: 'nearest' })
+  }
+
   private render(focusEntry?: string): void {
     const parent = this.parent
     if (!parent) return
@@ -158,12 +167,7 @@ export class WordSegmentSection implements SettingsPageEditorGroup {
     customRow.append(customInput)
     engineBlock.append(customRow)
     parent.append(engineBlock)
-    // 定位在入文档后执行：游离节点上 scrollIntoView 是 no-op
-    //（renderDefItems 同款约束——容器先入文档、条目再定位）
-    if (focusEntry === WORD_SEGMENT_SECTION_ENGINE_ENTRY) {
-      engineBlock.classList.add('vsidian-settings-item-located')
-      engineBlock.scrollIntoView?.({ block: 'nearest' })
-    }
+    this.locateBlock(engineBlock, focusEntry, WORD_SEGMENT_SECTION_ENGINE_ENTRY)
 
     // ---- 资源管理 ----
     const resourceBlock = document.createElement('div')
@@ -210,10 +214,7 @@ export class WordSegmentSection implements SettingsPageEditorGroup {
       resourceBlock.append(noticeEl)
     }
     parent.append(resourceBlock)
-    if (focusEntry === WORD_SEGMENT_SECTION_RESOURCE_ENTRY) {
-      resourceBlock.classList.add('vsidian-settings-item-located')
-      resourceBlock.scrollIntoView?.({ block: 'nearest' })
-    }
+    this.locateBlock(resourceBlock, focusEntry, WORD_SEGMENT_SECTION_RESOURCE_ENTRY)
   }
 
   /** 单选行：radio + 名称（+ 可选说明）；点击即保存该键值 */
