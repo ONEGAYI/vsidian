@@ -365,17 +365,29 @@ PR #203 用户验收反馈的一轮设计落地：反链面板形态改版（工
 ### 修复（产品四条 + 测试侧两条）
 
 - **装载回收（入口一）**：`textOf` 增装载清单，did 收尾统一 `documentClosed` 退役（谁装载谁回收）。
-- **改写触达回收（入口三的通道侧）**：will 的 `docsByKey` 引用者（`rewrittenDocs`，open 装载混合、dirty 已分流）与 did 出链触达文档一并进 did 收尾退役——非 dirty 文档的覆盖层退役即归基线（documentSaved 同款语义，无损）。
+- **改写触达回收（入口三的通道侧）**：will 的 `docsByKey` 引用者（`rewrittenDocs`，装载与面板打开混合、dirty 已分流）与 did 出链触达文档一并进 did 收尾退役——装载子集 will edit 随宿主落盘（退役即归基线）；面板子集只改 buffer 不落盘，did 收尾按「编辑器标签仍持有」豁免（见 review 轮修复），无标签者照退。
 - **盘面一致收敛（入口二主时序）**：`rescanFile` 读盘后，「未保存」暂存与磁盘文本一致（盘=buffer，外部写回流终态）时退役覆盖层归基线；盘≠暂存（真实未保存编辑）不动。
-- **关闭残渣兜底（实例死后的滞留）**：服务新增可选端口 `isDocOpen`（wiring 注入 textDocuments 在场探测，normKey 同款折叠），`rescanFile` 时文档已不在场则覆盖层必为残渣（onDidClose 漏触发兜底），直接退役。
+- **关闭残渣兜底（实例死后的滞留）**：服务新增可选端口 `isDocOpen`（wiring 注入 textDocuments 在场探测，无条件大小写折叠+分隔符归一——保守方向：大小写漂移只会误判在场而漏兜底，盘=暂存收敛路径仍可退役，不会误判不在场而误退役），`rescanFile` 时文档已不在场则覆盖层必为残渣（onDidClose 漏触发兜底），直接退役；文件 missing（外部删除）时同款判定（文档不在场的覆盖层残渣随基线移除一并退役，review 轮补）。
 - **测试观测口**：新增 `_test.getRenameCandidates`（`VSIDIAN_TEST_HOOKS` 门控，`renameCandidatesOf` 直通精简形态）；跨根用例 rename 前轮询等待「改名目标.md 的 incoming 含引用甲乙」——`waitRenameIndexReady` 只等 hasData && !scanning，观测不到增量自愈/加根 fullScan 进度（`setRoots` 会 epoch++ 中止在途增量改走全量重扫，而「第二根纳入」poll 满足点恰早于主根 fullScan），等待可观测事实而非固定延时。
 - **测试缺席自愈（入口三的编排侧）**：等待探针轮询中缺席者节流执行「打开并保存（save 落盘触发 onDidSaveTextDocument → 覆盖层随 documentSaved 退役+重扫）再外部写回原文（watcher 重扫、基线归位）」——全走产品正道事件；根因是多边型/漂移用例把 dirty 面板泄漏给了后续用例，跨根（纯磁盘视角用例）自愈收口。
 - 契约测试四例落 `test/unit/vaultIndexService.test.ts`（外部写回流退役 / 真实未保存不受影响 / isDocOpen=false 兜底退役 / isDocOpen=true 不退役），red 能力经禁用收敛块验证。
+
+### review 轮修复（2026-10-01 第二轮，低强度评审）
+
+- **面板引用者的覆盖层豁免（P2）**：首轮的改写触达回收把「did 收尾时刻仍被编辑器标签持有的文档」也退役了——面板打开的引用者经 will edit 改写后只转 buffer 脏不落盘，其覆盖层=buffer 现状是**合法接管**（#199「未保存内容即时反映」），退役会使索引回落旧盘面基线，连续 rename（对新目标再 rename）将静默漏发现该引用者（候选 incoming 读回旧边）。修复：收尾退役前按 `vscode.window.tabGroups` 探测「编辑器标签仍持有」（Vsidian 面板、普通文本编辑器或 diff 视图均算——用户可见编辑中的活 buffer 都不是通道残渣；装载文档无标签恒不持有，与首轮「宿主 bulk edit 短暂 dirty 不得挡装载回收」的实测教训零冲突）。豁免者退场走正常文档生命周期：面板关闭（provider onDidClose）→ 保存（documentSaved）→ isDocOpen 兜底。集成回归钉：多边型用例 rename 完成后、undo 前断言「引用甲的覆盖层持新目标好边」（`_test.getRenameOverlay` 直读，禁用豁免实测转红 `undefined`——即退役清空的形态）；不断言候选 incoming——反链桶按基线边聚合，rename 后新目标在依赖者重抽前恒无桶（见已知边界「桶依赖」条）。
+- **dirtyRefs 窄路径补装载收集**：will 时刻 dirty 分流的引用者若在 will→did 间被关闭且 dirty 丢弃，did 段 `textOf` 装载磁盘文本叠加改写后同样产生「无标签改写产物」——补传收集清单进收尾退役（入口一不在窄路径复活）。
+- **收尾退役移入 finally**：did 通道中途异常（IO/applyEdit 拒绝）不再丢退役与清单（批次键已先行删除，异常后无法找回）。
+- **textOf 装载收集 isDirty 防御**：URI 大小写漂移时 `open` 查找 miss、`openTextDocument` 返回已打开的 dirty 实例——真实未保存内容不得进退役清单（正常装载是磁盘态非 dirty，不受影响）。
+- **missing 分支残渣退役**：外部删除与关闭残渣并存时，覆盖层幽灵边不得继续贡献反链——`rescanFile` 的 missing 分支对「文档不在场」同款兜底退役（文档在场时保留覆盖层：编辑器内未保存内容仍接管查询）。单测两例钉住（不在场退役/在场保留，禁用实测转红）。
+- 注释契约修正：`documentClosed` 补 rename 通道调用方说明（不做面板检查——面板持有者已在调用前豁免，退役对象是无标签通道产物，幂等无害）；单测「真实未保存编辑」例补 rescanFile 触发（钉住 isDocOpen 端口缺省=视为在场的历史语义）。
 
 ### 已知边界（残余）
 
 - **dirty 面板残渣的产品侧根治未做**：打开文档带未保存编辑时被外部还原磁盘，反链按设计显示未保存编辑的链接（正确语义）；「用户主动丢弃未保存内容」的回滚事件 1.86 不广播，产品侧无通用退役信号——真实用户场景存在自愈路径（编辑/保存/关闭-重开该文档），测试场景经缺席自愈绕开。若后续真实场景出现反链长期滞留反馈，再评估 onDidClose 竞态加固（面板 dispose 与文档关闭事件的顺序保证）。
 - **增量重扫的断链边无依赖者传播**：`rescanFile(a)` 早于目标归位时抽出的断链边进基线后，目标登记不会重抽 a（fullScan 才全量重算）——跨根用例的等待探针已覆盖该窗口；「目标归位重抽依赖者」属增量维护的结构性增强，另票评估。
+- **批次上限淘汰会连带丢弃回收清单（review 轮确认，接受）**：`PENDING_BATCH_LIMIT=8` 淘汰最旧批次时其 `loadedDocs`/`rewrittenDocs` 一并丢弃——需 8 连 will 无 did（用户连续取消 rename）才触发，装载子集仍有盘=暂存收敛兜底，概率与影响均极低，不为此加复杂度。
+- **跨根集成用例对服务收敛块的回归检测力有限（review 轮确认，证明力分工）**：缺席自愈的两条退场路径（save→documentSaved 退役、writeFile→watcher 重扫）都不经过 `rescanFile` 的收敛块——禁用服务收敛时该用例大概率仍被自愈救活；服务级回归的实际防线是 `vaultIndexService.test.ts` 的契约用例（含 review 轮补的 missing 两例），集成用例守护的是编排层顺序缺陷本身。
+- **renameCandidatesOf 的桶依赖：rename 后新目标的 incoming 在依赖者重抽前近乎恒空（review 轮实测确认，与「目标归位重抽依赖者」同根，另票）**：反链桶按**基线边**聚合——引用者的 will edit 落盘触发重扫时新目标尚不存在（edit 先于 rename 应用），抽出断链边聚合不进新目标桶；覆盖层边不建桶（queryBacklinks 的 overlay 段独立遍历，但 renameCandidatesOf 仅在桶存在时进入查询）。例外：断链边回退按 target 原文聚合（`resolvedTarget ?? target`），链接文本与目标 rel 恰同形（如 `[[改名目标2.md]]`）时可命中回退桶。用户可见后果：rename X→Y 后立刻 rename Y→Z，Y 的引用者（含面板打开与已落盘者）在该窗口内静默漏改写——#199 时代即存在（与本票退役行为无关），修复需「目标归位重抽依赖者」或桶查询 fallback 扫覆盖层，属增量维护的结构性增强，另票评估。本轮豁免保住面板引用者的覆盖层载体（桶外查询路径与反链面板的即时反映不受退役破坏）。
 
 ### 与 #199 已知边界的关系
 

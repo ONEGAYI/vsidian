@@ -170,7 +170,9 @@ export function createVaultIndexService(
     excludePatterns,
     // 文档在场探测（#256 关闭残渣兜底）：rescanFile 时文档已不在
     // textDocuments → 其覆盖层/未保存暂存必为残渣（onDidCloseTextDocument
-    // 漏触发的兜底退役）。比较用 normKey 同款折叠（Windows 大小写漂移）
+    // 漏触发的兜底退役）。比较为无条件大小写折叠+分隔符归一（保守方向：
+    // 大小写漂移只会误判在场而漏兜底——盘=暂存收敛路径仍可退役，不会
+    // 误判不在场而误退役真实打开文档的覆盖层）
     isDocOpen: (fsPath) => {
       const fold = normalizeSeparators(fsPath).toLowerCase()
       return vscode.workspace.textDocuments.some(

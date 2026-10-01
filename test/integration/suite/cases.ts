@@ -11076,6 +11076,25 @@ export const cases: Array<[string, () => Promise<void>]> = [
       const root = s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir))
       return root && root.hasData && !root.scanning ? true : undefined
     })
+    // 面板引用者的覆盖层接管回归钉（#256 review 轮）：引用甲（面板打开）
+    // 经 will 改写后只转 buffer 脏不落盘，其覆盖层=buffer 现状是合法接管
+    // （#199「未保存内容即时反映」）——did 收尾不得把该覆盖层当残渣退役。
+    // 观测口直读覆盖层 resolved 边（须持新目标好边）；不断言
+    // renameCandidatesOf 的 incoming——其反链桶按基线边聚合，rename 后的
+    // 新目标在依赖者重抽前恒无桶（「目标归位重抽依赖者」已知边界，另票）
+    await poll('rename 后面板引用者覆盖层持新目标边', async () => {
+      const edges = (await vscode.commands.executeCommand(
+        'onegayi.vsidian._test.getRenameOverlay', wsUri('rename-ref-a.md').fsPath,
+      )) as string[] | undefined
+      return edges && edges.some((e) => e === '改名目标2.md' || e.endsWith('/改名目标2.md'))
+        ? edges
+        : undefined
+    }).catch(async (err) => {
+      const edges = await vscode.commands.executeCommand(
+        'onegayi.vsidian._test.getRenameOverlay', wsUri('rename-ref-a.md').fsPath,
+      )
+      throw new Error(`${(err as Error).message}；overlay实况=${JSON.stringify(edges)}`)
+    })
     // 撤销一步恢复：rename 与改写 edit 是同一撤销单元（undo 一次全部回退）
     await vscode.commands.executeCommand('undo')
     await poll('撤销恢复引用甲', async () => {

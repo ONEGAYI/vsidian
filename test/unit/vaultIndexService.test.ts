@@ -360,11 +360,24 @@ describe('VaultIndexService：覆盖层与保存', () => {
       'C:/vault/a.md': '# A\n\n引用 [[目标]]。\n',
       'C:/vault/目标.md': '# 目标\n',
     })
-    const { service } = makeService(fs)
+    let notify: ((p: string | null) => void) | undefined
+    const scan = scanPortOf(fs)
+    scan.watchRoot = (_root, onEvent) => {
+      notify = onEvent
+      return () => {}
+    }
+    // 刻意不注入 isDocOpen：钉住端口缺省=视为在场的历史语义（生产 wiring
+    // 恒注入；此处覆盖 rescanFile 在缺省分支下的行为）
+    const service = new VaultIndexService(scan, storagePortOf(), { storageRoot: 'C:/store', isWindowsHost: IS_WIN })
     await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
     // 用户编辑（未保存，盘面未变）：覆盖层必须继续遮蔽旧盘面基线
     service.applyUnsaved('C:/vault/a.md', 2, '# A\n\n引用消失。\n')
     await vi.advanceTimersByTimeAsync(700)
+    expect(itemsOf(await service.backlinksOf('C:/vault/目标.md'))).toHaveLength(0)
+    // 其他文件事件触发的本文件重扫（盘≠暂存且端口缺省视为在场）不得退役
+    fs.stats.set('C:/vault/a.md', { mtimeMs: 1_700_000_030_000, size: 14 })
+    notify!('C:/vault/a.md')
+    await vi.advanceTimersByTimeAsync(1200)
     expect(itemsOf(await service.backlinksOf('C:/vault/目标.md'))).toHaveLength(0)
   })
 
@@ -421,6 +434,64 @@ describe('VaultIndexService：覆盖层与保存', () => {
     notify!('C:/vault/a.md')
     await vi.advanceTimersByTimeAsync(1200)
     expect(itemsOf(await service.backlinksOf('C:/vault/目标.md'))).toHaveLength(0)
+  })
+
+  it('外部删除时文档不在场的残渣兜底退役，幽灵边不再贡献反链（#256 review 轮）', async () => {
+    // 文件被外部删除且其覆盖层残渣滞留（onDidClose 漏触发同发）：missing
+    // 分支只移除基线条目，来源的覆盖层幽灵边会继续出现在反链查询里
+    // （queryBacklinks 迭代全部覆盖条目）——文档不在场时必为残渣，须与
+    // 基线移除同拍退役
+    const fs = makeFs({
+      'C:/vault/a.md': '# A\n\n引用 [[目标]]。\n',
+      'C:/vault/目标.md': '# 目标\n',
+    })
+    let notify: ((p: string | null) => void) | undefined
+    const scan = scanPortOf(fs)
+    scan.watchRoot = (_root, onEvent) => {
+      notify = onEvent
+      return () => {}
+    }
+    const service = new VaultIndexService(scan, storagePortOf(), {
+      storageRoot: 'C:/store', isWindowsHost: IS_WIN,
+      isDocOpen: () => false, // 删除时文档已不在场（关闭残渣滞留）
+    })
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    // 面板期幽灵登记：未保存文本指向目标（盘≠暂存，回流收敛不命中）
+    service.applyUnsaved('C:/vault/a.md', 5, '# A\n\n引用 [[目标]] 与私文 [[目标]]。\n')
+    await vi.advanceTimersByTimeAsync(700)
+    expect(itemsOf(await service.backlinksOf('C:/vault/目标.md'))).toHaveLength(2)
+    // 外部删除 a：missing 分支移除基线；文档不在场 → 覆盖层残渣一并退役
+    fs.files.delete('C:/vault/a.md')
+    fs.stats.delete('C:/vault/a.md')
+    notify!('C:/vault/a.md')
+    await vi.advanceTimersByTimeAsync(1200)
+    expect(itemsOf(await service.backlinksOf('C:/vault/目标.md'))).toHaveLength(0)
+  })
+
+  it('外部删除时文档在场的覆盖层保留（编辑器内未保存内容仍接管查询）', async () => {
+    const fs = makeFs({
+      'C:/vault/a.md': '# A\n\n引用 [[目标]]。\n',
+      'C:/vault/目标.md': '# 目标\n',
+    })
+    let notify: ((p: string | null) => void) | undefined
+    const scan = scanPortOf(fs)
+    scan.watchRoot = (_root, onEvent) => {
+      notify = onEvent
+      return () => {}
+    }
+    const service = new VaultIndexService(scan, storagePortOf(), {
+      storageRoot: 'C:/store', isWindowsHost: IS_WIN,
+      isDocOpen: () => true, // 文档始终在场（编辑器打开中，文件被外部删除）
+    })
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    service.applyUnsaved('C:/vault/a.md', 5, '# A\n\n引用 [[目标]] 与私文 [[目标]]。\n')
+    await vi.advanceTimersByTimeAsync(700)
+    fs.files.delete('C:/vault/a.md')
+    fs.stats.delete('C:/vault/a.md')
+    notify!('C:/vault/a.md')
+    await vi.advanceTimersByTimeAsync(1200)
+    // 基线条目已移除，但编辑器内未保存内容（2 边）继续接管反链查询
+    expect(itemsOf(await service.backlinksOf('C:/vault/目标.md'))).toHaveLength(2)
   })
 })
 
