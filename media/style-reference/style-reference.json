@@ -3754,7 +3754,7 @@
       "category": "find-panel",
       "kind": "selector",
       "target": ".vsidian-find（浮动面板容器；.vsidian-find-open 展开态）—— 内部 .vsidian-find-row 主行（.vsidian-find-inputwrap 输入容器（边框/背景/聚焦环/非法红边载体）内嵌 .vsidian-find-input 输入框与 .vsidian-find-case（Aa）/ -word（ab）/ -regexp（.*）三开关（各自 -active 点亮态）/.vsidian-find-count 计数（-empty 零命中 / -hidden 空查询收起不占位）/ .vsidian-find-prev / -next 导航 / -in-selection 在选定内容中查找（-active 点亮；禁用态灰化）/ -close 关闭；-selection-range 为开启时正文里的范围淡底 mark）与 .vsidian-find-toggle 左缘替换栏展开切换（aria-expanded 随态）",
-      "purpose": "编辑区浮动查找面板（#236 起三开关面板，引擎 @codemirror/search 外部驱动）：column 布局——主行（输入/大小写-全字-正则三开关/「第 n 项，共 total 项·无结果」计数/上一个/下一个/关闭，同序对齐 VSCode 原生浮层）+ 左缘替换栏展开切换。三开关为查找选项单一事实源（shared/findOptions，#238「选下一处相同词」同源消费），workspace 级记忆跨会话保留；面板在 Live 与阅读两模式均可用（阅读保留块级命中与定位）。",
+      "purpose": "编辑区浮动查找面板（#236 起三开关面板，引擎 @codemirror/search 外部驱动）：grid 双列布局（2026-10 对齐 VSCode 原生）——左列替换栏展开切换（跨行全高：收起与主行等高、展开经 :has 跨两行与面板主体等高，常态强调色边框，字符图标收起旋 -90° 呈 >、展开回正呈 ⌄）+ 右列主行（输入/大小写-全字-正则三开关/「第 n 项，共 total 项·无结果」计数/上一个/下一个/关闭，同序对齐 VSCode 原生浮层）与替换行堆叠。三开关为查找选项单一事实源（shared/findOptions，#238「选下一处相同词」同源消费），workspace 级记忆跨会话保留；面板在 Live 与阅读两模式均可用（阅读保留块级命中与定位）。",
       "views": [
         "live",
         "reading"
@@ -3767,7 +3767,7 @@
         "support": "none"
       },
       "verification": [
-        "单元 findPanelCssContract：显隐对/column 布局/三开关点亮/红边规则钉住",
+        "单元 findPanelCssContract：显隐对/grid 双列布局/toggle 全高与强调色边框/图标方向/三开关点亮/红边规则钉住",
         "单元 find：面板开合、三开关重算与替换行为（jsdom 控制器）",
         "浏览器 findPanel（#236）：真实键盘路径"
       ],

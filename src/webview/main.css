@@ -3380,9 +3380,10 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
 /* ---- 编辑区查找（#14；#236 起三开关面板与可展开替换栏）：webview 内浮动查找面板 ----
    稳定样式入口（ADR-0004）：面板与匹配高亮均经 vsidian-find-* 类定位；
    custom editor webview 不可用 VSCode 原生 find 控件，此为自有 UI。
-   面板为 column 布局：左缘替换栏展开/收起切换（vsidian-find-toggle）+
-   主行（vsidian-find-row：输入/计数/三开关/导航/关闭）+ 替换行
-   （vsidian-find-replace，-open 类控制显隐——显隐纯 CSS，无 JS 内联）。
+   面板为 grid 双列布局（2026-10 对齐 VSCode 原生）：左列替换栏展开/收起
+   切换（vsidian-find-toggle，跨行全高）+ 右列主行（vsidian-find-row：
+   输入/计数/三开关/导航/关闭）与替换行（vsidian-find-replace，-open 类
+   控制显隐——显隐纯 CSS，无 JS 内联；收起不产生空行轨道）。
    2026-10 锚点跟随：right 不再静态钉视口，由控制器按正文列右缘测算
    写内联（ResizeObserver 逐帧跟随；铺满档保底 14px），top 维持静态。
    --vsidian-find-match-background / -current-background 为可覆盖变量入口 */
@@ -3391,7 +3392,7 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   top: 36px;
   z-index: 40;
   display: none;
-  flex-direction: column;
+  grid-template-columns: auto 1fr;
   gap: 4px;
   padding: 4px 6px;
   box-sizing: border-box;
@@ -3402,37 +3403,51 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
 }
 
 .vsidian-find.vsidian-find-open {
-  display: flex;
+  display: grid;
 }
 
-/* 替换栏展开/收起切换：左缘垂直居中（不占行内位），展开时箭头翻转 */
+/* 替换栏展开/收起切换（2026-10 对齐 VSCode 原生）：grid 左列竖条——
+   收起时与主行等高（替换行收起即无第二行轨道）、展开时经 :has 跨两行
+   与面板主体等高；常态强调色边框（VSCode 同款轮廓，对齐验收参考图）。
+   字符图标在 ::before：收起旋 -90° 呈 >（指向展开方向），展开回正呈 ⌄ */
 .vsidian-find .vsidian-find-toggle {
-  position: absolute;
-  left: 0;
-  top: 50%;
-  margin-top: -11px;
-  min-width: 18px;
-  padding: 3px 2px;
+  grid-row: 1 / 2;
+  grid-column: 1;
+  width: 22px;
+  height: auto;
+  align-self: stretch;
+  padding: 0;
+  border: 1px solid var(--vscode-focusBorder, #007fd4);
 }
 
-.vsidian-find .vsidian-find-toggle[aria-expanded='true'] {
-  transform: rotate(180deg);
+.vsidian-find:has(.vsidian-find-replace-open) .vsidian-find-toggle {
+  grid-row: 1 / 3;
 }
 
-/* 主行：输入 + 计数 + 三开关（Aa/ab/.*) + 上一个/下一个/关闭 */
+.vsidian-find .vsidian-find-toggle::before {
+  content: '⌄';
+  transform: rotate(-90deg);
+}
+
+.vsidian-find .vsidian-find-toggle[aria-expanded='true']::before {
+  transform: none;
+}
+
+/* 主行：输入 + 计数 + 三开关（Aa/ab/.*) + 上一个/下一个/关闭（右列首行） */
 .vsidian-find .vsidian-find-row {
+  grid-column: 2;
   display: flex;
   align-items: center;
   gap: 4px;
-  padding-left: 20px;
 }
 
-/* 替换行：默认收起，-open 类展开（阅读模式恒收起——替换是 Live 编辑能力） */
+/* 替换行：默认收起，-open 类展开（阅读模式恒收起——替换是 Live 编辑能力；
+   收起即 item 不生成、隐式第二行轨道不创建，面板无空隙残留） */
 .vsidian-find .vsidian-find-replace {
+  grid-column: 2;
   display: none;
   align-items: center;
   gap: 4px;
-  padding-left: 20px;
 }
 
 .vsidian-find .vsidian-find-replace.vsidian-find-replace-open {

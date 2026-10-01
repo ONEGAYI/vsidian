@@ -37,13 +37,13 @@ describe('查找面板 CSS 契约（#236）', () => {
     expect(legacy).toContain('var(--vsidian-find-hit-block-background, transparent)')
     expect(legacy).not.toContain('box-shadow')
   })
-  it('面板 open 态显隐：默认 none，open 类展开为 flex', () => {
+  it('面板 open 态显隐：默认 none，open 类展开为 grid', () => {
     expect(rule('.vsidian-find', /display:\s*none/)).toBeTruthy()
-    expect(rule('.vsidian-find.vsidian-find-open', /display:\s*flex/)).toBeTruthy()
+    expect(rule('.vsidian-find.vsidian-find-open', /display:\s*grid/)).toBeTruthy()
   })
 
-  it('面板为 column 布局（toggle + 主行 + 替换行的三段结构前提）', () => {
-    expect(rule('.vsidian-find', /flex-direction:\s*column/)).toBeTruthy()
+  it('面板为 grid 双列布局（toggle 左列 + 内容右列，2026-10 对齐 VSCode）', () => {
+    expect(rule('.vsidian-find', /grid-template-columns:\s*auto\s+1fr/)).toBeTruthy()
   })
 
   it('替换行显隐对：默认收起（display:none），-open 类展开（display:flex）', () => {
@@ -51,9 +51,23 @@ describe('查找面板 CSS 契约（#236）', () => {
     expect(rule('.vsidian-find .vsidian-find-replace.vsidian-find-replace-open', /display:\s*flex/)).toBeTruthy()
   })
 
-  it('主行与替换行为左缘 toggle 让位（padding-left）', () => {
-    expect(rule('.vsidian-find .vsidian-find-row', /padding-left:\s*20px/)).toBeTruthy()
-    expect(rule('.vsidian-find .vsidian-find-replace', /padding-left:\s*20px/)).toBeTruthy()
+  it('主行与替换行落在 grid 右列（column 2，toggle 让位走轨道不再用 padding）', () => {
+    expect(rule('.vsidian-find .vsidian-find-row', /grid-column:\s*2/)).toBeTruthy()
+    expect(rule('.vsidian-find .vsidian-find-replace', /grid-column:\s*2/)).toBeTruthy()
+  })
+
+  it('toggle 常态强调色边框（VSCode 同款轮廓）', () => {
+    expect(rule('.vsidian-find .vsidian-find-toggle', /border:\s*1px solid var\(--vscode-focusBorder/)).toBeTruthy()
+  })
+
+  it('toggle 高度随内容行：收起占首行，替换栏展开经 :has 跨两行', () => {
+    expect(rule('.vsidian-find .vsidian-find-toggle', /grid-row:\s*1\s*\/\s*2/)).toBeTruthy()
+    expect(rule('.vsidian-find:has(.vsidian-find-replace-open) .vsidian-find-toggle', /grid-row:\s*1\s*\/\s*3/)).toBeTruthy()
+  })
+
+  it('切换图标在 ::before：收起旋 -90° 呈 >，展开随 aria-expanded 回正呈 ⌄', () => {
+    expect(rule('.vsidian-find .vsidian-find-toggle::before', /transform:\s*rotate\(-90deg\)/)).toBeTruthy()
+    expect(rule('.vsidian-find .vsidian-find-toggle[aria-expanded=\'true\']::before', /transform:\s*none/)).toBeTruthy()
   })
 
   it('三开关激活态点亮规则覆盖 Aa/ab/.*/☰ 四类（VSCode inputOption 激活族）', () => {
@@ -102,10 +116,6 @@ describe('查找面板 CSS 契约（#236）', () => {
   it('主输入本体透明无边框（边框随容器）；替换输入框保持自带边框背景', () => {
     expect(rule('.vsidian-find .vsidian-find-input', /border:\s*none/)).toBeTruthy()
     expect(rule('.vsidian-find .vsidian-find-replace-input', /background-color:\s*var\(--vscode-input-background/)).toBeTruthy()
-  })
-
-  it('替换栏展开切换箭头随 aria-expanded 翻转（180 度）', () => {
-    expect(rule('.vsidian-find .vsidian-find-toggle[aria-expanded=\'true\']', /rotate\(180deg\)/)).toBeTruthy()
   })
 
   it('空查询计数收起：hidden 类 display:none（不预留「当前/总数」占位）', () => {

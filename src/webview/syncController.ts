@@ -7081,16 +7081,17 @@ export class WebviewSyncController {
   // （官方 replaceNext/replaceAll 全文扫描不排除头区，已退役）。
 
   /** 查找面板 DOM（稳定类名见 FIND_CLASS_NAMES；默认隐藏，open 类控制显隐；
-   *  #236 起 column 布局：toggle + 主行（输入/计数/三开关/导航）+ 替换行） */
+   *  2026-10 对齐 VSCode 原生：grid 双列布局——左列 toggle 跨行全高、右列
+   *  主行+替换行堆叠（原 column + absolute toggle + padding-left 让位退役）） */
   private buildFindPanel(): HTMLElement {
     const panel = document.createElement('div')
     panel.className = FIND_CLASS_NAMES.panel
     panel.setAttribute('role', 'search')
-    // 替换栏展开/收起切换（左缘 v 形；aria-expanded 与替换行 open 类同步）
+    // 替换栏展开/收起切换（左缘竖条；字符图标在 CSS ::before——收起态
+    // 旋 -90° 呈 >、展开态回正呈 ⌄，aria-expanded 与替换行 open 类同步）
     const toggle = document.createElement('button')
     toggle.type = 'button'
     toggle.className = FIND_CLASS_NAMES.toggle
-    toggle.textContent = '⌄'
     bindLocaleAttrs(toggle, 'find.toggleReplace')
     toggle.addEventListener('click', () => {
       this.setFindReplaceOpen(!(this.findReplaceOpen && this.viewMode === 'live'))
