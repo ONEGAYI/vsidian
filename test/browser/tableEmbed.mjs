@@ -1085,8 +1085,12 @@ try {
           }
         }
       }
-      assert.ok(roundsInPlace >= 2,
-        `#258b 逐轮断言确覆盖在场阶段（实际在场轮次 ${roundsInPlace}）`)
+      // 门限 5：按 fixture 几何（表格在文档中部、缓冲 600 + 视口高）卡在
+      // 场轮次应达数十轮，门限 2 只证明逐轮断言非空转——fixture 重排导致
+      // 卡只闪现两轮时覆盖面会静默变薄而测试仍绿（PR #268 审查 P2-5）
+      assert.ok(roundsInPlace >= 5,
+        `#258b 逐轮断言确覆盖在场阶段（实际在场轮次 ${roundsInPlace}，门限 5）`)
+      console.log('V3-OBSERVE-rounds-in-place', roundsInPlace)
       await page.waitForTimeout(400)
     }
     const readingScrollTop = async (top) => {

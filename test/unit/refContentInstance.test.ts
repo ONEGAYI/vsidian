@@ -27,7 +27,9 @@ function fixture(occurrence: string, start: number, sent: WebviewToHost[], strat
   })
   return { instance, mount, contentEl, scrollEl }
 }
-afterEach(() => { document.body.textContent = ''; vi.restoreAllMocks(); vi.unstubAllGlobals() })
+// useRealTimers 兜底：「外部滚动后卡内滚动被宿主重排静默重置」用例启用
+// fake timers，vitest 不自动还原——文件级配对还原，防泄漏到后续用例
+afterEach(() => { document.body.textContent = ''; vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
 it('已卸载块的属性按钮不再改变 occurrence 状态', () => {
   const a = fixture('first', 0, [])
