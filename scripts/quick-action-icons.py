@@ -39,6 +39,7 @@ KEYS = (
     "normalText", "cut", "copy", "paste", "selectAll", "comment",
     "pastePlain", "media", "footnote", "callout",
     "findPrev", "findNext", "findClose", "replaceOne", "replaceAll", "findInSelection",
+    "chevronRight",
 )
 COLORS = {"light": (54, 60, 70), "dark": (210, 218, 229)}
 CELL = 96
@@ -186,6 +187,8 @@ def draw_icon(key: str, rgb: tuple[int, int, int]) -> Image.Image:
         p.line([(15.2, 10.8), (20.4, 10.8)], 1.5)
     elif key == "blockMath":
         p.line([(18, 5), (6, 5), (12.5, 12), (6, 19), (18, 19)], 2)
+    elif key == "chevronRight":
+        p.line([(9.2, 7), (14.2, 12), (9.2, 17)])
     else:
         raise ValueError(f"Unknown icon: {key}")
     return p.raster(rgb)

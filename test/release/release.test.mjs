@@ -19,7 +19,8 @@ function katexFontEntries() {
 // 快速操作条与右键菜单共用的图标集：测试基线独立列出预期键，防止发布清单漏项。
 // #105/#106 起新增 highlight 与 horizontalRule 两键，fixture 当时未同步
 // （基线即失败），此处与 scripts/release.mjs 的清单对齐；#185 起右键菜单
-// 新增十键（normalText 等）同规则登记。
+// 新增十键（normalText 等）同规则登记；#236 查找面板六键与 2026-10
+// chevronRight 同规则补齐（5ac90d3 只登记了 release.mjs 侧、fixture 漏同步）。
 const QUICK_ICON_KEYS = [
   'bold', 'italic', 'strikethrough', 'inlineCode', 'heading',
   'bulletList', 'orderedList', 'taskList', 'quote', 'codeBlock',
@@ -27,6 +28,8 @@ const QUICK_ICON_KEYS = [
   'highlight', 'horizontalRule',
   'normalText', 'textFormat', 'paragraphStyle', 'comment',
   'externalLink', 'cut', 'copy', 'paste', 'selectAll', 'insertPlus',
+  'findPrev', 'findNext', 'findClose', 'replaceOne', 'replaceAll', 'findInSelection',
+  'chevronRight',
 ]
 function quickActionIconEntries() {
   return ['light', 'dark'].flatMap((theme) => QUICK_ICON_KEYS.map((key) => ({

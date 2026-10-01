@@ -3380,17 +3380,22 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
 /* ---- 编辑区查找（#14；#236 起三开关面板与可展开替换栏）：webview 内浮动查找面板 ----
    稳定样式入口（ADR-0004）：面板与匹配高亮均经 vsidian-find-* 类定位；
    custom editor webview 不可用 VSCode 原生 find 控件，此为自有 UI。
-   面板为 column 布局：左缘替换栏展开/收起切换（vsidian-find-toggle）+
-   主行（vsidian-find-row：输入/计数/三开关/导航/关闭）+ 替换行
-   （vsidian-find-replace，-open 类控制显隐——显隐纯 CSS，无 JS 内联）。
+   面板为 grid 双列布局（2026-10 对齐 VSCode 原生）：左列替换栏展开/收起
+   切换（vsidian-find-toggle，跨行全高）+ 右列主行（vsidian-find-row：
+   输入/计数/三开关/导航/关闭）与替换行（vsidian-find-replace，-open 类
+   控制显隐——显隐纯 CSS，无 JS 内联；收起不产生空行轨道）。
+   2026-10 锚点跟随：right 不再静态钉视口，由控制器按正文列右缘测算
+   写内联（ResizeObserver 逐帧跟随；铺满档保底 14px），top 维持静态。
    --vsidian-find-match-background / -current-background 为可覆盖变量入口 */
 .vsidian-find {
   position: absolute;
   top: 36px;
+  /* 静态兜底：syncOverlayAnchors 防御分支提前 return 时浮层仍有右上角
+     定位（内联值优先级更高，正常路径被动态 right 覆盖） */
   right: 14px;
   z-index: 40;
   display: none;
-  flex-direction: column;
+  grid-template-columns: auto 1fr;
   gap: 4px;
   padding: 4px 6px;
   box-sizing: border-box;
@@ -3401,37 +3406,77 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
 }
 
 .vsidian-find.vsidian-find-open {
-  display: flex;
+  display: grid;
 }
 
-/* 替换栏展开/收起切换：左缘垂直居中（不占行内位），展开时箭头翻转 */
+/* 替换栏展开/收起切换（2026-10 对齐 VSCode 原生）：grid 左列竖条——
+   收起时与主行等高（替换行收起即无第二行轨道）、展开时经 :has 跨两行
+   与面板主体等高。常态无边框（透明占位防高度跳动），focus 态才出强调
+   色圈——与输入框 focus-within 圈互斥（浏览器焦点语义 + 点击后焦点
+   归还输入框），不再有「永不消失的焦点圈」；图标为自绘 SVG 挂内嵌
+   glyph 层，展开随 aria-expanded 旋转 90°（> → ⌄，对齐原生动画语义） */
 .vsidian-find .vsidian-find-toggle {
-  position: absolute;
-  left: 0;
-  top: 50%;
-  margin-top: -11px;
-  min-width: 18px;
-  padding: 3px 2px;
+  grid-row: 1 / 2;
+  grid-column: 1;
+  width: 22px;
+  height: auto;
+  align-self: stretch;
+  padding: 0;
+  border: 1px solid transparent;
+  /* glyph 为块级子元素，居中必须显式 flex（与 quick-actions 按钮同款）——
+     button UA 的 text-align 对块盒不生效，垂直居中也非标准保证 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.vsidian-find .vsidian-find-toggle[aria-expanded='true'] {
-  transform: rotate(180deg);
+.vsidian-find:has(.vsidian-find-replace-open) .vsidian-find-toggle {
+  grid-row: 1 / 3;
 }
 
-/* 主行：输入 + 计数 + 三开关（Aa/ab/.*) + 上一个/下一个/关闭 */
+/* 切换按钮键盘聚焦圈（鼠标点击不触发 focus-visible，不驻留） */
+.vsidian-find .vsidian-find-toggle:focus-visible {
+  border-color: var(--vscode-focusBorder, #007fd4);
+}
+
+.vsidian-find .vsidian-find-toggle-glyph {
+  display: block;
+  width: 16px;
+  height: 16px;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 16px 16px;
+  transition: transform 0.12s ease;
+}
+
+.vsidian-find .vsidian-find-toggle[aria-expanded='true'] .vsidian-find-toggle-glyph {
+  transform: rotate(90deg);
+}
+
+#app .vsidian-find .vsidian-find-toggle-glyph {
+  background-image: url('../../media/quick-actions/light/light-chevronRight.svg');
+}
+
+body.vscode-dark #app .vsidian-find .vsidian-find-toggle-glyph,
+body.vscode-high-contrast #app .vsidian-find .vsidian-find-toggle-glyph {
+  background-image: url('../../media/quick-actions/dark/dark-chevronRight.svg');
+}
+
+/* 主行：输入 + 计数 + 三开关（Aa/ab/.*) + 上一个/下一个/关闭（右列首行） */
 .vsidian-find .vsidian-find-row {
+  grid-column: 2;
   display: flex;
   align-items: center;
   gap: 4px;
-  padding-left: 20px;
 }
 
-/* 替换行：默认收起，-open 类展开（阅读模式恒收起——替换是 Live 编辑能力） */
+/* 替换行：默认收起，-open 类展开（阅读模式恒收起——替换是 Live 编辑能力；
+   收起即 item 不生成、隐式第二行轨道不创建，面板无空隙残留） */
 .vsidian-find .vsidian-find-replace {
+  grid-column: 2;
   display: none;
   align-items: center;
   gap: 4px;
-  padding-left: 20px;
 }
 
 .vsidian-find .vsidian-find-replace.vsidian-find-replace-open {
@@ -3523,8 +3568,16 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   border-radius: 3px;
 }
 
-.vsidian-find button:hover {
+/* 禁用态不反白（☰ 无选区锚点、阅读模式替换 toggle） */
+.vsidian-find button:hover:not(:disabled) {
   background-color: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.25));
+}
+
+/* 替换栏 toggle 阅读态禁用（2026-10 阅读模式整体禁用替换）：灰化不响应，
+   disabled 不可聚焦——focus 圈天然不出现 */
+.vsidian-find .vsidian-find-toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* 导航、替换与「在选定内容中查找」按钮使用按主题切换的 16px SVG。 */
@@ -3601,12 +3654,14 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
 /* ---- #238 查找选项条：Ctrl+D 会话期间的迷你三按钮浮动条 ----
    仅大小写/全字/正则三开关（无搜索框无计数），非模态：不抢编辑器焦点
    （按钮 mousedown preventDefault 保焦）、不占弹窗互斥槽位、Esc 在
-   find 面板之后消费一次（只关条不收敛选区）。与主面板同右上角位、
-   互斥出现（面板开时由面板开关闪烁承担提示，条不出场）。按钮态与
-   主面板开关同源（aria-pressed = findOptions 记忆档，非会话 override） */
+   find 面板之后消费一次（只关条不收敛选区）。与主面板同位同锚（2026-10
+   起同为正文列右缘跟随，right 由控制器写内联）、互斥出现（面板开时由
+   面板开关闪烁承担提示，条不出场）。按钮态与主面板开关同源
+   （aria-pressed = findOptions 记忆档，非会话 override） */
 .vsidian-occurrence-bar {
   position: absolute;
   top: 36px;
+  /* 静态兜底：同 .vsidian-find（内联值优先级更高，正常路径被动态覆盖） */
   right: 14px;
   z-index: 39;
   display: none;

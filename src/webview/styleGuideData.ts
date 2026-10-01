@@ -3670,13 +3670,13 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "domain": "chrome",
     "category": "find-panel",
     "kind": "selector",
-    "target": ".vsidian-find（浮动面板容器；.vsidian-find-open 展开态）—— 内部 .vsidian-find-row 主行（.vsidian-find-inputwrap 输入容器（边框/背景/聚焦环/非法红边载体）内嵌 .vsidian-find-input 输入框与 .vsidian-find-case（Aa）/ -word（ab）/ -regexp（.*）三开关（各自 -active 点亮态）/.vsidian-find-count 计数（-empty 零命中 / -hidden 空查询收起不占位）/ .vsidian-find-prev / -next 导航 / -in-selection 在选定内容中查找（-active 点亮；禁用态灰化）/ -close 关闭；-selection-range 为开启时正文里的范围淡底 mark）与 .vsidian-find-toggle 左缘替换栏展开切换（aria-expanded 随态）",
-    "purpose": "编辑区浮动查找面板（#236 起三开关面板，引擎 @codemirror/search 外部驱动）：column 布局——主行（输入/大小写-全字-正则三开关/「第 n 项，共 total 项·无结果」计数/上一个/下一个/关闭，同序对齐 VSCode 原生浮层）+ 左缘替换栏展开切换。三开关为查找选项单一事实源（shared/findOptions，#238「选下一处相同词」同源消费），workspace 级记忆跨会话保留；面板在 Live 与阅读两模式均可用（阅读保留块级命中与定位）。",
+    "target": ".vsidian-find（浮动面板容器；.vsidian-find-open 展开态）—— 内部 .vsidian-find-row 主行（.vsidian-find-inputwrap 输入容器（边框/背景/聚焦环/非法红边载体）内嵌 .vsidian-find-input 输入框与 .vsidian-find-case（Aa）/ -word（ab）/ -regexp（.*）三开关（各自 -active 点亮态）/.vsidian-find-count 计数（-empty 零命中 / -hidden 空查询收起不占位）/ .vsidian-find-prev / -next 导航 / -in-selection 在选定内容中查找（-active 点亮；禁用态灰化）/ -close 关闭；-selection-range 为开启时正文里的范围淡底 mark）与 .vsidian-find-toggle 左缘替换栏展开切换（aria-expanded 随态；阅读模式 disabled 灰化）",
+    "purpose": "编辑区浮动查找面板（#236 起三开关面板，引擎 @codemirror/search 外部驱动）：grid 双列布局（2026-10 对齐 VSCode 原生）——左列替换栏展开切换（跨行全高：收起与主行等高、展开经 :has 跨两行与面板主体等高；常态无边框、focus 态才出强调色圈与输入框焦点圈互斥，点击后焦点归还输入框；图标为 quick-action-icons.py 自绘 SVG 挂内嵌 glyph 层，展开随 aria-expanded 旋转 90°：> → ⌄）+ 右列主行（输入/大小写-全字-正则三开关/「第 n 项，共 total 项·无结果」计数/上一个/下一个/关闭，同序对齐 VSCode 原生浮层）与替换行堆叠。三开关为查找选项单一事实源（shared/findOptions，#238「选下一处相同词」同源消费），workspace 级记忆跨会话保留；面板在 Live 与阅读两模式均可用（阅读保留块级命中与定位），替换入口阅读模式整体禁用（2026-10 用户决策——toggle disabled 灰化、Ctrl+H 键位不消费）。",
     "views": [
       "live",
       "reading"
     ],
-    "states": "面板 DOM 常驻、显隐由 .vsidian-find-open 控制（关闭时 display:none，探针不受影响）；三开关点亮为对应 -active 类（开启=点亮，如 matchCase 开启时 Aa 点亮）；非法正则输入容器红边反馈（invalid 类标在输入框上作状态源，:has 上探容器着色；空查询不算非法不标红；不崩、计数显示「无结果」）；空查询计数区以 -hidden 类整体收起（display:none，未搜索不预留「当前/总数」占位——#241 验收修订）；在选定内容中查找（#241 资产接线，VSCode ☰）：面板局部态非持久化（关闭面板/进入阅读即复位）——无用户选区锚点时按钮禁用（灰化不响应 hover），开启时点亮并入激活族、匹配/导航/替换限制在范围（范围随编辑映射、用户重选跟随），正文以 .vsidian-find-selection-range 淡底 mark 标记范围（非活动选区同款底色，可跨行）；开合与开关交互由浏览器套件按行为路径验证。",
+    "states": "面板 DOM 常驻、显隐由 .vsidian-find-open 控制（关闭时 display:none，探针不受影响）；三开关点亮为对应 -active 类（开启=点亮，如 matchCase 开启时 Aa 点亮）；非法正则输入容器红边反馈（invalid 类标在输入框上作状态源，:has 上探容器着色；空查询不算非法不标红；不崩、计数显示「无结果」）；空查询计数区以 -hidden 类整体收起（display:none，未搜索不预留「当前/总数」占位——#241 验收修订）；在选定内容中查找（#241 资产接线，VSCode ☰）：面板局部态非持久化（关闭面板/进入阅读即复位）——无用户选区锚点时按钮禁用（灰化不响应 hover），开启时点亮并入激活族、匹配/导航/替换限制在范围（范围随编辑映射、用户重选跟随），正文以 .vsidian-find-selection-range 淡底 mark 标记范围（非活动选区同款底色，可跨行）；替换栏 toggle 阅读态禁用（disabled 灰化不响应——共享 hover 规则带 :not(:disabled) 守卫，disabled 不可聚焦故 focus 圈天然不出现）；开合与开关交互由浏览器套件按行为路径验证。",
     "dom": "挂编辑器容器（position:relative 定位包含块）内、#app 之下；按钮均为真实 <button type=\"button\">（aria-pressed/aria-expanded 随态，aria-label/title 用 i18n 词条 find.*）；#241 起导航/关闭/替换按钮为图标形态——本体显示随主题切换的 SVG 图标，功能词只在 aria-label 与 hover title。",
     "example": ".vsidian-find {\n  border-radius: 6px;\n}\n.vsidian-find .vsidian-find-case-active {\n  color: #f14c4c;\n}",
     "obsidian": {
@@ -3684,7 +3684,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "单元 findPanelCssContract：显隐对/column 布局/三开关点亮/红边规则钉住",
+      "单元 findPanelCssContract：显隐对/grid 双列布局/toggle 全高与 focus 圈互斥/阅读态 disabled 灰化/chevron SVG 双主题与 90° 旋转/三开关点亮/红边规则钉住",
       "单元 find：面板开合、三开关重算与替换行为（jsdom 控制器）",
       "浏览器 findPanel（#236）：真实键盘路径"
     ],
@@ -3696,11 +3696,11 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "find-panel",
     "kind": "selector",
     "target": ".vsidian-find-replace（替换行容器；.vsidian-find-replace-open 展开态）—— 内部 .vsidian-find-replace-input 替换输入框 / .vsidian-find-replace-next「替换」/ .vsidian-find-replace-all「全部替换」按钮",
-    "purpose": "查找面板的可展开替换栏（#236）：替换行默认收起，左缘 toggle（find-panel 条目的 .vsidian-find-toggle）或 Ctrl+H（findReplace 操作）展开；「替换」替换当前匹配并移到下一处、「全部替换」整批替换——两者均为显式写操作（经 CM6 事务走标准写回链路，一笔 edit.request = 宿主撤销一次）。替换是 Live 编辑能力：阅读模式面板可用但替换行恒不展开。",
+    "purpose": "查找面板的可展开替换栏（#236）：替换行默认收起，左缘 toggle（find-panel 条目的 .vsidian-find-toggle）或 Ctrl+H（findReplace 操作）展开；「替换」替换当前匹配并移到下一处、「全部替换」整批替换——两者均为显式写操作（经 CM6 事务走标准写回链路，一笔 edit.request = 宿主撤销一次）。替换是 Live 编辑能力，阅读模式整体禁用（2026-10 用户决策）：带 replace 的打开指令不开面板（静默忽略）、Ctrl+H 键位不消费（注册表生效模式 Live）、toggle disabled 灰化；live 侧展开记忆不被阅读侧触碰，切回 live 原样恢复（关闭面板即终结会话，两模式同口径）。",
     "views": [
       "live"
     ],
-    "states": "替换行 DOM 常驻、显隐由 .vsidian-find-replace-open 控制（默认收起 display:none；阅读模式恒收起）；展开态由 FindSessionProbe.replaceOpen 观测。",
+    "states": "替换行 DOM 常驻、显隐由 .vsidian-find-replace-open 控制（默认收起 display:none；阅读模式恒收起且 toggle 禁用）；展开态由 FindSessionProbe.replaceOpen 观测。",
     "dom": "面板（.vsidian-find）内第三段；输入框 Enter 为面板局部键（替换下一个）；按钮为真实 <button type=\"button\">（#241 起图标形态，功能词在 aria-label/title，i18n 词条 find.replaceNext / find.replaceAll）。",
     "example": ".vsidian-find .vsidian-find-replace.vsidian-find-replace-open {\n  gap: 8px;\n}",
     "obsidian": {
@@ -3709,9 +3709,9 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     },
     "verification": [
       "单元 findPanelCssContract：替换行显隐对规则钉住",
-      "单元 find（#236）：替换下一个/全部替换各单笔 edit.request、$n 捕获组展开、阅读不执行"
+      "单元 find（#236）：替换下一个/全部替换各单笔 edit.request、$n 捕获组展开、阅读整体禁用（replace 指令不开面板/记忆不触碰/toggle disabled）"
     ],
-    "introduced": "#236（2026-10 批次）"
+    "introduced": "#236（2026-10 批次）；2026-10 阅读模式整体禁用（用户决策）"
   },
   {
     "id": "find-match-highlight",
@@ -4923,8 +4923,8 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "find-panel": {
-    "purpose": "Floating find panel over the editing area (three-toggle panel since #236, powered by the @codemirror/search engine in external-drive mode): column layout — main row (input, the case/whole-word/regexp toggles, the \"n of total / No results\" counter, previous/next/close — same order as the native VSCode widget) plus the left-edge replace-bar expander. The three toggles are the find-options single source of truth (shared/findOptions; also consumed by #238 \"select next same word\") and persist per workspace across sessions; the panel is available in both live and reading views (reading keeps block-level hits and positioning).",
-    "states": "The panel DOM is always present; visibility is controlled by .vsidian-find-open (display:none when closed, so probes are unaffected). A lit toggle means the option is on (e.g. Aa lit when match-case is enabled). An invalid regexp shows a red border on the input container (the invalid class marks the input as the state source and :has lifts the coloring onto the container; an empty query is not flagged and shows no red; no crash, counter reads \"No results\"). An empty query collapses the whole counter area via the -hidden class (display:none — nothing searched yet reserves no \"n of total\" blank, #241 acceptance revision). Find-in-selection (#241 asset wiring, the native ☰): a panel-local non-persisted state (reset on panel close or entering reading view) — the button is disabled without a user-selection anchor (grayed, hover unresponsive); when on it joins the lit family and matches/navigation/replacement are confined to the range (the range maps through edits and follows user reselection), with the range marked in the body text by a .vsidian-find-selection-range low-emphasis background mark (inactive-selection color, may span lines). Open/close and toggle interactions are verified by the browser suite along behavior paths.",
+    "purpose": "Floating find panel over the editing area (three-toggle panel since #236, powered by the @codemirror/search engine in external-drive mode): two-column grid layout since 2026-10, matching the native VSCode widget — the left column is the replace-bar expander (full height across rows: as tall as the main row when collapsed, spanning both rows via :has when expanded; no border at rest, the accent ring appears only on focus and stays mutually exclusive with the input focus ring — clicking hands focus back to the input; the icon is a self-drawn SVG from quick-action-icons.py on an embedded glyph layer, rotating 90° with aria-expanded when expanded: > to a downward chevron), and the right column stacks the main row (input, the case/whole-word/regexp toggles, the \"n of total / No results\" counter, previous/next/close — same order as the native VSCode widget) and the replace row. The three toggles are the find-options single source of truth (shared/findOptions; also consumed by #238 \"select next same word\") and persist per workspace across sessions; the panel is available in both live and reading views (reading keeps block-level hits and positioning), while the replace entry points are disabled entirely in reading view (2026-10 user decision — the toggle is disabled and grayed out, and Ctrl+H is not consumed).",
+    "states": "The panel DOM is always present; visibility is controlled by .vsidian-find-open (display:none when closed, so probes are unaffected). A lit toggle means the option is on (e.g. Aa lit when match-case is enabled). An invalid regexp shows a red border on the input container (the invalid class marks the input as the state source and :has lifts the coloring onto the container; an empty query is not flagged and shows no red; no crash, counter reads \"No results\"). An empty query collapses the whole counter area via the -hidden class (display:none — nothing searched yet reserves no \"n of total\" blank, #241 acceptance revision). Find-in-selection (#241 asset wiring, the native ☰): a panel-local non-persisted state (reset on panel close or entering reading view) — the button is disabled without a user-selection anchor (grayed, hover unresponsive); when on it joins the lit family and matches/navigation/replacement are confined to the range (the range maps through edits and follows user reselection), with the range marked in the body text by a .vsidian-find-selection-range low-emphasis background mark (inactive-selection color, may span lines). The replace-bar toggle is disabled in reading view (grayed via the disabled attribute — the shared hover rule carries a :not(:disabled) guard, and a disabled control cannot take focus so the focus ring never appears). Open/close and toggle interactions are verified by the browser suite along behavior paths.",
     "dom": "Attached inside the editor container (position:relative containing block), below #app; buttons are real <button type=\"button\"> elements (aria-pressed/aria-expanded follow state; aria-label/title from the find.* i18n entries). Since #241 the navigate/close/replace buttons are icon-shaped — the button body shows its light- or dark-theme SVG icon, while the words live solely in aria-label and the hover title; the input border/background/focus ring live on .vsidian-find-inputwrap, which embeds the three toggles at its right edge like the native widget.",
     "obsidian": {
       "counterpart": "None (the Obsidian find widget is an application-level part, not a document styling surface)"
@@ -4939,8 +4939,8 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "find-panel-replace": {
-    "purpose": "The expandable replace bar of the find panel (#236): collapsed by default, expanded via the left-edge toggle (find-panel entry, .vsidian-find-toggle) or Ctrl+H (the findReplace operation); \"Replace\" replaces the current match and moves to the next one, \"Replace All\" replaces the whole batch — both are explicit write operations (a single CM6 transaction through the standard write-back chain; one edit.request = one host undo). Replacing is a live-editing capability: in reading view the panel works but the replace bar never expands.",
-    "states": "The replace-row DOM is always present; visibility is controlled by .vsidian-find-replace-open (display:none by default; permanently collapsed in reading view). The expanded state is observable via FindSessionProbe.replaceOpen.",
+    "purpose": "The expandable replace bar of the find panel (#236): collapsed by default, expanded via the left-edge toggle (find-panel entry, .vsidian-find-toggle) or Ctrl+H (the findReplace operation); \"Replace\" replaces the current match and moves to the next one, \"Replace All\" replaces the whole batch — both are explicit write operations (a single CM6 transaction through the standard write-back chain; one edit.request = one host undo). Replacing is a live-editing capability, disabled entirely in reading view (2026-10 user decision): an open instruction carrying replace does not open the panel (silently ignored), Ctrl+H is not consumed (the registry lists the operation as live-only), and the toggle is disabled and grayed; the live-side expanded state is untouched by reading view and restored as-is when switching back to live (closing the panel ends the session in either mode alike).",
+    "states": "The replace-row DOM is always present; visibility is controlled by .vsidian-find-replace-open (display:none by default; permanently collapsed in reading view, where the toggle is also disabled). The expanded state is observable via FindSessionProbe.replaceOpen.",
     "dom": "Third section inside the panel (.vsidian-find); Enter in the input is a panel-local key (replace next); buttons are real <button type=\"button\"> elements (icon-shaped since #241 — the words live in aria-label/title, i18n entries find.replaceNext / find.replaceAll).",
     "obsidian": {
       "counterpart": "None (the Obsidian replace widget is application-level)"

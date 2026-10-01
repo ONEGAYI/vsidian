@@ -2,7 +2,8 @@
 // Shift+Enter 导航、Ctrl+H 展开替换栏、Esc 关闭）驱动生产控制器验证：
 // 三开关语义（matchCase/wholeWord/regexp 计数变化 + 点亮态 + findOptions.set
 // 出站）、非法正则红边不崩、替换写回（单笔 edit.request / 全部替换整批一笔）、
-// 阅读模式替换栏不展开。明暗主题各跑一遍。
+// 阅读模式整体禁用替换（2026-10：Ctrl+H 不响应、toggle 禁用灰化、live 展开记忆
+// 不被触碰）。明暗主题各跑一遍。
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -414,17 +415,42 @@ try {
     await page.click('.cm-content', { position: { x: 10, y: 10 } })
     panel = await waitPanel(page, (p) => p.inSelectionDisabled === true, '空选区事务后 ☰ 禁用')
 
-    // ---- 场景 8：阅读模式 Ctrl+H：面板开但替换栏不展开（只读）----
+    // ---- 场景 8：阅读模式整体禁用替换（2026-10）——live Ctrl+H 展开 →
+    // 阅读 toggle 禁用灰化、Ctrl+H 不响应 → 回 live 展开记忆原样恢复 ----
+    await page.keyboard.press('Control+h')
+    panel = await waitPanel(page, (p) => p.open && p.replaceOpen, 'live Ctrl+H 展开替换栏')
     await page.evaluate(() => window.setViewMode('reading'))
+    panel = await waitPanel(page, (p) => p.open && !p.replaceOpen, '阅读模式替换行收起')
+    panel = await waitPanel(page, (p) => p.toggleDisabled === true, '阅读模式 toggle 禁用')
+    assert.ok(parseFloat(panel.toggleOpacity) < 1, `阅读模式 toggle 应灰化，实际 opacity=${panel.toggleOpacity}`)
     // 键路由要求焦点在阅读容器内（readingFocused 判定）
     await page.evaluate(() => {
       const container = document.querySelector('.vsidian-view-reading')
       if (container instanceof HTMLElement) container.focus()
     })
     await page.keyboard.press('Control+h')
-    panel = await waitPanel(page, (p) => p.open && !p.replaceOpen, '阅读模式替换栏不展开')
+    panel = await waitPanel(page, (p) => p.open && !p.replaceOpen, '阅读模式 Ctrl+H 不展开')
+    // 回 live：toggle 恢复可用，live 展开记忆原样恢复（阅读侧未触碰）
+    await page.evaluate(() => window.setViewMode('live'))
+    panel = await waitPanel(page, (p) => p.open && p.replaceOpen && p.toggleDisabled === false, '回 live 替换展开记忆恢复')
+
+    // ---- 场景 8b：面板关闭后阅读模式 Ctrl+H 不开面板（替换命令整体禁用）----
     await page.keyboard.press('Escape')
-    await waitPanel(page, (p) => !p.open, '阅读模式 Esc 关闭')
+    await waitPanel(page, (p) => !p.open, 'Esc 关闭')
+    await page.evaluate(() => window.setViewMode('reading'))
+    await page.evaluate(() => {
+      const container = document.querySelector('.vsidian-view-reading')
+      if (container instanceof HTMLElement) container.focus()
+    })
+    await page.keyboard.press('Control+h')
+    panel = await waitPanel(page, (p) => !p.open, '阅读模式 Ctrl+H 不开面板')
+    // 回 live：Ctrl+H 恢复正常开面板并展开（关闭已清记忆，走 live 展开路径）
+    await page.evaluate(() => window.setViewMode('live'))
+    await page.evaluate(() => window.focusEditor())
+    await page.keyboard.press('Control+h')
+    panel = await waitPanel(page, (p) => p.open && p.replaceOpen, 'live Ctrl+H 恢复开面板展开')
+    await page.keyboard.press('Escape')
+    await waitPanel(page, (p) => !p.open, '收尾 Esc 关闭')
     assert.deepEqual(errors, [], '全程不得有页面错误')
     await page.close()
   }
