@@ -4076,6 +4076,29 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
   font-family: inherit;
 }
 
+/* ---- #246 混排嵌入（样式契约 content 域 reading-embed-mixed 与
+   embed-slot 条目）：块内占位提升产生的流内宿主（vsidian-reading-embed
+   + vsidian-reading-embed-mixed 修饰）。卡片壳规则随 #app
+   .vsidian-view-reading .vsidian-reading-embed .vsidian-embed-card 后代
+   选择器天然命中（独占行与混排同款绘制），此处只钉宿主自身在文字流中
+   的块级形态与间距——宽度跟随所属列/缩进区域（块级默认占满父内容盒，
+   列表项/引用内随 li/blockquote 内容宽，不越缩进界） ---- */
+
+#app .vsidian-view-reading .vsidian-reading-embed-mixed {
+  display: block;
+  margin: 0.35em 0;
+}
+
+/* 混排占位 span（未升级/不可提升形态：配对降级、链接域内、表格格内
+   #248 前）：正文文字形态 + 描述色弱化（与占位引用行的可辨识方向一致；
+   无 href——链接域内点击走外层 a 的既有语义） */
+#app .vsidian-view-reading .vsidian-reading-block .vsidian-embed-slot,
+#app .vsidian-embed-card .vsidian-embed-slot,
+#app .vsidian-hover-popup .vsidian-embed-slot {
+  font-family: inherit;
+  color: var(--vscode-descriptionForeground, inherit);
+}
+
 /* 只读契约：嵌入卡片内任务 checkbox 不响应指针（JS disabled 双保险；
    与悬停浮层同款规则并列，既有浮层选择器置尾保持契约匹配） */
 .vsidian-embed-card input[type="checkbox"],

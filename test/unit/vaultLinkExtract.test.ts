@@ -286,3 +286,41 @@ describe('extractVaultEdges：嵌入（#222 独立扫描器接入）', () => {
     ])
   })
 })
+
+describe('#246 混排嵌入边与注释排除（呈现同源核对）', () => {
+  it('混排/列表/引用/任务内的嵌入照常产边（区间为嵌入原文精确边界）', () => {
+    const text = '前文 ![[设计]] 后文\n- 项 ![[目标笔记]] 余\n> 引 ![[项目甲/设计]] 文\n- [ ] 任务 ![[设计]] 毕\n'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    expect(edges.map((e) => [e.kind, e.target, e.resolvedTarget])).toEqual([
+      ['embed', '设计', 'notes/设计.md'],
+      ['embed', '目标笔记', 'notes/目标笔记.md'],
+      ['embed', '项目甲/设计', 'notes/项目甲/设计.md'],
+      ['embed', '设计', 'notes/设计.md'],
+    ])
+    for (const e of edges) {
+      expect(text.slice(e.start, e.end)).toBe(`![[${e.target}]]`)
+    }
+  })
+
+  it('同段多个嵌入按源顺序各产边（occurrence 各有区间）', () => {
+    const text = '起 ![[设计]] 中 ![[目标笔记]] 末 ![[设计]] 收\n'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    expect(edges.map((e) => e.target)).toEqual(['设计', '目标笔记', '设计'])
+    expect(edges[0]!.start).toBeLessThan(edges[1]!.start)
+    expect(edges[1]!.start).toBeLessThan(edges[2]!.start)
+    expect(edges[0]!.start).not.toBe(edges[2]!.start)
+  })
+
+  it('HTML 注释内的双链/嵌入不产边（与阅读呈现的注释剥离同源——行内与跨行注释）', () => {
+    const text = [
+      '前 <!-- ![[设计]] 与 [[目标笔记]] --> 可见 ![[设计]] 后',
+      '<!--',
+      '![[目标笔记]]',
+      '-->',
+    ].join('\n')
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    expect(edges).toHaveLength(1)
+    expect(edges[0]).toMatchObject({ kind: 'embed', target: '设计' })
+    expect(text.slice(edges[0]!.start, edges[0]!.end)).toBe('![[设计]]')
+  })
+})

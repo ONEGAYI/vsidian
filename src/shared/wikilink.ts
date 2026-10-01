@@ -248,3 +248,35 @@ export function embedAtCol(line: string, col: number): EmbedOccurrence | null {
   }
   return null
 }
+
+/**
+ * 位置精确命中（#246 混排嵌入的 inline 渲染入口）：text[start..limit) 从
+ * `![[` 起、到 `]]` 止恰好构成一个合法嵌入时返回该出现，否则 null。判定
+ * 与 scanEmbedsInLine 逐字节同源（prev `[`/`!` 守卫、inner 禁 `[`/`]`/换
+ * 行、parseWikilinkInner 同款降级）——两入口对同一文本的命中集合由
+ * wikilinkEmbed 对拍测试钉住，供 markdown-it inline 规则逐位置试探而不
+ * 引入第二套形态学。base 缺省 0（返回值 from/to 为 start + base 语义）。
+ */
+export function embedAtPosition(text: string, start: number, limit: number, base = 0): EmbedOccurrence | null {
+  if (start + 3 > limit || start < 0 || start >= text.length) {
+    return null
+  }
+  if (text.charCodeAt(start) !== 0x21 /* ! */ ||
+      text.charCodeAt(start + 1) !== 0x5b /* [ */ ||
+      text.charCodeAt(start + 2) !== 0x5b /* [ */) {
+    return null
+  }
+  const prev = start > 0 ? text[start - 1] : ''
+  if (prev === '[' || prev === '!') {
+    return null // 前置守卫与 scanEmbedsInLine 一致（[![[x]] 链接域 / !! 双叹）
+  }
+  const close = text.indexOf(']]', start + 3)
+  if (close < 0 || close + 2 > limit) {
+    return null
+  }
+  const inner = text.slice(start + 3, close)
+  if (/[\[\]\n]/.test(inner) || parseWikilinkInner(inner) === null) {
+    return null
+  }
+  return { from: base + start, to: base + close + 2, inner }
+}

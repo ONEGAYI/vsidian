@@ -1952,20 +1952,21 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "content-limits",
     "kind": "limitation",
     "target": ".markdown-embed / 嵌入结构",
-    "purpose": "嵌入（![[…]]）的部分边界（#222 起独占正文一行的嵌入在 Reading 侧渲染为引用卡片、#223 起在 Live 侧挂载同款卡片并支持光标驱动源码显隐，见 reading-embed-card / live-embed-widget；#244/#245 起独占行在正文卡片与悬停浮层内递归展开）：混排（行内有其他内容）、列表/引用容器与表格格内的嵌入保留源文（后续票接入）；嵌入内容写入不支持。双链残缺形态按原文显示；blockquote 块已支持。",
+    "purpose": "嵌入（![[…]]）的部分边界（#222 起独占正文一行的嵌入在 Reading 侧渲染为引用卡片、#223 起在 Live 侧挂载同款卡片并支持光标驱动源码显隐，见 reading-embed-card / live-embed-widget；#244/#245 起独占行在正文卡片与悬停浮层内递归展开；#246 起 Reading 侧混排（行内有其他内容）与列表/引用容器内的嵌入升级为流内卡片，见 reading-embed-mixed）：Live 侧混排与容器形态保留源文（#247 接入）、表格格内保留占位文本（#248 接入）；嵌入内容写入不支持。双链残缺形态按原文显示；blockquote 块已支持。",
     "views": [
       "live",
       "reading"
     ],
-    "dom": "无嵌入容器的场景：非独占行/容器内的 ![[…]] 按原文文本呈现（两种视图一致）。",
+    "dom": "无嵌入容器的场景：Live 非独占行/容器内的 ![[…]] 按原文文本呈现；Reading 表格格内为占位 span（.vsidian-embed-slot，按文字形态呈现）。",
     "example": "",
     "obsidian": {
       "counterpart": ".markdown-embed",
       "support": "none"
     },
     "verification": [
-      "单元 readingBlocks：混排/容器/表格/代码区域不产 embed 块（识别矩阵）",
-      "单元 wikilinkEmbed：扫描器与独占行判定矩阵"
+      "单元 embedSlots：混排/容器/表格/代码/注释区域识别与提升矩阵（#246）",
+      "单元 wikilinkInteraction：合法嵌入升级为流内卡片与降级形态并存",
+      "单元 wikilinkEmbed：扫描器、独占行判定与位置精确命中对拍"
     ],
     "introduced": "#11（2026-09-24）"
   },
@@ -3628,6 +3629,54 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "单元 embedCard/webviewSync：独占行递归挂载、受限占位与直接来源打开；浏览器 hoverRecursive：单浮层内子卡片绘制"
     ],
     "introduced": "#222（2026-09-30）"
+  },
+  {
+    "id": "reading-embed-mixed",
+    "domain": "content",
+    "category": "link-image-wikilink",
+    "kind": "selector",
+    "target": ".vsidian-reading-embed-mixed（混排嵌入流内宿主——叠加在 .vsidian-reading-embed 上的修饰类；宿主同时携带 data-vsidian-embed-promoted 与独占行 embed 块同构的 data-vsidian-embed-inner / src 锚点 dataset）",
+    "purpose": "Reading 混排嵌入宿主（#246）：段落/列表/引用容器内与文字混排的 ![[…]]（「前文 ![[B]] 后文」）在块挂载后由行内占位（embed-slot）提升为流内块级宿主，内挂 reading-embed-card 同款卡片——呈现为「前文 → 块级卡片 → 后文」，源文件不新增换行。p 内提升时拆段（前文 p + 宿主 + 后文 p，类与属性克隆保留、空半不产出——合法 DOM，不在 p 内塞块级节点）；横跨嵌入的粗体/斜体/高亮拆壳为前后各完整的行内标签（可视语义保留）；列表项（无序/有序/任务/懒续行）与引用内直接落位，列表编号、缩进与引用边条容器不拆；宿主宽度跟随所属列/缩进区域（块级占满父内容盒，不越缩进界）。同一识别/挂载适配覆盖主文档 Reading、卡片内容与悬停内容三处（RefContentMount 与 EmbedCardManager 共用 embedSlots 装配）；同段/行多个嵌入各按 occurrence 区间独立成卡、保持源顺序。",
+    "views": [
+      "reading"
+    ],
+    "states": "升级路径与独占行卡片同构（装载中/成功/失败分态、限高滚动、深度与预算拒绝、递归与来源租约沿用 #244/#245 既有基建）；不可提升形态（链接域 a 内、表格格内 #248 前、配对失败降级）保持 .vsidian-embed-slot 占位文本不升级。",
+    "dom": "主文档 Reading：块元素（.vsidian-reading-block）内部由挂载适配（embedSlots.promoteEmbedSlot）产出，宿主 div 类为 .vsidian-reading-embed .vsidian-reading-embed-mixed；卡片内容与悬停内容内同样经 RefContentMount 块挂载钩子产出（直接来源/occurrence 语义按所在父实例）。卸载以 data-vsidian-embed-promoted 查询配对（宿主随所属块回收，实例状态保留在卡片状态库）。",
+    "example": "#app .vsidian-view-reading .vsidian-reading-embed-mixed {\n  display: block;\n  margin: 0.35em 0;\n}",
+    "obsidian": {
+      "counterpart": "（Obsidian 混排嵌入同为块级插入；容器规则闭源不作承诺）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 embedSlots（#246）：occurrence 扫描语法排除（代码/注释/表格/frontmatter）、占位配对、p 拆分/格式拆壳/列表引用落位/链接与表格不提升矩阵",
+      "单元 embedCard：混排宿主挂载出站请求带行内精确区间、同段多嵌入独立实例、卸载配对与重挂零重发",
+      "浏览器 mixedEmbed（#246）：真实指针滚动/明暗主题下前后文可见性与卡片绘制、列表编号与引用边条保真"
+    ],
+    "introduced": "#246（2026-10-01）"
+  },
+  {
+    "id": "embed-slot",
+    "domain": "content",
+    "category": "link-image-wikilink",
+    "kind": "selector",
+    "target": ".vsidian-embed-slot（混排嵌入行内占位 span，data-vsidian-embed-inner 携带目标原文）",
+    "purpose": "Reading 混排嵌入的行内占位（#246）：markdown-it inline 规则（与 shared/wikilink 扫描器同源的 embedAtPosition 判定）在段落/列表/引用/表格的行内内容产出的 span——块挂载后升级为 reading-embed-mixed 流内宿主；未升级/不可提升（链接域 a 内——嵌套 a 属非法 DOM、表格格内 #248 前、配对失败降级）时按占位文字形态呈现（正文文字 + 描述色弱化，保留 ![[ ]] 文本可辨识）。占位是 span 而非 a：可处于链接文字域内而不破坏 DOM 合法性，链接域内点击走外层 a 的既有链接语义。",
+    "views": [
+      "reading"
+    ],
+    "states": "升级（块挂载且占位可提升——被流内宿主替换，span 退场）/ 占位保持（其余形态；随块 HTML 重建而重建）。",
+    "dom": "块级容器（p/li/td 等）的行内内容中：<span class=\"vsidian-embed-slot\" data-vsidian-embed-inner=\"原文\">![[显示]]</span>；data 属性值经 HTML 转义，进 DOM 前经 sanitizeReadingDom 纵深净化（data 属性保留）。",
+    "example": "#app .vsidian-view-reading .vsidian-reading-block .vsidian-embed-slot {\n  color: var(--vscode-descriptionForeground, inherit);\n}",
+    "obsidian": {
+      "counterpart": "（Obsidian 混排嵌入直接渲染，无占位形态）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 embedSlots（#246）：占位 html 形态（span + data-inner + 显示文本）、代码字面量/残缺形态不产占位与未闭合注释边角",
+      "单元 embedSlots：占位查询与配对（data-vsidian-embed-inner 为挂载配对单一来源）",
+      "浏览器 mixedEmbed（#246）：表格格内占位文字可见（#248 前的降级形态）"
+    ],
+    "introduced": "#246（2026-10-01）"
   }
 ] as readonly StyleContractEntry[]
 
@@ -4150,8 +4199,8 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "limit-markdown-embed": {
-    "purpose": "Partial boundary for embeds (![[…]]): a line-owning embed renders as the reference card in the reading view (#222) and mounts the same card in the live view with cursor-driven source reveal (#223) — see reading-embed-card / live-embed-widget. Since #244/#245, line-owning embeds expand recursively inside body cards and hover previews. Mixed-run lines (other content on the line), list/blockquote containers, and table cells keep the raw source for later tickets; writing into embedded content is not supported. Incomplete wikilink forms are shown as-is; blockquote blocks are already supported.",
-    "dom": "Where no embed container applies: ![[…]] on non-owning lines or inside containers renders as raw text (consistent across both views).",
+    "purpose": "Partial boundary for embeds (![[…]]): a line-owning embed renders as the reference card in the reading view (#222) and mounts the same card in the live view with cursor-driven source reveal (#223) — see reading-embed-card / live-embed-widget. Since #244/#245, line-owning embeds expand recursively inside body cards and hover previews. Since #246, mixed-run lines (other content on the line) and list/blockquote containers upgrade to in-flow cards in the reading view — see reading-embed-mixed. Live-side mixed-run and container forms keep the raw source (#247), and table cells keep the placeholder text (#248); writing into embedded content is not supported. Incomplete wikilink forms are shown as-is; blockquote blocks are already supported.",
+    "dom": "Where no embed container applies: ![[…]] on non-owning live-view lines or inside containers renders as raw text; reading-view table cells show the placeholder span (.vsidian-embed-slot, rendered as plain text).",
     "obsidian": {
       "counterpart": ".markdown-embed"
     }
@@ -4732,6 +4781,22 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     "dom": "An <a class=\"vsidian-wikilink vsidian-embed-ref\" href=\"raw target\"> inside the embed block html (the href is the raw text before |, same convention as the reading wikilink anchor); when the parent-document embed block mounts it is replaced wholesale by the embed card (the placeholder line never appears there).",
     "obsidian": {
       "counterpart": "(Obsidian expands embeds recursively; there is no placeholder form)"
+    }
+  },
+  "reading-embed-mixed": {
+    "purpose": "Reading mixed-run embed host (#246): a ![[…]] mixed with text (\"lead ![[B]] trail\") or inside a list/blockquote container is promoted from its inline placeholder (embed-slot) into an in-flow block host after the block mounts, carrying the same reading-embed-card — rendered as \"lead text → block card → trail text\" with no newlines inserted into the source. Promotion inside a p splits the paragraph (lead p + host + trail p, classes and attributes cloned, empty halves dropped — valid DOM, never a block node inside p); bold/italic/highlight spanning the embed is unwrapped into two complete inline tags on each side (visual semantics preserved); list items (bullet/ordered/task/lazy continuation) and blockquotes host the card in place — list numbering, indentation, and the quote bar container stay intact; the host width follows its column/indentation area (block-level, filling the parent content box without crossing the indent). One shared recognition/mounting adapter covers the main reading document, card content, and hover content (RefContentMount and EmbedCardManager share the embedSlots assembly); multiple embeds in one paragraph each own an occurrence-keyed card in source order.",
+    "states": "Upgrade path mirrors the line-owning card (loading/success/failure states, capped scrolling, depth and budget rejection, recursion and source leases all reuse the #244/#245 infrastructure); non-promotable forms (inside an anchor, inside a table cell before #248, pairing-failure degradation) keep the .vsidian-embed-slot placeholder text.",
+    "dom": "Main reading document: produced inside a block element (.vsidian-reading-block) by the mounting adapter (embedSlots.promoteEmbedSlot), the host div carries classes .vsidian-reading-embed .vsidian-reading-embed-mixed; card and hover content produce it the same way via the RefContentMount block-mounted hook (direct-source/occurrence semantics follow the parent instance). Unmounting pairs via the data-vsidian-embed-promoted query (the host is reclaimed with its owning block; instance state stays in the card state store).",
+    "obsidian": {
+      "counterpart": "(Obsidian inserts mixed-run embeds as blocks too; container rules are closed-source and not promised)"
+    }
+  },
+  "embed-slot": {
+    "purpose": "Reading mixed-run inline placeholder (#246): a span emitted by a markdown-it inline rule (the embedAtPosition check, same source as the shared/wikilink scanner) in the inline content of paragraphs/lists/blockquotes/tables — promoted into a reading-embed-mixed in-flow host after the block mounts; when not promoted or not promotable (inside an anchor — nested anchors are invalid DOM; inside a table cell before #248; pairing-failure degradation) it renders as placeholder text (body text in the muted description color, keeping the ![[ ]] form recognizable). The placeholder is a span rather than an anchor: it can sit inside link label text without breaking DOM validity, and clicks inside link labels follow the enclosing anchor semantics.",
+    "states": "Promoted (block mounted and the placeholder is promotable — replaced by the in-flow host, the span leaves) / placeholder kept (all other forms; rebuilt whenever the block html is rebuilt).",
+    "dom": "Inline content of a block container (p/li/td): <span class=\"vsidian-embed-slot\" data-vsidian-embed-inner=\"raw\">![[display]]</span>; attribute values are HTML-escaped and survive the sanitizeReadingDom deep sanitization (data attributes are kept).",
+    "obsidian": {
+      "counterpart": "(Obsidian renders mixed-run embeds directly; there is no placeholder form)"
     }
   }
 } as Readonly<Record<string, StyleContractEntryOverride>>

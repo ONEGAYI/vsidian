@@ -16,7 +16,7 @@ await build({ entryPoints: [path.join(root, 'test/browser/readingEmbedFixture.ts
   bundle: true, outfile: bundle, format: 'iife',
   loader: { '.woff2': 'file', '.svg': 'file' }, assetNames: 'assets/[name]' })
 
-/** 父文档：独占行全文嵌入 + 章节嵌入 + 混排行 + 尾部大段正文（视口回收场景） */
+/** 父文档：独占行全文嵌入 + 章节嵌入 + 混排行（#246 起升级流内卡片）+ 尾部大段正文（视口回收场景） */
 const PARENT_DOC = [
   '# 嵌入父文档',
   '',
@@ -26,7 +26,7 @@ const PARENT_DOC = [
   '',
   '中间正文段落。',
   '',
-  '混排嵌入 ![[目标笔记]] 不成卡片（保留源文）。',
+  '混排嵌入 ![[目标笔记]] 现于 #246 升级为流内卡片。',
   '',
   '![[目标笔记#章节一]]',
   '',
@@ -94,31 +94,66 @@ try {
     await page.waitForTimeout(150)
   }
 
-  // ---- 场景 A：独占行嵌入挂载升级 + 请求载荷身份契约 + 混排保留源文 ----
+  // ---- 场景 A：独占行嵌入挂载升级 + 请求载荷身份契约 + 混排流内卡片 ----
   const reqsA = await hoverRequests()
-  assert.equal(reqsA.length, 2, '两个独占行嵌入（全文 + 章节）各发一笔装载请求')
-  assert.match(reqsA[0].instanceId, /^embed-/, '嵌入实例前缀')
-  assert.equal(reqsA[0].target, '目标笔记', 'target 为嵌入 inner 原文')
-  assert.equal(reqsA[1].target, '目标笔记#章节一', '章节嵌入目标原文含锚点')
-  assert.equal(reqsA[0].sourceStart, PARENT_DOC.indexOf('![[目标笔记]]'), 'sourceStart 为嵌入行区间起点')
-  assert.equal(reqsA[0].sourceEnd, PARENT_DOC.indexOf('![[目标笔记]]') + '![[目标笔记]]'.length, 'sourceEnd 为嵌入行区间终点')
+  assert.equal(reqsA.length, 3, '三个嵌入（独占全文 + 混排 + 章节）各发一笔装载请求')
+  const reqAt = (start) => {
+    const req = reqsA.find((r) => r.sourceStart === start)
+    assert.ok(req, `区间起点 ${start} 的装载请求应在途`)
+    return req
+  }
+  const ownStart = PARENT_DOC.indexOf('![[目标笔记]]')
+  const mixedAt = PARENT_DOC.indexOf('混排嵌入 ![[目标笔记]]') + '混排嵌入 '.length
+  const sectionAt = PARENT_DOC.indexOf('![[目标笔记#章节一]]')
+  const ownReq = reqAt(ownStart)
+  const mixedReq = reqAt(mixedAt)
+  const sectReq = reqAt(sectionAt)
+  for (const req of reqsA) {
+    assert.match(req.instanceId, /^embed-/, '嵌入实例前缀')
+  }
+  assert.equal(ownReq.target, '目标笔记', 'target 为嵌入 inner 原文')
+  assert.equal(mixedReq.target, '目标笔记', '混排嵌入目标原文同口径')
+  assert.equal(sectReq.target, '目标笔记#章节一', '章节嵌入目标原文含锚点')
+  assert.equal(ownReq.sourceEnd, ownStart + '![[目标笔记]]'.length, 'sourceEnd 为嵌入行区间终点')
+  // #246：混排请求区间是行内 occurrence 精确边界（不吞前后文）
+  assert.equal(mixedReq.sourceEnd, mixedAt + '![[目标笔记]]'.length, '混排 sourceEnd 为行内嵌入终点')
   let cards = await page.evaluate(() => window.readEmbedCards())
-  assert.equal(cards.length, 2, '恰两张嵌入卡片（混排行不成卡片）')
+  assert.equal(cards.length, 3, '恰三张嵌入卡片（#246 混排升级为流内卡片）')
   assert.ok(cards[0].hitInside, '卡片头部 elementFromPoint 命中应落在卡片内（真实绘制）')
   assert.ok(parseFloat(cards[0].barWidth) >= 3, `左侧引用边条应在场（实际 ${cards[0].barWidth}）`)
   assert.notEqual(cards[0].barColor, 'rgba(0, 0, 0, 0)', '边条颜色非透明（引用条色）')
   assert.equal(cards[0].stateText, zhCn['embed.loading'], '装载中就地 loading 文案')
   assert.ok(cards[0].openPresent, '右上角打开入口在场')
-  // 混排：主文档中的混排嵌入不成卡片，正文保留源文（占位引用行也不出现——它是 paragraph 文本）
-  const inlineMention = await page.evaluate(() =>
-    (Array.from(document.querySelectorAll('.vsidian-view-reading'))
-      .find((el) => !el.closest('.vsidian-embed-card') && !el.closest('.vsidian-hover-popup'))?.textContent ?? '').includes('混排嵌入 ![[目标笔记]] 不成卡片'))
-  assert.ok(inlineMention, '混排嵌入行应保留源文文本')
+  // #246：混排前后文成独立 p 且文本保留（流内卡片不吞文字）
+  const mixedAround = await page.evaluate(() => {
+    const host = document.querySelector('.vsidian-reading-embed-mixed')
+    if (!host) return null
+    const before = host.previousElementSibling
+    const after = host.nextElementSibling
+    return {
+      beforeText: (before?.textContent ?? '').trim(),
+      afterText: (after?.textContent ?? '').trim(),
+      beforeIsP: before instanceof HTMLParagraphElement,
+      afterIsP: after instanceof HTMLParagraphElement,
+    }
+  })
+  assert.ok(mixedAround, '混排流内宿主在场')
+  assert.ok(mixedAround.beforeIsP && mixedAround.afterIsP, '混排提升拆段为 p(前)+宿主+p(后)')
+  assert.ok(mixedAround.beforeText.includes('混排嵌入'), `前文保留（实际 ${mixedAround.beforeText}）`)
+  assert.ok(mixedAround.afterText.includes('升级为流内卡片'), `后文保留（实际 ${mixedAround.afterText}）`)
   passed++
-  console.log('[正文嵌入][PASS] 独占行挂载升级 + 载荷契约 + 混排保留源文')
+  console.log('[正文嵌入][PASS] 独占行挂载升级 + 载荷契约 + 混排流内卡片（#246）')
 
   // ---- 场景 B：成功回包 → 内容绘制（标题/任务禁写/标题栏 relPath/限高滚动）----
   await respondOk(0)
+  // #246 混排卡同目标回包（按区间寻位——请求序含 Live 侧先行，不按 index；
+  // E 场景零重发断言须全部全文卡已装载缓存）
+  {
+    const reqsB = await hoverRequests()
+    const mixedIdx = reqsB.findIndex((r) => r.sourceStart === mixedAt)
+    assert.ok(mixedIdx >= 0, '混排卡装载请求应在途')
+    await respondOk(mixedIdx, TARGET_DOC)
+  }
   cards = await page.evaluate(() => window.readEmbedCards())
   assert.equal(cards[0].stateVisible, false, '成功后状态行隐藏（内容区在场）')
   assert.ok(cards[0].text.includes('目标笔记标题'), '应渲染目标标题')
@@ -200,8 +235,18 @@ try {
   passed++
   console.log('[正文嵌入][PASS] 限高设置热更：embed.maxHeight=300 即时生效')
 
-  // ---- 场景 G：错误分态就地呈现（第二张卡片回 not-found）----
-  // 章节卡片的在途请求取最新一笔（场景 E 的回收重挂会以新身份重发在途请求）
+  // ---- 场景 G：错误分态就地呈现（第三张卡片回 not-found）----
+  // 混排卡（#246）装载后头部总高把章节块挤出首屏窗口——先滚到章节块
+  // 入场（其在途/重挂请求以最新一笔为准），再回错误包
+  const sectBlock = await page.evaluate(() => {
+    for (const el of Array.from(document.querySelectorAll('.vsidian-reading-block'))) {
+      if ((el.dataset['vsidianEmbedInner'] ?? '') === '目标笔记#章节一') return el.offsetTop
+    }
+    return null
+  })
+  assert.ok(sectBlock !== null, '章节块应已解析（dataset 携带 inner）')
+  await page.evaluate((top) => window.scrollReadingTo(top), sectBlock)
+  await page.waitForTimeout(300)
   const reqsG = (await hoverRequests()).filter((r) => r.target === '目标笔记#章节一')
   const sectionReq = reqsG.at(-1)
   await page.evaluate(({ reqId, instanceId }) => window.respondEmbed({

@@ -268,6 +268,7 @@ vsidian/
 │       ├── diagramPopup.ts             # 图表弹窗全屏浮层
 │       ├── diagramPopupGeometry.ts     # 弹窗几何纯函数
 │       ├── embedCard.ts                # Reading 嵌入卡片管理器
+│       ├── embedSlots.ts               # 混排嵌入识别配对与DOM提升纯逻辑
 │       ├── fenceEscape.ts              # 围栏 Tab 越界适配层（#125）
 │       ├── findSession.ts              # 查找匹配纯函数（#14）
 │       ├── fontArrival.ts              # 字体晚到监听（#130）

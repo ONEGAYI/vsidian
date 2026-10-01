@@ -1132,6 +1132,9 @@ export class WebviewSyncController {
       maxHeightPx: () => this.embedMaxHeightPx(),
       maxDepth: () => this.embedMaxDepth(),
       requestMeasure: () => this.view?.requestMeasure(),
+      // #246 混排占位提升的父文档全文（主文档 Reading 块挂载路径；与
+      // readingView.setDocument 同源——CM6 文档即权威文本，LF 坐标一致）
+      sourceText: () => this.view?.state.doc.toString() ?? null,
     })
     // #223 Live 嵌入 widget 接线（liveEmbed 装饰的 widget 经此挂载共用卡片）
     setLiveEmbedCards(this.embedCards)

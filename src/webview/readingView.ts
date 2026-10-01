@@ -45,6 +45,9 @@ export const READING_CLASS_NAMES = {
   /** #222 嵌入块（独占行；主文档挂载时内含嵌入卡片，嵌入内容/浮层内为
    *  占位引用行） */
   embedBlock: 'vsidian-reading-embed',
+  /** #246 混排嵌入宿主修饰类（叠加在 embedBlock 上：块内占位提升产生
+   *  的流内卡片宿主——列表/引用容器内跟随缩进与列宽） */
+  embedMixed: 'vsidian-reading-embed-mixed',
   /** #7 视口占位 spacer（屏外块的高度占位，非内容节点） */
   spacer: 'vsidian-reading-spacer',
   spacerTop: 'vsidian-reading-spacer-top',

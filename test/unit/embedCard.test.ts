@@ -857,3 +857,102 @@ it('#242 在场卡片滚回顶部后刷新，不恢复旧非零位置', async ()
   expect(scroll.scrollTop).toBe(0)
   manager.dispose()
 })
+
+describe('#246 混排嵌入：块内占位提升挂载（context.sourceText 注入）', () => {
+  function makeMixedContext(sent: WebviewToHost[], text: string, maxHeightPx = 480): EmbedCardContext {
+    return { ...makeContext(sent, maxHeightPx), sourceText: () => text }
+  }
+
+  /** 挂载一个指定 kind 的块并返回其元素 */
+  function mountBlockOfKind(
+    manager: EmbedCardManager,
+    text: string,
+    kind: 'paragraph' | 'list' | 'blockquote',
+  ): HTMLElement {
+    const blocks = splitReadingBlocks(text)
+    const block = blocks.find((b) => b.kind === kind)
+    if (!block) {
+      throw new Error(`文本未产生 ${kind} 块`)
+    }
+    const el = createReadingBlockElement(block, text)
+    document.body.appendChild(el)
+    manager.mountBlock(el)
+    return el
+  }
+
+  it('混排段落：p 拆分 + 卡片升级 + 出站请求带行内精确区间', () => {
+    const sent: WebviewToHost[] = []
+    const text = '前文 ![[目标笔记]] 后文'
+    const manager = new EmbedCardManager(makeMixedContext(sent, text))
+    const el = mountBlockOfKind(manager, text, 'paragraph')
+    const host = el.querySelector<HTMLElement>('.vsidian-reading-embed-mixed')!
+    expect(host).not.toBeNull()
+    expect(host.querySelector(`.${EMBED_CARD_CLASS_NAMES.card}`)).not.toBeNull()
+    expect(el.querySelectorAll('p')).toHaveLength(2)
+    const req = hoverRequestOf(sent)
+    expect(req.target).toBe('目标笔记')
+    expect(req.sourceStart).toBe(text.indexOf('![[目标笔记]]'))
+    expect(req.sourceEnd).toBe(req.sourceStart + '![[目标笔记]]'.length)
+    manager.dispose()
+  })
+
+  it('同段两个嵌入：两个独立实例与请求（occurrence 键按位置区分）', () => {
+    const sent: WebviewToHost[] = []
+    const text = '起 ![[目标笔记]] 中 ![[目标笔记]] 末'
+    const manager = new EmbedCardManager(makeMixedContext(sent, text))
+    const el = mountBlockOfKind(manager, text, 'paragraph')
+    expect(el.querySelectorAll(`.${EMBED_CARD_CLASS_NAMES.card}`)).toHaveLength(2)
+    const reqs = sent.filter((m) => m.kind === 'hover.request')
+    expect(reqs).toHaveLength(2)
+    const first = reqs[0] as Extract<WebviewToHost, { kind: 'hover.request' }>
+    const second = reqs[1] as Extract<WebviewToHost, { kind: 'hover.request' }>
+    expect(first.occurrenceId).not.toBe(second.occurrenceId)
+    expect(first.sourceStart).toBeLessThan(second.sourceStart)
+    manager.dispose()
+  })
+
+  it('列表与引用内提升挂载照常出站', () => {
+    for (const text of ['- 项 ![[目标笔记]] 余', '> 引 ![[目标笔记]] 文']) {
+      const sent: WebviewToHost[] = []
+      const manager = new EmbedCardManager(makeMixedContext(sent, text))
+      const kind = text.startsWith('-') ? 'list' : 'blockquote'
+      const el = mountBlockOfKind(manager, text, kind as 'list' | 'blockquote')
+      const host = el.querySelector<HTMLElement>('.vsidian-reading-embed-mixed')
+      expect(host, text).not.toBeNull()
+      expect(host!.querySelector(`.${EMBED_CARD_CLASS_NAMES.card}`), text).not.toBeNull()
+      expect(hoverRequestOf(sent).target, text).toBe('目标笔记')
+      manager.dispose()
+      document.body.innerHTML = ''
+    }
+  })
+
+  it('块卸载配对撤下混排卡片；重挂零重发已缓存（状态库语义键按区间）', () => {
+    const sent: WebviewToHost[] = []
+    const text = '前文 ![[目标笔记]] 后文'
+    const manager = new EmbedCardManager(makeMixedContext(sent, text))
+    const el = mountBlockOfKind(manager, text, 'paragraph')
+    const req = hoverRequestOf(sent)
+    manager.notifyResult(resultOk(req, TARGET_TEXT))
+    const sentBefore = sent.length
+    manager.unmountBlock(el)
+    expect(document.querySelector(`.${EMBED_CARD_CLASS_NAMES.card}`)).toBeNull()
+    // 重挂：装载缓存命中，零新请求
+    // 重挂：装载缓存命中，零新请求（首载 1 笔之后不再增长）
+    const el2 = mountBlockOfKind(manager, text, 'paragraph')
+    expect(el2.querySelector(`.${EMBED_CARD_CLASS_NAMES.card}`)).not.toBeNull()
+    expect(sent.filter((m) => m.kind === 'hover.request')).toHaveLength(1)
+    expect(sent.length).toBe(sentBefore)
+    manager.dispose()
+  })
+
+  it('sourceText 缺省（无注入）时不升级不误伤：占位保持引用行形态', () => {
+    const sent: WebviewToHost[] = []
+    const text = '前文 ![[目标笔记]] 后文'
+    const manager = new EmbedCardManager(makeContext(sent))
+    const el = mountBlockOfKind(manager, text, 'paragraph')
+    expect(el.querySelector(`.${EMBED_CARD_CLASS_NAMES.card}`)).toBeNull()
+    expect(el.querySelector('[data-vsidian-embed-inner]')).not.toBeNull()
+    expect(sent.filter((m) => m.kind === 'hover.request')).toHaveLength(0)
+    manager.dispose()
+  })
+})

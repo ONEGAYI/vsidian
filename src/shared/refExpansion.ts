@@ -1,7 +1,6 @@
 import type { HoverPreviewScope } from './protocol'
-import { soleEmbedOfLine } from './wikilink'
+import { scanEmbedsInLine } from './wikilink'
 import { chainAt, frontmatterRange, markdownTreeParser } from '../webview/markdownDoc'
-import { stripHtmlComments } from '../webview/htmlComment'
 
 export const REF_EXPANSION_LIMITS = {
   defaultDepth: 3,
@@ -27,7 +26,18 @@ export function inExpansionPath(path: readonly string[], key: string): boolean {
   return path.includes(key)
 }
 
-/** Validate a child against the current authoritative LF source, never a webview URI claim. */
+/**
+ * Validate a child against the current authoritative LF source, never a webview URI claim.
+ *
+ * #246 混排准入：区间不再要求独占整行，改为「该行内一个完整嵌入
+ * occurrence 的精确边界且 inner 逐字节匹配」；列表/引用（含任务、嵌套、
+ * 懒续行与组合）从语法排除中放行——与呈现侧（readingMarkdown 占位规则
+ * + embedSlots 提升）和索引侧（vaultLinkExtract 行扫描）同源。语法排除
+ * 守卫保留：代码（围栏/缩进/行内）、frontmatter、HTML 注释（lezer 的
+ * Comment/CommentBlock 节点——#246 前的 HTMLComment 条目从未命中过，
+ * 实测节点名后更正）与表格（TableCell 归 #248）仍拒绝，不因混排准入
+ * 而放宽——不通过删守卫把字面量升级为引用。
+ */
 export function validChildSource(
   parent: { version: number; range: { start: number; end: number } },
   current: { version: number; text: string },
@@ -37,18 +47,18 @@ export function validChildSource(
 ): boolean {
   if (current.version !== parent.version || !Number.isInteger(start) || !Number.isInteger(end) ||
     start < parent.range.start || end > parent.range.end || start >= end || end > current.text.length) return false
-  const slice = current.text.slice(start, end)
-  if (slice.includes('\n') || soleEmbedOfLine(slice)?.inner !== target) return false
   const lineStart = current.text.lastIndexOf('\n', start - 1) + 1
   const lineBreak = current.text.indexOf('\n', end)
   const lineEnd = lineBreak < 0 ? current.text.length : lineBreak
-  if (start !== lineStart || end !== lineEnd) return false
-  const lineIndex = current.text.slice(0, start).split('\n').length - 1
-  if (soleEmbedOfLine(stripHtmlComments(current.text).split('\n')[lineIndex] ?? '')?.inner !== target) return false
+  const line = current.text.slice(lineStart, lineEnd)
+  // 区间必须精确对齐行内 occurrence（inner 逐字节匹配——半截/吞字/错位拒绝）
+  const aligned = scanEmbedsInLine(line).some((hit) =>
+    lineStart + hit.from === start && lineStart + hit.to === end && hit.inner === target)
+  if (!aligned) return false
   const fm = frontmatterRange(current.text)
   if (fm && start < fm.end) return false
   const excluded = new Set(['FencedCode', 'CodeBlock', 'InlineCode', 'CodeText', 'CodeMark',
-    'HTMLBlock', 'HTMLComment', 'Blockquote', 'ListItem', 'Table'])
+    'CodeInfo', 'HTMLBlock', 'Comment', 'CommentBlock', 'Table'])
   const tree = markdownTreeParser.parse(current.text)
   return !chainAt(tree, start).some((node) => excluded.has(node.name))
 }

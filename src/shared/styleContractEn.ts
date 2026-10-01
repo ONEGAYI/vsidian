@@ -503,8 +503,8 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
   },
   'limit-markdown-embed': {
     purpose:
-      'Partial boundary for embeds (![[…]]): a line-owning embed renders as the reference card in the reading view (#222) and mounts the same card in the live view with cursor-driven source reveal (#223) — see reading-embed-card / live-embed-widget. Since #244/#245, line-owning embeds expand recursively inside body cards and hover previews. Mixed-run lines (other content on the line), list/blockquote containers, and table cells keep the raw source for later tickets; writing into embedded content is not supported. Incomplete wikilink forms are shown as-is; blockquote blocks are already supported.',
-    dom: 'Where no embed container applies: ![[…]] on non-owning lines or inside containers renders as raw text (consistent across both views).',
+      'Partial boundary for embeds (![[…]]): a line-owning embed renders as the reference card in the reading view (#222) and mounts the same card in the live view with cursor-driven source reveal (#223) — see reading-embed-card / live-embed-widget. Since #244/#245, line-owning embeds expand recursively inside body cards and hover previews. Since #246, mixed-run lines (other content on the line) and list/blockquote containers upgrade to in-flow cards in the reading view — see reading-embed-mixed. Live-side mixed-run and container forms keep the raw source (#247), and table cells keep the placeholder text (#248); writing into embedded content is not supported. Incomplete wikilink forms are shown as-is; blockquote blocks are already supported.',
+    dom: 'Where no embed container applies: ![[…]] on non-owning live-view lines or inside containers renders as raw text; reading-view table cells show the placeholder span (.vsidian-embed-slot, rendered as plain text).',
     obsidian: { counterpart: '.markdown-embed' },
   },
   'limit-strikethrough-live': {
@@ -1065,6 +1065,24 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
       'Inside referenced content, the line upgrades to a card or an in-place placeholder according to depth and budgets; clicks navigate by direct source without stacking another hover popup (the embed content domain stops mouseover/mouseout propagation).',
     dom: 'An <a class="vsidian-wikilink vsidian-embed-ref" href="raw target"> inside the embed block html (the href is the raw text before |, same convention as the reading wikilink anchor); when the parent-document embed block mounts it is replaced wholesale by the embed card (the placeholder line never appears there).',
     obsidian: { counterpart: '(Obsidian expands embeds recursively; there is no placeholder form)' },
+  },
+  'reading-embed-mixed': {
+    purpose:
+      'Reading mixed-run embed host (#246): a ![[…]] mixed with text ("lead ![[B]] trail") or inside a list/blockquote container is promoted from its inline placeholder (embed-slot) into an in-flow block host after the block mounts, carrying the same reading-embed-card — rendered as "lead text → block card → trail text" with no newlines inserted into the source. Promotion inside a p splits the paragraph (lead p + host + trail p, classes and attributes cloned, empty halves dropped — valid DOM, never a block node inside p); bold/italic/highlight spanning the embed is unwrapped into two complete inline tags on each side (visual semantics preserved); list items (bullet/ordered/task/lazy continuation) and blockquotes host the card in place — list numbering, indentation, and the quote bar container stay intact; the host width follows its column/indentation area (block-level, filling the parent content box without crossing the indent). One shared recognition/mounting adapter covers the main reading document, card content, and hover content (RefContentMount and EmbedCardManager share the embedSlots assembly); multiple embeds in one paragraph each own an occurrence-keyed card in source order.',
+    states:
+      'Upgrade path mirrors the line-owning card (loading/success/failure states, capped scrolling, depth and budget rejection, recursion and source leases all reuse the #244/#245 infrastructure); non-promotable forms (inside an anchor, inside a table cell before #248, pairing-failure degradation) keep the .vsidian-embed-slot placeholder text.',
+    dom:
+      'Main reading document: produced inside a block element (.vsidian-reading-block) by the mounting adapter (embedSlots.promoteEmbedSlot), the host div carries classes .vsidian-reading-embed .vsidian-reading-embed-mixed; card and hover content produce it the same way via the RefContentMount block-mounted hook (direct-source/occurrence semantics follow the parent instance). Unmounting pairs via the data-vsidian-embed-promoted query (the host is reclaimed with its owning block; instance state stays in the card state store).',
+    obsidian: { counterpart: '(Obsidian inserts mixed-run embeds as blocks too; container rules are closed-source and not promised)' },
+  },
+  'embed-slot': {
+    purpose:
+      'Reading mixed-run inline placeholder (#246): a span emitted by a markdown-it inline rule (the embedAtPosition check, same source as the shared/wikilink scanner) in the inline content of paragraphs/lists/blockquotes/tables — promoted into a reading-embed-mixed in-flow host after the block mounts; when not promoted or not promotable (inside an anchor — nested anchors are invalid DOM; inside a table cell before #248; pairing-failure degradation) it renders as placeholder text (body text in the muted description color, keeping the ![[ ]] form recognizable). The placeholder is a span rather than an anchor: it can sit inside link label text without breaking DOM validity, and clicks inside link labels follow the enclosing anchor semantics.',
+    states:
+      'Promoted (block mounted and the placeholder is promotable — replaced by the in-flow host, the span leaves) / placeholder kept (all other forms; rebuilt whenever the block html is rebuilt).',
+    dom:
+      'Inline content of a block container (p/li/td): <span class="vsidian-embed-slot" data-vsidian-embed-inner="raw">![[display]]</span>; attribute values are HTML-escaped and survive the sanitizeReadingDom deep sanitization (data attributes are kept).',
+    obsidian: { counterpart: '(Obsidian renders mixed-run embeds directly; there is no placeholder form)' },
   },
 }
 

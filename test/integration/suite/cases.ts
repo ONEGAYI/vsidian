@@ -12077,4 +12077,71 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
     console.log('[#245] 悬停 B→C→D 真来源、深度占位、整树退订与零写回通过')
   }],
+  ['混排嵌入：容器内卡片、宿主混排准入与零写回（#246）', async () => {
+    await vscode.commands.executeCommand(CMD.setSettings, { 'embed.maxDepth': 3 })
+    const parentName = '混排嵌入父文档.md'
+    const parentUri = wsUri(parentName).toString()
+    const parentDisk = await readDisk(parentName)
+    const bDisk = await readDisk('ref-depth/one/B 混排.md')
+    const cDisk = await readDisk('ref-depth/two/C.md')
+    await openWithEditor(parentName)
+    await waitSessionReady(parentName)
+    await vscode.commands.executeCommand(CMD.postToPanel, parentUri, { kind: 'view.mode.set', mode: 'reading' })
+    const pull = () => vscode.commands.executeCommand(CMD.viewState, parentUri, 0) as Promise<ViewState | undefined>
+    const inner = 'ref-depth/one/B 混排'
+    // 主文档 5 个可提升位（段落/无序/懒续/任务/引用）各升级一张卡；
+    // 链接域与表格格内保持占位（不升级——不在 readingEmbed 观测面）
+    const mixed = (v: ViewState | undefined) =>
+      (v?.readingEmbed ?? []).filter((item) => item.host !== 'live' && item.inner === inner)
+    // 卡片装载后变高使虚拟化窗口收缩，远端块（含宿主/卡片）按既有语义
+    // 回收——在场卡数是动态值；装载断言只看在场卡全部成功，5 个容器位
+    // 的提升矩阵由 embedSlots/embedCard 单测与浏览器 mixedEmbed 钉住
+    const loaded = await poll('混排卡装载', async () => {
+      const v = await pull()
+      const cards = mixed(v)
+      return v !== undefined && cards.length >= 1 &&
+        cards.every((c) => c.state === 'content' && (c.textLen ?? 0) > 0) ? v : undefined
+    }, 20000)
+    // 宿主混排准入：B 内容内的文字混排 C 与引用内 C（validChildSource 不再
+    // 要求独占行、放行列表/引用上下文）——真实子请求链装载
+    const cInner = '../two/C'
+    const cCards = (loaded.readingEmbed ?? []).filter((item) => item.host !== 'live' && item.inner === cInner)
+    // 风暴装载（5 B × 2 C 并发窗口）可触发并发预算分态（error 卡为正确
+    // 语义）；准入证明只须至少一张 C 真实装载，全部 error 才失败
+    assert(cCards.length >= 1 && cCards.some((c) => c.state === 'content'),
+      `B 内混排 C 应经宿主混排准入装载（实际 ${JSON.stringify(cCards.map((c) => c.state))}）`)
+    // C 内独占行 D 沿 #244 既有递归继续
+    const dCard = (loaded.readingEmbed ?? []).find((item) => item.host !== 'live' && item.inner === '../three/D')
+    assert(dCard?.state === 'content', 'C→D 独占行递归不受混排接入影响')
+    const watch = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
+    assert(watch.targets >= 3 && watch.subscriptions >= 3,
+      `B/C/D 真宿主订阅在场（实际 ${JSON.stringify(watch)}）`)
+    // 深度热更：混排卡同样受 embed.maxDepth 即时约束（子孙撤下）
+    await vscode.commands.executeCommand(CMD.setSettings, { 'embed.maxDepth': 1 })
+    await poll('深度 1 撤下混排子树', async () => {
+      const v = await pull()
+      const cards = mixed(v)
+      const cUnderB = (v?.readingEmbed ?? []).find((item) => item.host !== 'live' && item.inner === cInner)
+      return cards.length >= 1 && cards.every((c) => c.state === 'content') &&
+        cUnderB?.state === 'error' && cUnderB.note === editorMessages()['hover.errorDepth'] &&
+        !(v?.readingEmbed ?? []).some((item) => item.host !== 'live' && item.inner === '../three/D') ? v : undefined
+    }, 20000)
+    await vscode.commands.executeCommand(CMD.setSettings, { 'embed.maxDepth': 3 })
+    await poll('深度 3 恢复混排子树', async () => {
+      const v = await pull()
+      return (v?.readingEmbed ?? []).some((item) => item.host !== 'live' && item.inner === cInner && item.state === 'content') ? v : undefined
+    }, 20000)
+    // 零写回：磁盘三文档不变、无 edit.request、关闭面板订阅回落
+    assert((await readDisk(parentName)) === parentDisk &&
+      (await readDisk('ref-depth/one/B 混排.md')) === bDisk &&
+      (await readDisk('ref-depth/two/C.md')) === cDisk, '混排装载不落盘任何文档')
+    const parentState = (await vscode.commands.executeCommand(CMD.sessionState, parentUri)) as SessionState
+    assert(parentState.appliedEdits === 0, '混排嵌入没有进入父文档写回通道')
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await poll('混排面板关闭订阅回落', async () => {
+      const stats = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
+      return stats.targets === 0 && stats.subscriptions === 0 ? stats : undefined
+    })
+    console.log('[#246] 混排容器卡片、宿主混排准入、深度热更与零写回通过')
+  }],
 ]

@@ -6,6 +6,7 @@ import { splitReadingBlocks } from './readingBlocks'
 import { createReadingBlockElement } from './readingView'
 import { VirtualReadingView, type ReadingViewStats } from './readingVirtualView'
 import { createSourcedImageManager, mountRefContentBlock } from './refReadingContent'
+import { promoteEmbedSlotsInBlock, promotedHostsOf } from './embedSlots'
 import type { ImageResourceManager } from './imageResource'
 import { onLocaleChanged } from '../shared/i18n'
 
@@ -315,10 +316,25 @@ export class RefContentMount {
     if (this.target && el.dataset['vsidianEmbedInner'] !== undefined) {
       this.options.onEmbedBlockMounted?.(el, this.target)
     }
+    // #246 混排：块内占位提升为块级宿主（B 全文坐标回算 occurrence），
+    // 各宿主独立触发回调——同段/行多个嵌入各有位置身份，不共享块根身份
+    if (this.target !== null) {
+      const start = Number(el.dataset['vsidianSrcStart'])
+      const end = Number(el.dataset['vsidianSrcEnd'])
+      if (Number.isInteger(start) && Number.isInteger(end) && end >= start) {
+        for (const host of promoteEmbedSlotsInBlock(el, this.target.text, start, end)) {
+          this.options.onEmbedBlockMounted?.(host, this.target)
+        }
+      }
+    }
   }
 
   private unmountBlock(el: HTMLElement): void {
     if (!this.blocks.has(el)) return
+    // #246 混排宿主先于块根卸载（孙卡随父内容块在场；重复通知幂等）
+    for (const host of promotedHostsOf(el)) {
+      this.options.onEmbedBlockUnmounted?.(host)
+    }
     this.options.onEmbedBlockUnmounted?.(el)
     this.images?.detachWithin(el)
     for (const cleanup of this.blocks.get(el) ?? []) cleanup()

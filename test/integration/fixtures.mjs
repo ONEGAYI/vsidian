@@ -1104,6 +1104,39 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   writeFileSync(path.join(wsDir, 'ref-depth', 'two', 'C.md'), '# C 二层\n\n![[../three/D]]\n', 'utf8')
   writeFileSync(path.join(wsDir, 'ref-depth', 'three', 'D.md'), '# D 三层\n\n![[E]]\n', 'utf8')
   writeFileSync(path.join(wsDir, 'ref-depth', 'three', 'E.md'), '# E 四层\n', 'utf8')
+  // #246 混排/列表/引用容器：父文档 A 的嵌入与文字混排、在列表/引用/任务
+  // 项与懒续行内；B 内含「文字混排的 C 引用」——宿主 validChildSource 的
+  // 混排准入（不再要求独占行）沿真实子请求链验证。表格格内与链接域内
+  // 保持占位文本不升级（#248 前）。
+  writeFileSync(path.join(wsDir, '混排嵌入父文档.md'), [
+    '# 混排嵌入父文档',
+    '',
+    '前文段落 ![[ref-depth/one/B 混排]] 后文段落。',
+    '',
+    '- 无序项 ![[ref-depth/one/B 混排]] 项内余文',
+    '- 懒续项',
+    '  续行 ![[ref-depth/one/B 混排]] 续余',
+    '',
+    '- [ ] 任务项 ![[ref-depth/one/B 混排]] 完成度',
+    '',
+    '> 引用前文 ![[ref-depth/one/B 混排]] 引用后文',
+    '',
+    '链接域 [文字 ![[ref-depth/one/B 混排]] 形态](https://e.example/x) 保持占位。',
+    '',
+    '| 列甲 | 列乙 |',
+    '| --- | --- |',
+    '| 单元 | 格内 ![[ref-depth/one/B 混排]] 占位 |',
+    '',
+  ].join('\n'), 'utf8')
+  // B 的混排形态：文字混排 C + 引用内 C（宿主对 B 内混排子来源的准入）
+  writeFileSync(path.join(wsDir, 'ref-depth', 'one', 'B 混排.md'), [
+    '# B 混排一层',
+    '',
+    'B 前文 ![[../two/C]] B 后文。',
+    '',
+    '> 引用内 ![[../two/C]] 引用余',
+    '',
+  ].join('\n'), 'utf8')
   // 自引用：文档嵌入自身（A 嵌入 A——编辑自身后推送-重载不得循环）
   writeFileSync(path.join(wsDir, '同步自引用.md'), [
     '# 自引用文档',

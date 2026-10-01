@@ -119,3 +119,45 @@ describe('soleEmbedOfLine：独占正文一行判定（阅读挂载适配）', (
     expect(soleEmbedOfLine('')).toBeNull()
   })
 })
+
+describe('#246 embedAtPosition：位置精确命中（inline 渲染规则与扫描器同源）', () => {
+  it('从 ![[ 起点命中：区间与 inner 与 scanEmbedsInLine 完全一致', async () => {
+    const { embedAtPosition } = await import('../../src/shared/wikilink')
+    const line = '看 ![[甲]] 与 ![[乙/丙#节|显]] 及 [[双链]]'
+    const hits = scanEmbedsInLine(line)
+    expect(embedAtPosition(line, hits[0]!.from, line.length)?.inner).toBe('甲')
+    expect(embedAtPosition(line, hits[1]!.from, line.length)?.inner).toBe('乙/丙#节|显')
+    expect(embedAtPosition(line, hits[1]!.from, line.length)?.to).toBe(hits[1]!.to)
+  })
+
+  it('非起点/越界/前置守卫形态返回 null', async () => {
+    const { embedAtPosition } = await import('../../src/shared/wikilink')
+    const line = 'x [![[甲]]](u) 与 !![[乙]] 及 ![[丙]]'
+    const hit = scanEmbedsInLine(line)[0]!
+    expect(hit.inner).toBe('丙') // 前两者被守卫跳过（与扫描器一致）
+    expect(embedAtPosition(line, line.indexOf('![[丙]]'), line.length)?.inner).toBe('丙')
+    expect(embedAtPosition(line, line.indexOf('[![[甲]]') + 1, line.length)).toBeNull() // prev [
+    expect(embedAtPosition(line, line.indexOf('!![[乙]]') + 1, line.length)).toBeNull() // prev !
+    expect(embedAtPosition(line, line.indexOf('![[丙]]') + 1, line.length)).toBeNull() // 非起点
+    expect(embedAtPosition(line, line.indexOf('![[丙]]'), line.length - 2)).toBeNull() // 越上界
+  })
+
+  it('对拍：任意文本上两入口的命中集合逐字节一致', async () => {
+    const { embedAtPosition } = await import('../../src/shared/wikilink')
+    const lines = [
+      '!![[x]] [![[y]]] ![[z]] 混排 ![[未闭合',
+      'a ![[b|c]] d ![[e#f]] ![[ ]g]]',
+      '!!![[h]] ![[i]]![[j]] ![[k]]]',
+      '空串与普通行',
+    ]
+    for (const line of lines) {
+      const scanned = scanEmbedsInLine(line)
+      const perPos: typeof scanned = []
+      for (let i = 0; i <= line.length; i++) {
+        const hit = embedAtPosition(line, i, line.length)
+        if (hit) perPos.push(hit)
+      }
+      expect(perPos, line).toEqual(scanned)
+    }
+  })
+})

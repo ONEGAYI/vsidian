@@ -141,3 +141,57 @@ describe('#244 引用树与面板预算', () => {
     expect(budget.snapshot().inFlight).toBe(0)
   })
 })
+
+describe('#246 混排/列表/引用容器的直接父来源准入', () => {
+  const check = (text: string, inner = 'C'): boolean => {
+    const at = text.indexOf(`![[${inner}]]`)
+    return validChildSource(
+      { version: 1, range: { start: 0, end: text.length } },
+      { version: 1, text },
+      at,
+      at + `![[${inner}]]`.length,
+      inner,
+    )
+  }
+
+  it('文字混排：前文后文中的嵌入有子来源资格（不再要求独占行）', () => {
+    expect(check('前文 ![[C]] 后文')).toBe(true)
+    expect(check('起 ![[C]] 中 ![[C]] 末')).toBe(true)
+  })
+
+  it('无序/有序/任务列表与懒续行内的嵌入有子来源资格', () => {
+    expect(check('- 项 ![[C]] 余')).toBe(true)
+    expect(check('1. 项 ![[C]] 余')).toBe(true)
+    expect(check('- [ ] 任务 ![[C]] 余')).toBe(true)
+    expect(check('- 项\n  续 ![[C]] 余')).toBe(true)
+    expect(check('- 嵌套\n  - 内 ![[C]] 余')).toBe(true)
+  })
+
+  it('blockquote 及组合（引用内列表）内的嵌入有子来源资格', () => {
+    expect(check('> 引 ![[C]] 文')).toBe(true)
+    expect(check('> - 项 ![[C]] 余')).toBe(true)
+  })
+
+  it('表格格内仍无子来源资格（#248 接入前的既有边界）', () => {
+    expect(check('| a | ![[C]] |\n| --- | --- |\n| b | c |')).toBe(false)
+  })
+
+  it('语法排除守卫保留：代码/frontmatter/注释内不因混排准入而放宽', () => {
+    expect(check('段 `![[C]]` 段')).toBe(false)
+    expect(check('```md\n![[C]]\n```')).toBe(false)
+    expect(check('---\nkey: v\n---\n\n正文')).toBe(false)
+    expect(check('前 <!-- ![[C]] --> 后')).toBe(false)
+    expect(check('<!-- 前 ![[C]] --> 后')).toBe(false)
+  })
+
+  it('区间必须精确对齐行内 occurrence：半截/偏移/前后吞字均拒绝', () => {
+    const text = '前文 ![[C]] 后文'
+    const at = text.indexOf('![[C]]')
+    const parent = { version: 1, range: { start: 0, end: text.length } }
+    const cur = { version: 1, text }
+    expect(validChildSource(parent, cur, at, at + 4, 'C')).toBe(false) // 半截
+    expect(validChildSource(parent, cur, at - 1, at + 6, 'C')).toBe(false) // 吞前字
+    expect(validChildSource(parent, cur, at, at + 7, 'C')).toBe(false) // 吞后字
+    expect(validChildSource(parent, cur, at, at + 6, 'C')).toBe(true)
+  })
+})

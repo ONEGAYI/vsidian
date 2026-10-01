@@ -52,9 +52,13 @@ export function isVaultPanelOutlink(edge: VaultEdge, ctx: LinkContext): boolean 
   return target.kind === 'doc' || target.kind === 'anchor'
 }
 
-/** 行扫描类抽取（双链 / 宽松链接）排除的代码上下文（lezer 节点名）——
- *  与 liveLinks 的 INLINE_SCAN_CODE_CONTEXTS 同源复制（该模块带 DOM 依赖
- *  不可被宿主侧引用；集合漂移由抽取测试的代码上下文用例钉住） */
+/** occurrence 起点是否处于代码/注释上下文或 frontmatter 内（源码降级
+ *  边界）：代码集合同 liveLinks.inlineScanSuppressed 同源复制（该模块带
+ *  DOM 依赖不可被宿主侧引用；漂移由抽取测试钉住）。#246 起注释（lezer
+ *  的 Comment/CommentBlock）一并排除——阅读呈现对注释整段剥离（#139），
+ *  行扫描若在注释内产边即与「呈现不可见」分叉（反链出现不可见引用、
+ *  rename 触达用户看不见的位置）；live 行扫描对注释内文本的源码装饰
+ *  不受影响（live 呈现源文，注释文字可见） */
 const INLINE_SCAN_CODE_CONTEXTS = new Set([
   'FencedCode',
   'CodeBlock',
@@ -62,6 +66,8 @@ const INLINE_SCAN_CODE_CONTEXTS = new Set([
   'CodeMark',
   'CodeInfo',
   'InlineCode',
+  'Comment',
+  'CommentBlock',
 ])
 
 /** 存在性解析端口：绝对 fsPath → 根内相对规范路径（`/` 分隔、磁盘真实

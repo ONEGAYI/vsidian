@@ -381,18 +381,20 @@ describe('阅读视图：双链渲染为 a.vsidian-wikilink 与单击上报', ()
     expect(texts).toContain('目标笔记#深处的标题')
   })
 
-  it('降级形态按原文显示（源码保真）：嵌入与块引用不是可点击链接', () => {
+  it('降级形态按原文显示（源码保真）；合法嵌入 #246 起升级为流内卡片壳', () => {
     const h = makeBridge()
     const c = mount(h)
     c.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
     const text = readingContainer().textContent ?? ''
-    expect(text).toContain('![[嵌入目标]]')
+    // #246：合法嵌入形态升级为流内宿主（无会话环境保持壳与 loading 文案，
+    // 占位文本退场——装载链路由 embedCard/embedSlots 契约钉住）
+    expect(readingContainer().querySelectorAll('.vsidian-reading-embed-mixed').length).toBe(1)
     expect(text).toContain('[[目标笔记^块]]')
     expect(text).toContain('[[坏#]]')
     expect(text).toContain('[[围栏内不装饰]]')
     // 行内代码内容按 <code> 呈现（反引号是标记被消费），双链不解析
     expect(text).toContain('行内代码 [[不装饰]]')
-    // 全部 a 元素只有 3 个合法双链
+    // 全部 a 元素只有 3 个合法双链（#246 占位是 span，不产嵌套 a）
     expect(readingContainer().querySelectorAll('a').length).toBe(3)
   })
 

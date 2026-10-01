@@ -33,6 +33,7 @@ import { t } from '../shared/i18n'
 import { HOVER_REFRESH_DEFAULTS } from '../shared/hoverRefresh'
 import { REF_EXPANSION_LIMITS, RefExpansionBudget } from '../shared/refExpansion'
 import { RefContentInstance, type RefContentMount, type RefLoadedContent, type RefSourceContext } from './refContentInstance'
+import { promoteEmbedSlotsInBlock, promotedHostsOf } from './embedSlots'
 import { applyObsidianDomAlias } from '../shared/obsidianAlias'
 import { createReadingContainer, READING_CLASS_NAMES } from './readingView'
 import type { ReadingViewStats } from './readingVirtualView'
@@ -79,6 +80,10 @@ export interface EmbedCardContext {
   /** 嵌入限高设置（px；设置页 embed.maxHeight 投影） */
   maxHeightPx(): number
   maxDepth?(): number
+  /** #246 混排占位提升所需的父文档全文（主文档 Reading 块挂载路径注入；
+   *  缺省（无注入）时块内占位保持引用行形态不升级——Live 混排 #247）。
+   *  卡片/浮层内容的混排不经此口（RefContentMount 用装载结果自带全文） */
+  sourceText?(): string | null
   /** #223 Live 挂载的布局通知（view.requestMeasure）：卡片高度异步变动
    *  （内容装载、图片晚到）须唤醒 CM6 视口测量；Reading 侧无需提供 */
   requestMeasure?(): void
@@ -182,15 +187,28 @@ export class EmbedCardManager {
       : null
   }
 
-  /** 父文档块挂载钩子：embed 块（data-vsidian-embed-inner 在场）升级为卡片 */
+  /** 父文档块挂载钩子：embed 块（data-vsidian-embed-inner 在场）升级为卡片；
+   *  #246 混排：块内占位 span（context.sourceText 在场时）提升为流内宿主
+   *  并逐个挂载卡片——同一识别/挂载适配与卡片内容/悬停内容（经
+   *  RefContentMount 的 onEmbedBlockMounted）三处同源 */
   mountBlock(el: HTMLElement): void {
     const inner = el.dataset['vsidianEmbedInner']
-    if (inner === undefined || this.active.has(el)) {
-      return
+    if (inner !== undefined && !this.active.has(el)) {
+      const sourceStart = Number(el.dataset['vsidianSrcStart'] ?? 0)
+      const sourceEnd = Number(el.dataset['vsidianSrcEnd'] ?? sourceStart)
+      this.mountCardInto(el, inner, sourceStart, sourceEnd, 'reading')
     }
-    const sourceStart = Number(el.dataset['vsidianSrcStart'] ?? 0)
-    const sourceEnd = Number(el.dataset['vsidianSrcEnd'] ?? sourceStart)
-    this.mountCardInto(el, inner, sourceStart, sourceEnd, 'reading')
+    const text = this.context.sourceText?.()
+    if (text !== undefined && text !== null) {
+      const start = Number(el.dataset['vsidianSrcStart'])
+      const end = Number(el.dataset['vsidianSrcEnd'])
+      if (Number.isInteger(start) && Number.isInteger(end) && end >= start) {
+        for (const host of promoteEmbedSlotsInBlock(el, text, start, end)) {
+          this.mountCardInto(host, host.dataset['vsidianEmbedInner']!,
+            Number(host.dataset['vsidianSrcStart']), Number(host.dataset['vsidianSrcEnd']), 'reading')
+        }
+      }
+    }
   }
 
   /**
@@ -394,8 +412,13 @@ export class EmbedCardManager {
   }
 
   /** 宿主卸载钩子（Reading 块卸载 / Live widget destroy）：保存状态、释放
-   *  B 视图与资源管理器（实例状态保留在 entry 状态库） */
+   *  B 视图与资源管理器（实例状态保留在 entry 状态库）。#246 混排宿主
+   *  （块内提升产物）随所属块卸载——先于块根处理（宿主走同一 active
+   *  配对路径，重复调用幂等） */
   unmountBlock(el: HTMLElement): void {
+    for (const host of promotedHostsOf(el)) {
+      this.unmountBlock(host)
+    }
     const handle = this.active.get(el)
     if (!handle) {
       return
