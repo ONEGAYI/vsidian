@@ -238,6 +238,9 @@ export interface VaultIndexServiceOptions {
   verifyFocusRegainMinGapMs?: number
   /** 初始排除模式（activate 从持久化读入；缺省不排除） */
   excludePatterns?: readonly string[]
+  /** 文档是否打开（宿主 textDocuments 在场探测）；缺省视为在场（不启用
+   *  关闭残渣兜底——node 单测无宿主文档概念，行为与历史一致） */
+  isDocOpen?: (fsPath: string) => boolean
 }
 
 const ADAPTIVE_SHARDS: readonly { maxFiles: number; shards: number }[] = [
@@ -1096,6 +1099,9 @@ export class VaultIndexService {
    * 驱动，调用方须确认同文档无其他打开面板）：未保存内容随面板关闭丢弃
    * ——unsaved 全文、防抖计时器与覆盖层边一并退场，反链查询回到磁盘
    * 基线（内存索引是可重建缓存，磁盘为事实源）。不触发重扫（磁盘未变）。
+   * 另一调用方为 rename 通道收尾（#256，retireLoadedDocs）：不做面板
+   * 检查——面板持有者已在调用前按编辑器标签豁免，退役对象是无标签的
+   * 通道改写产物（装载文档/已落盘引用者），退役即归基线，幂等无害。
    */
   documentClosed(fsPath: string): void {
     const state = this.rootOf(fsPath)
@@ -1118,6 +1124,22 @@ export class VaultIndexService {
   }
 
   // ---- watcher / 增量队列 ----
+
+  /** 未保存暂存与覆盖层条目的退役（#256 回流收敛/残渣兜底共用体）：去抖
+   *  定时器、暂存全文、登记时间与覆盖层边一并退场。键域与登记同源：
+   *  unsaved* 用 normKey 绝对域、overlay 用根内相对 rel。不重扫、不通知
+   *  （调用方语义各自负责：重扫路径随后自会重建基线/发布变更）。 */
+  private retireUnsavedEntry(state: RootIndexState, fsPath: string, rel: string): void {
+    const key = this.normKey(fsPath)
+    const timer = state.unsavedTimers.get(key)
+    if (timer !== undefined) {
+      clearTimeout(timer)
+      state.unsavedTimers.delete(key)
+    }
+    state.unsaved.delete(key)
+    state.unsavedSince.delete(key)
+    state.overlay.clear(rel)
+  }
 
   private onWatchEvent(state: RootIndexState, fsPath: string | null): void {
     if (!fsPath) {
@@ -1225,7 +1247,13 @@ export class VaultIndexService {
     }
     const access = await this.scan.accessOf(fsPath)
     if (access === 'missing') {
-      // 删除：移除基线（未保存覆盖层保留——编辑器内未保存内容仍接管查询）
+      // 删除：移除基线。未保存覆盖层——文档仍打开时保留（编辑器内未保存
+      // 内容仍接管查询）；文档已不在场时必为残渣（#256 review 轮：外部
+      // 删除与关闭残渣并存时，幽灵边不得继续贡献反链），同款兜底退役——
+      // 先于 removeBaselineEntry 执行（其 notify 触发时覆盖层已到终态）
+      if (this.opts.isDocOpen !== undefined && !this.opts.isDocOpen(fsPath)) {
+        this.retireUnsavedEntry(state, fsPath, rel)
+      }
       this.removeBaselineEntry(state, rel)
       this.publishTargetChange(state, rel, 'deleted', null)
       return
@@ -1249,6 +1277,19 @@ export class VaultIndexService {
       return
     }
     const text = normalizeLf(raw)
+    // 外部变更回流收敛（#256）：「未保存」暂存若与磁盘文本一致（外部工具把
+    // 盘面写成 buffer 同款——writeFile/外部保存经宿主回流登记的暂存），覆盖
+    // 层使命已结束（基线即真相），此时退役——否则回流时刻早于目标文件归位
+    // 基线的话，覆盖层会持有断链边并无事件可退役（外部写无保存/关闭事件），
+    // 永久遮蔽已自愈的基线。盘≠暂存（真实未保存编辑）不动，覆盖层继续接管。
+    // 关闭残渣兜底（同票）：文档已不在宿主 textDocuments 时覆盖层同样退役——
+    // 覆盖层的存在前提是「文档打开且有未保存内容」，文档不在则必为残渣
+    // （onDidCloseTextDocument 漏触发时的兜底退役路径）
+    const pendingUnsaved = state.unsaved.get(this.normKey(fsPath))
+    const docAbsent = this.opts.isDocOpen !== undefined && !this.opts.isDocOpen(fsPath)
+    if (docAbsent || (pendingUnsaved !== undefined && normalizeLf(pendingUnsaved.text) === text)) {
+      this.retireUnsavedEntry(state, fsPath, rel)
+    }
     const prevEntry = state.model.files.get(rel)
     const edges = extractVaultEdges(rel, text, {
       docDir: this.dirname(fsPath),
@@ -1493,6 +1534,21 @@ export class VaultIndexService {
       incoming: [...incoming.entries()].map(([fsPath, edges]) => ({ fsPath, edges })),
       outgoing,
     }
+  }
+
+  /**
+   * 覆盖层条目只读视图（测试钩子观测口，`VSIDIAN_TEST_HOOKS` 门控命令
+   * 消费）：返回该文档覆盖层边的 resolvedTarget 列表（断链为 null）；
+   * 无条目返回 undefined。不触发任何状态变化。
+   */
+  overlayEdgesOf(fsPath: string): Array<string | null> | undefined {
+    const state = this.rootOf(fsPath)
+    if (!state) {
+      return undefined
+    }
+    const rel = this.relOf(state, fsPath)
+    const entry = rel === null ? undefined : state.overlay.get(rel)
+    return entry ? entry.edges.map((e) => e.resolvedTarget) : undefined
   }
 
   /**

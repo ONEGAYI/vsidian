@@ -1,4 +1,4 @@
-"""Build the 37 light/dark quick-action icons from raster AI sheets plus Pen draws.
+"""Build the light/dark quick-action icons from raster AI sheets plus Pen draws.
 
 Run: python scripts/quick-action-icons.py
 Requires Pillow and the VTracer CLI (`vtracer` on PATH). SVG paths are traced
@@ -29,6 +29,7 @@ AI_ICON_SOURCES: tuple[tuple[Path, tuple[str, ...]], ...] = (
     (ASSETS / "find-panel-source.png", (
         "findPrev", "findNext", "findClose", "replaceOne", "replaceAll", "findInSelection",
     )),
+    (ASSETS / "settings-sections-source.png", ("typewriter", "wordSegment")),
 )
 KEYS = (
     "bold", "italic", "strikethrough", "inlineCode", "heading",
@@ -40,6 +41,7 @@ KEYS = (
     "pastePlain", "media", "footnote", "callout",
     "findPrev", "findNext", "findClose", "replaceOne", "replaceAll", "findInSelection",
     "chevronRight",
+    "typewriter", "wordSegment",
 )
 COLORS = {"light": (54, 60, 70), "dark": (210, 218, 229)}
 CELL = 96

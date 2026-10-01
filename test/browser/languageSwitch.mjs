@@ -9,10 +9,10 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build, artifactPath, chromium } from './runtime.mjs'
+import { buildSettingsMain } from './settingsBundle.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
-const output = artifactPath(root, 'settings/main.js')
-await build({ entryPoints: [path.join(root, 'src/webview/settingsMain.ts')], bundle: true, outfile: output, format: 'iife' })
+const output = await buildSettingsMain(root)
 // 字典单独构建为 Node 可 import 的 ESM：测试从同一事实源取词条做期望值
 const dictOut = artifactPath(root, 'languageSwitchLocales.mjs')
 await build({ entryPoints: [path.join(root, 'src/shared/locales/index.ts')], bundle: true, outfile: dictOut, format: 'esm' })

@@ -106,6 +106,17 @@ interface PendingRenameBatch {
   dirtyRefs: string[]
   /** 被移动文档出链（did 阶段按新路径文本统一规划） */
   outgoing: PendingMovedOutgoing[]
+  /** will 阶段装载取文本的文档（did 收尾退役覆盖层，见 textOf） */
+  loadedDocs: string[]
+  /** will 阶段经 docsByKey 读文本的引用者（装载与面板打开混合、will 时刻
+   *  原则上全非 dirty——dirty 者已分流 dirtyRefs；URI 大小写漂移的窄径
+   *  除外：open 查找 miss 不经分流，由装载收集的 isDirty 防御与收尾的
+   *  标签豁免双网兜住）。装载子集 will edit 随宿主落盘（覆盖层=盘面，退役
+   *  即归基线）；面板子集只改 buffer 转脏不落盘（覆盖层=buffer 现状，
+   *  did 收尾按「编辑器标签仍持有」豁免，见 retireLoadedDocs）。无 tab
+   *  的缓存实例惰性重载不广播事件、onDidClose 不触发，覆盖层无退场路径
+   *  （#256）——did 时刻无标签者照退 */
+  rewrittenDocs: string[]
 }
 const pendingBatches = new Map<string, PendingRenameBatch>()
 const PENDING_BATCH_LIMIT = 8
@@ -135,8 +146,16 @@ function normalizeLf(text: string): string {
   return text.includes('\r') ? text.replace(/\r\n?/g, '\n') : text
 }
 
-/** 文档当前文本：已打开优先（含未保存内容），否则装载磁盘文本 */
-async function textOf(uri: vscode.Uri): Promise<{ host: string; lf: string } | null> {
+/** 文档当前文本：已打开优先（含未保存内容），否则装载磁盘文本。
+ *  装载态文档（openTextDocument 只装载不显示）经 loadedDocs 登记——它没有
+ *  编辑器标签，后续 will/did 的 applyEdit 改写会经 onDidChangeTextDocument
+ *  登记索引覆盖层，而 onDidCloseTextDocument 对装载文档永不触发（无标签
+ *  可关），覆盖层边会永久滞留遮蔽基线（#256 幽灵反链）——did 收尾按清单
+ *  统一退役（谁装载谁回收）。 */
+async function textOf(
+  uri: vscode.Uri,
+  loadedDocs?: string[],
+): Promise<{ host: string; lf: string } | null> {
   const open = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri.toString())
   let doc = open ?? null
   if (!doc) {
@@ -144,6 +163,12 @@ async function textOf(uri: vscode.Uri): Promise<{ host: string; lf: string } | n
       doc = await vscode.workspace.openTextDocument(uri)
     } catch {
       return null
+    }
+    // isDirty 防御（#256 review 轮）：URI 大小写漂移时 open 查找 miss、
+    // openTextDocument 返回的是已打开的 dirty 实例——真实未保存内容不得进
+    // 退役清单；正常装载是磁盘态（非 dirty），不受影响
+    if (!doc.isDirty) {
+      loadedDocs?.push(doc.uri.fsPath)
     }
   }
   const host = doc.getText()
@@ -233,6 +258,15 @@ export function installRenameRefUpdater(
   if (process.env.VSIDIAN_TEST_HOOKS === '1') {
     subs.push(
       vscode.commands.registerCommand('onegayi.vsidian._test.getRenameRefLog', () => getRenameRefLog()),
+      vscode.commands.registerCommand('onegayi.vsidian._test.getRenameCandidates', (fsPath: string) => {
+        const c = vaultIndex.renameCandidatesOf(fsPath)
+        return {
+          status: c.status,
+          incomingFsPaths: c.incoming.map((g) => g.fsPath),
+        }
+      }),
+      vscode.commands.registerCommand('onegayi.vsidian._test.getRenameOverlay', (fsPath: string) =>
+        vaultIndex.overlayEdgesOf(fsPath)),
     )
   }
   return subs
@@ -281,6 +315,8 @@ async function buildWillRenameEdit(
   const docsByKey = new Map<string, RenameDocInput & { hostText: string }>()
   const dirtyRefs: string[] = []
   const outgoingStash: PendingMovedOutgoing[] = []
+  const loadedDocs: string[] = []
+  const rewrittenDocs: string[] = []
   let hasCandidates = false
 
   for (const move of moves) {
@@ -333,7 +369,7 @@ async function buildWillRenameEdit(
         dirtyRefs.push(normKeyOf(group.fsPath))
         continue
       }
-      const text = await textOf(uri)
+      const text = await textOf(uri, loadedDocs)
       if (text === null) {
         log.skipped.push({ fsPath: group.fsPath, reason: 'edge-stale' })
         continue
@@ -345,6 +381,7 @@ async function buildWillRenameEdit(
         edgeRootFsPath: candidates.rootFsPath!,
         hostText: text.host,
       })
+      rewrittenDocs.push(group.fsPath)
     }
   }
 
@@ -365,10 +402,18 @@ async function buildWillRenameEdit(
     log.skipped.push(...plan.skipped.map((s) => ({ fsPath: s.fsPath, reason: s.reason })))
   }
   // 暂存至 did：rename 实际发生后合并出链与 dirty 引用者部分，统一落日志
-  // 与通知（will 后用户取消 rename 时 did 不到来，暂存悬挂由上限淘汰）
+  // 与通知（will 后用户取消 rename 时 did 不到来，暂存悬挂由上限淘汰）。
+  // loadedDocs 计入暂存条件：装载清单须随批次到 did 才能退役覆盖层
   if (log.plannedEdits > 0 || log.skipped.length > 0 || log.indexNotReady > 0 ||
-    dirtyRefs.length > 0 || outgoingStash.length > 0) {
-    stashBatch(batchKeyOf(files), { log: { ...log, moves: rawMoves }, expandedMoves: moves, dirtyRefs, outgoing: outgoingStash })
+    dirtyRefs.length > 0 || outgoingStash.length > 0 || loadedDocs.length > 0) {
+    stashBatch(batchKeyOf(files), {
+      log: { ...log, moves: rawMoves },
+      expandedMoves: moves,
+      dirtyRefs,
+      outgoing: outgoingStash,
+      loadedDocs,
+      rewrittenDocs,
+    })
   }
   return edit
 }
@@ -387,6 +432,12 @@ async function applyAfterRenameBatch(
   const key = batchKeyOf(files)
   const pending = pendingBatches.get(key)
   pendingBatches.delete(key)
+
+  /** did 出链通道触达的文档（open 装载混合——did applyEdit 改写它们，收尾
+   *  退役覆盖层归基线；dirtyRefs 段的叠加改写是真实未保存内容，不在此列
+   *  ——但该段装载取盘文本的窄路径（will 后关闭丢弃 dirty）会收集，
+   *  收尾与出链清单一并退役，#256 入口一不在窄路径复活） */
+  const didRewrittenDocs: string[] = []
   const rootFsPaths = vscode.workspace.workspaceFolders?.map((f) => f.uri.fsPath) ?? []
 
   // 索引批量刷新（整批一次）：优先用 will 暂存的展开映射；无暂底时就地
@@ -407,111 +458,163 @@ async function applyAfterRenameBatch(
   const log = pending.log
   const dirtyRefs = pending.dirtyRefs
 
-  // 被移动 Markdown 自身的出链：用 will 暂存的旧目录解析边规划（rename
-  // 已完成，新路径存在，applyEdit 安全）；文本取 did 时刻新路径内容（与
-  // rename 前一致，窗口内被改则区间验证按 stale 跳过）。整批一次规划、
-  // 一次 applyEdit（同文档多目标/多文档同批各一个撤销单元）
-  if (pending.outgoing.length > 0) {
-    const docs: RenameDocInput[] = []
-    const hostTexts = new Map<string, string>()
-    for (const item of pending.outgoing) {
-      const text = await textOf(vscode.Uri.file(item.newFsPath))
-      if (text === null) {
-        log.skipped.push({ fsPath: item.newFsPath, reason: 'edge-stale' })
-        continue
-      }
-      docs.push({
-        fsPath: item.newFsPath,
-        text: text.lf,
-        edges: item.edges,
-        edgeRootFsPath: item.edgeRootFsPath,
-      })
-      hostTexts.set(item.newFsPath, text.host)
-    }
-    if (docs.length > 0) {
-      const plan = planVaultRenameRewrites({ rootFsPaths, isWindowsHost, moves: expandedMoves }, docs)
-      if (plan.docs.length > 0) {
-        const edit = new vscode.WorkspaceEdit()
-        for (const docPlan of plan.docs) {
-          fillEdit(edit, docPlan, hostTexts)
-        }
-        const applied = await vscode.workspace.applyEdit(edit)
-        if (applied) {
-          log.plannedEdits += plan.docs.reduce((sum, d) => sum + d.edits.length, 0)
-          log.plannedFiles += plan.docs.length
-        }
-      }
-      log.skipped.push(...plan.skipped.map((s) => ({ fsPath: s.fsPath, reason: s.reason })))
-    }
-  }
-
-  // dirty 引用者的延迟改写：did 时刻基于当前 buffer（含未保存内容）重新
-  // 规划——常规 applyEdit 对 dirty 文档按 buffer 叠加（不回滚未保存内容）。
-  // 边数据查旧路径桶（refreshRenamedBatch 移除的是被移动文件自身条目，
-  // 引用者边仍按旧目标聚合可查）；整批合并一次规划、一次 applyEdit
-  if (dirtyRefs.length > 0) {
-    const docsByKey = new Map<string, RenameDocInput & { hostText: string }>()
-    for (const move of expandedMoves) {
-      const candidates = vaultIndex.renameCandidatesOf(move.oldFsPath)
-      if (candidates.status !== 'ready') {
-        continue
-      }
-      for (const group of candidates.incoming) {
-        if (!dirtyRefs.includes(normKeyOf(group.fsPath))) {
-          continue
-        }
-        const mergeKey = `${normKeyOf(group.fsPath)}@${normKeyOf(candidates.rootFsPath!)}`
-        const merged = docsByKey.get(mergeKey)
-        if (merged) {
-          merged.edges = [...merged.edges, ...group.edges]
-          continue
-        }
-        const text = await textOf(vscode.Uri.file(group.fsPath))
+  try {
+    // 被移动 Markdown 自身的出链：用 will 暂存的旧目录解析边规划（rename
+    // 已完成，新路径存在，applyEdit 安全）；文本取 did 时刻新路径内容（与
+    // rename 前一致，窗口内被改则区间验证按 stale 跳过）。整批一次规划、
+    // 一次 applyEdit（同文档多目标/多文档同批各一个撤销单元）
+    if (pending.outgoing.length > 0) {
+      const docs: RenameDocInput[] = []
+      const hostTexts = new Map<string, string>()
+      for (const item of pending.outgoing) {
+        const text = await textOf(vscode.Uri.file(item.newFsPath), didRewrittenDocs)
         if (text === null) {
-          log.skipped.push({ fsPath: group.fsPath, reason: 'edge-stale' })
+          log.skipped.push({ fsPath: item.newFsPath, reason: 'edge-stale' })
           continue
         }
-        docsByKey.set(mergeKey, {
-          fsPath: group.fsPath,
+        docs.push({
+          fsPath: item.newFsPath,
           text: text.lf,
-          edges: [...group.edges],
-          edgeRootFsPath: candidates.rootFsPath!,
-          hostText: text.host,
+          edges: item.edges,
+          edgeRootFsPath: item.edgeRootFsPath,
         })
+        hostTexts.set(item.newFsPath, text.host)
+        didRewrittenDocs.push(item.newFsPath)
+      }
+      if (docs.length > 0) {
+        const plan = planVaultRenameRewrites({ rootFsPaths, isWindowsHost, moves: expandedMoves }, docs)
+        if (plan.docs.length > 0) {
+          const edit = new vscode.WorkspaceEdit()
+          for (const docPlan of plan.docs) {
+            fillEdit(edit, docPlan, hostTexts)
+          }
+          const applied = await vscode.workspace.applyEdit(edit)
+          if (applied) {
+            log.plannedEdits += plan.docs.reduce((sum, d) => sum + d.edits.length, 0)
+            log.plannedFiles += plan.docs.length
+          }
+        }
+        log.skipped.push(...plan.skipped.map((s) => ({ fsPath: s.fsPath, reason: s.reason })))
       }
     }
-    if (docsByKey.size > 0) {
-      const docs = [...docsByKey.values()].map(({ hostText, ...doc }) => {
-        void hostText
-        return doc
-      })
-      const hostTexts = new Map<string, string>(
-        [...docsByKey.values()].map((d) => [d.fsPath, d.hostText]),
-      )
-      const plan = planVaultRenameRewrites({ rootFsPaths, isWindowsHost, moves: expandedMoves }, docs)
-      if (plan.docs.length > 0) {
-        const dirtyEdit = new vscode.WorkspaceEdit()
-        for (const docPlan of plan.docs) {
-          fillEdit(dirtyEdit, docPlan, hostTexts)
-        }
-        const applied = await vscode.workspace.applyEdit(dirtyEdit)
-        if (applied) {
-          log.plannedEdits += plan.docs.reduce((sum, d) => sum + d.edits.length, 0)
-          log.plannedFiles += plan.docs.length
-        }
-      }
-      log.skipped.push(...plan.skipped.map((s) => ({ fsPath: s.fsPath, reason: s.reason })))
-    }
-  }
 
-  // 合并反馈（无候选静默；未更新/部分跳过/已更新三态区分 + 未更新项详情）
-  log.notice = renameNoticeKeyOf(log)
-  if (log.notice !== null || log.plannedEdits > 0) {
-    notifyOf(log)
+    // dirty 引用者的延迟改写：did 时刻基于当前 buffer（含未保存内容）重新
+    // 规划——常规 applyEdit 对 dirty 文档按 buffer 叠加（不回滚未保存内容）。
+    // 边数据查旧路径桶（refreshRenamedBatch 移除的是被移动文件自身条目，
+    // 引用者边仍按旧目标聚合可查）；整批合并一次规划、一次 applyEdit
+    if (dirtyRefs.length > 0) {
+      const docsByKey = new Map<string, RenameDocInput & { hostText: string }>()
+      for (const move of expandedMoves) {
+        const candidates = vaultIndex.renameCandidatesOf(move.oldFsPath)
+        if (candidates.status !== 'ready') {
+          continue
+        }
+        for (const group of candidates.incoming) {
+          if (!dirtyRefs.includes(normKeyOf(group.fsPath))) {
+            continue
+          }
+          const mergeKey = `${normKeyOf(group.fsPath)}@${normKeyOf(candidates.rootFsPath!)}`
+          const merged = docsByKey.get(mergeKey)
+          if (merged) {
+            merged.edges = [...merged.edges, ...group.edges]
+            continue
+          }
+          const text = await textOf(vscode.Uri.file(group.fsPath), didRewrittenDocs)
+          if (text === null) {
+            log.skipped.push({ fsPath: group.fsPath, reason: 'edge-stale' })
+            continue
+          }
+          docsByKey.set(mergeKey, {
+            fsPath: group.fsPath,
+            text: text.lf,
+            edges: [...group.edges],
+            edgeRootFsPath: candidates.rootFsPath!,
+            hostText: text.host,
+          })
+        }
+      }
+      if (docsByKey.size > 0) {
+        const docs = [...docsByKey.values()].map(({ hostText, ...doc }) => {
+          void hostText
+          return doc
+        })
+        const hostTexts = new Map<string, string>(
+          [...docsByKey.values()].map((d) => [d.fsPath, d.hostText]),
+        )
+        const plan = planVaultRenameRewrites({ rootFsPaths, isWindowsHost, moves: expandedMoves }, docs)
+        if (plan.docs.length > 0) {
+          const dirtyEdit = new vscode.WorkspaceEdit()
+          for (const docPlan of plan.docs) {
+            fillEdit(dirtyEdit, docPlan, hostTexts)
+          }
+          const applied = await vscode.workspace.applyEdit(dirtyEdit)
+          if (applied) {
+            log.plannedEdits += plan.docs.reduce((sum, d) => sum + d.edits.length, 0)
+            log.plannedFiles += plan.docs.length
+          }
+        }
+        log.skipped.push(...plan.skipped.map((s) => ({ fsPath: s.fsPath, reason: s.reason })))
+      }
+    }
+
+    // 合并反馈（无候选静默；未更新/部分跳过/已更新三态区分 + 未更新项详情）
+    log.notice = renameNoticeKeyOf(log)
+    if (log.notice !== null || log.plannedEdits > 0) {
+      notifyOf(log)
+    }
+    if (log.plannedEdits > 0 || log.skipped.length > 0 || log.indexNotReady > 0 || log.cancelled) {
+      pushRenameLog(log)
+    }
+  } finally {
+    // 覆盖层回收（#256）：本批 will/did 触达并改写的文档（装载清单 + 引用者
+    // rewrittenDocs + did 出链清单），其文本变更（will edit / did applyEdit，
+    // 含宿主 bulk edit 的短暂 dirty 态）已登记覆盖层，而无 tab 的缓存文档
+    // 实例没有退场事件（onDidCloseTextDocument 永不触发、惰性重载不广播）
+    // ——不退役会永久遮蔽基线（外部还原后反链/rename 候选读到幽灵边）。
+    // did 时刻仍被编辑器标签持有者豁免（retireLoadedDocs：活 buffer 的未
+    // 保存内容是合法接管）；其余退役即归基线（documentSaved 同款语义）。
+    // finally 内执行（#256 review 轮）：通道中途异常（IO/applyEdit 拒绝）
+    // 不丢退役
+    retireLoadedDocs(vaultIndex, [...pending.loadedDocs, ...pending.rewrittenDocs, ...didRewrittenDocs])
   }
-  if (log.plannedEdits > 0 || log.skipped.length > 0 || log.indexNotReady > 0 || log.cancelled) {
-    pushRenameLog(log)
+}
+
+/** rename 通道触达文档的索引覆盖层退役（谁改写谁回收，见 textOf 注释）。
+ *  豁免（#256 review 轮）：did 收尾时刻仍被编辑器标签持有的文档不退役——
+ *  面板打开的引用者经 will edit 改写后只转 buffer 脏不落盘，其覆盖层=
+ *  buffer 现状是合法接管（#199「未保存内容即时反映」），退役会使索引回落
+ *  旧盘面基线，连续 rename（对新目标再 rename）将静默漏发现该引用者。
+ *  豁免者的退场走正常文档生命周期：面板关闭（provider onDidClose）→ 保存
+ *  （documentSaved）→ isDocOpen 兜底（标签关闭后残渣随重扫退役）。 */
+function retireLoadedDocs(vaultIndex: VaultIndexService, fsPaths: readonly string[]): void {
+  for (const fsPath of fsPaths) {
+    if (isTabHeld(fsPath)) {
+      continue
+    }
+    vaultIndex.documentClosed(fsPath)
   }
+}
+
+/** did 收尾时刻该文档是否仍被任一编辑器标签持有（Vsidian 面板、普通文本
+ *  编辑器或 diff 视图——用户可见编辑中的活 buffer 都不算通道残渣）；装载
+ *  文档无标签，恒不持有。比较用 normKeyOf 归一（Windows 大小写+分隔符，
+ *  与清单内路径同一归一体系）。 */
+function isTabHeld(fsPath: string): boolean {
+  const key = normKeyOf(fsPath)
+  for (const group of vscode.window.tabGroups.all) {
+    for (const tab of group.tabs) {
+      const input = tab.input as
+        | { uri?: vscode.Uri; modified?: vscode.Uri; original?: vscode.Uri }
+        | undefined
+      const uris = input ? [input.uri, input.modified, input.original] : []
+      for (const uri of uris) {
+        if (uri && uri.scheme === 'file' && normKeyOf(uri.fsPath) === key) {
+          return true
+        }
+      }
+    }
+  }
+  return false
 }
 
 /** 跳过原因的文案键（通知详情用） */

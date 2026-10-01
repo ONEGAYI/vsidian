@@ -11076,6 +11076,25 @@ export const cases: Array<[string, () => Promise<void>]> = [
       const root = s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir))
       return root && root.hasData && !root.scanning ? true : undefined
     })
+    // 面板引用者的覆盖层接管回归钉（#256 review 轮）：引用甲（面板打开）
+    // 经 will 改写后只转 buffer 脏不落盘，其覆盖层=buffer 现状是合法接管
+    // （#199「未保存内容即时反映」）——did 收尾不得把该覆盖层当残渣退役。
+    // 观测口直读覆盖层 resolved 边（须持新目标好边）；不断言
+    // renameCandidatesOf 的 incoming——其反链桶按基线边聚合，rename 后的
+    // 新目标在依赖者重抽前恒无桶（「目标归位重抽依赖者」已知边界，另票）
+    await poll('rename 后面板引用者覆盖层持新目标边', async () => {
+      const edges = (await vscode.commands.executeCommand(
+        'onegayi.vsidian._test.getRenameOverlay', wsUri('rename-ref-a.md').fsPath,
+      )) as string[] | undefined
+      return edges && edges.some((e) => e === '改名目标2.md' || e.endsWith('/改名目标2.md'))
+        ? edges
+        : undefined
+    }).catch(async (err) => {
+      const edges = await vscode.commands.executeCommand(
+        'onegayi.vsidian._test.getRenameOverlay', wsUri('rename-ref-a.md').fsPath,
+      )
+      throw new Error(`${(err as Error).message}；overlay实况=${JSON.stringify(edges)}`)
+    })
     // 撤销一步恢复：rename 与改写 edit 是同一撤销单元（undo 一次全部回退）
     await vscode.commands.executeCommand('undo')
     await poll('撤销恢复引用甲', async () => {
@@ -11260,6 +11279,53 @@ export const cases: Array<[string, () => Promise<void>]> = [
         const second = s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(secondDir))
         return second?.hasData ? true : undefined
       }, 30000)
+      // 等主根「改名目标.md 的引用边」自愈完成（#256）：waitRenameIndexReady 只等
+      // hasData && !scanning——观测不到前序用例残留的自愈进度。漂移用例把索引边
+      // 挪到改名目标3.md 桶后经外部 fs 通道还原，watcher 增量重扫异步恢复；加根的
+      // setRoots 又会中止在途增量改走 fullScan，而「第二根纳入」的满足点恰早于主根
+      // fullScan——不在此等边恢复，跨根 rename 的 will 会读到 incoming 缺失（改名
+      // 目标.md 桶 0~1 条引用者），暂存缺失或 skipped<2，「跨根跳过上报」必然超时
+      // （单宿主全量稳定复现、四分片因用例分属不同宿主而被掩盖）。等两个基线引用
+      // 者都在场即视自愈完成（rename-moved.md 同为引用者但不在断言语义内）。
+      // 缺席自愈（节流）：前序用例可把引用甲的面板以 dirty 态遗留（will edit 对
+      // 打开文档只作用 buffer 不落盘），closeAllEditors 丢弃 dirty 不广播回滚、
+      // 文档实例滞留缓存无退场事件——其「未保存」覆盖层残渣遮蔽基线。自愈动作=
+      // 打开并保存（save 落盘触发 onDidSaveTextDocument → 覆盖层随 documentSaved
+      // 退役+重扫）再外部写回原文（watcher 重扫、基线归位）——全走产品正道事件
+      let healKick = 0
+      await poll('跨根 rename 前索引边自愈', async () => {
+        const c = (await vscode.commands.executeCommand(
+          'onegayi.vsidian._test.getRenameCandidates', wsUri('改名目标.md').fsPath,
+        )) as { status: string; incomingFsPaths: string[] } | undefined
+        const aIn = c?.incomingFsPaths.some((p) => normFsPath(p) === normFsPath(wsUri('rename-ref-a.md').fsPath))
+        const bIn = c?.incomingFsPaths.some((p) => normFsPath(p) === normFsPath(wsUri('notes/rename-ref-b.md').fsPath))
+        if (c?.status === 'ready' && aIn && bIn) {
+          return true
+        }
+        if (c?.status === 'ready' && healKick++ % 6 === 0) {
+          const targets: Array<[vscode.Uri, string]> = []
+          if (!aIn) {
+            targets.push([wsUri('rename-ref-a.md'), RENAME_REF_A_DOC_TEXT])
+          }
+          if (!bIn) {
+            targets.push([wsUri('notes/rename-ref-b.md'), RENAME_REF_B_DOC_TEXT])
+          }
+          for (const [uri, text] of targets) {
+            const doc = await vscode.workspace.openTextDocument(uri)
+            await Promise.resolve(doc.save()).catch(() => {})
+            await Promise.resolve(vscode.workspace.fs.writeFile(uri, Buffer.from(text, 'utf8'))).catch(() => {})
+          }
+        }
+        return undefined
+      }).catch(async (err) => {
+        const c = (await vscode.commands.executeCommand(
+          'onegayi.vsidian._test.getRenameCandidates', wsUri('改名目标.md').fsPath,
+        )) as { status: string; incomingFsPaths: string[] } | undefined
+        const s = (await vscode.commands.executeCommand('onegayi.vsidian._test.getVaultIndexState')) as {
+          roots: Array<{ fsPath: string; hasData: boolean; scanning: boolean; queued: number; fileCount: number; edgeCount: number }>
+        }
+        throw new Error(`${(err as Error).message}；candidates实况=${JSON.stringify(c)}；主根实况=${JSON.stringify(s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir)))}`)
+      })
       // 跨根移动：改名目标.md → 第二根（跨根移动不被拦截，但不得生成跨根引用）
       const edit = new vscode.WorkspaceEdit()
       edit.renameFile(wsUri('改名目标.md'), vscode.Uri.file(`${secondDir}/改名目标.md`), { overwrite: false })

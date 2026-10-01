@@ -297,8 +297,9 @@ export const IMAGE_PASTE_SUBPATH_MAX_LENGTH = 200
  * #239「分词引擎」：Ctrl+Left/Right 词级移动对连续中文段的切分引擎。
  * builtin = Intl.Segmenter（granularity 'word'，浏览器内置零体积，默认）；
  * jieba = jieba-wasm（资源经公共 CDN 按需下载到 globalStorage，锁定版本
- * + sha256 校验，失败或离线回退 builtin 并明确提示）。设置页呈现归
- * 「中文分词」附加分页（wordSegmentSettings），编辑器页小节排除该前缀。
+ * + sha256 校验，失败或离线回退 builtin 并明确提示）。设置页呈现归编辑
+ * 器页「中文分词」委托组（#264 起为编辑器页尾二级组，wordSegmentSettings），
+ * 标准设置行呈现排除该前缀。
  */
 export const WORD_SEGMENT_ENGINE_KEY = 'editor.wordSegmentEngine'
 export const WORD_SEGMENT_ENGINE_MODES = ['builtin', 'jieba'] as const
@@ -499,10 +500,10 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     titleKey: 'setting.hoverLiveDirect.title',
     descriptionKey: 'setting.hoverLiveDirect.description',
   },
-  // #239 中文分词三件（引擎/下载源/自定义基址）：设置页呈现归「中文
-  // 分词」附加分页（wordSegmentSettings 同页渲染选择与下载管理），
-  // 编辑器页与搜索内建分组按 editor.wordSegment 前缀排除（见
-  // settingsPageView 的 editorDefs）
+  // #239 中文分词三件（引擎/下载源/自定义基址）：设置页呈现归编辑器页
+  // 「中文分词」委托组（#264 起为编辑器页尾二级组，wordSegmentSettings
+  // 同组渲染选择与下载管理），标准设置行与搜索内建分组按 editor.wordSegment
+  // 前缀排除防重复呈现（见 settingsPageView 的 editorDefs）
   {
     key: WORD_SEGMENT_ENGINE_KEY,
     type: 'string',

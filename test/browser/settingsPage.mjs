@@ -5,11 +5,11 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { mkdir } from 'node:fs/promises'
-import { build, artifactPath, chromium } from './runtime.mjs'
+import { artifactPath, chromium } from './runtime.mjs'
 import { buildZhLocaleIsland } from './localeIsland.mjs'
+import { buildSettingsMain } from './settingsBundle.mjs'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
-const output = artifactPath(root, 'settings/main.js')
-await build({ entryPoints: [path.join(root, 'src/webview/settingsMain.ts')], bundle: true, outfile: output, format: 'iife' })
+const output = await buildSettingsMain(root)
 const artifacts = artifactPath(root, 'screenshots/settingsPage')
 await mkdir(artifacts, { recursive: true })
 // 数据岛与宿主生成点同源；zhCn 为断言取词别名
@@ -20,7 +20,7 @@ try {
     const page = await browser.newPage({ viewport: { width: 1100, height: 720 } })
     const errors = []
     page.on('pageerror', (err) => errors.push(err.message))
-    await page.setContent(`<html lang="zh-CN"><body>${islandHtml}<div id="app"></div></body></html>`)
+    await page.setContent(`<html lang="zh-CN"><body class="${theme === 'dark' ? 'vscode-dark' : ''}">${islandHtml}<div id="app"></div></body></html>`)
     const palette = theme === 'light' ? ['#ffffff','#30343b','#f5f6f8','#59616d','#e0e4eb','#26313e','#ffffff','#d7dce3'] : ['#1e1e1e','#dddddd','#252526','#aaaaaa','#373d49','#ffffff','#313136','#474750']
     await page.addStyleTag({ content: `:root { --vscode-font-family: "Segoe UI", "Microsoft YaHei", sans-serif; --vscode-editor-background:${palette[0]}; --vscode-editor-foreground:${palette[1]}; --vscode-sideBar-background:${palette[2]}; --vscode-descriptionForeground:${palette[3]}; --vscode-list-activeSelectionBackground:${palette[4]}; --vscode-list-activeSelectionForeground:${palette[5]}; --vscode-input-background:${palette[6]}; --vscode-input-foreground:${palette[1]}; --vscode-panel-border:${palette[7]}; --vscode-focusBorder:#2687d4; }` })
     await page.addStyleTag({ path: output.replace(/\.js$/, '.css') })
@@ -84,6 +84,85 @@ try {
     // #163 二轮还原：分类收敛为编辑器页内小节——codeblock.* 控件在
     // 「编辑器」分组页的「代码块」小节内，先进组再取控件
     await page.getByRole('button', { name: zhCn['settings.editorCategory'], exact: true }).click()
+    // #263/#265/#264 组标题图标：四枚内联字形 + 打字机/分词两枚生图资产，
+    // 六组均占 16px（委托组经组对象 icon 槽走同一 h3 路径）。
+    const iconPaint = await page.evaluate(() => {
+      const textStart = (h3) => {
+        for (const node of h3.childNodes) {
+          if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) {
+            const range = document.createRange()
+            range.selectNodeContents(node)
+            return range.getBoundingClientRect().left
+          }
+        }
+        return NaN
+      }
+      return [...document.querySelectorAll('.vsidian-settings-group-title')].map((h3) => {
+        const box = h3.getBoundingClientRect()
+        const svg = h3.querySelector('svg')
+        const glyph = svg ?? h3.querySelector('.vsidian-settings-generated-icon')
+        const r = glyph?.getBoundingClientRect()
+        return {
+          icon: !!glyph,
+          generated: !!glyph && glyph !== svg,
+          dataIcon: glyph && glyph !== svg ? glyph.getAttribute('data-icon') : '',
+          width: r?.width ?? 0,
+          height: r?.height ?? 0,
+          iconLeft: r ? r.left - box.left : NaN,
+          textLeft: textStart(h3) - box.left,
+          stroke: svg ? getComputedStyle(svg).stroke : '',
+          fill: svg ? getComputedStyle(svg).fill : '',
+          backgroundImage: glyph ? getComputedStyle(glyph).backgroundImage : '',
+          rowHeight: box.height,
+        }
+      })
+    })
+    const expectedFg = theme === 'light' ? 'rgb(48, 52, 59)' : 'rgb(221, 221, 221)'
+    assert.equal(iconPaint.length, 6, '编辑器页应有六个二级组标题')
+    const withIcon = iconPaint.filter((g) => g.icon)
+    assert.equal(withIcon.length, 6, '编辑器页六组均应有图标（#263 四枚内联字形 + #265 两枚生图资产）')
+    for (const g of withIcon) {
+      assert.equal(g.width, 16, '图标渲染盒应为 16px（绘制层：样式未注入时退默认尺寸即失败）')
+      assert.equal(g.height, 16)
+      assert.equal(Math.round(g.iconLeft), 20, '图标应贴左 padding 缘')
+      assert.equal(Math.round(g.textLeft), 44, '标题文字应右移（20 padding + 16 图标 + 8 gap）')
+      if (!g.generated) {
+        assert.equal(g.stroke, expectedFg, '内联图标描边应随主题前景色（currentColor）')
+        assert.equal(g.fill, 'none')
+      }
+    }
+    assert.equal(iconPaint[2].generated, true, '符号输入组应显示打字机生图资产')
+    assert.equal(iconPaint[2].dataIcon, 'typewriter')
+    assert.match(iconPaint[2].backgroundImage, /data:image\/svg\+xml/u, '打字机 SVG 应由样式真实加载')
+    assert.equal(iconPaint[5].generated, true, '中文分词组（尾组）应显示分词生图资产')
+    assert.equal(iconPaint[5].dataIcon, 'wordSegment')
+    assert.match(iconPaint[5].backgroundImage, /data:image\/svg\+xml/u, '分词 SVG 应由样式真实加载')
+    assert.equal(new Set(iconPaint.map((g) => g.rowHeight)).size, 1, '各组标题行高应一致（图标不撑行）')
+    const countInk = async (png) => page.evaluate(async (base64) => {
+      const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${base64}`)).blob())
+      const canvas = document.createElement('canvas')
+      canvas.width = bitmap.width
+      canvas.height = bitmap.height
+      const context = canvas.getContext('2d')
+      context.drawImage(bitmap, 0, 0)
+      const data = context.getImageData(0, 0, bitmap.width, bitmap.height).data
+      const background = [data[0], data[1], data[2]]
+      let painted = 0
+      for (let at = 0; at < data.length; at += 4) {
+        if ([0, 1, 2].some((channel) => Math.abs(data[at + channel] - background[channel]) > 40)) painted++
+      }
+      return painted
+    }, png.toString('base64'))
+    const typewriterPng = await page.locator(".vsidian-settings-group-title .vsidian-settings-generated-icon[data-icon='typewriter']").screenshot()
+    const typewriterInk = await countInk(typewriterPng)
+    assert.ok(typewriterInk > 5, `打字机在${theme}主题下应真实绘制（命中${typewriterInk}像素）`)
+    // #265 接线：分词二级组（#264）标题已登记 wordSegment 资产，真实组内
+    // 图标直接做主题选择与绘制核验（不再临时挂载探针后移除）。
+    const segment = page.locator(".vsidian-settings-group-title .vsidian-settings-generated-icon[data-icon='wordSegment']")
+    assert.equal(await segment.count(), 1, '分词生图图标应恰为真实组标题上的一枚')
+    assert.match(await segment.evaluate(el => getComputedStyle(el).backgroundImage), /data:image\/svg\+xml/u)
+    const segmentInk = await countInk(await segment.screenshot())
+    assert.ok(segmentInk > 5, `分词图标在${theme}主题下应真实绘制（命中${segmentInk}像素）`)
     const cardBox = page.getByRole('checkbox', { name: zhCn['setting.codeblockCard.title'], exact: true })
     const lineNumbersBox = page.getByRole('checkbox', { name: zhCn['setting.codeblockLineNumbers.title'], exact: true })
     const copyButtonBox = page.getByRole('checkbox', { name: zhCn['setting.codeblockCopyButton.title'], exact: true })
@@ -267,6 +346,52 @@ try {
     assert.equal(calloutPaint.radius, '8px')
     assert.notEqual(calloutPaint.bg, 'rgba(0, 0, 0, 0)', 'callout 应有可辨色底')
     await page.screenshot({ path: path.join(artifacts, `settings-${theme}-css-snippets.png`) })
+    // #264 中文分词并入编辑器页：侧栏五项无分词入口；编辑器页尾二级组
+    //「中文分词」承载引擎/下载源与资源管理（可见性断言落用户看到的东西）
+    assert.deepEqual(await page.locator('.vsidian-settings-nav-item').allInnerTexts(),
+      [zhCn['settings.generalSection'], zhCn['settings.editorCategory'],
+        zhCn['keybindingSettings.title'], zhCn['appearance.title'], zhCn['indexMaintenance.title']],
+      '侧栏应为五项且不再有中文分词入口')
+    await page.getByRole('button', { name: zhCn['settings.editorCategory'], exact: true }).click()
+    const wordsegGroup = page.locator('.vsidian-settings-group').filter({
+      has: page.locator('.vsidian-settings-group-title', { hasText: zhCn['wordSegment.title'] }) })
+    await wordsegGroup.waitFor()
+    assert.equal(await wordsegGroup.count(), 1, '编辑器页应有唯一「中文分词」二级组')
+    assert.equal(await wordsegGroup
+      .locator('input[name="wordseg-editor.wordSegmentEngine"][value="jieba"]').isVisible(), true,
+      '分词组内 jieba 引擎选项应可见')
+    assert.equal(await wordsegGroup.getByRole('button', { name: zhCn['wordSegment.download'] }).isVisible(), true,
+      '分词组内下载按钮应可见')
+    // 兼容路由：宿主按退役分页 id 定位（focusSection wordSegment）打开编辑器
+    // 页分词组，定位块滚入主区可视范围（绘制层：几何落在主区矩形内）
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {
+      data: { kind: 'settings.focusSection', section: 'wordSegment', entry: 'engine' } })))
+    const wordsegLocated = wordsegGroup.locator('.vsidian-wordseg-block.vsidian-settings-item-located')
+    await wordsegLocated.waitFor()
+    assert.equal(await wordsegLocated.evaluate((el) => {
+      const main = document.querySelector('.vsidian-settings-main')
+      const box = el.getBoundingClientRect()
+      const view = main.getBoundingClientRect()
+      return box.top >= view.top && box.bottom <= view.bottom && box.height > 0
+    }), true, '兼容路由定位块应滚动进主区可视范围')
+    // 全局搜索「分词」：分词条目归编辑器分组命中，点击定位到组内对应块
+    await search.focus()
+    await page.keyboard.insertText('分词')
+    const wordsegResult = page.locator('.vsidian-settings-result')
+      .filter({ hasText: zhCn['wordSegment.engineLabel'] })
+    await wordsegResult.waitFor()
+    assert.equal(await wordsegResult.count(), 1, '搜索「分词」应命中分词引擎条目')
+    assert.match(await wordsegResult.innerText(), new RegExp(escapeRegExp(zhCn['settings.editorCategory'])),
+      '分词条目的搜索结果应标注编辑器分组')
+    await wordsegResult.click()
+    const searchLocated = wordsegGroup.locator('.vsidian-wordseg-block.vsidian-settings-item-located')
+    await searchLocated.waitFor()
+    assert.equal(await searchLocated.evaluate((el) => {
+      const main = document.querySelector('.vsidian-settings-main')
+      const box = el.getBoundingClientRect()
+      const view = main.getBoundingClientRect()
+      return box.top >= view.top && box.bottom <= view.bottom
+    }), true, '搜索定位块应滚动进主区可视范围')
     // 切回编辑器分组再走窄屏断言（分页切换会卸载前一分组内容）
     await page.getByRole('button', { name: zhCn['settings.editorCategory'], exact: true }).click()
     await page.setViewportSize({ width: 360, height: 740 })
