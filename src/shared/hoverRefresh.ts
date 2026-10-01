@@ -23,7 +23,7 @@ export const HOVER_REFRESH_DEFAULTS = {
   /** 宿主读取缓存字节上限（LF 全文累计；超出按插入序淘汰——「容量/
    *  内存有界」的字节维度） */
   cacheByteLimit: 2 * 1024 * 1024,
-  /** 订阅注册表目标数上限（全局；按最近触达淘汰整目标） */
+  /** 订阅注册表目标数上限（provider 内跨面板；满额拒绝新目标） */
   watchTargetLimit: 128,
   /** webview 嵌入实例状态库上限（语义键条目；LRU 淘汰）。修 4（review
    *  第二轮）：宿主侧 hoverSourceFsPaths 来源集合上限（documentSession
@@ -56,9 +56,8 @@ export function shouldApplyHoverVersion(applied: number | null, incoming: number
  * 类型无绑定（ADR-0009「实例身份不绑定容器类型」）；「会话」= 面板身份
  * （面板销毁经 releaseSession 一次性释放其全部订阅）。
  *
- * 有界：目标数超上限时按最近触达淘汰整目标（watch/unwatch 命中即触达）
- * ——被淘汰目标的订阅静默失效（后续失效推送不再到达，webview 侧内容
- * 停留最后快照；重开/重挂重新订阅自愈）。
+ * 有界：目标槽满额时拒绝新目标，绝不撤销仍在场的订阅。相同目标的
+ * 跨面板 occurrence 仍共享一个槽；调用方须将拒绝反馈给可见实例。
  */
 export class HoverWatchRegistry {
   /** 归一键 → Map<sessionKey, Set<instanceId>>（Map 插入序 = 触达序） */
@@ -74,13 +73,16 @@ export class HoverWatchRegistry {
     private readonly keyOf: (fsPath: string) => string = (fsPath) => fsPath,
   ) {}
 
+  canWatch(fsPath: string): boolean {
+    return this.table.has(this.keyOf(fsPath)) || this.table.size < this.targetLimit
+  }
+
   /** 登记订阅（幂等：同实例重复登记不虚增计数） */
-  watch(sessionKey: string, fsPath: string, instanceId: string): void {
+  watch(sessionKey: string, fsPath: string, instanceId: string): boolean {
     const key = this.keyOf(fsPath)
-    this.canonical.set(key, fsPath)
     let sessions = this.table.get(key)
     if (!sessions) {
-      this.evictIfNeeded()
+      if (!this.canWatch(fsPath)) return false
       sessions = new Map()
       this.table.set(key, sessions)
     } else {
@@ -88,12 +90,14 @@ export class HoverWatchRegistry {
       this.table.delete(key)
       this.table.set(key, sessions)
     }
+    this.canonical.set(key, fsPath)
     let instances = sessions.get(sessionKey)
     if (!instances) {
       instances = new Set()
       sessions.set(sessionKey, instances)
     }
     instances.add(instanceId)
+    return true
   }
 
   /** 释放单实例订阅；目标内最后一个实例退场时撤目标 */
@@ -189,15 +193,4 @@ export class HoverWatchRegistry {
     }
   }
 
-  /** 超上限淘汰最久未触达目标（整目标连带其全部会话实例） */
-  private evictIfNeeded(): void {
-    while (this.table.size >= this.targetLimit) {
-      const oldest = this.table.keys().next().value
-      if (oldest === undefined) {
-        break
-      }
-      this.table.delete(oldest)
-      this.canonical.delete(oldest)
-    }
-  }
 }

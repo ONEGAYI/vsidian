@@ -1961,20 +1961,23 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "content-limits",
     "kind": "limitation",
     "target": ".markdown-embed / 嵌入结构",
-    "purpose": "嵌入（![[…]]）的部分边界（#222 起独占正文一行的嵌入在 Reading 侧渲染为引用卡片、#223 起在 Live 侧挂载同款卡片并支持光标驱动源码显隐，见 reading-embed-card / live-embed-widget）：混排（行内有其他内容）、列表/引用容器与表格格内的嵌入保留源文（1.5 期接入）；递归展开不提供（一层展开内为占位引用行）；嵌入内容写入不支持。双链残缺形态按原文显示；blockquote 块已支持。",
+    "purpose": "嵌入（![[…]]）的部分边界（#222 起独占正文一行的嵌入在 Reading 侧渲染为引用卡片、#223 起在 Live 侧挂载同款卡片并支持光标驱动源码显隐，见 reading-embed-card / live-embed-widget；#244/#245 起独占行在正文卡片与悬停浮层内递归展开；#246 起 Reading 侧混排（行内有其他内容）与列表/引用容器内的嵌入升级为流内卡片，见 reading-embed-mixed；#247 起 Live 侧混排与列表/引用/任务/懒续行容器内的嵌入同挂卡片、隐藏态只替换嵌入精确区间——前后文/列表标记/任务控件/引用前缀/缩进保留，见 live-embed-widget；#248 起表格格内（表头/数据格，含 \\| 别名等转义形态按格内语义解码——目标/inner 为解码语义、区间为原始源文）双模式同升级为格内卡片）：Live/Reading 链接文字域内保持源文/占位（块级卡片在行内链接域属非法呈现）；嵌入内容写入不支持。双链残缺形态按原文显示；blockquote 块已支持。",
     "views": [
       "live",
       "reading"
     ],
-    "dom": "无嵌入容器的场景：非独占行/容器内的 ![[…]] 按原文文本呈现（两种视图一致）。",
+    "dom": "无嵌入容器的场景：Live/Reading 链接文字域内按原文/占位呈现（.vsidian-embed-slot，文字形态）；代码（围栏/缩进/行内）与注释内的嵌入字面量不解析。",
     "example": "",
     "obsidian": {
       "counterpart": ".markdown-embed",
       "support": "none"
     },
     "verification": [
-      "单元 readingBlocks：混排/容器/表格/代码区域不产 embed 块（识别矩阵）",
-      "单元 wikilinkEmbed：扫描器与独占行判定矩阵"
+      "单元 embedSlots：混排/容器/表格/代码/注释区域识别与提升矩阵（#246/#248）",
+      "单元 liveEmbed（#247/#248）：混排/容器/表格格挂卡与链接域/行内代码/注释排除矩阵",
+      "单元 tableCellEmbed（#248）：格内解码视图与源码区间映射、别名/锚点/URL 编码保真",
+      "单元 wikilinkInteraction：合法嵌入升级为流内卡片与降级形态并存",
+      "单元 wikilinkEmbed：扫描器、独占行判定与位置精确命中对拍"
     ],
     "introduced": "#11（2026-09-24）"
   },
@@ -3545,7 +3548,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "hover-preview",
     "kind": "selector",
     "target": ".vsidian-hover-popup（浮层容器；内含 .vsidian-hover-popup-header 标题条（目标显示名 + .vsidian-hover-popup-title 与 .vsidian-hover-popup-open 跳转入口——嵌入卡片同款，#217 验收跟进）、.vsidian-hover-popup-scroll 内容滚动区（承载只读 Reading 容器）与 .vsidian-hover-popup-state 就地状态行（loading/错误分态；错误分态追加 .vsidian-hover-popup-state-error 修饰——主题错误色，验收反馈与普通文字区分））",
-    "purpose": "悬停文档预览浮层（#218 一期首条闭环）：父文档 Reading 中悬停指向 Markdown 的双链/本地链接，经文档访问通道读取目标后以只读 Reading 内容显示。#221 全入口：Live 正文（默认 Ctrl+悬停，设置 hover.liveDirect 开启后直接悬停）与反链/出链面板条目（直接悬停）共用同一浮层。默认宽 480px / 最大高 400px（小视口由 JS 几何计划四边翻转并收缩钳制）；内容只读——任务 checkbox 禁用（JS disabled + pointer-events 双保险），无任何写回通道。#220 起浮层内为目标文档（B）的 Reading 内容：图片以 B 为来源解析（sourceDocUri 通道）、链接可点击跳转、代码块朴素高亮。#217 验收跟进：标题条与嵌入卡片同款——目标显示名（spec.target）常驻不随回包换，右上角跳转入口按目标形态分派到既有激活消息族（双链/普通链接直发、面板形态经 openAction 闭包走条目点击同通道），点击即上下文切换关闭。",
+    "purpose": "悬停文档预览浮层（#218 一期首条闭环）：父文档 Reading 中悬停指向 Markdown 的双链/本地链接，经文档访问通道读取目标后以只读 Reading 内容显示。#221 全入口：Live 正文（默认 Ctrl+悬停，设置 hover.liveDirect 开启后直接悬停）与反链/出链面板条目（直接悬停）共用同一浮层。默认宽 480px / 最大高 400px（小视口由 JS 几何计划四边翻转并收缩钳制）；内容只读——任务 checkbox 禁用（JS disabled + pointer-events 双保险），无任何写回通道。#220 起浮层内为目标文档（B）的 Reading 内容：图片以 B 为来源解析（sourceDocUri 通道）、链接可点击跳转、代码块朴素高亮。#245 起 B 内独占行引用沿直接来源递归为禁写卡片，共用正文卡片的深度与预算；子卡片滚轮到底接续浮层，异步高度变化按自然高重新贴锚，整轮只有一个悬停窗口。#217 验收跟进：标题条与嵌入卡片同款——目标显示名（spec.target）常驻不随回包换，右上角跳转入口按目标形态分派到既有激活消息族（双链/普通链接直发、面板形态经 openAction 闭包走条目点击同通道），点击即上下文切换关闭。",
     "views": [
       "live",
       "reading"
@@ -3624,11 +3627,11 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "link-image-wikilink",
     "kind": "selector",
     "target": ".vsidian-live-embed（Live 嵌入宿主 widget；.vsidian-live-embed-below 为显形态下方修饰）",
-    "purpose": "父文档 Live 正文嵌入的挂载宿主（#223）：独占正文一行的 ![[…]] 经 CM6 装饰挂载 reading-embed-card 同款卡片——隐形态（光标/选区未触及源码区间）整行 inline 替换为卡片（源文视觉退场；宿主经 CSS 块级化直接从源码行对齐，replace 前后的 cm-widgetBuffer 零高块级化——验收反馈「不留隐形源码行」，且保留布局盒作为 CM6 行内块坐标锚：完全摘除（display:none）会让 posAtCoords 垂直探测在区间尾拿不到 rect 直接跳过整块，方向键从上向下越过嵌入行——#217 验收实测；保持 inline 替换是键盘垂直导航可进入嵌入行的前提，块级替换会被 CM6 跳过整行）；显形态（selectionTouchesRange 语义命中：折叠光标在区间内部或两端、非空选区严格重叠、任一选区命中）源文可见可编辑、卡片移至行下方继续显示（动态下移一行给源码让位；显隐只作用于源文文本的视觉呈现，不是撤卡片）。宿主上下间距由自身 padding 承担、宿主内卡片壳 margin 清零——margin 折叠出行盒、CM6 高度记账（行号 gutter 与视口测算依据）不含它，曾致行号与正文错位逐卡累积（#217 验收实测，padding 计入盒子高使记账与渲染一致）。宿主吞事件（ignoreEvent=true）：卡片点击不落父编辑器光标、卡片内浏览器选区不被误当作父文档 CM6 源码选区；卡片内交互（滚动/选字复制/链接/属性按钮）走嵌入卡片自身监听。未闭合引用保留可编辑原文并撤下卡片；围栏/frontmatter 内与混排/容器形态不挂载（源文呈现，1.5 期接入）。",
+    "purpose": "父文档 Live 正文嵌入的挂载宿主（#223 独占行；#247 起混排/无序/有序/任务列表/懒续行/引用及组合容器内的 occurrence 同接入——识别与 #246 Reading 侧同源 scanEmbedsInLine；#248 起表格内容行（表头/数据格）的格内嵌入经格内解码扫描同接入——inner/目标为解码语义（\\| 别名不进路径）、替换区间为原始源文精确区间，widget 嵌在网格格 mark span 内（CM6 inline replace widget 不切开 mark），网格列布局与格区高亮不因格内卡破坏）：![[…]] 经 CM6 装饰挂载 reading-embed-card 同款卡片——隐形态（光标/选区未触及源码区间）只对嵌入精确区间 [from, to]（![[…]] 本身）做 inline 替换（#247 前整行替换；前后文字、列表标记/编号、任务控件、引用前缀与既有缩进保留在行内，源文不插入换行，宿主经 CSS 块级化呈现「前文 → 卡片 → 后文」流断行；replace 前后的 cm-widgetBuffer 零高块级化——验收反馈「不留隐形源码行」，且保留布局盒作为 CM6 行内块坐标锚：完全摘除（display:none）会让 posAtCoords 垂直探测在区间尾拿不到 rect 直接跳过整块，方向键从上向下越过嵌入行——#217 验收实测；保持 inline 替换是键盘垂直导航可进入嵌入行的前提，块级替换会被 CM6 跳过整行；格内形态的 buffer 零高块级化由格容器规则另行覆盖）；显形态（selectionTouchesRange 语义命中：折叠光标在区间内部或两端、非空选区严格重叠、任一选区命中——不扩大到相邻文字/整行）源文可见可编辑、卡片移至行下方继续显示（动态下移一行给源码让位；显隐只作用于源文文本的视觉呈现，不是撤卡片；兄弟卡片独立显隐）。宿主上下间距由自身 padding 承担、宿主内卡片壳 margin 清零——margin 折叠出行盒、CM6 高度记账（行号 gutter 与视口测算依据）不含它，曾致行号与正文错位逐卡累积（#217 验收实测，padding 计入盒子高使记账与渲染一致）。宿主吞事件（ignoreEvent=true）：卡片点击不落父编辑器光标、卡片内浏览器选区不被误当作父文档 CM6 源码选区；卡片内交互（滚动/选字复制/链接/属性按钮）走嵌入卡片自身监听；#248 起格区选取的起点锚定同排除嵌入卡域（tableRegionSelection——卡内 pointerdown 不启动父矩形格区选取）。未闭合引用保留可编辑原文并撤下卡片（恢复闭合按新引用重载）；围栏/行内代码/HTML 注释/frontmatter 与链接文字域内不挂载（源文呈现）。跨模式状态共享：独占行宿主 key 取行区间、混排/格内宿主 key 取嵌入精确区间（与 Reading 侧两种宿主同口径）。",
     "views": [
       "live"
     ],
-    "states": "隐藏态（整行 inline 替换 widget，行结构保留——键盘垂直导航双向可进入；卡片从源码行对齐与 buffer 零高块级化由 CSS 承担）/ 显形态（行下方 block widget .vsidian-live-embed-below，源文在场，动态下移一行给源码让位）；两态切换经装饰重建（卡片实例状态由嵌入卡片状态库保持）；装载中/成功/失败分态沿用卡片状态行。",
+    "states": "隐藏态（嵌入精确区间 inline 替换 widget，行结构与前后文/容器标记保留——键盘垂直导航双向可进入；卡片从源码行对齐与 buffer 零高块级化由 CSS 承担，混排呈「前文 → 卡片 → 后文」流断行；#248 起格内形态嵌在网格格 mark span 内、卡随列宽不撑破，格内 buffer 与宿主宽度由格容器规则约束）/ 显形态（行下方 block widget .vsidian-live-embed-below，源文在场，动态下移一行给源码让位；兄弟卡片独立显隐）；两态切换经装饰重建（卡片实例状态由嵌入卡片状态库保持）；装载中/成功/失败分态沿用卡片状态行。",
     "dom": "Live 视图 .cm-content 内：隐形态宿主 div 在 .cm-line 内（inline replace 的替换物，经 CSS display:block 块级化，前后 cm-widgetBuffer 零高块级化 display:block + height:0——观感等同隐藏，布局盒保留作坐标锚）；显形态为行尾后 block widget。卡片壳 .vsidian-embed-card（挂 .markdown-embed 别名）在内；嵌套 Reading 容器重置 white-space: normal（#217 验收实测：CM6 .cm-content 的 white-space: pre 级联会使块 innerHTML 尾部换行渲染为幽灵行盒，卡片行距成倍增大）。卡片高度异步变动（内容装载/图片晚到）经 ResizeObserver → view.requestMeasure 唤醒 CM6 布局。",
     "example": "#app .cm-editor .cm-content .vsidian-live-embed-below {\n  display: block;\n}",
     "obsidian": {
@@ -3636,9 +3639,11 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "单元 liveEmbed（#223）：显隐谓词矩阵（端点/内部/严格重叠/多选区）、抑制边界（围栏/开放围栏/frontmatter/混排）、增量表与装饰实例缓存",
-      "单元 embedCardCssContract：Live 宿主下方形态块级规则钉住；buffer 前后零高块级化组规则与宿主 padding / 卡片壳 margin 清零规则钉住（#217 验收反馈）",
-      "浏览器 liveEmbed（#223）：真实键盘/鼠标/IME/拖选驱动显隐切换、源码显形时卡片仍可见的绘制断言、内部选区隔离；#217 验收反馈补场景 C2（ArrowDown 从上方停进源码行，双向导航对称）与场景 M（行号 gutter 跨三卡对齐极差 < 1.5px）"
+      "单元 liveEmbed（#223/#247/#248）：显隐谓词矩阵（端点/内部/严格重叠/多选区/相邻文字反例/兄弟独立）、抑制边界（围栏/开放围栏/frontmatter/行内代码/注释/链接域）、混排与容器挂卡矩阵（精确区间/前后文保真/宿主 key 语义）、表格格内挂卡（解码 inner/源码区间/同格多引用独立显隐/增量重建）、增量表与装饰实例缓存",
+      "单元 embedCardCssContract：Live 宿主下方形态块级规则钉住；buffer 前后零高块级化组规则与宿主 padding / 卡片壳 margin 清零规则钉住（#217 验收反馈）；#248 格内 buffer 零高与格内宿主宽度约束组规则钉住",
+      "浏览器 liveEmbed（#223/#247 更新）：真实键盘/鼠标/IME/拖选驱动显隐切换、源码显形时卡片仍可见的绘制断言、内部选区隔离；#217 验收反馈补场景 C2（ArrowDown 从上方停进源码行，双向导航对称）与场景 M（行号 gutter 跨三卡对齐极差 < 1.5px）",
+      "浏览器 liveEmbedMixed（#247 新增）：混排/容器前后文与标记/checkbox 绘制保真、ArrowLeft 逐键进出与相邻文字不显形、同行双嵌入兄弟独立、真实 IME 修改混排 inner、Enter 拆行撤卡与 Backspace 合行恢复、卡片内选字/滚动壳/禁写 checkbox/右键零冒泡零写回、模式切换与动态高度",
+      "浏览器 tableEmbed（#248 新增）：Live/Reading 双模式表头与数据格卡绘制、转义别名形态、卡内真实指针选字不启动格区选取、区域复制序列化父文档源文、窄列不撑破"
     ],
     "introduced": "#223（2026-09-30）"
   },
@@ -3648,11 +3653,11 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "link-image-wikilink",
     "kind": "selector",
     "target": ".vsidian-embed-ref（占位引用行，挂阅读双链 a 级）",
-    "purpose": "嵌入占位引用行（#222 一层展开）：引用内容（悬停浮层或嵌入卡片内的 Reading 视图）中的独占行嵌入不递归装载——渲染为可打开的引用占位，文本保留 ![[显示]] 形态可辨识；点击经所在容器的链接委托按来源文档身份打开（宿主 sourceDocUri 语义）。占位目标按直接来源文档的目录解析。",
+    "purpose": "嵌入引用行的可打开占位形态（#222）：引用内容中的独占行先解析出 ![[显示]] 引用；#244/#245 起在预算与深度允许时升级为正文卡片或悬停内卡片，超深、循环或预算拒绝时保留就地说明及按直接来源打开目标的入口。目标始终按直接来源文档目录解析。",
     "views": [
       "reading"
     ],
-    "states": "常驻（引用内容内的嵌入行）；点击跳转、无悬停浮层叠加（嵌入内容域停止 mouseover/mouseout 冒泡）。",
+    "states": "引用内容中按当前深度和预算升级为卡片或就地占位；内部点击按直接来源跳转，不叠加第二个悬停浮层（嵌入内容域停止 mouseover/mouseout 冒泡）。",
     "dom": "嵌入块 html 内的 <a class=\"vsidian-wikilink vsidian-embed-ref\" href=\"目标原文\">（href 为 | 之前原文，与阅读双链 a 同口径）；主文档的嵌入块挂载时整块替换为嵌入卡片（占位行不出现）。",
     "example": ".vsidian-embed-ref {\n  font-family: inherit;\n}",
     "obsidian": {
@@ -3661,9 +3666,59 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     },
     "verification": [
       "单元 readingBlocks：embed 块占位 html 形态（wikilink 类 + 嵌入修饰类 + href 口径）",
-      "单元 embedCard：一层展开不嵌套装载、占位点击按 B 身份出站"
+      "单元 embedCard/webviewSync：独占行递归挂载、受限占位与直接来源打开；浏览器 hoverRecursive：单浮层内子卡片绘制"
     ],
     "introduced": "#222（2026-09-30）"
+  },
+  {
+    "id": "reading-embed-mixed",
+    "domain": "content",
+    "category": "link-image-wikilink",
+    "kind": "selector",
+    "target": ".vsidian-reading-embed-mixed（混排嵌入流内宿主——叠加在 .vsidian-reading-embed 上的修饰类；宿主同时携带 data-vsidian-embed-promoted 与独占行 embed 块同构的 data-vsidian-embed-inner / src 锚点 dataset）",
+    "purpose": "Reading 混排嵌入宿主（#246）：段落/列表/引用容器内与文字混排的 ![[…]]（「前文 ![[B]] 后文」）在块挂载后由行内占位（embed-slot）提升为流内块级宿主，内挂 reading-embed-card 同款卡片——呈现为「前文 → 块级卡片 → 后文」，源文件不新增换行。p 内提升时拆段（前文 p + 宿主 + 后文 p，类与属性克隆保留、空半不产出——合法 DOM，不在 p 内塞块级节点）；横跨嵌入的粗体/斜体/高亮拆壳为前后各完整的行内标签（可视语义保留）；列表项（无序/有序/任务/懒续行）与引用内直接落位，列表编号、缩进与引用边条容器不拆；宿主宽度跟随所属列/缩进区域（块级占满父内容盒，不越缩进界）。同一识别/挂载适配覆盖主文档 Reading、卡片内容与悬停内容三处（RefContentMount 与 EmbedCardManager 共用 embedSlots 装配）；同段/行多个嵌入各按 occurrence 区间独立成卡、保持源顺序。#248 起表格格内（表头 th/数据格 td）同升级——占位原位替换为格内宿主（表格行列结构不拆、宽度随列；\\| 别名等转义形态的占位经格内解码重解析产出，data-vsidian-embed-inner 为解码语义、src 锚点为原始源文区间）。",
+    "views": [
+      "reading"
+    ],
+    "states": "升级路径与独占行卡片同构（装载中/成功/失败分态、限高滚动、深度与预算拒绝、递归与来源租约沿用 #244/#245 既有基建）；不可提升形态（链接域 a 内、配对失败降级）保持 .vsidian-embed-slot 占位文本不升级；#248 起表格格内占位升级为格内宿主（转义别名形态含）。",
+    "dom": "主文档 Reading：块元素（.vsidian-reading-block）内部由挂载适配（embedSlots.promoteEmbedSlot）产出，宿主 div 类为 .vsidian-reading-embed .vsidian-reading-embed-mixed；卡片内容与悬停内容内同样经 RefContentMount 块挂载钩子产出（直接来源/occurrence 语义按所在父实例）；#248 起表格块（table 块）的 td/th 内格内宿主同款产出（原位替换占位）。卸载以 data-vsidian-embed-promoted 查询配对（宿主随所属块回收，实例状态保留在卡片状态库）。",
+    "example": "#app .vsidian-view-reading .vsidian-reading-embed-mixed {\n  display: block;\n  margin: 0.35em 0;\n}",
+    "obsidian": {
+      "counterpart": "（Obsidian 混排嵌入同为块级插入；容器规则闭源不作承诺）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 embedSlots（#246/#248）：occurrence 扫描语法排除（代码/注释/frontmatter）、占位配对、p 拆分/格式拆壳/列表引用落位/链接不提升矩阵、表格 td/th 格内提升与配对失败降级",
+      "单元 embedCard：混排宿主挂载出站请求带行内精确区间、同段多嵌入独立实例、卸载配对与重挂零重发",
+      "浏览器 mixedEmbed（#246）：真实指针滚动/明暗主题下前后文可见性与卡片绘制、列表编号与引用边条保真",
+      "浏览器 tableEmbed（#248）：Reading 表头/数据格卡绘制与窄列不撑破"
+    ],
+    "introduced": "#246（2026-10-01）"
+  },
+  {
+    "id": "embed-slot",
+    "domain": "content",
+    "category": "link-image-wikilink",
+    "kind": "selector",
+    "target": ".vsidian-embed-slot（混排嵌入行内占位 span，data-vsidian-embed-inner 携带目标原文）",
+    "purpose": "Reading 混排嵌入的行内占位（#246）：markdown-it inline 规则（与 shared/wikilink 扫描器同源的 embedAtPosition 判定）在段落/列表/引用/表格的行内内容产出的 span——块挂载后升级为 reading-embed-mixed 流内宿主（#248 起含表格 td/th 格内）；未升级/不可提升（链接域 a 内——嵌套 a 属非法 DOM、配对失败降级）时按占位文字形态呈现（正文文字 + 描述色弱化，保留 ![[ ]] 文本可辨识）。占位是 span 而非 a：可处于链接文字域内而不破坏 DOM 合法性，链接域内点击走外层 a 的既有链接语义。#248 起表格格内含 \\| 的嵌入形态经格内解码重解析产占位（data-vsidian-embed-inner 为解码语义，如 B|别名），与格内解码扫描的 occurrence 配对同源。",
+    "views": [
+      "reading"
+    ],
+    "states": "升级（块挂载且占位可提升——被流内/格内宿主替换，span 退场）/ 占位保持（其余形态；随块 HTML 重建而重建）。",
+    "dom": "块级容器（p/li/td/th 等）的行内内容中：<span class=\"vsidian-embed-slot\" data-vsidian-embed-inner=\"原文\">![[显示]]</span>；data 属性值经 HTML 转义，进 DOM 前经 sanitizeReadingDom 纵深净化（data 属性保留）。",
+    "example": "#app .vsidian-view-reading .vsidian-reading-block .vsidian-embed-slot {\n  color: var(--vscode-descriptionForeground, inherit);\n}",
+    "obsidian": {
+      "counterpart": "（Obsidian 混排嵌入直接渲染，无占位形态）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 embedSlots（#246）：占位 html 形态（span + data-inner + 显示文本）、代码字面量/残缺形态不产占位与未闭合注释边角",
+      "单元 embedSlots：占位查询与配对（data-vsidian-embed-inner 为挂载配对单一来源）",
+      "单元 readingMarkdown（#248）：格内 \\| 形态经解码重解析产占位（data-inner 解码语义）、跨格伪形态与 code span 字面量不产占位",
+      "浏览器 mixedEmbed（#246）：占位降级形态（链接域内）文字可见"
+    ],
+    "introduced": "#246（2026-10-01）"
   },
   {
     "id": "find-panel",
@@ -4329,8 +4384,8 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "limit-markdown-embed": {
-    "purpose": "Partial boundary for embeds (![[…]]): a line-owning embed renders as the reference card in the reading view (#222) and mounts the same card in the live view with cursor-driven source reveal (#223) — see reading-embed-card / live-embed-widget. Mixed-run lines (other content on the line), list/blockquote containers, and table cells keep the raw source (1.5-phase scope); recursive expansion is not provided (one-level expansion shows a placeholder reference line); writing into embedded content is not supported. Incomplete wikilink forms are shown as-is; blockquote blocks are already supported.",
-    "dom": "Where no embed container applies: ![[…]] on non-owning lines or inside containers renders as raw text (consistent across both views).",
+    "purpose": "Partial boundary for embeds (![[…]]): a line-owning embed renders as the reference card in the reading view (#222) and mounts the same card in the live view with cursor-driven source reveal (#223) — see reading-embed-card / live-embed-widget. Since #244/#245, line-owning embeds expand recursively inside body cards and hover previews. Since #246, mixed-run lines (other content on the line) and list/blockquote containers upgrade to in-flow cards in the reading view — see reading-embed-mixed. Since #247, mixed-run lines and list/blockquote/task/lazy-continuation containers in the live view mount cards too, with the hidden form replacing only the exact embed range — surrounding text, list markers, task checkboxes, quote prefixes and existing indentation are preserved, see live-embed-widget. Since #248, table cells (header and data cells, with escaped-pipe alias forms decoded per in-cell semantics — the target/inner uses the decoded form while ranges stay on the raw source) upgrade to in-cell cards in both views. Link-label runs keep the raw source/placeholder in both views (a block-level card inside an inline link label would be an invalid presentation); writing into embedded content is not supported. Incomplete wikilink forms are shown as-is; blockquote blocks are already supported.",
+    "dom": "Where no embed container applies: table cells and link-label runs in both views render the raw source or placeholder span (.vsidian-embed-slot, plain-text form); embed literals inside code (fenced/indented/inline) and comments are never parsed.",
     "obsidian": {
       "counterpart": ".markdown-embed"
     }
@@ -4867,7 +4922,7 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "hover-popup": {
-    "purpose": "The hover document preview popup (first closing loop of phase one, #218): hover a wikilink or local Markdown link in the parent reading view, and the target is read through the document-access channel and shown as read-only reading content. Since #221 the same popup serves all entry points: the live-preview body (Ctrl+hover by default, direct hover once the hover.liveDirect setting is on) and backlink/outgoing-link panel entries (direct hover). Default width 480px / max height 400px (in small viewports a JS geometry plan flips at the four edges and shrinks to fit); the content is read-only — task checkboxes are disabled (JS disabled + pointer-events double safety), with no write-back channel at all. Since #220 the popup carries the target document (B) as reading content: images resolve relative to B (the sourceDocUri channel), links are clickable for navigation, and code blocks get plain syntax highlighting. #217 acceptance follow-up: a header bar shared with the embed cards — the target display name (spec.target) stays constant regardless of the result payload, and the top-right open button dispatches to the existing activation message family by target shape (wikilink/plain-link sent directly; panel shapes go through an openAction closure along the same channel as the entry click); clicking closes the popup as a context switch.",
+    "purpose": "The hover document preview popup (first closing loop of phase one, #218): hover a wikilink or local Markdown link in the parent reading view, and the target is read through the document-access channel and shown as read-only reading content. Since #221 the same popup serves all entry points: the live-preview body (Ctrl+hover by default, direct hover once the hover.liveDirect setting is on) and backlink/outgoing-link panel entries (direct hover). Default width 480px / max height 400px (in small viewports a JS geometry plan flips at the four edges and shrinks to fit); the content is read-only — task checkboxes are disabled (JS disabled + pointer-events double safety), with no write-back channel at all. Since #220 the popup carries the target document (B) as reading content: images resolve relative to B (the sourceDocUri channel), links are clickable for navigation, and code blocks get plain syntax highlighting. Since #245, line-owning embeds inside B expand into read-only cards using the same depth and budget as body cards; a child card at its scroll boundary hands the wheel to the popup, and asynchronous height changes reposition it using natural content height. Only one hover popup exists throughout. #217 acceptance follow-up: a header bar shared with the embed cards — the target display name (spec.target) stays constant regardless of the result payload, and the top-right open button dispatches to the existing activation message family by target shape (wikilink/plain-link sent directly; panel shapes go through an openAction closure along the same channel as the entry click); clicking closes the popup as a context switch.",
     "states": "An interaction-state floating layer (mounted after the hover open delay, dismissed by leaving the joint anchor/popup domain after a close delay, Esc, parent scroll, or mode switch; since #221 a keyboard-command open moves focus into the popup with a :focus-visible outline, and while focus stays inside the popup it is not dismissed by the mouse leaving) — the container itself is not part of the static probes; open/close, keep-alive and painting are verified behaviorally by the browser hoverPreview / hoverEntry suites; the style entry point (a single low-specificity class) is public for snippet overrides.",
     "dom": "Since #220 attached directly inside #app (previously on body; fixed positioning is unaffected by the #app layout) — the #app theme variables, the `#app .vsidian-view-reading …` content styles, and enabled CSS snippets (the container class carries the .markdown-preview-view alias bridge) therefore match naturally, without duplicating a second theme environment for the popup. The inner reading container carries .vsidian-view-reading. The header bar (target display name plus open button) lists its rules together with the embed-card header selectors (popup selector first, embed selector last).",
     "obsidian": {
@@ -4891,8 +4946,8 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "live-embed-widget": {
-    "purpose": "The live-view embed host widget (#223): a line-owning ![[…]] in the live document mounts the same card as reading-embed-card via a CodeMirror decoration — hidden form (cursor/selection not touching the source range) replaces the whole line with an inline replacement (the source text leaves the visual flow; the host is block-levelized via CSS so the card aligns with the source line, and the cm-widgetBuffer pair around the replacement is zero-height block-levelized — the acceptance-feedback \"no invisible source line\" fix that also keeps the layout boxes as CM6 inline-block coordinate anchors: fully removing them (display:none) starves posAtCoords vertical probing at the range end of any rect, so the probing skips the whole block and ArrowDown from above jumps past the embed line — measured during the #217 acceptance round; keeping the replacement inline is the prerequisite for keyboard vertical navigation to enter the embed line, as a block-level replacement gets skipped wholesale by CM6); revealed form (per the selectionTouchesRange semantics: a collapsed cursor inside or on either end of the range, a non-empty selection strictly overlapping it, or any one selection range hitting it) shows the editable source with the card moved below the line (dynamically shifting down one line to make room; reveal only affects the visual presentation of the source text — the card is not dismissed). The host vertical spacing is carried by its own padding with the in-host card shell margin zeroed — margins collapse out of the line box and CM6 height accounting (which drives the line-number gutter and viewport math) excludes them, which used to accumulate a per-card gutter misalignment (#217 acceptance measurement; padding counts into the box height so accounting matches rendering). The host swallows events (ignoreEvent=true): clicks inside the card never place the parent editor cursor, and browser text selections inside the card are never mistaken for parent-document CM6 source selections; in-card interactions (scrolling/text-selection copy/links/properties buttons) go through the embed card own listeners. An unclosed reference keeps the editable raw text and dismisses the old card; embeds inside code fences/frontmatter and mixed-run/container forms do not mount (raw source shown, 1.5-phase scope).",
-    "states": "Hidden (a whole-line inline replace widget — the line structure is kept so keyboard vertical navigation can enter from both directions; the source-line alignment and buffer zero-height block-levelization are carried by CSS) / revealed (a below-line block widget .vsidian-live-embed-below with the source present, dynamically shifting down one line to make room); the switch rebuilds the decoration (per-instance card state is kept by the embed-card state store); loading/loaded/failure states reuse the card state line.",
+    "purpose": "The live-view embed host widget (#223 for line-owning embeds; since #247 occurrences inside mixed-run lines, ordered/unordered/task lists, lazy continuations, blockquotes and their combinations mount too — recognition shares the #246 reading-side scanEmbedsInLine; since #248 occurrences inside table content rows (header/data cells) mount via the in-cell decoded scan — inner/target use the decoded semantics (an escaped-pipe alias never leaks into the target path) while the replacement range is the exact raw-source range, and the widget nests inside the grid-cell mark span (a CM6 inline replace widget does not split marks), so the grid column layout and region highlighting survive in-cell cards): a ![[…]] in the live document mounts the same card as reading-embed-card via a CodeMirror decoration — hidden form (cursor/selection not touching the source range) replaces only the exact embed range [from, to] (the ![[…]] itself; before #247 the whole line) with an inline replacement (surrounding text, list markers/numbers, task checkboxes, quote prefixes and existing indentation stay on the line, no newline is ever inserted into the source, and the CSS block-levelized host renders the \"leading text → card → trailing text\" flow break; the cm-widgetBuffer pair around the replacement is zero-height block-levelized — the acceptance-feedback \"no invisible source line\" fix that also keeps the layout boxes as CM6 inline-block coordinate anchors: fully removing them (display:none) starves posAtCoords vertical probing at the range end of any rect, so the probing skips the whole block and ArrowDown from above jumps past the embed line — measured during the #217 acceptance round; keeping the replacement inline is the prerequisite for keyboard vertical navigation to enter the embed line, as a block-level replacement gets skipped wholesale by CM6; the in-cell buffer zero-heighting and host width constraints are carried by the grid-cell container rules); revealed form (per the selectionTouchesRange semantics: a collapsed cursor inside or on either end of the range, a non-empty selection strictly overlapping it, or any one selection range hitting it — never widened to adjacent text or the whole line) shows the editable source with the card moved below the line (dynamically shifting down one line to make room; reveal only affects the visual presentation of the source text — the card is not dismissed, and sibling cards reveal independently). The host vertical spacing is carried by its own padding with the in-host card shell margin zeroed — margins collapse out of the line box and CM6 height accounting (which drives the line-number gutter and viewport math) excludes them, which used to accumulate a per-card gutter misalignment (#217 acceptance measurement; padding counts into the box height so accounting matches rendering). The host swallows events (ignoreEvent=true): clicks inside the card never place the parent editor cursor, and browser text selections inside the card are never mistaken for parent-document CM6 source selections; in-card interactions (scrolling/text-selection copy/links/properties buttons) go through the embed card own listeners; since #248 the rectangular cell-region anchor also excludes the embed-card domain (tableRegionSelection — a pointerdown inside a card never starts the parent cell-region selection). An unclosed reference keeps the editable raw text and dismisses the old card (re-closing reloads per the new reference); embeds inside code fences/inline code/HTML comments/frontmatter and link-label runs do not mount (raw source shown). Cross-mode state sharing: the line-owning host key uses the line range while the mixed/in-cell host key uses the exact embed range (matching the two reading-side host conventions).",
+    "states": "Hidden (an exact-embed-range inline replace widget — the line structure plus surrounding text and container markers are kept so keyboard vertical navigation can enter from both directions; the source-line alignment and buffer zero-height block-levelization are carried by CSS, and mixed runs render the leading-text → card → trailing-text flow break; since #248 the in-cell form nests inside the grid-cell mark span with the card bounded by the column width — the in-cell buffers and host width are constrained by the grid-cell container rules) / revealed (a below-line block widget .vsidian-live-embed-below with the source present, dynamically shifting down one line to make room; sibling cards reveal independently); the switch rebuilds the decoration (per-instance card state is kept by the embed-card state store); loading/loaded/failure states reuse the card state line.",
     "dom": "Inside the live view .cm-content: the hidden-form host div sits inside .cm-line (the replacement of an inline replace, block-levelized via CSS display:block, with the surrounding cm-widgetBuffer pair zero-height block-levelized via display:block + height:0 — visually equivalent to hidden while the layout boxes remain as coordinate anchors); the revealed form is a block widget after the line end. The card shell .vsidian-embed-card (carrying the .markdown-embed alias) sits inside; the nested reading container resets white-space: normal (#217 acceptance measurement: the CM6 .cm-content white-space: pre cascade renders the trailing newline of each block innerHTML as a ghost line box, inflating card line spacing). Async card height changes (content loading, late images) wake the CM6 layout via ResizeObserver → view.requestMeasure.",
     "obsidian": {
       "counterpart": ".cm-embed-block (the Obsidian live embed container direction; the internal structure is closed-source and not promised)"
@@ -4915,11 +4970,27 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "reading-embed-ref": {
-    "purpose": "The embed placeholder reference line (#222 one-level expansion): a line-owning embed inside referenced reading content (hover popup or embed card) is not loaded recursively — it renders as an openable reference placeholder whose text keeps the recognizable ![[display]] form; clicking goes through the containing view link delegation and opens it with the source-document identity (the host sourceDocUri semantics). The placeholder target resolves relative to the direct source document.",
-    "states": "Ever-present (the embed lines inside referenced content); click navigates, with no hover-popup stacking (the embed content domain stops mouseover/mouseout propagation).",
+    "purpose": "The openable placeholder form of an embed reference (#222): a line-owning embed inside referenced reading content first parses into a recognizable ![[display]] reference. Since #244/#245 it mounts as a body card or hover-internal card when depth and budgets allow; excessive depth, a cycle, or budget rejection retains an in-place explanation and an open-target entry. The target always resolves relative to its direct source document.",
+    "states": "Inside referenced content, the line upgrades to a card or an in-place placeholder according to depth and budgets; clicks navigate by direct source without stacking another hover popup (the embed content domain stops mouseover/mouseout propagation).",
     "dom": "An <a class=\"vsidian-wikilink vsidian-embed-ref\" href=\"raw target\"> inside the embed block html (the href is the raw text before |, same convention as the reading wikilink anchor); when the parent-document embed block mounts it is replaced wholesale by the embed card (the placeholder line never appears there).",
     "obsidian": {
       "counterpart": "(Obsidian expands embeds recursively; there is no placeholder form)"
+    }
+  },
+  "reading-embed-mixed": {
+    "purpose": "Reading mixed-run embed host (#246): a ![[…]] mixed with text (\"lead ![[B]] trail\") or inside a list/blockquote container is promoted from its inline placeholder (embed-slot) into an in-flow block host after the block mounts, carrying the same reading-embed-card — rendered as \"lead text → block card → trail text\" with no newlines inserted into the source. Promotion inside a p splits the paragraph (lead p + host + trail p, classes and attributes cloned, empty halves dropped — valid DOM, never a block node inside p); bold/italic/highlight spanning the embed is unwrapped into two complete inline tags on each side (visual semantics preserved); list items (bullet/ordered/task/lazy continuation) and blockquotes host the card in place — list numbering, indentation, and the quote bar container stay intact; the host width follows its column/indentation area (block-level, filling the parent content box without crossing the indent). One shared recognition/mounting adapter covers the main reading document, card content, and hover content (RefContentMount and EmbedCardManager share the embedSlots assembly); multiple embeds in one paragraph each own an occurrence-keyed card in source order. Since #248, table cells (th/td) upgrade the same way — the placeholder is replaced in place by an in-cell host (the table row/column structure stays intact, the width follows the column; escaped-pipe alias forms produce their placeholder via the in-cell decoded re-parse, with data-vsidian-embed-inner in decoded semantics and the src anchors on the raw-source range).",
+    "states": "Upgrade path mirrors the line-owning card (loading/success/failure states, capped scrolling, depth and budget rejection, recursion and source leases all reuse the #244/#245 infrastructure); non-promotable forms (inside an anchor, pairing-failure degradation) keep the .vsidian-embed-slot placeholder text; since #248 table-cell placeholders upgrade to in-cell hosts (escaped-pipe alias forms included).",
+    "dom": "Main reading document: produced inside a block element (.vsidian-reading-block) by the mounting adapter (embedSlots.promoteEmbedSlot), the host div carries classes .vsidian-reading-embed .vsidian-reading-embed-mixed; card and hover content produce it the same way via the RefContentMount block-mounted hook (direct-source/occurrence semantics follow the parent instance); since #248 table blocks (the table kind) produce in-cell hosts inside td/th the same way (in-place placeholder replacement). Unmounting pairs via the data-vsidian-embed-promoted query (the host is reclaimed with its owning block; instance state stays in the card state store).",
+    "obsidian": {
+      "counterpart": "(Obsidian inserts mixed-run embeds as blocks too; container rules are closed-source and not promised)"
+    }
+  },
+  "embed-slot": {
+    "purpose": "Reading mixed-run inline placeholder (#246): a span emitted by a markdown-it inline rule (the embedAtPosition check, same source as the shared/wikilink scanner) in the inline content of paragraphs/lists/blockquotes/tables — promoted into a reading-embed-mixed in-flow host after the block mounts (since #248 including table td/th cells); when not promoted or not promotable (inside an anchor — nested anchors are invalid DOM; pairing-failure degradation) it renders as placeholder text (body text in the muted description color, keeping the ![[ ]] form recognizable). The placeholder is a span rather than an anchor: it can sit inside link label text without breaking DOM validity, and clicks inside link labels follow the enclosing anchor semantics. Since #248, table-cell embeds containing an escaped pipe produce their placeholder via the in-cell decoded re-parse (data-vsidian-embed-inner in decoded semantics, e.g. B|alias), pairing against the in-cell decoded occurrence scan.",
+    "states": "Promoted (block mounted and the placeholder is promotable — replaced by the in-flow/in-cell host, the span leaves) / placeholder kept (all other forms; rebuilt whenever the block html is rebuilt).",
+    "dom": "Inline content of a block container (p/li/td/th): <span class=\"vsidian-embed-slot\" data-vsidian-embed-inner=\"raw\">![[display]]</span>; attribute values are HTML-escaped and survive the sanitizeReadingDom deep sanitization (data attributes are kept).",
+    "obsidian": {
+      "counterpart": "(Obsidian renders mixed-run embeds directly; there is no placeholder form)"
     }
   },
   "find-panel": {

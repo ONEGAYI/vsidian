@@ -4,7 +4,7 @@
 // 状态保持（fm 展开/滚动位置，装载结果会话内缓存零重发）、限高设置与
 // 错误分态。真实指针/观感/视口回收回归在 test/browser 与集成层。
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HoverPreviewResult, WebviewToHost } from '../../src/shared/protocol'
 import { installLocale } from '../../src/shared/i18n'
 import { zhCn } from '../../src/shared/locales/zh-cn'
@@ -17,6 +17,14 @@ import { createReadingBlockElement } from '../../src/webview/readingView'
 import { splitReadingBlocks } from '../../src/webview/readingBlocks'
 
 installLocale('zh-cn', zhCn)
+
+// jsdom 没有布局；这些行为测试给真实外层 scrollport 一个可见高度。
+// 零高度首载与实际窗口是否可见由 readingVirtualView 单测和 Chromium 验证。
+beforeEach(() => {
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+    return this.classList.contains(EMBED_CARD_CLASS_NAMES.scroll) ? 400 : 0
+  })
+})
 
 const SESSION = { sessionId: 'panel-1', docUri: 'file:///d%3A/notes/a.md' }
 
@@ -36,7 +44,7 @@ const TARGET_TEXT = [
 /** 带 B 内二层嵌入的目标全文（一层展开场景） */
 const TARGET_WITH_EMBED = ['# 目标', '', '![[内层目标]]', '', '正文。', ''].join('\n')
 
-function makeContext(sent: WebviewToHost[], maxHeightPx = 480): EmbedCardContext {
+function makeContext(sent: WebviewToHost[], maxHeightPx = 480, maxDepth = 3): EmbedCardContext {
   return {
     session: () => SESSION,
     send: (message) => {
@@ -44,6 +52,7 @@ function makeContext(sent: WebviewToHost[], maxHeightPx = 480): EmbedCardContext
     },
     codeHighlight: () => true,
     maxHeightPx: () => maxHeightPx,
+    maxDepth: () => maxDepth,
   }
 }
 
@@ -71,7 +80,7 @@ function hoverRequestOf(sent: WebviewToHost[]) {
   return req
 }
 
-function resultOk(req: { reqId: number; instanceId: string }, text: string): HoverPreviewResult {
+function resultOk(req: { reqId: number; instanceId: string }, text: string): Extract<HoverPreviewResult, { ok: true }> {
   return {
     kind: 'hover.result',
     reqId: req.reqId,
@@ -87,9 +96,25 @@ function resultOk(req: { reqId: number; instanceId: string }, text: string): Hov
 
 afterEach(() => {
   document.body.innerHTML = ''
+  vi.restoreAllMocks()
 })
 
 describe('嵌入卡片：挂载升级与装载请求', () => {
+  it('外层滚动区在 loading 时隐藏：切到 content 同步建立首屏窗口', () => {
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains(EMBED_CARD_CLASS_NAMES.scroll) && this.style.display !== 'none' ? 400 : 0
+    })
+    const sent: WebviewToHost[] = []
+    const manager = new EmbedCardManager(makeContext(sent))
+    const el = mountEmbedBlock(manager, '![[目标笔记]]\n')
+    const scrollEl = el.querySelector<HTMLElement>(`.${EMBED_CARD_CLASS_NAMES.scroll}`)!
+    expect(scrollEl.style.display).toBe('none')
+    manager.notifyResult(resultOk(hoverRequestOf(sent), TARGET_TEXT))
+    expect(scrollEl.style.display).toBe('')
+    expect((el.querySelector('.vsidian-reading-heading-1')?.textContent ?? '').trim()).toBe('目标笔记')
+    manager.dispose()
+  })
+
   it('embed 块挂载升级为卡片：出站 hover.request（embed- 实例前缀 + 嵌入 inner + 行区间）', () => {
     const sent: WebviewToHost[] = []
     const manager = new EmbedCardManager(makeContext(sent))
@@ -177,29 +202,189 @@ describe('嵌入卡片：挂载升级与装载请求', () => {
   })
 })
 
-describe('嵌入卡片：一层展开与内部链接', () => {
-  it('B 内独占行嵌入不嵌套装载：占位引用行在场（可点击引用形态）', () => {
+describe('嵌入卡片：递归展开与内部链接', () => {
+  it('深度设为 1 时 B 内独占行嵌入显示深度卡片并保留打开入口', () => {
     const sent: WebviewToHost[] = []
-    const manager = new EmbedCardManager(makeContext(sent))
+    const manager = new EmbedCardManager(makeContext(sent, 480, 1))
     const el = mountEmbedBlock(manager, '![[目标笔记]]\n')
     manager.notifyResult(resultOk(hoverRequestOf(sent), TARGET_WITH_EMBED))
     const card = el.querySelector<HTMLElement>(`.${EMBED_CARD_CLASS_NAMES.card}`)!
-    // 一层展开：B 内 ![[内层目标]] 是占位引用行，不是嵌套卡片
-    expect(card.querySelectorAll(`.${EMBED_CARD_CLASS_NAMES.card}`)).toHaveLength(0)
-    const ref = card.querySelector<HTMLElement>('a.vsidian-embed-ref')
-    expect(ref?.textContent).toBe('![[内层目标]]')
-    // 只发出一笔装载请求（内层不递归装载）
+    expect(card.querySelectorAll(`.${EMBED_CARD_CLASS_NAMES.card}`)).toHaveLength(1)
+    expect(card.textContent).toContain(zhCn['hover.errorDepth'])
+    // 一层后不发第二笔读取。
     expect(sent.filter((m) => m.kind === 'hover.request')).toHaveLength(1)
     manager.dispose()
   })
 
-  it('占位行点击按 B 身份出站（wikilink.activate + sourceDocUri=B）', () => {
+  it('#244 默认三层 A→B→C→D，各层按直接来源请求，E 为深度占位', () => {
     const sent: WebviewToHost[] = []
     const manager = new EmbedCardManager(makeContext(sent))
     const el = mountEmbedBlock(manager, '![[目标笔记]]\n')
+    const bReq = hoverRequestOf(sent)
+    expect(bReq.occurrenceId).toBeDefined()
+    manager.notifyResult({ ...resultOk(bReq, '![[C]]'), sourceLeaseId: 'lease-b', depth: 1,
+      expansionPath: ['A', 'B'] })
+    const cReq = hoverRequestOf(sent)
+    expect(cReq.target).toBe('C')
+    expect(cReq.source).toEqual({ parentInstanceId: bReq.occurrenceId,
+      sourceDocUri: 'D:\\notes\\目标笔记.md' })
+    expect([cReq.sourceStart, cReq.sourceEnd]).toEqual([0, 6])
+    manager.notifyResult({ ...resultOk(cReq, '![[D]]'), target: { fsPath: 'D:\\notes\\c.md', relPath: 'c.md' },
+      sourceLeaseId: 'lease-c', depth: 2, expansionPath: ['A', 'B', 'C'] })
+    const dReq = hoverRequestOf(sent)
+    expect(dReq.target).toBe('D')
+    expect(dReq.source?.sourceDocUri).toBe('D:\\notes\\c.md')
+    manager.notifyResult({ ...resultOk(dReq, '![[E]]'), target: { fsPath: 'D:\\notes\\d.md', relPath: 'd.md' },
+      sourceLeaseId: 'lease-d', depth: 3, expansionPath: ['A', 'B', 'C', 'D'] })
+    expect(sent.filter((m) => m.kind === 'hover.request')).toHaveLength(3)
+    expect(el.querySelectorAll(`.${EMBED_CARD_CLASS_NAMES.card}`)).toHaveLength(4)
+    expect(el.textContent).toContain(zhCn['hover.errorDepth'])
+    manager.dispose()
+  })
+
+  it('#244 双视图同一子 occurrence 单侧卸载不退订，剩余 C 仍响应失效刷新', () => {
+    const sent: WebviewToHost[] = []
+    const manager = new EmbedCardManager(makeContext(sent))
+    const reading = mountEmbedBlock(manager, '![[目标笔记]]\n')
+    const live = document.createElement('span')
+    document.body.appendChild(live)
+    manager.mountCardInto(live, '目标笔记', 0, '![[目标笔记]]'.length, 'live')
+    const bReq = hoverRequestOf(sent)
+    manager.notifyResult({ ...resultOk(bReq, '![[C]]'), sourceLeaseId: 'b-lease', depth: 1 })
+    const cReq = hoverRequestOf(sent)
+    expect(sent.filter((m) => m.kind === 'hover.request')).toHaveLength(2)
+    manager.notifyResult({ ...resultOk(cReq, '# C'), target: { fsPath: 'D:\\notes\\c.md', relPath: 'c.md' },
+      sourceLeaseId: 'c-lease', depth: 2 })
+    expect(reading.textContent).toContain('C')
+    expect(live.textContent).toContain('C')
+    const before = manager.budgetStats().panelBytes
+    manager.unmountBlock(live)
+    expect(sent.filter((m) => m.kind === 'hover.unwatch' && m.instanceId === cReq.occurrenceId)).toHaveLength(0)
+    expect(manager.budgetStats()).toMatchObject({ panelInstances: 2 })
+    expect(manager.budgetStats().panelBytes).toBeLessThan(before)
+    manager.notifyInvalidated({ fsPath: 'D:\\notes\\c.md', status: 'changed', generation: 1 })
+    const refreshed = hoverRequestOf(sent)
+    expect(refreshed.target).toBe('C')
+    manager.notifyResult({ ...resultOk(refreshed, '# C refreshed'),
+      target: { fsPath: 'D:\\notes\\c.md', relPath: 'c.md' }, sourceLeaseId: 'c-lease-2', depth: 2 })
+    expect(reading.textContent).toContain('C refreshed')
+    manager.unmountBlock(reading)
+    expect(sent.filter((m) => m.kind === 'hover.unwatch' && m.instanceId === cReq.occurrenceId)).toHaveLength(1)
+    manager.dispose()
+  })
+
+  it('#244 子卡原生右键停在只读卡片域，保留浏览器默认复制菜单', () => {
+    const sent: WebviewToHost[] = []
+    const manager = new EmbedCardManager(makeContext(sent))
+    const el = mountEmbedBlock(manager, '![[目标笔记]]\n')
+    manager.notifyResult({ ...resultOk(hoverRequestOf(sent), '![[C]]'), depth: 1 })
+    manager.notifyResult({ ...resultOk(hoverRequestOf(sent), '# C title'),
+      target: { fsPath: 'D:\\notes\\c.md', relPath: 'c.md' }, depth: 2 })
+    let parentMenus = 0
+    const onParentMenu = () => { parentMenus++ }
+    document.body.addEventListener('contextmenu', onParentMenu)
+    const heading = el.querySelectorAll<HTMLElement>('.vsidian-reading-heading-1')[0]!
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+    heading.dispatchEvent(event)
+    expect(parentMenus).toBe(0)
+    expect(event.defaultPrevented).toBe(false)
+    document.body.removeEventListener('contextmenu', onParentMenu)
+    manager.dispose()
+  })
+
+  it('#244 同目标刷新先交接父新租约再读新 C；旧拒绝和旧子回包不撤新正文', () => {
+    const sent: WebviewToHost[] = []
+    const manager = new EmbedCardManager(makeContext(sent))
+    const el = mountEmbedBlock(manager, '![[目标笔记]]\n')
+    const first = hoverRequestOf(sent)
+    manager.notifyResult({ ...resultOk(first, '![[C]]'), sourceLeaseId: 'old-b', version: 1, depth: 1 })
+    const oldChild = hoverRequestOf(sent)
+    manager.notifyInvalidated({ fsPath: 'D:\\notes\\目标笔记.md', status: 'changed', generation: 1 })
+    const reload = hoverRequestOf(sent)
+    manager.notifyResult({ ...resultOk(reload, '![[C]]'), sourceLeaseId: 'new-b', version: 2, depth: 1 })
+    const newChild = hoverRequestOf(sent)
+    expect(newChild.reqId).not.toBe(oldChild.reqId)
+    const newWatchIndex = sent.findIndex((m) => m.kind === 'hover.watch' && m.sourceLeaseId === 'new-b')
+    const newChildIndex = sent.findIndex((m) => m.kind === 'hover.request' && m.reqId === newChild.reqId)
+    expect(newWatchIndex).toBeGreaterThan(-1)
+    expect(newWatchIndex).toBeLessThan(newChildIndex)
+    manager.notifyResult({ ...resultOk(oldChild, '# old'), target: { fsPath: 'D:\\notes\\c.md', relPath: 'c.md' } })
+    manager.notifyWatchRejected({ fsPath: 'D:\\notes\\目标笔记.md', instanceId: first.occurrenceId!,
+      reason: 'source', sourceLeaseId: 'old-b' })
+    expect(el.textContent).not.toContain(zhCn['hover.errorSourceExpired'])
+    expect(el.textContent).toContain('目标笔记.md')
+    manager.notifyWatchRejected({ fsPath: 'D:\\notes\\目标笔记.md', instanceId: first.occurrenceId!,
+      reason: 'capacity', sourceLeaseId: 'new-b' })
+    expect(el.textContent).toContain(zhCn['hover.errorWatchCapacity'])
+    expect(el.textContent).not.toContain('![[C]]')
+    manager.dispose()
+  })
+
+  it('#244 深度设置 1→3→1 当场重试并释放 C，旧回包不能复活', () => {
+    const sent: WebviewToHost[] = []
+    let depth = 1
+    const manager = new EmbedCardManager({ ...makeContext(sent), maxDepth: () => depth })
+    const el = mountEmbedBlock(manager, '![[目标笔记]]\n')
+    manager.notifyResult({ ...resultOk(hoverRequestOf(sent), '![[C]]'), sourceLeaseId: 'lease-b', depth: 1 })
+    expect(sent.filter((m) => m.kind === 'hover.request')).toHaveLength(1)
+    expect(el.textContent).toContain(zhCn['hover.errorDepth'])
+    depth = 3
+    manager.setMaxDepth(depth)
+    const cReq = hoverRequestOf(sent)
+    expect(cReq.target).toBe('C')
+    depth = 1
+    manager.setMaxDepth(depth)
+    manager.notifyResult({ ...resultOk(cReq, '# stale'), target: { fsPath: 'D:\\notes\\c.md', relPath: 'c.md' },
+      sourceLeaseId: 'late-c', depth: 2 })
+    expect(el.textContent).toContain(zhCn['hover.errorDepth'])
+    expect(el.textContent).not.toContain('stale')
+    manager.dispose()
+  })
+
+  it('#244 全文与生成 HTML 按实际驻留字节限额拒绝，拒绝不保留 watch', () => {
+    const sent: WebviewToHost[] = []
+    const manager = new EmbedCardManager(makeContext(sent))
+    const el = mountEmbedBlock(manager, '![[目标笔记]]\n')
+    const req = hoverRequestOf(sent)
+    manager.notifyResult({ ...resultOk(req, 'x'.repeat(600 * 1024)), sourceLeaseId: 'large-b' })
+    expect(el.textContent).toContain(zhCn['hover.errorBudget'])
+    expect(sent.some((m) => m.kind === 'hover.watch')).toBe(false)
+    expect(sent).toContainEqual({ kind: 'hover.source.release', sessionId: SESSION.sessionId,
+      docUri: SESSION.docUri, sourceLeaseId: 'large-b' })
+    expect(manager.budgetStats().panelBytes).toBe(0)
+    expect(manager.budgetStats().panelInstances).toBe(0)
+    manager.dispose()
+  })
+
+  it('#244 同目标兄弟 occurrence 各收费；同版本不同正文不假共享驻留', () => {
+    const sent: WebviewToHost[] = []
+    const manager = new EmbedCardManager(makeContext(sent))
+    const text = '![[目标笔记]]\n![[目标笔记]]'
+    const blocks = splitReadingBlocks(text).filter((b) => b.kind === 'embed')
+    for (const block of blocks) {
+      const el = createReadingBlockElement(block, text)
+      document.body.appendChild(el)
+      manager.mountBlock(el)
+    }
+    const reqs = sent.filter((m): m is Extract<WebviewToHost, { kind: 'hover.request' }> =>
+      m.kind === 'hover.request')
+    expect(reqs).toHaveLength(2)
+    manager.notifyResult(resultOk(reqs[0]!, '# one\n'))
+    const one = manager.budgetStats().panelBytes
+    manager.notifyResult(resultOk(reqs[1]!, '# two\n'))
+    expect(manager.budgetStats().panelBytes).toBeGreaterThan(one)
+    expect(manager.budgetStats().panelInstances).toBe(2)
+    manager.dispose()
+    expect(manager.budgetStats()).toMatchObject({ panelBytes: 0, panelInstances: 0 })
+  })
+
+  it('深度卡片打开入口按 B 身份出站（wikilink.activate + sourceDocUri=B）', () => {
+    const sent: WebviewToHost[] = []
+    const manager = new EmbedCardManager(makeContext(sent, 480, 1))
+    const el = mountEmbedBlock(manager, '![[目标笔记]]\n')
     manager.notifyResult(resultOk(hoverRequestOf(sent), TARGET_WITH_EMBED))
-    const ref = el.querySelector<HTMLElement>('a.vsidian-embed-ref')!
-    ref.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    const open = el.querySelectorAll<HTMLElement>(`.${EMBED_CARD_CLASS_NAMES.open}`)[1]!
+    open.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
     const activate = [...sent].reverse().find((m) => m.kind === 'wikilink.activate')
     expect(activate).toMatchObject({
       sessionId: SESSION.sessionId,
@@ -636,6 +821,138 @@ describe('#224 嵌入卡片：订阅、失效分态与有界状态库', () => {
     expect(requestCount(sent)).toBe(afterHeal)
     expect(el.textContent).toContain('重开内容')
     expect(manager.probe()[0]!.state).toBe('content')
+    manager.dispose()
+  })
+})
+
+// #242：卸载必须释放交互监听器；保留旧 DOM 引用不能再激活目标。
+describe('引用挂载释放', () => {
+  it('已卸载卡片的旧打开按钮不再发出消息', () => {
+    const sent: WebviewToHost[] = []
+    const manager = new EmbedCardManager(makeContext(sent))
+    const el = mountEmbedBlock(manager, '![[目标笔记]]\n')
+    const open = el.querySelector<HTMLButtonElement>(`.${EMBED_CARD_CLASS_NAMES.open}`)!
+    manager.unmountBlock(el)
+    const before = sent.length
+    open.click()
+    expect(sent.length).toBe(before)
+    manager.dispose()
+  })
+})
+
+it('#242 在场卡片滚回顶部后刷新，不恢复旧非零位置', async () => {
+  const sent: WebviewToHost[] = []
+  const manager = new EmbedCardManager(makeContext(sent))
+  const el = mountEmbedBlock(manager, '![[目标笔记]]\n')
+  manager.notifyResult(resultOk(hoverRequestOf(sent), TARGET_TEXT))
+  const scroll = el.querySelector<HTMLElement>('.vsidian-embed-card-scroll')!
+  scroll.scrollTop = 41
+  manager.notifyInvalidated({ fsPath: 'D:\\notes\\目标笔记.md', status: 'changed', generation: 1 })
+  manager.notifyResult(resultOk(hoverRequestOf(sent), TARGET_TEXT))
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  scroll.scrollTop = 0
+  manager.notifyInvalidated({ fsPath: 'D:\\notes\\目标笔记.md', status: 'changed', generation: 2 })
+  manager.notifyResult(resultOk(hoverRequestOf(sent), TARGET_TEXT))
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  expect(scroll.scrollTop).toBe(0)
+  manager.dispose()
+})
+
+describe('#246 混排嵌入：块内占位提升挂载（context.sourceText 注入）', () => {
+  function makeMixedContext(sent: WebviewToHost[], text: string, maxHeightPx = 480): EmbedCardContext {
+    return { ...makeContext(sent, maxHeightPx), sourceText: () => text }
+  }
+
+  /** 挂载一个指定 kind 的块并返回其元素 */
+  function mountBlockOfKind(
+    manager: EmbedCardManager,
+    text: string,
+    kind: 'paragraph' | 'list' | 'blockquote',
+  ): HTMLElement {
+    const blocks = splitReadingBlocks(text)
+    const block = blocks.find((b) => b.kind === kind)
+    if (!block) {
+      throw new Error(`文本未产生 ${kind} 块`)
+    }
+    const el = createReadingBlockElement(block, text)
+    document.body.appendChild(el)
+    manager.mountBlock(el)
+    return el
+  }
+
+  it('混排段落：p 拆分 + 卡片升级 + 出站请求带行内精确区间', () => {
+    const sent: WebviewToHost[] = []
+    const text = '前文 ![[目标笔记]] 后文'
+    const manager = new EmbedCardManager(makeMixedContext(sent, text))
+    const el = mountBlockOfKind(manager, text, 'paragraph')
+    const host = el.querySelector<HTMLElement>('.vsidian-reading-embed-mixed')!
+    expect(host).not.toBeNull()
+    expect(host.querySelector(`.${EMBED_CARD_CLASS_NAMES.card}`)).not.toBeNull()
+    expect(el.querySelectorAll('p')).toHaveLength(2)
+    const req = hoverRequestOf(sent)
+    expect(req.target).toBe('目标笔记')
+    expect(req.sourceStart).toBe(text.indexOf('![[目标笔记]]'))
+    expect(req.sourceEnd).toBe(req.sourceStart + '![[目标笔记]]'.length)
+    manager.dispose()
+  })
+
+  it('同段两个嵌入：两个独立实例与请求（occurrence 键按位置区分）', () => {
+    const sent: WebviewToHost[] = []
+    const text = '起 ![[目标笔记]] 中 ![[目标笔记]] 末'
+    const manager = new EmbedCardManager(makeMixedContext(sent, text))
+    const el = mountBlockOfKind(manager, text, 'paragraph')
+    expect(el.querySelectorAll(`.${EMBED_CARD_CLASS_NAMES.card}`)).toHaveLength(2)
+    const reqs = sent.filter((m) => m.kind === 'hover.request')
+    expect(reqs).toHaveLength(2)
+    const first = reqs[0] as Extract<WebviewToHost, { kind: 'hover.request' }>
+    const second = reqs[1] as Extract<WebviewToHost, { kind: 'hover.request' }>
+    expect(first.occurrenceId).not.toBe(second.occurrenceId)
+    expect(first.sourceStart).toBeLessThan(second.sourceStart)
+    manager.dispose()
+  })
+
+  it('列表与引用内提升挂载照常出站', () => {
+    for (const text of ['- 项 ![[目标笔记]] 余', '> 引 ![[目标笔记]] 文']) {
+      const sent: WebviewToHost[] = []
+      const manager = new EmbedCardManager(makeMixedContext(sent, text))
+      const kind = text.startsWith('-') ? 'list' : 'blockquote'
+      const el = mountBlockOfKind(manager, text, kind as 'list' | 'blockquote')
+      const host = el.querySelector<HTMLElement>('.vsidian-reading-embed-mixed')
+      expect(host, text).not.toBeNull()
+      expect(host!.querySelector(`.${EMBED_CARD_CLASS_NAMES.card}`), text).not.toBeNull()
+      expect(hoverRequestOf(sent).target, text).toBe('目标笔记')
+      manager.dispose()
+      document.body.innerHTML = ''
+    }
+  })
+
+  it('块卸载配对撤下混排卡片；重挂零重发已缓存（状态库语义键按区间）', () => {
+    const sent: WebviewToHost[] = []
+    const text = '前文 ![[目标笔记]] 后文'
+    const manager = new EmbedCardManager(makeMixedContext(sent, text))
+    const el = mountBlockOfKind(manager, text, 'paragraph')
+    const req = hoverRequestOf(sent)
+    manager.notifyResult(resultOk(req, TARGET_TEXT))
+    const sentBefore = sent.length
+    manager.unmountBlock(el)
+    expect(document.querySelector(`.${EMBED_CARD_CLASS_NAMES.card}`)).toBeNull()
+    // 重挂：装载缓存命中，零新请求
+    // 重挂：装载缓存命中，零新请求（首载 1 笔之后不再增长）
+    const el2 = mountBlockOfKind(manager, text, 'paragraph')
+    expect(el2.querySelector(`.${EMBED_CARD_CLASS_NAMES.card}`)).not.toBeNull()
+    expect(sent.filter((m) => m.kind === 'hover.request')).toHaveLength(1)
+    expect(sent.length).toBe(sentBefore)
+    manager.dispose()
+  })
+
+  it('sourceText 缺省（无注入）时不升级不误伤：占位保持引用行形态', () => {
+    const sent: WebviewToHost[] = []
+    const text = '前文 ![[目标笔记]] 后文'
+    const manager = new EmbedCardManager(makeContext(sent))
+    const el = mountBlockOfKind(manager, text, 'paragraph')
+    expect(el.querySelector(`.${EMBED_CARD_CLASS_NAMES.card}`)).toBeNull()
+    expect(el.querySelector('[data-vsidian-embed-inner]')).not.toBeNull()
+    expect(sent.filter((m) => m.kind === 'hover.request')).toHaveLength(0)
     manager.dispose()
   })
 })

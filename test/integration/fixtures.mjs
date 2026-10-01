@@ -1084,6 +1084,18 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
     '章节内容。',
     '',
   ].join('\n'), 'utf8')
+  // #248 表格格内嵌入：表头/数据格、转义别名与锚点形态（双模式挂载 +
+  // 格内索引边与 rename 的转义保真观测素材）。别名管道一律写成 `\|`
+  // （GFM 格内转义——不切列），rename 用例与 #222 的改名嵌入目标共用目标
+  writeFileSync(path.join(wsDir, '嵌入表格样例.md'), [
+    '# 嵌入表格样例',
+    '',
+    '| ![[嵌入目标\\|头别名]] | 短列 | 备注列 |',
+    '| --- | --- | --- |',
+    '| 前文 ![[嵌入目标]] 中 ![[改名嵌入目标#章节一\\|格内别名]] 后文 | 普通格 |',
+    '| 无嵌入行 | 123 |',
+    '',
+  ].join('\n'), 'utf8')
   // #224 引用视图同步：独立父文档组（嵌入 + 悬停双链）与目标文档——
   // 未保存修改推送（applyEdit 不保存）、外部磁盘变化（writeFile/unlink/
   // 恢复）、订阅计数回落与自引用防循环的观测素材。目标正文含可断言的
@@ -1108,6 +1120,77 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
     '# 同步目标2标题',
     '',
     '目标二初始内容：外部磁盘变化前的正文。',
+    '',
+  ].join('\n'), 'utf8')
+  // #249 引用组合链：生命周期串联（未保存编辑推送×浮层快速目标切换×
+  // 模式切换往返×面板销毁）的独立观测素材——不与 #224 文档共用（共用
+  // 样本会被早期用例修改保存，SYMBOL_WRAP_CRLF_DOC 教训）。正文含可
+  // 断言的修改前标记文本；父文档两个普通双链作浮层快速切换的目标序列
+  writeFileSync(path.join(wsDir, '组合链父文档.md'), [
+    '# 组合链父文档',
+    '',
+    '悬停目标序列：[[组合链目标A]] 与 [[组合链目标B]]。',
+    '',
+    '![[组合链目标A]]',
+    '',
+    '![[组合链目标B]]',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, '组合链目标A.md'), [
+    '# 组合链目标A标题',
+    '',
+    '组合链A初始正文段：修改前标记。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, '组合链目标B.md'), [
+    '# 组合链目标B标题',
+    '',
+    '组合链B初始正文段。',
+    '',
+  ].join('\n'), 'utf8')
+  // #244 真宿主递归：B/C 分别位于不同目录，下一层同名相对链接只能
+  // 从直接父文件目录解析；D 的 E 为第四层深度占位。
+  mkdirSync(path.join(wsDir, 'ref-depth', 'one'), { recursive: true })
+  mkdirSync(path.join(wsDir, 'ref-depth', 'two'), { recursive: true })
+  mkdirSync(path.join(wsDir, 'ref-depth', 'three'), { recursive: true })
+  writeFileSync(path.join(wsDir, '递归父文档.md'), '![[ref-depth/one/B]]\n', 'utf8')
+  // #245 悬停根 B 复用同一 B→C→D 链；正文父文档自身不挂卡。
+  writeFileSync(path.join(wsDir, '悬停递归.md'), '[[ref-depth/one/B]]\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'ref-depth', 'one', 'B.md'), '# B 一层\n\n![[../two/C]]\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'ref-depth', 'two', 'C.md'), '# C 二层\n\n![[../three/D]]\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'ref-depth', 'three', 'D.md'), '# D 三层\n\n![[E]]\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'ref-depth', 'three', 'E.md'), '# E 四层\n', 'utf8')
+  // #246 混排/列表/引用容器：父文档 A 的嵌入与文字混排、在列表/引用/任务
+  // 项与懒续行内；B 内含「文字混排的 C 引用」——宿主 validChildSource 的
+  // 混排准入（不再要求独占行）沿真实子请求链验证。表格格内与链接域内
+  // 保持占位文本不升级（#248 前）。
+  writeFileSync(path.join(wsDir, '混排嵌入父文档.md'), [
+    '# 混排嵌入父文档',
+    '',
+    '前文段落 ![[ref-depth/one/B 混排]] 后文段落。',
+    '',
+    '- 无序项 ![[ref-depth/one/B 混排]] 项内余文',
+    '- 懒续项',
+    '  续行 ![[ref-depth/one/B 混排]] 续余',
+    '',
+    '- [ ] 任务项 ![[ref-depth/one/B 混排]] 完成度',
+    '',
+    '> 引用前文 ![[ref-depth/one/B 混排]] 引用后文',
+    '',
+    '链接域 [文字 ![[ref-depth/one/B 混排]] 形态](https://e.example/x) 保持占位。',
+    '',
+    '| 列甲 | 列乙 |',
+    '| --- | --- |',
+    '| 单元 | 格内 ![[ref-depth/one/B 混排]] 占位 |',
+    '',
+  ].join('\n'), 'utf8')
+  // B 的混排形态：文字混排 C + 引用内 C（宿主对 B 内混排子来源的准入）
+  writeFileSync(path.join(wsDir, 'ref-depth', 'one', 'B 混排.md'), [
+    '# B 混排一层',
+    '',
+    'B 前文 ![[../two/C]] B 后文。',
+    '',
+    '> 引用内 ![[../two/C]] 引用余',
     '',
   ].join('\n'), 'utf8')
   // 自引用：文档嵌入自身（A 嵌入 A——编辑自身后推送-重载不得循环）

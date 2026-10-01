@@ -114,12 +114,17 @@ vsidian/
 │   │   ├── 2026-09-title-decoration-viewport.md       # 标题切片视口渲染实测数据
 │   │   ├── 2026-09-vault-index-storage.md             # 索引存储选型三档基准解读（#195）
 │   │   ├── 2026-10-hit-reveal-budget.md               # 命中显形重建预算实测（#251）
+│   │   ├── 2026-10-ref-expansion-244.md               # 递归引用驻留实测
+│   │   ├── 2026-10-ref-phase15-249.md                 # 1.5 期收口资源实测汇总（#249）
 │   │   └── data/                                      # 性能探针原始报告数据
 │   │       ├── browser-test-runner.json               # 浏览器调度实测数据
 │   │       ├── hover-embed-perf-host.json             # #225 真宿主编辑阻塞实测数据
 │   │       ├── hover-embed-perf.json                  # #225 状态层嵌入装饰实测数据
 │   │       ├── hover-refresh.json                     # #224 引用视图同步定向测量数据
 │   │       ├── perf-report.json                       # 性能探针原始报告数据
+│   │       ├── ref-expansion-244.json                 # 递归引用实测原始数据
+│   │       ├── ref-phase15-249.json                   # #249 资源实测原始报告数据
+│   │       ├── ref-virtual-243.json                   # 引用长文虚拟挂载原始数据
 │   │       ├── vault-index-storage-bench-recheck.json # #202 三档复测报告
 │   │       └── vault-index-storage-bench.json         # 索引存储基准原始数据（#195）
 │   ├── research/   # 技术调研报告
@@ -245,6 +250,7 @@ vsidian/
 │   │   ├── newline.ts            # CRLF/LF 换行协调器
 │   │   ├── obsidianAlias.ts      # Obsidian 别名桥实现同源表
 │   │   ├── protocol.ts           # 消息协议单一事实源
+│   │   ├── refExpansion.ts       # 引用递归路径与容量预算
 │   │   ├── settings.ts           # 设置定义与读写纯逻辑
 │   │   ├── styleContract.ts      # 公开样式契约清单单一事实源
 │   │   ├── styleContractEn.ts    # 样式参考条目英文覆盖单一事实源
@@ -274,6 +280,7 @@ vsidian/
 │       ├── diagramPopup.ts             # 图表弹窗全屏浮层
 │       ├── diagramPopupGeometry.ts     # 弹窗几何纯函数
 │       ├── embedCard.ts                # Reading 嵌入卡片管理器
+│       ├── embedSlots.ts               # 混排嵌入识别配对与DOM提升纯逻辑
 │       ├── fenceEscape.ts              # 围栏 Tab 越界适配层（#125）
 │       ├── findSession.ts              # 查找匹配纯函数（#14）
 │       ├── fontArrival.ts              # 字体晚到监听（#130）
@@ -337,6 +344,7 @@ vsidian/
 │       ├── readingView.ts              # 阅读视图 DOM 构建与锚点定位
 │       ├── readingViewport.ts          # 阅读视口挂载窗口纯函数
 │       ├── readingVirtualView.ts       # 阅读视图虚拟化装配层
+│       ├── refContentInstance.ts       # 引用内容实例与挂载生命周期
 │       ├── refReadingContent.ts        # 引用内容只读 Reading 装配
 │       ├── settingsMain.ts             # 设置页 webview 入口
 │       ├── settingsPage.css            # 设置页样式
@@ -348,6 +356,7 @@ vsidian/
 │       ├── symbolCompositionState.ts   # IME 选区快照共享状态
 │       ├── symbolWrap.ts               # 选区包裹编辑器适配层（#124）
 │       ├── syncController.ts           # CM6 同步控制器
+│       ├── tableCellEmbed.ts           # 表格格内嵌入三套区间映射
 │       ├── tableCells.ts               # 表格单元格边界、换行与转义
 │       ├── tableColumnWidth.ts         # 表格列宽采样与轨道计划纯函数
 │       ├── tableControls.ts            # 表格可见行控件与拖动

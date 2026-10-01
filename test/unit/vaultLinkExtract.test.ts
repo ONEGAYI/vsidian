@@ -286,3 +286,99 @@ describe('extractVaultEdges：嵌入（#222 独立扫描器接入）', () => {
     ])
   })
 })
+
+describe('#246 混排嵌入边与注释排除（呈现同源核对）', () => {
+  it('混排/列表/引用/任务内的嵌入照常产边（区间为嵌入原文精确边界）', () => {
+    const text = '前文 ![[设计]] 后文\n- 项 ![[目标笔记]] 余\n> 引 ![[项目甲/设计]] 文\n- [ ] 任务 ![[设计]] 毕\n'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    expect(edges.map((e) => [e.kind, e.target, e.resolvedTarget])).toEqual([
+      ['embed', '设计', 'notes/设计.md'],
+      ['embed', '目标笔记', 'notes/目标笔记.md'],
+      ['embed', '项目甲/设计', 'notes/项目甲/设计.md'],
+      ['embed', '设计', 'notes/设计.md'],
+    ])
+    for (const e of edges) {
+      expect(text.slice(e.start, e.end)).toBe(`![[${e.target}]]`)
+    }
+  })
+
+  it('同段多个嵌入按源顺序各产边（occurrence 各有区间）', () => {
+    const text = '起 ![[设计]] 中 ![[目标笔记]] 末 ![[设计]] 收\n'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    expect(edges.map((e) => e.target)).toEqual(['设计', '目标笔记', '设计'])
+    expect(edges[0]!.start).toBeLessThan(edges[1]!.start)
+    expect(edges[1]!.start).toBeLessThan(edges[2]!.start)
+    expect(edges[0]!.start).not.toBe(edges[2]!.start)
+  })
+
+  it('HTML 注释内的双链/嵌入不产边（与阅读呈现的注释剥离同源——行内与跨行注释）', () => {
+    const text = [
+      '前 <!-- ![[设计]] 与 [[目标笔记]] --> 可见 ![[设计]] 后',
+      '<!--',
+      '![[目标笔记]]',
+      '-->',
+    ].join('\n')
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    expect(edges).toHaveLength(1)
+    expect(edges[0]).toMatchObject({ kind: 'embed', target: '设计' })
+    expect(text.slice(edges[0]!.start, edges[0]!.end)).toBe('![[设计]]')
+  })
+})
+
+describe('#248 表格格内嵌入边（转义映射保真）', () => {
+  it('格内 \\| 别名形态产 embed 边：target 为解码路径、区间为源文、别名不进目标', () => {
+    const text = '| a | ![[设计\\|别名]] |\n| --- | --- |\n| b | c |'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    const embed = edges.find((e) => e.kind === 'embed')
+    expect(embed).toBeDefined()
+    expect(embed!.target).toBe('设计')
+    expect(embed!.resolvedTarget).toBe('notes/设计.md')
+    expect(embed!.anchor).toBe('')
+    // 区间 slice 回源文恰为嵌入原文（含 \\|）
+    expect(text.slice(embed!.start, embed!.end)).toBe('![[设计\\|别名]]')
+  })
+
+  it('格内锚点 + 别名组合：anchor 与解码路径拆列正确', () => {
+    const text = '| ![[设计#章节甲\\|显]] | b |\n| --- | --- |\n| c | d |'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    expect(edges.filter((e) => e.kind === 'embed').map((e) => [e.target, e.anchor])).toEqual([
+      ['设计', '章节甲'],
+    ])
+  })
+
+  it('表头格与数据格同产边；同格多引用按源顺序', () => {
+    const text = '| ![[设计]] ![[目标笔记\\|n]] | b |\n| --- | --- |\n| c | d |'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    expect(edges.filter((e) => e.kind === 'embed').map((e) => e.target)).toEqual(['设计', '目标笔记'])
+  })
+
+  it('格内行内代码中的嵌入字面量不产边；跨格伪形态不产边', () => {
+    const codeCell = '| `![[设计]]` | b |\n| --- | --- |\n| c | d |'
+    expect(extractVaultEdges('notes/源.md', codeCell, CTX, resolverOf(FILES, CTX))).toHaveLength(0)
+    const pseudo = '| a ![[x | y]] b |\n| --- | --- |\n| c | d |'
+    expect(extractVaultEdges('notes/源.md', pseudo, CTX, resolverOf(FILES, CTX))).toHaveLength(0)
+  })
+
+  it('普通段落行的 \\| 嵌入仍按原文字面产边（既有语义不扩散）', () => {
+    const text = '段 ![[设计\\|x]] 段\n'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    const embed = edges.find((e) => e.kind === 'embed')
+    expect(embed).toBeDefined()
+    // 非表格行不进入格内解码语义：path 按原文（含 \\）——目标字面与格内
+    // 解码边（'设计'）不同；resolved 的路径规范化容错命中属既有行为
+    expect(embed!.target).toBe('设计\\')
+    expect(embed!.target).not.toBe('设计')
+  })
+})
+
+describe('#248 P1-1 消费者一致性：`]]` 紧贴转义管道的嵌入边端点', () => {
+  it('边区间 slice 严格等于嵌入原文（rename 改写不触达转义反斜杠）', () => {
+    const text = '| ![[设计]]\\|尾 | y |\n| --- | --- |\n| a | b |'
+    const edges = extractVaultEdges('notes/源.md', text, CTX, resolverOf(FILES, CTX))
+    const embed = edges.find((e) => e.kind === 'embed')
+    expect(embed).toBeDefined()
+    expect(embed!.target).toBe('设计')
+    expect(text.slice(embed!.start, embed!.end)).toBe('![[设计]]')
+    expect(text[embed!.end]).toBe('\\')
+  })
+})

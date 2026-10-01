@@ -5,7 +5,7 @@
 // #220 扩展：B 身份资源管理器（sourceDocUri 载荷与结果路由）、浮层内
 // 链接点击跳转、笔记属性区折叠状态机与代码高亮。
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WebviewToHost } from '../../src/shared/protocol'
 import { installLocale } from '../../src/shared/i18n'
 import { zhCn } from '../../src/shared/locales/zh-cn'
@@ -32,6 +32,12 @@ import {
 // 错误分态文案断言需要已装配语言包（生产经数据岛/locale.changed 装配；
 // 单测直接注入 zh-cn 字典——与浏览器套件 buildZhLocaleIsland 同源）
 installLocale('zh-cn', zhCn)
+
+beforeEach(() => {
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+    return this.classList.contains('vsidian-hover-popup-scroll') ? 400 : 0
+  })
+})
 
 if (Range.prototype.getClientRects === undefined) {
   Range.prototype.getClientRects = () => [] as unknown as DOMRectList
@@ -90,6 +96,7 @@ afterEach(() => {
   __resetHoverPopupForTest()
   document.body.innerHTML = ''
   vi.useRealTimers()
+  vi.restoreAllMocks()
 })
 
 describe('悬停开闭时序与请求载荷', () => {
@@ -343,6 +350,22 @@ describe('Esc 与焦点', () => {
 })
 
 describe('内容渲染与只读契约', () => {
+  it('外层滚动区 loading 隐藏后切 content，同步挂载可见首屏', () => {
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('vsidian-hover-popup-scroll') && this.style.display !== 'none' ? 400 : 0
+    })
+    vi.useFakeTimers()
+    const h = makeHarness()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    const req = requestOf(h)
+    const scrollEl = popupEl()!.querySelector<HTMLElement>('.vsidian-hover-popup-scroll')!
+    expect(scrollEl.style.display).toBe('none')
+    notifyHoverResult({ kind: 'hover.result', reqId: req.reqId, instanceId: req.instanceId, ok: true, ...RESULT_OK })
+    expect(scrollEl.style.display).toBe('')
+    expect(popupEl()!.querySelector('.vsidian-reading-heading-1')?.textContent ?? '').toContain('目标笔记')
+  })
+
   it('成功结果以 Reading 块渲染目标全文；任务 checkbox 禁用（无写回能力）', () => {
     vi.useFakeTimers()
     const h = makeHarness()
@@ -1248,5 +1271,17 @@ describe('嵌套行内标记内的重复进入（同锚点不重置开设计时�
     vi.advanceTimersByTime(100) // 新锚点满 300ms
     expect(isHoverPopupOpen()).toBe(true)
     expect(requestOf(h).target).toBe('另一个笔记')
+  })
+})
+
+describe('#242 浮层挂载释放', () => {
+  it('关闭后保留的旧打开按钮不能激活目标', () => {
+    const h = makeHarness()
+    openHoverPopupForKeyboard(h.anchor, { target: '目标笔记', sourceStart: 10, sourceEnd: 30 })
+    const open = popupEl()!.querySelector<HTMLButtonElement>('.vsidian-hover-popup-open')!
+    closeHoverPopup()
+    const before = h.sent.length
+    open.click()
+    expect(h.sent.length).toBe(before)
   })
 })

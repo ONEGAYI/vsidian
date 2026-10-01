@@ -226,6 +226,11 @@ export const EMBED_MAX_HEIGHT_MIN = 160
 export const EMBED_MAX_HEIGHT_MAX = 2000
 /** 步进 20px（滑块粒度） */
 export const EMBED_MAX_HEIGHT_STEP = 20
+/** #244 A is depth 0; B/C/D are depths 1/2/3. */
+export const EMBED_MAX_DEPTH_KEY = 'embed.maxDepth'
+export const EMBED_MAX_DEPTH_DEFAULT = 3
+export const EMBED_MAX_DEPTH_MIN = 1
+export const EMBED_MAX_DEPTH_MAX = 6
 
 /**
  * #237「多光标」开关：Live 正文多选区/副光标能力（Alt+点击添加光标、
@@ -461,6 +466,16 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     descriptionKey: 'setting.readableLineWidth.description',
     zeroLabelKey: 'setting.readableLineWidthFill',
     unit: 'px',
+  },
+  {
+    key: EMBED_MAX_DEPTH_KEY,
+    type: 'number',
+    default: EMBED_MAX_DEPTH_DEFAULT,
+    min: EMBED_MAX_DEPTH_MIN,
+    max: EMBED_MAX_DEPTH_MAX,
+    step: 1,
+    titleKey: 'setting.embedMaxDepth.title',
+    descriptionKey: 'setting.embedMaxDepth.description',
   },
   {
     // #222 嵌入最大高度（embed.* 域 → 编辑器页「显示」组：非 symbol/

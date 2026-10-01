@@ -47,6 +47,26 @@ export interface HoverRefreshPorts {
   ): void
 }
 
+/** Provider watch admission is atomic with source retention in one JS turn. */
+export function admitHoverWatch(
+  coordinator: Pick<HoverRefreshCoordinator, 'canWatch' | 'watch'>,
+  source: { retainHoverSource(sessionId: string, fsPath: string, instanceId: string,
+    sourceLeaseId?: string): boolean },
+  args: { sessionKey: string; sessionId: string; fsPath: string; instanceId: string; sourceLeaseId?: string },
+  releaseRejectedLease: () => void,
+): 'ok' | 'capacity' | 'source' {
+  if (!coordinator.canWatch(args.fsPath)) {
+    releaseRejectedLease()
+    return 'capacity'
+  }
+  if (!source.retainHoverSource(args.sessionId, args.fsPath, args.instanceId, args.sourceLeaseId)) {
+    releaseRejectedLease()
+    return 'source'
+  }
+  coordinator.watch(args.sessionKey, args.fsPath, args.instanceId)
+  return 'ok'
+}
+
 /** 防抖窗内状态（per 目标） */
 interface PendingFlush {
   /** 首个未冲刷事件时刻（强制合并窗口起点） */
@@ -92,11 +112,15 @@ export class HoverRefreshCoordinator {
   }
 
   /** 登记实例订阅（幂等；sessionKey = docUri::sessionId） */
-  watch(sessionKey: string, fsPath: string, instanceId: string): void {
+  watch(sessionKey: string, fsPath: string, instanceId: string): boolean {
     if (this.disposed) {
-      return
+      return false
     }
-    this.registry.watch(sessionKey, fsPath, instanceId)
+    return this.registry.watch(sessionKey, fsPath, instanceId)
+  }
+
+  canWatch(fsPath: string): boolean {
+    return !this.disposed && this.registry.canWatch(fsPath)
   }
 
   /** 释放实例订阅（目标内最后一个实例退场才撤目标） */

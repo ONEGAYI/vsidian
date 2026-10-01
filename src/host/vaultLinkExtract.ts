@@ -29,6 +29,7 @@
 import type { SyntaxNode, Tree } from '@lezer/common'
 import { classifyImageTarget, classifyLinkTarget, type LinkContext } from './linkTarget'
 import { parseWikilinkInner, scanEmbedsInLine, scanWikilinksInLine } from '../shared/wikilink'
+import { scanEmbedsInTableRow } from '../webview/tableCellEmbed'
 import { scanLooseLinksInLine } from '../shared/looseLink'
 import { planVaultLinkPath, type VaultLinkPathContext } from '../shared/vaultLink'
 import { sortEdges, type VaultEdge, type VaultEdgeKind } from '../shared/vaultIndexModel'
@@ -52,9 +53,13 @@ export function isVaultPanelOutlink(edge: VaultEdge, ctx: LinkContext): boolean 
   return target.kind === 'doc' || target.kind === 'anchor'
 }
 
-/** 行扫描类抽取（双链 / 宽松链接）排除的代码上下文（lezer 节点名）——
- *  与 liveLinks 的 INLINE_SCAN_CODE_CONTEXTS 同源复制（该模块带 DOM 依赖
- *  不可被宿主侧引用；集合漂移由抽取测试的代码上下文用例钉住） */
+/** occurrence 起点是否处于代码/注释上下文或 frontmatter 内（源码降级
+ *  边界）：代码集合同 liveLinks.inlineScanSuppressed 同源复制（该模块带
+ *  DOM 依赖不可被宿主侧引用；漂移由抽取测试钉住）。#246 起注释（lezer
+ *  的 Comment/CommentBlock）一并排除——阅读呈现对注释整段剥离（#139），
+ *  行扫描若在注释内产边即与「呈现不可见」分叉（反链出现不可见引用、
+ *  rename 触达用户看不见的位置）；live 行扫描对注释内文本的源码装饰
+ *  不受影响（live 呈现源文，注释文字可见） */
 const INLINE_SCAN_CODE_CONTEXTS = new Set([
   'FencedCode',
   'CodeBlock',
@@ -62,12 +67,17 @@ const INLINE_SCAN_CODE_CONTEXTS = new Set([
   'CodeMark',
   'CodeInfo',
   'InlineCode',
+  'Comment',
+  'CommentBlock',
 ])
 
 /** 存在性解析端口：绝对 fsPath → 根内相对规范路径（`/` 分隔、磁盘真实
  *  大小写形态）或 null（不存在）。大小写语义由实现方按宿主平台决定
  *  （Windows 折叠 / POSIX 严格），与 #196 的 statFileRealPath 端口同型。 */
 export type VaultEdgeResolvePort = (absoluteFsPath: string) => string | null
+
+/** 表格内容行节点名（#248：嵌入行扫描的格内解码分类） */
+const TABLE_ROW_NODE_NAMES = new Set(['TableRow', 'TableHeader'])
 
 /** 名为 name 的直接子节点 */
 function childNamed(node: SyntaxNode, name: string): SyntaxNode | null {
@@ -130,6 +140,16 @@ function scanSuppressed(tree: Tree, from: number, fmEnd: number | null): boolean
     }
   }
   return false
+}
+
+/** 单行的嵌入命中（#248：表格内容行走格内解码扫描——inner 解码语义、
+ *  区间源文；其余行走原始行扫描）。 */
+function embedHitsOfLine(line: string, base: number, tree: Tree): ReturnType<typeof scanEmbedsInLine> {
+  if (!line.includes('![[')) {
+    return []
+  }
+  const isTableRow = chainAt(tree, base).some((node) => TABLE_ROW_NODE_NAMES.has(node.name))
+  return isTableRow ? scanEmbedsInTableRow(line, base) : scanEmbedsInLine(line, base)
 }
 
 /**
@@ -298,11 +318,14 @@ export function extractVaultEdges(
         end: hit.to,
       })
     }
-    for (const hit of scanEmbedsInLine(line, base)) {
+    for (const hit of embedHitsOfLine(line, base, tree)) {
       // #222 嵌入（独立语法角色，行扫描形态学）：索引不设行独占限制——
       // 引用关系按出现抽取（行独占只属呈现侧挂载适配）；代码上下文排除
       // 与双链同一 scanSuppressed 边界；resolve 与锚点拆列同 wikilink 口径
-      //（implicitMd 候选：显式图片等扩展名直接解析该文件）
+      //（implicitMd 候选：显式图片等扩展名直接解析该文件）。#248 起表格
+      // 内容行（TableRow/TableHeader）走格内解码扫描——inner/target 为解码
+      // 语义（`B|别名` 的目标路径不含 `\`），区间为原始源文（含 `\|`）；
+      // 非表格行 `\|` 形态仍按原文字面（既有语义不扩散）
       if (scanSuppressed(tree, hit.from, fmEnd)) {
         continue
       }

@@ -248,3 +248,215 @@ export function embedAtCol(line: string, col: number): EmbedOccurrence | null {
   }
   return null
 }
+
+/**
+ * 位置精确命中（#246 混排嵌入的 inline 渲染入口）：text[start..limit) 从
+ * `![[` 起、到 `]]` 止恰好构成一个合法嵌入时返回该出现，否则 null。判定
+ * 与 scanEmbedsInLine 逐字节同源（prev `[`/`!` 守卫、inner 禁 `[`/`]`/换
+ * 行、parseWikilinkInner 同款降级）——两入口对同一文本的命中集合由
+ * wikilinkEmbed 对拍测试钉住，供 markdown-it inline 规则逐位置试探而不
+ * 引入第二套形态学。base 缺省 0（返回值 from/to 为 start + base 语义）。
+ */
+export function embedAtPosition(text: string, start: number, limit: number, base = 0): EmbedOccurrence | null {
+  if (start + 3 > limit || start < 0 || start >= text.length) {
+    return null
+  }
+  if (text.charCodeAt(start) !== 0x21 /* ! */ ||
+      text.charCodeAt(start + 1) !== 0x5b /* [ */ ||
+      text.charCodeAt(start + 2) !== 0x5b /* [ */) {
+    return null
+  }
+  const prev = start > 0 ? text[start - 1] : ''
+  if (prev === '[' || prev === '!') {
+    return null // 前置守卫与 scanEmbedsInLine 一致（[![[x]] 链接域 / !! 双叹）
+  }
+  const close = text.indexOf(']]', start + 3)
+  if (close < 0 || close + 2 > limit) {
+    return null
+  }
+  const inner = text.slice(start + 3, close)
+  if (/[\[\]\n]/.test(inner) || parseWikilinkInner(inner) === null) {
+    return null
+  }
+  return { from: base + start, to: base + close + 2, inner }
+}
+
+/**
+ * 行内「链接/图片文字域」区间（#247 Live 嵌入发射排除）：保守方括号配对
+ * 形态学——`[`（前缀非 `\`）压栈、`]` 弹栈，弹出后**紧邻** `(`（内联目标）
+ * 或 `[`（引用式）的配对域记为链接文字域，区间 = 括号内文字（不含两侧
+ * 括号字符）。双链/嵌入自身的 `[[`…`]]` 按普通括号计数（压二弹二自平衡，
+ * 不产域）；嵌套括号域取外层闭合配对。
+ *
+ * 与 markdown-it 链接识别同向（Reading 侧 #246 钉住：链接文字域内嵌入
+ * 产占位但不升级，Live 侧镜像为不挂卡保持源文）；边缘形态分叉方向是
+ * 「误判为链接域 → 保持源文」，属安全降级（宁可少挂卡不误挂）。图片形态
+ * `![alt](url)` 的 alt 域同样命中（markdown-it 图片 alt 内不产卡片 DOM，
+ * Live 侧同向保持源文）。
+ *
+ * 本导出**不区分** image/link 域（全部紧邻域都返回——发射排除的保守口径：
+ * 误判方向是少挂卡的安全侧）。仅图片 alt 的精确子集（Reading 配对排除用
+ * ——误排除方向是整块降级，必须宁窄勿宽）见 imageAltRangesInLine。
+ */
+export function linkLabelRangesInLine(line: string, base = 0): Array<{ from: number; to: number }> {
+  if (!line.includes('[')) {
+    return []
+  }
+  return labelRangeCandidates(line, base).map(({ from, to }) => ({ from, to }))
+}
+
+/** 一次栈配对扫描的完整域产物（linkLabelRangesInLine 与
+ *  imageAltRangesInLine 的共享核心——形态学单一实现，两入口各取所需） */
+interface LabelRangeCandidate {
+  from: number
+  to: number
+  /** 开括号 `[` 的前一字符为 `!`（图片 alt 候选）。不做 `\!` 转义排除：
+   *  markdown-it 对 `\![alt](url)` 同样按图片解析（`\!` 的 `!` 兼作前缀，
+   *  实测 alt 走属性不落 DOM），转义判定反而与渲染分叉 */
+  image: boolean
+  /** `]` 后紧邻 `[`（引用式）时其内的原始 label（未闭合取到行尾的尽力
+   *  提取）；行内式（`(`）为 null */
+  refLabel: string | null
+  /** 域的链接/图片外围形态在行内闭合：行内式 = 目标 `(...)` 按
+   *  inlineTargetClosed 判定；引用式 = label `[...]` 有闭合 `]` */
+  targetClosed: boolean
+}
+
+/** 行内链接/图片目标 `(...)` 的闭合判定（与 markdown-it 目标语法同向、
+ *  宁窄勿宽）：尖括号包裹 `<…>` 后紧邻 `)`；或裸目标（无空白无括号）到
+ *  `)`；或裸目标后空白接 title（`"…"` / `'…' / `(…)`）再 `)`。不认定的
+ *  形态（裸目标含空白、未闭合、嵌套括号目标等）返回 false——markdown-it
+ *  对这些形态不产链接/图片（字面文本、占位照落 DOM），Reading 配对面
+ *  不得排除（误排除 = 整块降级回归） */
+function inlineTargetClosed(line: string, open: number): boolean {
+  if (line[open + 1] === '<') {
+    const close = line.indexOf('>', open + 2)
+    return close >= open + 2 && line[close + 1] === ')'
+  }
+  let j = open + 1
+  while (j < line.length) {
+    const ch = line[j]!
+    if (ch === ')') {
+      return true
+    }
+    if (ch === '(' || /\s/.test(ch)) {
+      break
+    }
+    j += 1
+  }
+  if (j >= line.length || line[j] === '(') {
+    return false
+  }
+  // 裸目标后空白接 title：终结符之后须紧邻 ')'
+  let k = j
+  while (k < line.length && /\s/.test(line[k]!)) {
+    k += 1
+  }
+  const quote = line[k]
+  if (quote === '"' || quote === "'") {
+    const end = line.indexOf(quote, k + 1)
+    return end > k && line[end + 1] === ')'
+  }
+  if (quote === '(') {
+    let depth = 0
+    for (let m = k; m < line.length; m += 1) {
+      const ch = line[m]!
+      if (ch === '(') {
+        depth += 1
+      } else if (ch === ')') {
+        depth -= 1
+        if (depth === 0) {
+          return line[m + 1] === ')'
+        }
+      }
+    }
+  }
+  return false
+}
+
+/** 栈配对核心：`[`（前缀非 `\`）压栈、`]` 弹栈，弹出后紧邻 `(` 或 `[` 的
+ *  配对域产候选（from/to = 括号内文字区间；嵌套域取外层闭合配对） */
+function labelRangeCandidates(line: string, base: number): LabelRangeCandidate[] {
+  const stack: Array<{ pos: number; image: boolean }> = []
+  const out: LabelRangeCandidate[] = []
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i]!
+    if (ch === '\\') {
+      i += 1 // 反斜杠转义下一字符（含 `[`/`]`）——保守跳过
+      continue
+    }
+    if (ch === '[') {
+      stack.push({ pos: i, image: i > 0 && line[i - 1] === '!' })
+      continue
+    }
+    if (ch === ']') {
+      const open = stack.pop()
+      if (open === undefined) {
+        continue
+      }
+      const next = line[i + 1]
+      if (next === '(') {
+        out.push({
+          from: base + open.pos + 1,
+          to: base + i,
+          image: open.image,
+          refLabel: null,
+          targetClosed: inlineTargetClosed(line, i + 1),
+        })
+      } else if (next === '[') {
+        const close = line.indexOf(']', i + 2)
+        out.push({
+          from: base + open.pos + 1,
+          to: base + i,
+          image: open.image,
+          refLabel: line.slice(i + 2, close >= 0 ? close : line.length),
+          targetClosed: close >= 0,
+        })
+      }
+    }
+  }
+  return out
+}
+
+/**
+ * **仅图片 alt 域**的区间（Reading 嵌入配对排除专用——markdown-it 把图片
+ * alt 渲染为属性、占位不落 DOM，occurrence 扫描侧必须同集合对齐，否则
+ * 配对失败整块降级牵连同块合法嵌入）。与 linkLabelRangesInLine 共享同一
+ * 栈配对核心（形态学单一实现），在此收紧为「宁窄勿宽」：误产域会把
+ * markdown-it 认定为字面文本的形态（占位照落 DOM）错排除，反向造成
+ * 整块降级回归。产域条件（全部经 markdown-it 实测对齐）：
+ * - 开括号 `[` 前是 `!`（图片候选；`\!` 前缀 markdown-it 同按图片解析）
+ * - 行内式：目标 `(...)` 闭合（裸目标无空白 / 尖括号 / title 形态）
+ * - 引用式：label `[...]` 闭合且 isDefinedRef 判定 ref 已定义（markdown-it
+ *   对未定义 ref 不产图片、按字面文本渲染占位照落 DOM——不排除）
+ *
+ * isDefinedRef 缺省时引用式域一律不产（无 refmap 可查即保守放弃）；回调
+ * 仅在行内存在引用式图片域时被调（惰性——调用方可按需延迟 refmap 提取）。
+ */
+export function imageAltRangesInLine(
+  line: string,
+  base = 0,
+  isDefinedRef?: (label: string) => boolean,
+): Array<{ from: number; to: number }> {
+  if (!line.includes('![')) {
+    return []
+  }
+  const out: Array<{ from: number; to: number }> = []
+  for (const c of labelRangeCandidates(line, base)) {
+    if (!c.image || !c.targetClosed) {
+      continue
+    }
+    if (c.refLabel !== null && isDefinedRef?.(c.refLabel) !== true) {
+      continue
+    }
+    out.push({ from: c.from, to: c.to })
+  }
+  return out
+}
+
+/** 引用 label 的 markdown-it 同款归一（normalizeReference 逐字节对齐：
+ *  trim + 空白折叠 + lower→upper 的 Unicode 简单折叠）——形态学回调里的
+ *  原始 label 与 refmap 键（已归一）比较前必须走同一函数 */
+export function normalizeReferenceLabel(label: string): string {
+  return label.trim().replace(/\s+/g, ' ').toLowerCase().toUpperCase()
+}

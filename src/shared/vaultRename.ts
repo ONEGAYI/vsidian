@@ -507,15 +507,33 @@ function buildBracketPathEdit(
   const targetPart = pipeAt >= 0 ? inner.slice(0, pipeAt) : inner
   const hashAt = targetPart.indexOf('#')
   const pathRaw = hashAt >= 0 ? targetPart.slice(0, hashAt) : targetPart
-  if (pathRaw.trim() !== edge.target) {
-    return null
+  if (pathRaw.trim() === edge.target) {
+    // 双链形态学不做 URL 编码（字面直写）；省略扩展名已在主流程剥除
+    return {
+      start: baseOffset + openLen,
+      end: baseOffset + openLen + pathRaw.length,
+      replacement: newRel,
+    }
   }
-  // 双链形态学不做 URL 编码（字面直写）；省略扩展名已在主流程剥除
-  return {
-    start: baseOffset + openLen,
-    end: baseOffset + openLen + pathRaw.length,
-    replacement: newRel,
+  // #248 表格格内嵌入（转义管道形态）：首个 `|` 分割把 `\` 留进了路径
+  //（`B\|别名` → pathRaw=`B\`），与解码语义的边 target（`B`）不匹配——按
+  // 转义管道（`\|`，pipe 前恰一枚未配对反斜杠）分割再定位一次；替换区间
+  // 只覆盖路径段（不含 `\|`），别名与锚点原文保真。非表格行的原文字面边
+  //（target 含 `\`）已在上方首分割命中，不进入本分支。
+  const escapedPipe = inner.indexOf('\\|')
+  if (escapedPipe >= 0) {
+    const escTargetPart = inner.slice(0, escapedPipe)
+    const escHashAt = escTargetPart.indexOf('#')
+    const escPathRaw = escHashAt >= 0 ? escTargetPart.slice(0, escHashAt) : escTargetPart
+    if (escPathRaw.trim() === edge.target) {
+      return {
+        start: baseOffset + openLen,
+        end: baseOffset + openLen + escPathRaw.length,
+        replacement: newRel,
+      }
+    }
   }
+  return null
 }
 
 /** mdlink/image/refdef：替换 href 的路径部分（保留 query/fragment/标题）。

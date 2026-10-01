@@ -14,13 +14,14 @@ import MarkdownIt, { type Env, type StateInline, type Token } from 'markdown-it'
 import katexPlugin from '@vscode/markdown-it-katex'
 import { MATH_CLASS_NAMES, stripInlineTexTicks } from '../shared/math'
 import { GRAPHIC_LANG_ATTR, MERMAID_CLASS_NAMES, MERMAID_CODE_ATTR, MERMAID_STATE_ATTR, isRenderedFenceInfo } from '../shared/mermaid'
-import { WIKILINK_CLASS_NAMES, parseWikilinkInner } from '../shared/wikilink'
+import { WIKILINK_CLASS_NAMES, embedAtPosition, parseWikilinkInner } from '../shared/wikilink'
 import { parseLooseLinkAt } from '../shared/looseLink'
 import { joinObsidianDomAliasForReading } from '../shared/obsidianAlias'
 import { escapeHtml } from '../shared/frontmatterTable'
 import { renderMathHtml } from './mathRenderCache'
 import { highlightFlankOk } from './markdownDoc'
 import { tableCellBreakLength } from './tableCells'
+import { decodeCellView } from './tableCellEmbed'
 
 /** 渲染环境：行首/行尾 offset 表（lineStarts[i]/lineEnds[i] 为第 i 行界） */
 export interface ReadingRenderEnv {
@@ -39,6 +40,9 @@ export const TASK_ITEM_RE = /^(\s*)(?:[-*+]|\d{1,9}[.)])\s+\[([ xX])\]\s/
 export const READING_MARKDOWN_CLASS_NAMES = {
   taskItem: 'vsidian-reading-task',
   taskCheckbox: 'vsidian-reading-task-checkbox',
+  /** #246 混排嵌入占位（inline 规则产出的 span；升级后由挂载适配替换
+   *  为块级卡片宿主，未升级/不可提升时保持行内文本形态） */
+  embedSlot: 'vsidian-embed-slot',
 } as const
 
 /**
@@ -307,6 +311,49 @@ function vsidianHighlightInlineRule(state: StateInline, silent: boolean): boolea
   return true
 }
 
+/**
+ * 混排嵌入 inline 规则（#246）：`![[…]]` 在段落/列表/引用等容器的行内
+ * 内容中出现时渲染为**行内占位 span**（携带 data-vsidian-embed-inner 与
+ * 显示文本），块挂载后由 embedSlots 提升为块级卡片宿主。识别判定与
+ * shared/wikilink 的 scanEmbedsInLine 逐字节同源（embedAtPosition——prev
+ * `[`/`!` 守卫与非法形态降级一致；两入口命中集合由对拍测试钉住）。
+ *
+ * 占位是 span 而非 a：链接文字域内的嵌入（`[文字 ![[B]] 文字](url)`——
+ * 行扫描形态学命中）在 a 内嵌 a 属非法 DOM，span 在任何行内上下文合法；
+ * 提升层（promoteEmbedSlot）以 a 祖先检查拒绝链接域内升级，占位保持
+ * 行内文本（点击走外层链接语义）。代码 span 已由 backticks 规则先行
+ * 消费（markdown-it 默认链序），围栏/缩进代码不进 inline 规则——代码
+ * 字面量不产占位（不通过删守卫把字面量升级为引用）。表格格内产占位
+ * （合法行内），#248 接入前由提升层的 table 祖先检查保持文本形态。
+ */
+function vsidianEmbedInlineRule(state: StateInline, silent: boolean): boolean {
+  const hit = embedAtPosition(state.src, state.pos, state.posMax)
+  if (!hit) {
+    return false
+  }
+  if (!silent) {
+    const token = state.push('vsidian_embed_slot', 'span', 0)
+    token.content = hit.inner
+  }
+  state.pos = hit.to
+  return true
+}
+
+/** 占位 span 的 HTML（inner 随 data 属性携带——挂载配对的单一来源）。
+ *  不挂 vsidian-wikilink 类：双链样式入口是 a 级选择器（span 不命中），
+ *  点击委托也以 href 为准——span 的独立呈现入口是 vsidian-embed-slot
+ *  （未升级/不可提升时按占位文字形态呈现，链接域内随外层 a 走链接） */
+function embedSlotHtml(inner: string): string {
+  const parsed = parseWikilinkInner(inner)
+  if (!parsed) {
+    return escapeHtml(`![[${inner}]]`) // 防御：规则判定已过滤非法形态
+  }
+  return (
+    `<span class="${READING_MARKDOWN_CLASS_NAMES.embedSlot}"` +
+    ` data-vsidian-embed-inner="${escapeHtml(inner)}">![[${escapeHtml(parsed.display)}]]</span>`
+  )
+}
+
 /** 创建阅读渲染器（安全配置锁定；渲染规则一次性装配，实例应复用） */
 export function createMarkdownRenderer(): InstanceType<typeof MarkdownIt> {
   const md = new MarkdownIt({
@@ -318,6 +365,9 @@ export function createMarkdownRenderer(): InstanceType<typeof MarkdownIt> {
   // #11 双链规则先于 link（[t](u)）：`[[…]]` 在 CommonMark 中只是普通文本，
   // 必须在文本规则消费前拦截
   md.inline.ruler.before('link', 'vsidian_wikilink', vsidianWikilinkInlineRule)
+  // #246 混排嵌入占位：插在标准 link 之前（image 在 link 之后，同被覆盖）；
+  // backticks 已先消费（默认链序），代码 span 内不产占位
+  md.inline.ruler.before('link', 'vsidian_embed_slot', vsidianEmbedInlineRule)
   // #152 宽松内联链接（目标含未编码空格，Obsidian 兼容）：插在标准 link
   // 之前（image 在 link 之后，同被覆盖）；后插者更靠近 link——双链先判定
   md.inline.ruler.before('link', 'vsidian_loose_link', vsidianLooseLinkInlineRule)
@@ -327,10 +377,19 @@ export function createMarkdownRenderer(): InstanceType<typeof MarkdownIt> {
   // shared/math.ts 对齐）；渲染规则覆盖为带稳定类名 + 原文降级
   md.use(katexPlugin, { throwOnError: true })
   installMathRenderers(md)
+  // #246 混排嵌入占位渲染：token 无 children，inner 存 content 由本规则
+  // 产出完整 span（显示文本 + data-inner——挂载配对与未升级降级的同源）
+  md.renderer.rules['vsidian_embed_slot'] = (tokens, idx) => embedSlotHtml(tokens[idx]!.content)
   // #60 Mermaid：fence 规则覆盖为容器输出（挂载后经 DOM API 渲染 SVG）
   installMermaidFenceRenderer(md)
   // 编辑态把格内回车存成 br。阅读态只在表格 inline token 里重新解析
   // 无属性 br；全局 html:false 继续转义其他 HTML，代码片段由解析器保留字面值。
+  // #248 格内嵌入：cell 内容含 `![[` 且含 `\|` 时，先按格内语义解码转义
+  // 管道（decodeCellView——跳过行内代码 span）再重解析——否则 markdown-it
+  // 的 escape 规则先消费 `\|`，把 `![[B\|别名]]` 拆断为 `![[B` + `|` + `别名]]`，
+  // 嵌入占位（vsidian_embed_slot）不连续无法命中；解码后占位规则产出的
+  // data-vsidian-embed-inner 为解码语义（`B|别名`），与 embedSlots 的
+  // occurrence 扫描（scanEmbedsInTableRow 同源解码）配对一致。
   md.inline.ruler.before('html_inline', 'vsidian_table_break', (state, silent) => {
     if (!state.env.vsidianTableCell) return false
     const length = tableCellBreakLength(state.src, state.pos)
@@ -344,9 +403,13 @@ export function createMarkdownRenderer(): InstanceType<typeof MarkdownIt> {
     for (const token of state.tokens) {
       if (token.type === 'table_open') inTable = true
       if (token.type === 'table_close') inTable = false
-      if (inTable && token.type === 'inline' && /<br/i.test(token.content)) {
+      if (inTable && token.type === 'inline') {
+        const content = token.content
+        const decode = content.includes('![[') && content.includes('\\|')
+        const reparsed = decode ? decodeCellView(content).text : content
+        if (!decode && !/<br/i.test(content)) continue
         token.children = []
-        md.inline.parse(token.content, md, { ...state.env, vsidianTableCell: true }, token.children)
+        md.inline.parse(reparsed, md, { ...state.env, vsidianTableCell: true }, token.children)
       }
     }
   })

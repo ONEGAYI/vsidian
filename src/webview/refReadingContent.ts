@@ -4,8 +4,8 @@
 // 属性区折叠与错误分态文案在此单一实现，两侧消费不各自复制（防漂移）。
 //
 // 职责边界（ADR-0009「内容视图」层）：本模块只负责「引用内容块进 DOM 时
-// 装配成什么」，不判定容器（浮层/嵌入卡片）的布局、生命周期与挂载时机
-// ——那些归各自容器模块（hoverPopup / embedCard）。
+// 装配成什么」。内容实例与配对释放在 refContentInstance，布局和挂载时机
+// 仍归各自容器模块（hoverPopup / embedCard）。
 //
 // 复用先例与行为来源：#220 的浮层装配（B 身份图片、朴素代码高亮、fm
 // 折叠交互——标题行悬停热区 + 按钮唯一操作入口、刷新不重置展开态）；
@@ -21,6 +21,16 @@ import { decorateReadingCodeCard, isReadingCodeBlock } from './readingCodeCard'
 import { buildFrontmatterHeaderHtml, escapeHtml } from '../shared/frontmatterTable'
 import { t } from '../shared/i18n'
 import type { HoverPreviewFailReason, WebviewToHost } from '../shared/protocol'
+
+/** 每次送达的临时租约单独释放；不把 token 缓存在共享内容数据中。 */
+export function releaseRefSourceLease(deps: {
+  session(): { sessionId: string | undefined; docUri: string | undefined }
+  send(message: WebviewToHost): void
+}, sourceLeaseId?: string): void {
+  const session = deps.session()
+  if (sourceLeaseId === undefined || !session.sessionId || !session.docUri) return
+  deps.send({ kind: 'hover.source.release', sessionId: session.sessionId, docUri: session.docUri, sourceLeaseId })
+}
 
 /** #220 笔记属性区稳定类名（样式契约 chrome 域 hover-fm-section 条目同源；
  *  #222 起嵌入卡片同款复用——引用内容专属样式入口，主阅读视图不受影响） */
@@ -94,6 +104,8 @@ export function mountRefContentBlock(
     codeHighlight: boolean
     /** 属性区折叠状态机；null = 非全文范围（不施加属性区） */
     fm: RefFmController | null
+    /** 内容挂载的配对释放入口；旧调用方可继续只做装配。 */
+    onDispose?: (cleanup: () => void) => void
   },
 ): void {
   for (const box of Array.from(el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))) {
@@ -120,14 +132,14 @@ export function mountRefContentBlock(
     })
   }
   if (opts.fm) {
-    applyRefFmSection(el, opts.fm)
+    applyRefFmSection(el, opts.fm, opts.onDispose)
   }
 }
 
 /** #220 笔记属性区施加（幂等；虚拟化重挂载时按 controller.expanded()
  *  重建）：仅全文引用（fmActive 由调用方判定）；成型态复用阅读侧标题栏，
  *  降级态合成同构标题栏（源码原文不丢弃，仅收起时隐藏） */
-export function applyRefFmSection(el: HTMLElement, fm: RefFmController): void {
+export function applyRefFmSection(el: HTMLElement, fm: RefFmController, onDispose?: (cleanup: () => void) => void): void {
   if (!el.classList.contains(READING_CLASS_NAMES.frontmatter)) {
     return
   }
@@ -147,7 +159,7 @@ export function applyRefFmSection(el: HTMLElement, fm: RefFmController): void {
     btn.className = REF_FM_CLASS_NAMES.toggle
     btn.innerHTML = REF_FM_TOGGLE_ICON_SVG
     const toggleBtn = btn
-    toggleBtn.addEventListener('click', (event) => {
+    const onClick = (event: MouseEvent): void => {
       // 热区语义：按钮是唯一操作入口（标题行 hover 只负责显示按钮）；
       // 阻断冒泡以免触发容器级点击语义
       event.stopPropagation()
@@ -156,7 +168,9 @@ export function applyRefFmSection(el: HTMLElement, fm: RefFmController): void {
       if (section) {
         applyFmCollapsedTo(section, expanded)
       }
-    })
+    }
+    toggleBtn.addEventListener('click', onClick)
+    onDispose?.(() => toggleBtn.removeEventListener('click', onClick))
     header.appendChild(btn)
   }
   applyFmCollapsedTo(el, fm.expanded())
@@ -192,5 +206,13 @@ export function refErrorText(reason: HoverPreviewFailReason, target: string, anc
       return t('hover.errorReadFailed')
     case 'anchor-missing':
       return t('hover.errorAnchorMissing', { target, anchor: anchor ?? '' })
+    case 'source-expired':
+      return t('hover.errorSourceExpired')
+    case 'cycle':
+      return t('hover.errorCycle')
+    case 'depth':
+      return t('hover.errorDepth')
+    case 'budget':
+      return t('hover.errorBudget')
   }
 }

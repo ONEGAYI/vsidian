@@ -9,6 +9,8 @@ import { bootLocaleFromDocument } from '../../src/webview/localeBoot'
 import { keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
 import '../../src/webview/main.css'
+import { getRefContentLifecycleStats, getRefReadingBlockCacheStats } from '../../src/webview/refContentInstance'
+import { openHoverPopupFor, openHoverPopupForKeyboard } from '../../src/webview/hoverPopup'
 
 bootLocaleFromDocument()
 
@@ -25,8 +27,25 @@ const bridge: VsCodeBridge = {
 }
 const controller = new WebviewSyncController(bridge)
 controller.mount(document.getElementById('app')!, [keymap.of(defaultKeymap)])
+let panelOpened = 0
 
 Object.assign(window, {
+  openHoverPanel() {
+    const anchor = document.createElement('button')
+    anchor.id = 'hover-panel-anchor'
+    document.body.appendChild(anchor)
+    openHoverPopupFor(anchor, { target: 'B', sourceStart: 0, sourceEnd: 0,
+      directFsPath: 'D:/notes/B.md', openAction: () => { panelOpened++ } })
+  },
+  panelOpenCount() { return panelOpened },
+  openHoverKeyboard(target: string) {
+    const anchor = document.querySelector<HTMLElement>('a.vsidian-wikilink')!
+    const trigger = document.createElement('button')
+    trigger.id = 'hover-keyboard-trigger'
+    document.body.appendChild(trigger)
+    trigger.focus()
+    openHoverPopupForKeyboard(anchor, { target, sourceStart: 0, sourceEnd: target.length + 4 })
+  },
   /** 装配父文档并切 Reading（宿主消息与生产同入口） */
   initHoverDoc(text: string) {
     controller.handleHostMessage({
@@ -41,6 +60,33 @@ Object.assign(window, {
   /** 已出站消息快照（hover.request / image.request / *.activate / edit.request 观测） */
   hoverSent(): WebviewToHost[] {
     return [...sent]
+  },
+  refCacheStats() { return getRefReadingBlockCacheStats() },
+  refLifecycleStats() { return getRefContentLifecycleStats() },
+  hoverVirtualStats() {
+    const before = sent.length
+    controller.handleHostMessage({ kind: 'view.state.request' })
+    const state = sent.slice(before).find((message) => message.kind === 'view.state')
+    return state?.kind === 'view.state' ? state.hoverPreview?.viewStats ?? null : null
+  },
+  hoverViewportSnapshot() {
+    const scrollEl = document.querySelector<HTMLElement>('.vsidian-hover-popup-scroll')
+    if (!scrollEl) return { visible: [], scrollTop: 0, scrollHeight: 0, clientHeight: 0 }
+    const clip = scrollEl.getBoundingClientRect()
+    const visible = Array.from(scrollEl.querySelectorAll<HTMLElement>('.vsidian-reading-block'))
+      .flatMap((block) => {
+        const box = block.getBoundingClientRect()
+        const top = Math.max(box.top, clip.top)
+        const bottom = Math.min(box.bottom, clip.bottom)
+        if (bottom - top < 3) return []
+        const hit = document.elementFromPoint(Math.min(box.left + 8, clip.right - 2), (top + bottom) / 2)
+        const style = getComputedStyle(block)
+        return [{ text: (block.textContent ?? '').trim(), painted:
+          style.visibility === 'visible' && style.display !== 'none' && style.opacity !== '0' &&
+          hit !== null && block.contains(hit) }]
+      })
+    return { visible, scrollTop: scrollEl.scrollTop, scrollHeight: scrollEl.scrollHeight,
+      clientHeight: scrollEl.clientHeight }
   },
   /** 注入宿主消息（hover.result / image.result / image.invalidate 等与真实
    *  handleHostMessage 同入口——#220 来源资源与属性区场景的驱动通道） */
