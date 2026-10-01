@@ -271,6 +271,25 @@ test('VSIX 检查：快速操作制作源不得混入 VSIX', () => {
   }
 })
 
+test('VSIX 检查：未知顶层条目报错（本地工具/日志混入防线——2026-10 实证 .zcode、.codex-remote-attachments 与历史发布日志混入且黑名单拦不住）', () => {
+  for (const name of [
+    'extension/.zcode/plans/plan.md',
+    'extension/.zcodeignore',
+    'extension/.codex-remote-attachments/01a0e708/attachment.bin',
+    'extension/release-ci-watch-0.4.0.log',
+    'extension/未知新目录/asset.png',
+  ]) {
+    const result = inspectVsixEntries([...makeEntries(), { size: 500, name }])
+    assert.equal(result.ok, false, `${name} 应被拒绝`)
+    assert.ok(result.errors.some((e) => e.includes('未知顶层条目')), `${name} 应报未知顶层条目`)
+  }
+})
+
+test('VSIX 检查：顶层白名单目录内的资产不误伤（out/ 与 media/ 各有专项检查）', () => {
+  const result = inspectVsixEntries([...makeEntries(), { size: 500, name: 'extension/media/style-reference/style-reference.json' }])
+  assert.ok(!result.errors.some((e) => e.includes('未知顶层条目')), 'media/ 顶层不应误报')
+})
+
 test('VSIX 检查：缺少必需运行时资产报错（大小写不敏感匹配）', () => {
   const entries = makeEntries().map((e) =>
     e.name === 'extension/package.nls.json' ? { ...e, name: 'extension/other.json' } : e,

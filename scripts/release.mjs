@@ -281,6 +281,31 @@ export function inspectVsixEntries(entries, options = {}) {
     }
   }
 
+  // 顶层白名单（2026-10 实证 .zcode、.codex-remote-attachments 与历史发布
+  // 日志混入包内且黑名单模式拦不住——git 忽略不等于 vsce 排除）：extension/
+  // 下只允许已知顶层目录与文件，未知顶层条目一律拒绝。新增根级运行时资产
+  // 须同步登记此处；本地工具产物应进 .vscodeignore 排除而非白名单。
+  const allowedTop = new Set([
+    'out',
+    'media',
+    'package.json',
+    'package.nls.json',
+    'package.nls.zh-cn.json',
+    'readme.md',
+    'changelog.md',
+    'license.txt',
+    'license',
+  ])
+  for (const e of entries) {
+    if (!/^extension\//i.test(e.name)) continue // 结构文件（vsixmanifest / Content_Types）由 REQUIRED_ROOT 把关
+    const rel = e.name.slice('extension/'.length).toLowerCase()
+    if (!rel) continue
+    const top = rel.split('/')[0]
+    if (!allowedTop.has(top)) {
+      errors.push(`未知顶层条目 ${e.name}（新根级资产须登记白名单；本地工具/日志应进 .vscodeignore 排除）`)
+    }
+  }
+
   for (const e of entries) {
     for (const [pattern, label] of FORBIDDEN_PATTERNS) {
       if (pattern.test(e.name.toLowerCase())) errors.push(`禁止文件 ${e.name}（${label}）`)

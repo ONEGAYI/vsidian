@@ -35,6 +35,12 @@ package-lock.json
 # 本地实施工件（依赖安装日志、验证日志目录）不进包（#132 实证 npm-install.log 曾混入）
 npm-install.log
 logs/**
+# 本地 AI 工具产物与历史发布日志不进包（2026-10 实证 .zcode、.codex-remote-attachments
+# 与 release-*.log 混入 VSIX——.gitignore 忽略不等于 vsce 排除，二者规则独立）
+.zcode/**
+.zcodeignore
+.codex-remote-attachments/**
+**/*.log
 
 # 原图仅存仓库溯源（1254×1254），VSIX 用 media/vsidian-icon-256.png
 media/vsidian-icon.png
