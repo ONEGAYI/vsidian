@@ -138,10 +138,19 @@ describe('侧栏与编辑器页组结构（#264）', () => {
     expect(group.querySelectorAll('[data-setting-key]')).toHaveLength(0)
   })
 
-  it('分词组无图标槽位字形（留空待 #265 生图接入），组标题无 svg', () => {
+  it('分词组标题接 #265 生图资产：generated-icon 槽在文字前且纯装饰（无内联 svg）', () => {
     const { parent } = makeProductionView()
     clickNav(parent, zhCn['settings.editorCategory'])
-    expect(wordSegmentGroup(parent).querySelector('.vsidian-settings-group-title svg')).toBeNull()
+    const title = wordSegmentGroup(parent).querySelector('.vsidian-settings-group-title')!
+    const glyph = title.querySelector<HTMLElement>('.vsidian-settings-generated-icon')
+    expect(glyph, '分词组标题应带生图资产图标槽').toBeTruthy()
+    // 图标在前、纯装饰（aria-hidden），文字节点随后
+    expect(title.firstElementChild).toBe(glyph)
+    expect(glyph!.dataset.icon).toBe('wordSegment')
+    expect(glyph!.getAttribute('aria-hidden')).toBe('true')
+    expect(title.textContent).toBe(zhCn['wordSegment.title'])
+    // 分词资产不走内联字形路径（svg 为空），由 CSS 按明暗主题加载
+    expect(title.querySelector('svg')).toBeNull()
   })
 })
 

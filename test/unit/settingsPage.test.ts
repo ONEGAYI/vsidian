@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest'
 import {
   SettingsPageView,
   SETTINGS_PAGE_CLASS_NAMES,
+  type SettingsPageEditorGroup,
 } from '../../src/webview/settingsPageView'
 import { PRODUCTION_SETTING_DEFINITIONS, type SettingDefinition } from '../../src/shared/settings'
 import { installLocale } from '../../src/shared/i18n'
@@ -18,6 +19,7 @@ import { CssSnippetSettingsSection } from '../../src/webview/cssSnippetSettings'
 import { StyleReferenceSection } from '../../src/webview/styleReferenceSettings'
 import { KeybindingSettingsSection } from '../../src/webview/keybindingSettings'
 import { IndexMaintenanceSection } from '../../src/webview/indexMaintenanceSettings'
+import { WordSegmentSection } from '../../src/webview/wordSegmentSettings'
 import { STYLE_GUIDE_ENTRIES } from '../../src/webview/styleGuideData'
 
 installLocale('zh-cn', zhCn)
@@ -33,13 +35,13 @@ const FIXTURE_DEFS: readonly SettingDefinition[] = [
   { key: 'editor.spellcheck', type: 'boolean', default: true, titleKey: 'setting.testFlag.title' },
 ]
 
-function makeView(defs: readonly SettingDefinition[]): {
+function makeView(defs: readonly SettingDefinition[], editorGroups: readonly SettingsPageEditorGroup[] = []): {
   view: SettingsPageView
   sent: unknown[]
   parent: HTMLElement
 } {
   const sent: unknown[] = []
-  const view = new SettingsPageView({ postMessage: (m) => sent.push(m) }, defs)
+  const view = new SettingsPageView({ postMessage: (m) => sent.push(m) }, defs, [], editorGroups)
   const parent = document.createElement('div')
   view.mount(parent)
   return { view, sent, parent }
@@ -493,8 +495,8 @@ describe('分组重组二轮还原（#163 验收反馈：侧栏只留常规/编�
   })
 })
 
-describe('组标题图标机制（#263：编辑器页二级 h3 组字形）', () => {
-  /** 编辑器页五组 h3 标题元素（editorSectionDefs 顺序即渲染顺序） */
+describe('组标题图标机制（#263：编辑器页二级 h3 组字形；#265：生图资产两枚）', () => {
+  /** 编辑器页二级组 h3 标题元素（editorSectionDefs 顺序即渲染顺序） */
   function groupTitleEls(parent: HTMLElement): HTMLElement[] {
     clickNav(parent, zhCn['settings.editorCategory'])
     return [...parent.querySelectorAll<HTMLElement>('.vsidian-settings-group-title')]
@@ -518,6 +520,32 @@ describe('组标题图标机制（#263：编辑器页二级 h3 组字形）', ()
     expect(generated!.dataset.icon).toBe('typewriter')
     expect(generated!.getAttribute('aria-hidden')).toBe('true')
     expect(titles[2]!.textContent).toBe(zhCn['settings.groupSymbols'])
+  })
+
+  it('六组标题均渲染图标（#264 生产装配）：四枚内联字形 + 打字机/分词两枚生图资产', () => {
+    const wordSegment = new WordSegmentSection({ postMessage: () => {} })
+    const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS, [wordSegment])
+    const titles = groupTitleEls(parent)
+    expect(titles).toHaveLength(6)
+    // 内联四枚（显示/编辑/代码块/图片）
+    for (const i of [0, 1, 3, 4]) {
+      const svg = titles[i]!.querySelector('svg')
+      expect(svg, `第 ${i} 组标题应带内联图标`).toBeTruthy()
+      expect(titles[i]!.firstElementChild).toBe(svg)
+      expect(svg!.getAttribute('aria-hidden')).toBe('true')
+    }
+    // 生图两枚走同一 generated-icon 槽（委托组经组对象 icon 槽登记）：
+    // 符号输入 = 打字机、中文分词 = wordSegment，都在文字前、纯装饰
+    const generatedKinds = [2, 5].map((i) => {
+      const glyph = titles[i]!.querySelector<HTMLElement>('.vsidian-settings-generated-icon')
+      expect(glyph, `第 ${i} 组标题应带生图资产图标`).toBeTruthy()
+      expect(titles[i]!.firstElementChild).toBe(glyph)
+      expect(glyph!.getAttribute('aria-hidden')).toBe('true')
+      expect(titles[i]!.textContent).toBe(
+        i === 2 ? zhCn['settings.groupSymbols'] : zhCn['wordSegment.title'])
+      return glyph!.dataset.icon
+    })
+    expect(generatedKinds).toEqual(['typewriter', 'wordSegment'])
   })
 
   it('字形与 v2 拍板清单一致：显示器/双 I 光标/尖括号/山形相框（24 viewBox 单 path）', () => {
@@ -547,6 +575,8 @@ describe('组标题图标机制（#263：编辑器页二级 h3 组字形）', ()
     expect(css).toMatch(/\.vsidian-settings-group-title \.vsidian-settings-generated-icon\s*\{[^}]*width:\s*16px[^}]*height:\s*16px/)
     expect(css).toContain('light-typewriter.svg')
     expect(css).toContain('dark-typewriter.svg')
+    expect(css).toContain('light-wordSegment.svg')
+    expect(css).toContain('dark-wordSegment.svg')
     // 统一渲染规则仍为字形族共本（fill:none、stroke:currentColor、1.7 圆角线帽）
     expect(css).toMatch(/\.vsidian-settings svg\s*\{[^}]*fill:\s*none[^}]*stroke:\s*currentColor[^}]*stroke-width:\s*1\.7/)
   })

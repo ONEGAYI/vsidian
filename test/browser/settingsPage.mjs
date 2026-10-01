@@ -85,7 +85,8 @@ try {
     // #163 二轮还原：分类收敛为编辑器页内小节——codeblock.* 控件在
     // 「编辑器」分组页的「代码块」小节内，先进组再取控件
     await page.getByRole('button', { name: zhCn['settings.editorCategory'], exact: true }).click()
-    // #263/#265 组标题图标：四枚内联字形 + 打字机生图资产，均占 16px。
+    // #263/#265/#264 组标题图标：四枚内联字形 + 打字机/分词两枚生图资产，
+    // 六组均占 16px（委托组经组对象 icon 槽走同一 h3 路径）。
     const iconPaint = await page.evaluate(() => {
       const textStart = (h3) => {
         for (const node of h3.childNodes) {
@@ -105,6 +106,7 @@ try {
         return {
           icon: !!glyph,
           generated: !!glyph && glyph !== svg,
+          dataIcon: glyph && glyph !== svg ? glyph.getAttribute('data-icon') : '',
           width: r?.width ?? 0,
           height: r?.height ?? 0,
           iconLeft: r ? r.left - box.left : NaN,
@@ -117,9 +119,9 @@ try {
       })
     })
     const expectedFg = theme === 'light' ? 'rgb(48, 52, 59)' : 'rgb(221, 221, 221)'
-    assert.equal(iconPaint.length, 5, '编辑器页应有五个二级组标题')
+    assert.equal(iconPaint.length, 6, '编辑器页应有六个二级组标题')
     const withIcon = iconPaint.filter((g) => g.icon)
-    assert.equal(withIcon.length, 5, '编辑器页五组均应有图标')
+    assert.equal(withIcon.length, 6, '编辑器页六组均应有图标（#263 四枚内联字形 + #265 两枚生图资产）')
     for (const g of withIcon) {
       assert.equal(g.width, 16, '图标渲染盒应为 16px（绘制层：样式未注入时退默认尺寸即失败）')
       assert.equal(g.height, 16)
@@ -131,7 +133,11 @@ try {
       }
     }
     assert.equal(iconPaint[2].generated, true, '符号输入组应显示打字机生图资产')
+    assert.equal(iconPaint[2].dataIcon, 'typewriter')
     assert.match(iconPaint[2].backgroundImage, /data:image\/svg\+xml/u, '打字机 SVG 应由样式真实加载')
+    assert.equal(iconPaint[5].generated, true, '中文分词组（尾组）应显示分词生图资产')
+    assert.equal(iconPaint[5].dataIcon, 'wordSegment')
+    assert.match(iconPaint[5].backgroundImage, /data:image\/svg\+xml/u, '分词 SVG 应由样式真实加载')
     assert.equal(new Set(iconPaint.map((g) => g.rowHeight)).size, 1, '各组标题行高应一致（图标不撑行）')
     const countInk = async (png) => page.evaluate(async (base64) => {
       const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${base64}`)).blob())
@@ -151,21 +157,13 @@ try {
     const typewriterPng = await page.locator(".vsidian-settings-group-title .vsidian-settings-generated-icon[data-icon='typewriter']").screenshot()
     const typewriterInk = await countInk(typewriterPng)
     assert.ok(typewriterInk > 5, `打字机在${theme}主题下应真实绘制（命中${typewriterInk}像素）`)
-    // #264 分词二级组尚未落地；在真实浏览器中临时挂载同一 16px 图标槽，
-    // 验证第二枚资产的主题选择与绘制，检查后立即移除。
-    await page.evaluate(() => {
-      const title = document.querySelector('.vsidian-settings-group-title')
-      const glyph = document.createElement('span')
-      glyph.className = 'vsidian-settings-generated-icon'
-      glyph.dataset.icon = 'wordSegment'
-      glyph.setAttribute('aria-hidden', 'true')
-      title.prepend(glyph)
-    })
+    // #265 接线：分词二级组（#264）标题已登记 wordSegment 资产，真实组内
+    // 图标直接做主题选择与绘制核验（不再临时挂载探针后移除）。
     const segment = page.locator(".vsidian-settings-group-title .vsidian-settings-generated-icon[data-icon='wordSegment']")
+    assert.equal(await segment.count(), 1, '分词生图图标应恰为真实组标题上的一枚')
     assert.match(await segment.evaluate(el => getComputedStyle(el).backgroundImage), /data:image\/svg\+xml/u)
     const segmentInk = await countInk(await segment.screenshot())
     assert.ok(segmentInk > 5, `分词图标在${theme}主题下应真实绘制（命中${segmentInk}像素）`)
-    await segment.evaluate(el => el.remove())
     const cardBox = page.getByRole('checkbox', { name: zhCn['setting.codeblockCard.title'], exact: true })
     const lineNumbersBox = page.getByRole('checkbox', { name: zhCn['setting.codeblockLineNumbers.title'], exact: true })
     const copyButtonBox = page.getByRole('checkbox', { name: zhCn['setting.codeblockCopyButton.title'], exact: true })

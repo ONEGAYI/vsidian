@@ -15,7 +15,7 @@ import {
   WORD_SEGMENT_SOURCE_KEY,
   type SettingsPayload,
 } from '../shared/settings'
-import type { SettingsPageBridge, SettingsPageEditorGroup } from './settingsPageView'
+import type { SettingsPageBridge, SettingsPageEditorGroup, SettingsGroupIcon } from './settingsPageView'
 
 type WordSegmentStateMessage = Extract<import('../shared/protocol').HostToWebview, { kind: 'wordSegment.state' }>
 
@@ -29,6 +29,10 @@ export class WordSegmentSection implements SettingsPageEditorGroup {
   /** #264 兼容路由：宿主按退役分页 id 发起 settings.focusSection 时路由
    *  回编辑器页本组（openWithSection 通道对外行为不变） */
   readonly legacySectionId = 'wordSegment'
+  /** #265 生图接线：组标题图标槽位登记——分词 A 方案生图资产（明暗两套
+   *  SVG 经 .vsidian-settings-generated-icon 按主题加载），走与 defs 组
+   *  同一 h3 容器路径 */
+  readonly icon: SettingsGroupIcon = 'wordSegment'
 
   private values: SettingsPayload | undefined
   private resourceState: WordSegmentStateMessage | undefined
