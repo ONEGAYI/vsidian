@@ -10976,14 +10976,18 @@ export const cases: Array<[string, () => Promise<void>]> = [
       // 可能恢复出上次会话遗留的失效根，位置移除会删错对象并把多根状态
       // 泄漏进窗口持久化，污染后续非分片运行）
       const dropFolder = async (dir: string): Promise<void> => {
-        for (let round = 0; round < 3; round++) {
+        for (let round = 0; round < 6; round++) {
           const folders = vscode.workspace.workspaceFolders ?? []
           const idx = folders.findIndex((f) => normFsPath(f.uri.fsPath) === normFsPath(dir))
           if (idx < 0) {
             return
           }
           if (!vscode.workspace.updateWorkspaceFolders(idx, 1)) {
-            return
+            // updateWorkspaceFolders 不可并发调用：被节流拒绝（返回 false）
+            // 是暂态——等待后重试而非放弃（CI 慢 runner 上放弃会让根集合
+            // 永驻多根，「根移除」必然超时；#215 CI 敏感性族同型加固）
+            await new Promise((r) => setTimeout(r, 600))
+            continue
           }
           // updateWorkspaceFolders 不可并发调用：等事件落定再试下一轮
           await new Promise((r) => setTimeout(r, 300))
@@ -11283,14 +11287,18 @@ export const cases: Array<[string, () => Promise<void>]> = [
         const oldExists = await vscode.workspace.fs.stat(wsUri('改名目标.md')).then(() => true, () => false)
         return main?.hasData && !main.scanning && oldExists ? true : undefined
       })
-      for (let round = 0; round < 3; round++) {
+      for (let round = 0; round < 6; round++) {
         const folders = vscode.workspace.workspaceFolders ?? []
         const idx = folders.findIndex((f) => normFsPath(f.uri.fsPath) === normFsPath(secondDir))
         if (idx < 0) {
           break
         }
         if (!vscode.workspace.updateWorkspaceFolders(idx, 1)) {
-          break
+          // updateWorkspaceFolders 不可并发调用：被节流拒绝（返回 false）
+          // 是暂态——等待后重试而非放弃（CI 慢 runner 上放弃会让第二根
+          // 永驻，「根集合还原」必然超时；#215 CI 敏感性族同型加固）
+          await new Promise((r) => setTimeout(r, 600))
+          continue
         }
         await new Promise((r) => setTimeout(r, 300))
       }
