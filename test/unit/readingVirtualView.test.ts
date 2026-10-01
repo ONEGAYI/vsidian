@@ -873,6 +873,31 @@ describe('VirtualReadingView：长文档滚动到底（#259 恒差）', () => {
     }
   })
 
+  it('晋升路径回填 measured：隐藏期全量渲染 → 可见晋升后 drift 重估不覆写晋升实测块', () => {
+    const text = makeDoc(100)
+    const heightSpy = stubRegionalHeights(text, 50, 80, 40)
+    try {
+      const container = createReadingContainer()
+      stubClientHeight(container, 0) // 隐藏期：无布局回退全量渲染
+      const view = new VirtualReadingView(container, { bufferPx: 600 })
+      view.setDocument(text)
+      expect(view.getStats().virtualized).toBe(false)
+      stubClientHeight(container, 400)
+      view.updateNow() // 可见：promoteToVirtual 实测全部块后按窗口收缩
+      // 晋升实测（前 50 块 80、后 50 块 40，总高 6000）必须入册 measured：
+      // 随后首窗 0..12 实测 80 → 标定 68 钳到 64 → drift 触发重估，已实测的
+      // 屏外块 50..99（曾测 40）不得被估计值覆写——spacerBottom =
+      // 6000 − tops[13]=1040。缺回填时 13..99 全被换回估计 76 → 6612。
+      const children = Array.from(container.children)
+      const spacerBottom = children[children.length - 1]! as HTMLElement
+      expect(spacerBottom.classList.contains(READING_CLASS_NAMES.spacerBottom)).toBe(true)
+      expect(Number.parseFloat(spacerBottom.style.height)).toBe(6000 - 1040)
+      view.dispose()
+    } finally {
+      heightSpy.mockRestore()
+    }
+  })
+
   it('连续滚动净位移单调前进不被稳定化回拉，末块进入挂载窗口（净位移钉）', () => {
     const text = makeDoc(100)
     const heightSpy = stubRegionalHeights(text, 50, 80, 40)
@@ -901,6 +926,132 @@ describe('VirtualReadingView：长文档滚动到底（#259 恒差）', () => {
       view.dispose()
     } finally {
       heightSpy.mockRestore()
+    }
+  })
+})
+
+// PR #268 审查 P1-2：容器横向宽度显著变化（拆分窗口、侧栏开合、
+// --file-line-width 变更）会改变全部块的真实高度。若 measured 只在
+// setDocument/clearDocument 清空，曾实测但已回收的块将永久保留旧宽度的
+// 实测值——高度表在旧宽/新宽值之间混杂，spacer 与 tops 失真直到用户逐段
+// 滚过重新实测。修复口径：RO 回调记录容器 contentRect.width，相对变化
+// >2%（与 drift 阈值同族）只置旗（回调内不改共享状态），measureAndStabilize
+// 消费时清空 measured——窗口内块照常实测回填，回收块交由 drift 重估刷成
+// 新标定估计。只比宽度：纵向尺寸变化（窗口差分/图片晚到）与宽度非正
+// （隐藏周期）都不置旗，纯滚动路径零影响。
+describe('VirtualReadingView：容器宽度变化实测失效（P1-2）', () => {
+  it('宽度显著变化后：回收块的旧宽度实测值被重估替换（RO 置旗 → 下轮更新清空实测集）', () => {
+    const text = makeDoc(100)
+    const blocks = splitReadingBlocks(text)
+    // 可变区域高度桩：宽度变化 = 全部块真实高度同步变化（此处整体变矮，
+    // 方向不影响机制验证）
+    const heightsByStart = new Map<string, number>()
+    const setRegional = (highPx: number, lowPx: number): void => {
+      blocks.forEach((b, i) => heightsByStart.set(String(b.start), i < 50 ? highPx : lowPx))
+    }
+    setRegional(80, 40)
+    let roCallback: ((entries: { target: Element; contentRect: { width: number } }[]) => void) | null = null
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(cb: (entries: { target: Element; contentRect: { width: number } }[]) => void) {
+        roCallback = cb
+      }
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    })
+    const heightSpy = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(
+      function (this: HTMLElement) {
+        const s = this.dataset?.['vsidianSrcStart']
+        const h = s != null ? heightsByStart.get(s) : undefined
+        return h ?? 36
+      },
+    )
+    try {
+      const container = createReadingContainer()
+      stubClientHeight(container, 400)
+      const view = new VirtualReadingView(container, { bufferPx: 600 })
+      expect(roCallback).not.toBeNull()
+      const fireWidth = (w: number): void => {
+        roCallback!([{ target: container, contentRect: { width: w } }])
+      }
+      fireWidth(800) // 初始宽度入册（不置旗）
+      view.setDocument(text)
+      // 首窗 0..27 实测 80；跳到尾段 82..99 实测 40，曾实测的 0..27 保留
+      container.scrollTop = 7000
+      view.updateNow()
+      const spacerTop = container.querySelector<HTMLElement>(`.${READING_CLASS_NAMES.spacerTop}`)!
+      expect(Number.parseFloat(spacerTop.style.height)).toBe(80 * 28 + 40 * 54)
+      // 宽度变化 51% > 2% + 全部块真实高度变矮（80/40 → 96/48 的矮档）
+      setRegional(96, 48)
+      fireWidth(392)
+      view.updateNow()
+      // 修复：实测集被清空 → 本轮窗口实测 48 → 标定 36 → drift 28.6% →
+      // 回收块（含曾实测 80 的 0..27）全部重估 48——高度表统一 48 步长，
+      // spacerTop = 首挂块序 × 48。
+      // 缺陷：0..27 保留旧宽度实测 80 → spacerTop 含 28×80 段 ≠ 序 × 48
+      const starts = mountedStarts(container)
+      const firstIdx = blocks.findIndex((b) => String(b.start) === starts[0])
+      expect(firstIdx).toBeGreaterThan(0)
+      expect(Number.parseFloat(spacerTop.style.height)).toBe(firstIdx * 48)
+      view.dispose()
+    } finally {
+      heightSpy.mockRestore()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('宽度未显著变化（纯纵向 resize / 隐藏周期）不置旗：实测值不受影响', () => {
+    const text = makeDoc(100)
+    const blocks = splitReadingBlocks(text)
+    const heightsByStart = new Map<string, number>()
+    blocks.forEach((b, i) => heightsByStart.set(String(b.start), i < 50 ? 80 : 40))
+    let roCallback: ((entries: { target: Element; contentRect: { width: number } }[]) => void) | null = null
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(cb: (entries: { target: Element; contentRect: { width: number } }[]) => void) {
+        roCallback = cb
+      }
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    })
+    const heightSpy = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(
+      function (this: HTMLElement) {
+        const s = this.dataset?.['vsidianSrcStart']
+        const h = s != null ? heightsByStart.get(s) : undefined
+        return h ?? 36
+      },
+    )
+    try {
+      const container = createReadingContainer()
+      stubClientHeight(container, 400)
+      const view = new VirtualReadingView(container, { bufferPx: 600 })
+      const fireWidth = (w: number): void => {
+        roCallback!([{ target: container, contentRect: { width: w } }])
+      }
+      fireWidth(800) // 初始宽度入册
+      view.setDocument(text)
+      container.scrollTop = 7000
+      view.updateNow()
+      // 与 #259 覆写钉同口径：曾实测 80 的 0..27 保留 + 回收带重估 40
+      const spacerTop = container.querySelector<HTMLElement>(`.${READING_CLASS_NAMES.spacerTop}`)!
+      expect(Number.parseFloat(spacerTop.style.height)).toBe(80 * 28 + 40 * 54)
+      // 再跑一轮 updateNow 让滚动锚定平移后的窗口收敛（此后无 RO 触发
+      // 时窗口与高度表稳定），取稳定基线
+      view.updateNow()
+      const settledTop = Number.parseFloat(spacerTop.style.height)
+      const settledScrollTop = container.scrollTop
+      // 纵向 resize（宽度不变）与隐藏（宽度 0，不入册）都不置旗：实测集
+      // 不被清空，布局模型零变化——纯滚动/窗口差分路径零影响的回归钉
+      fireWidth(800)
+      fireWidth(0)
+      fireWidth(800)
+      view.updateNow()
+      expect(Number.parseFloat(spacerTop.style.height)).toBe(settledTop)
+      expect(container.scrollTop).toBe(settledScrollTop)
+      view.dispose()
+    } finally {
+      heightSpy.mockRestore()
+      vi.unstubAllGlobals()
     }
   })
 })
@@ -966,7 +1117,13 @@ describe('VirtualReadingView：窗口差分重排最小移动（#258）', () => 
     )
     const children = Array.from(container.children)
     expect(children[0]!.classList.contains(READING_CLASS_NAMES.spacerTop)).toBe(true)
-    expect(children[children.length - 1]!.classList.contains(READING_CLASS_NAMES.spacerBottom)).toBe(true)
+    const spacerBottomEl = children[children.length - 1]!
+    expect(spacerBottomEl.classList.contains(READING_CLASS_NAMES.spacerBottom)).toBe(true)
+    // spacer 恒位契约：spacerBottom 紧跟末块（零移动的等价终态）
+    const lastBlock = container.querySelector<HTMLElement>(
+      `.${READING_CLASS_NAMES.block}[data-vsidian-src-start="${blocks[last]!.start}"]`,
+    )
+    expect(spacerBottomEl.previousSibling).toBe(lastBlock)
   }
 
   it('仅尾部追加：既有块与 spacerTop 零移动，新块按块序入位（first 钳在 0）', () => {

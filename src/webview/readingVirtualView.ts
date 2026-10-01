@@ -146,6 +146,12 @@ export class VirtualReadingView {
   private hooks: VirtualReadingViewOptions
 /** 最近一次有效视口高度（隐藏期保持虚拟模式用） */
   private lastViewportHeight = 0
+  /** RO 观测到的容器最近内容宽度（0 = 尚未记录） */
+  private lastContainerWidth = 0
+  /** 容器横向宽度显著变化待处理旗（RO 回调只置旗，清空动作在
+   *  measureAndStabilize 内消费——回调内直接改共享状态与「update 途中
+   *  不得同步改」同族，避免重入） */
+  private widthDriftPending = false
 
   constructor(container: HTMLElement, options: VirtualReadingViewOptions = {}) {
     this.container = container ?? createReadingContainer()
@@ -158,7 +164,10 @@ export class VirtualReadingView {
     this.spacerBottom = document.createElement('div')
     this.spacerBottom.className = `${READING_CLASS_NAMES.spacer} ${READING_CLASS_NAMES.spacerBottom}`
     if (typeof ResizeObserver === 'function') {
-      this.observer = new ResizeObserver(() => this.scheduleUpdate())
+      this.observer = new ResizeObserver((entries) => {
+        this.noteWidthDrift(entries)
+        this.scheduleUpdate()
+      })
       this.observer.observe(this.container)
       if (this.scrollEl !== this.container) this.observer.observe(this.scrollEl)
     }
@@ -596,6 +605,30 @@ export class VirtualReadingView {
     })
   }
 
+  /** RO 回调同步路径只做标记（PR #268 审查 P1-2）：容器内容宽度相对变化
+   *  超过 2%（与 drift 阈值同族）时置旗，实测集的清空推迟到
+   *  measureAndStabilize 消费——拆分窗口/侧栏开合/可读行宽变更会改变全部
+   *  块的真实高度，旧宽度的实测值不再可信。只比宽度：纵向尺寸变化（窗口
+   *  差分、图片晚到的既有通道）不置旗，纯滚动路径零影响；宽度非正（隐藏）
+   *  忽略不入册，显示/隐藏周期不把同宽复原误判为漂移。只看容器条目——
+   *  外部宿主形态下 scrollEl 与容器宽度本就不同（滚动条），跨目标比较会
+   *  把固定差误判成漂移。 */
+  private noteWidthDrift(entries: ResizeObserverEntry[]): void {
+    for (const entry of entries) {
+      if (entry.target !== this.container) {
+        continue
+      }
+      const w = entry.contentRect.width
+      if (w <= 0) {
+        continue
+      }
+      if (this.lastContainerWidth > 0 && Math.abs(w / this.lastContainerWidth - 1) > 0.02) {
+        this.widthDriftPending = true
+      }
+      this.lastContainerWidth = w
+    }
+  }
+
   private layoutAvailable(): boolean {
     return this.scrollEl.clientHeight > 0 || this.lastViewportHeight > 0
   }
@@ -742,6 +775,13 @@ export class VirtualReadingView {
    * 重估引起的上方内容位移同样被锚定补偿。
    */
   private measureAndStabilize(prevScrollTop: number, allowStabilize: boolean): void {
+    if (this.widthDriftPending) {
+      // 容器横向宽度已显著变化：旧宽度的实测值不再可信，清空实测集——
+      // 本轮窗口内块照常实测回填，回收块交由下方 drift 重估刷成新标定
+      // 估计（宽度变化通常改变行数分布，标定随之漂移触发重估）
+      this.widthDriftPending = false
+      this.measured.clear()
+    }
     const oldTops = this.tops
     const refIdx = anchorIndexAtScroll(oldTops, this.heights, prevScrollTop)
     const samples: HeightSample[] = []
@@ -825,9 +865,16 @@ export class VirtualReadingView {
       const h = outerHeight(el)
       if (h > 0 && idx < this.heights.length) {
         this.heights[idx] = h
+        // 与 measureAndStabilize 实测路径成对回填：heights 为实测 ⟺
+        // measured 有记录（#259 判据的不变量）。缺此回填时，隐藏期全量
+        // 渲染 → 可见晋升的块在 heights 持实测值、measured 无记录，其后
+        // 首次 drift 重估会把实测值换回估计值。
+        this.measured.add(idx)
       }
       idx += 1
     }
+    // 晋升实测发生在可见后的当前宽度：实测值即新宽度真值，无需宽度清空
+    this.widthDriftPending = false
     this.tops = blockTops(this.heights)
     // 全量块退场：释放图片槽位（后续由窗口挂载路径重新预备）
     this.releaseAllBlocks()
