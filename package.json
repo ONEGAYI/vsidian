@@ -3,7 +3,7 @@
   "displayName": "%manifest.displayName%",
   "icon": "media/vsidian-icon-256.png",
   "description": "%manifest.description%",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "publisher": "onegayi",
   "license": "MIT",
   "keywords": [
@@ -87,21 +87,21 @@
         "title": "%command.find.previous.title%",
         "category": "Vsidian"
       },
-        {
-          "command": "onegayi.vsidian.find.replace",
-          "title": "%command.find.replace.title%",
-          "category": "Vsidian"
-        },
-        {
-          "command": "onegayi.vsidian.find.replaceNext",
-          "title": "%command.find.replaceNext.title%",
-          "category": "Vsidian"
-        },
-        {
-          "command": "onegayi.vsidian.find.replaceAll",
-          "title": "%command.find.replaceAll.title%",
-          "category": "Vsidian"
-        },
+      {
+        "command": "onegayi.vsidian.find.replace",
+        "title": "%command.find.replace.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.find.replaceNext",
+        "title": "%command.find.replaceNext.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.find.replaceAll",
+        "title": "%command.find.replaceAll.title%",
+        "category": "Vsidian"
+      },
       {
         "command": "onegayi.vsidian.table.create",
         "title": "%command.table.create.title%",

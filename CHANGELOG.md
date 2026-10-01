@@ -15,6 +15,8 @@ Unreleased 段**——发布脚本与契约检查器提取/解析时均跳过 Un
 
 ## Unreleased - 开发中
 
+## 0.8.0 - 2026-10-02
+
 本版本以引用体验与编辑效率为主线：悬停预览与正文文档嵌入覆盖双模式全域入口并支持递归展开；查找与替换全面对齐 VSCode，新增多光标编辑、选下一处相同词与中文分词词级移动；设置页重组「外观」分页，最低支持版本降至 VSCode 1.82.3。
 
 ### 新增
@@ -279,4 +281,5 @@ Unreleased 段**——发布脚本与契约检查器提取/解析时均跳过 Un
 0.5.0: https://github.com/ONEGAYI/vsidian/compare/v0.4.0...v0.5.0
 0.6.0: https://github.com/ONEGAYI/vsidian/compare/v0.5.0...v0.6.0
 0.7.0: https://github.com/ONEGAYI/vsidian/compare/v0.6.0...v0.7.0
+0.8.0: https://github.com/ONEGAYI/vsidian/compare/v0.7.0...v0.8.0
 -->
