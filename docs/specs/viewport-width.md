@@ -194,6 +194,7 @@ docs/specs/viewport-width.md（分支 impl/2026-09-viewport-width）。
 - **#32 行号契约修订**：铺满态行为不变；限宽态正文列宽 = min(设定宽， 可用宽 − 行号列足迹)，行号列随列移动、间距不变。
 - **标题块水平盒禁令（#206）**：heading-N 装饰类与 `.vsidian-reading-block` 同挂在块 div 上且源序在后——其规则**不得声明任何水平 margin/padding**（margin 简写、margin-left/right、margin-inline 等会覆盖限宽档居中的 auto；铺满档不可见，限宽档标题贴左而正文居中，偏移 = (可用宽 − 设定宽) ÷ 2）；垂直间距一律 `margin-block`。契约由 `readingHeadingMarginCssContract` 与 `readingWidthProbe` A3b（限宽档标题/段落左缘一致）钉住。
 - **设置项**：`editor.readableLineWidth`（number 型，0–1600 步进 20，默认 0）；number schema 校验只管类型与范围，0 语义归消费方；设置页 0 档显示词经定义的 `zeroLabelKey` 取词（注册表驱动，渲染层无特判）。
+- **浮层锚点跟随（2026-10）**：查找面板（`.vsidian-find`）与选词选项条（`.vsidian-occurrence-bar`）的 `right` 不再静态钉视口 14px，由控制器按「#app 右缘 − 正文列右缘」测算写内联（`overlayAnchor.ts` 的 `planOverlayAnchorRight`，下限 14px）——限宽档浮层右缘贴正文列右缘；铺满档差值计入滚动条与内容边距余量（经典滚动条平台实测 ≈24px），面板同样贴正文右缘。测量源：live 为 `.cm-content`（整组居中含行号列参与，其右缘即正文列真实右缘）、reading 为任一限宽块/视口 spacer（同宽居中右缘一致）。跟随通道：ResizeObserver（`.vsidian-main` + 正文列元素，侧栏开合过渡动画逐帧跟随）+ 打开/模式切换主动同步 + live 编辑事务兜底；两浮层全不在场即断开观察。
 
 ### 验证矩阵（2026-09-28，工作树内全绿）
 
@@ -206,7 +207,14 @@ docs/specs/viewport-width.md（分支 impl/2026-09-viewport-width）。
 - `readingWidthProbe` 新增 A3b 限宽档标题/段落块左缘一致（修复前红：标题 24 / 段落 340，差 316px；修复后同列），断言总数 **23→24** 条（`grep -c "check('"` 口径）——历史落档「15 项」为 #175 入列时点计数，其后 74ce73c、4fbeb7e 两批增量未同步计数导致口径漂移，此处一并修正。
 - 新增 `readingHeadingMarginCssContract` 契约测试（heading-1..6 规则水平盒禁令 + 块居中 auto 钉住 + 拦截/放行矩阵自测：物理与逻辑属性水平全家族、大小写、声明前注释）。
 
+### 验证矩阵增量（2026-10，浮层锚点跟随）
+
+- 浏览器新套件 `findBarAnchor`（8 断言，已注册 run.mjs）：限宽档咬合且确为跟随值非保底、侧栏展开动画落定后仍咬合且面板确实随列左移、跨模式保活换测量源（reading 限宽块）仍咬合、选词选项条同锚（真实键盘 Ctrl+D）、铺满档贴正文右缘（余量计入 diff）、窗口缩放跟随。
+- 单测 `overlayAnchor.test.ts` 4 断言：差值取值、贴边保底、负值防御、边界恰等。
+- 受影响族回归 findPanel / occurrence / hitReveal / readingWidthProbe 全绿；全量单测 4623 通过零失败；`npm run compile` 类型零错。
+
 ### 已知边界
 
 - 溢出裁切防护靠 `safe center`；超宽不可断内容（超宽表格单元格）在限宽档由各行内滚动（表格 `overflow-x: auto`）承接。
 - frontmatter 卡片行级 grid 不限宽硬约束（AGENTS.md 落档）与列限宽正交：整列一起钳制，卡片与行同列，无错位。
+- 浮层锚点跟随：RO 只感知尺寸变化，纯位置移动（打字改行号位数、横向滚动移动列右缘）不触发——前者由 live 编辑事务的锚点补同步兜底，后者浮层保持文档位不随横滚移动（面板 absolute 于 #app，行为与 Obsidian 一致），下一次尺寸事件/编辑刷新。

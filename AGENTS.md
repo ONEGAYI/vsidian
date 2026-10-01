@@ -324,6 +324,7 @@ vsidian/
 │       ├── outlineSearch.ts            # 大纲标题搜索纯函数
 │       ├── outlineSection.ts           # 大纲控制域纯函数
 │       ├── outlinkPanel.ts             # 出链面板 DOM 与四态渲染
+│       ├── overlayAnchor.ts            # 浮层右缘锚点计划纯函数
 │       ├── perfProbe.ts                # webview 性能探针（#5）
 │       ├── popupMutex.ts               # 图表与图片弹窗互斥
 │       ├── quickActionState.ts         # 快速操作状态判定

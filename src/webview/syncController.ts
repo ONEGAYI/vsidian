@@ -123,6 +123,8 @@ import {
   type OccurrenceRange,
   type OccurrenceSeed,
 } from './nextOccurrence'
+// 2026-10 浮层锚点跟随：查找面板/选词选项条右缘对齐正文列右缘的计划纯函数
+import { planOverlayAnchorRight } from './overlayAnchor'
 import { liveDecorationsField, livePreviewDecorations, LIVE_CLASS_NAMES, selectionTouchesRange, tableCompositionSettled, TaskCheckboxWidget } from './liveDecorations'
 import { setOccurrenceHitActive } from './hitReveal'
 import { LINK_MOD_CLASS, createLinkInteractions, LINK_CLASS_NAMES, WIKILINK_CLASS_NAMES, activateLinkAtPos, activateLooseLinkAtPos, activateWikilinkAtPos } from './liveLinks'
@@ -927,6 +929,11 @@ export class WebviewSyncController {
     seed: OccurrenceSeed
     ranges: readonly OccurrenceRange[]
   } | null = null
+  // ---- 2026-10 浮层锚点跟随：查找面板与选词选项条右缘动态对齐正文列 ----
+  /** 锚点观察器（浮层任一在场时挂 .vsidian-main + 正文列元素；关闭即断）。
+   *  RO 只报尺寸变化：侧栏开合/窗口缩放（main 宽变）与行宽设置变更
+   *  （列宽变）逐帧触发跟随；jsdom 无 ResizeObserver，降级为仅主动同步 */
+  private overlayAnchorObserver: ResizeObserver | null = null
   /** 主面板开关闪烁计时（重复按下重启动画；dispose 时清理） */
   private findFlashTimer: ReturnType<typeof setTimeout> | undefined
   private readonly cancelKeybindingOnBlur = () => {
@@ -1384,7 +1391,8 @@ export class WebviewSyncController {
       hoverPreviewAnchorLeave(anchor)
     })
     // #53 布局骨架：#app > body(水平) > main(主编辑区：顶栏+横幅+双视图)
-    // + sidebar(右侧栏)；findPanel 浮层仍直接挂 #app（以 #app 为定位包含块）
+    // + sidebar(右侧栏)；findPanel 浮层直接挂 #app（以 #app 为定位包含块；
+    // 2026-10 锚点跟随：right 由控制器按正文列右缘测算写内联）
     this.sidebarEl = this.buildSidebar()
     // 拖宽恢复：把构造期恢复的宽度落到侧栏（默认值不写变量，见 applySidebarWidth）
     this.applySidebarWidth(this.sidebarWidth, false)
@@ -1401,8 +1409,9 @@ export class WebviewSyncController {
     this.bodyEl.appendChild(this.sidebarEl)
     parent.appendChild(this.bodyEl)
     parent.appendChild(this.findPanel)
-    // #238 查找选项条：与查找面板同定位包含块（parent）、同右上角位——与
-    // 面板互斥出现（面板开时代之以面板开关闪烁，见 flashFindToggles）
+    // #238 查找选项条：与查找面板同定位包含块（parent）、同锚点跟随
+    // （2026-10 起右缘对齐正文列，见 syncOverlayAnchors）——与面板互斥
+    // 出现（面板开时代之以面板开关闪烁，见 flashFindToggles）
     this.occurrenceBarEl = this.buildOccurrenceBar()
     parent.appendChild(this.occurrenceBarEl)
     // 侧栏初始态（持久化恢复）落到 DOM 类与按钮可访问名称
@@ -1641,6 +1650,8 @@ export class WebviewSyncController {
     this.hostThemeObserver = undefined
     this.quickActionResizeObserver?.disconnect()
     this.quickActionResizeObserver = undefined
+    this.overlayAnchorObserver?.disconnect()
+    this.overlayAnchorObserver = null
     if (this.docKeydown) {
       document.removeEventListener('keydown', this.docKeydown, true)
       this.docKeydown = undefined
@@ -3298,6 +3309,8 @@ export class WebviewSyncController {
         this.findRender()
         this.findLocate()
       }
+      // 锚点测量源随模式换元素（reading 限宽块）：重挂观察并重同步
+      this.refreshOverlayAnchorWatch()
       return
     }
     // reading → live：源码位置锚点 = modeAnchor（用户滚动经 scroll 监听
@@ -3325,6 +3338,8 @@ export class WebviewSyncController {
       this.findRender()
       this.findLocate()
     }
+    // 锚点测量源随模式换元素（live .cm-content）：重挂观察并重同步
+    this.refreshOverlayAnchorWatch()
   }
 
   /** 容器显隐（稳定类名 vsidian-view-live / vsidian-view-reading） */
@@ -7284,6 +7299,9 @@ export class WebviewSyncController {
         input.value = opts.replacement
       }
     }
+    // 锚点先行：显示前同步 right（打开路径无变化事件，RO 落位靠这次主动
+    // 测算），避免浮层以旧 right 闪现在视口右上角
+    this.startOverlayAnchorWatch()
     this.findPanel?.classList.add(FIND_CLASS_NAMES.open)
     this.findRender()
     this.findLocate()
@@ -7316,6 +7334,9 @@ export class WebviewSyncController {
     } else {
       this.findInputEl?.blur()
     }
+    // 面板退出即断锚点观察（选项条与面板互斥，此处会话必不在场；判定式
+    // 兜底防未来互斥关系变化）
+    this.stopOverlayAnchorWatchIfIdle()
   }
 
   /** 在选定内容中查找开关（#241 资产接线）：开启 = 捕获当前主选区（非空）
@@ -7678,6 +7699,7 @@ export class WebviewSyncController {
   /** 会话在场即显示选项条（每次 Ctrl+D 按下都会走到；主面板打开时改走
    *  flashFindToggles，本方法不被调用——UI 互斥） */
   private showOccurrenceBar(): void {
+    this.startOverlayAnchorWatch()
     this.occurrenceBarEl?.classList.add(OCCURRENCE_CLASS_NAMES.barOpen)
     this.syncOccurrenceBarDom()
   }
@@ -7691,7 +7713,88 @@ export class WebviewSyncController {
     this.occurrenceBarEl?.classList.remove(OCCURRENCE_CLASS_NAMES.barOpen)
     if (had) {
       this.view?.dispatch({ effects: setOccurrenceHitActive.of(false) })
+      this.stopOverlayAnchorWatchIfIdle()
     }
+  }
+
+  // ---- 2026-10 浮层锚点跟随（方法组）：测算与观察管理 ----
+
+  /** 锚点测量源：当前模式的正文列元素。live 为 .cm-content——#175 整组
+   *  居中单位是 [行号列+间距+正文列]，contentDOM 的右缘即正文列真实右缘；
+   *  reading 为任一限宽块/视口占位 spacer（同宽 margin auto 居中，右缘
+   *  一致），空文档降级容器（铺满语义，right 落保底 14px） */
+  private overlayAnchorContentEl(): HTMLElement | null {
+    if (this.viewMode === 'reading') {
+      const block = this.readingContainer?.querySelector<HTMLElement>(
+        '.vsidian-reading-block, .vsidian-reading-spacer',
+      )
+      return block ?? this.readingContainer ?? null
+    }
+    return this.view?.contentDOM ?? null
+  }
+
+  /** 按当前几何同步两个浮层的 style.right（两浮层互斥在场，同值都写无妨） */
+  private syncOverlayAnchors(): void {
+    const root = this.rootEl
+    const contentEl = this.overlayAnchorContentEl()
+    if (!root || !contentEl) {
+      return
+    }
+    const right = planOverlayAnchorRight({
+      appRight: root.getBoundingClientRect().right,
+      contentRight: contentEl.getBoundingClientRect().right,
+    })
+    if (this.findPanel) {
+      this.findPanel.style.right = `${right}px`
+    }
+    if (this.occurrenceBarEl) {
+      this.occurrenceBarEl.style.right = `${right}px`
+    }
+  }
+
+  /** 浮层任一在场时开观察：先主动同步一次（稳态打开时无变化事件可等），
+   *  再挂 ResizeObserver——侧栏开合是 CSS transition，过渡期间 main 宽度
+   *  每帧变化即逐帧回调，稳态零触发零开销 */
+  private startOverlayAnchorWatch(): void {
+    this.syncOverlayAnchors()
+    if (this.overlayAnchorObserver || typeof ResizeObserver === 'undefined') {
+      return
+    }
+    const observer = new ResizeObserver(() => this.syncOverlayAnchors())
+    this.overlayAnchorObserver = observer
+    this.observeOverlayAnchorTargets(observer)
+  }
+
+  /** 挂观察目标：main 恒观察（侧栏开合/窗口缩放），正文列元素跟随观察
+   *  （行宽设置变更时 main 宽不变、仅列宽变，漏观察即失准） */
+  private observeOverlayAnchorTargets(observer: ResizeObserver): void {
+    if (this.mainEl) {
+      observer.observe(this.mainEl)
+    }
+    const contentEl = this.overlayAnchorContentEl()
+    if (contentEl) {
+      observer.observe(contentEl)
+    }
+  }
+
+  /** 模式切换后重挂目标并重同步（测量源随模式换元素；查找会话跨模式保活
+   *  时调用；选词会话不跨模式，无需） */
+  private refreshOverlayAnchorWatch(): void {
+    if (!this.overlayAnchorObserver) {
+      return
+    }
+    this.overlayAnchorObserver.disconnect()
+    this.observeOverlayAnchorTargets(this.overlayAnchorObserver)
+    this.syncOverlayAnchors()
+  }
+
+  /** 两个浮层都不在场即断开观察（幂等；面板/会话互斥但都判一遍） */
+  private stopOverlayAnchorWatchIfIdle(): void {
+    if (this.findOpen || this.occurrenceSession) {
+      return
+    }
+    this.overlayAnchorObserver?.disconnect()
+    this.overlayAnchorObserver = null
   }
 
   /** 开关切换后的会话重建（用户决策「切换即按新选项重建会话」，选项条
@@ -8814,6 +8917,14 @@ export class WebviewSyncController {
               this.postCodeCopy(eff.value)
             }
           }
+        }
+      }),
+      // 2026-10 浮层锚点跟随：编辑事务轻量补同步——RO 只感知尺寸变化，
+      // 打字改行号位数等「仅移动正文列位置、列宽不变」的场景由事务路径
+      // 兜底（每事务两次 rect 读取，浮层不在场时零成本短路）
+      EditorView.updateListener.of(() => {
+        if (this.findOpen || this.occurrenceSession) {
+          this.syncOverlayAnchors()
         }
       }),
       // #241 在选定内容中查找：用户选区锚点与开启范围的生命周期——

@@ -3383,11 +3383,12 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
    面板为 column 布局：左缘替换栏展开/收起切换（vsidian-find-toggle）+
    主行（vsidian-find-row：输入/计数/三开关/导航/关闭）+ 替换行
    （vsidian-find-replace，-open 类控制显隐——显隐纯 CSS，无 JS 内联）。
+   2026-10 锚点跟随：right 不再静态钉视口，由控制器按正文列右缘测算
+   写内联（ResizeObserver 逐帧跟随；铺满档保底 14px），top 维持静态。
    --vsidian-find-match-background / -current-background 为可覆盖变量入口 */
 .vsidian-find {
   position: absolute;
   top: 36px;
-  right: 14px;
   z-index: 40;
   display: none;
   flex-direction: column;
@@ -3601,13 +3602,13 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
 /* ---- #238 查找选项条：Ctrl+D 会话期间的迷你三按钮浮动条 ----
    仅大小写/全字/正则三开关（无搜索框无计数），非模态：不抢编辑器焦点
    （按钮 mousedown preventDefault 保焦）、不占弹窗互斥槽位、Esc 在
-   find 面板之后消费一次（只关条不收敛选区）。与主面板同右上角位、
-   互斥出现（面板开时由面板开关闪烁承担提示，条不出场）。按钮态与
-   主面板开关同源（aria-pressed = findOptions 记忆档，非会话 override） */
+   find 面板之后消费一次（只关条不收敛选区）。与主面板同位同锚（2026-10
+   起同为正文列右缘跟随，right 由控制器写内联）、互斥出现（面板开时由
+   面板开关闪烁承担提示，条不出场）。按钮态与主面板开关同源
+   （aria-pressed = findOptions 记忆档，非会话 override） */
 .vsidian-occurrence-bar {
   position: absolute;
   top: 36px;
-  right: 14px;
   z-index: 39;
   display: none;
   gap: 2px;
