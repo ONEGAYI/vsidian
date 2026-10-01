@@ -61,6 +61,11 @@ describe('查找面板 CSS 契约（#236）', () => {
     expect(rule('.vsidian-find .vsidian-find-toggle:focus-visible', /border-color:\s*var\(--vscode-focusBorder/)).toBeTruthy()
   })
 
+  it('toggle 阅读态禁用灰化（disabled 不反白，2026-10 阅读整体禁用替换）', () => {
+    expect(rule('.vsidian-find .vsidian-find-toggle:disabled', /opacity:\s*0\.5/)).toBeTruthy()
+    expect(rule('.vsidian-find .vsidian-find-toggle:disabled', /cursor:\s*default/)).toBeTruthy()
+  })
+
   it('toggle 高度随内容行：收起占首行，替换栏展开经 :has 跨两行', () => {
     expect(rule('.vsidian-find .vsidian-find-toggle', /grid-row:\s*1\s*\/\s*2/)).toBeTruthy()
     expect(rule('.vsidian-find:has(.vsidian-find-replace-open) .vsidian-find-toggle', /grid-row:\s*1\s*\/\s*3/)).toBeTruthy()
@@ -83,9 +88,9 @@ describe('查找面板 CSS 契约（#236）', () => {
     expect(active).toMatch(/color:\s*var\(--vscode-inputOption-activeForeground/)
   })
 
-  it('图标按钮基线：透明底 + hover 淡入底色（功能词只在 aria-label/title）', () => {
+  it('图标按钮基线：透明底 + hover 淡入底色（功能词只在 aria-label/title；禁用态不反白）', () => {
     expect(rule('.vsidian-find button', /background-color:\s*transparent/)).toBeTruthy()
-    expect(rule('.vsidian-find button:hover', /background-color:\s*var\(--vscode-toolbar-hoverBackground/)).toBeTruthy()
+    expect(rule('.vsidian-find button:hover:not(:disabled)', /background-color:\s*var\(--vscode-toolbar-hoverBackground/)).toBeTruthy()
   })
 
   it('导航与替换图标在浅色、深色主题下都指向同名 SVG 资产', () => {

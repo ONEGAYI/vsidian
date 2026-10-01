@@ -8,8 +8,10 @@
 // - 三开关（matchCase/wholeWord/regexp）：面板按钮点亮=选项开启；切换
 //   即重算匹配并出站 findOptions.set 持久化（workspace 级记忆通道）
 // - 非法正则不崩且有可见反馈（输入框 invalid 类 + 「无结果」计数）
-// - 替换栏：Ctrl+H / view.find.open{replace:true} 展开；替换下一个与
-//   全部替换各为单笔写回（一笔撤销）；阅读模式只读不执行替换
+// - 替换栏：Ctrl+H / view.find.open{replace:true} 展开（仅 Live）；替换
+//   下一个与全部替换各为单笔写回（一笔撤销）；阅读模式整体禁用替换
+//   （2026-10：replace 指令不开面板、Ctrl+H 键位不消费、toggle disabled
+//   灰化，live 展开记忆不被阅读侧触碰）
 // - Ctrl+F 种子行为对齐 VSCode：单行非空选区填入搜索词
 // - 焦点与 Esc：打开聚焦输入框；Esc 关闭并把焦点归还编辑区（live 回 CM6）
 // - 定位协同：live 侧选区+滚动；reading 侧源位置锚点映射到块并滚动；
@@ -619,6 +621,33 @@ describe('替换栏与替换写回（#236：替换为显式写操作）', () => 
     expect(document.activeElement).toBe(parent!.querySelector('.vsidian-find-input'))
   })
 
+  it('阅读模式整体禁用替换：toggle disabled，点击不清 live 展开记忆（2026-10）', () => {
+    const h = makeBridge()
+    const c = mountFind(h)
+    c.handleHostMessage({ kind: 'view.find.open', replace: true })
+    expect(viewState(c, h).find?.replaceOpen).toBe(true)
+    c.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
+    const toggle = parent!.querySelector<HTMLButtonElement>('.vsidian-find-toggle')!
+    expect(toggle.disabled).toBe(true)
+    expect(viewState(c, h).find?.replaceOpen).toBe(false)
+    // 禁用按钮不派发 click；即使陈旧 DOM 边缘触发，处理链在阅读模式
+    // 也不触碰 live 展开记忆（此前点击会把记忆钳成 false——A-4）
+    toggle.click()
+    c.handleHostMessage({ kind: 'view.mode.set', mode: 'live' })
+    expect(viewState(c, h).find?.replaceOpen).toBe(true)
+  })
+
+  it('阅读模式 view.find.open {replace:true} 整体不开面板（Ctrl+H 同命令阅读禁用）', () => {
+    const h = makeBridge()
+    const c = mountFind(h)
+    c.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
+    c.handleHostMessage({ kind: 'view.find.open', replace: true })
+    expect(findPanel()?.classList.contains('vsidian-find-open')).toBe(false)
+    // 无 replace 的普通查找不受影响（阅读查找保留）
+    c.handleHostMessage({ kind: 'view.find.open', query: '目标词' })
+    expect(viewState(c, h).find?.open).toBe(true)
+  })
+
   it('替换下一个：当前匹配被替换（单笔 edit.request），会话就近保持', () => {
     const h = makeBridge()
     const c = mountFind(h, 'foo bar foo baz foo\n')
@@ -687,14 +716,16 @@ describe('替换栏与替换写回（#236：替换为显式写操作）', () => 
     expect(req.changes.length).toBe(3)
   })
 
-  it('替换在阅读模式不执行（只读）；替换栏不展开', () => {
+  it('替换在阅读模式不执行（只读；replace 指令不开面板，查询面板保留）', () => {
     const h = makeBridge()
     const c = mountFind(h, 'foo bar foo\n')
     c.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
     c.handleHostMessage({ kind: 'view.find.open', query: 'foo', replace: true })
-    const state = viewState(c, h)
-    expect(state.find?.open).toBe(true)
-    expect(state.find?.replaceOpen).toBe(false)
+    // 探针未开启会话时整体缺省（findTouched 未置位）——面板不开即会话未建
+    expect(viewState(c, h).find?.open ?? false).toBe(false)
+    // 普通查询照常打开（阅读查找保留），替换操作仍不执行（只读守卫）
+    c.handleHostMessage({ kind: 'view.find.open', query: 'foo' })
+    expect(viewState(c, h).find?.open).toBe(true)
     const before = editRequestCount(h)
     c.handleHostMessage({ kind: 'view.find.replace', op: 'all' })
     expect(editRequestCount(h)).toBe(before)

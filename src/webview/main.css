@@ -3568,8 +3568,16 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-toggle-glyph {
   border-radius: 3px;
 }
 
-.vsidian-find button:hover {
+/* 禁用态不反白（☰ 无选区锚点、阅读模式替换 toggle） */
+.vsidian-find button:hover:not(:disabled) {
   background-color: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.25));
+}
+
+/* 替换栏 toggle 阅读态禁用（2026-10 阅读模式整体禁用替换）：灰化不响应，
+   disabled 不可聚焦——focus 圈天然不出现 */
+.vsidian-find .vsidian-find-toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* 导航、替换与「在选定内容中查找」按钮使用按主题切换的 16px SVG。 */

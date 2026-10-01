@@ -228,10 +228,14 @@ describe('预览当前链接快捷键（#221）', () => {
 })
 
 describe('查找替换快捷键（#236）', () => {
-  it('findReplace 默认 ctrl+h 双模式非写；替换操作默认未绑定仅 Live', () => {
+  it('findReplace 默认 ctrl+h 仅 Live 非写（2026-10 阅读整体禁用替换）；替换操作默认未绑定仅 Live', () => {
     const replace = KEYBINDING_OPERATIONS.find((op) => op.id === 'findReplace')
-    expect(replace).toMatchObject({ mode: 'both', writes: false })
+    expect(replace).toMatchObject({ mode: 'live', writes: false })
     expect(getEffectiveBindings({}, 'findReplace')).toEqual(['ctrl+h'])
+    // 生效模式收窄到 Live：阅读模式键路由不消费 ctrl+h（替换是 Live 编辑
+    // 能力——面板不开、替换栏 toggle disabled，live 展开记忆不被触碰）
+    expect(resolveKeybinding({}, 'live', 'ctrl+h')).toEqual({ kind: 'command', id: 'findReplace' })
+    expect(resolveKeybinding({}, 'reading', 'ctrl+h')).toEqual({ kind: 'none' })
     const next = KEYBINDING_OPERATIONS.find((op) => op.id === 'findReplaceNext')
     expect(next).toMatchObject({ mode: 'live' })
     expect(getEffectiveBindings({}, 'findReplaceNext')).toEqual([])

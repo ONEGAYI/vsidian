@@ -152,7 +152,8 @@ export type HostToWebview =
   | { kind: 'image.test.pending'; reqId: number }
   /** 查找会话指令（#14；#236 起三开关/替换栏）：open 打开 webview 内浮动
    *  查找面板（可预置查询词，焦点进输入框；replace=true 同时展开替换栏
-   *  ——阅读模式只开面板不展开，替换是 Live 编辑能力；replacement 随
+   *  ——仅 Live；阅读模式整体禁用替换（2026-10）：带 replace 指令不打开
+   *  面板静默忽略，替换是 Live 编辑能力；replacement 随
    *  replace 预置替换词——与预置查询词同语义，宿主命令与测试注入共用）；
    *  close 关闭并归还焦点；step 循环定位上一/下一匹配。open/step/close
    *  为纯只读视图操作：不写文档、不产生编辑历史。replace（#236）执行

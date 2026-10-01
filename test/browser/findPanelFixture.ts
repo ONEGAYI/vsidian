@@ -69,6 +69,7 @@ Object.assign(window, {
     const input = panel.querySelector<HTMLInputElement>('.vsidian-find-input')
     const count = panel.querySelector<HTMLElement>('.vsidian-find-count')
     const replaceRow = panel.querySelector<HTMLElement>('.vsidian-find-replace')
+    const toggle = panel.querySelector<HTMLButtonElement>('.vsidian-find-toggle')
     return {
       open: panel.classList.contains('vsidian-find-open'),
       query: input?.value ?? '',
@@ -84,6 +85,9 @@ Object.assign(window, {
       selectionRangeMarks: document.querySelectorAll('.cm-content .vsidian-find-selection-range').length,
       replaceOpen: replaceRow?.classList.contains('vsidian-find-replace-open') ?? false,
       replaceInput: panel.querySelector<HTMLInputElement>('.vsidian-find-replace-input')?.value ?? '',
+      /** 替换栏 toggle 禁用态与灰化观测（2026-10 阅读整体禁用替换） */
+      toggleDisabled: toggle?.disabled ?? null,
+      toggleOpacity: toggle ? getComputedStyle(toggle).opacity : null,
       /** live 视口内全部匹配装饰数（当前匹配装饰另计） */
       matchMarks: document.querySelectorAll('.cm-content .vsidian-find-match').length,
       currentMarks: document.querySelectorAll('.cm-content .vsidian-find-match-current').length,

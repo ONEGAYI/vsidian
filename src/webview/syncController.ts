@@ -2185,7 +2185,13 @@ export class WebviewSyncController {
         this.clearAnchorFlash()
         break
       case 'view.find.open':
-        // 查找会话（#14）：webview 内浮动面板；open/step 为纯只读视图操作
+        // 查找会话（#14）：webview 内浮动面板；open/step 为纯只读视图操作。
+        // replace 语义（命令面板替换入口，与 Ctrl+H 同命令）在阅读模式
+        // 整体禁用（2026-10）：面板都不开，静默忽略——与 view.find.replace
+        // 的阅读守卫同口径
+        if (message.replace === true && this.viewMode !== 'live') {
+          break
+        }
         this.openFind(message.query, {
           replace: message.replace === true,
           replacement: typeof message.replacement === 'string' ? message.replacement : undefined,
@@ -7072,7 +7078,9 @@ export class WebviewSyncController {
   // UI 形态：webview 内浮动层（custom editor webview 不可用 VSCode 原生
   // find 控件，2026-10 批次四路核实）。入口：Mod-F 拦截、宿主
   // view.find.open（命令面板共用）、输入框 Enter/Shift-Enter、F3 循环
-  // 导航；Ctrl+H（findReplace）打开并展开替换栏；Esc 关闭归还焦点。
+  // 导航；Ctrl+H（findReplace，仅 Live）打开并展开替换栏；Esc 关闭归还
+  // 焦点。阅读模式整体禁用替换（2026-10）：键位不消费、replace 指令不
+  // 开面板、toggle disabled。
   // 匹配引擎（#236）：@codemirror/search 的 SearchQuery（三开关 +
   // literal 字面量口径），匹配集基于 CM6 doc 全文文本模型，文档变化经
   // Text 引用比较判过期；高亮自绘（官方面板未装配，见 findSession
@@ -7098,10 +7106,14 @@ export class WebviewSyncController {
     toggle.appendChild(toggleGlyph)
     bindLocaleAttrs(toggle, 'find.toggleReplace')
     toggle.addEventListener('click', () => {
-      this.setFindReplaceOpen(!(this.findReplaceOpen && this.viewMode === 'live'))
+      // 阅读模式整体禁用替换（2026-10）：disabled 灰化挡住真实点击，此处
+      // 再守卫 findRender 同步前的陈旧 DOM 边缘——不触碰 live 展开记忆
+      if (this.viewMode !== 'live') {
+        return
+      }
+      this.setFindReplaceOpen(!this.findReplaceOpen)
       // 焦点归还输入框（toggle 不驻留焦点圈；输入框 focus 圈与 toggle
-      // focus 圈天然互斥）。阅读模式的查找输入框同样真实可聚焦（openFind
-      // 同样 focus 它），两模式统一归还
+      // focus 圈天然互斥）
       this.findInputEl?.focus()
     })
     this.findToggleEl = toggle
@@ -7510,11 +7522,15 @@ export class WebviewSyncController {
       btn.disabled = !this.findInSelection &&
         (this.viewMode !== 'live' || this.findSelectionAnchor === null)
     }
-    // 替换行显隐（阅读模式恒收起——替换是 Live 编辑能力）；toggle 的
-    // aria-expanded 与展开态同步
+    // 替换行显隐与 toggle 禁用（2026-10 阅读模式整体禁用替换——行恒收起、
+    // toggle disabled 灰化；live 展开记忆 findReplaceOpen 不被触碰，回
+    // live 原样恢复）；aria-expanded 与展开态同步
     const replaceVisible = this.findReplaceOpen && this.viewMode === 'live'
     this.findReplaceRowEl?.classList.toggle(FIND_CLASS_NAMES.replaceOpen, replaceVisible)
     this.findToggleEl?.setAttribute('aria-expanded', String(replaceVisible))
+    if (this.findToggleEl) {
+      this.findToggleEl.disabled = this.viewMode !== 'live'
+    }
     if (this.readingView) {
       this.readingView.highlightMatches(
         this.viewMode === 'reading' && this.findOpen ? this.findMatches : [], this.findIndex)

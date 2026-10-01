@@ -2097,8 +2097,9 @@ export function createTextEditorProvider(
   }
 
   // ---- #236 查找替换命令：find.replace 打开面板并展开替换栏（活动 tab
-  //  为本扩展 custom editor 时向其面板发送；阅读模式由 webview 侧收窄为
-  //  只开面板——替换是 Live 编辑能力）。替换执行命令复用活动面板查找
+  //  为本扩展 custom editor 时向其面板发送；阅读模式整体禁用替换（2026-10
+  //  用户决策）——webview 侧守卫带 replace 指令不开面板，静默忽略）。
+  //  替换执行命令复用活动面板查找
   //  命令的定向逻辑（view.find.replace；webview 侧守卫面板开 + live +
   //  合法 query，阅读/未开会话时静默忽略）----
   context.subscriptions.push(
