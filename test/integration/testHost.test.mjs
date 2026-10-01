@@ -343,6 +343,26 @@ test('开发态分片各有报告，单片及另外两种启动器保留原报�
   }
 })
 
+test('开发态敏感组独立报告并显式传递分组，错误组在宿主启动前拒绝', async () => {
+  const dev = readFileSync(path.join(here, 'runTest.mjs'), 'utf8')
+  assert.match(dev, /integration-sensitive\.log/)
+  assert.match(dev, /VSIDIAN_TEST_GROUP:\s*group/)
+  const child = spawn(process.execPath, [path.join(here, 'runTest.mjs')], {
+    env: { ...process.env, VSIDIAN_TEST_GROUP: 'typo' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  let output = ''
+  child.stdout.on('data', (chunk) => { output += chunk })
+  child.stderr.on('data', (chunk) => { output += chunk })
+  const code = await new Promise((resolve, reject) => {
+    child.on('error', reject)
+    child.on('close', resolve)
+  })
+  assert.equal(code, 1)
+  assert.match(output, /VSIDIAN_TEST_GROUP/)
+  assert.doesNotMatch(output, /测试宿主模式|Downloading VS Code/)
+})
+
 test('Windows 独立桌面启动器原样传递真实进程输出和非零退出码', { skip: skipDesktop }, async () => {
   let output = ''
   let diagnostics = ''
