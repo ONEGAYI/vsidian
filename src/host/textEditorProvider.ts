@@ -92,6 +92,7 @@ import { sanitizeFindOptions, type FindOptions } from '../shared/findOptions'
 import { t } from '../shared/i18n'
 import { EMBED_MAX_DEPTH_DEFAULT, EMBED_MAX_DEPTH_KEY } from '../shared/settings'
 import type { JiebaWiring } from './jiebaResourceWiring'
+import { JIEBA_WASM_VERSION } from '../shared/jiebaManifest'
 
 export const VIEW_TYPE = 'onegayi.vsidian.editor'
 
@@ -239,6 +240,14 @@ function editorResourceRoots(
     vscode.Uri.joinPath(context.extensionUri, 'media'),
     imageResourceRoot(document),
   ]
+  // #239 修复：jieba 资源的宿主权威目录进 webview 资源服务许可面。
+  // asWebviewUri 只构造 URL；VSCode 资源服务（resourceLoading）对每个请求
+  // 做 localResourceRoots 包含性检查（scheme 须与某个 root 一致），缺失时
+  // 请求被 AccessDenied 拒绝、webview 动态 import 必抛「Failed to fetch
+  // dynamically imported module」回退 builtin——1.86.2 实测 globalStorageUri
+  // 即为 vscode-userdata: scheme，root 与资源同 scheme 即通过检查。只放行
+  // jieba-wasm 子树（最小许可面），目录未下载时无副作用
+  roots.push(vscode.Uri.joinPath(context.globalStorageUri, 'jieba-wasm'))
   if (snippetDirectory) {
     roots.push(vscode.Uri.file(snippetDirectory))
   }
@@ -2543,6 +2552,12 @@ export function createTextEditorProvider(
     vscode.commands.registerCommand('onegayi.vsidian._test.getSettings', () =>
       settings ? settings.service.getSnapshot() : {},
     ),
+    // #239 jieba 宿主权威状态观测：installed（下载 + sha256 校验落
+    // globalStorage 完成）与 notice（含 webview loadResult 回报的装载失败
+    // detail）——集成用例等待下载就绪与红灯诊断输出
+    vscode.commands.registerCommand('onegayi.vsidian._test.getJiebaState', () =>
+      jieba ? jieba.service.getState()
+        : { installed: false, version: JIEBA_WASM_VERSION, status: 'idle', notice: null }),
     vscode.commands.registerCommand('onegayi.vsidian._test.getKeybindings', () =>
       settings ? settings.keybindings.getSnapshot() : {},
     ),

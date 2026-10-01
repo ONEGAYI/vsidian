@@ -297,6 +297,7 @@ import { fenceEscape } from './fenceEscape'
 // 共用同一命令对象；引擎状态由 settings 快照与 wordSegment.state 两通道
 // 汇流驱动）
 import {
+  activeWordSegmentEngine,
   configureWordSegment,
   cursorWordLeft,
   cursorWordRight,
@@ -3046,6 +3047,7 @@ export class WebviewSyncController {
       selectionOffset: this.view?.state.selection.main.from ?? 0,
       wordSegmenter: typeof Intl.Segmenter === 'function',
       wasmCompile: probeWebviewWasmCompile(),
+      jiebaEngine: activeWordSegmentEngine(),
       selectionHead: this.view?.state.selection.main.head ?? 0,
       selectionAssoc: this.view?.state.selection.main.assoc ?? 0,
       liveViewportCenterLine: liveCenterPos === null ? undefined : liveView?.state.doc.lineAt(liveCenterPos).number,

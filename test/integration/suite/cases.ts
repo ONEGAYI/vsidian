@@ -63,6 +63,8 @@ const CMD = {
   installSettingsFixture: 'onegayi.vsidian._test.installSettingsFixture',
   getSettings: 'onegayi.vsidian._test.getSettings',
   setSettings: 'onegayi.vsidian._test.setSettings',
+  // #239 jieba 宿主状态观测（installed 与 notice 诊断）
+  getJiebaState: 'onegayi.vsidian._test.getJiebaState',
   injectSettingsPageMessage: 'onegayi.vsidian._test.injectSettingsPageMessage',
   // #128 CSS 片段链路（观测/注入；刷新走真实命令）
   snippetState: 'onegayi.vsidian._test.getSnippetState',
@@ -560,6 +562,8 @@ interface ViewState {
   wordSegmenter?: boolean
   /** #241 评审修复：webview CSP 下 WebAssembly 编译探针（jieba 前置条件） */
   wasmCompile?: boolean
+  /** #239 jieba 端到端观测：webview 实际生效的分词引擎（装载成功为 'jieba'） */
+  jiebaEngine?: 'builtin' | 'jieba'
   readingBlockCount?: number
   readingAnchorStart?: number
   /** #7 按需挂载观测 */
@@ -1182,6 +1186,7 @@ async function waitViewState(
       throw new Error(`${(err as Error).message}；最后观测：${JSON.stringify({
         viewMode: s['viewMode'],
         selectionOffset: s['selectionOffset'],
+        jiebaEngine: s['jiebaEngine'],
         find: s['find'],
         imageStates: s['imageStates'],
         imageProbe: s['imageProbe'],
@@ -7342,6 +7347,54 @@ export const cases: Array<[string, () => Promise<void>]> = [
       crlf.getText() === '标题一\r\n**正文** A 行\r\n正文 B 行\r\n' ? true : undefined)
     await vscode.commands.executeCommand(CMD.injectMessage, crlfUri, { kind: 'history.request', op: 'undo' })
     await poll('CRLF 格式撤销', () => crlf.getText() === crlfBefore ? true : undefined)
+  }],
+  ['jieba 端到端：globalStorage 资源经 webview 资源服务装载生效（#239）', async () => {
+    interface JiebaState {
+      installed: boolean
+      version: string
+      status: string
+      notice: { kind: string; detail?: string } | null
+    }
+    const jiebaState = async (): Promise<JiebaState> =>
+      (await vscode.commands.executeCommand(CMD.getJiebaState)) as JiebaState
+    await openWithEditor('lf.md')
+    await waitSessionReady('lf.md')
+    try {
+      // 引擎选 jieba（资源未就位时 wordMotion 仍以 builtin 服务命令；资源
+      // 经 wordSegment.state 到达后按需装载）
+      await vscode.commands.executeCommand(CMD.setSettings, { 'editor.wordSegmentEngine': 'jieba' })
+      // 走产品消息触发宿主真实下载（jsdelivr 直下 + sha256 校验 + 落
+      // globalStorage）——集成宿主便携目录每次全新，必为未安装态起步，
+      // 每轮真实拉取约 4MB（**本套件唯一的外网下载依赖**：jsdelivr 不可达
+      // 时下载段超时失败，失败信息附宿主 notice 可归因）。wordSegment.download
+      // 是设置页域消息（编辑器面板分派对其为显式 no-op——真实处理入口在
+      // 设置页链路），经设置页注入钩子走同一处理入口（handleMessage 不
+      // 依赖面板在场）
+      await vscode.commands.executeCommand(CMD.injectSettingsPageMessage, { kind: 'wordSegment.download' })
+      try {
+        await poll('jieba 资源下载安装完成', async () => {
+          const s = await jiebaState()
+          return s.installed ? s : undefined
+        }, 120000)
+      } catch (err) {
+        throw new Error(`${(err as Error).message}；宿主 jieba 状态=${JSON.stringify(await jiebaState())}`)
+      }
+      // 宿主 installed → wordSegment.state 全面板推送 → webview 动态 import
+      // jieba_rs_wasm.js（globalStorage 资源经 asWebviewUri 进 webview 资源
+      // 服务）。webview 的 localResourceRoots 不含 globalStorage 时该请求被
+      // AccessDenied 拒绝，import 抛错、引擎恒回退 builtin（任何宿主版本下
+      // 均如此；1.86 与新宿主的资源 URL 前缀 file+/vscode-userdata+ 只是
+      // globalStorageUri scheme 差异，非失败原因）——本用例即钉住该端到
+      // 端链路的行为级证据（#37 教训：层内词法断言测不到资源服务许可面）
+      try {
+        await waitViewState('lf.md', (v) => v.jiebaEngine === 'jieba', 0, 60000)
+      } catch (err) {
+        throw new Error(`${(err as Error).message}；宿主 jieba 状态=${JSON.stringify(await jiebaState())}`)
+      }
+    } finally {
+      // 引擎键恢复默认（每用例前的设置重置面不含本键，显式复位避免跨用例泄漏）
+      await vscode.commands.executeCommand(CMD.setSettings, { 'editor.wordSegmentEngine': 'builtin' })
+    }
   }],
   ['快速操作条：流内绘制、选区按钮与标题菜单写回（#89）', async () => {
     await openWithEditor('quick-actions-crlf.md')

@@ -133,6 +133,7 @@
 
 ## 7. 轮次记录
 
+- **2026-10-01 jieba webview 装载修复（#239 回归）**：用户真机报告「已下载资源在编辑器中加载失败，回退内置引擎」——根因不在下载或 CSP，而在 webview 资源服务的 **localResourceRoots 许可面从未包含 globalStorage**：`asWebviewUri` 只构造 URL，VSCode 资源服务（resourceLoading）对每个请求按 roots 做包含性检查并 AccessDenied 拒绝，webview 动态 import 必抛「Failed to fetch dynamically imported module」回退 builtin。1.86.2 实测 globalStorageUri 即为 `vscode-userdata:` scheme（资源 URL 前缀 `vscode-userdata+`，非宿主版本差异）——该装载路径自 #239 落地起在任何宿主下均未走通，此前测试分层各自豁免（单测注入绕过 import、浏览器 fixture、集成只测 CSP 前置）。修复：`editorResourceRoots` 常驻放行 `globalStorage/jieba-wasm` 子树（最小许可面；常驻声明不要求目录已存在，天然覆盖「先开面板后下载资源」的会话内时序，无需在状态广播处重赋 webview.options——重赋有资源状态重置扰动）。端到端回归钉入集成用例：`view.state` 新增 `jiebaEngine` 探针（webview 实际生效引擎）+ `_test.getJiebaState` 观测钩子，用例走真实链路（设置页消息触发宿主下载 → 校验落盘 → 广播 → webview import + wasm init），红灯期失败信息与用户症状逐字一致；待用户真机复验记录见 `manual-verification.md` 同日跟进节。
 - **2026-10-01 验收修订**：用户确认阅读视图查找升级为字符级高亮，全部命中浅黄、当前命中深橙，callout/引用块只标命中文字。匹配计数仍忠实全文源码；隐藏的目标和图形源码不转标同词正文。旧阅读命中块类及块底色变量保留给片段，默认块底色透明。实施在 `readingFind.ts` 与 `readingVirtualView.ts`，绘制、重挂载及模式切换验证见 `test/browser/findPanel.mjs`；待用户验收记录见 `manual-verification.md` 的 2026-10-01 跟进节。
 - **2026-10-01 隐藏源码反馈追加决策**：用户认可最小演示并同意接入阅读查找的只读源码浮层。当前匹配未完全呈现时显示所属源码行及精确字符标记，表格/图形保持渲染；fixed 浮层不占正文布局，动态显隐不移动下方段落，查找导航的定位滚动仍保留。不抢查找输入焦点、不写文档，关闭查找/切模式/离屏回收时清理；计数与成型 frontmatter 排除口径不变。实现入口 `readingFindSource.ts`，样式片段通过新增公开类与既有查找变量覆盖；自动化与人工待验见 `manual-verification.md` 同日隐藏源码反馈节。
 
