@@ -826,3 +826,81 @@ describe('VirtualReadingView：外部滚动宿主（#243）', () => {
     }
   })
 })
+
+// #259 长文档滚不到底：漂移重估的判据必须是「从未实测」（measured）而非
+// 「当前未挂载」（elements）——后者会把已实测但被回收的块高度换回估计值，
+// 与文件头「回收后保留实测」契约矛盾。区域异质高度（前段高、后段矮）使
+// 标定中位数随窗口样本摆动，每次摆动都覆写回收带的实测值，稳定化平移
+// 把高度表抖动转译成对用户滚轮的回吐（恒差的来源）。同质文档（估计恰等
+// 实测）掩盖了该缺陷——现有「回收块保留最后实测高度」用例全绿的原因。
+describe('VirtualReadingView：长文档滚动到底（#259 恒差）', () => {
+  /** 区域异质高度桩：块序 < highCount 的块 highPx、其余 lowPx（按块元素
+   *  的 data-vsidian-src-start 查表；非块元素返回基准 36） */
+  function stubRegionalHeights(text: string, highCount: number, highPx: number, lowPx: number) {
+    const blocks = splitReadingBlocks(text)
+    const byStart = new Map(
+      blocks.map((b, i) => [String(b.start), i < highCount ? highPx : lowPx] as const),
+    )
+    return vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(
+      function (this: HTMLElement) {
+        const s = this.dataset?.['vsidianSrcStart']
+        const h = s != null ? byStart.get(s) : undefined
+        return h ?? 36
+      },
+    )
+  }
+
+  it('漂移重估不覆写已实测回收块：spacerTop 按实测值累计（覆写钉）', () => {
+    const text = makeDoc(100)
+    const heightSpy = stubRegionalHeights(text, 50, 80, 40)
+    try {
+      const container = createReadingContainer()
+      stubClientHeight(container, 400)
+      const view = new VirtualReadingView(container, { bufferPx: 600 })
+      view.setDocument(text)
+      // 首窗 0..27 实测 80、标定 64、未测块 28..99 重估 76；跳到尾段：
+      // 窗口 82..99 实测 40 → 标定翻转到 28（drift 56%）→ 触发重估。
+      // 已实测回收的块 0..27（曾测 80）必须保留实测值。
+      container.scrollTop = 7000
+      view.updateNow()
+      const spacerTop = container.querySelector<HTMLElement>(`.${READING_CLASS_NAMES.spacerTop}`)!
+      // 期望：实测 80 的 0..27 保留 + 从未实测的 28..81 按新标定重估（40）
+      // 覆写缺陷下：0..81 全被换回估计 40 → spacerTop = 40×82 = 3280
+      expect(Number.parseFloat(spacerTop.style.height)).toBe(80 * 28 + 40 * 54)
+      view.dispose()
+    } finally {
+      heightSpy.mockRestore()
+    }
+  })
+
+  it('连续滚动净位移单调前进不被稳定化回拉，末块进入挂载窗口（净位移钉）', () => {
+    const text = makeDoc(100)
+    const heightSpy = stubRegionalHeights(text, 50, 80, 40)
+    try {
+      const container = createReadingContainer()
+      stubClientHeight(container, 400)
+      const view = new VirtualReadingView(container, { bufferPx: 600 })
+      view.setDocument(text)
+      // 滚轮式连续滚动：每轮 +60px。滚动路径连续覆盖 → 视口锚点上方
+      // 的块全部实测过；标定在中段分界处翻转时，重估只应影响从未实测
+      // 的块 → tops[锚点] 不变 → 稳定化平移为零。覆写缺陷下锚点上方
+      // 已测块被换回估计值，净位移被回吐钉死在分界附近。
+      for (let i = 0; i < 140; i++) {
+        container.scrollTop += 60
+        view.updateNow()
+        // 容忍单轮内样式抖动 ±120（两轮步长），不允许净回退
+        expect(container.scrollTop, `第 ${i} 轮滚动后 scrollTop`).toBeGreaterThan(
+          (i + 1) * 60 - 120,
+        )
+      }
+      // 文档模型总高 80×50 + 40×50 = 6000：140×60 后窗口应覆盖末块
+      const blocks = splitReadingBlocks(text)
+      expect(mountedStarts(container).at(-1)).toBe(
+        String(blocks[blocks.length - 1]!.start),
+      )
+      view.dispose()
+    } finally {
+      heightSpy.mockRestore()
+    }
+  })
+})
