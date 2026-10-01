@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import test from 'node:test'
-import { buildTestHostArgs, cleanupTestDirs, createPortableShardHost, resolveTestHostMode, runTestHost, writeTestWorkspaceFile } from './testHost.mjs'
+import { buildTestHostArgs, cleanupTestDirs, createPortableShardHost, evaluateHostReport, resolveTestHostMode, runTestHost, writeTestWorkspaceFile } from './testHost.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 
@@ -111,6 +111,133 @@ test('writeTestWorkspaceFile 生成单 folder 的 .code-workspace：multi-root �
   // folders 恰一个（= fixture 工作区根）、路径正斜杠（Windows 反斜杠的 JSON 转义形态免歧义）
   const parsed = JSON.parse(writes[0].content)
   assert.deepEqual(parsed.folders, [{ path: dir.split(path.sep).join('/') }])
+})
+
+// #254 启动器契约：宿主退出码非零时的报告判定不得只数 FAIL 行——
+// 「零 FAIL 但计划用例未全部取得终态」是被 #211 收尾噪声放行逻辑误放行过的
+// 真实形态（实测计划 59 项只执行 53 项被静默放行）。四类判定契约钉住：
+// 判败必须列出缺失用例的身份（有 START 无终态的名称 + 未开始数量）。
+function caseLog(kind, name) {
+  return `[集成测试][${kind}] ${name}`
+}
+
+function reportLines({ plan, pass = [], fail = [], startedWithoutEnd = [], noiseExit = 1 }) {
+  const lines = [`[testHost] 运行报告 2026-10-01T00:00:00.000Z`]
+  if (plan) lines.push(`[集成测试] 执行 ${plan.executed}/${plan.total} 项${plan.detail ?? ''}`)
+  for (const name of pass) {
+    lines.push(caseLog('START', name))
+    lines.push(caseLog('PASS', name))
+    lines.push(`[集成测试][TIME] 12ms ${name}`)
+  }
+  for (const name of fail) {
+    lines.push(caseLog('START', name))
+    lines.push(caseLog('FAIL', name))
+    lines.push(`[集成测试][TIME] 12ms ${name}`)
+  }
+  for (const name of startedWithoutEnd) lines.push(caseLog('START', name))
+  lines.push(`[testHost] 宿主退出码 ${noiseExit}`)
+  return lines
+}
+
+test('报告判定：零 FAIL 但零终态（首用例即截断）必须判败并点名缺失用例', () => {
+  const verdict = evaluateHostReport(reportLines({
+    plan: { executed: 1, total: 234 },
+    startedWithoutEnd: ['索引维护：工作区根增删与嵌套根归属（#198）'],
+  }), 1)
+  assert.equal(verdict.ok, false)
+  assert.equal(verdict.pardon, false)
+  assert.equal(verdict.failCount, 0)
+  assert.equal(verdict.planned, 1)
+  assert.equal(verdict.doneCount, 0)
+  assert.deepEqual(verdict.missing, ['索引维护：工作区根增删与嵌套根归属（#198）'])
+  assert.equal(verdict.notStarted, 0)
+  assert.match(verdict.reason, /索引维护：工作区根增删/)
+})
+
+test('报告判定：分片中途缺项（有 START 无终态）判败并区分缺终态与未开始', () => {
+  const passed = Array.from({ length: 52 }, (_, i) => `用例 ${i + 1}`)
+  const verdict = evaluateHostReport(reportLines({
+    plan: { executed: 59, total: 234, detail: '（分片 2/4，本片 59 项）' },
+    pass: passed,
+    startedWithoutEnd: ['跨根 rename（#199）', '悬停预览刷新（#224）', '图片三层失效（#201）'],
+  }), 1)
+  assert.equal(verdict.ok, false)
+  assert.equal(verdict.doneCount, 52)
+  assert.deepEqual(verdict.missing, ['跨根 rename（#199）', '悬停预览刷新（#224）', '图片三层失效（#201）'])
+  // START 共 55（52 完成 + 3 无终态），59 - 55 = 4 项未开始
+  assert.equal(verdict.notStarted, 4)
+  assert.match(verdict.reason, /3 项有始无终/)
+  assert.match(verdict.reason, /4 项未开始/)
+})
+
+test('报告判定：筛选用例缺项同样判败（计划 2 项只终态 1 项）', () => {
+  const verdict = evaluateHostReport(reportLines({
+    plan: { executed: 2, total: 234, detail: '（筛选 "根增删,rename"）' },
+    pass: ['工作区根增删（#198）'],
+  }), 1)
+  assert.equal(verdict.ok, false)
+  assert.deepEqual(verdict.missing, [])
+  assert.equal(verdict.notStarted, 1)
+})
+
+test('报告判定：全部计划用例取得终态且零 FAIL 的非零退出按 #211 噪声放行', () => {
+  const passed = Array.from({ length: 59 }, (_, i) => `用例 ${i + 1}`)
+  const verdict = evaluateHostReport(reportLines({
+    plan: { executed: 59, total: 234, detail: '（分片 2/4，本片 59 项）' },
+    pass: passed,
+  }), 1)
+  assert.equal(verdict.ok, true)
+  assert.equal(verdict.pardon, true)
+  assert.equal(verdict.failCount, 0)
+  assert.equal(verdict.doneCount, 59)
+})
+
+test('报告判定：存在 FAIL 行时无论终态计数如何都判败；退出码 0 直接通过', () => {
+  const failed = evaluateHostReport(reportLines({
+    plan: { executed: 2, total: 2 },
+    pass: ['用例 1'],
+    fail: ['用例 2'],
+  }), 1)
+  assert.equal(failed.ok, false)
+  assert.equal(failed.pardon, false)
+  assert.equal(failed.failCount, 1)
+  assert.match(failed.reason, /FAIL 1/)
+
+  const zeroExit = evaluateHostReport(reportLines({ plan: { executed: 1, total: 1 }, pass: ['用例 1'] }), 0)
+  assert.equal(zeroExit.ok, true)
+  assert.equal(zeroExit.pardon, false)
+})
+
+test('报告判定：报告缺计划行（执行 N/M）时不得放行非零退出；空片计划 0 同样判败且措辞区分', () => {
+  const verdict = evaluateHostReport([
+    '[testHost] 运行报告 2026-10-01T00:00:00.000Z',
+    '[testHost] 宿主退出码 1',
+  ], 1)
+  assert.equal(verdict.ok, false)
+  assert.equal(verdict.planned, 0)
+  assert.match(verdict.reason, /计划行/)
+
+  // 空片（分片允许「筛选结果少于片数」）：计划行在但为 0——判败不放行，
+  // 措辞不得误报「未见计划行」
+  const emptyShard = evaluateHostReport(reportLines({
+    plan: { executed: 0, total: 234, detail: '（分片 3/4，本片 0 项）' },
+  }), 1)
+  assert.equal(emptyShard.ok, false)
+  assert.equal(emptyShard.planned, 0)
+  assert.match(emptyShard.reason, /计划执行 0 项/)
+  assert.doesNotMatch(emptyShard.reason, /未见计划行/)
+})
+
+test('runTest 非零退出的放行判定经 evaluateHostReport 而非内联数行', () => {
+  const source = readFileSync(path.join(here, 'runTest.mjs'), 'utf8')
+  assert.match(source, /evaluateHostReport\(/)
+})
+
+test('runTest 支持 VSIDIAN_TEST_VSCODE_PATH 指定已解压宿主跳过下载（下界验证通道）', () => {
+  const source = readFileSync(path.join(here, 'runTest.mjs'), 'utf8')
+  assert.match(source, /VSIDIAN_TEST_VSCODE_PATH/)
+  // 有 override 时不得仍触发 1.86.2 下载（短路在 downloadAndUnzipVSCode 之前）
+  assert.match(source, /overrideExecutable \|\| await downloadAndUnzipVSCode/)
 })
 
 test('临时目录清理遇到占用仍继续清理其余目录，并拒绝越界目标', () => {

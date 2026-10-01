@@ -12,7 +12,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { generatePerfSample, generateReadingSample, generateMermaidDenseSample } from '../perf/gen-sample.mjs'
 import { writeFixtures, LARGE_DOC_LINES } from './fixtures.mjs'
-import { buildTestHostArgs, cleanupTestDirs, createPortableShardHost, resolveTestHostMode, runTestHost, writeTestWorkspaceFile } from './testHost.mjs'
+import { buildTestHostArgs, cleanupTestDirs, createPortableShardHost, evaluateHostReport, resolveTestHostMode, runTestHost, writeTestWorkspaceFile } from './testHost.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
@@ -26,7 +26,12 @@ if (sharded) {
   console.log(`[runTest] 分片并行：${shardTotal} 个宿主同时起跑（每片独立 fixture/存储/报告）`)
 }
 
-const executable = await downloadAndUnzipVSCode({ version: '1.86.2' })
+// VSIDIAN_TEST_VSCODE_PATH：指向已解压宿主可执行文件（如 1.82.3 下界
+// 验证）时跳过 1.86.2 下载直接使用——#254 分段验证路径 / #255 候选下界
+// 反复实测的通道；--extensionDevelopmentPath 模式不做 engines 安装门槛
+// 检查，不需要临时降版本
+const overrideExecutable = process.env.VSIDIAN_TEST_VSCODE_PATH
+const executable = overrideExecutable || await downloadAndUnzipVSCode({ version: '1.86.2' })
 const mode = resolveTestHostMode()
 console.log(`[runTest] 测试宿主模式：${mode}；宿主 ${executable}`)
 if (process.env.VSIDIAN_TEST_CASES) {
@@ -94,26 +99,20 @@ try {
     if (result.value === 0) {
       return []
     }
-    // 退出码非零时以报告为准：Linux 宿主收尾存在「全部用例 PASS 后退
-    // 出码 1」的退出竞速噪声（Extension host Canceled 特征，CI 五轮确
-    // 定性复现且与用例成败无关；本地 Windows 不复现）——报告内 FAIL
-    // 行数为零且计划用例已全部执行时放行该噪声，非零照常判败（不掩盖
-    // 真实失败）。执行计数核对（2026-10 批次加固）：此前只数 FAIL 行，
-    // 放行过「宿主中途截断」形态（少跑用例、零 FAIL、退出码 1，实测
-    // 计划 59 项只执行 53 项被静默放行）——#211 噪声边界是「全部用例
-    // PASS 后」的收尾竞速，未跑完的计划项不属于该边界，须照常判败
+    // 退出码非零时以报告为准（evaluateHostReport，#254 抽出为可测纯函数）：
+    // Linux 宿主收尾存在「全部用例 PASS 后退出码 1」的退出竞速噪声
+    // （Extension host Canceled 特征，CI 五轮确定性复现且与用例成败无关；
+    // 本地 Windows 不复现）——报告零 FAIL 且计划用例全部取得终态时放行该
+    // 噪声。宿主中途截断（零 FAIL 但计划项未跑完，此前实测 59 项只执行
+    // 53 项被静默放行）不属于 #211 边界：判败并点名缺失用例身份
     const report = path.join(testCacheDir, sharded ? `integration-dev-s${i + 1}.log` : 'integration-dev.log')
     try {
-      const lines = readFileSync(report, 'utf8').split('\n')
-      const failCount = lines.filter((line) => line.includes('[集成测试][FAIL]')).length
-      const doneCount = lines.filter((line) => line.includes('[集成测试][TIME]')).length
-      const planMatch = /\[集成测试\] 执行 (\d+)\/\d+ 项/
-        .exec(lines.find((line) => line.includes('[集成测试] 执行')) ?? '')
-      const planned = planMatch ? Number(planMatch[1]) : 0
-      if (failCount === 0 && planned > 0 && doneCount >= planned) {
-        console.warn(`[runTest] 片 ${i + 1} 宿主退出码 ${result.value} 但报告零失败且 ${doneCount}/${planned} 项全部执行（收尾退出噪声放行，详见 ${report}）`)
+      const verdict = evaluateHostReport(readFileSync(report, 'utf8').split('\n'), result.value)
+      if (verdict.ok) {
+        console.warn(`[runTest] 片 ${i + 1} 宿主退出码 ${result.value} 但${verdict.reason}（详见 ${report}）`)
         return []
       }
+      return [`${i + 1}: ${verdict.reason}`]
     } catch {
       // 报告不可读：维持退出码判定
     }

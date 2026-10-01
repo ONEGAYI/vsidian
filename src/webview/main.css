@@ -2950,6 +2950,28 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
 #app .cm-editor .cm-scroller .vsidian-table-grid-row > .vsidian-table-grid-cell.vsidian-table-region-bottom.vsidian-table-region-left { border-bottom-left-radius: 6px; }
 #app .cm-editor .cm-scroller .vsidian-table-grid-row > .vsidian-table-grid-cell.vsidian-table-region-bottom.vsidian-table-region-right { border-bottom-right-radius: 6px; }
 
+/* #252 格区在场时锚点格的光标让位：跨格接管的折叠单光标（防 pointerup
+   原生线性选区结算的既定形态）与零宽锚点格的 ::after 假光标会和格区蒙版
+   叠加成「左上格多一枚光标」的视觉残留——蒙版是唯一选区呈现。三条呈现
+   路径一并让位：drawSelection 绘制光标（多光标开，默认）、原生 caret
+   （多光标关）、零宽格假光标。格区消失（单击/失焦/编辑）后规则随类
+   撤销、光标恢复。不变式：格区在场 ⟺ 选区已折叠单光标，隐藏整层绘制
+   光标无 collateral（与 #237 零宽格去重同一取舍口径）。 */
+#app .cm-editor:has(.vsidian-table-region-cell) .cm-cursorLayer .cm-cursor {
+  display: none;
+}
+
+#app .cm-editor .cm-content:has(.vsidian-table-region-cell) {
+  caret-color: transparent;
+}
+
+/* 特异性须盖过空格假光标的聚焦显示规则（.cm-editor.cm-focused
+   .cm-scroller .empty-active::after，1 id + 4 class）——补 .cm-content
+   到 5 class，不依赖源序 */
+#app .cm-editor:has(.vsidian-table-region-cell) .cm-scroller .cm-content .vsidian-table-grid-empty-active::after {
+  display: none;
+}
+
 #app .cm-editor .cm-scroller .vsidian-table-grid-align-left { text-align: left; }
 #app .cm-editor .cm-scroller .vsidian-table-grid-align-center { text-align: center; }
 #app .cm-editor .cm-scroller .vsidian-table-grid-align-right { text-align: right; }
