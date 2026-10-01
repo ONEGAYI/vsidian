@@ -10,6 +10,9 @@
 import { describe, it, expect } from 'vitest'
 import {
   embedAtCol,
+  imageAltRangesInLine,
+  linkLabelRangesInLine,
+  normalizeReferenceLabel,
   parseWikilinkInner,
   scanEmbedsInLine,
   scanWikilinksInLine,
@@ -159,5 +162,117 @@ describe('#246 embedAtPosition：位置精确命中（inline 渲染规则与扫�
       }
       expect(perPos, line).toEqual(scanned)
     }
+  })
+})
+
+describe('linkLabelRangesInLine：链接/图片文字域形态学（P2-2 直接单测——Live 发射排除的保守口径）', () => {
+  it('图片 alt 域命中：区间为括号内文字（不含括号字符）', () => {
+    const line = '![alt text](http://u)'
+    const ranges = linkLabelRangesInLine(line)
+    expect(ranges).toHaveLength(1)
+    expect(line.slice(ranges[0]!.from, ranges[0]!.to)).toBe('alt text')
+  })
+
+  it('行内链接 label 域命中', () => {
+    const line = '看 [link text](u) 尾'
+    const ranges = linkLabelRangesInLine(line)
+    expect(ranges).toHaveLength(1)
+    expect(line.slice(ranges[0]!.from, ranges[0]!.to)).toBe('link text')
+  })
+
+  it('引用式 label 域命中（紧邻即产——不查 ref 是否定义，保守口径）', () => {
+    const line = '[text][ref]'
+    const ranges = linkLabelRangesInLine(line)
+    expect(ranges).toHaveLength(1)
+    expect(line.slice(ranges[0]!.from, ranges[0]!.to)).toBe('text')
+  })
+
+  it('反斜杠转义括号不参与配对', () => {
+    expect(linkLabelRangesInLine(String.raw`\[escaped\](u)`)).toEqual([])
+    const line = String.raw`x \[y\] z [w](u)`
+    const ranges = linkLabelRangesInLine(line)
+    expect(ranges).toHaveLength(1)
+    expect(line.slice(ranges[0]!.from, ranges[0]!.to)).toBe('w')
+  })
+
+  it('无 label 域的纯文句返回空；双链/嵌入自身括号自平衡不产域', () => {
+    expect(linkLabelRangesInLine('plain text no brackets here')).toEqual([])
+    expect(linkLabelRangesInLine('看 [[x]] 与 ![[y]] 混排')).toEqual([])
+  })
+
+  it('嵌套域取外层闭合配对（内层先闭合、外层后闭合，两域都产出）', () => {
+    const line = '[![alt](img)](link)'
+    const ranges = linkLabelRangesInLine(line)
+    expect(ranges).toHaveLength(2)
+    expect(line.slice(ranges[0]!.from, ranges[0]!.to)).toBe('alt')
+    expect(line.slice(ranges[1]!.from, ranges[1]!.to)).toBe('![alt](img)')
+  })
+
+  it('base 偏移：区间换算为全文 offset', () => {
+    const line = '![a](u)'
+    const ranges = linkLabelRangesInLine(line, 10)
+    expect(ranges[0]!.from).toBe(12)
+    expect(ranges[0]!.to).toBe(13)
+  })
+})
+
+describe('imageAltRangesInLine：仅图片 alt 域（Reading 配对排除的宁窄勿宽口径）', () => {
+  it('行内图片 alt 域命中（目标闭合）', () => {
+    const line = '![a ![[x]] b](http://u)'
+    const ranges = imageAltRangesInLine(line)
+    expect(ranges).toHaveLength(1)
+    expect(line.slice(ranges[0]!.from, ranges[0]!.to)).toBe('a ![[x]] b')
+  })
+
+  it('行内链接 label 域不是图片域（占位会落 DOM——Reading 配对面不得排除）', () => {
+    expect(imageAltRangesInLine('[a ![[x]] b](u)')).toEqual([])
+  })
+
+  it('引用式图片：label 闭合且 isDefinedRef 命中才产域；未定义与无回调均不产', () => {
+    const line = '![a ![[x]]][r1]'
+    expect(imageAltRangesInLine(line, 0, () => true)).toHaveLength(1)
+    expect(imageAltRangesInLine(line, 0, () => false)).toEqual([])
+    expect(imageAltRangesInLine(line)).toEqual([]) // 无回调保守放弃
+  })
+
+  it('isDefinedRef 收到原始 label（归一由调用方做——normalizeReferenceLabel 同源）', () => {
+    const seen: string[] = []
+    imageAltRangesInLine('![a][ r1 ]', 0, (label) => {
+      seen.push(label)
+      return true
+    })
+    expect(seen).toEqual([' r1 '])
+    expect(normalizeReferenceLabel(' r1 ')).toBe('R1')
+    expect(normalizeReferenceLabel('  Foo   Bar ')).toBe('FOO BAR')
+  })
+
+  it('\\![alt](u)（转义感叹前缀）仍按图片域产出（markdown-it 同按图片解析，实测对齐）', () => {
+    const line = String.raw`\![a ![[x]] b](u)`
+    const ranges = imageAltRangesInLine(line)
+    expect(ranges).toHaveLength(1)
+    expect(line.slice(ranges[0]!.from, ranges[0]!.to)).toBe('a ![[x]] b')
+  })
+
+  it('目标未闭合 / 裸目标含空白不产域（markdown-it 不认图片、占位照落 DOM）', () => {
+    expect(imageAltRangesInLine('![a ![[x]]](u')).toEqual([])
+    expect(imageAltRangesInLine('![a ![[x]]](u more)')).toEqual([])
+  })
+
+  it('尖括号目标与 title 目标产域（markdown-it 认定图片、占位不落 DOM）', () => {
+    const angle = '![a ![[x]]](<u v>)'
+    expect(imageAltRangesInLine(angle)).toHaveLength(1)
+    const titled = '![a ![[x]]](u "t")'
+    expect(imageAltRangesInLine(titled)).toHaveLength(1)
+  })
+
+  it('嵌套图片在链接 label 内：只产内层图片域（外层链接域不是图片域）', () => {
+    const line = '[![alt ![[x]]](u)](link)'
+    const ranges = imageAltRangesInLine(line)
+    expect(ranges).toHaveLength(1)
+    expect(line.slice(ranges[0]!.from, ranges[0]!.to)).toBe('alt ![[x]]')
+  })
+
+  it('无 ! 前缀的行返回空（快速预检）', () => {
+    expect(imageAltRangesInLine('[a](u) 双链 [[x]]')).toEqual([])
   })
 })

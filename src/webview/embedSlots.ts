@@ -9,9 +9,11 @@
 //   消费，不产占位）；本模块的 occurrence 扫描（blockEmbedOccurrences）
 //   用 lezer 树 + chainAt 排除代码/表格/注释/frontmatter（与
 //   refExpansion.validChildSource、vaultLinkExtract 的 scanSuppressed 同源
-//   边界），负责把占位定位回**原文 LF 精确区间**——inline token 无全文
-//   坐标（列表缩进剥离/懒续行使换算不可靠），以「占位文档序 ↔ 扫描命中
-//   文档序按 inner 分组计数配对」锚定，配对失败整块降级（占位保持引用
+//   边界）与**图片 alt 域排除**（终审 P1-1：markdown-it 把图片 alt 渲染为
+//   属性不落 DOM，扫描侧经 imageAltRangesInLine 同集合剔除，否则序列不
+//   等牵连整块降级），负责把占位定位回**原文 LF 精确区间**——inline token
+//   无全文坐标（列表缩进剥离/懒续行使换算不可靠），以「占位文档序 ↔ 扫描
+//   命中文档序按 inner 分组计数配对」锚定，配对失败整块降级（占位保持引用
 //   行文本，不升级、不误挂）。
 // - **提升**：占位在 p 内时拆段（前文 p + 宿主 + 后文 p——合法 DOM，不
 //   在 p 内塞块级节点）；行内格式祖先（strong/em/mark/del 等）先拆壳，
@@ -22,12 +24,13 @@
 //   vsidian-reading-embed-mixed）+ data-vsidian-embed-inner / src 锚点，
 //   EmbedCardManager.mountCardInto 与子卡 mountChildFrom 原样复用；卸载
 //   以 data-vsidian-embed-promoted 查询配对（promotedHostsOf）。
-import { scanEmbedsInLine } from '../shared/wikilink'
+import { imageAltRangesInLine, normalizeReferenceLabel, scanEmbedsInLine } from '../shared/wikilink'
 import { scanEmbedsInTableRow } from './tableCellEmbed'
 import { chainAt, frontmatterRange, markdownTreeParser } from './markdownDoc'
 import { READING_CLASS_NAMES } from './readingView'
-import { READING_MARKDOWN_CLASS_NAMES } from './readingMarkdown'
+import { READING_MARKDOWN_CLASS_NAMES, createMarkdownRenderer } from './readingMarkdown'
 import type { Tree } from '@lezer/common'
+import type { Env } from 'markdown-it'
 
 /** 混排嵌入占位的稳定类名（readingMarkdown 的 inline 规则同源常量；
  *  样式契约 content 域条目同源——占位与 vsidian-embed-ref 同形态但为
@@ -73,16 +76,53 @@ function treeFor(text: string): Tree {
   return tree
 }
 
+/** 引用集提取专用渲染器（规则链一次装配；parse 是同步纯函数，实例复用） */
+const refMd = createMarkdownRenderer()
+
+/** 引用式图片 alt 排除所需的文档级 ref 定义集（markdown-it refmap 权威，
+ *  与块数据 references 同源）：调用方未传时按全文惰性提取并缓存（同文本
+ *  只 parse 一次；无 `]:` 定义形态特征时零 parse）。仅在行内出现引用式
+ *  图片域时经回调触发（imageAltRangesInLine 惰性语义），频率极低 */
+let cachedRefs: { text: string; refs: ReadonlySet<string> } | null = null
+
+function referenceLabelsOf(text: string): ReadonlySet<string> {
+  if (cachedRefs?.text === text) {
+    return cachedRefs.refs
+  }
+  const refs = new Set<string>()
+  if (text.includes(']:')) {
+    const env: Env = {}
+    refMd.parse(text, env)
+    for (const key of Object.keys(env.references ?? {})) {
+      refs.add(key)
+    }
+  }
+  cachedRefs = { text, refs }
+  return refs
+}
+
 /**
  * 块区间内的全部嵌入 occurrence（文档序）：逐行扫描命中后经 lezer 树语法
  * 上下文过滤（代码/注释/frontmatter 不命中——与 validChildSource、
- * vaultLinkExtract 同源排除）。列表/引用前缀行照常命中（前缀字符不构成
- * `![[`，不影响扫描）；#248 起表格内容行（TableRow/TableHeader）走
- * scanEmbedsInTableRow 的**格内解码扫描**——逐格切分（`\|` 不切列）后
- * 在解码视图识别，inner 为解码语义（`B|别名`）、区间为原始源文——与
- * markdown-it 格内重解析产出的占位（inner 同解码语义）按文档序配对。
+ * vaultLinkExtract 同源排除）与**图片 alt 域排除**（终审 P1-1：markdown-it
+ * 把图片 alt 渲染为属性、占位不落 DOM，occurrence 侧须同集合对齐——
+ * imageAltRangesInLine 的宁窄勿宽口径见 shared/wikilink）。列表/引用前缀
+ * 行照常命中（前缀字符不构成 `![[`，不影响扫描）；#248 起表格内容行
+ * （TableRow/TableHeader）走 scanEmbedsInTableRow 的**格内解码扫描**——
+ * 逐格切分（`\|` 不切列）后在解码视图识别，inner 为解码语义（`B|别名`）、
+ * 区间为原始源文——与 markdown-it 格内重解析产出的占位（inner 同解码
+ * 语义）按文档序配对。
+ *
+ * references 为文档级 ref 定义集（引用式图片 alt 排除用；块数据
+ * block.references 同源可传）。缺省时按全文惰性提取缓存（markdown-it
+ * refmap 权威）。
  */
-export function blockEmbedOccurrences(text: string, blockStart: number, blockEnd: number): EmbedSlotOccurrence[] {
+export function blockEmbedOccurrences(
+  text: string,
+  blockStart: number,
+  blockEnd: number,
+  references?: ReadonlySet<string>,
+): EmbedSlotOccurrence[] {
   if (blockStart < 0 || blockEnd > text.length || blockStart >= blockEnd) {
     return []
   }
@@ -96,12 +136,17 @@ export function blockEmbedOccurrences(text: string, blockStart: number, blockEnd
   for (const line of text.slice(blockStart, blockEnd).split('\n')) {
     if (line.includes('![[')) {
       const isTableRow = chainAt(tree, base).some((node) => TABLE_ROW_NODE_NAMES.has(node.name))
+      const altRanges = imageAltRangesInLine(line, 0, (label) =>
+        (references ?? referenceLabelsOf(text)).has(normalizeReferenceLabel(label)))
       const hits = isTableRow ? scanEmbedsInTableRow(line, 0) : scanEmbedsInLine(line, 0)
       for (const hit of hits) {
         if (fm !== null && base + hit.from < fm.end) {
           continue
         }
         if (chainAt(tree, base + hit.from).some((node) => OCCURRENCE_EXCLUDED.has(node.name))) {
+          continue
+        }
+        if (altRanges.some((r) => hit.from >= r.from && hit.from < r.to)) {
           continue
         }
         out.push({ inner: hit.inner, start: base + hit.from, end: base + hit.to })
@@ -128,7 +173,8 @@ export function directEmbedSlots(blockEl: HTMLElement): HTMLElement[] {
  * （第 k 个某 inner 的占位 ↔ 第 k 个该 inner 的扫描命中）。两侧集合由
  * 语法排除表结构性对齐（markdown-it 占位产出于渲染文本、occurrence 经
  * lezer 树过滤；表格占位在 directEmbedSlots 剔除、跨行注释在
- * OCCURRENCE_EXCLUDED 的 CommentBlock 剔除）——正常路径两侧恒等长。
+ * OCCURRENCE_EXCLUDED 的 CommentBlock 剔除、图片 alt 域字面量在
+ * imageAltRangesInLine 剔除——终审 P1-1）——正常路径两侧恒等长。
  * 数量不一致（未对齐的语法角落或宿主文档竞态）返回 null，调用方整块
  * 降级（占位保持文本形态，安全侧）。
  */
@@ -237,12 +283,13 @@ export function promoteEmbedSlotsInBlock(
   text: string,
   blockStart: number,
   blockEnd: number,
+  references?: ReadonlySet<string>,
 ): HTMLElement[] {
   const slots = directEmbedSlots(blockEl)
   if (slots.length === 0) {
     return []
   }
-  const paired = pairEmbedSlots(slots, blockEmbedOccurrences(text, blockStart, blockEnd))
+  const paired = pairEmbedSlots(slots, blockEmbedOccurrences(text, blockStart, blockEnd, references))
   if (paired === null) {
     return []
   }

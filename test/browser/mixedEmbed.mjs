@@ -6,6 +6,7 @@
 //   不拆、引用边条绘制、宿主宽度跟随所属列（不越缩进界）
 // - 同段多嵌入源顺序；递归（卡片内容内混排升级孙卡，RefContentMount 路径）
 // - 链接域内占位不升级（span 文本形态）；#248 起表格格内同升级（td 宿主）
+// - 图片 alt 域内字面量不落 DOM、不牵连同段随文位降级（终审 P1-1 回归钉）
 // - 零写回（全程无 edit.request）
 import assert from 'node:assert/strict'
 import path from 'node:path'
@@ -20,14 +21,17 @@ await build({ entryPoints: [path.join(root, 'test/browser/readingEmbedFixture.ts
   loader: { '.woff2': 'file', '.svg': 'file' }, assetNames: 'assets/[name]' })
 
 /** 父文档：混排各形态（段落/跨格式/双嵌入/列表族/引用/组合/链接/表格）。
- *  乙笔记 10 个可提升位（段落/粗体/双嵌入首/无序/有序/任务/懒续/引用/引用内
- *  列表/表格格内 #248 起）+ 1 个不升级位（链接域）；丙笔记 1 个（双嵌入第二）。 */
+ *  乙笔记 11 个可提升位（段落/粗体/双嵌入首/无序/有序/任务/懒续/引用/引用内
+ *  列表/表格格内 #248 起/图片 alt 段随文位）+ 2 个不升级位（链接域 + 图片 alt
+ *  域内——终审 P1-1 后者不落 DOM 不发请求且不牵连同段随文位）；丙笔记 1 个。 */
 const PARENT_DOC = [
   '# 混排嵌入父文档',
   '',
   '前文段落 ![[乙笔记]] 后文段落。',
   '',
   '**粗体开 ![[乙笔记]] 粗体续** 与普通 *斜体*。',
+  '',
+  '图片 alt ![替代 ![[乙笔记]] 文字](https://e.example/i.png) 不升级，随后 ![[乙笔记]] 照常挂卡。',
   '',
   '起 ![[乙笔记]] 中 ![[丙笔记]] 末。',
   '',
@@ -72,7 +76,7 @@ const browser = await chromium.launch({ headless: true,
   channel: process.env.VSIDIAN_TEST_BROWSER_CHANNEL || undefined })
 let passed = 0
 try {
-  const page = await browser.newPage({ viewport: { width: 900, height: 720 } })
+  const page = await browser.newPage({ viewport: { width: 900, height: 900 } })
   const errors = []
   page.on('pageerror', (error) => errors.push(error.message))
   await page.setContent(`<html lang="zh-CN"><body>${islandHtml}<div id="app"></div></body></html>`)
@@ -110,7 +114,7 @@ try {
   const reqsA = await hoverRequests()
   const bReqs = reqsA.filter((r) => r.target === '乙笔记')
   const cReqs = reqsA.filter((r) => r.target === '丙笔记')
-  assert.equal(bReqs.length, 10, `乙笔记 10 个可提升位（丙另计；#248 起含表格格内）各发请求（实际 ${bReqs.length}）`)
+  assert.equal(bReqs.length, 11, `乙笔记 11 个可提升位（丙另计；#248 起含表格格内，终审 P1-1 起含图片 alt 段随文位）各发请求（实际 ${bReqs.length}）`)
   assert.equal(cReqs.length, 1, '丙笔记 1 个（同段双嵌入的第二目标）')
   for (const req of reqsA) {
     const raw = `![[${req.target}]]`
@@ -119,8 +123,12 @@ try {
   }
   const linkSlotFrom = PARENT_DOC.indexOf('![[乙笔记]]', PARENT_DOC.indexOf('[文字'))
   const tableSlotFrom = PARENT_DOC.indexOf('![[乙笔记]]', PARENT_DOC.indexOf('格内'))
+  const altSlotFrom = PARENT_DOC.indexOf('![[乙笔记]]', PARENT_DOC.indexOf('替代'))
+  const altFollowFrom = PARENT_DOC.indexOf('![[乙笔记]]', altSlotFrom + 1)
   assert.ok(!bReqs.some((r) => r.sourceStart === linkSlotFrom), '链接域内占位不升级（无请求）')
   assert.ok(bReqs.some((r) => r.sourceStart === tableSlotFrom), '表格格内升级（#248 起有请求）')
+  assert.ok(!bReqs.some((r) => r.sourceStart === altSlotFrom), '图片 alt 域内字面量不落 DOM（无请求——随 img alt 属性走，终审 P1-1）')
+  assert.ok(bReqs.some((r) => r.sourceStart === altFollowFrom), '同段随文位照常升级（不牵连，终审 P1-1）')
   passed++
   console.log('[混排嵌入][PASS] 混排请求载荷：行内精确区间 + 链接域不升级（表格格内 #248 起同升级）')
 
@@ -147,7 +155,7 @@ try {
       }
     })
   assert.ok(paraEvidence, '流内宿主在场')
-  assert.equal(paraEvidence.hostCount, 11, `主文档 11 个可提升位各一宿主（乙 10 + 丙 1，#248 起含表格 td 内，实际 ${paraEvidence.hostCount}）`)
+  assert.equal(paraEvidence.hostCount, 12, `主文档 12 个可提升位各一宿主（乙 11 + 丙 1，#248 起含表格 td 内，实际 ${paraEvidence.hostCount}）`)
   assert.ok(paraEvidence.beforeIsP && paraEvidence.afterIsP, '拆段为 p(前)+宿主+p(后)')
   assert.ok(paraEvidence.beforeVisible && paraEvidence.afterVisible, '前后文绘制层可见（非零高）')
   assert.equal(paraEvidence.beforeText, '前文段落', `前文文本无吞噬（实际 ${paraEvidence.beforeText}）`)
@@ -273,6 +281,34 @@ try {
   passed++
   console.log('[混排嵌入][PASS] 链接域占位保持；表格格内升级 td 宿主且不拆表（#248）')
 
+  // ---- 场景 D2：图片 alt 域内字面量不牵连同块（终审 P1-1：不整块降级） ----
+  const altEvidence = await page.evaluate(() => {
+      const imgs = Array.from(document.querySelectorAll('#app img'))
+        .filter((el) => !el.classList.contains('cm-widgetBuffer')
+          && !el.closest('.vsidian-embed-card') && !el.closest('.vsidian-hover-popup')
+          && el.closest('p') !== null)
+      const para = imgs[0]?.closest('p') ?? null
+      const host = para?.nextElementSibling ?? null
+      const rect = host instanceof HTMLElement ? host.getBoundingClientRect() : null
+      return {
+        imgCount: imgs.length,
+        imgAlt: imgs[0]?.getAttribute('alt') ?? '',
+        paraText: (para?.textContent ?? '').trim(),
+        hostIsMixed: host instanceof HTMLElement && host.classList.contains('vsidian-reading-embed-mixed'),
+        hostInner: host instanceof HTMLElement ? host.dataset['vsidianEmbedInner'] ?? '' : '',
+        hostVisible: rect !== null && rect.height > 0,
+      }
+    })
+  assert.equal(altEvidence.imgCount, 1, `图片 alt 域段渲染为 img（实际 ${altEvidence.imgCount}）`)
+  assert.ok(altEvidence.imgAlt.includes('替代') && altEvidence.imgAlt.includes('文字'),
+    `alt 属性携带替代文字（实际 ${altEvidence.imgAlt}）`)
+  assert.ok(altEvidence.paraText.startsWith('图片 alt'), `拆段前文保留（实际 ${altEvidence.paraText}）`)
+  assert.ok(altEvidence.hostIsMixed, '同段随文位提升为流内宿主（不牵连降级）')
+  assert.equal(altEvidence.hostInner, '乙笔记', `随文位宿主 inner（实际 ${altEvidence.hostInner}）`)
+  assert.ok(altEvidence.hostVisible, '随文位宿主绘制层可见（非零高）')
+  passed++
+  console.log('[混排嵌入][PASS] 图片 alt 域内字面量不牵连同块（img 属性呈现 + 随文位照常挂卡）')
+
   // ---- 场景 E：回包 → 内容绘制 + 卡片内递归混排（RefContentMount 路径） ----
   // 回包后卡片变高使虚拟化窗口收缩，远端块（含宿主/孙卡）按既有语义回收
   //——在场断言只覆盖当前窗口，请求侧断言覆盖全部 10 位与孙卡请求
@@ -282,8 +318,8 @@ try {
   const withContent = cardsAfter.filter((c) => c.text.includes('乙笔记正文') || c.text.includes('丙笔记正文'))
   assert.equal(withContent.length, cardsAfter.length, `在场卡片全部装载到目标正文（实际 ${withContent.length}/${cardsAfter.length}）`)
   const childReqs = (await hoverRequests()).filter((r) => r.source !== undefined)
-  assert.ok(childReqs.length >= 1 && childReqs.length <= 10,
-    `乙卡内容内混排位随父块挂载发孙卡请求（实际 ${childReqs.length}/10——远端块按虚拟化语义回收）`)
+  assert.ok(childReqs.length >= 1 && childReqs.length <= 11,
+    `乙卡内容内混排位随父块挂载发孙卡请求（实际 ${childReqs.length}/11——远端块按虚拟化语义回收）`)
   const recursion = await page.evaluate(() => {
       const inner = Array.from(document.querySelectorAll('.vsidian-embed-card .vsidian-embed-card'))
       const hosts = inner.map((card) => card.closest('.vsidian-reading-embed-mixed'))

@@ -157,6 +157,17 @@ describe('Live 嵌入装饰：抑制边界（表构建层不排除、发射层�
     expect(buildDecos(text, EditorSelection.single(text.length))).toHaveLength(0)
   })
 
+  it('P2-1 跨模式分叉钉（Live 半边）：引用式链接 ref 未定义 → label 域排除不挂卡（Reading 半边在 embedSlots.test.ts 钉住挂卡）', () => {
+    const text = '[foo ![[甲]] bar][undef] end'
+    expect(buildDecos(text, EditorSelection.single(0))).toHaveLength(0)
+  })
+
+  it('图片 alt 域内嵌入不挂卡、同行他嵌入照常挂卡（与 Reading 终审 P1-1 修复对齐钉）', () => {
+    const text = '![alt ![[甲]] alt2](http://u) then ![[乙]] more'
+    const items = buildDecos(text, EditorSelection.single(0))
+    expect(items.map((i) => i.widget!.inner)).toEqual(['乙'])
+  })
+
   it('#247 起混排/列表/引用行照常产出（容器上下文接入）；#248 起表格格照常产出；未闭合仍不产出', () => {
     const text = [
       '前 ![[混排]] 后',

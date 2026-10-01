@@ -537,8 +537,7 @@ describe('#248 表格格内嵌入的配对与提升', () => {
   })
 })
 
-describe('#248 P1-1 消费者一致性：`]]` 紧贴转义管道的格内 occurrence', () => {
-  it('occurrence 区间与提升宿主 dataset 锚点 slice 严格等于嵌入原文', () => {
+describe('#248 P1-1 消费者一致性：`]]` 紧贴转义管道的格内 occurrence', () => {  it('occurrence 区间与提升宿主 dataset 锚点 slice 严格等于嵌入原文', () => {
     const text = '| ![[B]]\\|尾 | y |\n| --- | --- |\n| a | b |'
     const occs = blockEmbedOccurrences(text, 0, text.length)
     expect(occs).toHaveLength(1)
@@ -553,5 +552,85 @@ describe('#248 P1-1 消费者一致性：`]]` 紧贴转义管道的格内 occurr
     expect(hosts).toHaveLength(1)
     expect(Number(hosts[0]!.dataset['vsidianSrcStart'])).toBe(occs[0]!.start)
     expect(Number(hosts[0]!.dataset['vsidianSrcEnd'])).toBe(occs[0]!.end)
+  })
+})
+
+describe('终审 P1-1：图片 alt 域内嵌入字面量不牵连同块降级（与 Live 对齐）', () => {
+  it('混合段落：行内图片 alt 内字面量不命中 occurrence，同段合法嵌入照常升级', () => {
+    const text = '![alt ![[x]] alt2](http://u) then ![[z]] more'
+    const { el } = mountedBlockOf(text)
+    // markdown-it 只为 z 产占位（x 随 img 的 alt 属性走、不落 DOM）
+    expect(slotsOf(el).map((s) => s.dataset['vsidianEmbedInner'])).toEqual(['z'])
+    // occurrence 侧与占位集合对齐：x 不命中——现状命中使序列不等 → 整块降级（本票缺陷）
+    expect(blockEmbedOccurrences(text, 0, text.length).map((o) => o.inner)).toEqual(['z'])
+    document.body.appendChild(el)
+    const hosts = promoteEmbedSlotsInBlock(el, text, 0, text.length)
+    expect(hosts.map((h) => h.dataset['vsidianEmbedInner'])).toEqual(['z'])
+  })
+
+  it('表格双格：一格 alt 字面量不牵连另一格嵌入升级（整表单块）', () => {
+    const text = '| ![alt ![[x]]](u) | ![[y]] |\n| --- | --- |\n| a | b |'
+    const blocks = splitReadingBlocks(text)
+    const table = blocks.find((b) => b.kind === 'table')!
+    const el = createReadingBlockElement(table, text)
+    document.body.appendChild(el)
+    expect(slotsOf(el).map((s) => s.dataset['vsidianEmbedInner'])).toEqual(['y'])
+    expect(blockEmbedOccurrences(text, table.start, table.end).map((o) => o.inner)).toEqual(['y'])
+    const hosts = promoteEmbedSlotsInBlock(el, text, table.start, table.end)
+    expect(hosts.map((h) => h.dataset['vsidianEmbedInner'])).toEqual(['y'])
+    expect(hosts[0]!.closest('th')).not.toBeNull()
+  })
+
+  it('引用式图片 ref 已定义：alt 内字面量不命中（markdown-it 同不产占位）', () => {
+    const text = '![alt ![[x]]][r1] then ![[z]]\n\n[r1]: http://u'
+    const { el } = mountedBlockOf(text)
+    expect(slotsOf(el).map((s) => s.dataset['vsidianEmbedInner'])).toEqual(['z'])
+    expect(blockEmbedOccurrences(text, 0, text.length).map((o) => o.inner)).toEqual(['z'])
+    document.body.appendChild(el)
+    const hosts = promoteEmbedSlotsInBlock(el, text, 0, text.length)
+    expect(hosts.map((h) => h.dataset['vsidianEmbedInner'])).toEqual(['z'])
+  })
+
+  it('引用式图片 ref 未定义：markdown-it 产字面占位，occurrence 同集合不排除（防误伤钉）', () => {
+    const text = '![alt ![[x]]][undef] then ![[z]]'
+    const { el } = mountedBlockOf(text)
+    expect(slotsOf(el).map((s) => s.dataset['vsidianEmbedInner'])).toEqual(['x', 'z'])
+    expect(blockEmbedOccurrences(text, 0, text.length).map((o) => o.inner)).toEqual(['x', 'z'])
+    document.body.appendChild(el)
+    const hosts = promoteEmbedSlotsInBlock(el, text, 0, text.length)
+    expect(hosts.map((h) => h.dataset['vsidianEmbedInner'])).toEqual(['x', 'z'])
+  })
+
+  it('裸目标含空白（markdown-it 不认图片）：不排除，字面占位照常升级（宁窄勿宽钉）', () => {
+    const text = '![alt ![[x]]](u more) then ![[z]]'
+    const { el } = mountedBlockOf(text)
+    expect(slotsOf(el).map((s) => s.dataset['vsidianEmbedInner'])).toEqual(['x', 'z'])
+    expect(blockEmbedOccurrences(text, 0, text.length).map((o) => o.inner)).toEqual(['x', 'z'])
+    document.body.appendChild(el)
+    const hosts = promoteEmbedSlotsInBlock(el, text, 0, text.length)
+    expect(hosts.map((h) => h.dataset['vsidianEmbedInner'])).toEqual(['x', 'z'])
+  })
+
+  it('嵌套图片在链接 label 内：内层图片域照常排除（外层链接域不扩大）', () => {
+    const text = '[![alt ![[x]]](u)](link) then ![[z]]'
+    const { el } = mountedBlockOf(text)
+    expect(slotsOf(el).map((s) => s.dataset['vsidianEmbedInner'])).toEqual(['z'])
+    expect(blockEmbedOccurrences(text, 0, text.length).map((o) => o.inner)).toEqual(['z'])
+    document.body.appendChild(el)
+    const hosts = promoteEmbedSlotsInBlock(el, text, 0, text.length)
+    expect(hosts.map((h) => h.dataset['vsidianEmbedInner'])).toEqual(['z'])
+  })
+})
+
+describe('P2-1 跨模式分叉钉（Reading 半边）：引用式链接 ref 未定义 → 占位裸落 DOM 升级挂卡', () => {
+  it('未定义 ref 不产 a：占位不在链接域内，照常提升（Live 半边在 liveEmbed.test.ts 钉住不挂）', () => {
+    const text = '[foo ![[x]] bar][undef] end'
+    const { el } = mountedBlockOf(text)
+    const slots = slotsOf(el)
+    expect(slots.map((s) => s.dataset['vsidianEmbedInner'])).toEqual(['x'])
+    expect(slots[0]!.closest('a')).toBeNull()
+    document.body.appendChild(el)
+    const hosts = promoteEmbedSlotsInBlock(el, text, 0, text.length)
+    expect(hosts.map((h) => h.dataset['vsidianEmbedInner'])).toEqual(['x'])
   })
 })

@@ -290,7 +290,7 @@ Reading 侧（主文档正文、卡片内容与悬停内容三处同一装配）
 **识别与配对（三层同源）**：
 
 - 渲染占位：markdown-it inline 规则（`shared/wikilink` 新增 `embedAtPosition`——与 `scanEmbedsInLine` 逐字节同源，命中集合由对拍测试钉住）在段落/列表/引用/表格的行内内容产出 `span.vsidian-embed-slot`（携带 `data-vsidian-embed-inner`）。占位是 span 而非 a：可处于链接文字域而不产生嵌套 a 的非法 DOM；代码字面量不产占位（backticks 先消费、围栏不进 inline——不通过删守卫把字面量升级为引用）。
-- 区间回算：inline token 无全文坐标（列表缩进剥离与懒续行使换算不可靠），挂载时由 `webview/embedSlots` 的 `blockEmbedOccurrences` 按 lezer 树语法上下文（代码/注释/表格/frontmatter 排除，与 `validChildSource`、`vaultLinkExtract` 同边界）扫描块区间，与 DOM 占位按「inner 分组计数」顺序配对（第 k 个同 inner 占位 ↔ 第 k 个命中）。配对失败整块降级（占位保持文本形态）。
+- 区间回算：inline token 无全文坐标（列表缩进剥离与懒续行使换算不可靠），挂载时由 `webview/embedSlots` 的 `blockEmbedOccurrences` 按 lezer 树语法上下文（代码/注释/表格/frontmatter 排除，与 `validChildSource`、`vaultLinkExtract` 同边界）扫描块区间，与 DOM 占位按「inner 分组计数」顺序配对（第 k 个同 inner 占位 ↔ 第 k 个命中）。配对失败整块降级（占位保持文本形态）。**图片 alt 域排除**（终审 P1-1 修复）：markdown-it 把图片 alt 渲染为属性、占位不落 DOM，occurrence 侧同样排除**恰好图片 alt 内部**的字面量（`shared/wikilink` 的 `imageAltRangesInLine` 宁窄勿宽口径：行内式须目标 `(...)` 闭合、引用式须 ref 已定义——markdown-it 对未定义 ref 按字面文本渲染占位照落 DOM，不排除）——否则 alt 内字面量命中使序列不等、整块降级牵连同块合法嵌入。
 - 挂载提升：`promoteEmbedSlot` 把占位提升为流内宿主 `div.vsidian-reading-embed.vsidian-reading-embed-mixed`（与独占行 embed 块同构 dataset——`EmbedCardManager.mountCardInto` / `mountChildFrom` 原样复用）。p 内拆段（前文 p + 宿主 + 后文 p，属性克隆、空半不产出——合法 DOM）；横跨嵌入的粗体/斜体/高亮经拆壳成为前后各完整的行内标签；列表项与引用内直接落位（编号、缩进、边条容器不拆）；宿主宽度跟随所属列/缩进区域。同段/行多个嵌入各按 occurrence 区间独立成卡、保持源顺序，不共享行首身份。
 
 **宿主准入（`shared/refExpansion.validChildSource`）**：子请求区间不再要求独占整行，改为「该行内一个完整嵌入 occurrence 的精确边界且 inner 逐字节匹配」；列表/引用（含任务、嵌套、懒续行与组合）从语法排除中放行。守卫保留：代码（围栏/缩进/行内）、frontmatter、HTML 注释与表格（#248）仍拒绝——原注释检查的行级 `stripHtmlComments` 对拍被 lezer 节点判定取代（实测节点名 Comment/CommentBlock；原集合中的 `HTMLComment` 条目从未命中过，本次更正）。Live 侧混排（#247）与表格格内（#248）不在本票：Live 保持源文，表格格内为占位文本。
@@ -306,9 +306,12 @@ Reading 侧（主文档正文、卡片内容与悬停内容三处同一装配）
 | blockquote 与引用内列表组合 | 卡片落位引用内容流，边条容器不拆 |
 | 卡片内容/悬停内容内（递归） | 同一装配升级（RefContentMount 块挂载钩子），预算/深度/租约沿用 #244/#245 |
 | 链接文字域内 | 占位 span 文本（识别同源、不升级） |
+| 图片 alt 域内字面量（`![alt ![[B]]](url)`、引用式已定义同） | 不升级、保持图片 alt 属性呈现（不产占位）；不牵连同块其他嵌入降级；与 Live 侧（label 域排除不挂卡）一致 |
 | 表格格内 | 占位 span 文本（#248 接入） |
 | 代码字面量/注释/frontmatter/残缺形态 | 原文可读降级（不产占位） |
 | Live 混排与容器 | 源文呈现（#247 接入） |
+
+**已知跨模式分叉（终审 P2-1 钉住，非缺陷、不改行为）**：`[文字 ![[B]] 文字][未定义ref]` 形态（引用式链接 + ref 未定义 + label 内嵌字面量）——markdown-it 对未定义 ref 不产 `<a>`，占位裸落段落内，Reading 侧**提升挂卡**；Live 侧被 `linkLabelRangesInLine` 的 label 域排除**不挂卡**（发射排除的「宁可少挂」方向）。极边缘形态，两侧行为保持现状，由 embedSlots.test.ts（Reading 挂）/ liveEmbed.test.ts（Live 不挂）对拍钉住。
 
 **公开样式入口**：新增 `reading-embed-mixed`（流内宿主修饰类，卡片壳规则随 `#app .vsidian-view-reading .vsidian-reading-embed .vsidian-embed-card` 后代选择器天然命中）与 `embed-slot`（行内占位 span，未升级时按正文文字 + 描述色呈现）两条 content 域条目；`limit-markdown-embed` 边界条目随实际能力更新。基线对照 v0.7.0（`c85d244`）：无既有入口破坏（`check:stylecontract` 八项零失败）。本票无新增用户可见文字（沿用既有 embed 词条）、无新增可绑定操作（复用「预览当前链接」与打开目标入口，评估记录见 keybindings.md）；新增设置无。
 
@@ -322,7 +325,7 @@ Live 侧（父文档第 0 层）的 `![[…]]` 不再要求独占正文一行：
 
 **精确显隐**：显隐谓词沿用 selectionTouchesRange——折叠光标含区间两端、非空选区严格相交、任一 CM6 range 命中即显形；**不扩大到相邻文字或整行**：光标在前后文/相邻文字上不显形（反例钉住）。显形态为行下方 block widget（below 卡），源文可见可编辑，兄弟卡片独立显隐（同行双嵌入互不牵连）。未闭合引用撤下旧目标卡片、保留可编辑原文；恢复闭合按新引用重载（增量表在编辑/换行/合行/撤销/外部同步下按 occurrence 精确区间重建，窗口外条目以行内重扫精确对齐校验）。
 
-**发射层排除（与 #246 同源集合）**：表构建层仍不排除（候选表含排除位——探针 `liveEmbedReveal` 含链接域/表格候选 7 枚即彼故）；发射层在围栏表/文末开放围栏/frontmatter 既有排除之外新增 lezer 语法上下文（行内代码/HTML 块/注释/表格——`embedSlots.OCCURRENCE_EXCLUDED` 同集合，表格 #248 前排除）与**行内链接/图片文字域**（`shared/wikilink` 新增 `linkLabelRangesInLine` 保守方括号配对形态学：`[`（前缀非 `\`）压栈、`]` 弹栈后紧邻 `(` 或 `[` 的配对域为链接文字域；lezer 把 `![[x]]` 解析为 Image 节点无法区分链接域，形态学误判方向为「保持源文」的安全降级——与 Reading 侧「链接域占位不升级」呈现对齐）。
+**发射层排除（与 #246 同源集合）**：表构建层仍不排除（候选表含排除位——探针 `liveEmbedReveal` 含链接域/表格候选 7 枚即彼故）；发射层在围栏表/文末开放围栏/frontmatter 既有排除之外新增 lezer 语法上下文（行内代码/HTML 块/注释/表格——`embedSlots.OCCURRENCE_EXCLUDED` 同集合，表格 #248 前排除）与**行内链接/图片文字域**（`shared/wikilink` 新增 `linkLabelRangesInLine` 保守方括号配对形态学：`[`（前缀非 `\`）压栈、`]` 弹栈后紧邻 `(` 或 `[` 的配对域为链接文字域；lezer 把 `![[x]]` 解析为 Image 节点无法区分链接域，形态学误判方向为「保持源文」的安全降级——与 Reading 侧「链接域占位不升级」呈现对齐）。终审 P1-1 起 Reading 配对面（`embedSlots`）复用同一栈扫描核心的更窄出口 `imageAltRangesInLine`（仅图片 alt 域，且行内式目标须闭合、引用式须 ref 已定义）：两口径分工——发射排除（Live）宁宽（误判方向是少挂卡的安全侧），配对排除（Reading）宁窄（误排除即整块降级回归）。
 
 **跨模式状态共享的 key 口径**：独占行嵌入宿主 key = 行区间（`lineFrom..lineTo`，Reading 独占行 embed 块同口径）；混排/容器 occurrence 宿主 key = 嵌入精确区间（`from..to`，Reading #246 混排提升宿主同口径）——同一嵌入在 Live↔Reading 切换时共享 fm 展开与滚动状态。Live 根请求的 `sourceStart/sourceEnd` 按同口径（宿主对根面板请求不设区间校验）。
 
