@@ -816,6 +816,14 @@ interface ViewState {
       /** 全部头部语言标签序列（DOM 顺序；渲染型围栏的 Mermaid 标签断言） */
       labels?: string[]
     }
+    /** frontmatter 卡片绘制观测（折叠链路）：标题栏在场时提供 */
+    fm?: {
+      rowCount: number
+      foldedCount: number
+      editCount: number
+      cardFoldedCount: number
+      tableFoldedCount: number
+    }
     /** #55：标题行左缘绘制观测（distinct computed 值；无挂载标题行为 null） */
     heading?: {
       inviewCount: number
@@ -9494,6 +9502,59 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await waitViewState('fm-edit.md', (v) => v.text === externalText &&
       v.cssProbe?.chromeSelectors?.['live-fm-card-line-live'] === 'rgb(230, 0, 1)' &&
       v.cssProbe?.chromeSelectors?.['live-fm-header-live'] === 'rgb(237, 0, 1)')
+  }],
+
+  ['frontmatter 卡片折叠：与代码块同交互（热区 + chevron）、零写回、双视图各持视图态', async () => {
+    await openWithEditor('fm-edit.md')
+    await waitSessionReady('fm-edit.md')
+    const uri = wsUri('fm-edit.md').toString()
+    const fmText = (await vscode.commands.executeCommand(CMD.viewState, uri) as ViewState).text!
+
+    // 前置：live 成型卡片在场（绘制层：键值行 + 修改按钮 + 未收起 chevron）
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', wsUri('fm-edit.md'))
+    await waitViewState('fm-edit.md', (v) => v.viewMode === 'live' &&
+      v.cssProbe?.chromeSelectors?.['live-fm-card-line-live'] === 'rgb(230, 0, 1)' &&
+      (v.paint?.fm?.rowCount ?? 0) > 0 && v.paint?.fm?.editCount === 1 &&
+      v.paint?.fm?.foldedCount === 0)
+    const st0 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+
+    // 1) chevron 折叠：行从绘制层消失、修改按钮让位、收起态行类与 chevron
+    //    转向在场；文档字节与写回数不变（视图态零写回）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'fm.test.click', action: 'fold-button' })
+    await waitViewState('fm-edit.md', (v) => v.paint?.fm?.rowCount === 0 &&
+      v.paint?.fm?.editCount === 0 && v.paint?.fm?.foldedCount === 1 &&
+      v.paint?.fm?.cardFoldedCount === 1 && v.paint?.fm?.tableFoldedCount === 0)
+    assert((await vscode.commands.executeCommand(CMD.viewState, uri) as ViewState).text === fmText,
+      '折叠不得写文档')
+    const st1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(st1.appliedEdits === st0.appliedEdits, '折叠不得产生宿主写回')
+
+    // 2) 标题栏热区展开：整条标题栏同为切换入口（非按钮区域点击）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'fm.test.click', action: 'fold-hotspot' })
+    await waitViewState('fm-edit.md', (v) => (v.paint?.fm?.rowCount ?? 0) > 0 &&
+      v.paint?.fm?.editCount === 1 && v.paint?.fm?.foldedCount === 0 && v.paint?.fm?.cardFoldedCount === 0)
+
+    // 3) 热区再折叠后切阅读：两视图折叠态各持不互通——阅读初始展开
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'fm.test.click', action: 'fold-hotspot' })
+    await waitViewState('fm-edit.md', (v) => v.paint?.fm?.cardFoldedCount === 1)
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading', wsUri('fm-edit.md'))
+    await waitViewState('fm-edit.md', (v) => v.viewMode === 'reading' &&
+      (v.paint?.fm?.rowCount ?? 0) > 0 && v.paint?.fm?.tableFoldedCount === 0)
+
+    // 4) 阅读侧折叠（表格收起类 + 行隐藏）与展开——rowCount 为绘制层口径
+    //    （阅读收起行由 CSS display:none 隐藏，非 DOM 移除；探针过滤后归零）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'fm.test.click', action: 'fold-button' })
+    await waitViewState('fm-edit.md', (v) => v.paint?.fm?.rowCount === 0 &&
+      v.paint?.fm?.tableFoldedCount === 1 && v.paint?.fm?.foldedCount === 1)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'fm.test.click', action: 'fold-button' })
+    await waitViewState('fm-edit.md', (v) => (v.paint?.fm?.rowCount ?? 0) > 0 && v.paint?.fm?.tableFoldedCount === 0)
+
+    // 5) 回 live：CM6 折叠态随编辑器状态保留（步骤 3 的收起态仍在场）
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', wsUri('fm-edit.md'))
+    await waitViewState('fm-edit.md', (v) => v.viewMode === 'live' &&
+      v.paint?.fm?.cardFoldedCount === 1 && v.paint?.fm?.rowCount === 0)
+    assert((await vscode.commands.executeCommand(CMD.viewState, uri) as ViewState).text === fmText,
+      '全程折叠切换不得写文档')
   }],
 
   ['工具栏双态切换：真实点击与快捷键通道、三态按钮共存与全局记忆（#141）', async () => {

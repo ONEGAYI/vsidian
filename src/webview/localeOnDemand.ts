@@ -16,6 +16,7 @@
 // 只剩层 aria-label，由 applyEditorLocale 兜底（探索笔记 §4.5）。
 import { t } from '../shared/i18n'
 import { CODE_CARD_CLASS_NAMES } from './liveCodeCard'
+import { FM_CARD_CLASS_NAMES } from './frontmatterDecorations'
 import { GRAPHIC_CHROME_CLASS_NAMES } from './graphicBlockChrome'
 import { LIVE_CLASS_NAMES } from './liveDecorations'
 import { DIAGRAM_POPUP_CLASS_NAMES } from './diagramPopup'
@@ -49,6 +50,19 @@ export function refreshOnDemandControlLocale(root: ParentNode): void {
     t(btn.classList.contains(CODE_CARD_CLASS_NAMES.foldCollapsed)
       ? 'codeblock.expand'
       : 'codeblock.collapse'))
+  // fm 卡片标题栏（FmCardHeaderWidget.toDOM 固化；live 首围栏行 widget 与
+  // 阅读挂载块 decorateReadingFrontmatterCard 同类名，document 级扫描一并
+  // 覆盖）：标题文字是文本节点（非属性，改写 textContent），「修改」按钮
+  // 与折叠 chevron 双写——折叠钮两态词按收起修饰类判定（收起态提示
+  // 「展开」），与代码卡折叠钮同口径；aria-expanded 与语言无关，不动
+  for (const el of root.querySelectorAll<HTMLElement>(`.${FM_CARD_CLASS_NAMES.headerTitle}`)) {
+    el.textContent = t('frontmatter.title')
+  }
+  rewriteButtonLocale(root, `.${FM_CARD_CLASS_NAMES.edit}`, () => t('frontmatter.edit'))
+  rewriteButtonLocale(root, `.${FM_CARD_CLASS_NAMES.fold}`, (btn) =>
+    t(btn.classList.contains(FM_CARD_CLASS_NAMES.foldCollapsed)
+      ? 'frontmatter.expand'
+      : 'frontmatter.collapse'))
   // 图形化块按钮组（buildGraphicChrome）：edit（仅实时预览装配）与 popup
   rewriteButtonLocale(root, `.${GRAPHIC_CHROME_CLASS_NAMES.edit}`, () => t('graphic.editSource'))
   rewriteButtonLocale(root, `.${GRAPHIC_CHROME_CLASS_NAMES.popup}`, () => t('graphic.popup'))

@@ -283,6 +283,73 @@ try {
     await page.close()
   }
 
+  // ---- live：折叠与代码块同交互（chevron + 标题栏热区，真实鼠标，零写回） ----
+  {
+    const { page, errors } = await openPage()
+    await page.evaluate((t) => window.initFmDoc(t, 'live'), FM_DOC)
+    // 展开态：chevron 在场且未收起；修改按钮在场
+    const foldBtn = page.locator('button.vsidian-fm-fold')
+    assert.equal(await foldBtn.count(), 1, '折叠 chevron 应在场')
+    assert.equal(await foldBtn.getAttribute('aria-expanded'), 'true', '展开态 aria-expanded')
+    // 点 chevron 折叠：行从绘制层消失、修改按钮让位、收起态行类与转向在场
+    await foldBtn.click()
+    assert.equal(await page.locator('.vsidian-fm-row').count(), 0, '折叠后键值行应消失')
+    assert.equal(await page.locator('button.vsidian-fm-edit').count(), 0, '收起态不发射修改按钮')
+    assert.equal(await page.locator('.vsidian-fm-card-folded').count(), 1, '首行应携带收起类')
+    const collapsed = page.locator('button.vsidian-fm-fold')
+    assert.equal(await collapsed.getAttribute('aria-expanded'), 'false', '收起态 aria-expanded')
+    assert.ok(await collapsed.evaluate((el) =>
+      el.classList.contains('vsidian-fm-fold-collapsed')), '收起态 chevron 应带转向修饰')
+    // 标题栏仍可见且有面积（折叠的承载面）
+    const headerBox = await page.locator('.vsidian-fm-header').boundingBox()
+    assert.ok(headerBox && headerBox.height > 8, '收起态标题栏应可见')
+    assert.equal(await page.evaluate(() => window.fmDoc()), FM_DOC, '折叠零写回')
+    assert.equal((await editRequests(page)).length, 0, '折叠零 edit.request')
+    // 标题栏空白热区（标题文字）点击展开：整条标题栏同为切换入口
+    await page.locator('.vsidian-fm-header-title').click()
+    assert.equal(await page.locator('.vsidian-fm-row').count(), 2, '热区点击应展开恢复键值行')
+    assert.equal(await page.locator('.vsidian-fm-card-folded').count(), 0, '展开后收起类消失')
+    assert.equal(await page.locator('button.vsidian-fm-edit').count(), 1, '展开后修改按钮回归')
+    // 修改按钮点击只开浮层不折叠（按钮不冒泡触发热区）
+    await page.locator('button.vsidian-fm-edit').click()
+    assert.equal(await page.evaluate(() => window.fmPopoverOpen()), true, '修改按钮应开浮层')
+    assert.equal(await page.locator('.vsidian-fm-row').count(), 2, '开浮层不得折叠卡片')
+    // 浮层打开期间折叠：浮层自动关闭（编辑对象已随表格隐藏）
+    await page.locator('button.vsidian-fm-fold').click()
+    assert.equal(await page.evaluate(() => window.fmPopoverOpen()), false, '折叠应关闭浮层')
+    assert.equal(await page.locator('.vsidian-fm-row').count(), 0, '折叠后行消失')
+    assert.deepEqual(errors, [], '页面不能有未捕获异常')
+    await page.close()
+  }
+
+  // ---- reading：折叠（表格收起类 + 行隐藏）与热区展开（真实鼠标） ----
+  {
+    const { page, errors } = await openPage()
+    await page.evaluate((t) => window.initFmDoc(t, 'reading'), ARRAY_DOC)
+    const readingRows = page.locator('.vsidian-reading-frontmatter .vsidian-fm-row')
+    assert.equal(await readingRows.count(), 3, '阅读侧折叠前行在场')
+    const readingFold = page.locator('.vsidian-reading-frontmatter button.vsidian-fm-fold')
+    assert.equal(await readingFold.count(), 1, '阅读侧折叠 chevron 应在场（挂载装饰）')
+    await readingFold.click()
+    const table = page.locator('.vsidian-reading-frontmatter .vsidian-fm-table')
+    assert.ok(await table.evaluate((el) => el.classList.contains('vsidian-fm-folded')),
+      '折叠后表格应携带收起类')
+    assert.equal(await readingRows.count(), 3, '行元素保留（隐藏由 CSS 承担）')
+    const rowDisplay = await readingRows.first().evaluate((el) => getComputedStyle(el).display)
+    assert.equal(rowDisplay, 'none', '收起态行应在绘制层隐藏')
+    // 表壳边框保留（收起态标题栏即卡片全部可见面）
+    const tableBox = await table.boundingBox()
+    assert.ok(tableBox && tableBox.height > 8, '收起态表壳应有可见面积')
+    // 热区（标题文字）展开
+    await page.locator('.vsidian-reading-frontmatter .vsidian-fm-header-title').click()
+    assert.ok(!(await table.evaluate((el) => el.classList.contains('vsidian-fm-folded'))),
+      '热区点击应展开')
+    assert.equal(await readingRows.first().evaluate((el) => getComputedStyle(el).display),
+      'grid', '展开后行恢复网格呈现')
+    assert.deepEqual(errors, [], '页面不能有未捕获异常')
+    await page.close()
+  }
+
 } finally {
   await browser.close()
 }

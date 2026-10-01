@@ -112,4 +112,26 @@ describe('frontmatter 表格卡片 CSS 契约（#140 Popover 改版）', () => {
     expect(css).not.toMatch(/\.vsidian-fm-add-entry/)
     expect(css).not.toMatch(/\.vsidian-fm-empty-value/)
   })
+
+  it('折叠（与代码块同交互）：标题栏热区指针形态、chevron 转向、live 首行收起成底边、阅读行隐藏', () => {
+    // 热区：标题栏整体可点击（chevron 与修改按钮各自 cursor:pointer）
+    const header = rule('#app .vsidian-fm-header')
+    expect(header).toMatch(/cursor:\s*pointer/)
+    expect(header).toMatch(/user-select:\s*none/)
+    // 折叠 chevron：无边框幽灵按钮（对齐代码卡 vsidian-code-card-fold 形态）
+    const fold = rule('#app .vsidian-fm-header .vsidian-fm-fold')
+    expect(fold).toMatch(/border:\s*none/)
+    expect(fold).toMatch(/width:\s*22px/)
+    // 收起态 chevron 转向（SVG 过渡旋转）
+    expect(rule('#app .vsidian-fm-header .vsidian-fm-fold svg')).toMatch(/transition:\s*transform/)
+    expect(rule('#app .vsidian-fm-header .vsidian-fm-fold-collapsed svg'))
+      .toMatch(/transform:\s*rotate\(-90deg\)/)
+    // live 收起态：首行成为卡片底边（复合选择器叠于 edge-top 圆角之上）
+    const foldedLine = rule('.vsidian-fm-card-edge-top.vsidian-fm-card-folded')
+    expect(foldedLine).toMatch(/border-bottom:\s*1px solid var\(--vscode-panel-border/)
+    expect(foldedLine).toMatch(/border-radius:\s*6px/)
+    // 阅读收起态：表格行整体隐藏（表壳保留边框圆角）
+    expect(rule('.vsidian-reading-frontmatter .vsidian-fm-table.vsidian-fm-folded .vsidian-fm-row'))
+      .toMatch(/display:\s*none/)
+  })
 })
