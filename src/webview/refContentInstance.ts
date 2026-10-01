@@ -160,6 +160,13 @@ export class RefContentMount {
   private readonly blocks = new Map<HTMLElement, Array<() => void>>()
   private readonly cleanups: Array<() => void> = []
   private frame: number | null = null
+  // #258：最后已知滚动位置——卡内 scroll 事件与本类程序写回同步它。
+  // 宿主块被主视图窗口差分后的 reorder 移动时，Chromium 表格布局重排
+  // 会静默重置 td 内滚动容器的 scrollTop（引擎行为：无 scroll 事件、
+  // 无 JS 写入，浏览器取证见 #258）。它与实际值的不一致即静默丢失的
+  // 判别信号，用于停歇核对与回收保存。
+  private lastKnownScrollTop = 0
+  private settleTimer: number | null = null
 
   constructor(
     readonly instance: RefContentInstance,
@@ -171,17 +178,25 @@ export class RefContentMount {
       onBlockMounted: (el) => this.mountBlock(el),
       onBlockUnmounted: (el) => this.unmountBlock(el),
     }) : null
+    // #258：滚轮事件可能只是驱动外层（卡已到边由滚动链接续外层，或事件
+    // target 在卡域边界附近穿过）——内层未实际滚动就不构成新阅读意图。
+    // wheel 只记在场见证，由随后的内层 scroll 事件证实后才取消恢复；
+    // 见证在场时滚回顶部的零位同样是用户意图。
+    let wheelWitness = false
     if (this.view) this.listen(options.scrollEl, 'scroll', () => {
+      this.lastKnownScrollTop = options.scrollEl.scrollTop
       // 恢复帧尚未执行时，外层已有新的非零滚动位置即交还用户意图。
-      // 内容清空导致的零位钳制不取消待恢复位置。
-      if (this.frame !== null && options.scrollEl.scrollTop > 0 &&
-        options.scrollEl.scrollTop !== this.instance.scrollTop) {
+      // 内容清空导致的零位钳制不取消待恢复位置；滚轮在场时除外
+      //（用户主动滚回顶部，零位也是新阅读意图）。
+      if (this.frame !== null && options.scrollEl.scrollTop !== this.instance.scrollTop &&
+        (wheelWitness || options.scrollEl.scrollTop > 0)) {
         this.cancelPendingRestore()
       }
+      wheelWitness = false
       this.view?.handleScroll()
     })
     if (this.view) {
-      this.listen(options.scrollEl, 'wheel', () => this.cancelPendingRestore())
+      this.listen(options.scrollEl, 'wheel', () => { wheelWitness = true })
       this.listen(options.scrollEl, 'pointerdown', () => this.cancelPendingRestore())
       this.listen(options.scrollEl, 'touchstart', () => this.cancelPendingRestore())
       this.listen(options.scrollEl, 'keydown', (event) => {
@@ -189,7 +204,39 @@ export class RefContentMount {
           this.cancelPendingRestore()
         }
       })
+      // #258：外部滚动（主容器或任何非本卡滚动区，捕获阶段接收不冒泡的
+      // scroll）可能伴随宿主块重排引发的静默重置。滚动中反复重排-恢复
+      // 会来回闪动，核对放在外层停歇后进行。
+      const onOuterScroll = (event: Event): void => {
+        const target = event.target
+        if (target === options.scrollEl ||
+          (target instanceof Node && options.scrollEl.contains(target))) return
+        if (this.settleTimer !== null) window.clearTimeout(this.settleTimer)
+        this.settleTimer = window.setTimeout(() => {
+          this.settleTimer = null
+          this.verifyNotSilentlyReset()
+        }, 120)
+      }
+      document.addEventListener('scroll', onOuterScroll, { capture: true, passive: true })
+      this.onDispose(() => document.removeEventListener('scroll', onOuterScroll, true))
     }
+  }
+
+  /** #258：外部滚动停歇后核对卡内滚动。归零且与最后已知值不符（用户
+   * 滚回顶部必有 scroll 事件见证，lastKnown 已同步为 0）即判定为宿主
+   * 重排造成的引擎静默重置，恢复最后已知值。恢复写回等价一次用户滚动
+   *（走同一 scroll 监听），不影响虚拟化窗口语义。 */
+  private verifyNotSilentlyReset(): void {
+    if (this.released || this.frame !== null) return
+    if (this.options.scrollEl.scrollTop === 0 && this.lastKnownScrollTop > 0) {
+      this.writeScrollTop(this.lastKnownScrollTop)
+    }
+  }
+
+  /** 程序写回滚动位置：同步最后已知值（scroll 事件的异步到达不影响判别）。 */
+  private writeScrollTop(value: number): void {
+    this.options.scrollEl.scrollTop = value
+    this.lastKnownScrollTop = value
   }
 
   get disposed(): boolean { return this.released }
@@ -209,7 +256,8 @@ export class RefContentMount {
 
   render(loaded: RefLoadedContent, beforeMount?: (bytes: number) => boolean): boolean {
     if (this.released) return false
-    // 刷新前保存真实当前位置，重挂的新壳为 0 时沿用 occurrence 保存值。
+    // 刷新前保存真实当前位置，重挂的新壳为 0 时沿用 occurrence 保存值
+    //（#242 契约：滚回顶部后刷新不恢复旧非零位置——保存实时值）。
     if (this.target !== null || this.options.scrollEl.scrollTop > 0) {
       this.instance.scrollTop = this.options.scrollEl.scrollTop
     }
@@ -253,11 +301,11 @@ export class RefContentMount {
         // 缓存重挂可能先于卡片附着：先让外层真实视口建立占位高度，
         // 然后恢复滚动并立即切到目标窗口。
         this.view?.updateNow()
-        this.options.scrollEl.scrollTop = this.instance.scrollTop
+        this.writeScrollTop(this.instance.scrollTop)
         this.view?.updateNow()
         // 首次实测可能修正占位高度并平移宿主 scrollTop；恢复请求的
         // occurrence 位置以合法 scrollTop 为准，再落一次最终值。
-        this.options.scrollEl.scrollTop = this.instance.scrollTop
+        this.writeScrollTop(this.instance.scrollTop)
       }
     }
     if (deferred) this.frame = requestAnimationFrame(restore)
@@ -282,7 +330,19 @@ export class RefContentMount {
 
   dispose(): void {
     if (this.released) return
-    if (this.target !== null) this.instance.scrollTop = this.options.scrollEl.scrollTop
+    if (this.settleTimer !== null) {
+      window.clearTimeout(this.settleTimer)
+      this.settleTimer = null
+    }
+    if (this.target !== null) {
+      // #258：回收时内层可能已被宿主重排静默重置（无 scroll 事件见证，
+      // 实际归零但 lastKnown 停在丢失前的值）——按最后已知值保存，重挂
+      // 才能恢复真实阅读位置。用户主动滚回顶部的 scroll 见证会同步
+      // lastKnown 为 0，不触发此兜底。
+      this.instance.scrollTop = this.options.scrollEl.scrollTop === 0 && this.lastKnownScrollTop > 0
+        ? this.lastKnownScrollTop
+        : this.options.scrollEl.scrollTop
+    }
     if (this.frame !== null) cancelAnimationFrame(this.frame)
     this.clear()
     this.view?.dispose()
