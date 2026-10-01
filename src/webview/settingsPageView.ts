@@ -28,10 +28,34 @@ export interface SettingsPageSection {
    *  CSS 片段分页槽位改为调色板字形并被「外观」合并分页沿用（画笔字形
    *  退役）；'book'（#132 样式参考分页）随侧栏条目合并一并退役；
    *  'links' 为索引维护分页的链环 glyph——形态改版批次自 'editor' 铅笔
-   *  改为链环（与侧栏反链图标同形语言） */
+   *  改为链环（与侧栏反链图标同形语言）；'keyboard' 为快捷键分页的字形
+   *  （#264 中文分词分页退役——其曾占位借用的 keyboard 槽位随之消失） */
   icon: 'keyboard' | 'editor' | 'palette' | 'links'
   entries: readonly { id: string; title: string; description?: string }[]
   /** 返回清理函数；focusEntry 为全局搜索定位到的入口。 */
+  mount(parent: HTMLElement, focusEntry?: string): void | (() => void)
+}
+
+/**
+ * 编辑器分页内的二级标题组委托（#264）：分词分页退役为编辑器页尾组。
+ * 组内容与组内定位由实现自行装配（承载标准设置行之外的呈现形态），条目
+ * 进全局搜索索引（归编辑器分组命中）；与 SettingsPageSection 互斥——
+ * 本接口不产生侧栏分页槽位，也不得以此新增分页形态。
+ */
+export interface SettingsPageEditorGroup {
+  /** 组标题语言键（h3 二级标题，t(titleKey) 取词） */
+  readonly titleKey: MessageKey
+  /** 兼容路由：宿主按退役分页 id 发起 settings.focusSection 时打开编辑器
+   *  页并定位到本组（entry 原样透传给 mount，语义不变） */
+  readonly legacySectionId?: string
+  /** 组标题图标槽位（SettingsGroupIcon 注册表驱动，与 defs 组同一 h3
+   *  路径：内联字形与 #265 生图资产同槽）：缺省 = 槽位空缺，标题文字
+   *  起点不变（分词组的 wordSegment 登记随 #265 生图接线落地） */
+  readonly icon?: SettingsGroupIcon
+  /** 全局搜索条目（id = mount 的 focusEntry 定位键） */
+  readonly entries: readonly { id: string; title: string; description?: string }[]
+  /** 组内容装配进容器（vsidian-settings-group）；返回的清理函数于分页
+   *  重渲染/切换时调用（释放内部 parent 引用） */
   mount(parent: HTMLElement, focusEntry?: string): void | (() => void)
 }
 
@@ -131,7 +155,9 @@ export class SettingsPageView {
 
   constructor(private readonly bridge: SettingsPageBridge,
     private readonly defs: readonly SettingDefinition[],
-    private readonly sections: readonly SettingsPageSection[] = []) {}
+    private readonly sections: readonly SettingsPageSection[] = [],
+    /** #264 编辑器页二级组委托（分词）：挂编辑器页尾，不占侧栏槽位 */
+    private readonly editorGroups: readonly SettingsPageEditorGroup[] = []) {}
 
   mount(parent: HTMLElement): void {
     const root = element('div', SETTINGS_PAGE_CLASS_NAMES.root)
@@ -189,8 +215,11 @@ export class SettingsPageView {
   }
 
   /** 切换到指定分类（附加分页或内建分组）；entry（#231）为分页内进一步
-   *  定位的条目 id（外观分页按归属路由页内页签）；整页重渲染（#132） */
+   *  定位的条目 id（外观分页按归属路由页内页签）；整页重渲染（#132）。
+   *  #264 兼容路由：宿主按退役分页 id（legacySectionId，如分词
+   *  'wordSegment'）发起定位时打开编辑器页，entry 透传给对应委托组 */
   selectSection(id: string, entry?: string): void {
+    if (this.editorGroups.some((g) => g.legacySectionId === id)) id = 'editor'
     const known = this.categories().some((c) => c.id === id)
     if (!known) return
     this.active = id
@@ -286,20 +315,30 @@ export class SettingsPageView {
       !d.key.startsWith('codeblock.') && !d.key.startsWith('image.'))
   }
   private editorDefs(): readonly SettingDefinition[] {
-    // #239 分词三键（editor.wordSegment*）呈现归「中文分词」附加分页
-    //（wordSegmentSettings 同页渲染选择与下载管理，值仍走标准保存链路），
-    // 编辑器页与搜索内建分组不重复呈现
+    // #239 分词三键（editor.wordSegment*）不由本表渲染；#264 起呈现归编辑
+    // 器页尾「中文分词」委托组（wordSegmentSettings 同组渲染选择与下载管
+    // 理，值仍走标准保存链路），排除保留防止标准设置行与搜索内建分组重复
+    // 呈现（搜索条目由委托组 entries 提供）
     return this.defs.filter((d) => !d.key.startsWith('general.') && !d.key.startsWith('editor.wordSegment'))
   }
   /** 编辑器页内小节（顺序即渲染顺序）；空小节由调用方跳过不渲染。
-   *  icon 为二级组标题图标，注册表驱动。 */
-  private editorSectionDefs(): Array<{ titleKey: MessageKey; icon?: SettingsGroupIcon; defs: () => readonly SettingDefinition[] }> {
+   *  icon 为二级组标题图标，注册表驱动（#263 内联四枚 + #265 生图两枚）。
+   *  #264 起尾部追加委托组（分词）：组内容非标准设置行，经 group.mount
+   *  装配，图标经组对象 icon 槽登记、走与 defs 组同一 h3 容器路径（结构
+   *  不加特判；未登记 = 槽位空缺，布局机制对其无差别）。 */
+  private editorSectionDefs(): Array<{
+    titleKey: MessageKey
+    icon?: SettingsGroupIcon
+    defs?: () => readonly SettingDefinition[]
+    group?: SettingsPageEditorGroup
+  }> {
     return [
       { titleKey: 'settings.groupDisplay', icon: 'display', defs: () => this.displayDefs() },
       { titleKey: 'settings.groupEditing', icon: 'editing', defs: () => this.editingDefs() },
       { titleKey: 'settings.groupSymbols', icon: 'typewriter', defs: () => this.symbolDefs() },
       { titleKey: 'settings.groupCodeblock', icon: 'codeblock', defs: () => this.codeblockDefs() },
       { titleKey: 'settings.groupImage', icon: 'image', defs: () => this.imageDefs() },
+      ...this.editorGroups.map((group) => ({ titleKey: group.titleKey, icon: group.icon, group })),
     ]
   }
   private categories() {
@@ -358,7 +397,12 @@ export class SettingsPageView {
         }))
       const groups = [
         { id: 'general', title: t('settings.generalSection'), entries: toEntries(this.generalDefs()) },
-        { id: 'editor', title: t('settings.editorCategory'), entries: toEntries(this.editorDefs()) },
+        // #264 委托组条目（分词 engine/resource）随编辑器分组命中：点击进
+        // 编辑器页并以条目 id 定位组内对应块
+        { id: 'editor', title: t('settings.editorCategory'), entries: [
+          ...toEntries(this.editorDefs()),
+          ...this.editorGroups.flatMap((g) => g.entries),
+        ] },
         ...this.sections,
       ]
       let count = 0
@@ -412,16 +456,25 @@ export class SettingsPageView {
       element('p', SETTINGS_PAGE_CLASS_NAMES.subtitle, t('settings.editorSubtitle')))
     let rendered = false
     for (const section of this.editorSectionDefs()) {
-      const defs = section.defs()
-      if (!defs.length) continue
+      const defs = section.defs?.() ?? []
+      // 委托组（#264 分词）不由 defs 驱动：条目呈现在组内，恒渲染
+      if (!defs.length && !section.group) continue
       const container = element('div', 'vsidian-settings-group')
-      // 组标题图标：h3 保持 flex + gap 布局；内联字形和生图资产同占 16px。
+      // #263/#265 组标题图标：h3 保持 flex + gap 布局（图标置左 padding
+      // 缘、文字右移），内联字形和生图资产同占 16px；委托组（#264）走
+      // 同一 h3 容器路径，图标随组对象槽位登记，未登记则槽位空缺。
       const title = element('h3', 'vsidian-settings-group-title')
       if (section.icon) title.append(groupIcon(section.icon))
       title.append(document.createTextNode(t(section.titleKey)))
       container.append(title)
       list.append(container)
-      this.renderDefItems(container, defs, focusEntry)
+      if (section.group) {
+        // 委托组：内容与组内定位（focusEntry = 组条目 id）由组自行装配；
+        // 清理函数并入 disposeSection（重渲染/切页时释放内部 parent 引用）
+        this.disposeSection = section.group.mount(container, focusEntry) ?? undefined
+      } else {
+        this.renderDefItems(container, defs, focusEntry)
+      }
       rendered = true
     }
     if (!rendered) {

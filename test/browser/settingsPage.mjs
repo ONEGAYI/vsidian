@@ -349,6 +349,52 @@ try {
     assert.equal(calloutPaint.radius, '8px')
     assert.notEqual(calloutPaint.bg, 'rgba(0, 0, 0, 0)', 'callout 应有可辨色底')
     await page.screenshot({ path: path.join(artifacts, `settings-${theme}-css-snippets.png`) })
+    // #264 中文分词并入编辑器页：侧栏五项无分词入口；编辑器页尾二级组
+    //「中文分词」承载引擎/下载源与资源管理（可见性断言落用户看到的东西）
+    assert.deepEqual(await page.locator('.vsidian-settings-nav-item').allInnerTexts(),
+      [zhCn['settings.generalSection'], zhCn['settings.editorCategory'],
+        zhCn['keybindingSettings.title'], zhCn['appearance.title'], zhCn['indexMaintenance.title']],
+      '侧栏应为五项且不再有中文分词入口')
+    await page.getByRole('button', { name: zhCn['settings.editorCategory'], exact: true }).click()
+    const wordsegGroup = page.locator('.vsidian-settings-group').filter({
+      has: page.locator('.vsidian-settings-group-title', { hasText: zhCn['wordSegment.title'] }) })
+    await wordsegGroup.waitFor()
+    assert.equal(await wordsegGroup.count(), 1, '编辑器页应有唯一「中文分词」二级组')
+    assert.equal(await wordsegGroup
+      .locator('input[name="wordseg-editor.wordSegmentEngine"][value="jieba"]').isVisible(), true,
+      '分词组内 jieba 引擎选项应可见')
+    assert.equal(await wordsegGroup.getByRole('button', { name: zhCn['wordSegment.download'] }).isVisible(), true,
+      '分词组内下载按钮应可见')
+    // 兼容路由：宿主按退役分页 id 定位（focusSection wordSegment）打开编辑器
+    // 页分词组，定位块滚入主区可视范围（绘制层：几何落在主区矩形内）
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {
+      data: { kind: 'settings.focusSection', section: 'wordSegment', entry: 'engine' } })))
+    const wordsegLocated = wordsegGroup.locator('.vsidian-wordseg-block.vsidian-settings-item-located')
+    await wordsegLocated.waitFor()
+    assert.equal(await wordsegLocated.evaluate((el) => {
+      const main = document.querySelector('.vsidian-settings-main')
+      const box = el.getBoundingClientRect()
+      const view = main.getBoundingClientRect()
+      return box.top >= view.top && box.bottom <= view.bottom && box.height > 0
+    }), true, '兼容路由定位块应滚动进主区可视范围')
+    // 全局搜索「分词」：分词条目归编辑器分组命中，点击定位到组内对应块
+    await search.focus()
+    await page.keyboard.insertText('分词')
+    const wordsegResult = page.locator('.vsidian-settings-result')
+      .filter({ hasText: zhCn['wordSegment.engineLabel'] })
+    await wordsegResult.waitFor()
+    assert.equal(await wordsegResult.count(), 1, '搜索「分词」应命中分词引擎条目')
+    assert.match(await wordsegResult.innerText(), new RegExp(escapeRegExp(zhCn['settings.editorCategory'])),
+      '分词条目的搜索结果应标注编辑器分组')
+    await wordsegResult.click()
+    const searchLocated = wordsegGroup.locator('.vsidian-wordseg-block.vsidian-settings-item-located')
+    await searchLocated.waitFor()
+    assert.equal(await searchLocated.evaluate((el) => {
+      const main = document.querySelector('.vsidian-settings-main')
+      const box = el.getBoundingClientRect()
+      const view = main.getBoundingClientRect()
+      return box.top >= view.top && box.bottom <= view.bottom
+    }), true, '搜索定位块应滚动进主区可视范围')
     // 切回编辑器分组再走窄屏断言（分页切换会卸载前一分组内容）
     await page.getByRole('button', { name: zhCn['settings.editorCategory'], exact: true }).click()
     await page.setViewportSize({ width: 360, height: 740 })
