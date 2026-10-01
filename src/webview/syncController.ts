@@ -1113,6 +1113,13 @@ export class WebviewSyncController {
       session: () => ({ sessionId: this.sessionId, docUri: this.docUri }),
       send: (message) => this.bridge.postMessage(message),
       codeHighlight: () => this.codeCardConfig.highlight,
+      mountEmbedChild: (parentInstanceId, block, target) =>
+        this.embedCards?.mountPopupChild(parentInstanceId, block, target),
+      unmountEmbedChild: (block) => this.embedCards?.unmountBlock(block),
+      admitRootContent: (instanceId, target, bytes) =>
+        this.embedCards?.admitPopupRoot(instanceId, target, bytes) ?? false,
+      clearRootContent: (instanceId) => this.embedCards?.clearPopupRoot(instanceId),
+      releaseRootContent: (instanceId) => this.embedCards?.releasePopupRoot(instanceId),
     })
     // #222 嵌入卡片管理器：会话身份 + 只读消息通道 + 高亮/限高投影
     //（dispose 随控制器释放；与 hoverPopup 上下文同源装配）。#223 起

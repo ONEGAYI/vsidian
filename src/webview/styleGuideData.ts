@@ -1952,7 +1952,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "content-limits",
     "kind": "limitation",
     "target": ".markdown-embed / 嵌入结构",
-    "purpose": "嵌入（![[…]]）的部分边界（#222 起独占正文一行的嵌入在 Reading 侧渲染为引用卡片、#223 起在 Live 侧挂载同款卡片并支持光标驱动源码显隐，见 reading-embed-card / live-embed-widget）：混排（行内有其他内容）、列表/引用容器与表格格内的嵌入保留源文（1.5 期接入）；递归展开不提供（一层展开内为占位引用行）；嵌入内容写入不支持。双链残缺形态按原文显示；blockquote 块已支持。",
+    "purpose": "嵌入（![[…]]）的部分边界（#222 起独占正文一行的嵌入在 Reading 侧渲染为引用卡片、#223 起在 Live 侧挂载同款卡片并支持光标驱动源码显隐，见 reading-embed-card / live-embed-widget；#244/#245 起独占行在正文卡片与悬停浮层内递归展开）：混排（行内有其他内容）、列表/引用容器与表格格内的嵌入保留源文（后续票接入）；嵌入内容写入不支持。双链残缺形态按原文显示；blockquote 块已支持。",
     "views": [
       "live",
       "reading"
@@ -3509,7 +3509,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "hover-preview",
     "kind": "selector",
     "target": ".vsidian-hover-popup（浮层容器；内含 .vsidian-hover-popup-header 标题条（目标显示名 + .vsidian-hover-popup-title 与 .vsidian-hover-popup-open 跳转入口——嵌入卡片同款，#217 验收跟进）、.vsidian-hover-popup-scroll 内容滚动区（承载只读 Reading 容器）与 .vsidian-hover-popup-state 就地状态行（loading/错误分态；错误分态追加 .vsidian-hover-popup-state-error 修饰——主题错误色，验收反馈与普通文字区分））",
-    "purpose": "悬停文档预览浮层（#218 一期首条闭环）：父文档 Reading 中悬停指向 Markdown 的双链/本地链接，经文档访问通道读取目标后以只读 Reading 内容显示。#221 全入口：Live 正文（默认 Ctrl+悬停，设置 hover.liveDirect 开启后直接悬停）与反链/出链面板条目（直接悬停）共用同一浮层。默认宽 480px / 最大高 400px（小视口由 JS 几何计划四边翻转并收缩钳制）；内容只读——任务 checkbox 禁用（JS disabled + pointer-events 双保险），无任何写回通道。#220 起浮层内为目标文档（B）的 Reading 内容：图片以 B 为来源解析（sourceDocUri 通道）、链接可点击跳转、代码块朴素高亮。#217 验收跟进：标题条与嵌入卡片同款——目标显示名（spec.target）常驻不随回包换，右上角跳转入口按目标形态分派到既有激活消息族（双链/普通链接直发、面板形态经 openAction 闭包走条目点击同通道），点击即上下文切换关闭。",
+    "purpose": "悬停文档预览浮层（#218 一期首条闭环）：父文档 Reading 中悬停指向 Markdown 的双链/本地链接，经文档访问通道读取目标后以只读 Reading 内容显示。#221 全入口：Live 正文（默认 Ctrl+悬停，设置 hover.liveDirect 开启后直接悬停）与反链/出链面板条目（直接悬停）共用同一浮层。默认宽 480px / 最大高 400px（小视口由 JS 几何计划四边翻转并收缩钳制）；内容只读——任务 checkbox 禁用（JS disabled + pointer-events 双保险），无任何写回通道。#220 起浮层内为目标文档（B）的 Reading 内容：图片以 B 为来源解析（sourceDocUri 通道）、链接可点击跳转、代码块朴素高亮。#245 起 B 内独占行引用沿直接来源递归为禁写卡片，共用正文卡片的深度与预算；子卡片滚轮到底接续浮层，异步高度变化按自然高重新贴锚，整轮只有一个悬停窗口。#217 验收跟进：标题条与嵌入卡片同款——目标显示名（spec.target）常驻不随回包换，右上角跳转入口按目标形态分派到既有激活消息族（双链/普通链接直发、面板形态经 openAction 闭包走条目点击同通道），点击即上下文切换关闭。",
     "views": [
       "live",
       "reading"
@@ -3612,11 +3612,11 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "link-image-wikilink",
     "kind": "selector",
     "target": ".vsidian-embed-ref（占位引用行，挂阅读双链 a 级）",
-    "purpose": "嵌入占位引用行（#222 一层展开）：引用内容（悬停浮层或嵌入卡片内的 Reading 视图）中的独占行嵌入不递归装载——渲染为可打开的引用占位，文本保留 ![[显示]] 形态可辨识；点击经所在容器的链接委托按来源文档身份打开（宿主 sourceDocUri 语义）。占位目标按直接来源文档的目录解析。",
+    "purpose": "嵌入引用行的可打开占位形态（#222）：引用内容中的独占行先解析出 ![[显示]] 引用；#244/#245 起在预算与深度允许时升级为正文卡片或悬停内卡片，超深、循环或预算拒绝时保留就地说明及按直接来源打开目标的入口。目标始终按直接来源文档目录解析。",
     "views": [
       "reading"
     ],
-    "states": "常驻（引用内容内的嵌入行）；点击跳转、无悬停浮层叠加（嵌入内容域停止 mouseover/mouseout 冒泡）。",
+    "states": "引用内容中按当前深度和预算升级为卡片或就地占位；内部点击按直接来源跳转，不叠加第二个悬停浮层（嵌入内容域停止 mouseover/mouseout 冒泡）。",
     "dom": "嵌入块 html 内的 <a class=\"vsidian-wikilink vsidian-embed-ref\" href=\"目标原文\">（href 为 | 之前原文，与阅读双链 a 同口径）；主文档的嵌入块挂载时整块替换为嵌入卡片（占位行不出现）。",
     "example": ".vsidian-embed-ref {\n  font-family: inherit;\n}",
     "obsidian": {
@@ -3625,7 +3625,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     },
     "verification": [
       "单元 readingBlocks：embed 块占位 html 形态（wikilink 类 + 嵌入修饰类 + href 口径）",
-      "单元 embedCard：一层展开不嵌套装载、占位点击按 B 身份出站"
+      "单元 embedCard/webviewSync：独占行递归挂载、受限占位与直接来源打开；浏览器 hoverRecursive：单浮层内子卡片绘制"
     ],
     "introduced": "#222（2026-09-30）"
   }
@@ -4150,7 +4150,7 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "limit-markdown-embed": {
-    "purpose": "Partial boundary for embeds (![[…]]): a line-owning embed renders as the reference card in the reading view (#222) and mounts the same card in the live view with cursor-driven source reveal (#223) — see reading-embed-card / live-embed-widget. Mixed-run lines (other content on the line), list/blockquote containers, and table cells keep the raw source (1.5-phase scope); recursive expansion is not provided (one-level expansion shows a placeholder reference line); writing into embedded content is not supported. Incomplete wikilink forms are shown as-is; blockquote blocks are already supported.",
+    "purpose": "Partial boundary for embeds (![[…]]): a line-owning embed renders as the reference card in the reading view (#222) and mounts the same card in the live view with cursor-driven source reveal (#223) — see reading-embed-card / live-embed-widget. Since #244/#245, line-owning embeds expand recursively inside body cards and hover previews. Mixed-run lines (other content on the line), list/blockquote containers, and table cells keep the raw source for later tickets; writing into embedded content is not supported. Incomplete wikilink forms are shown as-is; blockquote blocks are already supported.",
     "dom": "Where no embed container applies: ![[…]] on non-owning lines or inside containers renders as raw text (consistent across both views).",
     "obsidian": {
       "counterpart": ".markdown-embed"
@@ -4679,7 +4679,7 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "hover-popup": {
-    "purpose": "The hover document preview popup (first closing loop of phase one, #218): hover a wikilink or local Markdown link in the parent reading view, and the target is read through the document-access channel and shown as read-only reading content. Since #221 the same popup serves all entry points: the live-preview body (Ctrl+hover by default, direct hover once the hover.liveDirect setting is on) and backlink/outgoing-link panel entries (direct hover). Default width 480px / max height 400px (in small viewports a JS geometry plan flips at the four edges and shrinks to fit); the content is read-only — task checkboxes are disabled (JS disabled + pointer-events double safety), with no write-back channel at all. Since #220 the popup carries the target document (B) as reading content: images resolve relative to B (the sourceDocUri channel), links are clickable for navigation, and code blocks get plain syntax highlighting. #217 acceptance follow-up: a header bar shared with the embed cards — the target display name (spec.target) stays constant regardless of the result payload, and the top-right open button dispatches to the existing activation message family by target shape (wikilink/plain-link sent directly; panel shapes go through an openAction closure along the same channel as the entry click); clicking closes the popup as a context switch.",
+    "purpose": "The hover document preview popup (first closing loop of phase one, #218): hover a wikilink or local Markdown link in the parent reading view, and the target is read through the document-access channel and shown as read-only reading content. Since #221 the same popup serves all entry points: the live-preview body (Ctrl+hover by default, direct hover once the hover.liveDirect setting is on) and backlink/outgoing-link panel entries (direct hover). Default width 480px / max height 400px (in small viewports a JS geometry plan flips at the four edges and shrinks to fit); the content is read-only — task checkboxes are disabled (JS disabled + pointer-events double safety), with no write-back channel at all. Since #220 the popup carries the target document (B) as reading content: images resolve relative to B (the sourceDocUri channel), links are clickable for navigation, and code blocks get plain syntax highlighting. Since #245, line-owning embeds inside B expand into read-only cards using the same depth and budget as body cards; a child card at its scroll boundary hands the wheel to the popup, and asynchronous height changes reposition it using natural content height. Only one hover popup exists throughout. #217 acceptance follow-up: a header bar shared with the embed cards — the target display name (spec.target) stays constant regardless of the result payload, and the top-right open button dispatches to the existing activation message family by target shape (wikilink/plain-link sent directly; panel shapes go through an openAction closure along the same channel as the entry click); clicking closes the popup as a context switch.",
     "states": "An interaction-state floating layer (mounted after the hover open delay, dismissed by leaving the joint anchor/popup domain after a close delay, Esc, parent scroll, or mode switch; since #221 a keyboard-command open moves focus into the popup with a :focus-visible outline, and while focus stays inside the popup it is not dismissed by the mouse leaving) — the container itself is not part of the static probes; open/close, keep-alive and painting are verified behaviorally by the browser hoverPreview / hoverEntry suites; the style entry point (a single low-specificity class) is public for snippet overrides.",
     "dom": "Since #220 attached directly inside #app (previously on body; fixed positioning is unaffected by the #app layout) — the #app theme variables, the `#app .vsidian-view-reading …` content styles, and enabled CSS snippets (the container class carries the .markdown-preview-view alias bridge) therefore match naturally, without duplicating a second theme environment for the popup. The inner reading container carries .vsidian-view-reading. The header bar (target display name plus open button) lists its rules together with the embed-card header selectors (popup selector first, embed selector last).",
     "obsidian": {
@@ -4727,8 +4727,8 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "reading-embed-ref": {
-    "purpose": "The embed placeholder reference line (#222 one-level expansion): a line-owning embed inside referenced reading content (hover popup or embed card) is not loaded recursively — it renders as an openable reference placeholder whose text keeps the recognizable ![[display]] form; clicking goes through the containing view link delegation and opens it with the source-document identity (the host sourceDocUri semantics). The placeholder target resolves relative to the direct source document.",
-    "states": "Ever-present (the embed lines inside referenced content); click navigates, with no hover-popup stacking (the embed content domain stops mouseover/mouseout propagation).",
+    "purpose": "The openable placeholder form of an embed reference (#222): a line-owning embed inside referenced reading content first parses into a recognizable ![[display]] reference. Since #244/#245 it mounts as a body card or hover-internal card when depth and budgets allow; excessive depth, a cycle, or budget rejection retains an in-place explanation and an open-target entry. The target always resolves relative to its direct source document.",
+    "states": "Inside referenced content, the line upgrades to a card or an in-place placeholder according to depth and budgets; clicks navigate by direct source without stacking another hover popup (the embed content domain stops mouseover/mouseout propagation).",
     "dom": "An <a class=\"vsidian-wikilink vsidian-embed-ref\" href=\"raw target\"> inside the embed block html (the href is the raw text before |, same convention as the reading wikilink anchor); when the parent-document embed block mounts it is replaced wholesale by the embed card (the placeholder line never appears there).",
     "obsidian": {
       "counterpart": "(Obsidian expands embeds recursively; there is no placeholder form)"

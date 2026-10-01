@@ -52,7 +52,7 @@
 // setter 注入（imagePopup 的 setImagePopupContext 形态；syncController
 // mount 注入、dispose 清空）。
 import type { ImageResultPayload } from './imageResource'
-import { RefContentInstance, type RefContentMount } from './refContentInstance'
+import { RefContentInstance, type RefContentMount, type RefLoadedContent } from './refContentInstance'
 import { createReadingContainer, READING_CLASS_NAMES } from './readingView'
 import type { ReadingViewStats } from './readingVirtualView'
 import { claimPopup, releasePopup } from './popupMutex'
@@ -169,6 +169,12 @@ export interface HoverPreviewContext {
   send(message: WebviewToHost): void
   /** #220 代码高亮开关（面板 codeCardConfig.highlight 的只读投影；缺省开） */
   codeHighlight?(): boolean
+  /** #245 复用正文卡片管理器升级浮层内子引用，不创建第二个浮窗。 */
+  mountEmbedChild?(parentInstanceId: string, block: HTMLElement, target: RefLoadedContent): void
+  unmountEmbedChild?(block: HTMLElement): void
+  admitRootContent?(instanceId: string, target: RefLoadedContent, bytes: number): boolean
+  clearRootContent?(instanceId: string): void
+  releaseRootContent?(instanceId: string): void
 }
 
 interface HoverPopupState {
@@ -355,13 +361,13 @@ function position(state: HoverPopupState): void {
   }
   const anchorRect = state.anchor.getBoundingClientRect()
   const width = state.container.offsetWidth || HOVER_POPUP_DEFAULT_WIDTH
-  // 期望高按最大高常量规划（400 上限；内容更矮时 max-height 不抬高度，
-  // 自然高度不受影响）。不得喂加载期实测高：inline maxHeight 会把
-  // offsetHeight 钳在旧值，后续重定位永远读到冻结值——浮层在内容装载后
-  // 塌缩成 loading 态高度（#218 遗留缺陷，#220 浏览器属性区场景暴露：
-  // 指针落点被推出浮层外触发误关闭；按 400 规划后翻转决策也取最坏情况，
-  // 内容长高不再跳变）
-  const height = HOVER_POPUP_MAX_HEIGHT
+  // 用内部滚动内容的自然高度规划贴锚位置：外壳 offsetHeight 可能已被
+  // 旧 max-height 裁切，直接读它会把后续异步增高永久冻结在 loading 高。
+  // scrollHeight 不受外壳裁切；扣掉当前滚动口再加回自然内容即可恢复全高。
+  const measured = state.container.offsetHeight > 0
+    ? state.container.offsetHeight - state.scrollEl.clientHeight + state.scrollEl.scrollHeight
+    : HOVER_POPUP_MAX_HEIGHT
+  const height = Math.min(HOVER_POPUP_MAX_HEIGHT, Math.max(1, measured))
   const placement = planHoverPopupPlacement({
     anchor: {
       left: anchorRect.left,
@@ -460,6 +466,8 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
     session: () => ctx.session(),
     send: (message) => ctx.send(message),
     codeHighlight: () => ctx.codeHighlight?.() ?? true,
+    onEmbedBlockMounted: (block, target) => ctx.mountEmbedChild?.(instanceId, block, target),
+    onEmbedBlockUnmounted: (block) => ctx.unmountEmbedChild?.(block),
   })
   const state: HoverPopupState = {
     instanceId,
@@ -491,6 +499,7 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
       sendWatchMessage(state.watchedFsPath, state.instanceId, 'hover.unwatch')
       state.watchedFsPath = null
     }
+    ctx.releaseRootContent?.(state.instanceId)
     for (const cleanup of state.cleanups.splice(0)) cleanup()
   })
   popup = state
@@ -623,11 +632,12 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
 
   if (typeof ResizeObserver === 'function') {
     const observer = new ResizeObserver(() => {
-      if (popup) {
-        position(popup)
+      if (popup === state) {
+        position(state)
       }
     })
     observer.observe(container)
+    observer.observe(contentEl)
     state.cleanups.push(() => observer.disconnect())
   }
 
@@ -642,6 +652,7 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
     docUri: session.docUri,
     reqId,
     instanceId,
+    occurrenceId: instanceId,
     sourceStart: spec.sourceStart,
     sourceEnd: spec.sourceEnd,
     target: spec.target,
@@ -743,18 +754,35 @@ function applyHoverContent(state: HoverPopupState, message: Extract<HoverPreview
   state.scope = message.scope.kind
   state.targetFsPath = message.target.fsPath
   state.appliedVersion = message.version
-  state.content.render({
+  const loaded: RefLoadedContent = {
     fsPath: message.target.fsPath, relPath: message.target.relPath,
     scope: message.scope.kind, selector: message.scope, range: message.range,
     version: message.version, text: message.text,
+    depth: message.depth, expansionPath: message.expansionPath,
+  }
+  const rendered = state.content.render(loaded, (bytes) => {
+    if (context?.admitRootContent && !context.admitRootContent(state.instanceId, loaded, bytes)) return false
+    // 同 fsPath 未保存刷新也必须先续交根 B 的来源，再挂子卡发 C 请求。
+    ensureWatch(state, message.target.fsPath, message.sourceLeaseId)
+    return true
   })
+  if (!rendered) {
+    if (context) releaseRefSourceLease(context, message.sourceLeaseId)
+    context?.releaseRootContent?.(state.instanceId)
+    if (state.watchedFsPath !== null) {
+      sendWatchMessage(state.watchedFsPath, state.instanceId, 'hover.unwatch')
+      state.watchedFsPath = null
+      state.watchLeaseId = null
+    }
+    applyDisplay(state, 'error', t('hover.errorBudget'))
+    return
+  }
   applyDisplay(state, 'content', message.target.relPath)
   // #224 滚动位置恢复（刷新路径：内容重建后回写；内容缩短合法钳制）
   if (keepScroll > 0) {
     state.scrollEl.scrollTop = keepScroll
     state.content.updateNow()
   }
-  ensureWatch(state, message.target.fsPath, message.sourceLeaseId)
 }
 
 /** #224 登记目标订阅（成功装载后；目标身份变化先释放旧订阅） */
@@ -818,6 +846,7 @@ export function notifyHoverWatchRejected(message: {
   state.watchedFsPath = null
   state.watchLeaseId = null
   state.content.clear()
+  context?.clearRootContent?.(state.instanceId)
   applyDisplay(state, 'error', t(message.reason === 'capacity' ? 'hover.errorWatchCapacity' : 'hover.errorSourceExpired'))
   position(state)
 }
@@ -860,6 +889,7 @@ export function notifyHoverInvalidated(message: {
       docUri: session.docUri,
       reqId: state.reqId,
       instanceId: state.instanceId,
+      occurrenceId: state.instanceId,
       sourceStart: state.spec.sourceStart,
       sourceEnd: state.spec.sourceEnd,
       target: state.spec.target,
@@ -878,6 +908,7 @@ export function notifyHoverInvalidated(message: {
   // deleted / stale：撤下内容显示分态（视图清空防 display 反转后旧内容
   // 闪现；fm/滚动状态在实例 state 保留，恢复重载后无需重取）
   state.content.clear()
+  context?.clearRootContent?.(state.instanceId)
   state.targetFsPath = ''
   state.scope = ''
   applyDisplay(

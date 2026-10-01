@@ -365,6 +365,17 @@ export class EmbedCardManager {
   }
 
   private mountChildBlock(parent: EmbedEntry, el: HTMLElement, target: RefLoadedContent): void {
+    this.mountChildFrom(parent.key, parent.content.source.treeId ?? parent.key,
+      parent.content.source.depth ?? 1, el, target)
+  }
+
+  /** 浮层根 B 与正文卡片共用同一子卡状态库、来源链和面板预算。 */
+  mountPopupChild(parentInstanceId: string, el: HTMLElement, target: RefLoadedContent): void {
+    this.mountChildFrom(parentInstanceId, parentInstanceId, 1, el, target)
+  }
+
+  private mountChildFrom(parentKey: string, treeId: string, parentDepth: number,
+    el: HTMLElement, target: RefLoadedContent): void {
     const inner = el.dataset['vsidianEmbedInner']
     if (inner === undefined) return
     const start = Number(el.dataset['vsidianSrcStart'] ?? -1)
@@ -374,10 +385,10 @@ export class EmbedCardManager {
       panelDocUri: this.context.session().docUri ?? '',
       sourceDocUri: target.fsPath,
       range: { start, end },
-      occurrence: `${parent.key}/${start}::${inner}`,
-      parentInstanceId: parent.key,
-      depth: (target.depth ?? parent.content.source.depth ?? 1) + 1,
-      treeId: parent.content.source.treeId ?? parent.key,
+      occurrence: `${parentKey}/${start}::${inner}`,
+      parentInstanceId: parentKey,
+      depth: (target.depth ?? parentDepth) + 1,
+      treeId,
     }
     this.mountCardInto(el, inner, start, end, 'reading', source)
   }
@@ -656,6 +667,25 @@ export class EmbedCardManager {
 
   budgetStats(): ReturnType<RefExpansionBudget['snapshot']> {
     return this.budget.snapshot()
+  }
+
+  /** 悬停根 B 与正文卡树共用面板预算；解析字节在 DOM 挂载前准入。 */
+  admitPopupRoot(instanceId: string, loaded: RefLoadedContent, bytes: number): boolean {
+    this.budget.setDepthLimit(this.context.maxDepth?.() ?? REF_EXPANSION_LIMITS.defaultDepth)
+    if (this.budget.reserve(instanceId, instanceId, 1) !== 'ok' ||
+      this.budget.attachContent(instanceId, `${instanceId}\n${loaded.fsPath}\n${loaded.version}`, bytes) !== 'ok') {
+      this.budget.release(instanceId)
+      return false
+    }
+    return true
+  }
+
+  clearPopupRoot(instanceId: string): void {
+    this.budget.clearContent(instanceId)
+  }
+
+  releasePopupRoot(instanceId: string): void {
+    this.budget.release(instanceId)
   }
 
   /** 全部释放（syncController dispose）：卡片 DOM、B 视图与状态库 */

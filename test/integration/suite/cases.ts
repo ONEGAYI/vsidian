@@ -12036,4 +12036,45 @@ export const cases: Array<[string, () => Promise<void>]> = [
     })
     console.log('[#244] A→B→C→D、直接来源、未保存 B/C 更新、深度热更与零写回通过')
   }],
+  ['悬停递归：真宿主 B 来源、三层、关闭回收与零写回（#245）', async () => {
+    await vscode.commands.executeCommand(CMD.setSettings, { 'embed.maxDepth': 3 })
+    const parentName = '悬停递归.md'
+    const uri = wsUri(parentName).toString()
+    const disk = await readDisk(parentName)
+    await openWithEditor(parentName)
+    await waitSessionReady(parentName)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    await waitViewState(parentName, (v) => v.viewMode === 'reading')
+    const baseline = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { subscriptions: number }
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 0 })
+    const loaded = await poll('悬停 B→C→D 与 E 深度占位', async () => {
+      const v = await vscode.commands.executeCommand(CMD.viewState, uri, 0) as ViewState | undefined
+      const card = (inner: string) => (v?.readingEmbed ?? []).find((item) => item.inner === inner)
+      return v?.hoverPreview?.open === true && v.hoverPreview.state === 'content' &&
+        card('../two/C')?.state === 'content' &&
+        card('../three/D')?.state === 'content' &&
+        card('E')?.state === 'error' ? v : undefined
+    }, 20000)
+    assert(loaded.hoverPreview?.note === 'ref-depth/one/B.md',
+      `悬停根 B 身份应正确（实际 ${JSON.stringify(loaded.hoverPreview)}）`)
+    assert((loaded.readingEmbed ?? []).find((item) => item.inner === 'E')?.note ===
+      editorMessages()['hover.errorDepth'], '第四层 E 应显示深度占位')
+    const watching = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { subscriptions: number }
+    assert(watching.subscriptions >= baseline.subscriptions + 3,
+      `B/C/D 均应有真宿主订阅（${baseline.subscriptions}→${watching.subscriptions}）`)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 0 })
+    await poll('关闭悬停整树后 B/C/D 退订', async () => {
+      const v = await vscode.commands.executeCommand(CMD.viewState, uri, 0) as ViewState | undefined
+      const stats = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { subscriptions: number }
+      return v?.hoverPreview?.open === false && stats.subscriptions === baseline.subscriptions
+        ? v : undefined
+    }, 15000)
+    assert((await readDisk(parentName)) === disk, '悬停读取不得修改父文档磁盘')
+    const state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state.appliedEdits === 0, '悬停递归没有进入父文档写回通道')
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    console.log('[#245] 悬停 B→C→D 真来源、深度占位、整树退订与零写回通过')
+  }],
 ]

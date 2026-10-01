@@ -10,6 +10,7 @@ import { keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
 import '../../src/webview/main.css'
 import { getRefContentLifecycleStats, getRefReadingBlockCacheStats } from '../../src/webview/refContentInstance'
+import { openHoverPopupFor, openHoverPopupForKeyboard } from '../../src/webview/hoverPopup'
 
 bootLocaleFromDocument()
 
@@ -26,8 +27,25 @@ const bridge: VsCodeBridge = {
 }
 const controller = new WebviewSyncController(bridge)
 controller.mount(document.getElementById('app')!, [keymap.of(defaultKeymap)])
+let panelOpened = 0
 
 Object.assign(window, {
+  openHoverPanel() {
+    const anchor = document.createElement('button')
+    anchor.id = 'hover-panel-anchor'
+    document.body.appendChild(anchor)
+    openHoverPopupFor(anchor, { target: 'B', sourceStart: 0, sourceEnd: 0,
+      directFsPath: 'D:/notes/B.md', openAction: () => { panelOpened++ } })
+  },
+  panelOpenCount() { return panelOpened },
+  openHoverKeyboard(target: string) {
+    const anchor = document.querySelector<HTMLElement>('a.vsidian-wikilink')!
+    const trigger = document.createElement('button')
+    trigger.id = 'hover-keyboard-trigger'
+    document.body.appendChild(trigger)
+    trigger.focus()
+    openHoverPopupForKeyboard(anchor, { target, sourceStart: 0, sourceEnd: target.length + 4 })
+  },
   /** 装配父文档并切 Reading（宿主消息与生产同入口） */
   initHoverDoc(text: string) {
     controller.handleHostMessage({

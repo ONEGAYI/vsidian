@@ -1098,6 +1098,8 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   mkdirSync(path.join(wsDir, 'ref-depth', 'two'), { recursive: true })
   mkdirSync(path.join(wsDir, 'ref-depth', 'three'), { recursive: true })
   writeFileSync(path.join(wsDir, '递归父文档.md'), '![[ref-depth/one/B]]\n', 'utf8')
+  // #245 悬停根 B 复用同一 B→C→D 链；正文父文档自身不挂卡。
+  writeFileSync(path.join(wsDir, '悬停递归.md'), '[[ref-depth/one/B]]\n', 'utf8')
   writeFileSync(path.join(wsDir, 'ref-depth', 'one', 'B.md'), '# B 一层\n\n![[../two/C]]\n', 'utf8')
   writeFileSync(path.join(wsDir, 'ref-depth', 'two', 'C.md'), '# C 二层\n\n![[../three/D]]\n', 'utf8')
   writeFileSync(path.join(wsDir, 'ref-depth', 'three', 'D.md'), '# D 三层\n\n![[E]]\n', 'utf8')
