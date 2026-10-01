@@ -29,6 +29,8 @@ export const zhCn: Record<MessageKey, string> = {
   'settings.generalSectionDescription': '调整 Vsidian 的基础行为。更改会自动保存。',
   /** 编辑器页内小节（#163 二轮还原）：editor.symbol* 输入行为类 */
   'settings.groupSymbols': '符号输入',
+  /** 编辑器页内小节：编辑能力类（多光标，#237） */
+  'settings.groupEditing': '编辑',
   /** 编辑器页内小节：codeblock.* 呈现类 */
   'settings.groupCodeblock': '代码块',
   /** 编辑器页内小节：image.* 图片粘贴设置 */
@@ -101,6 +103,10 @@ export const zhCn: Record<MessageKey, string> = {
   'setting.symbolTabEscape.title': '符号 Tab 越界',
   'setting.symbolTabEscape.description':
     '实时预览中光标位于成对符号围栏内部（括号、引号或行内 Markdown 结构）且未选中文字时，Tab 先移到闭合标记左边界，再按一次越过整个闭合标记；嵌套围栏从最内层逐层退出。Tab 仅移动光标，不改动文本。围栏外保持既有行为（表格切格或整行缩进）；Shift+Tab 不受影响。本开关与前两项符号设置相互独立。',
+  /** 设置项「多光标」（#237 editor.multicursor） */
+  'setting.multicursor.title': '多光标',
+  'setting.multicursor.description':
+    '在实时预览中启用多条光标与副选区：按住 Alt 点击可在指针处添加（或移除）光标，Ctrl+Alt+Up/Down 在上方或下方行添加光标，Esc 一次收敛回主光标。关闭后回到单选区编辑。与「选区符号包裹」相互独立。',
   /** 设置项「界面语言」（#96 general.language，经 titleKey/descriptionKey 取词） */
   'setting.language.title': '界面语言',
   'setting.language.description':
@@ -178,6 +184,7 @@ export const zhCn: Record<MessageKey, string> = {
   'styleRef.category.backlinks': '反链面板',
   'styleRef.category.outlinks': '出链面板',
   'styleRef.category.hoverPreview': '悬停预览',
+  'styleRef.category.findPanel': '查找面板',
   'host.styleRefExported': '样式契约 JSON 已导出：{path}',
   'host.styleRefExportFailed': '样式契约 JSON 导出失败：{reason}',
   'host.styleRefExportReasonMissingAsset': '扩展安装不完整（缺少 style-reference.json）',
@@ -308,10 +315,26 @@ export const zhCn: Record<MessageKey, string> = {
 
   'find.placeholder': '查找',
   'find.label': '在文档中查找',
-  'find.caseToggle': '忽略大小写',
+  'find.toggleReplace': '展开/收起替换栏',
+  'find.replaceLabel': '替换为',
+  'find.replaceNext': '替换',
+  'find.replaceAll': '全部替换',
+  'find.invalid': '无效的正则表达式',
+  'find.matchCase': '区分大小写',
+  'find.wholeWord': '全字匹配',
+  'find.regexp': '使用正则表达式',
   'find.prev': '上一个匹配',
   'find.next': '下一个匹配',
   'find.close': '关闭查找',
+  'find.inSelection': '在选定内容中查找',
+  /** 计数形态（VSCode 同款）：{n} 当前序号、{total} 命中总数 */
+  'find.count': '第 {n} 项，共 {total} 项',
+  'find.noResults': '无结果',
+  'find.sourceHit': '源码命中',
+  'find.sourceReadonly': '只读',
+  'find.sourceLocation': '第 {line} 行，第 {column} 列',
+  /** #238 查找选项条（Ctrl+D 会话期间的迷你三按钮）容器可访问名称 */
+  'find.optionsBar': '查找选项',
 
   'conflict.bannerText': '检测到无法安全同步的外部修改：写回已暂停，本地输入已保留，不会被覆盖。',
   'conflict.copyUnconfirmed': '复制未确认输入',
@@ -521,6 +544,9 @@ export const zhCn: Record<MessageKey, string> = {
   'command.find.title': '查找（编辑区）',
   'command.find.next.title': '下一个查找结果',
   'command.find.previous.title': '上一个查找结果',
+  'command.find.replace.title': '替换（编辑区）',
+  'command.find.replaceNext.title': '替换下一个匹配',
+  'command.find.replaceAll.title': '全部替换匹配',
   'command.table.create.title': '创建表格',
   'command.table.insertRowAbove.title': '表格：上方插入行',
   'command.table.insertRowBelow.title': '表格：下方插入行',
@@ -551,6 +577,9 @@ export const zhCn: Record<MessageKey, string> = {
   'command.ui.outlinksToggle.title': '显示或隐藏出链面板',
   /** #208 刷新嵌入资源命令（工具栏按钮与快捷键/命令面板共用） */
   'command.editor.refresh.title': '刷新嵌入资源',
+  /** #237 多光标：在上方/下方行添加光标（仅实时预览；Alt+点击在指针处添加） */
+  'command.editor.addCursorAbove.title': '在上方添加光标',
+  'command.editor.addCursorBelow.title': '在下方添加光标',
   /** #221 预览当前链接（手动打开悬停浮层：键盘进入浮层、Esc 返回触发处） */
   'command.ui.hoverPreviewLink.title': '预览当前链接',
 
@@ -594,4 +623,59 @@ export const zhCn: Record<MessageKey, string> = {
   'contextMenu.selectAll': '全选',
   /** 命令面板/快捷键页操作名（keybindings 注册表 titleKey） */
   'command.block.copyLink.title': '复制当前块链接',
+
+  // ---- #239 中文分词词级移动（操作注册表 + 设置页分页 + 宿主通知）----
+  /** 词级移动四操作（默认 ctrl+方向 / alt+方向（mac 词移动惯例）；
+   *  Shift 变体单列操作——扩选注册） */
+  'command.wordMotion.cursorLeft.title': '按词左移（中文分词）',
+  'command.wordMotion.cursorRight.title': '按词右移（中文分词）',
+  'command.wordMotion.selectLeft.title': '按词向左扩展选区（中文分词）',
+  'command.wordMotion.selectRight.title': '按词向右扩展选区（中文分词）',
+  // ---- #238 选下一处相同词族（操作注册表 titleKey） ----
+  'command.find.selectNext.title': '选下一处相同词',
+  'command.find.selectPrevious.title': '选上一处相同词',
+  'command.find.skipCurrent.title': '跳过当前，选下一处相同词',
+  'command.find.allOccurrences.title': '选中全部相同词',
+  /** 设置项：分词引擎（呈现归「中文分词」附加分页） */
+  'setting.wordSegmentEngine.title': '分词引擎',
+  'setting.wordSegmentEngine.description': 'Ctrl+左/右箭头按词移动时对连续中文段的切分引擎。英文与数字段始终沿用内置分组语义。',
+  'setting.wordSegmentEngineBuiltin': '内置（Intl.Segmenter）',
+  'setting.wordSegmentEngineJieba': 'jieba-wasm（词典分词）',
+  /** 设置项：jieba 下载源 */
+  'setting.wordSegmentSource.title': 'jieba 下载源',
+  'setting.wordSegmentSource.description': 'jieba-wasm 资源的下载来源。资源经锁定版本 sha256 校验后存入扩展存储；下载在扩展宿主侧执行（Remote SSH 场景在远程机下载）。',
+  'setting.wordSegmentSourceJsdelivr': 'jsDelivr CDN（默认）',
+  'setting.wordSegmentSourceNpmmirror': 'npmmirror（国内镜像）',
+  'setting.wordSegmentSourceCustom': '自定义 URL',
+  /** 设置项：自定义下载源基址 */
+  'setting.wordSegmentCustomUrl.title': '自定义源基址',
+  'setting.wordSegmentCustomUrl.description': '自定义模式使用的 HTTPS 目录地址——两个锁定文件按 基址/jieba_rs_wasm.js 与 基址/jieba_rs_wasm_bg.wasm 下载。明文 HTTP 会被拒绝。',
+  /** 设置页「中文分词」分页框架与资源管理 */
+  'wordSegment.title': '中文分词',
+  'wordSegment.description': 'Ctrl+左/右箭头对连续中文段按词移动，以及 jieba 资源管理。',
+  'wordSegment.engineLabel': '分词引擎',
+  'wordSegment.engineDescription': '决定按词移动时连续中文的切分方式，切换即时生效。',
+  'wordSegment.engineBuiltinHint': '浏览器内置 ICU 分词，无需下载、始终可用。',
+  'wordSegment.engineJiebaHint': '词典质量更好；需一次性下载资源，不可用时自动回退内置引擎。',
+  'wordSegment.sourceLabel': '下载源',
+  'wordSegment.sourceDescription': '仅在选择 jieba 引擎时生效。',
+  'wordSegment.customUrlPlaceholder': 'https://example.com/jieba/',
+  'wordSegment.resourceLabel': 'jieba 资源',
+  'wordSegment.resourceDescription': '按需下载到扩展存储（约 4 MB），不随扩展打包。删除后回退内置引擎。',
+  'wordSegment.installed': '已安装并校验通过（jieba-wasm {version}）。',
+  'wordSegment.notInstalled': '未安装，当前使用内置引擎。',
+  'wordSegment.downloading': '下载并校验中…',
+  'wordSegment.download': '下载',
+  'wordSegment.deleteResource': '删除资源',
+  'wordSegment.noticeDownloaded': '下载并校验完成。',
+  'wordSegment.noticeDownloadFailed': '下载失败：{detail}',
+  'wordSegment.noticeDeleted': '资源已删除，回退内置引擎。',
+  'wordSegment.noticeDeleteFailed': '删除失败：{detail}',
+  'wordSegment.noticeLoadFailed': '已下载资源在编辑器中加载失败，回退内置引擎。{detail}',
+  /** 宿主通知（下载/删除结果） */
+  'host.jiebaDownloaded': 'jieba-wasm {version} 已下载并校验通过，按词移动已切换为 jieba。',
+  'host.jiebaDownloadFailed': 'jieba 资源下载失败：{detail}。按词移动继续使用内置引擎。',
+  'host.jiebaDeleted': 'jieba 资源已删除，按词移动回退内置引擎。',
+  'host.jiebaDeleteFailed': 'jieba 资源删除失败：{detail}。',
+  'host.jiebaLoadFailed': 'jieba 在编辑器中加载失败：{detail}。内置引擎保持生效。',
 }

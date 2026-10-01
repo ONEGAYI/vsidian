@@ -43,7 +43,7 @@ function makeStorage(writes: Array<{ key: string; value: unknown }> = []): Setti
 }
 
 describe('快照读取', () => {
-  it('生产注册表（#34 起）：快照为定义默认值（七开关均开 + 语言 auto + 可读行宽 0 + 嵌入限高 480 + Live 直接悬停关）', () => {
+  it('生产注册表（#34 起）：快照为定义默认值（八开关均开 + 语言 auto + 可读行宽 0 + 嵌入限高 480 + Live 直接悬停关 + 分词引擎内置）', () => {
     const svc = new SettingsService(makeStorage(), PRODUCTION_SETTING_DEFINITIONS)
     expect(svc.getSnapshot()).toEqual({
       'general.language': 'auto',
@@ -55,6 +55,8 @@ describe('快照读取', () => {
       'editor.symbolAutocomplete': true,
       'editor.symbolSelectionWrap': true,
       'editor.symbolTabEscape': true,
+      // #237 多光标（默认开 = alt+click / Ctrl+Alt+方向键可用）
+      'editor.multicursor': true,
       // #161 图片粘贴三件：总开关 / 存放模式枚举 / 子路径自由文本
       'image.paste': true,
       'image.pasteLocation': 'same-dir',
@@ -64,6 +66,11 @@ describe('快照读取', () => {
       'embed.maxHeight': 480,
       // #221 Live 直接悬停（默认关 = Ctrl+悬停）
       'hover.liveDirect': false,
+      // #239 中文分词三件：引擎默认内置（Intl.Segmenter）、下载源默认
+      // jsdelivr、自定义源基址默认空
+      'editor.wordSegmentEngine': 'builtin',
+      'editor.wordSegmentSource': 'jsdelivr',
+      'editor.wordSegmentJiebaUrl': '',
     })
   })
 

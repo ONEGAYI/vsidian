@@ -36,6 +36,8 @@ export const en = {
     'Adjust basic Vsidian behavior. Changes save automatically.',
   /** Editor-page section: editor.symbol* input behaviors */
   'settings.groupSymbols': 'Symbols',
+  /** Editor-page section: editing capabilities (multi-cursor, #237) */
+  'settings.groupEditing': 'Editing',
   /** Editor-page section: codeblock.* presentation */
   'settings.groupCodeblock': 'Code blocks',
   /** Editor-page section: image.* paste settings */
@@ -116,6 +118,10 @@ export const en = {
   'setting.symbolTabEscape.title': 'Tab escapes symbol fences',
   'setting.symbolTabEscape.description':
     'With the cursor inside a paired symbol fence (brackets, quotes, or inline Markdown structures) and no text selected, Tab first moves to the left edge of the closing marker, then jumps over it; nested fences exit innermost first. Tab moves the cursor only and never edits text. Outside fences, Tab keeps the existing behavior (table cell navigation or line indent); Shift+Tab is unaffected. Independent from the two symbol settings above.',
+  /** 设置项「多光标」（#237 editor.multicursor） */
+  'setting.multicursor.title': 'Multiple cursors',
+  'setting.multicursor.description':
+    'Enable multiple cursors and secondary selections in live preview: Alt+click adds or removes a cursor at the pointer, Ctrl+Alt+Up/Down adds a cursor on the line above or below, and Esc collapses back to the main cursor. Turn off to restore single-selection editing. Independent from "Wrap selection with symbols".',
   /** 设置项「界面语言」（#96 general.language，经 titleKey/descriptionKey 取词） */
   'setting.language.title': 'Interface language',
   'setting.language.description':
@@ -194,6 +200,7 @@ export const en = {
   'styleRef.category.backlinks': 'Backlinks panel',
   'styleRef.category.outlinks': 'Outgoing links panel',
   'styleRef.category.hoverPreview': 'Hover preview',
+  'styleRef.category.findPanel': 'Find panel',
   'host.styleRefExported': 'Style contract JSON exported: {path}',
   'host.styleRefExportFailed': 'Failed to export style contract JSON: {reason}',
   'host.styleRefExportReasonMissingAsset': 'extension install incomplete (style-reference.json missing)',
@@ -331,10 +338,26 @@ export const en = {
   /** 查找控件 */
   'find.placeholder': 'Find',
   'find.label': 'Find in document',
-  'find.caseToggle': 'Ignore case',
+  'find.toggleReplace': 'Toggle replace bar',
+  'find.replaceLabel': 'Replace with',
+  'find.replaceNext': 'Replace',
+  'find.replaceAll': 'Replace All',
+  'find.invalid': 'Invalid regular expression',
+  'find.matchCase': 'Match Case',
+  'find.wholeWord': 'Match Whole Word',
+  'find.regexp': 'Use Regular Expression',
   'find.prev': 'Previous match',
   'find.next': 'Next match',
   'find.close': 'Close find',
+  'find.inSelection': 'Find in selection',
+  /** Count form (VSCode-style): {n} current index, {total} match total */
+  'find.count': '{n} of {total}',
+  'find.noResults': 'No results',
+  'find.sourceHit': 'Source match',
+  'find.sourceReadonly': 'Read-only',
+  'find.sourceLocation': 'Line {line}, column {column}',
+  /** #238 查找选项条（Ctrl+D 会话期间的迷你三按钮）容器可访问名称 */
+  'find.optionsBar': 'Find options',
 
   /** 外部修改冲突横幅 */
   'conflict.bannerText':
@@ -560,6 +583,9 @@ export const en = {
   'command.find.title': 'Find (in the editor)',
   'command.find.next.title': 'Next match',
   'command.find.previous.title': 'Previous match',
+  'command.find.replace.title': 'Replace (in the editor)',
+  'command.find.replaceNext.title': 'Replace next match',
+  'command.find.replaceAll.title': 'Replace all matches',
   'command.table.create.title': 'Create a table',
   'command.table.insertRowAbove.title': 'Table: insert row above',
   'command.table.insertRowBelow.title': 'Table: insert row below',
@@ -590,6 +616,9 @@ export const en = {
   'command.ui.outlinksToggle.title': 'Show or hide the outgoing links panel',
   /** #208 refresh embedded resources command (toolbar button and keybinding/command palette share it) */
   'command.editor.refresh.title': 'Refresh embedded resources',
+  /** #237 multi-cursor: add a cursor on the line above/below (live preview only; Alt+click adds at the pointer) */
+  'command.editor.addCursorAbove.title': 'Add cursor above',
+  'command.editor.addCursorBelow.title': 'Add cursor below',
   /** #221 preview the link at the cursor/focus (manual hover-popup open; keyboard enters the popup and Esc returns) */
   'command.ui.hoverPreviewLink.title': 'Preview the current link',
 
@@ -633,6 +662,61 @@ export const en = {
   'contextMenu.selectAll': 'Select all',
   /** 命令面板/快捷键页操作名（keybindings 注册表 titleKey） */
   'command.block.copyLink.title': 'Copy link to current block',
+
+  // ---- #239 中文分词词级移动（操作注册表 + 设置页分页 + 宿主通知）----
+  /** 词级移动四操作（默认 ctrl+方向 / alt+方向（mac 词移动惯例）；
+   *  Shift 变体单列操作——扩选注册） */
+  'command.wordMotion.cursorLeft.title': 'Move left by one word (CJK-aware)',
+  'command.wordMotion.cursorRight.title': 'Move right by one word (CJK-aware)',
+  'command.wordMotion.selectLeft.title': 'Select left by one word (CJK-aware)',
+  'command.wordMotion.selectRight.title': 'Select right by one word (CJK-aware)',
+  // ---- #238 select-next-occurrence family（操作注册表 titleKey） ----
+  'command.find.selectNext.title': 'Select Next Occurrence',
+  'command.find.selectPrevious.title': 'Select Previous Occurrence',
+  'command.find.skipCurrent.title': 'Skip and Select Next Occurrence',
+  'command.find.allOccurrences.title': 'Select All Occurrences',
+  /** 设置项：分词引擎（呈现归「中文分词」附加分页） */
+  'setting.wordSegmentEngine.title': 'Word segmentation engine',
+  'setting.wordSegmentEngine.description': 'Engine used to split continuous CJK text for word-wise Ctrl+Left/Right motion. Latin and digit runs always keep the built-in group semantics.',
+  'setting.wordSegmentEngineBuiltin': 'Built-in (Intl.Segmenter)',
+  'setting.wordSegmentEngineJieba': 'jieba-wasm (dictionary segmentation)',
+  /** 设置项：jieba 下载源 */
+  'setting.wordSegmentSource.title': 'jieba download source',
+  'setting.wordSegmentSource.description': 'Where the jieba-wasm resources are downloaded from. Resources are stored in the extension storage after a locked-version sha256 check; the download runs on the extension host (on the remote machine for Remote SSH).',
+  'setting.wordSegmentSourceJsdelivr': 'jsDelivr CDN (default)',
+  'setting.wordSegmentSourceNpmmirror': 'npmmirror (China mirror)',
+  'setting.wordSegmentSourceCustom': 'Custom URL',
+  /** 设置项：自定义下载源基址 */
+  'setting.wordSegmentCustomUrl.title': 'Custom source base URL',
+  'setting.wordSegmentCustomUrl.description': 'HTTPS directory URL used in the custom mode — the two locked files are fetched as baseURL/jieba_rs_wasm.js and baseURL/jieba_rs_wasm_bg.wasm. Plain HTTP is rejected.',
+  /** 设置页「中文分词」分页框架与资源管理 */
+  'wordSegment.title': 'Word Segmentation',
+  'wordSegment.description': 'Word-wise Ctrl+Left/Right motion for continuous CJK text, plus jieba resource management.',
+  'wordSegment.engineLabel': 'Segmentation engine',
+  'wordSegment.engineDescription': 'Controls how continuous Chinese text is split when moving by words. Switching takes effect immediately.',
+  'wordSegment.engineBuiltinHint': 'Browser built-in ICU segmentation; no download, always available.',
+  'wordSegment.engineJiebaHint': 'Better dictionary quality; requires a one-time resource download, falls back to the built-in engine when unavailable.',
+  'wordSegment.sourceLabel': 'Download source',
+  'wordSegment.sourceDescription': 'Applies only when the jieba engine is selected.',
+  'wordSegment.customUrlPlaceholder': 'https://example.com/jieba/',
+  'wordSegment.resourceLabel': 'jieba resources',
+  'wordSegment.resourceDescription': 'Downloaded on demand into the extension storage (about 4 MB); never bundled with the extension. Deleting falls back to the built-in engine.',
+  'wordSegment.installed': 'jieba-wasm {version} installed and verified.',
+  'wordSegment.notInstalled': 'Not installed. The built-in engine is active.',
+  'wordSegment.downloading': 'Downloading and verifying…',
+  'wordSegment.download': 'Download',
+  'wordSegment.deleteResource': 'Delete resources',
+  'wordSegment.noticeDownloaded': 'Downloaded and verified.',
+  'wordSegment.noticeDownloadFailed': 'Download failed: {detail}',
+  'wordSegment.noticeDeleted': 'Resources deleted; the built-in engine is active.',
+  'wordSegment.noticeDeleteFailed': 'Delete failed: {detail}',
+  'wordSegment.noticeLoadFailed': 'Failed to load the downloaded resources in the editor; the built-in engine is active. {detail}',
+  /** 宿主通知（下载/删除结果） */
+  'host.jiebaDownloaded': 'jieba-wasm {version} downloaded and verified. Word motion now uses jieba.',
+  'host.jiebaDownloadFailed': 'Failed to download jieba resources: {detail}. Word motion keeps using the built-in engine.',
+  'host.jiebaDeleted': 'jieba resources deleted. Word motion falls back to the built-in engine.',
+  'host.jiebaDeleteFailed': 'Failed to delete jieba resources: {detail}.',
+  'host.jiebaLoadFailed': 'Failed to load jieba in the editor: {detail}. The built-in engine stays active.',
 } as const satisfies Record<string, string>
 
 /** 字典键：点分扁平键，以本包为类型基准（编译期检查 t() 取词键） */

@@ -28,6 +28,7 @@ export interface ReadingRenderEnv {
   lineEnds: number[]
   /** 渲染相对 body 的 token 时：token.map 行号加上该基值（0 基全文行号） */
   baseLine?: number
+  references?: Record<string, unknown>
 }
 
 /** 任务标记行：缩进 + 列表标记 + 空白 + [xX ] + 空白。

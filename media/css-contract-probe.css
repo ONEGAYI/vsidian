@@ -478,3 +478,21 @@
 #app .vsidian-sidebar .vsidian-sidebar-toolbar .vsidian-outlinks-toggle {
   --vsidian-chrome-probe: rgb(244, 0, 1);
 }
+
+/* ---- 查找面板（#236；DOM 常驻、显隐由 -open/-replace-open 类控制，
+      display:none 不影响 --vsidian-chrome-probe 级联读取；本组两条与
+      chromeContract.ts 同步顺延 245 起） ---- */
+#app .vsidian-find {
+  --vsidian-chrome-probe: rgb(245, 0, 1);
+}
+
+#app .vsidian-find .vsidian-find-replace {
+  --vsidian-chrome-probe: rgb(246, 0, 1);
+}
+
+/* ---- #238 查找选项条（Ctrl+D 会话期间的迷你三按钮；DOM 常驻、显隐由
+      -open 类控制，display:none 不影响探针级联读取；与 chromeContract.ts
+      同步顺延 247） ---- */
+#app .vsidian-occurrence-bar {
+  --vsidian-chrome-probe: rgb(247, 0, 1);
+}

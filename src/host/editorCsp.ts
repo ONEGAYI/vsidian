@@ -14,19 +14,34 @@
 // - 远程样式表内的相对字体 URL 由浏览器按「该远程 CSS 的 URL」解析锚定
 //   （与本地片段的相对路径同一浏览器语义，无需扩展参与）。
 //
+// #239 变更（jieba wasm 按需加载）：
+// - connect-src 追加 `${cspSource}`——jieba-wasm 浏览器产物的 init(url)
+//   内部经 fetch 拉取 wasm（宿主已下载到 globalStorage 并 sha256 校验，经
+//   asWebviewUri 转入本资源域）。只放行 webview 自有资源域，不开
+//   https:/http: 外网——「CSP 不开外网」红线维持（下载在宿主侧 Node fetch
+//   执行，不经 webview）。
+// - script-src 追加 `'wasm-unsafe-eval'`（#241 评审修复）——jieba 的加载
+//   链路是动态 import 产物 + `WebAssembly.instantiate`，Chromium 在 CSP
+//   无 wasm-unsafe-eval/unsafe-eval 时直接拒绝 wasm 编译（资源下载与
+//   校验全正常、实例化必抛、恒回退 Intl.Segmenter）。该项只放行
+//   WebAssembly 编译/实例化，不放行 JS eval，也不改变脚本装载的 nonce
+//   门控；官方 webview 指南允许按需为 wasm 放开此源表达式。
+//
 // 不放宽的面（验收红线）：
 // - script-src 维持 nonce 门控——不因字体/样式需求扩大脚本权限，不放
-//   https:/unsafe-inline/unsafe-eval；
+//   https:/unsafe-inline/unsafe-eval（'wasm-unsafe-eval' 是 #239 jieba
+//   wasm 实例化的最小必要放行，仅覆盖 WebAssembly，见文件头）；
 // - 明文 `http:` 源不放行（样式与字体都只认 https）；
-// - 无 connect-src（default-src 'none' 兜底）——webview JS 不经 fetch/XHR
-//   拉取远程资源，全部远程装载走浏览器原生管线，CSP 逐源把关。
+// - connect-src 仅 cspSource（自有资源域）——除 jieba wasm 的装载外，
+//   webview JS 不经 fetch/XHR 拉取任何远程资源，其余远程装载走浏览器
+//   原生管线，CSP 逐源把关。
 export function buildEditorCsp(cspSource: string, nonce: string): string {
   return [
     `default-src 'none'`,
     // data: 供 #111 图表弹窗 PNG 光栅化（自有 mermaid SVG 经 data URL
     // 装载到 canvas；位图不可执行，风险面限于解码）；https: 为既有放行
     `img-src ${cspSource} https: data:`,
-    `script-src ${cspSource} 'nonce-${nonce}'`,
+    `script-src ${cspSource} 'nonce-${nonce}' 'wasm-unsafe-eval'`,
     // 'unsafe-inline' 仅放行样式：CodeMirror 6（style-mod）在运行时向
     // document 注入 <style> 元素承载 baseTheme 与扩展样式，不放行则整个
     // CM6 注入样式表被拒（PR #37 P0 实证）。脚本仍由 nonce 门控。
@@ -34,5 +49,7 @@ export function buildEditorCsp(cspSource: string, nonce: string): string {
     `style-src ${cspSource} 'unsafe-inline' https:`,
     // https: 为 #130 远程 @font-face 字体（CORS 由字体服务侧回应，见文件头）
     `font-src ${cspSource} https:`,
+    // #239 jieba wasm：init(url) 的 fetch 只指向 cspSource 资源域
+    `connect-src ${cspSource}`,
   ].join('; ')
 }

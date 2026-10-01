@@ -326,6 +326,40 @@ describe('isWebviewToHost', () => {
         },
       }),
     ).toBe(true)
+    // #237 绘制光标色：字符串或 null 合法、缺省合法（多光标关/元素不在场）
+    expect(isWebviewToHost({ ...base, paint: {
+      textVisible: true, scrollerDisplay: 'flex', gutterUserSelect: 'none', darkTheme: false, caretColor: null,
+      readingFindSource: { visible: 'yes', text: '| a |', current: '|', background: 'rgb(20, 120, 200)' },
+    } })).toBe(false)
+    expect(isWebviewToHost({ ...base, paint: {
+      textVisible: true, scrollerDisplay: 'flex', gutterUserSelect: 'none', darkTheme: false, caretColor: null,
+      readingFindSource: { visible: true, text: '| a |', current: '|', background: 'rgb(20, 120, 200)' },
+    } })).toBe(true)
+    expect(
+      isWebviewToHost({
+        ...base,
+        paint: {
+          textVisible: true,
+          scrollerDisplay: 'flex',
+          gutterUserSelect: 'none',
+          darkTheme: true,
+          caretColor: 'transparent',
+          drawnCursorColor: 'rgb(221, 221, 221)',
+        },
+      }),
+    ).toBe(true)
+    expect(
+      isWebviewToHost({
+        ...base,
+        paint: { textVisible: true, scrollerDisplay: 'flex', gutterUserSelect: 'none', darkTheme: false, caretColor: null, drawnCursorColor: null },
+      }),
+    ).toBe(true)
+    expect(
+      isWebviewToHost({
+        ...base,
+        paint: { textVisible: true, scrollerDisplay: 'flex', gutterUserSelect: 'none', darkTheme: false, caretColor: null, drawnCursorColor: 0 },
+      }),
+    ).toBe(false)
     // 非法：textVisible 非布尔 / scrollerDisplay 非字符串非 null / darkTheme 非布尔 / caretColor 非字符串非 null
     expect(
       isWebviewToHost({ ...base, paint: { textVisible: 1, scrollerDisplay: 'flex', gutterUserSelect: 'none', darkTheme: false, caretColor: null } }),
@@ -933,6 +967,15 @@ describe('isWebviewToHost', () => {
     expect(isHostToWebview({ kind: 'outline.test.renameKey', text: 'x', key: 'tab' })).toBe(false)
     expect(isHostToWebview({ kind: 'outline.test.renameKey', text: 7, key: 'enter' })).toBe(false)
     expect(isHostToWebview({ kind: 'outline.test.renameKey', key: 'enter' })).toBe(false)
+  })
+
+  it('find.test.toggle 测试钩子消息校验（#14/#236）：三开关键枚举', () => {
+    expect(isHostToWebview({ kind: 'find.test.toggle', key: 'matchCase' })).toBe(true)
+    expect(isHostToWebview({ kind: 'find.test.toggle', key: 'wholeWord' })).toBe(true)
+    expect(isHostToWebview({ kind: 'find.test.toggle', key: 'regexp' })).toBe(true)
+    expect(isHostToWebview({ kind: 'find.test.toggle', key: 'case' })).toBe(false)
+    expect(isHostToWebview({ kind: 'find.test.toggle', key: 7 })).toBe(false)
+    expect(isHostToWebview({ kind: 'find.test.toggle' })).toBe(false)
   })
 
   it('outline.test.drag 测试钩子消息校验（#70）：非负索引 + 三态 + 三动作', () => {

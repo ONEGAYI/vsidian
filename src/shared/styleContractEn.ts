@@ -2,7 +2,7 @@
 // 域全量）：设置页「样式参考」条目文档字段的英文版单一事实源——中文清单
 // （./styleContract）保持权威基准不动，本模块按条目 id 索引、字段级覆盖；
 // 取词规则为**英文优先、条目或字段缺失回退中文基准**（规格
-// docs/specs/style-reference-i18n.md）。141 条（content 78 + chrome 63）
+// docs/specs/style-reference-i18n.md）。152 条（content 83 + chrome 69）
 // 已全量覆盖（域级完整性由 test/unit/styleContractEn.test.ts 钉住）。
 //
 // 字段分级（规格钉死）：
@@ -762,8 +762,9 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
   // ---- 代码块卡片（code-card，10 条；#78–#84）----
   'live-code-card-line': {
     purpose:
-      'The line-level class covered by cards: in live view the source line level (including the cleared fence lines and all code lines, carrying the card background); in reading view the in-card line spans (same class name as live, same convention across views); runs in parallel with the content-domain live-code-line (both are present when live cards are enabled).',
-    dom: 'Live: .cm-line line elements (the fence range with cards enabled); reading: span.vsidian-reading-code-line inside code.',
+      'Card lines carry the background on live source lines, including fence lines, and reading code-line spans. Live code ranges also carry .vsidian-code-selection: with drawSelection enabled, the text layer paints focused or inactive selection colors above opaque code backgrounds. With multicursor disabled, native selection rendering remains in use.',
+    states: 'Card lines persist; .vsidian-code-selection is emitted only where nonempty live selections intersect fenced code, including multiple ranges. Text-layer painting is gated by .cm-editor:has(.cm-selectionLayer).',
+    dom: 'Live: .cm-line elements in card-enabled fences, with span.vsidian-code-selection around selected code text; reading: span.vsidian-reading-code-line inside code.',
     obsidian: {
       counterpart:
         '.HyperMD-codeblock (the line family; the content-domain alias is attached to .vsidian-code-line, and the card line class is a vsidian-specific extension)',
@@ -1072,6 +1073,50 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
       'Ever-present (the embed lines inside referenced content); click navigates, with no hover-popup stacking (the embed content domain stops mouseover/mouseout propagation).',
     dom: 'An <a class="vsidian-wikilink vsidian-embed-ref" href="raw target"> inside the embed block html (the href is the raw text before |, same convention as the reading wikilink anchor); when the parent-document embed block mounts it is replaced wholesale by the embed card (the placeholder line never appears there).',
     obsidian: { counterpart: '(Obsidian expands embeds recursively; there is no placeholder form)' },
+  },
+  'find-panel': {
+    purpose:
+      'Floating find panel over the editing area (three-toggle panel since #236, powered by the @codemirror/search engine in external-drive mode): column layout — main row (input, the case/whole-word/regexp toggles, the "n of total / No results" counter, previous/next/close — same order as the native VSCode widget) plus the left-edge replace-bar expander. The three toggles are the find-options single source of truth (shared/findOptions; also consumed by #238 "select next same word") and persist per workspace across sessions; the panel is available in both live and reading views (reading keeps block-level hits and positioning).',
+    states:
+      'The panel DOM is always present; visibility is controlled by .vsidian-find-open (display:none when closed, so probes are unaffected). A lit toggle means the option is on (e.g. Aa lit when match-case is enabled). An invalid regexp shows a red border on the input container (the invalid class marks the input as the state source and :has lifts the coloring onto the container; an empty query is not flagged and shows no red; no crash, counter reads "No results"). An empty query collapses the whole counter area via the -hidden class (display:none — nothing searched yet reserves no "n of total" blank, #241 acceptance revision). Find-in-selection (#241 asset wiring, the native ☰): a panel-local non-persisted state (reset on panel close or entering reading view) — the button is disabled without a user-selection anchor (grayed, hover unresponsive); when on it joins the lit family and matches/navigation/replacement are confined to the range (the range maps through edits and follows user reselection), with the range marked in the body text by a .vsidian-find-selection-range low-emphasis background mark (inactive-selection color, may span lines). Open/close and toggle interactions are verified by the browser suite along behavior paths.',
+    dom: 'Attached inside the editor container (position:relative containing block), below #app; buttons are real <button type="button"> elements (aria-pressed/aria-expanded follow state; aria-label/title from the find.* i18n entries). Since #241 the navigate/close/replace buttons are icon-shaped — the button body shows its light- or dark-theme SVG icon, while the words live solely in aria-label and the hover title; the input border/background/focus ring live on .vsidian-find-inputwrap, which embeds the three toggles at its right edge like the native widget.',
+    obsidian: { counterpart: 'None (the Obsidian find widget is an application-level part, not a document styling surface)' },
+  },
+  'find-options-bar': {
+    purpose:
+      'The find options bar (#238): a mini floating strip present while a "select next occurrence" session is active — just the three toggle buttons, no search box and no counter (user decision: every Ctrl+D press opens it directly). The button states share the main panel toggle memory (shared/findOptions; aria-pressed in sync); clicking toggles and rebuilds the session with the new options. Non-modal: it never takes editor focus (button mousedown is preventDefault-ed to keep focus), never claims the popup mutex slot, and Esc is consumed once after the find panel (closes the bar only, leaving selections intact). While the main find panel is open it does not appear (the panel toggle buttons blink via .vsidian-find-flash instead); the session end (external selection change / focus loss / Esc / mode switch) fades it out.',
+    states:
+      'The bar DOM is always present; visibility is controlled by .vsidian-occurrence-bar-open (display:none by default, so probes are unaffected). A lit toggle means the option is on (same lit language as the main panel -active states). The panel toggle blink state is .vsidian-find-flash (a 0.45s opacity pulse animation; it lives on the find-panel buttons, not on the selectors of this entry).',
+    dom: 'Attached inside the editor container (same positioning containing block and top-right corner as .vsidian-find; the two appear exclusively); buttons are real <button type="button"> elements (aria-pressed follows state; aria-label/title reuse the find.matchCase / find.wholeWord / find.regexp entries, the container aria-label uses find.optionsBar).',
+    obsidian: { counterpart: 'None (the Obsidian Ctrl+D option hint is an application-level part, not a document styling surface)' },
+  },
+  'find-panel-replace': {
+    purpose:
+      'The expandable replace bar of the find panel (#236): collapsed by default, expanded via the left-edge toggle (find-panel entry, .vsidian-find-toggle) or Ctrl+H (the findReplace operation); "Replace" replaces the current match and moves to the next one, "Replace All" replaces the whole batch — both are explicit write operations (a single CM6 transaction through the standard write-back chain; one edit.request = one host undo). Replacing is a live-editing capability: in reading view the panel works but the replace bar never expands.',
+    states:
+      'The replace-row DOM is always present; visibility is controlled by .vsidian-find-replace-open (display:none by default; permanently collapsed in reading view). The expanded state is observable via FindSessionProbe.replaceOpen.',
+    dom: 'Third section inside the panel (.vsidian-find); Enter in the input is a panel-local key (replace next); buttons are real <button type="button"> elements (icon-shaped since #241 — the words live in aria-label/title, i18n entries find.replaceNext / find.replaceAll).',
+    obsidian: { counterpart: 'None (the Obsidian replace widget is application-level)' },
+  },
+  'find-match-highlight': {
+    purpose:
+      'Matches come from the @codemirror/search engine and are counted and located in the full source text. Live uses direct current-match and viewport match decorations. Reading maps source positions to visible text in mounted blocks: all hits are pale yellow and the current hit orange, including within callouts and blockquotes. Hidden link targets, image attributes, and rendered formula source still count without highlighting unrelated identical visible text. The current block retains .vsidian-reading-find-hit for existing snippets; default rendering adds no block tint or side bar.',
+    states:
+      'Interactive-state decoration (present only while a find session is open and has hits) — excluded from static probes; hit counting, the current index and positioning are verified by the integration find cases along behavior paths.',
+    dom: 'Live: inline decorations inside #app .cm-editor .cm-content; reading: spans around matching text inside #app .vsidian-view-reading. The current block retains .vsidian-reading-block.vsidian-reading-find-hit.',
+    obsidian: { counterpart: 'None (Obsidian match highlighting is application-level)' },
+  },
+  'var-find-highlight': {
+    purpose:
+      'Four find-highlight variables: --match-background colors all matches (semi-transparent yellow by default); --match-current-background colors the current match (orange by default, shared by both views); --match-current-outline sets its outline. --hit-block-background remains the reading current-block background entry for existing snippets, transparent by default and still effective when explicitly set.',
+    dom: 'Consumed by the live match decorations and the reading hit-block rules; defaults are inlined as var() fallbacks in the rules (no root value defined on #app — a snippet overriding at :root takes effect globally).',
+    obsidian: { counterpart: 'None (Obsidian highlight colors are application settings, not CSS variables)' },
+  },
+  'reading-find-source': {
+    purpose: 'Reading find feedback for hidden source: when the current match cannot be fully mapped to visible text, keep the rendered content and show its starting source line. Table delimiters, hidden link targets, formulas and comments remain locatable without switching modes. Match counts and order stay unchanged. Source is plain text with no editing or writeback path.',
+    states: 'Interactive state, mounted only for hidden or partially hidden current hits. Removed on visible hits, closing find, switching to Live, or disposal. Offscreen anchors hide it; virtual remounts restore it, and resizing repositions it. Fixed positioning leaves paragraph positions, block heights and scroll height unchanged; it never steals find focus, avoids the find panel and flips or shrinks at viewport edges. Long lines show about 320 UTF-16 units near the hit without splitting emoji. Multiline matches show the starting line, with trailing LF represented as \\n.',
+    dom: 'Inside #app but outside the reading scroll container. An aside[role=region] contains a header with source-hit, source line/column and read-only labels, followed by pre > code with precise span highlights. No input, textarea, contenteditable or new keyboard action; existing find navigation and close keys apply.',
+    obsidian: { counterpart: 'None (Vsidian reading find source feedback)' },
   },
 }
 

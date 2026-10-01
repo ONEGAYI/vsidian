@@ -470,6 +470,11 @@ export class DocumentSession {
           panel.port.send({ kind: 'settings.snapshot', values: panel.port.requestSettings() })
         }
         return Promise.resolve()
+      case 'findOptions.get':
+      case 'findOptions.set':
+        // #236 查找选项：provider 层拦截消费（持久化与广播在 provider
+        // 域）；绕过面板入口则无副作用
+        return Promise.resolve()
       case 'diagram.export': {
         // #111 图表导出：只读交互（不写文档、不入撤销栈），暂停态同样
         // 放行（与 clipboard.write 同口径）；结果回来源面板。会话守卫
@@ -546,6 +551,17 @@ export class DocumentSession {
       case 'index.rebuild':
       case 'index.cancel':
         // #198 索引维护只在设置页 webview 链路（settingsPage 模块）处理，
+        // 编辑器面板不会发出；到达此处无副作用（保持协议穷尽）
+        return Promise.resolve()
+      case 'wordSegment.get':
+      case 'wordSegment.loadResult':
+        // #239 分词资源状态：wordSegment.get 的应答在 provider 层处理
+        //（资源 URI 逐面板经 asWebviewUri 构造）；loadResult 由 provider
+        // 转发宿主通知。此处仅保持协议穷尽
+        return Promise.resolve()
+      case 'wordSegment.download':
+      case 'wordSegment.delete':
+        // #239 下载/删除只在设置页 webview 链路（settingsPage 模块）处理，
         // 编辑器面板不会发出；到达此处无副作用（保持协议穷尽）
         return Promise.resolve()
       case 'keybindings.get':

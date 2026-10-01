@@ -23,6 +23,8 @@ import { runStyleReferenceExport } from './host/styleReferenceExport'
 import { createVaultIndexService, currentRootRefs } from './host/vaultIndexWiring'
 import { installRenameRefUpdater } from './host/vaultRenameWiring'
 import { createIndexMaintenance, createIndexSettingsStore, initialExcludePatterns } from './host/vaultIndexMaintenance'
+import { createJiebaWiring } from './host/jiebaResourceWiring'
+import { createFindOptionsStore } from './host/findOptionsStore'
 import { t } from './shared/i18n'
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -74,6 +76,10 @@ export function activate(context: vscode.ExtensionContext): void {
   // #198：构造时读入持久化排除模式（无有效存储回落默认值）
   const vaultIndex = createVaultIndexService(context, initialExcludePatterns(indexStore))
   const indexMaintenance = createIndexMaintenance(indexStore, vaultIndex)
+  // #239 分词资源（jieba-wasm 按需下载）：宿主侧下载存 globalStorage
+  //（Remote SSH 在远程机执行），锁定版本 + sha256 清单校验（清单随 VSIX
+  // 发布、资源本体不进包体）；状态变更 → 设置页推送与用户通知
+  const jieba = createJiebaWiring(context, settingsService)
   const settingsPage = createSettingsPage(
     context,
     settingsService,
@@ -83,13 +89,19 @@ export function activate(context: vscode.ExtensionContext): void {
     () => runStyleReferenceExport(context),
     // #198 索引维护：设置页按钮与宿主命令共用同一 wiring
     indexMaintenance,
+    // #239 分词资源：设置页「中文分词」分页的状态与下载管理
+    jieba,
   )
   indexMaintenance.onStateChanged(() => settingsPage.notifyIndexChanged())
+  jieba.service.onStateChanged(() => settingsPage.notifyWordSegmentChanged())
   const provider = createTextEditorProvider(context, {
     service: settingsService,
     keybindings: keybindingService,
     page: settingsPage,
-  }, snippetService, vaultIndex, indexMaintenance)
+    // #236 查找选项持久化：workspaceState（工作区级记忆——对齐 VSCode
+    // storageService WORKSPACE 级口径；各工作区独立记忆）
+    findOptions: createFindOptionsStore(context.workspaceState),
+  }, snippetService, vaultIndex, indexMaintenance, jieba)
   void snippetService.initialize()
   if (vaultIndex) {
     // 后台初始化（不阻塞激活）；#198 根增删与窗口焦点由下方订阅接线

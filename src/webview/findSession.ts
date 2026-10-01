@@ -1,4 +1,5 @@
-// 编辑区查找：匹配计算与 Live 侧装饰（工单 #14）。
+// 编辑区查找：匹配计算与 Live 侧装饰（工单 #14；#236 起匹配引擎换
+// @codemirror/search 的 SearchQuery，外部驱动装配见 syncController）。
 //
 // 架构（依据 ADR-0005 / mvp.md「查找与跳转必须定位屏外内容」）：
 // - 匹配基于 webview 全文文本模型（CM6 doc 的字符串形态）计算——纯数据，
@@ -6,12 +7,22 @@
 // - 不为查找常驻全文 DOM：匹配数是数据不是 DOM；渲染高亮只做视口内——
 //   当前匹配为直接装饰（StateField，保证滚动后始终可见），全部匹配为
 //   间接装饰（ViewPlugin 按 visibleRanges 过滤，与 liveDecorations 同构）
-// - 码点语义：匹配起止不得落在代理对中间（emoji 安全）；坐标为 LF 全文
-//   UTF-16 code unit offset（与协议 SerChange / CM6 同构）
-// - 大小写语义固定：默认区分大小写；大小写不敏感是显式选项（UI 切换），
-//   不做改变区间长度的跨形态折叠（'ß'≠'SS'）
-// - 查找是纯只读操作：会话不 dispatch 文本变更、不发出站消息（#14 契约）
-import { RangeSet, StateEffect, StateField, type Extension, type Range } from '@codemirror/state'
+// - 引擎（#236）：SearchQuery 承载三开关（caseSensitive=matchCase /
+//   wholeWord / regexp）+ literal 字面量口径（\n 不转义，对齐 VSCode）；
+//   官方面板不装配（外部驱动），高亮经下方双轨自绘——search() 扩展的
+//   高亮仅在官方面板存在时渲染，不与其叠加
+// - 码点语义（引擎之上包裹层）：匹配起止不得落在代理对中间（emoji 安全）；
+//   坐标为 LF 全文 UTF-16 code unit offset（与协议 SerChange / CM6 同构）
+// - 成型头区排除（#236 批次边界）：搜索不进入 frontmatter 成型头区——
+//   excludeEnd 之前的匹配不进结果（成型判定在调用方，见 syncController）
+// - 替换匹配（#241 评审修复 P0-2）：替换与查找同源——同一引擎迭代内核
+//   （iterateEngineMatches）产出排除后的匹配集，官方 replaceNext/
+//   replaceAll 命令因全文扫描会改写头区而退役；$n 组替换展开复用官方
+//   引擎的内部 getReplacement（engineExpander）
+// - 查找是纯只读操作：会话不 dispatch 文本变更、不发出站消息（#14 契约，
+//   #236 修订：替换为显式写操作，由 syncController 经标准出站链路执行，
+//   不在本模块）
+import { RangeSet, StateEffect, StateField, Text, type Extension, type Range } from '@codemirror/state'
 import {
   Decoration,
   EditorView,
@@ -19,6 +30,8 @@ import {
   type DecorationSet,
   type ViewUpdate,
 } from '@codemirror/view'
+import { SearchQuery } from '@codemirror/search'
+import type { FindOptions } from '../shared/findOptions'
 
 /** 一个匹配：全文 UTF-16 code unit 的 [from, to) 区间 */
 export interface FindMatch {
@@ -26,19 +39,50 @@ export interface FindMatch {
   to: number
 }
 
-/** 查找稳定类名（ADR-0004 稳定样式入口；`vsidian-` 前缀） */
+/** 查找稳定类名（ADR-0004 稳定样式入口；`vsidian-` 前缀；契约登记见
+ *  shared/styleContract 的 chrome-find 类目） */
 export const FIND_CLASS_NAMES = {
   /** 浮动查找面板容器（webview 内，非 VSCode 原生 find） */
   panel: 'vsidian-find',
   open: 'vsidian-find-open',
+  /** 主行（查找输入 + 计数 + 三开关 + 导航）：面板 column 布局的行容器 */
+  row: 'vsidian-find-row',
+  /** 替换栏展开/收起切换按钮（面板左缘 v 形） */
+  toggle: 'vsidian-find-toggle',
+  /** 替换行容器（open 类控制显隐） */
+  replace: 'vsidian-find-replace',
+  replaceOpen: 'vsidian-find-replace-open',
+  replaceInput: 'vsidian-find-replace-input',
+  replaceNext: 'vsidian-find-replace-next',
+  replaceAll: 'vsidian-find-replace-all',
   input: 'vsidian-find-input',
+  /** 主输入容器（#241 对齐原生：边框/背景挂容器，三开关嵌入右缘） */
+  inputWrap: 'vsidian-find-inputwrap',
+  /** 非法正则反馈（输入框红边；计数区同时显示空态） */
+  inputInvalid: 'vsidian-find-input-invalid',
   count: 'vsidian-find-count',
   countEmpty: 'vsidian-find-count-empty',
+  /** 空查询收起态（未搜索不预留「当前/总数」占位，display:none） */
+  countHidden: 'vsidian-find-count-hidden',
+  /** 在选定内容中查找（#241 资产接线：VSCode ☰）：范围开关按钮与点亮态，
+   *  范围淡底 mark 见 selectionRange */
+  inSelection: 'vsidian-find-in-selection',
+  inSelectionActive: 'vsidian-find-in-selection-active',
+  /** 查找范围淡底 mark（开启 inSelection 时标记选区范围） */
+  selectionRange: 'vsidian-find-selection-range',
+  /** 三开关：点亮（*-active）= 该选项开启 */
   caseToggle: 'vsidian-find-case',
   caseActive: 'vsidian-find-case-active',
+  wordToggle: 'vsidian-find-word',
+  wordActive: 'vsidian-find-word-active',
+  regexpToggle: 'vsidian-find-regexp',
+  regexpActive: 'vsidian-find-regexp-active',
   prev: 'vsidian-find-prev',
   next: 'vsidian-find-next',
   close: 'vsidian-find-close',
+  /** 三开关闪烁态（#238：主面板打开时 Ctrl+D 的会话生效档与面板显示
+   *  脱节的提示——VSCode highlightFindOptions 语义，CSS 动画短促在场） */
+  flash: 'vsidian-find-flash',
   /** Live 全部匹配装饰（视口内间接装饰） */
   match: 'vsidian-find-match',
   /** Live 当前匹配装饰（直接装饰） */
@@ -47,7 +91,7 @@ export const FIND_CLASS_NAMES = {
   readingHit: 'vsidian-reading-find-hit',
 } as const
 
-// ---- 码点边界工具 ----
+// ---- 码点边界工具（引擎输出之上的包裹层过滤） ----
 
 function isHighSurrogate(code: number): boolean {
   return code >= 0xd800 && code <= 0xdbff
@@ -65,73 +109,177 @@ function isCodePointBoundary(text: string, p: number): boolean {
   return !(isHighSurrogate(text.charCodeAt(p - 1)) && isLowSurrogate(text.charCodeAt(p)))
 }
 
-/** 正则元字符转义（字面量查找语义） */
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+/** 由三开关构造引擎查询（literal=true：字符串模式按字面量处理，\n 不
+ *  转义——VSCode 口径，转义开关不对用户面暴露）；replace 由调用方补充 */
+export function buildSearchQuery(
+  search: string,
+  options: Pick<FindOptions, 'matchCase' | 'wholeWord' | 'regexp'>,
+  replace = '',
+): SearchQuery {
+  return new SearchQuery({
+    search,
+    replace,
+    caseSensitive: options.matchCase,
+    wholeWord: options.wholeWord,
+    regexp: options.regexp,
+    literal: true,
+  })
+}
+
+/** 引擎 cursor 原始值（运行时面）。d.ts 只声明 {from, to}；两条路径的
+ *  实际值都携带 precise（归一化劈开标记，官方 replaceNext/replaceAll 据
+ *  此跳过不可安全整段改写的命中），regexp 路径额外携带 match 数组——
+ *  官方展开器 getReplacement 的 $n 组语义消费它 */
+export interface EngineMatchValue {
+  from: number
+  to: number
+  precise: boolean
+  match?: RegExpExecArray
+}
+
+/** 引擎内部 query 的替换展开面（SearchQuery.create() 的内部对象上的
+ *  getReplacement——d.ts 未声明、运行时稳定；依赖版本精确锁定，非 ^ 浮
+ *  动）：literal 路径返回 unquote 后的替换串（忽略命中），regexp 路径按
+ *  官方语义展开 $&/$$/$1..$n。复用官方展开器而非自抄一份，保证与既有
+ *  官方命令的组替换语义逐字节一致 */
+interface EngineQueryExpander {
+  getReplacement(result: { match?: RegExpExecArray }): string
+}
+
+function engineExpander(query: SearchQuery): EngineQueryExpander {
+  return (query as unknown as { create(): EngineQueryExpander }).create()
+}
+
+/** 查询有效性（空查询与非法正则都无效：无匹配、命令不执行） */
+export function isFindQueryValid(search: string, options: Pick<FindOptions, 'regexp'>): boolean {
+  if (search === '') {
+    return false
+  }
+  if (!options.regexp) {
+    return true
+  }
+  try {
+    // 构造成功即合法（test('') 对 '.' 等模式返回 false，不能作判据）
+    void new RegExp(search)
+    return true
+  } catch {
+    return false
+  }
 }
 
 /**
- * 全文匹配计算（纯函数）：
- * - 空查询 / 无命中返回 []
- * - 从左到右、非重叠（下一轮从当前匹配 to 起扫）
- * - 匹配起止必须在码点边界上：命中落在代理对中间时丢弃该命中并前进
- *   一个单元继续扫（emoji 安全；行为由测试锁定）
- * - caseSensitive=false 时按 'i' 正则做大小写不敏感匹配，区间长度与
- *   原文本一致（不做 'ß'/'SS' 类跨形态折叠）
+ * 引擎迭代内核（computeFindMatches 与替换匹配共用的单一事实源）：
+ * - 空查询 / 非法正则 / 无命中返回 []
+ * - 从左到右、非重叠（引擎 next 语义）
+ * - 匹配起止必须在码点边界上：引擎命中劈开代理对时丢弃（防御层——
+ *   引擎的字符串与 u-flag 正则路径自身码点安全，此过滤兜底自定义
+ *   pattern 的边缘形态；行为由测试锁定）
+ * - excludeEnd（#236 成型头区排除）：起点 < excludeEnd 的命中不进结果
+ */
+function iterateEngineMatches(
+  text: string,
+  query: string,
+  options: FindOptions,
+  excludeEnd = 0,
+): EngineMatchValue[] {
+  // 长度快速排除只对字面量成立（查询长于文本必无命中）；regexp 模式的
+  // 模式长度与命中长度无关（(\d+)-(\d+) 可命中更短文本）——此前仅查找侧
+  // 消费时被长模式短文档的边缘掩盖，#241 替换与查找同源后必须放开，
+  // 否则面板计数与替换目标集脱节（计数 0 仍有可替换命中）
+  if (query === '' || (!options.regexp && query.length > text.length) || !isFindQueryValid(query, options)) {
+    return []
+  }
+  const engine = buildSearchQuery(query, options)
+  if (!engine.valid) {
+    return []
+  }
+  const doc = Text.of(text.split('\n'))
+  const out: EngineMatchValue[] = []
+  const cursor = engine.getCursor(doc) as Iterator<EngineMatchValue>
+  for (let step = cursor.next(); !step.done; step = cursor.next()) {
+    const { from, to } = step.value
+    if (from < excludeEnd) {
+      continue
+    }
+    if (isCodePointBoundary(text, from) && isCodePointBoundary(text, to)) {
+      out.push(step.value)
+    }
+  }
+  return out
+}
+
+/**
+ * 全文匹配计算（纯函数，引擎 = @codemirror/search 的 SearchQuery）：
+ * 语义契约见 iterateEngineMatches；本函数是查找侧（计数/高亮/导航）的
+ * {from, to} 投影
  */
 export function computeFindMatches(
   text: string,
   query: string,
-  caseSensitive: boolean,
+  options: FindOptions,
+  excludeEnd = 0,
 ): FindMatch[] {
-  if (query === '' || query.length > text.length) {
+  return iterateEngineMatches(text, query, options, excludeEnd).map(({ from, to }) => ({ from, to }))
+}
+
+/** 替换用匹配（#241 评审修复 P0-2）：与查找同源（同引擎、同头区排除、
+ *  同码点过滤），额外携带 precise 与预展开的替换文本 */
+export interface FindReplaceMatch {
+  from: number
+  to: number
+  /** 官方引擎的归一化安全标记：false 的命中不整段改写（官方 replaceAll
+   *  同款过滤；正常文本恒 true，仅大小写归一化膨胀字符的边缘形态为
+   *  false——面板计数在这种边缘下可能大于实际替换数，与官方引擎一致） */
+  precise: boolean
+  /** 经官方展开器预展开的替换文本（regexp 路径含 $n 组展开） */
+  replacement: string
+}
+
+/**
+ * 替换匹配计算（纯函数）：iterateEngineMatches 内核 + 官方展开器（$n
+ * 组语义复用 @codemirror/search 内部 getReplacement，见 engineExpander）
+ */
+export function computeFindReplaceMatches(
+  text: string,
+  query: string,
+  options: FindOptions,
+  replace: string,
+  excludeEnd = 0,
+): FindReplaceMatch[] {
+  const values = iterateEngineMatches(text, query, options, excludeEnd)
+  if (values.length === 0) {
     return []
   }
-  const out: FindMatch[] = []
-  if (caseSensitive) {
-    // 快路径：原生 indexOf（UTF-16 精确匹配）+ 边界校验
-    let at = text.indexOf(query)
-    while (at !== -1) {
-      if (isCodePointBoundary(text, at) && isCodePointBoundary(text, at + query.length)) {
-        out.push({ from: at, to: at + query.length })
-        at = text.indexOf(query, at + query.length)
-      } else {
-        // 命中劈开代理对：丢弃，前进一个单元重扫
-        at = text.indexOf(query, at + 1)
-      }
-    }
-    return out
+  const expander = engineExpander(buildSearchQuery(query, options, replace))
+  return values.map((v) => ({ from: v.from, to: v.to, precise: v.precise, replacement: expander.getReplacement(v) }))
+}
+
+/** replaceNext 的推进计划（纯函数，官方 replaceNext 命令的推进语义在
+ *  排除后匹配序列上的同构实现）：
+ *  - 无匹配：两者皆 -1（命令不执行）
+ *  - 参考位置（selFrom）起首个命中不精确（归一化劈开）→ 不替换，选区
+ *    移到序列中的下一处（官方 !precise 分支的单步推进）
+ *  - 命中恰被当前选区覆盖 → 替换它，选区移到下一处（含 wrap）
+ *  - 其余（命中未被选区覆盖）→ 不替换，选区移到该命中（官方「先选中
+ *    再按一次替换」的两段式手感）
+ */
+export function planReplaceNext(
+  matches: ReadonlyArray<{ from: number; to: number; precise: boolean }>,
+  selFrom: number,
+  selTo: number,
+): { replaceIndex: number; selectIndex: number } {
+  const n = matches.length
+  if (n === 0) {
+    return { replaceIndex: -1, selectIndex: -1 }
   }
-  // 大小写不敏感：'iu' 正则按码点迭代（构造失败——如查询含孤代理——
-  // 退化为小写化 indexOf 路径，保持可用）
-  try {
-    const re = new RegExp(escapeRegExp(query), 'giu')
-    for (let m = re.exec(text); m !== null; m = re.exec(text)) {
-      const from = m.index
-      const to = from + m[0].length
-      if (isCodePointBoundary(text, from) && isCodePointBoundary(text, to)) {
-        out.push({ from, to })
-      }
-      re.lastIndex = to
-    }
-    return out
-  } catch {
-    const lowerText = text.toLowerCase()
-    const lowerQuery = query.toLowerCase()
-    if (lowerQuery === '') {
-      return []
-    }
-    let at = lowerText.indexOf(lowerQuery)
-    while (at !== -1) {
-      if (isCodePointBoundary(text, at) && isCodePointBoundary(text, at + query.length)) {
-        out.push({ from: at, to: at + query.length })
-        at = lowerText.indexOf(lowerQuery, at + query.length)
-      } else {
-        at = lowerText.indexOf(lowerQuery, at + 1)
-      }
-    }
-    return out
+  const i = matchIndexFrom(matches, selFrom)
+  if (!matches[i]!.precise) {
+    return { replaceIndex: -1, selectIndex: (i + 1) % n }
   }
+  if (matches[i]!.from === selFrom && matches[i]!.to === selTo) {
+    return { replaceIndex: i, selectIndex: (i + 1) % n }
+  }
+  return { replaceIndex: -1, selectIndex: i }
 }
 
 /**
@@ -162,11 +310,17 @@ export interface FindDecoState {
   decos: DecorationSet
 }
 
-/** 匹配集替换效应（整组替换；空集即清空装饰） */
-export const setFindMatches = StateEffect.define<{ matches: readonly FindMatch[]; index: number }>()
+/** 匹配集替换效应（整组替换；空集即清空装饰）。#241 资产接线起携带
+ *  selectionRange：「在选定内容中查找」开启时的范围淡底 mark（null 无） */
+export const setFindMatches = StateEffect.define<{
+  matches: readonly FindMatch[]
+  index: number
+  selectionRange?: { from: number; to: number } | null
+}>()
 
 const currentMatchDeco = Decoration.mark({ class: FIND_CLASS_NAMES.matchCurrent })
 const allMatchDeco = Decoration.mark({ class: FIND_CLASS_NAMES.match })
+const selectionRangeDeco = Decoration.mark({ class: FIND_CLASS_NAMES.selectionRange })
 
 /** 当前匹配 mark（跨行匹配不可能出现：查询不含换行；防御性截到行尾） */
 function currentMatchRanges(
@@ -192,10 +346,16 @@ export const findStateField = StateField.define<FindDecoState>({
   update(value, tr) {
     for (const e of tr.effects) {
       if (e.is(setFindMatches)) {
+        // 范围 mark（可跨行，CM6 按行拆分绘制）；空/无效区间不发射
+        const ranges = currentMatchRanges(tr.state.doc, e.value)
+        const r = e.value.selectionRange
+        if (r && r.to > r.from && r.to <= tr.state.doc.length) {
+          ranges.push(selectionRangeDeco.range(r.from, r.to))
+        }
         return {
           matches: e.value.matches,
           index: e.value.index,
-          decos: RangeSet.of(currentMatchRanges(tr.state.doc, e.value), true),
+          decos: RangeSet.of(ranges, true),
         }
       }
     }

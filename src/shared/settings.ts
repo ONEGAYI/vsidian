@@ -15,6 +15,7 @@
 // 纯类型导入：MessageKey 只用于 optionLabelKeys 的编译期约束（esbuild 剥除
 // type import，字典字节不进 webview 产物——settings.ts 被两端共享）
 import type { MessageKey } from './locales/en'
+import { JIEBA_SOURCE_MODES, type JiebaSourceMode } from './jiebaManifest'
 
 /** 协议载荷中的设置值：标量容器（协议层只约束形态，合法性由本模块按定义判定；
  *  放宽数值类型不需要改协议——「整体下发而非逐项布尔」的扩展预留） */
@@ -227,6 +228,17 @@ export const EMBED_MAX_HEIGHT_MAX = 2000
 export const EMBED_MAX_HEIGHT_STEP = 20
 
 /**
+ * #237「多光标」开关：Live 正文多选区/副光标能力（Alt+点击添加光标、
+ * Ctrl+Alt+Up/Down 上下添加光标、Esc 收敛）的总开关。开启时装配
+ * allowMultipleSelections + drawSelection + clickAddsSelectionRange(alt)
+ * 扩展组；关闭后整组退出——多 range 被折回主 range、绘制层撤下、副光标
+ * 不可见，回到单选区行为。**独立于 #124 选区包裹**：包裹开关不再影响
+ * 多选区可用性（关闭本项时跨段包裹文本仍生效，仅选区保持降级为单 range）。
+ */
+export const MULTI_CURSOR_KEY = 'editor.multicursor'
+export const MULTI_CURSOR_DEFAULT = true
+
+/**
  * 语言设置键（#93 预留，#96 注册定义与「常规」分区）：值域 auto | zh-cn |
  * en（StringEnumSettingDefinition），解析与语言包装配见 shared/locales。
  * 键常量先行导出——宿主 HTML 生成点读取快照中的该键决定注入语言（缺省
@@ -275,6 +287,37 @@ export const IMAGE_PASTE_SUBPATH_KEY = 'image.pasteSubpath'
 export const IMAGE_PASTE_SUBPATH_DEFAULT = 'assets'
 /** 子路径长度上限（与定义 maxLength 同源；防超长字符串进存储与消息） */
 export const IMAGE_PASTE_SUBPATH_MAX_LENGTH = 200
+
+/**
+ * #239「分词引擎」：Ctrl+Left/Right 词级移动对连续中文段的切分引擎。
+ * builtin = Intl.Segmenter（granularity 'word'，浏览器内置零体积，默认）；
+ * jieba = jieba-wasm（资源经公共 CDN 按需下载到 globalStorage，锁定版本
+ * + sha256 校验，失败或离线回退 builtin 并明确提示）。设置页呈现归
+ * 「中文分词」附加分页（wordSegmentSettings），编辑器页小节排除该前缀。
+ */
+export const WORD_SEGMENT_ENGINE_KEY = 'editor.wordSegmentEngine'
+export const WORD_SEGMENT_ENGINE_MODES = ['builtin', 'jieba'] as const
+export type WordSegmentEngineMode = (typeof WORD_SEGMENT_ENGINE_MODES)[number]
+export const WORD_SEGMENT_ENGINE_DEFAULT: WordSegmentEngineMode = 'builtin'
+
+/**
+ * #239「jieba 下载源」：jsdelivr（默认）/ npmmirror / custom（自托管
+ * 目录基址，见 JIEBA_CUSTOM_URL_KEY）。URL 构造纯逻辑在
+ * shared/jiebaManifest；下载在宿主侧执行存 globalStorage（Remote SSH
+ * 在远程机下载）。
+ */
+export const WORD_SEGMENT_SOURCE_KEY = 'editor.wordSegmentSource'
+export type WordSegmentSourceSetting = JiebaSourceMode
+export const WORD_SEGMENT_SOURCE_DEFAULT: WordSegmentSourceSetting = 'jsdelivr'
+
+/**
+ * #239「自定义下载源基址」：custom 模式下生效的 https 目录 URL——两个
+ * 锁定文件按 `基址/文件名` 拼接下载（文案写明目录内需含同名两文件）；
+ * 非 custom 模式不生效。https 之外（含明文 http）拒绝下载。
+ */
+export const JIEBA_CUSTOM_URL_KEY = 'editor.wordSegmentJiebaUrl'
+export const JIEBA_CUSTOM_URL_DEFAULT = ''
+export const JIEBA_CUSTOM_URL_MAX_LENGTH = 500
 
 /**
  * 生产设置定义注册表：#33 交付空状态页面与完整数据链路，#34 加入首个
@@ -359,6 +402,15 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     titleKey: 'setting.symbolTabEscape.title',
     descriptionKey: 'setting.symbolTabEscape.description',
   },
+  {
+    // #237 多光标（editor.multicursor 域 → 编辑器页「编辑」组：与 symbol/
+    // codeblock/image 前缀并列的编辑行为组，editingDefs 收纳）
+    key: MULTI_CURSOR_KEY,
+    type: 'boolean',
+    default: MULTI_CURSOR_DEFAULT,
+    titleKey: 'setting.multicursor.title',
+    descriptionKey: 'setting.multicursor.description',
+  },
   // #161 图片粘贴：总开关 + 存放模式枚举 + 子路径自由文本（首个
   // StringTextSettingDefinition——设置页 text input 控件分支随本批接入）
   {
@@ -431,6 +483,47 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     default: HOVER_LIVE_DIRECT_DEFAULT,
     titleKey: 'setting.hoverLiveDirect.title',
     descriptionKey: 'setting.hoverLiveDirect.description',
+  },
+  // #239 中文分词三件（引擎/下载源/自定义基址）：设置页呈现归「中文
+  // 分词」附加分页（wordSegmentSettings 同页渲染选择与下载管理），
+  // 编辑器页与搜索内建分组按 editor.wordSegment 前缀排除（见
+  // settingsPageView 的 editorDefs）
+  {
+    key: WORD_SEGMENT_ENGINE_KEY,
+    type: 'string',
+    default: WORD_SEGMENT_ENGINE_DEFAULT,
+    enum: WORD_SEGMENT_ENGINE_MODES,
+    titleKey: 'setting.wordSegmentEngine.title',
+    descriptionKey: 'setting.wordSegmentEngine.description',
+    optionLabelKeys: {
+      builtin: 'setting.wordSegmentEngineBuiltin',
+      jieba: 'setting.wordSegmentEngineJieba',
+    },
+  },
+  {
+    key: WORD_SEGMENT_SOURCE_KEY,
+    type: 'string',
+    default: WORD_SEGMENT_SOURCE_DEFAULT,
+    enum: JIEBA_SOURCE_MODES,
+    titleKey: 'setting.wordSegmentSource.title',
+    descriptionKey: 'setting.wordSegmentSource.description',
+    optionLabelKeys: {
+      jsdelivr: 'setting.wordSegmentSourceJsdelivr',
+      npmmirror: 'setting.wordSegmentSourceNpmmirror',
+      custom: 'setting.wordSegmentSourceCustom',
+    },
+    // 引擎选 builtin 时下载源无意义（链式灰化，值不清除）
+    dependsOnEnum: { key: WORD_SEGMENT_ENGINE_KEY, values: ['jieba'] },
+  },
+  {
+    key: JIEBA_CUSTOM_URL_KEY,
+    type: 'string',
+    default: JIEBA_CUSTOM_URL_DEFAULT,
+    maxLength: JIEBA_CUSTOM_URL_MAX_LENGTH,
+    titleKey: 'setting.wordSegmentCustomUrl.title',
+    descriptionKey: 'setting.wordSegmentCustomUrl.description',
+    // 仅 custom 源下生效（链式灰化：builtin → 非 custom 两级传导）
+    dependsOnEnum: { key: WORD_SEGMENT_SOURCE_KEY, values: ['custom'] },
   },
 ]
 

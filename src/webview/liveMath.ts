@@ -27,6 +27,7 @@ import { EditorSelection, RangeSet, StateField, type Extension, type Range, type
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet } from '@codemirror/view'
 import type { Tree } from '@lezer/common'
 import { chainAt, visitRange, type SourceRange } from './markdownDoc'
+import { hitRangesOf, hitRevealField, hitIntersectsRange, type HitRange } from './hitReveal'
 import { liveDecorationsField, selectionTouchesRange } from './liveDecorations'
 import { MATH_CLASS_NAMES, opensMathBlockLine, scanMathInLine, scanMathRanges, type MathOccurrence } from '../shared/math'
 import { MATH_RENDER_CACHE_LIMIT, mathRenderStats, renderMathHtml } from './mathRenderCache'
@@ -282,6 +283,9 @@ function mathSuppressed(doc: Text, tree: Tree, hit: MathOccurrence, fm: SourceRa
  * 构建视口内行内公式装饰（#59 契约入口；纯数据输入，可单测直驱）：
  * 行内 `$…$`、段内 `$$…$$`、行首单行 `$$x$$` 限视口行（屏外不物化）；
  * 光标/选区触及公式范围 → 源码态 mark；范围外 → replace widget。
+ * #251 命中显形：块级（displayMode）公式的替换区间与活跃命中相交时
+ * 回源码态（widget 上的背景式命中 mark 画不出来——回源后命中高亮自然
+ * 可见）；行内 `$…$` 刻意不参与（票面覆盖清单钉住块级，不顺手放宽）。
  * 跨行块的装饰走 mathBlockDecorations（StateField）——CM6 不允许插件
  * 装饰集包含跨行 replace。
  */
@@ -291,6 +295,7 @@ export function buildMathDecorationRanges(
   selection: EditorSelection,
   visibleRanges: ReadonlyArray<{ from: number; to: number }>,
   fm: SourceRange | null,
+  hits: readonly HitRange[] = [],
 ): Array<Range<Decoration>> {
   const out: Array<Range<Decoration>> = []
   const seenLines = new Set<number>()
@@ -301,7 +306,7 @@ export function buildMathDecorationRanges(
       if (!seenLines.has(line.number)) {
         seenLines.add(line.number)
         for (const hit of scanMathInLine(line.text, line.from)) {
-          emitMathHit(out, doc, tree, hit, selection, fm)
+          emitMathHit(out, doc, tree, hit, selection, fm, hits)
         }
       }
       if (line.to >= range.to) {
@@ -321,11 +326,13 @@ function emitMathHit(
   hit: MathOccurrence,
   selection: EditorSelection,
   fm: SourceRange | null,
+  hits: readonly HitRange[] = [],
 ): void {
   if (mathSuppressed(doc, tree, hit, fm)) {
     return
   }
-  if (selectionTouchesRange(selection, hit.from, hit.to)) {
+  if (selectionTouchesRange(selection, hit.from, hit.to) ||
+      (hit.kind === 'block' && hitIntersectsRange(hits, hit.from, hit.to))) {
     out.push(mathSourceDeco.range(hit.from, hit.to))
   } else {
     out.push(mathWidgetDeco(hit.tex, hit.kind === 'block').range(hit.from, hit.to))
@@ -344,10 +351,11 @@ function buildMathBlockDecorationRanges(
   selection: EditorSelection,
   fm: SourceRange | null,
   blocks: readonly MathOccurrence[],
+  hits: readonly HitRange[] = [],
 ): Array<Range<Decoration>> {
   const out: Array<Range<Decoration>> = []
   for (const hit of blocks) {
-    emitMathHit(out, doc, tree, hit, selection, fm)
+    emitMathHit(out, doc, tree, hit, selection, fm, hits)
   }
   return out
 }
@@ -365,14 +373,17 @@ export const mathBlockDecorations = StateField.define<DecorationSet>({
         state.selection,
         field.fm,
         state.field(mathBlocksField),
+        hitRangesOf(state),
       ),
       true,
     )
   },
   update(value, tr) {
     // Transaction 没有 selectionSet（那是 ViewUpdate 的属性）：以显式
-    // selection 判定选区变化（liveDecorationsField 同款口径）
-    if (!tr.docChanged && tr.selection === undefined) {
+    // selection 判定选区变化（liveDecorationsField 同款口径）；
+    // #251 命中集变化（hitRevealField 值引用）同列重建触发
+    if (!tr.docChanged && tr.selection === undefined &&
+        tr.startState.field(hitRevealField, false) === tr.state.field(hitRevealField, false)) {
       return value
     }
     const field = tr.state.field(liveDecorationsField, false)
@@ -386,6 +397,7 @@ export const mathBlockDecorations = StateField.define<DecorationSet>({
         tr.state.selection,
         field.fm,
         tr.state.field(mathBlocksField),
+        hitRangesOf(tr.state),
       ),
       true,
     )
@@ -405,7 +417,8 @@ export const liveMath: Extension = [
         this.decorations = this.build(view)
       }
       update(update: import('@codemirror/view').ViewUpdate) {
-        if (update.docChanged || update.selectionSet || update.viewportChanged) {
+        if (update.docChanged || update.selectionSet || update.viewportChanged ||
+            update.startState.field(hitRevealField, false) !== update.state.field(hitRevealField, false)) {
           this.decorations = this.build(update.view)
         }
       }
@@ -421,6 +434,7 @@ export const liveMath: Extension = [
             view.state.selection,
             view.visibleRanges,
             field.fm,
+            hitRangesOf(view.state),
           ),
           true,
         )

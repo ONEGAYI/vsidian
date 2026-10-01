@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import test from 'node:test'
-import { buildTestHostArgs, cleanupTestDirs, createPortableShardHost, resolveTestHostMode, runTestHost } from './testHost.mjs'
+import { buildTestHostArgs, cleanupTestDirs, createPortableShardHost, resolveTestHostMode, runTestHost, writeTestWorkspaceFile } from './testHost.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 
@@ -98,6 +98,19 @@ test('并行宿主共用程序但使用各自的便携数据目录与环境变�
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('writeTestWorkspaceFile 生成单 folder 的 .code-workspace：multi-root 形态起步（#198 根增删不触发 reload）', () => {
+  const writes = []
+  const dir = path.join(tmpdir(), 'vsidian-wsfile', 'ws')
+  const file = writeTestWorkspaceFile(dir, (p, content) => writes.push({ p, content }))
+  // 文件是工作区目录的兄弟文件（不进任何根的扫描范围），名字随目录
+  assert.ok(file.endsWith(`${path.sep}ws.code-workspace`), `workspace 文件路径形态：${file}`)
+  assert.equal(writes.length, 1)
+  assert.equal(writes[0].p, file)
+  // folders 恰一个（= fixture 工作区根）、路径正斜杠（Windows 反斜杠的 JSON 转义形态免歧义）
+  const parsed = JSON.parse(writes[0].content)
+  assert.deepEqual(parsed.folders, [{ path: dir.split(path.sep).join('/') }])
 })
 
 test('临时目录清理遇到占用仍继续清理其余目录，并拒绝越界目标', () => {

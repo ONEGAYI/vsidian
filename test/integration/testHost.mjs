@@ -2,7 +2,7 @@
 // reportPath：把本次宿主运行的完整 stdout/stderr 与退出码落盘为报告文件
 // （跑一次 = 留一份证据，复核与统计读文件、不重跑）；打开失败仅告警降级。
 import { spawn } from 'node:child_process'
-import { closeSync, mkdirSync, mkdtempSync, openSync, rmSync, writeSync } from 'node:fs'
+import { closeSync, mkdirSync, mkdtempSync, openSync, rmSync, writeFileSync, writeSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -43,6 +43,27 @@ export function buildTestHostArgs({ workspaceDir, testsPath, extensionPath, exte
     `--user-data-dir=${userDataDir}`,
     workspaceDir,
   ]
+}
+
+/**
+ * 生成单 folder 的 .code-workspace 文件并返回其路径（2026-10 批次）：
+ * VSCode 1.86.2 上以**目录**（single-folder workspace）启动时，
+ * updateWorkspaceFolders 增根要走 enterMultiRootWorkspace 的 workspace
+ * 身份转换——触发 window reload、ext host 随之退出，跑在 ext host 里的
+ * 集成 suite 当场中断（#198「工作区根增删」用例确定性复现：返回 true
+ * 后 ext host 立即 code 0 退出、宿主 code 1）。以单 folder 的
+ * .code-workspace 启动让宿主以 multi-root 形态起步，根增删退化为纯
+ * folders 更新（无 reload）。workspaceDir 参数由此可传目录（向后兼容）
+ * 或本函数产出的 workspace 文件路径。
+ *
+ * 文件是工作区目录的**兄弟文件**（不进任何根的扫描范围）；调用方负责
+ * 随工作区目录一并清理
+ */
+export function writeTestWorkspaceFile(workspaceDir, writeFile = writeFileSync) {
+  const workspaceFile = `${workspaceDir}.code-workspace`
+  const posixDir = workspaceDir.split(path.sep).join('/')
+  writeFile(workspaceFile, `${JSON.stringify({ folders: [{ path: posixDir }] }, null, 2)}\n`, 'utf8')
+  return workspaceFile
 }
 
 export function createPortableShardHost(baseDir, shard, env = process.env) {

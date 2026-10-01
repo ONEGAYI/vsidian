@@ -21,6 +21,14 @@ const extra: readonly KeybindingOperation[] = [
   { id: 'find', command: 'onegayi.vsidian.find', titleKey: 'command.find.title', mode: 'both', writes: false, defaults: ['ctrl+f', 'meta+f'] },
   { id: 'findNext', command: 'onegayi.vsidian.find.next', titleKey: 'command.find.next.title', mode: 'both', writes: false, defaults: ['f3'] },
   { id: 'findPrevious', command: 'onegayi.vsidian.find.previous', titleKey: 'command.find.previous.title', mode: 'both', writes: false, defaults: ['shift+f3'] },
+  // #236 查找替换：findReplace 打开面板并展开替换栏（双模式命令均可用
+  // ——阅读模式只开面板不展开，替换是 Live 编辑能力）；替换操作是面板
+  // 会话命令（仅面板开 + live + 合法 query 时执行，webview 本地消化），
+  // 默认不占键位——面板内替换输入框 Enter 与按钮是主入口（VSCode
+  // Windows 档替换下一个亦无全局默认键），键位留给用户按需绑定
+  { id: 'findReplace', command: 'onegayi.vsidian.find.replace', titleKey: 'command.find.replace.title', mode: 'both', writes: false, defaults: ['ctrl+h'] },
+  { id: 'findReplaceNext', command: 'onegayi.vsidian.find.replaceNext', titleKey: 'command.find.replaceNext.title', mode: 'live', writes: false, defaults: [] },
+  { id: 'findReplaceAll', command: 'onegayi.vsidian.find.replaceAll', titleKey: 'command.find.replaceAll.title', mode: 'live', writes: false, defaults: [] },
   { id: 'toggleViewMode', command: 'onegayi.vsidian.toggleViewMode', titleKey: 'command.toggleViewMode.title', mode: 'both', writes: false, defaults: [] },
   // #232 拆键：三态切换的 titleKey 持独立无前缀操作名键（operation.*），
   // 与 manifest title 键（command.mode.to*.title，归属句式「将 Vsidian
@@ -99,6 +107,39 @@ export const UI_OPERATIONS = [
   // 生效（mode: both 只表示两模式下命令均可用——目标判定各自实现）；
   // 默认不占键位，键位留给用户按需绑定（评估记录见 docs/specs/keybindings.md）
   { id: 'hoverPreviewLink', command: 'onegayi.vsidian.ui.hoverPreviewLink', titleKey: 'command.ui.hoverPreviewLink.title', mode: 'both', writes: false, defaults: [] },
+  // #237 多光标·上下添加光标：@codemirror/commands 内置命令，webview 本地
+  // 消化（快捷键经 keybindingRouter 本地分支，命令面板经 ui.command 回发，
+  // 两条入口共用 webview 同一实现，不做出站宿主往返）。仅 Live 正文生效
+  // （阅读只读；写操作类——批次 D4「多光标为 Live 编辑能力」口径，本表
+  // 首个 mode live + writes 的 UI 操作）。默认 ctrl+alt+up/down（对齐
+  // VSCode；与操作表现有键位零冲突）；defaultKeymap 同键位内建绑定由
+  // multicursor 扩展组的接管 keymap 退役——键位所有权归注册表（用户清空/
+  // 改绑后内建绑定不得复活）
+  { id: 'addCursorAbove', command: 'onegayi.vsidian.editor.addCursorAbove', titleKey: 'command.editor.addCursorAbove.title', mode: 'live', writes: true, defaults: ['ctrl+alt+up'] },
+  { id: 'addCursorBelow', command: 'onegayi.vsidian.editor.addCursorBelow', titleKey: 'command.editor.addCursorBelow.title', mode: 'live', writes: true, defaults: ['ctrl+alt+down'] },
+  // #239 中文分词词级移动四操作（批次文档 §3 钉住：Live 编辑能力，
+  // writes=true 类——据此走 router 的 allowWrites 焦点门控，find 输入框
+  // 等非正文焦点不劫持）。默认 ctrl+方向（Windows/Linux）与 alt+方向
+  // （mac 词移动惯例；meta+left/right 不注册——mac Cmd+方向为行首/行尾
+  // 惯例不被覆盖）。Shift 变体单列操作（router 按整串 chord 精确匹配，
+  // ctrl+left 不含 shift——扩选必须独立注册）。执行装配在
+  // keybindingRouter 本地分支（同步直达，不出站宿主往返）；命令面板经
+  // UI_OPERATIONS 注册循环 → ui.command 回流（评估记录见 keybindings.md）
+  { id: 'cursorWordLeft', command: 'onegayi.vsidian.wordMotion.cursorLeft', titleKey: 'command.wordMotion.cursorLeft.title', mode: 'live', writes: true, defaults: ['ctrl+left', 'alt+left'] },
+  { id: 'selectWordLeft', command: 'onegayi.vsidian.wordMotion.selectLeft', titleKey: 'command.wordMotion.selectLeft.title', mode: 'live', writes: true, defaults: ['ctrl+shift+left', 'alt+shift+left'] },
+  { id: 'cursorWordRight', command: 'onegayi.vsidian.wordMotion.cursorRight', titleKey: 'command.wordMotion.cursorRight.title', mode: 'live', writes: true, defaults: ['ctrl+right', 'alt+right'] },
+  { id: 'selectWordRight', command: 'onegayi.vsidian.wordMotion.selectRight', titleKey: 'command.wordMotion.selectRight.title', mode: 'live', writes: true, defaults: ['ctrl+shift+right', 'alt+shift+right'] },
+  // #238 选下一处相同词族（批次 D3）：匹配选项与查找面板三开关同源
+  //（shared/findOptions），Live 编辑能力（writes=true 走 router 焦点门控）。
+  // 默认键对齐 VSCode：ctrl+d（选下一处）、ctrl+k ctrl+d（两段弦——跳过
+  // 当前；router 整串 chord 匹配与 1.2s 前缀超时已有基建）、ctrl+shift+l
+  // （全选）。「选上一处」对齐 VSCode 无默认键位（命令面板入口可达）。
+  // defaultKeymap/searchKeymap 均未绑定这三键（searchKeymap 不装配），
+  // 无内建绑定复活问题，不需吞键接管；冲突核对记录见 keybindings.md
+  { id: 'findSelectNext', command: 'onegayi.vsidian.find.selectNext', titleKey: 'command.find.selectNext.title', mode: 'live', writes: true, defaults: ['ctrl+d'] },
+  { id: 'findSelectPrevious', command: 'onegayi.vsidian.find.selectPrevious', titleKey: 'command.find.selectPrevious.title', mode: 'live', writes: true, defaults: [] },
+  { id: 'findSkipCurrent', command: 'onegayi.vsidian.find.skipCurrent', titleKey: 'command.find.skipCurrent.title', mode: 'live', writes: true, defaults: ['ctrl+k ctrl+d'] },
+  { id: 'findAllOccurrences', command: 'onegayi.vsidian.find.allOccurrences', titleKey: 'command.find.allOccurrences.title', mode: 'live', writes: true, defaults: ['ctrl+shift+l'] },
 ] as const satisfies readonly KeybindingOperation[]
 export type UiOperationId = (typeof UI_OPERATIONS)[number]['id']
 export function isUiOperationId(value: unknown): value is UiOperationId {

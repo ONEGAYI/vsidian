@@ -46,8 +46,15 @@ export async function run(): Promise<void> {
     shardLabel = `（分片 ${shard}/${total}，本片 ${sharded.length} 项）`
   }
   console.log(`[集成测试] 执行 ${sharded.length}/${cases.length} 项${filter ? `（筛选 ${JSON.stringify(filter)}）` : ''}${shardLabel}`)
+  let done = 0
   for (const [name, fn] of sharded) {
+    // 用例开始即留痕（[START] 与 [PASS]/[FAIL]/[TIME] 成对）：宿主在两项
+    // 之间异常退出时（2026-10 批次实测：53/59 项处 ext host 干净退出、
+    // 无 FAIL 无汇总），无 START 行即可把截断点定界到「上一项 finally 之后、
+    // 本项进入之前」，不再靠数 TIME 行倒推
+    console.log(`[集成测试][START] ${name}`)
     const caseStarted = Date.now()
+    done++
     try {
       // #38：全局模式记忆（globalState）在同一集成进程内跨用例共享——
       // reading 记忆会让后续用例的新面板被恢复成阅读模式、source 记忆会

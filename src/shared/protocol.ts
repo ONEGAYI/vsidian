@@ -8,9 +8,11 @@
 import type { SettingsPayload } from './settings'
 import { isFormatOperationId, type FormatOperationId } from './formatOperations'
 import { isKeybindingOperationId, isUiOperationId, type KeybindingOverrides, type UiOperationId } from './keybindings'
+import { sanitizeFindOptions, type FindOptions } from './findOptions'
 
 /** 设置快照类型随协议消息透出（载荷单一事实源仍在 shared/settings） */
 export type { SettingsPayload }
+export type { FindOptions }
 
 /** 一次变更：把全文 [offset, offset+length) 替换为 text（与 contentChanges 同构） */
 export interface SerChange {
@@ -148,12 +150,19 @@ export type HostToWebview =
    *  以此补登记同 reqId，使结果回包能通过陈旧回包校验、走完插入往返
    *  （与真实粘贴同一在途表同一插入路径） */
   | { kind: 'image.test.pending'; reqId: number }
-  /** 查找会话指令（#14）：open 打开 webview 内浮动查找面板（可预置查询词，
-   *  焦点进输入框）；close 关闭并归还焦点；step 循环定位上一/下一匹配。
-   *  查找是纯只读视图操作：不写文档、不产生编辑历史、无 webview→宿主消息 */
-  | { kind: 'view.find.open'; query?: string }
+  /** 查找会话指令（#14；#236 起三开关/替换栏）：open 打开 webview 内浮动
+   *  查找面板（可预置查询词，焦点进输入框；replace=true 同时展开替换栏
+   *  ——阅读模式只开面板不展开，替换是 Live 编辑能力；replacement 随
+   *  replace 预置替换词——与预置查询词同语义，宿主命令与测试注入共用）；
+   *  close 关闭并归还焦点；step 循环定位上一/下一匹配。open/step/close
+   *  为纯只读视图操作：不写文档、不产生编辑历史。replace（#236）执行
+   *  替换——next 替换当前匹配并移到下一处、all 全部替换，经 webview 的
+   *  CM6 事务走标准出站链路（一笔 edit.request = 宿主撤销一次），仅
+   *  live 模式执行 */
+  | { kind: 'view.find.open'; query?: string; replace?: boolean; replacement?: string }
   | { kind: 'view.find.close' }
   | { kind: 'view.find.step'; direction: 'next' | 'prev' }
+  | { kind: 'view.find.replace'; op: 'next' | 'all' }
   /** 表格结构操作（#13）：在面板光标处执行增删行列（仅 live 模式；阅读
    *  模式只读忽略）。变更经 webview 的 CM6 事务走标准出站链路
    *  （edit.request 一笔 = 宿主撤销一次） */
@@ -230,6 +239,11 @@ export type HostToWebview =
   | { kind: 'outline.test.menuClick'; command: string }
   /** 测试钩子（#69）：关闭当前右键菜单（等价 Esc/外点关闭路径） */
   | { kind: 'outline.test.menuClose' }
+  /** 测试钩子（#14/#236）：点击查找面板三开关（Aa/ab/.*）中 key 对应的
+   *  真实按钮，驱动与用户点击同一处理器（本地翻转 + 重算 + findOptions.set
+   *  上送宿主持久化，snapshot 广播回流）；宿主测试无法向 webview 派发真实
+   *  鼠标事件，以此通道驱动真实宿主内的选项链路 */
+  | { kind: 'find.test.toggle'; key: 'matchCase' | 'wholeWord' | 'regexp' }
   /** 剪贴板读结果（#183）：ok 时 text 为 LF 归一后的剪贴板文本；失败附
    *  原因码（read-failed = 环境读失败）。陈旧回包由 webview 按 reqId
    *  丢弃（在途表先例见 image.paste） */
@@ -360,6 +374,11 @@ export type HostToWebview =
    *  编辑器面板与设置页（含变更发起页面）。values 仍为全量快照；消费方按
    *  需读取关心的键（#34 场景：editor.lineNumbers 触发 CM6 扩展热重配） */
   | { kind: 'settings.changed'; values: SettingsPayload }
+  /** 查找选项快照（#236，请求-响应与推送共用形态）：三开关完整对象
+   *  （matchCase/wholeWord/regexp）。findOptions.get 的应答与 set 保存后的
+   *  广播共用；编辑器面板据此装配查找面板开关态与引擎匹配语义（#238
+   *  「选下一处相同词」同源消费） */
+  | { kind: 'findOptions.snapshot'; options: FindOptions }
   /** 语言包切换（#93 i18n）：携带新语言代码与完整新语言包，host→webview。
    *  语言变化不走 settings.changed 附带（语言包体积大，随每次设置变更附带
    *  是浪费）；宿主检测到 general.language 变化时发送。webview 收到后原子
@@ -490,6 +509,23 @@ export type HostToWebview =
         detail?: string
       } | null
     }
+  /** #239 分词资源状态（jieba-wasm 按需下载，宿主权威）：设置页「中文
+   *  分词」分页与编辑器面板消费。installed = 锁定版本资源在场且 sha256
+   *  校验通过；resources 仅在 installed 时携带（globalStorage 文件经
+   *  asWebviewUri 的 webview 资源 URI，编辑器侧按需动态 import 加载，
+   *  逐面板 URI 前缀私有故不缓存在宿主）。status:downloading 期间按钮
+   *  禁用；notice 保留至下一次操作覆盖（页面不自行清除）。 */
+  | {
+      kind: 'wordSegment.state'
+      installed: boolean
+      version: string
+      status: 'idle' | 'downloading'
+      notice: {
+        kind: 'downloaded' | 'download-failed' | 'deleted' | 'delete-failed' | 'load-failed'
+        detail?: string
+      } | null
+      resources: { js: string; wasm: string } | null
+    }
 
 /** webview → 宿主消息 */
 export type WebviewToHost =
@@ -567,6 +603,10 @@ export type WebviewToHost =
       liveScrollTopPx?: number
       /** webview 实际运行时能否使用词级分段器（#88）。 */
       wordSegmenter?: boolean
+      /** webview 实际运行时 CSP 是否放行 WebAssembly 编译（#241 评审修复：
+       *  8 字节空模块同步编译探针——jieba wasm 实例化的 CSP 前置条件，
+       *  在真实宿主 webview 内验证，词法断言之外的行为级证据） */
+      wasmCompile?: boolean
       /** 阅读容器内块元素数（#6；#7 起为挂载块数，屏外块不创建） */
       readingBlockCount?: number
       /** 当前阅读锚点块的源 start（源码位置锚点，非滚动百分比） */
@@ -586,6 +626,10 @@ export type WebviewToHost =
       /** 阅读容器滚动位置与内容总高（#7：px） */
       readingScrollTopPx?: number
       readingScrollHeightPx?: number
+      /** 阅读容器内查找命中块元素数（#241 验收回归观测：块级命中高亮的
+       *  绘制层证据——状态级 total 不保证 DOM 类落地；仅 reading 模式上报，
+       *  旧 webview 缺省） */
+      readingFindHitBlocks?: number
       /** 稳定样式契约探针（#6 内部测试 CSS 验证入口）：目标元素不存在时字段为 null */
       cssProbe?: CssProbeReport
       /** live 侧语法装饰统计（#8 双视图语义一致性观测；装饰集合级计数，非 DOM） */
@@ -624,6 +668,8 @@ export type WebviewToHost =
       imageProbe?: ImageSlotProbe[]
       /** 查找会话观测（#14）：首次打开后回报（未打开过时缺省） */
       find?: FindSessionProbe
+      /** #238 选词会话观测（选项条在场态与三开关；旧 webview 缺省） */
+      occurrence?: OccurrenceProbe
       /** 当前生效设置快照（#33 起缓存宿主下发的值；#34 行号等设置的观测面） */
       settings?: SettingsPayload
       /** #34 行号栏观测（设置开关态与视口内渲染结果；旧 webview 缺省） */
@@ -849,6 +895,13 @@ export type WebviewToHost =
    *  校验：通过才持久化并广播 settings.changed；拒绝时向来源设置页回
    *  settings.snapshot 以权威值恢复显示 */
   | { kind: 'settings.set'; values: SettingsPayload }
+  /** 请求查找选项快照（#236）：编辑器面板 init 后拉取当前三开关状态，
+   *  宿主以 findOptions.snapshot 响应（workspace 级记忆权威在宿主） */
+  | { kind: 'findOptions.get' }
+  /** 保存查找选项（#236）：查找面板切换开关后上送完整三开关。宿主清洗
+   *  校验后持久化（workspaceState）并广播 findOptions.snapshot 到全部
+   *  编辑器面板（多面板一致；选项是共享状态，非面板私有） */
+  | { kind: 'findOptions.set'; options: FindOptions }
   /** #69 剪贴板写（直写）：webview 环境无 navigator.clipboard 权限面，
    *  经宿主 env.clipboard.writeText。只读交互，暂停态同样放行 */
   | { kind: 'clipboard.write'; text: string }
@@ -945,6 +998,20 @@ export type WebviewToHost =
   | { kind: 'index.rebuild' }
   /** 取消在途维护操作（#198，设置页，重建/清理期间可用） */
   | { kind: 'index.cancel' }
+  /** 分词资源状态拉取（#239，设置页与编辑器面板装载时）：宿主以
+   *  wordSegment.state 应答（含已安装资源的 webview URI——逐面板私有） */
+  | { kind: 'wordSegment.get' }
+  /** 请求下载 jieba 资源（#239，设置页）：宿主按当前下载源设置执行——
+   *  下载 → sha256 校验 → 落 globalStorage，失败清理不留半成品文件；
+   *  全程经 wordSegment.state 推送（downloading → idle/notice） */
+  | { kind: 'wordSegment.download' }
+  /** 删除已下载 jieba 资源（#239，设置页）：删除后引擎回退 builtin，
+   *  结果经 wordSegment.state 推送 */
+  | { kind: 'wordSegment.delete' }
+  /** 编辑器侧 jieba 加载结果回报（#239）：宿主已确认资源就绪但 webview
+   *  动态 import/init 失败时上报（CSP/运行时不兼容等宿主不可见场景），
+   *  宿主通知用户并记录 notice.load-failed；成功不回报 */
+  | { kind: 'wordSegment.loadResult'; ok: boolean; detail?: string }
 
 /** 反链面板条目载荷（#197 backlinks.snapshot.items；形态与宿主
  *  BacklinkItem 同构——本接口为协议层稳定契约） */
@@ -1248,10 +1315,18 @@ export interface PaintProbe {
    *  body 主题 class 动态跟随；激活后 baseTheme 内建变体接管 caret 等
    *  颜色——本扩展不硬编码光标色（深色主题黑底黑光标回归的观测位） */
   darkTheme: boolean
-  /** `.cm-content` computed caret-color（'rgb(...)' 文本）。未启用
-   *  drawSelection 时 CM6 光标即原生 caret，颜色由 baseTheme 明暗变体
-   *  决定（light=black / dark=white）；jsdom 无 CSS 引擎为 null */
+  /** `.cm-content` computed caret-color（'rgb(...)' 文本）。#237 多光标
+   *  开启时 drawSelection 隐藏原生 caret（恒 transparent），光标颜色证据
+   *  移至 drawnCursorColor；关闭多光标时 CM6 光标即原生 caret，颜色由
+   *  baseTheme 明暗变体决定（light=black / dark=white）；jsdom 无 CSS
+   *  引擎为 null */
   caretColor: string | null
+  /** #237 绘制光标 `.cm-cursor` 的 computed borderLeftColor（'rgb(...)'
+   *  文本；多光标开→drawSelection 绘制，baseTheme 明暗变体 light=black /
+   *  dark=#ddd）。元素不在场（多光标关、未聚焦或 jsdom）为 null */
+  drawnCursorColor?: string | null
+  /** 阅读查找隐藏源码反馈：当前文字真实命中且有背景才视为 visible。 */
+  readingFindSource?: { visible: boolean; text: string; current: string; background: string | null }
   /** #42/#43 表格绘制：真宿主文本命中与计算样式；无表格/未选中为 null。 */
   table?: {
     cellVisible: boolean
@@ -1526,13 +1601,23 @@ export interface ReadingSyntaxProbe {
   tables: number
 }
 
-/** 查找会话观测（#14）：匹配集来自 webview 全文文本模型（屏外内容同样计数） */
+/** 查找会话观测（#14；#236 起三开关与替换栏）：匹配集来自 webview 全文
+ *  文本模型（屏外内容同样计数）；三开关与替换栏展开态随会话回报 */
 export interface FindSessionProbe {
   /** 面板当前是否打开（关闭后仍回报 open:false） */
   open: boolean
   query: string
-  /** 大小写语义：默认 true（区分） */
-  caseSensitive: boolean
+  /** 三开关（#236，单一事实源见 shared/findOptions）：matchCase 区分大小写 */
+  matchCase: boolean
+  wholeWord: boolean
+  regexp: boolean
+  /** 查询有效性（正则语法；非法时无匹配，面板有可见反馈） */
+  valid: boolean
+  /** 在选定内容中查找开启态（#241 资产接线：面板局部、非持久化，关闭
+   *  面板或进入阅读即复位；旧 webview 缺省） */
+  inSelection?: boolean
+  /** 替换栏展开态（替换为 Live 编辑能力，阅读模式恒 false） */
+  replaceOpen: boolean
   /** 匹配总数（文本模型全量计算） */
   total: number
   /** 当前匹配序号（1 基；无匹配为 0） */
@@ -1540,6 +1625,18 @@ export interface FindSessionProbe {
   /** 当前匹配区间（UTF-16 offset；无匹配为 null） */
   currentFrom: number | null
   currentTo: number | null
+}
+
+/** #238「选下一处相同词」会话观测：查找选项条在场态（= 会话在场）与
+ *  三开关按钮态（与 findOptions 单一事实源同源——显示的是面板开关记忆
+ *  档，会话 override 档不在此暴露） */
+export interface OccurrenceProbe {
+  /** 查找选项条是否在场（会话存续；主面板打开时恒 false——面板开关闪烁
+   *  承担选项提示） */
+  barOpen: boolean
+  matchCase: boolean
+  wholeWord: boolean
+  regexp: boolean
 }
 
 /**
@@ -1808,11 +1905,30 @@ function isFindSessionProbe(v: unknown): v is FindSessionProbe {
     isObject(v) &&
     typeof v.open === 'boolean' &&
     isString(v.query) &&
-    typeof v.caseSensitive === 'boolean' &&
+    typeof v.matchCase === 'boolean' &&
+    typeof v.wholeWord === 'boolean' &&
+    typeof v.regexp === 'boolean' &&
+    (v.inSelection === undefined || typeof v.inSelection === 'boolean') &&
+    typeof v.valid === 'boolean' &&
+    typeof v.replaceOpen === 'boolean' &&
     isNonNegativeInt(v.total) &&
     isNonNegativeInt(v.index) &&
     (v.currentFrom === null || isNonNegativeInt(v.currentFrom)) &&
     (v.currentTo === null || isNonNegativeInt(v.currentTo))
+  )
+}
+
+/** #236 查找选项载荷校验：sanitize 后仍是原值（三布尔齐全）才放行——
+ *  set/snapshot 拒绝缺字段或类型不符的载荷（宿主侧持久化前同样清洗） */
+function isFindOptions(v: unknown): v is FindOptions {
+  if (!isObject(v)) {
+    return false
+  }
+  const cleaned = sanitizeFindOptions(v)
+  return (
+    typeof v.matchCase === 'boolean' && cleaned.matchCase === v.matchCase &&
+    typeof v.wholeWord === 'boolean' && cleaned.wholeWord === v.wholeWord &&
+    typeof v.regexp === 'boolean' && cleaned.regexp === v.regexp
   )
 }
 
@@ -2001,7 +2117,8 @@ export function isOutlineMenuCommand(v: unknown): v is OutlineMenuCommand {
   )
 }
 
-/** 绘制层探针校验：textVisible/darkTheme 布尔；display/userSelect/caretColor 字符串或 null */
+/** 绘制层探针校验：textVisible/darkTheme 布尔；display/userSelect/caretColor/
+ *  drawnCursorColor 字符串或 null（#237 绘制光标色可缺省） */
 function isPaintProbe(v: unknown): v is PaintProbe {
   return (
     isObject(v) &&
@@ -2012,6 +2129,10 @@ function isPaintProbe(v: unknown): v is PaintProbe {
       v.visibleLineNumbers.every((number) => typeof number === 'string'))) &&
     typeof v.darkTheme === 'boolean' &&
     isNullOrString(v.caretColor) &&
+    (v.drawnCursorColor === undefined || isNullOrString(v.drawnCursorColor)) &&
+    (v.readingFindSource === undefined || (isObject(v.readingFindSource) &&
+      typeof v.readingFindSource.visible === 'boolean' && isString(v.readingFindSource.text) &&
+      isString(v.readingFindSource.current) && isNullOrString(v.readingFindSource.background))) &&
     (v.table === undefined || (
       isObject(v.table) &&
       typeof v.table.cellVisible === 'boolean' &&
@@ -2440,6 +2561,10 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
       return true
     case 'settings.set':
       return isSettingsPayload(v.values)
+    case 'findOptions.get':
+      return true
+    case 'findOptions.set':
+      return isFindOptions(v.options)
     case 'clipboard.write':
       // #69 两变体：text 直写 / linkHeading 由宿主拼标题链接；
       // #162 第三变体 linkBlock 由宿主拼块链接 [[笔记名#^id]]
@@ -2491,6 +2616,7 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         (v.liveViewportCenterLine === undefined || isNonNegativeInt(v.liveViewportCenterLine)) &&
         (v.liveScrollTopPx === undefined || isNonNegativeNumber(v.liveScrollTopPx)) &&
         (v.wordSegmenter === undefined || typeof v.wordSegmenter === 'boolean') &&
+        (v.wasmCompile === undefined || typeof v.wasmCompile === 'boolean') &&
         (v.readingBlockCount === undefined || isNonNegativeInt(v.readingBlockCount)) &&
         (v.readingAnchorStart === undefined || isNonNegativeInt(v.readingAnchorStart)) &&
         (v.readingTotalBlocks === undefined || isNonNegativeInt(v.readingTotalBlocks)) &&
@@ -2501,6 +2627,7 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         (v.readingAnchorTopPx === undefined || isNonNegativeNumber(v.readingAnchorTopPx)) &&
         (v.readingScrollTopPx === undefined || isNonNegativeNumber(v.readingScrollTopPx)) &&
         (v.readingScrollHeightPx === undefined || isNonNegativeNumber(v.readingScrollHeightPx)) &&
+        (v.readingFindHitBlocks === undefined || isNonNegativeInt(v.readingFindHitBlocks)) &&
         (v.cssProbe === undefined || isCssProbeReport(v.cssProbe)) &&
         (v.liveSyntax === undefined || isLiveSyntaxProbe(v.liveSyntax)) &&
         (v.tableGrid === undefined || isTableGridProbe(v.tableGrid)) &&
@@ -2755,7 +2882,13 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'index.cleanup':
     case 'index.rebuild':
     case 'index.cancel':
+    case 'wordSegment.get':
+    case 'wordSegment.download':
+    case 'wordSegment.delete':
       return true
+    case 'wordSegment.loadResult':
+      return typeof v.ok === 'boolean' &&
+        (v.detail === undefined || isString(v.detail))
     case 'index.setPatterns':
       return Array.isArray(v.patterns) && v.patterns.every(isString)
     default:
@@ -2904,11 +3037,15 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       // 的资源代次，恒 ≥ 1（0 是未刷新初值，不回发）
       return isPositiveInt(v.reqId) && isPositiveInt(v.generation)
     case 'view.find.open':
-      return v.query === undefined || isString(v.query)
+      return (v.query === undefined || isString(v.query)) &&
+        (v.replace === undefined || typeof v.replace === 'boolean') &&
+        (v.replacement === undefined || isString(v.replacement))
     case 'view.find.close':
       return true
     case 'view.find.step':
       return v.direction === 'next' || v.direction === 'prev'
+    case 'view.find.replace':
+      return v.op === 'next' || v.op === 'all'
     case 'table.command':
       return isTableEditOp(v.op)
     case 'table.create':
@@ -2969,6 +3106,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return isOutlineMenuCommand(v.command)
     case 'outline.test.menuClose':
       return true
+    case 'find.test.toggle':
+      return v.key === 'matchCase' || v.key === 'wholeWord' || v.key === 'regexp'
     case 'clipboard.read.result':
       if (!isPositiveInt(v.reqId)) {
         return false
@@ -3036,6 +3175,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return isString(v.section) && (v.entry === undefined || isString(v.entry))
     case 'settings.changed':
       return isSettingsPayload(v.values)
+    case 'findOptions.snapshot':
+      return isFindOptions(v.options)
     case 'locale.changed':
       // #93 语言包切换：形态校验（非空语言代码 + 全字符串词条的完整包）；
       // 语言代码是否在支持清单内由宿主发送侧保证（解析见 locales/resolveLocale）
@@ -3144,6 +3285,18 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         (v.notice === null || (isObject(v.notice) && isIndexNoticeKind(v.notice.kind) &&
           (v.notice.detail === undefined || isString(v.notice.detail))))
       )
+    case 'wordSegment.state':
+      // #239 分词资源状态：installed/version/status/notice 形态 + resources
+      // 仅 installed 时携带（js/wasm 两个 webview 资源 URI）
+      return (
+        typeof v.installed === 'boolean' &&
+        isString(v.version) &&
+        (v.status === 'idle' || v.status === 'downloading') &&
+        (v.notice === null || (isObject(v.notice) && isWordSegmentNoticeKind(v.notice.kind) &&
+          (v.notice.detail === undefined || isString(v.notice.detail)))) &&
+        (v.resources === null || (isObject(v.resources) &&
+          isString(v.resources.js) && isString(v.resources.wasm)))
+      )
     default:
       return false
   }
@@ -3157,6 +3310,15 @@ const INDEX_NOTICE_KINDS = [
 
 function isIndexNoticeKind(v: unknown): v is (typeof INDEX_NOTICE_KINDS)[number] {
   return typeof v === 'string' && (INDEX_NOTICE_KINDS as readonly string[]).includes(v)
+}
+
+/** #239 分词资源操作结果反馈种类（wordSegment.state.notice.kind） */
+const WORD_SEGMENT_NOTICE_KINDS = [
+  'downloaded', 'download-failed', 'deleted', 'delete-failed', 'load-failed',
+] as const
+
+function isWordSegmentNoticeKind(v: unknown): v is (typeof WORD_SEGMENT_NOTICE_KINDS)[number] {
+  return typeof v === 'string' && (WORD_SEGMENT_NOTICE_KINDS as readonly string[]).includes(v)
 }
 
 /** #197 反链条目载荷形态守卫（新字段可选：旧宿主快照缺省容忍） */

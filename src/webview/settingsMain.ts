@@ -10,6 +10,7 @@ import { CssSnippetSettingsSection } from './cssSnippetSettings'
 import { StyleReferenceSection } from './styleReferenceSettings'
 import { AppearanceSection } from './appearanceSettings'
 import { IndexMaintenanceSection } from './indexMaintenanceSettings'
+import { WordSegmentSection } from './wordSegmentSettings'
 import { bootLocaleFromDocument, handleLocaleChangedMessage } from './localeBoot'
 import './settingsPage.css'
 
@@ -32,11 +33,14 @@ const styleRef = new StyleReferenceSection({ postMessage: (message) => vscode.po
 const appearance = new AppearanceSection(snippets, styleRef)
 // #198 索引维护：排除模式编辑与清理/重建操作（状态权威在宿主，index.state 推送回显）
 const indexMaintenance = new IndexMaintenanceSection({ postMessage: (message) => vscode.postMessage(message) })
+// #239 中文分词：引擎选择与 jieba 资源下载管理（设置值与资源状态权威
+// 都在宿主，settings.* / wordSegment.state 推送回显）
+const wordSegment = new WordSegmentSection({ postMessage: (message) => vscode.postMessage(message) })
 
 const view = new SettingsPageView(
   { postMessage: (message) => vscode.postMessage(message) },
   PRODUCTION_SETTING_DEFINITIONS,
-  [keybindings, appearance, indexMaintenance],
+  [keybindings, appearance, indexMaintenance, wordSegment],
 )
 view.mount(document.getElementById('app') ?? document.body)
 vscode.postMessage({ kind: 'settings.get' })
@@ -46,11 +50,15 @@ vscode.postMessage({ kind: 'keybindings.get' })
 vscode.postMessage({ kind: 'snippets.get' })
 // #198 索引维护状态：同「装载即拉取」模式
 vscode.postMessage({ kind: 'index.get' })
+// #239 分词资源状态：同「装载即拉取」模式（wordSegment.state 应答，
+// 下载/删除完成后宿主经 onStateChanged 推送）
+vscode.postMessage({ kind: 'wordSegment.get' })
 
 window.addEventListener('message', (event) => {
   view.handleHostMessage(event.data)
   keybindings.handleHostMessage(event.data)
   snippets.handleHostMessage(event.data)
   indexMaintenance.handleHostMessage(event.data)
+  wordSegment.handleHostMessage(event.data)
   handleLocaleChangedMessage(event.data)
 })

@@ -1,7 +1,10 @@
 // 编辑器 webview CSP 装配契约（#130）：期望字符串的纯逻辑断言。真实宿主
 // 内 CSP 是否按此生效由集成测试钉住（#37 教训：样式注入失效时 DOM 断言
 // 照样绿，CSP 边界必须在真实 webview 宿主验证）；本测试钉住装配产物的
-// 词法形态——脚本面不放宽、明文 http 不放行、样式/字体面放行 https。
+// 词法形态——脚本装载面不放宽（nonce 门控）、明文 http 不放行、样式/字体
+// 面放行 https。script-src 的 'wasm-unsafe-eval'（#239 jieba wasm 实例化
+// 的最小必要放行，#241 评审修复补上并钉住）以精确等值断言锁定：移除即红
+// （收紧即红——防止后续以「最小化」名义静默回退导致 jieba 端到端失效）。
 import { describe, it, expect } from 'vitest'
 import { buildEditorCsp } from '../../src/host/editorCsp'
 
@@ -45,9 +48,19 @@ describe('编辑器 CSP 装配（#130 HTTPS 样式导入与联网字体）', () 
     ])
   })
 
-  it('script-src 不放宽：仅 cspSource + nonce，无 https:/unsafe-inline/unsafe-eval', () => {
+  it("script-src：cspSource + nonce + 'wasm-unsafe-eval'（精确等值，收紧即红）；不放行 https:/unsafe-inline/unsafe-eval", () => {
+    // #239 jieba wasm：动态 import 产物内 WebAssembly.instantiate 需要
+    // 'wasm-unsafe-eval'（Chromium 无此源表达式时拒绝 wasm 编译，引擎恒
+    // 回退 builtin）。#241 评审修复补上；toEqual 精确等值——任何移除/
+    // 追加（含误放行 unsafe-eval）都会红
     const script = directives.get('script-src')
-    expect(script).toEqual(['https://vscode-webview.test-origin', "'nonce-nonce-abc123'"])
+    expect(script).toEqual([
+      'https://vscode-webview.test-origin',
+      "'nonce-nonce-abc123'",
+      "'wasm-unsafe-eval'",
+    ])
+    // 放行面只此一枚 eval 类源表达式：不因 wasm 需求顺带打开 JS eval
+    expect(script?.filter((tok) => tok.includes('eval'))).toEqual(["'wasm-unsafe-eval'"])
   })
 
   it('协议边界：明文 http: 源不放行（任何指令都不含 http: 源表达式）', () => {
@@ -59,13 +72,13 @@ describe('编辑器 CSP 装配（#130 HTTPS 样式导入与联网字体）', () 
     expect(tokens.filter((tok) => tok === 'http:')).toEqual([])
   })
 
-  it('不以宿主代理绕过 CORS：无 connect-src（default-src none 下 fetch/XHR 全禁）', () => {
-    expect([...directives.keys()]).not.toContain('connect-src')
+  it('connect-src 仅放行 cspSource（#239 jieba wasm 经 init(url) 内部 fetch 装载；不开 https:/http: 外网）', () => {
+    expect(directives.get('connect-src')).toEqual(['https://vscode-webview.test-origin'])
   })
 
   it('指令集穷举（新增指令须随测试更新语义说明）', () => {
     expect([...directives.keys()].sort()).toEqual(
-      ['default-src', 'font-src', 'img-src', 'script-src', 'style-src'],
+      ['connect-src', 'default-src', 'font-src', 'img-src', 'script-src', 'style-src'],
     )
   })
 

@@ -87,7 +87,10 @@ import {
 import { installHostLocale, LOCALE_MESSAGES, type LocaleCode } from '../shared/locales'
 import { buildLocaleIslandHtml } from '../shared/locales/island'
 import { hostLocale } from './hostLocale'
+import type { FindOptionsStore } from './findOptionsStore'
+import { sanitizeFindOptions, type FindOptions } from '../shared/findOptions'
 import { t } from '../shared/i18n'
+import type { JiebaWiring } from './jiebaResourceWiring'
 
 export const VIEW_TYPE = 'onegayi.vsidian.editor'
 
@@ -100,6 +103,9 @@ export interface SettingsWiring {
   service: SettingsService
   keybindings: KeybindingService
   page: SettingsPageHandle
+  /** #236 查找选项持久化（workspaceState 工作区级记忆）：get 应答与
+   *  set 保存后广播的存储权威 */
+  findOptions: FindOptionsStore
 }
 
 /** .md / .markdown 判定（#38）：与 customEditors selector 及标题栏 when 子句
@@ -333,6 +339,9 @@ export function createTextEditorProvider(
   /** #198 索引维护接线（测试钩子观测持久化与生效模式用；生产由
    *  extension.ts 注入 createIndexMaintenance 产物） */
   indexMaintenance?: IndexMaintenance,
+  /** #239 分词资源接线（jieba 下载/删除宿主权威；编辑器面板消费
+   *  wordSegment.get 应答与 loadResult 转发、状态变化广播） */
+  jieba?: JiebaWiring,
 ): vscode.CustomTextEditorProvider {
   const sessions = new Map<string, SessionEntry>()
   let lastClosedInput: { docUri: string; webviewText?: string; fragments: string[] } | undefined
@@ -1425,6 +1434,34 @@ export function createTextEditorProvider(
           })
           return
         }
+        // #236 查找选项：get 按面板应答（每次装载拉取）；set 清洗后持久化
+        // （workspaceState 工作区级记忆）并广播全部 ready 编辑器面板——
+        // 选项是共享状态（多面板一致，#238 选下一处相同词同源消费）
+        if (isWebviewToHost(message) && message.kind === 'findOptions.get') {
+          void webviewPanel.webview.postMessage({
+            kind: 'findOptions.snapshot',
+            options: sanitizeFindOptions(settings?.findOptions.load()),
+          })
+          return
+        }
+        if (isWebviewToHost(message) && message.kind === 'findOptions.set') {
+          if (settings) {
+            const options: FindOptions = sanitizeFindOptions(message.options)
+            void settings.findOptions.save(options).then(() => {
+              for (const entry of sessions.values()) {
+                for (const panel of entry.session.getInfo().panels) {
+                  if (panel.ready) {
+                    void entry.session.postToPanel(panel.sessionId, {
+                      kind: 'findOptions.snapshot',
+                      options: { ...options },
+                    })
+                  }
+                }
+              }
+            })
+          }
+          return
+        }
         if (isWebviewToHost(message) && message.kind === 'keybindings.execute') {
           const operation = KEYBINDING_OPERATIONS.find((op) => op.id === message.id)
           const mode = entry.session.getViewState(sessionId)?.viewMode ?? 'live'
@@ -1433,6 +1470,20 @@ export function createTextEditorProvider(
             (!operation.writes || (mode === 'live' &&
               vscode.workspace.fs.isWritableFileSystem(document.uri.scheme) !== false))) {
             void vscode.commands.executeCommand(operation.command)
+          }
+          return
+        }
+        // #239 分词资源状态：面板装载时拉取（应答逐面板构造资源 URI——
+        // asWebviewUri 前缀面板私有）；loadResult 为 webview 侧 jieba 动态
+        // 加载失败回报（宿主校验通过但 webview 运行时不兼容的场景），
+        // 转服务记 notice 并通知用户
+        if (jieba && isWebviewToHost(message) && message.kind === 'wordSegment.get') {
+          void webviewPanel.webview.postMessage({ kind: 'wordSegment.state', ...jieba.stateFor(webviewPanel.webview) })
+          return
+        }
+        if (jieba && isWebviewToHost(message) && message.kind === 'wordSegment.loadResult') {
+          if (!message.ok) {
+            jieba.service.reportLoadFailed(message.detail)
           }
           return
         }
@@ -1655,6 +1706,26 @@ export function createTextEditorProvider(
       }
     })
     context.subscriptions.push({ dispose: () => offKeys() })
+  }
+
+  // ---- #239 分词资源状态广播（照 settings.changed 全面板遍历样板）：
+  //      下载/删除完成后推送（installed 与资源 URI 变化驱动编辑器侧
+  //      wordMotion 重评估加载）。资源 URI 逐面板构造（asWebviewUri
+  //      前缀面板私有），故不能复用单条消息的 postToPanel 广播 ----
+  if (jieba) {
+    const offJieba = jieba.service.onStateChanged(() => {
+      for (const entry of sessions.values()) {
+        for (const [sessionId, panel] of entry.panels) {
+          if (entry.session.getInfo().panels.some((p) => p.sessionId === sessionId && p.ready)) {
+            void panel.webview.postMessage({
+              kind: 'wordSegment.state',
+              ...jieba.stateFor(panel.webview),
+            })
+          }
+        }
+      }
+    })
+    context.subscriptions.push({ dispose: () => offJieba() })
   }
 
   // ---- #128 CSS 片段：装载失败提示（按 片段+版本 去重——多面板各自回报
@@ -2018,6 +2089,48 @@ export function createTextEditorProvider(
         if (panel.active && entry.session.getInfo().panels.some((p) =>
           p.sessionId === sessionId && p.ready)) {
           entry.session.postToPanel(sessionId, { kind: 'view.find.step', direction })
+          return true
+        }
+      }
+      return false
+    }))
+  }
+
+  // ---- #236 查找替换命令：find.replace 打开面板并展开替换栏（活动 tab
+  //  为本扩展 custom editor 时向其面板发送；阅读模式由 webview 侧收窄为
+  //  只开面板——替换是 Live 编辑能力）。替换执行命令复用活动面板查找
+  //  命令的定向逻辑（view.find.replace；webview 侧守卫面板开 + live +
+  //  合法 query，阅读/未开会话时静默忽略）----
+  context.subscriptions.push(
+    vscode.commands.registerCommand('onegayi.vsidian.find.replace', async () => {
+      const tab = vscode.window.tabGroups.activeTabGroup.activeTab
+      const input = tab?.input
+      if (
+        input instanceof vscode.TabInputCustom &&
+        input.viewType === VIEW_TYPE
+      ) {
+        const entry = getEntry(input.uri)
+        const panels = entry?.session.getInfo().panels.filter((p) => p.ready) ?? []
+        if (panels.length > 0) {
+          for (const panel of panels) {
+            entry!.session.postToPanel(panel.sessionId, { kind: 'view.find.open', replace: true })
+          }
+          return true
+        }
+      }
+      await vscode.window.showWarningMessage(t('host.noPanelForFind'))
+      return false
+    }),
+  )
+  for (const [command, op] of [
+    ['onegayi.vsidian.find.replaceNext', 'next'],
+    ['onegayi.vsidian.find.replaceAll', 'all'],
+  ] as const) {
+    context.subscriptions.push(vscode.commands.registerCommand(command, (): boolean => {
+      for (const entry of sessions.values()) for (const [sessionId, panel] of entry.panels) {
+        if (panel.active && entry.session.getInfo().panels.some((p) =>
+          p.sessionId === sessionId && p.ready)) {
+          entry.session.postToPanel(sessionId, { kind: 'view.find.replace', op })
           return true
         }
       }
