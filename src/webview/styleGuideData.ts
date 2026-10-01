@@ -3641,13 +3641,13 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "domain": "chrome",
     "category": "find-panel",
     "kind": "selector",
-    "target": ".vsidian-find（浮动面板容器；.vsidian-find-open 展开态）—— 内部 .vsidian-find-row 主行（.vsidian-find-input 输入框 / .vsidian-find-case（Aa）/ -word（ab）/ -regexp（.*）三开关（各自 -active 点亮态）/.vsidian-find-count 计数（-empty 零命中）/ .vsidian-find-prev / -next / -close 导航与关闭）与 .vsidian-find-toggle 左缘替换栏展开切换（aria-expanded 随态）",
+    "target": ".vsidian-find（浮动面板容器；.vsidian-find-open 展开态）—— 内部 .vsidian-find-row 主行（.vsidian-find-inputwrap 输入容器（边框/背景/聚焦环/非法红边载体）内嵌 .vsidian-find-input 输入框与 .vsidian-find-case（Aa）/ -word（ab）/ -regexp（.*）三开关（各自 -active 点亮态）/.vsidian-find-count 计数（-empty 零命中）/ .vsidian-find-prev / -next / -close 导航与关闭）与 .vsidian-find-toggle 左缘替换栏展开切换（aria-expanded 随态）",
     "purpose": "编辑区浮动查找面板（#236 起三开关面板，引擎 @codemirror/search 外部驱动）：column 布局——主行（输入/大小写-全字-正则三开关/「第 n 项，共 total 项·无结果」计数/上一个/下一个/关闭，同序对齐 VSCode 原生浮层）+ 左缘替换栏展开切换。三开关为查找选项单一事实源（shared/findOptions，#238「选下一处相同词」同源消费），workspace 级记忆跨会话保留；面板在 Live 与阅读两模式均可用（阅读保留块级命中与定位）。",
     "views": [
       "live",
       "reading"
     ],
-    "states": "面板 DOM 常驻、显隐由 .vsidian-find-open 控制（关闭时 display:none，探针不受影响）；三开关点亮为对应 -active 类（开启=点亮，如 matchCase 开启时 Aa 点亮）；非法正则输入框红边反馈（.vsidian-find-input-invalid，不崩、计数显示「无结果」）；开合与开关交互由浏览器套件按行为路径验证。",
+    "states": "面板 DOM 常驻、显隐由 .vsidian-find-open 控制（关闭时 display:none，探针不受影响）；三开关点亮为对应 -active 类（开启=点亮，如 matchCase 开启时 Aa 点亮）；非法正则输入容器红边反馈（invalid 类标在输入框上作状态源，:has 上探容器着色；空查询不算非法不标红；不崩、计数显示「无结果」）；开合与开关交互由浏览器套件按行为路径验证。",
     "dom": "挂编辑器容器（position:relative 定位包含块）内、#app 之下；按钮均为真实 <button type=\"button\">（aria-pressed/aria-expanded 随态，aria-label/title 用 i18n 词条 find.*）；#241 起导航/关闭/替换按钮为图标形态——本体只呈字形（SVG 资产就绪前为占位字形），功能词只在 aria-label 与 hover title。",
     "example": ".vsidian-find {\n  border-radius: 6px;\n}\n.vsidian-find .vsidian-find-case-active {\n  color: #f14c4c;\n}",
     "obsidian": {
@@ -4861,8 +4861,8 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
   },
   "find-panel": {
     "purpose": "Floating find panel over the editing area (three-toggle panel since #236, powered by the @codemirror/search engine in external-drive mode): column layout — main row (input, the case/whole-word/regexp toggles, the \"n of total / No results\" counter, previous/next/close — same order as the native VSCode widget) plus the left-edge replace-bar expander. The three toggles are the find-options single source of truth (shared/findOptions; also consumed by #238 \"select next same word\") and persist per workspace across sessions; the panel is available in both live and reading views (reading keeps block-level hits and positioning).",
-    "states": "The panel DOM is always present; visibility is controlled by .vsidian-find-open (display:none when closed, so probes are unaffected). A lit toggle means the option is on (e.g. Aa lit when match-case is enabled). An invalid regexp shows a red border on the input (.vsidian-find-input-invalid; no crash, counter reads \"No results\"). Open/close and toggle interactions are verified by the browser suite along behavior paths.",
-    "dom": "Attached inside the editor container (position:relative containing block), below #app; buttons are real <button type=\"button\"> elements (aria-pressed/aria-expanded follow state; aria-label/title from the find.* i18n entries). Since #241 the navigate/close/replace buttons are icon-shaped — the button body carries only the glyph (a placeholder until the SVG assets land), while the words live solely in aria-label and the hover title.",
+    "states": "The panel DOM is always present; visibility is controlled by .vsidian-find-open (display:none when closed, so probes are unaffected). A lit toggle means the option is on (e.g. Aa lit when match-case is enabled). An invalid regexp shows a red border on the input container (the invalid class marks the input as the state source and :has lifts the coloring onto the container; an empty query is not flagged and shows no red; no crash, counter reads \"No results\"). Open/close and toggle interactions are verified by the browser suite along behavior paths.",
+    "dom": "Attached inside the editor container (position:relative containing block), below #app; buttons are real <button type=\"button\"> elements (aria-pressed/aria-expanded follow state; aria-label/title from the find.* i18n entries). Since #241 the navigate/close/replace buttons are icon-shaped — the button body carries only the glyph (a placeholder until the SVG assets land), while the words live solely in aria-label and the hover title; the input border/background/focus ring live on .vsidian-find-inputwrap, which embeds the three toggles at its right edge like the native widget.",
     "obsidian": {
       "counterpart": "None (the Obsidian find widget is an application-level part, not a document styling surface)"
     }

@@ -7066,9 +7066,14 @@ export class WebviewSyncController {
     count.className = FIND_CLASS_NAMES.count
     // 计数文案随命中状态变化：登记回调型换包重刷（求值统一走
     // findCountText，findRender 状态更新与 locale.changed 重刷同源）。
-    // 位置在输入行三开关之后（VSCode 原生同序）
+    // 位置在输入容器之后（VSCode 原生同序）
     bindLocaleFn(count, 'text', () => this.findCountText())
-    row.appendChild(input)
+    // 输入容器（#241 对齐原生）：边框/背景挂容器，三开关嵌入右缘，
+    // 聚焦环与非法态红边都落在容器上
+    const inputWrap = document.createElement('div')
+    inputWrap.className = FIND_CLASS_NAMES.inputWrap
+    inputWrap.appendChild(input)
+    row.appendChild(inputWrap)
     // 三开关（Aa/ab/.*；点亮 = 选项开启）：切换即重算匹配并把新选项经
     // findOptions.set 上送宿主持久化（workspace 级记忆，多面板广播一致）
     const mkToggle = (
@@ -7100,9 +7105,10 @@ export class WebviewSyncController {
     this.findCaseBtnEl = caseBtn
     this.findWordBtnEl = wordBtn
     this.findRegexpBtnEl = regexpBtn
-    row.appendChild(caseBtn)
-    row.appendChild(wordBtn)
-    row.appendChild(regexpBtn)
+    // 三开关嵌入输入容器右缘（原生同构）
+    inputWrap.appendChild(caseBtn)
+    inputWrap.appendChild(wordBtn)
+    inputWrap.appendChild(regexpBtn)
     row.appendChild(count)
     // 图标按钮（导航与关闭，#241 对齐 VSCode 原生浮层）：按钮本体只呈
     // 占位字形（SVG 资产就绪后换 light/dark 图标），功能词在 aria-label
@@ -7307,10 +7313,14 @@ export class WebviewSyncController {
     this.findRecompute(prevFrom ?? this.findReferencePos())
   }
 
-  /** 计数文案（VSCode 形态）：「第 n 项，共 total 项」；零命中/非法正则
-   *  显示「无结果」。findRender 的状态刷新与 bindLocaleFn 的换包重刷共用
-   *  同一求值，杜绝双写漂移 */
+  /** 计数文案（VSCode 形态）：「第 n 项，共 total 项」；查询非空而零命中
+   *  （含非法正则）显示「无结果」，空查询无计数反馈（原生同款留白）。
+   *  findRender 的状态刷新与 bindLocaleFn 的换包重刷共用同一求值，杜绝
+   *  双写漂移 */
   private findCountText(): string {
+    if (this.findQuery === '') {
+      return ''
+    }
     const total = this.findMatches.length
     if (total === 0) {
       return t('find.noResults')
@@ -7328,10 +7338,13 @@ export class WebviewSyncController {
     const cur = this.findMatches[this.findIndex]
     if (this.findCountEl) {
       this.findCountEl.textContent = this.findCountText()
-      this.findCountEl.classList.toggle(FIND_CLASS_NAMES.countEmpty, total === 0)
+      // 空态类仅在「查询非空而零命中」时点亮（空查询是未搜索，不是无结果）
+      this.findCountEl.classList.toggle(
+        FIND_CLASS_NAMES.countEmpty, total === 0 && this.findQuery !== '')
     }
-    // 非法正则可见反馈：输入框红边 + title 提示（不崩、计数显示「无结果」）
-    const invalid = this.findOpen && !this.findValid
+    // 非法正则可见反馈：输入框红边 + title 提示（不崩、计数显示「无结果」）；
+    // 空查询不算非法（未搜索，不给红边）
+    const invalid = this.findOpen && this.findQuery !== '' && !this.findValid
     if (this.findInputEl) {
       this.findInputEl.classList.toggle(FIND_CLASS_NAMES.inputInvalid, invalid)
       this.findInputEl.title = invalid ? t('find.invalid') : ''

@@ -48,15 +48,27 @@ describe('查找面板 CSS 契约（#236）', () => {
     expect(rule('.vsidian-find button:hover', /background-color:\s*var\(--vscode-toolbar-hoverBackground/)).toBeTruthy()
   })
 
-  it('非法正则反馈：输入框 invalid 类红边（inputValidation 错误色）', () => {
-    expect(rule('.vsidian-find .vsidian-find-input.vsidian-find-input-invalid', /border-color:\s*var\(--vscode-inputValidation-errorBorder/)).toBeTruthy()
+  it('替换输入框与主输入框共用基础排版（合并选择器）', () => {
+    expect(rule('.vsidian-find .vsidian-find-input,\n.vsidian-find .vsidian-find-replace-input', /color:\s*var\(--vscode-input-foreground/)).toBeTruthy()
+  })
+
+  it('输入框容器：边框背景挂容器（三开关嵌入右缘的前提）', () => {
+    const wrap = rule('.vsidian-find .vsidian-find-inputwrap')
+    expect(wrap).toMatch(/background-color:\s*var\(--vscode-input-background/)
+    expect(wrap).toMatch(/border:\s*1px solid var\(--vscode-input-border/)
+  })
+
+  it('容器聚焦环与非法态：focus-within 走 focusBorder，invalid 经 :has 上容器', () => {
+    expect(rule('.vsidian-find .vsidian-find-inputwrap:focus-within', /border-color:\s*var\(--vscode-focusBorder/)).toBeTruthy()
+    expect(rule('.vsidian-find .vsidian-find-inputwrap:has(.vsidian-find-input-invalid)', /border-color:\s*var\(--vscode-inputValidation-errorBorder/)).toBeTruthy()
+  })
+
+  it('主输入本体透明无边框（边框随容器）；替换输入框保持自带边框背景', () => {
+    expect(rule('.vsidian-find .vsidian-find-input', /border:\s*none/)).toBeTruthy()
+    expect(rule('.vsidian-find .vsidian-find-replace-input', /background-color:\s*var\(--vscode-input-background/)).toBeTruthy()
   })
 
   it('替换栏展开切换箭头随 aria-expanded 翻转（180 度）', () => {
     expect(rule('.vsidian-find .vsidian-find-toggle[aria-expanded=\'true\']', /rotate\(180deg\)/)).toBeTruthy()
-  })
-
-  it('替换输入框与主输入框同款输入样式（合并选择器共用规则）', () => {
-    expect(rule('.vsidian-find .vsidian-find-input,\n.vsidian-find .vsidian-find-replace-input', /background-color:\s*var\(--vscode-input-background/)).toBeTruthy()
   })
 })

@@ -3330,20 +3330,50 @@ body.vsidian-mod-link #app .vsidian-view-reading a:hover {
 
 .vsidian-find .vsidian-find-input,
 .vsidian-find .vsidian-find-replace-input {
-  width: 180px;
   box-sizing: border-box;
   padding: 2px 6px;
   font-family: var(--vscode-font-family);
   font-size: var(--vscode-font-size, 13px);
   color: var(--vscode-input-foreground);
-  background-color: var(--vscode-input-background);
-  border: 1px solid var(--vscode-input-border, rgba(128, 128, 128, 0.35));
   outline: none;
 }
 
-/* 非法正则反馈：输入框红边（不崩；计数区同时显示空态「无结果」） */
-.vsidian-find .vsidian-find-input.vsidian-find-input-invalid {
+/* 主输入容器（#241 对齐原生）：边框/背景挂容器，三开关嵌入右缘；
+   聚焦环与非法态红边都落在容器上（invalid 类仍标在 input 上作状态源，
+   :has 上探容器着色——类不挪节点，契约不受扰） */
+.vsidian-find .vsidian-find-inputwrap {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  width: 220px;
+  padding: 1px 2px 1px 4px;
+  background-color: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, rgba(128, 128, 128, 0.35));
+  border-radius: 2px;
+}
+
+.vsidian-find .vsidian-find-inputwrap:focus-within {
+  border-color: var(--vscode-focusBorder, #007fd4);
+}
+
+/* 非法正则反馈：容器红边（不崩；计数区同时显示「无结果」） */
+.vsidian-find .vsidian-find-inputwrap:has(.vsidian-find-input-invalid) {
   border-color: var(--vscode-inputValidation-errorBorder, #be1100);
+}
+
+/* 主输入本体透明无边框（宽度随容器分摊给三开关后的余量） */
+.vsidian-find .vsidian-find-input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px;
+  background-color: transparent;
+  border: none;
+}
+
+.vsidian-find .vsidian-find-replace-input {
+  width: 180px;
+  background-color: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, rgba(128, 128, 128, 0.35));
 }
 
 .vsidian-find .vsidian-find-count {

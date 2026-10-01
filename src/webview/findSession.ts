@@ -56,6 +56,8 @@ export const FIND_CLASS_NAMES = {
   replaceNext: 'vsidian-find-replace-next',
   replaceAll: 'vsidian-find-replace-all',
   input: 'vsidian-find-input',
+  /** 主输入容器（#241 对齐原生：边框/背景挂容器，三开关嵌入右缘） */
+  inputWrap: 'vsidian-find-inputwrap',
   /** 非法正则反馈（输入框红边；计数区同时显示空态） */
   inputInvalid: 'vsidian-find-input-invalid',
   count: 'vsidian-find-count',

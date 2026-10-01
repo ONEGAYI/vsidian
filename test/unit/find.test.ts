@@ -241,6 +241,32 @@ describe('图标按钮形态（对齐 VSCode 原生浮层）', () => {
   })
 })
 
+describe('主行布局（三开关嵌入输入框容器）', () => {
+  it('输入框容器包住主输入与三开关（原生同构），计数与导航在容器外', () => {
+    const h = makeBridge()
+    const c = mountFind(h)
+    c.handleHostMessage({ kind: 'view.find.open', query: '目标词' })
+    const wrap = parent!.querySelector('.vsidian-find-inputwrap')!
+    expect(wrap.querySelector('.vsidian-find-input')).not.toBeNull()
+    expect(wrap.querySelector('.vsidian-find-case')).not.toBeNull()
+    expect(wrap.querySelector('.vsidian-find-word')).not.toBeNull()
+    expect(wrap.querySelector('.vsidian-find-regexp')).not.toBeNull()
+    // 计数与导航按钮留在容器外（原生同序：输入+开关 → 计数 → 导航）
+    expect(wrap.querySelector('.vsidian-find-count')).toBeNull()
+    expect(wrap.querySelector('.vsidian-find-prev')).toBeNull()
+  })
+
+  it('空查询不标红：输入框无 invalid 类、计数空白不带空态类', () => {
+    const h = makeBridge()
+    const c = mountFind(h)
+    c.handleHostMessage({ kind: 'view.find.open' })
+    expect(findInput()!.classList.contains('vsidian-find-input-invalid')).toBe(false)
+    const count = parent!.querySelector<HTMLElement>('.vsidian-find-count')!
+    expect(count.textContent).toBe('')
+    expect(count.classList.contains('vsidian-find-count-empty')).toBe(false)
+  })
+})
+
 describe('匹配计算与反馈（基于文本模型，含中文与 emoji）', () => {
   it('open 带 query：total 与文本模型一致（中文+emoji 文档），当前匹配为参考位置后首个', () => {
     const h = makeBridge()
