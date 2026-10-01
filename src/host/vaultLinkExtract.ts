@@ -378,3 +378,51 @@ export function extractVaultEdges(
 
   return sortEdges(edges)
 }
+
+/**
+ * 断链边重解析（#269 目标归位重抽依赖者的检测步）：对单条 resolvedTarget
+ * 为 null 的边按其边型同口径重建候选并探测存在性端口，返回重解析目标
+ * （仍不可解为 null）。边型口径与 extractVaultEdges 内部逐型一致——
+ * wikilink/embed 走 planVaultLinkPath 候选序（implicitMd），mdlink/refdef
+ * 走 classifyLinkTarget 的 doc 分支候选，image 走 classifyImageTarget 的
+ * workspace 单候选；external/blocked（外链与危险 scheme）不可接通恒
+ * null，本文件锚点边（target 空串）为自引用、resolved 恒非 null——二者
+ * 传入属调用方防御，返回 null 不参与依赖者判定。
+ */
+export function reresolveVaultEdgeTarget(
+  edge: Pick<VaultEdge, 'target' | 'kind'>,
+  ctx: VaultLinkPathContext,
+  resolve: VaultEdgeResolvePort,
+): string | null {
+  const probe = (candidates: readonly string[]): string | null => {
+    for (const candidate of candidates) {
+      const hit = resolve(candidate)
+      if (hit !== null) {
+        return hit
+      }
+    }
+    return null
+  }
+  switch (edge.kind) {
+    case 'wikilink':
+    case 'embed': {
+      if (edge.target === '') {
+        return null // 本文件锚点（自引用）边的防御分支
+      }
+      const plan = planVaultLinkPath(edge.target, ctx, { implicitMd: true })
+      return plan.kind === 'inside' ? probe(plan.candidates) : null
+    }
+    case 'mdlink':
+    case 'refdef': {
+      const target = classifyLinkTarget(edge.target, ctx)
+      if (target.kind !== 'doc') {
+        return null // external / blocked / anchor：非文档目标不可接通
+      }
+      return probe(target.candidates)
+    }
+    case 'image': {
+      const target = classifyImageTarget(edge.target, ctx)
+      return target.kind === 'workspace' ? resolve(target.fsPath) : null
+    }
+  }
+}

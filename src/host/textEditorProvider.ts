@@ -1635,6 +1635,37 @@ export function createTextEditorProvider(
     },
   }
 
+  // #270 dirty 丢弃/还原的覆盖层通用退役信号：「空 contentChanges 且文档
+  // 转 clean」的 dirty-state 事件是 1.86 宿主对「未保存内容不复存在」的
+  // 必达广播——丢弃无回滚 change、普通文本编辑器丢弃无 close 事件且文档
+  // 滞留 textDocuments（#270 集成实证），此前该终态无任何退役通道（幽灵
+  // 反链窗口）。保存路径另有 onDidSaveTextDocument → documentSaved 先行/
+  // 后至皆幂等无害；延迟一个宽限窗执行只为合并保存流的紧随事件。Vsidian
+  // 面板丢弃另有 close 事件路径（既有接线），本信号对齐同一终态、双保险。
+  const cleanRetireTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  const cancelCleanRetire = (fsPath: string): void => {
+    const timer = cleanRetireTimers.get(fsPath)
+    if (timer !== undefined) {
+      clearTimeout(timer)
+      cleanRetireTimers.delete(fsPath)
+    }
+  }
+  const scheduleCleanRetire = (fsPath: string): void => {
+    cancelCleanRetire(fsPath)
+    cleanRetireTimers.set(fsPath, setTimeout(() => {
+      cleanRetireTimers.delete(fsPath)
+      vaultIndex?.documentClosed(fsPath)
+    }, 800))
+  }
+  context.subscriptions.push({
+    dispose: () => {
+      for (const timer of cleanRetireTimers.values()) {
+        clearTimeout(timer)
+      }
+      cleanRetireTimers.clear()
+    },
+  })
+
   // 权威文档变更入口：一切来源（本扩展写回、原生编辑器、其他扩展、
   // undo/redo）的变更都进入 session 识别与广播
   context.subscriptions.push(
@@ -1647,6 +1678,16 @@ export function createTextEditorProvider(
           event.document.version,
           event.document.getText(),
         )
+        // #270：转 clean 的 dirty-state 事件（空 contentChanges）= 未保存
+        // 内容终结（丢弃/还原实测必发；undo 回保存态时若宿主另发该信号
+        // 同样覆盖——undo 自身是内容事件，走作废分支）——调度覆盖层退役；
+        // 反之（内容事件或转 dirty）作废在途信号——文档再入未保存态，先前
+        // 的 clean 信号已过期（否则丢弃后排定的退役会误清紧随的新编辑暂存）
+        if (event.contentChanges.length === 0 && !event.document.isDirty) {
+          scheduleCleanRetire(event.document.uri.fsPath)
+        } else {
+          cancelCleanRetire(event.document.uri.fsPath)
+        }
       }
       // #224 引用视图跟随：被订阅目标的未保存修改进防抖窗（短暂合并刷新；
       // 空 contentChanges 是 dirty 状态事件，无内容变更不触发）。目标自

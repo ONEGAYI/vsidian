@@ -33,6 +33,20 @@ export class VaultIndexOverlay {
     return true
   }
 
+  /** 世界变化后的同版本重算（#269 慢时序兜底）：rename 批末新路径登记完成
+   *  后重算现存未保存条目——「冲刷早于登记」落层的断链边无后续冲刷时机
+   *  （防抖定时器已消费），apply 的同版本拒绝会把它永久钉死。本入口只对
+   *  迟到旧扫描（版本更低）保持拒绝；相等（同 buffer 在新世界下的重算）
+   *  或更高接受。 */
+  reapply(docPath: string, contentVersion: number, edges: readonly VaultEdge[]): boolean {
+    const prev = this.entries.get(docPath)
+    if (prev && contentVersion < prev.contentVersion) {
+      return false
+    }
+    this.entries.set(docPath, { contentVersion, edges: [...edges] })
+    return true
+  }
+
   /** 退役覆盖条目（文档保存、磁盘基线已更新后回到基线）；未登记幂等 */
   clear(docPath: string): void {
     this.entries.delete(docPath)

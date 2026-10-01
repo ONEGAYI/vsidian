@@ -38,7 +38,7 @@
 //   CURRENT 代、继承源与更高代际——尊重并发窗口的活跃读者/写者）；
 //   rebuildAll 全根全量重扫（重解析正文并核验资源，进度回报、可取消）
 import * as path from 'node:path'
-import { extractVaultEdges, isVaultPanelOutlink } from './vaultLinkExtract'
+import { extractVaultEdges, isVaultPanelOutlink, reresolveVaultEdgeTarget } from './vaultLinkExtract'
 import type { LinkContext } from './linkTarget'
 import { queryBacklinks, VaultIndexOverlay } from './vaultIndexOverlay'
 import {
@@ -1040,13 +1040,26 @@ export class VaultIndexService {
   }
 
   private async flushUnsaved(state: RootIndexState, key: string): Promise<void> {
+    if (this.recomputeUnsaved(state, key, false)) {
+      this.notify()
+    }
+  }
+
+  /** 按当前世界（resolver 快照）重算 key 的未保存文本边。写入入口由
+   *  worldReapply 决定：false=flushUnsaved 常规冲刷（apply，版本严格递增，
+   *  迟到同版本扫描被拒）；true=rename 批末世界重算（reapply，同版本可
+   *  采信——「冲刷早于新路径登记」的断链边无后续冲刷时机，见 #269 落档）。
+   *  排除复检（applyUnsaved 同口径）：排除变更后 pending 与在途定时器可
+   *  残留，两条通道不得复活已排除来源的覆盖层条目（#198 排除语义）。
+   *  返回是否采信。 */
+  private recomputeUnsaved(state: RootIndexState, key: string, worldReapply: boolean): boolean {
     const pending = state.unsaved.get(key)
     if (!pending || !state.hasData) {
-      return
+      return false
     }
     const rel = this.relOf(state, key)
-    if (rel === null) {
-      return
+    if (rel === null || this.excludeMatcher.test(rel)) {
+      return false
     }
     const text = normalizeLf(pending.text)
     const modelResolver = this.makeModelResolver(state)
@@ -1064,9 +1077,9 @@ export class VaultIndexService {
       const target = this.relOf(state, abs)
       return target !== null && this.foldKey(target) === this.foldKey(rel) ? rel : null
     })
-    if (state.overlay.apply(rel, pending.version, edges)) {
-      this.notify()
-    }
+    return worldReapply
+      ? state.overlay.reapply(rel, pending.version, edges)
+      : state.overlay.apply(rel, pending.version, edges)
   }
 
   /** 文档保存：覆盖层退役 + 增量队列重扫（有界；等待排空） */
@@ -1099,9 +1112,10 @@ export class VaultIndexService {
    * 驱动，调用方须确认同文档无其他打开面板）：未保存内容随面板关闭丢弃
    * ——unsaved 全文、防抖计时器与覆盖层边一并退场，反链查询回到磁盘
    * 基线（内存索引是可重建缓存，磁盘为事实源）。不触发重扫（磁盘未变）。
-   * 另一调用方为 rename 通道收尾（#256，retireLoadedDocs）：不做面板
-   * 检查——面板持有者已在调用前按编辑器标签豁免，退役对象是无标签的
-   * 通道改写产物（装载文档/已落盘引用者），退役即归基线，幂等无害。
+   * 另一调用方为 rename 通道收尾（#256，retireLoadedDocs）：不做面板检查
+   * ——面板持有者与 dirty 缓存实例已在调用前豁免（#269：dirty buffer 是
+   * 通道改写的唯一载体），退役对象是无标签且无未保存内容的通道产物，
+   * 退役即归基线，幂等无害。
    */
   documentClosed(fsPath: string): void {
     const state = this.rootOf(fsPath)
@@ -1513,16 +1527,21 @@ export class VaultIndexService {
         break
       }
     }
+    // 桶缺失不整段跳过（#269）：rename 后新目标的桶在依赖者重抽前恒空，
+    // 但覆盖层在场的来源（面板打开的引用者经 will 改写只落 buffer，基线
+    // 边恒指旧名、无桶可言）须仍可查——与 backlinksOf 同口径按
+    // bucketKey ?? rel 查询，覆盖层段独立遍历命中；基线桶不存在时该段
+    // 自然为空。fold 传参同 backlinksOf（覆盖层边大小写漂移容错）。
     const incoming = new Map<string, VaultEdge[]>()
-    if (bucketKey !== null) {
-      for (const e of queryBacklinks(state.backlinks, state.overlay, bucketKey)) {
-        const abs = this.absOf(state, e.source)
-        let list = incoming.get(abs)
-        if (!list) {
-          incoming.set(abs, (list = []))
-        }
-        list.push(e)
+    for (const e of queryBacklinks(
+      state.backlinks, state.overlay, bucketKey ?? rel, (p) => this.foldKey(p),
+    )) {
+      const abs = this.absOf(state, e.source)
+      let list = incoming.get(abs)
+      if (!list) {
+        incoming.set(abs, (list = []))
       }
+      list.push(e)
     }
     const overlayEntry = state.overlay.get(rel)
     const outgoing = overlayEntry
@@ -1685,6 +1704,8 @@ export class VaultIndexService {
       }
       const mdLoads: MdLoad[] = []
       const assetPaths: string[] = []
+      /** 本批在该根新登记的位置（.md + asset；遍 3 依赖者检测的接通域） */
+      const registered = new Set<string>()
       for (let i = 0; i < fsPaths.length; i++) {
         const fsPath = fsPaths[i]!
         const rel = this.relOf(state, fsPath)
@@ -1714,6 +1735,7 @@ export class VaultIndexService {
             contentVersion: (state.model.files.get(rel)?.contentVersion ?? 0) + 1,
             ...this.birthtimeOf(stat),
           })
+          registered.add(rel)
         } else {
           assetPaths.push(fsPath)
         }
@@ -1744,6 +1766,7 @@ export class VaultIndexService {
           ...this.birthtimeOf(stat),
         })
         this.ensureGeneration(fsPath)
+        registered.add(rel)
         touched = true
       }
       // 遍 2：抽边（resolver 可见遍 1/1.5 登记的完整新清单——批内互链不断链）
@@ -1754,6 +1777,37 @@ export class VaultIndexService {
           isWindowsHost: this.opts.isWindowsHost,
         }, this.makeModelResolver(state))
         state.model.edges = state.model.edges.filter((e) => e.source !== load.rel).concat(edges)
+      }
+      // 遍 3（#269 目标归位重抽依赖者）：引用者的 will edit 落盘早于 rename
+      // 应用，其 watcher 重扫若先于本批登记（泵与 did 通道在事件循环上竞态），
+      // 断链边入基线后无事件重抽——新目标桶恒空，连续 rename 静默漏改写。
+      // 按批内新登记位置找出「断链重解析恰好接通」的来源重扫（其盘面已是
+      // 改写后文本，重抽即接通、桶随归位重建）。本批被移动文件不重扫——
+      // 遍 2 已按完整新清单抽边，重扫是纯冗余。
+      if (registered.size > 0) {
+        const registeredFold = new Set([...registered].map((r) => this.foldKey(r)))
+        const resolver = this.makeModelResolver(state)
+        const dependents = new Set<string>()
+        for (const e of state.model.edges) {
+          if (e.resolvedTarget !== null || registered.has(e.source)) {
+            continue
+          }
+          const hit = reresolveVaultEdgeTarget(e, {
+            docDir: this.dirname(this.absOf(state, e.source)),
+            rootDir: state.fsPath,
+            isWindowsHost: this.opts.isWindowsHost,
+          }, resolver)
+          if (hit !== null && registeredFold.has(this.foldKey(hit))) {
+            dependents.add(e.source)
+          }
+        }
+        let rescanned = 0
+        for (const rel of dependents) {
+          await this.rescanFile(state, this.absOf(state, rel))
+          if ((++rescanned) % this.rescanBatchFiles === 0) {
+            await this.scan.yieldToEventLoop()
+          }
+        }
       }
       if (touched) {
         touchedRoots.add(state)
@@ -1770,6 +1824,12 @@ export class VaultIndexService {
     for (const state of touchedRoots) {
       if (!state.model) {
         continue
+      }
+      // #269 慢时序兜底：覆盖层冲刷早于本批新路径登记（大批量/慢盘下 did
+      // 登记 > 500ms 防抖）时，断链边按当时世界落层且无后续冲刷时机——
+      // 批末按完整新清单重算现存未保存条目（同版本世界重算，reapply）
+      for (const key of state.unsaved.keys()) {
+        this.recomputeUnsaved(state, key, true)
       }
       state.backlinks = buildBacklinkIndex(state.model.edges)
       this.notify()
