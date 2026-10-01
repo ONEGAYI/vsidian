@@ -68,6 +68,9 @@ try {
   mkdirSync(outDir, { recursive: true })
   console.log(`[runPerf] fixture 工作区：${wsDir}`)
   console.log(`[runPerf] 报告目录：${outDir}`)
+  // 性能宿主有意留在 1.86.2：docs/perf 历史数据全部产自该宿主，跨批次
+  // 对比须保持同宿主；承诺下界的矩阵验证归 test/integration 与
+  // test/browser 各启动器（默认与 engines 同版，见 testHost 契约测试）
   await runTests({
     version: '1.86.2',
     extensionDevelopmentPath: root,

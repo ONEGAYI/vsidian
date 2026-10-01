@@ -38,10 +38,12 @@ if (sharded) {
 }
 
 // VSIDIAN_TEST_VSCODE_PATH：指向已解压宿主可执行文件（如 1.82.3 下界
-// 验证）时跳过默认宿主下载直接使用——#254 分段验证路径 / #255 候选下界
+// 验证）时跳过默认宿主下载直接使用——#254 分段验证路径 / #255 下界
 // 反复实测的通道；dev path 模式同样执行 engines 安装门槛（实测 1.82.3
-// 宿主上 engines ^1.86.0 时扩展不激活、_test.* 命令全 not found），
-// 下界验证树须临时降 package.json 的 engines（仅验证用，不进提交）
+// 宿主上 engines ^1.86.0 时扩展不激活、_test.* 命令全 not found）——
+// 用本通道探测**低于已提交 engines 下界**的更早宿主时，验证树须临时降
+// package.json 的 engines（仅验证用，不进提交）；默认路径宿主与 engines
+// 同版，无需任何降版
 const overrideExecutable = process.env.VSIDIAN_TEST_VSCODE_PATH
 const executable = overrideExecutable || await downloadAndUnzipVSCode({ version: '1.82.3' })
 const mode = resolveTestHostMode()
@@ -66,7 +68,8 @@ try {
       writeFixtures(wsDir, { generatePerfSample, generateReadingSample, generateMermaidDenseSample })
       // 以单 folder 的 .code-workspace 启动（multi-root 形态起步）：1.86.2 上
       // 目录（single-folder）启动时 updateWorkspaceFolders 增根触发 window
-      // reload（ext host 退出、suite 中断，#198 用例确定性复现）；multi-root
+      // reload（ext host 退出、suite 中断，#198 用例确定性复现；1.82.3 下界
+      // 矩阵沿用同型装配，未另测目录形态）；multi-root
       // 形态下根增删是纯 folders 更新
       const wsFile = writeTestWorkspaceFile(wsDir)
       wsFiles.push(wsFile)

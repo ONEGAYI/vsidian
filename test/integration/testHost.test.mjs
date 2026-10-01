@@ -254,7 +254,7 @@ test('runSettingsActivation 支持 VSIDIAN_TEST_VSCODE_PATH 指定已解压宿�
   assert.match(source, /overrideExecutable \|\| await downloadAndUnzipVSCode/)
 })
 
-test('三个集成启动器的默认下载宿主钉在 engines 承诺下界（#255 矩阵钉住）', () => {
+test('集成启动器默认下载宿主钉在 engines 承诺下界（#255 矩阵钉住）', () => {
   const pkg = JSON.parse(readFileSync(path.join(here, '..', '..', 'package.json'), 'utf8'))
   const engines = pkg.engines?.vscode ?? ''
   const m = /^\^?(\d+\.\d+\.\d+)$/.exec(engines)
@@ -263,12 +263,18 @@ test('三个集成启动器的默认下载宿主钉在 engines 承诺下界（#2
   const pattern = new RegExp(
     `downloadAndUnzipVSCode\\(\\{ version: '${floor.replace(/\./g, '\\.')}' \\}\\)`,
   )
-  for (const launcher of ['runTest.mjs', 'runInstalled.mjs', 'runSettingsActivation.mjs']) {
-    const source = readFileSync(path.join(here, launcher), 'utf8')
+  const launchers = [
+    path.join(here, 'runTest.mjs'),
+    path.join(here, 'runInstalled.mjs'),
+    path.join(here, 'runSettingsActivation.mjs'),
+    path.join(here, '..', 'browser', 'keybindingsHost.mjs'),
+  ]
+  for (const launcherPath of launchers) {
+    const source = readFileSync(launcherPath, 'utf8')
     assert.match(
       source,
       pattern,
-      `${launcher} 默认宿主须与 engines 下界 ${floor} 同版（#255 决策：验证矩阵钉在承诺下界）`,
+      `${path.basename(launcherPath)} 默认宿主须与 engines 下界 ${floor} 同版（#255 决策：验证矩阵钉在承诺下界）`,
     )
   }
 })

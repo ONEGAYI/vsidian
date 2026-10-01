@@ -103,7 +103,8 @@ try {
   const installedExt = path.join(extensionsDir, installedDirs[installedDirs.length - 1])
   // 以单 folder 的 .code-workspace 启动（multi-root 形态起步）：1.86.2 上目录
   // （single-folder）启动时 updateWorkspaceFolders 增根触发 window reload
-  // （ext host 退出、suite 中断，#198 用例确定性复现），见 testHost.mjs
+  // （ext host 退出、suite 中断，#198 用例确定性复现；1.82.3 下界矩阵沿用
+  // 同型装配，未另测目录形态），见 testHost.mjs
   const wsFile = writeTestWorkspaceFile(wsDir)
   const args = buildTestHostArgs({
     workspaceDir: wsFile,

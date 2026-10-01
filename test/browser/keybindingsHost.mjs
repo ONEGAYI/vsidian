@@ -1,4 +1,6 @@
-// VS Code 1.86.2 独立桌面 + 回环 CDP：真实 Electron/webview 到工作台键位路径。
+// VS Code 独立桌面 + 回环 CDP：真实 Electron/webview 到工作台键位路径。
+// 默认宿主与 engines 承诺下界同版（#255 矩阵钉住）；VSIDIAN_TEST_VSCODE_PATH
+// 指向已解压宿主可执行文件时跳过默认下载，用于下界候选的定向复验。
 import assert from 'node:assert/strict'
 import { build } from 'esbuild'
 import { downloadAndUnzipVSCode } from '@vscode/test-electron'
@@ -19,13 +21,14 @@ const server = createServer()
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
 const port = server.address().port
 await new Promise((resolve) => server.close(resolve))
-const executable = await downloadAndUnzipVSCode({ version: '1.86.2' })
+const overrideExecutable = process.env.VSIDIAN_TEST_VSCODE_PATH
+const executable = overrideExecutable || await downloadAndUnzipVSCode({ version: '1.82.3' })
 const args = buildTestHostArgs({ workspaceDir: dir,
   testsPath: path.join(root, 'out/test/integration/keybindingsHost.js'),
   extensionPath: root, extensionsDir: path.join(root, '.vscode-test/extensions'),
   userDataDir: path.join(dir, 'user-data'), disableExtensions: true })
 args.push(`--remote-debugging-port=${port}`, '--remote-debugging-address=127.0.0.1')
-console.log(`[键盘宿主] 独立桌面，回环 CDP 端口 ${port}，fixture ${dir}`)
+console.log(`[键盘宿主] 独立桌面，回环 CDP 端口 ${port}，fixture ${dir}；测试宿主：${executable}${overrideExecutable ? '（VSIDIAN_TEST_VSCODE_PATH 覆盖）' : ''}`)
 const host = runTestHost({ executable, args, env: { ...process.env, WORKSPACE_DIR: dir,
   VSIDIAN_TEST_HOOKS: '1' }, mode: 'desktop', timeoutMs: 90000,
   reportPath: path.join(root, '.vscode-test/keybindings-host.log') })
@@ -176,7 +179,7 @@ try {
   assert.equal(code, 0)
   assert.equal(readFileSync(path.join(dir, 'result'), 'utf8'), '**word**',
     'Ctrl+B 应由 Vsidian 加粗而非切换工作台侧栏')
-  console.log('[键盘宿主][PASS] 1.86.2 独立桌面 CDP Ctrl+B、Ctrl+0–6、改绑旧键释放、两段键、清空及重置')
+  console.log('[键盘宿主][PASS] 独立桌面 CDP Ctrl+B、Ctrl+0–6、改绑旧键释放、两段键、清空及重置（宿主版本见启动日志）')
 } finally {
   if (socket) socket.close()
   writeFileSync(path.join(dir, 'done'), '')

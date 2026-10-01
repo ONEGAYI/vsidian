@@ -1,4 +1,5 @@
-// 集成测试套件入口：在真实 VSCode 1.86 宿主内运行。
+// 集成测试套件入口：在真实 VSCode 宿主内运行（默认宿主与 engines
+// 承诺下界同版，见 test/integration/runTest.mjs 与 testHost 契约测试）。
 // 组织方式为极简自研 runner（不引入 mocha 依赖），失败汇总后抛错使
 // @vscode/test-electron 以非零码退出。
 //
