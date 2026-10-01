@@ -5,6 +5,7 @@
 // VSIDIAN_ITEST_SHARDS=N（N>=2）时并行起 N 个宿主。每片注入
 // VSIDIAN_TEST_SHARD=k/N，并以独立便携目录隔离用户数据、扩展与主进程 IPC。
 // 缺省 N=1 保持原有单宿主行为与 integration-dev.log 报告名。
+// VSIDIAN_TEST_GROUP=all/core/sensitive：缺省全量；敏感组报告单独命名。
 import { downloadAndUnzipVSCode } from '@vscode/test-electron'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -16,12 +17,21 @@ import { buildTestHostArgs, cleanupTestDirs, createPortableShardHost, evaluateHo
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
+const group = process.env.VSIDIAN_TEST_GROUP || 'all'
+if (!['all', 'core', 'sensitive'].includes(group)) {
+  console.error(`[runTest] VSIDIAN_TEST_GROUP 须为 all/core/sensitive，收到 ${JSON.stringify(process.env.VSIDIAN_TEST_GROUP)}`)
+  process.exit(1)
+}
+
 const shardTotal = Number(process.env.VSIDIAN_ITEST_SHARDS ?? '1')
 if (!Number.isInteger(shardTotal) || shardTotal < 1) {
   console.error(`[runTest] VSIDIAN_ITEST_SHARDS 须为 >=1 整数，收到 ${JSON.stringify(process.env.VSIDIAN_ITEST_SHARDS)}`)
   process.exit(1)
 }
 const sharded = shardTotal > 1
+const reportName = (shard) => group === 'sensitive'
+  ? (sharded ? `integration-sensitive-s${shard}.log` : 'integration-sensitive.log')
+  : (sharded ? `integration-dev-s${shard}.log` : 'integration-dev.log')
 if (sharded) {
   console.log(`[runTest] 分片并行：${shardTotal} 个宿主同时起跑（每片独立 fixture/存储/报告）`)
 }
@@ -34,6 +44,7 @@ const overrideExecutable = process.env.VSIDIAN_TEST_VSCODE_PATH
 const executable = overrideExecutable || await downloadAndUnzipVSCode({ version: '1.86.2' })
 const mode = resolveTestHostMode()
 console.log(`[runTest] 测试宿主模式：${mode}；宿主 ${executable}`)
+console.log(`[runTest] 分组：${group}`)
 if (process.env.VSIDIAN_TEST_CASES) {
   console.log(`[runTest] 用例筛选：${JSON.stringify(process.env.VSIDIAN_TEST_CASES)}`)
 }
@@ -84,9 +95,10 @@ try {
           LARGE_DOC_LINES: String(LARGE_DOC_LINES),
           // C-11：开启 _test.* 测试钩子命令（生产/常规开发不注册）
           VSIDIAN_TEST_HOOKS: '1',
+          VSIDIAN_TEST_GROUP: group,
           ...(sharded ? { VSIDIAN_TEST_SHARD: `${shard}/${shardTotal}` } : {}),
         },
-        reportPath: path.join(testCacheDir, sharded ? `integration-dev-s${shard}.log` : 'integration-dev.log'),
+        reportPath: path.join(testCacheDir, reportName(shard)),
       })
       console.log(`[runTest] 分片 ${shard}/${shardTotal} 宿主退出码 ${code}（耗时 ${((Date.now() - started) / 1000).toFixed(1)}s）`)
       return code
@@ -105,7 +117,7 @@ try {
     // 本地 Windows 不复现）——报告零 FAIL 且计划用例全部取得终态时放行该
     // 噪声。宿主中途截断（零 FAIL 但计划项未跑完，此前实测 59 项只执行
     // 53 项被静默放行）不属于 #211 边界：判败并点名缺失用例身份
-    const report = path.join(testCacheDir, sharded ? `integration-dev-s${i + 1}.log` : 'integration-dev.log')
+    const report = path.join(testCacheDir, reportName(i + 1))
     try {
       const verdict = evaluateHostReport(readFileSync(report, 'utf8').split('\n'), result.value)
       if (verdict.ok) {
@@ -119,7 +131,7 @@ try {
     return [`${i + 1}: 退出码 ${result.value}`]
   })
   if (failures.length > 0) {
-    throw new Error(`集成回归有 ${failures.length}/${shardTotal} 片失败（${failures.join('；')}），详见 .vscode-test/integration-dev*.log`)
+    throw new Error(`集成回归 ${group} 组有 ${failures.length}/${shardTotal} 片失败（${failures.join('；')}），详见 .vscode-test/integration-*.log`)
   }
 } catch (err) {
   console.error('[runTest] 运行失败', err)
