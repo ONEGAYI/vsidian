@@ -12503,6 +12503,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const cEdit = new vscode.WorkspaceEdit()
     cEdit.insert(cUri, cDoc.positionAt(cDoc.getText().length), '\nC 未保存尾注。')
     assert(await vscode.workspace.applyEdit(cEdit), 'C 未保存编辑应成功')
+    // 30s 与本用例相邻等待同预算：未保存刷新经 B 直接来源链路传播，四片
+    // 并发（本机 2/4 挂）与 CI 慢 runner 上可超 20s——负载延迟形态非死挂
+    // （定向恒过），属 #215 CI 敏感性族的窗口加固（同 71e6909 处置原则）
     await poll('C 未保存刷新', async () => {
       const v = await pull()
       const current = card(v, '../two/C')
@@ -12510,7 +12513,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
         (current.viewStats?.totalBlocks ?? 0) > cBlocks &&
         (current.viewStats?.mountedBlocks ?? 0) > 0 &&
         (current.textLen ?? 0) > 0 ? v : undefined
-    }, 20000)
+    }, 30000)
     assert(cDoc.isDirty, 'C 是未保存权威文档')
 
     const bDoc = await vscode.workspace.openTextDocument(bUri)
