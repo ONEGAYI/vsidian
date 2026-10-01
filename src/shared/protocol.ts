@@ -1322,6 +1322,8 @@ export interface PaintProbe {
    *  文本；多光标开→drawSelection 绘制，baseTheme 明暗变体 light=black /
    *  dark=#ddd）。元素不在场（多光标关、未聚焦或 jsdom）为 null */
   drawnCursorColor?: string | null
+  /** 阅读查找隐藏源码反馈：当前文字真实命中且有背景才视为 visible。 */
+  readingFindSource?: { visible: boolean; text: string; current: string; background: string | null }
   /** #42/#43 表格绘制：真宿主文本命中与计算样式；无表格/未选中为 null。 */
   table?: {
     cellVisible: boolean
@@ -2114,6 +2116,9 @@ function isPaintProbe(v: unknown): v is PaintProbe {
     typeof v.darkTheme === 'boolean' &&
     isNullOrString(v.caretColor) &&
     (v.drawnCursorColor === undefined || isNullOrString(v.drawnCursorColor)) &&
+    (v.readingFindSource === undefined || (isObject(v.readingFindSource) &&
+      typeof v.readingFindSource.visible === 'boolean' && isString(v.readingFindSource.text) &&
+      isString(v.readingFindSource.current) && isNullOrString(v.readingFindSource.background))) &&
     (v.table === undefined || (
       isObject(v.table) &&
       typeof v.table.cellVisible === 'boolean' &&

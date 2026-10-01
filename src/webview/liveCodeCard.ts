@@ -53,6 +53,8 @@ export type { CodeCardConfig } from './codeCardState'
 export const CODE_CARD_CLASS_NAMES = {
   /** 卡片覆盖行（含被清空的围栏行与全部内容行） */
   line: 'vsidian-code-card-line',
+  /** Live 字符选区：绘在代码文字层，避免底层 drawSelection 被不透明行底盖住。 */
+  selection: 'vsidian-code-selection',
   /** 首行圆角修饰（顶边圆角实际由头部横带承担） */
   edgeTop: 'vsidian-code-card-edge-top',
   /** 尾行圆角修饰（卡片底边圆角） */
@@ -496,6 +498,12 @@ export function buildCodeCardDecorations(
     }
     const openLine = doc.lineAt(fence.from)
     const closeLine = doc.lineAt(Math.min(fence.to, doc.length))
+    // drawSelection 位于正文背景下；代码主题允许不透明底色，选区在文字层补绘。
+    for (const range of selection.ranges) {
+      const from = Math.max(range.from, fence.from)
+      const to = Math.min(range.to, fence.to)
+      if (to > from) out.push(Decoration.mark({ class: CODE_CARD_CLASS_NAMES.selection }).range(from, to))
+    }
     const lang = resolveCodeLanguage(fence.info)
     // 语法高亮（#83）：卡片关闭时朴素围栏仍可着色；折叠块不可见跳过
     if (config.highlight && !isFolded && lang && hasHighlightEngine(lang.id)) {

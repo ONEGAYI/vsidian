@@ -18,6 +18,25 @@ function rule(selector: string, declaration?: RegExp): string {
 }
 
 describe('查找面板 CSS 契约（#236）', () => {
+  it('阅读源码反馈固定定位、不占正文布局，源码文字自动换行且共用查找色变量', () => {
+    const popup = rule(':where(#app .vsidian-reading-find-source)')
+    expect(popup).toMatch(/position:\s*fixed/)
+    expect(popup).toContain('--vscode-editorWidget-background')
+    expect(popup).toMatch(/max-height:\s*160px/)
+    expect(rule(':where(#app .vsidian-reading-find-source[hidden])')).toMatch(/display:\s*none/)
+    expect(rule(':where(#app .vsidian-reading-find-source-code)')).toMatch(/white-space:\s*pre-wrap/)
+    expect(css).toContain(':where(#app .vsidian-reading-find-source .vsidian-find-match),')
+    expect(css).toContain(':where(#app .vsidian-reading-find-source .vsidian-find-match-current),')
+  })
+  it('阅读字符高亮与 Live 共用色变量，旧命中块入口默认透明', () => {
+    expect(rule('#app .vsidian-view-reading .vsidian-find-match'))
+      .toContain('--vsidian-find-match-background')
+    expect(rule('#app .vsidian-view-reading .vsidian-find-match-current'))
+      .toContain('--vsidian-find-match-current-background')
+    const legacy = rule('#app .vsidian-view-reading .vsidian-reading-block.vsidian-reading-find-hit')
+    expect(legacy).toContain('var(--vsidian-find-hit-block-background, transparent)')
+    expect(legacy).not.toContain('box-shadow')
+  })
   it('面板 open 态显隐：默认 none，open 类展开为 flex', () => {
     expect(rule('.vsidian-find', /display:\s*none/)).toBeTruthy()
     expect(rule('.vsidian-find.vsidian-find-open', /display:\s*flex/)).toBeTruthy()

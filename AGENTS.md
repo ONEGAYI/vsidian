@@ -329,6 +329,8 @@ vsidian/
 │       ├── quickActionState.ts         # 快速操作状态判定
 │       ├── readingBlocks.ts            # markdown-it 阅读块切分
 │       ├── readingCodeCard.ts          # 阅读代码块卡片增强
+│       ├── readingFind.ts              # 阅读查找源坐标与字符高亮
+│       ├── readingFindSource.ts        # 阅读查找只读源码浮层
 │       ├── readingMarkdown.ts          # markdown-it 安全渲染层
 │       ├── readingProbe.ts             # 阅读视图性能探针
 │       ├── readingView.ts              # 阅读视图 DOM 构建与锚点定位

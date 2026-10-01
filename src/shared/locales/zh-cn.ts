@@ -330,6 +330,9 @@ export const zhCn: Record<MessageKey, string> = {
   /** 计数形态（VSCode 同款）：{n} 当前序号、{total} 命中总数 */
   'find.count': '第 {n} 项，共 {total} 项',
   'find.noResults': '无结果',
+  'find.sourceHit': '源码命中',
+  'find.sourceReadonly': '只读',
+  'find.sourceLocation': '第 {line} 行，第 {column} 列',
   /** #238 查找选项条（Ctrl+D 会话期间的迷你三按钮）容器可访问名称 */
   'find.optionsBar': '查找选项',
 

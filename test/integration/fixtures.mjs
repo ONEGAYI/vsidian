@@ -807,6 +807,8 @@ const HR_DOC = [
 export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample, generateMermaidDenseSample }) {
   writeFileSync(path.join(wsDir, 'lf.md'), LF_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'find.md'), FIND_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'find-hidden-source.md'),
+    '| name | state |\n| --- | --- |\n| build | ok |\n\nBelow the table.\n', 'utf8')
   // #241 替换头区排除样例：成型 frontmatter（title 值与 tags 项各含一次
   // 「目标词」——头区命中载体）与正文 3 处命中（替换排除断言载体）
   writeFileSync(path.join(wsDir, 'find-fm.md'), [

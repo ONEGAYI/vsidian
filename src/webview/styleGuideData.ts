@@ -2771,13 +2771,14 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "domain": "chrome",
     "category": "code-card",
     "kind": "selector",
-    "target": ".vsidian-code-card-line",
-    "purpose": "卡片覆盖的行级类：live 为源行级（含被清空的围栏行与全部代码行，承载卡片底色），阅读为卡内行 span（与 live 同类名，跨视图同口径）；与正文域 live-code-line 并行（live 卡片开启时两者都在场）。",
+    "target": ".vsidian-code-card-line（卡片行）；.vsidian-code-selection（Live 代码字符选区）",
+    "purpose": "卡片覆盖的行级类：live 为源行级（含被清空的围栏行与全部代码行，承载卡片底色），阅读为卡内行 span；与正文域 live-code-line 并行。Live 非空代码选区另挂 .vsidian-code-selection 字符装饰：drawSelection 开启时在文字层补绘聚焦/失焦选区色，避免不透明卡片底色遮住选区；多光标关闭时沿用原生选区。",
     "views": [
       "live",
       "reading"
     ],
-    "dom": "live：.cm-line 行元素（卡片开启的围栏范围）；阅读：code 内 span.vsidian-reading-code-line。",
+    "states": "卡片行常驻；.vsidian-code-selection 仅在 Live 非空选区与围栏代码相交时出现（支持多选区），文字层补绘由 .cm-editor:has(.cm-selectionLayer) 门控。",
+    "dom": "live：.cm-line 行元素（卡片开启的围栏范围），其代码选区内为 span.vsidian-code-selection；阅读：code 内 span.vsidian-reading-code-line。",
     "example": ".vsidian-code-card-line {\n  background: var(--vsidian-code-card-background);\n}",
     "obsidian": {
       "counterpart": ".HyperMD-codeblock（行族；正文域别名挂于 .vsidian-code-line，卡片行类为自有扩展）",
@@ -2785,6 +2786,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     },
     "verification": [
       "codeCardPaintCssContract：底色变量",
+      "浏览器 multicursor：不透明代码底色下截图像素必须为选区色",
       "集成「界面域样式契约」（#133）：chromeSelectors[\"live-code-card-live\"/\"live-code-card-reading\"] 探针命中"
     ],
     "introduced": "#79（2026-09-26）"
@@ -3689,14 +3691,14 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "domain": "chrome",
     "category": "find-panel",
     "kind": "selector",
-    "target": ".vsidian-find-match（全部匹配装饰）与 .vsidian-find-match-current（当前匹配装饰，live 行内）；.vsidian-reading-find-hit（阅读命中块，块级）",
-    "purpose": "查找匹配高亮（#14 既有结构，#236 起匹配集来自 @codemirror/search 引擎、高亮自绘——官方面板不装配，其高亮仅在面板存在时渲染）：live 侧双轨——当前匹配 StateField 直接装饰（滚动后始终可见）+ 全部匹配视口内间接装饰；阅读侧块级命中（只高亮当前匹配所在块）。匹配集基于全文文本模型，屏外内容同样计数与定位。",
+    "target": ".vsidian-find-match（全部匹配装饰）与 .vsidian-find-match-current（当前匹配装饰，双模式行内）；.vsidian-reading-find-hit（阅读当前命中块，旧片段入口）",
+    "purpose": "查找匹配高亮：匹配集来自 @codemirror/search 引擎，基于全文源码计数与定位。Live 为当前匹配直接装饰与全部匹配视口装饰；阅读侧按源坐标映射到已挂载块内的可见文字，全部命中浅黄、当前命中深橙，callout/引用块只染命中文字。隐藏链接目标、图片属性与已渲染公式等源码命中仍计数，不挪用相同可见文字作高亮。旧 .vsidian-reading-find-hit 仍挂当前命中块，默认不铺块底或边条，旧片段可继续命中。",
     "views": [
       "live",
       "reading"
     ],
     "states": "交互态装饰（查找会话打开且有命中时在场）——不进静态探针；命中计数、当前序号与定位由集成 find 用例按行为路径验证。",
-    "dom": "live：#app .cm-editor .cm-content 内行内装饰；reading：#app .vsidian-view-reading 的命中块（.vsidian-reading-block 挂 .vsidian-reading-find-hit）。",
+    "dom": "live：#app .cm-editor .cm-content 内行内装饰；reading：#app .vsidian-view-reading 内匹配文字的 span，当前命中块仍保留 .vsidian-reading-block.vsidian-reading-find-hit。",
     "example": "#app .cm-editor .cm-content .vsidian-find-match {\n  background-color: rgba(234, 179, 8, 0.4);\n}",
     "obsidian": {
       "counterpart": "无（Obsidian 命中高亮为应用级）",
@@ -3704,7 +3706,8 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     },
     "verification": [
       "单元 findSession：匹配集与装饰类名（引擎包裹层）",
-      "集成 find 用例（#14/#236）：命中计数、序号与屏外定位"
+      "集成 find 用例（#14/#236）：命中计数、序号与屏外定位",
+      "单元 readingVirtualView、浏览器 findPanel：精确命中、隐藏目标不串位、主题绘制、重挂载与模式切换保持、旧块变量仍生效"
     ],
     "introduced": "#14；#236（引擎迁移）"
   },
@@ -3714,7 +3717,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "find-panel",
     "kind": "variable",
     "target": "--vsidian-find-match-background / --vsidian-find-match-current-background / --vsidian-find-match-current-outline / --vsidian-find-hit-block-background",
-    "purpose": "查找高亮四变量（#14 既有）：--match-background 全部匹配底色（默认黄系半透）；--match-current-background 当前匹配底色（默认橙系，live 行内与阅读命中块左边条同引）；--match-current-outline 当前匹配描边；--hit-block-background 阅读命中块底色。",
+    "purpose": "查找高亮四变量：--match-background 全部匹配底色（默认黄系半透）；--match-current-background 当前匹配底色（默认橙系，双模式字符装饰同引）；--match-current-outline 当前匹配描边；--hit-block-background 阅读当前命中块的兼容底色入口（默认透明，片段显式赋值仍染块底）。",
     "views": [
       "live",
       "reading"
@@ -3729,6 +3732,30 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "单元 findPanelCssContract：变量消费规则存在（回落值内联形态）"
     ],
     "introduced": "#14"
+  },
+  {
+    "id": "reading-find-source",
+    "domain": "chrome",
+    "category": "find-panel",
+    "kind": "selector",
+    "target": ".vsidian-reading-find-source（只读源码浮层）与 .vsidian-reading-find-source-header / -location / -readonly / -code；浮层内复用 .vsidian-find-match / .vsidian-find-match-current",
+    "purpose": "阅读查找的隐藏源码反馈：当前命中无法完整映射到可见文字时，保留渲染态并显示命中起始源码行。表格分隔符、隐藏链接目标、公式与注释等无需切模式即可定位；计数与匹配顺序不变。源码以纯文本呈现，无编辑与写回入口。",
+    "views": [
+      "reading"
+    ],
+    "states": "交互态，只在隐藏或部分隐藏的当前命中时挂载；可见命中、关闭查找、切 Live 或销毁时移除。滚动后锚点屏外则隐藏，虚拟块重挂载恢复；窗口变化重定位。浮层 fixed 定位，不占正文排版空间，不改变段落位置、块高度或滚动高度；不抢查找焦点，避让查找面板，视口边缘翻转与收缩。长行截取当前命中附近不超过约 320 个 UTF-16 单元且不拆 emoji；跨行命中显示起始行，行末 LF 以 \\n 显示。",
+    "dom": "挂 #app 下、阅读滚动容器外；aside[role=region] 内头部显示源码命中、源行列与只读标签，pre > code 内 span 精确高亮。无 input、textarea、contenteditable 或新快捷键操作，沿用既有查找导航与关闭键。",
+    "example": "#app .vsidian-reading-find-source {\n  border-radius: 5px;\n}\n#app .vsidian-reading-find-source-code {\n  font-size: 13px;\n}",
+    "obsidian": {
+      "counterpart": "无（Vsidian 阅读查找的源码反馈）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 readingVirtualView：隐藏与部分隐藏命中、可见竖线、纯文本安全、长行与生命周期；findPanelCssContract 钉住 fixed 与共享色变量",
+      "浏览器 findPanel：明暗截图像素、段落与滚动高度不移动、键盘导航、模式切换、零写回、窄屏与虚拟挂载",
+      "集成编辑区查找：view.state.paint.readingFindSource 当前文字命中与背景实际生效"
+    ],
+    "introduced": "#241 验收跟进（2026-10-01）"
   },
   {
     "id": "find-options-bar",
@@ -4555,8 +4582,9 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "live-code-card-line": {
-    "purpose": "The line-level class covered by cards: in live view the source line level (including the cleared fence lines and all code lines, carrying the card background); in reading view the in-card line spans (same class name as live, same convention across views); runs in parallel with the content-domain live-code-line (both are present when live cards are enabled).",
-    "dom": "Live: .cm-line line elements (the fence range with cards enabled); reading: span.vsidian-reading-code-line inside code.",
+    "purpose": "Card lines carry the background on live source lines, including fence lines, and reading code-line spans. Live code ranges also carry .vsidian-code-selection: with drawSelection enabled, the text layer paints focused or inactive selection colors above opaque code backgrounds. With multicursor disabled, native selection rendering remains in use.",
+    "states": "Card lines persist; .vsidian-code-selection is emitted only where nonempty live selections intersect fenced code, including multiple ranges. Text-layer painting is gated by .cm-editor:has(.cm-selectionLayer).",
+    "dom": "Live: .cm-line elements in card-enabled fences, with span.vsidian-code-selection around selected code text; reading: span.vsidian-reading-code-line inside code.",
     "obsidian": {
       "counterpart": ".HyperMD-codeblock (the line family; the content-domain alias is attached to .vsidian-code-line, and the card line class is a vsidian-specific extension)"
     }
@@ -4884,18 +4912,26 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "find-match-highlight": {
-    "purpose": "Find match highlighting (structure from #14; since #236 the match set comes from the @codemirror/search engine and the highlight is self-drawn — the official panel is not installed and its highlight only renders while that panel exists): live side is dual-track — the current match via a StateField direct decoration (stays visible after scrolling) plus all matches via in-viewport indirect decorations; the reading side highlights at block level (only the block containing the current match). The match set is computed over the full-text model, so off-screen content is counted and located as well.",
+    "purpose": "Matches come from the @codemirror/search engine and are counted and located in the full source text. Live uses direct current-match and viewport match decorations. Reading maps source positions to visible text in mounted blocks: all hits are pale yellow and the current hit orange, including within callouts and blockquotes. Hidden link targets, image attributes, and rendered formula source still count without highlighting unrelated identical visible text. The current block retains .vsidian-reading-find-hit for existing snippets; default rendering adds no block tint or side bar.",
     "states": "Interactive-state decoration (present only while a find session is open and has hits) — excluded from static probes; hit counting, the current index and positioning are verified by the integration find cases along behavior paths.",
-    "dom": "live: inline decorations inside #app .cm-editor .cm-content; reading: the hit block inside #app .vsidian-view-reading (.vsidian-reading-block carrying .vsidian-reading-find-hit).",
+    "dom": "Live: inline decorations inside #app .cm-editor .cm-content; reading: spans around matching text inside #app .vsidian-view-reading. The current block retains .vsidian-reading-block.vsidian-reading-find-hit.",
     "obsidian": {
       "counterpart": "None (Obsidian match highlighting is application-level)"
     }
   },
   "var-find-highlight": {
-    "purpose": "The four find-highlight variables (from #14): --match-background is the background of all matches (semi-transparent yellow by default); --match-current-background the current-match background (orange by default, shared by the live inline decoration and the reading hit-block left bar); --match-current-outline the current-match outline; --hit-block-background the reading hit-block background.",
+    "purpose": "Four find-highlight variables: --match-background colors all matches (semi-transparent yellow by default); --match-current-background colors the current match (orange by default, shared by both views); --match-current-outline sets its outline. --hit-block-background remains the reading current-block background entry for existing snippets, transparent by default and still effective when explicitly set.",
     "dom": "Consumed by the live match decorations and the reading hit-block rules; defaults are inlined as var() fallbacks in the rules (no root value defined on #app — a snippet overriding at :root takes effect globally).",
     "obsidian": {
       "counterpart": "None (Obsidian highlight colors are application settings, not CSS variables)"
+    }
+  },
+  "reading-find-source": {
+    "purpose": "Reading find feedback for hidden source: when the current match cannot be fully mapped to visible text, keep the rendered content and show its starting source line. Table delimiters, hidden link targets, formulas and comments remain locatable without switching modes. Match counts and order stay unchanged. Source is plain text with no editing or writeback path.",
+    "states": "Interactive state, mounted only for hidden or partially hidden current hits. Removed on visible hits, closing find, switching to Live, or disposal. Offscreen anchors hide it; virtual remounts restore it, and resizing repositions it. Fixed positioning leaves paragraph positions, block heights and scroll height unchanged; it never steals find focus, avoids the find panel and flips or shrinks at viewport edges. Long lines show about 320 UTF-16 units near the hit without splitting emoji. Multiline matches show the starting line, with trailing LF represented as \\n.",
+    "dom": "Inside #app but outside the reading scroll container. An aside[role=region] contains a header with source-hit, source line/column and read-only labels, followed by pre > code with precise span highlights. No input, textarea, contenteditable or new keyboard action; existing find navigation and close keys apply.",
+    "obsidian": {
+      "counterpart": "None (Vsidian reading find source feedback)"
     }
   }
 } as Readonly<Record<string, StyleContractEntryOverride>>

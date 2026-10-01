@@ -26,26 +26,34 @@
 //   恢复其既有行为（无 allowMultipleSelections 时多 range 被 asSingle 折
 //   回，等同于光标上/下移一行——即 #237 之前的既有行为）
 import { EditorState } from '@codemirror/state'
-import { drawSelection, EditorView, keymap } from '@codemirror/view'
+import { drawSelection, EditorView, keymap, ViewPlugin } from '@codemirror/view'
 
-/** Windows 宿主防 Alt 夺焦（#241 验收实测）：真宿主里 Alt+mousedown 的
- *  默认行为会把窗口焦点交给宿主菜单层——光标虽已设好（mousedown 事件
- *  照常送达 CM6），但 webview 随即失焦且 Alt 的 keyup 被吞（修饰键粘滞），
- *  后续键入全部落在宿主快捷键层（光标在、无法打字、字母变 Alt 快捷键）。
- *  不阻断 mousedown 默认流程（preventDefault 会连带废掉
- *  clickAddsSelectionRange 的多光标添加），只在 mouseup 事后自愈：焦点
- *  已不在编辑器内时追回（headless 浏览器无此宿主行为，该防御只在实际
- *  宿主环境生效）。 */
-const altClickFocusGuard = EditorView.domEventHandlers({
-  mouseup(event: MouseEvent, view: EditorView) {
-    if (!event.altKey || event.button !== 0) {
+/** 宿主会转发 webview 的 Alt keyup 并激活菜单；真宿主复现表明夺焦在
+ *  释放 Alt 时发生，mouseup 追回焦点过早。只消费已用于点击添光标的
+ *  Alt 释放，单独按 Alt 仍交给宿主；不干预 CM6 的 mousedown 选区逻辑。 */
+const altClickFocusGuard = ViewPlugin.fromClass(class {
+  clickedWithAlt = false
+}, {
+  eventHandlers: {
+    keydown(event: KeyboardEvent) {
+      if (event.key === 'Alt' && !event.repeat) this.clickedWithAlt = false
       return false
-    }
-    const dom = view.contentDOM
-    if (document.activeElement !== dom && !dom.contains(document.activeElement)) {
-      view.focus()
-    }
-    return false
+    },
+    mousedown(event: MouseEvent) {
+      if (event.altKey && event.button === 0) this.clickedWithAlt = true
+      return false
+    },
+    keyup(event: KeyboardEvent) {
+      if (event.key !== 'Alt' || !this.clickedWithAlt) return false
+      this.clickedWithAlt = false
+      event.preventDefault()
+      event.stopPropagation()
+      return true
+    },
+    blur() {
+      this.clickedWithAlt = false
+      return false
+    },
   },
 })
 

@@ -279,6 +279,14 @@ describe('isWebviewToHost', () => {
       }),
     ).toBe(true)
     // #237 绘制光标色：字符串或 null 合法、缺省合法（多光标关/元素不在场）
+    expect(isWebviewToHost({ ...base, paint: {
+      textVisible: true, scrollerDisplay: 'flex', gutterUserSelect: 'none', darkTheme: false, caretColor: null,
+      readingFindSource: { visible: 'yes', text: '| a |', current: '|', background: 'rgb(20, 120, 200)' },
+    } })).toBe(false)
+    expect(isWebviewToHost({ ...base, paint: {
+      textVisible: true, scrollerDisplay: 'flex', gutterUserSelect: 'none', darkTheme: false, caretColor: null,
+      readingFindSource: { visible: true, text: '| a |', current: '|', background: 'rgb(20, 120, 200)' },
+    } })).toBe(true)
     expect(
       isWebviewToHost({
         ...base,

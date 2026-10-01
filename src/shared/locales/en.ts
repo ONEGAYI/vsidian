@@ -353,6 +353,9 @@ export const en = {
   /** Count form (VSCode-style): {n} current index, {total} match total */
   'find.count': '{n} of {total}',
   'find.noResults': 'No results',
+  'find.sourceHit': 'Source match',
+  'find.sourceReadonly': 'Read-only',
+  'find.sourceLocation': 'Line {line}, column {column}',
   /** #238 查找选项条（Ctrl+D 会话期间的迷你三按钮）容器可访问名称 */
   'find.optionsBar': 'Find options',
 

@@ -7291,7 +7291,7 @@ export class WebviewSyncController {
     this.findDoc = null
     // 纯 effect 事务：不带 changes，无编辑历史、无出站
     this.view?.dispatch({ effects: setFindMatches.of({ matches: [], index: 0 }) })
-    this.readingView?.highlightBlock(null)
+    this.readingView?.highlightMatches([], 0)
     if (this.viewMode === 'live') {
       this.view?.focus()
     } else {
@@ -7426,7 +7426,6 @@ export class WebviewSyncController {
       }),
     })
     const total = this.findMatches.length
-    const cur = this.findMatches[this.findIndex]
     if (this.findCountEl) {
       this.findCountEl.textContent = this.findCountText()
       // 空态类仅在「查询非空而零命中」时点亮（空查询是未搜索，不是无结果）
@@ -7468,12 +7467,8 @@ export class WebviewSyncController {
     this.findReplaceRowEl?.classList.toggle(FIND_CLASS_NAMES.replaceOpen, replaceVisible)
     this.findToggleEl?.setAttribute('aria-expanded', String(replaceVisible))
     if (this.readingView) {
-      // 块级高亮只在阅读模式生效（live 容器隐藏期不占用 DOM 类）
-      const start =
-        cur && this.viewMode === 'reading'
-          ? (this.readingView.anchorStartFor(this.clampToDoc(cur.from)) ?? null)
-          : null
-      this.readingView.highlightBlock(start)
+      this.readingView.highlightMatches(
+        this.viewMode === 'reading' && this.findOpen ? this.findMatches : [], this.findIndex)
     }
   }
 
@@ -7557,7 +7552,7 @@ export class WebviewSyncController {
       const start = this.readingView.anchorStartFor(this.clampToDoc(cur.from)) ?? cur.from
       this.modeAnchor = start
       this.readingView.scrollToSrcStart(start)
-      this.readingView.highlightBlock(start)
+      this.readingView.highlightMatches(this.findMatches, this.findIndex)
       // 定位意图重申：滚动事件（异步，含 clamp 后的视口读数）触发的锚点
       // 更新不得覆盖查找定位——帧+宏任务后（滚动事件突发期之后）重申目标
       // 锚点；同一窗口内的用户滚动会被覆盖（一帧内，定位优先）
@@ -8736,6 +8731,7 @@ export class WebviewSyncController {
         this.decorateMountedReadingCodeCards()
       },
     })
+    if (this.readingContainer?.contains(block)) this.readingView?.refreshFindHighlights(block)
   }
 
   /** #191 阅读折行容器类落位（幂等）：仅关闭态挂 vsidian-reading-nowrap，
@@ -9446,6 +9442,10 @@ export class WebviewSyncController {
           .filter((t) => t !== ''),
       }
       : undefined
+    const findSource = this.viewMode === 'reading'
+      ? this.readingContainer?.closest('#app')?.querySelector<HTMLElement>('.vsidian-reading-find-source')
+      : null
+    const findSourceCurrent = findSource?.querySelector<HTMLElement>('.vsidian-find-match-current')
     return {
       textVisible,
       scrollerDisplay: view.scrollDOM ? getComputedStyle(view.scrollDOM).display : null,
@@ -9454,6 +9454,12 @@ export class WebviewSyncController {
       darkTheme: view.state.facet(EditorView.darkTheme),
       caretColor,
       drawnCursorColor,
+      readingFindSource: {
+        visible: !!findSourceCurrent && paintedWithVisibleBackground(findSourceCurrent),
+        text: findSource?.querySelector('code')?.textContent ?? '',
+        current: findSourceCurrent?.textContent ?? '',
+        background: findSourceCurrent ? getComputedStyle(findSourceCurrent).backgroundColor : null,
+      },
       table: {
         cellVisible,
         caretGridColumn,

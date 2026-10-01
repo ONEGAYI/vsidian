@@ -95,11 +95,66 @@ async function altClick(page, offset) {
 }
 
 try {
+  await scenario('代码块不透明底色下：选区必须真正绘制在文字背景上',
+    { doc: '```js\nlet hi = "hello";\n```', cursor: 12 }, async (page) => {
+      await page.addStyleTag({ content: '#app { --vsidian-code-card-background: rgb(36,37,38); --vsidian-live-code-background: rgb(36,37,38); --vscode-editor-selectionBackground: rgb(20,120,200); }' })
+      // view.locate 自带跳转淡黄高亮；真实移动清除它后再测选区像素。
+      await page.keyboard.press('ArrowLeft')
+      await page.keyboard.press('ArrowRight')
+      const at = await page.evaluate(() => window.posCoords(12)) // hi 与 = 之间的空格
+      const clip = { x: Math.floor(at.x + 2), y: Math.floor(at.y), width: 2, height: 2 }
+      const pixel = async () => {
+        const png = await page.screenshot({ clip })
+        return page.evaluate(async (base64) => {
+          const image = new Image()
+          image.src = `data:image/png;base64,${base64}`
+          await image.decode()
+          const canvas = document.createElement('canvas')
+          canvas.width = image.width; canvas.height = image.height
+          const context = canvas.getContext('2d')
+          context.drawImage(image, 0, 0)
+          return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3)
+        }, png.toString('base64'))
+      }
+      await settle(page)
+      assert.deepEqual(await pixel(), [36,37,38], '未选中时为空格所在代码块底色')
+      await page.keyboard.press('Shift+ArrowRight')
+      assert.deepEqual((await read(page)).ranges, [{from:12,to:13}], '状态层应为有效选区')
+      await settle(page)
+      assert.deepEqual(await pixel(), [20,120,200], '截图像素必须呈选区色，不得被代码块底色盖住')
+      await page.keyboard.press('Escape')
+      await page.evaluate(() => window.locate(6))
+      await page.keyboard.press('ArrowRight')
+      await page.keyboard.press('ArrowLeft')
+      await altClick(page, 12)
+      await page.keyboard.press('Shift+ArrowRight')
+      assert.deepEqual((await read(page)).ranges, [{from:6,to:7},{from:12,to:13}])
+      await settle(page)
+      assert.deepEqual(await pixel(), [20,120,200], '副选区同样必须绘在不透明代码底色上')
+      await page.evaluate(() => window.setMulticursor(false))
+      await page.evaluate(() => window.locate(12))
+      await page.keyboard.press('ArrowLeft')
+      await page.keyboard.press('ArrowRight')
+      await page.keyboard.press('Shift+ArrowRight')
+      assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.vsidian-code-selection')).backgroundColor), 'rgba(0, 0, 0, 0)',
+        '多光标关闭时补绘退出，由原生选区承担')
+    })
   // ---- 场景 A：Alt+点击普通正文——添加副光标、绘制层可见、键入双落、
   //      Esc 收敛、再点既有光标位置移除（toggle） ----
   await scenario('Alt+点击普通正文：添加副光标 + 绘制层可见 + 双落键入 + Esc 收敛 + 再点移除',
     { doc: PLAIN_DOC, cursor: 5 }, async (page) => {
+      await page.evaluate(() => {
+        window.altReleases = 0
+        window.addEventListener('keyup', (event) => {
+          if (event.key === 'Alt') window.altReleases++
+        })
+      })
       await altClick(page, 24) // 第三行 't|hard line'（offset 24 在 t/h 间）
+      assert.equal(await page.evaluate(() => window.altReleases), 0,
+        'Alt+点击后的 Alt keyup 不得冒泡到宿主菜单转发层')
+      await page.keyboard.press('Alt')
+      assert.equal(await page.evaluate(() => window.altReleases), 1,
+        '单独按 Alt 必须继续交给宿主（菜单键不接管）')
       let state = await read(page)
       assert.deepEqual(state.ranges, [{ from: 5, to: 5 }, { from: 24, to: 24 }],
         `Alt+点击后应为双光标: ${JSON.stringify(state)}`)

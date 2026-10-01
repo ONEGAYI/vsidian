@@ -762,8 +762,9 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
   // ---- 代码块卡片（code-card，10 条；#78–#84）----
   'live-code-card-line': {
     purpose:
-      'The line-level class covered by cards: in live view the source line level (including the cleared fence lines and all code lines, carrying the card background); in reading view the in-card line spans (same class name as live, same convention across views); runs in parallel with the content-domain live-code-line (both are present when live cards are enabled).',
-    dom: 'Live: .cm-line line elements (the fence range with cards enabled); reading: span.vsidian-reading-code-line inside code.',
+      'Card lines carry the background on live source lines, including fence lines, and reading code-line spans. Live code ranges also carry .vsidian-code-selection: with drawSelection enabled, the text layer paints focused or inactive selection colors above opaque code backgrounds. With multicursor disabled, native selection rendering remains in use.',
+    states: 'Card lines persist; .vsidian-code-selection is emitted only where nonempty live selections intersect fenced code, including multiple ranges. Text-layer painting is gated by .cm-editor:has(.cm-selectionLayer).',
+    dom: 'Live: .cm-line elements in card-enabled fences, with span.vsidian-code-selection around selected code text; reading: span.vsidian-reading-code-line inside code.',
     obsidian: {
       counterpart:
         '.HyperMD-codeblock (the line family; the content-domain alias is attached to .vsidian-code-line, and the card line class is a vsidian-specific extension)',
@@ -1092,17 +1093,23 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
   },
   'find-match-highlight': {
     purpose:
-      'Find match highlighting (structure from #14; since #236 the match set comes from the @codemirror/search engine and the highlight is self-drawn — the official panel is not installed and its highlight only renders while that panel exists): live side is dual-track — the current match via a StateField direct decoration (stays visible after scrolling) plus all matches via in-viewport indirect decorations; the reading side highlights at block level (only the block containing the current match). The match set is computed over the full-text model, so off-screen content is counted and located as well.',
+      'Matches come from the @codemirror/search engine and are counted and located in the full source text. Live uses direct current-match and viewport match decorations. Reading maps source positions to visible text in mounted blocks: all hits are pale yellow and the current hit orange, including within callouts and blockquotes. Hidden link targets, image attributes, and rendered formula source still count without highlighting unrelated identical visible text. The current block retains .vsidian-reading-find-hit for existing snippets; default rendering adds no block tint or side bar.',
     states:
       'Interactive-state decoration (present only while a find session is open and has hits) — excluded from static probes; hit counting, the current index and positioning are verified by the integration find cases along behavior paths.',
-    dom: 'live: inline decorations inside #app .cm-editor .cm-content; reading: the hit block inside #app .vsidian-view-reading (.vsidian-reading-block carrying .vsidian-reading-find-hit).',
+    dom: 'Live: inline decorations inside #app .cm-editor .cm-content; reading: spans around matching text inside #app .vsidian-view-reading. The current block retains .vsidian-reading-block.vsidian-reading-find-hit.',
     obsidian: { counterpart: 'None (Obsidian match highlighting is application-level)' },
   },
   'var-find-highlight': {
     purpose:
-      'The four find-highlight variables (from #14): --match-background is the background of all matches (semi-transparent yellow by default); --match-current-background the current-match background (orange by default, shared by the live inline decoration and the reading hit-block left bar); --match-current-outline the current-match outline; --hit-block-background the reading hit-block background.',
+      'Four find-highlight variables: --match-background colors all matches (semi-transparent yellow by default); --match-current-background colors the current match (orange by default, shared by both views); --match-current-outline sets its outline. --hit-block-background remains the reading current-block background entry for existing snippets, transparent by default and still effective when explicitly set.',
     dom: 'Consumed by the live match decorations and the reading hit-block rules; defaults are inlined as var() fallbacks in the rules (no root value defined on #app — a snippet overriding at :root takes effect globally).',
     obsidian: { counterpart: 'None (Obsidian highlight colors are application settings, not CSS variables)' },
+  },
+  'reading-find-source': {
+    purpose: 'Reading find feedback for hidden source: when the current match cannot be fully mapped to visible text, keep the rendered content and show its starting source line. Table delimiters, hidden link targets, formulas and comments remain locatable without switching modes. Match counts and order stay unchanged. Source is plain text with no editing or writeback path.',
+    states: 'Interactive state, mounted only for hidden or partially hidden current hits. Removed on visible hits, closing find, switching to Live, or disposal. Offscreen anchors hide it; virtual remounts restore it, and resizing repositions it. Fixed positioning leaves paragraph positions, block heights and scroll height unchanged; it never steals find focus, avoids the find panel and flips or shrinks at viewport edges. Long lines show about 320 UTF-16 units near the hit without splitting emoji. Multiline matches show the starting line, with trailing LF represented as \\n.',
+    dom: 'Inside #app but outside the reading scroll container. An aside[role=region] contains a header with source-hit, source line/column and read-only labels, followed by pre > code with precise span highlights. No input, textarea, contenteditable or new keyboard action; existing find navigation and close keys apply.',
+    obsidian: { counterpart: 'None (Vsidian reading find source feedback)' },
   },
 }
 

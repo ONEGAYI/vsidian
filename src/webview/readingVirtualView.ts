@@ -20,6 +20,9 @@
 //   变化后实测回填 + 滚动锚定（视口顶块的顶部位置变化平移 scrollTop，
 //   保持源位置锚点稳定）
 import { splitReadingBlocks, type ReadingBlock } from './readingBlocks'
+import type { FindMatch } from './findSession'
+import { highlightReadingMatches } from './readingFind'
+import { ReadingFindSource } from './readingFindSource'
 import {
   READING_CLASS_NAMES,
   createReadingContainer,
@@ -94,6 +97,7 @@ export class VirtualReadingView {
 
   /** 块模型与高度表（解析与挂载分离：滚动只读不改块模型） */
   private blocks: ReadingBlock[] = []
+  private blocksByStart = new Map<number, ReadingBlock>()
   private text = ''
   private heights: number[] = []
   private tops: number[] = [0]
@@ -107,6 +111,10 @@ export class VirtualReadingView {
 
   /** #14 查找命中块的源 start（null 无高亮）：挂载/重建后自动重新施加 */
   private highlightSrcStart: number | null = null
+  private findMatches: readonly FindMatch[] = []
+  private findIndex = 0
+  private findCurrentVisible = false
+  private readonly findSource: ReadingFindSource
 
   /** #163 验收反馈：跳转目标高亮块的源 start（null 无）；挂载/重建后
    *  保持（与 highlightSrcStart 同机制），清除由 syncController 的消失
@@ -126,6 +134,7 @@ export class VirtualReadingView {
     this.container = container ?? createReadingContainer()
     this.fixedBufferPx = options.bufferPx
     this.hooks = options
+    this.findSource = new ReadingFindSource(this.container)
     this.spacerTop = document.createElement('div')
     this.spacerTop.className = `${READING_CLASS_NAMES.spacer} ${READING_CLASS_NAMES.spacerTop}`
     this.spacerBottom = document.createElement('div')
@@ -142,6 +151,7 @@ export class VirtualReadingView {
    *  选取在块模型上做（跨界块整块保留，不孤立解析截取字符串）；range 为
    *  LF 坐标（宿主经 NewlineCoordinator 换算后随 hover.result 下发） */
   setDocument(text: string, opts?: { range?: { start: number; end: number } }): void {
+    this.findSource.hide()
     this.parseCount += 1
     this.text = text
     this.blocks = splitReadingBlocks(text)
@@ -149,6 +159,7 @@ export class VirtualReadingView {
       const { start, end } = opts.range
       this.blocks = this.blocks.filter((b) => b.start <= end && b.end >= start)
     }
+    this.blocksByStart = new Map(this.blocks.map(block => [block.start, block]))
     this.heights = estimateHeights(this.blocks, text, this.calib)
     this.tops = blockTops(this.heights)
     // C-9：旧挂载元素逐个解除观察后再丢弃——ResizeObserver 对元素是
@@ -173,6 +184,7 @@ export class VirtualReadingView {
         this.hooks.onBlockMounted?.(el)
       }
       this.applyHighlightToDom()
+      this.highlightMatches(this.findMatches, this.findIndex)
       this.applyFlashToDom()
       return
     }
@@ -189,6 +201,7 @@ export class VirtualReadingView {
   updateNow(): void {
     if (this.blocks.length === 0) {
       this.clearAll()
+      this.updateFindSource()
       return
     }
     if (!this.layoutAvailable()) {
@@ -217,6 +230,7 @@ export class VirtualReadingView {
     }
     this.measureAndStabilize(scrollTop)
     this.updateSpacers()
+    this.updateFindSource()
   }
 
   /** 视口顶锚点块的源 start（真实布局优先；无布局环境回退高度表模型） */
@@ -346,6 +360,44 @@ export class VirtualReadingView {
     this.applyHighlightToDom()
   }
 
+  /** 字符高亮只装配已挂载块；旧命中块类保留，供现有片段继续命中。 */
+  highlightMatches(matches: readonly FindMatch[], index: number): void {
+    this.findMatches = matches
+    this.findIndex = index
+    this.findCurrentVisible = false
+    this.highlightSrcStart = matches[index] ? this.anchorStartFor(matches[index]!.from) : null
+    this.applyHighlightToDom()
+    for (const el of this.container.querySelectorAll<HTMLElement>(`.${READING_CLASS_NAMES.block}`)) {
+      this.paintFindBlock(el)
+    }
+    this.updateFindSource()
+  }
+
+  /** 代码卡重绘等局部 DOM 更新后恢复字符标记，不触发全文解析。 */
+  refreshFindHighlights(el: HTMLElement): void {
+    this.paintFindBlock(el)
+    this.updateFindSource()
+  }
+
+  private paintFindBlock(el: HTMLElement): void {
+    const block = this.blocksByStart.get(Number(el.dataset['vsidianSrcStart']))
+    if (block) {
+      const visible = highlightReadingMatches(el, block, this.text, this.findMatches, this.findIndex)
+      const current = this.findMatches[this.findIndex]
+      if (current && current.from >= block.start && current.from < block.end) this.findCurrentVisible = visible
+    }
+  }
+
+  private updateFindSource(): void {
+    const current = this.findMatches[this.findIndex]
+    if (!current || this.findCurrentVisible) { this.findSource.hide(); return }
+    if (!this.blocks.length) { this.findSource.show(this.container, this.text, this.findMatches, this.findIndex); return }
+    const block = this.blocks[blockIndexForOffset(this.blocks, current.from) ?? -1]
+    const el = block && this.container.querySelector<HTMLElement>(`.${READING_CLASS_NAMES.block}[data-vsidian-src-start="${block.start}"]`)
+    if (!el || (block.kind === 'frontmatter' && !el.querySelector('pre'))) { this.findSource.hide(); return }
+    this.findSource.show(el, this.text, this.findMatches, this.findIndex)
+  }
+
   /** 跳转目标高亮（#163 验收反馈）：块级类，null 清除；挂载/全文重建后
    *  保持——与 highlightBlock 同机制，但生命周期归 syncController 的
    *  消失监听（用户任意操作后清除），不随查找会话 */
@@ -450,6 +502,7 @@ export class VirtualReadingView {
   }
 
   dispose(): void {
+    this.findSource.dispose()
     this.observer?.disconnect()
     this.observer = null
     this.clearAll()
@@ -489,6 +542,7 @@ export class VirtualReadingView {
   }
 
   private clearAll(): void {
+    this.findSource.hide()
     this.observer && this.disconnectElements()
     this.releaseAllBlocks()
     this.elements.clear()
@@ -526,6 +580,7 @@ export class VirtualReadingView {
     this.observer?.observe(el)
     // #10：挂载即预备图片（进入挂载窗口 = 进入装载时机）
     this.hooks.onBlockMounted?.(el)
+    this.paintFindBlock(el)
   }
 
   private unmountBlock(i: number): void {

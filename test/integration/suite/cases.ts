@@ -712,6 +712,7 @@ interface ViewState {
     caretColor: string | null
     /** #237 绘制光标 .cm-cursor 的 borderLeftColor（多光标开时在场；不在场为 null） */
     drawnCursorColor?: string | null
+    readingFindSource?: { visible: boolean; text: string; current: string; background: string | null }
     table?: {
       cellVisible: boolean
       caretGridColumn?: number | null
@@ -3967,6 +3968,35 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const session = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
     assert(session.appliedEdits === 0, `查找与模式切换不得产生写回，实际 ${session.appliedEdits}`)
     assert(await readDisk('find.md') === diskBefore, '查找与模式切换后磁盘字节不变')
+  }],
+
+  ['编辑区查找：隐藏源码浮层真实绘制、导航与模式清理（#241 验收跟进）', async () => {
+    await openWithEditor('find-hidden-source.md')
+    await waitSessionReady('find-hidden-source.md')
+    const uri = wsUri('find-hidden-source.md').toString()
+    const diskBefore = await readDisk('find-hidden-source.md')
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.find.open', query: '|' })
+    const v = await waitViewState('find-hidden-source.md', s => s.find?.total === 9 && s.paint?.readingFindSource?.visible === true)
+    assert(v.paint!.readingFindSource!.text === '| name | state |', '源码反馈应为当前命中的原始行')
+    assert(v.paint!.readingFindSource!.current === '|', '源码反馈必须精确高亮当前竖线')
+    assert(v.paint!.readingFindSource!.background === 'rgba(255, 141, 55, 0.65)', '当前命中须实际消费默认高亮色')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.find.step', direction: 'next' })
+    await waitViewState('find-hidden-source.md', s => s.find?.index === 2 && s.paint?.readingFindSource?.visible === true)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.find.open', query: 'name' })
+    const visibleHit = await waitViewState('find-hidden-source.md', s => s.find?.total === 1 && s.paint?.readingFindSource?.visible === false)
+    assert(visibleHit.paint!.readingFindSource!.text === '', '可见正文命中不保留源码浮层')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.find.open', query: '|' })
+    await waitViewState('find-hidden-source.md', s => s.paint?.readingFindSource?.visible === true)
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive')
+    await waitViewState('find-hidden-source.md', s => s.viewMode === 'live' && s.paint?.readingFindSource?.visible === false)
+    await vscode.commands.executeCommand('onegayi.vsidian.mode.toReading')
+    await waitViewState('find-hidden-source.md', s => s.paint?.readingFindSource?.visible === true)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.find.close' })
+    await waitViewState('find-hidden-source.md', s => s.find?.open === false && s.paint?.readingFindSource?.text === '')
+    const session = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(session.appliedEdits === 0, '源码反馈与模式切换不得写回')
+    assert(await readDisk('find-hidden-source.md') === diskBefore, '源码反馈不修改磁盘字节')
   }],
 
   ['编辑区查找：替换写回、撤销粒度与阅读只读（#236）', async () => {

@@ -1205,7 +1205,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
   </section>
   <section class="domain" data-domain="chrome">
-    <h1 style="font-size:19px;margin-bottom:4px">界面域（70 条）</h1>
+    <h1 style="font-size:19px;margin-bottom:4px">界面域（71 条）</h1>
     <p class="note">界面域条目（#133 起逐项核实）：静态入口经探针在真实渲染中断言，交互态入口由浏览器/集成套件按行为路径验证；第三方渲染器（KaTeX/Mermaid）内部 DOM 不承诺为稳定接口（见各域「限制」类目）。</p>
     <h2>界面域 · 公式（5）</h2>
     <article class="entry" id="live-math">
@@ -1366,17 +1366,17 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
     <h2>界面域 · 代码块卡片（11）</h2>
     <article class="entry" id="live-code-card-line">
-      <h3><code>.vsidian-code-card-line</code><span class="eid">live-code-card-line</span></h3>
-      <p class="purpose">卡片覆盖的行级类：live 为源行级（含被清空的围栏行与全部代码行，承载卡片底色），阅读为卡内行 span（与 live 同类名，跨视图同口径）；与正文域 live-code-line 并行（live 卡片开启时两者都在场）。</p>
+      <h3><code>.vsidian-code-card-line（卡片行）；.vsidian-code-selection（Live 代码字符选区）</code><span class="eid">live-code-card-line</span></h3>
+      <p class="purpose">卡片覆盖的行级类：live 为源行级（含被清空的围栏行与全部代码行，承载卡片底色），阅读为卡内行 span；与正文域 live-code-line 并行。Live 非空代码选区另挂 .vsidian-code-selection 字符装饰：drawSelection 开启时在文字层补绘聚焦/失焦选区色，避免不透明卡片底色遮住选区；多光标关闭时沿用原生选区。</p>
       <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-semantic">semantic</span></p>
-
+<p class="states">状态：卡片行常驻；.vsidian-code-selection 仅在 Live 非空选区与围栏代码相交时出现（支持多选区），文字层补绘由 .cm-editor:has(.cm-selectionLayer) 门控。</p>
       <p class="obsidian">Obsidian 对应：.HyperMD-codeblock（行族；正文域别名挂于 .vsidian-code-line，卡片行类为自有扩展）</p>
 
-      <p class="dom">DOM 关系：live：.cm-line 行元素（卡片开启的围栏范围）；阅读：code 内 span.vsidian-reading-code-line。</p>
+      <p class="dom">DOM 关系：live：.cm-line 行元素（卡片开启的围栏范围），其代码选区内为 span.vsidian-code-selection；阅读：code 内 span.vsidian-reading-code-line。</p>
       <pre><code>.vsidian-code-card-line {
   background: var(--vsidian-code-card-background);
 }</code></pre>
-      <p class="verify">验证：codeCardPaintCssContract：底色变量；集成「界面域样式契约」（#133）：chromeSelectors[&quot;live-code-card-live&quot;/&quot;live-code-card-reading&quot;] 探针命中</p>
+      <p class="verify">验证：codeCardPaintCssContract：底色变量；浏览器 multicursor：不透明代码底色下截图像素必须为选区色；集成「界面域样式契约」（#133）：chromeSelectors[&quot;live-code-card-live&quot;/&quot;live-code-card-reading&quot;] 探针命中</p>
       <p class="life">引入：#79（2026-09-26）</p>
     </article>
     <article class="entry" id="live-code-card-edge">
@@ -2124,7 +2124,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：单元 hoverPopupCssContract：热区/按钮透明与指针/悬停与 focus-visible 显示/收起隐藏/chevron 旋转钉规则；单元 hoverPopup：属性区状态机（默认折叠/切换/刷新保留/重开复位/范围门控/降级合成标题栏）；浏览器 hoverPreview（#220）：真实指针折叠交互、键盘 Enter 操作、明暗主题下标题行与按钮可见性绘制层断言；单元 embedCard（#222）：嵌入卡片属性区状态机与视口回收重挂的状态保持</p>
       <p class="life">引入：#220（2026-09-30）</p>
     </article>
-    <h2>界面域 · 查找面板（5）</h2>
+    <h2>界面域 · 查找面板（6）</h2>
     <article class="entry" id="find-panel">
       <h3><code>.vsidian-find（浮动面板容器；.vsidian-find-open 展开态）—— 内部 .vsidian-find-row 主行（.vsidian-find-inputwrap 输入容器（边框/背景/聚焦环/非法红边载体）内嵌 .vsidian-find-input 输入框与 .vsidian-find-case（Aa）/ -word（ab）/ -regexp（.*）三开关（各自 -active 点亮态）/.vsidian-find-count 计数（-empty 零命中 / -hidden 空查询收起不占位）/ .vsidian-find-prev / -next 导航 / -in-selection 在选定内容中查找（-active 点亮；禁用态灰化）/ -close 关闭；-selection-range 为开启时正文里的范围淡底 mark）与 .vsidian-find-toggle 左缘替换栏展开切换（aria-expanded 随态）</code><span class="eid">find-panel</span></h3>
       <p class="purpose">编辑区浮动查找面板（#236 起三开关面板，引擎 @codemirror/search 外部驱动）：column 布局——主行（输入/大小写-全字-正则三开关/「第 n 项，共 total 项·无结果」计数/上一个/下一个/关闭，同序对齐 VSCode 原生浮层）+ 左缘替换栏展开切换。三开关为查找选项单一事实源（shared/findOptions，#238「选下一处相同词」同源消费），workspace 级记忆跨会话保留；面板在 Live 与阅读两模式均可用（阅读保留块级命中与定位）。</p>
@@ -2157,22 +2157,22 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="life">引入：#236（2026-10 批次）</p>
     </article>
     <article class="entry" id="find-match-highlight">
-      <h3><code>.vsidian-find-match（全部匹配装饰）与 .vsidian-find-match-current（当前匹配装饰，live 行内）；.vsidian-reading-find-hit（阅读命中块，块级）</code><span class="eid">find-match-highlight</span></h3>
-      <p class="purpose">查找匹配高亮（#14 既有结构，#236 起匹配集来自 @codemirror/search 引擎、高亮自绘——官方面板不装配，其高亮仅在面板存在时渲染）：live 侧双轨——当前匹配 StateField 直接装饰（滚动后始终可见）+ 全部匹配视口内间接装饰；阅读侧块级命中（只高亮当前匹配所在块）。匹配集基于全文文本模型，屏外内容同样计数与定位。</p>
+      <h3><code>.vsidian-find-match（全部匹配装饰）与 .vsidian-find-match-current（当前匹配装饰，双模式行内）；.vsidian-reading-find-hit（阅读当前命中块，旧片段入口）</code><span class="eid">find-match-highlight</span></h3>
+      <p class="purpose">查找匹配高亮：匹配集来自 @codemirror/search 引擎，基于全文源码计数与定位。Live 为当前匹配直接装饰与全部匹配视口装饰；阅读侧按源坐标映射到已挂载块内的可见文字，全部命中浅黄、当前命中深橙，callout/引用块只染命中文字。隐藏链接目标、图片属性与已渲染公式等源码命中仍计数，不挪用相同可见文字作高亮。旧 .vsidian-reading-find-hit 仍挂当前命中块，默认不铺块底或边条，旧片段可继续命中。</p>
       <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
 <p class="states">状态：交互态装饰（查找会话打开且有命中时在场）——不进静态探针；命中计数、当前序号与定位由集成 find 用例按行为路径验证。</p>
       <p class="obsidian">Obsidian 对应：无（Obsidian 命中高亮为应用级）</p>
 
-      <p class="dom">DOM 关系：live：#app .cm-editor .cm-content 内行内装饰；reading：#app .vsidian-view-reading 的命中块（.vsidian-reading-block 挂 .vsidian-reading-find-hit）。</p>
+      <p class="dom">DOM 关系：live：#app .cm-editor .cm-content 内行内装饰；reading：#app .vsidian-view-reading 内匹配文字的 span，当前命中块仍保留 .vsidian-reading-block.vsidian-reading-find-hit。</p>
       <pre><code>#app .cm-editor .cm-content .vsidian-find-match {
   background-color: rgba(234, 179, 8, 0.4);
 }</code></pre>
-      <p class="verify">验证：单元 findSession：匹配集与装饰类名（引擎包裹层）；集成 find 用例（#14/#236）：命中计数、序号与屏外定位</p>
+      <p class="verify">验证：单元 findSession：匹配集与装饰类名（引擎包裹层）；集成 find 用例（#14/#236）：命中计数、序号与屏外定位；单元 readingVirtualView、浏览器 findPanel：精确命中、隐藏目标不串位、主题绘制、重挂载与模式切换保持、旧块变量仍生效</p>
       <p class="life">引入：#14；#236（引擎迁移）</p>
     </article>
     <article class="entry" id="var-find-highlight">
       <h3><code>--vsidian-find-match-background / --vsidian-find-match-current-background / --vsidian-find-match-current-outline / --vsidian-find-hit-block-background</code><span class="eid">var-find-highlight</span></h3>
-      <p class="purpose">查找高亮四变量（#14 既有）：--match-background 全部匹配底色（默认黄系半透）；--match-current-background 当前匹配底色（默认橙系，live 行内与阅读命中块左边条同引）；--match-current-outline 当前匹配描边；--hit-block-background 阅读命中块底色。</p>
+      <p class="purpose">查找高亮四变量：--match-background 全部匹配底色（默认黄系半透）；--match-current-background 当前匹配底色（默认橙系，双模式字符装饰同引）；--match-current-outline 当前匹配描边；--hit-block-background 阅读当前命中块的兼容底色入口（默认透明，片段显式赋值仍染块底）。</p>
       <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
 
       <p class="obsidian">Obsidian 对应：无（Obsidian 高亮色为应用设置项非 CSS 变量）</p>
@@ -2184,6 +2184,23 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 }</code></pre>
       <p class="verify">验证：单元 findPanelCssContract：变量消费规则存在（回落值内联形态）</p>
       <p class="life">引入：#14</p>
+    </article>
+    <article class="entry" id="reading-find-source">
+      <h3><code>.vsidian-reading-find-source（只读源码浮层）与 .vsidian-reading-find-source-header / -location / -readonly / -code；浮层内复用 .vsidian-find-match / .vsidian-find-match-current</code><span class="eid">reading-find-source</span></h3>
+      <p class="purpose">阅读查找的隐藏源码反馈：当前命中无法完整映射到可见文字时，保留渲染态并显示命中起始源码行。表格分隔符、隐藏链接目标、公式与注释等无需切模式即可定位；计数与匹配顺序不变。源码以纯文本呈现，无编辑与写回入口。</p>
+      <p class="views"><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+<p class="states">状态：交互态，只在隐藏或部分隐藏的当前命中时挂载；可见命中、关闭查找、切 Live 或销毁时移除。滚动后锚点屏外则隐藏，虚拟块重挂载恢复；窗口变化重定位。浮层 fixed 定位，不占正文排版空间，不改变段落位置、块高度或滚动高度；不抢查找焦点，避让查找面板，视口边缘翻转与收缩。长行截取当前命中附近不超过约 320 个 UTF-16 单元且不拆 emoji；跨行命中显示起始行，行末 LF 以 \n 显示。</p>
+      <p class="obsidian">Obsidian 对应：无（Vsidian 阅读查找的源码反馈）</p>
+
+      <p class="dom">DOM 关系：挂 #app 下、阅读滚动容器外；aside[role=region] 内头部显示源码命中、源行列与只读标签，pre &gt; code 内 span 精确高亮。无 input、textarea、contenteditable 或新快捷键操作，沿用既有查找导航与关闭键。</p>
+      <pre><code>#app .vsidian-reading-find-source {
+  border-radius: 5px;
+}
+#app .vsidian-reading-find-source-code {
+  font-size: 13px;
+}</code></pre>
+      <p class="verify">验证：单元 readingVirtualView：隐藏与部分隐藏命中、可见竖线、纯文本安全、长行与生命周期；findPanelCssContract 钉住 fixed 与共享色变量；浏览器 findPanel：明暗截图像素、段落与滚动高度不移动、键盘导航、模式切换、零写回、窄屏与虚拟挂载；集成编辑区查找：view.state.paint.readingFindSource 当前文字命中与背景实际生效</p>
+      <p class="life">引入：#241 验收跟进（2026-10-01）</p>
     </article>
     <article class="entry" id="find-options-bar">
       <h3><code>.vsidian-occurrence-bar（迷你浮动条容器；.vsidian-occurrence-bar-open 显示态）—— 内部 .vsidian-occurrence-case（Aa）/ -word（ab）/ -regexp（.*）三开关（各自 -active 点亮态）</code><span class="eid">find-options-bar</span></h3>
