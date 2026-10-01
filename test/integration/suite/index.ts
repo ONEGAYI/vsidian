@@ -8,44 +8,23 @@
 // 注入（与真实 webview.onDidReceiveMessage 同一入口），宿主侧行为全部真实。
 import * as vscode from 'vscode'
 import { cases } from './cases'
+import { selectIntegrationCases } from './caseSelection'
 
 export async function run(): Promise<void> {
   const failures: string[] = []
+  const filter = process.env['VSIDIAN_TEST_CASES']
+  const { selected: sharded, group, shardLabel } = selectIntegrationCases(cases, {
+    group: process.env['VSIDIAN_TEST_GROUP'],
+    filter,
+    shard: process.env['VSIDIAN_TEST_SHARD'],
+  })
   // _test 钩子命令随扩展 activate 注册：runner 每用例前要调 resetLastMode，
   // 须先显式激活（首个用例自身的 activate 断言在其后执行）
   const ext = vscode.extensions.getExtension('onegayi.vsidian')
   if (ext && !ext.isActive) {
     await ext.activate()
   }
-  // 定向重跑：VSIDIAN_TEST_CASES=子串（逗号分隔任一命中即跑）只跑匹配
-  // 用例（开发调试用；缺省跑全量）。代码块卡片分支曾用单子串变量
-  // VSIDIAN_IT_FILTER（d351eda），main 侧 #86 已落多子串版本，合并取超集
-  const filter = process.env['VSIDIAN_TEST_CASES']
-  const parts = filter?.split(',').map((part) => part.trim()).filter(Boolean) ?? []
-  const selected = filter ? cases.filter(([name]) => parts.some((part) => name.includes(part))) : cases
-  if (filter && (!parts.length || !selected.length)) {
-    throw new Error(`VSIDIAN_TEST_CASES 未命中用例：${JSON.stringify(filter)}`)
-  }
-  // 分片：VSIDIAN_TEST_SHARD=k/N（1<=k<=N）把筛选后的用例按索引取模切给
-  // 当前片，与 VSIDIAN_TEST_CASES 正交（先筛选后切片）。缺省不分片跑全量；
-  // 筛选结果少于片数时允许空片（合法情况，0 项直接通过）
-  const shardSpec = process.env['VSIDIAN_TEST_SHARD']
-  let sharded = selected
-  let shardLabel = ''
-  if (shardSpec) {
-    const match = /^(\d+)\/(\d+)$/.exec(shardSpec)
-    if (!match) {
-      throw new Error(`VSIDIAN_TEST_SHARD 形如 k/N，收到 ${JSON.stringify(shardSpec)}`)
-    }
-    const shard = Number(match[1])
-    const total = Number(match[2])
-    if (total < 1 || shard < 1 || shard > total) {
-      throw new Error(`VSIDIAN_TEST_SHARD 越界：${shardSpec}`)
-    }
-    sharded = selected.filter((_, index) => index % total === shard - 1)
-    shardLabel = `（分片 ${shard}/${total}，本片 ${sharded.length} 项）`
-  }
-  console.log(`[集成测试] 执行 ${sharded.length}/${cases.length} 项${filter ? `（筛选 ${JSON.stringify(filter)}）` : ''}${shardLabel}`)
+  console.log(`[集成测试] 执行 ${sharded.length}/${cases.length} 项（分组 ${group}）${filter ? `（筛选 ${JSON.stringify(filter)}）` : ''}${shardLabel}`)
   let done = 0
   for (const [name, fn] of sharded) {
     // 用例开始即留痕（[START] 与 [PASS]/[FAIL]/[TIME] 成对）：宿主在两项
