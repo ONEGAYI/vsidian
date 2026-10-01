@@ -4461,6 +4461,45 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
   margin: 0.35em 0;
 }
 
+/* ---- #248 表格格内嵌入：td/th 内的流内宿主与 Live 网格格内的挂载
+   约束（无新增公开类——复用 reading-embed-mixed / live-embed 宿主类，
+   此处只钉格内容器下的宽度与缓冲形态）。
+   1) Reading 表格：td/th 是 auto 表格布局的格，宿主块级占满格内容宽
+      （max-width:100% + 卡壳既有 overflow:hidden + 内层滚动区横向
+      overflow:auto——长文件名/标题/链接/代码块折行或内层横滚，不因
+      内层最小宽度撑破列或挤掉邻格）；
+   2) Live 网格：格 mark span（grid item，min-width:0/overflow-wrap
+      anywhere 既有）内的嵌入 replace widget 前后各一枚 cm-widgetBuffer
+      ——#223 的零高块级化只覆盖行直接子代，格内的 buffer 由本规则同款
+      零高化（否则前后文与卡片间多出一行空白）。 */
+#app .vsidian-view-reading table td .vsidian-reading-embed-mixed,
+#app .vsidian-view-reading table th .vsidian-reading-embed-mixed {
+  max-width: 100%;
+  margin: 0.25em 0;
+}
+
+/* 格内嵌入 replace widget 前后各一枚 cm-widgetBuffer：只零高化**紧邻
+   嵌入宿主**的两枚（#223 行级先例的同款限定——格内还有 wikilink/图片/
+   公式/格内换行 <br> 等其它 replace widget，其 buffer 是 posAtCoords 的
+   坐标锚（#217 实测：摘除布局盒会让垂直探测跳过整块），不得一并零高化
+   ——#248 实测 tableCaret 的 cell-widget 拖选与 enter-cell 下移曾因此回归） */
+#app .cm-editor .cm-scroller .vsidian-table-grid-row > .vsidian-table-grid-cell .cm-widgetBuffer:has(+ .vsidian-live-embed),
+#app .cm-editor .cm-scroller .vsidian-table-grid-row > .vsidian-table-grid-cell .vsidian-live-embed + .cm-widgetBuffer {
+  display: block;
+  height: 0;
+}
+
+#app .cm-editor .cm-scroller .vsidian-table-grid-row > .vsidian-table-grid-cell .vsidian-live-embed {
+  max-width: 100%;
+  padding: 3px 0;
+}
+
+#app .cm-editor .cm-scroller .vsidian-table-grid-row > .vsidian-table-grid-cell .vsidian-live-embed .vsidian-embed-card-scroll {
+  /* 格内长文限高滚动照旧（embed.maxHeight 内联值优先）；横向内层滚动
+     防御卡内宽内容（代码块/表格）撑破列宽 */
+  overflow: auto;
+}
+
 /* 混排占位 span（未升级/不可提升形态：配对降级、链接域内、表格格内
    #248 前）：正文文字形态 + 描述色弱化（与占位引用行的可辨识方向一致；
    无 href——链接域内点击走外层 a 的既有语义） */

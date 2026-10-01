@@ -16,6 +16,7 @@ import {
   pairEmbedSlots,
   promoteEmbedSlot,
   promoteEmbedSlotsInBlock,
+  promotedHostsOf,
   type EmbedSlotOccurrence,
 } from '../../src/webview/embedSlots'
 import { splitReadingBlocks } from '../../src/webview/readingBlocks'
@@ -79,10 +80,15 @@ describe('blockEmbedOccurrences：块区间嵌入 occurrence 扫描', () => {
     expect(hits.map((h) => h.inner)).toEqual(['y'])
   })
 
-  it('表格行不命中（表格格内 #248 接入前的排除边界）', () => {
-    const text = '| a | ![[x]] |\n| --- | --- |\n| b | ![[y]] |'
+  it('表格行格内命中（#248 开放：格内解码扫描，区间为源文精确边界）', () => {
+    const text = '| a | ![[x]] |\n| --- | --- |\n| b | ![[y\\|别名]] |'
     const hits = blockEmbedOccurrences(text, 0, text.length)
-    expect(hits).toHaveLength(0)
+    expect(hits.map((h) => h.inner)).toEqual(['x', 'y|别名'])
+    for (const hit of hits) {
+      // 区间 slice 回源文恰为嵌入原文（含转义管道）
+      expect(text.slice(hit.start, hit.end)).toBe(
+        hit.inner === 'x' ? '![[x]]' : '![[y\\|别名]]')
+    }
   })
 
   it('列表与引用前缀行照常命中（含任务与懒续行形态）', () => {
@@ -270,7 +276,7 @@ describe('promoteEmbedSlot：占位提升为块级卡片宿主', () => {
     expect(slotsOf(el)).toHaveLength(1) // 占位原样保留
   })
 
-  it('表格内的占位不提升（#248 前表格格内保持占位）', () => {
+  it('表格 td 内的占位提升为格内宿主（#248 开放：原位替换，容器不拆）', () => {
     const text = '| a | b |\n| --- | --- |\n| c ![[甲]] | d |'
     const blocks = splitReadingBlocks(text)
     const table = blocks.find((b) => b.kind === 'table')!
@@ -279,8 +285,13 @@ describe('promoteEmbedSlot：占位提升为块级卡片宿主', () => {
     const slot = slotsOf(el)[0]!
     expect(slot.closest('table')).not.toBeNull()
     const occ: EmbedSlotOccurrence = { inner: '甲', start: 0, end: 7 }
-    expect(promoteEmbedSlot(slot, occ)).toBeNull()
-    expect(slotsOf(el)).toHaveLength(1)
+    const host = promoteEmbedSlot(slot, occ)
+    expect(host).not.toBeNull()
+    expect(host!.closest('td')).not.toBeNull()
+    // 表格结构不拆：占位被宿主原位替换
+    expect(el.querySelectorAll('tr')).toHaveLength(2)
+    expect(el.querySelectorAll('th')).toHaveLength(2)
+    expect(el.querySelectorAll('td')).toHaveLength(2)
   })
 
   it('同段两个嵌入：两次提升各自独立落位，顺序与源一致', () => {
@@ -365,7 +376,7 @@ describe('readingBlocks：混排占位的渲染产出（识别面）', () => {
 })
 
 describe('#246 审查修复：配对集合的结构性对齐（P1-A/P1-B）', () => {
-  it('P1-A 容器内表格：表格占位不进配对集合——同容器合法混排照常升级，格内嵌入保持占位', () => {
+  it('P1-A 容器内表格：#248 起表格占位进配对集合并升级——li 内混排与 td 格内嵌入都挂载', () => {
     const text = [
       '- 项甲 ![[乙]] 余',
       '- 表格项',
@@ -377,21 +388,21 @@ describe('#246 审查修复：配对集合的结构性对齐（P1-A/P1-B）', ()
     const listBlock = blocks.find((b) => b.kind === 'list')!
     const el = createReadingBlockElement(listBlock, text)
     document.body.appendChild(el)
-    // 直属占位剔除表格祖先成员（配对两侧集合一致）
+    // 直属占位包含表格格内成员（#248 开放：table 祖先剔除退役）
     const slots = directEmbedSlots(el)
-    expect(slots.map((s) => s.dataset['vsidianEmbedInner'])).toEqual(['乙'])
-    // occurrence 侧 Table 排除后同样只余乙——配对可达
+    expect(slots.map((s) => s.dataset['vsidianEmbedInner'])).toEqual(['乙', '丙'])
+    // occurrence 侧格内解码扫描同集合——配对可达
     const occs = blockEmbedOccurrences(text, listBlock.start, listBlock.end)
-    expect(occs.map((o) => o.inner)).toEqual(['乙'])
+    expect(occs.map((o) => o.inner)).toEqual(['乙', '丙'])
     expect(pairEmbedSlots(slots, occs)).not.toBeNull()
-    // 批量提升：乙升级为流内宿主（li 内），丙保持 td 内占位文本
+    // 批量提升：乙落 li 内流宿主，丙落 td 内（表格结构不拆）
     const hosts = promoteEmbedSlotsInBlock(el, text, listBlock.start, listBlock.end)
-    expect(hosts).toHaveLength(1)
+    expect(hosts).toHaveLength(2)
     expect(hosts[0]!.dataset['vsidianEmbedInner']).toBe('乙')
     expect(hosts[0]!.closest('li')).not.toBeNull()
-    const cellSlot = el.querySelector<HTMLElement>('td .vsidian-embed-slot')
-    expect(cellSlot?.dataset['vsidianEmbedInner']).toBe('丙')
-    expect(cellSlot?.textContent).toContain('![[丙]]')
+    expect(hosts[1]!.dataset['vsidianEmbedInner']).toBe('丙')
+    expect(hosts[1]!.closest('td')).not.toBeNull()
+    expect(el.querySelectorAll('tr')).toHaveLength(2)
   })
 
   it('P1-B 引用内跨行注释：CommentBlock 排除后配对可达——尾部嵌入升级、注释内嵌入不产占位不挂载', () => {
@@ -448,5 +459,99 @@ describe('#246 审查顺手修：边角与用例文本', () => {
     // 前半 p 保留软换行（源文换行未丢、未新增）
     expect(ps[0]!.textContent).toBe('行一文字\n行二 ')
     expect(ps[1]!.textContent).toBe(' 行三')
+  })
+})
+
+describe('#248 表格格内嵌入的配对与提升', () => {
+  const TABLE = [
+    '| ![[头甲\\|头别名]] | 普通表头 |',
+    '| --- | --- |',
+    '| 前文 ![[甲]] 后文 ![[乙\\|e]] | 单元格 |',
+  ].join('\n')
+
+  it('blockEmbedOccurrences：表格块的格内 occurrence 命中（inner 解码语义、区间为源文）', () => {
+    const hits = blockEmbedOccurrences(TABLE, 0, TABLE.length)
+    expect(hits.map((h) => h.inner)).toEqual(['头甲|头别名', '甲', '乙|e'])
+    // 区间 slice 回源文恰为嵌入原文（含 \\| 转义）
+    expect(TABLE.slice(hits[0]!.start, hits[0]!.end)).toBe('![[头甲\\|头别名]]')
+    expect(TABLE.slice(hits[2]!.start, hits[2]!.end)).toBe('![[乙\\|e]]')
+  })
+
+  it('表格块的行内代码与跨格伪形态不产 occurrence', () => {
+    const text = '| `![[甲]]` | a ![[x |\n| --- | --- |\n| b | y]] c |'
+    expect(blockEmbedOccurrences(text, 0, text.length)).toHaveLength(0)
+  })
+
+  it('directEmbedSlots：table 内的占位不再被排除（升级为真挂载）', () => {
+    const blocks = splitReadingBlocks(TABLE)
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0]!.kind).toBe('table')
+    const el = createReadingBlockElement(blocks[0]!, TABLE)
+    document.body.appendChild(el)
+    const slots = directEmbedSlots(el)
+    expect(slots.length).toBe(3)
+  })
+
+  it('promoteEmbedSlotsInBlock：表格块整链提升——td/th 内原位替换宿主（容器不拆）', () => {
+    const blocks = splitReadingBlocks(TABLE)
+    const el = createReadingBlockElement(blocks[0]!, TABLE)
+    document.body.appendChild(el)
+    const hosts = promoteEmbedSlotsInBlock(el, TABLE, blocks[0]!.start, blocks[0]!.end)
+    expect(hosts).toHaveLength(3)
+    // 表头格（th）与数据格（td）内直接落位：宿主是格单元格的子节点
+    const th = el.querySelector('th')!
+    const td = el.querySelector('tbody td')!
+    expect(th.querySelector('[data-vsidian-embed-promoted]')).toBe(hosts[0])
+    expect(td.querySelector('[data-vsidian-embed-promoted]')).toBe(hosts[1])
+    // 宿主 dataset 与独占行/混排同构（挂载适配复用的通道）
+    expect(hosts[0]!.dataset['vsidianEmbedInner']).toBe('头甲|头别名')
+    expect(Number(hosts[0]!.dataset['vsidianSrcStart'])).toBe(TABLE.indexOf('![[头甲\\|头别名]]'))
+    expect(Number(hosts[0]!.dataset['vsidianSrcEnd']))
+      .toBe(TABLE.indexOf('![[头甲\\|头别名]]') + '![[头甲\\|头别名]]'.length)
+    // 同格多引用按源顺序（hosts[1] 甲 在 hosts[2] 乙 之前）
+    expect(hosts[1]!.dataset['vsidianEmbedInner']).toBe('甲')
+    expect(hosts[2]!.dataset['vsidianEmbedInner']).toBe('乙|e')
+    // 表格结构未拆：行数与列数保持
+    expect(el.querySelectorAll('tr')).toHaveLength(2)
+    expect(el.querySelectorAll('tbody tr td')).toHaveLength(2)
+  })
+
+  it('配对失败整块降级：表格占位保持文本形态不升级', () => {
+    const blocks = splitReadingBlocks(TABLE)
+    const el = createReadingBlockElement(blocks[0]!, TABLE)
+    document.body.appendChild(el)
+    // 伪造 occurrence 缺口（只给一个块区间命中不了的窄区间）
+    const hosts = promoteEmbedSlotsInBlock(el, TABLE, 0, TABLE.indexOf('| 普通表头 |'))
+    expect(hosts).toHaveLength(0)
+    // 占位仍以 span 形态在场（文本可读降级）
+    expect(el.querySelectorAll('span[data-vsidian-embed-inner]')).toHaveLength(3)
+    expect(el.querySelector('[data-vsidian-embed-promoted]')).toBeNull()
+  })
+
+  it('promotedHostsOf：表格块内宿主可被卸载配对查询', () => {
+    const blocks = splitReadingBlocks(TABLE)
+    const el = createReadingBlockElement(blocks[0]!, TABLE)
+    document.body.appendChild(el)
+    promoteEmbedSlotsInBlock(el, TABLE, blocks[0]!.start, blocks[0]!.end)
+    expect(promotedHostsOf(el)).toHaveLength(3)
+  })
+})
+
+describe('#248 P1-1 消费者一致性：`]]` 紧贴转义管道的格内 occurrence', () => {
+  it('occurrence 区间与提升宿主 dataset 锚点 slice 严格等于嵌入原文', () => {
+    const text = '| ![[B]]\\|尾 | y |\n| --- | --- |\n| a | b |'
+    const occs = blockEmbedOccurrences(text, 0, text.length)
+    expect(occs).toHaveLength(1)
+    expect(occs[0]!.inner).toBe('B')
+    expect(text.slice(occs[0]!.start, occs[0]!.end)).toBe('![[B]]')
+    expect(text[occs[0]!.end]).toBe('\\')
+    // 提升宿主 dataset（hover.request sourceStart/End 的单一来源）同区间
+    const blocks = splitReadingBlocks(text)
+    const el = createReadingBlockElement(blocks[0]!, text)
+    document.body.appendChild(el)
+    const hosts = promoteEmbedSlotsInBlock(el, text, blocks[0]!.start, blocks[0]!.end)
+    expect(hosts).toHaveLength(1)
+    expect(Number(hosts[0]!.dataset['vsidianSrcStart'])).toBe(occs[0]!.start)
+    expect(Number(hosts[0]!.dataset['vsidianSrcEnd'])).toBe(occs[0]!.end)
   })
 })

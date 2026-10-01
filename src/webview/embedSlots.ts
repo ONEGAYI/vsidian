@@ -23,6 +23,7 @@
 //   EmbedCardManager.mountCardInto 与子卡 mountChildFrom 原样复用；卸载
 //   以 data-vsidian-embed-promoted 查询配对（promotedHostsOf）。
 import { scanEmbedsInLine } from '../shared/wikilink'
+import { scanEmbedsInTableRow } from './tableCellEmbed'
 import { chainAt, frontmatterRange, markdownTreeParser } from './markdownDoc'
 import { READING_CLASS_NAMES } from './readingView'
 import { READING_MARKDOWN_CLASS_NAMES } from './readingMarkdown'
@@ -37,12 +38,17 @@ export const EMBED_SLOT_CLASS = READING_MARKDOWN_CLASS_NAMES.embedSlot
 export const EMBED_MIXED_HOST_CLASS = READING_CLASS_NAMES.embedMixed
 
 /** occurrence 扫描的语法排除上下文（lezer 节点名）：代码族对齐
- *  vaultLinkExtract 的 INLINE_SCAN_CODE_CONTEXTS；Table 为 #248 接入前的
- *  表格格内排除；注释/frontmatter 与渲染侧剥离同源 */
+ *  vaultLinkExtract 的 INLINE_SCAN_CODE_CONTEXTS；注释/frontmatter 与渲染
+ *  侧剥离同源。#248 起 Table 退役——表格内容行（TableRow/TableHeader）的
+ *  格内嵌入改走 scanEmbedsInTableRow 的格内解码扫描（inner 解码语义、
+ *  区间源文），与 markdown-it 占位（格内重解析）配对同源 */
 const OCCURRENCE_EXCLUDED = new Set([
   'FencedCode', 'CodeBlock', 'CodeText', 'CodeMark', 'CodeInfo', 'InlineCode',
-  'HTMLBlock', 'Comment', 'CommentBlock', 'Table',
+  'HTMLBlock', 'Comment', 'CommentBlock',
 ])
+
+/** 表格内容行节点名（#248：格内解码扫描的行分类） */
+const TABLE_ROW_NODE_NAMES = new Set(['TableRow', 'TableHeader'])
 
 /** 提升时需要拆壳的行内格式标签（占位提出到块级父直下；code 内不会有
  *  占位，列入仅防御） */
@@ -68,10 +74,13 @@ function treeFor(text: string): Tree {
 }
 
 /**
- * 块区间内的全部嵌入 occurrence（文档序）：逐行 scanEmbedsInLine 命中后
- * 经 lezer 树语法上下文过滤（代码/表格/注释/frontmatter 不命中——与
- * validChildSource、vaultLinkExtract 同源排除）。列表/引用前缀行照常命中
- * （前缀字符不构成 `![[`，不影响扫描）。
+ * 块区间内的全部嵌入 occurrence（文档序）：逐行扫描命中后经 lezer 树语法
+ * 上下文过滤（代码/注释/frontmatter 不命中——与 validChildSource、
+ * vaultLinkExtract 同源排除）。列表/引用前缀行照常命中（前缀字符不构成
+ * `![[`，不影响扫描）；#248 起表格内容行（TableRow/TableHeader）走
+ * scanEmbedsInTableRow 的**格内解码扫描**——逐格切分（`\|` 不切列）后
+ * 在解码视图识别，inner 为解码语义（`B|别名`）、区间为原始源文——与
+ * markdown-it 格内重解析产出的占位（inner 同解码语义）按文档序配对。
  */
 export function blockEmbedOccurrences(text: string, blockStart: number, blockEnd: number): EmbedSlotOccurrence[] {
   if (blockStart < 0 || blockEnd > text.length || blockStart >= blockEnd) {
@@ -85,14 +94,18 @@ export function blockEmbedOccurrences(text: string, blockStart: number, blockEnd
   const out: EmbedSlotOccurrence[] = []
   let base = blockStart
   for (const line of text.slice(blockStart, blockEnd).split('\n')) {
-    for (const hit of scanEmbedsInLine(line, base)) {
-      if (fm !== null && hit.from < fm.end) {
-        continue
+    if (line.includes('![[')) {
+      const isTableRow = chainAt(tree, base).some((node) => TABLE_ROW_NODE_NAMES.has(node.name))
+      const hits = isTableRow ? scanEmbedsInTableRow(line, 0) : scanEmbedsInLine(line, 0)
+      for (const hit of hits) {
+        if (fm !== null && base + hit.from < fm.end) {
+          continue
+        }
+        if (chainAt(tree, base + hit.from).some((node) => OCCURRENCE_EXCLUDED.has(node.name))) {
+          continue
+        }
+        out.push({ inner: hit.inner, start: base + hit.from, end: base + hit.to })
       }
-      if (chainAt(tree, hit.from).some((node) => OCCURRENCE_EXCLUDED.has(node.name))) {
-        continue
-      }
-      out.push({ inner: hit.inner, start: hit.from, end: hit.to })
     }
     base += line.length + 1
   }
@@ -100,15 +113,14 @@ export function blockEmbedOccurrences(text: string, blockStart: number, blockEnd
 }
 
 /**
- * 块 DOM 内的直属占位（文档序），排除两类不可升级成员：
+ * 块 DOM 内的直属占位（文档序），排除不可升级成员：
  * - 已升级卡片内部的嵌套占位（孙卡由其自身内容挂载流程处理，不重复升级）
- * - 表格祖先内的占位（#248 前不升级；occurrence 侧 OCCURRENCE_EXCLUDED
- *   同步排除 Table——两侧集合一致，配对不因表格占位分叉而整块降级）
+ * - #248 起表格内占位**升级为真挂载**（原 table 祖先排除退役）——td/th 内
+ *   占位由 promoteEmbedSlot 原位替换为卡片宿主，配对与其它容器同源
  */
 export function directEmbedSlots(blockEl: HTMLElement): HTMLElement[] {
   return Array.from(blockEl.querySelectorAll<HTMLElement>(`span[data-vsidian-embed-inner]`))
-    .filter((slot) => slot.closest('.vsidian-embed-card') === null &&
-      slot.closest('table') === null)
+    .filter((slot) => slot.closest('.vsidian-embed-card') === null)
 }
 
 /**
@@ -149,14 +161,17 @@ export function pairEmbedSlots(
 }
 
 /**
- * 单个占位提升为块级卡片宿主。链接域（a 内）与表格（#248 前）不提升
- * （返回 null，占位保持行内文本）；其余按最近块级父容器落位：
+ * 单个占位提升为块级卡片宿主。链接域（a 内）不提升（返回 null，占位保持
+ * 行内文本——块级卡片在行内链接域属非法 DOM，点击走外层链接）；#248 起
+ * 表格格内（td/th）**提升为真挂载**（原 table 祖先拒绝退役）。其余按最近
+ * 块级父容器落位：
  * - p 内：拆为 p(前文) + 宿主 + p(后文)，类与属性克隆保留，空半不产出
  * - 行内格式祖先：逐层拆壳（strong/em 等前后各成完整标签）
- * - li/blockquote 等流内容容器：占位原位替换（容器结构不拆）
+ * - li/blockquote/td/th 等流内容容器：占位原位替换（容器结构不拆——
+ *   编号/缩进/边条/表格行列网格保持，宿主宽度跟随所属列）
  */
 export function promoteEmbedSlot(slot: HTMLElement, occ: EmbedSlotOccurrence): HTMLElement | null {
-  if (slot.closest('a') !== null || slot.closest('table') !== null) {
+  if (slot.closest('a') !== null) {
     return null
   }
   // 行内格式祖先拆壳：把占位提出到最近块级父直下

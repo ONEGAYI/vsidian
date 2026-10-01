@@ -2,7 +2,7 @@
 // 生产控制器装配（复用 liveEmbedFixture 基座）验证——
 // - 混排/无序/有序/任务/引用行内卡片挂载与前后文保真（前后文、列表标记、
 //   任务 checkbox、引用前缀绘制层可见；嵌入源文精确区间退场）
-// - 链接文字域/表格格内/行内代码保持源文（排除边界）
+// - 链接文字域/行内代码保持源文（排除边界）；#248 起表格格内同挂卡
 // - 真实键盘（ArrowLeft 逐键、Enter 拆行、Backspace 合行、Ctrl+Z 撤销）
 //   与真实 IME（CDP composition + 提交）驱动：精确显隐、兄弟独立、
 //   源文保真、未闭合撤卡与恢复重载
@@ -122,7 +122,7 @@ try {
   const reqsA = await hoverRequests()
   const goalReqs = reqsA.filter((r) => r.target === '目标笔记')
   const jiaReqs = reqsA.filter((r) => r.target === '甲笔记')
-  assert.equal(goalReqs.length, 6, `目标笔记 6 个可挂卡位各发请求（实际 ${goalReqs.length}）`)
+  assert.equal(goalReqs.length, 7, `目标笔记 7 个可挂卡位各发请求（#248 起表格格内同挂——实际 ${goalReqs.length}）`)
   assert.equal(jiaReqs.length, 1, '甲笔记 1 个（同行双嵌入首位）')
   for (const req of reqsA) {
     const raw = `![[${req.target}]]`
@@ -133,14 +133,14 @@ try {
   const tableAt = PARENT_DOC.indexOf('![[目标笔记]]', PARENT_DOC.indexOf('格内'))
   const codeAt = PARENT_DOC.indexOf('![[目标笔记]]', PARENT_DOC.indexOf('`code'))
   assert.ok(!goalReqs.some((r) => r.sourceStart === linkAt), '链接文字域不挂卡（无请求）')
-  assert.ok(!goalReqs.some((r) => r.sourceStart === tableAt), '表格格内不挂卡（#248 前）')
+  assert.ok(goalReqs.some((r) => r.sourceStart === tableAt), '表格格内挂卡（#248 起开放）')
   assert.ok(!goalReqs.some((r) => r.sourceStart === codeAt), '行内代码内不挂卡')
   // 前后文/标记/checkbox/引用前缀绘制可见；嵌入源文退场（文本节点级）
   for (const needle of ['前文混排', '后文混排。', '无序项', '1. 有序项', '任务项', '任务余文',
     '引用文', '引用余文', '起', '末。']) {
     assert.equal(await textPainted(needle), true, `容器上下文文本可见：${needle}`)
   }
-  // 混排位的嵌入源文退场（按行断言——文档中链接域/表格/行内代码三处
+  // 混排位的嵌入源文退场（按行断言——文档中链接域/行内代码两处
   // 排除位的源文按边界保留，不能全局断言）
   const mixSrcGone = await page.evaluate(() => {
     const line = Array.from(document.querySelectorAll('.cm-content .cm-line'))
@@ -167,7 +167,10 @@ try {
   assert.ok(excludedKept.link, '链接域行在场')
   assert.ok(excludedKept.link.kept && excludedKept.link.noHost, '链接域嵌入源文保留且不挂卡')
   assert.ok(excludedKept.table, '表格行在场')
-  assert.ok(excludedKept.table.kept && excludedKept.table.noHost, '表格格内嵌入源文保留且不挂卡（#248 前）')
+  // #248 起表格格内挂卡：源文退场（格内精确区间替换）、宿主嵌在网格格
+  // mark span 内（不破坏 grid 列布局）；深入场景见 tableEmbed 套件
+  assert.equal(excludedKept.table.kept, false, '表格格内嵌入源文退场（#248 精确区间替换）')
+  assert.equal(excludedKept.table.noHost, false, '表格格内卡片宿主在场')
   assert.ok(excludedKept.code, '行内代码行在场')
   assert.ok(excludedKept.code.kept && excludedKept.code.noHost, '行内代码内嵌入源文保留且不挂卡')
   const taskEvidence = await page.evaluate(() => {
@@ -188,7 +191,7 @@ try {
   assert.ok(taskEvidence.hostInSameLine, '任务行内嵌入卡片在同行挂载')
   assert.ok(taskEvidence.bothInLine, '任务控件与卡片共存（互不吞并）')
   let hosts = await reads()
-  assert.equal(hosts.length, 7, `7 个可挂卡位各一宿主（实际 ${hosts.length}）`)
+  assert.equal(hosts.length, 8, `8 个可挂卡位各一宿主（#248 起表格格内同挂——实际 ${hosts.length}）`)
   assert.ok(hosts.every((hh) => !hh.below), '初始全隐形态')
   assert.ok(hosts[0].cardHeight > 20, `卡片有真实高度（实际 ${hosts[0].cardHeight}）`)
   assert.equal(hosts[0].stateText, zhCn['embed.loading'], '装载中就地 loading 文案')
@@ -311,7 +314,7 @@ try {
   await page.waitForTimeout(80)
   // StateField 层计数（无视口依赖——回包后卡片限高使视口外卡不出 DOM）
   const spanBeforeF = await page.evaluate(() => window.liveEmbedSpanCount())
-  assert.equal(spanBeforeF, 10, `拆行前嵌入表 10 枚（7 挂卡位 + 3 排除候选——表构建层不排除，实际 ${spanBeforeF}）`)
+  assert.equal(spanBeforeF, 10, `拆行前嵌入表 10 枚（8 挂卡位 + 2 排除候选——表构建层不排除，实际 ${spanBeforeF}）`)
   await page.keyboard.press('Enter') // inner 中段拆行 → 跨行未闭合 → 撤卡
   await page.waitForTimeout(120)
   const docF = await page.evaluate(() => window.liveEmbedDocText())

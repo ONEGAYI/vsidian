@@ -12601,4 +12601,109 @@ export const cases: Array<[string, () => Promise<void>]> = [
     })
     console.log('[#247] Live 混排挂载、精确显隐、IME 编辑撤销闭环与零误写通过')
   }],
+
+  // ---- #248 表格格内嵌入 ----
+
+  // 表头/数据格的格内嵌入双模式挂载：嵌入表 inner 为解码语义（`\|` 别名
+  // 不进目标路径），真宿主读取闭环装载卡片；Reading 侧 td 宿主同装载；
+  // 源文（含转义管道）逐字节不动、双零 dirty 与零 applyEdit。绘制层与
+  // 交互隔离断言在浏览器 tableEmbed 套件（真实 Chromium 布局与指针）。
+  ['嵌入：表格格内双模式挂载与转义保真（#248）', async () => {
+    await openWithEditor('嵌入表格样例.md')
+    await waitSessionReady('嵌入表格样例.md')
+    const parentBefore = await readDisk('嵌入表格样例.md')
+    const targetBefore = await readDisk('嵌入目标.md')
+    const uri = wsUri('嵌入表格样例.md').toString()
+
+    // 嵌入表（Live 模式起步）：3 枚 occurrence，inner 一律解码语义
+    const shown = await waitViewState('嵌入表格样例.md', (v) =>
+      v.viewMode === 'live' && (v.liveEmbedReveal ?? []).length === 3)
+    const inners = (shown.liveEmbedReveal ?? []).map((r) => r.inner)
+    assert(inners.includes('嵌入目标|头别名'), `表头格转义别名 inner 为解码语义（实际 ${JSON.stringify(inners)}）`)
+    assert(inners.includes('嵌入目标') && inners.includes('改名嵌入目标#章节一|格内别名'),
+      `数据格两枚 inner 正确（实际 ${JSON.stringify(inners)}）`)
+    // 源文坐标保真：解码 inner 对应的源文区间含 \| 转义字符（不能用解码
+    // offset 写回——宿主侧以磁盘源文对拍）
+    assert(shown.text === parentBefore, `格内嵌入不改写源文（含 \\| 转义，实际 ${JSON.stringify(shown.text.slice(0, 120))}）`)
+
+    // 真宿主读取闭环：三卡装载（表头格 + 数据格两枚；改名嵌入目标章节卡）
+    const loaded = await waitViewState('嵌入表格样例.md', (v) => {
+      const live = (v.readingEmbed ?? []).filter((c) => c.host === 'live')
+      return live.length === 3 && live.every((c) => c.state === 'content')
+    })
+    const liveCards = (loaded.readingEmbed ?? []).filter((c) => c.host === 'live')
+    assert(liveCards.some((c) => c.inner === '嵌入目标|头别名' && c.scope === 'full'),
+      `表头格卡装载全文目标（实际 ${JSON.stringify(liveCards.map((c) => [c.inner, c.scope]))}）`)
+    assert(liveCards.some((c) => c.inner === '改名嵌入目标#章节一|格内别名' && c.scope === 'heading'),
+      '格内锚点别名卡装载章节目标')
+
+    // Reading 模式：td 格内宿主同装载（host=reading；卡内递归孙卡同为
+    // host=reading——按三枚格内目标 inner 匹配，不按总数）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    const wantedInners = ['嵌入目标|头别名', '嵌入目标', '改名嵌入目标#章节一|格内别名']
+    const reading = await waitViewState('嵌入表格样例.md', (v) => {
+      if (v.viewMode !== 'reading') return false
+      const cards = (v.readingEmbed ?? []).filter((c) => c.host === 'reading')
+      return wantedInners.every((inner) =>
+        cards.some((c) => c.inner === inner && c.state === 'content'))
+    })
+    assert((reading.readingEmbed ?? []).filter((c) => c.host === 'reading' && c.inner === '嵌入目标|头别名')
+      .length === 1, 'Reading 表头格卡在场')
+    assert(reading.text === parentBefore, 'Reading 侧源文逐字节不丢')
+
+    // 双零 dirty 与零写回（格内挂载全程只读）
+    const parentDoc = await vscode.workspace.openTextDocument(wsUri('嵌入表格样例.md'))
+    const targetDoc = await vscode.workspace.openTextDocument(wsUri('嵌入目标.md'))
+    assert(parentDoc?.isDirty === false && targetDoc?.isDirty === false, '父/目标文档双零 dirty')
+    assert(await readDisk('嵌入表格样例.md') === parentBefore, '格内嵌入渲染不得改写父文档磁盘')
+    assert(await readDisk('嵌入目标.md') === targetBefore, '格内嵌入读取不得改写目标磁盘')
+    const state = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state.appliedEdits === 0, `格内嵌入链路零 applyEdit（实际 ${state.appliedEdits}）`)
+
+    // 复位：切回 live（后续用例隔离）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    await waitViewState('嵌入表格样例.md', (v) => v.viewMode === 'live')
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await poll('表格嵌入面板关闭订阅回落', async () => {
+      const stats = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
+      return stats.targets === 0 && stats.subscriptions === 0 ? stats : undefined
+    })
+    console.log('[#248] 表格格内双模式挂载、转义保真与零写回通过')
+  }],
+
+  // 格内嵌入边接入 rename 管线：转义别名形态按解码语义命中映射，改写只
+  // 替换路径段——`\|` 别名与 `#锚点` 原样保留、列结构不裸化（\| 不变裸管
+  // 道）；撤销一步恢复。与 #222 共用改名嵌入目标（该用例先行并复位文件名）
+  ['嵌入：表格格内 rename 转义保真（#248）', async () => {
+    await waitRenameIndexReady()
+    const parentBefore = await readDisk('嵌入表格样例.md')
+    await openWithEditor('嵌入改写.md')
+    await waitSessionReady('嵌入改写.md')
+    const edit = new vscode.WorkspaceEdit()
+    edit.renameFile(wsUri('改名嵌入目标.md'), wsUri('改名嵌入目标2.md'), { overwrite: false })
+    assert(await vscode.workspace.applyEdit(edit), 'rename 应成功应用')
+    // 格内引用改写落盘：路径段替换，\| 别名与 #锚点 原样
+    const rewritten = await poll('格内嵌入引用改写落盘', async () => {
+      const text = (await vscode.workspace.openTextDocument(wsUri('嵌入表格样例.md'))).getText()
+      return text.includes('![[改名嵌入目标2#章节一\\|格内别名]]') ? text : undefined
+    })
+    assert(!rewritten.includes('改名嵌入目标#'), '旧目标不得残留（格内与正文引用同批改写）')
+    assert(rewritten.includes('| 前文 ![[嵌入目标]] 中 ![[改名嵌入目标2#章节一\\|格内别名]] 后文 | 普通格 |'),
+      `格内行结构保真（转义管道不被裸化、列数不变，实际 ${JSON.stringify(rewritten.split('\n').find((l) => l.includes('格内别名')) ?? '')}）`)
+    // 撤销一步恢复（与 rename 同一撤销单元）
+    await vscode.commands.executeCommand('undo')
+    await poll('撤销恢复格内嵌入引用', async () => {
+      const text = (await vscode.workspace.openTextDocument(wsUri('嵌入表格样例.md'))).getText()
+      return text === parentBefore ? text : undefined
+    })
+    await new Promise((r) => setTimeout(r, 600))
+    try {
+      await vscode.workspace.fs.stat(wsUri('改名嵌入目标2.md'))
+      await vscode.workspace.fs.rename(wsUri('改名嵌入目标2.md'), wsUri('改名嵌入目标.md'), { overwrite: true })
+    } catch {
+      // undo 已回滚文件名
+    }
+    await new Promise((r) => setTimeout(r, 400))
+    console.log('[#248] 表格格内 rename 转义保真与撤销恢复通过')
+  }],
 ]

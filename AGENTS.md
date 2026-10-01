@@ -353,6 +353,7 @@ vsidian/
 │       ├── symbolCompositionState.ts   # IME 选区快照共享状态
 │       ├── symbolWrap.ts               # 选区包裹编辑器适配层（#124）
 │       ├── syncController.ts           # CM6 同步控制器
+│       ├── tableCellEmbed.ts           # 表格格内嵌入三套区间映射
 │       ├── tableCells.ts               # 表格单元格边界、换行与转义
 │       ├── tableColumnWidth.ts         # 表格列宽采样与轨道计划纯函数
 │       ├── tableControls.ts            # 表格可见行控件与拖动

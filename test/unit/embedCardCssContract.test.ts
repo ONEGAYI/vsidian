@@ -135,3 +135,32 @@ describe('Live 隐形态呈现（验收反馈：不留隐形源码行）', () =>
     expect(card).toMatch(/margin:\s*0/)
   })
 })
+
+describe('#248 表格格内嵌入 CSS 契约（格容器下的宿主与缓冲形态）', () => {
+  it('Reading 表格 td/th 内流内宿主：宽度受限（不撑破列/挤邻格）', () => {
+    const host = rule('#app .vsidian-view-reading table th .vsidian-reading-embed-mixed')
+    expect(host).toMatch(/max-width:\s*100%/)
+    expect(host.split('{')[0])
+      .toContain('#app .vsidian-view-reading table td .vsidian-reading-embed-mixed')
+  })
+
+  it('Live 网格格内紧邻嵌入宿主的 cm-widgetBuffer 零高块级化（其余 widget 的坐标锚不动）', () => {
+    // 组规则以末尾选择器（后侧 buffer）定位，断言同时覆盖前侧（:has 形态）
+    const after = rule('#app .cm-editor .cm-scroller .vsidian-table-grid-row > .vsidian-table-grid-cell .vsidian-live-embed + .cm-widgetBuffer')
+    expect(after).toMatch(/display:\s*block/)
+    expect(after).toMatch(/height:\s*0/)
+    expect(after.split('{')[0])
+      .toContain('#app .cm-editor .cm-scroller .vsidian-table-grid-row > .vsidian-table-grid-cell .cm-widgetBuffer:has(+ .vsidian-live-embed)')
+  })
+
+  it('Live 网格格内的嵌入宿主：宽度受限与收紧的上下内边距', () => {
+    const host = rule('#app .cm-editor .cm-scroller .vsidian-table-grid-row > .vsidian-table-grid-cell .vsidian-live-embed')
+    expect(host).toMatch(/max-width:\s*100%/)
+    expect(host).toMatch(/padding:\s*3px 0/)
+  })
+
+  it('Live 网格格内的卡内容滚动区：横向内层滚动（宽内容不撑破列）', () => {
+    const scroll = rule('#app .cm-editor .cm-scroller .vsidian-table-grid-row > .vsidian-table-grid-cell .vsidian-live-embed .vsidian-embed-card-scroll')
+    expect(scroll).toMatch(/overflow:\s*auto/)
+  })
+})

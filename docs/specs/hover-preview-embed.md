@@ -1,6 +1,6 @@
 # 悬停预览与文档嵌入
 
-状态：**一期已实施（2026-09-30，工单 #218–#225）；1.5 期 #242–#245 已整合；#246 Reading 混排/列表/引用容器本工作树已实施待审**。规格整理于 2026-09-30 并经用户确认，同日授权开票与实施。本文是本功能的单一规格入口；架构方向见 [ADR-0009](../adr/0009-referenced-document-views.md)。一期各票交付与验证记录见文末「一期落地索引」；用户故事 U1–U12 的逐项核对结论随 #225 收口提交记录于人工验证清单。混排、二期 Live 编辑与三期 PDF 尚未实施。
+状态：**一期已实施（2026-09-30，工单 #218–#225）；1.5 期 #242–#245 已整合；#246 Reading 混排/列表/引用容器已合入主线；#247 Live 混排与 #248 表格格内嵌入本工作树已实施待审**。规格整理于 2026-09-30 并经用户确认，同日授权开票与实施。本文是本功能的单一规格入口；架构方向见 [ADR-0009](../adr/0009-referenced-document-views.md)。一期各票交付与验证记录见文末「一期落地索引」；用户故事 U1–U12 的逐项核对结论随 #225 收口提交记录于人工验证清单。1.5 期余 #249 组合收口；混排/格内已落地，目标 Live 编辑与 PDF 尚未实施。
 
 工作树：`C:/Users/64487/.codex/worktrees/hover-preview-embed/vscode-obsidian-like-editor`；分支：`codex/hover-preview-embed`。后续实施沿用该树。架构方向见 [ADR-0009](../adr/0009-referenced-document-views.md)。
 
@@ -219,7 +219,7 @@ CodeMirror 官网本次读取遇到 403；本规格显隐规则已核对本地�
 | #245 | 浮层递归、单浮窗、焦点与边界接续 | #244 | 本工作树已实施，待独立审查与用户验收 |
 | #246 | Reading 混排、列表和引用容器 | #244 | 已实施，待用户验收 |
 | #247 | Live 混排、精确源码显隐和输入保真 | #246 | 本工作树已实施，待独立审查与用户验收 |
-| #248 | 表格格内嵌入、转义映射和格区交互隔离 | #247 | 待实施 |
+| #248 | 表格格内嵌入、转义映射和格区交互隔离 | #247 | 本工作树已实施，待独立审查与用户验收 |
 | #249 | 组合验证、资源实测与交付收口 | #245、#248 | 待实施 |
 
 实施从最新主线建立独立工作树；#226 原正文的一期路径仅为历史记录。各功能票承担自己的 TDD、浏览器绘制与宿主验证，#249 补组合证据。#226 保持开放，自动化通过与用户验收分别记录。
@@ -341,3 +341,23 @@ Live 侧（父文档第 0 层）的 `![[…]]` 不再要求独占正文一行：
 **公开样式入口**：无新增类名或变量——复用 `live-embed-widget` 条目（`live-embed-mixed` 无对应类；混排与独占行同宿主类，仅替换区间不同）；`limit-markdown-embed` 与 `live-embed-widget` 两条目的 purpose/states/dom 随实际能力更新（双语），指南产物经 `gen:styleguide` 重生成。本票无新增用户可见文字（沿用既有 embed 词条）、无新增可绑定操作（复用「预览当前链接」与打开目标入口，评估记录见 keybindings.md）；新增设置无。
 
 自动化证据与人工待验见 [manual-verification.md](manual-verification.md) 的 #247 节。
+
+### #248 表格格内嵌入、转义映射与格区交互隔离（2026-10-01）
+
+表格单元格（表头 th／数据格 td）内的 `![[…]]` 在 Reading 与 Live 双模式升级为格内卡片；`\|` 别名等转义形态按**格内语义解码**挂载，源码与索引全程保真。
+
+**三套区间映射（单一事实源 `src/webview/tableCellEmbed.ts`）**：格内嵌入横跨三套坐标——原始源码（LF 全文 offset，写回/rename/索引的落点）、表格转义（`\|` 等，`escapeCellText` 的逆）、渲染文字（解码后）。核心函数：`decodeCellView` 把非行内代码 span 内的 `\|` 解码为 `|` 并产出**解码位→源码位**的显式映射数组；`scanEmbedsInTableRow` 逐 cell（`tableCells` 切列语义——`\|` 不切列）在解码视图识别 occurrence，**inner 为解码语义**（`![[B\|别名]]` → `B|别名`，`\` 不进目标路径），**from/to 恒为原始源码区间**（含 `\|` 转义字符）——解码字符串 offset（短于源文）绝不写回。跨格伪形态（开闭标记分属两格）与 code span 内字面量不命中。宿主解析端零改动：`hover.request` 的 target 即完整 inner，`readHoverDocTarget` 的 `parseWikilinkInner` 自拆管道。
+
+**三处准入开放（同源集合退役 Table）**：`refExpansion.validChildSource`（Table 移出排除集；对齐口径按行分类——表格内容行用解码扫描，非表格行保持原始扫描，普通段落 `\|` 形态不进入解码语义）、`embedSlots.OCCURRENCE_EXCLUDED`（Table 退役；`blockEmbedOccurrences` 表格行走格内解码扫描）、`liveEmbed.EMIT_EXCLUDED`（Table 退役；嵌入表 `scanEmbedSpansInLines`/`rebuildEmbedSpans` 增加 lezer 树行分类参数，树取自 `liveDecorationsField`——装配序在其后）。`#246` 曾对齐过滤的表格占位在本票升级为真挂载：`directEmbedSlots` 的 table 祖先排除退役、`promoteEmbedSlot` 在 td/th 内原位替换（表格行列结构不拆）；**渲染侧配套**：markdown-it 的 escape 规则会先消费 `\|` 把嵌入拆断，`vsidian_table_breaks` core 规则扩展为对含 `![[` 且含 `\|` 的 cell 先解码重解析——占位产出的 `data-vsidian-embed-inner` 与扫描侧同为解码语义，配对同源。
+
+**双模式呈现**：Reading 表格 td/th 内流内宿主（`reading-embed-mixed` 复用，max-width:100% 不撑破列）；Live 网格格 mark span 内挂卡——CM6 的 inline replace widget **嵌在 mark span 内部不切开 mark**（jsdom 勘察探针实证嵌套关系；浏览器 tableEmbed 场景 B 在真实 Chromium 布局断言卡宿主落位格内、各行格数不变、卡不越格），cell 仍是单 grid item，列布局与格区高亮不因格内卡破坏；隐形态替换嵌入精确区间（`#247` 语义），显形态行下方 block widget，格内 widgetBuffer 仅紧邻嵌入宿主的两枚零高化（其余 widget 的 buffer 是 posAtCoords 坐标锚，不得一并零高——tableCaret cell-widget 场景曾因误伤回归）。同格多引用按源顺序独立成卡、独立显隐。滚轮先由命中卡消费、到边界接续外层（格/表外所属滚动区，`embedCard` 既有 wheel 链）。
+
+**格区交互隔离**：`tableRegionSelection` 的**起点锚定**（onDown）排除嵌入卡域（`embedCard` 卡壳或 `live-embed` 宿主内不建立格区锚）——卡内真实指针拖选/选字/复制不启动父矩形格区选取、零写回；**路径命中**（onMove）不排除，从格/把手开始的拖选经过卡片仍按所在格扩展。区域复制序列化父文档引用源文（`tableRegion` 既有源文序列化——`![[B\|别名]]` 原文保留，`escapeCopiedPipes` 不双重转义），不把目标正文灌入表格。Tab/Enter/方向键/IME/填充空白契约沿用 `table-interaction-rework.md` 既有语义（浏览器 tableEmbed 场景钉住 Tab 落格与显隐独立）。
+
+**索引与 rename（与呈现同源）**：`vaultLinkExtract` 表格内容行走 `scanEmbedsInTableRow` 产边——target 为解码路径（`B`，非 `B\`）、区间为源文；`vaultRename.buildBracketPathEdit` 增加**转义管道第二尝试**——首个 `|` 分割把 `\` 留进路径与解码 target 不匹配时，按 `\|` 分割再定位一次，替换区间只覆盖路径段（`\|` 别名与锚点原文保真、列结构不裸化）；普通段落 `\|` 形态边（target 含 `\` 的原文字面）在首分割命中，不进入第二尝试（既有语义不扩散）。
+
+**生命周期与重映射**：格内 occurrence 走 Live 嵌入表增量重建与 Reading 块挂载的既有生命周期（`rebuildEmbedSpans` 窗口外条目按解码扫描精确对齐校验；块卸载配对释放宿主）；行列移动/粘贴扩展/删格产生的文本变化经嵌入表增量重建自然重映射（浏览器单测钉住编辑后区间随源文）。
+
+**样式契约**：零新增公开类名/变量——td/th 内复用 `reading-embed-mixed`、Live 复用 `live-embed-widget`，新增的只是格容器下的内部约束规则（格内宿主宽度、紧邻嵌入的 buffer 零高、卡内容横向滚动），由 `embedCardCssContract` 钉住；`limit-markdown-embed` / `live-embed-widget` / `reading-embed-mixed` / `embed-slot` 四条目随实际能力更新（双语）。本票无新增用户可见文字（沿用既有 embed 词条）、无新增可绑定操作（评估记录见 keybindings.md 的 #248 节）；新增设置无（复用 `embed.maxHeight`/`embed.maxDepth`）。
+
+自动化证据与人工待验见 [manual-verification.md](manual-verification.md) 的 #248 节。

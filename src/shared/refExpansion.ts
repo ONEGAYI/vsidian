@@ -1,5 +1,6 @@
 import type { HoverPreviewScope } from './protocol'
 import { scanEmbedsInLine } from './wikilink'
+import { scanEmbedsInTableRow } from '../webview/tableCellEmbed'
 import { chainAt, frontmatterRange, markdownTreeParser } from '../webview/markdownDoc'
 
 export const REF_EXPANSION_LIMITS = {
@@ -35,8 +36,14 @@ export function inExpansionPath(path: readonly string[], key: string): boolean {
  * + embedSlots 提升）和索引侧（vaultLinkExtract 行扫描）同源。语法排除
  * 守卫保留：代码（围栏/缩进/行内）、frontmatter、HTML 注释（lezer 的
  * Comment/CommentBlock 节点——#246 前的 HTMLComment 条目从未命中过，
- * 实测节点名后更正）与表格（TableCell 归 #248）仍拒绝，不因混排准入
- * 而放宽——不通过删守卫把字面量升级为引用。
+ * 实测节点名后更正）仍拒绝，不因混排准入而放宽——不通过删守卫把字面量
+ * 升级为引用。
+ *
+ * #248 表格准入：Table 从排除集合退役，表格内容行（TableHeader/TableRow）
+ * 的格内嵌入 occurrence 同源放行——对齐口径按格内语义：target 为解码
+ * inner（`B|别名`——scanEmbedsInTableRow 逐格解码视图），区间为原始源码
+ * 区间（含 `\|` 转义字符）；解码字符串 offset（短于源文）不通过区间
+ * 校验。非表格行的 `\|` 形态不进入解码语义（既有边界不扩散）。
  */
 export function validChildSource(
   parent: { version: number; range: { start: number; end: number } },
@@ -51,16 +58,20 @@ export function validChildSource(
   const lineBreak = current.text.indexOf('\n', end)
   const lineEnd = lineBreak < 0 ? current.text.length : lineBreak
   const line = current.text.slice(lineStart, lineEnd)
-  // 区间必须精确对齐行内 occurrence（inner 逐字节匹配——半截/吞字/错位拒绝）
-  const aligned = scanEmbedsInLine(line).some((hit) =>
+  const tree = markdownTreeParser.parse(current.text)
+  const nodeNames = chainAt(tree, start).map((node) => node.name)
+  // 区间必须精确对齐行内 occurrence（inner 逐字节匹配——半截/吞字/错位拒绝）。
+  // 表格内容行走格内解码扫描（inner 为解码语义），其余行走原始行扫描。
+  const tableRow = nodeNames.includes('TableRow') || nodeNames.includes('TableHeader')
+  const occurrences = tableRow ? scanEmbedsInTableRow(line, 0) : scanEmbedsInLine(line, 0)
+  const aligned = occurrences.some((hit) =>
     lineStart + hit.from === start && lineStart + hit.to === end && hit.inner === target)
   if (!aligned) return false
   const fm = frontmatterRange(current.text)
   if (fm && start < fm.end) return false
   const excluded = new Set(['FencedCode', 'CodeBlock', 'InlineCode', 'CodeText', 'CodeMark',
-    'CodeInfo', 'HTMLBlock', 'Comment', 'CommentBlock', 'Table'])
-  const tree = markdownTreeParser.parse(current.text)
-  return !chainAt(tree, start).some((node) => excluded.has(node.name))
+    'CodeInfo', 'HTMLBlock', 'Comment', 'CommentBlock'])
+  return !nodeNames.some((name) => excluded.has(name))
 }
 
 type LimitKey = 'treeInstances' | 'panelInstances' | 'treeBytes' | 'panelBytes' | 'concurrentReads'

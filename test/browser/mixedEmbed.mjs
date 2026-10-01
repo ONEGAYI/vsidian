@@ -5,7 +5,7 @@
 // - 无序/有序/任务/懒续行列表与 blockquote 内卡片落位：列表编号与结构
 //   不拆、引用边条绘制、宿主宽度跟随所属列（不越缩进界）
 // - 同段多嵌入源顺序；递归（卡片内容内混排升级孙卡，RefContentMount 路径）
-// - 链接域内与表格格内占位不升级（span 文本形态，#248 前降级）
+// - 链接域内占位不升级（span 文本形态）；#248 起表格格内同升级（td 宿主）
 // - 零写回（全程无 edit.request）
 import assert from 'node:assert/strict'
 import path from 'node:path'
@@ -20,8 +20,8 @@ await build({ entryPoints: [path.join(root, 'test/browser/readingEmbedFixture.ts
   loader: { '.woff2': 'file', '.svg': 'file' }, assetNames: 'assets/[name]' })
 
 /** 父文档：混排各形态（段落/跨格式/双嵌入/列表族/引用/组合/链接/表格）。
- *  乙笔记 9 个可提升位（段落/粗体/双嵌入首/无序/有序/任务/懒续/引用/引用内
- *  列表）+ 2 个不升级位（链接域/表格格内）；丙笔记 1 个（双嵌入第二）。 */
+ *  乙笔记 10 个可提升位（段落/粗体/双嵌入首/无序/有序/任务/懒续/引用/引用内
+ *  列表/表格格内 #248 起）+ 1 个不升级位（链接域）；丙笔记 1 个（双嵌入第二）。 */
 const PARENT_DOC = [
   '# 混排嵌入父文档',
   '',
@@ -110,7 +110,7 @@ try {
   const reqsA = await hoverRequests()
   const bReqs = reqsA.filter((r) => r.target === '乙笔记')
   const cReqs = reqsA.filter((r) => r.target === '丙笔记')
-  assert.equal(bReqs.length, 9, `乙笔记 9 个可提升位（丙另计）各发请求（实际 ${bReqs.length}）`)
+  assert.equal(bReqs.length, 10, `乙笔记 10 个可提升位（丙另计；#248 起含表格格内）各发请求（实际 ${bReqs.length}）`)
   assert.equal(cReqs.length, 1, '丙笔记 1 个（同段双嵌入的第二目标）')
   for (const req of reqsA) {
     const raw = `![[${req.target}]]`
@@ -120,9 +120,9 @@ try {
   const linkSlotFrom = PARENT_DOC.indexOf('![[乙笔记]]', PARENT_DOC.indexOf('[文字'))
   const tableSlotFrom = PARENT_DOC.indexOf('![[乙笔记]]', PARENT_DOC.indexOf('格内'))
   assert.ok(!bReqs.some((r) => r.sourceStart === linkSlotFrom), '链接域内占位不升级（无请求）')
-  assert.ok(!bReqs.some((r) => r.sourceStart === tableSlotFrom), '表格格内占位不升级（无请求）')
+  assert.ok(bReqs.some((r) => r.sourceStart === tableSlotFrom), '表格格内升级（#248 起有请求）')
   passed++
-  console.log('[混排嵌入][PASS] 混排请求载荷：行内精确区间 + 链接/表格占位不升级')
+  console.log('[混排嵌入][PASS] 混排请求载荷：行内精确区间 + 链接域不升级（表格格内 #248 起同升级）')
 
   // ---- 场景 B：段落混排绘制层（前后文 p 可见 + 卡片命中 + 粗体拆壳） ----
   const paraEvidence = await page.evaluate(() => {
@@ -147,7 +147,7 @@ try {
       }
     })
   assert.ok(paraEvidence, '流内宿主在场')
-  assert.equal(paraEvidence.hostCount, 10, `主文档 10 个可提升位各一宿主（乙 9 + 丙 1，实际 ${paraEvidence.hostCount}）`)
+  assert.equal(paraEvidence.hostCount, 11, `主文档 11 个可提升位各一宿主（乙 10 + 丙 1，#248 起含表格 td 内，实际 ${paraEvidence.hostCount}）`)
   assert.ok(paraEvidence.beforeIsP && paraEvidence.afterIsP, '拆段为 p(前)+宿主+p(后)')
   assert.ok(paraEvidence.beforeVisible && paraEvidence.afterVisible, '前后文绘制层可见（非零高）')
   assert.equal(paraEvidence.beforeText, '前文段落', `前文文本无吞噬（实际 ${paraEvidence.beforeText}）`)
@@ -244,31 +244,34 @@ try {
   passed++
   console.log('[混排嵌入][PASS] 列表族与引用容器：结构保真 + 宽度跟随 + 边条绘制')
 
-  // ---- 场景 D：链接域与表格格内占位（span 文本形态，不升级） ----
+  // ---- 场景 D：链接域占位保持（span 文本形态）；#248 起表格格内升级 td 宿主 ----
   const degradedEvidence = await page.evaluate(() => {
-      const slots = Array.from(document.querySelectorAll('span.vsidian-embed-slot'))
-        .filter((el) => !el.closest('.vsidian-embed-card') && !el.closest('.vsidian-hover-popup'))
-      const inLink = slots.filter((s) => s.closest('a'))
-      const inTable = slots.filter((s) => s.closest('table'))
-      const style = slots.length ? getComputedStyle(slots[0]) : null
-      return {
-        slotCount: slots.length,
-        inLink: inLink.length,
-        inTable: inTable.length,
-        linkText: (inLink[0]?.closest('a')?.textContent ?? '').trim(),
-        tableText: (inTable[0]?.textContent ?? '').trim(),
-        color: style?.color ?? '',
-        visibleHeight: slots[0]?.getBoundingClientRect().height ?? 0,
-      }
-    })
-  assert.equal(degradedEvidence.slotCount, 2, `恰两处占位保持（链接域 + 表格格内，实际 ${degradedEvidence.slotCount}）`)
+    const slots = Array.from(document.querySelectorAll('span.vsidian-embed-slot'))
+      .filter((el) => !el.closest('.vsidian-embed-card') && !el.closest('.vsidian-hover-popup'))
+    const inLink = slots.filter((s) => s.closest('a'))
+    const inTable = slots.filter((s) => s.closest('table'))
+    const tableHost = document.querySelector('table td .vsidian-reading-embed-mixed')
+    const style = slots.length ? getComputedStyle(slots[0]) : null
+    return {
+      slotCount: slots.length,
+      inLink: inLink.length,
+      inTableSlots: inTable.length,
+      linkText: (inLink[0]?.closest('a')?.textContent ?? '').trim(),
+      tableHostInTd: tableHost !== null,
+      tableTrCount: document.querySelectorAll('table tr').length,
+      color: style?.color ?? '',
+      visibleHeight: slots[0]?.getBoundingClientRect().height ?? 0,
+    }
+  })
+  assert.equal(degradedEvidence.slotCount, 1, `恰一处占位保持（链接域；表格格内 #248 起升级，实际 ${degradedEvidence.slotCount}）`)
   assert.equal(degradedEvidence.inLink, 1, '链接域占位 1 处')
-  assert.equal(degradedEvidence.inTable, 1, '表格格内占位 1 处')
+  assert.equal(degradedEvidence.inTableSlots, 0, '表格格内不再保持占位（升级为格内宿主）')
+  assert.ok(degradedEvidence.tableHostInTd, '表格格内卡片宿主落位 td（#248）')
+  assert.equal(degradedEvidence.tableTrCount, 2, '表格行结构完整（升级不拆表）')
   assert.ok(degradedEvidence.linkText.includes('![[乙笔记]]'), `链接域占位文本保留（实际 ${degradedEvidence.linkText}）`)
-  assert.ok(degradedEvidence.tableText.includes('![[乙笔记]]'), `表格格内占位文本保留（实际 ${degradedEvidence.tableText}）`)
   assert.ok(degradedEvidence.visibleHeight > 0, '占位绘制层可见（非零高）')
   passed++
-  console.log('[混排嵌入][PASS] 链接域与表格格内占位文本可见（#248 前降级形态）')
+  console.log('[混排嵌入][PASS] 链接域占位保持；表格格内升级 td 宿主且不拆表（#248）')
 
   // ---- 场景 E：回包 → 内容绘制 + 卡片内递归混排（RefContentMount 路径） ----
   // 回包后卡片变高使虚拟化窗口收缩，远端块（含宿主/孙卡）按既有语义回收

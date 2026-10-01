@@ -29,6 +29,7 @@
 import type { SyntaxNode, Tree } from '@lezer/common'
 import { classifyImageTarget, classifyLinkTarget, type LinkContext } from './linkTarget'
 import { parseWikilinkInner, scanEmbedsInLine, scanWikilinksInLine } from '../shared/wikilink'
+import { scanEmbedsInTableRow } from '../webview/tableCellEmbed'
 import { scanLooseLinksInLine } from '../shared/looseLink'
 import { planVaultLinkPath, type VaultLinkPathContext } from '../shared/vaultLink'
 import { sortEdges, type VaultEdge, type VaultEdgeKind } from '../shared/vaultIndexModel'
@@ -74,6 +75,9 @@ const INLINE_SCAN_CODE_CONTEXTS = new Set([
  *  大小写形态）或 null（不存在）。大小写语义由实现方按宿主平台决定
  *  （Windows 折叠 / POSIX 严格），与 #196 的 statFileRealPath 端口同型。 */
 export type VaultEdgeResolvePort = (absoluteFsPath: string) => string | null
+
+/** 表格内容行节点名（#248：嵌入行扫描的格内解码分类） */
+const TABLE_ROW_NODE_NAMES = new Set(['TableRow', 'TableHeader'])
 
 /** 名为 name 的直接子节点 */
 function childNamed(node: SyntaxNode, name: string): SyntaxNode | null {
@@ -136,6 +140,16 @@ function scanSuppressed(tree: Tree, from: number, fmEnd: number | null): boolean
     }
   }
   return false
+}
+
+/** 单行的嵌入命中（#248：表格内容行走格内解码扫描——inner 解码语义、
+ *  区间源文；其余行走原始行扫描）。 */
+function embedHitsOfLine(line: string, base: number, tree: Tree): ReturnType<typeof scanEmbedsInLine> {
+  if (!line.includes('![[')) {
+    return []
+  }
+  const isTableRow = chainAt(tree, base).some((node) => TABLE_ROW_NODE_NAMES.has(node.name))
+  return isTableRow ? scanEmbedsInTableRow(line, base) : scanEmbedsInLine(line, base)
 }
 
 /**
@@ -304,11 +318,14 @@ export function extractVaultEdges(
         end: hit.to,
       })
     }
-    for (const hit of scanEmbedsInLine(line, base)) {
+    for (const hit of embedHitsOfLine(line, base, tree)) {
       // #222 嵌入（独立语法角色，行扫描形态学）：索引不设行独占限制——
       // 引用关系按出现抽取（行独占只属呈现侧挂载适配）；代码上下文排除
       // 与双链同一 scanSuppressed 边界；resolve 与锚点拆列同 wikilink 口径
-      //（implicitMd 候选：显式图片等扩展名直接解析该文件）
+      //（implicitMd 候选：显式图片等扩展名直接解析该文件）。#248 起表格
+      // 内容行（TableRow/TableHeader）走格内解码扫描——inner/target 为解码
+      // 语义（`B|别名` 的目标路径不含 `\`），区间为原始源文（含 `\|`）；
+      // 非表格行 `\|` 形态仍按原文字面（既有语义不扩散）
       if (scanSuppressed(tree, hit.from, fmEnd)) {
         continue
       }

@@ -53,8 +53,10 @@ export function tableCellBreaks(text: string): Array<{ from: number; to: number 
 /** 列对齐语义（GFM 分隔行声明） */
 export type TableAlign = 'left' | 'center' | 'right'
 
-/** 行内代码 span 覆盖表（含定界反引号本身；未配对反引号不构成 span） */
-function scanCodeSpans(line: string): boolean[] {
+/** 行内代码 span 覆盖表（含定界反引号本身；未配对反引号不构成 span）。
+ *  #248 起导出：格内嵌入解码视图（tableCellEmbed）与写回转义共用同一
+ *  code span 判定，不另起一套扫描。 */
+export function scanCodeSpans(line: string): boolean[] {
   const inSpan = new Array<boolean>(line.length).fill(false)
   let i = 0
   while (i < line.length) {
@@ -114,8 +116,9 @@ export function maskCodeSpanPipes(line: string, marker: string): string {
   return changed ? chars.join('') : line
 }
 
-/** 位置 i 的管道符是否被反斜杠转义（前导奇数个连续 \） */
-function isEscapedAt(line: string, i: number): boolean {
+/** 位置 i 的管道符是否被反斜杠转义（前导奇数个连续 \）。
+ *  #248 起导出：格内解码视图（tableCellEmbed）复用同一转义判定。 */
+export function isEscapedAt(line: string, i: number): boolean {
   let n = 0
   for (let j = i - 1; j >= 0 && line[j] === '\\'; j--) {
     n += 1

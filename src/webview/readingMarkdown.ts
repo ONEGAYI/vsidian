@@ -21,6 +21,7 @@ import { escapeHtml } from '../shared/frontmatterTable'
 import { renderMathHtml } from './mathRenderCache'
 import { highlightFlankOk } from './markdownDoc'
 import { tableCellBreakLength } from './tableCells'
+import { decodeCellView } from './tableCellEmbed'
 
 /** 渲染环境：行首/行尾 offset 表（lineStarts[i]/lineEnds[i] 为第 i 行界） */
 export interface ReadingRenderEnv {
@@ -383,6 +384,12 @@ export function createMarkdownRenderer(): InstanceType<typeof MarkdownIt> {
   installMermaidFenceRenderer(md)
   // 编辑态把格内回车存成 br。阅读态只在表格 inline token 里重新解析
   // 无属性 br；全局 html:false 继续转义其他 HTML，代码片段由解析器保留字面值。
+  // #248 格内嵌入：cell 内容含 `![[` 且含 `\|` 时，先按格内语义解码转义
+  // 管道（decodeCellView——跳过行内代码 span）再重解析——否则 markdown-it
+  // 的 escape 规则先消费 `\|`，把 `![[B\|别名]]` 拆断为 `![[B` + `|` + `别名]]`，
+  // 嵌入占位（vsidian_embed_slot）不连续无法命中；解码后占位规则产出的
+  // data-vsidian-embed-inner 为解码语义（`B|别名`），与 embedSlots 的
+  // occurrence 扫描（scanEmbedsInTableRow 同源解码）配对一致。
   md.inline.ruler.before('html_inline', 'vsidian_table_break', (state, silent) => {
     if (!state.env.vsidianTableCell) return false
     const length = tableCellBreakLength(state.src, state.pos)
@@ -396,9 +403,13 @@ export function createMarkdownRenderer(): InstanceType<typeof MarkdownIt> {
     for (const token of state.tokens) {
       if (token.type === 'table_open') inTable = true
       if (token.type === 'table_close') inTable = false
-      if (inTable && token.type === 'inline' && /<br/i.test(token.content)) {
+      if (inTable && token.type === 'inline') {
+        const content = token.content
+        const decode = content.includes('![[') && content.includes('\\|')
+        const reparsed = decode ? decodeCellView(content).text : content
+        if (!decode && !/<br/i.test(content)) continue
         token.children = []
-        md.inline.parse(token.content, md, { ...state.env, vsidianTableCell: true }, token.children)
+        md.inline.parse(reparsed, md, { ...state.env, vsidianTableCell: true }, token.children)
       }
     }
   })

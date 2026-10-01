@@ -172,10 +172,6 @@ describe('#246 混排/列表/引用容器的直接父来源准入', () => {
     expect(check('> - 项 ![[C]] 余')).toBe(true)
   })
 
-  it('表格格内仍无子来源资格（#248 接入前的既有边界）', () => {
-    expect(check('| a | ![[C]] |\n| --- | --- |\n| b | c |')).toBe(false)
-  })
-
   it('语法排除守卫保留：代码/frontmatter/注释内不因混排准入而放宽', () => {
     expect(check('段 `![[C]]` 段')).toBe(false)
     expect(check('```md\n![[C]]\n```')).toBe(false)
@@ -193,5 +189,66 @@ describe('#246 混排/列表/引用容器的直接父来源准入', () => {
     expect(validChildSource(parent, cur, at - 1, at + 6, 'C')).toBe(false) // 吞前字
     expect(validChildSource(parent, cur, at, at + 7, 'C')).toBe(false) // 吞后字
     expect(validChildSource(parent, cur, at, at + 6, 'C')).toBe(true)
+  })
+})
+
+describe('#248 表格格内的直接父来源准入（转义映射）', () => {
+  const TABLE = [
+    '| 头1 | 头2 |',
+    '| --- | --- |',
+    '| a | ![[C]] |',
+    '| ![[B\\|别名]] | d |',
+  ].join('\n')
+
+  it('表格数据格内的嵌入有子来源资格（Table 不再排除）', () => {
+    const at = TABLE.indexOf('![[C]]')
+    expect(validChildSource(
+      { version: 1, range: { start: 0, end: TABLE.length } },
+      { version: 1, text: TABLE },
+      at, at + '![[C]]'.length, 'C',
+    )).toBe(true)
+  })
+
+  it('表格表头格内的嵌入有子来源资格', () => {
+    const text = '| ![[C]] | h |\n| --- | --- |\n| a | b |'
+    const at = text.indexOf('![[C]]')
+    expect(validChildSource(
+      { version: 1, range: { start: 0, end: text.length } },
+      { version: 1, text },
+      at, at + '![[C]]'.length, 'C',
+    )).toBe(true)
+  })
+
+  it('转义别名形态：target 为解码语义（B|别名），区间为原始源码区间', () => {
+    const at = TABLE.indexOf('![[B\\|别名]]')
+    const end = at + '![[B\\|别名]]'.length
+    const parent = { version: 1, range: { start: 0, end: TABLE.length } }
+    const cur = { version: 1, text: TABLE }
+    // 解码 inner 对齐通过
+    expect(validChildSource(parent, cur, at, end, 'B|别名')).toBe(true)
+    // 原始 inner（含 \）不匹配解码语义；解码 offset 写回（区间短 1）拒绝
+    expect(validChildSource(parent, cur, at, end, 'B\\|别名')).toBe(false)
+    expect(validChildSource(parent, cur, at, end - 1, 'B|别名')).toBe(false)
+  })
+
+  it('表格格内行内代码中的嵌入字面量仍拒绝', () => {
+    const text = '| `![[C]]` | b |\n| --- | --- |\n| c | d |'
+    const at = text.indexOf('![[C]]')
+    expect(validChildSource(
+      { version: 1, range: { start: 0, end: text.length } },
+      { version: 1, text },
+      at, at + '![[C]]'.length, 'C',
+    )).toBe(false)
+  })
+
+  it('普通段落行的 \\| 形态不进入格内解码语义（既有边界不扩散）', () => {
+    // 非表格行 `![[B\|x]]`：inner 按原文（B\x 形态）对齐，解码语义（B|x）不匹配
+    const text = '段 ![[B\\|x]] 段'
+    const at = text.indexOf('![[B\\|x]]')
+    const end = at + '![[B\\|x]]'.length
+    const parent = { version: 1, range: { start: 0, end: text.length } }
+    const cur = { version: 1, text }
+    expect(validChildSource(parent, cur, at, end, 'B\\|x')).toBe(true)
+    expect(validChildSource(parent, cur, at, end, 'B|x')).toBe(false)
   })
 })

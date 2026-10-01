@@ -157,7 +157,7 @@ describe('Live 嵌入装饰：抑制边界（表构建层不排除、发射层�
     expect(buildDecos(text, EditorSelection.single(text.length))).toHaveLength(0)
   })
 
-  it('#247 起混排/列表/引用行照常产出（容器上下文接入）；表格格/未闭合仍不产出', () => {
+  it('#247 起混排/列表/引用行照常产出（容器上下文接入）；#248 起表格格照常产出；未闭合仍不产出', () => {
     const text = [
       '前 ![[混排]] 后',
       '- ![[列表]]',
@@ -168,9 +168,9 @@ describe('Live 嵌入装饰：抑制边界（表构建层不排除、发射层�
       '尾段',
     ].join('\n')
     const items = buildDecos(text, EditorSelection.single(0))
-    // 混排 + 无序 + 引用三处挂卡；表格（#248 前排除）与未闭合保持源文
-    expect(items).toHaveLength(3)
-    expect(items.map((i) => i.widget!.inner)).toEqual(['混排', '列表', '引用'])
+    // 混排 + 无序 + 引用 + 表格格（#248 开放）四处挂卡；未闭合保持源文
+    expect(items).toHaveLength(4)
+    expect(items.map((i) => i.widget!.inner)).toEqual(['混排', '列表', '引用', '表格'])
   })
 
   it('围栏编辑联动：上方打开围栏使下方嵌入行即时撤下装饰', () => {
@@ -433,7 +433,7 @@ describe('#247 Live 混排与容器：occurrence 精确替换', () => {
     expect(buildDecos(text, EditorSelection.single(0))).toHaveLength(0)
   })
 
-  it('表格格内嵌入不挂卡（#248 前排除）；行内代码与注释内不挂卡', () => {
+  it('表格格内嵌入挂卡（#248 开放）；行内代码与注释内不挂卡', () => {
     const text = [
       '| a | b |',
       '| --- | --- |',
@@ -446,8 +446,8 @@ describe('#247 Live 混排与容器：occurrence 精确替换', () => {
       '正文 ![[丁]] 尾。',
     ].join('\n')
     const items = buildDecos(text, EditorSelection.single(0))
-    expect(items).toHaveLength(1)
-    expect(items[0]!.widget!.inner).toBe('丁')
+    expect(items).toHaveLength(2)
+    expect(items.map((i) => i.widget!.inner)).toEqual(['甲', '丁'])
   })
 
   it('嵌套列表/懒续行/引用内列表组合的嵌入照常挂卡', () => {
@@ -557,5 +557,97 @@ describe('#247 Live 嵌入表：occurrence 化增量与宿主 key', () => {
     expect(far.field(liveEmbedSpansField)[0]!.from).toBe(aAt)
     const near = far.update({ selection: { anchor: aAt + 2 } }).state
     expect(near.field(liveEmbedSpansField)[0]!.from).toBe(aAt)
+  })
+})
+
+describe('#248 表格格内嵌入：解码 inner 与精确显隐', () => {
+  const TABLE = [
+    '| 头 | 头 |',
+    '| --- | --- |',
+    '| a | ![[B\\|别名]] |',
+  ].join('\n')
+  const EMBED_AT = TABLE.indexOf('![[B\\|别名]]')
+  const EMBED_END = EMBED_AT + '![[B\\|别名]]'.length
+
+  it('表格行的嵌入表条目为解码 inner、源码区间（scanEmbedSpansInLines 表格感知）', () => {
+    let state = EditorState.create({
+      doc: TABLE,
+      extensions: [liveDecorationsField, mermaidFencesField, liveEmbedSpansField],
+    })
+    const spans = state.field(liveEmbedSpansField)
+    expect(spans).toHaveLength(1)
+    expect(spans[0]!.inner).toBe('B|别名')
+    expect(spans[0]!.from).toBe(EMBED_AT)
+    expect(spans[0]!.to).toBe(EMBED_END)
+    // sole 为 false（混排格——宿主 key 取嵌入精确区间）
+    expect(spans[0]!.sole).toBe(false)
+  })
+
+  it('格内嵌入隐形态：发射 inline replace（widget.inner 解码语义）', () => {
+    const items = buildDecos(TABLE, EditorSelection.single(0))
+    expect(items).toHaveLength(1)
+    expect(items[0]!.hidden).toBe(true)
+    expect(items[0]!.block).toBe(false)
+    expect(items[0]!.from).toBe(EMBED_AT)
+    expect(items[0]!.to).toBe(EMBED_END)
+    expect(items[0]!.widget!.inner).toBe('B|别名')
+  })
+
+  it('光标触及格内嵌入区间 → 源码显形（行下方 block widget）；未触及保持隐藏', () => {
+    const touched = buildDecos(TABLE, EditorSelection.single(EMBED_AT + 4))
+    expect(touched[0]!.hidden).toBe(false)
+    expect(touched[0]!.widget!.below).toBe(true)
+    const idle = buildDecos(TABLE, EditorSelection.single(TABLE.indexOf('头')))
+    expect(idle[0]!.hidden).toBe(true)
+  })
+
+  it('同格多引用：各自独立替换与显隐', () => {
+    const text = '| x ![[A]] y ![[B\\|b]] z |\n| --- |'
+    const idle = buildDecos(text, EditorSelection.single(0))
+    expect(idle.map((i) => i.widget!.inner)).toEqual(['A', 'B|b'])
+    const inSecond = text.indexOf('![[B\\|b]]') + 5
+    const touched = buildDecos(text, EditorSelection.single(inSecond))
+    const hiddenStates = touched.map((i) => i.hidden)
+    expect(hiddenStates).toEqual([true, false])
+  })
+
+  it('表格行内 code span 中的嵌入字面量不发射', () => {
+    const text = '| `![[C]]` | b |\n| --- | --- |\n| c | d |'
+    expect(buildDecos(text, EditorSelection.single(0))).toHaveLength(0)
+  })
+
+  it('增量重建：格内嵌入编辑后表更新（区间随源文变化）', () => {
+    let state = EditorState.create({
+      doc: TABLE,
+      extensions: [liveDecorationsField, mermaidFencesField, liveEmbedSpansField],
+    })
+    // 把别名改为更短的 inner（区间缩短）
+    state = state
+      .update({ changes: { from: EMBED_AT + 3, to: EMBED_END - 2, insert: 'C' } })
+      .state
+    const spans = state.field(liveEmbedSpansField)
+    expect(spans).toHaveLength(1)
+    expect(spans[0]!.inner).toBe('C')
+    expect(state.doc.sliceString(spans[0]!.from, spans[0]!.to)).toBe('![[C]]')
+  })
+})
+
+describe('#248 P1-1 消费者一致性：`]]` 紧贴转义管道的端点映射', () => {
+  it('嵌入表与发射区间 slice 严格等于嵌入原文（不多含转义反斜杠）', () => {
+    const text = '| ![[B]]\\|尾 | y |\n| --- | --- |\n| a | b |'
+    let state = EditorState.create({
+      doc: text,
+      extensions: [liveDecorationsField, mermaidFencesField, liveEmbedSpansField],
+    })
+    const spans = state.field(liveEmbedSpansField)
+    expect(spans).toHaveLength(1)
+    expect(text.slice(spans[0]!.from, spans[0]!.to)).toBe('![[B]]')
+    expect(text[spans[0]!.to]).toBe('\\')
+    // 隐形态 replace 区间 = 同一 span 区间（buildDecos 发射层）
+    const items = buildDecos(text, EditorSelection.single(0))
+    expect(items).toHaveLength(1)
+    expect(items[0]!.from).toBe(spans[0]!.from)
+    expect(items[0]!.to).toBe(spans[0]!.to)
+    expect(items[0]!.widget!.inner).toBe('B')
   })
 })

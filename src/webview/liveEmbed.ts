@@ -44,6 +44,7 @@ import { selectionTouchesRange } from './liveDecorations'
 import { liveDecorationsField } from './liveDecorations'
 import { mermaidFencesField } from './liveMermaid'
 import { chainAt } from './markdownDoc'
+import { scanEmbedsInTableRow } from './tableCellEmbed'
 import type { Tree } from '@lezer/common'
 import type { FenceSpan } from '../shared/mermaid'
 import { linkLabelRangesInLine, scanEmbedsInLine, soleEmbedOfLine } from '../shared/wikilink'
@@ -81,38 +82,56 @@ export interface LiveEmbedSpan {
 
 /** 发射层语法排除上下文（lezer 节点名）——与 #246 embedSlots 的
  *  OCCURRENCE_EXCLUDED、refExpansion.validChildSource 同源集合：
- *  代码族（围栏/缩进/行内）、HTML 块/注释、表格（#248 前排除）。
+ *  代码族（围栏/缩进/行内）、HTML 块/注释。#248 起 Table 退役——表格
+ *  内容行（TableRow/TableHeader）的格内嵌入经 scanEmbedsInTableRow 的
+ *  格内解码扫描挂载（inner 解码语义、替换区间为源文精确区间）。
  *  注意：lezer 把 `![[x]]` 解析为 Image 节点（所有嵌入的公共祖先），
  *  Image/LinkMark 不在排除集——否则全部嵌入被排除 */
 const EMIT_EXCLUDED = new Set([
   'FencedCode', 'CodeBlock', 'CodeText', 'CodeMark', 'CodeInfo', 'InlineCode',
-  'HTMLBlock', 'Comment', 'CommentBlock', 'Table',
+  'HTMLBlock', 'Comment', 'CommentBlock',
 ])
+
+/** 表格内容行节点名（#248：spans 表的格内解码扫描行分类） */
+const TABLE_ROW_NODE_NAMES = new Set(['TableRow', 'TableHeader'])
+
+/** 单行的嵌入 occurrence（表格内容行走格内解码扫描——inner 解码语义、
+ *  区间源文；其余行走原始行扫描）。sole 随行判定。 */
+function embedSpansOfLine(line: { text: string; from: number; to: number }, tree: Tree | null): LiveEmbedSpan[] {
+  const sole = soleEmbedOfLine(line.text) !== null
+  const isTableRow = tree !== null &&
+    chainAt(tree, line.from).some((node) => TABLE_ROW_NODE_NAMES.has(node.name))
+  const hits = isTableRow ? scanEmbedsInTableRow(line.text, line.from) : scanEmbedsInLine(line.text, line.from)
+  return hits.map((hit) => ({
+    lineFrom: line.from,
+    lineTo: line.to,
+    from: hit.from,
+    to: hit.to,
+    inner: hit.inner,
+    sole,
+  }))
+}
 
 /**
  * 行窗口嵌入扫描（create 全量 / 增量重建共用；纯数据输入可单测直驱）：
- * 逐行 scanEmbedsInLine 全部 occurrence（#246 识别——混排/列表/引用/
- * 懒续行/任务照常命中；表格/代码/链接域排除在发射层）。sole 标记随行
- * 判定（soleEmbedOfLine——宿主 key 区间选择）。本层不做语法排除。
+ * 逐行全部 occurrence（#246 识别、#248 起表格内容行走格内解码扫描——
+ * inner 为解码语义）；tree 提供表格行分类（缺省 null 时全部按原始行扫描
+ * ——嵌入表只作候选，发射层仍有语法排除兜底）。sole 标记随行判定
+ * （soleEmbedOfLine——宿主 key 区间选择）。本层不做语法排除。
  */
-export function scanEmbedSpansInLines(doc: Text, firstLine: number, lastLine: number): LiveEmbedSpan[] {
+export function scanEmbedSpansInLines(
+  doc: Text,
+  firstLine: number,
+  lastLine: number,
+  tree: Tree | null = null,
+): LiveEmbedSpan[] {
   const out: LiveEmbedSpan[] = []
   for (let n = firstLine; n <= lastLine; n += 1) {
     const line = doc.line(n)
     if (!line.text.includes('![[')) {
       continue
     }
-    const sole = soleEmbedOfLine(line.text) !== null
-    for (const hit of scanEmbedsInLine(line.text, line.from)) {
-      out.push({
-        lineFrom: line.from,
-        lineTo: line.to,
-        from: hit.from,
-        to: hit.to,
-        inner: hit.inner,
-        sole,
-      })
-    }
+    out.push(...embedSpansOfLine(line, tree))
   }
   return out
 }
@@ -123,12 +142,13 @@ export function scanEmbedSpansInLines(doc: Text, firstLine: number, lastLine: nu
  * 坍缩条目（整行被删映射出倒挂区间）丢弃——嵌入是行局部语法，无跨行
  * 状态（对照 mermaid 围栏表的开放状态锚，此处无此复杂度）。窗口外条目
  * 以行内 occurrence 重扫精确对齐校验（from/to/inner 全匹配才保留——
- * 同行多嵌入互不串位）。
+ * 同行多嵌入互不串位；表格行按格内解码扫描同款对齐）。
  */
 export function rebuildEmbedSpans(
   doc: Text,
   tr: Transaction,
   prev: readonly LiveEmbedSpan[],
+  tree: Tree | null = null,
 ): LiveEmbedSpan[] {
   const changes = tr.changes
   let seedFrom = doc.length + 1
@@ -165,34 +185,37 @@ export function rebuildEmbedSpans(
     }
     if (m.lineTo < windowStart || m.lineFrom > windowEnd) {
       // 窗口外保留：重扫该行 occurrence，精确对齐（from/to/inner）才保留
-      //（同行多嵌入按精确区间配对，不吞位、不漂移）
+      //（同行多嵌入按精确区间配对，不吞位、不漂移；表格行解码扫描同款）
       const line = doc.lineAt(m.lineFrom)
       if (line.from === m.lineFrom) {
-        const sole = soleEmbedOfLine(line.text) !== null
-        const hit = scanEmbedsInLine(line.text, line.from)
+        const hit = embedSpansOfLine(line, tree)
           .find((h) => h.from === m.from && h.to === m.to && h.inner === m.inner)
         if (hit) {
-          out.push({ lineFrom: line.from, lineTo: line.to, from: hit.from, to: hit.to, inner: hit.inner, sole })
+          out.push({ ...hit })
         }
       }
       // 行边界漂移（理论不可达，防御丢弃）
     }
   }
-  out.push(...scanEmbedSpansInLines(doc, firstLine, lastLine))
+  out.push(...scanEmbedSpansInLines(doc, firstLine, lastLine, tree))
   out.sort((a, b) => a.lineFrom - b.lineFrom || a.from - b.from)
   return out
 }
 
-/** 全文档嵌入表（#223）：docChanged 时增量重建；选区/视口变化零成本 */
+/** 全文档嵌入表（#223）：docChanged 时增量重建；选区/视口变化零成本。
+ *  树取自 liveDecorationsField（装配序在其后，增量解析与 state.doc 同步
+ *  ——表格行的格内解码扫描行分类来源） */
 export const liveEmbedSpansField = StateField.define<readonly LiveEmbedSpan[]>({
   create(state) {
-    return scanEmbedSpansInLines(state.doc, 1, state.doc.lines)
+    return scanEmbedSpansInLines(state.doc, 1, state.doc.lines,
+      state.field(liveDecorationsField, false)?.tree ?? null)
   },
   update(value, tr) {
     if (!tr.docChanged) {
       return value
     }
-    return rebuildEmbedSpans(tr.state.doc, tr, value)
+    return rebuildEmbedSpans(tr.state.doc, tr, value,
+      tr.state.field(liveDecorationsField, false)?.tree ?? null)
   },
 })
 
@@ -215,15 +238,17 @@ function fenceContains(fences: readonly FenceSpan[], lineFrom: number, lineTo: n
 }
 
 /**
- * 嵌入装饰构建（#223/#247 契约入口；纯数据输入，可单测直驱）：
- * 逐 occurrence 发射——触及源码区间 → 行下方 block widget（源文显形）；
+ * 嵌入装饰构建（#223/#247/#248 契约入口；纯数据输入，可单测直驱）：
+ * 逐 occurrence 发射——触及源码区间 → 行下方 block widget（源码显形）；
  * 未触及 → **嵌入精确区间** [from, to] inline replace widget（#247：前后
  * 文/列表标记/任务控件/引用前缀/缩进保留，卡片块级断行呈现由 CSS 承担，
- * 见 main.css 的 live-embed 段）。排除（发射层）：frontmatter 内（头区
- * 不产正文嵌入）、已闭合围栏内与文末开放围栏后（代码区域字面文本不作
- * 为嵌入——与阅读侧 markdown-it 块语义对齐）、lezer 语法上下文（行内
- * 代码/HTML 块/注释/表格——#246 同源排除集合，表格 #248 前排除）、行内
- * 链接/图片文字域（与 Reading 呈现对齐：链接域内嵌入不升级）。
+ * 见 main.css 的 live-embed 段；#248 起表格内容行同款——widget 嵌在网格
+ * 格 mark span 内（CM6 inline replace widget 不切开 mark），网格列布局
+ * 不因格内卡破坏）。排除（发射层）：frontmatter 内（头区不产正文嵌入）、
+ * 已闭合围栏内与文末开放围栏后（代码区域字面文本不作为嵌入——与阅读侧
+ * markdown-it 块语义对齐）、lezer 语法上下文（行内代码/HTML 块/注释——
+ * #246 同源排除集合；#248 起 Table 开放为格内挂载）、行内链接/图片文字域
+ * （与 Reading 呈现对齐：链接域内嵌入不升级）。
  */
 export function buildLiveEmbedDecorationRanges(
   selection: import('@codemirror/state').EditorSelection,
