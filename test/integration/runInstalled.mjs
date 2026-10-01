@@ -11,6 +11,8 @@
 //
 // 用法：node test/integration/runInstalled.mjs [VSIX 路径=根目录下最新 vsix]
 // 前提：npm run compile（suite 产物）与 npx @vscode/vsce package（VSIX）。
+// VSIDIAN_TEST_VSCODE_PATH 指向已解压宿主可执行文件时跳过 1.86.2 下载，
+// 用于 #255 兼容下界（如 1.82.3）的安装态回归验证。
 import { downloadAndUnzipVSCode } from '@vscode/test-electron'
 import { spawn } from 'node:child_process'
 import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
@@ -42,7 +44,13 @@ const wsDir = mkdtempSync(path.join(tmpdir(), 'vsidian-inst-'))
 try {
   const vsix = resolveVsix()
   writeFixtures(wsDir, { generatePerfSample, generateReadingSample, generateMermaidDenseSample })
-  const vscodeExecutablePath = await downloadAndUnzipVSCode({ version: '1.86.2' })
+  // VSIDIAN_TEST_VSCODE_PATH：指向已解压宿主可执行文件（如 1.82.3 下界
+  // 验证）时跳过 1.86.2 下载直接使用——#255 下界安装态回归通道；后续
+  // bin/code CLI 推导与测试宿主启动均基于同一 vscodeExecutablePath，
+  // override 路径须为标准解压布局（exe 同级有 bin/ 子目录）
+  const overrideExecutable = process.env.VSIDIAN_TEST_VSCODE_PATH
+  const vscodeExecutablePath = overrideExecutable || await downloadAndUnzipVSCode({ version: '1.86.2' })
+  console.log(`[runInstalled] 测试宿主：${vscodeExecutablePath}${overrideExecutable ? '（VSIDIAN_TEST_VSCODE_PATH 覆盖）' : ''}`)
 
   console.log(`[runInstalled] VSIX：${vsix}`)
   console.log(`[runInstalled] fixture 工作区：${wsDir}`)

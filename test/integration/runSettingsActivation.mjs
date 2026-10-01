@@ -3,6 +3,8 @@
 // activate 扩展，激活后的命令执行无法验证「contributes.commands 自动派生
 // onCommand 激活」，故单独成套（套件内不得调用 ext.activate()）。
 // 宿主启动走 testHost.mjs 共用策略（#45）：Windows 默认独立桌面不抢前台。
+// VSIDIAN_TEST_VSCODE_PATH 指向已解压宿主可执行文件时跳过 1.86.2 下载，
+// 用于 #255 兼容下界（如 1.82.3）的空窗口激活复验。
 import { downloadAndUnzipVSCode } from '@vscode/test-electron'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -16,7 +18,12 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 // 隔离 profile（--user-data-dir）同时避免会话恢复（如 remote）导致启动失败
 const emptyDir = mkdtempSync(path.join(tmpdir(), 'vsidian-act-'))
 try {
-  const executable = await downloadAndUnzipVSCode({ version: '1.86.2' })
+  // VSIDIAN_TEST_VSCODE_PATH：指向已解压宿主可执行文件（如 1.82.3 下界
+  // 验证）时跳过 1.86.2 下载直接使用——与 runTest.mjs / runInstalled.mjs
+  // 同款通道（#255）；后续 runTestHost 启动基于同一 executable
+  const overrideExecutable = process.env.VSIDIAN_TEST_VSCODE_PATH
+  const executable = overrideExecutable || await downloadAndUnzipVSCode({ version: '1.86.2' })
+  console.log(`[runSettingsActivation] 测试宿主：${executable}${overrideExecutable ? '（VSIDIAN_TEST_VSCODE_PATH 覆盖）' : ''}`)
   const args = buildTestHostArgs({
     workspaceDir: emptyDir,
     testsPath: path.join(root, 'out', 'test', 'integration', 'settingsActivation', 'index.js'),

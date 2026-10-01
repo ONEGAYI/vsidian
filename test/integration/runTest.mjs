@@ -38,8 +38,9 @@ if (sharded) {
 
 // VSIDIAN_TEST_VSCODE_PATH：指向已解压宿主可执行文件（如 1.82.3 下界
 // 验证）时跳过 1.86.2 下载直接使用——#254 分段验证路径 / #255 候选下界
-// 反复实测的通道；--extensionDevelopmentPath 模式不做 engines 安装门槛
-// 检查，不需要临时降版本
+// 反复实测的通道；dev path 模式同样执行 engines 安装门槛（实测 1.82.3
+// 宿主上 engines ^1.86.0 时扩展不激活、_test.* 命令全 not found），
+// 下界验证树须临时降 package.json 的 engines（仅验证用，不进提交）
 const overrideExecutable = process.env.VSIDIAN_TEST_VSCODE_PATH
 const executable = overrideExecutable || await downloadAndUnzipVSCode({ version: '1.86.2' })
 const mode = resolveTestHostMode()

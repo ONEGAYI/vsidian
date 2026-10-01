@@ -240,6 +240,20 @@ test('runTest 支持 VSIDIAN_TEST_VSCODE_PATH 指定已解压宿主跳过下载�
   assert.match(source, /overrideExecutable \|\| await downloadAndUnzipVSCode/)
 })
 
+test('runInstalled 支持 VSIDIAN_TEST_VSCODE_PATH 指定已解压宿主跳过下载（#255 下界安装态回归）', () => {
+  const source = readFileSync(path.join(here, 'runInstalled.mjs'), 'utf8')
+  assert.match(source, /VSIDIAN_TEST_VSCODE_PATH/)
+  // 有 override 时不得仍触发 1.86.2 下载（短路在 downloadAndUnzipVSCode 之前）
+  assert.match(source, /overrideExecutable \|\| await downloadAndUnzipVSCode/)
+})
+
+test('runSettingsActivation 支持 VSIDIAN_TEST_VSCODE_PATH 指定已解压宿主跳过下载（#255 下界空窗口激活复验）', () => {
+  const source = readFileSync(path.join(here, 'runSettingsActivation.mjs'), 'utf8')
+  assert.match(source, /VSIDIAN_TEST_VSCODE_PATH/)
+  // 有 override 时不得仍触发 1.86.2 下载（短路在 downloadAndUnzipVSCode 之前）
+  assert.match(source, /overrideExecutable \|\| await downloadAndUnzipVSCode/)
+})
+
 test('临时目录清理遇到占用仍继续清理其余目录，并拒绝越界目标', () => {
   const parent = mkdtempSync(path.join(tmpdir(), 'vsidian-cleanup-'))
   const locked = path.join(parent, 'locked')
