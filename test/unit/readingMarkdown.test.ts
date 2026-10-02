@@ -11,7 +11,7 @@
 import { describe, it, expect } from 'vitest'
 import { Text } from '@codemirror/state'
 import type { SyntaxNode } from '@lezer/common'
-import { docInput, markdownTreeParser } from '../../src/webview/markdownDoc'
+import { docInput, markdownTreeParser } from '../../src/shared/markdownDoc'
 import {
   convertTaskItems,
   buildLineBounds,

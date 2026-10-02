@@ -1,6 +1,6 @@
 import { StateEffect, StateField, type EditorState } from '@codemirror/state'
 import type { TableRegion } from './tableRegion'
-import { splitTableRowCells } from './tableCells'
+import { splitTableRowCells } from '../shared/tableCells'
 
 export const setTableRegion = StateEffect.define<TableRegion | null>()
 

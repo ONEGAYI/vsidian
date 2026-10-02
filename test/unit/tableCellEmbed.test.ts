@@ -10,9 +10,9 @@ import { describe, expect, it } from 'vitest'
 import {
   decodeCellView,
   scanEmbedsInTableRow,
-} from '../../src/webview/tableCellEmbed'
+} from '../../src/shared/tableCellEmbed'
 import { parseWikilinkInner } from '../../src/shared/wikilink'
-import { splitTableRowCells } from '../../src/webview/tableCells'
+import { splitTableRowCells } from '../../src/shared/tableCells'
 
 describe('decodeCellView：格内解码视图与源码位置映射', () => {
   it('无转义管道的行：文本原样、映射恒等', () => {

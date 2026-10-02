@@ -55,7 +55,7 @@ preview-5760 的表格跨格拖选、删除和控件交互未通过用户验收�
 - **格输入语义不变**：Tab/Enter/方向键/IME/填充空白契约照旧——嵌入格是普通格内容（`![[…]]` 是格内文本），Tab 定位格内容首、Enter 写 `<br>`、Delete/Backspace 按格内容清空语义；编辑引用走正常格内编辑（光标触及嵌入区间时源码显形），**不复用整格替换**。
 - **区域复制序列化源文**：契约 4 的复制对嵌入格输出**引用源码原文**（含 `\|` 转义，`escapeCopiedPipes` 不双重转义），不把目标正文灌入表格；格对格粘贴（契约 11）对含嵌入的源文本按既有转义规则铺开（`escapeCellText` 对已转义管道保持原样）。
 - **列宽与网格**：格内卡嵌在网格格 mark span 内（CM6 inline replace widget 不切开 mark），网格行仍是单 grid item——列宽计划（[live-table-column-width.md](live-table-column-width.md)）与列对齐不受影响；紧邻嵌入宿主的 cm-widgetBuffer 零高块级化（其余格内 widget 的 buffer 是 posAtCoords 坐标锚，**不得**一并零高——tableCaret cell-widget 场景曾因误伤回归，回归用例钉住）。
-- **转义映射单一事实源**：格内嵌入的「源码—表格转义—渲染文字」三套区间映射在 `src/webview/tableCellEmbed.ts`（`\|` 按格内语义解码、inner 为解码语义、区间恒为源文），切列判定复用 `tableCells` 不另起一套。
+- **转义映射单一事实源**：格内嵌入的「源码—表格转义—渲染文字」三套区间映射在 `src/shared/tableCellEmbed.ts`（`\|` 按格内语义解码、inner 为解码语义、区间恒为源文），切列判定复用 `tableCells` 不另起一套。
 
 ## 参考与范围
 用户给出矩形2×2高亮、底部悬停新增带、边沿点阵把手三张参考截图。详细调研保存在本机 D:/CODE/Project/_ForExplore/vsidian-table-research/调研结论.md。

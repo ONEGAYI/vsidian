@@ -26,7 +26,7 @@
 import { EditorSelection, RangeSet, StateField, type Extension, type Range, type Text, type Transaction } from '@codemirror/state'
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet } from '@codemirror/view'
 import type { Tree } from '@lezer/common'
-import { chainAt, visitRange, type SourceRange } from './markdownDoc'
+import { chainAt, visitRange, type SourceRange } from '../shared/markdownDoc'
 import { hitRangesOf, hitRevealField, hitIntersectsRange, type HitRange } from './hitReveal'
 import { liveDecorationsField, selectionTouchesRange } from './liveDecorations'
 import { MATH_CLASS_NAMES, opensMathBlockLine, scanMathInLine, scanMathRanges, type MathOccurrence } from '../shared/math'

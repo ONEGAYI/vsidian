@@ -25,8 +25,8 @@
 //   EmbedCardManager.mountCardInto 与子卡 mountChildFrom 原样复用；卸载
 //   以 data-vsidian-embed-promoted 查询配对（promotedHostsOf）。
 import { imageAltRangesInLine, normalizeReferenceLabel, scanEmbedsInLine } from '../shared/wikilink'
-import { scanEmbedsInTableRow } from './tableCellEmbed'
-import { chainAt, frontmatterRange, markdownTreeParser } from './markdownDoc'
+import { scanEmbedsInTableRow } from '../shared/tableCellEmbed'
+import { chainAt, frontmatterRange, markdownTreeParser } from '../shared/markdownDoc'
 import { READING_CLASS_NAMES } from './readingView'
 import { READING_MARKDOWN_CLASS_NAMES, createMarkdownRenderer } from './readingMarkdown'
 import type { Tree } from '@lezer/common'

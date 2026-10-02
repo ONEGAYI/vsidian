@@ -9,7 +9,7 @@ import { EditorSelection, Text } from '@codemirror/state'
 import type { DecorationSet } from '@codemirror/view'
 import { buildLivePreviewDecorations } from '../../src/webview/liveDecorations'
 import { buildLinkImageDecorationRanges, buildWikilinkDecorationRanges } from '../../src/webview/liveLinks'
-import { docInput, markdownTreeParser } from '../../src/webview/markdownDoc'
+import { docInput, markdownTreeParser } from '../../src/shared/markdownDoc'
 import { splitReadingBlocks } from '../../src/webview/readingBlocks'
 import { createReadingBlockElement, createReadingContainer } from '../../src/webview/readingView'
 import {

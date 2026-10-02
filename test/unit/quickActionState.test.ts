@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Text } from '@codemirror/state'
-import { markdownTreeParser } from '../../src/webview/markdownDoc'
+import { markdownTreeParser } from '../../src/shared/markdownDoc'
 import { quickActionState } from '../../src/webview/quickActionState'
 
 function state(text: string, op: Parameters<typeof quickActionState>[2], from: number, to = from) {

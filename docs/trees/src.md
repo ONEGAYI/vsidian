@@ -66,6 +66,7 @@ vsidian/
     │   │   ├── island.ts # 语言数据岛构建与解析
     │   │   └── zh-cn.ts  # 简体中文语言包（编译期 parity）
     │   ├── looseLink.ts          # 宽松内联链接/图片形态学单一事实源
+    │   ├── markdownDoc.ts        # Markdown 文档工具与树查询
     │   ├── math.ts               # 公式形态学纯函数（#59）
     │   ├── mermaid.ts            # Mermaid 围栏形态学（#60）
     │   ├── newline.ts            # CRLF/LF 换行协调器
@@ -79,6 +80,8 @@ vsidian/
     │   ├── symbols.ts            # 符号注册表单一事实源（#123）
     │   ├── symbolWrap.ts         # 选区包裹计划纯函数（#124）
     │   ├── tabEscape.ts          # Tab 越界定位纯函数（#125）
+    │   ├── tableCellEmbed.ts     # 表格格内嵌入三套区间映射
+    │   ├── tableCells.ts         # 表格单元格边界、换行与转义
     │   ├── testDiagnostics.ts    # 测试传播诊断有界日志
     │   ├── vaultIndexExclude.ts  # 索引排除模式纯逻辑单一事实源
     │   ├── vaultIndexModel.ts    # 引用索引内存模型纯逻辑
@@ -139,7 +142,6 @@ vsidian/
         ├── localeOnDemand.ts           # 按需控件文案换包 DOM 级重刷
         ├── main.css                    # webview 全局布局样式
         ├── main.ts                     # webview 启动入口
-        ├── markdownDoc.ts              # Markdown 文档工具与树查询
         ├── mathRenderCache.ts          # KaTeX 渲染 LRU 缓存共享模块
         ├── mermaidEntry.ts             # Mermaid 独立产物入口（#60）
         ├── mermaidRender.ts            # Mermaid 渲染管线（#60）
@@ -179,8 +181,6 @@ vsidian/
         ├── symbolCompositionState.ts   # IME 选区快照共享状态
         ├── symbolWrap.ts               # 选区包裹编辑器适配层（#124）
         ├── syncController.ts           # CM6 同步控制器
-        ├── tableCellEmbed.ts           # 表格格内嵌入三套区间映射
-        ├── tableCells.ts               # 表格单元格边界、换行与转义
         ├── tableColumnWidth.ts         # 表格列宽采样与轨道计划纯函数
         ├── tableControls.ts            # 表格可见行控件与拖动
         ├── tableCreate.ts              # 光标处建表规划纯函数

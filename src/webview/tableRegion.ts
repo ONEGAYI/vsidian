@@ -1,4 +1,4 @@
-import { escapeCellText, parseTableDelimiter, tableRowCellsForColumns, type TableCellRange } from './tableCells'
+import { escapeCellText, parseTableDelimiter, tableRowCellsForColumns, type TableCellRange } from '../shared/tableCells'
 import type { PlannedTableEdit, TableRowInfo } from './tableStructure'
 
 /** 表头和数据行使用连续索引；分隔行不计入矩形。端点始终规范化为升序。 */
