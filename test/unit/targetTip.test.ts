@@ -233,6 +233,7 @@ describe('跳转目标提示（#299 targetTip）', () => {
     // return——不走 hide→重建 300ms→缓存重显（先消失再复现的闪烁空窗，
     // 空窗内离开则本次悬停不再出提示）
     targetTipAnchorEnter(h.anchor, () => ({ target: '目标笔记', sourceStart: 0, sourceEnd: 4 }))
+    expect(tipEl()).toBe(el) // 即时断言（复核 N1）：旧 hide→重建路径此刻已收起为 null——区分新旧行为的鉴别点
     vi.advanceTimersByTime(DEFAULT_SHOW_DELAY_MS * 3)
     expect(tipEl()).toBe(el) // 同一 DOM 元素在场，未被移除重建
     expect(h.sent.filter((m) => m.kind === 'hover.target.resolve').length).toBe(1)
