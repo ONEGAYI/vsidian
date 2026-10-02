@@ -10,6 +10,10 @@ export async function run(): Promise<void> {
   const extension = vscode.extensions.getExtension('onegayi.vsidian')
   if (extension && !extension.isActive) await extension.activate()
   const doc = await vscode.workspace.openTextDocument(uri)
+  const events: { version: number; reason?: number; text: string }[] = []
+  const eventSubscription = vscode.workspace.onDidChangeTextDocument(event => {
+    if (event.document.uri.toString() === uri.toString() && event.contentChanges.length) events.push({ version: event.document.version, ...(event.reason ? { reason: event.reason } : {}), text: event.document.getText() })
+  })
   // openWith 返回早于 webview 内 CM6 挂载；CDP 探针以面板 ready 为起点，
   // 避免单次目标枚举撞上尚未创建 .cm-content 的启动窗口。
   let panelReady = false
@@ -27,10 +31,10 @@ export async function run(): Promise<void> {
   writeFileSync(path.join(directory, 'ready'), '')
   const done = path.join(directory, 'done')
   const request = path.join(directory, 'request.json')
-  for (let i = 0; i < 300 && !existsSync(done); i++) {
+  for (let i = 0; i < 1800 && !existsSync(done); i++) {
     if (existsSync(request)) {
       const message = JSON.parse(readFileSync(request, 'utf8')) as {
-        id: number; action: string; operationId?: string; bindings?: string[]; text?: string
+        id: number; action: string; operationId?: string; bindings?: string[]; text?: string; values?: Record<string, boolean>; panelIndex?: number
       }
       unlinkSync(request)
       let result: unknown
@@ -40,7 +44,17 @@ export async function run(): Promise<void> {
         'onegayi.vsidian._test.resetKeybindings')
       if (message.action === 'text') result = doc.getText()
       if (message.action === 'settings') result = await vscode.commands.executeCommand('onegayi.vsidian._test.getSettings')
-      if (message.action === 'paint') result = await vscode.commands.executeCommand('onegayi.vsidian._test.requestViewState', uri.toString())
+      if (message.action === 'preferences') result = await vscode.commands.executeCommand('onegayi.vsidian._test.setSettings', message.values)
+      if (message.action === 'events') result = events
+      if (message.action === 'undo') { await vscode.commands.executeCommand('undo'); result = doc.getText() }
+      if (message.action === 'redo') { await vscode.commands.executeCommand('redo'); result = doc.getText() }
+      if (message.action === 'source') { await vscode.commands.executeCommand('onegayi.vsidian.mode.toSource', uri); result = true }
+      if (message.action === 'live') { await vscode.commands.executeCommand('onegayi.vsidian.mode.toLive', uri); result = true }
+      if (message.action === 'sourceType') { await vscode.commands.executeCommand('type', { text: message.text ?? '' }); result = doc.getText() }
+      if (message.action === 'sourceEnd') { await vscode.commands.executeCommand('cursorBottom'); await vscode.commands.executeCommand('cursorEnd'); result = true }
+      if (message.action === 'split') { await vscode.commands.executeCommand('workbench.action.splitEditorRight'); result = true }
+      if (message.action === 'panels') result = await vscode.commands.executeCommand('onegayi.vsidian._test.getSessionState', uri.toString())
+      if (message.action === 'paint') result = await vscode.commands.executeCommand('onegayi.vsidian._test.requestViewState', uri.toString(), message.panelIndex ?? 0)
       if (message.action === 'notify') { void vscode.window.showInformationMessage('Host notification remains independent'); result = true }
       if (message.action === 'menu') result = await vscode.commands.executeCommand('onegayi.vsidian._test.postToPanel', uri.toString(), { kind: 'contextMenu.test.contextMenu', pos: 0 })
       if (message.action === 'mode') result = await vscode.commands.executeCommand(
@@ -57,4 +71,6 @@ export async function run(): Promise<void> {
   }
   if (!existsSync(done)) throw new Error('CDP 探针超时')
   writeFileSync(path.join(directory, 'result'), doc.getText())
+  writeFileSync(path.join(directory, 'events.json'), JSON.stringify(events, null, 2))
+  eventSubscription.dispose()
 }

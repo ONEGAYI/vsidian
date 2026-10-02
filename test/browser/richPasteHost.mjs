@@ -134,6 +134,7 @@ try {
     return result.result.value
   }
 
+  await command('preferences', { values: { 'editor.pasteSplitUndo': false } })
   await evaluate('document.querySelector(".cm-content").focus()')
   await evaluate('(async()=>{await navigator.clipboard.write([new ClipboardItem({"text/plain":new Blob(["new"],{type:"text/plain"}),"text/html":new Blob(["<b style=font-weight:normal><span style=font-weight:700>new</span></b>"],{type:"text/html"})})]);})()')
   await press('a');await press('v')

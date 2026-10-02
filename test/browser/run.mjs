@@ -56,7 +56,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // 2026-10 合并入列：findBarAnchor（浮层锚点跟随——查找面板与选词选项条
 // 右缘动态咬合正文列右缘：限宽/铺满/侧栏开合/模式切换/窗口缩放几何），
 // 紧随 hitReveal（同查找/选词族）。
-const names = ['tableCaret', 'blockquoteTablePaint', 'quoteBarPaint', 'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'wordMotion', 'imagePaste', 'plainPaste', 'richPaste', 'outlineJump', 'outlineCollapse', 'outlineHover',
+const names = ['tableCaret', 'blockquoteTablePaint', 'quoteBarPaint', 'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'wordMotion', 'imagePaste', 'plainPaste', 'richPaste', 'richPasteUndo', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage', 'settingsPageRestore',
   'skeletonProbe', 'tooltipCard',
 

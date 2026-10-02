@@ -42,8 +42,10 @@ import { clipboardPlainText, clipboardHasImages, dispatchClipboardPaste, readCli
 import { ToastChannel } from './toast'
 import { RichPasteDialog } from './richPasteDialog'
 import { htmlToMarkdown } from './htmlToMarkdown'
+import { planRichPaste, richPasteDistributionMatches } from './richPastePlan'
 import type { ClipboardSnapshot } from './clipboardPaste'
-import { PASTE_PRESERVE_FORMATTING_KEY, PASTE_ASK_BEFORE_KEY } from '../shared/settings'
+import { PASTE_PRESERVE_FORMATTING_KEY, PASTE_ASK_BEFORE_KEY, PASTE_SPLIT_UNDO_KEY } from '../shared/settings'
+import type { HostToWebview, PasteStage } from '../shared/protocol'
 import { chainAt } from '../shared/markdownDoc'
 import { LINE_NUMBER_GUTTER_SELECTOR, liveLineNumbers, paintedLineNumbers } from './liveLineNumbers'
 import { CODE_CARD_CLASS_NAMES, codeCardConfigFacet, codeCardCopyRequest, codeCardFoldField, codeCardHoverReveal, liveCodeCard, type CodeCardConfig } from './liveCodeCard'
@@ -658,6 +660,8 @@ function conflictsWithLocal(
 }
 
 interface BufferedIncremental {
+  reason?: Extract<HostToWebview, { kind: 'doc.changed' }>['reason']
+  paste?: Extract<HostToWebview, { kind: 'doc.changed' }>['paste']
   version: number
   /** 增量（权威变更前系；入队时点的参考系） */
   changes: SerChange[]
@@ -922,7 +926,10 @@ export class WebviewSyncController {
   private toast: ToastChannel | undefined
   private richPasteDialog: RichPasteDialog | undefined
   private pastePreferenceReqId = 0
-  private readonly pasteFeedback: Array<'rich' | 'fallback'> = []
+  private readonly pasteFeedback: { kind: 'rich' | 'fallback'; group: string; stage: PasteStage['stage']; landed: boolean }[] = []
+  private pasteGroupId = 0
+  private recordingPasteStage: PasteStage | undefined
+  private pasteToastKey: string | undefined
   /** 键位覆盖缓存（#183 提示列派生输入；keybindings.snapshot/changed 同步） */
   private keybindingOverrides: KeybindingOverrides = {}
   /** 重命名编辑态的条目索引（null = 无编辑态；条目内容区被 input 替换） */
@@ -1151,7 +1158,7 @@ export class WebviewSyncController {
   private unconfirmed: ChangeSet | null = null
   /** 已发出未确认事务（FIFO）：坐标为发出时逆穿未确认集的 baseVersion 系
    *  投影（C-2），ack ok 后按序剥离复合进已确认链 */
-  private sentTxns: { seq: number; changes: SerChange[] }[] = []
+  private sentTxns: { seq: number; changes: SerChange[]; paste?: PasteStage }[] = []
   /** 首笔无法安全逆投影的事务起，后续本地事务合并在同一待发 ChangeSet。
    *  定义域是所有已发送事务之后的本地文档，全部 ack 后可直接作为新请求。 */
   private deferredLocal: ChangeSet | null = null
@@ -1160,7 +1167,7 @@ export class WebviewSyncController {
    *  该段开始时的本地文档；sendDeferredLocal 每次只出站队首段（余段留守
    *  暂缓集），队首段 ack 收敛后依次出站——每段一笔 edit.request = 一条
    *  宿主 undo 记录。重置与 deferredLocal 同步 */
-  private deferredSegments: ChangeSet[] = []
+  private deferredSegments: { changes: ChangeSet; paste?: PasteStage }[] = []
   /** #153 撤销分段：最近一笔本地输入（含组合候选事务）的时间戳；null
    *  表示尚无本地输入（不启动停顿计时）。停顿判定是惰性的——只在下一笔
    *  输入/组合开始时回看间隔，不设分段定时器 */
@@ -2283,6 +2290,12 @@ export class WebviewSyncController {
           break
         }
         if (message.ok) {
+          const paste = this.sentTxns.find(txn => txn.seq === message.seq)?.paste
+          if (paste) {
+            for (const feedback of this.pasteFeedback) {
+              if (feedback.group === paste.group && feedback.stage === paste.stage) feedback.landed = true
+            }
+          }
           this.inFlight.delete(message.seq)
           // 按 seq 剥离已确认事务并复合进已确认链（C-2）：外部增量逆穿
           // 它平移回 baseVersion 系；宿主按序确认，通常命中队首
@@ -2333,6 +2346,7 @@ export class WebviewSyncController {
           break
         }
         this.lastDocChangedVersion = message.version
+        this.invalidatePasteFeedback()
         if (this.suspended) {
           // 暂停：外部增量不应用（保留本地输入，恢复时以全文对齐）
           break
@@ -2352,6 +2366,8 @@ export class WebviewSyncController {
             baseChanges: this.ackedChain
               ? unmapSerGroupThroughAcked(message.changes, this.ackedChain)
               : message.changes,
+            ...(message.reason ? { reason: message.reason } : {}),
+            ...(message.paste ? { paste: message.paste } : {}),
           })
         } else if (this.unconfirmed || this.ackedChain) {
           // 在途未确认编辑：外部增量（权威系）先逆穿已确认链回 base 系再
@@ -2363,9 +2379,11 @@ export class WebviewSyncController {
           }
           this.dispatchExternal(mapped)
           this.baseVersion = message.version
+          this.finishPasteHistory(message)
         } else {
           this.baseVersion = message.version
           this.dispatchExternal(message.changes)
+          this.finishPasteHistory(message)
         }
         break
       case 'doc.resync':
@@ -3343,6 +3361,7 @@ export class WebviewSyncController {
    */
   private enterSuspended(): void {
     this.richPasteDialog?.cancel(false)
+    this.invalidatePasteFeedback()
     this.pasteFeedback.length = 0
     if (this.suspended) {
       return
@@ -6927,6 +6946,13 @@ export class WebviewSyncController {
       if (plain) dispatchClipboardPaste(target.view.contentDOM, { text: plain, images: [] }, true)
       return
     }
+    if (!richPasteDistributionMatches(target.view.state, plain, converted.markdown)) {
+      this.clipboardReadReqId += 1
+      this.clipboardReadTarget = undefined
+      if (plain) this.applyRichPaste(plain, plain, 'fallback')
+      else this.toast?.show(t('toast.pasteNoText'), 'error')
+      return
+    }
     let keep = true
     if (this.settings?.[PASTE_ASK_BEFORE_KEY] !== false) {
       const choice = await this.richPasteDialog?.open()
@@ -6943,21 +6969,62 @@ export class WebviewSyncController {
     else if (plain) dispatchClipboardPaste(target.view.contentDOM, { text: plain, images: [] }, true)
   }
 
-  /** T2为单次插入；T3在此窄接口接入plain/格式两阶段宿主历史。 */
+  /** 同步显示两个本地阶段；既有ACK队列分别提交，不另设撤销历史。 */
   private applyRichPaste(plain: string, formatted: string, feedback: 'rich' | 'fallback'): void {
     const view = this.view
     if (!view || !formatted || this.viewMode !== 'live' || this.suspended || view.state.readOnly || !view.state.facet(EditorView.editable)) return
-    const before = view.state.doc
-    dispatchClipboardPaste(view.contentDOM, { text: formatted, images: [] }, true)
-    if (view.state.doc !== before && (feedback === 'fallback' || formatted !== plain)) this.pasteFeedback.push(feedback)
+    this.invalidatePasteFeedback()
+    // seq由bridge持久化并在面板重载后续号，避免新实例复用旧历史的组身份。
+    const group = `${this.sessionId}:${this.seq + 1}:paste-${++this.pasteGroupId}`
+    const stages = planRichPaste(view.state, plain, formatted, feedback === 'rich' && this.settings?.[PASTE_SPLIT_UNDO_KEY] !== false, group)
+    if (stages.length === 0) return
+    this.pasteFeedback.push({ kind: feedback, group, stage: stages.at(-1)!.paste.stage, landed: false })
+    try {
+      for (const stage of stages) {
+        this.recordingPasteStage = stage.paste
+        this.markUndoSegmentBoundary()
+        view.dispatch(stage.transaction)
+      }
+    } finally {
+      this.recordingPasteStage = undefined
+      this.markUndoSegmentBoundary()
+    }
     view.focus()
     this.releasePasteFeedback()
   }
 
   private releasePasteFeedback(): void {
-    if (this.hasUnlandedLocalEdits() || this.suspended) return
+    if (this.recordingPasteStage || this.hasUnlandedLocalEdits() || this.suspended) return
     for (const feedback of this.pasteFeedback.splice(0)) {
-      this.toast?.show(t(feedback === 'rich' ? 'toast.pasteFormattingKept' : 'toast.pasteFormattingFailed'), feedback === 'rich' ? 'neutral' : 'error')
+      if (!feedback.landed) continue
+      if (feedback.kind === 'rich') {
+        this.pasteToastKey = `paste:${feedback.group}`
+        this.toast?.show(t('toast.pasteFormattingKept'), 'neutral', this.pasteToastKey)
+      } else this.toast?.show(t('toast.pasteFormattingFailed'), 'error')
+    }
+  }
+
+  private invalidatePasteFeedback(): void {
+    for (let i = this.pasteFeedback.length - 1; i >= 0; i--) {
+      if (this.pasteFeedback[i]!.kind === 'rich') this.pasteFeedback.splice(i, 1)
+    }
+    if (this.pasteToastKey) this.toast?.dismiss(this.pasteToastKey)
+    this.pasteToastKey = undefined
+  }
+
+  private finishPasteHistory(message: Pick<Extract<HostToWebview, { kind: 'doc.changed' }>, 'reason' | 'paste'>): void {
+    this.invalidatePasteFeedback()
+    const view = this.view
+    const paste = message.paste
+    if (!view || !message.reason || !paste || this.suspended || this.hasUnlandedLocalEdits()) return
+    if (paste.sessionId === this.sessionId) {
+      const selection = message.reason === 'undo' ? paste.before : paste.after
+      const clamp = (pos: number) => Math.max(0, Math.min(view.state.doc.length, pos))
+      view.dispatch({ selection: EditorSelection.create(selection.ranges.map(r => EditorSelection.range(clamp(r.anchor), clamp(r.head))), selection.mainIndex), annotations: externalSync.of(true) })
+    }
+    if (message.reason === 'undo' && paste.stage === 'format' && paste.hasTextStep) {
+      this.pasteToastKey = `paste:${paste.group}`
+      this.toast?.show(t('toast.pasteFormattingUndone'), 'neutral', this.pasteToastKey)
     }
   }
 
@@ -8638,7 +8705,7 @@ export class WebviewSyncController {
           text: inserted.sliceString(0, inserted.length),
         })
       })
-      return { seq: txn.seq, changes: rebased }
+      return { ...txn, changes: rebased }
     })
     this.unconfirmed = this.unconfirmed.mapDesc(gCs, false) as ChangeSet
     if (this.ackedChain) {
@@ -8675,7 +8742,7 @@ export class WebviewSyncController {
   }
 
   /** 普通事务与空白格组合净变更共用同一出站/未确认坐标链。 */
-  private recordLocalChangeSet(changeSet: ChangeSet, changes: SerChange[]): void {
+  private recordLocalChangeSet(changeSet: ChangeSet, changes: SerChange[], paste?: PasteStage): void {
     if (changes.length === 0 || !this.sessionId) {
       this.unconfirmed = this.unconfirmed ? this.unconfirmed.compose(changeSet) : changeSet
       return
@@ -8684,7 +8751,7 @@ export class WebviewSyncController {
     // 标记来自用户主动移光标（或组合开始时刻的停顿回看）；时间停顿仅在
     // 非组合态回看——组合进行中不切段（原子性），组合间停顿已在
     // compositionstart 的 markPauseBoundary 判定过
-    const segmentBoundary = this.undoCursorBoundary ||
+    const segmentBoundary = !!paste || this.undoCursorBoundary ||
       (!this.composing && this.lastLocalInputAt !== null &&
         Date.now() - this.lastLocalInputAt >= UNDO_SEGMENT_PAUSE_MS)
     this.undoCursorBoundary = false
@@ -8695,12 +8762,13 @@ export class WebviewSyncController {
       if (this.deferredLocal && segmentBoundary) {
         // #153：分段边界落地——本笔开新撤销段（切分点落在字符边界，两段
         // 定义域依次衔接，出站坐标由 sendDeferredLocal 依次映射）
-        this.deferredSegments.push(changeSet)
+        this.deferredSegments.push({ changes: changeSet, ...(paste ? { paste } : {}) })
       } else if (this.deferredSegments.length > 0) {
         const last = this.deferredSegments.length - 1
-        this.deferredSegments[last] = this.deferredSegments[last].compose(changeSet)
+        const segment = this.deferredSegments[last]!
+        this.deferredSegments[last] = { ...segment, changes: segment.changes.compose(changeSet) }
       } else {
-        this.deferredSegments = [changeSet]
+        this.deferredSegments = [{ changes: changeSet, ...(paste ? { paste } : {}) }]
       }
       this.deferredLocal = this.deferredLocal
         ? this.deferredLocal.compose(changeSet)
@@ -8728,10 +8796,11 @@ export class WebviewSyncController {
     this.seq += 1
     this.persistState()
     this.inFlight.add(this.seq)
-    this.sentTxns.push({ seq: this.seq, changes: baseChanges })
+    this.sentTxns.push({ seq: this.seq, changes: baseChanges, ...(paste ? { paste } : {}) })
     this.bridge.postMessage({
       kind: 'edit.request', sessionId: this.sessionId, docUri: this.docUri,
       seq: this.seq, baseVersion: this.baseVersion, changes: baseChanges,
+      ...(paste ? { paste } : {}),
     })
   }
 
@@ -8772,10 +8841,11 @@ export class WebviewSyncController {
     // 深度 = 段数，行为等价；每轮迭代重新评估出站守卫）
     while (this.deferredSegments.length > 0 && !this.suspended && !this.blankComposition &&
         this.inFlight.size === 0 && !this.hasBufferedSync()) {
-      const head = this.deferredSegments[0]
+      const segment = this.deferredSegments[0]!
+      const head = segment.changes
       const rest = this.deferredSegments.slice(1)
       const restComposed = rest.length > 0
-        ? rest.reduce((acc, seg) => acc.compose(seg))
+        ? rest.map(seg => seg.changes).reduce((acc, seg) => acc.compose(seg))
         : null
       const changes: SerChange[] = []
       head.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
@@ -8807,7 +8877,7 @@ export class WebviewSyncController {
       this.seq += 1
       this.persistState()
       this.inFlight.add(this.seq)
-      this.sentTxns.push({ seq: this.seq, changes })
+      this.sentTxns.push({ seq: this.seq, changes, ...(segment.paste ? { paste: segment.paste } : {}) })
       this.bridge.postMessage({
         kind: 'edit.request',
         sessionId: this.sessionId,
@@ -8815,6 +8885,7 @@ export class WebviewSyncController {
         seq: this.seq,
         baseVersion: this.baseVersion,
         changes,
+        ...(segment.paste ? { paste: segment.paste } : {}),
       })
       return
     }
@@ -9072,6 +9143,7 @@ export class WebviewSyncController {
     this.refreshReading()
     this.baseVersion = Math.max(lastVersion, ackVersion ?? lastVersion)
     this.sendDeferredLocal()
+    if (groups.length) this.finishPasteHistory(groups.at(-1)!)
     // #148：缓冲收敛且暂缓集已出站（或本就无暂缓输入）——撤销意图可
     // 安全发出（若 sendDeferredLocal 刚发出新请求，释放判定继续等待其 ack）
     this.releasePendingHistory()
@@ -9096,6 +9168,7 @@ export class WebviewSyncController {
     if (!this.sessionId) {
       return false // 未初始化：让事件继续传播（defaultKeymap 的本地 no-op undo）
     }
+    this.invalidatePasteFeedback()
     if (!this.suspended && this.hasUnlandedLocalEdits()) {
       this.pendingHistoryOps.push(op)
       // 主动推进出站（暂缓集/缓冲有 flush 定时兜底，这里确保已调度）
@@ -11010,7 +11083,8 @@ export class WebviewSyncController {
               text: inserted.sliceString(0, inserted.length),
             })
           })
-          this.recordLocalChangeSet(tr.changes, changes)
+          if (!this.recordingPasteStage) this.invalidatePasteFeedback()
+          this.recordLocalChangeSet(tr.changes, changes, this.recordingPasteStage)
         }
       }),
       // 撤销/重做转发 keymap：置于数组末尾——CM6 同优先级 keymap 按数组
@@ -11018,9 +11092,9 @@ export class WebviewSyncController {
       // undo/redo 绑定在未装 history 扩展时返回 false）先于本转发落穿，
       // 之后才轮到转发请求宿主权威栈
       keymap.of([
-        { key: 'Mod-z', run: () => this.requestHistory('undo') },
-        { key: 'Shift-Mod-z', run: () => this.requestHistory('redo') },
-        { key: 'Mod-y', run: () => this.requestHistory('redo') },
+        { key: 'Mod-z', run: () => this.requestHistory('undo'), stopPropagation: true },
+        { key: 'Shift-Mod-z', run: () => this.requestHistory('redo'), stopPropagation: true },
+        { key: 'Mod-y', run: () => this.requestHistory('redo'), stopPropagation: true },
       ]),
       ViewPlugin.fromClass(class {
         private readonly onStart = captureCompositionStart

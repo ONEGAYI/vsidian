@@ -1,7 +1,7 @@
 import './toast.css'
 
 export type ToastSeverity = 'neutral' | 'warning' | 'error'
-interface Notice { text: string; severity: ToastSeverity }
+interface Notice { text: string; severity: ToastSeverity; key?: string }
 
 /** 编辑器本地轻提示；不依赖宿主通知，最多一条可见、五条等待。 */
 export class ToastChannel {
@@ -20,13 +20,43 @@ export class ToastChannel {
     app.append(this.container)
   }
 
-  show(text: string, severity: ToastSeverity = 'neutral'): void {
+  show(text: string, severity: ToastSeverity = 'neutral', key?: string): void {
     if (this.disposed || !text) return
+    if (key !== undefined) {
+      const notice = { text, severity, key }
+      for (let i = this.pending.length - 1; i >= 0; i--) {
+        if (this.pending[i]!.key === key) this.pending.splice(i, 1)
+      }
+      if (this.current?.key === key) {
+        this.clearCurrent()
+        this.present(notice)
+        return
+      }
+    }
     const previous = this.pending.at(-1) ?? this.current
-    if (previous?.text === text && previous.severity === severity) return
-    const notice = { text, severity }
+    if (previous?.text === text && previous.severity === severity && previous.key === key) return
+    const notice = { text, severity, ...(key !== undefined ? { key } : {}) }
     if (!this.current) this.present(notice)
     else if (this.pending.length < 5) this.pending.push(notice)
+  }
+
+  /** 只使指定业务组的消息失效，不影响其他本地提示或宿主通知。 */
+  dismiss(key: string): void {
+    for (let i = this.pending.length - 1; i >= 0; i--) {
+      if (this.pending[i]!.key === key) this.pending.splice(i, 1)
+    }
+    if (this.current?.key === key) {
+      this.clearCurrent()
+      const next = this.pending.shift()
+      if (next) this.present(next)
+    }
+  }
+
+  private clearCurrent(): void {
+    if (this.timer !== undefined) clearTimeout(this.timer)
+    this.timer = undefined
+    this.current = undefined
+    this.container.replaceChildren()
   }
 
   private duration(token: string, fallback: number, cssTime = false): number {

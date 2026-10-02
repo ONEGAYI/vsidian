@@ -17,7 +17,7 @@ function mount(text = '旧内容', values: Record<string, boolean> = {}) {
   c = new WebviewSyncController({ postMessage: (m) => sent.push(m as WebviewToHost), getState: () => undefined, setState: () => {} })
   const app = document.createElement('div'); app.id = 'app'; document.body.append(app)
   c.mount(app); c.handleHostMessage({ kind: 'init', sessionId: 's', docUri: 'file:///d/a.md', version: 1, text })
-  c.handleHostMessage({ kind: 'settings.snapshot', values })
+  c.handleHostMessage({ kind: 'settings.snapshot', values: { 'editor.pasteSplitUndo': false, ...values } })
   const view = EditorView.findFromDOM(app.querySelector('.cm-editor')!)!
   view.focus(); view.dispatch({ selection: { anchor: 0, head: text.length } })
   return { app, view, sent }

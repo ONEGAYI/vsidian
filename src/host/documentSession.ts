@@ -22,6 +22,8 @@ import {
   isWebviewToHost,
   type DiagramExportFailReason,
   type DiagramExportPayload,
+  type DocumentChangeReason,
+  type PasteHistory,
   type HostToWebview,
   type HoverPreviewRequestPayload,
   type HoverPreviewFailReason,
@@ -37,6 +39,7 @@ import type { HoverReadOutcome, HoverTargetTipOutcome } from './hoverDocAccess'
 import type { ImagePasteOutcome } from './imagePasteHost'
 import { mapChangeThroughChanges } from '../shared/changeMapping'
 import { NewlineCoordinator } from '../shared/newline'
+import { PasteHistoryTracker } from './pasteHistoryTracker'
 import type { ImageResolution } from './linkTarget'
 import { imageFsKey } from './imageVersioning'
 import type { ImageVerifyItem } from '../shared/imageRefresh'
@@ -193,6 +196,7 @@ interface PendingEdit {
   seq: number
   changes: SerChange[]
   confirmed: boolean
+  paste?: PasteHistory
 }
 
 interface PanelEntry {
@@ -326,7 +330,8 @@ export class DocumentSession {
    *  时把该编辑的偏移计算两次（不重叠时静默错位 len(E)，重叠时误判冲突
    *  暂停）。暂存到 pending 确认后按 version 有序补发，保证 webview 收到
    *  ack(E) → doc.changed(X) 的参考系一致序列，其既有状态机自然正确。 */
-  private readonly pendingExternal: { version: number; changes: SerChange[] }[] = []
+  private readonly pendingExternal: { version: number; changes: SerChange[]; reason?: DocumentChangeReason; paste?: PasteHistory }[] = []
+  private readonly pasteHistory: PasteHistoryTracker
   /** 换行协调：webview 侧统一 LF 坐标，宿主侧负责与权威文本的 CRLF 双向转换 */
   private readonly newline = new NewlineCoordinator()
   private queue: Promise<void> = Promise.resolve()
@@ -378,6 +383,7 @@ export class DocumentSession {
     private readonly options: DocumentSessionOptions = {},
   ) {
     this.newline.rebuild(doc.getText())
+    this.pasteHistory = new PasteHistoryTracker(this.newline.toLfText(doc.getText()))
     this.hoverCacheLimits = {
       entryLimit: options.hoverReadCache?.entryLimit ?? HOVER_REFRESH_DEFAULTS.cacheEntryLimit,
       byteLimit: options.hoverReadCache?.byteLimit ?? HOVER_REFRESH_DEFAULTS.cacheByteLimit,
@@ -1181,7 +1187,7 @@ export class DocumentSession {
    * 宿主文档变更事件入口（provider 接到 onDidChangeTextDocument 后调用）。
    * 自家 applyEdit 的回流在此被识别为确认并发 ack；其余视为外部变更广播。
    */
-  handleDocChanged(changes: SerChange[], version: number): void {
+  handleDocChanged(changes: SerChange[], version: number, reason?: DocumentChangeReason): void {
     // VSCode 的 dirty 状态变化也触发 onDidChangeTextDocument：没有内容变更，
     // 版本不推进。它不属于文本同步，不能进入版本日志或广播为外部修改；
     // 否则 IME 会缓冲这个空事件，确认时把待发候选误判为外部冲突。
@@ -1204,14 +1210,16 @@ export class DocumentSession {
     try {
       for (const panel of this.panels.values()) {
         const head = panel.pending[0]
-        if (head && !head.confirmed && changesEqual(head.changes, changes)) {
+        if (!reason && head && !head.confirmed && changesEqual(head.changes, changes)) {
+          this.pasteHistory.observe(lfChanges, this.newline.toLfText(this.doc.getText()), undefined, head.paste)
           this.confirmPending(panel, head, version)
           return
         }
       }
       // 外部变更广播（#48）：存在「已应用未确认」pending 的窗口期先暂存，
       // 由确认路径（回流匹配 / applyEdit resolve 兜底）补发
-      this.queueExternalBroadcast(version, lfChanges)
+      const paste = this.pasteHistory.observe(lfChanges, this.newline.toLfText(this.doc.getText()), reason)
+      this.queueExternalBroadcast(version, lfChanges, { ...(reason ? { reason } : {}), ...(paste ? { paste } : {}) })
     } finally {
       this.newline.rebuild(this.doc.getText())
     }
@@ -1691,7 +1699,8 @@ export class DocumentSession {
       this.flushPendingExternal()
       return
     }
-    const pending: PendingEdit = { seq: message.seq, changes: mapped, confirmed: false }
+    const pending: PendingEdit = { seq: message.seq, changes: mapped, confirmed: false,
+      ...(message.paste ? { paste: { ...message.paste, sessionId: panel.sessionId } } : {}) }
     panel.pending.push(pending)
     // #52：快照 apply 前版本——兜底确认时据此推导 E 实际落地的权威版本
     //（apply 窗口内到达的外部增量会把 doc.version 推进到高于 E 的值）
@@ -1735,6 +1744,8 @@ export class DocumentSession {
       // 到达的外部增量已把它推进，E 的广播会与随后补发的暂存增量同版本，
       // 被旁观面板的版本单调防线永久丢弃
       const version = this.fallbackConfirmVersion(versionBeforeApply)
+      // 无回流时只按确切增量更新解释表；版本/全文不能对齐时表会保守失效。
+      this.pasteHistory.observe(this.newline.hostChangesToLf(mapped), this.newline.toLfText(this.doc.getText()), undefined, entry.paste)
       this.confirmPending(panel, entry, version)
       this.confirmedEchoes.push({ version, changes: mapped })
       while (this.confirmedEchoes.length > ACK_CACHE_LIMIT) {
@@ -1915,7 +1926,7 @@ export class DocumentSession {
   /** 广播一笔外部变更（doc.changed）给全部 ready 面板；exclude 排除变更
    *  发起面板（其以 edit.ack 获知本笔）。暂停面板照发：webview 侧忽略
    *  并在恢复时以全文对齐（版本单调防线不受过期增量影响）。 */
-  private broadcastExternal(version: number, changes: SerChange[], exclude?: PanelEntry): void {
+  private broadcastExternal(version: number, changes: SerChange[], exclude?: PanelEntry, history?: { reason?: DocumentChangeReason; paste?: PasteHistory }): void {
     for (const other of this.panels.values()) {
       if (other !== exclude && other.ready) {
         other.port.send({
@@ -1923,6 +1934,7 @@ export class DocumentSession {
           version,
           changes,
           origin: 'external',
+          ...history,
         })
       }
     }
@@ -1931,12 +1943,12 @@ export class DocumentSession {
   /** 外部增量广播入口（#48）：无「已应用未确认」pending 时立即广播（与
    *  原行为一致）；否则按 version 有序暂存，由 pending 确认路径补发。
    *  有序插入兜住迟到回流（编辑回流晚于外部回流被处理）的乱序到达。 */
-  private queueExternalBroadcast(version: number, lfChanges: SerChange[]): void {
+  private queueExternalBroadcast(version: number, lfChanges: SerChange[], history?: { reason?: DocumentChangeReason; paste?: PasteHistory }): void {
     let index = this.pendingExternal.length
     while (index > 0 && this.pendingExternal[index - 1]!.version > version) {
       index--
     }
-    this.pendingExternal.splice(index, 0, { version, changes: lfChanges })
+    this.pendingExternal.splice(index, 0, { version, changes: lfChanges, ...history })
     this.flushPendingExternal()
   }
 
@@ -1960,7 +1972,7 @@ export class DocumentSession {
     }
     const queued = this.pendingExternal.splice(0)
     for (const item of queued) {
-      this.broadcastExternal(item.version, item.changes)
+      this.broadcastExternal(item.version, item.changes, undefined, item)
     }
   }
 

@@ -28,6 +28,7 @@ vsidian/
     │   ├── jiebaTar.ts                 # npm tarball 最小提取器
     │   ├── keybindingService.ts        # 快捷键全局存储服务
     │   ├── linkTarget.ts               # 宿主侧链接目标分类纯逻辑（#10）
+    │   ├── pasteHistoryTracker.ts      # 宿主粘贴阶段历史解释
     │   ├── settingsPage.ts             # 独立设置页面板装配
     │   ├── settingsService.ts          # 宿主设置服务
     │   ├── skeletonScreen.ts           # 骨架屏内联装配纯逻辑（#292）
@@ -175,6 +176,7 @@ vsidian/
         ├── refReadingContent.ts        # 引用内容只读 Reading 装配
         ├── richPasteDialog.css         # 粘贴询问主题与零特异性样式
         ├── richPasteDialog.ts          # 粘贴格式询问会话模态
+        ├── richPastePlan.ts            # 富文本粘贴两阶段计划
         ├── settingsMain.ts             # 设置页 webview 入口
         ├── settingsPage.css            # 设置页样式
         ├── settingsPageView.ts         # 设置页 webview 视图

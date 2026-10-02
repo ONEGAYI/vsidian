@@ -462,7 +462,7 @@ describe('分组重组二轮还原（#163 验收反馈：侧栏只留常规/编�
       ])
     // #237 多光标（editor.multicursor 域落编辑组）
     expect(groupItemTitles(parent, zhCn['settings.groupEditing']))
-      .toEqual([zhCn['setting.pastePreserveFormatting.title'], zhCn['setting.pasteAskBefore.title'], zhCn['setting.multicursor.title']])
+      .toEqual([zhCn['setting.pastePreserveFormatting.title'], zhCn['setting.pasteSplitUndo.title'], zhCn['setting.pasteAskBefore.title'], zhCn['setting.multicursor.title']])
     expect(groupItemTitles(parent, zhCn['settings.groupSymbols'])).toEqual([
       zhCn['setting.symbolAutocomplete.title'],
       zhCn['setting.symbolSelectionWrap.title'],

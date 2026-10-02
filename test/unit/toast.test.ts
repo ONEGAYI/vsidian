@@ -4,6 +4,24 @@ import { ToastChannel } from '../../src/webview/toast'
 
 afterEach(() => { vi.useRealTimers(); document.body.replaceChildren() })
 describe('独立轻提示通道', () => {
+  it('按粘贴组替换并清除过期反馈，不清除其他warning和等待消息', () => {
+    vi.useFakeTimers()
+    const app = document.createElement('div'); document.body.append(app)
+    const toast = new ToastChannel(app)
+    toast.show('图片提醒', 'warning')
+    toast.show('保留格式', 'neutral', 'paste:1')
+    toast.show('撤格式，再按一次', 'neutral', 'paste:1')
+    toast.dismiss('paste:1')
+    expect(app.querySelector('.vsidian-toast')?.textContent).toBe('图片提醒')
+    vi.advanceTimersByTime(5000)
+    expect(app.querySelector('.vsidian-toast')).toBeNull()
+    toast.show('保留格式', 'neutral', 'paste:2')
+    toast.show('撤格式，再按一次', 'neutral', 'paste:2')
+    expect(app.querySelector('.vsidian-toast')?.textContent).toBe('撤格式，再按一次')
+    toast.dismiss('paste:2'); vi.runAllTimers()
+    expect(app.querySelector('.vsidian-toast')).toBeNull()
+    toast.dispose()
+  })
   it('只显示一条，连续重复合并，顺序显示并保持焦点', () => {
     vi.useFakeTimers()
     const app = document.createElement('div')

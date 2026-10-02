@@ -22,6 +22,21 @@ export interface SerChange {
   text: string
 }
 
+/** 粘贴阶段只为真实宿主历史提供归属和选区解释，不执行替代撤销。 */
+export interface PasteSelection {
+  ranges: { anchor: number; head: number }[]
+  mainIndex: number
+}
+export interface PasteStage {
+  group: string
+  stage: 'text' | 'format' | 'single'
+  hasTextStep: boolean
+  before: PasteSelection
+  after: PasteSelection
+}
+export type DocumentChangeReason = 'undo' | 'redo'
+export interface PasteHistory extends PasteStage { sessionId: string }
+
 /** 表格结构操作（#13）：宿主命令面板命令 → webview 在光标处执行（live 模式） */
 export type TableEditOp =
   | 'insertRowAbove'
@@ -43,7 +58,7 @@ export type HostToWebview =
   | { kind: 'edit.ack'; seq: number; ok: true; version: number }
   | { kind: 'edit.ack'; seq: number; ok: false; reason: 'conflict' | 'error'; version: number; text?: string }
   /** 权威文档发生变更：变更增量（同指变更前文档） */
-  | { kind: 'doc.changed'; version: number; changes: SerChange[]; origin: 'external' }
+  | { kind: 'doc.changed'; version: number; changes: SerChange[]; origin: 'external'; reason?: DocumentChangeReason; paste?: PasteHistory }
   /** 全文重同步（应 sync.request 或宿主主动）：webview 以全文重置本地文档；
    *  对暂停中的面板兼作恢复信号（重置并解除暂停） */
   | { kind: 'doc.resync'; version: number; text: string }
@@ -579,6 +594,7 @@ export type WebviewToHost =
       seq: number
       baseVersion: number
       changes: SerChange[]
+      paste?: PasteStage
     }
   /** 撤销/重做请求：作用于宿主 TextDocument 权威历史（探索笔记 03 §4） */
   | { kind: 'history.request'; op: 'undo' | 'redo' }
@@ -2418,6 +2434,18 @@ export function isSerChange(v: unknown): v is SerChange {
   )
 }
 
+function isPasteSelection(v: unknown): v is PasteSelection {
+  if (!isObject(v) || !Array.isArray(v.ranges) || v.ranges.length === 0 || v.ranges.length > 1000 ||
+      typeof v.mainIndex !== 'number' || !isNonNegativeInt(v.mainIndex) || v.mainIndex >= v.ranges.length) return false
+  return v.ranges.every(r => isObject(r) && isNonNegativeInt(r.anchor) && isNonNegativeInt(r.head))
+}
+
+function isPasteStage(v: unknown): v is PasteStage {
+  return isObject(v) && typeof v.group === 'string' && v.group.length > 0 && v.group.length <= 128 &&
+    (v.stage === 'text' || v.stage === 'format' || v.stage === 'single') &&
+    typeof v.hasTextStep === 'boolean' && isPasteSelection(v.before) && isPasteSelection(v.after)
+}
+
 function isSerChangeArray(v: unknown): v is SerChange[] {
   return Array.isArray(v) && v.every(isSerChange)
 }
@@ -2638,7 +2666,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         isString(v.docUri) &&
         isPositiveInt(v.seq) &&
         isNonNegativeInt(v.baseVersion) &&
-        isSerChangeArray(v.changes)
+        isSerChangeArray(v.changes) &&
+        (v.paste === undefined || isPasteStage(v.paste))
       )
     case 'history.request':
       return v.op === 'undo' || v.op === 'redo'
@@ -3085,7 +3114,9 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return (
         isNonNegativeInt(v.version) &&
         isSerChangeArray(v.changes) &&
-        v.origin === 'external'
+        v.origin === 'external' &&
+        (v.reason === undefined || v.reason === 'undo' || v.reason === 'redo') &&
+        (v.paste === undefined || (isObject(v.paste) && isString(v.paste.sessionId) && isPasteStage(v.paste)))
       )
     case 'doc.resync':
       return isNonNegativeInt(v.version) && isString(v.text)

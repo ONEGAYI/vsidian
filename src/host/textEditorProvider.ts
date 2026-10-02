@@ -1749,6 +1749,7 @@ export function createTextEditorProvider(
           text: c.text,
         })),
         event.document.version,
+        event.reason === vscode.TextDocumentChangeReason.Undo ? 'undo' : event.reason === vscode.TextDocumentChangeReason.Redo ? 'redo' : undefined,
       )
     }),
   )

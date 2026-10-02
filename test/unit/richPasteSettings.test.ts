@@ -7,8 +7,11 @@ describe('富文本粘贴偏好', () => {
     const values = sanitizeStoredSettings(PRODUCTION_SETTING_DEFINITIONS, {})
     expect(values['editor.pastePreserveFormatting']).toBe(true)
     expect(values['editor.pasteAskBefore']).toBe(true)
+    expect(values['editor.pasteSplitUndo']).toBe(true)
     const def = PRODUCTION_SETTING_DEFINITIONS.find((d) => d.key === 'editor.pasteAskBefore')!
     expect(isSettingEnabled(PRODUCTION_SETTING_DEFINITIONS, { ...values, 'editor.pastePreserveFormatting': false }, def)).toBe(false)
+    const split = PRODUCTION_SETTING_DEFINITIONS.find((d) => d.key === 'editor.pasteSplitUndo')!
+    expect(isSettingEnabled(PRODUCTION_SETTING_DEFINITIONS, { ...values, 'editor.pastePreserveFormatting': false }, split)).toBe(false)
   })
   it('记忆选择原子持久化并在重新构造服务后回显，失败不广播', async () => {
     let stored: unknown
