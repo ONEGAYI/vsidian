@@ -13,6 +13,7 @@ import {
   LIVE_EMBED_CLASS_NAMES,
   LiveEmbedWidget,
   liveEmbed,
+  liveEmbedCardsHostMark,
   liveEmbedDecoCacheLimit,
   liveEmbedDecorations,
   liveEmbedSpansField,
@@ -39,6 +40,9 @@ function buildDecos(
       EditorState.allowMultipleSelections.of(true),
       liveDecorationsField,
       mermaidFencesField,
+      // P2-04：根正文挂卡宿主标记（嵌入装饰只在标记视图发射——嵌入内部
+      // Live 编辑器不挂卡）
+      liveEmbedCardsHostMark,
       liveEmbed,
     ],
     selection,
@@ -187,7 +191,7 @@ describe('Live 嵌入装饰：抑制边界（表构建层不排除、发射层�
   it('围栏编辑联动：上方打开围栏使下方嵌入行即时撤下装饰', () => {
     let state = EditorState.create({
       doc: '![[A]]\n',
-      extensions: [liveDecorationsField, mermaidFencesField, liveEmbed],
+      extensions: [liveDecorationsField, mermaidFencesField, liveEmbedCardsHostMark, liveEmbed],
       selection: EditorSelection.single(2),
     })
     expect(state.field(liveEmbedDecorations).size).toBe(1)
@@ -201,7 +205,7 @@ describe('Live 嵌入装饰：抑制边界（表构建层不排除、发射层�
       parent: document.body.appendChild(document.createElement('div')),
       state: EditorState.create({
         doc: DOC,
-        extensions: [liveDecorationsField, mermaidFencesField, liveEmbed],
+        extensions: [liveDecorationsField, mermaidFencesField, liveEmbedCardsHostMark, liveEmbed],
         selection: EditorSelection.single(0), // 未触及 → 隐形态
       }),
     })
@@ -388,7 +392,7 @@ describe('#247 Live 混排与容器：occurrence 精确替换', () => {
       parent: document.body.appendChild(document.createElement('div')),
       state: EditorState.create({
         doc: MIXED_DOC,
-        extensions: [liveDecorationsField, mermaidFencesField, liveEmbed],
+        extensions: [liveDecorationsField, mermaidFencesField, liveEmbedCardsHostMark, liveEmbed],
         selection: EditorSelection.single(0),
       }),
     })
@@ -537,7 +541,7 @@ describe('#247 Live 嵌入表：occurrence 化增量与宿主 key', () => {
       parent: document.body.appendChild(document.createElement('div')),
       state: EditorState.create({
         doc: '  ![[独占行]]\n\n前 ![[混排]] 后\n',
-        extensions: [liveDecorationsField, mermaidFencesField, liveEmbed],
+        extensions: [liveDecorationsField, mermaidFencesField, liveEmbedCardsHostMark, liveEmbed],
         selection: EditorSelection.single(0),
       }),
     })

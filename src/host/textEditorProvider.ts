@@ -9,6 +9,7 @@ import * as vscode from 'vscode'
 import { randomUUID } from 'node:crypto'
 import * as path from 'node:path'
 import { DocumentSession, type HostDocumentPort, type SessionNotice } from './documentSession'
+import { isRefEditClientMessage, RefEditPortRegistry, wrapRefEditPush } from './refEditPorts'
 import {
   appendImageVersionStamp,
   classifyImageTarget,
@@ -365,6 +366,94 @@ export function createTextEditorProvider(
   const sessions = new Map<string, SessionEntry>()
   const diagnostics = new TestDiagnostics()
   let lastClosedInput: { docUri: string; webviewText?: string; fragments: string[] } | undefined
+
+  // ---- P2-04（#281）目标编辑端口：嵌入内部 Live 与 B 会话的绑定簿记 ----
+  // provider 持注册表；B 会话接入复用 openEntry（B 打开为 custom editor 时
+  // 同一会话——「宿主每个 B 只有一个权威 DocumentSession」），虚拟面板的
+  // send 把编辑通道事件包成 refEdit.push 回来源面板（白名单见 refEditPorts）。
+  const refPorts = new RefEditPortRegistry()
+
+  /** 释放一个目标端口：B 会话 detach 虚拟面板；B 无面板时释放会话 */
+  const releaseRefPort = (portId: string): void => {
+    const binding = refPorts.release(portId)
+    if (!binding) {
+      return
+    }
+    const bEntry = sessions.get(binding.targetUri)
+    bEntry?.session.detachPanel(binding.virtualSessionId)
+    if (bEntry) {
+      releaseEntryIfIdle(vscode.Uri.parse(binding.targetUri))
+    }
+  }
+
+  /** P2-04 dirty 推送：B 文档 dirty 变化时按目标路由到全部绑定来源面板
+   *  （变化去重——content 与 dirty-state 两类事件都会到达，只发翻转） */
+  const pushRefEditDirty = (doc: vscode.TextDocument): void => {
+    const bindings = refPorts.byTarget(doc.uri.fsPath)
+    if (bindings.length === 0) {
+      return
+    }
+    const dirty = doc.isDirty
+    for (const binding of bindings) {
+      if (binding.lastDirty === dirty) {
+        continue
+      }
+      binding.lastDirty = dirty
+      sessions.get(binding.panelDocUri)?.session.postToPanel(binding.panelSessionId, {
+        kind: 'refEdit.dirty',
+        fsPath: binding.fsPath,
+        dirty,
+      })
+    }
+  }
+
+  /** P2-01 验证路由（用户已确认取舍）：为 B 撤销/重做的唯一公开路线是临时
+   *  激活 B 为文本编辑器（showTextDocument 恒开文本编辑器——默认编辑器解析
+   *  .md 会落回本扩展 custom editor）→ 全局 undo/redo → 重显来源面板 A →
+   *  收掉 B 预览标签（只收 isPreview 的——用户已开的钉住文本标签不动）。
+   *  标签栏短暂切换与键盘焦点离开 A 是已接受的可见代价。 */
+  const historyViaTempActivation = async (
+    bDoc: vscode.TextDocument,
+    originUri: vscode.Uri,
+    op: 'undo' | 'redo',
+  ): Promise<boolean> => {
+    try {
+      // 打开前快照 B 的既有文本标签：收口只关本次激活新增的差集——
+      // 1.82.3 实测 Tab.isPreview 对 showTextDocument({preview:true}) 不可靠
+      // （恒 false），按差分关标签既收掉临时标签，也不动用户已开的 B 标签
+      const tabsBefore = new Set(
+        vscode.window.tabGroups.all.flatMap((g) => g.tabs).filter((t) =>
+          t.input instanceof vscode.TabInputText &&
+          t.input.uri.toString() === bDoc.uri.toString()))
+      await vscode.window.showTextDocument(bDoc, { preview: true })
+      const executed = await vscode.commands
+        .executeCommand(op)
+        .then(() => true, () => false)
+      // 重显来源面板：openWith 对已开 custom editor 是重显（不新建）；来源
+      // 面板可能已关闭（绑定随面板销毁释放，此处为防御）——失败不回滚 B
+      if (sessions.get(originUri.toString())?.panels.size) {
+        try {
+          await vscode.commands.executeCommand('vscode.openWith', originUri, VIEW_TYPE)
+        } catch {
+          // 来源面板关闭竞态：保留当前激活态
+        }
+      }
+      for (const group of vscode.window.tabGroups.all) {
+        for (const tab of group.tabs) {
+          if (
+            tab.input instanceof vscode.TabInputText &&
+            tab.input.uri.toString() === bDoc.uri.toString() &&
+            !tabsBefore.has(tab)
+          ) {
+            await vscode.window.tabGroups.close(tab)
+          }
+        }
+      }
+      return executed
+    } catch {
+      return false
+    }
+  }
 
   // ---- #201 图片刷新协调器（provider 级单件：版本表与失效通道跨会话共享） ----
   const isWindowsHost = process.platform === 'win32'
@@ -810,18 +899,27 @@ export function createTextEditorProvider(
       // 调 undoRedoService.undo(resource) 作用于本文档的权威文本栈；产生的
       // 变更经 onDidChangeTextDocument 回流广播，不经过 applyEdit（无回声）。
       // C-5：webview 请求必须确认活动 tab 是本面板文档的 custom editor——
-      // 全局命令作用于活动编辑器，归属不符时静默忽略（不得撤销其他文档）
-      undo: async () => {
-        if (!isActiveTabCustomEditorOf(vscode.window.tabGroups.activeTabGroup.activeTab, VIEW_TYPE, doc.uri.toString())) {
+      // 全局命令作用于活动编辑器，归属不符时静默忽略（不得撤销其他文档）。
+      // P2-04（#281）：目标编辑端口在场（origin 携来源面板）时走 P2-01
+      // 验证的临时激活路由——B 无 custom editor tab 时撤销归属 B 的唯一
+      // 公开路线；带 URI 参数的 files.revert 与 Tab API 关脏标签均禁用
+      undo: async (origin?: { docUri: string }) => {
+        if (isActiveTabCustomEditorOf(vscode.window.tabGroups.activeTabGroup.activeTab, VIEW_TYPE, doc.uri.toString())) {
+          return vscode.commands.executeCommand('undo').then(() => true, () => false)
+        }
+        if (origin === undefined || refPorts.byTarget(doc.uri.fsPath).length === 0) {
           return false
         }
-        return vscode.commands.executeCommand('undo').then(() => true, () => false)
+        return historyViaTempActivation(doc, vscode.Uri.parse(origin.docUri), 'undo')
       },
-      redo: async () => {
-        if (!isActiveTabCustomEditorOf(vscode.window.tabGroups.activeTabGroup.activeTab, VIEW_TYPE, doc.uri.toString())) {
+      redo: async (origin?: { docUri: string }) => {
+        if (isActiveTabCustomEditorOf(vscode.window.tabGroups.activeTabGroup.activeTab, VIEW_TYPE, doc.uri.toString())) {
+          return vscode.commands.executeCommand('redo').then(() => true, () => false)
+        }
+        if (origin === undefined || refPorts.byTarget(doc.uri.fsPath).length === 0) {
           return false
         }
-        return vscode.commands.executeCommand('redo').then(() => true, () => false)
+        return historyViaTempActivation(doc, vscode.Uri.parse(origin.docUri), 'redo')
       },
     }
     // #201 图片周期核验与失效：会话按自身 linkCtx 解析图源目标（同一 src
@@ -858,6 +956,16 @@ export function createTextEditorProvider(
   const releaseEntryIfIdle = (uri: vscode.Uri): void => {
     const entry = sessions.get(uri.toString())
     if (entry && entry.session.getInfo().panels.length === 0) {
+      // P2-04：目标端口全部释放后才可能到 idle（虚拟面板计入 panels）；
+      // 到此仍指向本目标的端口是异常残留，防御性释放
+      for (const binding of refPorts.releaseTarget(uri.toString())) {
+        sessions.get(binding.panelDocUri)?.session.postToPanel(binding.panelSessionId, {
+          kind: 'refEdit.push',
+          portId: binding.portId,
+          fsPath: binding.fsPath,
+          message: { kind: 'session.suspended', version: entry.doc.version, reason: 'host-error' },
+        })
+      }
       entry.session.dispose()
       sessions.delete(uri.toString())
     }
@@ -874,7 +982,10 @@ export function createTextEditorProvider(
       entry.doc.uri.scheme === 'file' && entry.doc.uri.fsPath.toLowerCase() === fsPath)
   }
 
-  /** openWith 可能先返回、随后才注册新面板；按 URI 等待实际可投递面板。 */
+  /** openWith 可能先返回、随后才注册新面板；按 URI 等待实际可投递面板。
+   *  P2-04：只认真实 webview 面板（entry.panels 内的 sessionId）——B 会话
+   *  上的目标编辑虚拟面板虽 ready，但 view.locate 等面板消息不进 refEdit
+   *  通道，投给它等于丢失。 */
   const waitForReadyPanel = async (
     uri: vscode.Uri,
     timeoutMs = 5000,
@@ -882,7 +993,9 @@ export function createTextEditorProvider(
     const deadline = Date.now() + timeoutMs
     for (;;) {
       const entry = findEntry(uri)
-      const panel = entry?.session.getInfo().panels.find((p) => p.ready)
+      const panel = entry?.session
+        .getInfo()
+        .panels.find((p) => p.ready && entry.panels.has(p.sessionId))
       if (panel) {
         return { entry: entry!, sessionId: panel.sessionId }
       }
@@ -1620,6 +1733,133 @@ export function createTextEditorProvider(
           webviewPanel.dispose()
           return
         }
+        // ---- P2-04（#281）目标编辑端口：bind/unbind/message/save 在 provider
+        // 层拦截（B 会话接入与端口簿记都在 provider 域；不进 A 的会话通道）。
+        // 面板身份先认证（panelSessionId/panelDocUri 须为本面板），后续按
+        // portId 查绑定——释放后的迟到消息查不到即静默拒收
+        if (isWebviewToHost(message) &&
+          (message.kind === 'refEdit.bind' || message.kind === 'refEdit.unbind' ||
+            message.kind === 'refEdit.message' || message.kind === 'refEdit.save')) {
+          if (message.panelSessionId !== sessionId || message.panelDocUri !== document.uri.toString()) {
+            return
+          }
+          switch (message.kind) {
+            case 'refEdit.bind': {
+              const reject = (reason: 'source' | 'open-failed' | 'not-markdown'): void => {
+                send({ kind: 'refEdit.bound', reqId: message.reqId, ok: false, reason })
+              }
+              // 来源校验（不信任前端自报 URI）：目标须为本面板成功送达且被
+              // 该 occurrence 的 watch 固定（P2-A04「从已确认的来源租约绑定」）
+              if (!entry.session.hasHoverSourcePin(sessionId, message.fsPath, message.occurrence)) {
+                reject('source')
+                return
+              }
+              void (async (): Promise<void> => {
+                let bDoc: vscode.TextDocument
+                try {
+                  bDoc = await vscode.workspace.openTextDocument(vscode.Uri.file(message.fsPath))
+                } catch {
+                  reject('open-failed')
+                  return
+                }
+                if (!isMarkdownFile(bDoc.uri)) {
+                  reject('not-markdown')
+                  return
+                }
+                // 同 occurrence 幂等重绑：先释放旧端口（重挂路径）
+                const stale = refPorts.findOccurrence(sessionId, document.uri.toString(), message.occurrence)
+                if (stale) {
+                  releaseRefPort(stale.portId)
+                }
+                const bEntry = openEntry(bDoc)
+                const portId = refPorts.allocate()
+                const binding = {
+                  portId,
+                  virtualSessionId: '',
+                  targetUri: bDoc.uri.toString(),
+                  fsPath: message.fsPath,
+                  panelSessionId: sessionId,
+                  panelDocUri: document.uri.toString(),
+                  occurrence: message.occurrence,
+                  lastDirty: bDoc.isDirty,
+                }
+                // attachPanel 分配 B 会话内的面板 id（panel-N）——会话消息
+                // 路由（ready 注入 / refEdit.message / detach）用它；portId
+                // 只是 webview 侧的端口身份，两者分开（根因修正：曾误用
+                // portId 注入 ready，会话查不到面板被静默丢弃）
+                binding.virtualSessionId = bEntry.session.attachPanel({
+                  send: (m) => {
+                    if (!refPorts.lookup(portId, sessionId, document.uri.toString())) {
+                      return
+                    }
+                    const wrapped = wrapRefEditPush(binding, m)
+                    if (wrapped) {
+                      send(wrapped)
+                    }
+                  },
+                }, { refOrigin: { docUri: document.uri.toString() } })
+                refPorts.register(binding)
+                send({
+                  kind: 'refEdit.bound',
+                  reqId: message.reqId,
+                  ok: true,
+                  portId,
+                  fsPath: message.fsPath,
+                  docUri: bDoc.uri.toString(),
+                  version: bDoc.version,
+                  dirty: bDoc.isDirty,
+                })
+                // 注入 ready 握手：B 会话发 init（经虚拟面板 → refEdit.push）
+                void bEntry.session.handleWebviewMessage({ kind: 'ready' }, binding.virtualSessionId)
+              })()
+              return
+            }
+            case 'refEdit.unbind': {
+              const binding = refPorts.lookup(message.portId, sessionId, document.uri.toString())
+              if (binding && binding.fsPath === message.fsPath) {
+                releaseRefPort(message.portId)
+              }
+              return
+            }
+            case 'refEdit.message': {
+              const binding = refPorts.lookup(message.portId, sessionId, document.uri.toString())
+              if (!binding || binding.fsPath !== message.fsPath || !isRefEditClientMessage(message.message)) {
+                return // 释放后迟到消息 / 伪造端口 / 非编辑通道：静默拒收
+              }
+              const bEntry = sessions.get(binding.targetUri)
+              if (!bEntry) {
+                return
+              }
+              // 内消息的 docUri 由 B 会话按自身校验（= B 规范 URI）；面板
+              // 身份用绑定的虚拟面板 id（webview 侧 portId 仅作路由键）
+              void bEntry.session.handleWebviewMessage(message.message, binding.virtualSessionId)
+              return
+            }
+            case 'refEdit.save': {
+              const binding = refPorts.lookup(message.portId, sessionId, document.uri.toString())
+              if (!binding || binding.fsPath !== message.fsPath) {
+                return
+              }
+              void (async (): Promise<void> => {
+                // P2-01 验证路线：TextDocument.save() 无需激活 B 即落盘
+                //（保存失败返回 false——保留现场，dirty 推送另行对齐）
+                const bDoc = sessions.get(binding.targetUri)?.doc ??
+                  (await vscode.workspace.openTextDocument(vscode.Uri.parse(binding.targetUri)))
+                let ok = false
+                try {
+                  ok = (await bDoc.save()) === true
+                } catch {
+                  ok = false
+                }
+                if (ok) {
+                  binding.lastDirty = false
+                }
+                send({ kind: 'refEdit.save.result', portId: message.portId, fsPath: message.fsPath, ok })
+              })()
+              return
+            }
+          }
+        }
         void entry.session.handleWebviewMessage(message, sessionId)
       })
       // #38：面板激活（tab 切换/分组聚焦）时刷新活动模式 context——
@@ -1635,6 +1875,16 @@ export function createTextEditorProvider(
         pendingReadingRestore.delete(panelStateKey(document.uri.toString(), sessionId))
         // #224 引用视图订阅随面板销毁整体释放（订阅计数回落）
         hoverRefresh.releaseSession(hoverSessionKeyOf(document.uri.toString(), sessionId))
+        // P2-04：本面板的目标编辑端口整体释放（B 会话虚拟面板配对 detach；
+        // 来源 webview 已销毁，无需通知）。逐目标收集去重后再判 idle。
+        const releasedTargets = new Set<string>()
+        for (const binding of refPorts.releasePanel(sessionId, document.uri.toString())) {
+          sessions.get(binding.targetUri)?.session.detachPanel(binding.virtualSessionId)
+          releasedTargets.add(binding.targetUri)
+        }
+        for (const targetUri of releasedTargets) {
+          releaseEntryIfIdle(vscode.Uri.parse(targetUri))
+        }
         messageSub.dispose()
         viewStateSub.dispose()
         closeSub.dispose()
@@ -1745,6 +1995,9 @@ export function createTextEditorProvider(
         })),
         event.document.version,
       )
+      // P2-04：B 的 dirty 变化（content 与 dirty-state 两类事件）推送到
+      // 绑定中的来源面板（pushRefEditDirty 内按值去重，翻转才发）
+      pushRefEditDirty(event.document)
     }),
   )
 

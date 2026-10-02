@@ -53,10 +53,13 @@ export interface HostDocumentPort {
   getText(): string
   /** 应用一组全文偏移变更；返回是否成功 */
   applyChanges(changes: SerChange[]): Promise<boolean>
-  /** 对权威文档执行宿主撤销（undoRedoService 文本栈）；返回是否执行 */
-  undo(): Promise<boolean>
-  /** 对权威文档执行宿主重做（undoRedoService 文本栈）；返回是否执行 */
-  redo(): Promise<boolean>
+  /** 对权威文档执行宿主撤销（undoRedoService 文本栈）；返回是否执行。
+   *  P2-04（#281）起 origin（请求面板的来源身份）：嵌入目标端口的请求
+   *  经 provider 实现「临时激活 B → 全局 undo → 重显来源面板」的 P2-01
+   *  验证路由；缺省（根面板请求）为 undefined，语义不变 */
+  undo(origin?: { docUri: string }): Promise<boolean>
+  /** 对权威文档执行宿主重做（undoRedoService 文本栈）；返回是否执行（origin 语义同 undo） */
+  redo(origin?: { docUri: string }): Promise<boolean>
 }
 
 /** 面板发送通道 */
@@ -199,6 +202,9 @@ interface PanelEntry {
   sessionId: string
   port: PanelPort
   ready: boolean
+  /** P2-04（#281）目标编辑端口的来源面板身份（attachPanel 注入）：宿主
+   *  undo/redo 路由据此恢复来源面板活动态；根面板为 undefined */
+  refOrigin?: { docUri: string }
   pending: PendingEdit[]
   /** 已收但仍在全局 queue 中等待执行的请求；关闭检查须同步看见。 */
   queued: Map<number, SerChange[]>
@@ -394,13 +400,16 @@ export class DocumentSession {
     return this.options.docUri ?? ''
   }
 
-  /** 注册一个面板（resolveCustomTextEditor 时调用），返回 sessionId */
-  attachPanel(port: PanelPort): string {
+  /** 注册一个面板（resolveCustomTextEditor 时调用），返回 sessionId。
+   *  P2-04 起可选 refOrigin：目标编辑端口（嵌入内部 Live 的虚拟面板）携带
+   *  来源面板身份，history.request 执行时透传给权威端口 undo/redo */
+  attachPanel(port: PanelPort, opts?: { refOrigin?: { docUri: string } }): string {
     const sessionId = `panel-${this.nextPanelId++}`
     this.panels.set(sessionId, {
       sessionId,
       port,
       ready: false,
+      refOrigin: opts?.refOrigin,
       pending: [],
       queued: new Map(),
       ackCache: new Map(),
@@ -481,6 +490,18 @@ export class DocumentSession {
    *  未知会话一律 false */
   hasHoverSource(sessionId: string, fsPath: string): boolean {
     return this.panels.get(sessionId)?.hoverSourceFsPaths.has(fsPath) ?? false
+  }
+
+  /** P2-04（#281）occurrence 级来源固定查询面：fsPath 是否为本面板成功
+   *  送达 **且被该 occurrence 的 watch 固定** 的目标——refEdit.bind 的校验
+   *  基准（绑定要求「宿主已确认的来源租约」：仅送达不够，该引用位置须仍
+   *  持有订阅；unwatch/淘汰后固定释放即拒绝重绑）。未知会话一律 false */
+  hasHoverSourcePin(sessionId: string, fsPath: string, instanceId: string): boolean {
+    const panel = this.panels.get(sessionId)
+    if (!panel?.ready || !panel.hoverSourceFsPaths.has(fsPath)) {
+      return false
+    }
+    return panel.hoverSourcePins.get(fsPath)?.has(instanceId) === true
   }
 
   /** 只有本面板成功送达的目标可持有；来源租约按目标精确转交到 occurrence。 */
@@ -867,7 +888,12 @@ export class DocumentSession {
           return Promise.resolve()
         }
         const op = message.op
-        const task = this.queue.then(() => (op === 'undo' ? this.doc.undo() : this.doc.redo()))
+        // P2-04（#281）：目标编辑端口（虚拟面板）携来源身份——provider 的
+        // undo/redo 实现据此走 P2-01 验证的激活路由；根面板（无 refOrigin）
+        // 传 undefined，既有语义不变
+        const origin = panel.refOrigin
+        const task = this.queue.then(() =>
+          op === 'undo' ? this.doc.undo(origin) : this.doc.redo(origin))
         this.queue = task.then(() => undefined, () => undefined)
         return task.then(() => undefined)
       }

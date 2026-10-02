@@ -125,7 +125,7 @@ import { liveDecorationsField, LIVE_CLASS_NAMES, selectionTouchesRange, TaskChec
 import { setOccurrenceHitActive } from './hitReveal'
 import { LINK_MOD_CLASS, LINK_CLASS_NAMES, WIKILINK_CLASS_NAMES, activateLinkAtPos, activateLooseLinkAtPos, activateWikilinkAtPos } from './liveLinks'
 import { MATH_CLASS_NAMES } from '../shared/math'
-import { liveEmbedSpansField, setLiveEmbedCards } from './liveEmbed'
+import { liveEmbedCardsHostMark, liveEmbedSpansField, setLiveEmbedCards } from './liveEmbed'
 // #163 验收反馈：跳转目标高亮（view.locate 通道；半透黄经变量暴露，
 // 用户任意操作后消失）
 import { anchorFlashClear, anchorFlashRangeOf, anchorFlashSet } from './anchorFlash'
@@ -980,6 +980,8 @@ export class WebviewSyncController {
       codeHighlight: () => this.live?.codeCardHighlightEnabled ?? true,
       maxHeightPx: () => this.embedMaxHeightPx(),
       maxDepth: () => this.embedMaxDepth(),
+      // P2-04 根面板模式投影：未手动覆盖的根级嵌入内部模式跟随它
+      parentMode: () => this.viewMode,
       requestMeasure: () => this.view?.requestMeasure(),
       // #246 混排占位提升的父文档全文（主文档 Reading 块挂载路径；与
       // readingView.setDocument 同源——CM6 文档即权威文本，LF 坐标一致）
@@ -1185,6 +1187,16 @@ export class WebviewSyncController {
         return
       }
       const target = e.target instanceof Node ? e.target : null
+      // P2-04（#281）焦点路由：焦点在嵌入内部 Live 编辑器内时 Ctrl/Cmd+S
+      // 只保存目标 B（宿主 TextDocument.save 路线）——capture 阶段
+      // preventDefault 使 VSCode 预载脚本不再转发宿主（否则活动面板 A 被
+      // 保存）。焦点不在嵌入内则不拦截（宿主默认保存 A 不变）
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 's' &&
+        this.embedCards?.focusedLiveSave() === true) {
+        e.preventDefault()
+        e.stopPropagation()
+        return
+      }
       const liveFocused = this.viewMode === 'live' && !!target &&
         !!this.view?.contentDOM.contains(target) &&
         !this.view.state.readOnly && this.view.state.facet(EditorView.editable) && !this.suspended
@@ -1426,6 +1438,9 @@ export class WebviewSyncController {
    *  updateListener，等价搬运；随实例装配，不由卡片设置热重配重建） */
   private rootOwnedViewExtensions(): Extension[] {
     return [
+      // P2-04（#281）挂卡宿主标记：根正文才发射嵌入卡片装饰（嵌入内部
+      // Live 编辑器不挂卡——嵌套结构与命令接线归 P2-10）
+      liveEmbedCardsHostMark,
       // 2026-10 浮层锚点跟随：编辑事务轻量补同步——RO 只感知尺寸变化，
       // 打字改行号位数等「仅移动正文列位置、列宽不变」的场景由事务路径
       // 兜底（每事务两次 rect 读取，浮层不在场时零成本短路）
@@ -1730,6 +1745,8 @@ export class WebviewSyncController {
         // 引擎）仍在下方处理
         this.settings = message.values
         this.live?.applySettings(message.values)
+        // P2-04：嵌入内部 Live 实例的设置热重配（Live 扩展组随实例）
+        this.embedCards?.applySettings(message.values)
         this.applyReadableLineWidthSetting()
         this.applyEmbedMaxHeightSetting()
         this.embedCards?.setMaxDepth(this.embedMaxDepth())
@@ -1929,6 +1946,56 @@ export class WebviewSyncController {
         this.embedCards?.notifyWatchRejected(message)
         break
       }
+      case 'refEdit.bound':
+        // P2-04（#281）目标编辑端口绑定回执：嵌入卡片按 reqId 配对创建
+        // 内部 Live 实例（失败回退 Reading 呈现）
+        this.embedCards?.notifyBound(message)
+        break
+      case 'refEdit.push':
+        // B 会话编辑通道事件（init/ack/doc.changed/resync/suspended）：
+        // 按 portId 路由到嵌入实例（释放后的迟到推送查不到端口即丢弃）
+        this.embedCards?.notifyPush(message)
+        break
+      case 'refEdit.dirty':
+        // 目标 B 的未保存状态推送（按 fsPath 命中该目标的全部嵌入实例）
+        this.embedCards?.notifyDirty(message)
+        break
+      case 'refEdit.save.result':
+        this.embedCards?.notifySaveResult(message)
+        break
+      case 'embed.test.mode':
+        // P2-04 测试钩子：切换指定嵌入的内部模式（与用户点击头部按钮
+        // 同一处理器链路）
+        this.embedCards?.testSetMode(message.inner, message.mode, message.occurrence ?? 0)
+        break
+      case 'embed.test.type':
+        // P2-04 测试钩子：向嵌入内部 Live 实例注入一笔输入事务（与真实
+        // 键入同一事务管线 → refEdit.message 出站）
+        this.embedCards?.typeInEmbed(message.inner, message.pos, message.text, message.occurrence ?? 0)
+        break
+      case 'embed.test.save':
+        // P2-04 测试钩子：触发指定嵌入的目标保存（与头部保存入口同一出站）
+        this.embedCards?.testSave(message.inner, message.occurrence ?? 0)
+        break
+      case 'embed.test.history':
+        // P2-04 测试钩子：向嵌入实例转发撤销/重做（与真实键入 Mod-Z 同一
+        // 请求管线——实例竞态守卫后经 refEdit.message 出站）
+        this.embedCards?.testHistory(message.inner, message.op, message.occurrence ?? 0)
+        break
+      case 'embed.test.portWrite':
+        // P2-04 测试钩子：以给定端口身份伪造 edit.request 出站（宿主侧
+        // 重复 seq 去重 / 释放后拒收 / 不可安全写回暂停的目标文本断言载体）
+        this.embedCards?.testPortWrite({
+          portId: message.portId,
+          fsPath: message.fsPath,
+          seq: message.seq,
+          baseVersion: message.baseVersion,
+          offset: message.offset,
+          length: message.length,
+          text: message.text,
+          ...(message.repeat !== undefined ? { repeat: message.repeat } : {}),
+        })
+        break
       case 'hover.target.resolved': {
         // #299 跳转目标提示轻量解析回包（reqId 配对在 targetTip 模块内
         // 收敛——迟到回包丢弃；失败静默不出提示）
@@ -2132,6 +2199,9 @@ export class WebviewSyncController {
           // 回发此处）——与工具栏按钮共用同一发送实现（出站 refresh.request
           // 后由宿主失效编排回流），不另造路径
           case 'refreshEditor': this.sendEmbeddedRefreshRequest(); break
+          // P2-04 切换焦点嵌入的内部模式（命令面板/键位入口；默认未绑定，
+          // 与头部模式按钮同一实现——无焦点嵌入零操作）
+          case 'embedToggleMode': this.embedCards?.toggleFocusedMode(); break
           // #221 预览当前链接：命令面板/宿主命令入口与快捷键（keybindingRouter
           // 本地分支）共用同一实现（目标判定在 webview，无目标静默不误开）
           case 'hoverPreviewLink': this.previewLinkAtFocus(); break
@@ -3200,6 +3270,9 @@ export class WebviewSyncController {
       this.clearViewport()
     }
     this.viewMode = mode
+    // P2-04：根面板模式切换联动嵌入卡片的内部模式继承（无手动覆盖的
+    // 根级嵌入跟随；子卡级联）——在 viewMode 赋值后、容器显隐前通知
+    this.embedCards?.notifyParentModeChanged()
     // Live 悬停现场随模式切换作废（装饰 DOM 随重建脱树，补触发不得复活旧锚）
     this.lastLiveHover = null
     this.closeQuickHeadingMenu(false)
@@ -9282,6 +9355,8 @@ export class WebviewSyncController {
     this.hostDarkApplied = dark
     setMermaidDarkTheme(dark)
     this.live?.applyDarkTheme(dark)
+    // P2-04：嵌入内部 Live 实例的明暗热跟随
+    this.embedCards?.applyDarkTheme(dark)
   }
 
 }

@@ -27,7 +27,7 @@
 // - 只读契约：任务 checkbox 禁用（共享 mountRefContentBlock）、点击不
 //   写文档；卡片内点击不冒泡父容器委托（B 内链接按 B 目录解析是唯一
 //   正确语义，父容器按 A 解析的委托不得命中）。
-import type { HoverPreviewResult, WebviewToHost } from '../shared/protocol'
+import type { HoverPreviewResult, HostToWebview, WebviewToHost } from '../shared/protocol'
 import { parseWikilinkInner } from '../shared/wikilink'
 import { t } from '../shared/i18n'
 import { HOVER_REFRESH_DEFAULTS } from '../shared/hoverRefresh'
@@ -39,6 +39,18 @@ import { createReadingContainer, READING_CLASS_NAMES } from './readingView'
 import type { ReadingViewStats } from './readingVirtualView'
 import { refErrorText, releaseRefSourceLease } from './refReadingContent'
 import { WIKILINK_CLASS_NAMES } from '../shared/wikilink'
+import { LiveEditorInstance } from './liveInstance'
+import { ImageResourceManager, isDirectImageSrc } from './imageResource'
+import type { SettingsPayload } from '../shared/settings'
+import { EditorView } from '@codemirror/view'
+
+/** 装配时刻宿主明暗判定（与 syncController.isVscodeDarkBody 同源逻辑；
+ *  不跨模块引用避免 syncController↔embedCard 循环导入——热跟随经
+ *  applyDarkTheme 由根转发） */
+function embedHostDark(): boolean {
+  const cl = document.body.classList
+  return cl.contains('vscode-dark') || cl.contains('vscode-high-contrast')
+}
 
 /** 右上角打开入口图标（验收反馈：按钮本体空壳无图标——外部跳转形态，
  *  graphicBlockChrome 同款内联 SVG 风格；stroke currentColor 随按钮
@@ -50,16 +62,47 @@ export const OPEN_ICON =
   '<path d="M9 2.5h4.5V7"></path><path d="M13.5 2.5L7.5 8.5"></path>' +
   '<path d="M11.5 9v3.5a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1H6"></path></svg>'
 
+/** P2-04 内部模式切换：铅笔（当前 Reading → 切 Live 编辑） */
+const MODE_LIVE_ICON =
+  '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M11.8 2.6a1.6 1.6 0 0 1 2.3 2.3L5.7 13.3H3v-2.7z"></path>' +
+  '<path d="M10.6 4z"></path><path d="M2.5 14.8h11"></path></svg>'
+
+/** P2-04 内部模式切换：打开的书（当前 Live → 切回 Reading） */
+const MODE_READING_ICON =
+  '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M8 4C7 3 5.6 2.5 3.2 2.5v9.6c2.4 0 3.8.5 4.8 1.4 1-.9 2.4-1.4 4.8-1.4V2.5C10.4 2.5 9 3 8 4z"></path>' +
+  '<path d="M8 4v9.5"></path></svg>'
+
+/** P2-04 保存目标入口：软盘图标 */
+const SAVE_ICON =
+  '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M2.5 2.5h9L13.5 4.5v9h-11z"></path><path d="M5 2.5v3.2h5V2.5"></path>' +
+  '<path d="M5 13.5V9.5h6v4"></path></svg>'
+
 /** 嵌入卡片稳定类名（样式契约 content 域 reading-embed-card 条目同源） */
 export const EMBED_CARD_CLASS_NAMES = {
   /** 卡片壳（左引用边条 + 边框；挂 Obsidian 别名 .markdown-embed） */
   card: 'vsidian-embed-card',
   /** 顶部栏（文件名 + 打开入口） */
   header: 'vsidian-embed-card-header',
+  /** P2-04 顶部栏右侧动作组（保存/模式切换/打开） */
+  headerActions: 'vsidian-embed-card-header-actions',
   /** 文件名（成功后为根内相对路径；装载前为目标显示形态） */
   title: 'vsidian-embed-card-title',
   /** 右上角跳转目标文档入口（沿用 Vsidian 打开行为） */
   open: 'vsidian-embed-card-open',
+  /** P2-04 内部模式切换入口（Reading ↔ Live） */
+  mode: 'vsidian-embed-card-mode',
+  /** P2-04 保存目标入口（目标未保存时可见） */
+  save: 'vsidian-embed-card-save',
+  /** P2-04 目标未保存圆点（`·`，目标 dirty 时在场） */
+  dirty: 'vsidian-embed-card-dirty',
+  /** P2-04 内部 Live 编辑器容器（承载嵌入实例的 CM6 EditorView） */
+  live: 'vsidian-embed-card-live',
   /** 内容滚动区（长内容内部滚动；max-height 由设置驱动内联写入） */
   scroll: 'vsidian-embed-card-scroll',
   /** 就地状态行（loading / 错误分态） */
@@ -80,6 +123,9 @@ export interface EmbedCardContext {
   /** 嵌入限高设置（px；设置页 embed.maxHeight 投影） */
   maxHeightPx(): number
   maxDepth?(): number
+  /** P2-04 根面板当前模式（未手动选择的根级嵌入跟随它；子卡跟随直接父
+   *  嵌入的内部模式）。缺省 reading（保守：不主动建编辑端口） */
+  parentMode?(): 'reading' | 'live'
   /** #246 混排占位提升所需的父文档全文（主文档 Reading 块挂载路径注入；
    *  缺省（无注入）时块内占位保持引用行形态不升级——Live 混排 #247）。
    *  卡片/浮层内容的混排不经此口（RefContentMount 用装载结果自带全文） */
@@ -92,6 +138,25 @@ export interface EmbedCardContext {
 /** 装载结果缓存（父文档会话内；#224 变更订阅推送后按目标失效清除） */
 type EmbedLoaded = RefLoadedContent
 
+/** P2-04 嵌入实例的目标编辑端口状态（entry 级——同一 occurrence 的双容器
+ *  挂载共享一份；Reading 态不存在，即「Reading 无写端口」） */
+interface EmbedLiveState {
+  /** binding = 已发 refEdit.bind 待回执；bound = 端口已确认（init 待达或已装载） */
+  status: 'binding' | 'bound'
+  reqId: number
+  portId: string | null
+  fsPath: string
+  /** B 的规范 docUri（出站消息目标戳记，宿主 refEdit.bound 回执提供） */
+  docUri: string | null
+  dirty: boolean
+  suspended: boolean
+  instance: LiveEditorInstance | null
+  /** 实例的图片管理器（B 身份来源化请求；结果经 notifyImageResult 路由） */
+  images: ImageResourceManager | null
+  /** 首开定位完成标记（init 后锚点定位/会话选区恢复只做一次） */
+  initialLocated: boolean
+}
+
 /** 嵌入实例状态（跨挂载保持——视口回收不清除仍可见实例的状态） */
 interface EmbedEntry {
   /** 语义键：嵌入行区间 + 目标原文（父文档文本不变则稳定；文本变更后
@@ -100,6 +165,15 @@ interface EmbedEntry {
   inner: string
   sourceStart: number
   sourceEnd: number
+  /** P2-04 内部模式手动覆盖（null = 跟随直接父视图；面板会话内按
+   *  occurrence 记忆，父模式切换不回滚——「手动选择在父切换后保留」） */
+  modeOverride: 'reading' | 'live' | null
+  /** P2-04 目标编辑端口（可见且内部 Live 才在场） */
+  live: EmbedLiveState | null
+  /** P2-04 会话内选区记忆（端口销毁时保存，重绑 init 后恢复） */
+  liveSelection: { anchor: number; head: number } | null
+  /** P2-04 Live 在场期间的目标失效标记（切回 Reading 时补一次静默重载） */
+  pendingReadingRefresh: boolean
   loaded: EmbedLoaded | null
   /** P1-2（review 修复）最近已应用的目标版本（fsPath + version；成功应用
    *  时更新，**不随 loaded 清空**——changed 失效清 loaded 后仍作为回包
@@ -130,6 +204,10 @@ interface EmbedCardHandle {
   scrollEl: HTMLElement
   stateEl: HTMLElement
   contentEl: HTMLElement
+  /** P2-04 内部 Live 编辑器容器（与 contentEl 并列；显隐随内部模式） */
+  liveEl: HTMLElement
+  modeBtn: HTMLButtonElement
+  saveBtn: HTMLButtonElement
   content: RefContentMount
   display: 'loading' | 'content' | 'error'
   note: string
@@ -153,6 +231,15 @@ export interface EmbedCardProbe {
   /** #224 内容文本字符数（未保存修改推送后刷新可见性的观测面） */
   textLen: number
   viewStats: ReadingViewStats | null
+  /** P2-04 生效内部模式（覆盖优先，缺省跟随直接父） */
+  internalMode: 'reading' | 'live'
+  /** P2-04 目标编辑端口是否已绑定（可见且内部 Live 才为 true） */
+  liveBound: boolean
+  livePortId: string | null
+  liveDirty: boolean
+  liveSuspended: boolean
+  /** P2-04 内部 Live 编辑器文档长度（-1 = 无实例；外部同步/编辑回流观测） */
+  liveTextLen: number
 }
 
 /** 目标原文（`|` 之前——与阅读双链 a 的 href 同口径） */
@@ -181,6 +268,8 @@ export class EmbedCardManager {
   private readonly heightObserver: ResizeObserver | null
   private seq = 0
   private reqSeq = 0
+  /** P2-04 目标端口 bind 请求自增 id（refEdit.bound 按 reqId 配对） */
+  private liveReqSeq = 0
 
   constructor(context: EmbedCardContext) {
     this.context = context
@@ -239,6 +328,10 @@ export class EmbedCardManager {
         inner,
         sourceStart: Number.isInteger(sourceStart) ? sourceStart : 0,
         sourceEnd: Number.isInteger(sourceEnd) ? sourceEnd : sourceStart,
+        modeOverride: null,
+        live: null,
+        liveSelection: null,
+        pendingReadingRefresh: false,
         loaded: null,
         lastKnown: null,
         lastReq: null,
@@ -277,6 +370,19 @@ export class EmbedCardManager {
     const titleEl = document.createElement('span')
     titleEl.className = EMBED_CARD_CLASS_NAMES.title
     titleEl.textContent = parseWikilinkInner(inner)?.display ?? inner
+    // P2-04 内部模式切换入口（覆盖按 occurrence 记忆；图标/悬停词随当前
+    // 生效模式翻转——指向另一态）与保存目标入口（dirty 时可见）
+    const modeBtn = document.createElement('button')
+    modeBtn.type = 'button'
+    modeBtn.className = EMBED_CARD_CLASS_NAMES.mode
+    const saveBtn = document.createElement('button')
+    saveBtn.type = 'button'
+    saveBtn.className = EMBED_CARD_CLASS_NAMES.save
+    const saveLabel = t('embed.saveTarget')
+    saveBtn.setAttribute('aria-label', saveLabel)
+    saveBtn.setAttribute('data-tooltip', saveLabel)
+    saveBtn.innerHTML = SAVE_ICON
+    saveBtn.style.display = 'none'
     const openBtn = document.createElement('button')
     openBtn.type = 'button'
     openBtn.className = EMBED_CARD_CLASS_NAMES.open
@@ -285,15 +391,26 @@ export class EmbedCardManager {
     openBtn.setAttribute('data-tooltip', openLabel)
 
     openBtn.innerHTML = OPEN_ICON
+    const headerRight = document.createElement('span')
+    headerRight.className = EMBED_CARD_CLASS_NAMES.headerActions
+    headerRight.appendChild(saveBtn)
+    headerRight.appendChild(modeBtn)
+    headerRight.appendChild(openBtn)
     header.appendChild(titleEl)
-    header.appendChild(openBtn)
+    header.appendChild(headerRight)
     const scrollEl = document.createElement('div')
     scrollEl.className = EMBED_CARD_CLASS_NAMES.scroll
     scrollEl.style.maxHeight = `${this.context.maxHeightPx()}px`
     const stateEl = document.createElement('div')
     stateEl.className = EMBED_CARD_CLASS_NAMES.state
     const contentEl = createReadingContainer()
+    // P2-04 内部 Live 编辑器容器（与 Reading 容器并列；默认隐藏）
+    const liveEl = document.createElement('div')
+    liveEl.className = EMBED_CARD_CLASS_NAMES.live
+    liveEl.style.maxHeight = `${this.context.maxHeightPx()}px`
+    liveEl.style.display = 'none'
     scrollEl.appendChild(contentEl)
+    scrollEl.appendChild(liveEl)
     cardEl.appendChild(header)
     cardEl.appendChild(scrollEl)
     cardEl.appendChild(stateEl)
@@ -307,6 +424,9 @@ export class EmbedCardManager {
       scrollEl,
       stateEl,
       contentEl,
+      liveEl,
+      modeBtn,
+      saveBtn,
       content: entry.content.mount({
         contentEl, scrollEl, strategy: 'virtual',
         session: () => this.context.session(),
@@ -318,6 +438,15 @@ export class EmbedCardManager {
       display: 'loading',
       note: '',
       host,
+    }
+    // P2-04 范围锁：悬停浮层内的卡片不提供内部模式入口（浮层内部 Live 属
+    // P2-05）——浮层后代的来源父（浮层实例 id）不在状态库，据此结构判定
+    // （挂载时元素可能尚未进 DOM，closest 不可靠）；模式按钮隐藏（Tab 序
+    // 不新增停留点）且条目锁定 Reading，不随根面板 Live 继承绑定端口
+    if (source?.parentInstanceId !== undefined && !this.entries.has(source.parentInstanceId)) {
+      modeBtn.style.display = 'none'
+      modeBtn.tabIndex = -1
+      entry.modeOverride = 'reading'
     }
     this.active.set(el, handle)
     this.heightObserver?.observe(cardEl)
@@ -372,6 +501,21 @@ export class EmbedCardManager {
           ? { sourceDocUri: entry!.content.source.sourceDocUri } : {}),
       })
     })
+    // P2-04 内部模式切换（点击不冒泡父容器）；保存目标（同一出站通道）
+    handle.content.listen(modeBtn, 'click', (event) => {
+      event.stopPropagation()
+      this.toggleMode(entry!)
+    })
+    handle.content.listen(saveBtn, 'click', (event) => {
+      event.stopPropagation()
+      this.saveLive(entry!)
+    })
+    // 双容器并存时编辑器 DOM 归最近挂载的 handle 承载（宿主元素移动）
+    if (entry.live?.instance) {
+      handle.liveEl.appendChild(entry.live.instance.getView()!.dom)
+    }
+    this.applyInternalDom(handle)
+    this.refreshModeChrome(handle)
 
     if (entry.loaded) {
       // 重挂载：装载缓存直接渲染，恢复 fm/滚动状态（零新请求）
@@ -417,7 +561,8 @@ export class EmbedCardManager {
   /** 宿主卸载钩子（Reading 块卸载 / Live widget destroy）：保存状态、释放
    *  B 视图与资源管理器（实例状态保留在 entry 状态库）。#246 混排宿主
    *  （块内提升产物）随所属块卸载——先于块根处理（宿主走同一 active
-   *  配对路径，重复调用幂等） */
+   *  配对路径，重复调用幂等）。P2-04：编辑器 DOM 随 handle 卸载移动到
+   *  并存 handle 或随最后一个 handle 销毁端口（「可见才创建」的回收侧）。 */
   unmountBlock(el: HTMLElement): void {
     for (const host of promotedHostsOf(el)) {
       this.unmountBlock(host)
@@ -428,17 +573,27 @@ export class EmbedCardManager {
     }
     this.active.delete(el)
     handle.content.dispose()
-    const remaining = [...this.active.values()].filter((h) => h.entry === handle.entry).length
-    if (handle.entry.content.source.parentInstanceId !== undefined && remaining === 0) {
+    const remaining = [...this.active.values()].filter((h) => h.entry === handle.entry)
+    const live = handle.entry.live
+    if (live?.instance && remaining.length > 0) {
+      // 双容器并存（模式切换过渡）：编辑器 DOM 移交仍在场的 handle
+      remaining[0]!.liveEl.appendChild(live.instance.getView()!.dom)
+    }
+    if (handle.entry.content.source.parentInstanceId !== undefined && remaining.length === 0) {
       // 子实例仅随父块在场；回收后保留 occurrence 滚动状态，但释放授权
       // 与旧正文。重挂重新读当前父版本，不复活已退订的缓存快照。
       handle.entry.loaded = null
       handle.entry.lastReq = null
       this.unwatchEntry(handle.entry)
       this.budget.release(handle.entry.key)
-    } else if (remaining > 0 && handle.entry.loaded && handle.entry.parseBytes > 0) {
+    } else if (remaining.length > 0 && handle.entry.loaded && handle.entry.parseBytes > 0) {
       this.budget.attachContent(handle.entry.key,
-        this.dataKey(handle.entry, handle.entry.loaded), handle.entry.parseBytes * remaining)
+        this.dataKey(handle.entry, handle.entry.loaded), handle.entry.parseBytes * remaining.length)
+    }
+    if (remaining.length === 0 && live) {
+      // 最后一个宿主卸载（离屏）：销毁编辑器并释放端口（occurrence 会话
+      // 记忆保留——模式覆盖与选区）
+      this.teardownLive(handle.entry)
     }
     el.textContent = '' // 卡片 DOM（含 B 内容全量块）随宿主卸载丢弃
   }
@@ -535,10 +690,14 @@ export class EmbedCardManager {
     return false
   }
 
-  /** image.result 路由：作用于在场卡片的 B 管理器（reqId 由管理器自守卫） */
+  /** image.result 路由：作用于在场卡片的 B 管理器（reqId 由管理器自守卫）。
+   *  P2-04：内部 Live 实例的图片管理器同路由（B 身份来源化请求的回包） */
   notifyImageResult(msg: { reqId: number; ok: boolean; src?: string; reason?: string }): void {
     for (const handle of this.active.values()) {
       handle.content.notifyImageResult(msg)
+    }
+    for (const entry of this.entries.values()) {
+      entry.live?.images?.handleResult(msg)
     }
   }
 
@@ -578,6 +737,13 @@ export class EmbedCardManager {
       //（watchedFsPath——恢复 changed 推送仍能命中）
       const entryTarget = entry.loaded?.fsPath ?? entry.watchedFsPath
       if (entryTarget !== message.fsPath || entry.watchedFsPath === null) {
+        continue
+      }
+      // P2-04：Live 在场时 Reading 侧不重载——目标变更经端口增量推送驱动
+      // 编辑器（B 会话广播），Reading 缓存延迟到切回时静默重载（目标删除
+      // 也一样：B 的 TextDocument 驻留，编辑会话继续）
+      if (entry.live) {
+        entry.pendingReadingRefresh = true
         continue
       }
       // 在场滚动位置先保存（重建后恢复；离屏 entry 保留旧值）
@@ -648,6 +814,7 @@ export class EmbedCardManager {
   setMaxHeight(px: number): void {
     for (const handle of this.active.values()) {
       handle.scrollEl.style.maxHeight = `${px}px`
+      handle.liveEl.style.maxHeight = `${px}px`
     }
   }
 
@@ -671,6 +838,471 @@ export class EmbedCardManager {
     }
   }
 
+  // ---- P2-04（#281）内部模式状态机与目标编辑端口 ----
+
+  /** 生效内部模式：手动覆盖优先；缺省跟随直接父视图（根级嵌入取根面板
+   *  模式，子卡取直接父嵌入的内部模式——Q19 语义） */
+  private effectiveMode(entry: EmbedEntry): 'reading' | 'live' {
+    if (entry.modeOverride) {
+      return entry.modeOverride
+    }
+    const parentId = entry.content.source.parentInstanceId
+    if (parentId === undefined) {
+      return this.context.parentMode?.() ?? 'reading'
+    }
+    const parent = this.entries.get(parentId)
+    return parent ? this.effectiveMode(parent) : this.context.parentMode?.() ?? 'reading'
+  }
+
+  /** 手动切换内部模式（头部按钮 / 焦点嵌入的键位入口）：按 occurrence 记
+   *  忆，父模式切换不回滚 */
+  private toggleMode(entry: EmbedEntry): void {
+    entry.modeOverride = this.effectiveMode(entry) === 'live' ? 'reading' : 'live'
+    this.applyInternalMode(entry)
+  }
+
+  /** 模式施加与级联：本 entry 的 DOM 显隐与端口增删；无覆盖的子卡跟随
+   *  直接父（递归——子树模式继承）。幂等：同态重复调用无副作用 */
+  private applyInternalMode(entry: EmbedEntry): void {
+    const mode = this.effectiveMode(entry)
+    const handles = [...this.active.values()].filter((h) => h.entry === entry)
+    for (const handle of handles) {
+      this.applyInternalDom(handle, mode)
+      this.refreshModeChrome(handle)
+    }
+    if (mode === 'live') {
+      if (entry.loaded) {
+        this.ensureLivePort(entry)
+      }
+      // 未装载：等待装载完成（applyLoaded 的 Live 分支再绑定）
+    } else if (entry.live) {
+      this.teardownLive(entry)
+      this.restoreReadingDisplay(entry)
+    }
+    for (const child of this.entries.values()) {
+      if (child.content.source.parentInstanceId === entry.key && !child.modeOverride) {
+        this.applyInternalMode(child)
+      }
+    }
+  }
+
+  /** 根面板模式切换通知（syncController applyModeDom 联动）：无覆盖的根级
+   *  嵌入跟随（子卡随 applyInternalMode 级联） */
+  notifyParentModeChanged(): void {
+    for (const entry of this.entries.values()) {
+      if (entry.content.source.parentInstanceId === undefined && !entry.modeOverride) {
+        this.applyInternalMode(entry)
+      }
+    }
+  }
+
+  /** 句柄级内容显隐：Live 态显示编辑器容器（实例已建）并隐藏 Reading
+   *  容器；Reading 态反转。mode 传入避免递归重算 */
+  private applyInternalDom(handle: EmbedCardHandle, mode = this.effectiveMode(handle.entry)): void {
+    const liveOn = mode === 'live' && handle.entry.live?.instance != null
+    handle.contentEl.style.display = liveOn ? 'none' : ''
+    handle.liveEl.style.display = liveOn ? '' : 'none'
+  }
+
+  /** 切回 Reading 的内容恢复：目标失效过（Live 期间挂起）或无缓存时静默
+   *  重载；否则从装载缓存直接渲染 */
+  private restoreReadingDisplay(entry: EmbedEntry): void {
+    const handles = [...this.active.values()].filter((h) => h.entry === entry)
+    if (handles.length === 0) {
+      return
+    }
+    if (entry.pendingReadingRefresh || !entry.loaded) {
+      entry.pendingReadingRefresh = false
+      entry.lastReq = null
+      this.requestLoad(handles[0]!, { silent: true, reload: true })
+      return
+    }
+    for (const handle of handles) {
+      if (handle.display === 'content' && handle.contentEl.childElementCount === 0) {
+        this.applyLoaded(handle, entry.loaded)
+      }
+    }
+  }
+
+  /** 绑定目标编辑端口（可见且内部 Live 且已装载——装载完成的 watch 固定
+   *  是宿主 bind 校验的前置）。幂等：已有端口或绑定在途直接返回 */
+  private ensureLivePort(entry: EmbedEntry): void {
+    if (entry.live || !entry.loaded) {
+      return
+    }
+    const session = this.context.session()
+    if (!session.sessionId || !session.docUri) {
+      return
+    }
+    const reqId = ++this.liveReqSeq
+    entry.live = {
+      status: 'binding',
+      reqId,
+      portId: null,
+      fsPath: entry.loaded.fsPath,
+      docUri: null,
+      dirty: false,
+      suspended: false,
+      instance: null,
+      images: null,
+      initialLocated: false,
+    }
+    this.context.send({
+      kind: 'refEdit.bind',
+      panelSessionId: session.sessionId,
+      panelDocUri: session.docUri,
+      fsPath: entry.loaded.fsPath,
+      occurrence: entry.key,
+      reqId,
+    })
+  }
+
+  /** refEdit.bound 路由：按 reqId 配对（同 fsPath 校验防串目标） */
+  notifyBound(message: Extract<HostToWebview, { kind: 'refEdit.bound' }>): void {
+    for (const entry of this.entries.values()) {
+      const live = entry.live
+      if (!live || live.status !== 'binding' || live.reqId !== message.reqId ||
+        (message.ok && live.fsPath !== message.fsPath)) {
+        continue
+      }
+      if (!message.ok) {
+        // 绑定失败（来源过期 / 目标不可装载）：回退 Reading 呈现，清除
+        // 手动覆盖（避免每次重挂都失败重试的循环），就地提示
+        entry.live = null
+        entry.modeOverride = null
+        this.applyInternalMode(entry)
+        const note = t(message.reason === 'source' ? 'hover.errorSourceExpired' : 'embed.liveBindFailed')
+        for (const handle of this.active.values()) {
+          if (handle.entry === entry && !entry.loaded) {
+            this.applyDisplay(handle, 'error', note)
+          }
+        }
+        continue
+      }
+      live.status = 'bound'
+      live.portId = message.portId
+      live.docUri = message.docUri
+      live.dirty = message.dirty
+      this.createLiveInstance(entry)
+      this.refreshLiveChrome(entry)
+    }
+  }
+
+  /** 创建嵌入 Live 实例（portId/docUri 已知后；EditorView 空文档，init
+   *  推送装载全文）。图片管理器走 B 身份来源化请求（既有守卫通道）。 */
+  private createLiveInstance(entry: EmbedEntry): void {
+    const live = entry.live
+    if (!live || !live.portId || !live.docUri || live.instance) {
+      return
+    }
+    const hostHandle = [...this.active.values()].find((h) => h.entry === entry)
+    if (!hostHandle) {
+      return
+    }
+    live.images = new ImageResourceManager({
+      isDirectSrc: isDirectImageSrc,
+      requestHost: (src, reqId) => {
+        const session = this.context.session()
+        if (!session.sessionId || !session.docUri) {
+          return
+        }
+        this.context.send({
+          kind: 'image.request',
+          sessionId: session.sessionId,
+          docUri: session.docUri,
+          reqId,
+          src,
+          sourceDocUri: live.fsPath,
+        })
+      },
+    })
+    const instanceLive = live
+    const entryRef = entry
+    live.instance = new LiveEditorInstance(hostHandle.liveEl, {
+      send: (message) => this.sendRefEditOut(entryRef, message),
+      persistState: () => undefined, // seq 不跨端口持久化（每次 bind 新面板新 seq 空间）
+      images: live.images,
+      // P2-04：图片粘贴不拦截（资产归属归 P2-11——isLiveActive false 使
+      // createImagePaste 的 isEnabled 恒 false，默认粘贴行为不劫持）；
+      // 空白格组合规划随之关闭（表格结构编辑归 P2-10）
+      isLiveActive: () => false,
+      initialDark: embedHostDark(),
+      onSuspendedChange: () => {
+        if (instanceLive.instance) {
+          instanceLive.suspended = instanceLive.instance.isSuspended
+          this.refreshLiveChrome(entryRef)
+        }
+      },
+    })
+    live.instance.setSession(live.portId, live.docUri)
+    hostHandle.liveEl.appendChild(live.instance.getView()!.dom)
+    this.applyInternalDom(hostHandle)
+    this.refreshModeChrome(hostHandle)
+  }
+
+  /** 实例出站包装：编辑通道消息 → refEdit.message（目标身份 = 端口 B）；
+   *  其余（链接跳转/图片粘贴等资源与命令消息）不经目标端口——完整接线
+   *  归 P2-10/P2-11，本票丢弃（宿主侧同款白名单冗余防线） */
+  private sendRefEditOut(entry: EmbedEntry, message: WebviewToHost): void {
+    const live = entry.live
+    const session = this.context.session()
+    if (!live || !live.portId || !session.sessionId || !session.docUri) {
+      return
+    }
+    switch (message.kind) {
+      case 'edit.request':
+      case 'conflict.report':
+      case 'composition.changed':
+      case 'history.request':
+      case 'sync.request':
+      case 'conflict.action':
+        this.context.send({
+          kind: 'refEdit.message',
+          panelSessionId: session.sessionId,
+          panelDocUri: session.docUri,
+          portId: live.portId,
+          fsPath: live.fsPath,
+          message,
+        })
+        break
+      default:
+        break // P2-10/P2-11 接线前丢弃（不冒充已支持）
+    }
+  }
+
+  /** refEdit.push 路由：按 portId 配对驱动实例（释放后的迟到推送查不到
+   *  端口即丢弃——「释放后写入禁止」的行为侧） */
+  notifyPush(message: Extract<HostToWebview, { kind: 'refEdit.push' }>): void {
+    for (const entry of this.entries.values()) {
+      const live = entry.live
+      if (!live || live.portId !== message.portId || live.fsPath !== message.fsPath) {
+        continue
+      }
+      const inst = live.instance
+      if (!inst) {
+        continue
+      }
+      switch (message.message.kind) {
+        case 'init':
+          inst.handleFullSync(message.message.version, message.message.text, {
+            source: 'init',
+            restoreAnchor: true,
+          })
+          this.locateLiveInstance(entry)
+          break
+        case 'edit.ack':
+          inst.handleEditAck(message.message)
+          break
+        case 'doc.changed':
+          inst.handleDocChanged(message.message)
+          break
+        case 'doc.resync':
+          inst.handleFullSync(message.message.version, message.message.text, { source: 'resync' })
+          live.suspended = false
+          this.refreshLiveChrome(entry)
+          break
+        case 'session.suspended':
+          inst.handleSessionSuspended()
+          live.suspended = true
+          this.refreshLiveChrome(entry)
+          break
+      }
+    }
+  }
+
+  /** init 后定位：会话选区恢复优先（occurrence 记忆），否则标题/块引用
+   *  定位到锚点区间起点（P2-03 语义在 Live 侧的落位） */
+  private locateLiveInstance(entry: EmbedEntry): void {
+    const live = entry.live
+    const view = live?.instance?.getView()
+    if (!live || !view || live.initialLocated) {
+      return
+    }
+    live.initialLocated = true
+    if (entry.liveSelection) {
+      const { anchor, head } = entry.liveSelection
+      if (anchor <= view.state.doc.length && head <= view.state.doc.length) {
+        view.dispatch({ selection: { anchor, head }, scrollIntoView: true })
+      }
+      return
+    }
+    const loaded = entry.loaded
+    if (loaded && loaded.selector !== undefined && loaded.selector.kind !== 'full' &&
+      loaded.range.start > 0 && loaded.range.start <= view.state.doc.length) {
+      const at = loaded.range.start
+      view.dispatch({ selection: { anchor: at }, effects: EditorView.scrollIntoView(at) })
+    }
+  }
+
+  /** refEdit.dirty 路由：按 fsPath 命中全部绑定/绑定中的实例（多
+   *  occurrence 一致——目标 dirty 是文档级状态） */
+  notifyDirty(message: Extract<HostToWebview, { kind: 'refEdit.dirty' }>): void {
+    for (const entry of this.entries.values()) {
+      if (entry.live?.fsPath === message.fsPath) {
+        entry.live.dirty = message.dirty
+        this.refreshLiveChrome(entry)
+      }
+    }
+  }
+
+  /** refEdit.save.result 路由：成功清圆点（dirty 推送另发）；失败保留
+   *  现场（不误清目标状态） */
+  notifySaveResult(message: Extract<HostToWebview, { kind: 'refEdit.save.result' }>): void {
+    for (const entry of this.entries.values()) {
+      const live = entry.live
+      if (!live || live.portId !== message.portId || live.fsPath !== message.fsPath) {
+        continue
+      }
+      if (message.ok) {
+        live.dirty = false
+        this.refreshLiveChrome(entry)
+      }
+    }
+  }
+
+  /** 销毁目标编辑端口：保存选区（occurrence 会话记忆）→ 销毁实例与图片
+   *  管理器 → 出站 unbind → 清内容预算（Reading 重渲染时重新计费） */
+  private teardownLive(entry: EmbedEntry): void {
+    const live = entry.live
+    if (!live) {
+      return
+    }
+    const view = live.instance?.getView()
+    if (view) {
+      const sel = view.state.selection.main
+      entry.liveSelection = { anchor: sel.anchor, head: sel.head }
+    }
+    live.instance?.destroy()
+    live.images?.dispose()
+    entry.live = null
+    const session = this.context.session()
+    if (live.portId && session.sessionId && session.docUri) {
+      this.context.send({
+        kind: 'refEdit.unbind',
+        panelSessionId: session.sessionId,
+        panelDocUri: session.docUri,
+        portId: live.portId,
+        fsPath: live.fsPath,
+      })
+    }
+    this.budget.clearContent(entry.key)
+    for (const handle of this.active.values()) {
+      if (handle.entry !== entry) {
+        continue
+      }
+      handle.liveEl.textContent = ''
+      this.applyInternalDom(handle)
+      this.refreshModeChrome(handle)
+    }
+  }
+
+  /** 头部 live chrome 刷新：dirty 圆点在场性（物理移除——干净态无节点）、
+   *  保存入口显隐、暂停态提示 */
+  private refreshLiveChrome(entry: EmbedEntry): void {
+    for (const handle of this.active.values()) {
+      if (handle.entry !== entry) {
+        continue
+      }
+      const live = entry.live
+      const dirtyOn = !!live?.portId && live.dirty
+      let dot = handle.cardEl.querySelector<HTMLElement>(`.${EMBED_CARD_CLASS_NAMES.dirty}`)
+      if (dirtyOn) {
+        if (!dot) {
+          dot = document.createElement('span')
+          dot.className = EMBED_CARD_CLASS_NAMES.dirty
+          dot.textContent = '·'
+          const label = t('embed.dirtyDot')
+          dot.setAttribute('aria-label', label)
+          dot.setAttribute('data-tooltip', label)
+          // 圆点紧随文件名（动作组之前）
+          const actions = handle.cardEl.querySelector(`.${EMBED_CARD_CLASS_NAMES.headerActions}`)
+          actions?.parentElement?.insertBefore(dot, actions)
+        }
+      } else {
+        dot?.remove()
+      }
+      handle.saveBtn.style.display = dirtyOn ? '' : 'none'
+      if (live?.suspended) {
+        handle.stateEl.style.display = ''
+        handle.stateEl.textContent = t('embed.livePaused')
+      } else if (handle.display === 'content') {
+        handle.stateEl.style.display = 'none'
+      }
+    }
+  }
+
+  /** 模式按钮 chrome：图标与悬停词指向另一态 */
+  private refreshModeChrome(handle: EmbedCardHandle): void {
+    const mode = this.effectiveMode(handle.entry)
+    const toLive = mode !== 'live'
+    const label = t(toLive ? 'embed.modeToLive' : 'embed.modeToReading')
+    handle.modeBtn.setAttribute('aria-label', label)
+    handle.modeBtn.setAttribute('data-tooltip', label)
+    handle.modeBtn.innerHTML = toLive ? MODE_LIVE_ICON : MODE_READING_ICON
+  }
+
+  /** P2-04 保存目标（头部入口 / Ctrl+S 焦点路由共用出站） */
+  private saveLive(entry: EmbedEntry): void {
+    const live = entry.live
+    const session = this.context.session()
+    if (!live?.portId || !session.sessionId || !session.docUri) {
+      return
+    }
+    this.context.send({
+      kind: 'refEdit.save',
+      panelSessionId: session.sessionId,
+      panelDocUri: session.docUri,
+      portId: live.portId,
+      fsPath: live.fsPath,
+    })
+  }
+
+  /** 焦点所在嵌入的目标保存（Ctrl+S 焦点路由；焦点不在任何嵌入编辑器内
+   *  返回 false——宿主默认保存 A 不被拦截） */
+  focusedLiveSave(): boolean {
+    const active = document.activeElement
+    if (!(active instanceof Node)) {
+      return false
+    }
+    for (const entry of this.entries.values()) {
+      const dom = entry.live?.instance?.getView()?.dom
+      if (dom && dom.contains(active)) {
+        this.saveLive(entry)
+        return true
+      }
+    }
+    return false
+  }
+
+  /** 焦点所在嵌入的模式切换（键位入口 embedToggleMode；无焦点嵌入零操作） */
+  toggleFocusedMode(): void {
+    const active = document.activeElement
+    if (!(active instanceof Node)) {
+      return
+    }
+    for (const entry of this.entries.values()) {
+      const dom = entry.live?.instance?.getView()?.dom
+      if (dom && dom.contains(active)) {
+        this.toggleMode(entry)
+        return
+      }
+    }
+  }
+
+  /** 设置热更转发（Live 扩展组 Compartment 重配随实例） */
+  applySettings(values: SettingsPayload | undefined): void {
+    for (const entry of this.entries.values()) {
+      entry.live?.instance?.applySettings(values)
+    }
+  }
+
+  /** 宿主明暗热跟随转发 */
+  applyDarkTheme(dark: boolean): void {
+    for (const entry of this.entries.values()) {
+      entry.live?.instance?.applyDarkTheme(dark)
+    }
+  }
+
   /** 观测探针（view.state.readingEmbed 的数据源；host 区分容器） */
   probe(): EmbedCardProbe[] {
     const out: EmbedCardProbe[] = []
@@ -691,6 +1323,12 @@ export class EmbedCardManager {
         // #224 内容文本字符数（集成断言未保存修改推送后的刷新可见性）
         textLen: (handle.contentEl.textContent ?? '').length,
         viewStats: handle.content.getStats(),
+        internalMode: this.effectiveMode(handle.entry),
+        liveBound: handle.entry.live?.portId != null,
+        livePortId: handle.entry.live?.portId ?? null,
+        liveDirty: handle.entry.live?.dirty === true,
+        liveSuspended: handle.entry.live?.suspended === true,
+        liveTextLen: handle.entry.live?.instance?.getView()?.state.doc.length ?? -1,
       })
     }
     return out
@@ -719,8 +1357,14 @@ export class EmbedCardManager {
     this.budget.release(instanceId)
   }
 
-  /** 全部释放（syncController dispose）：卡片 DOM、B 视图与状态库 */
+  /** 全部释放（syncController dispose）：卡片 DOM、B 视图与状态库。
+   *  P2-04：目标端口先于状态库销毁（EditorView 销毁 + unbind 出站） */
   dispose(): void {
+    for (const entry of [...this.entries.values()]) {
+      if (entry.live) {
+        this.teardownLive(entry)
+      }
+    }
     for (const el of Array.from(this.active.keys())) {
       this.unmountBlock(el)
     }
@@ -731,6 +1375,108 @@ export class EmbedCardManager {
     }
     this.entries.clear()
     this.heightObserver?.disconnect()
+  }
+
+  // ---- P2-04 测试钩子（宿主 embed.test.* 经 syncController 转发；驱动与
+  // 用户交互同一处理器链路——模式切换走 toggleMode，输入走实例事务管线）----
+
+  /** 按 inner 与 occurrence 序号切换内部模式（默认第 0 个匹配实例） */
+  testSetMode(inner: string, mode: 'reading' | 'live', occurrence = 0): boolean {
+    const entry = this.entryOfInner(inner, occurrence)
+    if (!entry) {
+      return false
+    }
+    if (this.effectiveMode(entry) !== mode) {
+      this.toggleMode(entry)
+    }
+    return true
+  }
+
+  /** 向内部 Live 实例注入一笔输入事务（与真实键入同一管线：
+   *  updateListener → recordLocalChangeSet → refEdit.message 出站） */
+  typeInEmbed(inner: string, pos: number, text: string, occurrence = 0): boolean {
+    const entry = this.entryOfInner(inner, occurrence)
+    const view = entry?.live?.instance?.getView()
+    if (!entry || !view) {
+      return false
+    }
+    view.dispatch({ changes: { from: pos, to: pos, insert: text } })
+    return true
+  }
+
+  /** 按 inner 与 occurrence 序号保存目标 */
+  testSave(inner: string, occurrence = 0): boolean {
+    const entry = this.entryOfInner(inner, occurrence)
+    if (!entry?.live?.portId) {
+      return false
+    }
+    this.saveLive(entry)
+    return true
+  }
+
+  /** 按 inner 与 occurrence 序号转发撤销/重做（实例竞态守卫后出站；
+   *  与真实键入 Mod-Z 同一请求管线） */
+  testHistory(inner: string, op: 'undo' | 'redo', occurrence = 0): boolean {
+    const entry = this.entryOfInner(inner, occurrence)
+    const instance = entry?.live?.instance
+    if (!instance) {
+      return false
+    }
+    return instance.requestHistory(op)
+  }
+
+  /** 以给定端口身份伪造一笔 edit.request 出站（宿主侧去重/拒收/暂停的
+   *  目标文本断言载体；repeat 同 seq 重复发送） */
+  testPortWrite(spec: {
+    portId: string
+    fsPath: string
+    seq: number
+    baseVersion: number
+    offset: number
+    length: number
+    text: string
+    repeat?: number
+  }): boolean {
+    const session = this.context.session()
+    if (!session.sessionId || !session.docUri) {
+      return false
+    }
+    const message = {
+      kind: 'edit.request' as const,
+      sessionId: spec.portId,
+      docUri: '',
+      seq: spec.seq,
+      baseVersion: spec.baseVersion,
+      changes: [{ offset: spec.offset, length: spec.length, text: spec.text }],
+    }
+    // docUri 须为端口 B 的规范身份（宿主按会话校验）：从在场端口取同目标值
+    for (const entry of this.entries.values()) {
+      if (entry.live?.portId === spec.portId && entry.live.fsPath === spec.fsPath) {
+        message.docUri = entry.live.docUri ?? ''
+        break
+      }
+    }
+    if (!message.docUri) {
+      // 端口已释放（迟到写入场景）：docUri 无法从状态库取——宿主在端口
+      // 查找阶段即拒收，空串不构成绕过
+      message.docUri = ''
+    }
+    for (let i = 0; i < Math.max(1, spec.repeat ?? 1); i++) {
+      this.context.send({
+        kind: 'refEdit.message',
+        panelSessionId: session.sessionId,
+        panelDocUri: session.docUri,
+        portId: spec.portId,
+        fsPath: spec.fsPath,
+        message,
+      })
+    }
+    return true
+  }
+
+  private entryOfInner(inner: string, occurrence: number): EmbedEntry | undefined {
+    const matches = [...this.entries.values()].filter((e) => e.inner === inner)
+    return matches[occurrence]
   }
 
   // ---- 内部 ----
@@ -904,7 +1650,11 @@ export class EmbedCardManager {
 
   /** 装载结果渲染（首载与缓存重挂共用）：B Reading 视图 + 状态恢复。
    *  #224 刷新路径（在场 handle）：滚动位置先取当前值（重挂路径 scrollEl
-   *  新建为 0，保留 entry 旧值），重建后经既有 rAF 恢复；目标订阅登记 */
+   *  新建为 0，保留 entry 旧值），重建后经既有 rAF 恢复；目标订阅登记。
+   *  P2-04：Reading 呈现**先于端口绑定保留**——bind 回执到达前内容视图
+   *  在场（伪宿主/慢宿主不回 bind 时卡片不空白），绑定成功经
+   *  applyInternalDom 切换到编辑器容器；生效内部模式为 Live 时随后发起
+   *  端口绑定（装载完成的 watch 固定是宿主 bind 校验的前置）。 */
   private applyLoaded(handle: EmbedCardHandle, loaded: EmbedLoaded, sourceLeaseId?: string): void {
     if (handle.scrollEl.scrollTop > 0) {
       handle.entry.content.scrollTop = handle.scrollEl.scrollTop // 刷新前保存
@@ -927,6 +1677,9 @@ export class EmbedCardManager {
       this.budget.release(handle.entry.key)
       this.applyDisplay(handle, 'error', t('hover.errorBudget'))
       return
+    }
+    if (this.effectiveMode(handle.entry) === 'live') {
+      this.ensureLivePort(handle.entry)
     }
     // 顶部文件名：装载后为目标根内相对路径
     const titleEl = handle.cardEl.querySelector<HTMLElement>(`.${EMBED_CARD_CLASS_NAMES.title}`)

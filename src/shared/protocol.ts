@@ -48,6 +48,59 @@ export type HostToWebview =
   | { kind: 'doc.resync'; version: number; text: string }
   /** 面板处于暂停写回状态（webview 重载后由 init 后跟随下发，恢复暂停提示） */
   | { kind: 'session.suspended'; version: number; reason: 'conflict' | 'host-error' }
+  // ---- P2-04（#281）目标编辑端口（宿主 → webview）：B 会话的虚拟面板
+  // 推送经 refEdit.push 信封回来源面板，webview 按 portId 路由到嵌入实例
+  // ——B 的 ack/dirty/资源结果不落到根面板或另一 occurrence。
+  /** refEdit.bind 的结果：成功携带 portId（B 会话虚拟面板身份）、B 的
+   *  规范 docUri（出站消息目标戳记——webview 无法从 fsPath 自行构造）、
+   *  当前版本与 dirty；失败原因：source=未固定来源/occurrence 不符，
+   *  open-failed=目标文档无法装载，not-markdown=非 Markdown 目标 */
+  | {
+      kind: 'refEdit.bound'
+      reqId: number
+      ok: true
+      portId: string
+      fsPath: string
+      docUri: string
+      version: number
+      dirty: boolean
+    }
+  | { kind: 'refEdit.bound'; reqId: number; ok: false; reason: 'source' | 'open-failed' | 'not-markdown' }
+  /** B 会话编辑通道事件（init / edit.ack / doc.changed / doc.resync /
+   *  session.suspended）——B 的 DocumentSession 经虚拟面板 send 出站的
+   *  全部形态；其他消息（locale/settings 等）不进本信封 */
+  | { kind: 'refEdit.push'; portId: string; fsPath: string; message: RefEditHostEvent }
+  /** 目标 B 的未保存状态推送（dirty 变化时，面板级广播——按 fsPath 命中
+   *  该目标的全部嵌入实例；不携带 portId，多 occurrence 一致） */
+  | { kind: 'refEdit.dirty'; fsPath: string; dirty: boolean }
+  /** refEdit.save 的结果（保存失败保留现场，dirty 推送另行对齐） */
+  | { kind: 'refEdit.save.result'; portId: string; fsPath: string; ok: boolean }
+  /** P2-04 测试钩子：切换指定嵌入（inner + occurrence 序号）的内部模式
+   *  （与用户点击头部模式按钮同一处理器链路）；宿主测试无法向 webview
+   *  派发真实点击 */
+  | { kind: 'embed.test.mode'; inner: string; mode: 'reading' | 'live'; occurrence?: number }
+  /** P2-04 测试钩子：向指定嵌入的内部 Live 实例注入一笔输入事务（与真实
+   *  键入同一事务管线 → refEdit.message 出站） */
+  | { kind: 'embed.test.type'; inner: string; pos: number; text: string; occurrence?: number }
+  /** P2-04 测试钩子：触发指定嵌入的目标保存（与头部保存入口同一出站） */
+  | { kind: 'embed.test.save'; inner: string; occurrence?: number }
+  /** P2-04 测试钩子：向指定嵌入实例转发撤销/重做（与真实键入 Mod-Z 同一
+   *  请求管线——实例竞态守卫后经 refEdit.message 出站 history.request） */
+  | { kind: 'embed.test.history'; inner: string; op: 'undo' | 'redo'; occurrence?: number }
+  /** P2-04 测试钩子：以给定端口身份伪造一笔 edit.request 出站（宿主侧
+   *  重复 seq 去重 / 释放后迟到写入拒收 / 不可安全写回暂停的目标文本
+   *  断言载体；repeat 控制重复发送次数——同 seq 幂等） */
+  | {
+      kind: 'embed.test.portWrite'
+      portId: string
+      fsPath: string
+      seq: number
+      baseVersion: number
+      offset: number
+      length: number
+      text: string
+      repeat?: number
+    }
   /** 请求 webview 回报视图诊断（文本与渲染行数，供测试与性能观测） */
   | { kind: 'view.state.request' }
   /** #272 测试钩子门控的观测开关；只记录传播身份，不改变调度。 */
@@ -553,6 +606,19 @@ export type HostToWebview =
       resources: { js: string; wasm: string } | null
     }
 
+/** P2-04（#281）目标编辑端口推送事件（refEdit.push 载荷）：B 会话对虚拟
+ *  面板 send 出站的编辑通道子集——与根面板同构的同步语义（init 装载 /
+ *  ack 确认 / 外部增量 / 全文重同步 / 暂停通知），不含 locale/settings 等
+ *  面板级消息。 */
+export type RefEditHostEvent = Extract<
+  HostToWebview,
+  | { kind: 'init' }
+  | { kind: 'edit.ack' }
+  | { kind: 'doc.changed' }
+  | { kind: 'doc.resync' }
+  | { kind: 'session.suspended' }
+>
+
 /** webview → 宿主消息 */
 export type WebviewToHost =
   /** webview 脚本加载完成，请求 init。
@@ -594,6 +660,48 @@ export type WebviewToHost =
   | { kind: 'sync.test.close'; sessionId: string; docUri: string }
   /** 暂停横幅按钮动作：copy = 请求宿主复制未确认输入；resume = 请求恢复（重新同步） */
   | { kind: 'conflict.action'; sessionId: string; docUri: string; action: 'copy' | 'resume' }
+  // ---- P2-04（#281）目标编辑端口：嵌入内部 Live 与宿主 B 会话的绑定与
+  // 编辑通道。根面板身份（panelSessionId/panelDocUri = A 的会话）用于认证
+  // 与生命周期；portId 是 B 会话上的虚拟面板身份（出站消息的目标戳记）。
+  // 宿主从已确认的来源租约绑定 B：fsPath 必须是该面板成功送达且被该
+  // occurrence watch 固定的目标——拒绝前端自报任意 URI 与释放后的迟到
+  // 消息（portId 失配即丢弃）。
+  /** 请求绑定目标编辑端口（可见且内部 Live 的嵌入实例） */
+  | {
+      kind: 'refEdit.bind'
+      panelSessionId: string
+      panelDocUri: string
+      fsPath: string
+      occurrence: string
+      reqId: number
+    }
+  /** 释放目标编辑端口（切回 Reading / 嵌入离屏 / 实例销毁） */
+  | {
+      kind: 'refEdit.unbind'
+      panelSessionId: string
+      panelDocUri: string
+      portId: string
+      fsPath: string
+    }
+  /** 编辑通道出站：edit.request / conflict.report / composition.changed /
+   *  history.request / sync.request / conflict.action（链接/图片/资源消息
+   *  不混入本通道——完整接线归后续票） */
+  | {
+      kind: 'refEdit.message'
+      panelSessionId: string
+      panelDocUri: string
+      portId: string
+      fsPath: string
+      message: RefEditClientMessage
+    }
+  /** 保存目标 B（焦点在嵌入内时的 Ctrl+S 与头部保存入口共用） */
+  | {
+      kind: 'refEdit.save'
+      panelSessionId: string
+      panelDocUri: string
+      portId: string
+      fsPath: string
+    }
   /** view.locate 送达确认（#163 验收反馈）：webview 应用定位后原样回发
    *  消息 offset——宿主只补发「从未送达」的定位意图（面板重载竞态兜底），
    *  已送达的定位交给 webview 持久化锚点恢复，历史程序定位不再重播 */
@@ -1109,6 +1217,19 @@ export type WebviewToHost =
    *  动态 import/init 失败时上报（CSP/运行时不兼容等宿主不可见场景），
    *  宿主通知用户并记录 notice.load-failed；成功不回报 */
   | { kind: 'wordSegment.loadResult'; ok: boolean; detail?: string }
+
+/** P2-04（#281）目标编辑端口的编辑通道内消息（refEdit.message 载荷）：
+ *  与根面板编辑通道同构——B 会话按同一 DocumentSession 管线处理（seq 去重、
+ *  版本重定位、CRLF、ack、外部增量）。链接/图片/资源消息不在本通道。 */
+export type RefEditClientMessage = Extract<
+  WebviewToHost,
+  | { kind: 'edit.request' }
+  | { kind: 'conflict.report' }
+  | { kind: 'composition.changed' }
+  | { kind: 'history.request' }
+  | { kind: 'sync.request' }
+  | { kind: 'conflict.action' }
+>
 
 /** 反链面板条目载荷（#197 backlinks.snapshot.items；形态与宿主
  *  BacklinkItem 同构——本接口为协议层稳定契约） */
@@ -2704,6 +2825,51 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         isString(v.docUri) &&
         (v.action === 'copy' || v.action === 'resume')
       )
+    case 'refEdit.bind':
+      // P2-04：根面板身份 + 目标 fsPath + occurrence + reqId（形态学防线；
+      // 来源/固定校验在 provider 路由层，行为断言在集成用例）
+      return (
+        isString(v.panelSessionId) &&
+        isString(v.panelDocUri) &&
+        typeof v.fsPath === 'string' && v.fsPath.length > 0 &&
+        typeof v.occurrence === 'string' && v.occurrence.length > 0 &&
+        isPositiveInt(v.reqId)
+      )
+    case 'refEdit.unbind':
+    case 'refEdit.save':
+      return (
+        isString(v.panelSessionId) &&
+        isString(v.panelDocUri) &&
+        typeof v.portId === 'string' && v.portId.length > 0 &&
+        typeof v.fsPath === 'string' && v.fsPath.length > 0
+      )
+    case 'refEdit.message': {
+      // 编辑通道白名单：inner 消息须为 RefEditClientMessage 的合法形态
+      //（链接/图片等消息混入即拒绝——它们不经目标端口）
+      if (
+        !isString(v.panelSessionId) ||
+        !isString(v.panelDocUri) ||
+        !(typeof v.portId === 'string' && v.portId.length > 0) ||
+        !(typeof v.fsPath === 'string' && v.fsPath.length > 0) ||
+        !isObject(v.message)
+      ) {
+        return false
+      }
+      const inner = v.message as { kind?: unknown }
+      switch (inner.kind) {
+        case 'edit.request':
+        case 'conflict.report':
+        case 'composition.changed':
+          // 复用各消息自身的完整校验（含 SerChange 数组与数值域）
+          return isWebviewToHost(inner)
+        case 'history.request':
+        case 'sync.request':
+        case 'conflict.action':
+          return isWebviewToHost(inner)
+        default:
+          return false
+      }
+    }
     case 'view.locate.ack':
       return isNonNegativeInt(v.offset)
     case 'view.state':
@@ -3096,6 +3262,91 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return (
         isNonNegativeInt(v.version) &&
         (v.reason === 'conflict' || v.reason === 'host-error')
+      )
+    case 'refEdit.bound':
+      // P2-04：成功形态须携带完整端口身份（portId/B docUri/version/dirty）；
+      // 失败限定原因码
+      if (v.ok === true) {
+        return (
+          isPositiveInt(v.reqId) &&
+          typeof v.portId === 'string' && v.portId.length > 0 &&
+          typeof v.fsPath === 'string' && v.fsPath.length > 0 &&
+          isString(v.docUri) &&
+          isNonNegativeInt(v.version) &&
+          typeof v.dirty === 'boolean'
+        )
+      }
+      if (v.ok === false) {
+        return (
+          isPositiveInt(v.reqId) &&
+          (v.reason === 'source' || v.reason === 'open-failed' || v.reason === 'not-markdown')
+        )
+      }
+      return false
+    case 'refEdit.push': {
+      // 编辑通道白名单：inner 事件须为 RefEditHostEvent 合法形态
+      if (
+        !(typeof v.portId === 'string' && v.portId.length > 0) ||
+        !(typeof v.fsPath === 'string' && v.fsPath.length > 0) ||
+        !isObject(v.message)
+      ) {
+        return false
+      }
+      const inner = v.message as { kind?: unknown }
+      switch (inner.kind) {
+        case 'init':
+        case 'edit.ack':
+        case 'doc.changed':
+        case 'doc.resync':
+        case 'session.suspended':
+          return isHostToWebview(inner)
+        default:
+          return false
+      }
+    }
+    case 'refEdit.dirty':
+      return typeof v.fsPath === 'string' && v.fsPath.length > 0 && typeof v.dirty === 'boolean'
+    case 'refEdit.save.result':
+      return (
+        typeof v.portId === 'string' && v.portId.length > 0 &&
+        typeof v.fsPath === 'string' && v.fsPath.length > 0 &&
+        typeof v.ok === 'boolean'
+      )
+    case 'embed.test.mode':
+      // P2-04 测试钩子：inner + 目标模式 + 可选 occurrence 序号
+      return (
+        typeof v.inner === 'string' && v.inner.length > 0 &&
+        (v.mode === 'reading' || v.mode === 'live') &&
+        (v.occurrence === undefined || isNonNegativeInt(v.occurrence))
+      )
+    case 'embed.test.type':
+      return (
+        typeof v.inner === 'string' && v.inner.length > 0 &&
+        isNonNegativeInt(v.pos) &&
+        isString(v.text) &&
+        (v.occurrence === undefined || isNonNegativeInt(v.occurrence))
+      )
+    case 'embed.test.save':
+      return (
+        typeof v.inner === 'string' && v.inner.length > 0 &&
+        (v.occurrence === undefined || isNonNegativeInt(v.occurrence))
+      )
+    case 'embed.test.history':
+      return (
+        typeof v.inner === 'string' && v.inner.length > 0 &&
+        (v.op === 'undo' || v.op === 'redo') &&
+        (v.occurrence === undefined || isNonNegativeInt(v.occurrence))
+      )
+    case 'embed.test.portWrite':
+      return (
+        typeof v.portId === 'string' && v.portId.length > 0 &&
+        typeof v.fsPath === 'string' && v.fsPath.length > 0 &&
+        isPositiveInt(v.seq) &&
+        isNonNegativeInt(v.baseVersion) &&
+        isNonNegativeInt(v.offset) &&
+        isNonNegativeInt(v.length) &&
+        isString(v.text) &&
+        (v.repeat === undefined || isPositiveInt(v.repeat))
       )
     case 'view.state.request':
       return true

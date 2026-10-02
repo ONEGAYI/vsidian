@@ -38,7 +38,7 @@
 // - 本票不创建目标写入通道：嵌入内容 Reading 禁写语义由共享装配承担
 //   （mountRefContentBlock），Live 侧零额外写路径；未保存内容订阅与磁盘
 //   变化失效属 #224。
-import { RangeSet, StateField, type Extension, type Range, type Text, type Transaction } from '@codemirror/state'
+import { Facet, RangeSet, StateField, type Extension, type Range, type Text, type Transaction } from '@codemirror/state'
 import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view'
 import { selectionTouchesRange } from './liveDecorations'
 import { liveDecorationsField } from './liveDecorations'
@@ -390,11 +390,23 @@ export function liveEmbedWidgetDeco(
   return deco
 }
 
+/** P2-04（#281）挂卡宿主标记：只有装配该标记的 Live 视图（根正文）才
+ *  发射嵌入卡片装饰——嵌入内部 Live 编辑器不挂卡（其内部的 ![[…]] 保持
+ *  源文呈现；嵌套结构与命令接线归 P2-10，避免孙卡经模块级单例管理器以
+ *  根面板会话身份装载）。 */
+const embedCardsHostView = Facet.define<boolean, boolean>({ combine: (values) => values.some(Boolean) })
+
+/** 根正文装配标记（syncController 经 extraExtensions 注入主编辑器实例） */
+export const liveEmbedCardsHostMark = embedCardsHostView.of(true)
+
 /** 嵌入装饰（StateField，#223）：block widget 与跨行 replace 均须来自
  *  StateField（CM6 硬约束）；表/围栏/frontmatter/语法树任一变化或选区
  *  变化时全量重建（装饰实例缓存使 RangeSet.eq 可命中） */
 export const liveEmbedDecorations = StateField.define<DecorationSet>({
   create(state) {
+    if (!state.facet(embedCardsHostView)) {
+      return RangeSet.empty
+    }
     const deco = state.field(liveDecorationsField, false)
     if (!deco) {
       return RangeSet.empty
@@ -422,6 +434,9 @@ export const liveEmbedDecorations = StateField.define<DecorationSet>({
       tr.startState.field(liveDecorationsField, false) !== tr.state.field(liveDecorationsField, false)
     if (!tr.docChanged && tr.selection === undefined && !spansChanged && !fencesChanged && !liveDecoChanged) {
       return value
+    }
+    if (!tr.state.facet(embedCardsHostView)) {
+      return RangeSet.empty
     }
     const deco = tr.state.field(liveDecorationsField, false)
     if (!deco) {

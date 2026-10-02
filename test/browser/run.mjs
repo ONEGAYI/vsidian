@@ -35,6 +35,9 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // 百分比宽 SVG 铺满正文列、固有尺寸不拉伸、限宽联动、阅读非回归）。
 // #212 合并入列：imagePopup（图片弹窗与防误触——悬停按钮组、吞点击、
 // 弹窗缩放平移/刷新/导出消息、阅读单钮与排除项）紧随 imageRefresh。
+// P2-04 合并入列：embedLive（嵌入内部 Live——端口绑定/真实键入只写目标/
+// Ctrl+S 焦点路由/撤销走 B 历史/模式继承与覆盖记忆/编辑器无泄漏，B 侧用
+// 真实 DocumentSession 驱动）紧随 refCombination。
 // #223 合并入列：liveEmbed（父文档 Live 嵌入——光标驱动源码显隐、IME
 // 修改引用、未闭合撤卡恢复、内部选区隔离与绘制断言）紧随 readingEmbed。
 // #224 合并入列：hoverRefresh（引用视图同步——目标失效推送驱动嵌入/浮层
@@ -60,7 +63,7 @@ const names = ['tableCaret', 'blockquoteTablePaint', 'quoteBarPaint', 'taskClick
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage', 'settingsPageRestore',
   'skeletonProbe', 'tooltipCard',
 
-  'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract', 'commentToggle', 'viewToggle', 'contextMenu', 'anchorFlash', 'readingWidthProbe', 'readingBottomReach', 'codeCardChrome', 'liveImageLayout', 'imageRefresh', 'imagePopup', 'hoverPreview', 'hoverRecursive', 'readingEmbed', 'recursiveEmbed', 'liveEmbed', 'hoverEntry', 'hoverRefresh', 'targetTip', 'multicursor', 'multicursorWrite', 'findPanel', 'occurrence', 'hitReveal', 'findBarAnchor', 'mixedEmbed', 'liveEmbedMixed', 'tableEmbed', 'refCombination']
+  'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract', 'commentToggle', 'viewToggle', 'contextMenu', 'anchorFlash', 'readingWidthProbe', 'readingBottomReach', 'codeCardChrome', 'liveImageLayout', 'imageRefresh', 'imagePopup', 'hoverPreview', 'hoverRecursive', 'readingEmbed', 'recursiveEmbed', 'liveEmbed', 'hoverEntry', 'hoverRefresh', 'targetTip', 'multicursor', 'multicursorWrite', 'findPanel', 'occurrence', 'hitReveal', 'findBarAnchor', 'mixedEmbed', 'liveEmbedMixed', 'tableEmbed', 'refCombination', 'embedLive']
 const { workers, reuseBuilds, selected } = parseBrowserRunOptions(process.argv.slice(2), names)
 const parent = path.join(root, 'out/test/browser-runs')
 await mkdir(parent, { recursive: true })
