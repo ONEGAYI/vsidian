@@ -302,7 +302,7 @@ import { applyObsidianDomAlias, OBSIDIAN_ALIAS_PROBES } from '../shared/obsidian
 import { createFontArrivalWatch } from './fontArrival'
 import { CHROME_CONTRACT_PROBES } from '../shared/chromeContract'
 import { VirtualReadingView } from './readingVirtualView'
-import { blankRowInputPlan, runCreateTable, runTableEdit, tableEditing, tableRowsAt } from './tableEditing'
+import { blankRowInputPlan, clampExternalCursor, runCreateTable, runTableEdit, tableEditing, tableRowsAt } from './tableEditing'
 import { prefixLenOf } from './tableStructure'
 import { symbolAutocomplete } from './symbolAutocomplete'
 import { symbolSelectionWrap } from './symbolWrap'
@@ -8392,6 +8392,17 @@ export class WebviewSyncController {
       selection,
       annotations: externalSync.of(true),
     })
+    // #296 六轮：undo/外部整行替换会把格内容里的光标归到区间左端（前缀或
+    // 隐藏管道端点），触发前缀显形、网格破裂。用变更后 state 的网格信息把
+    // 主光标钳回最近格内容；selection-only 补事务与上一笔同步连发，浏览器
+    // 只渲染最终态，无中间闪烁。
+    const main = view.state.selection.main
+    if (main.empty) {
+      const clamped = clampExternalCursor(view.state, main.head)
+      if (clamped !== null && clamped !== main.head) {
+        view.dispatch({ selection: { anchor: clamped } })
+      }
+    }
   }
 
   /**

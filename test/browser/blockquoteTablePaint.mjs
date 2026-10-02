@@ -184,6 +184,55 @@ const failures = []
     console.error(`[引用表格绘制][FAIL] 拖选前缀保持隐藏与右键保选区（三轮）: ${error.message}`)
   } finally { await page.close() }
 }
+// ---- #296 六轮真机反馈：拖拽把手交换列后前缀不显形、光标留在格内容 ----
+{
+  const page = await browser.newPage()
+  const errors = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  try {
+    await page.setContent('<div id="app"></div>')
+    await page.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
+    await page.addScriptTag({ path: bundle })
+    const source = '前文\n\n> | 甲 | 乙 |\n> | --- | --- |\n> | 丙 | 丁 |\n\n后文'
+    await page.evaluate((text) => window.initTable(text), source)
+    await page.evaluate(() => new Promise(resolve =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    // 光标先落入首格内容（用户点击格内，再抓把手拖列）
+    const cellA = await page.locator('.vsidian-table-grid-row').nth(0)
+      .locator('.vsidian-table-grid-cell').nth(0).boundingBox()
+    await page.mouse.click(cellA.x + 14, cellA.y + cellA.height / 2)
+    // 列 0 把手拖到列 1 右半（slot=2，交换列 0/1）——修复前 dispatch 不带
+    // selection，CM6 默认映射把格内光标归到替换区间左端（前缀区端点），
+    // 前缀显形、网格破裂（真机报障形态）
+    const handle = await page.locator('.vsidian-table-column-handle').nth(0).boundingBox()
+    const cellB = await page.locator('.vsidian-table-grid-row').nth(0)
+      .locator('.vsidian-table-grid-cell').nth(1).boundingBox()
+    await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(cellB.x + cellB.width * 0.75, cellB.y + cellB.height / 2, { steps: 8 })
+    await page.mouse.up()
+    await page.evaluate(() => new Promise(resolve =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    const after = await page.evaluate(() => ({
+      ...window.readEditor(),
+      visibleQuote: [...document.querySelectorAll('.cm-content .vsidian-table-grid-row')]
+        .some((row) => row.textContent.includes('>')),
+    }))
+    assert(after.text.includes('> | 乙 | 甲 |'),
+      `拖拽须完成列交换（表头乙甲）: ${JSON.stringify(after.text)}`)
+    assert.equal(after.visibleQuote, false,
+      `拖拽交换列后引用前缀 > 不得显形（光标落前缀区即破裂）: ${JSON.stringify(after)}`)
+    const lineFrom = after.text.indexOf('> | 乙 | 甲 |')
+    assert(after.head > lineFrom + 2 && after.head <= lineFrom + 15,
+      `光标须留在交换后行内容区（不落 "> " 前缀闭区间）: ${JSON.stringify(after)}`)
+    assert.deepEqual(errors, [], `六轮场景页面异常: ${JSON.stringify(errors)}`)
+    passed++
+    console.log('[引用表格绘制][PASS] 拖拽交换列后前缀保持隐藏（六轮）')
+  } catch (error) {
+    failures.push(error)
+    console.error(`[引用表格绘制][FAIL] 拖拽交换列后前缀保持隐藏（六轮）: ${error.message}`)
+  } finally { await page.close() }
+}
 try {
   for (const [name, source, expect] of scenarios) {
     const page = await browser.newPage()

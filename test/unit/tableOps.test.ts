@@ -27,6 +27,7 @@ import {
   tableTabBackward,
   runTableEdit,
   runTableRowMove,
+  runTableColumnMove,
   tableRowsAt,
 } from '../../src/webview/tableEditing'
 import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/syncController'
@@ -53,6 +54,25 @@ const TABLE_DOC = [
   '结尾段落。',
   '',
 ].join('\n')
+
+const QUOTE_TABLE_DOC = [
+  '前导段落。',
+  '',
+  '> | a | b | c |',
+  '> | --- | --- | --- |',
+  '> | 1 | 2 | 3 |',
+  '> | 4 | 5 | 6 |',
+  '',
+  '结尾段落。',
+  '',
+].join('\n')
+
+/** 光标端点落在 "> " 前缀闭区间 [line.from, line.from+2] 即触发前缀显形
+ *  （与 liveDecorations 的端点触及语义同口径）。 */
+function headInQuotePrefix(view: EditorView, pos: number): boolean {
+  const line = view.state.doc.lineAt(pos)
+  return line.text.startsWith('> ') && pos >= line.from && pos <= line.from + 2
+}
 
 interface DecoItem {
   from: number
@@ -486,6 +506,41 @@ describe('表格点阵与悬停控件', () => {
     view.contentDOM.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }))
     expect(runTableRowMove(view, TABLE_DOC.indexOf('`x|y`'), 0)).toBe(false)
     view.contentDOM.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }))
+  })
+
+  it('引用表拖拽交换列后光标跟随原格内容，不落入引用前缀区（#296 六轮）', () => {
+    const view = makeEditView(QUOTE_TABLE_DOC, QUOTE_TABLE_DOC.indexOf('1') + 1)
+    // slot=2：列 0 拖到列 1 右半（交换列 0、1）；slot=1 是插回原位（无操作）
+    expect(runTableColumnMove(view, QUOTE_TABLE_DOC.indexOf('> | a'), 0, 2)).toBe(true)
+    const head = view.state.selection.main.head
+    // 新行 "> | 2 | 1 | 3 |"：原 "1" 内容已随列交换到第二格
+    const movedOne = view.state.doc.toString().indexOf('1')
+    expect(head).toBe(movedOne + 1)
+    expect(headInQuotePrefix(view, head)).toBe(false)
+    view.destroy()
+  })
+
+  it('引用表拖拽移动行后光标跟随原行内容，不落入引用前缀区（#296 六轮）', () => {
+    const view = makeEditView(QUOTE_TABLE_DOC, QUOTE_TABLE_DOC.indexOf('1') + 1)
+    expect(runTableRowMove(view, QUOTE_TABLE_DOC.indexOf('1'), 0)).toBe(true)
+    const head = view.state.selection.main.head
+    // 该行成为表头后，光标仍在 "1" 之后
+    const movedOne = view.state.doc.toString().indexOf('1')
+    expect(head).toBe(movedOne + 1)
+    expect(headInQuotePrefix(view, head)).toBe(false)
+    view.destroy()
+  })
+
+  it('引用表拖拽交换列后撤销，光标不落入引用前缀区（#296 六轮）', async () => {
+    const linked = await setupLinked(QUOTE_TABLE_DOC)
+    const view = linked.controller.getView()!
+    view.dispatch({ selection: { anchor: QUOTE_TABLE_DOC.indexOf('1') + 1 } })
+    expect(runTableColumnMove(view, QUOTE_TABLE_DOC.indexOf('> | a'), 0, 2)).toBe(true)
+    await settle()
+    await linked.doc.undo()
+    await settle()
+    expect(linked.doc.getText()).toBe(QUOTE_TABLE_DOC)
+    expect(headInQuotePrefix(view, view.state.selection.main.head)).toBe(false)
   })
 
   it('千行表仅为视口中已挂载的网格行建立抓手，滚动回收时同步更新', async () => {

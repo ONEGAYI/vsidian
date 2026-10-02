@@ -46,13 +46,18 @@ export interface PlannedTableEdit {
  * 把一个内容行插入到目标槽位之前。索引只数表头与数据行，不数分隔行；
  * slot 可为内容行数，表示插到末尾。只替换内容行字符，不触碰分隔行或换行符。
  * 返回的全部 changes 供 CM6 以一笔事务派发。
+ * cursor（可选）给定时返回 selection：光标随所在内容行的文本一起搬到新物理
+ * 行（行文本等长搬移，保留行内偏移）；光标不在内容行上（表外/分隔行）时不给
+ * selection——CM6 默认映射即正确（#296 六轮：默认映射把替换区间内部的光标
+ * 归到区间左端，引用表上恰落前缀区端点触发显形、网格破裂）。
  */
 export function planTableRowMove(
   doc: string,
   rows: TableRowInfo[],
   source: number,
   slot: number,
-): Pick<PlannedTableEdit, 'changes'> | null {
+  cursor?: number,
+): Pick<PlannedTableEdit, 'changes'> & { selection?: number } | null {
   if (rows.length < 3 || rows[0]?.kind !== 'header' || rows[1]?.kind !== 'delimiter' ||
       rows.slice(2).some((r) => r.kind !== 'row')) {
     return null
@@ -80,34 +85,102 @@ export function planTableRowMove(
       })
     }
   }
-  return changes.length > 0 ? { changes } : null
+  if (changes.length === 0) {
+    return null
+  }
+  let selection: number | undefined
+  if (cursor !== undefined) {
+    const c = content.findIndex((r) => cursor >= r.lineFrom && cursor <= r.lineTo)
+    if (c >= 0) {
+      const insertAt = slot > source ? slot - 1 : slot
+      let c2: number
+      if (c === source) {
+        c2 = insertAt
+      } else {
+        c2 = c > source ? c - 1 : c
+        if (c2 >= insertAt) {
+          c2++
+        }
+      }
+      // 行文本等长搬移：目标物理行行首 + 原行内偏移
+      const target = c2 === 0 ? rows[0]! : rows[c2 + 1]!
+      selection = target.lineFrom + (cursor - content[c]!.lineFrom)
+    }
+  }
+  return { changes, selection }
 }
 
-/** 将整列插入到目标槽位，分隔行对齐段与各内容行一同移动。 */
+/** 将整列插入到目标槽位，分隔行对齐段与各内容行一同移动。
+ *  cursor（可选）给定时返回 selection：光标随所在格内容一起搬到新列位置
+ *  （保留内容内偏移，clamp 到新内容长度）；光标不在内容行上（表外/分隔行）
+ *  时不给 selection，理由同 planTableRowMove。 */
 export function planTableColumnMove(
   doc: string,
   rows: TableRowInfo[],
   source: number,
   slot: number,
-): Pick<PlannedTableEdit, 'changes'> | null {
+  cursor?: number,
+): Pick<PlannedTableEdit, 'changes'> & { selection?: number } | null {
   if (rows[0]?.kind !== 'header' || rows[1]?.kind !== 'delimiter') return null
   const columns = parseTableDelimiter(doc.slice(rows[1]!.lineFrom, rows[1]!.lineTo), prefixLenOf(rows[1!]))?.length
   if (!columns || !Number.isInteger(source) || !Number.isInteger(slot) || source < 0 ||
       source >= columns || slot < 0 || slot > columns || slot === source || slot === source + 1) return null
   const changes: PlannedTableEdit['changes'] = []
-  for (const row of rows) {
+  const newLineTexts: string[] = []
+  let cursorInfo: { rowIdx: number; col: number; offset: number } | null = null
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]!
     const p = prefixLenOf(row)
-    const cells = tableRowCellsForColumns(doc.slice(row.lineFrom, row.lineTo), row.lineFrom, columns, p)
+    const lineText = doc.slice(row.lineFrom, row.lineTo)
+    const cells = tableRowCellsForColumns(lineText, row.lineFrom, columns, p)
     if (!cells || cells.length !== columns) return null
+    if (cursor !== undefined && !cursorInfo && row.kind !== 'delimiter' &&
+        cursor >= row.lineFrom && cursor <= row.lineTo) {
+      const col = columnOf(cells, cursor)
+      const cell = cells[col]!
+      cursorInfo = {
+        rowIdx: i,
+        col,
+        offset: Math.min(Math.max(cursor - cell.contentFrom, 0), cell.contentTo - cell.contentFrom),
+      }
+    }
     const values = cells.map((cell) => doc.slice(cell.from, cell.to))
     const [moved] = values.splice(source, 1)
     values.splice(slot > source ? slot - 1 : slot, 0, moved!)
     const insert = '|' + values.join('|') + '|'
+    newLineTexts.push(lineText.slice(0, p) + insert)
     if (insert !== doc.slice(row.lineFrom + p, row.lineTo)) {
       changes.push({ from: row.lineFrom + p, to: row.lineTo, insert })
     }
   }
-  return changes.length ? { changes } : null
+  if (!changes.length) return null
+  let selection: number | undefined
+  if (cursorInfo) {
+    const { rowIdx, col, offset } = cursorInfo
+    const insertAt = slot > source ? slot - 1 : slot
+    let col2: number
+    if (col === source) {
+      col2 = insertAt
+    } else {
+      col2 = col > source ? col - 1 : col
+      if (col2 >= insertAt) {
+        col2++
+      }
+    }
+    const p = prefixLenOf(rows[rowIdx]!)
+    const newCells = tableRowCellsForColumns(newLineTexts[rowIdx]!, 0, columns, p)
+    const cell = newCells?.[col2]
+    if (cell) {
+      // 表内行连续（含分隔行）；基准锚在首行行首，加上前方各行的长度差
+      let lineFrom = rows[0]!.lineFrom
+      for (let k = 0; k < rowIdx; k++) {
+        lineFrom += newLineTexts[k]!.length + 1
+      }
+      selection = lineFrom + cell.contentFrom +
+        Math.min(offset, cell.contentTo - cell.contentFrom)
+    }
+  }
+  return { changes, selection }
 }
 
 /** 行容器前缀长度（缺省 0） */

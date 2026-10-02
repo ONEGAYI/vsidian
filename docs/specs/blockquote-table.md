@@ -74,6 +74,14 @@
 - **设置侧栏「实验性功能」分组 + 「块内表格渲染」开关（用户指令）**：侧栏新增第三内置分组「实验性功能」（`experimental.*` 前缀定义，锥形瓶图标；#163「侧栏两组」契约随之修订），页内首个标题组「表格行为」（`experimental.table.*`），首项 `experimental.table.blockRender`（boolean 默认开）。关闭时：live 经 `tableContainerRenderFacet`（Compartment 热重配，`liveDecorationsField` 检测 facet 变化全量重建、gridPlans 缓存丢弃）对容器前缀行不网格化（回 #296 之前形态——引用行类照旧、管道源文可见）；reading 经 `splitReadingBlocks(text, { containerTableSource })` 把 blockquote/list 容器内表格无条件替换为源文 `<pre>`（与残缺回退同一通道，setting 缺省 true 行为与落地前一致）。设置页搜索分组、宿主快照默认值（`settingsService` 注册表驱动）、语言包双语同步接入。
 - 验证：jsdom 先红后绿（前缀端点 2 + zone 2 + 保选区 1 + 蒙版豁免 1 + 设置渲染 2 + 默认快照 1 + 降级 3 + facet 2）；浏览器 `blockquoteTablePaint` 增补「拖选前缀保持隐藏与右键保选区」场景、`settingsPage` 增补实验性分组绘制层断言（开关可见/默认开/标题可见）；全量单测 5017、compile、样式契约 8 项、全量浏览器 136.55s 全绿。
 
+## 四轮真机反馈修复（拖拽移动后前缀显形 / undo 同款，2026-10-02 第六轮）
+
+三轮交付（rebase 至 main 04f9524 后）用户真机复验报障：**拖拽把手交换列/移动行后引用块符号显形、网格破裂；移动后按撤销同样显形；点击表格外即恢复正常**。定位两层同根因——移动与撤销的 selection 都交给 CM6 默认映射，而映射对「光标落在替换区间内部」的既定行为是归到区间左端（`SelectionRange.map` 的 assoc=-1 语义）：
+
+- **移动落点（缺陷）**：`runTableRowMove`/`runTableColumnMove` 的 dispatch 不带 selection。行移动的 change 含前缀整行替换，格内光标映到行首（前缀区左端）；列移动的 change 从前缀右端起替换，光标映到 `lineFrom + prefixLen`（前缀区闭区间右端）——两端都命中三轮引入的「端点触及显形」谓词，前缀显形、网格破裂。修复：两个 planner（`planTableRowMove`/`planTableColumnMove`）增可选 `cursor` 参数并返回 `selection`——**光标随原内容搬移**（行移动：目标物理行行首 + 原行内偏移，行文本等长搬移；列移动：原格内容跟随列变换到新列，保留内容内偏移并 clamp），光标不在内容行上（表外/分隔行）不给 selection、维持默认映射（表外位置不受行内替换影响）。调用方 dispatch 时带上；顶层表格同样受益（此前光标映到行首隐藏管道，视觉无感但位置语义差）。
+- **撤销落点（同根缺陷）**：undo 反推的整行替换经 `dispatchExternalChanges` 的 `selection.map(ChangeSet)` 映射，格内容里的好光标同样被归到区间左端（前缀端点）。修复：外部变更应用后用**变更后 state** 的网格信息把主光标钳回最近格内容（`clampExternalCursor`——落前缀/管道/格缘空白时钳到最近格 `contentFrom`/`contentTo`，已在格内容或非网格行返回不动），selection-only 补事务与变更事务同步连发、浏览器只渲染最终态。口径边界：只处理折叠主光标；**用户主动定位**（本地选区事务）不经过该通道，「点击前缀编辑引用层级」的显形语义不受影响。
+- 回归钉法：jsdom 三例（列交换光标跟随原格内容且不在前缀闭区间、行移动同款、undo 后不在前缀闭区间——全链路走 `setupLinked` 宿主撤销通道）；浏览器 `blockquoteTablePaint` 增补「拖拽交换列后前缀保持隐藏」场景（真抓手 pointer 拖拽：列 0 把手拖到列 1 右半，断言交换生效 + 表格行可见文本不含 `>` + 光标留在行内容区）。已知边界：光标在分隔行上发起移动时维持默认映射（分隔行无格内容可钳，用户不会在分隔行编辑后再拖把手，真机有反馈再议）。
+
 ## 验证与完成条件
 
 - TDD：三层契约测试先行暴露缺口（装饰类名断言、创建产出文本断言、结构操作纯函数断言），再实现转绿。

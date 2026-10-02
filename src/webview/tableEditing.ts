@@ -227,8 +227,19 @@ const markTableCompositionInput = EditorState.transactionExtender.of((tr) =>
     : null)
 
 /** 仅渲染为网格的行才限制编辑范围；源码降级行保留原生编辑能力。 */
-function editableGridCellAt(state: EditorState, pos: number) {
-  const field = state.field(liveDecorationsField, false)
+/** 外部变更（undo/重做/宿主操作）把光标映射进网格行隐藏结构（容器前缀、
+ *  管道、格缘空白）时，钳到最近格内容；已在格内容内或非网格行返回 null。
+ *  #296 六轮：undo 反推的整行替换会把格内容里的光标归到区间左端——引用表
+ *  上恰落前缀区端点，触发前缀显形、网格破裂。用户主动定位（本地选区事务）
+ *  不经过本函数，「点击前缀编辑引用层级」的显形语义不受影响。 */
+export function clampExternalCursor(state: EditorState, pos: number): number | null {
+  const cell = editableGridCellAt(state, pos)
+  if (!cell) return null
+  if (pos >= cell.contentFrom && pos <= cell.contentTo) return null
+  return pos < cell.contentFrom ? cell.contentFrom : cell.contentTo
+}
+
+function editableGridCellAt(state: EditorState, pos: number) {  const field = state.field(liveDecorationsField, false)
   if (!field) return null
   const line = state.doc.lineAt(pos)
   let inGrid = false
@@ -1125,11 +1136,17 @@ export function runTableRowMove(view: EditorView, sourcePos: number, slot: numbe
   }
   const sourceLine = state.doc.lineAt(sourcePos).from
   const source = [rows[0]!, ...rows.slice(2)].findIndex((r) => r.lineFrom === sourceLine)
-  const plan = planTableRowMove(state.doc.toString(), rows, source, slot)
+  const plan = planTableRowMove(state.doc.toString(), rows, source, slot,
+    state.selection.main.head)
   if (!plan) {
     return false
   }
-  view.dispatch({ changes: plan.changes })
+  // #296 六轮：光标随行搬移——不带 selection 的默认映射会把替换区间内部的
+  // 光标归到区间左端，引用表上恰落前缀区端点（显形、网格破裂）
+  view.dispatch({
+    changes: plan.changes,
+    ...(plan.selection !== undefined ? { selection: { anchor: plan.selection } } : {}),
+  })
   return true
 }
 
@@ -1139,9 +1156,13 @@ export function runTableColumnMove(view: EditorView, tableFrom: number, source: 
   if (!field) return false
   const rows = tableRowsAt(view.state, tableFrom, field.tree)
   if (rows?.[0]?.lineFrom !== tableFrom) return false
-  const plan = planTableColumnMove(view.state.doc.toString(), rows, source, slot)
+  const plan = planTableColumnMove(view.state.doc.toString(), rows, source, slot,
+    view.state.selection.main.head)
   if (!plan) return false
-  view.dispatch({ changes: plan.changes })
+  view.dispatch({
+    changes: plan.changes,
+    ...(plan.selection !== undefined ? { selection: { anchor: plan.selection } } : {}),
+  })
   return true
 }
 
