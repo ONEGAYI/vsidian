@@ -4113,31 +4113,46 @@ export class WebviewSyncController {
         .decos.between(0, view.state.doc.length, (_from, _to, value) => {
           const spec = value.spec as { class?: string; widget?: { checked?: boolean } }
           if (typeof spec['class'] === 'string') {
+            // 各类彼此独立计数（#296：行类按行聚合为单条合并 class 装饰，
+            // 引用块内表格行同时是引用行与表格行——else-if 链会把表格行
+            // 吞进 quoteLines，探针测不到表格行）；各类名无子串包含关系，
+            // 独立计数不重复
             const cls = spec['class']
             if (cls.includes('vsidian-heading-line') && !cls.includes('vsidian-heading-inview')) {
               counts.headingLines += 1
-            } else if (cls.includes('vsidian-header-')) {
+            }
+            if (cls.includes('vsidian-header-')) {
               counts.headerSpans += 1
-            } else if (cls.includes('vsidian-strong')) {
+            }
+            if (cls.includes('vsidian-strong')) {
               counts.strongSpans += 1
-            } else if (cls.includes('vsidian-emphasis')) {
+            }
+            if (cls.includes('vsidian-emphasis')) {
               counts.emphasisSpans += 1
-            } else if (cls.includes('vsidian-inline-code')) {
+            }
+            if (cls.includes('vsidian-inline-code')) {
               counts.inlineCodeSpans += 1
-            } else if (cls.includes('vsidian-quote-line')) {
+            }
+            if (cls.includes('vsidian-quote-line')) {
               counts.quoteLines += 1
-            } else if (cls.includes('vsidian-code-line')) {
+            }
+            if (cls.includes('vsidian-code-line')) {
               counts.codeLines += 1
-            } else if (cls.includes('vsidian-list-line')) {
+            }
+            if (cls.includes('vsidian-list-line')) {
               counts.listLines += 1
-            } else if (cls.includes('vsidian-hr-line')) {
+            }
+            if (cls.includes('vsidian-hr-line')) {
               counts.hrLines += 1
-            } else if (cls.includes('vsidian-frontmatter-line')) {
+            }
+            if (cls.includes('vsidian-frontmatter-line')) {
               counts.frontmatterLines += 1
-            } else if (cls.includes('vsidian-table-cell')) {
+            }
+            if (cls.includes('vsidian-table-cell')) {
               // #12：单元格内容 mark（cellHeader/align 修饰并入计数，不重复）
               counts.tableCells += 1
-            } else if (cls.includes('vsidian-table-line')) {
+            }
+            if (cls.includes('vsidian-table-line')) {
               // 行级类包含全部表格行；cellHeader/align 修饰行已在前序命中
               counts.tableLines += 1
             }

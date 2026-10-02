@@ -20,12 +20,31 @@
 // #13 扩展点：TableCellRange 已携带列结构与对齐上下文（alignAt 调用方从
 // 分隔行解析），键盘导航/增删行列在此抽象上扩展，不需要重解析行文本。
 
+import { parseLinePrefix } from '../shared/listPrefix'
+
 /** 单元格区间：from/to 覆盖两管道符之间（含内侧空白），content* 为 trim 后内容 */
 export interface TableCellRange {
   from: number
   to: number
   contentFrom: number
   contentTo: number
+}
+
+/** 行首容器前缀长度（#296）：格区/控件层没有解析树行身份时的轻量回退。
+ *  形态学复用 src/shared/listPrefix（引用层 + 缩进 + 列表标记，含任务
+ *  标记）；无前缀（普通行/顶层表格行）为 0。装饰与结构层不经过本函数
+ *  ——它们以解析树行身份节点的 prefixLen 为准（单一口径见规格）。 */
+export function containerPrefixLen(lineText: string): number {
+  const prefix = parseLinePrefix(lineText)
+  return prefix ? prefix.quote.length + prefix.indent.length + prefix.mark.length : 0
+}
+
+/** 把行首容器前缀替换为等宽空格（#296）：结构性字符（`>`/列表标记）不
+ *  参与格拆分，留下的空白交给 splitTableRowCells 的边界容忍消化（无边界
+ *  纯空白行 ' | | ' 的前导空白参与格计数，不能剥走）。行内坐标全程无
+ *  偏移——调用方继续以行首/原 lineStart 为基准。 */
+export function blankContainerPrefix(lineText: string, prefixLen: number): string {
+  return prefixLen > 0 ? ' '.repeat(prefixLen) + lineText.slice(prefixLen) : lineText
 }
 
 /** 表格格内换行的持久化形式，仅允许无属性的 br。

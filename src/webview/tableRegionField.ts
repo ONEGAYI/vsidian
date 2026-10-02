@@ -1,6 +1,6 @@
 import { StateEffect, StateField, type EditorState } from '@codemirror/state'
 import type { TableRegion } from './tableRegion'
-import { splitTableRowCells } from '../shared/tableCells'
+import { blankContainerPrefix, containerPrefixLen, splitTableRowCells } from '../shared/tableCells'
 
 export const setTableRegion = StateEffect.define<TableRegion | null>()
 
@@ -9,7 +9,9 @@ function caretInRegion(state: EditorState, region: TableRegion, pos: number): bo
   const line = state.doc.lineAt(pos)
   const row = line.number - header.number - (line.number > header.number ? 1 : 0)
   if (row < region.rowFrom || row > region.rowTo) return false
-  const cells = splitTableRowCells(line.text, line.from)
+  // 行首容器前缀替换空格（#296）：无树上下文的回退口径，坐标零偏移
+  const cells = splitTableRowCells(
+    blankContainerPrefix(line.text, containerPrefixLen(line.text)), line.from)
   return cells.some((cell, column) => column >= region.columnFrom && column <= region.columnTo &&
     pos >= cell.from && pos <= cell.to)
 }

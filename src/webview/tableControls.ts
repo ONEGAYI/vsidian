@@ -4,8 +4,9 @@ import type { EditorState } from '@codemirror/state'
 import type { Tree } from '@lezer/common'
 import type { TableEditOp } from '../shared/protocol'
 import { liveDecorationsField } from './liveDecorations'
-import { splitTableRowCells } from '../shared/tableCells'
+import { blankContainerPrefix, splitTableRowCells } from '../shared/tableCells'
 import type { TableRowInfo } from './tableStructure'
+import { prefixLenOf } from './tableStructure'
 import { selectTableRegion, setTableRegion, tableRegionField } from './tableRegionSelection'
 import { t } from '../shared/i18n'
 
@@ -218,8 +219,10 @@ class TableControlsView {
         const handle = this.makeButton('vsidian-table-row-handle', t('table.selectRow', { n: index + 1 }),
         handleLeft, top + rect.height / 2, () => {
           if (this.suppressNextClick) { this.suppressNextClick = false; return }
-          const columns = splitTableRowCells(this.view.state.doc.lineAt(rows[0]!.lineFrom).text,
-            rows[0]!.lineFrom).length
+          // 表头行解析：前缀替换空格（#296），坐标零偏移
+          const columns = splitTableRowCells(
+            blankContainerPrefix(this.view.state.doc.lineAt(rows[0]!.lineFrom).text,
+              prefixLenOf(rows[0]!)), rows[0]!.lineFrom).length
           this.view.focus()
           selectTableRegion(this.view, { tableFrom: rows[0]!.lineFrom, rowFrom: index,
             rowTo: index, columnFrom: 0, columnTo: columns - 1 })
@@ -274,7 +277,8 @@ class TableControlsView {
           rect.right - editorRect.left + 6, (rect.top + lastVisible.bottom) / 2 - editorRect.top, () => {
             // 可见锚点只负责几何定位；结构命令始终取真实表头末列。
             const line = this.view.state.doc.lineAt(anchor.rows[0]!.lineFrom)
-            const last = splitTableRowCells(line.text, line.from).at(-1)
+            const last = splitTableRowCells(
+              blankContainerPrefix(line.text, prefixLenOf(anchor.rows[0]!)), line.from).at(-1)
             if (last) this.actions.runTableEditAt(this.view, last.contentFrom, 'insertColumnRight')
           })
         insertCol.textContent = '+'

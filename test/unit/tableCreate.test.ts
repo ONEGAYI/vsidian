@@ -41,6 +41,46 @@ describe('planCreateTable：光标处建立两列两内容行的空表格', () =
   })
 })
 
+describe('容器前缀感知（#296）：引用块与列表内插入保持容器层级', () => {
+  it('引用空行上插入：整行替换为引用内表格，前后不补空行', () => {
+    expect(apply('> ', 2).text).toBe('> |  |  |\n> | --- | --- |\n> |  |  |')
+  })
+
+  it('引用正文行行尾插入：正文段落化，表格与分隔空行保持引用层级', () => {
+    expect(apply('> 引用文', 5).text)
+      .toBe('> 引用文\n>\n> |  |  |\n> | --- | --- |\n> |  |  |')
+  })
+
+  it('多层引用逐层还原', () => {
+    expect(apply('> > ', 4).text).toBe('> > |  |  |\n> > | --- | --- |\n> > |  |  |')
+  })
+
+  it('列表空项上插入：首行带标记，后续行按内容列缩进', () => {
+    expect(apply('- ', 2).text).toBe('- |  |  |\n  | --- | --- |\n  |  |  |')
+  })
+
+  it('引用内列表组合前缀', () => {
+    expect(apply('> - ', 4).text).toBe('> - |  |  |\n>   | --- | --- |\n>   |  |  |')
+  })
+
+  it('列表正文行行尾插入：表格成为该项内容，用内容列缩进不带标记', () => {
+    expect(apply('- 项目', 4).text)
+      .toBe('- 项目\n  \n  |  |  |\n  | --- | --- |\n  |  |  |')
+  })
+
+  it('引用内表格为合法 GFM：blockquote 内渲染出 table', () => {
+    const html = new MarkdownIt().render(apply('> ', 2).text)
+    expect(html).toContain('<table>')
+    const nested = new MarkdownIt().render(apply('> > ', 4).text)
+    expect(nested).toContain('<table>')
+  })
+
+  it('普通行与裸空行行为不变（不猜测容器层级）', () => {
+    expect(apply('', 0).text).toBe(TABLE)
+    expect(apply('正文', 2).text).toBe(`正文\n\n${TABLE}`)
+  })
+})
+
 it('命令面板按界面语言显示 Create a table / 创建表格', () => {
   const manifest = JSON.parse(readFileSync('package.json', 'utf8')) as {
     contributes: { commands: Array<{ command: string; title: string; category: string }> }

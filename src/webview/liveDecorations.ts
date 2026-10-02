@@ -66,6 +66,7 @@ import { parseFrontmatterTable, type FmTableModel } from '../shared/frontmatterT
 import { buildFrontmatterCardPlan, fmFoldField } from './frontmatterDecorations'
 import {
   barePipeAt,
+  blankContainerPrefix,
   escapedPipeBackslashes,
   parseTableDelimiter,
   splitTableRowCells,
@@ -380,9 +381,15 @@ function emptyTableCellDecoFor(align: TableAlign | null, active: boolean,
 }
 
 type GridRowKind = 'header' | 'row'
+/** 网格行条目：行身份 + 该行容器前缀长度（#296——引用/列表内表格各行前缀
+ *  独立计算，lazy 延续行为 0；格解析与发射一律以前缀后的内容段为对象） */
+interface GridRowEntry {
+  kind: GridRowKind
+  prefixLen: number
+}
 interface TableGridPlan {
   columns: number
-  rows: Map<number, GridRowKind>
+  rows: Map<number, GridRowEntry>
   delimiterLine: number
   /** #142 列宽计划（grid-template-columns 值）：按表内容比例分配，同表各行共享 */
   template: string
@@ -402,19 +409,26 @@ export function getTableGridStats(): Readonly<typeof tableGridStats> {
  */
 function tableGridPlan(doc: Text, table: SyntaxNode): TableGridPlan | null {
   tableGridStats.planCalls += 1
-  const rows = new Map<number, GridRowKind>()
+  const rows = new Map<number, GridRowEntry>()
   const rowSamples = new Map<number, number[]>()
   let delimiterLine = 0
   let columns = 0
   let headers = 0
   for (let c = table.firstChild; c; c = c.nextSibling) {
     tableGridStats.rowsScanned += 1
+    // 引用块的 `>` 行前缀在 Lezer 树中挂为 Table 直接子节点（#296），
+    // 跳过后继续；其余未知直接子节点仍整体降级（不放宽既有安全边界）
+    if (c.name === 'QuoteMark') {
+      continue
+    }
     if (c.name !== 'TableHeader' && c.name !== 'TableDelimiter' && c.name !== 'TableRow') {
       return null
     }
     const line = doc.lineAt(c.from)
+    // 行身份节点 from 即内容首：行首至此为容器前缀
+    const prefixLen = c.from - line.from
     if (c.name === 'TableDelimiter') {
-      const aligns = parseTableDelimiter(line.text)
+      const aligns = parseTableDelimiter(blankContainerPrefix(line.text, prefixLen))
       if (!aligns || delimiterLine !== 0) {
         return null
       }
@@ -423,16 +437,17 @@ function tableGridPlan(doc: Text, table: SyntaxNode): TableGridPlan | null {
     } else {
       const kind: GridRowKind = c.name === 'TableHeader' ? 'header' : 'row'
       if (kind === 'header') headers += 1
-      rows.set(line.number, kind)
+      rows.set(line.number, { kind, prefixLen })
     }
   }
   if (headers !== 1 || delimiterLine === 0 || columns === 0 || rows.size === 0) {
     return null
   }
   const samples = new Array<number>(columns).fill(0)
-  for (const lineNo of rows.keys()) {
+  for (const [lineNo, entry] of rows) {
     tableGridStats.rowsScanned += 1
-    const text = doc.line(lineNo).text
+    // 前缀替换为空格参与拆分（#296）：坐标零偏移，空白走容忍机制
+    const text = blankContainerPrefix(doc.line(lineNo).text, entry.prefixLen)
     if (!tableRowCellsForColumns(text, 0, columns)) {
       return null
     }
@@ -517,7 +532,8 @@ function tableAlignsOf(doc: Text, table: SyntaxNode | null): Array<TableAlign | 
     }
     const line = doc.lineAt(c.from)
     if (c.to > line.from && c.to <= line.to) {
-      const aligns = parseTableDelimiter(line.text)
+      // 分隔行解析：前缀替换空格（#296），坐标零偏移
+      const aligns = parseTableDelimiter(blankContainerPrefix(line.text, c.from - line.from))
       if (aligns) {
         return aligns
       }
@@ -556,9 +572,13 @@ function emitTableRowMarks(
   const regionIndex = region && table && region.tableFrom === table.from
     ? header ? 0 : line.number - doc.lineAt(region.tableFrom).number - 1
     : -1
+  // 容器前缀（#296）：行身份节点 from 即内容首。格解析与发射以「前缀
+  // 替换为空格」的整行为对象——坐标零偏移，空白走边界容忍
+  const prefixLen = node.from - line.from
+  const contentText = blankContainerPrefix(line.text, prefixLen)
   const cells = grid && columns
-    ? tableRowCellsForColumns(line.text, line.from, columns) ?? []
-    : splitTableRowCells(line.text, line.from)
+    ? tableRowCellsForColumns(contentText, line.from, columns) ?? []
+    : splitTableRowCells(contentText, line.from)
   for (let col = 0; col < cells.length; col++) {
     const cell = cells[col]!
     if (grid) {
@@ -586,7 +606,7 @@ function emitTableRowMarks(
     const escapedPipeDeco = selectionTouchesRange(selection, line.from, line.to)
       ? tableEscapedPipeRevealDeco
       : tableEscapedPipeDeco
-    for (const pos of escapedPipeBackslashes(line.text)) {
+    for (const pos of escapedPipeBackslashes(contentText)) {
       out.push(escapedPipeDeco.range(line.from + pos, line.from + pos + 1))
     }
   }
@@ -781,8 +801,8 @@ function emitForRange(
           const first = Math.max(fromLine, doc.lineAt(node.from).number)
           const last = Math.min(toLine, doc.lineAt(Math.min(node.to, doc.length)).number)
           for (let lineNo = first; lineNo <= last; lineNo++) {
-            const kind = plan.rows.get(lineNo)
-            if (!kind) continue
+            const entry = plan.rows.get(lineNo)
+            if (!entry) continue
             // #251 命中显形：活跃命中/停驻触界的网格行回源（行不加网格
             // 行类、不进 gridLines——竖线等结构源码可见、命中 mark 可画，
             // 与分隔行光标停驻同款「类缺席」机制）。编辑选区刻意不参与
@@ -791,7 +811,7 @@ function emitForRange(
               continue
             }
             addLineCls(lineNo, LIVE_CLASS_NAMES.tableGridRow)
-            gridLines.set(lineNo, { kind, plan })
+            gridLines.set(lineNo, { kind: entry.kind, plan })
           }
           // 只有光标直接停在分隔行才显露可编辑源码。跨行选区即使覆盖该行，
           // 也继续隐藏结构标记，避免把 `| --- |` 当可选正文显示。
@@ -1588,13 +1608,16 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
           const pipe = currentLine.text.indexOf('|')
           const stillRow = pipe >= 0 &&
             chainAt(value.tree, currentLine.from + pipe + 1).some((node) => node.name === 'TableRow')
-          if (stillRow && tableRowCellsForColumns(currentLine.text, currentLine.from, oldPlan.columns)) {
+          // 该行容器前缀（#296）：替换空格参与格判定，坐标零偏移
+          const settledPrefix = oldPlan.rows.get(lineNo)?.prefixLen ?? 0
+          const settledText = blankContainerPrefix(currentLine.text, settledPrefix)
+          if (stillRow && tableRowCellsForColumns(settledText, currentLine.from, oldPlan.columns)) {
             // #142：组合净结果先以当前行的新宽度样本与逐行缓存折叠出新列宽
             // 计划——计划未变（取消或宽度无影响的净结果）保持「仅恢复当前行」
             // 快路径（千行表组合取消不全表扫描的性能契约）；计划变化才落整表
             // 重发射（同表各行内联的 grid 计划必须一致，成本与一次常规键入的
             // 表格重建同阶）。折叠是纯数值归并，不重扫行文本。
-            const freshRow = collectColumnSamples([currentLine.text], oldPlan.columns)
+            const freshRow = collectColumnSamples([settledText], oldPlan.columns)
             const merged = new Array<number>(oldPlan.columns).fill(0)
             for (const [rowNo, widths] of oldPlan.rowSamples) {
               const row = rowNo === lineNo ? freshRow : widths
@@ -1836,15 +1859,20 @@ export function snapGridSelectionHead(state: EditorState, pos: number, forward: 
   if (!plan) return null
   const columns = plan.columns
   const isDelimiter = line.number === plan.delimiterLine
-  const isContent = plan.rows.has(line.number)
+  const contentEntry = plan.rows.get(line.number)
+  const isContent = contentEntry !== undefined
   if (!isDelimiter && !isContent) return null
+  // 行解析：前缀替换空格（#296）——坐标零偏移
+  const prefixLenOfLine = (lineNo: number): number => plan.rows.get(lineNo)?.prefixLen ?? 0
   const boundariesOf = (lineNo: number): number[] | null => {
     const target = state.doc.line(lineNo)
-    const cells = tableRowCellsForColumns(target.text, target.from, columns)
+    const cells = tableRowCellsForColumns(
+      blankContainerPrefix(target.text, prefixLenOfLine(lineNo)), target.from, columns)
     return cells ? cells.flatMap((cell) => [cell.contentFrom, cell.contentTo]) : null
   }
   if (isContent) {
-    const cells = tableRowCellsForColumns(line.text, line.from, columns)
+    const cells = tableRowCellsForColumns(
+      blankContainerPrefix(line.text, contentEntry.prefixLen), line.from, columns)
     if (!cells) return null
     // 格区间（含首尾空白/填充）归属该格：clamp 到内容区间
     for (const cell of cells) {

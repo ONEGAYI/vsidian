@@ -152,7 +152,9 @@ export function tableRowsAt(state: EditorState, pos: number, tree: Tree): TableR
       continue
     }
     const l = state.doc.lineAt(c.from)
-    rows.push({ kind, lineFrom: l.from, lineTo: l.to })
+    // 行身份节点 from 即内容首：行首到该点的距离是容器前缀（引用/列表，
+    // #296；lazy 行为 0）。QuoteMark 混在 Table 直接子节点中，无行身份跳过
+    rows.push({ kind, lineFrom: l.from, lineTo: l.to, prefixLen: c.from - l.from })
   }
   return rows.length >= 2 ? rows.sort((a, b) => a.lineFrom - b.lineFrom) : null
 }

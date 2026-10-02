@@ -2,9 +2,9 @@ import { EditorSelection } from '@codemirror/state'
 import { EditorView, ViewPlugin } from '@codemirror/view'
 import type { Tree } from '@lezer/common'
 import { normalizeTableRegion, type TableRegion } from './tableRegion'
-import type { TableRowInfo } from './tableStructure'
+import { prefixLenOf, type TableRowInfo } from './tableStructure'
 import { liveDecorationsField } from './liveDecorations'
-import { splitTableRowCells } from '../shared/tableCells'
+import { blankContainerPrefix, containerPrefixLen, splitTableRowCells } from '../shared/tableCells'
 import { setTableRegion, tableRegionField } from './tableRegionField'
 
 export { setTableRegion, tableRegionField, sameTableRegion } from './tableRegionField'
@@ -16,7 +16,9 @@ export function selectTableRegion(view: EditorView, region: TableRegion | null):
     const header = view.state.doc.lineAt(normalized.tableFrom)
     const lineNumber = header.number + normalized.rowFrom + (normalized.rowFrom > 0 ? 1 : 0)
     const line = lineNumber <= view.state.doc.lines ? view.state.doc.line(lineNumber) : null
-    const cell = line && splitTableRowCells(line.text, line.from)[normalized.columnFrom]
+    // 无行身份上下文：容器前缀按形态学回退替换空格（#296），坐标零偏移
+    const cell = line && splitTableRowCells(
+      blankContainerPrefix(line.text, containerPrefixLen(line.text)), line.from)[normalized.columnFrom]
     view.dispatch({ selection: EditorSelection.create([
       EditorSelection.cursor(cell?.contentFrom ?? normalized.tableFrom, -1)]),
       effects: setTableRegion.of(normalized) })
@@ -78,7 +80,9 @@ export function createTableRegionPointer(tableRowsAt: (view: EditorView, pos: nu
       const row = rows && [rows[0], ...rows.slice(2)][region.rowFrom]
       if (!row) return
       const line = this.view.state.doc.lineAt(row.lineFrom)
-      const cell = splitTableRowCells(line.text, line.from)[region.columnFrom]
+      // 行身份前缀（#296）：格定位以前缀替换空格后的整行为对象
+      const cell = splitTableRowCells(
+        blankContainerPrefix(line.text, prefixLenOf(row)), line.from)[region.columnFrom]
       if (!cell) return
       this.view.dispatch({ selection: EditorSelection.single(cell.contentFrom), effects: setTableRegion.of(region) })
     }

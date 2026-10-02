@@ -40,8 +40,13 @@ const DOC = [
 
 const KINDS: Array<'header' | 'delimiter' | 'row'> = ['header', 'delimiter', 'row', 'row']
 
-/** 按行号（0 基）构造行结构（与解析树提取的行信息同构） */
-function rowsOf(doc: string, lineNos: number[], kinds: Array<'header' | 'delimiter' | 'row'>): TableRowInfo[] {
+/** 按行号（0 基）构造行结构（与解析树提取的行信息同构）；prefixLens 可选——各行容器前缀长度（#296） */
+function rowsOf(
+  doc: string,
+  lineNos: number[],
+  kinds: Array<'header' | 'delimiter' | 'row'>,
+  prefixLens?: number[],
+): TableRowInfo[] {
   const texts = doc.split('\n')
   const starts: number[] = []
   let acc = 0
@@ -53,6 +58,7 @@ function rowsOf(doc: string, lineNos: number[], kinds: Array<'header' | 'delimit
     kind: kinds[i]!,
     lineFrom: starts[n]!,
     lineTo: starts[n]! + texts[n]!.length,
+    prefixLen: prefixLens?.[i] ?? 0,
   }))
 }
 
@@ -464,5 +470,84 @@ describe('planTableEdit：上下文与边界', () => {
         expect(c.from).toBeLessThanOrEqual(tableTo)
       }
     }
+  })
+})
+
+// ---- 引用块内表格结构操作（#296）：行身份携带前缀 ----
+
+describe('引用块内表格结构操作（#296）', () => {
+  const QDOC = '> | a | b |\n> | --- | --- |\n> | 1 | 2 |'
+  const qrows = rowsOf(QDOC, [0, 1, 2], ['header', 'delimiter', 'row'], [2, 2, 2])
+
+  it('Tab 导航：前缀不入格内容，Tab 落下一格内容首', () => {
+    expect(tableCellNavTarget(QDOC, qrows, QDOC.indexOf('a'), true)).toBe(QDOC.indexOf('b'))
+    expect(tableCellNavTarget(QDOC, qrows, QDOC.indexOf('b'), false)).toBe(QDOC.indexOf('a') + 1)
+  })
+
+  it('行下方插行：新行携带引用前缀', () => {
+    const plan = planTableEdit(QDOC, qrows, QDOC.indexOf('1'), 'insertRowBelow')!
+    expect(apply(QDOC, plan.changes))
+      .toBe('> | a | b |\n> | --- | --- |\n> | 1 | 2 |\n> | | |')
+  })
+
+  it('表头上方插行统一落到分隔行后，且带引用前缀', () => {
+    const plan = planTableEdit(QDOC, qrows, QDOC.indexOf('a'), 'insertRowAbove')!
+    expect(apply(QDOC, plan.changes))
+      .toBe('> | a | b |\n> | --- | --- |\n> | | |\n> | 1 | 2 |')
+  })
+
+  it('删列：各行重建保留引用前缀', () => {
+    const plan = planTableEdit(QDOC, qrows, QDOC.indexOf('a'), 'deleteColumn')!
+    expect(apply(QDOC, plan.changes)).toBe('> | b |\n> | --- |\n> | 2 |')
+  })
+
+  it('插列：插入点落在内容区间内（前缀之后），各行前缀保留', () => {
+    const plan = planTableEdit(QDOC, qrows, QDOC.indexOf('a'), 'insertColumnRight')!
+    expect(apply(QDOC, plan.changes))
+      .toBe('> | a | | b |\n> | --- | --- | --- |\n> | 1 | | 2 |')
+  })
+
+  it('删数据行连同该行引用前缀一起删净', () => {
+    const plan = planTableEdit(QDOC, qrows, QDOC.indexOf('1'), 'deleteRow')!
+    expect(apply(QDOC, plan.changes)).toBe('> | a | b |\n> | --- | --- |')
+  })
+
+  it('删表头：升格行成为新表头，分隔行随移保持引用前缀', () => {
+    const plan = planTableEdit(QDOC, qrows, QDOC.indexOf('a'), 'deleteRow')!
+    expect(apply(QDOC, plan.changes)).toBe('> | 1 | 2 |\n> | --- | --- |')
+  })
+
+  it('整表删除（仅剩表头分隔行时删行）：连同前缀删净', () => {
+    const minimal = '> | 唯一 |\n> | --- |'
+    const rows = rowsOf(minimal, [0, 1], ['header', 'delimiter'], [2, 2])
+    const plan = planTableEdit(minimal, rows, minimal.indexOf('唯一'), 'deleteRow')!
+    expect(apply(minimal, plan.changes)).toBe('')
+  })
+
+  it('拖排列：重建行保留引用前缀，对齐信息随列移动', () => {
+    const plan = planTableColumnMove(QDOC, qrows, 1, 0)!
+    expect(apply(QDOC, plan.changes)).toBe('> | b | a |\n> | --- | --- |\n> | 2 | 1 |')
+  })
+
+  it('拖排行：整行文本（含前缀）随行走', () => {
+    const plan = planTableRowMove(QDOC, qrows, 1, 0)!
+    expect(apply(QDOC, plan.changes)).toBe('> | 1 | 2 |\n> | --- | --- |\n> | a | b |')
+  })
+
+  it('lazy 分隔行（无前缀）与带前继行共存：各自按自身前缀运算', () => {
+    const lazy = '> | a | b |\n| --- | --- |\n> | 1 | 2 |'
+    const rows = rowsOf(lazy, [0, 1, 2], ['header', 'delimiter', 'row'], [2, 0, 2])
+    const plan = planTableEdit(lazy, rows, lazy.indexOf('a'), 'deleteColumn')!
+    expect(apply(lazy, plan.changes)).toBe('> | b |\n| --- |\n> | 2 |')
+  })
+
+  it('多层引用前缀（> > ）的插行与删列', () => {
+    const deep = '> > | a | b |\n> > | --- | --- |\n> > | 1 | 2 |'
+    const rows = rowsOf(deep, [0, 1, 2], ['header', 'delimiter', 'row'], [4, 4, 4])
+    const insert = planTableEdit(deep, rows, deep.indexOf('1'), 'insertRowBelow')!
+    expect(apply(deep, insert.changes))
+      .toBe('> > | a | b |\n> > | --- | --- |\n> > | 1 | 2 |\n> > | | |')
+    const del = planTableEdit(deep, rows, deep.indexOf('a'), 'deleteColumn')!
+    expect(apply(deep, del.changes)).toBe('> > | b |\n> > | --- |\n> > | 2 |')
   })
 })

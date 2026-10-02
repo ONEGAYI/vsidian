@@ -446,6 +446,84 @@ describe('live 表格装饰', () => {
   })
 })
 
+// ---- 引用块内表格（#296） ----
+
+describe('引用块内表格网格化（#296）', () => {
+  it('引用块内表格进入网格形态：网格行、隐藏分隔行、格内容不含引用前缀', () => {
+    const doc = '> | a | b |\n> | --- | --- |\n> | 1 | 2 |'
+    const set = build(doc)
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(2)
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridCell, doc)).toEqual([' a ', ' b ', ' 1 ', ' 2 '])
+    const delimLineFrom = doc.indexOf('> | --- | --- |')
+    expect(collect(set).some((item) => item.from === delimLineFrom &&
+      item.cls?.split(' ').includes(LIVE_CLASS_NAMES.tableGridDelimiter))).toBe(true)
+  })
+
+  it('多层引用同样网格化，前缀完整剥离', () => {
+    const doc = '> > | 甲 | 乙 |\n> > | --- | --- |\n> > | 1 | 2 |'
+    const set = build(doc)
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(2)
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridCell, doc)).toEqual([' 甲 ', ' 乙 ', ' 1 ', ' 2 '])
+  })
+
+  it('引用内列表：表头带标记行与缩进续行都按各自前缀解析', () => {
+    const doc = '> - | a | b |\n>   | --- | --- |\n>   | 1 | 2 |'
+    const set = build(doc)
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(2)
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridCell, doc)).toEqual([' a ', ' b ', ' 1 ', ' 2 '])
+  })
+
+  it('lazy 分隔行（无引用前缀）按该行自身前缀独立解析', () => {
+    const doc = '> | a | b |\n| --- | --- |\n> | 1 | 2 |'
+    const set = build(doc)
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(2)
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridCell, doc)).toEqual([' a ', ' b ', ' 1 ', ' 2 '])
+  })
+
+  it('网格行与引用行类组合呈现；未触及时引用前缀保持隐藏', () => {
+    const doc = '前文\n\n> | a | b |\n> | --- | --- |\n> | 1 | 2 |\n\n后文'
+    const set = build(doc)
+    // 三行引用行类（表头/分隔/数据）与两行网格行类并存
+    expect(textsFor(set, LIVE_CLASS_NAMES.quoteLine, doc)).toHaveLength(3)
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(2)
+    // 未触及时 QuoteMark（含后随空格）整段隐藏：行首存在跨 "> " 的替换装饰
+    const headerLineFrom = doc.indexOf('> | a | b |')
+    expect(collect(set).some((item) => item.from === headerLineFrom &&
+      item.to === headerLineFrom + 2 && item.cls === undefined)).toBe(true)
+  })
+
+  it('光标停在引用表格内：网格保持；格内编辑前缀隐藏、触及 > 时显形', () => {
+    const doc = '> | a | b |\n> | --- | --- |\n> | 1 | 2 |'
+    const dataLineFrom = doc.indexOf('> | 1 | 2 |')
+    // 格内编辑：网格保持，前缀维持隐藏（QuoteMark 显隐只认触及，与表格
+    // 「编辑选区不显形」同口径——网格是核心体验）
+    const inCell = build(doc, { anchor: doc.indexOf('1') })
+    expect(textsFor(inCell, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(2)
+    expect(collect(inCell).some((item) => item.from === dataLineFrom &&
+      item.to === dataLineFrom + 2 && item.cls === undefined)).toBe(true)
+    // 光标触及 `>` 本身：前缀显形可编辑，网格不退场
+    const onMark = build(doc, { anchor: dataLineFrom + 1 })
+    expect(textsFor(onMark, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(2)
+    expect(collect(onMark).some((item) => item.from === dataLineFrom &&
+      item.to === dataLineFrom + 2 && item.cls === undefined)).toBe(false)
+  })
+
+  it('引用表单格编辑后增量装饰与全量重建对拍一致', () => {
+    const doc = '> | a | b |\n> | --- | --- |\n> | 1 | 2 |'
+    const view = makeEditView(doc, doc.indexOf('1'))
+    const cellAt = doc.indexOf('1')
+    view.dispatch({
+      changes: { from: cellAt, to: cellAt + 1, insert: '九' },
+      selection: EditorSelection.single(cellAt + 1),
+    })
+    const after = view.state.doc.toString()
+    expect(after).toBe('> | a | b |\n> | --- | --- |\n> | 九 | 2 |')
+    const full = buildLivePreviewDecorations(view.state.doc, view.state.selection)
+    expect(RangeSet.eq([view.state.field(liveDecorationsField).decos], [full])).toBe(true)
+    view.destroy()
+  })
+})
+
 // ---- 输入钩子（| 键转义） ----
 
 function makeEditView(doc: string, anchor: number): EditorView {

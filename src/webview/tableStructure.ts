@@ -20,7 +20,7 @@
 //
 // 坐标契约：全文 UTF-16 code unit offset（与协议 SerChange、CM6 同构）；
 // selection 为应用 changes 之后的新文档坐标。
-import { barePipeAt, parseTableDelimiter, splitTableRowCells, tableRowCellsForColumns, type TableCellRange } from '../shared/tableCells'
+import { barePipeAt, blankContainerPrefix, parseTableDelimiter, splitTableRowCells, tableRowCellsForColumns, type TableCellRange } from '../shared/tableCells'
 import type { TableEditOp } from '../shared/protocol'
 
 /** 表格行身份（解析树判定后传入；行区间不含换行） */
@@ -30,6 +30,10 @@ export interface TableRowInfo {
   lineFrom: number
   /** 行尾（不含换行）全文 offset */
   lineTo: number
+  /** 容器前缀长度（#296）：行首到表格结构起点的距离（引用层+缩进+列表
+   *  标记；lazy 行为 0）。缺省 0——顶层表格行为不变。格解析与结构重建
+   *  一律以前缀之后的内容段为运算对象，整行删除区间仍从行首起。 */
+  prefixLen?: number
 }
 
 /** 一次结构操作的规划结果：changes 与操作后光标落点（新文档坐标） */
@@ -87,21 +91,30 @@ export function planTableColumnMove(
   slot: number,
 ): Pick<PlannedTableEdit, 'changes'> | null {
   if (rows[0]?.kind !== 'header' || rows[1]?.kind !== 'delimiter') return null
-  const columns = parseTableDelimiter(doc.slice(rows[1].lineFrom, rows[1].lineTo))?.length
+  const columns = parseTableDelimiter(
+    blankContainerPrefix(doc.slice(rows[1]!.lineFrom, rows[1]!.lineTo), prefixLenOf(rows[1!])))?.length
   if (!columns || !Number.isInteger(source) || !Number.isInteger(slot) || source < 0 ||
       source >= columns || slot < 0 || slot > columns || slot === source || slot === source + 1) return null
   const changes: PlannedTableEdit['changes'] = []
   for (const row of rows) {
-    const text = doc.slice(row.lineFrom, row.lineTo)
+    const p = prefixLenOf(row)
+    const text = blankContainerPrefix(doc.slice(row.lineFrom, row.lineTo), p)
     const cells = tableRowCellsForColumns(text, row.lineFrom, columns)
     if (!cells || cells.length !== columns) return null
     const values = cells.map((cell) => doc.slice(cell.from, cell.to))
     const [moved] = values.splice(source, 1)
     values.splice(slot > source ? slot - 1 : slot, 0, moved!)
     const insert = '|' + values.join('|') + '|'
-    if (insert !== text) changes.push({ from: row.lineFrom, to: row.lineTo, insert })
+    if (insert !== doc.slice(row.lineFrom + p, row.lineTo)) {
+      changes.push({ from: row.lineFrom + p, to: row.lineTo, insert })
+    }
   }
   return changes.length ? { changes } : null
+}
+
+/** 行容器前缀长度（缺省 0） */
+export function prefixLenOf(row: TableRowInfo): number {
+  return row.prefixLen ?? 0
 }
 
 /** pos 所在行（区间含端点）；未命中返回 -1 */
@@ -144,10 +157,11 @@ export function tableCellNavTarget(
   const row = rows[i]!
   const delimiter = rows.find((entry) => entry.kind === 'delimiter')
   const columns = delimiter
-    ? parseTableDelimiter(doc.slice(delimiter.lineFrom, delimiter.lineTo))?.length
+    ? parseTableDelimiter(
+        blankContainerPrefix(doc.slice(delimiter.lineFrom, delimiter.lineTo), prefixLenOf(delimiter)))?.length
     : undefined
   const cellsOf = (entry: TableRowInfo): TableCellRange[] => {
-    const text = doc.slice(entry.lineFrom, entry.lineTo)
+    const text = blankContainerPrefix(doc.slice(entry.lineFrom, entry.lineTo), prefixLenOf(entry))
     return columns && entry.kind !== 'delimiter'
       ? tableRowCellsForColumns(text, entry.lineFrom, columns) ?? splitTableRowCells(text, entry.lineFrom)
       : splitTableRowCells(text, entry.lineFrom)
@@ -212,9 +226,15 @@ export function planTableEdit(
   if (delimIdx < 0) {
     return null
   }
-  const rowText = (r: TableRowInfo): string => doc.slice(r.lineFrom, r.lineTo)
+  // 两种行文本语义：fullText 整行含前缀（删除/随移/拖排的单位）；
+  // contentText 前缀替换为等宽空格（#296——结构性字符不参与格拆分，
+  // 空白走边界容忍；坐标以行首为基准，零偏移）
+  const fullText = (r: TableRowInfo): string => doc.slice(r.lineFrom, r.lineTo)
+  const contentText = (r: TableRowInfo): string => blankContainerPrefix(fullText(r), prefixLenOf(r))
   const rowCells = (r: TableRowInfo): TableCellRange[] =>
-    splitTableRowCells(rowText(r), r.lineFrom)
+    splitTableRowCells(contentText(r), r.lineFrom)
+  /** 该行前缀原文（插行补前缀用；参照行的容器层级） */
+  const prefixTextOf = (r: TableRowInfo): string => doc.slice(r.lineFrom, r.lineFrom + prefixLenOf(r))
   const cursorCells = rowCells(rows[i]!)
   if (cursorCells.length === 0) {
     return null
@@ -231,12 +251,17 @@ export function planTableEdit(
       const insertAt = rows[i]!.kind === 'row' ? (op === 'insertRowAbove' ? i : i + 1) : delimIdx + 1
       const newRow = emptyRowText(rowCells(rows[delimIdx]!).length)
       if (insertAt < rows.length) {
-        const from = rows[insertAt]!.lineFrom
-        return { changes: [{ from, to: from, insert: `${newRow}\n` }], selection: from + 2 }
+        // 新行带参照行（插入落点行）的容器前缀：引用/列表内插行保持层级（#296）
+        const target = rows[insertAt]!
+        const prefix = prefixTextOf(target)
+        const from = target.lineFrom
+        return { changes: [{ from, to: from, insert: `${prefix}${newRow}\n` }], selection: from + prefix.length + 2 }
       }
-      // 表格末尾追加（挂在末行换行之后；末行无换行则补）
-      const at = rows[rows.length - 1]!.lineTo
-      return { changes: [{ from: at, to: at, insert: `\n${newRow}` }], selection: at + 3 }
+      // 表格末尾追加（挂在末行换行之后；末行无换行则补）；同样携带末行前缀
+      const lastRow = rows[rows.length - 1]!
+      const at = lastRow.lineTo
+      const tailPrefix = prefixTextOf(lastRow)
+      return { changes: [{ from: at, to: at, insert: `\n${tailPrefix}${newRow}` }], selection: at + 1 + tailPrefix.length + 2 }
     }
     case 'deleteRow': {
       const row = rows[i]!
@@ -249,15 +274,16 @@ export function planTableEdit(
             selection: rows[0]!.lineFrom }
         }
         // 删表头 = 首个数据行升为新表头：GFM 要求分隔行紧跟表头，升格须把
-        // 分隔行移到升格行之后（对齐信息随分隔行文本原样保留）——单纯删除
-        // 表头行会让分隔行成为表格首行，整表退化为普通段落
+        // 分隔行移到升格行之后（对齐信息随分隔行文本原样保留——整行随移，
+        // lazy 无前缀分隔行落位后仍合法）——单纯删除表头行会让分隔行成为
+        // 表格首行，整表退化为普通段落
         const delim = rows[delimIdx]!
         const successor = rows[delimIdx + 1]!
         const successorHasNl = successor.lineTo < doc.length
         const promotedFrom = successorHasNl ? successor.lineTo + 1 : successor.lineTo
         const promotedInsert = successorHasNl
-          ? `${rowText(delim)}\n`
-          : `\n${rowText(delim)}`
+          ? `${fullText(delim)}\n`
+          : `\n${fullText(delim)}`
         const changes: PlannedTableEdit['changes'] = [
           { from: row.lineFrom, to: row.lineTo + 1, insert: '' },
           { from: delim.lineFrom, to: delim.lineTo + 1, insert: '' },
@@ -265,7 +291,7 @@ export function planTableEdit(
         ]
         const removed = row.lineTo + 1 - row.lineFrom + (delim.lineTo + 1 - delim.lineFrom)
         const newLineFrom = successor.lineFrom - removed
-        const cells = splitTableRowCells(rowText(successor), newLineFrom)
+        const cells = splitTableRowCells(contentText(successor), newLineFrom)
         return { changes, selection: focusOfCells(cells, newLineFrom, col) }
       }
       // 数据行：优先与后继换行合并删除；文件尾无换行时回纳前行换行
@@ -276,7 +302,7 @@ export function planTableEdit(
       const len = hasNl ? row.lineTo + 1 - row.lineFrom : row.lineTo - row.lineFrom + 1
       const target = i + 1 < rows.length ? rows[i + 1]! : rows[i - 1]!
       const newLineFrom = i + 1 < rows.length ? target.lineFrom - len : target.lineFrom
-      const cells = splitTableRowCells(rowText(target), newLineFrom)
+      const cells = splitTableRowCells(contentText(target), newLineFrom)
       return { changes, selection: focusOfCells(cells, newLineFrom, col) }
     }
     case 'insertColumnLeft':
@@ -284,10 +310,10 @@ export function planTableEdit(
       const newCol = op === 'insertColumnLeft' ? col : col + 1
       const changes: PlannedTableEdit['changes'] = []
       let focus = -1
-      let delta = 0 // 光标行之前各行的插入总长（行首右移量）
+      let delta = 0 // 光标行之前各行的插入总长（内容首右移量；与前缀无关）
       for (let r = 0; r < rows.length; r++) {
         const row = rows[r]!
-        const text = rowText(row)
+        const text = contentText(row)
         const cells = rowCells(row)
         const c = Math.min(newCol, cells.length)
         let insertAtRel: number
@@ -328,10 +354,10 @@ export function planTableEdit(
       }
       const changes: PlannedTableEdit['changes'] = []
       let focus = -1
-      let delta = 0 // 光标行之前各行的删除总长（行首左移量）
+      let delta = 0 // 光标行之前各行的删除总长（内容首左移量；与前缀无关）
       for (let r = 0; r < rows.length; r++) {
         const row = rows[r]!
-        const text = rowText(row)
+        const text = contentText(row)
         const cells = rowCells(row)
         if (col >= cells.length) {
           continue // 该行缺此列：不动
