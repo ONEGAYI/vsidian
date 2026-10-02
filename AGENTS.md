@@ -83,15 +83,17 @@ vsidian/
 ├── CONTEXT.md             # 领域语言与产品边界事实源
 ├── docs/                  # 项目文档根
 │   ├── adr/        # 架构决策记录
-│   │   ├── 0001-vscode-186-remote-support.md     # VSCode 兼容下界与远程支持决策
-│   │   ├── 0002-wikilink-on-demand-resolution.md # 双链按需解析不建持久索引
-│   │   ├── 0003-source-text-dual-view-editor.md  # 基于源文本的双视图编辑架构
-│   │   ├── 0004-stable-styling-contract.md       # 一期建立稳定样式入口
-│   │   ├── 0005-viewport-rendering.md            # 全文模型与视口渲染分离
-│   │   ├── 0006-rebrand-to-vsidian.md            # 统一更名为 vsidian 的映射记录
-│   │   ├── 0007-css-snippet-env-isolation.md     # CSS 片段环境隔离决策记录（#131）
-│   │   ├── 0008-workspace-reference-index.md     # 工作区引用索引架构与存储选型
-│   │   └── 0009-referenced-document-views.md     # 引用文档视图读写分离决策
+│   │   ├── 0001-vscode-186-remote-support.md          # VSCode 兼容下界与远程支持决策
+│   │   ├── 0002-wikilink-on-demand-resolution.md      # 双链按需解析不建持久索引
+│   │   ├── 0003-source-text-dual-view-editor.md       # 基于源文本的双视图编辑架构
+│   │   ├── 0004-stable-styling-contract.md            # 一期建立稳定样式入口
+│   │   ├── 0005-viewport-rendering.md                 # 全文模型与视口渲染分离
+│   │   ├── 0006-rebrand-to-vsidian.md                 # 统一更名为 vsidian 的映射记录
+│   │   ├── 0007-css-snippet-env-isolation.md          # CSS 片段环境隔离决策记录（#131）
+│   │   ├── 0008-workspace-reference-index.md          # 工作区引用索引架构与存储选型
+│   │   ├── 0009-referenced-document-views.md          # 引用文档视图读写分离决策
+│   │   ├── 0010-reference-edit-target-session.md      # 引用编辑的目标会话与历史归属
+│   │   └── 0011-reference-full-document-navigation.md # 引用全文可达与锚点导航决策
 │   ├── agents/     # agent 操作约定
 │   │   ├── domain.md        # 领域文档读取与维护约定
 │   │   └── issue-tracker.md # GitHub Issues 操作约定
@@ -120,6 +122,7 @@ vsidian/
 │   │   ├── css-snippets.md                    # CSS片段与样式兼容规格
 │   │   ├── frontmatter-table.md               # frontmatter 表格化规格
 │   │   ├── graphic-code-block-interaction.md  # 图形化代码块交互规格
+│   │   ├── hover-embed-phase2-tickets/…       # 二期票据正文与依赖
 │   │   ├── hover-preview-embed.md             # 悬停预览与文档嵌入规格
 │   │   ├── html-comment-support.md            # HTML 注释快捷键与呈现规格
 │   │   ├── i18n.md                            # 全局 i18n 适配规格
