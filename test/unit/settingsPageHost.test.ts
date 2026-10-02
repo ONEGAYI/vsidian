@@ -163,3 +163,88 @@ describe('设置页异步回信与面板生命周期', () => {
       && (m as { kind?: string }).kind === 'settings.focusSection')).toBe(true)
   })
 })
+
+describe('设置页会话内 UI 态恢复（webview 上报 uiState，重开/重载握手补发）', () => {
+  const makeService = () => ({
+    getSnapshot: () => ({}),
+    apply: () => Promise.resolve({ ok: true as const, values: {} }),
+  })
+  const kinds = (sent: unknown[]) => sent.map((m) => (m as { kind?: string }).kind)
+  const focusSent = (sent: unknown[]) =>
+    sent.filter((m) => (m as { kind?: string }).kind === 'settings.focusSection')
+
+  it('webview 上报 uiState → 宿主记忆（getInfo.uiState 可观测）；未上报时为 undefined', () => {
+    const fresh = makePanel()
+    vscodeMock.createWebviewPanel.mockReturnValue(fresh.panel)
+    const page = createSettingsPage({ extensionUri: 'extension' } as never,
+      makeService() as never, { getSnapshot: () => ({}) } as never)
+    expect(page.getInfo().uiState).toBeUndefined()
+    page.open()
+    page.injectMessage({ kind: 'settings.uiState', section: 'appearance', scrollTop: 120 })
+    expect(page.getInfo().uiState).toEqual({ section: 'appearance', scrollTop: 120 })
+  })
+
+  it('面板关闭后重开：settings.get 握手补发恢复定位（focusSection 带 scroll），握手前不发', () => {
+    const page = createSettingsPage({ extensionUri: 'extension' } as never,
+      makeService() as never, { getSnapshot: () => ({}) } as never)
+    const first = makePanel()
+    vscodeMock.createWebviewPanel.mockReturnValue(first.panel)
+    page.open()
+    page.injectMessage({ kind: 'settings.uiState', section: 'appearance', scrollTop: 120 })
+    page.close()
+    const second = makePanel()
+    vscodeMock.createWebviewPanel.mockReturnValue(second.panel)
+    page.open()
+    // 与 pendingSection 同模式：webview 未装载完成（未 settings.get）前补发会被忽略
+    expect(focusSent(second.sent)).toHaveLength(0)
+    page.injectMessage({ kind: 'settings.get' })
+    expect(second.sent).toContainEqual({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+  })
+
+  it('无 UI 态记忆（此前会话未到过设置页或从未切页滚动）：重开握手不补发定位', () => {
+    const page = createSettingsPage({ extensionUri: 'extension' } as never,
+      makeService() as never, { getSnapshot: () => ({}) } as never)
+    const first = makePanel()
+    vscodeMock.createWebviewPanel.mockReturnValue(first.panel)
+    page.open()
+    page.injectMessage({ kind: 'settings.get' })
+    page.close()
+    const second = makePanel()
+    vscodeMock.createWebviewPanel.mockReturnValue(second.panel)
+    page.open()
+    page.injectMessage({ kind: 'settings.get' })
+    expect(focusSent(second.sent)).toHaveLength(0)
+  })
+
+  it('显式定位优先于恢复：pendingSection 在场时握手只补发显式定位，不发恢复', () => {
+    const page = createSettingsPage({ extensionUri: 'extension' } as never,
+      makeService() as never, { getSnapshot: () => ({}) } as never)
+    const first = makePanel()
+    vscodeMock.createWebviewPanel.mockReturnValue(first.panel)
+    page.open()
+    page.injectMessage({ kind: 'settings.uiState', section: 'appearance', scrollTop: 120 })
+    page.close()
+    const second = makePanel()
+    vscodeMock.createWebviewPanel.mockReturnValue(second.panel)
+    page.openWithSection('keybindings')
+    page.injectMessage({ kind: 'settings.get' })
+    expect(focusSent(second.sent)).toEqual([{ kind: 'settings.focusSection', section: 'keybindings' }])
+  })
+
+  it('面板隐藏重载（panel 不换）再次握手：补发幂等，滚动值不丢', () => {
+    const fresh = makePanel()
+    vscodeMock.createWebviewPanel.mockReturnValue(fresh.panel)
+    const page = createSettingsPage({ extensionUri: 'extension' } as never,
+      makeService() as never, { getSnapshot: () => ({}) } as never)
+    page.open()
+    page.injectMessage({ kind: 'settings.get' })
+    page.injectMessage({ kind: 'settings.uiState', section: 'appearance', scrollTop: 120 })
+    // retainContextWhenHidden 不开：切走标签 webview 即释放重载，panel 对象
+    // 不变、settings.get 再次到达——恢复消息须再次补发（每次握手恢复）
+    page.injectMessage({ kind: 'settings.get' })
+    expect(focusSent(fresh.sent)).toEqual([
+      { kind: 'settings.focusSection', section: 'appearance', scroll: 120 },
+    ])
+    expect(kinds(fresh.sent).filter((k) => k === 'settings.snapshot')).toHaveLength(2)
+  })
+})

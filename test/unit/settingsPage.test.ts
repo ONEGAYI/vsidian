@@ -715,7 +715,9 @@ describe('可读行宽滑块（#175：number 型渲染为 range 控件）', () =
     input.dispatchEvent(new Event('input'))
     expect(readout.textContent).toBe('1200px')
     expect(input.getAttribute('aria-valuetext')).toBe('1200px')
-    expect(sent).toHaveLength(0)
+    // 断言语义是「拖动中不保存」：sent 里不含 settings.set（切页上下文的
+    // settings.uiState 上报属于会话内恢复契约，与保存链路无关）
+    expect(sent.filter((m) => (m as { kind?: string }).kind === 'settings.set')).toHaveLength(0)
     // 拖回 0：值文本回到铺满档
     input.value = '0'
     input.dispatchEvent(new Event('input'))
@@ -855,5 +857,89 @@ describe('外观合并分页（#231）', () => {
     clickAppearanceResult(parent, zhCn['styleRef.title'])
     expect(tabOf(parent, 'overview').getAttribute('aria-selected')).toBe('true')
     expect(parent.querySelector('.vsidian-style-ref-overview')!.hasAttribute('hidden')).toBe(false)
+  })
+})
+
+describe('会话内恢复：uiState 上报与 focusSection.scroll 应用（面板关闭/重载后分页与滚动还原）', () => {
+  /** 生产注册口径 + 外发消息捕获（uiState 上报断言需要桥侧记录） */
+  function makeTrackedFullView(): { view: SettingsPageView; sent: unknown[]; parent: HTMLElement } {
+    const sent: unknown[] = []
+    const snippets = new CssSnippetSettingsSection({ postMessage() {} })
+    const appearance = new AppearanceSection(
+      snippets, new StyleReferenceSection({ postMessage() {} }))
+    const view = new SettingsPageView(
+      { postMessage: (m) => sent.push(m) },
+      PRODUCTION_SETTING_DEFINITIONS,
+      [new KeybindingSettingsSection({ postMessage() {} }), appearance, new IndexMaintenanceSection({ postMessage() {} })],
+    )
+    const parent = document.createElement('div')
+    view.mount(parent)
+    return { view, sent, parent }
+  }
+  function mainEl(parent: HTMLElement): HTMLElement {
+    const main = parent.querySelector<HTMLElement>('.vsidian-settings-main')
+    expect(main, '主区滚动容器应已渲染').toBeTruthy()
+    return main!
+  }
+  function uiStateMessages(sent: unknown[]): Array<{ kind: string; section: string; scrollTop: number }> {
+    return sent.filter((m) => (m as { kind?: string }).kind === 'settings.uiState') as never
+  }
+
+  it('切换分页上报 uiState：section 为目标分页，scrollTop 为复位后的 0', () => {
+    const { sent, parent } = makeTrackedFullView()
+    clickNav(parent, zhCn['appearance.title'])
+    expect(uiStateMessages(sent).at(-1)).toEqual({
+      kind: 'settings.uiState', section: 'appearance', scrollTop: 0,
+    })
+  })
+
+  it('装载首帧回落默认页不上报：重开时不得抢在握手前覆盖宿主记忆（真实时序缺陷回归）', () => {
+    // 真实 webview 时序：mount 首帧 render 的上报先于 settings.get 到达
+    // 宿主——若上报默认回落页，宿主记忆被覆盖成 general，重开恢复永远
+    // 落回默认（集成用例「会话内恢复」超时实证）。首帧不报，记忆存活到
+    // 握手；用户真实切页/滚动才产生上报
+    const { sent } = makeTrackedFullView()
+    expect(uiStateMessages(sent)).toEqual([])
+  })
+
+  it('主区滚动（scroll 事件）上报 uiState：携带当前分页与滚动位置', () => {
+    const { sent, parent } = makeTrackedFullView()
+    clickNav(parent, zhCn['appearance.title'])
+    sent.length = 0
+    const main = mainEl(parent)
+    main.scrollTop = 200
+    main.dispatchEvent(new Event('scroll'))
+    expect(uiStateMessages(sent)).toEqual([
+      { kind: 'settings.uiState', section: 'appearance', scrollTop: 200 },
+    ])
+    // 分页上下文未变时视图不得复位滚动（#155 既有契约），上报后滚动保持
+    expect(main.scrollTop).toBe(200)
+  })
+
+  it('默认分页内滚动：section 回落首个分类（general）——用户未点过侧栏也须可恢复', () => {
+    const { sent, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    main.scrollTop = 300
+    main.dispatchEvent(new Event('scroll'))
+    expect(uiStateMessages(sent).at(-1)).toEqual({
+      kind: 'settings.uiState', section: 'general', scrollTop: 300,
+    })
+  })
+
+  it('focusSection 带 scroll（恢复形态）：切到目标分页并恢复滚动位置', () => {
+    const { view, parent } = makeTrackedFullView()
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    expect(parent.querySelector('.vsidian-settings-heading')?.textContent).toBe(zhCn['appearance.title'])
+    expect(mainEl(parent).scrollTop).toBe(120)
+  })
+
+  it('focusSection 不带 scroll（既有定位形态）：切页复位顶部，定位语义不回归', () => {
+    const { view, sent, parent } = makeTrackedFullView()
+    clickNav(parent, zhCn['appearance.title'])
+    mainEl(parent).scrollTop = 200
+    sent.length = 0
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'general' })
+    expect(parent.querySelector('.vsidian-settings-heading')?.textContent).toBe(zhCn['settings.generalSection'])
+    expect(mainEl(parent).scrollTop).toBe(0)
   })
 })

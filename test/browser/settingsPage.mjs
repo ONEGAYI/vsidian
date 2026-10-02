@@ -279,10 +279,13 @@ try {
     assert.equal(groupPaint.borderWidth, '1px')
     await search.focus()
     await page.keyboard.press('Control+b')
+    // 快捷键在搜索框不生效：外发白名单 = 各状态拉取（装载即拉取）+ 保存
+    // 链路 + 会话内恢复上报（settings.uiState，切页/滚动契约）
     assert.equal(await page.evaluate(() => window.sentMessages.filter(m =>
       m.kind !== 'settings.get' && m.kind !== 'settings.set' &&
       m.kind !== 'keybindings.get' && m.kind !== 'snippets.get' &&
-      m.kind !== 'wordSegment.get' && m.kind !== 'index.get').length), 0)
+      m.kind !== 'wordSegment.get' && m.kind !== 'index.get' &&
+      m.kind !== 'settings.uiState').length), 0)
     const focus = await search.evaluate(el => ({ style: getComputedStyle(el).outlineStyle, width: getComputedStyle(el).outlineWidth }))
     assert.equal(focus.style, 'solid')
     assert.equal(focus.width, '2px')

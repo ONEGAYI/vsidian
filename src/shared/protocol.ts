@@ -375,9 +375,12 @@ export type HostToWebview =
    * 面板未加载完成时由宿主在 ready 握手后补发；未知分页 id 时 webview 忽略。
    * entry（#231 外观合并，可选）：分页内进一步定位的条目 id——外观分页按
    * 条目归属路由到页内页签（片段目录/文件 → CSS 片段；overview → 样式参考；
-   * 契约条目 → 详细查询）。缺省时目标分页按自身默认形态呈现（向后兼容）
+   * 契约条目 → 详细查询）。缺省时目标分页按自身默认形态呈现（向后兼容）。
+   * scroll（可选，会话内恢复）：定位后应用的主区滚动位置——面板关闭/隐藏
+   * 重载后按宿主记忆的 UI 态恢复分页与滚动；缺省 = 顶部（既有定位语义），
+   * 与 entry 不同时使用（恢复消息只带 scroll）
    */
-  | { kind: 'settings.focusSection'; section: string; entry?: string }
+  | { kind: 'settings.focusSection'; section: string; entry?: string; scroll?: number }
   /** 设置变更通知（#33）：任一设置项保存成功后广播到全部已打开 Vsidian
    *  编辑器面板与设置页（含变更发起页面）。values 仍为全量快照；消费方按
    *  需读取关心的键（#34 场景：editor.lineNumbers 触发 CM6 扩展热重配） */
@@ -969,6 +972,11 @@ export type WebviewToHost =
    *  校验：通过才持久化并广播 settings.changed；拒绝时向来源设置页回
    *  settings.snapshot 以权威值恢复显示 */
   | { kind: 'settings.set'; values: SettingsPayload }
+  /** 设置页 UI 态上报（会话内恢复）：当前分页 id 与主区滚动位置。webview
+   *  在分页切换与主区滚动时上送，宿主记忆于扩展宿主内存（会话内存活）；
+   *  面板关闭/隐藏重载后按记忆经 settings.focusSection{scroll} 恢复。
+   *  section 为空字符串时宿主忽略（尚无激活分页——如首帧默认页未回落） */
+  | { kind: 'settings.uiState'; section: string; scrollTop: number }
   /** 请求查找选项快照（#236）：编辑器面板 init 后拉取当前三开关状态，
    *  宿主以 findOptions.snapshot 响应（workspace 级记忆权威在宿主） */
   | { kind: 'findOptions.get' }
@@ -2652,6 +2660,9 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
       return true
     case 'settings.set':
       return isSettingsPayload(v.values)
+    case 'settings.uiState':
+      // 会话内恢复：分页 id（可为空串=尚无激活分页）与非负滚动位置
+      return isString(v.section) && isNonNegativeInt(v.scrollTop)
     case 'findOptions.get':
       return true
     case 'findOptions.set':
@@ -3297,8 +3308,10 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'settings.snapshot':
       return isSettingsPayload(v.values)
     case 'settings.focusSection':
-      // #231：entry 可选字符串（缺省 = 无分页内定位，向后兼容）
-      return isString(v.section) && (v.entry === undefined || isString(v.entry))
+      // #231：entry 可选字符串（缺省 = 无分页内定位，向后兼容）；
+      // scroll（会话内恢复）可选非负数——恢复滚动位置，与 entry 不同时使用
+      return isString(v.section) && (v.entry === undefined || isString(v.entry)) &&
+        (v.scroll === undefined || isNonNegativeInt(v.scroll))
     case 'settings.changed':
       return isSettingsPayload(v.values)
     case 'findOptions.snapshot':
