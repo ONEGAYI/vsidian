@@ -1,6 +1,6 @@
 # 悬停与嵌入二期票据索引
 
-**状态**：2026-10-02，用户确认 14 票拆分并授权开票，已发布 #278–#291。前三张无本地技术前置的票已加 ready-for-agent，其他票保留阻塞依赖。**P2-01 研究已完成并收口**（2026-10-02 探针交付、2026-10-03 用户确认两项取舍）：四条路线 1.82.3 真宿主探针全部通过、无阻塞，依赖票的本票前置已放行，结论见[探针报告](../../research/vscode-1823-host-route-probes.md)。**P2-02、P2-03 已实施并合入 PR #313**（2026-10-02，`c197eaa`、`5c22110`），验收自动化通过，见[票据 02](02-live-instance-seam.md)／[票据 03](03-full-document-navigation.md) 执行记录。
+**状态**：2026-10-02，用户确认 14 票拆分并授权开票，已发布 #278–#291。前三张无本地技术前置的票已加 ready-for-agent，其他票保留阻塞依赖。**P2-01 研究已完成并收口**（2026-10-02 探针交付、2026-10-03 用户确认两项取舍）：四条路线 1.82.3 真宿主探针全部通过、无阻塞，依赖票的本票前置已放行，结论见[探针报告](../../research/vscode-1823-host-route-probes.md)。**P2-02、P2-03、P2-04 已实施并合入 PR #313**（2026-10-02/03，`c197eaa`、`5c22110`、`d166ec7`），验收自动化通过，见[票据 02](02-live-instance-seam.md)／[票据 03](03-full-document-navigation.md)／[票据 04](04-embed-target-editing.md) 执行记录。
 
 唯一规格：[hover-preview-embed.md 的二期正式规格](../hover-preview-embed.md)。父票 [#227](https://github.com/ONEGAYI/vsidian/issues/227)；历史版本想法已补入总体三期 [#18](https://github.com/ONEGAYI/vsidian/issues/18)。
 

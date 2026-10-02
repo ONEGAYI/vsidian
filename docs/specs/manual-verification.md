@@ -1518,3 +1518,15 @@ Live 渲染态经 lezer `HorizontalRule` 节点驱动：未触及该行时源文
 #296 五轮反馈修订轮（同日第七轮，用户反馈：「块内表格渲染」只应影响 live，reading 原行为就是渲染且无风险）：拆除 reading 侧接线——splitReadingBlocks/renderReadingBlocks/readingVirtualView.setDocument 的 containerTableSource 通道整体删除（ReadingSplitOptions 移除），applyTableBlockRenderSetting 只热重配 live facet；语言包描述改「仅实时预览，阅读模式始终渲染」。残缺回退（quoteTableRowsDegraded）独立判定不受影响。验证（TDD 先红后绿 2 例：经类型擦除传入关闭值断言 reading 仍渲染——通道若被重建即红）：全量单测与 compile 见提交记录。**A56 ⑬ 口径修订：开关只验实时预览回退与恢复，阅读模式始终渲染。**
 
 #296 审查修复轮（review-loops 第二次，同日，三只读子代理 + 主代理核实，12 项去重后全修复）：P1——planTableRowMove 行移动光标用旧目标行 lineFrom 加偏移，不等长行下前方槽位长度差未补偿、光标跨格漂移（探针实证），修复按置换后槽位文本累计新行首；P2——外部钳制补事务单 anchor spec 坍缩多光标，改逐 range 钳制；P3 批——钳制收窄为本笔替换区间内（不动远处网格行前缀光标）、move 类 dispatch 保多 range（moveSelectionSpec）、列移动前缀显形守恒、settings 注释七轮口径、tree.json 补登两个 browser 测试、契约测试标题计数对齐、reading 残缺判定全文 split 提为一次。验证（六例先红后绿）：全量单测/compile/契约/浏览器见提交记录。
+## 引用视图二期 P2-04——嵌入内部 Live 编辑、保存与撤销归属（#281，2026-10-03 实施待验收）
+
+- 交付范围：正文独占行嵌入卡片内部模式（默认跟随父面板、手动覆盖按引用位置记忆且父切换后保留）；内部 Live 经 LiveEditorInstance 绑定目标 B 的 DocumentSession（同一 B 只一份会话、端口双身份），普通输入只写 B、A 引用文本与 dirty 不动；焦点在嵌入内时 Ctrl+S 只保存 B（头部保存入口同效）、Ctrl+Z/Ctrl+Y 走 P2-01 已验证的激活路由（B 标签短暂切换后回 A，取舍已确认）；头部显示 B 名称与未保存 `·` 圆点，保存成功后消失；Reading 保持零写端口；可见性切换与释放不残留 EditorView／端口。悬停浮层内卡片锁定 Reading（P2-05 前无浮层内部 Live）。
+- 自动化记录（2026-10-03，工作树 codex/p2-04-embed-editing，TDD 25 项先红后绿）：全量单测 5179 项（新增 refEdit 协议/会话接线/嵌入 Live 共 30 例）；browser 新增 embedLive 8 场景（真实键盘键入、Ctrl+S/Ctrl+Z 焦点路由、外部同步、模式记忆、编辑器无泄漏）+ 嵌入族 8 套件与悬停/键位回归 6 套件全绿；1.82.3 真宿主定向集成 11/11（含 A 零推进、重复 seq、释放后写入零变化、CRLF 回读）；样式契约八项零失败；file-tree 补登 8 新文件。明细见票据执行记录（docs/specs/hover-embed-phase2-tickets/04-embed-target-editing.md）。
+- 人工待验：
+  1. **模式切换手感**：嵌入卡片头部模式按钮切换 Reading/Live——默认跟随父文档模式；手动切换后父文档再切模式，该卡片保持手动选择；同一目标的两处引用各自记忆互不串。
+  2. **内部编辑与 IME**：真实中文输入法在嵌入内部 Live 键入——只改 B；A 的引用文本与 A dirty 不受影响。
+  3. **保存与圆点**：嵌入内修改后头部 B 名称旁出现 `·`；焦点在嵌入内按 Ctrl+S 只保存 B、圆点消失；A 保持自身未保存状态。
+  4. **撤销观感**：嵌入内 Ctrl+Z——活动标签短暂切到 B 再回到 A（已确认取舍的可见代价）；A 自己的编辑历史不受波及。
+  5. **外部同步**：B 同时在普通文本标签打开时双向同步；焦点在 A 与嵌入间交错编辑，保存/撤销各归其主。
+  6. **泄漏观感**：嵌入切回 Reading、滚动离屏回收、关闭 A 后重开——无残留编辑器实例或异常交互面。
+- 已知边界与衔接：撤销路由激活 B 期间 A 的 webview 隐藏卸载、恢复后重载并自动重绑（stale 端口释放闭环已有集成例）——观感随 P2-05 一并评估；嵌入内部编辑器暂不挂孙卡/不接链接跳转/图片粘贴不劫持（P2-10/P2-11）；冲突暂停仅状态行提示（完整冲突界面归后续票）；悬停浮层内部 Live 归 P2-05。
