@@ -103,10 +103,10 @@ try {
   assert.ok(t1.rect.width > 0 && t1.rect.height > 0, '提示非零尺寸（真实绘制）')
   assert.equal(t1.display, 'block', '统一 tooltip 卡片显示态（--shown）')
   assert.equal(t1.focusable, true, '提示可聚焦（统一 tooltip 语义）')
-  // 几何：提示贴锚点下方（统一几何：下方优先）
+  // 几何：提示贴锚点上方（2026-10-02 用户裁定上优先；越缘翻转由几何单测钉）
   const anchorBox = await wikilink.boundingBox()
-  assert.ok(t1.rect.top >= (anchorBox?.y ?? 0) + (anchorBox?.height ?? 0) - 2,
-    `提示应位于锚点下方（提示 top ${t1.rect.top}，锚 bottom ${(anchorBox?.y ?? 0) + (anchorBox?.height ?? 0)}）`)
+  assert.ok(t1.rect.top + t1.rect.height <= (anchorBox?.y ?? 0) + 2,
+    `提示应位于锚点上方（提示 bottom ${t1.rect.top + t1.rect.height}，锚 top ${anchorBox?.y}）`)
   passed++
   console.log('[目标提示][PASS] 矩阵行2：默认组合无 Ctrl 出提示（绘制层实底+几何+内容+轻量请求）')
 

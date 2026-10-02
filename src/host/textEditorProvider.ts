@@ -1363,14 +1363,10 @@ export function createTextEditorProvider(
         openLink,
         openWikilink,
         readHoverTarget: readHoverTargetPort,
-        // #299 跳转目标提示轻量解析：与 readHoverTarget 同一解析语境，但
-        // 只解析不读正文（ports 只有 resolveVaultFile，无 openTextDocument）
+        // #299 跳转目标提示轻量解析：纯路径计算、零文件系统请求——不读
+        // 正文、不建读取与租约链路（用户裁定：诚实反映链接目标，不做存在性探测）
         resolveHoverTarget: (payload, report) => {
-          const access = hoverAccessContextOf(document)
-          resolveHoverTargetTip(payload, access, {
-            resolveVaultFile: (rawPath) =>
-              resolveVaultLinkFile(rawPath, access.resolve, statFileRealPath),
-          }).then(report)
+          resolveHoverTargetTip(payload, hoverAccessContextOf(document)).then(report)
         },
         readHoverSource: async (fsPath) => {
           try {

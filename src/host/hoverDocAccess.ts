@@ -35,7 +35,7 @@
 import * as path from 'node:path'
 import { NewlineCoordinator } from '../shared/newline'
 import { parseWikilinkInner } from '../shared/wikilink'
-import { isVaultPathInsideRoot, type VaultLinkFileResolution, type VaultLinkResolveContext } from '../shared/vaultLink'
+import { isVaultPathInsideRoot, planVaultLinkPath, type VaultLinkFileResolution, type VaultLinkResolveContext } from '../shared/vaultLink'
 import { classifyLinkTarget, planPathTextOf, splitHrefFragment } from './linkTarget'
 import { findBlockRange, findHeadingSectionRange } from './wikilinkTarget'
 import type { HoverPreviewFailReason, HoverPreviewScope } from '../shared/protocol'
@@ -272,18 +272,26 @@ export type HoverTargetTipOutcome =
   | { ok: true; relPath: string; anchor: string }
   | { ok: false }
 
+/**
+ * #299 跳转目标提示轻量解析：把悬停目标解析为「所属根内相对路径 + 源码
+ * 形态锚点」供提示显示。**纯路径计算、零文件系统请求**——提示诚实地把
+ * 链接目标反映出来：链接写什么就显示什么（无扩展名按双链默认补 .md 的
+ * 意图路径），目标文件是否存在、是否在工作区内打开（无工作区时根已回
+ * 退为文档父目录）均不影响位置呈现（2026-10-02 用户裁定）。只有形态学
+ * 非法（非链接/非法 wikilink/外部 scheme）与越出根边界（escape——无从
+ * 构成根内相对路径）静默不出。
+ */
 export async function resolveHoverTargetTip(
   spec: { target?: string; linkHref?: string; directTarget?: { fsPath: string; anchor?: string } },
   ctx: HoverDocAccessContext,
-  ports: Pick<HoverDocAccessPorts, 'resolveVaultFile'>,
 ): Promise<HoverTargetTipOutcome> {
   const relOf = ctx.resolve.isWindowsHost ? path.win32.relative : path.posix.relative
   const relPathOf = (fsPath: string): string =>
     relOf(ctx.rootFsPath, fsPath).replaceAll('\\', '/')
 
   if (spec.directTarget !== undefined) {
-    // 面板直接目标：fsPath 直取（与 readHoverDirectTarget 同一根内边界；
-    // 不读正文所以无 not-found 分态——fsPath 来自宿主快照身份）
+    // 面板直接目标：fsPath 直取（宿主快照身份，无形态学歧义；不读正文
+    // 所以无 not-found 分态）
     if (spec.directTarget.fsPath === '') {
       return { ok: false }
     }
@@ -298,6 +306,16 @@ export async function resolveHoverTargetTip(
     }
   }
 
+  // 链接目标的意图路径：候选规划取末位——无扩展名时即补 .md 的双链意图
+  // 候选，有扩展名时为唯一候选（自身）；escape（越界）无从呈现根内相对路径
+  const intentPathOf = (rawPath: string): string | null => {
+    const plan = planVaultLinkPath(rawPath, ctx.resolve)
+    if (plan.kind !== 'inside') {
+      return null
+    }
+    return plan.candidates[plan.candidates.length - 1] ?? null
+  }
+
   if (spec.linkHref !== undefined) {
     const classified = classifyLinkTarget(spec.linkHref, {
       docDir: ctx.resolve.docDir,
@@ -307,20 +325,18 @@ export async function resolveHoverTargetTip(
     if (classified.kind === 'external' || classified.kind === 'blocked') {
       return { ok: false }
     }
-    let fsPath: string
     if (classified.kind === 'anchor') {
       // 页内锚点：目标即来源文档自身（与 readHoverMdLinkTarget 同口径）
-      fsPath = ctx.sourceFsPath
-      return { ok: true, relPath: relPathOf(fsPath), anchor: `#${classified.fragment}` }
+      return { ok: true, relPath: relPathOf(ctx.sourceFsPath), anchor: `#${classified.fragment}` }
     }
     const { pathText } = splitHrefFragment(spec.linkHref.trim())
-    const resolution = await ports.resolveVaultFile(planPathTextOf(pathText))
-    if (resolution.kind !== 'target') {
+    const fsPath = intentPathOf(planPathTextOf(pathText))
+    if (fsPath === null) {
       return { ok: false }
     }
     return {
       ok: true,
-      relPath: relPathOf(resolution.fsPath),
+      relPath: relPathOf(fsPath),
       anchor: classified.fragment ? `#${classified.fragment}` : '',
     }
   }
@@ -332,13 +348,13 @@ export async function resolveHoverTargetTip(
     }
     let fsPath: string
     if (parsed.path === '') {
-      fsPath = ctx.sourceFsPath // 本文件锚点：不查文件系统（规则不特判，同样带完整路径）
+      fsPath = ctx.sourceFsPath // 本文件锚点：不特判，同样带完整路径
     } else {
-      const resolution = await ports.resolveVaultFile(parsed.path)
-      if (resolution.kind !== 'target') {
+      const planned = intentPathOf(parsed.path)
+      if (planned === null) {
         return { ok: false }
       }
-      fsPath = resolution.fsPath
+      fsPath = planned
     }
     const anchor = parsed.heading !== null
       ? `#${parsed.heading}`

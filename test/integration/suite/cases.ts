@@ -978,6 +978,11 @@ interface ViewState {
     fm?: 'none' | 'collapsed' | 'expanded'
     imageSrcs?: string[]
   }
+  /** #299 跳转目标提示观测：在场与路径文本 */
+  targetTip?: {
+    open: boolean
+    text: string
+  }
   /** #222 嵌入卡片观测：在场卡片逐枚（inner/state/note/blocks/scope/fm/限高） */
   readingEmbed?: Array<{
     inner: string
@@ -11871,6 +11876,47 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(finalState.appliedEdits === 0, `全链路零 applyEdit（实际 ${finalState.appliedEdits}）`)
   }],
 
+  // #299 跳转目标提示真宿主链路：Live 默认组合（总开关开、直接悬停关、
+  // 提示开、无修饰键）悬停 → 稳定计时到期出站 hover.target.resolve →
+  // documentSession 分发 → 宿主纯路径计算（零文件系统请求）→
+  // hover.target.resolved 回包 → 提示显示所属根内相对路径；浮层不开
+  // （两路径分工）；不存在目标照常显示意图路径；离开收起；零 applyEdit
+  // 零写盘
+  ['跳转目标提示：Live 默认组合悬停出路径、宿主轻量解析回包与浮层不开（#299）', async () => {
+    await openWithEditor('悬停预览.md')
+    await waitSessionReady('悬停预览.md')
+    const uri = wsUri('悬停预览.md').toString()
+    await waitViewState('悬停预览.md', (v) => v.viewMode === 'live' && (v.liveWikilinkCount ?? 0) >= 1)
+    const before = await readDisk('悬停预览.md')
+
+    // 悬停第 0 个双链（无修饰键，默认组合；mouseover 经 Live 容器委托
+    // ——与用户悬停同一处理器链路）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', link: 'live-wikilink', index: 0 })
+    const shown = await waitViewState('悬停预览.md', (v) =>
+      v.targetTip?.open === true && v.targetTip.text.length > 0)
+    assert(shown.targetTip?.text === '目标笔记.md',
+      `提示应显示所属根内相对路径（实际 ${JSON.stringify(shown.targetTip)}）`)
+    assert(shown.hoverPreview?.open !== true, `浮层不应打开——两路径分工（实际 ${shown.hoverPreview?.open}）`)
+
+    // 不存在目标照常显示意图路径（2026-10-02 用户裁定：纯计算零存在性探测）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', link: 'live-wikilink', index: 1 })
+    const missing = await waitViewState('悬停预览.md', (v) =>
+      v.targetTip?.open === true && v.targetTip.text.length > 0 && v.targetTip.text !== shown.targetTip?.text)
+    assert(missing.targetTip?.text === '悬停缺失目标.md',
+      `不存在目标应照常显示意图路径（实际 ${JSON.stringify(missing.targetTip)}）`)
+
+    // 离开链接 → 提示收起
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', link: 'live-wikilink', index: 1 })
+    await waitViewState('悬停预览.md', (v) => v.targetTip?.open === false)
+
+    assert(await readDisk('悬停预览.md') === before, '轻量解析不得改写正文磁盘')
+    const tipState = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(tipState.appliedEdits === 0, `全链路零 applyEdit（实际 ${tipState.appliedEdits}）`)
+  }],
+
   // #219 局部范围与普通链接矩阵：章节/块 scope 与块数、CRLF+中文空格路径
   // 目标、页内锚点（目标即来源文档）、失效锚点分态、普通链接 linkHref
   // 链路、外站预滤、零 applyEdit。目标文档「悬停 局部目标.md」全文 7 块
@@ -11938,7 +11984,13 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(anchor.hoverPreview?.note === '悬停预览.md',
       `页内锚点目标应为来源文档（实际 ${anchor.hoverPreview?.note}）`)
 
-    // 外站链接（md index 3）：预滤不开浮层（等待超过开延迟+读取余量后仍无）
+    // 外站链接（md index 3）：预滤不开浮层（等待超过开延迟+读取余量后仍无）。
+    // 先离开 index 2 还原真实事件序列：真实鼠标移到另一链接必先派发
+    // mouseout（旧浮层由 leave 关闭）；#299 起非法目标（外部 scheme）不进
+    // 浮层入口，纯 enter 序列不再借「换锚先关旧」的入口副作用关旧浮层
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 2, link: 'md' })
+    await waitViewState('悬停预览.md', (v) => v.hoverPreview?.open === false)
     await vscode.commands.executeCommand(CMD.postToPanel, uri,
       { kind: 'hover.test.pointer', action: 'enter', index: 3, link: 'md' })
     await new Promise((r) => setTimeout(r, 1000))

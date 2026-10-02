@@ -189,6 +189,7 @@ import {
   setTargetTipContext,
   targetTipAnchorEnter,
   targetTipAnchorLeave,
+  targetTipProbe,
 } from './targetTip'
 import { EmbedCardManager, EMBED_CARD_CLASS_NAMES } from './embedCard'
 import { GRAPHIC_LANG_ATTR, MERMAID_CLASS_NAMES, MERMAID_CODE_ATTR, MERMAID_STATE_ATTR } from '../shared/mermaid'
@@ -3223,6 +3224,9 @@ export class WebviewSyncController {
       fmPopoverOpen: isFmPopoverOpen(),
       // #218 悬停预览观测：浮层开闭、内容态与块数（集成断言用）
       hoverPreview: hoverPopupProbe(),
+      // #299 跳转目标提示观测：在场与路径文本（集成断言用——真实宿主
+      // 悬停链路的观测面，轻量解析回包经此可见）
+      targetTip: targetTipProbe(),
       // #222 嵌入卡片观测：在场卡片的状态/目标/块数/fm/限高（集成断言用）
       readingEmbed: this.embedCards?.probe() ?? [],
       // #223 Live 嵌入显隐观测：嵌入表逐枚的源码显形态（集成断言用）

@@ -735,6 +735,11 @@ export type WebviewToHost =
           mountedEver: number; unmountedEver: number
         } | null
       }
+      /** #299 跳转目标提示观测：在场与路径文本（旧 webview 缺省）。 */
+      targetTip?: {
+        open: boolean
+        text: string
+      }
       /** #222 嵌入卡片观测：在场卡片逐枚的嵌入目标原文、状态
        *  （loading/content/error）、目标标识（成功为根内相对路径/失败为
        *  错误文案）、内容块数、语义范围、属性区三态与限高（旧 webview 缺省）。
@@ -2744,7 +2749,7 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         (v.backlinks === undefined || isBacklinksProbe(v.backlinks)) &&
         (v.outlinks === undefined || isOutlinksProbe(v.outlinks)) &&
         (v.fmPopoverOpen === undefined || typeof v.fmPopoverOpen === 'boolean') &&
-        (v.hoverPreview === undefined || (isObject(v.hoverPreview) &&
+          (v.hoverPreview === undefined || (isObject(v.hoverPreview) &&
           typeof v.hoverPreview.open === 'boolean' &&
           (v.hoverPreview.state === 'loading' || v.hoverPreview.state === 'content' || v.hoverPreview.state === 'error') &&
           isString(v.hoverPreview.note) &&
@@ -2755,6 +2760,9 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
             v.hoverPreview.fm === 'collapsed' || v.hoverPreview.fm === 'expanded') &&
           (v.hoverPreview.imageSrcs === undefined ||
             (Array.isArray(v.hoverPreview.imageSrcs) && v.hoverPreview.imageSrcs.every(isString))))) &&
+        (v.targetTip === undefined || (isObject(v.targetTip) &&
+          typeof v.targetTip.open === 'boolean' &&
+          isString(v.targetTip.text))) &&
         (v.readingEmbed === undefined ||
           (Array.isArray(v.readingEmbed) && v.readingEmbed.every((e: unknown) =>
             isObject(e) &&

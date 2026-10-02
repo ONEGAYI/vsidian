@@ -127,13 +127,16 @@ function ensureContainer(): HTMLElement {
   return container
 }
 
-/** 定位：统一几何模块（居中优先 + 上下翻转 + 视口钳制） */
+/** 定位：统一几何模块（居中优先 + 视口钳制；垂直上优先、放不下翻下——
+ * 2026-10-02 用户裁定：链接下方常是后续正文与链接，气泡向上弹出不遮挡
+ * 阅读动线；统一体系其余场景仍默认往下） */
 function place(anchor: HTMLElement, el: HTMLElement): void {
   const rect = anchor.getBoundingClientRect()
   const plan = planTooltipPlacement({
     anchor: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
     tip: { width: el.offsetWidth, height: el.offsetHeight },
     viewport: { width: window.innerWidth, height: window.innerHeight },
+    preferVertical: 'above',
   })
   el.style.left = `${plan.left}px`
   el.style.top = `${plan.top}px`
