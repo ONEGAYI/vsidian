@@ -56,6 +56,9 @@ import { RefContentInstance, type RefContentMount, type RefLoadedContent } from 
 import { createReadingContainer, READING_CLASS_NAMES } from './readingView'
 import type { ReadingViewStats } from './readingVirtualView'
 import { claimPopup, releasePopup } from './popupMutex'
+// #299 跳转目标提示联动：浮层打开路径收起提示（「浮层开则提示关」，
+// 含悬停中补按 Ctrl 的立即消失——不进互斥锁的行为面表达）
+import { closeTargetTip } from './targetTip'
 import { OPEN_ICON } from './embedCard'
 import { WIKILINK_CLASS_NAMES } from '../shared/wikilink'
 import {
@@ -420,6 +423,7 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
   if (!context || !session?.sessionId || !session.docUri || spec === null) {
     return
   }
+  closeTargetTip() // #299 浮层打开：提示收起（键盘/显式入口兜底联动）
   closeHoverPopup()
   const container = document.createElement('div')
   container.className = HOVER_POPUP_CLASS_NAMES.popup
@@ -701,6 +705,9 @@ export function hoverPreviewAnchorEnter(anchor: HTMLElement, spec?: HoverPopupTa
   if (context?.hoverPreviewEnabled?.() === false) {
     return
   }
+  // #299 浮层将现：跳转目标提示立即收起（含悬停中补按 Ctrl 的补触发
+  // 路径——矩阵「补触发开 → 立即消失」，不等开延迟）
+  closeTargetTip()
   if (popup && popup.anchor === anchor) {
     cancelCloseTimer()
     return

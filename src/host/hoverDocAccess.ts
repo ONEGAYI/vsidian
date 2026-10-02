@@ -271,6 +271,99 @@ export async function readHoverMdLinkTarget(
  *
  * 全程无副作用：不 openWith、不定位、不提示、不写文档。
  */
+/**
+ * #299 跳转目标提示轻量解析：把悬停目标解析为「所属根内相对路径 + 源码
+ * 形态锚点」供提示显示。**只解析不读正文**——路径解析与存在性探测
+ * （stat 级，经 resolveVaultFile 端口）之外零 IO：不 openTextDocument、
+ * 不进 hover.request/watch 的读取与租约链路（提示只报位置不展内容，
+ * 轻量是硬边界）。目标语义与 readHoverDocTarget / readHoverMdLinkTarget /
+ * readHoverDirectTarget 同源（同一形态学、同一解析端口），仅省去正文
+ * 读取与范围收窄。解析失败（not-found/escape/unsupported/空串 fsPath）
+ * 一律 ok:false——webview 侧失败不出提示（不区分原因，无就地错误文案）。
+ */
+export type HoverTargetTipOutcome =
+  | { ok: true; relPath: string; anchor: string }
+  | { ok: false }
+
+export async function resolveHoverTargetTip(
+  spec: { target?: string; linkHref?: string; directTarget?: { fsPath: string; anchor?: string } },
+  ctx: HoverDocAccessContext,
+  ports: Pick<HoverDocAccessPorts, 'resolveVaultFile'>,
+): Promise<HoverTargetTipOutcome> {
+  const relOf = ctx.resolve.isWindowsHost ? path.win32.relative : path.posix.relative
+  const relPathOf = (fsPath: string): string =>
+    relOf(ctx.rootFsPath, fsPath).replaceAll('\\', '/')
+
+  if (spec.directTarget !== undefined) {
+    // 面板直接目标：fsPath 直取（与 readHoverDirectTarget 同一根内边界；
+    // 不读正文所以无 not-found 分态——fsPath 来自宿主快照身份）
+    if (spec.directTarget.fsPath === '') {
+      return { ok: false }
+    }
+    if (!isVaultPathInsideRoot(spec.directTarget.fsPath, ctx.resolve)) {
+      return { ok: false }
+    }
+    return {
+      ok: true,
+      relPath: relPathOf(spec.directTarget.fsPath),
+      // 锚点原文（标题或 ^块id）直接前缀 `#`——与源码形态一致
+      anchor: spec.directTarget.anchor ? `#${spec.directTarget.anchor}` : '',
+    }
+  }
+
+  if (spec.linkHref !== undefined) {
+    const classified = classifyLinkTarget(spec.linkHref, {
+      docDir: ctx.resolve.docDir,
+      rootDir: ctx.resolve.rootDir,
+      isWindowsHost: ctx.resolve.isWindowsHost,
+    })
+    if (classified.kind === 'external' || classified.kind === 'blocked') {
+      return { ok: false }
+    }
+    let fsPath: string
+    if (classified.kind === 'anchor') {
+      // 页内锚点：目标即来源文档自身（与 readHoverMdLinkTarget 同口径）
+      fsPath = ctx.sourceFsPath
+      return { ok: true, relPath: relPathOf(fsPath), anchor: `#${classified.fragment}` }
+    }
+    const { pathText } = splitHrefFragment(spec.linkHref.trim())
+    const resolution = await ports.resolveVaultFile(planPathTextOf(pathText))
+    if (resolution.kind !== 'target') {
+      return { ok: false }
+    }
+    return {
+      ok: true,
+      relPath: relPathOf(resolution.fsPath),
+      anchor: classified.fragment ? `#${classified.fragment}` : '',
+    }
+  }
+
+  if (spec.target !== undefined) {
+    const parsed = parseWikilinkInner(spec.target.trim())
+    if (!parsed) {
+      return { ok: false }
+    }
+    let fsPath: string
+    if (parsed.path === '') {
+      fsPath = ctx.sourceFsPath // 本文件锚点：不查文件系统（规则不特判，同样带完整路径）
+    } else {
+      const resolution = await ports.resolveVaultFile(parsed.path)
+      if (resolution.kind !== 'target') {
+        return { ok: false }
+      }
+      fsPath = resolution.fsPath
+    }
+    const anchor = parsed.heading !== null
+      ? `#${parsed.heading}`
+      : parsed.blockId !== null
+        ? `#^${parsed.blockId}`
+        : ''
+    return { ok: true, relPath: relPathOf(fsPath), anchor }
+  }
+
+  return { ok: false }
+}
+
 export async function readHoverDirectTarget(
   direct: { fsPath: string; anchor?: string },
   ctx: HoverDocAccessContext,

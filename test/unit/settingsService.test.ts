@@ -69,6 +69,8 @@ describe('快照读取', () => {
       'hover.enabled': true,
       // #221 Live 直接悬停（默认关 = Ctrl+悬停）
       'hover.liveDirect': false,
+      // #299 跳转目标提示（默认开 = 升级后新提示直接可用）
+      'hover.targetTip': true,
       // #239 中文分词三件：引擎默认内置（Intl.Segmenter）、下载源默认
       // jsdelivr、自定义源基址默认空
       'editor.wordSegmentEngine': 'builtin',

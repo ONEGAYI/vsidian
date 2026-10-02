@@ -87,6 +87,9 @@ export const zhCn: Record<MessageKey, string> = {
   /** #298 悬停预览总开关（hover.enabled） */
   'setting.hoverEnabled.title': '悬停预览引用文档',
   'setting.hoverEnabled.description': '指针悬停链接时弹出引用文档预览浮层，覆盖阅读模式正文、实时预览与反链/出链面板（含浮层内子引用）。关闭后所有悬停路径均不再弹出浮层；正文嵌入卡片不受影响。',
+  /** #299 跳转目标提示（hover.targetTip） */
+  'setting.hoverTargetTip.title': '悬停显示跳转目标',
+  'setting.hoverTargetTip.description': '悬停在引用上且不会弹出引用视图浮层时（如实时预览中未按住 Ctrl，或悬停预览总开关已关闭），短暂停留后显示目标位置的路径提示。独立于「悬停预览引用文档」总开关——关闭总开关后提示仍可用。',
   /** #221 Live 悬停触发方式（Ctrl+悬停 vs 直接悬停）；#298 改名并重写描述 */
   'setting.hoverLiveDirect.title': '实时预览中直接悬停显示',
   'setting.hoverLiveDirect.description': '开启后在实时预览中指针悬停链接即可直接打开引用视图浮层，无需修饰键；关闭时需按住 Ctrl（macOS 为 Cmd）再悬停，或悬停中补按 Ctrl。关闭「悬停预览引用文档」总开关后本设置不再生效。',

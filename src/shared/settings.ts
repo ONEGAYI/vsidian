@@ -296,6 +296,18 @@ export const HOVER_LIVE_DIRECT_KEY = 'hover.liveDirect'
 export const HOVER_LIVE_DIRECT_DEFAULT = false
 
 /**
+ * #299「悬停显示跳转目标」开关：悬停在引用上且本次悬停不会打开引用
+ * 视图浮层时，稳定悬停后显示目标位置小浮标（统一自绘悬停提示体系承载，
+ * 内容为目标相对其所属根的完整路径 + 源码形态锚点）。**独立于
+ * hover.enabled 总开关**、不登记依赖——总开关关闭时提示反而成为悬停
+ * 的唯一反馈，不应随之灰化。键与消费方（syncController 的 targetTip
+ * 投影与 targetTip 模块门控）成对导出。
+ */
+export const HOVER_TARGET_TIP_KEY = 'hover.targetTip'
+/** 默认 true：升级后新提示直接可用（#299 升级零迁移） */
+export const HOVER_TARGET_TIP_DEFAULT = true
+
+/**
  * #161 图片存放子路径（自由文本，默认 assets）：workspace-root /
  * relative-to-file 模式下拼在根后；same-dir 模式不生效（描述文案写明）。
  * 目录解析拒绝绝对路径与 `..` 越界（违规粘贴失败通知，不落盘）。
@@ -497,6 +509,16 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     default: HOVER_LIVE_DIRECT_DEFAULT,
     titleKey: 'setting.hoverLiveDirect.title',
     descriptionKey: 'setting.hoverLiveDirect.description',
+  },
+  {
+    // #299 跳转目标提示（hover.* 域 → 编辑器页「引用视图」组：直接悬停
+    // 显示之后、嵌入展开层级之前——组内第三项；独立于总开关不登记
+    // dependsOn，总开关关闭时提示是悬停的唯一反馈、不随其灰化）
+    key: HOVER_TARGET_TIP_KEY,
+    type: 'boolean',
+    default: HOVER_TARGET_TIP_DEFAULT,
+    titleKey: 'setting.hoverTargetTip.title',
+    descriptionKey: 'setting.hoverTargetTip.description',
   },
   {
     // #244 嵌入展开层级（embed.* 域 → 编辑器页「引用视图」组：#298 自

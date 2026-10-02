@@ -139,8 +139,9 @@ try {
     assert.equal(iconPaint[6].dataIcon, 'wordSegment')
     assert.match(iconPaint[6].backgroundImage, /data:image\/svg\+xml/u, '分词 SVG 应由样式真实加载')
     assert.equal(new Set(iconPaint.map((g) => g.rowHeight)).size, 1, '各组标题行高应一致（图标不撑行）')
-    // #298 引用视图组：组内四行用户可见文案与顺序（总开关 → 改名后的直接
-    // 悬停显示 → 嵌入层级 → 嵌入高度），总开关默认开并走真实保存链路
+    // #298/#299 引用视图组：组内五行用户可见文案与顺序（总开关 → 改名后
+    // 的直接悬停显示 → 跳转目标提示 → 嵌入层级 → 嵌入高度），总开关默认
+    // 开并走真实保存链路
     const refviewGroup = page.locator('.vsidian-settings-group').filter({
       has: page.locator('.vsidian-settings-group-title', { hasText: zhCn['settings.groupRefview'] }) })
     await refviewGroup.waitFor()
@@ -148,9 +149,10 @@ try {
     assert.deepEqual(refviewTitles.map((t) => t.trim()), [
       zhCn['setting.hoverEnabled.title'],
       zhCn['setting.hoverLiveDirect.title'],
+      zhCn['setting.hoverTargetTip.title'],
       zhCn['setting.embedMaxDepth.title'],
       zhCn['setting.embedMaxHeight.title'],
-    ], '引用视图组内顺序：总开关 → 直接悬停显示 → 嵌入展开层级 → 嵌入最大高度')
+    ], '引用视图组内顺序：总开关 → 直接悬停显示 → 跳转目标提示 → 嵌入展开层级 → 嵌入最大高度')
     assert.equal(await refviewGroup.getByRole('checkbox', { name: zhCn['setting.hoverLiveDirect.title'], exact: true })
       .isVisible(), true, '改名后的「实时预览中直接悬停显示」条目在组内呈现')
     const hoverEnabledBox = refviewGroup.getByRole('checkbox', { name: zhCn['setting.hoverEnabled.title'], exact: true })

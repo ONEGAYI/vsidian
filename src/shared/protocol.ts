@@ -503,6 +503,13 @@ export type HostToWebview =
       generation: number
     }
   | { kind: 'hover.watch.rejected'; fsPath: string; instanceId: string; reason: 'capacity' | 'source'; sourceLeaseId?: string }
+  /** #299 跳转目标提示解析结果（hover.target.resolve 的应答，reqId 配对）：
+   *  成功携带所属根内相对路径（`/` 分隔、含扩展名）与源码形态锚点
+   *  （`#标题` / `#^块id`；无锚点缺省）；webview 侧拼接 `relPath + anchor`
+   *  作为提示内容。失败仅 ok:false（无原因码——提示失败即静默不出，
+   *  不需要就地错误文案）。只读消息 */
+  | { kind: 'hover.target.resolved'; reqId: number; ok: true; relPath: string; anchor?: string }
+  | { kind: 'hover.target.resolved'; reqId: number; ok: false }
   /** 索引维护状态（#198，设置页消费）：排除模式（当前生效 + 默认值）、
    *  维护操作状态与进度、最近一次操作结果反馈。设置页经 index.get 拉取；
    *  宿主状态变更（模式保存/进度推进/操作完成）后推送。available=false
@@ -910,6 +917,27 @@ export type WebviewToHost =
       instanceId: string
     }
   | { kind: 'hover.source.release'; sessionId: string; docUri: string; sourceLeaseId: string }
+  /** #299 跳转目标提示轻量解析（只读消息，**不进 edit.request 通道**）：
+   *  webview 侧「浮层不将现」的悬停场景请求宿主把目标解析为所属根内
+   *  相对路径，应答经 hover.target.resolved（reqId 配对）。载荷三形态与
+   *  hover.request 的目标解析口径同源（target 双链原文 / linkHref 普通
+   *  链接 href / directTarget 面板直接目标）择一；**只解析不读正文**——
+   *  宿主仅做路径解析与存在性探测（stat 级），不 openTextDocument、不
+   *  建立 hover.request/watch 的文档读取与租约链路（提示只报位置不展
+   *  内容，轻量是硬边界）。解析失败（not-found/escape/不支持形态）回
+   *  ok:false，webview 侧不出提示 */
+  | {
+      kind: 'hover.target.resolve'
+      sessionId: string
+      docUri: string
+      reqId: number
+      /** 双链目标原文（`|` 之前；缺省取其余两形态之一） */
+      target?: string
+      /** 普通链接 href 原文 */
+      linkHref?: string
+      /** 面板直接目标（反链/出链条目；空串 fsPath = 断链条目） */
+      directTarget?: { fsPath: string; anchor?: string }
+    }
   /** 代码块复制请求（#81）：卡片头部复制按钮点击 → 宿主剪贴板 API 写入。
    *  text 为代码体原文（两条围栏行之间，不含围栏与 info string），恒为
    *  LF（CM6 LF 模型）；宿主按文档 EOL 归一后写剪贴板（webview 不触碰
@@ -2892,6 +2920,21 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'hover.source.release':
       return isString(v.sessionId) && isString(v.docUri) &&
         typeof v.sourceLeaseId === 'string' && v.sourceLeaseId.length > 0
+    case 'hover.target.resolve':
+      // #299 目标提示轻量解析：会话守卫 + reqId + 三形态目标载荷
+      //（target/linkHref/directTarget 与 hover.request 同口径）
+      return (
+        isString(v.sessionId) &&
+        isString(v.docUri) &&
+        isNonNegativeInt(v.reqId) &&
+        (v.target === undefined || isString(v.target)) &&
+        (v.linkHref === undefined || isString(v.linkHref)) &&
+        (v.directTarget === undefined ||
+          (typeof v.directTarget === 'object' && v.directTarget !== null &&
+            typeof (v.directTarget as { fsPath?: unknown }).fsPath === 'string' &&
+            ((v.directTarget as { anchor?: unknown }).anchor === undefined ||
+              typeof (v.directTarget as { anchor?: unknown }).anchor === 'string')))
+      )
     case 'perf.report':
       return (
         isNonNegativeInt(v.typingRounds) &&
@@ -3350,6 +3393,15 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         typeof v.instanceId === 'string' && v.instanceId.length > 0 &&
         (v.sourceLeaseId === undefined || (typeof v.sourceLeaseId === 'string' && v.sourceLeaseId.length > 0)) &&
         (v.reason === 'capacity' || v.reason === 'source')
+    case 'hover.target.resolved':
+      // #299 目标提示解析结果：reqId 配对；成功形态必带非空相对路径，
+      // 锚点为源码形态字符串（`#标题` / `#^块id`）或缺省
+      if (v.ok === false) {
+        return isNonNegativeInt(v.reqId)
+      }
+      return isNonNegativeInt(v.reqId) &&
+        typeof v.relPath === 'string' && v.relPath.length > 0 &&
+        (v.anchor === undefined || typeof v.anchor === 'string')
     case 'outlinks.test.click':
       return true
     case 'outlinks.test.itemClick':

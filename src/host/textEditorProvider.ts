@@ -88,6 +88,7 @@ import {
   readHoverDocTarget,
   readHoverDirectTarget,
   readHoverMdLinkTarget,
+  resolveHoverTargetTip,
   type HoverDocAccessContext,
   type HoverReadOutcome,
 } from './hoverDocAccess'
@@ -1362,6 +1363,15 @@ export function createTextEditorProvider(
         openLink,
         openWikilink,
         readHoverTarget: readHoverTargetPort,
+        // #299 跳转目标提示轻量解析：与 readHoverTarget 同一解析语境，但
+        // 只解析不读正文（ports 只有 resolveVaultFile，无 openTextDocument）
+        resolveHoverTarget: (payload, report) => {
+          const access = hoverAccessContextOf(document)
+          resolveHoverTargetTip(payload, access, {
+            resolveVaultFile: (rawPath) =>
+              resolveVaultLinkFile(rawPath, access.resolve, statFileRealPath),
+          }).then(report)
+        },
         readHoverSource: async (fsPath) => {
           try {
             const source = await vscode.workspace.openTextDocument(vscode.Uri.file(fsPath))

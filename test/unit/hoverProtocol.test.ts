@@ -376,3 +376,41 @@ it('#242 来源租约字段兼容旧协议，非法token与retainSource整体拒
   expect(isWebviewToHost({ ...watch, sourceLeaseId: 'lease-1' })).toBe(true)
   expect(isWebviewToHost({ ...watch, sourceLeaseId: {} })).toBe(false)
 })
+
+
+describe('跳转目标提示消息协议（#299：hover.target.resolve / hover.target.resolved）', () => {
+  it('合法三形态出站请求放行（target 双链 / linkHref 普通链接 / directTarget 面板直接目标）', () => {
+    const base = {
+      kind: 'hover.target.resolve' as const,
+      sessionId: 'panel-1',
+      docUri: 'file:///d%3A/notes/a.md',
+      reqId: 1,
+    }
+    expect(isWebviewToHost({ ...base, target: '目标笔记' })).toBe(true)
+    expect(isWebviewToHost({ ...base, linkHref: 'b.md#锚' })).toBe(true)
+    expect(isWebviewToHost({ ...base, directTarget: { fsPath: 'D:/notes/c.md', anchor: '^blk' } })).toBe(true)
+  })
+
+  it('出站请求非法形态整体拒绝（缺会话守卫 / 非法 reqId / 载荷形态错误）', () => {
+    expect(isWebviewToHost({ kind: 'hover.target.resolve', docUri: 'x', reqId: 1 })).toBe(false)
+    expect(isWebviewToHost({ kind: 'hover.target.resolve', sessionId: 's', reqId: 1 })).toBe(false)
+    expect(isWebviewToHost({ kind: 'hover.target.resolve', sessionId: 's', docUri: 'x', reqId: -1 })).toBe(false)
+    expect(isWebviewToHost({ kind: 'hover.target.resolve', sessionId: 's', docUri: 'x', reqId: 1, target: 42 })).toBe(false)
+    expect(isWebviewToHost({
+      kind: 'hover.target.resolve', sessionId: 's', docUri: 'x', reqId: 1,
+      directTarget: { fsPath: 7 },
+    })).toBe(false)
+  })
+
+  it('应答两形态放行：成功必带非空 relPath（anchor 可选），失败仅 ok:false', () => {
+    expect(isHostToWebview({ kind: 'hover.target.resolved', reqId: 1, ok: true, relPath: 'sub/b.md' })).toBe(true)
+    expect(isHostToWebview({ kind: 'hover.target.resolved', reqId: 1, ok: true, relPath: 'b.md', anchor: '#标题' })).toBe(true)
+    expect(isHostToWebview({ kind: 'hover.target.resolved', reqId: 1, ok: false })).toBe(true)
+  })
+
+  it('应答非法形态整体拒绝（成功缺 relPath / 空 relPath / anchor 类型错误）', () => {
+    expect(isHostToWebview({ kind: 'hover.target.resolved', reqId: 1, ok: true })).toBe(false)
+    expect(isHostToWebview({ kind: 'hover.target.resolved', reqId: 1, ok: true, relPath: '' })).toBe(false)
+    expect(isHostToWebview({ kind: 'hover.target.resolved', reqId: 1, ok: true, relPath: 'b.md', anchor: 5 })).toBe(false)
+  })
+})

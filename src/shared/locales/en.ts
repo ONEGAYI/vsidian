@@ -102,6 +102,9 @@ export const en = {
   /** #298 hover preview master switch (hover.enabled) */
   'setting.hoverEnabled.title': 'Preview references on hover',
   'setting.hoverEnabled.description': 'Point at a link to open the reference preview popup — covers the reading view body, the live preview, and the backlink/outlink panels (sub-references inside the popup included). Turn off to stop every hover path from opening the popup; embeds written in the note body are not affected.',
+  /** #299 jump target tip (hover.targetTip) */
+  'setting.hoverTargetTip.title': 'Show jump target on hover',
+  'setting.hoverTargetTip.description': 'When hovering a reference would not open the preview popup (for example without holding Ctrl in the live view, or while the hover preview master switch is off), show a brief path tip for the target location after a short dwell. Independent of "Preview references on hover" — the tip stays available with the master switch off.',
   /** #221 Live hover trigger (Ctrl+hover vs direct hover); #298 renamed + rewritten */
   'setting.hoverLiveDirect.title': 'Show previews directly on hover in the live view',
   'setting.hoverLiveDirect.description': 'Point at a link in the live preview to open the reference popup directly, without a modifier key. When off, hold Ctrl (Cmd on macOS) while hovering, or press Ctrl mid-hover. Has no effect while "Preview references on hover" is off.',

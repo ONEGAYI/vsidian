@@ -466,13 +466,15 @@ describe('分组重组二轮还原（#163 验收反馈：侧栏只留常规/编�
     ])
   })
 
-  it('引用视图组（#298）组内顺序：总开关 → 直接悬停显示 → 嵌入展开层级 → 嵌入最大高度', () => {
+  it('引用视图组（#298/#299）组内顺序：总开关 → 直接悬停显示 → 跳转目标提示 → 嵌入展开层级 → 嵌入最大高度', () => {
     const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
     clickNav(parent, zhCn['settings.editorCategory'])
     expect(groupItemTitles(parent, zhCn['settings.groupRefview'])).toEqual([
       zhCn['setting.hoverEnabled.title'],
       // #298 改名后标题经同一词条键取词（值见 settings.test 词条契约）
       zhCn['setting.hoverLiveDirect.title'],
+      // #299 跳转目标提示：独立于总开关不灰化（词条见 settings.test 注册契约）
+      zhCn['setting.hoverTargetTip.title'],
       // #222/#244 迁组：embed 两项取值/范围/生效行为零迁移（仅呈现位置变化）
       zhCn['setting.embedMaxDepth.title'],
       zhCn['setting.embedMaxHeight.title'],
