@@ -577,6 +577,72 @@ try {
   passed++
   console.log('[全入口][PASS] 长链接全宽：Ctrl/直接悬停 + 别名与相邻目标 + 修饰键后按 + 键盘边界')
 
+  // ---- 场景 R：#298 悬停总开关（hover.enabled）关闭——全域悬停路径前置拦截 ----
+  // 关闭后 Live 直接悬停、Ctrl+悬停、悬停中补按 Ctrl、反链面板条目全部
+  // 不开浮层且零读取请求；键盘命令为用户显式操作不在悬停路径清单内、仍可
+  // 打开；重开总开关后悬停路径恢复（门控只辖「出现」）。正文嵌入不受总
+  // 开关影响由 readingEmbed 套件全程在开关关闭下回归钉住。
+  await page.mouse.move(60, 500)
+  await escClose()
+  await page.evaluate(() => window.applyEntrySettings({ 'hover.enabled': false, 'hover.liveDirect': true }))
+  const reqCountR = (await hoverRequests()).length
+  // R1 直接悬停（liveDirect 开）不开
+  await wikilinkDeco().hover()
+  await page.waitForTimeout(OPEN_WAIT)
+  popup = await page.evaluate(() => window.readHoverPopup())
+  assert.equal(popup.open, false, '总开关关闭：Live 直接悬停不开浮层')
+  await page.mouse.move(60, 500)
+  await page.waitForTimeout(120)
+  // R2 Ctrl+悬停不开
+  await page.keyboard.down('Control')
+  await wikilinkDeco().hover()
+  await page.waitForTimeout(OPEN_WAIT)
+  popup = await page.evaluate(() => window.readHoverPopup())
+  assert.equal(popup.open, false, '总开关关闭：Ctrl+悬停不开浮层')
+  await page.keyboard.up('Control')
+  await page.mouse.move(60, 500)
+  await page.waitForTimeout(120)
+  // R3 悬停中补按 Ctrl 不补触发（先无修饰悬停、再按下修饰键）
+  await wikilinkDeco().hover()
+  await page.waitForTimeout(OPEN_WAIT)
+  await page.keyboard.down('Control')
+  await page.waitForTimeout(OPEN_WAIT)
+  popup = await page.evaluate(() => window.readHoverPopup())
+  assert.equal(popup.open, false, '总开关关闭：悬停中补按 Ctrl 不补触发')
+  await page.keyboard.up('Control')
+  await page.mouse.move(60, 500)
+  await page.waitForTimeout(120)
+  // R4 反链面板条目悬停不开（面板入口不随正文模式改变触发规则）——
+  // 侧栏自场景 F 起保持开启（场景 N 切到出链面板），直接切回反链面板
+  await page.locator('.vsidian-backlinks-toggle').click()
+  await page.locator('.vsidian-backlink-item').first().waitFor()
+  await page.locator('.vsidian-backlink-item').first().hover()
+  await page.waitForTimeout(OPEN_WAIT)
+  popup = await page.evaluate(() => window.readHoverPopup())
+  assert.equal(popup.open, false, '总开关关闭：反链面板条目悬停不开浮层')
+  assert.equal((await hoverRequests()).length, reqCountR,
+    '总开关关闭期间所有悬停路径零读取请求（前置拦截，非开后再关）')
+  // R5 键盘命令（显式打开）不受总开关管辖——光标置于双链内
+  await page.evaluate(pos => window.setLiveCursor(pos), wideLinkDoc.indexOf('[[target') + 2)
+  const beforeCmdR = (await hoverRequests()).length
+  await page.evaluate(() => window.runPreviewCommand())
+  popup = await page.evaluate(() => window.readHoverPopup())
+  assert.equal(popup.open, true, '键盘命令为显式操作，不受总开关管辖')
+  await escClose()
+  assert.equal((await hoverRequests()).length, beforeCmdR + 1, '键盘命令照常发出一次读取请求')
+  // R6 重开总开关：直接悬停恢复（liveDirect 仍开），开延迟后浮层在场
+  await page.mouse.move(60, 500)
+  await page.evaluate(() => window.applyEntrySettings({ 'hover.enabled': true, 'hover.liveDirect': true }))
+  await wikilinkDeco().hover()
+  await page.waitForTimeout(OPEN_WAIT)
+  popup = await page.evaluate(() => window.readHoverPopup())
+  assert.equal(popup.open, true, '重开总开关后悬停路径恢复打开')
+  assert.equal(popup.stateVisible, true, '恢复后打开即呈 loading 状态行')
+  await escClose()
+  await page.mouse.move(60, 500)
+  passed++
+  console.log('[全入口][PASS] #298 总开关：全域悬停路径拦截 + 键盘命令不辖 + 重开恢复')
+
   // ---- 收尾：零写回 ----
   assert.equal(await editRequestCount(), 0, '全场景零 edit.request（悬停/命令不写文档）')
   passed++

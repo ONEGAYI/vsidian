@@ -169,6 +169,11 @@ export interface HoverPreviewContext {
   send(message: WebviewToHost): void
   /** #220 代码高亮开关（面板 codeCardConfig.highlight 的只读投影；缺省开） */
   codeHighlight?(): boolean
+  /** #298 悬停总开关（hover.enabled）的只读投影：false = 所有悬停路径
+   *  不开浮层（阅读正文/面板/Live 两路/补按 Ctrl 补触发，统一在本模块
+   *  hoverPreviewAnchorEnter 入口前置拦截）；缺省（未提供）视为开——
+   *  键盘命令等显式打开不经此门（规格只辖悬停路径） */
+  hoverPreviewEnabled?(): boolean
   /** #245 复用正文卡片管理器升级浮层内子引用，不创建第二个浮窗。 */
   mountEmbedChild?(parentInstanceId: string, block: HTMLElement, target: RefLoadedContent): void
   unmountEmbedChild?(block: HTMLElement): void
@@ -687,8 +692,14 @@ export function openHoverPopupForKeyboard(anchor: HTMLElement, spec: HoverPopupT
  *  锚点先关旧再延迟开新。修 6（review 第二轮）：同一锚点已有 pendingOpen
  *  时不重建开设计时——嵌套行内标记链接（如 [**粗体**](x.md)）内跨子
  *  元素移动触发多次 mouseover（联合域内移动的 mouseout 被调用方过滤，
- *  无对应 leave），每次重建 300ms timer 会把浮层推迟到指针静止 */
+ *  无对应 leave），每次重建 300ms timer 会把浮层推迟到指针静止。
+ *  #298 总开关门控：hover.enabled 关闭时所有悬停路径（含补按 Ctrl 补
+ *  触发——其调用点同样收敛到本入口）前置拦截，不建待开计时不开浮层；
+ *  正文嵌入卡片不经本入口（常驻呈现不受总开关影响） */
 export function hoverPreviewAnchorEnter(anchor: HTMLElement, spec?: HoverPopupTargetSpec): void {
+  if (context?.hoverPreviewEnabled?.() === false) {
+    return
+  }
   if (popup && popup.anchor === anchor) {
     cancelCloseTimer()
     return

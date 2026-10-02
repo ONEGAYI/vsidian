@@ -273,11 +273,23 @@ export type ImagePasteLocationMode = (typeof IMAGE_PASTE_LOCATION_MODES)[number]
 export const IMAGE_PASTE_LOCATION_DEFAULT: ImagePasteLocationMode = 'same-dir'
 
 /**
- * #221「Live 直接悬停」开关：Live 正文中悬停双链/普通 Markdown 链接的
- * 触发条件——关闭（默认）需按住 Ctrl/Cmd 再悬停（防编辑途中指针扫过链接
- * 误开浮层），开启后无需修饰键直接悬停（与 Reading/面板一致的触发口
- * 径）。Reading 与反链/出链面板不受本开关影响（恒直接悬停）。键与消费
- * 方（syncController 的 Live mouseover 委托守卫）成对导出。
+ * #298「悬停预览引用文档」总开关：悬停触发引用视图浮层的全域启停。关闭后
+ * 所有悬停路径（阅读正文、反链/出链面板、实时预览直接悬停与 Ctrl+悬停、
+ * 悬停中补按 Ctrl 补触发）均不再打开浮层——门控在 webview 悬停入口
+ * （hoverPopup 的 hoverPreviewAnchorEnter）前置拦截；正文嵌入卡片
+ * （`![[…]]` 常驻呈现）不受影响；浮层既有消失语义不变（只辖「出现」）。
+ * 键与消费方（syncController 的 hoverPreviewEnabled 投影）成对导出。
+ */
+export const HOVER_ENABLED_KEY = 'hover.enabled'
+/** 默认 true：升级后既有悬停预览行为不变（#298 升级零迁移） */
+export const HOVER_ENABLED_DEFAULT = true
+
+/**
+ * #221「实时预览中直接悬停显示」开关：Live 正文中悬停双链/普通 Markdown
+ * 链接的触发条件——关闭（默认）需按住 Ctrl/Cmd 再悬停（防编辑途中指针扫过
+ * 链接误开浮层），开启后无需修饰键直接悬停。键与消费方（syncController 的
+ * Live mouseover 委托守卫）成对导出。#298 起归属「引用视图」组并改名——
+ * 该组内有总开关（hover.enabled）管辖全域悬停，本开关只调节 Live 触发方式。
  */
 export const HOVER_LIVE_DIRECT_KEY = 'hover.liveDirect'
 /** 默认 false：Live 默认 Ctrl+悬停（规格一期口径） */
@@ -469,6 +481,26 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     unit: 'px',
   },
   {
+    // #298 悬停预览总开关（hover.* 域 → 编辑器页「引用视图」组：组内首项，
+    // 见 settingsPageView 的 refviewDefs；注册表顺序即组内渲染顺序）
+    key: HOVER_ENABLED_KEY,
+    type: 'boolean',
+    default: HOVER_ENABLED_DEFAULT,
+    titleKey: 'setting.hoverEnabled.title',
+    descriptionKey: 'setting.hoverEnabled.description',
+  },
+  {
+    // #221 Live 直接悬停（hover.* 域 → 编辑器页「引用视图」组：#298 自
+    //「显示」组迁入并改名「实时预览中直接悬停显示」，总开关之后第二项）
+    key: HOVER_LIVE_DIRECT_KEY,
+    type: 'boolean',
+    default: HOVER_LIVE_DIRECT_DEFAULT,
+    titleKey: 'setting.hoverLiveDirect.title',
+    descriptionKey: 'setting.hoverLiveDirect.description',
+  },
+  {
+    // #244 嵌入展开层级（embed.* 域 → 编辑器页「引用视图」组：#298 自
+    //「显示」组迁入，取值/范围/生效行为零迁移，仅呈现位置变化）
     key: EMBED_MAX_DEPTH_KEY,
     type: 'number',
     default: EMBED_MAX_DEPTH_DEFAULT,
@@ -479,8 +511,8 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     descriptionKey: 'setting.embedMaxDepth.description',
   },
   {
-    // #222 嵌入最大高度（embed.* 域 → 编辑器页「显示」组：非 symbol/
-    // codeblock/image 前缀的 editor 域外键由 displayDefs 收纳）
+    // #222 嵌入最大高度（embed.* 域 → 编辑器页「引用视图」组：#298 自
+    //「显示」组迁入，零迁移；refviewDefs 收纳 hover.*/embed.* 两前缀）
     key: EMBED_MAX_HEIGHT_KEY,
     type: 'number',
     default: EMBED_MAX_HEIGHT_DEFAULT,
@@ -490,15 +522,6 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     titleKey: 'setting.embedMaxHeight.title',
     descriptionKey: 'setting.embedMaxHeight.description',
     unit: 'px',
-  },
-  {
-    // #221 Live 直接悬停（hover.* 域 → 编辑器页「显示」组：与 embed.*
-    // 同由 displayDefs 收纳）
-    key: HOVER_LIVE_DIRECT_KEY,
-    type: 'boolean',
-    default: HOVER_LIVE_DIRECT_DEFAULT,
-    titleKey: 'setting.hoverLiveDirect.title',
-    descriptionKey: 'setting.hoverLiveDirect.description',
   },
   // #239 中文分词三件（引擎/下载源/自定义基址）：设置页呈现归编辑器页
   // 「中文分词」委托组（#264 起为编辑器页尾二级组，wordSegmentSettings

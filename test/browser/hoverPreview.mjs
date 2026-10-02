@@ -622,6 +622,47 @@ try {
   passed++
   console.log('[悬停预览][PASS] 浮层文末紧凑留白：两种视口高度 + 文末绘制可见 + 主阅读留白保持')
 
+  // ---- 场景 W：#298 悬停总开关（hover.enabled）——关闭后阅读正文真悬停不弹浮层 ----
+  // 绘制层对照：开关开时浮层中心命中在浮层内（真实接收指针）；关闭后同一
+  // 真实悬停满开延迟浮层不出现且零读取请求（前置拦截，非开后再关）；重开
+  // 恢复。Live/面板/补按 Ctrl 路径的拦截见 hoverEntry 场景 R。
+  await page.keyboard.press('Escape')
+  await page.mouse.move(60, 560)
+  await page.waitForTimeout(CLOSE_WAIT)
+  await hoverLink()
+  await page.waitForTimeout(OPEN_WAIT)
+  popup = await page.evaluate(() => window.readHoverPopup())
+  assert.equal(popup.open, true, '基线：开关默认开，阅读正文悬停打开浮层')
+  const reqW = (await hoverRequests()).at(-1)
+  await page.evaluate(({ reqId, instanceId, text }) => window.respondHoverResult({
+    kind: 'hover.result', reqId, instanceId, ok: true,
+    target: { fsPath: 'D:\\notes\\目标笔记.md', relPath: '目标笔记.md' },
+    version: 5, text, range: { start: 0, end: text.length }, scope: { kind: 'full' },
+  }), { reqId: reqW.reqId, instanceId: reqW.instanceId, text: TARGET_DOC })
+  await page.waitForTimeout(120)
+  popup = await page.evaluate(() => window.readHoverPopup())
+  assert.equal(popup.hitInside, true, '基线绘制层：浮层上半中心命中在浮层内（用户真实可见）')
+  await page.mouse.move(60, 560)
+  await page.waitForTimeout(CLOSE_WAIT)
+  await page.evaluate(() => window.applyHoverSettings({ 'hover.enabled': false }))
+  const reqCountW = (await hoverRequests()).length
+  await hoverLink()
+  await page.waitForTimeout(OPEN_WAIT)
+  popup = await page.evaluate(() => window.readHoverPopup())
+  assert.equal(popup.open, false, '总开关关闭：同一真实悬停不再出现浮层')
+  assert.equal((await hoverRequests()).length, reqCountW, '总开关关闭：零读取请求（前置拦截）')
+  await page.mouse.move(60, 560)
+  await page.waitForTimeout(120)
+  await page.evaluate(() => window.applyHoverSettings({ 'hover.enabled': true }))
+  await hoverLink()
+  await page.waitForTimeout(OPEN_WAIT)
+  popup = await page.evaluate(() => window.readHoverPopup())
+  assert.equal(popup.open, true, '重开总开关：悬停路径恢复（门控只辖「出现」）')
+  await page.keyboard.press('Escape')
+  await page.mouse.move(60, 560)
+  passed++
+  console.log('[悬停预览][PASS] #298 总开关：阅读正文悬停拦截（绘制层对照）+ 重开恢复')
+
   // ---- #243：浮层自己的 scrollport 驱动长 B 文档有限窗口 ----
   const longPage = await browser.newPage({ viewport: { width: 900, height: 640 } })
   const longErrors = []

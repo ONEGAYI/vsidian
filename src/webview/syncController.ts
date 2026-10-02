@@ -85,6 +85,7 @@ import {
   EMBED_MAX_DEPTH_MAX,
   EMBED_MAX_HEIGHT_MAX,
   EMBED_MAX_HEIGHT_MIN,
+  HOVER_ENABLED_KEY,
   HOVER_LIVE_DIRECT_KEY,
   SHOW_LINE_NUMBERS_DEFAULT,
   SHOW_LINE_NUMBERS_KEY,
@@ -1271,6 +1272,8 @@ export class WebviewSyncController {
         this.bridge.postMessage(message)
       },
       codeHighlight: () => this.codeCardConfig.highlight,
+      // #298 悬停总开关投影（hover.enabled；门控收敛在 hoverPopup 入口）
+      hoverPreviewEnabled: () => this.hoverPreviewEnabled(),
       mountEmbedChild: (parentInstanceId, block, target) =>
         this.embedCards?.mountPopupChild(parentInstanceId, block, target),
       unmountEmbedChild: (block) => this.embedCards?.unmountBlock(block),
@@ -5279,6 +5282,14 @@ export class WebviewSyncController {
     return this.settings?.[HOVER_LIVE_DIRECT_KEY] === true
   }
 
+  /** #298 悬停总开关（hover.enabled；缺省/快照未达 = true 开）：关闭时
+   *  所有悬停路径不开浮层——经 hoverPreview 上下文投影，门控统一收敛在
+   *  hoverPopup 的 hoverPreviewAnchorEnter 入口（阅读/面板/Live 两路/
+   *  补按 Ctrl 补触发全部路由该入口） */
+  private hoverPreviewEnabled(): boolean {
+    return this.settings?.[HOVER_ENABLED_KEY] !== false
+  }
+
   /** 指针当前悬停的 Live 链接装饰：mouseover 时总在记录
    *  （修饰位不足也不丢——「先悬停、后按 Ctrl」补触发的现场），mouseout
    *  / 模式切换时清空；目标经装饰 DOM 映射到源码，不依赖指针坐标 */
@@ -5287,7 +5298,9 @@ export class WebviewSyncController {
   /** Ctrl/Cmd 按下补触发（验收反馈：指针已在链接上再按修饰键同样开浮层
    *  ——mouseover 时刻判修饰位只覆盖「按住再进入」，此路径覆盖「进入后
    *  按下」）。锚点经 DOM 映射到实时源码位置；同锚已开
-   *  浮层时 enter 幂等（取消待关计时），不同锚换锚重开 */
+   *  浮层时 enter 幂等（取消待关计时），不同锚换锚重开。#298 总开关
+   *  关闭时被前置拦截——本路径与所有悬停入口同收敛于
+   *  hoverPreviewAnchorEnter 的 hover.enabled 门控 */
   private onLiveHoverModifierDown(): void {
     if (this.viewMode !== 'live' || this.liveHoverDirect()) {
       return

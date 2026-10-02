@@ -110,7 +110,7 @@ describe('侧栏与编辑器页组结构（#264）', () => {
     ])
   })
 
-  it('编辑器页含六个二级组，尾组为「中文分词」（图片组之后）', () => {
+  it('编辑器页含七个二级组，尾组为「中文分词」（图片/引用视图组之后）', () => {
     const { parent } = makeProductionView()
     clickNav(parent, zhCn['settings.editorCategory'])
     expect(groupTitles(parent)).toEqual([
@@ -119,6 +119,8 @@ describe('侧栏与编辑器页组结构（#264）', () => {
       zhCn['settings.groupSymbols'],
       zhCn['settings.groupCodeblock'],
       zhCn['settings.groupImage'],
+      // #298 引用视图组（hover/embed 前缀归组，图片组之后、分词组之前）
+      zhCn['settings.groupRefview'],
       zhCn['wordSegment.title'],
     ])
   })

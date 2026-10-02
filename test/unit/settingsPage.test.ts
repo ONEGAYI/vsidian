@@ -427,7 +427,7 @@ describe('分组重组二轮还原（#163 验收反馈：侧栏只留常规/编�
     ])
   })
 
-  it('编辑器页内小节为显示/编辑/符号输入/代码块/图片，条目按前缀归节', () => {
+  it('编辑器页内小节为显示/编辑/符号输入/代码块/图片/引用视图，条目按前缀归节', () => {
     const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
     clickNav(parent, zhCn['settings.editorCategory'])
     expect(sectionTitles(parent)).toEqual([
@@ -436,16 +436,14 @@ describe('分组重组二轮还原（#163 验收反馈：侧栏只留常规/编�
       zhCn['settings.groupSymbols'],
       zhCn['settings.groupCodeblock'],
       zhCn['settings.groupImage'],
+      // #298 引用视图组（hover.* / embed.* 前缀归组）
+      zhCn['settings.groupRefview'],
     ])
+    // #298 迁组后「显示」小节不再收录 embed.* / hover.* 条目
     expect(groupItemTitles(parent, zhCn['settings.groupDisplay']))
       .toEqual([
         zhCn['setting.editorLineNumbers.title'],
         zhCn['setting.readableLineWidth.title'],
-        zhCn['setting.embedMaxDepth.title'],
-        // #222 嵌入限高（embed.* 域落显示组）
-        zhCn['setting.embedMaxHeight.title'],
-        // #221 Live 直接悬停（hover.* 域落显示组）
-        zhCn['setting.hoverLiveDirect.title'],
       ])
     // #237 多光标（editor.multicursor 域落编辑组）
     expect(groupItemTitles(parent, zhCn['settings.groupEditing']))
@@ -465,6 +463,19 @@ describe('分组重组二轮还原（#163 验收反馈：侧栏只留常规/编�
       zhCn['setting.imagePaste.title'],
       zhCn['setting.imagePasteLocation.title'],
       zhCn['setting.imagePasteSubpath.title'],
+    ])
+  })
+
+  it('引用视图组（#298）组内顺序：总开关 → 直接悬停显示 → 嵌入展开层级 → 嵌入最大高度', () => {
+    const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
+    clickNav(parent, zhCn['settings.editorCategory'])
+    expect(groupItemTitles(parent, zhCn['settings.groupRefview'])).toEqual([
+      zhCn['setting.hoverEnabled.title'],
+      // #298 改名后标题经同一词条键取词（值见 settings.test 词条契约）
+      zhCn['setting.hoverLiveDirect.title'],
+      // #222/#244 迁组：embed 两项取值/范围/生效行为零迁移（仅呈现位置变化）
+      zhCn['setting.embedMaxDepth.title'],
+      zhCn['setting.embedMaxHeight.title'],
     ])
   })
 
@@ -506,8 +517,8 @@ describe('组标题图标机制（#263：编辑器页二级 h3 组字形；#265�
   it('五组标题均渲染图标：四枚内联字形与符号输入打字机资产都在文字前', () => {
     const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
     const titles = groupTitleEls(parent)
-    expect(titles).toHaveLength(5)
-    const withIcon = [0, 1, 3, 4]
+    expect(titles).toHaveLength(6)
+    const withIcon = [0, 1, 3, 4, 5]
     for (const i of withIcon) {
       const svg = titles[i]!.querySelector('svg')
       expect(svg, `第 ${i} 组标题应带图标`).toBeTruthy()
@@ -523,13 +534,13 @@ describe('组标题图标机制（#263：编辑器页二级 h3 组字形；#265�
     expect(titles[2]!.textContent).toBe(zhCn['settings.groupSymbols'])
   })
 
-  it('六组标题均渲染图标（#264 生产装配）：四枚内联字形 + 打字机/分词两枚生图资产', () => {
+  it('七组标题均渲染图标（#264 生产装配）：五枚内联字形 + 打字机/分词两枚生图资产', () => {
     const wordSegment = new WordSegmentSection({ postMessage: () => {} })
     const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS, [wordSegment])
     const titles = groupTitleEls(parent)
-    expect(titles).toHaveLength(6)
-    // 内联四枚（显示/编辑/代码块/图片）
-    for (const i of [0, 1, 3, 4]) {
+    expect(titles).toHaveLength(7)
+    // 内联五枚（显示/编辑/代码块/图片/引用视图）
+    for (const i of [0, 1, 3, 4, 5]) {
       const svg = titles[i]!.querySelector('svg')
       expect(svg, `第 ${i} 组标题应带内联图标`).toBeTruthy()
       expect(titles[i]!.firstElementChild).toBe(svg)
@@ -537,7 +548,7 @@ describe('组标题图标机制（#263：编辑器页二级 h3 组字形；#265�
     }
     // 生图两枚走同一 generated-icon 槽（委托组经组对象 icon 槽登记）：
     // 符号输入 = 打字机、中文分词 = wordSegment，都在文字前、纯装饰
-    const generatedKinds = [2, 5].map((i) => {
+    const generatedKinds = [2, 6].map((i) => {
       const glyph = titles[i]!.querySelector<HTMLElement>('.vsidian-settings-generated-icon')
       expect(glyph, `第 ${i} 组标题应带生图资产图标`).toBeTruthy()
       expect(titles[i]!.firstElementChild).toBe(glyph)
@@ -580,6 +591,63 @@ describe('组标题图标机制（#263：编辑器页二级 h3 组字形；#265�
     expect(css).toContain('dark-wordSegment.svg')
     // 统一渲染规则仍为字形族共本（fill:none、stroke:currentColor、1.7 圆角线帽）
     expect(css).toMatch(/\.vsidian-settings svg\s*\{[^}]*fill:\s*none[^}]*stroke:\s*currentColor[^}]*stroke-width:\s*1\.7/)
+  })
+})
+
+describe('引用视图组（#298：总开关、改名呈现与开关回显/持久化）', () => {
+  /** 切到编辑器分组后取「引用视图」组容器 */
+  function refviewGroup(parent: HTMLElement): HTMLElement {
+    clickNav(parent, zhCn['settings.editorCategory'])
+    return sectionByTitle(parent, zhCn['settings.groupRefview'])
+  }
+  /** 组内设置行（按 data-setting-key 取） */
+  function itemOf(scope: ParentNode, key: string): HTMLElement {
+    const item = scope.querySelector(`[data-setting-key="${key}"]`)?.closest<HTMLElement>('.vsidian-settings-item')!
+    expect(item, `引用视图组应含 ${key} 设置行`).toBeTruthy()
+    return item
+  }
+
+  it('组标题图标一次接线：内联 svg 在文字前、aria-hidden 纯装饰（path 数据占位复用现有字形）', () => {
+    const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
+    const group = refviewGroup(parent)
+    const title = group.querySelector<HTMLElement>('.vsidian-settings-group-title')!
+    expect(title.textContent).toBe(zhCn['settings.groupRefview'])
+    const svg = title.querySelector('svg')
+    expect(svg, '引用视图组标题应带内联图标').toBeTruthy()
+    expect(title.firstElementChild).toBe(svg)
+    expect(svg!.getAttribute('aria-hidden')).toBe('true')
+    expect(svg!.querySelector('path')!.getAttribute('d')).toBeTruthy()
+  })
+
+  it('总开关默认开启回显；切换上送 settings.set；快照回显关闭值并保持有效', () => {
+    const { view, sent, parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
+    const group = refviewGroup(parent)
+    const box = itemOf(group, 'hover.enabled').querySelector<HTMLInputElement>(
+      `input.${SETTINGS_PAGE_CLASS_NAMES.checkbox}`)!
+    expect(box.checked, '总开关默认开启（升级零迁移）').toBe(true)
+    // 切换上送
+    box.checked = false
+    box.dispatchEvent(new Event('change'))
+    expect(sent.at(-1)).toEqual({ kind: 'settings.set', values: { 'hover.enabled': false } })
+    // 宿主回推权威快照：就地回显（重开/另窗改值的呈现路径）
+    view.handleHostMessage({ kind: 'settings.snapshot', values: { 'hover.enabled': false } })
+    const revived = itemOf(group, 'hover.enabled').querySelector<HTMLInputElement>(
+      `input.${SETTINGS_PAGE_CLASS_NAMES.checkbox}`)!
+    expect(revived.checked).toBe(false)
+    // 重新打开：再次上送 true
+    revived.checked = true
+    revived.dispatchEvent(new Event('change'))
+    expect(sent.at(-1)).toEqual({ kind: 'settings.set', values: { 'hover.enabled': true } })
+  })
+
+  it('改名后的标题与重写后的描述在组内呈现（用户可见文字经词条取词）', () => {
+    const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
+    const group = refviewGroup(parent)
+    const item = itemOf(group, 'hover.liveDirect')
+    expect(item.querySelector(`.${SETTINGS_PAGE_CLASS_NAMES.itemTitle}`)?.textContent)
+      .toBe(zhCn['setting.hoverLiveDirect.title'])
+    expect(item.querySelector(`.${SETTINGS_PAGE_CLASS_NAMES.itemDescription}`)?.textContent)
+      .toBe(zhCn['setting.hoverLiveDirect.description'])
   })
 })
 

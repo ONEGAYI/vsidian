@@ -43,7 +43,7 @@ function makeStorage(writes: Array<{ key: string; value: unknown }> = []): Setti
 }
 
 describe('快照读取', () => {
-  it('生产注册表（#34 起）：快照为定义默认值（八开关均开 + 语言 auto + 可读行宽 0 + 嵌入限高 480 + Live 直接悬停关 + 分词引擎内置）', () => {
+  it('生产注册表（#34 起）：快照为定义默认值（开关均开除 Live 直接悬停 + 语言 auto + 可读行宽 0 + 嵌入限高 480 + 悬停总开关开 + 分词引擎内置）', () => {
     const svc = new SettingsService(makeStorage(), PRODUCTION_SETTING_DEFINITIONS)
     expect(svc.getSnapshot()).toEqual({
       'general.language': 'auto',
@@ -65,6 +65,8 @@ describe('快照读取', () => {
       // #222 嵌入限高（Reading 嵌入卡片内容滚动区上限）
       'embed.maxHeight': 480,
       'embed.maxDepth': 3,
+      // #298 悬停预览总开关（默认开 = 升级后既有悬停预览行为不变）
+      'hover.enabled': true,
       // #221 Live 直接悬停（默认关 = Ctrl+悬停）
       'hover.liveDirect': false,
       // #239 中文分词三件：引擎默认内置（Intl.Segmenter）、下载源默认
