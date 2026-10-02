@@ -17,8 +17,8 @@
 //   单位（#7「超大单块」限制的缓解；细分后仍按 #7 机制挂载/回收）
 // - 未支持语法（脚注 [^1]、定义列表等）由 markdown-it 按普通段落文本
 //   渲染——保留原文的局部源码降级，不触发整篇改写
-import { frontmatterRange } from './markdownDoc'
-import { maskCodeSpanPipes } from './tableCells'
+import { frontmatterRange } from '../shared/markdownDoc'
+import { maskCodeSpanPipes } from '../shared/tableCells'
 import { stripHtmlComments } from './htmlComment'
 // #163 验收反馈：块 id 标记阅读隐藏（渲染前剥离，行数不变保锚点坐标系）
 import { stripBlockIdMarks } from './blockIdStrip'

@@ -20,7 +20,7 @@
 //
 // 坐标契约：全文 UTF-16 code unit offset（与协议 SerChange、CM6 同构）；
 // selection 为应用 changes 之后的新文档坐标。
-import { barePipeAt, parseTableDelimiter, splitTableRowCells, tableRowCellsForColumns, type TableCellRange } from './tableCells'
+import { barePipeAt, parseTableDelimiter, splitTableRowCells, tableRowCellsForColumns, type TableCellRange } from '../shared/tableCells'
 import type { TableEditOp } from '../shared/protocol'
 
 /** 表格行身份（解析树判定后传入；行区间不含换行） */

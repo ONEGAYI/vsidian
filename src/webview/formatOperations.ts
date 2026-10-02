@@ -1,7 +1,7 @@
 import type { SyntaxNode } from '@lezer/common'
 import type { FormatOperationId } from '../shared/formatOperations'
-import { markdownTreeParser } from './markdownDoc'
-import { parseTableDelimiter, tableRowCellsForColumns } from './tableCells'
+import { markdownTreeParser } from '../shared/markdownDoc'
+import { parseTableDelimiter, tableRowCellsForColumns } from '../shared/tableCells'
 import type { TableRegion } from './tableRegion'
 
 export interface FormatSelection { from: number; to: number }

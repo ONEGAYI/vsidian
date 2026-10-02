@@ -5,7 +5,7 @@
 // 与呈现侧同源（规格硬约束「语法抽取应与当前呈现复用规则，差异必须有测试
 // 及明确说明」）：
 // - 树驱动链接 / 图片 / 引用式定义：markdownTreeParser（与 liveDecorations /
-//   大纲同一解析器，src/webview/markdownDoc），内联形态判定与 liveLinks 的
+//   大纲同一解析器，src/shared/markdownDoc），内联形态判定与 liveLinks 的
 //   buildLinkImageDecorationRanges 同一判定（闭 LinkMark 后随 `(` 开标记）
 // - 双链与宽松链接：行扫描形态学直接复用 shared/wikilink 与 shared/looseLink
 //   （live 装饰与阅读渲染的同一单一事实源），代码上下文排除集合与 liveLinks
@@ -29,11 +29,11 @@
 import type { SyntaxNode, Tree } from '@lezer/common'
 import { classifyImageTarget, classifyLinkTarget, type LinkContext } from './linkTarget'
 import { parseWikilinkInner, scanEmbedsInLine, scanWikilinksInLine } from '../shared/wikilink'
-import { scanEmbedsInTableRow } from '../webview/tableCellEmbed'
+import { scanEmbedsInTableRow } from '../shared/tableCellEmbed'
 import { scanLooseLinksInLine } from '../shared/looseLink'
 import { planVaultLinkPath, type VaultLinkPathContext } from '../shared/vaultLink'
 import { sortEdges, type VaultEdge, type VaultEdgeKind } from '../shared/vaultIndexModel'
-import { chainAt, frontmatterRange, markdownTreeParser } from '../webview/markdownDoc'
+import { chainAt, frontmatterRange, markdownTreeParser } from '../shared/markdownDoc'
 
 /**
  * 出链面板的边准入判别（出链面板批次）：外部 scheme（https:// 等）与危险

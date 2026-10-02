@@ -36,7 +36,7 @@ import {
 import { liveDecorationsField } from './liveDecorations'
 import { mathBlocksField } from './liveMath'
 import { parentIndentWidth } from './listEditing'
-import { chainAt } from './markdownDoc'
+import { chainAt } from '../shared/markdownDoc'
 
 /** 表格节点：行落在其中即不接管（单元格导航优先；边界放行不缩进表格行） */
 const TABLE_NODES = new Set([

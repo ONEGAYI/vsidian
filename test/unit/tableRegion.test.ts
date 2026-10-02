@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import MarkdownIt from 'markdown-it'
 import { parseTableRegionClipboard, planTableRegionDelete, planTableRegionPaste, planTableRegionReplace, serializeTableRegion, type TableRegion } from '../../src/webview/tableRegion'
-import { parseTableDelimiter as parseTableDelimiterForTest } from '../../src/webview/tableCells'
+import { parseTableDelimiter as parseTableDelimiterForTest } from '../../src/shared/tableCells'
 import type { TableRowInfo } from '../../src/webview/tableStructure'
 
 const doc = '正文前\n\n| 名字 | 数量 | 备注 |\n| --- | :---: | ---: |\n| 苹果 | 3 | 甲 |\n| 香蕉 | 5 | 乙\\|丙 |\n| 樱桃 | 7 | `a|b` |\n\n正文后'

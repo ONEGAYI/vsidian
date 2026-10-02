@@ -29,7 +29,7 @@ import {
 } from '../shared/listPrefix'
 import { liveDecorationsField } from './liveDecorations'
 import { mathBlocksField } from './liveMath'
-import { chainAt } from './markdownDoc'
+import { chainAt } from '../shared/markdownDoc'
 
 /** 键位不接管的表格/代码上下文节点名（树判定，含独立装配无 tableEditing 的兜底） */
 const NON_LIST_CONTEXT_NODES = new Set([

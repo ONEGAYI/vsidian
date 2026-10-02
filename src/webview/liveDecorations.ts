@@ -54,7 +54,7 @@ import {
   markdownTreeParser,
   visitRange,
   type SourceRange,
-} from './markdownDoc'
+} from '../shared/markdownDoc'
 import { resolveTaskToggleAtMarker } from './taskToggle'
 import { t } from '../shared/i18n'
 import { applyObsidianDomAlias } from '../shared/obsidianAlias'
@@ -72,7 +72,7 @@ import {
   tableRowCellsForColumns,
   tableCellBreaks,
   type TableAlign,
-} from './tableCells'
+} from '../shared/tableCells'
 
 /** 标题类名（#5 契约保持不变） */
 export const HEADING_CLASS_NAMES = {

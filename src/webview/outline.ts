@@ -39,7 +39,7 @@ import {
   headingLevelOf,
   markdownTreeParser,
   visitRange,
-} from './markdownDoc'
+} from '../shared/markdownDoc'
 
 /** 大纲条目（全文标题序列的一项） */
 export interface OutlineItem {

@@ -4,7 +4,7 @@ import type { FormatOperationId } from '../shared/formatOperations'
 import type { FormatSelection } from './formatOperations'
 import { INLINE } from './formatOperations'
 import type { TableRegion } from './tableRegion'
-import { parseTableDelimiter, tableRowCellsForColumns } from './tableCells'
+import { parseTableDelimiter, tableRowCellsForColumns } from '../shared/tableCells'
 
 export type QuickActionState = 'inactive' | 'active' | 'mixed' | 'disabled'
 

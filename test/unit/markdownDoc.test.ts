@@ -15,7 +15,7 @@ import {
   headingLevelOf,
   markdownTreeParser,
   visitRange,
-} from '../../src/webview/markdownDoc'
+} from '../../src/shared/markdownDoc'
 
 describe('frontmatterRange：frontmatter 边界判定（两视图共用语义）', () => {
   it('标准 --- 开合：范围覆盖头尾两行（不含尾换行）', () => {

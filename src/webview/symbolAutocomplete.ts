@@ -48,7 +48,7 @@ import { getCompositionSelectionSnapshot } from './symbolCompositionState'
 import { externalSync } from './syncController'
 import { liveDecorationsField } from './liveDecorations'
 import { tableRegionField } from './tableRegionSelection'
-import { chainAt } from './markdownDoc'
+import { chainAt } from '../shared/markdownDoc'
 
 /** 代码上下文节点（含边界标记）：CodeMark/CodeInfo 归入围栏内部口径 */
 const CODE_CONTEXT_NODES = new Set([

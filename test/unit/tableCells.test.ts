@@ -19,7 +19,7 @@ import {
   parseTableDelimiter,
   needsPipeEscapeAt,
   escapeCellText,
-} from '../../src/webview/tableCells'
+} from '../../src/shared/tableCells'
 
 describe('splitTableRowCells：GFM 单元格切分', () => {
   it('标准行：| a | b | 切出两个单元格，区间含内侧空格、内容为 trim 后区间', () => {

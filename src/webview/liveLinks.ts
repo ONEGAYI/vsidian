@@ -23,7 +23,7 @@
 import { EditorSelection, RangeSet, Text, type Extension, type Range } from '@codemirror/state'
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet } from '@codemirror/view'
 import type { SyntaxNode, Tree } from '@lezer/common'
-import { chainAt, visitRange, type SourceRange } from './markdownDoc'
+import { chainAt, visitRange, type SourceRange } from '../shared/markdownDoc'
 import { liveDecorationsField, selectionTouchesRange } from './liveDecorations'
 import { hitIntersectsRange, hitRangesOf, hitRevealField, type HitRange } from './hitReveal'
 import { IMAGE_CLASS_NAMES, type ImageResourceManager } from './imageResource'

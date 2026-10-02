@@ -19,9 +19,9 @@ import { parseLooseLinkAt } from '../shared/looseLink'
 import { joinObsidianDomAliasForReading } from '../shared/obsidianAlias'
 import { escapeHtml } from '../shared/frontmatterTable'
 import { renderMathHtml } from './mathRenderCache'
-import { highlightFlankOk } from './markdownDoc'
-import { tableCellBreakLength } from './tableCells'
-import { decodeCellView } from './tableCellEmbed'
+import { highlightFlankOk } from '../shared/markdownDoc'
+import { tableCellBreakLength } from '../shared/tableCells'
+import { decodeCellView } from '../shared/tableCellEmbed'
 
 /** 渲染环境：行首/行尾 offset 表（lineStarts[i]/lineEnds[i] 为第 i 行界） */
 export interface ReadingRenderEnv {
