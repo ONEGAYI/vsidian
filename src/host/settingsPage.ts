@@ -66,6 +66,9 @@ export interface SettingsPageInfo {
   /** webview 已装载并请求过快照（ready 握手完成） */
   ready: boolean
   title: string
+  /** 会话内恢复：webview 最近上报的 UI 态（分页 + 主区滚动）；undefined =
+   *  本会话尚无上报。面板关闭/隐藏重载后按它经 focusSection{scroll} 恢复 */
+  uiState?: { section: string; scrollTop: number }
 }
 
 export interface SettingsPageHandle {
@@ -125,6 +128,10 @@ export function createSettingsPage(
   // #132：ready 前收到的分页定位请求（settings.get 应答后补发）；
   // #231：定位携带可选 entry（外观分页内页签/条目路由），挂起与补发同形态
   let pendingSection: { section: string; entry?: string } | undefined
+  // 会话内恢复：webview 最近上报的 UI 态（settings.uiState）。存活于扩展
+  // 宿主内存（会话级，非 workspaceState——跨会话不恢复）；面板关闭不清除，
+  // 重开/隐藏重载的 settings.get 握手时按它补发恢复定位
+  let lastUiState: { section: string; scrollTop: number } | undefined
 
   /** 设置页 webview 消息处理（onDidReceiveMessage 与测试注入共用入口） */
   const handleMessage = (message: unknown): void => {
@@ -169,6 +176,15 @@ export function createSettingsPage(
             kind: 'settings.focusSection',
             section: pending.section,
             ...(pending.entry !== undefined ? { entry: pending.entry } : {}),
+          })
+        } else if (lastUiState) {
+          // 会话内恢复：无显式定位请求时按 webview 上报的记忆恢复分页与
+          // 滚动（面板关闭重开与隐藏重载共用 settings.get 握手时机，每次
+          // 握手都补发——同值幂等；显式 openWithSection 优先于恢复）
+          void current?.webview.postMessage({
+            kind: 'settings.focusSection',
+            section: lastUiState.section,
+            scroll: lastUiState.scrollTop,
           })
         }
         // #96 R1 ready 即校准（设置页路径）：settings.get 是设置页的 ready
@@ -261,6 +277,13 @@ export function createSettingsPage(
       case 'index.cancel':
         index?.cancel()
         return
+      case 'settings.uiState':
+        // 会话内恢复上报：仅面板存活期间的上报才记忆（disposeSub 已清
+        // panel，旧面板迟到上报天然拦住）；空 section（尚无激活分页）忽略
+        if (panel && message.section) {
+          lastUiState = { section: message.section, scrollTop: message.scrollTop }
+        }
+        return
       case 'settings.set': {
         void service.apply(message.values).then((result) => {
           // 持久化期间设置页可能已关闭或重新打开；旧面板的 webview getter
@@ -308,8 +331,17 @@ export function createSettingsPage(
       hostLocale(service.getSnapshot()),
     )
     const messageSub = created.webview.onDidReceiveMessage(handleMessage)
+    // retainContextWhenHidden 不开：面板切后台 webview 即释放重载。隐藏即
+    // 重置 ready——stale-ready 窗口（webview 已卸载、重载握手未到）内
+    // openWithSection 的立即 postMessage 会落入已卸载的 webview 而丢失，
+    // 改走 pendingSection 挂起、重载握手补发；重载完成经 settings.get 重新
+    // 置位。重置同时让恢复补发不覆盖此期间的显式定位请求
+    const viewStateSub = created.onDidChangeViewState((event) => {
+      if (!event.webviewPanel.visible) ready = false
+    })
     created.onDidDispose(() => {
       messageSub.dispose()
+      viewStateSub.dispose()
       disposeSub()
     })
   }
@@ -342,8 +374,14 @@ export function createSettingsPage(
     },
     isOpen: () => panel !== undefined,
     // #96 title 优先读真实面板标题（面板开着时即用户在 VSCode 标签上看到
-    // 的文字）；未开时按当前装配语言计算（与下次 open 的标题一致）
-    getInfo: () => ({ open: panel !== undefined, ready, title: panel?.title ?? settingsPageTitle() }),
+    // 的文字）；未开时按当前装配语言计算（与下次 open 的标题一致）；
+    // uiState 供测试与诊断观测会话内恢复的记忆值
+    getInfo: () => ({
+      open: panel !== undefined,
+      ready,
+      title: panel?.title ?? settingsPageTitle(),
+      ...(lastUiState ? { uiState: { ...lastUiState } } : {}),
+    }),
     injectMessage: handleMessage,
     notifyLocaleChanged: (lang: LocaleCode) => {
       if (!panel) {

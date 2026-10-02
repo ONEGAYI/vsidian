@@ -31,6 +31,9 @@ try {
         window.sentMessages.push(message)
         setTimeout(() => {
           if (message.kind === 'settings.set') Object.assign(window.savedSettings, message.values)
+          // 通知型消息（uiState 等宿主不回执）不产生回包——真实宿主对
+          // uiState 无应答；对请求/保存类回 snapshot/changed
+          if (message.kind === 'settings.uiState') return
           window.dispatchEvent(new MessageEvent('message', { data: { kind: message.kind === 'settings.set' ? 'settings.changed' : 'settings.snapshot', values: window.savedSettings } }))
         }, 0)
       } })
@@ -278,11 +281,14 @@ try {
     assert.equal(groupPaint.radius, '10px')
     assert.equal(groupPaint.borderWidth, '1px')
     await search.focus()
+    // 等待此前页面交互（页签滚动、切页复位）的在途 scroll handler 落地，
+    // 避免其延迟上报污染清零后的全长断言
+    await page.waitForTimeout(50)
+    // 先清空外发记录（此前切页/回显产生的 uiState 属恢复契约，与本断言无关）
+    await page.evaluate(() => { window.sentMessages.length = 0 })
     await page.keyboard.press('Control+b')
-    assert.equal(await page.evaluate(() => window.sentMessages.filter(m =>
-      m.kind !== 'settings.get' && m.kind !== 'settings.set' &&
-      m.kind !== 'keybindings.get' && m.kind !== 'snippets.get' &&
-      m.kind !== 'wordSegment.get' && m.kind !== 'index.get').length), 0)
+    // 快捷键在搜索框不生效：拖动/按键期间不得产生任何外发（全长断言）
+    assert.equal(await page.evaluate(() => window.sentMessages.length), 0)
     const focus = await search.evaluate(el => ({ style: getComputedStyle(el).outlineStyle, width: getComputedStyle(el).outlineWidth }))
     assert.equal(focus.style, 'solid')
     assert.equal(focus.width, '2px')

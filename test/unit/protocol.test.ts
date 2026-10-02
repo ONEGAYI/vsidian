@@ -1912,6 +1912,33 @@ describe('设置消息协议（#33）', () => {
     // 方向校验：webview 方向不接受
     expect(isWebviewToHost({ kind: 'settings.focusSection', section: 'appearance', entry: 'overview' })).toBe(false)
   })
+
+  it('settings.focusSection scroll（会话内恢复）：可选非负整数，缺省向后兼容，浮点/负数拒绝', () => {
+    // 恢复形态：section + scroll（与 entry 不同时使用）
+    expect(isHostToWebview({ kind: 'settings.focusSection', section: 'editor', scroll: 0 })).toBe(true)
+    expect(isHostToWebview({ kind: 'settings.focusSection', section: 'editor', scroll: 120 })).toBe(true)
+    // 缺 scroll：既有定位形态不变（向后兼容）
+    expect(isHostToWebview({ kind: 'settings.focusSection', section: 'appearance' })).toBe(true)
+    // 守卫只收非负整数：浮点 scrollTop 须在 webview 侧取整后再上送/补发
+    expect(isHostToWebview({ kind: 'settings.focusSection', section: 'editor', scroll: 33.6 })).toBe(false)
+    expect(isHostToWebview({ kind: 'settings.focusSection', section: 'editor', scroll: -1 })).toBe(false)
+    expect(isHostToWebview({ kind: 'settings.focusSection', section: 'editor', scroll: '120' })).toBe(false)
+  })
+
+  it('settings.uiState（会话内恢复上报）：section 字符串 + 非负整数 scrollTop，非法形态拒绝', () => {
+    expect(isWebviewToHost({ kind: 'settings.uiState', section: 'editor', scrollTop: 0 })).toBe(true)
+    expect(isWebviewToHost({ kind: 'settings.uiState', section: 'general', scrollTop: 133 })).toBe(true)
+    // 宿主侧忽略空 section 的契约由发送方执行，守卫层面空串放行（形态合法）
+    expect(isWebviewToHost({ kind: 'settings.uiState', section: '', scrollTop: 0 })).toBe(true)
+    expect(isWebviewToHost({ kind: 'settings.uiState', section: 'editor' })).toBe(false)
+    expect(isWebviewToHost({ kind: 'settings.uiState', section: 'editor', scrollTop: -1 })).toBe(false)
+    // 浮点 scrollTop 必拒：webview 侧 Math.round 取整是该契约的发送方义务
+    expect(isWebviewToHost({ kind: 'settings.uiState', section: 'editor', scrollTop: 33.6 })).toBe(false)
+    expect(isWebviewToHost({ kind: 'settings.uiState', section: 'editor', scrollTop: '120' })).toBe(false)
+    expect(isWebviewToHost({ kind: 'settings.uiState', scrollTop: 120 })).toBe(false)
+    // 方向校验：宿主方向不接受
+    expect(isHostToWebview({ kind: 'settings.uiState', section: 'editor', scrollTop: 0 })).toBe(false)
+  })
 })
 
 describe('图表导出协议校验（#111）', () => {

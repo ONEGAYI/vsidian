@@ -5120,6 +5120,49 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand(CMD.closeSettingsPage)
   }],
 
+  ['设置页：会话内恢复——真实 webview 上报 uiState，记忆跨面板关闭重开存续', async () => {
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors')
+    await vscode.commands.executeCommand(CMD.closeSettingsPage)
+
+    await vscode.commands.executeCommand('onegayi.vsidian.openSettings')
+    await poll('设置页打开并就绪', async () => {
+      const i = (await vscode.commands.executeCommand(CMD.settingsPageInfo)) as
+        | { open: boolean; ready: boolean }
+        | undefined
+      return i?.open && i.ready ? true : undefined
+    })
+
+    // 经宿主正式定位通道切到外观分页（与用户点击侧栏同一 selectSection
+    // 路径）：真实 webview 渲染后上报 uiState，宿主记忆生效
+    await vscode.commands.executeCommand('onegayi.vsidian.openStyleReference')
+    await poll('宿主记忆到外观分页 uiState', async () => {
+      const i = (await vscode.commands.executeCommand(CMD.settingsPageInfo)) as
+        | { uiState?: { section: string; scrollTop: number } }
+        | undefined
+      return i?.uiState?.section === 'appearance' ? i.uiState : undefined
+    })
+
+    // 面板关闭：记忆必须存活（会话内恢复的前提——panel 销毁不清除）
+    await vscode.commands.executeCommand(CMD.closeSettingsPage)
+    await poll('设置页关闭且记忆仍在', async () => {
+      const i = (await vscode.commands.executeCommand(CMD.settingsPageInfo)) as
+        | { open: boolean; uiState?: { section: string } }
+        | undefined
+      return i && !i.open && i.uiState?.section === 'appearance' ? true : undefined
+    })
+
+    // 重开并就绪：记忆仍在（重开握手按它补发 focusSection{scroll} 恢复，
+    // 补发行为由 settingsPageHost 单测钉住；此处断言真宿主不清记忆）
+    await vscode.commands.executeCommand('onegayi.vsidian.openSettings')
+    await poll('重开就绪且恢复记忆存活', async () => {
+      const i = (await vscode.commands.executeCommand(CMD.settingsPageInfo)) as
+        | { open: boolean; ready: boolean; uiState?: { section: string } }
+        | undefined
+      return i?.open && i.ready && i.uiState?.section === 'appearance' ? true : undefined
+    })
+    await vscode.commands.executeCommand(CMD.closeSettingsPage)
+  }],
+
   ['设置页：工具栏消息入口打开、标题归属 Vsidian、不改文档与撤销历史（#33）', async () => {
     await openWithEditor('lf.md')
     await waitSessionReady('lf.md')

@@ -207,6 +207,9 @@ export class SettingsPageView {
     main.append(this.status, this.listEl)
     root.append(sidebar, main)
     this.mainEl = main
+    // 会话内恢复：主区滚动实时上报（浏览器 scroll 事件本身已按帧节流，
+    // 无需再节流）；分页上下文变化的上报在 render 尾部
+    main.addEventListener('scroll', () => this.reportUiState())
     parent.append(root)
     // 语言切换重渲染（#93/#101）：常驻骨架（标题/搜索框/侧栏标签）由
     // localeDom 注册表单点重刷；列表与分页是 render() 的重建产物，随换包
@@ -233,21 +236,25 @@ export class SettingsPageView {
   /** 切换到指定分类（附加分页或内建分组）；entry（#231）为分页内进一步
    *  定位的条目 id（外观分页按归属路由页内页签）；整页重渲染（#132）。
    *  #264 兼容路由：宿主按退役分页 id（legacySectionId，如分词
-   *  'wordSegment'）发起定位时打开编辑器页，entry 透传给对应委托组 */
-  selectSection(id: string, entry?: string): void {
+   *  'wordSegment'）发起定位时打开编辑器页，entry 透传给对应委托组。
+   *  scroll（可选，会话内恢复）：渲染复位后应用的主区滚动位置——缺省 =
+   *  保持 render 的复位语义（顶部）；未知分页整条忽略（不设滚动） */
+  selectSection(id: string, entry?: string, scroll?: number): void {
     if (this.editorGroups.some((g) => g.legacySectionId === id)) id = 'editor'
     const known = this.categories().some((c) => c.id === id)
     if (!known) return
     this.active = id
     this.render(entry)
+    if (scroll !== undefined && this.mainEl) this.mainEl.scrollTop = scroll
   }
 
   handleHostMessage(message: unknown): void {
     if (!isHostToWebview(message)) return
     // #132 样式参考：宿主命令定位到指定附加分页（未知 id 忽略）；
-    // #231 外观合并：entry 可选透传（分页内定位）
+    // #231 外观合并：entry 可选透传（分页内定位）；
+    // 会话内恢复：scroll 可选透传（面板重开/重载后恢复滚动位置）
     if (message.kind === 'settings.focusSection') {
-      this.selectSection(message.section, message.entry)
+      this.selectSection(message.section, message.entry, message.scroll)
       return
     }
     if (message.kind === 'settings.snapshot' || message.kind === 'settings.changed') {
@@ -405,6 +412,41 @@ export class SettingsPageView {
       })
       this.nav?.append(button)
     }
+    this.renderContent(focusEntry, query, active)
+    // 会话内恢复（面板关闭/隐藏重载后还原分页与滚动）：分页或搜索上下文
+    // 变化即上报 UI 态——同分页回显重渲染（开关回显、换包）不重复上报；
+    // 宿主在下次 settings.get 握手按记忆补发 focusSection{scroll}。
+    // 首帧回落默认页（active 未选）不上报：重开装载时首帧 render 先于
+    // settings.get 到达宿主，若上报会把宿主记忆覆盖成默认页，握手补发的
+    // 恢复就永远落回默认——只认用户真实所在（点过侧栏/搜索路由/滚动）的
+    // 分页；默认页内滚动仍经 scroll 事件上报（带上滚动值）
+    if (contextChanged && this.active) this.reportUiState()
+  }
+
+  /** 会话内恢复上报：当前生效分页（active 未选时回落首个分类，与 render
+   *  的回落渲染一致）与主区滚动位置。无激活分类（空 defs fixture）不发，
+   *  宿主侧空 section 同样忽略。scrollTop 取整：DOM scrollTop 是 double，
+   *  zoom/分数缩放下产生小数，协议守卫只收非负整数（不取整整条被静默
+   *  丢弃，恢复失效）；恢复误差 ≤0.5px 不可感知 */
+  private reportUiState(): void {
+    const id = this.active ?? this.categories()[0]?.id
+    if (!id) return
+    this.bridge.postMessage({
+      kind: 'settings.uiState',
+      section: id,
+      scrollTop: Math.round(this.mainEl?.scrollTop ?? 0),
+    })
+  }
+
+  /** 列表主体装配（render 的内容半）：搜索结果、附加分页委托与内建分组
+   *  的渲染路径；query/active 为 render 已算好的渲染上下文。内部 return
+   *  只退出装配，不影响 render 尾部的上报 */
+  private renderContent(
+    focusEntry: string | undefined,
+    query: string,
+    active: { id: string } | undefined,
+  ): void {
+    if (!this.listEl) return
     const list = this.listEl
     list.replaceChildren()
     if (query) {

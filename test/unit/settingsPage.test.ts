@@ -711,6 +711,8 @@ describe('可读行宽滑块（#175：number 型渲染为 range 控件）', () =
   it('拖动中（input）即时刷新值文本但不立即上送（保存语义在释放）', () => {
     const { sent, parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
     const { input, readout } = slider(parent)
+    // 切页动作自身的 uiState 上报不属于本用例语义，清零后断言全量外发为空
+    sent.length = 0
     input.value = '1200'
     input.dispatchEvent(new Event('input'))
     expect(readout.textContent).toBe('1200px')
@@ -855,5 +857,163 @@ describe('外观合并分页（#231）', () => {
     clickAppearanceResult(parent, zhCn['styleRef.title'])
     expect(tabOf(parent, 'overview').getAttribute('aria-selected')).toBe('true')
     expect(parent.querySelector('.vsidian-style-ref-overview')!.hasAttribute('hidden')).toBe(false)
+  })
+})
+
+describe('分词组设置回显：就地同步不重建（定位态保持）', () => {
+  /** 生产注册口径（含分词委托组）+ 外发消息捕获。单测无 settingsMain 的
+   *  window 分发，组消息按生产分发语义直达组实例 */
+  function makeWordsegView(): {
+    view: SettingsPageView
+    wordSegment: WordSegmentSection
+    sent: unknown[]
+    parent: HTMLElement
+  } {
+    const sent: unknown[] = []
+    const wordSegment = new WordSegmentSection({ postMessage: (m) => sent.push(m) })
+    const view = new SettingsPageView(
+      { postMessage: (m) => sent.push(m) },
+      PRODUCTION_SETTING_DEFINITIONS,
+      [],
+      [wordSegment],
+    )
+    const parent = document.createElement('div')
+    view.mount(parent)
+    return { view, wordSegment, sent, parent }
+  }
+
+  it('定位态收到 settings.snapshot 回显：组不重建、定位类保持，radio 选中态就地更新', () => {
+    const { view, wordSegment, parent } = makeWordsegView()
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'wordSegment', entry: 'engine' })
+    const located = parent.querySelector('.vsidian-wordseg-block.vsidian-settings-item-located')
+    expect(located, '定位类应已加上').toBeTruthy()
+    // 权威回显到达（真实时序：定位后任一设置保存广播 / 快照应答）
+    wordSegment.handleHostMessage({
+      kind: 'settings.snapshot',
+      values: { 'editor.wordSegmentEngine': 'jieba', 'editor.wordSegmentSource': 'npmmirror' },
+    })
+    // 无参重建会丢定位类（真浏览器套件时序敏感失败实证）——必须就地同步
+    expect(parent.querySelector('.vsidian-wordseg-block.vsidian-settings-item-located')).toBe(located)
+    expect(parent.querySelectorAll('.vsidian-wordseg-block')).toHaveLength(2)
+    expect(parent.querySelector<HTMLInputElement>(
+      'input[name="wordseg-editor.wordSegmentEngine"][value="jieba"]')!.checked).toBe(true)
+    expect(parent.querySelector<HTMLInputElement>(
+      'input[name="wordseg-editor.wordSegmentEngine"][value="builtin"]')!.checked).toBe(false)
+    expect(parent.querySelector<HTMLInputElement>(
+      'input[name="wordseg-editor.wordSegmentSource"][value="npmmirror"]')!.checked).toBe(true)
+  })
+
+  it('回显就地的灰化联动：engine 非 jieba 时下载源灰化、custom 输入禁用', () => {
+    const { view, wordSegment, parent } = makeWordsegView()
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'wordSegment', entry: 'engine' })
+    wordSegment.handleHostMessage({
+      kind: 'settings.changed',
+      values: { 'editor.wordSegmentEngine': 'builtin', 'editor.wordSegmentSource': 'jsdelivr' },
+    })
+    expect(parent.querySelector<HTMLInputElement>(
+      'input[name="wordseg-editor.wordSegmentSource"][value="jsdelivr"]')!.disabled).toBe(true)
+    expect(parent.querySelector<HTMLInputElement>(
+      'input[name="wordseg-editor.wordSegmentSource"][value="npmmirror"]')!.disabled).toBe(true)
+    expect(parent.querySelector<HTMLInputElement>(
+      'input.vsidian-wordseg-custom-url')!.disabled).toBe(true)
+    // 定位态依旧保持（同一断言锚点防回归）
+    expect(parent.querySelector('.vsidian-wordseg-block.vsidian-settings-item-located')).toBeTruthy()
+  })
+})
+
+describe('会话内恢复：uiState 上报与 focusSection.scroll 应用（面板关闭/重载后分页与滚动还原）', () => {
+  /** 生产注册口径 + 外发消息捕获（uiState 上报断言需要桥侧记录） */
+  function makeTrackedFullView(): { view: SettingsPageView; sent: unknown[]; parent: HTMLElement } {
+    const sent: unknown[] = []
+    const snippets = new CssSnippetSettingsSection({ postMessage() {} })
+    const appearance = new AppearanceSection(
+      snippets, new StyleReferenceSection({ postMessage() {} }))
+    const view = new SettingsPageView(
+      { postMessage: (m) => sent.push(m) },
+      PRODUCTION_SETTING_DEFINITIONS,
+      [new KeybindingSettingsSection({ postMessage() {} }), appearance, new IndexMaintenanceSection({ postMessage() {} })],
+    )
+    const parent = document.createElement('div')
+    view.mount(parent)
+    return { view, sent, parent }
+  }
+  function mainEl(parent: HTMLElement): HTMLElement {
+    const main = parent.querySelector<HTMLElement>('.vsidian-settings-main')
+    expect(main, '主区滚动容器应已渲染').toBeTruthy()
+    return main!
+  }
+  function uiStateMessages(sent: unknown[]): Array<{ kind: string; section: string; scrollTop: number }> {
+    return sent.filter((m) => (m as { kind?: string }).kind === 'settings.uiState') as never
+  }
+
+  it('切换分页上报 uiState：section 为目标分页，scrollTop 为复位后的 0', () => {
+    const { sent, parent } = makeTrackedFullView()
+    clickNav(parent, zhCn['appearance.title'])
+    expect(uiStateMessages(sent).at(-1)).toEqual({
+      kind: 'settings.uiState', section: 'appearance', scrollTop: 0,
+    })
+  })
+
+  it('装载首帧回落默认页不上报：重开时不得抢在握手前覆盖宿主记忆（真实时序缺陷回归）', () => {
+    // 真实 webview 时序：mount 首帧 render 的上报先于 settings.get 到达
+    // 宿主——若上报默认回落页，宿主记忆被覆盖成 general，重开恢复永远
+    // 落回默认（集成用例「会话内恢复」超时实证）。首帧不报，记忆存活到
+    // 握手；用户真实切页/滚动才产生上报
+    const { sent } = makeTrackedFullView()
+    expect(uiStateMessages(sent)).toEqual([])
+  })
+
+  it('主区滚动（scroll 事件）上报 uiState：携带当前分页与滚动位置', () => {
+    const { sent, parent } = makeTrackedFullView()
+    clickNav(parent, zhCn['appearance.title'])
+    sent.length = 0
+    const main = mainEl(parent)
+    main.scrollTop = 200
+    main.dispatchEvent(new Event('scroll'))
+    expect(uiStateMessages(sent)).toEqual([
+      { kind: 'settings.uiState', section: 'appearance', scrollTop: 200 },
+    ])
+    // 分页上下文未变时视图不得复位滚动（#155 既有契约），上报后滚动保持
+    expect(main.scrollTop).toBe(200)
+  })
+
+  it('浮点滚动位置取整后上报：DOM scrollTop 为 double（zoom/分数缩放），守卫只收非负整数', () => {
+    const { sent, parent } = makeTrackedFullView()
+    clickNav(parent, zhCn['appearance.title'])
+    sent.length = 0
+    const main = mainEl(parent)
+    main.scrollTop = 133.6
+    main.dispatchEvent(new Event('scroll'))
+    // 不取整的消息会在宿主 isWebviewToHost 整条被拒（静默丢弃），恢复失效
+    expect(uiStateMessages(sent)).toEqual([
+      { kind: 'settings.uiState', section: 'appearance', scrollTop: 134 },
+    ])
+  })
+
+  it('默认分页内滚动：section 回落首个分类（general）——用户未点过侧栏也须可恢复', () => {
+    const { sent, parent } = makeTrackedFullView()
+    const main = mainEl(parent)
+    main.scrollTop = 300
+    main.dispatchEvent(new Event('scroll'))
+    expect(uiStateMessages(sent).at(-1)).toEqual({
+      kind: 'settings.uiState', section: 'general', scrollTop: 300,
+    })
+  })
+
+  it('focusSection 带 scroll（恢复形态）：切到目标分页并恢复滚动位置', () => {
+    const { view, parent } = makeTrackedFullView()
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'appearance', scroll: 120 })
+    expect(parent.querySelector('.vsidian-settings-heading')?.textContent).toBe(zhCn['appearance.title'])
+    expect(mainEl(parent).scrollTop).toBe(120)
+  })
+
+  it('focusSection 不带 scroll（既有定位形态）：切页复位顶部，定位语义不回归', () => {
+    const { view, sent, parent } = makeTrackedFullView()
+    clickNav(parent, zhCn['appearance.title'])
+    mainEl(parent).scrollTop = 200
+    sent.length = 0
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'general' })
+    expect(parent.querySelector('.vsidian-settings-heading')?.textContent).toBe(zhCn['settings.generalSection'])
+    expect(mainEl(parent).scrollTop).toBe(0)
   })
 })
