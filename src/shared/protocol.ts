@@ -737,7 +737,7 @@ export type WebviewToHost =
         fm: 'none' | 'collapsed' | 'expanded'
         maxHeightPx: number
         host?: 'reading' | 'live'
-        rootHost?: 'reading' | 'live'
+        rootHost?: 'reading' | 'live' | 'hover'
         /** #224 内容文本字符数（未保存修改推送后刷新可见性的观测面：
          *  目标内容变化 → textLen 变化；旧 webview 缺省） */
         textLen?: number
@@ -2720,7 +2720,7 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
             // 修 2（review 第二轮）：#223 host 字段入校验器（与联合类型
             // 同步——缺省 / reading 块挂载 / live widget 挂载）
             (e.host === undefined || e.host === 'reading' || e.host === 'live') &&
-            (e.rootHost === undefined || e.rootHost === 'reading' || e.rootHost === 'live') &&
+            (e.rootHost === undefined || e.rootHost === 'reading' || e.rootHost === 'live' || e.rootHost === 'hover') &&
             (e.textLen === undefined || isNonNegativeInt(e.textLen))))) &&
         (v.typography === undefined || isTypographyProbe(v.typography))
       )
