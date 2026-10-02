@@ -130,6 +130,7 @@ vsidian/
 │   │   ├── mvp-issues.md                      # MVP GitHub Issue 索引
 │   │   ├── mvp.md                             # MVP 规格主文档
 │   │   ├── settings-page-visual-refresh.md    # 设置页视觉刷新规格（#155）
+│   │   ├── skeleton-screen.md                 # 编辑器初开骨架屏加载规格
 │   │   ├── style-contract-gate.md             # 契约门禁 CI 接线与远端配置文档
 │   │   ├── style-reference-i18n.md            # 样式参考条目双语化规格
 │   │   ├── symbol-input.md                    # 符号输入与行内围栏扩展约定落档
