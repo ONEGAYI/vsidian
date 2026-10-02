@@ -191,9 +191,9 @@ vsidian/
         ├── tableStructure.ts           # 表格导航与增删行列纯函数（#13）
         ├── targetTip.ts                # 跳转目标提示：浮层不将现时的目标位置浮标
         ├── taskToggle.ts               # 任务勾选解析纯函数（#9）
-        ├── tooltipCard.css             # 统一悬停提示卡片样式
-        ├── tooltipCard.ts              # 统一悬停提示委托层
-        ├── tooltipGeometry.ts          # 悬停提示定位几何
+        ├── tooltipCard.css             # 悬停提示共享样式
+        ├── tooltipCard.ts              # 悬停提示委托控制器
+        ├── tooltipGeometry.ts          # 悬停提示定位几何纯函数
         ├── wordMotion.ts               # 词级移动命令与引擎配置
         └── wordSegmentSettings.ts      # 设置页中文分词分页
 <!-- file-tree:tree^id=src:end -->
