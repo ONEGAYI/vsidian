@@ -93,6 +93,7 @@ import { t } from '../shared/i18n'
 import { EMBED_MAX_DEPTH_DEFAULT, EMBED_MAX_DEPTH_KEY } from '../shared/settings'
 import type { JiebaWiring } from './jiebaResourceWiring'
 import { JIEBA_WASM_VERSION } from '../shared/jiebaManifest'
+import { recordDiagnosticMessage, TestDiagnostics } from '../shared/testDiagnostics'
 
 export const VIEW_TYPE = 'onegayi.vsidian.editor'
 
@@ -354,6 +355,7 @@ export function createTextEditorProvider(
   jieba?: JiebaWiring,
 ): vscode.CustomTextEditorProvider {
   const sessions = new Map<string, SessionEntry>()
+  const diagnostics = new TestDiagnostics()
   let lastClosedInput: { docUri: string; webviewText?: string; fragments: string[] } | undefined
 
   // ---- #201 图片刷新协调器（provider 级单件：版本表与失效通道跨会话共享） ----
@@ -458,6 +460,7 @@ export function createTextEditorProvider(
   // 回调闭包引用 hoverEvents（下方声明），事件触发恒晚于注册
   if (vaultIndex) {
     const offTargetChange = vaultIndex.onTargetChange((event) => {
+      diagnostics.record('hover.disk', { fsPath: event.fsPath, status: event.status })
       if (isImageFileExtension(event.fsPath)) {
         scheduleImageEvent(event.fsPath)
       }
@@ -498,6 +501,7 @@ export function createTextEditorProvider(
   const hoverRefresh = new HoverRefreshCoordinator(
     {
       pushInvalidation: (sessionKeys, fsPath, status, generation) => {
+        diagnostics.record('hover.invalidate', { fsPath, status, generation, recipients: sessionKeys.length })
         // 只出站消息与清缓存——不得触发宿主事件源（自引用防循环的结构前提）
         for (const sessionKey of sessionKeys) {
           const newlineAt = sessionKey.indexOf('\n')
@@ -1216,6 +1220,10 @@ export function createTextEditorProvider(
       }
       const entry = openEntry(document)
       const send = (message: HostToWebview): void => {
+        if (message.kind === 'init' && diagnostics.enabled) {
+          void webviewPanel.webview.postMessage({ kind: 'diagnostics.test.set', enabled: true })
+        }
+        if (diagnostics.enabled) recordDiagnosticMessage(diagnostics, 'host.send', { ...message, docUri: document.uri.toString() })
         void webviewPanel.webview.postMessage(message)
       }
       // ---- #10 链接跳转与图片资源执行（面板端口注入；URI 解析在宿主侧） ----
@@ -1464,6 +1472,7 @@ export function createTextEditorProvider(
       }
 
       const messageSub = webviewPanel.webview.onDidReceiveMessage((message) => {
+        recordDiagnosticMessage(diagnostics, 'host.receive', message)
         if (isWebviewToHost(message) && message.kind === 'keybindings.get') {
           void webviewPanel.webview.postMessage({
             kind: 'keybindings.snapshot', overrides: settings?.keybindings.getSnapshot() ?? {},
@@ -1670,6 +1679,8 @@ export function createTextEditorProvider(
   // undo/redo）的变更都进入 session 识别与广播
   context.subscriptions.push(
     vscode.workspace.onDidChangeTextDocument((event) => {
+      diagnostics.record('document.changed', { fsPath: event.document.uri.fsPath,
+        version: event.document.version, changes: event.contentChanges.length, dirty: event.document.isDirty })
       // #197 索引覆盖层：消费原始事件（不经 session 产物——任何编辑器打开
       // 的 .md 都是索引来源域）；服务内做版本仲裁与去抖，未保存内容不落盘
       if (vaultIndex && event.document.uri.scheme === 'file' && /\.md$/i.test(event.document.uri.path)) {
@@ -1836,7 +1847,8 @@ export function createTextEditorProvider(
     // ——开关/内容刷新无需重赋 webview.options（重赋可能触发 webview 资源
     // 状态重置；扫描失败保留最近成功样式的语义不允许额外扰动）
     let lastSnippetDirectory = snippets.getState().directory
-    const offSnippets = snippets.onChange((state) => {
+    const offSnippets = snippets.onChange((state, reason) => {
+      diagnostics.record('snippets.broadcast', { reason, version: state.version })
       const directoryChanged = state.directory !== lastSnippetDirectory
       lastSnippetDirectory = state.directory
       for (const entry of sessions.values()) {
@@ -2328,6 +2340,31 @@ export function createTextEditorProvider(
   // ---- 测试钩子命令：仅集成测试经 runTest.mjs 注入 VSIDIAN_TEST_HOOKS=1 时
   // 注册（C-11），生产 VSIX 与常规 F5 开发不暴露 ----
   if (process.env.VSIDIAN_TEST_HOOKS === '1') {
+    context.subscriptions.push(
+      vscode.commands.registerCommand('onegayi.vsidian._test.setDiagnostics', (enabled: boolean) => {
+        diagnostics.reset(enabled === true)
+        snippets?.setTestDiagnostics(enabled === true)
+        for (const entry of sessions.values()) for (const panel of entry.panels.values()) {
+          void panel.webview.postMessage({ kind: 'diagnostics.test.set', enabled: enabled === true })
+        }
+      }),
+      vscode.commands.registerCommand('onegayi.vsidian._test.getDiagnostics', () => ({
+        host: diagnostics.snapshot(), snippets: snippets?.getTestDiagnostics(),
+        // 缓存是最后一次真实回报，不以失败后额外调度改变现场。无回报如实留空。
+        panels: [...sessions.values()].flatMap((entry) => [...entry.panels.keys()].map((sessionId) => {
+          const state = entry.session.getViewState(sessionId)
+          return { docUri: entry.doc.uri.toString(), sessionId, cached: true,
+            trace: state?.diagnostics, viewMode: state?.viewMode,
+            css: state?.cssProbe, readingTotalBlocks: state?.readingTotalBlocks,
+            readingMountedBlocks: state?.readingMountedBlocks,
+            readingScrollTopPx: state?.readingScrollTopPx,
+            embeds: state?.readingEmbed?.slice(0, 32).map((card) => ({
+              inner: card.inner, state: card.state, host: card.host, rootHost: card.rootHost, blocks: card.blocks,
+              textLen: card.textLen, viewStats: card.viewStats,
+            })) }
+        })).slice(0, 8),
+      })),
+    )
     context.subscriptions.push(
     vscode.commands.registerCommand('onegayi.vsidian._test.getSessionState', (uriStr: string) => {
       const entry = getEntry(vscode.Uri.parse(uriStr))

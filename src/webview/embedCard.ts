@@ -148,6 +148,8 @@ export interface EmbedCardProbe {
   maxHeightPx: number
   /** 容器来源（#223 Live 挂载与 Reading 块挂载的观测区分） */
   host: 'reading' | 'live'
+  /** #272 顶层正文归属；递归子卡自身 host=reading 仍可处于 Live 根内。 */
+  rootHost: 'reading' | 'live'
   /** #224 内容文本字符数（未保存修改推送后刷新可见性的观测面） */
   textLen: number
   viewStats: ReadingViewStats | null
@@ -680,6 +682,7 @@ export class EmbedCardManager {
         fm: fmSection ? (handle.entry.content.fmExpanded ? 'expanded' : 'collapsed') : 'none',
         maxHeightPx: Number.parseInt(handle.scrollEl.style.maxHeight, 10) || 0,
         host: handle.host,
+        rootHost: handle.cardEl.closest('.vsidian-view-live') ? 'live' : 'reading',
         // #224 内容文本字符数（集成断言未保存修改推送后的刷新可见性）
         textLen: (handle.contentEl.textContent ?? '').length,
         viewStats: handle.content.getStats(),

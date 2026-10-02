@@ -77,6 +77,7 @@ vsidian/
     │   ├── symbols.ts            # 符号注册表单一事实源（#123）
     │   ├── symbolWrap.ts         # 选区包裹计划纯函数（#124）
     │   ├── tabEscape.ts          # Tab 越界定位纯函数（#125）
+    │   ├── testDiagnostics.ts    # 测试传播诊断有界日志
     │   ├── vaultIndexExclude.ts  # 索引排除模式纯逻辑单一事实源
     │   ├── vaultIndexModel.ts    # 引用索引内存模型纯逻辑
     │   ├── vaultIndexSchedule.ts # 索引维护调度纯逻辑与初值常量

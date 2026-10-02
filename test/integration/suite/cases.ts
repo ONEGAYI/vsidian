@@ -2,6 +2,7 @@
 // fixture 工作区由 runTest.mjs 在临时目录动态生成（避免 git 换行转换干扰
 // 字节级断言），路径经环境变量 WORKSPACE_DIR 传入。
 import * as vscode from 'vscode'
+import { liveEmbedReady, readingEmbedCard } from './embedReadiness'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { LOCALE_MESSAGES, resolveLocale } from '../../../src/shared/locales'
 import { OBSIDIAN_ALIAS_PROBES } from '../../../src/shared/obsidianAlias'
@@ -985,6 +986,7 @@ interface ViewState {
     fm: 'none' | 'collapsed' | 'expanded'
     maxHeightPx: number
     host?: 'reading' | 'live'
+    rootHost?: 'reading' | 'live'
     /** #224 内容文本字符数（未保存修改推送后刷新可见性断言） */
     textLen?: number
     /** #243 现有虚拟窗口观测；仅取目标自身块数，排除子卡正文长度。 */
@@ -12141,12 +12143,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
 
     // 三张 Live 卡片（host=live）经真宿主读取闭环：两张 content（全文/章节）
     // + 缺失目标 error（Live widget 惰性物化——短文档全在视口）
-    const shown = await waitViewState('嵌入样例.md', (v) => {
-      const live = (v.readingEmbed ?? []).filter((c) => c.host === 'live')
-      // #247 起混排位同挂 Live 卡：3 独占 + 1 混排 = 4（content 3 + error 1）
-      return v.viewMode === 'live' && live.length === 4 &&
-        live.filter((c) => c.state === 'content').length === 3
-    })
+    // 缺失目标回包可晚于三张成功卡；必须等 error 终态后再采样断言。
+    const shown = await waitViewState('嵌入样例.md', liveEmbedReady)
     const liveCards = shown.readingEmbed!.filter((c) => c.host === 'live')
     const fullCard = liveCards.find((c) => c.inner === '嵌入目标')
     assert(fullCard && fullCard.scope === 'full' && fullCard.note === '嵌入目标.md',
@@ -12747,7 +12745,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand(CMD.postToPanel, parentUri, { kind: 'view.mode.set', mode: 'reading' })
     const pull = () => vscode.commands.executeCommand(CMD.viewState, parentUri, 0) as Promise<ViewState | undefined>
     const card = (v: ViewState | undefined, inner: string) =>
-      (v?.readingEmbed ?? []).find((item) => item.host !== 'live' && item.inner === inner)
+      readingEmbedCard(v?.readingEmbed, inner)
     const initial = await poll('三层真实内容与第四层占位', async () => {
       const v = await pull()
       return card(v, 'ref-depth/one/B')?.state === 'content' &&
@@ -12769,9 +12767,8 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const cEdit = new vscode.WorkspaceEdit()
     cEdit.insert(cUri, cDoc.positionAt(cDoc.getText().length), '\nC 未保存尾注。')
     assert(await vscode.workspace.applyEdit(cEdit), 'C 未保存编辑应成功')
-    // 30s 与本用例相邻等待同预算：未保存刷新经 B 直接来源链路传播，四片
-    // 并发（本机 2/4 挂）与 CI 慢 runner 上可超 20s——负载延迟形态非死挂
-    // （定向恒过），属 #215 CI 敏感性族的窗口加固（同 71e6909 处置原则）
+    // #272：保留现有 30s 预算；健康约 3s 与整段耗尽的 CI 样本并存，
+    // 不能据本机通过断定为纯延迟。失败时读取传播诊断快照区分链路断点。
     await poll('C 未保存刷新', async () => {
       const v = await pull()
       const current = card(v, '../two/C')

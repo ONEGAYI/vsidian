@@ -20,6 +20,7 @@
 //   变化后实测回填 + 滚动锚定（视口顶块的顶部位置变化平移 scrollTop，
 //   保持源位置锚点稳定）
 import { splitReadingBlocks, type ReadingBlock } from './readingBlocks'
+import type { DiagnosticEvent } from '../shared/testDiagnostics'
 import type { FindMatch } from './findSession'
 import { highlightReadingMatches } from './readingFind'
 import { ReadingFindSource } from './readingFindSource'
@@ -64,6 +65,8 @@ export interface ReadingViewStats {
 }
 
 export interface VirtualReadingViewOptions {
+  /** #272 被动观测现有 scroll/rAF 链；没有回调时不取诊断数据。 */
+  onDiagnostic?: (stage: string, data: DiagnosticEvent['data']) => void
   /** 滚动及裁剪宿主；缺省为内容容器（主阅读视图既有形态）。 */
   scrollEl?: HTMLElement
   /** 挂载缓冲（px）：窗口在视口两侧外扩的距离；缺省按视口高度自适应 */
@@ -144,6 +147,7 @@ export class VirtualReadingView {
   private disposed = false
   /** #10 图片生命周期钩子（构造注入） */
   private hooks: VirtualReadingViewOptions
+  private onDiagnostic: VirtualReadingViewOptions['onDiagnostic']
 /** 最近一次有效视口高度（隐藏期保持虚拟模式用） */
   private lastViewportHeight = 0
   /** RO 观测到的容器最近内容宽度（0 = 尚未记录） */
@@ -158,6 +162,7 @@ export class VirtualReadingView {
     this.scrollEl = options.scrollEl ?? this.container
     this.fixedBufferPx = options.bufferPx
     this.hooks = options
+    this.onDiagnostic = options.onDiagnostic
     this.findSource = new ReadingFindSource(this.container)
     this.spacerTop = document.createElement('div')
     this.spacerTop.className = `${READING_CLASS_NAMES.spacer} ${READING_CLASS_NAMES.spacerTop}`
@@ -238,6 +243,7 @@ export class VirtualReadingView {
 
   /** 滚动入口（scroll 事件）：rAF 合帧后重算窗口 */
   handleScroll(): void {
+    this.onDiagnostic?.('reading.scroll', { top: this.scrollEl.scrollTop })
     // 外部宿主刚发生滚动时，其 scrollTop 是用户意图；首次窗口实测
     // 的估计修正不应把该值平移。后续独立 RO（如图片晚到）仍会锚定。
     if (this.scrollEl !== this.container) this.skipStabilizeOnce = true
@@ -246,6 +252,8 @@ export class VirtualReadingView {
 
   /** 立即重算窗口（同步；测试与 handleScroll 的落点） */
   updateNow(): void {
+    this.onDiagnostic?.('reading.update', { disposed: this.disposed, blocks: this.blocks.length,
+      pendingFrame: this.pendingFrame, virtualized: this.virtualized, top: this.scrollEl.scrollTop })
     if (this.disposed) return
     if (this.blocks.length === 0) {
       this.clearAll()
@@ -253,6 +261,7 @@ export class VirtualReadingView {
       return
     }
     if (!this.layoutAvailable()) {
+      this.onDiagnostic?.('reading.hidden', {})
       return // 隐藏期：保持现状（曾虚拟化则 DOM 冻结，不回退重建）
     }
     if (!this.virtualized) {
@@ -277,6 +286,10 @@ export class VirtualReadingView {
     }
     const windowChanged = mount.length > 0 || recycle.length > 0
     this.mounted = next
+    this.onDiagnostic?.('reading.window', { from: next?.first ?? -1, to: next?.last ?? -1, mount: mount.length,
+      recycle: recycle.length, top: scrollTop, mounted: this.elements.size,
+      mountedFirst: this.elements.size ? Math.min(...this.elements.keys()) : -1,
+      mountedLast: this.elements.size ? Math.max(...this.elements.keys()) : -1 })
     // 只在窗口真实变化时重排：无变化路径零 DOM 写入——否则容器
     // ResizeObserver 会对自身布局变化再次回调，形成每帧空转循环
     if (windowChanged) {
@@ -593,12 +606,17 @@ export class VirtualReadingView {
 
   // ---- 内部 ----
 
+  /** 测试门控开启后接入，被动回报既有调度；关闭后不读取诊断数据。 */
+  setDiagnosticSink(sink: VirtualReadingViewOptions['onDiagnostic']): void { this.onDiagnostic = sink }
+
   private scheduleUpdate(): void {
+    this.onDiagnostic?.('reading.schedule', { disposed: this.disposed, pendingFrame: this.pendingFrame })
     if (this.disposed || this.pendingFrame) {
       return
     }
     this.pendingFrame = true
     this.cancelFrame = scheduleFrame(() => {
+      this.onDiagnostic?.('reading.frame', {})
       this.cancelFrame = null
       this.pendingFrame = false
       if (!this.disposed) this.updateNow()
