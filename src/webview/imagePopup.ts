@@ -221,7 +221,8 @@ function toolbarButton(
   btn.type = 'button'
   btn.className = className
   btn.setAttribute('aria-label', label)
-  btn.title = label
+  btn.setAttribute('data-tooltip', label)
+
   btn.innerHTML = icon
   btn.disabled = disabled
   btn.addEventListener('click', onClick)
@@ -231,7 +232,8 @@ function toolbarButton(
 /** 外链导出钮的悬停提示宿主（disabled button 不派发鼠标事件） */
 function wrapExportHint(btn: HTMLButtonElement): HTMLElement {
   const hint = document.createElement('span')
-  hint.title = t('graphic.popupExportImageDisabled')
+  hint.setAttribute('data-tooltip', t('graphic.popupExportImageDisabled'))
+
   hint.appendChild(btn)
   return hint
 }

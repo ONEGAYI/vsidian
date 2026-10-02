@@ -111,7 +111,7 @@ Object.assign(window, {
       bookDisplay: displayOf('vsidian-view-toggle-book'),
       editDisplay: displayOf('vsidian-view-toggle-edit'),
       aria: btn.getAttribute('aria-label'),
-      title: btn.getAttribute('title'),
+      title: btn.getAttribute('data-tooltip'),
       centerX: rect.x + rect.width / 2,
       toolbarCenterX: barRect ? barRect.x + barRect.width / 2 : null,
       gapToSidebar: sideRect ? sideRect.left - rect.right : null,

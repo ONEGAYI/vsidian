@@ -513,7 +513,7 @@ describe('卡片折叠（与代码块同交互：整卡头部热区 + 右上折�
     if (!fold) throw new Error('折叠 chevron 不在场')
     expect(fold.classList.contains('vsidian-fm-fold-collapsed')).toBe(false)
     expect(fold.getAttribute('aria-expanded')).toBe('true')
-    expect(fold.title).toContain('折叠')
+    expect(fold.getAttribute('data-tooltip')).toContain('折叠')
     expect(view.contentDOM.querySelector('.vsidian-fm-edit')).not.toBeNull()
     expect(view.contentDOM.querySelectorAll('.vsidian-fm-row').length).toBeGreaterThan(0)
     view.destroy()
@@ -530,7 +530,7 @@ describe('卡片折叠（与代码块同交互：整卡头部热区 + 右上折�
     const collapsedBtn = view.contentDOM.querySelector<HTMLButtonElement>('.vsidian-fm-fold')!
     expect(collapsedBtn.classList.contains('vsidian-fm-fold-collapsed')).toBe(true)
     expect(collapsedBtn.getAttribute('aria-expanded')).toBe('false')
-    expect(collapsedBtn.title).toContain('展开')
+    expect(collapsedBtn.getAttribute('data-tooltip')).toContain('展开')
     // 折叠是视图态：零写回
     expect(view.state.doc.toString()).toBe(FM_DOC)
     // 标题栏仍在场（折叠的承载面）

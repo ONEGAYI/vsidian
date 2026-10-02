@@ -156,7 +156,8 @@ class TableControlsView {
     const button = document.createElement('button')
     button.type = 'button'
     button.className = cls
-    button.title = label
+    button.setAttribute('data-tooltip', label)
+
     button.setAttribute('aria-label', label)
     button.style.left = `${left}px`
     button.style.top = `${top}px`

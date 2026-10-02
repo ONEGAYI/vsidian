@@ -240,7 +240,7 @@ describe('图标按钮形态（对齐 VSCode 原生浮层）', () => {
       // 本体不得残留占位字形或任何文字
       expect(btn.textContent, `${cls} 本体应为纯图标（无文字）`).toBe('')
       expect(btn.getAttribute('aria-label'), `${cls} 可访问名称`).toBe(word)
-      expect(btn.getAttribute('title'), `${cls} 悬停提示`).toBe(word)
+      expect(btn.getAttribute('data-tooltip'), `${cls} 悬停提示`).toBe(word)
     }
   })
 })
@@ -876,7 +876,7 @@ describe('在选定内容中查找（#241 资产接线：findInSelection）', ()
     c.handleHostMessage({ kind: 'view.find.open', query: '目标词' })
     const btn = inSelectionBtn()
     expect(btn.getAttribute('aria-label')).toBe('在选定内容中查找')
-    expect(btn.getAttribute('title')).toBe('在选定内容中查找')
+    expect(btn.getAttribute('data-tooltip')).toBe('在选定内容中查找')
     expect(btn.textContent).toBe('')
   })
 })

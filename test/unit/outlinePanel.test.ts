@@ -120,7 +120,7 @@ describe('大纲按钮与面板 DOM（#54）', () => {
     const d = outlineDom(parent)
     expect(d.toggle, '侧栏顶栏应有 vsidian-outline-toggle 按钮').toBeTruthy()
     expect(d.toggle!.getAttribute('aria-label')).toBe(zhCn['outline.label'])
-    expect(d.toggle!.getAttribute('title')).toBe(zhCn['outline.label'])
+    expect(d.toggle!.getAttribute('data-tooltip')).toBe(zhCn['outline.label'])
     expect(d.toggle!.getAttribute('aria-controls')).toBe('vsidian-outline-panel')
   })
 

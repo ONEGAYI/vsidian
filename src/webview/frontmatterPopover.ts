@@ -152,12 +152,14 @@ function removeButton(label: string, onConfirm: () => void): HTMLButtonElement {
   btn.type = 'button'
   btn.className = FM_POPOVER_CLASS_NAMES.remove
   btn.innerHTML = REMOVE_ICON
-  btn.title = label
+  btn.setAttribute('data-tooltip', label)
+
   btn.setAttribute('aria-label', label)
   const resetArmed = (): void => {
     btn.classList.remove(FM_POPOVER_CLASS_NAMES.removeArmed)
     btn.innerHTML = REMOVE_ICON
-    btn.title = label
+    btn.setAttribute('data-tooltip', label)
+
     btn.setAttribute('aria-label', label)
   }
   let armed = false
@@ -172,7 +174,8 @@ function removeButton(label: string, onConfirm: () => void): HTMLButtonElement {
     btn.classList.add(FM_POPOVER_CLASS_NAMES.removeArmed)
     const confirmLabel = t('frontmatter.removeConfirm')
     btn.textContent = confirmLabel
-    btn.title = confirmLabel
+    btn.setAttribute('data-tooltip', confirmLabel)
+
     btn.setAttribute('aria-label', confirmLabel)
     timer = window.setTimeout(() => {
       armed = false

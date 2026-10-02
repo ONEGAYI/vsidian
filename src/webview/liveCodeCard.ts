@@ -235,7 +235,8 @@ export function buildCopyButton(code: string, onCopy: (code: string) => void): H
   btn.type = 'button'
   btn.className = CODE_CARD_CLASS_NAMES.copy
   btn.setAttribute('aria-label', t('codeblock.copy'))
-  btn.title = t('codeblock.copy')
+  btn.setAttribute('data-tooltip', t('codeblock.copy'))
+
   const copyIcon = document.createElement('span')
   copyIcon.className = CODE_CARD_CLASS_NAMES.copyIconCopy
   copyIcon.setAttribute('aria-hidden', 'true')
@@ -284,7 +285,8 @@ export function buildFoldButton(folded: boolean, onToggle: () => void): HTMLButt
     : CODE_CARD_CLASS_NAMES.fold
   btn.setAttribute('aria-label', folded ? t('codeblock.expand') : t('codeblock.collapse'))
   btn.setAttribute('aria-expanded', folded ? 'false' : 'true')
-  btn.title = folded ? t('codeblock.expand') : t('codeblock.collapse')
+  btn.setAttribute('data-tooltip', folded ? t('codeblock.expand') : t('codeblock.collapse'))
+
   btn.innerHTML =
     '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" ' +
     'stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"></path></svg>'
@@ -313,7 +315,8 @@ export function buildWrapButton(wrapOn: boolean, onToggle: () => void): HTMLButt
     : `${CODE_CARD_CLASS_NAMES.wrap} ${CODE_CARD_CLASS_NAMES.wrapOff}`
   btn.setAttribute('aria-label', wrapOn ? t('codeblock.wrapDisable') : t('codeblock.wrapEnable'))
   btn.setAttribute('aria-pressed', wrapOn ? 'true' : 'false')
-  btn.title = wrapOn ? t('codeblock.wrapDisable') : t('codeblock.wrapEnable')
+  btn.setAttribute('data-tooltip', wrapOn ? t('codeblock.wrapDisable') : t('codeblock.wrapEnable'))
+
   btn.innerHTML =
     '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" ' +
     'stroke-linecap="round" stroke-linejoin="round">' +

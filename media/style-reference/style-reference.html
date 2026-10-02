@@ -1234,7 +1234,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
   </section>
   <section class="domain" data-domain="chrome">
-    <h1 style="font-size:19px;margin-bottom:4px">界面域（75 条）</h1>
+    <h1 style="font-size:19px;margin-bottom:4px">界面域（86 条）</h1>
     <p class="note">界面域条目（#133 起逐项核实）：静态入口经探针在真实渲染中断言，交互态入口由浏览器/集成套件按行为路径验证；第三方渲染器（KaTeX/Mermaid）内部 DOM 不承诺为稳定接口（见各域「限制」类目）。</p>
     <h2>界面域 · 公式（5）</h2>
     <article class="entry" id="live-math">
@@ -2302,6 +2302,140 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 }</code></pre>
       <p class="verify">验证：单元 skeletonScreen（#292）：列宽变量引用与预注入行为钉住；浏览器 skeletonProbe（#292）：限宽 600 跟随与铺满档等宽的绘制断言</p>
       <p class="life">引入：#292（2026-10-02）</p>
+    </article>
+    <h2>界面域 · 悬停提示（11）</h2>
+    <article class="entry" id="tooltip-card">
+      <h3><code>.vsidian-tooltip</code><span class="eid">tooltip-card</span></h3>
+      <p class="purpose">统一自绘悬停提示容器（#300）：全站悬停词（操作提示、用户内容字面量、态变原因、键位徽章）的自绘小卡片。document 级委托监听 [data-tooltip]（原生 title 已退役，防回潮扫描钉住），悬停经 --vsidian-tooltip-show-delay 延迟出现、焦点进入即时显示；可聚焦（tabindex=0）、内部文字可选中复制，不装载按钮。fixed 定位经 tooltipGeometry（下→上翻转、水平居中优先、越缘翻转对齐、视口钳制），z-index 10500 高于模态——图表/图片/悬停预览弹窗自身按钮的提示可呈现于弹窗之上；不参与 popupMutex 争夺，显隐纯指针/焦点驱动。设置页 webview 同机制同类名。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：无（Obsidian tooltip 无公开定制接口）</p>
+
+      <p class="dom">DOM 关系：挂载于 #app 直下（回退 body）；单例常驻，shown 修饰类驱动显隐。</p>
+      <pre><code>.vsidian-tooltip { background: var(--vsidian-tooltip-background); border-radius: var(--vsidian-tooltip-radius); }</code></pre>
+      <p class="verify">验证：单元 tooltipCard：显隐时序、保活、焦点即显、Esc 还焦、徽章渲染；单元 tooltipGeometry：翻转与钳制矩阵；浏览器 tooltipCard：悬停可见性与主题跟随的绘制层断言</p>
+      <p class="life">引入：#300（2026-10-02）</p>
+    </article>
+    <article class="entry" id="tooltip-key">
+      <h3><code>.vsidian-tooltip-key</code><span class="eid">tooltip-key</span></h3>
+      <p class="purpose">悬停提示内的键位徽章（#300）：带快捷键操作的键位段独立成章——名称走 data-tooltip、键位走 data-tooltip-keys（内部 
+ 分隔），多段键位各一枚；显示连接符由徽章形态承担，不走 common.keySeparator 显示串。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：无（Obsidian tooltip 无公开定制接口）</p>
+
+      <p class="dom">DOM 关系：.vsidian-tooltip 内 .vsidian-tooltip-keys 区（内部布局壳，不公开）的直接子元素序列。</p>
+      <pre><code>.vsidian-tooltip-key { background: var(--vsidian-tooltip-key-background); }</code></pre>
+      <p class="verify">验证：单元 tooltipCard：多段键位各一枚徽章、无键位不渲染</p>
+      <p class="life">引入：#300（2026-10-02）</p>
+    </article>
+    <article class="entry" id="var-tooltip-background">
+      <h3><code>--vsidian-tooltip-background</code><span class="eid">var-tooltip-background</span></h3>
+      <p class="purpose">悬停提示卡片背景（#300）：默认引宿主 --vscode-editorHoverWidget-background——浅色主题浅底深字、深色主题深底白字，与宿主原生悬停同频自适应。公开变量，CSS 片段可覆盖（规格 docs/specs/tooltip.md「视觉规格」）。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：无（Obsidian tooltip 无公开定制接口）</p>
+
+      <p class="dom">DOM 关系：定义于 #app（编辑器与设置页两 webview 同名容器）。</p>
+      <pre><code>#app { --vsidian-tooltip-background: …; }</code></pre>
+      <p class="verify">验证：单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用；浏览器 tooltipCard：计算样式非透明与主题类切换跟随</p>
+      <p class="life">引入：#300（2026-10-02）</p>
+    </article>
+    <article class="entry" id="var-tooltip-foreground">
+      <h3><code>--vsidian-tooltip-foreground</code><span class="eid">var-tooltip-foreground</span></h3>
+      <p class="purpose">悬停提示文字前景（#300）：默认引宿主 editorHover 前景，明暗自适应。公开变量，CSS 片段可覆盖。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：无（Obsidian tooltip 无公开定制接口）</p>
+
+      <p class="dom">DOM 关系：定义于 #app（编辑器与设置页两 webview 同名容器）。</p>
+      <pre><code>#app { --vsidian-tooltip-foreground: …; }</code></pre>
+      <p class="verify">验证：单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用；浏览器 tooltipCard：计算样式非透明与主题类切换跟随</p>
+      <p class="life">引入：#300（2026-10-02）</p>
+    </article>
+    <article class="entry" id="var-tooltip-border">
+      <h3><code>--vsidian-tooltip-border</code><span class="eid">var-tooltip-border</span></h3>
+      <p class="purpose">悬停提示边框（#300）：默认引宿主 editorHover 边框——浅色细边、深色近无，高对比主题随宿主强化。公开变量，CSS 片段可覆盖。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：无（Obsidian tooltip 无公开定制接口）</p>
+
+      <p class="dom">DOM 关系：定义于 #app（编辑器与设置页两 webview 同名容器）。</p>
+      <pre><code>#app { --vsidian-tooltip-border: …; }</code></pre>
+      <p class="verify">验证：单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用；浏览器 tooltipCard：计算样式非透明与主题类切换跟随</p>
+      <p class="life">引入：#300（2026-10-02）</p>
+    </article>
+    <article class="entry" id="var-tooltip-radius">
+      <h3><code>--vsidian-tooltip-radius</code><span class="eid">var-tooltip-radius</span></h3>
+      <p class="purpose">悬停提示圆角（#300）。公开变量，CSS 片段可覆盖。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：无（Obsidian tooltip 无公开定制接口）</p>
+
+      <p class="dom">DOM 关系：定义于 #app（编辑器与设置页两 webview 同名容器）。</p>
+      <pre><code>#app { --vsidian-tooltip-radius: …; }</code></pre>
+      <p class="verify">验证：单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用；浏览器 tooltipCard：计算样式非透明与主题类切换跟随</p>
+      <p class="life">引入：#300（2026-10-02）</p>
+    </article>
+    <article class="entry" id="var-tooltip-font-size">
+      <h3><code>--vsidian-tooltip-font-size</code><span class="eid">var-tooltip-font-size</span></h3>
+      <p class="purpose">悬停提示字号（#300）。公开变量，CSS 片段可覆盖。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：无（Obsidian tooltip 无公开定制接口）</p>
+
+      <p class="dom">DOM 关系：定义于 #app（编辑器与设置页两 webview 同名容器）。</p>
+      <pre><code>#app { --vsidian-tooltip-font-size: …; }</code></pre>
+      <p class="verify">验证：单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用；浏览器 tooltipCard：计算样式非透明与主题类切换跟随</p>
+      <p class="life">引入：#300（2026-10-02）</p>
+    </article>
+    <article class="entry" id="var-tooltip-max-width">
+      <h3><code>--vsidian-tooltip-max-width</code><span class="eid">var-tooltip-max-width</span></h3>
+      <p class="purpose">悬停提示最大宽度（#300）：超宽换行（错误原因等长文案的收束边界）。公开变量，CSS 片段可覆盖。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：无（Obsidian tooltip 无公开定制接口）</p>
+
+      <p class="dom">DOM 关系：定义于 #app（编辑器与设置页两 webview 同名容器）。</p>
+      <pre><code>#app { --vsidian-tooltip-max-width: …; }</code></pre>
+      <p class="verify">验证：单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用；浏览器 tooltipCard：计算样式非透明与主题类切换跟随</p>
+      <p class="life">引入：#300（2026-10-02）</p>
+    </article>
+    <article class="entry" id="var-tooltip-key-background">
+      <h3><code>--vsidian-tooltip-key-background</code><span class="eid">var-tooltip-key-background</span></h3>
+      <p class="purpose">键位徽章背景（#300）：默认引宿主 editorHover 状态条色。公开变量，CSS 片段可覆盖。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：无（Obsidian tooltip 无公开定制接口）</p>
+
+      <p class="dom">DOM 关系：定义于 #app（编辑器与设置页两 webview 同名容器）。</p>
+      <pre><code>#app { --vsidian-tooltip-key-background: …; }</code></pre>
+      <p class="verify">验证：单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用；浏览器 tooltipCard：计算样式非透明与主题类切换跟随</p>
+      <p class="life">引入：#300（2026-10-02）</p>
+    </article>
+    <article class="entry" id="var-tooltip-key-foreground">
+      <h3><code>--vsidian-tooltip-key-foreground</code><span class="eid">var-tooltip-key-foreground</span></h3>
+      <p class="purpose">键位徽章前景（#300）：默认引宿主 description 前景。公开变量，CSS 片段可覆盖。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：无（Obsidian tooltip 无公开定制接口）</p>
+
+      <p class="dom">DOM 关系：定义于 #app（编辑器与设置页两 webview 同名容器）。</p>
+      <pre><code>#app { --vsidian-tooltip-key-foreground: …; }</code></pre>
+      <p class="verify">验证：单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用；浏览器 tooltipCard：计算样式非透明与主题类切换跟随</p>
+      <p class="life">引入：#300（2026-10-02）</p>
+    </article>
+    <article class="entry" id="var-tooltip-show-delay">
+      <h3><code>--vsidian-tooltip-show-delay</code><span class="eid">var-tooltip-show-delay</span></h3>
+      <p class="purpose">悬停提示出现延迟，ms 无单位数字（#300）：控制器经 getComputedStyle 读取；公开为行为变量供片段调校。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+
+      <p class="obsidian">Obsidian 对应：无（Obsidian tooltip 无公开定制接口）</p>
+
+      <p class="dom">DOM 关系：定义于 #app（编辑器与设置页两 webview 同名容器）。</p>
+      <pre><code>#app { --vsidian-tooltip-show-delay: 300; }</code></pre>
+      <p class="verify">验证：单元 tooltipCard：延迟来源（变量读取、非法回缺省、注入覆盖）；浏览器 tooltipCard：无注入装配走真实 CSS 变量路径</p>
+      <p class="life">引入：#300（2026-10-02）</p>
     </article>
   </section>
 <p style="margin-top:48px;color:color-mix(in srgb, currentColor 50%, transparent);font-size:12px">由 src/shared/styleContract.ts 生成（scripts/genStyleGuide.mjs）；产物一致性由 test/unit/styleGuideGen.test.ts 钉住。</p>

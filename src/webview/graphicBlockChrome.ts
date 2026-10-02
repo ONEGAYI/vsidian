@@ -35,7 +35,8 @@ function buildChromeButton(
   btn.className = className
   const label = t(labelKey)
   btn.setAttribute('aria-label', label)
-  btn.title = label
+  btn.setAttribute('data-tooltip', label)
+
   btn.innerHTML = icon
   // 阻断 CM6 的点击落位（live 侧防误触；阅读侧无副作用），与卡片按钮同款
   btn.addEventListener('mousedown', (event) => {

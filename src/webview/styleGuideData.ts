@@ -250,6 +250,13 @@ export const STYLE_GUIDE_CATEGORIES: readonly StyleContractCategory[] = [
     "title": "加载占位",
     "titleKey": "styleRef.category.loading",
     "order": 14
+  },
+  {
+    "id": "tooltip",
+    "domain": "chrome",
+    "title": "悬停提示",
+    "titleKey": "styleRef.category.tooltip",
+    "order": 15
   }
 ] as readonly StyleContractCategory[]
 
@@ -3943,6 +3950,259 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "浏览器 skeletonProbe（#292）：限宽 600 跟随与铺满档等宽的绘制断言"
     ],
     "introduced": "#292（2026-10-02）"
+  },
+  {
+    "id": "tooltip-card",
+    "domain": "chrome",
+    "category": "tooltip",
+    "kind": "selector",
+    "target": ".vsidian-tooltip",
+    "purpose": "统一自绘悬停提示容器（#300）：全站悬停词（操作提示、用户内容字面量、态变原因、键位徽章）的自绘小卡片。document 级委托监听 [data-tooltip]（原生 title 已退役，防回潮扫描钉住），悬停经 --vsidian-tooltip-show-delay 延迟出现、焦点进入即时显示；可聚焦（tabindex=0）、内部文字可选中复制，不装载按钮。fixed 定位经 tooltipGeometry（下→上翻转、水平居中优先、越缘翻转对齐、视口钳制），z-index 10500 高于模态——图表/图片/悬停预览弹窗自身按钮的提示可呈现于弹窗之上；不参与 popupMutex 争夺，显隐纯指针/焦点驱动。设置页 webview 同机制同类名。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "挂载于 #app 直下（回退 body）；单例常驻，shown 修饰类驱动显隐。",
+    "example": ".vsidian-tooltip { background: var(--vsidian-tooltip-background); border-radius: var(--vsidian-tooltip-radius); }",
+    "obsidian": {
+      "counterpart": "无（Obsidian tooltip 无公开定制接口）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 tooltipCard：显隐时序、保活、焦点即显、Esc 还焦、徽章渲染",
+      "单元 tooltipGeometry：翻转与钳制矩阵",
+      "浏览器 tooltipCard：悬停可见性与主题跟随的绘制层断言"
+    ],
+    "introduced": "#300（2026-10-02）"
+  },
+  {
+    "id": "tooltip-key",
+    "domain": "chrome",
+    "category": "tooltip",
+    "kind": "selector",
+    "target": ".vsidian-tooltip-key",
+    "purpose": "悬停提示内的键位徽章（#300）：带快捷键操作的键位段独立成章——名称走 data-tooltip、键位走 data-tooltip-keys（内部 \n 分隔），多段键位各一枚；显示连接符由徽章形态承担，不走 common.keySeparator 显示串。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": ".vsidian-tooltip 内 .vsidian-tooltip-keys 区（内部布局壳，不公开）的直接子元素序列。",
+    "example": ".vsidian-tooltip-key { background: var(--vsidian-tooltip-key-background); }",
+    "obsidian": {
+      "counterpart": "无（Obsidian tooltip 无公开定制接口）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 tooltipCard：多段键位各一枚徽章、无键位不渲染"
+    ],
+    "introduced": "#300（2026-10-02）"
+  },
+  {
+    "id": "var-tooltip-background",
+    "domain": "chrome",
+    "category": "tooltip",
+    "kind": "variable",
+    "target": "--vsidian-tooltip-background",
+    "purpose": "悬停提示卡片背景（#300）：默认引宿主 --vscode-editorHoverWidget-background——浅色主题浅底深字、深色主题深底白字，与宿主原生悬停同频自适应。公开变量，CSS 片段可覆盖（规格 docs/specs/tooltip.md「视觉规格」）。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app（编辑器与设置页两 webview 同名容器）。",
+    "example": "#app { --vsidian-tooltip-background: …; }",
+    "obsidian": {
+      "counterpart": "无（Obsidian tooltip 无公开定制接口）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用",
+      "浏览器 tooltipCard：计算样式非透明与主题类切换跟随"
+    ],
+    "introduced": "#300（2026-10-02）"
+  },
+  {
+    "id": "var-tooltip-foreground",
+    "domain": "chrome",
+    "category": "tooltip",
+    "kind": "variable",
+    "target": "--vsidian-tooltip-foreground",
+    "purpose": "悬停提示文字前景（#300）：默认引宿主 editorHover 前景，明暗自适应。公开变量，CSS 片段可覆盖。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app（编辑器与设置页两 webview 同名容器）。",
+    "example": "#app { --vsidian-tooltip-foreground: …; }",
+    "obsidian": {
+      "counterpart": "无（Obsidian tooltip 无公开定制接口）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用",
+      "浏览器 tooltipCard：计算样式非透明与主题类切换跟随"
+    ],
+    "introduced": "#300（2026-10-02）"
+  },
+  {
+    "id": "var-tooltip-border",
+    "domain": "chrome",
+    "category": "tooltip",
+    "kind": "variable",
+    "target": "--vsidian-tooltip-border",
+    "purpose": "悬停提示边框（#300）：默认引宿主 editorHover 边框——浅色细边、深色近无，高对比主题随宿主强化。公开变量，CSS 片段可覆盖。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app（编辑器与设置页两 webview 同名容器）。",
+    "example": "#app { --vsidian-tooltip-border: …; }",
+    "obsidian": {
+      "counterpart": "无（Obsidian tooltip 无公开定制接口）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用",
+      "浏览器 tooltipCard：计算样式非透明与主题类切换跟随"
+    ],
+    "introduced": "#300（2026-10-02）"
+  },
+  {
+    "id": "var-tooltip-radius",
+    "domain": "chrome",
+    "category": "tooltip",
+    "kind": "variable",
+    "target": "--vsidian-tooltip-radius",
+    "purpose": "悬停提示圆角（#300）。公开变量，CSS 片段可覆盖。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app（编辑器与设置页两 webview 同名容器）。",
+    "example": "#app { --vsidian-tooltip-radius: …; }",
+    "obsidian": {
+      "counterpart": "无（Obsidian tooltip 无公开定制接口）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用",
+      "浏览器 tooltipCard：计算样式非透明与主题类切换跟随"
+    ],
+    "introduced": "#300（2026-10-02）"
+  },
+  {
+    "id": "var-tooltip-font-size",
+    "domain": "chrome",
+    "category": "tooltip",
+    "kind": "variable",
+    "target": "--vsidian-tooltip-font-size",
+    "purpose": "悬停提示字号（#300）。公开变量，CSS 片段可覆盖。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app（编辑器与设置页两 webview 同名容器）。",
+    "example": "#app { --vsidian-tooltip-font-size: …; }",
+    "obsidian": {
+      "counterpart": "无（Obsidian tooltip 无公开定制接口）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用",
+      "浏览器 tooltipCard：计算样式非透明与主题类切换跟随"
+    ],
+    "introduced": "#300（2026-10-02）"
+  },
+  {
+    "id": "var-tooltip-max-width",
+    "domain": "chrome",
+    "category": "tooltip",
+    "kind": "variable",
+    "target": "--vsidian-tooltip-max-width",
+    "purpose": "悬停提示最大宽度（#300）：超宽换行（错误原因等长文案的收束边界）。公开变量，CSS 片段可覆盖。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app（编辑器与设置页两 webview 同名容器）。",
+    "example": "#app { --vsidian-tooltip-max-width: …; }",
+    "obsidian": {
+      "counterpart": "无（Obsidian tooltip 无公开定制接口）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用",
+      "浏览器 tooltipCard：计算样式非透明与主题类切换跟随"
+    ],
+    "introduced": "#300（2026-10-02）"
+  },
+  {
+    "id": "var-tooltip-key-background",
+    "domain": "chrome",
+    "category": "tooltip",
+    "kind": "variable",
+    "target": "--vsidian-tooltip-key-background",
+    "purpose": "键位徽章背景（#300）：默认引宿主 editorHover 状态条色。公开变量，CSS 片段可覆盖。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app（编辑器与设置页两 webview 同名容器）。",
+    "example": "#app { --vsidian-tooltip-key-background: …; }",
+    "obsidian": {
+      "counterpart": "无（Obsidian tooltip 无公开定制接口）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用",
+      "浏览器 tooltipCard：计算样式非透明与主题类切换跟随"
+    ],
+    "introduced": "#300（2026-10-02）"
+  },
+  {
+    "id": "var-tooltip-key-foreground",
+    "domain": "chrome",
+    "category": "tooltip",
+    "kind": "variable",
+    "target": "--vsidian-tooltip-key-foreground",
+    "purpose": "键位徽章前景（#300）：默认引宿主 description 前景。公开变量，CSS 片段可覆盖。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app（编辑器与设置页两 webview 同名容器）。",
+    "example": "#app { --vsidian-tooltip-key-foreground: …; }",
+    "obsidian": {
+      "counterpart": "无（Obsidian tooltip 无公开定制接口）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用",
+      "浏览器 tooltipCard：计算样式非透明与主题类切换跟随"
+    ],
+    "introduced": "#300（2026-10-02）"
+  },
+  {
+    "id": "var-tooltip-show-delay",
+    "domain": "chrome",
+    "category": "tooltip",
+    "kind": "variable",
+    "target": "--vsidian-tooltip-show-delay",
+    "purpose": "悬停提示出现延迟，ms 无单位数字（#300）：控制器经 getComputedStyle 读取；公开为行为变量供片段调校。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app（编辑器与设置页两 webview 同名容器）。",
+    "example": "#app { --vsidian-tooltip-show-delay: 300; }",
+    "obsidian": {
+      "counterpart": "无（Obsidian tooltip 无公开定制接口）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 tooltipCard：延迟来源（变量读取、非法回缺省、注入覆盖）",
+      "浏览器 tooltipCard：无注入装配走真实 CSS 变量路径"
+    ],
+    "introduced": "#300（2026-10-02）"
   }
 ] as readonly StyleContractEntry[]
 
@@ -5143,6 +5403,83 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     "dom": "Inside #app but outside the reading scroll container. An aside[role=region] contains a header with source-hit, source line/column and read-only labels, followed by pre > code with precise span highlights. No input, textarea, contenteditable or new keyboard action; existing find navigation and close keys apply.",
     "obsidian": {
       "counterpart": "None (Vsidian reading find source feedback)"
+    }
+  },
+  "tooltip-card": {
+    "purpose": "The unified self-drawn hover hint card (#300): every hover hint in the editor and settings webviews (operation names, user-content literals like raw TeX or image alt, disabled-state reasons, and keybinding badges). A document-level delegate listens on [data-tooltip] — the native title attribute is retired fleet-wide and a contract scan blocks regressions. Appears after the --vsidian-tooltip-show-delay on hover and immediately on keyboard focus; focusable (tabindex=0) with selectable, copyable text; no buttons or interactive logic. Fixed positioning goes through tooltipGeometry (below-first with above flip, center-first horizontal alignment flipping at viewport edges, clamping) at z-index 10500, above modals so buttons inside popups keep hints; it never claims the popup mutex — visibility is purely pointer/focus driven. The settings webview shares the same mechanism and class names.",
+    "dom": "Appended to #app (falling back to body); a persistent singleton whose shown modifier class drives visibility.",
+    "obsidian": {
+      "counterpart": "None (Obsidian tooltips expose no customization interface)"
+    }
+  },
+  "tooltip-key": {
+    "purpose": "A keybinding badge inside the hover hint (#300): operations with shortcuts split into a two-part hint — the name travels in data-tooltip and the keys in data-tooltip-keys (internally \\n-separated), one badge per chord segment. The display connector is the badge form itself, not the common.keySeparator text join.",
+    "dom": "Direct children of the .vsidian-tooltip-keys area inside .vsidian-tooltip (an internal layout shell, not a public entry).",
+    "obsidian": {
+      "counterpart": "None (Obsidian tooltips expose no customization interface)"
+    }
+  },
+  "var-tooltip-background": {
+    "purpose": "The hover hint card background (#300): defaults to the host --vscode-editorHoverWidget-background — light text on a dark card in dark themes and the inverse in light themes, adapting in step with native host hovers. A public variable overridable by CSS snippets.",
+    "dom": "Defined on #app (the same-named container in both the editor and settings webviews).",
+    "obsidian": {
+      "counterpart": "None (Obsidian tooltips expose no customization interface)"
+    }
+  },
+  "var-tooltip-foreground": {
+    "purpose": "The hover hint text foreground (#300): defaults to the host editorHover foreground, adapting across themes. A public variable overridable by CSS snippets.",
+    "dom": "Defined on #app (the same-named container in both the editor and settings webviews).",
+    "obsidian": {
+      "counterpart": "None (Obsidian tooltips expose no customization interface)"
+    }
+  },
+  "var-tooltip-border": {
+    "purpose": "The hover hint border (#300): defaults to the host editorHover border — a hairline in light themes, nearly none in dark ones, strengthened automatically in high-contrast themes. A public variable overridable by CSS snippets.",
+    "dom": "Defined on #app (the same-named container in both the editor and settings webviews).",
+    "obsidian": {
+      "counterpart": "None (Obsidian tooltips expose no customization interface)"
+    }
+  },
+  "var-tooltip-radius": {
+    "purpose": "The hover hint corner radius (#300). A public variable overridable by CSS snippets.",
+    "dom": "Defined on #app (the same-named container in both the editor and settings webviews).",
+    "obsidian": {
+      "counterpart": "None (Obsidian tooltips expose no customization interface)"
+    }
+  },
+  "var-tooltip-font-size": {
+    "purpose": "The hover hint font size (#300). A public variable overridable by CSS snippets.",
+    "dom": "Defined on #app (the same-named container in both the editor and settings webviews).",
+    "obsidian": {
+      "counterpart": "None (Obsidian tooltips expose no customization interface)"
+    }
+  },
+  "var-tooltip-max-width": {
+    "purpose": "The hover hint max width (#300): longer copy such as error reasons wraps past this bound. A public variable overridable by CSS snippets.",
+    "dom": "Defined on #app (the same-named container in both the editor and settings webviews).",
+    "obsidian": {
+      "counterpart": "None (Obsidian tooltips expose no customization interface)"
+    }
+  },
+  "var-tooltip-key-background": {
+    "purpose": "The keybinding badge background (#300): defaults to the host editorHover status-bar tint. A public variable overridable by CSS snippets.",
+    "dom": "Defined on #app (the same-named container in both the editor and settings webviews).",
+    "obsidian": {
+      "counterpart": "None (Obsidian tooltips expose no customization interface)"
+    }
+  },
+  "var-tooltip-key-foreground": {
+    "purpose": "The keybinding badge foreground (#300): defaults to the host description foreground. A public variable overridable by CSS snippets.",
+    "dom": "Defined on #app (the same-named container in both the editor and settings webviews).",
+    "obsidian": {
+      "counterpart": "None (Obsidian tooltips expose no customization interface)"
+    }
+  },
+  "var-tooltip-show-delay": {
+    "purpose": "The hover hint show delay in unitless milliseconds (#300): the controller reads it via getComputedStyle; published as a behavioral variable so snippets can tune the pacing.",
+    "dom": "Defined on #app (the same-named container in both the editor and settings webviews).",
+    "obsidian": {
+      "counterpart": "None (Obsidian tooltips expose no customization interface)"
     }
   }
 } as Readonly<Record<string, StyleContractEntryOverride>>

@@ -12,6 +12,7 @@ import { AppearanceSection } from './appearanceSettings'
 import { IndexMaintenanceSection } from './indexMaintenanceSettings'
 import { WordSegmentSection } from './wordSegmentSettings'
 import { bootLocaleFromDocument, handleLocaleChangedMessage } from './localeBoot'
+import { installTooltipCard } from './tooltipCard'
 import './settingsPage.css'
 
 declare function acquireVsCodeApi(): {
@@ -22,6 +23,10 @@ declare function acquireVsCodeApi(): {
 bootLocaleFromDocument()
 
 const vscode = acquireVsCodeApi()
+
+// #300 统一自绘悬停提示：与编辑器 webview 同一委托机制（设置页常驻控件
+// 经 keybindingSettings 等写入 data-tooltip，原生 title 已退役）
+installTooltipCard()
 const keybindings = new KeybindingSettingsSection({ postMessage: (message) => vscode.postMessage(message) })
 const snippets = new CssSnippetSettingsSection({ postMessage: (message) => vscode.postMessage(message) })
 // #132 样式参考：离线渲染公开样式契约指南（数据模块随版本生成）；

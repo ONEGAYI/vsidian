@@ -152,7 +152,7 @@ describe('左侧设置入口齿轮图标化（#53）', () => {
     expect(btn!.querySelector('svg'), '设置按钮应为内联 SVG 齿轮图标').toBeTruthy()
     expect(btn!.textContent, '图标化后按钮不再承载文字').not.toContain('设置')
     expect(btn!.getAttribute('aria-label')).toBe('打开 Vsidian 设置')
-    expect(btn!.getAttribute('title')).toBe('打开 Vsidian 设置')
+    expect(btn!.getAttribute('data-tooltip')).toBe('打开 Vsidian 设置')
     expect(btn!.closest('.vsidian-main'), '设置按钮位于主编辑区顶栏（左侧）').toBeTruthy()
   })
 
@@ -192,7 +192,7 @@ describe('侧栏切换按钮（#53）', () => {
     const btn = parent.querySelector<HTMLButtonElement>('button.vsidian-sidebar-toggle')!
     expect(body.classList.contains('vsidian-sidebar-open')).toBe(false)
     expect(btn.getAttribute('aria-label')).toBe(zhCn['sidebar.expand'])
-    expect(btn.getAttribute('title')).toBe(zhCn['sidebar.expand'])
+    expect(btn.getAttribute('data-tooltip')).toBe(zhCn['sidebar.expand'])
     expect(btn.getAttribute('aria-expanded')).toBe('false')
   })
 
@@ -204,7 +204,7 @@ describe('侧栏切换按钮（#53）', () => {
     btn.click()
     expect(body.classList.contains('vsidian-sidebar-open')).toBe(true)
     expect(btn.getAttribute('aria-label')).toBe(zhCn['sidebar.collapse'])
-    expect(btn.getAttribute('title')).toBe(zhCn['sidebar.collapse'])
+    expect(btn.getAttribute('data-tooltip')).toBe(zhCn['sidebar.collapse'])
     expect(btn.getAttribute('aria-expanded')).toBe('true')
     btn.click()
     expect(body.classList.contains('vsidian-sidebar-open')).toBe(false)
