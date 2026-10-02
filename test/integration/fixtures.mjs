@@ -237,6 +237,30 @@ const RENAME_TARGET_DOC_WITH_ANCHOR = [
   '小节内容。',
   '',
 ].join('\n')
+// #269/#276 连续 rename：独立文档组，前序 #199 的 dirty 装载实例与外部
+// 归位过程不能成为本用例的起始内容或索引候选。
+const RENAME_CHAIN_REF_A_DOC = [
+  '# 链式引用甲',
+  '',
+  '见 [[链式目标]] 与 [同目标](./链式目标.md)。',
+  '',
+  '带锚 [[链式目标#深处小节|别名]]。',
+  '',
+].join('\n')
+const RENAME_CHAIN_REF_B_DOC = [
+  '# 链式引用乙',
+  '',
+  '上行 [[../链式目标]]。',
+  '',
+].join('\n')
+const RENAME_CHAIN_TARGET_DOC = [
+  '# 链式目标',
+  '',
+  '## 深处小节',
+  '',
+  '小节内容。',
+  '',
+].join('\n')
 // #200 目录/批量移动样例：目录（含嵌套层与被引用附件）+ 外部引用者 +
 // 目录内互链与上行出链（目录 rename/move、批量合并反馈的断言载体）
 const DIR_INNER_A_DOC = [
@@ -987,6 +1011,10 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   writeFileSync(path.join(wsDir, 'rename-moved.md'), RENAME_MOVED_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'notes', 'rename-note.md'), RENAME_NOTE_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'assets', 'rename-pic.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
+  // #269/#276：仅此连续 rename 用例使用这三篇文档。
+  writeFileSync(path.join(wsDir, '链式目标.md'), RENAME_CHAIN_TARGET_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'rename-chain-ref-a.md'), RENAME_CHAIN_REF_A_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'notes', 'rename-chain-ref-b.md'), RENAME_CHAIN_REF_B_DOC, 'utf8')
   // #200 目录/批量移动：目录（互链 + 嵌套 + 被引用附件）+ 外部引用者 + 上行目标
   mkdirSync(path.join(wsDir, 'dir-move', 'deep'), { recursive: true })
   writeFileSync(path.join(wsDir, 'dir-move', 'inner-a.md'), DIR_INNER_A_DOC, 'utf8')

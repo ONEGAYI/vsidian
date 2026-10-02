@@ -308,6 +308,21 @@ const RENAME_REF_B_DOC_TEXT = [
   '上行 [[../改名目标]]。',
   '',
 ].join('\n')
+/** #269/#276 独立起始文本（与 fixtures.mjs 同款；不复用 #199 的 buffer）。 */
+const RENAME_CHAIN_REF_A_DOC_TEXT = [
+  '# 链式引用甲',
+  '',
+  '见 [[链式目标]] 与 [同目标](./链式目标.md)。',
+  '',
+  '带锚 [[链式目标#深处小节|别名]]。',
+  '',
+].join('\n')
+const RENAME_CHAIN_REF_B_DOC_TEXT = [
+  '# 链式引用乙',
+  '',
+  '上行 [[../链式目标]]。',
+  '',
+].join('\n')
 const RENAME_MOVED_DOC_TEXT = [
   '# 移动自测',
   '',
@@ -11316,15 +11331,46 @@ export const cases: Array<[string, () => Promise<void>]> = [
 
   ['rename 引用改写：连续 rename 新目标桶空窗——rename 后立即查 incoming 含面板与装载引用者（#269）', async () => {
     await waitRenameIndexReady()
-    await openWithEditor('rename-ref-a.md')
-    await waitSessionReady('rename-ref-a.md')
-    const refAUri = wsUri('rename-ref-a.md').toString()
+    // #276：前序 #199 的外部归位并不保证宿主 dirty buffer 与索引同步
+    // 归位。本例独占 fixture，并只核对起始事实，不清理覆盖层或重建索引。
+    for (const [file, expected] of [
+      ['rename-chain-ref-a.md', RENAME_CHAIN_REF_A_DOC_TEXT],
+      ['notes/rename-chain-ref-b.md', RENAME_CHAIN_REF_B_DOC_TEXT],
+    ] as const) {
+      assert(await readDisk(file) === expected, `${file} 的盘面应为初始引用`)
+      const doc = vscode.workspace.textDocuments.find((d) => normFsPath(d.uri.fsPath) === normFsPath(wsUri(file).fsPath))
+      assert(!doc || (!doc.isDirty && doc.getText() === expected), `${file} 的宿主 buffer 应为 clean 初始引用，实际 ${JSON.stringify(doc && { dirty: doc.isDirty, text: doc.getText() })}`)
+      const overlay = await vscode.commands.executeCommand('onegayi.vsidian._test.getRenameOverlay', wsUri(file).fsPath)
+      assert(overlay === undefined, `${file} 起始不应残留覆盖层，实际 ${JSON.stringify(overlay)}`)
+    }
+    await poll('连续 rename 起始目标 incoming 含两个原始引用者', async () => {
+      const c = (await vscode.commands.executeCommand(
+        'onegayi.vsidian._test.getRenameCandidates', wsUri('链式目标.md').fsPath,
+      )) as { status: string; incomingFsPaths: string[] } | undefined
+      const paths = (c?.incomingFsPaths ?? []).map(normFsPath)
+      return c && paths.includes(normFsPath(wsUri('rename-chain-ref-a.md').fsPath)) &&
+        paths.includes(normFsPath(wsUri('notes/rename-chain-ref-b.md').fsPath)) ? c : undefined
+    })
+    await openWithEditor('rename-chain-ref-a.md')
+    await waitSessionReady('rename-chain-ref-a.md')
+    const refAUri = wsUri('rename-chain-ref-a.md').toString()
+    const waitChainRenameLog = (oldName: string, newName: string) =>
+      poll(`连续 rename 当前批次 ${oldName} → ${newName} 四边完整改写`, async () => {
+        const log = await lastRenameRefLog()
+        return log && log.moves.length === 1 &&
+          normFsPath(log.moves[0]!.oldFsPath) === normFsPath(wsUri(oldName).fsPath) &&
+          normFsPath(log.moves[0]!.newFsPath) === normFsPath(wsUri(newName).fsPath) &&
+          log.plannedEdits === 4 && log.plannedFiles === 2 && log.skipped.length === 0 &&
+          log.indexNotReady === 0 && !log.cancelled && log.notice === 'host.renameRefsUpdated' ? log : undefined
+      }).catch(async (err) => {
+        throw new Error(`${(err as Error).message}；log=${JSON.stringify(await lastRenameRefLog())}`)
+      })
     try {
-      // 第一次 rename：改名目标 → 改名目标2（引用甲=面板打开；引用乙=
+      // 第一次 rename：链式目标 → 链式目标2（引用甲=面板打开；引用乙=
       // openTextDocument 装载的无标签 dirty 实例——will edit 只进 buffer，
       // 磁盘保持旧文，见 vault-index-backlinks 规格 #269 落档的机制再实证）
       const edit = new vscode.WorkspaceEdit()
-      edit.renameFile(wsUri('改名目标.md'), wsUri('改名目标2.md'), { overwrite: false })
+      edit.renameFile(wsUri('链式目标.md'), wsUri('链式目标2.md'), { overwrite: false })
       assert(await vscode.workspace.applyEdit(edit), 'rename 应成功应用')
       // 验收断言（#269）：rename 完成后立即查新目标 incoming——装载引用者
       //（引用乙，经 did 收尾 dirty 豁免保住 buffer 载体 + 覆盖层冲刷解析 +
@@ -11333,65 +11379,71 @@ export const cases: Array<[string, () => Promise<void>]> = [
       // 引用乙的暂存与冲刷定时器 → incoming 恒空，本轮询超时转红。
       await poll('rename 后新目标 incoming 含面板与装载引用者', async () => {
         const c = (await vscode.commands.executeCommand(
-          'onegayi.vsidian._test.getRenameCandidates', wsUri('改名目标2.md').fsPath,
+          'onegayi.vsidian._test.getRenameCandidates', wsUri('链式目标2.md').fsPath,
         )) as { status: string; incomingFsPaths: string[] } | undefined
         const paths = (c?.incomingFsPaths ?? []).map(normFsPath)
-        const wantA = normFsPath(wsUri('rename-ref-a.md').fsPath)
-        const wantB = normFsPath(wsUri('notes/rename-ref-b.md').fsPath)
+        const wantA = normFsPath(wsUri('rename-chain-ref-a.md').fsPath)
+        const wantB = normFsPath(wsUri('notes/rename-chain-ref-b.md').fsPath)
         return c && paths.includes(wantA) && paths.includes(wantB) ? c : undefined
       }).catch(async (err) => {
         const raw = await vscode.commands.executeCommand(
-          'onegayi.vsidian._test.getRenameCandidates', wsUri('改名目标2.md').fsPath,
+          'onegayi.vsidian._test.getRenameCandidates', wsUri('链式目标2.md').fsPath,
         )
         const oldPath = await vscode.commands.executeCommand(
-          'onegayi.vsidian._test.getRenameCandidates', wsUri('改名目标.md').fsPath,
+          'onegayi.vsidian._test.getRenameCandidates', wsUri('链式目标.md').fsPath,
         )
         const overlayA = await vscode.commands.executeCommand(
-          'onegayi.vsidian._test.getRenameOverlay', wsUri('rename-ref-a.md').fsPath,
+          'onegayi.vsidian._test.getRenameOverlay', wsUri('rename-chain-ref-a.md').fsPath,
         )
         const overlayB = await vscode.commands.executeCommand(
-          'onegayi.vsidian._test.getRenameOverlay', wsUri('notes/rename-ref-b.md').fsPath,
+          'onegayi.vsidian._test.getRenameOverlay', wsUri('notes/rename-chain-ref-b.md').fsPath,
         )
-        const refBText = (await vscode.workspace.openTextDocument(wsUri('notes/rename-ref-b.md'))).getText()
-        const refBDisk = await readDisk('notes/rename-ref-b.md')
+        const refBText = (await vscode.workspace.openTextDocument(wsUri('notes/rename-chain-ref-b.md'))).getText()
+        const refBDisk = await readDisk('notes/rename-chain-ref-b.md')
         const log = await lastRenameRefLog()
         throw new Error(`${(err as Error).message}；candidates实况=${JSON.stringify(raw)}；` +
           `旧路径candidates=${JSON.stringify(oldPath)}；` +
           `overlayA=${JSON.stringify(overlayA)}；overlayB=${JSON.stringify(overlayB)}；` +
           `refB缓冲=${JSON.stringify(refBText)}；refB磁盘=${JSON.stringify(refBDisk)}；log=${JSON.stringify(log)}`)
       })
-      // 用户故事闭环：立即第二次 rename（改名目标2 → 改名目标3），引用者必须
+      await waitChainRenameLog('链式目标.md', '链式目标2.md')
+      const firstB = await vscode.workspace.openTextDocument(wsUri('notes/rename-chain-ref-b.md'))
+      assert(firstB.isDirty && firstB.getText().includes('[[../链式目标2]]'), '第一笔 rename 应更新装载引用乙的 dirty buffer')
+      assert(await readDisk('notes/rename-chain-ref-b.md') === RENAME_CHAIN_REF_B_DOC_TEXT, '装载引用乙的改写仍只在 buffer，盘面保持原文')
+      // 用户故事闭环：立即第二次 rename（链式目标2 → 链式目标3），引用者必须
       // 被改写而非静默漏改（修复前该 rename 的候选 incoming 为空、无候选即
       // 静默跳过，两引用文本原地不动）
       const edit2 = new vscode.WorkspaceEdit()
-      edit2.renameFile(wsUri('改名目标2.md'), wsUri('改名目标3.md'), { overwrite: false })
+      edit2.renameFile(wsUri('链式目标2.md'), wsUri('链式目标3.md'), { overwrite: false })
       assert(await vscode.workspace.applyEdit(edit2), '第二次 rename 应成功应用')
+      await waitChainRenameLog('链式目标2.md', '链式目标3.md')
       await poll('连续 rename 引用乙改写', async () => {
-        const text = (await vscode.workspace.openTextDocument(wsUri('notes/rename-ref-b.md'))).getText()
-        return text.includes('[[../改名目标3]]') ? text : undefined
+        const text = (await vscode.workspace.openTextDocument(wsUri('notes/rename-chain-ref-b.md'))).getText()
+        return text.includes('[[../链式目标3]]') ? text : undefined
       })
       await poll('连续 rename 引用甲面板同步', async () => {
         const v = (await vscode.commands.executeCommand(CMD.viewState, refAUri)) as { text?: string } | undefined
-        return v?.text && v.text.includes('[[改名目标3]]') ? v : undefined
+        return v?.text && v.text.includes('[[链式目标3]]') &&
+          v.text.includes('[同目标](链式目标3.md)') &&
+          v.text.includes('[[链式目标3#深处小节|别名]]') && !v.text.includes('链式目标2') ? v : undefined
       })
     } finally {
-      // 现场还原（漂移用例同款强兜底）：关面板丢弃 dirty buffer、写回两引用
-      // 原文（引用甲盘面本就未动，写回为幂等保险）、多候选名收敛归位
-      // 改名目标.md；未收敛让本用例 FAIL，不静默泄漏给后续用例
+      // 归位独占 fixture 的盘面与文件名（宿主装载 buffer 仍可能留存，
+      // 不把关闭标签当作装载文档终结）；后续用例不复用这些文档。
       await Promise.resolve(vscode.commands.executeCommand('workbench.action.closeAllEditors')).catch(() => {})
-      await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('rename-ref-a.md'), Buffer.from(RENAME_REF_A_DOC_TEXT, 'utf8'))).catch(() => {})
-      await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('notes/rename-ref-b.md'), Buffer.from(RENAME_REF_B_DOC_TEXT, 'utf8'))).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('rename-chain-ref-a.md'), Buffer.from(RENAME_CHAIN_REF_A_DOC_TEXT, 'utf8'))).catch(() => {})
+      await Promise.resolve(vscode.workspace.fs.writeFile(wsUri('notes/rename-chain-ref-b.md'), Buffer.from(RENAME_CHAIN_REF_B_DOC_TEXT, 'utf8'))).catch(() => {})
       let restored = false
       for (let attempt = 0; attempt < 10 && !restored; attempt++) {
-        for (const name of ['改名目标3.md', '改名目标2.md']) {
-          await Promise.resolve(restoreRename(wsUri(name), wsUri('改名目标.md'))).catch(() => {})
+        for (const name of ['链式目标3.md', '链式目标2.md']) {
+          await Promise.resolve(restoreRename(wsUri(name), wsUri('链式目标.md'))).catch(() => {})
         }
-        restored = await Promise.resolve(vscode.workspace.fs.stat(wsUri('改名目标.md'))).then(() => true, () => false)
+        restored = await Promise.resolve(vscode.workspace.fs.stat(wsUri('链式目标.md'))).then(() => true, () => false)
         if (!restored) await new Promise((r) => setTimeout(r, 200))
       }
       if (!restored) {
         const probe: Record<string, boolean> = {}
-        for (const name of ['改名目标.md', '改名目标2.md', '改名目标3.md']) {
+        for (const name of ['链式目标.md', '链式目标2.md', '链式目标3.md']) {
           probe[name] = await Promise.resolve(vscode.workspace.fs.stat(wsUri(name))).then(() => true, () => false)
         }
         throw new Error(`兜底归位未收敛（候选名实况 ${JSON.stringify(probe)}），不得静默泄漏给后续用例`)
