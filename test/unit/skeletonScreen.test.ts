@@ -5,6 +5,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
+  buildAppOpenTag,
   buildSkeletonBodyHtml,
   buildSkeletonStyleHtml,
   readableLineWidthPreset,
@@ -14,6 +15,7 @@ import {
   SKELETON_SHIMMER_CYCLE_MS,
   SKELETON_SHIMMER_DELAY_MS,
 } from '../../src/shared/skeletonTiming'
+import { READABLE_LINE_WIDTH_MAX } from '../../src/shared/settings'
 
 const providerSource = readFileSync(
   new URL('../../src/host/textEditorProvider.ts', import.meta.url),
@@ -67,23 +69,45 @@ describe('buildSkeletonBodyHtml（#292 内联标记）', () => {
 })
 
 describe('readableLineWidthPreset（#292 宽度预注入取值）', () => {
-  it('非 0 有效值返回整数像素', () => {
+  it('有效档原样返回（与 applyReadableLineWidthSetting 同口径，不取整）', () => {
     expect(readableLineWidthPreset(600)).toBe(600)
     expect(readableLineWidthPreset(620.0)).toBe(620)
+    expect(readableLineWidthPreset(0.4)).toBe(0.4)
+    expect(readableLineWidthPreset(READABLE_LINE_WIDTH_MAX)).toBe(READABLE_LINE_WIDTH_MAX)
   })
 
-  it('0（铺满档）、缺失与非数值一律不预注入', () => {
+  it('0（铺满档）、越界、缺失与非数值一律不预注入', () => {
     expect(readableLineWidthPreset(0)).toBeNull()
     expect(readableLineWidthPreset(undefined)).toBeNull()
     expect(readableLineWidthPreset('600')).toBeNull()
     expect(readableLineWidthPreset(-20)).toBeNull()
+    expect(readableLineWidthPreset(READABLE_LINE_WIDTH_MAX + 20)).toBeNull()
+  })
+})
+
+describe('buildAppOpenTag（#292 #app 开标签行为装配，审查 F3）', () => {
+  it('非 0 档：预写内联双变量并内嵌骨架标记', () => {
+    const tag = buildAppOpenTag(600)
+    expect(tag).toContain('id="app"')
+    expect(tag).toContain('--vsidian-reading-max-width:600px')
+    expect(tag).toContain('--vsidian-live-preview-max-width:600px')
+    expect(tag).toContain(`id="${SKELETON_ELEMENT_ID}"`)
+  })
+
+  it('铺满档/缺失：无 style 属性，仅骨架标记', () => {
+    for (const value of [null, undefined, 0]) {
+      const tag = buildAppOpenTag(value)
+      expect(tag.startsWith('<div id="app">')).toBe(true)
+      expect(tag).not.toContain('style=')
+      expect(tag).toContain(`id="${SKELETON_ELEMENT_ID}"`)
+    }
   })
 })
 
 describe('宿主装配接线（provider 词法钉住）', () => {
-  it('buildWebviewHtml 拼入骨架样式与标记', () => {
+  it('buildWebviewHtml 拼入骨架样式与 #app 开标签装配', () => {
     expect(providerSource).toContain('buildSkeletonStyleHtml()')
-    expect(providerSource).toContain('buildSkeletonBodyHtml()')
+    expect(providerSource).toContain('buildAppOpenTag(')
   })
 
   it('呈现时刻打点：main.js 之前写骨架呈现时刻全局（模板插值形态）', () => {

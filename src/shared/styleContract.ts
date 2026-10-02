@@ -2840,6 +2840,24 @@ export const STYLE_CONTRACT_ENTRIES: readonly StyleContractEntry[] = [
     ],
     introduced: '#292（2026-10-02）',
   },
+  {
+    id: 'skeleton-column',
+    domain: 'chrome',
+    category: 'loading',
+    kind: 'selector',
+    target: '.vsidian-skeleton-column',
+    purpose: '骨架列容器（#292）：承载骨架灰块序列的列盒，max-width 引用 --vsidian-live-preview-max-width（与正文列同源，不复制读值），水平留白与正文基线同变量（--vsidian-content-padding-inline）——用户片段对加载期列宽的定制点。',
+    views: ['live', 'reading'],
+    states: '仅装载窗口在场，撤除后不存在；铺满档（0）下随变量回退 none 自然铺满。',
+    dom: '.vsidian-skeleton 的唯一子元素；其直接子元素为 .vsidian-skeleton-block 序列（见 skeleton-block 条目）。',
+    example: '.vsidian-skeleton-column {\n  max-width: var(--vsidian-live-preview-max-width);\n}',
+    obsidian: { counterpart: '无（Obsidian 无加载骨架）', support: 'none' },
+    verification: [
+      '单元 skeletonScreen（#292）：列宽变量引用与预注入行为钉住',
+      '浏览器 skeletonProbe（#292）：限宽 600 跟随与铺满档等宽的绘制断言',
+    ],
+    introduced: '#292（2026-10-02）',
+  },
 ]
 
 /** 清单条目按 ID 索引（消费方查找用；ID 唯一性由契约测试钉住） */

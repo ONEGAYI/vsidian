@@ -9,6 +9,7 @@ import {
   SKELETON_SHIMMER_CYCLE_MS,
   SKELETON_SHIMMER_DELAY_MS,
 } from '../shared/skeletonTiming'
+import { READABLE_LINE_WIDTH_MAX, READABLE_LINE_WIDTH_MIN } from '../shared/settings'
 
 /** 骨架内联样式：单一样式源（main.css 不重复承载骨架规则），供 head 内
  *  <style> 原样拼接。宽度口径引用 #app 层 --vsidian-live-preview-max-width
@@ -93,13 +94,27 @@ export function buildSkeletonBodyHtml(): string {
 }
 
 /**
- * #292 可读行宽预注入取值（实施要点 4，消除骨架期宽度回跳）：非 0 有效
- * 档返回整数像素（写 #app 内联 style，后续 applyReadableLineWidthSetting
- * 的 0 档移除 / 非 0 档覆写语义不变）；0（铺满档）、缺失与非数值不预注入。
+ * #292 #app 开标签装配（审查 F3 行为级钉住的可测单元）：可读行宽非 0 档
+ * 预写内联双变量（内联强于 main.css 的 #app 缺省定义；骨架与正文同引变量，
+ * 空窗①即按设定宽呈现），并内嵌骨架标记。provider 的 buildWebviewHtml
+ * 直接拼入本产物。
+ */
+export function buildAppOpenTag(readableLineWidthPx: number | null | undefined): string {
+  const attr = readableLineWidthPx
+    ? ` style="--vsidian-reading-max-width:${readableLineWidthPx}px;--vsidian-live-preview-max-width:${readableLineWidthPx}px"`
+    : ''
+  return `<div id="app"${attr}>${buildSkeletonBodyHtml()}</div>`
+}
+
+/**
+ * #292 可读行宽预注入取值（实施要点 4，消除骨架期宽度回跳）：与
+ * applyReadableLineWidthSetting 同一口径——有限数值且 > MIN、≤ MAX 才生效，
+ * 原样返回（webview 侧落值不取整，两侧写出的 px 一致）；0（铺满档）、越界、
+ * 缺失与非数值不预注入，骨架回落铺满缺省，快照到达前后语义一致。
  */
 export function readableLineWidthPreset(value: unknown): number | null {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
-    return null
-  }
-  return Math.round(value)
+  return typeof value === 'number' && Number.isFinite(value) &&
+    value > READABLE_LINE_WIDTH_MIN && value <= READABLE_LINE_WIDTH_MAX
+    ? value
+    : null
 }

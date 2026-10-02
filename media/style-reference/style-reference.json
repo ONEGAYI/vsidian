@@ -3,7 +3,7 @@
     "schemaVersion": 1,
     "vsidianVersion": "0.8.0",
     "generatedAt": "2026-10-02",
-    "entryCount": 159,
+    "entryCount": 160,
     "source": "src/shared/styleContract.ts",
     "generator": "scripts/genStyleGuide.mjs",
     "determinism": "generatedAt 取当前版本在 CHANGELOG.md 的发布日期（无段落时取最新已发布版本日期），同源再生成字节一致。",
@@ -268,7 +268,7 @@
       "title": "加载占位",
       "titleKey": "styleRef.category.loading",
       "order": 14,
-      "count": 2
+      "count": 3
     }
   ],
   "variableAliases": [
@@ -4001,6 +4001,30 @@
       "verification": [
         "单元 skeletonScreen（#292）：颜色派生、动画常量与 reduced-motion 规则钉住",
         "浏览器 skeletonProbe（#292）：reduced-motion 下扫光关闭与扫光在场的绘制断言"
+      ],
+      "introduced": "#292（2026-10-02）"
+    },
+    {
+      "id": "skeleton-column",
+      "domain": "chrome",
+      "category": "loading",
+      "kind": "selector",
+      "target": ".vsidian-skeleton-column",
+      "purpose": "骨架列容器（#292）：承载骨架灰块序列的列盒，max-width 引用 --vsidian-live-preview-max-width（与正文列同源，不复制读值），水平留白与正文基线同变量（--vsidian-content-padding-inline）——用户片段对加载期列宽的定制点。",
+      "views": [
+        "live",
+        "reading"
+      ],
+      "states": "仅装载窗口在场，撤除后不存在；铺满档（0）下随变量回退 none 自然铺满。",
+      "dom": ".vsidian-skeleton 的唯一子元素；其直接子元素为 .vsidian-skeleton-block 序列（见 skeleton-block 条目）。",
+      "example": ".vsidian-skeleton-column {\n  max-width: var(--vsidian-live-preview-max-width);\n}",
+      "obsidian": {
+        "counterpart": "无（Obsidian 无加载骨架）",
+        "support": "none"
+      },
+      "verification": [
+        "单元 skeletonScreen（#292）：列宽变量引用与预注入行为钉住",
+        "浏览器 skeletonProbe（#292）：限宽 600 跟随与铺满档等宽的绘制断言"
       ],
       "introduced": "#292（2026-10-02）"
     }

@@ -1822,10 +1822,6 @@ export class WebviewSyncController {
         this.skeletonHoldReleased = true
         this.dismissSkeleton()
         break
-      case '_test.skeleton.query':
-        // #292 测试钩子：主动回报一次骨架状态
-        this.reportSkeletonState()
-        break
       case 'keybindings.snapshot':
       case 'keybindings.changed': {
         const overrides = message.overrides

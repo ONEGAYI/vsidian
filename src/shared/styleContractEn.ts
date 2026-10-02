@@ -956,6 +956,15 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
       'Direct div sequence of .vsidian-skeleton > .vsidian-skeleton-column; the column width consumes --vsidian-live-preview-max-width (same source as the content column; full-bleed at the 0 setting), with horizontal padding sharing the content baseline variable (--vsidian-content-padding-inline).',
     obsidian: { counterpart: 'No counterpart' },
   },
+  'skeleton-column': {
+    purpose:
+      'Skeleton column box (#292): hosts the skeleton bar sequence; its max-width consumes --vsidian-live-preview-max-width (same source as the content column, no copied values) and its horizontal padding shares the content baseline variable (--vsidian-content-padding-inline) — the customization point for user snippets targeting the loading-time column width.',
+    states:
+      'Present only during the load window, gone after removal; at the full-bleed setting (0) it fills the available width as the variable falls back to none.',
+    dom:
+      'The only child of .vsidian-skeleton; its direct children are the .vsidian-skeleton-block sequence (see the skeleton-block entry).',
+    obsidian: { counterpart: 'No counterpart' },
+  },
   'mode-body': {
     purpose:
       'The webview-wide mode anchor (#141): a mutually exclusive class pair that switches with the view mode on the layout root div (.vsidian-body inside #app, not the HTML body element — the class pair is not attached to <body>), serving as the public entry for user snippets styling "per mode" (e.g. #app .vsidian-body.vsidian-mode-reading .vsidian-toolbar button { … }). Built-in consumer: the show/hide rules of the view toggle book/edit icons take it as their single source.',

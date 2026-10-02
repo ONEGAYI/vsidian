@@ -28,9 +28,9 @@ import {
 import { parseWikilinkInner } from '../shared/wikilink'
 import { NewlineCoordinator } from '../shared/newline'
 import { buildEditorCsp } from './editorCsp'
-// #292 骨架屏内联装配（样式/标记/可读行宽预注入取值）
+// #292 骨架屏内联装配（样式/#app 开标签含骨架标记/可读行宽预注入取值）
 import {
-  buildSkeletonBodyHtml,
+  buildAppOpenTag,
   buildSkeletonStyleHtml,
   readableLineWidthPreset,
 } from './skeletonScreen'
@@ -3027,11 +3027,6 @@ function buildWebviewHtml(
   // 联网字体；脚本面维持 nonce 门控）——期望形态由 test/unit/editorCsp.test.ts
   // 钉住，真实宿主内生效由集成测试验证
   const csp = buildEditorCsp(webview.cspSource, nonce)
-  // #292 非 0 档可读行宽预写 #app 内联双变量（内联强于 main.css 的 #app
-  // 缺省定义；骨架与正文同引变量，空窗①即按设定宽呈现）
-  const readableLineWidthAttr = initial.readableLineWidthPx
-    ? ` style="--vsidian-reading-max-width:${initial.readableLineWidthPx}px;--vsidian-live-preview-max-width:${initial.readableLineWidthPx}px"`
-    : ''
   return `<!DOCTYPE html>
 <html lang="${locale}">
 <head>
@@ -3044,7 +3039,7 @@ ${buildSkeletonStyleHtml()}
 <title>Vsidian</title>
 </head>
 <body>
-<div id="app"${readableLineWidthAttr}>${buildSkeletonBodyHtml()}</div>
+${buildAppOpenTag(initial.readableLineWidthPx)}
 ${buildLocaleIslandHtml(locale, LOCALE_MESSAGES[locale])}
 <script nonce="${nonce}">window.__vsidianMermaidUri = "${mermaidUri}";${initial.holdSkeleton ? `window.${SKELETON_HOLD_GLOBAL} = true;` : ''}window.${SKELETON_SHOWN_AT_GLOBAL} = performance.now();</script>
 <script nonce="${nonce}" src="${scriptUri}"></script>

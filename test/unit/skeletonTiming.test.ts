@@ -83,4 +83,37 @@ describe('planSkeletonExit（#292 撤除计划）', () => {
     expect(Number.isFinite(plan.removeAt)).toBe(true)
     expect(plan.removeAt).toBe(T0 + SKELETON_SHIMMER_DELAY_MS + SKELETON_SHIMMER_CYCLE_MS)
   })
+
+  it('防御：非有限 cycleMs（Infinity）回退默认周期（审查 F1）', () => {
+    const plan = planSkeletonExit({
+      shownAt: T0,
+      readyAt: T0 + SKELETON_SHIMMER_DELAY_MS + 100,
+      cycleMs: Number.POSITIVE_INFINITY,
+    })
+    expect(plan.animationStarted).toBe(true)
+    expect(plan.removeAt).toBe(T0 + SKELETON_SHIMMER_DELAY_MS + SKELETON_SHIMMER_CYCLE_MS)
+  })
+
+  it('防御：负数与 NaN delayMs 回退默认延时（审查 F2）', () => {
+    for (const delayMs of [-5, Number.NaN]) {
+      const plan = planSkeletonExit({
+        shownAt: T0,
+        readyAt: T0 + SKELETON_SHIMMER_DELAY_MS + 100,
+        delayMs,
+      })
+      expect(plan.removeAt).toBe(T0 + SKELETON_SHIMMER_DELAY_MS + SKELETON_SHIMMER_CYCLE_MS)
+    }
+  })
+
+  it('防御：readyAt 非有限按未开始处理并立即撤（不产生 NaN 计时）', () => {
+    const plan = planSkeletonExit({ shownAt: T0, readyAt: Number.NaN })
+    expect(plan.animationStarted).toBe(false)
+    expect(plan.removeAt).toBe(0)
+  })
+
+  it('防御：shownAt 非有限按未开始处理（就绪即撤）', () => {
+    const plan = planSkeletonExit({ shownAt: Number.NaN, readyAt: T0 + 5000 })
+    expect(plan.animationStarted).toBe(false)
+    expect(plan.removeAt).toBe(T0 + 5000)
+  })
 })

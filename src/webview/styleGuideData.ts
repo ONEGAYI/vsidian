@@ -3919,6 +3919,30 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "浏览器 skeletonProbe（#292）：reduced-motion 下扫光关闭与扫光在场的绘制断言"
     ],
     "introduced": "#292（2026-10-02）"
+  },
+  {
+    "id": "skeleton-column",
+    "domain": "chrome",
+    "category": "loading",
+    "kind": "selector",
+    "target": ".vsidian-skeleton-column",
+    "purpose": "骨架列容器（#292）：承载骨架灰块序列的列盒，max-width 引用 --vsidian-live-preview-max-width（与正文列同源，不复制读值），水平留白与正文基线同变量（--vsidian-content-padding-inline）——用户片段对加载期列宽的定制点。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "仅装载窗口在场，撤除后不存在；铺满档（0）下随变量回退 none 自然铺满。",
+    "dom": ".vsidian-skeleton 的唯一子元素；其直接子元素为 .vsidian-skeleton-block 序列（见 skeleton-block 条目）。",
+    "example": ".vsidian-skeleton-column {\n  max-width: var(--vsidian-live-preview-max-width);\n}",
+    "obsidian": {
+      "counterpart": "无（Obsidian 无加载骨架）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 skeletonScreen（#292）：列宽变量引用与预注入行为钉住",
+      "浏览器 skeletonProbe（#292）：限宽 600 跟随与铺满档等宽的绘制断言"
+    ],
+    "introduced": "#292（2026-10-02）"
   }
 ] as readonly StyleContractEntry[]
 
@@ -4918,6 +4942,14 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     "purpose": "Skeleton gray bars and shimmer animation (#292): a generic fixed form (no document content is read, no line-number gutter simulated); both the bar fill and the shimmer highlight derive from the editor foreground color via low-ratio color-mix (adapts to light/dark themes); the shimmer starts after a start delay and loops, and removal waits for the current cycle to finish — delay/cycle constants are shared with the exit planner (shared/skeletonTiming).",
     "states": "The shimmer is disabled under prefers-reduced-motion: reduce (static bars); it starts only after the start delay (default 300ms), so instantly-loaded documents never show it.",
     "dom": "Direct div sequence of .vsidian-skeleton > .vsidian-skeleton-column; the column width consumes --vsidian-live-preview-max-width (same source as the content column; full-bleed at the 0 setting), with horizontal padding sharing the content baseline variable (--vsidian-content-padding-inline).",
+    "obsidian": {
+      "counterpart": "No counterpart"
+    }
+  },
+  "skeleton-column": {
+    "purpose": "Skeleton column box (#292): hosts the skeleton bar sequence; its max-width consumes --vsidian-live-preview-max-width (same source as the content column, no copied values) and its horizontal padding shares the content baseline variable (--vsidian-content-padding-inline) — the customization point for user snippets targeting the loading-time column width.",
+    "states": "Present only during the load window, gone after removal; at the full-bleed setting (0) it fills the available width as the variable falls back to none.",
+    "dom": "The only child of .vsidian-skeleton; its direct children are the .vsidian-skeleton-block sequence (see the skeleton-block entry).",
     "obsidian": {
       "counterpart": "No counterpart"
     }

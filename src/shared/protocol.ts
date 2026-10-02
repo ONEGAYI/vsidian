@@ -56,9 +56,9 @@ export type HostToWebview =
    *  探针编辑带 externalSync 注解，不产生写回（测量不污染宿主文档） */
   | { kind: 'perf.probe'; typingRounds: number; scrollRounds: number }
   /** #292 骨架屏测试钩子（VSIDIAN_TEST_HOOKS=1 集成装配专用）：release
-   *  解除宿主 HTML 嵌入的撤除冻结并立即撤除；query 主动触发一次状态回报 */
+   *  解除宿主 HTML 嵌入的撤除冻结并立即撤除。状态观测走 getLastSkeletonReport
+   *  轮询（adopt/hold/release 路径均主动回报，无需独立查询消息） */
   | { kind: '_test.skeleton.release' }
-  | { kind: '_test.skeleton.query' }
   /** 模式切换指令（#6）：live=实时预览，reading=阅读，toggle=翻转当前。
    *  模式是 webview 视图状态：不写 TextDocument、不入撤销栈。#38 起切换
    *  入口迁移宿主标题栏三态命令与命令面板命令（宿主推导显式目标后经
@@ -2970,7 +2970,6 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
   }
   switch (v.kind) {
     case '_test.skeleton.release':
-    case '_test.skeleton.query':
       // #292 骨架测试钩子：无字段的触发型消息
       return true
     case 'diagram.export.result':

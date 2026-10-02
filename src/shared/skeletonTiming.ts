@@ -49,10 +49,17 @@ export interface SkeletonExitPlan {
  *   ——等当前周期播完才撤（1.5 周期载完 → 第 2 周期末退出）。
  */
 export function planSkeletonExit(input: SkeletonExitPlanInput): SkeletonExitPlan {
-  const delayMs = input.delayMs !== undefined && input.delayMs >= 0
+  // 防御：非有限入参按「动画未开始」处理——撤除时刻退化为就绪时刻；
+  // readyAt 本身非有限时取 0（立即撤，最坏退化为现状空白，不产生 NaN 计时）
+  if (!Number.isFinite(input.readyAt) || !Number.isFinite(input.shownAt)) {
+    return { animationStarted: false, removeAt: Number.isFinite(input.readyAt) ? input.readyAt : 0 }
+  }
+  const delayMs = typeof input.delayMs === 'number' && Number.isFinite(input.delayMs) &&
+    input.delayMs >= 0
     ? input.delayMs
     : SKELETON_SHIMMER_DELAY_MS
-  const cycleMs = input.cycleMs !== undefined && input.cycleMs > 0
+  const cycleMs = typeof input.cycleMs === 'number' && Number.isFinite(input.cycleMs) &&
+    input.cycleMs > 0
     ? input.cycleMs
     : SKELETON_SHIMMER_CYCLE_MS
   const readyAt = input.readyAt
