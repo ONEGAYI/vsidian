@@ -168,8 +168,6 @@ export function installTooltipCard(options: TooltipCardOptions = {}): () => void
     // 延迟窗口内重复进入同一候选（控件内部子元素间穿越的成对 mouseover）：
     // 计时已在跑，重入不重置
     if (!shown && target === pendingAnchor) return
-    // 延迟窗口内重复进入同一候选（控件内部子元素间穿越的成对 mouseover）：
-    // 计时已在跑，重入不重置
     clearTimer()
     pendingAnchor = target
     if (target.getAttribute(TOOLTIP_ATTR) === '') {
