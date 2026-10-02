@@ -8,7 +8,7 @@ GitHub：[#278](https://github.com/ONEGAYI/vsidian/issues/278)
 
 Blocked by: 无本地前置票
 
-状态：**研究已完成（2026-10-02）**。结论：四条路线在 VSCode 1.82.3 下界真宿主全部通过，无阻塞；两项取舍／语义边界待用户确认后方可放行依赖票（见[探针结论](../../research/vscode-1823-host-route-probes.md)第 10 节）。探针为 `test/integration/suite/probe278.ts`（18 用例，`VSIDIAN_TEST_CASES='P2-01'` 定向复现）。已加 ready-for-agent；#226 阶段依赖关系不变。
+状态：**研究已完成并通过（2026-10-02 探针交付，2026-10-03 用户确认两项取舍）**。结论：四条路线在 VSCode 1.82.3 下界真宿主全部通过，无阻塞；两项取舍（撤销路由的可见标签切换、丢弃后 undo 翻回语义）已获用户接受，本票前置的依赖票（P2-04／P2-05／P2-10／P2-12／P2-13）就此放行。探针为 `test/integration/suite/probe278.ts`（18 用例，`VSIDIAN_TEST_CASES='P2-01'` 定向复现）；结论见[探针结论](../../research/vscode-1823-host-route-probes.md)。#226 阶段依赖关系不变。
 
 规格：[二期正式规格](../hover-preview-embed.md)；用户故事 P2-U10、U11、U19–U24；验收 P2-A05、A09–A11、A15。本票在技术上可独立准备；#226 是父票既有阶段依赖，发布时保留该跟踪关系，不由本轮关闭父票。
 
