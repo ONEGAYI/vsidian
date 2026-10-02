@@ -162,7 +162,8 @@ function toolbarButton(
   btn.type = 'button'
   btn.className = className
   btn.setAttribute('aria-label', label)
-  btn.title = label
+  btn.setAttribute('data-tooltip', label)
+
   btn.innerHTML = icon
   btn.disabled = disabled
   btn.addEventListener('click', onClick)

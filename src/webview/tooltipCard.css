@@ -1,0 +1,72 @@
+/* ---- #300 统一自绘悬停提示（tooltipCard）----
+   编辑器与设置页两 webview 共享本文件（esbuild 随 import 各自打包）。
+   明暗与高对比自适应：默认值引宿主 editorHover 变量族，不写主题分支；
+   公开变量与类名登记于 src/shared/styleContract.ts（var-tooltip-* 与
+   tooltip 类目），CSS 片段可定向覆盖。 */
+
+#app {
+  --vsidian-tooltip-background: var(--vscode-editorHoverWidget-background, #252526);
+  --vsidian-tooltip-foreground: var(--vscode-editorHoverWidget-foreground, #cccccc);
+  --vsidian-tooltip-border: var(--vscode-editorHoverWidget-border, transparent);
+  --vsidian-tooltip-radius: 6px;
+  --vsidian-tooltip-font-size: 12px;
+  --vsidian-tooltip-max-width: 320px;
+  --vsidian-tooltip-key-background: var(--vscode-editorHoverWidget-statusBarBackground, rgba(128, 128, 128, 0.18));
+  --vsidian-tooltip-key-foreground: var(--vscode-descriptionForeground, var(--vscode-editorHoverWidget-foreground, #cccccc));
+  /* 出现延迟（ms，无单位数字）：tooltipCard 控制器经 getComputedStyle 读取 */
+  --vsidian-tooltip-show-delay: 300;
+}
+
+.vsidian-tooltip {
+  position: fixed;
+  z-index: 10500; /* 高于模态（10000–10002）：弹窗自身按钮的提示可呈现 */
+  display: none;
+  box-sizing: border-box;
+  max-width: var(--vsidian-tooltip-max-width);
+  padding: 4px 8px;
+  background: var(--vsidian-tooltip-background);
+  color: var(--vsidian-tooltip-foreground);
+  border: 1px solid var(--vsidian-tooltip-border);
+  border-radius: var(--vsidian-tooltip-radius);
+  font-size: var(--vsidian-tooltip-font-size);
+  line-height: 18px;
+  box-shadow: var(--vscode-widget-shadow, 0 2px 8px rgba(0, 0, 0, 0.28));
+  overflow-wrap: break-word;
+  /* 小卡片：文字可选中复制；焦点环只在键盘到达时出现（点击选字不画环） */
+  user-select: text;
+  cursor: text;
+}
+
+.vsidian-tooltip:focus {
+  outline: none;
+}
+
+.vsidian-tooltip:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, var(--vsidian-tooltip-foreground));
+}
+
+.vsidian-tooltip--shown {
+  display: block;
+}
+
+.vsidian-tooltip-keys {
+  display: none;
+  margin-left: 6px;
+}
+
+.vsidian-tooltip-keys:not(:empty) {
+  display: inline-flex;
+  gap: 4px;
+  vertical-align: 2px; /* 徽章相对单行文字的基线微调（参照截图） */
+}
+
+.vsidian-tooltip-key {
+  box-sizing: border-box;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--vsidian-tooltip-key-background);
+  color: var(--vsidian-tooltip-key-foreground);
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+}

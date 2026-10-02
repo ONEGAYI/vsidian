@@ -150,13 +150,13 @@ describe('Live 视图：按钮组构成与排除项（契约 1）', () => {
     // 内嵌图片 widget 保持普通槽位形态（无 frame 类、无 chrome）
     const inlineImg = Array.from(
       content.querySelectorAll<HTMLElement>('.vsidian-image'),
-    ).find((el) => el.title === '内嵌图')!
+    ).find((el) => el.getAttribute('data-tooltip') === '内嵌图')!
     expect(inlineImg.classList.contains('vsidian-graphic-frame')).toBe(false)
     expect(inlineImg.querySelector('.vsidian-graphic-chrome')).toBeNull()
     // 表格内图片同（点击落单元格源码的现状前提）
     const tableImg = Array.from(
       content.querySelectorAll<HTMLElement>('.vsidian-image'),
-    ).find((el) => el.title === '表格图')!
+    ).find((el) => el.getAttribute('data-tooltip') === '表格图')!
     expect(tableImg.classList.contains('vsidian-graphic-frame')).toBe(false)
     expect(tableImg.querySelector('.vsidian-graphic-chrome')).toBeNull()
   })
@@ -177,10 +177,10 @@ describe('Live 视图：按钮组构成与排除项（契约 1）', () => {
     const content = c.getView()!.dom
     const frames = liveChromeFrames(content)
     expect(frames).toHaveLength(1)
-    expect(frames[0]!.title).toBe('宽松正文图')
+    expect(frames[0]!.getAttribute('data-tooltip')).toBe('宽松正文图')
     const looseTableImg = Array.from(
       content.querySelectorAll<HTMLElement>('.vsidian-image'),
-    ).find((el) => el.title === '宽松表格图')!
+    ).find((el) => el.getAttribute('data-tooltip') === '宽松表格图')!
     expect(looseTableImg.classList.contains('vsidian-graphic-frame')).toBe(false)
     expect(looseTableImg.querySelector('.vsidian-graphic-chrome')).toBeNull()
   })
@@ -207,7 +207,7 @@ describe('Live 视图：吞点击与 edit 落位（契约 2–3）', () => {
     await confirmLoads()
     const view = c.getView()!
     const anchorBefore = view.state.selection.main.anchor
-    const frame = liveChromeFrames(view.dom).find((el) => el.title === '示例图')!
+    const frame = liveChromeFrames(view.dom).find((el) => el.getAttribute('data-tooltip') === '示例图')!
     frame.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
     frame.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
     frame.dispatchEvent(new MouseEvent('click', { bubbles: true }))
@@ -223,13 +223,13 @@ describe('Live 视图：吞点击与 edit 落位（契约 2–3）', () => {
     const c = mountDoc(h)
     await confirmLoads()
     const view = c.getView()!
-    const frame = liveChromeFrames(view.dom).find((el) => el.title === '示例图')!
+    const frame = liveChromeFrames(view.dom).find((el) => el.getAttribute('data-tooltip') === '示例图')!
     const edit = frame.querySelector('.vsidian-graphic-chrome-edit') as HTMLButtonElement
     edit.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
     edit.click()
     await settle()
     expect(view.state.selection.main.anchor).toBe(DOC.indexOf('![示例图]'))
-    expect(liveChromeFrames(view.dom).find((el) => el.title === '示例图')).toBeUndefined()
+    expect(liveChromeFrames(view.dom).find((el) => el.getAttribute('data-tooltip') === '示例图')).toBeUndefined()
     expect(view.state.doc.toString()).toBe(DOC)
     expect(h.sent.filter((m) => m.kind === 'edit.request')).toHaveLength(0)
   })
@@ -240,7 +240,7 @@ describe('图片弹窗（契约 4–6）', () => {
     const h = makeHarness(new Map([['./assets/pic a.png', 'https://res/pic-a.png']]))
     const c = mountDoc(h)
     await confirmLoads()
-    const frame = liveChromeFrames(c.getView()!.dom).find((el) => el.title === '示例图')!
+    const frame = liveChromeFrames(c.getView()!.dom).find((el) => el.getAttribute('data-tooltip') === '示例图')!
     ;(frame.querySelector('.vsidian-graphic-chrome-popup') as HTMLButtonElement).click()
     await settle()
     expect(isImagePopupOpen()).toBe(true)
@@ -344,7 +344,7 @@ describe('图片弹窗（契约 4–6）', () => {
     contentHost.tabIndex = -1
     contentHost.focus()
     expect(document.activeElement).toBe(contentHost)
-    const frame = liveChromeFrames(c.getView()!.dom).find((el) => el.title === '示例图')!
+    const frame = liveChromeFrames(c.getView()!.dom).find((el) => el.getAttribute('data-tooltip') === '示例图')!
     ;(frame.querySelector('.vsidian-graphic-chrome-popup') as HTMLButtonElement).click()
     await settle()
     expect(isImagePopupOpen()).toBe(true)
@@ -378,7 +378,7 @@ describe('图片弹窗（契约 4–6）', () => {
     const h = makeHarness(new Map([['./assets/pic a.png', 'https://res/pic-a.png']]))
     const c = mountDoc(h)
     await confirmLoads()
-    const frame = liveChromeFrames(c.getView()!.dom).find((el) => el.title === '示例图')!
+    const frame = liveChromeFrames(c.getView()!.dom).find((el) => el.getAttribute('data-tooltip') === '示例图')!
     ;(frame.querySelector('.vsidian-graphic-chrome-popup') as HTMLButtonElement).click()
     await settle()
     ;(document.querySelector('.vsidian-diagram-export-image') as HTMLButtonElement).click()
@@ -398,13 +398,13 @@ describe('图片弹窗（契约 4–6）', () => {
     const h = makeHarness()
     const c = mountDoc(h)
     await confirmLoads()
-    const frame = liveChromeFrames(c.getView()!.dom).find((el) => el.title === '外链图')!
+    const frame = liveChromeFrames(c.getView()!.dom).find((el) => el.getAttribute('data-tooltip') === '外链图')!
     ;(frame.querySelector('.vsidian-graphic-chrome-popup') as HTMLButtonElement).click()
     await settle()
     const btn = document.querySelector('.vsidian-diagram-export-image') as HTMLButtonElement
     expect(btn.disabled).toBe(true)
     // disabled 不派发 click；悬停提示由 wrapper span 承担
-    expect(btn.parentElement?.title).not.toBe('')
+    expect(btn.parentElement?.getAttribute('data-tooltip')).not.toBe('')
     btn.click()
     await settle()
     expect(h.sent.filter((m) => m.kind === 'image.export')).toHaveLength(0)

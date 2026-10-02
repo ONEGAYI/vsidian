@@ -155,7 +155,7 @@ describe('宿主状态回显与开关上送', () => {
     const marks = [...parent.querySelectorAll<HTMLElement>('.vsidian-css-snippets-item-rejected')]
     expect(marks).toHaveLength(1)
     expect(marks[0]!.textContent).toBe(zhCn['cssSnippets.entryRejected'])
-    expect(marks[0]!.title).toBe('D:/outside.css')
+    expect(marks[0]!.getAttribute('data-tooltip')).toBe('D:/outside.css')
     // 拒绝态解除后重渲染：标记消失
     pushState(section, {
       directory: 'D:/snips',

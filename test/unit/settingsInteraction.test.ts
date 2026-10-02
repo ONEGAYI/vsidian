@@ -102,7 +102,7 @@ describe('工具栏设置入口（#33；#53 图标化）', () => {
     expect(btn!.querySelector('svg'), '设置按钮应为内联 SVG 齿轮图标').toBeTruthy()
     expect(btn!.textContent).not.toContain('设置')
     expect(btn!.getAttribute('aria-label')).toBe(zhCn['sidebar.settings'])
-    expect(btn!.getAttribute('title')).toBe(zhCn['sidebar.settings'])
+    expect(btn!.getAttribute('data-tooltip')).toBe(zhCn['sidebar.settings'])
     btn!.click()
     expect(sent).toContainEqual({ kind: 'settings.open' })
   })

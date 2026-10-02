@@ -79,7 +79,7 @@ describe('#208 工具栏刷新按钮', () => {
     const { c, parent } = setup()
     const btn = refreshButton(parent)
     expect(btn.getAttribute('aria-label')).toBe(zhCn['toolbar.refresh'])
-    expect(btn.getAttribute('title')).toBe(zhCn['toolbar.refresh'])
+    expect(btn.getAttribute('data-tooltip')).toBe(zhCn['toolbar.refresh'])
     c.dispose()
   })
 
@@ -88,7 +88,7 @@ describe('#208 工具栏刷新按钮', () => {
     const btn = refreshButton(parent)
     installLocale('en', en)
     expect(btn.getAttribute('aria-label')).toBe(en['toolbar.refresh'])
-    expect(btn.getAttribute('title')).toBe(en['toolbar.refresh'])
+    expect(btn.getAttribute('data-tooltip')).toBe(en['toolbar.refresh'])
     installLocale('zh-cn', zhCn)
     expect(btn.getAttribute('aria-label')).toBe(zhCn['toolbar.refresh'])
     c.dispose()

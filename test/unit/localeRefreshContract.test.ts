@@ -161,14 +161,14 @@ describe('换包后 DOM 无旧语言残留（#101 常驻控件契约）', () => 
       // （jsdom 无布局但 docView 首屏物化成立），卡片复制按钮 title 为 zh；
       // 物化若退化此断言先红，提示 fixture 与直构用例的分工需重估
       const cardCopy = parent.querySelector<HTMLElement>('.vsidian-code-card-copy')!
-      expect(cardCopy.title).toBe(zhCn['codeblock.copy'])
+      expect(cardCopy.getAttribute('data-tooltip')).toBe(zhCn['codeblock.copy'])
       switchToEnglish()
       // 正控制：既有刷新路径确实换词（标题栏设置按钮）
       const settingsBtn = parent.querySelector<HTMLButtonElement>('.vsidian-settings-toggle')!
       expect(settingsBtn.getAttribute('aria-label')).toBe(en['sidebar.settings'])
       // 按需控件：就地重刷换词（真实物化的卡片按钮 + 公式降级 title
       // 由全树 zhOnly 扫描覆盖）
-      expect(cardCopy.title).toBe(en['codeblock.copy'])
+      expect(cardCopy.getAttribute('data-tooltip')).toBe(en['codeblock.copy'])
       expectNoStaleZh(parent, '编辑器面板')
     } finally {
       detach()
@@ -288,49 +288,49 @@ describe('按需控件换包后就地重刷（#101 第三部分契约）', () =>
       images.attach(img, './broken.png')
       images.handleResult({ reqId: 1, ok: false, reason: 'not found' })
       // 正控制：换包前全部是 zh（展开态提示折叠、收起态提示展开）
-      expect(host.querySelector<HTMLElement>('.vsidian-code-card-copy')!.title)
+      expect(host.querySelector<HTMLElement>('.vsidian-code-card-copy')!.getAttribute('data-tooltip'))
         .toBe(zhCn['codeblock.copy'])
       const folds = [...host.querySelectorAll<HTMLElement>('.vsidian-code-card-fold')]
-      expect(folds.map((btn) => btn.title))
+      expect(folds.map((btn) => btn.getAttribute('data-tooltip')))
         .toEqual([zhCn['codeblock.collapse'], zhCn['codeblock.expand']])
       // fm 标题栏三件套（2026-10 折叠批次）：标题文本节点、修改按钮、
       // 折叠 chevron 两态——换包就地重刷接入清单钉住
       const fmTitles = [...host.querySelectorAll<HTMLElement>('.vsidian-fm-header-title')]
       expect(fmTitles.map((el) => el.textContent))
         .toEqual([zhCn['frontmatter.title'], zhCn['frontmatter.title']])
-      expect(host.querySelector<HTMLElement>('.vsidian-fm-edit')!.title)
+      expect(host.querySelector<HTMLElement>('.vsidian-fm-edit')!.getAttribute('data-tooltip'))
         .toBe(zhCn['frontmatter.edit'])
       const fmFolds = [...host.querySelectorAll<HTMLElement>('.vsidian-fm-fold')]
-      expect(fmFolds.map((btn) => btn.title))
+      expect(fmFolds.map((btn) => btn.getAttribute('data-tooltip')))
         .toEqual([zhCn['frontmatter.collapse'], zhCn['frontmatter.expand']])
-      expect(host.querySelector<HTMLElement>('.vsidian-graphic-chrome-edit')!.title)
+      expect(host.querySelector<HTMLElement>('.vsidian-graphic-chrome-edit')!.getAttribute('data-tooltip'))
         .toBe(zhCn['graphic.editSource'])
-      expect(host.querySelector<HTMLElement>('.vsidian-graphic-chrome-popup')!.title)
+      expect(host.querySelector<HTMLElement>('.vsidian-graphic-chrome-popup')!.getAttribute('data-tooltip'))
         .toBe(zhCn['graphic.popup'])
-      expect(host.querySelector<HTMLElement>('.vsidian-math-error')!.title)
+      expect(host.querySelector<HTMLElement>('.vsidian-math-error')!.getAttribute('data-tooltip'))
         .toBe(zhCn['decor.mathError'])
-      expect(img.title).toBe(zhCn['decor.imageError'].replace('{reason}', 'not found'))
+      expect(img.getAttribute('data-tooltip')).toBe(zhCn['decor.imageError'].replace('{reason}', 'not found'))
       switchToEnglish()
-      // 换包后：就地重刷为 en（title 与 aria-label 同源换词）
+      // 换包后：就地重刷为 en（data-tooltip 与 aria-label 同源换词）
       const copy = host.querySelector<HTMLElement>('.vsidian-code-card-copy')!
-      expect(copy.title).toBe(en['codeblock.copy'])
+      expect(copy.getAttribute('data-tooltip')).toBe(en['codeblock.copy'])
       expect(copy.getAttribute('aria-label')).toBe(en['codeblock.copy'])
-      expect(folds.map((btn) => btn.title))
+      expect(folds.map((btn) => btn.getAttribute('data-tooltip')))
         .toEqual([en['codeblock.collapse'], en['codeblock.expand']])
       expect(fmTitles.map((el) => el.textContent))
         .toEqual([en['frontmatter.title'], en['frontmatter.title']])
-      expect(host.querySelector<HTMLElement>('.vsidian-fm-edit')!.title)
+      expect(host.querySelector<HTMLElement>('.vsidian-fm-edit')!.getAttribute('data-tooltip'))
         .toBe(en['frontmatter.edit'])
-      expect(fmFolds.map((btn) => btn.title))
+      expect(fmFolds.map((btn) => btn.getAttribute('data-tooltip')))
         .toEqual([en['frontmatter.collapse'], en['frontmatter.expand']])
       expect(fmFolds[0]!.getAttribute('aria-label')).toBe(en['frontmatter.collapse'])
-      expect(host.querySelector<HTMLElement>('.vsidian-graphic-chrome-edit')!.title)
+      expect(host.querySelector<HTMLElement>('.vsidian-graphic-chrome-edit')!.getAttribute('data-tooltip'))
         .toBe(en['graphic.editSource'])
-      expect(host.querySelector<HTMLElement>('.vsidian-graphic-chrome-popup')!.title)
+      expect(host.querySelector<HTMLElement>('.vsidian-graphic-chrome-popup')!.getAttribute('data-tooltip'))
         .toBe(en['graphic.popup'])
-      expect(host.querySelector<HTMLElement>('.vsidian-math-error')!.title)
+      expect(host.querySelector<HTMLElement>('.vsidian-math-error')!.getAttribute('data-tooltip'))
         .toBe(en['decor.mathError'])
-      expect(img.title).toBe(en['decor.imageError'].replace('{reason}', 'not found'))
+      expect(img.getAttribute('data-tooltip')).toBe(en['decor.imageError'].replace('{reason}', 'not found'))
       expectNoStaleZh(host, '按需控件（直构树）')
     } finally {
       host.remove()
@@ -438,7 +438,7 @@ describe('按需控件换包后就地重刷（#101 第三部分契约）', () =>
       // 正控制：换包前 overlay 名与关闭按钮均为 zh
       expect(overlay.getAttribute('aria-label')).toBe(zhCn['graphic.popup'])
       expect(overlay.querySelector<HTMLButtonElement>(
-        `.${DIAGRAM_POPUP_CLASS_NAMES.close}`)!.title,
+        `.${DIAGRAM_POPUP_CLASS_NAMES.close}`)!.getAttribute('data-tooltip'),
       ).toBe(zhCn['graphic.popupClose'])
       switchToEnglish()
       expect(overlay.getAttribute('aria-label')).toBe(en['graphic.popup'])
@@ -454,7 +454,7 @@ describe('按需控件换包后就地重刷（#101 第三部分契约）', () =>
       for (const [cls, word] of toolbarCases) {
         const btn = overlay.querySelector<HTMLButtonElement>(`.${cls}`)!
         expect(btn, cls).toBeDefined()
-        expect(btn.title, `${cls} title`).toBe(word)
+        expect(btn.getAttribute('data-tooltip'), `${cls} 悬停词`).toBe(word)
         expect(btn.getAttribute('aria-label'), `${cls} aria-label`).toBe(word)
       }
       expectNoStaleZh(overlay, '图表弹窗')

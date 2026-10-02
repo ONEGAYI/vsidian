@@ -175,7 +175,8 @@ export class CssSnippetSettingsSection {
         const mark = document.createElement('span')
         mark.className = 'vsidian-css-snippets-item-rejected'
         mark.textContent = t('cssSnippets.entryRejected')
-        mark.title = rejection.path
+        mark.setAttribute('data-tooltip', rejection.path)
+
         item.append(mark)
       }
       item.append(box)

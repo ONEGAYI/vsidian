@@ -466,7 +466,8 @@ export class ImageResourceManager {
     )
     if (state === 'error') {
       slot.dataset['vsidianImgReason'] = reason ?? 'unknown'
-      slot.title = imageErrorTitle(reason)
+      slot.setAttribute('data-tooltip', imageErrorTitle(reason))
+
     } else {
       delete slot.dataset['vsidianImgReason']
     }

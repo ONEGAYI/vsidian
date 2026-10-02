@@ -282,7 +282,7 @@ describe('折行开关与窜行修复（#191）', () => {
     const onBtn = on.querySelector(`.${CODE_CARD_CLASS_NAMES.wrap}`)!
     expect(onBtn.classList.contains(CODE_CARD_CLASS_NAMES.wrapOff)).toBe(false)
     expect(onBtn.getAttribute('aria-label')).toBe(zhCn['codeblock.wrapDisable'])
-    expect(onBtn.getAttribute('title')).toBe(zhCn['codeblock.wrapDisable'])
+    expect(onBtn.getAttribute('data-tooltip')).toBe(zhCn['codeblock.wrapDisable'])
     expect(onBtn.getAttribute('aria-pressed')).toBe('true')
 
     const off = makeBlock('js')
@@ -290,7 +290,7 @@ describe('折行开关与窜行修复（#191）', () => {
     const offBtn = off.querySelector(`.${CODE_CARD_CLASS_NAMES.wrap}`)!
     expect(offBtn.classList.contains(CODE_CARD_CLASS_NAMES.wrapOff)).toBe(true)
     expect(offBtn.getAttribute('aria-label')).toBe(zhCn['codeblock.wrapEnable'])
-    expect(offBtn.getAttribute('title')).toBe(zhCn['codeblock.wrapEnable'])
+    expect(offBtn.getAttribute('data-tooltip')).toBe(zhCn['codeblock.wrapEnable'])
     expect(offBtn.getAttribute('aria-pressed')).toBe('false')
   })
 

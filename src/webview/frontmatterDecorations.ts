@@ -153,7 +153,8 @@ export function buildFmFoldButton(folded: boolean, onToggle: () => void): HTMLBu
   const label = folded ? t('frontmatter.expand') : t('frontmatter.collapse')
   btn.setAttribute('aria-label', label)
   btn.setAttribute('aria-expanded', folded ? 'false' : 'true')
-  btn.title = label
+  btn.setAttribute('data-tooltip', label)
+
   btn.innerHTML = FOLD_ICON_SVG
   armButton(btn, onToggle)
   return btn
@@ -199,7 +200,8 @@ export class FmCardHeaderWidget extends WidgetType {
       btn.className = FM_CARD_CLASS_NAMES.edit
       btn.innerHTML = EDIT_ICON_SVG
       const label = t('frontmatter.edit')
-      btn.title = label
+      btn.setAttribute('data-tooltip', label)
+
       btn.setAttribute('aria-label', label)
       armButton(btn, () => {
         // findFromDOM 只认携带 cmTile 的节点（本版本 CM6 的 Tile.get 语义，

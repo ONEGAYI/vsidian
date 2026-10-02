@@ -282,7 +282,8 @@ export class EmbedCardManager {
     openBtn.className = EMBED_CARD_CLASS_NAMES.open
     const openLabel = t('embed.openTarget')
     openBtn.setAttribute('aria-label', openLabel)
-    openBtn.title = openLabel
+    openBtn.setAttribute('data-tooltip', openLabel)
+
     openBtn.innerHTML = OPEN_ICON
     header.appendChild(titleEl)
     header.appendChild(openBtn)
