@@ -134,6 +134,11 @@ export const LIVE_CLASS_NAMES = {
   tableCellHeader: 'vsidian-table-cell-header',
   /** 管道符 span（含首尾边界管道） */
   tablePipe: 'vsidian-table-pipe',
+  /** 容器前缀 span（#296 渲染断裂修复）：网格行的引用/列表前缀区
+   *  （QuoteMark/ListMark 隐藏区 + 管道前裸空隙）统一包进本 mark，
+   *  随 CSS display:none 排除出 grid 放置——裸前缀在 grid 下是占位
+   *  格，会把格子挤 wrap（真机一表拆两块/错位/列序颠倒的根因） */
+  tablePrefix: 'vsidian-table-prefix',
   /** 安全表格的网格行和单元格；行身份另见 data-vsidian-table-row */
   tableGridRow: 'vsidian-table-grid-row',
   tableGridCell: 'vsidian-table-grid-cell',
@@ -285,6 +290,7 @@ const hrRuleDeco = Decoration.replace({ widget: new HorizontalRuleWidget() })
 // （lezer 的 TableCell 节点不识别 \| 与行内代码内管道，不作定位依据）
 
 const tablePipeDeco = Decoration.mark({ class: LIVE_CLASS_NAMES.tablePipe })
+const tablePrefixDeco = Decoration.mark({ class: LIVE_CLASS_NAMES.tablePrefix })
 const tableEscapedPipeDeco = Decoration.mark({ class: LIVE_CLASS_NAMES.tableEscapedPipe })
 const tableEscapedPipeRevealDeco = Decoration.mark({ class: LIVE_CLASS_NAMES.tableEscapedPipeReveal })
 // 转义符通用显隐（表格外）：默认隐藏 / 触及行浅色显形，色口径同块 id 淡化
@@ -472,14 +478,17 @@ const gridLineDecos = new Map<string, ReturnType<typeof Decoration.line>>()
  *  失配触发一次重绘），不影响正确性；旧文档态不再被引用后条目即死数据 */
 const GRID_LINE_DECO_CACHE_LIMIT = 512
 function tableGridLineDeco(cls: string, kind: GridRowKind, plan: TableGridPlan): ReturnType<typeof Decoration.line> {
-  const key = `${cls}\u0000${kind}\u0000${plan.columns}\u0000${plan.template}`
+  // 网格行同样过别名桥（#296）：引用/列表内表格行保留 .HyperMD-quote 等
+  // 兼容别名——样式契约承诺的选择器不得因网格行类丢失命中
+  const aliased = applyObsidianDomAlias(cls)
+  const key = `${aliased}\u0000${kind}\u0000${plan.columns}\u0000${plan.template}`
   let deco = gridLineDecos.get(key)
   if (!deco) {
     if (gridLineDecos.size >= GRID_LINE_DECO_CACHE_LIMIT) {
       gridLineDecos.clear()
     }
     deco = Decoration.line({
-      class: cls,
+      class: aliased,
       attributes: {
         'data-vsidian-table-row': kind,
         // #142：列数（旧入口保留）+ 列宽计划（minmax 保底 + fr 占比）；
@@ -603,6 +612,13 @@ function emitTableRowMarks(
     }
   }
   if (grid) {
+    // 容器前缀整段包进隐藏 mark（#296 渲染断裂修复）：前缀区（QuoteMark/
+    // ListMark 的 replace 隐藏区 + 管道前裸空隙）的 DOM 残留——replace 固有
+    // 空占位与裸文本节点——在 grid 行内都是 grid item，会把格子挤 wrap。
+    // 触及前缀时退场，与 QuoteMark 显形联动（可编辑层级）。
+    if (prefixLen > 0 && !selectionTouchesRange(selection, line.from, line.from + prefixLen)) {
+      out.push(tablePrefixDeco.range(line.from, line.from + prefixLen))
+    }
     // 转义管道的反斜杠：光标/选区触及该行时浅色显形（暴露源码），离开隐藏。
     // 行级判定与标题 mark 显隐同谓词——折叠光标含行两端，非空选区严格重叠。
     const escapedPipeDeco = selectionTouchesRange(selection, line.from, line.to)

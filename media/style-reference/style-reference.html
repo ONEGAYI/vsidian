@@ -66,7 +66,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 </table>
 
   <section class="domain" data-domain="content">
-    <h1 style="font-size:19px;margin-bottom:4px">正文域（85 条）</h1>
+    <h1 style="font-size:19px;margin-bottom:4px">正文域（86 条）</h1>
 
     <h2>正文域 · 容器与视图（2）</h2>
     <article class="entry" id="container-live">
@@ -416,7 +416,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：集成「Obsidian 原名别名桥」：.cm-hmd-frontmatter 命中；cssProbe.obsidianAliases[&quot;live-frontmatter-line&quot;]</p>
       <p class="life">引入：#8（2026-09-24）</p>
     </article>
-    <h2>正文域 · 表格（11）</h2>
+    <h2>正文域 · 表格（12）</h2>
     <article class="entry" id="live-table-line">
       <h3><code>.vsidian-table-line</code><span class="eid">live-table-line</span></h3>
       <p class="purpose">live 表格行（表头/分隔/数据行通用）；仅源码降级或活动分隔行显示管道符。</p>
@@ -487,6 +487,21 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：集成「表格装饰与单元格编辑写回」（#12）：.vsidian-table-pipe 命中 rgb(19, 20, 21)；cssProbe.liveTablePipeDecorationColor</p>
       <p class="life">引入：#12（2026-09-24）</p>
     </article>
+    <article class="entry" id="live-table-prefix">
+      <h3><code>.vsidian-table-prefix</code><span class="eid">live-table-prefix</span></h3>
+      <p class="purpose">网格行容器前缀 span（#296 渲染断裂修复）：引用/列表内表格行的前缀区（标记隐藏区与管道前裸空隙）统一包进本 mark，随 CSS display:none 排除出 grid 放置——前缀残留（replace 固有空占位与裸文本）在 grid 下是占位格，会把格子挤 wrap。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-native">native</span></p>
+<p class="states">状态：光标/选区触及前缀区时 mark 退场，前缀文本显形可编辑（此时前缀参与行内布局）。</p>
+      <p class="obsidian">Obsidian 对应：无对应（Obsidian 对容器内表格的前缀处理无公开类）</p>
+
+      <p class="dom">DOM 关系：网格行内覆盖容器前缀区间的 mark 装饰 span。</p>
+      <pre><code>.vsidian-table-prefix {
+  /* 片段一般无需覆写；如需保留前缀视觉痕迹可改呈现 */
+  display: inline;
+}</code></pre>
+      <p class="verify">验证：单元 liveDecorations：前缀 mark 发射与触及退场契约（#296 渲染断裂修复）；浏览器 blockquoteTablePaint：引用表格行对齐与列序绘制断言</p>
+      <p class="life">引入：#296（2026-10-02 渲染断裂修复）</p>
+    </article>
     <article class="entry" id="live-table-align">
       <h3><code>.vsidian-table-align-{left/center/right}</code><span class="eid">live-table-align</span></h3>
       <p class="purpose">live 分隔行声明的列对齐修饰（落在 trim 后内容 span 上）；网格实际布局由 grid-align 承担。</p>
@@ -503,9 +518,9 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
     <article class="entry" id="live-table-grid-row">
       <h3><code>.vsidian-table-grid-row（行附 data-vsidian-table-row=header/row、--vsidian-table-columns 列数与 --vsidian-table-col-widths 列宽计划）</code><span class="eid">live-table-grid-row</span></h3>
-      <p class="purpose">安全表格的 CSS grid 网格行；活动格也保留；单元格仍与源区间对应（非独立表格数据模型）。#142 起列宽按内容比例分配：行装饰内联列宽计划（逐列 minmax(min(48px, 等分份额), 内容占比 fr)，同表各行共享同一计划），网格规则消费之；计划缺失时回退列数等分。片段按类规则覆写 grid-template-columns 仍优先生效。</p>
+      <p class="purpose">安全表格的 CSS grid 网格行；活动格也保留；单元格仍与源区间对应（非独立表格数据模型）。#142 起列宽按内容比例分配：行装饰内联列宽计划（逐列 minmax(min(48px, 等分份额), 内容占比 fr)，同表各行共享同一计划），网格规则消费之；计划缺失时回退列数等分。片段按类规则覆写 grid-template-columns 仍优先生效。#296 渲染断裂修复：通用网格行规则不再声明 padding/box-shadow 抹平引用行类——引用内表格行与 .vsidian-quote-line 组合恢复竖条与内容缩进（同普通引用行观感）；格位外行级残留（管道/测量缓冲/前缀/replace 空占位）一律排除出 grid 放置。</p>
       <p class="views"><span class="badge">实时预览</span> <span class="support support-semantic">semantic</span></p>
-
+<p class="states">状态：引用/列表内表格行叠加容器行类（竖条、缩进、圆点）；选中行外框另见 row-selected 规则。</p>
       <p class="obsidian">Obsidian 对应：Obsidian live 网格方向（无精确对应类）</p>
 
       <p class="dom">DOM 关系：表格行内的网格行容器（grid 布局）。</p>

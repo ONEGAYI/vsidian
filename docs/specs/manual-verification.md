@@ -42,6 +42,8 @@ jieba webview 装载修复（2026-10-01，`wt-jieba-roots` 工作树，用户真
 
 #296 审查轮（review-loops 高强度，同日）：三只读子代理交叉审查 + 主代理核实，确认九项缺口并修复——两项 P1（格内编辑防护层对引用表整体失效：Enter 原生换行拆表、跨格选区键入吞字；无边界引用行 `> a | b` 的结构编辑前缀串位：插列管道落 `>` 前、删列吞 `>`、列移动/剪贴板格值被 `> ` 污染）、两项 P2（引用表格区格式化/快速操作静默 no-op；创建层裸标记 `-|` 粘连与正文行右段脱离引用块）、多项 P3（裸 `>` 紧贴、IME 收尾锚点、测试缺口）。修复核心：格切分函数（splitTableRowCells 族）内建 prefixLen 参数（blank + 首格 from clamp 到前缀右端）取代散装 blank 接线、editableGridCellAt 的分隔行查找按名遍历跳过 QuoteMark、canonical 重建补前缀、创建层三处保底；顺带修复基线缺陷「顶层无边界行插列静默无效」。25 项新契约测试先红后绿；全量单测 4982、browser 全脚本与集成全量（含新用例「引用块内表格格内编辑防护」）结果见当轮提交正文。A56 新增第 ⑥⑦ 待验点（引用表格内 Enter 观感、无边界引用行的结构操作）。
 
+#296 渲染断裂修复轮（同日第三轮，用户真机验收 A56 报障「严重渲染问题：一表拆两块、垂直错位、列序颠倒、引用竖条丢失」，按 diagnosing-bugs 技能流程执行）：Playwright Chromium 加载夹具同款内容复现（与真机截图同构：三列表拆「双列块+单列块」、两列表拆两个单列块、首列被挤至右块），裸 CM6 隔离实验钉住根因——**CM6 对行首 Decoration.replace 固有产出 contenteditable=false 空占位 span，grid 行内是 grid item 抢占格位**（与装饰发射无关、无法从源头消除）；另两项并存：网格行通用规则的 padding:0/box-shadow:none 覆盖引用竖条（#42 引入）、tableGridLineDeco 丢别名桥（.HyperMD-quote 不命中网格行）。**自动化全绿仍漏过的教训**：集成断言是 elementFromPoint 命中与 gridDisplay（存在性），抓不住布局错位——本轮新增浏览器脚本 blockquoteTablePaint 把「同行格同水平带、列序=源列序、行高不翻倍、竖条 computed 值」钉进绘制层。修复三层：前缀 mark 化（vsidian-table-prefix 排除出 grid 放置 + replace 空占位 CSS 隐藏 + 列表圆点 absolute）、竖条恢复（删通用规则抹平声明 + quote-line 组合规则）、别名桥补齐。验证（TDD 先红后绿：jsdom 5 红 + CSS 契约 2 红 + browser 4 红转全绿）：全量单测 4989/4989、compile+tsc、样式契约 8 项零失败（清单 161 条含新增 live-table-prefix 双语条目）、browser 全量与集成 core 组结果见当轮提交正文；五场景截图经视觉子代理复核（对齐/竖条/圆点/列序逐项判定）。**真机 A56 ①-⑦ 待用户复验**（此轮修复正是针对 ①②③⑦ 的断裂形态；⑥ 格内 Enter 与 ④⑤ 编辑/创建行为不受此轮影响但同批验收）。
+
 | 项目 | 状态 | 当前证据或缺失条件 |
 | --- | --- | --- |
 | A1 | 用户复验发现中文误暂停，已修复并补自动回归；待真实 IME 复验 | 2026-09-25，联合工作树 F5 中文确认后误报外部修改；已忽略 VSCode 无内容变更的脏状态事件。真实 DOM 候选经 WorkspaceEdit 保存回读在 1.86.2 与本机 1.139.0 定向验证通过；物理候选窗和 Esc 仍待复验 |

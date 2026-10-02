@@ -530,6 +530,53 @@ describe('引用块内表格网格化（#296）', () => {
     expect(textsFor(set, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(2)
     expect(textsFor(set, LIVE_CLASS_NAMES.tableGridCell, doc)).toEqual(['a ', ' b', 'c ', ' d'])
   })
+
+  // ---- #296 渲染断裂修复（真机验收报障）：前缀占位与别名桥 ----
+
+  it('网格引用行的前缀区包进隐藏 mark（前缀不得占格位）', () => {
+    const doc = '> | a | b |\n> | --- | --- |\n> | 1 | 2 |'
+    // 光标放文档末尾（不在任何前缀区——触及前缀会触发显形态退场）
+    const set = build(doc, { anchor: doc.length })
+    // `> ` 前缀（含 QuoteMark 隐藏区）由 vsidian-table-prefix mark 包住：
+    // CM6 对行首 replace 固有产出 contenteditable=false 空 span，grid 布局
+    // 下成为 grid item 抢占第一格位（真机一表拆两块/垂直错位/列序颠倒的
+    // 根因）——mark 化后由 CSS display:none 排除出 grid 放置
+    for (const at of [doc.indexOf('> | a | b |'), doc.indexOf('> | 1 | 2 |')]) {
+      expect(collect(set).some((i) => i.from === at && i.to === at + 2 &&
+        i.cls?.split(' ').includes('vsidian-table-prefix'))).toBe(true)
+    }
+  })
+
+  it('引用内列表续行的缩进空格也进前缀 mark（裸文本同为占位格）', () => {
+    const doc = '> - | a | b |\n>   | --- | --- |\n>   | 1 | 2 |'
+    const set = build(doc, { anchor: doc.length })
+    const dataFrom = doc.indexOf('>   | 1 | 2 |')
+    // 数据行前缀 `>   `（QuoteMark 区 + 管道前裸缩进空格）整段包住；
+    // 分隔行整行 display:none 不参与 grid 放置，无需前缀 mark
+    expect(collect(set).some((i) => i.from === dataFrom && i.to === dataFrom + 4 &&
+      i.cls?.split(' ').includes('vsidian-table-prefix'))).toBe(true)
+  })
+
+  it('顶层表格行不发前缀 mark（prefixLen=0 无前缀可包）', () => {
+    const doc = '| a | b |\n| --- | --- |\n| 1 | 2 |'
+    const set = build(doc)
+    expect(textsFor(set, 'vsidian-table-prefix', doc)).toHaveLength(0)
+  })
+
+  it('光标触及前缀时前缀 mark 退场（与 QuoteMark 显形联动）', () => {
+    const doc = '> | a | b |\n> | --- | --- |\n> | 1 | 2 |'
+    const dataFrom = doc.indexOf('> | 1 | 2 |')
+    const onMark = build(doc, { anchor: dataFrom + 1 })
+    expect(collect(onMark).some((i) => i.from === dataFrom &&
+      i.cls?.split(' ').includes('vsidian-table-prefix'))).toBe(false)
+  })
+
+  it('引用表格行保留 HyperMD-quote 别名（别名桥不因网格行丢失）', () => {
+    const doc = '> | a | b |\n> | --- | --- |\n> | 1 | 2 |'
+    const set = build(doc)
+    // 样式契约承诺 .HyperMD-quote 命中引用行：网格行线类同样过别名桥
+    expect(textsFor(set, 'HyperMD-quote', doc)).toHaveLength(3)
+  })
 })
 
 // ---- 输入钩子（| 键转义） ----

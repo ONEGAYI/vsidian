@@ -15,6 +15,9 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // #133 合并入列：chromeContract（界面域样式契约探针）紧随 obsidianAlias。
 // #143 合并入列：quoteBarPaint（引用竖条双视图 × 明暗主题绘制层）紧随
 // tableCaret（同批次 C 组渲染与样式侧套件）。
+// #296 渲染断裂修复合入列：blockquoteTablePaint（引用/列表/多层/无边界
+// 表格的 grid 布局绘制断言——同行格同水平带、列序、竖条计算值；防
+// elementFromPoint 存在性断言抓不住布局错位的盲区）紧随 tableCaret。
 // #140 合并入列：frontmatterTable（真实键鼠输入回流与结构按钮）紧随 taskClick。
 // #139 合并入列：commentToggle（HTML 注释 Ctrl+/ 两态、淡化绘制与阅读隐藏）。
 // #141 合并入列：viewToggle（工具栏双态切换按钮与 Ctrl+Q 快捷键入口）。
@@ -53,7 +56,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // 2026-10 合并入列：findBarAnchor（浮层锚点跟随——查找面板与选词选项条
 // 右缘动态咬合正文列右缘：限宽/铺满/侧栏开合/模式切换/窗口缩放几何），
 // 紧随 hitReveal（同查找/选词族）。
-const names = ['tableCaret', 'quoteBarPaint', 'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'wordMotion', 'imagePaste', 'outlineJump', 'outlineCollapse', 'outlineHover',
+const names = ['tableCaret', 'blockquoteTablePaint', 'quoteBarPaint', 'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'wordMotion', 'imagePaste', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage', 'settingsPageRestore',
   'skeletonProbe', 'tooltipCard',
 

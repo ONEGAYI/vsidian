@@ -39,6 +39,33 @@ describe('表格网格与选中轮廓 CSS 契约（#42/#43）', () => {
     expect(hidden).toContain('.vsidian-table-grid-row > .cm-widgetBuffer')
   })
 
+  it('前缀隐藏 mark 与 replace 空占位不占格位（#296 引用表格断裂）', () => {
+    // 两条通道把容器前缀排除出 grid 放置：
+    // 1) vsidian-table-prefix mark（QuoteMark/ListMark 的 replace 区与
+    //    管道前裸空隙统一包住）
+    // 2) CM6 对行首 replace 固有产出的 <span contenteditable="false"> 空
+    //    占位（隔离实验证实与 mark 无关、无法从发射侧消除），grid 下会
+    //    抢占第一格位——真机一表拆两块/错位/列序颠倒的根因
+    const hidden = rule('.vsidian-table-grid-delimiter', /display:\s*none/)
+    expect(hidden).toContain('.vsidian-table-grid-row .vsidian-table-prefix')
+    expect(hidden).toContain(
+      '.vsidian-table-grid-row > span[contenteditable="false"]:not([class])')
+  })
+
+  it('网格行恢复引用竖条与内容缩进（不再整体抹平）', () => {
+    // .vsidian-table-grid-row 的通用规则不得声明 padding/box-shadow 去覆盖
+    // 引用行类（.vsidian-quote-line 的 inset 竖条 + 0.9em 内容距）；
+    // 引用内表格须与普通引用行同观感（竖条与网格并存）。断言只查声明区
+    // （规则头注释会提到被删声明的历史，不能被误当回归）
+    const row = rule('.vsidian-table-grid-row')
+    const decls = row.split('{')[1] ?? ''
+    expect(decls).not.toMatch(/padding:\s*0/)
+    expect(decls).not.toMatch(/box-shadow:\s*none/)
+    const quoteBar = rule('.vsidian-table-grid-row.vsidian-quote-line')
+    expect(quoteBar).toMatch(/box-shadow:\s*inset 3px 0 0 var\(--vsidian-quote-bar-color\)/)
+    expect(quoteBar).toMatch(/padding-left:\s*calc\(0\.9em \+ 3px\)/)
+  })
+
   it('转义管道反斜杠默认隐藏、光标行浅色显形（Obsidian 对齐）', () => {
     // 默认隐藏：渲染为 |，所见即渲染结果
     expect(rule('.vsidian-table-escaped-pipe', /display:\s*none/)).toContain('display: none')

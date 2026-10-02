@@ -34,6 +34,25 @@
 - **插列无边界分支（基线缺陷顺带修复）**：目标列是首格且该行无左边界管道时，piece 从「空格+管道」改为「管道开头」形态（`'| |'` / `'| --- |'`）——前者与行首空白融合、列数不增，**顶层无边界行的插列静默无效是基线既有缺陷**，引用场景由 #296 放大可见，一并修复并以新契约钉住。
 - 验证：25 项新契约测试先红后绿（撤修复可复现全部缺口）；全量单测 4982、browser 全脚本、集成全量（含新增引用表编辑防护用例）另行记录于当轮提交。
 
+## 渲染断裂修复（真机验收报障，2026-10-02 第二轮）
+
+审查轮全绿交付后用户真机验收（A56 视觉夹具）报障**渲染断裂**：引用内表格一表拆两块（互补列分块）、两块垂直错位约一行高、列序与源相反、引用竖条整体丢失、拖拽手柄悬空、底部控件条横贯全宽。经 Playwright Chromium 复现（`tmpDiagBq` 诊断脚本，与真机截图同构）并裸 CM6 隔离实验钉住根因：
+
+- **根因一（格位抢占）**：CM6 对行首 `Decoration.replace({})`（QuoteMark/ListMark 隐藏所用）**固有产出 `<span contenteditable="false"></span>` 空占位**——裸 CM6 实验证实与 mark 装饰无关、无法从发射侧消除。该 span 在 `display: grid` 的表格行内是 grid item：每层容器前缀占掉一格位，格子整体右移一格、尾列 wrap 到第二排。同时解释拆两块（互补列）、错位一行、列序颠倒（首列被挤至右块）与行高翻倍。引用内列表续行的管道前裸缩进空格（匿名 grid item）与列表圆点 `::before` 伪元素同为此族占位。
+- **根因二（竖条覆盖）**：网格行通用规则的 `padding: 0; box-shadow: none`（#42 引入）源顺序在 `.vsidian-quote-line` 之后，同特异性抹平了引用竖条与内容缩进——顶层表格行为无差，引用表格行竖条全失。
+- **根因三（别名桥缺口）**：`tableGridLineDeco` 不走 `applyObsidianDomAlias`，网格行丢 `.HyperMD-quote` 等兼容别名（样式契约承诺的选择器不命中）。
+- **为何自动化全绿仍漏**：集成绘制层断言落在 elementFromPoint 命中与 gridDisplay（存在性/命中），文字仍在 DOM、命中照样成立；jsdom 无布局。**没有断言「同行格子同水平带、列序正确、网格背景连续」**——真机截图是唯一抓到它的验收层。
+
+修复（三层）：
+
+- **前缀 mark 化**：`emitTableRowMarks` 对 grid 行发射 `vsidian-table-prefix` mark 覆盖 `[line.from, line.from + prefixLen)`（与 QuoteMark/ListMark 的 replace 区间重叠由 CM6 自动拆分，实测安全）；光标/选区触及前缀区时退场（与 QuoteMark 显形联动，可编辑层级）。CSS 隐藏清单追加 `.vsidian-table-prefix` 与 `> span[contenteditable="false"]:not([class])`（replace 空占位），格位外行级残留一律排除出 grid 放置；列表圆点 `::before` 改 `position: absolute` 挂行缘。
+- **竖条恢复**：删除网格行通用规则的 `padding: 0; box-shadow: none`（顶层行为不变），新增 `.vsidian-table-grid-row.vsidian-quote-line` 组合规则恢复 inset 竖条与 `calc(0.9em + 3px)` 内容缩进——引用内表格行与普通引用行同观感。
+- **别名桥补齐**：`tableGridLineDeco` 的行类串过 `applyObsidianDomAlias`。
+
+回归钉法（防同型盲区）：新增浏览器脚本 `blockquoteTablePaint`（入 `run.mjs` 清单）——五场景（顶层对照/单层/双层/引用内列表/无边界）断言**同行格同水平带 ±1px、列序=源列序、各行首格左对齐、行高不翻倍、竖条 computed box-shadow、HyperMD-quote 别名、格内文字命中**；jsdom 钉前缀 mark 发射/触及退场/顶层不发与别名；`tablePaintCssContract` 钉隐藏清单选择器与竖条规则（断言只查声明区——规则头注释会提到被删声明的历史）。样式清单新增公开条目 `live-table-prefix`（双语），`live-table-grid-row` purpose 补记组合态语义。
+
+触及态已知边界：光标进入前缀区时前缀文本显形并参与行内布局（占首格位、格区右移）——短暂编辑态，回到格内即恢复；「触及显形可编辑」语义完整（既有 jsdom 契约钉住），布局让位不在本票修复范围。
+
 ## 验证与完成条件
 
 - TDD：三层契约测试先行暴露缺口（装饰类名断言、创建产出文本断言、结构操作纯函数断言），再实现转绿。
