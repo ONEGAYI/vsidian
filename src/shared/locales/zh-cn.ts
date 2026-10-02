@@ -35,6 +35,8 @@ export const zhCn: Record<MessageKey, string> = {
   'settings.groupCodeblock': '代码块',
   /** 编辑器页内小节：image.* 图片粘贴设置 */
   'settings.groupImage': '图片',
+  /** 编辑器页内小节（#298）：hover.* 悬停预览族与 embed.* 正文嵌入族 */
+  'settings.groupRefview': '引用视图',
 
   // ---- keybindingSettings.（快捷键分页）----
   'keybindingSettings.title': '快捷键',
@@ -82,9 +84,15 @@ export const zhCn: Record<MessageKey, string> = {
   'setting.embedMaxHeight.description': '阅读模式嵌入卡片内容区的最大高度：较短笔记保持自然高度，超出该值的内容在卡片内部滚动。',
   'setting.embedMaxDepth.title': '嵌入笔记展开层级',
   'setting.embedMaxDepth.description': '自动展开嵌入内容中的引用。来源笔记是第 0 层；设为 1 只显示直接嵌入，设为 3 再显示后续两层。',
-  /** #221 Live 悬停触发方式（Ctrl+悬停 vs 直接悬停） */
-  'setting.hoverLiveDirect.title': '实时预览中直接悬停链接',
-  'setting.hoverLiveDirect.description': '开启后在实时预览中指针悬停链接即可打开预览浮层；关闭时需按住 Ctrl（macOS 为 Cmd）再悬停。阅读模式与反链/出链面板不受影响，始终直接悬停。',
+  /** #298 悬停预览总开关（hover.enabled） */
+  'setting.hoverEnabled.title': '悬停预览引用文档',
+  'setting.hoverEnabled.description': '指针悬停链接时弹出引用文档预览浮层，覆盖阅读模式正文、实时预览与反链/出链面板（含浮层内子引用）。关闭后浮层的全部触发入口——悬停与「预览当前链接」键盘命令——均不再打开浮层；正文嵌入卡片不受影响。',
+  /** #299 跳转目标提示（hover.targetTip） */
+  'setting.hoverTargetTip.title': '悬停显示跳转目标',
+  'setting.hoverTargetTip.description': '悬停在引用上且不会弹出引用视图浮层时（如实时预览中未按住 Ctrl，或悬停预览总开关已关闭），短暂停留后显示目标位置的路径提示。独立于「悬停预览引用文档」总开关——关闭总开关后提示仍可用。',
+  /** #221 Live 悬停触发方式（Ctrl+悬停 vs 直接悬停）；#298 改名并重写描述 */
+  'setting.hoverLiveDirect.title': '实时预览中直接悬停显示',
+  'setting.hoverLiveDirect.description': '开启后在实时预览中指针悬停链接即可直接打开引用视图浮层，无需修饰键；关闭时需按住 Ctrl（macOS 为 Cmd）再悬停，或悬停中补按 Ctrl。关闭「悬停预览引用文档」总开关后本设置不再生效。',
   'setting.codeblockCard.title': '代码块卡片',
   'setting.codeblockCard.description': '围栏代码块在光标离开时收起为卡片：隐藏围栏标记，显示语言头部横带。关闭后回到朴素源码围栏外观。',
   'setting.codeblockLineNumbers.title': '卡内行号',

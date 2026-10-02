@@ -106,6 +106,8 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, tex
  *  display/editing/codeblock/image（#263 编辑器页二级组标题四枚，v2 拍板
  *  清单原样 path）：显示 = 显示器、编辑 = 双 I 光标、代码块 = 尖括号、
  *  图片 = 山形相框（#265 生图两枚从独立 SVG 资产加载，不在本表）。
+ *  refview（#298 引用视图组）：path 数据暂以 links 双链环占位（引用域
+ *  意象就近借用）——正式图标由用户后补，届时仅替换本行数据、接线不动；
  *  book（#132 样式参考分页）随 #231 侧栏条目合并退役；
  *  #163 一轮曾为符号/代码块/图片三组新增 keyboard 复用与 code/image 形，
  *  二轮还原为页内小节后侧栏不再使用，已随分支退役。 */
@@ -120,6 +122,7 @@ const ICON_PATHS = {
   editing: 'M7 4v16M5 4h4M5 20h4M17 4v16M15 4h4M15 20h4',
   codeblock: 'M8 7l-5 5 5 5M16 7l5 5-5 5',
   image: 'M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2ZM11 9a2 2 0 1 1-4 0 2 2 0 0 1 4 0M21 15l-3.09-3.09a2 2 0 0 0-2.82 0L6 21',
+  refview: 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71',
 } as const
 
 function icon(kind: keyof typeof ICON_PATHS): SVGSVGElement {
@@ -132,8 +135,9 @@ function icon(kind: keyof typeof ICON_PATHS): SVGSVGElement {
   return svg
 }
 
-/** 编辑器页二级组标题图标：四枚内联线性字形与 #265 两枚生图资产。 */
-export type SettingsGroupIcon = 'display' | 'editing' | 'codeblock' | 'image' | 'typewriter' | 'wordSegment'
+/** 编辑器页二级组标题图标：五枚内联线性字形与 #265 两枚生图资产
+ *  （#298 refview 的 path 数据暂以 links 字形占位，正式图标后补仅换数据）。 */
+export type SettingsGroupIcon = 'display' | 'editing' | 'codeblock' | 'image' | 'typewriter' | 'wordSegment' | 'refview'
 
 function groupIcon(kind: SettingsGroupIcon): SVGSVGElement | HTMLSpanElement {
   if (kind === 'typewriter' || kind === 'wordSegment') {
@@ -320,11 +324,20 @@ export class SettingsPageView {
   private imageDefs(): readonly SettingDefinition[] {
     return this.defs.filter((d) => d.key.startsWith('image.'))
   }
-  /** 编辑器页「显示」小节：非 general 且不属其他小节的 editor.* 定义 */
+  /** 编辑器页「显示」小节：非 general 且不属其他小节的 editor.* 定义
+   *  （#298 起 hover 与 embed 两前缀改归「引用视图」小节，此处显式排除） */
   private displayDefs(): readonly SettingDefinition[] {
     return this.editorDefs().filter(
       (d) => !d.key.startsWith('editor.symbol') && !d.key.startsWith('editor.multicursor') &&
-      !d.key.startsWith('codeblock.') && !d.key.startsWith('image.'))
+      !d.key.startsWith('codeblock.') && !d.key.startsWith('image.') &&
+      !d.key.startsWith('hover.') && !d.key.startsWith('embed.'))
+  }
+  /** 编辑器页「引用视图」小节（#298）：hover.*（悬停预览族）与 embed.*
+   *  （正文嵌入族）前缀的定义——组内顺序由注册表顺序决定（总开关 →
+   *  直接悬停显示 → 嵌入展开层级 → 嵌入最大高度），本过滤只做前缀收纳 */
+  private refviewDefs(): readonly SettingDefinition[] {
+    return this.editorDefs().filter(
+      (d) => d.key.startsWith('hover.') || d.key.startsWith('embed.'))
   }
   private editorDefs(): readonly SettingDefinition[] {
     // #239 分词三键（editor.wordSegment*）不由本表渲染；#264 起呈现归编辑
@@ -346,6 +359,9 @@ export class SettingsPageView {
       { titleKey: 'settings.groupSymbols', icon: 'typewriter', defs: () => this.symbolDefs() },
       { titleKey: 'settings.groupCodeblock', icon: 'codeblock', defs: () => this.codeblockDefs() },
       { titleKey: 'settings.groupImage', icon: 'image', defs: () => this.imageDefs() },
+      // #298 引用视图组：hover.*/embed.* 前缀收纳（icon key 一次接线，path
+      // 数据暂以 links 字形占位）；置于图片组之后、委托组（分词）之前
+      { titleKey: 'settings.groupRefview', icon: 'refview', defs: () => this.refviewDefs() },
       ...this.editorGroups.map((group): EditorSection => ({ titleKey: group.titleKey, icon: group.icon, group })),
     ]
   }

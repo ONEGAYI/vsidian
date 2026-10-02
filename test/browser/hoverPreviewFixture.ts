@@ -57,6 +57,10 @@ Object.assign(window, {
     })
     controller.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
   },
+  /** 注入设置快照（settings.snapshot 通道；#298 hover.enabled 总开关生效面） */
+  applyHoverSettings(values: Record<string, boolean | number | string>) {
+    controller.handleHostMessage({ kind: 'settings.snapshot', values })
+  },
   /** 已出站消息快照（hover.request / image.request / *.activate / edit.request 观测） */
   hoverSent(): WebviewToHost[] {
     return [...sent]

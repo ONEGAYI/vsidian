@@ -109,4 +109,27 @@ describe('审查修复后的钳制兜底（#300 复核轮）', () => {
     const p = planTooltipPlacement({ anchor: anchorAt(-10, 200, 40, 24), tip: TIP, viewport: VP })
     expect(p.left).toBeGreaterThanOrEqual(MARGIN)
   })
+
+  it('preferVertical above（#299 跳转目标提示）：视口中央上方呈现、居中不变', () => {
+    const p = planTooltipPlacement({ anchor: anchorAt(300, 200), tip: TIP, viewport: VP, preferVertical: 'above' })
+    expect(p.vertical).toBe('above')
+    expect(p.align).toBe('center')
+    expect(p.top).toBe(200 - GAP - TIP.height)
+  })
+
+  it('above 优先贴近视口顶缘：翻到下方（越缘翻转仍遵守）', () => {
+    // 锚点 top 30：above 需要 30-6-30=-6 越顶边距；下方空间充足
+    const p = planTooltipPlacement({ anchor: anchorAt(300, 30), tip: TIP, viewport: VP, preferVertical: 'above' })
+    expect(p.vertical).toBe('below')
+    expect(p.top).toBe(30 + 24 + GAP)
+  })
+
+  it('above 优先上下均放不下（矮视口/超高 tip）：翻下后钳到顶部边距，不出顶', () => {
+    // tip 高 590 超过视口可容高（600-16）：翻下越底后按「保顶优先」钳到 margin
+    const p = planTooltipPlacement({
+      anchor: anchorAt(300, 20), tip: { width: 120, height: 590 }, viewport: VP, preferVertical: 'above',
+    })
+    expect(p.vertical).toBe('below')
+    expect(p.top).toBe(MARGIN)
+  })
 })

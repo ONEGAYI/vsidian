@@ -528,3 +528,76 @@ describe('Live 直接悬停设置（#221）', () => {
       .toBe(true)
   })
 })
+
+describe('引用视图设置组（#298：总开关 + liveDirect 改名 + embed 迁组）', () => {
+  it('hover.enabled 注册为布尔项（默认 true = 悬停预览开）；词条键落 hoverEnabled', () => {
+    const def = PRODUCTION_SETTING_DEFINITIONS.find((d) => d.key === 'hover.enabled')
+    expect(def).toMatchObject({ type: 'boolean', default: true })
+    expect(def?.titleKey).toBe('setting.hoverEnabled.title')
+    expect(def?.descriptionKey).toBe('setting.hoverEnabled.description')
+    // 默认快照含新键；非法存量（类型不符）恢复默认 true（升级零迁移）
+    expect(settingsDefaults(PRODUCTION_SETTING_DEFINITIONS)['hover.enabled']).toBe(true)
+    expect(sanitizeStoredSettings(PRODUCTION_SETTING_DEFINITIONS, { 'hover.enabled': 'no' })['hover.enabled'])
+      .toBe(true)
+    expect(sanitizeStoredSettings(PRODUCTION_SETTING_DEFINITIONS, { 'hover.enabled': false })['hover.enabled'])
+      .toBe(false)
+  })
+
+  it('注册表顺序钉住「引用视图」组内顺序：总开关 → 直接悬停显示 → 跳转目标提示 → 嵌入层级 → 嵌入最大高度', () => {
+    const keys = PRODUCTION_SETTING_DEFINITIONS.map((d) => d.key)
+    const indexOf = (key: string) => {
+      const index = keys.indexOf(key)
+      expect(index, `注册表应含 ${key}`).toBeGreaterThanOrEqual(0)
+      return index
+    }
+    // 设置页组内条目按注册表顺序渲染（displayDefs/refviewDefs 皆为顺序过滤）
+    expect(indexOf('hover.enabled')).toBeLessThan(indexOf('hover.liveDirect'))
+    expect(indexOf('hover.liveDirect')).toBeLessThan(indexOf('hover.targetTip'))
+    expect(indexOf('hover.targetTip')).toBeLessThan(indexOf('embed.maxDepth'))
+    expect(indexOf('embed.maxDepth')).toBeLessThan(indexOf('embed.maxHeight'))
+  })
+
+  it('hover.targetTip 注册为布尔项（默认 true，#299 跳转目标提示）；独立于总开关不登记 dependsOn', () => {
+    const def = PRODUCTION_SETTING_DEFINITIONS.find((d) => d.key === 'hover.targetTip')
+    expect(def).toMatchObject({ type: 'boolean', default: true })
+    expect(def?.titleKey).toBe('setting.hoverTargetTip.title')
+    expect(def?.descriptionKey).toBe('setting.hoverTargetTip.description')
+    // 独立性契约：不登记任何依赖（总开关关闭时提示是悬停的唯一反馈，
+    // 不随总开关联动灰化——规格「设置项与分组」节）
+    expect('dependsOnEnum' in (def ?? {})).toBe(false)
+    expect('dependsOn' in (def ?? {})).toBe(false)
+    // 默认快照含新键；非法存量恢复默认 true
+    expect(settingsDefaults(PRODUCTION_SETTING_DEFINITIONS)['hover.targetTip']).toBe(true)
+    expect(sanitizeStoredSettings(PRODUCTION_SETTING_DEFINITIONS, { 'hover.targetTip': 'x' })['hover.targetTip'])
+      .toBe(true)
+    expect(sanitizeStoredSettings(PRODUCTION_SETTING_DEFINITIONS, { 'hover.targetTip': false })['hover.targetTip'])
+      .toBe(false)
+  })
+
+  it('改名与描述重写（词条层契约）：liveDirect 标题改为「实时预览中直接悬停显示」，旧描述句不再成立', async () => {
+    const { zhCn } = await import('../../src/shared/locales/zh-cn')
+    const { en } = await import('../../src/shared/locales/en')
+    expect(zhCn['setting.hoverLiveDirect.title']).toBe('实时预览中直接悬停显示')
+    // 旧句「阅读模式与反链/出链面板不受影响，始终直接悬停」在总开关存在后
+    // 不再成立（总开关关闭时全域悬停不弹），描述不得再含该断言
+    expect(zhCn['setting.hoverLiveDirect.description']).not.toContain('不受影响')
+    expect(en['setting.hoverLiveDirect.description']).not.toContain('always preview directly')
+    // 英文标题同步改名（中英同一语义）
+    expect(en['setting.hoverLiveDirect.title']).not.toBe('Hover links directly in live preview')
+  })
+
+  it('总开关描述明示键盘命令同辖（#298 跟进：文案与「总开关扩权管辖键盘命令」行为统一）', async () => {
+    const { zhCn } = await import('../../src/shared/locales/zh-cn')
+    const { en } = await import('../../src/shared/locales/en')
+    // 命令名与 command 词条同源（勿自造）：关闭语义必须覆盖键盘命令触发
+    // 入口（悬停与命令均不再打开浮层），并保留正文嵌入卡片豁免
+    expect(zhCn['setting.hoverEnabled.description'])
+      .toContain(`「${zhCn['command.ui.hoverPreviewLink.title']}」键盘命令`)
+    expect(zhCn['setting.hoverEnabled.description']).toContain('正文嵌入卡片不受影响')
+    expect(zhCn['setting.hoverEnabled.description']).not.toContain('键盘命令不受影响')
+    expect(en['setting.hoverEnabled.description'])
+      .toContain(`"${en['command.ui.hoverPreviewLink.title']}" keyboard command`)
+    expect(en['setting.hoverEnabled.description'])
+      .toContain('embeds written in the note body are not affected')
+  })
+})

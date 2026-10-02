@@ -84,8 +84,9 @@ try {
     // #163 二轮还原：分类收敛为编辑器页内小节——codeblock.* 控件在
     // 「编辑器」分组页的「代码块」小节内，先进组再取控件
     await page.getByRole('button', { name: zhCn['settings.editorCategory'], exact: true }).click()
-    // #263/#265/#264 组标题图标：四枚内联字形 + 打字机/分词两枚生图资产，
-    // 六组均占 16px（委托组经组对象 icon 槽走同一 h3 路径）。
+    // #263/#265/#264/#298 组标题图标：五枚内联字形（含引用视图组占位形）+
+    // 打字机/分词两枚生图资产，七组均占 16px（委托组经组对象 icon 槽走同一
+    // h3 路径）。
     const iconPaint = await page.evaluate(() => {
       const textStart = (h3) => {
         for (const node of h3.childNodes) {
@@ -118,9 +119,9 @@ try {
       })
     })
     const expectedFg = theme === 'light' ? 'rgb(48, 52, 59)' : 'rgb(221, 221, 221)'
-    assert.equal(iconPaint.length, 6, '编辑器页应有六个二级组标题')
+    assert.equal(iconPaint.length, 7, '编辑器页应有七个二级组标题')
     const withIcon = iconPaint.filter((g) => g.icon)
-    assert.equal(withIcon.length, 6, '编辑器页六组均应有图标（#263 四枚内联字形 + #265 两枚生图资产）')
+    assert.equal(withIcon.length, 7, '编辑器页七组均应有图标（#263/#298 内联字形 + #265 两枚生图资产）')
     for (const g of withIcon) {
       assert.equal(g.width, 16, '图标渲染盒应为 16px（绘制层：样式未注入时退默认尺寸即失败）')
       assert.equal(g.height, 16)
@@ -134,10 +135,51 @@ try {
     assert.equal(iconPaint[2].generated, true, '符号输入组应显示打字机生图资产')
     assert.equal(iconPaint[2].dataIcon, 'typewriter')
     assert.match(iconPaint[2].backgroundImage, /data:image\/svg\+xml/u, '打字机 SVG 应由样式真实加载')
-    assert.equal(iconPaint[5].generated, true, '中文分词组（尾组）应显示分词生图资产')
-    assert.equal(iconPaint[5].dataIcon, 'wordSegment')
-    assert.match(iconPaint[5].backgroundImage, /data:image\/svg\+xml/u, '分词 SVG 应由样式真实加载')
+    assert.equal(iconPaint[6].generated, true, '中文分词组（尾组）应显示分词生图资产')
+    assert.equal(iconPaint[6].dataIcon, 'wordSegment')
+    assert.match(iconPaint[6].backgroundImage, /data:image\/svg\+xml/u, '分词 SVG 应由样式真实加载')
     assert.equal(new Set(iconPaint.map((g) => g.rowHeight)).size, 1, '各组标题行高应一致（图标不撑行）')
+    // #298/#299 引用视图组：组内五行用户可见文案与顺序（总开关 → 改名后
+    // 的直接悬停显示 → 跳转目标提示 → 嵌入层级 → 嵌入高度），总开关默认
+    // 开并走真实保存链路
+    const refviewGroup = page.locator('.vsidian-settings-group').filter({
+      has: page.locator('.vsidian-settings-group-title', { hasText: zhCn['settings.groupRefview'] }) })
+    await refviewGroup.waitFor()
+    const refviewTitles = await refviewGroup.locator('.vsidian-settings-item-title').allInnerTexts()
+    assert.deepEqual(refviewTitles.map((t) => t.trim()), [
+      zhCn['setting.hoverEnabled.title'],
+      zhCn['setting.hoverLiveDirect.title'],
+      zhCn['setting.hoverTargetTip.title'],
+      zhCn['setting.embedMaxDepth.title'],
+      zhCn['setting.embedMaxHeight.title'],
+    ], '引用视图组内顺序：总开关 → 直接悬停显示 → 跳转目标提示 → 嵌入展开层级 → 嵌入最大高度')
+    assert.equal(await refviewGroup.getByRole('checkbox', { name: zhCn['setting.hoverLiveDirect.title'], exact: true })
+      .isVisible(), true, '改名后的「实时预览中直接悬停显示」条目在组内呈现')
+    const hoverEnabledBox = refviewGroup.getByRole('checkbox', { name: zhCn['setting.hoverEnabled.title'], exact: true })
+    assert.equal(await hoverEnabledBox.isChecked(), true, '总开关默认开启（升级零迁移）')
+    await hoverEnabledBox.click()
+    await page.getByRole('status').filter({ hasText: zhCn['settings.saveDone'] }).waitFor()
+    assert.equal(await page.evaluate(() => window.savedSettings['hover.enabled']), false,
+      '总开关经消息桥持久化（settings.set → 宿主侧合并）')
+    assert.equal(await hoverEnabledBox.isChecked(), false, '保存回推后就地回显关闭值')
+    await hoverEnabledBox.click()
+    await page.getByRole('status').filter({ hasText: zhCn['settings.saveDone'] }).waitFor()
+    assert.equal(await hoverEnabledBox.isChecked(), true, '再次切回开')
+    // #299 审查修复：跳转目标提示（hover.targetTip）同走真实保存链路专项
+    // 断言（与总开关用例各自独立）：click → saveDone → 持久化值落
+    // savedSettings → 保存回推后就地回显，再切回开值随链路更新
+    const targetTipBox = refviewGroup.getByRole('checkbox', { name: zhCn['setting.hoverTargetTip.title'], exact: true })
+    assert.equal(await targetTipBox.isChecked(), true, '跳转目标提示默认开启（缺省视为开）')
+    await targetTipBox.click()
+    await page.getByRole('status').filter({ hasText: zhCn['settings.saveDone'] }).waitFor()
+    assert.equal(await page.evaluate(() => window.savedSettings['hover.targetTip']), false,
+      '跳转目标提示经消息桥持久化（settings.set → 宿主侧合并）')
+    assert.equal(await targetTipBox.isChecked(), false, '保存回推后就地回显关闭值')
+    await targetTipBox.click()
+    await page.getByRole('status').filter({ hasText: zhCn['settings.saveDone'] }).waitFor()
+    assert.equal(await targetTipBox.isChecked(), true, '再次切回开')
+    assert.equal(await page.evaluate(() => window.savedSettings['hover.targetTip']), true,
+      '切回开的持久化值随保存链路更新')
     const countInk = async (png) => page.evaluate(async (base64) => {
       const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${base64}`)).blob())
       const canvas = document.createElement('canvas')
@@ -188,7 +230,7 @@ try {
     assert.equal(restorePaint, '1', '解灰后不透明度恢复')
     // #155 独立滚动骨架（绘制层，编辑器分组内容超一屏）：主区滚动时侧栏静止；
     // 切过分页后主区滚动复位、根元素不整体滚动。#163 二轮还原后编辑器页
-    // 内置四小节（生产注册表 11 项）天然超一屏，直接承载本探针
+    // 内置小节（#298 起生产注册表 12 项、六小节）天然超一屏，直接承载本探针
     const scrollProbe = await page.evaluate(() => {
       const main = document.querySelector('.vsidian-settings-main')
       const sidebar = document.querySelector('.vsidian-settings-sidebar')

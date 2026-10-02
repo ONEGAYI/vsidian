@@ -8,6 +8,7 @@ import {
   readHoverDocTarget,
   readHoverDirectTarget,
   readHoverMdLinkTarget,
+  resolveHoverTargetTip,
   type HoverDocAccessContext,
   type HoverDocAccessPorts,
   type HoverReadOutcome,
@@ -581,5 +582,111 @@ describe('readHoverDirectTarget：宿主侧静态边界（P1-1，不信任前端
       reason: 'non-markdown',
     })
     expect(h.opened).toEqual([])
+  })
+})
+
+
+describe('跳转目标提示轻量解析（#299 resolveHoverTargetTip：只解析不读正文）', () => {
+  /** 轻量端口替身：resolveVaultFile 同款 + openTextDocument 从不期望被调 */
+  function tipHarness(disk: Disk): Harness & { opened: string[] } {
+    return makeHarness(disk, undefined)
+  }
+
+  it('双链全文：解析成功返回所属根内相对路径（/ 分隔、含扩展名），无锚点', async () => {
+    const h = tipHarness(new Map([['D:\\notes\\sub\\目标笔记.md', note('x')]]))
+    const out = await resolveHoverTargetTip({ target: 'sub/目标笔记' }, h.ctx)
+    expect(out).toEqual({ ok: true, relPath: 'sub/目标笔记.md', anchor: '' })
+    // 轻量硬边界：不读目标正文（openTextDocument 零调用）
+    expect(h.opened).toEqual([])
+  })
+
+  it('双链锚点两形态：#标题 与 #^块id 按源码形态附加', async () => {
+    const h = tipHarness(new Map([['D:\\notes\\目标.md', note('x')]]))
+    expect(await resolveHoverTargetTip({ target: '目标#章节一' }, h.ctx))
+      .toEqual({ ok: true, relPath: '目标.md', anchor: '#章节一' })
+    expect(await resolveHoverTargetTip({ target: '目标#^blk-id' }, h.ctx))
+      .toEqual({ ok: true, relPath: '目标.md', anchor: '#^blk-id' })
+  })
+
+  it('双链本文件锚点（#标题）：目标即来源文档自身，同样带完整路径（规则不特判）', async () => {
+    const h = tipHarness(new Map([['D:\\notes\\a.md', note('x')]]))
+    const out = await resolveHoverTargetTip({ target: '#本文件标题' }, h.ctx)
+    expect(out).toEqual({ ok: true, relPath: 'a.md', anchor: '#本文件标题' })
+    expect(h.resolvedCalls).toEqual([]) // 本文件锚点不查文件系统
+  })
+
+  it('目标不存在照常显示意图路径（纯计算零探测）；escape / 非法形态仍 ok:false（2026-10-02 用户裁定）', async () => {
+    // 空磁盘：不存在任何文件——提示仍「诚实地把链接目标反映出来」（无扩展名补 .md 意图路径）
+    const h = tipHarness(new Map())
+    expect(await resolveHoverTargetTip({ target: '不存在的笔记' }, h.ctx))
+      .toEqual({ ok: true, relPath: '不存在的笔记.md', anchor: '' })
+    // 越出根边界：无从构成根内相对路径，静默不出
+    const esc = makeHarness(new Map(), () => ({ kind: 'escape' as const, detail: '' }))
+    expect(await resolveHoverTargetTip({ target: '../越界' }, esc.ctx)).toEqual({ ok: false })
+    // 形态学非法（空目标，parseWikilinkInner 归 null；[[ ]] 括号在 webview
+    // 判定族已剥除，内部文字层宽容）：不出
+    expect(await resolveHoverTargetTip({ target: '' }, h.ctx)).toEqual({ ok: false })
+  })
+
+  it('普通链接：linkHref 形态解析 + fragment 锚点（^ 前缀块 id 同形态附加）', async () => {
+    const h = tipHarness(new Map([['D:\\notes\\b.md', note('x')]]))
+    expect(await resolveHoverTargetTip({ linkHref: 'b.md' }, h.ctx))
+      .toEqual({ ok: true, relPath: 'b.md', anchor: '' })
+    expect(await resolveHoverTargetTip({ linkHref: 'b.md#小节' }, h.ctx))
+      .toEqual({ ok: true, relPath: 'b.md', anchor: '#小节' })
+    expect(await resolveHoverTargetTip({ linkHref: 'b.md#^blk' }, h.ctx))
+      .toEqual({ ok: true, relPath: 'b.md', anchor: '#^blk' })
+    // 页内锚点：目标即来源文档（路径相对根完整给出）
+    expect(await resolveHoverTargetTip({ linkHref: '#页内' }, h.ctx))
+      .toEqual({ ok: true, relPath: 'a.md', anchor: '#页内' })
+    // 外部 scheme：不接入（webview 已预滤，宿主复核兜底）
+    expect(await resolveHoverTargetTip({ linkHref: 'https://example.com/x' }, h.ctx))
+      .toEqual({ ok: false })
+  })
+
+  it('指向图片等非 Markdown 目标：路径照常返回（提示不只服务笔记链接；不读正文）', async () => {
+    const h = tipHarness(new Map([['D:\\notes\\assets\\图.png', { version: 1, text: '' }]]))
+    const out = await resolveHoverTargetTip({ target: 'assets/图.png' }, h.ctx)
+    expect(out).toEqual({ ok: true, relPath: 'assets/图.png', anchor: '' })
+    expect(h.opened).toEqual([])
+  })
+
+  it('面板直接目标：fsPath 直取相对路径 + 锚点原文附加；空串 fsPath（断链）失败', async () => {
+    const h = tipHarness(new Map())
+    expect(await resolveHoverTargetTip(
+      { directTarget: { fsPath: 'D:\\notes\\sub\\c.md' } }, h.ctx))
+      .toEqual({ ok: true, relPath: 'sub/c.md', anchor: '' })
+    expect(await resolveHoverTargetTip(
+      { directTarget: { fsPath: 'D:\\notes\\sub\\c.md', anchor: '^blk' } }, h.ctx))
+      .toEqual({ ok: true, relPath: 'sub/c.md', anchor: '#^blk' })
+    expect(await resolveHoverTargetTip(
+      { directTarget: { fsPath: 'D:\\notes\\sub\\c.md', anchor: '某标题' } }, h.ctx))
+      .toEqual({ ok: true, relPath: 'sub/c.md', anchor: '#某标题' })
+    expect(await resolveHoverTargetTip({ directTarget: { fsPath: '' } }, h.ctx))
+      .toEqual({ ok: false })
+    // 直接目标不走文本解析（resolve 端口零调用）
+    expect(h.resolvedCalls).toEqual([])
+  })
+
+  it('多根工作区：路径相对其所属根（rootFsPath），文档在根子目录不改变口径', async () => {
+    // 文档在根的子目录 sub 内：docDir=sub，目标解析基准为 docDir，
+    // 但 relPath 计算基准恒为 rootFsPath（所属根）
+    const h = makeHarness(new Map([['D:\\notes\\sub\\目标.md', note('x')]]))
+    h.ctx.resolve.docDir = 'D:\\notes\\sub'
+    h.ctx.sourceFsPath = 'D:\\notes\\sub\\a.md'
+    const out = await resolveHoverTargetTip({ target: '目标' }, h.ctx)
+    expect(out).toEqual({ ok: true, relPath: 'sub/目标.md', anchor: '' })
+  })
+
+  it('无工作区单文件：rootFsPath 为文档目录，路径相对当前文件目录（纯计算——hasWorkspace 不参与提示解析）', async () => {
+    // 空磁盘 + 无工作区实条件：目标不在磁盘也照常显示（纯计算口径）
+    const empty = tipHarness(new Map())
+    empty.ctx.resolve.docDir = 'D:\\单文件夹'
+    empty.ctx.resolve.rootDir = 'D:\\单文件夹'
+    empty.ctx.resolve.hasWorkspace = false
+    empty.ctx.sourceFsPath = 'D:\\单文件夹\\a.md'
+    empty.ctx.rootFsPath = 'D:\\单文件夹'
+    expect(await resolveHoverTargetTip({ target: '目标' }, empty.ctx))
+      .toEqual({ ok: true, relPath: '目标.md', anchor: '' })
   })
 })

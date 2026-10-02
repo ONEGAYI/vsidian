@@ -150,6 +150,94 @@ describe('悬停开闭时序与请求载荷', () => {
   })
 })
 
+describe('悬停总开关门控（#298：hover.enabled 关闭时全域悬停不弹浮层）', () => {
+  /** 上下文带总开关关闭的装配（其余与 makeHarness 同款） */
+  function makeDisabledHarness() {
+    const sent: WebviewToHost[] = []
+    setHoverPreviewContext({
+      session: () => SESSION,
+      send: (message) => {
+        sent.push(message)
+      },
+      codeHighlight: () => true,
+      hoverPreviewEnabled: () => false,
+    })
+    const anchor = document.createElement('a')
+    anchor.className = 'vsidian-wikilink'
+    anchor.setAttribute('href', '目标笔记')
+    document.body.appendChild(anchor)
+    return { sent, anchor }
+  }
+
+  it('总开关关闭：进入链接不建待开计时——满开延迟后无浮层、无请求（前置拦截）', () => {
+    vi.useFakeTimers()
+    const h = makeDisabledHarness()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS * 3)
+    expect(isHoverPopupOpen()).toBe(false)
+    expect(popupEl()).toBeNull()
+    expect(h.sent).toEqual([])
+  })
+
+  it('总开关关闭：显式 spec 路径（Live 装饰/面板条目/补按 Ctrl 补触发共用入口）同样被拦', () => {
+    vi.useFakeTimers()
+    const h = makeDisabledHarness()
+    // 「悬停中补按 Ctrl」补触发与面板/Live 入口都经显式 spec 调用本入口
+    hoverPreviewAnchorEnter(h.anchor, {
+      target: '目标笔记', sourceStart: 0, sourceEnd: 4,
+      directFsPath: 'D:/notes/目标笔记.md',
+    })
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS * 3)
+    expect(isHoverPopupOpen()).toBe(false)
+    expect(h.sent).toEqual([])
+    // leave 路径安全（无计时无浮层可清理，不崩溃）
+    hoverPreviewAnchorLeave(h.anchor)
+    expect(isHoverPopupOpen()).toBe(false)
+  })
+
+  it('总开关关闭同拦键盘命令（#298 跟进扩权：命令执行但静默）；上下文未提供开关时缺省视为开', () => {
+    vi.useFakeTimers()
+    // #298 跟进（2026-10-02 用户裁定扩权）：「预览当前链接」键盘命令入口
+    // 一并被拦——命令执行但静默不弹浮层（与「无目标静默不误开」同形态）
+    const h = makeDisabledHarness()
+    openHoverPopupForKeyboard(h.anchor, { target: '目标笔记', sourceStart: 0, sourceEnd: 4 })
+    expect(isHoverPopupOpen(), '总开关关闭时键盘命令不得打开浮层').toBe(false)
+    expect(popupEl()).toBeNull()
+    expect(h.sent, '静默拦截零请求').toEqual([])
+    // 缺省契约：上下文未提供 hoverPreviewEnabled（旧装配/测试 fixture）视为开
+    const fallback = makeHarness()
+    hoverPreviewAnchorEnter(fallback.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    expect(isHoverPopupOpen(), '缺省视为开：悬停路径恢复').toBe(true)
+  })
+
+  it('总开关重新打开后恢复悬停路径（消失语义不变：门控只辖出现）', () => {
+    vi.useFakeTimers()
+    let enabled = false
+    const sent: WebviewToHost[] = []
+    setHoverPreviewContext({
+      session: () => SESSION,
+      send: (message) => {
+        sent.push(message)
+      },
+      codeHighlight: () => true,
+      hoverPreviewEnabled: () => enabled,
+    })
+    const anchor = document.createElement('a')
+    anchor.className = 'vsidian-wikilink'
+    anchor.setAttribute('href', '目标笔记')
+    document.body.appendChild(anchor)
+    hoverPreviewAnchorEnter(anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    expect(isHoverPopupOpen()).toBe(false)
+    enabled = true
+    hoverPreviewAnchorEnter(anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    expect(isHoverPopupOpen(), '重开后同一悬停入口恢复打开').toBe(true)
+    expect(sent.filter((m) => m.kind === 'hover.request')).toHaveLength(1)
+  })
+})
+
 describe('保活与单例', () => {
   it('移入浮层取消延迟关闭（可停留滚动/选择）；再离开才计时关闭', () => {
     vi.useFakeTimers()

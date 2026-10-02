@@ -33,7 +33,7 @@ import {
   type SettingsPayload,
   type WebviewToHost,
 } from '../shared/protocol'
-import type { HoverReadOutcome } from './hoverDocAccess'
+import type { HoverReadOutcome, HoverTargetTipOutcome } from './hoverDocAccess'
 import type { ImagePasteOutcome } from './imagePasteHost'
 import { mapChangeThroughChanges } from '../shared/changeMapping'
 import { NewlineCoordinator } from '../shared/newline'
@@ -79,6 +79,15 @@ export interface PanelPort {
     report: (result: HoverReadOutcome) => void,
   ): void
   readHoverSource?(fsPath: string): Promise<{ version: number; text: string } | null>
+  /** #299 跳转目标提示轻量解析（vscode 层注入：hoverDocAccess 的
+   *  resolveHoverTargetTip——路径解析与存在性探测，**不读正文**、不建
+   *  读取/租约链路）；report 回报 hover.target.resolved 载荷（成功携带
+   *  所属根内相对路径与源码形态锚点，失败仅 ok:false）。只读交互，
+   *  暂停态同样放行 */
+  resolveHoverTarget?(
+    payload: { target?: string; linkHref?: string; directTarget?: { fsPath: string; anchor?: string } },
+    report: (result: HoverTargetTipOutcome) => void,
+  ): void
   /** #10 图片资源解析（vscode 层注入：classifyImageTarget + asWebviewUri）。
    *  #220 起第二可选参 sourceDocUri：悬停浮层内 B 文档图片的来源上下文
    *  （vscode 层按 B 目录构造 LinkContext）；缺省 = 面板自身文档 */
@@ -543,6 +552,38 @@ export class DocumentSession {
           this.trimHoverSources(panel)
         }
         return Promise.resolve()
+      case 'hover.target.resolve': {
+        // #299 跳转目标提示轻量解析：会话守卫与其余请求同款（就绪且
+        // docUri 匹配才放行，否则静默丢弃）；解析执行经面板端口注入
+        // （resolveHoverTargetTip——只解析不读正文），结果回来源面板
+        //（reqId 配对）。只读交互：不进 edit.request 通道、不建
+        // hover.request/watch 的读取与租约链路，暂停态同样放行
+        if (!panel.ready || message.docUri !== this.docUri) {
+          return Promise.resolve()
+        }
+        const port = panel.port.resolveHoverTarget
+        if (!port) {
+          panel.port.send({ kind: 'hover.target.resolved', reqId: message.reqId, ok: false })
+          return Promise.resolve()
+        }
+        port(
+          {
+            ...(message.target !== undefined ? { target: message.target } : {}),
+            ...(message.linkHref !== undefined ? { linkHref: message.linkHref } : {}),
+            ...(message.directTarget !== undefined ? { directTarget: message.directTarget } : {}),
+          },
+          (result) => {
+            if (this.disposed || this.panels.get(sessionId) !== panel) return
+            panel.port.send(
+              result.ok
+                ? { kind: 'hover.target.resolved', reqId: message.reqId, ok: true, relPath: result.relPath,
+                    ...(result.anchor ? { anchor: result.anchor } : {}) }
+                : { kind: 'hover.target.resolved', reqId: message.reqId, ok: false },
+            )
+          },
+        )
+        return Promise.resolve()
+      }
       case 'hover.source.release':
         if (panel.ready && message.docUri === this.docUri && message.sessionId === sessionId) {
           const grant = panel.hoverLeaseGrants.get(message.sourceLeaseId)

@@ -56,6 +56,9 @@ import { RefContentInstance, type RefContentMount, type RefLoadedContent } from 
 import { createReadingContainer, READING_CLASS_NAMES } from './readingView'
 import type { ReadingViewStats } from './readingVirtualView'
 import { claimPopup, releasePopup } from './popupMutex'
+// #299 跳转目标提示联动：浮层打开路径收起提示（「浮层开则提示关」，
+// 含悬停中补按 Ctrl 的立即消失——不进互斥锁的行为面表达）
+import { closeTargetTip } from './targetTip'
 import { OPEN_ICON } from './embedCard'
 import { WIKILINK_CLASS_NAMES } from '../shared/wikilink'
 import {
@@ -169,6 +172,12 @@ export interface HoverPreviewContext {
   send(message: WebviewToHost): void
   /** #220 代码高亮开关（面板 codeCardConfig.highlight 的只读投影；缺省开） */
   codeHighlight?(): boolean
+  /** #298 悬停总开关（hover.enabled）的只读投影：false = 所有悬停路径
+   *  不开浮层（阅读正文/面板/Live 两路/补按 Ctrl 补触发，统一在本模块
+   *  hoverPreviewAnchorEnter 入口前置拦截）；#298 跟进（2026-10-02 用户
+   *  裁定扩权）「预览当前链接」键盘命令同辖——openHoverPopupForKeyboard
+   *  入口同门（命令执行但静默不弹浮层）；缺省（未提供）视为开 */
+  hoverPreviewEnabled?(): boolean
   /** #245 复用正文卡片管理器升级浮层内子引用，不创建第二个浮窗。 */
   mountEmbedChild?(parentInstanceId: string, block: HTMLElement, target: RefLoadedContent): void
   unmountEmbedChild?(block: HTMLElement): void
@@ -415,6 +424,7 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
   if (!context || !session?.sessionId || !session.docUri || spec === null) {
     return
   }
+  closeTargetTip() // #299 浮层打开：提示收起（键盘/显式入口兜底联动）
   closeHoverPopup()
   const container = document.createElement('div')
   container.className = HOVER_POPUP_CLASS_NAMES.popup
@@ -677,8 +687,13 @@ export function openHoverPopupFor(anchor: HTMLElement, spec: HoverPopupTargetSpe
 }
 
 /** #221 键盘命令入口（「预览当前链接」的手动打开）：记录触发处焦点，
- *  打开后焦点进入浮层；Esc 关闭后返还（body/脱树不返还） */
+ *  打开后焦点进入浮层；Esc 关闭后返还（body/脱树不返还）。#298 跟进
+ *  （2026-10-02 用户裁定扩权）：总开关关闭时本入口同拦——命令执行但
+ *  静默不弹浮层（与「无目标静默不误开」同形态），不弹任何提示 */
 export function openHoverPopupForKeyboard(anchor: HTMLElement, spec: HoverPopupTargetSpec): void {
+  if (context?.hoverPreviewEnabled?.() === false) {
+    return
+  }
   const prev = document.activeElement instanceof HTMLElement ? document.activeElement : null
   openPopup(anchor, spec, { keyboard: true, prevFocus: prev })
 }
@@ -688,8 +703,17 @@ export function openHoverPopupForKeyboard(anchor: HTMLElement, spec: HoverPopupT
  *  锚点先关旧再延迟开新。修 6（review 第二轮）：同一锚点已有 pendingOpen
  *  时不重建开设计时——嵌套行内标记链接（如 [**粗体**](x.md)）内跨子
  *  元素移动触发多次 mouseover（联合域内移动的 mouseout 被调用方过滤，
- *  无对应 leave），每次重建 300ms timer 会把浮层推迟到指针静止 */
+ *  无对应 leave），每次重建 300ms timer 会把浮层推迟到指针静止。
+ *  #298 总开关门控：hover.enabled 关闭时所有悬停路径（含补按 Ctrl 补
+ *  触发——其调用点同样收敛到本入口）前置拦截，不建待开计时不开浮层；
+ *  正文嵌入卡片不经本入口（常驻呈现不受总开关影响） */
 export function hoverPreviewAnchorEnter(anchor: HTMLElement, spec?: HoverPopupTargetSpec): void {
+  if (context?.hoverPreviewEnabled?.() === false) {
+    return
+  }
+  // #299 浮层将现：跳转目标提示立即收起（含悬停中补按 Ctrl 的补触发
+  // 路径——矩阵「补触发开 → 立即消失」，不等开延迟）
+  closeTargetTip()
   if (popup && popup.anchor === anchor) {
     cancelCloseTimer()
     return

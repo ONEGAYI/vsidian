@@ -189,6 +189,7 @@ vsidian/
         ├── tableRegionField.ts         # 表格格区选区状态单一事实源
         ├── tableRegionSelection.ts     # 表格格区拖选指针交互
         ├── tableStructure.ts           # 表格导航与增删行列纯函数（#13）
+        ├── targetTip.ts                # 跳转目标提示：浮层不将现时的目标位置浮标
         ├── taskToggle.ts               # 任务勾选解析纯函数（#9）
         ├── tooltipCard.css             # 悬停提示共享样式
         ├── tooltipCard.ts              # 悬停提示委托控制器

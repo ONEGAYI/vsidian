@@ -71,7 +71,10 @@ try {
   await page.addScriptTag({ path: bundle })
   await page.evaluate((text) => window.initEmbedDoc(text), PARENT_DOC)
   // 保留一期单层回归：新深度设置置 1，B 内引用显示有界深度卡片。
-  await page.evaluate(() => window.respondEmbed({ kind: 'settings.snapshot', values: { 'embed.maxDepth': 1 } }))
+  // #298 起本套件全程同时关闭悬停总开关（hover.enabled=false）：正文嵌入
+  // 是显式写进正文的结构、不经悬停入口——全套件照常挂载/装载/绘制即为
+  //「嵌入不受总开关影响」的端到端证据。
+  await page.evaluate(() => window.respondEmbed({ kind: 'settings.snapshot', values: { 'embed.maxDepth': 1, 'hover.enabled': false } }))
   await page.locator('.vsidian-view-reading .vsidian-embed-card').first().waitFor({ timeout: 5000 })
 
   const sent = () => page.evaluate(() => window.embedSent())
