@@ -89,3 +89,24 @@ describe('悬停提示几何（#300）', () => {
     expect(Number.isInteger(p.left)).toBe(true)
   })
 })
+
+describe('审查修复后的钳制兜底（#300 复核轮）', () => {
+  it('锚点滚出视口顶部：below 分支钳到顶部边距', () => {
+    // 锚点 top=-30（部分滚出），below top=-30+24+6=0 < 8 → 钳到 margin
+    const p = planTooltipPlacement({ anchor: anchorAt(300, -30), tip: TIP, viewport: VP })
+    expect(p.vertical).toBe('below')
+    expect(p.top).toBe(MARGIN)
+  })
+
+  it('锚点贴左缘且居中越左：start 翻转后仍越左，钳到左边距', () => {
+    // 锚点 left=0：center left=20-60=-40 越左 → 翻 start left=0 < 8 → 钳
+    const p = planTooltipPlacement({ anchor: anchorAt(0, 200, 40, 24), tip: TIP, viewport: VP })
+    expect(p.align).toBe('clamp')
+    expect(p.left).toBe(MARGIN)
+  })
+
+  it('锚点部分滚出左缘（负坐标）：start 后不出视口', () => {
+    const p = planTooltipPlacement({ anchor: anchorAt(-10, 200, 40, 24), tip: TIP, viewport: VP })
+    expect(p.left).toBeGreaterThanOrEqual(MARGIN)
+  })
+})

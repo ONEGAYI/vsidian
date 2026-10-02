@@ -2907,7 +2907,8 @@ export const STYLE_CONTRACT_ENTRIES: readonly StyleContractEntry[] = [
     example: '#app { --vsidian-tooltip-background: …; }',
     obsidian: { counterpart: '无（Obsidian tooltip 无公开定制接口）', support: 'none' },
     verification: [
-      '契约 check:stylecontract：变量定义于 #app 且被 .vsidian-tooltip 规则引用',
+      '单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用',
+      '浏览器 tooltipCard：计算样式非透明与主题类切换跟随',
     ],
     introduced: '#300（2026-10-02）',
   },
@@ -2923,7 +2924,8 @@ export const STYLE_CONTRACT_ENTRIES: readonly StyleContractEntry[] = [
     example: '#app { --vsidian-tooltip-foreground: …; }',
     obsidian: { counterpart: '无（Obsidian tooltip 无公开定制接口）', support: 'none' },
     verification: [
-      '契约 check:stylecontract：变量定义于 #app 且被 .vsidian-tooltip 规则引用',
+      '单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用',
+      '浏览器 tooltipCard：计算样式非透明与主题类切换跟随',
     ],
     introduced: '#300（2026-10-02）',
   },
@@ -2939,7 +2941,8 @@ export const STYLE_CONTRACT_ENTRIES: readonly StyleContractEntry[] = [
     example: '#app { --vsidian-tooltip-border: …; }',
     obsidian: { counterpart: '无（Obsidian tooltip 无公开定制接口）', support: 'none' },
     verification: [
-      '契约 check:stylecontract：变量定义于 #app 且被 .vsidian-tooltip 规则引用',
+      '单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用',
+      '浏览器 tooltipCard：计算样式非透明与主题类切换跟随',
     ],
     introduced: '#300（2026-10-02）',
   },
@@ -2955,7 +2958,8 @@ export const STYLE_CONTRACT_ENTRIES: readonly StyleContractEntry[] = [
     example: '#app { --vsidian-tooltip-radius: …; }',
     obsidian: { counterpart: '无（Obsidian tooltip 无公开定制接口）', support: 'none' },
     verification: [
-      '契约 check:stylecontract：变量定义于 #app 且被 .vsidian-tooltip 规则引用',
+      '单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用',
+      '浏览器 tooltipCard：计算样式非透明与主题类切换跟随',
     ],
     introduced: '#300（2026-10-02）',
   },
@@ -2971,7 +2975,8 @@ export const STYLE_CONTRACT_ENTRIES: readonly StyleContractEntry[] = [
     example: '#app { --vsidian-tooltip-font-size: …; }',
     obsidian: { counterpart: '无（Obsidian tooltip 无公开定制接口）', support: 'none' },
     verification: [
-      '契约 check:stylecontract：变量定义于 #app 且被 .vsidian-tooltip 规则引用',
+      '单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用',
+      '浏览器 tooltipCard：计算样式非透明与主题类切换跟随',
     ],
     introduced: '#300（2026-10-02）',
   },
@@ -2987,7 +2992,8 @@ export const STYLE_CONTRACT_ENTRIES: readonly StyleContractEntry[] = [
     example: '#app { --vsidian-tooltip-max-width: …; }',
     obsidian: { counterpart: '无（Obsidian tooltip 无公开定制接口）', support: 'none' },
     verification: [
-      '契约 check:stylecontract：变量定义于 #app 且被 .vsidian-tooltip 规则引用',
+      '单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用',
+      '浏览器 tooltipCard：计算样式非透明与主题类切换跟随',
     ],
     introduced: '#300（2026-10-02）',
   },
@@ -3003,7 +3009,8 @@ export const STYLE_CONTRACT_ENTRIES: readonly StyleContractEntry[] = [
     example: '#app { --vsidian-tooltip-key-background: …; }',
     obsidian: { counterpart: '无（Obsidian tooltip 无公开定制接口）', support: 'none' },
     verification: [
-      '契约 check:stylecontract：变量定义于 #app 且被 .vsidian-tooltip 规则引用',
+      '单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用',
+      '浏览器 tooltipCard：计算样式非透明与主题类切换跟随',
     ],
     introduced: '#300（2026-10-02）',
   },
@@ -3019,7 +3026,8 @@ export const STYLE_CONTRACT_ENTRIES: readonly StyleContractEntry[] = [
     example: '#app { --vsidian-tooltip-key-foreground: …; }',
     obsidian: { counterpart: '无（Obsidian tooltip 无公开定制接口）', support: 'none' },
     verification: [
-      '契约 check:stylecontract：变量定义于 #app 且被 .vsidian-tooltip 规则引用',
+      '单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用',
+      '浏览器 tooltipCard：计算样式非透明与主题类切换跟随',
     ],
     introduced: '#300（2026-10-02）',
   },
@@ -3035,7 +3043,8 @@ export const STYLE_CONTRACT_ENTRIES: readonly StyleContractEntry[] = [
     example: '#app { --vsidian-tooltip-show-delay: 300; }',
     obsidian: { counterpart: '无（Obsidian tooltip 无公开定制接口）', support: 'none' },
     verification: [
-      '单元 tooltipCard：延迟变量读取与缺省兜底',
+      '单元 tooltipCard：延迟来源（变量读取、非法回缺省、注入覆盖）',
+      '浏览器 tooltipCard：无注入装配走真实 CSS 变量路径',
     ],
     introduced: '#300（2026-10-02）',
   },

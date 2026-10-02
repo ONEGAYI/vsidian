@@ -33,6 +33,7 @@ import { Annotation, ChangeSet, Compartment, EditorSelection, EditorState, Prec,
 import { EditorView, ViewPlugin, keymap } from '@codemirror/view'
 import { isInlineFormatOp, planFormatOperation, planFormatOperationRanges } from './formatOperations'
 import { createQuickActionStateReader } from './quickActionState'
+import { TOOLTIP_KEYS_SEPARATOR } from './tooltipCard'
 import { FORMAT_OPERATIONS, isFormatOperationId, type FormatOperationId } from '../shared/formatOperations'
 import { getEffectiveBindings, type KeybindingOverrides } from '../shared/keybindings'
 import { KeybindingRouter } from './keybindingRouter'
@@ -4378,9 +4379,10 @@ export class WebviewSyncController {
     const addOperation = (target: HTMLElement, op: FormatOperationId): void => {
       const item = FORMAT_OPERATIONS.find((entry) => entry.id === op)!
       const el = button(op, 'vsidian-quick-action')
-      // #101：可访问名称与基名 title 经注册表登记（动态键 item.titleKey 走
-      // 键锚点）——操作条关闭时 refreshQuickActions 早退，此前 title 会滞留
-      // 旧语言；开启后 refreshQuickActions 以复合 title（基名+键位）覆写
+      // #101：可访问名称与基名悬停词经注册表登记（动态键 item.titleKey 走
+      // 键锚点，落 data-tooltip）——操作条关闭时 refreshQuickActions 早退，
+      // 此前悬停词会滞留旧语言；开启后 refreshQuickActions 以两段结构
+      // （data-tooltip 基名 + data-tooltip-keys 键位徽章，#300）覆写
       bindLocaleAttrs(el, item.titleKey)
       el.dataset['op'] = op
       el.addEventListener('click', () => this.runFormatOperation(op))
@@ -4575,7 +4577,7 @@ export class WebviewSyncController {
       // 徽章串，显示连接符由徽章样式承担）；aria 侧沿用 keySeparator 显示串
       el.setAttribute('data-tooltip', base)
       if (keys.length) {
-        el.setAttribute('data-tooltip-keys', keys.join('\n'))
+        el.setAttribute('data-tooltip-keys', keys.join(TOOLTIP_KEYS_SEPARATOR))
         el.setAttribute('aria-description', t('common.keybindingHint', { keys: joined }))
       } else {
         el.removeAttribute('data-tooltip-keys')
@@ -4599,9 +4601,9 @@ export class WebviewSyncController {
    *  localeDom 注册表单点完成——顶栏/操作条框架与按钮、查找面板、冲突
    *  横幅、侧栏骨架与大纲骨架不再在此逐项回查，data-group 锚点随之退役，
    *  data-op/data-heading-op 仅保留给 refreshQuickActions）。此处剩三类：
-   *  - 工具提示经 refreshQuickActions 重算：复合 title（基名+键位）随选区/
-   *    输入驱动，与换包重刷互补（操作条关闭时早退，基名 title 已由注册表
-   *    就地换词）；
+   *  - 悬停词经 refreshQuickActions 重算：data-tooltip 基名 + 键位徽章两
+   *    段随选区/输入驱动，与换包重刷互补（操作条关闭时早退，基名已由
+   *    注册表就地换词）；
    *  - 表格控件层 aria-label 的就地兜底：tableControls 的控件按钮每轮
    *    render 全量重建取词（探索笔记 101 §4.5），静止窗口只剩层 aria；
    *  - 按需控件（#101 第三部分）：代码卡片/图形按钮/公式降级/图片错误/

@@ -37,7 +37,9 @@ export function planTooltipPlacement(input: TooltipPlacementInput): TooltipPlace
   const { anchor, tip, viewport } = input
 
   // 垂直：下优先，放不下翻上；翻上越顶边距则钳进视口（tip 近视口高的
-  // 极端场景以「不出视口」为唯一不变量，标签如实保持翻转态）
+  // 极端场景以「不出视口」为唯一不变量，标签如实保持翻转态）。锚点滚出
+  // 视口顶部时 below 的 top 同样可能越顶边距，一并钳制（对齐先例
+  // hoverPopupGeometry 的「任何结果不溢出可用视口」承诺）
   let vertical: TooltipPlacement['vertical'] = 'below'
   let top = anchor.bottom + gap
   if (top + tip.height > viewport.height - margin) {
@@ -46,6 +48,8 @@ export function planTooltipPlacement(input: TooltipPlacementInput): TooltipPlace
     if (top < margin) {
       top = Math.max(margin, viewport.height - margin - tip.height)
     }
+  } else if (top < margin) {
+    top = margin
   }
 
   // 水平：居中优先 → 越缘侧翻转对齐 → 钳制（tip 宽于视口时左缘优先，
@@ -62,12 +66,16 @@ export function planTooltipPlacement(input: TooltipPlacementInput): TooltipPlace
       left = margin
     }
   } else if (left < margin) {
-    // 居中越出左缘：对称翻左对齐锚点
+    // 居中越出左缘：对称翻左对齐锚点；锚点本身贴/越左缘时 start 仍越左，
+    // 同样钳制（与 end 分支的兜底对称，任何结果不悬出视口）
     align = 'start'
     left = anchor.left
     if (left + tip.width > viewport.width - margin) {
       align = 'clamp'
       left = Math.max(margin, viewport.width - margin - tip.width)
+    } else if (left < margin) {
+      align = 'clamp'
+      left = margin
     }
   }
 

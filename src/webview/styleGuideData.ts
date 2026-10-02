@@ -4015,7 +4015,8 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "契约 check:stylecontract：变量定义于 #app 且被 .vsidian-tooltip 规则引用"
+      "单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用",
+      "浏览器 tooltipCard：计算样式非透明与主题类切换跟随"
     ],
     "introduced": "#300（2026-10-02）"
   },
@@ -4037,7 +4038,8 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "契约 check:stylecontract：变量定义于 #app 且被 .vsidian-tooltip 规则引用"
+      "单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用",
+      "浏览器 tooltipCard：计算样式非透明与主题类切换跟随"
     ],
     "introduced": "#300（2026-10-02）"
   },
@@ -4059,7 +4061,8 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "契约 check:stylecontract：变量定义于 #app 且被 .vsidian-tooltip 规则引用"
+      "单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用",
+      "浏览器 tooltipCard：计算样式非透明与主题类切换跟随"
     ],
     "introduced": "#300（2026-10-02）"
   },
@@ -4081,7 +4084,8 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "契约 check:stylecontract：变量定义于 #app 且被 .vsidian-tooltip 规则引用"
+      "单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用",
+      "浏览器 tooltipCard：计算样式非透明与主题类切换跟随"
     ],
     "introduced": "#300（2026-10-02）"
   },
@@ -4103,7 +4107,8 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "契约 check:stylecontract：变量定义于 #app 且被 .vsidian-tooltip 规则引用"
+      "单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用",
+      "浏览器 tooltipCard：计算样式非透明与主题类切换跟随"
     ],
     "introduced": "#300（2026-10-02）"
   },
@@ -4125,7 +4130,8 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "契约 check:stylecontract：变量定义于 #app 且被 .vsidian-tooltip 规则引用"
+      "单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用",
+      "浏览器 tooltipCard：计算样式非透明与主题类切换跟随"
     ],
     "introduced": "#300（2026-10-02）"
   },
@@ -4147,7 +4153,8 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "契约 check:stylecontract：变量定义于 #app 且被 .vsidian-tooltip 规则引用"
+      "单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用",
+      "浏览器 tooltipCard：计算样式非透明与主题类切换跟随"
     ],
     "introduced": "#300（2026-10-02）"
   },
@@ -4169,7 +4176,8 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "契约 check:stylecontract：变量定义于 #app 且被 .vsidian-tooltip 规则引用"
+      "单元 tooltipCssContract：变量定义于 #app 块且被 .vsidian-tooltip 规则引用",
+      "浏览器 tooltipCard：计算样式非透明与主题类切换跟随"
     ],
     "introduced": "#300（2026-10-02）"
   },
@@ -4191,7 +4199,8 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "support": "none"
     },
     "verification": [
-      "单元 tooltipCard：延迟变量读取与缺省兜底"
+      "单元 tooltipCard：延迟来源（变量读取、非法回缺省、注入覆盖）",
+      "浏览器 tooltipCard：无注入装配走真实 CSS 变量路径"
     ],
     "introduced": "#300（2026-10-02）"
   }

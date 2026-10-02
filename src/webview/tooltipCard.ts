@@ -75,11 +75,27 @@ export function installTooltipCard(options: TooltipCardOptions = {}): () => void
   ;(options.mountRoot ?? document.getElementById('app') ?? document.body).appendChild(container)
 
   let anchor: Element | null = null
+  // 延迟窗口内的最近候选（尚未 show）：mouseout 的联合区域判定用它，
+  // 候选控件内部子元素间穿越不重置出现计时
+  let pendingAnchor: Element | null = null
   let shown = false
   let timer: ReturnType<typeof setTimeout> | undefined
   // Esc 还焦的一次性抑制：focus() 同步派发 focusin，若不抑制会在收起
   // 同拍内被 onFocusIn 命中重新显示（真实浏览器同样复现）
   let suppressNextFocusIn = false
+  // 态变即时刷新（规格「行为规格」）：shown 态监听锚点的提示属性——
+  // 值更新即重渲染重定位，属性移除即收（查找输入修正后「无效正则」
+  // 不残留）
+  const attributeObserver = new MutationObserver(() => {
+    if (!shown || anchor === null) return
+    const value = anchor.getAttribute(TOOLTIP_ATTR)
+    if (value === null || value === '') {
+      hide()
+      return
+    }
+    render(anchor)
+    place()
+  })
 
   const clearTimer = (): void => {
     if (timer !== undefined) {
@@ -120,14 +136,21 @@ export function installTooltipCard(options: TooltipCardOptions = {}): () => void
   const show = (target: Element): void => {
     if (!render(target)) return
     anchor = target
+    pendingAnchor = null
     shown = true
     container.classList.add(TOOLTIP_CLASS_NAMES.shown)
     place()
+    attributeObserver.observe(target, {
+      attributes: true,
+      attributeFilter: [TOOLTIP_ATTR, TOOLTIP_KEYS_ATTR],
+    })
   }
 
   const hide = (): void => {
     clearTimer()
+    attributeObserver.disconnect()
     anchor = null
+    pendingAnchor = null
     shown = false
     container.classList.remove(TOOLTIP_CLASS_NAMES.shown)
     text.textContent = ''
@@ -141,6 +164,7 @@ export function installTooltipCard(options: TooltipCardOptions = {}): () => void
     if (target === null) return
     if (shown && target === anchor) return
     clearTimer()
+    pendingAnchor = target
     if (target.getAttribute(TOOLTIP_ATTR) === '') {
       // 态变清空语义（如查找输入恢复合法）：命中空提示即收
       hide()
@@ -154,9 +178,10 @@ export function installTooltipCard(options: TooltipCardOptions = {}): () => void
   }
 
   const onMouseOut = (event: MouseEvent): void => {
-    if (!shown && timer === undefined) return
-    const to = event.relatedTarget
-    if (inLiveRegion(to, anchor, container)) return
+    if (!shown && timer === undefined && pendingAnchor === null) return
+    // 联合区域以「当前锚点或延迟窗口内候选」为基准：候选控件内部子元素
+    // 间穿越（relatedTarget 仍在候选内）不收、不重置计时
+    if (inLiveRegion(event.relatedTarget, anchor ?? pendingAnchor, container)) return
     hide()
   }
 
@@ -179,10 +204,13 @@ export function installTooltipCard(options: TooltipCardOptions = {}): () => void
     hide()
   }
 
-  const onKeydown = (event: KeyboardEvent): void => {
-    // 仅提示自身持有焦点时接管 Esc（指针悬停态不与其他浮层的 Esc 链冲突）
+  const onKeydownCapture = (event: KeyboardEvent): void => {
+    // 提示自身持有焦点时优先消费 Esc（document 捕获：hoverPopup 等既有
+    // 浮层的捕获期 Esc 处理器 stopPropagation 不拦截同节点上的其他
+    // listener，本处理器仍可达；stopImmediatePropagation 反向避免提示
+    // 持焦时其他浮层再响应同一按键）
     if (event.key !== 'Escape' || document.activeElement !== container) return
-    event.stopPropagation()
+    event.stopImmediatePropagation()
     const returnFocus = anchor
     suppressNextFocusIn = true
     hide()
@@ -205,17 +233,18 @@ export function installTooltipCard(options: TooltipCardOptions = {}): () => void
   document.addEventListener('mouseout', onMouseOut)
   document.addEventListener('focusin', onFocusIn)
   document.addEventListener('focusout', onFocusOut)
-  container.addEventListener('keydown', onKeydown)
+  document.addEventListener('keydown', onKeydownCapture, true)
   window.addEventListener('resize', onResize)
   document.addEventListener('scroll', onScroll, true)
 
   return () => {
     clearTimer()
+    attributeObserver.disconnect()
     document.removeEventListener('mouseover', onMouseOver)
     document.removeEventListener('mouseout', onMouseOut)
     document.removeEventListener('focusin', onFocusIn)
     document.removeEventListener('focusout', onFocusOut)
-    container.removeEventListener('keydown', onKeydown)
+    document.removeEventListener('keydown', onKeydownCapture, true)
     window.removeEventListener('resize', onResize)
     document.removeEventListener('scroll', onScroll, true)
     container.remove()

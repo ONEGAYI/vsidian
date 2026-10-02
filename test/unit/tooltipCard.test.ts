@@ -153,3 +153,94 @@ describe('悬停提示委托控制器（#300）', () => {
     expect(document.querySelector(`.${TOOLTIP_CLASS_NAMES.card}`)).toBeNull()
   })
 })
+
+describe('悬停提示态变与延迟来源（#300 审查修复）', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+    document.body.innerHTML = ''
+  })
+
+  it('显示中属性被移除：即时收起（态变清空，不经指针离开）', async () => {
+    vi.useFakeTimers()
+    installTooltipCard({ showDelayMs: 0 })
+    const anchor = makeAnchor('无效正则')
+    mouseover(anchor)
+    vi.advanceTimersByTime(0)
+    expect(container().classList.contains(TOOLTIP_CLASS_NAMES.shown)).toBe(true)
+    anchor.removeAttribute(TOOLTIP_ATTR)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(container().classList.contains(TOOLTIP_CLASS_NAMES.shown)).toBe(false)
+  })
+
+  it('显示中属性值更新：即时重渲染新文案', async () => {
+    vi.useFakeTimers()
+    installTooltipCard({ showDelayMs: 0 })
+    const anchor = makeAnchor('旧原因')
+    mouseover(anchor)
+    vi.advanceTimersByTime(0)
+    anchor.setAttribute(TOOLTIP_ATTR, '新原因')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(container().querySelector(`.${TOOLTIP_CLASS_NAMES.text}`)!.textContent).toBe('新原因')
+    expect(container().classList.contains(TOOLTIP_CLASS_NAMES.shown)).toBe(true)
+  })
+
+  it('延迟窗口内同控件子元素间穿越：不重置计时', () => {
+    vi.useFakeTimers()
+    installTooltipCard({ showDelayMs: 300 })
+    const anchor = document.createElement('button')
+    anchor.setAttribute(TOOLTIP_ATTR, '加粗')
+    const icon = document.createElement('span')
+    anchor.appendChild(icon)
+    document.body.appendChild(anchor)
+    mouseover(anchor)
+    // 文字 → 图标 span：同候选内部穿越，计时不清
+    mouseout(anchor, icon)
+    vi.advanceTimersByTime(299)
+    expect(container().classList.contains(TOOLTIP_CLASS_NAMES.shown)).toBe(false)
+    vi.advanceTimersByTime(1)
+    expect(container().classList.contains(TOOLTIP_CLASS_NAMES.shown)).toBe(true)
+    void icon
+  })
+
+  it('延迟来源：优先读变量计算值，非法值回缺省 300', () => {
+    vi.useFakeTimers()
+    const spy = vi.spyOn(window, 'getComputedStyle').mockReturnValue({
+      getPropertyValue: (name: string) =>
+        name === '--vsidian-tooltip-show-delay' ? 'not-a-number' : '',
+    } as unknown as CSSStyleDeclaration)
+    installTooltipCard()
+    const anchor = makeAnchor('加粗')
+    mouseover(anchor)
+    vi.advanceTimersByTime(299)
+    expect(container().classList.contains(TOOLTIP_CLASS_NAMES.shown)).toBe(false)
+    vi.advanceTimersByTime(1)
+    expect(container().classList.contains(TOOLTIP_CLASS_NAMES.shown)).toBe(true)
+    expect(spy).toHaveBeenCalled()
+  })
+
+  it('持焦提示的 Esc 上 document 捕获消费：先行 stopPropagation 的浮层链不遮蔽', () => {
+    vi.useFakeTimers()
+    installTooltipCard({ showDelayMs: 0 })
+    const anchor = makeAnchor('导出')
+    mouseover(anchor)
+    vi.advanceTimersByTime(0)
+    const card = container()
+    card.focus()
+    // 模拟 hoverPopup 型既有浮层：document 捕获期先处理 Esc 并 stopPropagation
+    const popup = document.createElement('div')
+    document.body.appendChild(popup)
+    const earlierCapture = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') event.stopPropagation()
+    }
+    document.addEventListener('keydown', earlierCapture, true)
+    try {
+      card.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      expect(card.classList.contains(TOOLTIP_CLASS_NAMES.shown)).toBe(false)
+      expect(document.activeElement).toBe(anchor)
+    } finally {
+      document.removeEventListener('keydown', earlierCapture, true)
+      popup.remove()
+    }
+  })
+})

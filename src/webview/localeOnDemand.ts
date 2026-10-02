@@ -10,7 +10,7 @@
 //
 // 新增按需控件接入清单：
 // 1. 创建侧（widget toDOM / 状态机转换）用稳定类名或 data 属性标记控件；
-// 2. 此处补一段扫描重写（title/aria-label 取 t()，选择器引创建侧常量）；
+// 2. 此处补一段扫描重写（data-tooltip/aria-label 取 t()，选择器引创建侧常量）；
 // 3. localeRefreshContract.test.ts 的按需控件用例补对应断言。
 // tableControls 不在此列：控件按钮每轮 render 全量重建取词，静止窗口
 // 只剩层 aria-label，由 applyEditorLocale 兜底（探索笔记 §4.5）。
@@ -40,7 +40,8 @@ function rewriteButtonLocale(
 }
 
 /** 换包后就地重刷已物化按需控件的固化文案（#101）：按钮类控件重写
- *  title/aria-label，mermaid 错误占位经重渲染换词 */
+ *  data-tooltip/aria-label（#300 起悬停词承载于 data-tooltip），mermaid
+ *  错误占位经重渲染换词 */
 export function refreshOnDemandControlLocale(root: ParentNode): void {
   // 代码卡片复制按钮（buildCopyButton，live 头部与阅读卡片共用 builder：
   // document 级扫描同时覆盖两视图已挂载块）

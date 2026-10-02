@@ -22,11 +22,17 @@ function walk(dir: string, out: string[] = []): string[] {
   return out
 }
 
-/** 禁令形态：DOM 悬停 title 的三种写入 */
+/** 禁令形态：DOM 悬停 title 的写入（主流传导 + 低成本无意形态；经辅助
+ *  函数透传、Object.assign 等间接通道不在此列——防的是顺手回潮，不是
+ *  对抗性规避，发现即人工处置） */
 const BANS: readonly { name: string; pattern: RegExp }[] = [
   { name: '属性赋值 .title =', pattern: /(?<![\w$.])\w+\.title\s*=[^=]/ },
+  { name: '属性赋值 .title =（行尾续行）', pattern: /\.title\s*=\s*$/ },
+  { name: '方括号成员赋值 ["title"] =', pattern: /\[\s*(['"])title\1\s*\]\s*=[^=]/ },
   { name: "setAttribute('title')", pattern: /setAttribute\(\s*(['"])title\1/ },
   { name: '模板内联 title="', pattern: /\stitle=\\"/ },
+  { name: "模板内联 title='", pattern: /\stitle='/ },
+  { name: '模板内联无引号插值 title=${', pattern: /\stitle=\$\{/ },
 ]
 
 describe('悬停词防回潮（#300：原生 title 退役）', () => {
