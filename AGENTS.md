@@ -19,6 +19,7 @@ VSCode 扩展：在 VSCode 中提供类 Obsidian 的 Markdown 编辑体验。
 - **可读行宽与双模式列布局约定（#174/#175 落档）**：修改双模式正文限宽、列居中、Live 行号列跟随、可读行宽设置，或触及 `--file-line-width` / `--vsidian-reading-max-width` / `--vsidian-live-preview-max-width` 变量前，必读 [docs/specs/viewport-width.md](docs/specs/viewport-width.md) 的「实施落档」节——双变量 #app 层同写、0 = 铺满零干预、设置与片段优先序、铺满态零位移与 #32 行号契约修订均在其中。
 - **工作区引用索引扩展约定（#194–#202 落档）**：修改索引调度、排除语义、rename 通道、图片失效通道或快照格式前，必读 [docs/specs/vault-index-backlinks.md](docs/specs/vault-index-backlinks.md)——各票实施落档（#198 调度与排除、#199/#200 rename 双通道、#201 图片三层失效、#202 收口）、「已知边界」与「明确不包含」清单在其中；台账外边界不得顺手改。
 - **统一右键菜单扩展约定（2026-09 菜单批次落档）**：新增或修改右键菜单项、簇、子菜单、覆写行为、安全降级矩阵或菜单图标接线前，必读 [docs/specs/context-menu.md](docs/specs/context-menu.md) 的「扩展约定（落档）」节——菜单项注册表与图标 key 表的两表同步、三步接入清单与「既有边界不得顺手放宽」清单（阅读/头区不接管、内置只隐藏不删、提示列只派生自键位注册表）均在其中。
+- **悬停提示扩展约定（#300 落档）**：新增或修改悬停提示（新控件、新浮层内按钮、键位徽章）前，必读 [docs/specs/tooltip.md](docs/specs/tooltip.md) 的「接管机制」节——悬停词唯一承载属性是 `data-tooltip`（原生 title 已退役，防回潮扫描拦截），文案经 `bindLocale` 家族或动态写属性，带快捷键的操作走 `data-tooltip-keys` 结构化键位徽章（内部 `\n` 分隔、不做文字缀尾），观感与出现延迟经 `--vsidian-tooltip-*` 公开变量（styleContract tooltip 类目）。
 - **用户可见文字一律 i18n**：所有面向用户的文字（webview 界面、设置页、宿主通知/确认框、package.json command title 与 displayName/description）必须经 `src/shared/locales/` 语言包与 `t()` 字典映射添加，禁止新增硬编码中/英文字面量；两语言包键集由编译期 parity 把关，回潮由 CI 防回潮扫描（源码 CJK 字面量契约测试）拦截。manifest 侧 `package.nls.*.json` 由构建脚本从字典生成，不在 JSON 里手写。
 
 ## 公开样式契约：Agent 修改约束（项目技能 style-contract）

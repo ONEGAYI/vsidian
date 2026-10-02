@@ -4571,9 +4571,16 @@ export class WebviewSyncController {
       const keys = bindings.map((key) => key.split('+').map((part) =>
         part.length === 1 ? part.toUpperCase() : part[0]!.toUpperCase() + part.slice(1)).join('+'))
       const joined = keys.join(t('common.keySeparator'))
-      el.title = keys.length ? `${base} (${joined})` : base
-      if (keys.length) el.setAttribute('aria-description', t('common.keybindingHint', { keys: joined }))
-      else el.removeAttribute('aria-description')
+      // #300 悬停词两段结构：名称与键位徽章分离（键位段为内部 \n 分隔的
+      // 徽章串，显示连接符由徽章样式承担）；aria 侧沿用 keySeparator 显示串
+      el.setAttribute('data-tooltip', base)
+      if (keys.length) {
+        el.setAttribute('data-tooltip-keys', keys.join('\n'))
+        el.setAttribute('aria-description', t('common.keybindingHint', { keys: joined }))
+      } else {
+        el.removeAttribute('data-tooltip-keys')
+        el.removeAttribute('aria-description')
+      }
     }
     const headingOptions = [...bar.querySelectorAll<HTMLElement>('[data-heading-op]')]
     this.quickHeadingBtn!.disabled = !editable || headingOptions.every((item) =>
@@ -7680,12 +7687,13 @@ export class WebviewSyncController {
       this.findCountEl.classList.toggle(
         FIND_CLASS_NAMES.countHidden, this.findQuery === '')
     }
-    // 非法正则可见反馈：输入框红边 + title 提示（不崩、计数显示「无结果」）；
-    // 空查询不算非法（未搜索，不给红边）
+    // 非法正则可见反馈：输入框红边 + 悬停提示（不崩、计数显示「无结果」）；
+    // 空查询不算非法（未搜索，不给红边）。#300 起悬停词承载于 data-tooltip
     const invalid = this.findOpen && this.findQuery !== '' && !this.findValid
     if (this.findInputEl) {
       this.findInputEl.classList.toggle(FIND_CLASS_NAMES.inputInvalid, invalid)
-      this.findInputEl.title = invalid ? t('find.invalid') : ''
+      if (invalid) this.findInputEl.setAttribute('data-tooltip', t('find.invalid'))
+      else this.findInputEl.removeAttribute('data-tooltip')
     }
     // 三开关按钮态：active 类与 aria-pressed 同步表示「选项开启」
     const syncToggle = (

@@ -53,7 +53,7 @@ describe('阅读 frontmatter 卡片折叠', () => {
     if (!fold) throw new Error('折叠 chevron 不在场')
     expect(fold.classList.contains('vsidian-fm-fold-collapsed')).toBe(false)
     expect(fold.getAttribute('aria-expanded')).toBe('true')
-    expect(fold.title).toContain('折叠')
+    expect(fold.getAttribute('data-tooltip')).toContain('折叠')
     expect(block.querySelector('.vsidian-fm-table')?.classList.contains('vsidian-fm-folded'))
       .toBe(false)
     expect(block.querySelectorAll('.vsidian-fm-row')).toHaveLength(2)
@@ -67,7 +67,7 @@ describe('阅读 frontmatter 卡片折叠', () => {
     const fold = block.querySelector<HTMLButtonElement>('.vsidian-fm-fold')!
     expect(fold.classList.contains('vsidian-fm-fold-collapsed')).toBe(true)
     expect(fold.getAttribute('aria-expanded')).toBe('false')
-    expect(fold.title).toContain('展开')
+    expect(fold.getAttribute('data-tooltip')).toContain('展开')
   })
 
   it('点 chevron 触发切换回调；点标题栏空白热区同样触发；无表格或无标题栏时不触碰', () => {

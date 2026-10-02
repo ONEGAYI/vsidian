@@ -226,7 +226,8 @@ export class LiveImageWidget extends WidgetType {
     }
     span.dataset['vsidianImgState'] = 'loading'
     span.classList.add(IMAGE_CLASS_NAMES.state('loading'))
-    span.title = this.alt
+    span.setAttribute('data-tooltip', this.alt)
+
     span.textContent = this.alt
     this.images?.attach(span, this.src, (slot, src) => {
       slot.textContent = ''

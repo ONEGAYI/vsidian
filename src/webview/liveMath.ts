@@ -80,7 +80,8 @@ export class LiveMathWidget extends WidgetType {
     const html = renderMathHtml(this.tex, this.displayMode)
     if (html === null) {
       span.className = MATH_CLASS_NAMES.mathError
-      span.title = t('decor.mathError')
+      span.setAttribute('data-tooltip', t('decor.mathError'))
+
       span.textContent = this.displayMode ? `$$${this.tex}$$` : `$${this.tex}$`
       return span
     }

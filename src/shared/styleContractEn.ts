@@ -1163,6 +1163,63 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
     dom: 'Inside #app but outside the reading scroll container. An aside[role=region] contains a header with source-hit, source line/column and read-only labels, followed by pre > code with precise span highlights. No input, textarea, contenteditable or new keyboard action; existing find navigation and close keys apply.',
     obsidian: { counterpart: 'None (Vsidian reading find source feedback)' },
   },
+
+  // ---- 悬停提示（tooltip，#300：统一自绘悬停提示，原生 title 退役）----
+  'tooltip-card': {
+    purpose: 'The unified self-drawn hover hint card (#300): every hover hint in the editor and settings webviews (operation names, user-content literals like raw TeX or image alt, disabled-state reasons, and keybinding badges). A document-level delegate listens on [data-tooltip] — the native title attribute is retired fleet-wide and a contract scan blocks regressions. Appears after the --vsidian-tooltip-show-delay on hover and immediately on keyboard focus; focusable (tabindex=0) with selectable, copyable text; no buttons or interactive logic. Fixed positioning goes through tooltipGeometry (below-first with above flip, horizontal edge flips, viewport clamping) at z-index 10500, above modals so buttons inside popups keep hints; it never claims the popup mutex — visibility is purely pointer/focus driven. The settings webview shares the same mechanism and class names.',
+    dom: 'Appended to #app (falling back to body); a persistent singleton whose shown modifier class drives visibility.',
+    obsidian: { counterpart: 'None (Obsidian tooltips expose no customization interface)' },
+  },
+  'tooltip-key': {
+    purpose: 'A keybinding badge inside the hover hint (#300): operations with shortcuts split into a two-part hint — the name travels in data-tooltip and the keys in data-tooltip-keys (internally \\n-separated), one badge per chord segment. The display connector is the badge form itself, not the common.keySeparator text join.',
+    dom: 'Direct children of the .vsidian-tooltip-keys area inside .vsidian-tooltip (an internal layout shell, not a public entry).',
+    obsidian: { counterpart: 'None (Obsidian tooltips expose no customization interface)' },
+  },
+  'var-tooltip-background': {
+    purpose: 'The hover hint card background (#300): defaults to the host --vscode-editorHoverWidget-background — light text on a dark card in dark themes and the inverse in light themes, adapting in step with native host hovers. A public variable overridable by CSS snippets.',
+    dom: 'Defined on #app (the same-named container in both the editor and settings webviews).',
+    obsidian: { counterpart: 'None (Obsidian tooltips expose no customization interface)' },
+  },
+  'var-tooltip-foreground': {
+    purpose: 'The hover hint text foreground (#300): defaults to the host editorHover foreground, adapting across themes. A public variable overridable by CSS snippets.',
+    dom: 'Defined on #app (the same-named container in both the editor and settings webviews).',
+    obsidian: { counterpart: 'None (Obsidian tooltips expose no customization interface)' },
+  },
+  'var-tooltip-border': {
+    purpose: 'The hover hint border (#300): defaults to the host editorHover border — a hairline in light themes, nearly none in dark ones, strengthened automatically in high-contrast themes. A public variable overridable by CSS snippets.',
+    dom: 'Defined on #app (the same-named container in both the editor and settings webviews).',
+    obsidian: { counterpart: 'None (Obsidian tooltips expose no customization interface)' },
+  },
+  'var-tooltip-radius': {
+    purpose: 'The hover hint corner radius (#300). A public variable overridable by CSS snippets.',
+    dom: 'Defined on #app (the same-named container in both the editor and settings webviews).',
+    obsidian: { counterpart: 'None (Obsidian tooltips expose no customization interface)' },
+  },
+  'var-tooltip-font-size': {
+    purpose: 'The hover hint font size (#300). A public variable overridable by CSS snippets.',
+    dom: 'Defined on #app (the same-named container in both the editor and settings webviews).',
+    obsidian: { counterpart: 'None (Obsidian tooltips expose no customization interface)' },
+  },
+  'var-tooltip-max-width': {
+    purpose: 'The hover hint max width (#300): longer copy such as error reasons wraps past this bound. A public variable overridable by CSS snippets.',
+    dom: 'Defined on #app (the same-named container in both the editor and settings webviews).',
+    obsidian: { counterpart: 'None (Obsidian tooltips expose no customization interface)' },
+  },
+  'var-tooltip-key-background': {
+    purpose: 'The keybinding badge background (#300): defaults to the host editorHover status-bar tint. A public variable overridable by CSS snippets.',
+    dom: 'Defined on #app (the same-named container in both the editor and settings webviews).',
+    obsidian: { counterpart: 'None (Obsidian tooltips expose no customization interface)' },
+  },
+  'var-tooltip-key-foreground': {
+    purpose: 'The keybinding badge foreground (#300): defaults to the host description foreground. A public variable overridable by CSS snippets.',
+    dom: 'Defined on #app (the same-named container in both the editor and settings webviews).',
+    obsidian: { counterpart: 'None (Obsidian tooltips expose no customization interface)' },
+  },
+  'var-tooltip-show-delay': {
+    purpose: 'The hover hint show delay in unitless milliseconds (#300): the controller reads it via getComputedStyle; published as a behavioral variable so snippets can tune the pacing.',
+    dom: 'Defined on #app (the same-named container in both the editor and settings webviews).',
+    obsidian: { counterpart: 'None (Obsidian tooltips expose no customization interface)' },
+  },
 }
 
 /**

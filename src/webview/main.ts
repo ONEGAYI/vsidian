@@ -8,6 +8,7 @@ import { keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
 import { WebviewSyncController } from './syncController'
 import { bootLocaleFromDocument, handleLocaleChangedMessage } from './localeBoot'
+import { installTooltipCard } from './tooltipCard'
 import './main.css'
 // #59 KaTeX 基础样式：esbuild 合并进 main.css，字体（仅 woff2）经 CSS url()
 // 产物化到 out/webview/assets/（CSP font-src 已放行 cspSource 域）
@@ -23,6 +24,10 @@ declare function acquireVsCodeApi(): {
 bootLocaleFromDocument()
 
 const vscode = acquireVsCodeApi()
+
+// #300 统一自绘悬停提示：document 级委托监听 [data-tooltip]，独立于
+// 控制器生命周期（webview 存续期常驻）
+installTooltipCard()
 
 const controller = new WebviewSyncController({
   postMessage: (message) => vscode.postMessage(message),

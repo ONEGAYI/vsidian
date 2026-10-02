@@ -6,8 +6,9 @@
 // - 回调 bindLocaleFn(el, 目标, resolve)：覆盖动态键（FORMAT_OPERATIONS 的
 //   titleKey）与复合/状态相关文案（侧栏开合的可访问名称）；
 // - 双目标便捷形 bindLocaleAttrs / bindLocaleFnAttrs：图标按钮的通用口径
-//   ——可访问名称（aria-label）与悬停提示（title）同词，一次调用登记两个
-//   目标，收敛成对的两次单目标登记；
+//   ——可访问名称（aria-label）与悬停提示（title 入参，经 writeTo 映射落
+//   为 data-tooltip，#300）同词，一次调用登记两个目标，收敛成对的两次
+//   单目标登记；
 // - 目标是属性名（'aria-label' / 'title' / 'placeholder' / …）或特指
 //   textContent 的 'text'。
 //
@@ -51,7 +52,9 @@ function writeTo(el: Element, target: LocaleTarget, value: string): void {
   if (target === 'text') {
     el.textContent = value
   } else {
-    el.setAttribute(target, value)
+    // 'title' 入参映射为 data-tooltip（#300 起悬停词退役原生 title——属性
+    // 在场时浏览器气泡无法阻止，自绘接管必须退役；调用方 API 面零改动）
+    el.setAttribute(target === 'title' ? 'data-tooltip' : target, value)
   }
 }
 

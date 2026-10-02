@@ -1,5 +1,5 @@
 // 按需控件文案的 DOM 级就地重刷（#101 第三部分）：CM6 widget 与资源
-// 状态机固化的 title/aria-label 生命周期归装饰系统——换包触发的装饰
+// 状态机固化的 data-tooltip/aria-label 生命周期归装饰系统——换包触发的装饰
 // 重算被按内容寻址的实例缓存 eq 短路，已物化 DOM 不重建（探索笔记 101
 // §4.6，空事务 dispatch 路线已否定）——故不经 localeDom 注册表登记，
 // 改由换包时按稳定类名 / data 属性扫描已物化控件就地改写
@@ -23,9 +23,10 @@ import { DIAGRAM_POPUP_CLASS_NAMES } from './diagramPopup'
 import { MATH_CLASS_NAMES } from '../shared/math'
 import { refreshMermaidErrorLocale } from './mermaidRender'
 
-/** 按钮类控件的双写共用段：选择器命中集就地重写 aria-label 与 title 同词
+/** 按钮类控件的双写共用段：选择器命中集就地重写 aria-label 与悬停词
  *  ——物化控件侧与常驻侧 bindLocaleAttrs 同一口径（fold 段的逐元素条件
- *  键经 labelOf(el) 承载） */
+ *  键经 labelOf(el) 承载）；悬停词承载属性为 data-tooltip（#300 起
+ *  原生 title 退役，与 localeDom 映射同口径） */
 function rewriteButtonLocale(
   root: ParentNode,
   selector: string,
@@ -34,7 +35,7 @@ function rewriteButtonLocale(
   for (const el of root.querySelectorAll<HTMLElement>(selector)) {
     const label = labelOf(el)
     el.setAttribute('aria-label', label)
-    el.title = label
+    el.setAttribute('data-tooltip', label)
   }
 }
 
@@ -66,20 +67,20 @@ export function refreshOnDemandControlLocale(root: ParentNode): void {
   // 图形化块按钮组（buildGraphicChrome）：edit（仅实时预览装配）与 popup
   rewriteButtonLocale(root, `.${GRAPHIC_CHROME_CLASS_NAMES.edit}`, () => t('graphic.editSource'))
   rewriteButtonLocale(root, `.${GRAPHIC_CHROME_CLASS_NAMES.popup}`, () => t('graphic.popup'))
-  // 公式降级 span 的 title（LiveMathWidget.toDOM 失败分支；成功态是
+  // 公式降级 span 的悬停词（LiveMathWidget.toDOM 失败分支；成功态是
   // KaTeX 排版，无本地化文案）
   for (const el of root.querySelectorAll<HTMLElement>(`.${MATH_CLASS_NAMES.mathError}`)) {
-    el.title = t('decor.mathError')
+    el.setAttribute('data-tooltip', t('decor.mathError'))
   }
-  // 图片错误态 title（imageResource.setSlotState 的 error 分支固化）：
+  // 图片错误态悬停词（imageResource.setSlotState 的 error 分支固化）：
   // reason 原文存于 data-vsidian-img-reason（缺失/unknown 回退
   // decor.unknownReason），据此重建插值。宿主 slot（live widget 容器与
   // 阅读 img）同带该 data 属性，一并覆盖
   for (const el of root.querySelectorAll<HTMLElement>('[data-vsidian-img-state="error"]')) {
     const reason = el.dataset['vsidianImgReason']
-    el.title = t('decor.imageError', {
+    el.setAttribute('data-tooltip', t('decor.imageError', {
       reason: reason && reason !== 'unknown' ? reason : t('decor.unknownReason'),
-    })
+    }))
   }
   // 表格空格占位 widget（EmptyTableCellWidget.toDOM 固化 aria-label）：
   // 装饰是模块级单例实例（eq 恒成立），物化 DOM 不随换包重建；标记类

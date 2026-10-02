@@ -384,7 +384,8 @@ export class KeybindingSettingsSection implements SettingsPageSection {
     const keyToggle = el('button', 'vsidian-keybindings-key-toggle') as HTMLButtonElement
     keyToggle.type = 'button'
     keyToggle.append(icon(KEYBOARD_ICON_PATH))
-    keyToggle.title = t('keybindingSettings.keySearchToggle')
+    keyToggle.setAttribute('data-tooltip', t('keybindingSettings.keySearchToggle'))
+
     keyToggle.setAttribute('aria-label', t('keybindingSettings.keySearchToggle'))
     keyToggle.setAttribute('aria-pressed', String(this.searchMode === 'key'))
     if (this.searchMode === 'key') keyToggle.classList.add('is-active')

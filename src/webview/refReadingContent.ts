@@ -184,7 +184,8 @@ function applyFmCollapsedTo(section: HTMLElement, expanded: boolean): void {
     btn.setAttribute('aria-expanded', String(expanded))
     const label = expanded ? t('hover.content.fmCollapse') : t('hover.content.fmExpand')
     btn.setAttribute('aria-label', label)
-    btn.title = label
+    btn.setAttribute('data-tooltip', label)
+
   }
 }
 

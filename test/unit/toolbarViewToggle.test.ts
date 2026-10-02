@@ -115,10 +115,10 @@ describe('工具栏双态视图切换按钮（#141）', () => {
     const { c, parent } = setup()
     const btn = parent.querySelector<HTMLButtonElement>('.vsidian-view-toggle')!
     expect(btn.getAttribute('aria-label')).toBe(zhCn['toolbar.switchToReading'])
-    expect(btn.getAttribute('title')).toBe(zhCn['toolbar.switchToReading'])
+    expect(btn.getAttribute('data-tooltip')).toBe(zhCn['toolbar.switchToReading'])
     c.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
     expect(btn.getAttribute('aria-label')).toBe(zhCn['toolbar.switchToLive'])
-    expect(btn.getAttribute('title')).toBe(zhCn['toolbar.switchToLive'])
+    expect(btn.getAttribute('data-tooltip')).toBe(zhCn['toolbar.switchToLive'])
     c.dispose()
     parent.remove()
   })

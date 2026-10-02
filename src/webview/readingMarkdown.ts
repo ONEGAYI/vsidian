@@ -98,7 +98,7 @@ function installMathRenderers(md: InstanceType<typeof MarkdownIt>): void {
     const html = renderMathHtml(content, displayMode)
     return html !== null
       ? `<span class="${MATH_CLASS_NAMES.math}">${html}</span>`
-      : `<span class="${MATH_CLASS_NAMES.mathError}" title="${escapeHtml(tex)}">${escapeHtml(`$${tex}$`)}</span>`
+      : `<span class="${MATH_CLASS_NAMES.mathError}" data-tooltip="${escapeHtml(tex)}">${escapeHtml(`$${tex}$`)}</span>`
   }
   const block = (tokens: Token[], idx: number): string => {
     const tex = tokens[idx]!.content
