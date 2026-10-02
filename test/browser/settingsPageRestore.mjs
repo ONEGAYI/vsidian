@@ -66,24 +66,28 @@ try {
   assert.ok(scrolled > 0, '编辑器分页内容应可滚动（否则恢复断言无意义）')
   await page.waitForFunction(() =>
     window.sentMessages.some((m) => m.kind === 'settings.uiState' && m.section === 'editor' && m.scrollTop > 0))
-  assert.equal((await uiStates()).at(-1).scrollTop, scrolled, '滚动事件应上报实际滚动位置')
+  // 上报值经 Math.round 取整（协议守卫只收非负整数），与原始 readback 的
+  // 比对须在取整后进行——分数缩放环境下 readback 可为小数，精确比对原值
+  // 会 flake
+  assert.equal((await uiStates()).at(-1).scrollTop, Math.round(scrolled), '滚动事件应上报取整后的滚动位置')
 
   // ---- 重载（= 面板关闭重开/隐藏释放后的 webview 重建）：假宿主按记忆
   // 补发恢复定位（与宿主实现同形态：settings.get 应答后 focusSection 带 scroll）----
   await loadSettingsPage([{ kind: 'settings.focusSection', section: 'editor', scroll: scrolled }])
   await page.locator('.vsidian-settings-nav-item').first().waitFor()
-  // 恢复布局层断言：渲染「编辑器」分页且主区滚动回到记忆值
+  // 恢复布局层断言：渲染「编辑器」分页且主区滚动回到记忆值（回放值=应用
+  // 值=读回值，链路自洽，不经取整）
   await page.getByRole('heading', { name: zhCn['settings.editorCategory'] }).waitFor()
   await page.waitForFunction((expected) =>
     document.querySelector('.vsidian-settings-main').scrollTop === expected, scrolled)
   assert.equal(await mainEl().evaluate((el) => el.scrollTop), scrolled, '重载后滚动应恢复到记忆位置')
   // 恢复应用后的上报闭环：切页（render）与滚动恢复（scroll 事件）均上报，
-  // 宿主记忆收敛到 {editor, 恢复值}
+  // 宿主记忆收敛到 {editor, 恢复值}（上报侧取整后比对，理由同上）
   await page.waitForFunction((expected) => {
     const states = window.sentMessages.filter((m) => m.kind === 'settings.uiState')
     const last = states.at(-1)
     return last && last.section === 'editor' && last.scrollTop === expected
-  }, scrolled)
+  }, Math.round(scrolled))
   assert.deepEqual(errors, [], '页面不得有未捕获错误')
 } finally {
   await browser.close()
