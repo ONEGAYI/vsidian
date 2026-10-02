@@ -194,9 +194,13 @@ describe('悬停提示态变与延迟来源（#300 审查修复）', () => {
     anchor.appendChild(icon)
     document.body.appendChild(anchor)
     mouseover(anchor)
-    // 文字 → 图标 span：同候选内部穿越，计时不清
+    // 计时行进至中段再派发真实成对事件（文字 → 图标 span）：同候选
+    // 重入须短路、deadline 保持 t=300——穿越若误重置，deadline 变
+    // t=450，t=300 的现身断言即红（本用例对修复有判别力）
+    vi.advanceTimersByTime(150)
     mouseout(anchor, icon)
-    vi.advanceTimersByTime(299)
+    mouseover(icon)
+    vi.advanceTimersByTime(149)
     expect(container().classList.contains(TOOLTIP_CLASS_NAMES.shown)).toBe(false)
     vi.advanceTimersByTime(1)
     expect(container().classList.contains(TOOLTIP_CLASS_NAMES.shown)).toBe(true)

@@ -134,9 +134,11 @@ export function installTooltipCard(options: TooltipCardOptions = {}): () => void
   }
 
   const show = (target: Element): void => {
+    // 候选消费即清：render 失败（属性被清空）的早退路径同样不可残留，
+    // 否则残留候选会同候选短路后续 mouseover、延迟计时无法再起
+    pendingAnchor = null
     if (!render(target)) return
     anchor = target
-    pendingAnchor = null
     shown = true
     container.classList.add(TOOLTIP_CLASS_NAMES.shown)
     place()
@@ -163,6 +165,11 @@ export function installTooltipCard(options: TooltipCardOptions = {}): () => void
       : null
     if (target === null) return
     if (shown && target === anchor) return
+    // 延迟窗口内重复进入同一候选（控件内部子元素间穿越的成对 mouseover）：
+    // 计时已在跑，重入不重置
+    if (!shown && target === pendingAnchor) return
+    // 延迟窗口内重复进入同一候选（控件内部子元素间穿越的成对 mouseover）：
+    // 计时已在跑，重入不重置
     clearTimer()
     pendingAnchor = target
     if (target.getAttribute(TOOLTIP_ATTR) === '') {
