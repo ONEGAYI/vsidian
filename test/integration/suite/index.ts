@@ -9,7 +9,7 @@
 // 注入（与真实 webview.onDidReceiveMessage 同一入口），宿主侧行为全部真实。
 import * as vscode from 'vscode'
 import { cases } from './cases'
-import { selectIntegrationCases } from './caseSelection'
+import { selectIntegrationCases, SENSITIVE_CASES } from './caseSelection'
 
 export async function run(): Promise<void> {
   const failures: string[] = []
@@ -28,6 +28,7 @@ export async function run(): Promise<void> {
   console.log(`[集成测试] 执行 ${sharded.length}/${cases.length} 项（分组 ${group}）${filter ? `（筛选 ${JSON.stringify(filter)}）` : ''}${shardLabel}`)
   let done = 0
   for (const [name, fn] of sharded) {
+    const diagnose = SENSITIVE_CASES.some((entry) => entry.name === name)
     // 用例开始即留痕（[START] 与 [PASS]/[FAIL]/[TIME] 成对）：宿主在两项
     // 之间异常退出时（2026-10 批次实测：53/59 项处 ext host 干净退出、
     // 无 FAIL 无汇总），无 START 行即可把截断点定界到「上一项 finally 之后、
@@ -117,13 +118,23 @@ export async function run(): Promise<void> {
         }
         await new Promise((r) => setTimeout(r, 100))
       }
+      await vscode.commands.executeCommand('onegayi.vsidian._test.setDiagnostics', diagnose)
       await fn()
       console.log(`[集成测试][PASS] ${name}`)
     } catch (err) {
       failures.push(name)
       console.error(`[集成测试][FAIL] ${name}`, err)
+      if (diagnose) {
+        try {
+          const snapshot = await vscode.commands.executeCommand('onegayi.vsidian._test.getDiagnostics')
+          console.error(`[集成测试][DIAGNOSTICS] ${name} ${JSON.stringify(snapshot)}`)
+        } catch (diagnosticError) {
+          console.error('[集成测试][DIAGNOSTICS-ERROR]', diagnosticError)
+        }
+      }
     } finally {
       try {
+        await vscode.commands.executeCommand('onegayi.vsidian._test.setDiagnostics', false)
         // closeAllEditors 偶发遗留 custom tab（webview 销毁时序）：残留的
         // 死面板会被后续用例的 openWith 重显成永不就绪状态（用例注记录过
         // 该陷阱），显式逐个关闭并复核，最多重试 5 轮

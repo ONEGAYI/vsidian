@@ -115,6 +115,7 @@ import {
   type FindMatch,
 } from './findSession'
 import { FIND_OPTIONS_DEFAULT, findOptionsEqual, type FindOptions } from '../shared/findOptions'
+import { recordDiagnosticMessage, TestDiagnostics } from '../shared/testDiagnostics'
 import {
   OCCURRENCE_CLASS_NAMES,
   planExpandWords,
@@ -637,6 +638,7 @@ interface BufferedIncremental {
 }
 
 export class WebviewSyncController {
+  private readonly diagnostics = new TestDiagnostics()
   private view: EditorView | undefined
   private sessionId = ''
   private docUri = ''
@@ -1246,7 +1248,10 @@ export class WebviewSyncController {
     // dispose 时清空（setHoverPreviewContext(null) 同步关浮层）
     setHoverPreviewContext({
       session: () => ({ sessionId: this.sessionId, docUri: this.docUri }),
-      send: (message) => this.bridge.postMessage(message),
+      send: (message) => {
+        recordDiagnosticMessage(this.diagnostics, 'webview.send', message)
+        this.bridge.postMessage(message)
+      },
       codeHighlight: () => this.codeCardConfig.highlight,
       mountEmbedChild: (parentInstanceId, block, target) =>
         this.embedCards?.mountPopupChild(parentInstanceId, block, target),
@@ -1262,7 +1267,10 @@ export class WebviewSyncController {
     // CM6 视口测量）
     this.embedCards = new EmbedCardManager({
       session: () => ({ sessionId: this.sessionId, docUri: this.docUri }),
-      send: (message) => this.bridge.postMessage(message),
+      send: (message) => {
+        recordDiagnosticMessage(this.diagnostics, 'webview.send', message)
+        this.bridge.postMessage(message)
+      },
       codeHighlight: () => this.codeCardConfig.highlight,
       maxHeightPx: () => this.embedMaxHeightPx(),
       maxDepth: () => this.embedMaxDepth(),
@@ -1746,7 +1754,13 @@ export class WebviewSyncController {
     if (!isHostToWebview(message)) {
       return
     }
+    recordDiagnosticMessage(this.diagnostics, 'webview.receive', message)
     switch (message.kind) {
+      case 'diagnostics.test.set':
+        this.diagnostics.reset(message.enabled)
+        this.readingView?.setDiagnosticSink(message.enabled
+          ? (stage, data) => this.diagnostics.record(stage, data) : undefined)
+        break
       case 'init':
         this.sessionId = message.sessionId
         this.docUri = message.docUri
@@ -1840,6 +1854,7 @@ export class WebviewSyncController {
         // #130 字体晚到：@font-face 字体在链 load 后才异步装载完成，另行
         // 经 document.fonts.ready 稳定时机补一轮重测（见 scheduleSnippetMeasure）
         this.snippetLoader.apply(message, (outcome) => {
+          this.diagnostics.record('snippets.outcome', { name: outcome.name, version: outcome.version, ok: outcome.ok })
           this.bridge.postMessage({
             kind: 'snippets.loadResult',
             name: outcome.name,
@@ -1975,6 +1990,8 @@ export class WebviewSyncController {
         // 卡片同消息通道。消费者回报是否消费；两者均未命中才释放来源
         // 租约，避免未命中的浮层提前释放仍应交给卡片的成功回包。
         const consumed = notifyHoverResult(message) || this.embedCards?.notifyResult(message)
+        this.diagnostics.record('hover.applied', { reqId: message.reqId, instanceId: message.instanceId,
+          consumed: consumed === true })
         if (!consumed && message.ok && message.sourceLeaseId !== undefined && this.sessionId && this.docUri) {
           this.bridge.postMessage({ kind: 'hover.source.release', sessionId: this.sessionId, docUri: this.docUri,
             sourceLeaseId: message.sourceLeaseId })
@@ -3033,6 +3050,7 @@ export class WebviewSyncController {
     // shared/protocol.ts 的 isTypographyProbe）
     const state: Extract<WebviewToHost, { kind: 'view.state' }> = {
       kind: 'view.state',
+      ...(this.diagnostics.enabled ? { diagnostics: this.diagnostics.snapshot() } : {}),
       text: doc?.toString() ?? '',
       docLength: doc?.length ?? 0,
       lineCount: doc?.lines ?? 0,

@@ -57,7 +57,39 @@ Remove-Item Env:VSIDIAN_ITEST_SHARDS
 
 扩展注册 `onegayi.vsidian._test.*` 辅助命令供集成测试观测/注入，仅 `VSIDIAN_TEST_HOOKS=1` 时注册。测试消息通道是**宿主侧门控、webview 侧被动接收**的分层设计：`_test.*` 注入命令（含向 webview 转发 `table.test.key` / `task.test.click` / `reading.test.image` 等）在宿主侧受 `VSIDIAN_TEST_HOOKS` 门控；webview 侧这些消息分支不做二次门控——webview 面板的消息源只有扩展自身（`panel.webview.postMessage`），封住注入源即封住入口。**勿误判为 webview 未设防**：这不是漏加门控，而是分层设计的既定边界。
 
-## 门禁调整与兼容证据
+## #272 传播诊断与采样修复（2026-10-02）
+
+**已确认两项测试采样问题**。#223 的 CI attempt 2 在 731ms 时直接断言缺失卡应为 error，实际仍为 loading；原等待条件只等待三张成功卡，没有等待缺失卡的终态。现改为四卡中三张 content、一张 error 后再检查各卡明细。真实管理器按成功回包先到、缺失回包后到的顺序验证，旧等待条件红、新条件绿。
+
+#244 在本轮 Windows 真宿主再次耗尽 30s（30919ms），首次失败快照证实：C 未保存版本 2 的文档变更、失效广播、重读和回包应用在 **370ms** 内完成。快照同时存在两张 `../two/C`，第一张属于隐藏 Live 根内的递归 Reading 子卡（总块数 3，挂载 0）；另一张属于当前 Reading 根（总块数 3，挂载 3）。原 `.find(host !== 'live')` 误选第一张。`host` 描述卡片自身的挂载适配，不能代表祖先正文模式；新增探针 `rootHost` 区分顶层正文归属，#244 按 Reading 根选择目标。该字段只在观测回报中存在，不增加 DOM 属性或改变递归视图行为。双根管理器的可控回包回归保留 `[0, 3]` 挂载对照，旧筛选红、新筛选绿。
+
+**该本机 #244 样本可以排除传播事件丢失**；历史 CI #244 样本没有链路观测，不能据此认定全部同源。#129 watcher 至样式生效、browser `cssSnippets` 滚回顶部后的标题挂载仍未定性。既有敏感名单、等待预算和失败退出码保持原有语义；本轮不启用自动重试，不据本机通过恢复 core 归属。
+
+### 自动留证与读取方法
+
+敏感用例在执行前通过宿主 `_test.setDiagnostics` 开启观测，结束后关闭并清空。该命令和 `_test.getDiagnostics` 仅在 `VSIDIAN_TEST_HOOKS=1` 注册；webview 按既有宿主门控模式被动接收开关。默认不记录事件，阅读视图的观测回调仅开启时装配，不增加 watcher、刷新或 rAF 调度。
+
+每个记录器保留最近 256 条事件，带本记录器顺序号 `seq`、毫秒时间戳 `at`、阶段 `stage` 和有限状态字段 `data`；字符串截至 192 字符、每事件最多 12 个字段，淘汰数量写入 `dropped`。只记录请求身份、版本、目标路径和状态，不记录正文、修改文本或资源 URL。失效报告最多收录 8 个面板、每面板 32 张卡片。协议拒绝无界或非法观测载荷。
+
+集成失败在公共面板清理之前输出 `[集成测试][DIAGNOSTICS]` 后的 JSON，沿用已有逐项报告与 CI artifact 留存。`panels[].cached=true` 表示最后一次真实 `view.state` 回报，不伪装成失败瞬间的新鲜采样；用例自己的 finally 可能已经清理片段目录，应结合日志时间顺序读取。`host.send.*` 表示尝试出站，`webview.receive.*` 才证明消息已到达。`hover.applied.consumed=true` 表示回包配对被消费，仍需卡片版本/块数等现场证据判断结果。
+
+| 待查链路 | 依次读取的阶段及现场 |
+| --- | --- |
+| #244 未保存刷新 | `document.changed` → `hover.invalidate`（含接收会话数量）→ `host.send.hover.invalidated` → `webview.receive.hover.invalidated` → `webview.send.hover.request` / `host.receive.hover.request` → 两端 `hover.result` → `hover.applied`；按 `reqId + instanceId` 关联，并核对面板身份、直接来源、目标版本及 `rootHost` |
+| #129 CSS 热更 | `snippets.fs` → `snippets.state`（原因、列表与入口版本）→ `snippets.broadcast` → `webview.receive.snippets.snapshot` → `snippets.outcome`；对照面板 `css` 绘制读值。入口 load/error 回报不能单独证明所有嵌套规则已生效 |
+| 阅读回顶挂载 | `reading.scroll` → `reading.schedule` → `reading.frame` → `reading.update` → `reading.window`（期望首尾、实际挂载首尾和数量）；`reading.hidden` 表示本次无可用布局 |
+
+browser `cssSnippets` 也开启同一 webview 记录器，等待超时时先输出 `[browser][DIAGNOSTICS]`，包含当前值、最多 16 条 pageerror、阅读窗口和标题数量，再抛出原等待错误。现场采样最多等 1s；采样失败单列，不吞原错误、不重试业务步骤。原 CI `cssSnippets.phases.jsonl` 仅有 build/launch，无法补出当时业务阶段；下次从现有 browser artifact 的 `cssSnippets.log` 读取新增快照。
+
+事件不存在只有在观测已启用、对应时间段仍完整且缓存足够新时，才支持定位断点；`dropped > 0` 或无新回报时应报告证据缺口。后续比较同提交的多次 CI 时，先匹配目标与版本，再比较相邻阶段耗时，避免把隐藏副本或旧缓存误判成产品不刷新。
+
+### 本轮验证边界
+
+发布对照为 v0.8.0（`03efef0`），历史样式锚点为 v0.4.0（`75c3df79074bdeaec0f02a38d40124f0cd66f857`）。公开选择器、变量、DOM 关系和历史样式基线未修订；现有 `cssSnippets` 的实际颜色及阅读重挂载断言继续执行，历史基线复验和八项契约检查通过。
+
+本树证据均在 `.vscode-test/issue272-*` 和 `out/test/browser-runs/`，不入 Git：保留 #223 与 #244 的采样红绿 JSON、首次 #244 完整诊断失败日志、修复后敏感四项真宿主报告、定向单测/浏览器及类型和样式检查。完整回归与独立双轴审查由 #272 + #276 汇总树统一执行。本轮无推送或 CI 执行，不把代理检查表述为用户验收，敏感名单退出仍遵循上节的多次 CI 条件。
+
+## 门禁调整与兼容证据（既有分组实施）
 
 本次 CI 修改的理由是把用户批准的四项临时豁免显式隔离，同时保留检测、失败信号和报告。#129 只迁移上述动态刷新用例，其余 CSS 导入、历史片段绘制与兼容检查仍在 core。独立 `style-contract` job 的基线复验、检查器变更暴露、全量检查、报告上传及发布链路均保持原有语义。
 
