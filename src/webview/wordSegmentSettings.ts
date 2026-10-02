@@ -64,7 +64,34 @@ export class WordSegmentSection implements SettingsPageEditorGroup {
     }
     if (message.kind === 'settings.snapshot' || message.kind === 'settings.changed') {
       this.values = message.values
-      this.render()
+      // 就地同步不重建：整组重建会丢定位类与用户焦点（定位态下任一设置
+      // 保存广播即触发本路径）——标准设置行的回显同为就地同步语义
+      this.syncSettingValues()
+    }
+  }
+
+  /** 设置值权威回显的就地同步：引擎/下载源 radio 选中态与灰化、自定义
+   *  URL 输入值与禁用态。资源状态块不受 settings.* 影响（随
+   *  wordSegment.state 重建），定位类与焦点原样保留。灰化口径与 render
+   *  一致：下载源三行只随 engine 非 jieba 禁用，custom 输入框另在下载源
+   *  非 custom 时禁用 */
+  private syncSettingValues(): void {
+    const parent = this.parent
+    if (!parent) return
+    const engine = this.valueOf(WORD_SEGMENT_ENGINE_KEY, WORD_SEGMENT_ENGINE_DEFAULT)
+    const source = this.valueOf(WORD_SEGMENT_SOURCE_KEY, WORD_SEGMENT_SOURCE_DEFAULT)
+    const sourceDisabled = engine !== 'jieba'
+    for (const radio of parent.querySelectorAll<HTMLInputElement>('input[type=radio][name^="wordseg-"]')) {
+      const key = radio.name.slice('wordseg-'.length)
+      radio.checked = radio.value === this.valueOf(key, '')
+      if (key === WORD_SEGMENT_SOURCE_KEY) {
+        radio.disabled = sourceDisabled
+      }
+    }
+    const customInput = parent.querySelector<HTMLInputElement>('input.vsidian-wordseg-custom-url')
+    if (customInput) {
+      customInput.value = this.valueOf(JIEBA_CUSTOM_URL_KEY, '')
+      customInput.disabled = sourceDisabled || source !== 'custom'
     }
   }
 

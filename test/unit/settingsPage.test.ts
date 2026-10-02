@@ -860,6 +860,67 @@ describe('外观合并分页（#231）', () => {
   })
 })
 
+describe('分词组设置回显：就地同步不重建（定位态保持）', () => {
+  /** 生产注册口径（含分词委托组）+ 外发消息捕获。单测无 settingsMain 的
+   *  window 分发，组消息按生产分发语义直达组实例 */
+  function makeWordsegView(): {
+    view: SettingsPageView
+    wordSegment: WordSegmentSection
+    sent: unknown[]
+    parent: HTMLElement
+  } {
+    const sent: unknown[] = []
+    const wordSegment = new WordSegmentSection({ postMessage: (m) => sent.push(m) })
+    const view = new SettingsPageView(
+      { postMessage: (m) => sent.push(m) },
+      PRODUCTION_SETTING_DEFINITIONS,
+      [],
+      [wordSegment],
+    )
+    const parent = document.createElement('div')
+    view.mount(parent)
+    return { view, wordSegment, sent, parent }
+  }
+
+  it('定位态收到 settings.snapshot 回显：组不重建、定位类保持，radio 选中态就地更新', () => {
+    const { view, wordSegment, parent } = makeWordsegView()
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'wordSegment', entry: 'engine' })
+    const located = parent.querySelector('.vsidian-wordseg-block.vsidian-settings-item-located')
+    expect(located, '定位类应已加上').toBeTruthy()
+    // 权威回显到达（真实时序：定位后任一设置保存广播 / 快照应答）
+    wordSegment.handleHostMessage({
+      kind: 'settings.snapshot',
+      values: { 'editor.wordSegmentEngine': 'jieba', 'editor.wordSegmentSource': 'npmmirror' },
+    })
+    // 无参重建会丢定位类（真浏览器套件时序敏感失败实证）——必须就地同步
+    expect(parent.querySelector('.vsidian-wordseg-block.vsidian-settings-item-located')).toBe(located)
+    expect(parent.querySelectorAll('.vsidian-wordseg-block')).toHaveLength(2)
+    expect(parent.querySelector<HTMLInputElement>(
+      'input[name="wordseg-editor.wordSegmentEngine"][value="jieba"]')!.checked).toBe(true)
+    expect(parent.querySelector<HTMLInputElement>(
+      'input[name="wordseg-editor.wordSegmentEngine"][value="builtin"]')!.checked).toBe(false)
+    expect(parent.querySelector<HTMLInputElement>(
+      'input[name="wordseg-editor.wordSegmentSource"][value="npmmirror"]')!.checked).toBe(true)
+  })
+
+  it('回显就地的灰化联动：engine 非 jieba 时下载源灰化、custom 输入禁用', () => {
+    const { view, wordSegment, parent } = makeWordsegView()
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'wordSegment', entry: 'engine' })
+    wordSegment.handleHostMessage({
+      kind: 'settings.changed',
+      values: { 'editor.wordSegmentEngine': 'builtin', 'editor.wordSegmentSource': 'jsdelivr' },
+    })
+    expect(parent.querySelector<HTMLInputElement>(
+      'input[name="wordseg-editor.wordSegmentSource"][value="jsdelivr"]')!.disabled).toBe(true)
+    expect(parent.querySelector<HTMLInputElement>(
+      'input[name="wordseg-editor.wordSegmentSource"][value="npmmirror"]')!.disabled).toBe(true)
+    expect(parent.querySelector<HTMLInputElement>(
+      'input.vsidian-wordseg-custom-url')!.disabled).toBe(true)
+    // 定位态依旧保持（同一断言锚点防回归）
+    expect(parent.querySelector('.vsidian-wordseg-block.vsidian-settings-item-located')).toBeTruthy()
+  })
+})
+
 describe('会话内恢复：uiState 上报与 focusSection.scroll 应用（面板关闭/重载后分页与滚动还原）', () => {
   /** 生产注册口径 + 外发消息捕获（uiState 上报断言需要桥侧记录） */
   function makeTrackedFullView(): { view: SettingsPageView; sent: unknown[]; parent: HTMLElement } {

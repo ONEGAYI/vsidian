@@ -39,6 +39,7 @@ try {
               window.dispatchEvent(new MessageEvent('message', { data: reply }))
             }
           }
+          // settings.uiState 为通知型消息，宿主不回执（同真实宿主语义）
         }, 0)
       } })
     }, hostReplies)
