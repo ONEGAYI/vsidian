@@ -94,6 +94,18 @@ try {
   await toast.waitFor()
   assert.equal(await toast.evaluate((el) => getComputedStyle(el).borderTopColor), 'rgb(0, 0, 0)')
   await page.waitForTimeout(200)
+  const bareClassSnippet = await page.addStyleTag({ content: '.vsidian-toast { background: rgb(30, 40, 50); color: rgb(220, 230, 240); border-color: rgb(80, 90, 100); }' })
+  for (const severity of ['neutral', 'warning', 'error']) {
+    await page.evaluate((severity) => window.showLocalToast('裸类片段覆盖', severity), severity)
+    await toast.waitFor()
+    assert.deepEqual(await toast.evaluate((el) => {
+      const paint = getComputedStyle(el)
+      return [paint.backgroundColor, paint.color, paint.borderTopColor]
+    }), ['rgb(30, 40, 50)', 'rgb(220, 230, 240)', 'rgb(80, 90, 100)'])
+    await page.waitForTimeout(200)
+  }
+  await bareClassSnippet.evaluate((el) => el.remove())
+  console.log('[PASS] 公开裸类片段覆盖普通、警告、错误三类实际绘制')
   await page.setViewportSize({ width: 240, height: 400 })
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.evaluate(() => { document.getElementById('app').style.setProperty('--vsidian-toast-duration', '1000'); window.showLocalToast('很长的操作引导文字，要求完整折行显示，不能裁掉正确粘贴图片的方式。') })

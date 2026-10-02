@@ -1,4 +1,4 @@
-#app {
+:where(#app) {
   --vsidian-toast-background: var(--vscode-editorWidget-background, var(--vscode-editor-background, #252526));
   --vsidian-toast-foreground: var(--vscode-editorWidget-foreground, var(--vscode-editor-foreground, #cccccc));
   --vsidian-toast-border: var(--vscode-widget-border, rgb(128 128 128 / 0.3));
@@ -24,7 +24,7 @@
   --vsidian-toast-error-duration: 5000;
 }
 
-:where(.vscode-dark) #app {
+:where(.vscode-dark #app) {
   --vsidian-toast-warning-background: #393321;
   --vsidian-toast-warning-foreground: #f1d990;
   --vsidian-toast-warning-border: #6b5930;
@@ -34,8 +34,8 @@
   --vsidian-toast-shadow: 0 4px 16px rgb(0 0 0 / 0.28);
 }
 
-:where(.vscode-high-contrast) #app,
-:where(.vscode-high-contrast-light) #app {
+:where(.vscode-high-contrast #app),
+:where(.vscode-high-contrast-light #app) {
   --vsidian-toast-warning-background: var(--vscode-editor-background);
   --vsidian-toast-warning-foreground: var(--vscode-editor-foreground);
   --vsidian-toast-warning-border: var(--vscode-contrastBorder, var(--vscode-editor-foreground));
@@ -44,7 +44,7 @@
   --vsidian-toast-error-border: var(--vscode-contrastBorder, var(--vscode-editor-foreground));
 }
 
-.vsidian-toast-container {
+:where(.vsidian-toast-container) {
   position: absolute;
   z-index: 9000; /* 高于正文，低于模态交互层（10000） */
   inset-inline: var(--vsidian-toast-viewport-margin);
@@ -54,7 +54,7 @@
   pointer-events: none;
 }
 
-.vsidian-toast {
+:where(.vsidian-toast) {
   box-sizing: border-box;
   max-width: min(var(--vsidian-toast-max-width), 100%);
   padding: var(--vsidian-toast-padding-block) var(--vsidian-toast-padding-inline);
@@ -71,19 +71,19 @@
   animation: vsidian-toast-enter var(--vsidian-toast-enter-duration) ease-out both;
 }
 
-.vsidian-toast[data-severity="warning"] {
+:where(.vsidian-toast[data-severity="warning"]) {
   background: var(--vsidian-toast-warning-background);
   color: var(--vsidian-toast-warning-foreground);
   border-color: var(--vsidian-toast-warning-border);
 }
 
-.vsidian-toast[data-severity="error"] {
+:where(.vsidian-toast[data-severity="error"]) {
   background: var(--vsidian-toast-error-background);
   color: var(--vsidian-toast-error-foreground);
   border-color: var(--vsidian-toast-error-border);
 }
 
-.vsidian-toast--leaving {
+:where(.vsidian-toast--leaving) {
   animation: vsidian-toast-exit var(--vsidian-toast-exit-duration) ease-in both;
 }
 @keyframes vsidian-toast-enter {
@@ -95,6 +95,6 @@
   to { opacity: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .vsidian-toast { animation: none; }
-  .vsidian-toast--leaving { opacity: 0; }
+  :where(.vsidian-toast) { animation: none; }
+  :where(.vsidian-toast--leaving) { opacity: 0; }
 }
