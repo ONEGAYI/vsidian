@@ -1,6 +1,6 @@
 # Live 富文本粘贴
 
-状态：2026-10-02 用户确认产品行为及四票拆分；已创建 #305–#308，#305–#307 本地实现与自动验证完成，#308 待实施。Toast 数值为初始视觉方案，待用户视觉验收。
+状态：2026-10-02 用户确认产品行为及四票拆分；#305–#308 本地实现完成，2026-10-03 兼容定向验证通过，统一分支完整回归另行收口。真实 Word/Google Docs、物理键盘与具体观感仍待人工验收；toast 数值为初始视觉方案。
 
 ## 问题与目标
 
@@ -215,6 +215,16 @@ Blocked by: T2、T3。
 - `ToastChannel.show` 可携业务 key，`dismiss` 仅清除对应组。新的撤销阶段替换旧的成功反馈；第二次撤销、重做和后续输入使相关引导立即失效，不清除无关 warning/error 或宿主通知。A=B 的仅格式记录不诱导再撤一次无关历史。公开 toast 选择器、token 与配色契约保持不变。
 - 多选区遇到纯文本行数与 Markdown 行数分发策略不一致时，本次回退原 CM6 纯文本分发并显示 error，只有一次撤销。例如两个选区收到 `甲\n乙`，HTML 的段落空行使格式文本变为三行，此时不将整块内容重复到两个选区。该保守边界不扩大为任意多光标 HTML 重排；分发一致的多选区仍可分步保留格式。
 - 自动证据包含阶段出站、失败/迟到 ACK、协议校验、真实原因与普通格式编辑的区分、快速双撤及 toast 队列清理。浏览器验证首次撤格式的 `paint.toast.visible`、淡红回退、设置灰化/持久化及多选区；VSCode 1.82.3 真宿主验证 A/B/C、替换选区、连续粘贴、前后输入、快速 Undo/Redo、关闭/等价无空阶段、两个真实面板与切源码后合并输入撤销。物理键盘、真实外部软件复制和具体视觉观感仍待用户验收。
+
+## #308 实施落档（2026-10-03）
+
+- 兼容测试以 Markdown 再渲染后的标题、段落、列表及行内语义为断言对象。先固定 8 项失败：跨块 `section` / `article` / Docs 形态 `b` 包装、包装内引用/代码/表格、嵌套列表标记继承及粗斜删除线的标点相邻。转换遍历现在保留包装内既有块结构，列表继续传递已支持的粗斜体语义；必要的相邻文字使用字符实体解决 CommonMark 标记边界，呈现正文不插空格、不引入 HTML 标签。字体、字号、颜色与复杂布局支持范围保持原约定。
+- 真实外部来源为 [MDN strong 元素文档](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/strong)。Playwright Chromium 151.0.7922.34 在未修改的网页选区按原生 Ctrl+C，读取剪贴板 plain/HTML 后直接切到生产 Live 粘贴，期间不重写剪贴板；native 与菜单得到同一文档，行内代码、链接和分步撤销已验证。存档 `test/browser/fixtures/rich-paste/mdn-strong-native.json` 记录 URL、采集时间、浏览器与获取方法，常规回归离线回放该真实样本；`VSIDIAN_RICH_PASTE_EXTERNAL_CAPTURE=1` 可复验实际网页来源。该样本只证明浏览器来源，不证明 Word/Google Docs。
+- 生产 Reading 视图经 DOM Range 选区与原生 Ctrl+C 产生 plain+HTML，直接粘入生产 Live，覆盖标题、粗体、斜体、删除线、链接与列表，并检查 C→B→A 替换选区历史。原始 Markdown 经原生复制和 Ctrl+Shift+V 逐字保留。Windows 原生 plain 的 CRLF 在证据中原样保存，CM6 比对沿用 LF 契约；未改 Reading 复制行为。
+- 浏览器 `richPasteCompatibility` 留四类反馈的完整 900×560 视口截图：保留格式、撤格式、图片纯文本 warning、转换回退 error。每类均检查 `paint.toast.visible`、焦点保持及视口底中位置，warning 文案随普通粘贴改绑更新；转换期间无外部资源请求。截图是代理自动化观测，数值与视觉观感仍待用户验收。
+- 本票日志与快照根为独立工作树 `out/test/308/`，首次红测与浏览器首轮 CRLF 期望失败均保留。定向单元、兼容浏览器、编译及样式门禁结果见交付回执；设置记忆、代码/表格上下文、独立图片流程、真实 VSCode 1.82.3 的 A/B/C、快速撤销、连续输入、源码模式与多面板证据沿用 #305–#307。统一分支终局全量单元、浏览器、宿主回归与独立审查由收口代理执行，不以本票定向结果冒充全量验证。
+
+用户操作说明已同步至 `docs/features.md`、README 双语入口和 Unreleased CHANGELOG；人工待验记录以 [manual-verification.md](manual-verification.md) 的「富文本粘贴与兼容收口」节为准。
 
 ## 不包含
 

@@ -41,7 +41,7 @@ try {
   await page.keyboard.press('Shift+Tab');await page.keyboard.press('Enter');await waitText('**新内容**')
   await page.waitForFunction(()=>document.querySelector('.vsidian-toast')?.textContent.includes('已保留'))
   assert.equal(await editor.evaluate(el=>document.activeElement===el),true)
-  console.log('[PASS] native CtrlV、Google Docs样本、询问绘制、局部Tab/Enter、单次编辑与成功toast')
+  console.log('[PASS] native CtrlV、Docs形态fixture、询问绘制、局部Tab/Enter、格式编辑与成功toast')
   await page.waitForTimeout(2800)
   await write('取消文本','<b>取消文本</b>');await selectAll();await page.keyboard.press('Control+V');await dialog.waitFor()
   await page.locator('[data-paste-remember]').check();await page.keyboard.press('Escape')

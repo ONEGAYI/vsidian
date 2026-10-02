@@ -10,6 +10,7 @@ const escapeText = (text: string) => text.replace(/\\/g, '\\\\').replace(/([`*_~
 interface Marks { bold: boolean; italic: boolean; strike: boolean }
 interface InlineRun extends Marks { text: string }
 const unmarked: Marks = { bold:false, italic:false, strike:false }
+const markKeys: Array<keyof Marks> = ['strike','italic','bold']
 
 function effectiveMarks(el: Element, inherited: Marks): Marks {
   const style = (el as HTMLElement).style
@@ -38,6 +39,14 @@ export function htmlToMarkdown(html: string): ConvertedHtml {
   let hasFormatting = false
   const literalBlocks: string[] = []
   let visited = 0
+  const blockContainers = new WeakMap<Element, boolean>()
+  function isBlockContainer(el: Element): boolean {
+    const cached = blockContainers.get(el)
+    if (cached !== undefined) return cached
+    const result = !ignored.has(el.tagName) && (blockTags.has(el.tagName) || Array.from(el.children).some(isBlockContainer))
+    blockContainers.set(el, result)
+    return result
+  }
   function inline(node: Node, inherited: Marks, table: boolean): InlineRun[] {
     if (++visited > 100_000) throw new Error('Clipboard HTML exceeds node budget')
     if (node.nodeType === Node.TEXT_NODE) return [{...inherited,text:escapeText((node.textContent ?? '').replace(/\s+/g,' '))}]
@@ -81,6 +90,21 @@ export function htmlToMarkdown(html: string): ConvertedHtml {
       if (last && last.bold===run.bold && last.italic===run.italic && last.strike===run.strike) last.text+=run.text
       else merged.push({...run})
     }
+    // CommonMark 标点两侧的 delimiter flanking 会受邻接文字影响。
+    // 仅把必要的邻接文字写成字符实体，呈现正文不增空格、不插 HTML 标签。
+    const punctuation = /[\p{P}\p{S}]/u
+    const literal = /[\p{L}\p{N}\p{M}]/u
+    const entity = (character: string) => `&#${character.codePointAt(0)};`
+    for (let index = 0; index < merged.length - 1; index++) {
+      const before = merged[index]!, after = merged[index + 1]!
+      const last = Array.from(before.text).at(-1) ?? '', first = Array.from(after.text)[0] ?? ''
+      if (markKeys.some(key => before[key] && !after[key]) && punctuation.test(last) && literal.test(first)) {
+        after.text = entity(first) + after.text.slice(first.length)
+      }
+      if (markKeys.some(key => !before[key] && after[key]) && literal.test(last) && punctuation.test(first)) {
+        before.text = before.text.slice(0, -last.length) + entity(last)
+      }
+    }
     function encode(parts: InlineRun[], available: Array<keyof Marks>): string {
       if (!available.length || !parts.length) return parts.map(part=>part.text).join('')
       const common = available.find(key=>parts.every(part=>part[key]))
@@ -97,13 +121,13 @@ export function htmlToMarkdown(html: string): ConvertedHtml {
       }
       return groups.map(group=>group[0]![key] ? mark(encode(group,remaining),marker) : encode(group,remaining)).join('')
     }
-    return encode(merged,['strike','italic','bold'])
+    return encode(merged,markKeys)
   }
   function children(el: Node, table = false, inherited: Marks = unmarked): string {
     const marks=el instanceof Element ? effectiveMarks(el,inherited) : inherited
     let result='',runs:InlineRun[]=[]
     for (const node of Array.from(el.childNodes)) {
-      if (node instanceof Element && blockTags.has(node.tagName)) {
+      if (node instanceof Element && isBlockContainer(node)) {
         result+=serialize(runs)+render(node,table,marks);runs=[]
       } else runs.push(...inline(node,marks,table))
     }
@@ -123,7 +147,7 @@ export function htmlToMarkdown(html: string): ConvertedHtml {
     if (node instanceof DocumentFragment) return children(node, table, inherited)
     const tag = node.tagName
     if (ignored.has(tag)) return ''
-    if (!blockTags.has(tag)) return serialize(inline(node,inherited,table))
+    if (!blockTags.has(tag)) return isBlockContainer(node) ? children(node,table,inherited) : serialize(inline(node,inherited,table))
     if (tag === 'PRE') {
       const text = node.textContent ?? ''
       if (!text) return ''
@@ -151,6 +175,7 @@ export function htmlToMarkdown(html: string): ConvertedHtml {
       return '\n\n' + lines.join('\n') + '\n\n'
     }
     if (tag === 'UL' || tag === 'OL') {
+      const marks = effectiveMarks(node, inherited)
       const items = Array.from(node.children).filter((child) => child.tagName === 'LI')
       if (!items.length) return ''
       hasFormatting = true
@@ -163,9 +188,9 @@ export function htmlToMarkdown(html: string): ConvertedHtml {
         const task = checkbox ? (checkbox.checked ? '[x] ' : '[ ] ') : ''
         checkbox?.remove()
         const prefix = tag === 'OL' ? `${start + index}. ` : '- '
-        const content = children(clone).trim().replace(/\n{3,}/g, '\n\n')
+        const content = children(clone, table, marks).trim().replace(/\n{3,}/g, '\n\n')
         const line = prefix + task + content.replace(/\n/g, '\n' + ' '.repeat(prefix.length))
-        return line + nested.map((el) => '\n' + render(el).trim().split('\n').map((part) => ' '.repeat(prefix.length) + part).join('\n')).join('')
+        return line + nested.map((el) => '\n' + render(el, table, effectiveMarks(li, marks)).trim().split('\n').map((part) => ' '.repeat(prefix.length) + part).join('\n')).join('')
       })
       return '\n\n' + lines.join('\n') + '\n\n'
     }
