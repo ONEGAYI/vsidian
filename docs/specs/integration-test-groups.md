@@ -195,6 +195,8 @@ Linux 最初的 `xvfb-run` 停在 X server 启动握手，尚未运行 Node 或�
 | 真宿主 Reading 与历史 CSS | Windows 1.82.3，9/9 通过，宿主与启动器退出码均为 0 | `reading-host-final.log`、`reading-host-final-report.log` |
 | #293 原用例与前序上下文 | Windows 11 次、Linux 20 次目标用例均通过；Linux 前序上下文 30/30 通过 | `css-host-baseline*`、`css-host-stress*`、`css-linux-exec*`、`css-linux-context*` |
 | 历史样式基线及当前契约 | git 锚点复验通过，八项检查零失败 | `style-baseline.log`、`style-current.log` |
-| 文件树 | 本次相关条目已核对；全量 strict 失败于基点已有的 10 项 tooltip 文件漏登记 | `tree-check.log` |
+| 文件树 | 初始 strict 报告基点已有的 10 项 tooltip 漏登记；推送前同步 main 后全量 strict 通过 | `tree-check.log`、`publish-tree-check.log` |
 
-本轮未获得推送授权，未执行推送、远端 CI 或合并；上述结果不代表用户验收，敏感名单与同提交多次 CI 的退出条件保持原有口径。
+本地阶段未执行推送、远端 CI 或合并。用户于 2026-10-02 授权推送并创建 PR，继续 CI 验证与取证；未授权合并。上述结果不代表用户验收，敏感名单与同提交多次 CI 的退出条件保持原有口径，远端结果按 PR 对应提交及 run 留证。
+
+推送前 fetch 发现 main 前移到 `2b059ed`，三次新增提交只涉及规格和文件树。未发布分支先 rebase；与本地提交 `2c35b1a` 比较，`src/`、`test/`、构建脚本、清单、锁文件和随包资源保持一致。main 已补齐 tooltip 批次的 10 项文件登记，随后全量 `check --strict` 与 #294 四种时序回归均通过（`publish-tree-check.log`、`publish-reading.log`）。
