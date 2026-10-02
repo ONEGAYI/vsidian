@@ -40,8 +40,11 @@ try {
   await editor.click()
   await page.keyboard.press('Control+A')
   await write('**文字**')
+  await page.evaluate(() => window.holdNextEditAck())
   await page.keyboard.press('Control+Shift+V')
   await page.waitForFunction(() => window.controller.getView().state.doc.toString() === '**文字**')
+  assert.equal(await toast.count(), 0, '真实剪贴板文本未ACK前不得宣称已粘贴')
+  await page.evaluate(() => window.finishHeldEditAck())
   await toast.waitFor()
   assert.match(await toast.innerText(), /已粘贴文本.*Ctrl\+V/)
   assert.equal(await page.evaluate(() => window.sent().some((m) => m.kind === 'image.paste')), false)
@@ -52,11 +55,23 @@ try {
   assert.equal(paint.visible, true)
   assert.equal(paint.background, 'rgb(255, 247, 219)')
   assert.equal(paint.pointerEvents, 'none')
+  // 祖先透明不改变文字矩形或卡片自身opacity，探针仍必须反映真实不可见。
+  for (const selector of ['.vsidian-toast-container', '#app']) {
+    await page.evaluate(selector => document.querySelector(selector).style.opacity = '0', selector)
+    await page.evaluate(() => window.post({ kind: 'view.state.request' }))
+    paint = await page.evaluate(() => window.sent().findLast(m => m.kind === 'view.state').paint.toast)
+    assert.equal(paint.visible, false, `${selector}透明时toast不能报告已绘制`)
+    await page.evaluate(selector => document.querySelector(selector).style.removeProperty('opacity'), selector)
+  }
+  await page.evaluate(() => window.post({ kind: 'view.state.request' }))
+  paint = await page.evaluate(() => window.sent().findLast(m => m.kind === 'view.state').paint.toast)
+  assert.equal(paint.visible, true, '恢复祖先绘制后toast应重新可见')
   const warningRect = await toast.boundingBox()
   assert.ok(Math.abs(warningRect.x + warningRect.width / 2 - 450) < 1)
   assert.ok(Math.abs(560 - warningRect.y - warningRect.height - 24) < 1)
   await toast.screenshot({ path: artifactPath(root, 'plainPaste/warning-light.png') })
   console.log('[PASS] 真实 Clipboard API + CtrlShiftV：只插文字、淡黄绘制、底部居中、不抢焦点')
+  console.log('[PASS] toast父容器和app透明时绘制探针均为false，恢复后为true')
 
   // 两种粘贴菜单提示取有效注册值，纯文本菜单走相同快照。
   await page.evaluate(() => { window.post({ kind: 'keybindings.changed', overrides: { paste: ['ctrl+alt+v'] } }); document.getElementById('app').style.setProperty('--vsidian-toast-warning-duration', '10') })
@@ -126,4 +141,12 @@ try {
   await page.waitForFunction(() => window.sent().some((m) => m.kind === 'image.paste'))
   assert.equal(await page.evaluate(() => window.controller.getView().state.doc.toString()), 'HTML 文字')
   console.log('[PASS] HTML-only提取与原生普通CtrlV图片优先回归')
+  await write('被拒的粘贴', true)
+  await editor.click();await page.keyboard.press('Control+A');await page.evaluate(() => window.holdNextEditAck())
+  await page.keyboard.press('Control+Shift+V')
+  await page.waitForFunction(() => window.controller.getView().state.doc.toString() === '被拒的粘贴')
+  assert.equal(await toast.count(), 0)
+  await page.evaluate(() => window.finishHeldEditAck(false))
+  assert.equal(await toast.count(), 0, '宿主拒绝不应出现已粘贴文本warning')
+  console.log('[PASS] 真实Clipboard纯文本图片反馈等实际ACK，拒绝后保留本地输入且不虚报成功')
 } finally { await browser.close() }

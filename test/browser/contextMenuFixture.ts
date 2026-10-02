@@ -10,6 +10,8 @@ import '../../src/webview/main.css'
 
 // #94：harness 页面注入语言数据岛，boot 与生产首帧同路径
 bootLocaleFromDocument()
+let holdEditAck = false
+const heldEdits: { seq: number; baseVersion: number }[] = []
 
 const controller = new WebviewSyncController({
   postMessage(msg: unknown) {
@@ -19,6 +21,7 @@ const controller = new WebviewSyncController({
     // 后续编辑出站——与单测短流程不同，浏览器回归按真实往返驱动）
     if (message.kind === 'edit.request') {
       const req = message as unknown as { seq: number; baseVersion: number }
+      if (holdEditAck) { heldEdits.push(req); return }
       setTimeout(() => {
         controller.handleHostMessage({
           kind: 'edit.ack', seq: req.seq, ok: true, version: req.baseVersion + 1,
@@ -138,6 +141,13 @@ Object.assign(window, {
   },
   /** 出站消息观测（剪贴板桥与 keybindings.execute） */
   sent: () => sent,
+  holdNextEditAck() { holdEditAck = true },
+  finishHeldEditAck(ok = true) {
+    holdEditAck = false
+    for (const req of heldEdits.splice(0)) controller.handleHostMessage(ok
+      ? { kind: 'edit.ack', seq: req.seq, ok: true, version: req.baseVersion + 1 }
+      : { kind: 'edit.ack', seq: req.seq, ok: false, reason: 'error', version: req.baseVersion })
+  },
   clearSent() {
     sent.length = 0
   },

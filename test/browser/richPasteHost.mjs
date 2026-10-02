@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict'
 import { build } from 'esbuild'
 import { downloadAndUnzipVSCode } from '@vscode/test-electron'
-import { mkdtempSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -12,6 +12,7 @@ import { createServer } from 'node:net'
 import { buildTestHostArgs, runTestHost } from '../integration/testHost.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
+mkdirSync(path.join(root, 'out/test/warning-ack'), { recursive: true })
 const dir = mkdtempSync(path.join(tmpdir(), 'vsidian-keyboard-host-'))
 writeFileSync(path.join(dir, 'keyboard.md'), 'word')
 await build({ entryPoints: [path.join(root, 'test/integration/richPasteHostSuite.ts')],
@@ -134,6 +135,27 @@ try {
     return result.result.value
   }
 
+  // 模态本身的绘制证据：文字范围、颜色、各层遮隐以及实际命中；不以DOM存在代替。
+  async function readDialogPaint() {
+    return evaluate(`(() => {
+      const dialog = document.querySelector('[role=dialog]')
+      const painted = node => {
+        const style = getComputedStyle(node), range = document.createRange()
+        range.selectNodeContents(node)
+        const bounds = range.getBoundingClientRect()
+        let shown = bounds.width > 0 && bounds.height > 0 && bounds.bottom > 0 && bounds.top < innerHeight && bounds.right > 0 && bounds.left < innerWidth && style.visibility === 'visible' && style.color !== 'rgba(0, 0, 0, 0)'
+        for (let ancestor = node; ancestor; ancestor = ancestor.parentElement) {
+          const paint = getComputedStyle(ancestor)
+          if (paint.display === 'none' || paint.contentVisibility === 'hidden' || Number(paint.opacity) === 0) shown = false
+        }
+        const hit = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2)
+        return { text: node.textContent, visible: shown && !!hit && node.contains(hit), foreground: style.color, background: style.backgroundColor }
+      }
+      if (!dialog) return null
+      return { label: dialog.getAttribute('aria-label'), background: getComputedStyle(dialog).backgroundColor, question: painted(dialog.querySelector('p')), buttons: [...dialog.querySelectorAll('[data-paste-choice]')].map(button => ({ choice: button.dataset.pasteChoice, ...painted(button) })) }
+    })()`)
+  }
+
   await command('preferences', { values: { 'editor.pasteSplitUndo': false } })
   await evaluate('document.querySelector(".cm-content").focus()')
   await evaluate('(async()=>{await navigator.clipboard.write([new ClipboardItem({"text/plain":new Blob(["new"],{type:"text/plain"}),"text/html":new Blob(["<b style=font-weight:normal><span style=font-weight:700>new</span></b>"],{type:"text/html"})})]);})()')
@@ -141,6 +163,18 @@ try {
   await new Promise(r=>setTimeout(r,250))
   assert.equal(await command('text'),'word','询问前不修改TextDocument')
   assert.equal(await evaluate('Boolean(document.querySelector("[role=dialog]"))'),true)
+  await evaluate('document.querySelector(".vsidian-paste-dialog-overlay").style.opacity="0"')
+  const hiddenDialog = await readDialogPaint()
+  assert.equal(await evaluate('Boolean(document.querySelector("[role=dialog]"))'),true,'隐藏模态仍通过旧DOM存在断言')
+  assert.equal(hiddenDialog.question.visible,false);assert(hiddenDialog.buttons.every(button=>!button.visible))
+  await evaluate('document.querySelector(".vsidian-paste-dialog-overlay").style.removeProperty("opacity")')
+  const dialogPaint = await readDialogPaint()
+  assert.equal(dialogPaint.question.text,dialogPaint.label);assert.equal(dialogPaint.question.visible,true)
+  assert.notEqual(dialogPaint.background,'rgba(0, 0, 0, 0)');assert.notEqual(dialogPaint.question.foreground,dialogPaint.background)
+  assert.deepEqual(dialogPaint.buttons.map(button=>button.choice),['keep','plain','cancel'])
+  assert(dialogPaint.buttons.every(button=>button.visible&&button.text.length>0),'三按钮文字必须实际绘出且命中')
+  writeFileSync(path.join(root,'out/test/warning-ack/dialog-host-paint.json'),JSON.stringify({hiddenDialog,dialogPaint},null,2))
+  console.log('[PASS] 真宿主询问文字/三按钮实际绘制；透明祖先负例仍有DOM但绘制为false')
   await evaluate('document.querySelector("[data-paste-remember]").checked=true;document.querySelector("[data-paste-choice=keep]").click()')
   await waitText('**new**');await new Promise(r=>setTimeout(r,250))
   const state=await command('paint');assert.equal(state.paint.toast.visible,true);assert.equal(state.paint.toast.severity,'neutral')

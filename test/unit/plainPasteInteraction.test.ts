@@ -35,6 +35,7 @@ function key(view: EditorView, value: string, shift = false) {
   return event
 }
 const settle = () => new Promise((resolve) => setTimeout(resolve, 50))
+function edits(sent: WebviewToHost[]) { return sent.filter((m): m is Extract<WebviewToHost, { kind: 'edit.request' }> => m.kind === 'edit.request') }
 
 describe('纯文本粘贴纵向入口', () => {
   it('两操作统一注册，默认键可清空', () => {
@@ -44,13 +45,44 @@ describe('纯文本粘贴纵向入口', () => {
   })
   it('Ctrl+Shift+V 图片加文字只插入文本，提示引导、不投递宿主通知或图片', async () => {
     clipboard('**原文**', true)
-    const { view, app, sent } = mount()
+    const { view, app, sent, controller: c } = mount()
     view.dispatch({ selection: { anchor: 0, head: 3 } })
     expect(key(view, 'V', true).defaultPrevented).toBe(true)
     await settle()
     expect(view.state.doc.toString()).toBe('**原文**')
+    expect(app.querySelector('.vsidian-toast')).toBeNull()
+    c.handleHostMessage({ kind: 'edit.ack', seq: edits(sent)[0].seq, ok: true, version: 2 })
     expect(app.querySelector('.vsidian-toast')?.getAttribute('data-severity')).toBe('warning')
     expect(sent.some((m) => m.kind === 'image.paste')).toBe(false)
+  })
+  it.each(['error', 'conflict'] as const)('图片加文字遭宿主%s拒绝，不报告已粘贴，迟到成功ACK也不翻回成功', async reason => {
+    clipboard('新内容', true)
+    const { view, app, sent, controller: c } = mount()
+    view.dispatch({ selection: { anchor: 0, head: 3 } })
+    key(view, 'V', true); await settle()
+    expect(app.querySelector('.vsidian-toast')).toBeNull()
+    const seq = edits(sent)[0].seq
+    c.handleHostMessage({ kind: 'edit.ack', seq, ok: false, reason, version: 1, text: '旧文本' })
+    expect(view.state.doc.toString()).toBe('新内容')
+    expect(app.querySelector('.vsidian-toast')).toBeNull()
+    c.handleHostMessage({ kind: 'edit.ack', seq, ok: true, version: 2 })
+    expect(app.querySelector('.vsidian-toast')).toBeNull()
+  })
+  it('触碰未确认输入的粘贴提示只认本次实际ACK，切模式后已接纳输入仍保护', async () => {
+    clipboard('新内容', true)
+    const { view, app, sent, controller: c } = mount()
+    view.dispatch({ changes: { from: 0, insert: '先前输入' } })
+    view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } })
+    key(view, 'V', true); await settle()
+    expect(edits(sent)).toHaveLength(1)
+    expect(app.querySelector('.vsidian-toast')).toBeNull()
+    c.handleHostMessage({ kind: 'edit.ack', seq: edits(sent)[0].seq, ok: true, version: 2 })
+    expect(edits(sent)).toHaveLength(2)
+    expect(app.querySelector('.vsidian-toast')).toBeNull()
+    c.handleHostMessage({ kind: 'view.mode.set', mode: 'reading' })
+    expect(view.state.doc.toString()).toBe('新内容')
+    c.handleHostMessage({ kind: 'edit.ack', seq: edits(sent)[1].seq, ok: true, version: 3 })
+    expect(app.querySelector('.vsidian-toast')?.textContent).toContain('已粘贴文本')
   })
   it('图片无文本：无编辑；普通粘贴改绑后提示用新键位，清空则仅操作名', async () => {
     clipboard(undefined, true)
