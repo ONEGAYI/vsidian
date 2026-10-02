@@ -13268,52 +13268,68 @@ export const cases: Array<[string, () => Promise<void>]> = [
   // 丢弃/还原后覆盖层退役（getRenameOverlay → undefined），反链回基线。
   ['#270 dirty 丢弃与还原的覆盖层通用退役（面板/普通编辑器/revert）', async () => {
     await waitRenameIndexReady()
-    const uri = wsUri('rename-ref-a.md')
-    const overlayOf = () => vscode.commands.executeCommand(
-      'onegayi.vsidian._test.getRenameOverlay', uri.fsPath,
-    ) as Thenable<string[] | undefined>
-    const waitOverlayLink = (label: string) => poll(`${label}：覆盖层登记丢弃链接`, async () => {
-      const edges = await overlayOf()
-      return edges && edges.some((e) => e === 'rename-moved.md') ? edges : undefined
-    })
-    const waitOverlayRetired = (label: string) => poll(`${label}：丢弃/还原后覆盖层退役`, async () => {
-      const edges = await overlayOf()
-      return edges === undefined ? true : undefined
-    })
-    const insertLinkLine = async () => {
-      const edit = new vscode.WorkspaceEdit()
-      edit.insert(uri, new vscode.Position(0, 0), '丢弃链接 [[rename-moved]]\n')
-      assert(await vscode.workspace.applyEdit(edit), '插行应成功')
-    }
-    try {
-      // ---- A：Vsidian 面板 dirty 丢弃（close 事件路径——既有行为回归钉）----
-      await openWithEditor('rename-ref-a.md')
-      await waitSessionReady('rename-ref-a.md')
-      await insertLinkLine()
-      await waitOverlayLink('A 段')
-      await vscode.commands.executeCommand('workbench.action.closeAllEditors')
-      await waitOverlayRetired('A 段')
-
-      // ---- B：普通文本编辑器 dirty 丢弃（无 close 事件——通用信号主战场）----
-      await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri))
-      await insertLinkLine()
-      await waitOverlayLink('B 段')
-      await vscode.commands.executeCommand('workbench.action.closeAllEditors')
-      // 丢弃无保存/关闭事件：唯一退役通道是「转 clean 的 dirty-state 事件」
-      //（#270 修复）——修复前覆盖层持弃置链接残渣滞留，本断言超时转红
-      await waitOverlayRetired('B 段')
-
-      // ---- C：普通文本编辑器显式还原（revert：真内容 change + clean 事件）----
-      await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri))
-      await insertLinkLine()
-      await waitOverlayLink('C 段')
-      await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor')
-      await waitOverlayRetired('C 段')
-    } finally {
-      // 现场还原：关全部编辑器、写回原文（watcher 重扫归位盘面与索引）
-      await Promise.resolve(vscode.commands.executeCommand('workbench.action.closeAllEditors')).catch(() => {})
-      await Promise.resolve(vscode.workspace.fs.writeFile(uri, Buffer.from(RENAME_REF_A_DOC_TEXT, 'utf8'))).catch(() => {})
-      await new Promise((r) => setTimeout(r, 1400))
+    // #309：closeAllEditors 的 soft revert 只清 dirty；普通编辑器重开又会
+    // 异步 reload。复用同一 buffer 会让后段插入与 reload 竞争，甚至叠加
+    // 前段未丢弃的正文。每段独占无盘面引用的 fixture，保持三条退役路径独立。
+    const scenarios = [
+      ['A 段', 'overlay-discard-custom.md', true, 'workbench.action.closeAllEditors'],
+      ['B 段', 'overlay-discard-native.md', false, 'workbench.action.closeAllEditors'],
+      ['C 段', 'overlay-revert-native.md', false, 'workbench.action.revertAndCloseActiveEditor'],
+    ] as const
+    for (const [label, file, custom, closeCommand] of scenarios) {
+      const uri = wsUri(file)
+      const baseline = '# Overlay retirement\n'
+      const inserted = '丢弃链接 [[rename-moved]]\n'
+      const overlayOf = () => vscode.commands.executeCommand(
+        'onegayi.vsidian._test.getRenameOverlay', uri.fsPath,
+      ) as Thenable<string[] | undefined>
+      let closed = false
+      const closeListener = vscode.workspace.onDidCloseTextDocument((doc) => {
+        if (doc.uri.toString() === uri.toString()) closed = true
+      })
+      try {
+        assert(await readDisk(file) === baseline, `${label}：盘面应为独立初始正文`)
+        assert(await overlayOf() === undefined, `${label}：初始覆盖层应缺席`)
+        if (custom) {
+          await openWithEditor(file)
+          await waitSessionReady(file)
+        } else {
+          await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri))
+        }
+        // custom 侧只取已装载文档；额外 openTextDocument 会持有模型引用，
+        // 改变关闭后的生命周期，把 A 段也变成 B 段的常驻文档路径。
+        const doc = vscode.workspace.textDocuments.find((candidate) => candidate.uri.toString() === uri.toString())!
+        assert(doc !== undefined, `${label}：编辑器应已装载文档`)
+        assert(!doc.isDirty && doc.getText() === baseline, `${label}：插入前应为 clean 初始正文`)
+        const edit = new vscode.WorkspaceEdit()
+        edit.insert(uri, new vscode.Position(0, 0), inserted)
+        assert(await vscode.workspace.applyEdit(edit), `${label}：插行应成功`)
+        assert(doc.isDirty && doc.getText() === inserted + baseline, `${label}：未保存插入应精确应用一次`)
+        await poll(`${label}：覆盖层登记丢弃链接`, async () => {
+          const edges = await overlayOf()
+          return edges?.includes('rename-moved.md') ? true : undefined
+        })
+        await vscode.commands.executeCommand(closeCommand)
+        await poll(`${label}：丢弃/还原后覆盖层退役`, async () =>
+          await overlayOf() === undefined ? true : undefined)
+        assert(await readDisk(file) === baseline, `${label}：丢弃不得写盘`)
+        if (custom) {
+          await poll('A 段：面板关闭后文档 close 事件到达', async () =>
+            closed && doc.isClosed ? true : undefined)
+        }
+        if (label === 'B 段') {
+          // 不允许以 documentClosed 清理替代 #270 的 clean 事件路径。
+          assert(!closed && !doc.isClosed && vscode.workspace.textDocuments.includes(doc),
+            'B 段：普通编辑器丢弃后文档应仍装载且未发 close 事件')
+          assert(!doc.isDirty, 'B 段：文档应已转 clean')
+        }
+        if (label === 'C 段') {
+          assert(doc.getText() === baseline, 'C 段：显式还原应恢复初始正文')
+        }
+      } finally {
+        closeListener.dispose()
+        await Promise.resolve(vscode.commands.executeCommand('workbench.action.closeAllEditors')).catch(() => {})
+      }
     }
   }],
 
