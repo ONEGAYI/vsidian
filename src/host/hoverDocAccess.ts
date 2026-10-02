@@ -21,15 +21,16 @@
 //   未保存修改天然可见；不创建每引用 WebviewPanel）；
 // - LF 坐标经 NewlineCoordinator 转换（webview 全程 LF）。
 //
-// #219 局部范围：结果携带语义范围选择器（scope：full/heading/block——
-// 锚点形态与链接形态无关，双链 `[[笔记#锚]]` 与普通链接 `[x](笔记.md#锚)`
-// 归同一选择器）+ LF 源范围。章节/块边界复用 wikilinkTarget 的完整范围
-// 函数（findHeadingSectionRange / findBlockRange——与跳转定位函数
+// #219 起结果携带语义选择器（scope：full/heading/block——锚点形态与链接
+// 形态无关，双链 `[[笔记#锚]]` 与普通链接 `[x](笔记.md#锚)` 归同一选择器）
+// + LF 锚定区间。章节/块边界复用 wikilinkTarget 的完整范围函数
+// （findHeadingSectionRange / findBlockRange——与跳转定位函数
 // findHeadingOffset / findBlockOffset 共享匹配口径但互不替代：跳转要
-// 落点行区间，预览要完整区间）。**全文随范围一起返回**（保留全文解析
-// 上下文——范围选取在渲染侧切块后按块区间过滤做，本层不孤立解析截取
-// 字符串）；目标文件在但锚点不存在 → anchor-missing 分态（携带锚点
-// 原文供就地提示，不以全文替代）。
+// 落点行区间，预览要完整区间）。**全文随结果一起返回**（P2-03 #280，
+// ADR-0011：内容范围恒为目标全文，锚点区间只作初始定位点——渲染侧不
+// 再按区间过滤）；目标文件在但锚点不存在 → anchor-missing 分态（携带锚点
+// 原文供就地提示，不以全文替代；刷新重载 anchorOptional 时例外——已打开
+// 实例继续可用，重开再验证）。
 //
 // 本模块不依赖 vscode（node 单测直驱；vscode 层装配在 textEditorProvider）。
 import * as path from 'node:path'
@@ -100,14 +101,18 @@ function scopeOf(spec: AnchorSpec): HoverPreviewScope {
     : { kind: 'block', anchor: `^${spec.anchor}` }
 }
 
-/** 读取目标正文并按锚点规格收窄范围（双链与普通链接共用收尾）：
- *  锚点命中 → LF 换算后的区间；锚点缺失 → anchor-missing 分态（不以
- *  全文替代）；无锚点 → 全文与 full 选择器 */
+/** 读取目标正文并定位锚点（双链与普通链接共用收尾）：内容范围恒为全文
+ *  （P2-03 #280，ADR-0011——标题/块引用全文可达）；锚点命中 → LF 换算的
+ *  **初始定位区间**（不再是内容边界）；锚点缺失 → anchor-missing 分态
+ *  （不以全文替代，重开再验证）；anchorOptional（刷新重载）时锚点缺失
+ *  不构成失败——回成功全文，定位区间退化为全文区间（已打开实例继续
+ *  可用）；无锚点 → 全文与 full 选择器 */
 async function readAndScope(
   fsPath: string,
   spec: AnchorSpec | null,
   ctx: HoverDocAccessContext,
   ports: HoverDocAccessPorts,
+  opts?: { anchorOptional?: boolean },
 ): Promise<HoverReadOutcome> {
   if (!isMarkdownPath(fsPath)) {
     // 一期只接 Markdown；图片/附件等目标不读取正文（#220/#223+ 再扩）
@@ -133,6 +138,10 @@ async function readAndScope(
     ? findHeadingSectionRange(doc.text, spec.anchor)
     : findBlockRange(doc.text, spec.anchor)
   if (hostRange === null) {
+    // P2-03 刷新宽容：已打开实例重载时锚点缺失不切成错误页（重开再验证）
+    if (opts?.anchorOptional === true) {
+      return { ok: true, ...identity, range: { start: 0, end: lfText.length }, scope: scopeOf(spec) }
+    }
     return { ok: false, reason: 'anchor-missing', anchor: spec.kind === 'block' ? `^${spec.anchor}` : spec.anchor }
   }
   return {
@@ -170,8 +179,15 @@ function anchorSpecOfFragment(fragment: string | null): AnchorSpec | null {
   return { kind: 'heading', anchor: fragment }
 }
 
+/** 读取选项（P2-03 #280）：anchorOptional = 刷新重载宽容——已打开实例的
+ *  重载在锚点缺失时仍回成功全文（重开再验证原锚点，见 readAndScope） */
+export interface HoverReadOpts {
+  anchorOptional?: boolean
+}
+
 /**
- * 读取悬停双链的目标文档（#218 全文路径；#219 起锚点收窄为章节/块）。
+ * 读取悬停双链的目标文档（#218 全文路径；#219 起锚点收窄为章节/块；
+ *  P2-03 起锚点只决定初始定位区间，内容范围恒全文）。
  *
  * rawTarget 为 `[[` 与 `]]` 之间、`|` 之前的原文（未 trim——parseWikilinkInner
  * 自带规范化）。全程无副作用：不 openWith、不定位、不提示、不写文档。
@@ -180,6 +196,7 @@ export async function readHoverDocTarget(
   rawTarget: string,
   ctx: HoverDocAccessContext,
   ports: HoverDocAccessPorts,
+  opts?: HoverReadOpts,
 ): Promise<HoverReadOutcome> {
   const parsed = parseWikilinkInner(rawTarget.trim())
   if (!parsed) {
@@ -202,7 +219,7 @@ export async function readHoverDocTarget(
     }
     fsPath = resolution.fsPath
   }
-  return readAndScope(fsPath, anchorSpecOfWikilink(parsed), ctx, ports)
+  return readAndScope(fsPath, anchorSpecOfWikilink(parsed), ctx, ports, opts)
 }
 
 /**
@@ -219,6 +236,7 @@ export async function readHoverMdLinkTarget(
   href: string,
   ctx: HoverDocAccessContext,
   ports: HoverDocAccessPorts,
+  opts?: HoverReadOpts,
 ): Promise<HoverReadOutcome> {
   const classified = classifyLinkTarget(href, {
     docDir: ctx.resolve.docDir,
@@ -255,7 +273,7 @@ export async function readHoverMdLinkTarget(
     }
     fsPath = resolution.fsPath
   }
-  return readAndScope(fsPath, anchorSpecOfFragment(classified.fragment), ctx, ports)
+  return readAndScope(fsPath, anchorSpecOfFragment(classified.fragment), ctx, ports, opts)
 }
 
 /**
@@ -384,6 +402,7 @@ export async function readHoverDirectTarget(
   direct: { fsPath: string; anchor?: string },
   ctx: HoverDocAccessContext,
   ports: HoverDocAccessPorts,
+  opts?: HoverReadOpts,
 ): Promise<HoverReadOutcome> {
   if (direct.fsPath === '') {
     return { ok: false, reason: 'not-found' }
@@ -397,5 +416,5 @@ export async function readHoverDirectTarget(
     return { ok: false, reason: 'escape' }
   }
   const spec = direct.anchor ? anchorSpecOfFragment(direct.anchor) : null
-  return readAndScope(direct.fsPath, spec, ctx, ports)
+  return readAndScope(direct.fsPath, spec, ctx, ports, opts)
 }

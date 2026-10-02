@@ -283,40 +283,47 @@ try {
     }),
     { reqId: req.reqId, instanceId: req.instanceId, text: TARGET_DOC, range, scope })
 
-  // ---- 场景 H：标题章节双链——只渲染章节内块（切块后过滤，非截字符串）----
+  // ---- 场景 H：标题章节双链——全文可达 + 首开定位到锚点（P2-03 #280）----
   await hoverNthWikilink(1)
   const hReq = await lastRequest()
   assert.equal(hReq.target, '目标笔记#章节一', '章节双链 target 为原文')
   assert.equal(hReq.linkHref, undefined, '双链不携带 linkHref')
   await respondScoped(hReq, SECTION_ONE_RANGE, { kind: 'heading', anchor: '章节一' })
-  await page.waitForTimeout(120)
+  await page.waitForTimeout(200)
   popup = await page.evaluate(() => window.readHoverPopup())
   assert.ok(popup.open, '章节预览浮层在场')
   assert.ok(popup.hitInside, '章节内容绘制层可见（命中浮层内）')
   assert.ok(popup.text.includes('章节一'), `应含目标标题（实际 ${popup.text.slice(0, 80)}）`)
   assert.ok(popup.text.includes('章节一段落'), '应含章节内段落')
-  assert.ok(!popup.text.includes('目标笔记全文标题'), '章节外的顶部标题不得出现')
-  assert.ok(!popup.text.includes('章节二段落'), '下一章节内容不得出现')
-  assert.deepEqual(popup.listItems, ['章节列表一', '章节列表二'],
-    `章节内列表整取且全文顶部任务列表被过滤（实际 ${JSON.stringify(popup.listItems)}）`)
+  // P2-03：内容范围恒全文——锚点前后的内容都在场
+  assert.ok(popup.text.includes('目标笔记全文标题'), '锚点前的顶部标题同样在场（全文可达）')
+  assert.ok(popup.text.includes('章节二段落'), '锚点区间之后的下一章节同样在场')
+  assert.deepEqual(popup.listItems, ['待办一', '已完成项', '章节列表一', '章节列表二'],
+    `全文渲染含顶部任务列表与章节列表（实际 ${JSON.stringify(popup.listItems)}）`)
+  // 首开定位：锚点区间起点 > 0（24 段正文在前）→ 初始滚动位置非零
+  const hViewport = await page.evaluate(() => window.hoverViewportSnapshot())
+  assert.ok(hViewport.scrollTop > 0, `首开应定位到锚点（scrollTop=${hViewport.scrollTop}）`)
   await page.keyboard.press('Escape')
   passed++
-  console.log('[悬停预览][PASS] 标题章节双链：章节内块渲染（含列表）、章节外内容过滤')
+  console.log('[悬停预览][PASS] 标题章节双链：全文可达 + 首开定位到锚点')
 
-  // ---- 场景 I：块引用双链——多行块整取（列表不截首行）----
+  // ---- 场景 I：块引用双链——全文可达 + 首开定位（P2-03 #280）----
   await hoverNthWikilink(2)
   const iReq = await lastRequest()
   assert.equal(iReq.target, '目标笔记#^multi-blk')
   await respondScoped(iReq, MULTI_BLOCK_RANGE, { kind: 'block', anchor: '^multi-blk' })
-  await page.waitForTimeout(120)
+  await page.waitForTimeout(200)
   popup = await page.evaluate(() => window.readHoverPopup())
   assert.ok(popup.open, '块预览浮层在场')
-  assert.deepEqual(popup.listItems, ['章节列表一', '章节列表二'],
-    `多行列表块整取——不得截成首行（实际 ${JSON.stringify(popup.listItems)}）`)
-  assert.ok(!popup.text.includes('章节一段落'), '块外内容不得出现')
+  assert.ok(popup.text.includes('待办一') && popup.text.includes('章节二段落'),
+    `块引用同样全文可达（实际 ${popup.text.slice(0, 80)}）`)
+  assert.deepEqual(popup.listItems, ['待办一', '已完成项', '章节列表一', '章节列表二'],
+    `全文渲染含全部列表项（实际 ${JSON.stringify(popup.listItems)}）`)
+  const iViewport = await page.evaluate(() => window.hoverViewportSnapshot())
+  assert.ok(iViewport.scrollTop > 0, `块引用首开定位到锚点（scrollTop=${iViewport.scrollTop}）`)
   await page.keyboard.press('Escape')
   passed++
-  console.log('[悬停预览][PASS] 块引用双链：完整多行块（列表两项整取、块外过滤）')
+  console.log('[悬停预览][PASS] 块引用双链：全文可达 + 首开定位')
 
   // ---- 场景 J：普通链接全文——linkHref 载荷与 DOM href 保真 ----
   const fullLink = page.locator('a').filter({ hasText: '全文链接' })
@@ -336,7 +343,7 @@ try {
   passed++
   console.log('[悬停预览][PASS] 普通链接全文：linkHref 载荷保真 + 全文渲染')
 
-  // ---- 场景 K：普通链接章节锚点——fragment 目标同样收窄 ----
+  // ---- 场景 K：普通链接章节锚点——fragment 同样全文可达 + 定位（P2-03）----
   const sectionLink = page.locator('a').filter({ hasText: '章节链接' })
   await sectionLink.scrollIntoViewIfNeeded()
   await sectionLink.hover()
@@ -345,13 +352,15 @@ try {
   const kHref = await sectionLink.evaluate((el) => el.getAttribute('href'))
   assert.equal(kReq.linkHref, kHref, `章节链接 linkHref 应为 DOM href 原文（实际 ${kReq.linkHref}）`)
   await respondScoped(kReq, SECTION_ONE_RANGE, { kind: 'heading', anchor: '章节一' })
-  await page.waitForTimeout(120)
+  await page.waitForTimeout(200)
   popup = await page.evaluate(() => window.readHoverPopup())
   assert.ok(popup.open && popup.text.includes('章节一段落'), '链接章节预览在场')
-  assert.ok(!popup.text.includes('章节二段落'), '章节外内容过滤')
+  assert.ok(popup.text.includes('章节二段落'), '链接章节锚点同样全文可达')
+  const kViewport = await page.evaluate(() => window.hoverViewportSnapshot())
+  assert.ok(kViewport.scrollTop > 0, `链接章节首开定位到锚点（scrollTop=${kViewport.scrollTop}）`)
   await page.keyboard.press('Escape')
   passed++
-  console.log('[悬停预览][PASS] 普通链接章节锚点：fragment 目标收窄渲染')
+  console.log('[悬停预览][PASS] 普通链接章节锚点：fragment 全文可达 + 首开定位')
 
   // ---- 场景 L：外部链接预滤——不开浮层、零请求 ----
   const requestsBefore = (await page.evaluate(() =>

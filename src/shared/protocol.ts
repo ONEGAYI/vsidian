@@ -458,11 +458,12 @@ export type HostToWebview =
     }
   /** 悬停文档预览结果（#218，hover.request 的应答，reqId+instanceId 双配对）：
    *  成功携带规范目标身份（fsPath + 所属根内相对路径）、目标版本
-   *  （TextDocument.version，#224 变更刷新的版本基准）、LF UTF-16 全文与
-   *  源范围、语义范围选择器（#219 起 full 全文 / heading 章节 / block 块；
-   *  全文随范围一起返回是「保留全文解析上下文再选取范围」的载荷形态，
-   *  webview 切范围在切块后按块区间过滤，不孤立解析截取字符串）。失败附
-   *  原因码（错误分态见 HoverPreviewFailReason；anchor-missing 附锚点原文）
+   *  （TextDocument.version，#224 变更刷新的版本基准）与 LF UTF-16 全文。
+   *  P2-03（#280，ADR-0011）起内容范围恒为目标全文；range 语义改为**初始
+   *  定位区间**（锚点命中的 LF 区间，heading/block 首开定位到 start；full
+   *  或刷新宽容锚点缺失时为全文区间 [0, length]），scope 保留语义选择器
+   *  （引用身份与观测探针用），两者均不再是内容或编辑边界。失败附原因码
+   *  （错误分态见 HoverPreviewFailReason；anchor-missing 附锚点原文）
    *  ——webview 就地 i18n 呈现，不弹宿主通知。只读消息：宿主不写任何文档 */
   | {
       kind: 'hover.result'
@@ -472,6 +473,7 @@ export type HostToWebview =
       target: HoverPreviewTargetIdentity
       version: number
       text: string
+      /** 初始定位区间（LF 坐标；锚点命中的锚定区间，full/宽容退化为全文区间） */
       range: { start: number; end: number }
       scope: HoverPreviewScope
       /** #244 Host-authenticated expansion ancestry, including root A. */
@@ -900,6 +902,11 @@ export type WebviewToHost =
        *  not-found 分态——条目仍可悬停显示失效占位）。target 字段此时为
        *  条目显示名（错误分态文案的取材） */
       directTarget?: { fsPath: string; anchor?: string }
+      /** P2-03（#280，ADR-0011）刷新宽容：已打开实例重载（hover.invalidated
+       *  changed 驱动的同实例重发 / 版本仲裁自愈重发）置 true——宿主锚点
+       *  缺失不构成失败，回成功全文（range 退化为全文区间，无初始定位点）。
+       *  首开不带本字段：锚点缺失仍 anchor-missing 分态（重开再验证原锚点） */
+      anchorOptional?: boolean
     }
   /** 悬停目标订阅（#224 引用视图同步，只读消息）：webview 侧视图实例
    *  （浮层/嵌入卡片）成功装载目标后登记——宿主对该目标的文档修改与磁盘
@@ -1167,7 +1174,8 @@ export interface HoverPreviewTargetIdentity {
 /** 悬停预览语义范围选择器（#218 一期全文；#219 扩展标题章节与块——
  *  锚点语义与链接形态无关：双链 `[[笔记#锚]]` 与普通链接 `[x](笔记.md#锚)`
  *  归同一选择器。anchor：标题原文或带 ^ 前缀的块 id（与
- *  OutlinkItemPayload.anchor 同口径） */
+ *  OutlinkItemPayload.anchor 同口径）。P2-03（#280）起只作初始定位与
+ *  引用身份标识，不再是内容、授权或编辑边界——内容范围恒为目标全文） */
 export type HoverPreviewScope =
   | { kind: 'full' }
   | { kind: 'heading'; anchor: string }
@@ -2924,7 +2932,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         (v.directTarget === undefined ||
           (isObject(v.directTarget) &&
             isString(v.directTarget.fsPath) &&
-            (v.directTarget.anchor === undefined || isString(v.directTarget.anchor))))
+            (v.directTarget.anchor === undefined || isString(v.directTarget.anchor)))) &&
+        (v.anchorOptional === undefined || typeof v.anchorOptional === 'boolean')
       )
     case 'hover.watch':
     case 'hover.unwatch':

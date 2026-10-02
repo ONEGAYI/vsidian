@@ -616,6 +616,8 @@ describe('#224 嵌入卡片：订阅、失效分态与有界状态库', () => {
     expect(manager.probe()[0]!.state).toBe('content')
     expect(sent.filter((m) => m.kind === 'hover.request')).toHaveLength(requestsBefore + 1)
     const refresh = hoverRequestOf(sent)
+    // P2-03 刷新宽容：已打开实例的重载不因锚点缺失切成错误页
+    expect(refresh.anchorOptional).toBe(true)
     // 旧 reqId 迟到回包丢弃（lastReq 已更新）
     const requests = sent.filter((m) => m.kind === 'hover.request')
     const first = requests[0]!

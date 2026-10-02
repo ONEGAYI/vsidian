@@ -254,6 +254,9 @@ interface PanelEntry {
 interface HoverSourceGrant {
   fsPath: string
   version: number
+  /** P2-03（#280）：初始定位区间参考（锚点命中的锚定区间；宽容重载为全文
+   *  区间）——子引用准入已不以它为界（validChildSource 按来源全文校验），
+   *  仅随租约保留定位语义 */
   range: { start: number; end: number }
   scope: HoverPreviewScope
   path: string[]
@@ -276,13 +279,16 @@ const HOVER_SOURCES_LIMIT = 64
 const IMAGE_SRC_TARGET_LIMIT = 256
 
 /** #224 悬停读取缓存的请求形态键（「按规范目标、范围区分」的形态近似：
- * 三种目标形态互斥——直接目标 / 普通链接 href / 双链 target 原文；范围
- * 锚点已含在各自原文内） */
+ *  三种目标形态互斥——直接目标 / 普通链接 href / 双链 target 原文；范围
+ *  锚点已含在各自原文内。P2-03（#280）anchorOptional 并入：刷新宽容
+ *  读取（锚点缺失回成功全文）与严格读取（anchor-missing 分态）的结果
+ *  形态不同，不得共享缓存条目——宽容成功被严格首开命中会跳过锚点验证，
+ *  严格失败缓存（不缓存，天然隔离）反向亦然 */
 function hoverShapeKeyOf(
-  message: Pick<HoverPreviewRequestPayload, 'target' | 'linkHref' | 'directTarget'>,
+  message: Pick<HoverPreviewRequestPayload, 'target' | 'linkHref' | 'directTarget' | 'anchorOptional'>,
   source?: { fsPath: string; version: number },
 ): string {
-  const prefix = source ? `s:${source.fsPath}\n${source.version}\n` : ''
+  const prefix = `${source ? `s:${source.fsPath}\n${source.version}\n` : ''}${message.anchorOptional === true ? 'a:' : ''}`
   if (message.directTarget !== undefined) {
     return `${prefix}d:${message.directTarget.fsPath}\n${message.directTarget.anchor ?? ''}`
   }
@@ -1052,11 +1058,17 @@ export class DocumentSession {
           if (message.source !== undefined && panel.hoverParentGrants.get(message.source.parentInstanceId) !== parent) {
             result = { ok: false, reason: 'source-expired' }
           }
+          // P2-03（#280，ADR-0011）：祖先循环按规范目标文档身份判定——不同
+          // 锚点不能绕过祖先循环，同目标兄弟 occurrence 仍合法。判定只对
+          // **链上子引用**（带来源）生效：第一跳（无 parent）不判循环——
+          // 页内锚点/自文档引用合法打开（目标即来源文档自身，一期 #219 契约
+          // 保持）；其内容中的再引用在链上按文档身份截断（深度与预算兜底）。
+          // grant.path/expansionPath 仍从根面板起算——B→A 回指在链上可见。
           const pathToParent = parent?.path ?? [canonicalRefTargetKey(
-            this.options.rootFsPath ?? this.docUri, { kind: 'full' }, this.options.isWindowsHost ?? false)]
+            this.options.rootFsPath ?? this.docUri, this.options.isWindowsHost ?? false)]
           if (result.ok) {
-            const key = canonicalRefTargetKey(result.fsPath, result.scope, this.options.isWindowsHost ?? false)
-            if (occurrenceId !== undefined && inExpansionPath(pathToParent, key)) result = { ok: false, reason: 'cycle' }
+            const key = canonicalRefTargetKey(result.fsPath, this.options.isWindowsHost ?? false)
+            if (parent !== undefined && occurrenceId !== undefined && inExpansionPath(pathToParent, key)) result = { ok: false, reason: 'cycle' }
             else if (occurrenceId !== undefined && panel.expansionBudget.attachContent(
               occurrenceId, `${occurrenceId}\n${result.fsPath}\n${result.version}`,
               result.lfText.length * 2 + 128) !== 'ok') {
@@ -1070,7 +1082,7 @@ export class DocumentSession {
               panel.hoverSourceLeases.set(sourceLeaseId, result.fsPath)
               panel.hoverLeaseGrants.set(sourceLeaseId, {
                 fsPath: result.fsPath, version: result.version, range: result.range, scope: result.scope,
-                path: [...pathToParent, canonicalRefTargetKey(result.fsPath, result.scope, this.options.isWindowsHost ?? false)],
+                path: [...pathToParent, canonicalRefTargetKey(result.fsPath, this.options.isWindowsHost ?? false)],
                 depth, treeId, occurrenceId: occurrenceId ?? '',
               })
             }
@@ -1103,7 +1115,7 @@ export class DocumentSession {
                   text: result.lfText,
                   range: result.range,
                   scope: result.scope,
-                  expansionPath: [...pathToParent, canonicalRefTargetKey(result.fsPath, result.scope,
+                  expansionPath: [...pathToParent, canonicalRefTargetKey(result.fsPath,
                     this.options.isWindowsHost ?? false)],
                   depth,
                   ...(sourceLeaseId !== undefined ? { sourceLeaseId } : {}),

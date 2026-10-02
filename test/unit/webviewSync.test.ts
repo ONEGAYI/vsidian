@@ -1137,7 +1137,7 @@ it('#245 悬停 B→C→D 递归并在关闭时退订整树，迟到叶回包只
   }
 })
 
-it.each(['heading', 'block'] as const)('#245 悬停 B 的 %s 范围只挂范围内 C，仍带全文来源坐标', (scope) => {
+it.each(['heading', 'block'] as const)('#245/P2-03 悬停 B 的 %s 引用全文可达：范围内外的 C/D 都挂载，来源坐标仍为全文系', (scope) => {
   const height = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
     return this.classList.contains('vsidian-hover-popup-scroll') ? 400 : 0
   })
@@ -1152,6 +1152,7 @@ it.each(['heading', 'block'] as const)('#245 悬停 B 的 %s 范围只挂范围�
       m.kind === 'hover.request' && m.target === 'B')!
     const text = '# One\n\n![[C]]\n\n# Two\n\n![[D]]\n'
     const start = text.indexOf('![[C]]')
+    const dStart = text.indexOf('![[D]]')
     c.handleHostMessage({ kind: 'hover.result', instanceId: root.instanceId, reqId: root.reqId,
       ok: true, sourceLeaseId: `scope-${scope}`,
       target: { fsPath: 'D:/notes/B.md', relPath: 'B.md' },
@@ -1162,8 +1163,11 @@ it.each(['heading', 'block'] as const)('#245 悬停 B 的 %s 范围只挂范围�
         : { kind: 'block', anchor: 'one-block' }, depth: 1 })
     const children = sent.filter((m): m is Extract<WebviewToHost, { kind: 'hover.request' }> =>
       m.kind === 'hover.request' && m.target !== 'B')
-    expect(children.map((m) => m.target)).toEqual(['C'])
+    // P2-03（#280）：内容范围恒全文——初始锚点区间外的 D 同样挂载展开
+    expect(children.map((m) => m.target)).toEqual(['C', 'D'])
     expect(children[0]).toMatchObject({ sourceStart: start, sourceEnd: start + 6,
+      source: { parentInstanceId: root.occurrenceId, sourceDocUri: 'D:/notes/B.md' } })
+    expect(children[1]).toMatchObject({ sourceStart: dStart, sourceEnd: dStart + 6,
       source: { parentInstanceId: root.occurrenceId, sourceDocUri: 'D:/notes/B.md' } })
   } finally {
     closeHoverPopup()

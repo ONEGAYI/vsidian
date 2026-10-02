@@ -910,6 +910,9 @@ export function notifyHoverInvalidated(message: {
     context.send({
       kind: 'hover.request',
       retainSource: true,
+      // P2-03（#280）：已打开实例的刷新重载不因锚点缺失切成错误页——
+      // 宿主宽容读取（锚点缺失回成功全文）；重开（新实例）再严格验证
+      anchorOptional: true,
       sessionId: session.sessionId,
       docUri: session.docUri,
       reqId: state.reqId,
