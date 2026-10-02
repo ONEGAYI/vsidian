@@ -28,6 +28,8 @@ const docText = [
 
 const browser = await chromium.launch({ headless: true,
   channel: process.env.VSIDIAN_TEST_BROWSER_CHANNEL || undefined })
+let diagnosticPage
+const pageErrors = []
 
 async function liveHeadingColor(page) {
   return page.evaluate(() => {
@@ -89,16 +91,32 @@ async function waitFor(fn, label, timeout = 8000) {
   for (;;) {
     const value = await fn()
     if (value !== undefined && value !== false && value !== null) return value
-    if (Date.now() - start > timeout) throw new Error(`等待超时：${label}（当前值 ${JSON.stringify(value)}）`)
+    if (Date.now() - start > timeout) {
+      // 先保存现场再抛原等待错误；诊断不重试、不主动唤醒视口或改滚动位置。
+      try {
+        let timer
+        const snapshot = await Promise.race([
+          diagnosticPage?.evaluate(() => window.snipDiagnostics()),
+          new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('诊断快照超时')), 1000) }),
+        ]).finally(() => clearTimeout(timer))
+        console.error(`[browser][DIAGNOSTICS] ${JSON.stringify({ label, value, pageErrors, snapshot })}`)
+      } catch (error) {
+        console.error('[browser][DIAGNOSTICS-ERROR]', error)
+      }
+      throw new Error(`等待超时：${label}（当前值 ${JSON.stringify(value)}）`)
+    }
     await new Promise((r) => setTimeout(r, 100))
   }
 }
 
 try {
   const page = await browser.newPage({ viewport: { width: 640, height: 480 } })
+  diagnosticPage = page
+  page.on('pageerror', (error) => { if (pageErrors.length < 16) pageErrors.push(error.message.slice(0, 500)) })
   await page.setContent('<div id="app"></div>')
   await page.addStyleTag({ path: output.replace(/\.js$/, '.css') })
   await page.addScriptTag({ path: output })
+  await page.evaluate(() => window.enableDiagnostics())
   await page.evaluate((text) => window.initSnip(text), docText)
   await waitFor(() => page.evaluate(() =>
     document.querySelector('.vsidian-heading-line-1') !== null), 'live 标题行渲染')

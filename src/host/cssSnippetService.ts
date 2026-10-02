@@ -34,6 +34,7 @@ import {
 } from '../shared/cssSnippets'
 import { readStoredCssSnippetBucket } from '../shared/cssSnippetEnv'
 import { analyzeSnippetEntry, normalizeSnippetPath } from '../shared/cssSnippetImports'
+import { TestDiagnostics } from '../shared/testDiagnostics'
 
 /** 持久层抽象（与 SettingsService/KeybindingService 同形；vscode 层用
  *  context.globalState 实现） */
@@ -111,6 +112,10 @@ function sameNameSet(a: readonly string[], b: readonly string[]): boolean {
 }
 
 export class CssSnippetService {
+  private readonly diagnostics = new TestDiagnostics()
+  /** 仅由宿主测试钩子启用；不开额外 watcher，不读取 CSS 正文。 */
+  setTestDiagnostics(enabled: boolean): void { this.diagnostics.reset(enabled) }
+  getTestDiagnostics(): ReturnType<TestDiagnostics['snapshot']> { return this.diagnostics.snapshot() }
   private readonly listeners = new Set<(state: CssSnippetState, reason: CssSnippetChangeReason) => void>()
   private stored: StoredCssSnippetState
   /** 最近成功扫描的文件名清单（读取失败时保留） */
@@ -308,6 +313,7 @@ export class CssSnippetService {
    * （保守全量重扫）。
    */
   notifyFsEvent(changedPath: string | null): void {
+    this.diagnostics.record('snippets.fs', { path: changedPath, disposed: this.disposed })
     if (this.disposed) {
       return
     }
@@ -563,6 +569,8 @@ export class CssSnippetService {
 
   private notify(reason: CssSnippetChangeReason): void {
     const state = this.getState()
+    if (this.diagnostics.enabled) this.diagnostics.record('snippets.state', { reason, version: state.version,
+      entries: this.getLinkItems().map((item) => `${item.name}:${item.v}`).join('|') })
     for (const listener of this.listeners) {
       listener(state, reason)
     }

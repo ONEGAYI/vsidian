@@ -32,4 +32,15 @@ Object.assign(window, {
     controller.handleHostMessage({ kind: 'snippets.snapshot', version, snippets })
   },
   snipSent() { return sent },
+  enableDiagnostics() { controller.handleHostMessage({ kind: 'diagnostics.test.set', enabled: true }) },
+  snipDiagnostics() {
+    controller.handleHostMessage({ kind: 'view.state.request' })
+    const state = [...sent].reverse().find((value) => (value as { kind?: string }).kind === 'view.state') as {
+      diagnostics?: unknown; readingTotalBlocks?: number; readingMountedBlocks?: number
+      readingScrollTopPx?: number; readingScrollHeightPx?: number; viewMode?: string
+    } | undefined
+    return { trace: state?.diagnostics, mode: state?.viewMode, blocks: state?.readingTotalBlocks,
+      mounted: state?.readingMountedBlocks, top: state?.readingScrollTopPx, height: state?.readingScrollHeightPx,
+      headings: document.querySelectorAll('.vsidian-reading-heading-1').length }
+  },
 })

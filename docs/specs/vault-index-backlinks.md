@@ -441,3 +441,44 @@ provider 的 `onDidChangeTextDocument` 索引接线内：**空 contentChanges �
 - 集成契约：`#270` 用例三段（Vsidian 面板丢弃=close 路径回归钉 / 普通编辑器丢弃=通用信号主战场，修复前红 / revert）断言丢弃与还原后 `getRenameOverlay` → undefined（反链回基线）。红态形态经修复前运行实测（A 段绿、B 段超时红）。
 - 残余边界（review-loops 轮补记）：其一，「clean 但 buffer 陈旧」的滞留实例若被用户再次编辑，applyUnsaved 会从陈旧 buffer 重新登记覆盖层——宿主模型怪象，索引按「未保存内容即时反映」跟随 buffer，重开文件即自愈；不为它加复杂度。其二，**丢弃瞬间的约 300ms 幽灵窗**：clean 信号到达时索引分支先经 applyUnsaved 把「buffer 残留的弃置文本」重新登记暂存并布防 500ms 冲刷——冲刷把弃置链接重建进覆盖层，晚于冲刷的 800ms 宽限退役才清除；窗口 [clean+500ms, clean+800ms] 内反链/更名候选可见弃置链接的瞬态虚影，终态必正确（宽限退役无遗漏路径）。消除需在 scheduleCleanRetire 时同步清 unsaved 暂存与冲刷定时器——触碰「未保存内容即时反映」的既有无条件入口、增加与在途冲刷的仲裁，与瞬态影响不相称，不做。
 - #256「已知边界（残余）」的「dirty 面板残渣产品侧根治未做」条目由本票关闭。
+
+## #276 单宿主前序失败追查（2026-10-02）
+
+**归因是 #269 回归用例复用了 #199 的现场，起始前提并未恢复**。本轮在基线 `03efef0`、Windows 1.82.3 独立便携宿主复现单宿主 core 原始失败；无需整套前序，只保留「#199 多边型改写与撤销 → #199 漂移保护与叠加改写 → #269 连续 rename」三项即可失败。分别去掉前两项中的任意一项时，剩下两项都通过。
+
+### 宿主与索引的实际顺序
+
+定向探针同时观测宿主 buffer、磁盘文本、覆盖层、重扫抽边与 rename 日志（`276-b-lifecycle-probe-host.log`）；断链的 `outgoing` 不能直接当作基线边，本轮另在重扫入口记录基线抽取结果。
+
+1. 前序关闭标签并外部写回原文后，引用甲仍是**无标签 dirty 装载实例**：buffer 持 `改名目标2`，磁盘持原名。索引保留其未保存内容的覆盖层符合现有接管语义；关闭标签不保证装载实例退场。
+2. 引用乙最终写回原文产生 version 9 的暂存。旧目标虽已在磁盘归位，索引还未重新登记；冲刷探针明确记录 `originalRegistered=false`，原名链接被抽成断链覆盖层。此时乙已 clean，buffer 与磁盘相同，但 #269 的 will 查询看到的原目标 incoming 缺席。
+3. #269 随即把原目标移到目标 2。批末重算仍无法把乙的原名链接接通；随后乙的 watcher 重扫发现**盘面等于暂存**，按既有收敛路径退役覆盖层。此时原目标已经真实移走，重扫又把原名链接落成基线断链。失败时 `overlayB=undefined` 与基线 `resolvedTarget=null` 正是这条路径的终态，不能据此认为前序已恢复。
+4. 甲的残留目标 2 在新目标登记后重新接通，造成「新目标 incoming 只有甲」的原始签名。甚至「仅漂移 → #269」的通过也含假阳性：甲在 #269 开始前已经指向目标 2，原断言未证明它经过本次第一笔 rename。
+
+上述证据不支持把本票并入 #272 的随机传播停摆族。测试没有固定初始 buffer 与候选，故本轮修复其输入隔离与断言；不扩大纯 watcher 的目标归位传播范围，不清全局索引或覆盖层，也不迁移敏感组。
+
+### 回归用例的修复
+
+- `fixtures.mjs` 为 #269 独占 `链式目标.md`、`rename-chain-ref-a.md` 与 `notes/rename-chain-ref-b.md`。前序仍完整执行，其装载文档与覆盖层不被测试主动清除。
+- 发起 rename 前核对两引用者的初始盘面、已有 buffer 的 clean 状态与原文、覆盖层缺席，以及原目标 incoming 含两个引用者。只读取和等待事实，不保存文档或重建索引来修复前提。
+- 两次 rename 都核对日志的旧新路径身份、两篇文档四条引用完整改写、零跳过与正确反馈；第二次断言甲的三种边型与乙的上行双链均更新。第一次另钉乙为 dirty 装载实例且盘面仍为原文，保留 #269 对「仅改 buffer」的真实宿主覆盖。
+- 负向实验临时关闭 `retireLoadedDocs` 的 dirty 缓存豁免，新独占用例仍在原来的「新目标 incoming 含面板与装载引用者」断言转红：乙 buffer 已改到目标 2、盘面保持旧文，覆盖层却被退役。实验改动与所有 `[DEBUG-276-*]` 探针均已移除。
+
+### 本轮验证与留证
+
+原始报告与定向报告原位于 #276 独立工作树的 `.vscode-test/`，不入 Git；每轮 `*-run.log` 记录退出码，对应 `*-host.log` 保存宿主完整逐项输出。汇总树已把 `276-*.log` 与分组 JSON 小报告按原文件名复制到 `.vscode-test/verification-272-276/issue276-evidence/`，逐文件核对 SHA-256；原路径、长度及摘要映射见 `.vscode-test/verification-272-276/evidence-copy-manifest.json`。
+
+汇总提交 `15aa9bf` 的单宿主 core 完整前序已 243/243 通过，宿主与启动器退出码均为 0；#269 在完整前序下耗时 1544ms。原报告与副本为 `.vscode-test/integration-dev.log`、`.vscode-test/verification-272-276/final-core-host.log`，完整统一验证及审查边界见 [集成测试分组规格的汇总记录](integration-test-groups.md#272--276-汇总验证2026-10-02)。这满足 #276 的完整 core 通过标准，未将用例移入敏感组，也未修改生产索引与 rename 行为。
+
+| 验证 | 结果与报告 |
+| --- | --- |
+| 原始单宿主 core，243 项 | #269 按原签名失败；另有 #239 下载 `fetch failed` 与 #125 设置回显失败，分别留证，不归为本票修复结果。`276-core-red-host.log` |
+| 三项最小前序 | #269 失败；入口甲 dirty、乙断链覆盖层与后续退役顺序见 `276-min-multi-drift-probe-host.log`、`276-b-lifecycle-probe-host.log` |
+| 多边型 → #269、漂移 → #269 两项对照 | 两组均通过；后者甲已有目标 2，记录于 `276-multi-only-probe-host.log`、`276-min-prefix-probe-host.log` |
+| 起始 buffer 契约红态 | 原复用 fixture 在甲 dirty buffer 前置断言失败，`276-fixture-contract-red2-host.log` |
+| 独占 fixture + 原三项前序 | 三项通过，#269 为 1362ms，`276-min-prefix-green-host.log` |
+| 关闭 dirty 缓存豁免的负向实验 | #269 原 incoming 断言失败，`276-negative-dirty-retire-host.log` |
+| 恢复生产逻辑后的独占用例 | 通过，2684ms，`276-isolated-final-green-host.log` |
+| 索引服务、覆盖层与 rename 单测 | 127 项通过，`276-target-unit.log` 含执行结果与已读回 JSON 的摘要；默认 Vitest JSON 随后被分组契约报告覆盖，未保留该轮原始 JSON |
+| 分组与当前清单契约 | 10 项通过，`276-groups-unit.log` |
+| 编译与类型检查 | 通过，`276-final-compile.log`、`276-green-typecheck.log` |

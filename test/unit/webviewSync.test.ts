@@ -43,6 +43,26 @@ function init(c: WebviewSyncController, text = '# 你好\n世界', version = 1, 
 }
 
 describe('ready 握手与 init', () => {
+  it('#272 观测须显式启用，关闭后 view.state 不携带日志且不重发业务消息', () => {
+    const { bridge, sent } = makeBridge()
+    const c = mount(bridge)
+    try {
+      init(c)
+      expect([...sent].reverse().find((m) => m.kind === 'view.state')).not.toHaveProperty('diagnostics')
+      c.handleHostMessage({ kind: 'diagnostics.test.set', enabled: true })
+      c.handleHostMessage({ kind: 'hover.invalidated', fsPath: '/B.md', status: 'changed', generation: 1 })
+      c.handleHostMessage({ kind: 'view.state.request' })
+      const active = [...sent].reverse().find((m) => m.kind === 'view.state') as Extract<WebviewToHost, { kind: 'view.state' }>
+      expect(active.diagnostics?.events).toEqual([expect.objectContaining({
+        stage: 'webview.receive.hover.invalidated', data: { fsPath: '/B.md', status: 'changed', generation: 1 },
+      })])
+      const before = sent.length
+      c.handleHostMessage({ kind: 'diagnostics.test.set', enabled: false })
+      expect(sent).toHaveLength(before)
+      c.handleHostMessage({ kind: 'view.state.request' })
+      expect(sent.at(-1)).not.toHaveProperty('diagnostics')
+    } finally { c.dispose() }
+  })
   it('mount 后发送 ready，此时不发送其他消息', () => {
     const { bridge, sent } = makeBridge()
     mount(bridge)

@@ -97,6 +97,25 @@ function makeService(storage: CssSnippetStorage, fs: CssSnippetFsPort, debounceM
 }
 
 describe('初始状态与初次扫描', () => {
+  it('#272 按需记录 watcher 入口及后继片段版本，不改变既有去抖扫描', async () => {
+    const fs = makeFs(['a.css'])
+    const svc = makeService(makeStorage(), fs)
+    try {
+      await svc.setDirectory('/snippets')
+      fs.watcherEvents()
+      await sleep(20)
+      expect(svc.getTestDiagnostics()).toEqual({ events: [], dropped: 0 })
+      svc.setTestDiagnostics(true)
+      const scans = fs.scans
+      fs.watcherEvents()
+      await sleep(20)
+      expect(fs.scans).toBe(scans + 1)
+      expect(svc.getTestDiagnostics().events.map((event) => event.stage)).toEqual(['snippets.fs', 'snippets.state'])
+      expect(svc.getTestDiagnostics().events[1]!.data).toMatchObject({ reason: 'scan', version: svc.getState().version })
+      svc.setTestDiagnostics(false)
+      expect(svc.getTestDiagnostics()).toEqual({ events: [], dropped: 0 })
+    } finally { svc.dispose() }
+  })
   it('未配置目录：空清单、无失败态，initialize 不触发扫描通知', async () => {
     const fs = makeFs(['a.css'])
     const svc = makeService(makeStorage(), fs)

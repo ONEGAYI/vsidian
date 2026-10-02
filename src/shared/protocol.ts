@@ -9,6 +9,7 @@ import type { SettingsPayload } from './settings'
 import { isFormatOperationId, type FormatOperationId } from './formatOperations'
 import { isKeybindingOperationId, isUiOperationId, type KeybindingOverrides, type UiOperationId } from './keybindings'
 import { sanitizeFindOptions, type FindOptions } from './findOptions'
+import { isDiagnosticSnapshot, type DiagnosticSnapshot } from './testDiagnostics'
 
 /** 设置快照类型随协议消息透出（载荷单一事实源仍在 shared/settings） */
 export type { SettingsPayload }
@@ -49,6 +50,8 @@ export type HostToWebview =
   | { kind: 'session.suspended'; version: number; reason: 'conflict' | 'host-error' }
   /** 请求 webview 回报视图诊断（文本与渲染行数，供测试与性能观测） */
   | { kind: 'view.state.request' }
+  /** #272 测试钩子门控的观测开关；只记录传播身份，不改变调度。 */
+  | { kind: 'diagnostics.test.set'; enabled: boolean }
   /** 性能探针（#5）：webview 测量输入延迟/长任务/滚动回收并回报 perf.report。
    *  探针编辑带 externalSync 注解，不产生写回（测量不污染宿主文档） */
   | { kind: 'perf.probe'; typingRounds: number; scrollRounds: number }
@@ -582,6 +585,7 @@ export type WebviewToHost =
   /** 视图诊断回报 */
   | {
       kind: 'view.state'
+      diagnostics?: DiagnosticSnapshot
       text: string
       docLength: number
       lineCount: number
@@ -733,6 +737,7 @@ export type WebviewToHost =
         fm: 'none' | 'collapsed' | 'expanded'
         maxHeightPx: number
         host?: 'reading' | 'live'
+        rootHost?: 'reading' | 'live' | 'hover'
         /** #224 内容文本字符数（未保存修改推送后刷新可见性的观测面：
          *  目标内容变化 → textLen 变化；旧 webview 缺省） */
         textLen?: number
@@ -2631,6 +2636,7 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
       return isNonNegativeInt(v.offset)
     case 'view.state':
       return (
+        (v.diagnostics === undefined || isDiagnosticSnapshot(v.diagnostics)) &&
         isString(v.text) &&
         isNonNegativeInt(v.docLength) &&
         isNonNegativeInt(v.lineCount) &&
@@ -2714,6 +2720,7 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
             // 修 2（review 第二轮）：#223 host 字段入校验器（与联合类型
             // 同步——缺省 / reading 块挂载 / live widget 挂载）
             (e.host === undefined || e.host === 'reading' || e.host === 'live') &&
+            (e.rootHost === undefined || e.rootHost === 'reading' || e.rootHost === 'live' || e.rootHost === 'hover') &&
             (e.textLen === undefined || isNonNegativeInt(e.textLen))))) &&
         (v.typography === undefined || isTypographyProbe(v.typography))
       )
@@ -2998,6 +3005,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       )
     case 'view.state.request':
       return true
+    case 'diagnostics.test.set':
+      return typeof v.enabled === 'boolean'
     case 'perf.probe':
       return isPositiveInt(v.typingRounds) && isPositiveInt(v.scrollRounds)
     case 'view.mode.set':
