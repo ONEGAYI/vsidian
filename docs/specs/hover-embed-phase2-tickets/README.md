@@ -1,6 +1,6 @@
 # 悬停与嵌入二期票据索引
 
-**状态**：2026-10-02，用户确认 14 票拆分并授权开票，已发布 #278–#291。前三张无本地技术前置的票已加 ready-for-agent，其他票保留阻塞依赖；产品代码尚未实施。
+**状态**：2026-10-02，用户确认 14 票拆分并授权开票，已发布 #278–#291。前三张无本地技术前置的票已加 ready-for-agent，其他票保留阻塞依赖；产品代码尚未实施。**P2-01 研究已完成**（2026-10-02）：四条路线 1.82.3 真宿主探针全部通过、无阻塞，两项取舍待用户确认后放行依赖票，结论见[探针报告](../../research/vscode-1823-host-route-probes.md)。
 
 唯一规格：[hover-preview-embed.md 的二期正式规格](../hover-preview-embed.md)。父票 [#227](https://github.com/ONEGAYI/vsidian/issues/227)；历史版本想法已补入总体三期 [#18](https://github.com/ONEGAYI/vsidian/issues/18)。
 
@@ -12,8 +12,7 @@ P2-01 是可行性验证，P2-02 是准备性复用改造；其他功能票都�
 
 | 本地编号 | GitHub | 标题与票据正文 | Blocked by | 可独立验证的交付 |
 | --- | --- | --- | --- | --- |
-| P2-01 | [#278](https://github.com/ONEGAYI/vsidian/issues/278) | [research: 验证目标历史、丢弃、临时对比与关闭交接](01-host-compatibility.md) | 无本地前置 | 宿主探针、通过／阻塞结论 |
-| P2-02 | [#279](https://github.com/ONEGAYI/vsidian/issues/279) | [refactor: 提炼 Live 实例上下文并验证主编辑器等价](02-live-instance-seam.md) | 无本地前置 | 主正文复用入口且行为等价 |
+| P2-01 | [#278](https://github.com/ONEGAYI/vsidian/issues/278) | [research: 验证目标历史、丢弃、临时对比与关闭交接](01-host-compatibility.md) | 无本地前置 | 宿主探针、通过／阻塞结论 || P2-02 | [#279](https://github.com/ONEGAYI/vsidian/issues/279) | [refactor: 提炼 Live 实例上下文并验证主编辑器等价](02-live-instance-seam.md) | 无本地前置 | 主正文复用入口且行为等价 |
 | P2-03 | [#280](https://github.com/ONEGAYI/vsidian/issues/280) | [feat: 引用全文可达与锚点初始定位](03-full-document-navigation.md) | 无本地前置 | Reading 全文与初始锚点 |
 | P2-04 | [#281](https://github.com/ONEGAYI/vsidian/issues/281) | [feat: 正文嵌入接入目标文档编辑、保存与历史](04-embed-target-editing.md) | [#278](https://github.com/ONEGAYI/vsidian/issues/278)（P2-01）、[#279](https://github.com/ONEGAYI/vsidian/issues/279)（P2-02）、[#280](https://github.com/ONEGAYI/vsidian/issues/280)（P2-03） | 独占行嵌入写 B、保存与历史 |
 | P2-05 | [#282](https://github.com/ONEGAYI/vsidian/issues/282) | [feat: 脏目标显式关闭确认与输入保护](05-explicit-close.md) | [#281](https://github.com/ONEGAYI/vsidian/issues/281)（P2-04） | 关闭三项选择与输入保护 |
@@ -61,5 +60,7 @@ P2-01 是可行性验证，P2-02 是准备性复用改造；其他功能票都�
 ## 发布记录
 
 用户于 2026-10-02 明确授权开票，已按拓扑顺序创建 #278–#291，并将本地 Blocked by 回填为真实 issue 链接。父票 #226／#227 未关闭或重写。P2-01–P2-03 已加 ready-for-agent；其他票待其前置验收通过后再更新就绪状态。
+
+**P2-01 执行记录（2026-10-02）**：#278 研究在独立树完成——18 个探针用例（`test/integration/suite/probe278.ts`）在 1.82.3 真宿主全部通过；四条路线（目标保存／撤销归属、文档级丢弃、临时副本原生对比、父关闭交接）均无阻塞，两项取舍（撤销路由的可见标签切换、丢弃后 undo 翻回语义）待用户确认。同时修正两项前置认知：`files.revert` 带 URI 参数在 1.82.3 误伤活动编辑器必须禁用；Tab API 编程关闭脏编辑器是静默丢弃（Q14 边界修正）。详见[探针报告](../../research/vscode-1823-host-route-probes.md)与票据正文。
 
 发布票据不等同编码、推送、PR 或合并授权。当前工作树、已确认产品契约、P2-01 的实际技术结论及各票验收标准共同构成之后实施上下文。

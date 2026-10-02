@@ -1328,5 +1328,13 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   mkdirSync(path.join(wsDir, 'other'), { recursive: true })
   writeFileSync(path.join(wsDir, 'other', '甲.md'), '# 重名甲（other 目录）\n', 'utf8')
   writeFileSync(path.join(wsDir, 'CaseNote.md'), '# 大小写目标\n英文命名的目标笔记。\n', 'utf8')
+  // #278 P2-01 真宿主探针 fixture：每用例独立文件对（-a.md = 面板甲 A，
+  // -b.md = 引用目标乙 B；hand 用例另有 -c.md 旁观丙）。用例各自把缓冲与
+  // 磁盘还原回以下字节后结束，跨用例零污染。
+  for (const name of ['save', 'guard', 'route', 'pf', 'share', 'atomic', 'revert', 'late', 'ro', 'diff', 'diff-fail', 'recycle', 'hand', 'hand2', 'inflight', 'clean']) {
+    writeFileSync(path.join(wsDir, `p201-${name}-a.md`), `# P2-01 ${name} 甲面板\n\n甲正文行\n`, 'utf8')
+    writeFileSync(path.join(wsDir, `p201-${name}-b.md`), `P2-01 ${name} 乙第一行\n乙第二行\n`, 'utf8')
+  }
+  writeFileSync(path.join(wsDir, 'p201-hand-c.md'), 'P2-01 hand 旁观丙\n', 'utf8')
   return { largeDocLines: LARGE_DOC_LINES }
 }

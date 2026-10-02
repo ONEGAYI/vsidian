@@ -3,6 +3,7 @@
 // 字节级断言），路径经环境变量 WORKSPACE_DIR 传入。
 import * as vscode from 'vscode'
 import { liveEmbedReady, readingEmbedCard } from './embedReadiness'
+import { probe278Cases } from './probe278'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { LOCALE_MESSAGES, resolveLocale } from '../../../src/shared/locales'
 import { OBSIDIAN_ALIAS_PROBES } from '../../../src/shared/obsidianAlias'
@@ -1319,6 +1320,9 @@ const TASK_DOC_SECOND_TOGGLED = [
 
 /** 用例表：名称 -> 执行函数 */
 export const cases: Array<[string, () => Promise<void>]> = [
+  // #278（P2-01）真宿主探针组：目标历史/丢弃/临时对比/关闭交接的公开路线
+  // 验证——研究工件独立成文件，定向复现：VSIDIAN_TEST_CASES='P2-01'
+  ...probe278Cases,
   ['激活与默认编辑器声明（#38 后接管 .md 默认打开）', async () => {
     const ext = vscode.extensions.getExtension(EXT_ID)
     assert(ext, `扩展 ${EXT_ID} 未找到`)

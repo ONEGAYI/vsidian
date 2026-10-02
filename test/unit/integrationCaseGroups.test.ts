@@ -138,7 +138,33 @@ it('第五组用例失败仍记录 FAIL、继续收集其余结果并返回失�
 })
 
 /** 只读真实 cases 声明的名称；不加载 vscode，也不执行任何用例正文。 */
+function parseCaseArray(fileName: string, varName: string): Array<[string, null]> {
+  const source = ts.createSourceFile(fileName,
+    readFileSync(`test/integration/suite/${fileName}`, 'utf8'),
+    ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  const names: Array<[string, null]> = []
+  for (const statement of source.statements) {
+    if (!ts.isVariableStatement(statement)) continue
+    for (const declaration of statement.declarationList.declarations) {
+      if (!ts.isIdentifier(declaration.name) || declaration.name.text !== varName) continue
+      const array = declaration.initializer
+      if (!array || !ts.isArrayLiteralExpression(array)) throw new Error(`${varName} 须为明确的用例数组`)
+      for (const entry of array.elements) {
+        if (!ts.isArrayLiteralExpression(entry) || !ts.isStringLiteral(entry.elements[0]!)) {
+          throw new Error('用例须登记唯一的字面量名称')
+        }
+        names.push([entry.elements[0].text, null])
+      }
+    }
+  }
+  if (!names.length) throw new Error(`未读取到 ${fileName} 的 ${varName} 清单`)
+  return names
+}
+
 function productionCases(): Array<[string, null]> {
+  // #278 探针清单独立成文件，经 cases.ts 数组内展开合入——解析器允许该
+  // 唯一展开并按运行时顺序内联其字面量名；其余展开形态仍立即失败
+  const probes = parseCaseArray('probe278.ts', 'probe278Cases')
   const source = ts.createSourceFile('cases.ts', readFileSync('test/integration/suite/cases.ts', 'utf8'),
     ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
   const names: Array<[string, null]> = []
@@ -149,6 +175,13 @@ function productionCases(): Array<[string, null]> {
       const array = declaration.initializer
       if (!array || !ts.isArrayLiteralExpression(array)) throw new Error('cases 须为明确的用例数组')
       for (const entry of array.elements) {
+        if (ts.isSpreadElement(entry)) {
+          if (ts.isIdentifier(entry.expression) && entry.expression.text === 'probe278Cases') {
+            names.push(...probes)
+            continue
+          }
+          throw new Error('用例数组不支持未知展开')
+        }
         if (!ts.isArrayLiteralExpression(entry) || !ts.isStringLiteral(entry.elements[0]!)) {
           throw new Error('用例须登记唯一的字面量名称')
         }
