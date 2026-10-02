@@ -3,9 +3,9 @@
 export const SENSITIVE_CASES = [
   {
     name: 'CSS 片段：被导入文件修改自动刷新、删除降级与缺失恢复（#129）',
-    issue: '#272 / #129',
+    issue: '#293 / #129',
     reason: 'CSS 导入刷新状态在 CI 超时，同一相关代码有通过记录。',
-    evidence: 'https://github.com/ONEGAYI/vsidian/issues/272#issuecomment-5933902595',
+    evidence: 'https://github.com/ONEGAYI/vsidian/issues/293',
   },
   {
     name: '索引维护：批量文件增删的队列收敛与索引守恒（Git 切换量级 100 文件，#202）',
@@ -16,13 +16,13 @@ export const SENSITIVE_CASES = [
   {
     name: '嵌入：Live 挂载与源码显隐——IME 编辑撤销闭环与双零 dirty（#223）',
     issue: '#272 / #223',
-    reason: '缺失目标尚在 loading 时采样错误态，存在状态推进与断言时序差异。',
+    reason: '缺失卡终态采样缺口已修复，待同提交多次 CI 验证后恢复 core。',
     evidence: 'https://github.com/ONEGAYI/vsidian/actions/runs/36875022608/attempts/2',
   },
   {
     name: '递归：真宿主直接来源、三层、设置热更与未保存刷新（#244）',
     issue: '#272 / #244',
-    reason: '同提交可约三秒通过或耗尽三十秒；事件传播根因未定。',
+    reason: '隐藏 Live 根重复卡误采已修复，待同提交多次 CI 验证后恢复 core。',
     evidence: 'https://github.com/ONEGAYI/vsidian/issues/272',
   },
 ] as const
