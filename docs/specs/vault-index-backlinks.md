@@ -466,7 +466,9 @@ provider 的 `onDidChangeTextDocument` 索引接线内：**空 contentChanges �
 
 ### 本轮验证与留证
 
-原始报告与定向报告在 #276 独立工作树的 `.vscode-test/`，不入 Git；每轮 `*-run.log` 记录退出码，对应 `*-host.log` 保存宿主完整逐项输出。单宿主完整 core 的最终通过仍待 #272 + #276 汇总树运行，不能以定向通过代替。
+原始报告与定向报告原位于 #276 独立工作树的 `.vscode-test/`，不入 Git；每轮 `*-run.log` 记录退出码，对应 `*-host.log` 保存宿主完整逐项输出。汇总树已把 `276-*.log` 与分组 JSON 小报告按原文件名复制到 `.vscode-test/verification-272-276/issue276-evidence/`，逐文件核对 SHA-256；原路径、长度及摘要映射见 `.vscode-test/verification-272-276/evidence-copy-manifest.json`。
+
+汇总提交 `15aa9bf` 的单宿主 core 完整前序已 243/243 通过，宿主与启动器退出码均为 0；#269 在完整前序下耗时 1544ms。原报告与副本为 `.vscode-test/integration-dev.log`、`.vscode-test/verification-272-276/final-core-host.log`，完整统一验证及审查边界见 [集成测试分组规格的汇总记录](integration-test-groups.md#272--276-汇总验证2026-10-02)。这满足 #276 的完整 core 通过标准，未将用例移入敏感组，也未修改生产索引与 rename 行为。
 
 | 验证 | 结果与报告 |
 | --- | --- |
@@ -477,6 +479,6 @@ provider 的 `onDidChangeTextDocument` 索引接线内：**空 contentChanges �
 | 独占 fixture + 原三项前序 | 三项通过，#269 为 1362ms，`276-min-prefix-green-host.log` |
 | 关闭 dirty 缓存豁免的负向实验 | #269 原 incoming 断言失败，`276-negative-dirty-retire-host.log` |
 | 恢复生产逻辑后的独占用例 | 通过，2684ms，`276-isolated-final-green-host.log` |
-| 索引服务、覆盖层与 rename 单测 | 127 项通过，`276-target-unit.log` 与 Vitest JSON 报告 |
+| 索引服务、覆盖层与 rename 单测 | 127 项通过，`276-target-unit.log` 含执行结果与已读回 JSON 的摘要；默认 Vitest JSON 随后被分组契约报告覆盖，未保留该轮原始 JSON |
 | 分组与当前清单契约 | 10 项通过，`276-groups-unit.log` |
 | 编译与类型检查 | 通过，`276-final-compile.log`、`276-green-typecheck.log` |
