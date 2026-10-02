@@ -1446,14 +1446,7 @@ export class WebviewSyncController {
       // #299 总开关开 → 浮层将现（原路径，门控在 hoverPopup 入口）；
       // 总开关关 → 浮层不将现，跳转目标提示候选（hoverPopupSpecOfAnchor
       // 同一提取口径：外部 scheme 与非法目标 null 不提示）
-      if (this.hoverPreviewEnabled()) {
-        hoverPreviewAnchorEnter(anchor)
-        return
-      }
-      const tipSpec = hoverPopupSpecOfAnchor(anchor)
-      if (tipSpec) {
-        targetTipAnchorEnter(anchor, tipSpec)
-      }
+      this.enterHoverOrTip(anchor, hoverPopupSpecOfAnchor(anchor))
     })
     this.readingContainer.addEventListener('mouseout', (event) => {
       const anchor = (event.target as HTMLElement | null)?.closest?.('a[href]')
@@ -1465,8 +1458,7 @@ export class WebviewSyncController {
       if (related instanceof Node && anchor.contains(related)) {
         return
       }
-      hoverPreviewAnchorLeave(anchor)
-      targetTipAnchorLeave(anchor, related instanceof Node ? related : null)
+      this.leaveHoverAndTip(anchor, related)
     })
     // #53 布局骨架：#app > body(水平) > main(主编辑区：顶栏+横幅+双视图)
     // + sidebar(右侧栏)；findPanel 浮层直接挂 #app（以 #app 为定位包含块；
@@ -1612,17 +1604,16 @@ export class WebviewSyncController {
       const withMod = event.ctrlKey || event.metaKey
       // #299 浮层将现判定并入总开关：总开关关（无论修饰位）或触发条件
       // 未满足（直接悬停关且无 Ctrl）都不开浮层——该悬停成为跳转目标
-      // 提示候选（判定族与浮层入口同源，spec null 不提示）
-      if (!this.hoverPreviewEnabled() || (!this.liveHoverDirect() && !withMod)) {
-        if (hoverAnchor && this.view) {
-          const tipSpec = this.liveLinkSpecOfAnchor(this.view, hoverAnchor)
-          if (tipSpec) {
-            targetTipAnchorEnter(hoverAnchor, tipSpec)
-          }
-        }
-        return
+      // 提示候选（判定族与浮层入口同源，spec null 不提示）。二路由经
+      // enterHoverOrTip 单点分派（非链接装饰/无视图零操作）
+      const view = this.view
+      if (hoverAnchor && view) {
+        this.enterHoverOrTip(
+          hoverAnchor,
+          this.liveLinkSpecOfAnchor(view, hoverAnchor),
+          this.hoverPreviewEnabled() && (this.liveHoverDirect() || withMod),
+        )
       }
-      this.handleLiveHover(event, 'enter')
     })
     this.view.contentDOM.addEventListener('mouseout', (event) => {
       if (this.viewMode !== 'live') {
@@ -1634,7 +1625,7 @@ export class WebviewSyncController {
           this.lastLiveHover = null
         }
       }
-      this.handleLiveHover(event, 'leave')
+      this.handleLiveHoverLeave(event)
     })
     // #111 图表导出通道：弹窗 → 宿主另存为（会话字段在此补齐；只读交互，
     // init 前无会话时静默丢弃——按钮在渲染成功后才可点）
@@ -5355,6 +5346,34 @@ export class WebviewSyncController {
     return this.settings?.[HOVER_TARGET_TIP_KEY] !== false
   }
 
+  /** 悬停二路由收拢（审查修复）：浮层将现 → 浮层入口（spec 随进——面板
+   *  /Live 目标不在正文 DOM，浮层无法自提取；Reading 传同一提取器的结果，
+   *  与浮层延迟到期自提取等价）；不将现 → 跳转目标提示候选（spec null
+   *  不提示）。将现判定缺省为总开关（hover.enabled）；Live 因修饰位参与
+   *  判定由调用侧传入。阅读 mouseover / Live mouseover / 反链 / 出链四
+   *  入口同一形状单点维护 */
+  private enterHoverOrTip(
+    anchor: HTMLElement,
+    spec: HoverPopupTargetSpec | null,
+    popupImminent = this.hoverPreviewEnabled(),
+  ): void {
+    if (popupImminent) {
+      hoverPreviewAnchorEnter(anchor, spec ?? undefined)
+      return
+    }
+    if (spec) {
+      targetTipAnchorEnter(anchor, spec)
+    }
+  }
+
+  /** 离开悬停目标（四入口 mouseout 共用）：浮层与目标提示两通道成对
+   *  转发（relatedTarget 落在本体内 = 联合域保活，两模块各自判定；
+   *  锚点内部移动的过滤在调用侧） */
+  private leaveHoverAndTip(anchor: HTMLElement, related: EventTarget | null): void {
+    hoverPreviewAnchorLeave(anchor)
+    targetTipAnchorLeave(anchor, related instanceof Node ? related : null)
+  }
+
   /** 指针当前悬停的 Live 链接装饰：mouseover 时总在记录
    *  （修饰位不足也不丢——「先悬停、后按 Ctrl」补触发的现场），mouseout
    *  / 模式切换时清空；目标经装饰 DOM 映射到源码，不依赖指针坐标 */
@@ -5407,31 +5426,19 @@ export class WebviewSyncController {
     return deco instanceof HTMLElement ? deco : null
   }
 
-  /** Live 悬停分派（mouseover/mouseout 委托转发）：enter 判定目标并经
-   *  延迟开启入口进 hoverPopup；leave 转发锚点离开 */
-  private handleLiveHover(event: MouseEvent, phase: 'enter' | 'leave'): void {
+  /** Live 悬停离开分派（mouseout 委托转发）：归约锚点后成对转发浮层与
+   *  目标提示的离开（enter 侧已由 mouseover 直接走 enterHoverOrTip，无
+   *  事件重放需求） */
+  private handleLiveHoverLeave(event: MouseEvent): void {
     const anchor = this.liveHoverAnchorOf(event.target)
     if (!anchor) {
       return
     }
-    if (phase === 'leave') {
-      const related = event.relatedTarget
-      if (related instanceof Node && anchor.contains(related)) {
-        return // 装饰内部移动（嵌套行内标记）不视为离开
-      }
-      hoverPreviewAnchorLeave(anchor)
-      targetTipAnchorLeave(anchor, related instanceof Node ? related : null)
-      return
+    const related = event.relatedTarget
+    if (related instanceof Node && anchor.contains(related)) {
+      return // 装饰内部移动（嵌套行内标记）不视为离开
     }
-    const view = this.view
-    if (!view) {
-      return
-    }
-    const spec = this.liveLinkSpecOfAnchor(view, anchor)
-    if (!spec) {
-      return
-    }
-    hoverPreviewAnchorEnter(anchor, spec)
+    this.leaveHoverAndTip(anchor, related)
   }
 
   /** Live 目标判定（与点击 mousedown 的判定族同序同口径）：双链 → 树驱动
@@ -5475,8 +5482,7 @@ export class WebviewSyncController {
       if (related instanceof Node && item.contains(related)) {
         return
       }
-      hoverPreviewAnchorLeave(item)
-      targetTipAnchorLeave(item, related instanceof Node ? related : null)
+      this.leaveHoverAndTip(item, related)
       return
     }
     if (!this.sessionId || !this.docUri) {
@@ -5494,11 +5500,7 @@ export class WebviewSyncController {
       openAction: this.backlinkOpenAction(payload),
     }
     // #299 总开关开 → 浮层将现（面板恒直接悬停）；关 → 目标提示候选
-    if (this.hoverPreviewEnabled()) {
-      hoverPreviewAnchorEnter(item, spec)
-    } else {
-      targetTipAnchorEnter(item, spec)
-    }
+    this.enterHoverOrTip(item, spec)
   }
 
   /** #217 验收跟进：面板形态浮层 header 跳转——与条目点击同通道同载荷
@@ -5550,8 +5552,7 @@ export class WebviewSyncController {
       if (related instanceof Node && item.contains(related)) {
         return
       }
-      hoverPreviewAnchorLeave(item)
-      targetTipAnchorLeave(item, related instanceof Node ? related : null)
+      this.leaveHoverAndTip(item, related)
       return
     }
     const payload = this.outlinkItemPayloadOf(item)
@@ -5568,11 +5569,7 @@ export class WebviewSyncController {
     }
     // #299 总开关开 → 浮层将现；关 → 目标提示候选（断链条目空串 fsPath
     // 由宿主轻量解析回失败，不出提示——与浮层的 not-found 分态分工不同）
-    if (this.hoverPreviewEnabled()) {
-      hoverPreviewAnchorEnter(item, spec)
-    } else {
-      targetTipAnchorEnter(item, spec)
-    }
+    this.enterHoverOrTip(item, spec)
   }
 
   /** #221 键盘命令「预览当前链接」：手动打开浮层且焦点进入（无目标静默

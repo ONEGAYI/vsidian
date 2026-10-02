@@ -165,6 +165,21 @@ try {
     await hoverEnabledBox.click()
     await page.getByRole('status').filter({ hasText: zhCn['settings.saveDone'] }).waitFor()
     assert.equal(await hoverEnabledBox.isChecked(), true, '再次切回开')
+    // #299 审查修复：跳转目标提示（hover.targetTip）同走真实保存链路专项
+    // 断言（与总开关用例各自独立）：click → saveDone → 持久化值落
+    // savedSettings → 保存回推后就地回显，再切回开值随链路更新
+    const targetTipBox = refviewGroup.getByRole('checkbox', { name: zhCn['setting.hoverTargetTip.title'], exact: true })
+    assert.equal(await targetTipBox.isChecked(), true, '跳转目标提示默认开启（缺省视为开）')
+    await targetTipBox.click()
+    await page.getByRole('status').filter({ hasText: zhCn['settings.saveDone'] }).waitFor()
+    assert.equal(await page.evaluate(() => window.savedSettings['hover.targetTip']), false,
+      '跳转目标提示经消息桥持久化（settings.set → 宿主侧合并）')
+    assert.equal(await targetTipBox.isChecked(), false, '保存回推后就地回显关闭值')
+    await targetTipBox.click()
+    await page.getByRole('status').filter({ hasText: zhCn['settings.saveDone'] }).waitFor()
+    assert.equal(await targetTipBox.isChecked(), true, '再次切回开')
+    assert.equal(await page.evaluate(() => window.savedSettings['hover.targetTip']), true,
+      '切回开的持久化值随保存链路更新')
     const countInk = async (png) => page.evaluate(async (base64) => {
       const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${base64}`)).blob())
       const canvas = document.createElement('canvas')

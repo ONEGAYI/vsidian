@@ -36,8 +36,10 @@ export const TOOLTIP_CLASS_NAMES = {
 } as const
 
 /** 出现延迟缺省值：CSS 变量不可读（jsdom/极端环境）时的兜底，与悬停
- *  预览既有节奏一致 */
-const DEFAULT_SHOW_DELAY_MS = 300
+ *  预览既有节奏一致。导出供 targetTip 单测推进计时（jsdom 读不到变量
+ *  时 resolveShowDelay 即回此值）——显示延迟缺省的单一事实源，不另设
+ *  同值常量 */
+export const DEFAULT_SHOW_DELAY_MS = 300
 
 /** 解析出现延迟：读容器计算样式上的公开变量（ms），非法值回缺省。
  *  #299 起导出：跳转目标提示（targetTip）复用同一延迟口径（统一

@@ -15,9 +15,10 @@ import {
   setTargetTipContext,
   targetTipAnchorEnter,
   targetTipAnchorLeave,
-  TARGET_TIP_SHOW_DELAY_MS,
 } from '../../src/webview/targetTip'
-import { TOOLTIP_CLASS_NAMES } from '../../src/webview/tooltipCard'
+// 稳定悬停延迟取统一提示体系的缺省单一来源（jsdom 读不到 CSS 变量，
+// resolveShowDelay 即回该缺省——推进量与运行时实际延迟同源）
+import { DEFAULT_SHOW_DELAY_MS, TOOLTIP_CLASS_NAMES } from '../../src/webview/tooltipCard'
 
 const SESSION = { sessionId: 'panel-1', docUri: 'file:///d%3A/notes/a.md' }
 
@@ -93,7 +94,7 @@ describe('跳转目标提示（#299 targetTip）', () => {
     targetTipAnchorEnter(h.anchor, { target: '目标笔记', sourceStart: 0, sourceEnd: 4 })
     expect(tipEl()).toBeNull()
     expect(h.sent).toEqual([]) // 计时未满零请求
-    vi.advanceTimersByTime(TARGET_TIP_SHOW_DELAY_MS - 1)
+    vi.advanceTimersByTime(DEFAULT_SHOW_DELAY_MS - 1)
     expect(h.sent).toEqual([])
     vi.advanceTimersByTime(1)
     const req = resolveMsg(h)
@@ -112,15 +113,15 @@ describe('跳转目标提示（#299 targetTip）', () => {
     vi.useFakeTimers()
     const h = makeHarness()
     targetTipAnchorEnter(h.anchor, { target: '目标笔记', sourceStart: 0, sourceEnd: 4 })
-    vi.advanceTimersByTime(TARGET_TIP_SHOW_DELAY_MS)
+    vi.advanceTimersByTime(DEFAULT_SHOW_DELAY_MS)
     const req = resolveMsg(h)
     h.respond(req.reqId, false)
     expect(tipEl()).toBeNull()
     // 指针离开 → 再次悬停同一目标：命中失败缓存零新请求、无提示
     targetTipAnchorLeave(h.anchor)
-    vi.advanceTimersByTime(TARGET_TIP_SHOW_DELAY_MS)
+    vi.advanceTimersByTime(DEFAULT_SHOW_DELAY_MS)
     targetTipAnchorEnter(h.anchor, { target: '目标笔记', sourceStart: 0, sourceEnd: 4 })
-    vi.advanceTimersByTime(TARGET_TIP_SHOW_DELAY_MS * 2)
+    vi.advanceTimersByTime(DEFAULT_SHOW_DELAY_MS * 2)
     expect(h.sent.filter((m) => m.kind === 'hover.target.resolve').length).toBe(1)
     expect(tipEl()).toBeNull()
   })
@@ -129,13 +130,13 @@ describe('跳转目标提示（#299 targetTip）', () => {
     vi.useFakeTimers()
     const h = makeHarness()
     targetTipAnchorEnter(h.anchor, { target: '目标笔记', sourceStart: 0, sourceEnd: 4 })
-    vi.advanceTimersByTime(TARGET_TIP_SHOW_DELAY_MS)
+    vi.advanceTimersByTime(DEFAULT_SHOW_DELAY_MS)
     h.respond(resolveMsg(h).reqId, true, '目标笔记.md')
     expect(tipEl()).not.toBeNull()
     targetTipAnchorLeave(h.anchor)
     expect(tipEl()).toBeNull()
     targetTipAnchorEnter(h.anchor, { target: '目标笔记', sourceStart: 0, sourceEnd: 4 })
-    vi.advanceTimersByTime(TARGET_TIP_SHOW_DELAY_MS)
+    vi.advanceTimersByTime(DEFAULT_SHOW_DELAY_MS)
     expect(h.sent.filter((m) => m.kind === 'hover.target.resolve').length).toBe(1)
     expect(tipEl()?.textContent).toBe('目标笔记.md')
   })
@@ -144,7 +145,7 @@ describe('跳转目标提示（#299 targetTip）', () => {
     vi.useFakeTimers()
     const h = makeHarness(() => false)
     targetTipAnchorEnter(h.anchor, { target: '目标笔记', sourceStart: 0, sourceEnd: 4 })
-    vi.advanceTimersByTime(TARGET_TIP_SHOW_DELAY_MS * 3)
+    vi.advanceTimersByTime(DEFAULT_SHOW_DELAY_MS * 3)
     expect(h.sent).toEqual([])
     expect(tipEl()).toBeNull()
     // init 前无会话：不发解析请求（会话守卫与其余请求同款）
@@ -154,7 +155,7 @@ describe('跳转目标提示（#299 targetTip）', () => {
       enabled: () => true,
     })
     targetTipAnchorEnter(h.anchor, { target: '目标笔记', sourceStart: 0, sourceEnd: 4 })
-    vi.advanceTimersByTime(TARGET_TIP_SHOW_DELAY_MS * 3)
+    vi.advanceTimersByTime(DEFAULT_SHOW_DELAY_MS * 3)
     expect(h.sent).toEqual([])
   })
 
@@ -163,11 +164,11 @@ describe('跳转目标提示（#299 targetTip）', () => {
     const h = makeHarness()
     targetTipAnchorEnter(h.anchor, { target: '目标笔记', sourceStart: 0, sourceEnd: 4 })
     targetTipAnchorLeave(h.anchor)
-    vi.advanceTimersByTime(TARGET_TIP_SHOW_DELAY_MS * 3)
+    vi.advanceTimersByTime(DEFAULT_SHOW_DELAY_MS * 3)
     expect(h.sent).toEqual([]) // 计时已取消
     // 出场后离开：收起
     targetTipAnchorEnter(h.anchor, { target: '目标笔记', sourceStart: 0, sourceEnd: 4 })
-    vi.advanceTimersByTime(TARGET_TIP_SHOW_DELAY_MS)
+    vi.advanceTimersByTime(DEFAULT_SHOW_DELAY_MS)
     h.respond(resolveMsg(h).reqId, true, '目标笔记.md')
     expect(tipEl()).not.toBeNull()
     targetTipAnchorLeave(h.anchor)
@@ -178,7 +179,7 @@ describe('跳转目标提示（#299 targetTip）', () => {
     vi.useFakeTimers()
     const h = makeHarness()
     targetTipAnchorEnter(h.anchor, { target: '目标笔记', sourceStart: 0, sourceEnd: 4 })
-    vi.advanceTimersByTime(TARGET_TIP_SHOW_DELAY_MS)
+    vi.advanceTimersByTime(DEFAULT_SHOW_DELAY_MS)
     h.respond(resolveMsg(h).reqId, true, '目标笔记.md')
     expect(tipEl()).not.toBeNull()
     closeTargetTip()
@@ -189,7 +190,7 @@ describe('跳转目标提示（#299 targetTip）', () => {
     vi.useFakeTimers()
     const h = makeHarness()
     targetTipAnchorEnter(h.anchor, { target: '目标笔记', sourceStart: 0, sourceEnd: 4 })
-    vi.advanceTimersByTime(TARGET_TIP_SHOW_DELAY_MS)
+    vi.advanceTimersByTime(DEFAULT_SHOW_DELAY_MS)
     h.anchor.remove() // 视口虚拟化回收（无 mouseout 派发）
     h.respond(resolveMsg(h).reqId, true, '目标笔记.md')
     expect(tipEl()).toBeNull()
@@ -197,7 +198,7 @@ describe('跳转目标提示（#299 targetTip）', () => {
     const anchor2 = document.createElement('a')
     document.body.appendChild(anchor2)
     targetTipAnchorEnter(anchor2, { target: '目标笔记', sourceStart: 0, sourceEnd: 4 })
-    vi.advanceTimersByTime(TARGET_TIP_SHOW_DELAY_MS)
+    vi.advanceTimersByTime(DEFAULT_SHOW_DELAY_MS)
     expect(tipEl()).not.toBeNull()
     anchor2.remove()
     document.dispatchEvent(new Event('scroll'))
@@ -208,11 +209,11 @@ describe('跳转目标提示（#299 targetTip）', () => {
     vi.useFakeTimers()
     const h = makeHarness()
     targetTipAnchorEnter(h.anchor, { target: '目标笔记', sourceStart: 0, sourceEnd: 4 })
-    vi.advanceTimersByTime(TARGET_TIP_SHOW_DELAY_MS)
+    vi.advanceTimersByTime(DEFAULT_SHOW_DELAY_MS)
     const staleReqId = resolveMsg(h).reqId
     targetTipAnchorLeave(h.anchor)
     targetTipAnchorEnter(h.anchor, { target: '目标笔记', sourceStart: 0, sourceEnd: 4 })
-    vi.advanceTimersByTime(TARGET_TIP_SHOW_DELAY_MS)
+    vi.advanceTimersByTime(DEFAULT_SHOW_DELAY_MS)
     const freshReqId = resolveMsg(h).reqId
     expect(freshReqId).toBeGreaterThan(staleReqId)
     h.respond(staleReqId, true, '旧响应.md')
@@ -225,7 +226,7 @@ describe('跳转目标提示（#299 targetTip）', () => {
     vi.useFakeTimers()
     const h = makeHarness()
     targetTipAnchorEnter(h.anchor, { target: 'b.md', linkHref: 'b.md', sourceStart: 0, sourceEnd: 4 })
-    vi.advanceTimersByTime(TARGET_TIP_SHOW_DELAY_MS)
+    vi.advanceTimersByTime(DEFAULT_SHOW_DELAY_MS)
     expect(resolveMsg(h).linkHref).toBe('b.md')
     const item = document.createElement('div')
     document.body.appendChild(item)
@@ -233,7 +234,7 @@ describe('跳转目标提示（#299 targetTip）', () => {
       target: '显示名', sourceStart: 0, sourceEnd: 0,
       directFsPath: 'D:/notes/sub/c.md', directAnchor: '^blk',
     })
-    vi.advanceTimersByTime(TARGET_TIP_SHOW_DELAY_MS)
+    vi.advanceTimersByTime(DEFAULT_SHOW_DELAY_MS)
     const direct = resolveMsg(h)
     expect(direct.directTarget).toEqual({ fsPath: 'D:/notes/sub/c.md', anchor: '^blk' })
   })
@@ -242,7 +243,7 @@ describe('跳转目标提示（#299 targetTip）', () => {
     vi.useFakeTimers()
     const h = makeHarness()
     targetTipAnchorEnter(h.anchor, { target: '目标笔记', sourceStart: 0, sourceEnd: 4 })
-    vi.advanceTimersByTime(TARGET_TIP_SHOW_DELAY_MS)
+    vi.advanceTimersByTime(DEFAULT_SHOW_DELAY_MS)
     h.respond(resolveMsg(h).reqId, true, '目标笔记.md')
     const el = tipEl()!
     expect(el.tabIndex).toBe(0) // 可聚焦（文字可选中复制的统一语义）
@@ -265,7 +266,7 @@ describe('跳转目标提示（#299 targetTip）', () => {
     vi.useFakeTimers()
     const h = makeHarness()
     targetTipAnchorEnter(h.anchor, { target: '目标笔记', sourceStart: 0, sourceEnd: 4 })
-    vi.advanceTimersByTime(TARGET_TIP_SHOW_DELAY_MS)
+    vi.advanceTimersByTime(DEFAULT_SHOW_DELAY_MS)
     h.respond(resolveMsg(h).reqId, true, '目标笔记.md')
     const el = tipEl()!
     // 调用侧委托转发形态（与 syncController 四入口同款）：leave 带

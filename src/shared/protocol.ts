@@ -1176,6 +1176,9 @@ export type HoverPreviewRequestPayload = Extract<WebviewToHost, { kind: 'hover.r
 /** #218 悬停预览结果消息（webview 侧消费形态） */
 export type HoverPreviewResult = Extract<HostToWebview, { kind: 'hover.result' }>
 
+/** #299 跳转目标提示解析结果消息（webview 侧消费形态） */
+export type TargetTipResolved = Extract<HostToWebview, { kind: 'hover.target.resolved' }>
+
 /** 性能快照（#5）：一次观测时点的 DOM 计数 */
 export interface PerfSnapshot {
   /** .cm-line 行元素数 */

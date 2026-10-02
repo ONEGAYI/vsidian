@@ -23,7 +23,7 @@
 // 浮层打开路径（hoverPopup）联动调 closeTargetTip（含悬停中补按 Ctrl
 // 的立即消失），无需互斥协调；与统一 tooltip 体系同款不 claim 不抢占。
 import type { HoverPopupTargetSpec } from './hoverPopup'
-import type { WebviewToHost } from '../shared/protocol'
+import type { TargetTipResolved, WebviewToHost } from '../shared/protocol'
 import { TOOLTIP_CLASS_NAMES, resolveShowDelay } from './tooltipCard'
 import { planTooltipPlacement } from './tooltipGeometry'
 
@@ -36,10 +36,6 @@ export interface TargetTipContext {
   /** hover.targetTip 设置的只读投影：false = 不计时不出提示（缺省视为开） */
   enabled?(): boolean
 }
-
-/** 稳定悬停延迟：与统一提示体系同一变量口径（缺省 300ms）；导出供
- *  契约测试推进计时（jsdom 读不到变量时即此缺省值） */
-export const TARGET_TIP_SHOW_DELAY_MS = 300
 
 /** 目标缓存容量（同一目标文字重复悬停不重复请求；成功与失败都缓存，
  *  有界防无界增长——插入序 = 淘汰序） */
@@ -280,14 +276,10 @@ export function targetTipAnchorLeave(anchor: HTMLElement, relatedTarget?: Node |
 
 /** 宿主解析结果路由（syncController handleHostMessage 转发）：reqId
  *  配对在途请求才生效——迟到/陈旧回包丢弃；成功显示（锚点仍连接），
- *  失败静默（不出提示）；两种结果都进缓存（同目标不重复请求） */
-export function notifyTargetTipResolved(message: Extract<WebviewToHost, never> | {
-  kind: 'hover.target.resolved'
-  reqId: number
-  ok: boolean
-  relPath?: string
-  anchor?: string
-}): void {
+ *  失败静默（不出提示）；两种结果都进缓存（同目标不重复请求）。消息
+ *  形状取协议单点类型 TargetTipResolved（hover.target.resolved 成员），
+ *  协议演进与本函数签名联动 */
+export function notifyTargetTipResolved(message: TargetTipResolved): void {
   const state = inflight.get(message.reqId)
   if (state === undefined) {
     return
@@ -299,14 +291,12 @@ export function notifyTargetTipResolved(message: Extract<WebviewToHost, never> |
   }
   cachePut(
     cacheKeyOf(docUri, state.spec),
-    message.ok && typeof message.relPath === 'string'
-      ? { relPath: message.relPath, anchor: typeof message.anchor === 'string' ? message.anchor : '' }
-      : null,
+    message.ok ? { relPath: message.relPath, anchor: message.anchor ?? '' } : null,
   )
   if (pending === state) {
     pending = null
   }
-  if (!message.ok || typeof message.relPath !== 'string') {
+  if (!message.ok) {
     return
   }
   if (!state.anchor.isConnected) {
@@ -315,7 +305,7 @@ export function notifyTargetTipResolved(message: Extract<WebviewToHost, never> |
   if (shown !== null) {
     hide()
   }
-  show(state.anchor, message.relPath, typeof message.anchor === 'string' ? message.anchor : '')
+  show(state.anchor, message.relPath, message.anchor ?? '')
 }
 
 /** 悬停态不接管 Esc（统一 tooltip 语义：不与其他浮层的 Esc 链冲突）；
