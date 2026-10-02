@@ -84,6 +84,9 @@ export type HostToWebview =
   | { kind: 'embed.test.type'; inner: string; pos: number; text: string; occurrence?: number }
   /** P2-04 测试钩子：触发指定嵌入的目标保存（与头部保存入口同一出站） */
   | { kind: 'embed.test.save'; inner: string; occurrence?: number }
+  /** P2-10 测试钩子：聚焦指定嵌入的内部 Live 编辑器（可选设置光标/选区
+   *  ——真实 focus 语义；后续 format/table 等命令按焦点目标分派到 B） */
+  | { kind: 'embed.test.focus'; inner: string; pos?: number; to?: number; occurrence?: number }
   /** P2-04 测试钩子：向指定嵌入实例转发撤销/重做（与真实键入 Mod-Z 同一
    *  请求管线——实例竞态守卫后经 refEdit.message 出站 history.request） */
   | { kind: 'embed.test.history'; inner: string; op: 'undo' | 'redo'; occurrence?: number }
@@ -3329,6 +3332,13 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'embed.test.save':
       return (
         typeof v.inner === 'string' && v.inner.length > 0 &&
+        (v.occurrence === undefined || isNonNegativeInt(v.occurrence))
+      )
+    case 'embed.test.focus':
+      return (
+        typeof v.inner === 'string' && v.inner.length > 0 &&
+        (v.pos === undefined || isNonNegativeInt(v.pos)) &&
+        (v.to === undefined || isNonNegativeInt(v.to)) &&
         (v.occurrence === undefined || isNonNegativeInt(v.occurrence))
       )
     case 'embed.test.history':

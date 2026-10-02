@@ -6,6 +6,7 @@
 // 模式记忆与编辑器无泄漏在此验证。
 import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/syncController'
 import type { SerChange, WebviewToHost } from '../../src/shared/protocol'
+import { isFormatOperationId } from '../../src/shared/formatOperations'
 import { bootLocaleFromDocument } from '../../src/webview/localeBoot'
 import { EditorView, keymap } from '@codemirror/view'
 import { EditorState } from '@codemirror/state'
@@ -71,9 +72,17 @@ function bPush(message: WebviewToHost | import('../../src/shared/protocol').Host
   controller.handleHostMessage({ kind: 'refEdit.push', portId: boundPortId, fsPath: B_FS, message })
 }
 
-/** 伪造宿主：hover.request 应答目标全文；refEdit.* 应答绑定/编辑/保存 */
+/** 伪造宿主：hover.request 应答目标全文；refEdit.* 应答绑定/编辑/保存。
+ *  keybindings.execute 按生产宿主路由近似回发（格式操作族 →
+ *  format.command——本地消化命令不经宿主，生产同款） */
 async function fakeHostHandle(message: WebviewToHost): Promise<void> {
   switch (message.kind) {
+    case 'keybindings.execute': {
+      if (isFormatOperationId(message.id)) {
+        controller.handleHostMessage({ kind: 'format.command', op: message.id })
+      }
+      return
+    }
     case 'hover.request': {
       if (message.target !== '目标笔记') {
         controller.handleHostMessage({
@@ -127,6 +136,12 @@ async function fakeHostHandle(message: WebviewToHost): Promise<void> {
           controller.handleHostMessage({ kind: 'refEdit.dirty', fsPath: B_FS, dirty: true })
         }
         bPush({ kind: 'edit.ack', seq: inner.seq, ok: true, version: bModel.ver })
+        return
+      }
+      if (inner.kind === 'sync.request') {
+        // P2-10 conflictDiscard：经端口请求重同步（放弃未提交输入版本）→
+        // 回 doc.resync（全文重置并解除暂停）
+        bPush({ kind: 'doc.resync', version: bModel.ver, text: bModel.content })
         return
       }
       if (inner.kind === 'history.request' && inner.op === 'undo') {
@@ -265,5 +280,38 @@ Object.assign(window, {
     }
     btn.click()
     return true
+  },
+  // ---- P2-10（#287）完整 Live 操作套件配套 ----
+  /** 嵌入编辑器内选区设置（生产同款事务；格式/菜单操作的输入前提） */
+  selectEmbedRange(from: number, to: number): boolean {
+    const view = embedEditorView()
+    if (!view || to > view.state.doc.length) {
+      return false
+    }
+    view.dispatch({ selection: { anchor: from, head: to } })
+    return true
+  },
+  /** 主编辑器（A）内选区设置（焦点回 A 后操作分派的输入前提） */
+  selectMainRange(from: number, to: number): boolean {
+    const view = mainView()
+    if (!view || to > view.state.doc.length) {
+      return false
+    }
+    view.dispatch({ selection: { anchor: from, head: to } })
+    return true
+  },
+  /** 嵌入编辑器选区 range 计数与主选区文本 */
+  embedSelectionInfo(): { ranges: number; from: number; to: number } {
+    const view = embedEditorView()
+    const sel = view?.state.selection
+    return { ranges: sel?.ranges.length ?? 0, from: sel?.main.from ?? -1, to: sel?.main.to ?? -1 }
+  },
+  /** 宿主 ui.command 回发入口（键位/命令面板共用链路） */
+  embedUiCommand(op: string): void {
+    controller.handleHostMessage({ kind: 'ui.command', op })
+  },
+  /** 向绑定端口注入冲突暂停推送（session.suspended——恢复走 doc.resync） */
+  embedSuspendPort(): void {
+    bPush({ kind: 'session.suspended', version: bModel.ver, reason: 'conflict' })
   },
 })

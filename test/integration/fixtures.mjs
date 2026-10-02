@@ -1151,6 +1151,29 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, 'p204-CRLF目标.md'),
     'p204 CRLF 目标首行\r\np204 第二行\r\n', 'utf8')
+  // P2-10（#287）引用完整 Live 操作：A 含唯一嵌入且自身无 frontmatter
+  //（嵌入编辑器内的 fm 卡是全文档唯一的 Popover 目标）；B 带 frontmatter
+  //（Popover 编辑链路）与正文（格式/表格命令目标）
+  writeFileSync(path.join(wsDir, 'p210-操作嵌入.md'), [
+    '# P2-10 操作嵌入',
+    '',
+    '![[p210-操作目标]]',
+    '',
+    '尾部段落。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p210-操作目标.md'), [
+    '---',
+    'tags:',
+    '  - 甲',
+    '---',
+    '# p210 操作目标',
+    '',
+    '目标首段文字。',
+    '',
+    '目标次段。',
+    '',
+  ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, '嵌入改写.md'), [
     '# 嵌入改写',
     '',

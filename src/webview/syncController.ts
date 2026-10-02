@@ -443,6 +443,52 @@ export class WebviewSyncController {
     return this.live?.isSuspended ?? false
   }
 
+  // ---- P2-10（#287）操作目标分派（A/B 焦点路由的单一解析面）----
+  /** 打开统一菜单时捕获的目标视图（执行前重验实例存活与文档一致；缺省
+   *  = 主正文 view——既有调用方语义不变） */
+  private contextMenuView: EditorView | undefined
+  /** 粘贴桥发起时捕获的目标视图（回包插入不得落回主编辑器） */
+  private clipboardReadTarget: EditorView | undefined
+
+  /** 焦点所在的嵌入内部 Live 实例（无焦点嵌入 null；编辑器在场才命中——
+   *  Reading 态卡片无编辑器天然不命中，阅读零写路径不受影响） */
+  private embedFocusedLive(): LiveEditorInstance | null {
+    return this.embedCards?.focusedLive() ?? null
+  }
+
+  /** 焦点在嵌入内时阻断主文面板/会话类命令（查找/选词/预览——面板会话
+   *  绑定主编辑器，实例化前不落 A；键位被吞不执行，命令面板入口因焦点
+   *  已离 webview 天然不触发） */
+  private embedFocusBlocked(): boolean {
+    return this.embedFocusedLive() !== null
+  }
+
+  /** 操作目标解析：焦点在嵌入内 → 嵌入实例 B；否则主正文 A。返回 embed
+   *  非空表示 view 属于嵌入端口（门控按实例暂停判定，不查宿主 viewMode
+   *  ——父 Reading + 嵌入手动 Live 是合法组合） */
+  private actionTarget(): { view: EditorView; embed: LiveEditorInstance } | { view: EditorView; embed: null } | null {
+    const embed = this.embedFocusedLive()
+    if (embed) {
+      const view = embed.getView()
+      if (view) {
+        return { view, embed }
+      }
+    }
+    return this.view ? { view: this.view, embed: null } : null
+  }
+
+  /** 目标可编辑门控（A/B 统一）：CM6 只读态共享；A 走宿主 Live + 根暂停，
+   *  嵌入走实例暂停（内部 Live 与宿主模式正交） */
+  private targetEditable(view: EditorView, embed: LiveEditorInstance | null): boolean {
+    if (view.state.readOnly || !view.state.facet(EditorView.editable)) {
+      return false
+    }
+    if (embed) {
+      return !embed.isSuspended
+    }
+    return this.viewMode === 'live' && !this.suspended
+  }
+
   // ---- 视图模式状态（#6）----
   /** 当前模式：不写 TextDocument、不入撤销栈，切换只 dispatch 选区/effects */
   // ---- #292 加载期骨架屏状态 ----
@@ -815,17 +861,21 @@ export class WebviewSyncController {
 
   constructor(private readonly bridge: VsCodeBridge) {
     this.keybindingRouter = new KeybindingRouter({}, (id) => {
-      if (id === 'find') this.openFind()
-      else if (id === 'findNext') this.findStep('next')
-      else if (id === 'findPrevious') this.findStep('prev')
+      // P2-10：焦点在嵌入内部 Live 内时，绑定主文编辑器状态的面板/会话类
+      // 命令（查找、选词、链接预览）不落 A——键位吞掉不执行（面板会话
+      // 实例化属后续票；写操作族不受此限，各自经 actionTarget 落 B）
+      const embedBlocked = () => this.embedFocusBlocked()
+      if (id === 'find') { if (!embedBlocked()) this.openFind() }
+      else if (id === 'findNext') { if (!embedBlocked()) this.findStep('next') }
+      else if (id === 'findPrevious') { if (!embedBlocked()) this.findStep('prev') }
       // #236 查找替换：Ctrl+H 打开面板并展开替换栏；替换操作是面板会话
       // 命令（仅面板开 + live + 合法 query 时执行，本地消化不转发宿主）
-      else if (id === 'findReplace') this.openFind(undefined, { replace: true })
-      else if (id === 'findReplaceNext') this.runFindReplace('next')
-      else if (id === 'findReplaceAll') this.runFindReplace('all')
+      else if (id === 'findReplace') { if (!embedBlocked()) this.openFind(undefined, { replace: true }) }
+      else if (id === 'findReplaceNext') { if (!embedBlocked()) this.runFindReplace('next') }
+      else if (id === 'findReplaceAll') { if (!embedBlocked()) this.runFindReplace('all') }
       // #221 预览当前链接：纯 webview 域（目标判定与浮层打开都在 webview，
       // 无宿主往返依赖），与命令面板入口（ui.command 回发）共用同一实现
-      else if (id === 'hoverPreviewLink') this.previewLinkAtFocus()
+      else if (id === 'hoverPreviewLink') { if (!embedBlocked()) this.previewLinkAtFocus() }
       // #237 上下添加光标：同「本地消化不转发宿主」先例——命令在 webview
       // 的 CM6 上执行（与命令面板 ui.command 回发入口共用 runCursorAdd）
       else if (id === 'addCursorAbove' || id === 'addCursorBelow') this.runCursorAdd(id)
@@ -839,10 +889,10 @@ export class WebviewSyncController {
       // #238 选下一处相同词族：同「本地消化不转发宿主」先例（选区计划在
       // webview 的 CM6 上执行，与命令面板 ui.command 回发入口共用
       // runOccurrenceSelect）；仅 Live 正文（router writes 门控 + 守卫）
-      else if (id === 'findSelectNext') this.runOccurrenceSelect('next')
-      else if (id === 'findSelectPrevious') this.runOccurrenceSelect('prev')
-      else if (id === 'findSkipCurrent') this.runOccurrenceSelect('skip')
-      else if (id === 'findAllOccurrences') this.runOccurrenceSelect('all')
+      else if (id === 'findSelectNext') { if (!embedBlocked()) this.runOccurrenceSelect('next') }
+      else if (id === 'findSelectPrevious') { if (!embedBlocked()) this.runOccurrenceSelect('prev') }
+      else if (id === 'findSkipCurrent') { if (!embedBlocked()) this.runOccurrenceSelect('skip') }
+      else if (id === 'findAllOccurrences') { if (!embedBlocked()) this.runOccurrenceSelect('all') }
       else this.bridge.postMessage({ kind: 'keybindings.execute', id })
     })
     const saved = bridge.getState<PersistedState>()
@@ -983,6 +1033,14 @@ export class WebviewSyncController {
       // P2-04 根面板模式投影：未手动覆盖的根级嵌入内部模式跟随它
       parentMode: () => this.viewMode,
       requestMeasure: () => this.view?.requestMeasure(),
+      // P2-10（#287）嵌入内部 Live 的右键菜单转发（打开统一菜单并捕获
+      // 实例目标——执行前重验）；实例事务/选区更新联动快速操作条状态刷新
+      onLiveContextMenu: (inner, view, event) => this.onEmbedLiveContextMenu(inner, view, event),
+      onLiveUpdate: () => {
+        if (this.quickActionsOpen) {
+          queueMicrotask(() => this.refreshQuickActions())
+        }
+      },
       // #246 混排占位提升的父文档全文（主文档 Reading 块挂载路径；与
       // readingView.setDocument 同源——CM6 文档即权威文本，LF 坐标一致）
       sourceText: () => this.view?.state.doc.toString() ?? null,
@@ -1197,6 +1255,12 @@ export class WebviewSyncController {
         e.stopPropagation()
         return
       }
+      // P2-10（#287）A/B 焦点分派：焦点在嵌入内部 Live 内时，键位路由按
+      // 内部模式 live 语义放行写操作（嵌入 Live 与宿主模式正交——父
+      // Reading + 手动 Live 下 ctrl+b 等仍可用），allowWrites 同步放开；
+      // 写命令的执行体各自经 actionTarget 落到 B（见 runFormatOperation 等）
+      const embedFocused = !!target &&
+        !!(this.embedCards?.focusedLive()?.getView()?.dom.contains(target) ?? false)
       const liveFocused = this.viewMode === 'live' && !!target &&
         !!this.view?.contentDOM.contains(target) &&
         !this.view.state.readOnly && this.view.state.facet(EditorView.editable) && !this.suspended
@@ -1205,8 +1269,9 @@ export class WebviewSyncController {
         !(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement)
       const withinEditor = !!target && (target === document ||
         !!this.bodyEl?.contains(target) || !!this.findPanel?.contains(target))
-      if (this.keybindingRouter.handle(e, this.viewMode,
-        liveFocused || readingFocused || withinEditor, liveFocused)) return
+      if (this.keybindingRouter.handle(e, embedFocused ? 'live' : this.viewMode,
+        liveFocused || readingFocused || withinEditor || embedFocused,
+        liveFocused || embedFocused)) return
       if (this.findOpen && e.key === 'Escape') {
         e.preventDefault()
         e.stopPropagation()
@@ -1973,6 +2038,11 @@ export class WebviewSyncController {
         // 键入同一事务管线 → refEdit.message 出站）
         this.embedCards?.typeInEmbed(message.inner, message.pos, message.text, message.occurrence ?? 0)
         break
+      case 'embed.test.focus':
+        // P2-10 测试钩子：聚焦嵌入内部 Live 编辑器（真实 focus 语义——
+        // 格式/表格/菜单等命令随后的目标分派走同一焦点判定）
+        this.embedCards?.focusEmbed(message.inner, message.pos, message.to, message.occurrence ?? 0)
+        break
       case 'embed.test.save':
         // P2-04 测试钩子：触发指定嵌入的目标保存（与头部保存入口同一出站）
         this.embedCards?.testSave(message.inner, message.occurrence ?? 0)
@@ -2146,15 +2216,18 @@ export class WebviewSyncController {
       case 'table.command': {
         // 表格增删行列（#13）：仅 live 模式执行（阅读除勾选任务外只读）；
         // 操作经 CM6 事务走标准出站链路（一笔 edit.request = 撤销一次），
-        // 暂停态下与 live 输入同语义（本地保留、不写回）
-        if (this.view && this.viewMode === 'live') {
-          runTableEdit(this.view, message.op)
+        // 暂停态下与 live 输入同语义（本地保留、不写回）。P2-10：焦点在
+        // 嵌入内部 Live 内时目标为 B（经端口出站）
+        const resolved = this.actionTarget()
+        if (resolved && this.targetEditable(resolved.view, resolved.embed)) {
+          runTableEdit(resolved.view, message.op)
         }
         break
       }
       case 'table.create': {
-        if (this.view && this.viewMode === 'live') {
-          runCreateTable(this.view)
+        const resolved = this.actionTarget()
+        if (resolved && this.targetEditable(resolved.view, resolved.embed)) {
+          runCreateTable(resolved.view)
         }
         break
       }
@@ -2202,6 +2275,17 @@ export class WebviewSyncController {
           // P2-04 切换焦点嵌入的内部模式（命令面板/键位入口；默认未绑定，
           // 与头部模式按钮同一实现——无焦点嵌入零操作）
           case 'embedToggleMode': this.embedCards?.toggleFocusedMode(); break
+          // P2-10（#287）引用 Live 操作族：保存目标（与焦点内 Ctrl+S 焦点
+          // 路由共用出站）与显式关闭（切回 Reading 释放端口；dirty 保留宿主
+          // 文本管线，关闭确认界面属 P2-05）。冲突三项：compare 的原生对比
+          // 页与完整选择界面属 P2-12（本票为登记占位，键位默认未绑定）；
+          // discard 走既有恢复通道（经端口出站 sync.request → doc.resync
+          // 放弃未提交输入版本）；cancel 语义即保持暂停与输入（零操作）
+          case 'embedSaveTarget': this.embedCards?.focusedLiveSave(); break
+          case 'embedClose': this.embedCards?.closeFocused(); break
+          case 'conflictCompare': break
+          case 'conflictDiscard': this.embedCards?.focusedConflictDiscard(); break
+          case 'conflictCancel': break
           // #221 预览当前链接：命令面板/宿主命令入口与快捷键（keybindingRouter
           // 本地分支）共用同一实现（目标判定在 webview，无目标静默不误开）
           case 'hoverPreviewLink': this.previewLinkAtFocus(); break
@@ -2402,10 +2486,15 @@ export class WebviewSyncController {
       case 'contextMenu.test.contextMenu': {
         // 测试钩子（#183）：在正文 doc 偏移 pos 处打开统一菜单（与用户右键
         // 同一命中判定与装配链路——posAtCoords 的替代注入点；宿主测试无法
-        // 向 webview 派发真实鼠标事件，不接管位同样不开菜单）
-        const snapshot = this.contextSnapshotAt(message.pos)
+        // 向 webview 派发真实鼠标事件，不接管位同样不开菜单）。目标 = 主
+        // 正文（嵌入实例经 embed.test 族 + 真实 contextmenu 事件驱动）
+        const view = this.view
+        if (!view) {
+          break
+        }
+        const snapshot = this.contextSnapshotAt(view, message.pos)
         if (snapshot) {
-          this.openContextMenu(snapshot, 24, 24)
+          this.openContextMenu(snapshot, 24, 24, view)
         }
         break
       }
@@ -2425,18 +2514,29 @@ export class WebviewSyncController {
       }
       case 'clipboard.read.result': {
         // #183 粘贴桥回包：reqId 陈旧即丢弃。消费即推进（不回退清零）——
-        // 回退会让下一次粘贴复用旧 reqId，旧回包重放成为可能
+        // 回退会让下一次粘贴复用旧 reqId，旧回包重放成为可能。P2-10：插入
+        // 目标 = 发起时捕获的视图（嵌入菜单的粘贴经端口写 B；回包时实例
+        // 已释放则放弃——不落回主编辑器）
         if (message.reqId !== this.clipboardReadReqId) {
           break
         }
         this.clipboardReadReqId += 1
-        const view = this.view
-        if (!message.ok || !view || this.viewMode !== 'live' || this.suspended) {
+        const targetView = this.clipboardReadTarget
+        this.clipboardReadTarget = undefined
+        const embedTarget = targetView !== undefined && targetView !== this.view
+          ? this.embedCards?.liveViewEntry(targetView) ?? null
+          : null
+        const isEmbedView = targetView !== undefined && targetView !== this.view
+        if (!message.ok || !targetView || (isEmbedView && !embedTarget)) {
           if (!message.ok) {
             // 只读失败告警不弹窗（与未知命令的 console.warn 同口径——
             // review-loops 修复：此前零日志，粘贴无反应无从定位）
             console.warn('[vsidian] 剪贴板读取失败，粘贴放弃（宿主 readText 失败或端口未接线）')
           }
+          break
+        }
+        const view = targetView
+        if (!this.targetEditable(view, embedTarget?.instance ?? null)) {
           break
         }
         // 光标处插入（选区被替换——与原生粘贴同语义）；单笔事务走标准出站
@@ -4053,11 +4153,18 @@ export class WebviewSyncController {
     this.refreshQuickActions()
   }
 
-  private runFormatOperation(op: FormatOperationId): void {
+  /** P2-10：格式操作目标分派——无显式 target 时按焦点解析（嵌入内 B /
+   *  主文 A）；右键菜单路径传入打开时捕获并重验过的 target（避免菜单
+   *  关闭还焦的时序差）。写回经目标 view 的标准出站链路（嵌入 = 端口
+   *  refEdit.message 只写 B） */
+  private runFormatOperation(
+    op: FormatOperationId,
+    target?: { view: EditorView; embed: LiveEditorInstance | null },
+  ): void {
     this.closeQuickHeadingMenu(false)
-    const view = this.view
-    if (!view || this.viewMode !== 'live' || this.suspended ||
-        view.state.readOnly || !view.state.facet(EditorView.editable)) return
+    const resolved = target ?? this.actionTarget()
+    const view = resolved?.view
+    if (!view || !this.targetEditable(view, resolved?.embed ?? null)) return
     const selection = view.state.selection
     const region = view.state.field(tableRegionField, false)
     // 多选区（#240，多光标设置开时可达；格区 region 与多 range 互斥）：
@@ -4164,9 +4271,10 @@ export class WebviewSyncController {
     const createTable = button('table', 'vsidian-quick-table')
     bindLocaleAttrs(createTable, 'format.insertTable')
     createTable.addEventListener('click', () => {
-      const view = this.view
-      if (view && this.viewMode === 'live' && !this.suspended &&
-          !view.state.readOnly && view.state.facet(EditorView.editable)) {
+      // P2-10：操作条按钮走焦点目标解析（焦点在嵌入内部 Live 内 = B）
+      const resolved = this.actionTarget()
+      const view = resolved?.view
+      if (view && this.targetEditable(view, resolved?.embed ?? null)) {
         runCreateTable(view)
         view.focus()
       }
@@ -4306,13 +4414,15 @@ export class WebviewSyncController {
 
   private refreshQuickActions(): void {
     const bar = this.quickActionsEl
-    const view = this.view
+    // P2-10：操作条状态随操作目标视图（焦点在嵌入内部 Live 内 = B 的
+    // 选区/格区；按钮执行同走 actionTarget——工具栏操作不写错目标）
+    const embed = this.embedFocusedLive()
+    const view = embed?.getView() ?? this.view
     if (!bar || !view || !this.quickActionsOpen) return
     const state = view.state
     const range = state.selection.main
     const region = state.field(tableRegionField, false)
-    const editable = this.viewMode === 'live' && !this.suspended && !state.readOnly &&
-      state.facet(EditorView.editable)
+    const editable = this.targetEditable(view, embed)
     const tree = state.field(liveDecorationsField).tree
     const readState = createQuickActionStateReader(state.doc, tree,
       { from: range.from, to: range.to }, region ?? null, editable)
@@ -5363,16 +5473,21 @@ export class WebviewSyncController {
   /** #237 上下添加光标（快捷键本地分支与 ui.command 回发共用）：CM6
    *  addCursorAbove/Below 在当前全部 range 上逐行加光标（goal column 由
    *  moveVertically 保持）。边界：仅 Live 正文（阅读只读、暂停面板无输入
-   *  语义）；多光标设置关闭时不接管（键位仍由注册表持有）；表格格区
+   *  语义；P2-10 起焦点在嵌入内部 Live 内时目标为 B——多光标设置按目标
+   *  实例快照）；多光标设置关闭时不接管（键位仍由注册表持有）；表格格区
    *  region 存在时不接管——region 状态机与多 range 正交，格区维持单选区
    *  语义（批次 §3 已定边界）。frontmatter 成型头区由 frontmatterEditing
    *  的选区引导兜底（加出的 range 双端落头区即被弹回 body 起点） */
   private runCursorAdd(op: 'addCursorAbove' | 'addCursorBelow'): void {
-    const view = this.view
-    if (!view || this.viewMode !== 'live' || this.suspended) {
+    const resolved = this.actionTarget()
+    const view = resolved?.view
+    if (!view || !this.targetEditable(view, resolved?.embed ?? null)) {
       return
     }
-    if (!(this.live?.multicursorEnabled ?? false)) {
+    const multicursorOn = resolved?.embed
+      ? resolved.embed.multicursorEnabled
+      : (this.live?.multicursorEnabled ?? false)
+    if (!multicursorOn) {
       return
     }
     if (view.state.field(tableRegionField, false)) {
@@ -6220,7 +6335,9 @@ export class WebviewSyncController {
   // 宿主 blockLink.copy 消息汇到同一 runBlockCopyAtCursor。
 
   /** contentDOM contextmenu：坐标 → posAtCoords → 区域与块目标判定；
-   *  接管位（全域，头区除外）preventDefault 后弹菜单 */
+   *  接管位（全域，头区除外）preventDefault 后弹菜单。P2-10 起嵌入内部
+   *  Live 编辑器的 contextmenu 经 onEmbedLiveContextMenu 同一打开路径（目
+   *  标视图 = 嵌入实例） */
   private onContentContextMenu(event: MouseEvent): void {
     const view = this.view
     if (!view || this.viewMode !== 'live') {
@@ -6230,22 +6347,40 @@ export class WebviewSyncController {
     if (pos === null) {
       return
     }
-    const snapshot = this.contextSnapshotAt(pos)
+    const snapshot = this.contextSnapshotAt(view, pos)
     if (snapshot === null) {
       return // 不接管位（frontmatter 头区）：放行浏览器原生菜单
     }
     event.preventDefault()
-    this.openContextMenu(snapshot, event.clientX, event.clientY)
+    this.openContextMenu(snapshot, event.clientX, event.clientY, view)
+  }
+
+  /** P2-10（#287）嵌入内部 Live 的 contextmenu 入口（embedCard 经 context
+   *  转发）：区域判定按嵌入实例的文档坐标，菜单目标视图捕获为该实例——
+   *  执行前重验（runContextMenuCommand），焦点变化/实例释放不落 A */
+  private onEmbedLiveContextMenu(_inner: string, view: EditorView, event: MouseEvent): void {
+    // precise=false：估计定位——嵌入编辑器在卡片限高滚动容器内，CM6 视口
+    // 测量不感知外部裁剪，精确模式对可视但越其视口的行返回 null；右键
+    // 菜单只需行级 zone/块目标，估计位置语义充分（主正文路径不变）
+    const pos = view.posAtCoords({ x: event.clientX, y: event.clientY }, false)
+    if (pos === null) {
+      return
+    }
+    const snapshot = this.contextSnapshotAt(view, pos)
+    if (snapshot === null) {
+      return // 不接管位（成型头区）：放行浏览器原生菜单
+    }
+    event.preventDefault()
+    this.openContextMenu(snapshot, event.clientX, event.clientY, view)
   }
 
   /** doc 偏移 → 打开菜单的判定快照（zone + 块目标 + 选区态 + 行段落结构；
    *  不接管位返回 null）。头区行索引在此推导：frontmatterRange 的字符区间
    *  换算为结束行索引。行结构只在 normal 区解析（#184 勾选接线）——表格/
    *  围栏/图形区整簇置灰且围栏内 `# 行` 是代码内容非结构，采集中性态
-   *  不点亮任何勾选 */
-  private contextSnapshotAt(pos: number): MenuContextSnapshot | null {
-    const view = this.view
-    if (!view || pos < 0 || pos > view.state.doc.length) {
+   *  不点亮任何勾选。P2-10：view 参数化（嵌入实例与主正文同判定族） */
+  private contextSnapshotAt(view: EditorView, pos: number): MenuContextSnapshot | null {
+    if (pos < 0 || pos > view.state.doc.length) {
       return null
     }
     const text = view.state.doc.toString()
@@ -6267,9 +6402,11 @@ export class WebviewSyncController {
 
   /** 打开统一菜单（先关旧菜单；与大纲菜单互斥）。定位：挂载后量尺寸，
    *  视口系 fixed clamp + 底部上翻（jsdom 无布局时退化为点击点）；子菜单
-   *  右缘放不下装配期翻左（applySubmenuFlip） */
-  private openContextMenu(snapshot: MenuContextSnapshot, clientX: number, clientY: number): void {
-    const view = this.view
+   *  右缘放不下装配期翻左（applySubmenuFlip）。P2-10：targetView 为菜单
+   *  命令的目标（缺省主正文）；打开时捕获，执行前重验 */
+  private openContextMenu(snapshot: MenuContextSnapshot, clientX: number, clientY: number,
+    targetView?: EditorView): void {
+    const view = targetView ?? this.view
     if (!view) {
       return
     }
@@ -6280,6 +6417,7 @@ export class WebviewSyncController {
       onCommand: (command) => this.runContextMenuCommand(command),
     })
     this.contextMenuEl = menu
+    this.contextMenuView = view
     this.contextMenuTarget = snapshot.blockTarget
     this.contextMenuDoc = view.state.doc
     document.body.appendChild(menu)
@@ -6329,6 +6467,7 @@ export class WebviewSyncController {
     }
     this.contextMenuEl?.remove()
     this.contextMenuEl = undefined
+    this.contextMenuView = undefined
     this.contextMenuTarget = null
     this.contextMenuDoc = null
   }
@@ -6343,7 +6482,8 @@ export class WebviewSyncController {
   }
 
   /** 菜单还焦：还回打开前的焦点宿主（已移出文档时回落编辑器）。仅在焦点
-   *  仍在菜单内时被调用（关闭路径已有 contains 判定） */
+   *  仍在菜单内时被调用（关闭路径已有 contains 判定）。P2-10：回落目标 =
+   *  菜单捕获的目标视图（嵌入打开则回嵌入选区，不误落主正文） */
   private restoreMenuFocus(): void {
     const prev = this.menuPrevFocus
     this.menuPrevFocus = null
@@ -6351,27 +6491,38 @@ export class WebviewSyncController {
       prev.focus()
       return
     }
-    this.view?.focus()
+    ;(this.contextMenuView ?? this.view)?.focus()
   }
 
   /** 菜单命令分派：锚点过期防御后按命令执行——先查运行期 handler（覆写
    *  语义「可换 handler」：register/override 带 handler 即替换执行体），未
    *  命中再走内置白名单：格式操作复用快速操作条同一执行路径
    *  （runFormatOperation）；块链接两项沿用 blockMenu 迁入实现；剪贴板
-   *  四项见模块头。无 handler 非白名单命令 console.warn（不再静默） */
+   *  四项见模块头。无 handler 非白名单命令 console.warn（不再静默）。
+   *  P2-10：执行目标是菜单打开时捕获的 contextMenuView（主正文或嵌入
+   *  实例），执行前重验——嵌入实例已释放（离屏/切 Reading）或文档换版
+   *  即放弃执行，不落回主编辑器 */
   private runContextMenuCommand(command: string): void {
     const target = this.contextMenuTarget
-    const view = this.view
-    if (!view) {
+    const menuView = this.contextMenuView
+    if (!menuView) {
       this.closeContextMenu()
       return
     }
-    // 锚点过期防御（与大纲菜单同口径）：菜单打开期间文档被外部变更改写
-    // 则块行号失效，放弃执行（CM6 Text 不可变——外部变更必换实例）
-    if (this.contextMenuDoc !== view.state.doc) {
+    // 重验一：嵌入目标实例须仍在场（主正文视图 = this.view 恒在场）
+    const embedTarget = menuView === this.view ? null : this.embedCards?.liveViewEntry(menuView) ?? null
+    if (menuView !== this.view && !embedTarget) {
       this.closeContextMenu()
       return
     }
+    // 重验二（锚点过期防御，与大纲菜单同口径）：菜单打开期间文档被外部
+    // 变更改写则块行号失效，放弃执行（CM6 Text 不可变——外部变更必换实例）
+    if (this.contextMenuDoc !== menuView.state.doc) {
+      this.closeContextMenu()
+      return
+    }
+    const view = menuView
+    const embed = embedTarget?.instance ?? null
     this.closeContextMenu()
     // 运行期 handler 优先（含覆写内置 id——替换内置执行体）
     const handler = contextMenuHandlerForCommand(command)
@@ -6381,22 +6532,22 @@ export class WebviewSyncController {
     }
     if (command === 'copyHeadingLink') {
       if (target !== null && target.heading !== null) {
-        this.copyHeadingLink(target.heading.text)
+        this.copyHeadingLink(target.heading.text, embedTarget?.docUri ?? this.docUri)
       }
       return
     }
     if (command === 'copyBlockLink') {
       if (target !== null) {
-        this.copyBlockLinkOf(target)
+        this.copyBlockLinkOf(target, view, embedTarget?.docUri ?? this.docUri)
       }
       return
     }
     if (command === 'cut' || command === 'copy') {
-      this.copySelectionToClipboard(command === 'cut')
+      this.copySelectionToClipboard(command === 'cut', { view, embed })
       return
     }
     if (command === 'paste') {
-      this.requestClipboardPaste()
+      this.requestClipboardPaste({ view, embed })
       return
     }
     if (command === 'selectAll') {
@@ -6411,17 +6562,17 @@ export class WebviewSyncController {
     }
     if (command === 'insertTable') {
       // 与快速操作条建表同源入口
-      if (this.viewMode === 'live' && !this.suspended && !view.state.readOnly &&
-          view.state.facet(EditorView.editable)) {
+      if (this.targetEditable(view, embed)) {
         runCreateTable(view)
         view.focus()
       }
       return
     }
     // 其余为 formatOperations id（wikilink/link/bold/…/heading1-6）——复用
-    // 快速操作条同一执行路径（含守卫、计划与焦点归还）
+    // 快速操作条同一执行路径（含守卫、计划与焦点归还；目标 = 菜单捕获
+    // 的重验后视图，不再按当前焦点二次解析——菜单关闭还焦存在时序差）
     if (isFormatOperationId(command)) {
-      this.runFormatOperation(command)
+      this.runFormatOperation(command, { view, embed })
       return
     }
     // 运行期注册且无 handler、又不在白名单：开发期告警（注册方应在描述符
@@ -6430,11 +6581,12 @@ export class WebviewSyncController {
   }
 
   /** 剪切/复制：选区文本经宿主剪贴板桥直写（多行 EOL 归一在会话层）；
-   *  剪切再以单笔事务删选区（一笔 edit.request = 宿主撤销一次） */
-  private copySelectionToClipboard(cut: boolean): void {
-    const view = this.view
-    if (!view || this.viewMode !== 'live' || this.suspended ||
-        view.state.readOnly || !view.state.facet(EditorView.editable)) {
+   *  剪切再以单笔事务删选区（一笔 edit.request = 宿主撤销一次）。
+   *  P2-10：target 参数化（嵌入菜单的目标实例；缺省按焦点解析） */
+  private copySelectionToClipboard(cut: boolean, target?: { view: EditorView; embed: LiveEditorInstance | null }): void {
+    const resolved = target ?? this.actionTarget()
+    const view = resolved?.view
+    if (!view || !this.targetEditable(view, resolved?.embed ?? null)) {
       return
     }
     const range = view.state.selection.main
@@ -6454,41 +6606,46 @@ export class WebviewSyncController {
   }
 
   /** 粘贴：宿主剪贴板读桥（reqId 在途防陈旧回包）；回包在
-   *  clipboard.read.result 分派处插入（光标处/替换选区） */
-  private requestClipboardPaste(): void {
-    const view = this.view
-    if (!view || this.viewMode !== 'live' || this.suspended ||
-        view.state.readOnly || !view.state.facet(EditorView.editable)) {
+   *  clipboard.read.result 分派处插入（光标处/替换选区）。P2-10：发起时
+   *  捕获目标视图（嵌入菜单的粘贴经端口写 B；回包重验实例在场） */
+  private requestClipboardPaste(target?: { view: EditorView; embed: LiveEditorInstance | null }): void {
+    const resolved = target ?? this.actionTarget()
+    const view = resolved?.view
+    if (!view || !this.targetEditable(view, resolved?.embed ?? null)) {
       return
     }
+    this.clipboardReadTarget = view
     this.clipboardReadReqId += 1
     this.bridge.postMessage({ kind: 'clipboard.read', reqId: this.clipboardReadReqId })
   }
 
   /** 快捷键/命令面板入口（宿主 blockLink.copy 消息）：对光标所在块执行
-   *  与右键同款复制（光标在标题行 = 复制标题链接） */
+   *  与右键同款复制（光标在标题行 = 复制标题链接）。P2-10：焦点在嵌入
+   *  内部 Live 内时目标为 B（块 id 补写与链接归属按目标文档） */
   private runBlockCopyAtCursor(): void {
-    const view = this.view
-    if (!view || this.viewMode !== 'live') {
+    const resolved = this.actionTarget()
+    const view = resolved?.view
+    if (!view || !this.targetEditable(view, resolved?.embed ?? null)) {
       return
     }
-    const target = this.contextSnapshotAt(view.state.selection.main.head)?.blockTarget ?? null
+    const target = this.contextSnapshotAt(view, view.state.selection.main.head)?.blockTarget ?? null
     if (target === null) {
       return
     }
+    const docUri = (resolved?.embed ? this.embedCards?.liveViewEntry(view)?.docUri : undefined) ?? this.docUri
     if (target.heading !== null) {
-      this.copyHeadingLink(target.heading.text)
+      this.copyHeadingLink(target.heading.text, docUri)
       return
     }
-    this.copyBlockLinkOf(target)
+    this.copyBlockLinkOf(target, view, docUri)
   }
 
   /** 复制标题链接：标题取行面字面文本（含行内标记）——与大纲 copyLink 及
    *  宿主 findHeadingOffset 的字面比较口径同源（宿主拼 `[[笔记名#标题]]`） */
-  private copyHeadingLink(headingText: string): void {
+  private copyHeadingLink(headingText: string, docUri: string): void {
     this.bridge.postMessage({
       kind: 'clipboard.write',
-      linkHeading: { docUri: this.docUri, heading: headingText },
+      linkHeading: { docUri, heading: headingText },
     })
   }
 
@@ -6496,12 +6653,9 @@ export class WebviewSyncController {
    *  识别，手写任一形态都复用）直接用；没有则先自动补写（6 位随机
    *  [a-z0-9]、全文 id 查重避让；块尾行后空一行写独立行，Obsidian 默认
    *  形态）——单事务 dispatch（一笔 edit.request = 撤销一次），dispatch
-   *  成功再写剪贴板 */
-  private copyBlockLinkOf(target: ContextMenuBlockTarget): void {
-    const view = this.view
-    if (!view) {
-      return
-    }
+   *  成功再写剪贴板。P2-10：view/docUri 参数化（嵌入菜单经端口写 B，
+   *  链接归属目标文档） */
+  private copyBlockLinkOf(target: ContextMenuBlockTarget, view: EditorView, docUri: string): void {
     const doc = view.state.doc
     const lines = doc.toString().split('\n')
     const lastLine = target.block.end
@@ -6515,7 +6669,7 @@ export class WebviewSyncController {
     if (existing !== null) {
       this.bridge.postMessage({
         kind: 'clipboard.write',
-        linkBlock: { docUri: this.docUri, blockId: existing },
+        linkBlock: { docUri, blockId: existing },
       })
       return
     }
@@ -6532,7 +6686,7 @@ export class WebviewSyncController {
     }
     this.bridge.postMessage({
       kind: 'clipboard.write',
-      linkBlock: { docUri: this.docUri, blockId: id },
+      linkBlock: { docUri, blockId: id },
     })
   }
 
@@ -7275,6 +7429,11 @@ export class WebviewSyncController {
    *  replace 预置替换词——与预置查询词同语义）。重复打开重新聚焦输入框
    *  并全选查询 */
   private openFind(query?: string, opts: { replace?: boolean; replacement?: string } = {}): void {
+    // P2-10：面板会话绑定主编辑器——焦点（记忆焦点）在嵌入内部 Live 内时
+    // 不打开（不落 A；面板实例化属后续票）
+    if (this.embedFocusBlocked()) {
+      return
+    }
     this.findTouched = true
     const wasOpen = this.findOpen
     // #238 面板打开：选项条让位（UI 互斥——面板在场时由面板开关闪烁承担
@@ -7408,7 +7567,7 @@ export class WebviewSyncController {
   }
 
   /** 循环导航（上一项/下一项）：步进后重绘并定位到新当前匹配 */
-  private findStep(direction: 'next' | 'prev'): void {    if (!this.findOpen) {
+  private findStep(direction: 'next' | 'prev'): void {    if (!this.findOpen || this.embedFocusBlocked()) {
       return
     }
     this.findEnsureFresh()
@@ -7913,6 +8072,11 @@ export class WebviewSyncController {
    *  否则按面板/选区状态决策种子；多选区文本不一致时只扩词不加选。
    *  生效（选区变化）才会话簿记 + 选项条/面板闪烁呈现 */
   private runOccurrenceSelect(op: 'next' | 'prev' | 'skip' | 'all'): void {
+    // P2-10：选词会话（选项条/命中显形）绑定主编辑器——焦点在嵌入内部
+    // Live 内时不执行（不落 A；会话实例化属后续票）
+    if (this.embedFocusBlocked()) {
+      return
+    }
     const view = this.view
     if (!view || this.viewMode !== 'live' || this.suspended) {
       return
@@ -8056,10 +8220,12 @@ export class WebviewSyncController {
   }
 
   /** #239 词级移动命令执行口：仅 Live 正文（router 的 writes 门控已限焦
-   *  点域；阅读模式只读静默不接管，与格式命令同口径） */
+   *  点域；阅读模式只读静默不接管，与格式命令同口径。P2-10 起焦点在嵌入
+   *  内部 Live 内时目标为 B（词移动作用于目标实例选区） */
   private runWordMotion(command: (view: EditorView) => boolean): void {
-    if (this.view && this.viewMode === 'live') {
-      command(this.view)
+    const resolved = this.actionTarget()
+    if (resolved && this.targetEditable(resolved.view, resolved.embed)) {
+      command(resolved.view)
     }
   }
 

@@ -114,6 +114,21 @@ export const UI_OPERATIONS = [
   // 规格约定模式切换默认未绑定；保存目标不设独立操作（复用焦点内
   // Ctrl+S 路由，见 syncController docKeydown 的 P2-04 段）
   { id: 'embedToggleMode', command: 'onegayi.vsidian.ui.embedToggleMode', titleKey: 'command.ui.embedToggleMode.title', mode: 'both', writes: false, defaults: [] },
+  // P2-10（#287）引用完整 Live 操作族：保存目标补独立可绑定入口（焦点内
+  // Ctrl+S 路由继续有效，两入口共用同一出站——此前 P2-04 评估「不设独立
+  // 操作」由本票按规格「保存目标登记可绑定入口」扩充）；显式关闭 = 关闭
+  // 焦点嵌入的编辑会话（切回 Reading 并释放端口；目标 dirty 保留宿主文本
+  // 管线，关闭确认界面属 P2-05）；冲突三项按规格登记（对比并解决/放弃
+  // 当前版本/取消）——compare 的原生对比页与完整选择界面属 P2-12，本票
+  // compare/cancel 为登记占位（无暂停现场零操作），discard 走既有恢复
+  // 通道（经端口出站 sync.request → doc.resync 重新同步 = 放弃未提交输入
+  // 版本，不回滚整个 B）。全部默认未绑定（规格「模式切换、冲突选择默认
+  // 未绑定」）
+  { id: 'embedSaveTarget', command: 'onegayi.vsidian.embed.saveTarget', titleKey: 'command.embed.saveTarget.title', mode: 'both', writes: false, defaults: [] },
+  { id: 'embedClose', command: 'onegayi.vsidian.embed.close', titleKey: 'command.embed.close.title', mode: 'both', writes: false, defaults: [] },
+  { id: 'conflictCompare', command: 'onegayi.vsidian.conflict.compare', titleKey: 'command.conflict.compare.title', mode: 'both', writes: false, defaults: [] },
+  { id: 'conflictDiscard', command: 'onegayi.vsidian.conflict.discard', titleKey: 'command.conflict.discard.title', mode: 'both', writes: false, defaults: [] },
+  { id: 'conflictCancel', command: 'onegayi.vsidian.conflict.cancel', titleKey: 'command.conflict.cancel.title', mode: 'both', writes: false, defaults: [] },
   // #237 多光标·上下添加光标：@codemirror/commands 内置命令，webview 本地
   // 消化（快捷键经 keybindingRouter 本地分支，命令面板经 ui.command 回发，
   // 两条入口共用 webview 同一实现，不做出站宿主往返）。仅 Live 正文生效

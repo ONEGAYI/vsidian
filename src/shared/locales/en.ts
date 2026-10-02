@@ -659,6 +659,12 @@ export const en = {
   /** #221 preview the link at the cursor/focus (manual hover-popup open; keyboard enters the popup and Esc returns) */
   'command.ui.hoverPreviewLink.title': 'Preview the current link',
   'command.ui.embedToggleMode.title': 'Toggle reference internal view mode',
+  /** P2-10 reference Live action entries (save target / explicit close / conflict trio; all unbound by default) */
+  'command.embed.saveTarget.title': 'Save focused reference target',
+  'command.embed.close.title': 'Close focused reference editing session',
+  'command.conflict.compare.title': 'Compare and resolve',
+  'command.conflict.discard.title': 'Discard current version',
+  'command.conflict.cancel.title': 'Cancel conflict choice',
 
   // ---- #159 锚点跳转（块引用定位与本文件锚点）----
   /** 块 id 缺失提示（与标题缺失同款「打开后提示」行为） */
