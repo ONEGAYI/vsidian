@@ -99,11 +99,12 @@ const hostValues = (values: Partial<SettingsPayload>): HostToWebview =>
   ({ kind: 'settings.snapshot', values }) as HostToWebview
 
 describe('侧栏与编辑器页组结构（#264）', () => {
-  it('侧栏五项：常规/编辑器/快捷键/外观/索引维护，「中文分词」入口退役', () => {
+  it('侧栏六项：常规/编辑器/实验性功能/快捷键/外观/索引维护，「中文分词」入口退役', () => {
     const { parent } = makeProductionView()
     expect(navTitles(parent)).toEqual([
       zhCn['settings.generalSection'],
       zhCn['settings.editorCategory'],
+      zhCn['settings.experimentalSection'],
       zhCn['keybindingSettings.title'],
       zhCn['appearance.title'],
       zhCn['indexMaintenance.title'],

@@ -27,6 +27,7 @@ import {
   tableTabBackward,
   runTableEdit,
   runTableRowMove,
+  runTableColumnMove,
   tableRowsAt,
 } from '../../src/webview/tableEditing'
 import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/syncController'
@@ -53,6 +54,25 @@ const TABLE_DOC = [
   '结尾段落。',
   '',
 ].join('\n')
+
+const QUOTE_TABLE_DOC = [
+  '前导段落。',
+  '',
+  '> | a | b | c |',
+  '> | --- | --- | --- |',
+  '> | 1 | 2 | 3 |',
+  '> | 4 | 5 | 6 |',
+  '',
+  '结尾段落。',
+  '',
+].join('\n')
+
+/** 光标端点落在 "> " 前缀闭区间 [line.from, line.from+2] 即触发前缀显形
+ *  （与 liveDecorations 的端点触及语义同口径）。 */
+function headInQuotePrefix(view: EditorView, pos: number): boolean {
+  const line = view.state.doc.lineAt(pos)
+  return line.text.startsWith('> ') && pos >= line.from && pos <= line.from + 2
+}
 
 interface DecoItem {
   from: number
@@ -113,6 +133,31 @@ describe('格区状态退出', () => {
     view.dispatch({ selection: EditorSelection.single(TABLE_DOC.indexOf('结尾段落')) })
     expect(view.state.field(tableRegionField)).toBeNull()
     expect(view.state.doc.toString()).toBe(TABLE_DOC)
+    view.destroy()
+  })
+  it('右键/大纲菜单夺焦不清蒙版（#186 关键 bug 1）；真实外部失焦照常清除', async () => {
+    const view = makeEditView(TABLE_DOC, TABLE_DOC.indexOf('苹果'))
+    selectTableRegion(view, { tableFrom: TABLE_DOC.indexOf('| 名字'), rowFrom: 1,
+      rowTo: 2, columnFrom: 0, columnTo: 1 })
+    expect(view.state.field(tableRegionField)).not.toBeNull()
+    const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
+    // 菜单夺焦：focusout 的 relatedTarget 是菜单容器（focusMenuDom 聚焦
+    // body 下的 .vsidian-context-menu）——此前 onBlur 直接清蒙版，用户
+    // 看到「选中单元格后右键失焦选区」；豁免后菜单操作期间蒙版保持
+    const menu = document.createElement('div')
+    menu.className = 'vsidian-context-menu'
+    document.body.appendChild(menu)
+    view.dom.dispatchEvent(new FocusEvent('focusout', { relatedTarget: menu, bubbles: true }))
+    await settle()
+    expect(view.state.field(tableRegionField)).not.toBeNull()
+    // 真实外部失焦（焦点移出编辑器且不在菜单内）：蒙版照常清除
+    const outside = document.createElement('div')
+    document.body.appendChild(outside)
+    view.dom.dispatchEvent(new FocusEvent('focusout', { relatedTarget: outside, bubbles: true }))
+    await settle()
+    expect(view.state.field(tableRegionField)).toBeNull()
+    menu.remove()
+    outside.remove()
     view.destroy()
   })
   it('阅读与实时预览切换清除矩形格区', async () => {
@@ -463,6 +508,181 @@ describe('表格点阵与悬停控件', () => {
     view.contentDOM.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }))
   })
 
+  it('引用表拖拽交换列后光标跟随原格内容，不落入引用前缀区（#296 六轮）', () => {
+    const view = makeEditView(QUOTE_TABLE_DOC, QUOTE_TABLE_DOC.indexOf('1') + 1)
+    // slot=2：列 0 拖到列 1 右半（交换列 0、1）；slot=1 是插回原位（无操作）
+    expect(runTableColumnMove(view, QUOTE_TABLE_DOC.indexOf('> | a'), 0, 2)).toBe(true)
+    const head = view.state.selection.main.head
+    // 新行 "> | 2 | 1 | 3 |"：原 "1" 内容已随列交换到第二格
+    const movedOne = view.state.doc.toString().indexOf('1')
+    expect(head).toBe(movedOne + 1)
+    expect(headInQuotePrefix(view, head)).toBe(false)
+    view.destroy()
+  })
+
+  it('引用表拖拽移动行后光标跟随原行内容，不落入引用前缀区（#296 六轮）', () => {
+    const view = makeEditView(QUOTE_TABLE_DOC, QUOTE_TABLE_DOC.indexOf('1') + 1)
+    expect(runTableRowMove(view, QUOTE_TABLE_DOC.indexOf('1'), 0)).toBe(true)
+    const head = view.state.selection.main.head
+    // 该行成为表头后，光标仍在 "1" 之后
+    const movedOne = view.state.doc.toString().indexOf('1')
+    expect(head).toBe(movedOne + 1)
+    expect(headInQuotePrefix(view, head)).toBe(false)
+    view.destroy()
+  })
+
+  it('引用表拖拽交换列后撤销，光标不落入引用前缀区（#296 六轮）', async () => {
+    const linked = await setupLinked(QUOTE_TABLE_DOC)
+    const view = linked.controller.getView()!
+    view.dispatch({ selection: { anchor: QUOTE_TABLE_DOC.indexOf('1') + 1 } })
+    expect(runTableColumnMove(view, QUOTE_TABLE_DOC.indexOf('> | a'), 0, 2)).toBe(true)
+    await settle()
+    await linked.doc.undo()
+    await settle()
+    expect(linked.doc.getText()).toBe(QUOTE_TABLE_DOC)
+    expect(headInQuotePrefix(view, view.state.selection.main.head)).toBe(false)
+  })
+
+  // ---- 审查轮（review-loops 第二次，2026-10-02）：六轮修复的缺陷补正 ----
+
+  const QUOTE_TABLE_RAGGED = [
+    '前文',
+    '',
+    '> | a | 乙乙乙乙 |',
+    '> | --- | --- |',
+    '> | 1111111 | 2 |',
+    '> | 短 | 行 |',
+    '',
+    '后文',
+    '',
+  ].join('\n')
+
+  it('不等长行移动后光标精确跟随原内容（行首按置换后文本累计，审查轮 P1）', () => {
+    // 光标在最长行（17 字）的 "1111111" 后，该行下移到末尾——前方槽位
+    // 装入更短文本，后续行起点左移；修复前用旧目标行 lineFrom 加偏移，
+    // 光标跨格漂移（探针实证偏 6-8 字符）
+    const one = QUOTE_TABLE_RAGGED.indexOf('1111111')
+    const oldLineFrom = QUOTE_TABLE_RAGGED.indexOf('> | 1111111')
+    const view = makeEditView(QUOTE_TABLE_RAGGED, one + 7)
+    expect(runTableRowMove(view, one, 3)).toBe(true)
+    const head = view.state.selection.main.head
+    const newLineFrom = view.state.doc.lineAt(view.state.doc.toString().indexOf('1111111')).from
+    // 精确断言：行内偏移保留（"1111111" 后 = 新行首 + 原行内偏移）
+    expect(head).toBe(newLineFrom + (one + 7 - oldLineFrom))
+    expect(headInQuotePrefix(view, head)).toBe(false)
+    view.destroy()
+  })
+
+  it('不等长行行尾光标下移后落新行尾，不落前缀区（审查轮 P1 极端位）', () => {
+    const lineFrom = QUOTE_TABLE_RAGGED.indexOf('> | 1111111')
+    const lineTo = lineFrom + 17
+    const view = makeEditView(QUOTE_TABLE_RAGGED, lineTo)
+    expect(runTableRowMove(view, QUOTE_TABLE_RAGGED.indexOf('1111111'), 3)).toBe(true)
+    const head = view.state.selection.main.head
+    expect(headInQuotePrefix(view, head)).toBe(false)
+    const movedOne = view.state.doc.toString().indexOf('1111111')
+    const newLine = view.state.doc.lineAt(movedOne)
+    expect(head).toBe(newLine.to)
+    view.destroy()
+  })
+
+  it('多光标下场 undo 不坍缩为单光标（审查轮 P2）', async () => {
+    const linked = await setupLinked(QUOTE_TABLE_DOC)
+    const view = linked.controller.getView()!
+    const inTable = QUOTE_TABLE_DOC.indexOf('1') + 1
+    const outside = QUOTE_TABLE_DOC.indexOf('结尾段落')
+    view.dispatch({ selection: EditorSelection.create(
+      [EditorSelection.cursor(inTable), EditorSelection.cursor(outside)], 0) })
+    expect(runTableColumnMove(view, QUOTE_TABLE_DOC.indexOf('> | a'), 0, 2)).toBe(true)
+    await settle()
+    expect(view.state.selection.ranges.length).toBe(2)
+    await linked.doc.undo()
+    await settle()
+    expect(view.state.selection.ranges.length).toBe(2)
+    expect(headInQuotePrefix(view, view.state.selection.main.head)).toBe(false)
+  })
+
+  it('外部变更不动远处网格行前缀区的光标（审查轮：钳制仅限本笔替换区间内）', async () => {
+    // 光标在表格 A 行首前缀区（网格行前缀、显形编辑态），外部变更落在
+    // 表格 B——钳制只应作用于被替换区间内的光标，不得拽走远处的显形态
+    const doc = [
+      '> | 甲 | 乙 |',
+      '> | --- | --- |',
+      '> | 丙 | 丁 |',
+      '',
+      '| 戊 | 己 |',
+      '| --- | --- |',
+      '| 庚 | 辛 |',
+      '',
+      '结尾。',
+      '',
+    ].join('\n')
+    const linked = await setupLinked(doc)
+    const view = linked.controller.getView()!
+    const prefixPos = doc.indexOf('> | 甲') + 1 // 表格 A 首行前缀区内
+    view.dispatch({ selection: { anchor: prefixPos } })
+    const cellFrom = doc.indexOf('庚')
+    await linked.doc.applyChanges([{ offset: cellFrom, length: 1, text: '庚庚' }])
+    await settle()
+    expect(view.state.selection.main.head).toBe(prefixPos)
+  })
+
+  it('净删除型外部变更不把区间外光标拽进格内容（审查轮二：坐标系自洽）', async () => {
+    // 光标在数据行行尾（替换区间外）；表头长格被大幅净删除（> 跨行距离：
+    // 同行剩余 + 分隔行整行）。修复后判定在 dispatch 前（旧 selection 对旧
+    // 区间，坐标系自洽），区间外光标保持跟随本行的映射位。
+    // 验证缺口如实记录：jsdom 全链路未能构造出误钳的完整触发交集（映射后
+    // 数值落旧区间 × 落点恰在新文档隐藏结构），「修复前误钳」由第 2 轮
+    // 复核的裸 CM6 映射探针实证（净删 11/插 5 时区间外光标映射后数值落入
+    // 旧区间）；本例锁定修复后的正向语义（区间外光标跟随本行、不被拽走）
+    const doc = [
+      '> | ' + '甲'.repeat(30) + ' | 乙 |',
+      '> | --- | --- |',
+      '> | 丙 | 丁 |',
+      '',
+      '结尾。',
+      '',
+    ].join('\n')
+    const linked = await setupLinked(doc)
+    const view = linked.controller.getView()!
+    const dataLineFrom = doc.indexOf('> | 丙')
+    const dataLineTo = dataLineFrom + '> | 丙 | 丁 |'.length
+    view.dispatch({ selection: { anchor: dataLineTo } }) // 数据行行尾（区间外）
+    // 表头长格净删除：30 个甲 → 1 个（净删 29，跨行距离 16）
+    const cellFrom = doc.indexOf('甲')
+    await linked.doc.applyChanges([{ offset: cellFrom, length: 30, text: '甲' }])
+    await settle()
+    const head = view.state.selection.main.head
+    const line = view.state.doc.lineAt(head)
+    // 光标仍在数据行行尾（跟随本行左移），不被拽进表头行格内容
+    expect(line.text).toBe('> | 丙 | 丁 |')
+    expect(head).toBe(line.to)
+  })
+
+  it('多 range 拖拽交换列不折叠选区，main 跟随原格内容（审查轮 P3）', () => {
+    const view = makeEditView(QUOTE_TABLE_DOC, QUOTE_TABLE_DOC.indexOf('1') + 1)
+    const inTable = QUOTE_TABLE_DOC.indexOf('1') + 1
+    const outside = QUOTE_TABLE_DOC.indexOf('结尾段落')
+    view.dispatch({ selection: EditorSelection.create(
+      [EditorSelection.cursor(inTable), EditorSelection.cursor(outside)], 0) })
+    expect(runTableColumnMove(view, QUOTE_TABLE_DOC.indexOf('> | a'), 0, 2)).toBe(true)
+    expect(view.state.selection.ranges.length).toBe(2)
+    const movedOne = view.state.doc.toString().indexOf('1')
+    expect(view.state.selection.main.head).toBe(movedOne + 1)
+    view.destroy()
+  })
+
+  it('光标在引用前缀区拖拽交换列，前缀内偏移保留（显形守恒，审查轮 P3）', () => {
+    const lineFrom = QUOTE_TABLE_DOC.indexOf('> | a | b | c |')
+    const view = makeEditView(QUOTE_TABLE_DOC, lineFrom + 1)
+    expect(runTableColumnMove(view, lineFrom, 0, 2)).toBe(true)
+    const head = view.state.selection.main.head
+    const newLineFrom = view.state.doc.toString().indexOf('> | b | a | c |')
+    expect(head).toBe(newLineFrom + 1)
+    expect(headInQuotePrefix(view, head)).toBe(true) // 前缀编辑态保持，不被吸进格内容
+    view.destroy()
+  })
+
   it('千行表仅为视口中已挂载的网格行建立抓手，滚动回收时同步更新', async () => {
     const doc = ['| a | b |', '| --- | --- |', ...Array.from({ length: 1000 }, (_, i) => `| ${i} | x |`), ''].join('\n')
     const view = makeEditView(doc, 0)
@@ -700,5 +920,148 @@ describe('千行表结构操作性能边界', () => {
     // 1002 行表格 + 尾随空段 = 1003；插行后 1004
     expect(linked.doc.getText().split('\n')).toHaveLength(1004)
     expect(elapsed).toBeLessThan(2000)
+  })
+})
+
+// ---- 引用块内表格的格内编辑链路（#296 审查轮） ----
+
+describe('引用块内表格的格内编辑防护（#296 审查轮）', () => {
+  const QDOC = '> | 名字 | 数量 |\n> | --- | --- |\n> | 苹果 | 3 |'
+
+  const keydown = (view: EditorView, init: KeyboardEventInit): void => {
+    view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }))
+  }
+
+  it('格内 Enter 持久化为 <br>，不把引用表格行真实拆散', () => {
+    const view = makeEditView(QDOC, QDOC.indexOf('苹') + 1)
+    keydown(view, { key: 'Enter' })
+    expect(view.state.doc.toString())
+      .toBe('> | 名字 | 数量 |\n> | --- | --- |\n> | 苹<br>果 | 3 |')
+    view.destroy()
+  })
+
+  it('Mod-a 在引用表格格内选中该格内容区间（不退化为全选）', () => {
+    const view = makeEditView(QDOC, QDOC.indexOf('苹果') + 1)
+    keydown(view, { key: 'a', ctrlKey: true })
+    const sel = view.state.selection.main
+    expect(sel.from).toBe(QDOC.indexOf('苹果'))
+    expect(sel.to).toBe(QDOC.indexOf('苹果') + 2)
+    view.destroy()
+  })
+
+  it('跨格选区键入：删除照常、文字落入格内不被丢弃', () => {
+    const view = makeEditView(QDOC, QDOC.indexOf('苹果'))
+    const from = QDOC.indexOf('苹果')
+    const to = QDOC.indexOf('3') + 1
+    view.dispatch({
+      changes: { from, to, insert: 'X' },
+      selection: { anchor: from + 1 },
+      userEvent: 'input.type.text',
+    })
+    const text = view.state.doc.toString()
+    expect(text).toContain('X')
+    // 引用表格行不被拆散：行数与引用前缀保持
+    expect(text.split('\n')).toHaveLength(3)
+    expect(text.split('\n').every((line) => line.startsWith('> ') || line === '')).toBe(true)
+    view.destroy()
+  })
+
+  it('单光标格内退格清空首格后不再吞引用前缀与隐藏管道', () => {
+    const view = makeEditView(QDOC, QDOC.indexOf('苹果') + 2)
+    const rowFrom = QDOC.indexOf('> | 苹果')
+    // jsdom 无浏览器退格默认行为，按过滤器真实入口派发 delete 事务：
+    // 一次清空 '苹果'（保留填充空格）；随后删填充空格的事务被拒绝
+    view.dispatch({
+      changes: { from: QDOC.indexOf('苹果'), to: QDOC.indexOf('苹果') + 2, insert: '' },
+      userEvent: 'delete.backward',
+    })
+    const cleared = view.state.doc.toString()
+    expect(cleared.split('\n')).toHaveLength(3)
+    expect(cleared.split('\n')[2]).toBe('> |  | 3 |')
+    expect(cleared.split('\n')[0]).toBe('> | 名字 | 数量 |')
+    // 填充空格守恒：删除被拒绝，引用前缀与隐藏管道原样
+    view.dispatch({
+      changes: { from: rowFrom + 3, to: rowFrom + 4, insert: '' },
+      selection: { anchor: rowFrom + 3 },
+      userEvent: 'delete.backward',
+    })
+    expect(view.state.doc.toString()).toBe(cleared)
+    view.destroy()
+  })
+})
+
+describe('表格边界水平进出导航（#296 二轮真机反馈）', () => {
+  // 表格首/末格最左/最右按方向键直达表格块外紧邻行；紧邻外部行尾/行首
+  // 反向直达首/末格内容（跳过隐藏前缀与管道）。此前首格最左 Left 被吞键
+  // 卡死（navTargetsOf 无左邻目标仍 return true），表格内外无法互达。
+  const DOC = '前文段落\n\n> | 名字 | 数量 |\n> | --- | --- |\n> | 苹果 | 3 |\n\n后文段落'
+  const TOP_DOC = '前文段落\n\n| 名字 | 数量 |\n| --- | --- |\n| 苹果 | 3 |\n\n后文段落'
+
+  const keydown = (view: EditorView, init: KeyboardEventInit): void => {
+    view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }))
+  }
+
+  it('引用表首格最左 Left：跳出表格到上一行行尾（不再吞键卡死）', () => {
+    const view = makeEditView(DOC, DOC.indexOf('名字'))
+    keydown(view, { key: 'ArrowLeft' })
+    expect(view.state.selection.main.head)
+      .toBe(DOC.indexOf('\n\n> | 名字') + 1) // 表格上一行（空行）行尾
+    view.destroy()
+  })
+
+  it('引用表末格最右 Right：跳出表格到下一行（空行）行首', () => {
+    const view = makeEditView(DOC, DOC.indexOf('3') + 1)
+    keydown(view, { key: 'ArrowRight' })
+    expect(view.state.selection.main.head)
+      .toBe(DOC.indexOf('后文段落') - 1) // 表格下一行（空行）行首
+    view.destroy()
+  })
+
+  it('表格上方紧邻行行尾 Right：直达引用表首格内容', () => {
+    const blankTo = DOC.indexOf('\n\n> | 名字') + 1
+    const view = makeEditView(DOC, blankTo)
+    keydown(view, { key: 'ArrowRight' })
+    expect(view.state.selection.main.head).toBe(DOC.indexOf('名字'))
+    view.destroy()
+  })
+
+  it('表格下方紧邻行行首 Left：直达引用表末格内容尾', () => {
+    // 紧邻表格末行的是空行（from = to）：光标落在空行行首
+    const blankFrom = DOC.indexOf('后文段落') - 1
+    const view = makeEditView(DOC, blankFrom)
+    keydown(view, { key: 'ArrowLeft' })
+    expect(view.state.selection.main.head).toBe(DOC.indexOf('3') + 1)
+    view.destroy()
+  })
+
+  it('顶层表边界同样进出（新契约对两形态一致）', () => {
+    const view = makeEditView(TOP_DOC, TOP_DOC.indexOf('名字'))
+    keydown(view, { key: 'ArrowLeft' })
+    expect(view.state.selection.main.head)
+      .toBe(TOP_DOC.indexOf('\n\n| 名字') + 1)
+    const view2 = makeEditView(TOP_DOC, TOP_DOC.indexOf('\n\n| 名字') + 1)
+    keydown(view2, { key: 'ArrowRight' })
+    expect(view2.state.selection.main.head).toBe(TOP_DOC.indexOf('名字'))
+    view.destroy()
+    view2.destroy()
+  })
+
+  it('文档首表格首格最左 Left：交原生（jsdom 无默认链不动，浏览器侧由原生左移）', () => {
+    const head = '> | 名字 | 数量 |\n> | --- | --- |\n> | 苹果 | 3 |'
+    const view = makeEditView(head, head.indexOf('名字'))
+    keydown(view, { key: 'ArrowLeft' })
+    // 不接管：贴文档边界时 keymap 返回 false 交原生（此处装配无
+    // defaultKeymap，原生位移为零即证明未接管）
+    expect(view.state.selection.main.head).toBe(head.indexOf('名字'))
+    view.destroy()
+  })
+
+  it('非贴边位置不接管：表格上一段正文行尾（隔空行）Right 走原生', () => {
+    const view = makeEditView(DOC, DOC.indexOf('前文段落') + 4)
+    keydown(view, { key: 'ArrowRight' })
+    // 紧邻行是空行而非表格行：不接管，光标交默认链（此处无 defaultKeymap
+    // 装配，keymap 返回 false 即无位移——断言位移未发生即证明未接管）
+    expect(view.state.selection.main.head).toBe(DOC.indexOf('前文段落') + 4)
+    view.destroy()
   })
 })

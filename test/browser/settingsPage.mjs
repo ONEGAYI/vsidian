@@ -394,12 +394,14 @@ try {
     assert.equal(calloutPaint.radius, '8px')
     assert.notEqual(calloutPaint.bg, 'rgba(0, 0, 0, 0)', 'callout 应有可辨色底')
     await page.screenshot({ path: path.join(artifacts, `settings-${theme}-css-snippets.png`) })
-    // #264 中文分词并入编辑器页：侧栏五项无分词入口；编辑器页尾二级组
-    //「中文分词」承载引擎/下载源与资源管理（可见性断言落用户看到的东西）
+    // #264 中文分词并入编辑器页：侧栏六项无分词入口（#296 三轮起第三
+    // 内置分组「实验性功能」）；编辑器页尾二级组「中文分词」承载引擎/
+    // 下载源与资源管理（可见性断言落用户看到的东西）
     assert.deepEqual(await page.locator('.vsidian-settings-nav-item').allInnerTexts(),
       [zhCn['settings.generalSection'], zhCn['settings.editorCategory'],
+        zhCn['settings.experimentalSection'],
         zhCn['keybindingSettings.title'], zhCn['appearance.title'], zhCn['indexMaintenance.title']],
-      '侧栏应为五项且不再有中文分词入口')
+      '侧栏应为六项且不再有中文分词入口')
     await page.getByRole('button', { name: zhCn['settings.editorCategory'], exact: true }).click()
     const wordsegGroup = page.locator('.vsidian-settings-group').filter({
       has: page.locator('.vsidian-settings-group-title', { hasText: zhCn['wordSegment.title'] }) })
@@ -410,6 +412,18 @@ try {
       '分词组内 jieba 引擎选项应可见')
     assert.equal(await wordsegGroup.getByRole('button', { name: zhCn['wordSegment.download'] }).isVisible(), true,
       '分词组内下载按钮应可见')
+    // #296 三轮「实验性功能」分组：独立侧栏页，首个小节「表格行为」内
+    // 「块内表格渲染」开关真实可见可交互（绘制层断言，非 DOM 存在性）
+    await page.getByRole('button', { name: zhCn['settings.experimentalSection'], exact: true }).click()
+    const tableGroup = page.locator('.vsidian-settings-group').filter({
+      has: page.locator('.vsidian-settings-group-title', { hasText: zhCn['settings.groupExperimentalTable'] }) })
+    await tableGroup.waitFor()
+    const blockRenderToggle = tableGroup.locator('input[type="checkbox"]')
+    assert.equal(await blockRenderToggle.count(), 1, '实验性页应有唯一「块内表格渲染」开关')
+    assert.equal(await blockRenderToggle.isVisible(), true, '块内表格渲染开关应可见')
+    assert.equal(await blockRenderToggle.isChecked(), true, '块内表格渲染默认开启')
+    assert.equal(await tableGroup.locator(`text=${zhCn['setting.experimentalTableRender.title']}`).isVisible(),
+      true, '开关行标题应可见')
     // 兼容路由：宿主按退役分页 id 定位（focusSection wordSegment）打开编辑器
     // 页分词组，定位块滚入主区可视范围（绘制层：几何落在主区矩形内）
     await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {

@@ -171,3 +171,41 @@ describe('格对格粘贴（2026-09-28 决策：剥包装、扩表容纳、永�
     expect(aligns).toEqual(['left', 'right', null])
   })
 })
+
+describe('引用块内表格区域（#296 审查轮）', () => {
+  // 无边界引用行：blank 后首段含内容不 shift，首格区间需 clamp 到前缀右端，
+  // 否则剪贴板格值与区域替换文本会把 "> " 带进内容
+  const qdoc = '> | 甲 | 乙 |\n> | --- | --- |\n> a | b'
+  const qtexts = qdoc.split('\n')
+  const qstarts: number[] = [0]
+  for (let i = 1; i < qtexts.length; i++) {
+    qstarts.push(qstarts[i - 1]! + qtexts[i - 1]!.length + 1)
+  }
+  const qrows: TableRowInfo[] = [0, 1, 2].map((line, index) => ({
+    kind: index === 0 ? 'header' : index === 1 ? 'delimiter' : 'row',
+    lineFrom: qstarts[line]!,
+    lineTo: qstarts[line]! + qtexts[line]!.length,
+    prefixLen: 2,
+  }))
+  const qapply = (changes: Array<{ from: number; to: number; insert: string }>) =>
+    [...changes].sort((a, b) => b.from - a.from).reduce((text, change) =>
+      text.slice(0, change.from) + change.insert + text.slice(change.to), qdoc)
+  const qregion = (r0: number, r1: number, c0: number, c1: number): TableRegion =>
+    ({ tableFrom: qrows[0]!.lineFrom, rowFrom: r0, rowTo: r1, columnFrom: c0, columnTo: c1 })
+
+  it('无边界行的格区复制：剪贴板格值不含引用前缀', () => {
+    expect(serializeTableRegion(qdoc, qrows, qregion(1, 1, 0, 1))).toBe('|a | b|\n| --- | --- |')
+  })
+
+  it('无边界行的区域替换：写回文本保持引用前缀且格值干净', () => {
+    const plan = planTableRegionReplace(qdoc, qrows, qregion(1, 1, 0, 0), '新')!
+    const after = qapply(plan.changes)
+    expect(after.split('\n')[2]).toBe('> |新 | b|')
+  })
+
+  it('区域删除（整列）：重建行保持引用层级', () => {
+    const plan = planTableRegionDelete(qdoc, qrows, qregion(0, 1, 0, 0))!
+    const after = qapply(plan.changes)
+    expect(after).toBe('> | 乙 |\n> | --- |\n> | b|')
+  })
+})

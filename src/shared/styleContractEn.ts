@@ -235,6 +235,14 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
     dom: 'A mark decoration span inside table rows.',
     obsidian: { counterpart: 'No counterpart (Obsidian hides pipes or shows them as-is)' },
   },
+  'live-table-prefix': {
+    purpose:
+      'Container prefix span for grid rows (#296 render-breakage fix): the prefix region of table rows inside quotes/lists (marker hiding range and the bare gap before the first pipe) is wrapped into this mark and excluded from grid placement via CSS display:none — leftover prefix DOM (the empty placeholder intrinsically produced by replace, and bare text nodes) becomes an occupying grid item that wraps cells onto a second row.',
+    states:
+      'The mark steps aside while the cursor/selection touches the prefix region, so the prefix text becomes visible and editable (it then participates in the inline layout).',
+    dom: 'A mark decoration span covering the container prefix range inside a grid row.',
+    obsidian: { counterpart: 'No counterpart (Obsidian exposes no public class for prefix handling of tables in containers)' },
+  },
   'live-table-align': {
     purpose:
       'Column alignment modifiers declared by the live delimiter row (applied to the trimmed content spans); the actual grid layout is handled by the grid-align classes.',
@@ -243,8 +251,10 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
   },
   'live-table-grid-row': {
     purpose:
-      'The CSS grid row of safe tables; the active cell keeps the grid in place, and cells still map to their source ranges (not an independent table data model). Since #142 column widths are distributed by content proportion: the line decoration inlines a per-table column width plan (per column minmax(min(48px, equal share), content-proportion fr); all rows of a table share the same plan) which the grid rules consume, falling back to equal columns by count when the plan is missing. Snippet overrides of grid-template-columns through class rules still take precedence.',
+      'The CSS grid row of safe tables; the active cell keeps the grid in place, and cells still map to their source ranges (not an independent table data model). Since #142 column widths are distributed by content proportion: the line decoration inlines a per-table column width plan (per column minmax(min(48px, equal share), content-proportion fr); all rows of a table share the same plan) which the grid rules consume, falling back to equal columns by count when the plan is missing. Snippet overrides of grid-template-columns through class rules still take precedence. #296 render-breakage fix: the generic grid row rule no longer declares padding/box-shadow that flatten quote line classes — table rows inside quotes restore the accent bar and content indent via the .vsidian-quote-line combination (matching plain quote lines); line-level leftovers outside cells (pipes, measurement buffers, prefixes, replace empty placeholders) are all excluded from grid placement.',
     dom: 'The grid row container inside table rows (CSS grid layout).',
+    states:
+      'Table rows inside quotes/lists stack container line classes on top (accent bar, indent, bullet); the selected-row outline is covered separately by the row-selected rules.',
     obsidian: { counterpart: 'The direction of the Obsidian live table grid (no precisely matching class)' },
   },
   'live-table-grid-cell': {

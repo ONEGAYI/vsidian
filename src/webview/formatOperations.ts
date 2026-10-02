@@ -1,7 +1,7 @@
 import type { SyntaxNode } from '@lezer/common'
 import type { FormatOperationId } from '../shared/formatOperations'
 import { markdownTreeParser } from '../shared/markdownDoc'
-import { parseTableDelimiter, tableRowCellsForColumns } from '../shared/tableCells'
+import { containerPrefixLen, parseTableDelimiter, tableRowCellsForColumns } from '../shared/tableCells'
 import type { TableRegion } from './tableRegion'
 
 export interface FormatSelection { from: number; to: number }
@@ -647,7 +647,9 @@ export function planFormatOperation(
     }
     const delimiter = offsets[1] === undefined ? '' : text.slice(offsets[1], text.indexOf('\n', offsets[1]) < 0
       ? text.length : text.indexOf('\n', offsets[1]))
-    const columns = parseTableDelimiter(delimiter)?.length
+    // 引用容器表的前缀感知（#296 审查轮）：分隔行与内容行都按形态学回退
+    // 传 prefixLen——原文直切会因首格含 `>` 而整体 null（格式化静默 no-op）
+    const columns = parseTableDelimiter(delimiter, containerPrefixLen(delimiter))?.length
     if (!columns || region.columnTo >= columns) return null
     const changes: FormatChange[] = []
     for (let row = region.rowFrom; row <= region.rowTo; row++) {
@@ -655,7 +657,7 @@ export function planFormatOperation(
       if (at === undefined) return null
       const eol = text.indexOf('\n', at)
       const line = text.slice(at, eol < 0 ? text.length : eol)
-      const cells = tableRowCellsForColumns(line, at, columns)
+      const cells = tableRowCellsForColumns(line, at, columns, containerPrefixLen(line))
       if (!cells) return null
       for (let col = region.columnFrom; col <= region.columnTo; col++) {
         const cell = cells[col]

@@ -91,6 +91,8 @@ import {
   HOVER_LIVE_DIRECT_KEY,
   SHOW_LINE_NUMBERS_DEFAULT,
   SHOW_LINE_NUMBERS_KEY,
+  TABLE_BLOCK_RENDER_DEFAULT,
+  TABLE_BLOCK_RENDER_KEY,
   SYMBOL_AUTOCOMPLETE_DEFAULT,
   SYMBOL_AUTOCOMPLETE_KEY,
   SYMBOL_SELECTION_WRAP_DEFAULT,
@@ -133,7 +135,7 @@ import {
 } from './nextOccurrence'
 // 2026-10 浮层锚点跟随：查找面板/选词选项条右缘对齐正文列右缘的计划纯函数
 import { planOverlayAnchorRight } from './overlayAnchor'
-import { liveDecorationsField, livePreviewDecorations, LIVE_CLASS_NAMES, selectionTouchesRange, tableCompositionSettled, TaskCheckboxWidget } from './liveDecorations'
+import { liveDecorationsField, livePreviewDecorations, LIVE_CLASS_NAMES, selectionTouchesRange, tableCompositionSettled, tableContainerRenderFacet, TaskCheckboxWidget } from './liveDecorations'
 import { setOccurrenceHitActive } from './hitReveal'
 import { LINK_MOD_CLASS, createLinkInteractions, LINK_CLASS_NAMES, WIKILINK_CLASS_NAMES, activateLinkAtPos, activateLooseLinkAtPos, activateWikilinkAtPos } from './liveLinks'
 import { liveMath } from './liveMath'
@@ -262,6 +264,7 @@ import {
   PLAIN_MENU_LINE,
   buildContextMenuModel,
   contextMenuBlockTargetAt,
+  contextMenuClickWithinSelection,
   contextMenuHandlerForCommand,
   contextMenuKeybindingHints,
   contextMenuZoneAt,
@@ -299,7 +302,8 @@ import { applyObsidianDomAlias, OBSIDIAN_ALIAS_PROBES } from '../shared/obsidian
 import { createFontArrivalWatch } from './fontArrival'
 import { CHROME_CONTRACT_PROBES } from '../shared/chromeContract'
 import { VirtualReadingView } from './readingVirtualView'
-import { blankRowInputPlan, runCreateTable, runTableEdit, tableEditing, tableRowsAt } from './tableEditing'
+import { blankRowInputPlan, clampExternalCursor, runCreateTable, runTableEdit, tableEditing, tableRowsAt } from './tableEditing'
+import { prefixLenOf } from './tableStructure'
 import { symbolAutocomplete } from './symbolAutocomplete'
 import { symbolSelectionWrap } from './symbolWrap'
 import { multicursorExtensions } from './multicursor'
@@ -657,6 +661,36 @@ interface BufferedIncremental {
   baseChanges: SerChange[] | null
 }
 
+/** 右键保选区（#186 关键 bug 1）：Chrome contenteditable 上右键 mousedown
+ *  的默认行为会把选区折叠/重定位到点击处——选好的单元格/文本选区被右键
+ *  清掉。两类命中都 preventDefault（VSCode 原生编辑器同款），contextmenu
+ *  事件不受影响照常触发：右键落在 CM6 选区内（含端点）；或落在活跃表格
+ *  矩形蒙版的表格行区间内（蒙版态 CM6 选区折叠在锚格，选区判定不覆盖，
+ *  而 caret 跳移会经选区变化清掉蒙版）。点在选区与蒙版外放行默认（右键
+ *  前光标落到点击处，菜单作用于右键点） */
+const contextMenuSelectionGuard = EditorView.domEventHandlers({
+  mousedown(event: MouseEvent, view: EditorView): boolean {
+    if (event.button !== 2) return false
+    const pos = view.posAtCoords({ x: event.clientX, y: event.clientY })
+    if (pos === null) return false
+    let keep = contextMenuClickWithinSelection(view.state.selection.ranges, pos)
+    if (!keep) {
+      const region = view.state.field(tableRegionField, false)
+      if (region) {
+        // 蒙版行区间：rowTo 是内容行索引（表头 0），分隔行在表头之后——
+        // 内容行 n>0 的源行号 = 首行 + n + 1（跳过分隔行）
+        const doc = view.state.doc
+        const first = doc.lineAt(region.tableFrom).number
+        const last = first + region.rowTo + (region.rowTo > 0 ? 1 : 0)
+        const lineNo = doc.lineAt(pos).number
+        keep = lineNo >= first && lineNo <= last
+      }
+    }
+    if (keep) event.preventDefault()
+    return false
+  },
+})
+
 export class WebviewSyncController {
   private readonly diagnostics = new TestDiagnostics()
   private view: EditorView | undefined
@@ -1006,6 +1040,12 @@ export class WebviewSyncController {
   private lineNumbersOn = SHOW_LINE_NUMBERS_DEFAULT
   /** 行号扩展的运行时开关通道（extensions 装配点） */
   private readonly lineNumbersCompartment = new Compartment()
+
+  // ---- 块内表格渲染状态（#296 三轮）----
+  /** 容器内表格网格化开关生效态（默认开）；live 经 facet 热重配
+   *  （#296 六轮：设置只管 live，reading 始终 markdown-it 原生渲染） */
+  private tableBlockRenderOn = TABLE_BLOCK_RENDER_DEFAULT
+  private readonly tableRenderCompartment = new Compartment()
 
   // ---- 代码块卡片状态（#79）----
   /** 卡片配置生效态（card/lineNumbers/copyButton/highlight；lineNumbers
@@ -1890,6 +1930,7 @@ export class WebviewSyncController {
         this.applyEmbedMaxHeightSetting()
         this.embedCards?.setMaxDepth(this.embedMaxDepth())
         this.applyWordSegmentEngineSetting()
+        this.applyTableBlockRenderSetting()
         break
       case 'wordSegment.state': {
         // #239 jieba 资源状态（宿主下载/删除后推送）：资源 URI 变化驱动
@@ -4113,31 +4154,46 @@ export class WebviewSyncController {
         .decos.between(0, view.state.doc.length, (_from, _to, value) => {
           const spec = value.spec as { class?: string; widget?: { checked?: boolean } }
           if (typeof spec['class'] === 'string') {
+            // 各类彼此独立计数（#296：行类按行聚合为单条合并 class 装饰，
+            // 引用块内表格行同时是引用行与表格行——else-if 链会把表格行
+            // 吞进 quoteLines，探针测不到表格行）；各类名无子串包含关系，
+            // 独立计数不重复
             const cls = spec['class']
             if (cls.includes('vsidian-heading-line') && !cls.includes('vsidian-heading-inview')) {
               counts.headingLines += 1
-            } else if (cls.includes('vsidian-header-')) {
+            }
+            if (cls.includes('vsidian-header-')) {
               counts.headerSpans += 1
-            } else if (cls.includes('vsidian-strong')) {
+            }
+            if (cls.includes('vsidian-strong')) {
               counts.strongSpans += 1
-            } else if (cls.includes('vsidian-emphasis')) {
+            }
+            if (cls.includes('vsidian-emphasis')) {
               counts.emphasisSpans += 1
-            } else if (cls.includes('vsidian-inline-code')) {
+            }
+            if (cls.includes('vsidian-inline-code')) {
               counts.inlineCodeSpans += 1
-            } else if (cls.includes('vsidian-quote-line')) {
+            }
+            if (cls.includes('vsidian-quote-line')) {
               counts.quoteLines += 1
-            } else if (cls.includes('vsidian-code-line')) {
+            }
+            if (cls.includes('vsidian-code-line')) {
               counts.codeLines += 1
-            } else if (cls.includes('vsidian-list-line')) {
+            }
+            if (cls.includes('vsidian-list-line')) {
               counts.listLines += 1
-            } else if (cls.includes('vsidian-hr-line')) {
+            }
+            if (cls.includes('vsidian-hr-line')) {
               counts.hrLines += 1
-            } else if (cls.includes('vsidian-frontmatter-line')) {
+            }
+            if (cls.includes('vsidian-frontmatter-line')) {
               counts.frontmatterLines += 1
-            } else if (cls.includes('vsidian-table-cell')) {
+            }
+            if (cls.includes('vsidian-table-cell')) {
               // #12：单元格内容 mark（cellHeader/align 修饰并入计数，不重复）
               counts.tableCells += 1
-            } else if (cls.includes('vsidian-table-line')) {
+            }
+            if (cls.includes('vsidian-table-line')) {
               // 行级类包含全部表格行；cellHeader/align 修饰行已在前序命中
               counts.tableLines += 1
             }
@@ -8325,6 +8381,13 @@ export class WebviewSyncController {
    *  指定规范化选区，避免先渲染无效 range 后被 DOM 观察器折叠。 */
   private dispatchExternalChanges(view: EditorView, changes: readonly SerChange[]): void {
     const specs = this.clampedSpec(changes)
+    // #296 审查轮二：钳制命中判定在 dispatch 前做（旧 selection 对旧区间
+    // [from,to]，坐标系自洽）——dispatch 后的 head 已映射到新文档，与旧
+    // 区间比较会在「净删除 + 区间外右侧近处光标」时误钳（映射后数值恰落
+    // 旧区间，但字符身份仍是区间外内容——远处前缀显形光标被拽走）、
+    // 「净插入 + 区间右端点光标」时漏钳
+    const hitMask = view.state.selection.ranges.map((range) =>
+      range.empty && specs.some((c) => range.head >= c.from && range.head <= c.to))
     const mapped = view.state.selection.map(ChangeSet.of(specs, view.state.doc.length))
     const selection = mapped.ranges.some((range) => range.from > range.to)
       ? EditorSelection.create(mapped.ranges.map((range) =>
@@ -8336,6 +8399,31 @@ export class WebviewSyncController {
       selection,
       annotations: externalSync.of(true),
     })
+    // #296 六轮 + 审查轮：undo/外部整行替换会把格内容里的光标归到区间左端
+    // （前缀或隐藏管道端点），触发前缀显形、网格破裂。用变更后 state 的
+    // 网格信息钳回最近格内容；只处理 dispatch 前命中（端点在被替换文本上）
+    // 的折叠光标——区间内光标才会被映射重定位，区间外（用户主动放置的
+    // 远处光标，如前缀显形编辑态）不动（审查轮 F4）；逐 range 钳制、其余
+    // range 保留（单 anchor spec 会整体替换选区、坍缩多光标——审查轮 F2）。
+    // selection-only 补事务与上一笔同步连发，浏览器只渲染最终态。
+    const sel = view.state.selection
+    let ranges: ReturnType<typeof EditorSelection.cursor>[] | null = null
+    for (let i = 0; i < sel.ranges.length; i++) {
+      if (!hitMask[i]) {
+        continue
+      }
+      const clamped = clampExternalCursor(view.state, sel.ranges[i]!.head)
+      if (clamped === null || clamped === sel.ranges[i]!.head) {
+        continue
+      }
+      if (!ranges) {
+        ranges = sel.ranges.slice()
+      }
+      ranges[i] = EditorSelection.cursor(clamped)
+    }
+    if (ranges) {
+      view.dispatch({ selection: EditorSelection.create(ranges, sel.mainIndex) })
+    }
   }
 
   /**
@@ -8657,8 +8745,12 @@ export class WebviewSyncController {
       const lineNumber = header.number + pending.region.rowFrom + (pending.region.rowFrom > 0 ? 1 : 0)
       const initialLine = lineNumber <= start.doc.lines ? start.doc.line(lineNumber) : null
       const currentLine = lineNumber <= view.state.doc.lines ? view.state.doc.line(lineNumber) : null
-      const initialCell = initialLine && splitTableRowCells(initialLine.text, initialLine.from)[pending.region.columnFrom]
-      const currentCell = currentLine && splitTableRowCells(currentLine.text, currentLine.from)[pending.region.columnFrom]
+      // 格定位按行身份 prefixLen 前缀感知切分（#296 审查轮）：原文直切会
+      // 把 `>` 算进首格，typed 回退推导与 selection 锚点错位
+      const rowInfo = rows && rows[pending.region.rowFrom + (pending.region.rowFrom > 0 ? 1 : 0)]
+      const rowPrefix = rowInfo ? prefixLenOf(rowInfo) : 0
+      const initialCell = initialLine && splitTableRowCells(initialLine.text, initialLine.from, rowPrefix)[pending.region.columnFrom]
+      const currentCell = currentLine && splitTableRowCells(currentLine.text, currentLine.from, rowPrefix)[pending.region.columnFrom]
       if (rows && initialCell && currentCell) {
         const oldContent = start.doc.sliceString(initialCell.contentFrom, initialCell.contentTo)
         const newContent = view.state.doc.sliceString(currentCell.contentFrom, currentCell.contentTo)
@@ -8926,6 +9018,25 @@ export class WebviewSyncController {
     this.lineNumbersOn = on
     this.view?.dispatch({
       effects: this.lineNumbersCompartment.reconfigure(on ? liveLineNumbers() : []),
+    })
+  }
+
+  /**
+   * 应用「块内表格渲染」设置（#296 三轮；settings.snapshot / settings.changed
+   * 到达时）：缺键回定义默认（向后兼容）、非布尔忽略（与行号同口径）。
+   * live 侧经 Compartment 热重配 tableContainerRenderFacet——装饰 StateField
+   * 检测 facet 变化全量重建。#296 六轮用户决策：设置只管 live 网格化，
+   * reading 不受影响（markdown-it 原生渲染即原行为，无风险）
+   */
+  private applyTableBlockRenderSetting(): void {
+    const raw = this.settings?.[TABLE_BLOCK_RENDER_KEY]
+    const on = typeof raw === 'boolean' ? raw : TABLE_BLOCK_RENDER_DEFAULT
+    if (on === this.tableBlockRenderOn) {
+      return
+    }
+    this.tableBlockRenderOn = on
+    this.view?.dispatch({
+      effects: this.tableRenderCompartment.reconfigure(tableContainerRenderFacet.of(on)),
     })
   }
 
@@ -10529,9 +10640,14 @@ export class WebviewSyncController {
       // mount 时按定义默认开）；列在流内、与正文以固定间距相隔的布局
       // 见 main.css 的 #34 段（行号列宽随位数自适应，无降级机制）
       this.lineNumbersCompartment.of(this.lineNumbersOn ? liveLineNumbers() : []),
+      // #296 三轮「块内表格渲染」：容器内表格网格化开关（默认开，设置
+      // 快照/变更到达后热重配；liveDecorationsField 检测 facet 变化全量重建）
+      this.tableRenderCompartment.of(tableContainerRenderFacet.of(this.tableBlockRenderOn)),
       // 标题实时预览装饰（#5 切片）：直接装饰（StateField）+ 间接装饰
       // （ViewPlugin 按 visibleRanges），见 liveDecorations.ts 头注释
       livePreviewDecorations,
+      // 右键保选区（#186 bug 1）：右键 mousedown 在选区内 preventDefault
+      contextMenuSelectionGuard,
       // #10 链接/图片：视口间接装饰（链接 span、图片 widget）+ Ctrl/Cmd
       // 单击跳转意图上报（执行归宿主）；#11 双链同通道（原始 target 上报）
       createLinkInteractions({

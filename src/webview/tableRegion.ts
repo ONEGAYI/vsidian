@@ -1,5 +1,5 @@
 import { escapeCellText, parseTableDelimiter, tableRowCellsForColumns, type TableCellRange } from '../shared/tableCells'
-import type { PlannedTableEdit, TableRowInfo } from './tableStructure'
+import { prefixLenOf, type PlannedTableEdit, type TableRowInfo } from './tableStructure'
 
 /** 表头和数据行使用连续索引；分隔行不计入矩形。端点始终规范化为升序。 */
 export interface TableRegion {
@@ -12,11 +12,13 @@ export interface TableRegion {
 
 function tableParts(doc: string, rows: TableRowInfo[]) {
   if (rows[0]?.kind !== 'header' || rows[1]?.kind !== 'delimiter') return null
-  const columns = parseTableDelimiter(doc.slice(rows[1].lineFrom, rows[1].lineTo))?.length
+  // 行解析：前缀感知切分（#296 审查轮：内建 blank + 首格 clamp——无边界行
+  // 的前缀不进格值，剪贴板与替换文本干净），坐标以行首为基准（零偏移）
+  const columns = parseTableDelimiter(doc.slice(rows[1]!.lineFrom, rows[1]!.lineTo), prefixLenOf(rows[1!]))?.length
   if (!columns) return null
   const content = [rows[0], ...rows.slice(2)]
   const cells = content.map((row) => tableRowCellsForColumns(
-    doc.slice(row.lineFrom, row.lineTo), row.lineFrom, columns))
+    doc.slice(row.lineFrom, row.lineTo), row.lineFrom, columns, prefixLenOf(row)))
   if (cells.some((row) => !row || row.length !== columns)) return null
   return { columns, content, cells: cells as TableCellRange[][] }
 }
@@ -92,10 +94,13 @@ export function planTableRegionDelete(doc: string, rows: TableRowInfo[], selecte
     const line = (cells: TableCellRange[]) => '|' + cells.map((cell) => doc.slice(cell.from, cell.to)).join('|') + '|'
     const keep = (cells: TableCellRange[]) => cells.filter((_cell, index) =>
       index < region.columnFrom || index > region.columnTo)
-    const rebuilt = [line(keep(parts.cells[0]!)),
-      line(keep(tableRowCellsForColumns(doc.slice(rows[1]!.lineFrom, rows[1]!.lineTo),
-        rows[1]!.lineFrom, parts.columns)!)),
-      ...parts.cells.slice(1).map((cells) => line(keep(cells)))].join('\n')
+    // 列重建整块替换：各行携带自身容器前缀（#296），前缀不参与列运算
+    const prefix = (r: TableRowInfo) => doc.slice(r.lineFrom, r.lineFrom + prefixLenOf(r))
+    const rebuilt = [prefix(rows[0]!) + line(keep(parts.cells[0]!)),
+      prefix(rows[1]!) + line(keep(tableRowCellsForColumns(doc.slice(rows[1]!.lineFrom, rows[1]!.lineTo),
+        rows[1]!.lineFrom, parts.columns, prefixLenOf(rows[1!]))!)),
+      ...parts.content.slice(1).map((row, index) =>
+        prefix(row) + line(keep(parts.cells[index + 1]!)))].join('\n')
     return { changes: [{ from: blockFrom, to: blockTo, insert: rebuilt }], selection: blockFrom }
   }
   const changes: PlannedTableEdit['changes'] = []
@@ -107,18 +112,20 @@ export function planTableRegionDelete(doc: string, rows: TableRowInfo[], selecte
       if (cell.contentFrom < cell.contentTo) rowChanges.push({ from: cell.contentFrom, to: cell.contentTo, insert: '' })
     }
     if (!rowChanges.length) continue
-    let edited = doc.slice(row.lineFrom, row.lineTo)
+    const contentFrom = row.lineFrom + prefixLenOf(row)
+    let edited = doc.slice(contentFrom, row.lineTo)
     for (const change of [...rowChanges].reverse()) {
-      edited = edited.slice(0, change.from - row.lineFrom) + edited.slice(change.to - row.lineFrom)
+      edited = edited.slice(0, change.from - contentFrom) + edited.slice(change.to - contentFrom)
     }
-    if (tableRowCellsForColumns(edited, row.lineFrom, parts.columns)) {
+    if (tableRowCellsForColumns(edited, contentFrom, parts.columns)) {
       changes.push(...rowChanges)
     } else {
       const values = parts.cells[r]!.map((cell, col) => {
         if (col < region.columnFrom || col > region.columnTo) return doc.slice(cell.from, cell.to)
         return doc.slice(cell.from, cell.contentFrom) + doc.slice(cell.contentTo, cell.to) || ' '
       })
-      changes.push({ from: row.lineFrom, to: row.lineTo, insert: '|' + values.join('|') + '|' })
+      // 兜底重建只替换内容段，行容器前缀保留在文档中（#296）
+      changes.push({ from: row.lineFrom + prefixLenOf(row), to: row.lineTo, insert: '|' + values.join('|') + '|' })
     }
   }
   return changes.length ? { changes, selection: changes[0]!.from } : null
@@ -145,15 +152,17 @@ export function planTableRegionReplace(doc: string, rows: TableRowInfo[], select
       return value || ' '
     })
     const replacement = '|' + values.join('|') + '|'
-    if (!tableRowCellsForColumns(replacement, row.lineFrom, parts.columns)) return null
+    const contentFrom = row.lineFrom + prefixLenOf(row)
+    if (!tableRowCellsForColumns(replacement, contentFrom, parts.columns)) return null
     if (r === region.rowFrom) {
       const first = parts.cells[r]![region.columnFrom]!
-      selection = row.lineFrom + precedingDelta + 1 + values.slice(0, region.columnFrom)
+      selection = contentFrom + precedingDelta + 1 + values.slice(0, region.columnFrom)
         .reduce((length, value) => length + value.length + 1, 0) +
         doc.slice(first.from, first.contentFrom).length + inserted.length
     }
-    changes.push({ from: row.lineFrom, to: row.lineTo, insert: replacement })
-    precedingDelta += replacement.length - (row.lineTo - row.lineFrom)
+    // 替换只重写内容段：行容器前缀保留在文档中（#296）
+    changes.push({ from: contentFrom, to: row.lineTo, insert: replacement })
+    precedingDelta += replacement.length - (row.lineTo - contentFrom)
   }
   return selection >= 0 ? { changes, selection } : null
 }
@@ -207,6 +216,9 @@ export function planTableRegionPaste(doc: string, rows: TableRowInfo[], selected
   let firstCellLine = 0
   let firstCellFrom = 0
   let firstCellText = ' '
+  // 重建行携带自身容器前缀（#296）；越出表尾的扩行取区域首行前缀
+  const prefixOf = (row: TableRowInfo) => doc.slice(row.lineFrom, row.lineFrom + prefixLenOf(row))
+  const regionPrefix = prefixOf(parts.content[region.rowFrom]!)
   for (let index = 0; index < parts.content.length; index++) {
     // 重建集 = 选区行 ∪ 源溢入行；扩列时全表行加格不可免——非规范源形态
     // （省略边界管道等）在扩列场景被等价规范化属功能必需，非扩列场景
@@ -221,17 +233,18 @@ export function planTableRegionPaste(doc: string, rows: TableRowInfo[], selected
     const values = Array.from({ length: totalCols }, (_unused, col) => valueFor(index, col) || ' ')
     if (index === region.rowFrom) {
       firstCellLine = index === 0 ? 0 : index + 1
-      firstCellFrom = 1 + values.slice(0, region.columnFrom)
+      firstCellFrom = prefixOf(parts.content[index]!).length + 1 + values.slice(0, region.columnFrom)
         .reduce((length, value) => length + value.length + 1, 0)
       firstCellText = values[region.columnFrom]!
     }
-    lines.push('|' + values.join('|') + '|')
+    lines.push(prefixOf(parts.content[index]!) + '|' + values.join('|') + '|')
   }
   // 扩列时分隔行按原对齐重建为显式边界形态：源分隔行可能省略尾管道
   // （GFM 合法），直接原文拼接会产出 `--- ---` 类非法声明使整表降级
-  const aligns = parseTableDelimiter(doc.slice(rows[1]!.lineFrom, rows[1]!.lineTo)) ?? []
+  const aligns = parseTableDelimiter(
+    doc.slice(rows[1]!.lineFrom, rows[1]!.lineTo), prefixLenOf(rows[1!])) ?? []
   const delimiter = totalCols > parts.columns
-    ? '|' + Array.from({ length: totalCols }, (_unused, col) => {
+    ? prefixOf(rows[1]!) + '|' + Array.from({ length: totalCols }, (_unused, col) => {
         const align = col < aligns.length ? aligns[col] : null
         return align === 'center' ? ' :---: ' : align === 'right' ? ' ---: ' : align === 'left' ? ' :--- ' : ' --- '
       }).join('|') + '|'
@@ -240,7 +253,7 @@ export function planTableRegionPaste(doc: string, rows: TableRowInfo[], selected
   // 追加行（源行数越过表尾）：源覆盖列取源值，其余格为空白
   for (let index = parts.content.length; index < region.rowFrom + sourceRows; index++) {
     const values = Array.from({ length: totalCols }, (_unused, col) => valueFor(index, col) || ' ')
-    allLines.push('|' + values.join('|') + '|')
+    allLines.push(regionPrefix + '|' + values.join('|') + '|')
   }
   const blockFrom = rows[0]!.lineFrom
   const blockTo = rows.at(-1)!.lineTo

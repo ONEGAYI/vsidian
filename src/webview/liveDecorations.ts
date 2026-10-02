@@ -26,6 +26,7 @@
 import {
   Annotation,
   EditorSelection,
+  Facet,
   Prec,
   RangeSet,
   StateField,
@@ -66,8 +67,11 @@ import { parseFrontmatterTable, type FmTableModel } from '../shared/frontmatterT
 import { buildFrontmatterCardPlan, fmFoldField } from './frontmatterDecorations'
 import {
   barePipeAt,
+  blankContainerPrefix,
+  containerPrefixLen,
   escapedPipeBackslashes,
   parseTableDelimiter,
+  quoteDepthOfLine,
   splitTableRowCells,
   tableRowCellsForColumns,
   tableCellBreaks,
@@ -132,6 +136,11 @@ export const LIVE_CLASS_NAMES = {
   tableCellHeader: 'vsidian-table-cell-header',
   /** 管道符 span（含首尾边界管道） */
   tablePipe: 'vsidian-table-pipe',
+  /** 容器前缀 span（#296 渲染断裂修复）：网格行的引用/列表前缀区
+   *  （QuoteMark/ListMark 隐藏区 + 管道前裸空隙）统一包进本 mark，
+   *  随 CSS display:none 排除出 grid 放置——裸前缀在 grid 下是占位
+   *  格，会把格子挤 wrap（真机一表拆两块/错位/列序颠倒的根因） */
+  tablePrefix: 'vsidian-table-prefix',
   /** 安全表格的网格行和单元格；行身份另见 data-vsidian-table-row */
   tableGridRow: 'vsidian-table-grid-row',
   tableGridCell: 'vsidian-table-grid-cell',
@@ -283,6 +292,7 @@ const hrRuleDeco = Decoration.replace({ widget: new HorizontalRuleWidget() })
 // （lezer 的 TableCell 节点不识别 \| 与行内代码内管道，不作定位依据）
 
 const tablePipeDeco = Decoration.mark({ class: LIVE_CLASS_NAMES.tablePipe })
+const tablePrefixDeco = Decoration.mark({ class: LIVE_CLASS_NAMES.tablePrefix })
 const tableEscapedPipeDeco = Decoration.mark({ class: LIVE_CLASS_NAMES.tableEscapedPipe })
 const tableEscapedPipeRevealDeco = Decoration.mark({ class: LIVE_CLASS_NAMES.tableEscapedPipeReveal })
 // 转义符通用显隐（表格外）：默认隐藏 / 触及行浅色显形，色口径同块 id 淡化
@@ -380,9 +390,15 @@ function emptyTableCellDecoFor(align: TableAlign | null, active: boolean,
 }
 
 type GridRowKind = 'header' | 'row'
+/** 网格行条目：行身份 + 该行容器前缀长度（#296——引用/列表内表格各行前缀
+ *  独立计算，lazy 延续行为 0；格解析与发射一律以前缀后的内容段为对象） */
+interface GridRowEntry {
+  kind: GridRowKind
+  prefixLen: number
+}
 interface TableGridPlan {
   columns: number
-  rows: Map<number, GridRowKind>
+  rows: Map<number, GridRowEntry>
   delimiterLine: number
   /** #142 列宽计划（grid-template-columns 值）：按表内容比例分配，同表各行共享 */
   template: string
@@ -400,21 +416,42 @@ export function getTableGridStats(): Readonly<typeof tableGridStats> {
  * 仅对源区间与显示格一一对应的表格启用网格。缺列/多列以及无法解析的
  * 分隔行保持源码形态，避免视觉点击落到错误列。
  */
-function tableGridPlan(doc: Text, table: SyntaxNode): TableGridPlan | null {
+/** #296 三轮「块内表格渲染」设置（experimental.table.blockRender）：容器
+ *  前缀行（引用/列表及其组合）内的表格是否网格化。缺省 true（当前落地
+ *  行为）；syncController 经 Compartment 热重配，liveDecorationsField 检测
+ *  facet 变化走全量重建（gridPlans 缓存随新 Map 丢弃，容器行退回
+ *  #296 之前的普通行形态——引用行类照旧、管道按源文可见） */
+export const tableContainerRenderFacet = Facet.define<boolean, boolean>({
+  combine: (values) => (values.length > 0 ? values[values.length - 1]! : true),
+})
+
+function tableGridPlan(doc: Text, table: SyntaxNode, containerRender = true): TableGridPlan | null {
   tableGridStats.planCalls += 1
-  const rows = new Map<number, GridRowKind>()
+  const rows = new Map<number, GridRowEntry>()
   const rowSamples = new Map<number, number[]>()
   let delimiterLine = 0
   let columns = 0
   let headers = 0
   for (let c = table.firstChild; c; c = c.nextSibling) {
     tableGridStats.rowsScanned += 1
+    // 引用块的 `>` 行前缀在 Lezer 树中挂为 Table 直接子节点（#296），
+    // 跳过后继续；其余未知直接子节点仍整体降级（不放宽既有安全边界）
+    if (c.name === 'QuoteMark') {
+      continue
+    }
     if (c.name !== 'TableHeader' && c.name !== 'TableDelimiter' && c.name !== 'TableRow') {
       return null
     }
     const line = doc.lineAt(c.from)
+    // 行身份节点 from 即内容首：行首至此为容器前缀
+    const prefixLen = c.from - line.from
+    // 设置关闭（#296 三轮）：容器前缀行不网格化——整表回退源文行（不放宽
+    // 既有安全边界，仅按设置短路；顶层表 prefixLen=0 不受影响）
+    if (!containerRender && prefixLen > 0) {
+      return null
+    }
     if (c.name === 'TableDelimiter') {
-      const aligns = parseTableDelimiter(line.text)
+      const aligns = parseTableDelimiter(line.text, prefixLen)
       if (!aligns || delimiterLine !== 0) {
         return null
       }
@@ -423,20 +460,36 @@ function tableGridPlan(doc: Text, table: SyntaxNode): TableGridPlan | null {
     } else {
       const kind: GridRowKind = c.name === 'TableHeader' ? 'header' : 'row'
       if (kind === 'header') headers += 1
-      rows.set(line.number, kind)
+      rows.set(line.number, { kind, prefixLen })
     }
   }
   if (headers !== 1 || delimiterLine === 0 || columns === 0 || rows.size === 0) {
     return null
   }
-  const samples = new Array<number>(columns).fill(0)
-  for (const lineNo of rows.keys()) {
-    tableGridStats.rowsScanned += 1
-    const text = doc.line(lineNo).text
-    if (!tableRowCellsForColumns(text, 0, columns)) {
+  // #296 二轮：引用前缀一致性——表头与各数据行的引用层级须一致（分隔行
+  // 不进 rows，天然豁免：无前缀 lazy 分隔是 GFM 常见合法形态）。残缺行
+  // （缺 >/纯缩进/多层级）已脱离引用块语义，网格会把脱离行混进引用表——
+  // 受影响部分整表回退源码行（真机反馈「整表回退」）。顶层表层级恒 0
+  // 不受影响；Lezer 已把残缺行拆出表外的形态（表内无从判定）不在此列
+  let headerDepth = -1
+  for (const [lineNo, entry] of rows) {
+    const depth = quoteDepthOfLine(doc.line(lineNo).text)
+    if (entry.kind === 'header') {
+      headerDepth = depth
+    } else if (depth !== headerDepth) {
       return null
     }
-    const widths = collectColumnSamples([text], columns)
+  }
+  const samples = new Array<number>(columns).fill(0)
+  for (const [lineNo, entry] of rows) {
+    tableGridStats.rowsScanned += 1
+    // 前缀感知拆分（#296 审查轮：内建 blank + 首格 clamp）：列宽样本仍用
+    // blank 形态（collectColumnSamples 取 contentFrom/To，不受 clamp 影响）
+    const text = doc.line(lineNo).text
+    if (!tableRowCellsForColumns(text, 0, columns, entry.prefixLen)) {
+      return null
+    }
+    const widths = collectColumnSamples([blankContainerPrefix(text, entry.prefixLen)], columns)
     rowSamples.set(lineNo, widths)
     for (let col = 0; col < columns; col++) {
       if (widths[col]! > samples[col]!) {
@@ -455,14 +508,17 @@ const gridLineDecos = new Map<string, ReturnType<typeof Decoration.line>>()
  *  失配触发一次重绘），不影响正确性；旧文档态不再被引用后条目即死数据 */
 const GRID_LINE_DECO_CACHE_LIMIT = 512
 function tableGridLineDeco(cls: string, kind: GridRowKind, plan: TableGridPlan): ReturnType<typeof Decoration.line> {
-  const key = `${cls}\u0000${kind}\u0000${plan.columns}\u0000${plan.template}`
+  // 网格行同样过别名桥（#296）：引用/列表内表格行保留 .HyperMD-quote 等
+  // 兼容别名——样式契约承诺的选择器不得因网格行类丢失命中
+  const aliased = applyObsidianDomAlias(cls)
+  const key = `${aliased}\u0000${kind}\u0000${plan.columns}\u0000${plan.template}`
   let deco = gridLineDecos.get(key)
   if (!deco) {
     if (gridLineDecos.size >= GRID_LINE_DECO_CACHE_LIMIT) {
       gridLineDecos.clear()
     }
     deco = Decoration.line({
-      class: cls,
+      class: aliased,
       attributes: {
         'data-vsidian-table-row': kind,
         // #142：列数（旧入口保留）+ 列宽计划（minmax 保底 + fr 占比）；
@@ -517,7 +573,8 @@ function tableAlignsOf(doc: Text, table: SyntaxNode | null): Array<TableAlign | 
     }
     const line = doc.lineAt(c.from)
     if (c.to > line.from && c.to <= line.to) {
-      const aligns = parseTableDelimiter(line.text)
+      // 分隔行解析：前缀替换空格（#296），坐标零偏移
+      const aligns = parseTableDelimiter(blankContainerPrefix(line.text, c.from - line.from))
       if (aligns) {
         return aligns
       }
@@ -552,13 +609,20 @@ function emitTableRowMarks(
   const header = node.name === 'TableHeader'
   const table = tableAncestor(path)
   const aligns = tableAlignsOf(doc, table)
-  // 内容行索引（表头 0，数据行跳过分隔行）——与 tableRegionField 的坐标一致
-  const regionIndex = region && table && region.tableFrom === table.from
+  // 内容行索引（表头 0，数据行跳过分隔行）——与 tableRegionField 的坐标一致。
+  // 判等用行首口径（#296 二轮）：region.tableFrom 是拖选锚定的表格首行行首
+  //（含容器前缀），Lezer 的 Table 节点 from 跳过前缀落在管道位——引用表格
+  // 两者相差 prefixLen，直接比树节点 from 会恒不等、蒙版类永不并入格装饰
+  const regionIndex = region && table && region.tableFrom === doc.lineAt(table.from).from
     ? header ? 0 : line.number - doc.lineAt(region.tableFrom).number - 1
     : -1
+  // 容器前缀（#296）：行身份节点 from 即内容首。格切分经 prefixLen 参数
+  // 内建前缀感知（审查轮：blank + 首格 clamp——无边界行首格 mark 不覆盖
+  // 前缀区，前缀隐藏仍由引用装饰负责）；坐标零偏移
+  const prefixLen = node.from - line.from
   const cells = grid && columns
-    ? tableRowCellsForColumns(line.text, line.from, columns) ?? []
-    : splitTableRowCells(line.text, line.from)
+    ? tableRowCellsForColumns(line.text, line.from, columns, prefixLen) ?? []
+    : splitTableRowCells(line.text, line.from, prefixLen)
   for (let col = 0; col < cells.length; col++) {
     const cell = cells[col]!
     if (grid) {
@@ -581,12 +645,21 @@ function emitTableRowMarks(
     }
   }
   if (grid) {
+    // 容器前缀整段包进隐藏 mark（#296 渲染断裂修复）：前缀区（QuoteMark/
+    // ListMark 的 replace 隐藏区 + 管道前裸空隙）的 DOM 残留——replace 固有
+    // 空占位与裸文本节点——在 grid 行内都是 grid item，会把格子挤 wrap。
+    // 触及前缀时退场，与 QuoteMark 显形联动（可编辑层级）。触及是端点
+    // 语义（#296 三轮）：拖选跨格的选区区间覆盖前缀不退场——跨越显形
+    // 即「引用块符号纳入选区」；端点进入（光标/扩选到行首）才显形
+    if (prefixLen > 0 && !selectionEndpointsTouchRange(selection, line.from, line.from + prefixLen)) {
+      out.push(tablePrefixDeco.range(line.from, line.from + prefixLen))
+    }
     // 转义管道的反斜杠：光标/选区触及该行时浅色显形（暴露源码），离开隐藏。
     // 行级判定与标题 mark 显隐同谓词——折叠光标含行两端，非空选区严格重叠。
     const escapedPipeDeco = selectionTouchesRange(selection, line.from, line.to)
       ? tableEscapedPipeRevealDeco
       : tableEscapedPipeDeco
-    for (const pos of escapedPipeBackslashes(line.text)) {
+    for (const pos of escapedPipeBackslashes(blankContainerPrefix(line.text, prefixLen))) {
       out.push(escapedPipeDeco.range(line.from + pos, line.from + pos + 1))
     }
   }
@@ -609,6 +682,20 @@ export function selectionTouchesRange(selection: EditorSelection, from: number, 
     if (range.empty ? range.head >= from && range.head <= to : range.from < to && range.to > from) {
       return true
     }
+  }
+  return false
+}
+
+/** 选区端点（head/anchor）是否落入范围（#296 三轮）：折叠光标与
+ *  selectionTouchesRange 同判定（head 即端点）；非空选区只在端点进入
+ *  范围时算触及——拖选跨格的选区区间覆盖表格行前缀是拖选常态，区间
+ *  重叠语义会把前缀 mark 全线退场显形（「引用块符号纳入选区」观感的
+ *  根因）。用于前缀隐藏 mark：跨越不显形，端点进入（扩选到行首编辑
+ *  前缀）才显形。 */
+export function selectionEndpointsTouchRange(selection: EditorSelection, from: number, to: number): boolean {
+  for (const range of selection.ranges) {
+    if (range.head >= from && range.head <= to) return true
+    if (!range.empty && range.anchor >= from && range.anchor <= to) return true
   }
   return false
 }
@@ -668,6 +755,7 @@ function emitForRange(
   region: TableRegion | null = null,
   hitReveal: HitRevealContext | null = null,
   fmFolded = false,
+  containerRender = true,
 ): Array<Range<Decoration>> {
   const out: Array<Range<Decoration>> = []
   const lineCls: Array<Set<string> | undefined> = new Array(toLine - fromLine + 1).fill(undefined)
@@ -682,6 +770,7 @@ function emitForRange(
     set.add(cls)
   }
   const touches = (from: number, to: number): boolean => selectionTouchesRange(selection, from, to)
+  const endpointTouches = (from: number, to: number): boolean => selectionEndpointsTouchRange(selection, from, to)
   const markerEnd = (node: SyntaxNode): number =>
     node.to < doc.length && doc.sliceString(node.to, node.to + 1) === ' ' ? node.to + 1 : node.to
 
@@ -774,15 +863,15 @@ function emitForRange(
         eachNodeLine(doc, node, fromLine, toLine, (n) => addLineCls(n, LIVE_CLASS_NAMES.tableLine))
         let plan = gridPlans.get(node.from)
         if (plan === undefined && !gridPlans.has(node.from)) {
-          plan = tableGridPlan(doc, node)
+          plan = tableGridPlan(doc, node, containerRender)
           gridPlans.set(node.from, plan)
         }
         if (plan) {
           const first = Math.max(fromLine, doc.lineAt(node.from).number)
           const last = Math.min(toLine, doc.lineAt(Math.min(node.to, doc.length)).number)
           for (let lineNo = first; lineNo <= last; lineNo++) {
-            const kind = plan.rows.get(lineNo)
-            if (!kind) continue
+            const entry = plan.rows.get(lineNo)
+            if (!entry) continue
             // #251 命中显形：活跃命中/停驻触界的网格行回源（行不加网格
             // 行类、不进 gridLines——竖线等结构源码可见、命中 mark 可画，
             // 与分隔行光标停驻同款「类缺席」机制）。编辑选区刻意不参与
@@ -791,7 +880,7 @@ function emitForRange(
               continue
             }
             addLineCls(lineNo, LIVE_CLASS_NAMES.tableGridRow)
-            gridLines.set(lineNo, { kind, plan })
+            gridLines.set(lineNo, { kind: entry.kind, plan })
           }
           // 只有光标直接停在分隔行才显露可编辑源码。跨行选区即使覆盖该行，
           // 也继续隐藏结构标记，避免把 `| --- |` 当可选正文显示。
@@ -918,7 +1007,9 @@ function emitForRange(
       }
       case 'QuoteMark': {
         const to = markerEnd(node)
-        if (!touches(node.from, to)) {
+        // 端点语义（#296 三轮）：非空选区跨越引用标记不显形（拖选跨行
+        // 常态）；端点进入才显形可编辑——与表格前缀 mark 同口径
+        if (!endpointTouches(node.from, to)) {
           out.push(hideDeco.range(node.from, to))
         }
         return
@@ -935,7 +1026,8 @@ function emitForRange(
         }
         const line = doc.lineAt(node.from)
         const to = markerEnd(node)
-        if (!touches(line.from, to)) {
+        // 端点语义（#296 三轮）：同 QuoteMark——选区跨越不显形
+        if (!endpointTouches(line.from, to)) {
           out.push(hideDeco.range(line.from, to))
         } else {
           addLineCls(line.number, LIVE_CLASS_NAMES.listMarkerVisible)
@@ -1186,12 +1278,14 @@ function headText(doc: Text): string {
 
 /** 全量构建（create / 全文替换 / 探针对拍） */
 export function buildLivePreviewDecorations(doc: Text, selection: EditorSelection,
-  region: TableRegion | null = null, hitReveal: HitRevealContext | null = null, fmFolded = false): DecorationSet {
+  region: TableRegion | null = null, hitReveal: HitRevealContext | null = null, fmFolded = false,
+  containerRender = true): DecorationSet {
   const tree = parseTree(doc)
   const fm = frontmatterOf(doc)
   stats.fullBuildLines = doc.lines
   return RangeSet.of(
-    emitForRange(tree, doc, selection, fm, 1, doc.lines, new Map(), frontmatterModelOf(doc, fm), region, hitReveal, fmFolded),
+    emitForRange(tree, doc, selection, fm, 1, doc.lines, new Map(), frontmatterModelOf(doc, fm), region, hitReveal, fmFolded,
+      containerRender),
     true,
   )
 }
@@ -1518,28 +1612,39 @@ function changedCovers(changed: readonly ChangedRange4[], from: number, to: numb
 
 // ---- StateField ----
 
+/** 全量构建（create 与设置热重配共用）：树/头区/网格计划从头解析，
+ *  gridPlans 新 Map（容器行 plan 按 facet 当前值重算） */
+function buildLiveDecoState(state: EditorState): LiveDecoState {
+  const tree = parseTree(state.doc)
+  const fm = frontmatterOf(state.doc)
+  const fmModel = frontmatterModelOf(state.doc, fm)
+  stats.fullBuildLines = state.doc.lines
+  const gridPlans = new Map<number, TableGridPlan | null>()
+  const decos = RangeSet.of(
+    emitForRange(tree, state.doc, state.selection, fm, 1, state.doc.lines, gridPlans, fmModel,
+      state.field(tableRegionField, false), hitRevealContextOf(state), state.field(fmFoldField, false) ?? false,
+      state.facet(tableContainerRenderFacet)), true)
+  return {
+    decos,
+    tree,
+    fragments: TreeFragment.addTree(tree),
+    fm,
+    fmModel,
+    gridPlans,
+    gridSegments: deriveGridSegments(decos, [{ from: 0, to: state.doc.length }], state.doc),
+    compositionPreview: false,
+  }
+}
+
 export const liveDecorationsField = StateField.define<LiveDecoState>({
-  create(state) {
-    const tree = parseTree(state.doc)
-    const fm = frontmatterOf(state.doc)
-    const fmModel = frontmatterModelOf(state.doc, fm)
-    stats.fullBuildLines = state.doc.lines
-    const gridPlans = new Map<number, TableGridPlan | null>()
-    const decos = RangeSet.of(
-      emitForRange(tree, state.doc, state.selection, fm, 1, state.doc.lines, gridPlans, fmModel,
-        state.field(tableRegionField, false), hitRevealContextOf(state), state.field(fmFoldField, false) ?? false), true)
-    return {
-      decos,
-      tree,
-      fragments: TreeFragment.addTree(tree),
-      fm,
-      fmModel,
-      gridPlans,
-      gridSegments: deriveGridSegments(decos, [{ from: 0, to: state.doc.length }], state.doc),
-      compositionPreview: false,
-    }
-  },
+  create: buildLiveDecoState,
   update(value, tr) {
+    // #296 三轮「块内表格渲染」热重配：facet 变化（Compartment reconfigure
+    // 的纯事务，无文档/选区变化）走与 create 同构的全量重建——增量路径不
+    // 感知 facet，且 gridPlans 缓存的容器行 plan 需按新开关重算
+    if (tr.startState.facet(tableContainerRenderFacet) !== tr.state.facet(tableContainerRenderFacet)) {
+      return buildLiveDecoState(tr.state)
+    }
     // #251 命中显形：hitRevealField 值变化（命中集增删/停驻种入收缩）也
     // 是重建触发源——依赖读取（下方 hitRevealSpans）保证该 field 先更新
     const hitRevealChanged = tr.startState.field(hitRevealField, false) !== tr.state.field(hitRevealField, false)
@@ -1565,7 +1670,8 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
           filterTo: doc.line(fmLast).to,
           filter: () => false,
           add: emitForRange(value.tree, doc, tr.state.selection, value.fm, 1, fmLast, value.gridPlans,
-            value.fmModel, tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), fmFolded),
+            value.fmModel, tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), fmFolded,
+            tr.state.facet(tableContainerRenderFacet)),
           sort: true,
         })
         return {
@@ -1588,13 +1694,16 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
           const pipe = currentLine.text.indexOf('|')
           const stillRow = pipe >= 0 &&
             chainAt(value.tree, currentLine.from + pipe + 1).some((node) => node.name === 'TableRow')
-          if (stillRow && tableRowCellsForColumns(currentLine.text, currentLine.from, oldPlan.columns)) {
+          // 该行容器前缀（#296）：替换空格参与格判定，坐标零偏移
+          const settledPrefix = oldPlan.rows.get(lineNo)?.prefixLen ?? 0
+          const settledText = blankContainerPrefix(currentLine.text, settledPrefix)
+          if (stillRow && tableRowCellsForColumns(settledText, currentLine.from, oldPlan.columns, settledPrefix)) {
             // #142：组合净结果先以当前行的新宽度样本与逐行缓存折叠出新列宽
             // 计划——计划未变（取消或宽度无影响的净结果）保持「仅恢复当前行」
             // 快路径（千行表组合取消不全表扫描的性能契约）；计划变化才落整表
             // 重发射（同表各行内联的 grid 计划必须一致，成本与一次常规键入的
             // 表格重建同阶）。折叠是纯数值归并，不重扫行文本。
-            const freshRow = collectColumnSamples([currentLine.text], oldPlan.columns)
+            const freshRow = collectColumnSamples([settledText], oldPlan.columns)
             const merged = new Array<number>(oldPlan.columns).fill(0)
             for (const [rowNo, widths] of oldPlan.rowSamples) {
               const row = rowNo === lineNo ? freshRow : widths
@@ -1610,7 +1719,8 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
                 filterTo: currentLine.to,
                 filter: () => false,
                 add: emitForRange(value.tree, doc, tr.state.selection, value.fm, lineNo, lineNo, value.gridPlans, value.fmModel,
-                  tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state)),
+                  tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), false,
+                  tr.state.facet(tableContainerRenderFacet)),
                 sort: true,
               })
               return {
@@ -1635,7 +1745,8 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
             filterTo: doc.line(last).to,
             filter: () => false,
             add: emitForRange(value.tree, doc, tr.state.selection, value.fm, first, last, gridPlans, value.fmModel,
-              tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state)),
+              tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), false,
+              tr.state.facet(tableContainerRenderFacet)),
             sort: true,
           })
           return {
@@ -1663,7 +1774,8 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
           filterTo: to,
           filter: () => false,
           add: emitForRange(value.tree, doc, tr.state.selection, value.fm, span.fromLine, span.toLine, value.gridPlans, value.fmModel,
-            tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), tr.state.field(fmFoldField, false) ?? false),
+            tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), tr.state.field(fmFoldField, false) ?? false,
+            tr.state.facet(tableContainerRenderFacet)),
           sort: true,
         })
         scanned += span.toLine - span.fromLine + 1
@@ -1725,7 +1837,8 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
         filterTo: to,
         filter: () => false,
         add: emitForRange(tree, doc, tr.state.selection, fm, span.fromLine, span.toLine, gridPlans, fmModel,
-          tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), tr.state.field(fmFoldField, false) ?? false),
+          tr.state.field(tableRegionField, false), hitRevealContextOf(tr.state), tr.state.field(fmFoldField, false) ?? false,
+          tr.state.facet(tableContainerRenderFacet)),
         sort: true,
       })
       scanned += span.toLine - span.fromLine + 1
@@ -1836,15 +1949,18 @@ export function snapGridSelectionHead(state: EditorState, pos: number, forward: 
   if (!plan) return null
   const columns = plan.columns
   const isDelimiter = line.number === plan.delimiterLine
-  const isContent = plan.rows.has(line.number)
+  const contentEntry = plan.rows.get(line.number)
+  const isContent = contentEntry !== undefined
   if (!isDelimiter && !isContent) return null
+  // 行解析：前缀感知切分（#296 审查轮：内建 blank + 首格 clamp）——坐标零偏移
+  const prefixLenOfLine = (lineNo: number): number => plan.rows.get(lineNo)?.prefixLen ?? 0
   const boundariesOf = (lineNo: number): number[] | null => {
     const target = state.doc.line(lineNo)
-    const cells = tableRowCellsForColumns(target.text, target.from, columns)
+    const cells = tableRowCellsForColumns(target.text, target.from, columns, prefixLenOfLine(lineNo))
     return cells ? cells.flatMap((cell) => [cell.contentFrom, cell.contentTo]) : null
   }
   if (isContent) {
-    const cells = tableRowCellsForColumns(line.text, line.from, columns)
+    const cells = tableRowCellsForColumns(line.text, line.from, columns, contentEntry.prefixLen)
     if (!cells) return null
     // 格区间（含首尾空白/填充）归属该格：clamp 到内容区间
     for (const cell of cells) {
@@ -1893,7 +2009,10 @@ const gridCellMouseSelection = EditorView.mouseSelectionStyle.of((view, event) =
   if (!cell || !row) return null
   const cells = [...row.querySelectorAll<HTMLElement>(':scope > .vsidian-table-grid-cell')]
   const line = view.state.doc.lineAt(view.posAtDOM(row, 0))
-  const range = tableRowCellsForColumns(line.text, line.from, cells.length)?.[cells.indexOf(cell)]
+  // 前缀感知切分（#296 审查轮）：引用行原文不 blank 会多出含 `>` 的首格，
+  // 与 DOM 格数不匹配而整体失效；形态学回退与树口径一致
+  const range = tableRowCellsForColumns(line.text, line.from, cells.length,
+    containerPrefixLen(line.text))?.[cells.indexOf(cell)]
   if (!range) return null
   // 空格子的源码填充不属于用户内容。再次点击时落在填充前，避免把
   // 保留的输入节点变成下一次键入文字的前置空格。
@@ -1963,7 +2082,8 @@ function clampGridCellPointer(event: MouseEvent, view: EditorView): boolean {
   if (column < 0) return false
   const line = view.state.doc.lineAt(view.posAtDOM(row, 0))
   const range = tableRowCellsForColumns(line.text, line.from,
-    row.querySelectorAll(':scope > .vsidian-table-grid-cell').length)?.[column]
+    row.querySelectorAll(':scope > .vsidian-table-grid-cell').length,
+    containerPrefixLen(line.text))?.[column]
   if (!range) return false
   const empty = range.contentFrom === range.contentTo && range.from < range.to
   const from = empty ? range.from : range.contentFrom

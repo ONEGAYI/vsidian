@@ -189,3 +189,70 @@ describe('双视图表格语义对拍（小文档全挂载）', () => {
     expect(liveTableLines - 1).toBe(readingRows)
   })
 })
+
+// ---- #296 二轮：引用内表格前缀残缺 → reading 同口径整表回退源码 ----
+
+describe('引用表格前缀残缺的 reading 回退（#296 二轮）', () => {
+  it('数据行缺 > 的引用表：不渲染半张表，按源文呈现', () => {
+    const text = '前文\n\n> | 甲 | 乙 |\n> | --- | --- |\n| 丙 | 丁 |\n\n后文'
+    const blocks = splitReadingBlocks(text)
+    const tableBlocks = blocks.filter((b) => b.kind === 'table')
+    expect(tableBlocks).toHaveLength(0)
+    // 受影响表按源文呈现（markdown-it 会把残缺行踢出留半张表头表）
+    const sourceBlock = blocks.find((b) => b.html.includes('| 甲 | 乙 |'))
+    expect(sourceBlock).toBeDefined()
+    expect(sourceBlock!.html).not.toContain('<table>')
+  })
+
+  it('完好引用表与顶层表不受回退判定影响', () => {
+    const intact = '前文\n\n> | 甲 | 乙 |\n> | --- | --- |\n> | 丙 | 丁 |\n\n后文'
+    // 引用表在 reading 是 blockquote 块（表嵌其内），顶层表是 table 块
+    const quote = splitReadingBlocks(intact).find((b) => b.kind === 'blockquote')
+    expect(quote).toBeDefined()
+    const el = createReadingBlockElement(quote!, intact)
+    expect(el.querySelectorAll('th')).toHaveLength(2)
+    expect(el.querySelectorAll('td')).toHaveLength(2)
+    const top = '前文\n\n| 甲 | 乙 |\n| --- | --- |\n| 丙 | 丁 |\n\n后文'
+    const topTable = splitReadingBlocks(top).find((b) => b.kind === 'table')
+    expect(topTable).toBeDefined()
+    expect(createReadingBlockElement(topTable!, top).querySelectorAll('td'))
+      .toHaveLength(2)
+  })
+
+  it('lazy 分隔行（合法形态）不触发回退', () => {
+    const text = '> | 甲 | 乙 |\n| --- | --- |\n> | 丙 | 丁 |'
+    // markdown-it 不认 lazy 分隔行（不成表）——该形态在 reading 天然为
+    // 段落，不因回退判定产生额外 table 块
+    expect(splitReadingBlocks(text).filter((b) => b.kind === 'table')).toHaveLength(0)
+  })
+})
+
+describe('「块内表格渲染」设置不影响 reading（#296 六轮用户决策）', () => {
+  // 用户口径：reading 模式原行为就是渲染且无风险，设置只管 live 网格化。
+  // 通道已拆除（splitReadingBlocks 单参）——经类型擦除传入关闭值，运行时
+  // 必须被忽略；若有人重建 containerTableSource 通道本组转红
+  const splitWithLegacyOpt = splitReadingBlocks as unknown as (
+    text: string, opts?: { containerTableSource?: boolean },
+  ) => ReturnType<typeof splitReadingBlocks>
+
+  it('即使传入关闭值，引用内表格仍按 markdown-it 原生渲染', () => {
+    const text = '前文\n\n> | 甲 | 乙 |\n> | --- | --- |\n> | 丙 | 丁 |\n\n后文'
+    const quote = splitWithLegacyOpt(text, { containerTableSource: false })
+      .find((b) => b.kind === 'blockquote')
+    expect(quote).toBeDefined()
+    const el = createReadingBlockElement(quote!, text)
+    expect(el.querySelectorAll('th')).toHaveLength(2)
+    expect(el.textContent).not.toContain('| 甲 | 乙 |')
+  })
+
+  it('列表内表格同样始终渲染，顶层表不受影响', () => {
+    const text = '前文\n\n- | 甲 | 乙 |\n  | --- | --- |\n  | 丙 | 丁 |\n\n| 顶 | 层 |\n| --- | --- |\n| a | b |\n\n后文'
+    const blocks = splitWithLegacyOpt(text, { containerTableSource: false })
+    const list = blocks.find((b) => b.kind === 'list')
+    expect(list).toBeDefined()
+    expect(createReadingBlockElement(list!, text).querySelectorAll('th')).toHaveLength(2)
+    const top = blocks.find((b) => b.kind === 'table')
+    expect(top).toBeDefined()
+    expect(createReadingBlockElement(top!, text).querySelectorAll('td')).toHaveLength(2)
+  })
+})

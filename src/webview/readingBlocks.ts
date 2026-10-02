@@ -18,7 +18,7 @@
 // - 未支持语法（脚注 [^1]、定义列表等）由 markdown-it 按普通段落文本
 //   渲染——保留原文的局部源码降级，不触发整篇改写
 import { frontmatterRange } from '../shared/markdownDoc'
-import { maskCodeSpanPipes } from '../shared/tableCells'
+import { maskCodeSpanPipes, quoteTableRowsDegraded } from '../shared/tableCells'
 import { stripHtmlComments } from './htmlComment'
 // #163 验收反馈：块 id 标记阅读隐藏（渲染前剥离，行数不变保锚点坐标系）
 import { stripBlockIdMarks } from './blockIdStrip'
@@ -127,6 +127,20 @@ function restoreCodePipes(tokens: Token[], marker: string): void {
 function headingLevelOfTag(tag: string): 1 | 2 | 3 | 4 | 5 | 6 | null {
   const m = /^h([1-6])$/.exec(tag)
   return m ? (Number(m[1]) as 1 | 2 | 3 | 4 | 5 | 6) : null
+}
+
+/** #296 二轮：引用表残缺降级——把渲染 HTML 中的 <table> 替换为源文
+ *  <pre>（文本经 textContent 赋值天然转义）；块内其余内容（引用段落等）
+ *  保持原渲染。 */
+function degradeQuoteTableHtml(html: string, sourceText: string): string {
+  const doc = new DOMParser().parseFromString(html, 'text/html')
+  const table = doc.querySelector('table')
+  if (!table) return html
+  const pre = doc.createElement('pre')
+  pre.className = 'vsidian-reading-table-source'
+  pre.textContent = sourceText
+  table.replaceWith(pre)
+  return doc.body.innerHTML
 }
 
 /**
@@ -257,6 +271,9 @@ function splitBody(
 ): ReadingBlock[] {
   const bodyStart = env.lineStarts[baseLine] ?? text.length
   const body = text.slice(bodyStart)
+  // 全文行数组只切一次，逐块复用（残缺判定的行级访问用，审查轮 F12——
+  // 逐块全文 split 是 O(块数×全文行数)，引用表密集的大文档可感知）
+  const lines = text.split('\n')
   // 渲染规则的 li 锚点换算需要 body 基行（渲染是同步的，env 变更不外泄）
   env.baseLine = baseLine
   if (body.trim() === '') {
@@ -290,7 +307,7 @@ function splitBody(
       const group = tokens.slice(i, j + 1)
       const map = token.map
       if (map) {
-        pushBlock(text, env, baseLine, blocks, group, map, token)
+        pushBlock(text, env, baseLine, blocks, lines, group, map, token)
       }
       i = j + 1
       continue
@@ -298,7 +315,7 @@ function splitBody(
     // 叶子块（fence / hr / code_block / html_block 等）
     const map = token.map
     if (map && token.type !== 'html_block') {
-      pushBlock(text, env, baseLine, blocks, [token], map, token)
+      pushBlock(text, env, baseLine, blocks, lines, [token], map, token)
     }
     i += 1
   }
@@ -318,6 +335,7 @@ function pushBlock(
   env: ReadingRenderEnv,
   baseLine: number,
   blocks: ReadingBlock[],
+  lines: readonly string[],
   group: Token[],
   map: [number, number],
   opener: Token,
@@ -391,9 +409,24 @@ function pushBlock(
       blocks.push({ kind: 'paragraph', start, end, html: renderTokenHtml(md, group, env) })
       return
     }
-    case 'blockquote_open':
-      blocks.push({ kind: 'blockquote', start, end, html: renderTokenHtml(md, group, env) })
+    case 'blockquote_open': {
+      let html = renderTokenHtml(md, group, env)
+      // #296 二轮：引用内表格前缀残缺 → 表格部分回退源文（与 live 同口径，
+      // 形态学判定共享自 tableCells）。markdown-it 会把残缺引用行踢出表、
+      // 留下半张表头表——受影响表按源文呈现，残缺行本身已是相邻段落块
+      // （#296 六轮：「块内表格渲染」设置只管 live，reading 始终渲染）
+      const tableToken = group.find((t) => t.type === 'table_open' && t.map)
+      if (tableToken?.map) {
+        const headerIdx = (env.baseLine ?? 0) + tableToken.map[0]
+        if (quoteTableRowsDegraded(lines, headerIdx)) {
+          const from = env.lineStarts[headerIdx] ?? start
+          const to = env.lineEnds[(env.baseLine ?? 0) + tableToken.map[1] - 1] ?? end
+          html = degradeQuoteTableHtml(html, text.slice(from, to))
+        }
+      }
+      blocks.push({ kind: 'blockquote', start, end, html })
       return
+    }
     case 'bullet_list_open':
     case 'ordered_list_open': {
       const itemAnchors: number[] = []
@@ -405,7 +438,11 @@ function pushBlock(
           }
         }
       }
-      blocks.push({ kind: 'list', start, end, html: renderTokenHtml(md, group, env), itemAnchors })
+      let html = renderTokenHtml(md, group, env)
+      // （#296 六轮：「块内表格渲染」设置只管 live——列表内表格在 reading
+      //  始终按 markdown-it 原生渲染；列表内残缺无形态学判定——markdown-it
+      //  不成表即天然源文）
+      blocks.push({ kind: 'list', start, end, html, itemAnchors })
       return
     }
     case 'hr':

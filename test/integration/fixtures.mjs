@@ -128,6 +128,25 @@ const TABLE_DOC = [
   '结尾段落。',
   '',
 ].join('\n')
+// #296 引用块内表格样例：单层引用网格 + lazy 分隔行 + 多层引用
+const BLOCKQUOTE_TABLE_DOC = [
+  '# 引用块内表格样例',
+  '',
+  '> | 名字 | 数量 |',
+  '> | --- | --- |',
+  '> | 苹果 | 3 |',
+  '',
+  '> | 甲 | 乙 |',
+  '| --- | --- |',
+  '> | 1 | 2 |',
+  '',
+  '> > | 层级 | 深度 |',
+  '> > | --- | --- |',
+  '> > | 外层 | 2 |',
+  '',
+  '结尾段落。',
+  '',
+].join('\n')
 const TABLE42_EMPTY_DOC = '| A | B |\n| --- | --- |\n| | 空 |\n'
 // #13 表格导航/结构操作样例：表格前后有段落（区域不变断言），含对齐、
 // 行内代码管道与转义管道
@@ -884,6 +903,7 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   writeFileSync(path.join(wsDir, 'fence-chunk.md'), FENCE_CHUNK_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'task.md'), TASK_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'table.md'), TABLE_DOC, 'utf8')
+  writeFileSync(path.join(wsDir, 'blockquote-table.md'), BLOCKQUOTE_TABLE_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'table42.md'), TABLE_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'table-cell-delete.md'), TABLE_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'table42-empty.md'), TABLE42_EMPTY_DOC, 'utf8')

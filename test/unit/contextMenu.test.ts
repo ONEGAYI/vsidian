@@ -23,6 +23,7 @@ import {
   contextMenuKeybindingHints,
   contextMenuRegistrySnapshot,
   contextMenuZoneAt,
+  contextMenuClickWithinSelection,
   hideContextMenuItem,
   menuLineStructureOf,
   menuViewportPosition,
@@ -604,6 +605,36 @@ describe('区域判定（contextMenuZoneAt：全域接管的安全降级输入�
     const short = ['|-|-|', '|a|b|']
     expect(contextMenuZoneAt(short, 0, -1)).toBe('table')
     expect(contextMenuZoneAt(short, 1, -1)).toBe('table')
+  })
+
+  it('块内表格判定为 table：分隔行剥容器前缀（#296 三轮右键识别修复）', () => {
+    // 引用块内表格：分隔行 `> |---|---|` 的 `> ` 前缀不参与形态判定——
+    // 修复前引用表不判为 table，格式/段落/插入簇置灰的降级矩阵失效
+    const quote = ['> | a | b |', '> |---|---|', '> | 1 | 2 |']
+    expect(contextMenuZoneAt(quote, 0, -1)).toBe('table')
+    expect(contextMenuZoneAt(quote, 1, -1)).toBe('table')
+    expect(contextMenuZoneAt(quote, 2, -1)).toBe('table')
+    // 引用内列表组合容器（quote-list）
+    const quotedList = ['> - | a | b |', '>   |---|---|', '>   | 1 | 2 |']
+    expect(contextMenuZoneAt(quotedList, 0, -1)).toBe('table')
+    expect(contextMenuZoneAt(quotedList, 2, -1)).toBe('table')
+    // 引用内完好表格不会误伤普通引用文本（无分隔行仍是 normal）
+    expect(contextMenuZoneAt(['> 引用文本 | 带管道'], 0, -1)).toBe('normal')
+  })
+
+  it('右键保选区判定：点击落在选区内（含端点）才保持选区（#186 bug 1）', () => {
+    const ranges = [{ from: 4, to: 10 }, { from: 20, to: 25 }]
+    // 区间内与两端点：保持
+    expect(contextMenuClickWithinSelection(ranges, 5)).toBe(true)
+    expect(contextMenuClickWithinSelection(ranges, 4)).toBe(true)
+    expect(contextMenuClickWithinSelection(ranges, 10)).toBe(true)
+    expect(contextMenuClickWithinSelection(ranges, 22)).toBe(true)
+    // 区间外（含缝隙）：放行默认（右键折叠光标到点击处）
+    expect(contextMenuClickWithinSelection(ranges, 3)).toBe(false)
+    expect(contextMenuClickWithinSelection(ranges, 15)).toBe(false)
+    // 折叠选区（from === to）只有精确命中才保持
+    expect(contextMenuClickWithinSelection([{ from: 7, to: 7 }], 7)).toBe(true)
+    expect(contextMenuClickWithinSelection([{ from: 7, to: 7 }], 8)).toBe(false)
   })
 
   it('围栏代码区（含开闭围栏行）判定为 fence；mermaid 围栏判定为 graphic', () => {

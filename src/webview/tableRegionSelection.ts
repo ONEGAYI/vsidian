@@ -2,9 +2,9 @@ import { EditorSelection } from '@codemirror/state'
 import { EditorView, ViewPlugin } from '@codemirror/view'
 import type { Tree } from '@lezer/common'
 import { normalizeTableRegion, type TableRegion } from './tableRegion'
-import type { TableRowInfo } from './tableStructure'
+import { prefixLenOf, type TableRowInfo } from './tableStructure'
 import { liveDecorationsField } from './liveDecorations'
-import { splitTableRowCells } from '../shared/tableCells'
+import { containerPrefixLen, splitTableRowCells } from '../shared/tableCells'
 import { setTableRegion, tableRegionField } from './tableRegionField'
 
 export { setTableRegion, tableRegionField, sameTableRegion } from './tableRegionField'
@@ -16,7 +16,9 @@ export function selectTableRegion(view: EditorView, region: TableRegion | null):
     const header = view.state.doc.lineAt(normalized.tableFrom)
     const lineNumber = header.number + normalized.rowFrom + (normalized.rowFrom > 0 ? 1 : 0)
     const line = lineNumber <= view.state.doc.lines ? view.state.doc.line(lineNumber) : null
-    const cell = line && splitTableRowCells(line.text, line.from)[normalized.columnFrom]
+    // 无行身份上下文：前缀按形态学回退感知切分（#296 审查轮），坐标零偏移
+    const cell = line && splitTableRowCells(
+      line.text, line.from, containerPrefixLen(line.text))[normalized.columnFrom]
     view.dispatch({ selection: EditorSelection.create([
       EditorSelection.cursor(cell?.contentFrom ?? normalized.tableFrom, -1)]),
       effects: setTableRegion.of(normalized) })
@@ -57,8 +59,18 @@ export function createTableRegionPointer(tableRowsAt: (view: EditorView, pos: nu
 
     private readonly onBlur = (event: FocusEvent): void => {
       if (event.relatedTarget instanceof Node && this.view.dom.contains(event.relatedTarget)) return
+      // 右键/大纲菜单夺焦不算失焦（#186 关键 bug 1）：菜单打开时
+      // focusMenuDom 聚焦菜单容器，其操作对象正是本矩形蒙版——此前
+      // focusout 即清蒙版，用户看到「选中单元格后右键失焦选区」。菜单
+      // 关闭还焦后蒙版保持（菜单命令自行决定是否消费选区）
+      if (event.relatedTarget instanceof Element &&
+          event.relatedTarget.closest('.vsidian-context-menu, .vsidian-outline-menu')) return
       queueMicrotask(() => {
         if (this.view.dom.contains(document.activeElement)) return
+        // 菜单打开期间 activeElement 在菜单容器内（body 下、view 外），
+        // 同样豁免——focusout 无 relatedTarget 的浏览器路径兜底
+        if (document.activeElement instanceof Element &&
+            document.activeElement.closest('.vsidian-context-menu, .vsidian-outline-menu')) return
         this.anchor = null
         if (this.view.state.field(tableRegionField)) selectTableRegion(this.view, null)
       })
@@ -78,7 +90,9 @@ export function createTableRegionPointer(tableRowsAt: (view: EditorView, pos: nu
       const row = rows && [rows[0], ...rows.slice(2)][region.rowFrom]
       if (!row) return
       const line = this.view.state.doc.lineAt(row.lineFrom)
-      const cell = splitTableRowCells(line.text, line.from)[region.columnFrom]
+      // 行身份前缀（#296 审查轮）：格定位走前缀感知切分，坐标零偏移
+      const cell = splitTableRowCells(
+        line.text, line.from, prefixLenOf(row))[region.columnFrom]
       if (!cell) return
       this.view.dispatch({ selection: EditorSelection.single(cell.contentFrom), effects: setTableRegion.of(region) })
     }

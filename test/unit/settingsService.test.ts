@@ -43,7 +43,7 @@ function makeStorage(writes: Array<{ key: string; value: unknown }> = []): Setti
 }
 
 describe('快照读取', () => {
-  it('生产注册表（#34 起）：快照为定义默认值（开关均开除 Live 直接悬停 + 语言 auto + 可读行宽 0 + 嵌入限高 480 + 悬停总开关开 + 分词引擎内置）', () => {
+it('生产注册表（#34 起）：快照为定义默认值（开关均开除 Live 直接悬停——含悬停总开关、跳转目标提示与块内表格渲染 + 语言 auto + 可读行宽 0 + 嵌入限高 480 + 分词引擎内置）', () => {
     const svc = new SettingsService(makeStorage(), PRODUCTION_SETTING_DEFINITIONS)
     expect(svc.getSnapshot()).toEqual({
       'general.language': 'auto',
@@ -76,6 +76,8 @@ describe('快照读取', () => {
       'editor.wordSegmentEngine': 'builtin',
       'editor.wordSegmentSource': 'jsdelivr',
       'editor.wordSegmentJiebaUrl': '',
+      // #296 三轮 块内表格渲染（实验性，默认开 = 容器内表格网格化）
+      'experimental.table.blockRender': true,
     })
   })
 

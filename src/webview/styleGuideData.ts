@@ -947,6 +947,29 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "introduced": "#12（2026-09-24）"
   },
   {
+    "id": "live-table-prefix",
+    "domain": "content",
+    "category": "table",
+    "kind": "selector",
+    "target": ".vsidian-table-prefix",
+    "purpose": "网格行容器前缀 span（#296 渲染断裂修复）：引用/列表内表格行的前缀区（标记隐藏区与管道前裸空隙）统一包进本 mark，随 CSS display:none 排除出 grid 放置——前缀残留（replace 固有空占位与裸文本）在 grid 下是占位格，会把格子挤 wrap。",
+    "views": [
+      "live"
+    ],
+    "states": "光标/选区触及前缀区时 mark 退场，前缀文本显形可编辑（此时前缀参与行内布局）。",
+    "dom": "网格行内覆盖容器前缀区间的 mark 装饰 span。",
+    "example": ".vsidian-table-prefix {\n  /* 片段一般无需覆写；如需保留前缀视觉痕迹可改呈现 */\n  display: inline;\n}",
+    "obsidian": {
+      "counterpart": "无对应（Obsidian 对容器内表格的前缀处理无公开类）",
+      "support": "native"
+    },
+    "verification": [
+      "单元 liveDecorations：前缀 mark 发射与触及退场契约（#296 渲染断裂修复）",
+      "浏览器 blockquoteTablePaint：引用表格行对齐与列序绘制断言"
+    ],
+    "introduced": "#296（2026-10-02 渲染断裂修复）"
+  },
+  {
     "id": "live-table-align",
     "domain": "content",
     "category": "table",
@@ -973,10 +996,11 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "table",
     "kind": "selector",
     "target": ".vsidian-table-grid-row（行附 data-vsidian-table-row=header/row、--vsidian-table-columns 列数与 --vsidian-table-col-widths 列宽计划）",
-    "purpose": "安全表格的 CSS grid 网格行；活动格也保留；单元格仍与源区间对应（非独立表格数据模型）。#142 起列宽按内容比例分配：行装饰内联列宽计划（逐列 minmax(min(48px, 等分份额), 内容占比 fr)，同表各行共享同一计划），网格规则消费之；计划缺失时回退列数等分。片段按类规则覆写 grid-template-columns 仍优先生效。",
+    "purpose": "安全表格的 CSS grid 网格行；活动格也保留；单元格仍与源区间对应（非独立表格数据模型）。#142 起列宽按内容比例分配：行装饰内联列宽计划（逐列 minmax(min(48px, 等分份额), 内容占比 fr)，同表各行共享同一计划），网格规则消费之；计划缺失时回退列数等分。片段按类规则覆写 grid-template-columns 仍优先生效。#296 渲染断裂修复：通用网格行规则不再声明 padding/box-shadow 抹平引用行类——引用内表格行与 .vsidian-quote-line 组合恢复竖条与内容缩进（同普通引用行观感）；格位外行级残留（管道/测量缓冲/前缀/replace 空占位）一律排除出 grid 放置。",
     "views": [
       "live"
     ],
+    "states": "引用/列表内表格行叠加容器行类（竖条、缩进、圆点）；选中行外框另见 row-selected 规则。",
     "dom": "表格行内的网格行容器（grid 布局）。",
     "example": ".vsidian-table-grid-row {\n  /* 覆写为固定轨道 */\n  grid-template-columns: 1fr 2fr;\n}",
     "obsidian": {
@@ -4421,6 +4445,14 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
       "counterpart": "No counterpart (Obsidian hides pipes or shows them as-is)"
     }
   },
+  "live-table-prefix": {
+    "purpose": "Container prefix span for grid rows (#296 render-breakage fix): the prefix region of table rows inside quotes/lists (marker hiding range and the bare gap before the first pipe) is wrapped into this mark and excluded from grid placement via CSS display:none — leftover prefix DOM (the empty placeholder intrinsically produced by replace, and bare text nodes) becomes an occupying grid item that wraps cells onto a second row.",
+    "states": "The mark steps aside while the cursor/selection touches the prefix region, so the prefix text becomes visible and editable (it then participates in the inline layout).",
+    "dom": "A mark decoration span covering the container prefix range inside a grid row.",
+    "obsidian": {
+      "counterpart": "No counterpart (Obsidian exposes no public class for prefix handling of tables in containers)"
+    }
+  },
   "live-table-align": {
     "purpose": "Column alignment modifiers declared by the live delimiter row (applied to the trimmed content spans); the actual grid layout is handled by the grid-align classes.",
     "dom": "Span-level modifier classes on table cells.",
@@ -4429,8 +4461,9 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "live-table-grid-row": {
-    "purpose": "The CSS grid row of safe tables; the active cell keeps the grid in place, and cells still map to their source ranges (not an independent table data model). Since #142 column widths are distributed by content proportion: the line decoration inlines a per-table column width plan (per column minmax(min(48px, equal share), content-proportion fr); all rows of a table share the same plan) which the grid rules consume, falling back to equal columns by count when the plan is missing. Snippet overrides of grid-template-columns through class rules still take precedence.",
+    "purpose": "The CSS grid row of safe tables; the active cell keeps the grid in place, and cells still map to their source ranges (not an independent table data model). Since #142 column widths are distributed by content proportion: the line decoration inlines a per-table column width plan (per column minmax(min(48px, equal share), content-proportion fr); all rows of a table share the same plan) which the grid rules consume, falling back to equal columns by count when the plan is missing. Snippet overrides of grid-template-columns through class rules still take precedence. #296 render-breakage fix: the generic grid row rule no longer declares padding/box-shadow that flatten quote line classes — table rows inside quotes restore the accent bar and content indent via the .vsidian-quote-line combination (matching plain quote lines); line-level leftovers outside cells (pipes, measurement buffers, prefixes, replace empty placeholders) are all excluded from grid placement.",
     "dom": "The grid row container inside table rows (CSS grid layout).",
+    "states": "Table rows inside quotes/lists stack container line classes on top (accent bar, indent, bullet); the selected-row outline is covered separately by the row-selected rules.",
     "obsidian": {
       "counterpart": "The direction of the Obsidian live table grid (no precisely matching class)"
     }

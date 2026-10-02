@@ -19,7 +19,7 @@ installLocale('zh-cn', zhCn)
 // - 增量装饰与全量重建对拍一致（RangeSet.eq）
 // - 千行单表：装饰构建/单格编辑增量在宽松时限内完成且写回正确
 import { describe, it, expect, vi } from 'vitest'
-import { EditorSelection, EditorState, RangeSet, Text } from '@codemirror/state'
+import { Compartment, EditorSelection, EditorState, RangeSet, Text } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { defaultKeymap, deleteCharBackward, deleteCharForward } from '@codemirror/commands'
 import type { DecorationSet } from '@codemirror/view'
@@ -29,6 +29,7 @@ import {
   getTableGridStats,
   liveDecorationsField,
   livePreviewDecorations,
+  tableContainerRenderFacet,
 } from '../../src/webview/liveDecorations'
 import { blankRowInputPlan, tableEditing, tablePipeKeyHandler } from '../../src/webview/tableEditing'
 import { splitTableRowCells, tableRowCellsForColumns } from '../../src/shared/tableCells'
@@ -88,8 +89,11 @@ function textsFor(set: DecorationSet, cls: string, doc: string): string[] {
     .map((i) => (i.to > i.from ? doc.slice(i.from, i.to) : `@${i.from}`))
 }
 
-function build(doc: string, selection = { anchor: 0 }): DecorationSet {
-  return buildLivePreviewDecorations(Text.of(doc.split('\n')), EditorSelection.single(selection.anchor))
+function build(doc: string, selection: { anchor: number; head?: number } = { anchor: 0 }): DecorationSet {
+  return buildLivePreviewDecorations(
+    Text.of(doc.split('\n')),
+    EditorSelection.single(selection.anchor, selection.head ?? selection.anchor),
+  )
 }
 
 // ---- 装饰契约 ----
@@ -443,6 +447,254 @@ describe('live 表格装饰', () => {
     expect(
       textsFor(full, LIVE_CLASS_NAMES.tableLine, tr.state.doc.toString()),
     ).toHaveLength(0)
+  })
+})
+
+// ---- 引用块内表格（#296） ----
+
+describe('引用块内表格网格化（#296）', () => {
+  it('引用块内表格进入网格形态：网格行、隐藏分隔行、格内容不含引用前缀', () => {
+    const doc = '> | a | b |\n> | --- | --- |\n> | 1 | 2 |'
+    const set = build(doc)
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(2)
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridCell, doc)).toEqual([' a ', ' b ', ' 1 ', ' 2 '])
+    const delimLineFrom = doc.indexOf('> | --- | --- |')
+    expect(collect(set).some((item) => item.from === delimLineFrom &&
+      item.cls?.split(' ').includes(LIVE_CLASS_NAMES.tableGridDelimiter))).toBe(true)
+  })
+
+  it('多层引用同样网格化，前缀完整剥离', () => {
+    const doc = '> > | 甲 | 乙 |\n> > | --- | --- |\n> > | 1 | 2 |'
+    const set = build(doc)
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(2)
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridCell, doc)).toEqual([' 甲 ', ' 乙 ', ' 1 ', ' 2 '])
+  })
+
+  it('引用内列表：表头带标记行与缩进续行都按各自前缀解析', () => {
+    const doc = '> - | a | b |\n>   | --- | --- |\n>   | 1 | 2 |'
+    const set = build(doc)
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(2)
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridCell, doc)).toEqual([' a ', ' b ', ' 1 ', ' 2 '])
+  })
+
+  it('lazy 分隔行（无引用前缀）按该行自身前缀独立解析', () => {
+    const doc = '> | a | b |\n| --- | --- |\n> | 1 | 2 |'
+    const set = build(doc)
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(2)
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridCell, doc)).toEqual([' a ', ' b ', ' 1 ', ' 2 '])
+  })
+
+  it('网格行与引用行类组合呈现；未触及时引用前缀保持隐藏', () => {
+    const doc = '前文\n\n> | a | b |\n> | --- | --- |\n> | 1 | 2 |\n\n后文'
+    const set = build(doc)
+    // 三行引用行类（表头/分隔/数据）与两行网格行类并存
+    expect(textsFor(set, LIVE_CLASS_NAMES.quoteLine, doc)).toHaveLength(3)
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(2)
+    // 未触及时 QuoteMark（含后随空格）整段隐藏：行首存在跨 "> " 的替换装饰
+    const headerLineFrom = doc.indexOf('> | a | b |')
+    expect(collect(set).some((item) => item.from === headerLineFrom &&
+      item.to === headerLineFrom + 2 && item.cls === undefined)).toBe(true)
+  })
+
+  it('光标停在引用表格内：网格保持；格内编辑前缀隐藏、触及 > 时显形', () => {
+    const doc = '> | a | b |\n> | --- | --- |\n> | 1 | 2 |'
+    const dataLineFrom = doc.indexOf('> | 1 | 2 |')
+    // 格内编辑：网格保持，前缀维持隐藏（QuoteMark 显隐只认触及，与表格
+    // 「编辑选区不显形」同口径——网格是核心体验）
+    const inCell = build(doc, { anchor: doc.indexOf('1') })
+    expect(textsFor(inCell, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(2)
+    expect(collect(inCell).some((item) => item.from === dataLineFrom &&
+      item.to === dataLineFrom + 2 && item.cls === undefined)).toBe(true)
+    // 光标触及 `>` 本身：前缀显形可编辑，网格不退场
+    const onMark = build(doc, { anchor: dataLineFrom + 1 })
+    expect(textsFor(onMark, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(2)
+    expect(collect(onMark).some((item) => item.from === dataLineFrom &&
+      item.to === dataLineFrom + 2 && item.cls === undefined)).toBe(false)
+  })
+
+  it('引用表单格编辑后增量装饰与全量重建对拍一致', () => {
+    const doc = '> | a | b |\n> | --- | --- |\n> | 1 | 2 |'
+    const view = makeEditView(doc, doc.indexOf('1'))
+    const cellAt = doc.indexOf('1')
+    view.dispatch({
+      changes: { from: cellAt, to: cellAt + 1, insert: '九' },
+      selection: EditorSelection.single(cellAt + 1),
+    })
+    const after = view.state.doc.toString()
+    expect(after).toBe('> | a | b |\n> | --- | --- |\n> | 九 | 2 |')
+    const full = buildLivePreviewDecorations(view.state.doc, view.state.selection)
+    expect(RangeSet.eq([view.state.field(liveDecorationsField).decos], [full])).toBe(true)
+    view.destroy()
+  })
+
+  it('无边界引用行（> a | b）：首格 mark 不覆盖引用前缀区（#296 审查轮）', () => {
+    const doc = '> a | b\n> --- | ---\n> c | d'
+    const set = build(doc)
+    // 网格成立且格 mark 文本不含引用前缀（前缀隐藏由引用装饰负责）
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(2)
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridCell, doc)).toEqual(['a ', ' b', 'c ', ' d'])
+  })
+
+  // ---- #296 渲染断裂修复（真机验收报障）：前缀占位与别名桥 ----
+
+  it('网格引用行的前缀区包进隐藏 mark（前缀不得占格位）', () => {
+    const doc = '> | a | b |\n> | --- | --- |\n> | 1 | 2 |'
+    // 光标放文档末尾（不在任何前缀区——触及前缀会触发显形态退场）
+    const set = build(doc, { anchor: doc.length })
+    // `> ` 前缀（含 QuoteMark 隐藏区）由 vsidian-table-prefix mark 包住：
+    // CM6 对行首 replace 固有产出 contenteditable=false 空 span，grid 布局
+    // 下成为 grid item 抢占第一格位（真机一表拆两块/垂直错位/列序颠倒的
+    // 根因）——mark 化后由 CSS display:none 排除出 grid 放置
+    for (const at of [doc.indexOf('> | a | b |'), doc.indexOf('> | 1 | 2 |')]) {
+      expect(collect(set).some((i) => i.from === at && i.to === at + 2 &&
+        i.cls?.split(' ').includes('vsidian-table-prefix'))).toBe(true)
+    }
+  })
+
+  it('引用内列表续行的缩进空格也进前缀 mark（裸文本同为占位格）', () => {
+    const doc = '> - | a | b |\n>   | --- | --- |\n>   | 1 | 2 |'
+    const set = build(doc, { anchor: doc.length })
+    const dataFrom = doc.indexOf('>   | 1 | 2 |')
+    // 数据行前缀 `>   `（QuoteMark 区 + 管道前裸缩进空格）整段包住；
+    // 分隔行整行 display:none 不参与 grid 放置，无需前缀 mark
+    expect(collect(set).some((i) => i.from === dataFrom && i.to === dataFrom + 4 &&
+      i.cls?.split(' ').includes('vsidian-table-prefix'))).toBe(true)
+  })
+
+  it('顶层表格行不发前缀 mark（prefixLen=0 无前缀可包）', () => {
+    const doc = '| a | b |\n| --- | --- |\n| 1 | 2 |'
+    const set = build(doc)
+    expect(textsFor(set, 'vsidian-table-prefix', doc)).toHaveLength(0)
+  })
+
+  it('光标触及前缀时前缀 mark 退场（与 QuoteMark 显形联动）', () => {
+    const doc = '> | a | b |\n> | --- | --- |\n> | 1 | 2 |'
+    const dataFrom = doc.indexOf('> | 1 | 2 |')
+    const onMark = build(doc, { anchor: dataFrom + 1 })
+    expect(collect(onMark).some((i) => i.from === dataFrom &&
+      i.cls?.split(' ').includes('vsidian-table-prefix'))).toBe(false)
+  })
+
+  it('格内起点拖选跨格：非空选区跨越前缀不显形（#296 三轮真机反馈）', () => {
+    const doc = '> | a | b |\n> | --- | --- |\n> | 1 | 2 |'
+    // 先点击首格落光标，再拖选到末格：anchor/head 都在格内容上，选区
+    // 区间跨越行 3 的 `> ` 前缀——「纳入选区」观感的根因是区间重叠
+    // 语义触发前缀 mark 退场显形；跨越是拖选常态，不得显形。分隔行整行
+    // display:none 不发前缀 mark，基线为行 1/行 3 共 2 条
+    const set = build(doc, { anchor: doc.indexOf('a') + 1, head: doc.indexOf('2') + 1 })
+    expect(textsFor(set, 'vsidian-table-prefix', doc)).toHaveLength(2)
+    for (const at of [doc.indexOf('> | a | b |'), doc.indexOf('> | 1 | 2 |')]) {
+      expect(collect(set).some((i) => i.from === at &&
+        i.cls?.split(' ').includes('vsidian-table-prefix'))).toBe(true)
+    }
+  })
+
+  it('非空选区端点进入前缀区间才显形（shift+扩选到行首语义）', () => {
+    const doc = '> | a | b |\n> | --- | --- |\n> | 1 | 2 |'
+    // head 扩到行 1 行首（前缀区内端点）：行 1 前缀显形（mark 退场），
+    // 行 3 前缀未被端点触及仍隐藏
+    const set = build(doc, { anchor: doc.indexOf('a') + 1, head: 0 })
+    expect(collect(set).some((i) => i.from === doc.indexOf('> | a | b |') &&
+      i.cls?.split(' ').includes('vsidian-table-prefix'))).toBe(false)
+    expect(collect(set).some((i) => i.from === doc.indexOf('> | 1 | 2 |') &&
+      i.cls?.split(' ').includes('vsidian-table-prefix'))).toBe(true)
+  })
+
+  it('「块内表格渲染」关闭：容器内表格不网格化，顶层表不受影响（#296 三轮设置）', () => {
+    const doc = '前文\n\n| 甲 | 乙 |\n| --- | --- |\n| 丙 | 丁 |\n\n> | a | b |\n> | --- | --- |\n> | 1 | 2 |'
+    const off = buildLivePreviewDecorations(Text.of(doc.split('\n')),
+      EditorSelection.single(doc.length), null, null, false, false)
+    // 只剩顶层表两行网格；引用表退回普通引用行（管道按源文可见）
+    expect(textsFor(off, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(2)
+    const on = buildLivePreviewDecorations(Text.of(doc.split('\n')),
+      EditorSelection.single(doc.length), null, null, false, true)
+    expect(textsFor(on, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(4)
+  })
+
+  it('facet 热重配触发装饰全量重建（Compartment reconfigure 纯事务）', () => {
+    const doc = '> | a | b |\n> | --- | --- |\n> | 1 | 2 |'
+    const compartment = new Compartment()
+    const state = EditorState.create({
+      doc,
+      extensions: [livePreviewDecorations, compartment.of(tableContainerRenderFacet.of(true))],
+    })
+    expect(collect(state.field(liveDecorationsField).decos).some((i) =>
+      i.cls?.split(' ').includes(LIVE_CLASS_NAMES.tableGridRow))).toBe(true)
+    const off = state.update({ effects: compartment.reconfigure(tableContainerRenderFacet.of(false)) }).state
+    expect(collect(off.field(liveDecorationsField).decos).some((i) =>
+      i.cls?.split(' ').includes(LIVE_CLASS_NAMES.tableGridRow))).toBe(false)
+  })
+
+  it('引用表格行保留 HyperMD-quote 别名（别名桥不因网格行丢失）', () => {
+    const doc = '> | a | b |\n> | --- | --- |\n> | 1 | 2 |'
+    const set = build(doc)
+    // 样式契约承诺 .HyperMD-quote 命中引用行：网格行线类同样过别名桥
+    expect(textsFor(set, 'HyperMD-quote', doc)).toHaveLength(3)
+  })
+
+  it('引用表格的格区蒙版类并入格装饰（region 判等用行首口径，#296 二轮）', () => {
+    const doc = '> | a | b |\n> | --- | --- |\n> | 1 | 2 |\n> | 3 | 4 |'
+    // region.tableFrom 是拖选锚定的表格首行行首（含 `> ` 前缀）；Lezer 的
+    // Table 节点 from 跳过前缀落在管道位——判等若直接比树节点 from，引用
+    // 表格恒不等、regionIndex=-1、蒙版类永不并入（真机拖选折叠无蒙版根因）
+    const region = { tableFrom: doc.indexOf('> | a | b |'),
+      rowFrom: 0, rowTo: 1, columnFrom: 0, columnTo: 1 }
+    const set = buildLivePreviewDecorations(
+      Text.of(doc.split('\n')), EditorSelection.single(doc.length), region)
+    const cells = collect(set).filter((i) =>
+      i.cls?.split(' ').includes(LIVE_CLASS_NAMES.tableGridCell))
+    expect(cells.length).toBeGreaterThanOrEqual(4)
+    const masked = cells.filter((i) => i.cls?.split(' ').includes(LIVE_CLASS_NAMES.tableRegionCell))
+    // 2×2 区域：a/b（表头行）与 1/2（首个数据行）四格都须带蒙版类
+    expect(masked.map((i) => doc.slice(i.from, i.to))).toEqual([' a ', ' b ', ' 1 ', ' 2 '])
+  })
+
+  // ---- #296 二轮反馈 3：引用前缀残缺 → 受影响表格整表回退源码 ----
+
+  it('数据行缺 > 前缀：整表回退源码行（不网格化）', () => {
+    const doc = '> | a | b |\n> | --- | --- |\n| 1 | 2 |'
+    const set = build(doc, { anchor: doc.length })
+    // 残缺行已脱离引用块，网格会把脱离行混进引用表——受影响部分整表回退
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(0)
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridCell, doc)).toHaveLength(0)
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableLine, doc)).toHaveLength(3)
+  })
+
+  it('数据行为纯缩进（无 >）：同样整表回退', () => {
+    const doc = '> | a | b |\n> | --- | --- |\n  | 1 | 2 |'
+    const set = build(doc, { anchor: doc.length })
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(0)
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableLine, doc)).toHaveLength(3)
+  })
+
+  it('数据行引用层级多于表头：Lezer 已拆出表外，孤儿表头暂保持网格（边界记录）', () => {
+    const doc = '> | a | b |\n> | --- | --- |\n> > | 1 | 2 |'
+    const set = build(doc, { anchor: doc.length })
+    // 多层级数据行被 Lezer 拆出 Table 成独立节点，表内只剩表头+分隔——
+    // 前缀一致性无从判定（表内行层级一致），孤儿表头按合法引用内表头
+    // 网格化。可判定降级只覆盖残缺行仍在 Table 内的形态；拆散形态待真机
+    // 反馈后另行开票
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(1)
+  })
+
+  it('lazy 分隔行（合法形态）不触发整表回退', () => {
+    const doc = '> | a | b |\n| --- | --- |\n> | 1 | 2 |'
+    const set = build(doc, { anchor: doc.length })
+    // 分隔行豁免：无前缀的 lazy 分隔是 GFM 常见合法形态（契约 5 保留）
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(2)
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridCell, doc)).toEqual([' a ', ' b ', ' 1 ', ' 2 '])
+  })
+
+  it('顶层表格不受引用前缀一致性校验影响', () => {
+    const doc = '| a | b |\n| --- | --- |\n| 1 | 2 |'
+    const set = build(doc, { anchor: doc.length })
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(2)
+  })
+
+  it('列表内表格的行首列表标记不参与引用层级判定（引用层级一致仍网格化）', () => {
+    const doc = '> - | a | b |\n>   | --- | --- |\n>   | 1 | 2 |'
+    const set = build(doc, { anchor: doc.length })
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(2)
   })
 })
 

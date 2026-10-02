@@ -419,12 +419,27 @@ describe('分组重组二轮还原（#163 验收反馈：侧栏只留常规/编�
     [...sectionByTitle(parent, title).querySelectorAll(`.${SETTINGS_PAGE_CLASS_NAMES.item}`)]
       .map((el) => el.querySelector(`.${SETTINGS_PAGE_CLASS_NAMES.itemTitle}`)?.textContent ?? '')
 
-  it('侧栏只呈现常规/编辑器两个内置分组（附加分页另算）', () => {
+  it('侧栏内置分组为常规/编辑器/实验性功能（#296 三轮起 experimental.* 独立分组；附加分页另算）', () => {
     const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
     expect(navTitles(parent)).toEqual([
       zhCn['settings.generalSection'],
       zhCn['settings.editorCategory'],
+      zhCn['settings.experimentalSection'],
     ])
+  })
+
+  it('实验性页首个小节为「表格行为」，收纳块内表格渲染开关（#296 三轮）', () => {
+    const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
+    clickNav(parent, zhCn['settings.experimentalSection'])
+    expect(parent.querySelector('.vsidian-settings-heading')?.textContent)
+      .toBe(zhCn['settings.experimentalSection'])
+    expect(sectionTitles(parent)).toEqual([zhCn['settings.groupExperimentalTable']])
+    expect(groupItemTitles(parent, zhCn['settings.groupExperimentalTable']))
+      .toEqual([zhCn['setting.experimentalTableRender.title']])
+    // 编辑器页「显示」小节不重复收纳 experimental.*（上游 editorDefs 排除）
+    clickNav(parent, zhCn['settings.editorCategory'])
+    expect(groupItemTitles(parent, zhCn['settings.groupDisplay']))
+      .not.toContain(zhCn['setting.experimentalTableRender.title'])
   })
 
   it('编辑器页内小节为显示/编辑/符号输入/代码块/图片/引用视图，条目按前缀归节', () => {
@@ -799,11 +814,12 @@ describe('外观合并分页（#231）', () => {
     result!.click()
   }
 
-  it('侧栏五条：常规、编辑器、快捷键、外观、索引维护；「外观」为调色板图标', () => {
+  it('侧栏六条：常规、编辑器、实验性功能、快捷键、外观、索引维护；「外观」为调色板图标', () => {
     const { parent } = makeFullView()
     expect(navItems(parent).map((b) => b.textContent)).toEqual([
       zhCn['settings.generalSection'],
       zhCn['settings.editorCategory'],
+      zhCn['settings.experimentalSection'],
       zhCn['keybindingSettings.title'],
       zhCn['appearance.title'],
       zhCn['indexMaintenance.title'],

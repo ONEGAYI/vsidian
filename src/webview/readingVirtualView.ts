@@ -196,7 +196,8 @@ export class VirtualReadingView {
     this.findSource.hide()
     if (opts?.parsedNow !== false) this.parseCount += 1
     this.text = text
-    this.blocks = opts?.blocks ? [...opts.blocks] : splitReadingBlocks(text)
+    this.blocks = opts?.blocks ? [...opts.blocks]
+      : splitReadingBlocks(text)
     if (opts?.range) {
       const { start, end } = opts.range
       this.blocks = this.blocks.filter((b) => b.start <= end && b.end >= start)

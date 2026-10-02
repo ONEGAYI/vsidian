@@ -485,3 +485,19 @@ describe('多 range 逐段规划（#240）', () => {
     expect(plan!.selections[0]).toBeNull()
   })
 })
+
+describe('引用块内表格区域格式化（#296 审查轮）', () => {
+  it('引用表格分隔行与格内容按前缀感知解析：格区加粗真实生效', () => {
+    const doc = '> | 甲 | 乙 |\n> | --- | --- |\n> | a | b |'
+    const region = { tableFrom: doc.indexOf('> | 甲'), rowFrom: 1, rowTo: 1, columnFrom: 0, columnTo: 0 }
+    const out = apply(doc, 'bold', 0, 0, region)
+    expect(out.text).toBe('> | 甲 | 乙 |\n> | --- | --- |\n> | **a** | b |')
+  })
+
+  it('无边界引用行的格区加粗同样生效', () => {
+    const doc = '> | 甲 | 乙 |\n> | --- | --- |\n> a | b'
+    const region = { tableFrom: doc.indexOf('> | 甲'), rowFrom: 1, rowTo: 1, columnFrom: 0, columnTo: 0 }
+    const out = apply(doc, 'bold', 0, 0, region)
+    expect(out.text).toBe('> | 甲 | 乙 |\n> | --- | --- |\n> **a** | b')
+  })
+})

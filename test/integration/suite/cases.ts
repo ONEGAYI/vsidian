@@ -3430,6 +3430,52 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(await readDisk(name) === afterPaddingDelete, '落盘内容只能清空当前格，表格标记必须完整')
   }],
 
+  ['引用块内表格网格化绘制：格内容命中、表头底色与行级网格（#296）', async () => {
+    await openWithEditor('blockquote-table.md')
+    await waitSessionReady('blockquote-table.md')
+    // 样例含三张引用表（单层 / lazy 分隔行 / 多层引用）：9 个表格行类、
+    // 12 个单元格内容 mark（`>` 不入格内容，格内文字全部命中）
+    const view = await waitViewState('blockquote-table.md',
+      (v) => v.liveSyntax?.tableLines === 9 && v.liveSyntax?.tableCells === 12)
+    assert(view.liveSyntax!.tableLines === 9,
+      `引用表表格行装饰应为 9，实际 ${view.liveSyntax!.tableLines}`)
+    assert(view.liveSyntax!.tableCells === 12,
+      `引用表单元格装饰应为 12，实际 ${view.liveSyntax!.tableCells}`)
+    // 绘制层：网格布局真实生效、格文字经 elementFromPoint 命中（非仅
+    // DOM 存在）、表头保留底色——引用竖条与网格组合呈现不互斥
+    const rendered = await waitViewState('blockquote-table.md',
+      (v) => v.paint?.table?.cellVisible === true)
+    assert(rendered.paint!.table!.gridDisplay === 'grid',
+      '引用块内表格须以网格布局绘制，不能停留源码形态')
+    assert((rendered.paint!.table!.headerCellBackgrounds?.length ?? 0) > 0,
+      '引用块内表格表头须保留底色')
+    assert(rendered.tableGrid?.visibleRows === 6, '三张引用表（单层/lazy/多层）的表头与数据行都须进入网格')
+  }],
+
+  ['引用块内表格格内编辑防护：Enter 持久化换行标记、网格不拆散（#296 审查轮）', async () => {
+    const name = 'blockquote-table.md'
+    await openWithEditor(name)
+    await waitSessionReady(name)
+    const uri = wsUri(name).toString()
+    const doc = await vscode.workspace.openTextDocument(wsUri(name))
+    const before = doc.getText()
+    // 光标落在首张引用表数据行「苹果」内容中（格内编辑防护链路：
+    // 修复前 editableGridCellAt 对引用表返回 null，Enter 走原生换行拆散表格）
+    const at = before.indexOf('苹果') + 1
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.locate', offset: at })
+    await waitViewState(name, (v) => v.selectionOffset === at)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key: 'enter' })
+    // Enter 写 <br>（格内换行），引用表格行不被真实换行拆散
+    const entered = before.replace('苹果', '苹<br>果')
+    await waitViewState(name, (v) => v.text === entered)
+    await poll('Enter 落盘为格内换行标记', () => doc.getText() === entered ? true : undefined)
+    const afterEnter = await waitViewState(name, (v) => v.tableGrid?.visibleRows === 6)
+    assert(afterEnter.tableGrid!.visibleRows === 6, '格内换行后三张引用表网格保持')
+    assert(afterEnter.paint?.table?.cellVisible === true, '格内换行后仍在网格绘制层可见')
+    assert(await doc.save(), '保存失败')
+    assert(await readDisk(name) === entered, '落盘内容须保持引用层级与格内换行标记')
+  }],
+
   ['安全表格仅绘制段首行号，格内光标与设置切换不恢复重叠编号', async () => {
     await openWithEditor('table42.md')
     await waitSessionReady('table42.md')
