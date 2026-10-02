@@ -203,6 +203,7 @@ export const en = {
   'styleRef.category.outlinks': 'Outgoing links panel',
   'styleRef.category.hoverPreview': 'Hover preview',
   'styleRef.category.findPanel': 'Find panel',
+  'styleRef.category.loading': 'Loading placeholder',
   'host.styleRefExported': 'Style contract JSON exported: {path}',
   'host.styleRefExportFailed': 'Failed to export style contract JSON: {reason}',
   'host.styleRefExportReasonMissingAsset': 'extension install incomplete (style-reference.json missing)',

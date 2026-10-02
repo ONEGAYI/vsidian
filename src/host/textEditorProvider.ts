@@ -28,6 +28,13 @@ import {
 import { parseWikilinkInner } from '../shared/wikilink'
 import { NewlineCoordinator } from '../shared/newline'
 import { buildEditorCsp } from './editorCsp'
+// #292 骨架屏内联装配（样式/标记/可读行宽预注入取值）
+import {
+  buildSkeletonBodyHtml,
+  buildSkeletonStyleHtml,
+  readableLineWidthPreset,
+} from './skeletonScreen'
+import { SKELETON_HOLD_GLOBAL, SKELETON_SHOWN_AT_GLOBAL } from '../shared/skeletonTiming'
 import { FORMAT_OPERATIONS } from '../shared/formatOperations'
 import { KEYBINDING_OPERATIONS, UI_OPERATIONS } from '../shared/keybindings'
 import {
@@ -90,7 +97,7 @@ import { hostLocale } from './hostLocale'
 import type { FindOptionsStore } from './findOptionsStore'
 import { sanitizeFindOptions, type FindOptions } from '../shared/findOptions'
 import { t } from '../shared/i18n'
-import { EMBED_MAX_DEPTH_DEFAULT, EMBED_MAX_DEPTH_KEY } from '../shared/settings'
+import { EMBED_MAX_DEPTH_DEFAULT, EMBED_MAX_DEPTH_KEY, READABLE_LINE_WIDTH_KEY } from '../shared/settings'
 import type { JiebaWiring } from './jiebaResourceWiring'
 import { JIEBA_WASM_VERSION } from '../shared/jiebaManifest'
 import { recordDiagnosticMessage, TestDiagnostics } from '../shared/testDiagnostics'
@@ -1634,12 +1641,21 @@ export function createTextEditorProvider(
         enableScripts: true,
         localResourceRoots: editorResourceRoots(context, document, snippets?.getState().directory ?? null),
       }
+      // 快照取一次（#93 语言与 #292 可读行宽预注入共用）
+      const settingsSnapshot = settings?.service.getSnapshot()
       webviewPanel.webview.html = buildWebviewHtml(
         webviewPanel.webview,
         context.extensionUri,
         // #93 生效语言：读语言设置（#4 注册 general.language 前缺省 auto）
         // 按宿主显示语言解析；数据岛注入当前语言包（webview 零字典字节）
-        hostLocale(settings?.service.getSnapshot()),
+        hostLocale(settingsSnapshot),
+        {
+          // #292 非 0 档可读行宽预写 #app 内联变量（消除骨架期宽度回跳）；
+          // 后续 applyReadableLineWidthSetting 的 0 档移除/非 0 覆写语义不变
+          readableLineWidthPx: readableLineWidthPreset(settingsSnapshot?.[READABLE_LINE_WIDTH_KEY]),
+          // #292 集成测试冻结骨架撤除（C-11 同款宿主侧门控：生产不嵌入）
+          holdSkeleton: process.env.VSIDIAN_TEST_HOOKS === '1',
+        },
       )
     },
   }
@@ -2380,6 +2396,16 @@ export function createTextEditorProvider(
         imageGeneration: entry.session.getImageGeneration(),
       }
     }),
+    vscode.commands.registerCommand('onegayi.vsidian._test.getSkeletonState', (uriStr: string, panelIndex = 0) => {
+      // #292 骨架状态查询：读最近一次 webview 回报（hold 装配下 adopt/
+      // release 都会回报；调用方按需重试）
+      const entry = getEntry(vscode.Uri.parse(uriStr))
+      const panel = entry?.session.getInfo().panels[panelIndex]
+      if (!entry || !panel) {
+        return undefined
+      }
+      return entry.session.getLastSkeletonReport(panel.sessionId) ?? null
+    }),
     vscode.commands.registerCommand(
       'onegayi.vsidian._test.injectWebviewMessage',
       async (uriStr: string, message: Record<string, unknown>, panelIndex = 0) => {
@@ -2972,6 +2998,10 @@ function buildWebviewHtml(
   webview: vscode.Webview,
   extensionUri: vscode.Uri,
   locale: LocaleCode,
+  // #292 装配参数：readableLineWidthPx = 非 0 档可读行宽预写 #app 内联变量
+  // （消除骨架期宽度回跳）；holdSkeleton 供集成测试冻结骨架撤除（宿主侧
+  // 门控，调用侧仅在 VSIDIAN_TEST_HOOKS=1 传真值）
+  initial: { readableLineWidthPx?: number | null; holdSkeleton?: boolean } = {},
 ): string {
   const nonce = randomUUID()
   const scriptUri = webview.asWebviewUri(
@@ -2997,20 +3027,26 @@ function buildWebviewHtml(
   // 联网字体；脚本面维持 nonce 门控）——期望形态由 test/unit/editorCsp.test.ts
   // 钉住，真实宿主内生效由集成测试验证
   const csp = buildEditorCsp(webview.cspSource, nonce)
+  // #292 非 0 档可读行宽预写 #app 内联双变量（内联强于 main.css 的 #app
+  // 缺省定义；骨架与正文同引变量，空窗①即按设定宽呈现）
+  const readableLineWidthAttr = initial.readableLineWidthPx
+    ? ` style="--vsidian-reading-max-width:${initial.readableLineWidthPx}px;--vsidian-live-preview-max-width:${initial.readableLineWidthPx}px"`
+    : ''
   return `<!DOCTYPE html>
 <html lang="${locale}">
 <head>
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="${csp}">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+${buildSkeletonStyleHtml()}
 <link href="${styleUri}" rel="stylesheet">
 <link href="${probeCssUri}" rel="stylesheet">
 <title>Vsidian</title>
 </head>
 <body>
-<div id="app"></div>
+<div id="app"${readableLineWidthAttr}>${buildSkeletonBodyHtml()}</div>
 ${buildLocaleIslandHtml(locale, LOCALE_MESSAGES[locale])}
-<script nonce="${nonce}">window.__vsidianMermaidUri = "${mermaidUri}";</script>
+<script nonce="${nonce}">window.__vsidianMermaidUri = "${mermaidUri}";${initial.holdSkeleton ? `window.${SKELETON_HOLD_GLOBAL} = true;` : ''}window.${SKELETON_SHOWN_AT_GLOBAL} = performance.now();</script>
 <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`

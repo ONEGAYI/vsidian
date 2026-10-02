@@ -938,6 +938,24 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
       'A button inside the top .vsidian-toolbar, immediately to the left of the dual-state view toggle; an inline SVG circular arrow (lucide refresh-cw motif, four paths, constant stroke-width=2, no icon library).',
     obsidian: { counterpart: 'No counterpart' },
   },
+  'skeleton': {
+    purpose:
+      'Loading skeleton overlay for the editor initial open (#292): rendered with the initial HTML immediately, covering both the script-load and content-ready windows; after mount it is re-parented as an overlay inside the main editor area below the toolbar, and removed after the first content frame following the shimmer cycle-completion rule. Default background follows the editor background variable; the skeleton never intercepts pointer events.',
+    states:
+      'Present only during the load window: covers #app fully before mount, content area only after mount (the host class .vsidian-skeleton-host provides the positioning context and is removed on dismissal); gone after removal.',
+    dom:
+      'Direct child of #app in the initial HTML (single instance, stable id vsidian-skeleton); after mount moved to the end of .vsidian-main (vsidian-skeleton-host state) — never inside a view container (the reading virtualizer manages container children per block, see docs/specs/skeleton-screen.md).',
+    obsidian: { counterpart: 'No counterpart' },
+  },
+  'skeleton-block': {
+    purpose:
+      'Skeleton gray bars and shimmer animation (#292): a generic fixed form (no document content is read, no line-number gutter simulated); both the bar fill and the shimmer highlight derive from the editor foreground color via low-ratio color-mix (adapts to light/dark themes); the shimmer starts after a start delay and loops, and removal waits for the current cycle to finish — delay/cycle constants are shared with the exit planner (shared/skeletonTiming).',
+    states:
+      'The shimmer is disabled under prefers-reduced-motion: reduce (static bars); it starts only after the start delay (default 300ms), so instantly-loaded documents never show it.',
+    dom:
+      'Direct div sequence of .vsidian-skeleton > .vsidian-skeleton-column; the column width consumes --vsidian-live-preview-max-width (same source as the content column; full-bleed at the 0 setting), with horizontal padding sharing the content baseline variable (--vsidian-content-padding-inline).',
+    obsidian: { counterpart: 'No counterpart' },
+  },
   'mode-body': {
     purpose:
       'The webview-wide mode anchor (#141): a mutually exclusive class pair that switches with the view mode on the layout root div (.vsidian-body inside #app, not the HTML body element — the class pair is not attached to <body>), serving as the public entry for user snippets styling "per mode" (e.g. #app .vsidian-body.vsidian-mode-reading .vsidian-toolbar button { … }). Built-in consumer: the show/hide rules of the view toggle book/edit icons take it as their single source.',

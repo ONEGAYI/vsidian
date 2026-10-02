@@ -243,6 +243,13 @@ export const STYLE_GUIDE_CATEGORIES: readonly StyleContractCategory[] = [
     "title": "查找面板",
     "titleKey": "styleRef.category.findPanel",
     "order": 13
+  },
+  {
+    "id": "loading",
+    "domain": "chrome",
+    "title": "加载占位",
+    "titleKey": "styleRef.category.loading",
+    "order": 14
   }
 ] as readonly StyleContractCategory[]
 
@@ -3862,6 +3869,56 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "浏览器 occurrence（#238）：真实键盘 Ctrl+D 连按与弦键位"
     ],
     "introduced": "#238（2026-10 批次）"
+  },
+  {
+    "id": "skeleton",
+    "domain": "chrome",
+    "category": "loading",
+    "kind": "container",
+    "target": ".vsidian-skeleton（列容器 .vsidian-skeleton-column 为其唯一子元素）",
+    "purpose": "编辑器初次打开的加载期骨架容器（#292）：随初始 HTML 即时呈现，覆盖「脚本加载」与「正文就绪」两段空窗；挂载后收编为主编辑区内、工具栏下方的覆盖层，正文首帧后按扫光收束规则移除。默认背景随编辑器背景变量，骨架不拦截指针事件。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "仅装载窗口在场：挂载前覆盖 #app 整页，挂载后仅盖内容区（宿主类 .vsidian-skeleton-host 提供定位包含块，撤除时一并移除）；撤除后不存在。",
+    "dom": "初始 HTML 内 #app 的直接子元素（单实例，稳定 id vsidian-skeleton）；挂载后移入 .vsidian-main（vsidian-skeleton-host 态）末尾——不进视图容器（阅读虚拟化按块管理容器子树，见规格 skeleton-screen.md）。",
+    "example": ".vsidian-skeleton {\n  background: var(--vscode-editor-background);\n}",
+    "obsidian": {
+      "counterpart": "无（Obsidian 无加载骨架）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 skeletonScreen（#292）：内联装配形态钉住（宽变量引用/延时周期同源常量/reduced-motion/自包含无外部资源）",
+      "单元 skeletonPanel（#292）：jsdom 控制器收编、撤除、测试冻结与 release",
+      "浏览器 skeletonProbe（#292）：呈现与撤除的绘制断言、宽度跟随限宽变量",
+      "集成 _test.getSkeletonState（#292）：hold 装配下的在场与落点回报"
+    ],
+    "introduced": "#292（2026-10-02）"
+  },
+  {
+    "id": "skeleton-block",
+    "domain": "chrome",
+    "category": "loading",
+    "kind": "selector",
+    "target": ".vsidian-skeleton-block（nth-child 宽高序列的标题/段落/代码块形态；::after 扫光层与 @keyframes vsidian-skeleton-sweep）",
+    "purpose": "骨架灰块条与扫光动画（#292）：通用固定形态（不读文档内容、不模拟行号列），灰块底色与扫光高亮均由编辑器前景色低占比 color-mix 派生（明暗主题自适应）；扫光经启动延时后循环，撤除等当前周期播完——延时/周期常量与撤除计划同源（shared/skeletonTiming）。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "扫光在 prefers-reduced-motion: reduce 下禁用（静态灰块）；启动延时（默认 300ms）结束后才出现扫光，瞬间载好的文档全程无动画。",
+    "dom": ".vsidian-skeleton > .vsidian-skeleton-column 的直接子 div 序列；列宽引用 --vsidian-live-preview-max-width（与正文列同源，0 = 铺满档下骨架同样铺满），水平留白与正文基线同变量（--vsidian-content-padding-inline）。",
+    "example": ".vsidian-skeleton-block {\n  background: color-mix(in srgb, var(--vscode-editor-foreground) 9%, transparent);\n}",
+    "obsidian": {
+      "counterpart": "无（Obsidian 无加载骨架）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 skeletonScreen（#292）：颜色派生、动画常量与 reduced-motion 规则钉住",
+      "浏览器 skeletonProbe（#292）：reduced-motion 下扫光关闭与扫光在场的绘制断言"
+    ],
+    "introduced": "#292（2026-10-02）"
   }
 ] as readonly StyleContractEntry[]
 
@@ -4845,6 +4902,22 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     "purpose": "The refresh-embedded-resources button (#208): the manual refresh entry — a click posts a refresh.request outbound; the host drops the image resolution cache, bumps the resource generation and replies with the invalidation notice, after which the webview remounts every active image slot for re-resolution (reloading with the new-generation URI) and resets the Mermaid lazy-load failure terminal state. Refreshing never touches the document content/undo stack/view state (cursor, scroll and mode stay as they were), and the keybinding entry shares the same send implementation.",
     "states": "Persistent in both modes; before readiness (before init) a click is a no-op. The #158 push rule (margin-left:auto) moved from view-toggle to this button in #208 — head of the right-end group (refresh + dual-state toggle + sidebar toggle, adjacent), with a flexible gap toward the left group.",
     "dom": "A button inside the top .vsidian-toolbar, immediately to the left of the dual-state view toggle; an inline SVG circular arrow (lucide refresh-cw motif, four paths, constant stroke-width=2, no icon library).",
+    "obsidian": {
+      "counterpart": "No counterpart"
+    }
+  },
+  "skeleton": {
+    "purpose": "Loading skeleton overlay for the editor initial open (#292): rendered with the initial HTML immediately, covering both the script-load and content-ready windows; after mount it is re-parented as an overlay inside the main editor area below the toolbar, and removed after the first content frame following the shimmer cycle-completion rule. Default background follows the editor background variable; the skeleton never intercepts pointer events.",
+    "states": "Present only during the load window: covers #app fully before mount, content area only after mount (the host class .vsidian-skeleton-host provides the positioning context and is removed on dismissal); gone after removal.",
+    "dom": "Direct child of #app in the initial HTML (single instance, stable id vsidian-skeleton); after mount moved to the end of .vsidian-main (vsidian-skeleton-host state) — never inside a view container (the reading virtualizer manages container children per block, see docs/specs/skeleton-screen.md).",
+    "obsidian": {
+      "counterpart": "No counterpart"
+    }
+  },
+  "skeleton-block": {
+    "purpose": "Skeleton gray bars and shimmer animation (#292): a generic fixed form (no document content is read, no line-number gutter simulated); both the bar fill and the shimmer highlight derive from the editor foreground color via low-ratio color-mix (adapts to light/dark themes); the shimmer starts after a start delay and loops, and removal waits for the current cycle to finish — delay/cycle constants are shared with the exit planner (shared/skeletonTiming).",
+    "states": "The shimmer is disabled under prefers-reduced-motion: reduce (static bars); it starts only after the start delay (default 300ms), so instantly-loaded documents never show it.",
+    "dom": "Direct div sequence of .vsidian-skeleton > .vsidian-skeleton-column; the column width consumes --vsidian-live-preview-max-width (same source as the content column; full-bleed at the 0 setting), with horizontal padding sharing the content baseline variable (--vsidian-content-padding-inline).",
     "obsidian": {
       "counterpart": "No counterpart"
     }

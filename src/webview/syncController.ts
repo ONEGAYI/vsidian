@@ -314,6 +314,13 @@ import { indentEditing } from './indentEditing'
 import { selectTableRegion, tableRegionField } from './tableRegionSelection'
 import { planTableRegionReplace, type TableRegion } from './tableRegion'
 import { splitTableRowCells } from './tableCells'
+// #292 骨架屏：撤除计划纯逻辑与装配常量（HTML 打点/收编/hold 全局同源）
+import {
+  planSkeletonExit,
+  SKELETON_ELEMENT_ID,
+  SKELETON_HOLD_GLOBAL,
+  SKELETON_SHOWN_AT_GLOBAL,
+} from '../shared/skeletonTiming'
 
 /** rAF 不可用环境（旧 jsdom）退化为短超时（与 readingVirtualView 同款） */
 function scheduleFrame(fn: () => void): void {
@@ -648,6 +655,17 @@ export class WebviewSyncController {
 
   // ---- 视图模式状态（#6）----
   /** 当前模式：不写 TextDocument、不入撤销栈，切换只 dispatch 选区/effects */
+  // ---- #292 加载期骨架屏状态 ----
+  /** 收编后的骨架元素（撤除后 null；宿主 HTML 未含骨架时保持 null） */
+  private skeletonEl: HTMLElement | null = null
+  /** 骨架呈现时刻（宿主 HTML 在 main.js 前打点；缺失回退 mount 时刻） */
+  private skeletonShownAt: number | null = null
+  /** 收编落点（撤除后 null） */
+  private skeletonContainer: 'live' | 'reading' | null = null
+  private skeletonExitScheduled = false
+  private skeletonExitTimer: ReturnType<typeof setTimeout> | undefined
+  /** 测试 release 已到（解除宿主 HTML 嵌入的 hold 冻结） */
+  private skeletonHoldReleased = false
   private viewMode: ViewMode
   /** 最近模式锚点：live=光标主位；reading=锚点块 src-start（源码位置锚点） */
   private modeAnchor: number | null
@@ -1620,6 +1638,9 @@ export class WebviewSyncController {
     // （浅色墨水叠暗底不可读）
     setMermaidDarkTheme(this.hostDarkApplied)
     this.applyModeDom(this.viewMode)
+    // #292 空窗②收编：骨架移入当前模式容器（只盖内容区、与工具栏共存），
+    // 在 ready 出站前完成（宿主收到 ready 才发 init 全文）
+    this.adoptSkeleton()
     // #94/#101 语言切换：常驻控件文案由 localeDom 注册表单点重刷（各
     // build* 创建点登记）；此处订阅只剩复合工具提示重算与按需控件兜底
     // （首帧装配不触发，installLocale 才通知）
@@ -1663,6 +1684,11 @@ export class WebviewSyncController {
     if (this.flushTimer !== undefined) {
       clearTimeout(this.flushTimer)
       this.flushTimer = undefined
+    }
+    // #292 骨架撤除计时清理（元素随 webview 卸载，计时器须显式清除）
+    if (this.skeletonExitTimer !== undefined) {
+      clearTimeout(this.skeletonExitTimer)
+      this.skeletonExitTimer = undefined
     }
     this.cancelOutlineRefresh()
     this.cancelOutlineHighlightUpdate()
@@ -1790,6 +1816,15 @@ export class WebviewSyncController {
           this.bridge.postMessage({ kind: 'backlinks.get', sessionId: this.sessionId!, docUri: this.docUri })
           this.bridge.postMessage({ kind: 'outlinks.get', sessionId: this.sessionId!, docUri: this.docUri })
         }
+        break
+      case '_test.skeleton.release':
+        // #292 测试钩子：解除 HTML 嵌入的撤除冻结并立即撤除
+        this.skeletonHoldReleased = true
+        this.dismissSkeleton()
+        break
+      case '_test.skeleton.query':
+        // #292 测试钩子：主动回报一次骨架状态
+        this.reportSkeletonState()
         break
       case 'keybindings.snapshot':
       case 'keybindings.changed': {
@@ -3229,6 +3264,108 @@ export class WebviewSyncController {
     })
   }
 
+  // ---- #292 加载期骨架屏：收编与撤除（规格 docs/specs/skeleton-screen.md）----
+  // 空窗①由宿主内联装配覆盖（skeletonScreen.ts）；这里只承接空窗②——
+  // 挂载收编与撤除调度（首帧 + 扫光收束规则）。收编落点是 .vsidian-main
+  // （工具栏下方的覆盖层，top 按活跃视图容器实测偏移）：不进视图容器——
+  // 阅读虚拟化 setDocument 以 textContent='' 整容器清空子树，进容器会被
+  // init 首次渲染误清除。
+
+  /** 空窗②收编：初始 HTML 的骨架移入主编辑区，只盖内容区、与真实工具栏
+   *  共存（.vsidian-skeleton-host 提供定位包含块，top 取活跃视图容器相对
+   *  主区的偏移，适应 quickActions 展开等行高变化）。宿主 HTML 未含骨架
+   *  （设置页/旧产物）时跳过。收编后用户切模式：覆盖层与模式无关，撤除
+   *  计时照常走完。 */
+  private adoptSkeleton(): void {
+    const el = document.getElementById(SKELETON_ELEMENT_ID)
+    if (!(el instanceof HTMLElement) || !this.mainEl) {
+      return
+    }
+    const shownAt = (globalThis as Record<string, unknown>)[SKELETON_SHOWN_AT_GLOBAL]
+    this.skeletonShownAt = typeof shownAt === 'number' && Number.isFinite(shownAt)
+      ? shownAt
+      : performance.now()
+    this.skeletonContainer = this.viewMode === 'reading' ? 'reading' : 'live'
+    this.mainEl.classList.add('vsidian-skeleton-host')
+    // 覆盖层顶沿对齐活跃视图容器顶沿（工具栏/快速操作行之下）；jsdom 等
+    // 无布局环境矩形全零，退化为 top:0
+    const viewEl = this.skeletonContainer === 'reading' ? this.readingContainer : this.liveWrapper
+    if (viewEl) {
+      const hostTop = this.mainEl.getBoundingClientRect().top
+      const viewTop = viewEl.getBoundingClientRect().top
+      el.style.top = `${Math.max(0, viewTop - hostTop)}px`
+    }
+    this.mainEl.appendChild(el)
+    this.skeletonEl = el
+    this.reportSkeletonState()
+  }
+
+  /** 撤除调度：全文落地后双 rAF（readingProbe 同款）取就绪时刻，按
+   *  planSkeletonExit 定时移除。幂等；测试冻结期间只回报不撤除。 */
+  private scheduleSkeletonExit(): void {
+    if (!this.skeletonEl || this.skeletonExitScheduled) {
+      return
+    }
+    this.skeletonExitScheduled = true
+    scheduleFrame(() => scheduleFrame(() => {
+      if (!this.skeletonEl) {
+        return
+      }
+      if (this.skeletonHoldActive()) {
+        this.reportSkeletonState()
+        return
+      }
+      const readyAt = performance.now()
+      const reducedMotion = typeof window.matchMedia === 'function' &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      const plan = planSkeletonExit({
+        shownAt: this.skeletonShownAt ?? readyAt,
+        readyAt,
+        reducedMotion,
+      })
+      this.skeletonExitTimer = setTimeout(
+        () => this.dismissSkeleton(),
+        Math.max(0, plan.removeAt - performance.now()),
+      )
+    }))
+  }
+
+  /** 撤除骨架并还原主区定位包含块（容器布局回到骨架出现前的形态）。 */
+  private dismissSkeleton(): void {
+    if (this.skeletonExitTimer !== undefined) {
+      clearTimeout(this.skeletonExitTimer)
+      this.skeletonExitTimer = undefined
+    }
+    if (!this.skeletonEl) {
+      return
+    }
+    this.skeletonEl.remove()
+    this.skeletonEl = null
+    this.skeletonContainer = null
+    this.mainEl?.classList.remove('vsidian-skeleton-host')
+    this.reportSkeletonState()
+  }
+
+  /** 测试冻结在位判定：宿主 HTML 嵌入 hold 全局（仅 VSIDIAN_TEST_HOOKS
+   *  装配写入）且尚未收到 release。生产环境恒 false。 */
+  private skeletonHoldActive(): boolean {
+    return !this.skeletonHoldReleased &&
+      (globalThis as Record<string, unknown>)[SKELETON_HOLD_GLOBAL] === true
+  }
+
+  /** 状态回报（测试钩子）：仅在宿主嵌入 hold 全局时出站——生产零消息。 */
+  private reportSkeletonState(): void {
+    if ((globalThis as Record<string, unknown>)[SKELETON_HOLD_GLOBAL] !== true) {
+      return
+    }
+    this.bridge.postMessage({
+      kind: '_test.skeleton.report',
+      present: this.skeletonEl !== null,
+      container: this.skeletonContainer,
+      shownAt: this.skeletonShownAt,
+    })
+  }
+
   /** 全文同步（init / doc.resync）：组合中缓冲，否则立即重置。
    *  doc.resync 对暂停面板兼作恢复信号：重置文本并解除暂停（#4）。
    *  组合中的恢复（含暂停解除）延后到 flush。
@@ -3274,6 +3411,8 @@ export class WebviewSyncController {
     // #148：全文落地即权威基线（本地未落地编辑已被权威文本取代）——
     // 撤销意图此刻发出，撤销的是宿主栈上最后已完成的操作
     this.releasePendingHistory()
+    // #292：全文落地即读首帧就绪时刻，调度骨架按扫光收束规则撤除（幂等）
+    this.scheduleSkeletonExit()
   }
 
   /** 解除暂停（doc.resync / init 全文装载后调用）：状态全量对齐 */

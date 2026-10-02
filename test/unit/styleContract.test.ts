@@ -385,6 +385,7 @@ const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   outlinks: 2,
   'hover-preview': 2,
   'find-panel': 6,
+  loading: 2,
 }
 
 describe('styleContract 类目体系（#145）', () => {

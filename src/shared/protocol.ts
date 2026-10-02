@@ -55,6 +55,10 @@ export type HostToWebview =
   /** 性能探针（#5）：webview 测量输入延迟/长任务/滚动回收并回报 perf.report。
    *  探针编辑带 externalSync 注解，不产生写回（测量不污染宿主文档） */
   | { kind: 'perf.probe'; typingRounds: number; scrollRounds: number }
+  /** #292 骨架屏测试钩子（VSIDIAN_TEST_HOOKS=1 集成装配专用）：release
+   *  解除宿主 HTML 嵌入的撤除冻结并立即撤除；query 主动触发一次状态回报 */
+  | { kind: '_test.skeleton.release' }
+  | { kind: '_test.skeleton.query' }
   /** 模式切换指令（#6）：live=实时预览，reading=阅读，toggle=翻转当前。
    *  模式是 webview 视图状态：不写 TextDocument、不入撤销栈。#38 起切换
    *  入口迁移宿主标题栏三态命令与命令面板命令（宿主推导显式目标后经
@@ -972,6 +976,14 @@ export type WebviewToHost =
       /** 宿主不支持 PerformanceObserver('longtask') 时为 null */
       longTasks: { count: number; maxMs: number; totalMs: number } | null
       headingStats: { totalUpdates: number; lastUpdateScannedLines: number; fullBuildLines: number }
+    }
+  /** #292 骨架屏状态回报（测试钩子）：present 为骨架元素在场，container 为
+   *  挂载收编落点；仅在宿主嵌入 hold 全局（测试装配）时回报，生产零消息 */
+  | {
+      kind: '_test.skeleton.report'
+      present: boolean
+      container: 'live' | 'reading' | null
+      shownAt: number | null
     }
   /** CSS 片段快照拉取（#128）：编辑器面板 init 后与设置页 ready 后请求；
    *  宿主分别以 snippets.snapshot（编辑器，含 URI 清单）与 snippets.state
@@ -2552,6 +2564,11 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
   switch (v.kind) {
     case 'ready':
       return true
+    case '_test.skeleton.report':
+      // #292 骨架状态回报：测试钩子通道，仅校验字段类型
+      return typeof v.present === 'boolean' &&
+        (v.container === 'live' || v.container === 'reading' || v.container === null) &&
+        (v.shownAt === null || typeof v.shownAt === 'number')
     case 'keybindings.get':
       return true
     case 'keybindings.set':
@@ -2952,6 +2969,10 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     return false
   }
   switch (v.kind) {
+    case '_test.skeleton.release':
+    case '_test.skeleton.query':
+      // #292 骨架测试钩子：无字段的触发型消息
+      return true
     case 'diagram.export.result':
       return isPositiveInt(v.reqId) && typeof v.ok === 'boolean' &&
         (v.reason === undefined || v.reason === 'cancelled' || v.reason === 'invalid' || v.reason === 'writeFailed')

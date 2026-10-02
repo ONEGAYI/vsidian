@@ -32,6 +32,8 @@ const VIEW_TYPE = 'onegayi.vsidian.editor'
 const EXT_ID = 'onegayi.vsidian'
 const CMD = {
   sessionState: 'onegayi.vsidian._test.getSessionState',
+  // #292 骨架屏状态回报查询（hold 装配下 adopt/release 均出站回报）
+  skeletonState: 'onegayi.vsidian._test.getSkeletonState',
   injectMessage: 'onegayi.vsidian._test.injectWebviewMessage',
   postToPanel: 'onegayi.vsidian._test.postToPanel',
   viewState: 'onegayi.vsidian._test.requestViewState',
@@ -13213,5 +13215,33 @@ export const cases: Array<[string, () => Promise<void>]> = [
       await Promise.resolve(vscode.workspace.fs.writeFile(uri, Buffer.from(RENAME_REF_A_DOC_TEXT, 'utf8'))).catch(() => {})
       await new Promise((r) => setTimeout(r, 1400))
     }
+  }],
+
+  ['骨架屏：hold 装配下收编在场、release 后撤除（#292）', async () => {
+    // hold 门控（VSIDIAN_TEST_HOOKS=1 装配）下骨架在 init 后保持在场：
+    // 回报在 webview 挂载收编时即出站，轮询最近一份断言；release 走
+    // postToPanel 与生产消息同一入口。呈现几何与宽度断言在浏览器套件
+    // skeletonProbe（绘制层），此处钉宿主可见的生命周期与回报通道。
+    await openWithEditor('mode.md')
+    const held = await poll('骨架在场回报', async () => {
+      const report = await vscode.commands.executeCommand(
+        CMD.skeletonState, wsUri('mode.md')) as
+        | { present?: boolean; container?: string | null; shownAt?: number | null }
+        | undefined | null
+      return report && report.present === true ? report : undefined
+    })
+    assert(held.container === 'live', `默认模式收编落点应为 live，实际 ${held.container}`)
+    assert(typeof held.shownAt === 'number', '回报应含呈现时刻打点')
+    await vscode.commands.executeCommand(
+      CMD.postToPanel, wsUri('mode.md'), { kind: '_test.skeleton.release' })
+    const released = await poll('骨架撤除回报', async () => {
+      const report = await vscode.commands.executeCommand(
+        CMD.skeletonState, wsUri('mode.md')) as
+        | { present?: boolean; container?: string | null }
+        | undefined | null
+      return report && report.present === false ? report : undefined
+    })
+    assert(released.container === null, '撤除后收编落点应清空')
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors')
   }],
 ]
