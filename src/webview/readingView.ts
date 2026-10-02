@@ -141,10 +141,9 @@ export function createReadingBlockElement(block: ReadingBlock, text: string): HT
 export function renderReadingBlocks(
   container: HTMLElement,
   text: string,
-  opts?: { containerTableSource?: boolean },
 ): number {
   container.textContent = ''
-  const blocks = splitReadingBlocks(text, opts)
+  const blocks = splitReadingBlocks(text)
   for (const block of blocks) {
     container.appendChild(createReadingBlockElement(block, text))
   }

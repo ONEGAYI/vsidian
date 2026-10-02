@@ -82,9 +82,9 @@ export const zhCn: Record<MessageKey, string> = {
   // ---- setting.（设置项定义）----
   'setting.editorLineNumbers.title': '显示行号',
   'setting.editorLineNumbers.description': '在实时预览左侧留白带内显示源文件行号（阅读模式不显示）。',
-  /** #296 块内表格渲染：引用块/列表等容器内的表格是否网格化渲染 */
+  /** #296 块内表格渲染：引用块/列表等容器内的表格是否网格化渲染（仅实时预览） */
   'setting.experimentalTableRender.title': '块内表格渲染',
-  'setting.experimentalTableRender.description': '引用块、列表等容器内的表格渲染为表格（双模式一致）。关闭后容器内表格按源码文本呈现。',
+  'setting.experimentalTableRender.description': '在实时预览中将引用块、列表等容器内的表格渲染为可编辑网格，关闭后按源码文本呈现。阅读模式不受此设置影响，始终渲染表格。',
   'setting.readableLineWidth.title': '可读行宽',
   'setting.readableLineWidth.description': '实时预览与阅读模式正文列的最大宽度：0 表示铺满可用宽度；设为具体数值后正文按该宽度限宽，在主编辑区内居中，右侧大纲栏展开时自动避让收缩。',
   'setting.readableLineWidthFill': '铺满',

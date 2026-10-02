@@ -71,7 +71,7 @@
   - 块内表格右键未识别为表格右键——降级矩阵失效。根因：`shared/contextMenu.ts` 的 `TABLE_DELIMITER_RE` 不认行首容器前缀，引用表分隔行 `> |---|` 不匹配 → zone 判 normal、格式/段落/插入整簇不置灰。修复：分隔行判定先剥容器前缀（`parseLinePrefix` 同源于 `containerPrefixLen`）；引用/quote-list 组合容器与顶层表同矩阵。
   - 选中单元格后右键失焦选区——两条链路同时修：①Chrome contenteditable 右键 mousedown 默认把选区重定位到点击处，`contextMenuSelectionGuard`（domEventHandlers）在右键落入选区内**或活跃矩形蒙版的表格行区间内**时 preventDefault（蒙版态 CM6 选区折叠在锚格，需按蒙版行区间判；VSCode 同款语义，contextmenu 照常触发）；②右键菜单 `focusMenuDom` 夺焦触发 `tableRegionSelection.onBlur` 清矩形蒙版（用户「失焦选区」的字面机制）——onBlur 对 relatedTarget/activeElement 在 `.vsidian-context-menu`/`.vsidian-outline-menu` 内的夺焦豁免，菜单关闭还焦后蒙版保持。
   - **职能转移（用户决策）**：边界导航只做出入不承担引用层级控制；「移除引用块 / 增一层引用」等层级操作职能转移至表格专属右键菜单——已补进 #186 切片清单（本轮未实施菜单项本身）。
-- **设置侧栏「实验性功能」分组 + 「块内表格渲染」开关（用户指令）**：侧栏新增第三内置分组「实验性功能」（`experimental.*` 前缀定义，锥形瓶图标；#163「侧栏两组」契约随之修订），页内首个标题组「表格行为」（`experimental.table.*`），首项 `experimental.table.blockRender`（boolean 默认开）。关闭时：live 经 `tableContainerRenderFacet`（Compartment 热重配，`liveDecorationsField` 检测 facet 变化全量重建、gridPlans 缓存丢弃）对容器前缀行不网格化（回 #296 之前形态——引用行类照旧、管道源文可见）；reading 经 `splitReadingBlocks(text, { containerTableSource })` 把 blockquote/list 容器内表格无条件替换为源文 `<pre>`（与残缺回退同一通道，setting 缺省 true 行为与落地前一致）。设置页搜索分组、宿主快照默认值（`settingsService` 注册表驱动）、语言包双语同步接入。
+- **设置侧栏「实验性功能」分组 + 「块内表格渲染」开关（用户指令）**：侧栏新增第三内置分组「实验性功能」（`experimental.*` 前缀定义，锥形瓶图标；#163「侧栏两组」契约随之修订），页内首个标题组「表格行为」（`experimental.table.*`），首项 `experimental.table.blockRender`（boolean 默认开）。关闭时：live 经 `tableContainerRenderFacet`（Compartment 热重配，`liveDecorationsField` 检测 facet 变化全量重建、gridPlans 缓存丢弃）对容器前缀行不网格化（回 #296 之前形态——引用行类照旧、管道源文可见）。三轮落地时 reading 曾同步回退源文；**六轮用户决策改为设置只管 live**——reading 原行为就是 markdown-it 渲染且无风险，containerTableSource 通道整体拆除（残缺回退的 quoteTableRowsDegraded 判定不受影响），设置描述文案同步改为「仅实时预览」。设置页搜索分组、宿主快照默认值（`settingsService` 注册表驱动）、语言包双语同步接入。
 - 验证：jsdom 先红后绿（前缀端点 2 + zone 2 + 保选区 1 + 蒙版豁免 1 + 设置渲染 2 + 默认快照 1 + 降级 3 + facet 2）；浏览器 `blockquoteTablePaint` 增补「拖选前缀保持隐藏与右键保选区」场景、`settingsPage` 增补实验性分组绘制层断言（开关可见/默认开/标题可见）；全量单测 5017、compile、样式契约 8 项、全量浏览器 136.55s 全绿。
 
 ## 四轮真机反馈修复（拖拽移动后前缀显形 / undo 同款，2026-10-02 第六轮）
@@ -81,6 +81,10 @@
 - **移动落点（缺陷）**：`runTableRowMove`/`runTableColumnMove` 的 dispatch 不带 selection。行移动的 change 含前缀整行替换，格内光标映到行首（前缀区左端）；列移动的 change 从前缀右端起替换，光标映到 `lineFrom + prefixLen`（前缀区闭区间右端）——两端都命中三轮引入的「端点触及显形」谓词，前缀显形、网格破裂。修复：两个 planner（`planTableRowMove`/`planTableColumnMove`）增可选 `cursor` 参数并返回 `selection`——**光标随原内容搬移**（行移动：目标物理行行首 + 原行内偏移，行文本等长搬移；列移动：原格内容跟随列变换到新列，保留内容内偏移并 clamp），光标不在内容行上（表外/分隔行）不给 selection、维持默认映射（表外位置不受行内替换影响）。调用方 dispatch 时带上；顶层表格同样受益（此前光标映到行首隐藏管道，视觉无感但位置语义差）。
 - **撤销落点（同根缺陷）**：undo 反推的整行替换经 `dispatchExternalChanges` 的 `selection.map(ChangeSet)` 映射，格内容里的好光标同样被归到区间左端（前缀端点）。修复：外部变更应用后用**变更后 state** 的网格信息把主光标钳回最近格内容（`clampExternalCursor`——落前缀/管道/格缘空白时钳到最近格 `contentFrom`/`contentTo`，已在格内容或非网格行返回不动），selection-only 补事务与变更事务同步连发、浏览器只渲染最终态。口径边界：只处理折叠主光标；**用户主动定位**（本地选区事务）不经过该通道，「点击前缀编辑引用层级」的显形语义不受影响。
 - 回归钉法：jsdom 三例（列交换光标跟随原格内容且不在前缀闭区间、行移动同款、undo 后不在前缀闭区间——全链路走 `setupLinked` 宿主撤销通道）；浏览器 `blockquoteTablePaint` 增补「拖拽交换列后前缀保持隐藏」场景（真抓手 pointer 拖拽：列 0 把手拖到列 1 右半，断言交换生效 + 表格行可见文本不含 `>` + 光标留在行内容区）。已知边界：光标在分隔行上发起移动时维持默认映射（分隔行无格内容可钳，用户不会在分隔行编辑后再拖把手，真机有反馈再议）。
+
+## 五轮真机反馈修订（「块内表格渲染」只管 live，2026-10-02 第七轮）
+
+用户反馈：该开关只应影响 live——reading 原行为就是 markdown-it 渲染且无风险。拆除 reading 侧接线：`splitReadingBlocks` / `renderReadingBlocks` / `readingVirtualView.setDocument` 的 `containerTableSource` 通道整体删除（`ReadingSplitOptions` 移除，`applyTableBlockRenderSetting` 只热重配 live facet、不再重载 reading 全文）；语言包描述改「仅实时预览，阅读模式始终渲染」。残缺回退（`quoteTableRowsDegraded`）是独立判定不受影响。回归：readingTable 新组 2 例经类型擦除传入关闭值、断言运行时被忽略（通道若被重建即红）。
 
 ## 验证与完成条件
 

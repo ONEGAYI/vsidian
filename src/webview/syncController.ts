@@ -1042,8 +1042,8 @@ export class WebviewSyncController {
   private readonly lineNumbersCompartment = new Compartment()
 
   // ---- 块内表格渲染状态（#296 三轮）----
-  /** 容器内表格网格化开关生效态（默认开）；live 经 facet 热重配、
-   *  reading 经 setDocument 的 containerTableSource 通道重建 */
+  /** 容器内表格网格化开关生效态（默认开）；live 经 facet 热重配
+   *  （#296 六轮：设置只管 live，reading 始终 markdown-it 原生渲染） */
   private tableBlockRenderOn = TABLE_BLOCK_RENDER_DEFAULT
   private readonly tableRenderCompartment = new Compartment()
 
@@ -9004,9 +9004,8 @@ export class WebviewSyncController {
    * 应用「块内表格渲染」设置（#296 三轮；settings.snapshot / settings.changed
    * 到达时）：缺键回定义默认（向后兼容）、非布尔忽略（与行号同口径）。
    * live 侧经 Compartment 热重配 tableContainerRenderFacet——装饰 StateField
-   * 检测 facet 变化全量重建；reading 侧经 readingView.setDocument 的
-   * containerTableSource 通道重载全文（隐藏容器重载无视觉影响，切回
-   * 阅读态即按新值呈现）
+   * 检测 facet 变化全量重建。#296 六轮用户决策：设置只管 live 网格化，
+   * reading 不受影响（markdown-it 原生渲染即原行为，无风险）
    */
   private applyTableBlockRenderSetting(): void {
     const raw = this.settings?.[TABLE_BLOCK_RENDER_KEY]
@@ -9018,7 +9017,6 @@ export class WebviewSyncController {
     this.view?.dispatch({
       effects: this.tableRenderCompartment.reconfigure(tableContainerRenderFacet.of(on)),
     })
-    this.readingView?.setDocument(this.view?.state.doc.toString() ?? '', { containerTableSource: on })
   }
 
   /**

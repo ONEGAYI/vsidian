@@ -98,11 +98,11 @@ export const en = {
   // ---- setting.（设置项定义 title/description，经 titleKey/descriptionKey 取词）----
   'setting.editorLineNumbers.title': 'Show line numbers',
   'setting.editorLineNumbers.description': 'Show source file line numbers in the left gutter of the live preview (not shown in reading view).',
-  /** #296 tables inside block containers: grid rendering for tables nested in
-   *  blockquotes/lists and other containers */
+  /** #296 tables inside block containers: editable grid rendering for tables
+   *  nested in blockquotes/lists and other containers (live preview only) */
   'setting.experimentalTableRender.title': 'Render tables inside containers',
   'setting.experimentalTableRender.description':
-    'Render tables inside blockquotes, lists and other containers as tables (both views). Turn off to show their raw source text instead.',
+    'Render tables inside blockquotes, lists and other containers as an editable grid in the live preview; turn off to show their raw source text instead. The reading view always renders tables and is not affected by this setting.',
   'setting.readableLineWidth.title': 'Readable line width',
   'setting.readableLineWidth.description': 'Maximum width of the content column in the live preview and reading view: 0 fills the available width; a specific value caps the column, which then centers in the editor area and yields to the outline sidebar when space is tight.',
   'setting.readableLineWidthFill': 'Fill',

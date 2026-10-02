@@ -227,32 +227,32 @@ describe('引用表格前缀残缺的 reading 回退（#296 二轮）', () => {
   })
 })
 
-describe('「块内表格渲染」设置：reading 容器表源文回退（#296 三轮）', () => {
-  it('设置关闭：完好引用表也按源文呈现（与 live 退普通行同口径）', () => {
+describe('「块内表格渲染」设置不影响 reading（#296 六轮用户决策）', () => {
+  // 用户口径：reading 模式原行为就是渲染且无风险，设置只管 live 网格化。
+  // 通道已拆除（splitReadingBlocks 单参）——经类型擦除传入关闭值，运行时
+  // 必须被忽略；若有人重建 containerTableSource 通道本组转红
+  const splitWithLegacyOpt = splitReadingBlocks as unknown as (
+    text: string, opts?: { containerTableSource?: boolean },
+  ) => ReturnType<typeof splitReadingBlocks>
+
+  it('即使传入关闭值，引用内表格仍按 markdown-it 原生渲染', () => {
     const text = '前文\n\n> | 甲 | 乙 |\n> | --- | --- |\n> | 丙 | 丁 |\n\n后文'
-    const quote = splitReadingBlocks(text, { containerTableSource: false }).find((b) => b.kind === 'blockquote')
+    const quote = splitWithLegacyOpt(text, { containerTableSource: false })
+      .find((b) => b.kind === 'blockquote')
     expect(quote).toBeDefined()
     const el = createReadingBlockElement(quote!, text)
-    expect(el.querySelectorAll('th, td')).toHaveLength(0)
-    expect(el.textContent).toContain('| 甲 | 乙 |')
+    expect(el.querySelectorAll('th')).toHaveLength(2)
+    expect(el.textContent).not.toContain('| 甲 | 乙 |')
   })
 
-  it('设置关闭：列表内表格同样回退源文；顶层表不受影响', () => {
+  it('列表内表格同样始终渲染，顶层表不受影响', () => {
     const text = '前文\n\n- | 甲 | 乙 |\n  | --- | --- |\n  | 丙 | 丁 |\n\n| 顶 | 层 |\n| --- | --- |\n| a | b |\n\n后文'
-    const blocks = splitReadingBlocks(text, { containerTableSource: false })
+    const blocks = splitWithLegacyOpt(text, { containerTableSource: false })
     const list = blocks.find((b) => b.kind === 'list')
     expect(list).toBeDefined()
-    const listEl = createReadingBlockElement(list!, text)
-    expect(listEl.querySelectorAll('th, td')).toHaveLength(0)
-    expect(listEl.textContent).toContain('| 甲 | 乙 |')
+    expect(createReadingBlockElement(list!, text).querySelectorAll('th')).toHaveLength(2)
     const top = blocks.find((b) => b.kind === 'table')
     expect(top).toBeDefined()
     expect(createReadingBlockElement(top!, text).querySelectorAll('td')).toHaveLength(2)
-  })
-
-  it('设置缺省（true）：容器表照常渲染，行为与设置项落地前一致', () => {
-    const text = '前文\n\n> | 甲 | 乙 |\n> | --- | --- |\n> | 丙 | 丁 |\n\n后文'
-    const quote = splitReadingBlocks(text).find((b) => b.kind === 'blockquote')
-    expect(createReadingBlockElement(quote!, text).querySelectorAll('th')).toHaveLength(2)
   })
 })
