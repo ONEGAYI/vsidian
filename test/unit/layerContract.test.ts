@@ -26,12 +26,26 @@ function walk(dir: string, out: string[] = []): string[] {
 
 /** 说明符提取：静态 import/export-from 的 `from '...'`、副作用
  *  `import '...'` 与动态 `import('...')` 三形态；`from` 前限定行首/
- *  空白/}（多行 import 收尾），避免正文英文句子里的字面量误报。 */
+ *  空白/}（多行 import 收尾），避免正文英文句子里的字面量误报。
+ *  带 g 的 matchAll 全量命中：同一行写多条语句时（`import a from
+ *  './ok'; import b from '../webview/b'`）不漏检第二个。 */
 const SPEC_PATTERNS: readonly RegExp[] = [
-  /(?:^|[\s;}])from\s+['"]([^'"]+)['"]/,
-  /(?:^|[\s;])import\s+['"]([^'"]+)['"]/,
-  /import\s*\(\s*['"]([^'"]+)['"]\s*\)/,
+  /(?:^|[\s;}])from\s+['"]([^'"]+)['"]/g,
+  /(?:^|[\s;])import\s+['"]([^'"]+)['"]/g,
+  /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
 ]
+
+/** 单行内全部模块说明符（三种形态、按出现序；matchAll 自带 g 语义，
+ *  每次调用从独立克隆迭代，无 lastIndex 跨行污染） */
+function specifiersInLine(line: string): string[] {
+  const specs: string[] = []
+  for (const pattern of SPEC_PATTERNS) {
+    for (const match of line.matchAll(pattern)) {
+      if (match[1]) specs.push(match[1])
+    }
+  }
+  return specs
+}
 
 function isImplPath(specifier: string, file: string): boolean {
   if (!specifier.startsWith('./') && !specifier.startsWith('../')) return false
@@ -50,13 +64,9 @@ describe('shared 层分层契约（#266：不依赖实现层）', () => {
     for (const file of files) {
       const lines = readFileSync(file, 'utf-8').split('\n')
       lines.forEach((line, idx) => {
-        for (const pattern of SPEC_PATTERNS) {
-          const match = pattern.exec(line)
-          const specifier = match?.[1]
-          if (specifier && isImplPath(specifier, file)) {
-            violations.push(`${file}:${idx + 1} [${specifier}] ${line.trim()}`)
-            break
-          }
+        const violation = specifiersInLine(line).find((spec) => isImplPath(spec, file))
+        if (violation) {
+          violations.push(`${file}:${idx + 1} [${violation}] ${line.trim()}`)
         }
       })
     }
@@ -66,5 +76,13 @@ describe('shared 层分层契约（#266：不依赖实现层）', () => {
         '公共依赖应下沉到 src/shared（见 docs/specs/ 与 #266）:\n' +
         violations.join('\n'),
     ).toEqual([])
+  })
+
+  it('同一行多条语句时逐说明符检全（判别力：第二个违规不因只检首个而漏网）', () => {
+    const file = join(SHARED_ROOT, 'probe.ts')
+    const line = "import { ok } from './protocol'; import { bad } from '../webview/probe'"
+    expect(specifiersInLine(line)).toEqual(['./protocol', '../webview/probe'])
+    expect(specifiersInLine(line).filter((spec) => isImplPath(spec, file)))
+      .toEqual(['../webview/probe'])
   })
 })
