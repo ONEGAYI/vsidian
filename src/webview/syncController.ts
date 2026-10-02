@@ -1445,8 +1445,10 @@ export class WebviewSyncController {
       }
       // #299 总开关开 → 浮层将现（原路径，门控在 hoverPopup 入口）；
       // 总开关关 → 浮层不将现，跳转目标提示候选（hoverPopupSpecOfAnchor
-      // 同一提取口径：外部 scheme 与非法目标 null 不提示）
-      this.enterHoverOrTip(anchor, hoverPopupSpecOfAnchor(anchor))
+      // 同一提取口径：外部 scheme 与非法目标 null 不提示）；spec 经
+      // thunk 统一形态（DOM 属性提取廉价，求值时机由 enterHoverOrTip
+      // 的两路由决定）
+      this.enterHoverOrTip(anchor, () => hoverPopupSpecOfAnchor(anchor))
     })
     this.readingContainer.addEventListener('mouseout', (event) => {
       const anchor = (event.target as HTMLElement | null)?.closest?.('a[href]')
@@ -1605,12 +1607,15 @@ export class WebviewSyncController {
       // #299 浮层将现判定并入总开关：总开关关（无论修饰位）或触发条件
       // 未满足（直接悬停关且无 Ctrl）都不开浮层——该悬停成为跳转目标
       // 提示候选（判定族与浮层入口同源，spec null 不提示）。二路由经
-      // enterHoverOrTip 单点分派（非链接装饰/无视图零操作）
+      // enterHoverOrTip 单点分派（非链接装饰/无视图零操作）。spec 以
+      // thunk 传入（review-loops 第 1 轮懒化）：浮层将现路径立即求值，
+      // tip 路径延迟到目标提示的稳定悬停计时到期——默认组合下划过链接
+      // 零源码位置解析成本
       const view = this.view
       if (hoverAnchor && view) {
         this.enterHoverOrTip(
           hoverAnchor,
-          this.liveLinkSpecOfAnchor(view, hoverAnchor),
+          () => this.liveLinkSpecOfAnchor(view, hoverAnchor),
           this.hoverPreviewEnabled() && (this.liveHoverDirect() || withMod),
         )
       }
@@ -5346,24 +5351,32 @@ export class WebviewSyncController {
     return this.settings?.[HOVER_TARGET_TIP_KEY] !== false
   }
 
-  /** 悬停二路由收拢（审查修复）：浮层将现 → 浮层入口（spec 随进——面板
-   *  /Live 目标不在正文 DOM，浮层无法自提取；Reading 传同一提取器的结果，
-   *  与浮层延迟到期自提取等价）；不将现 → 跳转目标提示候选（spec null
-   *  不提示）。将现判定缺省为总开关（hover.enabled）；Live 因修饰位参与
-   *  判定由调用侧传入。阅读 mouseover / Live mouseover / 反链 / 出链四
-   *  入口同一形状单点维护 */
+  /** 悬停二路由收拢（审查修复；review-loops 第 1 轮懒化重构）：spec 以
+   *  提供者（thunk）传入——浮层将现路径立即求值，null 直接 return 不进
+   *  浮层入口：与 #221 旧版「修饰位足但 spec null 不开浮层」结构等价，
+   *  不再依赖浮层开延迟到期后的 DOM 自提取兜底（旧接线把 null 透传为
+   *  undefined 进浮层入口，其等价性靠 Live 装饰无 href、自提取恒 null
+   *  的巧合成立）；不将现路径把 thunk 原样下传目标提示，求值延迟到其
+   *  稳定悬停计时到期回调内——默认组合（总开关开、liveDirect 关、无
+   *  Ctrl）下划过链接（计时到期前离开）零解析成本。面板目标不在正文
+   *  DOM，浮层无法自提取，spec 必须随进；Reading 传同一提取器。将现
+   *  判定缺省为总开关（hover.enabled）；Live 因修饰位参与判定由调用侧
+   *  传入。阅读 mouseover / Live mouseover / 反链 / 出链四入口同一形状
+   *  单点维护 */
   private enterHoverOrTip(
     anchor: HTMLElement,
-    spec: HoverPopupTargetSpec | null,
+    specOf: () => HoverPopupTargetSpec | null,
     popupImminent = this.hoverPreviewEnabled(),
   ): void {
     if (popupImminent) {
-      hoverPreviewAnchorEnter(anchor, spec ?? undefined)
+      const spec = specOf()
+      if (!spec) {
+        return
+      }
+      hoverPreviewAnchorEnter(anchor, spec)
       return
     }
-    if (spec) {
-      targetTipAnchorEnter(anchor, spec)
-    }
+    targetTipAnchorEnter(anchor, specOf)
   }
 
   /** 离开悬停目标（四入口 mouseout 共用）：浮层与目标提示两通道成对
@@ -5500,7 +5513,8 @@ export class WebviewSyncController {
       openAction: this.backlinkOpenAction(payload),
     }
     // #299 总开关开 → 浮层将现（面板恒直接悬停）；关 → 目标提示候选
-    this.enterHoverOrTip(item, spec)
+    //（spec 已就地构造，thunk 统一形态——enterHoverOrTip 两路由单点）
+    this.enterHoverOrTip(item, () => spec)
   }
 
   /** #217 验收跟进：面板形态浮层 header 跳转——与条目点击同通道同载荷
@@ -5568,8 +5582,9 @@ export class WebviewSyncController {
       openAction: this.outlinkOpenAction(payload),
     }
     // #299 总开关开 → 浮层将现；关 → 目标提示候选（断链条目空串 fsPath
-    // 由宿主轻量解析回失败，不出提示——与浮层的 not-found 分态分工不同）
-    this.enterHoverOrTip(item, spec)
+    // 由宿主轻量解析回失败，不出提示——与浮层的 not-found 分态分工不同；
+    // spec 已就地构造，thunk 统一形态）
+    this.enterHoverOrTip(item, () => spec)
   }
 
   /** #221 键盘命令「预览当前链接」：手动打开浮层且焦点进入（无目标静默

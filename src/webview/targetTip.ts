@@ -45,10 +45,22 @@ type CachedTarget = { relPath: string; anchor: string } | null
 
 interface PendingTip {
   anchor: HTMLElement
-  spec: HoverPopupTargetSpec
+  /** 目标提供者（review-loops 第 1 轮懒化）：Live 入口的源码位置解析
+   *  （posAtDOM + 判定族扫描）昂贵，求值延迟到计时到期回调内——划过
+   *  （300ms 内离开取消计时）零解析成本；面板/阅读入口的 DOM 属性提取
+   *  廉价，统一走同一形态。求值 null（目标不合法/锚点已脱树归约失败）
+   *  = 不出提示：原调用侧 if (spec) 过滤内移，判定延迟不改变结果 */
+  specOf: () => HoverPopupTargetSpec | null
+  /** specOf 到期求值结果（求值即落位；inflight 登记后恒非 null——
+   *  notifyTargetTipResolved 的缓存键与此同源） */
+  spec: HoverPopupTargetSpec | null
   timer: number | undefined
   /** 已发出的解析请求代次（回包配对；未发出为 undefined） */
   reqId: number | undefined
+  /** enter 批次捕获的会话文档 URI：cacheGet（计时到期）与 cachePut
+   *  （回包到达）同用此值——对称捕获，回包时不再重读会话，跨文档
+   *  切换不错挂缓存 */
+  docUri: string
 }
 
 let context: TargetTipContext | null = null
@@ -203,9 +215,11 @@ export function closeTargetTipIfAnchorWithin(scope: ParentNode): void {
 }
 
 /** 进入悬停目标（调用侧已判定「浮层不将现」：总开关关、Live 修饰位
- *  不足或总开关关时的面板/阅读路径）。spec 与浮层入口同源
- *  （HoverPopupTargetSpec——target/linkHref/directFsPath/directAnchor） */
-export function targetTipAnchorEnter(anchor: HTMLElement, spec: HoverPopupTargetSpec): void {
+ *  不足或总开关关时的面板/阅读路径）。spec 以提供者传入（Live 热路径
+ *  懒求值——求值时机在计时到期回调内，见 PendingTip.specOf）；提供者
+ *  与浮层入口同源（HoverPopupTargetSpec——target/linkHref/directFsPath/
+ *  directAnchor） */
+export function targetTipAnchorEnter(anchor: HTMLElement, specOf: () => HoverPopupTargetSpec | null): void {
   if (context?.enabled?.() === false) {
     return
   }
@@ -214,13 +228,27 @@ export function targetTipAnchorEnter(anchor: HTMLElement, spec: HoverPopupTarget
     return
   }
   const sessionId = session.sessionId
-  const docUri = session.docUri
-  if (pending !== null && pending.anchor === anchor && pending.reqId === undefined) {
-    return // 同锚点待开：保留首次进入起算的计时（浮层入口同款语义）
+  // 同锚重入幂等（review-loops 第 1 轮修复，对齐浮层入口「修 6」语义）：
+  // 其一，已显示同锚保活——hide 后重建须经 300ms 计时 + 解析往返，在场
+  // 提示会先消失再复现（闪烁空窗），空窗内离开则不再显示；其二，在途
+  // 同锚（计时期或请求已发，不论 reqId）保留首次起算的计时与在途代次
+  // ——重入重发会作废在途请求徒增一次往返，回包前 UI 反馈空窗
+  if (shown !== null && shown.anchor === anchor) {
+    return
+  }
+  if (pending !== null && pending.anchor === anchor) {
+    return
   }
   cancelPending()
   hide() // 换锚点：在场提示先行收起
-  const state: PendingTip = { anchor, spec, timer: undefined, reqId: undefined }
+  const state: PendingTip = {
+    anchor,
+    specOf,
+    spec: null,
+    timer: undefined,
+    reqId: undefined,
+    docUri: session.docUri,
+  }
   pending = state
   const delay = resolveShowDelay(ensureContainer())
   state.timer = window.setTimeout(() => {
@@ -228,7 +256,14 @@ export function targetTipAnchorEnter(anchor: HTMLElement, spec: HoverPopupTarget
     if (pending !== state) {
       return
     }
-    const cached = cacheGet(cacheKeyOf(docUri, spec))
+    // 懒求值（计时到期才解析）：null = 目标不合法或锚点已脱树（Live
+    // 判定族对脱树锚点归约失败），不出提示不请求
+    const spec = (state.spec = state.specOf())
+    if (!spec) {
+      pending = null
+      return
+    }
+    const cached = cacheGet(cacheKeyOf(state.docUri, spec))
     if (cached.hit && cached.value !== undefined) {
       if (cached.value !== null) {
         show(anchor, cached.value.relPath, cached.value.anchor)
@@ -244,7 +279,7 @@ export function targetTipAnchorEnter(anchor: HTMLElement, spec: HoverPopupTarget
     context!.send({
       kind: 'hover.target.resolve',
       sessionId,
-      docUri,
+      docUri: state.docUri,
       reqId,
       ...(spec.linkHref !== undefined
         ? { linkHref: spec.linkHref }
@@ -285,12 +320,15 @@ export function notifyTargetTipResolved(message: TargetTipResolved): void {
     return
   }
   inflight.delete(message.reqId)
-  const docUri = context?.session().docUri
-  if (!docUri) {
-    return
+  const spec = state.spec
+  if (!spec) {
+    return // 不可达（inflight 只在求值落位后登记）：防御性早退
   }
+  // 缓存键与 cacheGet 对称（review-loops 第 1 轮修复）：同用 pending 状态
+  // 内 enter 批次捕获的 docUri——回包时不再重读会话，跨文档切换（切
+  // 文档/rename）不把回包错挂到新文档的键上
   cachePut(
-    cacheKeyOf(docUri, state.spec),
+    cacheKeyOf(state.docUri, spec),
     message.ok ? { relPath: message.relPath, anchor: message.anchor ?? '' } : null,
   )
   if (pending === state) {

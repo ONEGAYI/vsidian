@@ -259,19 +259,6 @@ export async function readHoverMdLinkTarget(
 }
 
 /**
- * 读取面板条目的直接目标（#221 反链/出链悬停）：目标身份是宿主快照携带
- * 的绝对 fsPath（± 锚点），**不走 target/linkHref 文本解析与根内路径探测**
- * （解析端口零调用——条目身份在快照生成时已由宿主解析定局）。
- *
- * - 无锚点 / 空串锚点 → 全文（scope=full；反链条目与无锚点出链条目）；
- * - 锚点语义与链接形态无关（`^id` 前缀 = 块引用，否则标题章节——与
- *   OutlinkItemPayload.anchor 同口径，复用 anchorSpecOfFragment 归一）；
- * - 空串 fsPath = 断链出链条目 → not-found 分态（条目仍可悬停显示失效
- *   占位，而非静默不发）。
- *
- * 全程无副作用：不 openWith、不定位、不提示、不写文档。
- */
-/**
  * #299 跳转目标提示轻量解析：把悬停目标解析为「所属根内相对路径 + 源码
  * 形态锚点」供提示显示。**只解析不读正文**——路径解析与存在性探测
  * （stat 级，经 resolveVaultFile 端口）之外零 IO：不 openTextDocument、
@@ -364,6 +351,19 @@ export async function resolveHoverTargetTip(
   return { ok: false }
 }
 
+/**
+ * 读取面板条目的直接目标（#221 反链/出链悬停）：目标身份是宿主快照携带
+ * 的绝对 fsPath（± 锚点），**不走 target/linkHref 文本解析与根内路径探测**
+ * （解析端口零调用——条目身份在快照生成时已由宿主解析定局）。
+ *
+ * - 无锚点 / 空串锚点 → 全文（scope=full；反链条目与无锚点出链条目）；
+ * - 锚点语义与链接形态无关（`^id` 前缀 = 块引用，否则标题章节——与
+ *   OutlinkItemPayload.anchor 同口径，复用 anchorSpecOfFragment 归一）；
+ * - 空串 fsPath = 断链出链条目 → not-found 分态（条目仍可悬停显示失效
+ *   占位，而非静默不发）。
+ *
+ * 全程无副作用：不 openWith、不定位、不提示、不写文档。
+ */
 export async function readHoverDirectTarget(
   direct: { fsPath: string; anchor?: string },
   ctx: HoverDocAccessContext,

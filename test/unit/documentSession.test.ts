@@ -3,7 +3,7 @@
 // 拒绝）、自家编辑确认（edit.ack）与外部变更广播（doc.changed）。
 // 权威文档通过 HostDocumentPort 注入（vscode 层实现），此处用假文档驱动。
 import { describe, it, expect } from 'vitest'
-import { DocumentSession, type HostDocumentPort, type SessionNotice } from '../../src/host/documentSession'
+import { DocumentSession, type HostDocumentPort, type PanelPort, type SessionNotice } from '../../src/host/documentSession'
 import { HOVER_REFRESH_DEFAULTS } from '../../src/shared/hoverRefresh'
 import type { HostToWebview, SerChange, WebviewToHost } from '../../src/shared/protocol'
 
@@ -2460,5 +2460,111 @@ describe('#224 P2-2/P3-2：来源集合查询面与重读触达', () => {
     expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\t01.md')).toBe(true)
     expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\t02.md')).toBe(false)
     expect(t.s.session.hasHoverSource(t.id, 'D:\\notes\\t99.md')).toBe(true)
+  })
+})
+
+describe('#299 hover.target.resolve：会话守卫与结果回包路由', () => {
+  /** 装配一个带可观测解析端口的面板（端口可整体缺省——b 例） */
+  const attach = (
+    s: ReturnType<typeof setup>,
+    port?: { resolveHoverTarget?: PanelPort['resolveHoverTarget'] },
+  ) => {
+    const out: HostToWebview[] = []
+    const id = s.session.attachPanel({
+      send: (m) => out.push(m),
+      ...(port?.resolveHoverTarget ? { resolveHoverTarget: port.resolveHoverTarget } : {}),
+    })
+    return { out, id }
+  }
+
+  it('未 ready 或 docUri 不匹配：静默丢弃——无回包且解析端口零调用', async () => {
+    const s = setup()
+    let portCalls = 0
+    const { out, id } = attach(s, {
+      resolveHoverTarget: (_payload, report) => {
+        portCalls++
+        report({ ok: true, relPath: 'b.md', anchor: '' })
+      },
+    })
+    // 未 ready：不发 ready 直接解析请求
+    await s.session.handleWebviewMessage(
+      { kind: 'hover.target.resolve', sessionId: id, docUri: DOC_URI, reqId: 1, target: 'B' }, id)
+    expect(portCalls).toBe(0)
+    expect(out).toEqual([])
+    // ready 后 docUri 不匹配：同样静默
+    await s.session.handleWebviewMessage({ kind: 'ready' }, id)
+    await s.session.handleWebviewMessage(
+      { kind: 'hover.target.resolve', sessionId: id, docUri: 'file:///other/x.md', reqId: 2, target: 'B' }, id)
+    expect(portCalls).toBe(0)
+    expect(out.filter((m) => m.kind === 'hover.target.resolved')).toEqual([])
+    s.session.dispose()
+  })
+
+  it('解析端口缺失：回 ok:false 配对 reqId——防 webview inflight 悬挂的唯一保障', async () => {
+    const s = setup()
+    const { out, id } = attach(s) // 不注入 resolveHoverTarget
+    await s.session.handleWebviewMessage({ kind: 'ready' }, id)
+    await s.session.handleWebviewMessage(
+      { kind: 'hover.target.resolve', sessionId: id, docUri: DOC_URI, reqId: 7, target: 'B' }, id)
+    // 旧宿主/未注入端口的降级面：请求方（targetTip inflight 登记）必须
+    // 收到否定回包，否则解析请求永久悬挂（无超时重发机制）
+    expect(out.filter((m) => m.kind === 'hover.target.resolved')).toEqual([
+      { kind: 'hover.target.resolved', reqId: 7, ok: false },
+    ])
+    s.session.dispose()
+  })
+
+  it('解析回调到达前会话已 dispose 或面板已注销：结果丢弃不回发', async () => {
+    const s = setup()
+    const reports: Array<(result: { ok: true; relPath: string; anchor?: string }) => void> = []
+    const { out, id } = attach(s, {
+      resolveHoverTarget: (_payload, report) => {
+        reports.push(report as typeof reports[number])
+      },
+    })
+    await s.session.handleWebviewMessage({ kind: 'ready' }, id)
+    // 在途请求 1：回调持有（模拟解析进行中），随后整会话销毁
+    await s.session.handleWebviewMessage(
+      { kind: 'hover.target.resolve', sessionId: id, docUri: DOC_URI, reqId: 1, target: 'B' }, id)
+    expect(reports.length).toBe(1)
+    s.session.dispose()
+    reports[0]({ ok: true, relPath: 'b.md', anchor: '' })
+    expect(out.filter((m) => m.kind === 'hover.target.resolved')).toEqual([])
+    // 在途请求 2：新会话上面板注销（detach）后回调到达——同守卫丢弃
+    const s2 = setup()
+    const reports2: Array<(result: { ok: true; relPath: string; anchor?: string }) => void> = []
+    const p2 = attach(s2, {
+      resolveHoverTarget: (_payload, report) => {
+        reports2.push(report as typeof reports2[number])
+      },
+    })
+    await s2.session.handleWebviewMessage({ kind: 'ready' }, p2.id)
+    await s2.session.handleWebviewMessage(
+      { kind: 'hover.target.resolve', sessionId: p2.id, docUri: DOC_URI, reqId: 2, target: 'B' }, p2.id)
+    s2.session.detachPanel(p2.id)
+    reports2[0]({ ok: true, relPath: 'b.md' })
+    expect(p2.out.filter((m) => m.kind === 'hover.target.resolved')).toEqual([])
+    s2.session.dispose()
+  })
+
+  it('端口解析成功：结果回发来源面板（relPath + 源码形态锚点，reqId 配对）', async () => {
+    const s = setup()
+    const { out, id } = attach(s, {
+      resolveHoverTarget: (payload, report) => {
+        report(payload.target === 'B'
+          ? { ok: true, relPath: 'sub/b.md', anchor: '#标题' }
+          : { ok: false })
+      },
+    })
+    await s.session.handleWebviewMessage({ kind: 'ready' }, id)
+    await s.session.handleWebviewMessage(
+      { kind: 'hover.target.resolve', sessionId: id, docUri: DOC_URI, reqId: 3, target: 'B' }, id)
+    await s.session.handleWebviewMessage(
+      { kind: 'hover.target.resolve', sessionId: id, docUri: DOC_URI, reqId: 4, target: '坏' }, id)
+    expect(out.filter((m) => m.kind === 'hover.target.resolved')).toEqual([
+      { kind: 'hover.target.resolved', reqId: 3, ok: true, relPath: 'sub/b.md', anchor: '#标题' },
+      { kind: 'hover.target.resolved', reqId: 4, ok: false },
+    ])
+    s.session.dispose()
   })
 })
