@@ -144,6 +144,8 @@ export class VirtualReadingView {
   private pendingFrame = false
   private skipStabilizeOnce = false
   private cancelFrame: (() => void) | null = null
+  /** 延迟定位校准只属于发起它的那次定位；top 记录本视图最后写入的位置。 */
+  private locateSnap: { top: number } | null = null
   private disposed = false
   /** #10 图片生命周期钩子（构造注入） */
   private hooks: VirtualReadingViewOptions
@@ -190,6 +192,7 @@ export class VirtualReadingView {
     parsedNow?: boolean
   }): void {
     if (this.disposed) return
+    this.locateSnap = null
     this.findSource.hide()
     if (opts?.parsedNow !== false) this.parseCount += 1
     this.text = text
@@ -255,6 +258,7 @@ export class VirtualReadingView {
     this.onDiagnostic?.('reading.update', { disposed: this.disposed, blocks: this.blocks.length,
       pendingFrame: this.pendingFrame, virtualized: this.virtualized, top: this.scrollEl.scrollTop })
     if (this.disposed) return
+    const locateSnap = this.currentLocateSnap()
     if (this.blocks.length === 0) {
       this.clearAll()
       this.updateFindSource()
@@ -308,6 +312,7 @@ export class VirtualReadingView {
       }
     }
     this.updateFindSource()
+    if (locateSnap && this.locateSnap === locateSnap) locateSnap.top = this.scrollEl.scrollTop
   }
 
   /** 视口顶锚点块的源 start（真实布局优先；无布局环境回退高度表模型） */
@@ -359,6 +364,7 @@ export class VirtualReadingView {
 
   /** 滚动到源 start 对应块（虚拟模式下先按高度表估计定位再实测修正） */
   scrollToSrcStart(srcStart: number): void {
+    this.locateSnap = null
     if (!this.virtualized) {
       const el = this.container.querySelector<HTMLElement>(
         `.${READING_CLASS_NAMES.block}[data-vsidian-src-start="${srcStart}"]`,
@@ -390,7 +396,8 @@ export class VirtualReadingView {
     // 布局（容器 padding、边距合并）存在系统性残差，可能把同步校准好的
     // 位置再次拖偏且无人纠正（锚点监听随即读取错位视口）。帧+宏任务后
     // 按目标块真实位置再吸附，未命中（仍偏）则再补一轮
-    this.scheduleLocateSnap(idx, 2)
+    const request = this.locateSnap = { top: this.scrollEl.scrollTop }
+    this.scheduleLocateSnap(idx, 2, request)
   }
 
   /** 目标块真实布局位置吸附 scrollTop（返回是否发生了校正） */
@@ -405,7 +412,9 @@ export class VirtualReadingView {
     }
     const delta = el.getBoundingClientRect().top - box.top
     if (Math.abs(delta) > 0.5) {
+      const request = this.currentLocateSnap()
       this.scrollEl.scrollTop += delta
+      if (request) request.top = this.scrollEl.scrollTop
       this.updateNow()
       return true
     }
@@ -413,14 +422,27 @@ export class VirtualReadingView {
   }
 
   /** 定位后的异步吸附：等过滚动事件与 rAF 窗口重算的突发期再校准 */
-  private scheduleLocateSnap(idx: number, rounds: number): void {
+  private scheduleLocateSnap(idx: number, rounds: number, request: { top: number }): void {
     scheduleFrame(() => {
+      if (this.currentLocateSnap() !== request) return
       setTimeout(() => {
+        if (this.currentLocateSnap() !== request) return
         if (this.snapToBlockTop(idx) && rounds > 1) {
-          this.scheduleLocateSnap(idx, rounds - 1)
+          this.scheduleLocateSnap(idx, rounds - 1, request)
+        } else if (this.locateSnap === request) {
+          this.locateSnap = null
         }
       }, 0)
     })
+  }
+
+  /** scroll 事件可能尚未派发，校准前必须读取位置，不能只靠事件取消旧请求。 */
+  private currentLocateSnap(): { top: number } | null {
+    if (this.disposed || this.scrollEl.clientHeight <= 0 ||
+      (this.locateSnap && this.scrollEl.scrollTop !== this.locateSnap.top)) {
+      this.locateSnap = null
+    }
+    return this.locateSnap
   }
 
   /** 源 offset → 锚点块 → 滚动（view.locate / 模式切换定位链） */
@@ -584,6 +606,7 @@ export class VirtualReadingView {
   /** 释放当前文档及资源，不将清空计为一次 Markdown 解析。 */
   clearDocument(): void {
     if (this.disposed) return
+    this.locateSnap = null
     this.blocks = []
     this.text = ''
     this.heights = []
@@ -595,6 +618,7 @@ export class VirtualReadingView {
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
+    this.locateSnap = null
     this.cancelFrame?.()
     this.cancelFrame = null
     this.pendingFrame = false
