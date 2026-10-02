@@ -93,6 +93,8 @@
 - **维护批（P3）**：`settings.ts` 键注释更新为七轮口径（仅 live）；`tableEditing.ts` 孤儿注释归位与挤行整理；tree.json 补登 `blockquoteTablePaint.mjs`/`blockquoteTablePaintFixture.ts`（经 file-tree 技能入口）；`styleContractEn.test.ts` 标题计数 171→172 与断言对齐；reading 残缺判定的全文 `split` 提为切块入口一次（逐块 split 是 O(块数×全文行数)，引用表密集大文档可感知——审查实测 500 块/3000 行约半耗时在此）。
 - 验证：六例先红后绿；全量单测/compile/样式契约/浏览器全量见提交记录。
 
+第 2 轮独立复核（未参与修复的子代理）确认全部修复正确，另发现钳制命中判定的坐标系错位残留（映射后 head 对旧区间：净删除误钳/净插入漏钳），已修（判定移 dispatch 前，hitMask 旧对旧）。已知观察项（CM6 选区合法性固有约束，触发极窄、不阻塞）：多 range 映射后触碰/重叠时 `EditorSelection.create` 的 normalized 合并会重排 ranges——钳制 hitMask 索引与合并后 ranges 可能错位（漏钳或错位钳），以及两个 range 钳到同一位置时坍缩为单 range。
+
 ## 五轮真机反馈修订（「块内表格渲染」只管 live，2026-10-02 第七轮）
 
 用户反馈：该开关只应影响 live——reading 原行为就是 markdown-it 渲染且无风险。拆除 reading 侧接线：`splitReadingBlocks` / `renderReadingBlocks` / `readingVirtualView.setDocument` 的 `containerTableSource` 通道整体删除（`ReadingSplitOptions` 移除，`applyTableBlockRenderSetting` 只热重配 live facet、不再重载 reading 全文）；语言包描述改「仅实时预览，阅读模式始终渲染」。残缺回退（`quoteTableRowsDegraded`）是独立判定不受影响。回归：readingTable 新组 2 例经类型擦除传入关闭值、断言运行时被忽略（通道若被重建即红）。
