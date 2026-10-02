@@ -91,15 +91,13 @@ export function planTableColumnMove(
   slot: number,
 ): Pick<PlannedTableEdit, 'changes'> | null {
   if (rows[0]?.kind !== 'header' || rows[1]?.kind !== 'delimiter') return null
-  const columns = parseTableDelimiter(
-    blankContainerPrefix(doc.slice(rows[1]!.lineFrom, rows[1]!.lineTo), prefixLenOf(rows[1!])))?.length
+  const columns = parseTableDelimiter(doc.slice(rows[1]!.lineFrom, rows[1]!.lineTo), prefixLenOf(rows[1!]))?.length
   if (!columns || !Number.isInteger(source) || !Number.isInteger(slot) || source < 0 ||
       source >= columns || slot < 0 || slot > columns || slot === source || slot === source + 1) return null
   const changes: PlannedTableEdit['changes'] = []
   for (const row of rows) {
     const p = prefixLenOf(row)
-    const text = blankContainerPrefix(doc.slice(row.lineFrom, row.lineTo), p)
-    const cells = tableRowCellsForColumns(text, row.lineFrom, columns)
+    const cells = tableRowCellsForColumns(doc.slice(row.lineFrom, row.lineTo), row.lineFrom, columns, p)
     if (!cells || cells.length !== columns) return null
     const values = cells.map((cell) => doc.slice(cell.from, cell.to))
     const [moved] = values.splice(source, 1)
@@ -157,14 +155,14 @@ export function tableCellNavTarget(
   const row = rows[i]!
   const delimiter = rows.find((entry) => entry.kind === 'delimiter')
   const columns = delimiter
-    ? parseTableDelimiter(
-        blankContainerPrefix(doc.slice(delimiter.lineFrom, delimiter.lineTo), prefixLenOf(delimiter)))?.length
+    ? parseTableDelimiter(doc.slice(delimiter.lineFrom, delimiter.lineTo), prefixLenOf(delimiter))?.length
     : undefined
   const cellsOf = (entry: TableRowInfo): TableCellRange[] => {
-    const text = blankContainerPrefix(doc.slice(entry.lineFrom, entry.lineTo), prefixLenOf(entry))
+    const text = doc.slice(entry.lineFrom, entry.lineTo)
     return columns && entry.kind !== 'delimiter'
-      ? tableRowCellsForColumns(text, entry.lineFrom, columns) ?? splitTableRowCells(text, entry.lineFrom)
-      : splitTableRowCells(text, entry.lineFrom)
+      ? tableRowCellsForColumns(text, entry.lineFrom, columns, prefixLenOf(entry)) ??
+        splitTableRowCells(text, entry.lineFrom, prefixLenOf(entry))
+      : splitTableRowCells(text, entry.lineFrom, prefixLenOf(entry))
   }
   const cells = cellsOf(row)
   if (cells.length === 0) {
@@ -227,12 +225,11 @@ export function planTableEdit(
     return null
   }
   // 两种行文本语义：fullText 整行含前缀（删除/随移/拖排的单位）；
-  // contentText 前缀替换为等宽空格（#296——结构性字符不参与格拆分，
-  // 空白走边界容忍；坐标以行首为基准，零偏移）
+  // 格切分经 prefixLen 参数内建前缀感知（#296 审查轮——blank+首格 clamp
+  // 见 tableCells.splitTableRowCells），坐标以行首为基准零偏移
   const fullText = (r: TableRowInfo): string => doc.slice(r.lineFrom, r.lineTo)
-  const contentText = (r: TableRowInfo): string => blankContainerPrefix(fullText(r), prefixLenOf(r))
   const rowCells = (r: TableRowInfo): TableCellRange[] =>
-    splitTableRowCells(contentText(r), r.lineFrom)
+    splitTableRowCells(fullText(r), r.lineFrom, prefixLenOf(r))
   /** 该行前缀原文（插行补前缀用；参照行的容器层级） */
   const prefixTextOf = (r: TableRowInfo): string => doc.slice(r.lineFrom, r.lineFrom + prefixLenOf(r))
   const cursorCells = rowCells(rows[i]!)
@@ -291,7 +288,7 @@ export function planTableEdit(
         ]
         const removed = row.lineTo + 1 - row.lineFrom + (delim.lineTo + 1 - delim.lineFrom)
         const newLineFrom = successor.lineFrom - removed
-        const cells = splitTableRowCells(contentText(successor), newLineFrom)
+        const cells = splitTableRowCells(fullText(successor), newLineFrom, prefixLenOf(successor))
         return { changes, selection: focusOfCells(cells, newLineFrom, col) }
       }
       // 数据行：优先与后继换行合并删除；文件尾无换行时回纳前行换行
@@ -302,7 +299,7 @@ export function planTableEdit(
       const len = hasNl ? row.lineTo + 1 - row.lineFrom : row.lineTo - row.lineFrom + 1
       const target = i + 1 < rows.length ? rows[i + 1]! : rows[i - 1]!
       const newLineFrom = i + 1 < rows.length ? target.lineFrom - len : target.lineFrom
-      const cells = splitTableRowCells(contentText(target), newLineFrom)
+      const cells = splitTableRowCells(fullText(target), newLineFrom, prefixLenOf(target))
       return { changes, selection: focusOfCells(cells, newLineFrom, col) }
     }
     case 'insertColumnLeft':
@@ -313,12 +310,19 @@ export function planTableEdit(
       let delta = 0 // 光标行之前各行的插入总长（内容首右移量；与前缀无关）
       for (let r = 0; r < rows.length; r++) {
         const row = rows[r]!
-        const text = contentText(row)
+        const p = prefixLenOf(row)
+        const text = blankContainerPrefix(fullText(row), p)
         const cells = rowCells(row)
         const c = Math.min(newCol, cells.length)
         let insertAtRel: number
         let piece: string
-        if (c < cells.length) {
+        if (c === 0 && cells.length > 0 && cells[0]!.from - row.lineFrom <= p) {
+          // 目标列是首格且该行无左边界管道（无边界行，#296 审查轮）：
+          // 「空格+管道」会与行首（前缀）空白融合、列数不增——顶层无边界
+          // 行基线即此静默无效；改产「管道开头」形态：新边界 + 新空列
+          insertAtRel = p
+          piece = row.kind === 'delimiter' ? '| --- |' : '| |'
+        } else if (c < cells.length) {
           // 目标列已有格：在其区间起点（前管道之后）插入「空格+管道」
           insertAtRel = cells[c]!.from - row.lineFrom
           piece = row.kind === 'delimiter' ? ' --- |' : ' |'
@@ -336,7 +340,7 @@ export function planTableEdit(
         }
         if (r === i) {
           const newText = text.slice(0, insertAtRel) + piece + text.slice(insertAtRel)
-          const newCells = splitTableRowCells(newText, row.lineFrom + delta)
+          const newCells = splitTableRowCells(newText, row.lineFrom + delta, p)
           focus = focusOfCells(newCells, row.lineFrom + delta, newCol)
         }
         if (r < i) {
@@ -357,7 +361,8 @@ export function planTableEdit(
       let delta = 0 // 光标行之前各行的删除总长（内容首左移量；与前缀无关）
       for (let r = 0; r < rows.length; r++) {
         const row = rows[r]!
-        const text = contentText(row)
+        const p = prefixLenOf(row)
+        const text = blankContainerPrefix(fullText(row), p)
         const cells = rowCells(row)
         if (col >= cells.length) {
           continue // 该行缺此列：不动
@@ -365,8 +370,9 @@ export function planTableEdit(
         let delFromRel: number
         let delToRel: number
         if (col > 0 || cells[0]!.from - row.lineFrom > 0) {
-          // 常态：删该格及其前管道（含内侧空白）
-          delFromRel = cells[col]!.from - row.lineFrom - 1
+          // 常态：删该格及其前管道（含内侧空白）。格前位置落进容器前缀区
+          // 时收在前缀右端——无边界行删首列不动前缀（#296 审查轮）
+          delFromRel = Math.max(p, cells[col]!.from - row.lineFrom - 1)
           delToRel = cells[col]!.to - row.lineFrom
         } else {
           // 首格且行首无边界管道：删该格及其后管道
@@ -375,7 +381,7 @@ export function planTableEdit(
         }
         if (r === i) {
           const newText = text.slice(0, delFromRel) + text.slice(delToRel)
-          const newCells = splitTableRowCells(newText, row.lineFrom - delta)
+          const newCells = splitTableRowCells(newText, row.lineFrom - delta, p)
           focus = focusOfCells(newCells, row.lineFrom - delta, col)
         }
         if (r < i) {

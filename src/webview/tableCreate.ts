@@ -14,20 +14,30 @@ const EMPTY_TABLE_ROWS = EMPTY_TABLE.split('\n')
 /** 表格行的容器前缀形态（#296）：形态学复用 src/shared/listPrefix 单一事
  *  实源。first 用于表头（含列表标记，表格行不是列表项故不含任务标记）；
  *  rest 用于分隔/数据行（标记换成等宽内容列缩进）；blank 用于表格前后
- *  的分隔空行（裸引用层 + 内容列缩进）。无容器前缀返回 null。 */
-function containerShapes(lineText: string): { first: string; rest: string; blank: string; total: number } | null {
+ *  的分隔空行（裸引用层 + 内容列缩进）；body 用于表格后残留的右侧文字
+ *  （完整前缀——右段仍是正文，列表项保持项形态）。无容器前缀返回 null。
+ *  审查轮保底：裸标记（`-`、`1.`，gap1 为空的合法空项形态）与裸引用
+ *  （`>`）后补一个空格——first 直接拼标记会产生 `-|` / `>|` 紧贴形态，
+ *  `-|` 还让表格脱离列表层级。 */
+function containerShapes(lineText: string): { first: string; rest: string; blank: string; body: string; total: number } | null {
   const prefix = parseLinePrefix(lineText)
   if (!prefix) return null
+  const gap1 = prefix.list ? prefix.list.gap1 || ' ' : ''
   const head = prefix.list
     ? prefix.list.bullet
-      ? prefix.list.bullet + prefix.list.gap1
-      : prefix.list.digits + prefix.list.delim + prefix.list.gap1
+      ? prefix.list.bullet + gap1
+      : prefix.list.digits + prefix.list.delim + gap1
     : ''
+  // 引用层不吞尾空白的裸 `>` 同样补一空格（与 `> ` 形态对齐）
+  const quote = prefix.quote.endsWith(' ') || !prefix.quote ? prefix.quote : prefix.quote + ' '
   const contentCol = ' '.repeat(prefix.indent.length + head.length)
+  // 右段前缀：完整结构前缀（含任务标记），mark 不以空白结尾时保底一空格
+  const markText = prefix.mark && !/\s$/u.test(prefix.mark) ? prefix.mark + ' ' : prefix.mark
   return {
-    first: prefix.quote + prefix.indent + head,
-    rest: prefix.quote + prefix.indent + contentCol,
-    blank: prefix.quote.replace(/\s+$/u, '') + (prefix.list ? prefix.indent + contentCol : ''),
+    first: quote + prefix.indent + head,
+    rest: quote + prefix.indent + contentCol,
+    blank: quote.replace(/\s+$/u, '') + (prefix.list ? prefix.indent + contentCol : ''),
+    body: quote + prefix.indent + markText,
     total: prefixLength(prefix),
   }
 }
@@ -71,7 +81,7 @@ export function planCreateTable(doc: string, from: number, to = from): PlannedTa
       ? `${left}\n${shapes.blank}\n`
       : previousLine.trim() ? `${shapes.blank}\n` : ''
     const suffixOut = rightStart < lineEnd
-      ? `\n${shapes.blank}\n${doc.slice(rightStart, lineEnd)}`
+      ? `\n${shapes.blank}\n${shapes.body}${doc.slice(rightStart, lineEnd)}`
       : nextLine.trim() ? `\n${shapes.blank}` : ''
     return {
       changes: { from: lineStart, to: lineEnd, insert: prefixOut + tableText + suffixOut },

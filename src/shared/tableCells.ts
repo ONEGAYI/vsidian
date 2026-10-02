@@ -175,37 +175,42 @@ export function escapedPipeBackslashes(lineText: string): number[] {
  * GFM 语义切分一行表格行为单元格。
  * 调用方负责判定该行确为表格行（表头/数据行）；非表格行（无裸管道）返回 []。
  * 行首/行尾边界管道符不产生空单元格；中间空段是空单元格（零宽内容）。
+ * prefixLen（#296 审查轮）：行首容器前缀宽。内部把前缀替换为等宽空格参与
+ * 切分（结构字符不入格），并把首格 from clamp 到前缀右端——无边界行
+ * （> a | b）的首段含内容不会被 shift，不 clamp 时前缀区会被算进首格
+ * 区间（插列管道落到 > 之前、删列吞 >、格值带前缀）。坐标零偏移。
  */
-export function splitTableRowCells(lineText: string, lineStart: number): TableCellRange[] {
-  if (!lineText.includes('|')) {
+export function splitTableRowCells(lineText: string, lineStart: number, prefixLen = 0): TableCellRange[] {
+  const text = blankContainerPrefix(lineText, prefixLen)
+  if (!text.includes('|')) {
     return []
   }
-  const inSpan = scanCodeSpans(lineText)
+  const inSpan = scanCodeSpans(text)
   const segs: Array<{ from: number; to: number }> = []
   let segStart = 0
-  for (let i = 0; i < lineText.length; i++) {
-    if (lineText[i] === '|' && !inSpan[i] && !isEscapedAt(lineText, i)) {
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '|' && !inSpan[i] && !isEscapedAt(text, i)) {
       segs.push({ from: segStart, to: i })
       segStart = i + 1
     }
   }
-  segs.push({ from: segStart, to: lineText.length })
+  segs.push({ from: segStart, to: text.length })
   // 纯空白行且首尾没有实际边界管道时，每段空白都是一个单元格：
   // ` | ` 为两格，` | | ` 为三格。若行首/行尾有管道，或行内有内容，
   // 则首尾空白段是边界外的缩进/尾随空白，不计入单元格。
-  const hasContent = segs.some((seg) => lineText.slice(seg.from, seg.to).trim() !== '')
+  const hasContent = segs.some((seg) => text.slice(seg.from, seg.to).trim() !== '')
   const hasEdgePipe = segs[0]!.from === segs[0]!.to ||
     segs[segs.length - 1]!.from === segs[segs.length - 1]!.to
   if (hasContent || hasEdgePipe) {
-    if (segs.length > 0 && lineText.slice(segs[0]!.from, segs[0]!.to).trim() === '') {
+    if (segs.length > 0 && text.slice(segs[0]!.from, segs[0]!.to).trim() === '') {
       segs.shift()
     }
-    if (segs.length > 0 && lineText.slice(segs[segs.length - 1]!.from, segs[segs.length - 1]!.to).trim() === '') {
+    if (segs.length > 0 && text.slice(segs[segs.length - 1]!.from, segs[segs.length - 1]!.to).trim() === '') {
       segs.pop()
     }
   }
-  return segs.map((seg) => {
-    const raw = lineText.slice(seg.from, seg.to)
+  const cells = segs.map((seg) => {
+    const raw = text.slice(seg.from, seg.to)
     const lead = raw.length - raw.trimStart().length
     const trail = raw.length - raw.trimEnd().length
     const contentFrom = lineStart + seg.from + lead
@@ -217,27 +222,41 @@ export function splitTableRowCells(lineText: string, lineStart: number): TableCe
       contentTo,
     }
   })
+  // 首格 from clamp 到前缀右端（前缀区不可入格；from ≤ to 防御）
+  if (prefixLen > 0 && cells.length > 0) {
+    const first = cells[0]!
+    const from = Math.min(Math.max(first.from, lineStart + prefixLen), first.to)
+    if (from !== first.from) {
+      cells[0] = { ...first, from }
+    }
+  }
+  return cells
 }
 
 /**
  * 表格网格需要每个显示格有独立源区间。仅在纯空白且省略边界管道的行上，
  * 允许按表头列数舍弃多余的尾部空白段；含内容的多列行仍拒绝映射。
+ * prefixLen 语义同 splitTableRowCells（#296 审查轮）。
  */
 export function tableRowCellsForColumns(
   lineText: string,
   lineStart: number,
   columns: number,
+  prefixLen = 0,
 ): TableCellRange[] | null {
-  const cells = splitTableRowCells(lineText, lineStart)
+  const cells = splitTableRowCells(lineText, lineStart, prefixLen)
   if (cells.length === columns) return cells
-  if (columns > 0 && cells.length === columns + 1 && /^[\s|]+$/.test(lineText) &&
+  if (columns > 0 && cells.length === columns + 1 &&
+      /^[\s|]+$/.test(blankContainerPrefix(lineText, prefixLen)) &&
       lineText[0] !== '|' && lineText[lineText.length - 1] !== '|') {
     return cells.slice(0, columns)
   }
   return null
 }
 
-/** 首次写入无边界纯空白行时，在同一事务中规范化为显式边界并填目标格。 */
+/** 首次写入无边界纯空白行时，在同一事务中规范化为显式边界并填目标格。
+ *  prefixLen（#296 审查轮）：引用/列表内的纯空白行同样规范化，canonical
+ *  重建保留行首前缀（原文照抄），坐标以行首为基准零偏移。 */
 export function planBlankRowCellInput(
   lineText: string,
   lineStart: number,
@@ -245,15 +264,18 @@ export function planBlankRowCellInput(
   from: number,
   to: number,
   insert: string,
+  prefixLen = 0,
 ): { from: number; to: number; insert: string; selection: number } | null {
-  if (from !== to || !insert || insert.includes('\n') || !/^[\s|]+$/.test(lineText) ||
-      lineText[0] === '|' || lineText[lineText.length - 1] === '|') return null
-  const cells = tableRowCellsForColumns(lineText, lineStart, columns)
+  const blanked = blankContainerPrefix(lineText, prefixLen)
+  if (from !== to || !insert || insert.includes('\n') || !/^[\s|]+$/.test(blanked) ||
+      blanked[0] === '|' || blanked[blanked.length - 1] === '|') return null
+  const cells = tableRowCellsForColumns(lineText, lineStart, columns, prefixLen)
   if (!cells) return null
   const column = cells.findIndex((cell) => cell.contentFrom === from)
   if (column < 0) return null
-  const canonical = '|' + ' |'.repeat(columns)
-  const target = splitTableRowCells(canonical, lineStart)[column]!.contentFrom
+  const prefix = lineText.slice(0, prefixLen)
+  const canonical = prefix + '|' + ' |'.repeat(columns)
+  const target = splitTableRowCells(canonical, lineStart, prefixLen)[column]!.contentFrom
   const relative = target - lineStart
   const escaped = escapeCellText(insert)
   return {
@@ -265,11 +287,13 @@ export function planBlankRowCellInput(
 }
 
 /**
- * 分隔行判定与列对齐：`---`/`:---`/`---:`/`:---:` 序列。
+ * 分隔行判定与列对齐：`---`/`:---`/`:---:`/`:---:` 序列。
  * 非分隔行返回 null。允许省略首尾边界管道与段内空格。
+ * prefixLen 语义同 splitTableRowCells（#296 审查轮）：引用分隔行原文
+ * 直接解析（等宽替换下 contentFrom 在原文与 blank 文本中同指）。
  */
-export function parseTableDelimiter(lineText: string): Array<TableAlign | null> | null {
-  const cells = splitTableRowCells(lineText, 0)
+export function parseTableDelimiter(lineText: string, prefixLen = 0): Array<TableAlign | null> | null {
+  const cells = splitTableRowCells(lineText, 0, prefixLen)
   if (cells.length === 0) {
     return null
   }

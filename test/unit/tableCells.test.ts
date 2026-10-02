@@ -223,3 +223,55 @@ describe('escapeCellText：写回内容持久化（换行 + 转义，单一事�
     expect(escapeCellText('普通内容 **加粗**')).toBe('普通内容 **加粗**')
   })
 })
+
+describe('容器前缀参数（#296 审查轮）：切分内建前缀感知与首格 clamp', () => {
+  it('无边界引用行 > a | b：首格区间从前缀右端起，前缀不入格', () => {
+    // "> a | b"：0='>',1=' ',2='a',3=' ',4='|',5=' ',6='b'
+    const cells = splitTableRowCells('> a | b', 0, 2)
+    expect(cells).toHaveLength(2)
+    expect(cells[0]).toMatchObject({ from: 2, to: 4, contentFrom: 2, contentTo: 3 })
+    expect(cells[1]).toMatchObject({ from: 5, to: 7, contentFrom: 6, contentTo: 7 })
+  })
+
+  it('有边界引用行 > | a | b |：区间与顶层表格整体平移前缀宽一致', () => {
+    const cells = splitTableRowCells('> | a | b |', 0, 2)
+    const top = splitTableRowCells('| a | b |', 0)
+    expect(cells.map((c) => [c.from, c.to, c.contentFrom, c.contentTo]))
+      .toEqual(top.map((c) => [c.from + 2, c.to + 2, c.contentFrom + 2, c.contentTo + 2]))
+  })
+
+  it('tableRowCellsForColumns：引用行原文直接切分列数匹配（消费方不再先 blank）', () => {
+    expect(tableRowCellsForColumns('> | a | b |', 0, 2, 2)).toHaveLength(2)
+    expect(tableRowCellsForColumns('> a | b', 0, 2, 2)).toHaveLength(2)
+    // 不传 prefixLen 的既有行为不变：顶层照切、引用行原文切不出（首格含 >）
+    expect(tableRowCellsForColumns('| a | b |', 0, 2)).toHaveLength(2)
+    expect(tableRowCellsForColumns('> | a | b |', 0, 2)).toBeNull()
+  })
+
+  it('parseTableDelimiter：引用分隔行原文直接解析（有/无边界）', () => {
+    expect(parseTableDelimiter('> | --- | :---: |', 2)).toEqual([null, 'center'])
+    expect(parseTableDelimiter('> --- | ---:', 2)).toEqual([null, 'right'])
+    // 不传 prefixLen 的既有行为不变
+    expect(parseTableDelimiter('| --- | --- |')).toEqual([null, null])
+    expect(parseTableDelimiter('> | --- | --- |')).toBeNull()
+  })
+
+  it('lineStart 非零时区间为文档绝对坐标（clamp 同样生效）', () => {
+    const doc = '段落\n\n> a | b\n'
+    const at = doc.indexOf('> a')
+    const cells = splitTableRowCells('> a | b', at, 2)
+    expect(cells[0]).toMatchObject({ from: at + 2, to: at + 4, contentFrom: at + 2, contentTo: at + 3 })
+  })
+
+  it('纯空白无边界行：前缀空白参与格计数不丢格，首格 from clamp 到前缀右端', () => {
+    // ">  | |  " blank 后 "   | |  "：管道两侧段全空白，三格
+    const cells = splitTableRowCells('>  | |  ', 0, 2)
+    expect(cells).toHaveLength(3)
+    expect(cells[0]!.from).toBe(2)
+  })
+
+  it('clamp 后 from 不越过 to（防御语义）', () => {
+    const cells = splitTableRowCells('> a | b', 0, 2)
+    expect(cells[0]!.from).toBeLessThanOrEqual(cells[0]!.to)
+  })
+})

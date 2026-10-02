@@ -551,3 +551,41 @@ describe('引用块内表格结构操作（#296）', () => {
     expect(apply(deep, del.changes)).toBe('> > | b |\n> > | --- |\n> > | 2 |')
   })
 })
+
+describe('无边界引用行的结构操作（#296 审查轮）', () => {
+  // 省略首边界管道的形态（GFM 合法，tableCells 头注释口径）：blank 后首段
+  // 含内容不 shift，首格区间若不 clamp 到前缀右端会覆盖前缀区——插列管道
+  // 落在 > 之前、删列吞掉 > 、列移动把 > 带进格值
+  const NLDOC = '> a | b\n> --- | ---\n> c | d'
+  const nlRows = rowsOf(NLDOC, [0, 1, 2], ['header', 'delimiter', 'row'], [2, 2, 2])
+
+  it('插列：新管道落在前缀右侧，行不脱离引用块、列数实际增加', () => {
+    const plan = planTableEdit(NLDOC, nlRows, NLDOC.indexOf('a'), 'insertColumnLeft')!
+    expect(apply(NLDOC, plan.changes))
+      .toBe('> | |a | b\n> | --- |--- | ---\n> | |c | d')
+  })
+
+  it('删列：删除区间不吞引用前缀，各行保持引用层级', () => {
+    const plan = planTableEdit(NLDOC, nlRows, NLDOC.indexOf('a'), 'deleteColumn')!
+    expect(apply(NLDOC, plan.changes)).toBe('> | b\n> | ---\n> | d')
+  })
+
+  it('列移动：格值不含前缀字符，行保持引用层级', () => {
+    const plan = planTableColumnMove(NLDOC, nlRows, 0, 2)!
+    expect(apply(NLDOC, plan.changes)).toBe('> | b|a |\n> | ---|--- |\n> | d|c |')
+  })
+
+  it('插行与表尾追加：新行带引用前缀（无边界参照行同样保持层级）', () => {
+    const plan = planTableEdit(NLDOC, nlRows, NLDOC.indexOf('c'), 'insertRowBelow')!
+    expect(apply(NLDOC, plan.changes)).toBe('> a | b\n> --- | ---\n> c | d\n> | | |')
+  })
+})
+
+describe('顶层无边界行插列（基线缺陷，#296 审查轮顺带修复）', () => {
+  it('无左边界管道的行上左插列：产出带边界的新空列，列数实际增加', () => {
+    const doc = 'a | b\n--- | ---\nc | d'
+    const rows = rowsOf(doc, [0, 1, 2], ['header', 'delimiter', 'row'])
+    const plan = planTableEdit(doc, rows, 0, 'insertColumnLeft')!
+    expect(apply(doc, plan.changes)).toBe('| |a | b\n| --- |--- | ---\n| |c | d')
+  })
+})

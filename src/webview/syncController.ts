@@ -300,6 +300,7 @@ import { createFontArrivalWatch } from './fontArrival'
 import { CHROME_CONTRACT_PROBES } from '../shared/chromeContract'
 import { VirtualReadingView } from './readingVirtualView'
 import { blankRowInputPlan, runCreateTable, runTableEdit, tableEditing, tableRowsAt } from './tableEditing'
+import { prefixLenOf } from './tableStructure'
 import { symbolAutocomplete } from './symbolAutocomplete'
 import { symbolSelectionWrap } from './symbolWrap'
 import { multicursorExtensions } from './multicursor'
@@ -8672,8 +8673,12 @@ export class WebviewSyncController {
       const lineNumber = header.number + pending.region.rowFrom + (pending.region.rowFrom > 0 ? 1 : 0)
       const initialLine = lineNumber <= start.doc.lines ? start.doc.line(lineNumber) : null
       const currentLine = lineNumber <= view.state.doc.lines ? view.state.doc.line(lineNumber) : null
-      const initialCell = initialLine && splitTableRowCells(initialLine.text, initialLine.from)[pending.region.columnFrom]
-      const currentCell = currentLine && splitTableRowCells(currentLine.text, currentLine.from)[pending.region.columnFrom]
+      // 格定位按行身份 prefixLen 前缀感知切分（#296 审查轮）：原文直切会
+      // 把 `>` 算进首格，typed 回退推导与 selection 锚点错位
+      const rowInfo = rows && rows[pending.region.rowFrom + (pending.region.rowFrom > 0 ? 1 : 0)]
+      const rowPrefix = rowInfo ? prefixLenOf(rowInfo) : 0
+      const initialCell = initialLine && splitTableRowCells(initialLine.text, initialLine.from, rowPrefix)[pending.region.columnFrom]
+      const currentCell = currentLine && splitTableRowCells(currentLine.text, currentLine.from, rowPrefix)[pending.region.columnFrom]
       if (rows && initialCell && currentCell) {
         const oldContent = start.doc.sliceString(initialCell.contentFrom, initialCell.contentTo)
         const newContent = view.state.doc.sliceString(currentCell.contentFrom, currentCell.contentTo)

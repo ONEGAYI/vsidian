@@ -24,8 +24,8 @@ import type { SyntaxNode, Tree } from '@lezer/common'
 import type { TableEditOp } from '../shared/protocol'
 import { liveDecorationsField, LIVE_CLASS_NAMES, snapGridSelectionHead, tableCompositionPreview } from './liveDecorations'
 import { chainAt } from '../shared/markdownDoc'
-import { escapeCellText, needsPipeEscapeAt, parseTableDelimiter, planBlankRowCellInput, tableRowCellsForColumns, tableCellBreaks } from '../shared/tableCells'
-import { planTableColumnMove, planTableEdit, planTableRowMove, tableCellNavTarget, type TableRowInfo } from './tableStructure'
+import { blankContainerPrefix, containerPrefixLen, escapeCellText, needsPipeEscapeAt, parseTableDelimiter, planBlankRowCellInput, tableRowCellsForColumns, tableCellBreaks } from '../shared/tableCells'
+import { planTableColumnMove, planTableEdit, planTableRowMove, prefixLenOf, tableCellNavTarget, type TableRowInfo } from './tableStructure'
 import { createTableControls } from './tableControls'
 import { planCreateTable } from './tableCreate'
 import { parseTableRegionClipboard, planTableRegionDelete, planTableRegionPaste, planTableRegionReplace, serializeTableRegion } from './tableRegion'
@@ -161,9 +161,12 @@ export function tableRowsAt(state: EditorState, pos: number, tree: Tree): TableR
 
 export function blankRowInputPlan(state: EditorState, from: number, to: number, text: string) {
   const line = state.doc.lineAt(from)
-  if (!line.text.includes('|') || !/^[\s|]+$/.test(line.text)) return null
+  if (!line.text.includes('|')) return null
   const field = state.field(liveDecorationsField, false)
   if (!field) return null
+  // 纯空白判定在 blank 形态上做（#296 审查轮）：引用前缀替换后仍是空白行
+  const prefixLen = containerPrefixLen(line.text)
+  if (!/^[\s|]+$/.test(blankContainerPrefix(line.text, prefixLen))) return null
   const path = chainAt(field.tree, line.from + line.text.indexOf('|') + 1)
   const table = path.find((node) => node.name === 'Table')
   if (!table || !path.some((node) => node.name === 'TableRow')) return null
@@ -178,13 +181,24 @@ export function blankRowInputPlan(state: EditorState, from: number, to: number, 
   const cached = field.gridPlans.get(table.from)
   let columns = cached?.columns
   if (!columns) {
-    const delimiter = table.firstChild?.nextSibling
-    if (delimiter?.name !== 'TableDelimiter') return null
-    const declaration = state.doc.lineAt(delimiter.from)
-    columns = parseTableDelimiter(declaration.text)?.length
+    // 分隔行按名遍历查找：引用容器表的 Table 直接子节点混有 QuoteMark，
+    // firstChild.nextSibling 不保证是 TableDelimiter（#296 审查轮）
+    const delimiter = firstDelimiterOf(table)
+    if (!delimiter) return null
+    const delimLine = state.doc.lineAt(delimiter.from)
+    columns = parseTableDelimiter(delimLine.text, delimiter.from - delimLine.from)?.length
   }
   if (!columns) return null
-  return planBlankRowCellInput(line.text, line.from, columns, from, to, text)
+  return planBlankRowCellInput(line.text, line.from, columns, from, to, text, prefixLen)
+}
+
+/** 表内首个 TableDelimiter 直接子节点（引用容器表混有 QuoteMark，不能
+ *  用兄弟步进假设分隔行位置；#296 审查轮） */
+function firstDelimiterOf(table: SyntaxNode): SyntaxNode | null {
+  for (let child = table.firstChild; child; child = child.nextSibling) {
+    if (child.name === 'TableDelimiter') return child
+  }
+  return null
 }
 
 const setTableComposition = StateEffect.define<boolean>()
@@ -225,16 +239,21 @@ function editableGridCellAt(state: EditorState, pos: number) {
   if (!inGrid) return null
   const table = chainAt(field.tree, line.from + line.text.indexOf('|') + 1)
     .find((node) => node.name === 'Table')
-  const delimiter = table?.firstChild?.nextSibling
-  if (!table || delimiter?.name !== 'TableDelimiter') return null
-  const columns = field.gridPlans.get(table.from)?.columns ??
-    parseTableDelimiter(state.doc.lineAt(delimiter.from).text)?.length
+  // 分隔行按名遍历查找（引用容器表混有 QuoteMark，#296 审查轮）
+  const delimiter = table ? firstDelimiterOf(table) : null
+  if (!table || !delimiter) return null
+  const plan = field.gridPlans.get(table.from)
+  // 前缀口径：网格计划的行身份优先，无缓存时形态学回退（与树口径一致）
+  const prefixLen = plan?.rows.get(line.number)?.prefixLen ?? containerPrefixLen(line.text)
+  const delimLine = state.doc.lineAt(delimiter.from)
+  const columns = plan?.columns ??
+    parseTableDelimiter(delimLine.text, delimiter.from - delimLine.from)?.length
   if (!columns) return null
-  const cells = tableRowCellsForColumns(line.text, line.from, columns)
+  const cells = tableRowCellsForColumns(line.text, line.from, columns, prefixLen)
   if (!cells?.length) return null
   const cell = cells.find((cell) => pos >= cell.from && pos <= cell.to) ??
     (pos < cells[0]!.from ? cells[0]! : cells[cells.length - 1]!)
-  return { ...cell, cells, line }
+  return { ...cell, cells, line, prefixLen }
 }
 
 /** 选区（或其越格部分）覆盖的安全表格全集，按文档序去重。
@@ -315,9 +334,9 @@ function planGridSelectionEdit(
     const blockFrom = rows[0]!.lineFrom
     const blockTo = rows[rows.length - 1]!.lineTo
     const firstCells = tableRowCellsForColumns(doc.lineAt(contentRows[0]!.lineFrom).text,
-      contentRows[0]!.lineFrom, columns)
+      contentRows[0]!.lineFrom, columns, prefixLenOf(contentRows[0]!))
     const lastCells = tableRowCellsForColumns(doc.lineAt(contentRows[contentRows.length - 1]!.lineFrom).text,
-      contentRows[contentRows.length - 1]!.lineFrom, columns)
+      contentRows[contentRows.length - 1]!.lineFrom, columns, prefixLenOf(contentRows[contentRows.length - 1]!))
     if (!firstCells?.length || !lastCells?.length) continue
     const firstBoundary = firstCells[0]!.contentFrom
     const lastBoundary = lastCells[lastCells.length - 1]!.contentTo
@@ -340,7 +359,7 @@ function planGridSelectionEdit(
     if (cursor < padStart) changes.push({ from: cursor, to: padStart, insert: '' })
     for (const row of contentRows) {
       if (row.lineTo < range.from || row.lineFrom > range.to) continue
-      const cells = tableRowCellsForColumns(doc.lineAt(row.lineFrom).text, row.lineFrom, columns)
+      const cells = tableRowCellsForColumns(doc.lineAt(row.lineFrom).text, row.lineFrom, columns, prefixLenOf(row))
       if (!cells?.length) continue
       let rowChanges: Array<{ from: number; to: number; insert: string }> = []
       for (const cell of cells) {
@@ -360,17 +379,20 @@ function planGridSelectionEdit(
       }
       rowChanges.sort((a, b) => a.from - b.from)
       // 表头全部格内容删空后 lezer 不再将其解析为表格（全空白表头行），
-      // 整表会静默降级为源码——拒绝这笔删除，保持防护语义
+      // 整表会静默降级为源码——拒绝这笔删除，保持防护语义（前缀 blank 后
+      // 判定，引用行不因 `>` 逃过检查；#296 审查轮）
       const editedLine = applySpans(doc.sliceString(row.lineFrom, row.lineTo), row.lineFrom, rowChanges)
-      if (row.kind === 'header' && !/[^\s|]/.test(editedLine)) return 'reject'
+      if (row.kind === 'header' && !/[^\s|]/.test(blankContainerPrefix(editedLine, prefixLenOf(row)))) return 'reject'
       // 删除转义符等暴露格内管道时，canonical 重写保列数；仍失败则拒绝
-      if (!tableRowCellsForColumns(editedLine, row.lineFrom, columns)) {
+      // （canonical 保留行首容器前缀，引用行不因重建丢层级）
+      if (!tableRowCellsForColumns(editedLine, row.lineFrom, columns, prefixLenOf(row))) {
         const parts = cells.map((cell) => {
           const text = applySpans(doc.sliceString(cell.from, cell.to), cell.from, rowChanges)
           return text.length === 0 && cell.to > cell.from ? ' ' : text
         })
-        const canonical = '|' + parts.join('|') + '|'
-        if (!tableRowCellsForColumns(canonical, row.lineFrom, columns)) return 'reject'
+        const canonical = doc.slice(row.lineFrom, row.lineFrom + prefixLenOf(row)) +
+          '|' + parts.join('|') + '|'
+        if (!tableRowCellsForColumns(canonical, row.lineFrom, columns, prefixLenOf(row))) return 'reject'
         rowChanges = [{ from: row.lineFrom, to: row.lineTo, insert: canonical }]
       }
       changes.push(...rowChanges)
@@ -395,7 +417,8 @@ function planGridSelectionEdit(
       const plan = field.gridPlans.get(table.from)
       const onDelimiter = plan != null && line.number === plan.delimiterLine
       const columns = plan?.columns
-      const cells = columns ? tableRowCellsForColumns(line.text, line.from, columns) : null
+      const prefixLen = plan?.rows.get(line.number)?.prefixLen ?? containerPrefixLen(line.text)
+      const cells = columns ? tableRowCellsForColumns(line.text, line.from, columns, prefixLen) : null
       const cell = cells?.find((item) => range.from >= item.from && range.from <= item.to) ?? null
       text = cell && !onDelimiter ? escapeCellText(insert) : null
     }
@@ -561,22 +584,23 @@ const protectGridCellContent = EditorState.transactionFilter.of((tr) => {
       editedLine = editedLine.slice(0, change.from - cell.line.from) + change.insert +
         editedLine.slice(change.to - cell.line.from)
     }
-    if (!tableRowCellsForColumns(editedLine, cell.line.from, cell.cells.length)) {
+    if (!tableRowCellsForColumns(editedLine, cell.line.from, cell.cells.length, cell.prefixLen)) {
       const column = cell.cells.findIndex((item) => item.from === cell.from)
       const parts = cell.cells.map((item) => tr.startState.sliceDoc(item.from, item.to))
       for (const change of [...changes].reverse()) {
         parts[column] = parts[column]!.slice(0, change.from - cell.from) + change.insert +
           parts[column]!.slice(change.to - cell.from)
       }
-      const canonical = '|' + parts.join('|') + '|'
+      // canonical 保留行首容器前缀（#296 审查轮）：引用行重建不丢层级
+      const canonical = cell.line.text.slice(0, cell.prefixLen) + '|' + parts.join('|') + '|'
       // 删除转义符或代码定界符可能暴露格内管道。补边界仍不能保持列数时
       // 拒绝这笔删除，避免把当前格拆成额外列。
-      if (!tableRowCellsForColumns(canonical, cell.line.from, cell.cells.length)) return []
+      if (!tableRowCellsForColumns(canonical, cell.line.from, cell.cells.length, cell.prefixLen)) return []
       const caret = clearedCell ? 0
         : Math.min(parts[column]!.length, changes[0]!.from - cell.from + changes[0]!.insert.length)
       return {
         changes: { from: cell.line.from, to: cell.line.to, insert: canonical },
-        selection: { anchor: cell.line.from + 1 + parts.slice(0, column).reduce((n, part) => n + part.length + 1, 0) + caret },
+        selection: { anchor: cell.line.from + cell.prefixLen + 1 + parts.slice(0, column).reduce((n, part) => n + part.length + 1, 0) + caret },
         annotations: Transaction.userEvent.of(tr.annotation(Transaction.userEvent)!),
         scrollIntoView: tr.scrollIntoView,
       }
@@ -642,7 +666,7 @@ const keepGridInputCaretInsideCell = EditorState.transactionFilter.of((tr) => {
   const head = tr.newSelection.main.head
   const line = tr.newDoc.lineAt(head)
   if (line.number !== cell.line.number) return tr
-  const cells = tableRowCellsForColumns(line.text, line.from, cell.cells.length)
+  const cells = tableRowCellsForColumns(line.text, line.from, cell.cells.length, cell.prefixLen)
   const column = cell.cells.findIndex((candidate) => candidate.from === cell.from)
   const target = cells?.[column]
   if (!target || head < target.from || head > target.to) return tr
@@ -865,7 +889,8 @@ function moveVerticallyAcrossGrid(view: EditorView, forward: boolean): boolean {
       const outside = state.doc.line(outsideNumber)
       return select(outside.from + Math.min(Math.max(0, range.head - cell.contentFrom), outside.length), 1)
     }
-    const cells = tableRowCellsForColumns(state.sliceDoc(nextRow.lineFrom, nextRow.lineTo), nextRow.lineFrom, cell.cells.length)
+    const cells = tableRowCellsForColumns(state.sliceDoc(nextRow.lineFrom, nextRow.lineTo),
+      nextRow.lineFrom, cell.cells.length, prefixLenOf(nextRow))
     const column = cell.cells.findIndex((entry) => entry.from === cell.from)
     const next = cells?.[column]
     if (!next || !editableGridCellAt(state, next.from)) return false

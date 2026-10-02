@@ -702,3 +702,70 @@ describe('千行表结构操作性能边界', () => {
     expect(elapsed).toBeLessThan(2000)
   })
 })
+
+// ---- 引用块内表格的格内编辑链路（#296 审查轮） ----
+
+describe('引用块内表格的格内编辑防护（#296 审查轮）', () => {
+  const QDOC = '> | 名字 | 数量 |\n> | --- | --- |\n> | 苹果 | 3 |'
+
+  const keydown = (view: EditorView, init: KeyboardEventInit): void => {
+    view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }))
+  }
+
+  it('格内 Enter 持久化为 <br>，不把引用表格行真实拆散', () => {
+    const view = makeEditView(QDOC, QDOC.indexOf('苹') + 1)
+    keydown(view, { key: 'Enter' })
+    expect(view.state.doc.toString())
+      .toBe('> | 名字 | 数量 |\n> | --- | --- |\n> | 苹<br>果 | 3 |')
+    view.destroy()
+  })
+
+  it('Mod-a 在引用表格格内选中该格内容区间（不退化为全选）', () => {
+    const view = makeEditView(QDOC, QDOC.indexOf('苹果') + 1)
+    keydown(view, { key: 'a', ctrlKey: true })
+    const sel = view.state.selection.main
+    expect(sel.from).toBe(QDOC.indexOf('苹果'))
+    expect(sel.to).toBe(QDOC.indexOf('苹果') + 2)
+    view.destroy()
+  })
+
+  it('跨格选区键入：删除照常、文字落入格内不被丢弃', () => {
+    const view = makeEditView(QDOC, QDOC.indexOf('苹果'))
+    const from = QDOC.indexOf('苹果')
+    const to = QDOC.indexOf('3') + 1
+    view.dispatch({
+      changes: { from, to, insert: 'X' },
+      selection: { anchor: from + 1 },
+      userEvent: 'input.type.text',
+    })
+    const text = view.state.doc.toString()
+    expect(text).toContain('X')
+    // 引用表格行不被拆散：行数与引用前缀保持
+    expect(text.split('\n')).toHaveLength(3)
+    expect(text.split('\n').every((line) => line.startsWith('> ') || line === '')).toBe(true)
+    view.destroy()
+  })
+
+  it('单光标格内退格清空首格后不再吞引用前缀与隐藏管道', () => {
+    const view = makeEditView(QDOC, QDOC.indexOf('苹果') + 2)
+    const rowFrom = QDOC.indexOf('> | 苹果')
+    // jsdom 无浏览器退格默认行为，按过滤器真实入口派发 delete 事务：
+    // 一次清空 '苹果'（保留填充空格）；随后删填充空格的事务被拒绝
+    view.dispatch({
+      changes: { from: QDOC.indexOf('苹果'), to: QDOC.indexOf('苹果') + 2, insert: '' },
+      userEvent: 'delete.backward',
+    })
+    const cleared = view.state.doc.toString()
+    expect(cleared.split('\n')).toHaveLength(3)
+    expect(cleared.split('\n')[2]).toBe('> |  | 3 |')
+    expect(cleared.split('\n')[0]).toBe('> | 名字 | 数量 |')
+    // 填充空格守恒：删除被拒绝，引用前缀与隐藏管道原样
+    view.dispatch({
+      changes: { from: rowFrom + 3, to: rowFrom + 4, insert: '' },
+      selection: { anchor: rowFrom + 3 },
+      userEvent: 'delete.backward',
+    })
+    expect(view.state.doc.toString()).toBe(cleared)
+    view.destroy()
+  })
+})

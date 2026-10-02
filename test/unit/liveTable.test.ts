@@ -522,6 +522,14 @@ describe('引用块内表格网格化（#296）', () => {
     expect(RangeSet.eq([view.state.field(liveDecorationsField).decos], [full])).toBe(true)
     view.destroy()
   })
+
+  it('无边界引用行（> a | b）：首格 mark 不覆盖引用前缀区（#296 审查轮）', () => {
+    const doc = '> a | b\n> --- | ---\n> c | d'
+    const set = build(doc)
+    // 网格成立且格 mark 文本不含引用前缀（前缀隐藏由引用装饰负责）
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(2)
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridCell, doc)).toEqual(['a ', ' b', 'c ', ' d'])
+  })
 })
 
 // ---- 输入钩子（| 键转义） ----

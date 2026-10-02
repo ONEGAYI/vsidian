@@ -4,7 +4,7 @@ import type { FormatOperationId } from '../shared/formatOperations'
 import type { FormatSelection } from './formatOperations'
 import { INLINE } from './formatOperations'
 import type { TableRegion } from './tableRegion'
-import { parseTableDelimiter, tableRowCellsForColumns } from '../shared/tableCells'
+import { containerPrefixLen, parseTableDelimiter, tableRowCellsForColumns } from '../shared/tableCells'
 
 export type QuickActionState = 'inactive' | 'active' | 'mixed' | 'disabled'
 
@@ -80,14 +80,17 @@ function regionCells(doc: Text, region: TableRegion): string[] | null {
       region.rowFrom < 0 || region.columnFrom < 0) return null
   const header = doc.lineAt(region.tableFrom).number
   if (header >= doc.lines) return null
-  const columns = parseTableDelimiter(doc.line(header + 1).text)?.length
+  // 引用容器表的前缀感知（#296 审查轮）：分隔行与内容行都按形态学
+  // 回退传 prefixLen，原文直切会因首格含 `>` 而整体 null（静默 no-op）
+  const delimLine = doc.line(header + 1)
+  const columns = parseTableDelimiter(delimLine.text, containerPrefixLen(delimLine.text))?.length
   if (!columns || region.columnTo >= columns) return null
   const values: string[] = []
   for (let row = region.rowFrom; row <= region.rowTo; row++) {
     const lineNumber = header + (row === 0 ? 0 : row + 1)
     if (lineNumber > doc.lines) return null
     const line = doc.line(lineNumber)
-    const cells = tableRowCellsForColumns(line.text, line.from, columns)
+    const cells = tableRowCellsForColumns(line.text, line.from, columns, containerPrefixLen(line.text))
     if (!cells) return null
     for (let column = region.columnFrom; column <= region.columnTo; column++) {
       const cell = cells[column]

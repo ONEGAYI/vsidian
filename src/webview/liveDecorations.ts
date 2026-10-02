@@ -67,6 +67,7 @@ import { buildFrontmatterCardPlan, fmFoldField } from './frontmatterDecorations'
 import {
   barePipeAt,
   blankContainerPrefix,
+  containerPrefixLen,
   escapedPipeBackslashes,
   parseTableDelimiter,
   splitTableRowCells,
@@ -428,7 +429,7 @@ function tableGridPlan(doc: Text, table: SyntaxNode): TableGridPlan | null {
     // 行身份节点 from 即内容首：行首至此为容器前缀
     const prefixLen = c.from - line.from
     if (c.name === 'TableDelimiter') {
-      const aligns = parseTableDelimiter(blankContainerPrefix(line.text, prefixLen))
+      const aligns = parseTableDelimiter(line.text, prefixLen)
       if (!aligns || delimiterLine !== 0) {
         return null
       }
@@ -446,12 +447,13 @@ function tableGridPlan(doc: Text, table: SyntaxNode): TableGridPlan | null {
   const samples = new Array<number>(columns).fill(0)
   for (const [lineNo, entry] of rows) {
     tableGridStats.rowsScanned += 1
-    // 前缀替换为空格参与拆分（#296）：坐标零偏移，空白走容忍机制
-    const text = blankContainerPrefix(doc.line(lineNo).text, entry.prefixLen)
-    if (!tableRowCellsForColumns(text, 0, columns)) {
+    // 前缀感知拆分（#296 审查轮：内建 blank + 首格 clamp）：列宽样本仍用
+    // blank 形态（collectColumnSamples 取 contentFrom/To，不受 clamp 影响）
+    const text = doc.line(lineNo).text
+    if (!tableRowCellsForColumns(text, 0, columns, entry.prefixLen)) {
       return null
     }
-    const widths = collectColumnSamples([text], columns)
+    const widths = collectColumnSamples([blankContainerPrefix(text, entry.prefixLen)], columns)
     rowSamples.set(lineNo, widths)
     for (let col = 0; col < columns; col++) {
       if (widths[col]! > samples[col]!) {
@@ -572,13 +574,13 @@ function emitTableRowMarks(
   const regionIndex = region && table && region.tableFrom === table.from
     ? header ? 0 : line.number - doc.lineAt(region.tableFrom).number - 1
     : -1
-  // 容器前缀（#296）：行身份节点 from 即内容首。格解析与发射以「前缀
-  // 替换为空格」的整行为对象——坐标零偏移，空白走边界容忍
+  // 容器前缀（#296）：行身份节点 from 即内容首。格切分经 prefixLen 参数
+  // 内建前缀感知（审查轮：blank + 首格 clamp——无边界行首格 mark 不覆盖
+  // 前缀区，前缀隐藏仍由引用装饰负责）；坐标零偏移
   const prefixLen = node.from - line.from
-  const contentText = blankContainerPrefix(line.text, prefixLen)
   const cells = grid && columns
-    ? tableRowCellsForColumns(contentText, line.from, columns) ?? []
-    : splitTableRowCells(contentText, line.from)
+    ? tableRowCellsForColumns(line.text, line.from, columns, prefixLen) ?? []
+    : splitTableRowCells(line.text, line.from, prefixLen)
   for (let col = 0; col < cells.length; col++) {
     const cell = cells[col]!
     if (grid) {
@@ -606,7 +608,7 @@ function emitTableRowMarks(
     const escapedPipeDeco = selectionTouchesRange(selection, line.from, line.to)
       ? tableEscapedPipeRevealDeco
       : tableEscapedPipeDeco
-    for (const pos of escapedPipeBackslashes(contentText)) {
+    for (const pos of escapedPipeBackslashes(blankContainerPrefix(line.text, prefixLen))) {
       out.push(escapedPipeDeco.range(line.from + pos, line.from + pos + 1))
     }
   }
@@ -1611,7 +1613,7 @@ export const liveDecorationsField = StateField.define<LiveDecoState>({
           // 该行容器前缀（#296）：替换空格参与格判定，坐标零偏移
           const settledPrefix = oldPlan.rows.get(lineNo)?.prefixLen ?? 0
           const settledText = blankContainerPrefix(currentLine.text, settledPrefix)
-          if (stillRow && tableRowCellsForColumns(settledText, currentLine.from, oldPlan.columns)) {
+          if (stillRow && tableRowCellsForColumns(settledText, currentLine.from, oldPlan.columns, settledPrefix)) {
             // #142：组合净结果先以当前行的新宽度样本与逐行缓存折叠出新列宽
             // 计划——计划未变（取消或宽度无影响的净结果）保持「仅恢复当前行」
             // 快路径（千行表组合取消不全表扫描的性能契约）；计划变化才落整表
@@ -1862,17 +1864,15 @@ export function snapGridSelectionHead(state: EditorState, pos: number, forward: 
   const contentEntry = plan.rows.get(line.number)
   const isContent = contentEntry !== undefined
   if (!isDelimiter && !isContent) return null
-  // 行解析：前缀替换空格（#296）——坐标零偏移
+  // 行解析：前缀感知切分（#296 审查轮：内建 blank + 首格 clamp）——坐标零偏移
   const prefixLenOfLine = (lineNo: number): number => plan.rows.get(lineNo)?.prefixLen ?? 0
   const boundariesOf = (lineNo: number): number[] | null => {
     const target = state.doc.line(lineNo)
-    const cells = tableRowCellsForColumns(
-      blankContainerPrefix(target.text, prefixLenOfLine(lineNo)), target.from, columns)
+    const cells = tableRowCellsForColumns(target.text, target.from, columns, prefixLenOfLine(lineNo))
     return cells ? cells.flatMap((cell) => [cell.contentFrom, cell.contentTo]) : null
   }
   if (isContent) {
-    const cells = tableRowCellsForColumns(
-      blankContainerPrefix(line.text, contentEntry.prefixLen), line.from, columns)
+    const cells = tableRowCellsForColumns(line.text, line.from, columns, contentEntry.prefixLen)
     if (!cells) return null
     // 格区间（含首尾空白/填充）归属该格：clamp 到内容区间
     for (const cell of cells) {
@@ -1921,7 +1921,10 @@ const gridCellMouseSelection = EditorView.mouseSelectionStyle.of((view, event) =
   if (!cell || !row) return null
   const cells = [...row.querySelectorAll<HTMLElement>(':scope > .vsidian-table-grid-cell')]
   const line = view.state.doc.lineAt(view.posAtDOM(row, 0))
-  const range = tableRowCellsForColumns(line.text, line.from, cells.length)?.[cells.indexOf(cell)]
+  // 前缀感知切分（#296 审查轮）：引用行原文不 blank 会多出含 `>` 的首格，
+  // 与 DOM 格数不匹配而整体失效；形态学回退与树口径一致
+  const range = tableRowCellsForColumns(line.text, line.from, cells.length,
+    containerPrefixLen(line.text))?.[cells.indexOf(cell)]
   if (!range) return null
   // 空格子的源码填充不属于用户内容。再次点击时落在填充前，避免把
   // 保留的输入节点变成下一次键入文字的前置空格。
@@ -1991,7 +1994,8 @@ function clampGridCellPointer(event: MouseEvent, view: EditorView): boolean {
   if (column < 0) return false
   const line = view.state.doc.lineAt(view.posAtDOM(row, 0))
   const range = tableRowCellsForColumns(line.text, line.from,
-    row.querySelectorAll(':scope > .vsidian-table-grid-cell').length)?.[column]
+    row.querySelectorAll(':scope > .vsidian-table-grid-cell').length,
+    containerPrefixLen(line.text))?.[column]
   if (!range) return false
   const empty = range.contentFrom === range.contentTo && range.from < range.to
   const from = empty ? range.from : range.contentFrom

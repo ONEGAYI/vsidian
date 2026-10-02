@@ -24,6 +24,16 @@
 - **创建层复用形态学单一事实源**：插入表格的前缀解析复用 `src/shared/listPrefix.ts` 的 `parseLinePrefix`（引用层 + 缩进 + 列表标记），不另起解析；表格行前缀不含任务标记（表格行不是列表项）。
 - **纯函数层保持树无关**：`tableStructure`/`tableRegion` 只做字符串与区间运算，前缀作为行身份数据传入，语义继续由单测固定。
 
+## 审查轮补齐（review-loops，2026-10-02）
+
+首轮交付后的高强度审查（三只读子代理 + 主代理核实）确认九项缺口并修复，核心两项为 P1：
+
+- **格切分内建前缀感知（取代散装 blank 接线）**：`splitTableRowCells` / `tableRowCellsForColumns` / `parseTableDelimiter` / `planBlankRowCellInput` 增可选 `prefixLen` 参数（缺省 0，既有调用零变化），内部做「blank + **首格 from clamp 到前缀右端**」。clamp 是关键增量：无边界行（`> a | b`）blank 后首段含内容不被 shift，不 clamp 时首格区间覆盖前缀区——插列管道落到 `>` 之前、删列吞掉 `>`、列移动把 `> ` 带进格值、剪贴板格值被污染（P1）。全部消费点（tableEditing / liveDecorations / tableRegion 家族 / tableControls / quickActionState / formatOperations / syncController IME 收尾）统一改传原文 + prefixLen；无树上下文处用 `containerPrefixLen` 形态学回退（审查证实与树口径一致）。
+- **格内编辑防护层接线（P1）**：修复前 `editableGridCellAt` 对引用表整体返回 null——① 分隔行查找 `firstChild.nextSibling` 被 QuoteMark 挡住（改按名遍历）；② 原文切分多出含 `>` 的首格与列数不符（改传 prefixLen）。下游 Enter 拆行、跨格选区键入吞字、Mod-a/方向键/鼠标选区失效全部随之修复；canonical 重建（清空兜底、暴露管道重写）补行首前缀，引用行不因重建丢层级。
+- **创建层三处保底**：裸列表标记（`-`、`1.`，gap1 为空的合法空项形态）与裸引用 `>` 后保底一个空格——此前产出 `-|  |  |` 粘连形态且表格脱离列表层级；正文行中部插表的右侧文字补完整前缀（含列表标记）——此前裸行落在引用块外（引用空行打断 lazy continuation，实测 markdown-it 确认降层）。
+- **插列无边界分支（基线缺陷顺带修复）**：目标列是首格且该行无左边界管道时，piece 从「空格+管道」改为「管道开头」形态（`'| |'` / `'| --- |'`）——前者与行首空白融合、列数不增，**顶层无边界行的插列静默无效是基线既有缺陷**，引用场景由 #296 放大可见，一并修复并以新契约钉住。
+- 验证：25 项新契约测试先红后绿（撤修复可复现全部缺口）；全量单测 4982、browser 全脚本、集成全量（含新增引用表编辑防护用例）另行记录于当轮提交。
+
 ## 验证与完成条件
 
 - TDD：三层契约测试先行暴露缺口（装饰类名断言、创建产出文本断言、结构操作纯函数断言），再实现转绿。

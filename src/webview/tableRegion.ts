@@ -1,4 +1,4 @@
-import { blankContainerPrefix, escapeCellText, parseTableDelimiter, tableRowCellsForColumns, type TableCellRange } from '../shared/tableCells'
+import { escapeCellText, parseTableDelimiter, tableRowCellsForColumns, type TableCellRange } from '../shared/tableCells'
 import { prefixLenOf, type PlannedTableEdit, type TableRowInfo } from './tableStructure'
 
 /** 表头和数据行使用连续索引；分隔行不计入矩形。端点始终规范化为升序。 */
@@ -12,13 +12,13 @@ export interface TableRegion {
 
 function tableParts(doc: string, rows: TableRowInfo[]) {
   if (rows[0]?.kind !== 'header' || rows[1]?.kind !== 'delimiter') return null
-  // 行解析：前缀替换为等宽空格（#296），坐标以行首为基准（零偏移）
-  const columns = parseTableDelimiter(
-    blankContainerPrefix(doc.slice(rows[1]!.lineFrom, rows[1]!.lineTo), prefixLenOf(rows[1!])))?.length
+  // 行解析：前缀感知切分（#296 审查轮：内建 blank + 首格 clamp——无边界行
+  // 的前缀不进格值，剪贴板与替换文本干净），坐标以行首为基准（零偏移）
+  const columns = parseTableDelimiter(doc.slice(rows[1]!.lineFrom, rows[1]!.lineTo), prefixLenOf(rows[1!]))?.length
   if (!columns) return null
   const content = [rows[0], ...rows.slice(2)]
   const cells = content.map((row) => tableRowCellsForColumns(
-    blankContainerPrefix(doc.slice(row.lineFrom, row.lineTo), prefixLenOf(row)), row.lineFrom, columns))
+    doc.slice(row.lineFrom, row.lineTo), row.lineFrom, columns, prefixLenOf(row)))
   if (cells.some((row) => !row || row.length !== columns)) return null
   return { columns, content, cells: cells as TableCellRange[][] }
 }
@@ -96,10 +96,9 @@ export function planTableRegionDelete(doc: string, rows: TableRowInfo[], selecte
       index < region.columnFrom || index > region.columnTo)
     // 列重建整块替换：各行携带自身容器前缀（#296），前缀不参与列运算
     const prefix = (r: TableRowInfo) => doc.slice(r.lineFrom, r.lineFrom + prefixLenOf(r))
-    const delimText = blankContainerPrefix(doc.slice(rows[1]!.lineFrom, rows[1]!.lineTo), prefixLenOf(rows[1]!))
     const rebuilt = [prefix(rows[0]!) + line(keep(parts.cells[0]!)),
-      prefix(rows[1]!) + line(keep(tableRowCellsForColumns(delimText,
-        rows[1]!.lineFrom, parts.columns)!)),
+      prefix(rows[1]!) + line(keep(tableRowCellsForColumns(doc.slice(rows[1]!.lineFrom, rows[1]!.lineTo),
+        rows[1]!.lineFrom, parts.columns, prefixLenOf(rows[1!]))!)),
       ...parts.content.slice(1).map((row, index) =>
         prefix(row) + line(keep(parts.cells[index + 1]!)))].join('\n')
     return { changes: [{ from: blockFrom, to: blockTo, insert: rebuilt }], selection: blockFrom }
@@ -243,7 +242,7 @@ export function planTableRegionPaste(doc: string, rows: TableRowInfo[], selected
   // 扩列时分隔行按原对齐重建为显式边界形态：源分隔行可能省略尾管道
   // （GFM 合法），直接原文拼接会产出 `--- ---` 类非法声明使整表降级
   const aligns = parseTableDelimiter(
-    blankContainerPrefix(doc.slice(rows[1]!.lineFrom, rows[1]!.lineTo), prefixLenOf(rows[1]!))) ?? []
+    doc.slice(rows[1]!.lineFrom, rows[1]!.lineTo), prefixLenOf(rows[1!])) ?? []
   const delimiter = totalCols > parts.columns
     ? prefixOf(rows[1]!) + '|' + Array.from({ length: totalCols }, (_unused, col) => {
         const align = col < aligns.length ? aligns[col] : null
