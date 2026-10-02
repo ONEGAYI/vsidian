@@ -139,6 +139,7 @@ vsidian/
 │   │   ├── table-interaction-rework.md        # 表格交互重做规格
 │   │   ├── toolbar-refresh.md                 # 工具栏刷新按钮与缓存刷新规格
 │   │   ├── toolbar-view-toggle.md             # 工具栏双态切换按钮规格
+│   │   ├── tooltip.md                         # 统一自绘悬停提示规格
 │   │   ├── vault-index-backlinks.md           # 引用索引与反链实施规格
 │   │   └── viewport-width.md                  # 可读行宽与双模式列布局规格
 │   └── trees/      # 文件树子视图承载目录
