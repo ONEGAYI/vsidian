@@ -8381,6 +8381,13 @@ export class WebviewSyncController {
    *  指定规范化选区，避免先渲染无效 range 后被 DOM 观察器折叠。 */
   private dispatchExternalChanges(view: EditorView, changes: readonly SerChange[]): void {
     const specs = this.clampedSpec(changes)
+    // #296 审查轮二：钳制命中判定在 dispatch 前做（旧 selection 对旧区间
+    // [from,to]，坐标系自洽）——dispatch 后的 head 已映射到新文档，与旧
+    // 区间比较会在「净删除 + 区间外右侧近处光标」时误钳（映射后数值恰落
+    // 旧区间，但字符身份仍是区间外内容——远处前缀显形光标被拽走）、
+    // 「净插入 + 区间右端点光标」时漏钳
+    const hitMask = view.state.selection.ranges.map((range) =>
+      range.empty && specs.some((c) => range.head >= c.from && range.head <= c.to))
     const mapped = view.state.selection.map(ChangeSet.of(specs, view.state.doc.length))
     const selection = mapped.ranges.some((range) => range.from > range.to)
       ? EditorSelection.create(mapped.ranges.map((range) =>
@@ -8394,20 +8401,19 @@ export class WebviewSyncController {
     })
     // #296 六轮 + 审查轮：undo/外部整行替换会把格内容里的光标归到区间左端
     // （前缀或隐藏管道端点），触发前缀显形、网格破裂。用变更后 state 的
-    // 网格信息钳回最近格内容；**只处理端点落在本笔替换区间内的折叠光标**
-    // ——区间内光标才会被映射重定位，区间外（用户主动放置的远处光标，
-    // 如前缀显形编辑态）不动（审查轮 F4）；逐 range 钳制、其余 range 保留
-    // （单 anchor spec 会整体替换选区、坍缩多光标——审查轮 F2）。
+    // 网格信息钳回最近格内容；只处理 dispatch 前命中（端点在被替换文本上）
+    // 的折叠光标——区间内光标才会被映射重定位，区间外（用户主动放置的
+    // 远处光标，如前缀显形编辑态）不动（审查轮 F4）；逐 range 钳制、其余
+    // range 保留（单 anchor spec 会整体替换选区、坍缩多光标——审查轮 F2）。
     // selection-only 补事务与上一笔同步连发，浏览器只渲染最终态。
     const sel = view.state.selection
     let ranges: ReturnType<typeof EditorSelection.cursor>[] | null = null
     for (let i = 0; i < sel.ranges.length; i++) {
-      const range = sel.ranges[i]!
-      if (!range.empty || !specs.some((c) => range.head >= c.from && range.head <= c.to)) {
+      if (!hitMask[i]) {
         continue
       }
-      const clamped = clampExternalCursor(view.state, range.head)
-      if (clamped === null || clamped === range.head) {
+      const clamped = clampExternalCursor(view.state, sel.ranges[i]!.head)
+      if (clamped === null || clamped === sel.ranges[i]!.head) {
         continue
       }
       if (!ranges) {

@@ -627,6 +627,38 @@ describe('表格点阵与悬停控件', () => {
     expect(view.state.selection.main.head).toBe(prefixPos)
   })
 
+  it('净删除型外部变更不把区间外光标拽进格内容（审查轮二：坐标系自洽）', async () => {
+    // 光标在数据行行尾（替换区间外）；表头长格被大幅净删除（> 跨行距离：
+    // 同行剩余 + 分隔行整行）。修复后判定在 dispatch 前（旧 selection 对旧
+    // 区间，坐标系自洽），区间外光标保持跟随本行的映射位。
+    // 验证缺口如实记录：jsdom 全链路未能构造出误钳的完整触发交集（映射后
+    // 数值落旧区间 × 落点恰在新文档隐藏结构），「修复前误钳」由第 2 轮
+    // 复核的裸 CM6 映射探针实证（净删 11/插 5 时区间外光标映射后数值落入
+    // 旧区间）；本例锁定修复后的正向语义（区间外光标跟随本行、不被拽走）
+    const doc = [
+      '> | ' + '甲'.repeat(30) + ' | 乙 |',
+      '> | --- | --- |',
+      '> | 丙 | 丁 |',
+      '',
+      '结尾。',
+      '',
+    ].join('\n')
+    const linked = await setupLinked(doc)
+    const view = linked.controller.getView()!
+    const dataLineFrom = doc.indexOf('> | 丙')
+    const dataLineTo = dataLineFrom + '> | 丙 | 丁 |'.length
+    view.dispatch({ selection: { anchor: dataLineTo } }) // 数据行行尾（区间外）
+    // 表头长格净删除：30 个甲 → 1 个（净删 29，跨行距离 16）
+    const cellFrom = doc.indexOf('甲')
+    await linked.doc.applyChanges([{ offset: cellFrom, length: 30, text: '甲' }])
+    await settle()
+    const head = view.state.selection.main.head
+    const line = view.state.doc.lineAt(head)
+    // 光标仍在数据行行尾（跟随本行左移），不被拽进表头行格内容
+    expect(line.text).toBe('> | 丙 | 丁 |')
+    expect(head).toBe(line.to)
+  })
+
   it('多 range 拖拽交换列不折叠选区，main 跟随原格内容（审查轮 P3）', () => {
     const view = makeEditView(QUOTE_TABLE_DOC, QUOTE_TABLE_DOC.indexOf('1') + 1)
     const inTable = QUOTE_TABLE_DOC.indexOf('1') + 1
