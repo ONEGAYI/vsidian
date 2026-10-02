@@ -1035,6 +1035,10 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   writeFileSync(path.join(wsDir, '链式目标.md'), RENAME_CHAIN_TARGET_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'rename-chain-ref-a.md'), RENAME_CHAIN_REF_A_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'notes', 'rename-chain-ref-b.md'), RENAME_CHAIN_REF_B_DOC, 'utf8')
+  // #270/#309：三条退役路径各自独占文档，不继承 rename 或前一段的 soft revert buffer。
+  for (const name of ['overlay-discard-custom.md', 'overlay-discard-native.md', 'overlay-revert-native.md']) {
+    writeFileSync(path.join(wsDir, name), '# Overlay retirement\n', 'utf8')
+  }
   // #200 目录/批量移动：目录（互链 + 嵌套 + 被引用附件）+ 外部引用者 + 上行目标
   mkdirSync(path.join(wsDir, 'dir-move', 'deep'), { recursive: true })
   writeFileSync(path.join(wsDir, 'dir-move', 'inner-a.md'), DIR_INNER_A_DOC, 'utf8')

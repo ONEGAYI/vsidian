@@ -200,3 +200,23 @@ Linux 最初的 `xvfb-run` 停在 X server 启动握手，尚未运行 Node 或�
 本地阶段未执行推送、远端 CI 或合并。用户于 2026-10-02 授权推送并创建 PR，继续 CI 验证与取证；未授权合并。上述结果不代表用户验收，敏感名单与同提交多次 CI 的退出条件保持原有口径，远端结果按 PR 对应提交及 run 留证。
 
 推送前 fetch 发现 main 前移到 `2b059ed`，三次新增提交只涉及规格和文件树。未发布分支先 rebase；与本地提交 `2c35b1a` 比较，`src/`、`test/`、构建脚本、清单、锁文件和随包资源保持一致。main 已补齐 tooltip 批次的 10 项文件登记，随后全量 `check --strict` 与 #294 四种时序回归均通过（`publish-tree-check.log`、`publish-reading.log`）。
+
+## #309：退役用例的文档复用与异步重读竞争
+
+**本机已复现并定位到 #270 的 B 段**。使用 Windows VSCode 1.82.3 开发态宿主，按原日志的完整用例名称和顺序恢复 62 项，前 61 项通过；堆栈指向 B 段普通编辑器重开后的 `applyEdit`，并非 A 段第一次插入。
+
+VSCode 1.82.3 的 [closeAllEditors 实现](https://github.com/microsoft/vscode/blob/1.82.3/src/vs/workbench/browser/parts/editor/editorActions.ts)在选择不保存时执行 soft revert；[TextFileEditorModel.revert](https://github.com/microsoft/vscode/blob/1.82.3/src/vs/workbench/services/textfile/common/textFileEditorModel.ts)此时只清 dirty，不重读正文。若模型引用仍存活，clean 不代表 buffer 已与磁盘一致。[普通文件编辑器的 resolve](https://github.com/microsoft/vscode/blob/1.82.3/src/vs/workbench/contrib/files/browser/editors/fileEditorInput.ts)使用 `reload: { async: true }`，故 `showTextDocument` 返回也不保证磁盘重读完成。
+
+失败后才输出的内存观测保留了原失败：A 段插入得到 v3；621ms 后关闭触发 soft revert；B 段重开启动异步重读，约 73ms 后恢复盘面并推进到 v4；[bulk text edit 的版本校验](https://github.com/microsoft/vscode/blob/1.82.3/src/vs/workbench/contrib/bulkEdit/browser/bulkTextEdits.ts)随后拒绝旧版本编辑。恢复正文的发起者是普通编辑器重开时的加载链。此处定位的是本机同形失败；历史 CI 未采集内部时间线，不把本机时序冒充 CI 原始观测。
+
+| 候选机制 | 证据与裁决 |
+| --- | --- |
+| A 段插入被未知 revert 撤回 | A 的 soft revert 来自用例自己的关闭动作；失败堆栈位于 B 段，原判断需修正 |
+| B 段重新装载与新编辑竞争 | 红态中重读将 v3 改为 v4 后编辑被拒；实时打印探针的绿态中编辑先完成，重读因版本变化被放弃，两种顺序均有留证 |
+| 扩展写回、undo 或额外磁盘写入 | 原票观测为零调用、mtime 不变；本轮捕获的是宿主重读更新模型路径，不需要这些机制参与即可解释该次拒绝 |
+
+**测试约束**：A（面板丢弃）、B（普通编辑器丢弃）、C（显式还原）各自独占无盘面引用的 fixture；不复用前序 rename 文档，也不在三段之间复用 soft revert 后的 buffer。每段验证 clean 初始正文、一次精确插入、覆盖层登记与退役、磁盘未保存。A 不额外调用 `openTextDocument` 持有引用，并检查文档 close；B 则断言文档仍装载、没有 close 事件且已转 clean，保证仍检测 #270 的通用退役路径。C 验证正文已真正恢复。修复不增加等待预算、自动重试或敏感组豁免，不修改生产链路或清单顺序。
+
+**验证结果**：原 62 项顺序红态复现后，隔离 fixture 版本全绿；关闭 B 段 clean 退役接线时，新回归按预期失败。rebase 到合并 #311 后的 `origin/main`（`9f1877e`），编译与类型检查通过，235 个 Vitest 文件 5129 项通过，Node 启动器等契约 112 项通过、6 项按 foreground 模式跳过；四分片 all 组集成测试 252/252 全过，各宿主退出码为 0。
+
+原失败的自动复现仍需约 100～130 秒完整前序，未取得小于 5 秒的独立红态复现。诊断脚本、日志与便携宿主均为本机临时产物，不进入 Git；本地验证不代表用户验收。
