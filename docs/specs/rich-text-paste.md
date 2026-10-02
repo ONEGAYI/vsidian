@@ -1,6 +1,6 @@
 # Live 富文本粘贴
 
-状态：2026-10-02 用户确认产品行为及四票拆分；#305–#308 本地实现完成，2026-10-03 兼容定向验证通过，统一分支完整回归另行收口。真实 Word/Google Docs、物理键盘与具体观感仍待人工验收；toast 数值为初始视觉方案。
+状态：2026-10-02 用户确认产品行为及四票拆分；#305–#308 本地实现完成，2026-10-03 统一分支完整回归通过，终局证据见下文。真实 Word/Google Docs、物理键盘与具体观感仍待人工验收；toast 数值为初始视觉方案。
 
 ## 问题与目标
 
@@ -225,6 +225,26 @@ Blocked by: T2、T3。
 - 本票日志与快照根为独立工作树 `out/test/308/`，首次红测与浏览器首轮 CRLF 期望失败均保留。定向单元、兼容浏览器、编译及样式门禁结果见交付回执；设置记忆、代码/表格上下文、独立图片流程、真实 VSCode 1.82.3 的 A/B/C、快速撤销、连续输入、源码模式与多面板证据沿用 #305–#307。统一分支终局全量单元、浏览器、宿主回归与独立审查由收口代理执行，不以本票定向结果冒充全量验证。
 
 用户操作说明已同步至 `docs/features.md`、README 双语入口和 Unreleased CHANGELOG；人工待验记录以 [manual-verification.md](manual-verification.md) 的「富文本粘贴与兼容收口」节为准。
+
+## 统一分支终局验证（2026-10-03）
+
+验证对象为 `codex/rich-text-paste` 的产品提交 `0aa321fa08350d268942ae31059d7ca54923e27e`。#305–#308 及审查修复均已合入；以下为代理自动化验证，不代表用户验收或已发布。
+
+| 验证 | 最终结果 | 统一工作树证据 |
+| --- | --- | --- |
+| 完整编译与类型检查 | 退出 0 | `out/test/rich-paste/final/review-compile.log` |
+| 完整单元与启动器契约 | vitest 244 文件、5049 项；node 契约 118 项，全绿 | `out/test/rich-paste/final/review-unit.log` |
+| 完整浏览器回归 | 61/61 套件通过，132.381 秒 | `out/test/browser-runs/run-RunAu7/report.json` 及逐套件日志 |
+| VSCode 1.82.3 默认全量集成 | 单宿主 `all`，248/248 终态、0 失败，包含四项敏感用例 | `out/test/rich-paste/final/review-integration-native.log` |
+| 真实剪贴板与宿主历史 | 原生/菜单、偏好记忆、ACK 后反馈、A/B/C、快速撤销、连续输入、源码切换与双面板通过 | `out/test/rich-paste/final/review-rich-paste-host.log`、`review-rich-paste-undo-host.log` |
+| 样式历史基线与八项门禁 | 顺序复验、退出 0；既有发布快照警告未改变 | `out/test/rich-paste/final/review-style-baseline.log`、`review-style-gate.log` |
+| 文件树与差异格式 | 严格检查及 `git diff --check` 通过 | `out/test/rich-paste/final/review-file-tree.log` |
+
+审查暴露的来源实体解码、图片含文字提示过早报告成功、透明祖先误报可见等问题均保留失败先行的验证并修复。真实宿主模态问句、三个按钮的可读文字及命中区域有绘制证据；透明 overlay 下 DOM 仍在而可见性为 false，恢复后全部为 true，原始数据为 `out/test/rich-paste/final/review-dialog-host-paint.json`。toast 公开入口保持，新增规则以 `:where()` 允许裸类片段覆盖。
+
+首轮浏览器为 60/61，唯一失败为设置页定位外框底边 `720.09375px` 超过视口 `720px`。复核证实是原生整数滚动的亚像素余量；外框断言采用一设备像素容差，同时严格验证内部标题、控件及实际绘制和命中，未修改生产滚动。原生失败报告 `run-rLfzIk`、精确诊断及修复后定向报告均保留。首轮集成仅因复用宿主 binary 时本树缓存父目录不存在而未启动测试；创建本树目录后四片 `all` 248 项通过，最终组合再次以默认单宿主验证全绿，两轮不混作同一份证据。
+
+各票原始日志、MDN/Reading 剪贴板快照和完整视口截图已承接到 `out/test/rich-paste/ticket-305/` 至 `ticket-308/`；审查红绿与模态数据存于 `final/review-fixes-307/`。`final/summary.json` 区分首轮失败与修复后结果。Word/Google Docs 真实样本、物理键鼠、真实 IME 及 toast 默认观感仍待用户验收；本轮未推送、创建 PR、合并远端或关票。
 
 ## 不包含
 
