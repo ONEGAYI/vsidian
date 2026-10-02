@@ -516,7 +516,75 @@ describe('VirtualReadingView：源锚点定位（屏外目标）', () => {
     expect(view.currentAnchor()).toBe(blocks[70]!.start)
     expect(mountedStarts(container)).toContain(String(blocks[70]!.start))
   })
-})
+
+  it.each(['before-frame', 'before-task', 'superseded', 'layout-only'] as const)(
+    '延迟定位校准尊重新滚动意图，并保留自身布局校正（#294：%s）', (timing) => {
+    vi.useFakeTimers()
+      const frames = new Map<number, FrameRequestCallback>()
+      let frameId = 0
+      vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+        frames.set(++frameId, callback)
+        return frameId
+      })
+      vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id))
+      const text = makeDoc(100)
+      const container = createReadingContainer()
+      stubClientHeight(container, 400)
+      let layoutShift = 0
+      let blockHeight = 36
+      const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+        if (this === container) return new DOMRect(0, 0, 600, 400)
+        const start = Number(this.dataset['vsidianSrcStart'])
+        const index = (text.slice(0, start).match(/\n\n/g) ?? []).length
+        return new DOMRect(0, index * blockHeight - container.scrollTop + layoutShift, 600, blockHeight)
+      })
+      const view = new VirtualReadingView(container, { bufferPx: 600 })
+      const flushFrame = (runTasks = true) => {
+        const callbacks = [...frames.values()]
+        frames.clear()
+        callbacks.forEach(callback => callback(0))
+        if (runTasks) vi.runOnlyPendingTimers()
+      }
+      try {
+        view.setDocument(text)
+        view.scrollToOffset(text.indexOf('第 90 段'))
+        expect(container.scrollTop).toBe(90 * 36)
+        if (timing === 'layout-only') {
+          // 没有新滚动意图：同步实测先校正位置，延迟校准仍应抵消剩余布局位移。
+          layoutShift = 12
+          blockHeight = 37
+          heightSpy.mockReturnValue(37)
+          view.updateNow()
+          flushFrame()
+          flushFrame()
+          expect(container.scrollTop).toBe(90 * 37 + 12)
+        } else if (timing === 'superseded') {
+          flushFrame(false)
+          view.scrollToOffset(text.indexOf('第 80 段'))
+          vi.runOnlyPendingTimers()
+          expect(container.scrollTop).toBe(80 * 36)
+          flushFrame()
+          expect(container.scrollTop).toBe(80 * 36)
+        } else {
+          if (timing === 'before-task') flushFrame(false)
+          // 浏览器先写入 scrollTop，再异步派发 scroll；旧校准可能夹在两者之间。
+          container.scrollTop = 0
+          if (timing === 'before-task') vi.runOnlyPendingTimers()
+          else flushFrame()
+          view.handleScroll()
+          flushFrame()
+          expect(container.scrollTop).toBe(0)
+          expect(mountedStarts(container)).toContain('0')
+        }
+      } finally {
+        view.dispose()
+        rectSpy.mockRestore()
+        vi.unstubAllGlobals()
+        vi.useRealTimers()
+      }
+    })
+    },
+  )
 
 describe('VirtualReadingView：动态尺寸变化与生命周期', () => {
   let heightSpy: ReturnType<typeof vi.spyOn>
