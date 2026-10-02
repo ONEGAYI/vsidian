@@ -353,3 +353,35 @@ export function escapeCellText(text: string): string {
   }
   return out
 }
+
+// ---- #296 二轮：引用内表格的前缀一致性判定（live/reading 同源语义） ----
+
+/** 行首引用层级：行首到首个非空白非 `>` 字符之间的 `>` 个数。
+ *  `> > x` 与 `>>x` 均为 2；`  | x` 为 0；`> - x` 为 1（列表标记停）。 */
+export function quoteDepthOfLine(text: string): number {
+  let depth = 0
+  for (const ch of text) {
+    if (ch === '>') depth += 1
+    else if (!/\s/.test(ch)) break
+  }
+  return depth
+}
+
+/** 引用表前缀残缺判定（形态学）：headerIdx 为表头行号。从表头起逐行扫
+ *  连续的表格形态行（含管道）：分隔行（去空白/管道/冒号/`>` 后为 ≥3 连
+ *  字符 `-`，含 lazy 无前缀形态）豁免；数据行引用层级 ≠ 表头即残缺。
+ *  顶层表头（层级 0）恒不残缺。live 侧由树内行集合同义校验（分隔行不进
+ *  行集合，天然豁免），两侧对同一源文给出一致结论。 */
+export function quoteTableRowsDegraded(lines: string[], headerIdx: number): boolean {
+  const headerDepth = quoteDepthOfLine(lines[headerIdx] ?? '')
+  if (headerDepth === 0) return false
+  for (let i = headerIdx + 1; i < lines.length; i++) {
+    const line = lines[i]!
+    if (!line.includes('|')) break
+    // 去空白/管道/冒号/引用符/反斜杠后为 ≥3 连字符 → 分隔行（含 lazy）
+    const stripped = line.replace(/[\s|:>]/g, '').replaceAll('\\', '')
+    if (/^-{3,}$/.test(stripped)) continue
+    if (quoteDepthOfLine(line) !== headerDepth) return true
+  }
+  return false
+}

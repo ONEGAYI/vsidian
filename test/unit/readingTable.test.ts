@@ -189,3 +189,40 @@ describe('双视图表格语义对拍（小文档全挂载）', () => {
     expect(liveTableLines - 1).toBe(readingRows)
   })
 })
+
+// ---- #296 二轮：引用内表格前缀残缺 → reading 同口径整表回退源码 ----
+
+describe('引用表格前缀残缺的 reading 回退（#296 二轮）', () => {
+  it('数据行缺 > 的引用表：不渲染半张表，按源文呈现', () => {
+    const text = '前文\n\n> | 甲 | 乙 |\n> | --- | --- |\n| 丙 | 丁 |\n\n后文'
+    const blocks = splitReadingBlocks(text)
+    const tableBlocks = blocks.filter((b) => b.kind === 'table')
+    expect(tableBlocks).toHaveLength(0)
+    // 受影响表按源文呈现（markdown-it 会把残缺行踢出留半张表头表）
+    const sourceBlock = blocks.find((b) => b.html.includes('| 甲 | 乙 |'))
+    expect(sourceBlock).toBeDefined()
+    expect(sourceBlock!.html).not.toContain('<table>')
+  })
+
+  it('完好引用表与顶层表不受回退判定影响', () => {
+    const intact = '前文\n\n> | 甲 | 乙 |\n> | --- | --- |\n> | 丙 | 丁 |\n\n后文'
+    // 引用表在 reading 是 blockquote 块（表嵌其内），顶层表是 table 块
+    const quote = splitReadingBlocks(intact).find((b) => b.kind === 'blockquote')
+    expect(quote).toBeDefined()
+    const el = createReadingBlockElement(quote!, intact)
+    expect(el.querySelectorAll('th')).toHaveLength(2)
+    expect(el.querySelectorAll('td')).toHaveLength(2)
+    const top = '前文\n\n| 甲 | 乙 |\n| --- | --- |\n| 丙 | 丁 |\n\n后文'
+    const topTable = splitReadingBlocks(top).find((b) => b.kind === 'table')
+    expect(topTable).toBeDefined()
+    expect(createReadingBlockElement(topTable!, top).querySelectorAll('td'))
+      .toHaveLength(2)
+  })
+
+  it('lazy 分隔行（合法形态）不触发回退', () => {
+    const text = '> | 甲 | 乙 |\n| --- | --- |\n> | 丙 | 丁 |'
+    // markdown-it 不认 lazy 分隔行（不成表）——该形态在 reading 天然为
+    // 段落，不因回退判定产生额外 table 块
+    expect(splitReadingBlocks(text).filter((b) => b.kind === 'table')).toHaveLength(0)
+  })
+})

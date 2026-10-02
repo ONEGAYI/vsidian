@@ -18,7 +18,7 @@
 // - 未支持语法（脚注 [^1]、定义列表等）由 markdown-it 按普通段落文本
 //   渲染——保留原文的局部源码降级，不触发整篇改写
 import { frontmatterRange } from '../shared/markdownDoc'
-import { maskCodeSpanPipes } from '../shared/tableCells'
+import { maskCodeSpanPipes, quoteTableRowsDegraded } from '../shared/tableCells'
 import { stripHtmlComments } from './htmlComment'
 // #163 验收反馈：块 id 标记阅读隐藏（渲染前剥离，行数不变保锚点坐标系）
 import { stripBlockIdMarks } from './blockIdStrip'
@@ -127,6 +127,20 @@ function restoreCodePipes(tokens: Token[], marker: string): void {
 function headingLevelOfTag(tag: string): 1 | 2 | 3 | 4 | 5 | 6 | null {
   const m = /^h([1-6])$/.exec(tag)
   return m ? (Number(m[1]) as 1 | 2 | 3 | 4 | 5 | 6) : null
+}
+
+/** #296 二轮：引用表残缺降级——把渲染 HTML 中的 <table> 替换为源文
+ *  <pre>（文本经 textContent 赋值天然转义）；块内其余内容（引用段落等）
+ *  保持原渲染。 */
+function degradeQuoteTableHtml(html: string, sourceText: string): string {
+  const doc = new DOMParser().parseFromString(html, 'text/html')
+  const table = doc.querySelector('table')
+  if (!table) return html
+  const pre = doc.createElement('pre')
+  pre.className = 'vsidian-reading-table-source'
+  pre.textContent = sourceText
+  table.replaceWith(pre)
+  return doc.body.innerHTML
 }
 
 /**
@@ -391,9 +405,23 @@ function pushBlock(
       blocks.push({ kind: 'paragraph', start, end, html: renderTokenHtml(md, group, env) })
       return
     }
-    case 'blockquote_open':
-      blocks.push({ kind: 'blockquote', start, end, html: renderTokenHtml(md, group, env) })
+    case 'blockquote_open': {
+      let html = renderTokenHtml(md, group, env)
+      // #296 二轮：引用内表格前缀残缺 → 表格部分回退源文（与 live 同口径，
+      // 形态学判定共享自 tableCells）。markdown-it 会把残缺引用行踢出表、
+      // 留下半张表头表——受影响表按源文呈现，残缺行本身已是相邻段落块
+      const tableToken = group.find((t) => t.type === 'table_open' && t.map)
+      if (tableToken?.map) {
+        const headerIdx = (env.baseLine ?? 0) + tableToken.map[0]
+        if (quoteTableRowsDegraded(text.split('\n'), headerIdx)) {
+          const from = env.lineStarts[headerIdx] ?? start
+          const to = env.lineEnds[(env.baseLine ?? 0) + tableToken.map[1] - 1] ?? end
+          html = degradeQuoteTableHtml(html, text.slice(from, to))
+        }
+      }
+      blocks.push({ kind: 'blockquote', start, end, html })
       return
+    }
     case 'bullet_list_open':
     case 'ordered_list_open': {
       const itemAnchors: number[] = []

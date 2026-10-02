@@ -577,6 +577,71 @@ describe('引用块内表格网格化（#296）', () => {
     // 样式契约承诺 .HyperMD-quote 命中引用行：网格行线类同样过别名桥
     expect(textsFor(set, 'HyperMD-quote', doc)).toHaveLength(3)
   })
+
+  it('引用表格的格区蒙版类并入格装饰（region 判等用行首口径，#296 二轮）', () => {
+    const doc = '> | a | b |\n> | --- | --- |\n> | 1 | 2 |\n> | 3 | 4 |'
+    // region.tableFrom 是拖选锚定的表格首行行首（含 `> ` 前缀）；Lezer 的
+    // Table 节点 from 跳过前缀落在管道位——判等若直接比树节点 from，引用
+    // 表格恒不等、regionIndex=-1、蒙版类永不并入（真机拖选折叠无蒙版根因）
+    const region = { tableFrom: doc.indexOf('> | a | b |'),
+      rowFrom: 0, rowTo: 1, columnFrom: 0, columnTo: 1 }
+    const set = buildLivePreviewDecorations(
+      Text.of(doc.split('\n')), EditorSelection.single(doc.length), region)
+    const cells = collect(set).filter((i) =>
+      i.cls?.split(' ').includes(LIVE_CLASS_NAMES.tableGridCell))
+    expect(cells.length).toBeGreaterThanOrEqual(4)
+    const masked = cells.filter((i) => i.cls?.split(' ').includes(LIVE_CLASS_NAMES.tableRegionCell))
+    // 2×2 区域：a/b（表头行）与 1/2（首个数据行）四格都须带蒙版类
+    expect(masked.map((i) => doc.slice(i.from, i.to))).toEqual([' a ', ' b ', ' 1 ', ' 2 '])
+  })
+
+  // ---- #296 二轮反馈 3：引用前缀残缺 → 受影响表格整表回退源码 ----
+
+  it('数据行缺 > 前缀：整表回退源码行（不网格化）', () => {
+    const doc = '> | a | b |\n> | --- | --- |\n| 1 | 2 |'
+    const set = build(doc, { anchor: doc.length })
+    // 残缺行已脱离引用块，网格会把脱离行混进引用表——受影响部分整表回退
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(0)
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridCell, doc)).toHaveLength(0)
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableLine, doc)).toHaveLength(3)
+  })
+
+  it('数据行为纯缩进（无 >）：同样整表回退', () => {
+    const doc = '> | a | b |\n> | --- | --- |\n  | 1 | 2 |'
+    const set = build(doc, { anchor: doc.length })
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(0)
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableLine, doc)).toHaveLength(3)
+  })
+
+  it('数据行引用层级多于表头：Lezer 已拆出表外，孤儿表头暂保持网格（边界记录）', () => {
+    const doc = '> | a | b |\n> | --- | --- |\n> > | 1 | 2 |'
+    const set = build(doc, { anchor: doc.length })
+    // 多层级数据行被 Lezer 拆出 Table 成独立节点，表内只剩表头+分隔——
+    // 前缀一致性无从判定（表内行层级一致），孤儿表头按合法引用内表头
+    // 网格化。可判定降级只覆盖残缺行仍在 Table 内的形态；拆散形态待真机
+    // 反馈后另行开票
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(1)
+  })
+
+  it('lazy 分隔行（合法形态）不触发整表回退', () => {
+    const doc = '> | a | b |\n| --- | --- |\n> | 1 | 2 |'
+    const set = build(doc, { anchor: doc.length })
+    // 分隔行豁免：无前缀的 lazy 分隔是 GFM 常见合法形态（契约 5 保留）
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(2)
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridCell, doc)).toEqual([' a ', ' b ', ' 1 ', ' 2 '])
+  })
+
+  it('顶层表格不受引用前缀一致性校验影响', () => {
+    const doc = '| a | b |\n| --- | --- |\n| 1 | 2 |'
+    const set = build(doc, { anchor: doc.length })
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(2)
+  })
+
+  it('列表内表格的行首列表标记不参与引用层级判定（引用层级一致仍网格化）', () => {
+    const doc = '> - | a | b |\n>   | --- | --- |\n>   | 1 | 2 |'
+    const set = build(doc, { anchor: doc.length })
+    expect(textsFor(set, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(2)
+  })
 })
 
 // ---- 输入钩子（| 键转义） ----

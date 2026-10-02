@@ -70,6 +70,7 @@ import {
   containerPrefixLen,
   escapedPipeBackslashes,
   parseTableDelimiter,
+  quoteDepthOfLine,
   splitTableRowCells,
   tableRowCellsForColumns,
   tableCellBreaks,
@@ -450,6 +451,20 @@ function tableGridPlan(doc: Text, table: SyntaxNode): TableGridPlan | null {
   if (headers !== 1 || delimiterLine === 0 || columns === 0 || rows.size === 0) {
     return null
   }
+  // #296 二轮：引用前缀一致性——表头与各数据行的引用层级须一致（分隔行
+  // 不进 rows，天然豁免：无前缀 lazy 分隔是 GFM 常见合法形态）。残缺行
+  // （缺 >/纯缩进/多层级）已脱离引用块语义，网格会把脱离行混进引用表——
+  // 受影响部分整表回退源码行（真机反馈「整表回退」）。顶层表层级恒 0
+  // 不受影响；Lezer 已把残缺行拆出表外的形态（表内无从判定）不在此列
+  let headerDepth = -1
+  for (const [lineNo, entry] of rows) {
+    const depth = quoteDepthOfLine(doc.line(lineNo).text)
+    if (entry.kind === 'header') {
+      headerDepth = depth
+    } else if (depth !== headerDepth) {
+      return null
+    }
+  }
   const samples = new Array<number>(columns).fill(0)
   for (const [lineNo, entry] of rows) {
     tableGridStats.rowsScanned += 1
@@ -579,8 +594,11 @@ function emitTableRowMarks(
   const header = node.name === 'TableHeader'
   const table = tableAncestor(path)
   const aligns = tableAlignsOf(doc, table)
-  // 内容行索引（表头 0，数据行跳过分隔行）——与 tableRegionField 的坐标一致
-  const regionIndex = region && table && region.tableFrom === table.from
+  // 内容行索引（表头 0，数据行跳过分隔行）——与 tableRegionField 的坐标一致。
+  // 判等用行首口径（#296 二轮）：region.tableFrom 是拖选锚定的表格首行行首
+  //（含容器前缀），Lezer 的 Table 节点 from 跳过前缀落在管道位——引用表格
+  // 两者相差 prefixLen，直接比树节点 from 会恒不等、蒙版类永不并入格装饰
+  const regionIndex = region && table && region.tableFrom === doc.lineAt(table.from).from
     ? header ? 0 : line.number - doc.lineAt(region.tableFrom).number - 1
     : -1
   // 容器前缀（#296）：行身份节点 from 即内容首。格切分经 prefixLen 参数

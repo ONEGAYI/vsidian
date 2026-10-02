@@ -823,12 +823,40 @@ function moveAcrossGridCell(view: EditorView, forward: boolean): boolean {
   if (view.compositionStarted || view.state.selection.ranges.length !== 1 || !view.state.selection.main.empty) return false
   const head = view.state.selection.main.head
   const cell = editableGridCellAt(view.state, head)
-  if (!cell) return false
+  const line = view.state.doc.lineAt(head)
+  if (!cell) {
+    // 表格边界的进入一步（#296 二轮真机反馈）：紧邻表格的外部行尾/行首按
+    // 方向键直达首/末格内容——跳过隐藏前缀与管道（所见即所得：下一个可见
+    // 位置就是格内容）。前缀的层级编辑入口保留（点击显形区、出格后回走）。
+    const nextNumber = line.number + (forward ? 1 : -1)
+    if (nextNumber < 1 || nextNumber > view.state.doc.lines) return false
+    if (forward ? head !== line.to : head !== line.from) return false
+    const rowCells = editableGridCellAt(view.state, view.state.doc.line(nextNumber).from)
+    if (!rowCells || rowCells.cells.length === 0) return false
+    const entry = forward ? rowCells.cells[0]! : rowCells.cells[rowCells.cells.length - 1]!
+    const entryEmpty = entry.contentFrom === entry.contentTo
+    const entryAt = entryEmpty ? entry.from : forward ? entry.contentFrom : entry.contentTo
+    view.dispatch({ selection: EditorSelection.create([
+      EditorSelection.cursor(entryAt, entryEmpty || forward ? 1 : -1)]),
+      scrollIntoView: true, userEvent: 'select' })
+    return true
+  }
   const end = cell.to > cell.from && view.state.sliceDoc(cell.to - 1, cell.to) === ' ' ? cell.to - 1 : cell.to
   const emptyContent = cell.contentFrom === cell.contentTo
   if (!emptyContent && (forward ? head < end : head > cell.contentFrom)) return false
   const target = navTargetsOf(view, forward, true)?.[0]
-  if (target === undefined) return true
+  if (target === undefined) {
+    // 表格边界的出格一步（#296 二轮真机反馈）：首格最左/末格最右不再吞键
+    // 卡死，直达表格块外紧邻行（上一行行尾/下一行行首）；表格贴文档边界时
+    // 交原生落行首/行尾（前缀触及显形，层级编辑入口保留）
+    const outsideNumber = line.number + (forward ? 1 : -1)
+    if (outsideNumber < 1 || outsideNumber > view.state.doc.lines) return false
+    const outside = view.state.doc.line(outsideNumber)
+    const at = forward ? outside.from : outside.to
+    view.dispatch({ selection: EditorSelection.create([EditorSelection.cursor(at, 1)]),
+      scrollIntoView: true, userEvent: 'select' })
+    return true
+  }
   const next = editableGridCellAt(view.state, target)
   if (!next) return false
   const empty = next.contentFrom === next.contentTo

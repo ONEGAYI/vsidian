@@ -769,3 +769,79 @@ describe('引用块内表格的格内编辑防护（#296 审查轮）', () => {
     view.destroy()
   })
 })
+
+describe('表格边界水平进出导航（#296 二轮真机反馈）', () => {
+  // 表格首/末格最左/最右按方向键直达表格块外紧邻行；紧邻外部行尾/行首
+  // 反向直达首/末格内容（跳过隐藏前缀与管道）。此前首格最左 Left 被吞键
+  // 卡死（navTargetsOf 无左邻目标仍 return true），表格内外无法互达。
+  const DOC = '前文段落\n\n> | 名字 | 数量 |\n> | --- | --- |\n> | 苹果 | 3 |\n\n后文段落'
+  const TOP_DOC = '前文段落\n\n| 名字 | 数量 |\n| --- | --- |\n| 苹果 | 3 |\n\n后文段落'
+
+  const keydown = (view: EditorView, init: KeyboardEventInit): void => {
+    view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }))
+  }
+
+  it('引用表首格最左 Left：跳出表格到上一行行尾（不再吞键卡死）', () => {
+    const view = makeEditView(DOC, DOC.indexOf('名字'))
+    keydown(view, { key: 'ArrowLeft' })
+    expect(view.state.selection.main.head)
+      .toBe(DOC.indexOf('\n\n> | 名字') + 1) // 表格上一行（空行）行尾
+    view.destroy()
+  })
+
+  it('引用表末格最右 Right：跳出表格到下一行（空行）行首', () => {
+    const view = makeEditView(DOC, DOC.indexOf('3') + 1)
+    keydown(view, { key: 'ArrowRight' })
+    expect(view.state.selection.main.head)
+      .toBe(DOC.indexOf('后文段落') - 1) // 表格下一行（空行）行首
+    view.destroy()
+  })
+
+  it('表格上方紧邻行行尾 Right：直达引用表首格内容', () => {
+    const blankTo = DOC.indexOf('\n\n> | 名字') + 1
+    const view = makeEditView(DOC, blankTo)
+    keydown(view, { key: 'ArrowRight' })
+    expect(view.state.selection.main.head).toBe(DOC.indexOf('名字'))
+    view.destroy()
+  })
+
+  it('表格下方紧邻行行首 Left：直达引用表末格内容尾', () => {
+    // 紧邻表格末行的是空行（from = to）：光标落在空行行首
+    const blankFrom = DOC.indexOf('后文段落') - 1
+    const view = makeEditView(DOC, blankFrom)
+    keydown(view, { key: 'ArrowLeft' })
+    expect(view.state.selection.main.head).toBe(DOC.indexOf('3') + 1)
+    view.destroy()
+  })
+
+  it('顶层表边界同样进出（新契约对两形态一致）', () => {
+    const view = makeEditView(TOP_DOC, TOP_DOC.indexOf('名字'))
+    keydown(view, { key: 'ArrowLeft' })
+    expect(view.state.selection.main.head)
+      .toBe(TOP_DOC.indexOf('\n\n| 名字') + 1)
+    const view2 = makeEditView(TOP_DOC, TOP_DOC.indexOf('\n\n| 名字') + 1)
+    keydown(view2, { key: 'ArrowRight' })
+    expect(view2.state.selection.main.head).toBe(TOP_DOC.indexOf('名字'))
+    view.destroy()
+    view2.destroy()
+  })
+
+  it('文档首表格首格最左 Left：交原生（jsdom 无默认链不动，浏览器侧由原生左移）', () => {
+    const head = '> | 名字 | 数量 |\n> | --- | --- |\n> | 苹果 | 3 |'
+    const view = makeEditView(head, head.indexOf('名字'))
+    keydown(view, { key: 'ArrowLeft' })
+    // 不接管：贴文档边界时 keymap 返回 false 交原生（此处装配无
+    // defaultKeymap，原生位移为零即证明未接管）
+    expect(view.state.selection.main.head).toBe(head.indexOf('名字'))
+    view.destroy()
+  })
+
+  it('非贴边位置不接管：表格上一段正文行尾（隔空行）Right 走原生', () => {
+    const view = makeEditView(DOC, DOC.indexOf('前文段落') + 4)
+    keydown(view, { key: 'ArrowRight' })
+    // 紧邻行是空行而非表格行：不接管，光标交默认链（此处无 defaultKeymap
+    // 装配，keymap 返回 false 即无位移——断言位移未发生即证明未接管）
+    expect(view.state.selection.main.head).toBe(DOC.indexOf('前文段落') + 4)
+    view.destroy()
+  })
+})

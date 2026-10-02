@@ -53,6 +53,70 @@ const browser = await chromium.launch({ headless: true,
   channel: process.env.VSIDIAN_TEST_BROWSER_CHANNEL || undefined })
 let passed = 0
 const failures = []
+// ---- #296 二轮真机反馈：拖选蒙版与边界导航（真实键盘/鼠标） ----
+{
+  const page = await browser.newPage()
+  const errors = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  try {
+    await page.setContent('<div id="app"></div>')
+    await page.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
+    await page.addScriptTag({ path: bundle })
+    const source = '前文\n\n> | 甲 | 乙 |\n> | --- | --- |\n> | 丙 | 丁 |\n\n后文'
+    await page.evaluate((text) => window.initTable(text), source)
+    await page.evaluate(() => new Promise(resolve =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    const read = () => page.evaluate(() => ({ ...window.readEditor(),
+      region: document.querySelectorAll('.vsidian-table-region-cell').length }))
+    // 1) 跨格拖选：引用表格 2×2 蒙版四格齐备（region 判等行首口径——
+    //    修复前蒙版类永不并入、选区折叠钉死在锚格）
+    const a = await page.locator('.vsidian-table-grid-row').nth(0)
+      .locator('.vsidian-table-grid-cell').nth(0).boundingBox()
+    const b = await page.locator('.vsidian-table-grid-row').nth(1)
+      .locator('.vsidian-table-grid-cell').nth(1).boundingBox()
+    await page.mouse.move(a.x + 14, a.y + a.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(b.x + b.width - 14, b.y + b.height / 2, { steps: 6 })
+    await page.mouse.up()
+    const afterDrag = await read()
+    assert.equal(afterDrag.region, 4,
+      `引用表格跨格拖选须建立 2×2 蒙版: ${JSON.stringify(afterDrag)}`)
+    await page.mouse.click(10, 300)
+    // 2) 边界出格：首格最左连按 Left 直达表格上一行（此前吞键卡死）
+    const cell0 = page.locator('.vsidian-table-grid-row').nth(0)
+      .locator('.vsidian-table-grid-cell').nth(0)
+    await cell0.click()
+    await page.keyboard.press('Home')
+    await page.keyboard.press('ArrowLeft')
+    const afterLeft = await read()
+    assert(afterLeft.head <= source.indexOf('\n\n> | 甲') + 1,
+      `首格最左 Left 应跳出表格到上一行（空行行尾）: ${JSON.stringify(afterLeft)}`)
+    // 3) 边界入格：空行行尾 Right 直达首格内容（跳过隐藏前缀与管道）
+    await page.keyboard.press('ArrowRight')
+    const afterRight = await read()
+    assert.equal(afterRight.head, source.indexOf('甲'),
+      `表格上方空行行尾 Right 应直达首格内容「甲」: ${JSON.stringify(afterRight)}`)
+    // 4) 末格最右 Right 跳出、下方空行行首 Left 回末格内容尾
+    const cellLast = page.locator('.vsidian-table-grid-row').nth(1)
+      .locator('.vsidian-table-grid-cell').nth(1)
+    await cellLast.click()
+    await page.keyboard.press('End')
+    await page.keyboard.press('ArrowRight')
+    const afterExit = await read()
+    assert.equal(afterExit.head, source.indexOf('后文') - 1,
+      `末格最右 Right 应跳出表格到下一行行首: ${JSON.stringify(afterExit)}`)
+    await page.keyboard.press('ArrowLeft')
+    const backIn = await read()
+    assert.equal(backIn.head, source.indexOf('丁') + 1,
+      `下方空行行首 Left 应直达末格内容尾「丁」后: ${JSON.stringify(backIn)}`)
+    assert.deepEqual(errors, [], `导航场景页面异常: ${JSON.stringify(errors)}`)
+    passed++
+    console.log('[引用表格绘制][PASS] 边界导航与拖选蒙版（二轮）')
+  } catch (error) {
+    failures.push(error)
+    console.error(`[引用表格绘制][FAIL] 边界导航与拖选蒙版（二轮）: ${error.message}`)
+  } finally { await page.close() }
+}
 try {
   for (const [name, source, expect] of scenarios) {
     const page = await browser.newPage()
