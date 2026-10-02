@@ -711,13 +711,13 @@ describe('可读行宽滑块（#175：number 型渲染为 range 控件）', () =
   it('拖动中（input）即时刷新值文本但不立即上送（保存语义在释放）', () => {
     const { sent, parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
     const { input, readout } = slider(parent)
+    // 切页动作自身的 uiState 上报不属于本用例语义，清零后断言全量外发为空
+    sent.length = 0
     input.value = '1200'
     input.dispatchEvent(new Event('input'))
     expect(readout.textContent).toBe('1200px')
     expect(input.getAttribute('aria-valuetext')).toBe('1200px')
-    // 断言语义是「拖动中不保存」：sent 里不含 settings.set（切页上下文的
-    // settings.uiState 上报属于会话内恢复契约，与保存链路无关）
-    expect(sent.filter((m) => (m as { kind?: string }).kind === 'settings.set')).toHaveLength(0)
+    expect(sent).toHaveLength(0)
     // 拖回 0：值文本回到铺满档
     input.value = '0'
     input.dispatchEvent(new Event('input'))
@@ -914,6 +914,19 @@ describe('会话内恢复：uiState 上报与 focusSection.scroll 应用（面�
     ])
     // 分页上下文未变时视图不得复位滚动（#155 既有契约），上报后滚动保持
     expect(main.scrollTop).toBe(200)
+  })
+
+  it('浮点滚动位置取整后上报：DOM scrollTop 为 double（zoom/分数缩放），守卫只收非负整数', () => {
+    const { sent, parent } = makeTrackedFullView()
+    clickNav(parent, zhCn['appearance.title'])
+    sent.length = 0
+    const main = mainEl(parent)
+    main.scrollTop = 133.6
+    main.dispatchEvent(new Event('scroll'))
+    // 不取整的消息会在宿主 isWebviewToHost 整条被拒（静默丢弃），恢复失效
+    expect(uiStateMessages(sent)).toEqual([
+      { kind: 'settings.uiState', section: 'appearance', scrollTop: 134 },
+    ])
   })
 
   it('默认分页内滚动：section 回落首个分类（general）——用户未点过侧栏也须可恢复', () => {

@@ -19,6 +19,7 @@ import { zhCn } from '../../src/shared/locales/zh-cn'
 function makePanel() {
   let disposed = false
   let onDispose = () => {}
+  let onViewState: ((event: { webviewPanel: { visible: boolean } }) => void) | undefined
   const sent: unknown[] = []
   const webview = {
     cspSource: 'vscode-resource:',
@@ -34,8 +35,14 @@ function makePanel() {
       return webview
     },
     onDidDispose: (callback: () => void) => { onDispose = callback; return { dispose: () => {} } },
+    onDidChangeViewState: (callback: (event: { webviewPanel: { visible: boolean } }) => void) => {
+      onViewState = callback
+      return { dispose: () => { onViewState = undefined } }
+    },
     dispose: () => { disposed = true; onDispose() },
     reveal: () => {},
+    /** 模拟面板可见性切换（retainContextWhenHidden 不开：隐藏即释放重载） */
+    setHidden: () => onViewState?.({ webviewPanel: { visible: false } }),
   }
   return { panel, sent }
 }
@@ -246,5 +253,26 @@ describe('设置页会话内 UI 态恢复（webview 上报 uiState，重开/重�
       { kind: 'settings.focusSection', section: 'appearance', scroll: 120 },
     ])
     expect(kinds(fresh.sent).filter((k) => k === 'settings.snapshot')).toHaveLength(2)
+  })
+
+  it('面板隐藏重置 ready：显式定位走挂起-握手补发，stale-ready 窗口不被恢复覆盖', () => {
+    // 审查发现（stale-ready）：面板切后台时 webview 释放但 panel 不 dispose，
+    // ready 若保持 true，openWithSection 的立即 postMessage 会落入已卸载的
+    // webview 而丢失，随后重载握手按记忆补发恢复——显式定位被覆盖
+    const fresh = makePanel()
+    vscodeMock.createWebviewPanel.mockReturnValue(fresh.panel)
+    const page = createSettingsPage({ extensionUri: 'extension' } as never,
+      makeService() as never, { getSnapshot: () => ({}) } as never)
+    page.open()
+    page.injectMessage({ kind: 'settings.get' })
+    page.injectMessage({ kind: 'settings.uiState', section: 'keybindings', scrollTop: 40 })
+    // 面板切后台（webview 即将释放重载）：ready 必须重置
+    fresh.panel.setHidden()
+    page.openWithSection('appearance')
+    // ready 已重置：定位挂起，不得向已卸载的 webview 立即发送
+    expect(focusSent(fresh.sent)).toHaveLength(0)
+    // 重载完成握手：补发显式定位（而非恢复 keybindings 记忆）
+    page.injectMessage({ kind: 'settings.get' })
+    expect(focusSent(fresh.sent)).toEqual([{ kind: 'settings.focusSection', section: 'appearance' }])
   })
 })

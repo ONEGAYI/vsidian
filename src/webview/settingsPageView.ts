@@ -425,14 +425,16 @@ export class SettingsPageView {
 
   /** 会话内恢复上报：当前生效分页（active 未选时回落首个分类，与 render
    *  的回落渲染一致）与主区滚动位置。无激活分类（空 defs fixture）不发，
-   *  宿主侧空 section 同样忽略 */
+   *  宿主侧空 section 同样忽略。scrollTop 取整：DOM scrollTop 是 double，
+   *  zoom/分数缩放下产生小数，协议守卫只收非负整数（不取整整条被静默
+   *  丢弃，恢复失效）；恢复误差 ≤0.5px 不可感知 */
   private reportUiState(): void {
     const id = this.active ?? this.categories()[0]?.id
     if (!id) return
     this.bridge.postMessage({
       kind: 'settings.uiState',
       section: id,
-      scrollTop: this.mainEl?.scrollTop ?? 0,
+      scrollTop: Math.round(this.mainEl?.scrollTop ?? 0),
     })
   }
 

@@ -331,8 +331,17 @@ export function createSettingsPage(
       hostLocale(service.getSnapshot()),
     )
     const messageSub = created.webview.onDidReceiveMessage(handleMessage)
+    // retainContextWhenHidden 不开：面板切后台 webview 即释放重载。隐藏即
+    // 重置 ready——stale-ready 窗口（webview 已卸载、重载握手未到）内
+    // openWithSection 的立即 postMessage 会落入已卸载的 webview 而丢失，
+    // 改走 pendingSection 挂起、重载握手补发；重载完成经 settings.get 重新
+    // 置位。重置同时让恢复补发不覆盖此期间的显式定位请求
+    const viewStateSub = created.onDidChangeViewState((event) => {
+      if (!event.webviewPanel.visible) ready = false
+    })
     created.onDidDispose(() => {
       messageSub.dispose()
+      viewStateSub.dispose()
       disposeSub()
     })
   }
