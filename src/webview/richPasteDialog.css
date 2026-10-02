@@ -1,0 +1,38 @@
+:where(.vsidian-paste-dialog-overlay) {
+  position: absolute;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgb(0 0 0 / 0.18);
+}
+:where(.vsidian-paste-dialog) {
+  box-sizing: border-box;
+  width: min(420px, 100%);
+  padding: 20px;
+  color: var(--vscode-editorWidget-foreground, var(--vscode-editor-foreground));
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+  border: 1px solid var(--vscode-contrastBorder, var(--vscode-widget-border, rgb(128 128 128 / 0.4)));
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgb(0 0 0 / 0.25);
+  font-size: 13px;
+  line-height: 1.5;
+}
+:where(.vsidian-paste-dialog p) { margin: 0 0 16px; }
+:where(.vsidian-paste-dialog label) { display: flex; gap: 8px; align-items: center; }
+:where(.vsidian-paste-dialog-actions) { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+:where(.vsidian-paste-dialog button) {
+  color: var(--vscode-button-secondaryForeground, var(--vscode-editor-foreground));
+  background: var(--vscode-button-secondaryBackground, rgb(128 128 128 / 0.2));
+  border: 1px solid var(--vscode-contrastBorder, transparent);
+  padding: 5px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+:where(.vsidian-paste-dialog button[data-paste-choice="keep"]) {
+  color: var(--vscode-button-foreground, white);
+  background: var(--vscode-button-background, #007acc);
+}
+:where(.vsidian-paste-dialog button:focus-visible,.vsidian-paste-dialog input:focus-visible) { outline: 1px solid var(--vscode-focusBorder, #007acc); outline-offset: 2px; }

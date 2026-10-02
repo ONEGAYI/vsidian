@@ -121,6 +121,7 @@ vsidian/
         ├── hoverPopup.ts               # 悬停预览浮层单例
         ├── hoverPopupGeometry.ts       # 悬停浮层几何纯函数
         ├── htmlComment.ts              # 阅读侧 HTML 注释剥离纯函数
+        ├── htmlToMarkdown.ts           # 富文本HTML到Markdown转换
         ├── imagePaste.ts               # 图片粘贴拦截适配层（#161）
         ├── imagePopup.ts               # 图片弹窗全屏浮层单例
         ├── imageResource.ts            # 图片资源状态机（#10）
@@ -172,6 +173,8 @@ vsidian/
         ├── readingVirtualView.ts       # 阅读视图虚拟化装配层
         ├── refContentInstance.ts       # 引用内容实例与挂载生命周期
         ├── refReadingContent.ts        # 引用内容只读 Reading 装配
+        ├── richPasteDialog.css         # 粘贴询问主题与零特异性样式
+        ├── richPasteDialog.ts          # 粘贴格式询问会话模态
         ├── settingsMain.ts             # 设置页 webview 入口
         ├── settingsPage.css            # 设置页样式
         ├── settingsPageView.ts         # 设置页 webview 视图

@@ -659,6 +659,7 @@ export class DocumentSession {
         return Promise.resolve()
       }
       case 'settings.set':
+      case 'paste.preferences.set':
         // #33 设置保存只在设置页 webview 链路（settingsPage 模块）处理，
         // 编辑器面板不会发出；到达此处无副作用
         return Promise.resolve()

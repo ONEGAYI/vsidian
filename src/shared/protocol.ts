@@ -33,6 +33,7 @@ export type TableEditOp =
 
 /** 宿主 → webview 消息 */
 export type HostToWebview =
+  | { kind: 'paste.preferences.result'; reqId: number; ok: boolean }
   /** ready 后首发：全文 + 当前权威版本 */
   | { kind: 'init'; sessionId: string; docUri: string; version: number; text: string }
   /** 编辑请求已应用（或被拒绝）。
@@ -553,6 +554,7 @@ export type HostToWebview =
 
 /** webview → 宿主消息 */
 export type WebviewToHost =
+  | { kind: 'paste.preferences.set'; reqId: number; preserveFormatting: boolean }
   /** webview 脚本加载完成，请求 init。
    *  已知限制（C-8）：ready 与 init 之间的毫秒级窗口内到达的 doc.changed
    *  会被未 ready 面板丢弃——装载以 init 全文为准，内容不丢；仅当窗口内
@@ -2692,6 +2694,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'clipboard.read':
       // #183 粘贴桥：reqId 会话面板内自增（对应 clipboard.read.result）
       return isPositiveInt(v.reqId)
+    case 'paste.preferences.set':
+      return isPositiveInt(v.reqId) && typeof v.preserveFormatting === 'boolean'
     case 'conflict.action':
       return (
         isString(v.sessionId) &&
@@ -3255,6 +3259,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         return isString(v.text)
       }
       return v.ok === false && v.reason === 'read-failed'
+    case 'paste.preferences.result':
+      return isPositiveInt(v.reqId) && typeof v.ok === 'boolean'
     case 'contextMenu.test.contextMenu':
       return isNonNegativeInt(v.pos)
     case 'contextMenu.test.menuClick':

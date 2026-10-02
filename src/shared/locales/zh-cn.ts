@@ -5,12 +5,26 @@
 import type { MessageKey } from './en'
 
 export const zhCn: Record<MessageKey, string> = {
+  'setting.pastePreserveFormatting.title': '粘贴保留富文本',
+  'setting.pastePreserveFormatting.description': '普通粘贴时，将支持的富文本格式转换为 Markdown。',
+  'setting.pasteAskBefore.title': '粘贴前询问',
+  'setting.pasteAskBefore.description': '遇到可转换格式时询问是否保留，可重新开启以恢复提示。',
+  'paste.dialog.question': '是否保留粘贴内容中的格式？',
+  'paste.dialog.keep': '保留格式',
+  'paste.dialog.plain': '仅粘贴文本',
+  'paste.dialog.cancel': '取消',
+  'paste.dialog.remember': '不再提示该信息',
+  'toast.pasteFormattingKept': '已保留粘贴内容中的格式',
+  'toast.pasteFormattingFailed': '无法保留格式，已粘贴为纯文本',
+  'toast.pasteNoText': '无法粘贴：未能提取可用文本',
+  'toast.pastePreferencesFailed': '未能保存粘贴偏好，本次选择仅对本次粘贴生效',
   'command.clipboard.paste.title': '粘贴',
   'command.clipboard.pastePlain.title': '粘贴纯文本',
   'contextMenu.pastePlain': '粘贴纯文本',
   'toast.pasteImageOnly': '无法将图片粘贴为纯文本，请使用{paste}粘贴图片',
   'toast.pasteTextOnly': '已粘贴文本，未粘贴图片；如需图片，请使用{paste}',
   'styleRef.category.toast': '轻提示',
+  'styleRef.category.richPaste': '粘贴询问',
   // ---- settings.（设置页框架）----
   'settings.pageTitle': 'Vsidian 设置',
   'settings.searchPlaceholder': '搜索设置…',

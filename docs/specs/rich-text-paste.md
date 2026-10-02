@@ -1,6 +1,6 @@
 # Live 富文本粘贴
 
-状态：2026-10-02 用户确认产品行为及四票拆分；已创建 #305–#308，#305 本地实现与自动验证完成，其余待实施。Toast 数值为初始视觉方案，待用户视觉验收。
+状态：2026-10-02 用户确认产品行为及四票拆分；已创建 #305–#308，#305–#306 本地实现与自动验证完成，#307–#308 待实施。Toast 数值为初始视觉方案，待用户视觉验收。
 
 ## 问题与目标
 
@@ -196,6 +196,16 @@ Blocked by: T2、T3。
 - 真宿主 1.82.3 `plainPasteHost.mjs` 已实测多格式 read/write（text/plain、text/html、image/png）、Ctrl+Shift+V 落宿主 TextDocument、纯文本菜单图片路径及 `paint.toast.visible`、焦点保持、宿主通知不清除本地提示。浏览器 `plainPaste` 覆盖主题/片段覆盖/窄视口/减少动态效果并保存截图；现有 `contextMenu` / `imagePaste` 套件通过。具体视觉观感、真实外部软件与物理快捷键仍待用户验收。
 
 本节只记录 #305；#306–#308 的转换、询问设置及宿主分步历史尚待各票实施。
+
+## #306 实施落档（2026-10-02）
+
+- 普通原生 paste 与菜单/改绑快照共用 `processRichPaste`。独立图片文件项先走原有资产管线；代码（含行内代码）与表格上下文优先纯文本，不扩大区域粘贴。`htmlToMarkdown` 只解析脱离活动文档的 HTML，不执行脚本、样式表或加载资源；支持语义标签及内联 font-weight/font-style/line-through 声明，按继承后的行内语义片段组合，避免嵌套同标记变成其他格式。Markdown 字面符号会转义；普通包装不会仅因转义差异而触发询问。
+- HTML-only 纯文本提取新增格间 Tab 与行间换行；已有 text/plain（包括空串）保持原样优先。普通 HTML 图片只保留持久 HTTP(S) 外链，本地/临时地址及 VSCode HTTPS 资源代理仅保留 alt；显式纯文本入口也识别 HTML img，给出未粘图片的 warning，不把 HTML img 伪装成独立文件项。
+- `RichPasteDialog` 为局部模态：三按钮、记忆勾选、Tab/Enter/Esc；不新增全局操作。记忆通过限定的 `paste.preferences.set` 端点，原子保存总开关及 ask=false，复用 SettingsService 的持久化与广播；两个设置进入扩展设置页「编辑」小节，关闭总开关时询问灰化保值，可恢复询问。取消/Esc 不保存。
+- `applyRichPaste(plain, formatted, feedback)` 当前只插入一笔，供 #307 接入两阶段历史；成功或已回退提示待宿主 edit.ack、在途与缓冲收敛后投递，写失败/暂停不报告格式成功。转换无可用文本时不改文档，仅显示 error。模态后的目标、文档、选区与模式代次重新校验，迟到结果不跨目标写入。
+- 公开新增 `.vsidian-paste-dialog-overlay` / `.vsidian-paste-dialog` 两条样式契约，中英说明及生成指南同步；内置样式使用 :where 零特异性。已发布参照 v0.8.0（03efef0），未发布基线 f9b21d8982fa2029e031b470916598e16312088b，旧契约无移除。自动验证含 Markdown 渲染语义复核、真实 Clipboard API 浏览器 native/菜单/模态与设置页回显；真实 VSCode 1.82.3 已验证格式落宿主文档、询问记忆持久化、一次 undo/redo、实际成功后的 toast 绘制及菜单同源链路。
+
+真实外部软件复制及视觉观感仍待人工验收；合并前完整批次回归由收口票执行。
 
 ## 不包含
 

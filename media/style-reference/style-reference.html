@@ -1249,7 +1249,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
   </section>
   <section class="domain" data-domain="chrome">
-    <h1 style="font-size:19px;margin-bottom:4px">界面域（112 条）</h1>
+    <h1 style="font-size:19px;margin-bottom:4px">界面域（114 条）</h1>
     <p class="note">界面域条目（#133 起逐项核实）：静态入口经探针在真实渲染中断言，交互态入口由浏览器/集成套件按行为路径验证；第三方渲染器（KaTeX/Mermaid）内部 DOM 不承诺为稳定接口（见各域「限制」类目）。</p>
     <h2>界面域 · 公式（5）</h2>
     <article class="entry" id="live-math">
@@ -2764,6 +2764,31 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <pre><code>#app { --vsidian-toast-error-duration: 5000; }</code></pre>
       <p class="verify">验证：单元 toastCssContract：变量定义与消费；单元 toast：生命周期；浏览器 plainPaste：片段覆盖、主题、焦点与绘制层；真宿主 plainPasteHost：paint.toast.visible</p>
       <p class="life">引入：#305（2026-10-02）</p>
+    </article>
+    <h2>界面域 · 粘贴询问（2）</h2>
+    <article class="entry" id="paste-dialog-overlay">
+      <h3><code>.vsidian-paste-dialog-overlay</code><span class="eid">paste-dialog-overlay</span></h3>
+      <p class="purpose">粘贴格式询问模态遮罩：拦截局部交互，取消不产生编辑。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-none">none</span></p>
+<p class="states">状态：仅检测到可转换格式且询问开启时挂载；模式切换或目标失效不插入迟到结果。</p>
+      <p class="obsidian">Obsidian 对应：无（Vsidian 粘贴询问）</p>
+
+      <p class="dom">DOM 关系：#app 的直接后代，覆盖当前编辑器视口。</p>
+      <pre><code>.vsidian-paste-dialog-overlay { background: rgb(0 0 0 / 0.1); }</code></pre>
+      <p class="verify">验证：单元 richPasteInteraction：询问/取消/目标失效；浏览器 richPaste：模态绘制与键盘焦点</p>
+      <p class="life">引入：#306（2026-10-02）</p>
+    </article>
+    <article class="entry" id="paste-dialog">
+      <h3><code>.vsidian-paste-dialog</code><span class="eid">paste-dialog</span></h3>
+      <p class="purpose">保留格式、仅文本、取消与不再提示复选框的对话框；键盘Tab聚焦循环，Esc取消。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-none">none</span></p>
+<p class="states">状态：通过选择保存本次决定；勾选且未取消时保存两个偏好。</p>
+      <p class="obsidian">Obsidian 对应：无（Vsidian 粘贴询问）</p>
+
+      <p class="dom">DOM 关系：.vsidian-paste-dialog-overlay 的直接后代；role=dialog、aria-modal=true。</p>
+      <pre><code>.vsidian-paste-dialog { border-radius: 12px; }</code></pre>
+      <p class="verify">验证：单元 richPasteInteraction：三种选择；浏览器 richPaste：模态背景/焦点与记忆回显；真宿主 richPasteHost：设置持久化</p>
+      <p class="life">引入：#306（2026-10-02）</p>
     </article>
   </section>
 <p style="margin-top:48px;color:color-mix(in srgb, currentColor 50%, transparent);font-size:12px">由 src/shared/styleContract.ts 生成（scripts/genStyleGuide.mjs）；产物一致性由 test/unit/styleGuideGen.test.ts 钉住。</p>

@@ -146,6 +146,7 @@ export const STYLE_CONTRACT_CATEGORIES: readonly StyleContractCategory[] = [
   { id: 'loading', domain: 'chrome', title: '加载占位', titleKey: 'styleRef.category.loading', order: 14 },
   { id: 'tooltip', domain: 'chrome', title: '悬停提示', titleKey: 'styleRef.category.tooltip', order: 15 },
   { id: 'toast', domain: 'chrome', title: '轻提示', titleKey: 'styleRef.category.toast', order: 16 },
+  { id: 'rich-paste', domain: 'chrome', title: '粘贴询问', titleKey: 'styleRef.category.richPaste', order: 17 },
 ]
 
 /** 类目按 ID 索引（消费方查找用） */
@@ -3668,6 +3669,50 @@ export const STYLE_CONTRACT_ENTRIES: readonly StyleContractEntry[] = [
     "target": "--vsidian-toast-error-duration",
     "purpose": "错误停留毫秒数（无单位）",
     "example": "#app { --vsidian-toast-error-duration: 5000; }"
+  },
+  {
+    "id": "paste-dialog-overlay",
+    "domain": "chrome",
+    "category": "rich-paste",
+    "kind": "container",
+    "target": ".vsidian-paste-dialog-overlay",
+    "purpose": "粘贴格式询问模态遮罩：拦截局部交互，取消不产生编辑。",
+    "views": [
+      "live"
+    ],
+    "states": "仅检测到可转换格式且询问开启时挂载；模式切换或目标失效不插入迟到结果。",
+    "dom": "#app 的直接后代，覆盖当前编辑器视口。",
+    "example": ".vsidian-paste-dialog-overlay { background: rgb(0 0 0 / 0.1); }",
+    "obsidian": {
+      "counterpart": "无（Vsidian 粘贴询问）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 richPasteInteraction：询问/取消/目标失效；浏览器 richPaste：模态绘制与键盘焦点"
+    ],
+    "introduced": "#306（2026-10-02）"
+  },
+  {
+    "id": "paste-dialog",
+    "domain": "chrome",
+    "category": "rich-paste",
+    "kind": "selector",
+    "target": ".vsidian-paste-dialog",
+    "purpose": "保留格式、仅文本、取消与不再提示复选框的对话框；键盘Tab聚焦循环，Esc取消。",
+    "views": [
+      "live"
+    ],
+    "states": "通过选择保存本次决定；勾选且未取消时保存两个偏好。",
+    "dom": ".vsidian-paste-dialog-overlay 的直接后代；role=dialog、aria-modal=true。",
+    "example": ".vsidian-paste-dialog { border-radius: 12px; }",
+    "obsidian": {
+      "counterpart": "无（Vsidian 粘贴询问）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 richPasteInteraction：三种选择；浏览器 richPaste：模态背景/焦点与记忆回显；真宿主 richPasteHost：设置持久化"
+    ],
+    "introduced": "#306（2026-10-02）"
   },
 ]
 

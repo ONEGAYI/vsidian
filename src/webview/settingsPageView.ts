@@ -330,7 +330,7 @@ export class SettingsPageView {
   /** 编辑器页「编辑」小节：编辑能力类（#237 多光标 editor.multicursor；
    *  批次后续票的选词/分词设置同归此节） */
   private editingDefs(): readonly SettingDefinition[] {
-    return this.defs.filter((d) => d.key.startsWith('editor.multicursor'))
+    return this.defs.filter((d) => d.key.startsWith('editor.multicursor') || d.key.startsWith('editor.paste'))
   }
   private codeblockDefs(): readonly SettingDefinition[] {
     return this.defs.filter((d) => d.key.startsWith('codeblock.'))
@@ -352,7 +352,7 @@ export class SettingsPageView {
    *  一并排除） */
   private displayDefs(): readonly SettingDefinition[] {
     return this.editorDefs().filter(
-      (d) => !d.key.startsWith('editor.symbol') && !d.key.startsWith('editor.multicursor') &&
+      (d) => !d.key.startsWith('editor.symbol') && !d.key.startsWith('editor.multicursor') && !d.key.startsWith('editor.paste') &&
       !d.key.startsWith('codeblock.') && !d.key.startsWith('image.') &&
       !d.key.startsWith('hover.') && !d.key.startsWith('embed.'))
   }

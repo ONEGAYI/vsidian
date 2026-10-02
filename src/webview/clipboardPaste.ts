@@ -5,6 +5,15 @@ export interface ClipboardSnapshot {
   images: File[]
 }
 
+/** HTML里的图片属于格式数据，不伪装为独立图片文件或触发资产导入。 */
+export function clipboardHasImages(snapshot: ClipboardSnapshot): boolean {
+  if (snapshot.images.length) return true
+  if (!snapshot.html) return false
+  const template = document.createElement('template')
+  template.innerHTML = snapshot.html
+  return !!template.content.querySelector('img')
+}
+
 interface ClipboardReader {
   read(): Promise<readonly { types: readonly string[]; getType(type: string): Promise<Blob> }[]>
 }
@@ -39,6 +48,10 @@ export function clipboardPlainText(snapshot: ClipboardSnapshot): string {
   template.content.querySelectorAll('script,style,iframe,object,embed').forEach((el) => el.remove())
   template.content.querySelectorAll('br').forEach((el) => el.replaceWith('\n'))
   template.content.querySelectorAll('img').forEach((el) => el.replaceWith(el.getAttribute('alt') ?? ''))
+  template.content.querySelectorAll('tr').forEach((row) => {
+    const cells = Array.from(row.children).filter((cell) => cell.matches('th,td'))
+    for (const cell of cells.slice(0, -1)) cell.append('\t')
+  })
   template.content.querySelectorAll('p,div,li,h1,h2,h3,h4,h5,h6,blockquote,pre,tr').forEach((el) => el.append('\n'))
   return (template.content.textContent ?? '').replace(/\n+$/, '').replace(/\r\n?/g, '\n')
 }

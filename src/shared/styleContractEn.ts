@@ -1414,6 +1414,22 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
       "counterpart": "None (Vsidian local lightweight notifications)"
     }
   },
+  "paste-dialog-overlay": {
+    "purpose": "Overlay for the paste-formatting prompt; cancellation creates no edit.",
+    "states": "Mounted only when formatting can be converted and prompting is enabled; stale results cannot insert after mode or target changes.",
+    "dom": "Direct child of #app, covering the current editor viewport.",
+    "obsidian": {
+      "counterpart": "None (Vsidian paste prompt)"
+    }
+  },
+  "paste-dialog": {
+    "purpose": "Dialog with Keep formatting, Paste text only, Cancel and a Do not show again checkbox; Tab cycles focus and Escape cancels.",
+    "states": "Choice applies to this paste; checking Remember saves two preferences only when not cancelled.",
+    "dom": "Direct child of .vsidian-paste-dialog-overlay; role=dialog and aria-modal=true.",
+    "obsidian": {
+      "counterpart": "None (Vsidian paste prompt)"
+    }
+  },
 }
 
 /**
