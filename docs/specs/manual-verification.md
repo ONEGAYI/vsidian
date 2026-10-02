@@ -1514,7 +1514,9 @@ Live 渲染态经 lezer `HorizontalRule` 节点驱动：未触及该行时源文
 
 #308 原始证据已复制到统一工作树 `out/test/rich-paste/ticket-308/`：单元首红/完整红/定向绿日志、`browser-first/` 首轮失败报告、`browser-native-green/` 实际外部来源绿报告及完整截图。首轮兼容失败为 Windows native plain 以 CRLF 提供而新断言直接比较 CM6 LF，修正期望后通过；原始剪贴板快照保留。此前 #305–#307 的完整报告由统一工作树 `out/test/rich-paste/ticket-305/`、`ticket-306/`、`ticket-307/` 承接。
 
-**统一分支终局结果**：产品提交 `0aa321fa08350d268942ae31059d7ca54923e27e` 编译通过；244 文件/5049 条 vitest 与 118 条启动器契约全绿；61/61 浏览器套件通过；VSCode 1.82.3 默认单宿主 `all` 248/248 集成通过，包含四项敏感用例。原生剪贴板/菜单/询问记忆、实际 ACK 后反馈及 A/B/C、快速历史、多面板和源码模式又在最终组合中通过。样式历史基线复验、八项门禁、文件树严格检查及差异格式检查通过；证据集中在 `out/test/rich-paste/final/`，浏览器原生报告为 `out/test/browser-runs/run-RunAu7/`。
+**对齐 main 前的旧基线结果**：产品提交 `0aa321fa08350d268942ae31059d7ca54923e27e` 编译通过；244 文件/5049 条 vitest 与 118 条启动器契约全绿；61/61 浏览器套件通过；VSCode 1.82.3 默认单宿主 `all` 248/248 集成通过，包含四项敏感用例。原生剪贴板/菜单/询问记忆、实际 ACK 后反馈及 A/B/C、快速历史、多面板和源码模式通过。样式历史基线复验、八项门禁、文件树严格检查及差异格式检查通过；此批旧证据保留在 `out/test/rich-paste/final/` 与 `out/test/browser-runs/run-RunAu7/`，不作为新 main 组合的通过依据。
+
+**对齐最新 main 后的终局结果**：分支普通 rebase 到 main `15007032a81bdc25182953d81dea62bc1160f402`，新产品提交 `6962b6e1a936782168cb4c58519c4aa568397fad` 编译、246 文件/5214 条 vitest、118 条 node 契约、64/64 浏览器及默认单宿主 `all` 252/252 集成全部通过。两个 native 剪贴板宿主在新组合中再次通过询问/模态绘制、实际 ACK 后提示及完整历史矩阵；样式历史基线、八项门禁、文件树严格检查与差异格式检查通过。保留 main 的引用视图组、设置页恢复及引用块表格行为；新报告位于 `out/test/rich-paste/final/main-sync/` 和 `out/test/browser-runs/run-Sh2bSp/`，`final/summary.json` 分开登记旧结果与 `afterMainSync` 新结果。
 
 首次完整浏览器设置页外框断言因 `0.094px` 的原生整数滚动余量失败；修复验证采用一设备像素外框容差，并严格检查内部标题、控件、颜色及命中。真实生产滚动未改。审查发现的来源实体、图片含文本提示过早、透明祖先误报绘制问题已修复并保留红绿证据；询问问句/三按钮的实际宿主绘制与透明祖先负例保存为 `final/review-dialog-host-paint.json`。首次失败与最终绿报告分开记录于 `final/summary.json`，不将定向通过或四片首轮与默认单宿主终局混用。独立审查的最终复核由根会话记录，人工待验项保持如下。
 
