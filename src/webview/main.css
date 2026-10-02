@@ -4515,6 +4515,72 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
   outline-offset: 1px;
 }
 
+/* ---- P2-04（#281）嵌入内部 Live：头部动作组（保存/模式切换/打开）、
+   未保存圆点与编辑器容器。动作按钮与打开入口同款图标按钮规则（并列
+   选择器，悬停浮层同款规则见 hover-popup 条目）；圆点为精确字符 `·`
+   （P2-U16），警示色随主题变量。编辑器容器与 Reading 容器并列于滚动
+   区——内部 Live 态由内联 max-height 约束、CM6 自身 scroller 滚动
+   （视口测量依赖 cm-scroller 为滚动元素，不用外层滚动区） ---- */
+
+/* 顶部栏右侧动作组：标题占剩余宽，动作靠右成组 */
+#app .vsidian-embed-card .vsidian-embed-card-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  margin-left: auto;
+}
+
+/* 保存目标 / 内部模式切换入口：与打开入口同款图标按钮 */
+#app .vsidian-embed-card .vsidian-embed-card-save,
+#app .vsidian-embed-card .vsidian-embed-card-mode {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--vscode-icon-foreground, inherit);
+  cursor: pointer;
+}
+
+#app .vsidian-embed-card .vsidian-embed-card-save:hover,
+#app .vsidian-embed-card .vsidian-embed-card-save:focus-visible,
+#app .vsidian-embed-card .vsidian-embed-card-mode:hover,
+#app .vsidian-embed-card .vsidian-embed-card-mode:focus-visible {
+  border-color: var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
+  background: var(--vscode-editor-background, transparent);
+}
+
+#app .vsidian-embed-card .vsidian-embed-card-save:focus-visible,
+#app .vsidian-embed-card .vsidian-embed-card-mode:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #4fc1ff);
+  outline-offset: 1px;
+}
+
+/* 目标未保存圆点（`·`）：警示色，紧随文件名 */
+#app .vsidian-embed-card .vsidian-embed-card-dirty {
+  flex: none;
+  margin-left: 2px;
+  font-weight: 700;
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+/* 内部 Live 编辑器容器：限高由内联 max-height 写入（随设置热更），滚动
+   由 CM6 自身 cm-scroller 承担（容器不滚动，避免 CM6 视口测量失效） */
+#app .vsidian-embed-card .vsidian-embed-card-live {
+  overflow: hidden;
+}
+
+#app .vsidian-embed-card .vsidian-embed-card-live .cm-editor {
+  max-height: 100%;
+}
+
 /* 内容滚动区：长内容内部滚动。max-height 缺省 480（规格一期初值），
    设置驱动的内联 max-height 优先（embed.maxHeight 设置项） */
 #app .vsidian-embed-card .vsidian-embed-card-scroll {

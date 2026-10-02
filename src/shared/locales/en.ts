@@ -454,6 +454,14 @@ export const en = {
    *  existing Vsidian open behavior, never edits the embed source) */
   'embed.loading': 'Loading embedded note…',
   'embed.openTarget': 'Open target note',
+  /** P2-04 (#281) embed internal Live: mode toggle / save target / dirty dot
+   *  and bind-failed / paused notes (tooltips share the same keys) */
+  'embed.modeToLive': 'Edit inside reference (switch to Live)',
+  'embed.modeToReading': 'Switch to Reading view',
+  'embed.saveTarget': 'Save target note',
+  'embed.dirtyDot': 'Target has unsaved changes',
+  'embed.liveBindFailed': 'Cannot attach target editing (target unavailable or not Markdown).',
+  'embed.livePaused': 'Editing paused: unsafe to write back, input retained.',
 
   /** 反链面板（#197：四态与条目；形态改版批次：工具栏/排序/搜索/页头） */
   'backlinks.label': 'Backlinks',
@@ -650,6 +658,7 @@ export const en = {
   'command.editor.addCursorBelow.title': 'Add cursor below',
   /** #221 preview the link at the cursor/focus (manual hover-popup open; keyboard enters the popup and Esc returns) */
   'command.ui.hoverPreviewLink.title': 'Preview the current link',
+  'command.ui.embedToggleMode.title': 'Toggle reference internal view mode',
 
   // ---- #159 锚点跳转（块引用定位与本文件锚点）----
   /** 块 id 缺失提示（与标题缺失同款「打开后提示」行为） */

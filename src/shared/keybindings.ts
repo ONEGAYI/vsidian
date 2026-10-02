@@ -108,6 +108,12 @@ export const UI_OPERATIONS = [
   // 生效（mode: both 只表示两模式下命令均可用——目标判定各自实现）；
   // 默认不占键位，键位留给用户按需绑定（评估记录见 docs/specs/keybindings.md）
   { id: 'hoverPreviewLink', command: 'onegayi.vsidian.ui.hoverPreviewLink', titleKey: 'command.ui.hoverPreviewLink.title', mode: 'both', writes: false, defaults: [] },
+  // P2-04（#281）切换焦点嵌入的内部模式（Reading ↔ Live）：与嵌入卡片头部
+  // 模式按钮同一实现（焦点不在嵌入编辑器内零操作）。切换本身只建/拆目标
+  // 编辑端口、不写正文（writes: false——写门控按「是否写权威文本」判定）。
+  // 规格约定模式切换默认未绑定；保存目标不设独立操作（复用焦点内
+  // Ctrl+S 路由，见 syncController docKeydown 的 P2-04 段）
+  { id: 'embedToggleMode', command: 'onegayi.vsidian.ui.embedToggleMode', titleKey: 'command.ui.embedToggleMode.title', mode: 'both', writes: false, defaults: [] },
   // #237 多光标·上下添加光标：@codemirror/commands 内置命令，webview 本地
   // 消化（快捷键经 keybindingRouter 本地分支，命令面板经 ui.command 回发，
   // 两条入口共用 webview 同一实现，不做出站宿主往返）。仅 Live 正文生效

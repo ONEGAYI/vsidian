@@ -1120,6 +1120,37 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
     '二层正文。',
     '',
   ].join('\n'), 'utf8')
+  // P2-04（#281）嵌入内部 Live 编辑：独立文件对（不与 #222 嵌入样例共
+  // 享目标——写回断言互不干扰）。父文档两枚同目标 occurrence（多端口
+  // 隔离）；CRLF 目标为 CRLF 字节（坐标转换断言）。
+  writeFileSync(path.join(wsDir, 'p204-编辑嵌入.md'), [
+    '# P2-04 编辑嵌入',
+    '',
+    '![[p204-编辑目标]]',
+    '',
+    '中间段落。',
+    '',
+    '![[p204-编辑目标]]',
+    '',
+    '尾部段落。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p204-编辑目标.md'), [
+    '# p204 编辑目标',
+    '',
+    '目标首段。',
+    '',
+    '目标次段。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p204-CRLF嵌入.md'), [
+    '# P2-04 CRLF 嵌入',
+    '',
+    '![[p204-CRLF目标]]',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p204-CRLF目标.md'),
+    'p204 CRLF 目标首行\r\np204 第二行\r\n', 'utf8')
   writeFileSync(path.join(wsDir, '嵌入改写.md'), [
     '# 嵌入改写',
     '',

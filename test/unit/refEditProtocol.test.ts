@@ -1,0 +1,134 @@
+// P2-04（#281）refEdit 端口协议契约：嵌入内部 Live 与宿主 B 会话之间的
+// 绑定/出站/推送消息形态与运行期校验——「不信任前端任意 URI、释放后迟到
+// 消息按 portId 拒绝」的第一道形态学防线（行为级拒绝在 provider 路由层，
+// 由集成用例钉住；本文件钉住协议层的接受/拒绝边界）。
+import { describe, expect, it } from 'vitest'
+import { isHostToWebview, isWebviewToHost } from '../../src/shared/protocol'
+
+const PANEL = { panelSessionId: 'panel-1', panelDocUri: 'file:///d%3A/notes/a.md' }
+
+describe('refEdit 协议：webview → 宿主', () => {
+  it('refEdit.bind 接受完整载荷', () => {
+    expect(isWebviewToHost({
+      kind: 'refEdit.bind',
+      ...PANEL,
+      fsPath: 'D:\\notes\\b.md',
+      occurrence: '12::![[b]]',
+      reqId: 1,
+    })).toBe(true)
+  })
+
+  it('refEdit.bind 拒绝缺字段/错型载荷', () => {
+    expect(isWebviewToHost({ kind: 'refEdit.bind', ...PANEL, fsPath: 'D:\\b.md', occurrence: 'k' })).toBe(false)
+    expect(isWebviewToHost({ kind: 'refEdit.bind', ...PANEL, fsPath: 'D:\\b.md', occurrence: 'k', reqId: 0 })).toBe(false)
+    expect(isWebviewToHost({ kind: 'refEdit.bind', ...PANEL, occurrence: 'k', reqId: 1 })).toBe(false)
+  })
+
+  it('refEdit.message 携带编辑通道内消息时接受（edit.request / history.request）', () => {
+    expect(isWebviewToHost({
+      kind: 'refEdit.message',
+      ...PANEL,
+      portId: 'panel-9',
+      fsPath: 'D:\\notes\\b.md',
+      message: {
+        kind: 'edit.request',
+        sessionId: 'panel-9',
+        docUri: 'file:///d%3A/notes/b.md',
+        seq: 1,
+        baseVersion: 3,
+        changes: [{ offset: 0, length: 0, text: 'x' }],
+      },
+    })).toBe(true)
+    expect(isWebviewToHost({
+      kind: 'refEdit.message',
+      ...PANEL,
+      portId: 'panel-9',
+      fsPath: 'D:\\notes\\b.md',
+      message: { kind: 'history.request', op: 'undo' },
+    })).toBe(true)
+  })
+
+  it('refEdit.message 拒绝非编辑通道内消息（link.activate 不得混入目标端口）', () => {
+    expect(isWebviewToHost({
+      kind: 'refEdit.message',
+      ...PANEL,
+      portId: 'panel-9',
+      fsPath: 'D:\\notes\\b.md',
+      message: {
+        kind: 'link.activate',
+        sessionId: 'panel-9',
+        docUri: 'file:///d%3A/notes/b.md',
+        href: './c.md',
+        srcStart: 0,
+        srcEnd: 8,
+      },
+    })).toBe(false)
+  })
+
+  it('refEdit.save / refEdit.unbind 接受完整载荷', () => {
+    expect(isWebviewToHost({
+      kind: 'refEdit.save',
+      ...PANEL,
+      portId: 'panel-9',
+      fsPath: 'D:\\notes\\b.md',
+    })).toBe(true)
+    expect(isWebviewToHost({
+      kind: 'refEdit.unbind',
+      ...PANEL,
+      portId: 'panel-9',
+      fsPath: 'D:\\notes\\b.md',
+    })).toBe(true)
+    expect(isWebviewToHost({ kind: 'refEdit.save', ...PANEL, portId: '', fsPath: 'D:\\b.md' })).toBe(false)
+  })
+})
+
+describe('refEdit 协议：宿主 → webview', () => {
+  it('refEdit.bound 成功形态携带 portId/docUri/version/dirty', () => {
+    expect(isHostToWebview({
+      kind: 'refEdit.bound',
+      reqId: 1,
+      ok: true,
+      portId: 'panel-9',
+      fsPath: 'D:\\notes\\b.md',
+      docUri: 'file:///d%3A/notes/b.md',
+      version: 2,
+      dirty: false,
+    })).toBe(true)
+  })
+
+  it('refEdit.bound 失败形态限定原因码', () => {
+    expect(isHostToWebview({ kind: 'refEdit.bound', reqId: 1, ok: false, reason: 'source' })).toBe(true)
+    expect(isHostToWebview({ kind: 'refEdit.bound', reqId: 1, ok: false, reason: 'not-markdown' })).toBe(true)
+    expect(isHostToWebview({ kind: 'refEdit.bound', reqId: 1, ok: false, reason: 'open-failed' })).toBe(true)
+    expect(isHostToWebview({ kind: 'refEdit.bound', reqId: 1, ok: false, reason: 'whatever' })).toBe(false)
+  })
+
+  it('refEdit.push 只接受编辑通道事件（init/ack/doc.changed/resync/suspended）', () => {
+    expect(isHostToWebview({
+      kind: 'refEdit.push',
+      portId: 'panel-9',
+      fsPath: 'D:\\b.md',
+      message: { kind: 'doc.changed', version: 4, changes: [], origin: 'external' },
+    })).toBe(true)
+    expect(isHostToWebview({
+      kind: 'refEdit.push',
+      portId: 'panel-9',
+      fsPath: 'D:\\b.md',
+      message: { kind: 'session.suspended', version: 4, reason: 'conflict' },
+    })).toBe(true)
+    // 非编辑通道事件不得作为 push 载荷（settings/locale 走根通道）
+    expect(isHostToWebview({
+      kind: 'refEdit.push',
+      portId: 'panel-9',
+      fsPath: 'D:\\b.md',
+      message: { kind: 'view.mode.set', mode: 'live' },
+    })).toBe(false)
+  })
+
+  it('refEdit.dirty / refEdit.save.result 接受完整载荷', () => {
+    expect(isHostToWebview({ kind: 'refEdit.dirty', fsPath: 'D:\\b.md', dirty: true })).toBe(true)
+    expect(isHostToWebview({ kind: 'refEdit.dirty', fsPath: 'D:\\b.md' })).toBe(false)
+    expect(isHostToWebview({ kind: 'refEdit.save.result', portId: 'panel-9', fsPath: 'D:\\b.md', ok: true })).toBe(true)
+    expect(isHostToWebview({ kind: 'refEdit.save.result', portId: 'panel-9', fsPath: 'D:\\b.md' })).toBe(false)
+  })
+})

@@ -367,6 +367,11 @@
         "category": "Vsidian"
       },
       {
+        "command": "onegayi.vsidian.ui.embedToggleMode",
+        "title": "%command.ui.embedToggleMode.title%",
+        "category": "Vsidian"
+      },
+      {
         "command": "onegayi.vsidian.wordMotion.cursorLeft",
         "title": "%command.wordMotion.cursorLeft.title%",
         "category": "Vsidian"

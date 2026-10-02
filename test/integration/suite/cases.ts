@@ -999,6 +999,14 @@ interface ViewState {
     textLen?: number
     /** #243 现有虚拟窗口观测；仅取目标自身块数，排除子卡正文长度。 */
     viewStats?: { totalBlocks: number; mountedBlocks: number } | null
+    /** P2-04（#281）内部模式与目标编辑端口观测 */
+    internalMode?: 'reading' | 'live'
+    liveBound?: boolean
+    livePortId?: string | null
+    liveDirty?: boolean
+    liveSuspended?: boolean
+    /** 内部 Live 编辑器文档长度（-1 = 无实例） */
+    liveTextLen?: number
   }>
   /** #223 Live 嵌入显隐观测：嵌入表逐枚的源码显形态（selectionTouchesRange 语义） */
   liveEmbedReveal?: Array<{ inner: string; line: number; revealed: boolean }>
@@ -13262,6 +13270,234 @@ export const cases: Array<[string, () => Promise<void>]> = [
     }
     await new Promise((r) => setTimeout(r, 400))
     console.log('[#248] 表格格内 rename 转义保真与撤销恢复通过')
+  }],
+  // ---- P2-04（#281）嵌入内部 Live：第一条可写链路的真宿主证明。父面板
+  // 默认 Live → 未覆盖嵌入继承内部 Live → 绑定目标编辑端口（B 的
+  // DocumentSession 虚拟面板）→ 普通输入只写 B；A 零写回/零 dirty；dirty
+  // 推送驱动圆点；保存走 TextDocument.save（P2-01 验证路线）。 ----
+  ['P2-04 嵌入内部 Live：输入只写目标、dirty 圆点与保存路由（#281）', async () => {
+    await openWithEditor('p204-编辑嵌入.md')
+    await waitSessionReady('p204-编辑嵌入.md')
+    const uri = wsUri('p204-编辑嵌入.md').toString()
+    const targetUri = wsUri('p204-编辑目标.md')
+    const parentBefore = await readDisk('p204-编辑嵌入.md')
+    const targetBefore = await readDisk('p204-编辑目标.md')
+    const parentDoc = await vscode.workspace.openTextDocument(wsUri('p204-编辑嵌入.md'))
+    const session0 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+
+    // 两枚同目标 occurrence 均装载并绑定（父 Live 继承 → 自动 bind）
+    const bound = await waitViewState('p204-编辑嵌入.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner === 'p204-编辑目标')
+      return cards.length === 2 && cards.every((c) => c.liveBound === true && c.internalMode === 'live')
+        ? true : false
+    })
+    const ports = new Set(bound.readingEmbed!.filter((c) => c.inner === 'p204-编辑目标').map((c) => c.livePortId))
+    assert(ports.size === 2, `同目标两 occurrence 各自独立端口（实际 ${JSON.stringify([...ports])}）`)
+    assert(bound.readingEmbed!.every((c) => c.inner !== 'p204-编辑目标' || c.liveDirty === false),
+      '目标初始干净（无圆点）')
+
+    // occurrence 0 普通输入：只写 B（经 B 会话，A 会话零 applyEdit）
+    const insertAt = '# p204 编辑目标\n\n'.length + 3
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.type', inner: 'p204-编辑目标', pos: insertAt, text: '【嵌入编辑】',
+    })
+    const bDoc = await poll('B 权威文档收到嵌入编辑', () => {
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())
+      return doc?.getText().includes('【嵌入编辑】') ? doc : undefined
+    })
+    assert(bDoc.isDirty, '嵌入编辑后目标 B dirty')
+    // dirty 推送 → 圆点在场（探针）
+    await waitViewState('p204-编辑嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p204-编辑目标' && c.liveDirty === true)
+        ? true : false)
+    // A 零写回：文本不变、不 dirty、A 会话 appliedEdits 零推进（根面板身份
+    // 与目标会话身份分开——B 的编辑不经过 A 的 DocumentSession）
+    await waitViewState('p204-编辑嵌入.md', (v) => v.text === parentBefore)
+    assert(parentDoc.getText() === parentBefore && !parentDoc.isDirty, '父文档 A 零写回且零 dirty')
+    const session1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(session1.appliedEdits === session0.appliedEdits,
+      `A 会话 appliedEdits 零推进（B 编辑走 B 会话；实际 ${session1.appliedEdits}，基线 ${session0.appliedEdits}）`)
+    assert(await readDisk('p204-编辑目标.md') === targetBefore, '保存前目标磁盘未变')
+
+    // 保存路由（embed.test.save 与头部保存入口/Ctrl+S 焦点路由同一出站）：
+    // TextDocument.save 只落 B——磁盘更新、dirty 清零、圆点消失、A 原样
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.save', inner: 'p204-编辑目标',
+    })
+    await poll('目标保存落盘', async () => (await readDisk('p204-编辑目标.md')).includes('【嵌入编辑】') ? true : undefined)
+    assert(!bDoc.isDirty, '保存后目标干净')
+    await waitViewState('p204-编辑嵌入.md', (v) =>
+      (v.readingEmbed ?? []).every((c) => c.inner !== 'p204-编辑目标' || c.liveDirty !== true)
+        ? true : false)
+    assert(await readDisk('p204-编辑嵌入.md') === parentBefore && !parentDoc.isDirty,
+      '保存目标不动父文档（A 磁盘与 dirty 原样）')
+    console.log('[P2-04] 嵌入输入只写目标 + dirty 圆点 + 保存路由通过')
+  }],
+
+  // ---- P2-04（#281）宿主历史路由（P2-01 验证的临时激活路线）与端口
+  // 拒收面：撤销精准落 B、A 活动标签恢复、B 预览标签收口；重复 seq 幂等
+  // 去重；释放后（unbind 后）的迟到写入按 portId 拒收。 ----
+  ['P2-04 嵌入内部 Live：撤销激活路由、重复 seq 去重与释放后写入拒收（#281）', async () => {
+    await openWithEditor('p204-编辑嵌入.md')
+    await waitSessionReady('p204-编辑嵌入.md')
+    const uri = wsUri('p204-编辑嵌入.md').toString()
+    const targetUri = wsUri('p204-编辑目标.md')
+    const targetClean = (await vscode.workspace.openTextDocument(targetUri)).getText()
+    const bound = await waitViewState('p204-编辑嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p204-编辑目标' && c.liveBound === true)
+        ? true : false)
+    void bound
+    const fsPath = targetUri.fsPath
+
+    // 键入一笔（撤销载体）
+    const insertAt = '# p204 编辑目标\n\n'.length + 3
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.type', inner: 'p204-编辑目标', pos: insertAt, text: '撤销载体',
+    })
+    const bDoc = await poll('撤销载体写入 B', () => {
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())
+      return doc?.getText().includes('撤销载体') ? doc : undefined
+    })
+    assert(bDoc.isDirty, '载体编辑后 B dirty')
+
+    // 撤销走 P2-01 激活路由：B 无 custom 标签 → showTextDocument(B preview)
+    // → 全局 undo → 重显 A → 收 B 预览标签（用户已确认的标签切换取舍）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.history', inner: 'p204-编辑目标', op: 'undo',
+    })
+    await poll('撤销回退 B 到已保存内容', () =>
+      bDoc.getText() === targetClean && !bDoc.isDirty ? true : undefined)
+    // 收口断言经轮询：undo 落盘先行、openWith 重显与预览标签收起随后
+    // （historyViaTempActivation 的异步收尾与文本回退存在毫秒级竞态）
+    await poll('撤销路由收口（活动标签回 A、B 预览标签收起）', () => {
+      const activeInput = vscode.window.tabGroups.activeTabGroup.activeTab?.input
+      const restored = activeInput instanceof vscode.TabInputCustom &&
+        activeInput.viewType === VIEW_TYPE && activeInput.uri.toString() === uri
+      const bTextTabs = vscode.window.tabGroups.all
+        .flatMap((g) => g.tabs)
+        .filter((t) => t.input instanceof vscode.TabInputText && t.input.uri.toString() === targetUri.toString())
+      return restored && bTextTabs.length === 0 ? true : undefined
+    })
+
+    // 撤销路由激活 B 期间 A 的 webview 被隐藏（retainContextWhenHidden
+    // 关闭 → 卸载），恢复后重载并自动重绑——端口身份换新，此处重取当前
+    // 端口（旧端口的 stale 释放路径已由重绑闭环覆盖）
+    const rebound = await waitViewState('p204-编辑嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p204-编辑目标' && c.liveBound === true)
+        ? true : false)
+    const port = rebound.readingEmbed!.find((c) => c.inner === 'p204-编辑目标' && c.livePortId)!.livePortId!
+
+    // 重复 seq：同 seq 两笔伪造写入 → 宿主 ackCache 幂等去重，恰一笔落 B
+    const versionBefore = bDoc.version
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.portWrite', portId: port, fsPath, seq: 9001,
+      baseVersion: versionBefore, offset: 0, length: 0, text: '重复载入', repeat: 2,
+    })
+    await poll('重复 seq 首笔落 B', () => bDoc.getText().includes('重复载入') ? true : undefined)
+    await new Promise((r) => setTimeout(r, 500))
+    assert(bDoc.version === versionBefore + 1,
+      `重复 seq 恰一笔 applyEdit（版本 +1；实际 ${versionBefore} → ${bDoc.version}）`)
+    assert(bDoc.getText().split('重复载入').length - 1 === 1,
+      '同 seq 第二笔由 ackCache 去重（不重复写入）')
+
+    // 释放后写入拒收：切回 Reading（unbind，两枚 occurrence 各自切）→ 旧
+    // portId 的迟到写入被拒
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.mode', inner: 'p204-编辑目标', mode: 'reading', occurrence: 0,
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.mode', inner: 'p204-编辑目标', mode: 'reading', occurrence: 1,
+    })
+    await waitViewState('p204-编辑嵌入.md', (v) =>
+      (v.readingEmbed ?? []).every((c) => c.inner !== 'p204-编辑目标' || c.liveBound !== true)
+        ? true : false)
+    const textAfterUnbind = bDoc.getText()
+    const versionAfterUnbind = bDoc.version
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.portWrite', portId: port, fsPath, seq: 9002,
+      baseVersion: versionAfterUnbind, offset: 0, length: 0, text: '迟到写入',
+    })
+    await new Promise((r) => setTimeout(r, 500))
+    assert(bDoc.getText() === textAfterUnbind && bDoc.version === versionAfterUnbind,
+      '释放后的迟到端口写入被拒收（B 权威文本与版本零变化）')
+
+    // 现场还原：激活 B → 无参 revert 回保存内容（P2-01 验证路线）→ 收标签
+    await vscode.window.showTextDocument(bDoc, { preview: true })
+    await vscode.commands.executeCommand('workbench.action.files.revert')
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await poll('B 回到已保存内容', () => bDoc.getText() === targetClean ? true : undefined)
+    console.log('[P2-04] 撤销激活路由 + 重复 seq 去重 + 释放后拒收通过')
+  }],
+
+  // ---- P2-04（#281）CRLF 坐标与不可安全写回暂停的目标文本断言：CRLF 目标
+  // 键入经 LF/宿主坐标双向转换保存回读保真；外部覆盖旧版本请求区间 →
+  // 重定位失败 → 面板暂停 + edit.ack fail，B 权威文本 = 外部版本（嵌入
+  // 旧版未写入），A 零波及。 ----
+  ['P2-04 嵌入内部 Live：CRLF 坐标保真与不可安全写回暂停（#281）', async () => {
+    await openWithEditor('p204-CRLF嵌入.md')
+    await waitSessionReady('p204-CRLF嵌入.md')
+    const uri = wsUri('p204-CRLF嵌入.md').toString()
+    const targetUri = wsUri('p204-CRLF目标.md')
+    const parentDoc = await vscode.workspace.openTextDocument(wsUri('p204-CRLF嵌入.md'))
+    const bound = await waitViewState('p204-CRLF嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p204-CRLF目标' && c.liveBound === true)
+        ? true : false)
+    const card = bound.readingEmbed!.find((c) => c.inner === 'p204-CRLF目标')!
+    const port = card.livePortId!
+    const fsPath = targetUri.fsPath
+    const bDoc = vscode.workspace.textDocuments.find(
+      (d) => d.uri.toString() === targetUri.toString()) ??
+      (await vscode.workspace.openTextDocument(targetUri))
+    assert(bDoc.getText().includes('\r\n'), 'CRLF 目标装载保留宿主行尾')
+
+    // 键入（webview LF 坐标 → 宿主 CRLF 坐标）+ 保存：磁盘回读 CRLF 保真
+    const insertAt = 'p204 CRLF 目标首行'.length - 2
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.type', inner: 'p204-CRLF目标', pos: insertAt, text: 'CRLF编辑',
+    })
+    await poll('CRLF 目标收到键入', () => bDoc.getText().includes('CRLF编辑') ? true : undefined)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.save', inner: 'p204-CRLF目标',
+    })
+    const savedDisk = await poll('CRLF 保存落盘', async () => {
+      const text = await readDisk('p204-CRLF目标.md')
+      return text.includes('CRLF编辑') && text.includes('\r\n') ? text : undefined
+    })
+    assert(savedDisk.includes('p204 CRLF 目标CRLF编辑首行\r\np204 第二行\r\n'),
+      `LF 坐标键入转换为宿主 CRLF 坐标且既有行尾保真（实际 ${JSON.stringify(savedDisk)}）`)
+    assert(!parentDoc.isDirty && parentDoc.getText() === (await readDisk('p204-CRLF嵌入.md')),
+      'CRLF 编辑与保存全程父文档零波及')
+
+    // 不可安全写回暂停：外部覆盖区间 [0,6)（版本前移），随后以旧
+    // baseVersion 对同区间伪造写入 → 重定位失败 → 暂停 + 目标文本断言
+    const versionAtPause = bDoc.version
+    const external = new vscode.WorkspaceEdit()
+    external.replace(targetUri, new vscode.Range(0, 0, 0, 6), '外部改写')
+    assert(await vscode.workspace.applyEdit(external), '外部覆盖应成功应用')
+    const bDocNow = await poll('外部版本到达 B 文档', () => {
+      const latest = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())
+      return latest?.getText().startsWith('外部改写') ? latest : undefined
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.portWrite', portId: port, fsPath, seq: 9003,
+      baseVersion: versionAtPause, offset: 0, length: 6, text: '嵌入旧版',
+    })
+    await waitViewState('p204-CRLF嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p204-CRLF目标' && c.liveSuspended === true)
+        ? true : false)
+    assert(bDocNow.getText().startsWith('外部改写') && !bDocNow.getText().includes('嵌入旧版'),
+      '暂停后 B 权威文本保持外部版本（旧版本请求未写入——目标文本断言）')
+    assert(bDocNow.getText().includes('CRLF编辑'), '此前已保存的 CRLF 编辑仍在（外部只覆盖 [0,6)）')
+
+    // 现场还原：切回 Reading 释放端口 → 激活 B → 无参 revert 回保存内容
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.mode', inner: 'p204-CRLF目标', mode: 'reading',
+    })
+    await vscode.window.showTextDocument(bDocNow, { preview: true })
+    await vscode.commands.executeCommand('workbench.action.files.revert')
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await poll('B 回到已保存内容', () => bDocNow.getText() === savedDisk ? true : undefined)
+    console.log('[P2-04] CRLF 坐标保真 + 不可安全写回暂停（目标文本断言）通过')
   }],
 
   // #270 dirty「主动丢弃未保存内容」的覆盖层通用退役信号。1.86 事件面实证

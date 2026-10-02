@@ -419,6 +419,14 @@ export const zhCn: Record<MessageKey, string> = {
    *  （aria-label 与 title 同词；打开沿用 Vsidian 既有打开行为，不改写嵌入原文） */
   'embed.loading': '正在加载嵌入内容…',
   'embed.openTarget': '打开目标笔记',
+  /** P2-04（#281）嵌入内部 Live：模式切换 / 保存目标 / 未保存圆点与
+   *  绑定失败、暂停态的就地文案（悬停词走 data-tooltip 同一词条） */
+  'embed.modeToLive': '在引用内编辑（切换到实时预览）',
+  'embed.modeToReading': '切换到阅读视图',
+  'embed.saveTarget': '保存目标笔记',
+  'embed.dirtyDot': '目标有未保存修改',
+  'embed.liveBindFailed': '无法接入目标编辑（目标不可用或不是 Markdown）。',
+  'embed.livePaused': '编辑已暂停：无法安全写回，输入已保留。',
 
   /** 反链面板（#197：四态与条目；形态改版批次：工具栏/排序/搜索/页头） */
   'backlinks.label': '反向链接',
@@ -608,6 +616,7 @@ export const zhCn: Record<MessageKey, string> = {
   'command.editor.addCursorBelow.title': '在下方添加光标',
   /** #221 预览当前链接（手动打开悬停浮层：键盘进入浮层、Esc 返回触发处） */
   'command.ui.hoverPreviewLink.title': '预览当前链接',
+  'command.ui.embedToggleMode.title': '切换引用的内部视图模式',
 
   // ---- #159 锚点跳转（块引用定位与本文件锚点）----
   /** 块 id 缺失提示（与标题缺失同款「打开后提示」行为） */
