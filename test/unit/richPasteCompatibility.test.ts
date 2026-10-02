@@ -56,4 +56,41 @@ describe('富文本兼容包装保留既有 Markdown 语义', () => {
       expect(dom.querySelector(selector)?.textContent).toBe(formatted)
     }
   })
+
+  it.each([
+    ['<strong>&amp;copy;</strong>', 'strong', '&copy;'],
+    ['<em>&amp;#169;</em>', 'em', '&#169;'],
+    ['<del>&amp;#xA9;</del>', 's', '&#xA9;'],
+    ['<strong>&amp;amp;</strong>', 'strong', '&amp;'],
+  ])('来源字面实体不被 Markdown 二次解释：%s', (html, selector, text) => {
+    const dom = rendered(html)
+    expect(dom.textContent?.trim()).toBe(text)
+    expect(dom.querySelector(selector)?.textContent).toBe(text)
+  })
+
+  it('保护来源实体时仍保留转换器生成的标点边界实体', () => {
+    const dom = rendered('<strong>字面 &amp;copy; <em>(x)</em>bar</strong>')
+    expect(dom.textContent?.trim()).toBe('字面 &copy; (x)bar')
+    expect(dom.querySelector('strong')?.textContent).toBe('字面 &copy; (x)bar')
+    expect(dom.querySelector('em')?.textContent).toBe('(x)')
+  })
+
+  it('链接文本和目的地中的字面实体都保持原义', () => {
+    const dom = rendered('<a href="https://example.test/?literal=&amp;copy;">&amp;copy;</a>')
+    expect.soft(dom.querySelector('a')?.textContent).toBe('&copy;')
+    expect.soft(dom.querySelector('a')?.getAttribute('href')).toBe('https://example.test/?literal=&copy;')
+  })
+
+  it('图片 alt 和目的地中的字面实体都保持原义', () => {
+    const dom = rendered('<img src="https://example.test/image.png?literal=&amp;copy;" alt="&amp;copy;">')
+    expect.soft(dom.querySelector('img')?.getAttribute('alt')).toBe('&copy;')
+    expect.soft(dom.querySelector('img')?.getAttribute('src')).toBe('https://example.test/image.png?literal=&copy;')
+  })
+
+  it('行内代码与代码围栏保持字面实体原文，不误加 Markdown 转义', () => {
+    expect(htmlToMarkdown('<code>&amp;copy; &amp;#169;</code>').markdown).toBe('`&copy; &#169;`')
+    expect(htmlToMarkdown('<pre><code>&amp;copy; &amp;#169;</code></pre>').markdown).toBe('```\n&copy; &#169;\n```')
+    const dom = rendered('<code>&amp;copy; &amp;#169;</code><pre><code>&amp;copy; &amp;#169;</code></pre>')
+    expect([...dom.querySelectorAll('code')].map(el => el.textContent)).toEqual(['&copy; &#169;', '&copy; &#169;\n'])
+  })
 })

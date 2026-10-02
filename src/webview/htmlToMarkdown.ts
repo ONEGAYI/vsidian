@@ -5,7 +5,10 @@ const urlPolicy = new MarkdownIt()
 export interface ConvertedHtml { markdown: string; hasFormatting: boolean }
 const ignored = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'META', 'LINK'])
 const blockTags = new Set(['P','DIV','UL','OL','LI','TABLE','TR','TH','TD','PRE','BLOCKQUOTE','H1','H2','H3','H4','H5','H6'])
-const escapeText = (text: string) => text.replace(/\\/g, '\\\\').replace(/([`*_~{}\[\]<>#])/g, '\\$1')
+// HTML 解析已经还原来源文字；只保护其中的字面实体前缀，避免 Markdown 再解码。
+// 转换器后续生成的标点边界实体不经过此入口，代码原文也不做正文转义。
+const escapeEntityPrefixes = (value: string) => value.replace(/&(?=(?:#(?:\d+|x[\da-f]+)|[a-z][\da-z]*);)/gi, '&amp;')
+const escapeText = (text: string) => escapeEntityPrefixes(text).replace(/\\/g, '\\\\').replace(/([`*_~{}\[\]<>#])/g, '\\$1')
   .replace(/^(\s{0,3})([-+])(?=\s|[-+]{2})/gm, '$1\\$2').replace(/^(\s{0,3}\d+)([.)])(?=\s)/gm, '$1\\$2')
 interface Marks { bold: boolean; italic: boolean; strike: boolean }
 interface InlineRun extends Marks { text: string }
@@ -28,7 +31,7 @@ function effectiveMarks(el: Element, inherited: Marks): Marks {
 function safeUrl(value: string): string | null {
   const url = value.trim()
   if (!url || !urlPolicy.validateLink(url.replace(/[\u0000-\u0020\u007f]/g, ''))) return null
-  return url.replace(/ /g, '%20').replace(/\(/g, '%28').replace(/\)/g, '%29')
+  return escapeEntityPrefixes(url).replace(/ /g, '%20').replace(/\(/g, '%28').replace(/\)/g, '%29')
 }
 
 /** 脱离活动文档解析，不执行HTML或加载其资源；只输出Markdown支持的语义。 */
