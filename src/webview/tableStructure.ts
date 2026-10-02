@@ -47,9 +47,12 @@ export interface PlannedTableEdit {
  * slot 可为内容行数，表示插到末尾。只替换内容行字符，不触碰分隔行或换行符。
  * 返回的全部 changes 供 CM6 以一笔事务派发。
  * cursor（可选）给定时返回 selection：光标随所在内容行的文本一起搬到新物理
- * 行（行文本等长搬移，保留行内偏移）；光标不在内容行上（表外/分隔行）时不给
- * selection——CM6 默认映射即正确（#296 六轮：默认映射把替换区间内部的光标
- * 归到区间左端，引用表上恰落前缀区端点触发显形、网格破裂）。
+ * 行——保留行内偏移，行首按**置换后**的各槽位文本累计（各物理行接收的
+ * 新文本长度不同，后续行起点随之前方槽位的长度差平移；审查轮实证修复）。
+ * 光标不在内容行上（表外/分隔行）时不给 selection——CM6 默认映射即正确
+ * （#296 六轮：默认映射把替换区间内部的光标归到区间左端，引用表上恰落
+ * 前缀区端点触发显形、网格破裂）。doc 须为 LF 形态（webview 协议契约，
+ * 行间恰一个换行的累计假设才成立）。
  */
 export function planTableRowMove(
   doc: string,
@@ -102,9 +105,18 @@ export function planTableRowMove(
           c2++
         }
       }
-      // 行文本等长搬移：目标物理行行首 + 原行内偏移
-      const target = c2 === 0 ? rows[0]! : rows[c2 + 1]!
-      selection = target.lineFrom + (cursor - content[c]!.lineFrom)
+      // 目标槽位新行首：物理布局 [槽0, 分隔行, 槽1, 槽2, ...]——槽 0 行首
+      // 不变；槽 k≥1 的行首越过槽 0 新文本、分隔行（不置换、长度不变）与
+      // 前方各槽位的新文本累计（每行 +1 换行）
+      let targetFrom = rows[0]!.lineFrom
+      if (c2 > 0) {
+        const delimLen = rows[1]!.lineTo - rows[1]!.lineFrom
+        targetFrom += reordered[0]!.length + 1 + delimLen + 1
+        for (let j = 1; j < c2; j++) {
+          targetFrom += reordered[j]!.length + 1
+        }
+      }
+      selection = targetFrom + (cursor - content[c]!.lineFrom)
     }
   }
   return { changes, selection }
@@ -112,8 +124,11 @@ export function planTableRowMove(
 
 /** 将整列插入到目标槽位，分隔行对齐段与各内容行一同移动。
  *  cursor（可选）给定时返回 selection：光标随所在格内容一起搬到新列位置
- *  （保留内容内偏移，clamp 到新内容长度）；光标不在内容行上（表外/分隔行）
- *  时不给 selection，理由同 planTableRowMove。 */
+ *  （保留内容内偏移，clamp 到新内容长度）；光标在行首容器前缀区（cursor <
+ *  lineFrom + prefixLen）时保留行内偏移——前缀不参与列交换、字符级不变，
+ *  「前缀显形编辑态」随行守恒（审查轮 F7）；光标不在内容行上（表外/分隔
+ *  行）时不给 selection，理由同 planTableRowMove。doc 须为 LF 形态（webview
+ *  协议契约）。 */
 export function planTableColumnMove(
   doc: string,
   rows: TableRowInfo[],
@@ -127,7 +142,7 @@ export function planTableColumnMove(
       source >= columns || slot < 0 || slot > columns || slot === source || slot === source + 1) return null
   const changes: PlannedTableEdit['changes'] = []
   const newLineTexts: string[] = []
-  let cursorInfo: { rowIdx: number; col: number; offset: number } | null = null
+  let cursorInfo: { rowIdx: number; col: number; offset: number; inPrefix: boolean } | null = null
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i]!
     const p = prefixLenOf(row)
@@ -136,12 +151,17 @@ export function planTableColumnMove(
     if (!cells || cells.length !== columns) return null
     if (cursor !== undefined && !cursorInfo && row.kind !== 'delimiter' &&
         cursor >= row.lineFrom && cursor <= row.lineTo) {
-      const col = columnOf(cells, cursor)
-      const cell = cells[col]!
-      cursorInfo = {
-        rowIdx: i,
-        col,
-        offset: Math.min(Math.max(cursor - cell.contentFrom, 0), cell.contentTo - cell.contentFrom),
+      if (cursor < row.lineFrom + p) {
+        cursorInfo = { rowIdx: i, col: -1, offset: cursor - row.lineFrom, inPrefix: true }
+      } else {
+        const col = columnOf(cells, cursor)
+        const cell = cells[col]!
+        cursorInfo = {
+          rowIdx: i,
+          col,
+          offset: Math.min(Math.max(cursor - cell.contentFrom, 0), cell.contentTo - cell.contentFrom),
+          inPrefix: false,
+        }
       }
     }
     const values = cells.map((cell) => doc.slice(cell.from, cell.to))
@@ -156,28 +176,32 @@ export function planTableColumnMove(
   if (!changes.length) return null
   let selection: number | undefined
   if (cursorInfo) {
-    const { rowIdx, col, offset } = cursorInfo
-    const insertAt = slot > source ? slot - 1 : slot
-    let col2: number
-    if (col === source) {
-      col2 = insertAt
-    } else {
-      col2 = col > source ? col - 1 : col
-      if (col2 >= insertAt) {
-        col2++
-      }
+    const { rowIdx, col, offset, inPrefix } = cursorInfo
+    // 表内行连续（含分隔行）；基准锚在首行行首，加上前方各行的新长度
+    let lineFrom = rows[0]!.lineFrom
+    for (let k = 0; k < rowIdx; k++) {
+      lineFrom += newLineTexts[k]!.length + 1
     }
-    const p = prefixLenOf(rows[rowIdx]!)
-    const newCells = tableRowCellsForColumns(newLineTexts[rowIdx]!, 0, columns, p)
-    const cell = newCells?.[col2]
-    if (cell) {
-      // 表内行连续（含分隔行）；基准锚在首行行首，加上前方各行的长度差
-      let lineFrom = rows[0]!.lineFrom
-      for (let k = 0; k < rowIdx; k++) {
-        lineFrom += newLineTexts[k]!.length + 1
+    if (inPrefix) {
+      selection = lineFrom + offset
+    } else {
+      const insertAt = slot > source ? slot - 1 : slot
+      let col2: number
+      if (col === source) {
+        col2 = insertAt
+      } else {
+        col2 = col > source ? col - 1 : col
+        if (col2 >= insertAt) {
+          col2++
+        }
       }
-      selection = lineFrom + cell.contentFrom +
-        Math.min(offset, cell.contentTo - cell.contentFrom)
+      const p = prefixLenOf(rows[rowIdx]!)
+      const newCells = tableRowCellsForColumns(newLineTexts[rowIdx]!, 0, columns, p)
+      const cell = newCells?.[col2]
+      if (cell) {
+        selection = lineFrom + cell.contentFrom +
+          Math.min(offset, cell.contentTo - cell.contentFrom)
+      }
     }
   }
   return { changes, selection }

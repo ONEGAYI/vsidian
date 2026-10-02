@@ -543,6 +543,114 @@ describe('表格点阵与悬停控件', () => {
     expect(headInQuotePrefix(view, view.state.selection.main.head)).toBe(false)
   })
 
+  // ---- 审查轮（review-loops 第二次，2026-10-02）：六轮修复的缺陷补正 ----
+
+  const QUOTE_TABLE_RAGGED = [
+    '前文',
+    '',
+    '> | a | 乙乙乙乙 |',
+    '> | --- | --- |',
+    '> | 1111111 | 2 |',
+    '> | 短 | 行 |',
+    '',
+    '后文',
+    '',
+  ].join('\n')
+
+  it('不等长行移动后光标精确跟随原内容（行首按置换后文本累计，审查轮 P1）', () => {
+    // 光标在最长行（17 字）的 "1111111" 后，该行下移到末尾——前方槽位
+    // 装入更短文本，后续行起点左移；修复前用旧目标行 lineFrom 加偏移，
+    // 光标跨格漂移（探针实证偏 6-8 字符）
+    const one = QUOTE_TABLE_RAGGED.indexOf('1111111')
+    const oldLineFrom = QUOTE_TABLE_RAGGED.indexOf('> | 1111111')
+    const view = makeEditView(QUOTE_TABLE_RAGGED, one + 7)
+    expect(runTableRowMove(view, one, 3)).toBe(true)
+    const head = view.state.selection.main.head
+    const newLineFrom = view.state.doc.lineAt(view.state.doc.toString().indexOf('1111111')).from
+    // 精确断言：行内偏移保留（"1111111" 后 = 新行首 + 原行内偏移）
+    expect(head).toBe(newLineFrom + (one + 7 - oldLineFrom))
+    expect(headInQuotePrefix(view, head)).toBe(false)
+    view.destroy()
+  })
+
+  it('不等长行行尾光标下移后落新行尾，不落前缀区（审查轮 P1 极端位）', () => {
+    const lineFrom = QUOTE_TABLE_RAGGED.indexOf('> | 1111111')
+    const lineTo = lineFrom + 17
+    const view = makeEditView(QUOTE_TABLE_RAGGED, lineTo)
+    expect(runTableRowMove(view, QUOTE_TABLE_RAGGED.indexOf('1111111'), 3)).toBe(true)
+    const head = view.state.selection.main.head
+    expect(headInQuotePrefix(view, head)).toBe(false)
+    const movedOne = view.state.doc.toString().indexOf('1111111')
+    const newLine = view.state.doc.lineAt(movedOne)
+    expect(head).toBe(newLine.to)
+    view.destroy()
+  })
+
+  it('多光标下场 undo 不坍缩为单光标（审查轮 P2）', async () => {
+    const linked = await setupLinked(QUOTE_TABLE_DOC)
+    const view = linked.controller.getView()!
+    const inTable = QUOTE_TABLE_DOC.indexOf('1') + 1
+    const outside = QUOTE_TABLE_DOC.indexOf('结尾段落')
+    view.dispatch({ selection: EditorSelection.create(
+      [EditorSelection.cursor(inTable), EditorSelection.cursor(outside)], 0) })
+    expect(runTableColumnMove(view, QUOTE_TABLE_DOC.indexOf('> | a'), 0, 2)).toBe(true)
+    await settle()
+    expect(view.state.selection.ranges.length).toBe(2)
+    await linked.doc.undo()
+    await settle()
+    expect(view.state.selection.ranges.length).toBe(2)
+    expect(headInQuotePrefix(view, view.state.selection.main.head)).toBe(false)
+  })
+
+  it('外部变更不动远处网格行前缀区的光标（审查轮：钳制仅限本笔替换区间内）', async () => {
+    // 光标在表格 A 行首前缀区（网格行前缀、显形编辑态），外部变更落在
+    // 表格 B——钳制只应作用于被替换区间内的光标，不得拽走远处的显形态
+    const doc = [
+      '> | 甲 | 乙 |',
+      '> | --- | --- |',
+      '> | 丙 | 丁 |',
+      '',
+      '| 戊 | 己 |',
+      '| --- | --- |',
+      '| 庚 | 辛 |',
+      '',
+      '结尾。',
+      '',
+    ].join('\n')
+    const linked = await setupLinked(doc)
+    const view = linked.controller.getView()!
+    const prefixPos = doc.indexOf('> | 甲') + 1 // 表格 A 首行前缀区内
+    view.dispatch({ selection: { anchor: prefixPos } })
+    const cellFrom = doc.indexOf('庚')
+    await linked.doc.applyChanges([{ offset: cellFrom, length: 1, text: '庚庚' }])
+    await settle()
+    expect(view.state.selection.main.head).toBe(prefixPos)
+  })
+
+  it('多 range 拖拽交换列不折叠选区，main 跟随原格内容（审查轮 P3）', () => {
+    const view = makeEditView(QUOTE_TABLE_DOC, QUOTE_TABLE_DOC.indexOf('1') + 1)
+    const inTable = QUOTE_TABLE_DOC.indexOf('1') + 1
+    const outside = QUOTE_TABLE_DOC.indexOf('结尾段落')
+    view.dispatch({ selection: EditorSelection.create(
+      [EditorSelection.cursor(inTable), EditorSelection.cursor(outside)], 0) })
+    expect(runTableColumnMove(view, QUOTE_TABLE_DOC.indexOf('> | a'), 0, 2)).toBe(true)
+    expect(view.state.selection.ranges.length).toBe(2)
+    const movedOne = view.state.doc.toString().indexOf('1')
+    expect(view.state.selection.main.head).toBe(movedOne + 1)
+    view.destroy()
+  })
+
+  it('光标在引用前缀区拖拽交换列，前缀内偏移保留（显形守恒，审查轮 P3）', () => {
+    const lineFrom = QUOTE_TABLE_DOC.indexOf('> | a | b | c |')
+    const view = makeEditView(QUOTE_TABLE_DOC, lineFrom + 1)
+    expect(runTableColumnMove(view, lineFrom, 0, 2)).toBe(true)
+    const head = view.state.selection.main.head
+    const newLineFrom = view.state.doc.toString().indexOf('> | b | a | c |')
+    expect(head).toBe(newLineFrom + 1)
+    expect(headInQuotePrefix(view, head)).toBe(true) // 前缀编辑态保持，不被吸进格内容
+    view.destroy()
+  })
+
   it('千行表仅为视口中已挂载的网格行建立抓手，滚动回收时同步更新', async () => {
     const doc = ['| a | b |', '| --- | --- |', ...Array.from({ length: 1000 }, (_, i) => `| ${i} | x |`), ''].join('\n')
     const view = makeEditView(doc, 0)

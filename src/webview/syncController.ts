@@ -8392,16 +8392,31 @@ export class WebviewSyncController {
       selection,
       annotations: externalSync.of(true),
     })
-    // #296 六轮：undo/外部整行替换会把格内容里的光标归到区间左端（前缀或
-    // 隐藏管道端点），触发前缀显形、网格破裂。用变更后 state 的网格信息把
-    // 主光标钳回最近格内容；selection-only 补事务与上一笔同步连发，浏览器
-    // 只渲染最终态，无中间闪烁。
-    const main = view.state.selection.main
-    if (main.empty) {
-      const clamped = clampExternalCursor(view.state, main.head)
-      if (clamped !== null && clamped !== main.head) {
-        view.dispatch({ selection: { anchor: clamped } })
+    // #296 六轮 + 审查轮：undo/外部整行替换会把格内容里的光标归到区间左端
+    // （前缀或隐藏管道端点），触发前缀显形、网格破裂。用变更后 state 的
+    // 网格信息钳回最近格内容；**只处理端点落在本笔替换区间内的折叠光标**
+    // ——区间内光标才会被映射重定位，区间外（用户主动放置的远处光标，
+    // 如前缀显形编辑态）不动（审查轮 F4）；逐 range 钳制、其余 range 保留
+    // （单 anchor spec 会整体替换选区、坍缩多光标——审查轮 F2）。
+    // selection-only 补事务与上一笔同步连发，浏览器只渲染最终态。
+    const sel = view.state.selection
+    let ranges: ReturnType<typeof EditorSelection.cursor>[] | null = null
+    for (let i = 0; i < sel.ranges.length; i++) {
+      const range = sel.ranges[i]!
+      if (!range.empty || !specs.some((c) => range.head >= c.from && range.head <= c.to)) {
+        continue
       }
+      const clamped = clampExternalCursor(view.state, range.head)
+      if (clamped === null || clamped === range.head) {
+        continue
+      }
+      if (!ranges) {
+        ranges = sel.ranges.slice()
+      }
+      ranges[i] = EditorSelection.cursor(clamped)
+    }
+    if (ranges) {
+      view.dispatch({ selection: EditorSelection.create(ranges, sel.mainIndex) })
     }
   }
 

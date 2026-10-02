@@ -372,7 +372,7 @@ export function quoteDepthOfLine(text: string): number {
  *  字符 `-`，含 lazy 无前缀形态）豁免；数据行引用层级 ≠ 表头即残缺。
  *  顶层表头（层级 0）恒不残缺。live 侧由树内行集合同义校验（分隔行不进
  *  行集合，天然豁免），两侧对同一源文给出一致结论。 */
-export function quoteTableRowsDegraded(lines: string[], headerIdx: number): boolean {
+export function quoteTableRowsDegraded(lines: readonly string[], headerIdx: number): boolean {
   const headerDepth = quoteDepthOfLine(lines[headerIdx] ?? '')
   if (headerDepth === 0) return false
   for (let i = headerIdx + 1; i < lines.length; i++) {

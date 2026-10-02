@@ -16,7 +16,7 @@
 //   增删行列以单笔 CM6 事务派发 = 单笔 edit.request = 宿主撤销一次
 // - #43 悬停控件由 tableControls.ts 只按可见 DOM 行构建；拖排行的纯规划
 //   在 tableStructure.ts，松手时仍经本模块单笔 CM6 事务写回
-import { Annotation, EditorSelection, EditorState, StateEffect, StateField, Transaction, type TransactionSpec } from '@codemirror/state'
+import { Annotation, ChangeSet, EditorSelection, EditorState, StateEffect, StateField, Transaction, type TransactionSpec } from '@codemirror/state'
 import { EditorView, ViewPlugin, keymap, type ViewUpdate } from '@codemirror/view'
 import type { Command } from '@codemirror/view'
 import { deleteCharBackward } from '@codemirror/commands'
@@ -226,7 +226,6 @@ const markTableCompositionInput = EditorState.transactionExtender.of((tr) =>
     ? { annotations: tableCompositionPreview.of(true) }
     : null)
 
-/** 仅渲染为网格的行才限制编辑范围；源码降级行保留原生编辑能力。 */
 /** 外部变更（undo/重做/宿主操作）把光标映射进网格行隐藏结构（容器前缀、
  *  管道、格缘空白）时，钳到最近格内容；已在格内容内或非网格行返回 null。
  *  #296 六轮：undo 反推的整行替换会把格内容里的光标归到区间左端——引用表
@@ -239,7 +238,9 @@ export function clampExternalCursor(state: EditorState, pos: number): number | n
   return pos < cell.contentFrom ? cell.contentFrom : cell.contentTo
 }
 
-function editableGridCellAt(state: EditorState, pos: number) {  const field = state.field(liveDecorationsField, false)
+/** 仅渲染为网格的行才限制编辑范围；源码降级行保留原生编辑能力。 */
+function editableGridCellAt(state: EditorState, pos: number) {
+  const field = state.field(liveDecorationsField, false)
   if (!field) return null
   const line = state.doc.lineAt(pos)
   let inGrid = false
@@ -1120,6 +1121,23 @@ export function runTableEditAt(view: EditorView, pos: number, op: TableEditOp): 
   return true
 }
 
+/** 移动类操作的选区 spec：main 为折叠光标且 plan 给出跟随点时——其余
+ *  range 先按 changes 默认映射（保多光标，单 anchor spec 会整体替换选区——
+ *  审查轮 F5），main 替换为 plan 的跟随点；main 非空（选区态）或 plan 未给
+ *  跟随点时返回 undefined，走 CM6 默认映射。 */
+function moveSelectionSpec(
+  view: EditorView,
+  plan: { changes: Array<{ from: number; to: number; insert: string }>; selection?: number },
+): { selection: EditorSelection } | undefined {
+  if (plan.selection === undefined || !view.state.selection.main.empty) {
+    return undefined
+  }
+  const mapped = view.state.selection.map(ChangeSet.of(plan.changes, view.state.doc.length))
+  const ranges = mapped.ranges.map((range, i) =>
+    i === mapped.mainIndex ? EditorSelection.cursor(plan.selection!) : range)
+  return { selection: EditorSelection.create(ranges, mapped.mainIndex) }
+}
+
 /** 行位置属于表头或数据行；目标 slot 不计分隔行。 */
 export function runTableRowMove(view: EditorView, sourcePos: number, slot: number): boolean {
   if (view.compositionStarted) {
@@ -1143,10 +1161,7 @@ export function runTableRowMove(view: EditorView, sourcePos: number, slot: numbe
   }
   // #296 六轮：光标随行搬移——不带 selection 的默认映射会把替换区间内部的
   // 光标归到区间左端，引用表上恰落前缀区端点（显形、网格破裂）
-  view.dispatch({
-    changes: plan.changes,
-    ...(plan.selection !== undefined ? { selection: { anchor: plan.selection } } : {}),
-  })
+  view.dispatch({ changes: plan.changes, ...moveSelectionSpec(view, plan) })
   return true
 }
 
@@ -1159,10 +1174,7 @@ export function runTableColumnMove(view: EditorView, tableFrom: number, source: 
   const plan = planTableColumnMove(view.state.doc.toString(), rows, source, slot,
     view.state.selection.main.head)
   if (!plan) return false
-  view.dispatch({
-    changes: plan.changes,
-    ...(plan.selection !== undefined ? { selection: { anchor: plan.selection } } : {}),
-  })
+  view.dispatch({ changes: plan.changes, ...moveSelectionSpec(view, plan) })
   return true
 }
 

@@ -271,6 +271,9 @@ function splitBody(
 ): ReadingBlock[] {
   const bodyStart = env.lineStarts[baseLine] ?? text.length
   const body = text.slice(bodyStart)
+  // 全文行数组只切一次，逐块复用（残缺判定的行级访问用，审查轮 F12——
+  // 逐块全文 split 是 O(块数×全文行数)，引用表密集的大文档可感知）
+  const lines = text.split('\n')
   // 渲染规则的 li 锚点换算需要 body 基行（渲染是同步的，env 变更不外泄）
   env.baseLine = baseLine
   if (body.trim() === '') {
@@ -304,7 +307,7 @@ function splitBody(
       const group = tokens.slice(i, j + 1)
       const map = token.map
       if (map) {
-        pushBlock(text, env, baseLine, blocks, group, map, token)
+        pushBlock(text, env, baseLine, blocks, lines, group, map, token)
       }
       i = j + 1
       continue
@@ -312,7 +315,7 @@ function splitBody(
     // 叶子块（fence / hr / code_block / html_block 等）
     const map = token.map
     if (map && token.type !== 'html_block') {
-      pushBlock(text, env, baseLine, blocks, [token], map, token)
+      pushBlock(text, env, baseLine, blocks, lines, [token], map, token)
     }
     i += 1
   }
@@ -332,6 +335,7 @@ function pushBlock(
   env: ReadingRenderEnv,
   baseLine: number,
   blocks: ReadingBlock[],
+  lines: readonly string[],
   group: Token[],
   map: [number, number],
   opener: Token,
@@ -414,7 +418,7 @@ function pushBlock(
       const tableToken = group.find((t) => t.type === 'table_open' && t.map)
       if (tableToken?.map) {
         const headerIdx = (env.baseLine ?? 0) + tableToken.map[0]
-        if (quoteTableRowsDegraded(text.split('\n'), headerIdx)) {
+        if (quoteTableRowsDegraded(lines, headerIdx)) {
           const from = env.lineStarts[headerIdx] ?? start
           const to = env.lineEnds[(env.baseLine ?? 0) + tableToken.map[1] - 1] ?? end
           html = degradeQuoteTableHtml(html, text.slice(from, to))

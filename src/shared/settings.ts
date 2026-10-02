@@ -133,8 +133,9 @@ export const SHOW_LINE_NUMBERS_DEFAULT = true
 
 /**
  * #296「块内表格渲染」：引用块/列表等容器内的表格是否网格化渲染
- * （live 网格 + reading 表格，两侧同口径；关闭后容器内表格按源码
- * 文本呈现——#296 之前的容器行形态）。归属「实验性功能」侧栏分组
+ * （仅 live 实时预览；#296 七轮用户决策——reading 不受此设置影响，
+ * 始终按 markdown-it 原生渲染表格）。关闭后 live 容器内表格按源码
+ * 文本呈现——#296 之前的容器行形态。归属「实验性功能」侧栏分组
  * （experimental.* 前缀）的首个标题组「表格行为」（experimental.table.*）。
  */
 export const TABLE_BLOCK_RENDER_KEY = 'experimental.table.blockRender'

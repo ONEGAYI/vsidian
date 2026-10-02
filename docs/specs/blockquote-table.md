@@ -78,9 +78,20 @@
 
 三轮交付（rebase 至 main 04f9524 后）用户真机复验报障：**拖拽把手交换列/移动行后引用块符号显形、网格破裂；移动后按撤销同样显形；点击表格外即恢复正常**。定位两层同根因——移动与撤销的 selection 都交给 CM6 默认映射，而映射对「光标落在替换区间内部」的既定行为是归到区间左端（`SelectionRange.map` 的 assoc=-1 语义）：
 
-- **移动落点（缺陷）**：`runTableRowMove`/`runTableColumnMove` 的 dispatch 不带 selection。行移动的 change 含前缀整行替换，格内光标映到行首（前缀区左端）；列移动的 change 从前缀右端起替换，光标映到 `lineFrom + prefixLen`（前缀区闭区间右端）——两端都命中三轮引入的「端点触及显形」谓词，前缀显形、网格破裂。修复：两个 planner（`planTableRowMove`/`planTableColumnMove`）增可选 `cursor` 参数并返回 `selection`——**光标随原内容搬移**（行移动：目标物理行行首 + 原行内偏移，行文本等长搬移；列移动：原格内容跟随列变换到新列，保留内容内偏移并 clamp），光标不在内容行上（表外/分隔行）不给 selection、维持默认映射（表外位置不受行内替换影响）。调用方 dispatch 时带上；顶层表格同样受益（此前光标映到行首隐藏管道，视觉无感但位置语义差）。
+- **移动落点（缺陷）**：`runTableRowMove`/`runTableColumnMove` 的 dispatch 不带 selection。行移动的 change 含前缀整行替换，格内光标映到行首（前缀区左端）；列移动的 change 从前缀右端起替换，光标映到 `lineFrom + prefixLen`（前缀区闭区间右端）——两端都命中三轮引入的「端点触及显形」谓词，前缀显形、网格破裂。修复：两个 planner（`planTableRowMove`/`planTableColumnMove`）增可选 `cursor` 参数并返回 `selection`——**光标随原内容搬移**（行移动：目标物理行行首 + 原行内偏移——行首按置换后各槽位文本累计，见下方审查轮补正；列移动：原格内容跟随列变换到新列，保留内容内偏移并 clamp），光标不在内容行上（表外/分隔行）不给 selection、维持默认映射（表外位置不受行内替换影响）。调用方 dispatch 时带上；顶层表格同样受益（此前光标映到行首隐藏管道，视觉无感但位置语义差）。
 - **撤销落点（同根缺陷）**：undo 反推的整行替换经 `dispatchExternalChanges` 的 `selection.map(ChangeSet)` 映射，格内容里的好光标同样被归到区间左端（前缀端点）。修复：外部变更应用后用**变更后 state** 的网格信息把主光标钳回最近格内容（`clampExternalCursor`——落前缀/管道/格缘空白时钳到最近格 `contentFrom`/`contentTo`，已在格内容或非网格行返回不动），selection-only 补事务与变更事务同步连发、浏览器只渲染最终态。口径边界：只处理折叠主光标；**用户主动定位**（本地选区事务）不经过该通道，「点击前缀编辑引用层级」的显形语义不受影响。
 - 回归钉法：jsdom 三例（列交换光标跟随原格内容且不在前缀闭区间、行移动同款、undo 后不在前缀闭区间——全链路走 `setupLinked` 宿主撤销通道）；浏览器 `blockquoteTablePaint` 增补「拖拽交换列后前缀保持隐藏」场景（真抓手 pointer 拖拽：列 0 把手拖到列 1 右半，断言交换生效 + 表格行可见文本不含 `>` + 光标留在行内容区）。已知边界：光标在分隔行上发起移动时维持默认映射（分隔行无格内容可钳，用户不会在分隔行编辑后再拖把手，真机有反馈再议）。
+
+## 审查轮补正（review-loops 第二次，2026-10-02，三只读子代理 + 主代理核实）
+
+对六七轮交付的高强度审查发现六轮修复一处 P1 缺陷与一批 P3，全部修复：
+
+- **行移动光标错位（P1）**：`planTableRowMove` 的 selection 用**旧目标行** lineFrom 加行内偏移——「行文本等长搬移」假设只对置换前成立，各物理行接收的新文本长度不同，后续行起点随前方槽位长度差平移（列移动做了 newLineTexts 补偿、行移动漏做）。不等长行下光标跨格漂移（探针实证偏 6-8 字符），行尾光标极端组合可复现显形报障。修复：目标槽位新行首按 `[槽0新文本, 分隔行(不变), 槽1..k-1 新文本]` 逐行 +1 换行累计；planner 契约注释钉死 doc 须为 LF 形态。回归：不等长行两例（格内容精确跟随 + 行尾光标落新行尾不进前缀）。
+- **外部钳制两处收敛（P2/P3）**：①补事务用单 anchor spec 会整体替换选区、坍缩多光标（审查探针实证 2 range → 1）——改逐 range 钳制（EditorSelection.create 保持全部 range 与 mainIndex）；②无条件钳制会拽走用户主动放在**网格行前缀区**的远处光标（显形编辑态被误伤）——钳制收窄为「端点落在本笔替换区间内的折叠光标」（区间内才会被映射重定位，区间外不动）。回归：多光标 undo 不坍缩 + 远处网格行前缀光标不动两例。
+- **move 类 dispatch 保多光标（P3）**：`runTable*Move` 的 `{ anchor }` spec 同样坍缩多 range——新增 `moveSelectionSpec`：其余 range 按 changes 默认映射、main（折叠光标）用 plan 跟随点；main 非空（选区态）退默认映射。回归：多 range 拖列不折叠且 main 跟随。
+- **列移动前缀显形守恒（P3）**：光标在行首容器前缀区（`cursor < lineFrom + prefixLen`）拖列时前缀不参与列交换、字符级不变——selection 直接保留行内偏移（此前被吸附进首格内容，显形编辑态意外丢失）；与行移动的显形守恒口径统一。回归一例。
+- **维护批（P3）**：`settings.ts` 键注释更新为七轮口径（仅 live）；`tableEditing.ts` 孤儿注释归位与挤行整理；tree.json 补登 `blockquoteTablePaint.mjs`/`blockquoteTablePaintFixture.ts`（经 file-tree 技能入口）；`styleContractEn.test.ts` 标题计数 171→172 与断言对齐；reading 残缺判定的全文 `split` 提为切块入口一次（逐块 split 是 O(块数×全文行数)，引用表密集大文档可感知——审查实测 500 块/3000 行约半耗时在此）。
+- 验证：六例先红后绿；全量单测/compile/样式契约/浏览器全量见提交记录。
 
 ## 五轮真机反馈修订（「块内表格渲染」只管 live，2026-10-02 第七轮）
 
