@@ -138,9 +138,13 @@ export function createReadingBlockElement(block: ReadingBlock, text: string): HT
  * 返回渲染块数。#7 起此函数是无布局环境（jsdom/隐藏容器）的回退路径，
  * 也是虚拟化路径的对拍基线；真实布局可用时由 readingVirtualView 按需挂载。
  */
-export function renderReadingBlocks(container: HTMLElement, text: string): number {
+export function renderReadingBlocks(
+  container: HTMLElement,
+  text: string,
+  opts?: { containerTableSource?: boolean },
+): number {
   container.textContent = ''
-  const blocks = splitReadingBlocks(text)
+  const blocks = splitReadingBlocks(text, opts)
   for (const block of blocks) {
     container.appendChild(createReadingBlockElement(block, text))
   }

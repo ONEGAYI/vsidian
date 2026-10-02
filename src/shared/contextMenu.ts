@@ -600,11 +600,21 @@ export function contextMenuBlockTargetAt(
  *  tableCells 为准，此处只服务区域判定） */
 const TABLE_DELIMITER_RE = /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/
 
+/** 行首容器前缀剥离（#296 三轮右键识别）：引用 `>` / 列表标记 / 缩进
+ *  不参与分隔行形态判定——块内表格（引用/列表及其组合容器内）与顶层
+ *  表进同一降级矩阵。形态学与 webview/tableCells.containerPrefixLen
+ *  同源（shared/listPrefix 的 parseLinePrefix） */
+function stripContainerPrefix(line: string): string {
+  const prefix = parseLinePrefix(line)
+  return prefix ? line.slice(prefix.quote.length + prefix.indent.length + prefix.mark.length) : line
+}
+
 function tableRowLike(line: string): boolean {
   return line.includes('|') && line.trim() !== ''
 }
 
-/** 命中行是否落在表格块内（连续 pipe 行组内存在分隔行） */
+/** 命中行是否落在表格块内（连续 pipe 行组内存在分隔行）；分隔行判定
+ *  先剥容器前缀（块内表格的 `> |---|` 同为分隔形态） */
 function tableZoneAt(lines: readonly string[], lineIndex: number): boolean {
   if (!tableRowLike(lines[lineIndex]!)) {
     return false
@@ -618,7 +628,7 @@ function tableZoneAt(lines: readonly string[], lineIndex: number): boolean {
     end += 1
   }
   for (let k = start; k <= end; k++) {
-    if (TABLE_DELIMITER_RE.test(lines[k]!)) {
+    if (TABLE_DELIMITER_RE.test(stripContainerPrefix(lines[k]!))) {
       return true
     }
   }
@@ -654,6 +664,18 @@ export function contextMenuZoneAt(
     return 'table'
   }
   return 'normal'
+}
+
+/** 右键保选区判定（#186 关键 bug 1）：Chrome contenteditable 上右键
+ *  mousedown 的默认行为会把选区折叠到点击处（点在选区外时），编辑器
+ *  选好的单元格/文本选区被右键清掉；右键落在既有选区内（含端点）时
+ *  应保持选区——VSCode 原生编辑器同款语义。结构化 ranges 不依赖
+ *  CM6 类型（shared 端可测；调用方传 selection.ranges） */
+export function contextMenuClickWithinSelection(
+  ranges: ReadonlyArray<{ from: number; to: number }>,
+  pos: number,
+): boolean {
+  return ranges.some((r) => pos >= r.from && pos <= r.to)
 }
 
 // ---- 定位纯函数（块菜单与大纲菜单共用；子菜单翻转是大纲右置修复载体）----

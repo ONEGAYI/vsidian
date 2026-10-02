@@ -59,8 +59,18 @@ export function createTableRegionPointer(tableRowsAt: (view: EditorView, pos: nu
 
     private readonly onBlur = (event: FocusEvent): void => {
       if (event.relatedTarget instanceof Node && this.view.dom.contains(event.relatedTarget)) return
+      // 右键/大纲菜单夺焦不算失焦（#186 关键 bug 1）：菜单打开时
+      // focusMenuDom 聚焦菜单容器，其操作对象正是本矩形蒙版——此前
+      // focusout 即清蒙版，用户看到「选中单元格后右键失焦选区」。菜单
+      // 关闭还焦后蒙版保持（菜单命令自行决定是否消费选区）
+      if (event.relatedTarget instanceof Element &&
+          event.relatedTarget.closest('.vsidian-context-menu, .vsidian-outline-menu')) return
       queueMicrotask(() => {
         if (this.view.dom.contains(document.activeElement)) return
+        // 菜单打开期间 activeElement 在菜单容器内（body 下、view 外），
+        // 同样豁免——focusout 无 relatedTarget 的浏览器路径兜底
+        if (document.activeElement instanceof Element &&
+            document.activeElement.closest('.vsidian-context-menu, .vsidian-outline-menu')) return
         this.anchor = null
         if (this.view.state.field(tableRegionField)) selectTableRegion(this.view, null)
       })

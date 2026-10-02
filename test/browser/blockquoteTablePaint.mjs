@@ -117,6 +117,73 @@ const failures = []
     console.error(`[引用表格绘制][FAIL] 边界导航与拖选蒙版（二轮）: ${error.message}`)
   } finally { await page.close() }
 }
+// ---- #296 三轮真机反馈：拖选跨越前缀不显形 + 右键保选区 ----
+{
+  const page = await browser.newPage()
+  const errors = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  try {
+    await page.setContent('<div id="app"></div>')
+    await page.addStyleTag({ path: bundle.replace(/\.js$/, '.css') })
+    await page.addScriptTag({ path: bundle })
+    const source = '前文\n\n> | 甲 | 乙 |\n> | --- | --- |\n> | 丙 | 丁 |\n\n后文'
+    await page.evaluate((text) => window.initTable(text), source)
+    await page.evaluate(() => new Promise(resolve =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    const read = () => page.evaluate(() => window.readEditor())
+    // 1) 格内起点拖选跨格：前缀保持隐藏——视觉口径断言（用户看到的）：
+    //    修复前选区区间覆盖前缀触发 QuoteMark 隐藏退场，`>` 进入可见文本
+    //    （「引用块符号纳入选区」）；修复后端点语义，`>` 保持被 replace
+    //    隐藏。field 层前缀 mark 齐备作伴证（DOM 中该 mark 被 QuoteMark
+    //    replace 优先占位，不直接出现在 DOM——断言不查 DOM 存在性）
+    const a = await page.locator('.vsidian-table-grid-row').nth(0)
+      .locator('.vsidian-table-grid-cell').nth(0).boundingBox()
+    const b = await page.locator('.vsidian-table-grid-row').nth(1)
+      .locator('.vsidian-table-grid-cell').nth(1).boundingBox()
+    await page.mouse.move(a.x + 14, a.y + a.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(b.x + b.width - 14, b.y + b.height / 2, { steps: 6 })
+    await page.mouse.up()
+    const afterDrag = await page.evaluate(() => ({
+      visibleQuote: [...document.querySelectorAll('.cm-content .vsidian-table-grid-row')]
+        .some((row) => row.textContent.includes('>')),
+      region: document.querySelectorAll('.vsidian-table-region-cell').length,
+      prefixMarks: window.probePrefixMarks(),
+    }))
+    assert.equal(afterDrag.visibleQuote, false,
+      `拖选跨格后引用前缀 > 不得进入可见文本（纳入选区观感）: ${JSON.stringify(afterDrag)}`)
+    assert.equal(afterDrag.region, 4, `跨格拖选须建立 2×2 矩形蒙版: ${JSON.stringify(afterDrag)}`)
+    assert.equal(afterDrag.prefixMarks, 2,
+      `field 层前缀 mark 须齐备 2 条: ${JSON.stringify(afterDrag)}`)
+    // 2) 右键落在选区内：蒙版与选区保持——修复前两条链路：右键 mousedown
+    //    的 Chrome 默认行为 caret 跳移（蒙版态选区折叠在锚格，guard 按
+    //    蒙版表格行区间保）；右键菜单夺焦（focusMenuDom）触发
+    //    tableRegionSelection.onBlur 清矩形蒙版（「选中单元格后右键失焦
+    //    选区」的字面机制——onBlur 菜单豁免保）
+    const before = await read()
+    await page.mouse.down({ button: 'right' })
+    await page.mouse.up({ button: 'right' })
+    const after = await read()
+    assert.equal(after.ranges, before.ranges,
+      `右键在选区内须保持选区形态（range 数不 collapse）: 前 ${JSON.stringify(before)} 后 ${JSON.stringify(after)}`)
+    assert.equal(await page.evaluate(() =>
+      document.querySelectorAll('.vsidian-table-region-cell').length), 4,
+      '右键打开菜单后矩形蒙版须保持（菜单夺焦不清选区）')
+    await page.keyboard.press('Escape')
+    await page.evaluate(() => new Promise(resolve =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    // 菜单关闭（Esc）后蒙版仍在——还焦不清
+    assert.equal(await page.evaluate(() =>
+      document.querySelectorAll('.vsidian-table-region-cell').length), 4,
+      '菜单关闭后矩形蒙版须保持')
+    assert.deepEqual(errors, [], `三轮场景页面异常: ${JSON.stringify(errors)}`)
+    passed++
+    console.log('[引用表格绘制][PASS] 拖选前缀保持隐藏与右键保选区（三轮）')
+  } catch (error) {
+    failures.push(error)
+    console.error(`[引用表格绘制][FAIL] 拖选前缀保持隐藏与右键保选区（三轮）: ${error.message}`)
+  } finally { await page.close() }
+}
 try {
   for (const [name, source, expect] of scenarios) {
     const page = await browser.newPage()

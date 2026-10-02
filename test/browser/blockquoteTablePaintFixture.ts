@@ -5,6 +5,7 @@ import 'katex/dist/katex.min.css'
 import { WebviewSyncController } from '../../src/webview/syncController'
 import { keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
+import { liveDecorationsField } from '../../src/webview/liveDecorations'
 import '../../src/webview/main.css'
 
 const controller = new WebviewSyncController({
@@ -18,9 +19,19 @@ Object.assign(window, { initTable(text: string) {
     docUri: 'file:///bq.md', version: 1, text })
 }, readEditor() {
   const view = controller.getView()
-  if (!view) return { text: '', head: 0, from: 0, to: 0, line: 0 }
+  if (!view) return { text: '', head: 0, from: 0, to: 0, line: 0, ranges: 0 }
   const head = view.state.selection.main.head
   return { text: view.state.doc.toString(), head,
     from: view.state.selection.main.from, to: view.state.selection.main.to,
-    line: view.state.doc.lineAt(head).number }
+    line: view.state.doc.lineAt(head).number,
+    ranges: view.state.selection.ranges.length }
+}, probePrefixMarks() {
+  const view = controller.getView()
+  if (!view) return -1
+  const decos = view.state.field(liveDecorationsField, false)?.decos
+  let count = 0
+  decos?.between(0, view.state.doc.length, (_from, _to, value) => {
+    if (typeof value.spec['class'] === 'string' && value.spec['class'].includes('vsidian-table-prefix')) count += 1
+  })
+  return count
 }, controller })

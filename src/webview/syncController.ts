@@ -91,6 +91,8 @@ import {
   HOVER_LIVE_DIRECT_KEY,
   SHOW_LINE_NUMBERS_DEFAULT,
   SHOW_LINE_NUMBERS_KEY,
+  TABLE_BLOCK_RENDER_DEFAULT,
+  TABLE_BLOCK_RENDER_KEY,
   SYMBOL_AUTOCOMPLETE_DEFAULT,
   SYMBOL_AUTOCOMPLETE_KEY,
   SYMBOL_SELECTION_WRAP_DEFAULT,
@@ -133,7 +135,7 @@ import {
 } from './nextOccurrence'
 // 2026-10 浮层锚点跟随：查找面板/选词选项条右缘对齐正文列右缘的计划纯函数
 import { planOverlayAnchorRight } from './overlayAnchor'
-import { liveDecorationsField, livePreviewDecorations, LIVE_CLASS_NAMES, selectionTouchesRange, tableCompositionSettled, TaskCheckboxWidget } from './liveDecorations'
+import { liveDecorationsField, livePreviewDecorations, LIVE_CLASS_NAMES, selectionTouchesRange, tableCompositionSettled, tableContainerRenderFacet, TaskCheckboxWidget } from './liveDecorations'
 import { setOccurrenceHitActive } from './hitReveal'
 import { LINK_MOD_CLASS, createLinkInteractions, LINK_CLASS_NAMES, WIKILINK_CLASS_NAMES, activateLinkAtPos, activateLooseLinkAtPos, activateWikilinkAtPos } from './liveLinks'
 import { liveMath } from './liveMath'
@@ -262,6 +264,7 @@ import {
   PLAIN_MENU_LINE,
   buildContextMenuModel,
   contextMenuBlockTargetAt,
+  contextMenuClickWithinSelection,
   contextMenuHandlerForCommand,
   contextMenuKeybindingHints,
   contextMenuZoneAt,
@@ -658,6 +661,36 @@ interface BufferedIncremental {
   baseChanges: SerChange[] | null
 }
 
+/** 右键保选区（#186 关键 bug 1）：Chrome contenteditable 上右键 mousedown
+ *  的默认行为会把选区折叠/重定位到点击处——选好的单元格/文本选区被右键
+ *  清掉。两类命中都 preventDefault（VSCode 原生编辑器同款），contextmenu
+ *  事件不受影响照常触发：右键落在 CM6 选区内（含端点）；或落在活跃表格
+ *  矩形蒙版的表格行区间内（蒙版态 CM6 选区折叠在锚格，选区判定不覆盖，
+ *  而 caret 跳移会经选区变化清掉蒙版）。点在选区与蒙版外放行默认（右键
+ *  前光标落到点击处，菜单作用于右键点） */
+const contextMenuSelectionGuard = EditorView.domEventHandlers({
+  mousedown(event: MouseEvent, view: EditorView): boolean {
+    if (event.button !== 2) return false
+    const pos = view.posAtCoords({ x: event.clientX, y: event.clientY })
+    if (pos === null) return false
+    let keep = contextMenuClickWithinSelection(view.state.selection.ranges, pos)
+    if (!keep) {
+      const region = view.state.field(tableRegionField, false)
+      if (region) {
+        // 蒙版行区间：rowTo 是内容行索引（表头 0），分隔行在表头之后——
+        // 内容行 n>0 的源行号 = 首行 + n + 1（跳过分隔行）
+        const doc = view.state.doc
+        const first = doc.lineAt(region.tableFrom).number
+        const last = first + region.rowTo + (region.rowTo > 0 ? 1 : 0)
+        const lineNo = doc.lineAt(pos).number
+        keep = lineNo >= first && lineNo <= last
+      }
+    }
+    if (keep) event.preventDefault()
+    return false
+  },
+})
+
 export class WebviewSyncController {
   private readonly diagnostics = new TestDiagnostics()
   private view: EditorView | undefined
@@ -1007,6 +1040,12 @@ export class WebviewSyncController {
   private lineNumbersOn = SHOW_LINE_NUMBERS_DEFAULT
   /** 行号扩展的运行时开关通道（extensions 装配点） */
   private readonly lineNumbersCompartment = new Compartment()
+
+  // ---- 块内表格渲染状态（#296 三轮）----
+  /** 容器内表格网格化开关生效态（默认开）；live 经 facet 热重配、
+   *  reading 经 setDocument 的 containerTableSource 通道重建 */
+  private tableBlockRenderOn = TABLE_BLOCK_RENDER_DEFAULT
+  private readonly tableRenderCompartment = new Compartment()
 
   // ---- 代码块卡片状态（#79）----
   /** 卡片配置生效态（card/lineNumbers/copyButton/highlight；lineNumbers
@@ -1891,6 +1930,7 @@ export class WebviewSyncController {
         this.applyEmbedMaxHeightSetting()
         this.embedCards?.setMaxDepth(this.embedMaxDepth())
         this.applyWordSegmentEngineSetting()
+        this.applyTableBlockRenderSetting()
         break
       case 'wordSegment.state': {
         // #239 jieba 资源状态（宿主下载/删除后推送）：资源 URI 变化驱动
@@ -8950,6 +8990,27 @@ export class WebviewSyncController {
   }
 
   /**
+   * 应用「块内表格渲染」设置（#296 三轮；settings.snapshot / settings.changed
+   * 到达时）：缺键回定义默认（向后兼容）、非布尔忽略（与行号同口径）。
+   * live 侧经 Compartment 热重配 tableContainerRenderFacet——装饰 StateField
+   * 检测 facet 变化全量重建；reading 侧经 readingView.setDocument 的
+   * containerTableSource 通道重载全文（隐藏容器重载无视觉影响，切回
+   * 阅读态即按新值呈现）
+   */
+  private applyTableBlockRenderSetting(): void {
+    const raw = this.settings?.[TABLE_BLOCK_RENDER_KEY]
+    const on = typeof raw === 'boolean' ? raw : TABLE_BLOCK_RENDER_DEFAULT
+    if (on === this.tableBlockRenderOn) {
+      return
+    }
+    this.tableBlockRenderOn = on
+    this.view?.dispatch({
+      effects: this.tableRenderCompartment.reconfigure(tableContainerRenderFacet.of(on)),
+    })
+    this.readingView?.setDocument(this.view?.state.doc.toString() ?? '', { containerTableSource: on })
+  }
+
+  /**
    * CSS 片段装载成功后的测量唤醒（#128）：外部样式表落地可能改变行高/
    * 字号，live 侧 CM6 视口需要被重新测量（样式变化不产生 CM6 事务，视口
    * 不会自行重排）。立即一次 + 下一帧一次（字体类变更的排版常在帧间才
@@ -10549,9 +10610,14 @@ export class WebviewSyncController {
       // mount 时按定义默认开）；列在流内、与正文以固定间距相隔的布局
       // 见 main.css 的 #34 段（行号列宽随位数自适应，无降级机制）
       this.lineNumbersCompartment.of(this.lineNumbersOn ? liveLineNumbers() : []),
+      // #296 三轮「块内表格渲染」：容器内表格网格化开关（默认开，设置
+      // 快照/变更到达后热重配；liveDecorationsField 检测 facet 变化全量重建）
+      this.tableRenderCompartment.of(tableContainerRenderFacet.of(this.tableBlockRenderOn)),
       // 标题实时预览装饰（#5 切片）：直接装饰（StateField）+ 间接装饰
       // （ViewPlugin 按 visibleRanges），见 liveDecorations.ts 头注释
       livePreviewDecorations,
+      // 右键保选区（#186 bug 1）：右键 mousedown 在选区内 preventDefault
+      contextMenuSelectionGuard,
       // #10 链接/图片：视口间接装饰（链接 span、图片 widget）+ Ctrl/Cmd
       // 单击跳转意图上报（执行归宿主）；#11 双链同通道（原始 target 上报）
       createLinkInteractions({

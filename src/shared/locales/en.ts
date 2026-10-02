@@ -44,6 +44,13 @@ export const en = {
   'settings.groupImage': 'Images',
   /** Editor-page section (#298): hover.* preview family and embed.* family */
   'settings.groupRefview': 'Reference views',
+  /** Settings-page "Experimental" sidebar category (home for experimental.*
+   *  toggles; defaults follow the shipped behavior, disable to fall back) */
+  'settings.experimentalSection': 'Experimental',
+  'settings.experimentalSectionDescription':
+    'Toggles for features not yet settled. They default to the current shipped behavior; disable to fall back to the stable one.',
+  /** Experimental-page section: experimental.table.* table behaviors */
+  'settings.groupExperimentalTable': 'Table behavior',
 
   // ---- keybindingSettings.（快捷键分页：标题、模式标签、状态、搜索、按钮）----
   'keybindingSettings.title': 'Keybindings',
@@ -91,6 +98,11 @@ export const en = {
   // ---- setting.（设置项定义 title/description，经 titleKey/descriptionKey 取词）----
   'setting.editorLineNumbers.title': 'Show line numbers',
   'setting.editorLineNumbers.description': 'Show source file line numbers in the left gutter of the live preview (not shown in reading view).',
+  /** #296 tables inside block containers: grid rendering for tables nested in
+   *  blockquotes/lists and other containers */
+  'setting.experimentalTableRender.title': 'Render tables inside containers',
+  'setting.experimentalTableRender.description':
+    'Render tables inside blockquotes, lists and other containers as tables (both views). Turn off to show their raw source text instead.',
   'setting.readableLineWidth.title': 'Readable line width',
   'setting.readableLineWidth.description': 'Maximum width of the content column in the live preview and reading view: 0 fills the available width; a specific value caps the column, which then centers in the editor area and yields to the outline sidebar when space is tight.',
   'setting.readableLineWidthFill': 'Fill',

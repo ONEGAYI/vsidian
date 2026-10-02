@@ -122,6 +122,12 @@ const ICON_PATHS = {
   editing: 'M7 4v16M5 4h4M5 20h4M17 4v16M15 4h4M15 20h4',
   codeblock: 'M8 7l-5 5 5 5M16 7l5 5-5 5',
   image: 'M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2ZM11 9a2 2 0 1 1-4 0 2 2 0 0 1 4 0M21 15l-3.09-3.09a2 2 0 0 0-2.82 0L6 21',
+  // experimental（#296 三轮「实验性功能」侧栏组）：锥形瓶（lucide
+  // flask-conical 线性化——实验意象）；table（实验页「表格行为」小节
+  // 标题）：外框 + 中缝十字的 2×2 网格
+  experimental:
+    'M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2 M8.5 2h7 M7 15h10',
+  table: 'M3 5h18v14H3zM12 5v14M3 12h18',
   refview: 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71',
 } as const
 
@@ -135,9 +141,10 @@ function icon(kind: keyof typeof ICON_PATHS): SVGSVGElement {
   return svg
 }
 
-/** 编辑器页二级组标题图标：五枚内联线性字形与 #265 两枚生图资产
- *  （#298 refview 的 path 数据暂以 links 字形占位，正式图标后补仅换数据）。 */
-export type SettingsGroupIcon = 'display' | 'editing' | 'codeblock' | 'image' | 'typewriter' | 'wordSegment' | 'refview'
+/** 编辑器页二级组标题图标：五枚内联线性字形与 #265 两枚生图资产。
+ *  refview（#298）：引用视图小节标题（path 暂以 links 字形占位，正式图
+ *  标后补仅换数据）；table（#296 三轮）：实验页「表格行为」小节标题。 */
+export type SettingsGroupIcon = 'display' | 'editing' | 'codeblock' | 'image' | 'typewriter' | 'wordSegment' | 'refview' | 'table'
 
 function groupIcon(kind: SettingsGroupIcon): SVGSVGElement | HTMLSpanElement {
   if (kind === 'typewriter' || kind === 'wordSegment') {
@@ -331,8 +338,18 @@ export class SettingsPageView {
   private imageDefs(): readonly SettingDefinition[] {
     return this.defs.filter((d) => d.key.startsWith('image.'))
   }
+  /** 实验性页全部定义（侧栏分组与搜索分组的条目源）：experimental.* 前缀 */
+  private experimentalDefs(): readonly SettingDefinition[] {
+    return this.defs.filter((d) => d.key.startsWith('experimental.'))
+  }
+  /** 实验性页「表格行为」小节：experimental.table.* */
+  private experimentalTableDefs(): readonly SettingDefinition[] {
+    return this.defs.filter((d) => d.key.startsWith('experimental.table.'))
+  }
   /** 编辑器页「显示」小节：非 general 且不属其他小节的 editor.* 定义
-   *  （#298 起 hover 与 embed 两前缀改归「引用视图」小节，此处显式排除） */
+   *  （#298 起 hover 与 embed 两前缀改归「引用视图」小节，此处显式排除；
+   *  #296 三轮起 experimental.* 归「实验性功能」侧栏分组，上游 editorDefs
+   *  一并排除） */
   private displayDefs(): readonly SettingDefinition[] {
     return this.editorDefs().filter(
       (d) => !d.key.startsWith('editor.symbol') && !d.key.startsWith('editor.multicursor') &&
@@ -350,8 +367,11 @@ export class SettingsPageView {
     // #239 分词三键（editor.wordSegment*）不由本表渲染；#264 起呈现归编辑
     // 器页尾「中文分词」委托组（wordSegmentSettings 同组渲染选择与下载管
     // 理，值仍走标准保存链路），排除保留防止标准设置行与搜索内建分组重复
-    // 呈现（搜索条目由委托组 entries 提供）
-    return this.defs.filter((d) => !d.key.startsWith('general.') && !d.key.startsWith('editor.wordSegment'))
+    // 呈现（搜索条目由委托组 entries 提供）；#296 三轮 experimental.* 归
+    // 独立「实验性功能」侧栏分组，同样不进编辑器页（displayDefs 以上游
+    // editorDefs 为基，一并排除）
+    return this.defs.filter((d) => !d.key.startsWith('general.') && !d.key.startsWith('editor.wordSegment') &&
+      !d.key.startsWith('experimental.'))
   }
   /** 编辑器页内小节（顺序即渲染顺序）；空小节由调用方跳过不渲染。
    *  icon 为二级组标题图标，注册表驱动（#263 内联四枚 + #265 生图两枚）。
@@ -372,14 +392,25 @@ export class SettingsPageView {
       ...this.editorGroups.map((group): EditorSection => ({ titleKey: group.titleKey, icon: group.icon, group })),
     ]
   }
+  /** 实验性页内小节（#296 三轮；顺序即渲染顺序，空小节跳过；首个为
+   *  「表格行为」experimental.table.*——后续实验域按同前缀模式追加行） */
+  private experimentalSectionDefs(): EditorSection[] {
+    return [
+      { titleKey: 'settings.groupExperimentalTable', icon: 'table', defs: () => this.experimentalTableDefs() },
+    ]
+  }
   private categories() {
-    const builtIn: Array<{ id: string; title: string; icon: 'general' | 'editor' }> = []
+    const builtIn: Array<{ id: string; title: string; icon: 'general' | 'editor' | 'experimental' }> = []
     // 空组不注册（fixture 可能只含部分前缀——空组不得占据默认激活位）
     if (this.generalDefs().length > 0) {
       builtIn.push({ id: 'general', title: t('settings.generalSection'), icon: 'general' })
     }
     if (this.editorDefs().length > 0) {
       builtIn.push({ id: 'editor', title: t('settings.editorCategory'), icon: 'editor' })
+    }
+    // #296 三轮「实验性功能」侧栏分组（experimental.* 的独立归属页）
+    if (this.experimentalDefs().length > 0) {
+      builtIn.push({ id: 'experimental', title: t('settings.experimentalSection'), icon: 'experimental' })
     }
     return [...builtIn, ...this.sections]
   }
@@ -469,6 +500,8 @@ export class SettingsPageView {
           ...toEntries(this.editorDefs()),
           ...this.editorGroups.flatMap((g) => g.entries),
         ] },
+        // #296 三轮 experimental.* 随「实验性功能」分组命中（无委托组）
+        { id: 'experimental', title: t('settings.experimentalSection'), entries: toEntries(this.experimentalDefs()) },
         ...this.sections,
       ]
       let count = 0
@@ -517,6 +550,30 @@ export class SettingsPageView {
       // 容器先入文档再填充：renderDefItems 的 focusEntry focus/scrollIntoView
       // 需要条目已在文档中，游离节点上 focus 不生效
       this.renderDefItems(group, this.generalDefs(), focusEntry)
+      return
+    }
+    // 实验性分组（#296 三轮）：页内按小节标题分组（首个为「表格行为」，
+    // experimental.table.*），结构与编辑器页小节同构（h3 标题 + 分组容器，
+    // 空小节不渲染；当前无委托组形态）
+    if (active.id === 'experimental') {
+      list.append(element('h2', 'vsidian-settings-heading', t('settings.experimentalSection')),
+        element('p', SETTINGS_PAGE_CLASS_NAMES.subtitle, t('settings.experimentalSectionDescription')))
+      let rendered = false
+      for (const section of this.experimentalSectionDefs()) {
+        const defs = section.defs?.() ?? []
+        if (!defs.length) continue
+        const container = element('div', 'vsidian-settings-group')
+        const title = element('h3', 'vsidian-settings-group-title')
+        if (section.icon) title.append(groupIcon(section.icon))
+        title.append(document.createTextNode(t(section.titleKey)))
+        container.append(title)
+        list.append(container)
+        this.renderDefItems(container, defs, focusEntry)
+        rendered = true
+      }
+      if (!rendered) {
+        list.append(element('p', SETTINGS_PAGE_CLASS_NAMES.empty, t('settings.empty')))
+      }
       return
     }
     list.append(element('h2', 'vsidian-settings-heading', t('settings.editorCategory')),

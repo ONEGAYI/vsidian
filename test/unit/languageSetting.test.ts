@@ -138,18 +138,18 @@ describe('设置页「常规」分组渲染与选项显示名（视觉层断言�
     installLocale('zh-cn', zhCn)
     const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
     expect([...parent.querySelectorAll<HTMLButtonElement>(NAV_ITEM)].map((b) => b.textContent))
-      .toEqual(['常规', '编辑器'])
+      .toEqual(['常规', '编辑器', '实验性功能'])
     installLocale('en', en)
     // 不重新 mount：onLocaleChanged 订阅触发 applyLocale → render 重建；
     // 编辑器分类标题经 t() 取词（#95 键化），同样随语言变化
     expect([...parent.querySelectorAll<HTMLButtonElement>(NAV_ITEM)].map((b) => b.textContent))
-      .toEqual([en['settings.generalSection'], en['settings.editorCategory']])
+      .toEqual([en['settings.generalSection'], en['settings.editorCategory'], en['settings.experimentalSection']])
     const select = parent.querySelector<HTMLSelectElement>(`select.${SETTINGS_PAGE_CLASS_NAMES.select}`)!
     expect([...select.options].map((o) => o.textContent)).toEqual(['Auto', '简体中文', 'English'])
     // 换回 zh 同样就地恢复
     installLocale('zh-cn', zhCn)
     expect([...parent.querySelectorAll<HTMLButtonElement>(NAV_ITEM)].map((b) => b.textContent))
-      .toEqual(['常规', '编辑器'])
+      .toEqual(['常规', '编辑器', '实验性功能'])
   })
 
   it('分组隔离（#163 二轮还原口径）：编辑器页「图片」小节只含 image.* 定义，语言项不在其中', () => {

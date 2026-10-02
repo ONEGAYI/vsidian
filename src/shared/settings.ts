@@ -132,6 +132,15 @@ export const SHOW_LINE_NUMBERS_KEY = 'editor.lineNumbers'
 export const SHOW_LINE_NUMBERS_DEFAULT = true
 
 /**
+ * #296「块内表格渲染」：引用块/列表等容器内的表格是否网格化渲染
+ * （live 网格 + reading 表格，两侧同口径；关闭后容器内表格按源码
+ * 文本呈现——#296 之前的容器行形态）。归属「实验性功能」侧栏分组
+ * （experimental.* 前缀）的首个标题组「表格行为」（experimental.table.*）。
+ */
+export const TABLE_BLOCK_RENDER_KEY = 'experimental.table.blockRender'
+export const TABLE_BLOCK_RENDER_DEFAULT = true
+
+/**
  * #79「代码块卡片」总开关：围栏代码块呈现态收起为卡片（隐藏围栏标记、
  * 头部横带 + 语言标签；行号/复制按钮子开关见 #80/#81 的
  * codeblock.lineNumbers / codeblock.copyButton，语法高亮见 #83 的
@@ -380,6 +389,15 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     default: SHOW_LINE_NUMBERS_DEFAULT,
     titleKey: 'setting.editorLineNumbers.title',
     descriptionKey: 'setting.editorLineNumbers.description',
+  },
+  {
+    // #296 块内表格渲染（experimental.table.* 域 → 实验性页「表格行为」
+    // 组：experimentalDefs / experimentalTableDefs 收纳，侧栏独立分组）
+    key: TABLE_BLOCK_RENDER_KEY,
+    type: 'boolean',
+    default: TABLE_BLOCK_RENDER_DEFAULT,
+    titleKey: 'setting.experimentalTableRender.title',
+    descriptionKey: 'setting.experimentalTableRender.description',
   },
   {
     key: CODEBLOCK_CARD_KEY,

@@ -19,7 +19,7 @@ installLocale('zh-cn', zhCn)
 // - 增量装饰与全量重建对拍一致（RangeSet.eq）
 // - 千行单表：装饰构建/单格编辑增量在宽松时限内完成且写回正确
 import { describe, it, expect, vi } from 'vitest'
-import { EditorSelection, EditorState, RangeSet, Text } from '@codemirror/state'
+import { Compartment, EditorSelection, EditorState, RangeSet, Text } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { defaultKeymap, deleteCharBackward, deleteCharForward } from '@codemirror/commands'
 import type { DecorationSet } from '@codemirror/view'
@@ -29,6 +29,7 @@ import {
   getTableGridStats,
   liveDecorationsField,
   livePreviewDecorations,
+  tableContainerRenderFacet,
 } from '../../src/webview/liveDecorations'
 import { blankRowInputPlan, tableEditing, tablePipeKeyHandler } from '../../src/webview/tableEditing'
 import { splitTableRowCells, tableRowCellsForColumns } from '../../src/shared/tableCells'
@@ -88,8 +89,11 @@ function textsFor(set: DecorationSet, cls: string, doc: string): string[] {
     .map((i) => (i.to > i.from ? doc.slice(i.from, i.to) : `@${i.from}`))
 }
 
-function build(doc: string, selection = { anchor: 0 }): DecorationSet {
-  return buildLivePreviewDecorations(Text.of(doc.split('\n')), EditorSelection.single(selection.anchor))
+function build(doc: string, selection: { anchor: number; head?: number } = { anchor: 0 }): DecorationSet {
+  return buildLivePreviewDecorations(
+    Text.of(doc.split('\n')),
+    EditorSelection.single(selection.anchor, selection.head ?? selection.anchor),
+  )
 }
 
 // ---- 装饰契约 ----
@@ -569,6 +573,56 @@ describe('引用块内表格网格化（#296）', () => {
     const onMark = build(doc, { anchor: dataFrom + 1 })
     expect(collect(onMark).some((i) => i.from === dataFrom &&
       i.cls?.split(' ').includes('vsidian-table-prefix'))).toBe(false)
+  })
+
+  it('格内起点拖选跨格：非空选区跨越前缀不显形（#296 三轮真机反馈）', () => {
+    const doc = '> | a | b |\n> | --- | --- |\n> | 1 | 2 |'
+    // 先点击首格落光标，再拖选到末格：anchor/head 都在格内容上，选区
+    // 区间跨越行 3 的 `> ` 前缀——「纳入选区」观感的根因是区间重叠
+    // 语义触发前缀 mark 退场显形；跨越是拖选常态，不得显形。分隔行整行
+    // display:none 不发前缀 mark，基线为行 1/行 3 共 2 条
+    const set = build(doc, { anchor: doc.indexOf('a') + 1, head: doc.indexOf('2') + 1 })
+    expect(textsFor(set, 'vsidian-table-prefix', doc)).toHaveLength(2)
+    for (const at of [doc.indexOf('> | a | b |'), doc.indexOf('> | 1 | 2 |')]) {
+      expect(collect(set).some((i) => i.from === at &&
+        i.cls?.split(' ').includes('vsidian-table-prefix'))).toBe(true)
+    }
+  })
+
+  it('非空选区端点进入前缀区间才显形（shift+扩选到行首语义）', () => {
+    const doc = '> | a | b |\n> | --- | --- |\n> | 1 | 2 |'
+    // head 扩到行 1 行首（前缀区内端点）：行 1 前缀显形（mark 退场），
+    // 行 3 前缀未被端点触及仍隐藏
+    const set = build(doc, { anchor: doc.indexOf('a') + 1, head: 0 })
+    expect(collect(set).some((i) => i.from === doc.indexOf('> | a | b |') &&
+      i.cls?.split(' ').includes('vsidian-table-prefix'))).toBe(false)
+    expect(collect(set).some((i) => i.from === doc.indexOf('> | 1 | 2 |') &&
+      i.cls?.split(' ').includes('vsidian-table-prefix'))).toBe(true)
+  })
+
+  it('「块内表格渲染」关闭：容器内表格不网格化，顶层表不受影响（#296 三轮设置）', () => {
+    const doc = '前文\n\n| 甲 | 乙 |\n| --- | --- |\n| 丙 | 丁 |\n\n> | a | b |\n> | --- | --- |\n> | 1 | 2 |'
+    const off = buildLivePreviewDecorations(Text.of(doc.split('\n')),
+      EditorSelection.single(doc.length), null, null, false, false)
+    // 只剩顶层表两行网格；引用表退回普通引用行（管道按源文可见）
+    expect(textsFor(off, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(2)
+    const on = buildLivePreviewDecorations(Text.of(doc.split('\n')),
+      EditorSelection.single(doc.length), null, null, false, true)
+    expect(textsFor(on, LIVE_CLASS_NAMES.tableGridRow, doc)).toHaveLength(4)
+  })
+
+  it('facet 热重配触发装饰全量重建（Compartment reconfigure 纯事务）', () => {
+    const doc = '> | a | b |\n> | --- | --- |\n> | 1 | 2 |'
+    const compartment = new Compartment()
+    const state = EditorState.create({
+      doc,
+      extensions: [livePreviewDecorations, compartment.of(tableContainerRenderFacet.of(true))],
+    })
+    expect(collect(state.field(liveDecorationsField).decos).some((i) =>
+      i.cls?.split(' ').includes(LIVE_CLASS_NAMES.tableGridRow))).toBe(true)
+    const off = state.update({ effects: compartment.reconfigure(tableContainerRenderFacet.of(false)) }).state
+    expect(collect(off.field(liveDecorationsField).decos).some((i) =>
+      i.cls?.split(' ').includes(LIVE_CLASS_NAMES.tableGridRow))).toBe(false)
   })
 
   it('引用表格行保留 HyperMD-quote 别名（别名桥不因网格行丢失）', () => {

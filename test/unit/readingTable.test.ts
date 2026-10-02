@@ -226,3 +226,33 @@ describe('引用表格前缀残缺的 reading 回退（#296 二轮）', () => {
     expect(splitReadingBlocks(text).filter((b) => b.kind === 'table')).toHaveLength(0)
   })
 })
+
+describe('「块内表格渲染」设置：reading 容器表源文回退（#296 三轮）', () => {
+  it('设置关闭：完好引用表也按源文呈现（与 live 退普通行同口径）', () => {
+    const text = '前文\n\n> | 甲 | 乙 |\n> | --- | --- |\n> | 丙 | 丁 |\n\n后文'
+    const quote = splitReadingBlocks(text, { containerTableSource: false }).find((b) => b.kind === 'blockquote')
+    expect(quote).toBeDefined()
+    const el = createReadingBlockElement(quote!, text)
+    expect(el.querySelectorAll('th, td')).toHaveLength(0)
+    expect(el.textContent).toContain('| 甲 | 乙 |')
+  })
+
+  it('设置关闭：列表内表格同样回退源文；顶层表不受影响', () => {
+    const text = '前文\n\n- | 甲 | 乙 |\n  | --- | --- |\n  | 丙 | 丁 |\n\n| 顶 | 层 |\n| --- | --- |\n| a | b |\n\n后文'
+    const blocks = splitReadingBlocks(text, { containerTableSource: false })
+    const list = blocks.find((b) => b.kind === 'list')
+    expect(list).toBeDefined()
+    const listEl = createReadingBlockElement(list!, text)
+    expect(listEl.querySelectorAll('th, td')).toHaveLength(0)
+    expect(listEl.textContent).toContain('| 甲 | 乙 |')
+    const top = blocks.find((b) => b.kind === 'table')
+    expect(top).toBeDefined()
+    expect(createReadingBlockElement(top!, text).querySelectorAll('td')).toHaveLength(2)
+  })
+
+  it('设置缺省（true）：容器表照常渲染，行为与设置项落地前一致', () => {
+    const text = '前文\n\n> | 甲 | 乙 |\n> | --- | --- |\n> | 丙 | 丁 |\n\n后文'
+    const quote = splitReadingBlocks(text).find((b) => b.kind === 'blockquote')
+    expect(createReadingBlockElement(quote!, text).querySelectorAll('th')).toHaveLength(2)
+  })
+})

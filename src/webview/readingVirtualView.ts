@@ -115,6 +115,9 @@ export class VirtualReadingView {
   private tops: number[] = [0]
   private calib: HeightCalibration = { lineHeightPx: DEFAULT_LINE_HEIGHT_PX }
   private parseCount = 0
+  /** #296 三轮「块内表格渲染」实例态（默认 true；切块经
+   *  splitReadingBlocks 的 containerTableSource 通道） */
+  private containerTableSource = true
   private virtualized = false
 
   /** 当前挂载窗口与元素表（索引 → 元素） */
@@ -190,13 +193,18 @@ export class VirtualReadingView {
     /** 已在来源缓存完成全文解析的块；各实例只共享只读数据，不共享 DOM。 */
     blocks?: readonly ReadingBlock[]
     parsedNow?: boolean
+    /** #296 三轮「块内表格渲染」：容器内表格回退源文（缺省 true；传入
+     *  时存为实例态，后续重建沿用——设置热更新经本参数重载全文） */
+    containerTableSource?: boolean
   }): void {
     if (this.disposed) return
     this.locateSnap = null
     this.findSource.hide()
     if (opts?.parsedNow !== false) this.parseCount += 1
+    if (opts?.containerTableSource !== undefined) this.containerTableSource = opts.containerTableSource
     this.text = text
-    this.blocks = opts?.blocks ? [...opts.blocks] : splitReadingBlocks(text)
+    this.blocks = opts?.blocks ? [...opts.blocks]
+      : splitReadingBlocks(text, { containerTableSource: this.containerTableSource })
     if (opts?.range) {
       const { start, end } = opts.range
       this.blocks = this.blocks.filter((b) => b.start <= end && b.end >= start)

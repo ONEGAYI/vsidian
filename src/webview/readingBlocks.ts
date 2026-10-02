@@ -222,11 +222,18 @@ function embedLinesOfParagraph(text: string, start: number, end: number): EmbedL
   return out
 }
 
+/** 切块选项（#296 三轮「块内表格渲染」设置） */
+export interface ReadingSplitOptions {
+  /** 容器内（引用/列表及其组合）表格是否渲染为表格；false 时受影响表
+   *  按源文呈现（degradeQuoteTableHtml 与残缺回退同一通道）。缺省 true */
+  containerTableSource?: boolean
+}
+
 /**
  * 把 LF 全文切分为阅读块序列（单调有序、互不重叠）。
  * 解析与渲染在切块时一次完成（块携带 html），#7 挂载路径不再解析。
  */
-export function splitReadingBlocks(text: string): ReadingBlock[] {
+export function splitReadingBlocks(text: string, opts?: ReadingSplitOptions): ReadingBlock[] {
   const blocks: ReadingBlock[] = []
   const env = buildLineBounds(text)
   const fm = frontmatterRange(text)
@@ -247,9 +254,9 @@ export function splitReadingBlocks(text: string): ReadingBlock[] {
         })
         : `<pre class="vsidian-reading-frontmatter-text">${escapeHtml(text.slice(0, fm.end))}</pre>`,
     })
-    return splitBody(text, env, fmEndLine + 1, blocks)
+    return splitBody(text, env, fmEndLine + 1, blocks, opts)
   }
-  return splitBody(text, env, 0, blocks)
+  return splitBody(text, env, 0, blocks, opts)
 }
 
 /** offset → 0 基行号（env.lineEnds 上的线性定位；仅 frontmatter 边界用） */
@@ -268,6 +275,7 @@ function splitBody(
   env: ReadingRenderEnv,
   baseLine: number,
   blocks: ReadingBlock[],
+  opts?: ReadingSplitOptions,
 ): ReadingBlock[] {
   const bodyStart = env.lineStarts[baseLine] ?? text.length
   const body = text.slice(bodyStart)
@@ -304,7 +312,7 @@ function splitBody(
       const group = tokens.slice(i, j + 1)
       const map = token.map
       if (map) {
-        pushBlock(text, env, baseLine, blocks, group, map, token)
+        pushBlock(text, env, baseLine, blocks, group, map, token, opts)
       }
       i = j + 1
       continue
@@ -312,7 +320,7 @@ function splitBody(
     // 叶子块（fence / hr / code_block / html_block 等）
     const map = token.map
     if (map && token.type !== 'html_block') {
-      pushBlock(text, env, baseLine, blocks, [token], map, token)
+      pushBlock(text, env, baseLine, blocks, [token], map, token, opts)
     }
     i += 1
   }
@@ -335,6 +343,7 @@ function pushBlock(
   group: Token[],
   map: [number, number],
   opener: Token,
+  opts?: ReadingSplitOptions,
 ): void {
   const startLine = baseLine + map[0]
   let endLine = baseLine + map[1] - 1 // map 的 end 为下一块首行
@@ -410,10 +419,11 @@ function pushBlock(
       // #296 二轮：引用内表格前缀残缺 → 表格部分回退源文（与 live 同口径，
       // 形态学判定共享自 tableCells）。markdown-it 会把残缺引用行踢出表、
       // 留下半张表头表——受影响表按源文呈现，残缺行本身已是相邻段落块
+      // #296 三轮：设置关闭 → 容器内表格无条件回退源文（同一通道）
       const tableToken = group.find((t) => t.type === 'table_open' && t.map)
       if (tableToken?.map) {
         const headerIdx = (env.baseLine ?? 0) + tableToken.map[0]
-        if (quoteTableRowsDegraded(text.split('\n'), headerIdx)) {
+        if (opts?.containerTableSource === false || quoteTableRowsDegraded(text.split('\n'), headerIdx)) {
           const from = env.lineStarts[headerIdx] ?? start
           const to = env.lineEnds[(env.baseLine ?? 0) + tableToken.map[1] - 1] ?? end
           html = degradeQuoteTableHtml(html, text.slice(from, to))
@@ -433,7 +443,19 @@ function pushBlock(
           }
         }
       }
-      blocks.push({ kind: 'list', start, end, html: renderTokenHtml(md, group, env), itemAnchors })
+      let html = renderTokenHtml(md, group, env)
+      // #296 三轮：设置关闭 → 列表内表格同样回退源文（与引用/双模式同
+      // 口径；列表内残缺无形态学判定——markdown-it 不成表即天然源文）
+      if (opts?.containerTableSource === false) {
+        const tableToken = group.find((t) => t.type === 'table_open' && t.map)
+        if (tableToken?.map) {
+          const headerIdx = (env.baseLine ?? 0) + tableToken.map[0]
+          const from = env.lineStarts[headerIdx] ?? start
+          const to = env.lineEnds[(env.baseLine ?? 0) + tableToken.map[1] - 1] ?? end
+          html = degradeQuoteTableHtml(html, text.slice(from, to))
+        }
+      }
+      blocks.push({ kind: 'list', start, end, html, itemAnchors })
       return
     }
     case 'hr':

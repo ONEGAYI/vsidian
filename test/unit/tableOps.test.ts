@@ -115,6 +115,31 @@ describe('格区状态退出', () => {
     expect(view.state.doc.toString()).toBe(TABLE_DOC)
     view.destroy()
   })
+  it('右键/大纲菜单夺焦不清蒙版（#186 关键 bug 1）；真实外部失焦照常清除', async () => {
+    const view = makeEditView(TABLE_DOC, TABLE_DOC.indexOf('苹果'))
+    selectTableRegion(view, { tableFrom: TABLE_DOC.indexOf('| 名字'), rowFrom: 1,
+      rowTo: 2, columnFrom: 0, columnTo: 1 })
+    expect(view.state.field(tableRegionField)).not.toBeNull()
+    const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
+    // 菜单夺焦：focusout 的 relatedTarget 是菜单容器（focusMenuDom 聚焦
+    // body 下的 .vsidian-context-menu）——此前 onBlur 直接清蒙版，用户
+    // 看到「选中单元格后右键失焦选区」；豁免后菜单操作期间蒙版保持
+    const menu = document.createElement('div')
+    menu.className = 'vsidian-context-menu'
+    document.body.appendChild(menu)
+    view.dom.dispatchEvent(new FocusEvent('focusout', { relatedTarget: menu, bubbles: true }))
+    await settle()
+    expect(view.state.field(tableRegionField)).not.toBeNull()
+    // 真实外部失焦（焦点移出编辑器且不在菜单内）：蒙版照常清除
+    const outside = document.createElement('div')
+    document.body.appendChild(outside)
+    view.dom.dispatchEvent(new FocusEvent('focusout', { relatedTarget: outside, bubbles: true }))
+    await settle()
+    expect(view.state.field(tableRegionField)).toBeNull()
+    menu.remove()
+    outside.remove()
+    view.destroy()
+  })
   it('阅读与实时预览切换清除矩形格区', async () => {
     const linked = await setupLinked(TABLE_DOC)
     const view = linked.controller.getView()!

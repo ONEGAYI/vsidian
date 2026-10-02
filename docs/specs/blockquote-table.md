@@ -62,6 +62,18 @@
 - **引用前缀残缺 → 整表回退源码（降级契约，用户指令；live 与 reading 同口径）**：残缺场景（删除某行 `>`、纯缩进续行）下，Lezer 仍把脱离引用块的行留在 Table 内并网格化（视觉混入）、markdown-it 则踢出残缺行渲染半张表头表（两侧不一致且都不是用户想要的）。新契约：表头与各数据行的引用层级须一致（`tableCells.quoteDepthOfLine`，live 树内行集合同义校验 + reading 形态学 `quoteTableRowsDegraded` 同源共享），不一致时 live 整表不网格化（回退源码行类）、reading 把 blockquote 内的表格部分替换为源文 `<pre class="vsidian-reading-table-source">`（残缺行本身已是相邻段落，不再渲染半张表）。**分隔行豁免**（无前缀 lazy 分隔是 GFM 常见合法形态，契约 5 保留）；顶层表层级恒 0 不受影响。已知边界：Lezer 已把残缺行拆出表外的形态（如数据行多一层 `> >`，表内只剩孤儿表头）超出表内可判定范围——live 孤儿表头暂保持网格化、reading 侧形态学判定仍会回退；拆散形态待真机反馈后另行开票。
 - 验证：jsdom 先红后绿（蒙版 1 + 导航 7 + 降级 live 6 + reading 3）；浏览器 `blockquoteTablePaint` 增补「边界导航与拖选蒙版」场景（真实键盘四向进出 + 真拖选）；双模式端到端探针复核六种残缺形态（完好/lazy 豁免不受影响，主场景两侧一致回退）。
 
+## 三轮真机反馈修复（拖选纳入前缀 / 右键两缺陷 / 实验性开关，2026-10-02 第五轮）
+
+二轮交付后用户复验再提三组，全部落地：
+
+- **格内起点拖选跨格把引用符号纳入选区（缺陷）**：先点击单元格落光标、再拖选跨格时 `> ` 显形进选区。根因是**显形谓词用区间重叠语义**——非空选区跨越前缀/QuoteMark 隐藏区即触发退场显形，而「选区区间覆盖中间隐藏结构」恰是跨格拖选的常态。修复：新增**端点触及**谓词 `selectionEndpointsTouchRange`（折叠光标与旧语义一致；非空选区只有 head/anchor 端点落入区间才算触及），前缀 mark（`liveDecorations` 表格前缀退场）与 QuoteMark/ListMark 隐藏退场三处换用——跨越不显形、扩选到行首（端点进入）仍可编辑层级。回归：jsdom 跨越不退场/端点进入退场两例 + 浏览器真拖选断言「表格行可见文本不含 `>`」（视觉口径——field 层前缀 mark 计 2 为伴证；DOM 中该 mark 被 QuoteMark replace 优先占位不直接出现，断言不查 DOM 存在性）。
+- **右键两关键缺陷（#186 补票，bug2 立即修复）**：
+  - 块内表格右键未识别为表格右键——降级矩阵失效。根因：`shared/contextMenu.ts` 的 `TABLE_DELIMITER_RE` 不认行首容器前缀，引用表分隔行 `> |---|` 不匹配 → zone 判 normal、格式/段落/插入整簇不置灰。修复：分隔行判定先剥容器前缀（`parseLinePrefix` 同源于 `containerPrefixLen`）；引用/quote-list 组合容器与顶层表同矩阵。
+  - 选中单元格后右键失焦选区——两条链路同时修：①Chrome contenteditable 右键 mousedown 默认把选区重定位到点击处，`contextMenuSelectionGuard`（domEventHandlers）在右键落入选区内**或活跃矩形蒙版的表格行区间内**时 preventDefault（蒙版态 CM6 选区折叠在锚格，需按蒙版行区间判；VSCode 同款语义，contextmenu 照常触发）；②右键菜单 `focusMenuDom` 夺焦触发 `tableRegionSelection.onBlur` 清矩形蒙版（用户「失焦选区」的字面机制）——onBlur 对 relatedTarget/activeElement 在 `.vsidian-context-menu`/`.vsidian-outline-menu` 内的夺焦豁免，菜单关闭还焦后蒙版保持。
+  - **职能转移（用户决策）**：边界导航只做出入不承担引用层级控制；「移除引用块 / 增一层引用」等层级操作职能转移至表格专属右键菜单——已补进 #186 切片清单（本轮未实施菜单项本身）。
+- **设置侧栏「实验性功能」分组 + 「块内表格渲染」开关（用户指令）**：侧栏新增第三内置分组「实验性功能」（`experimental.*` 前缀定义，锥形瓶图标；#163「侧栏两组」契约随之修订），页内首个标题组「表格行为」（`experimental.table.*`），首项 `experimental.table.blockRender`（boolean 默认开）。关闭时：live 经 `tableContainerRenderFacet`（Compartment 热重配，`liveDecorationsField` 检测 facet 变化全量重建、gridPlans 缓存丢弃）对容器前缀行不网格化（回 #296 之前形态——引用行类照旧、管道源文可见）；reading 经 `splitReadingBlocks(text, { containerTableSource })` 把 blockquote/list 容器内表格无条件替换为源文 `<pre>`（与残缺回退同一通道，setting 缺省 true 行为与落地前一致）。设置页搜索分组、宿主快照默认值（`settingsService` 注册表驱动）、语言包双语同步接入。
+- 验证：jsdom 先红后绿（前缀端点 2 + zone 2 + 保选区 1 + 蒙版豁免 1 + 设置渲染 2 + 默认快照 1 + 降级 3 + facet 2）；浏览器 `blockquoteTablePaint` 增补「拖选前缀保持隐藏与右键保选区」场景、`settingsPage` 增补实验性分组绘制层断言（开关可见/默认开/标题可见）；全量单测 5017、compile、样式契约 8 项、全量浏览器 136.55s 全绿。
+
 ## 验证与完成条件
 
 - TDD：三层契约测试先行暴露缺口（装饰类名断言、创建产出文本断言、结构操作纯函数断言），再实现转绿。
