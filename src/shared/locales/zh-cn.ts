@@ -86,7 +86,7 @@ export const zhCn: Record<MessageKey, string> = {
   'setting.embedMaxDepth.description': '自动展开嵌入内容中的引用。来源笔记是第 0 层；设为 1 只显示直接嵌入，设为 3 再显示后续两层。',
   /** #298 悬停预览总开关（hover.enabled） */
   'setting.hoverEnabled.title': '悬停预览引用文档',
-  'setting.hoverEnabled.description': '指针悬停链接时弹出引用文档预览浮层，覆盖阅读模式正文、实时预览与反链/出链面板（含浮层内子引用）。关闭后所有悬停路径均不再弹出浮层；正文嵌入卡片不受影响。',
+  'setting.hoverEnabled.description': '指针悬停链接时弹出引用文档预览浮层，覆盖阅读模式正文、实时预览与反链/出链面板（含浮层内子引用）。关闭后浮层的全部触发入口——悬停与「预览当前链接」键盘命令——均不再打开浮层；正文嵌入卡片不受影响。',
   /** #299 跳转目标提示（hover.targetTip） */
   'setting.hoverTargetTip.title': '悬停显示跳转目标',
   'setting.hoverTargetTip.description': '悬停在引用上且不会弹出引用视图浮层时（如实时预览中未按住 Ctrl，或悬停预览总开关已关闭），短暂停留后显示目标位置的路径提示。独立于「悬停预览引用文档」总开关——关闭总开关后提示仍可用。',

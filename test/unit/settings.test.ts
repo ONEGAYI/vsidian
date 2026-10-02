@@ -586,4 +586,18 @@ describe('引用视图设置组（#298：总开关 + liveDirect 改名 + embed �
     expect(en['setting.hoverLiveDirect.title']).not.toBe('Hover links directly in live preview')
   })
 
+  it('总开关描述明示键盘命令同辖（#298 跟进：文案与「总开关扩权管辖键盘命令」行为统一）', async () => {
+    const { zhCn } = await import('../../src/shared/locales/zh-cn')
+    const { en } = await import('../../src/shared/locales/en')
+    // 命令名与 command 词条同源（勿自造）：关闭语义必须覆盖键盘命令触发
+    // 入口（悬停与命令均不再打开浮层），并保留正文嵌入卡片豁免
+    expect(zhCn['setting.hoverEnabled.description'])
+      .toContain(`「${zhCn['command.ui.hoverPreviewLink.title']}」键盘命令`)
+    expect(zhCn['setting.hoverEnabled.description']).toContain('正文嵌入卡片不受影响')
+    expect(zhCn['setting.hoverEnabled.description']).not.toContain('键盘命令不受影响')
+    expect(en['setting.hoverEnabled.description'])
+      .toContain(`"${en['command.ui.hoverPreviewLink.title']}" keyboard command`)
+    expect(en['setting.hoverEnabled.description'])
+      .toContain('embeds written in the note body are not affected')
+  })
 })

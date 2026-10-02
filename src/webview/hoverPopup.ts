@@ -174,8 +174,9 @@ export interface HoverPreviewContext {
   codeHighlight?(): boolean
   /** #298 悬停总开关（hover.enabled）的只读投影：false = 所有悬停路径
    *  不开浮层（阅读正文/面板/Live 两路/补按 Ctrl 补触发，统一在本模块
-   *  hoverPreviewAnchorEnter 入口前置拦截）；缺省（未提供）视为开——
-   *  键盘命令等显式打开不经此门（规格只辖悬停路径） */
+   *  hoverPreviewAnchorEnter 入口前置拦截）；#298 跟进（2026-10-02 用户
+   *  裁定扩权）「预览当前链接」键盘命令同辖——openHoverPopupForKeyboard
+   *  入口同门（命令执行但静默不弹浮层）；缺省（未提供）视为开 */
   hoverPreviewEnabled?(): boolean
   /** #245 复用正文卡片管理器升级浮层内子引用，不创建第二个浮窗。 */
   mountEmbedChild?(parentInstanceId: string, block: HTMLElement, target: RefLoadedContent): void
@@ -686,8 +687,13 @@ export function openHoverPopupFor(anchor: HTMLElement, spec: HoverPopupTargetSpe
 }
 
 /** #221 键盘命令入口（「预览当前链接」的手动打开）：记录触发处焦点，
- *  打开后焦点进入浮层；Esc 关闭后返还（body/脱树不返还） */
+ *  打开后焦点进入浮层；Esc 关闭后返还（body/脱树不返还）。#298 跟进
+ *  （2026-10-02 用户裁定扩权）：总开关关闭时本入口同拦——命令执行但
+ *  静默不弹浮层（与「无目标静默不误开」同形态），不弹任何提示 */
 export function openHoverPopupForKeyboard(anchor: HTMLElement, spec: HoverPopupTargetSpec): void {
+  if (context?.hoverPreviewEnabled?.() === false) {
+    return
+  }
   const prev = document.activeElement instanceof HTMLElement ? document.activeElement : null
   openPopup(anchor, spec, { keyboard: true, prevFocus: prev })
 }

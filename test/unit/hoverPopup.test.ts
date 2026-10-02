@@ -195,19 +195,20 @@ describe('悬停总开关门控（#298：hover.enabled 关闭时全域悬停不�
     expect(isHoverPopupOpen()).toBe(false)
   })
 
-  it('总开关关闭不拦键盘命令（显式打开非悬停路径）；上下文未提供开关时缺省视为开', () => {
+  it('总开关关闭同拦键盘命令（#298 跟进扩权：命令执行但静默）；上下文未提供开关时缺省视为开', () => {
     vi.useFakeTimers()
-    // 键盘命令（「预览当前链接」）为用户显式操作，不在悬停路径清单内
+    // #298 跟进（2026-10-02 用户裁定扩权）：「预览当前链接」键盘命令入口
+    // 一并被拦——命令执行但静默不弹浮层（与「无目标静默不误开」同形态）
     const h = makeDisabledHarness()
     openHoverPopupForKeyboard(h.anchor, { target: '目标笔记', sourceStart: 0, sourceEnd: 4 })
-    expect(isHoverPopupOpen(), '键盘命令不受总开关管辖（规格只辖悬停路径）').toBe(true)
-    expect(h.sent.some((m) => m.kind === 'hover.request'), '键盘命令照常发出读取请求').toBe(true)
-    closeHoverPopup()
+    expect(isHoverPopupOpen(), '总开关关闭时键盘命令不得打开浮层').toBe(false)
+    expect(popupEl()).toBeNull()
+    expect(h.sent, '静默拦截零请求').toEqual([])
     // 缺省契约：上下文未提供 hoverPreviewEnabled（旧装配/测试 fixture）视为开
     const fallback = makeHarness()
     hoverPreviewAnchorEnter(fallback.anchor)
     vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
-    expect(isHoverPopupOpen()).toBe(true)
+    expect(isHoverPopupOpen(), '缺省视为开：悬停路径恢复').toBe(true)
   })
 
   it('总开关重新打开后恢复悬停路径（消失语义不变：门控只辖出现）', () => {

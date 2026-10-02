@@ -101,7 +101,7 @@ export const en = {
   'setting.embedMaxDepth.description': 'Automatically expand references inside embedded notes. The source note is depth 0; 1 shows only direct embeds, and 3 also shows the next two levels.',
   /** #298 hover preview master switch (hover.enabled) */
   'setting.hoverEnabled.title': 'Preview references on hover',
-  'setting.hoverEnabled.description': 'Point at a link to open the reference preview popup — covers the reading view body, the live preview, and the backlink/outlink panels (sub-references inside the popup included). Turn off to stop every hover path from opening the popup; embeds written in the note body are not affected.',
+  'setting.hoverEnabled.description': 'Point at a link to open the reference preview popup — covers the reading view body, the live preview, and the backlink/outlink panels (sub-references inside the popup included). Turn off to stop every trigger — hovering and the "Preview the current link" keyboard command — from opening the popup; embeds written in the note body are not affected.',
   /** #299 jump target tip (hover.targetTip) */
   'setting.hoverTargetTip.title': 'Show jump target on hover',
   'setting.hoverTargetTip.description': 'When hovering a reference would not open the preview popup (for example without holding Ctrl in the live view, or while the hover preview master switch is off), show a brief path tip for the target location after a short dwell. Independent of "Preview references on hover" — the tip stays available with the master switch off.',
