@@ -3,9 +3,10 @@
 //
 // 策略（规格 docs/specs/tooltip.md「行为规格」）：
 // - 锚定触发元素（非鼠标位置）；
-// - 垂直：下方优先 → 上方翻转 → 上下均放不下回落下方并钳进下边距；
-// - 水平：start（左对齐锚点）→ 越右缘翻 end（右对齐锚点）→ 仍越左缘钳到
-//   左边距（tip 宽于视口时左缘优先，不出右缘）；
+// - 垂直：下方优先 → 上方翻转 → 翻上仍越顶边距则钳进视口；
+// - 水平：**居中优先**（锚点中心对齐提示中心，参照 Obsidian 观感）→ 越出
+//   右缘翻 end（右对齐锚点）→ 仍越左缘钳到左边距；越出左缘对称翻 start
+//   （左对齐锚点）→ 仍越右缘钳到右边距（tip 宽于视口时左缘优先）；
 // - 间距与视口边距沿用悬停预览先例（gap 6 / margin 8）。
 
 export interface TooltipAnchorRect {
@@ -27,7 +28,7 @@ export interface TooltipPlacement {
   top: number
   left: number
   vertical: 'below' | 'above'
-  align: 'start' | 'end' | 'clamp'
+  align: 'center' | 'start' | 'end' | 'clamp'
 }
 
 export function planTooltipPlacement(input: TooltipPlacementInput): TooltipPlacement {
@@ -47,15 +48,26 @@ export function planTooltipPlacement(input: TooltipPlacementInput): TooltipPlace
     }
   }
 
-  // 水平：start → end 翻转 → 钳制（左缘优先：tip 宽于视口时不悬出右缘）
-  let align: TooltipPlacement['align'] = 'start'
-  let left = anchor.left
+  // 水平：居中优先 → 越缘侧翻转对齐 → 钳制（tip 宽于视口时左缘优先，
+  // 不悬出右缘）
+  const centerX = (anchor.left + anchor.right) / 2
+  let align: TooltipPlacement['align'] = 'center'
+  let left = centerX - tip.width / 2
   if (left + tip.width > viewport.width - margin) {
+    // 居中越出右缘：翻右对齐锚点
     align = 'end'
     left = anchor.right - tip.width
     if (left < margin) {
       align = 'clamp'
       left = margin
+    }
+  } else if (left < margin) {
+    // 居中越出左缘：对称翻左对齐锚点
+    align = 'start'
+    left = anchor.left
+    if (left + tip.width > viewport.width - margin) {
+      align = 'clamp'
+      left = Math.max(margin, viewport.width - margin - tip.width)
     }
   }
 

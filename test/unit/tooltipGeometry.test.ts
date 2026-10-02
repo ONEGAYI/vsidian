@@ -13,12 +13,12 @@ const GAP = 6
 const MARGIN = 8
 
 describe('悬停提示几何（#300）', () => {
-  it('视口中央：下方呈现、start（左对齐锚点）', () => {
+  it('视口中央：下方呈现、居中于锚点', () => {
     const p = planTooltipPlacement({ anchor: anchorAt(300, 200), tip: TIP, viewport: VP })
     expect(p.vertical).toBe('below')
-    expect(p.align).toBe('start')
+    expect(p.align).toBe('center')
     expect(p.top).toBe(200 + 24 + GAP)
-    expect(p.left).toBe(300)
+    expect(p.left).toBe(300 + 40 / 2 - TIP.width / 2)
   })
 
   it('贴近视口底缘：上方翻转', () => {
@@ -36,25 +36,36 @@ describe('悬停提示几何（#300）', () => {
     expect(p.top + TIP.height).toBeLessThanOrEqual(vp.height)
   })
 
-  it('左对齐越出右缘：水平翻转为 end（右对齐锚点）', () => {
+  it('居中越出右缘：水平翻转为 end（右对齐锚点）', () => {
+    // 中心 770：center left=710，710+120=830 > 792 → 翻右对齐，left=670
     const p = planTooltipPlacement({ anchor: anchorAt(750, 200), tip: TIP, viewport: VP })
     expect(p.vertical).toBe('below')
     expect(p.align).toBe('end')
     expect(p.left).toBe(750 + 40 - TIP.width)
   })
 
-  it('end 翻转后仍越出左缘：钳制到左边距（窄锚点 + 近半视口宽 tip）', () => {
-    // start 越右缘 ⟺ left > vw-margin-w；end 越左缘 ⟺ right < margin+w；
-    // 两者同时要求锚点极窄（宽 < 视口-2×margin-2×tip 宽的补集），取
-    // left=395/right=407、w=400：start 795>792 越、end 7<8 越 → 钳制
+  it('居中越出左缘：对称翻转为 start（左对齐锚点）', () => {
+    // 中心 30：center left=-30 < 8 → 翻左对齐，left=10
+    const p = planTooltipPlacement({ anchor: anchorAt(10, 200), tip: TIP, viewport: VP })
+    expect(p.align).toBe('start')
+    expect(p.left).toBe(10)
+  })
+
+  it('居中越左翻 start 后仍越出右缘：钳制到左边距（tip 宽于视口）', () => {
+    // 锚点贴左缘（left=4）、tip 900 宽于视口 800：center left=24-450=-426
+    // 越左 → 翻 start left=4；4+900=904 > 792 仍越右 → 钳制。
+    // center 基准下「end 后仍越左」不可达（越右要求锚点偏右、end 越左要求
+    // 锚点贴左，互斥），对称场景落在 start 分支
     const p = planTooltipPlacement({
-      anchor: anchorAt(395, 200, 12, 24), tip: { width: 400, height: 30 }, viewport: VP,
+      anchor: anchorAt(4, 200, 40, 24), tip: { width: 900, height: 30 }, viewport: VP,
     })
     expect(p.align).toBe('clamp')
     expect(p.left).toBe(MARGIN)
   })
 
   it('钳制上限：tip 宽于视口时不出右缘（左缘优先）', () => {
+    // 锚点居中（中心 420）：center left=420-450=-30 越左 → 翻 start left=400；
+    // 400+900=1300 > 792 → 钳 max(8, 792-900)=8，左缘优先
     const p = planTooltipPlacement({
       anchor: anchorAt(400, 200), tip: { width: 900, height: 30 }, viewport: VP,
     })

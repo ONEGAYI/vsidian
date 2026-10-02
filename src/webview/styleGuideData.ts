@@ -3957,7 +3957,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "category": "tooltip",
     "kind": "selector",
     "target": ".vsidian-tooltip",
-    "purpose": "统一自绘悬停提示容器（#300）：全站悬停词（操作提示、用户内容字面量、态变原因、键位徽章）的自绘小卡片。document 级委托监听 [data-tooltip]（原生 title 已退役，防回潮扫描钉住），悬停经 --vsidian-tooltip-show-delay 延迟出现、焦点进入即时显示；可聚焦（tabindex=0）、内部文字可选中复制，不装载按钮。fixed 定位经 tooltipGeometry（下→上翻转、左右翻转、视口钳制），z-index 10500 高于模态——图表/图片/悬停预览弹窗自身按钮的提示可呈现于弹窗之上；不参与 popupMutex 争夺，显隐纯指针/焦点驱动。设置页 webview 同机制同类名。",
+    "purpose": "统一自绘悬停提示容器（#300）：全站悬停词（操作提示、用户内容字面量、态变原因、键位徽章）的自绘小卡片。document 级委托监听 [data-tooltip]（原生 title 已退役，防回潮扫描钉住），悬停经 --vsidian-tooltip-show-delay 延迟出现、焦点进入即时显示；可聚焦（tabindex=0）、内部文字可选中复制，不装载按钮。fixed 定位经 tooltipGeometry（下→上翻转、水平居中优先、越缘翻转对齐、视口钳制），z-index 10500 高于模态——图表/图片/悬停预览弹窗自身按钮的提示可呈现于弹窗之上；不参与 popupMutex 争夺，显隐纯指针/焦点驱动。设置页 webview 同机制同类名。",
     "views": [
       "live",
       "reading"
@@ -5397,7 +5397,7 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "tooltip-card": {
-    "purpose": "The unified self-drawn hover hint card (#300): every hover hint in the editor and settings webviews (operation names, user-content literals like raw TeX or image alt, disabled-state reasons, and keybinding badges). A document-level delegate listens on [data-tooltip] — the native title attribute is retired fleet-wide and a contract scan blocks regressions. Appears after the --vsidian-tooltip-show-delay on hover and immediately on keyboard focus; focusable (tabindex=0) with selectable, copyable text; no buttons or interactive logic. Fixed positioning goes through tooltipGeometry (below-first with above flip, horizontal edge flips, viewport clamping) at z-index 10500, above modals so buttons inside popups keep hints; it never claims the popup mutex — visibility is purely pointer/focus driven. The settings webview shares the same mechanism and class names.",
+    "purpose": "The unified self-drawn hover hint card (#300): every hover hint in the editor and settings webviews (operation names, user-content literals like raw TeX or image alt, disabled-state reasons, and keybinding badges). A document-level delegate listens on [data-tooltip] — the native title attribute is retired fleet-wide and a contract scan blocks regressions. Appears after the --vsidian-tooltip-show-delay on hover and immediately on keyboard focus; focusable (tabindex=0) with selectable, copyable text; no buttons or interactive logic. Fixed positioning goes through tooltipGeometry (below-first with above flip, center-first horizontal alignment flipping at viewport edges, clamping) at z-index 10500, above modals so buttons inside popups keep hints; it never claims the popup mutex — visibility is purely pointer/focus driven. The settings webview shares the same mechanism and class names.",
     "dom": "Appended to #app (falling back to body); a persistent singleton whose shown modifier class drives visibility.",
     "obsidian": {
       "counterpart": "None (Obsidian tooltips expose no customization interface)"

@@ -2867,7 +2867,7 @@ export const STYLE_CONTRACT_ENTRIES: readonly StyleContractEntry[] = [
     category: 'tooltip',
     kind: 'selector',
     target: '.vsidian-tooltip',
-    purpose: '统一自绘悬停提示容器（#300）：全站悬停词（操作提示、用户内容字面量、态变原因、键位徽章）的自绘小卡片。document 级委托监听 [data-tooltip]（原生 title 已退役，防回潮扫描钉住），悬停经 --vsidian-tooltip-show-delay 延迟出现、焦点进入即时显示；可聚焦（tabindex=0）、内部文字可选中复制，不装载按钮。fixed 定位经 tooltipGeometry（下→上翻转、左右翻转、视口钳制），z-index 10500 高于模态——图表/图片/悬停预览弹窗自身按钮的提示可呈现于弹窗之上；不参与 popupMutex 争夺，显隐纯指针/焦点驱动。设置页 webview 同机制同类名。',
+    purpose: '统一自绘悬停提示容器（#300）：全站悬停词（操作提示、用户内容字面量、态变原因、键位徽章）的自绘小卡片。document 级委托监听 [data-tooltip]（原生 title 已退役，防回潮扫描钉住），悬停经 --vsidian-tooltip-show-delay 延迟出现、焦点进入即时显示；可聚焦（tabindex=0）、内部文字可选中复制，不装载按钮。fixed 定位经 tooltipGeometry（下→上翻转、水平居中优先、越缘翻转对齐、视口钳制），z-index 10500 高于模态——图表/图片/悬停预览弹窗自身按钮的提示可呈现于弹窗之上；不参与 popupMutex 争夺，显隐纯指针/焦点驱动。设置页 webview 同机制同类名。',
     views: ['live', 'reading'],
     dom: '挂载于 #app 直下（回退 body）；单例常驻，shown 修饰类驱动显隐。',
     example: '.vsidian-tooltip { background: var(--vsidian-tooltip-background); border-radius: var(--vsidian-tooltip-radius); }',
