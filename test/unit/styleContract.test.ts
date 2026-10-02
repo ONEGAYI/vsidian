@@ -388,6 +388,7 @@ const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   'find-panel': 6,
   loading: 3,
   tooltip: 11,
+  toast: 26,
 }
 
 describe('styleContract 类目体系（#145）', () => {

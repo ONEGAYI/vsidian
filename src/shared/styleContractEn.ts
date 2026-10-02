@@ -1230,6 +1230,190 @@ export const STYLE_CONTRACT_EN_OVERRIDES: Readonly<Record<string, StyleContractE
     dom: 'Defined on #app (the same-named container in both the editor and settings webviews).',
     obsidian: { counterpart: 'None (Obsidian tooltips expose no customization interface)' },
   },
+  "toast-container": {
+    "purpose": "Independent lightweight notification channel centered at the bottom of the editor viewport; preserves focus and does not block input.",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    },
+    "states": "At most one visible message; independent from host notifications."
+  },
+  "toast": {
+    "purpose": "Local notification card; text wraps without truncating action guidance.",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    },
+    "states": "data-severity is neutral, warning or error; animation states are internal."
+  },
+  "toast-severity": {
+    "purpose": "Severity selectors: neutral follows the theme, warning is pale yellow, error pale red; high contrast uses theme foreground and borders.",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-background": {
+    "purpose": "Neutral background, follows the current theme",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-foreground": {
+    "purpose": "Neutral text color, follows the current theme",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-border": {
+    "purpose": "Neutral border, follows the current theme",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-warning-background": {
+    "purpose": "Pale yellow warning background, adapted to light/dark and high contrast themes",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-warning-foreground": {
+    "purpose": "Warning text color, adapted to light/dark and high contrast themes",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-warning-border": {
+    "purpose": "Warning border color, adapted to light/dark and high contrast themes",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-error-background": {
+    "purpose": "Pale red error background, adapted to light/dark and high contrast themes",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-error-foreground": {
+    "purpose": "Error text color, adapted to light/dark and high contrast themes",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-error-border": {
+    "purpose": "Error border color, adapted to light/dark and high contrast themes",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-radius": {
+    "purpose": "Notification corner radius",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-font-size": {
+    "purpose": "Notification font size",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-padding-inline": {
+    "purpose": "Notification horizontal padding",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-padding-block": {
+    "purpose": "Notification vertical padding",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-max-width": {
+    "purpose": "Maximum width, also clamped by viewport margins",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-viewport-margin": {
+    "purpose": "Horizontal viewport margin",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-bottom-offset": {
+    "purpose": "Offset from the editor viewport bottom, plus safe area",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-shadow": {
+    "purpose": "Notification shadow",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-enter-distance": {
+    "purpose": "Upward entrance distance; removed when reduced motion is preferred",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-enter-duration": {
+    "purpose": "Entrance animation duration (CSS time)",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-exit-duration": {
+    "purpose": "Exit animation duration (CSS time)",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-duration": {
+    "purpose": "Neutral display duration in unitless milliseconds",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-warning-duration": {
+    "purpose": "Warning display duration in unitless milliseconds",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-error-duration": {
+    "purpose": "Error display duration in unitless milliseconds",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
 }
 
 /**

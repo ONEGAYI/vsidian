@@ -257,6 +257,13 @@ export const STYLE_GUIDE_CATEGORIES: readonly StyleContractCategory[] = [
     "title": "悬停提示",
     "titleKey": "styleRef.category.tooltip",
     "order": 15
+  },
+  {
+    "id": "toast",
+    "domain": "chrome",
+    "title": "轻提示",
+    "titleKey": "styleRef.category.toast",
+    "order": 16
   }
 ] as readonly StyleContractCategory[]
 
@@ -4227,6 +4234,606 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "浏览器 tooltipCard：无注入装配走真实 CSS 变量路径"
     ],
     "introduced": "#300（2026-10-02）"
+  },
+  {
+    "domain": "chrome",
+    "category": "toast",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app，容器为其直接后代；不随正文滚动。",
+    "obsidian": {
+      "counterpart": "无（Vsidian 自带轻提示）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 toastCssContract：变量定义与消费；单元 toast：生命周期",
+      "浏览器 plainPaste：片段覆盖、主题、焦点与绘制层；真宿主 plainPasteHost：paint.toast.visible"
+    ],
+    "introduced": "#305（2026-10-02）",
+    "id": "toast-container",
+    "kind": "container",
+    "target": ".vsidian-toast-container",
+    "purpose": "编辑器视口底部居中的独立轻提示通道；不抢焦点，不拦截下层输入。",
+    "states": "同时最多一条；与宿主通知通道独立。",
+    "example": ".vsidian-toast-container { bottom: 32px; }"
+  },
+  {
+    "domain": "chrome",
+    "category": "toast",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app，容器为其直接后代；不随正文滚动。",
+    "obsidian": {
+      "counterpart": "无（Vsidian 自带轻提示）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 toastCssContract：变量定义与消费；单元 toast：生命周期",
+      "浏览器 plainPaste：片段覆盖、主题、焦点与绘制层；真宿主 plainPasteHost：paint.toast.visible"
+    ],
+    "introduced": "#305（2026-10-02）",
+    "id": "toast",
+    "kind": "selector",
+    "target": ".vsidian-toast",
+    "purpose": "本地轻提示卡片；文本折行，不裁掉操作引导。",
+    "states": "data-severity 为 neutral、warning 或 error；动画状态内部使用。",
+    "example": ".vsidian-toast { font-size: 13px; }"
+  },
+  {
+    "domain": "chrome",
+    "category": "toast",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app，容器为其直接后代；不随正文滚动。",
+    "obsidian": {
+      "counterpart": "无（Vsidian 自带轻提示）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 toastCssContract：变量定义与消费；单元 toast：生命周期",
+      "浏览器 plainPaste：片段覆盖、主题、焦点与绘制层；真宿主 plainPasteHost：paint.toast.visible"
+    ],
+    "introduced": "#305（2026-10-02）",
+    "id": "toast-severity",
+    "kind": "selector",
+    "target": ".vsidian-toast[data-severity=\"neutral\"], .vsidian-toast[data-severity=\"warning\"], .vsidian-toast[data-severity=\"error\"]",
+    "purpose": "三种严重性入口：普通跟随主题，警告淡黄，错误淡红；高对比采用主题前景与边框。",
+    "example": ".vsidian-toast[data-severity=\"warning\"] { border-width: 2px; }"
+  },
+  {
+    "domain": "chrome",
+    "category": "toast",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app，容器为其直接后代；不随正文滚动。",
+    "obsidian": {
+      "counterpart": "无（Vsidian 自带轻提示）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 toastCssContract：变量定义与消费；单元 toast：生命周期",
+      "浏览器 plainPaste：片段覆盖、主题、焦点与绘制层；真宿主 plainPasteHost：paint.toast.visible"
+    ],
+    "introduced": "#305（2026-10-02）",
+    "id": "var-toast-background",
+    "kind": "variable",
+    "target": "--vsidian-toast-background",
+    "purpose": "普通提示背景，跟随当前主题",
+    "example": "#app { --vsidian-toast-background: #252526; }"
+  },
+  {
+    "domain": "chrome",
+    "category": "toast",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app，容器为其直接后代；不随正文滚动。",
+    "obsidian": {
+      "counterpart": "无（Vsidian 自带轻提示）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 toastCssContract：变量定义与消费；单元 toast：生命周期",
+      "浏览器 plainPaste：片段覆盖、主题、焦点与绘制层；真宿主 plainPasteHost：paint.toast.visible"
+    ],
+    "introduced": "#305（2026-10-02）",
+    "id": "var-toast-foreground",
+    "kind": "variable",
+    "target": "--vsidian-toast-foreground",
+    "purpose": "普通提示文字，跟随当前主题",
+    "example": "#app { --vsidian-toast-foreground: #cccccc; }"
+  },
+  {
+    "domain": "chrome",
+    "category": "toast",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app，容器为其直接后代；不随正文滚动。",
+    "obsidian": {
+      "counterpart": "无（Vsidian 自带轻提示）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 toastCssContract：变量定义与消费；单元 toast：生命周期",
+      "浏览器 plainPaste：片段覆盖、主题、焦点与绘制层；真宿主 plainPasteHost：paint.toast.visible"
+    ],
+    "introduced": "#305（2026-10-02）",
+    "id": "var-toast-border",
+    "kind": "variable",
+    "target": "--vsidian-toast-border",
+    "purpose": "普通提示边框，跟随当前主题",
+    "example": "#app { --vsidian-toast-border: #888888; }"
+  },
+  {
+    "domain": "chrome",
+    "category": "toast",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app，容器为其直接后代；不随正文滚动。",
+    "obsidian": {
+      "counterpart": "无（Vsidian 自带轻提示）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 toastCssContract：变量定义与消费；单元 toast：生命周期",
+      "浏览器 plainPaste：片段覆盖、主题、焦点与绘制层；真宿主 plainPasteHost：paint.toast.visible"
+    ],
+    "introduced": "#305（2026-10-02）",
+    "id": "var-toast-warning-background",
+    "kind": "variable",
+    "target": "--vsidian-toast-warning-background",
+    "purpose": "警告淡黄色背景，适配明暗及高对比主题",
+    "example": "#app { --vsidian-toast-warning-background: #fff7db; }"
+  },
+  {
+    "domain": "chrome",
+    "category": "toast",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app，容器为其直接后代；不随正文滚动。",
+    "obsidian": {
+      "counterpart": "无（Vsidian 自带轻提示）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 toastCssContract：变量定义与消费；单元 toast：生命周期",
+      "浏览器 plainPaste：片段覆盖、主题、焦点与绘制层；真宿主 plainPasteHost：paint.toast.visible"
+    ],
+    "introduced": "#305（2026-10-02）",
+    "id": "var-toast-warning-foreground",
+    "kind": "variable",
+    "target": "--vsidian-toast-warning-foreground",
+    "purpose": "警告文字色，适配明暗及高对比主题",
+    "example": "#app { --vsidian-toast-warning-foreground: #70530b; }"
+  },
+  {
+    "domain": "chrome",
+    "category": "toast",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app，容器为其直接后代；不随正文滚动。",
+    "obsidian": {
+      "counterpart": "无（Vsidian 自带轻提示）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 toastCssContract：变量定义与消费；单元 toast：生命周期",
+      "浏览器 plainPaste：片段覆盖、主题、焦点与绘制层；真宿主 plainPasteHost：paint.toast.visible"
+    ],
+    "introduced": "#305（2026-10-02）",
+    "id": "var-toast-warning-border",
+    "kind": "variable",
+    "target": "--vsidian-toast-warning-border",
+    "purpose": "警告轻边框色，适配明暗及高对比主题",
+    "example": "#app { --vsidian-toast-warning-border: #e7d49a; }"
+  },
+  {
+    "domain": "chrome",
+    "category": "toast",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app，容器为其直接后代；不随正文滚动。",
+    "obsidian": {
+      "counterpart": "无（Vsidian 自带轻提示）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 toastCssContract：变量定义与消费；单元 toast：生命周期",
+      "浏览器 plainPaste：片段覆盖、主题、焦点与绘制层；真宿主 plainPasteHost：paint.toast.visible"
+    ],
+    "introduced": "#305（2026-10-02）",
+    "id": "var-toast-error-background",
+    "kind": "variable",
+    "target": "--vsidian-toast-error-background",
+    "purpose": "错误淡红色背景，适配明暗及高对比主题",
+    "example": "#app { --vsidian-toast-error-background: #fdebec; }"
+  },
+  {
+    "domain": "chrome",
+    "category": "toast",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app，容器为其直接后代；不随正文滚动。",
+    "obsidian": {
+      "counterpart": "无（Vsidian 自带轻提示）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 toastCssContract：变量定义与消费；单元 toast：生命周期",
+      "浏览器 plainPaste：片段覆盖、主题、焦点与绘制层；真宿主 plainPasteHost：paint.toast.visible"
+    ],
+    "introduced": "#305（2026-10-02）",
+    "id": "var-toast-error-foreground",
+    "kind": "variable",
+    "target": "--vsidian-toast-error-foreground",
+    "purpose": "错误文字色，适配明暗及高对比主题",
+    "example": "#app { --vsidian-toast-error-foreground: #922f3c; }"
+  },
+  {
+    "domain": "chrome",
+    "category": "toast",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app，容器为其直接后代；不随正文滚动。",
+    "obsidian": {
+      "counterpart": "无（Vsidian 自带轻提示）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 toastCssContract：变量定义与消费；单元 toast：生命周期",
+      "浏览器 plainPaste：片段覆盖、主题、焦点与绘制层；真宿主 plainPasteHost：paint.toast.visible"
+    ],
+    "introduced": "#305（2026-10-02）",
+    "id": "var-toast-error-border",
+    "kind": "variable",
+    "target": "--vsidian-toast-error-border",
+    "purpose": "错误轻边框色，适配明暗及高对比主题",
+    "example": "#app { --vsidian-toast-error-border: #e9bbc1; }"
+  },
+  {
+    "domain": "chrome",
+    "category": "toast",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app，容器为其直接后代；不随正文滚动。",
+    "obsidian": {
+      "counterpart": "无（Vsidian 自带轻提示）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 toastCssContract：变量定义与消费；单元 toast：生命周期",
+      "浏览器 plainPaste：片段覆盖、主题、焦点与绘制层；真宿主 plainPasteHost：paint.toast.visible"
+    ],
+    "introduced": "#305（2026-10-02）",
+    "id": "var-toast-radius",
+    "kind": "variable",
+    "target": "--vsidian-toast-radius",
+    "purpose": "提示圆角",
+    "example": "#app { --vsidian-toast-radius: 8px; }"
+  },
+  {
+    "domain": "chrome",
+    "category": "toast",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app，容器为其直接后代；不随正文滚动。",
+    "obsidian": {
+      "counterpart": "无（Vsidian 自带轻提示）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 toastCssContract：变量定义与消费；单元 toast：生命周期",
+      "浏览器 plainPaste：片段覆盖、主题、焦点与绘制层；真宿主 plainPasteHost：paint.toast.visible"
+    ],
+    "introduced": "#305（2026-10-02）",
+    "id": "var-toast-font-size",
+    "kind": "variable",
+    "target": "--vsidian-toast-font-size",
+    "purpose": "提示字号",
+    "example": "#app { --vsidian-toast-font-size: 12px; }"
+  },
+  {
+    "domain": "chrome",
+    "category": "toast",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app，容器为其直接后代；不随正文滚动。",
+    "obsidian": {
+      "counterpart": "无（Vsidian 自带轻提示）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 toastCssContract：变量定义与消费；单元 toast：生命周期",
+      "浏览器 plainPaste：片段覆盖、主题、焦点与绘制层；真宿主 plainPasteHost：paint.toast.visible"
+    ],
+    "introduced": "#305（2026-10-02）",
+    "id": "var-toast-padding-inline",
+    "kind": "variable",
+    "target": "--vsidian-toast-padding-inline",
+    "purpose": "提示水平内边距",
+    "example": "#app { --vsidian-toast-padding-inline: 14px; }"
+  },
+  {
+    "domain": "chrome",
+    "category": "toast",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app，容器为其直接后代；不随正文滚动。",
+    "obsidian": {
+      "counterpart": "无（Vsidian 自带轻提示）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 toastCssContract：变量定义与消费；单元 toast：生命周期",
+      "浏览器 plainPaste：片段覆盖、主题、焦点与绘制层；真宿主 plainPasteHost：paint.toast.visible"
+    ],
+    "introduced": "#305（2026-10-02）",
+    "id": "var-toast-padding-block",
+    "kind": "variable",
+    "target": "--vsidian-toast-padding-block",
+    "purpose": "提示垂直内边距",
+    "example": "#app { --vsidian-toast-padding-block: 9px; }"
+  },
+  {
+    "domain": "chrome",
+    "category": "toast",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app，容器为其直接后代；不随正文滚动。",
+    "obsidian": {
+      "counterpart": "无（Vsidian 自带轻提示）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 toastCssContract：变量定义与消费；单元 toast：生命周期",
+      "浏览器 plainPaste：片段覆盖、主题、焦点与绘制层；真宿主 plainPasteHost：paint.toast.visible"
+    ],
+    "introduced": "#305（2026-10-02）",
+    "id": "var-toast-max-width",
+    "kind": "variable",
+    "target": "--vsidian-toast-max-width",
+    "purpose": "提示最大宽度，同时受视口安全留白钳制",
+    "example": "#app { --vsidian-toast-max-width: 480px; }"
+  },
+  {
+    "domain": "chrome",
+    "category": "toast",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app，容器为其直接后代；不随正文滚动。",
+    "obsidian": {
+      "counterpart": "无（Vsidian 自带轻提示）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 toastCssContract：变量定义与消费；单元 toast：生命周期",
+      "浏览器 plainPaste：片段覆盖、主题、焦点与绘制层；真宿主 plainPasteHost：paint.toast.visible"
+    ],
+    "introduced": "#305（2026-10-02）",
+    "id": "var-toast-viewport-margin",
+    "kind": "variable",
+    "target": "--vsidian-toast-viewport-margin",
+    "purpose": "视口两侧安全留白",
+    "example": "#app { --vsidian-toast-viewport-margin: 16px; }"
+  },
+  {
+    "domain": "chrome",
+    "category": "toast",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app，容器为其直接后代；不随正文滚动。",
+    "obsidian": {
+      "counterpart": "无（Vsidian 自带轻提示）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 toastCssContract：变量定义与消费；单元 toast：生命周期",
+      "浏览器 plainPaste：片段覆盖、主题、焦点与绘制层；真宿主 plainPasteHost：paint.toast.visible"
+    ],
+    "introduced": "#305（2026-10-02）",
+    "id": "var-toast-bottom-offset",
+    "kind": "variable",
+    "target": "--vsidian-toast-bottom-offset",
+    "purpose": "距编辑器视口底部距离，另计安全区",
+    "example": "#app { --vsidian-toast-bottom-offset: 24px; }"
+  },
+  {
+    "domain": "chrome",
+    "category": "toast",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app，容器为其直接后代；不随正文滚动。",
+    "obsidian": {
+      "counterpart": "无（Vsidian 自带轻提示）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 toastCssContract：变量定义与消费；单元 toast：生命周期",
+      "浏览器 plainPaste：片段覆盖、主题、焦点与绘制层；真宿主 plainPasteHost：paint.toast.visible"
+    ],
+    "introduced": "#305（2026-10-02）",
+    "id": "var-toast-shadow",
+    "kind": "variable",
+    "target": "--vsidian-toast-shadow",
+    "purpose": "提示阴影",
+    "example": "#app { --vsidian-toast-shadow: 0 4px 16px rgb(0 0 0 / 0.12); }"
+  },
+  {
+    "domain": "chrome",
+    "category": "toast",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app，容器为其直接后代；不随正文滚动。",
+    "obsidian": {
+      "counterpart": "无（Vsidian 自带轻提示）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 toastCssContract：变量定义与消费；单元 toast：生命周期",
+      "浏览器 plainPaste：片段覆盖、主题、焦点与绘制层；真宿主 plainPasteHost：paint.toast.visible"
+    ],
+    "introduced": "#305（2026-10-02）",
+    "id": "var-toast-enter-distance",
+    "kind": "variable",
+    "target": "--vsidian-toast-enter-distance",
+    "purpose": "入场自下向上位移；减少动态效果时移除",
+    "example": "#app { --vsidian-toast-enter-distance: 8px; }"
+  },
+  {
+    "domain": "chrome",
+    "category": "toast",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app，容器为其直接后代；不随正文滚动。",
+    "obsidian": {
+      "counterpart": "无（Vsidian 自带轻提示）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 toastCssContract：变量定义与消费；单元 toast：生命周期",
+      "浏览器 plainPaste：片段覆盖、主题、焦点与绘制层；真宿主 plainPasteHost：paint.toast.visible"
+    ],
+    "introduced": "#305（2026-10-02）",
+    "id": "var-toast-enter-duration",
+    "kind": "variable",
+    "target": "--vsidian-toast-enter-duration",
+    "purpose": "入场动画时长（CSS 时间）",
+    "example": "#app { --vsidian-toast-enter-duration: 160ms; }"
+  },
+  {
+    "domain": "chrome",
+    "category": "toast",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app，容器为其直接后代；不随正文滚动。",
+    "obsidian": {
+      "counterpart": "无（Vsidian 自带轻提示）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 toastCssContract：变量定义与消费；单元 toast：生命周期",
+      "浏览器 plainPaste：片段覆盖、主题、焦点与绘制层；真宿主 plainPasteHost：paint.toast.visible"
+    ],
+    "introduced": "#305（2026-10-02）",
+    "id": "var-toast-exit-duration",
+    "kind": "variable",
+    "target": "--vsidian-toast-exit-duration",
+    "purpose": "离场动画时长（CSS 时间）",
+    "example": "#app { --vsidian-toast-exit-duration: 120ms; }"
+  },
+  {
+    "domain": "chrome",
+    "category": "toast",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app，容器为其直接后代；不随正文滚动。",
+    "obsidian": {
+      "counterpart": "无（Vsidian 自带轻提示）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 toastCssContract：变量定义与消费；单元 toast：生命周期",
+      "浏览器 plainPaste：片段覆盖、主题、焦点与绘制层；真宿主 plainPasteHost：paint.toast.visible"
+    ],
+    "introduced": "#305（2026-10-02）",
+    "id": "var-toast-duration",
+    "kind": "variable",
+    "target": "--vsidian-toast-duration",
+    "purpose": "普通提示停留毫秒数（无单位）",
+    "example": "#app { --vsidian-toast-duration: 2600; }"
+  },
+  {
+    "domain": "chrome",
+    "category": "toast",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app，容器为其直接后代；不随正文滚动。",
+    "obsidian": {
+      "counterpart": "无（Vsidian 自带轻提示）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 toastCssContract：变量定义与消费；单元 toast：生命周期",
+      "浏览器 plainPaste：片段覆盖、主题、焦点与绘制层；真宿主 plainPasteHost：paint.toast.visible"
+    ],
+    "introduced": "#305（2026-10-02）",
+    "id": "var-toast-warning-duration",
+    "kind": "variable",
+    "target": "--vsidian-toast-warning-duration",
+    "purpose": "警告停留毫秒数（无单位）",
+    "example": "#app { --vsidian-toast-warning-duration: 4000; }"
+  },
+  {
+    "domain": "chrome",
+    "category": "toast",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "dom": "定义于 #app，容器为其直接后代；不随正文滚动。",
+    "obsidian": {
+      "counterpart": "无（Vsidian 自带轻提示）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 toastCssContract：变量定义与消费；单元 toast：生命周期",
+      "浏览器 plainPaste：片段覆盖、主题、焦点与绘制层；真宿主 plainPasteHost：paint.toast.visible"
+    ],
+    "introduced": "#305（2026-10-02）",
+    "id": "var-toast-error-duration",
+    "kind": "variable",
+    "target": "--vsidian-toast-error-duration",
+    "purpose": "错误停留毫秒数（无单位）",
+    "example": "#app { --vsidian-toast-error-duration: 5000; }"
   }
 ] as readonly StyleContractEntry[]
 
@@ -5513,6 +6120,190 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     "dom": "Defined on #app (the same-named container in both the editor and settings webviews).",
     "obsidian": {
       "counterpart": "None (Obsidian tooltips expose no customization interface)"
+    }
+  },
+  "toast-container": {
+    "purpose": "Independent lightweight notification channel centered at the bottom of the editor viewport; preserves focus and does not block input.",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    },
+    "states": "At most one visible message; independent from host notifications."
+  },
+  "toast": {
+    "purpose": "Local notification card; text wraps without truncating action guidance.",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    },
+    "states": "data-severity is neutral, warning or error; animation states are internal."
+  },
+  "toast-severity": {
+    "purpose": "Severity selectors: neutral follows the theme, warning is pale yellow, error pale red; high contrast uses theme foreground and borders.",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-background": {
+    "purpose": "Neutral background, follows the current theme",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-foreground": {
+    "purpose": "Neutral text color, follows the current theme",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-border": {
+    "purpose": "Neutral border, follows the current theme",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-warning-background": {
+    "purpose": "Pale yellow warning background, adapted to light/dark and high contrast themes",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-warning-foreground": {
+    "purpose": "Warning text color, adapted to light/dark and high contrast themes",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-warning-border": {
+    "purpose": "Warning border color, adapted to light/dark and high contrast themes",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-error-background": {
+    "purpose": "Pale red error background, adapted to light/dark and high contrast themes",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-error-foreground": {
+    "purpose": "Error text color, adapted to light/dark and high contrast themes",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-error-border": {
+    "purpose": "Error border color, adapted to light/dark and high contrast themes",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-radius": {
+    "purpose": "Notification corner radius",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-font-size": {
+    "purpose": "Notification font size",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-padding-inline": {
+    "purpose": "Notification horizontal padding",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-padding-block": {
+    "purpose": "Notification vertical padding",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-max-width": {
+    "purpose": "Maximum width, also clamped by viewport margins",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-viewport-margin": {
+    "purpose": "Horizontal viewport margin",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-bottom-offset": {
+    "purpose": "Offset from the editor viewport bottom, plus safe area",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-shadow": {
+    "purpose": "Notification shadow",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-enter-distance": {
+    "purpose": "Upward entrance distance; removed when reduced motion is preferred",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-enter-duration": {
+    "purpose": "Entrance animation duration (CSS time)",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-exit-duration": {
+    "purpose": "Exit animation duration (CSS time)",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-duration": {
+    "purpose": "Neutral display duration in unitless milliseconds",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-warning-duration": {
+    "purpose": "Warning display duration in unitless milliseconds",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
+    }
+  },
+  "var-toast-error-duration": {
+    "purpose": "Error display duration in unitless milliseconds",
+    "dom": "Defined on #app; the container is a direct child and does not scroll with the document.",
+    "obsidian": {
+      "counterpart": "None (Vsidian local lightweight notifications)"
     }
   }
 } as Readonly<Record<string, StyleContractEntryOverride>>

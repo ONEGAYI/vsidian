@@ -1395,6 +1395,8 @@ export interface LineGutterAlignment {
  * jsdom 无布局能力（rect 恒 0），textVisible 恒 false，不作单测断言依据。
  */
 export interface PaintProbe {
+  /** #305 本地轻提示：不拦截命中，文字范围与样式确认实际可见。 */
+  toast?: { visible: boolean; text: string; severity: string; background: string; foreground: string; pointerEvents: string }
   /** 首个含文本行：首字符 rect 在视口内且 elementFromPoint 命中内容区。
    *  覆盖物（冲突暂停横幅、查找面板等绝对定位元素）遮挡首 8 行文本时同样
    *  返回 false——失败排障时先排除覆盖物再怀疑 CSP 样式失效 */

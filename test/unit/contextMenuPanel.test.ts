@@ -121,7 +121,7 @@ describe('全域接管与不接管位（contextMenu.test.contextMenu 钩子）',
     expect(topCommands()).toEqual([
       'wikilink', 'link', 'copyBlockLink',
       'textFormat', 'paragraphStyle', 'insert',
-      'cut', 'copy', 'paste', 'selectAll',
+      'cut', 'copy', 'paste', 'pastePlain', 'selectAll',
     ])
   })
 

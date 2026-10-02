@@ -36,7 +36,10 @@ import { createQuickActionStateReader } from './quickActionState'
 import { TOOLTIP_KEYS_SEPARATOR } from './tooltipCard'
 import { FORMAT_OPERATIONS, isFormatOperationId, type FormatOperationId } from '../shared/formatOperations'
 import { getEffectiveBindings, type KeybindingOverrides } from '../shared/keybindings'
-import { KeybindingRouter } from './keybindingRouter'
+import { KeybindingRouter, keyStep } from './keybindingRouter'
+import { resolveKeybinding, formatBindingLabel } from '../shared/keybindings'
+import { clipboardPlainText, dispatchClipboardPaste, readClipboardSnapshot } from './clipboardPaste'
+import { ToastChannel } from './toast'
 import { LINE_NUMBER_GUTTER_SELECTOR, liveLineNumbers, paintedLineNumbers } from './liveLineNumbers'
 import { CODE_CARD_CLASS_NAMES, codeCardConfigFacet, codeCardCopyRequest, codeCardFoldField, codeCardHoverReveal, liveCodeCard, type CodeCardConfig } from './liveCodeCard'
 import { decorateReadingCodeCard, isReadingCodeBlock, READING_CODE_NOWRAP_CLASS } from './readingCodeCard'
@@ -909,6 +912,9 @@ export class WebviewSyncController {
   private contextMenuDismissKey: ((e: KeyboardEvent) => void) | undefined
   /** 剪贴板读（粘贴桥）在途 reqId（陈旧回包丢弃；image.paste 在途表先例） */
   private clipboardReadReqId = 0
+  private clipboardReadTarget: { view: EditorView; doc: EditorState['doc']; selection: EditorState['selection']; sessionId: string | undefined; docUri: string; modeRevision: number } | undefined
+  private pasteModeRevision = 0
+  private toast: ToastChannel | undefined
   /** 键位覆盖缓存（#183 提示列派生输入；keybindings.snapshot/changed 同步） */
   private keybindingOverrides: KeybindingOverrides = {}
   /** 重命名编辑态的条目索引（null = 无编辑态；条目内容区被 input 替换） */
@@ -1195,7 +1201,8 @@ export class WebviewSyncController {
 
   constructor(private readonly bridge: VsCodeBridge) {
     this.keybindingRouter = new KeybindingRouter({}, (id) => {
-      if (id === 'find') this.openFind()
+      if (id === 'paste' || id === 'pastePlain') this.requestClipboardPaste(id === 'pastePlain')
+      else if (id === 'find') this.openFind()
       else if (id === 'findNext') this.findStep('next')
       else if (id === 'findPrevious') this.findStep('prev')
       // #236 查找替换：Ctrl+H 打开面板并展开替换栏；替换操作是面板会话
@@ -1527,6 +1534,7 @@ export class WebviewSyncController {
     // 出现（面板开时代之以面板开关闪烁，见 flashFindToggles）
     this.occurrenceBarEl = this.buildOccurrenceBar()
     parent.appendChild(this.occurrenceBarEl)
+    this.toast = new ToastChannel(parent)
     // 侧栏初始态（持久化恢复）落到 DOM 类与按钮可访问名称
     this.applySidebarDom()
     // 大纲面板初始态（持久化恢复）落到侧栏容器类与按钮 aria-expanded
@@ -1570,6 +1578,15 @@ export class WebviewSyncController {
         !(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement)
       const withinEditor = !!target && (target === document ||
         !!this.bodyEl?.contains(target) || !!this.findPanel?.contains(target))
+      // 默认普通粘贴保留原生 paste 事件（包括图片文件名/表格处理）。
+      // 改绑入口和右键读取多格式快照；两入口最终仍进入同一 paste 处理链。
+      const step = keyStep(e)
+      if (liveFocused && (step === 'ctrl+v' || step === 'meta+v') &&
+          resolveKeybinding(this.keybindingOverrides, 'live', step, true).kind === 'command' &&
+          getEffectiveBindings(this.keybindingOverrides, 'paste').includes(step)) {
+        e.stopPropagation()
+        return
+      }
       if (this.keybindingRouter.handle(e, this.viewMode,
         liveFocused || readingFocused || withinEditor, liveFocused)) return
       if (this.findOpen && e.key === 'Escape') {
@@ -1735,6 +1752,9 @@ export class WebviewSyncController {
   }
 
   dispose(): void {
+    this.toast?.dispose()
+    this.toast = undefined
+    this.clipboardReadReqId += 1
     this.flushPendingViewState()
     // #238 会话与闪烁计时清理（选项条 DOM 随 parent 移除）
     this.endOccurrenceSession()
@@ -2402,6 +2422,8 @@ export class WebviewSyncController {
       }
       case 'ui.command':
         switch (message.op) {
+          case 'paste': this.requestClipboardPaste(); break
+          case 'pastePlain': this.requestClipboardPaste(true); break
           case 'sidebarToggle': this.toggleSidebar(); break
           case 'outlineToggle':
             if (!this.sidebarOpen && !this.outlineActive) this.toggleSidebar()
@@ -2657,7 +2679,9 @@ export class WebviewSyncController {
         }
         this.clipboardReadReqId += 1
         const view = this.view
-        if (!message.ok || !view || this.viewMode !== 'live' || this.suspended) {
+        const target = this.clipboardReadTarget
+        this.clipboardReadTarget = undefined
+        if (!message.ok || !view || !target || !this.clipboardTargetValid(target)) {
           if (!message.ok) {
             // 只读失败告警不弹窗（与未知命令的 console.warn 同口径——
             // review-loops 修复：此前零日志，粘贴无反应无从定位）
@@ -2666,9 +2690,8 @@ export class WebviewSyncController {
           break
         }
         // 光标处插入（选区被替换——与原生粘贴同语义）；单笔事务走标准出站
-        const range = view.state.selection.main
         try {
-          view.dispatch({ changes: { from: range.from, to: range.to, insert: message.text } })
+          if (message.text) dispatchClipboardPaste(view.contentDOM, { text: message.text, images: [] }, true)
         } catch (error) {
           console.error('[vsidian] 粘贴插入失败（坐标与当前文档不匹配）', error)
         }
@@ -3545,6 +3568,8 @@ export class WebviewSyncController {
       this.persistState()
       return
     }
+    this.pasteModeRevision += 1
+    this.clipboardReadReqId += 1
     // review-loops B3：命令面板切模式不经鼠标路径（无 pointercancel），
     // 拖拽会话若残留会跨模式存活（落点判定随视图重算漂移）——统一取消
     this.cancelOutlineDrag()
@@ -6747,8 +6772,8 @@ export class WebviewSyncController {
       this.copySelectionToClipboard(command === 'cut')
       return
     }
-    if (command === 'paste') {
-      this.requestClipboardPaste()
+    if (command === 'paste' || command === 'pastePlain') {
+      this.requestClipboardPaste(command === 'pastePlain')
       return
     }
     if (command === 'selectAll') {
@@ -6805,16 +6830,54 @@ export class WebviewSyncController {
     view.focus()
   }
 
-  /** 粘贴：宿主剪贴板读桥（reqId 在途防陈旧回包）；回包在
-   *  clipboard.read.result 分派处插入（光标处/替换选区） */
-  private requestClipboardPaste(): void {
+  /** 菜单/可绑定粘贴：优先多格式快照，权限受限时宿主纯文本桥回退。
+   *  两路径均固定本次目标并进入既有 paste 处理链。 */
+  private requestClipboardPaste(plain = false): void {
     const view = this.view
     if (!view || this.viewMode !== 'live' || this.suspended ||
         view.state.readOnly || !view.state.facet(EditorView.editable)) {
       return
     }
     this.clipboardReadReqId += 1
-    this.bridge.postMessage({ kind: 'clipboard.read', reqId: this.clipboardReadReqId })
+    const reqId = this.clipboardReadReqId
+    const target = { view, doc: view.state.doc, selection: view.state.selection,
+      sessionId: this.sessionId, docUri: this.docUri, modeRevision: this.pasteModeRevision }
+    this.clipboardReadTarget = target
+    const valid = () => reqId === this.clipboardReadReqId && this.clipboardTargetValid(target)
+    if (!navigator.clipboard?.read) {
+      this.bridge.postMessage({ kind: 'clipboard.read', reqId })
+      return
+    }
+    void readClipboardSnapshot(navigator.clipboard).then((snapshot) => {
+      if (!valid()) return
+      this.clipboardReadReqId += 1
+      this.clipboardReadTarget = undefined
+      const text = clipboardPlainText(snapshot)
+      if (plain && !text) {
+        if (snapshot.images.length) this.showPlainPasteImageToast(false)
+        return
+      }
+      const handled = dispatchClipboardPaste(view.contentDOM, snapshot, plain)
+      if (plain && snapshot.images.length && handled) this.showPlainPasteImageToast(true)
+      view.focus()
+    }).catch(() => {
+      // 权限受限时仅回退宿主 text/plain；未读取图片类型，不伪报遇到图片。
+      if (valid()) this.bridge.postMessage({ kind: 'clipboard.read', reqId })
+    })
+  }
+
+  private clipboardTargetValid(target: NonNullable<WebviewSyncController['clipboardReadTarget']>): boolean {
+    return this.view === target.view && this.sessionId === target.sessionId && this.docUri === target.docUri &&
+      this.pasteModeRevision === target.modeRevision && this.viewMode === 'live' && !this.suspended &&
+      target.view.state.doc === target.doc && target.view.state.selection.eq(target.selection) &&
+      !target.view.state.readOnly && target.view.state.facet(EditorView.editable)
+  }
+
+  private showPlainPasteImageToast(inserted: boolean): void {
+    const bindings = getEffectiveBindings(this.keybindingOverrides, 'paste')
+    const name = t('command.clipboard.paste.title')
+    const paste = bindings.length ? `${name} (${formatBindingLabel(bindings[0]!)})` : name
+    this.toast?.show(t(inserted ? 'toast.pasteTextOnly' : 'toast.pasteImageOnly', { paste }), 'warning')
   }
 
   /** 快捷键/命令面板入口（宿主 blockLink.copy 消息）：对光标所在块执行
@@ -10099,7 +10162,25 @@ export class WebviewSyncController {
       fm,
       heading: headingPaint,
       ...(contextMenu ? { contextMenu } : {}),
+      toast: this.collectToastPaint(),
     }
+  }
+
+  private collectToastPaint(): NonNullable<PaintProbe['toast']> {
+    const el = this.rootEl?.querySelector<HTMLElement>('.vsidian-toast')
+    const empty = { visible: false, text: '', severity: '', background: '', foreground: '', pointerEvents: '' }
+    if (!el) return empty
+    try {
+      const style = getComputedStyle(el)
+      const range = document.createRange()
+      range.selectNodeContents(el)
+      const rect = range.getBoundingClientRect()
+      const visible = rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight &&
+        rect.right > 0 && rect.left < innerWidth && style.display !== 'none' &&
+        style.visibility === 'visible' && Number(style.opacity) > 0 && style.color !== 'rgba(0, 0, 0, 0)'
+      return { visible, text: el.textContent ?? '', severity: el.dataset['severity'] ?? '',
+        background: style.backgroundColor, foreground: style.color, pointerEvents: style.pointerEvents }
+    } catch { return empty }
   }
 
   /**

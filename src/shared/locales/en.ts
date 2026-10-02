@@ -9,6 +9,12 @@
 // decor）；#95 补设置页框架、快捷键分页、设置项定义（setting.*）与宿主消息
 // （host.*）词条（键前缀分组见规格「字典架构」表）。
 export const en = {
+  'command.clipboard.paste.title': 'Paste',
+  'command.clipboard.pastePlain.title': 'Paste as plain text',
+  'contextMenu.pastePlain': 'Paste as plain text',
+  'toast.pasteImageOnly': 'An image cannot be pasted as plain text. Use {paste} to paste the image.',
+  'toast.pasteTextOnly': 'Text pasted without the image. Use {paste} to paste the image.',
+  'styleRef.category.toast': 'Light notifications',
   // ---- settings.（设置页框架：标题、搜索、分类、保存状态、空状态）----
   /** 设置页面板标题（宿主 createWebviewPanel 标题与页面 h1 同源） */
   'settings.pageTitle': 'Vsidian Settings',

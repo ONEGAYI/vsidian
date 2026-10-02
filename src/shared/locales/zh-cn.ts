@@ -5,6 +5,12 @@
 import type { MessageKey } from './en'
 
 export const zhCn: Record<MessageKey, string> = {
+  'command.clipboard.paste.title': '粘贴',
+  'command.clipboard.pastePlain.title': '粘贴纯文本',
+  'contextMenu.pastePlain': '粘贴纯文本',
+  'toast.pasteImageOnly': '无法将图片粘贴为纯文本，请使用{paste}粘贴图片',
+  'toast.pasteTextOnly': '已粘贴文本，未粘贴图片；如需图片，请使用{paste}',
+  'styleRef.category.toast': '轻提示',
   // ---- settings.（设置页框架）----
   'settings.pageTitle': 'Vsidian 设置',
   'settings.searchPlaceholder': '搜索设置…',

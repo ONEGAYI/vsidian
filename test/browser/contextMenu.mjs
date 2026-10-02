@@ -83,7 +83,7 @@ try {
   assert.deepEqual(state.topCommands, [
     'wikilink', 'link', 'copyBlockLink',
     'textFormat', 'paragraphStyle', 'insert',
-    'cut', 'copy', 'paste', 'selectAll',
+    'cut', 'copy', 'paste', 'pastePlain', 'selectAll',
   ], `普通段顶级命令序列（实际 ${JSON.stringify(state.topCommands)}）`)
   assert.ok(state.topTexts.includes('复制块链接') && state.topTexts.includes('粘贴'),
     `菜单文案应取 zh 语言包（实际 ${JSON.stringify(state.topTexts)}）`)
@@ -134,7 +134,7 @@ try {
   passed++
   console.log('[统一菜单回归][PASS] 分组线绘制 + 提示列右对齐小字 + 未绑定不占位')
 
-  // ---- 场景 C：图标资产接线（#184：26 枚 mask 有 url + 真实加载 + 真实绘制 + H1 徽标） ----
+  // ---- 场景 C：图标资产接线（#184：27 枚 mask 有 url + 真实加载 + 真实绘制 + H1 徽标） ----
   const iconState = await page.evaluate(() => {
     const icons = [...document.querySelectorAll('.vsidian-context-menu [data-icon]')]
     return {
@@ -144,14 +144,14 @@ try {
       badge: window.readMenu().badgeOf('heading1'),
     }
   })
-  assert.equal(new Set(iconState.keys).size, 26, `菜单应引用 26 枚接线图标（实际 ${JSON.stringify([...new Set(iconState.keys)])}）`)
+  assert.equal(new Set(iconState.keys).size, 27, `菜单应引用 27 枚接线图标（实际 ${JSON.stringify([...new Set(iconState.keys)])}）`)
   assert.deepEqual(iconState.noUrl, [], `全部图标位 mask 应有资产 url（缺 ${JSON.stringify(iconState.noUrl)}）`)
   assert.deepEqual(iconState.notLight, [], `默认亮色页面应指向 light 资产（偏 ${JSON.stringify(iconState.notLight)}）`)
   assert.equal(iconState.badge, 'H1', '段落设置 H1 档用文字徽标（不经生图）')
   await page.waitForFunction(() =>
     performance.getEntriesByType('resource').filter((entry) =>
-      entry.name.endsWith('.svg') && entry.name.includes('/light-')).length >= 26)
-  assert.ok(iconRequests.filter((name) => name.startsWith('light-')).length >= 26,
+      entry.name.endsWith('.svg') && entry.name.includes('/light-')).length >= 27)
+  assert.ok(iconRequests.filter((name) => name.startsWith('light-')).length >= 27,
     `亮色图标资产应真实网络加载（实际 ${iconRequests.length} 次）`)
   // 顶级项图标真实绘制（mask 遮罩后非纯背景——照 quickActions 像素分析先例）
   const iconPaint = async (key) => {
@@ -182,7 +182,7 @@ try {
   const clipboard = await iconPaint('paste')
   assert.ok(clipboard.colors > 2 && clipboard.paintedPixels > 4, `paste 图标应真实绘制（${JSON.stringify(clipboard)}）`)
   passed++
-  console.log('[统一菜单回归][PASS] 图标接线：26 枚 mask 资产、真实加载与绘制、H1 徽标')
+  console.log('[统一菜单回归][PASS] 图标接线：27 枚 mask 资产、真实加载与绘制、H1 徽标')
 
   // ---- 场景 C2：暗色主题图标切换（body.vscode-dark → dark 资产加载） ----
   const darkPage = await browser.newPage({ viewport: { width: 900, height: 560 } })
@@ -211,12 +211,12 @@ try {
       notDark: icons.filter((el) => !getComputedStyle(el).maskImage.includes('dark-')).map((el) => el.dataset['icon']),
     }
   })
-  assert.equal(darkState.uniqueKeys, 26, '暗色页应同样引用 26 枚接线图标')
+  assert.equal(darkState.uniqueKeys, 27, '暗色页应同样引用 27 枚接线图标')
   assert.deepEqual(darkState.notDark, [], `暗色主题应指向 dark 资产（偏 ${JSON.stringify(darkState.notDark)}）`)
   await darkPage.waitForFunction(() =>
     performance.getEntriesByType('resource').filter((entry) =>
-      entry.name.endsWith('.svg') && entry.name.includes('/dark-')).length >= 26)
-  assert.ok(darkRequests.filter((name) => name.startsWith('dark-')).length >= 26,
+      entry.name.endsWith('.svg') && entry.name.includes('/dark-')).length >= 27)
+  assert.ok(darkRequests.filter((name) => name.startsWith('dark-')).length >= 27,
     `暗色图标资产应真实网络加载（实际 ${darkRequests.length} 次）`)
   assert.deepEqual(darkErrors, [], '暗色页无未捕获异常')
   await darkPage.close()

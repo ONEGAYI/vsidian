@@ -97,6 +97,7 @@ vsidian/
         ├── backlinkGrouping.ts         # 反链面板分组排序过滤纯函数
         ├── backlinkPanel.ts            # 反链面板 DOM 与四态渲染（#197）
         ├── blockIdStrip.ts             # 阅读渲染块标记剥离纯函数
+        ├── clipboardPaste.ts           # 多格式剪贴板快照与粘贴适配
         ├── codeCardState.ts            # 卡片共享状态中立模块
         ├── codeHighlight.ts            # 语法高亮引擎装配与缓存
         ├── contextMenuDom.ts           # 统一菜单 DOM 装配与子菜单翻转
@@ -191,6 +192,8 @@ vsidian/
         ├── tableStructure.ts           # 表格导航与增删行列纯函数（#13）
         ├── targetTip.ts                # 跳转目标提示：浮层不将现时的目标位置浮标
         ├── taskToggle.ts               # 任务勾选解析纯函数（#9）
+        ├── toast.css                   # 轻提示主题与公开样式变量
+        ├── toast.ts                    # 编辑器独立轻提示通道
         ├── tooltipCard.css             # 悬停提示共享样式
         ├── tooltipCard.ts              # 悬停提示委托控制器
         ├── tooltipGeometry.ts          # 悬停提示定位几何纯函数

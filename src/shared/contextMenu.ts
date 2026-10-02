@@ -130,9 +130,9 @@ export const CONTEXT_MENU_ICON_KEYS = [
   'horizontalRule', 'codeBlock', 'blockMath',
   // 需 AI 新生成（接线）
   'externalLink', 'textFormat', 'paragraphStyle', 'insertPlus', 'normalText',
-  'cut', 'copy', 'paste', 'selectAll', 'comment',
+  'cut', 'copy', 'paste', 'pastePlain', 'selectAll', 'comment',
   // 备用（项不做，显式记账）
-  'pastePlain', 'media', 'footnote', 'callout',
+  'media', 'footnote', 'callout',
 ] as const
 
 /** 结构敏感区谓词（表格单元格/围栏代码/图形块——写操作置灰的矩阵单元） */
@@ -201,7 +201,8 @@ export const CONTEXT_MENU_ITEMS = [
   { id: 'cut', group: 'clipboard', order: 0, command: 'cut', labelKey: 'contextMenu.cut', iconKey: 'cut', enable: hasSelection },
   { id: 'copy', group: 'clipboard', order: 1, command: 'copy', labelKey: 'contextMenu.copy', iconKey: 'copy', enable: hasSelection },
   { id: 'paste', group: 'clipboard', order: 2, command: 'paste', labelKey: 'contextMenu.paste', iconKey: 'paste' },
-  { id: 'selectAll', group: 'clipboard', order: 3, command: 'selectAll', labelKey: 'contextMenu.selectAll', iconKey: 'selectAll' },
+  { id: 'pastePlain', group: 'clipboard', order: 3, command: 'pastePlain', labelKey: 'contextMenu.pastePlain', iconKey: 'pastePlain' },
+  { id: 'selectAll', group: 'clipboard', order: 4, command: 'selectAll', labelKey: 'contextMenu.selectAll', iconKey: 'selectAll' },
 ] as const satisfies readonly MenuItemDescriptor[]
 
 // ---- 覆写层（模块私有 Map + 访问器；内置 = 第一个注册者，无第二套渲染路径）----
@@ -540,11 +541,10 @@ export function buildContextMenuModel(
 
 // ---- 键位提示派生（提示列唯一数据通道：键位注册表 + 剪贴板固定提示）----
 
-/** 剪贴板四项固定提示（沿用 CM6 既有默认绑定，不新增键位注册表条目） */
+/** 剪切/复制/全选沿用 CM6 固定提示；粘贴两操作取有效注册值（#305）。 */
 const CLIPBOARD_FIXED_HINTS: Readonly<Record<string, string>> = {
   cut: 'Ctrl+X',
   copy: 'Ctrl+C',
-  paste: 'Ctrl+V',
   selectAll: 'Ctrl+A',
 }
 
