@@ -22,8 +22,8 @@
 //   只替换路径段，`\|` 别名与锚点原文保真）
 //
 // 本模块不依赖 vscode/CM6/DOM（node 单测直驱；宿主与 webview 双产物共用）。
-import type { EmbedOccurrence } from '../shared/wikilink'
-import { scanEmbedsInLine } from '../shared/wikilink'
+import type { EmbedOccurrence } from './wikilink'
+import { scanEmbedsInLine } from './wikilink'
 import { isEscapedAt, scanCodeSpans, splitTableRowCells } from './tableCells'
 
 /** 格内解码视图：文本 + 逐解码位置到源码位置的映射。

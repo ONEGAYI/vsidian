@@ -1,7 +1,7 @@
 import type { HoverPreviewScope } from './protocol'
 import { scanEmbedsInLine } from './wikilink'
-import { scanEmbedsInTableRow } from '../webview/tableCellEmbed'
-import { chainAt, frontmatterRange, markdownTreeParser } from '../webview/markdownDoc'
+import { scanEmbedsInTableRow } from './tableCellEmbed'
+import { chainAt, frontmatterRange, markdownTreeParser } from './markdownDoc'
 
 export const REF_EXPANSION_LIMITS = {
   defaultDepth: 3,

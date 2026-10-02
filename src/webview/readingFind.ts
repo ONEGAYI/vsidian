@@ -1,7 +1,7 @@
 import type { FindMatch } from './findSession'
 import { FIND_CLASS_NAMES } from './findSession'
 import { hasReadingReference, type ReadingBlock } from './readingBlocks'
-import { markdownTreeParser } from './markdownDoc'
+import { markdownTreeParser } from '../shared/markdownDoc'
 import { stripHtmlComments } from './htmlComment'
 import { stripBlockIdMarks } from './blockIdStrip'
 import { scanMathRanges } from '../shared/math'

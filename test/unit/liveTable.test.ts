@@ -31,7 +31,7 @@ import {
   livePreviewDecorations,
 } from '../../src/webview/liveDecorations'
 import { blankRowInputPlan, tableEditing, tablePipeKeyHandler } from '../../src/webview/tableEditing'
-import { splitTableRowCells, tableRowCellsForColumns } from '../../src/webview/tableCells'
+import { splitTableRowCells, tableRowCellsForColumns } from '../../src/shared/tableCells'
 import { splitReadingBlocks } from '../../src/webview/readingBlocks'
 import { createReadingBlockElement } from '../../src/webview/readingView'
 import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/syncController'

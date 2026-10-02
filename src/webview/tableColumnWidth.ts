@@ -13,7 +13,7 @@
 //   合计被钳制在容器宽内，多列/窄面板下不横向溢出。
 // - 权重加固定保底加成（TABLE_WEIGHT_PADDING_UNITS）：近似阅读模式 auto 布局
 //   的格内边距占位，并使全空表头退化为等分观感（各列权重相等）。
-import { escapedPipeBackslashes, tableCellBreaks, tableRowCellsForColumns } from './tableCells'
+import { escapedPipeBackslashes, tableCellBreaks, tableRowCellsForColumns } from '../shared/tableCells'
 
 /** 最小列宽下限（px）：空列/空表头的保底可读宽度 */
 export const TABLE_MIN_COLUMN_PX = 48

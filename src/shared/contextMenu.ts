@@ -594,7 +594,7 @@ export function contextMenuBlockTargetAt(
   return { block, heading }
 }
 
-/** 表格分隔行形态（与 webview/tableCells.parseTableDelimiter 的格子口径
+/** 表格分隔行形态（与 shared/tableCells.parseTableDelimiter 的格子口径
  *  对齐的行级近似——最小连字符数同为 `-+`（GFM 单连字符 `|-|-|` 即合法），
  *  `|---|---|` / `:---: |` / 无边界管道形态；转义管道等完整切分语义仍以
  *  tableCells 为准，此处只服务区域判定） */

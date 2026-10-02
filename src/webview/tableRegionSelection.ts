@@ -4,7 +4,7 @@ import type { Tree } from '@lezer/common'
 import { normalizeTableRegion, type TableRegion } from './tableRegion'
 import type { TableRowInfo } from './tableStructure'
 import { liveDecorationsField } from './liveDecorations'
-import { splitTableRowCells } from './tableCells'
+import { splitTableRowCells } from '../shared/tableCells'
 import { setTableRegion, tableRegionField } from './tableRegionField'
 
 export { setTableRegion, tableRegionField, sameTableRegion } from './tableRegionField'

@@ -39,7 +39,7 @@ import {
 } from '../shared/tabEscape'
 import { liveDecorationsField } from './liveDecorations'
 import { tableRegionField } from './tableRegionSelection'
-import { chainAt, visitRange } from './markdownDoc'
+import { chainAt, visitRange } from '../shared/markdownDoc'
 
 /** 块级代码上下文（排除集）：光标链命中即不接管——代码块内 Tab 继续
  *  缩进（indentEditing 的 CODE_NODES 同族口径，另含围栏语言行 CodeInfo

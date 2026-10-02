@@ -10,7 +10,7 @@
 //   导航纯函数随之移除；新增项文本改写计划（planSetFmArrayItem）与
 //   flow 数组值整框改写（planSetFmValue 扩展），供 Popover 输入框派发
 import { describe, it, expect } from 'vitest'
-import { frontmatterRange } from '../../src/webview/markdownDoc'
+import { frontmatterRange } from '../../src/shared/markdownDoc'
 import {
   parseFrontmatterTable,
   planSetFmValue,

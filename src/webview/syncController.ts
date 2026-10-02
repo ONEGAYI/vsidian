@@ -278,7 +278,7 @@ import {
   standaloneBlockIdAfterBlock,
   standaloneBlockIdOf,
 } from '../shared/blockId'
-import { FM_SCAN_LIMIT, frontmatterRange } from './markdownDoc'
+import { FM_SCAN_LIMIT, frontmatterRange } from '../shared/markdownDoc'
 import {
   outlineChangesOrdered,
   outlineCopyText,
@@ -326,7 +326,7 @@ import { listEditing } from './listEditing'
 import { indentEditing } from './indentEditing'
 import { selectTableRegion, tableRegionField } from './tableRegionSelection'
 import { planTableRegionReplace, type TableRegion } from './tableRegion'
-import { splitTableRowCells } from './tableCells'
+import { splitTableRowCells } from '../shared/tableCells'
 // #292 骨架屏：撤除计划纯逻辑与装配常量（HTML 打点/收编/hold 全局同源）
 import {
   planSkeletonExit,
