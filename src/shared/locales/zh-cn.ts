@@ -187,6 +187,7 @@ export const zhCn: Record<MessageKey, string> = {
   'styleRef.category.outlinks': '出链面板',
   'styleRef.category.hoverPreview': '悬停预览',
   'styleRef.category.findPanel': '查找面板',
+  'styleRef.category.loading': '加载占位',
   'host.styleRefExported': '样式契约 JSON 已导出：{path}',
   'host.styleRefExportFailed': '样式契约 JSON 导出失败：{reason}',
   'host.styleRefExportReasonMissingAsset': '扩展安装不完整（缺少 style-reference.json）',

@@ -215,6 +215,8 @@ interface PanelEntry {
   lastPerfReport?: Extract<WebviewToHost, { kind: 'perf.report' }>
   /** 最近一次阅读视图探针回报（#7：测试钩子 readingPerf 轮询读取） */
   lastReadingPerfReport?: Extract<WebviewToHost, { kind: 'reading.perf.report' }>
+  /** 最近一次骨架屏状态回报（#292：测试钩子 getSkeletonState 轮询读取） */
+  lastSkeletonReport?: Extract<WebviewToHost, { kind: '_test.skeleton.report' }>
   /** 冲突通知只发一次（避免通知风暴） */
   conflictNotified: boolean
   /** webview 曾在会话内重载（ready 重复到达，B-2）：暂停面板复制未确认
@@ -1126,6 +1128,10 @@ export class DocumentSession {
       case 'reading.perf.report':
         panel.lastReadingPerfReport = message
         return Promise.resolve()
+      case '_test.skeleton.report':
+        // #292 骨架状态回报：仅测试装配（hold 全局）会出站，原样存最近一份
+        panel.lastSkeletonReport = message
+        return Promise.resolve()
     }
   }
 
@@ -1186,6 +1192,13 @@ export class DocumentSession {
     sessionId: string,
   ): Extract<WebviewToHost, { kind: 'reading.perf.report' }> | undefined {
     return this.panels.get(sessionId)?.lastReadingPerfReport
+  }
+
+  /** 最近一次骨架屏状态回报（#292 测试钩子用） */
+  getLastSkeletonReport(
+    sessionId: string,
+  ): Extract<WebviewToHost, { kind: '_test.skeleton.report' }> | undefined {
+    return this.panels.get(sessionId)?.lastSkeletonReport
   }
 
   /** 当前资源代次（#208：provider 层图片 URI ?v= 戳的数据源；0 = 未刷新） */

@@ -78,6 +78,8 @@ const DYNAMIC_STATE_ENTRIES: ReadonlySet<string> = new Set([
   'mode-body', // 模式态类（live/reading 互斥，两态必居其一——无静态单值可断言）
   'find-match-highlight', // #236 匹配装饰（查找会话打开且命中时在场；计数/序号/定位由集成 find 用例按行为路径验证）
   'reading-find-source', // 隐藏源码当前命中时挂载；浏览器像素与真宿主 paint 探针验证。
+  'skeleton-block', // #292 装载窗口瞬态（撤除后不存在）：探针无法常态采集；单元 skeletonScreen 钉装配形态、浏览器 skeletonProbe 断绘制与撤除
+  'skeleton-column', // #292 同骨架族瞬态：宽度跟随由浏览器 skeletonProbe S3 绘制断言承接
 ])
 
 describe('chromeContract 覆盖分工', () => {

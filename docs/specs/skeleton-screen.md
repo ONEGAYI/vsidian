@@ -131,3 +131,34 @@
 - `gh issue create --title <上> --body-file <正文文件>`（[issue-tracker.md](../agents/issue-tracker.md) 约定，中文标题正文，多行正文写 UTF-8 文件）。
 - 标签：建议 `ready-for-agent`（切片完成、验收标准明确）。
 - 建票后回填票号至本节，并按 CI 敏感期处置约定处理文档提交（纯文档直推 main）。
+
+## 八、实施落档（#292，2026-10-02）
+
+分支 `impl/2026-10-skeleton-screen` 实现并全量验证。**后续改骨架呈现、撤除规则、装配形态或触及 `shared/skeletonTiming` 常量前，必读本节。**
+
+### 行为契约（钉住，不得顺手放宽）
+
+- **装配单一形态**：骨架样式与标记仅由 `src/host/skeletonScreen.ts` 构造器生成、经 `buildWebviewHtml` 内联进初始 HTML（head `<style>` + `#app` 首子元素）——main.css 不承载骨架规则，外链 CSS 到达前空窗①即有样式（CSP style-src 已放行 unsafe-inline，未改 CSP）。
+- **常量同源**：启动延时 300ms / 扫光周期 1500ms 定义于 `src/shared/skeletonTiming.ts`，内联 CSS（animation-delay/周期）与撤除计划（`planSkeletonExit`）共同消费——改扫光节奏只改常量，两侧自动一致。
+- **收编落点 = `.vsidian-main` 覆盖层**：挂载时骨架移入主编辑区末尾（`.vsidian-skeleton-host` 提供定位包含块），`top` 按活跃视图容器相对主区实测偏移——**不进视图容器**（阅读虚拟化 `setDocument` 以 `textContent = ''` 整容器清空子树，进容器会在 init 首次渲染被误清除，实施实证）。撤除时还原宿主类与布局。
+- **撤除信号**：`handleFullSync` 落地（含空文档）→ 双 rAF（`scheduleFrame` 同款退化）读就绪时刻 → `planSkeletonExit` 定时移除；周期收束规则见第三节，恰在边界就绪即撤。
+- **宽度预注入**：非 0 档 `editor.readableLineWidth` 由 provider 经 `readableLineWidthPreset` 预写 `#app` 内联双变量（消除骨架期宽度回跳）；0 档不写，`applyReadableLineWidthSetting` 的 0 档移除/非 0 覆写语义不变。
+- **测试通道门控**：`VSIDIAN_TEST_HOOKS=1` 时 provider 嵌入 `__vsidianSkeletonHold` 全局冻结撤除；webview 经 `_test.skeleton.release`（postToPanel）解除、状态经 `_test.skeleton.report` 回报、宿主 `_test.getSkeletonState` 轮询——生产装配不含 hold 全局，回报零消息。
+
+### 契约登记
+
+- 新增 chrome 域类目 `loading`（加载占位）与两条目 `skeleton`（container）/ `skeleton-block`（selector）；英文覆盖、locales 键（`styleRef.category.loading`）与样式指南产物同步。
+- `skeleton-block` 列入 chromeContract 动态态豁免表——装载窗口瞬态，探针无法常态采集；呈现断言由浏览器套件 skeletonProbe 承接。
+
+### 验证矩阵（2026-10-02，工作树内全绿）
+
+- `npm run compile` 类型零错；`check:stylecontract` 八项零失败（条目 159：+loading 类目 +2 条目）。
+- 单测全量 226 文件通过：新增 `skeletonTiming`（撤除矩阵 10 断言）、`skeletonScreen`（装配形态 9 断言）、`skeletonPanel`（jsdom 生命周期 5 用例）、契约快照联动（类目计数/英文覆盖/翻页遍历/豁免表）。
+- 浏览器 `skeletonProbe`（已注册 run.mjs）8 断言：空窗①整页覆盖不透明、收编后贴工具栏下缘、限宽 600 跟随/铺满档与主区等宽、扫光常量（0.3s/1.5s）、reduced-motion 关闭、release 与无冻结路径撤除。
+- 集成新增用例「骨架屏：hold 装配下收编在场、release 后撤除」：回报通道与 release 链路真宿主验证。
+
+### 已知边界
+
+- `.vsidian-skeleton-host` 使主区在装载窗口内成为定位包含块——若有绝对定位浮层在此窗口内打开（如快速操作面板），其包含块从 `#app` 变为主区，短暂窗内观感差异可接受；撤除即还原。
+- 收编后用户切模式：覆盖层与模式无关、继续覆盖内容区直至撤除（无跨容器迁移）。
+- 阅读恢复场景下骨架列宽恒按 Live 口径（Q9 裁定，不为片段差异化切换）。

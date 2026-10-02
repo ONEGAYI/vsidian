@@ -1234,7 +1234,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
     </article>
   </section>
   <section class="domain" data-domain="chrome">
-    <h1 style="font-size:19px;margin-bottom:4px">界面域（72 条）</h1>
+    <h1 style="font-size:19px;margin-bottom:4px">界面域（75 条）</h1>
     <p class="note">界面域条目（#133 起逐项核实）：静态入口经探针在真实渲染中断言，交互态入口由浏览器/集成套件按行为路径验证；第三方渲染器（KaTeX/Mermaid）内部 DOM 不承诺为稳定接口（见各域「限制」类目）。</p>
     <h2>界面域 · 公式（5）</h2>
     <article class="entry" id="live-math">
@@ -2259,6 +2259,49 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 }</code></pre>
       <p class="verify">验证：单元 occurrenceCssContract：选项条显隐对与三开关点亮规则钉住；单元 occurrence（#238）：显示/在场/淡出/切换重建/闪烁替代的完整行为路径；浏览器 occurrence（#238）：真实键盘 Ctrl+D 连按与弦键位</p>
       <p class="life">引入：#238（2026-10 批次）</p>
+    </article>
+    <h2>界面域 · 加载占位（3）</h2>
+    <article class="entry" id="skeleton">
+      <h3><code>.vsidian-skeleton（列容器 .vsidian-skeleton-column 为其唯一子元素）</code><span class="eid">skeleton</span></h3>
+      <p class="purpose">编辑器初次打开的加载期骨架容器（#292）：随初始 HTML 即时呈现，覆盖「脚本加载」与「正文就绪」两段空窗；挂载后收编为主编辑区内、工具栏下方的覆盖层，正文首帧后按扫光收束规则移除。默认背景随编辑器背景变量，骨架不拦截指针事件。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+<p class="states">状态：仅装载窗口在场：挂载前覆盖 #app 整页，挂载后仅盖内容区（宿主类 .vsidian-skeleton-host 提供定位包含块，撤除时一并移除）；撤除后不存在。</p>
+      <p class="obsidian">Obsidian 对应：无（Obsidian 无加载骨架）</p>
+
+      <p class="dom">DOM 关系：初始 HTML 内 #app 的直接子元素（单实例，稳定 id vsidian-skeleton）；挂载后移入 .vsidian-main（vsidian-skeleton-host 态）末尾——不进视图容器（阅读虚拟化按块管理容器子树，见规格 skeleton-screen.md）。</p>
+      <pre><code>.vsidian-skeleton {
+  background: var(--vscode-editor-background);
+}</code></pre>
+      <p class="verify">验证：单元 skeletonScreen（#292）：内联装配形态钉住（宽变量引用/延时周期同源常量/reduced-motion/自包含无外部资源）；单元 skeletonPanel（#292）：jsdom 控制器收编、撤除、测试冻结与 release；浏览器 skeletonProbe（#292）：呈现与撤除的绘制断言、宽度跟随限宽变量；集成 _test.getSkeletonState（#292）：hold 装配下的在场与落点回报</p>
+      <p class="life">引入：#292（2026-10-02）</p>
+    </article>
+    <article class="entry" id="skeleton-block">
+      <h3><code>.vsidian-skeleton-block（nth-child 宽高序列的标题/段落/代码块形态；::after 扫光层与 @keyframes vsidian-skeleton-sweep）</code><span class="eid">skeleton-block</span></h3>
+      <p class="purpose">骨架灰块条与扫光动画（#292）：通用固定形态（不读文档内容、不模拟行号列），灰块底色与扫光高亮均由编辑器前景色低占比 color-mix 派生（明暗主题自适应）；扫光经启动延时后循环，撤除等当前周期播完——延时/周期常量与撤除计划同源（shared/skeletonTiming）。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+<p class="states">状态：扫光在 prefers-reduced-motion: reduce 下禁用（静态灰块）；启动延时（默认 300ms）结束后才出现扫光，瞬间载好的文档全程无动画。</p>
+      <p class="obsidian">Obsidian 对应：无（Obsidian 无加载骨架）</p>
+
+      <p class="dom">DOM 关系：.vsidian-skeleton &gt; .vsidian-skeleton-column 的直接子 div 序列；列宽引用 --vsidian-live-preview-max-width（与正文列同源，0 = 铺满档下骨架同样铺满），水平留白与正文基线同变量（--vsidian-content-padding-inline）。</p>
+      <pre><code>.vsidian-skeleton-block {
+  background: color-mix(in srgb, var(--vscode-editor-foreground) 9%, transparent);
+}</code></pre>
+      <p class="verify">验证：单元 skeletonScreen（#292）：颜色派生、动画常量与 reduced-motion 规则钉住；浏览器 skeletonProbe（#292）：reduced-motion 下扫光关闭与扫光在场的绘制断言</p>
+      <p class="life">引入：#292（2026-10-02）</p>
+    </article>
+    <article class="entry" id="skeleton-column">
+      <h3><code>.vsidian-skeleton-column</code><span class="eid">skeleton-column</span></h3>
+      <p class="purpose">骨架列容器（#292）：承载骨架灰块序列的列盒，max-width 引用 --vsidian-live-preview-max-width（与正文列同源，不复制读值），水平留白与正文基线同变量（--vsidian-content-padding-inline）——用户片段对加载期列宽的定制点。</p>
+      <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
+<p class="states">状态：仅装载窗口在场，撤除后不存在；铺满档（0）下随变量回退 none 自然铺满。</p>
+      <p class="obsidian">Obsidian 对应：无（Obsidian 无加载骨架）</p>
+
+      <p class="dom">DOM 关系：.vsidian-skeleton 的唯一子元素；其直接子元素为 .vsidian-skeleton-block 序列（见 skeleton-block 条目）。</p>
+      <pre><code>.vsidian-skeleton-column {
+  max-width: var(--vsidian-live-preview-max-width);
+}</code></pre>
+      <p class="verify">验证：单元 skeletonScreen（#292）：列宽变量引用与预注入行为钉住；浏览器 skeletonProbe（#292）：限宽 600 跟随与铺满档等宽的绘制断言</p>
+      <p class="life">引入：#292（2026-10-02）</p>
     </article>
   </section>
 <p style="margin-top:48px;color:color-mix(in srgb, currentColor 50%, transparent);font-size:12px">由 src/shared/styleContract.ts 生成（scripts/genStyleGuide.mjs）；产物一致性由 test/unit/styleGuideGen.test.ts 钉住。</p>
