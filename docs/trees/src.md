@@ -30,6 +30,7 @@ vsidian/
     │   ├── linkTarget.ts               # 宿主侧链接目标分类纯逻辑（#10）
     │   ├── settingsPage.ts             # 独立设置页面板装配
     │   ├── settingsService.ts          # 宿主设置服务
+    │   ├── skeletonScreen.ts           # 骨架屏内联装配纯逻辑（#292）
     │   ├── styleReferenceExport.ts     # 契约 JSON 导出宿主执行壳
     │   ├── styleReferenceExportPlan.ts # 契约 JSON 导出纯规划逻辑
     │   ├── textEditorProvider.ts       # 自定义文本编辑器提供者
@@ -72,6 +73,7 @@ vsidian/
     │   ├── protocol.ts           # 消息协议单一事实源
     │   ├── refExpansion.ts       # 引用递归路径与容量预算
     │   ├── settings.ts           # 设置定义与读写纯逻辑
+    │   ├── skeletonTiming.ts     # 骨架屏撤除计算与装配常量（#292）
     │   ├── styleContract.ts      # 公开样式契约清单单一事实源
     │   ├── styleContractEn.ts    # 样式参考条目英文覆盖单一事实源
     │   ├── symbols.ts            # 符号注册表单一事实源（#123）
