@@ -33,7 +33,9 @@ export function releaseRefSourceLease(deps: {
 }
 
 /** #220 笔记属性区稳定类名（样式契约 chrome 域 hover-fm-section 条目同源；
- *  #222 起嵌入卡片同款复用——引用内容专属样式入口，主阅读视图不受影响） */
+ *  #222 起嵌入卡片同款复用——引用内容专属样式入口，主阅读视图不受影响。
+ *  P2-03（#280）起内容范围恒全文：标题/块引用的属性区同样施加（原「仅
+ *  全文引用」条件随局部范围契约一并退役） */
 export const REF_FM_CLASS_NAMES = {
   /** 属性区修饰（挂引用内容内 frontmatter 块；仅全文引用） */
   section: 'vsidian-hover-fm',
@@ -93,16 +95,15 @@ export function createSourcedImageManager(deps: {
 }
 
 /** 引用内容块挂载装配（虚拟化与无布局回退两路径共用）：只读装配 +
- *  B 身份图片 + 图形块渲染 + 代码高亮 + 笔记属性区（fmActive 且块为
- *  frontmatter 时施加——章节/块引用不附带属性区，由调用方以 fmActive
- *  表达） */
+ *  B 身份图片 + 图形块渲染 + 代码高亮 + 笔记属性区（fm 控制器存在时施加
+ *  ——P2-03 起内容恒全文，调用方一律提供；null 仅用于无目标装配） */
 export function mountRefContentBlock(
   el: HTMLElement,
   opts: {
     images: ImageResourceManager | null
     /** 朴素代码高亮开关（#220：无卡片工具条——token span 直接注入） */
     codeHighlight: boolean
-    /** 属性区折叠状态机；null = 非全文范围（不施加属性区） */
+    /** 属性区折叠状态机；null = 无目标内容（不施加属性区） */
     fm: RefFmController | null
     /** 内容挂载的配对释放入口；旧调用方可继续只做装配。 */
     onDispose?: (cleanup: () => void) => void
@@ -137,8 +138,8 @@ export function mountRefContentBlock(
 }
 
 /** #220 笔记属性区施加（幂等；虚拟化重挂载时按 controller.expanded()
- *  重建）：仅全文引用（fmActive 由调用方判定）；成型态复用阅读侧标题栏，
- *  降级态合成同构标题栏（源码原文不丢弃，仅收起时隐藏） */
+ *  重建）：内容恒全文（P2-03）——目标含 frontmatter 即施加；成型态复用
+ *  阅读侧标题栏，降级态合成同构标题栏（源码原文不丢弃，仅收起时隐藏） */
 export function applyRefFmSection(el: HTMLElement, fm: RefFmController, onDispose?: (cleanup: () => void) => void): void {
   if (!el.classList.contains(READING_CLASS_NAMES.frontmatter)) {
     return

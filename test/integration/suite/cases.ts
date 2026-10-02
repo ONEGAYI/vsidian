@@ -11982,25 +11982,26 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await waitViewState('悬停预览.md', (v) => v.viewMode === 'reading' && (v.readingWikilinkCount ?? 0) >= 5)
     const before = await readDisk('悬停 局部目标.md')
 
-    // 章节双链（index 2）：scope=heading、块数收窄到章节甲 3 块（CRLF 换算
-    // 正确时与 LF 文档同构；目标标识为中文空格路径的根内相对路径）
+    // 章节双链（index 2）：scope=heading、P2-03（#280）起全文可达——块数
+    // 为目标全文 7 块（锚点只作初始定位，不再收窄内容范围；CRLF 换算正确
+    // 时与 LF 文档同构；目标标识为中文空格路径的根内相对路径）
     await vscode.commands.executeCommand(CMD.postToPanel, uri,
       { kind: 'hover.test.pointer', action: 'enter', index: 2 })
     const section = await waitViewState('悬停预览.md', (v) =>
       v.hoverPreview?.open === true && v.hoverPreview.state === 'content' && v.hoverPreview.scope === 'heading')
     assert(section.hoverPreview?.note === '悬停 局部目标.md',
       `章节预览目标标识应为根内相对路径（实际 ${section.hoverPreview?.note}）`)
-    assert(section.hoverPreview?.blocks === 3,
-      `章节甲应渲染 3 块（标题/段落/列表；实际 ${section.hoverPreview?.blocks}）`)
+    assert(section.hoverPreview?.blocks === 7,
+      `章节引用应渲染目标全文 7 块（实际 ${section.hoverPreview?.blocks}）`)
 
-    // 块引用双链（index 3）：scope=block、完整列表块 1 块（多行块不截首行
-    // ——截首行时列表块缺失、blocks 为 0）
+    // 块引用双链（index 3）：scope=block、同样全文 7 块（多行块语义由
+    // 定位区间承载——anchor 命中即成功，内容范围不再按块收窄）
     await vscode.commands.executeCommand(CMD.postToPanel, uri,
       { kind: 'hover.test.pointer', action: 'enter', index: 3 })
     const block = await waitViewState('悬停预览.md', (v) =>
       v.hoverPreview?.open === true && v.hoverPreview.state === 'content' && v.hoverPreview.scope === 'block')
-    assert(block.hoverPreview?.blocks === 1,
-      `块引用应渲染完整列表块 1 块（实际 ${block.hoverPreview?.blocks}）`)
+    assert(block.hoverPreview?.blocks === 7,
+      `块引用应渲染目标全文 7 块（实际 ${block.hoverPreview?.blocks}）`)
 
     // 失效锚点（index 4）：anchor-missing 分态就地呈现（不以全文替代），
     // 文案含锚点原文（note 为错误文案载体）
@@ -12020,13 +12021,13 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(mdFull.hoverPreview?.blocks === 7,
       `普通链接全文应渲染 7 块（实际 ${mdFull.hoverPreview?.blocks}）`)
 
-    // 普通链接章节（md index 1，fragment 锚点）：scope=heading、3 块
+    // 普通链接章节（md index 1，fragment 锚点）：scope=heading、全文 7 块
     await vscode.commands.executeCommand(CMD.postToPanel, uri,
       { kind: 'hover.test.pointer', action: 'enter', index: 1, link: 'md' })
     const mdSection = await waitViewState('悬停预览.md', (v) =>
       v.hoverPreview?.open === true && v.hoverPreview.state === 'content' && v.hoverPreview.scope === 'heading')
-    assert(mdSection.hoverPreview?.blocks === 3,
-      `链接章节应渲染 3 块（实际 ${mdSection.hoverPreview?.blocks}）`)
+    assert(mdSection.hoverPreview?.blocks === 7,
+      `链接章节应渲染目标全文 7 块（实际 ${mdSection.hoverPreview?.blocks}）`)
 
     // 页内锚点（md index 2）：目标即来源文档自身（不跨文档），scope=heading
     await vscode.commands.executeCommand(CMD.postToPanel, uri,

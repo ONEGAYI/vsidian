@@ -2568,3 +2568,229 @@ describe('#299 hover.target.resolve：会话守卫与结果回包路由', () => 
     s.session.dispose()
   })
 })
+
+describe('P2-03 全文可达：循环身份、刷新宽容与全文计费（#280）', () => {
+  const aPath = 'D:\\notes\\a.md'
+  const bPath = 'D:\\notes\\b.md'
+  /** B 正文：顶部一个指向 A#某标题 的嵌入（锚定区间外的祖先回指） */
+  const bText = '![[A#某标题]]\n正文'
+
+  function setupHost(overrides?: {
+    readHoverTarget?: PanelPort['readHoverTarget']
+    getEmbedDepthLimit?: () => number
+  }) {
+    const doc = new FakeDoc('![[B#章节]]')
+    const session = new DocumentSession(doc, {
+      docUri: DOC_URI,
+      rootFsPath: aPath,
+      isWindowsHost: true,
+      getEmbedDepthLimit: overrides?.getEmbedDepthLimit,
+    })
+    const out: HostToWebview[] = []
+    const reads: Array<{ target: string; anchorOptional?: boolean; verifiedSource?: string }> = []
+    const id = session.attachPanel({
+      send: (m) => out.push(m),
+      readHoverSource: async (fsPath) => fsPath === bPath ? { version: 1, text: bText } : null,
+      readHoverTarget: overrides?.readHoverTarget ?? ((payload, report) => {
+        reads.push({
+          target: payload.target,
+          anchorOptional: payload.anchorOptional,
+          verifiedSource: payload.verifiedSource?.fsPath,
+        })
+        if (payload.target === 'B#章节') {
+          report({ ok: true, fsPath: bPath, relPath: 'b.md', version: 1, lfText: bText,
+            range: { start: bText.indexOf('正文'), end: bText.length }, scope: { kind: 'heading', anchor: '章节' } })
+          return
+        }
+        if (payload.target === 'A#某标题' || payload.target === 'A') {
+          report({ ok: true, fsPath: aPath, relPath: 'a.md', version: 1, lfText: doc.getText(),
+            range: { start: 0, end: doc.getText().length }, scope: { kind: 'full' } })
+          return
+        }
+        report({ ok: false, reason: 'not-found' })
+      }),
+    })
+    const last = () => out.at(-1) as Extract<HostToWebview, { kind: 'hover.result' }>
+    return { doc, session, out, id, reads, last }
+  }
+
+  /** 先把根 B 卡片（heading 引用）送达并固定租约，返回首个成功回包 */
+  async function deliverRootB(h: ReturnType<typeof setupHost>) {
+    await h.session.handleWebviewMessage({ kind: 'ready' }, h.id)
+    await h.session.handleWebviewMessage({
+      kind: 'hover.request', sessionId: h.id, docUri: DOC_URI,
+      reqId: 1, instanceId: 'mount-b', occurrenceId: 'root-b',
+      sourceStart: 0, sourceEnd: 9, target: 'B#章节', retainSource: true,
+    }, h.id)
+    const first = h.last()
+    expect(first).toMatchObject({ ok: true })
+    if (first.ok) {
+      expect(h.session.retainHoverSource(h.id, bPath, 'root-b', first.sourceLeaseId)).toBe(true)
+    }
+    return first
+  }
+
+  it('祖先循环按规范目标文档身份判定：不同锚点不能绕过（A→B#章节→A#某标题 截断）', async () => {
+    const h = setupHost()
+    await deliverRootB(h)
+    const at = bText.indexOf('![[A#某标题]]')
+    await h.session.handleWebviewMessage({
+      kind: 'hover.request', sessionId: h.id, docUri: DOC_URI,
+      reqId: 2, instanceId: 'mount-a', occurrenceId: 'child-a',
+      sourceStart: at, sourceEnd: at + '![[A#某标题]]'.length, target: 'A#某标题', retainSource: true,
+      source: { parentInstanceId: 'root-b', sourceDocUri: bPath },
+    }, h.id)
+    expect(h.last()).toMatchObject({ ok: false, reason: 'cycle' })
+  })
+
+  it('同目标兄弟实例合法：两个 B 卡片 occurrence 并存均成功', async () => {
+    const h = setupHost()
+    await h.session.handleWebviewMessage({ kind: 'ready' }, h.id)
+    for (const [reqId, occurrence] of [[1, 'root-b'], [2, 'root-b2']] as const) {
+      await h.session.handleWebviewMessage({
+        kind: 'hover.request', sessionId: h.id, docUri: DOC_URI,
+        reqId, instanceId: `mount-${occurrence}`, occurrenceId: occurrence,
+        sourceStart: 0, sourceEnd: 9, target: 'B#章节', retainSource: true,
+      }, h.id)
+      expect(h.last()).toMatchObject({ ok: true, instanceId: `mount-${occurrence}` })
+    }
+  })
+
+  it('第一跳自文档引用（页内锚点/自嵌）合法打开：循环判定只作用于链上子引用', async () => {
+    const h = setupHost()
+    await h.session.handleWebviewMessage({ kind: 'ready' }, h.id)
+    // 目标 = 根面板文档自身（页内锚点语义——替身对 'A#某标题' 返回根文档
+    // aPath）：成功打开，不判 cycle
+    await h.session.handleWebviewMessage({
+      kind: 'hover.request', sessionId: h.id, docUri: DOC_URI,
+      reqId: 1, instanceId: 'mount-self', occurrenceId: 'self-occ',
+      sourceStart: 0, sourceEnd: 9, target: 'A#某标题', retainSource: true,
+    }, h.id)
+    const self = h.last()
+    expect(self.ok, '页内锚点/自文档引用（目标即根面板文档）合法打开').toBe(true)
+    if (self.ok) {
+      // 其 grant.path 含根 A——内容中的再引用在链上按文档身份截断
+      expect(self.expansionPath?.length).toBeGreaterThanOrEqual(1)
+    }
+    h.session.dispose()
+  })
+
+  it('锚定区间外的合法子引用放行：来源守卫以直接来源全文为界（伪造来源仍拒绝）', async () => {
+    // B 正文：顶部一个指向 D 的嵌入（位于 B 初始锚定区间之外）
+    const cText = '![[D]]\n正文'
+    const doc = new FakeDoc('![[B#章节]]')
+    const session = new DocumentSession(doc, {
+      docUri: DOC_URI, rootFsPath: aPath, isWindowsHost: true,
+    })
+    const out: HostToWebview[] = []
+    const id = session.attachPanel({
+      send: (m) => out.push(m),
+      readHoverSource: async (fsPath) => fsPath === bPath ? { version: 1, text: cText } : null,
+      readHoverTarget: (payload, report) => {
+        if (payload.target === 'B#章节') {
+          // 锚定定位区间只覆盖「正文」段（子引用位于其外）
+          report({ ok: true, fsPath: bPath, relPath: 'b.md', version: 1, lfText: cText,
+            range: { start: cText.indexOf('正文'), end: cText.length }, scope: { kind: 'heading', anchor: '章节' } })
+        } else if (payload.target === 'D') {
+          report({ ok: true, fsPath: 'D:\\notes\\d.md', relPath: 'd.md', version: 1, lfText: 'D 全文',
+            range: { start: 0, end: 5 }, scope: { kind: 'full' } })
+        } else {
+          report({ ok: false, reason: 'not-found' })
+        }
+      },
+    })
+    await session.handleWebviewMessage({ kind: 'ready' }, id)
+    await session.handleWebviewMessage({
+      kind: 'hover.request', sessionId: id, docUri: DOC_URI,
+      reqId: 1, instanceId: 'mount-b', occurrenceId: 'root-b',
+      sourceStart: 0, sourceEnd: 9, target: 'B#章节', retainSource: true,
+    }, id)
+    const first = out.at(-1) as Extract<HostToWebview, { kind: 'hover.result'; ok: true }>
+    expect(first).toMatchObject({ ok: true })
+    expect(session.retainHoverSource(id, bPath, 'root-b', first.sourceLeaseId)).toBe(true)
+    // D 的 occurrence 在 B 锚定区间之外（顶部）——P2-03 起合法（先红）
+    const at = cText.indexOf('![[D]]')
+    await session.handleWebviewMessage({
+      kind: 'hover.request', sessionId: id, docUri: DOC_URI,
+      reqId: 2, instanceId: 'mount-d', occurrenceId: 'child-d',
+      sourceStart: at, sourceEnd: at + '![[D]]'.length, target: 'D',
+      source: { parentInstanceId: 'root-b', sourceDocUri: bPath },
+    }, id)
+    expect(out.at(-1)).toMatchObject({ ok: true })
+    // 伪造原文（occurrence 对不上 inner）仍拒绝
+    await session.handleWebviewMessage({
+      kind: 'hover.request', sessionId: id, docUri: DOC_URI,
+      reqId: 3, instanceId: 'mount-d2', occurrenceId: 'child-d2',
+      sourceStart: at, sourceEnd: at + '![[D]]'.length, target: '伪造成别的',
+      source: { parentInstanceId: 'root-b', sourceDocUri: bPath },
+    }, id)
+    expect(out.at(-1)).toMatchObject({ ok: false, reason: 'source-expired' })
+    session.dispose()
+  })
+
+  it('anchorOptional 刷新宽容：宿主端口透传，且与严格读取的缓存互不串台', async () => {
+    let anchorHit = false
+    const reads2: Array<{ target: string; anchorOptional?: boolean }> = []
+    const headingText = '# 存在的标题\n\n正文\n'
+    const h = setupHost({
+      readHoverTarget: (payload, report) => {
+        reads2.push({ target: payload.target, anchorOptional: payload.anchorOptional })
+        if (payload.target === 'T#标题') {
+          if (anchorHit) {
+            report({ ok: true, fsPath: 'D:\\notes\\t.md', relPath: 't.md', version: 2,
+              lfText: headingText, range: { start: 0, end: headingText.length }, scope: { kind: 'heading', anchor: '标题' } })
+          } else {
+            report({ ok: false, reason: 'anchor-missing', anchor: '标题' })
+          }
+        }
+      },
+    })
+    await h.session.handleWebviewMessage({ kind: 'ready' }, h.id)
+    // 严格首开：锚点缺失 → anchor-missing（失败不缓存）
+    await h.session.handleWebviewMessage({
+      kind: 'hover.request', sessionId: h.id, docUri: DOC_URI,
+      reqId: 1, instanceId: 'i1', occurrenceId: 'o1',
+      sourceStart: 0, sourceEnd: 5, target: 'T#标题',
+    }, h.id)
+    expect(h.last()).toMatchObject({ ok: false, reason: 'anchor-missing' })
+    // 刷新重载（anchorOptional）：端口透传且锚点此时命中 → 成功并缓存
+    anchorHit = true
+    await h.session.handleWebviewMessage({
+      kind: 'hover.request', sessionId: h.id, docUri: DOC_URI,
+      reqId: 2, instanceId: 'i1', occurrenceId: 'o1',
+      sourceStart: 0, sourceEnd: 5, target: 'T#标题', anchorOptional: true,
+    }, h.id)
+    expect(h.last()).toMatchObject({ ok: true })
+    expect(reads2.some((r) => r.anchorOptional === true), 'anchorOptional 透传到读取端口').toBe(true)
+    // 严格重开：不得命中宽容成功缓存（锚点又缺失 → 再验证 → anchor-missing）
+    anchorHit = false
+    await h.session.handleWebviewMessage({
+      kind: 'hover.request', sessionId: h.id, docUri: DOC_URI,
+      reqId: 3, instanceId: 'i2', occurrenceId: 'o2',
+      sourceStart: 0, sourceEnd: 5, target: 'T#标题',
+    }, h.id)
+    expect(h.last(), '严格重开不被宽容缓存污染').toMatchObject({ ok: false, reason: 'anchor-missing' })
+  })
+
+  it('目标按全文计费：heading 引用的大全文不能按旧局部预算通过', async () => {
+    const bigText = `${'x'.repeat(600_000)}\n## 章节\n${'y'.repeat(600_000)}\n`
+    const h = setupHost({
+      getEmbedDepthLimit: () => 3,
+      readHoverTarget: (_payload, report) => {
+        report({ ok: true, fsPath: 'D:\\notes\\big.md', relPath: 'big.md', version: 1,
+          lfText: bigText,
+          range: { start: bigText.indexOf('## 章节'), end: bigText.length },
+          scope: { kind: 'heading', anchor: '章节' } })
+      },
+    })
+    await h.session.handleWebviewMessage({ kind: 'ready' }, h.id)
+    await h.session.handleWebviewMessage({
+      kind: 'hover.request', sessionId: h.id, docUri: DOC_URI,
+      reqId: 1, instanceId: 'i-big', occurrenceId: 'o-big',
+      sourceStart: 0, sourceEnd: 5, target: 'big#章节', retainSource: true,
+    }, h.id)
+    // 全文 1.2M 字符 ≈ 2.4 MiB：超单树 2 MiB 上界 → budget 拒绝（非成功）
+    expect(h.last()).toMatchObject({ ok: false, reason: 'budget' })
+  })
+})
+

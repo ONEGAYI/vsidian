@@ -489,6 +489,7 @@ export class EmbedCardManager {
           this.requestLoad(first, {
             silent: matched.some((h) => h.entry === entry && h.display === 'content'),
             heal: true,
+            reload: true,
           })
           continue
         }
@@ -591,10 +592,11 @@ export class EmbedCardManager {
       const handles = [...this.active.values()].filter((h) => h.entry === entry)
       if (message.status === 'changed') {
         // 每 entry 单笔重发（lastReq 是 entry 级共享——同 entry 的双容器
-        // handle 不重复请求，回包对全部配对 handle 渲染，与首载同构）
+        // handle 不重复请求，回包对全部配对 handle 渲染，与首载同构）。
+        // P2-03：已打开实例的重载带 anchorOptional（锚点缺失不切错误页）
         const first = handles[0]
         if (first) {
-          this.requestLoad(first, { silent: true })
+          this.requestLoad(first, { silent: true, reload: true })
         }
         this.touchEntry(entry) // 刷新中仍是有效实例
       } else {
@@ -830,7 +832,7 @@ export class EmbedCardManager {
    *  回包重建，无闪烁）；heal = P1-2 过期回包的自愈重发（循环防护标记） */
   private requestLoad(
     handle: EmbedCardHandle,
-    opts?: { silent?: boolean; heal?: boolean },
+    opts?: { silent?: boolean; heal?: boolean; reload?: boolean },
   ): void {
     const session = this.context.session()
     if ((handle.entry.content.source.depth ?? 1) > (this.context.maxDepth?.() ?? REF_EXPANSION_LIMITS.defaultDepth)) {
@@ -858,6 +860,9 @@ export class EmbedCardManager {
     this.context.send({
       kind: 'hover.request',
       retainSource: true,
+      // P2-03（#280）：changed 失效重载与过期自愈都是已打开实例的重读——
+      // 锚点缺失不切成错误页（宿主宽容回全文）；首挂载不带（严格验证）
+      ...(opts?.reload === true ? { anchorOptional: true } : {}),
       sessionId: session.sessionId,
       docUri: session.docUri,
       reqId,

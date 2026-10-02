@@ -1,4 +1,3 @@
-import type { HoverPreviewScope } from './protocol'
 import { scanEmbedsInLine } from './wikilink'
 import { scanEmbedsInTableRow } from './tableCellEmbed'
 import { chainAt, frontmatterRange, markdownTreeParser } from './markdownDoc'
@@ -13,14 +12,17 @@ export const REF_EXPANSION_LIMITS = {
   concurrentReads: 8,
 } as const
 
-/** A node is the canonical target and its semantic range, not a particular card instance. */
-export function canonicalRefTargetKey(fsPath: string, scope: HoverPreviewScope, windows: boolean): string {
+/**
+ * A node's canonical identity is the target document itself, not a semantic
+ * scope or a particular card instance. P2-03 (#280, ADR-0011): full-document
+ * access unifies heading/block references with full references, so a different
+ * anchor no longer creates a different content node and cannot bypass an
+ * ancestor cycle; sibling occurrences of the same target remain legal.
+ */
+export function canonicalRefTargetKey(fsPath: string, windows: boolean): string {
   const path = fsPath.replace(/\\/g, '/').replace(/\/+$/g, '')
   const canonicalPath = windows ? path.toLowerCase() : path
-  const anchor = scope.kind === 'heading'
-    ? scope.anchor.trim().replace(/\s+/g, ' ').toLowerCase()
-    : scope.kind === 'block' ? scope.anchor : ''
-  return JSON.stringify([canonicalPath, scope.kind, anchor])
+  return JSON.stringify([canonicalPath])
 }
 
 export function inExpansionPath(path: readonly string[], key: string): boolean {
@@ -29,6 +31,11 @@ export function inExpansionPath(path: readonly string[], key: string): boolean {
 
 /**
  * Validate a child against the current authoritative LF source, never a webview URI claim.
+ *
+ * P2-03 (#280): the parent's initial anchor range no longer bounds where a
+ * legal child may live — the direct source's full text is the boundary
+ * (content scope = full document). Version match, byte-exact occurrence
+ * alignment and the syntax-exclusion guards are unchanged.
  *
  * #246 混排准入：区间不再要求独占整行，改为「该行内一个完整嵌入
  * occurrence 的精确边界且 inner 逐字节匹配」；列表/引用（含任务、嵌套、
@@ -46,14 +53,14 @@ export function inExpansionPath(path: readonly string[], key: string): boolean {
  * 校验。非表格行的 `\|` 形态不进入解码语义（既有边界不扩散）。
  */
 export function validChildSource(
-  parent: { version: number; range: { start: number; end: number } },
+  parent: { version: number },
   current: { version: number; text: string },
   start: number,
   end: number,
   target: string,
 ): boolean {
   if (current.version !== parent.version || !Number.isInteger(start) || !Number.isInteger(end) ||
-    start < parent.range.start || end > parent.range.end || start >= end || end > current.text.length) return false
+    start < 0 || end > current.text.length || start >= end) return false
   const lineStart = current.text.lastIndexOf('\n', start - 1) + 1
   const lineBreak = current.text.indexOf('\n', end)
   const lineEnd = lineBreak < 0 ? current.text.length : lineBreak

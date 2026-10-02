@@ -690,3 +690,57 @@ describe('跳转目标提示轻量解析（#299 resolveHoverTargetTip：只解�
       .toEqual({ ok: true, relPath: '目标.md', anchor: '' })
   })
 })
+
+describe('P2-03 全文可达与锚点初始定位（#280，ADR-0011）', () => {
+  const TARGET_TEXT = ['顶部段。', '', '## 章节甲', '', '甲段。', '', '## 章节乙', '', '乙段。', ''].join('\n')
+  const disk = (): Disk => new Map<string, { version: number; text: string }>([
+    ['D:\\notes\\a.md', note('x')],
+    ['D:\\notes\\目标.md', note(TARGET_TEXT, 4)],
+  ])
+
+  it('anchorOptional（刷新重载）：锚点缺失不构成失败——成功全文 + 定位区间退化为全文区间', async () => {
+    const h = makeHarness(disk())
+    const out = await readHoverDocTarget('目标#已删除的标题', h.ctx, h.ports, { anchorOptional: true })
+    expect(out).toMatchObject({
+      ok: true,
+      fsPath: 'D:\\notes\\目标.md',
+      version: 4,
+      range: { start: 0, end: TARGET_TEXT.length },
+      scope: { kind: 'heading', anchor: '已删除的标题' },
+    })
+    if (out.ok) {
+      expect(out.lfText).toBe(TARGET_TEXT)
+    }
+  })
+
+  it('不带 anchorOptional（首开）：锚点缺失仍 anchor-missing 分态（重开再验证原锚点）', async () => {
+    const h = makeHarness(disk())
+    const out = await readHoverDocTarget('目标#已删除的标题', h.ctx, h.ports)
+    expect(out).toEqual({ ok: false, reason: 'anchor-missing', anchor: '已删除的标题' })
+  })
+
+  it('anchorOptional 且锚点命中：行为与严格读取一致（range 仍为锚定定位区间）', async () => {
+    const h = makeHarness(disk())
+    const out = await readHoverDocTarget('目标#章节甲', h.ctx, h.ports, { anchorOptional: true })
+    expect(out).toMatchObject({ ok: true, scope: { kind: 'heading', anchor: '章节甲' } })
+    if (out.ok) {
+      expect(out.range.start).toBe(TARGET_TEXT.indexOf('## 章节甲'))
+      // 章节定位区间覆盖到下一同级标题之前（含章节尾内容，不含乙标题）
+      expect(out.range.end).toBeGreaterThan(TARGET_TEXT.indexOf('甲段。'))
+      expect(out.range.end).toBeLessThanOrEqual(TARGET_TEXT.indexOf('## 章节乙'))
+    }
+  })
+
+  it('普通链接与直接目标入口同款 anchorOptional 语义', async () => {
+    const h = makeHarness(disk())
+    const md = await readHoverMdLinkTarget('目标.md#已删除的标题', h.ctx, h.ports, { anchorOptional: true })
+    expect(md).toMatchObject({ ok: true, range: { start: 0, end: TARGET_TEXT.length } })
+    const direct = await readHoverDirectTarget(
+      { fsPath: 'D:\\notes\\目标.md', anchor: '^已删除' }, h.ctx, h.ports, { anchorOptional: true })
+    expect(direct).toMatchObject({
+      ok: true,
+      range: { start: 0, end: TARGET_TEXT.length },
+      scope: { kind: 'block', anchor: '^已删除' },
+    })
+  })
+})

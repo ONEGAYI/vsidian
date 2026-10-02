@@ -1332,10 +1332,13 @@ export function createTextEditorProvider(
               },
             }
             outcome = payload.directTarget !== undefined
-              ? await readHoverDirectTarget(payload.directTarget, access, ports)
+              ? await readHoverDirectTarget(payload.directTarget, access, ports,
+                payload.anchorOptional === true ? { anchorOptional: true } : undefined)
               : payload.linkHref !== undefined
-                ? await readHoverMdLinkTarget(payload.linkHref, access, ports)
-                : await readHoverDocTarget(payload.target, access, ports)
+                ? await readHoverMdLinkTarget(payload.linkHref, access, ports,
+                  payload.anchorOptional === true ? { anchorOptional: true } : undefined)
+                : await readHoverDocTarget(payload.target, access, ports,
+                  payload.anchorOptional === true ? { anchorOptional: true } : undefined)
           } catch {
             outcome = { ok: false, reason: 'read-failed' }
           }

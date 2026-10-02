@@ -181,12 +181,11 @@ export class VirtualReadingView {
   }
 
   /** 全文装载/重建（init、resync、外部增量后的重建路径）：全文切块一次。
-   *  #219 悬停局部预览：opts.range 存在时切块后按块区间**求交过滤**——
-   *  解析仍吃全文（保留全文解析上下文，不丢章节外引用式链接定义），范围
-   *  选取在块模型上做（跨界块整块保留，不孤立解析截取字符串）；range 为
-   *  LF 坐标（宿主经 NewlineCoordinator 换算后随 hover.result 下发） */
+   *  解析吃全文（保留全文解析上下文，不丢章节外引用式链接定义）。P2-03
+   * （#280）起引用内容不再按区间过滤——标题/块引用全文可达，初始定位由
+   *  调用方经 scrollToSrcStart 按锚点区间起点执行（原 range 求交过滤随
+   *  局部范围契约退役） */
   setDocument(text: string, opts?: {
-    range?: { start: number; end: number }
     /** 已在来源缓存完成全文解析的块；各实例只共享只读数据，不共享 DOM。 */
     blocks?: readonly ReadingBlock[]
     parsedNow?: boolean
@@ -198,10 +197,6 @@ export class VirtualReadingView {
     this.text = text
     this.blocks = opts?.blocks ? [...opts.blocks]
       : splitReadingBlocks(text)
-    if (opts?.range) {
-      const { start, end } = opts.range
-      this.blocks = this.blocks.filter((b) => b.start <= end && b.end >= start)
-    }
     this.blocksByStart = new Map(this.blocks.map(block => [block.start, block]))
     this.heights = estimateHeights(this.blocks, text, this.calib)
     this.tops = blockTops(this.heights)

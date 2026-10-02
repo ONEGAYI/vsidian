@@ -555,7 +555,7 @@ describe('局部范围与普通链接入口（#219）', () => {
     return { start: titleStart, end: listEnd }
   }
 
-  it('heading scope 成功结果：只渲染章节内块（切块后按 range 过滤，非截字符串）', () => {
+  it('P2-03 heading scope 成功结果：全文可达（锚点前后内容都在场），探针仍记录 heading', () => {
     vi.useFakeTimers()
     const h = makeHarness()
     hoverPreviewAnchorEnter(h.anchor)
@@ -576,17 +576,16 @@ describe('局部范围与普通链接入口（#219）', () => {
     const text = el.textContent ?? ''
     expect(text).toContain('章节甲')
     expect(text).toContain('列表项二')
-    expect(text, '章节外的顶部段不得出现').not.toContain('顶部段')
-    expect(text, '下一章节不得出现').not.toContain('乙段')
+    expect(text, '锚点之前的顶部段同样在场（全文可达）').toContain('顶部段')
+    expect(text, '锚点区间之后的下一章节同样在场').toContain('乙段')
     expect(text, '多行列表块整取（不截首行）').toContain('列表项一')
     const probe = hoverPopupProbe()
     expect(probe.scope).toBe('heading')
-    expect(probe.blocks, '只渲染章节内块').toBeLessThan(
-      el ? SECTION_TARGET.split('\n').filter((l) => l.trim() !== '').length : Infinity,
-    )
+    // 全文可达后首屏挂载的块数不再小于全文块量级（原局部过滤时仅 3 块）
+    expect(probe.blocks).toBeGreaterThanOrEqual(5)
   })
 
-  it('block scope 成功结果：探针记录 block 且范围生效', () => {
+  it('P2-03 block scope 成功结果：全文在场，探针记录 block', () => {
     vi.useFakeTimers()
     const h = makeHarness()
     hoverPreviewAnchorEnter(h.anchor)
@@ -609,7 +608,7 @@ describe('局部范围与普通链接入口（#219）', () => {
     })
     const text = popupEl()!.textContent ?? ''
     expect(text).toContain('列表项一')
-    expect(text, '块外内容不得出现').not.toContain('顶部段')
+    expect(text, '块外的顶部段在场（全文可达）').toContain('顶部段')
     expect(hoverPopupProbe().scope).toBe('block')
     expect(blockStart).toBeGreaterThan(0)
   })
@@ -874,7 +873,7 @@ describe('#220 来源资源与浮层内容（B 身份）', () => {
     expect(hoverPopupProbe().fm, '重开恢复折叠').toBe('collapsed')
   })
 
-  it('章节引用不附带属性区；无 frontmatter 不显示标题行（探针 fm=none）', () => {
+  it('P2-03 章节引用同样附带属性区（全文内容含 frontmatter）；无 frontmatter 不显示标题行（探针 fm=none）', () => {
     const h = makeHarness()
     const headingStart = B_DOC.indexOf('# B 标题')
     vi.useFakeTimers()
@@ -889,8 +888,9 @@ describe('#220 来源资源与浮层内容（B 身份）', () => {
       range: { start: headingStart, end: B_DOC.length },
       scope: { kind: 'heading', anchor: 'B 标题' },
     })
-    expect(el().querySelector('.vsidian-hover-fm')).toBeNull()
-    expect(hoverPopupProbe().fm).toBe('none')
+    // P2-03（#280）：内容范围恒全文——属性区随全文在场（默认折叠）
+    expect(el().querySelector('.vsidian-hover-fm')).not.toBeNull()
+    expect(hoverPopupProbe().fm).toBe('collapsed')
 
     // 无 frontmatter 文档
     closeHoverPopup()
@@ -1210,6 +1210,8 @@ describe('#224 引用视图同步：订阅、失效分态与版本仲裁', () =>
     }
     expect(refresh.instanceId).toBe(req.instanceId) // 同实例
     expect(refresh.reqId).toBeGreaterThan(req.reqId) // 新请求代次
+    // P2-03 刷新宽容：已打开实例的重载不因锚点缺失切成错误页
+    expect(refresh.anchorOptional).toBe(true)
     // 装载中保持内容态（不闪 loading）
     expect(hoverPopupProbe().state).toBe('content')
     // 新内容到达（带 frontmatter——刷新后属性区仍应在场）

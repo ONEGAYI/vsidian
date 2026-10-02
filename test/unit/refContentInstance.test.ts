@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RefContentInstance, getRefReadingBlockCacheStats, type RefLoadedContent } from '../../src/webview/refContentInstance'
 import { installLocale } from '../../src/shared/i18n'
 import { zhCn } from '../../src/shared/locales/zh-cn'
@@ -325,4 +325,69 @@ it('超大目标不进入常驻解析缓存，重复装载重新解析', () => {
   expect(after.bytes).toBeLessThanOrEqual(2 * 1024 * 1024)
   a.instance.dispose()
   b.instance.dispose()
+})
+
+// P2-03（#280，ADR-0011）：引用全文可达——标题/块引用渲染目标全文，
+// range 只作初始定位点；属性区随全文内容一并在场。
+describe('P2-03 全文可达与锚点初始定位', () => {
+  const HEADING_TEXT = '顶部段。\n\n## 章节\n\n甲段。\n\n乙段。'
+  const sectionStart = HEADING_TEXT.indexOf('## 章节')
+  const headingLoaded: RefLoadedContent = {
+    fsPath: 'D:/notes/heading-target.md', relPath: 'heading-target.md',
+    scope: 'heading', selector: { kind: 'heading', anchor: '章节' },
+    version: 2, text: HEADING_TEXT,
+    range: { start: sectionStart, end: HEADING_TEXT.indexOf('乙段。') },
+  }
+
+  it('标题引用渲染锚点前后完整目标内容（内容范围 = 全文，不再按 range 过滤）', () => {
+    const a = fixture('p2-heading', 0, [])
+    a.mount.render(headingLoaded)
+    const text = a.contentEl.textContent ?? ''
+    expect(text, '锚点前的顶部段在场').toContain('顶部段')
+    expect(text, '锚点章节在场').toContain('甲段')
+    expect(text, '锚点区间之后的尾段在场').toContain('乙段')
+    a.instance.dispose()
+  })
+
+  it('标题引用同样施加属性区折叠（全文内容包含 frontmatter）', () => {
+    const withFm: RefLoadedContent = {
+      ...headingLoaded,
+      fsPath: 'D:/notes/heading-fm.md',
+      text: `---\ntitle: B\n---\n\n${HEADING_TEXT}`,
+    }
+    withFm.range = { start: withFm.text.indexOf('## 章节'), end: withFm.text.length }
+    const a = fixture('p2-heading-fm', 0, [])
+    a.mount.render(withFm)
+    expect(a.contentEl.querySelector('.vsidian-hover-fm-toggle'), 'heading 引用也有属性区开关').not.toBeNull()
+    a.instance.dispose()
+  })
+
+  it('首开定位到锚点：无保存滚动位置时按定位区间起点滚动（有保存位置则不重定位）', async () => {
+    const { VirtualReadingView } = await import('../../src/webview/readingVirtualView')
+    const locate = vi.spyOn(VirtualReadingView.prototype, 'scrollToSrcStart')
+    const a = fixture('p2-locate', 0, [], 'virtual')
+    a.mount.render(headingLoaded)
+    // 定位帧延迟一帧执行（等宿主入 DOM 建立布局）
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    expect(locate).toHaveBeenCalledTimes(1)
+    expect(locate).toHaveBeenCalledWith(sectionStart)
+    locate.mockClear()
+    // 刷新路径（保存了滚动位置）：恢复位置优先，不重定位锚点
+    a.scrollEl.scrollTop = 42
+    a.mount.render(headingLoaded)
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    expect(locate).not.toHaveBeenCalled()
+    a.instance.dispose()
+    locate.mockRestore()
+  })
+
+  it('全文引用（full）不触发锚点定位', async () => {
+    const { VirtualReadingView } = await import('../../src/webview/readingVirtualView')
+    const locate = vi.spyOn(VirtualReadingView.prototype, 'scrollToSrcStart')
+    const a = fixture('p2-full', 0, [], 'virtual')
+    a.mount.render({ ...loaded, selector: { kind: 'full' } })
+    expect(locate).not.toHaveBeenCalled()
+    a.instance.dispose()
+    locate.mockRestore()
+  })
 })
