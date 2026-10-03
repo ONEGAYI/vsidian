@@ -100,8 +100,34 @@ try {
   // 浮窗根不进嵌入探针（有自己的 hoverPreview 探针）
   const embeds = await page.evaluate(() => window.hoverLiveEmbeds())
   assert.equal(embeds.length, 0, '浮窗根不污染嵌入卡片探针')
+  // 浮窗高度随内部 Live 编辑器内容自适应（视觉验收回归：切 Live 后浮窗
+  // 不得停留在 Reading 期测量高度把编辑器裁掉一截——编辑器高度也不得
+  // 溢出 live 容器〔max-height:100% 对 auto 父无效的坑，inherit 承接〕）
+  const liveGeom = () => page.evaluate(() => {
+    const popup = document.querySelector('.vsidian-hover-popup')
+    const liveEl = popup ? popup.querySelector('.vsidian-hover-popup-live') : null
+    const ed = liveEl ? liveEl.querySelector('.cm-editor') : null
+    if (!popup || !liveEl || !ed) return null
+    const h = (el) => Math.round(el.getBoundingClientRect().height)
+    return { popupH: h(popup), liveH: h(liveEl), edH: h(ed) }
+  })
+  let geom = null
+  {
+    const start = Date.now()
+    for (;;) {
+      geom = await liveGeom()
+      if (geom && geom.edH > 0 && geom.edH <= geom.liveH + 2) break
+      if (Date.now() - start > 4000) break
+      await page.waitForTimeout(60)
+    }
+  }
+  assert.ok(geom, '浮窗 Live 几何可测')
+  assert.ok(geom.edH <= geom.liveH + 2,
+    `Live 编辑器不得溢出 live 容器被裁（ed ${geom ? geom.edH : '?'} vs live ${geom ? geom.liveH : '?'}）`)
+  assert.ok(geom.popupH >= 240 && geom.popupH <= 400,
+    `浮窗高度应随 Live 内容自适应（实测 ${geom ? geom.popupH : '?'}，冻结在 Reading 期约 181 即缺陷）`)
   passed++
-  console.log('[L1] 父模式继承 + 端口绑定 + 编辑器绘制层通过')
+  console.log('[L1] 浮窗高度随内部 Live 自适应（无裁切、不冻结）通过')
 
   // ---- L2 真实键盘输入只写 B；dirty 圆点绘制层在场 ----
   await page.click('.vsidian-hover-popup-live .cm-content')

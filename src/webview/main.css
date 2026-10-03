@@ -4412,7 +4412,10 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
 }
 
 #app > .vsidian-hover-popup .vsidian-hover-popup-live .cm-editor {
-  max-height: 100%;
+  /* 承接容器内联限高（max-height:100% 对 auto 高度的父容器无效——编辑器
+     溢出被 overflow:hidden 裁掉一截；inherit 口径与嵌入卡 P2-07 修正
+     同源，超出部分由 cm-scroller 内部滚动） */
+  max-height: inherit;
 }
 
 /* 内部 Reading 容器：随正文排版基线与主题/片段（别名桥在容器类上）。

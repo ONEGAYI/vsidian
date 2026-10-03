@@ -513,12 +513,27 @@ function position(state: HoverPopupState): void {
   }
   const anchorRect = state.anchor.getBoundingClientRect()
   const width = state.container.offsetWidth || HOVER_POPUP_DEFAULT_WIDTH
+  // P2-06 内部 Live 容器限高：总高扣头部/边框等固定 chrome（外壳实测差）
+  // ——CM6 自身 scroller 滚动（视口测量依赖 cm-scroller 为滚动元素，
+  // 嵌入卡片同款口径）；外壳未入布局时用保守缺省
+  const chromeH = state.container.offsetHeight > 0 && state.scrollEl.clientHeight > 0
+    ? state.container.offsetHeight - state.scrollEl.clientHeight
+    : 48
   // 用内部滚动内容的自然高度规划贴锚位置：外壳 offsetHeight 可能已被
   // 旧 max-height 裁切，直接读它会把后续异步增高永久冻结在 loading 高。
   // scrollHeight 不受外壳裁切；扣掉当前滚动口再加回自然内容即可恢复全高。
-  const measured = state.container.offsetHeight > 0
-    ? state.container.offsetHeight - state.scrollEl.clientHeight + state.scrollEl.scrollHeight
-    : HOVER_POPUP_MAX_HEIGHT
+  // P2-06 视觉验收回归：内部 Live 在场时外壳差值法失效（liveEl 被自身
+  // max-height 钳住，scrollEl.scrollHeight 随之被钳）——自然高度改取
+  // cm-scroller 的内容全高（不受 max-height 裁切）
+  let measured: number
+  const liveScroller = state.liveEl.querySelector<HTMLElement>('.cm-scroller')
+  if (liveScroller && getComputedStyle(state.liveEl).display !== 'none') {
+    measured = chromeH + liveScroller.scrollHeight
+  } else {
+    measured = state.container.offsetHeight > 0
+      ? state.container.offsetHeight - state.scrollEl.clientHeight + state.scrollEl.scrollHeight
+      : HOVER_POPUP_MAX_HEIGHT
+  }
   const height = Math.min(HOVER_POPUP_MAX_HEIGHT, Math.max(1, measured))
   const placement = planHoverPopupPlacement({
     anchor: {
@@ -535,12 +550,6 @@ function position(state: HoverPopupState): void {
   state.container.style.width = `${placement.width}px`
   // 最大高由几何计划钳制（常规 = 400 上限；小视口收缩）
   state.container.style.maxHeight = `${placement.height}px`
-  // P2-06 内部 Live 容器限高：总高扣头部/边框等固定 chrome（外壳实测差）
-  // ——CM6 自身 scroller 滚动（视口测量依赖 cm-scroller 为滚动元素，
-  // 嵌入卡片同款口径）；外壳未入布局时用保守缺省
-  const chromeH = state.container.offsetHeight > 0 && state.scrollEl.clientHeight > 0
-    ? state.container.offsetHeight - state.scrollEl.clientHeight
-    : 48
   state.liveEl.style.maxHeight = `${Math.max(140, placement.height - chromeH)}px`
 }
 
@@ -920,6 +929,10 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
     })
     observer.observe(container)
     observer.observe(contentEl)
+    // P2-06 视觉验收回归：内部 Live 编辑器异步建立/装载撑高 liveEl 时同样
+    // 重定位——否则浮窗冻结在 Reading 期测量高度，编辑器溢出被裁
+    //（用户实测 251px 编辑器被 148px 容器裁掉一截）
+    observer.observe(state.liveEl)
     state.cleanups.push(() => observer.disconnect())
   }
 
