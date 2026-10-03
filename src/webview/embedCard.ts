@@ -778,6 +778,10 @@ export class EmbedCardManager {
     if (!entry) {
       entry = {
         key,
+        // P2-06 对外身份即语义键（watch/bind occurrence 与子卡 parentInstanceId
+        // 同源）；P2-07 的 collapsed 键迁移不适用浮窗根（见 remapSources 跳过）
+        hostId: key,
+        collapsed: false,
         inner: args.inner,
         sourceStart: args.sourceStart,
         sourceEnd: args.sourceEnd,
@@ -1247,6 +1251,10 @@ export class EmbedCardManager {
     }
     const moves: Array<{ entry: EmbedEntry; newKey: string; start: number; end: number }> = []
     for (const entry of this.entries.values()) {
+      if (entry.popupRoot) {
+        continue // 浮窗根（P2-06）：语义键非文本位键，不随事务迁移；失效由
+        // 浮窗自身的 watch/occurrence 生命周期管理
+      }
       if (entry.content.source.parentInstanceId !== undefined || entry.collapsed) {
         continue // 子卡：坐标属父 B 全文空间；坍缩死键：不再平移（原位恢复
         // 才命中缓存——删表回填/undo 的坐标语义；漂移后重挂按新实例装载）
