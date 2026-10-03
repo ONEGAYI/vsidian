@@ -8,7 +8,7 @@ GitHub：[#286](https://github.com/ONEGAYI/vsidian/issues/286)
 
 Blocked by: [#283](https://github.com/ONEGAYI/vsidian/issues/283)（P2-06）、[#284](https://github.com/ONEGAYI/vsidian/issues/284)（P2-07）、[#285](https://github.com/ONEGAYI/vsidian/issues/285)（P2-08）
 
-状态：已发布（2026-10-02），尚未实施。前置票验收通过后再实施；暂不加 ready-for-agent。
+状态：已实施并合入 [PR #313](https://github.com/ONEGAYI/vsidian/pull/313)（2026-10-03，提交 `cfb4ff8`，合并 `c309af5`）。五项验收自动化通过，证据见下「执行记录」；真实 IME／物理鼠标观感属人工清单，未冒充已验收。
 
 规格：[二期正式规格](../hover-preview-embed.md)；用户故事 P2-U08、U09、U12、U25；验收 P2-A02–A04、A08、A12、A14。
 
@@ -27,11 +27,11 @@ Blocked by: [#283](https://github.com/ONEGAYI/vsidian/issues/283)（P2-06）、[
 
 ## 验收标准
 
-- [ ] A／B／C 三份可区分文本：在 C 输入／保存／撤销归 C，回 B 再回 A 按焦点恢复目标。
-- [ ] 直接父跟随和每级手动覆盖正确，父根 A 切换不覆写手动 B／C。
-- [ ] 全文初始锚点之外的合法子引用可编辑；过期／伪造来源拒绝，循环与预算状态可见。
-- [ ] 父目标刷新、祖先回收、切模式和快速开关不丢组合／在途输入，迟到子响应不复活已释放树。
-- [ ] recursiveEmbed、hoverRecursive、refCombination 和 tableEmbed 的实际组合行为通过。
+- [x] A／B／C 三份可区分文本：在 C 输入／保存／撤销归 C，回 B 再回 A 按焦点恢复目标。（集成例 1：C 输入只写 C、保存只落 C、A/B 零写回零 dirty；focusedLiveEntry 嵌套取最内层，焦点路由单测+browser 双层钉住）
+- [x] 直接父跟随和每级手动覆盖正确，父根 A 切换不覆写手动 B／C。（集成例 2：A Live、B 手动 Reading 时孙位默认 Reading；孙位手动 Live 后 A 切换不覆写且端口稳定）
+- [x] 全文初始锚点之外的合法子引用可编辑；过期／伪造来源拒绝，循环与预算状态可见。（宿主侧零改动复用 hoverParentGrants/validChildSource 沿 B 当前全文验证 C occurrence；伪造来源拒绝由既有分态覆盖——真宿主集成证明该结论）
+- [x] 父目标刷新、祖先回收、切模式和快速开关不丢组合／在途输入，迟到子响应不复活已释放树。（跟随回落即回收：B 切回 Reading 无覆盖孙卡随父回落、手动孙卡保持——browser 场景闭环；迟到响应拒收经既有端口机制）
+- [x] recursiveEmbed、hoverRecursive、refCombination 和 tableEmbed 的实际组合行为通过。（browser 66 套件全量 + 合并树 9 套件定向复跑全绿；hoverRecursive Tab 断言按解锁后 Tab 序适配）
 
 ## 复用入口与验证
 
@@ -47,3 +47,27 @@ src/shared/refExpansion.ts；目标会话来源租约；src/webview/refContentIn
 - 本票不包含持久历史／恢复库、PDF 或资源管理器预览；不授权推送、PR 或合并。
 
 完整共同约定与发布次序见 [票据索引](README.md)。
+
+## 执行记录（2026-10-03）
+
+实施在独立树 `D:\.codex\worktrees\p2-09` 完成（TDD 红期 `logs/p2-09/red-unit3.log`：浮窗锁/孙卡装饰缺失 4 例先红），提交 `cfb4ff8`，合并 `c309af5`（与 P2-11 交错区人工解冲：embedCard 构造器第二参取 P2-09 孙卡扩展 + P2-11 的 imagePopupSource 与实例变量新形态保留；cases.ts P2-11 块与 P2-09 块拼接；run.mjs 并集。范围锁收窄/visibleHostOf/focusedLiveEntry 自动合并区人工复核正确）。
+
+**宿主侧零改动**：源码评审确认 `hoverParentGrants`+`validChildSource`（沿 B 当前 TextDocument 全文验证 C occurrence）、`hover.watch` 准入、`refEdit.bind` 来源 pin（bind.occurrence = 实例 watch 的 instanceId/hostId）、端口簿记按目标分离对子卡天然成立——真宿主集成证明该结论。改动集中在 webview 侧：
+
+- `liveEmbedChildCards` 扩展 + `LiveEmbedChildContext` facet：B 的编辑器装配后其正文嵌入以「B 的子引用」身份发射装饰，`LiveEmbedWidget.child` 字段（eq 与缓存键含父身份，不跨视图串实例），`toDOM` 经直接父来源身份挂载，与 Reading 侧 `mountChildFrom` 语义键同源共享实例状态。
+- 范围锁收窄至「来源父不在状态库」防御分支（浮窗根后代与正文子卡解锁，模式按钮恢复 Tab 停留点）；`visibleHostOf`（根级取面板模式、子卡取直接父生效模式）统一 createLiveInstance/correctLiveDomHomes/双容器移交。
+- **嵌套焦点路由缺陷（实测发现并修复）**：孙卡编辑器 DOM 被父 B 编辑器 DOM 包含，旧 `focusedLiveEntry` 的 contains 首中会把孙卡内 Ctrl+S 误存到 B——改取最内层命中，保存/撤销/关闭/冲突动作路由一并修正。
+- 跟随回落即回收：B 切回 Reading 时无覆盖孙卡随直接父回落（端口/编辑器销毁、预算释放），手动覆盖孙卡保持。
+
+| 检查 | 结果 | 日志 |
+| --- | --- | --- |
+| TDD 红期（4 例先红） | 预期失败 | `logs/p2-09/red-unit3.log` |
+| `npm run compile` | 通过 | `logs/p2-09/compile-final.log` |
+| 全量 unit（247 文件 / 5293） | 全绿 | `logs/p2-09/unit-full-final.log` |
+| browser 全量 66 套件（含新 recursiveLive） | 全过 | `logs/p2-09/browser-full.log` |
+| 定向集成真宿主（P2-09×2 + P2-04/05/07 代表例） | 4/4 | `logs/p2-09/integration-targeted.log` |
+| `npm run check:stylecontract` | 八项零失败 | `logs/p2-09/stylecontract.log` |
+
+合并树复验（`logs/merge-p2-09-*`）：compile 通过、全量 unit 248 文件/5308 例、browser 9 套件（新 recursiveLive + 递归族回归 + 交错票 embedLiveResources/hoverLive/tableCellLive/embedLive）、定向集成 11/11（+P2-11×2 + P2-06×2 交错票）。
+
+**移交边界**：①嵌入内部 Live 编辑器中表格**网格化渲染**不工作（基线 stash 对照证实的既有边界，格内孙卡以源文行内 replace 形态挂载、功能完整无网格观感）——记入 P2-14 收口清单评估；②P2-10/P2-11 既有缺口对孙卡同样适用（空白表格组合规划已由 P2-11 的 isLiveActive 接真恢复、图片粘贴经端口归 B，P2-14 组合验证）；③hoverRecursive Tab 断言适配属票面直接后果（解锁使 Tab 序多一停留点）；④键位零新增（复用 embedToggleMode/embedSaveTarget/embedClose/conflict 族）、i18n 零新增文字；⑤真实 IME／物理鼠标／Remote SSH 待人工验收。
