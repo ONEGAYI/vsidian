@@ -108,6 +108,7 @@ vsidian/
         ├── contextMenuDom.ts           # 统一菜单 DOM 装配与子菜单翻转
         ├── css.d.ts                    # CSS 导入类型声明
         ├── cssSnippetSettings.ts       # 外观页 CSS 片段页签体
+        ├── defaultEditorSettings.ts    # 设置页默认编辑器委托组
         ├── diagramExport.ts            # 图表导出序列化与光栅化
         ├── diagramPopup.ts             # 图表弹窗全屏浮层
         ├── diagramPopupGeometry.ts     # 弹窗几何纯函数

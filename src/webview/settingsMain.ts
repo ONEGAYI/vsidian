@@ -11,6 +11,7 @@ import { StyleReferenceSection } from './styleReferenceSettings'
 import { AppearanceSection } from './appearanceSettings'
 import { IndexMaintenanceSection } from './indexMaintenanceSettings'
 import { WordSegmentSection } from './wordSegmentSettings'
+import { DefaultEditorSection } from './defaultEditorSettings'
 import { bootLocaleFromDocument, handleLocaleChangedMessage } from './localeBoot'
 import { installTooltipCard } from './tooltipCard'
 import './settingsPage.css'
@@ -43,12 +44,16 @@ const indexMaintenance = new IndexMaintenanceSection({ postMessage: (message) =>
 // 退役：以编辑器页尾二级组委托装配（侧栏无分词入口，focusSection
 // 'wordSegment' 兼容路由到编辑器页分词组）
 const wordSegment = new WordSegmentSection({ postMessage: (message) => vscode.postMessage(message) })
+// #323 默认编辑器守护：常规页「默认编辑器」委托组（状态行四形态 +
+// 守护开关 + 手动设为默认；判定权威在宿主，defaultEditor.state 推送回显）
+const defaultEditor = new DefaultEditorSection({ postMessage: (message) => vscode.postMessage(message) })
 
 const view = new SettingsPageView(
   { postMessage: (message) => vscode.postMessage(message) },
   PRODUCTION_SETTING_DEFINITIONS,
   [keybindings, appearance, indexMaintenance],
   [wordSegment],
+  [defaultEditor],
 )
 view.mount(document.getElementById('app') ?? document.body)
 vscode.postMessage({ kind: 'settings.get' })
@@ -61,6 +66,9 @@ vscode.postMessage({ kind: 'index.get' })
 // #239 分词资源状态：同「装载即拉取」模式（wordSegment.state 应答，
 // 下载/删除完成后宿主经 onStateChanged 推送）
 vscode.postMessage({ kind: 'wordSegment.get' })
+// #323 默认编辑器守护状态：同「装载即拉取」模式（defaultEditor.state
+// 应答；associations 变化与手动改回后宿主经 onStateChanged 推送）
+vscode.postMessage({ kind: 'defaultEditor.get' })
 
 window.addEventListener('message', (event) => {
   view.handleHostMessage(event.data)
@@ -68,5 +76,6 @@ window.addEventListener('message', (event) => {
   snippets.handleHostMessage(event.data)
   indexMaintenance.handleHostMessage(event.data)
   wordSegment.handleHostMessage(event.data)
+  defaultEditor.handleHostMessage(event.data)
   handleLocaleChangedMessage(event.data)
 })

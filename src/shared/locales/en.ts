@@ -834,6 +834,16 @@ export const en = {
   'host.defaultEditorDismissLabel': 'Dismiss',
   'host.defaultEditorFixed': 'Vsidian is again the default editor for Markdown files.',
   'host.defaultEditorFixFailed': 'Could not restore the default editor automatically (a workspace setting may override it). Opening the editor associations setting for manual review.',
+  /** #323 设置页常规页「默认编辑器」委托组：组标题、状态行四形态与手动按钮 */
+  'defaultEditor.title': 'Default Editor',
+  'defaultEditor.statusLabel': 'Current default editor',
+  'defaultEditor.statusDescription': 'Which editor opens Markdown files by default. When another extension takes over, restore Vsidian with one click.',
+  'defaultEditor.statusPending': 'Reading current associations…',
+  'defaultEditor.statusVsidian': 'Vsidian',
+  'defaultEditor.statusBuiltin': 'VSCode built-in text editor',
+  'defaultEditor.statusOther': 'Another extension: {name}',
+  'defaultEditor.statusNone': 'No association recorded — VSCode picks the editor when a Markdown file opens',
+  'defaultEditor.fixButton': 'Set as Default',
 } as const satisfies Record<string, string>
 
 /** 字典键：点分扁平键，以本包为类型基准（编译期检查 t() 取词键） */

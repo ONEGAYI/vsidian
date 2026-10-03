@@ -171,6 +171,105 @@ describe('设置页异步回信与面板生命周期', () => {
   })
 })
 
+describe('设置页默认编辑器守护接线（#323）', () => {
+  const makeService = () => ({
+    getSnapshot: () => ({}),
+    apply: () => Promise.resolve({ ok: true as const, values: {} }),
+  })
+  /** 守护 wiring 假件：stateFor 现算值可变（模拟宿主判定翻转），fixNow 记调用 */
+  const makeGuard = () => {
+    let state: {
+      status: 'vsidian' | 'builtin' | 'other' | 'none'
+      viewType: string | null
+      label: string | null
+    } = { status: 'other', viewType: 'x.editor', label: 'X' }
+    const calls: number[] = []
+    return {
+      calls,
+      setState(next: typeof state) {
+        state = next
+      },
+      wiring: {
+        stateFor: () => ({ ...state }),
+        fixNow: () => {
+          calls.push(calls.length)
+          return Promise.resolve({ ok: true })
+        },
+      },
+    }
+  }
+
+  it('defaultEditor.get：以 stateFor 现算载荷应答 defaultEditor.state（装载即拉取）', () => {
+    const fresh = makePanel()
+    vscodeMock.createWebviewPanel.mockReturnValue(fresh.panel)
+    const guard = makeGuard()
+    const page = createSettingsPage({ extensionUri: 'extension' } as never,
+      makeService() as never, { getSnapshot: () => ({}) } as never,
+      undefined, undefined, undefined, undefined, guard.wiring as never)
+    page.open()
+    fresh.sent.length = 0
+    page.injectMessage({ kind: 'defaultEditor.get' })
+    expect(fresh.sent).toContainEqual({
+      kind: 'defaultEditor.state', status: 'other', viewType: 'x.editor', label: 'X',
+    })
+  })
+
+  it('defaultEditor.fix：调用守护修复链路，不逐次应答（结果经推送与宿主通知）', async () => {
+    const fresh = makePanel()
+    vscodeMock.createWebviewPanel.mockReturnValue(fresh.panel)
+    const guard = makeGuard()
+    const page = createSettingsPage({ extensionUri: 'extension' } as never,
+      makeService() as never, { getSnapshot: () => ({}) } as never,
+      undefined, undefined, undefined, undefined, guard.wiring as never)
+    page.open()
+    page.injectMessage({ kind: 'defaultEditor.fix' })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(guard.calls).toHaveLength(1)
+    expect(fresh.sent.filter((m) => (m as { kind?: string }).kind === 'defaultEditor.state'))
+      .toHaveLength(0)
+  })
+
+  it('notifyDefaultEditorChanged：面板开着推送现算状态；面板未开 no-op', () => {
+    const fresh = makePanel()
+    vscodeMock.createWebviewPanel.mockReturnValue(fresh.panel)
+    const guard = makeGuard()
+    const page = createSettingsPage({ extensionUri: 'extension' } as never,
+      makeService() as never, { getSnapshot: () => ({}) } as never,
+      undefined, undefined, undefined, undefined, guard.wiring as never)
+    page.open()
+    page.notifyDefaultEditorChanged()
+    expect(fresh.sent).toContainEqual({
+      kind: 'defaultEditor.state', status: 'other', viewType: 'x.editor', label: 'X',
+    })
+    // 判定翻转后：推送内容现算（不缓存）
+    guard.setState({ status: 'vsidian', viewType: null, label: null })
+    fresh.sent.length = 0
+    page.notifyDefaultEditorChanged()
+    expect(fresh.sent).toContainEqual({
+      kind: 'defaultEditor.state', status: 'vsidian', viewType: null, label: null,
+    })
+    // 面板未开：no-op 不抛错（重开经 defaultEditor.get 重新拉取）
+    fresh.sent.length = 0
+    page.close()
+    expect(() => page.notifyDefaultEditorChanged()).not.toThrow()
+    expect(fresh.sent).toHaveLength(0)
+  })
+
+  it('未注入守护接线时消息分支静默忽略（不抛错）', () => {
+    const fresh = makePanel()
+    vscodeMock.createWebviewPanel.mockReturnValue(fresh.panel)
+    const page = createSettingsPage({ extensionUri: 'extension' } as never,
+      makeService() as never, { getSnapshot: () => ({}) } as never)
+    page.open()
+    expect(() => {
+      page.injectMessage({ kind: 'defaultEditor.get' })
+      page.injectMessage({ kind: 'defaultEditor.fix' })
+      page.notifyDefaultEditorChanged()
+    }).not.toThrow()
+    expect(fresh.sent.some((m) => (m as { kind?: string }).kind === 'defaultEditor.state')).toBe(false)
+  })
+})
+
 describe('设置页会话内 UI 态恢复（webview 上报 uiState，重开/重载握手补发）', () => {
   const makeService = () => ({
     getSnapshot: () => ({}),
