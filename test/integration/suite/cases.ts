@@ -15210,4 +15210,172 @@ export const cases: Array<[string, () => Promise<void>]> = [
     }, 15000)
     console.log('[P2-14] 代码卡复制经端口落宿主剪贴板（含伪身份拒收）通过')
   }],
+
+  // ---- #316 bind 在途竞态：refEdit.bind 的 void async 路径在
+  //  openTextDocument await 区间内面板 dispose——closeSub 的 releasePanel
+  //  查不到在途 binding 静默返回，register 照常执行成为永久孤儿（释放通道
+  //  onDidDispose 已消费），B 会话被死虚拟面板钉住、releaseEntryIfIdle 永不
+  //  满足。测试缝（armRefEditBindSuspend）把 dispose 精确排进窗口；对照段
+  //  钉住「窗口外放行不误伤正常 bind」。 ----
+  ['#316 bind 在途面板销毁不产生孤儿端口，B 会话可回收（对照：正常放行不误伤）', async () => {
+    await openWithEditor('p204-编辑嵌入.md')
+    await waitSessionReady('p204-编辑嵌入.md')
+    const uri = wsUri('p204-编辑嵌入.md').toString()
+    const targetUri = wsUri('p204-编辑目标.md')
+    const fsPath = targetUri.fsPath
+    // 真实 webview 装载：两 occurrence 绑定完成即目标已进面板来源集合
+    // （hoverSourceFsPaths 已含目标——注入 watch/bind 的前置）
+    const bound = await waitViewState('p204-编辑嵌入.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner === 'p204-编辑目标')
+      return cards.length === 2 && cards.every((c) => c.liveBound === true) ? true : false
+    })
+    const livePortIds = bound.readingEmbed!.filter((c) => c.inner === 'p204-编辑目标')
+      .map((c) => c.livePortId as string)
+    const session = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    const panelId = session.panels.find((p) => p.ready)!.sessionId
+    const refPortStats = (): Promise<{ size: number; portIds: string[] }> =>
+      vscode.commands.executeCommand('onegayi.vsidian._test.refPortStats') as Promise<{ size: number; portIds: string[] }>
+    const suspendState = (): Promise<{ armed: boolean; hits: number }> =>
+      vscode.commands.executeCommand('onegayi.vsidian._test.refEditBindSuspendState') as Promise<{ armed: boolean; hits: number }>
+    // 经真实 watch 入口固定自造 occurrence（bind 的来源租约前置），再注入
+    // bind——与真实链路同一校验与处理入口（injectWebviewReceived 同族注入面）
+    const injectOccurrenceBind = async (occurrence: string, reqId: number): Promise<void> => {
+      assert((await vscode.commands.executeCommand(CMD.injectWebviewReceived, uri, {
+        kind: 'hover.watch', sessionId: panelId, docUri: uri, fsPath, instanceId: occurrence,
+      })) === true, 'hover.watch 注入应命中真实面板处理器')
+      assert((await vscode.commands.executeCommand(CMD.injectWebviewReceived, uri, {
+        kind: 'refEdit.bind', panelSessionId: panelId, panelDocUri: uri,
+        fsPath, occurrence, reqId,
+      })) === true, 'refEdit.bind 注入应命中真实面板处理器')
+    }
+
+    // 对照：屏障武装 → bind 在 openTextDocument 恢复点挂起 → 直接放行
+    //（不 dispose）→ 新端口照常注册——复查不误伤正常路径
+    const base = await refPortStats()
+    await vscode.commands.executeCommand('onegayi.vsidian._test.armRefEditBindSuspend')
+    await injectOccurrenceBind('occ-316-control', 9101)
+    await poll('对照 bind 到达在途屏障', async () => {
+      const s = await suspendState()
+      return s.hits >= 1 ? true : undefined
+    })
+    await vscode.commands.executeCommand('onegayi.vsidian._test.releaseRefEditBindSuspend')
+    const mid = await poll('对照 bind 完成注册（新端口在场）', async () => {
+      const s = await refPortStats()
+      return s.size === base.size + 1 ? s : undefined
+    })
+    const controlPorts = mid.portIds.filter((id) => !base.portIds.includes(id))
+    assert(controlPorts.length === 1, `对照端口恰一个（实际 ${JSON.stringify(controlPorts)}）`)
+
+    // 主测：屏障武装 → bind 挂起 → 面板 dispose（closeSub 的 releasePanel
+    // 查不到在途 binding）→ 放行 → 断言不产生孤儿：B 会话可回收、全局端口
+    // 集合回到基线减去本面板既有端口（真实两枚 + 对照一枚全释放，零新增）
+    await vscode.commands.executeCommand('onegayi.vsidian._test.armRefEditBindSuspend')
+    await injectOccurrenceBind('occ-316-orphan', 9102)
+    await poll('主测 bind 到达在途屏障', async () => {
+      const s = await suspendState()
+      return s.hits >= 1 ? true : undefined
+    })
+    assert((await vscode.commands.executeCommand(CMD.injectWebviewReceived, uri, {
+      kind: 'sync.test.close', sessionId: panelId, docUri: uri,
+    })) === true, 'sync.test.close 注入应命中真实面板处理器')
+    await vscode.commands.executeCommand('onegayi.vsidian._test.releaseRefEditBindSuspend')
+    // 孤儿路径下（缺陷态）register 在放行后照常执行，虚拟面板钉住 B——
+    // 轮询「B 会话回收」超时即红；修复后 closeSub 释放既有端口 + bind 复查
+    // 早退，B 会话随最后一个虚拟面板 detach 而回收
+    await poll('B 会话随面板销毁回收（无孤儿钉住）', async () => {
+      const state = (await vscode.commands.executeCommand(CMD.sessionState, targetUri.toString())) as SessionState
+      return state.found === false ? true : undefined
+    })
+    const after = await refPortStats()
+    assert(after.size === base.size - livePortIds.length,
+      `面板销毁后本面板端口全释放、零新增（基线 ${base.size} 减真实 ${livePortIds.length} 枚 → 实际 ${after.size}）`)
+    assert(after.portIds.every((id) => !controlPorts.includes(id) && !livePortIds.includes(id)),
+      `旧端口与对照端口均从注册表消失（实际 ${JSON.stringify(after.portIds)}）`)
+    console.log('[#316] bind 在途面板销毁不产生孤儿端口（对照放行不误伤）通过')
+  }],
+
+  // ---- #316（b2 形态 1）webview 重载、面板对象与 sessionId 不变
+  //  （Developer Reload Webviews）：webview 侧端口状态库（embedCard 的
+  //  entries Map）随重建整体丢失，旧 binding 的释放只能靠同 occurrence
+  //  重绑命中 findOccurrence（三字段含 sessionId）——离屏未重挂 occurrence
+  //  无人释放，B 会话被死虚拟面板钉住至面板真正关闭（有界驻留）。修复：
+  //  重复 ready 即旧端口族的逻辑死亡信号，宿主整体释放（保留 #290 记账，
+  //  重载→关闭链路交接不漏）；重挂 occurrence 的 re-bind 查不到旧端口直接
+  //  注册新端口，等价自愈。 ----
+  ['#316 webview 重载（同面板 reload）：旧端口整体释放、重绑自愈', async () => {
+    await openWithEditor('p204-编辑嵌入.md')
+    await waitSessionReady('p204-编辑嵌入.md')
+    const bound = await waitViewState('p204-编辑嵌入.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner === 'p204-编辑目标')
+      return cards.length === 2 && cards.every((c) => c.liveBound === true) ? true : false
+    })
+    const before = bound.readingEmbed!.filter((c) => c.inner === 'p204-编辑目标')
+      .map((c) => c.livePortId as string)
+    const refPortStats = (): Promise<{ size: number; portIds: string[] }> =>
+      vscode.commands.executeCommand('onegayi.vsidian._test.refPortStats') as Promise<{ size: number; portIds: string[] }>
+    // reloadWebviewAction 重载全部 webview（2490 先例）：本面板重复 ready →
+    // 重载信号 → 旧端口族整体释放；重挂 occurrence 自动 re-bind
+    await vscode.commands.executeCommand('workbench.action.webview.reloadWebviewAction')
+    // 终态：旧 portId 全部消失（b2 下重载即释放，不依赖重绑时序与
+    // occurrence 是否在屏——离屏端口的释放正是本用例钉住的语义）
+    await poll('重载后旧端口从注册表消失', async () => {
+      const stats = await refPortStats()
+      return stats.portIds.every((id) => !before.includes(id)) ? stats : undefined
+    })
+    // 重绑自愈：两 occurrence 恢复绑定且端口身份换新
+    await waitViewState('p204-编辑嵌入.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner === 'p204-编辑目标')
+      return cards.length === 2 && cards.every((c) => c.liveBound === true &&
+        !before.includes(c.livePortId as string)) ? true : false
+    })
+    console.log('[#316] webview 重载旧端口整体释放 + 重绑自愈通过')
+  }],
+
+  // ---- #316（b2 形态 2）tab 隐藏卸载、重显 re-resolve：sessionId 更换
+  //  （P2-04/P2-05 已实证触发路径：showTextDocument(B) 使 A 隐藏卸载 →
+  //  重显 A）。重绑闭环的 findOccurrence 三字段含 sessionId，新 sessionId
+  //  下查不到旧端口——可见 occurrence 的旧 binding 同样驻留至面板真正
+  //  关闭。修复：resolve 开头按【对象同一性】收编同面板旧代并整体释放
+  //  （split 多面板不误伤）；宿主 re-resolve 若传新对象则收编为 no-op，
+  //  旧对象 dispose 走 closeSub 兜底。断言钉「终态旧 portId 必消失」——
+  //  不区分路径（1.82.3 的对象语义以观测日志记录）。 ----
+  ['#316 隐藏卸载重显 re-resolve：旧端口终态必消失', async () => {
+    await openWithEditor('p204-编辑嵌入.md')
+    await waitSessionReady('p204-编辑嵌入.md')
+    const uri = wsUri('p204-编辑嵌入.md').toString()
+    const targetUri = wsUri('p204-编辑目标.md')
+    const bound = await waitViewState('p204-编辑嵌入.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner === 'p204-编辑目标')
+      return cards.length === 2 && cards.every((c) => c.liveBound === true) ? true : false
+    })
+    const before = bound.readingEmbed!.filter((c) => c.inner === 'p204-编辑目标')
+      .map((c) => c.livePortId as string)
+    const sessionBefore = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    // 激活 B 文本编辑器 → A 隐藏卸载（retainContextWhenHidden 关闭，P2-04
+    // 撤销路由同型路径）
+    const bDoc = await vscode.workspace.openTextDocument(targetUri)
+    await vscode.window.showTextDocument(bDoc, { preview: true })
+    await new Promise((r) => setTimeout(r, 1000))
+    // 重显 A：openWith 对已开 custom editor 是重显（13420 先例），触发
+    // re-resolve 或 webview 重建（对象语义观测）
+    await openWithEditor('p204-编辑嵌入.md')
+    await waitViewState('p204-编辑嵌入.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner === 'p204-编辑目标')
+      return cards.length === 2 && cards.every((c) => c.liveBound === true) ? true : false
+    })
+    const sessionAfter = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    console.log(`[#316] re-resolve 观测：重显前 panels=${JSON.stringify(sessionBefore.panels)}，重显后 panels=${JSON.stringify(sessionAfter.panels)}`)
+    // 终态：旧 portId 必消失（对象同源收编或旧对象 dispose 兜底，路径不区分）
+    await poll('重显后旧端口从注册表消失', async () => {
+      const stats = (await vscode.commands.executeCommand('onegayi.vsidian._test.refPortStats')) as { size: number; portIds: string[] }
+      return stats.portIds.every((id) => !before.includes(id)) ? stats : undefined
+    })
+    // 收尾：关掉 B 预览标签（A 留给后续用例各自管理，与 P2-04 系惯例一致）
+    const bTab = vscode.window.tabGroups.all.flatMap((g) => g.tabs)
+      .find((t) => t.input instanceof vscode.TabInputText && t.input.uri.toString() === targetUri.toString())
+    if (bTab) {
+      await vscode.window.tabGroups.close(bTab)
+    }
+    console.log('[#316] 隐藏卸载重显 re-resolve 旧端口终态释放通过')
+  }],
 ]

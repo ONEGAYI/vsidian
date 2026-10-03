@@ -155,6 +155,22 @@ export class RefEditPortRegistry {
     return released
   }
 
+  /** #316 面板整体释放的保留记账变体（webview 重载/重显收编路径）：端口族
+   *  随 webview 重建作废（webview 侧端口状态库随重建丢失，旧 portId 无人再
+   *  引用），但「曾成功写入」记账保留到面板真正销毁（releasePanel 清账）
+   *  ——重载→关闭链路的 dirty 交接判定（#290）不漏。释放面与 releasePanel
+   *  一致（调用方据此逐绑定 detach B 会话虚拟面板） */
+  releasePanelKeepAck(panelSessionId: string, panelDocUri: string): RefEditBinding[] {
+    const released: RefEditBinding[] = []
+    for (const portId of [...(this.byPanel.get(`${panelDocUri}\n${panelSessionId}`) ?? [])]) {
+      const binding = this.release(portId)
+      if (binding) {
+        released.push(binding)
+      }
+    }
+    return released
+  }
+
   /** B 文档会话释放（B 面板全部关闭）时整体释放指向它的端口 */
   releaseTarget(targetUri: string): RefEditBinding[] {
     const released: RefEditBinding[] = []
@@ -169,6 +185,12 @@ export class RefEditPortRegistry {
 
   size(): number {
     return this.byPort.size
+  }
+
+  /** #316 观测面（_test.refPortStats 数据源）：活跃端口数与 portId 清单
+   *  ——集成用例断言「面板销毁/重载后旧 portId 消失、孤儿不产生」的证据 */
+  stats(): { size: number; portIds: string[] } {
+    return { size: this.byPort.size, portIds: [...this.byPort.keys()] }
   }
 
   private panelKeyOf(binding: RefEditBinding): string {
