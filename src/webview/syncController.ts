@@ -1515,11 +1515,13 @@ export class WebviewSyncController {
       // P2-07（#284）嵌入实例键迁移：A 的事务使容器内嵌入区间平移时，把
       // 嵌入实例的状态库键迁移到新坐标——widget 随后按新坐标重挂即命中
       // 迁移实例，装载缓存/内部 Live 端口/选区记忆保持（前后文打字零重载
-      // 零重绑）。transactionExtender 在 docView 更新（widget toDOM）前执行，
-      // 且被 changeFilter 拒绝的事务不会到达——无「取消事务已迁移」错配
+      // 零重绑）。P2-08（#285）起传入变更前 doc：区间被整段覆盖重写时启用
+      // 保文本重定位判定（表格列/行移动等结构编辑的实例迁移）。transactionExtender
+      // 在 docView 更新（widget toDOM）前执行，且被 changeFilter 拒绝的事务
+      // 不会到达——无「取消事务已迁移」错配
       EditorState.transactionExtender.of((tr) => {
         if (this.embedCards && tr.docChanged) {
-          this.embedCards.remapSources(tr.changes)
+          this.embedCards.remapSources(tr.changes, tr.startState.doc)
         }
         return null
       }),

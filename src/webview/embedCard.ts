@@ -44,7 +44,7 @@ import { ImageResourceManager, isDirectImageSrc } from './imageResource'
 import { closeFmPopoverForView } from './frontmatterPopover'
 import type { SettingsPayload } from '../shared/settings'
 import { EditorView, keymap } from '@codemirror/view'
-import { Annotation, EditorState, Prec, type Extension, type Transaction } from '@codemirror/state'
+import { Annotation, EditorState, Prec, type ChangeSet, type Extension, type Text, type Transaction } from '@codemirror/state'
 
 /** 装配时刻宿主明暗判定（与 syncController.isVscodeDarkBody 同源逻辑；
  *  不跨模块引用避免 syncController↔embedCard 循环导入——热跟随经
@@ -330,6 +330,47 @@ export interface EmbedCardProbe {
 function targetOfInner(inner: string): string {
   const pipeAt = inner.indexOf('|')
   return pipeAt >= 0 ? inner.slice(0, pipeAt) : inner
+}
+
+/** P2-08（#285）重定位命中判定：A 的变更使嵌入源区间被覆盖重写时，检查
+ *  事务插入文本中是否**逐字保留嵌入源文**（表格行列结构编辑的保文本重写
+ *  形态——列/行移动、canonical 整行重写、格区粘贴重建：格值/整行取原 doc
+ *  切片搬运，含 `\|` 转义原文；行移动的对换形态下源文落在**另一枚变更**
+ *  的插入文本里，故搜索域是事务全部变更而非仅覆盖区间的那枚）。命中返回
+ *  嵌入在新文档坐标的区间（fromB 系）；未命中（真实删除/改写）返回 null。
+ *  源文取自变更前 doc（原始源码坐标——不混解码偏移）。
+ *  claimed：已被先序 entry 占用的命中位（多枚同源文实例按 sourceStart
+ *  升序分配出现次序；重排同文实例的身份证互换属可接受边界——同源文实例
+ *  目标一致，差异仅在选区/滚动记忆）。 */
+function relocatedInterval(
+  doc: Text,
+  changes: ChangeSet,
+  sourceStart: number,
+  sourceEnd: number,
+  claimed: ReadonlyArray<{ start: number; end: number }>,
+): { start: number; end: number } | null {
+  const raw = doc.sliceString(sourceStart, sourceEnd)
+  if (raw.length === 0) {
+    return null
+  }
+  let found: { start: number; end: number } | null = null
+  changes.iterChanges((_fromA, _toA, fromB, _toB, inserted) => {
+    if (found !== null) {
+      return
+    }
+    const text = inserted.toString()
+    let at = text.indexOf(raw)
+    while (at >= 0) {
+      const start = fromB + at
+      const end = start + raw.length
+      if (!claimed.some((c) => start < c.end && end > c.start)) {
+        found = { start, end }
+        return
+      }
+      at = text.indexOf(raw, at + 1)
+    }
+  })
+  return found
 }
 
 /**
@@ -957,14 +998,27 @@ export class EmbedCardManager {
    *  区间——前后文打字每键平移，不迁移即卡片重载 + 端口销毁重建风暴。
    *  只迁移根级 entry（子卡坐标在直接父 B 的全文坐标空间，A 的事务不可
    *  映射）；坍缩（嵌入被改写残缺、区间倒挂）不迁移——死键留给 LRU 淘汰。
+   *  P2-08（#285）重定位分支：区间被整段覆盖重写（mapPos 倒挂）时，若插入
+   *  文本逐字保留嵌入源文（表格行列结构编辑的保文本搬运——列/行移动等，
+   *  由 mainDocChangeFilter 的存活检查放行），迁移到插入文本内的命中位
+   *  （claimed 占位使同覆盖变更内多枚同源文实例按文档序分配）；源文不存
+   *  在才是真删除——冻结死键（原位恢复如 undo/删表回填仍命中缓存）。
+   *  doc 缺省（既有单测直驱）时不做重定位判定，保持 P2-07 纯 mapPos 语义。
    *  调用时序契约：须在 docView 更新（widget toDOM）前——生产经
    *  appendTransaction 装配（被 changeFilter 拒绝的事务不会到达，天然免除
    *  「取消的事务已迁移」错配）。 */
-  remapSources(changes: import('@codemirror/state').ChangeSet): void {
+  remapSources(changes: ChangeSet, doc?: Text): void {
     if (this.entries.size === 0) {
       return
     }
     const moves: Array<{ entry: EmbedEntry; newKey: string; start: number; end: number }> = []
+    /** 本轮待应用的新键（应用前 entries 未更新——mapPos 路径与重定位路径
+     *  之间的撞键守卫） */
+    const pendingKeys = new Set<string>()
+    /** 重定位占位（同覆盖变更内多枚同源文 entry 按文档序分配命中位） */
+    const claimed: Array<{ start: number; end: number }> = []
+    /** 坍缩候选（区间倒挂）先收集，按 sourceStart 升序做重定位分配 */
+    const collapseCandidates: EmbedEntry[] = []
     for (const entry of this.entries.values()) {
       if (entry.content.source.parentInstanceId !== undefined || entry.collapsed) {
         continue // 子卡：坐标属父 B 全文空间；坍缩死键：不再平移（原位恢复
@@ -976,16 +1030,34 @@ export class EmbedCardManager {
         continue
       }
       if (end <= start) {
-        // 坍缩（嵌入区间被改写吞没——部分删除倒挂或整段删除钳成零宽）：
-        // 键冻结在原坐标，后续事务不再平移
-        entry.collapsed = true
+        collapseCandidates.push(entry)
         continue
       }
       const newKey = `${start}::${entry.inner}`
-      if (newKey === entry.key || this.entries.has(newKey)) {
+      if (newKey === entry.key || this.entries.has(newKey) || pendingKeys.has(newKey)) {
         continue // 防御：撞键（理论不可达）放弃迁移，保持现状语义
       }
+      pendingKeys.add(newKey)
       moves.push({ entry, newKey, start, end })
+    }
+    collapseCandidates.sort((a, b) => a.sourceStart - b.sourceStart)
+    for (const entry of collapseCandidates) {
+      const moved = doc
+        ? relocatedInterval(doc, changes, entry.sourceStart, entry.sourceEnd, claimed)
+        : null
+      if (!moved) {
+        // 真实删除/改写（源文不存活）：键冻结在原坐标，后续事务不再平移
+        entry.collapsed = true
+        continue
+      }
+      const newKey = `${moved.start}::${entry.inner}`
+      if (this.entries.has(newKey) || pendingKeys.has(newKey)) {
+        entry.collapsed = true // 撞键防御：冻结（新位置已有实例，重挂按新实例装载）
+        continue
+      }
+      pendingKeys.add(newKey)
+      claimed.push(moved)
+      moves.push({ entry, newKey, start: moved.start, end: moved.end })
     }
     for (const { entry, newKey, start, end } of moves) {
       this.entries.delete(entry.key)
@@ -1878,10 +1950,19 @@ export class EmbedCardManager {
             matched = true
           }
         })
-        if (matched) {
-          hit = entry
-          break
+        if (!matched) {
+          continue
         }
+        // P2-08（#285）保文本重定位放行：覆盖区间、但事务插入文本仍逐字
+        // 保留嵌入源文的结构编辑（表格列/行移动——含行对换形态、canonical
+        // 整行重写、格区粘贴重建：格值/整行取原 doc 切片搬运）不是删除引用
+        // ——不弹确认不吞事务；实例键迁移由 remapSources 的重定位分支承担
+        //（filter 先于事务应用，通过后 transactionExtender 必见同一 changes）
+        if (relocatedInterval(tr.startState.doc, tr.changes, entry.sourceStart, entry.sourceEnd, [])) {
+          continue
+        }
+        hit = entry
+        break
       }
       if (!hit) {
         return true // 不相关变更（未覆盖活跃引用区间）：放行
