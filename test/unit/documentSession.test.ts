@@ -2221,6 +2221,46 @@ describe('#220 来源资源：hover.result 来源记录与守卫路由', () => {
     expect(resolveCalls).toEqual([])
     expect(out.filter((m) => m.kind === 'image.result')).toHaveLength(0)
   })
+
+  it('P2-11 image.export：sourceDocUri 匹配来源记录时透传导出端口；未送达来源丢弃', async () => {
+    const s = setup()
+    const out: HostToWebview[] = []
+    const exportCalls: Array<{ src: string; sourceDocUri?: string }> = []
+    const id = s.session.attachPanel({
+      send: (m) => out.push(m),
+      readHoverTarget: (_payload, report) => {
+        report({
+          ok: true, fsPath: B_PATH, relPath: 'sub/b.md', version: 1,
+          lfText: '# B\n', range: { start: 0, end: 5 }, scope: { kind: 'full' },
+        })
+      },
+      exportImage: (payload, report) => {
+        exportCalls.push({ src: payload.src, sourceDocUri: payload.sourceDocUri })
+        report({ ok: true })
+      },
+    })
+    await ready10(s, id)
+    await s.send(id, {
+      kind: 'hover.request', sessionId: id, docUri: DOC_URI,
+      reqId: 1, instanceId: 'hover-1', sourceStart: 0, sourceEnd: 5, target: 'sub/b',
+    })
+    // 送达过的 B 目标：透传（provider 端按 B 目录解析——集成层断言磁盘）
+    await s.send(id, {
+      kind: 'image.export', sessionId: id, docUri: DOC_URI,
+      reqId: 1, src: './img.png', fileName: 'img.png', sourceDocUri: B_PATH,
+    })
+    expect(exportCalls).toEqual([{ src: './img.png', sourceDocUri: B_PATH }])
+    expect(out.filter((m) => m.kind === 'image.export.result')).toEqual([
+      { kind: 'image.export.result', reqId: 1, ok: true },
+    ])
+    // 未送达过的来源：静默丢弃（不信任前端任意 URI，不回落 A 目录导出）
+    await s.send(id, {
+      kind: 'image.export', sessionId: id, docUri: DOC_URI,
+      reqId: 2, src: './img.png', fileName: 'img.png', sourceDocUri: 'C:\\伪造\\目录.md',
+    })
+    expect(exportCalls).toHaveLength(1)
+    expect(out.filter((m) => m.kind === 'image.export.result')).toHaveLength(1)
+  })
 })
 
 // ---- 工单 #222：来源记录集合化（嵌入卡片与悬停浮层多目标共存） ----

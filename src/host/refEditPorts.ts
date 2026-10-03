@@ -26,10 +26,12 @@ export interface RefEditBinding {
   lastDirty: boolean | undefined
 }
 
-/** 出站推送白名单：B 会话对虚拟面板 send 的消息中，仅编辑通道事件进入
- *  refEdit.push 信封；其余（locale.changed / settings.snapshot /
- *  view.state.request 等面板级消息）不进目标端口通道——它们经 ready 注入
- *  的 init 之后的补发只对根面板有意义。返回 null = 不推送。 */
+/** 出站推送白名单：B 会话对虚拟面板 send 的消息中，编辑通道事件与资源
+ *  回包（P2-11）进入 refEdit.push 信封；其余（locale.changed /
+ *  settings.snapshot / view.state.request 等面板级消息）不进目标端口通道
+ *  ——它们经 ready 注入的 init 之后的补发只对根面板有意义。
+ *  资源回包经信封按 portId 定向回推（不广播根面板——实例管理器的 reqId
+ *  空间与 A 面板独立，广播投递会在撞号时错插错图）。返回 null = 不推送。 */
 export function wrapRefEditPush(
   binding: RefEditBinding,
   message: HostToWebview,
@@ -40,6 +42,10 @@ export function wrapRefEditPush(
     case 'doc.changed':
     case 'doc.resync':
     case 'session.suspended':
+    case 'image.result':
+    case 'image.invalidate':
+    case 'image.paste.result':
+    case 'refresh.invalidated':
       return { kind: 'refEdit.push', portId: binding.portId, fsPath: binding.fsPath, message: message as RefEditHostEvent }
     default:
       return null
@@ -170,8 +176,9 @@ export class RefEditPortRegistry {
   }
 }
 
-/** refEdit.message 的内消息是否属于编辑通道（冗余防线：协议校验已白名单，
- *  provider 路由前再判定一次——错误路由直接写 B 的代价高） */
+/** refEdit.message 的内消息是否属于端口通道（冗余防线：协议校验已白名单，
+ *  provider 路由前再判定一次——错误路由直接写 B 的代价高）。P2-11 起资源
+ *  消息同通道：B 会话按自身 docUri 守卫并以 B 目录/根边界解析执行。 */
 export function isRefEditClientMessage(message: WebviewToHost): boolean {
   switch (message.kind) {
     case 'edit.request':
@@ -180,6 +187,11 @@ export function isRefEditClientMessage(message: WebviewToHost): boolean {
     case 'history.request':
     case 'sync.request':
     case 'conflict.action':
+    case 'link.activate':
+    case 'wikilink.activate':
+    case 'image.request':
+    case 'image.paste':
+    case 'refresh.request':
       return true
     default:
       return false

@@ -48,7 +48,7 @@ describe('refEdit 协议：webview → 宿主', () => {
     })).toBe(true)
   })
 
-  it('refEdit.message 拒绝非编辑通道内消息（link.activate 不得混入目标端口）', () => {
+  it('refEdit.message 携带资源消息时接受（P2-11：链接/双链/图片/粘贴/刷新经目标端口传身份）', () => {
     expect(isWebviewToHost({
       kind: 'refEdit.message',
       ...PANEL,
@@ -62,6 +62,69 @@ describe('refEdit 协议：webview → 宿主', () => {
         srcStart: 0,
         srcEnd: 8,
       },
+    })).toBe(true)
+    expect(isWebviewToHost({
+      kind: 'refEdit.message',
+      ...PANEL,
+      portId: 'panel-9',
+      fsPath: 'D:\\notes\\b.md',
+      message: {
+        kind: 'wikilink.activate',
+        sessionId: 'panel-9',
+        docUri: 'file:///d%3A/notes/b.md',
+        target: '双链目标',
+        srcStart: 0,
+        srcEnd: 8,
+      },
+    })).toBe(true)
+    expect(isWebviewToHost({
+      kind: 'refEdit.message',
+      ...PANEL,
+      portId: 'panel-9',
+      fsPath: 'D:\\notes\\b.md',
+      message: {
+        kind: 'image.request',
+        sessionId: 'panel-9',
+        docUri: 'file:///d%3A/notes/b.md',
+        reqId: 1,
+        src: './res.png',
+      },
+    })).toBe(true)
+    expect(isWebviewToHost({
+      kind: 'refEdit.message',
+      ...PANEL,
+      portId: 'panel-9',
+      fsPath: 'D:\\notes\\b.md',
+      message: {
+        kind: 'image.paste',
+        sessionId: 'panel-9',
+        docUri: 'file:///d%3A/notes/b.md',
+        reqId: 1,
+        mime: 'image/png',
+        dataBase64: 'iVBORw0KGgo=',
+      },
+    })).toBe(true)
+    expect(isWebviewToHost({
+      kind: 'refEdit.message',
+      ...PANEL,
+      portId: 'panel-9',
+      fsPath: 'D:\\notes\\b.md',
+      message: {
+        kind: 'refresh.request',
+        sessionId: 'panel-9',
+        docUri: 'file:///d%3A/notes/b.md',
+        reqId: 1,
+      },
+    })).toBe(true)
+  })
+
+  it('refEdit.message 仍拒绝面板级消息混入目标端口（settings/view 族不走端口）', () => {
+    expect(isWebviewToHost({
+      kind: 'refEdit.message',
+      ...PANEL,
+      portId: 'panel-9',
+      fsPath: 'D:\\notes\\b.md',
+      message: { kind: 'view.switch.request', target: 'reading' },
     })).toBe(false)
   })
 
@@ -103,7 +166,7 @@ describe('refEdit 协议：宿主 → webview', () => {
     expect(isHostToWebview({ kind: 'refEdit.bound', reqId: 1, ok: false, reason: 'whatever' })).toBe(false)
   })
 
-  it('refEdit.push 只接受编辑通道事件（init/ack/doc.changed/resync/suspended）', () => {
+  it('refEdit.push 接受编辑通道与资源回包事件（P2-11 起含 image.*/refresh.invalidated）', () => {
     expect(isHostToWebview({
       kind: 'refEdit.push',
       portId: 'panel-9',
@@ -116,7 +179,32 @@ describe('refEdit 协议：宿主 → webview', () => {
       fsPath: 'D:\\b.md',
       message: { kind: 'session.suspended', version: 4, reason: 'conflict' },
     })).toBe(true)
-    // 非编辑通道事件不得作为 push 载荷（settings/locale 走根通道）
+    // P2-11 资源回包：B 会话对虚拟面板的资源结果经同一信封定向回推
+    expect(isHostToWebview({
+      kind: 'refEdit.push',
+      portId: 'panel-9',
+      fsPath: 'D:\\b.md',
+      message: { kind: 'image.result', reqId: 1, ok: true, src: 'vscode-webview-resource://x/res.png' },
+    })).toBe(true)
+    expect(isHostToWebview({
+      kind: 'refEdit.push',
+      portId: 'panel-9',
+      fsPath: 'D:\\b.md',
+      message: { kind: 'image.invalidate', srcs: ['res.png'] },
+    })).toBe(true)
+    expect(isHostToWebview({
+      kind: 'refEdit.push',
+      portId: 'panel-9',
+      fsPath: 'D:\\b.md',
+      message: { kind: 'image.paste.result', reqId: 1, ok: true, markdown: '![image](assets/p.png)' },
+    })).toBe(true)
+    expect(isHostToWebview({
+      kind: 'refEdit.push',
+      portId: 'panel-9',
+      fsPath: 'D:\\b.md',
+      message: { kind: 'refresh.invalidated', reqId: 1, generation: 5 },
+    })).toBe(true)
+    // 非端口通道事件不得作为 push 载荷（settings/locale 走根通道）
     expect(isHostToWebview({
       kind: 'refEdit.push',
       portId: 'panel-9',

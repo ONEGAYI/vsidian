@@ -2091,6 +2091,19 @@ export class WebviewSyncController {
         // 请求管线——实例竞态守卫后经 refEdit.message 出站）
         this.embedCards?.testHistory(message.inner, message.op, message.occurrence ?? 0)
         break
+      case 'embed.test.pasteImage':
+        // P2-11 测试钩子：向嵌入实例注入图片粘贴载荷（与真实 paste 拦截
+        // 同一实例管线——reqId 分配/在途登记/经目标端口出站）
+        this.embedCards?.testPasteImage(
+          message.inner,
+          {
+            mime: message.mime,
+            dataBase64: message.dataBase64,
+            ...(message.fileNameHint !== undefined ? { fileNameHint: message.fileNameHint } : {}),
+          },
+          message.occurrence ?? 0,
+        )
+        break
       case 'embed.test.portWrite':
         // P2-04 测试钩子：以给定端口身份伪造一笔 edit.request 出站（宿主侧
         // 重复 seq 去重 / 释放后拒收 / 不可安全写回暂停的目标文本断言载体）
@@ -4638,13 +4651,17 @@ export class WebviewSyncController {
   /** #208 手动刷新请求发送（工具栏按钮与快捷键入口共用——两条入口汇合
    *  于此，宿主编排在 documentSession 的 refresh.request 处理唯一）：
    *  reqId 逐次自增并记录为「最后发出的请求」，回发的 refresh.invalidated
-   *  以此配对（陈旧回执观测层丢弃）。未就绪（init 前）无会话身份，不发送 */
+   *  以此配对（陈旧回执观测层丢弃）。未就绪（init 前）无会话身份，不发送。
+   *  P2-11（#288）：内部 Live 的 B 图不走 A 会话缓存——同时向全部活跃
+   *  目标端口广播 refresh.request（B 会话各自清缓存推进代次，回包经
+   *  refEdit.push 信封驱动实例管理器全量失效重挂） */
   private sendEmbeddedRefreshRequest(): void {
     if (!this.sessionId || !this.docUri) {
       return
     }
     const reqId = this.refreshReqId + 1
     this.refreshReqId = reqId
+    this.embedCards?.refreshLiveResources()
     this.bridge.postMessage({
       kind: 'refresh.request',
       sessionId: this.sessionId,

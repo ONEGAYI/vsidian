@@ -115,6 +115,17 @@ export type HostToWebview =
   /** P2-04 测试钩子：向指定嵌入实例转发撤销/重做（与真实键入 Mod-Z 同一
    *  请求管线——实例竞态守卫后经 refEdit.message 出站 history.request） */
   | { kind: 'embed.test.history'; inner: string; op: 'undo' | 'redo'; occurrence?: number }
+  /** P2-11 测试钩子：向指定嵌入实例注入图片粘贴载荷（与真实 paste 拦截
+   *  同一实例管线——实例 reqId 分配 + 在途登记 + refEdit.message 信封
+   *  出站；宿主测试无法向 webview 派发真实剪贴板事件） */
+  | {
+      kind: 'embed.test.pasteImage'
+      inner: string
+      mime: string
+      dataBase64: string
+      fileNameHint?: string
+      occurrence?: number
+    }
   /** P2-04 测试钩子：以给定端口身份伪造一笔 edit.request 出站（宿主侧
    *  重复 seq 去重 / 释放后迟到写入拒收 / 不可安全写回暂停的目标文本
    *  断言载体；repeat 控制重复发送次数——同 seq 幂等） */
@@ -672,7 +683,10 @@ export type HostToWebview =
 /** P2-04（#281）目标编辑端口推送事件（refEdit.push 载荷）：B 会话对虚拟
  *  面板 send 出站的编辑通道子集——与根面板同构的同步语义（init 装载 /
  *  ack 确认 / 外部增量 / 全文重同步 / 暂停通知），不含 locale/settings 等
- *  面板级消息。 */
+ *  面板级消息。P2-11（#288）起资源回包同信封定向回推（image.result /
+ *  image.invalidate / image.paste.result / refresh.invalidated）——B 会话
+ *  的资源结果按 portId 路由到嵌入实例，不广播根面板（reqId 空间隔离，
+ *  不与 A 面板或其他 B occurrence 的管理器撞号）。 */
 export type RefEditHostEvent = Extract<
   HostToWebview,
   | { kind: 'init' }
@@ -680,6 +694,10 @@ export type RefEditHostEvent = Extract<
   | { kind: 'doc.changed' }
   | { kind: 'doc.resync' }
   | { kind: 'session.suspended' }
+  | { kind: 'image.result' }
+  | { kind: 'image.invalidate' }
+  | { kind: 'image.paste.result' }
+  | { kind: 'refresh.invalidated' }
 >
 
 /** webview → 宿主消息 */
@@ -1190,7 +1208,18 @@ export type WebviewToHost =
    *  不经 canvas 光栅化；src 为文档内图片原始地址（外链图 webview 侧
    *  按钮已禁用，不发本消息），fileName 为建议名（basename 清洗后）；
    *  结果经 image.export.result 回报来源面板 */
-  | { kind: 'image.export'; sessionId: string; docUri: string; reqId: number; src: string; fileName: string }
+  | {
+      kind: 'image.export'
+      sessionId: string
+      docUri: string
+      reqId: number
+      src: string
+      fileName: string
+      /** P2-11（#288）来源文档（嵌入内部 Live 的图片弹窗导出）：宿主按 B
+       *  目录/根边界定位导出文件；与已送达来源比对，不匹配即丢弃（不回落
+       *  面板自身目录——B 内图片按 A 目录导出是错误文件）。缺省 = 面板自身 */
+      sourceDocUri?: string
+    }
   /** 打开 Vsidian 设置页（#33）：编辑器工具栏「设置」按钮 → 宿主
    *  createWebviewPanel。无 sessionId/docUri——打开设置页不依赖任何文档
    *  会话（无文档打开时同样可用） */
@@ -1335,7 +1364,12 @@ export type WebviewToHost =
 
 /** P2-04（#281）目标编辑端口的编辑通道内消息（refEdit.message 载荷）：
  *  与根面板编辑通道同构——B 会话按同一 DocumentSession 管线处理（seq 去重、
- *  版本重定位、CRLF、ack、外部增量）。链接/图片/资源消息不在本通道。 */
+ *  版本重定位、CRLF、ack、外部增量）。
+ *  P2-11（#288）起资源消息同通道入站：链接/双链/图片解析/图片粘贴/手动刷新
+ *  经宿主验证的目标端口传递 B 身份（B 会话按自身 docUri 守卫并以 B 目录/
+ *  根边界解析执行）——与 #220 悬停浮层的 sourceDocUri 直发是两条并行路径
+ *  （直发按面板已送达目标比对，端口按 portId 绑定比对；后者即「经过宿主
+ *  验证的目标绑定」）。面板级消息（locale/settings/view 族）仍不得混入。 */
 export type RefEditClientMessage = Extract<
   WebviewToHost,
   | { kind: 'edit.request' }
@@ -1344,6 +1378,11 @@ export type RefEditClientMessage = Extract<
   | { kind: 'history.request' }
   | { kind: 'sync.request' }
   | { kind: 'conflict.action' }
+  | { kind: 'link.activate' }
+  | { kind: 'wikilink.activate' }
+  | { kind: 'image.request' }
+  | { kind: 'image.paste' }
+  | { kind: 'refresh.request' }
 >
 
 /** 反链面板条目载荷（#197 backlinks.snapshot.items；形态与宿主
@@ -2989,8 +3028,9 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         isString(v.text)
       )
     case 'refEdit.message': {
-      // 编辑通道白名单：inner 消息须为 RefEditClientMessage 的合法形态
-      //（链接/图片等消息混入即拒绝——它们不经目标端口）
+      // 编辑与资源通道白名单：inner 消息须为 RefEditClientMessage 的合法
+      // 形态（P2-11 起含链接/双链/图片/粘贴/刷新——经目标端口传 B 身份；
+      // settings/view 等面板级消息混入即拒绝）
       if (
         !isString(v.panelSessionId) ||
         !isString(v.panelDocUri) ||
@@ -3010,6 +3050,14 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         case 'history.request':
         case 'sync.request':
         case 'conflict.action':
+          return isWebviewToHost(inner)
+        // P2-11 资源消息：复用直发形态的完整校验（内消息 docUri 须为 B 的
+        // 规范 URI——宿主 B 会话按自身 docUri 守卫）
+        case 'link.activate':
+        case 'wikilink.activate':
+        case 'image.request':
+        case 'image.paste':
+        case 'refresh.request':
           return isWebviewToHost(inner)
         default:
           return false
@@ -3157,7 +3205,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
       )
     case 'image.export':
       // #212 图片导出：会话守卫字段对齐 image.request；src 非空、fileName
-      // 限长（与粘贴 fileNameHint 同限；非法整体丢弃）
+      // 限长（与粘贴 fileNameHint 同限；非法整体丢弃）。P2-11 sourceDocUri
+      // （嵌入内部 Live 弹窗导出的 B 来源）可选非空字符串
       return (
         isString(v.sessionId) &&
         isString(v.docUri) &&
@@ -3166,7 +3215,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         v.src.length > 0 &&
         typeof v.fileName === 'string' &&
         v.fileName.length > 0 &&
-        v.fileName.length <= IMAGE_PASTE_LIMITS.fileNameHintMaxChars
+        v.fileName.length <= IMAGE_PASTE_LIMITS.fileNameHintMaxChars &&
+        (v.sourceDocUri === undefined || (typeof v.sourceDocUri === 'string' && v.sourceDocUri.length > 0))
       )
     case 'image.request':
       // #220 sourceDocUri（悬停浮层内图片的来源文档）：可选非空字符串
@@ -3429,7 +3479,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       }
       return false
     case 'refEdit.push': {
-      // 编辑通道白名单：inner 事件须为 RefEditHostEvent 合法形态
+      // 编辑与资源回包白名单：inner 事件须为 RefEditHostEvent 合法形态
+      //（P2-11 起含 image.* / refresh.invalidated 定向回推）
       if (
         !(typeof v.portId === 'string' && v.portId.length > 0) ||
         !(typeof v.fsPath === 'string' && v.fsPath.length > 0) ||
@@ -3444,6 +3495,11 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         case 'doc.changed':
         case 'doc.resync':
         case 'session.suspended':
+          return isHostToWebview(inner)
+        case 'image.result':
+        case 'image.invalidate':
+        case 'image.paste.result':
+        case 'refresh.invalidated':
           return isHostToWebview(inner)
         default:
           return false
@@ -3511,6 +3567,20 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return (
         typeof v.inner === 'string' && v.inner.length > 0 &&
         (v.op === 'undo' || v.op === 'redo') &&
+        (v.occurrence === undefined || isNonNegativeInt(v.occurrence))
+      )
+    case 'embed.test.pasteImage':
+      // P2-11 测试钩子：mime/dataBase64 形态与 image.paste 同限
+      return (
+        typeof v.inner === 'string' && v.inner.length > 0 &&
+        typeof v.mime === 'string' &&
+        v.mime.startsWith('image/') &&
+        typeof v.dataBase64 === 'string' &&
+        v.dataBase64.length > 0 &&
+        v.dataBase64.length <= IMAGE_PASTE_LIMITS.dataBase64MaxChars &&
+        (v.fileNameHint === undefined ||
+          (typeof v.fileNameHint === 'string' &&
+            v.fileNameHint.length <= IMAGE_PASTE_LIMITS.fileNameHintMaxChars)) &&
         (v.occurrence === undefined || isNonNegativeInt(v.occurrence))
       )
     case 'embed.test.portWrite':

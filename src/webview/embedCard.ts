@@ -294,8 +294,13 @@ interface EmbedLiveState {
   /** P2-05 已知最新 B 版本（bound/init/推送取 max——模态确认基线与 stale
    *  判定的 webview 侧参照；最终防线在宿主执行时比对权威 version） */
   lastSeenVersion: number
-  /** 实例的图片管理器（B 身份来源化请求；结果经 notifyImageResult 路由） */
+  /** 实例的图片管理器（P2-11 起请求经目标端口出站、结果经 refEdit.push
+   *  信封定向路由——reqId 只在端口空间内，不与 A 面板或其他 B occurrence
+   *  的管理器撞号错插） */
   images: ImageResourceManager | null
+  /** P2-11（#288）手动刷新 reqId 计数（refresh.request 经端口进 B 会话，
+   *  与 refresh.invalidated 回包配对） */
+  refreshReqSeq: number
   /** 首开定位完成标记（init 后锚点定位/会话选区恢复只做一次） */
   initialLocated: boolean
 }
@@ -419,10 +424,16 @@ export interface EmbedCardProbe {
   /** P2-04 目标编辑端口是否已绑定（可见且内部 Live 才为 true） */
   liveBound: boolean
   livePortId: string | null
+  /** P2-11（#288）B 的规范 docUri（端口信封内消息的目标戳记——集成断言
+   *  注入资源消息时的身份载体） */
+  liveDocUri: string | null
   liveDirty: boolean
   liveSuspended: boolean
   /** P2-04 内部 Live 编辑器文档长度（-1 = 无实例；外部同步/编辑回流观测） */
   liveTextLen: number
+  /** P2-11（#288）内部 Live 图片管理器的已应用地址（B 身份解析结果——
+   *  「按 B 目录解析才命中」的集成断言面） */
+  liveImageSrcs: string[]
   /** P2-05 该嵌入发起的关闭确认模态态（none/open/stale） */
   closeDialog: 'none' | 'open' | 'stale'
   /** P2-05 发起（或挂起）的退出意图径 */
@@ -506,6 +517,8 @@ export class EmbedCardManager {
   private liveReqSeq = 0
   /** P2-07 稳定宿主身份自增序（面板会话内每 occurrence 唯一且永不变） */
   private hostSeq = 0
+  /** P2-11 最近一次设置快照（新实例补发；undefined = 从未收到） */
+  private lastSettings: SettingsPayload | undefined
 
   constructor(context: EmbedCardContext) {
     this.context = context
@@ -1125,14 +1138,14 @@ export class EmbedCardManager {
     return false
   }
 
-  /** image.result 路由：作用于在场卡片的 B 管理器（reqId 由管理器自守卫）。
-   *  P2-04：内部 Live 实例的图片管理器同路由（B 身份来源化请求的回包） */
+  /** image.result 路由（A 面板广播的直发回包）：只作用于在场卡片的 Reading
+   *  内容管理器（reqId 由各管理器自守卫）。
+   *  P2-11：内部 Live 实例的管理器不在此投递——其请求经目标端口出站，
+   *  回包经 refEdit.push 信封定向（notifyPush）；两侧 reqId 空间独立，若
+   *  广播投递会在撞号时把 A 的解析结果错插进 B 的槽位（错图） */
   notifyImageResult(msg: { reqId: number; ok: boolean; src?: string; reason?: string }): void {
     for (const handle of this.active.values()) {
       handle.content.notifyImageResult(msg)
-    }
-    for (const entry of this.entries.values()) {
-      entry.live?.images?.handleResult(msg)
     }
   }
 
@@ -1505,6 +1518,7 @@ export class EmbedCardManager {
       instance: null,
       lastSeenVersion: 0,
       images: null,
+      refreshReqSeq: 0,
       initialLocated: false,
     }
     this.context.send({
@@ -1550,7 +1564,10 @@ export class EmbedCardManager {
   }
 
   /** 创建嵌入 Live 实例（portId/docUri 已知后；EditorView 空文档，init
-   *  推送装载全文）。图片管理器走 B 身份来源化请求（既有守卫通道）。
+   *  推送装载全文）。P2-11（#288）目标资源接线：图片管理器的请求经目标
+   *  端口出站（refEdit.message 信封，B 会话按自身身份解析——不再借 A 的
+   *  直发通道）；isLiveActive 真实化（内部模式判定，粘贴拦截随之打开）；
+   *  图片弹窗按实例注册 B 身份上下文。
    *  P2-10：contentDOM 的 contextmenu 转发根统一菜单（携带 inner 与实例
    *  view——根打开时捕获目标，执行前重验）；实例事务经 onLiveUpdate
    *  通知根联动（快速操作条状态随焦点嵌入的编辑刷新）。 */
@@ -1568,33 +1585,35 @@ export class EmbedCardManager {
     if (!hostHandle) {
       return
     }
+    const instanceLive = live
+    const entryRef = entry
     live.images = new ImageResourceManager({
       isDirectSrc: isDirectImageSrc,
+      // P2-11：请求经目标端口（refEdit.message 信封内 image.request，docUri
+      // = B 规范 URI——B 会话按自身守卫并以 B 目录/根边界解析；sessionId
+      // 沿用端口身份戳记）。结果经 refEdit.push 信封定向回本管理器，与 A
+      // 面板广播隔离
       requestHost: (src, reqId) => {
         const session = this.context.session()
-        if (!session.sessionId || !session.docUri) {
+        if (!session.sessionId || !session.docUri || !instanceLive.docUri) {
           return
         }
-        this.context.send({
+        this.sendRefEditOut(entryRef, {
           kind: 'image.request',
           sessionId: session.sessionId,
-          docUri: session.docUri,
+          docUri: instanceLive.docUri,
           reqId,
           src,
-          sourceDocUri: live.fsPath,
         })
       },
     })
-    const instanceLive = live
-    const entryRef = entry
-    live.instance = new LiveEditorInstance(hostHandle.liveEl, {
+    // P2-11 实例在场判定：闭包比对实例身份（teardown 置 entry.live = null
+    // 或重建实例后，旧闭包不冒充激活态——粘贴守卫/空白格组合规划据此门控）
+    const created = new LiveEditorInstance(hostHandle.liveEl, {
       send: (message) => this.sendRefEditOut(entryRef, message),
       persistState: () => undefined, // seq 不跨端口持久化（每次 bind 新面板新 seq 空间）
       images: live.images,
-      // P2-04：图片粘贴不拦截（资产归属归 P2-11——isLiveActive false 使
-      // createImagePaste 的 isEnabled 恒 false，默认粘贴行为不劫持）；
-      // 空白格组合规划随之关闭（表格结构编辑归 P2-10）
-      isLiveActive: () => false,
+      isLiveActive: (): boolean => entryRef.live?.instance === created,
       initialDark: embedHostDark(),
       onSuspendedChange: () => {
         if (instanceLive.instance) {
@@ -1611,12 +1630,40 @@ export class EmbedCardManager {
         this.retryPendingClose(entryRef)
         this.refreshLiveChrome(entryRef)
       },
+      // P2-11 图片弹窗实例上下文：B 管理器 + B 全文 + B 来源导出（打开弹窗
+      // 时经 EditorView 反查捕获；sendExport 守卫 entry.live 仍为本实例——
+      // 释放后迟到的弹窗操作不产生孤立出站）
+      imagePopupSource: {
+        images: live.images,
+        docSource: () => instanceLive.instance?.getView()?.state.doc.toString() ?? null,
+        sendExport: (req) => {
+          const session = this.context.session()
+          if (entryRef.live !== instanceLive || !session.sessionId || !session.docUri) {
+            return
+          }
+          this.context.send({
+            kind: 'image.export',
+            sessionId: session.sessionId,
+            docUri: session.docUri,
+            reqId: req.reqId,
+            src: req.src,
+            fileName: req.fileName,
+            sourceDocUri: instanceLive.fsPath,
+          })
+        },
+      },
     }, [this.embedEscapeKeymap(entryRef)])
-    live.instance.setSession(live.portId, live.docUri)
-    hostHandle.liveEl.appendChild(live.instance.getView()!.dom)
+    const inst = created
+    live.instance = inst
+    // P2-11：补发最近设置快照（实例创建晚于面板装载——见 applySettings 注释）
+    if (this.lastSettings !== undefined) {
+      inst.applySettings(this.lastSettings)
+    }
+    inst.setSession(live.portId, live.docUri)
+    hostHandle.liveEl.appendChild(inst.getView()!.dom)
     // P2-10 嵌入内右键菜单：转发根（根打开统一菜单并捕获实例目标）。
     // 监听随 contentDOM 生命周期（view.destroy 移除 DOM，无需解绑）
-    const menuView = live.instance.getView()!
+    const menuView = inst.getView()!
     const innerRef = entry.inner
     menuView.contentDOM.addEventListener('contextmenu', (event) => {
       if (this.context.onLiveContextMenu) {
@@ -1627,9 +1674,9 @@ export class EmbedCardManager {
     this.refreshModeChrome(hostHandle)
   }
 
-  /** 实例出站包装：编辑通道消息 → refEdit.message（目标身份 = 端口 B）；
-   *  其余（链接跳转/图片粘贴等资源与命令消息）不经目标端口——完整接线
-   *  归 P2-10/P2-11，本票丢弃（宿主侧同款白名单冗余防线） */
+  /** 实例出站包装：编辑通道与资源消息（P2-11）→ refEdit.message（目标
+   *  身份 = 端口 B——B 会话按自身 docUri 守卫并以 B 目录/根边界解析执行）；
+   *  其余面板级消息不经目标端口，丢弃（宿主侧同款白名单冗余防线） */
   private sendRefEditOut(entry: EmbedEntry, message: WebviewToHost): void {
     const live = entry.live
     const session = this.context.session()
@@ -1643,6 +1690,13 @@ export class EmbedCardManager {
       case 'history.request':
       case 'sync.request':
       case 'conflict.action':
+      // P2-11（#288）资源消息经目标端口传身份：链接/双链以 B 为解析语境、
+      // 图片粘贴按 B 目录落盘、手动刷新清 B 会话缓存
+      case 'link.activate':
+      case 'wikilink.activate':
+      case 'image.request':
+      case 'image.paste':
+      case 'refresh.request':
         this.context.send({
           kind: 'refEdit.message',
           panelSessionId: session.sessionId,
@@ -1653,7 +1707,7 @@ export class EmbedCardManager {
         })
         break
       default:
-        break // P2-10/P2-11 接线前丢弃（不冒充已支持）
+        break // 面板级消息不经端口（codeblock.copy 等遗留丢弃，归 P2-14 收口核对）
     }
   }
 
@@ -1732,6 +1786,24 @@ export class EmbedCardManager {
           }
           inst.handleSessionSuspended()
           this.refreshLiveChrome(entry)
+          break
+        // ---- P2-11（#288）资源回包：经信封按 portId 定向路由（reqId 由
+        // 各管理器/实例自守卫——释放后迟到推送查不到端口即丢弃，不写 A
+        // 或另一 B occurrence）----
+        case 'image.paste.result':
+          if (!inst) {
+            continue
+          }
+          inst.handleImagePasteResult(message.message)
+          break
+        case 'image.result':
+          live.images?.handleResult(message.message)
+          break
+        case 'image.invalidate':
+          live.images?.invalidate(message.message.srcs)
+          break
+        case 'refresh.invalidated':
+          live.images?.invalidateAll()
           break
       }
     }
@@ -2545,6 +2617,10 @@ export class EmbedCardManager {
 
   /** 设置热更转发（Live 扩展组 Compartment 重配随实例） */
   applySettings(values: SettingsPayload | undefined): void {
+    // P2-11：留存最近快照——实例创建晚于面板装载（settings.snapshot 在
+    // init 后拉取，彼时嵌入实例可能尚未 bind），新实例补发一次避免其设置
+    // 回退默认值（图片粘贴总开关等实例内守卫的读取源）
+    this.lastSettings = values
     for (const entry of this.entries.values()) {
       entry.live?.instance?.applySettings(values)
     }
@@ -2585,9 +2661,13 @@ export class EmbedCardManager {
         internalMode: this.effectiveMode(handle.entry),
         liveBound: handle.entry.live?.portId != null,
         livePortId: handle.entry.live?.portId ?? null,
+        liveDocUri: handle.entry.live?.docUri ?? null,
         liveDirty: handle.entry.live?.dirty === true,
         liveSuspended: handle.entry.live?.suspended === true,
         liveTextLen: handle.entry.live?.instance?.getView()?.state.doc.length ?? -1,
+        liveImageSrcs: (handle.entry.live?.images?.activeEntries() ?? [])
+          .filter((e) => e.appliedSrc !== undefined)
+          .map((e) => e.appliedSrc!),
         closeDialog: this.closeDialogBelongsTo(handle.entry)
           ? (this.closeDialog!.stale ? 'stale' : 'open')
           : 'none',
@@ -2675,6 +2755,54 @@ export class EmbedCardManager {
     }
     view.dispatch({ changes: { from: pos, to: pos, insert: text } })
     return true
+  }
+
+  /** P2-11（#288）手动刷新广播：向全部活跃目标端口发 refresh.request（经
+   *  refEdit.message 信封进 B 会话——宿主清 B 解析缓存并推进资源代次后，
+   *  refresh.invalidated 经信封回推驱动 live.images 全量失效重挂）。与 A
+   *  面板自身的 refresh.request 同发（工具栏刷新按钮的面板级语义：面板内
+   *  全部资源刷新，内部 Live 的 B 图不在 A 会话缓存里，不经端口刷不动） */
+  refreshLiveResources(): void {
+    const session = this.context.session()
+    if (!session.sessionId || !session.docUri) {
+      return
+    }
+    for (const entry of this.entries.values()) {
+      const live = entry.live
+      if (!live?.portId || !live.docUri) {
+        continue
+      }
+      live.refreshReqSeq += 1
+      this.context.send({
+        kind: 'refEdit.message',
+        panelSessionId: session.sessionId,
+        panelDocUri: session.docUri,
+        portId: live.portId,
+        fsPath: live.fsPath,
+        message: {
+          kind: 'refresh.request',
+          sessionId: live.portId,
+          docUri: live.docUri,
+          reqId: live.refreshReqSeq,
+        },
+      })
+    }
+  }
+
+  /** P2-11（#288）测试钩子：向指定嵌入实例注入图片粘贴载荷（与真实 paste
+   *  拦截同一实例管线——reqId 分配/在途登记/refEdit.message 信封出站；宿主
+   *  测试无法向 webview 派发真实剪贴板事件） */
+  testPasteImage(
+    inner: string,
+    payload: { mime: string; dataBase64: string; fileNameHint?: string },
+    occurrence = 0,
+  ): boolean {
+    const entry = this.entryOfInner(inner, occurrence)
+    const instance = entry?.live?.instance
+    if (!entry || !instance) {
+      return false
+    }
+    return instance.pasteImageFromTest(payload)
   }
 
   /** P2-10 测试钩子配套：聚焦指定嵌入的内部 Live 编辑器（可选设置光标/
