@@ -110,50 +110,11 @@
 - **集成（真宿主 1.82.3）**：`_test.*` 注入命令读守护状态（当前判定、版本锁、拒绝记录）；写回路径经隔离 profile 的真实 settings 验证 associations 值变化与复查闭环；toast UI 交互进人工验证。
 - **人工验证清单**：真宿主装 vscode-office → 抢占 → 重启触发提示 → 一键改回生效（打开 .md 默认进 Vsidian）→ 拒绝后同抢占者不再提示 → 模拟升级（版本号变化）后重新提示一次 → 设置页状态行与手动按钮闭环。
 
-## 七、票面草稿（待建票）
+## 七、票面草稿（已建票，拆分两票）
 
-标题：`feat: 默认编辑器守护——检测 Markdown 关联被抢占并在安装/升级后提示一键改回`
+建票记录（2026-10-03）：
 
-```markdown
-## 需求（共识已定稿：docs/specs/default-editor-guard.md）
+- **[#322](https://github.com/ONEGAYI/vsidian/issues/322)** `feat: 默认编辑器守护核心——关联抢占检测、版本锁主动提示与一键改回`：守护完整产品闭环（检测、两层时机、提示修复、拒绝记录、守护设置键、`onStartupFinished` 激活、i18n、单测与集成注入命令），无阻塞、可立即开始（已加 `ready-for-agent` 标签）。
+- **[#323](https://github.com/ONEGAYI/vsidian/issues/323)** `feat: 设置页「默认编辑器」委托组——状态行、守护开关与手动改回`：常规页委托组（状态行四形态、开关呈现、手动按钮），Blocked by #322（消费其判定与修复通道）。
 
-其他扩展（如 vscode-office）抢占 Markdown 默认编辑器后本扩展静默失效且不再激活。
-落地默认编辑器守护：
-
-- **检测**：读 workbench.editorAssociations 合并生效值，键集（*.md、*.markdown、
-  **/*.md、**/*.markdown）任一存在且值非本扩展即视为接管（值 "default" 也算）；
-  抢占者经 contributes.customEditors 反查可读名，失败回退原值。
-- **时机两层**：globalState 版本锁与当前版本不相等（首装/升级/降级）→ 首次激活
-  主动检测一次；此后 onDidChangeConfiguration 沿「是我→非我」变更沿提示。
-- **修复**：inspect().globalValue 合并写回 global 层（*.md/*.markdown 常写、已存在
-  特异键覆盖、不新增），写后复查生效值，复查失败降级引导统一设置中心。
-- **防骚扰**：拒绝记录按抢占者 viewType 压制被动层；换抢占者重新提示；版本变化
-  主动检测绕过拒绝一次（每版本至多一次）；toast 超时不记拒绝。
-- **设置页**：常规页「默认编辑器」委托组——状态行 + 守护开关（两态默认开）+
-  手动「设为默认」按钮（已是我时禁用）。
-- **激活**：activationEvents 增加 onStartupFinished。
-- **边界**：无记录竞争不检测（宿主官方冲突警告在场）；官方警告点「Keep {他者}」
-  记入 profile storage 的静默盲区明确不覆盖；不反杀 workspace 层（降级引导）；
-  多窗口并发不去重。
-
-## 实施要点（风险）
-
-1. 写回必须基于 inspect().globalValue 合并，防 workspace 层值提升到 global。
-2. associations 键集为宿主实现细节：键集常量集中定义，检测与写回共用单一事实源。
-3. 多窗口并发极端重复提示记已知边界，不做去重。
-4. 版本比较主.次.修三元组自实现；退化形态视为不相等。
-5. 设置委托组按「中文分词」组先例接线，回显与生效验证按「插件设置入口」约定。
-
-## 验收
-
-- 单测覆盖判定矩阵 / 写回构造 / 版本比较 / 拒绝记录语义全绿。
-- 集成：注入命令读守护状态、写回路径真实 settings 生效与复查闭环。
-- 人工：装 vscode-office 抢占 → 提示 → 一键改回 → 拒绝压制 → 升级再提示一次 →
-  设置页闭环。
-```
-
-### 建票操作
-
-- `gh issue create --title <上> --body-file <正文文件>`（[issue-tracker.md](../agents/issue-tracker.md) 约定，中文标题正文，多行正文写 UTF-8 文件）。
-- 标签：建议 `ready-for-agent`。
-- 建票后回填票号至本节；文档提交按 CI 敏感期处置约定（纯文档直推 main）。
+原单票草稿拆分为上述两票：验证路径不同（真宿主抢占场景 vs 设置页回显）、设置页委托组为独立 UI 体量（`wordSegmentSettings` 先例），两票垂直切片、线性依赖。票面正文以两票 issue 为准（含完整验收清单）。实施在独立工作树进行。
