@@ -1172,6 +1172,27 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, 'p204-CRLF目标.md'),
     'p204 CRLF 目标首行\r\np204 第二行\r\n', 'utf8')
+  // P2-08（#285）表格格内嵌入的内部 Live：父表格含转义别名（表头 + 数据
+  // 格混排）与 #标题 形态——结构编辑不误伤、删行拦截与保存路由的宿主侧
+  writeFileSync(path.join(wsDir, 'p208-表格嵌入.md'), [
+    '# P2-08 表格格内 Live',
+    '',
+    '| ![[p208-表格目标\\|头别名]] | 头B | 头C |',
+    '| --- | --- | --- |',
+    '| 甲 ![[p208-表格目标\\|别名]] 乙 | ![[p208-表格目标#小节]] | 普通格 |',
+    '| 数据行 | ![[p208-表格目标]] | 普通格二 |',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p208-表格目标.md'), [
+    '# p208 表格目标',
+    '',
+    '目标首段。',
+    '',
+    '## 小节',
+    '',
+    '小节正文一段。',
+    '',
+  ].join('\n'), 'utf8')
   // P2-10（#287）引用完整 Live 操作：A 含唯一嵌入且自身无 frontmatter
   //（嵌入编辑器内的 fm 卡是全文档唯一的 Popover 目标）；B 带 frontmatter
   //（Popover 编辑链路）与正文（格式/表格命令目标）

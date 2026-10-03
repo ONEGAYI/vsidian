@@ -13606,6 +13606,127 @@ export const cases: Array<[string, () => Promise<void>]> = [
     console.log('[P2-07] 容器混排内部 Live：输入只写目标 + 实例平移稳定 + 保存路由通过')
   }],
 
+ // ---- P2-08（#285）表格格内嵌入的内部 Live 与父表格输入隔离：表头/
+  // 数据格（转义别名 + #标题形态）继承内部 Live 并绑定独立端口；格内 B
+  // 输入只写目标；父表格结构编辑（行移动对换形态、插列）保文本重定位——
+  // 零删除确认、端口稳定（livePortId 不变）、B 未保存编辑保持；删嵌入行
+  // 照常拦截确认（取消保留 / 保存并关闭完成删除且目标落盘）。 ----
+  ['P2-08 表格格内内部 Live：输入只写目标、结构编辑不误伤与删除拦截（#285）', async () => {
+    await openWithEditor('p208-表格嵌入.md')
+    await waitSessionReady('p208-表格嵌入.md')
+    const uri = wsUri('p208-表格嵌入.md').toString()
+    const parentBefore = await readDisk('p208-表格嵌入.md')
+    const parentDoc = await vscode.workspace.openTextDocument(wsUri('p208-表格嵌入.md'))
+    const session0 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+
+    // 四枚格内嵌入（表头转义别名 + 数据格混排别名/#小节/全文）继承内部 Live
+    const bound = await waitViewState('p208-表格嵌入.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner.startsWith('p208-表格目标'))
+      return cards.length === 4 && cards.every((c) => c.liveBound === true &&
+        c.internalMode === 'live' && (c.liveTextLen ?? -1) >= 0) ? true : false
+    })
+    const portsBefore = (bound.readingEmbed ?? [])
+      .filter((c) => c.inner.startsWith('p208-表格目标'))
+      .map((c) => c.livePortId as string)
+    assert(new Set(portsBefore).size === 4,
+      `四个格内位各自独立端口（实际 ${JSON.stringify(portsBefore)}）`)
+    const bDoc = await poll('表格目标 B 文档打开', () => {
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === wsUri('p208-表格目标.md').toString())
+      return doc ?? undefined
+    })
+
+    // 格内 B 输入只写 B（数据格别名位 occurrence 1）：A 零写回零 dirty
+    const insertAt = '# p208 表格目标\n\n'.length + 2
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.type', inner: 'p208-表格目标|别名', pos: insertAt, text: '【格内编辑】', occurrence: 0,
+    })
+    await poll('B 权威文本收到格内编辑', () =>
+      bDoc.getText().includes('【格内编辑】') ? true : undefined)
+    assert(bDoc.isDirty, '格内编辑后目标 B dirty')
+    assert(parentDoc.getText() === parentBefore && !parentDoc.isDirty,
+      '父文档 A 零写回且零 dirty（格内嵌入编辑不落 A）')
+    const session1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(session1.appliedEdits === session0.appliedEdits,
+      `A 会话 appliedEdits 零推进（实际 ${session1.appliedEdits}，基线 ${session0.appliedEdits}）`)
+
+    // 父表格结构编辑①行移动（真实拖拽钩子：数据行 1 升表头——对换形态的
+    // 整行重写覆盖嵌入区间但逐字保留源文）：零删除确认、A 换位、端口稳定
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'table.test.drag', sourceIndex: 1, targetSlot: 0,
+    })
+    const rowMoved = await poll('行移动写回 A', () =>
+      parentDoc.getText().includes('| 甲 ![[p208-表格目标\\|别名]] 乙 | ![[p208-表格目标#小节]] | 普通格 |') &&
+      parentDoc.getText().split('\n')[2]?.startsWith('| 甲 ![[') ? parentDoc.getText() : undefined)
+    await waitViewState('p208-表格嵌入.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner.startsWith('p208-表格目标'))
+      return cards.length === 4 && cards.every((c) => c.liveBound === true &&
+        portsBefore.includes(c.livePortId as string) && c.closeDialog === 'none') ? true : false
+    }, 0, 30000)
+    assert(rowMoved.split('\n')[4] === '| ![[p208-表格目标\\|头别名]] | 头B | 头C |',
+      `原表头行随移到数据区、转义管道逐字保留（实际 ${JSON.stringify(rowMoved.split('\n').slice(2, 6))}）`)
+    assert(bDoc.getText().includes('【格内编辑】'),
+      '行移动期间 B 的未保存编辑保持（实例与端口未销毁重建）')
+
+    // 父表格结构编辑②插列（真实命令路径：光标普通格 → insertColumnRight
+    // 纯插入不覆盖区间）：端口随坐标平移保持
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'table.test.cellClick', rowIndex: 1, columnIndex: 2,
+    })
+    await new Promise((r) => setTimeout(r, 200))
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'table.command', op: 'insertColumnRight',
+    })
+    await poll('插列写回 A', () => {
+      const lines = parentDoc.getText().split('\n')
+      return lines[3] === '| --- | --- | --- | --- |' &&
+        lines[4] === '| ![[p208-表格目标\\|头别名]] | 头B | 头C | |' ? true : undefined
+    })
+    await waitViewState('p208-表格嵌入.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner.startsWith('p208-表格目标'))
+      return cards.length === 4 && cards.every((c) => c.liveBound === true &&
+        portsBefore.includes(c.livePortId as string)) ? true : false
+    }, 0, 30000)
+    assert(parentDoc.getText().includes('甲 ![[p208-表格目标\\|别名]] 乙'),
+      '插列后嵌入原文与邻文保真')
+
+    // 删嵌入行（行选区 + Delete）：真删除拦截确认——取消保留
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'table.test.select', axis: 'row', index: 1,
+    })
+    await new Promise((r) => setTimeout(r, 250))
+    const textBeforeDelete = parentDoc.getText()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key: 'delete' })
+    const intercepting = await waitViewState('p208-表格嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.closeDialog === 'open') ? true : false)
+    assert(!!intercepting, '删嵌入行弹删除确认（真删除拦截保持）')
+    await new Promise((r) => setTimeout(r, 200))
+    assert(parentDoc.getText() === textBeforeDelete, '确认前 A 不写入（事务被拦）')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'embed.test.dialogAction', action: 'cancel' })
+    await poll('取消后模态退场', async () => {
+      const state = (await vscode.commands.executeCommand(CMD.viewState, uri)) as ViewState | undefined
+      return state && !(state.readingEmbed ?? []).some((c) => c.closeDialog === 'open') ? true : undefined
+    })
+    assert(parentDoc.getText() === textBeforeDelete, '取消保留引用行')
+
+    // 再删 → 保存并关闭：目标 B 落盘、A 行删除、端口随引用退场释放
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'table.test.select', axis: 'row', index: 1,
+    })
+    await new Promise((r) => setTimeout(r, 250))
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key: 'delete' })
+    await waitViewState('p208-表格嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.closeDialog === 'open') ? true : false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'embed.test.dialogAction', action: 'save' })
+    await poll('保存并关闭后嵌入行删除', () =>
+      !parentDoc.getText().includes('p208-表格目标\\|头别名') ? true : undefined)
+    await poll('目标 B 随关闭保存落盘', async () =>
+      (await readDisk('p208-表格目标.md')).includes('【格内编辑】') ? true : undefined)
+    assert(!bDoc.isDirty, '保存并关闭后目标干净')
+    assert(parentDoc.getText().includes('p208-表格目标\\|别名') && parentDoc.getText().includes('数据行'),
+      '其余行与格不受扰（甲行与数据行的嵌入保持）')
+    console.log('[P2-08] 表格格内内部 Live：输入只写目标 + 结构编辑不误伤 + 删除拦截通过')
+  }],
+
  // ---- P2-10（#287）引用完整 Live 操作落 B 不落 A：焦点在嵌入内部 Live
   // 编辑器内时，格式命令（format.command 宿主回发路径）、表格创建与
   // frontmatter Popover 编辑全部指向实际目标 B（经 B 的 DocumentSession
