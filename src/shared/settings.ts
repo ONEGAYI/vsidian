@@ -363,6 +363,18 @@ export const JIEBA_CUSTOM_URL_DEFAULT = ''
 export const JIEBA_CUSTOM_URL_MAX_LENGTH = 500
 
 /**
+ * #322「默认编辑器守护」开关：Markdown 默认编辑器被其他扩展抢占时的
+ * 提示通知总开关（两态布尔，默认开）。关闭只停提示——检测、版本锁写回
+ * 与手动改回（fixNow）不受影响（规格「守护模式」决策）。设置页呈现归
+ * #323 常规页「默认编辑器」委托组（本票仅键与存储链路落地：标准设置行
+ * 与搜索分组按 generalDefs 排除该键——wordSegment 排除同款）。键与
+ * 消费方（host/editorGuardWiring 的 isGuardEnabled 端口）成对导出，
+ * 避免字面量漂移。
+ */
+export const DEFAULT_EDITOR_GUARD_KEY = 'general.defaultEditorGuard'
+export const DEFAULT_EDITOR_GUARD_DEFAULT = true
+
+/**
  * 生产设置定义注册表：#33 交付空状态页面与完整数据链路，#34 加入首个
  * 实际设置项「显示行号」（设置页自此渲染真实开关），#79 加入「代码块卡片」，
  * #80 加入「卡内行号」，#81 加入「复制按钮」，#83 加入「语法高亮」，#96
@@ -627,6 +639,17 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     descriptionKey: 'setting.wordSegmentCustomUrl.description',
     // 仅 custom 源下生效（链式灰化：builtin → 非 custom 两级传导）
     dependsOnEnum: { key: WORD_SEGMENT_SOURCE_KEY, values: ['custom'] },
+  },
+  // #322 默认编辑器守护开关（general.* 域 → 常规页归属：#323 起以常规页
+  // 「默认编辑器」委托组呈现（wordSegment 先例同款「键进注册表 + 标准行
+  // 排除 + 委托组自绘」形态），本票标准设置行与搜索分组排除该键防重复
+  // 呈现——见 settingsPageView 的 generalDefs）
+  {
+    key: DEFAULT_EDITOR_GUARD_KEY,
+    type: 'boolean',
+    default: DEFAULT_EDITOR_GUARD_DEFAULT,
+    titleKey: 'setting.defaultEditorGuard.title',
+    descriptionKey: 'setting.defaultEditorGuard.description',
   },
 ]
 

@@ -24,6 +24,7 @@ import { createVaultIndexService, currentRootRefs } from './host/vaultIndexWirin
 import { installRenameRefUpdater } from './host/vaultRenameWiring'
 import { createIndexMaintenance, createIndexSettingsStore, initialExcludePatterns } from './host/vaultIndexMaintenance'
 import { createJiebaWiring } from './host/jiebaResourceWiring'
+import { createEditorGuardWiring } from './host/editorGuardWiring'
 import { createFindOptionsStore } from './host/findOptionsStore'
 import { t } from './shared/i18n'
 
@@ -80,6 +81,12 @@ export function activate(context: vscode.ExtensionContext): void {
   //（Remote SSH 在远程机执行），锁定版本 + sha256 清单校验（清单随 VSIX
   // 发布、资源本体不进包体）；状态变更 → 设置页推送与用户通知
   const jieba = createJiebaWiring(context, settingsService)
+  // #322 默认编辑器守护：两层时机（globalState 版本锁门控的启动主动检测
+  // + associations「未接管 → 接管」变更沿被动监听）+ 一键改回修复链路。
+  // onStartupFinished 常驻激活后每窗口装配（空窗口也检测）；通知文案走
+  // host.defaultEditor* 词条，_test 钩子在 wiring 内门控注册。设置页委托
+  // 组属 #323，本票不进 settingsPage
+  createEditorGuardWiring(context, settingsService)
   const settingsPage = createSettingsPage(
     context,
     settingsService,

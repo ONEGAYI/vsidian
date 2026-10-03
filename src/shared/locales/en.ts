@@ -824,6 +824,16 @@ export const en = {
   'host.jiebaDeleted': 'jieba resources deleted. Word motion falls back to the built-in engine.',
   'host.jiebaDeleteFailed': 'Failed to delete jieba resources: {detail}.',
   'host.jiebaLoadFailed': 'Failed to load jieba in the editor: {detail}. The built-in engine stays active.',
+  /** #322 默认编辑器守护：设置项（呈现归 #323 常规页「默认编辑器」委托组） */
+  'setting.defaultEditorGuard.title': 'Default editor guard',
+  'setting.defaultEditorGuard.description': 'Show a notification when another extension takes over as the default editor for Markdown files, with a one-click way to restore Vsidian.',
+  /** #322 默认编辑器守护：宿主通知（抢占提示 / 修复结果） */
+  'host.defaultEditorTakenOver': 'The default editor for Markdown files is currently {name}. Restore Vsidian as the default?',
+  'host.defaultEditorBuiltinName': 'the VSCode built-in text editor',
+  'host.defaultEditorFixLabel': 'Use Vsidian',
+  'host.defaultEditorDismissLabel': 'Dismiss',
+  'host.defaultEditorFixed': 'Vsidian is again the default editor for Markdown files.',
+  'host.defaultEditorFixFailed': 'Could not restore the default editor automatically (a workspace setting may override it). Opening the editor associations setting for manual review.',
 } as const satisfies Record<string, string>
 
 /** 字典键：点分扁平键，以本包为类型基准（编译期检查 t() 取词键） */

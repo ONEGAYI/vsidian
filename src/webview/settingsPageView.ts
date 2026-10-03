@@ -9,6 +9,7 @@ import type { MessageKey } from '../shared/locales/en'
 import { bindLocale } from './localeDom'
 import { isHostToWebview } from '../shared/protocol'
 import {
+  DEFAULT_EDITOR_GUARD_KEY,
   isSettingEnabled,
   type SettingDefinition,
   type SettingsPayload,
@@ -322,7 +323,10 @@ export class SettingsPageView {
    *  组内小节承担（显示/符号输入/代码块/图片，editorSectionDefs）。
    *  键名即持久化标识，分组纯展示归属（重组零迁移：已存设置值不受影响） */
   private generalDefs(): readonly SettingDefinition[] {
-    return this.defs.filter((d) => d.key.startsWith('general.'))
+    // #322 默认编辑器守护开关不由本表渲染：#323 起常规页以「默认编辑器」
+    // 委托组呈现（wordSegment 排除同款），排除防标准设置行与搜索内建
+    // 分组（toEntries 以本表为源）重复呈现
+    return this.defs.filter((d) => d.key.startsWith('general.') && d.key !== DEFAULT_EDITOR_GUARD_KEY)
   }
   private symbolDefs(): readonly SettingDefinition[] {
     return this.defs.filter((d) => d.key.startsWith('editor.symbol'))

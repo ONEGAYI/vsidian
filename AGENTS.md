@@ -121,6 +121,7 @@ vsidian/
 │   │   ├── code-block-card.md                 # 代码块卡片功能规格
 │   │   ├── context-menu.md                    # 统一右键菜单规格（正文全域接管）
 │   │   ├── css-snippets.md                    # CSS片段与样式兼容规格
+│   │   ├── default-editor-guard.md            # 默认编辑器守护规格
 │   │   ├── frontmatter-table.md               # frontmatter 表格化规格
 │   │   ├── graphic-code-block-interaction.md  # 图形化代码块交互规格
 │   │   ├── hover-embed-phase2-tickets/…       # 二期票据正文与依赖
