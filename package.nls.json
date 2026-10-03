@@ -1,6 +1,8 @@
 {
   "manifest.displayName": "Vsidian",
   "manifest.description": "Obsidian-like Markdown editing: live preview + reading views",
+  "command.clipboard.paste.title": "Paste",
+  "command.clipboard.pastePlain.title": "Paste as plain text",
   "command.toggleViewMode.title": "Switch to the next view mode",
   "command.mode.toReading.title": "Switch Vsidian to reading view",
   "command.mode.toSource.title": "Switch Vsidian to the source editor",

@@ -271,6 +271,9 @@ export const LANGUAGE_DEFAULT = 'auto'
  */
 export const IMAGE_PASTE_KEY = 'image.paste'
 export const IMAGE_PASTE_DEFAULT = true
+export const PASTE_PRESERVE_FORMATTING_KEY = 'editor.pastePreserveFormatting'
+export const PASTE_ASK_BEFORE_KEY = 'editor.pasteAskBefore'
+export const PASTE_SPLIT_UNDO_KEY = 'editor.pasteSplitUndo'
 
 /**
  * #161 图片存放位置模式（StringEnum）：same-dir=与当前文件同目录（默认）；
@@ -436,6 +439,26 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     default: SYMBOL_AUTOCOMPLETE_DEFAULT,
     titleKey: 'setting.symbolAutocomplete.title',
     descriptionKey: 'setting.symbolAutocomplete.description',
+  },
+  {
+    key: PASTE_PRESERVE_FORMATTING_KEY,
+    type: 'boolean', default: true,
+    titleKey: 'setting.pastePreserveFormatting.title',
+    descriptionKey: 'setting.pastePreserveFormatting.description',
+  },
+  {
+    key: PASTE_SPLIT_UNDO_KEY,
+    type: 'boolean', default: true,
+    titleKey: 'setting.pasteSplitUndo.title',
+    descriptionKey: 'setting.pasteSplitUndo.description',
+    dependsOn: PASTE_PRESERVE_FORMATTING_KEY,
+  },
+  {
+    key: PASTE_ASK_BEFORE_KEY,
+    type: 'boolean', default: true,
+    titleKey: 'setting.pasteAskBefore.title',
+    descriptionKey: 'setting.pasteAskBefore.description',
+    dependsOn: PASTE_PRESERVE_FORMATTING_KEY,
   },
   {
     key: SYMBOL_SELECTION_WRAP_KEY,

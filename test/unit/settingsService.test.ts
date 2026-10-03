@@ -57,6 +57,9 @@ it('生产注册表（#34 起）：快照为定义默认值（开关均开除 Li
       'editor.symbolTabEscape': true,
       // #237 多光标（默认开 = alt+click / Ctrl+Alt+方向键可用）
       'editor.multicursor': true,
+      'editor.pastePreserveFormatting': true,
+      'editor.pasteAskBefore': true,
+      'editor.pasteSplitUndo': true,
       // #161 图片粘贴三件：总开关 / 存放模式枚举 / 子路径自由文本
       'image.paste': true,
       'image.pasteLocation': 'same-dir',

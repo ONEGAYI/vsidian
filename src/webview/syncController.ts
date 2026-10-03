@@ -36,7 +36,17 @@ import { createQuickActionStateReader } from './quickActionState'
 import { TOOLTIP_KEYS_SEPARATOR } from './tooltipCard'
 import { FORMAT_OPERATIONS, isFormatOperationId, type FormatOperationId } from '../shared/formatOperations'
 import { getEffectiveBindings, type KeybindingOverrides } from '../shared/keybindings'
-import { KeybindingRouter } from './keybindingRouter'
+import { KeybindingRouter, keyStep } from './keybindingRouter'
+import { resolveKeybinding, formatBindingLabel } from '../shared/keybindings'
+import { clipboardPlainText, clipboardHasImages, dispatchClipboardPaste, readClipboardSnapshot } from './clipboardPaste'
+import { ToastChannel } from './toast'
+import { RichPasteDialog } from './richPasteDialog'
+import { htmlToMarkdown } from './htmlToMarkdown'
+import { planRichPaste, richPasteDistributionMatches } from './richPastePlan'
+import type { ClipboardSnapshot } from './clipboardPaste'
+import { PASTE_PRESERVE_FORMATTING_KEY, PASTE_ASK_BEFORE_KEY, PASTE_SPLIT_UNDO_KEY } from '../shared/settings'
+import type { HostToWebview, PasteStage } from '../shared/protocol'
+import { chainAt } from '../shared/markdownDoc'
 import { LINE_NUMBER_GUTTER_SELECTOR, liveLineNumbers, paintedLineNumbers } from './liveLineNumbers'
 import { CODE_CARD_CLASS_NAMES, codeCardConfigFacet, codeCardCopyRequest, codeCardFoldField, codeCardHoverReveal, liveCodeCard, type CodeCardConfig } from './liveCodeCard'
 import { decorateReadingCodeCard, isReadingCodeBlock, READING_CODE_NOWRAP_CLASS } from './readingCodeCard'
@@ -650,6 +660,8 @@ function conflictsWithLocal(
 }
 
 interface BufferedIncremental {
+  reason?: Extract<HostToWebview, { kind: 'doc.changed' }>['reason']
+  paste?: Extract<HostToWebview, { kind: 'doc.changed' }>['paste']
   version: number
   /** 增量（权威变更前系；入队时点的参考系） */
   changes: SerChange[]
@@ -909,6 +921,16 @@ export class WebviewSyncController {
   private contextMenuDismissKey: ((e: KeyboardEvent) => void) | undefined
   /** 剪贴板读（粘贴桥）在途 reqId（陈旧回包丢弃；image.paste 在途表先例） */
   private clipboardReadReqId = 0
+  private clipboardReadTarget: { view: EditorView; doc: EditorState['doc']; selection: EditorState['selection']; sessionId: string | undefined; docUri: string; modeRevision: number } | undefined
+  private pasteModeRevision = 0
+  private toast: ToastChannel | undefined
+  private richPasteDialog: RichPasteDialog | undefined
+  private pastePreferenceReqId = 0
+  private readonly pasteFeedback: { kind: 'rich' | 'fallback' | 'plain-image'; group: string; stage: PasteStage['stage']; landed: boolean }[] = []
+  private pasteGroupId = 0
+  private recordingPasteStage: PasteStage | undefined
+  private recordingPlainPasteFeedback: string | undefined
+  private pasteToastKey: string | undefined
   /** 键位覆盖缓存（#183 提示列派生输入；keybindings.snapshot/changed 同步） */
   private keybindingOverrides: KeybindingOverrides = {}
   /** 重命名编辑态的条目索引（null = 无编辑态；条目内容区被 input 替换） */
@@ -1137,7 +1159,7 @@ export class WebviewSyncController {
   private unconfirmed: ChangeSet | null = null
   /** 已发出未确认事务（FIFO）：坐标为发出时逆穿未确认集的 baseVersion 系
    *  投影（C-2），ack ok 后按序剥离复合进已确认链 */
-  private sentTxns: { seq: number; changes: SerChange[] }[] = []
+  private sentTxns: { seq: number; changes: SerChange[]; paste?: PasteStage; plainPasteFeedback?: string }[] = []
   /** 首笔无法安全逆投影的事务起，后续本地事务合并在同一待发 ChangeSet。
    *  定义域是所有已发送事务之后的本地文档，全部 ack 后可直接作为新请求。 */
   private deferredLocal: ChangeSet | null = null
@@ -1146,7 +1168,7 @@ export class WebviewSyncController {
    *  该段开始时的本地文档；sendDeferredLocal 每次只出站队首段（余段留守
    *  暂缓集），队首段 ack 收敛后依次出站——每段一笔 edit.request = 一条
    *  宿主 undo 记录。重置与 deferredLocal 同步 */
-  private deferredSegments: ChangeSet[] = []
+  private deferredSegments: { changes: ChangeSet; paste?: PasteStage; plainPasteFeedback?: string }[] = []
   /** #153 撤销分段：最近一笔本地输入（含组合候选事务）的时间戳；null
    *  表示尚无本地输入（不启动停顿计时）。停顿判定是惰性的——只在下一笔
    *  输入/组合开始时回看间隔，不设分段定时器 */
@@ -1195,7 +1217,8 @@ export class WebviewSyncController {
 
   constructor(private readonly bridge: VsCodeBridge) {
     this.keybindingRouter = new KeybindingRouter({}, (id) => {
-      if (id === 'find') this.openFind()
+      if (id === 'paste' || id === 'pastePlain') this.requestClipboardPaste(id === 'pastePlain')
+      else if (id === 'find') this.openFind()
       else if (id === 'findNext') this.findStep('next')
       else if (id === 'findPrevious') this.findStep('prev')
       // #236 查找替换：Ctrl+H 打开面板并展开替换栏；替换操作是面板会话
@@ -1527,6 +1550,8 @@ export class WebviewSyncController {
     // 出现（面板开时代之以面板开关闪烁，见 flashFindToggles）
     this.occurrenceBarEl = this.buildOccurrenceBar()
     parent.appendChild(this.occurrenceBarEl)
+    this.toast = new ToastChannel(parent)
+    this.richPasteDialog = new RichPasteDialog(parent)
     // 侧栏初始态（持久化恢复）落到 DOM 类与按钮可访问名称
     this.applySidebarDom()
     // 大纲面板初始态（持久化恢复）落到侧栏容器类与按钮 aria-expanded
@@ -1534,6 +1559,7 @@ export class WebviewSyncController {
     this.applyQuickActionsDom()
     // document 捕获先于 VS Code webview 预加载脚本的 window 冒泡转发。
     this.docKeydown = (e: KeyboardEvent) => {
+      if (this.richPasteDialog?.isOpen()) return
       // Ctrl/Cmd 按下（非重复）：Live 悬停补触发——指针已在链接上时开浮层
       // （不 preventDefault/stopPropagation：修饰键本身不是键绑定，其余
       // 路由照常）
@@ -1570,6 +1596,15 @@ export class WebviewSyncController {
         !(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement)
       const withinEditor = !!target && (target === document ||
         !!this.bodyEl?.contains(target) || !!this.findPanel?.contains(target))
+      // 默认普通粘贴保留原生 paste 事件（包括图片文件名/表格处理）。
+      // 改绑入口和右键读取多格式快照；两入口最终仍进入同一 paste 处理链。
+      const step = keyStep(e)
+      if (liveFocused && (step === 'ctrl+v' || step === 'meta+v') &&
+          resolveKeybinding(this.keybindingOverrides, 'live', step, true).kind === 'command' &&
+          getEffectiveBindings(this.keybindingOverrides, 'paste').includes(step)) {
+        e.stopPropagation()
+        return
+      }
       if (this.keybindingRouter.handle(e, this.viewMode,
         liveFocused || readingFocused || withinEditor, liveFocused)) return
       if (this.findOpen && e.key === 'Escape') {
@@ -1735,6 +1770,12 @@ export class WebviewSyncController {
   }
 
   dispose(): void {
+    this.toast?.dispose()
+    this.richPasteDialog?.dispose()
+    this.richPasteDialog = undefined
+    this.pasteFeedback.length = 0
+    this.toast = undefined
+    this.clipboardReadReqId += 1
     this.flushPendingViewState()
     // #238 会话与闪烁计时清理（选项条 DOM 随 parent 移除）
     this.endOccurrenceSession()
@@ -2250,6 +2291,18 @@ export class WebviewSyncController {
           break
         }
         if (message.ok) {
+          const txn = this.sentTxns.find(txn => txn.seq === message.seq)
+          const paste = txn?.paste
+          if (paste) {
+            for (const feedback of this.pasteFeedback) {
+              if (feedback.group === paste.group && feedback.stage === paste.stage) feedback.landed = true
+            }
+          }
+          if (txn?.plainPasteFeedback) {
+            for (const feedback of this.pasteFeedback) {
+              if (feedback.kind === 'plain-image' && feedback.group === txn.plainPasteFeedback) feedback.landed = true
+            }
+          }
           this.inFlight.delete(message.seq)
           // 按 seq 剥离已确认事务并复合进已确认链（C-2）：外部增量逆穿
           // 它平移回 baseVersion 系；宿主按序确认，通常命中队首
@@ -2275,6 +2328,7 @@ export class WebviewSyncController {
           // 新请求会留在 inFlight，下方释放自会判定继续等待）——此刻撤销
           // 意图可安全发出
           this.releasePendingHistory()
+          this.releasePasteFeedback()
           break
         }
         // ok:false（conflict/error）：本地有未确认输入时保留文本并暂停；
@@ -2299,6 +2353,7 @@ export class WebviewSyncController {
           break
         }
         this.lastDocChangedVersion = message.version
+        this.invalidatePasteFeedback()
         if (this.suspended) {
           // 暂停：外部增量不应用（保留本地输入，恢复时以全文对齐）
           break
@@ -2318,6 +2373,8 @@ export class WebviewSyncController {
             baseChanges: this.ackedChain
               ? unmapSerGroupThroughAcked(message.changes, this.ackedChain)
               : message.changes,
+            ...(message.reason ? { reason: message.reason } : {}),
+            ...(message.paste ? { paste: message.paste } : {}),
           })
         } else if (this.unconfirmed || this.ackedChain) {
           // 在途未确认编辑：外部增量（权威系）先逆穿已确认链回 base 系再
@@ -2329,9 +2386,11 @@ export class WebviewSyncController {
           }
           this.dispatchExternal(mapped)
           this.baseVersion = message.version
+          this.finishPasteHistory(message)
         } else {
           this.baseVersion = message.version
           this.dispatchExternal(message.changes)
+          this.finishPasteHistory(message)
         }
         break
       case 'doc.resync':
@@ -2402,6 +2461,8 @@ export class WebviewSyncController {
       }
       case 'ui.command':
         switch (message.op) {
+          case 'paste': this.requestClipboardPaste(); break
+          case 'pastePlain': this.requestClipboardPaste(true); break
           case 'sidebarToggle': this.toggleSidebar(); break
           case 'outlineToggle':
             if (!this.sidebarOpen && !this.outlineActive) this.toggleSidebar()
@@ -2657,7 +2718,9 @@ export class WebviewSyncController {
         }
         this.clipboardReadReqId += 1
         const view = this.view
-        if (!message.ok || !view || this.viewMode !== 'live' || this.suspended) {
+        const target = this.clipboardReadTarget
+        this.clipboardReadTarget = undefined
+        if (!message.ok || !view || !target || !this.clipboardTargetValid(target)) {
           if (!message.ok) {
             // 只读失败告警不弹窗（与未知命令的 console.warn 同口径——
             // review-loops 修复：此前零日志，粘贴无反应无从定位）
@@ -2666,14 +2729,18 @@ export class WebviewSyncController {
           break
         }
         // 光标处插入（选区被替换——与原生粘贴同语义）；单笔事务走标准出站
-        const range = view.state.selection.main
         try {
-          view.dispatch({ changes: { from: range.from, to: range.to, insert: message.text } })
+          if (message.text) dispatchClipboardPaste(view.contentDOM, { text: message.text, images: [] }, true)
         } catch (error) {
           console.error('[vsidian] 粘贴插入失败（坐标与当前文档不匹配）', error)
         }
         break
       }
+      case 'paste.preferences.result':
+        if (!message.ok && message.reqId === this.pastePreferenceReqId) {
+          this.toast?.show(t('toast.pastePreferencesFailed'), 'error')
+        }
+        break
       case 'outline.test.renameKey': {
         // 测试钩子（#69）：向重命名输入框注入文本并以 Enter/Esc 收尾
         // （真实 keydown 链路）
@@ -3300,6 +3367,9 @@ export class WebviewSyncController {
    * 停止一切写回与外部同步；恢复唯一途径是 doc.resync（宿主 resumePanel）。
    */
   private enterSuspended(): void {
+    this.richPasteDialog?.cancel(false)
+    this.invalidatePasteFeedback()
+    this.pasteFeedback.length = 0
     if (this.suspended) {
       return
     }
@@ -3545,6 +3615,9 @@ export class WebviewSyncController {
       this.persistState()
       return
     }
+    this.pasteModeRevision += 1
+    this.clipboardReadReqId += 1
+    this.richPasteDialog?.cancel(false)
     // review-loops B3：命令面板切模式不经鼠标路径（无 pointercancel），
     // 拖拽会话若残留会跨模式存活（落点判定随视图重算漂移）——统一取消
     this.cancelOutlineDrag()
@@ -6747,8 +6820,8 @@ export class WebviewSyncController {
       this.copySelectionToClipboard(command === 'cut')
       return
     }
-    if (command === 'paste') {
-      this.requestClipboardPaste()
+    if (command === 'paste' || command === 'pastePlain') {
+      this.requestClipboardPaste(command === 'pastePlain')
       return
     }
     if (command === 'selectAll') {
@@ -6805,16 +6878,190 @@ export class WebviewSyncController {
     view.focus()
   }
 
-  /** 粘贴：宿主剪贴板读桥（reqId 在途防陈旧回包）；回包在
-   *  clipboard.read.result 分派处插入（光标处/替换选区） */
-  private requestClipboardPaste(): void {
+  /** 菜单/可绑定粘贴：优先多格式快照，权限受限时宿主纯文本桥回退。
+   *  两路径均固定本次目标并进入既有 paste 处理链。 */
+  private requestClipboardPaste(plain = false): void {
     const view = this.view
     if (!view || this.viewMode !== 'live' || this.suspended ||
         view.state.readOnly || !view.state.facet(EditorView.editable)) {
       return
     }
     this.clipboardReadReqId += 1
-    this.bridge.postMessage({ kind: 'clipboard.read', reqId: this.clipboardReadReqId })
+    const reqId = this.clipboardReadReqId
+    const target = { view, doc: view.state.doc, selection: view.state.selection,
+      sessionId: this.sessionId, docUri: this.docUri, modeRevision: this.pasteModeRevision }
+    this.clipboardReadTarget = target
+    const valid = () => reqId === this.clipboardReadReqId && this.clipboardTargetValid(target)
+    if (!navigator.clipboard?.read) {
+      this.bridge.postMessage({ kind: 'clipboard.read', reqId })
+      return
+    }
+    void readClipboardSnapshot(navigator.clipboard).then((snapshot) => {
+      if (!valid()) return
+      if (!plain && snapshot.images.length === 0) {
+        void this.processRichPaste(snapshot, target, reqId)
+        return
+      }
+      this.clipboardReadReqId += 1
+      this.clipboardReadTarget = undefined
+      const text = clipboardPlainText(snapshot)
+      const hasImages = clipboardHasImages(snapshot)
+      if (plain && !text) {
+        if (hasImages) this.showPlainPasteImageToast(false)
+        return
+      }
+      if (plain && hasImages) this.applyPlainPasteWithImageFeedback(view, snapshot)
+      else dispatchClipboardPaste(view.contentDOM, snapshot, plain)
+      view.focus()
+    }).catch(() => {
+      // 权限受限时仅回退宿主 text/plain；未读取图片类型，不伪报遇到图片。
+      if (valid()) this.bridge.postMessage({ kind: 'clipboard.read', reqId })
+    })
+  }
+
+  private clipboardTargetValid(target: NonNullable<WebviewSyncController['clipboardReadTarget']>): boolean {
+    return this.view === target.view && this.sessionId === target.sessionId && this.docUri === target.docUri &&
+      !!this.sessionId && !!this.docUri &&
+      this.pasteModeRevision === target.modeRevision && this.viewMode === 'live' && !this.suspended &&
+      target.view.state.doc === target.doc && target.view.state.selection.eq(target.selection) &&
+      !target.view.state.readOnly && target.view.state.facet(EditorView.editable)
+  }
+
+  /** 普通native paste与菜单/改绑快照的同一转换入口；只用一份输入快照。 */
+  private async processRichPaste(snapshot: ClipboardSnapshot, target: NonNullable<WebviewSyncController['clipboardReadTarget']>, reqId: number): Promise<void> {
+    const valid = () => reqId === this.clipboardReadReqId && this.clipboardTargetValid(target)
+    if (!valid()) return
+    let plain: string
+    try { plain = clipboardPlainText(snapshot) } catch { this.toast?.show(t('toast.pasteNoText'), 'error'); return }
+    const state = target.view.state
+    const tree = state.field(liveDecorationsField, false)?.tree
+    const plainContext = state.selection.ranges.some((range) => tree && [range.from, range.to].some((pos) =>
+      chainAt(tree, pos).some((node) => ['FencedCode', 'CodeBlock', 'InlineCode', 'Table', 'TableHeader', 'TableRow', 'TableDelimiter'].includes(node.name))))
+    const enabled = this.settings?.[PASTE_PRESERVE_FORMATTING_KEY] !== false
+    if (!enabled || plainContext || !snapshot.html) {
+      if (plain) dispatchClipboardPaste(target.view.contentDOM, { text: plain, images: [] }, true)
+      return
+    }
+    let converted: ReturnType<typeof htmlToMarkdown>
+    try { converted = htmlToMarkdown(snapshot.html) }
+    catch {
+      if (plain) this.applyRichPaste(plain, plain, 'fallback')
+      else this.toast?.show(t('toast.pasteNoText'), 'error')
+      return
+    }
+    if (!converted.hasFormatting || converted.markdown === plain) {
+      if (plain) dispatchClipboardPaste(target.view.contentDOM, { text: plain, images: [] }, true)
+      return
+    }
+    if (!richPasteDistributionMatches(target.view.state, plain, converted.markdown)) {
+      this.clipboardReadReqId += 1
+      this.clipboardReadTarget = undefined
+      if (plain) this.applyRichPaste(plain, plain, 'fallback')
+      else this.toast?.show(t('toast.pasteNoText'), 'error')
+      return
+    }
+    let keep = true
+    if (this.settings?.[PASTE_ASK_BEFORE_KEY] !== false) {
+      const choice = await this.richPasteDialog?.open()
+      if (!valid() || !choice || choice.decision === 'cancel') return
+      keep = choice.decision === 'keep'
+      if (choice.remember) {
+        this.bridge.postMessage({ kind: 'paste.preferences.set', reqId: ++this.pastePreferenceReqId, preserveFormatting: keep })
+      }
+    }
+    if (!valid()) return
+    this.clipboardReadReqId += 1
+    this.clipboardReadTarget = undefined
+    if (keep) this.applyRichPaste(plain, converted.markdown, 'rich')
+    else if (plain) dispatchClipboardPaste(target.view.contentDOM, { text: plain, images: [] }, true)
+  }
+
+  /** 同步显示两个本地阶段；既有ACK队列分别提交，不另设撤销历史。 */
+  private applyRichPaste(plain: string, formatted: string, feedback: 'rich' | 'fallback'): void {
+    const view = this.view
+    if (!view || !formatted || this.viewMode !== 'live' || this.suspended || view.state.readOnly || !view.state.facet(EditorView.editable)) return
+    this.invalidatePasteFeedback()
+    // seq由bridge持久化并在面板重载后续号，避免新实例复用旧历史的组身份。
+    const group = `${this.sessionId}:${this.seq + 1}:paste-${++this.pasteGroupId}`
+    const stages = planRichPaste(view.state, plain, formatted, feedback === 'rich' && this.settings?.[PASTE_SPLIT_UNDO_KEY] !== false, group)
+    if (stages.length === 0) return
+    this.pasteFeedback.push({ kind: feedback, group, stage: stages.at(-1)!.paste.stage, landed: false })
+    try {
+      for (const stage of stages) {
+        this.recordingPasteStage = stage.paste
+        this.markUndoSegmentBoundary()
+        view.dispatch(stage.transaction)
+      }
+    } finally {
+      this.recordingPasteStage = undefined
+      this.markUndoSegmentBoundary()
+    }
+    view.focus()
+    this.releasePasteFeedback()
+  }
+
+  private releasePasteFeedback(): void {
+    if (this.recordingPasteStage || this.recordingPlainPasteFeedback || this.hasUnlandedLocalEdits() || this.suspended) return
+    for (const feedback of this.pasteFeedback.splice(0)) {
+      if (!feedback.landed) continue
+      if (feedback.kind === 'rich') {
+        this.pasteToastKey = `paste:${feedback.group}`
+        this.toast?.show(t('toast.pasteFormattingKept'), 'neutral', this.pasteToastKey)
+      } else if (feedback.kind === 'plain-image') this.showPlainPasteImageToast(true)
+      else this.toast?.show(t('toast.pasteFormattingFailed'), 'error')
+    }
+  }
+
+  /** 仍走原生CM/table粘贴链；本地反馈ID随事务/暂缓段等实际ACK，不进入宿主协议。 */
+  private applyPlainPasteWithImageFeedback(view: EditorView, snapshot: ClipboardSnapshot): void {
+    const group = `${this.sessionId}:${this.seq + 1}:plain-image-${++this.pasteGroupId}`
+    const feedback = { kind: 'plain-image' as const, group, stage: 'single' as const, landed: false }
+    this.pasteFeedback.push(feedback)
+    const before = view.state.doc
+    this.recordingPlainPasteFeedback = group
+    this.markUndoSegmentBoundary()
+    let handled = false
+    try { handled = dispatchClipboardPaste(view.contentDOM, snapshot, true) }
+    finally {
+      this.recordingPlainPasteFeedback = undefined
+      this.markUndoSegmentBoundary()
+    }
+    if (!handled || view.state.doc === before) {
+      const index = this.pasteFeedback.indexOf(feedback)
+      if (index >= 0) this.pasteFeedback.splice(index, 1)
+    }
+    this.releasePasteFeedback()
+  }
+
+  private invalidatePasteFeedback(): void {
+    for (let i = this.pasteFeedback.length - 1; i >= 0; i--) {
+      if (this.pasteFeedback[i]!.kind === 'rich') this.pasteFeedback.splice(i, 1)
+    }
+    if (this.pasteToastKey) this.toast?.dismiss(this.pasteToastKey)
+    this.pasteToastKey = undefined
+  }
+
+  private finishPasteHistory(message: Pick<Extract<HostToWebview, { kind: 'doc.changed' }>, 'reason' | 'paste'>): void {
+    this.invalidatePasteFeedback()
+    const view = this.view
+    const paste = message.paste
+    if (!view || !message.reason || !paste || this.suspended || this.hasUnlandedLocalEdits()) return
+    if (paste.sessionId === this.sessionId) {
+      const selection = message.reason === 'undo' ? paste.before : paste.after
+      const clamp = (pos: number) => Math.max(0, Math.min(view.state.doc.length, pos))
+      view.dispatch({ selection: EditorSelection.create(selection.ranges.map(r => EditorSelection.range(clamp(r.anchor), clamp(r.head))), selection.mainIndex), annotations: externalSync.of(true) })
+    }
+    if (message.reason === 'undo' && paste.stage === 'format' && paste.hasTextStep) {
+      this.pasteToastKey = `paste:${paste.group}`
+      this.toast?.show(t('toast.pasteFormattingUndone'), 'neutral', this.pasteToastKey)
+    }
+  }
+
+  private showPlainPasteImageToast(inserted: boolean): void {
+    const bindings = getEffectiveBindings(this.keybindingOverrides, 'paste')
+    const name = t('command.clipboard.paste.title')
+    const paste = bindings.length ? `${name} (${formatBindingLabel(bindings[0]!)})` : name
+    this.toast?.show(t(inserted ? 'toast.pasteTextOnly' : 'toast.pasteImageOnly', { paste }), 'warning')
   }
 
   /** 快捷键/命令面板入口（宿主 blockLink.copy 消息）：对光标所在块执行
@@ -8487,7 +8734,7 @@ export class WebviewSyncController {
           text: inserted.sliceString(0, inserted.length),
         })
       })
-      return { seq: txn.seq, changes: rebased }
+      return { ...txn, changes: rebased }
     })
     this.unconfirmed = this.unconfirmed.mapDesc(gCs, false) as ChangeSet
     if (this.ackedChain) {
@@ -8524,7 +8771,7 @@ export class WebviewSyncController {
   }
 
   /** 普通事务与空白格组合净变更共用同一出站/未确认坐标链。 */
-  private recordLocalChangeSet(changeSet: ChangeSet, changes: SerChange[]): void {
+  private recordLocalChangeSet(changeSet: ChangeSet, changes: SerChange[], paste?: PasteStage, plainPasteFeedback?: string): void {
     if (changes.length === 0 || !this.sessionId) {
       this.unconfirmed = this.unconfirmed ? this.unconfirmed.compose(changeSet) : changeSet
       return
@@ -8533,7 +8780,7 @@ export class WebviewSyncController {
     // 标记来自用户主动移光标（或组合开始时刻的停顿回看）；时间停顿仅在
     // 非组合态回看——组合进行中不切段（原子性），组合间停顿已在
     // compositionstart 的 markPauseBoundary 判定过
-    const segmentBoundary = this.undoCursorBoundary ||
+    const segmentBoundary = !!paste || !!plainPasteFeedback || this.undoCursorBoundary ||
       (!this.composing && this.lastLocalInputAt !== null &&
         Date.now() - this.lastLocalInputAt >= UNDO_SEGMENT_PAUSE_MS)
     this.undoCursorBoundary = false
@@ -8544,12 +8791,13 @@ export class WebviewSyncController {
       if (this.deferredLocal && segmentBoundary) {
         // #153：分段边界落地——本笔开新撤销段（切分点落在字符边界，两段
         // 定义域依次衔接，出站坐标由 sendDeferredLocal 依次映射）
-        this.deferredSegments.push(changeSet)
+        this.deferredSegments.push({ changes: changeSet, ...(paste ? { paste } : {}), ...(plainPasteFeedback ? { plainPasteFeedback } : {}) })
       } else if (this.deferredSegments.length > 0) {
         const last = this.deferredSegments.length - 1
-        this.deferredSegments[last] = this.deferredSegments[last].compose(changeSet)
+        const segment = this.deferredSegments[last]!
+        this.deferredSegments[last] = { ...segment, changes: segment.changes.compose(changeSet) }
       } else {
-        this.deferredSegments = [changeSet]
+        this.deferredSegments = [{ changes: changeSet, ...(paste ? { paste } : {}), ...(plainPasteFeedback ? { plainPasteFeedback } : {}) }]
       }
       this.deferredLocal = this.deferredLocal
         ? this.deferredLocal.compose(changeSet)
@@ -8577,10 +8825,11 @@ export class WebviewSyncController {
     this.seq += 1
     this.persistState()
     this.inFlight.add(this.seq)
-    this.sentTxns.push({ seq: this.seq, changes: baseChanges })
+    this.sentTxns.push({ seq: this.seq, changes: baseChanges, ...(paste ? { paste } : {}), ...(plainPasteFeedback ? { plainPasteFeedback } : {}) })
     this.bridge.postMessage({
       kind: 'edit.request', sessionId: this.sessionId, docUri: this.docUri,
       seq: this.seq, baseVersion: this.baseVersion, changes: baseChanges,
+      ...(paste ? { paste } : {}),
     })
   }
 
@@ -8621,10 +8870,11 @@ export class WebviewSyncController {
     // 深度 = 段数，行为等价；每轮迭代重新评估出站守卫）
     while (this.deferredSegments.length > 0 && !this.suspended && !this.blankComposition &&
         this.inFlight.size === 0 && !this.hasBufferedSync()) {
-      const head = this.deferredSegments[0]
+      const segment = this.deferredSegments[0]!
+      const head = segment.changes
       const rest = this.deferredSegments.slice(1)
       const restComposed = rest.length > 0
-        ? rest.reduce((acc, seg) => acc.compose(seg))
+        ? rest.map(seg => seg.changes).reduce((acc, seg) => acc.compose(seg))
         : null
       const changes: SerChange[] = []
       head.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
@@ -8656,7 +8906,7 @@ export class WebviewSyncController {
       this.seq += 1
       this.persistState()
       this.inFlight.add(this.seq)
-      this.sentTxns.push({ seq: this.seq, changes })
+      this.sentTxns.push({ seq: this.seq, changes, ...(segment.paste ? { paste: segment.paste } : {}), ...(segment.plainPasteFeedback ? { plainPasteFeedback: segment.plainPasteFeedback } : {}) })
       this.bridge.postMessage({
         kind: 'edit.request',
         sessionId: this.sessionId,
@@ -8664,6 +8914,7 @@ export class WebviewSyncController {
         seq: this.seq,
         baseVersion: this.baseVersion,
         changes,
+        ...(segment.paste ? { paste: segment.paste } : {}),
       })
       return
     }
@@ -8921,9 +9172,11 @@ export class WebviewSyncController {
     this.refreshReading()
     this.baseVersion = Math.max(lastVersion, ackVersion ?? lastVersion)
     this.sendDeferredLocal()
+    if (groups.length) this.finishPasteHistory(groups.at(-1)!)
     // #148：缓冲收敛且暂缓集已出站（或本就无暂缓输入）——撤销意图可
     // 安全发出（若 sendDeferredLocal 刚发出新请求，释放判定继续等待其 ack）
     this.releasePendingHistory()
+    this.releasePasteFeedback()
   }
 
   private scheduleFlush(): void {
@@ -8944,6 +9197,7 @@ export class WebviewSyncController {
     if (!this.sessionId) {
       return false // 未初始化：让事件继续传播（defaultKeymap 的本地 no-op undo）
     }
+    this.invalidatePasteFeedback()
     if (!this.suspended && this.hasUnlandedLocalEdits()) {
       this.pendingHistoryOps.push(op)
       // 主动推进出站（暂缓集/缓冲有 flush 定时兜底，这里确保已调度）
@@ -10099,7 +10353,33 @@ export class WebviewSyncController {
       fm,
       heading: headingPaint,
       ...(contextMenu ? { contextMenu } : {}),
+      toast: this.collectToastPaint(),
     }
+  }
+
+  private collectToastPaint(): NonNullable<PaintProbe['toast']> {
+    const el = this.rootEl?.querySelector<HTMLElement>('.vsidian-toast')
+    const empty = { visible: false, text: '', severity: '', background: '', foreground: '', pointerEvents: '' }
+    if (!el) return empty
+    try {
+      const style = getComputedStyle(el)
+      const range = document.createRange()
+      range.selectNodeContents(el)
+      const rect = range.getBoundingClientRect()
+      let ancestorsPainted = true
+      for (let node = el.parentElement; node; node = node.parentElement) {
+        const parentStyle = getComputedStyle(node)
+        if (parentStyle.display === 'none' || parentStyle.contentVisibility === 'hidden' || Number(parentStyle.opacity) === 0) {
+          ancestorsPainted = false
+          break
+        }
+      }
+      const visible = rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight &&
+        rect.right > 0 && rect.left < innerWidth && style.display !== 'none' &&
+        style.visibility === 'visible' && Number(style.opacity) > 0 && style.color !== 'rgba(0, 0, 0, 0)' && ancestorsPainted
+      return { visible, text: el.textContent ?? '', severity: el.dataset['severity'] ?? '',
+        background: style.backgroundColor, foreground: style.color, pointerEvents: style.pointerEvents }
+    } catch { return empty }
   }
 
   /**
@@ -10741,6 +11021,24 @@ export class WebviewSyncController {
       // #161 图片粘贴拦截（paste domEventHandler）：无 keymap/filter 顺序
       // 语义（paste 与其他 DOM handler 互不竞争），置于装饰与编辑钩子之后
       // 仅作分组；命中 image/* 剪贴板项即出站宿主落盘，未命中放行默认粘贴
+      EditorView.domEventHandlers({ paste: (event, view) => {
+        if (this.viewMode !== 'live' || this.suspended || view.compositionStarted ||
+            view.state.readOnly || !view.state.facet(EditorView.editable)) return false
+        const data = event.clipboardData
+        if (!data || Array.from(data.items).some((item) => item.kind === 'file' && item.type.startsWith('image/'))) return false
+        const html = data.getData('text/html')
+        if (!html) return false
+        const snapshot: ClipboardSnapshot = { html, images: [] }
+        if (Array.from(data.types).includes('text/plain')) snapshot.text = data.getData('text/plain')
+        const target = { view, doc: view.state.doc, selection: view.state.selection,
+          sessionId: this.sessionId, docUri: this.docUri, modeRevision: this.pasteModeRevision }
+        const reqId = ++this.clipboardReadReqId
+        this.clipboardReadTarget = target
+        this.richPasteDialog?.cancel(false)
+        event.preventDefault()
+        void this.processRichPaste(snapshot, target, reqId)
+        return true
+      } }),
       createImagePaste({
         isEnabled: () => {
           const raw = this.settings?.[IMAGE_PASTE_KEY]
@@ -10822,7 +11120,8 @@ export class WebviewSyncController {
               text: inserted.sliceString(0, inserted.length),
             })
           })
-          this.recordLocalChangeSet(tr.changes, changes)
+          if (!this.recordingPasteStage) this.invalidatePasteFeedback()
+          this.recordLocalChangeSet(tr.changes, changes, this.recordingPasteStage, this.recordingPlainPasteFeedback)
         }
       }),
       // 撤销/重做转发 keymap：置于数组末尾——CM6 同优先级 keymap 按数组
@@ -10830,9 +11129,9 @@ export class WebviewSyncController {
       // undo/redo 绑定在未装 history 扩展时返回 false）先于本转发落穿，
       // 之后才轮到转发请求宿主权威栈
       keymap.of([
-        { key: 'Mod-z', run: () => this.requestHistory('undo') },
-        { key: 'Shift-Mod-z', run: () => this.requestHistory('redo') },
-        { key: 'Mod-y', run: () => this.requestHistory('redo') },
+        { key: 'Mod-z', run: () => this.requestHistory('undo'), stopPropagation: true },
+        { key: 'Shift-Mod-z', run: () => this.requestHistory('redo'), stopPropagation: true },
+        { key: 'Mod-y', run: () => this.requestHistory('redo'), stopPropagation: true },
       ]),
       ViewPlugin.fromClass(class {
         private readonly onStart = captureCompositionStart

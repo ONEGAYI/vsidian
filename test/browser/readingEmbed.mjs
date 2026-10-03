@@ -330,21 +330,46 @@ try {
   assert.equal(back.parseCount, first.stats.parseCount, '回到首屏仍不重复解析')
   const beforeDispose = await longPage.evaluate(() => window.refLifecycleStats())
   await longPage.evaluate(() => window.respondEmbed({ kind: 'view.mode.set', mode: 'live' }))
-  await longPage.locator('.cm-content').first().click()
+  // 父编辑区包含只读嵌入 widget，点击整个 cm-content 的中心会把 DOM
+  // 选区落到 B 卡正文。明确点击父标题并用原生 End 使模型/DOM 光标对齐。
+  const parentLine = longPage.locator('.vsidian-view-live .cm-content > .cm-line')
+    .filter({ hasText: '引用父文档' }).first()
+  await parentLine.click()
+  await longPage.keyboard.press('End')
+  const parentInputPrecondition = await longPage.evaluate(() => {
+    const view = window.controller.getView()
+    const anchor = window.getSelection()?.anchorNode
+    const element = anchor?.nodeType === Node.ELEMENT_NODE ? anchor : anchor?.parentElement
+    return { focused: view.hasFocus && document.activeElement === view.contentDOM,
+      anchorInParentText: Boolean(element?.closest('.cm-line') && view.contentDOM.contains(element) &&
+        !element.closest('.vsidian-embed-card, .vsidian-live-embed')),
+      anchorText: element?.textContent?.slice(0, 100) ?? '', selectionHead: view.state.selection.main.head,
+      parentLineEnd: view.state.doc.line(1).to }
+  })
+  await writeFile(artifactPath(root, 'readingEmbed/parent-input-precondition.json'), `${JSON.stringify(parentInputPrecondition, null, 2)}\n`)
+  assert.equal(parentInputPrecondition.focused, true, '输入测量前必须聚焦父文档编辑器')
+  assert.equal(parentInputPrecondition.anchorInParentText, true, '输入测量前光标必须在父文档文本，不能在只读引用卡片内')
+  assert.equal(parentInputPrecondition.selectionHead, parentInputPrecondition.parentLineEnd, '原生 End 后父模型光标应位于首行末尾')
   await longPage.evaluate(() => window.startInputProbe())
   await longPage.keyboard.type('x')
-  await longPage.waitForTimeout(80)
+  // 等真实出站，而非在固定80ms时截断采样；起点和时间戳均保持原测量，
+  // 慢于80ms的真实延迟照样记录，不注入默认值或重发输入。
+  await longPage.waitForFunction(() => window.inputProbeMs() !== null, null, { timeout: 5000 })
   const inputToEditRequestMs = await longPage.evaluate(() => window.inputProbeMs())
   const parentEdits = await longPage.evaluate(() => window.embedSent().filter((m) => m.kind === 'edit.request'))
   assert.ok(inputToEditRequestMs !== null, '父文档 Live 输入须出站供延迟测量')
+  assert.equal(await longPage.evaluate(() => window.controller.getView().state.doc.toString()),
+    '# 引用父文档x\n\n![[长文]]\n', '原生x只修改父文档首行，不修改B卡或嵌入引用')
   assert.ok(parentEdits.every((m) => m.docUri === 'file:///d%3A/notes/parent.md'), '长 B 在场时输入只写父文档')
+  await writeFile(artifactPath(root, 'readingEmbed/live-parent-input.json'),
+    `${JSON.stringify({ parentInputPrecondition, inputToEditRequestMs, parentEdits }, null, 2)}\n`)
   await longPage.evaluate(() => window.disposeEmbedController())
   const afterDispose = await longPage.evaluate(() => window.refLifecycleStats())
   assert.ok(beforeDispose.activeBlocks > 0, '释放前有真实引用块')
   assert.equal(afterDispose.activeBlocks, 0, '关闭面板后配对释放引用块')
   assert.deepEqual(longErrors, [], '长文页无未捕获异常')
   const longReport = { targetBlocks: 1000, first, middle, last, back, beforeDispose, afterDispose,
-    responseToFirstPaintMs, inputToEditRequestMs }
+    responseToFirstPaintMs, inputToEditRequestMs, parentInputPrecondition }
   await longPage.close()
 
   // 一个超长列表仍是单个挂载块：记录 DOM 下界，不将多块窗口数据泛化。

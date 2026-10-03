@@ -133,6 +133,7 @@ vsidian/
 │   │   ├── mvp-issues.md                      # MVP GitHub Issue 索引
 │   │   ├── mvp.md                             # MVP 规格主文档
 │   │   ├── reference-view-group.md            # 引用视图设置组与跳转目标提示规格
+│   │   ├── rich-text-paste.md                 # 富文本粘贴与分步撤销规格
 │   │   ├── settings-page-visual-refresh.md    # 设置页视觉刷新规格（#155）
 │   │   ├── skeleton-screen.md                 # 编辑器初开骨架屏加载规格
 │   │   ├── style-contract-gate.md             # 契约门禁 CI 接线与远端配置文档

@@ -4,6 +4,8 @@
 
 | 操作 | 生效模式 | 默认绑定 |
 | --- | --- | --- |
+| 粘贴 | Live 正文可编辑 | Ctrl+V / Cmd+V |
+| 粘贴纯文本 | Live 正文可编辑 | Ctrl+Shift+V / Cmd+Shift+V |
 | 粗体 | Live | Ctrl+B |
 | 斜体 | Live | Ctrl+I |
 | 删除线、高亮（#105，默认未绑定，仅 Live 正文生效）、行内代码 | Live | 无 |

@@ -425,17 +425,14 @@ try {
     assert.equal(await tableGroup.locator(`text=${zhCn['setting.experimentalTableRender.title']}`).isVisible(),
       true, '开关行标题应可见')
     // 兼容路由：宿主按退役分页 id 定位（focusSection wordSegment）打开编辑器
-    // 页分词组，定位块滚入主区可视范围（绘制层：几何落在主区矩形内）
+    // 页分词组：外框只容忍原生滚动的亚像素取整，文字/控件必须完整可见。
     await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {
       data: { kind: 'settings.focusSection', section: 'wordSegment', entry: 'engine' } })))
     const wordsegLocated = wordsegGroup.locator('.vsidian-wordseg-block.vsidian-settings-item-located')
     await wordsegLocated.waitFor()
-    assert.equal(await wordsegLocated.evaluate((el) => {
-      const main = document.querySelector('.vsidian-settings-main')
-      const box = el.getBoundingClientRect()
-      const view = main.getBoundingClientRect()
-      return box.top >= view.top && box.bottom <= view.bottom && box.height > 0
-    }), true, '兼容路由定位块应滚动进主区可视范围')
+    const wordsegViewport = await wordsegLocationPaint(wordsegLocated)
+    if (!wordsegViewport.visible) await page.screenshot({ path: path.join(artifacts, `settings-${theme}-wordseg-locate-failure.png`) })
+    assert.equal(wordsegViewport.visible, true, `兼容路由定位块应滚动进主区可视范围：${JSON.stringify(wordsegViewport)}`)
     // 全局搜索「分词」：分词条目归编辑器分组命中，点击定位到组内对应块
     await search.focus()
     await page.keyboard.insertText('分词')
@@ -448,12 +445,8 @@ try {
     await wordsegResult.click()
     const searchLocated = wordsegGroup.locator('.vsidian-wordseg-block.vsidian-settings-item-located')
     await searchLocated.waitFor()
-    assert.equal(await searchLocated.evaluate((el) => {
-      const main = document.querySelector('.vsidian-settings-main')
-      const box = el.getBoundingClientRect()
-      const view = main.getBoundingClientRect()
-      return box.top >= view.top && box.bottom <= view.bottom
-    }), true, '搜索定位块应滚动进主区可视范围')
+    const searchViewport = await wordsegLocationPaint(searchLocated)
+    assert.equal(searchViewport.visible, true, `搜索定位块应滚动进主区可视范围：${JSON.stringify(searchViewport)}`)
     // 切回编辑器分组再走窄屏断言（分页切换会卸载前一分组内容）
     await page.getByRole('button', { name: zhCn['settings.editorCategory'], exact: true }).click()
     await page.setViewportSize({ width: 360, height: 740 })
@@ -480,4 +473,27 @@ try {
 /** 断言用的最简正则转义（词条含（）等全角标点，仅 () 需转义） */
 function escapeRegExp(text) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+async function wordsegLocationPaint(locator) {
+  return locator.evaluate((el) => {
+    const main = document.querySelector('.vsidian-settings-main')
+    const box = el.getBoundingClientRect(), view = main.getBoundingClientRect()
+    // scrollIntoView 按设备像素取整，不能把不足一像素的外框差异当作内容被裁切。
+    const tolerance = 1 / devicePixelRatio
+    const content = [...el.querySelectorAll('.vsidian-wordseg-caption, input, button')]
+    const contentsVisible = content.length > 0 && content.every((item) => {
+      const rect = item.getBoundingClientRect(), cs = getComputedStyle(item)
+      return rect.height > 0 && rect.top >= view.top && rect.bottom <= view.bottom &&
+        cs.display !== 'none' && cs.visibility === 'visible' && Number(cs.opacity) > 0
+    })
+    const caption = el.querySelector('.vsidian-wordseg-caption')
+    const captionStyle = getComputedStyle(caption), captionBox = caption.getBoundingClientRect()
+    const painted = el.contains(document.elementFromPoint(captionBox.left + 2, captionBox.top + captionBox.height / 2)) &&
+      captionStyle.color !== 'rgba(0, 0, 0, 0)' && captionStyle.color !== getComputedStyle(main).backgroundColor
+    return { visible: box.height > 0 && box.top >= view.top - tolerance && box.bottom <= view.bottom + tolerance &&
+        contentsVisible && painted,
+      top: box.top, bottom: box.bottom, viewTop: view.top, viewBottom: view.bottom,
+      tolerance, contentsVisible, painted, captionColor: captionStyle.color }
+  })
 }

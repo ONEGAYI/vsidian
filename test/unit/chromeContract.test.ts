@@ -82,6 +82,9 @@ const DYNAMIC_STATE_ENTRIES: ReadonlySet<string> = new Set([
   'skeleton-column', // #292 同骨架族瞬态：宽度跟随由浏览器 skeletonProbe S3 绘制断言承接
   'tooltip-card', // #300 悬停瞬态（shown 类仅悬停/焦点在场）：单元 tooltipCard 钉委托行为、浏览器 tooltipCard 断可见性与主题跟随绘制
   'tooltip-key', // #300 键位徽章随提示渲染（keys 区 :empty 时不存在）：单元 tooltipCard 钉多段徽章渲染
+  'toast', // #305 仅反馈期间存在：plainPaste 浏览器及 plainPasteHost 真宿主 paint.toast 可见性验证
+  'toast-severity', // #305 同一瞬态卡片的严重性分支：plainPaste 对三种背景与高对比/片段覆盖绘制验证
+  'paste-dialog', // #306 询问会话瞬态：richPaste 浏览器断背景、焦点和局部键盘；richPasteHost断宿主编辑及偏好记忆
 ])
 
 describe('chromeContract 覆盖分工', () => {

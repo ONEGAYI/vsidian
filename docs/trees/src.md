@@ -28,6 +28,7 @@ vsidian/
     │   ├── jiebaTar.ts                 # npm tarball 最小提取器
     │   ├── keybindingService.ts        # 快捷键全局存储服务
     │   ├── linkTarget.ts               # 宿主侧链接目标分类纯逻辑（#10）
+    │   ├── pasteHistoryTracker.ts      # 宿主粘贴阶段历史解释
     │   ├── settingsPage.ts             # 独立设置页面板装配
     │   ├── settingsService.ts          # 宿主设置服务
     │   ├── skeletonScreen.ts           # 骨架屏内联装配纯逻辑（#292）
@@ -97,6 +98,7 @@ vsidian/
         ├── backlinkGrouping.ts         # 反链面板分组排序过滤纯函数
         ├── backlinkPanel.ts            # 反链面板 DOM 与四态渲染（#197）
         ├── blockIdStrip.ts             # 阅读渲染块标记剥离纯函数
+        ├── clipboardPaste.ts           # 多格式剪贴板快照与粘贴适配
         ├── codeCardState.ts            # 卡片共享状态中立模块
         ├── codeHighlight.ts            # 语法高亮引擎装配与缓存
         ├── contextMenuDom.ts           # 统一菜单 DOM 装配与子菜单翻转
@@ -120,6 +122,7 @@ vsidian/
         ├── hoverPopup.ts               # 悬停预览浮层单例
         ├── hoverPopupGeometry.ts       # 悬停浮层几何纯函数
         ├── htmlComment.ts              # 阅读侧 HTML 注释剥离纯函数
+        ├── htmlToMarkdown.ts           # 富文本HTML到Markdown转换
         ├── imagePaste.ts               # 图片粘贴拦截适配层（#161）
         ├── imagePopup.ts               # 图片弹窗全屏浮层单例
         ├── imageResource.ts            # 图片资源状态机（#10）
@@ -171,6 +174,9 @@ vsidian/
         ├── readingVirtualView.ts       # 阅读视图虚拟化装配层
         ├── refContentInstance.ts       # 引用内容实例与挂载生命周期
         ├── refReadingContent.ts        # 引用内容只读 Reading 装配
+        ├── richPasteDialog.css         # 粘贴询问主题与零特异性样式
+        ├── richPasteDialog.ts          # 粘贴格式询问会话模态
+        ├── richPastePlan.ts            # 富文本粘贴两阶段计划
         ├── settingsMain.ts             # 设置页 webview 入口
         ├── settingsPage.css            # 设置页样式
         ├── settingsPageView.ts         # 设置页 webview 视图
@@ -191,6 +197,8 @@ vsidian/
         ├── tableStructure.ts           # 表格导航与增删行列纯函数（#13）
         ├── targetTip.ts                # 跳转目标提示：浮层不将现时的目标位置浮标
         ├── taskToggle.ts               # 任务勾选解析纯函数（#9）
+        ├── toast.css                   # 轻提示主题与公开样式变量
+        ├── toast.ts                    # 编辑器独立轻提示通道
         ├── tooltipCard.css             # 悬停提示共享样式
         ├── tooltipCard.ts              # 悬停提示委托控制器
         ├── tooltipGeometry.ts          # 悬停提示定位几何纯函数

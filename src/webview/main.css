@@ -1707,6 +1707,7 @@ body.vscode-high-contrast #app {
 .vsidian-context-menu [data-icon='cut'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-cut.svg'); }
 .vsidian-context-menu [data-icon='copy'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-copy.svg'); }
 .vsidian-context-menu [data-icon='paste'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-paste.svg'); }
+.vsidian-context-menu [data-icon='pastePlain'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-pastePlain.svg'); }
 .vsidian-context-menu [data-icon='selectAll'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-selectAll.svg'); }
 .vsidian-context-menu [data-icon='comment'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-comment.svg'); }
 .vsidian-context-menu [data-icon='bold'] { --vsidian-context-icon: url('../../media/quick-actions/light/light-bold.svg'); }
@@ -1743,6 +1744,8 @@ body.vscode-dark .vsidian-context-menu [data-icon='copy'],
 body.vscode-high-contrast .vsidian-context-menu [data-icon='copy'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-copy.svg'); }
 body.vscode-dark .vsidian-context-menu [data-icon='paste'],
 body.vscode-high-contrast .vsidian-context-menu [data-icon='paste'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-paste.svg'); }
+body.vscode-dark .vsidian-context-menu [data-icon='pastePlain'],
+body.vscode-high-contrast .vsidian-context-menu [data-icon='pastePlain'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-pastePlain.svg'); }
 body.vscode-dark .vsidian-context-menu [data-icon='selectAll'],
 body.vscode-high-contrast .vsidian-context-menu [data-icon='selectAll'] { --vsidian-context-icon: url('../../media/quick-actions/dark/dark-selectAll.svg'); }
 body.vscode-dark .vsidian-context-menu [data-icon='comment'],

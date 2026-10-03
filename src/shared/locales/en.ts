@@ -9,6 +9,29 @@
 // decor）；#95 补设置页框架、快捷键分页、设置项定义（setting.*）与宿主消息
 // （host.*）词条（键前缀分组见规格「字典架构」表）。
 export const en = {
+  'setting.pastePreserveFormatting.title': 'Preserve formatting when pasting',
+  'setting.pastePreserveFormatting.description': 'Convert supported rich text formatting to Markdown during ordinary paste.',
+  'setting.pasteAskBefore.title': 'Ask before pasting',
+  'setting.pasteSplitUndo.title': 'Undo rich text paste in steps',
+  'setting.pasteSplitUndo.description': 'Undo pasted formatting first, then the text. When disabled, undo the entire paste at once.',
+  'setting.pasteAskBefore.description': 'Ask whether to keep convertible formatting. Enable again to restore the prompt.',
+  'paste.dialog.question': 'Keep the formatting in the pasted content?',
+  'paste.dialog.keep': 'Keep formatting',
+  'paste.dialog.plain': 'Paste text only',
+  'paste.dialog.cancel': 'Cancel',
+  'paste.dialog.remember': 'Do not show this message again',
+  'toast.pasteFormattingKept': 'Formatting in the pasted content has been preserved.',
+  'toast.pasteFormattingUndone': 'Pasted formatting has been undone. Undo again to remove the pasted text.',
+  'toast.pasteFormattingFailed': 'Formatting could not be preserved. Pasted as plain text.',
+  'toast.pasteNoText': 'Cannot paste: no usable text could be extracted.',
+  'toast.pastePreferencesFailed': 'Paste preferences could not be saved. The choice applies only to this paste.',
+  'command.clipboard.paste.title': 'Paste',
+  'command.clipboard.pastePlain.title': 'Paste as plain text',
+  'contextMenu.pastePlain': 'Paste as plain text',
+  'toast.pasteImageOnly': 'An image cannot be pasted as plain text. Use {paste} to paste the image.',
+  'toast.pasteTextOnly': 'Text pasted without the image. Use {paste} to paste the image.',
+  'styleRef.category.toast': 'Light notifications',
+  'styleRef.category.richPaste': 'Paste prompt',
   // ---- settings.（设置页框架：标题、搜索、分类、保存状态、空状态）----
   /** 设置页面板标题（宿主 createWebviewPanel 标题与页面 h1 同源） */
   'settings.pageTitle': 'Vsidian Settings',
