@@ -119,7 +119,7 @@
 
 原单票草稿拆分为上述两票：验证路径不同（真宿主抢占场景 vs 设置页回显）、设置页委托组为独立 UI 体量（`wordSegmentSettings` 先例），两票垂直切片、线性依赖。票面正文以两票 issue 为准（含完整验收清单）。实施在独立工作树进行。
 
-## 八、实施落档（#322，2026-10-03；#323 进行中）
+## 八、实施落档（#322/#323，2026-10-03，PR #325）
 
 分支 `impl/322-guard-core` 实现并全量验证（compile 零错；单测 5473/5473；真宿主 1.82.3 集成 292/292 含三条新例）。**后续改守护检测、时机模型、写回或防骚扰语义前，必读本节。**
 
@@ -131,3 +131,14 @@
 - **集成重置面**：集成 runner 每用例前重置守护 globalState（版本锁/拒绝记录），与设置重置同清单——否则「首装检测」被前序用例写锁污染。
 - **设置键**：`general.defaultEditorGuard`（默认开）走标准注册表链路，`settingsPageView.generalDefs` 已排除防重复呈现；#323 委托组接管呈现。
 - **测试钩子**：四条 `_test.*`（状态读取/版本锁/拒绝记录/重置），`VSIDIAN_TEST_HOOKS` 门控；集成宿主内通知按超时语义短路（同 provider 对话框短路口径）。
+
+### #323 设置页委托组（钉住，不得顺手放宽）
+
+- **四形态展示判定独立于接管判定**：`classifyDefaultEditorDisplay`（vsidian / builtin / other / none）细分 #322 接管判定合并处理的「已是我」与「无记录」；检测序与接管判定同向（glob 长度降序），载荷形态 `DefaultEditorDisplayState`。
+- **状态推送链路**：service `onStateChanged` 在生效判定可能变化的链路（被动层配置变更、`fixNow` 含写回失败）完成后通知；`getDisplayState()` 装配载荷（other 形态经端口反查可读名，失败回退关联值原文）。
+- **常规页装配扩展**：`SettingsPageView` 第五构造参 `generalGroups` 与 `editorGroups` 平行（不复用编辑器页尾槽位，编辑器页尾既有机制零改动）；委托组接口更名 `SettingsPageDelegateGroup`；`categories()` 注册条件计入委托组、`selectSection` 补常规页组路由。
+- **组件契约**：`src/webview/defaultEditorSettings.ts`——状态行四形态、守护开关复用标准设置行结构（值走 `settings.set` 标准链路）、手动按钮已是我禁用；state 推送只重建状态块（开关行 DOM 不动、DOM 顺序恒定）。
+- **协议**：`defaultEditor.state`（宿主→webview）与 `defaultEditor.get` / `defaultEditor.fix`（webview→宿主）。
+- **搜索归属**：常规页委托组条目归常规分组命中——与 #264「委托组条目归所挂分页的分组」同一口径。
+- **视觉断言口径**：设置页无 paint 探针，可见文本/禁用态断言落在 jsdom 同构装配套件（与生产 settingsMain 同构）——设置页既有先例形态；toast 交互与观感六项在人工验证清单。
+- **基线修复留痕**：#322 提交上 `integrationCaseGroups.test.ts` 缺 `getEditorGuardState` mock（全量单测在该基线红，#323 实证），#323 顺带修复并在提交正文留痕；合并态全量 5517/5517 绿终裁。
