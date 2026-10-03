@@ -10966,15 +10966,21 @@ export const cases: Array<[string, () => Promise<void>]> = [
     type IndexState = {
       available: boolean
       excludePatterns: string[]
-      roots: Array<{ fsPath: string; fileCount: number; edgeCount: number; hasData: boolean }>
+      roots: Array<{
+        fsPath: string; fileCount: number; edgeCount: number; hasData: boolean
+        scanning: boolean; verifying: boolean; queued: number
+      }>
       persistedPatterns: string[] | null
     }
     const state = async (): Promise<IndexState> =>
       (await vscode.commands.executeCommand('onegayi.vsidian._test.getVaultIndexState')) as IndexState
-    const rootCount = async (): Promise<number> => {
-      const s = await state()
-      return s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir))?.fileCount ?? -1
+    const completedRootCount = (s: IndexState): number => {
+      const root = s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir))
+      // 设置消息不等待全量扫描；同一快照须既满足计数，也完成该根扫描/核验/排队。
+      return root?.hasData && !root.scanning && !root.verifying && root.queued === 0
+        ? root.fileCount : -1
     }
+    const rootCount = async (): Promise<number> => completedRootCount(await state())
     // 初始：默认模式、无持久化
     const initialCount = await poll('索引就绪', async () => {
       const c = await rootCount()
@@ -10999,7 +11005,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     })
     const excluded = await poll('排除后覆盖范围重算', async () => {
       const s = await state()
-      const c = s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir))?.fileCount ?? -1
+      const c = completedRootCount(s)
       return c === countWithBoth - 2 ? s : undefined
     })
     assert(JSON.stringify(excluded.persistedPatterns) === JSON.stringify(['ex-zone/**']),
@@ -11011,7 +11017,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     })
     await poll('非法项拒绝、合法项生效且覆盖范围还原', async () => {
       const s = await state()
-      const c = s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir))?.fileCount ?? -1
+      const c = completedRootCount(s)
       return JSON.stringify(s.excludePatterns) === JSON.stringify(['**/.git/**']) &&
         JSON.stringify(s.persistedPatterns) === JSON.stringify(['**/.git/**']) &&
         c === countWithBoth ? s : undefined
@@ -11020,7 +11026,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await vscode.commands.executeCommand(CMD.injectSettingsPageMessage, { kind: 'index.resetPatterns' })
     await poll('恢复默认', async () => {
       const s = await state()
-      const c = s.roots.find((r) => normFsPath(r.fsPath) === normFsPath(wsDir))?.fileCount ?? -1
+      const c = completedRootCount(s)
       return c === countWithBoth &&
         JSON.stringify(s.excludePatterns) === JSON.stringify(['**/.git/**', '**/node_modules/**']) &&
         JSON.stringify(s.persistedPatterns) === JSON.stringify(['**/.git/**', '**/node_modules/**'])
