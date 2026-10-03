@@ -2024,6 +2024,30 @@ describe('定位意图送达确认与补发边界（#163 验收反馈：已送�
     await s.send(id, { kind: 'ready' })
     expect(locateOffsets(s, id)).toEqual([7, 12, 12])
   })
+
+  it('带 head 的定位（#318）：重握手补发仍带同 head，不降级为单点', async () => {
+    const s = setup('# 标题\n\n正文段落\n')
+    const id = s.attach()
+    await readyPanel(s, id)
+    s.session.postToPanel(id, { kind: 'view.locate', offset: 7, head: 10 })
+    await s.send(id, { kind: 'ready' })
+    const locates = s.sent.get(id)!.filter((m): m is Extract<HostToWebview, { kind: 'view.locate' }> =>
+      m.kind === 'view.locate')
+    expect(locates.map((m) => m.offset)).toEqual([7, 7])
+    expect(locates[0]).toMatchObject({ head: 10 })
+    expect(locates[1], '补发不得丢弃 head（区间选区降级为单点）').toMatchObject({ head: 10 })
+  })
+
+  it('带 head 的定位 ack 对账：ack 只对 offset，区间意图同样被清除', async () => {
+    const s = setup('# 标题\n\n正文段落\n')
+    const id = s.attach()
+    await readyPanel(s, id)
+    s.session.postToPanel(id, { kind: 'view.locate', offset: 7, head: 10 })
+    await s.send(id, { kind: 'view.locate.ack', offset: 7 })
+    await s.send(id, { kind: 'ready' })
+    // 送达确认后不再补发：head 不参与对账键（协议 ack 仅携带 offset）
+    expect(locateOffsets(s, id)).toEqual([7])
+  })
 })
 
 // ---- 工单 #220：悬停浮层的来源资源路由（B 身份图片解析与链接跳转） ----

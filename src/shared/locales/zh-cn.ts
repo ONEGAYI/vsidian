@@ -111,6 +111,9 @@ export const zhCn: Record<MessageKey, string> = {
   'setting.readableLineWidth.title': '可读行宽',
   'setting.readableLineWidth.description': '实时预览与阅读模式正文列的最大宽度：0 表示铺满可用宽度；设为具体数值后正文按该宽度限宽，在主编辑区内居中，右侧大纲栏展开时自动避让收缩。',
   'setting.readableLineWidthFill': '铺满',
+  /** #318 搜索定位打开提示（editor.searchRevealHint） */
+  'setting.searchRevealHint.title': '搜索定位打开提示',
+  'setting.searchRevealHint.description': '从工作区搜索结果打开笔记并首次激活时，右下角显示带「定位」按钮的提示气泡，点击后跳转到搜索选中的匹配处。提示本身不做任何操作——只有点击按钮才会定位。每篇笔记每会话最多提示一次；命令与键位入口不受此设置影响。',
   /** #222 嵌入卡片限高（阅读模式嵌入内容超出后内部滚动） */
   'setting.embedMaxHeight.title': '嵌入内容最大高度',
   'setting.embedMaxHeight.description': '阅读模式嵌入卡片内容区的最大高度：较短笔记保持自然高度，超出该值的内容在卡片内部滚动。',
@@ -304,6 +307,12 @@ export const zhCn: Record<MessageKey, string> = {
   'host.indexMaintenanceBusy': '索引维护操作正在进行中，请稍后再试。',
   'host.indexCleanupDone': '索引缓存已清理，移除 {count} 个过期代际。',
   'host.indexCleanupFailed': '缓存清理失败：{detail}',
+  /** #318 搜索导航定位恢复命令的失败反馈（成功由 flash 高亮呈现） */
+  'host.searchRevealNotFound': '未能将搜索选中条目匹配到当前 Vsidian 面板（需要先在搜索结果中选中一条匹配）。',
+  'host.searchRevealNoPanel': '当前活动标签页不是 Vsidian 面板——请先在 Vsidian 中打开目标笔记（或切换到其标签页）再定位搜索结果。',
+  /** #318 打开提示（宿主通知气泡 + 定位按钮；弹出本身零副作用） */
+  'host.searchRevealHint': '从搜索结果打开？点此定位到选中的匹配处。',
+  'host.searchRevealHintLocate': '定位',
   // ---- #199 更名/移动引用自动更新（宿主通知；批量操作合并提示）----
   'host.renameRefsUpdated': '已更名「{file}」并更新 {count} 处引用（{files} 个文件）。',
   'host.renameRefsPartiallyUpdated': '已更名「{file}」并更新 {count} 处引用；{skipped} 处因越界或内容变化跳过，未全部更新。',
@@ -657,6 +666,8 @@ export const zhCn: Record<MessageKey, string> = {
    *  评估记录见 docs/specs/keybindings.md） */
   'command.index.rebuild.title': '索引：完整重建',
   'command.index.cleanup.title': '索引：清理当前工作区缓存',
+  /** #318 搜索导航定位恢复（默认未绑定，评估记录见 docs/specs/keybindings.md） */
+  'command.searchReveal.locate.title': '定位到搜索选中结果',
   'command.ui.sidebarToggle.title': '展开或收起右侧栏',
   'command.ui.outlineToggle.title': '显示或隐藏大纲',
   'command.ui.outlineSearch.title': '搜索大纲标题',

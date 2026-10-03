@@ -83,6 +83,8 @@ it('生产注册表（#34 起）：快照为定义默认值（开关均开除 Li
       'experimental.table.blockRender': true,
       // #322 默认编辑器守护（默认开 = 抢占提示可用；呈现归 #323 委托组）
       'general.defaultEditorGuard': true,
+      // #318 搜索定位打开提示（默认关 = 2026-10-04 用户裁定，需在设置页显式开启）
+      'editor.searchRevealHint': false,
     })
   })
 

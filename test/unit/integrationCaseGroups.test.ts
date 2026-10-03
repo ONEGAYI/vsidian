@@ -209,6 +209,8 @@ it('四个 core 分片与第五组无交集、无漏项，其他同领域用例�
   expect(core).toContain('CSS 片段：@import 子目录依赖生效与共享依赖隔离（#129）')
   expect(core).toContain('嵌入：限高设置持久化、回显与卡片热更（#222）')
   expect(core).toContain('Live 视口源锚点：Mermaid 围栏附近切标签页后中心行与光标保持')
+  expect(core).toContain('搜索定位恢复（#318）：显式命令矩阵——首次/重复/多匹配/CRLF/剪贴板恢复')
+  expect(core).toContain('搜索定位打开提示（#318）：首次激活提示/会话去重/设置门控')
   for (let shard = 1; shard <= 4; shard++) {
     const legacy = selectIntegrationCases(all, { shard: `${shard}/4` }).selected.map(([name]) => name)
     const actual = selectIntegrationCases(all, { group: 'core', shard: `${shard}/4` }).selected.map(([name]) => name)

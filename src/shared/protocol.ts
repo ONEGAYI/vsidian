@@ -197,8 +197,11 @@ export type HostToWebview =
   | { kind: 'view.mode.set'; mode: 'live' | 'reading' | 'toggle' }
   /** 定位请求（#6 起，为 #10 查找/跳转预留的宿主 → webview 入口）：
    *  把光标移动到源 offset 并滚动到可见（live）；reading 模式滚动到
-   *  对应锚点块。纯视图操作：不写文档、不产生编辑历史 */
-  | { kind: 'view.locate'; offset: number }
+   *  对应锚点块。纯视图操作：不写文档、不产生编辑历史。
+   *  head（#318）：选区右端（LF 坐标），携带时 live 落位为
+   *  区间选区 [offset, head)——外部搜索导航恢复匹配选区用；缺省单点，
+   *  既有单点语义不变 */
+  | { kind: 'view.locate'; offset: number; head?: number }
   /** 阅读视图性能探针（#7）：reading 模式下对阅读容器往返滚动并回报
    *  挂载/回收/解析次数。要求当前处于 reading 模式，否则回报失败态 */
   | { kind: 'reading.perf'; scrollRounds: number }
@@ -3685,7 +3688,7 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'view.mode.set':
       return v.mode === 'live' || v.mode === 'reading' || v.mode === 'toggle'
     case 'view.locate':
-      return isNonNegativeInt(v.offset)
+      return isNonNegativeInt(v.offset) && (v.head === undefined || isNonNegativeInt(v.head))
     case 'reading.perf':
       return isPositiveInt(v.scrollRounds)
     case 'reading.test.image':

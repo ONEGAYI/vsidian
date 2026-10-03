@@ -129,6 +129,9 @@ export const en = {
   'setting.readableLineWidth.title': 'Readable line width',
   'setting.readableLineWidth.description': 'Maximum width of the content column in the live preview and reading view: 0 fills the available width; a specific value caps the column, which then centers in the editor area and yields to the outline sidebar when space is tight.',
   'setting.readableLineWidthFill': 'Fill',
+  /** #318 search reveal open hint (editor.searchRevealHint) */
+  'setting.searchRevealHint.title': 'Search reveal open hint',
+  'setting.searchRevealHint.description': 'When a note opened from workspace search results becomes active, show a hint notification with a "Locate" button that jumps to the selected match. The hint itself changes nothing — locating only runs after you click. One hint per note per session; command and keybinding entries stay available regardless.',
   /** #222 embed card height cap (reading-view embeds scroll internally past it) */
   'setting.embedMaxHeight.title': 'Embedded note max height',
   'setting.embedMaxHeight.description': 'Maximum height of the reading-view embed card content area: shorter notes keep their natural height while longer content scrolls inside the card up to this limit.',
@@ -325,6 +328,12 @@ export const en = {
   'host.indexMaintenanceBusy': 'An index maintenance operation is already running. Please try again later.',
   'host.indexCleanupDone': 'Index cache cleaned; {count} obsolete generation(s) removed.',
   'host.indexCleanupFailed': 'Cache cleanup failed: {detail}',
+  /** #318: failure feedback for the search reveal command (success is shown via the flash highlight) */
+  'host.searchRevealNotFound': 'Could not match a selected search result to the current Vsidian panel (select a match in the search view first).',
+  'host.searchRevealNoPanel': 'No active Vsidian panel — open the note in Vsidian (or switch to its tab) before revealing a search result.',
+  /** #318 open hint (host notification with a locate button; showing it is side-effect free) */
+  'host.searchRevealHint': 'Opened from search results? Jump to the selected match here.',
+  'host.searchRevealHintLocate': 'Locate',
   // ---- #199 rename/move reference auto-update (host notices; batch merged) ----
   'host.renameRefsUpdated': 'Renamed "{file}" and updated {count} reference(s) in {files} file(s).',
   'host.renameRefsPartiallyUpdated': 'Renamed "{file}" and updated {count} reference(s); {skipped} skipped (out of root or content changed) — not fully updated.',
@@ -704,6 +713,8 @@ export const en = {
    *  评估记录见 docs/specs/keybindings.md） */
   'command.index.rebuild.title': 'Index: full rebuild',
   'command.index.cleanup.title': 'Index: clean workspace cache',
+  /** #318: search reveal (unbound by default; see docs/specs/keybindings.md) */
+  'command.searchReveal.locate.title': 'Reveal selected search result',
   'command.ui.sidebarToggle.title': 'Expand or collapse the sidebar',
   'command.ui.outlineToggle.title': 'Show or hide the outline',
   'command.ui.outlineSearch.title': 'Search headings',

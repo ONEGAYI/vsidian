@@ -89,6 +89,8 @@
 
 **索引维护命令注册为宿主命令、默认未绑定（#198 评估结论）**：「完整重建」（`onegayi.vsidian.index.rebuild`）与「清理当前工作区缓存」（`onegayi.vsidian.index.cleanup`）登记于 extra 操作表（双模式生效 `mode: both`、非写操作 `writes: false`——语义为命令在两模式下均可用；操作本体不写正文，只维护索引缓存）。索引维护属**设置页/宿主域操作**：入口常驻设置页「索引维护」分页（按钮与命令共用同一 wiring），不接管正文输入、不进 webview 键路由；宿主侧注册保证设置页或面板异常时命令面板仍可达（cssSnippets.pause 同模式）。低频操作默认不占键位，用户可按需绑定。
 
+**「定位到搜索选中结果」注册为宿主命令、默认未绑定（#318 评估结论，2026-10-03 落定）**：外部搜索导航定位恢复的显式触发入口（`onegayi.vsidian.searchReveal.locate`，双模式生效 `mode: both`、非写操作 `writes: false`——纯视图定位，view.locate 通道与双链锚点跳转同链）。**显式方案定案、自动捕获停止**：恢复路径依赖内部命令 `search.action.copyMatch` 的剪贴板回读（有非文本剪贴板被覆盖的副作用），且「面板激活自动捕获」存在残留选中与切换标签不可区分的歧义——原型验证实证了三项证据（残留选中歧义误定位、已激活面板无事件盲区、非文本剪贴板覆盖，见 [#318 原型验证结论评论](https://github.com/ONEGAYI/vsidian/issues/318)），按票面停止条件移除自动方案；**显式触发把意图判定交给用户按键，零歧义**，故注册为可绑定命令但默认未绑定（语义、边界与官方 API 落地后的演进路径见 [search-reveal.md](search-reveal.md)）。
+
 **单文件更名/移动的引用自动更新无快捷键（#199 评估结论）**：引用改写由 `onWillRenameFiles`/`onDidRenameFiles` 事件自动驱动（用户在资源管理器/命令面板发起 rename 或 move 即触发，任何 VSCode 原生改名入口都覆盖），不是可枚举目标的用户命令、不注册操作、不占键位（通道语义与实测边界见 [vault-index-backlinks.md](vault-index-backlinks.md) 的「#199 实施落档」节）。外部工具改名不触发 VSCode rename 事件，只刷新索引不改写（「不猜测旧新身份」）。
 
 **目录/批量移动的引用更新无新增键位入口（#200 评估结论）**：与 #199 同一事件通道的批量化扩展——目录 rename/move 与多文件同批移动由同一 `onWillRenameFiles`/`onDidRenameFiles` 驱动（事件内的 files 数组即批量输入），无新的用户主动命令面、不注册操作、不占键位（展开与批量规划语义见 [vault-index-backlinks.md](vault-index-backlinks.md) 的「#200 实施落档」节）。

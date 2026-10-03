@@ -2945,8 +2945,9 @@ export class WebviewSyncController {
       }
       case 'view.locate': {
         // 定位（#10 查找/跳转入口）：光标移到源 offset；reading 滚动到块。
-        // 纯视图操作——事务不带 changes，不产生编辑历史
-        this.locateOffset(message.offset, true)
+        // 纯视图操作——事务不带 changes，不产生编辑历史。head（#318）
+        // 携带时 live 落位区间选区（外部搜索导航恢复匹配选区）
+        this.locateOffset(message.offset, true, message.head)
         // 送达确认（#163 验收反馈）：offset 原样回发（对账不受 clamp/块化
         // 影响）——宿主停发补发，此后重载恢复走持久化锚点，历史程序定位
         // 不再重播、不拉回用户已手动离开的位置
@@ -3658,7 +3659,10 @@ export class WebviewSyncController {
    * 段落整体覆盖半透黄高亮，用户任意操作后消失（大纲点击不闪——已有
    * 条目常驻高亮）。
    */
-  private locateOffset(offset: number, flash = false): void {
+  /** head（#318）：选区右端（LF 坐标），携带时 live 落位为区间选区
+   *  [offset, head)；缺省单点，既有单点语义不变。reading 分支按块定位，
+   *  head 不适用（块级 flash 语义保持） */
+  private locateOffset(offset: number, flash = false, head?: number): void {
     const pos = this.clampToDoc(offset)
     // 新的程序定位应覆盖旧视口记忆；实际滚动事件会重新记录新视口。
     this.clearViewport()
@@ -3683,10 +3687,15 @@ export class WebviewSyncController {
       // 同步到 DOM Selection，用户看不到光标落位；点击大纲即完成导航，
       // 焦点归还正文（继续输入/滚动）
       this.view?.focus()
+      // 区间滚动目标取右端——搜索导航的匹配区间右端更常远离视口（命中
+      // 在行中后段时左端可能已在屏内），reveal 右端保证整个区间可见
+      const revealPos = head !== undefined ? this.clampToDoc(head) : pos
       this.view?.dispatch({
-        selection: { anchor: pos },
+        selection: head !== undefined
+          ? { anchor: pos, head: revealPos }
+          : { anchor: pos },
         effects: [
-          EditorView.scrollIntoView(pos, { y: 'center' }),
+          EditorView.scrollIntoView(revealPos, { y: 'center' }),
           // 高亮并入同一事务（无 changes，仍纯视图操作）
           ...(flash
             ? [anchorFlashSet.of(anchorFlashRangeOf(this.view.state.doc, pos))]
