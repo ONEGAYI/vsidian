@@ -27,3 +27,13 @@ export function mixedEmbedReady(view: {
     cards.some((card) => card.inner === targets.child && card.state === 'content') &&
     readingEmbedCard(cards, targets.descendant)?.state === 'content'
 }
+
+/** #222：宿主保存成功之后还需等待设置回显与 Reading 卡片的实际限高。 */
+export function readingEmbedHeightReady(view: {
+  viewMode?: string
+  settings?: Readonly<Record<string, unknown>>
+  readingEmbed?: readonly { rootHost?: string; state: string; maxHeightPx?: number }[]
+}, height: number): boolean {
+  const card = (view.readingEmbed ?? []).find((item) => item.rootHost === 'reading' && item.state === 'content')
+  return view.viewMode === 'reading' && view.settings?.['embed.maxHeight'] === height && card?.maxHeightPx === height
+}

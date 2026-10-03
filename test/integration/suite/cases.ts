@@ -2,7 +2,7 @@
 // fixture 工作区由 runTest.mjs 在临时目录动态生成（避免 git 换行转换干扰
 // 字节级断言），路径经环境变量 WORKSPACE_DIR 传入。
 import * as vscode from 'vscode'
-import { liveEmbedReady, mixedEmbedReady, readingEmbedCard } from './embedReadiness'
+import { liveEmbedReady, mixedEmbedReady, readingEmbedCard, readingEmbedHeightReady } from './embedReadiness'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { LOCALE_MESSAGES, resolveLocale } from '../../../src/shared/locales'
 import { OBSIDIAN_ALIAS_PROBES } from '../../../src/shared/obsidianAlias'
@@ -12372,21 +12372,20 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const invalid = (await vscode.commands.executeCommand(CMD.setSettings, { 'embed.maxHeight': 99999 })) as { ok: boolean }
     assert(invalid.ok === false, '超上限值必须被拒绝（定义域校验）')
 
-    // 打开嵌入面板：装载时 settings.get 拉取链路带上限高；卡片内联应用
+    // openWithEditor 也可复用前一用例的已装载面板；宿主保存成功不等于
+    // webview 已消费 settings.snapshot/changed。等回显和实际限高同就绪。
     await openWithEditor('嵌入样例.md')
     await waitSessionReady('嵌入样例.md')
     const uri = wsUri('嵌入样例.md').toString()
     await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
-    const loaded = await waitViewState('嵌入样例.md', (v) =>
-      v.viewMode === 'reading' && (v.readingEmbed ?? []).some((c) => c.state === 'content'))
-    const card = loaded.readingEmbed!.find((c) => c.state === 'content')!
+    const loaded = await waitViewState('嵌入样例.md', (v) => readingEmbedHeightReady(v, 600))
+    const card = loaded.readingEmbed!.find((c) => c.rootHost === 'reading' && c.state === 'content')!
     assert(card.maxHeightPx === 600, `装载时卡片限高应为设置值 600（实际 ${String(card.maxHeightPx)}）`)
 
     // 广播热更：保存新值 → 已开面板的卡片即时更新
     await vscode.commands.executeCommand(CMD.setSettings, { 'embed.maxHeight': 320 })
-    const updated = await waitViewState('嵌入样例.md', (v) =>
-      (v.readingEmbed ?? []).some((c) => c.state === 'content' && c.maxHeightPx === 320))
-    assert(updated.readingEmbed!.some((c) => c.maxHeightPx === 320), '设置变更应热更到场卡片限高')
+    const updated = await waitViewState('嵌入样例.md', (v) => readingEmbedHeightReady(v, 320))
+    assert(updated.readingEmbed!.some((c) => c.rootHost === 'reading' && c.maxHeightPx === 320), '设置变更应热更到场卡片限高')
 
     // 收尾：恢复默认并切回 live
     await vscode.commands.executeCommand(CMD.setSettings, { 'embed.maxHeight': 480 })

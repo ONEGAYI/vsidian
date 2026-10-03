@@ -2,7 +2,54 @@
 import { expect, it, vi } from 'vitest'
 import { EmbedCardManager } from '../../src/webview/embedCard'
 import { isWebviewToHost, type WebviewToHost } from '../../src/shared/protocol'
-import { liveEmbedReady, mixedEmbedReady, readingEmbedCard } from '../integration/suite/embedReadiness'
+import { liveEmbedReady, mixedEmbedReady, readingEmbedCard, readingEmbedHeightReady } from '../integration/suite/embedReadiness'
+
+it('#222：已装载卡片仍为480时，持久层600不能提前完成webview限高等待', () => {
+  const reading = document.createElement('div')
+  reading.className = 'vsidian-view-reading'
+  document.body.append(reading)
+  const sent: WebviewToHost[] = []
+  let height = 480
+  const manager = new EmbedCardManager({
+    session: () => ({ sessionId: 'height', docUri: 'file:///parent.md' }),
+    send: (message) => sent.push(message), maxHeightPx: () => height,
+  })
+  try {
+    const host = document.createElement('div')
+    reading.append(host)
+    manager.mountCardInto(host, '目标', 0, 8, 'reading')
+    const request = sent.find((message) => message.kind === 'hover.request')
+    expect(request?.kind).toBe('hover.request')
+    if (request?.kind !== 'hover.request') throw new Error('目标请求未生成')
+    manager.notifyResult({ kind: 'hover.result', reqId: request.reqId, instanceId: request.instanceId,
+      ok: true, target: { fsPath: '/target.md', relPath: 'target.md' }, version: 1,
+      text: '# 内容', range: { start: 0, end: 4 }, scope: { kind: 'full' } })
+    const snapshot = () => ({ viewMode: 'reading', settings: { 'embed.maxHeight': height }, readingEmbed: manager.probe() })
+    expect(manager.probe()[0]).toMatchObject({ state: 'content', maxHeightPx: 480, rootHost: 'reading' })
+    expect(readingEmbedHeightReady(snapshot(), 600)).toBe(false)
+    height = 600
+    manager.setMaxHeight(height)
+    expect(readingEmbedHeightReady(snapshot(), 600)).toBe(true)
+    height = 320
+    manager.setMaxHeight(height)
+    expect(readingEmbedHeightReady(snapshot(), 320)).toBe(true)
+  } finally {
+    manager.dispose()
+    reading.remove()
+  }
+})
+
+it('#222：限高等待同时要求设置回显与活动Reading卡片，不接受旧值或隐藏根', () => {
+  const view = { viewMode: 'reading', settings: { 'embed.maxHeight': 600 },
+    readingEmbed: [{ rootHost: 'reading', state: 'content', maxHeightPx: 600 }] }
+  expect(readingEmbedHeightReady(view, 600)).toBe(true)
+  expect(readingEmbedHeightReady({ ...view, settings: { 'embed.maxHeight': 480 } }, 600)).toBe(false)
+  expect(readingEmbedHeightReady({ ...view, readingEmbed: [{ ...view.readingEmbed[0]!, maxHeightPx: 480 }] }, 600)).toBe(false)
+  expect(readingEmbedHeightReady({ ...view, readingEmbed: [{ ...view.readingEmbed[0]!, rootHost: 'live' }] }, 600)).toBe(false)
+  expect(readingEmbedHeightReady({ ...view, readingEmbed: [{ ...view.readingEmbed[0]!, rootHost: 'hover' }] }, 600)).toBe(false)
+  expect(readingEmbedHeightReady({ ...view, readingEmbed: [{ ...view.readingEmbed[0]!, state: 'loading' }] }, 600)).toBe(false)
+  expect(readingEmbedHeightReady({ ...view, viewMode: 'live' }, 600)).toBe(false)
+})
 
 const mixedTargets = { parent: 'B 混排', child: '../two/C', descendant: '../three/D' }
 
