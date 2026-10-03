@@ -13500,6 +13500,91 @@ export const cases: Array<[string, () => Promise<void>]> = [
     console.log('[P2-04] CRLF 坐标保真 + 不可安全写回暂停（目标文本断言）通过')
   }],
 
+  // ---- P2-10（#287）引用完整 Live 操作落 B 不落 A：焦点在嵌入内部 Live
+  // 编辑器内时，格式命令（format.command 宿主回发路径）、表格创建与
+  // frontmatter Popover 编辑全部指向实际目标 B（经 B 的 DocumentSession
+  // 虚拟面板写回宿主权威文本）；A 的文本/dirty/appliedEdits 零变化；实例
+  // 释放（切 Reading）后 Popover 关闭（浮层不残留可写死视图）。 ----
+  ['P2-10 引用完整 Live 操作：格式/表格/属性 Popover 落 B 不落 A（#287）', async () => {
+    await openWithEditor('p210-操作嵌入.md')
+    await waitSessionReady('p210-操作嵌入.md')
+    const uri = wsUri('p210-操作嵌入.md').toString()
+    const targetUri = wsUri('p210-操作目标.md')
+    const parentBefore = await readDisk('p210-操作嵌入.md')
+    const targetBefore = await readDisk('p210-操作目标.md')
+    const parentDoc = await vscode.workspace.openTextDocument(wsUri('p210-操作嵌入.md'))
+    const session0 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+
+    // 嵌入继承父 Live → 绑定端口（装载 + init 完成；liveTextLen ≥ 0 = init
+    // 已装载全文）
+    await waitViewState('p210-操作嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p210-操作目标' && c.liveBound === true &&
+        (c.liveTextLen ?? -1) >= 0 && c.internalMode === 'live')
+        ? true : false)
+    const bDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())!
+    const fmPrefix = '---\ntags:\n  - 甲\n---\n# p210 操作目标\n\n'.length
+
+    // 1) 格式命令（焦点嵌入 → 目标 B）：选「首段」加粗
+    const seg = '首段'
+    const segAt = fmPrefix + '目标'.length
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.focus', inner: 'p210-操作目标', pos: segAt, to: segAt + seg.length,
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'format.command', op: 'bold',
+    })
+    await poll('格式命令写 B（加粗首段）', () =>
+      bDoc.getText().includes(`**${seg}**`) ? true : undefined)
+    assert(bDoc.isDirty, '格式操作后目标 B dirty')
+    assert(parentDoc.getText() === parentBefore && !parentDoc.isDirty, 'A 零写回且零 dirty（格式命令不落 A）')
+    const session1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(session1.appliedEdits === session0.appliedEdits,
+      `A 会话 appliedEdits 零推进（格式命令经 B 会话；实际 ${session1.appliedEdits}）`)
+
+    // 2) 表格创建命令（焦点嵌入 → 目标 B）：文末插入表格骨架
+    const textNow = bDoc.getText()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.focus', inner: 'p210-操作目标', pos: textNow.length - 1,
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.create' })
+    await poll('表格创建写 B', () => bDoc.getText().includes('| --- | --- |') ? true : undefined)
+    assert(parentDoc.getText() === parentBefore, '表格创建不写 A')
+
+    // 3) frontmatter Popover 捕获嵌入实例：打开（A 无 fm——全文档唯一 fm 卡
+    //    在嵌入编辑器内）→ 数组加项 → 写 B 头区；A 不变
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'fm.test.click', action: 'edit-button',
+    })
+    await waitViewState('p210-操作嵌入.md', (v) => v.fmPopoverOpen === true)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'fm.test.click', action: 'popover-add-item', index: 0,
+    })
+    await poll('Popover 加项写 B 头区', () =>
+      bDoc.getText().includes('  - 甲\n  - item\n') ? true : undefined)
+    assert(parentDoc.getText() === parentBefore && !parentDoc.isDirty,
+      'Popover 编辑不写 A（父文档保持原文与干净）')
+
+    // 4) 实例释放联动：Popover 打开状态下切回 Reading（teardownLive）→
+    //    浮层关闭（不残留可写死视图）；后续 format 命令回到 A 语境被
+    //    A 自身守卫处理（A 无选区包裹空围栏属既有语义，此处只断言 B 不再
+    //    被写入——释放后无写路径）
+    const bTextAtRelease = bDoc.getText()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.mode', inner: 'p210-操作目标', mode: 'reading',
+    })
+    await waitViewState('p210-操作嵌入.md', (v) =>
+      v.fmPopoverOpen === false &&
+      (v.readingEmbed ?? []).every((c) => c.inner !== 'p210-操作目标' || c.liveBound !== true)
+        ? true : false)
+    await new Promise((r) => setTimeout(r, 400))
+    assert(bDoc.getText() === bTextAtRelease, '实例释放后 B 无迟到写入')
+
+    // 现场还原：保存 B（清 dirty）→ 关闭 A 前保持工作区整洁
+    await bDoc.save()
+    assert(await readDisk('p210-操作目标.md') !== targetBefore, '目标保存后磁盘已更新')
+    console.log('[P2-10] 格式/表格/Popover 操作落 B 不落 A 通过')
+  }],
+
   // #270 dirty「主动丢弃未保存内容」的覆盖层通用退役信号。1.86 事件面实证
   //（探针轮落 .vscode-test 报告）：Vsidian 面板丢弃有 tabClosed+close 事件
   //（既有 onDidClose 接线已退役，本例 A 段回归钉）；普通文本编辑器丢弃

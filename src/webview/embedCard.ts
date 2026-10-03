@@ -41,6 +41,7 @@ import { refErrorText, releaseRefSourceLease } from './refReadingContent'
 import { WIKILINK_CLASS_NAMES } from '../shared/wikilink'
 import { LiveEditorInstance } from './liveInstance'
 import { ImageResourceManager, isDirectImageSrc } from './imageResource'
+import { closeFmPopoverForView } from './frontmatterPopover'
 import type { SettingsPayload } from '../shared/settings'
 import { EditorView } from '@codemirror/view'
 
@@ -133,6 +134,15 @@ export interface EmbedCardContext {
   /** #223 Live 挂载的布局通知（view.requestMeasure）：卡片高度异步变动
    *  （内容装载、图片晚到）须唤醒 CM6 视口测量；Reading 侧无需提供 */
   requestMeasure?(): void
+  /** P2-10（#287）嵌入内部 Live 的右键菜单入口：编辑器 contentDOM 的
+   *  contextmenu 转发根控制器打开统一菜单（根按传入 view 判定区域快照
+   *  并捕获目标——执行前重验实例存活与文档一致，见 syncController 的
+   *  openContextMenu/runContextMenuCommand）。未提供时保持现状（浏览器
+   *  原生菜单，卡片域 stopPropagation 语义不变——Reading 内容不接管） */
+  onLiveContextMenu?(inner: string, view: EditorView, event: MouseEvent): void
+  /** P2-10 实例事务/选区更新旁路观测（快速操作条等根 chrome 随焦点嵌入
+   *  的编辑联动刷新；轻量回调，重活由根自行调度） */
+  onLiveUpdate?(update: { docChanged: boolean; selectionSet: boolean }): void
 }
 
 /** 装载结果缓存（父文档会话内；#224 变更订阅推送后按目标失效清除） */
@@ -155,6 +165,15 @@ interface EmbedLiveState {
   images: ImageResourceManager | null
   /** 首开定位完成标记（init 后锚点定位/会话选区恢复只做一次） */
   initialLocated: boolean
+}
+
+/** P2-10 嵌入实例的公开目标形状（菜单执行重验与操作分派的观测面） */
+export interface EmbedLiveTarget {
+  fsPath: string
+  portId: string | null
+  docUri: string | null
+  suspended: boolean
+  instance: LiveEditorInstance
 }
 
 /** 嵌入实例状态（跨挂载保持——视口回收不清除仍可见实例的状态） */
@@ -989,7 +1008,10 @@ export class EmbedCardManager {
   }
 
   /** 创建嵌入 Live 实例（portId/docUri 已知后；EditorView 空文档，init
-   *  推送装载全文）。图片管理器走 B 身份来源化请求（既有守卫通道）。 */
+   *  推送装载全文）。图片管理器走 B 身份来源化请求（既有守卫通道）。
+   *  P2-10：contentDOM 的 contextmenu 转发根统一菜单（携带 inner 与实例
+   *  view——根打开时捕获目标，执行前重验）；实例事务经 onLiveUpdate
+   *  通知根联动（快速操作条状态随焦点嵌入的编辑刷新）。 */
   private createLiveInstance(entry: EmbedEntry): void {
     const live = entry.live
     if (!live || !live.portId || !live.docUri || live.instance) {
@@ -1033,9 +1055,20 @@ export class EmbedCardManager {
           this.refreshLiveChrome(entryRef)
         }
       },
+      // P2-10：根 chrome 联动（快速操作条状态刷新）——轻量转发，根自行调度
+      onViewUpdate: (update) => this.context.onLiveUpdate?.(update),
     })
     live.instance.setSession(live.portId, live.docUri)
     hostHandle.liveEl.appendChild(live.instance.getView()!.dom)
+    // P2-10 嵌入内右键菜单：转发根（根打开统一菜单并捕获实例目标）。
+    // 监听随 contentDOM 生命周期（view.destroy 移除 DOM，无需解绑）
+    const menuView = live.instance.getView()!
+    const innerRef = entry.inner
+    menuView.contentDOM.addEventListener('contextmenu', (event) => {
+      if (this.context.onLiveContextMenu) {
+        this.context.onLiveContextMenu(innerRef, menuView, event)
+      }
+    })
     this.applyInternalDom(hostHandle)
     this.refreshModeChrome(hostHandle)
   }
@@ -1161,7 +1194,9 @@ export class EmbedCardManager {
   }
 
   /** 销毁目标编辑端口：保存选区（occurrence 会话记忆）→ 销毁实例与图片
-   *  管理器 → 出站 unbind → 清内容预算（Reading 重渲染时重新计费） */
+   *  管理器 → 出站 unbind → 清内容预算（Reading 重渲染时重新计费）。
+   *  P2-10：属该实例的 frontmatter Popover 随实例关闭（浮层单例持有
+   *  view——实例释放后迟到输入不得经死视图派发） */
   private teardownLive(entry: EmbedEntry): void {
     const live = entry.live
     if (!live) {
@@ -1171,6 +1206,7 @@ export class EmbedCardManager {
     if (view) {
       const sel = view.state.selection.main
       entry.liveSelection = { anchor: sel.anchor, head: sel.head }
+      closeFmPopoverForView(view)
     }
     live.instance?.destroy()
     live.images?.dispose()
@@ -1260,32 +1296,88 @@ export class EmbedCardManager {
   /** 焦点所在嵌入的目标保存（Ctrl+S 焦点路由；焦点不在任何嵌入编辑器内
    *  返回 false——宿主默认保存 A 不被拦截） */
   focusedLiveSave(): boolean {
-    const active = document.activeElement
-    if (!(active instanceof Node)) {
+    const entry = this.focusedLiveEntry()
+    if (!entry) {
       return false
     }
-    for (const entry of this.entries.values()) {
-      const dom = entry.live?.instance?.getView()?.dom
-      if (dom && dom.contains(active)) {
-        this.saveLive(entry)
-        return true
-      }
-    }
-    return false
+    this.saveLive(entry)
+    return true
   }
 
-  /** 焦点所在嵌入的模式切换（键位入口 embedToggleMode；无焦点嵌入零操作） */
-  toggleFocusedMode(): void {
+  /** P2-10 焦点所在嵌入的内部 Live 实例（操作目标解析：焦点在嵌入编辑器
+   *  内返回实例，否则 null——根的格式/表格/多光标等操作据此分派 B） */
+  focusedLive(): LiveEditorInstance | null {
+    const entry = this.focusedLiveEntry()
+    return entry?.live?.instance ?? null
+  }
+
+  /** P2-10 view → 嵌入实例目标配对（菜单执行前重验：view 仍属于在场端口
+   *  才允许执行；实例释放后返回 undefined——已销毁 view 不得接收写事务） */
+  liveViewEntry(view: EditorView): EmbedLiveTarget | undefined {
+    for (const entry of this.entries.values()) {
+      const live = entry.live
+      if (live?.instance && live.instance.getView() === view) {
+        return {
+          fsPath: live.fsPath,
+          portId: live.portId,
+          docUri: live.docUri,
+          suspended: live.suspended,
+          instance: live.instance,
+        }
+      }
+    }
+    return undefined
+  }
+
+  /** P2-10 显式关闭焦点嵌入的编辑会话（embedClose 操作执行体）：强制切
+   *  回 Reading 并释放端口（occurrence 会话记忆保留）。目标 dirty 由宿主
+   *  文本管线持有，编辑器销毁不丢弃已写入修改；关闭确认界面属 P2-05 */
+  closeFocused(): boolean {
+    const entry = this.focusedLiveEntry()
+    if (!entry || !entry.live) {
+      return false
+    }
+    entry.modeOverride = 'reading'
+    this.applyInternalMode(entry)
+    return true
+  }
+
+  /** P2-10 冲突「放弃当前版本」（conflictDiscard 执行体）：焦点嵌入处于
+   *  冲突暂停时经端口出站 sync.request（宿主回 doc.resync → 全文重置并
+   *  解除暂停 = 放弃本次未提交输入版本，不回滚整个 B）。无暂停现场零
+   *  操作；对比（conflictCompare）与取消（conflictCancel）为登记占位，
+   *  完整选择界面属 P2-12 */
+  focusedConflictDiscard(): boolean {
+    const entry = this.focusedLiveEntry()
+    const live = entry?.live
+    if (!entry || !live || !live.suspended) {
+      return false
+    }
+    this.sendRefEditOut(entry, { kind: 'sync.request' })
+    return true
+  }
+
+  /** 焦点（document.activeElement）所在嵌入的 entry（无焦点嵌入 null） */
+  private focusedLiveEntry(): EmbedEntry | null {
     const active = document.activeElement
     if (!(active instanceof Node)) {
-      return
+      return null
     }
     for (const entry of this.entries.values()) {
       const dom = entry.live?.instance?.getView()?.dom
       if (dom && dom.contains(active)) {
-        this.toggleMode(entry)
-        return
+        return entry
       }
+    }
+    return null
+  }
+
+  /** 焦点所在嵌入的模式切换（键位入口 embedToggleMode；无焦点嵌入编辑器
+   *  零操作——P2-04 评估口径保持，Reading 态切换走头部按钮） */
+  toggleFocusedMode(): void {
+    const entry = this.focusedLiveEntry()
+    if (entry) {
+      this.toggleMode(entry)
     }
   }
 
@@ -1401,6 +1493,26 @@ export class EmbedCardManager {
       return false
     }
     view.dispatch({ changes: { from: pos, to: pos, insert: text } })
+    return true
+  }
+
+  /** P2-10 测试钩子配套：聚焦指定嵌入的内部 Live 编辑器（可选设置光标/
+   *  选区；焦点目标分派按真实 activeElement 判定——与用户点击编辑器同一
+   *  语义） */
+  focusEmbed(inner: string, pos?: number, to?: number, occurrence = 0): boolean {
+    const entry = this.entryOfInner(inner, occurrence)
+    const view = entry?.live?.instance?.getView()
+    if (!entry || !view) {
+      return false
+    }
+    const anchor = typeof pos === 'number' ? Math.min(pos, view.state.doc.length) : undefined
+    if (anchor !== undefined) {
+      const head = typeof to === 'number'
+        ? Math.min(Math.max(to, 0), view.state.doc.length)
+        : anchor
+      view.dispatch({ selection: { anchor, head } })
+    }
+    view.focus()
     return true
   }
 

@@ -100,7 +100,12 @@ export class LiveMermaidWidget extends WidgetType {
           }
         },
         onPopup: () => {
-          openGraphicPopup(this.language, this.code)
+          // P2-10：弹窗按本 widget 所属编辑器的全文刷新（嵌入内部 Live 的
+          // 图形块归 B，不读主正文）；视图已脱挂（极端时序）时回落全局源
+          const view = EditorView.findFromDOM(frame)
+          openGraphicPopup(this.language, this.code, view
+            ? { docSource: () => view.state.doc.toString() }
+            : undefined)
         },
       }),
     )

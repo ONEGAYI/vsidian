@@ -617,6 +617,12 @@ export const zhCn: Record<MessageKey, string> = {
   /** #221 预览当前链接（手动打开悬停浮层：键盘进入浮层、Esc 返回触发处） */
   'command.ui.hoverPreviewLink.title': '预览当前链接',
   'command.ui.embedToggleMode.title': '切换引用的内部视图模式',
+  /** P2-10 引用 Live 操作入口（保存目标/显式关闭/冲突三项；默认均未绑定） */
+  'command.embed.saveTarget.title': '保存焦点引用的目标',
+  'command.embed.close.title': '关闭焦点引用的编辑会话',
+  'command.conflict.compare.title': '对比并解决',
+  'command.conflict.discard.title': '放弃当前版本',
+  'command.conflict.cancel.title': '取消冲突选择',
 
   // ---- #159 锚点跳转（块引用定位与本文件锚点）----
   /** 块 id 缺失提示（与标题缺失同款「打开后提示」行为） */
