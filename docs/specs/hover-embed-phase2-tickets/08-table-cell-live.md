@@ -70,4 +70,4 @@ src/webview/tableCellEmbed.ts、embedCard.ts 与父表格输入路径；test/bro
 
 合并树复验（`logs/merge-p2-08/`）：compile 通过、全量 unit 245 文件/5276 例、browser 11 套件（tableCellLive + 表格族 2 + 嵌入族 6 + hoverLive/hoverRefresh）、定向集成 20/20（加 P2-06×2、P2-12×1 复盖 remapSources 热区相邻票）。
 
-**移交父代理的边界**：格内**连击两字**（无停顿）在基线既有暂缓窗口触发 `\|` 转义丢失并使整表降级——embed-free 基线同样复现（`logs/p2-08/diag-base2.mjs`），属表格输入族既有缺陷非本票引入，已另开 [#315](https://github.com/ONEGAYI/vsidian/issues/315) 跟踪。同一覆盖变更内多枚同源文实例被重排时按文档序分配命中位——身份证互换仅影响选区/滚动记忆（目标一致，用户不可见）。格内空白表格组合规划（`isLiveActive:false`）与图片粘贴仍是 P2-10/P2-11 既有缺口，P2-14 收口核对。
+**移交父代理的边界**：格内**连击两字**（无停顿）在基线既有暂缓窗口触发 `\|` 转义丢失并使整表降级——embed-free 基线同样复现（`logs/p2-08/diag-base2.mjs`），属表格输入族既有缺陷非本票引入，已另开 [#315](https://github.com/ONEGAYI/vsidian/issues/315) 跟踪（2026-10-03 注：#315 复现尝试三层证据均不可复现——真实 Chromium 9 种驱动组合、jsdom 现状核、机制归因：物理键 keydown-forceFlush 与 DOM 回报 filter 管道双防线覆盖；原探针已删形态不可考；处置待定，tableCellLive 场景 C2 钉住连击不丢 `\|` 转义契约防回归）。同一覆盖变更内多枚同源文实例被重排时按文档序分配命中位——身份证互换仅影响选区/滚动记忆（目标一致，用户不可见）。格内空白表格组合规划（`isLiveActive:false`）与图片粘贴仍是 P2-10/P2-11 既有缺口，P2-14 收口核对。
