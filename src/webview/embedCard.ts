@@ -1378,6 +1378,59 @@ export class EmbedCardManager {
     }
   }
 
+  /** P2-09 递归补齐（review-loops B-1）：B 自身事务使其内孙卡区间平移时，
+   *  迁移孙卡的状态库键与源区间（occurrence 键 = `${直接父 hostId}/${start}::
+   *  ${inner}`）——widget 随后按新坐标重挂即命中迁移实例，装载缓存/内部
+   *  Live 端口/编辑现场保持。机制与根级 remapSources（P2-07）同构，坐标
+   *  空间为直接父 B 的全文（A 的事务不经过此路径——根级键由 remapSources
+   *  负责，两层互不重叠）。坍缩（孙卡引用在 B 内被改写/删除，区间倒挂）
+   *  冻结死键留给 LRU 淘汰；保文本重定位判定不接（B 内表格重写孙卡行走
+   *  重载装载的退化，语义安全）。经 createLiveInstance 的
+   *  transactionExtender 装配（B 实例的事务，docView 更新前执行）。 */
+  remapChildSources(parentHostId: string, changes: ChangeSet): void {
+    if (this.entries.size === 0) {
+      return
+    }
+    const moves: Array<{ entry: EmbedEntry; newKey: string; start: number; end: number }> = []
+    const pendingKeys = new Set<string>()
+    for (const entry of this.entries.values()) {
+      if (entry.popupRoot || entry.collapsed ||
+          entry.content.source.parentInstanceId !== parentHostId) {
+        continue // 浮窗根非坐标键；冻结死键不再平移；只动本实例的直接子卡
+      }
+      if (entry.sourceEnd > changes.length) {
+        // 坐标域防御：孙卡区间不在该事务的定义域（实例初始化的空文档
+        // 全文装载——孙卡 entry 常先于实例存在：Reading 侧块升级先建键，
+        // Live 实例后建）。装载后区间以既有键对位（全文即其坐标系），
+        // 无从也无需迁移
+        continue
+      }
+      const start = changes.mapPos(entry.sourceStart, 1)
+      const end = changes.mapPos(entry.sourceEnd, -1)
+      if (start === entry.sourceStart && end === entry.sourceEnd) {
+        continue
+      }
+      if (end <= start) {
+        entry.collapsed = true // 真删除/改写：键冻结原坐标（undo 回填仍命中缓存）
+        continue
+      }
+      const newKey = `${parentHostId}/${start}::${entry.inner}`
+      if (newKey === entry.key || this.entries.has(newKey) || pendingKeys.has(newKey)) {
+        continue // 防御：撞键放弃迁移，保持现状语义
+      }
+      pendingKeys.add(newKey)
+      moves.push({ entry, newKey, start, end })
+    }
+    for (const { entry, newKey, start, end } of moves) {
+      this.entries.delete(entry.key)
+      entry.key = newKey
+      entry.sourceStart = start
+      entry.sourceEnd = end
+      entry.content.source.range = { start, end }
+      this.entries.set(newKey, entry)
+    }
+  }
+
   /** 生效内部模式：手动覆盖优先；缺省跟随直接父视图（根级嵌入取根面板
    *  模式，子卡取直接父嵌入的内部模式——Q19 语义） */
   private effectiveMode(entry: EmbedEntry): 'reading' | 'live' {
@@ -1676,7 +1729,16 @@ export class EmbedCardManager {
           })
         },
       },
-    }, [this.embedEscapeKeymap(entryRef), liveEmbedChildCards({
+    }, [this.embedEscapeKeymap(entryRef), EditorState.transactionExtender.of((tr) => {
+      // B 实例事务的孙卡键迁移（review-loops B-1）：docView 更新（widget
+      // toDOM）前迁移，新 widget 按新坐标重挂即命中——与根级
+      // rootOwnedViewExtensions 的 remapSources 装配同构（每实例只动自己
+      // 的直接子卡，parentHostId 限定）
+      if (tr.docChanged) {
+        this.remapChildSources(entryRef.hostId, tr.changes)
+      }
+      return null
+    }), liveEmbedChildCards({
       parentHostId: entryRef.hostId,
       panelDocUri: this.context.session().docUri ?? '',
       sourceDocUri: live.fsPath,
@@ -2263,30 +2325,46 @@ export class EmbedCardManager {
     docSnapshot: string
   } | null = null
 
+  /** 意图就此死亡（无确认链发起：无会话/暂停/他意图在场/会话身份缺失）
+   *  时同步清删除拦截账——closePendingDelete 若滞留，mainDocChangeFilter
+   *  对后续一切覆盖活跃引用区间的删除事务静默吞除（零反馈），主编辑器
+   *  删除功能失效直至该 entry 离屏回收（review-loops A-1 回归） */
+  private clearDeadDeleteIntent(entry: EmbedEntry): void {
+    if (this.closePendingDelete?.entry === entry) {
+      this.closePendingDelete = null
+    }
+  }
+
   /** 显式退出意图统一入口 */
   requestClose(entry: EmbedEntry, intent: CloseIntent): void {
     const live = entry.live
     if (!live || live.status !== 'bound' || !live.portId) {
+      this.clearDeadDeleteIntent(entry) // 意图死亡：删除拦截账不滞留
       return // 无编辑会话（Reading 态）——退出意图无对象
     }
     if (live.suspended) {
       // 冲突暂停沿用输入保留：不弹三项关闭模态（三项冲突处理归 P2-12）；
       // 实例与输入保留（状态行既有暂停提示在场）
+      this.clearDeadDeleteIntent(entry) // 意图死亡：删除拦截账不滞留
       entry.pendingCloseIntent = null
       return
     }
     if (this.closeDialog || (this.closePendingQuery && this.closePendingQuery.entry !== entry)) {
+      this.clearDeadDeleteIntent(entry) // 意图死亡：删除拦截账不滞留
       return // 已有意图在处理（模态在场 / 他 entry 的 query 在途）；同 entry
       // 的在途 query 允许覆盖重发（宿主目标装载失败等无回包形态可自愈）
     }
     if (live.instance?.hasPendingLocalInput()) {
       // IME 组合中／写入未 ack：先保留实例不吞输入，落定后重入检查最新
-      // dirty（不把未提交输入误报已保存）
+      // dirty（不把未提交输入误报已保存）。意图仍活着（pendingCloseIntent
+      // 承载重入链），删除拦截账保留——拦截期内的后续删除本就按
+      // 「先关闭当前模态」语义丢弃
       entry.pendingCloseIntent = intent
       return
     }
     const session = this.context.session()
     if (!session.sessionId || !session.docUri) {
+      this.clearDeadDeleteIntent(entry) // 意图死亡：删除拦截账不滞留
       return
     }
     const reqId = ++this.closeReqSeq
@@ -2532,10 +2610,15 @@ export class EmbedCardManager {
       }
       // 活跃端口区间（端口在场 = 引用正在编辑；区间即挂载时的源区间）。
       // P2-06：面板条目（反链/出链）触发的浮窗根是中性区间 [0,0]——引用
-      // 不在 A 正文内，删除拦截不适用（否则误吞 A 文档头部的任意编辑）
+      // 不在 A 正文内，删除拦截不适用（否则误吞 A 文档头部的任意编辑）。
+      // review-loops A-2：子卡（孙卡等）区间属直接父 B 的全文坐标空间，
+      // 与 A 事务坐标不可比较（与 remapSources 的子卡跳过同口径）——数值
+      // 巧合覆盖即误拦无关删除，不参与删除拦截
       const actives: EmbedEntry[] = []
       for (const entry of this.entries.values()) {
-        if (entry.live?.portId && !(entry.popupRoot && entry.sourceEnd <= entry.sourceStart)) {
+        if (entry.live?.portId &&
+            entry.content.source.parentInstanceId === undefined &&
+            !(entry.popupRoot && entry.sourceEnd <= entry.sourceStart)) {
           actives.push(entry)
         }
       }

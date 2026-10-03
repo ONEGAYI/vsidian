@@ -15,6 +15,7 @@ import type { HoverPreviewResult, WebviewToHost } from '../../src/shared/protoco
 import { installLocale } from '../../src/shared/i18n'
 import { zhCn } from '../../src/shared/locales/zh-cn'
 import { EditorView } from '@codemirror/view'
+import { EditorState } from '@codemirror/state'
 import {
   EMBED_CARD_CLASS_NAMES,
   EmbedCardManager,
@@ -453,5 +454,70 @@ describe('P2-09 浮窗内孙卡解除范围锁', () => {
     h.popupEl()!.querySelector<HTMLButtonElement>('.vsidian-hover-popup-mode')!.click()
     expect(h.sent.filter((m) => m.kind === 'refEdit.unbind').length).toBe(2)
     expect(bindRequestsOf(h).filter((b) => b.fsPath === C_FS).length).toBe(cBindsBefore)
+  })
+})
+
+// ---- review-loops 第一轮回归：递归 Live 与删除拦截/实例键迁移的接缝 ----
+
+describe('P2-09 递归补齐（review-loops 第一轮回归）', () => {
+  it('孙卡 Live 时 A 删除数值覆盖孙卡 B 坐标区间：事务放行、无确认模态（A-2）', () => {
+    const h = makeHarness('reading')
+    const root = loadRootCard(h, '![[目标笔记]]\n', B_TEXT)
+    cardOf(root).querySelector<HTMLButtonElement>(`.${EMBED_CARD_CLASS_NAMES.mode}`)!.click()
+    const bHostId = lastBindRequest(h).occurrence
+    respondBound(h, B_FS, B_DOC_URI, B_TEXT)
+    // 孙卡挂载 + 装载 + 跟随 B（手动 Live）→ 建独立端口
+    mountGrandchild(h, bHostId, bHostId)
+    loadGrandchild(h)
+    respondBound(h, C_FS, C_DOC_URI, C_TEXT)
+    expect(h.manager.probe().find((p) => p.inner === C_INNER)?.liveBound).toBe(true)
+    // A 主编辑器装配删除拦截（生产 rootOwnedViewExtensions 同款）
+    const aDoc = 'x'.repeat(C_TO + 20)
+    const mainView = new EditorView({
+      parent: document.body,
+      state: EditorState.create({ doc: aDoc, extensions: [h.manager.mainDocChangeFilter()] }),
+    })
+    // 删除区间数值覆盖孙卡的 B 坐标区间 [C_FROM, C_TO]——跨坐标空间的比较
+    // 无意义（孙卡区间属 B 全文空间，A 的同数值区间是无关文本），应放行；
+    // 误拦则事务被吞、孙卡编辑会话被无关确认链打扰
+    mainView.dispatch({ changes: { from: C_FROM - 2, to: C_TO + 2 } })
+    expect(mainView.state.doc.toString()).not.toBe(aDoc)
+    expect(h.sent.some((m) => m.kind === 'refEdit.close.query')).toBe(false)
+    expect(h.manager.probe().find((p) => p.inner === C_INNER)?.liveBound).toBe(true)
+    mainView.destroy()
+  })
+
+  it('B 编辑器内孙卡上方打字：孙卡键迁移零重载、端口零重建（B-1）', () => {
+    const h = makeHarness('reading')
+    const root = loadRootCard(h, '![[目标笔记]]\n', B_TEXT)
+    cardOf(root).querySelector<HTMLButtonElement>(`.${EMBED_CARD_CLASS_NAMES.mode}`)!.click()
+    const bHostId = lastBindRequest(h).occurrence
+    respondBound(h, B_FS, B_DOC_URI, B_TEXT)
+    const bEditor = editorIn(root)!
+    expect(bEditor).not.toBeNull()
+    // 孙卡挂载（生产 widget toDOM 同入口）+ 装载 + 跟随 B Live 建端口
+    setLiveEmbedCards(h.manager)
+    mountGrandchild(h, bHostId, bHostId)
+    loadGrandchild(h)
+    respondBound(h, C_FS, C_DOC_URI, C_TEXT)
+    expect(h.manager.probe().find((p) => p.inner === C_INNER)?.liveBound).toBe(true)
+    const counts = () => ({
+      req: h.sent.filter((m) => m.kind === 'hover.request').length,
+      bind: h.sent.filter((m) => m.kind === 'refEdit.bind').length,
+      unbind: h.sent.filter((m) => m.kind === 'refEdit.unbind').length,
+    })
+    const before = counts()
+    // B 内孙卡引用上方打字（B 事务平移孙卡区间——装饰重建按新坐标重挂，
+    // 键未迁移则新 widget 不命中状态库：整卡重载 + 端口销毁重建风暴）
+    bEditor.dispatch({ changes: { from: 0, to: 0, insert: '前缀' } })
+    const after = counts()
+    expect(after.req).toBe(before.req) // 零重载：新键命中迁移 entry
+    expect(after.bind).toBe(before.bind)
+    expect(after.unbind).toBe(before.unbind) // 端口零销毁
+    // 孙卡实例现场保持（装载缓存与内部 Live 端口不随 B 打字蒸发）
+    const probe = h.manager.probe().find((p) => p.inner === C_INNER)
+    expect(probe?.liveBound).toBe(true)
+    expect(probe?.state).toBe('content')
+    setLiveEmbedCards(null)
   })
 })

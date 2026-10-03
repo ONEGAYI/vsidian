@@ -595,6 +595,34 @@ describe('P2-05 删除活跃引用拦截', () => {
     ctx.manager.dispose()
     ctx.mainView.destroy()
   })
+
+  it('suspended 态的删除拦截不滞留：冲突恢复后再次删除可正常确认（泄漏回归）', () => {
+    const ctx = setupDirty()
+    // 冲突暂停：删除拦截命中后 requestClose 沿 suspended 早退（无确认链发起）
+    ctx.manager.notifyPush({
+      kind: 'refEdit.push', portId: 'port-1', fsPath: B_FS,
+      message: { kind: 'session.suspended', version: 4, reason: 'conflict' },
+    })
+    const line = ctx.mainView.state.doc.line(3)
+    ctx.mainView.dispatch({ changes: { from: line.from, to: line.to + 1 } })
+    expect(ctx.mainView.state.doc.toString()).toBe(A_DOC) // 事务被吞（拦截语义）
+    expect(lastQueryOf(ctx.sent)).toBeUndefined() // suspended 早退：无 query 出站
+    // 冲突恢复（doc.resync 全文重置 + 清暂停）
+    ctx.manager.notifyPush({
+      kind: 'refEdit.push', portId: 'port-1', fsPath: B_FS,
+      message: { kind: 'doc.resync', version: 5, text: TARGET_TEXT },
+    })
+    expect(ctx.manager.probe().find((p) => p.inner === '目标笔记')!.liveSuspended).toBe(false)
+    // 恢复后再次删除：应重新走确认链。若 closePendingDelete 因早退滞留，
+    // 此处事务被 2570 守卫静默吞掉（无 query、无模态、A 不变）——主编辑器
+    // 删除功能失效直至该 entry 离屏回收
+    ctx.mainView.dispatch({ changes: { from: line.from, to: line.to + 1 } })
+    expect(ctx.mainView.state.doc.toString()).toBe(A_DOC)
+    const query = lastQueryOf(ctx.sent)
+    expect(query && query.kind === 'refEdit.close.query' && query.intent === 'delete').toBe(true)
+    ctx.manager.dispose()
+    ctx.mainView.destroy()
+  })
 })
 
 describe('P2-05 非退出路径不弹窗', () => {
