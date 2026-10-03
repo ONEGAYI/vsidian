@@ -1693,7 +1693,7 @@ export class DocumentSession {
   postToPanel(sessionId: string, message: HostToWebview): void {
     this.panels.get(sessionId)?.port.send(message)
     if (message.kind === 'view.locate') {
-      // head（#318 原型）随定位意图一并留存——补发不降级为单点
+      // head（#318）随定位意图一并留存——补发不降级为单点
       this.lastLocate = { offset: message.offset, head: message.head }
     }
   }

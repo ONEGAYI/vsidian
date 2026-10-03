@@ -108,7 +108,8 @@ vsidian/
 │   ├── research/   # 技术调研报告
 │   │   ├── obsidian-live-preview-editor.md  # Obsidian 技术栈与选型调研
 │   │   ├── obsidian-viewport-rendering.md   # 视口渲染性能补充调研
-│   │   └── vscode-1823-host-route-probes.md # P2-01 宿主路线探针结论
+│   │   ├── vscode-1823-host-route-probes.md # P2-01 宿主路线探针结论
+│   │   └── vscode-search-view-internals.md  # VSCode 搜索视图内部源码核查
 │   ├── specs/      # 产品规格
 │   │   ├── anchor-navigation.md               # 锚点跳转规格（标题/块引用/复制块链接）
 │   │   ├── appearance-merge.md                # 外观合并分页规格
@@ -139,6 +140,7 @@ vsidian/
 │   │   ├── mvp.md                             # MVP 规格主文档
 │   │   ├── reference-view-group.md            # 引用视图设置组与跳转目标提示规格
 │   │   ├── rich-text-paste.md                 # 富文本粘贴与分步撤销规格
+│   │   ├── search-reveal.md                   # 外部搜索导航定位恢复规格
 │   │   ├── settings-page-visual-refresh.md    # 设置页视觉刷新规格（#155）
 │   │   ├── skeleton-screen.md                 # 编辑器初开骨架屏加载规格
 │   │   ├── style-contract-gate.md             # 契约门禁 CI 接线与远端配置文档

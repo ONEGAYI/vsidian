@@ -198,7 +198,7 @@ export type HostToWebview =
   /** 定位请求（#6 起，为 #10 查找/跳转预留的宿主 → webview 入口）：
    *  把光标移动到源 offset 并滚动到可见（live）；reading 模式滚动到
    *  对应锚点块。纯视图操作：不写文档、不产生编辑历史。
-   *  head（#318 原型）：选区右端（LF 坐标），携带时 live 落位为
+   *  head（#318）：选区右端（LF 坐标），携带时 live 落位为
    *  区间选区 [offset, head)——外部搜索导航恢复匹配选区用；缺省单点，
    *  既有单点语义不变 */
   | { kind: 'view.locate'; offset: number; head?: number }

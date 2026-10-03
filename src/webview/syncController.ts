@@ -2945,7 +2945,7 @@ export class WebviewSyncController {
       }
       case 'view.locate': {
         // 定位（#10 查找/跳转入口）：光标移到源 offset；reading 滚动到块。
-        // 纯视图操作——事务不带 changes，不产生编辑历史。head（#318 原型）
+        // 纯视图操作——事务不带 changes，不产生编辑历史。head（#318）
         // 携带时 live 落位区间选区（外部搜索导航恢复匹配选区）
         this.locateOffset(message.offset, true, message.head)
         // 送达确认（#163 验收反馈）：offset 原样回发（对账不受 clamp/块化
@@ -3659,7 +3659,7 @@ export class WebviewSyncController {
    * 段落整体覆盖半透黄高亮，用户任意操作后消失（大纲点击不闪——已有
    * 条目常驻高亮）。
    */
-  /** head（#318 原型）：选区右端（LF 坐标），携带时 live 落位为区间选区
+  /** head（#318）：选区右端（LF 坐标），携带时 live 落位为区间选区
    *  [offset, head)；缺省单点，既有单点语义不变。reading 分支按块定位，
    *  head 不适用（块级 flash 语义保持） */
   private locateOffset(offset: number, flash = false, head?: number): void {

@@ -47,6 +47,7 @@ Vsidian brings an Obsidian-like Markdown editing experience to VS Code. After in
 | Image paste | Ctrl+V saves the clipboard image and inserts the reference at the cursor; save location and subpath are configurable |
 | Image popup | Hover an image for its button group; the full-screen popup zooms, pans, refreshes, and exports the original; clicking the image no longer jumps to source |
 | Embedded refresh | Images replaced or deleted on disk reload automatically or show a not-found state; the toolbar button refreshes images and diagrams on demand; shortcut bindable (unbound by default) |
+| Search reveal | After a workspace-search result opens a note, the command "Reveal selected search result" moves the cursor to the match (unbound by default; no auto-reveal due to a VSCode API gap) |
 
 ### References & backlinks
 
@@ -87,6 +88,7 @@ The complete behavior, boundaries, and settings of each feature are documented i
 - No support for Obsidian Canvas, whiteboards, the Obsidian plugin ecosystem, or note formats other than Markdown.
 - The CSP allows any https image source (a design trade-off for remote image hosting; in theory usable as a tracking pixel).
 - Very long code blocks skip syntax coloring and fall back to a plain-text card.
+- External entries (workspace search, problems panel, etc.) open a note without revealing the match — a VSCode public API gap (tracking vscode#289785); use the command "Reveal selected search result" to locate it manually.
 
 ## Building from source
 
