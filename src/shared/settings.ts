@@ -376,11 +376,12 @@ export const DEFAULT_EDITOR_GUARD_DEFAULT = true
 
 /**
  * #318「搜索定位打开提示」开关：从搜索结果打开 Vsidian 文档、面板首次
- * 激活时右下角提示气泡（带「定位」按钮）的总开关（两态布尔，默认开）。
- * 提示本身零副作用——不做剪贴板捕获/定位动作，按钮点击才进入既有显式
- * 定位链路（与命令同权同反馈）；关闭只停提示，命令与键位入口不受影响
- * （见 docs/specs/search-reveal.md「打开提示」节）。键与消费方（宿主
- * textEditorProvider 的 maybeShowSearchRevealHint 门控）成对导出。
+ * 激活时右下角提示气泡（带「定位」按钮）的总开关（两态布尔，默认值见
+ * SEARCH_REVEAL_HINT_DEFAULT——默认关）。提示本身零副作用——不做剪贴
+ * 板捕获/定位动作，按钮点击才进入既有显式定位链路（与命令同权同反馈）；
+ * 关闭只停提示，命令与键位入口不受影响（见 docs/specs/search-reveal.md
+ * 「打开提示」节）。键与消费方（宿主 textEditorProvider 的
+ * maybeShowSearchRevealHint 门控）成对导出。
  * editor.* 域（非排除前缀）→ 编辑器页「显示」小节。
  */
 export const SEARCH_REVEAL_HINT_KEY = 'editor.searchRevealHint'

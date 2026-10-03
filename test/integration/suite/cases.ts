@@ -15742,13 +15742,26 @@ export const cases: Array<[string, () => Promise<void>]> = [
         `乙文档首开应提示一条（实际 ${JSON.stringify(uris)}）`)
       log('会话去重（每文档每会话最多一条）✓')
 
-      // —— 设置关 → 新文档首开不提示（门控；关闭期间激活不占用去重名额）——
+      // —— 设置关 → 新文档首开不提示（门控）——
       await vscode.commands.executeCommand('onegayi.vsidian._test.setSettings', { 'editor.searchRevealHint': false })
       await vscode.commands.executeCommand('vscode.open', wsUri('hint-c.md'))
       await waitViewState('hint-c.md', (v) => v.text === docC)
       uris = await takeHintUris()
       assert(uris.length === 0, `设置关时不提示（实际 ${JSON.stringify(uris)}）`)
       log('设置门控（关时不弹）✓')
+
+      // —— 重开设置 → 切走（甲已提示不重弹）切回丙 → 丙恰好一条：关闭
+      //    期间的激活不占用去重名额（wiring 早退顺序 + 快照实时读的组合
+      //    证据——纯函数单测只覆盖判定层）——
+      await vscode.commands.executeCommand('onegayi.vsidian._test.setSettings', { 'editor.searchRevealHint': true })
+      await vscode.commands.executeCommand('vscode.open', wsUri('hint-a.md'))
+      await waitViewState('hint-a.md', (v) => v.text === docA)
+      await vscode.commands.executeCommand('vscode.open', wsUri('hint-c.md'))
+      await waitViewState('hint-c.md', (v) => v.text === docC)
+      uris = await takeHintUris()
+      assert(uris.filter((u) => u === uriOf('hint-c.md')).length === 1,
+        `重开设置后丙首次有效激活应恰好提示一条（实际 ${JSON.stringify(uris)}）`)
+      log('关闭期间不占去重名额（重开后可提示）✓')
     } finally {
       await vscode.commands.executeCommand('onegayi.vsidian._test.setSettings', { 'editor.searchRevealHint': false })
       for (const file of ['hint-a.md', 'hint-b.md', 'hint-c.md']) {
