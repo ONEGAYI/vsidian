@@ -1010,6 +1010,10 @@ interface ViewState {
     /** P2-05（#282）关闭确认模态观测（none/open/stale）与发起意图径 */
     closeDialog?: 'none' | 'open' | 'stale'
     closeIntent?: 'close' | 'escape' | 'delete' | ''
+    /** P2-12（#289）冲突选择态（none/open/collapsed）、compare 在途与失败提示 */
+    conflictChoice?: 'none' | 'open' | 'collapsed'
+    conflictComparePending?: boolean
+    conflictNotice?: boolean
   }>
   /** #223 Live 嵌入显隐观测：嵌入表逐枚的源码显形态（selectionTouchesRange 语义） */
   liveEmbedReveal?: Array<{ inner: string; line: number; revealed: boolean }>
@@ -13799,6 +13803,266 @@ export const cases: Array<[string, () => Promise<void>]> = [
       return cards.every((c) => c.closeDialog !== 'open') ? true : false
     }, 0, 30000)
     console.log('[P2-05] 三项模态 + 保存失败保留现场 + 文档级丢弃通过')
+  }],
+
+  // ---- P2-12（#289）写入冲突三项选择与原生临时副本对比：真实冲突暂停
+  // （外部覆盖 + 旧版本请求重定位失败）现场呈现三项选择；「对比并解决」
+  // 经宿主创建 untitled 临时副本并打开 vscode.diff（左=临时副本、右=真实
+  // B，P2-01 §6 验证路线）——断言两侧内容、转交后重同步（旧输入不重放、
+  // 不误报已合并）、对比页关闭后 untitled 释放（资源闭环）；「取消」收起
+  // 保持现场；「放弃当前版本」只放弃未提交输入（B 的外部修改与 dirty 保留，
+  // 干净 B 不替代未提交输入状态判断）；注入打开失败原现场可继续选择。 ----
+  ['P2-12 冲突三项选择与原生临时副本对比（#289）', async () => {
+    await openWithEditor('p212-冲突嵌入.md')
+    await waitSessionReady('p212-冲突嵌入.md')
+    const uri = wsUri('p212-冲突嵌入.md').toString()
+    const targetUri = wsUri('p212-冲突目标.md')
+    const parentDisk = await readDisk('p212-冲突嵌入.md')
+
+    const bound = await waitViewState('p212-冲突嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p212-冲突目标' && c.liveBound === true &&
+        (c.liveTextLen ?? -1) >= 0)
+        ? true : false)
+    const port = bound.readingEmbed!.find((c) => c.inner === 'p212-冲突目标')!.livePortId!
+    const fsPath = targetUri.fsPath
+    const bDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())!
+    const HEAD = '# p212 冲突目标\n\n'.length
+
+    // ---- 1. 真实冲突暂停：外部覆盖「目标首段」区间，旧版本请求同区间 ----
+    // B 行结构固定：line 2 = '目标首段。'（LF fixture；Range 用行/列，勿以
+    // 文档偏移冒充列——越界会被宿主 clamp 成行尾插入，冲突不再触发）
+    const versionAtPause = bDoc.version
+    const external1 = new vscode.WorkspaceEdit()
+    external1.replace(targetUri, new vscode.Range(2, 0, 2, 5), '外部交错修改')
+    assert(await vscode.workspace.applyEdit(external1), '外部交错修改应成功应用')
+    await poll('外部版本到达 B', () =>
+      bDoc.getText().includes('外部交错修改') ? true : undefined)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.portWrite', portId: port, fsPath, seq: 9101,
+      baseVersion: versionAtPause, offset: HEAD, length: 5, text: '嵌入旧版',
+    })
+    const suspended1 = await waitViewState('p212-冲突嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p212-冲突目标' &&
+        c.liveSuspended === true && c.conflictChoice === 'open')
+        ? true : false)
+    assert(bDoc.getText().includes('外部交错修改') && !bDoc.getText().includes('嵌入旧版'),
+      '暂停时双方文本完整：B 保持外部权威版本（未自动覆盖）')
+    assert(bDoc.isDirty, '外部修改使 B dirty（目标 dirty 与未提交输入是两种状态）')
+    // 宿主侧冲突快照留存伪造输入片段（「输入不丢」的行为侧证据）
+    const conflict = (await vscode.commands.executeCommand(CMD.conflictState, targetUri.toString())) as ConflictState
+    assert(conflict.found === true, 'B 会话冲突状态可查')
+    assert((conflict.fragments ?? []).some((f: string) => f.includes('嵌入旧版')),
+      `冲突快照留存未提交片段（实际 ${JSON.stringify(conflict.fragments)}）`)
+
+    // 暂停后用户继续输入（本地保留——宿主收进冲突快照，不重置 webview）
+    const liveLen0 = suspended1.readingEmbed!.find((c) => c.inner === 'p212-冲突目标')!.liveTextLen!
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.type', inner: 'p212-冲突目标', pos: HEAD, text: '继续输入',
+    })
+    await waitViewState('p212-冲突嵌入.md', (v) => {
+      const c = (v.readingEmbed ?? []).find((e) => e.inner === 'p212-冲突目标')
+      return c && (c.liveTextLen ?? -1) === liveLen0 + '继续输入'.length ? true : false
+    })
+
+    // ---- 2. 对比并解决：untitled 临时副本（左）+ 真实 B（右）----
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.conflictAction', inner: 'p212-冲突目标', action: 'compare',
+    })
+    const diffTab = await poll('原生对比页打开（TabInputTextDiff）', () => {
+      const tab = vscode.window.tabGroups.activeTabGroup.activeTab
+      return tab?.input instanceof vscode.TabInputTextDiff ? tab : undefined
+    })
+    const diffInput = diffTab.input as vscode.TabInputTextDiff
+    assert(diffInput.modified.toString() === targetUri.toString(), '对比页右侧 = 真实 B 文档')
+    assert(diffInput.original.scheme === 'untitled', '对比页左侧 = untitled 临时副本')
+    const tempUriStr = diffInput.original.toString()
+    const tempDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === tempUriStr)
+    assert(tempDoc, '临时副本已在 textDocuments（承载未提交输入）')
+    // 伪造请求路径无在途未确认输入：实例按 ack-fail 干净恢复装载权威全文
+    // 后暂停（#4 契约），「最新尚未提交输入」= 暂停后的继续输入——临时副
+    // 本完整承载实例当前全文（右侧同基线 + 左侧独有的未提交输入）
+    const bTextAtCompare = bDoc.getText()
+    assert(tempDoc!.getText().startsWith('# p212 冲突目标') &&
+      tempDoc!.getText().includes('继续输入'),
+      '临时副本承载实例当前全文（含暂停后的未提交输入）')
+    assert(tempDoc!.getText() !== bTextAtCompare,
+      '临时副本与 B 当前版本存在差异（未提交输入待处理）')
+    assert(bTextAtCompare.includes('外部交错修改'), '右侧保持 B 当前权威版本')
+
+    // 转交后恢复：宿主直驱（对比页激活会隐藏来源面板 webview，恢复不经
+    // webview）——B 会话暂停已清、旧输入不重放
+    await poll('宿主侧恢复（B 会话暂停解除）', async () => {
+      const s = (await vscode.commands.executeCommand(CMD.conflictState, targetUri.toString())) as ConflictState
+      return s.suspended === false ? true : undefined
+    })
+    assert(!bDoc.getText().includes('继续输入') && !bDoc.getText().includes('嵌入旧版'),
+      '成功转交后旧未提交输入不再次写入 B（打开对比不误报已合并）')
+
+    // ---- 3. 关闭对比页 → untitled 释放（资源释放闭环，无累计泄漏）----
+    //（编程关闭 diff tab；1.82.3 关闭含未保存 untitled 的 diff 时模型可能
+    // 短暂释放后以独立文本标签恢复——poll 兜底补关该标签直至终态，等价
+    // 用户关闭残留标签；B 无独立文本标签，模型级 dirty 驻留不受影响）
+    assert(await vscode.window.tabGroups.close(diffTab) === true, '对比页 tab 关闭成功')
+    await poll('对比页关闭后 untitled 释放', async () => {
+      if (!vscode.workspace.textDocuments.some((d) => d.uri.toString() === tempUriStr)) {
+        return true
+      }
+      const stray = vscode.window.tabGroups.all.flatMap((g) => g.tabs)
+        .find((t) => t.input instanceof vscode.TabInputText &&
+          t.input.uri.toString() === tempUriStr)
+      if (stray) {
+        await vscode.window.tabGroups.close(stray)
+      }
+      return undefined
+    })
+    const tempUris = (await vscode.commands.executeCommand('onegayi.vsidian._test.getConflictTempUris')) as string[]
+    assert(!tempUris.includes(tempUriStr), '临时副本记账随关闭移除')
+
+    // 重显来源面板：webview 重载恢复（宿主已恢复——init 全文装载，暂停
+    // 状态不补发），嵌入重新绑定
+    await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.parse(uri), VIEW_TYPE)
+    const reshow = await waitViewState('p212-冲突嵌入.md', (v) => {
+      const c = (v.readingEmbed ?? []).find((e) => e.inner === 'p212-冲突目标')
+      return c && c.liveSuspended === false && c.conflictChoice === 'none' &&
+        c.liveBound === true && (c.liveTextLen ?? -1) === bDoc.getText().length ? true : false
+    })
+    // webview 重载后端口换新（旧端口随面板销毁释放）——后续伪造请求用新端口
+    const port2 = reshow.readingEmbed!.find((c) => c.inner === 'p212-冲突目标')!.livePortId!
+
+    // ---- 4. 取消与重新选择（保持暂停与输入）----
+    const versionAtPause2 = bDoc.version
+    const external2 = new vscode.WorkspaceEdit()
+    external2.replace(targetUri, new vscode.Range(2, 0, 2, 5), '外部二改修改')
+    assert(await vscode.workspace.applyEdit(external2), '第二次外部修改应成功')
+    await poll('外部二改到达 B', () => bDoc.getText().includes('外部二改修改') ? true : undefined)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.portWrite', portId: port2, fsPath, seq: 9102,
+      baseVersion: versionAtPause2, offset: HEAD, length: 5, text: '嵌入旧版二',
+    })
+    await waitViewState('p212-冲突嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p212-冲突目标' &&
+        c.liveSuspended === true && c.conflictChoice === 'open')
+        ? true : false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.conflictAction', inner: 'p212-冲突目标', action: 'cancel',
+    })
+    await waitViewState('p212-冲突嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p212-冲突目标' &&
+        c.conflictChoice === 'collapsed' && c.liveSuspended === true)
+        ? true : false)
+    // 重新选择展开
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.conflictAction', inner: 'p212-冲突目标', action: 'reopen',
+    })
+    await waitViewState('p212-冲突嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p212-冲突目标' && c.conflictChoice === 'open')
+        ? true : false)
+
+    // ---- 5. 干净 B 仍有保护；放弃当前版本只放弃未提交输入 ----
+    // 保存 B（外部修改落盘 → B 干净）不解除暂停：未提交输入保护不随 B 干净消失
+    assert((await bDoc.save()) === true, '冲突期间保存 B（外部修改落盘）')
+    const diskSavedAt5 = bDoc.getText() // 第 5 步起磁盘已保存基线（后续 revert 目标）
+    await waitViewState('p212-冲突嵌入.md', (v) => {
+      const c = (v.readingEmbed ?? []).find((e) => e.inner === 'p212-冲突目标')
+      return c && c.liveDirty === false && c.liveSuspended === true ? true : false
+    })
+    const bTextBeforeDiscard = bDoc.getText()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.conflictAction', inner: 'p212-冲突目标', action: 'discard',
+    })
+    await waitViewState('p212-冲突嵌入.md', (v) => {
+      const c = (v.readingEmbed ?? []).find((e) => e.inner === 'p212-冲突目标')
+      return c && c.liveSuspended === false && c.conflictChoice === 'none' &&
+        (c.liveTextLen ?? -1) === bTextBeforeDiscard.length ? true : false
+    })
+    assert(bDoc.getText() === bTextBeforeDiscard && !bDoc.isDirty,
+      '放弃当前版本对齐 B 当前权威内容（不回滚 B 的其他修改——已保存内容原样）')
+
+    // ---- 6. 打开失败原现场可继续选择；重试成功 ----
+    const versionAtPause3 = bDoc.version
+    const external3 = new vscode.WorkspaceEdit()
+    external3.replace(targetUri, new vscode.Range(2, 0, 2, 5), '外部三改修改')
+    assert(await vscode.workspace.applyEdit(external3), '第三次外部修改应成功')
+    await poll('外部三改到达 B', () => bDoc.getText().includes('外部三改修改') ? true : undefined)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.portWrite', portId: port2, fsPath, seq: 9103,
+      baseVersion: versionAtPause3, offset: HEAD, length: 5, text: '嵌入旧版三',
+    })
+    await waitViewState('p212-冲突嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p212-冲突目标' &&
+        c.liveSuspended === true && c.conflictChoice === 'open')
+        ? true : false)
+    await vscode.commands.executeCommand('onegayi.vsidian._test.failNextConflictDiff')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.conflictAction', inner: 'p212-冲突目标', action: 'compare',
+    })
+    await waitViewState('p212-冲突嵌入.md', (v) => {
+      const c = (v.readingEmbed ?? []).find((e) => e.inner === 'p212-冲突目标')
+      return c && c.conflictNotice === true && c.conflictComparePending === false &&
+        c.liveSuspended === true && c.conflictChoice === 'open' ? true : false
+    })
+    const tempsAtFail = (await vscode.commands.executeCommand('onegayi.vsidian._test.getConflictTempUris')) as string[]
+    assert(tempsAtFail.length === 0, '失败注入不消耗临时资源（无 untitled 残留）')
+    // 重试（注入已消耗）：成功打开并释放
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.conflictAction', inner: 'p212-冲突目标', action: 'compare',
+    })
+    const diffTab2 = await poll('重试后对比页再次打开', () => {
+      const tab = vscode.window.tabGroups.activeTabGroup.activeTab
+      return tab?.input instanceof vscode.TabInputTextDiff ? tab : undefined
+    })
+    const diffInput2 = diffTab2.input as vscode.TabInputTextDiff
+    assert(diffInput2.modified.toString() === targetUri.toString() &&
+      diffInput2.original.scheme === 'untitled', '重试对比页左 untitled 右真实 B')
+    await poll('重试转交后宿主侧恢复', async () => {
+      const s = (await vscode.commands.executeCommand(CMD.conflictState, targetUri.toString())) as ConflictState
+      return s.suspended === false ? true : undefined
+    })
+    // 关闭重试的对比页（同第 3 步：编程关闭 diff tab，untitled 随宿主释放）
+    assert(await vscode.window.tabGroups.close(diffTab2) === true, '重试对比页 tab 关闭成功')
+    // 1.82.3 宿主怪癖：关闭含未保存 untitled 的 diff tab 时模型短暂释放后
+    // 可能以独立文本标签恢复（第一次关闭的 poll 在恢复窗口内通过；本步
+    // 以长窗口断言终态）——兜底补关该独立标签（等价用户关闭残留标签；
+    // 关闭文本标签不影响 B 的模型级 dirty 驻留）
+    try {
+      await poll('重试对比页关闭后 untitled 释放', async () => {
+        if (!vscode.workspace.textDocuments.some((d) => d.uri.scheme === 'untitled')) {
+          return true
+        }
+        const stray = vscode.window.tabGroups.all.flatMap((g) => g.tabs)
+          .find((t) => t.input instanceof vscode.TabInputText && t.input.uri.scheme === 'untitled')
+        if (stray) {
+          await vscode.window.tabGroups.close(stray)
+        }
+        return undefined
+      })
+    } catch (err) {
+      const remain = vscode.workspace.textDocuments.filter((d) => d.uri.scheme === 'untitled')
+        .map((d) => ({ uri: d.uri.toString(), text: d.getText().slice(0, 40) }))
+      assert(false, `untitled 释放超时：残留 ${JSON.stringify(remain)}；${String(err)}`)
+    }
+    const tempsFinal = (await vscode.commands.executeCommand('onegayi.vsidian._test.getConflictTempUris')) as string[]
+    assert(tempsFinal.length === 0, `全程无累计临时副本泄漏（实际 ${JSON.stringify(tempsFinal)}）`)
+
+    // 重显来源面板（对比页激活曾隐藏 webview）：重载恢复为正常编辑态
+    await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.parse(uri), VIEW_TYPE)
+    await waitViewState('p212-冲突嵌入.md', (v) => {
+      const c = (v.readingEmbed ?? []).find((e) => e.inner === 'p212-冲突目标')
+      return c && c.liveSuspended === false && c.liveBound === true ? true : false
+    })
+
+    // 现场还原：释放端口 + B 回到已保存内容（第 5 步保存后的磁盘基线——
+    // 外部修改那时已合法落盘，revert 恢复到该版本而非 fixture 原始字节）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.mode', inner: 'p212-冲突目标', mode: 'reading',
+    })
+    await vscode.window.showTextDocument(bDoc, { preview: true })
+    await vscode.commands.executeCommand('workbench.action.files.revert')
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await poll('B 回到已保存内容', () =>
+      bDoc.getText() === diskSavedAt5 && !bDoc.isDirty ? true : undefined)
+    assert(await readDisk('p212-冲突嵌入.md') === parentDisk, 'A 全程零波及')
+    console.log('[P2-12] 冲突三项 + 原生临时副本对比 + 资源释放闭环通过')
   }],
 
   // ---- P2-05（#282）删除活跃引用拦截：覆盖活跃端口的 A 事务先拦截确认

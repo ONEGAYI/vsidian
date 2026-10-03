@@ -1129,6 +1129,56 @@ describe('sync.request（webview 发起的全文重同步）', () => {
     await s.session.handleWebviewMessage({ kind: 'sync.request' }, id)
     expect(s.sent.get(id)!.length).toBe(0)
   })
+
+  it('P2-12：暂停面板的 sync.request 走恢复语义（清暂停与快照 + doc.resync）', async () => {
+    // 「放弃当前版本」与「对比并解决成功转交」共用出站 sync.request：宿主侧
+    // 须解除暂停（旧队列不重放）并以权威全文重置——不能只发 doc.resync 而
+    // 留下 suspended（后续输入将全部落入冲突快照黑洞）
+    const s = setup('草稿')
+    const id = s.attach()
+    await readyPanel(s, id)
+    // 外部覆盖原文区间，使基于旧版本的请求不可安全重定位 → 冲突暂停
+    s.doc.content = '外部全文'
+    s.doc.ver++
+    s.session.handleDocChanged([{ offset: 0, length: 2, text: '外部全文' }], s.doc.ver)
+    await s.send(id, {
+      kind: 'edit.request', sessionId: id, docUri: DOC_URI, seq: 1, baseVersion: 1,
+      changes: [{ offset: 0, length: 1, text: '本' }],
+    })
+    expect(s.session.getConflictState(id)?.suspended).toBe(true)
+    expect(s.session.getConflictState(id)?.fragments).toContain('本')
+    await s.send(id, { kind: 'sync.request' })
+    const state = s.session.getConflictState(id)!
+    expect(state.suspended).toBe(false)
+    expect(state.fragments).toEqual([])
+    expect(state.webviewText).toBeUndefined()
+    expect(s.sent.get(id)!.at(-1)).toMatchObject({ kind: 'doc.resync', text: '外部全文' })
+  })
+
+  it('P2-12：暂停面板 sync.request 恢复后，新 edit.request 正常写回（旧输入不重放）', async () => {
+    const s = setup('草稿')
+    const id = s.attach()
+    await readyPanel(s, id)
+    s.doc.content = '外部全文'
+    s.doc.ver++
+    s.session.handleDocChanged([{ offset: 0, length: 2, text: '外部全文' }], s.doc.ver)
+    await s.send(id, {
+      kind: 'edit.request', sessionId: id, docUri: DOC_URI, seq: 1, baseVersion: 1,
+      changes: [{ offset: 0, length: 1, text: '本' }],
+    })
+    expect(s.session.getConflictState(id)?.suspended).toBe(true)
+    await s.send(id, { kind: 'sync.request' })
+    const versionAfterResume = s.doc.version
+    // 恢复后的新输入（webview 已被 resync 重置为权威全文，baseVersion 对齐）
+    await s.send(id, {
+      kind: 'edit.request', sessionId: id, docUri: DOC_URI, seq: 2, baseVersion: versionAfterResume,
+      changes: [{ offset: 4, length: 0, text: '！' }],
+    })
+    expect(s.doc.content).toBe('外部全文！')
+    const ack = s.sent.get(id)!.at(-1)
+    expect(ack).toMatchObject({ kind: 'edit.ack', seq: 2, ok: true })
+    expect(s.session.getConflictState(id)?.suspended).toBe(false)
+  })
 })
 
 describe('perf.report 缓存（#5 性能测量通道）', () => {

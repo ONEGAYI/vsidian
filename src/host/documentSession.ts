@@ -901,6 +901,14 @@ export class DocumentSession {
         if (!panel.ready) {
           return Promise.resolve()
         }
+        if (panel.suspended) {
+          // P2-12（#289）：暂停面板的重同步请求 = 放弃当前版本／对比转交后
+          // 重新对齐 B——走恢复语义（清暂停与冲突快照 + 权威全文 doc.resync）。
+          // 只发 doc.resync 不清 suspended 会把后续输入全部落入冲突快照
+          // 黑洞（宿主暂停是写回裁决的权威侧，webview 侧标志不替代它）
+          this.resumePanel(sessionId)
+          return Promise.resolve()
+        }
         panel.port.send({
           kind: 'doc.resync',
           version: this.doc.version,

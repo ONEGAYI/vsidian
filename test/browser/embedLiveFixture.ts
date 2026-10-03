@@ -76,6 +76,9 @@ function applyTo(text: string, changes: SerChange[]): string {
  *  版本等价（embedLive/embedLiveActions 既有断言不受影响） */
 const boundPorts = new Set<string>()
 let bindReqSeq = 0
+/** P2-12 冲突 compare 请求观测（text 断言载体）与应答配置 */
+const conflictCompareRequests: Array<{ text: string }> = []
+let conflictCompareOk = true
 
 /** 定向推送（指定端口） */
 function bPushTo(portId: string, message: WebviewToHost | import('../../src/shared/protocol').HostToWebview): void {
@@ -199,6 +202,22 @@ async function fakeHostHandle(message: WebviewToHost): Promise<void> {
       bModel.dirty = false
       controller.handleHostMessage({ kind: 'refEdit.dirty', fsPath: B_FS, dirty: false })
       controller.handleHostMessage({ kind: 'refEdit.save.result', portId: message.portId, fsPath: B_FS, ok: true })
+      return
+    }
+    case 'refEdit.conflictCompare': {
+      // P2-12：伪宿主记录 compare 请求（text = 实例当前全文快照）并按配置
+      // 应答。ok 时模拟宿主直驱恢复（resumePanel → doc.resync 推送——对比
+      // 页激活会隐藏来源 webview，生产恢复不依赖 webview 再出站请求）
+      if (message.portId !== boundPortId) {
+        return
+      }
+      conflictCompareRequests.push({ text: message.text })
+      controller.handleHostMessage({
+        kind: 'refEdit.conflictCompare.result', portId: boundPortId, fsPath: B_FS, ok: conflictCompareOk,
+      })
+      if (conflictCompareOk) {
+        bPush({ kind: 'doc.resync', version: ++bModel.ver, text: bModel.content })
+      }
       return
     }
     case 'refEdit.close.query': {
@@ -390,6 +409,45 @@ Object.assign(window, {
   /** 向绑定端口注入冲突暂停推送（session.suspended——恢复走 doc.resync） */
   embedSuspendPort(): void {
     bPush({ kind: 'session.suspended', version: bModel.ver, reason: 'conflict' })
+  },
+  /** P2-12 已收到的 compare 请求快照（text 断言载体） */
+  embedConflictCompareRequests(): Array<{ text: string }> {
+    return conflictCompareRequests.map((r) => ({ ...r }))
+  },
+  /** P2-12 配置伪宿主对下一次 compare 请求的应答 */
+  embedSetConflictCompareOk(ok: boolean): void {
+    conflictCompareOk = ok
+  },
+  /** P2-12 冲突选择条观测（在场/收起/按钮绘制与 hover 词） */
+  embedConflictChoiceState(): {
+    present: boolean
+    buttons: string[]
+    compareTooltip: string
+    noticePainted: boolean
+    buttonsPainted: boolean
+  } {
+    const box = document.querySelector<HTMLElement>('.vsidian-embed-card .vsidian-embed-card-state .vsidian-embed-card-conflict')
+    if (!box) {
+      return { present: false, buttons: [], compareTooltip: '', noticePainted: false, buttonsPainted: false }
+    }
+    const buttons = [...box.querySelectorAll<HTMLButtonElement>('button')]
+      .map((b) => b.className.replace('vsidian-embed-card-conflict-', ''))
+    const compare = box.querySelector<HTMLButtonElement>('.vsidian-embed-card-conflict-compare') ??
+      box.querySelector<HTMLButtonElement>('.vsidian-embed-card-conflict-reopen')
+    const notice = document.querySelector<HTMLElement>('.vsidian-embed-card-conflict-notice')
+    return {
+      present: true,
+      buttons,
+      compareTooltip: compare?.getAttribute('data-tooltip') ?? '',
+      // 绘制层证据：按钮真实占位（非 display:none/零尺寸），notice 左边条
+      noticePainted: notice !== null && notice.offsetHeight > 0 &&
+        getComputedStyle(notice).borderLeftWidth !== '0px',
+      buttonsPainted: buttons.length > 0 && box.offsetHeight > 0 &&
+        buttons.every((cls) => {
+          const el = box.querySelector<HTMLButtonElement>(`.vsidian-embed-card-conflict-${cls}`)
+          return el !== null && el.offsetHeight > 0
+        }),
+    }
   },
   /** 点击头部关闭编辑按钮（真实点击链路；P2-05） */
   clickEmbedCloseButton(): boolean {

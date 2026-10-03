@@ -2055,6 +2055,11 @@ export class WebviewSyncController {
         // 现场；stale 重新确认
         this.embedCards?.notifyCloseResult(message)
         break
+      case 'refEdit.conflictCompare.result':
+        // P2-12（#289）「对比并解决」结果：ok = 转交完成（出站 sync.request
+        // 重同步解除暂停）；失败保留选择现场并就地提示
+        this.embedCards?.notifyConflictCompareResult(message)
+        break
       case 'embed.test.mode':
         // P2-04 测试钩子：切换指定嵌入的内部模式（与用户点击头部按钮
         // 同一处理器链路）
@@ -2104,6 +2109,11 @@ export class WebviewSyncController {
       case 'embed.test.deleteRef':
         // P2-05 测试钩子：主编辑器派发删除指定引用行事务（真实事务管线）
         this.embedCards?.testDeleteRef(message.inner, message.occurrence ?? 0)
+        break
+      case 'embed.test.conflictAction':
+        // P2-12 测试钩子：触发指定嵌入的冲突三项动作（与选择条按钮同一
+        // 处理器链路）
+        this.embedCards?.testConflictAction(message.inner, message.action, message.occurrence ?? 0)
         break
       case 'hover.target.resolved': {
         // #299 跳转目标提示轻量解析回包（reqId 配对在 targetTip 模块内
@@ -2317,15 +2327,15 @@ export class WebviewSyncController {
           // P2-10（#287）+ P2-05（#282）引用 Live 操作族：保存目标（与焦点
           // 内 Ctrl+S 焦点路由共用出站）。显式关闭统一为 P2-05 退出确认
           // 链路（dirty 时三项模态，干净直接关闭；与头部关闭按钮/嵌入内
-          // Esc/删除拦截同径）。冲突三项：compare 的原生对比页与完整选择
-          // 界面属 P2-12（本票为登记占位，键位默认未绑定）；discard 走既有
-          // 恢复通道（经端口出站 sync.request → doc.resync 放弃未提交输入
-          // 版本）；cancel 语义即保持暂停与输入（零操作）
+          // Esc/删除拦截同径）。P2-12（#289）冲突三项接真实执行：compare
+          // 出站对比请求（宿主开原生对比页），cancel 收起选择保持暂停与
+          // 输入，discard 走恢复通道（sync.request → resync 放弃未提交输入
+          // 版本）——与暂停状态行选择条按钮同一处理器
           case 'embedSaveTarget': this.embedCards?.focusedLiveSave(); break
           case 'embedClose': this.embedCards?.closeFocused(); break
-          case 'conflictCompare': break
+          case 'conflictCompare': this.embedCards?.focusedConflictCompare(); break
           case 'conflictDiscard': this.embedCards?.focusedConflictDiscard(); break
-          case 'conflictCancel': break
+          case 'conflictCancel': this.embedCards?.focusedConflictCancel(); break
           // #221 预览当前链接：命令面板/宿主命令入口与快捷键（keybindingRouter
           // 本地分支）共用同一实现（目标判定在 webview，无目标静默不误开）
           case 'hoverPreviewLink': this.previewLinkAtFocus(); break

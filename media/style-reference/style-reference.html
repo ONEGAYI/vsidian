@@ -66,7 +66,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 </table>
 
   <section class="domain" data-domain="content">
-    <h1 style="font-size:19px;margin-bottom:4px">正文域（87 条）</h1>
+    <h1 style="font-size:19px;margin-bottom:4px">正文域（88 条）</h1>
 
     <h2>正文域 · 容器与视图（2）</h2>
     <article class="entry" id="container-live">
@@ -754,7 +754,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="verify">验证：单元 readingViewport / readingVirtualView：挂载窗口与 spacer 契约</p>
       <p class="life">引入：#7（2026-09-24）</p>
     </article>
-    <h2>正文域 · 链接、图片与双链（16）</h2>
+    <h2>正文域 · 链接、图片与双链（17）</h2>
     <article class="entry" id="mod-link-hover">
       <h3><code>body.vsidian-mod-link（Ctrl/Cmd 修饰键激活态，挂 body 的全局状态类）</code><span class="eid">mod-link-hover</span></h3>
       <p class="purpose">修饰键悬停反馈（#217 验收反馈：Ctrl+悬停可跳转链接但无任何样式提示，可发现性缺失）：按住 Ctrl/Cmd 时悬停可跳转的链接（双链/嵌入引用/普通链接——源码态 mark 与渲染态 widget，Reading 侧 a 同款）加下划线并显示可点击光标（替代文本光标竖条）。状态类由 syncController 的 document 级 keydown/keyup（getModifierState 精确处理左右修饰键同按与交替）与窗口 blur 回落维护；渲染态 widget 的常驻可点击光标（既有规则）不受影响。</p>
@@ -934,6 +934,23 @@ ul.legend { padding-left: 18px; font-size: 13px; }
 }</code></pre>
       <p class="verify">验证：单元 embedClose（P2-05）：模态呈现（三项文案/文件名/默认焦点取消）、取消与失败保留现场、stale 重新确认、干净目标不弹、suspended 不弹；浏览器 embedLive 场景 I–N（P2-05）：真实 Esc/点击驱动；绘制层断言（遮罩 fixed + 非透明背景、盒子背景 + 边框、按钮可见、stale 提示左边条）；集成 P2-05 用例（1.82.3 真宿主）：三项模态、保存失败（只读盘）保留现场、文档级丢弃与多 occurrence 去重、删除引用拦截</p>
       <p class="life">引入：#282（2026-10-03）</p>
+    </article>
+    <article class="entry" id="embed-conflict-choices">
+      <h3><code>.vsidian-embed-card-conflict（冲突三项选择条，嵌入卡片状态行 .vsidian-embed-card-state 内、P2-12 冲突暂停时在场；-compare 对比并解决 / -discard 放弃当前版本 / -cancel 取消 三按钮 / -reopen 取消收起后的重新选择入口 / -notice 对比打开失败的就地提示行）</code><span class="eid">embed-conflict-choices</span></h3>
+      <p class="purpose">P2-12（#289）写入冲突三项选择：引用内部 Live 因不可安全写回（外部交错修改覆盖请求区间等）暂停时，在暂停现场（状态行）就地呈现「对比并解决／放弃当前版本／取消」——compare 的 hover 文案为用户指定原文「在临时副本和冲突版本的对比视图中处理冲突」（data-tooltip 承载，逐字）。三项语义：compare 出站当前输入全文快照，宿主创建 untitled 临时副本并打开 VSCode 原生对比页（左=临时副本、右=真实 B，P2-01 §6 验证路线；对比页交互归宿主，扩展不自建解决界面），成功转交后经 sync.request 重同步解除暂停（旧未提交队列不重放）；discard 只放弃本次未成功提交的输入并重新同步 B（不回滚整个 B——与 P2-05 的文档级丢弃分开建模）；cancel 收起选择保持暂停与输入（-reopen 单按钮提供再展开入口）。非模态呈现（不阻断嵌入内容查看，不调用 window.alert）；失败（-notice，警示左边条）保留现场可重试。主题变量取 VSCode 公开变量族（compare 主操作 button 主色族 / 其余 button-secondary 族 / 在途禁用 opacity / focus-visible 描边 / 提示行 editorWarning 左边条），主题与 CSS 片段跟随宿主外观。</p>
+      <p class="views"><span class="badge">实时预览</span> <span class="support support-none">none</span></p>
+<p class="states">状态：不在场（缺省——非冲突暂停；正常编辑/装载/错误分态均无选择条）/ 展开（暂停提示文字 + 三项按钮；compare 在途禁用——opacity 降级）/ 收起（cancel 后：仅剩 -reopen 重新选择入口，暂停与输入保持）/ 失败保留现场（-notice 提示行在场 + 三项按钮保留，可重试）/ 暂停解除（doc.resync 到达：选择条整体移除，状态行交还 loading/错误分态管理）。</p>
+      <p class="obsidian">Obsidian 对应：无直接对应（Obsidian 冲突处理闭源；本项目自绘就地选择条，对比页走宿主原生 diff）</p>
+
+      <p class="dom">DOM 关系：嵌入卡片 .vsidian-embed-card 的状态行 .vsidian-embed-card-state 内：暂停提示为 &lt;span&gt;（文案经 i18n 词条 embed.livePaused，bindLocale 登记换语言刷新）；选择条为 div.vsidian-embed-card-conflict（flex wrap 容器）；按钮为真实 &lt;button type=&quot;button&quot;&gt;（可见文字经 embed.conflictCompareLabel / embed.conflictDiscardLabel / embed.conflictCancelLabel / embed.conflictReopenLabel，悬停词 data-tooltip 经 embed.conflictCompareHint / embed.conflictDiscardHint / embed.conflictCancelHint / embed.conflictReopenHint——compare 悬停词为用户指定原文）；失败提示为 div.vsidian-embed-card-conflict-notice（文案 embed.conflictCompareFailed）。与选择条按钮 / 键位操作（conflictCompare/conflictDiscard/conflictCancel，P2-10 登记默认未绑定）/ 测试钩子同一处理器链路。</p>
+      <pre><code>.vsidian-embed-card .vsidian-embed-card-state .vsidian-embed-card-conflict {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}</code></pre>
+      <p class="verify">验证：单元 embedConflictChoices（P2-12）：三项呈现与文案/hover 逐字、compare 出站全文快照与在途防重入、结果 ok 重同步（旧输入不重放）、失败保留现场可重试、cancel 收起与重新选择、键位路由与暂停外零操作；单元 embedCardCssContract（P2-12）：选择条 flex wrap、compare 主按钮色与三项次按钮色、禁用态与 focus-visible、失败提示左边条规则钉住；浏览器 embedLiveActions 场景 I（P2-12）：三项真实绘制（非零尺寸占位）、compare hover 逐字、真实点击转交与重同步、cancel 收起/重新选择、失败提示绘制（左边条）与重试；集成 P2-12 用例（1.82.3 真宿主）：真实冲突暂停现场三项、untitled 左/真实 B 右的原生对比页与两侧内容断言、转交后旧输入不写入 B、对比页关闭后 untitled 释放（无累计泄漏）、放弃不回滚 B 其他修改、干净 B 仍有保护、失败注入保留现场可重试</p>
+      <p class="life">引入：#289（2026-10-02）</p>
     </article>
     <article class="entry" id="live-embed-widget">
       <h3><code>.vsidian-live-embed（Live 嵌入宿主 widget；.vsidian-live-embed-below 为显形态下方修饰）</code><span class="eid">live-embed-widget</span></h3>

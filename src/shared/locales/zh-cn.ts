@@ -235,6 +235,9 @@ export const zhCn: Record<MessageKey, string> = {
   'host.discardAndResync': '放弃本地修改并重新同步',
   'host.confirmResume': '将放弃“{name}”编辑器中未确认的本地修改，并以磁盘/权威内容重新同步。建议先复制未确认输入。',
   'host.conflictPaused': '“{name}”的编辑已暂停：外部修改与未确认输入无法安全合并。未确认输入已保留，可随时取回。',
+  /** P2-12（#289）冲突三项「对比并解决」打开的原生对比页标题（左：未提交
+   *  输入临时副本；右：真实目标文档） */
+  'host.conflictDiffTitle': '写入冲突：{name}（左侧：当前输入副本 / 右侧：目标当前版本）',
   'host.panelClosedWithInput': '“{name}”的编辑器已关闭（或连接断开），存在未保存的未确认输入：{text}',
   'host.wikilinkUnsupported': '不支持的双链形态「[[{target}]]」（嵌入 ![[…]] 属二期）：已按原文保留',
   'host.wikilinkNoWorkspace': '当前文档不在任何工作区文件夹内：双链目标按来源文档的相对路径解析，未打开文件夹时无法跳转（链接文本保留）',
@@ -439,6 +442,19 @@ export const zhCn: Record<MessageKey, string> = {
   'embed.closeSaveFailed': '保存失败（文件可能只读），已保留当前编辑。',
   'embed.closeDiscardFailed': '丢弃失败，已保留当前状态。',
   'embed.closeStale': '目标在确认期间又被修改，请重新确认。',
+
+  /** P2-12（#289）写入冲突三项选择（暂停状态行就地呈现）。compare 的
+   *  hover 为用户指定原文逐字；discard 只放弃本次未成功写入的输入（非
+   *  文档级回滚）；cancel 保持暂停与当前输入 */
+  'embed.conflictCompareLabel': '对比并解决',
+  'embed.conflictCompareHint': '在临时副本和冲突版本的对比视图中处理冲突',
+  'embed.conflictDiscardLabel': '放弃当前版本',
+  'embed.conflictDiscardHint': '放弃本次未成功写入的输入，重新同步目标当前内容。',
+  'embed.conflictCancelLabel': '取消',
+  'embed.conflictCancelHint': '保持暂停与当前输入。',
+  'embed.conflictReopenLabel': '重新选择',
+  'embed.conflictReopenHint': '重新显示冲突处理选项。',
+  'embed.conflictCompareFailed': '打开对比视图失败，已保留当前输入，可重试。',
 
   /** 反链面板（#197：四态与条目；形态改版批次：工具栏/排序/搜索/页头） */
   'backlinks.label': '反向链接',

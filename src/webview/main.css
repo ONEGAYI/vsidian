@@ -4729,6 +4729,66 @@ body > .vsidian-ref-close-backdrop .vsidian-ref-close-actions button:focus-visib
   outline-offset: 1px;
 }
 
+/* ---- P2-12（#289）写入冲突三项选择（样式契约 content 域
+   embed-conflict-choices 条目）：冲突暂停现场（状态行内）的就地选择条
+   ——「对比并解决 / 放弃当前版本 / 取消」，compare 的 hover 为用户指定
+   原文。非模态（不阻断嵌入内容查看）；取消收起后仅剩「重新选择」入口。
+   主题变量取 VSCode 注入的公开变量族，主题/片段跟随宿主外观 ---- */
+
+.vsidian-embed-card .vsidian-embed-card-state .vsidian-embed-card-conflict {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.vsidian-embed-card .vsidian-embed-card-state .vsidian-embed-card-conflict button {
+  font-family: inherit;
+  font-size: 12px;
+  padding: 2px 10px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 2px;
+  cursor: pointer;
+  color: var(--vscode-button-secondaryForeground, #ffffff);
+  background: var(--vscode-button-secondaryBackground, #5a5a5a);
+}
+
+.vsidian-embed-card .vsidian-embed-card-state .vsidian-embed-card-conflict button:hover:not(:disabled) {
+  background: var(--vscode-button-secondaryHoverBackground, #6b6b6b);
+}
+
+.vsidian-embed-card .vsidian-embed-card-state .vsidian-embed-card-conflict .vsidian-embed-card-conflict-compare {
+  color: var(--vscode-button-foreground, #ffffff);
+  background: var(--vscode-button-background, #0e639c);
+}
+
+.vsidian-embed-card .vsidian-embed-card-state .vsidian-embed-card-conflict .vsidian-embed-card-conflict-compare:hover:not(:disabled) {
+  background: var(--vscode-button-hoverBackground, #1177bb);
+}
+
+.vsidian-embed-card .vsidian-embed-card-state .vsidian-embed-card-conflict button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.vsidian-embed-card .vsidian-embed-card-state .vsidian-embed-card-conflict button:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #4fc1ff);
+  outline-offset: 1px;
+}
+
+.vsidian-embed-card .vsidian-embed-card-state .vsidian-embed-card-conflict-reopen {
+  font-size: 12px;
+}
+
+.vsidian-embed-card .vsidian-embed-card-state .vsidian-embed-card-conflict-notice {
+  margin-top: 4px;
+  padding: 4px 8px;
+  border-left: 3px solid var(--vscode-editorWarning-foreground, #cca700);
+  color: var(--vscode-descriptionForeground, inherit);
+  overflow-wrap: anywhere;
+}
+
 /* ---- #246 混排嵌入（样式契约 content 域 reading-embed-mixed 与
    embed-slot 条目）：块内占位提升产生的流内宿主（vsidian-reading-embed
    + vsidian-reading-embed-mixed 修饰）。卡片壳规则随 #app

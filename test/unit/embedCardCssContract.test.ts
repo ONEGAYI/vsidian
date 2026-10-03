@@ -113,6 +113,35 @@ describe('错误分态样式区分（验收反馈）', () => {
   })
 })
 
+describe('P2-12 冲突三项选择条 CSS 契约（#289）', () => {
+  it('选择条：状态行内横排（flex 换行容纳窄卡）', () => {
+    const box = rule('.vsidian-embed-card .vsidian-embed-card-state .vsidian-embed-card-conflict')
+    expect(box).toMatch(/display:\s*flex/)
+    expect(box).toMatch(/flex-wrap:\s*wrap/)
+  })
+
+  it('compare 主操作用主题主按钮色；其余两项用次按钮色（放弃不喧宾夺主）', () => {
+    const compare = rule('.vsidian-embed-card .vsidian-embed-card-state .vsidian-embed-card-conflict .vsidian-embed-card-conflict-compare')
+    expect(compare).toMatch(/background:\s*var\(--vscode-button-background/)
+    expect(compare).toMatch(/color:\s*var\(--vscode-button-foreground/)
+    const others = rule('.vsidian-embed-card .vsidian-embed-card-state .vsidian-embed-card-conflict button')
+    expect(others).toMatch(/background:\s*var\(--vscode-button-secondaryBackground/)
+    expect(others).toMatch(/color:\s*var\(--vscode-button-secondaryForeground/)
+  })
+
+  it('在途禁用态与键盘焦点可见（disabled 降透明；focus-visible 描边）', () => {
+    const disabled = rule('.vsidian-embed-card .vsidian-embed-card-state .vsidian-embed-card-conflict button:disabled')
+    expect(disabled).toMatch(/opacity:\s*0\.55/)
+    const focus = rule('.vsidian-embed-card .vsidian-embed-card-state .vsidian-embed-card-conflict button:focus-visible')
+    expect(focus).toMatch(/outline:\s*1px solid var\(--vscode-focusBorder/)
+  })
+
+  it('失败提示行：警示左边条（与 ref-close-dialog 提示行同口径）', () => {
+    const notice = rule('.vsidian-embed-card .vsidian-embed-card-state .vsidian-embed-card-conflict-notice')
+    expect(notice).toMatch(/border-left:\s*3px solid var\(--vscode-editorWarning-foreground/)
+  })
+})
+
 describe('Live 隐形态呈现（验收反馈：不留隐形源码行）', () => {
   it('宿主块级化 + 零高块级化 inline replace 前后的 cm-widgetBuffer（垂直导航坐标锚）', () => {
     const host = rule('#app .cm-editor .cm-content .vsidian-live-embed')

@@ -96,6 +96,10 @@ export type HostToWebview =
       fsPath: string
       outcome: 'closed' | 'save-failed' | 'discard-failed' | 'stale'
     }
+  /** P2-12（#289）「对比并解决」结果：ok = 原生对比页已打开（临时资源完整
+   *  就绪并成功转交；webview 随即出站 sync.request 重同步解除暂停——旧
+   *  未提交队列不重放）；!ok = 打开/资源失败，暂停现场与输入保留，可重试 */
+  | { kind: 'refEdit.conflictCompare.result'; portId: string; fsPath: string; ok: boolean }
   /** P2-04 测试钩子：切换指定嵌入（inner + occurrence 序号）的内部模式
    *  （与用户点击头部模式按钮同一处理器链路）；宿主测试无法向 webview
    *  派发真实点击 */
@@ -139,6 +143,14 @@ export type HostToWebview =
   /** P2-05（#282）测试钩子：在主编辑器派发删除指定引用行的事务（真实
    *  事务管线——命中活跃引用区间的删除走拦截确认链路） */
   | { kind: 'embed.test.deleteRef'; inner: string; occurrence?: number }
+  /** P2-12（#289）测试钩子：触发指定嵌入的冲突三项动作（与选择条按钮 /
+   *  键位操作同一处理器链路；reopen 为收起态的再展开入口） */
+  | {
+      kind: 'embed.test.conflictAction'
+      inner: string
+      action: 'compare' | 'discard' | 'cancel' | 'reopen'
+      occurrence?: number
+    }
   /** 请求 webview 回报视图诊断（文本与渲染行数，供测试与性能观测） */
   | { kind: 'view.state.request' }
   /** #272 测试钩子门控的观测开关；只记录传播身份，不改变调度。 */
@@ -766,6 +778,19 @@ export type WebviewToHost =
       confirmedVersion: number
       reqId: number
     }
+  /** P2-12（#289）冲突三项「对比并解决」：请求宿主创建承载当前未提交
+   *  输入的临时副本（untitled）并打开 VSCode 原生对比页（左=临时副本、
+   *  右=真实 B）。text 为嵌入实例当前全文快照（webview 侧唯一权威来源，
+   *  宿主不回查）。宿主回 refEdit.conflictCompare.result；对比页交互由
+   *  宿主管理，扩展不自建解决界面 */
+  | {
+      kind: 'refEdit.conflictCompare'
+      panelSessionId: string
+      panelDocUri: string
+      portId: string
+      fsPath: string
+      text: string
+    }
   /** view.locate 送达确认（#163 验收反馈）：webview 应用定位后原样回发
    *  消息 offset——宿主只补发「从未送达」的定位意图（面板重载竞态兜底），
    *  已送达的定位交给 webview 持久化锚点恢复，历史程序定位不再重播 */
@@ -946,6 +971,13 @@ export type WebviewToHost =
         closeDialog?: 'none' | 'open' | 'stale'
         /** P2-05 发起退出意图的径（模态/挂起期间观测）；旧 webview 缺省。 */
         closeIntent?: 'close' | 'escape' | 'delete' | ''
+        /** P2-12 冲突选择态（none = 非暂停 / open = 三项在场 / collapsed =
+         *  已取消收起）；旧 webview 缺省。 */
+        conflictChoice?: 'none' | 'open' | 'collapsed'
+        /** P2-12 「对比并解决」在途（防重入观测）；旧 webview 缺省。 */
+        conflictComparePending?: boolean
+        /** P2-12 对比打开失败的就地提示在场；旧 webview 缺省。 */
+        conflictNotice?: boolean
       }>
       /** #223 Live 嵌入显隐观测：嵌入表逐枚的源码显形态（目标原文、行号、
        *  光标/选区是否触及源码区间——selectionTouchesRange 语义；旧 webview
@@ -2934,6 +2966,15 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         isNonNegativeInt(v.confirmedVersion) &&
         isPositiveInt(v.reqId)
       )
+    case 'refEdit.conflictCompare':
+      // P2-12：对比请求（身份校验与 refEdit.save 同口径 + text 全文快照）
+      return (
+        isString(v.panelSessionId) &&
+        isString(v.panelDocUri) &&
+        typeof v.portId === 'string' && v.portId.length > 0 &&
+        typeof v.fsPath === 'string' && v.fsPath.length > 0 &&
+        isString(v.text)
+      )
     case 'refEdit.message': {
       // 编辑通道白名单：inner 消息须为 RefEditClientMessage 的合法形态
       //（链接/图片等消息混入即拒绝——它们不经目标端口）
@@ -3420,6 +3461,13 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         (v.outcome === 'closed' || v.outcome === 'save-failed' ||
           v.outcome === 'discard-failed' || v.outcome === 'stale')
       )
+    case 'refEdit.conflictCompare.result':
+      // P2-12：对比请求结果（ok = 对比页已打开并完成转交）
+      return (
+        typeof v.portId === 'string' && v.portId.length > 0 &&
+        typeof v.fsPath === 'string' && v.fsPath.length > 0 &&
+        typeof v.ok === 'boolean'
+      )
     case 'embed.test.mode':
       // P2-04 测试钩子：inner + 目标模式 + 可选 occurrence 序号
       return (
@@ -3475,6 +3523,13 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'embed.test.deleteRef':
       return (
         typeof v.inner === 'string' && v.inner.length > 0 &&
+        (v.occurrence === undefined || isNonNegativeInt(v.occurrence))
+      )
+    case 'embed.test.conflictAction':
+      return (
+        typeof v.inner === 'string' && v.inner.length > 0 &&
+        (v.action === 'compare' || v.action === 'discard' ||
+          v.action === 'cancel' || v.action === 'reopen') &&
         (v.occurrence === undefined || isNonNegativeInt(v.occurrence))
       )
     case 'view.state.request':

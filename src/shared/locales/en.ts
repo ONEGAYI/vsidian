@@ -254,6 +254,10 @@ export const en = {
   'host.discardAndResync': 'Discard local changes and resync',
   'host.confirmResume': 'This will discard the unconfirmed local changes in the "{name}" editor and resync with the on-disk/authoritative content. Consider copying the unconfirmed input first.',
   'host.conflictPaused': 'Editing of "{name}" is paused: the external change and the unconfirmed input cannot be merged safely. The unconfirmed input is kept and can be retrieved at any time.',
+  /** P2-12 (#289) title of the native diff editor opened by "Compare and
+   *  Resolve" (left: temporary copy of the uncommitted input; right: the real
+   *  target document) */
+  'host.conflictDiffTitle': 'Write conflict: {name} (Left: copy of current input / Right: current target version)',
   'host.panelClosedWithInput': 'The editor for "{name}" was closed (or the connection dropped) with unsaved unconfirmed input: {text}',
   'host.wikilinkUnsupported': 'Unsupported wikilink form "[[{target}]]" (embeds ![[…]] belong to a later phase): kept as-is',
   'host.wikilinkNoWorkspace': 'The current document is not in any workspace folder: wikilink targets resolve relative to the source document, so jumping is unavailable with no folder open (the link text is kept)',
@@ -475,6 +479,21 @@ export const en = {
   'embed.closeSaveFailed': 'Save failed (the file may be read-only); the current editing state is kept.',
   'embed.closeDiscardFailed': 'Discard failed; the current state is kept.',
   'embed.closeStale': 'The target changed while confirming; please confirm again.',
+
+  /** P2-12 (#289) write-conflict three choices in the paused state row.
+   *  The compare hover text is the user-specified wording, translated to
+   *  match it word for word in meaning; discard only drops the input that
+   *  failed to write (not a document-level rollback); cancel keeps the
+   *  pause and the current input. */
+  'embed.conflictCompareLabel': 'Compare and Resolve',
+  'embed.conflictCompareHint': 'Resolve the conflict in a diff view between the temporary copy and the conflicting version',
+  'embed.conflictDiscardLabel': 'Discard Current Version',
+  'embed.conflictDiscardHint': 'Discard the input that failed to write, then resync to the current target content.',
+  'embed.conflictCancelLabel': 'Cancel',
+  'embed.conflictCancelHint': 'Keep the pause and the current input.',
+  'embed.conflictReopenLabel': 'Choose Again',
+  'embed.conflictReopenHint': 'Show the conflict resolution choices again.',
+  'embed.conflictCompareFailed': 'Failed to open the diff view. The current input is kept; you can retry.',
 
   /** 反链面板（#197：四态与条目；形态改版批次：工具栏/排序/搜索/页头） */
   'backlinks.label': 'Backlinks',
