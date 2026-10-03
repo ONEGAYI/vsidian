@@ -73,4 +73,4 @@ test/browser 既有生产脚本、test/integration/testHost.mjs、perf 入口；
 
 合并树复验（`logs/merge-p2-14-*`，叠加 main 合并 76d3ce1f）：compile 通过、全量 unit 259 文件/5405 例、browser 9 套件（embedLiveCloseout + richPaste 族 + 嵌入族交叉）、定向集成 10/10、sensitive 4/4。
 
-**归档的已知边界**：嵌入图周期核验不覆盖（1.5 期同口径）；浮窗内子卡悬停无触发路径（live 链接非 a[href]）；#315 连击缺陷另行跟踪；dispose 微秒竞态/窗口退出维持 P2-13 边界；contract 清理项核实无「已迁移旧单实例入口」可删。
+**归档的已知边界**：嵌入图周期核验不覆盖（1.5 期同口径）；浮窗内子卡悬停无触发路径（live 链接非 a[href]）；#315 连击缺陷另行跟踪；嵌入实例未接 #314 粘贴钩子另行归档（`onPasteTxnAcked`/`onExternalDocSettled`/`onHistoryIntent`/`onRichPasteHtml` 仅根实例接线，代码注释已声明——嵌入内 rich paste 无「已保留格式」toast、粘贴后 undo 不恢复粘贴前选区、原生 Ctrl+V 的 HTML 走纯文本默认链；撤销分段本身正常，`withPasteMeta`/`markUndoSegmentBoundary` 系实例方法已随实例生效；#317 对齐口径）；dispose 微秒竞态/窗口退出维持 P2-13 边界；contract 清理项核实无「已迁移旧单实例入口」可删。
