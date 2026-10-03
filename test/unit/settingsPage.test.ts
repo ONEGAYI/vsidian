@@ -9,7 +9,7 @@ import { describe, it, expect } from 'vitest'
 import {
   SettingsPageView,
   SETTINGS_PAGE_CLASS_NAMES,
-  type SettingsPageEditorGroup,
+  type SettingsPageDelegateGroup,
 } from '../../src/webview/settingsPageView'
 import { PRODUCTION_SETTING_DEFINITIONS, type SettingDefinition } from '../../src/shared/settings'
 import { installLocale } from '../../src/shared/i18n'
@@ -35,7 +35,7 @@ const FIXTURE_DEFS: readonly SettingDefinition[] = [
   { key: 'editor.spellcheck', type: 'boolean', default: true, titleKey: 'setting.testFlag.title' },
 ]
 
-function makeView(defs: readonly SettingDefinition[], editorGroups: readonly SettingsPageEditorGroup[] = []): {
+function makeView(defs: readonly SettingDefinition[], editorGroups: readonly SettingsPageDelegateGroup[] = []): {
   view: SettingsPageView
   sent: unknown[]
   parent: HTMLElement

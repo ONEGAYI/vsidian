@@ -787,4 +787,14 @@ export const zhCn: Record<MessageKey, string> = {
   'host.defaultEditorDismissLabel': '忽略',
   'host.defaultEditorFixed': 'Vsidian 已恢复为 Markdown 文件的默认编辑器。',
   'host.defaultEditorFixFailed': '未能自动恢复默认编辑器（可能被工作区设置覆盖），即将打开编辑器关联设置供手动处理。',
+  /** #323 设置页常规页「默认编辑器」委托组：组标题、状态行四形态与手动按钮 */
+  'defaultEditor.title': '默认编辑器',
+  'defaultEditor.statusLabel': '当前默认编辑器',
+  'defaultEditor.statusDescription': 'Markdown 文件默认由哪个编辑器打开。被其他扩展抢占时可一键改回 Vsidian。',
+  'defaultEditor.statusPending': '正在读取当前关联…',
+  'defaultEditor.statusVsidian': 'Vsidian',
+  'defaultEditor.statusBuiltin': 'VSCode 内置文本编辑器',
+  'defaultEditor.statusOther': '其他扩展：{name}',
+  'defaultEditor.statusNone': '无记录（打开 Markdown 文件时由 VSCode 仲裁决定）',
+  'defaultEditor.fixButton': '设为默认',
 }

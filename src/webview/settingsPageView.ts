@@ -38,16 +38,17 @@ export interface SettingsPageSection {
 }
 
 /**
- * 编辑器分页内的二级标题组委托（#264）：分词分页退役为编辑器页尾组。
- * 组内容与组内定位由实现自行装配（承载标准设置行之外的呈现形态），条目
- * 进全局搜索索引（归编辑器分组命中）；与 SettingsPageSection 互斥——
- * 本接口不产生侧栏分页槽位，也不得以此新增分页形态。
+ * 分页内二级标题组委托（#264 分词组引入，挂编辑器页尾；#323 常规页装配
+ * 扩展起支持挂任意内建分组页）：组内容与组内定位由实现自行装配（承载
+ * 标准设置行之外的呈现形态），条目进全局搜索索引（归所挂分组的搜索分组
+ * 命中）；与 SettingsPageSection 互斥——本接口不产生侧栏分页槽位，也不得
+ * 以此新增分页形态。
  */
-export interface SettingsPageEditorGroup {
+export interface SettingsPageDelegateGroup {
   /** 组标题语言键（h3 二级标题，t(titleKey) 取词） */
   readonly titleKey: MessageKey
-  /** 兼容路由：宿主按退役分页 id 发起 settings.focusSection 时打开编辑器
-   *  页并定位到本组（entry 原样透传给 mount，语义不变） */
+  /** 兼容路由：宿主按退役分页 id 发起 settings.focusSection 时打开所属页
+   *  并定位到本组（entry 原样透传给 mount，语义不变）；新组无退役分页则缺省 */
   readonly legacySectionId?: string
   /** 组标题图标槽位（SettingsGroupIcon 注册表驱动，与 defs 组同一 h3
    *  路径：内联字形与 #265 生图资产同槽）：缺省 = 槽位空缺，标题文字
@@ -68,7 +69,7 @@ export interface SettingsPageEditorGroup {
  */
 type EditorSection =
   | { titleKey: MessageKey; icon: SettingsGroupIcon; defs: () => readonly SettingDefinition[]; group?: undefined }
-  | { titleKey: MessageKey; icon?: SettingsGroupIcon; defs?: undefined; group: SettingsPageEditorGroup }
+  | { titleKey: MessageKey; icon?: SettingsGroupIcon; defs?: undefined; group: SettingsPageDelegateGroup }
 
 export const SETTINGS_PAGE_CLASS_NAMES = {
   root: 'vsidian-settings', title: 'vsidian-settings-title',
@@ -109,6 +110,8 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, tex
  *  图片 = 山形相框（#265 生图两枚从独立 SVG 资产加载，不在本表）。
  *  refview（#298 引用视图组）：path 数据暂以 links 双链环占位（引用域
  *  意象就近借用）——正式图标由用户后补，届时仅替换本行数据、接线不动；
+ *  shield（#323 常规页「默认编辑器」组标题）：盾牌（lucide shield 线性
+ *  化——守护意象）；
  *  book（#132 样式参考分页）随 #231 侧栏条目合并退役；
  *  #163 一轮曾为符号/代码块/图片三组新增 keyboard 复用与 code/image 形，
  *  二轮还原为页内小节后侧栏不再使用，已随分支退役。 */
@@ -123,6 +126,7 @@ const ICON_PATHS = {
   editing: 'M7 4v16M5 4h4M5 20h4M17 4v16M15 4h4M15 20h4',
   codeblock: 'M8 7l-5 5 5 5M16 7l5 5-5 5',
   image: 'M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2ZM11 9a2 2 0 1 1-4 0 2 2 0 0 1 4 0M21 15l-3.09-3.09a2 2 0 0 0-2.82 0L6 21',
+  shield: 'M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z',
   // experimental（#296 三轮「实验性功能」侧栏组）：锥形瓶（lucide
   // flask-conical 线性化——实验意象）；table（实验页「表格行为」小节
   // 标题）：外框 + 中缝十字的 2×2 网格
@@ -144,8 +148,9 @@ function icon(kind: keyof typeof ICON_PATHS): SVGSVGElement {
 
 /** 编辑器页二级组标题图标：五枚内联线性字形与 #265 两枚生图资产。
  *  refview（#298）：引用视图小节标题（path 暂以 links 字形占位，正式图
- *  标后补仅换数据）；table（#296 三轮）：实验页「表格行为」小节标题。 */
-export type SettingsGroupIcon = 'display' | 'editing' | 'codeblock' | 'image' | 'typewriter' | 'wordSegment' | 'refview' | 'table'
+ *  标后补仅换数据）；table（#296 三轮）：实验页「表格行为」小节标题；
+ *  shield（#323）：常规页「默认编辑器」委托组标题（守护意象内联字形）。 */
+export type SettingsGroupIcon = 'display' | 'editing' | 'codeblock' | 'image' | 'typewriter' | 'wordSegment' | 'refview' | 'table' | 'shield'
 
 function groupIcon(kind: SettingsGroupIcon): SVGSVGElement | HTMLSpanElement {
   if (kind === 'typewriter' || kind === 'wordSegment') {
@@ -181,7 +186,10 @@ export class SettingsPageView {
     private readonly defs: readonly SettingDefinition[],
     private readonly sections: readonly SettingsPageSection[] = [],
     /** #264 编辑器页二级组委托（分词）：挂编辑器页尾，不占侧栏槽位 */
-    private readonly editorGroups: readonly SettingsPageEditorGroup[] = []) {}
+    private readonly editorGroups: readonly SettingsPageDelegateGroup[] = [],
+    /** #323 常规页二级组委托（默认编辑器守护）：挂常规页标准行之后，
+     *  不占侧栏槽位（常规页装配扩展——委托组机制此前只挂编辑器页尾） */
+    private readonly generalGroups: readonly SettingsPageDelegateGroup[] = []) {}
 
   mount(parent: HTMLElement): void {
     const root = element('div', SETTINGS_PAGE_CLASS_NAMES.root)
@@ -248,6 +256,7 @@ export class SettingsPageView {
    *  scroll（可选，会话内恢复）：渲染复位后应用的主区滚动位置——缺省 =
    *  保持 render 的复位语义（顶部）；未知分页整条忽略（不设滚动） */
   selectSection(id: string, entry?: string, scroll?: number): void {
+    if (this.generalGroups.some((g) => g.legacySectionId === id)) id = 'general'
     if (this.editorGroups.some((g) => g.legacySectionId === id)) id = 'editor'
     const known = this.categories().some((c) => c.id === id)
     if (!known) return
@@ -405,8 +414,9 @@ export class SettingsPageView {
   }
   private categories() {
     const builtIn: Array<{ id: string; title: string; icon: 'general' | 'editor' | 'experimental' }> = []
-    // 空组不注册（fixture 可能只含部分前缀——空组不得占据默认激活位）
-    if (this.generalDefs().length > 0) {
+    // 空组不注册（fixture 可能只含部分前缀——空组不得占据默认激活位）；
+    // #323：委托组同样计入所属页的注册条件（常规页仅有委托组时也注册）
+    if (this.generalDefs().length > 0 || this.generalGroups.length > 0) {
       builtIn.push({ id: 'general', title: t('settings.generalSection'), icon: 'general' })
     }
     if (this.editorDefs().length > 0) {
@@ -497,7 +507,13 @@ export class SettingsPageView {
           ...(d.descriptionKey ? { description: t(d.descriptionKey) } : {}),
         }))
       const groups = [
-        { id: 'general', title: t('settings.generalSection'), entries: toEntries(this.generalDefs()) },
+        { id: 'general', title: t('settings.generalSection'), entries: [
+          ...toEntries(this.generalDefs()),
+          // #323 常规页委托组条目（默认编辑器状态行/守护开关）随常规分组
+          // 命中：点击进常规页并以条目 id 定位组内对应块（编辑器页委托组
+          // 归编辑器分组的同一口径）
+          ...this.generalGroups.flatMap((g) => g.entries),
+        ] },
         // #264 委托组条目（分词 engine/resource）随编辑器分组命中：点击进
         // 编辑器页并以条目 id 定位组内对应块
         { id: 'editor', title: t('settings.editorCategory'), entries: [
@@ -543,9 +559,11 @@ export class SettingsPageView {
       if (dispose) this.sectionDisposers.push(dispose)
       return
     }
-    // 编辑器分组（#163 二轮还原）：页内按组内标题分小节（显示/符号输入/
-    // 代码块/图片），各小节一个容器，空小节不渲染；general 组无小节。
-    // #155 容器语言：组内条目包进分组容器（圆角 + 色差底），随分页统一
+    // 常规分组：标准行直铺（无小节），#323 起标准行之后可挂二级委托组
+    //（默认编辑器守护——见下方装配块）；编辑器分组（#163 二轮还原）：页内
+    // 按组内标题分小节（显示/符号输入/代码块/图片），各小节一个容器，空
+    // 小节不渲染。#155 容器语言：组内条目包进分组容器（圆角 + 色差底），
+    // 随分页统一
     if (active.id === 'general') {
       list.append(element('h2', 'vsidian-settings-heading', t('settings.generalSection')),
         element('p', SETTINGS_PAGE_CLASS_NAMES.subtitle, t('settings.generalSectionDescription')))
@@ -554,6 +572,19 @@ export class SettingsPageView {
       // 容器先入文档再填充：renderDefItems 的 focusEntry focus/scrollIntoView
       // 需要条目已在文档中，游离节点上 focus 不生效
       this.renderDefItems(group, this.generalDefs(), focusEntry)
+      // #323 常规页委托组（默认编辑器守护）：标准行之后逐组挂载，结构与
+      // 编辑器页委托组同构（独立分组容器 + h3 标题；mount 返回的清理函数
+      // 收进卸载器集合，重渲染/切页时释放）
+      for (const delegate of this.generalGroups) {
+        const container = element('div', 'vsidian-settings-group')
+        const title = element('h3', 'vsidian-settings-group-title')
+        if (delegate.icon) title.append(groupIcon(delegate.icon))
+        title.append(document.createTextNode(t(delegate.titleKey)))
+        container.append(title)
+        list.append(container)
+        const dispose = delegate.mount(container, focusEntry)
+        if (dispose) this.sectionDisposers.push(dispose)
+      }
       return
     }
     // 实验性分组（#296 三轮）：页内按小节标题分组（首个为「表格行为」，

@@ -81,6 +81,8 @@ const CMD = {
   resetEditorGuardState: 'onegayi.vsidian._test.resetEditorGuardState',
   runEditorGuardStartupCheck: 'onegayi.vsidian._test.runEditorGuardStartupCheck',
   fixDefaultEditor: 'onegayi.vsidian._test.fixDefaultEditor',
+  // #323 设置页「默认编辑器」委托组状态载荷观测（defaultEditor.state 同源）
+  getDefaultEditorState: 'onegayi.vsidian._test.getDefaultEditorState',
   // 快捷键链路（正式 KeybindingService 通道：快照直读存储层）
   getKeybindings: 'onegayi.vsidian._test.getKeybindings',
   setKeybindings: 'onegayi.vsidian._test.setKeybindings',
@@ -15305,6 +15307,90 @@ export const cases: Array<[string, () => Promise<void>]> = [
       console.log('[#322] workspace 层覆盖复查兜底降级通过')
     } finally {
       await cfg.update('editorAssociations', undefined, vscode.ConfigurationTarget.Workspace)
+      await cfg.update('editorAssociations', undefined, vscode.ConfigurationTarget.Global)
+    }
+  }],
+
+  // ---- #323：设置页「默认编辑器」委托组（状态载荷四形态 / 手动改回经
+  //      设置页消息通道闭环）---- 状态行可见文本与开关回显的呈现面由
+  // vitest jsdom 委托组套件钉住（defaultEditorSettings.test.ts，与生产
+  // settingsMain 同构装配）；此处断言真宿主侧「状态行收到的数据」与
+  // 「按钮消息走通真实修复链路」。
+
+  ['默认编辑器守护：设置页状态载荷四形态判定（#323）', async () => {
+    const cfg = vscode.workspace.getConfiguration('workbench')
+    const state = async () =>
+      (await vscode.commands.executeCommand(CMD.getDefaultEditorState)) as {
+        status: string; viewType: string | null; label: string | null
+      }
+    try {
+      await cfg.update('editorAssociations', undefined, vscode.ConfigurationTarget.Global)
+      // 无记录 → none（viewType/label 均 null）
+      const none = await state()
+      assert(none.status === 'none', `无记录应为 none，实际 ${JSON.stringify(none)}`)
+      assert(none.viewType === null && none.label === null, 'none 形态不应携带 viewType/label')
+      // 全是我 → vsidian（与 none 区分——detectEditorTakeover 合并为未接管）
+      await cfg.update('editorAssociations', { '*.md': VIEW_TYPE }, vscode.ConfigurationTarget.Global)
+      const mine = await state()
+      assert(mine.status === 'vsidian', `全是我应为 vsidian，实际 ${JSON.stringify(mine)}`)
+      // 内置编辑器 → builtin（viewType 随行 "default"，label null——设置页自组句）
+      await cfg.update('editorAssociations', { '*.md': 'default' }, vscode.ConfigurationTarget.Global)
+      const builtin = await state()
+      assert(builtin.status === 'builtin', `内置编辑器应为 builtin，实际 ${JSON.stringify(builtin)}`)
+      assert(builtin.viewType === 'default', `builtin 应随行关联值原文，实际 ${String(builtin.viewType)}`)
+      assert(builtin.label === null, 'builtin 形态 label 应为 null（设置页语言包组句）')
+      // 其他扩展 → other：反查不到可读名回退关联值原文
+      const phantom = 'onegayi.vsidian.__nonexistent323.editor'
+      await cfg.update('editorAssociations', { '*.md': phantom }, vscode.ConfigurationTarget.Global)
+      const other = await state()
+      assert(other.status === 'other', `他者关联应为 other，实际 ${JSON.stringify(other)}`)
+      assert(other.viewType === phantom && other.label === phantom,
+        `反查失败应回退原文（viewType/label 均 ${phantom}），实际 ${JSON.stringify(other)}`)
+      console.log('[#323] 设置页状态载荷四形态判定通过')
+    } finally {
+      await cfg.update('editorAssociations', undefined, vscode.ConfigurationTarget.Global)
+    }
+  }],
+
+  ['默认编辑器守护：设置页手动改回按钮闭环（#323）', async () => {
+    const cfg = vscode.workspace.getConfiguration('workbench')
+    try {
+      // 预置被抢占态（内置编辑器 + 无关文件类型保留探针）
+      await cfg.update('editorAssociations', {
+        '*.md': 'default',
+        '*.ipynb': 'test.guard323.editor',
+      }, vscode.ConfigurationTarget.Global)
+      const taken = (await vscode.commands.executeCommand(CMD.getDefaultEditorState)) as { status: string }
+      assert(taken.status === 'builtin', `预置后应为 builtin，实际 ${taken.status}`)
+      // 打开设置页（真实面板装载，经消息通道走通修复链路）
+      await vscode.commands.executeCommand('onegayi.vsidian.openSettings')
+      await poll('设置页打开并就绪', async () => {
+        const i = (await vscode.commands.executeCommand(CMD.settingsPageInfo)) as
+          | { open: boolean; ready: boolean }
+          | undefined
+        return i?.open && i.ready ? true : undefined
+      })
+      // 「设为默认」按钮产生的消息经设置页正式入口注入（与真实
+      // onDidReceiveMessage 同一 handleMessage；通知在钩子模式短路，写回真实）
+      await vscode.commands.executeCommand(CMD.injectSettingsPageMessage, { kind: 'defaultEditor.fix' })
+      await poll('手动改回写回生效', async () => {
+        const effective = vscode.workspace.getConfiguration('workbench')
+          .get<Record<string, string>>('editorAssociations') ?? {}
+        return effective['*.md'] === VIEW_TYPE ? effective : undefined
+      })
+      // 状态载荷同源翻转（设置页状态行收到的数据）：builtin → vsidian
+      const after = (await vscode.commands.executeCommand(CMD.getDefaultEditorState)) as { status: string }
+      assert(after.status === 'vsidian', `改回后载荷应为 vsidian，实际 ${after.status}`)
+      // 无关文件类型映射保留（基底合并不误伤）
+      const effective = vscode.workspace.getConfiguration('workbench')
+        .get<Record<string, string>>('editorAssociations') ?? {}
+      assert(effective['*.ipynb'] === 'test.guard323.editor', '无关文件类型映射应保留')
+      // 状态拉取通道（面板开着经正式入口）：不抛错即通道在线（应答发往
+      // 真实 webview，呈现面由 jsdom 套件钉住）
+      await vscode.commands.executeCommand(CMD.injectSettingsPageMessage, { kind: 'defaultEditor.get' })
+      console.log('[#323] 设置页手动改回按钮闭环通过')
+    } finally {
+      await vscode.commands.executeCommand(CMD.closeSettingsPage)
       await cfg.update('editorAssociations', undefined, vscode.ConfigurationTarget.Global)
     }
   }],

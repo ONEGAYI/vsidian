@@ -27,6 +27,8 @@ vi.mock('vscode', () => ({
         'image.pasteLocation': 'same-dir', 'image.pasteSubpath': 'assets',
       }
       if (command.endsWith('.getSnippetState')) return { directory: null, entries: [] }
+      // #322 守护面重置（suite/index.ts 每用例前读回校验）：mock 已清空态
+      if (command.endsWith('.getEditorGuardState')) return { versionLock: null, rejections: [] }
       return undefined
     },
   },

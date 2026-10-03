@@ -10,6 +10,7 @@ import { isFormatOperationId, type FormatOperationId } from './formatOperations'
 import { isKeybindingOperationId, isUiOperationId, type KeybindingOverrides, type UiOperationId } from './keybindings'
 import { sanitizeFindOptions, type FindOptions } from './findOptions'
 import { isDiagnosticSnapshot, type DiagnosticSnapshot } from './testDiagnostics'
+import type { DefaultEditorDisplayState, DefaultEditorDisplayStatus } from './editorGuard'
 
 /** 设置快照类型随协议消息透出（载荷单一事实源仍在 shared/settings） */
 export type { SettingsPayload }
@@ -695,6 +696,13 @@ export type HostToWebview =
       } | null
       resources: { js: string; wasm: string } | null
     }
+  /** #323 默认编辑器守护状态（设置页常规页「默认编辑器」委托组消费）：
+   *  当前默认编辑器四形态判定（vsidian 已是我 / builtin 内置文本编辑器 /
+   *  other 其他扩展（label 为可读名，反查失败回退关联值原文）/ none 无记
+   *  录）。设置页经 defaultEditor.get 拉取；宿主在生效判定可能变化的链路
+   *  （associations 配置变更、fixNow 修复）后经 notifyDefaultEditorChanged
+   *  推送。守护开关值不经本消息（随 settings.snapshot/changed 回显）。 */
+  | { kind: 'defaultEditor.state' } & DefaultEditorDisplayState
 
 /** P2-04（#281）目标编辑端口推送事件（refEdit.push 载荷）：B 会话对虚拟
  *  面板 send 出站的编辑通道子集——与根面板同构的同步语义（init 装载 /
@@ -1379,6 +1387,14 @@ export type WebviewToHost =
    *  动态 import/init 失败时上报（CSP/运行时不兼容等宿主不可见场景），
    *  宿主通知用户并记录 notice.load-failed；成功不回报 */
   | { kind: 'wordSegment.loadResult'; ok: boolean; detail?: string }
+  /** 默认编辑器守护状态拉取（#323，设置页装载/重载时）：宿主以
+   *  defaultEditor.state 应答（四形态判定现算） */
+  | { kind: 'defaultEditor.get' }
+  /** 手动「设为默认」（#323，设置页「默认编辑器」组）：走守护修复链路
+   *  同一逻辑（inspect().globalValue 基底合并写回 + 复查生效值 + 失败降级
+   *  引导）；结果经 defaultEditor.state 推送（状态行更新为 Vsidian）与宿主
+   *  通知呈现，不逐次应答 */
+  | { kind: 'defaultEditor.fix' }
 
 /** P2-04（#281）目标编辑端口的编辑通道内消息（refEdit.message 载荷）：
  *  与根面板编辑通道同构——B 会话按同一 DocumentSession 管线处理（seq 去重、
@@ -3428,6 +3444,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'wordSegment.get':
     case 'wordSegment.download':
     case 'wordSegment.delete':
+    case 'defaultEditor.get':
+    case 'defaultEditor.fix':
       return true
     case 'wordSegment.loadResult':
       return typeof v.ok === 'boolean' &&
@@ -4034,6 +4052,13 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         (v.resources === null || (isObject(v.resources) &&
           isString(v.resources.js) && isString(v.resources.wasm)))
       )
+    case 'defaultEditor.state':
+      // #323 默认编辑器守护状态：四形态枚举 + viewType/label 原文或 null
+      return (
+        isDefaultEditorDisplayStatus(v.status) &&
+        (v.viewType === null || isString(v.viewType)) &&
+        (v.label === null || isString(v.label))
+      )
     default:
       return false
   }
@@ -4056,6 +4081,15 @@ const WORD_SEGMENT_NOTICE_KINDS = [
 
 function isWordSegmentNoticeKind(v: unknown): v is (typeof WORD_SEGMENT_NOTICE_KINDS)[number] {
   return typeof v === 'string' && (WORD_SEGMENT_NOTICE_KINDS as readonly string[]).includes(v)
+}
+
+/** #323 默认编辑器守护四形态（defaultEditor.state.status；单一事实源在
+ *  shared/editorGuard 的 DefaultEditorDisplayStatus） */
+const DEFAULT_EDITOR_DISPLAY_STATUSES = ['vsidian', 'builtin', 'other', 'none'] as const
+
+function isDefaultEditorDisplayStatus(v: unknown): v is DefaultEditorDisplayStatus {
+  return typeof v === 'string' &&
+    (DEFAULT_EDITOR_DISPLAY_STATUSES as readonly string[]).includes(v)
 }
 
 /** #197 反链条目载荷形态守卫（新字段可选：旧宿主快照缺省容忍） */

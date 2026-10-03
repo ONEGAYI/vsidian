@@ -4,7 +4,8 @@
 // 先例同 textEditorProvider 冲突处理）、被动层 onDidChangeConfiguration
 // 订阅（常挂——守护关闭仅由服务停提示）与 _test 注入命令（VSIDIAN_
 // TEST_HOOKS 门控，C-11 同判据）。服务纯逻辑在 host/editorGuardService
-//（端口注入，单测覆盖）。
+//（端口注入，单测覆盖）。#323 起暴露 stateFor/fixNow（设置页「默认编辑器」
+// 委托组消费，settingsPage 消息分支接线）。
 //
 // 集成测试宿主的通知短路：VSIDIAN_TEST_HOOKS=1 时抢占提示按「自然超时」
 // 语义直接返回 undefined（不记拒绝）、成功/降级通知与 openSettings 引导
@@ -13,11 +14,13 @@
 import * as vscode from 'vscode'
 import {
   BUILTIN_EDITOR_ASSOCIATION_VALUE,
+  type DefaultEditorDisplayState,
   type EditorGuardPersisted,
 } from '../shared/editorGuard'
 import {
   EDITOR_GUARD_STORAGE_KEY,
   EditorGuardService,
+  type EditorGuardFixResult,
   type EditorGuardPorts,
   type EditorGuardRuntimeState,
 } from './editorGuardService'
@@ -27,6 +30,11 @@ import { t } from '../shared/i18n'
 
 export interface EditorGuardWiring {
   service: EditorGuardService
+  /** #323 defaultEditor.state 载荷（判定现算，不缓存；设置页状态行数据源） */
+  stateFor(): DefaultEditorDisplayState
+  /** #323 手动「设为默认」入口（service.fixNow 同一修复链路；设置页按钮
+   *  与提示通知按钮、_test 钩子共用） */
+  fixNow(): Promise<EditorGuardFixResult>
 }
 
 /** 抢占者可读名反查：扫 extensions.all 的 contributes.customEditors 匹配
@@ -107,6 +115,9 @@ export function createEditorGuardWiring(
   }
   const service = new EditorGuardService(ports)
 
+  /** #323 defaultEditor.state 载荷（判定现算） */
+  const stateFor = (): DefaultEditorDisplayState => service.getDisplayState()
+
   // 被动层常挂（守护关闭仅由服务停提示，监听不拆）；事件回调不 await
   //（沿检测与提示是后台链路）
   context.subscriptions.push(
@@ -130,6 +141,12 @@ export function createEditorGuardWiring(
         'onegayi.vsidian._test.getEditorGuardState',
         (): EditorGuardRuntimeState => service.getState(),
       ),
+      // #323 设置页状态行载荷观测（四形态判定的集成断言面）：与生产
+      // defaultEditor.state 消息同源（stateFor 现算）
+      vscode.commands.registerCommand(
+        'onegayi.vsidian._test.getDefaultEditorState',
+        (): DefaultEditorDisplayState => stateFor(),
+      ),
       vscode.commands.registerCommand(
         'onegayi.vsidian._test.resetEditorGuardState',
         () => service.reset(),
@@ -146,5 +163,9 @@ export function createEditorGuardWiring(
     )
   }
 
-  return { service }
+  return {
+    service,
+    stateFor,
+    fixNow: () => service.fixNow(),
+  }
 }
