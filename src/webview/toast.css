@@ -1,0 +1,100 @@
+:where(#app) {
+  --vsidian-toast-background: var(--vscode-editorWidget-background, var(--vscode-editor-background, #252526));
+  --vsidian-toast-foreground: var(--vscode-editorWidget-foreground, var(--vscode-editor-foreground, #cccccc));
+  --vsidian-toast-border: var(--vscode-widget-border, rgb(128 128 128 / 0.3));
+  --vsidian-toast-warning-background: #fff7db;
+  --vsidian-toast-warning-foreground: #70530b;
+  --vsidian-toast-warning-border: #e7d49a;
+  --vsidian-toast-error-background: #fdebec;
+  --vsidian-toast-error-foreground: #922f3c;
+  --vsidian-toast-error-border: #e9bbc1;
+  --vsidian-toast-radius: 8px;
+  --vsidian-toast-font-size: 12px;
+  --vsidian-toast-padding-inline: 14px;
+  --vsidian-toast-padding-block: 9px;
+  --vsidian-toast-max-width: 480px;
+  --vsidian-toast-viewport-margin: 16px;
+  --vsidian-toast-bottom-offset: 24px;
+  --vsidian-toast-shadow: 0 4px 16px rgb(0 0 0 / 0.12);
+  --vsidian-toast-enter-distance: 8px;
+  --vsidian-toast-enter-duration: 160ms;
+  --vsidian-toast-exit-duration: 120ms;
+  --vsidian-toast-duration: 2600;
+  --vsidian-toast-warning-duration: 4000;
+  --vsidian-toast-error-duration: 5000;
+}
+
+:where(.vscode-dark #app) {
+  --vsidian-toast-warning-background: #393321;
+  --vsidian-toast-warning-foreground: #f1d990;
+  --vsidian-toast-warning-border: #6b5930;
+  --vsidian-toast-error-background: #3c292d;
+  --vsidian-toast-error-foreground: #f3b6bf;
+  --vsidian-toast-error-border: #74414a;
+  --vsidian-toast-shadow: 0 4px 16px rgb(0 0 0 / 0.28);
+}
+
+:where(.vscode-high-contrast #app),
+:where(.vscode-high-contrast-light #app) {
+  --vsidian-toast-warning-background: var(--vscode-editor-background);
+  --vsidian-toast-warning-foreground: var(--vscode-editor-foreground);
+  --vsidian-toast-warning-border: var(--vscode-contrastBorder, var(--vscode-editor-foreground));
+  --vsidian-toast-error-background: var(--vscode-editor-background);
+  --vsidian-toast-error-foreground: var(--vscode-editor-foreground);
+  --vsidian-toast-error-border: var(--vscode-contrastBorder, var(--vscode-editor-foreground));
+}
+
+:where(.vsidian-toast-container) {
+  position: absolute;
+  z-index: 9000; /* 高于正文，低于模态交互层（10000） */
+  inset-inline: var(--vsidian-toast-viewport-margin);
+  bottom: calc(var(--vsidian-toast-bottom-offset) + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+:where(.vsidian-toast) {
+  box-sizing: border-box;
+  max-width: min(var(--vsidian-toast-max-width), 100%);
+  padding: var(--vsidian-toast-padding-block) var(--vsidian-toast-padding-inline);
+  background: var(--vsidian-toast-background);
+  color: var(--vsidian-toast-foreground);
+  border: 1px solid var(--vsidian-toast-border);
+  border-radius: var(--vsidian-toast-radius);
+  font-size: var(--vsidian-toast-font-size);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  box-shadow: var(--vsidian-toast-shadow);
+  pointer-events: none;
+  animation: vsidian-toast-enter var(--vsidian-toast-enter-duration) ease-out both;
+}
+
+:where(.vsidian-toast[data-severity="warning"]) {
+  background: var(--vsidian-toast-warning-background);
+  color: var(--vsidian-toast-warning-foreground);
+  border-color: var(--vsidian-toast-warning-border);
+}
+
+:where(.vsidian-toast[data-severity="error"]) {
+  background: var(--vsidian-toast-error-background);
+  color: var(--vsidian-toast-error-foreground);
+  border-color: var(--vsidian-toast-error-border);
+}
+
+:where(.vsidian-toast--leaving) {
+  animation: vsidian-toast-exit var(--vsidian-toast-exit-duration) ease-in both;
+}
+@keyframes vsidian-toast-enter {
+  from { opacity: 0; transform: translateY(var(--vsidian-toast-enter-distance)); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes vsidian-toast-exit {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  :where(.vsidian-toast) { animation: none; }
+  :where(.vsidian-toast--leaving) { opacity: 0; }
+}

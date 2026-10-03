@@ -175,7 +175,7 @@ describe('样式参考英文 UI 全局残留断言（#180 收尾）', () => {
     const parent = mountDetail('overview')
     const catButtons = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-style-ref-cat')]
     // 25 = content 10 + chrome 15（#236 起新增 find-panel 类目，#292 起新增 loading 类目，#300 起新增 tooltip 类目）
-    expect(catButtons.length).toBe(25)
+    expect(catButtons.length).toBe(27)
     const seen = new Set<string>()
     for (const cat of catButtons) {
       const catId = cat.dataset['category']!

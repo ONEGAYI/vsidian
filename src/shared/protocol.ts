@@ -22,6 +22,21 @@ export interface SerChange {
   text: string
 }
 
+/** 粘贴阶段只为真实宿主历史提供归属和选区解释，不执行替代撤销。 */
+export interface PasteSelection {
+  ranges: { anchor: number; head: number }[]
+  mainIndex: number
+}
+export interface PasteStage {
+  group: string
+  stage: 'text' | 'format' | 'single'
+  hasTextStep: boolean
+  before: PasteSelection
+  after: PasteSelection
+}
+export type DocumentChangeReason = 'undo' | 'redo'
+export interface PasteHistory extends PasteStage { sessionId: string }
+
 /** 表格结构操作（#13）：宿主命令面板命令 → webview 在光标处执行（live 模式） */
 export type TableEditOp =
   | 'insertRowAbove'
@@ -33,6 +48,7 @@ export type TableEditOp =
 
 /** 宿主 → webview 消息 */
 export type HostToWebview =
+  | { kind: 'paste.preferences.result'; reqId: number; ok: boolean }
   /** ready 后首发：全文 + 当前权威版本 */
   | { kind: 'init'; sessionId: string; docUri: string; version: number; text: string }
   /** 编辑请求已应用（或被拒绝）。
@@ -42,7 +58,7 @@ export type HostToWebview =
   | { kind: 'edit.ack'; seq: number; ok: true; version: number }
   | { kind: 'edit.ack'; seq: number; ok: false; reason: 'conflict' | 'error'; version: number; text?: string }
   /** 权威文档发生变更：变更增量（同指变更前文档） */
-  | { kind: 'doc.changed'; version: number; changes: SerChange[]; origin: 'external' }
+  | { kind: 'doc.changed'; version: number; changes: SerChange[]; origin: 'external'; reason?: DocumentChangeReason; paste?: PasteHistory }
   /** 全文重同步（应 sync.request 或宿主主动）：webview 以全文重置本地文档；
    *  对暂停中的面板兼作恢复信号（重置并解除暂停） */
   | { kind: 'doc.resync'; version: number; text: string }
@@ -702,6 +718,7 @@ export type RefEditHostEvent = Extract<
 
 /** webview → 宿主消息 */
 export type WebviewToHost =
+  | { kind: 'paste.preferences.set'; reqId: number; preserveFormatting: boolean }
   /** webview 脚本加载完成，请求 init。
    *  已知限制（C-8）：ready 与 init 之间的毫秒级窗口内到达的 doc.changed
    *  会被未 ready 面板丢弃——装载以 init 全文为准，内容不丢；仅当窗口内
@@ -726,6 +743,7 @@ export type WebviewToHost =
       seq: number
       baseVersion: number
       changes: SerChange[]
+      paste?: PasteStage
     }
   /** 撤销/重做请求：作用于宿主 TextDocument 权威历史（探索笔记 03 §4） */
   | { kind: 'history.request'; op: 'undo' | 'redo' }
@@ -1678,6 +1696,8 @@ export interface LineGutterAlignment {
  * jsdom 无布局能力（rect 恒 0），textVisible 恒 false，不作单测断言依据。
  */
 export interface PaintProbe {
+  /** #305 本地轻提示：不拦截命中，文字范围与样式确认实际可见。 */
+  toast?: { visible: boolean; text: string; severity: string; background: string; foreground: string; pointerEvents: string }
   /** 首个含文本行：首字符 rect 在视口内且 elementFromPoint 命中内容区。
    *  覆盖物（冲突暂停横幅、查找面板等绝对定位元素）遮挡首 8 行文本时同样
    *  返回 false——失败排障时先排除覆盖物再怀疑 CSP 样式失效 */
@@ -2697,6 +2717,18 @@ export function isSerChange(v: unknown): v is SerChange {
   )
 }
 
+function isPasteSelection(v: unknown): v is PasteSelection {
+  if (!isObject(v) || !Array.isArray(v.ranges) || v.ranges.length === 0 || v.ranges.length > 1000 ||
+      typeof v.mainIndex !== 'number' || !isNonNegativeInt(v.mainIndex) || v.mainIndex >= v.ranges.length) return false
+  return v.ranges.every(r => isObject(r) && isNonNegativeInt(r.anchor) && isNonNegativeInt(r.head))
+}
+
+function isPasteStage(v: unknown): v is PasteStage {
+  return isObject(v) && typeof v.group === 'string' && v.group.length > 0 && v.group.length <= 128 &&
+    (v.stage === 'text' || v.stage === 'format' || v.stage === 'single') &&
+    typeof v.hasTextStep === 'boolean' && isPasteSelection(v.before) && isPasteSelection(v.after)
+}
+
 function isSerChangeArray(v: unknown): v is SerChange[] {
   return Array.isArray(v) && v.every(isSerChange)
 }
@@ -2917,7 +2949,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         isString(v.docUri) &&
         isPositiveInt(v.seq) &&
         isNonNegativeInt(v.baseVersion) &&
-        isSerChangeArray(v.changes)
+        isSerChangeArray(v.changes) &&
+        (v.paste === undefined || isPasteStage(v.paste))
       )
     case 'history.request':
       return v.op === 'undo' || v.op === 'redo'
@@ -2973,6 +3006,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'clipboard.read':
       // #183 粘贴桥：reqId 会话面板内自增（对应 clipboard.read.result）
       return isPositiveInt(v.reqId)
+    case 'paste.preferences.set':
+      return isPositiveInt(v.reqId) && typeof v.preserveFormatting === 'boolean'
     case 'conflict.action':
       return (
         isString(v.sessionId) &&
@@ -3449,7 +3484,9 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return (
         isNonNegativeInt(v.version) &&
         isSerChangeArray(v.changes) &&
-        v.origin === 'external'
+        v.origin === 'external' &&
+        (v.reason === undefined || v.reason === 'undo' || v.reason === 'redo') &&
+        (v.paste === undefined || (isObject(v.paste) && isString(v.paste.sessionId) && isPasteStage(v.paste)))
       )
     case 'doc.resync':
       return isNonNegativeInt(v.version) && isString(v.text)
@@ -3780,6 +3817,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         return isString(v.text)
       }
       return v.ok === false && v.reason === 'read-failed'
+    case 'paste.preferences.result':
+      return isPositiveInt(v.reqId) && typeof v.ok === 'boolean'
     case 'contextMenu.test.contextMenu':
       return isNonNegativeInt(v.pos)
     case 'contextMenu.test.menuClick':

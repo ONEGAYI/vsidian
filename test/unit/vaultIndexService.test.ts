@@ -754,12 +754,140 @@ describe('VaultIndexService：#198 排除语义', () => {
     expect(itemsOf(await service.backlinksOf('C:/vault/b.md'))).toHaveLength(0)
   })
 
-  it('getExcludePatterns / maintenanceInfo 回读当前模式', async () => {
+  it('getExcludePatterns / maintenanceInfo 回读当前模式与正常扫描完成态', async () => {
     const { service } = makeService(makeFs(EXCLUDED_FS))
     await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
     await service.setExcludePatterns(['**/.git/**'])
     expect(service.getExcludePatterns()).toEqual(['**/.git/**'])
     expect(service.maintenanceInfo().excludePatterns).toEqual(['**/.git/**'])
+    expect(service.maintenanceInfo().roots).toMatchObject([
+      { hasData: true, scanning: false, verifying: false, queued: 0 },
+    ])
+  })
+
+  it('旧扫描提交结束不得放行新扫描期间的删除队列（#198）', async () => {
+    const firstTemp = 'C:/vault/ex-zone/a.md'
+    const lastTemp = 'C:/vault/ex-zone/b.md'
+    const fs = makeFs({
+      'C:/vault/base.md': '# 基线\n',
+      [firstTemp]: '# 临时甲\n',
+      [lastTemp]: '# 临时乙\n',
+    })
+    let notify: ((p: string | null) => void) | undefined
+    const scan = scanPortOf(fs)
+    scan.watchRoot = (_root, onEvent) => { notify = onEvent; return () => {} }
+    const storage = storagePortOf()
+    const service = new VaultIndexService(scan, storage, {
+      storageRoot: 'C:/store', isWindowsHost: IS_WIN,
+    })
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+
+    let releaseOldCommit!: () => void
+    let enteredOldCommit!: () => void
+    const oldCommitGate = new Promise<void>((resolve) => { releaseOldCommit = resolve })
+    const oldCommitEntered = new Promise<void>((resolve) => { enteredOldCommit = resolve })
+    const writeFile = storage.writeFile.bind(storage)
+    let holdOldCommit = true
+    storage.writeFile = async (path, content) => {
+      await writeFile(path, content)
+      if (holdOldCommit && path.endsWith('/CURRENT')) {
+        holdOldCommit = false
+        enteredOldCommit()
+        await oldCommitGate
+      }
+    }
+
+    let releaseNewRead!: () => void
+    let enteredNewRead!: () => void
+    const newReadGate = new Promise<void>((resolve) => { releaseNewRead = resolve })
+    const newReadEntered = new Promise<void>((resolve) => { enteredNewRead = resolve })
+    const readFileText = scan.readFileText.bind(scan)
+    let holdNewRead = false
+    scan.readFileText = async (path) => {
+      const raw = await readFileText(path)
+      if (holdNewRead && path.replace(/\\/g, '/') === lastTemp) {
+        enteredNewRead()
+        await newReadGate
+      }
+      return raw
+    }
+
+    let oldScan: Promise<void> | undefined
+    let newScan: Promise<void> | undefined
+    try {
+      // 设置页可以在旧扫描已发布模型、但 CURRENT 提交尚未返回时发送下一次设置。
+      oldScan = service.setExcludePatterns(['**/.git/**'])
+      await oldCommitEntered
+      holdNewRead = true
+      newScan = service.setExcludePatterns(['**/.git/**', '**/node_modules/**'])
+      await newReadEntered
+
+      releaseOldCommit()
+      await oldScan
+      const scanningWhileNewRead = service.maintenanceInfo().roots[0]!.scanning
+      for (const path of [firstTemp, lastTemp]) {
+        fs.files.delete(path)
+        fs.stats.delete(path)
+        notify!(path)
+      }
+      await vi.advanceTimersByTimeAsync(1200)
+      const countWhileNewRead = service.maintenanceInfo().roots[0]!.fileCount
+
+      // 新扫描读到了删除前的正文；删除事件须等该模型发布后再重扫，不能被覆盖。
+      releaseNewRead()
+      await newScan
+      await vi.advanceTimersByTimeAsync(1200)
+      const finalRoot = service.maintenanceInfo().roots[0]!
+      expect({
+        scanningWhileNewRead,
+        countWhileNewRead,
+        finalCount: finalRoot.fileCount,
+        finalScanning: finalRoot.scanning,
+        finalQueued: finalRoot.queued,
+      }).toEqual({
+        scanningWhileNewRead: true, countWhileNewRead: 3,
+        finalCount: 1, finalScanning: false, finalQueued: 0,
+      })
+    } finally {
+      releaseOldCommit()
+      releaseNewRead()
+      await Promise.allSettled([oldScan, newScan])
+      service.dispose()
+    }
+  })
+
+  it('旧扫描最后一次读取结束不得覆盖新排除域（#198）', async () => {
+    const lastTemp = 'C:/vault/ex-zone/b.md'
+    const fs = makeFs({ 'C:/vault/base.md': '# 基线\n', [lastTemp]: '# 临时\n' })
+    const { service, scan } = makeService(fs)
+    await service.initialize([{ fsPath: 'C:/vault', uri: 'file:///c%3A/vault' }])
+    let release!: () => void
+    let entered!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const readEntered = new Promise<void>((resolve) => { entered = resolve })
+    const readFileText = scan.readFileText.bind(scan)
+    scan.readFileText = async (path) => {
+      const raw = await readFileText(path)
+      if (path.replace(/\\/g, '/') === lastTemp) {
+        entered()
+        await gate
+      }
+      return raw
+    }
+    const oldScan = service.setExcludePatterns([])
+    try {
+      await readEntered
+      await service.setExcludePatterns(['ex-zone/**'])
+      expect(service.maintenanceInfo().roots[0]!.fileCount).toBe(1)
+      release()
+      await oldScan
+      // 旧列表已读到正文，取消检查仍须阻止它发布到新覆盖域与快照。
+      expect(service.maintenanceInfo().roots[0]!.fileCount).toBe(1)
+    } finally {
+      release()
+      await oldScan
+      service.dispose()
+    }
   })
 })
 

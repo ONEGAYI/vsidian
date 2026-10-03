@@ -109,7 +109,7 @@ describe('描述符表契约（CONTEXT_MENU_ITEMS）', () => {
 
   it('剪贴板四项与块链接命令在内置命令集中', () => {
     const commands = new Set(all.map((def) => def.command))
-    for (const command of ['cut', 'copy', 'paste', 'selectAll', 'copyHeadingLink', 'copyBlockLink', 'insertTable']) {
+    for (const command of ['cut', 'copy', 'paste', 'pastePlain', 'selectAll', 'copyHeadingLink', 'copyBlockLink', 'insertTable']) {
       expect(commands.has(command), `${command} 应在内置命令集`).toBe(true)
     }
   })
@@ -375,7 +375,7 @@ describe('空组收起（可见项为零时整组连同分隔线消失；置灰�
       hideContextMenuItem(def.id)
     }
     expect(modelIds(normalCtx())).toEqual(['insertWikilink', 'insertExternalLink', 'copyBlockLink',
-      'cut', 'copy', 'paste', 'selectAll'])
+      'cut', 'copy', 'paste', 'pastePlain', 'selectAll'])
   })
 })
 
@@ -801,8 +801,8 @@ describe('图标资产两表同步（#184：规格「扩展约定」两表同步
   )
   const root = path.resolve(process.cwd())
 
-  it('被描述符引用的图标 key 恰 26 枚（16 复用 + 10 新生成接线）', () => {
-    expect(referenced.size).toBe(26)
+  it('被描述符引用的图标 key 恰 27 枚（#305 接入既有 pastePlain 资产）', () => {
+    expect(referenced.size).toBe(27)
   })
 
   it('每个被引用 key 都有明暗两套 SVG 资产文件', () => {
@@ -814,8 +814,8 @@ describe('图标资产两表同步（#184：规格「扩展约定」两表同步
     }
   })
 
-  it('备用 4 key（pastePlain/media/footnote/callout）不被任何描述符引用（显式记账）', () => {
-    for (const key of ['pastePlain', 'media', 'footnote', 'callout']) {
+  it('备用 3 key（media/footnote/callout）不被任何描述符引用（显式记账）', () => {
+    for (const key of ['media', 'footnote', 'callout']) {
       expect(referenced.has(key), `备用 key ${key} 不应被描述符引用`).toBe(false)
       // 资产在表登记（KEYS 同步）：备用资产文件同样在场
       expect(existsSync(path.join(root, 'media/quick-actions/light', `light-${key}.svg`)),
@@ -844,7 +844,7 @@ describe('命令分派契约（三簇叶命令可执行；显式分支另有面�
     // contextMenuPanel.test.ts 逐项覆盖（cut/copy/paste/selectAll/
     // copyHeadingLink/copyBlockLink/insertTable + bold 代表 formatOperations
     // 同路径）；本契约防「新增描述符忘接分派」的回归。
-    const explicit = new Set(['cut', 'copy', 'paste', 'selectAll', 'copyHeadingLink', 'copyBlockLink', 'insertTable'])
+    const explicit = new Set(['cut', 'copy', 'paste', 'pastePlain', 'selectAll', 'copyHeadingLink', 'copyBlockLink', 'insertTable'])
     for (const def of flattenItems(CONTEXT_MENU_ITEMS)) {
       if (def.children && def.children.length > 0) {
         continue // 父项点击只展开不执行（无叶命令）

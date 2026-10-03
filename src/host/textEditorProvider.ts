@@ -99,7 +99,7 @@ import { hostLocale } from './hostLocale'
 import type { FindOptionsStore } from './findOptionsStore'
 import { sanitizeFindOptions, type FindOptions } from '../shared/findOptions'
 import { t } from '../shared/i18n'
-import { EMBED_MAX_DEPTH_DEFAULT, EMBED_MAX_DEPTH_KEY, READABLE_LINE_WIDTH_KEY } from '../shared/settings'
+import { EMBED_MAX_DEPTH_DEFAULT, EMBED_MAX_DEPTH_KEY, READABLE_LINE_WIDTH_KEY, PASTE_PRESERVE_FORMATTING_KEY, PASTE_ASK_BEFORE_KEY } from '../shared/settings'
 import type { JiebaWiring } from './jiebaResourceWiring'
 import { JIEBA_WASM_VERSION } from '../shared/jiebaManifest'
 import { recordDiagnosticMessage, TestDiagnostics } from '../shared/testDiagnostics'
@@ -1917,6 +1917,14 @@ export function createTextEditorProvider(
 
       const panelMessageHandler = (message: unknown): void => {
         recordDiagnosticMessage(diagnostics, 'host.receive', message)
+        // 粘贴模态记忆只允许更新两个既定偏好，复用现有持久化与广播。
+        if (isWebviewToHost(message) && message.kind === 'paste.preferences.set') {
+          void (settings?.service.apply({ [PASTE_PRESERVE_FORMATTING_KEY]: message.preserveFormatting,
+            [PASTE_ASK_BEFORE_KEY]: false }) ?? Promise.resolve({ ok: false })).then((result) => {
+            void webviewPanel.webview.postMessage({ kind: 'paste.preferences.result', reqId: message.reqId, ok: result.ok })
+          })
+          return
+        }
         if (isWebviewToHost(message) && message.kind === 'keybindings.get') {
           void webviewPanel.webview.postMessage({
             kind: 'keybindings.snapshot', overrides: settings?.keybindings.getSnapshot() ?? {},
@@ -2479,6 +2487,7 @@ export function createTextEditorProvider(
           text: c.text,
         })),
         event.document.version,
+        event.reason === vscode.TextDocumentChangeReason.Undo ? 'undo' : event.reason === vscode.TextDocumentChangeReason.Redo ? 'redo' : undefined,
       )
       // P2-04：B 的 dirty 变化（content 与 dirty-state 两类事件）推送到
       // 绑定中的来源面板（pushRefEditDirty 内按值去重，翻转才发）

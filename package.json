@@ -45,6 +45,16 @@
     ],
     "commands": [
       {
+        "command": "onegayi.vsidian.clipboard.paste",
+        "title": "%command.clipboard.paste.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.clipboard.pastePlain",
+        "title": "%command.clipboard.pastePlain.title%",
+        "category": "Vsidian"
+      },
+      {
         "command": "onegayi.vsidian.toggleViewMode",
         "title": "%command.toggleViewMode.title%",
         "category": "Vsidian"

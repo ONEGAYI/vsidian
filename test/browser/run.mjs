@@ -65,7 +65,9 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // P2-09 合入列：recursiveLive（递归引用直接父模式与逐层目标编辑——B 内
 // 部 Live 编辑器挂孙卡〔独占行/混排/格内〕、孙卡独立端口、在 C 键入只写
 // C、父根切换不覆写手动、循环截断与编辑器移交）紧随 tableCellLive。
-const names = ['tableCaret', 'blockquoteTablePaint', 'quoteBarPaint', 'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'wordMotion', 'imagePaste', 'outlineJump', 'outlineCollapse', 'outlineHover',
+// main 合入列（PR #314）：plainPaste/richPaste/richPasteUndo/
+// richPasteCompatibility（富文本粘贴/分步撤销族）紧随 imagePaste。
+const names = ['tableCaret', 'blockquoteTablePaint', 'quoteBarPaint', 'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'wordMotion', 'imagePaste', 'plainPaste', 'richPaste', 'richPasteUndo', 'richPasteCompatibility', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage', 'settingsPageRestore',
   'skeletonProbe', 'tooltipCard',
 

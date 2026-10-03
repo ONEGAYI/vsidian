@@ -184,6 +184,8 @@ interface RootIndexState {
   meta: SnapshotMeta | null
   /** 扫描/重建进行中（无数据时面板呈 loading，有数据呈 updating） */
   scanning: boolean
+  /** 当前全量扫描的所有权；旧轮结束不得清掉新轮的 busy 状态。 */
+  scanOwner: symbol | undefined
   hasData: boolean
   unwatch: (() => void) | null
   /** 快照合并提交去抖定时器 */
@@ -635,6 +637,7 @@ export class VaultIndexService {
       overlay: new VaultIndexOverlay(),
       meta: null,
       scanning: false,
+      scanOwner: undefined,
       hasData: false,
       unwatch: null,
       commitTimer: undefined,
@@ -702,14 +705,16 @@ export class VaultIndexService {
   }
 
   /** 全量扫描：分批读盘抽取（批间让出）→ 附件登记（两遍法）→ 快照提交。
-   *  epoch 不匹配（取消/新一轮维护）时中止——扫描标志经 finally 复位，
-   *  模型保持上次完整数据。 */
+   *  epoch 不匹配（取消/新一轮维护）时中止，模型保持上次完整数据。
+   *  模型发布后仍忙至提交结束；只有当前扫描能在 finally 复位并接力。 */
   private async fullScan(
     state: RootIndexState,
     runOpts: { epoch?: number; onProgress?: (done: number, total: number) => void } = {},
   ): Promise<void> {
     const epoch = runOpts.epoch ?? this.maintenanceEpoch
-    const cancelled = (): boolean => this.disposed || epoch !== this.maintenanceEpoch
+    const scanOwner = Symbol()
+    const cancelled = (): boolean => this.disposed || epoch !== this.maintenanceEpoch || state.scanOwner !== scanOwner
+    state.scanOwner = scanOwner
     state.scanning = true
     state.rescanQueue.clear() // 全量重扫涵盖增量任务，排空避免重复
     this.notify()
@@ -846,6 +851,9 @@ export class VaultIndexService {
       // 变化发布（#198）：与上一版模型比对 stat（重扫/重建场景）；首扫描
       // 只建立代次不广播（避免启动风暴）；索引条目消失 ≠ 磁盘删除——
       // 只有 accessOf=missing 的正证据才广播 deleted
+      if (cancelled()) {
+        return
+      }
       const prevModel = state.model
       for (const [rel, entry] of files) {
         const prev = prevModel?.files.get(rel)
@@ -878,16 +886,22 @@ export class VaultIndexService {
         }
       }
 
+      if (cancelled()) {
+        return
+      }
       const model: VaultIndexModel = { files, edges }
       state.model = model
       state.backlinks = buildBacklinkIndex(model.edges)
       state.hasData = true
-      state.scanning = false
       this.notify()
       await this.commitSnapshot(state)
     } finally {
-      state.scanning = false
-      this.resumeAfterBusy(state)
+      if (state.scanOwner === scanOwner) {
+        state.scanOwner = undefined
+        state.scanning = false
+        this.notify()
+        this.resumeAfterBusy(state)
+      }
     }
   }
 

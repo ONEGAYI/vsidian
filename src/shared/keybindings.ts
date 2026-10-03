@@ -82,6 +82,8 @@ const extra: readonly KeybindingOperation[] = [
 
 /** 视图中已有明确目标的按钮动作：命令面板、快捷键均可调用。 */
 export const UI_OPERATIONS = [
+  { id: 'paste', command: 'onegayi.vsidian.clipboard.paste', titleKey: 'command.clipboard.paste.title', mode: 'live', writes: true, defaults: ['ctrl+v', 'meta+v'] },
+  { id: 'pastePlain', command: 'onegayi.vsidian.clipboard.pastePlain', titleKey: 'command.clipboard.pastePlain.title', mode: 'live', writes: true, defaults: ['ctrl+shift+v', 'meta+shift+v'] },
   { id: 'sidebarToggle', command: 'onegayi.vsidian.ui.sidebarToggle', titleKey: 'command.ui.sidebarToggle.title', mode: 'both', writes: false, defaults: [] },
   { id: 'outlineToggle', command: 'onegayi.vsidian.ui.outlineToggle', titleKey: 'command.ui.outlineToggle.title', mode: 'both', writes: false, defaults: [] },
   { id: 'outlineSearch', command: 'onegayi.vsidian.ui.outlineSearch', titleKey: 'command.ui.outlineSearch.title', mode: 'both', writes: false, defaults: [] },
