@@ -2,6 +2,7 @@
 // fixture 工作区由 runTest.mjs 在临时目录动态生成（避免 git 换行转换干扰
 // 字节级断言），路径经环境变量 WORKSPACE_DIR 传入。
 import * as vscode from 'vscode'
+import * as path from 'node:path'
 import { liveEmbedReady, mixedEmbedReady, readingEmbedCard, readingEmbedHeightReady } from './embedReadiness'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { LOCALE_MESSAGES, resolveLocale } from '../../../src/shared/locales'
@@ -13418,4 +13419,107 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const tipState = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
     assert(tipState.appliedEdits === 0, `全链路零 applyEdit（实际 ${tipState.appliedEdits}）`)
   }],
+
+  // ---- 诊断（2026-10-03 独立树）：外部携带位置打开（全工作区搜索点击
+  //      同源）在 custom editor 接管 .md 后是否保留定位。反馈回路 + 宿主
+  //      可感知信号盘点，结论落档后整段处置（转正式回归用例或随修复改写）----
+
+  // vscode.open 携带 TextDocumentShowOptions.selection 与搜索结果条目点击
+  // 同源（都收敛到 editorService.openEditor(resource, { selection })，不指定
+  // viewType、走 .md 默认编辑器）。原生文本编辑器会 reveal 并选中匹配；
+  // 断言 custom editor 路径下 webview 的选区与视口同样落位。
+  ['搜索跳转（诊断反馈回路）：外部 selection 打开应定位并选中匹配', async () => {
+    const uri = wsUri('search-reveal.md')
+    await vscode.workspace.fs.writeFile(uri, Buffer.from(SEARCH_REVEAL_DOC_TEXT, 'utf8'))
+    const target = searchRevealTargetPosition()
+    await vscode.commands.executeCommand('vscode.open', uri, {
+      selection: new vscode.Range(
+        target.line, target.col, target.line, target.col + SEARCH_REVEAL_TARGET.length),
+    })
+    const doc = await vscode.workspace.openTextDocument(uri)
+    // fixture 为纯 LF：宿主 offset 与 webview LF 坐标一致，无需换算
+    const wantStart = doc.offsetAt(new vscode.Position(target.line, target.col))
+    const wantEnd = wantStart + SEARCH_REVEAL_TARGET.length
+    const view = await waitViewState('search-reveal.md', (v) => v.text === SEARCH_REVEAL_DOC_TEXT)
+    console.log(`[诊断 search-reveal] 期望选区 [${wantStart},${wantEnd})，实际 selection=${view.selectionOffset}/${view.selectionHead}，视口中心行=${view.liveViewportCenterLine}，目标行=${target.line}`)
+    assert(
+      view.selectionOffset === wantStart && view.selectionHead === wantEnd,
+      `外部 selection 打开后应选中匹配（期望 ${wantStart}..${wantEnd}，实际 ${view.selectionOffset}..${view.selectionHead}）`,
+    )
+    assert(
+      view.liveViewportCenterLine !== undefined &&
+        Math.abs(view.liveViewportCenterLine - target.line) <= 8,
+      `视口应滚到目标行附近（目标行 ${target.line}，中心行 ${view.liveViewportCenterLine}）`,
+    )
+  }],
+
+  // 信号盘点探针：同一打开动作下，1.82.3 宿主侧扩展 API 能感知到什么
+  // （伴随文本编辑器？selection 事件？tab 形态？）——决定 workaround 空间。
+  // 无强断言，观察值经 console.log 落 .vscode-test/integration-dev.log。
+  ['搜索跳转（诊断探针）：外部 selection 打开的宿主可感知信号盘点', async () => {
+    const uri = wsUri('search-reveal.md')
+    await vscode.workspace.fs.writeFile(uri, Buffer.from(SEARCH_REVEAL_DOC_TEXT, 'utf8'))
+    const target = searchRevealTargetPosition()
+    const selectionEvents: string[] = []
+    const visibleEvents: string[] = []
+    const activeEvents: string[] = []
+    const selSub = vscode.window.onDidChangeTextEditorSelection((e) => {
+      selectionEvents.push(`${path.basename(e.textEditor.document.uri.fsPath)}:${JSON.stringify(e.selections.map((s) => [s.anchor.line, s.anchor.character, s.active.line, s.active.character]))}`)
+    })
+    const visSub = vscode.window.onDidChangeVisibleTextEditors((editors) => {
+      visibleEvents.push(editors.map((e) => path.basename(e.document.uri.fsPath)).join(','))
+    })
+    const actSub = vscode.window.onDidChangeActiveTextEditor((editor) => {
+      activeEvents.push(editor ? path.basename(editor.document.uri.fsPath) : 'undefined')
+    })
+    try {
+      await vscode.commands.executeCommand('vscode.open', uri, {
+        selection: new vscode.Range(
+          target.line, target.col, target.line, target.col + SEARCH_REVEAL_TARGET.length),
+      })
+      await waitViewState('search-reveal.md', (v) => v.text === SEARCH_REVEAL_DOC_TEXT)
+      const tabs = vscode.window.tabGroups.all.flatMap((g) => g.tabs).map((t) => {
+        if (t.input instanceof vscode.TabInputCustom) {
+          return `custom:${path.basename(t.input.uri.fsPath)}`
+        }
+        if (t.input instanceof vscode.TabInputText) {
+          return `text:${path.basename(t.input.uri.fsPath)}`
+        }
+        return `other:${t.input instanceof Object ? t.input.constructor.name : String(t.input)}`
+      })
+      console.log(`[诊断 search-reveal 信号] tabs=${JSON.stringify(tabs)}`)
+      console.log(`[诊断 search-reveal 信号] activeTextEditor=${vscode.window.activeTextEditor ? path.basename(vscode.window.activeTextEditor.document.uri.fsPath) : 'undefined'}`)
+      console.log(`[诊断 search-reveal 信号] visibleTextEditors=${JSON.stringify(vscode.window.visibleTextEditors.map((e) => path.basename(e.document.uri.fsPath)))}`)
+      console.log(`[诊断 search-reveal 信号] onDidChangeTextEditorSelection=${JSON.stringify(selectionEvents)}`)
+      console.log(`[诊断 search-reveal 信号] onDidChangeVisibleTextEditors=${JSON.stringify(visibleEvents)}`)
+      console.log(`[诊断 search-reveal 信号] onDidChangeActiveTextEditor=${JSON.stringify(activeEvents)}`)
+    } finally {
+      selSub.dispose()
+      visSub.dispose()
+      actSub.dispose()
+    }
+  }],
 ]
+
+// ---- 诊断 fixture（2026-10-03 独立树）：目标词全文档唯一、位于第 60+ 行
+//      （初始视口之外），使「跳转是否发生」可由选区与视口中心行区分 ----
+const SEARCH_REVEAL_TARGET = '目标匹配词'
+const SEARCH_REVEAL_DOC_TEXT = [
+  '# 搜索跳转样例',
+  '',
+  ...Array.from({ length: 60 }, (_, i) => `填充段落 ${i}：保证目标在初始视口之外。`),
+  '',
+  `${SEARCH_REVEAL_TARGET}所在段落——全文档唯一命中位置。`,
+  '',
+  ...Array.from({ length: 40 }, (_, i) => `尾部段落 ${i}`),
+  '',
+].join('\n')
+
+function searchRevealTargetPosition(): { line: number; col: number } {
+  const lines = SEARCH_REVEAL_DOC_TEXT.split('\n')
+  const line = lines.findIndex((l) => l.includes(SEARCH_REVEAL_TARGET))
+  if (line < 0) {
+    throw new Error('诊断 fixture 构造缺陷：目标词不存在')
+  }
+  return { line, col: lines[line]!.indexOf(SEARCH_REVEAL_TARGET) }
+}
