@@ -1235,6 +1235,54 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
     '目标次段。',
     '',
   ].join('\n'), 'utf8')
+  // P2-13（#290）父标签关闭交接：交接嵌入（同目标两 occurrence + 一个从未
+  // 编辑的干净目标——去重与「干净不开」断言素材）与冲突嵌入（关闭时未
+  // 提交输入的当次三项选择素材）；各自独立文件对，不与 p204/p205/p212
+  // 共享目标——dirty/回滚断言互不干扰
+  writeFileSync(path.join(wsDir, 'p213-交接嵌入.md'), [
+    '# P2-13 交接嵌入',
+    '',
+    '![[p213-交接目标]]',
+    '',
+    '中间段落。',
+    '',
+    '![[p213-交接目标]]',
+    '',
+    '![[p213-干净目标]]',
+    '',
+    '尾部段落。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p213-交接目标.md'), [
+    '# p213 交接目标',
+    '',
+    '目标首段。',
+    '',
+    '目标次段。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p213-干净目标.md'), [
+    '# p213 干净目标',
+    '',
+    '干净目标首段。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p213-冲突嵌入.md'), [
+    '# P2-13 冲突嵌入',
+    '',
+    '![[p213-冲突目标]]',
+    '',
+    '尾部段落。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p213-冲突目标.md'), [
+    '# p213 冲突目标',
+    '',
+    '目标首段。',
+    '',
+    '目标次段。',
+    '',
+  ].join('\n'), 'utf8')
 
   // P2-06/#283 悬停浮窗根引用内部 Live：Live 父继承与手动切换/位置记忆链路
   writeFileSync(path.join(wsDir, 'p206-悬停Live.md'), [

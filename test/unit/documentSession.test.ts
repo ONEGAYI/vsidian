@@ -2844,3 +2844,106 @@ describe('P2-03 全文可达：循环身份、刷新宽容与全文计费（#280
   })
 })
 
+
+// ---- P2-13（#290）父标签关闭交接的会话支撑面 ----
+// settleEdits：在途编辑排空等待面——resolve = 调用时刻已入队的全部编辑任务
+// 执行完（写回照常完成，P2-01 §7 在途验证的会话侧保证）。父面板 onDidDispose
+// 的交接流程在 detach 虚拟面板前调用：settle 之后的未确认输入才是真正未写入
+// B 的（暂停快照/组合期），dirty 判定也因此取到在途完成后的最新状态。
+describe('P2-13 settleEdits：在途编辑排空等待面', () => {
+  it('settle resolve 时已入队的写入已落权威文档（ack 已发）', async () => {
+    const s = setup('# 标题\n')
+    const id = s.attach()
+    await readyPanel(s, id)
+    await s.send(id, {
+      kind: 'edit.request', sessionId: id, docUri: DOC_URI, seq: 1,
+      baseVersion: s.doc.version, changes: [{ offset: 4, length: 0, text: '正文' }],
+    } as WebviewToHost)
+    await s.session.settleEdits()
+    expect(s.doc.getText()).toBe('# 标题正文\n')
+    expect(s.sent.get(id)!.some((m) => m.kind === 'edit.ack')).toBe(true)
+  })
+
+  it('在途挂起期间 settle 不 resolve；放行后随写入完成 resolve', async () => {
+    const s = setup('# 标题\n')
+    const id = s.attach()
+    await readyPanel(s, id)
+    // 可放行的在途闸门（holdNextApply 不可中途放行——其语义是永不完成，
+    // 本例要验证的是「settle 等待真实在途」而非永久挂起）
+    const origApply = s.doc.applyChanges.bind(s.doc)
+    let releaseGate: (() => void) | undefined
+    s.doc.applyChanges = async (changes) => {
+      await new Promise<void>((resolve) => { releaseGate = resolve })
+      return origApply(changes)
+    }
+    // 发送不 await（任务挂在闸门上；send 的返回即任务 promise）
+    const task = s.send(id, {
+      kind: 'edit.request', sessionId: id, docUri: DOC_URI, seq: 2,
+      baseVersion: s.doc.version, changes: [{ offset: 4, length: 0, text: '挂起' }],
+    } as WebviewToHost)
+    await new Promise((r) => setTimeout(r, 50)) // 等闸门挂上
+    let settled = false
+    const settlePromise = s.session.settleEdits().then(() => {
+      settled = true
+    })
+    await new Promise((r) => setTimeout(r, 50))
+    expect(settled, '在途未完成时 settle 不得提前 resolve').toBe(false)
+    releaseGate!()
+    await task
+    await settlePromise
+    expect(s.doc.getText()).toBe('# 标题挂起\n')
+  })
+
+  it('settle 不受暂停面板的既有快照影响（queue 空即 resolve——交接后续走 detach 通知）', async () => {
+    const s = setup('# 标题\n')
+    const id = s.attach()
+    await readyPanel(s, id)
+    // 制造暂停：apply 失败 → 输入留存 conflictFragments（queue 仍会排空）
+    s.doc.applyResult = false
+    await s.send(id, {
+      kind: 'edit.request', sessionId: id, docUri: DOC_URI, seq: 3,
+      baseVersion: s.doc.version, changes: [{ offset: 0, length: 0, text: '失败' }],
+    } as WebviewToHost)
+    await s.session.settleEdits()
+    const state = s.session.getConflictState(id)
+    expect(state?.suspended).toBe(true)
+    expect(state?.fragments.join('')).toContain('失败')
+  })
+})
+
+// detachPanel 通知的来源标记：引用编辑端口（虚拟面板）与根面板的关闭残留
+// 输入走不同呈现——P2-13 只对前者提供三项当次选择（对比并解决/放弃当前
+// 版本/取消），后者维持既有「复制取回」通知。
+describe('P2-13 panel-closed-with-input 通知的 fromRefPort 标记', () => {
+  it('虚拟面板（refOrigin）的关闭残留通知携带 fromRefPort: true', async () => {
+    const notices: SessionNotice[] = []
+    const s = setup('# B\n', { onNotice: (n) => notices.push(n) })
+    const id = s.session.attachPanel({ send: () => undefined }, { refOrigin: { docUri: 'file:///d%3A/notes/a.md' } })
+    // 制造未确认输入：组合期挂起（conflict.report 携 compositionPending 快照，
+    // 快照与权威全文不等即「关闭时仍有未写入输入」）
+    await s.session.handleWebviewMessage({ kind: 'ready' }, id)
+    await s.send(id, {
+      kind: 'conflict.report', sessionId: id, docUri: DOC_URI,
+      version: 1, revision: 1, text: '# B\n输入', compositionPending: true,
+    } as WebviewToHost)
+    s.session.detachPanel(id)
+    const notice = notices.find((n) => n.type === 'panel-closed-with-input')
+    expect(notice).toBeDefined()
+    expect(notice && notice.type === 'panel-closed-with-input' && notice.fromRefPort).toBe(true)
+  })
+
+  it('根面板（无 refOrigin）的关闭残留通知不带 fromRefPort（维持既有呈现）', async () => {
+    const notices: SessionNotice[] = []
+    const s = setup('# A\n', { onNotice: (n) => notices.push(n) })
+    const id = s.session.attachPanel({ send: () => undefined })
+    await s.session.handleWebviewMessage({ kind: 'ready' }, id)
+    await s.send(id, {
+      kind: 'conflict.report', sessionId: id, docUri: DOC_URI,
+      version: 1, revision: 1, text: '# A\n输入', compositionPending: true,
+    } as WebviewToHost)
+    s.session.detachPanel(id)
+    const notice = notices.find((n) => n.type === 'panel-closed-with-input')
+    expect(notice).toBeDefined()
+    expect(notice && notice.type === 'panel-closed-with-input' && notice.fromRefPort).toBeUndefined()
+  })
+})

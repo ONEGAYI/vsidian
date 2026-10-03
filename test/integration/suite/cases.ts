@@ -14071,6 +14071,213 @@ export const cases: Array<[string, () => Promise<void>]> = [
     console.log('[P2-12] 冲突三项 + 原生临时副本对比 + 资源释放闭环通过')
   }],
 
+  // ---- P2-13（#290）父标签关闭交接：宿主直接关闭 A 的文件标签
+  // （closeActiveEditor 即用户关标签——无公开可取消前置事件，onDidDispose
+  // 后接管）：把引用编辑涉及且仍 dirty 的 B 打开为独立普通文本标签
+  // （showTextDocument 现有 TextDocument、preview:false 钉住；已有 B 标签
+  // 复用不重复——P2-01 §7 真宿主验证路线）；干净 B 不打开；TextDocument
+  // 身份/文本/dirty 与关闭前一致（不自动保存/丢弃/另建副本）。 ----
+  ['P2-13 父标签关闭交接：dirty B 去重开标签、已有标签复用与干净 B 不开（#290）', async () => {
+    await openWithEditor('p213-交接嵌入.md')
+    await waitSessionReady('p213-交接嵌入.md')
+    const uri = wsUri('p213-交接嵌入.md').toString()
+    const targetUri = wsUri('p213-交接目标.md')
+    const cleanUri = wsUri('p213-干净目标.md')
+    const parentDisk = await readDisk('p213-交接嵌入.md')
+
+    // 三卡绑定：同目标两 occurrence + 从未编辑的干净目标
+    await waitViewState('p213-交接嵌入.md', (v) => {
+      const cards = v.readingEmbed ?? []
+      const dirtyCards = cards.filter((c) => c.inner === 'p213-交接目标')
+      return dirtyCards.length === 2 && dirtyCards.every((c) => c.liveBound === true) &&
+        cards.some((c) => c.inner === 'p213-干净目标' && c.liveBound === true) ? true : false
+    })
+
+    // occurrence 0 输入 → B dirty（引用编辑已写入未保存；B 全程无标签）
+    const insertAt = '# p213 交接目标\n\n'.length + 3
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.type', inner: 'p213-交接目标', pos: insertAt, text: '【交接编辑】',
+    })
+    const dirtyDoc = await poll('嵌入编辑写入 B（dirty）', () => {
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())
+      return doc?.getText().includes('【交接编辑】') && doc.isDirty ? doc : undefined
+    })
+    const bTextAtClose = dirtyDoc.getText()
+
+    // 关闭 A 文件标签（普通关闭路径——onDidDispose 触发交接）。两 occurrence
+    // 同目标只交接一次：B 文本标签恰 1 个；A 的 custom 标签消失；打开的是
+    // 关闭前的同一 TextDocument（不另建副本），文本与 dirty 与关闭前一致
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await poll('交接完成（B 标签 1 个、A 标签消失）', () => {
+      const tabs = vscode.window.tabGroups.all.flatMap((g) => g.tabs)
+      const bTabs = tabs.filter((t) =>
+        t.input instanceof vscode.TabInputText && t.input.uri.toString() === targetUri.toString())
+      const aTabs = tabs.filter((t) =>
+        t.input instanceof vscode.TabInputCustom && t.input.viewType === VIEW_TYPE &&
+        t.input.uri.toString() === uri)
+      return bTabs.length === 1 && aTabs.length === 0 ? bTabs[0] : undefined
+    })
+    const bAfter = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())!
+    assert(bAfter === dirtyDoc, '交接打开的是关闭前的同一 TextDocument（不另建副本）')
+    assert(bAfter.getText() === bTextAtClose && bAfter.isDirty,
+      'B 文本与 dirty 与关闭前一致（不自动保存/丢弃）')
+
+    // 干净目标（活跃端口在场但从未写入）不自动打开
+    const cleanTabs = vscode.window.tabGroups.all.flatMap((g) => g.tabs)
+      .filter((t) =>
+        t.input instanceof vscode.TabInputText && t.input.uri.toString() === cleanUri.toString())
+    assert(cleanTabs.length === 0, '干净 B 不自动打开')
+
+    // preview:false 钉住（P2-01 探针形态）：旁观预览标签不得替换 B 标签
+    const bystander = await vscode.workspace.openTextDocument(wsUri('p213-冲突嵌入.md'))
+    await vscode.window.showTextDocument(bystander, { preview: true })
+    const bTabsAfterPreview = vscode.window.tabGroups.all.flatMap((g) => g.tabs)
+      .filter((t) =>
+        t.input instanceof vscode.TabInputText && t.input.uri.toString() === targetUri.toString())
+    assert(bTabsAfterPreview.length === 1, '交接标签钉住（不被后续预览替换）')
+
+    // 已有 B 标签复用：B 已有交接开的钉住标签，重开 A 再编辑再关闭——
+    // 交接复用既有标签，不生成重复
+    await openWithEditor('p213-交接嵌入.md')
+    await waitSessionReady('p213-交接嵌入.md')
+    await waitViewState('p213-交接嵌入.md', (v) => {
+      const dirtyCards = (v.readingEmbed ?? []).filter((c) => c.inner === 'p213-交接目标')
+      return dirtyCards.length === 2 && dirtyCards.every((c) => c.liveBound === true) ? true : false
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.type', inner: 'p213-交接目标', pos: insertAt, text: '【交接编辑二】',
+      occurrence: 1,
+    })
+    await poll('第二笔嵌入编辑写入 B', () => {
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())
+      return doc?.getText().includes('【交接编辑二】') && doc.isDirty ? doc : undefined
+    })
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await poll('二次交接复用既有标签（仍恰 1 个）', () => {
+      const bTabs = vscode.window.tabGroups.all.flatMap((g) => g.tabs)
+        .filter((t) =>
+          t.input instanceof vscode.TabInputText && t.input.uri.toString() === targetUri.toString())
+      return bTabs.length === 1 ? bTabs[0] : undefined
+    })
+    assert(bAfter.getText().includes('【交接编辑二】'),
+      '复用标签承载最新 dirty 文本')
+
+    // 现场还原：B 还原到已保存内容（激活 + 无参 revert，P2-01 §5.2 路线）
+    await vscode.window.showTextDocument(bAfter, { preview: true })
+    await vscode.commands.executeCommand('workbench.action.files.revert')
+    await poll('B 回到已保存内容', () => !bAfter.isDirty ? true : undefined)
+    assert(await readDisk('p213-交接嵌入.md') === parentDisk, 'A 磁盘零波及（不伪造 dirty）')
+    console.log('[P2-13] 父标签关闭交接（去重/复用/干净不开/身份一致）通过')
+  }],
+
+  // ---- P2-13（#290）关闭时的未提交输入：A 关闭时引用编辑存在「已收到但
+  // 未写入 B」的输入（冲突暂停现场）——B 文档交接与该输入分开：B 标签打开
+  // 的是 B 当前权威文本（不冒称包含该输入）；输入经 detachPanel 通知走
+  // P2-12 三项当次选择（对比并解决 = 宿主快照开原生对比页；取消/转交不清
+  // 除宿主快照；放弃当前版本只清快照、不回滚 B）。 ----
+  ['P2-13 关闭交接：未提交输入不冒称已在 B 标签与三项当次选择（#290）', async () => {
+    await openWithEditor('p213-冲突嵌入.md')
+    await waitSessionReady('p213-冲突嵌入.md')
+    const uri = wsUri('p213-冲突嵌入.md').toString()
+    const targetUri = wsUri('p213-冲突目标.md')
+
+    const bound = await waitViewState('p213-冲突嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p213-冲突目标' && c.liveBound === true)
+        ? true : false)
+    const port = bound.readingEmbed!.find((c) => c.inner === 'p213-冲突目标')!.livePortId!
+    const bDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())!
+    const HEAD = '# p213 冲突目标\n\n'.length
+
+    // 制造冲突暂停（P2-12 同款）：外部覆盖目标首段 + 旧版本请求同区间 →
+    // 输入留存宿主冲突快照（「已收到未写入 B」素材）
+    const versionAtPause = bDoc.version
+    const external = new vscode.WorkspaceEdit()
+    external.replace(targetUri, new vscode.Range(2, 0, 2, 5), '外部交错修改')
+    assert(await vscode.workspace.applyEdit(external) === true, '外部交错修改应成功应用')
+    await poll('外部版本到达 B', () => bDoc.getText().includes('外部交错修改') ? true : undefined)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.portWrite', portId: port, fsPath: targetUri.fsPath, seq: 9201,
+      baseVersion: versionAtPause, offset: HEAD, length: 5, text: '未提交旧版',
+    })
+    await waitViewState('p213-冲突嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p213-冲突目标' && c.liveSuspended === true)
+        ? true : false)
+    assert(bDoc.isDirty, '外部修改使 B dirty（B 的 dirty 与未提交输入分开观测）')
+
+    // 关闭 A 文件标签：settle（在途已空）→ detach（暂停现场触发「关闭残留
+    // 输入」通知）→ B dirty → 交接开标签
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+
+    await poll('交接标签出现（B dirty）', () => {
+      const tabs = vscode.window.tabGroups.all.flatMap((g) => g.tabs)
+      return tabs.some((t) =>
+        t.input instanceof vscode.TabInputText && t.input.uri.toString() === targetUri.toString())
+        ? true : undefined
+    })
+    assert(bDoc.getText().includes('外部交错修改') && !bDoc.getText().includes('未提交旧版'),
+      'B 标签内容为 B 当前权威文本（未提交输入不冒称已在 B 标签）')
+
+    // 关闭残留通知在场：宿主留存快照 + fromRefPort（三项呈现路径）
+    const closed = await poll('关闭残留输入通知记录', async () => {
+      const rec = (await vscode.commands.executeCommand(CMD.closedInput)) as
+        | { docUri: string; webviewText?: string; fragments: string[]; fromRefPort?: boolean }
+        | undefined
+      return rec && rec.docUri === targetUri.toString() && rec.fromRefPort === true ? rec : undefined
+    })
+    const snapshotText = closed.webviewText ?? closed.fragments.join('\n')
+    assert(snapshotText.includes('未提交旧版'), '宿主已收到的未写入输入留存于快照')
+
+    // 「对比并解决」执行路径（通知按钮同一函数）：左侧临时副本含未提交
+    // 输入、右侧真实 B；转交成功不清除快照（取消路径留存）
+    const diffOk = (await vscode.commands.executeCommand('onegayi.vsidian._test.closedInputConflictDiff')) as boolean
+    assert(diffOk === true, '关闭残留输入的对比并解决打开成功')
+    const diffTab = await poll('原生对比页在场（TabInputTextDiff）', () => {
+      const tab = vscode.window.tabGroups.activeTabGroup.activeTab
+      return tab?.input instanceof vscode.TabInputTextDiff ? tab : undefined
+    })
+    const diffInput = diffTab.input as vscode.TabInputTextDiff
+    assert(diffInput.modified.toString() === targetUri.toString(), '对比页右侧 = 真实 B 文档')
+    assert(diffInput.original.scheme === 'untitled', '对比页左侧 = untitled 临时副本')
+    const tempDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === diffInput.original.toString())
+    assert(tempDoc?.getText().includes('未提交旧版'), '临时副本承载未写入的输入')
+    const keptAfterCompare = (await vscode.commands.executeCommand(CMD.closedInput)) as
+      | { docUri: string } | undefined
+    assert(keptAfterCompare?.docUri === targetUri.toString(),
+      '转交（对比打开）不静默清除宿主快照')
+    // 关闭对比页 → untitled 释放（P2-12 同款收尾，含独立标签兜底）
+    assert(await vscode.window.tabGroups.close(diffTab) === true, '对比页 tab 关闭成功')
+    const tempUriStr = diffInput.original.toString()
+    await poll('对比页关闭后 untitled 释放', async () => {
+      if (!vscode.workspace.textDocuments.some((d) => d.uri.toString() === tempUriStr)) {
+        return true
+      }
+      const stray = vscode.window.tabGroups.all.flatMap((g) => g.tabs)
+        .find((t) => t.input instanceof vscode.TabInputText &&
+          t.input.uri.toString() === tempUriStr)
+      if (stray) {
+        await vscode.window.tabGroups.close(stray)
+      }
+      return undefined
+    })
+
+    // 「放弃当前版本」：只清宿主快照（本次未写入的输入），B 文本与 dirty
+    // 不动（不借用文档级回滚）
+    const bTextBeforeDiscard = bDoc.getText()
+    const bDirtyBeforeDiscard = bDoc.isDirty
+    const discard = (await vscode.commands.executeCommand('onegayi.vsidian._test.discardClosedInput')) as { discarded: boolean }
+    assert(discard.discarded === true, '放弃当前版本清除留存快照')
+    assert(((await vscode.commands.executeCommand(CMD.closedInput)) as undefined) === undefined,
+      '快照已清（下次读取为空）')
+    assert(bDoc.getText() === bTextBeforeDiscard && bDoc.isDirty === bDirtyBeforeDiscard,
+      '放弃当前版本不回滚 B（只作用于未提交输入版本）')
+
+    // 现场还原：B 还原到已保存内容（外部修改从未落盘）
+    await vscode.window.showTextDocument(bDoc, { preview: true })
+    await vscode.commands.executeCommand('workbench.action.files.revert')
+    await poll('B 回到已保存内容', () => !bDoc.isDirty ? true : undefined)
+    console.log('[P2-13] 关闭交接（未提交输入不冒称 + 三项当次选择）通过')
+  }],
+
   // ---- P2-05（#282）删除活跃引用拦截：覆盖活跃端口的 A 事务先拦截确认
   //（取消不把删除先写入 A）；确认后完成删除与相关退出；Esc 径同链路。 ----
   ['P2-05 删除活跃引用拦截与 Esc 退出（#282）', async () => {

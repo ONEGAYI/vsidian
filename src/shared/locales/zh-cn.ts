@@ -239,6 +239,14 @@ export const zhCn: Record<MessageKey, string> = {
    *  输入临时副本；右：真实目标文档） */
   'host.conflictDiffTitle': '写入冲突：{name}（左侧：当前输入副本 / 右侧：目标当前版本）',
   'host.panelClosedWithInput': '“{name}”的编辑器已关闭（或连接断开），存在未保存的未确认输入：{text}',
+  /** P2-13（#290）父标签关闭后，引用编辑端口（虚拟面板）未写入目标的输入
+   *  通知（三项当次选择：对比并解决 / 放弃当前版本 / 取消） */
+  'host.refClosedWithInput': '父文档已关闭，“{name}”的引用编辑存在未写入目标的输入：{text}',
+  'host.conflictCompareLabel': '对比并解决',
+  'host.conflictDiscardLabel': '放弃当前版本',
+  'host.conflictCancelLabel': '取消',
+  'host.handoffFailed': '打开“{name}”的编辑标签失败，未保存修改仍保留在宿主中，可重试打开。',
+  'host.handoffRetry': '重试打开',
   'host.wikilinkUnsupported': '不支持的双链形态「[[{target}]]」（嵌入 ![[…]] 属二期）：已按原文保留',
   'host.wikilinkNoWorkspace': '当前文档不在任何工作区文件夹内：双链目标按来源文档的相对路径解析，未打开文件夹时无法跳转（链接文本保留）',
   'host.wikilinkNotFound': '双链目标不存在：[[{target}]]（已按来源文档所在目录解析；不会自动创建文件）',
