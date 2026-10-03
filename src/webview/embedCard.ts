@@ -42,6 +42,7 @@ import type { ReadingViewStats } from './readingVirtualView'
 import { refErrorText, releaseRefSourceLease } from './refReadingContent'
 import { WIKILINK_CLASS_NAMES } from '../shared/wikilink'
 import { LiveEditorInstance } from './liveInstance'
+import { liveEmbedChildCards } from './liveEmbed'
 import { ImageResourceManager, isDirectImageSrc } from './imageResource'
 import { closeFmPopoverForView } from './frontmatterPopover'
 import type { SettingsPayload } from '../shared/settings'
@@ -707,16 +708,14 @@ export class EmbedCardManager {
       note: '',
       host,
     }
-    // P2-04 范围锁：悬停浮层内的卡片不提供内部模式入口（浮层内部 Live 属
-    // P2-05）——浮层后代的来源父（按 hostId 查，P2-07）不在状态库，或父为
-    // 浮窗根 entry（P2-06 起根引用以语义键驻留状态库；子卡的直接父跟随与
-    // 逐层编辑属 P2-09），据此结构判定（挂载时元素可能尚未进 DOM，closest
-    // 不可靠）；模式按钮隐藏（Tab 序不新增停留点）且条目锁定 Reading，
-    // 不随根面板 Live 继承绑定端口
+    // P2-09（#286）范围锁收窄：仅「来源父不在状态库」（防御——父实例已
+    // 淘汰/释放的迟到挂载，无父可跟随、无来源授权）仍锁 Reading；浮窗根
+    // 后代（P2-04/P2-06 曾整体锁定）与正文子卡一律解锁——直接父跟随、
+    // 手动覆盖与逐层编辑按本票交付。模式按钮恢复 Tab 停留点。
     const parentEntry = source?.parentInstanceId !== undefined
       ? this.entryOfHostId(source.parentInstanceId)
       : undefined
-    if (source?.parentInstanceId !== undefined && (!parentEntry || parentEntry.popupRoot)) {
+    if (source?.parentInstanceId !== undefined && !parentEntry) {
       modeBtn.style.display = 'none'
       modeBtn.tabIndex = -1
       entry.modeOverride = 'reading'
@@ -1024,8 +1023,11 @@ export class EmbedCardManager {
     const remaining = [...this.active.values()].filter((h) => h.entry === handle.entry)
     const live = handle.entry.live
     if (live?.instance && remaining.length > 0) {
-      // 双容器并存（模式切换过渡）：编辑器 DOM 移交仍在场的 handle
-      remaining[0]!.liveEl.appendChild(live.instance.getView()!.dom)
+      // 双容器并存（模式切换过渡）：编辑器 DOM 移交仍在场的 handle——
+      // P2-09 优先移交可见宿主（孙卡随直接父；隐藏容器 handle 不销毁但
+      // 编辑器落进去即不可见）
+      const target = remaining.find((h) => h.host === this.visibleHostOf(handle.entry)) ?? remaining[0]!
+      target.liveEl.appendChild(live.instance.getView()!.dom)
     }
     if (handle.entry.content.source.parentInstanceId !== undefined && remaining.length === 0) {
       // 子实例仅随父块在场；回收后保留 occurrence 滚动状态，但释放授权
@@ -1432,17 +1434,29 @@ export class EmbedCardManager {
     this.correctLiveDomHomes()
   }
 
+  /** P2-09（#286）该 entry 的可见宿主形态：根级取根面板模式（P2-07 既有
+   *  语义）；子卡取直接父的生效内部模式（孙卡在父 Reading 容器与父 Live
+   *  编辑器 widget 中只在当前可见的一侧）。父不在库（防御）回落面板模式 */
+  private visibleHostOf(entry: EmbedEntry): 'reading' | 'live' {
+    const parentId = entry.content.source.parentInstanceId
+    if (parentId === undefined) {
+      return this.context.parentMode?.() ?? 'reading'
+    }
+    const parent = this.entryOfHostId(parentId)
+    return parent ? this.effectiveMode(parent) : this.context.parentMode?.() ?? 'reading'
+  }
+
   /** P2-07（#284）编辑器容器归属校正：live 在场的根级 entry，把编辑器
    *  DOM 移到当前父模式容器的 handle（编辑器唯一 DOM 节点，appendChild
-   *  移动即迁移——Chromium 移动聚焦节点保持焦点） */
+   *  移动即迁移——Chromium 移动聚焦节点保持焦点）。P2-09：判定改为按
+   *  entry 的可见宿主（visibleHostOf——孙卡随直接父，不随根面板） */
   private correctLiveDomHomes(): void {
-    const visibleHost = this.context.parentMode?.() ?? 'reading'
     for (const entry of this.entries.values()) {
       const view = entry.live?.instance?.getView()
       if (!view || !entry.live?.portId) {
         continue
       }
-      const handle = [...this.active.values()].find((h) => h.entry === entry && h.host === visibleHost)
+      const handle = [...this.active.values()].find((h) => h.entry === entry && h.host === this.visibleHostOf(entry))
       if (handle && !handle.liveEl.contains(view.dom)) {
         handle.liveEl.appendChild(view.dom)
         this.applyInternalDom(handle)
@@ -1570,16 +1584,21 @@ export class EmbedCardManager {
    *  图片弹窗按实例注册 B 身份上下文。
    *  P2-10：contentDOM 的 contextmenu 转发根统一菜单（携带 inner 与实例
    *  view——根打开时捕获目标，执行前重验）；实例事务经 onLiveUpdate
-   *  通知根联动（快速操作条状态随焦点嵌入的编辑刷新）。 */
+   *  通知根联动（快速操作条状态随焦点嵌入的编辑刷新）。
+   *  P2-09（#286）：实例装配孙卡上下文（liveEmbedChildCards）——B 的
+   *  编辑器正文中的嵌入以 B 的子引用挂载（直接父跟随与逐层编辑）；容器
+   *  归属按「该 entry 的可见宿主」选择（根级看面板模式，孙卡看直接父
+   *  生效模式——不建在隐藏容器）。 */
   private createLiveInstance(entry: EmbedEntry): void {
     const live = entry.live
     if (!live || !live.portId || !live.docUri || live.instance) {
       return
     }
-    // P2-07（#284）可见容器优先：双容器并存（父模式 Live↔Reading 往返，
-    // 隐藏容器 handle 不销毁）时，编辑器建在当前父模式对应容器——建在隐藏
-    // 容器会让内部 Live 不可见而端口活跃
-    const visibleHost = this.context.parentMode?.() ?? 'reading'
+    // P2-09 可见容器：该 entry 的当前可见宿主形态（根级 = 面板模式；子卡
+    // = 直接父生效模式——父 Reading 时孙卡只在 Reading 容器，父 Live 时
+    // 孙卡在其编辑器 widget 内）。双容器并存（隐藏容器 handle 不销毁）
+    // 时选可见者——建在隐藏容器会让内部 Live 不可见而端口活跃
+    const visibleHost = this.visibleHostOf(entry)
     const hostHandle = [...this.active.values()].find((h) => h.entry === entry && h.host === visibleHost)
       ?? [...this.active.values()].find((h) => h.entry === entry)
     if (!hostHandle) {
@@ -1652,7 +1671,13 @@ export class EmbedCardManager {
           })
         },
       },
-    }, [this.embedEscapeKeymap(entryRef)])
+    }, [this.embedEscapeKeymap(entryRef), liveEmbedChildCards({
+      parentHostId: entryRef.hostId,
+      panelDocUri: this.context.session().docUri ?? '',
+      sourceDocUri: live.fsPath,
+      parentDepth: entryRef.content.source.depth ?? 1,
+      treeId: entryRef.content.source.treeId ?? entryRef.hostId,
+    })])
     const inst = created
     live.instance = inst
     // P2-11：补发最近设置快照（实例创建晚于面板装载——见 applySettings 注释）
@@ -2559,16 +2584,9 @@ export class EmbedCardManager {
 
   /** 焦点所在嵌入的显式关闭（键位操作入口 embedClose；无焦点嵌入零操作） */
   closeFocused(): void {
-    const active = document.activeElement
-    if (!(active instanceof Node)) {
-      return
-    }
-    for (const entry of this.entries.values()) {
-      const dom = entry.live?.instance?.getView()?.dom
-      if (dom && dom.contains(active)) {
-        this.requestClose(entry, 'close')
-        return
-      }
+    const entry = this.focusedLiveEntry()
+    if (entry) {
+      this.requestClose(entry, 'close')
     }
   }
 
@@ -2590,20 +2608,28 @@ export class EmbedCardManager {
     }]))
   }
 
-  /** 焦点（document.activeElement）所在嵌入的 entry（无焦点嵌入 null） */
+  /** 焦点（document.activeElement）所在嵌入的 entry（无焦点嵌入 null）。
+   *  P2-09（#286）嵌套结构取**最内层**命中：孙卡编辑器 dom 被父 B 的
+   *  编辑器 dom 包含——焦点路由（保存/撤销/关闭/冲突动作）归最具体实例，
+   *  contains 判定命中最外层会把孙卡内的 Ctrl+S 误存 B */
   private focusedLiveEntry(): EmbedEntry | null {
-
     const active = document.activeElement
     if (!(active instanceof Node)) {
       return null
     }
+    let best: { entry: EmbedEntry; dom: HTMLElement } | null = null
     for (const entry of this.entries.values()) {
       const dom = entry.live?.instance?.getView()?.dom
-      if (dom && dom.contains(active)) {
-        return entry
+      if (!dom || !dom.contains(active)) {
+        continue
       }
+      if (best === null || best.dom.contains(dom)) {
+        best = { entry, dom }
+      }
+      // 互不包含（兄弟孙卡各自域内）：焦点只会落在一个 dom 内，不可达；
+      // 保守保持已命中的首个
     }
-    return null
+    return best?.entry ?? null
   }
 
   /** 焦点所在嵌入的模式切换（键位入口 embedToggleMode；无焦点嵌入编辑器

@@ -1288,6 +1288,43 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
     '干净目标首段。',
     '',
   ].join('\n'), 'utf8')
+  // P2-09（#286）递归引用直接父模式与逐层目标编辑：A→B→C 三份可区分文本；
+  // B 内多形态孙位（独占行/混排/列表/引用/表格格内——嵌套跟随与逐层编辑
+  // 的组合素材；装载/来源校验/循环走生产真链路）
+  writeFileSync(path.join(wsDir, 'p209-递归父A.md'), [
+    '# P2-09 递归父 A',
+    '',
+    '![[p209-递归B]]',
+    '',
+    'A 尾部段落。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p209-递归B.md'), [
+    '# p209 递归 B',
+    '',
+    '![[p209-递归C]]',
+    '',
+    '前文混排 ![[p209-递归C|混排位]] 后文混排。',
+    '',
+    '- 列表项 ![[p209-递归C|列表位]] 列表余文',
+    '',
+    '> 引用文 ![[p209-递归C|引用位]] 引用余文',
+    '',
+    '| 格内头 | 普通头 |',
+    '| --- | --- |',
+    '| ![[p209-递归C\\|格内位]] | 普通格 |',
+    '',
+    'B 尾部段落。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p209-递归C.md'), [
+    '# p209 递归 C',
+    '',
+    'C 首段正文。',
+    '',
+    'C 次段正文。',
+    '',
+  ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, 'p213-冲突嵌入.md'), [
     '# P2-13 冲突嵌入',
     '',
