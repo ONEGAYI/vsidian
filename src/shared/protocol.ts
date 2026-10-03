@@ -439,6 +439,19 @@ export type HostToWebview =
       /** Live 入口的 Ctrl 修饰位（派发 mouseover 时透传；仅 live-* 有意义） */
       ctrlKey?: boolean
     }
+  /** P2-06（#283）测试钩子：悬停浮窗根引用内部 Live 的操作族——与浮窗
+   *  头部按钮（mode/save/close）/编辑器事务管线同一处理器链路（宿主测试
+   *  无法向 webview 派发真实点击或键入）。type 向浮窗内编辑器注入一笔
+   *  输入事务；focus 聚焦浮窗内编辑器（可选设置选区）；close 携带
+   *  intent（close/escape 与头部按钮/Esc 消隐同径） */
+  | {
+      kind: 'hover.test.live'
+      action: 'mode' | 'type' | 'focus' | 'save' | 'close'
+      intent?: 'close' | 'escape'
+      pos?: number
+      to?: number
+      text?: string
+    }
   /** 测试钩子（#21）：在真实 webview 的 CM6 中输入，验证暂停态即时留存。 */
   | { kind: 'sync.test.edit'; offset: number; text: string; closeAfter?: boolean }
   /** 测试钩子：组合候选写入首行 DOM，经过 CM6 MutationObserver 的真实输入链。 */
@@ -3689,6 +3702,14 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
           v.link === 'live-wikilink' || v.link === 'live-md' ||
           v.link === 'backlink' || v.link === 'outlink') &&
         (v.ctrlKey === undefined || typeof v.ctrlKey === 'boolean')
+    case 'hover.test.live':
+      // P2-06（#283）测试钩子：操作枚举 + 可选 intent/选区/文本
+      return (v.action === 'mode' || v.action === 'type' || v.action === 'focus' ||
+          v.action === 'save' || v.action === 'close') &&
+        (v.intent === undefined || v.intent === 'close' || v.intent === 'escape') &&
+        (v.pos === undefined || isNonNegativeInt(v.pos)) &&
+        (v.to === undefined || isNonNegativeInt(v.to)) &&
+        (v.text === undefined || isString(v.text))
     case 'sync.test.composition':
       return (v.phase === 'start' || v.phase === 'update' || v.phase === 'end') && isString(v.text)
     case 'link.test.mousedown':

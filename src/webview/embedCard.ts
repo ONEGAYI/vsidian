@@ -32,7 +32,7 @@ import { parseWikilinkInner } from '../shared/wikilink'
 import { t } from '../shared/i18n'
 import { HOVER_REFRESH_DEFAULTS } from '../shared/hoverRefresh'
 import { REF_EXPANSION_LIMITS, RefExpansionBudget } from '../shared/refExpansion'
-import { RefContentInstance, type RefContentMount, type RefLoadedContent, type RefSourceContext } from './refContentInstance'
+import { RefContentInstance, type RefContentMount, type RefLoadedContent, type RefMountOptions, type RefSourceContext } from './refContentInstance'
 import { promoteEmbedSlotsInBlock, promotedHostsOf } from './embedSlots'
 import { applyObsidianDomAlias } from '../shared/obsidianAlias'
 import { createReadingContainer, READING_CLASS_NAMES } from './readingView'
@@ -65,21 +65,21 @@ export const OPEN_ICON =
   '<path d="M11.5 9v3.5a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1H6"></path></svg>'
 
 /** P2-04 内部模式切换：铅笔（当前 Reading → 切 Live 编辑） */
-const MODE_LIVE_ICON =
+export const MODE_LIVE_ICON =
   '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" ' +
   'stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
   '<path d="M11.8 2.6a1.6 1.6 0 0 1 2.3 2.3L5.7 13.3H3v-2.7z"></path>' +
   '<path d="M10.6 4z"></path><path d="M2.5 14.8h11"></path></svg>'
 
 /** P2-04 内部模式切换：打开的书（当前 Live → 切回 Reading） */
-const MODE_READING_ICON =
+export const MODE_READING_ICON =
   '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" ' +
   'stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
   '<path d="M8 4C7 3 5.6 2.5 3.2 2.5v9.6c2.4 0 3.8.5 4.8 1.4 1-.9 2.4-1.4 4.8-1.4V2.5C10.4 2.5 9 3 8 4z"></path>' +
   '<path d="M8 4v9.5"></path></svg>'
 
 /** P2-04 保存目标入口：软盘图标 */
-const SAVE_ICON =
+export const SAVE_ICON =
   '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" ' +
   'stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
   '<path d="M2.5 2.5h9L13.5 4.5v9h-11z"></path><path d="M5 2.5v3.2h5V2.5"></path>' +
@@ -87,7 +87,7 @@ const SAVE_ICON =
 
 /** P2-05 显式关闭编辑入口：X 图标（内部 Live 在场时显示；点击走脏目标
  *  确认链路——保存并关闭／丢弃修改并关闭／取消） */
-const CLOSE_ICON =
+export const CLOSE_ICON =
   '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" ' +
   'stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
   '<path d="M3.5 3.5l9 9"></path><path d="M12.5 3.5l-9 9"></path></svg>'
@@ -149,8 +149,74 @@ export const EMBED_CARD_CLASS_NAMES = {
 } as const
 
 /** P2-05（#282）显式退出意图三径：close = 头部关闭按钮／键位操作，
- *  escape = 嵌入内 Esc，delete = 删除活跃引用行（A 事务拦截） */
+ *  escape = 嵌入内 Esc，delete = 删除活跃引用行（A 事务拦截）。P2-06
+ *  起浮窗根的头部关闭与 Esc 消隐同用 close/escape 径 */
 type CloseIntent = 'close' | 'escape' | 'delete'
+
+/** P2-06（#283）悬停浮窗根引用挂载参数：DOM 与头部 chrome 元素由
+ *  hoverPopup 建造并注入；管理器据此登记 entry（引用位置语义键跨开合
+ *  驻留）并接线端口/模式/关闭链路 */
+export interface HoverPopupRootMountArgs {
+  /** 引用位置语义键（跨开合稳定；refEdit.bind occurrence 与 hover.watch
+   *  身份同源——宿主来源固定的校验键） */
+  key: string
+  /** 目标原文（错误分态等文案取材） */
+  inner: string
+  sourceStart: number
+  sourceEnd: number
+  /** 浮窗容器（handle 宿主键与圆点插入根域） */
+  container: HTMLElement
+  scrollEl: HTMLElement
+  stateEl: HTMLElement
+  contentEl: HTMLElement
+  /** 内部 Live 编辑器容器（与 contentEl 并列；显隐随内部模式） */
+  liveEl: HTMLElement
+  modeBtn: HTMLButtonElement
+  saveBtn: HTMLButtonElement
+  closeBtn: HTMLButtonElement
+  /** dirty 圆点插入锚（浮窗头部动作组——圆点落在标题与动作组之间） */
+  headerActionsEl: HTMLElement
+  /** 浮窗头部圆点类名（hover-popup 族；嵌入卡走 EMBED_CARD_CLASS_NAMES） */
+  dirtyClass: string
+  /** Reading 内容挂载选项（实例归 entry.content——跨开合滚动记忆；
+   *  fm 展开按 #220 既有契约在每次挂载时复位） */
+  contentMount: RefMountOptions
+  /** Live 在场期间目标失效后的 Reading 重载（浮窗自己的请求机械；
+   *  restoreReadingDisplay 的 popup 分支） */
+  reloadContent(silent: boolean): void
+  /** 显式退出链路完成（干净直接退出或三项模态确认后） */
+  onExplicitCloseSettled?(intent: CloseIntent): void
+  /** 三项模态取消（保留现场；浮窗的消隐意图一并清除） */
+  onExplicitCloseCanceled?(): void
+  /** 端口态变化信号（bound/dirty/暂停——浮窗保活重估与 chrome 联动） */
+  onLiveStateChanged?(): void
+}
+
+/** P2-06 悬停浮窗根引用会话：浮窗侧对端口/模式/关闭链路的窄操作面 */
+export interface HoverPopupRootSession {
+  /** 生效内部模式（覆盖优先；缺省跟随根面板当前模式） */
+  effectiveMode(): 'reading' | 'live'
+  /** 手动切换内部模式（头部按钮；按引用位置记忆，父模式切换不回滚） */
+  toggleMode(): void
+  /** 保存目标（头部入口；端口未绑零操作） */
+  save(): void
+  /** 显式关闭编辑（复用 P2-05 链路：dirty 弹三项模态、干净直接退出） */
+  requestClose(intent?: 'close' | 'escape'): void
+  /** 装载成功送达：entry.loaded 填充 + 生效 Live 时绑定端口 */
+  contentLoaded(loaded: RefLoadedContent): void
+  /** Live 在场期间的目标失效标记（切回 Reading 时补一次静默重载） */
+  markPendingReadingRefresh(): void
+  /** 内部 Live 端口是否在场（Esc 分层等） */
+  hasLivePort(): boolean
+  /** 端口状态观测（探针数据源；未绑定为缺省值） */
+  liveState(): { bound: boolean; dirty: boolean; suspended: boolean }
+  /** 普通关闭抵抗判定（Q18）：端口在场且 dirty／输入未落定／冲突暂停 */
+  resistsNormalClose(): boolean
+  /** 该引用的三项关闭确认模态是否在场 */
+  isCloseDialogOpen(): boolean
+  /** 浮窗关闭：销毁端口与挂载（occurrence 记忆保留在驻留 entry） */
+  close(): void
+}
 
 /** 出站上下文（syncController mount 注入；dispose 清空） */
 export interface EmbedCardContext {
@@ -230,6 +296,17 @@ interface EmbedEntry {
   inner: string
   sourceStart: number
   sourceEnd: number
+  /** P2-06 悬停浮窗根引用宿主标记（entry 驻留状态库跨开合记忆；请求/
+   *  订阅由浮窗侧驱动，管理器只持有端口与模式状态机） */
+  popupRoot: boolean
+  /** P2-06 浮窗根宿主回调（mountPopupRoot 注入、session.close 清空——
+   *  浮窗关闭后不得再触达其 DOM/意图） */
+  popupHost: {
+    reloadContent(silent: boolean): void
+    onExplicitCloseSettled?(intent: CloseIntent): void
+    onExplicitCloseCanceled?(): void
+    onLiveStateChanged?(): void
+  } | null
   /** P2-04 内部模式手动覆盖（null = 跟随直接父视图；面板会话内按
    *  occurrence 记忆，父模式切换不回滚——「手动选择在父切换后保留」） */
   modeOverride: 'reading' | 'live' | null
@@ -263,7 +340,8 @@ interface EmbedEntry {
 }
 
 /** 挂载中的卡片实例（DOM 生命周期 = 宿主元素在场期间——Reading 块元素
- *  或 Live widget 根，#223 起两容器同款 handle） */
+ *  或 Live widget 根，#223 起两容器同款 handle；P2-06 起悬停浮窗根引用
+ *  以 host='hover' 挂载——DOM 归浮窗，chrome 元素经 popupChrome 引用） */
 interface EmbedCardHandle {
   entry: EmbedEntry
   instanceId: string
@@ -281,8 +359,12 @@ interface EmbedCardHandle {
   content: RefContentMount
   display: 'loading' | 'content' | 'error'
   note: string
-  /** 容器来源（探针观测面；行为路径不分叉——两容器共用装配） */
-  host: 'reading' | 'live'
+  /** 容器来源（探针观测面；行为路径不分叉——两容器共用装配）。P2-06
+   *  起 'hover' = 悬停浮窗根引用（浮窗 DOM/生命周期归 hoverPopup） */
+  host: 'reading' | 'live' | 'hover'
+  /** P2-06 浮窗根 chrome 差异（dirty 圆点类名与插入锚——refreshLiveChrome
+   *  的 popup 分支；嵌入卡缺省走 EMBED_CARD_CLASS_NAMES 路径） */
+  popupChrome?: { dirtyClass: string; actionsEl: HTMLElement }
 }
 
 /** 嵌入卡片观测探针形态（view.state.readingEmbed 数据源） */
@@ -402,6 +484,8 @@ export class EmbedCardManager {
         inner,
         sourceStart: Number.isInteger(sourceStart) ? sourceStart : 0,
         sourceEnd: Number.isInteger(sourceEnd) ? sourceEnd : sourceStart,
+        popupRoot: false,
+        popupHost: null,
         modeOverride: null,
         live: null,
         pendingCloseIntent: null,
@@ -526,10 +610,15 @@ export class EmbedCardManager {
       host,
     }
     // P2-04 范围锁：悬停浮层内的卡片不提供内部模式入口（浮层内部 Live 属
-    // P2-05）——浮层后代的来源父（浮层实例 id）不在状态库，据此结构判定
-    // （挂载时元素可能尚未进 DOM，closest 不可靠）；模式按钮隐藏（Tab 序
-    // 不新增停留点）且条目锁定 Reading，不随根面板 Live 继承绑定端口
-    if (source?.parentInstanceId !== undefined && !this.entries.has(source.parentInstanceId)) {
+    // P2-05）——浮层后代的来源父不在状态库，或父为浮窗根 entry（P2-06 起
+    // 根引用以语义键驻留状态库；子卡的直接父跟随与逐层编辑属 P2-09），
+    // 据此结构判定（挂载时元素可能尚未进 DOM，closest 不可靠）；模式按钮
+    // 隐藏（Tab 序不新增停留点）且条目锁定 Reading，不随根面板 Live 继承
+    // 绑定端口
+    const parentEntry = source?.parentInstanceId !== undefined
+      ? this.entries.get(source.parentInstanceId)
+      : undefined
+    if (source?.parentInstanceId !== undefined && (!parentEntry || parentEntry.popupRoot)) {
       modeBtn.style.display = 'none'
       modeBtn.tabIndex = -1
       entry.modeOverride = 'reading'
@@ -630,6 +719,169 @@ export class EmbedCardManager {
     this.mountChildFrom(parentInstanceId, parentInstanceId, 1, el, target)
   }
 
+  // ---- P2-06（#283）悬停浮窗根引用的内部 Live 宿主 ----
+  // 浮窗 DOM/头部 chrome/请求与订阅归 hoverPopup；目标编辑端口、内部模式
+  // 状态机与显式关闭链路归本管理器（与正文嵌入同款 requestClose/save/
+  // dirty 语义——票面「后续浮窗使用同一目标操作和结果」，不另造）。entry
+  // 以引用位置语义键驻留状态库：跨开合记忆模式覆盖/选区/滚动/fm，LRU
+  // 界内有效；浮窗内子卡（B 的嵌入）仍按 P2-04 范围锁 Reading——直接父
+  // 跟随与逐层编辑属 P2-09。
+
+  /** P2-06 浮窗根挂载参数（hoverPopup 组装 DOM 后注入） */
+  mountPopupRoot(args: HoverPopupRootMountArgs): { session: HoverPopupRootSession; content: RefContentMount } {
+    const key = args.key
+    let entry = this.entries.get(key)
+    if (!entry) {
+      entry = {
+        key,
+        inner: args.inner,
+        sourceStart: args.sourceStart,
+        sourceEnd: args.sourceEnd,
+        popupRoot: true,
+        popupHost: null,
+        modeOverride: null,
+        live: null,
+        pendingCloseIntent: null,
+        liveSelection: null,
+        pendingReadingRefresh: false,
+        loaded: null,
+        lastKnown: null,
+        lastReq: null,
+        healReqId: null,
+        content: new RefContentInstance({
+          panelDocUri: this.context.session().docUri ?? '',
+          sourceDocUri: this.context.session().docUri ?? '',
+          range: { start: args.sourceStart, end: args.sourceEnd },
+          occurrence: key,
+          depth: 1,
+          treeId: key,
+        }),
+        watchedFsPath: null,
+        watchLeaseId: null,
+        parseBytes: 0,
+      }
+      this.entries.set(key, entry)
+      const owned = entry
+      entry.content.onDispose(() => {
+        owned.lastReq = null
+        this.unwatchEntry(owned)
+      })
+    } else {
+      this.touchEntry(entry) // LRU 触达（同位置重开 = 仍有效实例）
+    }
+    entry.popupRoot = true
+    // 每次打开内容按当次请求装载（浮窗总重发 hover.request）；跨开合记忆
+    // 的是模式覆盖/选区/滚动（entry.content 驻留），不缓存正文。fm 展开
+    // 不在记忆清单——#220 既有契约「重新打开恢复折叠」保持（实例复用仅
+    // 为滚动位置记忆，挂载时复位）
+    entry.loaded = null
+    entry.lastReq = null
+    entry.healReqId = null
+    entry.content.fmExpanded = false
+    this.evictEntriesIfNeeded()
+    entry.popupHost = {
+      reloadContent: args.reloadContent,
+      ...(args.onExplicitCloseSettled ? { onExplicitCloseSettled: args.onExplicitCloseSettled } : {}),
+      ...(args.onExplicitCloseCanceled ? { onExplicitCloseCanceled: args.onExplicitCloseCanceled } : {}),
+      ...(args.onLiveStateChanged ? { onLiveStateChanged: args.onLiveStateChanged } : {}),
+    }
+    const content = entry.content.mount(args.contentMount)
+    const handle: EmbedCardHandle = {
+      entry,
+      instanceId: `hover-root-${++this.seq}`,
+      hostEl: args.container,
+      cardEl: args.container,
+      scrollEl: args.scrollEl,
+      stateEl: args.stateEl,
+      contentEl: args.contentEl,
+      liveEl: args.liveEl,
+      modeBtn: args.modeBtn,
+      saveBtn: args.saveBtn,
+      closeBtn: args.closeBtn,
+      content,
+      display: 'loading',
+      note: '',
+      host: 'hover',
+      popupChrome: { dirtyClass: args.dirtyClass, actionsEl: args.headerActionsEl },
+    }
+    this.active.set(args.container, handle)
+    this.refreshModeChrome(handle)
+    return { session: this.popupRootSessionOf(entry), content }
+  }
+
+  /** 浮窗根会话实现（闭包持 entry；close 后各方法零操作/空值） */
+  private popupRootSessionOf(entry: EmbedEntry): HoverPopupRootSession {
+    return {
+      effectiveMode: () => this.effectiveMode(entry),
+      toggleMode: () => {
+        if (this.isPopupRootOpen(entry)) {
+          this.toggleMode(entry)
+        }
+      },
+      save: () => this.saveLive(entry),
+      requestClose: (intent) => this.requestClose(entry, intent ?? 'close'),
+      contentLoaded: (loaded) => {
+        if (!this.isPopupRootOpen(entry)) {
+          return
+        }
+        entry.loaded = loaded
+        entry.lastKnown = { fsPath: loaded.fsPath, version: loaded.version }
+        this.touchEntry(entry)
+        if (this.effectiveMode(entry) === 'live') {
+          this.ensureLivePort(entry)
+        }
+      },
+      markPendingReadingRefresh: () => {
+        entry.pendingReadingRefresh = true
+      },
+      hasLivePort: () => this.isPopupRootOpen(entry) && !!entry.live?.portId,
+      liveState: () => ({
+        bound: this.isPopupRootOpen(entry) && !!entry.live?.portId,
+        dirty: this.isPopupRootOpen(entry) && entry.live?.dirty === true,
+        suspended: this.isPopupRootOpen(entry) && entry.live?.suspended === true,
+      }),
+      resistsNormalClose: () => {
+        if (!this.isPopupRootOpen(entry)) {
+          return false
+        }
+        const live = entry.live
+        if (!live || live.status !== 'bound' || !live.portId) {
+          return false
+        }
+        // Q18：dirty 才保活；Q12/Q18 补充——组合/在途输入与冲突暂停不按
+        // 「B 干净」销毁（目标 dirty 与未提交输入分开观测）
+        return live.dirty || live.suspended || live.instance?.hasPendingLocalInput() === true
+      },
+      isCloseDialogOpen: () => this.closeDialogBelongsTo(entry),
+      close: () => {
+        this.teardownLive(entry) // 选区保存 → 实例/图片销毁 → unbind → chrome 清场
+        const handle = this.popupHostHandleOf(entry)
+        if (handle) {
+          this.active.delete(handle.hostEl)
+          handle.content.dispose()
+        }
+        entry.popupHost = null
+        entry.loaded = null
+        entry.lastReq = null
+      },
+    }
+  }
+
+  /** 浮窗根的在场 handle（active 键 = 浮窗容器；未挂载 undefined） */
+  private popupHostHandleOf(entry: EmbedEntry): EmbedCardHandle | undefined {
+    for (const handle of this.active.values()) {
+      if (handle.entry === entry && handle.host === 'hover') {
+        return handle
+      }
+    }
+    return undefined
+  }
+
+  /** 浮窗根是否在场挂载（未开/已关的驻留 entry 不建端口、不触达 DOM） */
+  private isPopupRootOpen(entry: EmbedEntry): boolean {
+    return this.popupHostHandleOf(entry) !== undefined
+  }
+
   private mountChildFrom(parentKey: string, treeId: string, parentDepth: number,
     el: HTMLElement, target: RefLoadedContent): void {
     const inner = el.dataset['vsidianEmbedInner']
@@ -661,6 +913,9 @@ export class EmbedCardManager {
     const handle = this.active.get(el)
     if (!handle) {
       return
+    }
+    if (handle.host === 'hover') {
+      return // P2-06 浮窗根 handle 只经 session.close 卸载（浮窗生命周期）
     }
     this.active.delete(el)
     handle.content.dispose()
@@ -996,10 +1251,20 @@ export class EmbedCardManager {
   }
 
   /** 切回 Reading 的内容恢复：目标失效过（Live 期间挂起）或无缓存时静默
-   *  重载；否则从装载缓存直接渲染 */
+   *  重载；否则从装载缓存直接渲染。P2-06：浮窗根的重载走浮窗自己的
+   *  请求机械（reloadContent）——Reading 请求/订阅归浮窗，管理器不代发 */
   private restoreReadingDisplay(entry: EmbedEntry): void {
     const handles = [...this.active.values()].filter((h) => h.entry === entry)
     if (handles.length === 0) {
+      return
+    }
+    if (entry.popupHost) {
+      if (entry.pendingReadingRefresh) {
+        entry.pendingReadingRefresh = false
+        entry.popupHost.reloadContent(true)
+      }
+      // 无挂起失效：Live 期 Reading 容器仅隐藏未清空，applyInternalDom
+      // 已切回显示，无需重建
       return
     }
     if (entry.pendingReadingRefresh || !entry.loaded) {
@@ -1016,9 +1281,14 @@ export class EmbedCardManager {
   }
 
   /** 绑定目标编辑端口（可见且内部 Live 且已装载——装载完成的 watch 固定
-   *  是宿主 bind 校验的前置）。幂等：已有端口或绑定在途直接返回 */
+   *  是宿主 bind 校验的前置）。幂等：已有端口或绑定在途直接返回。P2-06：
+   *  浮窗根须在场挂载（已关浮窗的驻留 entry 不建端口——重开时按当次
+   *  装载重新绑定） */
   private ensureLivePort(entry: EmbedEntry): void {
     if (entry.live || !entry.loaded) {
+      return
+    }
+    if (entry.popupRoot && !this.isPopupRootOpen(entry)) {
       return
     }
     const session = this.context.session()
@@ -1131,8 +1401,13 @@ export class EmbedCardManager {
       },
       // P2-10：根 chrome 联动（快速操作条状态刷新）——轻量转发，根自行调度
       onViewUpdate: (update) => this.context.onLiveUpdate?.(update),
-      // P2-05（#282）输入落定回调：挂起的退出意图重入（检查最新 dirty）
-      onLocalInputSettled: () => this.retryPendingClose(entryRef),
+      // P2-05（#282）输入落定回调：挂起的退出意图重入（检查最新 dirty）；
+      // P2-06（#283）兼作保活重估信号（在途落定后 dirty 语义重算——浮窗
+      // 侧 reevaluateLiveKeepAlive 恢复常规关闭）
+      onLocalInputSettled: () => {
+        this.retryPendingClose(entryRef)
+        this.refreshLiveChrome(entryRef)
+      },
     }, [this.embedEscapeKeymap(entryRef)])
     live.instance.setSession(live.portId, live.docUri)
     hostHandle.liveEl.appendChild(live.instance.getView()!.dom)
@@ -1360,7 +1635,9 @@ export class EmbedCardManager {
   }
 
   /** 头部 live chrome 刷新：dirty 圆点在场性（物理移除——干净态无节点）、
-   *  保存入口显隐、暂停态提示、P2-05 关闭编辑入口显隐（端口在场时） */
+   *  保存入口显隐、暂停态提示、P2-05 关闭编辑入口显隐（端口在场时）。
+   *  P2-06：浮窗根（host='hover'）走 popupChrome 的圆点类名与插入锚；
+   *  刷新后向浮窗发端口态变化信号（保活重估） */
   private refreshLiveChrome(entry: EmbedEntry): void {
     for (const handle of this.active.values()) {
       if (handle.entry !== entry) {
@@ -1370,18 +1647,20 @@ export class EmbedCardManager {
       const portOn = !!live?.portId
       const dirtyOn = portOn && live!.dirty
       handle.closeBtn.style.display = portOn ? '' : 'none'
-      let dot = handle.cardEl.querySelector<HTMLElement>(`.${EMBED_CARD_CLASS_NAMES.dirty}`)
+      const dirtyClass = handle.popupChrome?.dirtyClass ?? EMBED_CARD_CLASS_NAMES.dirty
+      let dot = handle.cardEl.querySelector<HTMLElement>(`.${dirtyClass}`)
       if (dirtyOn) {
         if (!dot) {
           dot = document.createElement('span')
-          dot.className = EMBED_CARD_CLASS_NAMES.dirty
+          dot.className = dirtyClass
           dot.textContent = '·'
           const label = t('embed.dirtyDot')
           dot.setAttribute('aria-label', label)
           dot.setAttribute('data-tooltip', label)
-          // 圆点紧随文件名（动作组之前）
-          const actions = handle.cardEl.querySelector(`.${EMBED_CARD_CLASS_NAMES.headerActions}`)
-          actions?.parentElement?.insertBefore(dot, actions)
+          // 圆点紧随文件名（动作组之前）；浮窗根插入锚由 popupChrome 给出
+          const anchor = handle.popupChrome?.actionsEl ??
+            handle.cardEl.querySelector(`.${EMBED_CARD_CLASS_NAMES.headerActions}`)
+          anchor?.parentElement?.insertBefore(dot, anchor)
         }
       } else {
         dot?.remove()
@@ -1394,6 +1673,7 @@ export class EmbedCardManager {
         handle.stateEl.style.display = 'none'
       }
     }
+    entry.popupHost?.onLiveStateChanged?.()
   }
 
   /** 模式按钮 chrome：图标与悬停词指向另一态 */
@@ -1578,6 +1858,11 @@ export class EmbedCardManager {
       this.finishClose(entry, intent)
       return
     }
+    if (!this.isPopupRootOpen(entry) && entry.popupRoot) {
+      // P2-06：浮窗已关（query 在途回包迟到）——退出意图无承载现场，
+      // 不弹模态（端口已随 session.close 销毁）
+      return
+    }
     this.openCloseDialog(entry, intent, message.version, message.relPath)
   }
 
@@ -1696,9 +1981,10 @@ export class EmbedCardManager {
     }
     if (action === 'cancel') {
       // 取消：保留引用与当前输入；删除意图不完成（拦截 spec 丢弃，A 原
-      // 引用保留）
+      // 引用保留）；浮窗的消隐意图一并清除（onExplicitCloseCanceled）
       this.closePendingDelete = null
       dialog.entry.pendingCloseIntent = null
+      dialog.entry.popupHost?.onExplicitCloseCanceled?.()
       this.closeCloseDialog()
       return
     }
@@ -1722,7 +2008,9 @@ export class EmbedCardManager {
   }
 
   /** 完成退出：close/escape 切回 Reading（会话记忆——不随父级联回 Live）；
-   *  delete 重放被拦的删除事务（A 写入该删除，端口随引用回收） */
+   *  delete 重放被拦的删除事务（A 写入该删除，端口随引用回收）。P2-06：
+   *  浮窗根同语义（编辑会话退出、浮窗去留由浮窗侧按意图决定——消隐意图
+   *  与删除引用在链路完成后关浮窗，经 onExplicitCloseSettled 通知） */
   private finishClose(entry: EmbedEntry, intent: CloseIntent): void {
     if (intent !== 'delete') {
       entry.pendingCloseIntent = null
@@ -1730,9 +2018,11 @@ export class EmbedCardManager {
         entry.modeOverride = 'reading'
         this.applyInternalMode(entry)
       }
+      entry.popupHost?.onExplicitCloseSettled?.(intent)
       return
     }
     this.replayPendingDelete()
+    entry.popupHost?.onExplicitCloseSettled?.(intent)
   }
 
   /** 重放被拦的删除事务（守卫：拦截以来 A 完全未变才重放——任何漂移都
@@ -1766,10 +2056,12 @@ export class EmbedCardManager {
       if (!tr.docChanged || tr.annotation(refCloseReplay) === true) {
         return true
       }
-      // 活跃端口区间（端口在场 = 引用正在编辑；区间即挂载时的源区间）
+      // 活跃端口区间（端口在场 = 引用正在编辑；区间即挂载时的源区间）。
+      // P2-06：面板条目（反链/出链）触发的浮窗根是中性区间 [0,0]——引用
+      // 不在 A 正文内，删除拦截不适用（否则误吞 A 文档头部的任意编辑）
       const actives: EmbedEntry[] = []
       for (const entry of this.entries.values()) {
-        if (entry.live?.portId) {
+        if (entry.live?.portId && !(entry.popupRoot && entry.sourceEnd <= entry.sourceStart)) {
           actives.push(entry)
         }
       }
@@ -1887,10 +2179,15 @@ export class EmbedCardManager {
     }
   }
 
-  /** 观测探针（view.state.readingEmbed 的数据源；host 区分容器） */
+  /** 观测探针（view.state.readingEmbed 的数据源；host 区分容器）。P2-06：
+   *  浮窗根（host='hover'）不进嵌入探针——它有自己的 hoverPreview 探针，
+   *  且驻留 entry 会污染嵌入 occurrence 序号 */
   probe(): EmbedCardProbe[] {
     const out: EmbedCardProbe[] = []
     for (const handle of this.active.values()) {
+      if (handle.host === 'hover') {
+        continue
+      }
       const fmSection = handle.contentEl.querySelector('.vsidian-hover-fm')
       out.push({
         inner: handle.entry.inner,
@@ -2093,8 +2390,8 @@ export class EmbedCardManager {
     // 死键（父文本变更后旧区间 entry，无在场 handle、无 live）会占序号槽位
     // ——两者都让 occurrence:N 指向错误实例
     const matches = [...this.entries.values()]
-      .filter((e) => e.inner === inner)
-      .filter((e) => [...this.active.values()].some((h) => h.entry === e))
+      .filter((e) => e.inner === inner && !e.popupRoot)
+      .filter((e) => [...this.active.values()].some((h) => h.entry === e && h.host !== 'hover'))
       .sort((a, b) => a.sourceStart - b.sourceStart)
     return matches[occurrence]
   }

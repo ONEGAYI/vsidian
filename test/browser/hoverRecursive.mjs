@@ -202,6 +202,10 @@ try {
   }
   await keyboardRespond('B', '![[C]]\n', 1)
   await keyboardRespond('C', '# C\n\n可复制正文。\n', 2)
+  // P2-06（#283）起浮窗头部新增模式切换入口（真实 Tab 序停留点——纯
+  // Reading 的保存/关闭为 display:none 不进 Tab 序）：一次到模式入口、
+  // 二次到头部跳转、三次到子卡打开入口
+  await keyboard.keyboard.press('Tab')
   await keyboard.keyboard.press('Tab')
   await keyboard.keyboard.press('Tab')
   assert.equal(await keyboard.evaluate(() => document.activeElement?.classList.contains('vsidian-embed-card-open')),

@@ -4342,6 +4342,76 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
   outline-offset: -1px;
 }
 
+/* ---- P2-06（#283）悬停浮窗根引用内部 Live：头部动作组（保存/模式切换/
+   关闭编辑）、未保存圆点与编辑器容器。与嵌入卡片 P2-04 同款规则（并列
+   策略，浮层选择器置首）；圆点为精确字符 `·`（P2-U16），警示色随主题
+   变量；编辑器容器与 Reading 容器并列于滚动区——限高随几何计划内联
+   写入，滚动由 CM6 自身 cm-scroller 承担（视口测量依赖 cm-scroller 为
+   滚动元素，不用外层滚动区，嵌入卡片同款口径） ---- */
+
+/* 头部右侧动作组：标题占剩余宽，动作靠右成组 */
+#app > .vsidian-hover-popup .vsidian-hover-popup-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  margin-left: auto;
+}
+
+/* 保存目标 / 内部模式切换 / 显式关闭编辑入口：与跳转入口同款图标按钮 */
+#app > .vsidian-hover-popup .vsidian-hover-popup-save,
+#app > .vsidian-hover-popup .vsidian-hover-popup-mode,
+#app > .vsidian-hover-popup .vsidian-hover-popup-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--vscode-icon-foreground, inherit);
+  cursor: pointer;
+}
+
+#app > .vsidian-hover-popup .vsidian-hover-popup-save:hover,
+#app > .vsidian-hover-popup .vsidian-hover-popup-save:focus-visible,
+#app > .vsidian-hover-popup .vsidian-hover-popup-mode:hover,
+#app > .vsidian-hover-popup .vsidian-hover-popup-mode:focus-visible,
+#app > .vsidian-hover-popup .vsidian-hover-popup-close:hover,
+#app > .vsidian-hover-popup .vsidian-hover-popup-close:focus-visible {
+  border-color: var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
+  background: var(--vscode-editor-background, transparent);
+}
+
+#app > .vsidian-hover-popup .vsidian-hover-popup-save:focus-visible,
+#app > .vsidian-hover-popup .vsidian-hover-popup-mode:focus-visible,
+#app > .vsidian-hover-popup .vsidian-hover-popup-close:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #4fc1ff);
+  outline-offset: 1px;
+}
+
+/* 目标未保存圆点（`·`）：警示色，紧随目标显示名（动作组之前） */
+#app > .vsidian-hover-popup .vsidian-hover-popup-dirty {
+  flex: none;
+  margin-left: 2px;
+  font-weight: 700;
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+/* 内部 Live 编辑器容器：限高由几何计划内联写入，滚动由 CM6 自身
+   cm-scroller 承担（容器不滚动，避免 CM6 视口测量失效） */
+#app > .vsidian-hover-popup .vsidian-hover-popup-live {
+  overflow: hidden;
+}
+
+#app > .vsidian-hover-popup .vsidian-hover-popup-live .cm-editor {
+  max-height: 100%;
+}
+
 /* 内部 Reading 容器：随正文排版基线与主题/片段（别名桥在容器类上）。
    同属 #app 作用域，覆盖主阅读容器的 40vh 文末留白，浮层用紧凑内边距。 */
 #app > .vsidian-hover-popup .vsidian-hover-popup-scroll .vsidian-view-reading {
