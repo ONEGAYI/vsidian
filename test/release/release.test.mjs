@@ -20,7 +20,8 @@ function katexFontEntries() {
 // #105/#106 起新增 highlight 与 horizontalRule 两键，fixture 当时未同步
 // （基线即失败），此处与 scripts/release.mjs 的清单对齐；#185 起右键菜单
 // 新增十键（normalText 等）同规则登记；#236 查找面板六键与 2026-10
-// chevronRight 同规则补齐（5ac90d3 只登记了 release.mjs 侧、fixture 漏同步）。
+// chevronRight 同规则补齐（5ac90d3 只登记了 release.mjs 侧、fixture 漏同步）；
+// #305–#308 粘贴纯文本 pastePlain 同规则登记。
 const QUICK_ICON_KEYS = [
   'bold', 'italic', 'strikethrough', 'inlineCode', 'heading',
   'bulletList', 'orderedList', 'taskList', 'quote', 'codeBlock',
@@ -31,6 +32,7 @@ const QUICK_ICON_KEYS = [
   'findPrev', 'findNext', 'findClose', 'replaceOne', 'replaceAll', 'findInSelection',
   'chevronRight',
   'typewriter', 'wordSegment',
+  'pastePlain',
 ]
 function quickActionIconEntries() {
   return ['light', 'dark'].flatMap((theme) => QUICK_ICON_KEYS.map((key) => ({
