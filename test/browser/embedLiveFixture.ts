@@ -208,12 +208,12 @@ async function fakeHostHandle(message: WebviewToHost): Promise<void> {
       // P2-12：伪宿主记录 compare 请求（text = 实例当前全文快照）并按配置
       // 应答。ok 时模拟宿主直驱恢复（resumePanel → doc.resync 推送——对比
       // 页激活会隐藏来源 webview，生产恢复不依赖 webview 再出站请求）
-      if (message.portId !== boundPortId) {
+      if (!portKnown(message.portId)) {
         return
       }
       conflictCompareRequests.push({ text: message.text })
       controller.handleHostMessage({
-        kind: 'refEdit.conflictCompare.result', portId: boundPortId, fsPath: B_FS, ok: conflictCompareOk,
+        kind: 'refEdit.conflictCompare.result', portId: message.portId, fsPath: B_FS, ok: conflictCompareOk,
       })
       if (conflictCompareOk) {
         bPush({ kind: 'doc.resync', version: ++bModel.ver, text: bModel.content })
