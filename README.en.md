@@ -5,7 +5,7 @@ English | **[中文](https://github.com/ONEGAYI/vsidian/blob/main/README.md)**
 Vsidian brings an Obsidian-like Markdown editing experience to VS Code. After installing, opening a `.md` file enters live preview directly: the document renders as you read it, moving the cursor onto a heading, link, or formula reveals its source, and the rendering restores once you move on. A reading mode and the native source editor are one click away at any time.
 
 - **Both views render only the viewport**: scrolling and editing stay responsive on large documents.
-- **Obsidian editing habits**: wikilinks and block-reference jumps, backlink and outgoing-link panels, reference updates on rename, grid table editing, task checkboxes, frontmatter property tables, image paste with automatic saving, and a unified context menu — familiar operations in familiar places.
+- **Obsidian editing habits**: wikilinks and block-reference jumps, hover preview and document embeds (edit embedded notes in place), backlink and outgoing-link panels, reference updates on rename, grid table editing, task checkboxes, frontmatter property tables, image paste with automatic saving, and a unified context menu — familiar operations in familiar places.
 - **Public styling surface**: a built-in CSS snippet system plus a documented style contract browsed offline and exportable as JSON, with Obsidian-name selectors and CSS variables accepted directly.
 
 ## Installation
@@ -21,6 +21,7 @@ Vsidian brings an Obsidian-like Markdown editing experience to VS Code. After in
 | Feature | Description |
 | --- | --- |
 | Three view states | Cycle live preview, reading, and the source editor; the last mode and scroll position are remembered across windows |
+| Default editor guard | Prompts when another extension takes over as the default `.md` editor and restores Vsidian in one click; the "General" settings group shows the current default editor live |
 | Unified context menu | Right-click anywhere in the live preview body for link, formatting, and clipboard clusters, with cascading submenus, icons, and shortcut hints |
 | Text formatting | Command palette and quick-action bar cover bold, italic, highlight, headings, inline code, and more; every action is rebindable |
 | Rich / plain text paste | Ctrl+V converts supported HTML formatting to Markdown, asking first and undoing text and formatting separately by default; Ctrl+Shift+V keeps original text and Markdown markers; see [paste details](docs/features.md#富文本粘贴与撤销) (Chinese) |
@@ -34,7 +35,7 @@ Vsidian brings an Obsidian-like Markdown editing experience to VS Code. After in
 
 | Feature | Description |
 | --- | --- |
-| Table editing | Well-formed tables render as an editable grid: in-cell editing, rectangular selection and copy, row/column add, delete and reorder, content-proportional column widths |
+| Table editing | Well-formed tables render as an editable grid: in-cell editing, rectangular selection and copy, row/column add, delete and reorder, content-proportional column widths; tables inside quotes and lists are supported too |
 | Lists & quotes | Enter continues structure, Backspace peels it off in layers, Tab indents whole lines; nested lists and quotes fully supported |
 | Frontmatter properties | The YAML head renders as a read-only table card; a popover adds, edits, and removes properties, one undo per action |
 
@@ -53,8 +54,9 @@ Vsidian brings an Obsidian-like Markdown editing experience to VS Code. After in
 
 | Feature | Description |
 | --- | --- |
-| Hover document preview | Ctrl+hover a link to preview the target note — full text, a heading section, or a block reference; available in live preview, reading mode, and the link panels, with a direct-hover option in settings |
-| Document embeds | `![[note]]` mounts a read-only card in both views, source shows for editing at the cursor; inline, list, quote, and table-cell positions all render, with recursive expansion (three levels by default) |
+| Hover document preview | Ctrl+hover a link to preview the target note — full text, a heading section, or a block reference; available in live preview, reading mode, and the link panels; edit and save the target inside the popup, with direct-hover and master toggles in settings |
+| Jump target tip | When hovering shows no preview popup, a brief pause reveals a small badge with the target path and anchor; works in both views and the link panels, toggle in settings |
+| Document embeds | `![[note]]` mounts a card in both views where the target note can be edited and saved in place, leaving the parent document untouched; the cursor reveals the reference source for editing; inline, list, quote, and table-cell positions all render, with recursive expansion (three levels by default) |
 | Backlink panel | The sidebar shows which documents reference the current note: context cards grouped by source with the matched link highlighted, sortable and searchable, click to jump to the reference |
 | Outgoing links panel | The sidebar lists every link in the current note (wikilinks, links, images, reference definitions); click lands on the link's actual anchor, broken links dim |
 | Reference updates on rename | Renaming or moving files and folders inside VS Code rewrites wikilinks, links, and image references to the new locations; one undo reverts the whole rewrite |

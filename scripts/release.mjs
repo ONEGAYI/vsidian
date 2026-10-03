@@ -102,6 +102,8 @@ const QUICK_ACTION_ICON_KEYS = [
   // #185 右键菜单图标接入同一图标集（部分复用上列既有键，此处为新增键）
   'normalText', 'textFormat', 'paragraphStyle', 'comment',
   'externalLink', 'cut', 'copy', 'paste', 'selectAll', 'insertPlus',
+  // #305–#308 粘贴纯文本（右键菜单剪贴板簇）
+  'pastePlain',
   // #236 查找面板六键（0.7.0 后未发布批次引入，此前发布检查未跑过）
   'findPrev', 'findNext', 'findClose', 'replaceOne', 'replaceAll', 'findInSelection',
   // 2026-10 查找面板替换栏切换 chevron（Pen 直绘）
