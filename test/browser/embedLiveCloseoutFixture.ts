@@ -327,6 +327,27 @@ Object.assign(window, {
     return document.activeElement instanceof HTMLElement &&
       !!document.activeElement.closest('.vsidian-embed-card')
   },
+  /** 浮窗根编辑器视图公开取（S6 光标/滚动实验——光标定位并聚焦；定位
+   *  模拟真实输入/导航后的光标跟随：selection + scrollIntoView） */
+  focusCloseoutPopupEditor(pos?: number): boolean {
+    const editor = document.querySelector<HTMLElement>('.vsidian-hover-popup-live .cm-editor')
+    const view = editor ? EditorView.findFromDOM(editor) : null
+    if (!view) {
+      return false
+    }
+    if (typeof pos === 'number') {
+      view.dispatch({ selection: { anchor: Math.min(pos, view.state.doc.length) }, scrollIntoView: true })
+    }
+    view.focus()
+    return document.activeElement !== null &&
+      !!document.activeElement.closest('.vsidian-hover-popup')
+  },
+  /** 浮窗根编辑器当前选区锚点（S6 会话记忆恢复验证） */
+  closeoutPopupSelection(): number | null {
+    const editor = document.querySelector<HTMLElement>('.vsidian-hover-popup-live .cm-editor')
+    const view = editor ? EditorView.findFromDOM(editor) : null
+    return view ? view.state.selection.main.anchor : null
+  },
   /** 指定卡编辑器文本 */
   closeoutEditorText(title: string): string {
     return editorIn(cardOfTitle(title))?.state.doc.toString() ?? ''

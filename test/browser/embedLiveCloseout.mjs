@@ -307,6 +307,61 @@ try {
   passed++
   console.log('[S5][PASS] 空白表格组合规划：B 内空白格 CDP IME 组合「笔|记」→ 规划转义落格「笔\\|记」')
 
+  // ---- S6 浮层进度：光标会话记忆恢复不强制滚动（2026-10-02 验收反馈）----
+  // 用户悬停长目标（孙引用在 ~14 行）：首开浮层在开头；在编辑器内点过/
+  // 输入过（光标落到中部）后关闭重开，浮层被拉到上次光标行——重开预览
+  // 应从头显示，光标记忆本身保留（继续编辑时 CM6 按输入跟随）
+  const page6 = await newPage()
+  const B6 = ['# 父级B标题', '']
+  for (let i = 1; i <= 30; i++) {
+    B6.push(`B 段落第 ${i} 行，填充内容使浮层内容超过首屏视口高度。`)
+  }
+  B6.push('', '## 尾部标题', '', '尾部内容。', '')
+  await page6.evaluate((b) => window.setupCloseoutTargets(b, '# 孙级C标题\n\n孙级C正文。\n'), B6.join('\n'))
+  await page6.evaluate(() => {
+    window.initCloseoutDoc('打开 [[父级B]] 查看。\n', 'live')
+    window.applyCloseoutSettings({ 'hover.liveDirect': true })
+  })
+  await page6.locator('.cm-content .vsidian-wikilink').first().waitFor()
+  const openLivePopup6 = async () => {
+    await page6.evaluate(() => window.closeoutHoverPtr('live-wikilink', 'enter', 0))
+    await waitUntil(page6, () => {
+      const p = window.readCloseoutPopup()
+      return p.open === true && p.editorPresent === true ? p : null
+    }, '浮窗根 Live 编辑器在场')
+    await page6.waitForTimeout(400)
+  }
+  const scrollInfo6 = () => page6.evaluate(() => {
+    const scroller = document.querySelector('.vsidian-hover-popup-live .cm-scroller')
+    return scroller instanceof HTMLElement
+      ? { top: scroller.scrollTop, clientH: scroller.clientHeight, scrollH: scroller.scrollHeight }
+      : null
+  })
+  await openLivePopup6()
+  // 首开从顶部显示
+  let info = await scrollInfo6()
+  assert.ok(info && info.top === 0, `首开浮层从顶部显示（实际 scrollTop ${info?.top}）`)
+  // 光标落到首屏外（第 30 行），模拟用户点击/输入过的现场
+  const atFar = B6.join('\n').indexOf('第 30 行')
+  assert.equal(await page6.evaluate((p) => window.focusCloseoutPopupEditor(p), atFar), true,
+    '光标定位到首屏外第 30 行')
+  const farInfo = await scrollInfo6()
+  assert.ok(farInfo && farInfo.top > 0,
+    `前置自检：光标定位后视口已滚动到光标区（scrollTop ${farInfo?.top}——为 0 说明光标仍在首屏内，B 需加长）`)
+  // 关闭（teardownLive 保存光标会话记忆）→ 重开
+  await page6.evaluate(() => document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })))
+  await waitUntil(page6, () => window.readCloseoutPopup().open !== true, '浮窗关闭')
+  await openLivePopup6()
+  info = await scrollInfo6()
+  assert.ok(info, '重开后滚动容器可测')
+  assert.equal(info.top, 0,
+    `重开浮层应从顶部显示，不被上次光标位置拉走（实际 scrollTop ${info.top}）`)
+  const selAfter = await page6.evaluate(() => window.closeoutPopupSelection())
+  assert.equal(selAfter, atFar, `重开后光标会话记忆保留在原位置（实际 ${selAfter}，预期 ${atFar}）`)
+  await page6.close()
+  passed++
+  console.log('[S6][PASS] 浮层进度：光标记忆恢复不强制滚动，重开从顶部显示')
+
   assert.deepEqual(errors, [], '无浏览器运行时错误')
   console.log(`embedLiveCloseout：${passed} 组场景全部通过`)
 } finally {

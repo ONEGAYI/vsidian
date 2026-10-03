@@ -1905,7 +1905,11 @@ export class EmbedCardManager {
   }
 
   /** init 后定位：会话选区恢复优先（occurrence 记忆），否则标题/块引用
-   *  定位到锚点区间起点（P2-03 语义在 Live 侧的落位） */
+   *  定位到锚点区间起点（P2-03 语义在 Live 侧的落位）。选区恢复只设光标
+   *  不强制滚动——重开浮层保持从顶部显示（2026-10-02 验收反馈：恢复记忆
+   *  把浮层拉回上次光标行，预览进度错乱）；继续编辑时 CM6 按输入/导航
+   *  自行跟随光标。章节/块引用定位保持滚动（打开即到引用区间是 P2-03
+   *  的显式语义） */
   private locateLiveInstance(entry: EmbedEntry): void {
     const live = entry.live
     const view = live?.instance?.getView()
@@ -1916,7 +1920,7 @@ export class EmbedCardManager {
     if (entry.liveSelection) {
       const { anchor, head } = entry.liveSelection
       if (anchor <= view.state.doc.length && head <= view.state.doc.length) {
-        view.dispatch({ selection: { anchor, head }, scrollIntoView: true })
+        view.dispatch({ selection: { anchor, head } })
       }
       return
     }
