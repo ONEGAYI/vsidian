@@ -90,8 +90,14 @@ try {
   await waitUntil(page1, () => window.closeoutModel('孙级C')?.saved === 1, 'Ctrl+S 只保存孙卡目标 C')
   assert.equal((await page1.evaluate(() => window.closeoutModel('父级B'))).saved, 0, 'B 未被连带保存')
   const s1Editors = await page1.evaluate(() => window.closeoutEditorCount())
-  // 关闭浮窗（指针离场）：浮窗根与孙卡编辑器全部回收
+  // 指针离场：孙卡编辑器仍持有焦点（输入现场保活——IME 打字现场不因
+  // 鼠标离开销毁，2026-10-02 验收反馈修复口径），浮窗不按延迟关闭
   await page1.evaluate(() => window.closeoutHoverPtr('live-wikilink', 'leave', 0))
+  await page1.waitForTimeout(600)
+  assert.equal(await page1.evaluate(() => window.readCloseoutPopup().open), true,
+    '孙卡编辑器持有焦点时指针离场不销毁输入现场')
+  // 外点 = 明确上下文切换：浮窗根与孙卡编辑器全部回收
+  await page1.evaluate(() => document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })))
   await waitUntil(page1, () => window.closeoutEditorCount() === 1, '浮窗关闭后仅剩主编辑器（B/孙卡全回收）')
   await page1.close()
   passed++

@@ -221,6 +221,58 @@ try {
   passed++
   console.log('[L6] Esc 分层（选区收敛/空选区退出/Reading 关闭）通过')
 
+  // ---- L7 焦点现场保活：编辑器聚焦 + 鼠标移出不销毁（IME 打字现场）----
+  // 鼠标打开的浮窗（非键盘模态）下，用户点击编辑器开始输入（键盘/IME），
+  // 鼠标离开（去够输入法候选窗等）不关闭——规格「焦点在浮层内部时不能仅
+  // 因鼠标离开而销毁」的打字现场口径；按钮副作用焦点不算键盘现场（L3
+  // 保存后移出仍关闭），外点/失焦语义不受本保活豁免
+  await hoverPtr('live-wikilink', 'enter', 0)
+  await waitFor('浮窗重开', probe, (v) => v.open === true && v.state === 'content')
+  // L6 的 Esc 退出编辑把该位置会话记忆为 Reading——手动切回 Live
+  await page.click('.vsidian-hover-popup .vsidian-hover-popup-mode')
+  await waitFor('Live 端口绑定', probe, (v) => v.liveBound === true)
+  // 程序性聚焦编辑器（不触发 mouseenter——指针保持「已移出」语义）
+  await page.evaluate(() => { window.hoverEditorView()?.focus() })
+  assert.equal((await popupDom()).focusInEditor, true, '编辑器持有焦点')
+  await mouseLeavePopup()
+  await page.waitForTimeout(CLOSE_WAIT)
+  assert.equal((await probe()).open, true, '编辑器聚焦时鼠标离开不销毁打字现场')
+  // 外点 = 明确上下文切换：打字现场不豁免外点关闭
+  await page.evaluate(() => document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })))
+  await waitFor('外点立即关闭', probe, (v) => v.open !== true, 1500)
+  passed++
+  console.log('[L7] 编辑器焦点现场移出保活 + 外点关闭通过')
+
+  // ---- L8 关延迟排程后开始输入：到点复查现场，不销毁输入中浮窗 ----
+  // 干净浮窗 + 焦点不在编辑器时移出（排 350ms 关延迟），延迟到点前用户
+  // 点击编辑器开始输入（组合开始）：已排定的关闭到点时复查保活态——
+  // 输入现场（组合/在途/dirty/编辑器焦点）在场则放弃本次关闭
+  await hoverPtr('live-wikilink', 'enter', 0)
+  await waitFor('浮窗重开', probe, (v) => v.open === true && v.state === 'content')
+  if ((await probe()).internalMode !== 'live') {
+    await page.click('.vsidian-hover-popup .vsidian-hover-popup-mode')
+  }
+  await waitFor('Live 端口绑定', probe, (v) => v.liveBound === true)
+  await mouseLeavePopup() // 干净 + 无焦点现场：关延迟开始排程
+  await page.waitForTimeout(200) // 延迟已排未到点
+  await page.evaluate(() => {
+    window.hoverEditorView()?.focus()
+    document.querySelector('.vsidian-hover-popup-live .cm-content')
+      ?.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }))
+  })
+  await page.waitForTimeout(CLOSE_WAIT) // 关延迟到点
+  assert.equal((await probe()).open, true, '排定的关延迟到点时输入现场在场不关闭')
+  // 收尾：结束组合（无文本无 dirty）后外点关闭，恢复常规语义
+  await page.evaluate(() => {
+    document.querySelector('.vsidian-hover-popup-live .cm-content')
+      ?.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '' }))
+  })
+  await page.waitForTimeout(150)
+  await page.evaluate(() => document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })))
+  await waitFor('组合结束后外点关闭', probe, (v) => v.open !== true, 1500)
+  passed++
+  console.log('[L8] 关延迟排程后输入开始不销毁现场通过')
+
   // ---- 收尾断言：无页面错误、无编辑器泄漏 ----
   assert.deepEqual(errors, [], '页面无未捕获错误')
   const editorCount = await page.evaluate(() => window.hoverLiveEditorCount())

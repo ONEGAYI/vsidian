@@ -302,7 +302,7 @@ function ensureInactiveListener(): void {
   }
   const onWindowFocus = (): void => {
     // 回焦重估：dirty 已清（别处保存）且指针不在联合域 → 恢复常规关闭
-    if (popup && !liveKeepAlive() && !popup.pointerInside && !keyboardKeepAlive()) {
+    if (popup && !liveKeepAlive() && !popup.pointerInside && !keyboardKeepAlive() && !editorFocusKeepAlive()) {
       scheduleClose()
     }
   }
@@ -418,8 +418,11 @@ function scheduleClose(): void {
   }
   // #221 键盘模态保活：焦点在浮层内部时不因鼠标离开（联合域 mouseleave
   // 的延迟关闭源）而销毁键盘操作现场——规格「焦点在浮层内部时不能仅因
-  // 鼠标离开而销毁」；焦点离开浮层后恢复常规鼠标关闭语义
-  if (keyboardKeepAlive()) {
+  // 鼠标离开而销毁」；焦点离开浮层后恢复常规鼠标关闭语义。
+  // 输入现场保活（鼠标打开路径同样成立）：用户点击浮窗内编辑器开始
+  // 输入（键盘/IME 组合）后鼠标移出——去够输入法候选窗等——不销毁
+  // 打字现场；按钮副作用焦点不构成键盘现场（保存/切换后按普通悬停规则）
+  if (keyboardKeepAlive() || editorFocusKeepAlive()) {
     return
   }
   if (liveKeepAlive()) {
@@ -433,6 +436,12 @@ function scheduleClose(): void {
   popup.closeTimer = window.setTimeout(() => {
     if (popup) {
       popup.closeTimer = undefined
+      // 排程后现场翻转复查：关延迟排定（干净 + 无现场）后用户才开始
+      // 输入（组合/在途/dirty 起）或聚焦编辑器——鼠标未归场（无
+      // mouseenter 抵消）时不得按早前排定的延迟销毁输入现场
+      if (keyboardKeepAlive() || editorFocusKeepAlive() || liveKeepAlive() || popup.pointerInside) {
+        return
+      }
       closeHoverPopup()
     }
   }, HOVER_POPUP_CLOSE_DELAY_MS)
@@ -442,6 +451,16 @@ function scheduleClose(): void {
  *  时同样成立——focus 落在浮层内任意后代） */
 function keyboardKeepAlive(): boolean {
   return popup !== null && popup.keyboardOpened && popup.container.contains(document.activeElement)
+}
+
+/** 输入现场保活：浮窗内 CM6 编辑器持有焦点（根编辑器或嵌卡/孙卡编辑器
+ *  ——孙卡 DOM 在浮窗容器任意层）。只认编辑器焦点：打字现场（键盘/IME
+ *  输入中）值得保活；点击按钮/头部后的副作用焦点不算（P2-U18 干净目标
+ *  普通悬停关闭语义不被滞留焦点劫持） */
+function editorFocusKeepAlive(): boolean {
+  const active = document.activeElement
+  return popup !== null && active !== null && popup.container.contains(active) &&
+    active.closest('.cm-content') !== null
 }
 
 /** P2-06（Q18）dirty 保活判定：浮窗根内部 Live 端口在场且（目标 dirty／
@@ -462,7 +481,13 @@ function reevaluateLiveKeepAlive(): void {
   const resisting = liveKeepAlive()
   const was = state.liveResistPrev
   state.liveResistPrev = resisting
-  if (was && !resisting && !state.pointerInside && !keyboardKeepAlive()) {
+  if (!was && resisting) {
+    // 抵抗上升（输入开始/在途起）：撤销已排定的关延迟——排程时干净、
+    // 排程后现场翻转的时序缺口
+    cancelCloseTimer()
+    return
+  }
+  if (was && !resisting && !state.pointerInside && !keyboardKeepAlive() && !editorFocusKeepAlive()) {
     scheduleClose()
   }
 }
@@ -901,11 +926,12 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
 
   // 父容器滚动：锚点视口位置失效，立即关闭（浮层自身滚动区在联合域内不受影响）；
   // #221 键盘模态且焦点在浮层内时豁免——Tab 遍历浮层内容触发的程序性滚动
-  // 不得销毁键盘操作现场（#220 已知张力的调整）；P2-06 dirty Live 同豁免
-  //（键盘模态先例：保持浮层驻留，不重贴锚——普通条件恢复后按常规重定位）
+  // 不得销毁键盘操作现场（#220 已知张力的调整）；编辑器输入现场（scrollIntoView
+  // 等程序性滚动）与 P2-06 dirty Live 同豁免（键盘模态先例：保持浮层驻留，
+  // 不重贴锚——普通条件恢复后按常规重定位）
   const onScroll = (event: Event): void => {
     if (popup && event.target instanceof Node && !popup.container.contains(event.target) &&
-      !keyboardKeepAlive() && !liveKeepAlive()) {
+      !keyboardKeepAlive() && !editorFocusKeepAlive() && !liveKeepAlive()) {
       closeHoverPopup()
     }
   }
