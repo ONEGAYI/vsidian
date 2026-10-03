@@ -2,7 +2,63 @@
 import { expect, it, vi } from 'vitest'
 import { EmbedCardManager } from '../../src/webview/embedCard'
 import { isWebviewToHost, type WebviewToHost } from '../../src/shared/protocol'
-import { liveEmbedReady, readingEmbedCard } from '../integration/suite/embedReadiness'
+import { liveEmbedReady, mixedEmbedReady, readingEmbedCard } from '../integration/suite/embedReadiness'
+
+const mixedTargets = { parent: 'B 混排', child: '../two/C', descendant: '../three/D' }
+
+it('#246：B/C 已装载但 D 子请求仍在途时，混排链不能提前完成等待', () => {
+  const reading = document.createElement('div')
+  reading.className = 'vsidian-view-reading'
+  document.body.append(reading)
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(400)
+  const sent: WebviewToHost[] = []
+  const manager = new EmbedCardManager({
+    session: () => ({ sessionId: 'mixed', docUri: 'file:///parent.md' }),
+    send: (message) => sent.push(message), maxHeightPx: () => 480, maxDepth: () => 3,
+  })
+  const reply = (inner: string, target: string, text: string) => {
+    const request = sent.find((message) => message.kind === 'hover.request' && message.target === inner)
+    expect(request?.kind).toBe('hover.request')
+    if (request?.kind !== 'hover.request') throw new Error('递归子请求未生成')
+    manager.notifyResult({ kind: 'hover.result', reqId: request.reqId, instanceId: request.instanceId,
+      ok: true, target: { fsPath: `/${target}.md`, relPath: `${target}.md` }, version: 1,
+      text, range: { start: 0, end: text.length }, scope: { kind: 'full' } })
+  }
+  try {
+    const parent = document.createElement('div')
+    reading.append(parent)
+    manager.mountCardInto(parent, mixedTargets.parent, 0, 20, 'reading')
+    reply(mixedTargets.parent, 'B', '# B\n\n前文 ![[../two/C]] 后文。')
+    reply(mixedTargets.child, 'C', '# C\n\n![[../three/D]]')
+    expect(manager.probe().map((card) => [card.inner, card.state])).toEqual([
+      [mixedTargets.parent, 'content'], [mixedTargets.child, 'content'], [mixedTargets.descendant, 'loading'],
+    ])
+    expect(mixedEmbedReady({ viewMode: 'reading', readingEmbed: manager.probe() }, mixedTargets)).toBe(false)
+    reply(mixedTargets.descendant, 'D', '# D\n\n实际递归正文')
+    expect(mixedEmbedReady({ viewMode: 'reading', readingEmbed: manager.probe() }, mixedTargets)).toBe(true)
+  } finally {
+    manager.dispose()
+    reading.remove()
+    vi.restoreAllMocks()
+  }
+})
+
+it('#246：只接受同一 Reading 根的完整链，C 的部分预算分态不放宽 D 的成功要求', () => {
+  const card = (inner: string, state = 'content', rootHost = 'reading') =>
+    ({ inner, state, rootHost, host: inner === mixedTargets.parent ? rootHost : 'reading', textLen: 10 })
+  const parents = [card(mixedTargets.parent), card(mixedTargets.child)]
+  const ready = (cards: ReturnType<typeof card>[], viewMode = 'reading') =>
+    mixedEmbedReady({ viewMode, readingEmbed: cards }, mixedTargets)
+  expect(ready(parents)).toBe(false)
+  expect(ready([...parents, card(mixedTargets.descendant, 'loading')])).toBe(false)
+  expect(ready([...parents, card(mixedTargets.descendant, 'error')])).toBe(false)
+  expect(ready([...parents, card(mixedTargets.descendant)])).toBe(true)
+  expect(ready([...parents, card(mixedTargets.descendant)], 'live')).toBe(false)
+  expect(ready([...parents, card(mixedTargets.descendant, 'content', 'live')])).toBe(false)
+  expect(ready([...parents, card(mixedTargets.descendant, 'content', 'hover')])).toBe(false)
+  expect(ready([card(mixedTargets.parent), card(mixedTargets.child, 'error'), card(mixedTargets.descendant)])).toBe(false)
+  expect(ready([...parents, card(mixedTargets.child, 'error'), card(mixedTargets.descendant)])).toBe(true)
+})
 
 it('#223：三个成功回包先到，缺失目标仍 loading 时不提前完成等待', () => {
   const sent: WebviewToHost[] = []

@@ -14,3 +14,16 @@ export function readingEmbedCard<T extends { inner: string; host?: string; rootH
 ): T | undefined {
   return cards?.find((card) => card.rootHost === 'reading' && card.inner === inner)
 }
+
+/** #246：混排递归链装载后才采样后续断言；调用方保持在场父卡动态数量。 */
+export function mixedEmbedReady(view: {
+  viewMode?: string
+  readingEmbed?: readonly { inner: string; host?: string; rootHost?: string; state: string; textLen?: number }[]
+} | undefined, targets: { parent: string; child: string; descendant: string }): boolean {
+  const cards = (view?.readingEmbed ?? []).filter((card) => card.rootHost === 'reading')
+  const parents = cards.filter((card) => card.inner === targets.parent)
+  return view?.viewMode === 'reading' && parents.length >= 1 &&
+    parents.every((card) => card.state === 'content' && (card.textLen ?? 0) > 0) &&
+    cards.some((card) => card.inner === targets.child && card.state === 'content') &&
+    readingEmbedCard(cards, targets.descendant)?.state === 'content'
+}

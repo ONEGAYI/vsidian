@@ -2,7 +2,7 @@
 // fixture 工作区由 runTest.mjs 在临时目录动态生成（避免 git 换行转换干扰
 // 字节级断言），路径经环境变量 WORKSPACE_DIR 传入。
 import * as vscode from 'vscode'
-import { liveEmbedReady, readingEmbedCard } from './embedReadiness'
+import { liveEmbedReady, mixedEmbedReady, readingEmbedCard } from './embedReadiness'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { LOCALE_MESSAGES, resolveLocale } from '../../../src/shared/locales'
 import { OBSIDIAN_ALIAS_PROBES } from '../../../src/shared/obsidianAlias'
@@ -12983,26 +12983,35 @@ export const cases: Array<[string, () => Promise<void>]> = [
     // 主文档 5 个可提升位（段落/无序/懒续/任务/引用）各升级一张卡；
     // 链接域与表格格内保持占位（不升级——不在 readingEmbed 观测面）
     const mixed = (v: ViewState | undefined) =>
-      (v?.readingEmbed ?? []).filter((item) => item.host !== 'live' && item.inner === inner)
+      (v?.readingEmbed ?? []).filter((item) => item.rootHost === 'reading' && item.inner === inner)
+    const cInner = '../two/C'
     // 卡片装载后变高使虚拟化窗口收缩，远端块（含宿主/卡片）按既有语义
-    // 回收——在场卡数是动态值；装载断言只看在场卡全部成功，5 个容器位
-    // 的提升矩阵由 embedSlots/embedCard 单测与浏览器 mixedEmbed 钉住
-    const loaded = await poll('混排卡装载', async () => {
+    // 回收——在场父卡数是动态值；父卡成功并不表示递归子请求已返回。
+    // 等同一 Reading 根的 B/C/D 全链就绪后再做后续断言，仍保留 C
+    // 部分预算 error 的既有边界；5 个容器位由单测与浏览器钉住。
+    let loadingSnapshot: ViewState | undefined
+    const loaded = await poll('混排 Reading B→C→D 装载', async () => {
       const v = await pull()
-      const cards = mixed(v)
-      return v !== undefined && cards.length >= 1 &&
-        cards.every((c) => c.state === 'content' && (c.textLen ?? 0) > 0) ? v : undefined
-    }, 20000)
+      loadingSnapshot = v
+      return mixedEmbedReady(v, { parent: inner, child: cInner, descendant: '../three/D' }) ? v : undefined
+    }, 20000).catch((error) => {
+      console.error('[#246] 混排递归就绪失败，最后快照', JSON.stringify({
+        mode: loadingSnapshot?.viewMode,
+        cards: (loadingSnapshot?.readingEmbed ?? []).map((card) => ({
+          inner: card.inner, rootHost: card.rootHost, state: card.state, note: card.note,
+        })),
+      }))
+      throw error
+    })
     // 宿主混排准入：B 内容内的文字混排 C 与引用内 C（validChildSource 不再
     // 要求独占行、放行列表/引用上下文）——真实子请求链装载
-    const cInner = '../two/C'
-    const cCards = (loaded.readingEmbed ?? []).filter((item) => item.host !== 'live' && item.inner === cInner)
+    const cCards = (loaded.readingEmbed ?? []).filter((item) => item.rootHost === 'reading' && item.inner === cInner)
     // 风暴装载（5 B × 2 C 并发窗口）可触发并发预算分态（error 卡为正确
     // 语义）；准入证明只须至少一张 C 真实装载，全部 error 才失败
     assert(cCards.length >= 1 && cCards.some((c) => c.state === 'content'),
       `B 内混排 C 应经宿主混排准入装载（实际 ${JSON.stringify(cCards.map((c) => c.state))}）`)
     // C 内独占行 D 沿 #244 既有递归继续
-    const dCard = (loaded.readingEmbed ?? []).find((item) => item.host !== 'live' && item.inner === '../three/D')
+    const dCard = readingEmbedCard(loaded.readingEmbed, '../three/D')
     assert(dCard?.state === 'content', 'C→D 独占行递归不受混排接入影响')
     const watch = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
     assert(watch.targets >= 3 && watch.subscriptions >= 3,
@@ -13012,15 +13021,15 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await poll('深度 1 撤下混排子树', async () => {
       const v = await pull()
       const cards = mixed(v)
-      const cUnderB = (v?.readingEmbed ?? []).find((item) => item.host !== 'live' && item.inner === cInner)
+      const cUnderB = readingEmbedCard(v?.readingEmbed, cInner)
       return cards.length >= 1 && cards.every((c) => c.state === 'content') &&
         cUnderB?.state === 'error' && cUnderB.note === editorMessages()['hover.errorDepth'] &&
-        !(v?.readingEmbed ?? []).some((item) => item.host !== 'live' && item.inner === '../three/D') ? v : undefined
+        !readingEmbedCard(v?.readingEmbed, '../three/D') ? v : undefined
     }, 20000)
     await vscode.commands.executeCommand(CMD.setSettings, { 'embed.maxDepth': 3 })
     await poll('深度 3 恢复混排子树', async () => {
       const v = await pull()
-      return (v?.readingEmbed ?? []).some((item) => item.host !== 'live' && item.inner === cInner && item.state === 'content') ? v : undefined
+      return (v?.readingEmbed ?? []).some((item) => item.rootHost === 'reading' && item.inner === cInner && item.state === 'content') ? v : undefined
     }, 20000)
     // 零写回：磁盘三文档不变、无 edit.request、关闭面板订阅回落
     assert((await readDisk(parentName)) === parentDisk &&
