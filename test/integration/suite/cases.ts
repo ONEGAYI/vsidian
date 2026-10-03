@@ -13515,6 +13515,87 @@ export const cases: Array<[string, () => Promise<void>]> = [
     console.log('[P2-04] CRLF 坐标保真 + 不可安全写回暂停（目标文本断言）通过')
   }],
 
+ // ---- P2-07（#284）混排/列表/任务/引用容器内嵌入的内部 Live：容器位
+  // 输入只写目标 B（A 的容器标记与前后文保真、会话零推进）；A 的外部编辑
+  // 使嵌入区间平移后实例与端口稳定（键迁移——livePortId 不变、零重绑）；
+  // 容器位保存路由只落 B。 ----
+  ['P2-07 混排容器内部 Live：输入只写目标与实例平移稳定（#284）', async () => {
+    await openWithEditor('p207-容器混排.md')
+    await waitSessionReady('p207-容器混排.md')
+    const uri = wsUri('p207-容器混排.md').toString()
+    const targetUri = wsUri('p207-容器目标.md')
+    const parentBefore = await readDisk('p207-容器混排.md')
+    const targetBefore = await readDisk('p207-容器目标.md')
+    const parentDoc = await vscode.workspace.openTextDocument(wsUri('p207-容器混排.md'))
+    const session0 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+
+    // 容器矩阵（混排/无序/任务/引用）4 卡位全部继承父 Live 并绑定独立端口
+    const bound = await waitViewState('p207-容器混排.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner === 'p207-容器目标')
+      return cards.length === 4 && cards.every((c) => c.liveBound === true &&
+        c.internalMode === 'live' && (c.liveTextLen ?? -1) >= 0) ? true : false
+    })
+    const portsBefore = (bound.readingEmbed ?? [])
+      .filter((c) => c.inner === 'p207-容器目标')
+      .map((c) => c.livePortId as string)
+    assert(new Set(portsBefore).size === 4,
+      `四个容器位各自独立端口（实际 ${JSON.stringify(portsBefore)}）`)
+    const bDoc = await poll('容器目标 B 文档打开', () => {
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())
+      return doc ?? undefined
+    })
+
+    // 无序位（occurrence 1）普通输入：只写 B——A 的容器标记/前后文保真
+    const insertAt = '# p207 容器目标\n\n'.length + 2
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.type', inner: 'p207-容器目标', pos: insertAt, text: '【容器混排编辑】', occurrence: 1,
+    })
+    await poll('B 权威文本收到容器位编辑', () =>
+      bDoc.getText().includes('【容器混排编辑】') ? true : undefined)
+    assert(bDoc.isDirty, '容器位编辑后目标 B dirty')
+    await waitViewState('p207-容器混排.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p207-容器目标' && c.liveDirty === true)
+        ? true : false)
+    assert(parentDoc.getText() === parentBefore && !parentDoc.isDirty,
+      '父文档 A 零写回且零 dirty（容器位嵌入编辑不落 A——源码位置与独占行不同）')
+    const session1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(session1.appliedEdits === session0.appliedEdits,
+      `A 会话 appliedEdits 零推进（实际 ${session1.appliedEdits}，基线 ${session0.appliedEdits}）`)
+    assert(await readDisk('p207-容器目标.md') === targetBefore, '保存前目标磁盘未变')
+
+    // A 的外部编辑（前文插入两字）：嵌入区间平移——实例键迁移使端口稳定
+    // （livePortId 与打字前完全一致、零重绑；外部增量经真实同步链路进 A 视图）
+    const edit = new vscode.WorkspaceEdit()
+    edit.insert(wsUri('p207-容器混排.md'), new vscode.Position(2, 4), '甲乙')
+    await vscode.workspace.applyEdit(edit)
+    await poll('A 外部编辑同步进父文档', () =>
+      parentDoc.getText().includes('前文混排甲乙') ? true : undefined)
+    await waitViewState('p207-容器混排.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner === 'p207-容器目标')
+      return cards.length === 4 && cards.every((c) => c.liveBound === true &&
+        portsBefore.includes(c.livePortId as string)) ? true : false
+    }, 0, 30000)
+    assert(parentDoc.getText().includes('前文混排甲乙 ![[p207-容器目标]] 后文混排。'),
+      'A 前文含新字且嵌入原文/列表/引用标记保真')
+    assert(bDoc.getText().includes('【容器混排编辑】'),
+      'A 平移期间 B 的未保存编辑保持（实例与端口未销毁重建）')
+
+    // 容器位保存路由：只落 B（磁盘更新、dirty 清零、A 原样）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.save', inner: 'p207-容器目标', occurrence: 1,
+    })
+    await poll('容器目标保存落盘', async () =>
+      (await readDisk('p207-容器目标.md')).includes('【容器混排编辑】') ? true : undefined)
+    assert(!bDoc.isDirty, '保存后目标干净')
+    // 保存 B 不触碰 A：A 磁盘仍是外部编辑前的原文（外部编辑未保存，宿主
+    // dirty 模型保持），A 文本与 dirty 状态与保存前一致
+    assert(await readDisk('p207-容器混排.md') === parentBefore,
+      '保存目标不落 A 盘（A 磁盘仍为外部编辑前原文）')
+    assert(parentDoc.isDirty, 'A 的外部编辑 dirty 保持（保存 B 不误存/不清 A）')
+    assert(parentDoc.getText().includes('前文混排甲乙'), 'A 文本保持（外部编辑内容不被回滚）')
+    console.log('[P2-07] 容器混排内部 Live：输入只写目标 + 实例平移稳定 + 保存路由通过')
+  }],
+
  // ---- P2-10（#287）引用完整 Live 操作落 B 不落 A：焦点在嵌入内部 Live
   // 编辑器内时，格式命令（format.command 宿主回发路径）、表格创建与
   // frontmatter Popover 编辑全部指向实际目标 B（经 B 的 DocumentSession

@@ -596,7 +596,9 @@ describe('#224 嵌入卡片：订阅、失效分态与有界状态库', () => {
       docUri: SESSION.docUri,
       fsPath: 'D:\\notes\\目标笔记.md',
     })
-    expect(watch && watch.kind === 'hover.watch' && watch.instanceId).toMatch(/^\d+::目标笔记$/)
+    // P2-07（#284）：对外身份统一为稳定 hostId（坐标键随事务迁移，hostId
+    // 不变——宿主 pin/退订不因文本平移失配）
+    expect(watch && watch.kind === 'hover.watch' && watch.instanceId).toMatch(/^embed-occ-\d+$/)
     manager.dispose()
     const unwatch = sent.find((m) => m.kind === 'hover.unwatch')
     expect(unwatch).toMatchObject({ fsPath: 'D:\\notes\\目标笔记.md' })

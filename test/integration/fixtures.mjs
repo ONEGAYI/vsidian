@@ -1135,6 +1135,27 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
     '尾部段落。',
     '',
   ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p207-容器混排.md'), [
+    '# P2-07 容器混排',
+    '',
+    '前文混排 ![[p207-容器目标]] 后文混排。',
+    '',
+    '- 无序项 ![[p207-容器目标]] 无序余文',
+    '- [ ] 任务项 ![[p207-容器目标]] 任务余文',
+    '',
+    '> 引用文 ![[p207-容器目标]] 引用余文',
+    '',
+    '收尾段落。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p207-容器目标.md'), [
+    '# p207 容器目标',
+    '',
+    '容器目标首段。',
+    '',
+    '容器目标次段。',
+    '',
+  ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, 'p204-编辑目标.md'), [
     '# p204 编辑目标',
     '',

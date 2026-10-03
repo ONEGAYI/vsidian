@@ -6,6 +6,8 @@
 // 模式记忆与编辑器无泄漏在此验证。
 import { WebviewSyncController, type VsCodeBridge } from '../../src/webview/syncController'
 import type { SerChange, WebviewToHost } from '../../src/shared/protocol'
+import { liveEmbedSpansField } from '../../src/webview/liveEmbed'
+import { selectionTouchesRange } from '../../src/webview/liveDecorations'
 import { isFormatOperationId } from '../../src/shared/formatOperations'
 import { bootLocaleFromDocument } from '../../src/webview/localeBoot'
 import { EditorView, keymap } from '@codemirror/view'
@@ -68,13 +70,26 @@ function applyTo(text: string, changes: SerChange[]): string {
   return out
 }
 
-let boundPortId = ''
+/** P2-07（#284）多端口：同目标多 occurrence 各自绑定独立端口——B 权威模型
+ *  单份（宿主文档级），端口集合受理按 portId 配对；广播推送发往全部在场
+ *  端口（B 的其他视图修改 → 各端口增量，生产语义）。单卡场景行为与单端口
+ *  版本等价（embedLive/embedLiveActions 既有断言不受影响） */
+const boundPorts = new Set<string>()
 let bindReqSeq = 0
 
-/** B 会话推送（编辑通道事件 → refEdit.push 信封回 webview） */
-function bPush(message: WebviewToHost | import('../../src/shared/protocol').HostToWebview): void {
-  controller.handleHostMessage({ kind: 'refEdit.push', portId: boundPortId, fsPath: B_FS, message })
+/** 定向推送（指定端口） */
+function bPushTo(portId: string, message: WebviewToHost | import('../../src/shared/protocol').HostToWebview): void {
+  controller.handleHostMessage({ kind: 'refEdit.push', portId, fsPath: B_FS, message })
 }
+
+/** 广播推送（全部在场端口——外部变更的宿主会话广播近似） */
+function bPush(message: WebviewToHost | import('../../src/shared/protocol').HostToWebview): void {
+  for (const portId of boundPorts) {
+    bPushTo(portId, message)
+  }
+}
+
+const portKnown = (portId: string): boolean => boundPorts.has(portId)
 
 /** 伪造宿主：hover.request 应答目标全文；refEdit.* 应答绑定/编辑/保存。
  *  keybindings.execute 按生产宿主路由近似回发（格式操作族 →
@@ -112,23 +127,27 @@ async function fakeHostHandle(message: WebviewToHost): Promise<void> {
       return
     }
     case 'refEdit.bind': {
-      boundPortId = `refport-test-${bindReqSeq}`
+      const portId = `refport-test-${++bindReqSeq}`
+      boundPorts.add(portId)
       controller.handleHostMessage({
         kind: 'refEdit.bound', reqId: message.reqId, ok: true,
-        portId: boundPortId, fsPath: B_FS, docUri: B_DOC_URI,
+        portId, fsPath: B_FS, docUri: B_DOC_URI,
         version: bModel.ver, dirty: bModel.dirty,
       })
       // ready 握手的 init 推送（会话全文本）
-      bPush({ kind: 'init', sessionId: boundPortId, docUri: B_DOC_URI, version: bModel.ver, text: bModel.content })
+      bPushTo(portId, { kind: 'init', sessionId: portId, docUri: B_DOC_URI, version: bModel.ver, text: bModel.content })
       return
     }
     case 'refEdit.unbind': {
-      boundPortId = ''
+      boundPorts.delete(message.portId)
       return
     }
     case 'refEdit.message': {
-      if (message.portId !== boundPortId) {
+      if (!portKnown(message.portId)) {
         return
+      }
+      const ack = (seq: number): void => {
+        bPushTo(message.portId, { kind: 'edit.ack', seq, ok: true, version: bModel.ver })
       }
       const inner = message.message
       if (inner.kind === 'edit.request') {
@@ -139,7 +158,7 @@ async function fakeHostHandle(message: WebviewToHost): Promise<void> {
           bModel.dirty = true
           controller.handleHostMessage({ kind: 'refEdit.dirty', fsPath: B_FS, dirty: true })
         }
-        bPush({ kind: 'edit.ack', seq: inner.seq, ok: true, version: bModel.ver })
+        ack(inner.seq)
         return
       }
       if (inner.kind === 'sync.request') {
@@ -172,14 +191,14 @@ async function fakeHostHandle(message: WebviewToHost): Promise<void> {
       return
     }
     case 'refEdit.save': {
-      if (message.portId !== boundPortId) {
+      if (!portKnown(message.portId)) {
         return
       }
       bModel.savedCount++
       bModel.savedContent = bModel.content
       bModel.dirty = false
       controller.handleHostMessage({ kind: 'refEdit.dirty', fsPath: B_FS, dirty: false })
-      controller.handleHostMessage({ kind: 'refEdit.save.result', portId: boundPortId, fsPath: B_FS, ok: true })
+      controller.handleHostMessage({ kind: 'refEdit.save.result', portId: message.portId, fsPath: B_FS, ok: true })
       return
     }
     case 'refEdit.close.query': {
@@ -191,7 +210,7 @@ async function fakeHostHandle(message: WebviewToHost): Promise<void> {
       return
     }
     case 'refEdit.close.execute': {
-      if (message.portId !== boundPortId) {
+      if (!portKnown(message.portId)) {
         return
       }
       const reply = (outcome: 'closed' | 'save-failed' | 'discard-failed' | 'stale'): void => {
@@ -248,6 +267,10 @@ function embedEditorView(): EditorView | null {
 }
 
 Object.assign(window, {
+  /** 注入宿主消息（settings.snapshot 等与真实 handleHostMessage 同入口） */
+  respondEmbedLive(message: import('../../src/shared/protocol').HostToWebview) {
+    controller.handleHostMessage(message)
+  },
   /** 装配父文档（Live 起步——内部模式继承验证的默认父态） */
   initEmbedLiveDoc(text: string) {
     controller.handleHostMessage({
@@ -426,6 +449,119 @@ Object.assign(window, {
   /** 置保存失败注入（只读盘模拟；P2-05） */
   embedTargetSetSaveFail(fail: boolean): void {
     bModel.saveFail = fail
+  },
+  // ---- P2-07（#284）容器混排 × 内部 Live 套件配套 ----
+  /** 全部嵌入卡探针（view.state.readingEmbed 全量；多卡容器矩阵） */
+  embedLiveAllCards(): Array<Record<string, unknown>> {
+    controller.handleHostMessage({ kind: 'view.state.request' })
+    const state = [...sent].reverse().find((m) => m.kind === 'view.state') as
+      | { readingEmbed?: Array<Record<string, unknown>> }
+      | undefined
+    return state?.readingEmbed ?? []
+  },
+  /** 主编辑器（A）光标设置并聚焦（前后文打字/显隐驱动的输入前提） */
+  focusMainAt(pos: number): boolean {
+    const view = mainView()
+    if (!view || pos > view.state.doc.length) {
+      return false
+    }
+    view.dispatch({ selection: { anchor: pos } })
+    view.focus()
+    return document.activeElement instanceof HTMLElement &&
+      !!document.activeElement.closest('.vsidian-view-live')
+  },
+  /** 嵌入表逐枚显隐（selectionTouchesRange 同语义——B 选区隔离断言面） */
+  embedRevealStates(): Array<{ inner: string; from: number; to: number; revealed: boolean }> {
+    const view = mainView()
+    const spans = view?.state.field(liveEmbedSpansField, false)
+    if (!view || !spans) {
+      return []
+    }
+    const selection = view.state.selection
+    return spans.map((s) => ({
+      inner: s.inner, from: s.from, to: s.to,
+      revealed: selectionTouchesRange(selection, s.from, s.to),
+    }))
+  },
+  /** 主编辑器（A）选区快照（B 交互不改变 A 选区的断言面） */
+  embedMainSelection(): { anchor: number; head: number } {
+    const sel = mainView()?.state.selection.main
+    return { anchor: sel?.anchor ?? -1, head: sel?.head ?? -1 }
+  },
+  /** 第 i 个嵌入编辑器聚焦（多卡场景真实键盘前提；可选光标位） */
+  focusEmbedEditorAt(i: number, pos?: number): boolean {
+    const editors = document.querySelectorAll<HTMLElement>('.vsidian-embed-card .vsidian-embed-card-live .cm-editor')
+    const editor = editors[i]
+    if (!editor) {
+      return false
+    }
+    const view = EditorView.findFromDOM(editor)
+    if (!view) {
+      return false
+    }
+    if (typeof pos === 'number') {
+      view.dispatch({ selection: { anchor: Math.min(pos, view.state.doc.length) } })
+    }
+    view.focus()
+    return document.activeElement instanceof HTMLElement &&
+      !!document.activeElement.closest('.vsidian-embed-card')
+  },
+  /** 第 i 个嵌入编辑器文本 */
+  embedEditorTextAt(i: number): string {
+    const editors = document.querySelectorAll<HTMLElement>('.vsidian-embed-card .vsidian-embed-card-live .cm-editor')
+    const view = editors[i] ? EditorView.findFromDOM(editors[i]!) : null
+    return view?.state.doc.toString() ?? ''
+  },
+  /** 全文档 CM6 编辑器计数（主 + 嵌入；泄漏与存活断言面） */
+  embedLiveEditorCountAll(): number {
+    return document.querySelectorAll('#app .cm-editor').length
+  },
+  /** 卡片内 CM6 编辑器计数 */
+  embedCardEditorCountAll(): number {
+    return document.querySelectorAll('.vsidian-embed-card .cm-editor').length
+  },
+  /** 第 i 个嵌入卡的绘制观测（宿主形态、卡高、编辑器在场） */
+  embedCardPaintAt(i: number): {
+    hostClasses: string
+    below: boolean
+    cardHeight: number
+    editorPresent: boolean
+    titleText: string
+  } {
+    const hosts = Array.from(document.querySelectorAll<HTMLElement>(
+      '.vsidian-live-embed, .vsidian-reading-embed'))
+    const host = hosts[i]
+    const card = host?.querySelector<HTMLElement>('.vsidian-embed-card')
+    return {
+      hostClasses: host?.className ?? '',
+      below: host?.classList.contains('vsidian-live-embed-below') ?? false,
+      cardHeight: card?.getBoundingClientRect().height ?? 0,
+      editorPresent: (card?.querySelectorAll('.vsidian-embed-card-live .cm-editor').length ?? 0) > 0,
+      titleText: (card?.querySelector('.vsidian-embed-card-title')?.textContent ?? '').trim(),
+    }
+  },
+  /** 指定文本节点首个矩形 top（相邻行让位断言面） */
+  embedTextTopOf(needle: string): number {
+    const content = document.querySelector('#app')
+    if (!content) {
+      return -1
+    }
+    const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT)
+    let node: Node | null = null
+    while ((node = walker.nextNode()) !== null) {
+      const t = node.textContent ?? ''
+      const at = t.indexOf(needle)
+      if (at >= 0) {
+        const range = document.createRange()
+        range.setStart(node, at)
+        range.setEnd(node, at + 1)
+        const rect = range.getBoundingClientRect()
+        if (rect.height > 0) {
+          return rect.top
+        }
+      }
+    }
+    return -1
   },
   /** 主编辑器删除指定引用行（真实事务管线；P2-05 拦截断言载体） */
   embedDeleteRefLine(): boolean {

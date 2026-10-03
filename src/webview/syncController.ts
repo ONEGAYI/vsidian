@@ -32,7 +32,7 @@
 //   （不再发送 edit.request、忽略 doc.changed）；doc.resync 兼作恢复信号
 // - seq 持久化：经 bridge.setState 保存，webview 重载（retainContextWhenHidden
 //   关闭导致的状态重建）后继续编号，宿主按 seq 幂等去重
-import { Annotation, EditorSelection, type Extension, type Text } from '@codemirror/state'
+import { Annotation, EditorSelection, EditorState, type Extension, type Text } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { isInlineFormatOp, planFormatOperation, planFormatOperationRanges } from './formatOperations'
 import { createQuickActionStateReader } from './quickActionState'
@@ -1512,6 +1512,17 @@ export class WebviewSyncController {
       // P2-05（#282）删除活跃引用拦截：覆盖活跃端口引用区间的 A 事务先
       // 拦截确认（取消不写入 A）；重放事务带豁免注解放行
       ...(this.embedCards ? [this.embedCards.mainDocChangeFilter()] : []),
+      // P2-07（#284）嵌入实例键迁移：A 的事务使容器内嵌入区间平移时，把
+      // 嵌入实例的状态库键迁移到新坐标——widget 随后按新坐标重挂即命中
+      // 迁移实例，装载缓存/内部 Live 端口/选区记忆保持（前后文打字零重载
+      // 零重绑）。transactionExtender 在 docView 更新（widget toDOM）前执行，
+      // 且被 changeFilter 拒绝的事务不会到达——无「取消事务已迁移」错配
+      EditorState.transactionExtender.of((tr) => {
+        if (this.embedCards && tr.docChanged) {
+          this.embedCards.remapSources(tr.changes)
+        }
+        return null
+      }),
       // 2026-10 浮层锚点跟随：编辑事务轻量补同步——RO 只感知尺寸变化，
       // 打字改行号位数等「仅移动正文列位置、列宽不变」的场景由事务路径
       // 兜底（每事务两次 rect 读取，浮层不在场时零成本短路）
