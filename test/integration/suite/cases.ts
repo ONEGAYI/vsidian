@@ -14778,4 +14778,134 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await waitViewState('p206-悬停Live.md', (v) => v.hoverPreview?.open === false)
     console.log('[P2-06] dirty 保活 + 三项模态关闭 + 位置记忆通过')
   }],
+
+  // ---- P2-09（#286）递归引用的直接父模式与逐层目标编辑：B（正文嵌入）
+  // 手动 Live 后其编辑器挂孙卡（独占行/混排/列表/引用/表格格内五个位）、
+  // 孙卡跟随直接父绑定独立端口；在 C 输入只写 C、保存只落 C——A/B 零写回
+  // 零 dirty；直接父跟随与手动独立（A Live、B 手动 Reading 时孙位默认
+  // Reading；孙位手动 Live 后 A 切换不覆写手动 B/C）。 ----
+  ['P2-09 递归逐层目标编辑：B 内部 Live 挂孙卡、C 输入只写 C、保存只落 C（#286）', async () => {
+    await openWithEditor('p209-递归父A.md')
+    await waitSessionReady('p209-递归父A.md')
+    const uri = wsUri('p209-递归父A.md').toString()
+    const aBefore = await readDisk('p209-递归父A.md')
+    const bBefore = await readDisk('p209-递归B.md')
+    const cBefore = await readDisk('p209-递归C.md')
+    const parentDoc = await vscode.workspace.openTextDocument(wsUri('p209-递归父A.md'))
+    const bDocOf = () => vscode.workspace.textDocuments.find((d) =>
+      d.uri.toString() === wsUri('p209-递归B.md').toString())
+    const session0 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+
+    // B 卡手动切 Live：B 编辑器在场后孙卡随直接父跟随（五个位全部挂载绑定）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.mode', inner: 'p209-递归B', mode: 'live',
+    })
+    const grandInners = ['p209-递归C', 'p209-递归C|混排位', 'p209-递归C|列表位', 'p209-递归C|引用位', 'p209-递归C|格内位']
+    const bound = await waitViewState('p209-递归父A.md', (v) => {
+      const bCard = (v.readingEmbed ?? []).find((c) => c.inner === 'p209-递归B' &&
+        c.internalMode === 'live' && c.liveBound === true && (c.liveTextLen ?? -1) >= 0)
+      if (!bCard) {
+        return false
+      }
+      const cards = (v.readingEmbed ?? []).filter((c) =>
+        grandInners.includes(String(c.inner)) && c.internalMode === 'live' &&
+        c.liveBound === true && (c.liveTextLen ?? -1) >= 0)
+      return cards.length >= 5 ? true : false
+    }, 0, 30000)
+    const byInner = new Map<string, string>()
+    for (const c of bound.readingEmbed ?? []) {
+      if (grandInners.includes(String(c.inner)) && c.liveBound === true) {
+        byInner.set(String(c.inner), String(c.livePortId))
+      }
+    }
+    const bPort = (bound.readingEmbed ?? []).find((c) => c.inner === 'p209-递归B')?.livePortId
+    assert(byInner.size === 5, `五个孙位全部绑定（实际 ${JSON.stringify([...byInner.keys()])}）`)
+    for (const [inner, port] of byInner) {
+      assert(port && port !== bPort, `孙位 ${inner} 端口独立于 B（${port} vs ${bPort}）`)
+    }
+    assert(new Set(byInner.values()).size === 5, '五个孙位端口互不相同（同目标多 occurrence 各自端口）')
+    const cDoc = await poll('孙目标 C 文档打开', () => {
+      const doc = vscode.workspace.textDocuments.find((d) =>
+        d.uri.toString() === wsUri('p209-递归C.md').toString())
+      return doc ?? undefined
+    })
+
+    // 独占行孙位（occurrence 0）输入：只写 C——A/B 零写回零 dirty
+    const insertAt = '# p209 递归 C\n\n'.length + 2
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.type', inner: 'p209-递归C', pos: insertAt, text: '【递归孙编辑】', occurrence: 0,
+    })
+    await poll('C 权威文本收到孙卡编辑', () =>
+      cDoc.getText().includes('【递归孙编辑】') ? true : undefined)
+    assert(cDoc.isDirty, '孙卡编辑后 C dirty')
+    assert(parentDoc.getText() === aBefore && !parentDoc.isDirty,
+      '父 A 零写回且零 dirty（递归孙卡编辑不落 A）')
+    const bDoc = bDocOf()
+    assert(!bDoc || (bDoc.getText() === bBefore && !bDoc.isDirty),
+      '直接来源 B 零写回且零 dirty（孙卡编辑归 C——逐层目标端口分离）')
+    const session1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(session1.appliedEdits === session0.appliedEdits,
+      `A 会话 appliedEdits 零推进（实际 ${session1.appliedEdits}，基线 ${session0.appliedEdits}）`)
+    assert(await readDisk('p209-递归C.md') === cBefore, '保存前 C 磁盘未变')
+
+    // 保存孙卡目标：只落 C（磁盘更新、dirty 清零；A/B 磁盘不变）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.save', inner: 'p209-递归C', occurrence: 0,
+    })
+    await poll('孙目标保存落盘', async () =>
+      (await readDisk('p209-递归C.md')).includes('【递归孙编辑】') ? true : undefined)
+    assert(!cDoc.isDirty, '保存后 C 干净')
+    assert(await readDisk('p209-递归父A.md') === aBefore, '保存孙目标不落 A 盘')
+    assert(await readDisk('p209-递归B.md') === bBefore, '保存孙目标不落 B 盘')
+    console.log('[P2-09] 递归逐层目标编辑：孙卡跟随绑定 + 输入/保存逐层归属通过')
+  }],
+
+  ['P2-09 直接父跟随与手动独立：B 手动 Reading 时孙位默认 Reading、孙位手动 Live 不被 A 覆写（#286）', async () => {
+    await openWithEditor('p209-递归父A.md')
+    await waitSessionReady('p209-递归父A.md')
+    const uri = wsUri('p209-递归父A.md').toString()
+    const grandOf = (v: ViewState, inner: string) =>
+      (v.readingEmbed ?? []).filter((c) => c.inner === inner)
+
+    // A 切 Live：根级 B 跟随、孙位随直接父链继承 Live（真宿主全链装载）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    await waitViewState('p209-递归父A.md', (v) => {
+      const sole = grandOf(v, 'p209-递归C')
+      return sole.length >= 1 && sole.every((c) => c.internalMode === 'live' && c.liveBound === true)
+    }, 0, 30000)
+    // B 手动切 Reading：孙位随直接父回落（无写端口——不沿用根 A 的 Live）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.mode', inner: 'p209-递归B', mode: 'reading',
+    })
+    await waitViewState('p209-递归父A.md', (v) => {
+      const bCard = (v.readingEmbed ?? []).find((c) => c.inner === 'p209-递归B')
+      const sole = grandOf(v, 'p209-递归C')
+      return bCard?.internalMode === 'reading' && bCard?.liveBound !== true &&
+        sole.length >= 1 && sole.every((c) => c.internalMode === 'reading' && c.liveBound !== true)
+    }, 0, 30000)
+    // 孙位（表格格内位）手动切 Live：建独立端口（本次会话独立记忆）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.mode', inner: 'p209-递归C|格内位', mode: 'live',
+    })
+    const manual = await waitViewState('p209-递归父A.md', (v) => {
+      const cell = grandOf(v, 'p209-递归C|格内位')
+      return cell.length >= 1 && cell.some((c) => c.internalMode === 'live' && c.liveBound === true)
+    }, 0, 30000)
+    const manualPort = grandOf(manual, 'p209-递归C|格内位').find((c) => c.liveBound === true)?.livePortId
+    assert(manualPort, '格内孙位手动 Live 建立端口')
+    // A 切回 Reading：B 保持手动 Reading、孙位保持手动 Live（父根切换不覆写）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    const after = await waitViewState('p209-递归父A.md', (v) => {
+      const bCard = (v.readingEmbed ?? []).find((c) => c.inner === 'p209-递归B')
+      const cell = grandOf(v, 'p209-递归C|格内位')
+      return bCard?.internalMode === 'reading' &&
+        cell.some((c) => c.internalMode === 'live' && c.liveBound === true) ? true : false
+    })
+    const bAfter = (after.readingEmbed ?? []).find((c) => c.inner === 'p209-递归B')
+    const cellAfter = grandOf(after, 'p209-递归C|格内位').filter((c) => c.liveBound === true)
+    assert(bAfter?.internalMode === 'reading', `B 保持手动 Reading（实际 ${bAfter?.internalMode}）`)
+    assert(cellAfter.length >= 1 && cellAfter[0]?.livePortId === manualPort,
+      '格内孙位保持手动 Live 且端口稳定（A 切换不覆写手动选择）')
+    console.log('[P2-09] 直接父跟随 + 手动独立记忆 + 父根切换不覆写通过')
+  }],
 ]
