@@ -153,10 +153,10 @@ describe('页面结构（#33 归属与空状态）', () => {
     expect(item!.querySelector(`.${SETTINGS_PAGE_CLASS_NAMES.itemDescription}`)?.textContent)
       .toBe(zhCn['setting.searchRevealHint.description'])
     const box = item!.querySelector<HTMLInputElement>(`input.${SETTINGS_PAGE_CLASS_NAMES.checkbox}`)!
-    expect(box.checked).toBe(true) // 默认开启
-    box.checked = false
+    expect(box.checked).toBe(false) // 默认关闭（2026-10-04 用户裁定）
+    box.checked = true
     box.dispatchEvent(new Event('change'))
-    expect(sent).toContainEqual({ kind: 'settings.set', values: { 'editor.searchRevealHint': false } })
+    expect(sent).toContainEqual({ kind: 'settings.set', values: { 'editor.searchRevealHint': true } })
   })
 })
 

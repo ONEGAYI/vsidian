@@ -32,7 +32,7 @@ VSCode 全工作区搜索（Ctrl+Shift+F）命中 `.md` 后点击结果条目：
 显式命令是零歧义但「打开后需再按一步」的入口；本节为该路径补一个**可见的增强入口**：面板首次激活时右下角弹宿主通知气泡（`showInformationMessage`），带「定位」按钮，点击即执行与命令完全相同的定位链路（同一 `searchRevealLocateWithFeedback` 执行体——串行化、轮询捕获、行文本校验、分型失败通知全部复用，不另写路径）。
 
 - **触发**：面板激活的两种形态都覆盖——①`webviewPanel.onDidChangeViewState` 的 `active` 分支（tab 切换/分组聚焦）；②**打开即激活**形态直接查 resolve 时刻的 `webviewPanel.active` 初始态（1.82.3 实测：`vscode.open` 等打开链路创建面板即 active，viewState 变化事件零触发——弹回源码的 bounceToSource 对同形态同样直查初始态；两条路径由去重 Set 保证每会话至多合计一条）。门控 = 会话内该文档 URI 未提示过（内存 `Set<uriString>` 去重，会话级不持久化）**且** 设置开关 `editor.searchRevealHint` 开启。每文档每会话最多一条（带按钮通知不自动消失，去重是噪音上限）；仅实际弹出才记账——设置关闭期间的激活不占用名额，重开设置后该文档仍可提示一次。门控纯函数 `shouldShowSearchRevealHint`（`src/host/searchReveal.ts`，单测钉住）。
-- **通知形态**：单按钮（`host.searchRevealHintLocate`「定位」）。不设「不再提示」按钮——关闭路径走设置页（编辑器页「显示」小节「搜索定位打开提示」，默认开）。
+- **通知形态**：单按钮（`host.searchRevealHintLocate`「定位」）。不设「不再提示」按钮——关闭路径走设置页（编辑器页「显示」小节「搜索定位打开提示」，默认关——2026-10-04 用户裁定：提示是猜测性的，由用户显式开启）。
 - **零副作用边界（与被停止的自动捕获的本质区别）**：弹出提示本身**不做任何剪贴板/捕获/定位动作**。自动捕获在激活时刻就 copyMatch 扰动剪贴板并可能误定位；本提示只在用户点击按钮后才进入既有显式链路，意图由点击确认。判定不通过时同样零动作。
 - **测试钩子形态**：`VSIDIAN_TEST_HOOKS=1` 下通知本体不弹（editorGuard 先例——真通知堆积干扰自动化），提示观测记录（`_test.takeSearchRevealHintLog`，take 语义取后清空）照常保留供断言。按钮→定位链路与显式命令同函数，由「显式命令矩阵」用例等价覆盖；通知气泡不可程序化点击，点击路径见人工验证清单。
 
@@ -75,4 +75,4 @@ VSCode 全工作区搜索（Ctrl+Shift+F）命中 `.md` 后点击结果条目：
 
 - 原型验证（独立树 `dev/diag-search-reveal` @ `b6d8d13d`）：`view.locate` head 协议扩展、`src/host/searchReveal.ts` 纯逻辑、显式命令与自动开关 wiring、双语文案与键位登记、集成矩阵（显式/歧义）与诊断用例；结论回票见 [#318 原型验证结论评论](https://github.com/ONEGAYI/vsidian/issues/318)。
 - 转正（2026-10-03，分支 `feat/318-search-reveal`）：显式命令路径措辞与用例转正（显式命令矩阵进 core 组）；自动捕获路径（`searchRevealAuto` 开关、激活钩子、`_test.setSearchRevealAuto`、歧义矩阵用例）与纯观测用例（信号盘点、命令面探针、反馈回路红测试）移除。
-- 打开提示（2026-10-04，PR #328 验收反馈）：面板首次激活弹「定位」按钮提示（门控纯函数 `shouldShowSearchRevealHint` + `maybeShowSearchRevealHint` wiring）；设置项 `editor.searchRevealHint` 纳入设置页编辑器页「显示」小节（默认开）；命令与按钮共用 `searchRevealLocateWithFeedback` 执行体；集成用例「搜索定位打开提示」进 core 组（`integrationCaseGroups.test.ts` 含包含断言），runner 每用例重置面并入该键。
+- 打开提示（2026-10-04，PR #328 验收反馈）：面板首次激活弹「定位」按钮提示（门控纯函数 `shouldShowSearchRevealHint` + `maybeShowSearchRevealHint` wiring）；设置项 `editor.searchRevealHint` 纳入设置页编辑器页「显示」小节（默认关，2026-10-04 用户裁定；同日由默认开翻转，集成重置面随默认值同步）；命令与按钮共用 `searchRevealLocateWithFeedback` 执行体；集成用例「搜索定位打开提示」进 core 组（`integrationCaseGroups.test.ts` 含包含断言），runner 每用例重置面并入该键。

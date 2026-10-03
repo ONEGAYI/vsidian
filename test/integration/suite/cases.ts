@@ -15719,6 +15719,9 @@ export const cases: Array<[string, () => Promise<void>]> = [
     try {
       // 清场：前序用例打开 proto-* 等文档的提示记录不留入本用例断言
       await takeHintUris()
+      // 默认关（2026-10-04 用户裁定）——用例内显式开启覆盖「首次激活/
+      // 去重」路径；finally 还原基线 false
+      await vscode.commands.executeCommand('onegayi.vsidian._test.setSettings', { 'editor.searchRevealHint': true })
       // —— 首次打开 → 首次激活 → 提示一条 ——
       await vscode.commands.executeCommand('vscode.open', wsUri('hint-a.md'))
       await waitViewState('hint-a.md', (v) => v.text === docA)
@@ -15747,7 +15750,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
       assert(uris.length === 0, `设置关时不提示（实际 ${JSON.stringify(uris)}）`)
       log('设置门控（关时不弹）✓')
     } finally {
-      await vscode.commands.executeCommand('onegayi.vsidian._test.setSettings', { 'editor.searchRevealHint': true })
+      await vscode.commands.executeCommand('onegayi.vsidian._test.setSettings', { 'editor.searchRevealHint': false })
       for (const file of ['hint-a.md', 'hint-b.md', 'hint-c.md']) {
         await Promise.resolve(vscode.workspace.fs.delete(wsUri(file), { useTrash: false })).catch(() => undefined)
       }

@@ -384,8 +384,9 @@ export const DEFAULT_EDITOR_GUARD_DEFAULT = true
  * editor.* 域（非排除前缀）→ 编辑器页「显示」小节。
  */
 export const SEARCH_REVEAL_HINT_KEY = 'editor.searchRevealHint'
-/** 默认 true：升级后打开提示直接可用（每文档每会话最多一条，噪音有上限） */
-export const SEARCH_REVEAL_HINT_DEFAULT = true
+/** 默认 false（2026-10-04 用户裁定）：提示是猜测性的（宿主无打开来源
+ *  信号，非搜索来源打开也会弹），默认关闭由用户显式开启 */
+export const SEARCH_REVEAL_HINT_DEFAULT = false
 
 /**
  * 生产设置定义注册表：#33 交付空状态页面与完整数据链路，#34 加入首个
