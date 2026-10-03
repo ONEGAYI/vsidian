@@ -4580,8 +4580,14 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
   overflow: hidden;
 }
 
+/* P2-07（#284）高度自适应修正：#app .cm-editor 的全局 height:100%（主
+   编辑器全高兜底）会命中嵌入编辑器——短文也恒撑满限高（实测卡高恒为
+   maxHeight，内容增删不可观测、观感上嵌入恒为满高大块）。height:auto
+   恢复内容自适应；max-height:inherit 承接容器内联限高——超出部分由
+   cm-scroller 内部滚动（与主编辑器限高机制同源） */
 #app .vsidian-embed-card .vsidian-embed-card-live .cm-editor {
-  max-height: 100%;
+  height: auto;
+  max-height: inherit;
 }
 
 /* 内容滚动区：长内容内部滚动。max-height 缺省 480（规格一期初值），

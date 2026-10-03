@@ -224,9 +224,15 @@ export interface EmbedLiveTarget {
 
 /** 嵌入实例状态（跨挂载保持——视口回收不清除仍可见实例的状态） */
 interface EmbedEntry {
-  /** 语义键：嵌入行区间 + 目标原文（父文档文本不变则稳定；文本变更后
-   *  键漂移自然开新实例，旧键随 LRU 淘汰回收） */
+  /** 语义键：嵌入行区间 + 目标原文。P2-07 起随 A 的事务映射迁移（平移
+   *  稳定——前后文打字不再漂移开新实例）；坍缩（嵌入被改写残缺）不迁移，
+   *  死键随 LRU 淘汰回收 */
   key: string
+  /** P2-07（#284）稳定宿主身份：面板会话内永不变（键迁移/文本平移均保持）。
+   *  对外身份统一走它——hover.watch 的 instanceId、refEdit.bind 的
+   *  occurrence、预算 instance 键与 dataKey：宿主 pin 表、来源租约与预算
+   *  不随文本编辑失配（若用坐标键，每笔平移都使 pin/退订/重绑失去配对） */
+  hostId: string
   inner: string
   sourceStart: number
   sourceEnd: number
@@ -238,6 +244,10 @@ interface EmbedEntry {
   /** P2-05（#282）挂起的显式退出意图（IME 组合中／写入未 ack 时先保留
    *  实例，输入落定后重入检查最新 dirty；一次性） */
   pendingCloseIntent: 'close' | 'escape' | 'delete' | null
+  /** P2-07（#284）坍缩死亡标记：嵌入区间被改写吞没（区间倒挂）后置位——
+   *  键保持坍缩时刻原始坐标（原位恢复如 undo/删表回填可命中缓存复用），
+   *  后续事务不再平移（死键坐标无语义，平移只会错位）；LRU 淘汰回收 */
+  collapsed: boolean
   /** P2-04 会话内选区记忆（端口销毁时保存，重绑 init 后恢复） */
   liveSelection: { anchor: number; head: number } | null
   /** P2-04 Live 在场期间的目标失效标记（切回 Reading 时补一次静默重载） */
@@ -344,6 +354,8 @@ export class EmbedCardManager {
   private reqSeq = 0
   /** P2-04 目标端口 bind 请求自增 id（refEdit.bound 按 reqId 配对） */
   private liveReqSeq = 0
+  /** P2-07 稳定宿主身份自增序（面板会话内每 occurrence 唯一且永不变） */
+  private hostSeq = 0
 
   constructor(context: EmbedCardContext) {
     this.context = context
@@ -397,14 +409,19 @@ export class EmbedCardManager {
     const key = source?.occurrence ?? `${Number.isInteger(sourceStart) ? sourceStart : 0}::${inner}`
     let entry = this.entries.get(key)
     if (!entry) {
+      // P2-07 稳定宿主身份：对外身份（watch/bind/预算/dataKey/父子链）统一
+      // 走 hostId——键迁移只动状态库内的坐标键，宿主侧配对不受文本平移影响
+      const hostId = `embed-occ-${++this.hostSeq}`
       entry = {
         key,
+        hostId,
         inner,
         sourceStart: Number.isInteger(sourceStart) ? sourceStart : 0,
         sourceEnd: Number.isInteger(sourceEnd) ? sourceEnd : sourceStart,
         modeOverride: null,
         live: null,
         pendingCloseIntent: null,
+        collapsed: false,
         liveSelection: null,
         pendingReadingRefresh: false,
         loaded: null,
@@ -415,9 +432,9 @@ export class EmbedCardManager {
           panelDocUri: this.context.session().docUri ?? '',
           sourceDocUri: this.context.session().docUri ?? '',
           range: { start: sourceStart, end: sourceEnd },
-          occurrence: key,
+          occurrence: hostId,
           depth: 1,
-          treeId: key,
+          treeId: hostId,
         }),
         watchedFsPath: null,
         watchLeaseId: null,
@@ -526,10 +543,11 @@ export class EmbedCardManager {
       host,
     }
     // P2-04 范围锁：悬停浮层内的卡片不提供内部模式入口（浮层内部 Live 属
-    // P2-05）——浮层后代的来源父（浮层实例 id）不在状态库，据此结构判定
-    // （挂载时元素可能尚未进 DOM，closest 不可靠）；模式按钮隐藏（Tab 序
-    // 不新增停留点）且条目锁定 Reading，不随根面板 Live 继承绑定端口
-    if (source?.parentInstanceId !== undefined && !this.entries.has(source.parentInstanceId)) {
+    // P2-05）——浮层后代的来源父（浮层实例 id）不是嵌入 hostId，据此结构
+    // 判定（挂载时元素可能尚未进 DOM，closest 不可靠）；模式按钮隐藏（Tab
+    // 序不新增停留点）且条目锁定 Reading，不随根面板 Live 继承绑定端口
+    //（P2-07：parentInstanceId 统一为父 hostId——按 hostId 查在场 entry）
+    if (source?.parentInstanceId !== undefined && !this.entryOfHostId(source.parentInstanceId)) {
       modeBtn.style.display = 'none'
       modeBtn.tabIndex = -1
       entry.modeOverride = 'reading'
@@ -621,7 +639,7 @@ export class EmbedCardManager {
   }
 
   private mountChildBlock(parent: EmbedEntry, el: HTMLElement, target: RefLoadedContent): void {
-    this.mountChildFrom(parent.key, parent.content.source.treeId ?? parent.key,
+    this.mountChildFrom(parent.hostId, parent.content.source.treeId ?? parent.hostId,
       parent.content.source.depth ?? 1, el, target)
   }
 
@@ -676,9 +694,9 @@ export class EmbedCardManager {
       handle.entry.loaded = null
       handle.entry.lastReq = null
       this.unwatchEntry(handle.entry)
-      this.budget.release(handle.entry.key)
+      this.budget.release(handle.entry.hostId)
     } else if (remaining.length > 0 && handle.entry.loaded && handle.entry.parseBytes > 0) {
-      this.budget.attachContent(handle.entry.key,
+      this.budget.attachContent(handle.entry.hostId,
         this.dataKey(handle.entry, handle.entry.loaded), handle.entry.parseBytes * remaining.length)
     }
     if (remaining.length === 0 && live) {
@@ -845,7 +863,7 @@ export class EmbedCardManager {
       }
       entry.loaded = null
       entry.lastReq = null
-      if (message.status !== 'changed') this.budget.clearContent(entry.key)
+      if (message.status !== 'changed') this.budget.clearContent(entry.hostId)
       const handles = [...this.active.values()].filter((h) => h.entry === entry)
       if (message.status === 'changed') {
         // 每 entry 单笔重发（lastReq 是 entry 级共享——同 entry 的双容器
@@ -872,13 +890,14 @@ export class EmbedCardManager {
 
   /** 宿主拒绝订阅时撤下已送达正文，避免留下无法刷新的在场快照。 */
   notifyWatchRejected(message: { fsPath: string; instanceId: string; reason: 'capacity' | 'source'; sourceLeaseId?: string }): void {
-    const entry = this.entries.get(message.instanceId)
+    // instanceId 为 hostId（P2-07 对外身份统一）——宿主 pin/拒绝按它配对
+    const entry = this.entryOfHostId(message.instanceId)
     if (!entry || entry.watchedFsPath !== message.fsPath ||
       (message.sourceLeaseId !== undefined && entry.watchLeaseId !== message.sourceLeaseId)) return
     entry.loaded = null
     entry.lastReq = null
     this.unwatchEntry(entry)
-    this.budget.release(entry.key)
+    this.budget.release(entry.hostId)
     const note = t(message.reason === 'capacity' ? 'hover.errorWatchCapacity' : 'hover.errorSourceExpired')
     for (const handle of this.active.values()) {
       if (handle.entry !== entry) continue
@@ -920,7 +939,7 @@ export class EmbedCardManager {
         handle.entry.loaded = null
         handle.content.clear()
         this.unwatchEntry(handle.entry)
-        this.budget.release(handle.entry.key)
+        this.budget.release(handle.entry.hostId)
         this.applyDisplay(handle, 'error', t('hover.errorDepth'))
       } else if (handle.display === 'error' && handle.note === t('hover.errorDepth') &&
         handle.entry.lastReq === null && handle.entry.loaded === null) {
@@ -930,6 +949,53 @@ export class EmbedCardManager {
   }
 
   // ---- P2-04（#281）内部模式状态机与目标编辑端口 ----
+
+  /** P2-07（#284）嵌入实例键迁移：A 的事务使嵌入区间平移时，把根级 entry
+   *  的状态库键与源区间迁移到新坐标（widget 随后按新坐标重挂，mountCardInto
+   *  命中迁移后的 entry——装载缓存、内部 Live 端口、选区与 fm/滚动状态全
+   *  保持）。独占行因键取行首本就少漂移，混排/列表/引用容器的键取嵌入精确
+   *  区间——前后文打字每键平移，不迁移即卡片重载 + 端口销毁重建风暴。
+   *  只迁移根级 entry（子卡坐标在直接父 B 的全文坐标空间，A 的事务不可
+   *  映射）；坍缩（嵌入被改写残缺、区间倒挂）不迁移——死键留给 LRU 淘汰。
+   *  调用时序契约：须在 docView 更新（widget toDOM）前——生产经
+   *  appendTransaction 装配（被 changeFilter 拒绝的事务不会到达，天然免除
+   *  「取消的事务已迁移」错配）。 */
+  remapSources(changes: import('@codemirror/state').ChangeSet): void {
+    if (this.entries.size === 0) {
+      return
+    }
+    const moves: Array<{ entry: EmbedEntry; newKey: string; start: number; end: number }> = []
+    for (const entry of this.entries.values()) {
+      if (entry.content.source.parentInstanceId !== undefined || entry.collapsed) {
+        continue // 子卡：坐标属父 B 全文空间；坍缩死键：不再平移（原位恢复
+        // 才命中缓存——删表回填/undo 的坐标语义；漂移后重挂按新实例装载）
+      }
+      const start = changes.mapPos(entry.sourceStart, 1)
+      const end = changes.mapPos(entry.sourceEnd, -1)
+      if (start === entry.sourceStart && end === entry.sourceEnd) {
+        continue
+      }
+      if (end <= start) {
+        // 坍缩（嵌入区间被改写吞没——部分删除倒挂或整段删除钳成零宽）：
+        // 键冻结在原坐标，后续事务不再平移
+        entry.collapsed = true
+        continue
+      }
+      const newKey = `${start}::${entry.inner}`
+      if (newKey === entry.key || this.entries.has(newKey)) {
+        continue // 防御：撞键（理论不可达）放弃迁移，保持现状语义
+      }
+      moves.push({ entry, newKey, start, end })
+    }
+    for (const { entry, newKey, start, end } of moves) {
+      this.entries.delete(entry.key)
+      entry.key = newKey
+      entry.sourceStart = start
+      entry.sourceEnd = end
+      entry.content.source.range = { start, end }
+      this.entries.set(newKey, entry)
+    }
+  }
 
   /** 生效内部模式：手动覆盖优先；缺省跟随直接父视图（根级嵌入取根面板
    *  模式，子卡取直接父嵌入的内部模式——Q19 语义） */
@@ -941,7 +1007,7 @@ export class EmbedCardManager {
     if (parentId === undefined) {
       return this.context.parentMode?.() ?? 'reading'
     }
-    const parent = this.entries.get(parentId)
+    const parent = this.entryOfHostId(parentId)
     return parent ? this.effectiveMode(parent) : this.context.parentMode?.() ?? 'reading'
   }
 
@@ -971,18 +1037,41 @@ export class EmbedCardManager {
       this.restoreReadingDisplay(entry)
     }
     for (const child of this.entries.values()) {
-      if (child.content.source.parentInstanceId === entry.key && !child.modeOverride) {
+      if (child.content.source.parentInstanceId === entry.hostId && !child.modeOverride) {
         this.applyInternalMode(child)
       }
     }
   }
 
   /** 根面板模式切换通知（syncController applyModeDom 联动）：无覆盖的根级
-   *  嵌入跟随（子卡随 applyInternalMode 级联） */
+   *  嵌入跟随（子卡随 applyInternalMode 级联）。P2-07（#284）：切换后校正
+   *  既有内部 Live 编辑器的容器归属——编辑器 DOM 随「最近挂载 handle」
+   *  （mountCardInto/unmountBlock 的移交规则），而模式切换不触发重挂
+   *  （隐藏容器 handle 不销毁），不校正则编辑器滞留隐藏容器（端口活跃
+   *  但用户不可见） */
   notifyParentModeChanged(): void {
     for (const entry of this.entries.values()) {
       if (entry.content.source.parentInstanceId === undefined && !entry.modeOverride) {
         this.applyInternalMode(entry)
+      }
+    }
+    this.correctLiveDomHomes()
+  }
+
+  /** P2-07（#284）编辑器容器归属校正：live 在场的根级 entry，把编辑器
+   *  DOM 移到当前父模式容器的 handle（编辑器唯一 DOM 节点，appendChild
+   *  移动即迁移——Chromium 移动聚焦节点保持焦点） */
+  private correctLiveDomHomes(): void {
+    const visibleHost = this.context.parentMode?.() ?? 'reading'
+    for (const entry of this.entries.values()) {
+      const view = entry.live?.instance?.getView()
+      if (!view || !entry.live?.portId) {
+        continue
+      }
+      const handle = [...this.active.values()].find((h) => h.entry === entry && h.host === visibleHost)
+      if (handle && !handle.liveEl.contains(view.dom)) {
+        handle.liveEl.appendChild(view.dom)
+        this.applyInternalDom(handle)
       }
     }
   }
@@ -1044,7 +1133,7 @@ export class EmbedCardManager {
       panelSessionId: session.sessionId,
       panelDocUri: session.docUri,
       fsPath: entry.loaded.fsPath,
-      occurrence: entry.key,
+      occurrence: entry.hostId,
       reqId,
     })
   }
@@ -1091,7 +1180,12 @@ export class EmbedCardManager {
     if (!live || !live.portId || !live.docUri || live.instance) {
       return
     }
-    const hostHandle = [...this.active.values()].find((h) => h.entry === entry)
+    // P2-07（#284）可见容器优先：双容器并存（父模式 Live↔Reading 往返，
+    // 隐藏容器 handle 不销毁）时，编辑器建在当前父模式对应容器——建在隐藏
+    // 容器会让内部 Live 不可见而端口活跃
+    const visibleHost = this.context.parentMode?.() ?? 'reading'
+    const hostHandle = [...this.active.values()].find((h) => h.entry === entry && h.host === visibleHost)
+      ?? [...this.active.values()].find((h) => h.entry === entry)
     if (!hostHandle) {
       return
     }
@@ -1348,7 +1442,7 @@ export class EmbedCardManager {
         fsPath: live.fsPath,
       })
     }
-    this.budget.clearContent(entry.key)
+    this.budget.clearContent(entry.hostId)
     for (const handle of this.active.values()) {
       if (handle.entry !== entry) {
         continue
@@ -1964,7 +2058,7 @@ export class EmbedCardManager {
     // #224 订阅随状态库整体释放（实例订阅计数回落）
     for (const entry of this.entries.values()) {
       entry.content.dispose()
-      this.budget.release(entry.key)
+      this.budget.release(entry.hostId)
     }
     this.entries.clear()
     this.heightObserver?.disconnect()
@@ -2151,6 +2245,17 @@ export class EmbedCardManager {
 
   // ---- 内部 ----
 
+  /** P2-07 按 hostId 查在场/状态库 entry（父子链、宿主拒绝与浮层锁的
+   *  身份解析——entries 的 Map 键是坐标键，hostId 需遍历；上限 64 条） */
+  private entryOfHostId(hostId: string): EmbedEntry | undefined {
+    for (const entry of this.entries.values()) {
+      if (entry.hostId === hostId) {
+        return entry
+      }
+    }
+    return undefined
+  }
+
   /** LRU 触达：重插到 Map 尾部（插入序 = 淘汰序，hoverSourceFsPaths 先例） */
   private touchEntry(entry: EmbedEntry): void {
     this.entries.delete(entry.key)
@@ -2184,7 +2289,7 @@ export class EmbedCardManager {
       }
       this.entries.delete(victim)
       entry.content.dispose()
-      this.budget.release(entry.key)
+      this.budget.release(entry.hostId)
     }
   }
 
@@ -2203,7 +2308,7 @@ export class EmbedCardManager {
       return
     }
     if (entry.watchedFsPath !== null && entry.watchedFsPath !== entry.loaded.fsPath) {
-      this.sendUnwatch(entry.watchedFsPath, entry.key)
+      this.sendUnwatch(entry.watchedFsPath, entry.hostId)
     }
     entry.watchedFsPath = entry.loaded.fsPath
     entry.watchLeaseId = sourceLeaseId ?? null
@@ -2212,7 +2317,7 @@ export class EmbedCardManager {
       sessionId: session.sessionId,
       docUri: session.docUri,
       fsPath: entry.watchedFsPath,
-      instanceId: entry.key,
+      instanceId: entry.hostId,
       ...(sourceLeaseId !== undefined ? { sourceLeaseId } : {}),
     })
   }
@@ -2225,7 +2330,7 @@ export class EmbedCardManager {
     const fsPath = entry.watchedFsPath
     entry.watchedFsPath = null
     entry.watchLeaseId = null
-    this.sendUnwatch(fsPath, entry.key)
+    this.sendUnwatch(fsPath, entry.hostId)
   }
 
   /** #224 订阅释放消息出站 */
@@ -2256,8 +2361,8 @@ export class EmbedCardManager {
       return
     }
     this.budget.setDepthLimit(this.context.maxDepth?.() ?? REF_EXPANSION_LIMITS.defaultDepth)
-    const admission = this.budget.reserve(handle.entry.content.source.treeId ?? handle.entry.key,
-      handle.entry.key, handle.entry.content.source.depth ?? 1)
+    const admission = this.budget.reserve(handle.entry.content.source.treeId ?? handle.entry.hostId,
+      handle.entry.hostId, handle.entry.content.source.depth ?? 1)
     if (admission !== 'ok') {
       this.applyDisplay(handle, 'error', t(admission === 'depth' ? 'hover.errorDepth' : 'hover.errorBudget'))
       return
@@ -2286,7 +2391,7 @@ export class EmbedCardManager {
       sourceStart: handle.entry.sourceStart,
       sourceEnd: handle.entry.sourceEnd,
       target: handle.entry.inner,
-      occurrenceId: handle.entry.key,
+      occurrenceId: handle.entry.hostId,
       ...(handle.entry.content.source.parentInstanceId !== undefined ? { source: {
         parentInstanceId: handle.entry.content.source.parentInstanceId,
         sourceDocUri: handle.entry.content.source.sourceDocUri,
@@ -2333,7 +2438,7 @@ export class EmbedCardManager {
     this.touchEntry(handle.entry) // LRU 触达（仍有效实例）
     const mounted = handle.content.render(loaded, (bytes) => {
       const borrowers = [...this.active.values()].filter((h) => h.entry === handle.entry).length
-      if (this.budget.attachContent(handle.entry.key, this.dataKey(handle.entry, loaded),
+      if (this.budget.attachContent(handle.entry.hostId, this.dataKey(handle.entry, loaded),
         bytes * Math.max(1, borrowers)) !== 'ok') return false
       handle.entry.parseBytes = bytes
       // 先交接新版本来源，再挂子块；宿主 FIFO 消息中 C 读取不能先于 B 的
@@ -2344,7 +2449,7 @@ export class EmbedCardManager {
     if (!mounted) {
       releaseRefSourceLease(this.context, sourceLeaseId)
       handle.entry.loaded = null
-      this.budget.release(handle.entry.key)
+      this.budget.release(handle.entry.hostId)
       this.applyDisplay(handle, 'error', t('hover.errorBudget'))
       return
     }
