@@ -183,6 +183,12 @@ export interface DocumentSessionOptions {
    *  都以此对齐当前生效语言（与 init 重发全文同模式）。会话保持纯逻辑：
    *  hostLocale + LOCALE_MESSAGES 的装配由 vscode 层注入；未注入不发 */
   requestLocale?: () => { lang: string; messages: Readonly<Record<string, string>> } | undefined
+  /** #316（b2 形态 1）webview 重载信号：同一面板的重复 ready（B-2）即
+   *  webview 重建——provider 据此整体释放该 sessionId 名下的目标编辑端口
+   *  （webview 侧端口状态库随重建丢失，旧 portId 无人再引用；释放后 re-bind
+   *  查不到旧端口直接注册新端口，等价自愈）。会话保持纯逻辑：释放动作在
+   *  provider 域；未注入时无行为变化 */
+  onPanelReload?: (sessionId: string) => void
   /** #201 周期核验端口：image.verify 的 items 透传给 provider 协调器
    *  （stat + 版本表决策 + 失效回调走 invalidateImagesByFsPath）。
    *  会话侧只做会话守卫与串行合并（并发有界）；未注入时 verify 静默
@@ -811,6 +817,10 @@ export class DocumentSession {
           // 重复 ready = webview 重载（B-2）：init 已重发权威全文，此后暂停
           // 面板的 view.state 不再代表冲突前的未确认输入
           panel.reloaded = true
+          // #316（b2 形态 1）：重载即该面板旧端口族的逻辑死亡信号——
+          // webview 侧端口状态库随重建丢失，旧 portId 无人再引用。provider
+          // 据此整体释放（保留 #290 记账）；re-bind 走新端口等价自愈
+          this.options.onPanelReload?.(sessionId)
         }
         // #96 R1 ready 即校准：语言变化只广播给切换瞬间 ready 的面板，
         // 重载（数据岛装回创建时语言）与未 ready 面板都会错过——每次

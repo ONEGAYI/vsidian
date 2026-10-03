@@ -381,6 +381,12 @@ export function createTextEditorProvider(
    *  onDidReceiveMessage 同一函数；refEdit.* 在 provider 层拦截，会话入口
    *  注入无法触达——injectWebviewReceived 经此以完全一致的处理入口注入） */
   const panelMessageHandlers = new Map<string, (message: unknown) => void>()
+  // #316 测试缝（VSIDIAN_TEST_HOOKS 门控注册，见 _test.armRefEditBindSuspend）：
+  // bind handler 在 openTextDocument 恢复后、register 前的可武装屏障——把
+  // 面板 dispose 精确排进「releasePanel 已消费 / register 未发生」的竞态窗口
+  let refEditBindSuspend: Promise<void> | null = null
+  let refEditBindSuspendRelease: (() => void) | null = null
+  let refEditBindSuspendHits = 0
 
   /** 释放一个目标端口：B 会话 detach 虚拟面板；B 无面板时释放会话 */
   const releaseRefPort = (portId: string): void => {
@@ -392,6 +398,23 @@ export function createTextEditorProvider(
     bEntry?.session.detachPanel(binding.virtualSessionId)
     if (bEntry) {
       releaseEntryIfIdle(vscode.Uri.parse(binding.targetUri))
+    }
+  }
+
+  /** #316（b2）webview 重建时整体释放该面板名下的目标编辑端口：webview
+   *  侧端口状态库（embedCard 的 entries Map）随重建整体丢失，旧 portId
+   *  无论在屏离屏都无人再引用——重建即端口族的逻辑死亡信号。不用
+   *  releasePanel：其会连带清 #290「曾成功写入」记账（面板关闭时 dirty
+   *  交接的判定集合），重载→关闭链路会漏交接 dirty B——走保留记账变体。
+   *  释放后可见 occurrence 的 re-bind 经 findOccurrence 查不到旧端口，
+   *  直接注册新端口（等价自愈）；B 会话无其他面板时随之回收（re-bind 重建） */
+  const releaseRefPortsOnWebviewReload = (panelDocUri: string, panelSessionId: string): void => {
+    for (const binding of refPorts.releasePanelKeepAck(panelSessionId, panelDocUri)) {
+      const bEntry = sessions.get(binding.targetUri)
+      bEntry?.session.detachPanel(binding.virtualSessionId)
+      if (bEntry) {
+        releaseEntryIfIdle(vscode.Uri.parse(binding.targetUri))
+      }
     }
   }
 
@@ -1246,6 +1269,12 @@ export function createTextEditorProvider(
         const locale = hostLocale(settings?.service.getSnapshot())
         return { lang: locale, messages: LOCALE_MESSAGES[locale] }
       },
+      // #316（b2 形态 1）：webview 重载（同一面板重复 ready）→ 该 sessionId
+      // 名下目标编辑端口整体释放（保留 #290 记账——重载→关闭链路的 dirty
+      // 交接判定不漏）。本回调只在真实 webview 面板的重复 ready 触发；B 会话
+      // 虚拟面板的重复 ready 以 virtualSessionId 调用，注册表按面板键查不到
+      // 为无害 no-op
+      onPanelReload: (sessionId) => releaseRefPortsOnWebviewReload(key, sessionId),
     })
     sessions.set(key, fresh)
     return fresh
@@ -1647,6 +1676,32 @@ export function createTextEditorProvider(
         return
       }
       const entry = openEntry(document)
+      // #316（b2 形态 2）：重显 re-resolve 收编。retainContextWhenHidden 关闭
+      // 时 tab 隐藏卸载、重显会再次 resolve 同一 webviewPanel 并分配新
+      // sessionId——旧 sessionId 的会话面板条目、entry.panels 条目与
+      // panelMessageHandlers 登记只挂 onDidDispose 清理，而该对象若不真正
+      // dispose 则旧 binding 的释放通道随旧 sessionId 失效（findOccurrence
+      // 三字段含 sessionId，重绑闭环在新 sessionId 下查不到旧端口）。按
+      // 【对象同一性】收编同面板旧代：split 场景一个 entry 合法存在多个
+      // 不同面板对象的 sessionId，不得按「非当前 sessionId」盲收编；宿主
+      // re-resolve 若传入新对象则此处为 no-op（旧对象 dispose 走 closeSub
+      // 兜底，同样正确；1.82.3 实测隐藏重显走同对象重复 ready，即形态 1
+      // 路径，本收编为防御性正确）。收编释放走保留记账变体（#290 交接
+      // 不漏），旧代若有未确认输入经 detachPanel 走「关闭残留输入」通知
+      // ——重载场景输入确实已丢失，语义可接受。收编同时消掉旧死条目对
+      // getInfo().panels / realPanelsOf 口径的污染（P2-04 起虚拟面板计数
+      // 依赖 entry.panels.has 过滤）
+      for (const [staleSessionId, stalePanel] of [...entry.panels]) {
+        if (stalePanel !== webviewPanel) {
+          continue
+        }
+        releaseRefPortsOnWebviewReload(document.uri.toString(), staleSessionId)
+        entry.session.detachPanel(staleSessionId)
+        entry.panels.delete(staleSessionId)
+        panelMessageHandlers.delete(staleSessionId)
+        pendingReadingRestore.delete(panelStateKey(document.uri.toString(), staleSessionId))
+        hoverRefresh.releaseSession(hoverSessionKeyOf(document.uri.toString(), staleSessionId))
+      }
       const send = (message: HostToWebview): void => {
         if (message.kind === 'init' && diagnostics.enabled) {
           void webviewPanel.webview.postMessage({ kind: 'diagnostics.test.set', enabled: true })
@@ -2087,8 +2142,27 @@ export function createTextEditorProvider(
                   reject('open-failed')
                   return
                 }
+                // #316 测试缝（生产恒 false 走不到）：bind 在途屏障——await
+                // 恢复后挂起，供集成用例在窗口内注入面板 dispose（red 证据：
+                // 复查缺位时 register 照常执行成为孤儿）
+                if (process.env.VSIDIAN_TEST_HOOKS === '1' && refEditBindSuspend) {
+                  refEditBindSuspendHits += 1
+                  await refEditBindSuspend
+                }
                 if (!isMarkdownFile(bDoc.uri)) {
                   reject('not-markdown')
+                  return
+                }
+                // #316 方案 a：await 恢复后复查来源面板仍存活。openTextDocument
+                // 的 await 区间内面板可能已 dispose——closeSub 的 releasePanel
+                // 查不到在途 binding 静默返回，此处不复查则 register 照常执行，
+                // 而该 binding 的释放通道（onDidDispose）已消费，成为钉住 B
+                // 会话的永久孤儿。复查通过后到 register 全同步无交错点。
+                // 判定依据 entry.panels.has：closeSub 先删该条目再做释放；闭包
+                // 捕获的 entry 对象即使已被 releaseEntryIfIdle 从 sessions 移除，
+                // Map.delete 只删映射不动对象内容，判定依然正确。回包不发——
+                // 面板已死收不到
+                if (!entry.panels.has(sessionId)) {
                   return
                 }
                 // 同 occurrence 幂等重绑：先释放旧端口（重挂路径）
@@ -3214,6 +3288,30 @@ export function createTextEditorProvider(
         return true
       },
     ),
+    vscode.commands.registerCommand(
+      // #316 测试缝：bind 在途屏障武装——此后首个到达 openTextDocument 恢复点
+      // 的 refEdit.bind 挂起（hits 计数供用例确认已挂住）；release 放行
+      'onegayi.vsidian._test.armRefEditBindSuspend', () => {
+        refEditBindSuspendHits = 0
+        refEditBindSuspend = new Promise((resolve) => {
+          refEditBindSuspendRelease = resolve
+        })
+      }),
+    vscode.commands.registerCommand(
+      'onegayi.vsidian._test.releaseRefEditBindSuspend', () => {
+        refEditBindSuspendRelease?.()
+        refEditBindSuspendRelease = null
+        refEditBindSuspend = null
+      }),
+    vscode.commands.registerCommand(
+      'onegayi.vsidian._test.refEditBindSuspendState', () => ({
+        armed: refEditBindSuspend !== null,
+        hits: refEditBindSuspendHits,
+      })),
+    vscode.commands.registerCommand(
+      // #316 观测面：refEdit 端口注册表快照（活跃 portId 清单）——面板
+      // 销毁/重载后旧端口消失与孤儿不产生的断言证据
+      'onegayi.vsidian._test.refPortStats', () => refPorts.stats()),
     vscode.commands.registerCommand(
       // 宿主 → webview 方向的消息注入钩子：与 injectWebviewMessage（webview →
       // 宿主）对称，供集成测试驱动 view.mode.set / view.locate 等正式消息

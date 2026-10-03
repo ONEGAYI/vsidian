@@ -128,3 +128,33 @@ describe('P2-04 hasHoverSourcePin：refEdit.bind 的来源校验面', () => {
     expect(session.hasHoverSource(panelId, 'D:\\notes\\目标.md')).toBe(true)
   })
 })
+
+describe('#316 onPanelReload：webview 重载信号（重复 ready）回调', () => {
+  it('同一面板第二次 ready（重载）以该 sessionId 触发回调；首次 ready 不触发', async () => {
+    const { doc } = { doc: new FakeDoc() }
+    const reloaded: string[] = []
+    const session = new DocumentSession(doc, {
+      docUri: DOC_URI,
+      onPanelReload: (sessionId) => reloaded.push(sessionId),
+    })
+    const port: PanelPort = { send: () => {} }
+    const panelId = session.attachPanel(port)
+    await session.handleWebviewMessage({ kind: 'ready' }, panelId)
+    expect(reloaded).toEqual([]) // 首次 ready 是装载，不是重载
+    await session.handleWebviewMessage({ kind: 'ready' }, panelId)
+    expect(reloaded).toEqual([panelId]) // 重复 ready = webview 重载
+    await session.handleWebviewMessage({ kind: 'ready' }, panelId)
+    expect(reloaded).toEqual([panelId, panelId]) // 每次重载都发信号（幂等处理归 provider）
+  })
+
+  it('未注入回调时重复 ready 无副作用（可选注入，既有构造不受影响）', async () => {
+    const doc = new FakeDoc()
+    const session = new DocumentSession(doc, { docUri: DOC_URI })
+    const sent: HostToWebview[] = []
+    const panelId = session.attachPanel({ send: (m) => sent.push(m) })
+    await session.handleWebviewMessage({ kind: 'ready' }, panelId)
+    await session.handleWebviewMessage({ kind: 'ready' }, panelId)
+    expect(session.getInfo().panels.length).toBe(1)
+    expect(sent.length).toBeGreaterThan(0) // init 重发照常（既有 B-2 行为不变）
+  })
+})

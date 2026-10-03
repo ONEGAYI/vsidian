@@ -75,6 +75,38 @@ describe('P2-13 noteEditAck：面板级「曾成功写入」记账', () => {
   })
 })
 
+describe('#316 releasePanelKeepAck：webview 重载的端口族作废（保留记账变体）', () => {
+  it('释放该面板全部端口（与 releasePanel 同释放面），记账保留', () => {
+    const registry = registryWithTwoTargets()
+    registry.noteEditAck(PANEL_A.panelSessionId, PANEL_A.panelDocUri, TARGET_B)
+    const panelB = { panelSessionId: 'panel-9', panelDocUri: 'file:///d%3A/notes/other.md' }
+    registry.register(bindingOf(registry.allocate(), TARGET_B, panelB))
+
+    const released = registry.releasePanelKeepAck(PANEL_A.panelSessionId, PANEL_A.panelDocUri)
+    // 释放面与 releasePanel 一致：本面板两端口全释放、返回绑定供调用方 detach
+    expect(released.length).toBe(2)
+    expect(released.every((b) => b.panelSessionId === PANEL_A.panelSessionId)).toBe(true)
+    expect(registry.size()).toBe(1) // 另一面板端口保留
+    expect(registry.panelEditTargets(PANEL_A.panelSessionId, PANEL_A.panelDocUri))
+      .toEqual([TARGET_B]) // 记账保留（与 releasePanel 的差异面）
+  })
+
+  it('未登记面板调用为无害 no-op（返回空数组）', () => {
+    const registry = registryWithTwoTargets()
+    expect(registry.releasePanelKeepAck('panel-none', 'file:///d%3A/notes/none.md')).toEqual([])
+    expect(registry.size()).toBe(2)
+  })
+
+  it('记账随面板最终销毁（releasePanel）清账——重载→关闭链路交接判定不漏', () => {
+    const registry = registryWithTwoTargets()
+    registry.noteEditAck(PANEL_A.panelSessionId, PANEL_A.panelDocUri, TARGET_B)
+    registry.releasePanelKeepAck(PANEL_A.panelSessionId, PANEL_A.panelDocUri)
+    expect(registry.panelEditTargets(PANEL_A.panelSessionId, PANEL_A.panelDocUri)).toEqual([TARGET_B])
+    registry.releasePanel(PANEL_A.panelSessionId, PANEL_A.panelDocUri)
+    expect(registry.panelEditTargets(PANEL_A.panelSessionId, PANEL_A.panelDocUri)).toEqual([])
+  })
+})
+
 describe('isRefEditClientMessage：refEdit.message 内消息白名单', () => {
   it('P2-14 codeblock.copy 放行（嵌入内代码卡复制经端口走宿主剪贴板）', () => {
     expect(isRefEditClientMessage({
