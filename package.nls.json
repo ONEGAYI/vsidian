@@ -54,6 +54,7 @@
   "command.cssSnippets.resume.title": "CSS snippets: resume",
   "command.index.rebuild.title": "Index: full rebuild",
   "command.index.cleanup.title": "Index: clean workspace cache",
+  "command.searchReveal.locate.title": "Reveal selected search result",
   "command.ui.sidebarToggle.title": "Expand or collapse the sidebar",
   "command.ui.outlineToggle.title": "Show or hide the outline",
   "command.ui.outlineSearch.title": "Search headings",

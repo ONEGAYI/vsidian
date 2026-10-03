@@ -78,6 +78,10 @@ const extra: readonly KeybindingOperation[] = [
   // 评估记录见 docs/specs/keybindings.md
   { id: 'indexRebuild', command: 'onegayi.vsidian.index.rebuild', titleKey: 'command.index.rebuild.title', mode: 'both', writes: false, defaults: [] },
   { id: 'indexCleanup', command: 'onegayi.vsidian.index.cleanup', titleKey: 'command.index.cleanup.title', mode: 'both', writes: false, defaults: [] },
+  // #318 原型：外部搜索导航定位恢复——显式触发（命令面板可达）。绕过路径
+  // 依赖内部命令 copyMatch 的剪贴板回读，自动捕获有歧义与副作用（票内矩
+  // 阵记录），原型阶段默认不占键位，用户可经键位设置自配
+  { id: 'searchRevealLocate', command: 'onegayi.vsidian.searchReveal.locate', titleKey: 'command.searchReveal.locate.title', mode: 'both', writes: false, defaults: [] },
 ]
 
 /** 视图中已有明确目标的按钮动作：命令面板、快捷键均可调用。 */

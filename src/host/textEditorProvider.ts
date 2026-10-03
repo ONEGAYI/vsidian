@@ -85,6 +85,7 @@ import type { SettingsPageHandle } from './settingsPage'
 import { runDiagramExport } from './diagramExportHost'
 import { runImageExport } from './imageExportHost'
 import { runImagePaste, type ImagePasteOutcome } from './imagePasteHost'
+import { matchHostOffset, parseCopyMatch } from './searchReveal'
 import {
   readHoverDocTarget,
   readHoverDirectTarget,
@@ -1342,6 +1343,87 @@ export function createTextEditorProvider(
   const realPanelsOf = (entry: SessionEntry | undefined): Array<{ sessionId: string; ready: boolean }> =>
     entry?.session.getInfo().panels.filter((p) => entry.panels.has(p.sessionId)) ?? []
 
+  // ---- #318 原型验证：外部搜索导航定位恢复（copyMatch 回读绕过路径） ----
+  // VSCode 不向 custom editor 透传 openEditor 的 selection（公开 API 缺口，
+  // microsoft/vscode#289785）；绕过路径＝回读搜索树保留的选中条目
+  //（search.action.copyMatch 输出「1-based 行列 + 匹配行全文」到剪贴板），
+  // 与目标文档行文本配对恢复位置后经 view.locate 落位（双链锚点同一通道）。
+
+  /** 定位恢复结果态：located=已发 view.locate；no-panel=触发时无活动
+   *  Vsidian 面板（或 5s 内未就绪）；no-match=copyMatch 无匹配级输出
+   *  （命令缺失 / 无选中 / no-op）；no-fit=选中条目与本文件行文本不吻合
+   *  （文件身份校验拦截——残留条目不得误定位） */
+  type SearchRevealResult = 'located' | 'no-panel' | 'no-match' | 'no-fit'
+
+  /** 观测记录（仅 VSIDIAN_TEST_HOOKS 下留存，供 #318 矩阵断言） */
+  const searchRevealLog: Array<{ at: number; trigger: string; result: SearchRevealResult }> = []
+  const recordSearchReveal = (trigger: string, result: SearchRevealResult): void => {
+    if (process.env.VSIDIAN_TEST_HOOKS === '1') {
+      searchRevealLog.push({ at: Date.now(), trigger, result })
+      while (searchRevealLog.length > 64) {
+        searchRevealLog.shift()
+      }
+    }
+  }
+
+  /** 剪贴板三步捕获：哨兵 → copyMatch → 回读 → 恢复原文本。no-op（非
+   *  匹配级选中不写剪贴板）经哨兵未变识别为无输出。已知副作用：恢复只能
+   *  写回文本——捕获前的非文本剪贴板（图片等）被覆盖，#318 矩阵记录该代价 */
+  const SEARCH_REVEAL_SENTINEL = '\u0000vsidian-search-reveal\u0000'
+  const captureSearchMatch = async (): Promise<string | null> => {
+    const before = await vscode.env.clipboard.readText()
+    await vscode.env.clipboard.writeText(SEARCH_REVEAL_SENTINEL)
+    try {
+      await vscode.commands.executeCommand('search.action.copyMatch')
+      await new Promise((r) => setTimeout(r, 200))
+      const value = await vscode.env.clipboard.readText()
+      return value !== SEARCH_REVEAL_SENTINEL ? value : null
+    } catch {
+      // 命令未注册（宿主版本差异）或执行失败：视为无输出
+      return null
+    } finally {
+      void vscode.env.clipboard.writeText(before)
+    }
+  }
+
+  /** 对触发时活动的 Vsidian 面板应用搜索树选中条目位置。目标 uri 在入口
+   *  快照（快速连击时旧任务不得把位置落到后来激活的文件上）；首次打开
+   *  init 握手未完由 waitForReadyPanel 兜。offset 转 LF 后经 view.locate
+   *  发送——flash 高亮由该通道既有语义提供 */
+  const searchRevealLocate = async (trigger: string): Promise<SearchRevealResult> => {
+    const tab = vscode.window.tabGroups.activeTabGroup.activeTab
+    if (!(tab?.input instanceof vscode.TabInputCustom) || tab.input.viewType !== VIEW_TYPE) {
+      recordSearchReveal(trigger, 'no-panel')
+      return 'no-panel'
+    }
+    const targetUri = tab.input.uri
+    const ready = await waitForReadyPanel(targetUri, 5000)
+    if (!ready) {
+      recordSearchReveal(trigger, 'no-panel')
+      return 'no-panel'
+    }
+    const raw = await captureSearchMatch()
+    const probe = raw === null ? null : parseCopyMatch(raw)
+    if (!probe) {
+      recordSearchReveal(trigger, 'no-match')
+      return 'no-match'
+    }
+    const docText = ready.entry.doc.getText()
+    const hostOffset = matchHostOffset(docText, probe)
+    if (hostOffset === null) {
+      recordSearchReveal(trigger, 'no-fit')
+      return 'no-fit'
+    }
+    const lfOffset = new NewlineCoordinator(docText).hostOffsetToLf(hostOffset)
+    ready.entry.session.postToPanel(ready.sessionId, { kind: 'view.locate', offset: lfOffset })
+    recordSearchReveal(trigger, 'located')
+    return 'located'
+  }
+
+  /** 自动捕获开关（默认关）：开启时段内面板激活即尝试定位恢复——原型
+   *  验证（#318 误触发歧义矩阵）用，开启本身有剪贴板扰动代价，非正式态 */
+  let searchRevealAuto = false
+
   // ---- #197 反链面板：快照应答与条目跳转（面板级 UI 意图的执行体） ----
 
   /** 反链广播序号（review-loops #16）：按文档单调递增——快照应答为异步
@@ -2443,6 +2525,11 @@ export function createTextEditorProvider(
       const viewStateSub = webviewPanel.onDidChangeViewState((e) => {
         if (e.webviewPanel.active) {
           refreshActiveModeContext()
+          // #318 原型：自动捕获（默认关）——开启时段内面板激活即尝试恢复
+          // 搜索选中条目位置；误触发歧义矩阵实测用（详见票内记录）
+          if (searchRevealAuto) {
+            void searchRevealLocate('activation')
+          }
         }
       })
       const closeSub = webviewPanel.onDidDispose(() => {
@@ -3199,6 +3286,19 @@ export function createTextEditorProvider(
     }))
   }
 
+  // #318 原型验证：外部搜索导航定位恢复——显式触发（命令面板可达；键位
+  // 注册表已登记、默认不占键位，见 docs/specs/keybindings.md）。成功落位由
+  // view.locate 通道的 flash 高亮呈现；失败（无活动面板 / copyMatch 无输出 /
+  // 行文本不吻合）以宿主通知反馈
+  context.subscriptions.push(vscode.commands.registerCommand(
+    'onegayi.vsidian.searchReveal.locate',
+    () => void searchRevealLocate('command').then((result) => {
+      if (result !== 'located') {
+        void vscode.window.showWarningMessage(t('host.searchRevealNotFound'))
+      }
+    }),
+  ))
+
   // ---- 测试钩子命令：仅集成测试经 runTest.mjs 注入 VSIDIAN_TEST_HOOKS=1 时
   // 注册（C-11），生产 VSIX 与常规 F5 开发不暴露 ----
   if (process.env.VSIDIAN_TEST_HOOKS === '1') {
@@ -3646,6 +3746,15 @@ export function createTextEditorProvider(
       'onegayi.vsidian._test.setIndexPatterns',
       (patterns: string[]) => indexMaintenance?.setPatterns(patterns),
     ),
+    // ---- #318 原型验证测试钩子：自动捕获开关与观测记录（take 语义取后清空）----
+    vscode.commands.registerCommand('onegayi.vsidian._test.setSearchRevealAuto', (enabled: boolean) => {
+      searchRevealAuto = enabled === true
+    }),
+    vscode.commands.registerCommand('onegayi.vsidian._test.takeSearchRevealLog', () => {
+      const snapshot = [...searchRevealLog]
+      searchRevealLog.length = 0
+      return snapshot
+    }),
   )
   }
 
