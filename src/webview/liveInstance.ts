@@ -18,7 +18,7 @@
 import { Annotation, ChangeSet, Compartment, EditorSelection, EditorState, Prec, type Extension } from '@codemirror/state'
 import { EditorView, ViewPlugin, keymap, type ViewUpdate } from '@codemirror/view'
 import { contextMenuClickWithinSelection } from '../shared/contextMenu'
-import type { HostToWebview, SerChange, WebviewToHost } from '../shared/protocol'
+import type { DocumentChangeReason, HostToWebview, PasteHistory, PasteStage, SerChange, WebviewToHost } from '../shared/protocol'
 import {
   CODEBLOCK_CARD_DEFAULT,
   CODEBLOCK_CARD_KEY,
@@ -273,6 +273,10 @@ function conflictsWithLocal(
 }
 
 interface BufferedIncremental {
+  /** #314 分步撤销：doc.changed 的来源与粘贴归属（flush 收敛时随末组
+   *  回调根做撤销选区恢复；缓冲期间不丢失） */
+  reason?: DocumentChangeReason
+  paste?: PasteHistory
   version: number
   /** 增量（权威变更前系；入队时点的参考系） */
   changes: SerChange[]
@@ -350,6 +354,25 @@ export interface LiveEditorInstanceDeps {
    *  资源身份（B 管理器 / B 全文 / B 来源导出）。生命周期随实例——
    *  构造注册、destroy 注销；缺省不注册（主正文回落全局上下文） */
   imagePopupSource?: ImagePopupSource
+  /** #314 粘贴事务 ack 落定（ok 分支、剥离已确认队列**之前**回读）：
+   *  根据此标记 pasteFeedback 的 landed；粘贴/纯图粘贴反馈的释放时机
+   *  由根在 ack 代理后统一驱动 */
+  onPasteTxnAcked?(meta: { paste: PasteStage | null; plainPasteFeedback: string | null }): void
+  /** #314 doc.changed 过版本单调防线后回调（对齐 main 版在暂停判定前
+   *  作废未落定 rich 反馈的时机；空变更不触发） */
+  onExternalDocArrived?(): void
+  /** #314 外部增量应用落定后回调（直发路径每组一次；组合 flush 收敛时
+   *  对末组一次）：根做分步撤销选区恢复（finishPasteHistory）与粘贴
+   *  反馈释放。仅根实例接线——嵌入实例的 undo 回流属已知边界不接 */
+  onExternalDocSettled?(message: { reason?: DocumentChangeReason; paste?: PasteHistory }): void
+  /** #314 撤销/重做意图进入（requestHistory 守卫前）：根作废未落定
+   *  rich 反馈——撤销会回流重写粘贴历史，不再提示「已保留格式」 */
+  onHistoryIntent?(): void
+  /** #314 原生 paste 事件带 text/html 且无图片文件时的接管钩子（实例
+   *  的 paste domEventHandler 拦截后交根：html→markdown 转换、弹窗
+   *  决策与快照管线在根）。返回 true = 根接管（实例 preventDefault）；
+   *  未提供或返回 false 放行默认粘贴链（嵌入实例缺省回落原生粘贴） */
+  onRichPasteHtml?(payload: { view: EditorView; html: string; text?: string }): boolean
 }
 
 /**
@@ -395,6 +418,13 @@ export class LiveEditorInstance {
    *  快照（handler 每次事件自取，无需 Compartment——未命中直接放行） */
   private imagePasteReqId = 0
   private readonly imagePastePending = new Set<number>()
+  /** #314 粘贴元数据通道（随实例）：withPasteMeta 包裹的同步执行期间，
+   *  实例内 dispatch 触发的出站（recordLocalChangeSet 直发与暂缓段）附上
+   *  这份元数据——edit.request 的 paste 协议字段、sentTxns/deferredSegments
+   *  的回读源。P2-02 后出站管线随实例，main 版根级 recordingPasteStage
+   *  瞬时标记的职责由此承接（根级同名标记仍存，用于 onViewUpdate 豁免
+   *  与反馈释放守卫，不再参与出站） */
+  private currentPasteMeta: { paste?: PasteStage; plainPasteFeedback?: string } | undefined
 
   // ---- 冲突暂停状态（#4）----
   /** 暂停写回：保留本地文本、忽略外部增量、不再发送 edit.request */
@@ -406,8 +436,10 @@ export class LiveEditorInstance {
    *  外部增量到达时必须平移穿过它（否则静默错位） */
   private unconfirmed: ChangeSet | null = null
   /** 已发出未确认事务（FIFO）：坐标为发出时逆穿未确认集的 baseVersion 系
-   *  投影（C-2），ack ok 后按序剥离复合进已确认链 */
-  private sentTxns: { seq: number; changes: SerChange[] }[] = []
+   *  投影（C-2），ack ok 后按序剥离复合进已确认链。#314 粘贴元数据
+   *  （paste 协议字段 / plainPasteFeedback 本地反馈 ID）随事务携带：
+   *  ack 剥离前回读驱动根的反馈落定 */
+  private sentTxns: { seq: number; changes: SerChange[]; paste?: PasteStage; plainPasteFeedback?: string }[] = []
   /** 首笔无法安全逆投影的事务起，后续本地事务合并在同一待发 ChangeSet。
    *  定义域是所有已发送事务之后的本地文档，全部 ack 后可直接作为新请求。 */
   private deferredLocal: ChangeSet | null = null
@@ -415,8 +447,9 @@ export class LiveEditorInstance {
    *  平行维护，恒满足 composeAll(段序列) === deferredLocal）。每段定义域为
    *  该段开始时的本地文档；sendDeferredLocal 每次只出站队首段（余段留守
    *  暂缓集），队首段 ack 收敛后依次出站——每段一笔 edit.request = 一条
-   *  宿主 undo 记录。重置与 deferredLocal 同步 */
-  private deferredSegments: ChangeSet[] = []
+   *  宿主 undo 记录。重置与 deferredLocal 同步。#314 粘贴元数据随段携带
+   *  （段出站时附到 sentTxns 与 edit.request） */
+  private deferredSegments: { changes: ChangeSet; paste?: PasteStage; plainPasteFeedback?: string }[] = []
   /** #153 撤销分段：最近一笔本地输入（含组合候选事务）的时间戳；null
    *  表示尚无本地输入（不启动停顿计时）。停顿判定是惰性的——只在下一笔
    *  输入/组合开始时回看间隔，不设分段定时器 */
@@ -778,6 +811,16 @@ export class LiveEditorInstance {
     }
     if (message.ok) {
       this.inFlight.delete(message.seq)
+      // #314 粘贴元数据回读：剥离已确认队列**之前**找本事务（confirmSentTxn
+      //  会 splice 掉），根据此标记 pasteFeedback 落定（时机对齐 main 版
+      //  ok 分支开头；无元数据的事务零回调）
+      const txn = this.sentTxns.find((t) => t.seq === message.seq)
+      if (txn && (txn.paste || txn.plainPasteFeedback)) {
+        this.deps.onPasteTxnAcked?.({
+          paste: txn.paste ?? null,
+          plainPasteFeedback: txn.plainPasteFeedback ?? null,
+        })
+      }
       // 按 seq 剥离已确认事务并复合进已确认链（C-2）：外部增量逆穿
       // 它平移回 baseVersion 系；宿主按序确认，通常命中队首
       this.confirmSentTxn(message.seq)
@@ -829,6 +872,9 @@ export class LiveEditorInstance {
       return
     }
     this.lastDocChangedVersion = message.version
+    // #314：外部增量过版本防线即作废未落定的 rich 粘贴反馈（对齐 main
+    // 版在暂停判定前的时机；暂停/暂缓分支同样先作废再退出）
+    this.deps.onExternalDocArrived?.()
     if (this.suspended) {
       // 暂停：外部增量不应用（保留本地输入，恢复时以全文对齐）
       return
@@ -841,13 +887,16 @@ export class LiveEditorInstance {
     }
     if (this.composing || this.blankComposition || this.hasBufferedSync()) {
       // 组合中不打断输入；缓冲挂起期间到达的增量一并对齐到 flush。
-      // 入队即逆穿到 base 系（参考系一致性见 BufferedIncremental 注释）
+      // 入队即逆穿到 base 系（参考系一致性见 BufferedIncremental 注释）；
+      // #314 分步撤销的 reason/paste 随组缓冲（flush 收敛时随末组回调根）
       this.pendingExternal.push({
         version: message.version,
         changes: message.changes,
         baseChanges: this.ackedChain
           ? unmapSerGroupThroughAcked(message.changes, this.ackedChain)
           : message.changes,
+        ...(message.reason !== undefined ? { reason: message.reason } : {}),
+        ...(message.paste !== undefined ? { paste: message.paste } : {}),
       })
     } else if (this.unconfirmed || this.ackedChain) {
       // 在途未确认编辑：外部增量（权威系）先逆穿已确认链回 base 系再
@@ -859,9 +908,11 @@ export class LiveEditorInstance {
       }
       this.dispatchExternal(mapped)
       this.baseVersion = message.version
+      this.deps.onExternalDocSettled?.({ reason: message.reason, paste: message.paste })
     } else {
       this.baseVersion = message.version
       this.dispatchExternal(message.changes)
+      this.deps.onExternalDocSettled?.({ reason: message.reason, paste: message.paste })
     }
   }
 
@@ -1123,7 +1174,8 @@ export class LiveEditorInstance {
           text: inserted.sliceString(0, inserted.length),
         })
       })
-      return { seq: txn.seq, changes: rebased }
+      // #314：rebase 只重算坐标，粘贴元数据原样随事务保留
+      return { ...txn, changes: rebased }
     })
     this.unconfirmed = this.unconfirmed.mapDesc(gCs, false) as ChangeSet
     if (this.ackedChain) {
@@ -1161,17 +1213,36 @@ export class LiveEditorInstance {
 
   // ---- 本地编辑意图（出站链）----
 
+  /** #314 粘贴元数据通道：包裹 fn 的同步执行期间，实例内 dispatch 触发
+   *  的出站与暂缓段都附上这份元数据（edit.request 的 paste 字段 +
+   *  sentTxns/deferredSegments 的回读源）。根的 applyRichPaste /
+   *  applyPlainPasteWithImageFeedback 经此包裹粘贴事务（替代 main 版
+   *  根级瞬时标记直接读出站管线的机制；嵌套包裹内层胜出、退出恢复） */
+  withPasteMeta<T>(meta: { paste?: PasteStage; plainPasteFeedback?: string }, fn: () => T): T {
+    const prev = this.currentPasteMeta
+    this.currentPasteMeta = meta
+    try {
+      return fn()
+    } finally {
+      this.currentPasteMeta = prev
+    }
+  }
+
   /** 普通事务与空白格组合净变更共用同一出站/未确认坐标链。 */
   private recordLocalChangeSet(changeSet: ChangeSet, changes: SerChange[]): void {
     if (changes.length === 0 || !this.sessionId) {
       this.unconfirmed = this.unconfirmed ? this.unconfirmed.compose(changeSet) : changeSet
       return
     }
+    // #314：粘贴事务（withPasteMeta 包裹的 dispatch）强制开新撤销段——
+    // 每个粘贴阶段独立一笔 edit.request = 一条宿主 undo 记录
+    const paste = this.currentPasteMeta?.paste
+    const plainPasteFeedback = this.currentPasteMeta?.plainPasteFeedback
     // #153 撤销段边界判定（先于本笔累积，比较用上一笔时间戳）：光标边界
     // 标记来自用户主动移光标（或组合开始时刻的停顿回看）；时间停顿仅在
     // 非组合态回看——组合进行中不切段（原子性），组合间停顿已在
     // compositionstart 的 markPauseBoundary 判定过
-    const segmentBoundary = this.undoCursorBoundary ||
+    const segmentBoundary = !!paste || !!plainPasteFeedback || this.undoCursorBoundary ||
       (!this.composing && this.lastLocalInputAt !== null &&
         Date.now() - this.lastLocalInputAt >= UNDO_SEGMENT_PAUSE_MS)
     this.undoCursorBoundary = false
@@ -1182,12 +1253,13 @@ export class LiveEditorInstance {
       if (this.deferredLocal && segmentBoundary) {
         // #153：分段边界落地——本笔开新撤销段（切分点落在字符边界，两段
         // 定义域依次衔接，出站坐标由 sendDeferredLocal 依次映射）
-        this.deferredSegments.push(changeSet)
+        this.deferredSegments.push({ changes: changeSet, ...(paste ? { paste } : {}), ...(plainPasteFeedback ? { plainPasteFeedback } : {}) })
       } else if (this.deferredSegments.length > 0) {
         const last = this.deferredSegments.length - 1
-        this.deferredSegments[last] = this.deferredSegments[last].compose(changeSet)
+        const segment = this.deferredSegments[last]!
+        this.deferredSegments[last] = { ...segment, changes: segment.changes.compose(changeSet) }
       } else {
-        this.deferredSegments = [changeSet]
+        this.deferredSegments = [{ changes: changeSet, ...(paste ? { paste } : {}), ...(plainPasteFeedback ? { plainPasteFeedback } : {}) }]
       }
       this.deferredLocal = this.deferredLocal
         ? this.deferredLocal.compose(changeSet)
@@ -1217,10 +1289,11 @@ export class LiveEditorInstance {
     this.seq += 1
     this.deps.persistState()
     this.inFlight.add(this.seq)
-    this.sentTxns.push({ seq: this.seq, changes: baseChanges })
+    this.sentTxns.push({ seq: this.seq, changes: baseChanges, ...(paste ? { paste } : {}), ...(plainPasteFeedback ? { plainPasteFeedback } : {}) })
     this.deps.send({
       kind: 'edit.request', sessionId: this.sessionId, docUri: this.docUri,
       seq: this.seq, baseVersion: this.baseVersion, changes: baseChanges,
+      ...(paste ? { paste } : {}),
     })
     // P2-05：在途请求 = 输入挂起态——置位 settle 检测（ack 收敛时翻转通知）
     this.notifyInputSettle()
@@ -1263,10 +1336,11 @@ export class LiveEditorInstance {
     // 深度 = 段数，行为等价；每轮迭代重新评估出站守卫）
     while (this.deferredSegments.length > 0 && !this.suspended && !this.blankComposition &&
         this.inFlight.size === 0 && !this.hasBufferedSync()) {
-      const head = this.deferredSegments[0]
+      const segment = this.deferredSegments[0]!
+      const head = segment.changes
       const rest = this.deferredSegments.slice(1)
       const restComposed = rest.length > 0
-        ? rest.reduce((acc, seg) => acc.compose(seg))
+        ? rest.map((seg) => seg.changes).reduce((acc, seg) => acc.compose(seg))
         : null
       const changes: SerChange[] = []
       head.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
@@ -1298,7 +1372,7 @@ export class LiveEditorInstance {
       this.seq += 1
       this.deps.persistState()
       this.inFlight.add(this.seq)
-      this.sentTxns.push({ seq: this.seq, changes })
+      this.sentTxns.push({ seq: this.seq, changes, ...(segment.paste ? { paste: segment.paste } : {}), ...(segment.plainPasteFeedback ? { plainPasteFeedback: segment.plainPasteFeedback } : {}) })
       this.deps.send({
         kind: 'edit.request',
         sessionId: this.sessionId,
@@ -1306,6 +1380,7 @@ export class LiveEditorInstance {
         seq: this.seq,
         baseVersion: this.baseVersion,
         changes,
+        ...(segment.paste ? { paste: segment.paste } : {}),
       })
       return
     }
@@ -1324,8 +1399,11 @@ export class LiveEditorInstance {
 
   /** #153 撤销分段：用户主动移光标（点击 / 导航键）开新段。组合进行中
    *  不置位——真实浏览器里点击通常直接取消组合（触发 compositionend），
-   *  新一轮组合开始时由 markPauseBoundary 重新判定 */
-  private markUndoSegmentBoundary(): void {
+   *  新一轮组合开始时由 markPauseBoundary 重新判定。
+   *  #314 起公开：根的粘贴分步落段（applyRichPaste 每阶段前置边界，
+   *  对齐 main 版根级同名方法的调用面——边界标记随实例，经实例 API
+   *  显式置位） */
+  markUndoSegmentBoundary(): void {
     if (!this.composing) {
       this.undoCursorBoundary = true
     }
@@ -1563,6 +1641,13 @@ export class LiveEditorInstance {
     this.deps.onExternalTextApplied?.()
     this.baseVersion = Math.max(lastVersion, ackVersion ?? lastVersion)
     this.sendDeferredLocal()
+    // #314 分步撤销：缓冲收敛时对末组回放 doc.changed 的 reason/paste
+    // （对齐 main 版 flush 末尾的 finishPasteHistory 时机——根做撤销
+    // 选区恢复与反馈释放）
+    if (groups.length) {
+      const last = groups[groups.length - 1]!
+      this.deps.onExternalDocSettled?.({ reason: last.reason, paste: last.paste })
+    }
     // #148：缓冲收敛且暂缓集已出站（或本就无暂缓输入）——撤销意图可
     // 安全发出（若 sendDeferredLocal 刚发出新请求，释放判定继续等待其 ack）
     this.releasePendingHistory()
@@ -1588,6 +1673,9 @@ export class LiveEditorInstance {
     if (!this.sessionId) {
       return false // 未初始化：让事件继续传播（defaultKeymap 的本地 no-op undo）
     }
+    // #314：撤销意图进入即作废未落定的 rich 反馈（对齐 main 版时机——
+    // 撤销回流会重写粘贴历史，不再提示「已保留格式」）
+    this.deps.onHistoryIntent?.()
     if (!this.suspended && this.hasUnlandedLocalEdits()) {
       this.pendingHistoryOps.push(op)
       // 主动推进出站（暂缓集/缓冲有 flush 定时兜底，这里确保已调度）
@@ -1610,6 +1698,12 @@ export class LiveEditorInstance {
       this.composing ||
       this.blankComposition !== null ||
       this.hasBufferedSync()
+  }
+
+  /** #314 粘贴反馈守卫的只读投影（根 releasePasteFeedback /
+   *  finishPasteHistory 的「本地全部落定」判定随目标实例） */
+  hasUnlandedLocalEditsNow(): boolean {
+    return this.hasUnlandedLocalEdits()
   }
 
   private releasePendingHistory(): void {
@@ -1802,6 +1896,26 @@ export class LiveEditorInstance {
       // #120 Tab/Shift+Tab 通用行缩进：排在 tableEditing 之后（表格
       // 单元格导航优先，表格行不缩进）、defaultKeymap 之前
       indentEditing,
+      // #314 富文本粘贴接管（paste domEventHandler）：带 text/html 且无
+      // 图片文件的原生粘贴交根钩子（html→markdown 转换、弹窗决策与
+      // clipboardReadTarget 在途登记在根，见 WebviewSyncController.
+      // handleRichPasteHtml）；根未接管（含嵌入实例未提供钩子——组合
+      // 边界）放行默认粘贴链。无 keymap/filter 顺序语义（paste 与其他
+      // DOM handler 互不竞争），置于 createImagePaste 之前仅作分组
+      EditorView.domEventHandlers({ paste: (event, view) => {
+        if (!this.deps.isLiveActive() || this.suspended || view.compositionStarted ||
+            view.state.readOnly || !view.state.facet(EditorView.editable)) return false
+        const data = event.clipboardData
+        if (!data || Array.from(data.items).some((item) => item.kind === 'file' && item.type.startsWith('image/'))) return false
+        const html = data.getData('text/html')
+        if (!html) return false
+        const text = Array.from(data.types).includes('text/plain')
+          ? data.getData('text/plain')
+          : undefined
+        if (this.deps.onRichPasteHtml?.({ view, html, text }) !== true) return false
+        event.preventDefault()
+        return true
+      } }),
       // #161 图片粘贴拦截（paste domEventHandler）：无 keymap/filter 顺序
       // 语义（paste 与其他 DOM handler 互不竞争），置于装饰与编辑钩子之后
       // 仅作分组；命中 image/* 剪贴板项即出站宿主落盘，未命中放行默认粘贴
@@ -1860,11 +1974,13 @@ export class LiveEditorInstance {
       // 撤销/重做转发 keymap：置于数组末尾——CM6 同优先级 keymap 按数组
       // 先后依次尝试（先者先匹配），调用方传入的 defaultKeymap（其本地
       // undo/redo 绑定在未装 history 扩展时返回 false）先于本转发落穿，
-      // 之后才轮到转发请求宿主权威栈
+      // 之后才轮到转发请求宿主权威栈。#314 起 stopPropagation：撤销意图
+      // 不得落穿到 webview 预载脚本的宿主键位转发（宿主 undo 会绕开
+      // 本实例的粘贴历史回流语义）
       keymap.of([
-        { key: 'Mod-z', run: () => this.requestHistory('undo') },
-        { key: 'Shift-Mod-z', run: () => this.requestHistory('redo') },
-        { key: 'Mod-y', run: () => this.requestHistory('redo') },
+        { key: 'Mod-z', run: () => this.requestHistory('undo'), stopPropagation: true },
+        { key: 'Shift-Mod-z', run: () => this.requestHistory('redo'), stopPropagation: true },
+        { key: 'Mod-y', run: () => this.requestHistory('redo'), stopPropagation: true },
       ]),
       ViewPlugin.fromClass(class {
         private readonly onStart = captureCompositionStart

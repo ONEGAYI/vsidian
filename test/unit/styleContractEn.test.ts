@@ -105,8 +105,8 @@ describe('英文覆盖一致性契约（#178 机制 + #179 content 域全量 + #
   })
 
   it('两域合计全量覆盖，无覆盖表缺口（历史批次 + P2-12 #289 冲突三项选择条 + #305 toast + #306 粘贴询问）', () => {
-    expect(STYLE_CONTRACT_ENTRIES.length).toBe(201)
-    expect(Object.keys(STYLE_CONTRACT_EN_OVERRIDES).length).toBe(201)
+    expect(STYLE_CONTRACT_ENTRIES.length).toBe(202)
+    expect(Object.keys(STYLE_CONTRACT_EN_OVERRIDES).length).toBe(202)
     for (const entry of STYLE_CONTRACT_ENTRIES) {
       expect(STYLE_CONTRACT_EN_OVERRIDES[entry.id], `条目缺英文覆盖：${entry.id}`).toBeDefined()
     }

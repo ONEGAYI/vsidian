@@ -32,7 +32,7 @@
 //   （不再发送 edit.request、忽略 doc.changed）；doc.resync 兼作恢复信号
 // - seq 持久化：经 bridge.setState 保存，webview 重载（retainContextWhenHidden
 //   关闭导致的状态重建）后继续编号，宿主按 seq 幂等去重
-import { Annotation, ChangeSet, EditorSelection, EditorState, type Extension, type Text } from '@codemirror/state'
+import { Annotation, EditorSelection, EditorState, type Extension, type Text } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { isInlineFormatOp, planFormatOperation, planFormatOperationRanges } from './formatOperations'
 import { createQuickActionStateReader } from './quickActionState'
@@ -50,19 +50,19 @@ import type { ClipboardSnapshot } from './clipboardPaste'
 import { PASTE_PRESERVE_FORMATTING_KEY, PASTE_ASK_BEFORE_KEY, PASTE_SPLIT_UNDO_KEY } from '../shared/settings'
 import type { HostToWebview, PasteStage } from '../shared/protocol'
 import { chainAt } from '../shared/markdownDoc'
-import { LINE_NUMBER_GUTTER_SELECTOR, liveLineNumbers, paintedLineNumbers } from './liveLineNumbers'
+import { LINE_NUMBER_GUTTER_SELECTOR, paintedLineNumbers } from './liveLineNumbers'
 import { CODE_CARD_CLASS_NAMES } from './liveCodeCard'
 // #314 代码卡扩展族（codeCardConfigFacet/codeCardCopyRequest/codeCardFoldField/
-// codeCardHoverReveal/liveCodeCard/CodeCardConfig）随 extensions() 装配位使用
-// ——若根 extensions 不直接引用（装配在 liveInstance extensions 注入），
-// 由 #314 移植任务按实际引用面收敛导入
+// codeCardHoverReveal/liveCodeCard/CodeCardConfig）的装配位在 liveInstance 的
+// extensions()/codeCardExtension()（P2-02 迁移），根仅消费 CODE_CARD_CLASS_NAMES
+// （阅读侧卡片增强）；本 import 不再引入扩展族符号
 // P2-02（#279）：主正文 Live 实例上下文——创建/同步/编辑意图/扩展装配的
 // 最小可复用入口；主面板经此创建唯一正文编辑器。externalSync 注解随同步
 // 机制本体迁入 liveInstance，此处 re-export 维持 symbolAutocomplete /
 // frontmatterEditing / perfProbe 既有导入路径
-import { LiveEditorInstance, type LiveEditorInstanceDeps } from './liveInstance'
+import { externalSync, LiveEditorInstance, type LiveEditorInstanceDeps } from './liveInstance'
 
-export { externalSync } from './liveInstance'
+export { externalSync }
 import { decorateReadingCodeCard, isReadingCodeBlock, READING_CODE_NOWRAP_CLASS } from './readingCodeCard'
 import {
   isHostToWebview,
@@ -80,7 +80,6 @@ import {
   type OutlinksProbe,
   type PaintProbe,
   type ReadingSyntaxProbe,
-  type SerChange,
   type SidebarProbe,
   type TypographyInheritSample,
   type TypographyProbe,
@@ -437,212 +436,6 @@ function isSoloImageInParent(img: HTMLImageElement): boolean {
   return elementCount === 1
 }
 
-/**
- * 本地系坐标逆穿段表回定义域（baseVersion）系（C-2 出站方向）。
- * 插入/替换内容内部塌缩到段起点。调用方须先暂缓与插入内容相交的
- * 出站编辑；协议 offset/length 无法表达其内部位置或同点关联侧。
- */
-function localPosToBase(p: number, sections: readonly ChainSection[]): number {
-  let delta = 0
-  for (const s of sections) {
-    const afterStart = s.fromA + delta
-    const afterEnd = afterStart + s.insLen
-    if (p <= afterStart) {
-      return p - delta
-    }
-    if (p >= afterEnd) {
-      delta += s.insLen - (s.toA - s.fromA)
-      continue
-    }
-    return s.fromA
-  }
-  return p - delta
-}
-
-/** 新编辑触及未确认变更的插入内容或纯删除塌缩点时，无法安全逆投影。
- *  纯删除虽无插入内容，紧接着在原位置补字（IME 替换选区的常见顺序）
- *  仍依赖前笔删除；若立即发旧基线坐标，宿主会与自己的删除判为冲突。 */
-function touchesUnconfirmedChange(
-  changes: readonly SerChange[],
-  sections: readonly ChainSection[],
-): boolean {
-  let delta = 0
-  for (const s of sections) {
-    const afterStart = s.fromA + delta
-    const afterEnd = afterStart + s.insLen
-    if (changes.some((c) => {
-      if (s.insLen > 0) {
-        return c.length === 0
-          ? c.offset >= afterStart && c.offset <= afterEnd
-          : c.offset < afterEnd && c.offset + c.length > afterStart
-      }
-      return s.fromA < s.toA && (c.length === 0
-        ? c.offset === afterStart
-        : c.offset <= afterStart && c.offset + c.length > afterStart)
-    })) {
-      return true
-    }
-    delta += s.insLen - (s.toA - s.fromA)
-  }
-  return false
-}
-
-/** 逆穿已确认链后的变更：端点携带关联语义（正穿未确认集时保持前后次序） */
-interface UnmappedChange extends SerChange {
-  fromAssoc: 1 | -1
-  toAssoc: 1 | -1
-}
-
-/**
- * 把一组「权威系（已含已确认事务）」增量逆平移回 unconfirmed 定义域
- * （baseVersion）系（C-2 入站方向）：外部增量坐标已含已确认编辑，
- * 直接穿未确认集会多平移已确认部分。端点落在已确认段的插入内容
- * 严格内部、或纯删除段的塌缩点上时归属二义，返回 null（冲突暂停）。
- */
-function unmapSerGroupThroughAcked(
-  changes: readonly SerChange[],
-  chain: ChangeSet,
-): UnmappedChange[] | null {
-  const sections = chainSections(chain)
-  const unmapPos = (p: number): { pos: number; assoc: 1 | -1 } | null => {
-    let delta = 0
-    for (const s of sections) {
-      const afterStart = s.fromA + delta
-      const afterEnd = afterStart + s.insLen
-      if (s.insLen === 0 && p === afterStart) {
-        return null // 纯删除段塌缩点：原被删区间内归属二义
-      }
-      if (p < afterStart) {
-        return { pos: p - delta, assoc: -1 }
-      }
-      if (p === afterStart) {
-        return { pos: s.fromA, assoc: -1 }
-      }
-      if (p === afterEnd) {
-        delta += s.insLen - (s.toA - s.fromA)
-        return { pos: p - delta, assoc: 1 }
-      }
-      if (p > afterEnd) {
-        delta += s.insLen - (s.toA - s.fromA)
-        continue
-      }
-      return null // 已确认段插入内容严格内部：与已确认内容冲突
-    }
-    return { pos: p - delta, assoc: -1 }
-  }
-  const out: UnmappedChange[] = []
-  for (const c of changes) {
-    const from = unmapPos(c.offset)
-    const to = unmapPos(c.offset + c.length)
-    if (!from || !to || from.pos > to.pos) {
-      return null
-    }
-    out.push({
-      offset: from.pos,
-      length: to.pos - from.pos,
-      text: c.text,
-      fromAssoc: from.assoc,
-      toAssoc: to.assoc,
-    })
-  }
-  return out
-}
-
-/**
- * 把一组外部增量（坐标基于缓冲开始前的文档）映射穿过缓冲挂起期间累积的
- * 本地变更（通常为组合上屏事务）。真重叠（区间相交、同点双插入或区间
- * 跨过插入点——归属/顺序二义）返回 null，保守交由冲突暂停处理；
- * 端点仅相邻时按关联语义平移（C-3：CM6 touchesRange 对相邻也返回 true，
- * 不能直接用它判定冲突）。
- */
-function mapSerGroupThroughCm(
-  changes: readonly (SerChange & Partial<UnmappedChange>)[],
-  local: ChangeSet,
-): SerChange[] | null {
-  const out: SerChange[] = []
-  for (const c of changes) {
-    const from = c.offset
-    const to = c.offset + c.length
-    if (conflictsWithLocal(from, to, c.fromAssoc ?? -1, local)) {
-      return null
-    }
-    const mappedFrom = local.mapPos(from, c.fromAssoc ?? -1)
-    const mappedTo = local.mapPos(to, c.toAssoc ?? 1)
-    out.push({ offset: mappedFrom, length: mappedTo - mappedFrom, text: c.text })
-  }
-  return out
-}
-
-/** 外部区间与本地变更段是否真重叠（C-3）。
- *  fromAssoc=1 表示外部插入点语义在段插入内容之后（顺序已由逆穿确定），
- *  同点不再视为顺序二义；默认 -1（无上下文）时同点双插入仍判冲突。 */
-function conflictsWithLocal(
-  from: number,
-  to: number,
-  fromAssoc: 1 | -1,
-  local: ChangeSet,
-): boolean {
-  let conflict = false
-  local.iterChanges((fromA, toA) => {
-    if (fromA === toA) {
-      if (from === to) {
-        if (from === fromA && fromAssoc !== 1) {
-          conflict = true // 同点双插入且顺序未定：二义
-        }
-      } else if (from < fromA && to > fromA) {
-        conflict = true // 外部区间跨过插入点：本地插入内容归属二义
-      }
-    } else if (from < toA && to > fromA) {
-      conflict = true // 标准区间相交（端点相邻不算）
-    }
-  })
-  return conflict
-}
-
-interface BufferedIncremental {
-  reason?: Extract<HostToWebview, { kind: 'doc.changed' }>['reason']
-  paste?: Extract<HostToWebview, { kind: 'doc.changed' }>['paste']
-  version: number
-  /** 增量（权威变更前系；入队时点的参考系） */
-  changes: SerChange[]
-  /** 入队时逆穿当时已确认链得到的 baseVersion 系增量；null = 与当时已确认
-   *  编辑二义，无法安全逆映射（flush 时按冲突暂停处理）。
-   *  为何入队即逆穿：组合编辑的 ack 可能在 flush 之前到达并复合进已确认链，
-   *  届时缓冲增量的参考系（不含组合编辑）与已确认链（含）不再一致，迟到
-   *  的逆穿会多平移组合编辑部分（#12 表格 IME 场景实测暴露） */
-  baseChanges: SerChange[] | null
-}
-
-/** 右键保选区（#186 关键 bug 1）：Chrome contenteditable 上右键 mousedown
- *  的默认行为会把选区折叠/重定位到点击处——选好的单元格/文本选区被右键
- *  清掉。两类命中都 preventDefault（VSCode 原生编辑器同款），contextmenu
- *  事件不受影响照常触发：右键落在 CM6 选区内（含端点）；或落在活跃表格
- *  矩形蒙版的表格行区间内（蒙版态 CM6 选区折叠在锚格，选区判定不覆盖，
- *  而 caret 跳移会经选区变化清掉蒙版）。点在选区与蒙版外放行默认（右键
- *  前光标落到点击处，菜单作用于右键点） */
-const contextMenuSelectionGuard = EditorView.domEventHandlers({
-  mousedown(event: MouseEvent, view: EditorView): boolean {
-    if (event.button !== 2) return false
-    const pos = view.posAtCoords({ x: event.clientX, y: event.clientY })
-    if (pos === null) return false
-    let keep = contextMenuClickWithinSelection(view.state.selection.ranges, pos)
-    if (!keep) {
-      const region = view.state.field(tableRegionField, false)
-      if (region) {
-        // 蒙版行区间：rowTo 是内容行索引（表头 0），分隔行在表头之后——
-        // 内容行 n>0 的源行号 = 首行 + n + 1（跳过分隔行）
-        const doc = view.state.doc
-        const first = doc.lineAt(region.tableFrom).number
-        const last = first + region.rowTo + (region.rowTo > 0 ? 1 : 0)
-        const lineNo = doc.lineAt(pos).number
-        keep = lineNo >= first && lineNo <= last
-      }
-    }
-    if (keep) event.preventDefault()
-    return false
-  },
-})
-
 export class WebviewSyncController {
   private readonly diagnostics = new TestDiagnostics()
   /** P2-02（#279）：主正文 Live 实例上下文——EditorView 创建/目标文本同步/
@@ -669,8 +462,6 @@ export class WebviewSyncController {
   /** 打开统一菜单时捕获的目标视图（执行前重验实例存活与文档一致；缺省
    *  = 主正文 view——既有调用方语义不变） */
   private contextMenuView: EditorView | undefined
-  /** 粘贴桥发起时捕获的目标视图（回包插入不得落回主编辑器） */
-  private clipboardReadTarget: EditorView | undefined
 
   /** 焦点所在的嵌入内部 Live 实例（无焦点嵌入 null；编辑器在场才命中——
    *  Reading 态卡片无编辑器天然不命中，阅读零写路径不受影响） */
@@ -1089,50 +880,6 @@ export class WebviewSyncController {
   /** body 主题 class 观察者：宿主切换明暗主题时热跟随 */
   private hostThemeObserver: MutationObserver | undefined
 
-  // ---- 冲突暂停状态（#4）----
-  /** 暂停写回：保留本地文本、忽略外部增量、不再发送 edit.request */
-  private suspended = false
-  private conflictRevision = 0
-  /** 发出后未收 ok ack 的请求 seq 集合（全部确认后未确认集清空） */
-  private inFlight = new Set<number>()
-  /** 未确认变更集：本地文档相对 baseVersion 权威文本的累积变更；
-   *  外部增量到达时必须平移穿过它（否则静默错位） */
-  private unconfirmed: ChangeSet | null = null
-  /** 已发出未确认事务（FIFO）：坐标为发出时逆穿未确认集的 baseVersion 系
-   *  投影（C-2），ack ok 后按序剥离复合进已确认链 */
-  private sentTxns: { seq: number; changes: SerChange[]; paste?: PasteStage; plainPasteFeedback?: string }[] = []
-  /** 首笔无法安全逆投影的事务起，后续本地事务合并在同一待发 ChangeSet。
-   *  定义域是所有已发送事务之后的本地文档，全部 ack 后可直接作为新请求。 */
-  private deferredLocal: ChangeSet | null = null
-  /** #153 撤销分段：暂缓集按撤销段切分的 ChangeSet 序列（与 deferredLocal
-   *  平行维护，恒满足 composeAll(段序列) === deferredLocal）。每段定义域为
-   *  该段开始时的本地文档；sendDeferredLocal 每次只出站队首段（余段留守
-   *  暂缓集），队首段 ack 收敛后依次出站——每段一笔 edit.request = 一条
-   *  宿主 undo 记录。重置与 deferredLocal 同步 */
-  private deferredSegments: { changes: ChangeSet; paste?: PasteStage; plainPasteFeedback?: string }[] = []
-  /** #153 撤销分段：最近一笔本地输入（含组合候选事务）的时间戳；null
-   *  表示尚无本地输入（不启动停顿计时）。停顿判定是惰性的——只在下一笔
-   *  输入/组合开始时回看间隔，不设分段定时器 */
-  private lastLocalInputAt: number | null = null
-  /** #153 撤销分段：用户主动移过光标（点击/导航键）的一次性边界标记，
-   *  由 markUndoSegmentBoundary 置位、recordLocalChangeSet 消费；组合
-   *  进行中不置位（组合原子性优先），组合开始时刻的停顿由
-   *  markPauseBoundary 单独判定 */
-  private undoCursorBoundary = false
-  /** deferredLocal 的来源标志（#123）：组合期间暂缓的净输入为 true（外部
-   *  增量并存时经 base 系映射应用，不走触碰式保守暂停）；触碰未确认区间
-   *  的暂缓为 false（与外部并存时保留 #4 的暂停口径）。出站/清空同步复位 */
-  private deferredFromComposition = false
-  /** #148 undo 竞态守卫：本地存在未落地宿主的编辑时暂存的撤销/重做意图，
-   *  按按下序累积（键盘重复/连按不折叠）。此态下宿主撤销栈顶还不是这些
-   *  编辑，先发 history.request 会撤到更早的操作，迟到的本地编辑再经重定位
-   *  静默应用。待本地编辑全部落地确认后经 releasePendingHistory 按序发出；
-   *  进入冲突暂停时随 B-4 口径丢弃（暂停面板的撤销忽略，不补发） */
-  private pendingHistoryOps: ('undo' | 'redo')[] = []
-  /** 已确认事务复合（定义域 = unconfirmed 定义域 = baseVersion 系）：
-   *  外部增量（权威系坐标）先逆穿它平移回 base 系再穿未确认集（C-2），
-   *  避免把「已含已确认编辑」的坐标当 base 系多平移 */
-  private ackedChain: ChangeSet | null = null
   private banner: HTMLElement | undefined
 
   constructor(private readonly bridge: VsCodeBridge) {
@@ -1143,7 +890,7 @@ export class WebviewSyncController {
       const embedBlocked = () => this.embedFocusBlocked()
       // #314 粘贴命令经 actionTarget 目标化（嵌入菜单粘贴落 B；正文落根）
       if (id === 'paste' || id === 'pastePlain') {
-        this.requestClipboardPaste({ ...this.actionTarget(), plain: id === 'pastePlain' })
+        this.requestClipboardPaste({ plain: id === 'pastePlain' })
       } else if (id === 'find') { if (!embedBlocked()) this.openFind() }
       else if (id === 'findNext') { if (!embedBlocked()) this.findStep('next') }
       else if (id === 'findPrevious') { if (!embedBlocked()) this.findStep('prev') }
@@ -1755,7 +1502,17 @@ export class WebviewSyncController {
       initialDark: isVscodeDarkBody(),
       initialSeq: this.initialSeq,
       initialConflictRevision: this.initialConflictRevision,
-      onSuspendedChange: (active) => this.setBannerVisible(active),
+      onSuspendedChange: (active) => {
+        // #314：进入暂停即作废粘贴现场（对齐 main 版 enterSuspended 开头
+        // 的清理——弹窗取消、rich 反馈作废清空；暂停态下粘贴入口全被
+        // 守卫拦住，反馈不会再增长，幂等清理无额外影响）
+        if (active) {
+          this.richPasteDialog?.cancel(false)
+          this.invalidatePasteFeedback()
+          this.pasteFeedback.length = 0
+        }
+        this.setBannerVisible(active)
+      },
       onExternalTextApplied: () => this.refreshReading(),
       onFullSyncApplied: ({ restoreAnchor }) => {
         this.refreshReading()
@@ -1765,7 +1522,45 @@ export class WebviewSyncController {
         // #292：全文落地即读首帧就绪时刻，调度骨架按扫光收束规则撤除（幂等）
         this.scheduleSkeletonExit()
       },
+      // #314 粘贴元数据 ack 落定：按事务携带的 paste/组 ID 标记
+      // pasteFeedback 的 landed（实例在剥离已确认队列前回读回调）
+      onPasteTxnAcked: ({ paste, plainPasteFeedback }) => {
+        if (paste) {
+          for (const feedback of this.pasteFeedback) {
+            if (feedback.group === paste.group && feedback.stage === paste.stage) feedback.landed = true
+          }
+        }
+        if (plainPasteFeedback) {
+          for (const feedback of this.pasteFeedback) {
+            if (feedback.kind === 'plain-image' && feedback.group === plainPasteFeedback) feedback.landed = true
+          }
+        }
+      },
+      // #314 外部增量过版本防线即作废未落定 rich 反馈（doc.changed 的
+      // 暂停/暂缓分支同样先作废再退出——语义对齐 main 版）
+      onExternalDocArrived: () => this.invalidatePasteFeedback(),
+      // #314 外部增量落定：分步撤销选区恢复 + 反馈释放（直发路径每组一次、
+      // 组合 flush 收敛时对末组一次；释放守卫随根实例，幂等多调无害）
+      onExternalDocSettled: (message) => {
+        this.finishPasteHistory(message)
+        this.releasePasteFeedback(this.live ?? null)
+      },
+      // #314 撤销意图进入即作废未落定 rich 反馈
+      onHistoryIntent: () => this.invalidatePasteFeedback(),
+      // #314 原生 HTML 粘贴接管（实例 paste domEventHandler → 转换管线）
+      onRichPasteHtml: ({ view, html, text }) => this.handleRichPasteHtml(view, html, text),
       onViewUpdate: (update) => {
+        // #314：本地非粘贴事务作废未落定的 rich 反馈（对齐 main 版
+        // updateListener 的 recordingPasteStage 豁免——粘贴 dispatch 由
+        // 根级标记豁免，其余本地事务即作废；外部事务不在此列）
+        if (!this.recordingPasteStage) {
+          for (const tr of update.transactions) {
+            if (tr.docChanged && !tr.annotation(externalSync)) {
+              this.invalidatePasteFeedback()
+              break
+            }
+          }
+        }
         if (this.quickActionsOpen && (update.docChanged || update.selectionSet)) {
           // StateField 已在本事务更新；微任务避免在 CM6 update 生命周期内
           // 再读取旧 EditorView.state。重复信号合并由当前状态读取自然收敛。
@@ -2543,13 +2338,14 @@ export class WebviewSyncController {
         break
       }
       case 'edit.ack': {
-        // #314 移植待办（PR #314 × P2-02 架构）：pasteFeedback 落定与分步撤销钩子
-        // （recordingPasteStage 出站附元数据/finishPasteHistory）需迁入 liveInstance
-        // 的出站与 ack 管线——暂取 P2-02 实例代理，richPaste 族套件在移植后复验
         // 同步状态机（C-2 基线推进 / ok:false 冲突暂停）随实例（P2-02）；
         // ack 失败附文的重置走实例 handleFullSync，阅读刷新等根联动经
-        // 实例 hook 回调
+        // 实例 hook 回调。#314 粘贴元数据的 ack 落定经实例
+        // onPasteTxnAcked 钩子（剥离前回读）；代理返回即 ok 分支收敛，
+        // 此处释放粘贴反馈（时机对齐 main 版 ok 分支末尾——fail 路径
+        // 已被 enterSuspended → onSuspendedChange 清空，release 幂等空转）
         this.live?.handleEditAck(message)
+        this.releasePasteFeedback(this.live ?? null)
         break
       }
       case 'doc.changed':
@@ -2629,7 +2425,7 @@ export class WebviewSyncController {
       case 'ui.command':
         switch (message.op) {
           case 'paste': this.requestClipboardPaste(); break
-          case 'pastePlain': this.requestClipboardPaste(true); break
+          case 'pastePlain': this.requestClipboardPaste({ plain: true }); break
           case 'sidebarToggle': this.toggleSidebar(); break
           case 'outlineToggle':
             if (!this.sidebarOpen && !this.outlineActive) this.toggleSidebar()
@@ -2900,33 +2696,26 @@ export class WebviewSyncController {
       case 'clipboard.read.result': {
         // #183 粘贴桥回包：reqId 陈旧即丢弃。消费即推进（不回退清零）——
         // 回退会让下一次粘贴复用旧 reqId，旧回包重放成为可能。P2-10：插入
-        // 目标 = 发起时捕获的视图（嵌入菜单的粘贴经端口写 B；回包时实例
-        // 已释放则放弃——不落回主编辑器）
+        // 目标 = 发起时捕获的目标（#314 起为身份快照对象；回包时实例已
+        // 释放/文档已变则经 clipboardTargetValid 放弃——不落回主编辑器）
         if (message.reqId !== this.clipboardReadReqId) {
           break
         }
         this.clipboardReadReqId += 1
-        const targetView = this.clipboardReadTarget
+        const target = this.clipboardReadTarget
         this.clipboardReadTarget = undefined
-        const embedTarget = targetView !== undefined && targetView !== this.view
-          ? this.embedCards?.liveViewEntry(targetView) ?? null
-          : null
-        const isEmbedView = targetView !== undefined && targetView !== this.view
-        if (!message.ok || !targetView || (isEmbedView && !embedTarget)) {
-          if (!message.ok) {
-            // 只读失败告警不弹窗（与未知命令的 console.warn 同口径——
-            // review-loops 修复：此前零日志，粘贴无反应无从定位）
-            console.warn('[vsidian] 剪贴板读取失败，粘贴放弃（宿主 readText 失败或端口未接线）')
-          }
+        if (!message.ok) {
+          // 只读失败告警不弹窗（与未知命令的 console.warn 同口径——
+          // review-loops 修复：此前零日志，粘贴无反应无从定位）
+          console.warn('[vsidian] 剪贴板读取失败，粘贴放弃（宿主 readText 失败或端口未接线）')
           break
         }
-        const view = targetView
-        if (!this.targetEditable(view, embedTarget?.instance ?? null)) {
+        if (!target || !this.clipboardTargetValid(target)) {
           break
         }
         // 光标处插入（选区被替换——与原生粘贴同语义）；单笔事务走标准出站
         try {
-          if (message.text) dispatchClipboardPaste(view.contentDOM, { text: message.text, images: [] }, true)
+          if (message.text) dispatchClipboardPaste(target.view.contentDOM, { text: message.text, images: [] }, true)
         } catch (error) {
           console.error('[vsidian] 粘贴插入失败（坐标与当前文档不匹配）', error)
         }
@@ -3558,66 +3347,6 @@ export class WebviewSyncController {
     }))
   }
 
-  /**
-   * 进入冲突暂停：保留本地文本，上报快照（有未确认输入时），显示横幅，
-   * 停止一切写回与外部同步；恢复唯一途径是 doc.resync（宿主 resumePanel）。
-   */
-  private enterSuspended(): void {
-    this.richPasteDialog?.cancel(false)
-    this.invalidatePasteFeedback()
-    this.pasteFeedback.length = 0
-    if (this.suspended) {
-      return
-    }
-    const hasUnconfirmed =
-      this.unconfirmed !== null || this.inFlight.size > 0 || this.deferredLocal !== null || this.composing
-    this.suspended = true
-    this.setBannerVisible(true)
-    if (hasUnconfirmed) {
-      this.reportConflictSnapshot()
-    }
-    // 暂停后这些状态不再参与同步；恢复时由 doc.resync 全量对齐。
-    // pendingFull 保留：暂停前的全文重置（恢复内容）在 flush 时仍应用
-    this.unconfirmed = null
-    this.ackedChain = null
-    this.sentTxns = []
-    this.deferredLocal = null
-    this.deferredSegments = []
-    this.undoCursorBoundary = false
-      this.deferredFromComposition = false
-    this.inFlight.clear()
-    this.pendingExternal = []
-    // #148：持有的撤销/重做意图随之丢弃——暂停面板的撤销忽略（B-4），
-    // 恢复后不补发（补发会撤到用户无法预期的操作）
-    this.pendingHistoryOps = []
-  }
-
-  /**
-   * 暂停/暂缓态每笔输入立即刷新宿主快照。两种状态的输入不在宿主 pending
-   * 内，延后发送会在快速关闭或断连时留下无法取回的窗口。正常输入仍走
-   * 增量 edit.request，不发送全文。
-   *
-   * #49 唯一例外：组合期间的暂缓输入不逐笔上报（见 recordLocalChangeSet
-   * 暂缓分支注释）。暂停态（enterSuspended 进入时与暂停中的每笔输入）不受
-   * 该例外影响，仍立即快照——暂停非高频路径，且组合中进入暂停时本地文本
-   * 已脱离正常出站链路（inFlight/deferredLocal 均被清空），快照是此时唯一
-   * 的取回通道，不放宽。
-   */
-  private reportConflictSnapshot(): void {
-    if (!this.sessionId || (!this.suspended && !this.deferredLocal)) {
-      return
-    }
-    this.conflictRevision += 1
-    this.persistState()
-    this.bridge.postMessage({
-      kind: 'conflict.report',
-      sessionId: this.sessionId,
-      docUri: this.docUri,
-      version: this.baseVersion,
-      revision: this.conflictRevision,
-      text: this.view?.state.doc.toString() ?? '',
-    })
-  }
 
   // ---- #292 加载期骨架屏：收编与撤除（规格 docs/specs/skeleton-screen.md）----
   // 空窗①由宿主内联装配覆盖（skeletonScreen.ts）；这里只承接空窗②——
@@ -7062,23 +6791,51 @@ export class WebviewSyncController {
     view.focus()
   }
 
+  /** #314 粘贴目标实例解析：view → 所属 Live 实例（嵌入经 liveViewEntry
+   *  反查在场端口，正文回落 this.live）。粘贴的出站元数据通道
+   *  （withPasteMeta）、撤销段边界（markUndoSegmentBoundary）与组身份
+   *  （sessionId/seq）都取目标实例——P2-02 后出站管线随实例，#314 的
+   *  反馈/分段机制随之实例化 */
+  private pasteOwnerInstance(view: EditorView): LiveEditorInstance | null {
+    if (view !== this.view) {
+      return this.embedCards?.liveViewEntry(view)?.instance ?? null
+    }
+    return this.live ?? null
+  }
+
+  /** 粘贴目标身份（reqId 校验与组身份的 sessionId/docUri）：嵌入目标取
+   *  实例身份（其 edit.request/ack 均以实例会话为目标），正文取根会话 */
+  private pasteTargetIdentity(view: EditorView, instance: LiveEditorInstance): { sessionId: string; docUri: string } {
+    return view === this.view
+      ? { sessionId: this.sessionId, docUri: this.docUri }
+      : { sessionId: instance.targetSessionId, docUri: instance.targetDocUri }
+  }
+
   /** 菜单/可绑定粘贴：优先多格式快照，权限受限时宿主纯文本桥回退。
    *  两路径均固定本次目标并进入既有 paste 处理链。P2-10：发起时捕获目标
    *  视图（嵌入菜单的粘贴经端口写 B；回包重验实例在场）；plain 走纯文本
-   *  桥（#314 pastePlain 命令）。#314 移植待办：多格式管线的目标身份
-   *  （target 构造的 sessionId/docUri 仍取根——嵌入目标应按实例身份） */
-  private requestClipboardPaste(requestTarget?: { view: EditorView; embed: LiveEditorInstance | null; plain?: boolean }): void {
-    const resolved = requestTarget ?? { ...this.actionTarget(), plain: false }
-    const plain = resolved?.plain === true
-    const view = resolved?.view
-    if (!view || !this.targetEditable(view, resolved?.embed ?? null)) {
+   *  桥（#314 pastePlain 命令）。#314 移植：目标身份（sessionId/docUri）
+   *  按目标实例——嵌入粘贴的 reqId 校验与组身份对齐实例会话，不再取根 */
+  private requestClipboardPaste(requestTarget?: { view?: EditorView; embed?: LiveEditorInstance | null; plain?: boolean }): void {
+    const plain = requestTarget?.plain === true
+    const resolved = requestTarget?.view !== undefined
+      ? { view: requestTarget.view, embed: requestTarget.embed ?? null }
+      : this.actionTarget()
+    if (!resolved) {
       return
     }
-    this.clipboardReadTarget = view
+    const view = resolved.view
+    if (!this.targetEditable(view, resolved.embed)) {
+      return
+    }
+    const instance = this.pasteOwnerInstance(view)
+    if (!instance) {
+      return
+    }
     this.clipboardReadReqId += 1
     const reqId = this.clipboardReadReqId
     const target = { view, doc: view.state.doc, selection: view.state.selection,
-      sessionId: this.sessionId, docUri: this.docUri, modeRevision: this.pasteModeRevision }
+      ...this.pasteTargetIdentity(view, instance), modeRevision: this.pasteModeRevision }
     this.clipboardReadTarget = target
     const valid = () => reqId === this.clipboardReadReqId && this.clipboardTargetValid(target)
     if (!navigator.clipboard?.read) {
@@ -7109,11 +6866,41 @@ export class WebviewSyncController {
   }
 
   private clipboardTargetValid(target: NonNullable<WebviewSyncController['clipboardReadTarget']>): boolean {
-    return this.view === target.view && this.sessionId === target.sessionId && this.docUri === target.docUri &&
-      !!this.sessionId && !!this.docUri &&
-      this.pasteModeRevision === target.modeRevision && this.viewMode === 'live' && !this.suspended &&
+    const instance = this.pasteOwnerInstance(target.view)
+    if (!instance || instance.getView() !== target.view) {
+      return false
+    }
+    // 根目标要求根处于 live；嵌入目标不查根模式（父 Reading + 嵌入手动
+    // Live 是合法组合——实例侧 Live 激活与可编辑性由实例守卫覆盖）
+    if (target.view === this.view && this.viewMode !== 'live') {
+      return false
+    }
+    const identity = this.pasteTargetIdentity(target.view, instance)
+    return !!identity.sessionId && !!identity.docUri &&
+      identity.sessionId === target.sessionId && identity.docUri === target.docUri &&
+      this.pasteModeRevision === target.modeRevision && !instance.isSuspended &&
       target.view.state.doc === target.doc && target.view.state.selection.eq(target.selection) &&
       !target.view.state.readOnly && target.view.state.facet(EditorView.editable)
+  }
+
+  /** #314 原生 HTML 粘贴接管（实例 paste domEventHandler → 根转换管线，
+   *  与菜单/改绑入口共用 processRichPaste）：构造同构的目标身份并登记
+   *  在途 reqId。嵌入实例未接线 onRichPasteHtml（组合边界）——其 HTML
+   *  粘贴在实例侧放行默认链，不会到达此处 */
+  private handleRichPasteHtml(view: EditorView, html: string, text?: string): boolean {
+    const instance = this.pasteOwnerInstance(view)
+    if (!instance || instance.getView() !== view ||
+        instance.isSuspended || view.state.readOnly || !view.state.facet(EditorView.editable)) {
+      return false
+    }
+    this.clipboardReadReqId += 1
+    const reqId = this.clipboardReadReqId
+    const target = { view, doc: view.state.doc, selection: view.state.selection,
+      ...this.pasteTargetIdentity(view, instance), modeRevision: this.pasteModeRevision }
+    this.clipboardReadTarget = target
+    this.richPasteDialog?.cancel(false)
+    void this.processRichPaste({ html, images: [], ...(text !== undefined ? { text } : {}) }, target, reqId)
+    return true
   }
 
   /** 普通native paste与菜单/改绑快照的同一转换入口；只用一份输入快照。 */
@@ -7134,7 +6921,7 @@ export class WebviewSyncController {
     let converted: ReturnType<typeof htmlToMarkdown>
     try { converted = htmlToMarkdown(snapshot.html) }
     catch {
-      if (plain) this.applyRichPaste(plain, plain, 'fallback')
+      if (plain) this.applyRichPaste(plain, plain, 'fallback', target.view)
       else this.toast?.show(t('toast.pasteNoText'), 'error')
       return
     }
@@ -7145,7 +6932,7 @@ export class WebviewSyncController {
     if (!richPasteDistributionMatches(target.view.state, plain, converted.markdown)) {
       this.clipboardReadReqId += 1
       this.clipboardReadTarget = undefined
-      if (plain) this.applyRichPaste(plain, plain, 'fallback')
+      if (plain) this.applyRichPaste(plain, plain, 'fallback', target.view)
       else this.toast?.show(t('toast.pasteNoText'), 'error')
       return
     }
@@ -7161,36 +6948,47 @@ export class WebviewSyncController {
     if (!valid()) return
     this.clipboardReadReqId += 1
     this.clipboardReadTarget = undefined
-    if (keep) this.applyRichPaste(plain, converted.markdown, 'rich')
+    if (keep) this.applyRichPaste(plain, converted.markdown, 'rich', target.view)
     else if (plain) dispatchClipboardPaste(target.view.contentDOM, { text: plain, images: [] }, true)
   }
 
-  /** 同步显示两个本地阶段；既有ACK队列分别提交，不另设撤销历史。 */
-  private applyRichPaste(plain: string, formatted: string, feedback: 'rich' | 'fallback'): void {
-    const view = this.view
-    if (!view || !formatted || this.viewMode !== 'live' || this.suspended || view.state.readOnly || !view.state.facet(EditorView.editable)) return
+  /** 同步显示两个本地阶段；既有ACK队列分别提交，不另设撤销历史。
+   *  #314 × P2-02：出站元数据经目标实例 withPasteMeta 通道附到
+   *  edit.request/sentTxns/暂缓段（根级 recordingPasteStage 仅承担
+   *  onViewUpdate 豁免与释放守卫，不再参与出站）；撤销段边界经实例公开
+   *  markUndoSegmentBoundary；组身份（sessionId/seq）取目标实例（嵌入
+   *  粘贴的组不冒充根会话） */
+  private applyRichPaste(plain: string, formatted: string, feedback: 'rich' | 'fallback', view: EditorView): void {
+    const instance = this.pasteOwnerInstance(view)
+    if (!instance || instance.getView() !== view || !formatted ||
+        instance.isSuspended || view.state.readOnly || !view.state.facet(EditorView.editable)) return
     this.invalidatePasteFeedback()
     // seq由bridge持久化并在面板重载后续号，避免新实例复用旧历史的组身份。
-    const group = `${this.sessionId}:${this.seq + 1}:paste-${++this.pasteGroupId}`
+    const identity = this.pasteTargetIdentity(view, instance)
+    const group = `${identity.sessionId}:${instance.seqNow + 1}:paste-${++this.pasteGroupId}`
     const stages = planRichPaste(view.state, plain, formatted, feedback === 'rich' && this.settings?.[PASTE_SPLIT_UNDO_KEY] !== false, group)
     if (stages.length === 0) return
     this.pasteFeedback.push({ kind: feedback, group, stage: stages.at(-1)!.paste.stage, landed: false })
     try {
       for (const stage of stages) {
         this.recordingPasteStage = stage.paste
-        this.markUndoSegmentBoundary()
-        view.dispatch(stage.transaction)
+        instance.markUndoSegmentBoundary()
+        instance.withPasteMeta({ paste: stage.paste }, () => view.dispatch(stage.transaction))
       }
     } finally {
       this.recordingPasteStage = undefined
-      this.markUndoSegmentBoundary()
+      instance.markUndoSegmentBoundary()
     }
     view.focus()
-    this.releasePasteFeedback()
+    this.releasePasteFeedback(instance)
   }
 
-  private releasePasteFeedback(): void {
-    if (this.recordingPasteStage || this.recordingPlainPasteFeedback || this.hasUnlandedLocalEdits() || this.suspended) return
+  /** 反馈释放：落定项弹 toast。「本地全部落定」与暂停态按**目标实例**
+   *  判定（main 版根级 hasUnlandedLocalEdits 的实例化——粘贴事务的
+   *  在途/暂缓状态在目标实例上） */
+  private releasePasteFeedback(target: LiveEditorInstance | null): void {
+    if (this.recordingPasteStage || this.recordingPlainPasteFeedback) return
+    if (!target || target.hasUnlandedLocalEditsNow() || target.isSuspended) return
     for (const feedback of this.pasteFeedback.splice(0)) {
       if (!feedback.landed) continue
       if (feedback.kind === 'rich') {
@@ -7203,23 +7001,29 @@ export class WebviewSyncController {
 
   /** 仍走原生CM/table粘贴链；本地反馈ID随事务/暂缓段等实际ACK，不进入宿主协议。 */
   private applyPlainPasteWithImageFeedback(view: EditorView, snapshot: ClipboardSnapshot): void {
-    const group = `${this.sessionId}:${this.seq + 1}:plain-image-${++this.pasteGroupId}`
+    const instance = this.pasteOwnerInstance(view)
+    if (!instance || instance.getView() !== view) return
+    const identity = this.pasteTargetIdentity(view, instance)
+    const group = `${identity.sessionId}:${instance.seqNow + 1}:plain-image-${++this.pasteGroupId}`
     const feedback = { kind: 'plain-image' as const, group, stage: 'single' as const, landed: false }
     this.pasteFeedback.push(feedback)
     const before = view.state.doc
     this.recordingPlainPasteFeedback = group
-    this.markUndoSegmentBoundary()
+    instance.markUndoSegmentBoundary()
     let handled = false
-    try { handled = dispatchClipboardPaste(view.contentDOM, snapshot, true) }
+    try {
+      handled = instance.withPasteMeta({ plainPasteFeedback: group }, () =>
+        dispatchClipboardPaste(view.contentDOM, snapshot, true))
+    }
     finally {
       this.recordingPlainPasteFeedback = undefined
-      this.markUndoSegmentBoundary()
+      instance.markUndoSegmentBoundary()
     }
     if (!handled || view.state.doc === before) {
       const index = this.pasteFeedback.indexOf(feedback)
       if (index >= 0) this.pasteFeedback.splice(index, 1)
     }
-    this.releasePasteFeedback()
+    this.releasePasteFeedback(instance)
   }
 
   private invalidatePasteFeedback(): void {
@@ -7230,11 +7034,16 @@ export class WebviewSyncController {
     this.pasteToastKey = undefined
   }
 
+  /** #314 分步撤销的 undo/redo 回流收尾：粘贴历史选区恢复 + 阶段撤销
+   *  toast。doc.changed 只路由根实例（P2-02 路由现状），本方法保持根
+   *  视角；嵌入粘贴的 undo 选区恢复是组合缺口（嵌入实例的 doc.changed
+   *  回流不接 onExternalDocSettled 钩子）——已知边界，不在本票实现 */
   private finishPasteHistory(message: Pick<Extract<HostToWebview, { kind: 'doc.changed' }>, 'reason' | 'paste'>): void {
     this.invalidatePasteFeedback()
     const view = this.view
     const paste = message.paste
-    if (!view || !message.reason || !paste || this.suspended || this.hasUnlandedLocalEdits()) return
+    if (!view || !this.live || !message.reason || !paste || this.suspended ||
+        this.live.hasUnlandedLocalEditsNow()) return
     if (paste.sessionId === this.sessionId) {
       const selection = message.reason === 'undo' ? paste.before : paste.after
       const clamp = (pos: number) => Math.max(0, Math.min(view.state.doc.length, pos))
@@ -8797,658 +8606,6 @@ export class WebviewSyncController {
     }
   }
 
-  /** 把 SerChange 组转为 clamp 到当前文档长度的 CM change spec */
-  private clampedSpec(changes: readonly SerChange[]) {
-    const len = this.view?.state.doc.length ?? 0
-    return changes.map((c) => ({
-      from: Math.min(c.offset, len),
-      to: Math.min(c.offset + c.length, len),
-      insert: c.text,
-    }))
-  }
-
-  /**
-   * 外部增量以单事务应用（externalSync 注解，不回发）；
-   * 区间 clamp 到当前文档长度（宿主与本地状态的毫秒级竞态防御，
-   * 避免超范围坐标抛错）。阅读模式下随后重建阅读视图（保留滚动锚点）。
-   */
-  private dispatchExternal(changes: readonly SerChange[]): void {
-    const view = this.view
-    if (!view) {
-      return
-    }
-    this.dispatchExternalChanges(view, changes)
-    this.refreshReading()
-  }
-
-  /** CM6 把非空选区映射穿过覆盖整段的宿主替换时，可能产生 from > to
-   *  的 SelectionRange（两端分别映到替换后区间的右、左边界）。视觉上仍
-   *  高亮，但下一次输入会用反向 change range。须在同一笔外部事务内
-   *  指定规范化选区，避免先渲染无效 range 后被 DOM 观察器折叠。 */
-  private dispatchExternalChanges(view: EditorView, changes: readonly SerChange[]): void {
-    const specs = this.clampedSpec(changes)
-    // #296 审查轮二：钳制命中判定在 dispatch 前做（旧 selection 对旧区间
-    // [from,to]，坐标系自洽）——dispatch 后的 head 已映射到新文档，与旧
-    // 区间比较会在「净删除 + 区间外右侧近处光标」时误钳（映射后数值恰落
-    // 旧区间，但字符身份仍是区间外内容——远处前缀显形光标被拽走）、
-    // 「净插入 + 区间右端点光标」时漏钳
-    const hitMask = view.state.selection.ranges.map((range) =>
-      range.empty && specs.some((c) => range.head >= c.from && range.head <= c.to))
-    const mapped = view.state.selection.map(ChangeSet.of(specs, view.state.doc.length))
-    const selection = mapped.ranges.some((range) => range.from > range.to)
-      ? EditorSelection.create(mapped.ranges.map((range) =>
-        range.from > range.to ? EditorSelection.range(range.to, range.from) : range),
-      mapped.mainIndex)
-      : undefined
-    view.dispatch({
-      changes: specs,
-      selection,
-      annotations: externalSync.of(true),
-    })
-    // #296 六轮 + 审查轮：undo/外部整行替换会把格内容里的光标归到区间左端
-    // （前缀或隐藏管道端点），触发前缀显形、网格破裂。用变更后 state 的
-    // 网格信息钳回最近格内容；只处理 dispatch 前命中（端点在被替换文本上）
-    // 的折叠光标——区间内光标才会被映射重定位，区间外（用户主动放置的
-    // 远处光标，如前缀显形编辑态）不动（审查轮 F4）；逐 range 钳制、其余
-    // range 保留（单 anchor spec 会整体替换选区、坍缩多光标——审查轮 F2）。
-    // selection-only 补事务与上一笔同步连发，浏览器只渲染最终态。
-    const sel = view.state.selection
-    let ranges: ReturnType<typeof EditorSelection.cursor>[] | null = null
-    for (let i = 0; i < sel.ranges.length; i++) {
-      if (!hitMask[i]) {
-        continue
-      }
-      const clamped = clampExternalCursor(view.state, sel.ranges[i]!.head)
-      if (clamped === null || clamped === sel.ranges[i]!.head) {
-        continue
-      }
-      if (!ranges) {
-        ranges = sel.ranges.slice()
-      }
-      ranges[i] = EditorSelection.cursor(clamped)
-    }
-    if (ranges) {
-      view.dispatch({ selection: EditorSelection.create(ranges, sel.mainIndex) })
-    }
-  }
-
-  /**
-   * 外部增量组（坐标 = 权威当前系，直发路径）应用的统一入口：
-   * 1. 有已确认事务时先逆穿已确认链，平移回 unconfirmed 定义域（baseVersion
-   *    系）——外部坐标已含已确认编辑，直接穿未确认集会多平移已确认部分（C-2）
-   * 2. 再穿未确认集映射到本地系；两阶段任一二义（真重叠）返回 null（冲突暂停）
-   * 3. 应用成功后，未确认集与已确认链都以 base 系增量 rebase（定义域推进，
-   *    CM6 mapDesc 精确保持段语义），baseVersion 由调用方推进
-   *
-   * 组合缓冲 flush 路径不经过此入口的逆穿阶段（缓冲增量已在入队时逆穿，
-   * 见 BufferedIncremental.baseChanges），直接调 applyBaseChanges。
-   */
-  private applyExternalGroup(changes: readonly SerChange[]): SerChange[] | null {
-    let baseChanges: readonly (SerChange & Partial<UnmappedChange>)[] = changes
-    if (this.ackedChain) {
-      const rev = unmapSerGroupThroughAcked(changes, this.ackedChain)
-      if (!rev) {
-        return null
-      }
-      baseChanges = rev
-    }
-    return this.applyBaseChanges(baseChanges)
-  }
-
-  /**
-   * baseVersion 系增量穿未确认集映射到本地系并 rebase 参考系
-   * （直发与组合 flush 共用的后半段；返回本地系增量，二义返回 null）。
-   */
-  private applyBaseChanges(
-    baseChanges: readonly (SerChange & Partial<UnmappedChange>)[],
-  ): SerChange[] | null {
-    if (!this.unconfirmed) {
-      // 已确认链非空时未确认集必非空（同源清空）；异常态自愈
-      this.ackedChain = null
-      this.sentTxns = []
-      return [...baseChanges]
-    }
-    const mapped = mapSerGroupThroughCm(baseChanges, this.unconfirmed)
-    if (!mapped) {
-      return null
-    }
-    const gCs = ChangeSet.of(
-      [...baseChanges]
-        .sort((a, b) => a.offset - b.offset)
-        .map((c) => ({ from: c.offset, to: c.offset + c.length, insert: c.text })),
-      this.unconfirmed.length,
-    )
-    // 待确认事务与 unconfirmed/ackedChain 共用定义域；外部增量推进定义域时
-    // 也要同步平移其坐标，否则稍后 ack 会把旧位置复合进 ackedChain。
-    this.sentTxns = this.sentTxns.map((txn) => {
-      const cs = ChangeSet.of(
-        txn.changes.map((c) => ({ from: c.offset, to: c.offset + c.length, insert: c.text })),
-        this.unconfirmed!.length,
-      ).mapDesc(gCs, false) as ChangeSet
-      const rebased: SerChange[] = []
-      cs.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
-        rebased.push({
-          offset: fromA,
-          length: toA - fromA,
-          text: inserted.sliceString(0, inserted.length),
-        })
-      })
-      return { ...txn, changes: rebased }
-    })
-    this.unconfirmed = this.unconfirmed.mapDesc(gCs, false) as ChangeSet
-    if (this.ackedChain) {
-      this.ackedChain = this.ackedChain.mapDesc(gCs, false) as ChangeSet
-    }
-    return mapped
-  }
-
-  /** ack ok(seq)：把该事务从待确认队列剥离并复合进已确认链（C-2）。
-   *  事务坐标为 base 系投影，与已确认链同定义域，经 mapDesc rebase 后
-   *  compose（该事务发出晚于已确认事务，mapDesc before=false） */
-  private confirmSentTxn(seq: number): void {
-    const idx = this.sentTxns.findIndex((t) => t.seq === seq)
-    if (idx < 0) {
-      return // 未知 seq（暂停清理后的迟到 ack）：忽略
-    }
-    const [txn] = this.sentTxns.splice(idx, 1)
-    if (!txn) {
-      return
-    }
-    const baseLen = this.ackedChain ? this.ackedChain.length : this.unconfirmed?.length
-    if (baseLen === undefined) {
-      return
-    }
-    const cs = ChangeSet.of(
-      [...txn.changes]
-        .sort((a, b) => a.offset - b.offset)
-        .map((c) => ({ from: c.offset, to: c.offset + c.length, insert: c.text })),
-      baseLen,
-    )
-    this.ackedChain = this.ackedChain
-      ? (this.ackedChain.compose(cs.mapDesc(this.ackedChain, false) as ChangeSet))
-      : cs
-  }
-
-  /** 普通事务与空白格组合净变更共用同一出站/未确认坐标链。 */
-  private recordLocalChangeSet(changeSet: ChangeSet, changes: SerChange[], paste?: PasteStage, plainPasteFeedback?: string): void {
-    if (changes.length === 0 || !this.sessionId) {
-      this.unconfirmed = this.unconfirmed ? this.unconfirmed.compose(changeSet) : changeSet
-      return
-    }
-    // #153 撤销段边界判定（先于本笔累积，比较用上一笔时间戳）：光标边界
-    // 标记来自用户主动移光标（或组合开始时刻的停顿回看）；时间停顿仅在
-    // 非组合态回看——组合进行中不切段（原子性），组合间停顿已在
-    // compositionstart 的 markPauseBoundary 判定过
-    const segmentBoundary = !!paste || !!plainPasteFeedback || this.undoCursorBoundary ||
-      (!this.composing && this.lastLocalInputAt !== null &&
-        Date.now() - this.lastLocalInputAt >= UNDO_SEGMENT_PAUSE_MS)
-    this.undoCursorBoundary = false
-    this.lastLocalInputAt = Date.now()
-    if (this.composing || this.deferredLocal || (
-      this.unconfirmed && touchesUnconfirmedChange(changes, chainSections(this.unconfirmed))
-    )) {
-      if (this.deferredLocal && segmentBoundary) {
-        // #153：分段边界落地——本笔开新撤销段（切分点落在字符边界，两段
-        // 定义域依次衔接，出站坐标由 sendDeferredLocal 依次映射）
-        this.deferredSegments.push({ changes: changeSet, ...(paste ? { paste } : {}), ...(plainPasteFeedback ? { plainPasteFeedback } : {}) })
-      } else if (this.deferredSegments.length > 0) {
-        const last = this.deferredSegments.length - 1
-        const segment = this.deferredSegments[last]!
-        this.deferredSegments[last] = { ...segment, changes: segment.changes.compose(changeSet) }
-      } else {
-        this.deferredSegments = [{ changes: changeSet, ...(paste ? { paste } : {}), ...(plainPasteFeedback ? { plainPasteFeedback } : {}) }]
-      }
-      this.deferredLocal = this.deferredLocal
-        ? this.deferredLocal.compose(changeSet)
-        : changeSet
-      if (this.composing) {
-        this.deferredFromComposition = true
-      }
-      this.unconfirmed = this.unconfirmed ? this.unconfirmed.compose(changeSet) : changeSet
-      // 组合期间不逐笔上报全文快照（#49）：组合中的候选事务一律暂缓
-      // （#123 起含首笔——首笔立即出站会让组合结束点的符号补全成为第二
-      // 笔，破坏「一次补全一笔事务」），逐笔 conflict.report 意味着大文档
-      // 下每个候选都全文序列化 + postMessage。组合结束 flush 后
-      // deferredLocal 经 sendDeferredLocal 以单笔 edit.request 出站、文本
-      // 进入宿主权威文档，取回语义由 VSCode 文本管线兜底；丢失窗口仅限
-      // 组合进行中（候选未上屏）快速关闭/断连，与 VSCode 原生编辑器同类
-      // 行为一致。组合外（composing === false）的暂缓输入保持逐笔快照，
-      // 取回兜底不放宽。
-      if (!this.composing) {
-        this.reportConflictSnapshot()
-      }
-      return
-    }
-    const baseChanges = this.toBaseChanges(changes)
-    this.unconfirmed = this.unconfirmed ? this.unconfirmed.compose(changeSet) : changeSet
-    this.seq += 1
-    this.persistState()
-    this.inFlight.add(this.seq)
-    this.sentTxns.push({ seq: this.seq, changes: baseChanges, ...(paste ? { paste } : {}), ...(plainPasteFeedback ? { plainPasteFeedback } : {}) })
-    this.bridge.postMessage({
-      kind: 'edit.request', sessionId: this.sessionId, docUri: this.docUri,
-      seq: this.seq, baseVersion: this.baseVersion, changes: baseChanges,
-      ...(paste ? { paste } : {}),
-    })
-  }
-
-  private reportBlankCompositionSnapshot(pending: boolean): void {
-    if (!this.sessionId) return
-    this.conflictRevision += 1
-    this.persistState()
-    this.bridge.postMessage({
-      kind: 'conflict.report', sessionId: this.sessionId, docUri: this.docUri,
-      version: this.baseVersion, revision: this.conflictRevision,
-      text: this.view?.state.doc.toString() ?? '', compositionPending: pending,
-    })
-  }
-
-  /** 候选期间只跨桥传变更片段；宿主以组合开始时的全文快照为基线增量应用。 */
-  private reportBlankCompositionChanges(changeSet: ChangeSet): void {
-    if (!this.sessionId) return
-    const changes: SerChange[] = []
-    changeSet.iterChanges((from, to, _fromB, _toB, inserted) => {
-      changes.push({ offset: from, length: to - from, text: inserted.sliceString(0, inserted.length) })
-    })
-    if (changes.length === 0) return
-    this.conflictRevision += 1
-    this.persistState()
-    this.bridge.postMessage({
-      kind: 'composition.changed', sessionId: this.sessionId, docUri: this.docUri,
-      revision: this.conflictRevision, changes,
-    })
-  }
-
-  /** 已发请求全部确认后，以确认后的权威版本发送待发本地净变更。
-   *  #153 撤销分段：暂缓集按撤销段切分出站——队首段即本笔 edit.request
-   *  （一条宿主 undo 记录），余段留守暂缓集；队首段 ack 收敛后本方法再次
-   *  被调用，依次出站下一笔。分段只改撤销粒度：传输合并语义不变（段内
-   *  仍单笔传输），暂缓/冲突/缓冲守卫全部沿用。 */
-  private sendDeferredLocal(): void {
-    // 队首段净抵消时余段继续出站：连续多段恒净抵消以循环处理（原递归
-    // 深度 = 段数，行为等价；每轮迭代重新评估出站守卫）
-    while (this.deferredSegments.length > 0 && !this.suspended && !this.blankComposition &&
-        this.inFlight.size === 0 && !this.hasBufferedSync()) {
-      const segment = this.deferredSegments[0]!
-      const head = segment.changes
-      const rest = this.deferredSegments.slice(1)
-      const restComposed = rest.length > 0
-        ? rest.map(seg => seg.changes).reduce((acc, seg) => acc.compose(seg))
-        : null
-      const changes: SerChange[] = []
-      head.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
-        changes.push({
-          offset: fromA,
-          length: toA - fromA,
-          text: inserted.sliceString(0, inserted.length),
-        })
-      })
-      this.deferredSegments = rest
-      this.deferredLocal = restComposed
-      if (!restComposed) {
-        this.deferredFromComposition = false
-      }
-      // 进入出站流程即清已确认链（先于净抵消判定，对齐分段改造前语义）：
-      // 净抵消段跳过出站时同样清空——否则段耗尽路径遗留 ackedChain，
-      // hasUnlandedLocalEdits 恒真且无收敛点释放，Ctrl+Z 被无限期暂缓
-      this.ackedChain = null
-      this.sentTxns = []
-      if (changes.length === 0) {
-        // 队首段净变更完全抵消（段内输入自相抵消）：跳过出站，余段继续
-        this.unconfirmed = restComposed
-        continue
-      }
-      // 未确认集重挂到「全部已确认 + 暂缓集」复合：发送段计入在途、余段
-      // 留守，整体仍等于原复合（队首段 ∘ 余段）；末段出站时退化为旧语义
-      // （unconfirmed = 该段本身）
-      this.unconfirmed = restComposed ? head.compose(restComposed) : head
-      this.seq += 1
-      this.persistState()
-      this.inFlight.add(this.seq)
-      this.sentTxns.push({ seq: this.seq, changes, ...(segment.paste ? { paste: segment.paste } : {}), ...(segment.plainPasteFeedback ? { plainPasteFeedback: segment.plainPasteFeedback } : {}) })
-      this.bridge.postMessage({
-        kind: 'edit.request',
-        sessionId: this.sessionId,
-        docUri: this.docUri,
-        seq: this.seq,
-        baseVersion: this.baseVersion,
-        changes,
-        ...(segment.paste ? { paste: segment.paste } : {}),
-      })
-      return
-    }
-  }
-
-  /** #153 撤销分段：组合开始时刻回看与上一笔本地输入的停顿——停顿达阈值
-   *  即置位段边界（本组合的净输入落到新段）。组合间分段只能在此判定：
-   *  组合进行中的候选事务不回看停顿（原子性），组合结束后再输入则由
-   *  recordLocalChangeSet 的常规判定覆盖 */
-  private markPauseBoundary(): void {
-    if (this.lastLocalInputAt !== null &&
-        Date.now() - this.lastLocalInputAt >= UNDO_SEGMENT_PAUSE_MS) {
-      this.undoCursorBoundary = true
-    }
-  }
-
-  /** #153 撤销分段：用户主动移光标（点击 / 导航键）开新段。组合进行中
-   *  不置位——真实浏览器里点击通常直接取消组合（触发 compositionend），
-   *  新一轮组合开始时由 markPauseBoundary 重新判定 */
-  private markUndoSegmentBoundary(): void {
-    if (!this.composing) {
-      this.undoCursorBoundary = true
-    }
-  }
-
-  /**
-   * 出站请求坐标转换：本地系 → baseVersion 系（C-2）。宿主重定位把请求
-   * 坐标解释为 baseVersion 系，有未确认编辑时本地系与其不一致（多笔在途
-   * 的连续输入会被静默错位），必须先逆穿未确认集。未确认集为空时本地系
-   * 即 base 系，原样返回。
-   */
-  private toBaseChanges(changes: SerChange[]): SerChange[] {
-    const u = this.unconfirmed
-    if (!u || changes.length === 0) {
-      return changes
-    }
-    const sections = chainSections(u)
-    return changes.map((c) => {
-      const from = localPosToBase(c.offset, sections)
-      const to = localPosToBase(c.offset + c.length, sections)
-      return { offset: from, length: to - from, text: c.text }
-    })
-  }
-
-  private beginBlankComposition(): void {
-    if (this.blankComposition || this.viewMode !== 'live' || !this.view) return
-    const state = this.view.state
-    const selection = state.selection.main
-    if (!selection.empty || (!blankRowInputPlan(state, selection.from, selection.to, 'x') &&
-        !state.field(tableRegionField, false))) return
-    this.blankComposition = { startState: state, changes: null,
-      region: state.field(tableRegionField, false) ?? undefined }
-    this.compositionCommittedText = null
-    this.reportBlankCompositionSnapshot(true)
-  }
-
-  /** 仅空白网格组合：结束后取净输入，一笔规范化并沿既有出站链提交。 */
-  private finishBlankComposition(): boolean {
-    const pending = this.blankComposition
-    const view = this.view
-    if (!pending || !view) return false
-    let net = pending.changes
-    if (!net) {
-      this.blankComposition = null
-      view.dispatch({ selection: view.state.selection, annotations: tableCompositionSettled.of(true) })
-      this.reportBlankCompositionSnapshot(false)
-      return false
-    }
-    const initial: SerChange[] = []
-    net.iterChanges((from, to, _fromB, _toB, inserted) => {
-      initial.push({ offset: from, length: to - from, text: inserted.sliceString(0, inserted.length) })
-    })
-    let normalized = false
-    if (pending.region) {
-      const start = pending.startState
-      const field = start.field(liveDecorationsField, false)
-      const rows = field && tableRowsAt(start, pending.region.tableFrom, field.tree)
-      const header = start.doc.lineAt(pending.region.tableFrom)
-      const lineNumber = header.number + pending.region.rowFrom + (pending.region.rowFrom > 0 ? 1 : 0)
-      const initialLine = lineNumber <= start.doc.lines ? start.doc.line(lineNumber) : null
-      const currentLine = lineNumber <= view.state.doc.lines ? view.state.doc.line(lineNumber) : null
-      // 格定位按行身份 prefixLen 前缀感知切分（#296 审查轮）：原文直切会
-      // 把 `>` 算进首格，typed 回退推导与 selection 锚点错位
-      const rowInfo = rows && rows[pending.region.rowFrom + (pending.region.rowFrom > 0 ? 1 : 0)]
-      const rowPrefix = rowInfo ? prefixLenOf(rowInfo) : 0
-      const initialCell = initialLine && splitTableRowCells(initialLine.text, initialLine.from, rowPrefix)[pending.region.columnFrom]
-      const currentCell = currentLine && splitTableRowCells(currentLine.text, currentLine.from, rowPrefix)[pending.region.columnFrom]
-      if (rows && initialCell && currentCell) {
-        const oldContent = start.doc.sliceString(initialCell.contentFrom, initialCell.contentTo)
-        const newContent = view.state.doc.sliceString(currentCell.contentFrom, currentCell.contentTo)
-        const typed = this.compositionCommittedText ??
-          (newContent.endsWith(oldContent) ? newContent.slice(0, newContent.length - oldContent.length) : newContent)
-        const plan = typed ? planTableRegionReplace(start.doc.toString(), rows, pending.region, typed) : null
-        if (plan || !typed) {
-          const desired = plan ? [...plan.changes].reverse().reduce((doc, change) =>
-            doc.slice(0, change.from) + change.insert + doc.slice(change.to), start.doc.toString())
-            : start.doc.toString()
-          const current = view.state.doc.toString()
-          if (desired !== current) {
-            let prefix = 0
-            while (prefix < current.length && prefix < desired.length && current[prefix] === desired[prefix]) prefix++
-            let suffix = 0
-            while (suffix < current.length - prefix && suffix < desired.length - prefix &&
-              current[current.length - 1 - suffix] === desired[desired.length - 1 - suffix]) suffix++
-            view.dispatch({ changes: { from: prefix, to: current.length - suffix,
-              insert: desired.slice(prefix, desired.length - suffix) },
-              selection: { anchor: plan?.selection ?? initialCell.contentFrom },
-              annotations: tableCompositionSettled.of(true) })
-            net = pending.changes
-          }
-          normalized = true
-        }
-      }
-    }
-    if (initial.length === 1 && initial[0]!.length === 0 && initial[0]!.text) {
-      const edit = initial[0]!
-      const plan = blankRowInputPlan(pending.startState, edit.offset, edit.offset, edit.text)
-      if (plan) {
-        const line = view.state.doc.lineAt(plan.from)
-        view.dispatch({
-          changes: { from: line.from, to: line.to, insert: plan.insert },
-          selection: { anchor: plan.selection },
-        })
-        net = pending.changes
-        normalized = true
-      }
-    }
-    this.blankComposition = null
-    this.compositionCommittedText = null
-    const changes: SerChange[] = []
-    net!.iterChanges((from, to, _fromB, _toB, inserted) => {
-      changes.push({ offset: from, length: to - from, text: inserted.sliceString(0, inserted.length) })
-    })
-    // 组合取消可能先插后删；ChangeSet 仍可包含文本相同的替换。
-    const effective = changes.some((change) =>
-      pending.startState.doc.sliceString(change.offset, change.offset + change.length) !== change.text)
-    if (!effective) {
-      view.dispatch({ selection: view.state.selection, annotations: tableCompositionSettled.of(true) })
-      this.reportBlankCompositionSnapshot(false)
-      return false
-    }
-    if (!normalized) {
-      view.dispatch({ selection: view.state.selection, annotations: tableCompositionSettled.of(true) })
-    }
-    // 并发全文没有可证明的局部重定位，留给暂停态取回，不能覆盖候选。
-    if (this.pendingFull) {
-      this.reportBlankCompositionSnapshot(true)
-      return true
-    }
-    if (this.suspended) {
-      this.reportConflictSnapshot()
-      this.reportBlankCompositionSnapshot(true)
-      return true
-    }
-    this.recordLocalChangeSet(net!, changes)
-    this.reportBlankCompositionSnapshot(false)
-    return true
-  }
-
-  /**
-   * 应用缓冲的外部同步。compositionend 后宏任务晚于 CM6 最终上屏微任务；
-   * 空白网格组合先提交净本地变更，再将外部变更穿过它做重定位。
-   */
-  private flushBufferedExternal(): void {
-    this.flushTimer = undefined
-    if (this.composing || !this.view) {
-      // 新一轮组合进行中：缓冲保持，待下一轮 compositionend 重新调度
-      return
-    }
-    const blankInput = this.finishBlankComposition()
-    if (blankInput && this.pendingFull) {
-      this.pendingFull = undefined
-      this.pendingExternal = []
-      this.pendingVersionAck = undefined
-      this.enterSuspended()
-      this.reportConflictSnapshot()
-      return
-    }
-    if (this.suspended) {
-      // 暂停期间外部增量作废（保留本地输入，恢复时以全文对齐）；
-      // 暂停前缓冲的全文重置仍应用（保留恢复内容，不静默丢弃）
-      const suspendedAckVersion = this.pendingVersionAck
-      this.pendingVersionAck = undefined
-      const groups = this.pendingExternal
-      this.pendingExternal = []
-      if (this.pendingFull) {
-        const { version, text, source } = this.pendingFull
-        this.pendingFull = undefined
-        this.replaceDoc(text)
-        this.baseVersion = Math.max(version, suspendedAckVersion ?? version)
-        this.lastDocChangedVersion = Math.max(this.lastDocChangedVersion, version)
-        if (source === 'resync') {
-          // 协议明文 doc.resync 对暂停面板兼作恢复信号（B-1）：组合中的
-          // 恢复延后到这里生效——全文装载并解除暂停
-          this.exitSuspended()
-          for (const group of groups) {
-            if (group.version > version) {
-              this.dispatchExternal(group.changes)
-              this.baseVersion = Math.max(this.baseVersion, group.version)
-            }
-          }
-          this.refreshReading()
-        }
-      }
-      return
-    }
-    const ackVersion = this.pendingVersionAck
-    this.pendingVersionAck = undefined
-    if (this.pendingFull) {
-      const { version, text } = this.pendingFull
-      this.pendingFull = undefined
-      this.unconfirmed = null
-      this.ackedChain = null
-      this.sentTxns = []
-      this.deferredLocal = null
-      this.deferredSegments = []
-      this.undoCursorBoundary = false
-      this.deferredFromComposition = false
-      this.replaceDoc(text)
-      this.baseVersion = Math.max(version, ackVersion ?? version)
-      this.lastDocChangedVersion = Math.max(this.lastDocChangedVersion, version)
-    }
-    const groups = this.pendingExternal
-    this.pendingExternal = []
-    let lastVersion = this.baseVersion
-    for (const group of groups) {
-      if (this.deferredLocal && !this.deferredFromComposition) {
-        // 非组合的触碰式暂缓与外部并存：保留输入并暂停（#4 既有保守
-        // 口径，suspendResume/compositionBuffer 钉住）。组合暂缓净输入
-        // （#123 起含首笔）不在此列——它与 unconfirmed 同步复合、定义域
-        // 一致，经下方 base 系映射应用，真重叠由 mapped 判定兜底
-        this.enterSuspended()
-        return
-      }
-      // 外部增量已在入队时逆穿到 base 系（迟到逆穿会多平移组合编辑，见
-      // BufferedIncremental 注释）；base 系增量直接穿未确认集应用（C-2 后半段）
-      const mapped = group.baseChanges
-        ? this.applyBaseChanges(group.baseChanges)
-        : null // 入队时即与已确认编辑二义：无法安全映射
-      if (!mapped) {
-        // 外部区间与本地未确认编辑真重叠：无法安全映射。保留本地输入、
-        // 暂停写回并上报冲突（#4；不再 sync.request 全文覆盖丢组合输入）
-        this.enterSuspended()
-        return
-      }
-      this.dispatchExternalChanges(this.view, mapped)
-      lastVersion = group.version
-    }
-    if (this.inFlight.size === 0) {
-      // 缓冲应用完且无在途请求：本地与权威一致
-      this.unconfirmed = null
-      this.ackedChain = null
-      this.sentTxns = []
-    }
-    this.refreshReading()
-    this.baseVersion = Math.max(lastVersion, ackVersion ?? lastVersion)
-    this.sendDeferredLocal()
-    if (groups.length) this.finishPasteHistory(groups.at(-1)!)
-    // #148：缓冲收敛且暂缓集已出站（或本就无暂缓输入）——撤销意图可
-    // 安全发出（若 sendDeferredLocal 刚发出新请求，释放判定继续等待其 ack）
-    this.releasePendingHistory()
-    this.releasePasteFeedback()
-  }
-
-  private scheduleFlush(): void {
-    // deferredLocal 计入（#123）：组合期间一律暂缓的本地净输入在
-    // compositionend 后也由 flush 定时出站（原先仅靠 edit.ack 到达兜底）
-    if (this.flushTimer === undefined && (this.deferredLocal || this.hasBufferedSync() || this.blankComposition)) {
-      this.flushTimer = setTimeout(() => this.flushBufferedExternal(), 0)
-    }
-  }
-
-  /** 撤销/重做转发：宿主持有唯一权威栈，本地不装 history 扩展。
-   *  #148 竞态守卫：本地还有未落地宿主的编辑时（在途未确认请求、IME/触碰
-   *  暂缓集、未确认坐标链任一非空）不立即发出——宿主队列按到达序串行，
-   *  此刻 undo/redo 撤到的是更早的操作，迟到的本地编辑再经重定位静默应用。
-   *  意图按下序暂存，待全部落地后由 releasePendingHistory 发出；暂停面板
-   *  不持有（B-4 口径不变：照发由宿主忽略）。 */
-  private requestHistory(op: 'undo' | 'redo'): boolean {
-    if (!this.sessionId) {
-      return false // 未初始化：让事件继续传播（defaultKeymap 的本地 no-op undo）
-    }
-    this.invalidatePasteFeedback()
-    if (!this.suspended && this.hasUnlandedLocalEdits()) {
-      this.pendingHistoryOps.push(op)
-      // 主动推进出站（暂缓集/缓冲有 flush 定时兜底，这里确保已调度）
-      this.scheduleFlush()
-      return true
-    }
-    this.bridge.postMessage({ kind: 'history.request', op })
-    return true
-  }
-
-  /** #148：本地是否存在尚未落地宿主的编辑。在途未确认请求（inFlight/
-   *  sentTxns）、IME/触碰暂缓集（deferredLocal）、未确认坐标链（unconfirmed/
-   *  ackedChain）、组合中未定稿输入或待 flush 的缓冲任一非空即真。 */
-  private hasUnlandedLocalEdits(): boolean {
-    return this.inFlight.size > 0 ||
-      this.sentTxns.length > 0 ||
-      this.deferredLocal !== null ||
-      this.unconfirmed !== null ||
-      this.ackedChain !== null ||
-      this.composing ||
-      this.blankComposition !== null ||
-      this.hasBufferedSync()
-  }
-
-  /** #148：本地编辑全部落地宿主后，发出暂存的撤销/重做意图。释放点为
-   *  「已落地」状态的收敛处：edit.ack 确认、组合/缓冲 flush 完成、全文
-   *  重同步落地。发出后宿主队列保证 history.request 排在刚落地的
-   *  edit.request 之后，撤销的必然是最后一次已完成的编辑。 */
-  private releasePendingHistory(): void {
-    if (this.pendingHistoryOps.length === 0) {
-      return
-    }
-    if (this.suspended || this.hasUnlandedLocalEdits()) {
-      return
-    }
-    const ops = this.pendingHistoryOps
-    this.pendingHistoryOps = []
-    for (const op of ops) {
-      this.bridge.postMessage({ kind: 'history.request', op })
-    }
-  }
-
-  private replaceDoc(text: string): void {
-    const view = this.view
-    if (!view) {
-      return
-    }
-    view.dispatch({
-      changes: { from: 0, to: view.state.doc.length, insert: text },
-      annotations: externalSync.of(true),
-    })
-  }
 
   // ---- 行号栏（#34）----
 
@@ -10838,287 +9995,6 @@ export class WebviewSyncController {
     this.embedCards?.applyDarkTheme(dark)
   }
 
-  private extensions() {
-    const captureCompositionStart = () => {
-      // #153：组合开始时刻（捕获阶段、置组合态之前）回看与上一笔本地
-      // 输入的停顿——组合间分段的唯一判定点。必须在 composing 置 true 前
-      // 判定（ViewPlugin 捕获阶段先于 domEventHandlers 冒泡运行）；组合
-      // 进行中的候选更新不再回看，否则组合中长停顿后继续选候选会把一次
-      // 组合拆成两段（违反原子性）
-      this.markPauseBoundary()
-      // CM6 的内建 observer 在冒泡阶段会先删除跨行选区；必须在捕获
-      // 阶段标记组合，首笔删除才能进入 deferredLocal 与定稿重建合并。
-      this.composing = true
-      this.beginBlankComposition()
-    }
-    return [
-      EditorView.lineWrapping,
-      // 宿主明暗主题声明：初始按 body 主题 class 判定，切换时热重配
-      // （applyHostTheme）。baseTheme 内建变体接管 caret 等颜色——不硬编码
-      this.darkCompartment.of(EditorView.darkTheme.of(isVscodeDarkBody())),
-      // 行号栏（#34）：源文件行号经 Compartment 装配（设置开关热重配，
-      // mount 时按定义默认开）；列在流内、与正文以固定间距相隔的布局
-      // 见 main.css 的 #34 段（行号列宽随位数自适应，无降级机制）
-      this.lineNumbersCompartment.of(this.lineNumbersOn ? liveLineNumbers() : []),
-      // #296 三轮「块内表格渲染」：容器内表格网格化开关（默认开，设置
-      // 快照/变更到达后热重配；liveDecorationsField 检测 facet 变化全量重建）
-      this.tableRenderCompartment.of(tableContainerRenderFacet.of(this.tableBlockRenderOn)),
-      // 标题实时预览装饰（#5 切片）：直接装饰（StateField）+ 间接装饰
-      // （ViewPlugin 按 visibleRanges），见 liveDecorations.ts 头注释
-      livePreviewDecorations,
-      // 右键保选区（#186 bug 1）：右键 mousedown 在选区内 preventDefault
-      contextMenuSelectionGuard,
-      // #10 链接/图片：视口间接装饰（链接 span、图片 widget）+ Ctrl/Cmd
-      // 单击跳转意图上报（执行归宿主）；#11 双链同通道（原始 target 上报）
-      createLinkInteractions({
-        postActivate: (href, srcStart, srcEnd) => {
-          if (this.sessionId) {
-            this.bridge.postMessage({
-              kind: 'link.activate',
-              sessionId: this.sessionId,
-              docUri: this.docUri,
-              href,
-              srcStart,
-              srcEnd,
-            })
-          }
-        },
-        postActivateWikilink: (target, srcStart, srcEnd) => {
-          if (this.sessionId) {
-            this.bridge.postMessage({
-              kind: 'wikilink.activate',
-              sessionId: this.sessionId,
-              docUri: this.docUri,
-              target,
-              srcStart,
-              srcEnd,
-            })
-          }
-        },
-        images: this.images!,
-      }),
-      // #59 公式：跨行块表（StateField 增量）+ 视口装饰（光标进入显源码、
-      // 离开恢复 KaTeX 排版；渲染与装饰实例均按源文缓存）
-      liveMath,
-      // #60 Mermaid：围栏表 + 跨行块 replace 装饰（光标进入围栏显源码、
-      // 离开恢复渲染图；渲染容器与阅读侧共用 mermaidRender 管线）
-      liveMermaid,
-      // #223/#247 Live 正文嵌入：嵌入表 + 双形态装饰（隐形态只替换嵌入
-      // 精确区间 [from, to] 呈卡片——#247 起不再整行替换，前后文与父结构
-      // 保留 / 显形态源文可见 + 行下方卡片；光标/选区触及源码区间显形，
-      // 离开隐藏）。纯装饰 StateField 无键位语义；卡片内容经 embedCards
-      // （EmbedCardManager）与 Reading 侧同状态库装载
-      liveEmbed,
-      // #163 验收反馈：块 id 标记淡化（行尾 ` ^id` 与独立行 `^id` 双形态
-      // mark 装饰；围栏内部不命中；docChanged 全量行扫描重建）
-      liveBlockId,
-      // #163 验收反馈：跳转目标高亮（行级 line 装饰，effect 驱动）
-      anchorFlash,
-      // #79 代码块卡片：呈现态围栏收起 + 头部横带 + 卡片行类（配置经
-      // Compartment 热重配，围栏表复用上方 mermaidFencesField）
-      this.codeCardCompartment.of(this.codeCardExtension()),
-      // #140 frontmatter 光标引导：成型头区不暴露源码——选区进入被弹到
-      // 闭合行后（filter 硬拦 + updateListener 兜底），编辑收敛到标题栏
-      // 「修改」按钮的 Popover；文档变更同时驱动浮层按最新模型重建
-      frontmatterEditing,
-      // #125 围栏内两步 Tab 越界：必须置于 tableEditing **之前**——CM6
-      // keymap 与 transactionFilter 的顺序语义相反：keymap 把全部绑定按
-      // 扩展数组顺序正序拼接后依序尝试（@codemirror/view buildKeymap/
-      // runHandlers 正序遍历，靠前者先匹配、return false 落穿给后者；
-      // filter 是逆序应用——#123/#124 排在 tableEditing 之后即彼故）。
-      // 靠前装配使「格内有效围栏先越界、越出后 Tab 切格、正文未命中落
-      // 缩进」三段优先级无需改 tableEditing/indentEditing 一行代码；
-      // 未命中 return false 自然落穿。关闭时经 tabEscapeCompartment
-      // 整组退出装配
-      this.tabEscapeCompartment.of(this.tabEscapeOn ? fenceEscape : []),
-      // 表格单元格输入钩子（#12）：表格行内键入 | 转义写回 \|；
-      // 编辑面即 CM6 源文本行，同步链路复用本控制器的标准出站路径
-      tableEditing,
-      // #123 符号自动补全：置于 tableEditing 之后（扩展数组靠后者先
-      // 过滤/先匹配）——符号补全先于表格的空白行规范化与格区替换看到
-      // 事务（无选区单字符场景与它们互斥），Backspace 链先于表格删除
-      // 命令（自动空对是更具体的编辑器状态）；设置关闭时经
-      // symbolAutocloseCompartment 整组退出装配
-      this.symbolAutocloseCompartment.of(this.symbolAutocompleteOn ? symbolAutocomplete : []),
-      // #124 选区包裹：置于 symbolAutocomplete 之后（靠后者先过滤）——
-      // 包裹只认非空选区（与补全分支互斥），改写后补全 filter 按
-      // startState 选区门控自然放行；多 range 原文选区的存续依赖
-      // #237 多光标组的 allowMultipleSelections（独立设置，默认开）；
-      // 关闭时经 compartment 整组退出
-      this.symbolSelectionWrapCompartment.of(this.symbolSelectionWrapOn ? symbolSelectionWrap : []),
-      // #237 多光标：allowMultipleSelections + drawSelection（副光标/多选区
-      // 可见）+ alt+click 添加选区 + defaultKeymap 内建 Ctrl+Alt+方向键接管
-      // （键位所有权归操作注册表）。组内无 keymap/filter 顺序语义（facet/
-      // 绘制层/吞键 keymap 与其他扩展不竞争事务），关闭时整组退出装配
-      this.multicursorCompartment.of(this.multicursorOn ? multicursorExtensions : []),
-      // #119 列表/引用 Enter 前缀延续与退格清层：必须排在 tableEditing
-      // 之后（表格上下文优先，格内 Enter 仍为 <br>）、extraExtensions 的
-      // defaultKeymap 之前（先于通用键位拦截）
-      listEditing,
-      // #120 Tab/Shift+Tab 通用行缩进：排在 tableEditing 之后（表格
-      // 单元格导航优先，表格行不缩进）、defaultKeymap 之前
-      indentEditing,
-      // #161 图片粘贴拦截（paste domEventHandler）：无 keymap/filter 顺序
-      // 语义（paste 与其他 DOM handler 互不竞争），置于装饰与编辑钩子之后
-      // 仅作分组；命中 image/* 剪贴板项即出站宿主落盘，未命中放行默认粘贴
-      EditorView.domEventHandlers({ paste: (event, view) => {
-        if (this.viewMode !== 'live' || this.suspended || view.compositionStarted ||
-            view.state.readOnly || !view.state.facet(EditorView.editable)) return false
-        const data = event.clipboardData
-        if (!data || Array.from(data.items).some((item) => item.kind === 'file' && item.type.startsWith('image/'))) return false
-        const html = data.getData('text/html')
-        if (!html) return false
-        const snapshot: ClipboardSnapshot = { html, images: [] }
-        if (Array.from(data.types).includes('text/plain')) snapshot.text = data.getData('text/plain')
-        const target = { view, doc: view.state.doc, selection: view.state.selection,
-          sessionId: this.sessionId, docUri: this.docUri, modeRevision: this.pasteModeRevision }
-        const reqId = ++this.clipboardReadReqId
-        this.clipboardReadTarget = target
-        this.richPasteDialog?.cancel(false)
-        event.preventDefault()
-        void this.processRichPaste(snapshot, target, reqId)
-        return true
-      } }),
-      createImagePaste({
-        isEnabled: () => {
-          const raw = this.settings?.[IMAGE_PASTE_KEY]
-          const enabled = typeof raw === 'boolean' ? raw : IMAGE_PASTE_DEFAULT
-          // 阅读模式不接管（只读语义）；暂停面板不产生新写回链路
-          return enabled && this.viewMode === 'live' && !this.suspended
-        },
-        getSession: () => (this.sessionId ? { sessionId: this.sessionId, docUri: this.docUri } : null),
-        nextReqId: () => ++this.imagePasteReqId,
-        post: (message) => {
-          if (message.kind === 'image.paste') {
-            this.imagePastePending.add(message.reqId)
-          }
-          this.bridge.postMessage(message)
-        },
-      }),
-      // 查找装饰（#14）：当前匹配（直接）+ 全部匹配（视口内间接）。
-      // #236 引擎：@codemirror/search 的 SearchQuery 作匹配引擎（findSession
-      // 内构造，官方面板与 searchKeymap 不装——高亮自绘）；#241 评审修复
-      // 起官方 replaceNext/replaceAll 命令与 search() query 状态整体退役，
-      // 替换走 computeFindReplaceMatches/planReplaceNext 自研路径（头区
-      // 排除，见 runFindReplace）
-      findDecorations,
-      ...this.extraExtensions,
-      EditorView.updateListener.of((update) => {
-        if (this.quickActionsOpen && (update.docChanged || update.selectionSet)) {
-          // StateField 已在本事务更新；微任务避免在 CM6 update 生命周期内
-          // 再读取旧 EditorView.state。重复信号合并由当前状态读取自然收敛。
-          queueMicrotask(() => this.refreshQuickActions())
-        }
-        if (update.selectionSet && !update.docChanged && this.viewMode === 'live') {
-          const anchor = update.state.selection.main.from
-          if (anchor !== this.modeAnchor) {
-            this.modeAnchor = anchor
-            this.scheduleSelectionSave()
-          }
-        }
-        if (!update.docChanged) {
-          return
-        }
-        // 查找会话的匹配失效（#14）：文档变化后标记过期，微任务中重算并
-        // 刷新（updateListener 内不可同步 dispatch；纯 effect 事务零写回）
-        if (this.findOpen) {
-          queueMicrotask(() => {
-            if (this.findOpen && this.view) {
-              this.findEnsureFresh()
-              this.findRender()
-            }
-          })
-        }
-        // 大纲刷新调度（#54）：仅面板可见时去抖开启（不可见面板不伴随每次
-        // 按键全量解析；数据新鲜度由 view.state 回报前的即时校准兜底）
-        if (this.outlineVisible()) {
-          this.scheduleOutlineRefresh()
-        }
-        for (const tr of update.transactions) {
-          if (!tr.docChanged || tr.annotation(externalSync)) {
-            continue
-          }
-          if (this.blankComposition) {
-            const buffered = this.blankComposition
-            buffered.changes = buffered.changes ? buffered.changes.compose(tr.changes) : tr.changes
-            // #153：空白格组合候选也是本地输入——刷新停顿计时的基准
-            this.lastLocalInputAt = Date.now()
-            this.reportBlankCompositionChanges(tr.changes)
-            continue
-          }
-          if (this.suspended) {
-            // 暂停写回：本地文本继续保留累积，但不回传、不追踪同步状态；
-            // 立即刷新宿主全文快照，快速关闭时也能取回这笔输入。
-            this.reportConflictSnapshot()
-            continue
-          }
-          const changes: SerChange[] = []
-          tr.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
-            changes.push({
-              offset: fromA,
-              length: toA - fromA,
-              text: inserted.sliceString(0, inserted.length),
-            })
-          })
-          if (!this.recordingPasteStage) this.invalidatePasteFeedback()
-          this.recordLocalChangeSet(tr.changes, changes, this.recordingPasteStage, this.recordingPlainPasteFeedback)
-        }
-      }),
-      // 撤销/重做转发 keymap：置于数组末尾——CM6 同优先级 keymap 按数组
-      // 先后依次尝试（先者先匹配），调用方传入的 defaultKeymap（其本地
-      // undo/redo 绑定在未装 history 扩展时返回 false）先于本转发落穿，
-      // 之后才轮到转发请求宿主权威栈
-      keymap.of([
-        { key: 'Mod-z', run: () => this.requestHistory('undo'), stopPropagation: true },
-        { key: 'Shift-Mod-z', run: () => this.requestHistory('redo'), stopPropagation: true },
-        { key: 'Mod-y', run: () => this.requestHistory('redo'), stopPropagation: true },
-      ]),
-      ViewPlugin.fromClass(class {
-        private readonly onStart = captureCompositionStart
-
-        constructor(private readonly view: EditorView) {
-          view.contentDOM.addEventListener('compositionstart', this.onStart, true)
-        }
-
-        destroy() {
-          this.view.contentDOM.removeEventListener('compositionstart', this.onStart, true)
-        }
-      }),
-      // IME 组合状态跟踪：compositionend 后调度缓冲 flush
-      Prec.highest(EditorView.domEventHandlers({
-        compositionstart: () => {
-          // 停顿回看在 captureCompositionStart（捕获阶段）已完成——到达
-          // 冒泡 handler 时 composing 已置 true，此处只保留既有标记逻辑
-          this.composing = true
-          this.beginBlankComposition()
-        },
-        compositionupdate: () => {
-          // 未观察到 start 的迟入组合（missed start 兜底）：捕获阶段未回看
-          // 停顿，这里在置组合态前补判；组合中的候选更新不再回看（原子性）
-          if (!this.composing) {
-            this.markPauseBoundary()
-            this.composing = true
-          }
-          this.beginBlankComposition()
-        },
-        compositionend: (event) => {
-          this.compositionCommittedText = event.data || null
-          this.composing = false
-          this.scheduleFlush()
-        },
-        // #153：用户主动移光标开新撤销段（点击 / 导航键选区移动）；纯输入
-        // 导致的光标后移不在此列（不派发 DOM 事件信号）
-        mousedown: () => {
-          this.markUndoSegmentBoundary()
-        },
-        keydown: (event) => {
-          if (UNDO_SEGMENT_NAV_KEYS.has(event.key)) {
-            this.markUndoSegmentBoundary()
-          }
-        },
-      })),
-    ]
-  }
 }
 
 /** 单条行号对齐采样（collectGutterAlignment 的条目体，#116 flash 审查
