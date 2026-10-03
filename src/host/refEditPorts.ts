@@ -178,7 +178,8 @@ export class RefEditPortRegistry {
 
 /** refEdit.message 的内消息是否属于端口通道（冗余防线：协议校验已白名单，
  *  provider 路由前再判定一次——错误路由直接写 B 的代价高）。P2-11 起资源
- *  消息同通道：B 会话按自身 docUri 守卫并以 B 目录/根边界解析执行。 */
+ *  消息同通道：B 会话按自身 docUri 守卫并以 B 目录/根边界解析执行；P2-14
+ *  起 codeblock.copy 同通道（复制文本经 B 会话 EOL 归一后走宿主剪贴板）。 */
 export function isRefEditClientMessage(message: WebviewToHost): boolean {
   switch (message.kind) {
     case 'edit.request':
@@ -192,6 +193,7 @@ export function isRefEditClientMessage(message: WebviewToHost): boolean {
     case 'image.request':
     case 'image.paste':
     case 'refresh.request':
+    case 'codeblock.copy':
       return true
     default:
       return false

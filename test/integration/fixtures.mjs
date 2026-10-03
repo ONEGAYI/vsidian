@@ -1325,6 +1325,36 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
     'C 次段正文。',
     '',
   ].join('\n'), 'utf8')
+  // P2-14（#291）组合收口：表格格内三层递归（A 表格 → B → C）组合素材 +
+  // B 含代码块（代码卡复制经端口落宿主剪贴板的端到端素材）
+  writeFileSync(path.join(wsDir, 'p214-组合父A.md'), [
+    '# P2-14 组合父 A',
+    '',
+    '| 格头 | 普通头 |',
+    '| --- | --- |',
+    '| ![[p214-组合B\\|格内位]] | 普通格 |',
+    '',
+    'A 尾部段落。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p214-组合B.md'), [
+    '# p214 组合 B',
+    '',
+    '![[p214-组合C]]',
+    '',
+    '```js',
+    'const combo = 1',
+    '```',
+    '',
+    'B 尾部段落。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p214-组合C.md'), [
+    '# p214 组合 C',
+    '',
+    'C 首段正文。',
+    '',
+  ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, 'p213-冲突嵌入.md'), [
     '# P2-13 冲突嵌入',
     '',

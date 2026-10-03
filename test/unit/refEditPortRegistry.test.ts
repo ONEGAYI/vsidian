@@ -5,7 +5,7 @@
 // 生命周期：随面板销毁（releasePanel）整体清账；单个端口释放（releasePort，
 // 离屏回收路径）不清——曾编辑事实与端口在场是两个概念。
 import { describe, expect, it } from 'vitest'
-import { RefEditPortRegistry, type RefEditBinding } from '../../src/host/refEditPorts'
+import { isRefEditClientMessage, RefEditPortRegistry, type RefEditBinding } from '../../src/host/refEditPorts'
 
 const PANEL_A = { panelSessionId: 'panel-1', panelDocUri: 'file:///d%3A/notes/a.md' }
 const TARGET_B = 'file:///d%3A/notes/b.md'
@@ -72,5 +72,26 @@ describe('P2-13 noteEditAck：面板级「曾成功写入」记账', () => {
     registry.noteEditAck(panelB.panelSessionId, panelB.panelDocUri, TARGET_C)
     registry.releasePanel(PANEL_A.panelSessionId, PANEL_A.panelDocUri)
     expect(registry.panelEditTargets(panelB.panelSessionId, panelB.panelDocUri)).toEqual([TARGET_C])
+  })
+})
+
+describe('isRefEditClientMessage：refEdit.message 内消息白名单', () => {
+  it('P2-14 codeblock.copy 放行（嵌入内代码卡复制经端口走宿主剪贴板）', () => {
+    expect(isRefEditClientMessage({
+      kind: 'codeblock.copy', sessionId: 'panel-9', docUri: TARGET_B, text: 'x\n',
+    })).toBe(true)
+  })
+
+  it('编辑通道与资源消息照旧放行（既有回归）', () => {
+    expect(isRefEditClientMessage({ kind: 'history.request', op: 'undo' })).toBe(true)
+    expect(isRefEditClientMessage({ kind: 'sync.request' })).toBe(true)
+    expect(isRefEditClientMessage({
+      kind: 'refresh.request', sessionId: 'panel-9', docUri: TARGET_B, reqId: 1,
+    })).toBe(true)
+  })
+
+  it('面板级消息仍拒绝（settings/view 族不走目标端口）', () => {
+    expect(isRefEditClientMessage({ kind: 'view.switch.request', target: 'reading' })).toBe(false)
+    expect(isRefEditClientMessage({ kind: 'settings.open' })).toBe(false)
   })
 })

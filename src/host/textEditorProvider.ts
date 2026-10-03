@@ -2163,6 +2163,14 @@ export function createTextEditorProvider(
                   openWikilink: (intent) => {
                     void executeWikilinkIntent(bDoc, intent, bEntry.linkLog)
                   },
+                  // P2-14（#291）#81 复制端口随虚拟面板注入：嵌入内代码卡
+                  // 复制经端口进 B 会话（codeblock.copy 按自身 docUri 守卫
+                  // + B 文档 EOL 归一）后由剪贴板端口执行——与根面板同语义
+                  writeClipboard: (text: string) => {
+                    void vscode.env.clipboard.writeText(text).then(undefined, (error: unknown) => {
+                      console.error('[vsidian] 剪贴板写入失败（嵌入代码卡复制）', error)
+                    })
+                  },
                 }, { refOrigin: { docUri: document.uri.toString() } })
                 refPorts.register(binding)
                 send({
