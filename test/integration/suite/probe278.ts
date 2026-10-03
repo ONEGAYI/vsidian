@@ -709,7 +709,14 @@ export const probe278Cases: Array<[string, () => Promise<void>]> = [
     // 左右内容完整可读；B 的 dirty 与内容不被打开对比扰动
     assert(temp.getText() === tempText, '临时副本内容应完整')
     assert(bDoc.getText() === B1 && bDoc.isDirty, '打开对比不得改写或清洗 B')
-    assert(tabsOfFile('p201-diff-b.md').every((t) => t.kind === 'diff'), '对比页应为 B 的唯一视图形态')
+    // 对比页应为 B 的唯一视图形态：轮询断言——vscode.diff 打开过程中宿主
+    // 可能先为 modified 侧建 text 编辑器再异步替换为 diff 编辑器，慢宿主上
+    // 瞬时断言会撞上回收窗口（CI 间歇红、快宿主恒绿的时序敏感点；给收敛
+    // 窗后语义不变：diff 标签在场且 B 无其他形态标签）
+    await poll('对比页应为 B 的唯一视图形态', () => {
+      const tabs = tabsOfFile('p201-diff-b.md')
+      return tabs.length > 0 && tabs.every((t) => t.kind === 'diff') ? true : undefined
+    }, 10000)
     logEv('diff-open', {
       leftLen: temp.getText().length, rightDirty: bDoc.isDirty,
       bTextTabs: tabsOfFile('p201-diff-b.md').filter((t) => t.kind === 'text').length,

@@ -12796,39 +12796,51 @@ export const cases: Array<[string, () => Promise<void>]> = [
       return card !== undefined && card.state === 'content' ? v : undefined
     }, 15000)
 
-    // #244 自引用沿当前路径截断：A→A 直接显示循环分态；编辑 A 后
-    // 新实例仍在读取前截断，零订阅、零写回。
+    // #244 自引用沿当前路径截断 + P2-03（#280，ADR-0011）第一跳合法打开：
+    // A→A 的根卡是第一跳自文档引用——合法打开（渲染全文），其内容中的
+    // 自引用是链上自引用，按文档身份截断（errorCycle 子卡在场、无第三
+    // 层）。断言取 rootHost=reading 的稳定容器（live 容器在模式切换过渡
+    // 期并存且内部虚拟化挂载随视口时序变化，不作为观测面）。编辑 A 后
+    // 失效重载一轮同样收敛，订阅无风暴、零写回。
     await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
     await openWithEditor('同步自引用.md')
     await waitSessionReady('同步自引用.md')
     const selfUri = wsUri('同步自引用.md').toString()
     await vscode.commands.executeCommand(CMD.postToPanel, selfUri, { kind: 'view.mode.set', mode: 'reading' })
-    const selfCardOf = (v: ViewState) => (v.readingEmbed ?? []).find((c) => c.host !== 'live')
-    const pullSelf = () => vscode.commands.executeCommand(
+    const selfCardsOf = (v: ViewState) => (v.readingEmbed ?? []).filter((c) => c.rootHost === 'reading')
+    const selfPull = () => vscode.commands.executeCommand(
       CMD.viewState, wsUri('同步自引用.md').toString(), 0) as Promise<ViewState | undefined>
-    await poll('自引用循环分态', async () => {
-      const v = await pullSelf()
-      const card = v && selfCardOf(v)
-      return card !== undefined && card.state === 'error' &&
-        card.note === editorMessages()['hover.errorCycle'] ? v : undefined
+    await poll('自引用第一跳合法打开', async () => {
+      const v = await selfPull()
+      return v !== undefined && selfCardsOf(v).some((c) => c.state === 'content') ? v : undefined
     })
+    const firstOpen = await poll('自引用链上截断', async () => {
+      const v = await selfPull()
+      return v !== undefined && selfCardsOf(v).some((c) => c.state === 'error' &&
+        c.note === editorMessages()['hover.errorCycle']) ? v : undefined
+    })
+    const selfBaseLen = selfCardsOf(firstOpen).find((c) => c.state === 'content')?.textLen ?? 0
     const selfEdit = new vscode.WorkspaceEdit()
     selfEdit.replace(wsUri('同步自引用.md'), new vscode.Range(0, 0, 0, 0), '# 自引用首段追加\n\n')
     assert(await vscode.workspace.applyEdit(selfEdit), '自引用编辑应成功应用')
     await poll('编辑后自引用仍截断', async () => {
-      const v = await pullSelf()
-      const card = v && selfCardOf(v)
-      return card !== undefined && card.state === 'error' &&
-        card.note === editorMessages()['hover.errorCycle'] ? v : undefined
+      const v = await selfPull()
+      if (v === undefined) {
+        return undefined
+      }
+      const cards = selfCardsOf(v)
+      const reloaded = cards.some((c) => c.state === 'content' && (c.textLen ?? 0) > selfBaseLen)
+      return reloaded && cards.some((c) => c.state === 'error' &&
+        c.note === editorMessages()['hover.errorCycle']) ? v : undefined
     }, 15000)
-    // 收敛断言：两个防抖周期后没有建立任何自引用目标订阅。
+    // 收敛断言：两个防抖周期后订阅计数稳定（第一跳合法装载的目标订阅
+    // 在场；链上截断不新增订阅——无递归订阅风暴）。
     await new Promise((r) => setTimeout(r, 1500))
     const selfStats1 = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
     await new Promise((r) => setTimeout(r, 800))
     const selfStats2 = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
-    assert(selfStats1.targets === 0 && selfStats1.subscriptions === 0 &&
-      selfStats2.targets === 0 && selfStats2.subscriptions === 0,
-    `自引用读取前截断、无订阅（实际 ${JSON.stringify(selfStats1)} → ${JSON.stringify(selfStats2)}）`)
+    assert(JSON.stringify(selfStats1) === JSON.stringify(selfStats2) && selfStats1.subscriptions > 0,
+    `自引用截断后订阅收敛无风暴（实际 ${JSON.stringify(selfStats1)} → ${JSON.stringify(selfStats2)}）`)
     // 零写回：编辑经 WorkspaceEdit（不走 webview 编辑管线），推送-重载
     // 链路对 edit.request 通道零触碰（appliedEdits 恒 0——重载只读）
     const selfState = (await vscode.commands.executeCommand(CMD.sessionState, selfUri)) as SessionState
