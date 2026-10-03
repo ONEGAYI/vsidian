@@ -66,6 +66,7 @@
   "command.editor.addCursorBelow.title": "Add cursor below",
   "command.ui.hoverPreviewLink.title": "Preview the current link",
   "command.ui.embedToggleMode.title": "Toggle reference internal view mode",
+  "command.ui.embedCloseTarget.title": "Close reference editing",
   "command.wordMotion.cursorLeft.title": "Move left by one word (CJK-aware)",
   "command.wordMotion.selectLeft.title": "Select left by one word (CJK-aware)",
   "command.wordMotion.cursorRight.title": "Move right by one word (CJK-aware)",

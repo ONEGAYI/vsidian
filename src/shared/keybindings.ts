@@ -114,6 +114,13 @@ export const UI_OPERATIONS = [
   // 规格约定模式切换默认未绑定；保存目标不设独立操作（复用焦点内
   // Ctrl+S 路由，见 syncController docKeydown 的 P2-04 段）
   { id: 'embedToggleMode', command: 'onegayi.vsidian.ui.embedToggleMode', titleKey: 'command.ui.embedToggleMode.title', mode: 'both', writes: false, defaults: [] },
+  // P2-05（#282）关闭焦点嵌入的引用编辑：与头部关闭按钮/嵌入内 Esc 同一
+  // 确认链路（dirty 三项模态；无焦点嵌入零操作）。操作本身不直接写权威
+  // 文本（保存/丢弃经用户模态确认后由宿主执行——writes: false）；仅 Live
+  // 生效（Reading 无编辑会话）。规格「浮窗关闭复用 Esc」——嵌入内 Esc 由
+  // 实例 keymap 承载（编辑器按键优先级），本操作默认不占键位（评估记录见
+  // docs/specs/keybindings.md 的 P2-05 节）
+  { id: 'embedCloseTarget', command: 'onegayi.vsidian.ui.embedCloseTarget', titleKey: 'command.ui.embedCloseTarget.title', mode: 'live', writes: false, defaults: [] },
   // #237 多光标·上下添加光标：@codemirror/commands 内置命令，webview 本地
   // 消化（快捷键经 keybindingRouter 本地分支，命令面板经 ui.command 回发，
   // 两条入口共用 webview 同一实现，不做出站宿主往返）。仅 Live 正文生效

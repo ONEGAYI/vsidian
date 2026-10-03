@@ -986,6 +986,9 @@ export class WebviewSyncController {
       // #246 混排占位提升的父文档全文（主文档 Reading 块挂载路径；与
       // readingView.setDocument 同源——CM6 文档即权威文本，LF 坐标一致）
       sourceText: () => this.view?.state.doc.toString() ?? null,
+      // P2-05（#282）主编辑器（A 的 Live 视图）：删除活跃引用的拦截重放
+      // 在确认后派发（changeFilter 由 rootOwnedViewExtensions 装配）
+      mainEditorView: () => this.view ?? null,
     })
     // #223 Live 嵌入 widget 接线（liveEmbed 装饰的 widget 经此挂载共用卡片）
     setLiveEmbedCards(this.embedCards)
@@ -1441,6 +1444,9 @@ export class WebviewSyncController {
       // P2-04（#281）挂卡宿主标记：根正文才发射嵌入卡片装饰（嵌入内部
       // Live 编辑器不挂卡——嵌套结构与命令接线归 P2-10）
       liveEmbedCardsHostMark,
+      // P2-05（#282）删除活跃引用拦截：覆盖活跃端口引用区间的 A 事务先
+      // 拦截确认（取消不写入 A）；重放事务带豁免注解放行
+      ...(this.embedCards ? [this.embedCards.mainDocChangeFilter()] : []),
       // 2026-10 浮层锚点跟随：编辑事务轻量补同步——RO 只感知尺寸变化，
       // 打字改行号位数等「仅移动正文列位置、列宽不变」的场景由事务路径
       // 兜底（每事务两次 rect 读取，浮层不在场时零成本短路）
@@ -1963,6 +1969,16 @@ export class WebviewSyncController {
       case 'refEdit.save.result':
         this.embedCards?.notifySaveResult(message)
         break
+      case 'refEdit.close.state':
+        // P2-05（#282）显式关闭意图的 B 最新状态应答：dirty 弹三项模态，
+        // 干净直接完成退出
+        this.embedCards?.notifyCloseState(message)
+        break
+      case 'refEdit.close.result':
+        // P2-05（#282）确认后的关闭动作结果：closed 完成退出；失败保留
+        // 现场；stale 重新确认
+        this.embedCards?.notifyCloseResult(message)
+        break
       case 'embed.test.mode':
         // P2-04 测试钩子：切换指定嵌入的内部模式（与用户点击头部按钮
         // 同一处理器链路）
@@ -1983,7 +1999,7 @@ export class WebviewSyncController {
         this.embedCards?.testHistory(message.inner, message.op, message.occurrence ?? 0)
         break
       case 'embed.test.portWrite':
-        // P2-04 测试钩子：以给定端口身份伪造 edit.request 出站（宿主侧
+        // P2-04 测试钩子：以给定端口身份伪造一笔 edit.request 出站（宿主侧
         // 重复 seq 去重 / 释放后拒收 / 不可安全写回暂停的目标文本断言载体）
         this.embedCards?.testPortWrite({
           portId: message.portId,
@@ -1995,6 +2011,18 @@ export class WebviewSyncController {
           text: message.text,
           ...(message.repeat !== undefined ? { repeat: message.repeat } : {}),
         })
+        break
+      case 'embed.test.close':
+        // P2-05 测试钩子：触发指定嵌入的显式关闭意图（三径同 requestClose）
+        this.embedCards?.testClose(message.inner, message.intent, message.occurrence ?? 0)
+        break
+      case 'embed.test.dialogAction':
+        // P2-05 测试钩子：点击关闭确认模态按钮（真实 click 同一处理器）
+        this.embedCards?.testDialogAction(message.action)
+        break
+      case 'embed.test.deleteRef':
+        // P2-05 测试钩子：主编辑器派发删除指定引用行事务（真实事务管线）
+        this.embedCards?.testDeleteRef(message.inner, message.occurrence ?? 0)
         break
       case 'hover.target.resolved': {
         // #299 跳转目标提示轻量解析回包（reqId 配对在 targetTip 模块内
@@ -2202,6 +2230,9 @@ export class WebviewSyncController {
           // P2-04 切换焦点嵌入的内部模式（命令面板/键位入口；默认未绑定，
           // 与头部模式按钮同一实现——无焦点嵌入零操作）
           case 'embedToggleMode': this.embedCards?.toggleFocusedMode(); break
+          // P2-05 关闭焦点嵌入的引用编辑（命令面板/键位入口；默认未绑定，
+          // 与头部关闭按钮/Esc 同一确认链路——无焦点嵌入零操作）
+          case 'embedCloseTarget': this.embedCards?.closeFocused(); break
           // #221 预览当前链接：命令面板/宿主命令入口与快捷键（keybindingRouter
           // 本地分支）共用同一实现（目标判定在 webview，无目标静默不误开）
           case 'hoverPreviewLink': this.previewLinkAtFocus(); break

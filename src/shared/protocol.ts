@@ -75,6 +75,27 @@ export type HostToWebview =
   | { kind: 'refEdit.dirty'; fsPath: string; dirty: boolean }
   /** refEdit.save 的结果（保存失败保留现场，dirty 推送另行对齐） */
   | { kind: 'refEdit.save.result'; portId: string; fsPath: string; ok: boolean }
+  /** P2-05（#282）refEdit.close.query 的应答：B 的最新权威状态（dirty /
+   *  version / 根内相对路径）——模态呈现与确认基线的单一事实源（宿主回包
+   *  而非 webview 缓存的 dirty 推送，规避推送时序下的旧值） */
+  | {
+      kind: 'refEdit.close.state'
+      reqId: number
+      fsPath: string
+      dirty: boolean
+      version: number
+      relPath: string
+    }
+  /** P2-05（#282）refEdit.close.execute 的结果：closed = 关闭动作完成（B 已
+   *  保存/回滚，webview 可收尾退出）；save-failed / discard-failed = 动作
+   *  失败保留现场；stale = 确认基线已过期（B 在确认期间被修改或保存后又有
+   *  新修改），须重新确认，不得用旧确认丢弃新修改 */
+  | {
+      kind: 'refEdit.close.result'
+      reqId: number
+      fsPath: string
+      outcome: 'closed' | 'save-failed' | 'discard-failed' | 'stale'
+    }
   /** P2-04 测试钩子：切换指定嵌入（inner + occurrence 序号）的内部模式
    *  （与用户点击头部模式按钮同一处理器链路）；宿主测试无法向 webview
    *  派发真实点击 */
@@ -101,6 +122,20 @@ export type HostToWebview =
       text: string
       repeat?: number
     }
+  /** P2-05（#282）测试钩子：触发指定嵌入的显式关闭意图（与头部关闭按钮 /
+   *  嵌入内 Esc / 删除拦截同一处理器链路；intent 三径同参数） */
+  | {
+      kind: 'embed.test.close'
+      inner: string
+      intent: 'close' | 'escape' | 'delete'
+      occurrence?: number
+    }
+  /** P2-05（#282）测试钩子：点击关闭确认模态的按钮（真实 click 链路；
+   *  宿主测试无法向 webview 派发真实点击） */
+  | { kind: 'embed.test.dialogAction'; action: 'save' | 'discard' | 'cancel' }
+  /** P2-05（#282）测试钩子：在主编辑器派发删除指定引用行的事务（真实
+   *  事务管线——命中活跃引用区间的删除走拦截确认链路） */
+  | { kind: 'embed.test.deleteRef'; inner: string; occurrence?: number }
   /** 请求 webview 回报视图诊断（文本与渲染行数，供测试与性能观测） */
   | { kind: 'view.state.request' }
   /** #272 测试钩子门控的观测开关；只记录传播身份，不改变调度。 */
@@ -702,6 +737,32 @@ export type WebviewToHost =
       portId: string
       fsPath: string
     }
+  /** P2-05（#282）显式关闭意图开始：统一检查目标 B 最新状态（关闭按钮 /
+   *  Esc / 删除活跃引用三径共用；intent 为观测与收尾分派用）。宿主回
+   *  refEdit.close.state */
+  | {
+      kind: 'refEdit.close.query'
+      panelSessionId: string
+      panelDocUri: string
+      portId: string
+      fsPath: string
+      intent: 'close' | 'escape' | 'delete'
+      reqId: number
+    }
+  /** P2-05（#282）用户确认后的关闭动作执行：save = 保存并关闭；discard =
+   *  丢弃修改并关闭（文档级回滚）。confirmedVersion 为用户确认基线（模态
+   *  最新已知版本）——宿主执行前比对 B 当前版本，不一致回 stale 重新确认，
+   *  不得用旧确认丢弃新修改。宿主回 refEdit.close.result */
+  | {
+      kind: 'refEdit.close.execute'
+      panelSessionId: string
+      panelDocUri: string
+      portId: string
+      fsPath: string
+      action: 'save' | 'discard'
+      confirmedVersion: number
+      reqId: number
+    }
   /** view.locate 送达确认（#163 验收反馈）：webview 应用定位后原样回发
    *  消息 offset——宿主只补发「从未送达」的定位意图（面板重载竞态兜底），
    *  已送达的定位交给 webview 持久化锚点恢复，历史程序定位不再重播 */
@@ -876,6 +937,12 @@ export type WebviewToHost =
           parseCount: number; virtualized: boolean; maxMountedBlocks: number
           mountedEver: number; unmountedEver: number
         } | null
+        /** P2-05 关闭确认模态观测（该嵌入发起的退出意图）：none = 无模态 /
+         *  open = 模态在场 / stale = 确认期间目标被修改需重新确认；旧
+         *  webview 缺省。 */
+        closeDialog?: 'none' | 'open' | 'stale'
+        /** P2-05 发起退出意图的径（模态/挂起期间观测）；旧 webview 缺省。 */
+        closeIntent?: 'close' | 'escape' | 'delete' | ''
       }>
       /** #223 Live 嵌入显隐观测：嵌入表逐枚的源码显形态（目标原文、行号、
        *  光标/选区是否触及源码区间——selectionTouchesRange 语义；旧 webview
@@ -2843,6 +2910,27 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         typeof v.portId === 'string' && v.portId.length > 0 &&
         typeof v.fsPath === 'string' && v.fsPath.length > 0
       )
+    case 'refEdit.close.query':
+      // P2-05：关闭意图开始（身份校验与 refEdit.save 同口径 + intent + reqId）
+      return (
+        isString(v.panelSessionId) &&
+        isString(v.panelDocUri) &&
+        typeof v.portId === 'string' && v.portId.length > 0 &&
+        typeof v.fsPath === 'string' && v.fsPath.length > 0 &&
+        (v.intent === 'close' || v.intent === 'escape' || v.intent === 'delete') &&
+        isPositiveInt(v.reqId)
+      )
+    case 'refEdit.close.execute':
+      // P2-05：确认后的动作执行（confirmedVersion 为非负版本基线）
+      return (
+        isString(v.panelSessionId) &&
+        isString(v.panelDocUri) &&
+        typeof v.portId === 'string' && v.portId.length > 0 &&
+        typeof v.fsPath === 'string' && v.fsPath.length > 0 &&
+        (v.action === 'save' || v.action === 'discard') &&
+        isNonNegativeInt(v.confirmedVersion) &&
+        isPositiveInt(v.reqId)
+      )
     case 'refEdit.message': {
       // 编辑通道白名单：inner 消息须为 RefEditClientMessage 的合法形态
       //（链接/图片等消息混入即拒绝——它们不经目标端口）
@@ -3312,6 +3400,23 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         typeof v.fsPath === 'string' && v.fsPath.length > 0 &&
         typeof v.ok === 'boolean'
       )
+    case 'refEdit.close.state':
+      // P2-05：B 最新权威状态（dirty/version/根内相对路径）
+      return (
+        isPositiveInt(v.reqId) &&
+        typeof v.fsPath === 'string' && v.fsPath.length > 0 &&
+        typeof v.dirty === 'boolean' &&
+        isNonNegativeInt(v.version) &&
+        isString(v.relPath)
+      )
+    case 'refEdit.close.result':
+      // P2-05：关闭动作结果（closed / 失败保留现场 / stale 重新确认）
+      return (
+        isPositiveInt(v.reqId) &&
+        typeof v.fsPath === 'string' && v.fsPath.length > 0 &&
+        (v.outcome === 'closed' || v.outcome === 'save-failed' ||
+          v.outcome === 'discard-failed' || v.outcome === 'stale')
+      )
     case 'embed.test.mode':
       // P2-04 测试钩子：inner + 目标模式 + 可选 occurrence 序号
       return (
@@ -3347,6 +3452,20 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         isNonNegativeInt(v.length) &&
         isString(v.text) &&
         (v.repeat === undefined || isPositiveInt(v.repeat))
+      )
+    case 'embed.test.close':
+      // P2-05 测试钩子：inner + 意图三径 + 可选 occurrence 序号
+      return (
+        typeof v.inner === 'string' && v.inner.length > 0 &&
+        (v.intent === 'close' || v.intent === 'escape' || v.intent === 'delete') &&
+        (v.occurrence === undefined || isNonNegativeInt(v.occurrence))
+      )
+    case 'embed.test.dialogAction':
+      return v.action === 'save' || v.action === 'discard' || v.action === 'cancel'
+    case 'embed.test.deleteRef':
+      return (
+        typeof v.inner === 'string' && v.inner.length > 0 &&
+        (v.occurrence === undefined || isNonNegativeInt(v.occurrence))
       )
     case 'view.state.request':
       return true

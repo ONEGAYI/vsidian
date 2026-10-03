@@ -66,6 +66,7 @@
   "command.editor.addCursorBelow.title": "在下方添加光标",
   "command.ui.hoverPreviewLink.title": "预览当前链接",
   "command.ui.embedToggleMode.title": "切换引用的内部视图模式",
+  "command.ui.embedCloseTarget.title": "关闭引用编辑",
   "command.wordMotion.cursorLeft.title": "按词左移（中文分词）",
   "command.wordMotion.selectLeft.title": "按词向左扩展选区（中文分词）",
   "command.wordMotion.cursorRight.title": "按词右移（中文分词）",
