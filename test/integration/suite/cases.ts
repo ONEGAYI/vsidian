@@ -1020,6 +1020,9 @@ interface ViewState {
     conflictChoice?: 'none' | 'open' | 'collapsed'
     conflictComparePending?: boolean
     conflictNotice?: boolean
+    /** P2-09（#286）递归深度与直接父身份——根级计数口径的观测维度 */
+    depth?: number
+    parentInstanceId?: string | null
   }>
   /** #223 Live 嵌入显隐观测：嵌入表逐枚的源码显形态（selectionTouchesRange 语义） */
   liveEmbedReveal?: Array<{ inner: string; line: number; revealed: boolean }>
@@ -13216,9 +13219,10 @@ export const cases: Array<[string, () => Promise<void>]> = [
     // offset 写回——宿主侧以磁盘源文对拍）
     assert(shown.text === parentBefore, `格内嵌入不改写源文（含 \\| 转义，实际 ${JSON.stringify(shown.text.slice(0, 120))}）`)
 
-    // 真宿主读取闭环：三卡装载（表头格 + 数据格两枚；改名嵌入目标章节卡）
+    // 真宿主读取闭环：三卡装载（表头格 + 数据格两枚；改名嵌入目标章节卡）。
+    // P2-09 起孙卡随直接父进 live 挂载——host=live 计数按根级口径过滤
     const loaded = await waitViewState('嵌入表格样例.md', (v) => {
-      const live = (v.readingEmbed ?? []).filter((c) => c.host === 'live')
+      const live = (v.readingEmbed ?? []).filter((c) => c.host === 'live' && !c.parentInstanceId)
       return live.length === 3 && live.every((c) => c.state === 'content')
     })
     const liveCards = (loaded.readingEmbed ?? []).filter((c) => c.host === 'live')
