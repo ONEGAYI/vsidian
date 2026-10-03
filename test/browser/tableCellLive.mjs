@@ -150,8 +150,9 @@ try {
     '光标落「数据行二」文字尾')
   await settle(100)
   const markC = await mark()
-  // 逐字节奏输入（60ms/字）：连击两字会命中基线既有的暂缓窗口异常
-  //（格内输入族问题，非本票范围——logs/p2-08/diag-base2.mjs 复现与留证）
+  // 逐字节奏输入（60ms/字）：P2-08 曾观察连击两字命中格内输入异常（原探针
+  // logs/p2-08/diag-base2.mjs 已删、形态不可考）；#315 复现尝试在当前代码
+  // 三层证据不可复现（见 C2 用例注记），60ms 节奏保留作节奏多样性回归。
   await page.keyboard.type('丁戊', { delay: 60 })
   await settle(350)
   const outC = await after(markC)
@@ -164,6 +165,35 @@ try {
   assert.equal(await page.evaluate(() => window.tableCellMainSelection().head > 0), true)
   passed++
   console.log('[格内Live][PASS] C 焦点回 A：Tab 切格恢复 + 邻格打字实例平移零风暴')
+
+  // ---- 场景 C2：格内零间隔连击「字+|」钉契约（#315） ----
+  // #315 复现尝试三层证据均不可复现：真实 Chromium 9 种驱动组合（含本用例的
+  // keyboard.type 零间隔、CDP Input.insertText 无 keydown 纯路径串行/快连、
+  // P2-08 原文档「丁戊」连击、空白格无尾填充形态、CDP imeSetComposition IME
+  // 组合路径）全部 \| 保真；jsdom 改格 text node 后立即 keydown 亦现状绿
+  //（CM6 keydown-forceFlush 防线）；机制上物理键 keydown 与 DOM 回报 filter
+  // 管道（escapeCellText）双防线覆盖。P2-08 原探针已删、形态不可考。此处
+  // 先绿钉住「格内连击输入不丢 \| 转义、表格不降级」防回归。
+  const cellTextC2 = '数据行二丁戊'
+  const atC2 = textC2.indexOf(cellTextC2)
+  assert.equal(await page.evaluate((p) => window.tableCellFocusMainAt(p), atC2 + cellTextC2.length), true,
+    'C2 光标落数据格文字尾')
+  await settle(100)
+  const markC2 = await mark()
+  await page.keyboard.type('丁|', { delay: 0 })
+  await settle(400)
+  const textC2b = await mainText()
+  assert.ok(textC2b.includes('数据行二丁戊丁\\|'),
+    `C2 连击第二键 | 保转义（实际 ${textC2b.split('\n')[5] ?? ''}）`)
+  const gridRowsC2 = await page.locator('.vsidian-table-grid-row').count()
+  assert.ok(gridRowsC2 >= 3, `C2 表格仍网格化不降级（实际 ${gridRowsC2} 行）`)
+  const outC2 = await after(markC2)
+  assert.equal(countOf(outC2, 'refEdit.bind'), 0, 'C2 连击零重绑')
+  assert.equal(countOf(outC2, 'refEdit.unbind'), 0, 'C2 连击零端口销毁')
+  assert.equal(await page.evaluate(() => window.tableCellCardEditorCount()), 5,
+    'C2 连击后 5 编辑器全部存活')
+  passed++
+  console.log('[格内Live][PASS] C2 零间隔连击「丁|」：\\| 转义保真、表格不降级')
 
   // ---- 场景 D：列移动真实拖拽（列 1 嵌入列 → 列 2 位）——不误弹、端口稳定 ----
   await page.evaluate(() => window.tableCellFocusMainAt(0))
