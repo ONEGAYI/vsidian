@@ -82,6 +82,9 @@ export async function run(): Promise<void> {
         await vscode.commands.executeCommand('onegayi.vsidian._test.setSettings', {
           'editor.lineNumbers': true,
           'general.language': 'auto',
+          // #322 默认编辑器守护开关（残留 false 会让后续守护用例的提示
+          // 语义被关闭）
+          'general.defaultEditorGuard': true,
           // #161 图片粘贴三键并入重置面：pasteLocation/pasteSubpath 残留会
           // 让后续粘贴用例落盘到错误位置（paste 总开关残留 false 则整链
           // 静默失效）
@@ -112,6 +115,23 @@ export async function run(): Promise<void> {
           if (attempt >= 10) {
             console.warn(
               `[集成测试][WARN] 片段状态重置未稳定（directory=${String(snippet.directory)}），放行用例「${name}」`,
+            )
+          }
+          break
+        }
+        await new Promise((r) => setTimeout(r, 100))
+      }
+      // #322 守护面重置（globalState 与设置同层）：版本锁与拒绝记录跨用例
+      // 共享会让「首装检测」类断言被前序写锁污染——每用例前清空（读回校验
+      // + 重试，与设置重置同一防护口径）
+      for (let attempt = 0; ; attempt++) {
+        await vscode.commands.executeCommand('onegayi.vsidian._test.resetEditorGuardState')
+        const guard = (await vscode.commands.executeCommand(
+          'onegayi.vsidian._test.getEditorGuardState')) as { versionLock?: string | null; rejections?: string[] }
+        if ((guard.versionLock == null && (guard.rejections?.length ?? 0) === 0) || attempt >= 10) {
+          if (attempt >= 10) {
+            console.warn(
+              `[集成测试][WARN] 守护状态重置未稳定（versionLock=${String(guard.versionLock)}），放行用例「${name}」`,
             )
           }
           break

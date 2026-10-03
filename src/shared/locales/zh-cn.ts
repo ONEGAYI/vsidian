@@ -777,4 +777,24 @@ export const zhCn: Record<MessageKey, string> = {
   'host.jiebaDeleted': 'jieba 资源已删除，按词移动回退内置引擎。',
   'host.jiebaDeleteFailed': 'jieba 资源删除失败：{detail}。',
   'host.jiebaLoadFailed': 'jieba 在编辑器中加载失败：{detail}。内置引擎保持生效。',
+  /** #322 默认编辑器守护：设置项（呈现归 #323 常规页「默认编辑器」委托组） */
+  'setting.defaultEditorGuard.title': '默认编辑器守护',
+  'setting.defaultEditorGuard.description': '当其他扩展抢占 Markdown 文件的默认编辑器时显示提示通知，并可一键改回 Vsidian。',
+  /** #322 默认编辑器守护：宿主通知（抢占提示 / 修复结果） */
+  'host.defaultEditorTakenOver': 'Markdown 文件的默认编辑器当前为 {name}，要改回 Vsidian 吗？',
+  'host.defaultEditorBuiltinName': 'VSCode 内置文本编辑器',
+  'host.defaultEditorFixLabel': '改回 Vsidian',
+  'host.defaultEditorDismissLabel': '忽略',
+  'host.defaultEditorFixed': 'Vsidian 已恢复为 Markdown 文件的默认编辑器。',
+  'host.defaultEditorFixFailed': '未能自动恢复默认编辑器（可能被工作区设置覆盖），即将打开编辑器关联设置供手动处理。',
+  /** #323 设置页常规页「默认编辑器」委托组：组标题、状态行四形态与手动按钮 */
+  'defaultEditor.title': '默认编辑器',
+  'defaultEditor.statusLabel': '当前默认编辑器',
+  'defaultEditor.statusDescription': 'Markdown 文件默认由哪个编辑器打开。被其他扩展抢占时可一键改回 Vsidian。',
+  'defaultEditor.statusPending': '正在读取当前关联…',
+  'defaultEditor.statusVsidian': 'Vsidian',
+  'defaultEditor.statusBuiltin': 'VSCode 内置文本编辑器',
+  'defaultEditor.statusOther': '其他扩展：{name}',
+  'defaultEditor.statusNone': '无记录（打开 Markdown 文件时由 VSCode 仲裁决定）',
+  'defaultEditor.fixButton': '设为默认',
 }

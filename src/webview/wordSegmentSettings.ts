@@ -1,6 +1,6 @@
 // 设置页「中文分词」二级组（#239 分词分页；#264 起退役为编辑器页尾组）：
 // 分词引擎选择（builtin Intl/jieba）、jieba 下载源选择（jsdelivr/npmmirror/
-// 自定义 URL）与资源下载/删除管理。经 SettingsPageEditorGroup 委托装配进
+// 自定义 URL）与资源下载/删除管理。经 SettingsPageDelegateGroup 委托装配进
 // 编辑器分页（不占侧栏分页槽位）；设置值权威在宿主（settings.snapshot/
 // changed 回显），资源状态权威在宿主（wordSegment.state 推送），组不自行
 // 推断。文案一律 t() 取词（wordSegment.* / setting.* 词条）。
@@ -15,7 +15,7 @@ import {
   WORD_SEGMENT_SOURCE_KEY,
   type SettingsPayload,
 } from '../shared/settings'
-import type { SettingsPageBridge, SettingsPageEditorGroup, SettingsGroupIcon } from './settingsPageView'
+import type { SettingsPageBridge, SettingsPageDelegateGroup, SettingsGroupIcon } from './settingsPageView'
 
 type WordSegmentStateMessage = Extract<import('../shared/protocol').HostToWebview, { kind: 'wordSegment.state' }>
 
@@ -23,7 +23,7 @@ type WordSegmentStateMessage = Extract<import('../shared/protocol').HostToWebvie
 export const WORD_SEGMENT_SECTION_ENGINE_ENTRY = 'engine'
 export const WORD_SEGMENT_SECTION_RESOURCE_ENTRY = 'resource'
 
-export class WordSegmentSection implements SettingsPageEditorGroup {
+export class WordSegmentSection implements SettingsPageDelegateGroup {
   /** 组标题语言键（编辑器页内 h3 二级标题，复用原分词分页标题词条） */
   readonly titleKey = 'wordSegment.title' as const
   /** #264 兼容路由：宿主按退役分页 id 发起 settings.focusSection 时路由

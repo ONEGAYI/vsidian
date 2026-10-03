@@ -47,14 +47,14 @@
 ### 时机模型（两层互补）
 
 - **主动层（版本锁门控）**：激活时比较 globalState 版本锁与 `context.extension.packageJSON.version`，不相等（首装、升级、降级均含）→ 执行一次检测（可提示）→ 无条件写锁为当前版本。主动层 toast 延迟约 1.5 秒出现。
-- **被动层（配置变更监听）**：`workspace.onDidChangeConfiguration` 过滤 `workbench.editorAssociations`，生效值发生**「是我 → 非我」的变更沿**时提示；守护开关关闭时常挂监听仅更新设置页状态行，不提示。
+- **被动层（配置变更监听）**：`workspace.onDidChangeConfiguration` 过滤 `workbench.editorAssociations`，生效值发生**「未接管 → 接管」的变更沿**（实施宽化，原共识为「是我 → 非我」，依据与裁定见第八节实施落档）时提示；守护开关关闭时常挂监听仅更新设置页状态行，不提示。
 - 两层提示共用同一通知与修复链路。
 
 ### 防骚扰语义
 
 - 拒绝记录按抢占者 viewType 存 globalState；同抢占者的被动层提示被压制，换抢占者（viewType 变化）重新具备资格。
 - 版本变化触发的主动检测绕过拒绝记录一次——每版本至多一次主动提示。
-- toast 自然超时（用户未选任何按钮）不记拒绝记录；沿触发保证接管状态不变期间不重复弹；同一时刻通知在途（in-flight）不重复弹。
+- toast 自然超时（用户未选任何按钮）不记拒绝记录；沿触发保证接管状态不变期间不重复弹；同一时刻通知在途（in-flight）不重复弹——在途期间换抢占者的沿在 settle 后补弹（同抢占者不补，一次提示已足够）；每次弹前复核生效值，主动层延迟窗或排队等待期间用户已自行改回的过时指名提示不再弹出。
 - 守护开关（设置页「默认编辑器」组）整体关闭提示；关闭不影响状态行与手动按钮。
 
 ### 设置页形态
@@ -118,3 +118,29 @@
 - **[#323](https://github.com/ONEGAYI/vsidian/issues/323)** `feat: 设置页「默认编辑器」委托组——状态行、守护开关与手动改回`：常规页委托组（状态行四形态、开关呈现、手动按钮），Blocked by #322（消费其判定与修复通道）。
 
 原单票草稿拆分为上述两票：验证路径不同（真宿主抢占场景 vs 设置页回显）、设置页委托组为独立 UI 体量（`wordSegmentSettings` 先例），两票垂直切片、线性依赖。票面正文以两票 issue 为准（含完整验收清单）。实施在独立工作树进行。
+
+## 八、实施落档（#322/#323，2026-10-03，PR #325）
+
+分支 `impl/322-guard-core` 实现并全量验证（compile 零错；单测 5473/5473；真宿主 1.82.3 集成 292/292 含三条新例；PR #325 合并终态——单测 262 文件全过、集成 297/297 含守护五例）。**后续改守护检测、时机模型、写回或防骚扰语义前，必读本节。**
+
+### 行为契约（钉住，不得顺手放宽）
+
+- **沿触发实施宽化**：被动层提示沿由共识的「是我 → 非我」宽化为**「未接管 → 接管」**。依据：宿主仲裁通道（多 default 竞争的官方冲突警告中选 Configure Default，或仲裁静默写入）使生效值从「无记录」直接变「接管」，前值并非「是我」，原义会漏掉这条真实抢占路径；宽化后沿触发防重弹本质不变（接管状态不变化不重复弹），首次被仲裁写入也获得一次提示，拒绝记录与版本绕过语义照常兜底。
+- **模块落点**：纯逻辑单一事实源 `src/shared/editorGuard.ts`（键集常量、接管判定、写回值构造、版本三元组比较、拒绝记录语义），宿主服务 `src/host/editorGuardService.ts` 与装配 `src/host/editorGuardWiring.ts`（端口注入，不依赖 vscode 的部分可假端口单测）。
+- **检测顺序与宿主同向**：多键命中时按 glob 字符串长度降序报告最特异抢占者（对齐宿主 1.82 仲裁的特异性规则，见第四节查证）。
+- **集成重置面**：集成 runner 每用例前重置守护 globalState（版本锁/拒绝记录），与设置重置同清单——否则「首装检测」被前序用例写锁污染。
+- **设置键**：`general.defaultEditorGuard`（默认开）走标准注册表链路，`settingsPageView.generalDefs` 已排除防重复呈现；#323 委托组接管呈现。
+- **测试钩子**：五条 `_test.*`（#322 落四条：`getEditorGuardState` 状态读取（含版本锁与拒绝记录字段）/ `runEditorGuardStartupCheck` 主动检测 / `fixDefaultEditor` 修复 / `resetEditorGuardState` 重置；#323 增 `getDefaultEditorState` 展示载荷），`VSIDIAN_TEST_HOOKS` 门控；集成宿主内通知按超时语义短路（同 provider 对话框短路口径）。
+- **审查修复轮（review-loops，2026-10-03）**：在途提示期间换抢占者的沿 settle 后补弹（同 taker 不补，保留原始绕过语义）；每次弹前复核生效值——延迟窗/排队等待期间用户已自行改回的过时提示不再弹出；`persistState` 持久化失败静默吞（内存态为准，后果仅下次启动多提示一次）。轮 2 复核再收紧两处：挂起槽消费移入 finally（通知端口异常 settle 也不滞留到未来才补弹过时值）；补弹指名以现算生效值为准（挂起等待期间外部再改 associations、尚未触发配置事件的窗口，不重放旧挂起名）。回归用例在 `editorGuardService.test.ts`「审查修复回归」节。
+- **已知边界（审查修复轮裁定不修）**：主动层 1.5s 延迟定时器无 dispose 通道——宿主存活的去激活窗口（如禁用扩展待 reload）内可能多弹一次提示，无实际危害；为该极端窗口向纯逻辑服务注入 dispose 端口不成比例。
+
+### #323 设置页委托组（钉住，不得顺手放宽）
+
+- **四形态展示判定独立于接管判定**：`classifyDefaultEditorDisplay`（vsidian / builtin / other / none）细分 #322 接管判定合并处理的「已是我」与「无记录」；检测序与接管判定同向（glob 长度降序），载荷形态 `DefaultEditorDisplayState`。
+- **状态推送链路**：service `onStateChanged` 在生效判定可能变化的链路（被动层配置变更、`fixNow` 含写回失败）完成后通知；`getDisplayState()` 装配载荷（other 形态经端口反查可读名，失败回退关联值原文）。
+- **常规页装配扩展**：`SettingsPageView` 第五构造参 `generalGroups` 与 `editorGroups` 平行（不复用编辑器页尾槽位，编辑器页尾既有机制零改动）；委托组接口更名 `SettingsPageDelegateGroup`；`categories()` 注册条件计入委托组、`selectSection` 补常规页组路由。
+- **组件契约**：`src/webview/defaultEditorSettings.ts`——状态行四形态、守护开关复用标准设置行结构（值走 `settings.set` 标准链路）、手动按钮已是我禁用；state 推送只重建状态块（开关行 DOM 不动、DOM 顺序恒定）。
+- **协议**：`defaultEditor.state`（宿主→webview）与 `defaultEditor.get` / `defaultEditor.fix`（webview→宿主）。
+- **搜索归属**：常规页委托组条目归常规分组命中——与 #264「委托组条目归所挂分页的分组」同一口径。
+- **视觉断言口径**：设置页无 paint 探针，可见文本/禁用态断言落在 jsdom 同构装配套件（与生产 settingsMain 同构）——设置页既有先例形态；toast 交互与观感六项在人工验证清单。
+- **基线修复留痕**：#322 提交上 `integrationCaseGroups.test.ts` 缺 `getEditorGuardState` mock（全量单测在该基线红，#323 实证），#323 顺带修复并在提交正文留痕；合并态全量 5517/5517 绿终裁。

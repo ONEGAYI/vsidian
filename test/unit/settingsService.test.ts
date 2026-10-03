@@ -81,6 +81,8 @@ it('生产注册表（#34 起）：快照为定义默认值（开关均开除 Li
       'editor.wordSegmentJiebaUrl': '',
       // #296 三轮 块内表格渲染（实验性，默认开 = 容器内表格网格化）
       'experimental.table.blockRender': true,
+      // #322 默认编辑器守护（默认开 = 抢占提示可用；呈现归 #323 委托组）
+      'general.defaultEditorGuard': true,
     })
   })
 

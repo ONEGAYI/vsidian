@@ -357,6 +357,21 @@ body.vscode-high-contrast .vsidian-settings-generated-icon[data-icon='wordSegmen
 .vsidian-wordseg-actions button.vsidian-index-primary:hover { background: var(--vscode-button-hoverBackground, #006ab8); }
 .vsidian-wordseg-actions button:disabled { opacity: 0.55; cursor: default; }
 
+/* ---- #323 常规页「默认编辑器」委托组（状态行 + 手动设为默认按钮；
+ * 守护开关行复用标准设置行 .vsidian-settings-item 结构，样式零新增） ---- */
+.vsidian-defedit-block { padding: 10px 0 6px; display: flex; flex-direction: column; gap: 6px; }
+.vsidian-defedit-label { display: flex; flex-direction: column; gap: 3px; min-width: 0; margin-top: 4px; }
+.vsidian-defedit-caption { font-weight: 600; }
+.vsidian-defedit-description { color: var(--vscode-descriptionForeground, #666); }
+.vsidian-defedit-status { min-height: 20px; margin: 4px 0 0; }
+.vsidian-defedit-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.vsidian-defedit-actions button { min-height: 26px; padding: 3px 10px;
+  border: 1px solid var(--vscode-button-border, var(--vscode-panel-border, #cbd0d8)); border-radius: 6px;
+  color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-background, #0078d4);
+  border-color: transparent; cursor: pointer; }
+.vsidian-defedit-actions button:hover { background: var(--vscode-button-hoverBackground, #006ab8); }
+.vsidian-defedit-actions button:disabled { opacity: 0.55; cursor: default; }
+
 
 /* ---- #132 样式参考分页（styleReferenceSettings；条目卡片与过滤工具行） ---- */
 /* #155 跟进：详细查询页签可见时主区收起滚动（:has 联动，切回总表自动恢复）

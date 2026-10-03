@@ -75,6 +75,14 @@ const CMD = {
   snippetState: 'onegayi.vsidian._test.getSnippetState',
   setSnippetDirectory: 'onegayi.vsidian._test.setSnippetDirectory',
   setSnippetEnabled: 'onegayi.vsidian._test.setSnippetEnabled',
+  // #322 默认编辑器守护状态观测与写回通道（通知在钩子模式短路，判定与
+  // 写回链路保持真实）
+  getEditorGuardState: 'onegayi.vsidian._test.getEditorGuardState',
+  resetEditorGuardState: 'onegayi.vsidian._test.resetEditorGuardState',
+  runEditorGuardStartupCheck: 'onegayi.vsidian._test.runEditorGuardStartupCheck',
+  fixDefaultEditor: 'onegayi.vsidian._test.fixDefaultEditor',
+  // #323 设置页「默认编辑器」委托组状态载荷观测（defaultEditor.state 同源）
+  getDefaultEditorState: 'onegayi.vsidian._test.getDefaultEditorState',
   // 快捷键链路（正式 KeybindingService 通道：快照直读存储层）
   getKeybindings: 'onegayi.vsidian._test.getKeybindings',
   setKeybindings: 'onegayi.vsidian._test.setKeybindings',
@@ -15211,6 +15219,181 @@ export const cases: Array<[string, () => Promise<void>]> = [
     console.log('[P2-14] 代码卡复制经端口落宿主剪贴板（含伪身份拒收）通过')
   }],
 
+  // ---- #322：默认编辑器守护（检测 / 版本锁 / 写回闭环 / 复查兜底） ----
+  // 守护 globalState 已由 runner 每用例前经 resetEditorGuardState 重置
+  //（suite/index.ts 重置面）；本扩展通知在 VSIDIAN_TEST_HOOKS=1 下短路
+  //（同 provider 对话框短路口径），提示交互进人工验证清单。
+
+  ['默认编辑器守护：状态读取与版本锁闭环（#322）', async () => {
+    // 新 profile associations 无 Markdown 记录 → 未接管；runner 已重置守护面
+    const idle = (await vscode.commands.executeCommand(CMD.getEditorGuardState)) as {
+      takenOver: boolean; takerViewType: string | null; versionLock: string | null;
+      rejections: string[]; guardEnabled: boolean
+    }
+    assert(idle.takenOver === false && idle.takerViewType === null, `重置后应为未接管，实际 ${JSON.stringify(idle)}`)
+    assert(idle.versionLock === null, `重置后版本锁应为空，实际 ${String(idle.versionLock)}`)
+    assert(Array.isArray(idle.rejections) && idle.rejections.length === 0, '重置后拒绝记录应为空')
+    assert(idle.guardEnabled === true, '守护开关默认开')
+    // 主动层：首装语义（锁空）→ 检测一次并无条件写锁
+    await vscode.commands.executeCommand(CMD.runEditorGuardStartupCheck)
+    const locked = (await vscode.commands.executeCommand(CMD.getEditorGuardState)) as { versionLock: string | null }
+    const version = String(vscode.extensions.getExtension(EXT_ID)!.packageJSON.version ?? '')
+    assert(locked.versionLock === version, `主动检测后版本锁应写为当前版本 ${version}，实际 ${String(locked.versionLock)}`)
+    // 幂等：锁相同再跑不写不提示（未接管场景下无副作用）
+    await vscode.commands.executeCommand(CMD.runEditorGuardStartupCheck)
+    const again = (await vscode.commands.executeCommand(CMD.getEditorGuardState)) as { versionLock: string | null }
+    assert(again.versionLock === version, '锁已相同时应保持不变')
+    // 守护开关经标准设置链路可写（键已进注册表；呈现归 #323 委托组）
+    const off = (await vscode.commands.executeCommand(CMD.setSettings, { 'general.defaultEditorGuard': false })) as { ok: boolean }
+    assert(off.ok === true, '守护开关经标准链路保存应成功')
+    const disabled = (await vscode.commands.executeCommand(CMD.getEditorGuardState)) as { guardEnabled: boolean }
+    assert(disabled.guardEnabled === false, '关闭后状态读取应为 false')
+    await vscode.commands.executeCommand(CMD.setSettings, { 'general.defaultEditorGuard': true })
+    const restored = (await vscode.commands.executeCommand(CMD.getEditorGuardState)) as { guardEnabled: boolean }
+    assert(restored.guardEnabled === true, '恢复默认后状态读取应为 true')
+    console.log(`[#322] 守护状态读取与版本锁闭环通过（版本 ${version}）`)
+  }],
+
+  ['默认编辑器守护：抢占判定与一键改回真实 settings 闭环（#322）', async () => {
+    const cfg = vscode.workspace.getConfiguration('workbench')
+    try {
+      // 预置 global 层他者关联（内置编辑器 default + 无关文件类型保留探针）
+      await cfg.update('editorAssociations', {
+        '*.md': 'default',
+        '*.ipynb': 'test.guard.editor',
+      }, vscode.ConfigurationTarget.Global)
+      const taken = (await vscode.commands.executeCommand(CMD.getEditorGuardState)) as {
+        takenOver: boolean; takerViewType: string | null; takerLabel: string | null
+      }
+      assert(taken.takenOver === true, '生效值非我时应判定接管')
+      assert(taken.takerViewType === 'default', `抢占者应为 default，实际 ${String(taken.takerViewType)}`)
+      assert(typeof taken.takerLabel === 'string' && taken.takerLabel.length > 0, '内置编辑器应有特判可读名')
+      // 一键改回：真实 update Global + 复查 get() 生效值
+      const fix = (await vscode.commands.executeCommand(CMD.fixDefaultEditor)) as { ok: boolean }
+      assert(fix.ok === true, `一键改回应复查成功，实际 ${JSON.stringify(fix)}`)
+      // Configuration 是获取时刻的快照：update 后须重新 getConfiguration 读
+      // 新值（扩展侧端口每次新拿实例，复查逻辑本身不受此影响）
+      const effective = vscode.workspace.getConfiguration('workbench')
+        .get<Record<string, string>>('editorAssociations') ?? {}
+      assert(effective['*.md'] === VIEW_TYPE, `*.md 应改回本扩展，实际 ${String(effective['*.md'])}`)
+      assert(effective['*.markdown'] === VIEW_TYPE, `*.markdown 应常写为本扩展，实际 ${String(effective['*.markdown'])}`)
+      assert(effective['*.ipynb'] === 'test.guard.editor', '无关文件类型映射应保留')
+      const after = (await vscode.commands.executeCommand(CMD.getEditorGuardState)) as { takenOver: boolean }
+      assert(after.takenOver === false, '改回后判定应恢复未接管')
+      console.log('[#322] 抢占判定与一键改回真实 settings 闭环通过')
+    } finally {
+      await cfg.update('editorAssociations', undefined, vscode.ConfigurationTarget.Global)
+    }
+  }],
+
+  ['默认编辑器守护：workspace 层同 key 覆盖时复查兜底降级（#322）', async () => {
+    const cfg = vscode.workspace.getConfiguration('workbench')
+    try {
+      // workspace 层占住 *.md：global 写回胜不过同 key 的 workspace 层
+      //（1.82 合并语义——workspace 条目先铺底，user 条目同 key 不补入）
+      await cfg.update('editorAssociations', { '*.md': 'default' }, vscode.ConfigurationTarget.Workspace)
+      const taken = (await vscode.commands.executeCommand(CMD.getEditorGuardState)) as { takenOver: boolean }
+      assert(taken.takenOver === true, '生效值（含 workspace 层）非我时应判定接管')
+      const fix = (await vscode.commands.executeCommand(CMD.fixDefaultEditor)) as { ok: boolean }
+      assert(fix.ok === false, '复查生效值仍非我时不得误报成功')
+      // 写回确实落到 global 层（基底合并证据），但生效值被 workspace 层覆盖
+      //（读值用新 Configuration 实例，同上）
+      const freshCfg = vscode.workspace.getConfiguration('workbench')
+      const globalValue = freshCfg.inspect('editorAssociations')?.globalValue as Record<string, string> | undefined
+      assert(globalValue?.['*.md'] === VIEW_TYPE, `global 层 *.md 应已写回本扩展，实际 ${String(globalValue?.['*.md'])}`)
+      assert(globalValue?.['*.markdown'] === VIEW_TYPE, 'global 层 *.markdown 应常写')
+      const effective = freshCfg.get<Record<string, string>>('editorAssociations') ?? {}
+      assert(effective['*.md'] === 'default', `生效值应仍被 workspace 层占住，实际 ${String(effective['*.md'])}`)
+      console.log('[#322] workspace 层覆盖复查兜底降级通过')
+    } finally {
+      await cfg.update('editorAssociations', undefined, vscode.ConfigurationTarget.Workspace)
+      await cfg.update('editorAssociations', undefined, vscode.ConfigurationTarget.Global)
+    }
+  }],
+
+  // ---- #323：设置页「默认编辑器」委托组（状态载荷四形态 / 手动改回经
+  //      设置页消息通道闭环）---- 状态行可见文本与开关回显的呈现面由
+  // vitest jsdom 委托组套件钉住（defaultEditorSettings.test.ts，与生产
+  // settingsMain 同构装配）；此处断言真宿主侧「状态行收到的数据」与
+  // 「按钮消息走通真实修复链路」。
+
+  ['默认编辑器守护：设置页状态载荷四形态判定（#323）', async () => {
+    const cfg = vscode.workspace.getConfiguration('workbench')
+    const state = async () =>
+      (await vscode.commands.executeCommand(CMD.getDefaultEditorState)) as {
+        status: string; viewType: string | null; label: string | null
+      }
+    try {
+      await cfg.update('editorAssociations', undefined, vscode.ConfigurationTarget.Global)
+      // 无记录 → none（viewType/label 均 null）
+      const none = await state()
+      assert(none.status === 'none', `无记录应为 none，实际 ${JSON.stringify(none)}`)
+      assert(none.viewType === null && none.label === null, 'none 形态不应携带 viewType/label')
+      // 全是我 → vsidian（与 none 区分——detectEditorTakeover 合并为未接管）
+      await cfg.update('editorAssociations', { '*.md': VIEW_TYPE }, vscode.ConfigurationTarget.Global)
+      const mine = await state()
+      assert(mine.status === 'vsidian', `全是我应为 vsidian，实际 ${JSON.stringify(mine)}`)
+      // 内置编辑器 → builtin（viewType 随行 "default"，label null——设置页自组句）
+      await cfg.update('editorAssociations', { '*.md': 'default' }, vscode.ConfigurationTarget.Global)
+      const builtin = await state()
+      assert(builtin.status === 'builtin', `内置编辑器应为 builtin，实际 ${JSON.stringify(builtin)}`)
+      assert(builtin.viewType === 'default', `builtin 应随行关联值原文，实际 ${String(builtin.viewType)}`)
+      assert(builtin.label === null, 'builtin 形态 label 应为 null（设置页语言包组句）')
+      // 其他扩展 → other：反查不到可读名回退关联值原文
+      const phantom = 'onegayi.vsidian.__nonexistent323.editor'
+      await cfg.update('editorAssociations', { '*.md': phantom }, vscode.ConfigurationTarget.Global)
+      const other = await state()
+      assert(other.status === 'other', `他者关联应为 other，实际 ${JSON.stringify(other)}`)
+      assert(other.viewType === phantom && other.label === phantom,
+        `反查失败应回退原文（viewType/label 均 ${phantom}），实际 ${JSON.stringify(other)}`)
+      console.log('[#323] 设置页状态载荷四形态判定通过')
+    } finally {
+      await cfg.update('editorAssociations', undefined, vscode.ConfigurationTarget.Global)
+    }
+  }],
+
+  ['默认编辑器守护：设置页手动改回按钮闭环（#323）', async () => {
+    const cfg = vscode.workspace.getConfiguration('workbench')
+    try {
+      // 预置被抢占态（内置编辑器 + 无关文件类型保留探针）
+      await cfg.update('editorAssociations', {
+        '*.md': 'default',
+        '*.ipynb': 'test.guard323.editor',
+      }, vscode.ConfigurationTarget.Global)
+      const taken = (await vscode.commands.executeCommand(CMD.getDefaultEditorState)) as { status: string }
+      assert(taken.status === 'builtin', `预置后应为 builtin，实际 ${taken.status}`)
+      // 打开设置页（真实面板装载，经消息通道走通修复链路）
+      await vscode.commands.executeCommand('onegayi.vsidian.openSettings')
+      await poll('设置页打开并就绪', async () => {
+        const i = (await vscode.commands.executeCommand(CMD.settingsPageInfo)) as
+          | { open: boolean; ready: boolean }
+          | undefined
+        return i?.open && i.ready ? true : undefined
+      })
+      // 「设为默认」按钮产生的消息经设置页正式入口注入（与真实
+      // onDidReceiveMessage 同一 handleMessage；通知在钩子模式短路，写回真实）
+      await vscode.commands.executeCommand(CMD.injectSettingsPageMessage, { kind: 'defaultEditor.fix' })
+      await poll('手动改回写回生效', async () => {
+        const effective = vscode.workspace.getConfiguration('workbench')
+          .get<Record<string, string>>('editorAssociations') ?? {}
+        return effective['*.md'] === VIEW_TYPE ? effective : undefined
+      })
+      // 状态载荷同源翻转（设置页状态行收到的数据）：builtin → vsidian
+      const after = (await vscode.commands.executeCommand(CMD.getDefaultEditorState)) as { status: string }
+      assert(after.status === 'vsidian', `改回后载荷应为 vsidian，实际 ${after.status}`)
+      // 无关文件类型映射保留（基底合并不误伤）
+      const effective = vscode.workspace.getConfiguration('workbench')
+        .get<Record<string, string>>('editorAssociations') ?? {}
+      assert(effective['*.ipynb'] === 'test.guard323.editor', '无关文件类型映射应保留')
+      // 状态拉取通道（面板开着经正式入口）：不抛错即通道在线（应答发往
+      // 真实 webview，呈现面由 jsdom 套件钉住）
+      await vscode.commands.executeCommand(CMD.injectSettingsPageMessage, { kind: 'defaultEditor.get' })
+      console.log('[#323] 设置页手动改回按钮闭环通过')
+    } finally {
+      await vscode.commands.executeCommand(CMD.closeSettingsPage)
+      await cfg.update('editorAssociations', undefined, vscode.ConfigurationTarget.Global)
+    }
+  }],
   // ---- #316 bind 在途竞态：refEdit.bind 的 void async 路径在
   //  openTextDocument await 区间内面板 dispose——closeSub 的 releasePanel
   //  查不到在途 binding 静默返回，register 照常执行成为永久孤儿（释放通道

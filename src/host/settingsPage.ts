@@ -23,6 +23,7 @@ import type { KeybindingService } from './keybindingService'
 import type { CssSnippetState } from '../shared/cssSnippets'
 import type { IndexStateMessage } from './vaultIndexMaintenance'
 import type { JiebaWiring } from './jiebaResourceWiring'
+import type { EditorGuardWiring } from './editorGuardWiring'
 
 /** #128 CSS 片段管理接线（extension.ts 注入）：设置页面板的片段消息处理
  *  与状态推送。目录选择对话框（chooseDirectory）经回调进宿主 vscode 层——
@@ -101,6 +102,12 @@ export interface SettingsPageHandle {
    */
   notifyWordSegmentChanged(): void
   /**
+   * #323 默认编辑器守护：宿主生效判定可能变化后（associations 配置变更、
+   * 手动改回）向已开设置页发 defaultEditor.state（面板未开时 no-op——重开
+   * 经 defaultEditor.get 重新拉取权威状态回显）
+   */
+  notifyDefaultEditorChanged(): void
+  /**
    * #132 样式参考：打开（或 reveal）设置页并定位到指定附加分页。
    * 面板未 ready 时在握手完成后补发（webview 装载是异步的）。
    * #231：entry 可选——分页内进一步定位的条目 id（外观分页按条目归属
@@ -122,6 +129,9 @@ export function createSettingsPage(
   /** #239 分词资源接线（extension.ts 注入 createJiebaWiring 产物）：
    *  设置页「中文分词」分页的状态拉取与下载/删除操作 */
   jieba?: JiebaWiring,
+  /** #323 默认编辑器守护接线（extension.ts 注入 createEditorGuardWiring
+   *  产物）：设置页常规页「默认编辑器」委托组的状态拉取与手动改回 */
+  editorGuard?: EditorGuardWiring,
 ): SettingsPageHandle {
   let panel: vscode.WebviewPanel | undefined
   let ready = false
@@ -261,6 +271,23 @@ export function createSettingsPage(
         return
       case 'wordSegment.loadResult':
         return // 编辑器面板链路（provider 消费），设置页不会发出
+      case 'defaultEditor.get':
+        // #323 守护状态拉取（设置页装载/重载的 ready 回填；结果经
+        // notifyDefaultEditorChanged 同款推送——associations 变化与手动改回
+        // 后服务 onStateChanged 广播）
+        if (editorGuard) {
+          ready = true
+          void current?.webview.postMessage({
+            kind: 'defaultEditor.state',
+            ...editorGuard.stateFor(),
+          })
+        }
+        return
+      case 'defaultEditor.fix':
+        // 手动「设为默认」：守护修复链路（合并写回 + 复查 + 失败降级引导）；
+        // 结果经 defaultEditor.state 推送与宿主通知呈现，不逐次应答
+        void editorGuard?.fixNow()
+        return
       case 'index.setPatterns':
         // 结果（含被拒项回显）经 notifyIndexChanged 的 index.state 推送
         void index?.setPatterns(message.patterns)
@@ -418,6 +445,17 @@ export function createSettingsPage(
       void panel.webview.postMessage({
         kind: 'wordSegment.state',
         ...jieba.stateFor(panel.webview),
+      })
+    },
+    // #323 默认编辑器守护状态推送（服务 onStateChanged → extension.ts 接线）：
+    // 面板未开时 no-op（重开经 defaultEditor.get 重新拉取）
+    notifyDefaultEditorChanged: () => {
+      if (!panel || !editorGuard) {
+        return
+      }
+      void panel.webview.postMessage({
+        kind: 'defaultEditor.state',
+        ...editorGuard.stateFor(),
       })
     },
   }
