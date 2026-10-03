@@ -369,7 +369,7 @@ const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   'line-syntax': 5,
   table: 12,
   'reading-structure': 12,
-  'link-image-wikilink': 15,
+  'link-image-wikilink': 16,
   'content-variables': 12,
   'content-limits': 11,
   // chrome 域（86）

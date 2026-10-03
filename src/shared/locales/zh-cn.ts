@@ -427,6 +427,18 @@ export const zhCn: Record<MessageKey, string> = {
   'embed.dirtyDot': '目标有未保存修改',
   'embed.liveBindFailed': '无法接入目标编辑（目标不可用或不是 Markdown）。',
   'embed.livePaused': '编辑已暂停：无法安全写回，输入已保留。',
+  /** P2-05（#282）显式关闭确认：关闭入口悬停词与三项模态（默认取消；
+   *  文件名与文档级丢弃影响须在确认文字中指明） */
+  'embed.closeEditor': '关闭引用编辑',
+  'embed.closeDialogTitle': '关闭引用编辑',
+  'embed.closeDialogMessage': '{file} 有未保存的修改。',
+  'embed.closeDialogDiscardScope': '丢弃将恢复整个文件的已保存内容，包括在其他视图中的未保存修改。',
+  'embed.closeCancel': '取消',
+  'embed.closeSave': '保存并关闭',
+  'embed.closeDiscard': '丢弃修改并关闭',
+  'embed.closeSaveFailed': '保存失败（文件可能只读），已保留当前编辑。',
+  'embed.closeDiscardFailed': '丢弃失败，已保留当前状态。',
+  'embed.closeStale': '目标在确认期间又被修改，请重新确认。',
 
   /** 反链面板（#197：四态与条目；形态改版批次：工具栏/排序/搜索/页头） */
   'backlinks.label': '反向链接',

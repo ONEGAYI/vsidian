@@ -455,6 +455,52 @@ export function createTextEditorProvider(
     }
   }
 
+  /** P2-05（#282）文档级丢弃路线（P2-01 §5.2 已验证）：激活 B 为文本编辑
+   *  （showTextDocument 恒开文本编辑器——默认编辑器解析 .md 会落回本扩展
+   *  custom editor）→ **无参** `workbench.action.files.revert`（带 URI 参数
+   *  的形态在 1.82.3 证伪且有害——误清活动编辑器 + 多余标签，禁用）→
+   *  重显来源面板 A → 差分收掉 B 临时标签（与撤销路由同款收口）。丢弃
+   *  恢复整个 B（含其他视图的未保存修改）；revert 不清 undo 历史（宿主
+   *  合法语义，用户已确认接受）。激活期间 A 的 webview 可能隐藏卸载、
+   *  恢复后重载（P2-04 实测取舍的自然延伸——端口随面板销毁释放，重载
+   *  后嵌入重新绑定，最终状态一致）。 */
+  const revertViaTempActivation = async (
+    bDoc: vscode.TextDocument,
+    originUri: vscode.Uri,
+  ): Promise<boolean> => {
+    try {
+      const tabsBefore = new Set(
+        vscode.window.tabGroups.all.flatMap((g) => g.tabs).filter((t) =>
+          t.input instanceof vscode.TabInputText &&
+          t.input.uri.toString() === bDoc.uri.toString()))
+      await vscode.window.showTextDocument(bDoc, { preview: true })
+      const reverted = await vscode.commands
+        .executeCommand('workbench.action.files.revert')
+        .then(() => true, () => false)
+      if (sessions.get(originUri.toString())?.panels.size) {
+        try {
+          await vscode.commands.executeCommand('vscode.openWith', originUri, VIEW_TYPE)
+        } catch {
+          // 来源面板关闭竞态：保留当前激活态
+        }
+      }
+      for (const group of vscode.window.tabGroups.all) {
+        for (const tab of group.tabs) {
+          if (
+            tab.input instanceof vscode.TabInputText &&
+            tab.input.uri.toString() === bDoc.uri.toString() &&
+            !tabsBefore.has(tab)
+          ) {
+            await vscode.window.tabGroups.close(tab)
+          }
+        }
+      }
+      return reverted
+    } catch {
+      return false
+    }
+  }
+
   // ---- #201 图片刷新协调器（provider 级单件：版本表与失效通道跨会话共享） ----
   const isWindowsHost = process.platform === 'win32'
   const imageRefreshEvents: string[] = []
@@ -1739,7 +1785,8 @@ export function createTextEditorProvider(
         // portId 查绑定——释放后的迟到消息查不到即静默拒收
         if (isWebviewToHost(message) &&
           (message.kind === 'refEdit.bind' || message.kind === 'refEdit.unbind' ||
-            message.kind === 'refEdit.message' || message.kind === 'refEdit.save')) {
+            message.kind === 'refEdit.message' || message.kind === 'refEdit.save' ||
+            message.kind === 'refEdit.close.query' || message.kind === 'refEdit.close.execute')) {
           if (message.panelSessionId !== sessionId || message.panelDocUri !== document.uri.toString()) {
             return
           }
@@ -1855,6 +1902,101 @@ export function createTextEditorProvider(
                   binding.lastDirty = false
                 }
                 send({ kind: 'refEdit.save.result', portId: message.portId, fsPath: message.fsPath, ok })
+              })()
+              return
+            }
+            case 'refEdit.close.query': {
+              // P2-05（#282）显式关闭意图开始：统一检查目标 B 最新权威状态
+              //（dirty/version——模态呈现与确认基线的单一事实源，不信任
+              // webview 缓存的 dirty 推送时序）
+              const binding = refPorts.lookup(message.portId, sessionId, document.uri.toString())
+              if (!binding || binding.fsPath !== message.fsPath) {
+                return
+              }
+              void (async (): Promise<void> => {
+                let bDoc: vscode.TextDocument | undefined = sessions.get(binding.targetUri)?.doc
+                if (!bDoc) {
+                  try {
+                    bDoc = await vscode.workspace.openTextDocument(vscode.Uri.parse(binding.targetUri))
+                  } catch {
+                    // 目标不可装载（极罕见——bind 成功过）：无回包；webview
+                    // 同 entry 的再次意图可覆盖重发（requestClose 允许覆盖）
+                    return
+                  }
+                }
+                send({
+                  kind: 'refEdit.close.state',
+                  reqId: message.reqId,
+                  fsPath: message.fsPath,
+                  dirty: bDoc.isDirty,
+                  version: bDoc.version,
+                  relPath: vscode.workspace.asRelativePath(bDoc.uri, false),
+                })
+              })()
+              return
+            }
+            case 'refEdit.close.execute': {
+              // P2-05（#282）确认后的关闭动作执行。版本守卫（双防线第二道）：
+              // B 当前版本 ≠ 用户确认基线即回 stale 重新确认——不得用旧确认
+              // 丢弃新修改。save：TextDocument.save 失败保留现场；保存后再验
+              // dirty/版本（保存期间又有新修改 → stale）。discard：P2-01 已验证
+              // 的激活 B → 无参 revert → 重显 A → 收临时标签（恢复整个 B，
+              // 含其他视图的未保存修改）。多 occurrence 同目标重复 execute 因
+              // revert 推进版本，第二次到达即 stale——不重复回滚。
+              const binding = refPorts.lookup(message.portId, sessionId, document.uri.toString())
+              if (!binding || binding.fsPath !== message.fsPath) {
+                return
+              }
+              void (async (): Promise<void> => {
+                const reply = (outcome: 'closed' | 'save-failed' | 'discard-failed' | 'stale'): void => {
+                  send({ kind: 'refEdit.close.result', reqId: message.reqId, fsPath: message.fsPath, outcome })
+                }
+                let bDoc: vscode.TextDocument | undefined = sessions.get(binding.targetUri)?.doc
+                if (!bDoc) {
+                  try {
+                    bDoc = await vscode.workspace.openTextDocument(vscode.Uri.parse(binding.targetUri))
+                  } catch {
+                    reply(message.action === 'save' ? 'save-failed' : 'discard-failed')
+                    return
+                  }
+                }
+                if (bDoc.version !== message.confirmedVersion) {
+                  reply('stale')
+                  return
+                }
+                if (message.action === 'save') {
+                  let ok = false
+                  try {
+                    ok = (await bDoc.save()) === true
+                  } catch {
+                    ok = false
+                  }
+                  if (!ok) {
+                    reply('save-failed')
+                    return
+                  }
+                  // 保存成功后再验：另一视图又有新修改（dirty 重现/版本前移）
+                  // 时不关闭，重新确认
+                  if (bDoc.isDirty || bDoc.version !== message.confirmedVersion) {
+                    reply('stale')
+                    return
+                  }
+                  binding.lastDirty = false
+                  reply('closed')
+                  return
+                }
+                const reverted = await revertViaTempActivation(bDoc, document.uri)
+                if (!reverted) {
+                  reply('discard-failed')
+                  return
+                }
+                if (bDoc.isDirty) {
+                  // revert 后仍有未保存修改（异常形态）：不宣称关闭成功
+                  reply('stale')
+                  return
+                }
+                binding.lastDirty = false
+                reply('closed')
               })()
               return
             }

@@ -43,7 +43,8 @@ import { LiveEditorInstance } from './liveInstance'
 import { ImageResourceManager, isDirectImageSrc } from './imageResource'
 import { closeFmPopoverForView } from './frontmatterPopover'
 import type { SettingsPayload } from '../shared/settings'
-import { EditorView } from '@codemirror/view'
+import { EditorView, keymap } from '@codemirror/view'
+import { Annotation, EditorState, Prec, type Extension, type Transaction } from '@codemirror/state'
 
 /** 装配时刻宿主明暗判定（与 syncController.isVscodeDarkBody 同源逻辑；
  *  不跨模块引用避免 syncController↔embedCard 循环导入——热跟随经
@@ -84,6 +85,38 @@ const SAVE_ICON =
   '<path d="M2.5 2.5h9L13.5 4.5v9h-11z"></path><path d="M5 2.5v3.2h5V2.5"></path>' +
   '<path d="M5 13.5V9.5h6v4"></path></svg>'
 
+/** P2-05 显式关闭编辑入口：X 图标（内部 Live 在场时显示；点击走脏目标
+ *  确认链路——保存并关闭／丢弃修改并关闭／取消） */
+const CLOSE_ICON =
+  '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M3.5 3.5l9 9"></path><path d="M12.5 3.5l-9 9"></path></svg>'
+
+/** P2-05 关闭确认模态稳定类名（样式契约 ref-close-dialog 条目同源） */
+export const REF_CLOSE_DIALOG_CLASS_NAMES = {
+  /** 全屏半透明遮罩（body 直接子级；fixed 定位） */
+  backdrop: 'vsidian-ref-close-backdrop',
+  /** 对话框壳（role=dialog aria-modal） */
+  box: 'vsidian-ref-close-dialog',
+  /** 标题行 */
+  title: 'vsidian-ref-close-title',
+  /** 说明行（文件名 + 丢弃影响） */
+  message: 'vsidian-ref-close-message',
+  /** 就地提示行（stale 重新确认 / 保存失败 / 丢弃失败；缺省隐藏） */
+  notice: 'vsidian-ref-close-notice',
+  /** 按钮组 */
+  actions: 'vsidian-ref-close-actions',
+  /** 保存并关闭 */
+  save: 'vsidian-ref-close-save',
+  /** 丢弃修改并关闭（危险动作；主题警示色） */
+  discard: 'vsidian-ref-close-discard',
+  /** 取消（默认焦点） */
+  cancel: 'vsidian-ref-close-cancel',
+} as const
+
+/** P2-05 重放豁免注解：确认删除后重放被拦事务（changeFilter 见注解放行） */
+const refCloseReplay = Annotation.define<boolean>()
+
 /** 嵌入卡片稳定类名（样式契约 content 域 reading-embed-card 条目同源） */
 export const EMBED_CARD_CLASS_NAMES = {
   /** 卡片壳（左引用边条 + 边框；挂 Obsidian 别名 .markdown-embed） */
@@ -100,6 +133,8 @@ export const EMBED_CARD_CLASS_NAMES = {
   mode: 'vsidian-embed-card-mode',
   /** P2-04 保存目标入口（目标未保存时可见） */
   save: 'vsidian-embed-card-save',
+  /** P2-05 显式关闭编辑入口（内部 Live 在场时可见） */
+  close: 'vsidian-embed-card-close',
   /** P2-04 目标未保存圆点（`·`，目标 dirty 时在场） */
   dirty: 'vsidian-embed-card-dirty',
   /** P2-04 内部 Live 编辑器容器（承载嵌入实例的 CM6 EditorView） */
@@ -112,6 +147,10 @@ export const EMBED_CARD_CLASS_NAMES = {
    *  loading 不挂，与悬停浮层 stateError 同口径） */
   stateError: 'vsidian-embed-card-state-error',
 } as const
+
+/** P2-05（#282）显式退出意图三径：close = 头部关闭按钮／键位操作，
+ *  escape = 嵌入内 Esc，delete = 删除活跃引用行（A 事务拦截） */
+type CloseIntent = 'close' | 'escape' | 'delete'
 
 /** 出站上下文（syncController mount 注入；dispose 清空） */
 export interface EmbedCardContext {
@@ -143,6 +182,10 @@ export interface EmbedCardContext {
   /** P2-10 实例事务/选区更新旁路观测（快速操作条等根 chrome 随焦点嵌入
    *  的编辑联动刷新；轻量回调，重活由根自行调度） */
   onLiveUpdate?(update: { docChanged: boolean; selectionSet: boolean }): void
+  /** P2-05（#282）主编辑器（A 的 Live 视图）：删除活跃引用的拦截重放在
+   *  确认后派发到主编辑器（生产由 syncController 注入；缺省时删除意图
+   *  确认后不重放——引用保留，保守路径） */
+  mainEditorView?(): EditorView | null
 }
 
 /** 装载结果缓存（父文档会话内；#224 变更订阅推送后按目标失效清除） */
@@ -161,6 +204,9 @@ interface EmbedLiveState {
   dirty: boolean
   suspended: boolean
   instance: LiveEditorInstance | null
+  /** P2-05 已知最新 B 版本（bound/init/推送取 max——模态确认基线与 stale
+   *  判定的 webview 侧参照；最终防线在宿主执行时比对权威 version） */
+  lastSeenVersion: number
   /** 实例的图片管理器（B 身份来源化请求；结果经 notifyImageResult 路由） */
   images: ImageResourceManager | null
   /** 首开定位完成标记（init 后锚点定位/会话选区恢复只做一次） */
@@ -189,6 +235,9 @@ interface EmbedEntry {
   modeOverride: 'reading' | 'live' | null
   /** P2-04 目标编辑端口（可见且内部 Live 才在场） */
   live: EmbedLiveState | null
+  /** P2-05（#282）挂起的显式退出意图（IME 组合中／写入未 ack 时先保留
+   *  实例，输入落定后重入检查最新 dirty；一次性） */
+  pendingCloseIntent: 'close' | 'escape' | 'delete' | null
   /** P2-04 会话内选区记忆（端口销毁时保存，重绑 init 后恢复） */
   liveSelection: { anchor: number; head: number } | null
   /** P2-04 Live 在场期间的目标失效标记（切回 Reading 时补一次静默重载） */
@@ -227,6 +276,8 @@ interface EmbedCardHandle {
   liveEl: HTMLElement
   modeBtn: HTMLButtonElement
   saveBtn: HTMLButtonElement
+  /** P2-05 显式关闭编辑入口（内部 Live 在场时可见） */
+  closeBtn: HTMLButtonElement
   content: RefContentMount
   display: 'loading' | 'content' | 'error'
   note: string
@@ -259,6 +310,10 @@ export interface EmbedCardProbe {
   liveSuspended: boolean
   /** P2-04 内部 Live 编辑器文档长度（-1 = 无实例；外部同步/编辑回流观测） */
   liveTextLen: number
+  /** P2-05 该嵌入发起的关闭确认模态态（none/open/stale） */
+  closeDialog: 'none' | 'open' | 'stale'
+  /** P2-05 发起（或挂起）的退出意图径 */
+  closeIntent: 'close' | 'escape' | 'delete' | ''
 }
 
 /** 目标原文（`|` 之前——与阅读双链 a 的 href 同口径） */
@@ -349,6 +404,7 @@ export class EmbedCardManager {
         sourceEnd: Number.isInteger(sourceEnd) ? sourceEnd : sourceStart,
         modeOverride: null,
         live: null,
+        pendingCloseIntent: null,
         liveSelection: null,
         pendingReadingRefresh: false,
         loaded: null,
@@ -402,6 +458,15 @@ export class EmbedCardManager {
     saveBtn.setAttribute('data-tooltip', saveLabel)
     saveBtn.innerHTML = SAVE_ICON
     saveBtn.style.display = 'none'
+    // P2-05 显式关闭编辑入口（内部 Live 在场时可见；dirty 走确认链路）
+    const closeBtn = document.createElement('button')
+    closeBtn.type = 'button'
+    closeBtn.className = EMBED_CARD_CLASS_NAMES.close
+    const closeLabel = t('embed.closeEditor')
+    closeBtn.setAttribute('aria-label', closeLabel)
+    closeBtn.setAttribute('data-tooltip', closeLabel)
+    closeBtn.innerHTML = CLOSE_ICON
+    closeBtn.style.display = 'none'
     const openBtn = document.createElement('button')
     openBtn.type = 'button'
     openBtn.className = EMBED_CARD_CLASS_NAMES.open
@@ -414,6 +479,7 @@ export class EmbedCardManager {
     headerRight.className = EMBED_CARD_CLASS_NAMES.headerActions
     headerRight.appendChild(saveBtn)
     headerRight.appendChild(modeBtn)
+    headerRight.appendChild(closeBtn)
     headerRight.appendChild(openBtn)
     header.appendChild(titleEl)
     header.appendChild(headerRight)
@@ -446,6 +512,7 @@ export class EmbedCardManager {
       liveEl,
       modeBtn,
       saveBtn,
+      closeBtn,
       content: entry.content.mount({
         contentEl, scrollEl, strategy: 'virtual',
         session: () => this.context.session(),
@@ -528,6 +595,11 @@ export class EmbedCardManager {
     handle.content.listen(saveBtn, 'click', (event) => {
       event.stopPropagation()
       this.saveLive(entry!)
+    })
+    // P2-05 显式关闭（点击不冒泡父容器；dirty 检查与三项模态在 manager）
+    handle.content.listen(closeBtn, 'click', (event) => {
+      event.stopPropagation()
+      this.requestClose(entry!, 'close')
     })
     // 双容器并存时编辑器 DOM 归最近挂载的 handle 承载（宿主元素移动）
     if (entry.live?.instance) {
@@ -963,6 +1035,7 @@ export class EmbedCardManager {
       dirty: false,
       suspended: false,
       instance: null,
+      lastSeenVersion: 0,
       images: null,
       initialLocated: false,
     }
@@ -1002,6 +1075,7 @@ export class EmbedCardManager {
       live.portId = message.portId
       live.docUri = message.docUri
       live.dirty = message.dirty
+      live.lastSeenVersion = Math.max(live.lastSeenVersion, message.version)
       this.createLiveInstance(entry)
       this.refreshLiveChrome(entry)
     }
@@ -1057,7 +1131,9 @@ export class EmbedCardManager {
       },
       // P2-10：根 chrome 联动（快速操作条状态刷新）——轻量转发，根自行调度
       onViewUpdate: (update) => this.context.onLiveUpdate?.(update),
-    })
+      // P2-05（#282）输入落定回调：挂起的退出意图重入（检查最新 dirty）
+      onLocalInputSettled: () => this.retryPendingClose(entryRef),
+    }, [this.embedEscapeKeymap(entryRef)])
     live.instance.setSession(live.portId, live.docUri)
     hostHandle.liveEl.appendChild(live.instance.getView()!.dom)
     // P2-10 嵌入内右键菜单：转发根（根打开统一菜单并捕获实例目标）。
@@ -1104,7 +1180,10 @@ export class EmbedCardManager {
   }
 
   /** refEdit.push 路由：按 portId 配对驱动实例（释放后的迟到推送查不到
-   *  端口即丢弃——「释放后写入禁止」的行为侧） */
+   *  端口即丢弃——「释放后写入禁止」的行为侧）。P2-05：版本推送更新
+   *  lastSeenVersion 并驱动模态 stale（确认期间目标被修改须重新确认）；
+   *  冲突暂停推送消费挂起的退出意图（suspended guard 使其 no-op——输入
+   *  保留，三项冲突处理归 P2-12）。 */
   notifyPush(message: Extract<HostToWebview, { kind: 'refEdit.push' }>): void {
     for (const entry of this.entries.values()) {
       const live = entry.live
@@ -1112,11 +1191,12 @@ export class EmbedCardManager {
         continue
       }
       const inst = live.instance
-      if (!inst) {
-        continue
-      }
       switch (message.message.kind) {
         case 'init':
+          live.lastSeenVersion = Math.max(live.lastSeenVersion, message.message.version)
+          if (!inst) {
+            continue
+          }
           inst.handleFullSync(message.message.version, message.message.text, {
             source: 'init',
             restoreAnchor: true,
@@ -1124,19 +1204,48 @@ export class EmbedCardManager {
           this.locateLiveInstance(entry)
           break
         case 'edit.ack':
+          if (message.message.ok) {
+            live.lastSeenVersion = Math.max(live.lastSeenVersion, message.message.version)
+            if (this.closeDialogBelongsTo(entry)) {
+              this.markCloseStale()
+            }
+          }
+          if (!inst) {
+            continue
+          }
           inst.handleEditAck(message.message)
           break
         case 'doc.changed':
+          live.lastSeenVersion = Math.max(live.lastSeenVersion, message.message.version)
+          if (this.closeDialogBelongsTo(entry)) {
+            this.markCloseStale()
+          }
+          if (!inst) {
+            continue
+          }
           inst.handleDocChanged(message.message)
           break
         case 'doc.resync':
+          live.lastSeenVersion = Math.max(live.lastSeenVersion, message.message.version)
+          if (!inst) {
+            continue
+          }
           inst.handleFullSync(message.message.version, message.message.text, { source: 'resync' })
           live.suspended = false
           this.refreshLiveChrome(entry)
           break
         case 'session.suspended':
-          inst.handleSessionSuspended()
           live.suspended = true
+          // 冲突暂停：挂起的退出意图就地消费（suspended guard 使重入 no-op）
+          if (entry.pendingCloseIntent !== null) {
+            const intent = entry.pendingCloseIntent
+            entry.pendingCloseIntent = null
+            this.requestClose(entry, intent)
+          }
+          if (!inst) {
+            continue
+          }
+          inst.handleSessionSuspended()
           this.refreshLiveChrome(entry)
           break
       }
@@ -1168,11 +1277,15 @@ export class EmbedCardManager {
   }
 
   /** refEdit.dirty 路由：按 fsPath 命中全部绑定/绑定中的实例（多
-   *  occurrence 一致——目标 dirty 是文档级状态） */
+   *  occurrence 一致——目标 dirty 是文档级状态）。P2-05：模态在场时
+   *  dirty 翻转 = 确认期间目标被修改（stale 重新确认） */
   notifyDirty(message: Extract<HostToWebview, { kind: 'refEdit.dirty' }>): void {
     for (const entry of this.entries.values()) {
       if (entry.live?.fsPath === message.fsPath) {
         entry.live.dirty = message.dirty
+        if (message.dirty && this.closeDialogBelongsTo(entry)) {
+          this.markCloseStale()
+        }
         this.refreshLiveChrome(entry)
       }
     }
@@ -1196,11 +1309,25 @@ export class EmbedCardManager {
   /** 销毁目标编辑端口：保存选区（occurrence 会话记忆）→ 销毁实例与图片
    *  管理器 → 出站 unbind → 清内容预算（Reading 重渲染时重新计费）。
    *  P2-10：属该实例的 frontmatter Popover 随实例关闭（浮层单例持有
-   *  view——实例释放后迟到输入不得经死视图派发） */
+   *  view——实例释放后迟到输入不得经死视图派发）；
+   *  P2-05：该 entry 的在场模态随端口取消（端口释放后确认链路无目标；
+   *  离屏回收不弹窗契约不受影响——模态取消不是新弹窗）、挂起意图与
+   *  拦截 spec 清空 */
   private teardownLive(entry: EmbedEntry): void {
     const live = entry.live
     if (!live) {
       return
+    }
+    if (this.closeDialogBelongsTo(entry)) {
+      this.closePendingDelete = null
+      this.closeCloseDialog()
+    }
+    entry.pendingCloseIntent = null
+    if (this.closePendingDelete?.entry === entry) {
+      this.closePendingDelete = null
+    }
+    if (this.closePendingQuery?.entry === entry) {
+      this.closePendingQuery = null
     }
     const view = live.instance?.getView()
     if (view) {
@@ -1233,14 +1360,16 @@ export class EmbedCardManager {
   }
 
   /** 头部 live chrome 刷新：dirty 圆点在场性（物理移除——干净态无节点）、
-   *  保存入口显隐、暂停态提示 */
+   *  保存入口显隐、暂停态提示、P2-05 关闭编辑入口显隐（端口在场时） */
   private refreshLiveChrome(entry: EmbedEntry): void {
     for (const handle of this.active.values()) {
       if (handle.entry !== entry) {
         continue
       }
       const live = entry.live
-      const dirtyOn = !!live?.portId && live.dirty
+      const portOn = !!live?.portId
+      const dirtyOn = portOn && live!.dirty
+      handle.closeBtn.style.display = portOn ? '' : 'none'
       let dot = handle.cardEl.querySelector<HTMLElement>(`.${EMBED_CARD_CLASS_NAMES.dirty}`)
       if (dirtyOn) {
         if (!dot) {
@@ -1329,19 +1458,6 @@ export class EmbedCardManager {
     return undefined
   }
 
-  /** P2-10 显式关闭焦点嵌入的编辑会话（embedClose 操作执行体）：强制切
-   *  回 Reading 并释放端口（occurrence 会话记忆保留）。目标 dirty 由宿主
-   *  文本管线持有，编辑器销毁不丢弃已写入修改；关闭确认界面属 P2-05 */
-  closeFocused(): boolean {
-    const entry = this.focusedLiveEntry()
-    if (!entry || !entry.live) {
-      return false
-    }
-    entry.modeOverride = 'reading'
-    this.applyInternalMode(entry)
-    return true
-  }
-
   /** P2-10 冲突「放弃当前版本」（conflictDiscard 执行体）：焦点嵌入处于
    *  冲突暂停时经端口出站 sync.request（宿主回 doc.resync → 全文重置并
    *  解除暂停 = 放弃本次未提交输入版本，不回滚整个 B）。无暂停现场零
@@ -1357,8 +1473,384 @@ export class EmbedCardManager {
     return true
   }
 
+  // ---- P2-05（#282）显式关闭确认与输入保护 ----
+  // 三径统一入口 requestClose（头部关闭按钮 / 嵌入内 Esc / 删除活跃引用
+  // 拦截）：IME 组合中或写入未 ack 先保留实例（挂起意图，落定后重入）；
+  // 冲突暂停沿用输入保留（不弹三项模态，P2-12 接入冲突三项）；干净目标
+  // 直接完成退出；dirty 时自绘三项模态（默认取消）。后续浮窗（P2-06）
+  // 复用同一目标操作与结果。
+
+  /** 关闭请求自增 id（close.query / close.execute 按 reqId 配对） */
+  private closeReqSeq = 0
+  /** 在场模态上下文（单实例：一次只处理一个退出意图） */
+  private closeDialog: {
+    entry: EmbedEntry
+    intent: CloseIntent
+    /** 用户确认基线（webview 侧最新已知版本；stale 时更新） */
+    version: number
+    relPath: string
+    reqId: number
+    /** 确认期间目标被修改（重新确认提示在场） */
+    stale: boolean
+    /** DOM 根（backdrop） */
+    root: HTMLElement
+    /** 就地提示行（stale / 失败） */
+    noticeEl: HTMLElement
+  } | null = null
+  /** 在途 close.query 的配对上下文（reqId → 发起 entry/intent；回包按
+   *  reqId 配对后转模态或直接完成退出） */
+  private closePendingQuery: { entry: EmbedEntry; intent: CloseIntent; reqId: number } | null = null
+  /** 拦截的删除活跃引用事务（确认后重放到主编辑器；取消即丢弃） */
+  private closePendingDelete: {
+    entry: EmbedEntry
+    /** 被拦事务的变更 spec（A 文档 LF 坐标） */
+    changes: { from: number; to: number; insert: string }[]
+    /** 拦截时刻的整篇 A 文本快照（重放守卫：拦截以来 A 完全未变才重放） */
+    docSnapshot: string
+  } | null = null
+
+  /** 显式退出意图统一入口 */
+  requestClose(entry: EmbedEntry, intent: CloseIntent): void {
+    const live = entry.live
+    if (!live || live.status !== 'bound' || !live.portId) {
+      return // 无编辑会话（Reading 态）——退出意图无对象
+    }
+    if (live.suspended) {
+      // 冲突暂停沿用输入保留：不弹三项关闭模态（三项冲突处理归 P2-12）；
+      // 实例与输入保留（状态行既有暂停提示在场）
+      entry.pendingCloseIntent = null
+      return
+    }
+    if (this.closeDialog || (this.closePendingQuery && this.closePendingQuery.entry !== entry)) {
+      return // 已有意图在处理（模态在场 / 他 entry 的 query 在途）；同 entry
+      // 的在途 query 允许覆盖重发（宿主目标装载失败等无回包形态可自愈）
+    }
+    if (live.instance?.hasPendingLocalInput()) {
+      // IME 组合中／写入未 ack：先保留实例不吞输入，落定后重入检查最新
+      // dirty（不把未提交输入误报已保存）
+      entry.pendingCloseIntent = intent
+      return
+    }
+    const session = this.context.session()
+    if (!session.sessionId || !session.docUri) {
+      return
+    }
+    const reqId = ++this.closeReqSeq
+    entry.pendingCloseIntent = null
+    this.closePendingQuery = { entry, intent, reqId }
+    this.context.send({
+      kind: 'refEdit.close.query',
+      panelSessionId: session.sessionId,
+      panelDocUri: session.docUri,
+      portId: live.portId,
+      fsPath: live.fsPath,
+      intent,
+      reqId,
+    })
+  }
+
+  /** 输入落定回调（LiveEditorInstance.onLocalInputSettled）：重入挂起意图 */
+  private retryPendingClose(entry: EmbedEntry): void {
+    const intent = entry.pendingCloseIntent
+    if (!intent || entry.pendingCloseIntent === null) {
+      return
+    }
+    entry.pendingCloseIntent = null
+    this.requestClose(entry, intent)
+  }
+
+  /** refEdit.close.state 路由：按在途 query 的 reqId 配对——dirty 弹模态；
+   *  干净直接完成退出（回包是宿主权威快照，不依赖 dirty 推送时序） */
+  notifyCloseState(message: Extract<HostToWebview, { kind: 'refEdit.close.state' }>): void {
+    const pending = this.closePendingQuery
+    if (!pending || pending.reqId !== message.reqId) {
+      return
+    }
+    this.closePendingQuery = null
+    const { entry, intent } = pending
+    const live = entry.live
+    if (live && live.fsPath === message.fsPath) {
+      live.lastSeenVersion = Math.max(live.lastSeenVersion, message.version)
+    }
+    if (!message.dirty) {
+      // 干净目标：无未保存修改，直接完成退出（不弹模态）
+      entry.pendingCloseIntent = null
+      this.finishClose(entry, intent)
+      return
+    }
+    this.openCloseDialog(entry, intent, message.version, message.relPath)
+  }
+
+  /** refEdit.close.result 路由：closed 完成退出；失败保留现场；stale 重新确认 */
+  notifyCloseResult(message: Extract<HostToWebview, { kind: 'refEdit.close.result' }>): void {
+    const dialog = this.closeDialog
+    if (!dialog || dialog.entry.live?.fsPath !== message.fsPath) {
+      return
+    }
+    if (message.outcome === 'closed') {
+      const { entry, intent } = dialog
+      this.closeCloseDialog()
+      this.finishClose(entry, intent)
+      return
+    }
+    if (message.outcome === 'stale') {
+      this.markCloseStale()
+      return
+    }
+    // save-failed / discard-failed：保留现场（模态在场 + 提示行）
+    dialog.noticeEl.style.display = ''
+    dialog.noticeEl.textContent = t(message.outcome === 'save-failed'
+      ? 'embed.closeSaveFailed' : 'embed.closeDiscardFailed')
+  }
+
+  /** 打开三项模态（自绘；默认焦点取消——回车/Enter 不会误触保存或丢弃） */
+  private openCloseDialog(entry: EmbedEntry, intent: CloseIntent, version: number, relPath: string): void {
+    this.closeCloseDialog() // 防御：前一模态残留
+    entry.pendingCloseIntent = null
+    const root = document.createElement('div')
+    root.className = REF_CLOSE_DIALOG_CLASS_NAMES.backdrop
+    const box = document.createElement('div')
+    box.className = REF_CLOSE_DIALOG_CLASS_NAMES.box
+    const titleId = `vsidian-ref-close-title-${++this.closeReqSeq}`
+    box.setAttribute('role', 'dialog')
+    box.setAttribute('aria-modal', 'true')
+    box.setAttribute('aria-labelledby', titleId)
+    const title = document.createElement('div')
+    title.className = REF_CLOSE_DIALOG_CLASS_NAMES.title
+    title.id = titleId
+    title.textContent = t('embed.closeDialogTitle')
+    const message = document.createElement('div')
+    message.className = REF_CLOSE_DIALOG_CLASS_NAMES.message
+    message.textContent = t('embed.closeDialogMessage', { file: relPath })
+    const scope = document.createElement('div')
+    scope.className = REF_CLOSE_DIALOG_CLASS_NAMES.message
+    scope.textContent = t('embed.closeDialogDiscardScope')
+    const notice = document.createElement('div')
+    notice.className = REF_CLOSE_DIALOG_CLASS_NAMES.notice
+    notice.style.display = 'none'
+    const actions = document.createElement('div')
+    actions.className = REF_CLOSE_DIALOG_CLASS_NAMES.actions
+    const mkBtn = (kind: 'save' | 'discard' | 'cancel', labelKey: Parameters<typeof t>[0]) => {
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = REF_CLOSE_DIALOG_CLASS_NAMES[kind]
+      btn.textContent = t(labelKey)
+      btn.addEventListener('click', () => this.onCloseDialogAction(kind))
+      return btn
+    }
+    actions.appendChild(mkBtn('cancel', 'embed.closeCancel'))
+    actions.appendChild(mkBtn('save', 'embed.closeSave'))
+    actions.appendChild(mkBtn('discard', 'embed.closeDiscard'))
+    box.appendChild(title)
+    box.appendChild(message)
+    box.appendChild(scope)
+    box.appendChild(notice)
+    box.appendChild(actions)
+    root.appendChild(box)
+    // 模态键盘语义：Esc = 取消（默认焦点为取消——Enter 落在取消上）
+    root.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation()
+        this.onCloseDialogAction('cancel')
+      }
+    })
+    document.body.appendChild(root)
+    this.closeDialog = {
+      entry, intent, version, relPath,
+      reqId: 0, // execute 的 reqId 在动作时分配
+      stale: false,
+      root,
+      noticeEl: notice,
+    }
+    actions.querySelector<HTMLButtonElement>(`.${REF_CLOSE_DIALOG_CLASS_NAMES.cancel}`)?.focus()
+  }
+
+  /** 关闭模态（DOM 移除 + 上下文清空） */
+  private closeCloseDialog(): void {
+    if (!this.closeDialog) {
+      return
+    }
+    this.closeDialog.root.remove()
+    this.closeDialog = null
+  }
+
+  /** 确认期间目标被修改：stale 提示在场（重新确认；旧确认不丢弃新修改） */
+  private markCloseStale(): void {
+    const dialog = this.closeDialog
+    if (!dialog) {
+      return
+    }
+    dialog.stale = true
+    // 基线刷新为 webview 侧最新已知版本（用户在看到提示后再次点击 = 重新
+    // 确认；宿主执行时仍比对权威版本——双防线）
+    dialog.version = dialog.entry.live?.lastSeenVersion ?? dialog.version
+    dialog.noticeEl.style.display = ''
+    dialog.noticeEl.textContent = t('embed.closeStale')
+  }
+
+  /** 模态按钮动作（真实 click 与测试钩子同一处理器） */
+  private onCloseDialogAction(action: 'save' | 'discard' | 'cancel'): void {
+    const dialog = this.closeDialog
+    if (!dialog) {
+      return
+    }
+    if (action === 'cancel') {
+      // 取消：保留引用与当前输入；删除意图不完成（拦截 spec 丢弃，A 原
+      // 引用保留）
+      this.closePendingDelete = null
+      dialog.entry.pendingCloseIntent = null
+      this.closeCloseDialog()
+      return
+    }
+    const live = dialog.entry.live
+    const session = this.context.session()
+    if (!live?.portId || !session.sessionId || !session.docUri) {
+      this.closeCloseDialog()
+      return
+    }
+    const reqId = ++this.closeReqSeq
+    this.context.send({
+      kind: 'refEdit.close.execute',
+      panelSessionId: session.sessionId,
+      panelDocUri: session.docUri,
+      portId: live.portId,
+      fsPath: live.fsPath,
+      action,
+      confirmedVersion: dialog.version,
+      reqId,
+    })
+  }
+
+  /** 完成退出：close/escape 切回 Reading（会话记忆——不随父级联回 Live）；
+   *  delete 重放被拦的删除事务（A 写入该删除，端口随引用回收） */
+  private finishClose(entry: EmbedEntry, intent: CloseIntent): void {
+    if (intent !== 'delete') {
+      entry.pendingCloseIntent = null
+      if (entry.live) {
+        entry.modeOverride = 'reading'
+        this.applyInternalMode(entry)
+      }
+      return
+    }
+    this.replayPendingDelete()
+  }
+
+  /** 重放被拦的删除事务（守卫：拦截以来 A 完全未变才重放——任何漂移都
+   *  保守放弃，保持现状由用户重新删除） */
+  private replayPendingDelete(): void {
+    const pending = this.closePendingDelete
+    this.closePendingDelete = null
+    if (!pending) {
+      return
+    }
+    pending.entry.pendingCloseIntent = null
+    const view = this.context.mainEditorView?.()
+    if (!view) {
+      return
+    }
+    const current = view.state.doc.toString()
+    if (current !== pending.docSnapshot) {
+      return // 模态期间 A 被修改：不重放（保守——引用保留，用户可重删）
+    }
+    view.dispatch({
+      changes: pending.changes,
+      annotations: refCloseReplay.of(true),
+    })
+  }
+
+  /** 删除活跃引用拦截（changeFilter）：变更完整覆盖任一「端口在场的嵌入
+   *  引用源区间」时拦截（返回 false 取消变更，事务其余部分照常）并记录
+   *  pendingDelete——先确认后写入 A。重放事务带豁免注解放行。 */
+  mainDocChangeFilter(): Extension {
+    return EditorState.changeFilter.of((tr: Transaction): boolean => {
+      if (!tr.docChanged || tr.annotation(refCloseReplay) === true) {
+        return true
+      }
+      // 活跃端口区间（端口在场 = 引用正在编辑；区间即挂载时的源区间）
+      const actives: EmbedEntry[] = []
+      for (const entry of this.entries.values()) {
+        if (entry.live?.portId) {
+          actives.push(entry)
+        }
+      }
+      if (actives.length === 0) {
+        return true
+      }
+      let hit: EmbedEntry | null = null
+      for (const entry of actives) {
+        let matched = false
+        tr.changes.iterChanges((fromA, toA) => {
+          if (!matched && fromA <= entry.sourceStart && toA >= entry.sourceEnd && toA > fromA) {
+            matched = true
+          }
+        })
+        if (matched) {
+          hit = entry
+          break
+        }
+      }
+      if (!hit) {
+        return true // 不相关变更（未覆盖活跃引用区间）：放行
+      }
+      if (this.closeDialog || this.closePendingDelete) {
+        return false // 已有意图在处理：丢弃新命中（先关闭当前模态）
+      }
+      // 记录被拦事务（变更 spec + 全文快照守卫）并发起删除退出意图
+      const changes: { from: number; to: number; insert: string }[] = []
+      tr.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+        changes.push({ from: fromA, to: toA, insert: inserted.toString() })
+      })
+      this.closePendingDelete = {
+        entry: hit,
+        changes,
+        docSnapshot: tr.startState.doc.toString(),
+      }
+      this.requestClose(hit, 'delete')
+      return false
+    })
+  }
+
+  /** 模态是否属于该 entry（state 路由配对用） */
+  private closeDialogBelongsTo(entry: EmbedEntry): boolean {
+    return this.closeDialog?.entry === entry
+  }
+
+  /** 焦点所在嵌入的显式关闭（键位操作入口 embedClose；无焦点嵌入零操作） */
+  closeFocused(): void {
+    const active = document.activeElement
+    if (!(active instanceof Node)) {
+      return
+    }
+    for (const entry of this.entries.values()) {
+      const dom = entry.live?.instance?.getView()?.dom
+      if (dom && dom.contains(active)) {
+        this.requestClose(entry, 'close')
+        return
+      }
+    }
+  }
+
+  /** 嵌入内 Esc：非空选区先收选区（不关闭）；空选区触发显式关闭 */
+  private embedEscapeKeymap(entry: EmbedEntry): Extension {
+    return Prec.high(keymap.of([{
+      key: 'Escape',
+      run: (view) => {
+        const sel = view.state.selection.main
+        if (!sel.empty) {
+          // 先收选区（标准编辑器语义：Esc 折叠选区到光标）——默认 keymap
+          // 无 Escape 绑定，这里显式处理并拦截
+          view.dispatch({ selection: { anchor: sel.head } })
+          return true
+        }
+        this.requestClose(entry, 'escape')
+        return true
+      },
+    }]))
+  }
+
   /** 焦点（document.activeElement）所在嵌入的 entry（无焦点嵌入 null） */
   private focusedLiveEntry(): EmbedEntry | null {
+
     const active = document.activeElement
     if (!(active instanceof Node)) {
       return null
@@ -1421,6 +1913,12 @@ export class EmbedCardManager {
         liveDirty: handle.entry.live?.dirty === true,
         liveSuspended: handle.entry.live?.suspended === true,
         liveTextLen: handle.entry.live?.instance?.getView()?.state.doc.length ?? -1,
+        closeDialog: this.closeDialogBelongsTo(handle.entry)
+          ? (this.closeDialog!.stale ? 'stale' : 'open')
+          : 'none',
+        closeIntent: this.closeDialogBelongsTo(handle.entry)
+          ? this.closeDialog!.intent
+          : handle.entry.pendingCloseIntent ?? '',
       })
     }
     return out
@@ -1457,6 +1955,9 @@ export class EmbedCardManager {
         this.teardownLive(entry)
       }
     }
+    this.closeCloseDialog()
+    this.closePendingDelete = null
+    this.closePendingQuery = null
     for (const el of Array.from(this.active.keys())) {
       this.unmountBlock(el)
     }
@@ -1587,8 +2088,65 @@ export class EmbedCardManager {
   }
 
   private entryOfInner(inner: string, occurrence: number): EmbedEntry | undefined {
-    const matches = [...this.entries.values()].filter((e) => e.inner === inner)
+    // 测试钩子的 occurrence 序号 = 文档序（sourceStart 排序）在场的第 N 个：
+    // entries 的 Map 插入序随 LRU touchEntry 重排（P2-05 实测翻车），且漂移
+    // 死键（父文本变更后旧区间 entry，无在场 handle、无 live）会占序号槽位
+    // ——两者都让 occurrence:N 指向错误实例
+    const matches = [...this.entries.values()]
+      .filter((e) => e.inner === inner)
+      .filter((e) => [...this.active.values()].some((h) => h.entry === e))
+      .sort((a, b) => a.sourceStart - b.sourceStart)
     return matches[occurrence]
+  }
+
+  // ---- P2-05（#282）测试钩子（宿主 embed.test.* 经 syncController 转发；
+  // 与用户交互同一处理器链路）----
+
+  /** 触发指定嵌入的显式关闭意图（三径同 requestClose） */
+  testClose(inner: string, intent: CloseIntent, occurrence = 0): boolean {
+    const entry = this.entryOfInner(inner, occurrence)
+    if (!entry) {
+      return false
+    }
+    this.requestClose(entry, intent)
+    return true
+  }
+
+  /** 点击关闭确认模态按钮（真实 click 同一处理器） */
+  testDialogAction(action: 'save' | 'discard' | 'cancel'): boolean {
+    if (!this.closeDialog) {
+      return false
+    }
+    this.onCloseDialogAction(action)
+    return true
+  }
+
+  /** 在主编辑器派发删除指定引用行的事务（真实事务管线；命中活跃引用
+   *  区间走拦截确认链路）。行范围由嵌入源区间所在行推导（整行含换行） */
+  testDeleteRef(inner: string, occurrence = 0): boolean {
+    const entry = this.entryOfInner(inner, occurrence)
+    const view = this.context.mainEditorView?.()
+    if (!entry || !view) {
+      return false
+    }
+    const doc = view.state.doc
+    if (entry.sourceStart > doc.length || entry.sourceEnd > doc.length) {
+      return false
+    }
+    const line = doc.lineAt(Math.min(entry.sourceStart, doc.length))
+    const to = line.number < doc.lines ? line.to + 1 : line.to // 含行尾换行
+    view.dispatch({ changes: { from: line.from, to } })
+    return true
+  }
+
+  /** 设置指定嵌入内部 Live 实例的选区（Esc 分径测试：非空选区先收选区） */
+  testSetSelection(inner: string, anchor: number, head: number, occurrence = 0): boolean {
+    const view = this.entryOfInner(inner, occurrence)?.live?.instance?.getView()
+    if (!view) {
+      return false
+    }
+    view.dispatch({ selection: { anchor, head } })
+    return true
   }
 
   // ---- 内部 ----

@@ -341,6 +341,10 @@ export interface LiveEditorInstanceDeps {
   /** 根特性的事务旁路观测（快速操作条刷新/模式锚点/查找/大纲随事务联动；
    *  在实例同步簿记之前调用，保持原 updateListener 内的先后次序） */
   onViewUpdate?(update: ViewUpdate): void
+  /** P2-05（#282）本地输入从「在途/组合中」翻转到「全部落定」的一次性通知
+   *  （关闭/退出意图的输入保护：挂起的意图在此时重新检查最新 dirty）。
+   *  只在 pending → idle 翻转时触发；持续 idle 不重复通知 */
+  onLocalInputSettled?(): void
 }
 
 /**
@@ -488,6 +492,29 @@ export class LiveEditorInstance {
   /** 冲突暂停态（根命令门控/探针消费） */
   get isSuspended(): boolean {
     return this.suspended
+  }
+
+  /** P2-05（#282）本地输入是否在途/组合中：IME 组合、空白格组合暂缓、
+   *  未 ack 的 edit.request、暂缓未发集任一在场即 true——显式退出意图
+   *  在此态下先保留实例，落定后重新检查最新 dirty（不吞输入、不把未
+   *  提交输入误报已保存） */
+  hasPendingLocalInput(): boolean {
+    return this.composing || this.blankComposition !== null ||
+      this.inFlight.size > 0 || this.deferredLocal !== null
+  }
+
+  /** P2-05：pending → idle 翻转检测（翻转时一次性通知 deps） */
+  private pendingInputNotified = false
+
+  private notifyInputSettle(): void {
+    if (this.hasPendingLocalInput()) {
+      this.pendingInputNotified = true
+      return
+    }
+    if (this.pendingInputNotified) {
+      this.pendingInputNotified = false
+      this.deps.onLocalInputSettled?.()
+    }
   }
 
   /** 行号开关生效态（行号探针消费） */
@@ -693,6 +720,8 @@ export class LiveEditorInstance {
     // #148：全文落地即权威基线（本地未落地编辑已被权威文本取代）——
     // 撤销意图此刻发出，撤销的是宿主栈上最后已完成的操作
     this.releasePendingHistory()
+    // P2-05：全文落地可能清空输入挂起态（resync 恢复等），通知 settle
+    this.notifyInputSettle()
   }
 
   /** edit.ack（ok 推进基线；fail 保留文本进暂停，干净时以附文重置） */
@@ -727,6 +756,8 @@ export class LiveEditorInstance {
       // 新请求会留在 inFlight，下方释放自会判定继续等待）——此刻撤销
       // 意图可安全发出
       this.releasePendingHistory()
+      // P2-05：ack 收敛可能清空在途输入（触发挂起意图重新检查最新 dirty）
+      this.notifyInputSettle()
       return
     }
     // ok:false（conflict/error）：本地有未确认输入时保留文本并暂停；
@@ -1131,6 +1162,8 @@ export class LiveEditorInstance {
       if (!this.composing) {
         this.reportConflictSnapshot()
       }
+      // P2-05：暂缓集增长 = 输入挂起态（组合/触碰暂缓）——置位 settle 检测
+      this.notifyInputSettle()
       return
     }
     const baseChanges = this.toBaseChanges(changes)
@@ -1143,6 +1176,8 @@ export class LiveEditorInstance {
       kind: 'edit.request', sessionId: this.sessionId, docUri: this.docUri,
       seq: this.seq, baseVersion: this.baseVersion, changes: baseChanges,
     })
+    // P2-05：在途请求 = 输入挂起态——置位 settle 检测（ack 收敛时翻转通知）
+    this.notifyInputSettle()
   }
 
   private reportBlankCompositionSnapshot(pending: boolean): void {
@@ -1485,6 +1520,8 @@ export class LiveEditorInstance {
     // #148：缓冲收敛且暂缓集已出站（或本就无暂缓输入）——撤销意图可
     // 安全发出（若 sendDeferredLocal 刚发出新请求，释放判定继续等待其 ack）
     this.releasePendingHistory()
+    // P2-05：组合 flush 完成可能清空输入挂起态（触发挂起意图重新检查）
+    this.notifyInputSettle()
   }
 
   private scheduleFlush(): void {
@@ -1608,6 +1645,8 @@ export class LiveEditorInstance {
       // 阶段标记组合，首笔删除才能进入 deferredLocal 与定稿重建合并。
       this.composing = true
       this.beginBlankComposition()
+      // P2-05：组合开始 = 输入挂起态——置位 settle 检测
+      this.notifyInputSettle()
     }
     return [
       EditorView.lineWrapping,
@@ -1813,6 +1852,8 @@ export class LiveEditorInstance {
             this.composing = true
           }
           this.beginBlankComposition()
+          // P2-05：组合开始 = 输入挂起态——置位 settle 检测
+          this.notifyInputSettle()
         },
         compositionend: (event) => {
           this.compositionCommittedText = event.data || null

@@ -50,9 +50,13 @@ const TARGET_TEXT = [
 /** 伪造 B 权威文本模型（LF 坐标；宿主 TextDocument 的行为近似） */
 const bModel = {
   content: TARGET_TEXT,
+  /** 已保存内容基线（save 更新 / discard 回滚目标） */
+  savedContent: TARGET_TEXT,
   ver: 2,
   dirty: false,
   savedCount: 0,
+  /** P2-05 保存失败注入（只读盘模拟；置位后 save() 返回 false） */
+  saveFail: false,
   undoStack: [] as { changes: SerChange[]; before: string }[],
 }
 
@@ -172,9 +176,59 @@ async function fakeHostHandle(message: WebviewToHost): Promise<void> {
         return
       }
       bModel.savedCount++
+      bModel.savedContent = bModel.content
       bModel.dirty = false
       controller.handleHostMessage({ kind: 'refEdit.dirty', fsPath: B_FS, dirty: false })
       controller.handleHostMessage({ kind: 'refEdit.save.result', portId: boundPortId, fsPath: B_FS, ok: true })
+      return
+    }
+    case 'refEdit.close.query': {
+      // P2-05：B 最新权威状态（dirty/version/相对路径——模态呈现与基线）
+      controller.handleHostMessage({
+        kind: 'refEdit.close.state', reqId: message.reqId, fsPath: B_FS,
+        dirty: bModel.dirty, version: bModel.ver, relPath: '目标笔记.md',
+      })
+      return
+    }
+    case 'refEdit.close.execute': {
+      if (message.portId !== boundPortId) {
+        return
+      }
+      const reply = (outcome: 'closed' | 'save-failed' | 'discard-failed' | 'stale'): void => {
+        controller.handleHostMessage({
+          kind: 'refEdit.close.result', reqId: message.reqId, fsPath: B_FS, outcome,
+        })
+      }
+      // 版本守卫（宿主同款）：确认基线过期即 stale，不用旧确认丢弃新修改
+      if (bModel.ver !== message.confirmedVersion) {
+        reply('stale')
+        return
+      }
+      if (message.action === 'save') {
+        if (bModel.saveFail) {
+          reply('save-failed')
+          return
+        }
+        bModel.savedCount++
+        bModel.savedContent = bModel.content
+        bModel.dirty = false
+        controller.handleHostMessage({ kind: 'refEdit.dirty', fsPath: B_FS, dirty: false })
+        reply('closed')
+        return
+      }
+      // discard：文档级回滚（恢复整个 B 到已保存内容；广播外部增量）
+      if (bModel.dirty) {
+        const before = bModel.content
+        bModel.content = bModel.savedContent
+        bModel.ver++
+        bModel.dirty = false
+        controller.handleHostMessage({ kind: 'refEdit.dirty', fsPath: B_FS, dirty: false })
+        bPush({
+          kind: 'doc.changed', version: bModel.ver, origin: 'external',
+          changes: [{ offset: 0, length: before.length, text: bModel.savedContent }],
+        })
+      }
+      reply('closed')
       return
     }
     default:
@@ -281,7 +335,7 @@ Object.assign(window, {
     btn.click()
     return true
   },
-  // ---- P2-10（#287）完整 Live 操作套件配套 ----
+ // ---- P2-10（#287）完整 Live 操作套件配套 ----
   /** 嵌入编辑器内选区设置（生产同款事务；格式/菜单操作的输入前提） */
   selectEmbedRange(from: number, to: number): boolean {
     const view = embedEditorView()
@@ -313,5 +367,82 @@ Object.assign(window, {
   /** 向绑定端口注入冲突暂停推送（session.suspended——恢复走 doc.resync） */
   embedSuspendPort(): void {
     bPush({ kind: 'session.suspended', version: bModel.ver, reason: 'conflict' })
+  },
+  /** 点击头部关闭编辑按钮（真实点击链路；P2-05） */
+  clickEmbedCloseButton(): boolean {
+    const btn = document.querySelector<HTMLButtonElement>('.vsidian-embed-card .vsidian-embed-card-close')
+    if (!btn) {
+      return false
+    }
+    btn.click()
+    return true
+  },
+  /** 关闭确认模态观测（P2-05：在场/stale/文案/焦点/绘制形态） */
+  embedCloseDialogState(): {
+    open: boolean
+    stale: boolean
+    text: string
+    focusedAction: string
+    backdropPainted: boolean
+    boxPainted: boolean
+    noticePainted: boolean
+  } {
+    const box = document.querySelector<HTMLElement>('.vsidian-ref-close-dialog')
+    const backdrop = document.querySelector<HTMLElement>('.vsidian-ref-close-backdrop')
+    if (!box || !backdrop) {
+      return { open: false, stale: false, text: '', focusedAction: '', backdropPainted: false, boxPainted: false, noticePainted: false }
+    }
+    const notice = box.querySelector<HTMLElement>('.vsidian-ref-close-notice')
+    const focus = document.activeElement
+    const actionOf = (el: Element | null): string =>
+      el?.classList.contains('vsidian-ref-close-save') ? 'save'
+        : el?.classList.contains('vsidian-ref-close-discard') ? 'discard'
+          : el?.classList.contains('vsidian-ref-close-cancel') ? 'cancel' : ''
+    return {
+      open: true,
+      stale: notice !== null && notice.style.display !== 'none' && (notice.textContent ?? '').length > 0,
+      text: box.textContent ?? '',
+      focusedAction: actionOf(focus),
+      backdropPainted: getComputedStyle(backdrop).position === 'fixed' &&
+        getComputedStyle(backdrop).backgroundColor !== 'rgba(0, 0, 0, 0)' &&
+        getComputedStyle(backdrop).backgroundColor !== 'transparent',
+      boxPainted: getComputedStyle(box).backgroundColor !== 'rgba(0, 0, 0, 0)' &&
+        getComputedStyle(box).backgroundColor !== 'transparent' &&
+        getComputedStyle(box).borderWidth !== '0px',
+      noticePainted: notice !== null && notice.style.display !== 'none'
+        ? getComputedStyle(notice).borderLeftWidth !== '0px'
+        : false,
+    }
+  },
+  /** 点击模态按钮（真实 click；P2-05） */
+  embedDialogClick(action: 'save' | 'discard' | 'cancel'): boolean {
+    const btn = document.querySelector<HTMLButtonElement>(`.vsidian-ref-close-${action}`)
+    if (!btn) {
+      return false
+    }
+    btn.click()
+    return true
+  },
+  /** 置保存失败注入（只读盘模拟；P2-05） */
+  embedTargetSetSaveFail(fail: boolean): void {
+    bModel.saveFail = fail
+  },
+  /** 主编辑器删除指定引用行（真实事务管线；P2-05 拦截断言载体） */
+  embedDeleteRefLine(): boolean {
+    const view = mainView()
+    const text = view?.state.doc.toString() ?? ''
+    const idx = text.indexOf('![[目标笔记]]')
+    if (idx < 0 || !view) {
+      return false
+    }
+    const lineStart = text.lastIndexOf('\n', idx - 1) + 1
+    let lineEnd = text.indexOf('\n', idx)
+    if (lineEnd < 0) {
+      lineEnd = text.length
+    } else {
+      lineEnd += 1
+    }
+    view.dispatch({ changes: { from: lineStart, to: lineEnd } })
+    return true
   },
 })

@@ -4531,9 +4531,10 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
   margin-left: auto;
 }
 
-/* 保存目标 / 内部模式切换入口：与打开入口同款图标按钮 */
+/* 保存目标 / 内部模式切换 / 显式关闭编辑入口：与打开入口同款图标按钮 */
 #app .vsidian-embed-card .vsidian-embed-card-save,
-#app .vsidian-embed-card .vsidian-embed-card-mode {
+#app .vsidian-embed-card .vsidian-embed-card-mode,
+#app .vsidian-embed-card .vsidian-embed-card-close {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -4552,7 +4553,9 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
 #app .vsidian-embed-card .vsidian-embed-card-save:hover,
 #app .vsidian-embed-card .vsidian-embed-card-save:focus-visible,
 #app .vsidian-embed-card .vsidian-embed-card-mode:hover,
-#app .vsidian-embed-card .vsidian-embed-card-mode:focus-visible {
+#app .vsidian-embed-card .vsidian-embed-card-mode:focus-visible,
+#app .vsidian-embed-card .vsidian-embed-card-close:hover,
+#app .vsidian-embed-card .vsidian-embed-card-close:focus-visible {
   border-color: var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
   background: var(--vscode-editor-background, transparent);
 }
@@ -4619,6 +4622,105 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
    保留 ![[ ]] 文本可辨识；与内部 Reading 的正文点击语义同通道 */
 .vsidian-embed-ref {
   font-family: inherit;
+}
+
+/* ---- P2-05（#282）关闭确认模态（样式契约 content 域 ref-close-dialog
+   条目）：显式退出（头部关闭按钮 / 嵌入内 Esc / 删除活跃引用）命中
+   dirty 目标时的自绘三项对话框——「保存并关闭 / 丢弃修改并关闭 / 取消」，
+   默认焦点取消。挂 body 直接子级（fixed 遮罩，不进 #app 编辑器 DOM 树）。
+   主题变量取 VSCode 注入的公开变量族，主题/片段跟随宿主外观 ---- */
+
+body > .vsidian-ref-close-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60; /* 悬停浮层（z-index 40）与图片弹窗之上——模态阻断 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--vscode-editorWidget-editableBackground, rgba(0, 0, 0, 0.36));
+}
+
+body > .vsidian-ref-close-backdrop .vsidian-ref-close-dialog {
+  box-sizing: border-box;
+  width: min(460px, calc(100vw - 48px));
+  padding: 16px 18px 14px;
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
+  border-radius: 6px;
+  background: var(--vscode-editor-background, #1e1e1e);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  color: var(--vscode-editor-foreground, inherit);
+}
+
+body > .vsidian-ref-close-backdrop .vsidian-ref-close-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+body > .vsidian-ref-close-backdrop .vsidian-ref-close-message {
+  color: var(--vscode-editor-foreground, inherit);
+  overflow-wrap: anywhere;
+  margin-bottom: 6px;
+}
+
+body > .vsidian-ref-close-backdrop .vsidian-ref-close-message + .vsidian-ref-close-message {
+  color: var(--vscode-descriptionForeground, inherit);
+}
+
+body > .vsidian-ref-close-backdrop .vsidian-ref-close-notice {
+  margin: 6px 0;
+  padding: 6px 8px;
+  border-left: 3px solid var(--vscode-editorWarning-foreground, #cca700);
+  color: var(--vscode-descriptionForeground, inherit);
+  overflow-wrap: anywhere;
+}
+
+body > .vsidian-ref-close-backdrop .vsidian-ref-close-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+body > .vsidian-ref-close-backdrop .vsidian-ref-close-actions button {
+  font-family: inherit;
+  font-size: 13px;
+  padding: 4px 12px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+body > .vsidian-ref-close-backdrop .vsidian-ref-close-actions .vsidian-ref-close-save {
+  color: var(--vscode-button-foreground, #ffffff);
+  background: var(--vscode-button-background, #0e639c);
+}
+
+body > .vsidian-ref-close-backdrop .vsidian-ref-close-actions .vsidian-ref-close-save:hover {
+  background: var(--vscode-button-hoverBackground, #1177bb);
+}
+
+body > .vsidian-ref-close-backdrop .vsidian-ref-close-actions .vsidian-ref-close-discard {
+  color: var(--vscode-button-secondaryForeground, #ffffff);
+  background: var(--vscode-button-secondaryBackground, #5a5a5a);
+  border-color: var(--vscode-contrastBorder, transparent);
+}
+
+body > .vsidian-ref-close-backdrop .vsidian-ref-close-actions .vsidian-ref-close-discard:hover {
+  background: var(--vscode-button-secondaryHoverBackground, #6b6b6b);
+}
+
+body > .vsidian-ref-close-backdrop .vsidian-ref-close-actions .vsidian-ref-close-cancel {
+  color: var(--vscode-button-foreground, #ffffff);
+  background: var(--vscode-button-background, #0e639c);
+}
+
+body > .vsidian-ref-close-backdrop .vsidian-ref-close-actions .vsidian-ref-close-cancel:hover {
+  background: var(--vscode-button-hoverBackground, #1177bb);
+}
+
+body > .vsidian-ref-close-backdrop .vsidian-ref-close-actions button:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #4fc1ff);
+  outline-offset: 1px;
 }
 
 /* ---- #246 混排嵌入（样式契约 content 域 reading-embed-mixed 与

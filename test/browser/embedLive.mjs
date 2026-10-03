@@ -211,6 +211,177 @@ try {
   passed++
   console.log('[嵌入Live][PASS] H 父 Reading 跟随 + 零页面错误')
 
+  // ---- P2-05（#282）场景 I–N：显式关闭确认与输入保护（真实键盘与点击） ----
+  // 父切回 Live + 手动覆盖切回 Live（H 后覆盖为 Reading——覆盖记忆不被父
+  // 切换回滚，须手动切回），并制造 dirty（真实键入）
+  await page.evaluate(() => window.setEmbedLiveMode('live'))
+  await settle(250)
+  await page.evaluate(() => window.clickEmbedModeButton())
+  await settle(300)
+  const preI = (await cards())[0]
+  assert.equal(preI.internalMode, 'live', '场景 I 前置：手动切回内部 Live')
+  assert.equal(preI.liveBound, true, '场景 I 前置：端口已绑定')
+  assert.equal(await page.evaluate(() => window.focusEmbedEditor()), true, '焦点进嵌入编辑器')
+  await page.keyboard.press('End')
+  await page.keyboard.type('【关闭前】')
+  await settle(300)
+  assert.equal(await page.evaluate(() => window.embedDirtyDotPresent()), true, '场景 I 前置：目标 dirty（圆点在场）')
+
+  // ---- 场景 I：真实 Esc 键触发关闭意图；模态绘制层与默认焦点取消 ----
+  await page.keyboard.press('Escape')
+  await settle(250)
+  const dialogI = await page.evaluate(() => window.embedCloseDialogState())
+  assert.equal(dialogI.open, true, 'Esc 后三项模态在场')
+  assert.ok(dialogI.text.includes('目标笔记.md'), '确认文字指明 B 文件名')
+  assert.ok(dialogI.text.includes(zhCn['embed.closeSave']), '「保存并关闭」按钮文案在场')
+  assert.ok(dialogI.text.includes(zhCn['embed.closeDiscard']), '「丢弃修改并关闭」按钮文案在场')
+  assert.ok(dialogI.text.includes(zhCn['embed.closeDialogDiscardScope']), '文档级丢弃影响说明在场')
+  assert.equal(dialogI.focusedAction, 'cancel', '默认焦点为取消')
+  assert.equal(dialogI.backdropPainted, true, '遮罩绘制（fixed + 非透明背景）')
+  assert.equal(dialogI.boxPainted, true, '对话框盒子绘制（背景 + 边框）')
+  // 绘制层：保存/丢弃按钮真实可见（有背景色与尺寸）
+  const btnPaint = await page.evaluate(() => {
+    const save = document.querySelector('.vsidian-ref-close-save')
+    const discard = document.querySelector('.vsidian-ref-close-discard')
+    if (!(save instanceof HTMLElement) || !(discard instanceof HTMLElement)) {
+      return null
+    }
+    return {
+      saveVisible: save.getBoundingClientRect().height > 10 && getComputedStyle(save).backgroundColor !== 'rgba(0, 0, 0, 0)',
+      discardVisible: discard.getBoundingClientRect().height > 10 && getComputedStyle(discard).backgroundColor !== 'rgba(0, 0, 0, 0)',
+    }
+  })
+  assert.equal(btnPaint?.saveVisible, true, '保存按钮可见绘制')
+  assert.equal(btnPaint?.discardVisible, true, '丢弃按钮可见绘制')
+
+  // ---- 场景 J：模态期间外部修改 → stale 重新确认；丢弃携带新基线并回滚 ----
+  const markJ = await mark()
+  await page.evaluate(() => window.embedTargetExternalEdit(0, 0, '冲突外改 '))
+  await settle(250)
+  const dialogJ = await page.evaluate(() => window.embedCloseDialogState())
+  assert.equal(dialogJ.stale, true, '确认期间目标被修改 → stale 提示在场')
+  assert.equal(dialogJ.noticePainted, true, 'stale 提示行绘制（警示左边条）')
+  assert.ok(dialogJ.text.includes(zhCn['embed.closeStale']), 'stale 文案在场')
+  assert.equal(await page.evaluate(() => window.embedDialogClick('discard')), true, '点击丢弃修改并关闭')
+  await settle(300)
+  const outboundJ = await sentAfter(markJ)
+  const execJ = outboundJ.find((m) => m.kind === 'refEdit.close.execute')
+  assert.ok(execJ && execJ.action === 'discard', '丢弃动作出站 execute(discard)')
+  // 外改后的基线（外改 ver+1）——新基线不再 stale，回滚成功
+  assert.equal((await page.evaluate(() => window.embedCloseDialogState())).open, false, '关闭后模态不在场')
+  const modelJ = await page.evaluate(() => window.embedTargetModel())
+  assert.equal(modelJ.dirty, false, '丢弃后目标干净（整个 B 回滚）')
+  assert.ok(!(modelJ.text).includes('冲突外改'), '外改内容随文档级丢弃回滚')
+  assert.ok(!(modelJ.text).includes('【关闭前】'), '嵌入编辑内容随文档级丢弃回滚')
+  // 卡片回 Reading（会话记忆）；编辑器销毁（泄漏观测）
+  await settle(250)
+  const cardJ = (await cards())[0]
+  assert.equal(cardJ.internalMode, 'reading', '关闭后嵌入切回 Reading')
+  assert.equal(cardJ.liveBound, false, '端口已释放')
+  assert.equal(await page.evaluate(() => window.embedCardEditorCount()), 0, '嵌入编辑器已销毁')
+
+  // ---- 场景 K：非空选区 Esc 先收选区不触发；再 Esc（空选区）才触发 ----
+  await page.evaluate(() => window.clickEmbedModeButton()) // 切回 Live
+  await settle(300)
+  await page.evaluate(() => window.focusEmbedEditor())
+  await page.keyboard.press('End')
+  await page.keyboard.type('【K】')
+  await settle(300)
+  await page.keyboard.down('Shift')
+  await page.keyboard.press('Home')
+  await page.keyboard.up('Shift')
+  const markK = await mark()
+  await page.keyboard.press('Escape') // 非空选区：收选区
+  await settle(200)
+  assert.equal((await page.evaluate(() => window.embedCloseDialogState())).open, false,
+    '非空选区 Esc 不触发关闭模态（先收选区）')
+  await page.keyboard.press('Escape') // 空选区：触发
+  await settle(250)
+  assert.equal((await page.evaluate(() => window.embedCloseDialogState())).open, true,
+    '空选区 Esc 触发关闭模态')
+  assert.equal(await page.evaluate(() => window.embedDialogClick('cancel')), true, '点击取消')
+  await settle(200)
+  assert.equal((await page.evaluate(() => window.embedCloseDialogState())).open, false, '取消后模态关闭')
+  const cardK = (await cards())[0]
+  assert.equal(cardK.internalMode, 'live', '取消保留现场（仍 Live 编辑）')
+  assert.equal(cardK.liveBound, true, '取消保留端口')
+
+  // ---- 场景 L：头部关闭按钮（真实点击）→ 保存并关闭（干净后无二次确认） ----
+  const markL = await mark()
+  assert.equal(await page.evaluate(() => window.clickEmbedCloseButton()), true, '点击头部关闭按钮')
+  await settle(250)
+  assert.equal((await page.evaluate(() => window.embedCloseDialogState())).open, true, '按钮触发模态')
+  assert.equal(await page.evaluate(() => window.embedDialogClick('save')), true, '点击保存并关闭')
+  await settle(300)
+  const outboundL = await sentAfter(markL)
+  assert.ok(outboundL.some((m) => m.kind === 'refEdit.close.execute' && m.action === 'save'),
+    '保存动作出站 execute(save)')
+  const modelL = await page.evaluate(() => window.embedTargetModel())
+  assert.equal(modelL.dirty, false, '保存并关闭后目标干净')
+  assert.ok(modelL.text.includes('【K】'), '编辑内容已保存落盘（伪宿主模型）')
+  assert.equal((await page.evaluate(() => window.embedCloseDialogState())).open, false, '模态已关闭')
+  const cardL = (await cards())[0]
+  assert.equal(cardL.internalMode, 'reading', '关闭后回 Reading')
+
+  // ---- 场景 M：保存失败保留现场（只读盘模拟 → save-failed 提示 + 模态在场） ----
+  await page.evaluate(() => window.clickEmbedModeButton()) // 回 Live
+  await settle(300)
+  await page.evaluate(() => window.focusEmbedEditor())
+  await page.keyboard.press('End')
+  await page.keyboard.type('【M】')
+  await settle(300)
+  await page.evaluate(() => window.embedTargetSetSaveFail(true))
+  await page.evaluate(() => window.clickEmbedCloseButton())
+  await settle(250)
+  assert.equal((await page.evaluate(() => window.embedCloseDialogState())).open, true, '失败场景模态在场')
+  await page.evaluate(() => window.embedDialogClick('save'))
+  await settle(300)
+  const dialogM = await page.evaluate(() => window.embedCloseDialogState())
+  assert.equal(dialogM.open, true, '保存失败保留现场（模态不关）')
+  assert.ok(dialogM.text.includes(zhCn['embed.closeSaveFailed']), '保存失败提示行在场')
+  const cardM = (await cards())[0]
+  assert.equal(cardM.liveBound, true, '保存失败端口保留')
+  // 恢复可写 → 保存并关闭成功
+  await page.evaluate(() => window.embedTargetSetSaveFail(false))
+  await page.evaluate(() => window.embedDialogClick('save'))
+  await settle(300)
+  assert.equal((await page.evaluate(() => window.embedCloseDialogState())).open, false, '恢复后保存并关闭完成')
+  const cardM2 = (await cards())[0]
+  assert.equal(cardM2.internalMode, 'reading', '关闭后回 Reading')
+
+  // ---- 场景 N：删除活跃引用拦截——A 不先写入、取消保留原引用、确认后完成 ----
+  await page.evaluate(() => window.clickEmbedModeButton()) // 回 Live
+  await settle(300)
+  await page.evaluate(() => window.focusEmbedEditor())
+  await page.keyboard.press('End')
+  await page.keyboard.type('【N】')
+  await settle(300)
+  const textBeforeN = await page.evaluate(() => window.mainEditorText())
+  await page.evaluate(() => window.embedDeleteRefLine())
+  await settle(250)
+  // 拦截：A 未变 + 模态在场（delete 意图）
+  assert.equal(await page.evaluate(() => window.mainEditorText()), textBeforeN,
+    '删除事务被拦截：A 原文未变（不把未确认删除先写入 A）')
+  const dialogN = await page.evaluate(() => window.embedCloseDialogState())
+  assert.equal(dialogN.open, true, '删除意图触发模态')
+  // 取消：A 原引用保留
+  await page.evaluate(() => window.embedDialogClick('cancel'))
+  await settle(200)
+  assert.equal(await page.evaluate(() => window.mainEditorText()), textBeforeN, '取消后 A 原引用保留')
+  // 再次删除 → 丢弃并关闭：A 中该删除完成 + B 回滚
+  await page.evaluate(() => window.embedDeleteRefLine())
+  await settle(250)
+  await page.evaluate(() => window.embedDialogClick('discard'))
+  await settle(400)
+  const textAfterN = await page.evaluate(() => window.mainEditorText())
+  assert.ok(!textAfterN.includes(EMBED_LINE), '确认后 A 中引用行删除完成')
+  const modelN = await page.evaluate(() => window.embedTargetModel())
+  assert.equal(modelN.dirty, false, '确认丢弃后 B 回滚干净')
+  assert.ok(!(modelN.text).includes('【N】'), 'B 编辑内容随丢弃回滚')
+  assert.equal(errors.length, 0, `P2-05 场景零页面错误（实际 ${JSON.stringify(errors)}）`)
+  passed += 6
+  console.log('[嵌入Live][PASS] I-N 显式关闭确认：Esc/按钮/删除拦截、stale 重确认、保存失败保留现场')
+
   console.log(`embedLive：${passed} 场景通过`)
 } finally {
   await browser.close()

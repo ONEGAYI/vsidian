@@ -1007,6 +1007,9 @@ interface ViewState {
     liveSuspended?: boolean
     /** 内部 Live 编辑器文档长度（-1 = 无实例） */
     liveTextLen?: number
+    /** P2-05（#282）关闭确认模态观测（none/open/stale）与发起意图径 */
+    closeDialog?: 'none' | 'open' | 'stale'
+    closeIntent?: 'close' | 'escape' | 'delete' | ''
   }>
   /** #223 Live 嵌入显隐观测：嵌入表逐枚的源码显形态（selectionTouchesRange 语义） */
   liveEmbedReveal?: Array<{ inner: string; line: number; revealed: boolean }>
@@ -13500,7 +13503,7 @@ export const cases: Array<[string, () => Promise<void>]> = [
     console.log('[P2-04] CRLF 坐标保真 + 不可安全写回暂停（目标文本断言）通过')
   }],
 
-  // ---- P2-10（#287）引用完整 Live 操作落 B 不落 A：焦点在嵌入内部 Live
+ // ---- P2-10（#287）引用完整 Live 操作落 B 不落 A：焦点在嵌入内部 Live
   // 编辑器内时，格式命令（format.command 宿主回发路径）、表格创建与
   // frontmatter Popover 编辑全部指向实际目标 B（经 B 的 DocumentSession
   // 虚拟面板写回宿主权威文本）；A 的文本/dirty/appliedEdits 零变化；实例
@@ -13583,6 +13586,232 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await bDoc.save()
     assert(await readDisk('p210-操作目标.md') !== targetBefore, '目标保存后磁盘已更新')
     console.log('[P2-10] 格式/表格/Popover 操作落 B 不落 A 通过')
+  }],
+
+  // ---- P2-05（#282）显式关闭确认：插件可控退出统一检查 B 最新状态——
+  // dirty 三项模态（保存并关闭/丢弃修改并关闭/取消，默认取消）；取消与
+  // 保存失败保留现场；文档级丢弃恢复整个 B（多 occurrence 去重不重复回滚）。
+  // 保存走 TextDocument.save、丢弃走 P2-01 验证的激活 B + 无参 revert。
+  ['P2-05 显式关闭：三项模态、保存失败保留现场与多 occurrence 丢弃去重（#282）', async () => {
+    await openWithEditor('p205-关闭嵌入.md')
+    await waitSessionReady('p205-关闭嵌入.md')
+    const uri = wsUri('p205-关闭嵌入.md').toString()
+    const targetUri = wsUri('p205-关闭目标.md')
+    const targetDiskBase = await readDisk('p205-关闭目标.md')
+    const TARGET_HEAD = '# p205 关闭目标\n\n'.length + 3
+
+    // 两 occurrence 继承父 Live 自动绑定
+    await waitViewState('p205-关闭嵌入.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner === 'p205-关闭目标')
+      return cards.length === 2 && cards.every((c) => c.liveBound === true) ? true : false
+    })
+
+    // occurrence 0 输入 → B dirty；显式关闭 → 模态在场（含文件名与三项文案）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.type', inner: 'p205-关闭目标', pos: TARGET_HEAD, text: '【关闭编辑】',
+    })
+    await waitViewState('p205-关闭嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p205-关闭目标' && c.liveDirty === true)
+        ? true : false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.close', inner: 'p205-关闭目标', intent: 'close', occurrence: 0,
+    })
+    const dialogOpen = await waitViewState('p205-关闭嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p205-关闭目标' && c.closeDialog === 'open')
+        ? true : false)
+    const occ0a = dialogOpen.readingEmbed!.find((c) => c.inner === 'p205-关闭目标' && c.closeDialog === 'open')!
+    assert(occ0a.closeIntent === 'close', '模态意图径为 close')
+
+    // 取消：保留现场——模态关、卡片仍 Live、B 仍 dirty
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.dialogAction', action: 'cancel',
+    })
+    await waitViewState('p205-关闭嵌入.md', (v) =>
+      (v.readingEmbed ?? []).every((c) => c.inner !== 'p205-关闭目标' || c.closeDialog === 'none')
+        ? true : false)
+    const afterCancel = await waitViewState('p205-关闭嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p205-关闭目标' && c.liveBound === true && c.liveDirty === true)
+        ? true : false)
+    assert(afterCancel.readingEmbed!.some((c) => c.inner === 'p205-关闭目标' && c.internalMode === 'live'),
+      '取消后 occurrence 0 仍内部 Live（保留现场）')
+
+    // 保存失败（只读盘）：模态保留 + 卡片保留
+    const { chmodSync } = await import('node:fs')
+    chmodSync(targetUri.fsPath, 0o444)
+    try {
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+        kind: 'embed.test.close', inner: 'p205-关闭目标', intent: 'close', occurrence: 0,
+      })
+      await waitViewState('p205-关闭嵌入.md', (v) =>
+        (v.readingEmbed ?? []).some((c) => c.inner === 'p205-关闭目标' && c.closeDialog === 'open')
+          ? true : false)
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+        kind: 'embed.test.dialogAction', action: 'save',
+      })
+      const failState = await waitViewState('p205-关闭嵌入.md', (v) =>
+        (v.readingEmbed ?? []).some((c) =>
+          c.inner === 'p205-关闭目标' && (c.closeDialog === 'open' || c.closeDialog === 'stale'))
+          ? true : false, 0, 20000)
+      void failState
+      const bFail = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())!
+      assert(bFail.isDirty, '保存失败后 B 仍 dirty（保留现场）')
+      assert(await readDisk('p205-关闭目标.md') === targetDiskBase, '失败保存未写磁盘')
+    } finally {
+      chmodSync(targetUri.fsPath, 0o666)
+    }
+
+    // 恢复可写：保存并关闭 → B 落盘、dirty 清零、occurrence 0 回 Reading
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.dialogAction', action: 'save',
+    })
+    await poll('保存并关闭落盘', async () =>
+      (await readDisk('p205-关闭目标.md')).includes('【关闭编辑】') ? true : undefined)
+    await waitViewState('p205-关闭嵌入.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner === 'p205-关闭目标')
+      return cards.some((c) => c.closeDialog === 'none') && cards[0]!.internalMode === 'reading' && cards[0]!.liveBound === false
+        ? true : false
+    })
+
+    // occurrence 1 再输入 → 丢弃并关闭：整个 B 回滚（含 occ0 已保存内容后的
+    // 新修改——恢复到磁盘已保存内容）；同目标不重复回滚（第二次关闭因
+    // dirty=false 直接完成，无第二次 revert）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.type', inner: 'p205-关闭目标', pos: TARGET_HEAD, text: '【occ1 改】', occurrence: 1,
+    })
+    await waitViewState('p205-关闭嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p205-关闭目标' && c.liveDirty === true)
+        ? true : false)
+    const verBeforeRevert = vscode.workspace.textDocuments
+      .find((d) => d.uri.toString() === targetUri.toString())!.version
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.close', inner: 'p205-关闭目标', intent: 'close', occurrence: 1,
+    })
+    await waitViewState('p205-关闭嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p205-关闭目标' && c.closeDialog === 'open')
+        ? true : false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.dialogAction', action: 'discard',
+    })
+    await poll('revert 后 B 回到磁盘已保存内容', async () => {
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())
+      return doc && !doc.isDirty && doc.getText() === (await readDisk('p205-关闭目标.md')) ? true : undefined
+    })
+    const bAfter = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())!
+    assert(bAfter.getText().includes('【关闭编辑】') && !bAfter.getText().includes('【occ1 改】'),
+      '文档级丢弃恢复到已保存内容（occ1 的未保存修改被回滚，已保存内容保留）')
+    assert(bAfter.version > verBeforeRevert, 'revert 推进版本（P2-01 语义）')
+    // 卡片关闭（dirty=false 路径——A 面板可能因激活切换重载，等待最终态）
+    await waitViewState('p205-关闭嵌入.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner === 'p205-关闭目标')
+      return cards.every((c) => c.closeDialog !== 'open') ? true : false
+    }, 0, 30000)
+    console.log('[P2-05] 三项模态 + 保存失败保留现场 + 文档级丢弃通过')
+  }],
+
+  // ---- P2-05（#282）删除活跃引用拦截：覆盖活跃端口的 A 事务先拦截确认
+  //（取消不把删除先写入 A）；确认后完成删除与相关退出；Esc 径同链路。 ----
+  ['P2-05 删除活跃引用拦截与 Esc 退出（#282）', async () => {
+    await openWithEditor('p205-关闭嵌入.md')
+    await waitSessionReady('p205-关闭嵌入.md')
+    const uri = wsUri('p205-关闭嵌入.md').toString()
+    const aDiskBase = await readDisk('p205-关闭嵌入.md')
+    const parentDoc = await vscode.workspace.openTextDocument(wsUri('p205-关闭嵌入.md'))
+    const TARGET_HEAD = '# p205 关闭目标\n\n'.length + 3
+
+    await waitViewState('p205-关闭嵌入.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner === 'p205-关闭目标')
+      return cards.length === 2 && cards.every((c) => c.liveBound === true) ? true : false
+    })
+
+    // occurrence 0 输入 → dirty；删除引用行事务（主编辑器真实事务管线）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.type', inner: 'p205-关闭目标', pos: TARGET_HEAD, text: '【删除前】',
+    })
+    await waitViewState('p205-关闭嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p205-关闭目标' && c.liveDirty === true)
+        ? true : false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.deleteRef', inner: 'p205-关闭目标', occurrence: 0,
+    })
+    // 拦截：A 文本未变（未确认删除不写入 A）+ 模态在场（delete 意图）
+    const intercepted = await waitViewState('p205-关闭嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p205-关闭目标' && c.closeDialog === 'open' && c.closeIntent === 'delete')
+        ? true : false)
+    assert(intercepted.text.includes('![[p205-关闭目标]]'), '拦截后 A 引用行仍在（webview 文本未删）')
+    assert(parentDoc.getText() === aDiskBase, '宿主 A 权威文本未变（未把删除先写入 A）')
+
+    // 取消：A 原引用保留
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.dialogAction', action: 'cancel',
+    })
+    const afterCancel = await waitViewState('p205-关闭嵌入.md', (v) =>
+      (v.readingEmbed ?? []).every((c) => c.inner !== 'p205-关闭目标' || c.closeDialog === 'none')
+        ? true : false)
+    assert(afterCancel.text.includes('![[p205-关闭目标]]'), '取消后 A 原引用保留')
+
+    // 再次删除 → 保存并关闭：B 落盘后 A 中该引用行删除完成（确认后才写入）。
+    // 注：确认动作选 save 而非 discard——discard 走激活 B + revert（P2-01
+    // 路线），激活期间 A 的 webview 隐藏卸载、恢复后重载（P2-04 实测取舍），
+    // closed 回包与删除重放随重载丢失（B 已正确回滚、引用保留由用户重删）
+    // ——「确认后 A 删除完成」在 save 路径（不激活 B）下才可稳定断言；
+    // discard 的文档级回滚已由用例 1 的多 occurrence 段验证。
+    const diskBeforeConfirm = await readDisk('p205-关闭目标.md')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.deleteRef', inner: 'p205-关闭目标', occurrence: 0,
+    })
+    await waitViewState('p205-关闭嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p205-关闭目标' && c.closeDialog === 'open')
+        ? true : false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.dialogAction', action: 'save',
+    })
+    await poll('确认保存落盘', async () =>
+      (await readDisk('p205-关闭目标.md')).includes('【删除前】') ? true : undefined)
+    await waitViewState('p205-关闭嵌入.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner === 'p205-关闭目标')
+      return cards.length === 1 && cards.every((c) => c.closeDialog === 'none') ? true : false
+    }, 0, 30000)
+    // A 的删除经标准管线写回宿主（重放事务 → edit.request → WorkspaceEdit）
+    await poll('A 删除写回宿主', async () => {
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === wsUri('p205-关闭嵌入.md').toString())
+      const text = doc?.getText() ?? ''
+      const occurrences = text.split('![[p205-关闭目标]]').length - 1
+      return occurrences === 1 ? true : undefined
+    })
+    const diskAfterConfirm = await readDisk('p205-关闭目标.md')
+    assert(diskAfterConfirm.includes('【删除前】') && diskAfterConfirm !== diskBeforeConfirm,
+      '确认保存后 B 落盘（磁盘含保存内容）')
+
+    // Esc 径（删除后剩余 occurrence——A 文本变化导致重挂重绑）：先等重挂
+    // 绑定稳定（liveBound），再输入（type 过早会在实例建立前静默丢弃）
+    await waitViewState('p205-关闭嵌入.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner === 'p205-关闭目标')
+      return cards.length === 1 && cards[0]!.liveBound === true ? true : false
+    }, 0, 30000)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.type', inner: 'p205-关闭目标', pos: TARGET_HEAD, text: '【esc】', occurrence: 0,
+    })
+    await waitViewState('p205-关闭嵌入.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner === 'p205-关闭目标')
+      return cards.length === 1 && cards[0]!.liveBound === true && cards[0]!.liveDirty === true ? true : false
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.close', inner: 'p205-关闭目标', intent: 'escape', occurrence: 0,
+    })
+    const escDialog = await waitViewState('p205-关闭嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p205-关闭目标' && c.closeDialog === 'open' && c.closeIntent === 'escape')
+        ? true : false)
+    void escDialog
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.dialogAction', action: 'save',
+    })
+    await poll('Esc 径保存落盘', async () =>
+      (await readDisk('p205-关闭目标.md')).includes('【esc】') ? true : undefined)
+    await waitViewState('p205-关闭嵌入.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner === 'p205-关闭目标')
+      return cards.length === 1 && cards[0]!.liveBound === false && cards[0]!.closeDialog === 'none' ? true : false
+    }, 0, 30000)
+    console.log('[P2-05] 删除引用拦截（取消保留/确认完成）+ Esc 径关闭通过')
   }],
 
   // #270 dirty「主动丢弃未保存内容」的覆盖层通用退役信号。1.86 事件面实证

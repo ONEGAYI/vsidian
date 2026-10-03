@@ -462,6 +462,19 @@ export const en = {
   'embed.dirtyDot': 'Target has unsaved changes',
   'embed.liveBindFailed': 'Cannot attach target editing (target unavailable or not Markdown).',
   'embed.livePaused': 'Editing paused: unsafe to write back, input retained.',
+  /** P2-05 (#282) explicit close confirmation: close entry tooltip and the
+   *  three-action dialog (cancel is the default focus; the file name and the
+   *  document-level discard impact must be spelled out in the confirmation) */
+  'embed.closeEditor': 'Close reference editing',
+  'embed.closeDialogTitle': 'Close reference editing',
+  'embed.closeDialogMessage': '{file} has unsaved changes.',
+  'embed.closeDialogDiscardScope': 'Discarding restores the entire file to its saved content, including unsaved changes made in other views.',
+  'embed.closeCancel': 'Cancel',
+  'embed.closeSave': 'Save and close',
+  'embed.closeDiscard': 'Discard changes and close',
+  'embed.closeSaveFailed': 'Save failed (the file may be read-only); the current editing state is kept.',
+  'embed.closeDiscardFailed': 'Discard failed; the current state is kept.',
+  'embed.closeStale': 'The target changed while confirming; please confirm again.',
 
   /** 反链面板（#197：四态与条目；形态改版批次：工具栏/排序/搜索/页头） */
   'backlinks.label': 'Backlinks',

@@ -1158,6 +1158,16 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
     '# P2-10 操作嵌入',
     '',
     '![[p210-操作目标]]',
+  // P2-05（#282）显式关闭确认：独立文件对（同目标两 occurrence——多端口
+  // 丢弃去重断言；不与 p204 共享目标——dirty/回滚断言互不干扰）
+  writeFileSync(path.join(wsDir, 'p205-关闭嵌入.md'), [
+    '# P2-05 关闭嵌入',
+    '',
+    '![[p205-关闭目标]]',
+    '',
+    '中间段落。',
+    '',
+    '![[p205-关闭目标]]',
     '',
     '尾部段落。',
     '',
@@ -1170,6 +1180,10 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
     '# p210 操作目标',
     '',
     '目标首段文字。',
+  writeFileSync(path.join(wsDir, 'p205-关闭目标.md'), [
+    '# p205 关闭目标',
+    '',
+    '目标首段。',
     '',
     '目标次段。',
     '',
