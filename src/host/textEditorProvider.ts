@@ -1052,6 +1052,15 @@ export function createTextEditorProvider(
     }
   }
 
+  /** 测试钩子的面板定位口径（与 waitForReadyPanel 同一过滤）：只认真实
+   *  webview 面板——P2-04 起被嵌入目标的会话里还有嵌入内部 Live 绑定
+   *  attachPanel 的虚拟面板（无 webview 承载），panelIndex 命中虚拟面板
+   *  时 view.state.request / sidebar.test.click 等 UI 消息无处理者等于
+   *  丢失（CI 回归实证：嵌入样例面板先开、其目标面板的 panels[0] 全为
+   *  虚拟面板，反链面板指令从未到达真实面板）。 */
+  const realPanelsOf = (entry: SessionEntry | undefined): Array<{ sessionId: string; ready: boolean }> =>
+    entry?.session.getInfo().panels.filter((p) => entry.panels.has(p.sessionId)) ?? []
+
   // ---- #197 反链面板：快照应答与条目跳转（面板级 UI 意图的执行体） ----
 
   /** 反链广播序号（review-loops #16）：按文档单调递增——快照应答为异步
@@ -2793,7 +2802,10 @@ export function createTextEditorProvider(
       }
       return {
         found: true,
-        panels: entry.session.getInfo().panels,
+        // 只报真实 webview 面板（realPanelsOf 口径）——集成用例的
+        // waitSessionReady/面板数断言以「用户可见面板」为语义，虚拟面板
+        // 计入会让就绪判据被无 UI 承载的面板提前满足
+        panels: realPanelsOf(entry),
         version: entry.doc.version,
         appliedEdits: entry.appliedEdits,
         // #208 资源代次（0 = 未刷新；每次手动刷新 +1，图片 URI ?v= 戳同源）
@@ -2832,7 +2844,9 @@ export function createTextEditorProvider(
       'onegayi.vsidian._test.postToPanel',
       async (uriStr: string, message: Record<string, unknown>, panelIndex = 0) => {
         const entry = getEntry(vscode.Uri.parse(uriStr))
-        const panels = entry?.session.getInfo().panels.filter((p) => p.ready) ?? []
+        // panelIndex 在真实 webview 面板中计数（realPanelsOf 口径）——
+        // 虚拟面板不承载 UI 消息处理者，投给它等于丢失
+        const panels = realPanelsOf(entry).filter((p) => p.ready)
         const panel = panels[panelIndex]
         if (!entry || !panel) {
           throw new Error(`无可用会话面板：${uriStr}`)
@@ -2911,7 +2925,9 @@ export function createTextEditorProvider(
       'onegayi.vsidian._test.requestViewState',
       async (uriStr: string, panelIndex = 0) => {
         const entry = getEntry(vscode.Uri.parse(uriStr))
-        const panels = entry?.session.getInfo().panels.filter((p) => p.ready) ?? []
+        // panelIndex 在真实 webview 面板中计数（realPanelsOf 口径）——虚拟
+        // 面板无 view.state 回报者，命中即恒 undefined（观测面假超时）
+        const panels = realPanelsOf(entry).filter((p) => p.ready)
         const panel = panels[panelIndex]
         if (!entry || !panel) {
           return undefined
