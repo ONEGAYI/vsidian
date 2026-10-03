@@ -1,9 +1,11 @@
-/** #223 首载采样：同一父文档内四张 Live 卡全部到达终态后再检查明细。 */
+/** #223 首载采样：同一父文档内四张 Live 卡全部到达终态后再检查明细。
+ *  P2-09 起孙卡随直接父进 live 挂载——host=live 的卡不再只含根级，计数
+ *  按根级口径（parentInstanceId 为空）过滤，孙卡多寡不影响本谓词。 */
 export function liveEmbedReady(view: {
   viewMode?: string
-  readingEmbed?: readonly { host?: string; state: string }[]
+  readingEmbed?: readonly { host?: string; state: string; parentInstanceId?: string | null }[]
 }): boolean {
-  const live = (view.readingEmbed ?? []).filter((card) => card.host === 'live')
+  const live = (view.readingEmbed ?? []).filter((card) => card.host === 'live' && !card.parentInstanceId)
   return view.viewMode === 'live' && live.length === 4 &&
     live.filter((card) => card.state === 'content').length === 3 &&
     live.filter((card) => card.state === 'error').length === 1

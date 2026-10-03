@@ -445,6 +445,11 @@ export interface EmbedCardProbe {
   conflictComparePending: boolean
   /** P2-12 对比打开失败的就地提示在场 */
   conflictNotice: boolean
+  /** P2-09 递归深度（根级 = 1；孙卡起 ≥ 2——集成断言按根级计数不受孙卡
+   *  挂载影响；P2-09 起孙卡随直接父进 live 挂载，host=live 的卡不再只含根级） */
+  depth: number
+  /** P2-09 直接父 hostId（根级 = null；孙卡的来源父身份观测） */
+  parentInstanceId: string | null
 }
 
 /** 目标原文（`|` 之前——与阅读双链 a 的 href 同口径） */
@@ -2694,6 +2699,8 @@ export class EmbedCardManager {
         liveImageSrcs: (handle.entry.live?.images?.activeEntries() ?? [])
           .filter((e) => e.appliedSrc !== undefined)
           .map((e) => e.appliedSrc!),
+        depth: handle.entry.content.source.depth ?? 1,
+        parentInstanceId: handle.entry.content.source.parentInstanceId ?? null,
         closeDialog: this.closeDialogBelongsTo(handle.entry)
           ? (this.closeDialog!.stale ? 'stale' : 'open')
           : 'none',
