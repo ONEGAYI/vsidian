@@ -134,3 +134,32 @@ describe('view.locate 跳转目标高亮（reading）', () => {
     expect(flashReadingBlocks().length).toBe(0)
   })
 })
+
+describe('view.locate 区间选区落位（#318 head）', () => {
+  function viewState(c: WebviewSyncController, h: BridgeHarness) {
+    const before = h.sent.length
+    c.handleHostMessage({ kind: 'view.state.request' })
+    const msg = h.sent.slice(before).find((m) => m.kind === 'view.state')
+    if (!msg) {
+      throw new Error('view.state 未回报')
+    }
+    return msg as Extract<WebviewToHost, { kind: 'view.state' }>
+  }
+
+  it('带 head：selectionOffset/selectionHead 落区间两端；缺省 head 单点不变', () => {
+    const h = makeBridge()
+    const { c } = mountPanel(h)
+    const from = DOC.indexOf('目标段落甲')
+    const to = DOC.indexOf('目标段落乙')
+    c.handleHostMessage({ kind: 'view.locate', offset: from, head: to })
+    const state = viewState(c, h)
+    expect(state.selectionOffset, '区间左端应落 offset').toBe(from)
+    expect(state.selectionHead, '区间右端应落 head').toBe(to)
+    // 缺省 head 单点落位：光标落 offset（outlineJump.test.ts 已有覆盖），
+    // 此处补齐 head 退化一致性
+    c.handleHostMessage({ kind: 'view.locate', offset: to })
+    const single = viewState(c, h)
+    expect(single.selectionOffset).toBe(to)
+    expect(single.selectionHead, '无 head 时选区退化为单点').toBe(single.selectionOffset)
+  })
+})

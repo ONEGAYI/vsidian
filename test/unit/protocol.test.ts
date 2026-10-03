@@ -1584,6 +1584,13 @@ describe('模式切换协议（#6）', () => {
     expect(isHostToWebview({ kind: 'view.locate' })).toBe(false)
   })
 
+  it('view.locate 可选 head（#318）：非负整数接受，负数/字符串拒绝', () => {
+    expect(isHostToWebview({ kind: 'view.locate', offset: 3, head: 5 })).toBe(true)
+    expect(isHostToWebview({ kind: 'view.locate', offset: 3, head: -1 })).toBe(false)
+    expect(isHostToWebview({ kind: 'view.locate', offset: 3, head: '7' })).toBe(false)
+    expect(isHostToWebview({ kind: 'view.locate', offset: 3, head: 1.5 })).toBe(false)
+  })
+
   it('view.state 接受模式诊断可选字段，拒绝类型错误', () => {
     expect(
       isWebviewToHost({ ...baseViewState, viewMode: 'reading', selectionOffset: 3, readingBlockCount: 5, readingAnchorStart: 0 }),
