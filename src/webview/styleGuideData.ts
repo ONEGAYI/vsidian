@@ -10,7 +10,7 @@ import type { StyleContractEntryOverride } from '../shared/styleContractEn'
 import type { ObsidianVariableAlias } from '../shared/obsidianAlias'
 
 /** 指南配套的扩展版本（与安装版本一致） */
-export const STYLE_GUIDE_VERSION = "0.8.0"
+export const STYLE_GUIDE_VERSION = "0.9.0"
 
 /** Obsidian 变量别名总表（指南总表同源） */
 export const STYLE_GUIDE_VARIABLE_ALIASES: readonly ObsidianVariableAlias[] = [
