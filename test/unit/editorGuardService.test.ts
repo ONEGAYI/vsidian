@@ -345,6 +345,65 @@ describe('EditorGuardService 审查修复回归（review-loops 轮 1）', () => 
     expect(service.getState().rejections).toEqual([TAKER])
     expect(service.getState().versionLock).toBe('1.0.0')
   })
+
+  it('挂起等待期间抢占者再度更换：补弹指名以当前生效值为准（不弹旧名）', async () => {
+    const { service, state } = makeHarness()
+    await service.runStartupCheck()
+    let release!: () => void
+    state.promptGate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    state.associations = { '*.md': TAKER }
+    await service.handleAssociationsChanged() // A 提示挂起
+    state.associations = { '*.md': VSIDIAN_EDITOR_VIEW_TYPE }
+    await service.handleAssociationsChanged()
+    state.associations = { '*.md': 'another.editor' } // B 挂起（沿已消费）
+    await service.handleAssociationsChanged()
+    // 挂起等待期间外部再改 associations 为 C——尚未触发配置事件（异步
+    // 事件排队的窗口）：settle 后补弹的指名应以当前生效值为准
+    state.associations = { '*.md': 'c.editor' }
+    release() // A settle
+    await flush()
+    expect(state.prompts).toEqual([TAKER, 'c.editor'])
+  })
+
+  it('通知端口异常 settle：挂起槽在 finally 内即时消费，不滞留到未来补弹', async () => {
+    const { service, state } = makeHarness()
+    await service.runStartupCheck()
+    let rejectGate!: (reason: Error) => void
+    state.promptGate = new Promise<void>((_, reject) => {
+      rejectGate = reject
+    })
+    state.associations = { '*.md': TAKER }
+    await service.handleAssociationsChanged() // A 提示挂起（void 调用，异常走 unhandled）
+    state.associations = { '*.md': VSIDIAN_EDITOR_VIEW_TYPE }
+    await service.handleAssociationsChanged()
+    state.associations = { '*.md': 'another.editor' } // B 挂起
+    await service.handleAssociationsChanged()
+    // void 调用链上的异常以 unhandled rejection 形态出现，就地吸收
+    const swallowed: unknown[] = []
+    const onUnhandled = (reason: unknown) => {
+      swallowed.push(reason)
+    }
+    process.on('unhandledRejection', onUnhandled)
+    try {
+      rejectGate(new Error('notify broken')) // A 异常 settle → finally 应即时消费挂起槽
+      await flush()
+      // 修复语义：现算 B 在场，立即补弹 B（旧实现滞留挂起槽，此处无第二条）
+      expect(state.prompts).toEqual([TAKER, 'another.editor'])
+      // 不滞留的证明：新沿 D 正常弹 D，D settle 后不再多弹过时的 B
+      state.promptGate = null
+      state.associations = { '*.md': VSIDIAN_EDITOR_VIEW_TYPE }
+      await service.handleAssociationsChanged()
+      state.associations = { '*.md': 'd.editor' }
+      await service.handleAssociationsChanged()
+      await flush()
+      expect(state.prompts).toEqual([TAKER, 'another.editor', 'd.editor'])
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
+    expect(swallowed.length).toBeGreaterThan(0) // 场景确以异常 settle 为前提
+  })
 })
 
 describe('EditorGuardService 守护开关', () => {

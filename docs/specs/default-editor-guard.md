@@ -131,7 +131,7 @@
 - **集成重置面**：集成 runner 每用例前重置守护 globalState（版本锁/拒绝记录），与设置重置同清单——否则「首装检测」被前序用例写锁污染。
 - **设置键**：`general.defaultEditorGuard`（默认开）走标准注册表链路，`settingsPageView.generalDefs` 已排除防重复呈现；#323 委托组接管呈现。
 - **测试钩子**：五条 `_test.*`（#322 落四条：`getEditorGuardState` 状态读取（含版本锁与拒绝记录字段）/ `runEditorGuardStartupCheck` 主动检测 / `fixDefaultEditor` 修复 / `resetEditorGuardState` 重置；#323 增 `getDefaultEditorState` 展示载荷），`VSIDIAN_TEST_HOOKS` 门控；集成宿主内通知按超时语义短路（同 provider 对话框短路口径）。
-- **审查修复轮（review-loops，2026-10-03）**：在途提示期间换抢占者的沿 settle 后补弹（同 taker 不补，保留原始绕过语义）；每次弹前复核生效值——延迟窗/排队等待期间用户已自行改回的过时提示不再弹出；`persistState` 持久化失败静默吞（内存态为准，后果仅下次启动多提示一次）。回归用例在 `editorGuardService.test.ts`「审查修复回归」节。
+- **审查修复轮（review-loops，2026-10-03）**：在途提示期间换抢占者的沿 settle 后补弹（同 taker 不补，保留原始绕过语义）；每次弹前复核生效值——延迟窗/排队等待期间用户已自行改回的过时提示不再弹出；`persistState` 持久化失败静默吞（内存态为准，后果仅下次启动多提示一次）。轮 2 复核再收紧两处：挂起槽消费移入 finally（通知端口异常 settle 也不滞留到未来才补弹过时值）；补弹指名以现算生效值为准（挂起等待期间外部再改 associations、尚未触发配置事件的窗口，不重放旧挂起名）。回归用例在 `editorGuardService.test.ts`「审查修复回归」节。
 - **已知边界（审查修复轮裁定不修）**：主动层 1.5s 延迟定时器无 dispose 通道——宿主存活的去激活窗口（如禁用扩展待 reload）内可能多弹一次提示，无实际危害；为该极端窗口向纯逻辑服务注入 dispose 端口不成比例。
 
 ### #323 设置页委托组（钉住，不得顺手放宽）

@@ -295,11 +295,21 @@ export class EditorGuardService {
     } finally {
       this.promptInFlight = false
       this.inFlightTakerViewType = null
-    }
-    const pending = this.pendingPrompt
-    this.pendingPrompt = null
-    if (pending) {
-      void this.promptTakeover(pending.takerViewType, { bypassRejections: pending.bypassRejections })
+      // 挂起槽消费放 finally：提示异常 settle（通知端口 reject 等极端路径）
+      // 也不滞留到未来任意一次 settle 才补弹过时值
+      const pending = this.pendingPrompt
+      this.pendingPrompt = null
+      if (pending) {
+        // 补弹指名以当前生效值为准——挂起等待期间抢占者可能再度更换
+        //（外部写入尚未触发配置事件的窗口），重放旧挂起名会指名失真；
+        // 已改回（未接管）时现算判定直接拦下，与弹前复核同闸
+        const current = detectEditorTakeover(this.ports.getAssociations())
+        if (current.takenOver) {
+          void this.promptTakeover(current.takerViewType ?? pending.takerViewType, {
+            bypassRejections: pending.bypassRejections,
+          })
+        }
+      }
     }
   }
 
