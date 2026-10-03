@@ -123,7 +123,9 @@ try {
   assert.equal(watches.length, 2, '两嵌入各发一笔实例订阅（目标相同）')
   assert.ok(watches.every((m) => m.kind === 'hover.watch' && m.fsPath === B_PATH))
   assert.notEqual(watches[0].instanceId, watches[1].instanceId, '实例身份互异（entry 语义键）')
-  assert.match(watches[0].instanceId, /^\d+::/, '嵌入实例身份为 entry 语义键')
+  // P2-07 起 watch 对外身份 = 稳定 hostId（embed-occ-N，文本平移不失配），
+  // entry 坐标键（start::inner）只在状态库内部使用
+  assert.match(watches[0].instanceId, /^embed-occ-/, '嵌入实例身份为稳定 hostId')
   let cards = await page.evaluate(() => window.readRefreshCards())
   assert.equal(cards.length, 2)
   assert.ok(cards[0].hitInside, '卡片绘制层命中（真实接收指针）')
@@ -239,11 +241,13 @@ try {
   popup = await page.evaluate(() => window.readRefreshPopup())
   assert.equal(popup.open, false, '浮层已关闭')
   const unwatchMessages = (await watchMessages()).filter((m) => m.kind === 'hover.unwatch')
-  assert.ok(unwatchMessages.some((m) => m.instanceId.startsWith('hover-')),
+  // P2-06（#283）起浮窗 watch 身份 = 引用位置语义键（hover@…，bind 来源
+  // 固定同源）；与嵌入订阅（start::inner 形态）仍可区分
+  assert.ok(unwatchMessages.some((m) => m.instanceId.startsWith('hover@')),
     `浮层关闭应配对 unwatch（实际 ${JSON.stringify(unwatchMessages)}）`)
   // 嵌入订阅仍在（仍有效实例）
   const finalWatches = (await watchMessages()).filter((m) => m.kind === 'hover.watch').length
-  const finalUnwatches = unwatchMessages.filter((m) => m.instanceId.startsWith('hover-')).length
+  const finalUnwatches = unwatchMessages.filter((m) => m.instanceId.startsWith('hover@')).length
   assert.ok(finalWatches - finalUnwatches >= 1, '嵌入订阅不随浮层关闭退场（仍有效实例）')
   passed++
   console.log('[视图同步][PASS] 浮层订阅刷新 + 滚动保持 + 关闭配对 unwatch')

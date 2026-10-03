@@ -277,7 +277,20 @@ export const en = {
   'host.discardAndResync': 'Discard local changes and resync',
   'host.confirmResume': 'This will discard the unconfirmed local changes in the "{name}" editor and resync with the on-disk/authoritative content. Consider copying the unconfirmed input first.',
   'host.conflictPaused': 'Editing of "{name}" is paused: the external change and the unconfirmed input cannot be merged safely. The unconfirmed input is kept and can be retrieved at any time.',
+  /** P2-12 (#289) title of the native diff editor opened by "Compare and
+   *  Resolve" (left: temporary copy of the uncommitted input; right: the real
+   *  target document) */
+  'host.conflictDiffTitle': 'Write conflict: {name} (Left: copy of current input / Right: current target version)',
   'host.panelClosedWithInput': 'The editor for "{name}" was closed (or the connection dropped) with unsaved unconfirmed input: {text}',
+  /** P2-13 (#290) notice for input from a reference edit port (virtual panel)
+   *  that was never written to the target after its parent tab closed (three
+   *  immediate choices: compare and resolve / discard current version / cancel) */
+  'host.refClosedWithInput': 'The parent document closed with input from the "{name}" reference edit that was not written to the target: {text}',
+  'host.conflictCompareLabel': 'Compare and resolve',
+  'host.conflictDiscardLabel': 'Discard current version',
+  'host.conflictCancelLabel': 'Cancel',
+  'host.handoffFailed': 'Failed to open an editor tab for "{name}"; its unsaved changes are still kept by the host and can be retried.',
+  'host.handoffRetry': 'Retry opening',
   'host.wikilinkUnsupported': 'Unsupported wikilink form "[[{target}]]" (embeds ![[…]] belong to a later phase): kept as-is',
   'host.wikilinkNoWorkspace': 'The current document is not in any workspace folder: wikilink targets resolve relative to the source document, so jumping is unavailable with no folder open (the link text is kept)',
   'host.wikilinkNotFound': 'Wikilink target not found: [[{target}]] (resolved relative to the source document directory; files are never created automatically)',
@@ -477,6 +490,42 @@ export const en = {
    *  existing Vsidian open behavior, never edits the embed source) */
   'embed.loading': 'Loading embedded note…',
   'embed.openTarget': 'Open target note',
+  /** P2-04 (#281) embed internal Live: mode toggle / save target / dirty dot
+   *  and bind-failed / paused notes (tooltips share the same keys) */
+  'embed.modeToLive': 'Edit inside reference (switch to Live)',
+  'embed.modeToReading': 'Switch to Reading view',
+  'embed.saveTarget': 'Save target note',
+  'embed.dirtyDot': 'Target has unsaved changes',
+  'embed.liveBindFailed': 'Cannot attach target editing (target unavailable or not Markdown).',
+  'embed.livePaused': 'Editing paused: unsafe to write back, input retained.',
+  /** P2-05 (#282) explicit close confirmation: close entry tooltip and the
+   *  three-action dialog (cancel is the default focus; the file name and the
+   *  document-level discard impact must be spelled out in the confirmation) */
+  'embed.closeEditor': 'Close reference editing',
+  'embed.closeDialogTitle': 'Close reference editing',
+  'embed.closeDialogMessage': '{file} has unsaved changes.',
+  'embed.closeDialogDiscardScope': 'Discarding restores the entire file to its saved content, including unsaved changes made in other views.',
+  'embed.closeCancel': 'Cancel',
+  'embed.closeSave': 'Save and close',
+  'embed.closeDiscard': 'Discard changes and close',
+  'embed.closeSaveFailed': 'Save failed (the file may be read-only); the current editing state is kept.',
+  'embed.closeDiscardFailed': 'Discard failed; the current state is kept.',
+  'embed.closeStale': 'The target changed while confirming; please confirm again.',
+
+  /** P2-12 (#289) write-conflict three choices in the paused state row.
+   *  The compare hover text is the user-specified wording, translated to
+   *  match it word for word in meaning; discard only drops the input that
+   *  failed to write (not a document-level rollback); cancel keeps the
+   *  pause and the current input. */
+  'embed.conflictCompareLabel': 'Compare and Resolve',
+  'embed.conflictCompareHint': 'Resolve the conflict in a diff view between the temporary copy and the conflicting version',
+  'embed.conflictDiscardLabel': 'Discard Current Version',
+  'embed.conflictDiscardHint': 'Discard the input that failed to write, then resync to the current target content.',
+  'embed.conflictCancelLabel': 'Cancel',
+  'embed.conflictCancelHint': 'Keep the pause and the current input.',
+  'embed.conflictReopenLabel': 'Choose Again',
+  'embed.conflictReopenHint': 'Show the conflict resolution choices again.',
+  'embed.conflictCompareFailed': 'Failed to open the diff view. The current input is kept; you can retry.',
 
   /** 反链面板（#197：四态与条目；形态改版批次：工具栏/排序/搜索/页头） */
   'backlinks.label': 'Backlinks',
@@ -673,6 +722,13 @@ export const en = {
   'command.editor.addCursorBelow.title': 'Add cursor below',
   /** #221 preview the link at the cursor/focus (manual hover-popup open; keyboard enters the popup and Esc returns) */
   'command.ui.hoverPreviewLink.title': 'Preview the current link',
+  'command.ui.embedToggleMode.title': 'Toggle reference internal view mode',
+  /** P2-10 reference Live action entries (save target / explicit close / conflict trio; all unbound by default) */
+  'command.embed.saveTarget.title': 'Save focused reference target',
+  'command.embed.close.title': 'Close focused reference editing session',
+  'command.conflict.compare.title': 'Compare and resolve',
+  'command.conflict.discard.title': 'Discard current version',
+  'command.conflict.cancel.title': 'Cancel conflict choice',
 
   // ---- #159 锚点跳转（块引用定位与本文件锚点）----
   /** 块 id 缺失提示（与标题缺失同款「打开后提示」行为） */

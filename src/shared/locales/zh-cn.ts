@@ -258,7 +258,18 @@ export const zhCn: Record<MessageKey, string> = {
   'host.discardAndResync': '放弃本地修改并重新同步',
   'host.confirmResume': '将放弃“{name}”编辑器中未确认的本地修改，并以磁盘/权威内容重新同步。建议先复制未确认输入。',
   'host.conflictPaused': '“{name}”的编辑已暂停：外部修改与未确认输入无法安全合并。未确认输入已保留，可随时取回。',
+  /** P2-12（#289）冲突三项「对比并解决」打开的原生对比页标题（左：未提交
+   *  输入临时副本；右：真实目标文档） */
+  'host.conflictDiffTitle': '写入冲突：{name}（左侧：当前输入副本 / 右侧：目标当前版本）',
   'host.panelClosedWithInput': '“{name}”的编辑器已关闭（或连接断开），存在未保存的未确认输入：{text}',
+  /** P2-13（#290）父标签关闭后，引用编辑端口（虚拟面板）未写入目标的输入
+   *  通知（三项当次选择：对比并解决 / 放弃当前版本 / 取消） */
+  'host.refClosedWithInput': '父文档已关闭，“{name}”的引用编辑存在未写入目标的输入：{text}',
+  'host.conflictCompareLabel': '对比并解决',
+  'host.conflictDiscardLabel': '放弃当前版本',
+  'host.conflictCancelLabel': '取消',
+  'host.handoffFailed': '打开“{name}”的编辑标签失败，未保存修改仍保留在宿主中，可重试打开。',
+  'host.handoffRetry': '重试打开',
   'host.wikilinkUnsupported': '不支持的双链形态「[[{target}]]」（嵌入 ![[…]] 属二期）：已按原文保留',
   'host.wikilinkNoWorkspace': '当前文档不在任何工作区文件夹内：双链目标按来源文档的相对路径解析，未打开文件夹时无法跳转（链接文本保留）',
   'host.wikilinkNotFound': '双链目标不存在：[[{target}]]（已按来源文档所在目录解析；不会自动创建文件）',
@@ -442,6 +453,39 @@ export const zhCn: Record<MessageKey, string> = {
    *  （aria-label 与 title 同词；打开沿用 Vsidian 既有打开行为，不改写嵌入原文） */
   'embed.loading': '正在加载嵌入内容…',
   'embed.openTarget': '打开目标笔记',
+  /** P2-04（#281）嵌入内部 Live：模式切换 / 保存目标 / 未保存圆点与
+   *  绑定失败、暂停态的就地文案（悬停词走 data-tooltip 同一词条） */
+  'embed.modeToLive': '在引用内编辑（切换到实时预览）',
+  'embed.modeToReading': '切换到阅读视图',
+  'embed.saveTarget': '保存目标笔记',
+  'embed.dirtyDot': '目标有未保存修改',
+  'embed.liveBindFailed': '无法接入目标编辑（目标不可用或不是 Markdown）。',
+  'embed.livePaused': '编辑已暂停：无法安全写回，输入已保留。',
+  /** P2-05（#282）显式关闭确认：关闭入口悬停词与三项模态（默认取消；
+   *  文件名与文档级丢弃影响须在确认文字中指明） */
+  'embed.closeEditor': '关闭引用编辑',
+  'embed.closeDialogTitle': '关闭引用编辑',
+  'embed.closeDialogMessage': '{file} 有未保存的修改。',
+  'embed.closeDialogDiscardScope': '丢弃将恢复整个文件的已保存内容，包括在其他视图中的未保存修改。',
+  'embed.closeCancel': '取消',
+  'embed.closeSave': '保存并关闭',
+  'embed.closeDiscard': '丢弃修改并关闭',
+  'embed.closeSaveFailed': '保存失败（文件可能只读），已保留当前编辑。',
+  'embed.closeDiscardFailed': '丢弃失败，已保留当前状态。',
+  'embed.closeStale': '目标在确认期间又被修改，请重新确认。',
+
+  /** P2-12（#289）写入冲突三项选择（暂停状态行就地呈现）。compare 的
+   *  hover 为用户指定原文逐字；discard 只放弃本次未成功写入的输入（非
+   *  文档级回滚）；cancel 保持暂停与当前输入 */
+  'embed.conflictCompareLabel': '对比并解决',
+  'embed.conflictCompareHint': '在临时副本和冲突版本的对比视图中处理冲突',
+  'embed.conflictDiscardLabel': '放弃当前版本',
+  'embed.conflictDiscardHint': '放弃本次未成功写入的输入，重新同步目标当前内容。',
+  'embed.conflictCancelLabel': '取消',
+  'embed.conflictCancelHint': '保持暂停与当前输入。',
+  'embed.conflictReopenLabel': '重新选择',
+  'embed.conflictReopenHint': '重新显示冲突处理选项。',
+  'embed.conflictCompareFailed': '打开对比视图失败，已保留当前输入，可重试。',
 
   /** 反链面板（#197：四态与条目；形态改版批次：工具栏/排序/搜索/页头） */
   'backlinks.label': '反向链接',
@@ -631,6 +675,13 @@ export const zhCn: Record<MessageKey, string> = {
   'command.editor.addCursorBelow.title': '在下方添加光标',
   /** #221 预览当前链接（手动打开悬停浮层：键盘进入浮层、Esc 返回触发处） */
   'command.ui.hoverPreviewLink.title': '预览当前链接',
+  'command.ui.embedToggleMode.title': '切换引用的内部视图模式',
+  /** P2-10 引用 Live 操作入口（保存目标/显式关闭/冲突三项；默认均未绑定） */
+  'command.embed.saveTarget.title': '保存焦点引用的目标',
+  'command.embed.close.title': '关闭焦点引用的编辑会话',
+  'command.conflict.compare.title': '对比并解决',
+  'command.conflict.discard.title': '放弃当前版本',
+  'command.conflict.cancel.title': '取消冲突选择',
 
   // ---- #159 锚点跳转（块引用定位与本文件锚点）----
   /** 块 id 缺失提示（与标题缺失同款「打开后提示」行为） */

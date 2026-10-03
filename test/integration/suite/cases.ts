@@ -3,6 +3,7 @@
 // 字节级断言），路径经环境变量 WORKSPACE_DIR 传入。
 import * as vscode from 'vscode'
 import { liveEmbedReady, mixedEmbedReady, readingEmbedCard, readingEmbedHeightReady } from './embedReadiness'
+import { probe278Cases } from './probe278'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { LOCALE_MESSAGES, resolveLocale } from '../../../src/shared/locales'
 import { OBSIDIAN_ALIAS_PROBES } from '../../../src/shared/obsidianAlias'
@@ -35,6 +36,7 @@ const CMD = {
   // #292 骨架屏状态回报查询（hold 装配下 adopt/release 均出站回报）
   skeletonState: 'onegayi.vsidian._test.getSkeletonState',
   injectMessage: 'onegayi.vsidian._test.injectWebviewMessage',
+  injectWebviewReceived: 'onegayi.vsidian._test.injectWebviewReceived',
   postToPanel: 'onegayi.vsidian._test.postToPanel',
   viewState: 'onegayi.vsidian._test.requestViewState',
   cachedViewState: 'onegayi.vsidian._test.getCachedViewState',
@@ -968,7 +970,8 @@ interface ViewState {
   /** #140 Popover 改版：frontmatter 属性编辑浮层开态（protocol.ts 缺省可选） */
   fmPopoverOpen?: boolean
   /** #218 悬停预览观测：浮层开闭、内容态、目标标识与内容块数；
-   *  #220 新增 fm 属性区三态与 imageSrcs 浮层内已应用图片地址（旧 webview 缺省） */
+   *  #220 新增 fm 属性区三态与 imageSrcs 浮层内已应用图片地址（旧 webview 缺省）；
+   *  P2-06（#283）新增根引用内部 Live 观测（旧 webview 缺省） */
   hoverPreview?: {
     open: boolean
     state: 'loading' | 'content' | 'error'
@@ -977,6 +980,11 @@ interface ViewState {
     scope: 'full' | 'heading' | 'block' | ''
     fm?: 'none' | 'collapsed' | 'expanded'
     imageSrcs?: string[]
+    internalMode?: 'reading' | 'live'
+    liveBound?: boolean
+    liveDirty?: boolean
+    liveSuspended?: boolean
+    closeDialogOpen?: boolean
   }
   /** #299 跳转目标提示观测：在场与路径文本 */
   targetTip?: {
@@ -998,6 +1006,28 @@ interface ViewState {
     textLen?: number
     /** #243 现有虚拟窗口观测；仅取目标自身块数，排除子卡正文长度。 */
     viewStats?: { totalBlocks: number; mountedBlocks: number } | null
+    /** P2-04（#281）内部模式与目标编辑端口观测 */
+    internalMode?: 'reading' | 'live'
+    liveBound?: boolean
+    livePortId?: string | null
+    /** P2-11（#288）B 规范 docUri（资源信封注入的身份载体） */
+    liveDocUri?: string | null
+    liveDirty?: boolean
+    liveSuspended?: boolean
+    /** 内部 Live 编辑器文档长度（-1 = 无实例） */
+    liveTextLen?: number
+    /** P2-11（#288）内部 Live 图片管理器的已应用地址（B 身份解析观测） */
+    liveImageSrcs?: string[]
+    /** P2-05（#282）关闭确认模态观测（none/open/stale）与发起意图径 */
+    closeDialog?: 'none' | 'open' | 'stale'
+    closeIntent?: 'close' | 'escape' | 'delete' | ''
+    /** P2-12（#289）冲突选择态（none/open/collapsed）、compare 在途与失败提示 */
+    conflictChoice?: 'none' | 'open' | 'collapsed'
+    conflictComparePending?: boolean
+    conflictNotice?: boolean
+    /** P2-09（#286）递归深度与直接父身份——根级计数口径的观测维度 */
+    depth?: number
+    parentInstanceId?: string | null
   }>
   /** #223 Live 嵌入显隐观测：嵌入表逐枚的源码显形态（selectionTouchesRange 语义） */
   liveEmbedReveal?: Array<{ inner: string; line: number; revealed: boolean }>
@@ -1319,6 +1349,9 @@ const TASK_DOC_SECOND_TOGGLED = [
 
 /** 用例表：名称 -> 执行函数 */
 export const cases: Array<[string, () => Promise<void>]> = [
+  // #278（P2-01）真宿主探针组：目标历史/丢弃/临时对比/关闭交接的公开路线
+  // 验证——研究工件独立成文件，定向复现：VSIDIAN_TEST_CASES='P2-01'
+  ...probe278Cases,
   ['激活与默认编辑器声明（#38 后接管 .md 默认打开）', async () => {
     const ext = vscode.extensions.getExtension(EXT_ID)
     assert(ext, `扩展 ${EXT_ID} 未找到`)
@@ -11984,25 +12017,26 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await waitViewState('悬停预览.md', (v) => v.viewMode === 'reading' && (v.readingWikilinkCount ?? 0) >= 5)
     const before = await readDisk('悬停 局部目标.md')
 
-    // 章节双链（index 2）：scope=heading、块数收窄到章节甲 3 块（CRLF 换算
-    // 正确时与 LF 文档同构；目标标识为中文空格路径的根内相对路径）
+    // 章节双链（index 2）：scope=heading、P2-03（#280）起全文可达——块数
+    // 为目标全文 7 块（锚点只作初始定位，不再收窄内容范围；CRLF 换算正确
+    // 时与 LF 文档同构；目标标识为中文空格路径的根内相对路径）
     await vscode.commands.executeCommand(CMD.postToPanel, uri,
       { kind: 'hover.test.pointer', action: 'enter', index: 2 })
     const section = await waitViewState('悬停预览.md', (v) =>
       v.hoverPreview?.open === true && v.hoverPreview.state === 'content' && v.hoverPreview.scope === 'heading')
     assert(section.hoverPreview?.note === '悬停 局部目标.md',
       `章节预览目标标识应为根内相对路径（实际 ${section.hoverPreview?.note}）`)
-    assert(section.hoverPreview?.blocks === 3,
-      `章节甲应渲染 3 块（标题/段落/列表；实际 ${section.hoverPreview?.blocks}）`)
+    assert(section.hoverPreview?.blocks === 7,
+      `章节引用应渲染目标全文 7 块（实际 ${section.hoverPreview?.blocks}）`)
 
-    // 块引用双链（index 3）：scope=block、完整列表块 1 块（多行块不截首行
-    // ——截首行时列表块缺失、blocks 为 0）
+    // 块引用双链（index 3）：scope=block、同样全文 7 块（多行块语义由
+    // 定位区间承载——anchor 命中即成功，内容范围不再按块收窄）
     await vscode.commands.executeCommand(CMD.postToPanel, uri,
       { kind: 'hover.test.pointer', action: 'enter', index: 3 })
     const block = await waitViewState('悬停预览.md', (v) =>
       v.hoverPreview?.open === true && v.hoverPreview.state === 'content' && v.hoverPreview.scope === 'block')
-    assert(block.hoverPreview?.blocks === 1,
-      `块引用应渲染完整列表块 1 块（实际 ${block.hoverPreview?.blocks}）`)
+    assert(block.hoverPreview?.blocks === 7,
+      `块引用应渲染目标全文 7 块（实际 ${block.hoverPreview?.blocks}）`)
 
     // 失效锚点（index 4）：anchor-missing 分态就地呈现（不以全文替代），
     // 文案含锚点原文（note 为错误文案载体）
@@ -12022,13 +12056,13 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(mdFull.hoverPreview?.blocks === 7,
       `普通链接全文应渲染 7 块（实际 ${mdFull.hoverPreview?.blocks}）`)
 
-    // 普通链接章节（md index 1，fragment 锚点）：scope=heading、3 块
+    // 普通链接章节（md index 1，fragment 锚点）：scope=heading、全文 7 块
     await vscode.commands.executeCommand(CMD.postToPanel, uri,
       { kind: 'hover.test.pointer', action: 'enter', index: 1, link: 'md' })
     const mdSection = await waitViewState('悬停预览.md', (v) =>
       v.hoverPreview?.open === true && v.hoverPreview.state === 'content' && v.hoverPreview.scope === 'heading')
-    assert(mdSection.hoverPreview?.blocks === 3,
-      `链接章节应渲染 3 块（实际 ${mdSection.hoverPreview?.blocks}）`)
+    assert(mdSection.hoverPreview?.blocks === 7,
+      `链接章节应渲染目标全文 7 块（实际 ${mdSection.hoverPreview?.blocks}）`)
 
     // 页内锚点（md index 2）：目标即来源文档自身（不跨文档），scope=heading
     await vscode.commands.executeCommand(CMD.postToPanel, uri,
@@ -12788,39 +12822,51 @@ export const cases: Array<[string, () => Promise<void>]> = [
       return card !== undefined && card.state === 'content' ? v : undefined
     }, 15000)
 
-    // #244 自引用沿当前路径截断：A→A 直接显示循环分态；编辑 A 后
-    // 新实例仍在读取前截断，零订阅、零写回。
+    // #244 自引用沿当前路径截断 + P2-03（#280，ADR-0011）第一跳合法打开：
+    // A→A 的根卡是第一跳自文档引用——合法打开（渲染全文），其内容中的
+    // 自引用是链上自引用，按文档身份截断（errorCycle 子卡在场、无第三
+    // 层）。断言取 rootHost=reading 的稳定容器（live 容器在模式切换过渡
+    // 期并存且内部虚拟化挂载随视口时序变化，不作为观测面）。编辑 A 后
+    // 失效重载一轮同样收敛，订阅无风暴、零写回。
     await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
     await openWithEditor('同步自引用.md')
     await waitSessionReady('同步自引用.md')
     const selfUri = wsUri('同步自引用.md').toString()
     await vscode.commands.executeCommand(CMD.postToPanel, selfUri, { kind: 'view.mode.set', mode: 'reading' })
-    const selfCardOf = (v: ViewState) => (v.readingEmbed ?? []).find((c) => c.host !== 'live')
-    const pullSelf = () => vscode.commands.executeCommand(
+    const selfCardsOf = (v: ViewState) => (v.readingEmbed ?? []).filter((c) => c.rootHost === 'reading')
+    const selfPull = () => vscode.commands.executeCommand(
       CMD.viewState, wsUri('同步自引用.md').toString(), 0) as Promise<ViewState | undefined>
-    await poll('自引用循环分态', async () => {
-      const v = await pullSelf()
-      const card = v && selfCardOf(v)
-      return card !== undefined && card.state === 'error' &&
-        card.note === editorMessages()['hover.errorCycle'] ? v : undefined
+    await poll('自引用第一跳合法打开', async () => {
+      const v = await selfPull()
+      return v !== undefined && selfCardsOf(v).some((c) => c.state === 'content') ? v : undefined
     })
+    const firstOpen = await poll('自引用链上截断', async () => {
+      const v = await selfPull()
+      return v !== undefined && selfCardsOf(v).some((c) => c.state === 'error' &&
+        c.note === editorMessages()['hover.errorCycle']) ? v : undefined
+    })
+    const selfBaseLen = selfCardsOf(firstOpen).find((c) => c.state === 'content')?.textLen ?? 0
     const selfEdit = new vscode.WorkspaceEdit()
     selfEdit.replace(wsUri('同步自引用.md'), new vscode.Range(0, 0, 0, 0), '# 自引用首段追加\n\n')
     assert(await vscode.workspace.applyEdit(selfEdit), '自引用编辑应成功应用')
     await poll('编辑后自引用仍截断', async () => {
-      const v = await pullSelf()
-      const card = v && selfCardOf(v)
-      return card !== undefined && card.state === 'error' &&
-        card.note === editorMessages()['hover.errorCycle'] ? v : undefined
+      const v = await selfPull()
+      if (v === undefined) {
+        return undefined
+      }
+      const cards = selfCardsOf(v)
+      const reloaded = cards.some((c) => c.state === 'content' && (c.textLen ?? 0) > selfBaseLen)
+      return reloaded && cards.some((c) => c.state === 'error' &&
+        c.note === editorMessages()['hover.errorCycle']) ? v : undefined
     }, 15000)
-    // 收敛断言：两个防抖周期后没有建立任何自引用目标订阅。
+    // 收敛断言：两个防抖周期后订阅计数稳定（第一跳合法装载的目标订阅
+    // 在场；链上截断不新增订阅——无递归订阅风暴）。
     await new Promise((r) => setTimeout(r, 1500))
     const selfStats1 = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
     await new Promise((r) => setTimeout(r, 800))
     const selfStats2 = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
-    assert(selfStats1.targets === 0 && selfStats1.subscriptions === 0 &&
-      selfStats2.targets === 0 && selfStats2.subscriptions === 0,
-    `自引用读取前截断、无订阅（实际 ${JSON.stringify(selfStats1)} → ${JSON.stringify(selfStats2)}）`)
+    assert(JSON.stringify(selfStats1) === JSON.stringify(selfStats2) && selfStats1.subscriptions > 0,
+    `自引用截断后订阅收敛无风暴（实际 ${JSON.stringify(selfStats1)} → ${JSON.stringify(selfStats2)}）`)
     // 零写回：编辑经 WorkspaceEdit（不走 webview 编辑管线），推送-重载
     // 链路对 edit.request 通道零触碰（appliedEdits 恒 0——重载只读）
     const selfState = (await vscode.commands.executeCommand(CMD.sessionState, selfUri)) as SessionState
@@ -13192,9 +13238,10 @@ export const cases: Array<[string, () => Promise<void>]> = [
     // offset 写回——宿主侧以磁盘源文对拍）
     assert(shown.text === parentBefore, `格内嵌入不改写源文（含 \\| 转义，实际 ${JSON.stringify(shown.text.slice(0, 120))}）`)
 
-    // 真宿主读取闭环：三卡装载（表头格 + 数据格两枚；改名嵌入目标章节卡）
+    // 真宿主读取闭环：三卡装载（表头格 + 数据格两枚；改名嵌入目标章节卡）。
+    // P2-09 起孙卡随直接父进 live 挂载——host=live 计数按根级口径过滤
     const loaded = await waitViewState('嵌入表格样例.md', (v) => {
-      const live = (v.readingEmbed ?? []).filter((c) => c.host === 'live')
+      const live = (v.readingEmbed ?? []).filter((c) => c.host === 'live' && !c.parentInstanceId)
       return live.length === 3 && live.every((c) => c.state === 'content')
     })
     const liveCards = (loaded.readingEmbed ?? []).filter((c) => c.host === 'live')
@@ -13271,6 +13318,1214 @@ export const cases: Array<[string, () => Promise<void>]> = [
     }
     await new Promise((r) => setTimeout(r, 400))
     console.log('[#248] 表格格内 rename 转义保真与撤销恢复通过')
+  }],
+  // ---- P2-04（#281）嵌入内部 Live：第一条可写链路的真宿主证明。父面板
+  // 默认 Live → 未覆盖嵌入继承内部 Live → 绑定目标编辑端口（B 的
+  // DocumentSession 虚拟面板）→ 普通输入只写 B；A 零写回/零 dirty；dirty
+  // 推送驱动圆点；保存走 TextDocument.save（P2-01 验证路线）。 ----
+  ['P2-04 嵌入内部 Live：输入只写目标、dirty 圆点与保存路由（#281）', async () => {
+    await openWithEditor('p204-编辑嵌入.md')
+    await waitSessionReady('p204-编辑嵌入.md')
+    const uri = wsUri('p204-编辑嵌入.md').toString()
+    const targetUri = wsUri('p204-编辑目标.md')
+    const parentBefore = await readDisk('p204-编辑嵌入.md')
+    const targetBefore = await readDisk('p204-编辑目标.md')
+    const parentDoc = await vscode.workspace.openTextDocument(wsUri('p204-编辑嵌入.md'))
+    const session0 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+
+    // 两枚同目标 occurrence 均装载并绑定（父 Live 继承 → 自动 bind）
+    const bound = await waitViewState('p204-编辑嵌入.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner === 'p204-编辑目标')
+      return cards.length === 2 && cards.every((c) => c.liveBound === true && c.internalMode === 'live')
+        ? true : false
+    })
+    const ports = new Set(bound.readingEmbed!.filter((c) => c.inner === 'p204-编辑目标').map((c) => c.livePortId))
+    assert(ports.size === 2, `同目标两 occurrence 各自独立端口（实际 ${JSON.stringify([...ports])}）`)
+    assert(bound.readingEmbed!.every((c) => c.inner !== 'p204-编辑目标' || c.liveDirty === false),
+      '目标初始干净（无圆点）')
+
+    // occurrence 0 普通输入：只写 B（经 B 会话，A 会话零 applyEdit）
+    const insertAt = '# p204 编辑目标\n\n'.length + 3
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.type', inner: 'p204-编辑目标', pos: insertAt, text: '【嵌入编辑】',
+    })
+    const bDoc = await poll('B 权威文档收到嵌入编辑', () => {
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())
+      return doc?.getText().includes('【嵌入编辑】') ? doc : undefined
+    })
+    assert(bDoc.isDirty, '嵌入编辑后目标 B dirty')
+    // dirty 推送 → 圆点在场（探针）
+    await waitViewState('p204-编辑嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p204-编辑目标' && c.liveDirty === true)
+        ? true : false)
+    // A 零写回：文本不变、不 dirty、A 会话 appliedEdits 零推进（根面板身份
+    // 与目标会话身份分开——B 的编辑不经过 A 的 DocumentSession）
+    await waitViewState('p204-编辑嵌入.md', (v) => v.text === parentBefore)
+    assert(parentDoc.getText() === parentBefore && !parentDoc.isDirty, '父文档 A 零写回且零 dirty')
+    const session1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(session1.appliedEdits === session0.appliedEdits,
+      `A 会话 appliedEdits 零推进（B 编辑走 B 会话；实际 ${session1.appliedEdits}，基线 ${session0.appliedEdits}）`)
+    assert(await readDisk('p204-编辑目标.md') === targetBefore, '保存前目标磁盘未变')
+
+    // 保存路由（embed.test.save 与头部保存入口/Ctrl+S 焦点路由同一出站）：
+    // TextDocument.save 只落 B——磁盘更新、dirty 清零、圆点消失、A 原样
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.save', inner: 'p204-编辑目标',
+    })
+    await poll('目标保存落盘', async () => (await readDisk('p204-编辑目标.md')).includes('【嵌入编辑】') ? true : undefined)
+    assert(!bDoc.isDirty, '保存后目标干净')
+    await waitViewState('p204-编辑嵌入.md', (v) =>
+      (v.readingEmbed ?? []).every((c) => c.inner !== 'p204-编辑目标' || c.liveDirty !== true)
+        ? true : false)
+    assert(await readDisk('p204-编辑嵌入.md') === parentBefore && !parentDoc.isDirty,
+      '保存目标不动父文档（A 磁盘与 dirty 原样）')
+    console.log('[P2-04] 嵌入输入只写目标 + dirty 圆点 + 保存路由通过')
+  }],
+
+  // ---- P2-04（#281）宿主历史路由（P2-01 验证的临时激活路线）与端口
+  // 拒收面：撤销精准落 B、A 活动标签恢复、B 预览标签收口；重复 seq 幂等
+  // 去重；释放后（unbind 后）的迟到写入按 portId 拒收。 ----
+  ['P2-04 嵌入内部 Live：撤销激活路由、重复 seq 去重与释放后写入拒收（#281）', async () => {
+    await openWithEditor('p204-编辑嵌入.md')
+    await waitSessionReady('p204-编辑嵌入.md')
+    const uri = wsUri('p204-编辑嵌入.md').toString()
+    const targetUri = wsUri('p204-编辑目标.md')
+    const targetClean = (await vscode.workspace.openTextDocument(targetUri)).getText()
+    const bound = await waitViewState('p204-编辑嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p204-编辑目标' && c.liveBound === true)
+        ? true : false)
+    void bound
+    const fsPath = targetUri.fsPath
+
+    // 键入一笔（撤销载体）
+    const insertAt = '# p204 编辑目标\n\n'.length + 3
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.type', inner: 'p204-编辑目标', pos: insertAt, text: '撤销载体',
+    })
+    const bDoc = await poll('撤销载体写入 B', () => {
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())
+      return doc?.getText().includes('撤销载体') ? doc : undefined
+    })
+    assert(bDoc.isDirty, '载体编辑后 B dirty')
+
+    // 撤销走 P2-01 激活路由：B 无 custom 标签 → showTextDocument(B preview)
+    // → 全局 undo → 重显 A → 收 B 预览标签（用户已确认的标签切换取舍）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.history', inner: 'p204-编辑目标', op: 'undo',
+    })
+    await poll('撤销回退 B 到已保存内容', () =>
+      bDoc.getText() === targetClean && !bDoc.isDirty ? true : undefined)
+    // 收口断言经轮询：undo 落盘先行、openWith 重显与预览标签收起随后
+    // （historyViaTempActivation 的异步收尾与文本回退存在毫秒级竞态）
+    await poll('撤销路由收口（活动标签回 A、B 预览标签收起）', () => {
+      const activeInput = vscode.window.tabGroups.activeTabGroup.activeTab?.input
+      const restored = activeInput instanceof vscode.TabInputCustom &&
+        activeInput.viewType === VIEW_TYPE && activeInput.uri.toString() === uri
+      const bTextTabs = vscode.window.tabGroups.all
+        .flatMap((g) => g.tabs)
+        .filter((t) => t.input instanceof vscode.TabInputText && t.input.uri.toString() === targetUri.toString())
+      return restored && bTextTabs.length === 0 ? true : undefined
+    })
+
+    // 撤销路由激活 B 期间 A 的 webview 被隐藏（retainContextWhenHidden
+    // 关闭 → 卸载），恢复后重载并自动重绑——端口身份换新，此处重取当前
+    // 端口（旧端口的 stale 释放路径已由重绑闭环覆盖）
+    const rebound = await waitViewState('p204-编辑嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p204-编辑目标' && c.liveBound === true)
+        ? true : false)
+    const port = rebound.readingEmbed!.find((c) => c.inner === 'p204-编辑目标' && c.livePortId)!.livePortId!
+
+    // 重复 seq：同 seq 两笔伪造写入 → 宿主 ackCache 幂等去重，恰一笔落 B
+    const versionBefore = bDoc.version
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.portWrite', portId: port, fsPath, seq: 9001,
+      baseVersion: versionBefore, offset: 0, length: 0, text: '重复载入', repeat: 2,
+    })
+    await poll('重复 seq 首笔落 B', () => bDoc.getText().includes('重复载入') ? true : undefined)
+    await new Promise((r) => setTimeout(r, 500))
+    assert(bDoc.version === versionBefore + 1,
+      `重复 seq 恰一笔 applyEdit（版本 +1；实际 ${versionBefore} → ${bDoc.version}）`)
+    assert(bDoc.getText().split('重复载入').length - 1 === 1,
+      '同 seq 第二笔由 ackCache 去重（不重复写入）')
+
+    // 释放后写入拒收：切回 Reading（unbind，两枚 occurrence 各自切）→ 旧
+    // portId 的迟到写入被拒
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.mode', inner: 'p204-编辑目标', mode: 'reading', occurrence: 0,
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.mode', inner: 'p204-编辑目标', mode: 'reading', occurrence: 1,
+    })
+    await waitViewState('p204-编辑嵌入.md', (v) =>
+      (v.readingEmbed ?? []).every((c) => c.inner !== 'p204-编辑目标' || c.liveBound !== true)
+        ? true : false)
+    const textAfterUnbind = bDoc.getText()
+    const versionAfterUnbind = bDoc.version
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.portWrite', portId: port, fsPath, seq: 9002,
+      baseVersion: versionAfterUnbind, offset: 0, length: 0, text: '迟到写入',
+    })
+    await new Promise((r) => setTimeout(r, 500))
+    assert(bDoc.getText() === textAfterUnbind && bDoc.version === versionAfterUnbind,
+      '释放后的迟到端口写入被拒收（B 权威文本与版本零变化）')
+
+    // 现场还原：激活 B → 无参 revert 回保存内容（P2-01 验证路线）→ 收标签
+    await vscode.window.showTextDocument(bDoc, { preview: true })
+    await vscode.commands.executeCommand('workbench.action.files.revert')
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await poll('B 回到已保存内容', () => bDoc.getText() === targetClean ? true : undefined)
+    console.log('[P2-04] 撤销激活路由 + 重复 seq 去重 + 释放后拒收通过')
+  }],
+
+  // ---- P2-04（#281）CRLF 坐标与不可安全写回暂停的目标文本断言：CRLF 目标
+  // 键入经 LF/宿主坐标双向转换保存回读保真；外部覆盖旧版本请求区间 →
+  // 重定位失败 → 面板暂停 + edit.ack fail，B 权威文本 = 外部版本（嵌入
+  // 旧版未写入），A 零波及。 ----
+  ['P2-04 嵌入内部 Live：CRLF 坐标保真与不可安全写回暂停（#281）', async () => {
+    await openWithEditor('p204-CRLF嵌入.md')
+    await waitSessionReady('p204-CRLF嵌入.md')
+    const uri = wsUri('p204-CRLF嵌入.md').toString()
+    const targetUri = wsUri('p204-CRLF目标.md')
+    const parentDoc = await vscode.workspace.openTextDocument(wsUri('p204-CRLF嵌入.md'))
+    const bound = await waitViewState('p204-CRLF嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p204-CRLF目标' && c.liveBound === true)
+        ? true : false)
+    const card = bound.readingEmbed!.find((c) => c.inner === 'p204-CRLF目标')!
+    const port = card.livePortId!
+    const fsPath = targetUri.fsPath
+    const bDoc = vscode.workspace.textDocuments.find(
+      (d) => d.uri.toString() === targetUri.toString()) ??
+      (await vscode.workspace.openTextDocument(targetUri))
+    assert(bDoc.getText().includes('\r\n'), 'CRLF 目标装载保留宿主行尾')
+
+    // 键入（webview LF 坐标 → 宿主 CRLF 坐标）+ 保存：磁盘回读 CRLF 保真
+    const insertAt = 'p204 CRLF 目标首行'.length - 2
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.type', inner: 'p204-CRLF目标', pos: insertAt, text: 'CRLF编辑',
+    })
+    await poll('CRLF 目标收到键入', () => bDoc.getText().includes('CRLF编辑') ? true : undefined)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.save', inner: 'p204-CRLF目标',
+    })
+    const savedDisk = await poll('CRLF 保存落盘', async () => {
+      const text = await readDisk('p204-CRLF目标.md')
+      return text.includes('CRLF编辑') && text.includes('\r\n') ? text : undefined
+    })
+    assert(savedDisk.includes('p204 CRLF 目标CRLF编辑首行\r\np204 第二行\r\n'),
+      `LF 坐标键入转换为宿主 CRLF 坐标且既有行尾保真（实际 ${JSON.stringify(savedDisk)}）`)
+    assert(!parentDoc.isDirty && parentDoc.getText() === (await readDisk('p204-CRLF嵌入.md')),
+      'CRLF 编辑与保存全程父文档零波及')
+
+    // 不可安全写回暂停：外部覆盖区间 [0,6)（版本前移），随后以旧
+    // baseVersion 对同区间伪造写入 → 重定位失败 → 暂停 + 目标文本断言
+    const versionAtPause = bDoc.version
+    const external = new vscode.WorkspaceEdit()
+    external.replace(targetUri, new vscode.Range(0, 0, 0, 6), '外部改写')
+    assert(await vscode.workspace.applyEdit(external), '外部覆盖应成功应用')
+    const bDocNow = await poll('外部版本到达 B 文档', () => {
+      const latest = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())
+      return latest?.getText().startsWith('外部改写') ? latest : undefined
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.portWrite', portId: port, fsPath, seq: 9003,
+      baseVersion: versionAtPause, offset: 0, length: 6, text: '嵌入旧版',
+    })
+    await waitViewState('p204-CRLF嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p204-CRLF目标' && c.liveSuspended === true)
+        ? true : false)
+    assert(bDocNow.getText().startsWith('外部改写') && !bDocNow.getText().includes('嵌入旧版'),
+      '暂停后 B 权威文本保持外部版本（旧版本请求未写入——目标文本断言）')
+    assert(bDocNow.getText().includes('CRLF编辑'), '此前已保存的 CRLF 编辑仍在（外部只覆盖 [0,6)）')
+
+    // 现场还原：切回 Reading 释放端口 → 激活 B → 无参 revert 回保存内容
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.mode', inner: 'p204-CRLF目标', mode: 'reading',
+    })
+    await vscode.window.showTextDocument(bDocNow, { preview: true })
+    await vscode.commands.executeCommand('workbench.action.files.revert')
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await poll('B 回到已保存内容', () => bDocNow.getText() === savedDisk ? true : undefined)
+    console.log('[P2-04] CRLF 坐标保真 + 不可安全写回暂停（目标文本断言）通过')
+  }],
+
+ // ---- P2-07（#284）混排/列表/任务/引用容器内嵌入的内部 Live：容器位
+  // 输入只写目标 B（A 的容器标记与前后文保真、会话零推进）；A 的外部编辑
+  // 使嵌入区间平移后实例与端口稳定（键迁移——livePortId 不变、零重绑）；
+  // 容器位保存路由只落 B。 ----
+  ['P2-07 混排容器内部 Live：输入只写目标与实例平移稳定（#284）', async () => {
+    await openWithEditor('p207-容器混排.md')
+    await waitSessionReady('p207-容器混排.md')
+    const uri = wsUri('p207-容器混排.md').toString()
+    const targetUri = wsUri('p207-容器目标.md')
+    const parentBefore = await readDisk('p207-容器混排.md')
+    const targetBefore = await readDisk('p207-容器目标.md')
+    const parentDoc = await vscode.workspace.openTextDocument(wsUri('p207-容器混排.md'))
+    const session0 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+
+    // 容器矩阵（混排/无序/任务/引用）4 卡位全部继承父 Live 并绑定独立端口
+    const bound = await waitViewState('p207-容器混排.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner === 'p207-容器目标')
+      return cards.length === 4 && cards.every((c) => c.liveBound === true &&
+        c.internalMode === 'live' && (c.liveTextLen ?? -1) >= 0) ? true : false
+    })
+    const portsBefore = (bound.readingEmbed ?? [])
+      .filter((c) => c.inner === 'p207-容器目标')
+      .map((c) => c.livePortId as string)
+    assert(new Set(portsBefore).size === 4,
+      `四个容器位各自独立端口（实际 ${JSON.stringify(portsBefore)}）`)
+    const bDoc = await poll('容器目标 B 文档打开', () => {
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())
+      return doc ?? undefined
+    })
+
+    // 无序位（occurrence 1）普通输入：只写 B——A 的容器标记/前后文保真
+    const insertAt = '# p207 容器目标\n\n'.length + 2
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.type', inner: 'p207-容器目标', pos: insertAt, text: '【容器混排编辑】', occurrence: 1,
+    })
+    await poll('B 权威文本收到容器位编辑', () =>
+      bDoc.getText().includes('【容器混排编辑】') ? true : undefined)
+    assert(bDoc.isDirty, '容器位编辑后目标 B dirty')
+    await waitViewState('p207-容器混排.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p207-容器目标' && c.liveDirty === true)
+        ? true : false)
+    assert(parentDoc.getText() === parentBefore && !parentDoc.isDirty,
+      '父文档 A 零写回且零 dirty（容器位嵌入编辑不落 A——源码位置与独占行不同）')
+    const session1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(session1.appliedEdits === session0.appliedEdits,
+      `A 会话 appliedEdits 零推进（实际 ${session1.appliedEdits}，基线 ${session0.appliedEdits}）`)
+    assert(await readDisk('p207-容器目标.md') === targetBefore, '保存前目标磁盘未变')
+
+    // A 的外部编辑（前文插入两字）：嵌入区间平移——实例键迁移使端口稳定
+    // （livePortId 与打字前完全一致、零重绑；外部增量经真实同步链路进 A 视图）
+    const edit = new vscode.WorkspaceEdit()
+    edit.insert(wsUri('p207-容器混排.md'), new vscode.Position(2, 4), '甲乙')
+    await vscode.workspace.applyEdit(edit)
+    await poll('A 外部编辑同步进父文档', () =>
+      parentDoc.getText().includes('前文混排甲乙') ? true : undefined)
+    await waitViewState('p207-容器混排.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner === 'p207-容器目标')
+      return cards.length === 4 && cards.every((c) => c.liveBound === true &&
+        portsBefore.includes(c.livePortId as string)) ? true : false
+    }, 0, 30000)
+    assert(parentDoc.getText().includes('前文混排甲乙 ![[p207-容器目标]] 后文混排。'),
+      'A 前文含新字且嵌入原文/列表/引用标记保真')
+    assert(bDoc.getText().includes('【容器混排编辑】'),
+      'A 平移期间 B 的未保存编辑保持（实例与端口未销毁重建）')
+
+    // 容器位保存路由：只落 B（磁盘更新、dirty 清零、A 原样）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.save', inner: 'p207-容器目标', occurrence: 1,
+    })
+    await poll('容器目标保存落盘', async () =>
+      (await readDisk('p207-容器目标.md')).includes('【容器混排编辑】') ? true : undefined)
+    assert(!bDoc.isDirty, '保存后目标干净')
+    // 保存 B 不触碰 A：A 磁盘仍是外部编辑前的原文（外部编辑未保存，宿主
+    // dirty 模型保持），A 文本与 dirty 状态与保存前一致
+    assert(await readDisk('p207-容器混排.md') === parentBefore,
+      '保存目标不落 A 盘（A 磁盘仍为外部编辑前原文）')
+    assert(parentDoc.isDirty, 'A 的外部编辑 dirty 保持（保存 B 不误存/不清 A）')
+    assert(parentDoc.getText().includes('前文混排甲乙'), 'A 文本保持（外部编辑内容不被回滚）')
+    console.log('[P2-07] 容器混排内部 Live：输入只写目标 + 实例平移稳定 + 保存路由通过')
+  }],
+
+ // ---- P2-08（#285）表格格内嵌入的内部 Live 与父表格输入隔离：表头/
+  // 数据格（转义别名 + #标题形态）继承内部 Live 并绑定独立端口；格内 B
+  // 输入只写目标；父表格结构编辑（行移动对换形态、插列）保文本重定位——
+  // 零删除确认、端口稳定（livePortId 不变）、B 未保存编辑保持；删嵌入行
+  // 照常拦截确认（取消保留 / 保存并关闭完成删除且目标落盘）。 ----
+  ['P2-08 表格格内内部 Live：输入只写目标、结构编辑不误伤与删除拦截（#285）', async () => {
+    await openWithEditor('p208-表格嵌入.md')
+    await waitSessionReady('p208-表格嵌入.md')
+    const uri = wsUri('p208-表格嵌入.md').toString()
+    const parentBefore = await readDisk('p208-表格嵌入.md')
+    const parentDoc = await vscode.workspace.openTextDocument(wsUri('p208-表格嵌入.md'))
+    const session0 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+
+    // 四枚格内嵌入（表头转义别名 + 数据格混排别名/#小节/全文）继承内部 Live
+    const bound = await waitViewState('p208-表格嵌入.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner.startsWith('p208-表格目标'))
+      return cards.length === 4 && cards.every((c) => c.liveBound === true &&
+        c.internalMode === 'live' && (c.liveTextLen ?? -1) >= 0) ? true : false
+    })
+    const portsBefore = (bound.readingEmbed ?? [])
+      .filter((c) => c.inner.startsWith('p208-表格目标'))
+      .map((c) => c.livePortId as string)
+    assert(new Set(portsBefore).size === 4,
+      `四个格内位各自独立端口（实际 ${JSON.stringify(portsBefore)}）`)
+    const bDoc = await poll('表格目标 B 文档打开', () => {
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === wsUri('p208-表格目标.md').toString())
+      return doc ?? undefined
+    })
+
+    // 格内 B 输入只写 B（数据格别名位 occurrence 1）：A 零写回零 dirty
+    const insertAt = '# p208 表格目标\n\n'.length + 2
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.type', inner: 'p208-表格目标|别名', pos: insertAt, text: '【格内编辑】', occurrence: 0,
+    })
+    await poll('B 权威文本收到格内编辑', () =>
+      bDoc.getText().includes('【格内编辑】') ? true : undefined)
+    assert(bDoc.isDirty, '格内编辑后目标 B dirty')
+    assert(parentDoc.getText() === parentBefore && !parentDoc.isDirty,
+      '父文档 A 零写回且零 dirty（格内嵌入编辑不落 A）')
+    const session1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(session1.appliedEdits === session0.appliedEdits,
+      `A 会话 appliedEdits 零推进（实际 ${session1.appliedEdits}，基线 ${session0.appliedEdits}）`)
+
+    // 父表格结构编辑①行移动（真实拖拽钩子：数据行 1 升表头——对换形态的
+    // 整行重写覆盖嵌入区间但逐字保留源文）：零删除确认、A 换位、端口稳定
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'table.test.drag', sourceIndex: 1, targetSlot: 0,
+    })
+    const rowMoved = await poll('行移动写回 A', () =>
+      parentDoc.getText().includes('| 甲 ![[p208-表格目标\\|别名]] 乙 | ![[p208-表格目标#小节]] | 普通格 |') &&
+      parentDoc.getText().split('\n')[2]?.startsWith('| 甲 ![[') ? parentDoc.getText() : undefined)
+    await waitViewState('p208-表格嵌入.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner.startsWith('p208-表格目标'))
+      return cards.length === 4 && cards.every((c) => c.liveBound === true &&
+        portsBefore.includes(c.livePortId as string) && c.closeDialog === 'none') ? true : false
+    }, 0, 30000)
+    assert(rowMoved.split('\n')[4] === '| ![[p208-表格目标\\|头别名]] | 头B | 头C |',
+      `原表头行随移到数据区、转义管道逐字保留（实际 ${JSON.stringify(rowMoved.split('\n').slice(2, 6))}）`)
+    assert(bDoc.getText().includes('【格内编辑】'),
+      '行移动期间 B 的未保存编辑保持（实例与端口未销毁重建）')
+
+    // 父表格结构编辑②插列（真实命令路径：光标普通格 → insertColumnRight
+    // 纯插入不覆盖区间）：端口随坐标平移保持
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'table.test.cellClick', rowIndex: 1, columnIndex: 2,
+    })
+    await new Promise((r) => setTimeout(r, 200))
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'table.command', op: 'insertColumnRight',
+    })
+    await poll('插列写回 A', () => {
+      const lines = parentDoc.getText().split('\n')
+      return lines[3] === '| --- | --- | --- | --- |' &&
+        lines[4] === '| ![[p208-表格目标\\|头别名]] | 头B | 头C | |' ? true : undefined
+    })
+    await waitViewState('p208-表格嵌入.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner.startsWith('p208-表格目标'))
+      return cards.length === 4 && cards.every((c) => c.liveBound === true &&
+        portsBefore.includes(c.livePortId as string)) ? true : false
+    }, 0, 30000)
+    assert(parentDoc.getText().includes('甲 ![[p208-表格目标\\|别名]] 乙'),
+      '插列后嵌入原文与邻文保真')
+
+    // 删嵌入行（行选区 + Delete）：真删除拦截确认——取消保留
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'table.test.select', axis: 'row', index: 1,
+    })
+    await new Promise((r) => setTimeout(r, 250))
+    const textBeforeDelete = parentDoc.getText()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key: 'delete' })
+    const intercepting = await waitViewState('p208-表格嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.closeDialog === 'open') ? true : false)
+    assert(!!intercepting, '删嵌入行弹删除确认（真删除拦截保持）')
+    await new Promise((r) => setTimeout(r, 200))
+    assert(parentDoc.getText() === textBeforeDelete, '确认前 A 不写入（事务被拦）')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'embed.test.dialogAction', action: 'cancel' })
+    await poll('取消后模态退场', async () => {
+      const state = (await vscode.commands.executeCommand(CMD.viewState, uri)) as ViewState | undefined
+      return state && !(state.readingEmbed ?? []).some((c) => c.closeDialog === 'open') ? true : undefined
+    })
+    assert(parentDoc.getText() === textBeforeDelete, '取消保留引用行')
+
+    // 再删 → 保存并关闭：目标 B 落盘、A 行删除、端口随引用退场释放
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'table.test.select', axis: 'row', index: 1,
+    })
+    await new Promise((r) => setTimeout(r, 250))
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.test.key', key: 'delete' })
+    await waitViewState('p208-表格嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.closeDialog === 'open') ? true : false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'embed.test.dialogAction', action: 'save' })
+    await poll('保存并关闭后嵌入行删除', () =>
+      !parentDoc.getText().includes('p208-表格目标\\|头别名') ? true : undefined)
+    await poll('目标 B 随关闭保存落盘', async () =>
+      (await readDisk('p208-表格目标.md')).includes('【格内编辑】') ? true : undefined)
+    assert(!bDoc.isDirty, '保存并关闭后目标干净')
+    assert(parentDoc.getText().includes('p208-表格目标\\|别名') && parentDoc.getText().includes('数据行'),
+      '其余行与格不受扰（甲行与数据行的嵌入保持）')
+    console.log('[P2-08] 表格格内内部 Live：输入只写目标 + 结构编辑不误伤 + 删除拦截通过')
+  }],
+
+ // ---- P2-10（#287）引用完整 Live 操作落 B 不落 A：焦点在嵌入内部 Live
+  // 编辑器内时，格式命令（format.command 宿主回发路径）、表格创建与
+  // frontmatter Popover 编辑全部指向实际目标 B（经 B 的 DocumentSession
+  // 虚拟面板写回宿主权威文本）；A 的文本/dirty/appliedEdits 零变化；实例
+  // 释放（切 Reading）后 Popover 关闭（浮层不残留可写死视图）。 ----
+  ['P2-10 引用完整 Live 操作：格式/表格/属性 Popover 落 B 不落 A（#287）', async () => {
+    await openWithEditor('p210-操作嵌入.md')
+    await waitSessionReady('p210-操作嵌入.md')
+    const uri = wsUri('p210-操作嵌入.md').toString()
+    const targetUri = wsUri('p210-操作目标.md')
+    const parentBefore = await readDisk('p210-操作嵌入.md')
+    const targetBefore = await readDisk('p210-操作目标.md')
+    const parentDoc = await vscode.workspace.openTextDocument(wsUri('p210-操作嵌入.md'))
+    const session0 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+
+    // 嵌入继承父 Live → 绑定端口（装载 + init 完成；liveTextLen ≥ 0 = init
+    // 已装载全文）
+    await waitViewState('p210-操作嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p210-操作目标' && c.liveBound === true &&
+        (c.liveTextLen ?? -1) >= 0 && c.internalMode === 'live')
+        ? true : false)
+    const bDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())!
+    const fmPrefix = '---\ntags:\n  - 甲\n---\n# p210 操作目标\n\n'.length
+
+    // 1) 格式命令（焦点嵌入 → 目标 B）：选「首段」加粗
+    const seg = '首段'
+    const segAt = fmPrefix + '目标'.length
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.focus', inner: 'p210-操作目标', pos: segAt, to: segAt + seg.length,
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'format.command', op: 'bold',
+    })
+    await poll('格式命令写 B（加粗首段）', () =>
+      bDoc.getText().includes(`**${seg}**`) ? true : undefined)
+    assert(bDoc.isDirty, '格式操作后目标 B dirty')
+    assert(parentDoc.getText() === parentBefore && !parentDoc.isDirty, 'A 零写回且零 dirty（格式命令不落 A）')
+    const session1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(session1.appliedEdits === session0.appliedEdits,
+      `A 会话 appliedEdits 零推进（格式命令经 B 会话；实际 ${session1.appliedEdits}）`)
+
+    // 2) 表格创建命令（焦点嵌入 → 目标 B）：文末插入表格骨架
+    const textNow = bDoc.getText()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.focus', inner: 'p210-操作目标', pos: textNow.length - 1,
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'table.create' })
+    await poll('表格创建写 B', () => bDoc.getText().includes('| --- | --- |') ? true : undefined)
+    assert(parentDoc.getText() === parentBefore, '表格创建不写 A')
+
+    // 3) frontmatter Popover 捕获嵌入实例：打开（A 无 fm——全文档唯一 fm 卡
+    //    在嵌入编辑器内）→ 数组加项 → 写 B 头区；A 不变
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'fm.test.click', action: 'edit-button',
+    })
+    await waitViewState('p210-操作嵌入.md', (v) => v.fmPopoverOpen === true)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'fm.test.click', action: 'popover-add-item', index: 0,
+    })
+    await poll('Popover 加项写 B 头区', () =>
+      bDoc.getText().includes('  - 甲\n  - item\n') ? true : undefined)
+    assert(parentDoc.getText() === parentBefore && !parentDoc.isDirty,
+      'Popover 编辑不写 A（父文档保持原文与干净）')
+
+    // 4) 实例释放联动：Popover 打开状态下切回 Reading（teardownLive）→
+    //    浮层关闭（不残留可写死视图）；后续 format 命令回到 A 语境被
+    //    A 自身守卫处理（A 无选区包裹空围栏属既有语义，此处只断言 B 不再
+    //    被写入——释放后无写路径）
+    const bTextAtRelease = bDoc.getText()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.mode', inner: 'p210-操作目标', mode: 'reading',
+    })
+    await waitViewState('p210-操作嵌入.md', (v) =>
+      v.fmPopoverOpen === false &&
+      (v.readingEmbed ?? []).every((c) => c.inner !== 'p210-操作目标' || c.liveBound !== true)
+        ? true : false)
+    await new Promise((r) => setTimeout(r, 400))
+    assert(bDoc.getText() === bTextAtRelease, '实例释放后 B 无迟到写入')
+
+    // 现场还原：保存 B（清 dirty）→ 关闭 A 前保持工作区整洁
+    await bDoc.save()
+    assert(await readDisk('p210-操作目标.md') !== targetBefore, '目标保存后磁盘已更新')
+    console.log('[P2-10] 格式/表格/Popover 操作落 B 不落 A 通过')
+  }],
+
+  // ---- P2-05（#282）显式关闭确认：插件可控退出统一检查 B 最新状态——
+  // dirty 三项模态（保存并关闭/丢弃修改并关闭/取消，默认取消）；取消与
+  // 保存失败保留现场；文档级丢弃恢复整个 B（多 occurrence 去重不重复回滚）。
+  // 保存走 TextDocument.save、丢弃走 P2-01 验证的激活 B + 无参 revert。
+  ['P2-05 显式关闭：三项模态、保存失败保留现场与多 occurrence 丢弃去重（#282）', async () => {
+    await openWithEditor('p205-关闭嵌入.md')
+    await waitSessionReady('p205-关闭嵌入.md')
+    const uri = wsUri('p205-关闭嵌入.md').toString()
+    const targetUri = wsUri('p205-关闭目标.md')
+    const targetDiskBase = await readDisk('p205-关闭目标.md')
+    const TARGET_HEAD = '# p205 关闭目标\n\n'.length + 3
+
+    // 两 occurrence 继承父 Live 自动绑定
+    await waitViewState('p205-关闭嵌入.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner === 'p205-关闭目标')
+      return cards.length === 2 && cards.every((c) => c.liveBound === true) ? true : false
+    })
+
+    // occurrence 0 输入 → B dirty；显式关闭 → 模态在场（含文件名与三项文案）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.type', inner: 'p205-关闭目标', pos: TARGET_HEAD, text: '【关闭编辑】',
+    })
+    await waitViewState('p205-关闭嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p205-关闭目标' && c.liveDirty === true)
+        ? true : false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.close', inner: 'p205-关闭目标', intent: 'close', occurrence: 0,
+    })
+    const dialogOpen = await waitViewState('p205-关闭嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p205-关闭目标' && c.closeDialog === 'open')
+        ? true : false)
+    const occ0a = dialogOpen.readingEmbed!.find((c) => c.inner === 'p205-关闭目标' && c.closeDialog === 'open')!
+    assert(occ0a.closeIntent === 'close', '模态意图径为 close')
+
+    // 取消：保留现场——模态关、卡片仍 Live、B 仍 dirty
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.dialogAction', action: 'cancel',
+    })
+    await waitViewState('p205-关闭嵌入.md', (v) =>
+      (v.readingEmbed ?? []).every((c) => c.inner !== 'p205-关闭目标' || c.closeDialog === 'none')
+        ? true : false)
+    const afterCancel = await waitViewState('p205-关闭嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p205-关闭目标' && c.liveBound === true && c.liveDirty === true)
+        ? true : false)
+    assert(afterCancel.readingEmbed!.some((c) => c.inner === 'p205-关闭目标' && c.internalMode === 'live'),
+      '取消后 occurrence 0 仍内部 Live（保留现场）')
+
+    // 保存失败（只读盘）：模态保留 + 卡片保留
+    const { chmodSync } = await import('node:fs')
+    chmodSync(targetUri.fsPath, 0o444)
+    try {
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+        kind: 'embed.test.close', inner: 'p205-关闭目标', intent: 'close', occurrence: 0,
+      })
+      await waitViewState('p205-关闭嵌入.md', (v) =>
+        (v.readingEmbed ?? []).some((c) => c.inner === 'p205-关闭目标' && c.closeDialog === 'open')
+          ? true : false)
+      await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+        kind: 'embed.test.dialogAction', action: 'save',
+      })
+      const failState = await waitViewState('p205-关闭嵌入.md', (v) =>
+        (v.readingEmbed ?? []).some((c) =>
+          c.inner === 'p205-关闭目标' && (c.closeDialog === 'open' || c.closeDialog === 'stale'))
+          ? true : false, 0, 20000)
+      void failState
+      const bFail = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())!
+      assert(bFail.isDirty, '保存失败后 B 仍 dirty（保留现场）')
+      assert(await readDisk('p205-关闭目标.md') === targetDiskBase, '失败保存未写磁盘')
+    } finally {
+      chmodSync(targetUri.fsPath, 0o666)
+    }
+
+    // 恢复可写：保存并关闭 → B 落盘、dirty 清零、occurrence 0 回 Reading
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.dialogAction', action: 'save',
+    })
+    await poll('保存并关闭落盘', async () =>
+      (await readDisk('p205-关闭目标.md')).includes('【关闭编辑】') ? true : undefined)
+    await waitViewState('p205-关闭嵌入.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner === 'p205-关闭目标')
+      return cards.some((c) => c.closeDialog === 'none') && cards[0]!.internalMode === 'reading' && cards[0]!.liveBound === false
+        ? true : false
+    })
+
+    // occurrence 1 再输入 → 丢弃并关闭：整个 B 回滚（含 occ0 已保存内容后的
+    // 新修改——恢复到磁盘已保存内容）；同目标不重复回滚（第二次关闭因
+    // dirty=false 直接完成，无第二次 revert）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.type', inner: 'p205-关闭目标', pos: TARGET_HEAD, text: '【occ1 改】', occurrence: 1,
+    })
+    await waitViewState('p205-关闭嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p205-关闭目标' && c.liveDirty === true)
+        ? true : false)
+    const verBeforeRevert = vscode.workspace.textDocuments
+      .find((d) => d.uri.toString() === targetUri.toString())!.version
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.close', inner: 'p205-关闭目标', intent: 'close', occurrence: 1,
+    })
+    await waitViewState('p205-关闭嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p205-关闭目标' && c.closeDialog === 'open')
+        ? true : false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.dialogAction', action: 'discard',
+    })
+    await poll('revert 后 B 回到磁盘已保存内容', async () => {
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())
+      return doc && !doc.isDirty && doc.getText() === (await readDisk('p205-关闭目标.md')) ? true : undefined
+    })
+    const bAfter = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())!
+    assert(bAfter.getText().includes('【关闭编辑】') && !bAfter.getText().includes('【occ1 改】'),
+      '文档级丢弃恢复到已保存内容（occ1 的未保存修改被回滚，已保存内容保留）')
+    assert(bAfter.version > verBeforeRevert, 'revert 推进版本（P2-01 语义）')
+    // 卡片关闭（dirty=false 路径——A 面板可能因激活切换重载，等待最终态）
+    await waitViewState('p205-关闭嵌入.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner === 'p205-关闭目标')
+      return cards.every((c) => c.closeDialog !== 'open') ? true : false
+    }, 0, 30000)
+    console.log('[P2-05] 三项模态 + 保存失败保留现场 + 文档级丢弃通过')
+  }],
+
+  // ---- P2-12（#289）写入冲突三项选择与原生临时副本对比：真实冲突暂停
+  // （外部覆盖 + 旧版本请求重定位失败）现场呈现三项选择；「对比并解决」
+  // 经宿主创建 untitled 临时副本并打开 vscode.diff（左=临时副本、右=真实
+  // B，P2-01 §6 验证路线）——断言两侧内容、转交后重同步（旧输入不重放、
+  // 不误报已合并）、对比页关闭后 untitled 释放（资源闭环）；「取消」收起
+  // 保持现场；「放弃当前版本」只放弃未提交输入（B 的外部修改与 dirty 保留，
+  // 干净 B 不替代未提交输入状态判断）；注入打开失败原现场可继续选择。 ----
+  ['P2-12 冲突三项选择与原生临时副本对比（#289）', async () => {
+    await openWithEditor('p212-冲突嵌入.md')
+    await waitSessionReady('p212-冲突嵌入.md')
+    const uri = wsUri('p212-冲突嵌入.md').toString()
+    const targetUri = wsUri('p212-冲突目标.md')
+    const parentDisk = await readDisk('p212-冲突嵌入.md')
+
+    const bound = await waitViewState('p212-冲突嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p212-冲突目标' && c.liveBound === true &&
+        (c.liveTextLen ?? -1) >= 0)
+        ? true : false)
+    const port = bound.readingEmbed!.find((c) => c.inner === 'p212-冲突目标')!.livePortId!
+    const fsPath = targetUri.fsPath
+    const bDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())!
+    const HEAD = '# p212 冲突目标\n\n'.length
+
+    // ---- 1. 真实冲突暂停：外部覆盖「目标首段」区间，旧版本请求同区间 ----
+    // B 行结构固定：line 2 = '目标首段。'（LF fixture；Range 用行/列，勿以
+    // 文档偏移冒充列——越界会被宿主 clamp 成行尾插入，冲突不再触发）
+    const versionAtPause = bDoc.version
+    const external1 = new vscode.WorkspaceEdit()
+    external1.replace(targetUri, new vscode.Range(2, 0, 2, 5), '外部交错修改')
+    assert(await vscode.workspace.applyEdit(external1), '外部交错修改应成功应用')
+    await poll('外部版本到达 B', () =>
+      bDoc.getText().includes('外部交错修改') ? true : undefined)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.portWrite', portId: port, fsPath, seq: 9101,
+      baseVersion: versionAtPause, offset: HEAD, length: 5, text: '嵌入旧版',
+    })
+    const suspended1 = await waitViewState('p212-冲突嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p212-冲突目标' &&
+        c.liveSuspended === true && c.conflictChoice === 'open')
+        ? true : false)
+    assert(bDoc.getText().includes('外部交错修改') && !bDoc.getText().includes('嵌入旧版'),
+      '暂停时双方文本完整：B 保持外部权威版本（未自动覆盖）')
+    assert(bDoc.isDirty, '外部修改使 B dirty（目标 dirty 与未提交输入是两种状态）')
+    // 宿主侧冲突快照留存伪造输入片段（「输入不丢」的行为侧证据）
+    const conflict = (await vscode.commands.executeCommand(CMD.conflictState, targetUri.toString())) as ConflictState
+    assert(conflict.found === true, 'B 会话冲突状态可查')
+    assert((conflict.fragments ?? []).some((f: string) => f.includes('嵌入旧版')),
+      `冲突快照留存未提交片段（实际 ${JSON.stringify(conflict.fragments)}）`)
+
+    // 暂停后用户继续输入（本地保留——宿主收进冲突快照，不重置 webview）
+    const liveLen0 = suspended1.readingEmbed!.find((c) => c.inner === 'p212-冲突目标')!.liveTextLen!
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.type', inner: 'p212-冲突目标', pos: HEAD, text: '继续输入',
+    })
+    await waitViewState('p212-冲突嵌入.md', (v) => {
+      const c = (v.readingEmbed ?? []).find((e) => e.inner === 'p212-冲突目标')
+      return c && (c.liveTextLen ?? -1) === liveLen0 + '继续输入'.length ? true : false
+    })
+
+    // ---- 2. 对比并解决：untitled 临时副本（左）+ 真实 B（右）----
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.conflictAction', inner: 'p212-冲突目标', action: 'compare',
+    })
+    const diffTab = await poll('原生对比页打开（TabInputTextDiff）', () => {
+      const tab = vscode.window.tabGroups.activeTabGroup.activeTab
+      return tab?.input instanceof vscode.TabInputTextDiff ? tab : undefined
+    })
+    const diffInput = diffTab.input as vscode.TabInputTextDiff
+    assert(diffInput.modified.toString() === targetUri.toString(), '对比页右侧 = 真实 B 文档')
+    assert(diffInput.original.scheme === 'untitled', '对比页左侧 = untitled 临时副本')
+    const tempUriStr = diffInput.original.toString()
+    const tempDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === tempUriStr)
+    assert(tempDoc, '临时副本已在 textDocuments（承载未提交输入）')
+    // 伪造请求路径无在途未确认输入：实例按 ack-fail 干净恢复装载权威全文
+    // 后暂停（#4 契约），「最新尚未提交输入」= 暂停后的继续输入——临时副
+    // 本完整承载实例当前全文（右侧同基线 + 左侧独有的未提交输入）
+    const bTextAtCompare = bDoc.getText()
+    assert(tempDoc!.getText().startsWith('# p212 冲突目标') &&
+      tempDoc!.getText().includes('继续输入'),
+      '临时副本承载实例当前全文（含暂停后的未提交输入）')
+    assert(tempDoc!.getText() !== bTextAtCompare,
+      '临时副本与 B 当前版本存在差异（未提交输入待处理）')
+    assert(bTextAtCompare.includes('外部交错修改'), '右侧保持 B 当前权威版本')
+
+    // 转交后恢复：宿主直驱（对比页激活会隐藏来源面板 webview，恢复不经
+    // webview）——B 会话暂停已清、旧输入不重放
+    await poll('宿主侧恢复（B 会话暂停解除）', async () => {
+      const s = (await vscode.commands.executeCommand(CMD.conflictState, targetUri.toString())) as ConflictState
+      return s.suspended === false ? true : undefined
+    })
+    assert(!bDoc.getText().includes('继续输入') && !bDoc.getText().includes('嵌入旧版'),
+      '成功转交后旧未提交输入不再次写入 B（打开对比不误报已合并）')
+
+    // ---- 3. 关闭对比页 → untitled 释放（资源释放闭环，无累计泄漏）----
+    //（编程关闭 diff tab；1.82.3 关闭含未保存 untitled 的 diff 时模型可能
+    // 短暂释放后以独立文本标签恢复——poll 兜底补关该标签直至终态，等价
+    // 用户关闭残留标签；B 无独立文本标签，模型级 dirty 驻留不受影响）
+    assert(await vscode.window.tabGroups.close(diffTab) === true, '对比页 tab 关闭成功')
+    await poll('对比页关闭后 untitled 释放', async () => {
+      if (!vscode.workspace.textDocuments.some((d) => d.uri.toString() === tempUriStr)) {
+        return true
+      }
+      const stray = vscode.window.tabGroups.all.flatMap((g) => g.tabs)
+        .find((t) => t.input instanceof vscode.TabInputText &&
+          t.input.uri.toString() === tempUriStr)
+      if (stray) {
+        await vscode.window.tabGroups.close(stray)
+      }
+      return undefined
+    })
+    const tempUris = (await vscode.commands.executeCommand('onegayi.vsidian._test.getConflictTempUris')) as string[]
+    assert(!tempUris.includes(tempUriStr), '临时副本记账随关闭移除')
+
+    // 重显来源面板：webview 重载恢复（宿主已恢复——init 全文装载，暂停
+    // 状态不补发），嵌入重新绑定
+    await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.parse(uri), VIEW_TYPE)
+    const reshow = await waitViewState('p212-冲突嵌入.md', (v) => {
+      const c = (v.readingEmbed ?? []).find((e) => e.inner === 'p212-冲突目标')
+      return c && c.liveSuspended === false && c.conflictChoice === 'none' &&
+        c.liveBound === true && (c.liveTextLen ?? -1) === bDoc.getText().length ? true : false
+    })
+    // webview 重载后端口换新（旧端口随面板销毁释放）——后续伪造请求用新端口
+    const port2 = reshow.readingEmbed!.find((c) => c.inner === 'p212-冲突目标')!.livePortId!
+
+    // ---- 4. 取消与重新选择（保持暂停与输入）----
+    const versionAtPause2 = bDoc.version
+    const external2 = new vscode.WorkspaceEdit()
+    external2.replace(targetUri, new vscode.Range(2, 0, 2, 5), '外部二改修改')
+    assert(await vscode.workspace.applyEdit(external2), '第二次外部修改应成功')
+    await poll('外部二改到达 B', () => bDoc.getText().includes('外部二改修改') ? true : undefined)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.portWrite', portId: port2, fsPath, seq: 9102,
+      baseVersion: versionAtPause2, offset: HEAD, length: 5, text: '嵌入旧版二',
+    })
+    await waitViewState('p212-冲突嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p212-冲突目标' &&
+        c.liveSuspended === true && c.conflictChoice === 'open')
+        ? true : false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.conflictAction', inner: 'p212-冲突目标', action: 'cancel',
+    })
+    await waitViewState('p212-冲突嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p212-冲突目标' &&
+        c.conflictChoice === 'collapsed' && c.liveSuspended === true)
+        ? true : false)
+    // 重新选择展开
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.conflictAction', inner: 'p212-冲突目标', action: 'reopen',
+    })
+    await waitViewState('p212-冲突嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p212-冲突目标' && c.conflictChoice === 'open')
+        ? true : false)
+
+    // ---- 5. 干净 B 仍有保护；放弃当前版本只放弃未提交输入 ----
+    // 保存 B（外部修改落盘 → B 干净）不解除暂停：未提交输入保护不随 B 干净消失
+    assert((await bDoc.save()) === true, '冲突期间保存 B（外部修改落盘）')
+    const diskSavedAt5 = bDoc.getText() // 第 5 步起磁盘已保存基线（后续 revert 目标）
+    await waitViewState('p212-冲突嵌入.md', (v) => {
+      const c = (v.readingEmbed ?? []).find((e) => e.inner === 'p212-冲突目标')
+      return c && c.liveDirty === false && c.liveSuspended === true ? true : false
+    })
+    const bTextBeforeDiscard = bDoc.getText()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.conflictAction', inner: 'p212-冲突目标', action: 'discard',
+    })
+    await waitViewState('p212-冲突嵌入.md', (v) => {
+      const c = (v.readingEmbed ?? []).find((e) => e.inner === 'p212-冲突目标')
+      return c && c.liveSuspended === false && c.conflictChoice === 'none' &&
+        (c.liveTextLen ?? -1) === bTextBeforeDiscard.length ? true : false
+    })
+    assert(bDoc.getText() === bTextBeforeDiscard && !bDoc.isDirty,
+      '放弃当前版本对齐 B 当前权威内容（不回滚 B 的其他修改——已保存内容原样）')
+
+    // ---- 6. 打开失败原现场可继续选择；重试成功 ----
+    const versionAtPause3 = bDoc.version
+    const external3 = new vscode.WorkspaceEdit()
+    external3.replace(targetUri, new vscode.Range(2, 0, 2, 5), '外部三改修改')
+    assert(await vscode.workspace.applyEdit(external3), '第三次外部修改应成功')
+    await poll('外部三改到达 B', () => bDoc.getText().includes('外部三改修改') ? true : undefined)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.portWrite', portId: port2, fsPath, seq: 9103,
+      baseVersion: versionAtPause3, offset: HEAD, length: 5, text: '嵌入旧版三',
+    })
+    await waitViewState('p212-冲突嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p212-冲突目标' &&
+        c.liveSuspended === true && c.conflictChoice === 'open')
+        ? true : false)
+    await vscode.commands.executeCommand('onegayi.vsidian._test.failNextConflictDiff')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.conflictAction', inner: 'p212-冲突目标', action: 'compare',
+    })
+    await waitViewState('p212-冲突嵌入.md', (v) => {
+      const c = (v.readingEmbed ?? []).find((e) => e.inner === 'p212-冲突目标')
+      return c && c.conflictNotice === true && c.conflictComparePending === false &&
+        c.liveSuspended === true && c.conflictChoice === 'open' ? true : false
+    })
+    const tempsAtFail = (await vscode.commands.executeCommand('onegayi.vsidian._test.getConflictTempUris')) as string[]
+    assert(tempsAtFail.length === 0, '失败注入不消耗临时资源（无 untitled 残留）')
+    // 重试（注入已消耗）：成功打开并释放
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.conflictAction', inner: 'p212-冲突目标', action: 'compare',
+    })
+    const diffTab2 = await poll('重试后对比页再次打开', () => {
+      const tab = vscode.window.tabGroups.activeTabGroup.activeTab
+      return tab?.input instanceof vscode.TabInputTextDiff ? tab : undefined
+    })
+    const diffInput2 = diffTab2.input as vscode.TabInputTextDiff
+    assert(diffInput2.modified.toString() === targetUri.toString() &&
+      diffInput2.original.scheme === 'untitled', '重试对比页左 untitled 右真实 B')
+    await poll('重试转交后宿主侧恢复', async () => {
+      const s = (await vscode.commands.executeCommand(CMD.conflictState, targetUri.toString())) as ConflictState
+      return s.suspended === false ? true : undefined
+    })
+    // 关闭重试的对比页（同第 3 步：编程关闭 diff tab，untitled 随宿主释放）
+    assert(await vscode.window.tabGroups.close(diffTab2) === true, '重试对比页 tab 关闭成功')
+    // 1.82.3 宿主怪癖：关闭含未保存 untitled 的 diff tab 时模型短暂释放后
+    // 可能以独立文本标签恢复（第一次关闭的 poll 在恢复窗口内通过；本步
+    // 以长窗口断言终态）——兜底补关该独立标签（等价用户关闭残留标签；
+    // 关闭文本标签不影响 B 的模型级 dirty 驻留）
+    try {
+      await poll('重试对比页关闭后 untitled 释放', async () => {
+        if (!vscode.workspace.textDocuments.some((d) => d.uri.scheme === 'untitled')) {
+          return true
+        }
+        const stray = vscode.window.tabGroups.all.flatMap((g) => g.tabs)
+          .find((t) => t.input instanceof vscode.TabInputText && t.input.uri.scheme === 'untitled')
+        if (stray) {
+          await vscode.window.tabGroups.close(stray)
+        }
+        return undefined
+      })
+    } catch (err) {
+      const remain = vscode.workspace.textDocuments.filter((d) => d.uri.scheme === 'untitled')
+        .map((d) => ({ uri: d.uri.toString(), text: d.getText().slice(0, 40) }))
+      assert(false, `untitled 释放超时：残留 ${JSON.stringify(remain)}；${String(err)}`)
+    }
+    const tempsFinal = (await vscode.commands.executeCommand('onegayi.vsidian._test.getConflictTempUris')) as string[]
+    assert(tempsFinal.length === 0, `全程无累计临时副本泄漏（实际 ${JSON.stringify(tempsFinal)}）`)
+
+    // 重显来源面板（对比页激活曾隐藏 webview）：重载恢复为正常编辑态
+    await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.parse(uri), VIEW_TYPE)
+    await waitViewState('p212-冲突嵌入.md', (v) => {
+      const c = (v.readingEmbed ?? []).find((e) => e.inner === 'p212-冲突目标')
+      return c && c.liveSuspended === false && c.liveBound === true ? true : false
+    })
+
+    // 现场还原：释放端口 + B 回到已保存内容（第 5 步保存后的磁盘基线——
+    // 外部修改那时已合法落盘，revert 恢复到该版本而非 fixture 原始字节）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.mode', inner: 'p212-冲突目标', mode: 'reading',
+    })
+    await vscode.window.showTextDocument(bDoc, { preview: true })
+    await vscode.commands.executeCommand('workbench.action.files.revert')
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await poll('B 回到已保存内容', () =>
+      bDoc.getText() === diskSavedAt5 && !bDoc.isDirty ? true : undefined)
+    assert(await readDisk('p212-冲突嵌入.md') === parentDisk, 'A 全程零波及')
+    console.log('[P2-12] 冲突三项 + 原生临时副本对比 + 资源释放闭环通过')
+  }],
+
+  // ---- P2-13（#290）父标签关闭交接：宿主直接关闭 A 的文件标签
+  // （closeActiveEditor 即用户关标签——无公开可取消前置事件，onDidDispose
+  // 后接管）：把引用编辑涉及且仍 dirty 的 B 打开为独立普通文本标签
+  // （showTextDocument 现有 TextDocument、preview:false 钉住；已有 B 标签
+  // 复用不重复——P2-01 §7 真宿主验证路线）；干净 B 不打开；TextDocument
+  // 身份/文本/dirty 与关闭前一致（不自动保存/丢弃/另建副本）。 ----
+  ['P2-13 父标签关闭交接：dirty B 去重开标签、已有标签复用与干净 B 不开（#290）', async () => {
+    await openWithEditor('p213-交接嵌入.md')
+    await waitSessionReady('p213-交接嵌入.md')
+    const uri = wsUri('p213-交接嵌入.md').toString()
+    const targetUri = wsUri('p213-交接目标.md')
+    const cleanUri = wsUri('p213-干净目标.md')
+    const parentDisk = await readDisk('p213-交接嵌入.md')
+
+    // 三卡绑定：同目标两 occurrence + 从未编辑的干净目标
+    await waitViewState('p213-交接嵌入.md', (v) => {
+      const cards = v.readingEmbed ?? []
+      const dirtyCards = cards.filter((c) => c.inner === 'p213-交接目标')
+      return dirtyCards.length === 2 && dirtyCards.every((c) => c.liveBound === true) &&
+        cards.some((c) => c.inner === 'p213-干净目标' && c.liveBound === true) ? true : false
+    })
+
+    // occurrence 0 输入 → B dirty（引用编辑已写入未保存；B 全程无标签）
+    const insertAt = '# p213 交接目标\n\n'.length + 3
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.type', inner: 'p213-交接目标', pos: insertAt, text: '【交接编辑】',
+    })
+    const dirtyDoc = await poll('嵌入编辑写入 B（dirty）', () => {
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())
+      return doc?.getText().includes('【交接编辑】') && doc.isDirty ? doc : undefined
+    })
+    const bTextAtClose = dirtyDoc.getText()
+
+    // 关闭 A 文件标签（普通关闭路径——onDidDispose 触发交接）。两 occurrence
+    // 同目标只交接一次：B 文本标签恰 1 个；A 的 custom 标签消失；打开的是
+    // 关闭前的同一 TextDocument（不另建副本），文本与 dirty 与关闭前一致
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await poll('交接完成（B 标签 1 个、A 标签消失）', () => {
+      const tabs = vscode.window.tabGroups.all.flatMap((g) => g.tabs)
+      const bTabs = tabs.filter((t) =>
+        t.input instanceof vscode.TabInputText && t.input.uri.toString() === targetUri.toString())
+      const aTabs = tabs.filter((t) =>
+        t.input instanceof vscode.TabInputCustom && t.input.viewType === VIEW_TYPE &&
+        t.input.uri.toString() === uri)
+      return bTabs.length === 1 && aTabs.length === 0 ? bTabs[0] : undefined
+    })
+    const bAfter = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())!
+    assert(bAfter === dirtyDoc, '交接打开的是关闭前的同一 TextDocument（不另建副本）')
+    assert(bAfter.getText() === bTextAtClose && bAfter.isDirty,
+      'B 文本与 dirty 与关闭前一致（不自动保存/丢弃）')
+
+    // 干净目标（活跃端口在场但从未写入）不自动打开
+    const cleanTabs = vscode.window.tabGroups.all.flatMap((g) => g.tabs)
+      .filter((t) =>
+        t.input instanceof vscode.TabInputText && t.input.uri.toString() === cleanUri.toString())
+    assert(cleanTabs.length === 0, '干净 B 不自动打开')
+
+    // preview:false 钉住（P2-01 探针形态）：旁观预览标签不得替换 B 标签
+    const bystander = await vscode.workspace.openTextDocument(wsUri('p213-冲突嵌入.md'))
+    await vscode.window.showTextDocument(bystander, { preview: true })
+    const bTabsAfterPreview = vscode.window.tabGroups.all.flatMap((g) => g.tabs)
+      .filter((t) =>
+        t.input instanceof vscode.TabInputText && t.input.uri.toString() === targetUri.toString())
+    assert(bTabsAfterPreview.length === 1, '交接标签钉住（不被后续预览替换）')
+
+    // 已有 B 标签复用：B 已有交接开的钉住标签，重开 A 再编辑再关闭——
+    // 交接复用既有标签，不生成重复
+    await openWithEditor('p213-交接嵌入.md')
+    await waitSessionReady('p213-交接嵌入.md')
+    await waitViewState('p213-交接嵌入.md', (v) => {
+      const dirtyCards = (v.readingEmbed ?? []).filter((c) => c.inner === 'p213-交接目标')
+      return dirtyCards.length === 2 && dirtyCards.every((c) => c.liveBound === true) ? true : false
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.type', inner: 'p213-交接目标', pos: insertAt, text: '【交接编辑二】',
+      occurrence: 1,
+    })
+    await poll('第二笔嵌入编辑写入 B', () => {
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())
+      return doc?.getText().includes('【交接编辑二】') && doc.isDirty ? doc : undefined
+    })
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await poll('二次交接复用既有标签（仍恰 1 个）', () => {
+      const bTabs = vscode.window.tabGroups.all.flatMap((g) => g.tabs)
+        .filter((t) =>
+          t.input instanceof vscode.TabInputText && t.input.uri.toString() === targetUri.toString())
+      return bTabs.length === 1 ? bTabs[0] : undefined
+    })
+    assert(bAfter.getText().includes('【交接编辑二】'),
+      '复用标签承载最新 dirty 文本')
+
+    // 现场还原：B 还原到已保存内容（激活 + 无参 revert，P2-01 §5.2 路线）
+    await vscode.window.showTextDocument(bAfter, { preview: true })
+    await vscode.commands.executeCommand('workbench.action.files.revert')
+    await poll('B 回到已保存内容', () => !bAfter.isDirty ? true : undefined)
+    assert(await readDisk('p213-交接嵌入.md') === parentDisk, 'A 磁盘零波及（不伪造 dirty）')
+    console.log('[P2-13] 父标签关闭交接（去重/复用/干净不开/身份一致）通过')
+  }],
+
+  // ---- P2-13（#290）关闭时的未提交输入：A 关闭时引用编辑存在「已收到但
+  // 未写入 B」的输入（冲突暂停现场）——B 文档交接与该输入分开：B 标签打开
+  // 的是 B 当前权威文本（不冒称包含该输入）；输入经 detachPanel 通知走
+  // P2-12 三项当次选择（对比并解决 = 宿主快照开原生对比页；取消/转交不清
+  // 除宿主快照；放弃当前版本只清快照、不回滚 B）。 ----
+  ['P2-13 关闭交接：未提交输入不冒称已在 B 标签与三项当次选择（#290）', async () => {
+    await openWithEditor('p213-冲突嵌入.md')
+    await waitSessionReady('p213-冲突嵌入.md')
+    const uri = wsUri('p213-冲突嵌入.md').toString()
+    const targetUri = wsUri('p213-冲突目标.md')
+
+    const bound = await waitViewState('p213-冲突嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p213-冲突目标' && c.liveBound === true)
+        ? true : false)
+    const port = bound.readingEmbed!.find((c) => c.inner === 'p213-冲突目标')!.livePortId!
+    const bDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())!
+    const HEAD = '# p213 冲突目标\n\n'.length
+
+    // 制造冲突暂停（P2-12 同款）：外部覆盖目标首段 + 旧版本请求同区间 →
+    // 输入留存宿主冲突快照（「已收到未写入 B」素材）
+    const versionAtPause = bDoc.version
+    const external = new vscode.WorkspaceEdit()
+    external.replace(targetUri, new vscode.Range(2, 0, 2, 5), '外部交错修改')
+    assert(await vscode.workspace.applyEdit(external) === true, '外部交错修改应成功应用')
+    await poll('外部版本到达 B', () => bDoc.getText().includes('外部交错修改') ? true : undefined)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.portWrite', portId: port, fsPath: targetUri.fsPath, seq: 9201,
+      baseVersion: versionAtPause, offset: HEAD, length: 5, text: '未提交旧版',
+    })
+    await waitViewState('p213-冲突嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p213-冲突目标' && c.liveSuspended === true)
+        ? true : false)
+    assert(bDoc.isDirty, '外部修改使 B dirty（B 的 dirty 与未提交输入分开观测）')
+
+    // 关闭 A 文件标签：settle（在途已空）→ detach（暂停现场触发「关闭残留
+    // 输入」通知）→ B dirty → 交接开标签
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+
+    await poll('交接标签出现（B dirty）', () => {
+      const tabs = vscode.window.tabGroups.all.flatMap((g) => g.tabs)
+      return tabs.some((t) =>
+        t.input instanceof vscode.TabInputText && t.input.uri.toString() === targetUri.toString())
+        ? true : undefined
+    })
+    assert(bDoc.getText().includes('外部交错修改') && !bDoc.getText().includes('未提交旧版'),
+      'B 标签内容为 B 当前权威文本（未提交输入不冒称已在 B 标签）')
+
+    // 关闭残留通知在场：宿主留存快照 + fromRefPort（三项呈现路径）
+    const closed = await poll('关闭残留输入通知记录', async () => {
+      const rec = (await vscode.commands.executeCommand(CMD.closedInput)) as
+        | { docUri: string; webviewText?: string; fragments: string[]; fromRefPort?: boolean }
+        | undefined
+      return rec && rec.docUri === targetUri.toString() && rec.fromRefPort === true ? rec : undefined
+    })
+    const snapshotText = closed.webviewText ?? closed.fragments.join('\n')
+    assert(snapshotText.includes('未提交旧版'), '宿主已收到的未写入输入留存于快照')
+
+    // 「对比并解决」执行路径（通知按钮同一函数）：左侧临时副本含未提交
+    // 输入、右侧真实 B；转交成功不清除快照（取消路径留存）
+    const diffOk = (await vscode.commands.executeCommand('onegayi.vsidian._test.closedInputConflictDiff')) as boolean
+    assert(diffOk === true, '关闭残留输入的对比并解决打开成功')
+    const diffTab = await poll('原生对比页在场（TabInputTextDiff）', () => {
+      const tab = vscode.window.tabGroups.activeTabGroup.activeTab
+      return tab?.input instanceof vscode.TabInputTextDiff ? tab : undefined
+    })
+    const diffInput = diffTab.input as vscode.TabInputTextDiff
+    assert(diffInput.modified.toString() === targetUri.toString(), '对比页右侧 = 真实 B 文档')
+    assert(diffInput.original.scheme === 'untitled', '对比页左侧 = untitled 临时副本')
+    const tempDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === diffInput.original.toString())
+    assert(tempDoc?.getText().includes('未提交旧版'), '临时副本承载未写入的输入')
+    const keptAfterCompare = (await vscode.commands.executeCommand(CMD.closedInput)) as
+      | { docUri: string } | undefined
+    assert(keptAfterCompare?.docUri === targetUri.toString(),
+      '转交（对比打开）不静默清除宿主快照')
+    // 关闭对比页 → untitled 释放（P2-12 同款收尾，含独立标签兜底）
+    assert(await vscode.window.tabGroups.close(diffTab) === true, '对比页 tab 关闭成功')
+    const tempUriStr = diffInput.original.toString()
+    await poll('对比页关闭后 untitled 释放', async () => {
+      if (!vscode.workspace.textDocuments.some((d) => d.uri.toString() === tempUriStr)) {
+        return true
+      }
+      const stray = vscode.window.tabGroups.all.flatMap((g) => g.tabs)
+        .find((t) => t.input instanceof vscode.TabInputText &&
+          t.input.uri.toString() === tempUriStr)
+      if (stray) {
+        await vscode.window.tabGroups.close(stray)
+      }
+      return undefined
+    })
+
+    // 「放弃当前版本」：只清宿主快照（本次未写入的输入），B 文本与 dirty
+    // 不动（不借用文档级回滚）
+    const bTextBeforeDiscard = bDoc.getText()
+    const bDirtyBeforeDiscard = bDoc.isDirty
+    const discard = (await vscode.commands.executeCommand('onegayi.vsidian._test.discardClosedInput')) as { discarded: boolean }
+    assert(discard.discarded === true, '放弃当前版本清除留存快照')
+    assert(((await vscode.commands.executeCommand(CMD.closedInput)) as undefined) === undefined,
+      '快照已清（下次读取为空）')
+    assert(bDoc.getText() === bTextBeforeDiscard && bDoc.isDirty === bDirtyBeforeDiscard,
+      '放弃当前版本不回滚 B（只作用于未提交输入版本）')
+
+    // 现场还原：B 还原到已保存内容（外部修改从未落盘）
+    await vscode.window.showTextDocument(bDoc, { preview: true })
+    await vscode.commands.executeCommand('workbench.action.files.revert')
+    await poll('B 回到已保存内容', () => !bDoc.isDirty ? true : undefined)
+    console.log('[P2-13] 关闭交接（未提交输入不冒称 + 三项当次选择）通过')
+  }],
+
+  // ---- P2-05（#282）删除活跃引用拦截：覆盖活跃端口的 A 事务先拦截确认
+  //（取消不把删除先写入 A）；确认后完成删除与相关退出；Esc 径同链路。 ----
+  ['P2-05 删除活跃引用拦截与 Esc 退出（#282）', async () => {
+    await openWithEditor('p205-关闭嵌入.md')
+    await waitSessionReady('p205-关闭嵌入.md')
+    const uri = wsUri('p205-关闭嵌入.md').toString()
+    const aDiskBase = await readDisk('p205-关闭嵌入.md')
+    const parentDoc = await vscode.workspace.openTextDocument(wsUri('p205-关闭嵌入.md'))
+    const TARGET_HEAD = '# p205 关闭目标\n\n'.length + 3
+
+    await waitViewState('p205-关闭嵌入.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner === 'p205-关闭目标')
+      return cards.length === 2 && cards.every((c) => c.liveBound === true) ? true : false
+    })
+
+    // occurrence 0 输入 → dirty；删除引用行事务（主编辑器真实事务管线）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.type', inner: 'p205-关闭目标', pos: TARGET_HEAD, text: '【删除前】',
+    })
+    await waitViewState('p205-关闭嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p205-关闭目标' && c.liveDirty === true)
+        ? true : false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.deleteRef', inner: 'p205-关闭目标', occurrence: 0,
+    })
+    // 拦截：A 文本未变（未确认删除不写入 A）+ 模态在场（delete 意图）
+    const intercepted = await waitViewState('p205-关闭嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p205-关闭目标' && c.closeDialog === 'open' && c.closeIntent === 'delete')
+        ? true : false)
+    assert(intercepted.text.includes('![[p205-关闭目标]]'), '拦截后 A 引用行仍在（webview 文本未删）')
+    assert(parentDoc.getText() === aDiskBase, '宿主 A 权威文本未变（未把删除先写入 A）')
+
+    // 取消：A 原引用保留
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.dialogAction', action: 'cancel',
+    })
+    const afterCancel = await waitViewState('p205-关闭嵌入.md', (v) =>
+      (v.readingEmbed ?? []).every((c) => c.inner !== 'p205-关闭目标' || c.closeDialog === 'none')
+        ? true : false)
+    assert(afterCancel.text.includes('![[p205-关闭目标]]'), '取消后 A 原引用保留')
+
+    // 再次删除 → 保存并关闭：B 落盘后 A 中该引用行删除完成（确认后才写入）。
+    // 注：确认动作选 save 而非 discard——discard 走激活 B + revert（P2-01
+    // 路线），激活期间 A 的 webview 隐藏卸载、恢复后重载（P2-04 实测取舍），
+    // closed 回包与删除重放随重载丢失（B 已正确回滚、引用保留由用户重删）
+    // ——「确认后 A 删除完成」在 save 路径（不激活 B）下才可稳定断言；
+    // discard 的文档级回滚已由用例 1 的多 occurrence 段验证。
+    const diskBeforeConfirm = await readDisk('p205-关闭目标.md')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.deleteRef', inner: 'p205-关闭目标', occurrence: 0,
+    })
+    await waitViewState('p205-关闭嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p205-关闭目标' && c.closeDialog === 'open')
+        ? true : false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.dialogAction', action: 'save',
+    })
+    await poll('确认保存落盘', async () =>
+      (await readDisk('p205-关闭目标.md')).includes('【删除前】') ? true : undefined)
+    await waitViewState('p205-关闭嵌入.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner === 'p205-关闭目标')
+      return cards.length === 1 && cards.every((c) => c.closeDialog === 'none') ? true : false
+    }, 0, 30000)
+    // A 的删除经标准管线写回宿主（重放事务 → edit.request → WorkspaceEdit）
+    await poll('A 删除写回宿主', async () => {
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === wsUri('p205-关闭嵌入.md').toString())
+      const text = doc?.getText() ?? ''
+      const occurrences = text.split('![[p205-关闭目标]]').length - 1
+      return occurrences === 1 ? true : undefined
+    })
+    const diskAfterConfirm = await readDisk('p205-关闭目标.md')
+    assert(diskAfterConfirm.includes('【删除前】') && diskAfterConfirm !== diskBeforeConfirm,
+      '确认保存后 B 落盘（磁盘含保存内容）')
+
+    // Esc 径（删除后剩余 occurrence——A 文本变化导致重挂重绑）：先等重挂
+    // 绑定稳定（liveBound），再输入（type 过早会在实例建立前静默丢弃）
+    await waitViewState('p205-关闭嵌入.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner === 'p205-关闭目标')
+      return cards.length === 1 && cards[0]!.liveBound === true ? true : false
+    }, 0, 30000)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.type', inner: 'p205-关闭目标', pos: TARGET_HEAD, text: '【esc】', occurrence: 0,
+    })
+    await waitViewState('p205-关闭嵌入.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner === 'p205-关闭目标')
+      return cards.length === 1 && cards[0]!.liveBound === true && cards[0]!.liveDirty === true ? true : false
+    })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.close', inner: 'p205-关闭目标', intent: 'escape', occurrence: 0,
+    })
+    const escDialog = await waitViewState('p205-关闭嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p205-关闭目标' && c.closeDialog === 'open' && c.closeIntent === 'escape')
+        ? true : false)
+    void escDialog
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.dialogAction', action: 'save',
+    })
+    await poll('Esc 径保存落盘', async () =>
+      (await readDisk('p205-关闭目标.md')).includes('【esc】') ? true : undefined)
+    await waitViewState('p205-关闭嵌入.md', (v) => {
+      const cards = (v.readingEmbed ?? []).filter((c) => c.inner === 'p205-关闭目标')
+      return cards.length === 1 && cards[0]!.liveBound === false && cards[0]!.closeDialog === 'none' ? true : false
+    }, 0, 30000)
+    console.log('[P2-05] 删除引用拦截（取消保留/确认完成）+ Esc 径关闭通过')
   }],
 
   // #270 dirty「主动丢弃未保存内容」的覆盖层通用退役信号。1.86 事件面实证
@@ -13417,5 +14672,542 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(await readDisk('悬停预览.md') === before, '轻量解析不得改写正文磁盘')
     const tipState = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
     assert(tipState.appliedEdits === 0, `全链路零 applyEdit（实际 ${tipState.appliedEdits}）`)
+  }],
+
+  // ---- P2-06（#283）悬停浮窗根引用内部 Live：第一条可写链路的真宿主
+  // 证明。Live 父（Ctrl+悬停）→ 浮窗根继承内部 Live → 按引用位置语义键
+  // 绑定目标端口 → 普通输入只写 B；A 零写回/零 dirty；dirty 推送驱动
+  // 圆点（探针）；保存走 TextDocument.save 只落 B；关闭后无残留编辑器。 ----
+  ['P2-06 悬停浮窗内部 Live：继承绑定、输入只写目标与保存路由（#283）', async () => {
+    await openWithEditor('p206-悬停Live.md')
+    await waitSessionReady('p206-悬停Live.md')
+    const uri = wsUri('p206-悬停Live.md').toString()
+    const parentBefore = await readDisk('p206-悬停Live.md')
+    const targetBefore = await readDisk('p206-编辑目标.md')
+    const parentDoc = await vscode.workspace.openTextDocument(wsUri('p206-悬停Live.md'))
+    const session0 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    const TARGET_HEAD = '# p206 编辑目标\n\n'.length + 3
+
+    // Live 父 + Ctrl+悬停（默认组合；与用户操作同一处理器链路）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'view.mode.set', mode: 'live' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', link: 'live-wikilink', index: 0, ctrlKey: true })
+
+    // 装载 + 继承 Live + 端口绑定（occurrence = 引用位置语义键）
+    const bound = await waitViewState('p206-悬停Live.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' &&
+      v.hoverPreview.internalMode === 'live' && v.hoverPreview.liveBound === true
+        ? true : false)
+    assert(bound.hoverPreview?.liveDirty !== true, '目标初始干净（无圆点）')
+
+    // 浮窗内输入：只写 B（经 B 会话，A 会话零 applyEdit）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'hover.test.live', action: 'type', pos: TARGET_HEAD, text: '【悬停编辑】',
+    })
+    const bDoc = await poll('B 权威文档收到悬停编辑', () => {
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === wsUri('p206-编辑目标.md').toString())
+      return doc?.getText().includes('【悬停编辑】') ? doc : undefined
+    })
+    assert(bDoc.isDirty, '悬停编辑后目标 B dirty')
+    await waitViewState('p206-悬停Live.md', (v) => v.hoverPreview?.liveDirty === true ? true : false)
+    await waitViewState('p206-悬停Live.md', (v) => v.text === parentBefore)
+    assert(parentDoc.getText() === parentBefore && !parentDoc.isDirty, '父文档 A 零写回且零 dirty')
+    const session1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(session1.appliedEdits === session0.appliedEdits,
+      `A 会话 appliedEdits 零推进（B 编辑走 B 会话；实际 ${session1.appliedEdits}，基线 ${session0.appliedEdits}）`)
+    assert(await readDisk('p206-编辑目标.md') === targetBefore, '保存前目标磁盘未变')
+
+    // 保存路由（hover.test.live save 与头部保存入口/Ctrl+S 焦点路由同一出站）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'hover.test.live', action: 'save',
+    })
+    await poll('目标保存落盘且权威文档干净', async () =>
+      (await readDisk('p206-编辑目标.md')).includes('【悬停编辑】') && !bDoc.isDirty ? true : undefined)
+    await waitViewState('p206-悬停Live.md', (v) => v.hoverPreview?.liveDirty !== true ? true : false)
+    assert(await readDisk('p206-悬停Live.md') === parentBefore && !parentDoc.isDirty,
+      '保存目标不动父文档（A 磁盘与 dirty 原样）')
+
+    // 干净后离开：浮窗按常规关闭（Q18：干净 Live 不保活）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', link: 'live-wikilink', index: 0 })
+    await waitViewState('p206-悬停Live.md', (v) => v.hoverPreview?.open === false)
+    console.log('[P2-06] 悬停浮窗继承绑定 + 输入只写目标 + 保存路由通过')
+  }],
+
+  // ---- P2-06（#283）dirty 保活、显式关闭三项模态与引用位置模式记忆：
+  // dirty 期间离开不销毁；头部关闭走 P2-05 确认（保存并关闭后退出编辑、
+  // 浮窗保留回 Reading）；同位置重开按手动覆盖记忆（不随父级联回 Live）。 ----
+  ['P2-06 悬停浮窗内部 Live：dirty 保活、三项模态关闭与位置记忆（#283）', async () => {
+    await openWithEditor('p206-悬停Live.md')
+    await waitSessionReady('p206-悬停Live.md')
+    const uri = wsUri('p206-悬停Live.md').toString()
+    const TARGET_HEAD = '# p206 编辑目标\n\n'.length + 3
+
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'view.mode.set', mode: 'live' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', link: 'live-wikilink', index: 0, ctrlKey: true })
+    await waitViewState('p206-悬停Live.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.liveBound === true ? true : false)
+
+    // dirty 后离开：浮窗保活（Q18——普通关闭条件不销毁）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'hover.test.live', action: 'type', pos: TARGET_HEAD, text: '【保活编辑】',
+    })
+    await waitViewState('p206-悬停Live.md', (v) => v.hoverPreview?.liveDirty === true ? true : false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', link: 'live-wikilink', index: 0 })
+    await new Promise((resolve) => setTimeout(resolve, 1200)) // 关延迟 350ms 的 3 倍以上
+    // 仍在场断言：poll 到 open+dirty 组合（关闭即超时失败）
+    await waitViewState('p206-悬停Live.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.liveDirty === true ? true : false)
+
+    // 显式关闭（头部按钮同径）→ dirty 弹三项模态（P2-05 链路复用）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'hover.test.live', action: 'close', intent: 'close',
+    })
+    await waitViewState('p206-悬停Live.md', (v) => v.hoverPreview?.closeDialogOpen === true ? true : false)
+    // 保存并关闭：保存落盘、退出编辑（回 Reading）、浮窗保留（close 意图不关浮窗）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.dialogAction', action: 'save',
+    })
+    await poll('模态保存落盘', async () =>
+      (await readDisk('p206-编辑目标.md')).includes('【保活编辑】') ? true : undefined)
+    const settled = await waitViewState('p206-悬停Live.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.internalMode === 'reading' &&
+      v.hoverPreview.liveBound !== true && v.hoverPreview.closeDialogOpen !== true
+        ? true : false)
+    assert(settled.hoverPreview?.liveDirty !== true, '保存后圆点消失')
+
+    // Reading 态离开：常规关闭；同位置重开按手动覆盖记忆（父 Live 不覆写）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', link: 'live-wikilink', index: 0 })
+    await waitViewState('p206-悬停Live.md', (v) => v.hoverPreview?.open === false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', link: 'live-wikilink', index: 0, ctrlKey: true })
+    const reopened = await waitViewState('p206-悬停Live.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' ? true : false)
+    assert(reopened.hoverPreview?.internalMode === 'reading',
+      `显式退出写入的手动 Reading 跨开合记忆（实际 ${reopened.hoverPreview?.internalMode}）`)
+    // 手动切回 Live：重绑端口（同位置记忆与端口复链）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'hover.test.live', action: 'mode',
+    })
+    await waitViewState('p206-悬停Live.md', (v) =>
+      v.hoverPreview?.internalMode === 'live' && v.hoverPreview.liveBound === true ? true : false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', link: 'live-wikilink', index: 0 })
+    await waitViewState('p206-悬停Live.md', (v) => v.hoverPreview?.open === false)
+    console.log('[P2-06] dirty 保活 + 三项模态关闭 + 位置记忆通过')
+  }],
+
+  // ---- P2-11（#288）嵌入内部 Live 的目标资源：A 在根目录、B 在子目录
+  // embed-assets/——图片/双链以 B 为来源经目标端口解析，A 文本与资产目录
+  // 不误改；粘贴按 B 的配置目录落盘且只插 B。 ----
+  ['P2-11 嵌入内部 Live：B 目录资源——图片解析与双链跳转按 B 归属（#288）', async () => {
+    await openWithEditor('p211-资源嵌入.md')
+    const session = await waitSessionReady('p211-资源嵌入.md')
+    const uri = wsUri('p211-资源嵌入.md').toString()
+    const targetUri = wsUri('embed-assets/嵌入资源目标.md')
+    const parentBefore = await readDisk('p211-资源嵌入.md')
+    const targetBefore = await readDisk('embed-assets/嵌入资源目标.md')
+
+    // 父 Live → 嵌入继承内部 Live → 自动绑定；B 图按 B 目录解析装载
+    //（only-in-b.png 只在 embed-assets/ 内：按 A/根目录解析必 not-found——
+    // 已应用地址含子目录路径是 B 身份解析的直接证据）
+    const imaged = await waitViewState('p211-资源嵌入.md', (v) => {
+      const card = (v.readingEmbed ?? []).find((c) => c.inner === 'embed-assets/嵌入资源目标')
+      return card && card.liveBound === true && card.internalMode === 'live' &&
+        (card.liveImageSrcs ?? []).some((s) => s.includes('embed-assets') && s.includes('only-in-b.png'))
+        ? true : false
+    })
+    const card = imaged.readingEmbed!.find((c) => c.inner === 'embed-assets/嵌入资源目标')!
+    assert(Boolean(card.livePortId && card.liveDocUri), '端口与 B 规范身份在探针在场')
+
+    // 资源读取零写回：父/目标双零 dirty、磁盘不动、零 applyEdit
+    const parentDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri)
+    const targetDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())
+    assert(targetDoc, '资源目标经 openTextDocument 装载（B 会话接入）')
+    assert(parentDoc?.isDirty === false && targetDoc?.isDirty === false, '父/目标文档双零 dirty')
+    assert(await readDisk('p211-资源嵌入.md') === parentBefore, '资源装载不得改写父文档磁盘')
+    assert(await readDisk('embed-assets/嵌入资源目标.md') === targetBefore, '资源装载不得改写目标磁盘')
+    const state0 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state0.appliedEdits === 0, `图片解析零 applyEdit（实际 ${state0.appliedEdits}）`)
+
+    // 来源双链跳转（跳转会打开新标签——注入放在末尾，其后不再轮询本面板）：
+    // 注入与浮层内点击同一信封形态（refEdit.message 内 wikilink.activate 携带
+    // B 身份）——宿主经端口绑定路由到 B 会话的 openWikilink（按 B 目录解析）。
+    // B内双链目标只在 embed-assets/ 内：按 B 目录解析打开子目录目标；按 A
+    // 目录解析则 not-found（不打开）
+    // 经真实 webview 消息处理入口注入（injectWebviewReceived——provider 层
+    // 拦截 refEdit.* 的同一校验与路由；injectWebviewMessage 走会话入口触达不了）
+    assert(await vscode.commands.executeCommand(CMD.injectWebviewReceived, uri, {
+      kind: 'refEdit.message',
+      panelSessionId: session.panels.find((p) => p.ready)?.sessionId ?? '',
+      panelDocUri: uri,
+      portId: card.livePortId!,
+      fsPath: targetUri.fsPath,
+      message: {
+        kind: 'wikilink.activate',
+        sessionId: card.livePortId!,
+        docUri: card.liveDocUri!,
+        target: 'B内双链目标',
+        srcStart: 0,
+        srcEnd: 8,
+      },
+    }), '注入应命中真实面板处理器')
+    // 双链执行经 B 会话端口注入（bEntry 的 linkLog）——日志按 B 的 URI 查
+    const entry = await waitWikilinkLog(targetUri.toString(), (e) =>
+      e.target === 'B内双链目标')
+    assert(entry.path === wsUri('embed-assets/B内双链目标.md').fsPath,
+      `来源双链应按 B 目录解析到子目录目标（实际 ${entry.path}）`)
+    assert(await readDisk('p211-资源嵌入.md') === parentBefore, '双链跳转不得改写父文档')
+    const state1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state1.appliedEdits === 0, `全程零 applyEdit（实际 ${state1.appliedEdits}）`)
+    console.log('[P2-11] 嵌入 B 目录资源（图片解析 + 双链跳转）通过')
+  }],
+
+  ['P2-11 嵌入内部 Live：图片粘贴按 B 配置落盘且只插 B（#288）', async () => {
+    await waitSettings({ 'image.paste': true, 'image.pasteLocation': 'same-dir', 'image.pasteSubpath': 'assets' })
+    await openWithEditor('p211-资源嵌入.md')
+    await waitSessionReady('p211-资源嵌入.md')
+    const uri = wsUri('p211-资源嵌入.md').toString()
+    const targetUri = wsUri('embed-assets/嵌入资源目标.md')
+    const parentBefore = await readDisk('p211-资源嵌入.md')
+    const targetBefore = await readDisk('embed-assets/嵌入资源目标.md')
+    await waitViewState('p211-资源嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'embed-assets/嵌入资源目标' && c.liveBound === true))
+    // 粘贴日志清底（B 的 URI 键）+ 根目录资产基线（A 目录不得新增）
+    await vscode.commands.executeCommand(CMD.imagePasteLog, targetUri.toString())
+    const rootPngBefore = (await vscode.workspace.fs.readDirectory(wsUri('.')))
+      .filter(([n, t]) => t === vscode.FileType.File && /\.png$/i.test(n))
+      .map(([n]) => n).sort()
+    const state0 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+
+    // 注入粘贴载荷（与真实 paste 拦截同一实例管线：reqId 分配 + 在途登记 +
+    // 经目标端口出站；宿主测试无法向 webview 派发真实剪贴板事件）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.pasteImage',
+      inner: 'embed-assets/嵌入资源目标',
+      mime: 'image/png',
+      dataBase64: PASTE_PNG_BASE64,
+    })
+
+    // B 权威文本收到插入（经 B 会话标准 edit.request——宿主 B 会话 applyEdit）；
+    // same-dir 模式 = B 同目录落盘（subpath 属 workspace-root 模式，此处不
+    // 参与——与 #161 主面板语义完全同款，插入为时间戳名 percent-encoded 引用）
+    const bDoc = await poll('B 收到粘贴插入', () => {
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())
+      return doc && /!\[Pasted image \d{14}\]\(Pasted%20image%20\d{14}\.png\)/.test(doc.getText()) ? doc : undefined
+    })
+    assert(bDoc.isDirty, '粘贴插入后目标 B dirty（未保存）')
+
+    // 磁盘资产位置（A 与 B 不同目录的核心断言）：same-dir 模式解析为 B 的
+    // 同目录 embed-assets/（时间戳名 PNG 出现）；根目录（A 所在目录）不出现
+    // 任何新 png——按 A 目录落盘则资产会出现在根目录
+    await poll('粘贴资产按 B 目录落盘', async () => {
+      const entries = await vscode.workspace.fs.readDirectory(wsUri('embed-assets'))
+      return entries.some(([name, t]) => t === vscode.FileType.File && /Pasted image \d{14}\.png$/.test(name)) ? true : undefined
+    })
+    const rootPngAfter = (await vscode.workspace.fs.readDirectory(wsUri('.')))
+      .filter(([n, t]) => t === vscode.FileType.File && /\.png$/i.test(n))
+      .map(([n]) => n).sort()
+    assert(rootPngAfter.join('|') === rootPngBefore.join('|'),
+      `根目录（A 目录）不得出现粘贴资产（前 ${JSON.stringify(rootPngBefore)} 后 ${JSON.stringify(rootPngAfter)}）`)
+
+    // 宿主粘贴日志（B 的 URI 键）：落盘执行确经 B 端口注入的 pasteImage
+    const pasteLog = (await vscode.commands.executeCommand(CMD.imagePasteLog, targetUri.toString())) as unknown[]
+    assert(pasteLog.length === 1, `B 端口收到恰一笔粘贴载荷（实际 ${pasteLog.length}）`)
+
+    // A 零写回：父磁盘不动、不 dirty、A 会话 appliedEdits 零推进
+    const parentDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri)
+    assert(await readDisk('p211-资源嵌入.md') === parentBefore, '粘贴不得改写父文档磁盘')
+    assert(await readDisk('embed-assets/嵌入资源目标.md') === targetBefore, '保存前目标磁盘未变')
+    assert(parentDoc?.isDirty === false, '父文档 A 零 dirty')
+    const state1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state1.appliedEdits === state0.appliedEdits,
+      `A 会话 appliedEdits 零推进（B 的插入不经 A 会话；实际 ${state1.appliedEdits}，基线 ${state0.appliedEdits}）`)
+
+    // 保存路由只落 B：磁盘更新、dirty 清零（复用 P2-04 的 embed.test.save）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.save', inner: 'embed-assets/嵌入资源目标',
+    })
+    await poll('目标保存落盘', async () =>
+      /Pasted%20image%20\d{14}\.png/.test(await readDisk('embed-assets/嵌入资源目标.md')) ? true : undefined)
+    assert(!bDoc.isDirty, '保存后目标干净')
+    assert(await readDisk('p211-资源嵌入.md') === parentBefore, '保存目标不动父文档')
+    console.log('[P2-11] 嵌入图片粘贴按 B 落盘且只插 B 通过')
+  }],
+
+  // ---- P2-09（#286）递归引用的直接父模式与逐层目标编辑：B（正文嵌入）
+  // 手动 Live 后其编辑器挂孙卡（独占行/混排/列表/引用/表格格内五个位）、
+  // 孙卡跟随直接父绑定独立端口；在 C 输入只写 C、保存只落 C——A/B 零写回
+  // 零 dirty；直接父跟随与手动独立（A Live、B 手动 Reading 时孙位默认
+  // Reading；孙位手动 Live 后 A 切换不覆写手动 B/C）。 ----
+  ['P2-09 递归逐层目标编辑：B 内部 Live 挂孙卡、C 输入只写 C、保存只落 C（#286）', async () => {
+    await openWithEditor('p209-递归父A.md')
+    await waitSessionReady('p209-递归父A.md')
+    const uri = wsUri('p209-递归父A.md').toString()
+    const aBefore = await readDisk('p209-递归父A.md')
+    const bBefore = await readDisk('p209-递归B.md')
+    const cBefore = await readDisk('p209-递归C.md')
+    const parentDoc = await vscode.workspace.openTextDocument(wsUri('p209-递归父A.md'))
+    const bDocOf = () => vscode.workspace.textDocuments.find((d) =>
+      d.uri.toString() === wsUri('p209-递归B.md').toString())
+    const session0 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+
+    // B 卡手动切 Live：B 编辑器在场后孙卡随直接父跟随（五个位全部挂载绑定）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.mode', inner: 'p209-递归B', mode: 'live',
+    })
+    const grandInners = ['p209-递归C', 'p209-递归C|混排位', 'p209-递归C|列表位', 'p209-递归C|引用位', 'p209-递归C|格内位']
+    const bound = await waitViewState('p209-递归父A.md', (v) => {
+      const bCard = (v.readingEmbed ?? []).find((c) => c.inner === 'p209-递归B' &&
+        c.internalMode === 'live' && c.liveBound === true && (c.liveTextLen ?? -1) >= 0)
+      if (!bCard) {
+        return false
+      }
+      const cards = (v.readingEmbed ?? []).filter((c) =>
+        grandInners.includes(String(c.inner)) && c.internalMode === 'live' &&
+        c.liveBound === true && (c.liveTextLen ?? -1) >= 0)
+      return cards.length >= 5 ? true : false
+    }, 0, 30000)
+    const byInner = new Map<string, string>()
+    for (const c of bound.readingEmbed ?? []) {
+      if (grandInners.includes(String(c.inner)) && c.liveBound === true) {
+        byInner.set(String(c.inner), String(c.livePortId))
+      }
+    }
+    const bPort = (bound.readingEmbed ?? []).find((c) => c.inner === 'p209-递归B')?.livePortId
+    assert(byInner.size === 5, `五个孙位全部绑定（实际 ${JSON.stringify([...byInner.keys()])}）`)
+    for (const [inner, port] of byInner) {
+      assert(port && port !== bPort, `孙位 ${inner} 端口独立于 B（${port} vs ${bPort}）`)
+    }
+    assert(new Set(byInner.values()).size === 5, '五个孙位端口互不相同（同目标多 occurrence 各自端口）')
+    const cDoc = await poll('孙目标 C 文档打开', () => {
+      const doc = vscode.workspace.textDocuments.find((d) =>
+        d.uri.toString() === wsUri('p209-递归C.md').toString())
+      return doc ?? undefined
+    })
+
+    // 独占行孙位（occurrence 0）输入：只写 C——A/B 零写回零 dirty
+    const insertAt = '# p209 递归 C\n\n'.length + 2
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.type', inner: 'p209-递归C', pos: insertAt, text: '【递归孙编辑】', occurrence: 0,
+    })
+    await poll('C 权威文本收到孙卡编辑', () =>
+      cDoc.getText().includes('【递归孙编辑】') ? true : undefined)
+    assert(cDoc.isDirty, '孙卡编辑后 C dirty')
+    assert(parentDoc.getText() === aBefore && !parentDoc.isDirty,
+      '父 A 零写回且零 dirty（递归孙卡编辑不落 A）')
+    const bDoc = bDocOf()
+    assert(!bDoc || (bDoc.getText() === bBefore && !bDoc.isDirty),
+      '直接来源 B 零写回且零 dirty（孙卡编辑归 C——逐层目标端口分离）')
+    const session1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(session1.appliedEdits === session0.appliedEdits,
+      `A 会话 appliedEdits 零推进（实际 ${session1.appliedEdits}，基线 ${session0.appliedEdits}）`)
+    assert(await readDisk('p209-递归C.md') === cBefore, '保存前 C 磁盘未变')
+
+    // 保存孙卡目标：只落 C（磁盘更新、dirty 清零；A/B 磁盘不变）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.save', inner: 'p209-递归C', occurrence: 0,
+    })
+    await poll('孙目标保存落盘', async () =>
+      (await readDisk('p209-递归C.md')).includes('【递归孙编辑】') ? true : undefined)
+    assert(!cDoc.isDirty, '保存后 C 干净')
+    assert(await readDisk('p209-递归父A.md') === aBefore, '保存孙目标不落 A 盘')
+    assert(await readDisk('p209-递归B.md') === bBefore, '保存孙目标不落 B 盘')
+    console.log('[P2-09] 递归逐层目标编辑：孙卡跟随绑定 + 输入/保存逐层归属通过')
+  }],
+
+  ['P2-09 直接父跟随与手动独立：B 手动 Reading 时孙位默认 Reading、孙位手动 Live 不被 A 覆写（#286）', async () => {
+    await openWithEditor('p209-递归父A.md')
+    await waitSessionReady('p209-递归父A.md')
+    const uri = wsUri('p209-递归父A.md').toString()
+    const grandOf = (v: ViewState, inner: string) =>
+      (v.readingEmbed ?? []).filter((c) => c.inner === inner)
+
+    // A 切 Live：根级 B 跟随、孙位随直接父链继承 Live（真宿主全链装载）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    await waitViewState('p209-递归父A.md', (v) => {
+      const sole = grandOf(v, 'p209-递归C')
+      return sole.length >= 1 && sole.every((c) => c.internalMode === 'live' && c.liveBound === true)
+    }, 0, 30000)
+    // B 手动切 Reading：孙位随直接父回落（无写端口——不沿用根 A 的 Live）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.mode', inner: 'p209-递归B', mode: 'reading',
+    })
+    await waitViewState('p209-递归父A.md', (v) => {
+      const bCard = (v.readingEmbed ?? []).find((c) => c.inner === 'p209-递归B')
+      const sole = grandOf(v, 'p209-递归C')
+      return bCard?.internalMode === 'reading' && bCard?.liveBound !== true &&
+        sole.length >= 1 && sole.every((c) => c.internalMode === 'reading' && c.liveBound !== true)
+    }, 0, 30000)
+    // 孙位（表格格内位）手动切 Live：建独立端口（本次会话独立记忆）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.mode', inner: 'p209-递归C|格内位', mode: 'live',
+    })
+    const manual = await waitViewState('p209-递归父A.md', (v) => {
+      const cell = grandOf(v, 'p209-递归C|格内位')
+      return cell.length >= 1 && cell.some((c) => c.internalMode === 'live' && c.liveBound === true)
+    }, 0, 30000)
+    const manualPort = grandOf(manual, 'p209-递归C|格内位').find((c) => c.liveBound === true)?.livePortId
+    assert(manualPort, '格内孙位手动 Live 建立端口')
+    // A 切回 Reading：B 保持手动 Reading、孙位保持手动 Live（父根切换不覆写）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    const after = await waitViewState('p209-递归父A.md', (v) => {
+      const bCard = (v.readingEmbed ?? []).find((c) => c.inner === 'p209-递归B')
+      const cell = grandOf(v, 'p209-递归C|格内位')
+      return bCard?.internalMode === 'reading' &&
+        cell.some((c) => c.internalMode === 'live' && c.liveBound === true) ? true : false
+    })
+    const bAfter = (after.readingEmbed ?? []).find((c) => c.inner === 'p209-递归B')
+    const cellAfter = grandOf(after, 'p209-递归C|格内位').filter((c) => c.liveBound === true)
+    assert(bAfter?.internalMode === 'reading', `B 保持手动 Reading（实际 ${bAfter?.internalMode}）`)
+    assert(cellAfter.length >= 1 && cellAfter[0]?.livePortId === manualPort,
+      '格内孙位保持手动 Live 且端口稳定（A 切换不覆写手动选择）')
+    console.log('[P2-09] 直接父跟随 + 手动独立记忆 + 父根切换不覆写通过')
+  }],
+
+  // ---- P2-14（#291）二期组合收口：跨票真实场景在 1.82.3 真宿主的组合
+  // 证明——表格格内三层递归（P2-08×P2-09：A 表格格 → B 手动 Live → B 内
+  // 孙卡 C 跟随）编辑/保存逐层归属与关闭回收基线；代码卡复制经目标端口
+  // 落宿主剪贴板（P2-14 接线的端到端）。 ----
+  ['P2-14 组合收口：表格格内三层递归编辑与关闭回收基线（#291）', async () => {
+    await openWithEditor('p214-组合父A.md')
+    await waitSessionReady('p214-组合父A.md')
+    const uri = wsUri('p214-组合父A.md').toString()
+    const bUri = wsUri('p214-组合B.md')
+    const cUri = wsUri('p214-组合C.md')
+    const aBefore = await readDisk('p214-组合父A.md')
+    const bBefore = await readDisk('p214-组合B.md')
+    const parentDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri)
+    assert(parentDoc, '父 A 文档在场')
+
+    // 表格格内 B 手动 Live（父 Reading 下格内卡独立进入——与 P2-08 场景 H
+    // 同款路径）；孙卡 C 随直接父 B 跟随装载并绑定独立端口
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.mode', inner: 'p214-组合B|格内位', mode: 'live',
+    })
+    const bound = await waitViewState('p214-组合父A.md', (v) => {
+      const bCard = (v.readingEmbed ?? []).find((c) => c.inner === 'p214-组合B|格内位' &&
+        c.internalMode === 'live' && c.liveBound === true && (c.liveTextLen ?? -1) >= 0)
+      const grand = (v.readingEmbed ?? []).filter((c) => c.inner === 'p214-组合C' &&
+        c.internalMode === 'live' && c.liveBound === true && (c.liveTextLen ?? -1) >= 0)
+      return bCard && grand.length >= 1 ? true : false
+    }, 0, 30000)
+    const bPort = (bound.readingEmbed ?? []).find((c) => c.inner === 'p214-组合B|格内位')?.livePortId
+    const grandPort = (bound.readingEmbed ?? []).find((c) => c.inner === 'p214-组合C' && c.liveBound === true)?.livePortId
+    assert(bPort && grandPort && bPort !== grandPort,
+      `三层组合端口分离（B ${bPort} vs C ${grandPort}）`)
+    const session0 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+
+    // 在孙卡 C 输入：只写 C——A/B 零写回零 dirty（三层逐层归属）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.type', inner: 'p214-组合C', pos: '# p214 组合 C\n\n'.length + 2,
+      text: '【三层孙】', occurrence: 0,
+    })
+    const cDoc = await poll('C 权威文本收到三层格内孙卡编辑', () => {
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === cUri.toString())
+      return doc?.getText().includes('【三层孙】') && doc.isDirty ? doc : undefined
+    })
+    assert(parentDoc.getText() === aBefore && !parentDoc.isDirty, '三层组合下父 A 零写回零 dirty')
+    const bDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === bUri.toString())
+    assert(!bDoc || (bDoc.getText() === bBefore && !bDoc.isDirty),
+      '直接来源 B 零写回零 dirty（孙卡编辑归 C）')
+    const session1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(session1.appliedEdits === session0.appliedEdits,
+      `A 会话 appliedEdits 零推进（实际 ${session1.appliedEdits}）`)
+
+    // 保存孙卡目标只落 C；随后干净关闭 A：无 B/C 交接标签 + 订阅整体回落
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.save', inner: 'p214-组合C', occurrence: 0,
+    })
+    await poll('孙目标保存落盘', async () =>
+      (await readDisk('p214-组合C.md')).includes('【三层孙】') ? true : undefined)
+    assert(!cDoc.isDirty, '保存后 C 干净')
+    assert(await readDisk('p214-组合父A.md') === aBefore, '保存孙目标不落 A 盘')
+    assert(await readDisk('p214-组合B.md') === bBefore, '保存孙目标不落 B 盘')
+    await new Promise((r) => setTimeout(r, 300))
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await poll('关闭 A 后无 B/C 交接标签（干净不交接）', () => {
+      const tabs = vscode.window.tabGroups.all.flatMap((g) => g.tabs)
+      const stray = tabs.filter((t) =>
+        t.input instanceof vscode.TabInputText &&
+        (t.input.uri.toString() === bUri.toString() || t.input.uri.toString() === cUri.toString()))
+      return stray.length === 0 ? true : undefined
+    })
+    await poll('组合链面板销毁订阅整体回落', async () => {
+      const stats = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
+      return stats.subscriptions === 0 && stats.targets === 0 ? stats : undefined
+    }, 15000)
+    console.log('[P2-14] 表格格内三层递归组合编辑 + 关闭回收基线通过')
+  }],
+
+  ['P2-14 嵌入内部 Live：代码卡复制经端口落宿主剪贴板（#291）', async () => {
+    await openWithEditor('p214-组合父A.md')
+    const session = await waitSessionReady('p214-组合父A.md')
+    const uri = wsUri('p214-组合父A.md').toString()
+    const bUri = wsUri('p214-组合B.md')
+
+    // B 手动 Live 绑定端口（格内卡进入目标编辑）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.mode', inner: 'p214-组合B|格内位', mode: 'live',
+    })
+    const bound = await waitViewState('p214-组合父A.md', (v) => {
+      const bCard = (v.readingEmbed ?? []).find((c) => c.inner === 'p214-组合B|格内位' &&
+        c.internalMode === 'live' && c.liveBound === true && (c.liveTextLen ?? -1) >= 0)
+      return bCard ? true : false
+    }, 0, 30000)
+    const card = (bound.readingEmbed ?? []).find((c) => c.inner === 'p214-组合B|格内位')!
+    assert(Boolean(card.livePortId && card.liveDocUri), 'B 端口与规范身份在场')
+
+    // 预置剪贴板哨兵后注入 codeblock.copy 信封（与 webview 复制按钮点击的
+    // 出站同形态）——宿主经端口绑定路由进 B 会话（docUri 守卫 + EOL 归一）
+    // 后由 writeClipboard 落宿主剪贴板
+    await vscode.env.clipboard.writeText('__p214-sentinel__')
+    assert(await vscode.commands.executeCommand(CMD.injectWebviewReceived, uri, {
+      kind: 'refEdit.message',
+      panelSessionId: session.panels.find((p) => p.ready)?.sessionId ?? '',
+      panelDocUri: uri,
+      portId: card.livePortId!,
+      fsPath: bUri.fsPath,
+      message: {
+        kind: 'codeblock.copy',
+        sessionId: card.livePortId!,
+        docUri: card.liveDocUri!,
+        text: 'const combo = 1',
+      },
+    }), '注入应命中真实面板处理器')
+    await poll('剪贴板收到 B 代码体', async () =>
+      (await vscode.env.clipboard.readText()) === 'const combo = 1' ? true : undefined)
+
+    // 伪造端口身份被拒：错误 docUri 的复制请求不得触碰剪贴板（哨兵保持）
+    await vscode.env.clipboard.writeText('__p214-sentinel2__')
+    assert(await vscode.commands.executeCommand(CMD.injectWebviewReceived, uri, {
+      kind: 'refEdit.message',
+      panelSessionId: session.panels.find((p) => p.ready)?.sessionId ?? '',
+      panelDocUri: uri,
+      portId: card.livePortId!,
+      fsPath: bUri.fsPath,
+      message: {
+        kind: 'codeblock.copy',
+        sessionId: card.livePortId!,
+        docUri: uri, // 伪称 A 的 docUri——B 会话按自身 docUri 守卫须拒收
+        text: 'SHOULD_NOT_COPY',
+      },
+    }), '注入应命中真实面板处理器')
+    await new Promise((r) => setTimeout(r, 300))
+    assert(await vscode.env.clipboard.readText() === '__p214-sentinel2__',
+      '伪身份复制被 B 会话守卫拒收（剪贴板不被污染）')
+
+    // 现场清理：关闭面板回落订阅
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await poll('复制例面板销毁订阅回落', async () => {
+      const stats = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
+      return stats.subscriptions === 0 && stats.targets === 0 ? stats : undefined
+    }, 15000)
+    console.log('[P2-14] 代码卡复制经端口落宿主剪贴板（含伪身份拒收）通过')
   }],
 ]

@@ -88,6 +88,12 @@ describe('hover.request 校验（webview → 宿主）', () => {
     expect(isWebviewToHost(validRequest()), '缺省仍为双链形态').toBe(true)
     expect(isWebviewToHost({ ...validRequest(), linkHref: 3 })).toBe(false)
   })
+
+  it('P2-03 刷新宽容：anchorOptional 可选布尔（非布尔整体拒绝）', () => {
+    expect(isWebviewToHost({ ...validRequest(), anchorOptional: true })).toBe(true)
+    expect(isWebviewToHost(validRequest()), '缺省仍为严格锚点验证').toBe(true)
+    expect(isWebviewToHost({ ...validRequest(), anchorOptional: 'yes' })).toBe(false)
+  })
 })
 
 describe('hover.result 校验（宿主 → webview）', () => {

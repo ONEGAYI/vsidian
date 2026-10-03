@@ -1038,7 +1038,10 @@ it('#245 悬停 B 内独占 C 递归请求沿 B 来源且仍只有一个浮窗',
     openHoverPopupForKeyboard(anchor, { target: 'B', sourceStart: 0, sourceEnd: 5 })
     const root = sent.find((m): m is Extract<WebviewToHost, { kind: 'hover.request' }> =>
       m.kind === 'hover.request' && m.target === 'B')!
-    expect(root.occurrenceId).toBe(root.instanceId)
+    // P2-06（#283）起浮窗根请求的 occurrenceId = 引用位置语义键（与
+    // hover.watch 身份、refEdit.bind occurrence 同源——宿主来源租约按
+    // occurrence 转交固定）；instanceId 仍为请求配对身份（hover-N）
+    expect(root.occurrenceId).toBe('hover@0::B')
     c.handleHostMessage({ kind: 'hover.result', instanceId: root.instanceId, reqId: root.reqId,
       ok: true, sourceLeaseId: 'popup-b-lease', target: { fsPath: 'D:/notes/B.md', relPath: 'B.md' },
       version: 1, text: '![[C]]\n', range: { start: 0, end: 7 }, scope: { kind: 'full' },
@@ -1137,7 +1140,7 @@ it('#245 悬停 B→C→D 递归并在关闭时退订整树，迟到叶回包只
   }
 })
 
-it.each(['heading', 'block'] as const)('#245 悬停 B 的 %s 范围只挂范围内 C，仍带全文来源坐标', (scope) => {
+it.each(['heading', 'block'] as const)('#245/P2-03 悬停 B 的 %s 引用全文可达：范围内外的 C/D 都挂载，来源坐标仍为全文系', (scope) => {
   const height = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
     return this.classList.contains('vsidian-hover-popup-scroll') ? 400 : 0
   })
@@ -1152,6 +1155,7 @@ it.each(['heading', 'block'] as const)('#245 悬停 B 的 %s 范围只挂范围�
       m.kind === 'hover.request' && m.target === 'B')!
     const text = '# One\n\n![[C]]\n\n# Two\n\n![[D]]\n'
     const start = text.indexOf('![[C]]')
+    const dStart = text.indexOf('![[D]]')
     c.handleHostMessage({ kind: 'hover.result', instanceId: root.instanceId, reqId: root.reqId,
       ok: true, sourceLeaseId: `scope-${scope}`,
       target: { fsPath: 'D:/notes/B.md', relPath: 'B.md' },
@@ -1162,8 +1166,11 @@ it.each(['heading', 'block'] as const)('#245 悬停 B 的 %s 范围只挂范围�
         : { kind: 'block', anchor: 'one-block' }, depth: 1 })
     const children = sent.filter((m): m is Extract<WebviewToHost, { kind: 'hover.request' }> =>
       m.kind === 'hover.request' && m.target !== 'B')
-    expect(children.map((m) => m.target)).toEqual(['C'])
+    // P2-03（#280）：内容范围恒全文——初始锚点区间外的 D 同样挂载展开
+    expect(children.map((m) => m.target)).toEqual(['C', 'D'])
     expect(children[0]).toMatchObject({ sourceStart: start, sourceEnd: start + 6,
+      source: { parentInstanceId: root.occurrenceId, sourceDocUri: 'D:/notes/B.md' } })
+    expect(children[1]).toMatchObject({ sourceStart: dStart, sourceEnd: dStart + 6,
       source: { parentInstanceId: root.occurrenceId, sourceDocUri: 'D:/notes/B.md' } })
   } finally {
     closeHoverPopup()

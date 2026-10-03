@@ -28,7 +28,7 @@ import { liveDecorationsField, selectionTouchesRange } from './liveDecorations'
 import { hitIntersectsRange, hitRangesOf, hitRevealField, type HitRange } from './hitReveal'
 import { IMAGE_CLASS_NAMES, type ImageResourceManager } from './imageResource'
 import { buildGraphicChrome, GRAPHIC_CHROME_CLASS_NAMES, markImageFrameSized } from './graphicBlockChrome'
-import { openImagePopup } from './imagePopup'
+import { imagePopupOptsOfView, openImagePopup } from './imagePopup'
 import {
   WIKILINK_CLASS_NAMES,
   embedAtCol,
@@ -250,7 +250,11 @@ export class LiveImageWidget extends WidgetType {
               }
             },
             onPopup: () => {
-              openImagePopup(this.src, this.alt)
+              // P2-11：弹窗按本 widget 所属编辑器的实例资源身份打开（嵌入
+              // 内部 Live 的图片归 B——装载/刷新/导出均 B 身份）；视图已脱挂
+              // 或主正文编辑器（无注册）回落全局上下文
+              const owner = EditorView.findFromDOM(span)
+              openImagePopup(this.src, this.alt, owner ? imagePopupOptsOfView(owner) : undefined)
             },
           }),
         )

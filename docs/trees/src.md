@@ -29,6 +29,7 @@ vsidian/
     │   ├── keybindingService.ts        # 快捷键全局存储服务
     │   ├── linkTarget.ts               # 宿主侧链接目标分类纯逻辑（#10）
     │   ├── pasteHistoryTracker.ts      # 宿主粘贴阶段历史解释
+    │   ├── refEditPorts.ts             # 引用编辑端口绑定注册表
     │   ├── settingsPage.ts             # 独立设置页面板装配
     │   ├── settingsService.ts          # 宿主设置服务
     │   ├── skeletonScreen.ts           # 骨架屏内联装配纯逻辑（#292）
@@ -136,6 +137,7 @@ vsidian/
         ├── liveCodeCard.ts             # Live 代码块卡片装饰
         ├── liveDecorations.ts          # 语法树驱动 Live 装饰（#8）
         ├── liveEmbed.ts                # Live 嵌入装饰与源码显隐
+        ├── liveInstance.ts             # Live 编辑器可复用实例
         ├── liveLineNumbers.ts          # 表格段首行号与绘制探针
         ├── liveLinks.ts                # live 链接装饰与跳转（#10）
         ├── liveMath.ts                 # 行内与块级公式 live 装饰（#59）

@@ -4345,6 +4345,79 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
   outline-offset: -1px;
 }
 
+/* ---- P2-06（#283）悬停浮窗根引用内部 Live：头部动作组（保存/模式切换/
+   关闭编辑）、未保存圆点与编辑器容器。与嵌入卡片 P2-04 同款规则（并列
+   策略，浮层选择器置首）；圆点为精确字符 `·`（P2-U16），警示色随主题
+   变量；编辑器容器与 Reading 容器并列于滚动区——限高随几何计划内联
+   写入，滚动由 CM6 自身 cm-scroller 承担（视口测量依赖 cm-scroller 为
+   滚动元素，不用外层滚动区，嵌入卡片同款口径） ---- */
+
+/* 头部右侧动作组：标题占剩余宽，动作靠右成组 */
+#app > .vsidian-hover-popup .vsidian-hover-popup-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  margin-left: auto;
+}
+
+/* 保存目标 / 内部模式切换 / 显式关闭编辑入口：与跳转入口同款图标按钮 */
+#app > .vsidian-hover-popup .vsidian-hover-popup-save,
+#app > .vsidian-hover-popup .vsidian-hover-popup-mode,
+#app > .vsidian-hover-popup .vsidian-hover-popup-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--vscode-icon-foreground, inherit);
+  cursor: pointer;
+}
+
+#app > .vsidian-hover-popup .vsidian-hover-popup-save:hover,
+#app > .vsidian-hover-popup .vsidian-hover-popup-save:focus-visible,
+#app > .vsidian-hover-popup .vsidian-hover-popup-mode:hover,
+#app > .vsidian-hover-popup .vsidian-hover-popup-mode:focus-visible,
+#app > .vsidian-hover-popup .vsidian-hover-popup-close:hover,
+#app > .vsidian-hover-popup .vsidian-hover-popup-close:focus-visible {
+  border-color: var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
+  background: var(--vscode-editor-background, transparent);
+}
+
+#app > .vsidian-hover-popup .vsidian-hover-popup-save:focus-visible,
+#app > .vsidian-hover-popup .vsidian-hover-popup-mode:focus-visible,
+#app > .vsidian-hover-popup .vsidian-hover-popup-close:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #4fc1ff);
+  outline-offset: 1px;
+}
+
+/* 目标未保存圆点（`·`）：警示色，紧随目标显示名（动作组之前） */
+#app > .vsidian-hover-popup .vsidian-hover-popup-dirty {
+  flex: none;
+  margin-left: 2px;
+  font-weight: 700;
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+/* 内部 Live 编辑器容器：限高由几何计划内联写入，滚动由 CM6 自身
+   cm-scroller 承担（容器不滚动，避免 CM6 视口测量失效） */
+#app > .vsidian-hover-popup .vsidian-hover-popup-live {
+  overflow: hidden;
+}
+
+#app > .vsidian-hover-popup .vsidian-hover-popup-live .cm-editor {
+  /* 承接容器内联限高（max-height:100% 对 auto 高度的父容器无效——编辑器
+     溢出被 overflow:hidden 裁掉一截；inherit 口径与嵌入卡 P2-07 修正
+     同源，超出部分由 cm-scroller 内部滚动） */
+  max-height: inherit;
+}
+
 /* 内部 Reading 容器：随正文排版基线与主题/片段（别名桥在容器类上）。
    同属 #app 作用域，覆盖主阅读容器的 40vh 文末留白，浮层用紧凑内边距。 */
 #app > .vsidian-hover-popup .vsidian-hover-popup-scroll .vsidian-view-reading {
@@ -4518,6 +4591,81 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
   outline-offset: 1px;
 }
 
+/* ---- P2-04（#281）嵌入内部 Live：头部动作组（保存/模式切换/打开）、
+   未保存圆点与编辑器容器。动作按钮与打开入口同款图标按钮规则（并列
+   选择器，悬停浮层同款规则见 hover-popup 条目）；圆点为精确字符 `·`
+   （P2-U16），警示色随主题变量。编辑器容器与 Reading 容器并列于滚动
+   区——内部 Live 态由内联 max-height 约束、CM6 自身 scroller 滚动
+   （视口测量依赖 cm-scroller 为滚动元素，不用外层滚动区） ---- */
+
+/* 顶部栏右侧动作组：标题占剩余宽，动作靠右成组 */
+#app .vsidian-embed-card .vsidian-embed-card-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  margin-left: auto;
+}
+
+/* 保存目标 / 内部模式切换 / 显式关闭编辑入口：与打开入口同款图标按钮 */
+#app .vsidian-embed-card .vsidian-embed-card-save,
+#app .vsidian-embed-card .vsidian-embed-card-mode,
+#app .vsidian-embed-card .vsidian-embed-card-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--vscode-icon-foreground, inherit);
+  cursor: pointer;
+}
+
+#app .vsidian-embed-card .vsidian-embed-card-save:hover,
+#app .vsidian-embed-card .vsidian-embed-card-save:focus-visible,
+#app .vsidian-embed-card .vsidian-embed-card-mode:hover,
+#app .vsidian-embed-card .vsidian-embed-card-mode:focus-visible,
+#app .vsidian-embed-card .vsidian-embed-card-close:hover,
+#app .vsidian-embed-card .vsidian-embed-card-close:focus-visible {
+  border-color: var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
+  background: var(--vscode-editor-background, transparent);
+}
+
+#app .vsidian-embed-card .vsidian-embed-card-save:focus-visible,
+#app .vsidian-embed-card .vsidian-embed-card-mode:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #4fc1ff);
+  outline-offset: 1px;
+}
+
+/* 目标未保存圆点（`·`）：警示色，紧随文件名 */
+#app .vsidian-embed-card .vsidian-embed-card-dirty {
+  flex: none;
+  margin-left: 2px;
+  font-weight: 700;
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+/* 内部 Live 编辑器容器：限高由内联 max-height 写入（随设置热更），滚动
+   由 CM6 自身 cm-scroller 承担（容器不滚动，避免 CM6 视口测量失效） */
+#app .vsidian-embed-card .vsidian-embed-card-live {
+  overflow: hidden;
+}
+
+/* P2-07（#284）高度自适应修正：#app .cm-editor 的全局 height:100%（主
+   编辑器全高兜底）会命中嵌入编辑器——短文也恒撑满限高（实测卡高恒为
+   maxHeight，内容增删不可观测、观感上嵌入恒为满高大块）。height:auto
+   恢复内容自适应；max-height:inherit 承接容器内联限高——超出部分由
+   cm-scroller 内部滚动（与主编辑器限高机制同源） */
+#app .vsidian-embed-card .vsidian-embed-card-live .cm-editor {
+  height: auto;
+  max-height: inherit;
+}
+
 /* 内容滚动区：长内容内部滚动。max-height 缺省 480（规格一期初值），
    设置驱动的内联 max-height 优先（embed.maxHeight 设置项） */
 #app .vsidian-embed-card .vsidian-embed-card-scroll {
@@ -4556,6 +4704,165 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
    保留 ![[ ]] 文本可辨识；与内部 Reading 的正文点击语义同通道 */
 .vsidian-embed-ref {
   font-family: inherit;
+}
+
+/* ---- P2-05（#282）关闭确认模态（样式契约 content 域 ref-close-dialog
+   条目）：显式退出（头部关闭按钮 / 嵌入内 Esc / 删除活跃引用）命中
+   dirty 目标时的自绘三项对话框——「保存并关闭 / 丢弃修改并关闭 / 取消」，
+   默认焦点取消。挂 body 直接子级（fixed 遮罩，不进 #app 编辑器 DOM 树）。
+   主题变量取 VSCode 注入的公开变量族，主题/片段跟随宿主外观 ---- */
+
+body > .vsidian-ref-close-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60; /* 悬停浮层（z-index 40）与图片弹窗之上——模态阻断 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--vscode-editorWidget-editableBackground, rgba(0, 0, 0, 0.36));
+}
+
+body > .vsidian-ref-close-backdrop .vsidian-ref-close-dialog {
+  box-sizing: border-box;
+  width: min(460px, calc(100vw - 48px));
+  padding: 16px 18px 14px;
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
+  border-radius: 6px;
+  background: var(--vscode-editor-background, #1e1e1e);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  color: var(--vscode-editor-foreground, inherit);
+}
+
+body > .vsidian-ref-close-backdrop .vsidian-ref-close-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+body > .vsidian-ref-close-backdrop .vsidian-ref-close-message {
+  color: var(--vscode-editor-foreground, inherit);
+  overflow-wrap: anywhere;
+  margin-bottom: 6px;
+}
+
+body > .vsidian-ref-close-backdrop .vsidian-ref-close-message + .vsidian-ref-close-message {
+  color: var(--vscode-descriptionForeground, inherit);
+}
+
+body > .vsidian-ref-close-backdrop .vsidian-ref-close-notice {
+  margin: 6px 0;
+  padding: 6px 8px;
+  border-left: 3px solid var(--vscode-editorWarning-foreground, #cca700);
+  color: var(--vscode-descriptionForeground, inherit);
+  overflow-wrap: anywhere;
+}
+
+body > .vsidian-ref-close-backdrop .vsidian-ref-close-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+body > .vsidian-ref-close-backdrop .vsidian-ref-close-actions button {
+  font-family: inherit;
+  font-size: 13px;
+  padding: 4px 12px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+body > .vsidian-ref-close-backdrop .vsidian-ref-close-actions .vsidian-ref-close-save {
+  color: var(--vscode-button-foreground, #ffffff);
+  background: var(--vscode-button-background, #0e639c);
+}
+
+body > .vsidian-ref-close-backdrop .vsidian-ref-close-actions .vsidian-ref-close-save:hover {
+  background: var(--vscode-button-hoverBackground, #1177bb);
+}
+
+body > .vsidian-ref-close-backdrop .vsidian-ref-close-actions .vsidian-ref-close-discard {
+  color: var(--vscode-button-secondaryForeground, #ffffff);
+  background: var(--vscode-button-secondaryBackground, #5a5a5a);
+  border-color: var(--vscode-contrastBorder, transparent);
+}
+
+body > .vsidian-ref-close-backdrop .vsidian-ref-close-actions .vsidian-ref-close-discard:hover {
+  background: var(--vscode-button-secondaryHoverBackground, #6b6b6b);
+}
+
+body > .vsidian-ref-close-backdrop .vsidian-ref-close-actions .vsidian-ref-close-cancel {
+  color: var(--vscode-button-foreground, #ffffff);
+  background: var(--vscode-button-background, #0e639c);
+}
+
+body > .vsidian-ref-close-backdrop .vsidian-ref-close-actions .vsidian-ref-close-cancel:hover {
+  background: var(--vscode-button-hoverBackground, #1177bb);
+}
+
+body > .vsidian-ref-close-backdrop .vsidian-ref-close-actions button:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #4fc1ff);
+  outline-offset: 1px;
+}
+
+/* ---- P2-12（#289）写入冲突三项选择（样式契约 content 域
+   embed-conflict-choices 条目）：冲突暂停现场（状态行内）的就地选择条
+   ——「对比并解决 / 放弃当前版本 / 取消」，compare 的 hover 为用户指定
+   原文。非模态（不阻断嵌入内容查看）；取消收起后仅剩「重新选择」入口。
+   主题变量取 VSCode 注入的公开变量族，主题/片段跟随宿主外观 ---- */
+
+.vsidian-embed-card .vsidian-embed-card-state .vsidian-embed-card-conflict {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.vsidian-embed-card .vsidian-embed-card-state .vsidian-embed-card-conflict button {
+  font-family: inherit;
+  font-size: 12px;
+  padding: 2px 10px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 2px;
+  cursor: pointer;
+  color: var(--vscode-button-secondaryForeground, #ffffff);
+  background: var(--vscode-button-secondaryBackground, #5a5a5a);
+}
+
+.vsidian-embed-card .vsidian-embed-card-state .vsidian-embed-card-conflict button:hover:not(:disabled) {
+  background: var(--vscode-button-secondaryHoverBackground, #6b6b6b);
+}
+
+.vsidian-embed-card .vsidian-embed-card-state .vsidian-embed-card-conflict .vsidian-embed-card-conflict-compare {
+  color: var(--vscode-button-foreground, #ffffff);
+  background: var(--vscode-button-background, #0e639c);
+}
+
+.vsidian-embed-card .vsidian-embed-card-state .vsidian-embed-card-conflict .vsidian-embed-card-conflict-compare:hover:not(:disabled) {
+  background: var(--vscode-button-hoverBackground, #1177bb);
+}
+
+.vsidian-embed-card .vsidian-embed-card-state .vsidian-embed-card-conflict button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.vsidian-embed-card .vsidian-embed-card-state .vsidian-embed-card-conflict button:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #4fc1ff);
+  outline-offset: 1px;
+}
+
+.vsidian-embed-card .vsidian-embed-card-state .vsidian-embed-card-conflict-reopen {
+  font-size: 12px;
+}
+
+.vsidian-embed-card .vsidian-embed-card-state .vsidian-embed-card-conflict-notice {
+  margin-top: 4px;
+  padding: 4px 8px;
+  border-left: 3px solid var(--vscode-editorWarning-foreground, #cca700);
+  color: var(--vscode-descriptionForeground, inherit);
+  overflow-wrap: anywhere;
 }
 
 /* ---- #246 混排嵌入（样式契约 content 域 reading-embed-mixed 与

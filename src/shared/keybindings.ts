@@ -110,6 +110,28 @@ export const UI_OPERATIONS = [
   // 生效（mode: both 只表示两模式下命令均可用——目标判定各自实现）；
   // 默认不占键位，键位留给用户按需绑定（评估记录见 docs/specs/keybindings.md）
   { id: 'hoverPreviewLink', command: 'onegayi.vsidian.ui.hoverPreviewLink', titleKey: 'command.ui.hoverPreviewLink.title', mode: 'both', writes: false, defaults: [] },
+  // P2-04（#281）切换焦点嵌入的内部模式（Reading ↔ Live）：与嵌入卡片头部
+  // 模式按钮同一实现（焦点不在嵌入编辑器内零操作）。切换本身只建/拆目标
+  // 编辑端口、不写正文（writes: false——写门控按「是否写权威文本」判定）。
+  // 规格约定模式切换默认未绑定；保存目标不设独立操作（复用焦点内
+  // Ctrl+S 路由，见 syncController docKeydown 的 P2-04 段）
+  { id: 'embedToggleMode', command: 'onegayi.vsidian.ui.embedToggleMode', titleKey: 'command.ui.embedToggleMode.title', mode: 'both', writes: false, defaults: [] },
+  // P2-10（#287）+ P2-05（#282）合并口径：保存目标补独立可绑定入口（焦点内
+  // Ctrl+S 路由继续有效，两入口共用同一出站——此前 P2-04 评估「不设独立
+  // 操作」由 P2-10 按规格「保存目标登记可绑定入口」扩充）；显式关闭统一为
+  // P2-05 退出确认链路（dirty 时先弹保存并关闭/丢弃修改并关闭/取消三项自
+  // 绘模态，干净目标直接关闭；切回 Reading 并释放端口；与头部关闭按钮、
+  // 嵌入内 Esc、删除活跃引用拦截四径同一实现）；冲突三项按规格登记（对比并解决/放弃
+  // 当前版本/取消）——compare 的原生对比页与完整选择界面属 P2-12，本票
+  // compare/cancel 为登记占位（无暂停现场零操作），discard 走既有恢复
+  // 通道（经端口出站 sync.request → doc.resync 重新同步 = 放弃未提交输入
+  // 版本，不回滚整个 B）。全部默认未绑定（规格「模式切换、冲突选择默认
+  // 未绑定」）
+  { id: 'embedSaveTarget', command: 'onegayi.vsidian.embed.saveTarget', titleKey: 'command.embed.saveTarget.title', mode: 'both', writes: false, defaults: [] },
+  { id: 'embedClose', command: 'onegayi.vsidian.embed.close', titleKey: 'command.embed.close.title', mode: 'live', writes: false, defaults: [] },
+  { id: 'conflictCompare', command: 'onegayi.vsidian.conflict.compare', titleKey: 'command.conflict.compare.title', mode: 'both', writes: false, defaults: [] },
+  { id: 'conflictDiscard', command: 'onegayi.vsidian.conflict.discard', titleKey: 'command.conflict.discard.title', mode: 'both', writes: false, defaults: [] },
+  { id: 'conflictCancel', command: 'onegayi.vsidian.conflict.cancel', titleKey: 'command.conflict.cancel.title', mode: 'both', writes: false, defaults: [] },
   // #237 多光标·上下添加光标：@codemirror/commands 内置命令，webview 本地
   // 消化（快捷键经 keybindingRouter 本地分支，命令面板经 ui.command 回发，
   // 两条入口共用 webview 同一实现，不做出站宿主往返）。仅 Live 正文生效

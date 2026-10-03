@@ -59,8 +59,16 @@ import { claimPopup, releasePopup } from './popupMutex'
 // #299 跳转目标提示联动：浮层打开路径收起提示（「浮层开则提示关」，
 // 含悬停中补按 Ctrl 的立即消失——不进互斥锁的行为面表达）
 import { closeTargetTip } from './targetTip'
-import { OPEN_ICON } from './embedCard'
+import {
+  CLOSE_ICON,
+  MODE_LIVE_ICON,
+  OPEN_ICON,
+  SAVE_ICON,
+  type HoverPopupRootMountArgs,
+  type HoverPopupRootSession,
+} from './embedCard'
 import { WIKILINK_CLASS_NAMES } from '../shared/wikilink'
+import { EditorView } from '@codemirror/view'
 import {
   refErrorText,
   releaseRefSourceLease,
@@ -83,10 +91,22 @@ export const HOVER_POPUP_CLASS_NAMES = {
   header: 'vsidian-hover-popup-header',
   /** 标题（目标显示名 = spec.target，不随回包换） */
   title: 'vsidian-hover-popup-title',
+  /** P2-06 头部右侧动作组（保存/模式切换/关闭编辑 + 打开入口） */
+  actions: 'vsidian-hover-popup-actions',
+  /** P2-06 保存目标入口（目标未保存时可见） */
+  save: 'vsidian-hover-popup-save',
+  /** P2-06 内部模式切换入口（Reading ↔ Live） */
+  mode: 'vsidian-hover-popup-mode',
+  /** P2-06 显式关闭编辑入口（内部 Live 端口在场时可见） */
+  close: 'vsidian-hover-popup-close',
+  /** P2-06 目标未保存圆点（`·`，目标 dirty 时在场——嵌入卡片同款语义） */
+  dirty: 'vsidian-hover-popup-dirty',
   /** 跳转入口（打开目标文档；嵌入卡片打开按钮同款图标与语义） */
   open: 'vsidian-hover-popup-open',
   /** 内容滚动区（移入保活后的滚动承载） */
   scroll: 'vsidian-hover-popup-scroll',
+  /** P2-06 内部 Live 编辑器容器（与 Reading 容器并列；限高随几何计划） */
+  live: 'vsidian-hover-popup-live',
   /** 就地状态行（loading / 错误分态） */
   state: 'vsidian-hover-popup-state',
   /** 错误分态修饰（验收反馈：错误文案与普通文字区分——主题错误色，
@@ -184,6 +204,10 @@ export interface HoverPreviewContext {
   admitRootContent?(instanceId: string, target: RefLoadedContent, bytes: number): boolean
   clearRootContent?(instanceId: string): void
   releaseRootContent?(instanceId: string): void
+  /** P2-06（#283）浮窗根引用的内部 Live 宿主（EmbedCardManager 挂载）：
+   *  目标编辑端口/内部模式状态机/显式关闭链路与正文嵌入同源；缺省（未
+   *  提供）浮窗保持纯 Reading 形态（chrome 隐藏） */
+  mountPopupRoot?(args: HoverPopupRootMountArgs): { session: HoverPopupRootSession; content: RefContentMount } | null
 }
 
 interface HoverPopupState {
@@ -194,7 +218,22 @@ interface HoverPopupState {
   scrollEl: HTMLElement
   stateEl: HTMLElement
   contentEl: HTMLElement
-  instance: RefContentInstance
+  /** P2-06 内部 Live 编辑器容器（与 contentEl 并列于 scrollEl） */
+  liveEl: HTMLElement
+  /** P2-06 浮窗根引用宿主会话（null = 上下文未提供：纯 Reading 浮窗） */
+  root: HoverPopupRootSession | null
+  /** P2-06 watch 身份：根会话在场 = 引用位置语义键（bind 来源固定同源）；
+   *  否则回落 instanceId（纯 Reading 形态的既有身份） */
+  watchInstanceId: string
+  /** P2-06 指针在浮层容器内（dirty 清零后恢复常规关闭的重估依据） */
+  pointerInside: boolean
+  /** P2-06 Esc 消隐意图：显式退出链路完成后关浮窗（模态取消则清除） */
+  dismissPending: boolean
+  /** P2-06 上一次保活重估值（resist→clean 转变时恢复关闭计时） */
+  liveResistPrev: boolean
+  /** 纯 Reading 形态的实例（root 在场时为 null——实例归管理器驻留 entry，
+   *  跨开合记忆滚动/fm） */
+  instance: RefContentInstance | null
   content: RefContentMount
   /** loading → content / error（结果只接受一次：陈旧回包丢弃） */
   display: 'loading' | 'content' | 'error'
@@ -245,8 +284,11 @@ export function setHoverPreviewContext(ctx: HoverPreviewContext | null): void {
 // 480×400 遮挡正文拦截 mouseover，切回后悬停完全失效（点侧栏/切页释放
 // 才恢复）。瞬态 UI 失焦即关（在场实例与待开计时一并清），与宿主 hover
 // 语义一致；键盘模态不豁免——窗口失焦时键盘现场已断，关闭返还 prevFocus
-// 无副作用。监听随上下文装配惰性挂载（模块顶层 DOM 访问会炸 node 环境的
-// 纯逻辑测试 import 链），卸载幂等
+// 无副作用。P2-06（Q18）例外：dirty Live 保活——目标 B 有未保存修改时
+// 移出/外点/切应用等普通关闭条件不销毁（「切应用仍在」，P2-A08），窗口
+// 回焦时按最新 dirty 重估（保活失效且指针不在联合域则恢复关闭语义）。
+// 监听随上下文装配惰性挂载（模块顶层 DOM 访问会炸 node 环境的纯逻辑
+// 测试 import 链），卸载幂等
 let inactiveListenerCleanup: (() => void) | null = null
 function ensureInactiveListener(): void {
   if (inactiveListenerCleanup) {
@@ -254,7 +296,15 @@ function ensureInactiveListener(): void {
   }
   const release = (): void => {
     cancelPendingOpen()
-    closeHoverPopup()
+    if (!liveKeepAlive()) {
+      closeHoverPopup()
+    }
+  }
+  const onWindowFocus = (): void => {
+    // 回焦重估：dirty 已清（别处保存）且指针不在联合域 → 恢复常规关闭
+    if (popup && !liveKeepAlive() && !popup.pointerInside && !keyboardKeepAlive() && !editorFocusKeepAlive()) {
+      scheduleClose()
+    }
   }
   const onVisibilityChange = (): void => {
     if (document.hidden) {
@@ -262,9 +312,11 @@ function ensureInactiveListener(): void {
     }
   }
   window.addEventListener('blur', release)
+  window.addEventListener('focus', onWindowFocus)
   document.addEventListener('visibilitychange', onVisibilityChange)
   inactiveListenerCleanup = () => {
     window.removeEventListener('blur', release)
+    window.removeEventListener('focus', onWindowFocus)
     document.removeEventListener('visibilitychange', onVisibilityChange)
     inactiveListenerCleanup = null
   }
@@ -277,7 +329,8 @@ export function isHoverPopupOpen(): boolean {
   return popup !== null
 }
 
-/** 悬停预览观测探针（view.state.hoverPreview 的数据源） */
+/** 悬停预览观测探针（view.state.hoverPreview 的数据源）。P2-06 起含根
+ *  引用内部 Live 观测（生效模式/端口绑定/dirty/暂停） */
 export function hoverPopupProbe(): {
   open: boolean
   state: 'loading' | 'content' | 'error'
@@ -289,9 +342,34 @@ export function hoverPopupProbe(): {
   /** #220 浮层内已应用 src 的图片地址（B 身份资源解析观测面） */
   imageSrcs: string[]
   viewStats: ReadingViewStats | null
+  /** P2-06 生效内部模式（覆盖优先；缺省跟随根面板模式） */
+  internalMode: 'reading' | 'live'
+  /** P2-06 目标编辑端口是否已绑定 */
+  liveBound: boolean
+  /** P2-06 目标 B 未保存状态（圆点观测面；纯 Reading 形态恒 false） */
+  liveDirty: boolean
+  /** P2-06 编辑暂停（冲突）状态 */
+  liveSuspended: boolean
+  /** P2-06/P2-05 三项关闭确认模态在场 */
+  closeDialogOpen: boolean
 } {
+  const liveProbe = () => {
+    const st = popup?.root?.liveState()
+    return {
+      internalMode: popup?.root?.effectiveMode() ?? 'reading',
+      liveBound: popup?.root?.hasLivePort() ?? false,
+      liveDirty: st?.dirty ?? false,
+      liveSuspended: st?.suspended ?? false,
+      /** 该引用的三项关闭确认模态在场（P2-05 链路观测面） */
+      closeDialogOpen: popup?.root?.isCloseDialogOpen() ?? false,
+    }
+  }
   if (!popup || popup.display !== 'content') {
-    return { open: popup !== null, state: popup?.display ?? 'loading', note: popup?.note ?? '', blocks: 0, scope: popup?.scope ?? '', fm: 'none', imageSrcs: [], viewStats: null }
+    return {
+      open: popup !== null, state: popup?.display ?? 'loading', note: popup?.note ?? '', blocks: 0,
+      scope: popup?.scope ?? '', fm: 'none', imageSrcs: [], viewStats: null,
+      ...liveProbe(),
+    }
   }
   const fmSection = popup.contentEl.querySelector(`.${REF_FM_CLASS_NAMES.section}`)
   const imageSrcs: string[] = []
@@ -301,15 +379,22 @@ export function hoverPopupProbe(): {
       imageSrcs.push(src)
     }
   }
+  // fm 态从 DOM 观测（切换按钮 aria-expanded 随态）——legacy 读实例字段，
+  // 根会话形态实例归管理器驻留 entry，DOM 侧写两形态同源
+  const fmToggle = fmSection?.querySelector('button[aria-expanded]')
+  const fmExpanded = popup.instance
+    ? popup.instance.fmExpanded
+    : fmToggle?.getAttribute('aria-expanded') === 'true'
   return {
     open: true,
     state: popup.display,
     note: popup.note,
     blocks: popup.contentEl.querySelectorAll(`.${READING_CLASS_NAMES.block}`).length,
     scope: popup.scope,
-    fm: fmSection ? (popup.instance.fmExpanded ? 'expanded' : 'collapsed') : 'none',
+    fm: fmSection ? (fmExpanded ? 'expanded' : 'collapsed') : 'none',
     imageSrcs,
     viewStats: popup.content.getStats(),
+    ...liveProbe(),
   }
 }
 
@@ -333,14 +418,30 @@ function scheduleClose(): void {
   }
   // #221 键盘模态保活：焦点在浮层内部时不因鼠标离开（联合域 mouseleave
   // 的延迟关闭源）而销毁键盘操作现场——规格「焦点在浮层内部时不能仅因
-  // 鼠标离开而销毁」；焦点离开浮层后恢复常规鼠标关闭语义
-  if (keyboardKeepAlive()) {
+  // 鼠标离开而销毁」；焦点离开浮层后恢复常规鼠标关闭语义。
+  // 输入现场保活（鼠标打开路径同样成立）：用户点击浮窗内编辑器开始
+  // 输入（键盘/IME 组合）后鼠标移出——去够输入法候选窗等——不销毁
+  // 打字现场；按钮副作用焦点不构成键盘现场（保存/切换后按普通悬停规则）
+  if (keyboardKeepAlive() || editorFocusKeepAlive()) {
+    return
+  }
+  if (liveKeepAlive()) {
+    // P2-06（Q18）：dirty Live 抵抗普通关闭条件（移出延迟关）。抵抗态
+    // 就地记录——后续端口态信号（dirty 清零/在途落定）翻转时据此恢复
+    // 关闭语义（reevaluateLiveKeepAlive）
+    popup.liveResistPrev = true
     return
   }
   cancelCloseTimer()
   popup.closeTimer = window.setTimeout(() => {
     if (popup) {
       popup.closeTimer = undefined
+      // 排程后现场翻转复查：关延迟排定（干净 + 无现场）后用户才开始
+      // 输入（组合/在途/dirty 起）或聚焦编辑器——鼠标未归场（无
+      // mouseenter 抵消）时不得按早前排定的延迟销毁输入现场
+      if (keyboardKeepAlive() || editorFocusKeepAlive() || liveKeepAlive() || popup.pointerInside) {
+        return
+      }
       closeHoverPopup()
     }
   }, HOVER_POPUP_CLOSE_DELAY_MS)
@@ -350,6 +451,73 @@ function scheduleClose(): void {
  *  时同样成立——focus 落在浮层内任意后代） */
 function keyboardKeepAlive(): boolean {
   return popup !== null && popup.keyboardOpened && popup.container.contains(document.activeElement)
+}
+
+/** 输入现场保活：浮窗内 CM6 编辑器持有焦点（根编辑器或嵌卡/孙卡编辑器
+ *  ——孙卡 DOM 在浮窗容器任意层）。只认编辑器焦点：打字现场（键盘/IME
+ *  输入中）值得保活；点击按钮/头部后的副作用焦点不算（P2-U18 干净目标
+ *  普通悬停关闭语义不被滞留焦点劫持） */
+function editorFocusKeepAlive(): boolean {
+  const active = document.activeElement
+  return popup !== null && active !== null && popup.container.contains(active) &&
+    active.closest('.cm-content') !== null
+}
+
+/** P2-06（Q18）dirty 保活判定：浮窗根内部 Live 端口在场且（目标 dirty／
+ *  输入未落定／冲突暂停）——移出、外点、失焦等普通关闭条件不销毁。
+ *  目标 dirty 与未提交输入分开观测：组合期/在途/暂停不按「B 干净」销毁 */
+function liveKeepAlive(): boolean {
+  return popup !== null && popup.root !== null && popup.root.resistsNormalClose()
+}
+
+/** P2-06 端口态变化重估（onLiveStateChanged）：保活失效转变（resist→
+ *  clean）且指针不在联合域时恢复常规关闭语义——dirty 消除后浮窗不再
+ *  滞留（键盘模态保活另行判定） */
+function reevaluateLiveKeepAlive(): void {
+  const state = popup
+  if (!state) {
+    return
+  }
+  const resisting = liveKeepAlive()
+  const was = state.liveResistPrev
+  state.liveResistPrev = resisting
+  if (!was && resisting) {
+    // 抵抗上升（输入开始/在途起）：撤销已排定的关延迟——排程时干净、
+    // 排程后现场翻转的时序缺口
+    cancelCloseTimer()
+    return
+  }
+  if (was && !resisting && !state.pointerInside && !keyboardKeepAlive() && !editorFocusKeepAlive()) {
+    scheduleClose()
+  }
+}
+
+/** P2-06 引用位置语义键：面板会话内跨开合稳定（模式/选区/滚动记忆与
+ *  refEdit.bind occurrence、hover.watch 身份同源）；面板条目等中性区间
+ *  （sourceStart=0）以目标区分——同目标条目共享会话记忆 */
+function hoverRootKey(spec: HoverPopupTargetSpec): string {
+  return `hover@${spec.sourceStart}::${spec.target}`
+}
+
+/** P2-06 显式退出链路完成回调（onExplicitCloseSettled）：浮窗去留按意图
+ *  决定——Esc 消隐意图（焦点不在编辑器内发起）与删除引用（锚点随 A 的
+ *  删除事务消失）在链路完成后关浮窗；头部关闭按钮（close）与编辑器内
+ *  Esc 只退出编辑回 Reading，浮窗保留。键盘模态下编辑器销毁后焦点落回
+ *  浮窗容器（避免掉 body） */
+function onRootCloseSettled(intent: 'close' | 'escape' | 'delete'): void {
+  const state = popup
+  if (!state) {
+    return
+  }
+  const dismiss = state.dismissPending || intent === 'delete'
+  state.dismissPending = false
+  if (dismiss) {
+    closeHoverPopup()
+    return
+  }
+  if (state.keyboardOpened && state.container.isConnected) {
+    state.container.focus()
+  }
 }
 
 /** 锚点与浮层联合域之外的指针位置判定（保活边界） */
@@ -370,12 +538,27 @@ function position(state: HoverPopupState): void {
   }
   const anchorRect = state.anchor.getBoundingClientRect()
   const width = state.container.offsetWidth || HOVER_POPUP_DEFAULT_WIDTH
+  // P2-06 内部 Live 容器限高：总高扣头部/边框等固定 chrome（外壳实测差）
+  // ——CM6 自身 scroller 滚动（视口测量依赖 cm-scroller 为滚动元素，
+  // 嵌入卡片同款口径）；外壳未入布局时用保守缺省
+  const chromeH = state.container.offsetHeight > 0 && state.scrollEl.clientHeight > 0
+    ? state.container.offsetHeight - state.scrollEl.clientHeight
+    : 48
   // 用内部滚动内容的自然高度规划贴锚位置：外壳 offsetHeight 可能已被
   // 旧 max-height 裁切，直接读它会把后续异步增高永久冻结在 loading 高。
   // scrollHeight 不受外壳裁切；扣掉当前滚动口再加回自然内容即可恢复全高。
-  const measured = state.container.offsetHeight > 0
-    ? state.container.offsetHeight - state.scrollEl.clientHeight + state.scrollEl.scrollHeight
-    : HOVER_POPUP_MAX_HEIGHT
+  // P2-06 视觉验收回归：内部 Live 在场时外壳差值法失效（liveEl 被自身
+  // max-height 钳住，scrollEl.scrollHeight 随之被钳）——自然高度改取
+  // cm-scroller 的内容全高（不受 max-height 裁切）
+  let measured: number
+  const liveScroller = state.liveEl.querySelector<HTMLElement>('.cm-scroller')
+  if (liveScroller && getComputedStyle(state.liveEl).display !== 'none') {
+    measured = chromeH + liveScroller.scrollHeight
+  } else {
+    measured = state.container.offsetHeight > 0
+      ? state.container.offsetHeight - state.scrollEl.clientHeight + state.scrollEl.scrollHeight
+      : HOVER_POPUP_MAX_HEIGHT
+  }
   const height = Math.min(HOVER_POPUP_MAX_HEIGHT, Math.max(1, measured))
   const placement = planHoverPopupPlacement({
     anchor: {
@@ -392,6 +575,7 @@ function position(state: HoverPopupState): void {
   state.container.style.width = `${placement.width}px`
   // 最大高由几何计划钳制（常规 = 400 上限；小视口收缩）
   state.container.style.maxHeight = `${placement.height}px`
+  state.liveEl.style.maxHeight = `${Math.max(140, placement.height - chromeH)}px`
 }
 
 function applyDisplay(state: HoverPopupState, display: 'loading' | 'content' | 'error', note: string): void {
@@ -437,23 +621,55 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
   scrollEl.className = HOVER_POPUP_CLASS_NAMES.scroll
   const contentEl = createReadingContainer()
   scrollEl.appendChild(contentEl)
+  // P2-06 内部 Live 编辑器容器（与 Reading 容器并列；默认隐藏——生效
+  // 内部模式为 Live 且端口装载后由管理器 applyInternalDom 翻转）
+  const liveEl = document.createElement('div')
+  liveEl.className = HOVER_POPUP_CLASS_NAMES.live
+  liveEl.style.display = 'none'
+  scrollEl.appendChild(liveEl)
   // 标题条（验收反馈 2026-09-30：嵌入卡片同款 header——目标显示名常驻
-  // 不随回包换；跳转按钮与嵌入打开入口同图标同语义）
+  // 不随回包换；跳转按钮与嵌入打开入口同图标同语义）。P2-06：右侧动作
+  // 组新增保存/模式切换/关闭编辑入口（与嵌入卡片同款图标与语义；根会话
+  // 未接入（纯 Reading 形态）时隐藏）
   const header = document.createElement('div')
   header.className = HOVER_POPUP_CLASS_NAMES.header
   const titleEl = document.createElement('span')
   titleEl.className = HOVER_POPUP_CLASS_NAMES.title
   titleEl.textContent = spec.target
+  const headerActions = document.createElement('span')
+  headerActions.className = HOVER_POPUP_CLASS_NAMES.actions
+  const mkChromeBtn = (
+    className: string,
+    icon: string,
+    labelKey: Parameters<typeof t>[0],
+  ): HTMLButtonElement => {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = className
+    const label = t(labelKey)
+    btn.setAttribute('aria-label', label)
+    btn.setAttribute('data-tooltip', label)
+    btn.innerHTML = icon
+    return btn
+  }
+  const saveBtn = mkChromeBtn(HOVER_POPUP_CLASS_NAMES.save, SAVE_ICON, 'embed.saveTarget')
+  saveBtn.style.display = 'none'
+  const modeBtn = mkChromeBtn(HOVER_POPUP_CLASS_NAMES.mode, MODE_LIVE_ICON, 'embed.modeToLive')
+  const closeBtn = mkChromeBtn(HOVER_POPUP_CLASS_NAMES.close, CLOSE_ICON, 'embed.closeEditor')
+  closeBtn.style.display = 'none'
   const openBtn = document.createElement('button')
   openBtn.type = 'button'
   openBtn.className = HOVER_POPUP_CLASS_NAMES.open
   const openLabel = t('embed.openTarget')
   openBtn.setAttribute('aria-label', openLabel)
   openBtn.setAttribute('data-tooltip', openLabel)
-
   openBtn.innerHTML = OPEN_ICON
+  headerActions.appendChild(saveBtn)
+  headerActions.appendChild(modeBtn)
+  headerActions.appendChild(closeBtn)
+  headerActions.appendChild(openBtn)
   header.appendChild(titleEl)
-  header.appendChild(openBtn)
+  header.appendChild(headerActions)
   container.appendChild(header)
   container.appendChild(stateEl)
   container.appendChild(scrollEl)
@@ -465,21 +681,70 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
 
   const instanceId = `hover-${++instanceSeq}`
   const reqId = ++reqSeq
-  const instance = new RefContentInstance({
+  const ctx = context
+  // P2-06：子引用挂载的父身份 = watch 身份（宿主对子请求按父 watch 固定
+  // 校验来源）。根会话在场为引用位置语义键（与 bind occurrence 同源），
+  // 否则 instanceId（纯 Reading 形态）；闭包晚绑定——mountPopupRoot 结果
+  // 出来后赋值
+  let embedParentIdentity = instanceId
+  const mountOptions = {
+    contentEl, scrollEl, strategy: 'virtual' as const,
+    session: () => ctx.session(),
+    send: (message: WebviewToHost) => ctx.send(message),
+    codeHighlight: () => ctx.codeHighlight?.() ?? true,
+    onEmbedBlockMounted: (block: HTMLElement, target: RefLoadedContent) =>
+      ctx.mountEmbedChild?.(embedParentIdentity, block, target),
+    onEmbedBlockUnmounted: (block: HTMLElement) => ctx.unmountEmbedChild?.(block),
+  }
+  // P2-06 浮窗根引用宿主接入：entry 按引用位置语义键驻留管理器状态库
+  // （跨开合记忆模式/选区/滚动/fm）；Reading 挂载经 entry.content（同一
+  // RefContentInstance）。上下文未提供（纯 Reading 形态）时回落自建实例
+  const rootKey = hoverRootKey(spec)
+  const mounted = ctx.mountPopupRoot?.({
+    key: rootKey,
+    inner: spec.target,
+    sourceStart: spec.sourceStart,
+    sourceEnd: spec.sourceEnd,
+    container,
+    scrollEl,
+    stateEl,
+    contentEl,
+    liveEl,
+    modeBtn,
+    saveBtn,
+    closeBtn,
+    headerActionsEl: headerActions,
+    dirtyClass: HOVER_POPUP_CLASS_NAMES.dirty,
+    contentMount: mountOptions,
+    reloadContent: (silent) => {
+      if (popup) {
+        requestReload(popup, silent)
+      }
+    },
+    onExplicitCloseSettled: (intent) => onRootCloseSettled(intent),
+    onExplicitCloseCanceled: () => {
+      if (popup) {
+        popup.dismissPending = false
+      }
+    },
+    onLiveStateChanged: () => reevaluateLiveKeepAlive(),
+  }) ?? null
+  const root = mounted?.session ?? null
+  embedParentIdentity = root ? rootKey : instanceId
+  const instance = root ? null : new RefContentInstance({
     panelDocUri: session.docUri,
     sourceDocUri: session.docUri,
     range: { start: spec.sourceStart, end: spec.sourceEnd },
     occurrence: instanceId,
   })
-  const ctx = context
-  const content = instance.mount({
-    contentEl, scrollEl, strategy: 'virtual',
-    session: () => ctx.session(),
-    send: (message) => ctx.send(message),
-    codeHighlight: () => ctx.codeHighlight?.() ?? true,
-    onEmbedBlockMounted: (block, target) => ctx.mountEmbedChild?.(instanceId, block, target),
-    onEmbedBlockUnmounted: (block) => ctx.unmountEmbedChild?.(block),
-  })
+  const content = mounted?.content ?? instance!.mount(mountOptions)
+  if (!root) {
+    // 纯 Reading 形态：chrome 隐藏（Tab 序不新增停留点）
+    saveBtn.style.display = 'none'
+    modeBtn.style.display = 'none'
+    modeBtn.tabIndex = -1
+    closeBtn.style.display = 'none'
+  }
   const state: HoverPopupState = {
     instanceId,
     reqId,
@@ -488,6 +753,12 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
     scrollEl,
     stateEl,
     contentEl,
+    liveEl,
+    root,
+    watchInstanceId: root ? rootKey : instanceId,
+    pointerInside: false,
+    dismissPending: false,
+    liveResistPrev: false,
     instance,
     content,
     display: 'loading',
@@ -504,15 +775,6 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
     closeTimer: undefined,
     cleanups: [],
   }
-  instance.onDispose(() => {
-    if (state.closeTimer !== undefined) window.clearTimeout(state.closeTimer)
-    if (state.watchedFsPath !== null) {
-      sendWatchMessage(state.watchedFsPath, state.instanceId, 'hover.unwatch')
-      state.watchedFsPath = null
-    }
-    ctx.releaseRootContent?.(state.instanceId)
-    for (const cleanup of state.cleanups.splice(0)) cleanup()
-  })
   popup = state
   claimPopup(closeHoverPopup)
   applyDisplay(state, 'loading', t('hover.loading'))
@@ -520,6 +782,22 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
   if (state.keyboardOpened) {
     // 键盘打开：焦点进入浮层（Esc 关闭后返还 prevFocus——见 closeHoverPopup）
     container.focus()
+  }
+  // P2-06 头部 chrome 接线（根会话在场）：与嵌入卡片头部按钮同一处理器
+  // 语义——模式切换/保存目标/显式关闭（dirty 弹三项模态、干净直接退出）
+  if (root) {
+    content.listen(modeBtn, 'click', (event) => {
+      event.stopPropagation()
+      root.toggleMode()
+    })
+    content.listen(saveBtn, 'click', (event) => {
+      event.stopPropagation()
+      root.save()
+    })
+    content.listen(closeBtn, 'click', (event) => {
+      event.stopPropagation()
+      root.requestClose('close')
+    })
   }
 
   // #220 浮层内链接点击：B 内双链/普通链接/外链经既有 open 通道（附
@@ -597,24 +875,49 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
   })
 
   // 键盘：Esc 关闭（捕获阶段拦截，不外溢宿主键绑定；关闭时键盘模态返还
-  // 触发处焦点——见 closeHoverPopup）
+  // 触发处焦点——见 closeHoverPopup）。P2-06 分层：三项关闭确认模态在场
+  // 归模态（Esc=取消）；内部 Live 端口在场且焦点在编辑器内归编辑器
+  // keymap（收选区后走同一显式退出链路——捕获阶段不拦截，事件继续到
+  // 编辑器）；端口在场但焦点在编辑器外 = 消隐意图，经显式退出链路（dirty
+  // 弹三项模态、干净直接退出编辑，完成后关浮窗）；无端口保持原瞬态语义
   const onKeydown = (event: KeyboardEvent): void => {
-    if (event.key === 'Escape') {
-      event.stopPropagation()
-      closeHoverPopup()
+    if (event.key !== 'Escape') {
+      return
     }
+    if (popup?.root?.isCloseDialogOpen()) {
+      return // 模态自身的 Esc = 取消（模态根监听处理，不重复消费）
+    }
+    if (popup?.root?.hasLivePort()) {
+      if (popup.liveEl.contains(document.activeElement)) {
+        return // 编辑器 keymap 处理（非空选区先收选区，再走退出链路）
+      }
+      event.stopPropagation()
+      popup.dismissPending = true
+      popup.root.requestClose('escape')
+      return
+    }
+    event.stopPropagation()
+    closeHoverPopup()
   }
   document.addEventListener('keydown', onKeydown, true)
   state.cleanups.push(() => document.removeEventListener('keydown', onKeydown, true))
 
   // 移入保活 / 移出延迟关闭（联合域 = 锚点 ∪ 浮层；键盘模态的保活豁免
-  // 在 scheduleClose 内判定——焦点在浮层内时鼠标离开不销毁键盘现场）
-  content.listen(container, 'mouseenter', () => cancelCloseTimer())
-  content.listen(container, 'mouseleave', () => scheduleClose())
+  // 在 scheduleClose 内判定——焦点在浮层内时鼠标离开不销毁键盘现场；
+  // P2-06 dirty Live 的抵抗同样在 scheduleClose 内判定）。pointerInside
+  // 供 dirty 清零后的保活重估（reevaluateLiveKeepAlive）
+  content.listen(container, 'mouseenter', () => {
+    state.pointerInside = true
+    cancelCloseTimer()
+  })
+  content.listen(container, 'mouseleave', () => {
+    state.pointerInside = false
+    scheduleClose()
+  })
   // 联合域内的指针按下不关闭（选字复制起点）；域外按下立即关（点击别处
-  // = 明确的上下文切换）
+  // = 明确的上下文切换）——P2-06 dirty Live 抵抗（Q18「外点仍在」）
   const onPointerDown = (event: PointerEvent): void => {
-    if (popup && event.target instanceof Node && !insideJointDomain(popup, event.target)) {
+    if (popup && event.target instanceof Node && !insideJointDomain(popup, event.target) && !liveKeepAlive()) {
       closeHoverPopup()
     }
   }
@@ -623,9 +926,12 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
 
   // 父容器滚动：锚点视口位置失效，立即关闭（浮层自身滚动区在联合域内不受影响）；
   // #221 键盘模态且焦点在浮层内时豁免——Tab 遍历浮层内容触发的程序性滚动
-  // 不得销毁键盘操作现场（#220 已知张力的调整）
+  // 不得销毁键盘操作现场（#220 已知张力的调整）；编辑器输入现场（scrollIntoView
+  // 等程序性滚动）与 P2-06 dirty Live 同豁免（键盘模态先例：保持浮层驻留，
+  // 不重贴锚——普通条件恢复后按常规重定位）
   const onScroll = (event: Event): void => {
-    if (popup && event.target instanceof Node && !popup.container.contains(event.target) && !keyboardKeepAlive()) {
+    if (popup && event.target instanceof Node && !popup.container.contains(event.target) &&
+      !keyboardKeepAlive() && !editorFocusKeepAlive() && !liveKeepAlive()) {
       closeHoverPopup()
     }
   }
@@ -649,6 +955,10 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
     })
     observer.observe(container)
     observer.observe(contentEl)
+    // P2-06 视觉验收回归：内部 Live 编辑器异步建立/装载撑高 liveEl 时同样
+    // 重定位——否则浮窗冻结在 Reading 期测量高度，编辑器溢出被裁
+    //（用户实测 251px 编辑器被 148px 容器裁掉一截）
+    observer.observe(state.liveEl)
     state.cleanups.push(() => observer.disconnect())
   }
 
@@ -663,7 +973,9 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
     docUri: session.docUri,
     reqId,
     instanceId,
-    occurrenceId: instanceId,
+    // P2-06：occurrenceId 与 watch 身份同源（宿主来源租约按 occurrence
+    // 转交固定——语义键或 instanceId 二者必须一致，否则 watch 被拒）
+    occurrenceId: state.watchInstanceId,
     sourceStart: spec.sourceStart,
     sourceEnd: spec.sourceEnd,
     target: spec.target,
@@ -744,7 +1056,9 @@ export function hoverPreviewAnchorLeave(anchor: HTMLElement): void {
 
 /** 关闭并释放实例（显式关闭 / 上下文失效 / dispose 路径共用；幂等）。
  *  #221 键盘模态：关闭后返还触发处焦点（prevFocus 脱树或 body 不返还——
- *  程序化打开时无真实先前焦点可回） */
+ *  程序化打开时无真实先前焦点可回）。P2-06：根会话在场时端口与挂载经
+ *  session.close 释放（occurrence 记忆驻留管理器状态库——模式/选区/
+ *  滚动跨开合）；订阅与根预算释放两路径同款（legacy 原经 instance.onDispose） */
 export function closeHoverPopup(): void {
   cancelPendingOpen()
   const state = popup
@@ -752,7 +1066,21 @@ export function closeHoverPopup(): void {
     return
   }
   popup = null
-  state.instance.dispose()
+  if (state.root) {
+    state.root.close()
+  } else {
+    state.instance?.dispose()
+  }
+  if (state.watchedFsPath !== null) {
+    sendWatchMessage(state.watchedFsPath, state.watchInstanceId, 'hover.unwatch')
+    state.watchedFsPath = null
+    state.watchLeaseId = null
+  }
+  context?.releaseRootContent?.(state.instanceId)
+  if (state.closeTimer !== undefined) {
+    window.clearTimeout(state.closeTimer)
+  }
+  for (const cleanup of state.cleanups.splice(0)) cleanup()
   state.container.remove()
   releasePopup(closeHoverPopup)
   if (state.keyboardOpened && state.prevFocus !== null && state.prevFocus.isConnected) {
@@ -769,11 +1097,14 @@ export function closeHoverPopupIfAnchorWithin(scope: ParentNode): void {
   }
 }
 
-/** #220 内容应用（成功回包 / 同实例刷新共用入口）：**不重置 fmExpanded**
- *  ——刷新（目标内容变化引发的重建，#224 经 hover.invalidated 驱动同实例
- *  重发请求）保留属性展开状态；重开（新实例）才恢复默认折叠。#224 起
- *  刷新保持滚动位置（内容重建前保存 scrollTop、重建后回写——内容缩短时
- *  浏览器按 scrollHeight 合法钳制）并登记目标订阅（hover.watch） */
+/** #221/#224 内容应用（成功回包 / 同实例刷新共用入口）：**不重置
+ *  fmExpanded**——刷新（目标内容变化引发的重建，#224 经 hover.invalidated
+ *  驱动同实例重发请求）保留属性展开状态；重开恢复默认折叠（#220 既有
+ *  契约保持——P2-06 根会话实例跨开合驻留只为滚动记忆，fm 在挂载时复位）。
+ *  #224 起刷新保持滚动位置（内容重建前保存
+ *  scrollTop、重建后回写——内容缩短时浏览器按 scrollHeight 合法钳制）
+ *  并登记目标订阅（hover.watch）。P2-06：装载成功送达根会话（entry.loaded
+ *  填充；生效内部 Live 时绑定目标编辑端口） */
 function applyHoverContent(state: HoverPopupState, message: Extract<HoverPreviewResult, { ok: true }>): void {
   const keepScroll = state.scrollEl.scrollTop // #224 刷新前保存（首载为 0）
   state.scope = message.scope.kind
@@ -795,7 +1126,7 @@ function applyHoverContent(state: HoverPopupState, message: Extract<HoverPreview
     if (context) releaseRefSourceLease(context, message.sourceLeaseId)
     context?.releaseRootContent?.(state.instanceId)
     if (state.watchedFsPath !== null) {
-      sendWatchMessage(state.watchedFsPath, state.instanceId, 'hover.unwatch')
+      sendWatchMessage(state.watchedFsPath, state.watchInstanceId, 'hover.unwatch')
       state.watchedFsPath = null
       state.watchLeaseId = null
     }
@@ -808,19 +1139,65 @@ function applyHoverContent(state: HoverPopupState, message: Extract<HoverPreview
     state.scrollEl.scrollTop = keepScroll
     state.content.updateNow()
   }
+  // P2-06：引用位置会话记忆的滚动恢复（重开路径——根会话实例跨开合
+  // 驻留，与嵌入卡片 applyLoaded 的 restoreScroll 同口径；首载/无记忆
+  // scrollTop 0 无操作，延迟一帧等宿主布局建立后回写）
+  state.content.restoreScroll(true)
+  state.root?.contentLoaded(loaded)
 }
 
-/** #224 登记目标订阅（成功装载后；目标身份变化先释放旧订阅） */
+/** P2-06/#224 重发读取请求（刷新与 Live 切回的静默重载共用）：新 reqId
+ *  推进（旧回包按配对守卫丢弃）；silent 不切 loading 态（旧内容保留）；
+ *  已打开实例的重读带 anchorOptional（锚点缺失不切错误页——P2-03） */
+function requestReload(state: HoverPopupState, silent: boolean): void {
+  const session = context?.session()
+  if (!context || !session?.sessionId || !session.docUri) {
+    return
+  }
+  state.reqId = ++reqSeq
+  // 版本谱系断点自愈（修 7 同款）：watch 目标文档被宿主释放重开时让版本
+  // 防线短暂让位——迟到的旧回包仍由 instanceId + reqId 配对守卫拦截
+  state.appliedVersion = -1
+  if (!silent) {
+    applyDisplay(state, 'loading', t('hover.loading'))
+  }
+  context.send({
+    kind: 'hover.request',
+    retainSource: true,
+    anchorOptional: true,
+    sessionId: session.sessionId,
+    docUri: session.docUri,
+    reqId: state.reqId,
+    instanceId: state.instanceId,
+    occurrenceId: state.watchInstanceId,
+    sourceStart: state.spec.sourceStart,
+    sourceEnd: state.spec.sourceEnd,
+    target: state.spec.target,
+    ...(state.spec.linkHref !== undefined ? { linkHref: state.spec.linkHref } : {}),
+    ...(state.spec.directFsPath !== undefined
+      ? {
+          directTarget: {
+            fsPath: state.spec.directFsPath,
+            ...(state.spec.directAnchor ? { anchor: state.spec.directAnchor } : {}),
+          },
+        }
+      : {}),
+  })
+}
+
+/** #224 登记目标订阅（成功装载后；目标身份变化先释放旧订阅）。P2-06：
+ *  watch 身份 = watchInstanceId（根会话在场为引用位置语义键——refEdit.bind
+ *  来源固定校验同源；纯 Reading 形态为 instanceId 既有身份） */
 function ensureWatch(state: HoverPopupState, fsPath: string, sourceLeaseId?: string): void {
   if (state.watchedFsPath === fsPath && sourceLeaseId === undefined) {
     return
   }
   if (state.watchedFsPath !== null && state.watchedFsPath !== fsPath) {
-    sendWatchMessage(state.watchedFsPath, state.instanceId, 'hover.unwatch')
+    sendWatchMessage(state.watchedFsPath, state.watchInstanceId, 'hover.unwatch')
   }
   state.watchedFsPath = fsPath
   state.watchLeaseId = sourceLeaseId ?? null
-  sendWatchMessage(fsPath, state.instanceId, 'hover.watch', sourceLeaseId)
+  sendWatchMessage(fsPath, state.watchInstanceId, 'hover.watch', sourceLeaseId)
 }
 
 /** #224 订阅消息出站（会话守卫字段与 hover.request 同款） */
@@ -861,13 +1238,19 @@ export function notifyHoverResult(message: HoverPreviewResult): boolean {
   return true
 }
 
-/** 订阅容量／来源校验失败时，立即撤掉不能再获得失效推送的正文。 */
+/** 订阅容量／来源校验失败时，立即撤掉不能再获得失效推送的正文。
+ *  P2-06：内部 Live 端口在场时不撤编辑现场（编辑经目标端口独立于
+ *  hover.watch——失效标记挂起，切回 Reading 时重载） */
 export function notifyHoverWatchRejected(message: {
   fsPath: string; instanceId: string; reason: 'capacity' | 'source'; sourceLeaseId?: string
 }): void {
   const state = popup
-  if (!state || state.instanceId !== message.instanceId || state.watchedFsPath !== message.fsPath ||
+  if (!state || state.watchInstanceId !== message.instanceId || state.watchedFsPath !== message.fsPath ||
     (message.sourceLeaseId !== undefined && state.watchLeaseId !== message.sourceLeaseId)) return
+  if (state.root?.hasLivePort()) {
+    state.root.markPendingReadingRefresh()
+    return
+  }
   state.watchedFsPath = null
   state.watchLeaseId = null
   state.content.clear()
@@ -885,6 +1268,10 @@ export function notifyHoverWatchRejected(message: {
  *   不无限保留旧内容；订阅保持（恢复 changed 推送可重载）。
  * - stale：权限/断连读取失败分态（read-failed 文案；不等同删除）。
  * 同面板消息 FIFO，代次单调由宿主协调器保证——不做乱序丢弃。
+ * P2-06：内部 Live 端口在场时不重载 Reading（目标变更经端口增量推送驱动
+ *  编辑器——B 会话广播；挂起 pendingReadingRefresh，切回 Reading 时由
+ *  管理器 reloadContent 补一次静默重载），deleted/stale 也不撤编辑现场
+ *  （B 的 TextDocument 驻留，编辑会话继续——与正文嵌入同款语义）
  */
 export function notifyHoverInvalidated(message: {
   fsPath: string
@@ -895,39 +1282,12 @@ export function notifyHoverInvalidated(message: {
   if (!state || state.watchedFsPath !== message.fsPath) {
     return
   }
+  if (state.root?.hasLivePort()) {
+    state.root.markPendingReadingRefresh()
+    return
+  }
   if (message.status === 'changed') {
-    const session = context?.session()
-    if (!context || !session?.sessionId || !session.docUri) {
-      return
-    }
-    state.reqId = ++reqSeq // 新请求代次：旧 reqId 迟到回包因配对失败丢弃
-    // 修 7（review 第二轮）：版本谱系断点自愈——watch 目标文档被宿主
-    // 释放重开（TextDocument.version 重置变小）时，回包 version <
-    // appliedVersion 会被版本仲裁恒拒且无重发通道，旧内容滞留。changed
-    // 重发前置 appliedVersion = -1 让版本防线短暂让位：迟到的旧回包仍由
-    // instanceId + reqId 配对守卫拦截（上一行已推进 reqId），安全
-    state.appliedVersion = -1
-    context.send({
-      kind: 'hover.request',
-      retainSource: true,
-      sessionId: session.sessionId,
-      docUri: session.docUri,
-      reqId: state.reqId,
-      instanceId: state.instanceId,
-      occurrenceId: state.instanceId,
-      sourceStart: state.spec.sourceStart,
-      sourceEnd: state.spec.sourceEnd,
-      target: state.spec.target,
-      ...(state.spec.linkHref !== undefined ? { linkHref: state.spec.linkHref } : {}),
-      ...(state.spec.directFsPath !== undefined
-        ? {
-            directTarget: {
-              fsPath: state.spec.directFsPath,
-              ...(state.spec.directAnchor ? { anchor: state.spec.directAnchor } : {}),
-            },
-          }
-        : {}),
-    })
+    requestReload(state, true)
     return
   }
   // deleted / stale：撤下内容显示分态（视图清空防 display 反转后旧内容
@@ -960,6 +1320,60 @@ export function notifyHoverImageInvalidate(srcs: readonly string[]): void {
  *  （活跃槽位重新走宿主解析，新 URI 带新代次戳） */
 export function invalidateHoverPopupImages(): void {
   popup?.content.invalidateImages()
+}
+
+/** P2-06 测试钩子（宿主 hover.test.live 经 syncController 转发）：浮窗根
+ *  内部 Live 的操作族——与头部按钮（mode/save/close）与编辑器事务管线
+ *  同一处理器链路；无浮窗或无根会话返回 false */
+export function hoverPopupLiveTestAction(
+  action: 'mode' | 'type' | 'focus' | 'save' | 'close',
+  opts?: { intent?: 'close' | 'escape'; pos?: number; to?: number; text?: string },
+): boolean {
+  const state = popup
+  if (!state?.root) {
+    return false
+  }
+  switch (action) {
+    case 'mode':
+      state.root.toggleMode()
+      return true
+    case 'type': {
+      const view = popupEditorView(state)
+      if (!view) {
+        return false
+      }
+      const at = Math.min(opts?.pos ?? 0, view.state.doc.length)
+      view.dispatch({ changes: { from: at, to: at, insert: opts?.text ?? '' } })
+      return true
+    }
+    case 'focus': {
+      const view = popupEditorView(state)
+      if (!view) {
+        return false
+      }
+      if (typeof opts?.pos === 'number') {
+        const anchor = Math.min(opts.pos, view.state.doc.length)
+        const head = typeof opts.to === 'number'
+          ? Math.min(Math.max(opts.to, 0), view.state.doc.length)
+          : anchor
+        view.dispatch({ selection: { anchor, head } })
+      }
+      view.focus()
+      return true
+    }
+    case 'save':
+      state.root.save()
+      return true
+    case 'close':
+      state.root.requestClose(opts?.intent ?? 'close')
+      return true
+  }
+}
+
+/** 浮窗内编辑器视图（测试钩子与观测共用；不在场 null） */
+function popupEditorView(state: HoverPopupState): EditorView | null {
+  const editor = state.liveEl.querySelector('.cm-editor')
+  return editor instanceof HTMLElement ? EditorView.findFromDOM(editor) : null
 }
 
 /** 测试隔离：清空模块级单例状态（生产不调用） */

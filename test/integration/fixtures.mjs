@@ -1120,6 +1120,273 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
     '二层正文。',
     '',
   ].join('\n'), 'utf8')
+  // P2-04（#281）嵌入内部 Live 编辑：独立文件对（不与 #222 嵌入样例共
+  // 享目标——写回断言互不干扰）。父文档两枚同目标 occurrence（多端口
+  // 隔离）；CRLF 目标为 CRLF 字节（坐标转换断言）。
+  writeFileSync(path.join(wsDir, 'p204-编辑嵌入.md'), [
+    '# P2-04 编辑嵌入',
+    '',
+    '![[p204-编辑目标]]',
+    '',
+    '中间段落。',
+    '',
+    '![[p204-编辑目标]]',
+    '',
+    '尾部段落。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p207-容器混排.md'), [
+    '# P2-07 容器混排',
+    '',
+    '前文混排 ![[p207-容器目标]] 后文混排。',
+    '',
+    '- 无序项 ![[p207-容器目标]] 无序余文',
+    '- [ ] 任务项 ![[p207-容器目标]] 任务余文',
+    '',
+    '> 引用文 ![[p207-容器目标]] 引用余文',
+    '',
+    '收尾段落。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p207-容器目标.md'), [
+    '# p207 容器目标',
+    '',
+    '容器目标首段。',
+    '',
+    '容器目标次段。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p204-编辑目标.md'), [
+    '# p204 编辑目标',
+    '',
+    '目标首段。',
+    '',
+    '目标次段。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p204-CRLF嵌入.md'), [
+    '# P2-04 CRLF 嵌入',
+    '',
+    '![[p204-CRLF目标]]',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p204-CRLF目标.md'),
+    'p204 CRLF 目标首行\r\np204 第二行\r\n', 'utf8')
+  // P2-08（#285）表格格内嵌入的内部 Live：父表格含转义别名（表头 + 数据
+  // 格混排）与 #标题 形态——结构编辑不误伤、删行拦截与保存路由的宿主侧
+  writeFileSync(path.join(wsDir, 'p208-表格嵌入.md'), [
+    '# P2-08 表格格内 Live',
+    '',
+    '| ![[p208-表格目标\\|头别名]] | 头B | 头C |',
+    '| --- | --- | --- |',
+    '| 甲 ![[p208-表格目标\\|别名]] 乙 | ![[p208-表格目标#小节]] | 普通格 |',
+    '| 数据行 | ![[p208-表格目标]] | 普通格二 |',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p208-表格目标.md'), [
+    '# p208 表格目标',
+    '',
+    '目标首段。',
+    '',
+    '## 小节',
+    '',
+    '小节正文一段。',
+    '',
+  ].join('\n'), 'utf8')
+  // P2-10（#287）引用完整 Live 操作：A 含唯一嵌入且自身无 frontmatter
+  //（嵌入编辑器内的 fm 卡是全文档唯一的 Popover 目标）；B 带 frontmatter
+  //（Popover 编辑链路）与正文（格式/表格命令目标）
+  writeFileSync(path.join(wsDir, 'p210-操作嵌入.md'), [
+    '# P2-10 操作嵌入',
+    '',
+    '![[p210-操作目标]]',
+    '',
+    '尾部段落。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p210-操作目标.md'), [
+    '---',
+    'tags:',
+    '  - 甲',
+    '---',
+    '# p210 操作目标',
+    '',
+    '目标首段文字。',
+    '',
+    '目标次段。',
+    '',
+  ].join('\n'), 'utf8')
+  // P2-05（#282）显式关闭确认：独立文件对（同目标两 occurrence——多端口
+  // 丢弃去重断言；不与 p204 共享目标——dirty/回滚断言互不干扰）
+  writeFileSync(path.join(wsDir, 'p205-关闭嵌入.md'), [
+    '# P2-05 关闭嵌入',
+    '',
+    '![[p205-关闭目标]]',
+    '',
+    '中间段落。',
+    '',
+    '![[p205-关闭目标]]',
+    '',
+    '尾部段落。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p205-关闭目标.md'), [
+    '# p205 关闭目标',
+    '',
+    '目标首段。',
+    '',
+    '目标次段。',
+    '',
+  ].join('\n'), 'utf8')
+  // P2-12（#289）写入冲突三项选择：独立文件对（外部交错修改制造真实
+  // 冲突暂停；compare 的 untitled/diff、discard、cancel 分径断言素材）
+  writeFileSync(path.join(wsDir, 'p212-冲突嵌入.md'), [
+    '# P2-12 冲突嵌入',
+    '',
+    '![[p212-冲突目标]]',
+    '',
+    '尾部段落。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p212-冲突目标.md'), [
+    '# p212 冲突目标',
+    '',
+    '目标首段。',
+    '',
+    '目标次段。',
+    '',
+  ].join('\n'), 'utf8')
+  // P2-13（#290）父标签关闭交接：交接嵌入（同目标两 occurrence + 一个从未
+  // 编辑的干净目标——去重与「干净不开」断言素材）与冲突嵌入（关闭时未
+  // 提交输入的当次三项选择素材）；各自独立文件对，不与 p204/p205/p212
+  // 共享目标——dirty/回滚断言互不干扰
+  writeFileSync(path.join(wsDir, 'p213-交接嵌入.md'), [
+    '# P2-13 交接嵌入',
+    '',
+    '![[p213-交接目标]]',
+    '',
+    '中间段落。',
+    '',
+    '![[p213-交接目标]]',
+    '',
+    '![[p213-干净目标]]',
+    '',
+    '尾部段落。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p213-交接目标.md'), [
+    '# p213 交接目标',
+    '',
+    '目标首段。',
+    '',
+    '目标次段。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p213-干净目标.md'), [
+    '# p213 干净目标',
+    '',
+    '干净目标首段。',
+    '',
+  ].join('\n'), 'utf8')
+  // P2-09（#286）递归引用直接父模式与逐层目标编辑：A→B→C 三份可区分文本；
+  // B 内多形态孙位（独占行/混排/列表/引用/表格格内——嵌套跟随与逐层编辑
+  // 的组合素材；装载/来源校验/循环走生产真链路）
+  writeFileSync(path.join(wsDir, 'p209-递归父A.md'), [
+    '# P2-09 递归父 A',
+    '',
+    '![[p209-递归B]]',
+    '',
+    'A 尾部段落。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p209-递归B.md'), [
+    '# p209 递归 B',
+    '',
+    '![[p209-递归C]]',
+    '',
+    '前文混排 ![[p209-递归C|混排位]] 后文混排。',
+    '',
+    '- 列表项 ![[p209-递归C|列表位]] 列表余文',
+    '',
+    '> 引用文 ![[p209-递归C|引用位]] 引用余文',
+    '',
+    '| 格内头 | 普通头 |',
+    '| --- | --- |',
+    '| ![[p209-递归C\\|格内位]] | 普通格 |',
+    '',
+    'B 尾部段落。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p209-递归C.md'), [
+    '# p209 递归 C',
+    '',
+    'C 首段正文。',
+    '',
+    'C 次段正文。',
+    '',
+  ].join('\n'), 'utf8')
+  // P2-14（#291）组合收口：表格格内三层递归（A 表格 → B → C）组合素材 +
+  // B 含代码块（代码卡复制经端口落宿主剪贴板的端到端素材）
+  writeFileSync(path.join(wsDir, 'p214-组合父A.md'), [
+    '# P2-14 组合父 A',
+    '',
+    '| 格头 | 普通头 |',
+    '| --- | --- |',
+    '| ![[p214-组合B\\|格内位]] | 普通格 |',
+    '',
+    'A 尾部段落。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p214-组合B.md'), [
+    '# p214 组合 B',
+    '',
+    '![[p214-组合C]]',
+    '',
+    '```js',
+    'const combo = 1',
+    '```',
+    '',
+    'B 尾部段落。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p214-组合C.md'), [
+    '# p214 组合 C',
+    '',
+    'C 首段正文。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p213-冲突嵌入.md'), [
+    '# P2-13 冲突嵌入',
+    '',
+    '![[p213-冲突目标]]',
+    '',
+    '尾部段落。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p213-冲突目标.md'), [
+    '# p213 冲突目标',
+    '',
+    '目标首段。',
+    '',
+    '目标次段。',
+    '',
+  ].join('\n'), 'utf8')
+
+  // P2-06/#283 悬停浮窗根引用内部 Live：Live 父继承与手动切换/位置记忆链路
+  writeFileSync(path.join(wsDir, 'p206-悬停Live.md'), [
+    '# P2-06 悬停 Live',
+    '',
+    '指向 [[p206-编辑目标]] 的双链（Live 正文 Ctrl+悬停进入）。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p206-编辑目标.md'), [
+    '# p206 编辑目标',
+    '',
+    '目标首段。',
+    '',
+    '目标次段。',
+    '',
+  ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, '嵌入改写.md'), [
     '# 嵌入改写',
     '',
@@ -1298,6 +1565,31 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
     '只在 hover-assets 子目录内存在的目标（B 身份解析的命中判据）。',
     '',
   ].join('\n'), 'utf8')
+  // P2-11（#288）嵌入内部 Live 的 B 目录资源：父文档在根目录、目标 B 在
+  // 子目录 embed-assets/ 内——图片 only-in-b.png、内链目标（普通链接与双链
+  // 双形态）都只在该子目录存在，按 A 目录/根解析必 not-found；B 粘贴资产
+  // 的 same-dir+assets 目录（embed-assets/assets/）也按 B 归属（磁盘位置
+  // 断言：根目录不得出现新资产）
+  writeFileSync(path.join(wsDir, 'p211-资源嵌入.md'), [
+    '# 嵌入资源父文档',
+    '',
+    '![[embed-assets/嵌入资源目标]]',
+    '',
+    '尾部段落。',
+    '',
+  ].join('\n'), 'utf8')
+  mkdirSync(path.join(wsDir, 'embed-assets'), { recursive: true })
+  writeFileSync(path.join(wsDir, 'embed-assets', '嵌入资源目标.md'), [
+    '# 嵌入资源目标标题',
+    '',
+    '![B 图](only-in-b.png)',
+    '',
+    '[B 链接](内链目标.md) 与双链 [[B内双链目标]]。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'embed-assets', 'only-in-b.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
+  writeFileSync(path.join(wsDir, 'embed-assets', '内链目标.md'), '# 内链目标\n\n只在 embed-assets 内的普通链接目标。\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'embed-assets', 'B内双链目标.md'), '# B内双链目标\n\n只在 embed-assets 内的双链目标。\n', 'utf8')
   writeFileSync(path.join(wsDir, 'wikilink-target.md'), WIKILINK_TARGET_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'wikilink-crlf-target.md'), WIKILINK_CRLF_TARGET_DOC, 'utf8')
   // #162 复制块链接：frontmatter 头区（不接管断言）、标题行/普通段/表格/
@@ -1328,5 +1620,13 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
   mkdirSync(path.join(wsDir, 'other'), { recursive: true })
   writeFileSync(path.join(wsDir, 'other', '甲.md'), '# 重名甲（other 目录）\n', 'utf8')
   writeFileSync(path.join(wsDir, 'CaseNote.md'), '# 大小写目标\n英文命名的目标笔记。\n', 'utf8')
+  // #278 P2-01 真宿主探针 fixture：每用例独立文件对（-a.md = 面板甲 A，
+  // -b.md = 引用目标乙 B；hand 用例另有 -c.md 旁观丙）。用例各自把缓冲与
+  // 磁盘还原回以下字节后结束，跨用例零污染。
+  for (const name of ['save', 'guard', 'route', 'pf', 'share', 'atomic', 'revert', 'late', 'ro', 'diff', 'diff-fail', 'recycle', 'hand', 'hand2', 'inflight', 'clean']) {
+    writeFileSync(path.join(wsDir, `p201-${name}-a.md`), `# P2-01 ${name} 甲面板\n\n甲正文行\n`, 'utf8')
+    writeFileSync(path.join(wsDir, `p201-${name}-b.md`), `P2-01 ${name} 乙第一行\n乙第二行\n`, 'utf8')
+  }
+  writeFileSync(path.join(wsDir, 'p201-hand-c.md'), 'P2-01 hand 旁观丙\n', 'utf8')
   return { largeDocLines: LARGE_DOC_LINES }
 }

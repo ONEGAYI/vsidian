@@ -19,9 +19,10 @@
 // 零写回：点击/hover/开关弹窗/刷新/导出均不触碰文档与撤销栈。
 import { t } from '../shared/i18n'
 import { IMAGE_PASTE_LIMITS } from '../shared/protocol'
-import { normalizeImgSrc, type ImageResourceManager } from './imageResource'
+import { isDirectImageSrc, normalizeImgSrc, type ImageResourceManager } from './imageResource'
 import { closeDiagramPopup, DIAGRAM_POPUP_CLASS_NAMES } from './diagramPopup'
 import { claimPopup, releasePopup } from './popupMutex'
+import type { EditorView } from '@codemirror/view'
 import {
   POPUP_DRAG_SLOP,
   POPUP_FALLBACK_SIZE,
@@ -47,10 +48,39 @@ export interface ImagePopupContext {
   sendExport: (req: { reqId: number; src: string; fileName: string }) => void
 }
 
+/** P2-11（#288）图片弹窗实例上下文（打开时捕获的调用实例资源身份）：
+ *  嵌入内部 Live 的图片弹窗按 B 身份装载/刷新/导出——images 为 B 的
+ *  资源管理器（请求经目标端口）、docSource 为 B 全文、sendExport 附
+ *  sourceDocUri（B 的 fsPath）。与全局 ImagePopupContext 分开建模：
+ *  面板级 isDirectSrc 等纯函数继续取全局缺省 */
+export interface ImagePopupSource {
+  images: ImageResourceManager
+  docSource: () => string | null
+  sendExport: (req: { reqId: number; src: string; fileName: string }) => void
+}
+
 let context: ImagePopupContext | null = null
 
 export function setImagePopupContext(ctx: ImagePopupContext | null): void {
   context = ctx
+}
+
+// ---- P2-11 实例上下文注册表（EditorView → 弹窗资源身份） ----
+// 打开弹窗的 widget 经 EditorView.findFromDOM 反查所属编辑器，再取其实例
+// 上下文——主正文编辑器无注册（undefined），回落全局 context（A 面板）。
+// 生命周期随 Live 实例（构造注册、destroy 注销），释放后的弹窗操作回落全局
+const viewSources = new WeakMap<EditorView, ImagePopupSource>()
+
+export function registerImagePopupSource(view: EditorView, source: ImagePopupSource): void {
+  viewSources.set(view, source)
+}
+
+export function unregisterImagePopupSource(view: EditorView): void {
+  viewSources.delete(view)
+}
+
+export function imagePopupOptsOfView(view: EditorView): ImagePopupSource | undefined {
+  return viewSources.get(view)
 }
 
 /** 导出建议文件名限长（与宿主 sanitize 及粘贴 fileNameHint 同限，单一值源） */
@@ -121,6 +151,9 @@ interface ImagePopupState {
   zoomLabel: HTMLElement
   /** 弹窗图片（管理器槽位；attach/detach 与弹窗同生命周期） */
   img: HTMLImageElement
+  /** P2-11 打开时快照的装配上下文（实例源覆盖全局缺省；弹窗存续期间
+   *  全局 context 变化不影响已开弹窗，关闭 detach 用同一管理器） */
+  ctx: ImagePopupContext
   rawSrc: string
   intrinsic: { w: number; h: number }
   transform: PopupTransform
@@ -145,7 +178,7 @@ export function closeImagePopup(): void {
   for (const cleanup of p.cleanups) {
     cleanup()
   }
-  context?.images.detach(p.img)
+  p.ctx.images.detach(p.img)
   p.overlay.remove()
   document.body.style.overflow = p.prevBodyOverflow
   if (p.prevFocus && p.prevFocus.isConnected) {
@@ -182,12 +215,10 @@ function fitToStage(p: ImagePopupState): void {
 /** 刷新语义（规格决策表）：按当前文档重定位该图（rawSrc 仍在文档中）后
  *  走 image.invalidate 单源失效重取——弹窗 img 是管理器槽位，重挂后的新
  *  地址自动应用并触发 load 重新 fit。定位不到（文档不可得/图被删改）或
- *  直连外链（无失效语义）维持快照 */
+ *  直连外链（无失效语义）维持快照。P2-11：重定位用打开时快照的实例
+ *  docSource（嵌入内部 Live 按 B 全文，不读主正文） */
 function refreshImage(p: ImagePopupState): void {
-  const ctx = context
-  if (!ctx) {
-    return
-  }
+  const ctx = p.ctx
   const doc = ctx.docSource()
   if (doc === null || !locateImageOccurrence(doc, p.rawSrc)) {
     return
@@ -241,12 +272,27 @@ function wrapExportHint(btn: HTMLButtonElement): HTMLElement {
 /** 打开图片弹窗（单例：再次打开先关闭旧的；与图表弹窗互斥）。rawSrc 统一
  *  归一为解码形态（与 image.request 的 src 同口径）：live 装饰传入源文
  *  原样（可能是 %20 编码），阅读 dataset 已是解码值——归一后装载、刷新
- *  定位与导出消息共用同一身份 */
-export function openImagePopup(rawSrc: string, alt: string): void {
-  const ctx = context
-  if (!ctx) {
+ *  定位与导出消息共用同一身份。
+ *  P2-11：source 为打开时捕获的实例上下文（嵌入内部 Live 的弹窗按 B 身份
+ *  装载/刷新/导出）；缺省回落全局 context（主正文/阅读侧不变） */
+export function openImagePopup(rawSrc: string, alt: string, source?: ImagePopupSource): void {
+  const global = context
+  if (!global && !source) {
     return
   }
+  const ctx: ImagePopupContext = global
+    ? {
+        images: source?.images ?? global.images,
+        docSource: source?.docSource ?? global.docSource,
+        isDirectSrc: global.isDirectSrc,
+        sendExport: source?.sendExport ?? global.sendExport,
+      }
+    : {
+        images: source!.images,
+        docSource: source!.docSource,
+        isDirectSrc: isDirectImageSrc,
+        sendExport: source!.sendExport,
+      }
   // 归一为解码身份（live 槽位传入源文原样；阅读 dataset 已是归一值，再
   // 归一为幂等空操作——除非身份含合法 %XX 字面，见规格「已知边界」）
   rawSrc = normalizeImgSrc(rawSrc)
@@ -285,6 +331,7 @@ export function openImagePopup(rawSrc: string, alt: string): void {
     toolbar,
     zoomLabel,
     img,
+    ctx,
     rawSrc,
     intrinsic: POPUP_FALLBACK_SIZE,
     transform: { scale: 1, panX: 0, panY: 0 },

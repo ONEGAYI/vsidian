@@ -38,7 +38,7 @@
 // - 本票不创建目标写入通道：嵌入内容 Reading 禁写语义由共享装配承担
 //   （mountRefContentBlock），Live 侧零额外写路径；未保存内容订阅与磁盘
 //   变化失效属 #224。
-import { RangeSet, StateField, type Extension, type Range, type Text, type Transaction } from '@codemirror/state'
+import { Facet, RangeSet, StateField, type Extension, type Range, type Text, type Transaction } from '@codemirror/state'
 import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view'
 import { selectionTouchesRange } from './liveDecorations'
 import { liveDecorationsField } from './liveDecorations'
@@ -249,6 +249,9 @@ function fenceContains(fences: readonly FenceSpan[], lineFrom: number, lineTo: n
  * markdown-it 块语义对齐）、lezer 语法上下文（行内代码/HTML 块/注释——
  * #246 同源排除集合；#248 起 Table 开放为格内挂载）、行内链接/图片文字域
  * （与 Reading 呈现对齐：链接域内嵌入不升级）。
+ * P2-09（#286）：child 在场（嵌入内部 Live 编辑器装配孙卡上下文）时，
+ * widget 携带该上下文——孙卡以直接父 B 的来源身份挂载（parentInstanceId/
+ * occurrence 键/depth/来源文档），不落根级语义键。
  */
 export function buildLiveEmbedDecorationRanges(
   selection: import('@codemirror/state').EditorSelection,
@@ -258,6 +261,7 @@ export function buildLiveEmbedDecorationRanges(
   fm: { end: number } | null,
   doc: Text,
   tree: Tree | null,
+  child?: LiveEmbedChildContext | null,
 ): Array<Range<Decoration>> {
   const out: Array<Range<Decoration>> = []
   for (const span of spans) {
@@ -283,7 +287,7 @@ export function buildLiveEmbedDecorationRanges(
     const keyFrom = span.sole ? span.lineFrom : span.from
     const keyTo = span.sole ? span.lineTo : span.to
     const touched = selectionTouchesRange(selection, span.from, span.to)
-    const deco = liveEmbedWidgetDeco(span.inner, span.lineFrom, span.lineTo, keyFrom, keyTo, touched)
+    const deco = liveEmbedWidgetDeco(span.inner, span.lineFrom, span.lineTo, keyFrom, keyTo, touched, child)
     out.push(touched ? deco.range(span.lineTo) : deco.range(span.from, span.to))
   }
   return out
@@ -307,6 +311,10 @@ export function setLiveEmbedCards(manager: EmbedCardManager | null): void {
  * 自有监听器。两形态均为块级（隐形态 = 嵌入精确区间 inline replace 的
  * 替换物，流断行呈现「前文 → 卡片 → 后文」；显形态 = 行下方 block
  * widget）；高度由 CM6 测量 + ResizeObserver→requestMeasure 兜底回填。
+ * P2-09（#286）：child 在场时（嵌入内部 Live 编辑器的孙卡装饰），挂载走
+ * 直接父来源身份（parentInstanceId / occurrence 键 / depth / 来源文档
+ * = 直接父 B）——坐标在本 widget 所属编辑器的全文空间（= B 全文），与
+ * Reading 侧孙卡（mountChildFrom）的语义键同源，跨模式共享实例状态。
  */
 export class LiveEmbedWidget extends WidgetType {
   constructor(
@@ -317,6 +325,8 @@ export class LiveEmbedWidget extends WidgetType {
     readonly keyFrom: number,
     readonly keyTo: number,
     readonly below: boolean,
+    /** P2-09 孙卡挂载上下文（缺省 = 根正文嵌入——无来源链） */
+    readonly child?: LiveEmbedChildContext,
   ) {
     super()
   }
@@ -325,7 +335,8 @@ export class LiveEmbedWidget extends WidgetType {
     return (
       other.inner === this.inner && other.lineFrom === this.lineFrom &&
       other.lineTo === this.lineTo && other.keyFrom === this.keyFrom &&
-      other.keyTo === this.keyTo && other.below === this.below
+      other.keyTo === this.keyTo && other.below === this.below &&
+      other.child?.parentHostId === this.child?.parentHostId
     )
   }
 
@@ -340,7 +351,21 @@ export class LiveEmbedWidget extends WidgetType {
     host.className = this.below
       ? `${LIVE_EMBED_CLASS_NAMES.host} ${LIVE_EMBED_CLASS_NAMES.below}`
       : LIVE_EMBED_CLASS_NAMES.host
-    cards?.mountCardInto(host, this.inner, this.keyFrom, this.keyTo, 'live')
+    if (this.child) {
+      // P2-09 孙卡：经直接父来源身份挂载（occurrence 键与 mountChildFrom
+      // 同源——B 的 Reading 侧与 Live 编辑器侧命中同一 entry 实例）
+      cards?.mountCardInto(host, this.inner, this.keyFrom, this.keyTo, 'live', {
+        panelDocUri: this.child.panelDocUri,
+        sourceDocUri: this.child.sourceDocUri,
+        range: { start: this.keyFrom, end: this.keyTo },
+        occurrence: `${this.child.parentHostId}/${this.keyFrom}::${this.inner}`,
+        parentInstanceId: this.child.parentHostId,
+        depth: this.child.parentDepth + 1,
+        treeId: this.child.treeId,
+      })
+    } else {
+      cards?.mountCardInto(host, this.inner, this.keyFrom, this.keyTo, 'live')
+    }
     return host
   }
 
@@ -355,7 +380,9 @@ export class LiveEmbedWidget extends WidgetType {
 
 const decoCache = new Map<string, ReturnType<typeof liveEmbedWidgetDeco>>()
 
-/** widget 装饰实例缓存（同键复用，RangeSet.eq 前提；mermaidWidgetDeco 先例） */
+/** widget 装饰实例缓存（同键复用，RangeSet.eq 前提；mermaidWidgetDeco 先例）。
+ *  P2-09：孙卡 widget 的缓存键含父身份——同一坐标/inner 在不同父编辑器
+ *  中是不同实例（来源链不同），不得跨视图复用。 */
 export function liveEmbedWidgetDeco(
   inner: string,
   lineFrom: number,
@@ -363,8 +390,9 @@ export function liveEmbedWidgetDeco(
   keyFrom: number,
   keyTo: number,
   below: boolean,
+  child?: LiveEmbedChildContext | null,
 ): ReturnType<typeof Decoration.replace> | ReturnType<typeof Decoration.widget> {
-  const key = `${below ? 1 : 0}::${lineFrom}::${lineTo}::${keyFrom}::${keyTo}::${inner}`
+  const key = `${child ? `c:${child.parentHostId}:` : ''}${below ? 1 : 0}::${lineFrom}::${lineTo}::${keyFrom}::${keyTo}::${inner}`
   const hit = decoCache.get(key)
   if (hit) {
     decoCache.delete(key)
@@ -372,13 +400,13 @@ export function liveEmbedWidgetDeco(
     return hit
   }
   const deco = below
-    ? Decoration.widget({ widget: new LiveEmbedWidget(inner, lineFrom, lineTo, keyFrom, keyTo, true), block: true, side: 1 })
+    ? Decoration.widget({ widget: new LiveEmbedWidget(inner, lineFrom, lineTo, keyFrom, keyTo, true, child ?? undefined), block: true, side: 1 })
     // 隐形态保持 inline replace（行结构保留——键盘垂直导航可进入嵌入行，
     // 块级 replace 会被 CM6 当不可停靠块直接跳过，实测 ArrowUp 越过整行）；
     // #247 起替换区间为嵌入精确区间（前后文/标记/缩进保留），「前文 →
     // 卡片 → 后文」的流断行呈现由 CSS 承担（宿主块级化 + 隐藏 replace
     // widget 前后的 cm-widgetBuffer）
-    : Decoration.replace({ widget: new LiveEmbedWidget(inner, lineFrom, lineTo, keyFrom, keyTo, false) })
+    : Decoration.replace({ widget: new LiveEmbedWidget(inner, lineFrom, lineTo, keyFrom, keyTo, false, child ?? undefined) })
   decoCache.set(key, deco)
   while (decoCache.size > liveEmbedDecoCacheLimit) {
     const oldest = decoCache.keys().next().value
@@ -390,11 +418,50 @@ export function liveEmbedWidgetDeco(
   return deco
 }
 
+/** P2-04（#281）挂卡宿主标记：只有装配该标记的 Live 视图（根正文）才
+ *  发射嵌入卡片装饰——P2-09 起嵌入内部 Live 编辑器经**孙卡上下文 facet**
+ *  （liveEmbedChildCards）发射：孙卡以直接父来源身份挂载（不落根级语义
+ *  键，不与根面板嵌入串位）；无标记且无孙卡上下文的视图仍不发射。 */
+const embedCardsHostView = Facet.define<boolean, boolean>({ combine: (values) => values.some(Boolean) })
+
+/** 根正文装配标记（syncController 经 extraExtensions 注入主编辑器实例） */
+export const liveEmbedCardsHostMark = embedCardsHostView.of(true)
+
+/** P2-09（#286）孙卡挂载上下文：嵌入内部 Live 编辑器（B 的编辑器）装配
+ *  后，其正文中的嵌入以「B 的子引用」挂载——直接父身份、深度与家族树
+ *  取 B 的稳定宿主身份；来源文档 = B 的目标 fsPath（孙卡来源链沿 B）。 */
+export interface LiveEmbedChildContext {
+  /** 直接父 B 的稳定宿主身份（hostId——对外身份永不变，P2-07） */
+  parentHostId: string
+  /** 面板会话文档（面板身份仍为根 A 面板——请求/端口出站都经它） */
+  panelDocUri: string
+  /** 直接来源文档 = B 的目标 fsPath（孙卡 hover.request 的 sourceDocUri） */
+  sourceDocUri: string
+  /** B 的深度（孙卡 depth = parentDepth + 1；预算与深度截断沿用） */
+  parentDepth: number
+  /** 家族树（预算与实例分组——与 B 自身的 treeId 同源） */
+  treeId: string
+}
+
+const liveEmbedChildCardsFacet = Facet.define<LiveEmbedChildContext, LiveEmbedChildContext | null>({
+  combine: (values) => values[values.length - 1] ?? null,
+})
+
+/** P2-09 孙卡装配扩展：嵌入内部 Live 编辑器（LiveEditorInstance 经
+ *  extraExtensions 注入——embedCard.createLiveInstance）发射孙卡装饰 */
+export function liveEmbedChildCards(ctx: LiveEmbedChildContext): Extension {
+  return liveEmbedChildCardsFacet.of(ctx)
+}
+
 /** 嵌入装饰（StateField，#223）：block widget 与跨行 replace 均须来自
  *  StateField（CM6 硬约束）；表/围栏/frontmatter/语法树任一变化或选区
  *  变化时全量重建（装饰实例缓存使 RangeSet.eq 可命中） */
 export const liveEmbedDecorations = StateField.define<DecorationSet>({
   create(state) {
+    const child = state.facet(liveEmbedChildCardsFacet)
+    if (!state.facet(embedCardsHostView) && !child) {
+      return RangeSet.empty
+    }
     const deco = state.field(liveDecorationsField, false)
     if (!deco) {
       return RangeSet.empty
@@ -409,6 +476,7 @@ export const liveEmbedDecorations = StateField.define<DecorationSet>({
         deco.fm,
         state.doc,
         deco.tree,
+        child,
       ),
       true,
     )
@@ -422,6 +490,10 @@ export const liveEmbedDecorations = StateField.define<DecorationSet>({
       tr.startState.field(liveDecorationsField, false) !== tr.state.field(liveDecorationsField, false)
     if (!tr.docChanged && tr.selection === undefined && !spansChanged && !fencesChanged && !liveDecoChanged) {
       return value
+    }
+    const child = tr.state.facet(liveEmbedChildCardsFacet)
+    if (!tr.state.facet(embedCardsHostView) && !child) {
+      return RangeSet.empty
     }
     const deco = tr.state.field(liveDecorationsField, false)
     if (!deco) {
@@ -437,6 +509,7 @@ export const liveEmbedDecorations = StateField.define<DecorationSet>({
         deco.fm,
         tr.state.doc,
         deco.tree,
+        child,
       ),
       true,
     )

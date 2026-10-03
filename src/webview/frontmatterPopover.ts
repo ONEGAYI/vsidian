@@ -527,3 +527,13 @@ export function closeFmPopover(): void {
     p.prevFocus.focus()
   }
 }
+
+/** P2-10（#287）关闭属于指定编辑器视图的 Popover（嵌入实例释放联动）：
+ *  浮层单例持有打开时的 view——实例销毁后迟到输入若仍经死视图派发，
+ *  写入会脱离端口链路被静默丢弃；teardownLive 时对被销毁 view 调用本
+ *  函数关闭浮层。其他视图的浮层不受影响（幂等；无浮层零操作） */
+export function closeFmPopoverForView(view: EditorViewType): void {
+  if (popover && popover.view === view) {
+    closeFmPopover()
+  }
+}

@@ -9,6 +9,7 @@ import * as vscode from 'vscode'
 import { randomUUID } from 'node:crypto'
 import * as path from 'node:path'
 import { DocumentSession, type HostDocumentPort, type SessionNotice } from './documentSession'
+import { isRefEditClientMessage, RefEditPortRegistry, wrapRefEditPush, type RefEditBinding } from './refEditPorts'
 import {
   appendImageVersionStamp,
   classifyImageTarget,
@@ -364,7 +365,340 @@ export function createTextEditorProvider(
 ): vscode.CustomTextEditorProvider {
   const sessions = new Map<string, SessionEntry>()
   const diagnostics = new TestDiagnostics()
-  let lastClosedInput: { docUri: string; webviewText?: string; fragments: string[] } | undefined
+  /** P2-13（#290）最近一条「面板关闭残留输入」快照（宿主留存）：无条件记录
+   *  ——「取消不静默清除宿主已收到快照」的可观测实现；测试钩子
+   *  getLastClosedInput 暴露，放弃当前版本时清除 */
+  let lastClosedInput:
+    | { docUri: string; webviewText?: string; fragments: string[]; fromRefPort?: boolean }
+    | undefined
+
+  // ---- P2-04（#281）目标编辑端口：嵌入内部 Live 与 B 会话的绑定簿记 ----
+  // provider 持注册表；B 会话接入复用 openEntry（B 打开为 custom editor 时
+  // 同一会话——「宿主每个 B 只有一个权威 DocumentSession」），虚拟面板的
+  // send 把编辑通道事件包成 refEdit.push 回来源面板（白名单见 refEditPorts）。
+  const refPorts = new RefEditPortRegistry()
+  /** P2-11（#288）测试钩子配套：会话面板 → 真实 webview 消息处理器（与
+   *  onDidReceiveMessage 同一函数；refEdit.* 在 provider 层拦截，会话入口
+   *  注入无法触达——injectWebviewReceived 经此以完全一致的处理入口注入） */
+  const panelMessageHandlers = new Map<string, (message: unknown) => void>()
+
+  /** 释放一个目标端口：B 会话 detach 虚拟面板；B 无面板时释放会话 */
+  const releaseRefPort = (portId: string): void => {
+    const binding = refPorts.release(portId)
+    if (!binding) {
+      return
+    }
+    const bEntry = sessions.get(binding.targetUri)
+    bEntry?.session.detachPanel(binding.virtualSessionId)
+    if (bEntry) {
+      releaseEntryIfIdle(vscode.Uri.parse(binding.targetUri))
+    }
+  }
+
+  /** P2-04 dirty 推送：B 文档 dirty 变化时按目标路由到全部绑定来源面板
+   *  （变化去重——content 与 dirty-state 两类事件都会到达，只发翻转） */
+  const pushRefEditDirty = (doc: vscode.TextDocument): void => {
+    const bindings = refPorts.byTarget(doc.uri.fsPath)
+    if (bindings.length === 0) {
+      return
+    }
+    const dirty = doc.isDirty
+    for (const binding of bindings) {
+      if (binding.lastDirty === dirty) {
+        continue
+      }
+      binding.lastDirty = dirty
+      sessions.get(binding.panelDocUri)?.session.postToPanel(binding.panelSessionId, {
+        kind: 'refEdit.dirty',
+        fsPath: binding.fsPath,
+        dirty,
+      })
+    }
+  }
+
+  /** P2-13（#290）父标签关闭交接：把本面板引用编辑涉及且仍 dirty 的 B 打开
+   *  为独立普通文本标签（showTextDocument 现有 TextDocument、preview:false
+   *  钉住；已有 B 标签时宿主复用不重复开——P2-01 §7 真宿主验证路线）。
+   *  判定集合 = 关闭时活跃端口（含在途写回的目标）∪ 该面板「曾成功写入」
+   *  记账（端口已释放的离屏回收/切 Reading 场景——ADR-0010「引用编辑涉及
+   *  且仍有未保存修改的 B」）。
+   *  顺序（票据契约）：① 等 B 会话在途提交排空（写回照常完成）→ ② 再
+   *  detach 虚拟面板——此刻的未确认输入才是真正未写入 B 的（暂停快照/
+   *  组合期），经 detachPanel 通知走 P2-12 三项当次选择；B 文档交接与该
+   *  输入分开，B 标签不冒称包含它 → ③ 最新 dirty 判定（dirty 模型即使无
+   *  编辑器也驻留 textDocuments——P2-01 §8；不在 = 已干净回收，不打开）
+   *  → ④ dirty 才 showTextDocument；干净 B 不打开，不自动保存/丢弃/另建
+   *  副本，也不把 A 伪造 dirty。仅覆盖普通标签关闭（onDidDispose 路径）：
+   *  窗口退出/重载时扩展主机停机，showTextDocument 不可用即自然失效，不
+   *  承诺退出后自动重开（Hot Exit 归宿主）。 */
+  const handoffDirtyTargetsOnClose = async (info: {
+    editTargets: string[]
+    releasedBindings: RefEditBinding[]
+  }): Promise<void> => {
+    // targetUri 去重（同一 B 多 occurrence 只交接一次）；值为该目标的活跃
+    // 绑定（可能为空——只剩记账的目标）
+    const targets = new Map<string, RefEditBinding[]>()
+    for (const binding of info.releasedBindings) {
+      const list = targets.get(binding.targetUri) ?? []
+      list.push(binding)
+      targets.set(binding.targetUri, list)
+    }
+    for (const targetUri of info.editTargets) {
+      if (!targets.has(targetUri)) {
+        targets.set(targetUri, [])
+      }
+    }
+    for (const [targetUri, bindings] of targets) {
+      const uri = vscode.Uri.parse(targetUri)
+      let entry = sessions.get(targetUri)
+      if (entry) {
+        // ① 在途提交排空（带超时兜底：queue 异常滞留不阻塞交接与释放）
+        await Promise.race([
+          entry.session.settleEdits(),
+          new Promise<void>((resolve) => setTimeout(resolve, 5000)),
+        ]).catch(() => undefined)
+        // ② settle 后再 detach：未确认输入 = 真正未写入的（若有则经
+        // detachPanel 触发「关闭残留输入」三项通知——与 B 文档交接分开）
+        for (const binding of bindings) {
+          entry!.session.detachPanel(binding.virtualSessionId)
+        }
+      }
+      // ③ 最新 dirty 判定（dispose 时刻旧状态不作数；不从磁盘重读生成副本）
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri)
+      if (doc && doc.isDirty) {
+        // ④ 交接打开（失败：可操作当次反馈，宿主现场保留，不标记已保存）
+        try {
+          await vscode.window.showTextDocument(doc, { preview: false })
+        } catch {
+          showHandoffOpenFailure(doc)
+        }
+      }
+      // detach 已完成（或目标只剩记账）→ 判 idle 释放（B 会话可能仍被其他
+      // 面板/端口持有，此时为 no-op）
+      entry = sessions.get(targetUri)
+      if (entry) {
+        releaseEntryIfIdle(uri)
+      }
+    }
+  }
+
+  /** P2-13（#290）交接打开失败反馈：当次可操作（重试），保留宿主可用现场
+   *  （dirty 文档不受影响），不标记已保存 */
+  const showHandoffOpenFailure = (doc: vscode.TextDocument): void => {
+    const name = vscode.workspace.asRelativePath(doc.uri, false)
+    const retryLabel = t('host.handoffRetry')
+    void vscode.window
+      .showWarningMessage(t('host.handoffFailed', { name }), retryLabel)
+      .then((pick) => {
+        if (pick === retryLabel) {
+          // showTextDocument 返回 1.86 的 Thenable（无 .catch），async 包装
+          void (async (): Promise<void> => {
+            try {
+              await vscode.window.showTextDocument(doc, { preview: false })
+            } catch {
+              showHandoffOpenFailure(doc)
+            }
+          })()
+        }
+      })
+  }
+
+  /** P2-01 验证路由（用户已确认取舍）：为 B 撤销/重做的唯一公开路线是临时
+   *  激活 B 为文本编辑器（showTextDocument 恒开文本编辑器——默认编辑器解析
+   *  .md 会落回本扩展 custom editor）→ 全局 undo/redo → 重显来源面板 A →
+   *  收掉 B 预览标签（只收 isPreview 的——用户已开的钉住文本标签不动）。
+   *  标签栏短暂切换与键盘焦点离开 A 是已接受的可见代价。 */
+  const historyViaTempActivation = async (
+    bDoc: vscode.TextDocument,
+    originUri: vscode.Uri,
+    op: 'undo' | 'redo',
+  ): Promise<boolean> => {
+    try {
+      // 打开前快照 B 的既有文本标签：收口只关本次激活新增的差集——
+      // 1.82.3 实测 Tab.isPreview 对 showTextDocument({preview:true}) 不可靠
+      // （恒 false），按差分关标签既收掉临时标签，也不动用户已开的 B 标签
+      const tabsBefore = new Set(
+        vscode.window.tabGroups.all.flatMap((g) => g.tabs).filter((t) =>
+          t.input instanceof vscode.TabInputText &&
+          t.input.uri.toString() === bDoc.uri.toString()))
+      await vscode.window.showTextDocument(bDoc, { preview: true })
+      const executed = await vscode.commands
+        .executeCommand(op)
+        .then(() => true, () => false)
+      // 重显来源面板：openWith 对已开 custom editor 是重显（不新建）；来源
+      // 面板可能已关闭（绑定随面板销毁释放，此处为防御）——失败不回滚 B
+      if (sessions.get(originUri.toString())?.panels.size) {
+        try {
+          await vscode.commands.executeCommand('vscode.openWith', originUri, VIEW_TYPE)
+        } catch {
+          // 来源面板关闭竞态：保留当前激活态
+        }
+      }
+      for (const group of vscode.window.tabGroups.all) {
+        for (const tab of group.tabs) {
+          if (
+            tab.input instanceof vscode.TabInputText &&
+            tab.input.uri.toString() === bDoc.uri.toString() &&
+            !tabsBefore.has(tab)
+          ) {
+            await vscode.window.tabGroups.close(tab)
+          }
+        }
+      }
+      return executed
+    } catch {
+      return false
+    }
+  }
+
+  /** P2-05（#282）文档级丢弃路线（P2-01 §5.2 已验证）：激活 B 为文本编辑
+   *  （showTextDocument 恒开文本编辑器——默认编辑器解析 .md 会落回本扩展
+   *  custom editor）→ **无参** `workbench.action.files.revert`（带 URI 参数
+   *  的形态在 1.82.3 证伪且有害——误清活动编辑器 + 多余标签，禁用）→
+   *  重显来源面板 A → 差分收掉 B 临时标签（与撤销路由同款收口）。丢弃
+   *  恢复整个 B（含其他视图的未保存修改）；revert 不清 undo 历史（宿主
+   *  合法语义，用户已确认接受）。激活期间 A 的 webview 可能隐藏卸载、
+   *  恢复后重载（P2-04 实测取舍的自然延伸——端口随面板销毁释放，重载
+   *  后嵌入重新绑定，最终状态一致）。 */
+  const revertViaTempActivation = async (
+    bDoc: vscode.TextDocument,
+    originUri: vscode.Uri,
+  ): Promise<boolean> => {
+    try {
+      const tabsBefore = new Set(
+        vscode.window.tabGroups.all.flatMap((g) => g.tabs).filter((t) =>
+          t.input instanceof vscode.TabInputText &&
+          t.input.uri.toString() === bDoc.uri.toString()))
+      await vscode.window.showTextDocument(bDoc, { preview: true })
+      const reverted = await vscode.commands
+        .executeCommand('workbench.action.files.revert')
+        .then(() => true, () => false)
+      if (sessions.get(originUri.toString())?.panels.size) {
+        try {
+          await vscode.commands.executeCommand('vscode.openWith', originUri, VIEW_TYPE)
+        } catch {
+          // 来源面板关闭竞态：保留当前激活态
+        }
+      }
+      for (const group of vscode.window.tabGroups.all) {
+        for (const tab of group.tabs) {
+          if (
+            tab.input instanceof vscode.TabInputText &&
+            tab.input.uri.toString() === bDoc.uri.toString() &&
+            !tabsBefore.has(tab)
+          ) {
+            await vscode.window.tabGroups.close(tab)
+          }
+        }
+      }
+      return reverted
+    } catch {
+      return false
+    }
+  }
+
+  // ---- P2-12（#289）冲突三项「对比并解决」：untitled 临时副本 + 原生对比
+  // 页（P2-01 §6 已验证路线）。临时副本承载 webview 送来的当前未提交输入
+  // 全文（LF 形态直接承载——untitled 行尾即 LF）；对比页打开后其编辑/保
+  // 存/关闭由宿主管理，扩展不自建解决界面，也不主动关闭已打开的对比页
+  //（revert 类命令会误伤 diff 编辑器右侧 B 的未保存修改）。释放闭环：
+  // 对比页关闭时 untitled 随之从 textDocuments 释放（宿主生命周期，P2-01
+  // §6.3 验证）；打开失败的孤儿副本由扩展自驱清理（showTextDocument +
+  // revertAndCloseActiveEditor——作用于 untitled 独立标签，只丢副本自身）。
+  // conflictTempUris 只做记账（观察与防泄漏核查），不延长文档寿命。 ----
+
+  /** 冲突临时副本（untitled）记账：在场集合，随 onDidCloseTextDocument 移除 */
+  const conflictTempUris = new Set<string>()
+  /** 测试钩子注入（VSIDIAN_TEST_HOOKS=1 经 _test.failNextConflictDiff 置位）：
+   *  下一次 compare 请求短路为失败——集成测试「API／资源打开失败原现场
+   *  可继续选择」断言载体；生产路径恒 false */
+  let conflictDiffFailOnce = false
+
+  /** 打开失败的孤儿临时副本清理：副本从未被对比页持有时（executeCommand
+   *  抛错形态），自驱关闭其独立标签使其从 textDocuments 释放 */
+  const cleanupOrphanConflictTemp = async (temp: vscode.TextDocument): Promise<void> => {
+    try {
+      if (!vscode.workspace.textDocuments.some((d) => d.uri.toString() === temp.uri.toString())) {
+        return // 已释放（宿主生命周期先行）
+      }
+      await vscode.window.showTextDocument(temp, { preview: true, preserveFocus: true })
+      await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor')
+    } catch {
+      // 清理失败：副本驻留但无编辑器持有（不可见），单次失败不累计
+    } finally {
+      conflictTempUris.delete(temp.uri.toString())
+    }
+  }
+
+  /** 「对比并解决」核心：以给定文本创建 untitled 临时副本并打开 vscode.diff
+   *  （左=临时副本、右=真实 B）。P2-13 起两个入口共用——webview 实例的
+   *  refEdit.conflictCompare（text 为实例当前全文快照）与父标签关闭后
+   *  「关闭残留输入」通知的对比动作（text 为 detachPanel 通知带走的宿主
+   *  快照，面板已注销无从回查）。返回 ok = 临时资源完整就绪且对比成功打开；
+   *  失败不消耗输入（孤儿副本自驱清理） */
+  const openConflictDiffForText = async (
+    targetUriStr: string,
+    text: string,
+  ): Promise<boolean> => {
+    let bDoc: vscode.TextDocument | undefined = sessions.get(targetUriStr)?.doc
+    if (!bDoc) {
+      try {
+        bDoc = await vscode.workspace.openTextDocument(vscode.Uri.parse(targetUriStr))
+      } catch {
+        return false // 目标不可装载：原现场可继续选择（不清输入）
+      }
+    }
+    if (conflictDiffFailOnce) {
+      conflictDiffFailOnce = false
+      return false // 注入失败：不消耗任何资源
+    }
+    let temp: vscode.TextDocument
+    try {
+      temp = await vscode.workspace.openTextDocument({ content: text, language: 'markdown' })
+    } catch {
+      return false // 临时资源创建失败：原现场可继续选择
+    }
+    conflictTempUris.add(temp.uri.toString())
+    try {
+      await vscode.commands.executeCommand(
+        'vscode.diff',
+        temp.uri,
+        bDoc.uri,
+        t('host.conflictDiffTitle', { name: vscode.workspace.asRelativePath(bDoc.uri, false) }),
+        // P2-01 §6.1 验证形态：override 避免 .md 落回本扩展 custom editor。
+        // 不带 preview:false——1.82.3 实测 pinned diff 被 revertAndClose 关闭
+        // 时左侧 untitled 会弹独立标签驻留不释放（探针只验证过默认 preview
+        // 形态的免提示关闭与释放）；preview 形态下对比页被后续预览替换即随
+        // 宿主生命周期释放，与用户关闭同语义
+        { override: true },
+      )
+      return true
+    } catch {
+      await cleanupOrphanConflictTemp(temp)
+      return false
+    }
+  }
+
+  /** 「对比并解决」执行（webview 实例入口）：临时副本承载实例当前未提交输入
+   *  全文（webview 是未提交输入的唯一权威来源——宿主不回查）。结果回
+   *  refEdit.conflictCompare.result：ok 前提是临时资源完整就绪且对比成功
+   *  打开（webview 收 ok 后才解除暂停重同步）；失败保留原现场。成功后宿主
+   *  直驱恢复（对比页激活会隐藏来源面板 webview，恢复不能依赖 webview 再
+   *  出站 sync.request：resumePanel 清暂停与旧未提交队列（不重放）；活
+   *  webview 由随后的 doc.resync 推送解除暂停 UI，已销毁的 webview 重载后
+   *  以 init 全文恢复（暂停已清，不补发 suspended） */
+  const openConflictDiff = async (
+    binding: RefEditBinding,
+    text: string,
+    reply: (ok: boolean) => void,
+  ): Promise<void> => {
+    const ok = await openConflictDiffForText(binding.targetUri, text)
+    reply(ok)
+    if (ok) {
+      sessions.get(binding.targetUri)?.session.resumePanel(binding.virtualSessionId)
+    }
+  }
+
 
   // ---- #201 图片刷新协调器（provider 级单件：版本表与失效通道跨会话共享） ----
   const isWindowsHost = process.platform === 'win32'
@@ -619,11 +953,39 @@ export function createTextEditorProvider(
     }
     // panel-closed-with-input：面板关闭（或 SSH 断连触发的 dispose）时未确认
     // 输入仍在宿主快照中——提示取回，不得误报已保存。文本优先取 webview
-    // 即时上报的全文快照（#21：含暂停后新输入与暂缓集内容），回退逐笔片段
-    if (process.env.VSIDIAN_TEST_HOOKS === '1') {
-      lastClosedInput = { docUri: notice.docUri, webviewText: notice.webviewText, fragments: notice.fragments }
+    // 即时上报的全文快照（#21：含暂停后新输入与暂缓集内容），回退逐笔片段。
+    // P2-13（#290）：快照无条件留存（lastClosedInput）——「取消不静默清除
+    // 宿主已收到快照」；引用编辑端口（虚拟面板）来源的通知呈现三项当次选择
+    // （复用 P2-12 语义），根面板来源维持既有「复制取回」
+    lastClosedInput = {
+      docUri: notice.docUri,
+      webviewText: notice.webviewText,
+      fragments: notice.fragments,
+      ...(notice.fromRefPort ? { fromRefPort: true } : {}),
     }
     const closedText = notice.webviewText ?? notice.fragments.join('\n')
+    if (notice.fromRefPort) {
+      // 三项当次选择（与 webview 暂停现场同义）：对比并解决（宿主快照 →
+      // 原生对比页，转交不消除快照、不宣称已合并）；放弃当前版本（只丢弃
+      // 本次未写入的输入——面板已注销，宿主侧即清除留存快照，B 文档不动，
+      // 不借用文档级回滚）；取消（快照原样留存，不自动清除）
+      const compareLabel = t('host.conflictCompareLabel')
+      const discardVersionLabel = t('host.conflictDiscardLabel')
+      void vscode.window
+        .showWarningMessage(
+          t('host.refClosedWithInput', { name, text: closedText.slice(0, 120) }),
+          compareLabel,
+          discardVersionLabel,
+        )
+        .then((pick) => {
+          if (pick === compareLabel) {
+            void runClosedInputCompare()
+          } else if (pick === discardVersionLabel) {
+            discardClosedInput()
+          }
+        })
+      return
+    }
     void vscode.window
       .showWarningMessage(
         t('host.panelClosedWithInput', { name, text: closedText.slice(0, 120) }),
@@ -637,6 +999,31 @@ export function createTextEditorProvider(
           )
         }
       })
+  }
+
+  /** P2-13（#290）「关闭残留输入」的对比并解决：以 lastClosedInput 快照打开
+   *  原生对比页（通知按钮与 _test.closedInputConflictDiff 钩子共用同一执行
+   *  路径）。转交成功不清除快照（不宣称已合并；临时副本由宿主生命周期释放） */
+  const runClosedInputCompare = async (): Promise<boolean> => {
+    if (!lastClosedInput) {
+      return false
+    }
+    const text = lastClosedInput.webviewText ?? lastClosedInput.fragments.join('\n')
+    if (!text) {
+      return false
+    }
+    return openConflictDiffForText(lastClosedInput.docUri, text)
+  }
+
+  /** P2-13（#290）「关闭残留输入」的放弃当前版本：只丢弃本次未写入目标的
+   *  输入（宿主侧即清除留存快照）；B 文档与其他视图的修改不受影响，不借用
+   *  文档级回滚（放弃语义只作用于未提交版本——P2-12 同款） */
+  const discardClosedInput = (): boolean => {
+    if (!lastClosedInput) {
+      return false
+    }
+    lastClosedInput = undefined
+    return true
   }
 
   // ---- #38 三态视图编排：全局模式记忆 + 活动模式 context + 恢复决策 ----
@@ -810,18 +1197,27 @@ export function createTextEditorProvider(
       // 调 undoRedoService.undo(resource) 作用于本文档的权威文本栈；产生的
       // 变更经 onDidChangeTextDocument 回流广播，不经过 applyEdit（无回声）。
       // C-5：webview 请求必须确认活动 tab 是本面板文档的 custom editor——
-      // 全局命令作用于活动编辑器，归属不符时静默忽略（不得撤销其他文档）
-      undo: async () => {
-        if (!isActiveTabCustomEditorOf(vscode.window.tabGroups.activeTabGroup.activeTab, VIEW_TYPE, doc.uri.toString())) {
+      // 全局命令作用于活动编辑器，归属不符时静默忽略（不得撤销其他文档）。
+      // P2-04（#281）：目标编辑端口在场（origin 携来源面板）时走 P2-01
+      // 验证的临时激活路由——B 无 custom editor tab 时撤销归属 B 的唯一
+      // 公开路线；带 URI 参数的 files.revert 与 Tab API 关脏标签均禁用
+      undo: async (origin?: { docUri: string }) => {
+        if (isActiveTabCustomEditorOf(vscode.window.tabGroups.activeTabGroup.activeTab, VIEW_TYPE, doc.uri.toString())) {
+          return vscode.commands.executeCommand('undo').then(() => true, () => false)
+        }
+        if (origin === undefined || refPorts.byTarget(doc.uri.fsPath).length === 0) {
           return false
         }
-        return vscode.commands.executeCommand('undo').then(() => true, () => false)
+        return historyViaTempActivation(doc, vscode.Uri.parse(origin.docUri), 'undo')
       },
-      redo: async () => {
-        if (!isActiveTabCustomEditorOf(vscode.window.tabGroups.activeTabGroup.activeTab, VIEW_TYPE, doc.uri.toString())) {
+      redo: async (origin?: { docUri: string }) => {
+        if (isActiveTabCustomEditorOf(vscode.window.tabGroups.activeTabGroup.activeTab, VIEW_TYPE, doc.uri.toString())) {
+          return vscode.commands.executeCommand('redo').then(() => true, () => false)
+        }
+        if (origin === undefined || refPorts.byTarget(doc.uri.fsPath).length === 0) {
           return false
         }
-        return vscode.commands.executeCommand('redo').then(() => true, () => false)
+        return historyViaTempActivation(doc, vscode.Uri.parse(origin.docUri), 'redo')
       },
     }
     // #201 图片周期核验与失效：会话按自身 linkCtx 解析图源目标（同一 src
@@ -858,6 +1254,16 @@ export function createTextEditorProvider(
   const releaseEntryIfIdle = (uri: vscode.Uri): void => {
     const entry = sessions.get(uri.toString())
     if (entry && entry.session.getInfo().panels.length === 0) {
+      // P2-04：目标端口全部释放后才可能到 idle（虚拟面板计入 panels）；
+      // 到此仍指向本目标的端口是异常残留，防御性释放
+      for (const binding of refPorts.releaseTarget(uri.toString())) {
+        sessions.get(binding.panelDocUri)?.session.postToPanel(binding.panelSessionId, {
+          kind: 'refEdit.push',
+          portId: binding.portId,
+          fsPath: binding.fsPath,
+          message: { kind: 'session.suspended', version: entry.doc.version, reason: 'host-error' },
+        })
+      }
       entry.session.dispose()
       sessions.delete(uri.toString())
     }
@@ -874,7 +1280,10 @@ export function createTextEditorProvider(
       entry.doc.uri.scheme === 'file' && entry.doc.uri.fsPath.toLowerCase() === fsPath)
   }
 
-  /** openWith 可能先返回、随后才注册新面板；按 URI 等待实际可投递面板。 */
+  /** openWith 可能先返回、随后才注册新面板；按 URI 等待实际可投递面板。
+   *  P2-04：只认真实 webview 面板（entry.panels 内的 sessionId）——B 会话
+   *  上的目标编辑虚拟面板虽 ready，但 view.locate 等面板消息不进 refEdit
+   *  通道，投给它等于丢失。 */
   const waitForReadyPanel = async (
     uri: vscode.Uri,
     timeoutMs = 5000,
@@ -882,7 +1291,9 @@ export function createTextEditorProvider(
     const deadline = Date.now() + timeoutMs
     for (;;) {
       const entry = findEntry(uri)
-      const panel = entry?.session.getInfo().panels.find((p) => p.ready)
+      const panel = entry?.session
+        .getInfo()
+        .panels.find((p) => p.ready && entry.panels.has(p.sessionId))
       if (panel) {
         return { entry: entry!, sessionId: panel.sessionId }
       }
@@ -892,6 +1303,15 @@ export function createTextEditorProvider(
       await new Promise((r) => setTimeout(r, 100))
     }
   }
+
+  /** 测试钩子的面板定位口径（与 waitForReadyPanel 同一过滤）：只认真实
+   *  webview 面板——P2-04 起被嵌入目标的会话里还有嵌入内部 Live 绑定
+   *  attachPanel 的虚拟面板（无 webview 承载），panelIndex 命中虚拟面板
+   *  时 view.state.request / sidebar.test.click 等 UI 消息无处理者等于
+   *  丢失（CI 回归实证：嵌入样例面板先开、其目标面板的 panels[0] 全为
+   *  虚拟面板，反链面板指令从未到达真实面板）。 */
+  const realPanelsOf = (entry: SessionEntry | undefined): Array<{ sessionId: string; ready: boolean }> =>
+    entry?.session.getInfo().panels.filter((p) => entry.panels.has(p.sessionId)) ?? []
 
   // ---- #197 反链面板：快照应答与条目跳转（面板级 UI 意图的执行体） ----
 
@@ -1332,10 +1752,13 @@ export function createTextEditorProvider(
               },
             }
             outcome = payload.directTarget !== undefined
-              ? await readHoverDirectTarget(payload.directTarget, access, ports)
+              ? await readHoverDirectTarget(payload.directTarget, access, ports,
+                payload.anchorOptional === true ? { anchorOptional: true } : undefined)
               : payload.linkHref !== undefined
-                ? await readHoverMdLinkTarget(payload.linkHref, access, ports)
-                : await readHoverDocTarget(payload.target, access, ports)
+                ? await readHoverMdLinkTarget(payload.linkHref, access, ports,
+                  payload.anchorOptional === true ? { anchorOptional: true } : undefined)
+                : await readHoverDocTarget(payload.target, access, ports,
+                  payload.anchorOptional === true ? { anchorOptional: true } : undefined)
           } catch {
             outcome = { ok: false, reason: 'read-failed' }
           }
@@ -1453,7 +1876,15 @@ export function createTextEditorProvider(
             report({ ok: false, reason: 'cancelled' })
             return
           }
-          void runImageExport(payload, linkCtx, document.uri.toString(), report)
+          // P2-11 sourceDocUri（嵌入内部 Live 弹窗导出）：按 B 目录/根边界
+          // 定位导出文件（会话侧已守卫来源为面板送达过的目标）；缺省 = 面板
+          // 自身文档
+          void runImageExport(
+            payload,
+            payload.sourceDocUri !== undefined ? linkContextOfPath(payload.sourceDocUri) : linkCtx,
+            document.uri.toString(),
+            report,
+          )
         },
         // #161 图片粘贴落盘端口：读设置快照 → 目录解析（URI path 空间）→
         // 建目录/写盘 → 回发插入文本。测试钩子模式记录载荷形态但不短路
@@ -1484,7 +1915,7 @@ export function createTextEditorProvider(
         pendingReadingRestore.add(panelStateKey(document.uri.toString(), sessionId))
       }
 
-      const messageSub = webviewPanel.webview.onDidReceiveMessage((message) => {
+      const panelMessageHandler = (message: unknown): void => {
         recordDiagnosticMessage(diagnostics, 'host.receive', message)
         // 粘贴模态记忆只允许更新两个既定偏好，复用现有持久化与广播。
         if (isWebviewToHost(message) && message.kind === 'paste.preferences.set') {
@@ -1625,8 +2056,314 @@ export function createTextEditorProvider(
           webviewPanel.dispose()
           return
         }
+        // ---- P2-04（#281）目标编辑端口：bind/unbind/message/save 在 provider
+        // 层拦截（B 会话接入与端口簿记都在 provider 域；不进 A 的会话通道）。
+        // 面板身份先认证（panelSessionId/panelDocUri 须为本面板），后续按
+        // portId 查绑定——释放后的迟到消息查不到即静默拒收
+        if (isWebviewToHost(message) &&
+          (message.kind === 'refEdit.bind' || message.kind === 'refEdit.unbind' ||
+            message.kind === 'refEdit.message' || message.kind === 'refEdit.save' ||
+            message.kind === 'refEdit.close.query' || message.kind === 'refEdit.close.execute' ||
+            message.kind === 'refEdit.conflictCompare')) {
+          if (message.panelSessionId !== sessionId || message.panelDocUri !== document.uri.toString()) {
+            return
+          }
+          switch (message.kind) {
+            case 'refEdit.bind': {
+              const reject = (reason: 'source' | 'open-failed' | 'not-markdown'): void => {
+                send({ kind: 'refEdit.bound', reqId: message.reqId, ok: false, reason })
+              }
+              // 来源校验（不信任前端自报 URI）：目标须为本面板成功送达且被
+              // 该 occurrence 的 watch 固定（P2-A04「从已确认的来源租约绑定」）
+              if (!entry.session.hasHoverSourcePin(sessionId, message.fsPath, message.occurrence)) {
+                reject('source')
+                return
+              }
+              void (async (): Promise<void> => {
+                let bDoc: vscode.TextDocument
+                try {
+                  bDoc = await vscode.workspace.openTextDocument(vscode.Uri.file(message.fsPath))
+                } catch {
+                  reject('open-failed')
+                  return
+                }
+                if (!isMarkdownFile(bDoc.uri)) {
+                  reject('not-markdown')
+                  return
+                }
+                // 同 occurrence 幂等重绑：先释放旧端口（重挂路径）
+                const stale = refPorts.findOccurrence(sessionId, document.uri.toString(), message.occurrence)
+                if (stale) {
+                  releaseRefPort(stale.portId)
+                }
+                const bEntry = openEntry(bDoc)
+                const portId = refPorts.allocate()
+                const binding = {
+                  portId,
+                  virtualSessionId: '',
+                  targetUri: bDoc.uri.toString(),
+                  fsPath: message.fsPath,
+                  panelSessionId: sessionId,
+                  panelDocUri: document.uri.toString(),
+                  occurrence: message.occurrence,
+                  lastDirty: bDoc.isDirty,
+                }
+                // attachPanel 分配 B 会话内的面板 id（panel-N）——会话消息
+                // 路由（ready 注入 / refEdit.message / detach）用它；portId
+                // 只是 webview 侧的端口身份，两者分开（根因修正：曾误用
+                // portId 注入 ready，会话查不到面板被静默丢弃）。
+                // P2-11（#288）资源端口随虚拟面板注入（全部按 B 身份构造）：
+                // - resolveImage：B 目录/根边界解析，URI 在来源面板 A 的
+                //   webview 构造（asWebviewUri 前缀面板私有——B 的结果最终
+                //   在 A 内加载）
+                // - pasteImage：目录解析与相对路径基准 = B 的 URI、工作区
+                //   folder 按 B 归属（粘贴资产按 B 的配置落盘，不写父文档）
+                // - openLink/openWikilink：以 B 为解析语境执行（B 打开失败
+                //   静默不动作，与 #220 来源路径同语义）
+                const bLinkCtx = linkContextOf(bDoc)
+                binding.virtualSessionId = bEntry.session.attachPanel({
+                  send: (m) => {
+                    if (!refPorts.lookup(portId, sessionId, document.uri.toString())) {
+                      return
+                    }
+                    // P2-13（#290）「曾成功写入」记账：本端口发起的编辑经 B 会话
+                    // 确认（edit.ack ok）即登记——端口后续释放（离屏回收/切
+                    // Reading）后，父标签关闭交接的判定集合仍含该目标
+                    if (m.kind === 'edit.ack' && m.ok) {
+                      refPorts.noteEditAck(sessionId, document.uri.toString(), binding.targetUri)
+                    }
+                    const wrapped = wrapRefEditPush(binding, m)
+                    if (wrapped) {
+                      send(wrapped)
+                    }
+                  },
+                  resolveImage: (src) =>
+                    resolveWorkspaceImage(
+                      src,
+                      bLinkCtx,
+                      webviewPanel.webview,
+                      imageRefresh.versions,
+                      bEntry.session.getImageGeneration(),
+                    ),
+                  pasteImage: (payload, report) => {
+                    if (process.env.VSIDIAN_TEST_HOOKS === '1') {
+                      const key = bDoc.uri.toString()
+                      const log = imagePasteTestLog.get(key) ?? []
+                      log.push(payload)
+                      imagePasteTestLog.set(key, log)
+                    }
+                    void runImagePaste(
+                      payload,
+                      {
+                        settings: settings?.service.getSnapshot() ?? {},
+                        docUri: bDoc.uri,
+                        workspaceRootPath:
+                          vscode.workspace.getWorkspaceFolder(bDoc.uri)?.uri.path ?? null,
+                      },
+                      report,
+                    )
+                  },
+                  openLink: (intent) => {
+                    void executeLinkIntent(bDoc, bLinkCtx, intent, bEntry.linkLog, {
+                      waitForReadyPanel,
+                    })
+                  },
+                  openWikilink: (intent) => {
+                    void executeWikilinkIntent(bDoc, intent, bEntry.linkLog)
+                  },
+                  // P2-14（#291）#81 复制端口随虚拟面板注入：嵌入内代码卡
+                  // 复制经端口进 B 会话（codeblock.copy 按自身 docUri 守卫
+                  // + B 文档 EOL 归一）后由剪贴板端口执行——与根面板同语义
+                  writeClipboard: (text: string) => {
+                    void vscode.env.clipboard.writeText(text).then(undefined, (error: unknown) => {
+                      console.error('[vsidian] 剪贴板写入失败（嵌入代码卡复制）', error)
+                    })
+                  },
+                }, { refOrigin: { docUri: document.uri.toString() } })
+                refPorts.register(binding)
+                send({
+                  kind: 'refEdit.bound',
+                  reqId: message.reqId,
+                  ok: true,
+                  portId,
+                  fsPath: message.fsPath,
+                  docUri: bDoc.uri.toString(),
+                  version: bDoc.version,
+                  dirty: bDoc.isDirty,
+                })
+                // 注入 ready 握手：B 会话发 init（经虚拟面板 → refEdit.push）
+                void bEntry.session.handleWebviewMessage({ kind: 'ready' }, binding.virtualSessionId)
+              })()
+              return
+            }
+            case 'refEdit.unbind': {
+              const binding = refPorts.lookup(message.portId, sessionId, document.uri.toString())
+              if (binding && binding.fsPath === message.fsPath) {
+                releaseRefPort(message.portId)
+              }
+              return
+            }
+            case 'refEdit.message': {
+              const binding = refPorts.lookup(message.portId, sessionId, document.uri.toString())
+              if (!binding || binding.fsPath !== message.fsPath || !isRefEditClientMessage(message.message)) {
+                return // 释放后迟到消息 / 伪造端口 / 非编辑通道：静默拒收
+              }
+              const bEntry = sessions.get(binding.targetUri)
+              if (!bEntry) {
+                return
+              }
+              // 内消息的 docUri 由 B 会话按自身校验（= B 规范 URI）；面板
+              // 身份用绑定的虚拟面板 id（webview 侧 portId 仅作路由键）
+              void bEntry.session.handleWebviewMessage(message.message, binding.virtualSessionId)
+              return
+            }
+            case 'refEdit.save': {
+              const binding = refPorts.lookup(message.portId, sessionId, document.uri.toString())
+              if (!binding || binding.fsPath !== message.fsPath) {
+                return
+              }
+              void (async (): Promise<void> => {
+                // P2-01 验证路线：TextDocument.save() 无需激活 B 即落盘
+                //（保存失败返回 false——保留现场，dirty 推送另行对齐）
+                const bDoc = sessions.get(binding.targetUri)?.doc ??
+                  (await vscode.workspace.openTextDocument(vscode.Uri.parse(binding.targetUri)))
+                let ok = false
+                try {
+                  ok = (await bDoc.save()) === true
+                } catch {
+                  ok = false
+                }
+                if (ok) {
+                  binding.lastDirty = false
+                }
+                send({ kind: 'refEdit.save.result', portId: message.portId, fsPath: message.fsPath, ok })
+              })()
+              return
+            }
+            case 'refEdit.close.query': {
+              // P2-05（#282）显式关闭意图开始：统一检查目标 B 最新权威状态
+              //（dirty/version——模态呈现与确认基线的单一事实源，不信任
+              // webview 缓存的 dirty 推送时序）
+              const binding = refPorts.lookup(message.portId, sessionId, document.uri.toString())
+              if (!binding || binding.fsPath !== message.fsPath) {
+                return
+              }
+              void (async (): Promise<void> => {
+                let bDoc: vscode.TextDocument | undefined = sessions.get(binding.targetUri)?.doc
+                if (!bDoc) {
+                  try {
+                    bDoc = await vscode.workspace.openTextDocument(vscode.Uri.parse(binding.targetUri))
+                  } catch {
+                    // 目标不可装载（极罕见——bind 成功过）：无回包；webview
+                    // 同 entry 的再次意图可覆盖重发（requestClose 允许覆盖）
+                    return
+                  }
+                }
+                send({
+                  kind: 'refEdit.close.state',
+                  reqId: message.reqId,
+                  fsPath: message.fsPath,
+                  dirty: bDoc.isDirty,
+                  version: bDoc.version,
+                  relPath: vscode.workspace.asRelativePath(bDoc.uri, false),
+                })
+              })()
+              return
+            }
+            case 'refEdit.close.execute': {
+              // P2-05（#282）确认后的关闭动作执行。版本守卫（双防线第二道）：
+              // B 当前版本 ≠ 用户确认基线即回 stale 重新确认——不得用旧确认
+              // 丢弃新修改。save：TextDocument.save 失败保留现场；保存后再验
+              // dirty/版本（保存期间又有新修改 → stale）。discard：P2-01 已验证
+              // 的激活 B → 无参 revert → 重显 A → 收临时标签（恢复整个 B，
+              // 含其他视图的未保存修改）。多 occurrence 同目标重复 execute 因
+              // revert 推进版本，第二次到达即 stale——不重复回滚。
+              const binding = refPorts.lookup(message.portId, sessionId, document.uri.toString())
+              if (!binding || binding.fsPath !== message.fsPath) {
+                return
+              }
+              void (async (): Promise<void> => {
+                const reply = (outcome: 'closed' | 'save-failed' | 'discard-failed' | 'stale'): void => {
+                  send({ kind: 'refEdit.close.result', reqId: message.reqId, fsPath: message.fsPath, outcome })
+                }
+                let bDoc: vscode.TextDocument | undefined = sessions.get(binding.targetUri)?.doc
+                if (!bDoc) {
+                  try {
+                    bDoc = await vscode.workspace.openTextDocument(vscode.Uri.parse(binding.targetUri))
+                  } catch {
+                    reply(message.action === 'save' ? 'save-failed' : 'discard-failed')
+                    return
+                  }
+                }
+                if (bDoc.version !== message.confirmedVersion) {
+                  reply('stale')
+                  return
+                }
+                if (message.action === 'save') {
+                  let ok = false
+                  try {
+                    ok = (await bDoc.save()) === true
+                  } catch {
+                    ok = false
+                  }
+                  if (!ok) {
+                    reply('save-failed')
+                    return
+                  }
+                  // 保存成功后再验：另一视图又有新修改（dirty 重现/版本前移）
+                  // 时不关闭，重新确认
+                  if (bDoc.isDirty || bDoc.version !== message.confirmedVersion) {
+                    reply('stale')
+                    return
+                  }
+                  binding.lastDirty = false
+                  reply('closed')
+                  return
+                }
+                const reverted = await revertViaTempActivation(bDoc, document.uri)
+                if (!reverted) {
+                  reply('discard-failed')
+                  return
+                }
+                if (bDoc.isDirty) {
+                  // revert 后仍有未保存修改（异常形态）：不宣称关闭成功
+                  reply('stale')
+                  return
+                }
+                binding.lastDirty = false
+                reply('closed')
+              })()
+              return
+            }
+            case 'refEdit.conflictCompare': {
+              // P2-12（#289）「对比并解决」：临时副本 + 原生对比页（P2-01 §6
+              //  验证路线）。身份校验与 refEdit.save 同口径；text 为 webview
+              //  送来的实例当前全文快照（宿主不回查——webview 是未提交输入
+              //  的唯一权威来源）
+              const binding = refPorts.lookup(message.portId, sessionId, document.uri.toString())
+              if (!binding || binding.fsPath !== message.fsPath) {
+                return
+              }
+              void openConflictDiff(binding, message.text, (ok) => {
+                send({
+                  kind: 'refEdit.conflictCompare.result',
+                  portId: message.portId,
+                  fsPath: message.fsPath,
+                  ok,
+                })
+              })
+              return
+            }
+          }
+        }
         void entry.session.handleWebviewMessage(message, sessionId)
-      })
+      }
+      const messageSub = webviewPanel.webview.onDidReceiveMessage(panelMessageHandler)
+      // P2-11（#288）测试钩子配套：按会话面板登记处理器——refEdit.* 在
+      // provider 层拦截（进会话之前），injectWebviewMessage 走会话入口
+      // 无法触达；本登记供 injectWebviewReceived 以真实 webview 消息的
+      // 同一处理入口注入（校验与路由完全一致）
+      panelMessageHandlers.set(sessionId, panelMessageHandler)
       // #38：面板激活（tab 切换/分组聚焦）时刷新活动模式 context——
       // custom editor 不触发 onDidChangeActiveTextEditor，靠此事件覆盖
       const viewStateSub = webviewPanel.onDidChangeViewState((e) => {
@@ -1640,7 +2377,16 @@ export function createTextEditorProvider(
         pendingReadingRestore.delete(panelStateKey(document.uri.toString(), sessionId))
         // #224 引用视图订阅随面板销毁整体释放（订阅计数回落）
         hoverRefresh.releaseSession(hoverSessionKeyOf(document.uri.toString(), sessionId))
+        // P2-04：本面板的目标编辑端口簿记立即释放（来源 webview 已销毁，
+        // 释放后迟到消息按 portId 查不到即拒收）。
+        // P2-13（#290）：虚拟面板 detach 与 dirty 交接移入异步流程——先等
+        // 宿主可继续完成的在途提交再判最新 dirty（不能只看 dispose 时刻的
+        // 旧状态）；先取「曾成功写入」记账再 releasePanel（其内部清账）
+        const editTargets = refPorts.panelEditTargets(sessionId, document.uri.toString())
+        const releasedBindings = refPorts.releasePanel(sessionId, document.uri.toString())
+        void handoffDirtyTargetsOnClose({ editTargets, releasedBindings })
         messageSub.dispose()
+        panelMessageHandlers.delete(sessionId)
         viewStateSub.dispose()
         closeSub.dispose()
         releaseEntryIfIdle(document.uri)
@@ -1751,6 +2497,17 @@ export function createTextEditorProvider(
         event.document.version,
         event.reason === vscode.TextDocumentChangeReason.Undo ? 'undo' : event.reason === vscode.TextDocumentChangeReason.Redo ? 'redo' : undefined,
       )
+      // P2-04：B 的 dirty 变化（content 与 dirty-state 两类事件）推送到
+      // 绑定中的来源面板（pushRefEditDirty 内按值去重，翻转才发）
+      pushRefEditDirty(event.document)
+    }),
+  )
+
+  // P2-12（#289）：冲突临时副本（untitled）关闭记账——对比页关闭时副本随
+  // 之释放（宿主生命周期），此处只同步移除在场集合（不延长文档寿命）
+  context.subscriptions.push(
+    vscode.workspace.onDidCloseTextDocument((document) => {
+      conflictTempUris.delete(document.uri.toString())
     }),
   )
 
@@ -2404,7 +3161,10 @@ export function createTextEditorProvider(
       }
       return {
         found: true,
-        panels: entry.session.getInfo().panels,
+        // 只报真实 webview 面板（realPanelsOf 口径）——集成用例的
+        // waitSessionReady/面板数断言以「用户可见面板」为语义，虚拟面板
+        // 计入会让就绪判据被无 UI 承载的面板提前满足
+        panels: realPanelsOf(entry),
         version: entry.doc.version,
         appliedEdits: entry.appliedEdits,
         // #208 资源代次（0 = 未刷新；每次手动刷新 +1，图片 URI ?v= 戳同源）
@@ -2438,12 +3198,31 @@ export function createTextEditorProvider(
       },
     ),
     vscode.commands.registerCommand(
+      // P2-11（#288）：以真实 webview 消息的同一处理入口注入（provider 层的
+      // refEdit.* 拦截、校验与路由完全一致）——injectWebviewMessage 走会话
+      // 入口触达不了 provider 拦截的 refEdit 族；panelIndex 口径与 postToPanel
+      // 同（真实 webview 面板）
+      'onegayi.vsidian._test.injectWebviewReceived',
+      (uriStr: string, message: Record<string, unknown>, panelIndex = 0): boolean => {
+        const entry = getEntry(vscode.Uri.parse(uriStr))
+        const panel = realPanelsOf(entry).filter((p) => p.ready)[panelIndex]
+        const handler = panel ? panelMessageHandlers.get(panel.sessionId) : undefined
+        if (!entry || !panel || !handler) {
+          return false
+        }
+        handler(message)
+        return true
+      },
+    ),
+    vscode.commands.registerCommand(
       // 宿主 → webview 方向的消息注入钩子：与 injectWebviewMessage（webview →
       // 宿主）对称，供集成测试驱动 view.mode.set / view.locate 等正式消息
       'onegayi.vsidian._test.postToPanel',
       async (uriStr: string, message: Record<string, unknown>, panelIndex = 0) => {
         const entry = getEntry(vscode.Uri.parse(uriStr))
-        const panels = entry?.session.getInfo().panels.filter((p) => p.ready) ?? []
+        // panelIndex 在真实 webview 面板中计数（realPanelsOf 口径）——
+        // 虚拟面板不承载 UI 消息处理者，投给它等于丢失
+        const panels = realPanelsOf(entry).filter((p) => p.ready)
         const panel = panels[panelIndex]
         if (!entry || !panel) {
           throw new Error(`无可用会话面板：${uriStr}`)
@@ -2485,6 +3264,13 @@ export function createTextEditorProvider(
       'onegayi.vsidian._test.getLastClosedInput',
       () => lastClosedInput,
     ),
+    // P2-13（#290）「关闭残留输入」三项选择的执行路径驱动（宿主通知按钮
+    // 无法在集成测试中点击；钩子与按钮走同一函数——行为等价的执行载体）
+    vscode.commands.registerCommand('onegayi.vsidian._test.closedInputConflictDiff', () =>
+      runClosedInputCompare()),
+    vscode.commands.registerCommand('onegayi.vsidian._test.discardClosedInput', () => ({
+      discarded: discardClosedInput(),
+    })),
     vscode.commands.registerCommand(
       // 宿主缓存的 view.state（模式主动回报的观测面）：断言宿主侧写命令
       // 拦截所依据的 viewMode 缓存已就位/常新
@@ -2519,10 +3305,27 @@ export function createTextEditorProvider(
       },
     ),
     vscode.commands.registerCommand(
+      // P2-12（#289）：置位下一次 refEdit.conflictCompare 短路为失败（不消
+      // 耗 untitled/对比页资源）——「API／资源打开失败原现场可继续选择」
+      // 的注入断言载体
+      'onegayi.vsidian._test.failNextConflictDiff',
+      () => {
+        conflictDiffFailOnce = true
+        return true
+      },
+    ),
+    vscode.commands.registerCommand(
+      // P2-12（#289）：冲突临时副本（untitled）记账观测（资源释放闭环断言）
+      'onegayi.vsidian._test.getConflictTempUris',
+      () => [...conflictTempUris],
+    ),
+    vscode.commands.registerCommand(
       'onegayi.vsidian._test.requestViewState',
       async (uriStr: string, panelIndex = 0) => {
         const entry = getEntry(vscode.Uri.parse(uriStr))
-        const panels = entry?.session.getInfo().panels.filter((p) => p.ready) ?? []
+        // panelIndex 在真实 webview 面板中计数（realPanelsOf 口径）——虚拟
+        // 面板无 view.state 回报者，命中即恒 undefined（观测面假超时）
+        const panels = realPanelsOf(entry).filter((p) => p.ready)
         const panel = panels[panelIndex]
         if (!entry || !panel) {
           return undefined

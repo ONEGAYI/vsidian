@@ -9,43 +9,51 @@ import {
 
 describe('#244 引用展开路径身份', () => {
   it('Windows 根 A 与回指 A 的目标路径同一身份；POSIX 保留大小写语义', () => {
-    const full = { kind: 'full' as const }
-    expect(canonicalRefTargetKey('D:\\Notes\\A.md', full, true))
-      .toBe(canonicalRefTargetKey('d:/notes/a.md', full, true))
-    expect(canonicalRefTargetKey('/Notes/A.md', full, false))
-      .not.toBe(canonicalRefTargetKey('/notes/a.md', full, false))
+    expect(canonicalRefTargetKey('D:\\Notes\\A.md', true))
+      .toBe(canonicalRefTargetKey('d:/notes/a.md', true))
+    expect(canonicalRefTargetKey('/Notes/A.md', false))
+      .not.toBe(canonicalRefTargetKey('/notes/a.md', false))
   })
 
-  it('同文件 full、章节与块是不同语义节点；循环只查当前路径', () => {
-    const full = canonicalRefTargetKey('/notes/a.md', { kind: 'full' }, false)
-    const heading = canonicalRefTargetKey('/notes/a.md', { kind: 'heading', anchor: '第一章' }, false)
-    const block = canonicalRefTargetKey('/notes/a.md', { kind: 'block', anchor: '^x' }, false)
-    expect(new Set([full, heading, block]).size).toBe(3)
-    expect(inExpansionPath([full, heading], full)).toBe(true)
-    expect(inExpansionPath([full, heading], block)).toBe(false)
-    expect(inExpansionPath([full], heading)).toBe(false)
+  it('P2-03（ADR-0011）：循环身份只按规范目标文档——同文件不同锚点不再绕过循环', () => {
+    const full = canonicalRefTargetKey('/notes/a.md', false)
+    const heading = canonicalRefTargetKey('/notes/a.md', false)
+    const block = canonicalRefTargetKey('/notes/a.md', false)
+    expect(heading).toBe(full)
+    expect(block).toBe(full)
+    // 不同锚点不能绕过：祖先路径含 A 时，A#任何锚点仍在路径上
+    expect(inExpansionPath([full], heading)).toBe(true)
+    expect(inExpansionPath([full], block)).toBe(true)
     expect(inExpansionPath([full], full)).toBe(true)
-    expect(canonicalRefTargetKey('/notes/a.md', { kind: 'heading', anchor: 'Foo  Bar' }, false))
-      .toBe(canonicalRefTargetKey('/notes/a.md', { kind: 'heading', anchor: ' foo bar ' }, false))
-    expect(canonicalRefTargetKey('/notes/a.md', { kind: 'block', anchor: '^Foo' }, false))
-      .not.toBe(canonicalRefTargetKey('/notes/a.md', { kind: 'block', anchor: '^foo' }, false))
+    // 其他文档不受影响
+    expect(inExpansionPath([full], canonicalRefTargetKey('/notes/b.md', false))).toBe(false)
   })
 })
 
 describe('#244 直接父来源', () => {
-  const parent = { version: 7, range: { start: 4, end: 25 } }
+  const parent = { version: 7 }
   const text = 'xxx\n![[C]]\nother text\n'
-  it('父版本、可见范围和原文必须同时匹配，未保存版本前移即失效', () => {
+  it('父版本与引用原文同时匹配才准入，未保存版本前移即失效', () => {
     expect(validChildSource(parent, { version: 7, text }, 4, 10, 'C')).toBe(true)
     expect(validChildSource(parent, { version: 8, text }, 4, 10, 'C')).toBe(false)
-    expect(validChildSource(parent, { version: 7, text }, 0, 3, 'C')).toBe(false)
     expect(validChildSource(parent, { version: 7, text }, 4, 10, 'Other')).toBe(false)
     expect(validChildSource(parent, { version: 7, text }, 4, 11, 'C')).toBe(false)
+  })
+  it('P2-03：锚定区间之外的子引用同样有来源资格（内容范围 = 直接来源全文）', () => {
+    // 父为 heading 引用，初始定位区间只覆盖文中段；子引用 occurrence 在
+    // 区间之外（顶部）——合法子引用可位于初始章节之外
+    const heading = { version: 7 }
+    const fullText = '![[C]]\n前文\n## 章节\n章节体\n'
+    const at = fullText.indexOf('![[C]]')
+    expect(validChildSource(heading, { version: 7, text: fullText }, at, at + 6, 'C')).toBe(true)
+    expect(validChildSource(heading, { version: 7, text: fullText }, at, at + 6, 'X')).toBe(false)
+    // 来源全文边界仍硬：越出全文的 occurrence 拒绝
+    expect(validChildSource(heading, { version: 7, text: fullText }, fullText.length, fullText.length + 6, 'C')).toBe(false)
   })
   it('围栏、frontmatter、HTML 注释里的独占字面量没有子卡片来源资格', () => {
     for (const text of ['```md\n![[C]]\n```', '---\n![[C]]\n---\nbody', '<!--\n![[C]]\n-->']) {
       const at = text.indexOf('![[C]]')
-      const valid = validChildSource({ version: 1, range: { start: 0, end: text.length } },
+      const valid = validChildSource({ version: 1 },
         { version: 1, text }, at, at + 6, 'C')
       expect(valid, text).toBe(false)
     }
@@ -146,7 +154,7 @@ describe('#246 混排/列表/引用容器的直接父来源准入', () => {
   const check = (text: string, inner = 'C'): boolean => {
     const at = text.indexOf(`![[${inner}]]`)
     return validChildSource(
-      { version: 1, range: { start: 0, end: text.length } },
+      { version: 1 },
       { version: 1, text },
       at,
       at + `![[${inner}]]`.length,
@@ -183,7 +191,7 @@ describe('#246 混排/列表/引用容器的直接父来源准入', () => {
   it('区间必须精确对齐行内 occurrence：半截/偏移/前后吞字均拒绝', () => {
     const text = '前文 ![[C]] 后文'
     const at = text.indexOf('![[C]]')
-    const parent = { version: 1, range: { start: 0, end: text.length } }
+    const parent = { version: 1 }
     const cur = { version: 1, text }
     expect(validChildSource(parent, cur, at, at + 4, 'C')).toBe(false) // 半截
     expect(validChildSource(parent, cur, at - 1, at + 6, 'C')).toBe(false) // 吞前字
@@ -203,7 +211,7 @@ describe('#248 表格格内的直接父来源准入（转义映射）', () => {
   it('表格数据格内的嵌入有子来源资格（Table 不再排除）', () => {
     const at = TABLE.indexOf('![[C]]')
     expect(validChildSource(
-      { version: 1, range: { start: 0, end: TABLE.length } },
+      { version: 1 },
       { version: 1, text: TABLE },
       at, at + '![[C]]'.length, 'C',
     )).toBe(true)
@@ -213,7 +221,7 @@ describe('#248 表格格内的直接父来源准入（转义映射）', () => {
     const text = '| ![[C]] | h |\n| --- | --- |\n| a | b |'
     const at = text.indexOf('![[C]]')
     expect(validChildSource(
-      { version: 1, range: { start: 0, end: text.length } },
+      { version: 1 },
       { version: 1, text },
       at, at + '![[C]]'.length, 'C',
     )).toBe(true)
@@ -222,7 +230,7 @@ describe('#248 表格格内的直接父来源准入（转义映射）', () => {
   it('转义别名形态：target 为解码语义（B|别名），区间为原始源码区间', () => {
     const at = TABLE.indexOf('![[B\\|别名]]')
     const end = at + '![[B\\|别名]]'.length
-    const parent = { version: 1, range: { start: 0, end: TABLE.length } }
+    const parent = { version: 1 }
     const cur = { version: 1, text: TABLE }
     // 解码 inner 对齐通过
     expect(validChildSource(parent, cur, at, end, 'B|别名')).toBe(true)
@@ -235,7 +243,7 @@ describe('#248 表格格内的直接父来源准入（转义映射）', () => {
     const text = '| `![[C]]` | b |\n| --- | --- |\n| c | d |'
     const at = text.indexOf('![[C]]')
     expect(validChildSource(
-      { version: 1, range: { start: 0, end: text.length } },
+      { version: 1 },
       { version: 1, text },
       at, at + '![[C]]'.length, 'C',
     )).toBe(false)
@@ -246,7 +254,7 @@ describe('#248 表格格内的直接父来源准入（转义映射）', () => {
     const text = '段 ![[B\\|x]] 段'
     const at = text.indexOf('![[B\\|x]]')
     const end = at + '![[B\\|x]]'.length
-    const parent = { version: 1, range: { start: 0, end: text.length } }
+    const parent = { version: 1 }
     const cur = { version: 1, text }
     expect(validChildSource(parent, cur, at, end, 'B\\|x')).toBe(true)
     expect(validChildSource(parent, cur, at, end, 'B|x')).toBe(false)

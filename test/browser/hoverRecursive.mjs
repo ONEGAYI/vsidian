@@ -202,7 +202,15 @@ try {
   }
   await keyboardRespond('B', '![[C]]\n', 1)
   await keyboardRespond('C', '# C\n\n可复制正文。\n', 2)
+  // P2-06（#283）起浮窗头部新增模式切换入口（真实 Tab 序停留点——纯
+  // Reading 的保存/关闭为 display:none 不进 Tab 序）：一次到模式入口、
+  // 二次到头部跳转。P2-09（#286）起浮窗内子卡解锁模式入口——三次到
+  // 子卡模式按钮（跟随直接父/可手动独立切换）、四次到子卡打开入口
   await keyboard.keyboard.press('Tab')
+  await keyboard.keyboard.press('Tab')
+  await keyboard.keyboard.press('Tab')
+  assert.equal(await keyboard.evaluate(() => document.activeElement?.classList.contains('vsidian-embed-card-mode')),
+    true, 'Tab 进入 C 子卡模式入口（P2-09 解锁直接父跟随的手动切换）')
   await keyboard.keyboard.press('Tab')
   assert.equal(await keyboard.evaluate(() => document.activeElement?.classList.contains('vsidian-embed-card-open')),
     true, 'Tab 可进入 C 子卡打开入口')

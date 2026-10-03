@@ -160,6 +160,9 @@ export class RefContentMount {
   private readonly blocks = new Map<HTMLElement, Array<() => void>>()
   private readonly cleanups: Array<() => void> = []
   private frame: number | null = null
+  // P2-03 首开锚点定位帧：与 restoreScroll 的恢复帧分离（定位不受
+  // restoreScroll 的取消语义影响，用户滚动/交互两者一并取消）
+  private locateFrame: number | null = null
   // #258：最后已知滚动位置——卡内 scroll 事件与本类程序写回同步它。
   // 宿主块被主视图窗口差分后的 reorder 移动时，Chromium 表格布局重排
   // 会静默重置 td 内滚动容器的 scrollTop（引擎行为：无 scroll 事件、
@@ -186,22 +189,24 @@ export class RefContentMount {
     if (this.view) this.listen(options.scrollEl, 'scroll', () => {
       this.lastKnownScrollTop = options.scrollEl.scrollTop
       // 恢复帧尚未执行时，外层已有新的非零滚动位置即交还用户意图。
-      // 内容清空导致的零位钳制不取消待恢复位置；滚轮在场时除外
+      // 内容清空导致的零位钳制不取消恢复位置；滚轮在场时除外
       //（用户主动滚回顶部，零位也是新阅读意图）。
       if (this.frame !== null && options.scrollEl.scrollTop !== this.instance.scrollTop &&
         (wheelWitness || options.scrollEl.scrollTop > 0)) {
         this.cancelPendingRestore()
       }
+      this.cancelPendingLocate()
       wheelWitness = false
       this.view?.handleScroll()
     })
     if (this.view) {
-      this.listen(options.scrollEl, 'wheel', () => { wheelWitness = true })
-      this.listen(options.scrollEl, 'pointerdown', () => this.cancelPendingRestore())
-      this.listen(options.scrollEl, 'touchstart', () => this.cancelPendingRestore())
+      this.listen(options.scrollEl, 'wheel', () => { wheelWitness = true; this.cancelPendingLocate() })
+      this.listen(options.scrollEl, 'pointerdown', () => { this.cancelPendingRestore(); this.cancelPendingLocate() })
+      this.listen(options.scrollEl, 'touchstart', () => { this.cancelPendingRestore(); this.cancelPendingLocate() })
       this.listen(options.scrollEl, 'keydown', (event) => {
         if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) {
           this.cancelPendingRestore()
+          this.cancelPendingLocate()
         }
       })
       // #258：外部滚动（主容器或任何非本卡滚动区，捕获阶段接收不冒泡的
@@ -273,23 +278,72 @@ export class RefContentMount {
       send: this.options.send,
       sourceDocUri: () => this.target?.fsPath ?? '',
     })
+    // P2-03（#280，ADR-0011）：内容范围恒为目标全文——块不再按 range 过滤；
+    // range 只作初始定位区间（无保存滚动位置的首开滚动到锚点）
     if (this.view) {
       this.view.setDocument(loaded.text, {
         blocks: parsed.blocks, parsedNow: parsed.parsedNow,
-        range: loaded.scope === 'full' ? undefined : loaded.range,
       })
       this.view.updateNow()
     } else {
-      const blocks = parsed.blocks
-      const scoped: ReadingBlock[] = loaded.scope === 'full' ? blocks
-        : blocks.filter((b) => b.start <= loaded.range.end && b.end >= loaded.range.start)
-      for (const block of scoped) {
+      for (const block of parsed.blocks) {
         const el = createReadingBlockElement(block, loaded.text)
         this.options.contentEl.appendChild(el)
         this.mountBlock(el)
       }
     }
+    // P2-03 首开定位：标题/块引用且无保存滚动位置时定位到锚点区间起点；
+    // 刷新/重挂（有保存位置）优先恢复阅读位置，不重新定位
+    if (this.instance.scrollTop === 0 && loaded.selector !== undefined &&
+      loaded.selector.kind !== 'full' && loaded.range.start > 0) {
+      const locateAt = loaded.range.start
+      this.scheduleRefLocate(() => {
+        if (this.released || this.target !== loaded) return
+        if (this.view) {
+          this.view.scrollToSrcStart(locateAt)
+        } else if (this.options.scrollEl.scrollTop === 0) {
+          // 无布局回退路径：定位到锚点块元素的顶部
+          const el = this.options.contentEl.querySelector<HTMLElement>(
+            `[data-vsidian-src-start="${locateAt}"]`,
+          ) ?? this.nearestBlockElementFrom(locateAt)
+          if (el) {
+            this.options.scrollEl.scrollTop = el.offsetTop
+          }
+        }
+      })
+    }
     return true
+  }
+
+  /** P2-03 首开定位帧调度（延迟一帧等宿主入 DOM 建立布局，与
+   *  restoreScroll 的延迟一帧口径一致） */
+  private scheduleRefLocate(fn: () => void): void {
+    if (this.locateFrame !== null) cancelAnimationFrame(this.locateFrame)
+    this.locateFrame = requestAnimationFrame(() => {
+      this.locateFrame = null
+      fn()
+    })
+  }
+
+  /** 用户已有滚动/交互意图时取消待执行的锚点定位 */
+  private cancelPendingLocate(): void {
+    if (this.locateFrame === null) return
+    cancelAnimationFrame(this.locateFrame)
+    this.locateFrame = null
+  }
+
+  /** 无布局回退路径：按定位起点找首个起点不早于它的块元素（近似落点） */
+  private nearestBlockElementFrom(offset: number): HTMLElement | null {
+    let best: HTMLElement | null = null
+    for (const el of this.options.contentEl.children) {
+      if (!(el instanceof HTMLElement)) continue
+      const start = Number(el.dataset['vsidianSrcStart'])
+      if (Number.isInteger(start) && start >= offset) {
+        best = el
+        break
+      }
+    }
+    return best
   }
 
   restoreScroll(deferred: boolean): void {
@@ -314,6 +368,7 @@ export class RefContentMount {
 
   clear(): void {
     if (this.released) return
+    this.cancelPendingLocate()
     this.view?.clearDocument()
     for (const el of [...this.blocks.keys()]) this.unmountBlock(el)
     this.images?.dispose()
@@ -333,6 +388,10 @@ export class RefContentMount {
     if (this.settleTimer !== null) {
       window.clearTimeout(this.settleTimer)
       this.settleTimer = null
+    }
+    if (this.locateFrame !== null) {
+      cancelAnimationFrame(this.locateFrame)
+      this.locateFrame = null
     }
     if (this.target !== null) {
       // #258：回收时内层可能已被宿主重排静默重置（无 scroll 事件见证，
@@ -367,7 +426,9 @@ export class RefContentMount {
     mountRefContentBlock(el, {
       images: this.images,
       codeHighlight: this.options.codeHighlight(),
-      fm: this.target?.scope === 'full' ? {
+      // P2-03（#280）：内容范围恒全文——frontmatter 属性区随全文内容
+      // 在场（折叠状态机仍按 occurrence 实例独立）
+      fm: this.target ? {
         expanded: () => this.instance.fmExpanded,
         toggle: () => (this.instance.fmExpanded = !this.instance.fmExpanded),
       } : null,

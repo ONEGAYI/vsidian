@@ -95,6 +95,9 @@ interface PopupState {
   zoomLabel: HTMLElement
   language: string
   code: string
+  /** P2-10（#287）实例文档源（打开时捕获的调用方编辑器——嵌入内部 Live
+   *  的图形块弹窗刷新按 B 全文重定位；缺省回落全局 docSource（主正文）） */
+  instanceDocSource: (() => string | null) | null
   /** 当前快照的 SVG 字符串与内在尺寸（导出与缩放基准） */
   svg: string | null
   intrinsic: IntrinsicSize
@@ -230,11 +233,12 @@ async function loadSnapshot(p: PopupState): Promise<void> {
   applyTransform(p)
 }
 
-/** 刷新语义（规格契约 4）：按当前文档源码重取——经 docSource 在当前
+/** 刷新语义（规格契约 4）：按当前文档源码重取——经文档源在当前
  *  全文中重定位该语言围栏的最新内容（外部变更主场景），重定位失败
- *  （文档不可得或歧义）回退打开时快照 */
+ *  （文档不可得或歧义）回退打开时快照。P2-10：实例源优先（嵌入内部
+ *  Live 的弹窗按 B 全文重定位，不读主正文） */
 function refreshSnapshot(p: PopupState): void {
-  const doc = docSource?.() ?? null
+  const doc = (p.instanceDocSource ?? docSource)?.() ?? null
   if (doc !== null) {
     const fresh = locateGraphicFenceCode(doc, p.language, p.code)
     if (fresh !== null && fresh !== p.code) {
@@ -290,8 +294,14 @@ async function exportPng(p: PopupState): Promise<void> {
 }
 
 /** 打开图表弹窗（单例：再次打开先关闭旧的；#212 起经 popupMutex 与图片
- *  弹窗互斥——同时只允许一个弹窗实例） */
-export function openGraphicPopup(language: string, code: string): void {
+ *  弹窗互斥——同时只允许一个弹窗实例）。P2-10：opts.docSource 为打开时
+ *  捕获的实例文档源（嵌入内部 Live 的图形块按 B 全文刷新；缺省回落全局
+ *  主正文源——阅读侧与主正文调用方不变） */
+export function openGraphicPopup(
+  language: string,
+  code: string,
+  opts: { docSource?: () => string | null } = {},
+): void {
   closeDiagramPopup()
   const renderer = graphicRendererFor(language)
   if (!renderer) {
@@ -327,6 +337,7 @@ export function openGraphicPopup(language: string, code: string): void {
     zoomLabel,
     language: language.trim(),
     code,
+    instanceDocSource: opts.docSource ?? null,
     svg: null,
     intrinsic: POPUP_FALLBACK_SIZE,
     transform: { scale: 1, panX: 0, panY: 0 },

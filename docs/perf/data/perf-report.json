@@ -1,13 +1,13 @@
 {
-  "startedAt": "2026-09-25T19:18:14.899Z",
+  "startedAt": "2026-10-03T03:56:17.956Z",
   "samples": {
     "1k": {
       "file": "perf-1k.md",
       "byteSize": 86753,
       "open": {
-        "openToReadyMs": 278,
-        "openToEditableMs": 344,
-        "openToFirstInputMs": 359,
+        "openToReadyMs": 574,
+        "openToEditableMs": 628,
+        "openToFirstInputMs": 656,
         "pollIntervalMs": 25
       },
       "lineCount": 1001,
@@ -22,83 +22,83 @@
         "typingRounds": 50,
         "scrollRounds": 10,
         "docLines": 1001,
-        "firstInputSettledEpochMs": 1790363895459,
+        "firstInputSettledEpochMs": 1790999779112,
         "baseline": {
           "renderedLines": 54,
           "contentDomCount": 59,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 12989876
+          "jsHeapBytes": 18414211
         },
         "afterTyping": {
           "renderedLines": 54,
           "contentDomCount": 59,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 14969394
+          "jsHeapBytes": 16273351
         },
         "afterScroll": {
           "renderedLines": 54,
           "contentDomCount": 59,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 12381365
+          "jsHeapBytes": 16014661
         },
         "inputDelayMs": {
           "samples": [
-            13.799999997019768,
-            17.400000005960464,
-            17.599999994039536,
-            18.200000002980232,
-            18.200000002980232,
-            12.199999988079071,
-            18.100000008940697,
-            18.099999994039536,
-            18.200000002980232,
-            12.400000005960464,
-            17.899999991059303,
-            18.200000002980232,
-            18.200000002980232,
-            14.299999997019768,
-            31,
-            21.400000005960464,
-            12.299999997019768,
-            17.700000002980232,
-            18.200000002980232,
-            18.200000002980232,
-            12.299999997019768,
-            17.899999991059303,
-            18.400000005960464,
-            18.099999994039536,
-            28.600000008940697,
-            7.5999999940395355,
-            12.299999997019768,
-            18.100000008940697,
-            18.200000002980232,
-            12,
-            18.19999998807907,
-            18.200000002980232,
-            18.100000008940697,
-            12.099999994039536,
-            18.299999997019768,
-            18.200000002980232,
-            18.099999994039536,
-            12.100000008940697,
-            18.299999997019768,
-            18.099999994039536,
-            18.100000008940697,
-            12.299999997019768,
-            18.099999994039536,
-            18.200000002980232,
-            18.200000002980232,
-            12.099999994039536,
-            18,
-            18.400000005960464,
-            18.099999994039536,
-            11.900000005960464
+            29.900000005960464,
+            33.5,
+            33.29999998211861,
+            33.30000001192093,
+            33.29999998211861,
+            33.5,
+            33.30000001192093,
+            33.19999998807907,
+            33.400000005960464,
+            33.400000005960464,
+            33.30000001192093,
+            33.29999998211861,
+            33.400000005960464,
+            33.30000001192093,
+            33.19999998807907,
+            33.400000005960464,
+            33.29999998211861,
+            33.400000005960464,
+            33.400000005960464,
+            33.19999998807907,
+            33.30000001192093,
+            33.400000005960464,
+            33.29999998211861,
+            33.30000001192093,
+            33.400000005960464,
+            33.29999998211861,
+            33.30000001192093,
+            53,
+            33.30000001192093,
+            33.29999998211861,
+            33.80000001192093,
+            32.79999998211861,
+            34,
+            32.70000001788139,
+            33.400000005960464,
+            33.29999998211861,
+            33.30000001192093,
+            33.29999998211861,
+            33.400000005960464,
+            33.20000001788139,
+            33.400000005960464,
+            33.19999998807907,
+            33.5,
+            33.30000001192093,
+            33.39999997615814,
+            33.20000001788139,
+            33.400000005960464,
+            33.19999998807907,
+            33.30000001192093,
+            33.29999998211861
           ],
-          "avgMs": 16.964000000059606,
-          "maxMs": 31
+          "avgMs": 33.65199999988079,
+          "maxMs": 53
         },
         "longTasks": null,
         "headingStats": {
@@ -111,9 +111,9 @@
         "file": "reading-1k.md",
         "byteSize": 87872,
         "open": {
-          "openToReadyMs": 104,
-          "openToEditableMs": 139,
-          "openToFirstInputMs": 158,
+          "openToReadyMs": 140,
+          "openToEditableMs": 172,
+          "openToFirstInputMs": 204,
           "pollIntervalMs": 25
         },
         "totalBlocks": 1000,
@@ -129,14 +129,14 @@
             "contentDomCount": 102,
             "scrollTopPx": 15,
             "scrollHeightPx": 32618,
-            "jsHeapBytes": 18068926
+            "jsHeapBytes": 16153541
           },
           "afterScroll": {
             "mountedBlocks": 50,
             "contentDomCount": 102,
             "scrollTopPx": 0,
             "scrollHeightPx": 32530,
-            "jsHeapBytes": 12559427
+            "jsHeapBytes": 21733175
           },
           "parseCount": 1,
           "maxMountedBlocks": 80,
@@ -144,8 +144,8 @@
         }
       },
       "modeSwitch": {
-        "toReadingMs": 110,
-        "toLiveMs": 140,
+        "toReadingMs": 124,
+        "toLiveMs": 124,
         "pollIntervalMs": 25
       }
     },
@@ -153,9 +153,9 @@
       "file": "perf-10k.md",
       "byteSize": 877494,
       "open": {
-        "openToReadyMs": 134,
-        "openToEditableMs": 226,
-        "openToFirstInputMs": 234,
+        "openToReadyMs": 163,
+        "openToEditableMs": 228,
+        "openToFirstInputMs": 246,
         "pollIntervalMs": 25
       },
       "lineCount": 10001,
@@ -170,83 +170,83 @@
         "typingRounds": 50,
         "scrollRounds": 10,
         "docLines": 10001,
-        "firstInputSettledEpochMs": 1790363898111,
+        "firstInputSettledEpochMs": 1790999782818,
         "baseline": {
           "renderedLines": 54,
           "contentDomCount": 59,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 17014246
+          "jsHeapBytes": 22938210
         },
         "afterTyping": {
           "renderedLines": 54,
           "contentDomCount": 59,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 13110281
+          "jsHeapBytes": 18884088
         },
         "afterScroll": {
           "renderedLines": 54,
           "contentDomCount": 59,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 13853992
+          "jsHeapBytes": 17943205
         },
         "inputDelayMs": {
           "samples": [
-            7,
-            17.799999997019768,
-            18.200000002980232,
-            12.100000008940697,
-            18.19999998807907,
-            18.200000002980232,
-            18.200000002980232,
-            12.099999994039536,
-            18.100000008940697,
-            18.200000002980232,
-            18.299999997019768,
-            12,
-            18.200000002980232,
-            30.599999994039536,
-            17.799999997019768,
-            18.19999998807907,
-            18.100000008940697,
-            18.099999994039536,
-            12.200000002980232,
-            18.099999994039536,
-            18.200000002980232,
-            18.200000002980232,
-            12.099999994039536,
-            18.100000008940697,
-            18.299999997019768,
-            18.099999994039536,
-            12.100000008940697,
-            18.200000002980232,
-            18.19999998807907,
-            18.200000002980232,
-            12,
-            18.299999997019768,
-            18.100000008940697,
-            18.200000002980232,
-            12.199999988079071,
-            18.200000002980232,
-            18.100000008940697,
-            18.099999994039536,
-            12.099999994039536,
-            18.200000002980232,
-            18.200000002980232,
-            18.099999994039536,
-            12.200000002980232,
-            18.200000002980232,
-            18.099999994039536,
-            18.30000001192093,
-            12,
-            18.19999998807907,
-            18.100000008940697,
-            18.200000002980232
+            29.69999998807907,
+            33.30000001192093,
+            33.400000005960464,
+            33.29999998211861,
+            33.400000005960464,
+            33.30000001192093,
+            33.29999998211861,
+            33.400000005960464,
+            33.30000001192093,
+            33.29999998211861,
+            33.30000001192093,
+            33.400000005960464,
+            33.29999998211861,
+            33.400000005960464,
+            33.30000001192093,
+            33.19999998807907,
+            33.400000005960464,
+            33.400000005960464,
+            33.39999997615814,
+            33.30000001192093,
+            33.19999998807907,
+            33.29999998211861,
+            33.400000005960464,
+            33.30000001192093,
+            33.29999998211861,
+            33.30000001192093,
+            33.400000005960464,
+            33.29999998211861,
+            33.400000005960464,
+            33.30000001192093,
+            33.19999998807907,
+            33.30000001192093,
+            33.29999998211861,
+            33.400000005960464,
+            33.30000001192093,
+            33.400000005960464,
+            33.39999997615814,
+            33.20000001788139,
+            33.400000005960464,
+            33.29999998211861,
+            33.30000001192093,
+            33.29999998211861,
+            33.30000001192093,
+            33.400000005960464,
+            33.29999998211861,
+            33.30000001192093,
+            33.400000005960464,
+            33.29999998211861,
+            33.30000001192093,
+            33.400000005960464
           ],
-          "avgMs": 16.85,
-          "maxMs": 30.599999994039536
+          "avgMs": 33.25599999964237,
+          "maxMs": 33.400000005960464
         },
         "longTasks": null,
         "headingStats": {
@@ -259,9 +259,9 @@
         "file": "reading-10k.md",
         "byteSize": 888693,
         "open": {
-          "openToReadyMs": 142,
-          "openToEditableMs": 240,
-          "openToFirstInputMs": 258,
+          "openToReadyMs": 129,
+          "openToEditableMs": 250,
+          "openToFirstInputMs": 262,
           "pollIntervalMs": 25
         },
         "totalBlocks": 10000,
@@ -277,14 +277,14 @@
             "contentDomCount": 102,
             "scrollTopPx": 15,
             "scrollHeightPx": 324038,
-            "jsHeapBytes": 37499055
+            "jsHeapBytes": 25161179
           },
           "afterScroll": {
             "mountedBlocks": 50,
             "contentDomCount": 102,
             "scrollTopPx": 0,
             "scrollHeightPx": 323950,
-            "jsHeapBytes": 24400152
+            "jsHeapBytes": 26300646
           },
           "parseCount": 1,
           "maxMountedBlocks": 80,
@@ -292,7 +292,7 @@
         }
       },
       "modeSwitch": {
-        "toReadingMs": 125,
+        "toReadingMs": 127,
         "toLiveMs": 126,
         "pollIntervalMs": 25
       }
@@ -301,9 +301,9 @@
       "file": "perf-100k.md",
       "byteSize": 8874895,
       "open": {
-        "openToReadyMs": 301,
-        "openToEditableMs": 872,
-        "openToFirstInputMs": 889,
+        "openToReadyMs": 315,
+        "openToEditableMs": 946,
+        "openToFirstInputMs": 984,
         "pollIntervalMs": 25
       },
       "lineCount": 100001,
@@ -318,83 +318,83 @@
         "typingRounds": 50,
         "scrollRounds": 10,
         "docLines": 100001,
-        "firstInputSettledEpochMs": 1790363901529,
+        "firstInputSettledEpochMs": 1790999787525,
         "baseline": {
           "renderedLines": 54,
           "contentDomCount": 59,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 63466589
+          "jsHeapBytes": 30053067
         },
         "afterTyping": {
           "renderedLines": 54,
           "contentDomCount": 59,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 28058601
+          "jsHeapBytes": 32340797
         },
         "afterScroll": {
           "renderedLines": 54,
           "contentDomCount": 59,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 30357662
+          "jsHeapBytes": 28250361
         },
         "inputDelayMs": {
           "samples": [
-            6.899999991059303,
-            16.700000002980232,
-            18,
-            18.200000002980232,
-            18.400000005960464,
-            28.5,
-            16.69999998807907,
-            16.600000008940697,
-            16.899999991059303,
-            18,
-            18.200000002980232,
-            18.299999997019768,
-            28.600000008940697,
-            16.700000002980232,
-            16.69999998807907,
-            22.600000008940697,
-            12.200000002980232,
-            18.19999998807907,
-            18.200000002980232,
-            18.100000008940697,
-            12.099999994039536,
-            18.200000002980232,
-            18.099999994039536,
-            18.200000002980232,
-            12.099999994039536,
-            18.200000002980232,
-            18.299999997019768,
-            18.200000002980232,
-            12.100000008940697,
-            18.099999994039536,
-            18.099999994039536,
-            18.200000002980232,
-            12.200000002980232,
-            18.099999994039536,
-            18.100000008940697,
-            18.299999997019768,
-            12.099999994039536,
-            18.200000002980232,
-            18.100000008940697,
-            18.099999994039536,
-            12.100000008940697,
-            18.200000002980232,
-            18.19999998807907,
-            18.100000008940697,
-            12.200000002980232,
-            18.099999994039536,
-            18.200000002980232,
-            18.099999994039536,
-            12.299999997019768,
-            18.100000008940697
+            33.400000005960464,
+            33.19999998807907,
+            50,
+            33.30000001192093,
+            33.39999997615814,
+            33.30000001192093,
+            33.30000001192093,
+            34.599999994039536,
+            32.099999994039536,
+            33.30000001192093,
+            33.29999998211861,
+            33.30000001192093,
+            50.099999994039536,
+            33.30000001192093,
+            33.39999997615814,
+            49.900000005960464,
+            33.30000001192093,
+            49.900000005960464,
+            50.099999994039536,
+            33.400000005960464,
+            33.19999998807907,
+            33.400000005960464,
+            33.19999998807907,
+            33.400000005960464,
+            33.30000001192093,
+            33.400000005960464,
+            33.29999998211861,
+            33.400000005960464,
+            50,
+            50,
+            33.30000001192093,
+            33.29999998211861,
+            33.400000005960464,
+            33.30000001192093,
+            33.29999998211861,
+            33.30000001192093,
+            33.30000001192093,
+            33.29999998211861,
+            33.400000005960464,
+            50,
+            50,
+            33.400000005960464,
+            33.29999998211861,
+            33.30000001192093,
+            50,
+            49.900000005960464,
+            33.5,
+            33.19999998807907,
+            33.400000005960464,
+            33.30000001192093
           ],
-          "avgMs": 17.18800000011921,
-          "maxMs": 28.600000008940697
+          "avgMs": 36.99400000035763,
+          "maxMs": 50.099999994039536
         },
         "longTasks": null,
         "headingStats": {
@@ -407,9 +407,9 @@
         "file": "reading-100k.md",
         "byteSize": 8986894,
         "open": {
-          "openToReadyMs": 297,
-          "openToEditableMs": 1069,
-          "openToFirstInputMs": 1111,
+          "openToReadyMs": 306,
+          "openToEditableMs": 1125,
+          "openToFirstInputMs": 1190,
           "pollIntervalMs": 25
         },
         "totalBlocks": 100000,
@@ -425,14 +425,14 @@
             "contentDomCount": 102,
             "scrollTopPx": 15,
             "scrollHeightPx": 3238238,
-            "jsHeapBytes": 248589232
+            "jsHeapBytes": 264414271
           },
           "afterScroll": {
             "mountedBlocks": 50,
             "contentDomCount": 102,
             "scrollTopPx": 0,
             "scrollHeightPx": 3238150,
-            "jsHeapBytes": 240312258
+            "jsHeapBytes": 268569345
           },
           "parseCount": 1,
           "maxMountedBlocks": 80,
@@ -440,8 +440,8 @@
         }
       },
       "modeSwitch": {
-        "toReadingMs": 406,
-        "toLiveMs": 129,
+        "toReadingMs": 499,
+        "toLiveMs": 115,
         "pollIntervalMs": 25
       }
     },
@@ -449,9 +449,9 @@
       "file": "perf-10kb.md",
       "byteSize": 10250,
       "open": {
-        "openToReadyMs": 116,
-        "openToEditableMs": 116,
-        "openToFirstInputMs": 140,
+        "openToReadyMs": 111,
+        "openToEditableMs": 141,
+        "openToFirstInputMs": 181,
         "pollIntervalMs": 25
       },
       "lineCount": 120,
@@ -466,83 +466,83 @@
         "typingRounds": 50,
         "scrollRounds": 10,
         "docLines": 120,
-        "firstInputSettledEpochMs": 1790363905501,
+        "firstInputSettledEpochMs": 1790999794301,
         "baseline": {
           "renderedLines": 120,
           "contentDomCount": 129,
           "headingLineCount": 2,
           "inviewHeadingCount": 2,
-          "jsHeapBytes": 251149016
+          "jsHeapBytes": 270400779
         },
         "afterTyping": {
           "renderedLines": 120,
           "contentDomCount": 129,
           "headingLineCount": 2,
           "inviewHeadingCount": 2,
-          "jsHeapBytes": 246081722
+          "jsHeapBytes": 274104411
         },
         "afterScroll": {
           "renderedLines": 120,
           "contentDomCount": 129,
           "headingLineCount": 2,
           "inviewHeadingCount": 2,
-          "jsHeapBytes": 246416458
+          "jsHeapBytes": 274440359
         },
         "inputDelayMs": {
           "samples": [
-            7.0999999940395355,
-            16.100000008940697,
-            8.199999988079071,
-            12.100000008940697,
-            18.200000002980232,
-            12.099999994039536,
-            18.200000002980232,
-            18.099999994039536,
-            18.200000002980232,
-            12.099999994039536,
-            18.200000002980232,
-            18.100000008940697,
-            18.299999997019768,
-            28.200000002980232,
-            16.799999997019768,
-            21.5,
-            12.299999997019768,
-            18.099999994039536,
-            18.200000002980232,
-            18.100000008940697,
+            6.300000011920929,
+            15.800000011920929,
+            8.5,
             12.199999988079071,
-            18.100000008940697,
-            19.5,
-            17,
-            12,
-            18.200000002980232,
-            18.19999998807907,
-            18.100000008940697,
-            12.299999997019768,
-            18,
-            18.200000002980232,
-            18.099999994039536,
-            12.799999997019768,
-            17.5,
-            18.30000001192093,
-            18.099999994039536,
-            12.099999994039536,
-            18.100000008940697,
-            18.299999997019768,
-            18.099999994039536,
-            12.300000011920929,
-            18,
-            18.19999998807907,
-            18.100000008940697,
-            12.200000002980232,
-            18.099999994039536,
-            18.200000002980232,
-            18.100000008940697,
-            12.299999997019768,
-            17.900000005960464
+            29.400000005960464,
+            33.29999998211861,
+            33.400000005960464,
+            37.20000001788139,
+            29.5,
+            33.29999998211861,
+            33.400000005960464,
+            33.19999998807907,
+            33.400000005960464,
+            33.30000001192093,
+            34,
+            32.69999998807907,
+            33.30000001192093,
+            33.29999998211861,
+            33.400000005960464,
+            33.30000001192093,
+            33.5,
+            33.19999998807907,
+            33.30000001192093,
+            33.29999998211861,
+            33.400000005960464,
+            33.30000001192093,
+            33.29999998211861,
+            33.30000001192093,
+            33.900000005960464,
+            32.900000005960464,
+            33.19999998807907,
+            33.400000005960464,
+            33.29999998211861,
+            33.30000001192093,
+            33.400000005960464,
+            33.29999998211861,
+            33.30000001192093,
+            33.400000005960464,
+            33.19999998807907,
+            33.30000001192093,
+            33.400000005960464,
+            33.29999998211861,
+            33.30000001192093,
+            33.400000005960464,
+            33.29999998211861,
+            33.30000001192093,
+            33.5,
+            33.19999998807907,
+            33.30000001192093,
+            33.30000001192093
           ],
-          "avgMs": 16.496000000238418,
-          "maxMs": 28.200000002980232
+          "avgMs": 31.440000000596047,
+          "maxMs": 37.20000001788139
         },
         "longTasks": null,
         "headingStats": {
@@ -555,9 +555,9 @@
         "file": "reading-10kb.md",
         "byteSize": 10202,
         "open": {
-          "openToReadyMs": 108,
-          "openToEditableMs": 139,
-          "openToFirstInputMs": 147,
+          "openToReadyMs": 140,
+          "openToEditableMs": 140,
+          "openToFirstInputMs": 149,
           "pollIntervalMs": 25
         },
         "totalBlocks": 117,
@@ -573,14 +573,14 @@
             "contentDomCount": 102,
             "scrollTopPx": 15,
             "scrollHeightPx": 4020,
-            "jsHeapBytes": 252990320
+            "jsHeapBytes": 278069835
           },
           "afterScroll": {
             "mountedBlocks": 50,
             "contentDomCount": 102,
             "scrollTopPx": 0,
             "scrollHeightPx": 3983,
-            "jsHeapBytes": 111181912
+            "jsHeapBytes": 22668131
           },
           "parseCount": 1,
           "maxMountedBlocks": 76,
@@ -588,8 +588,8 @@
         }
       },
       "modeSwitch": {
-        "toReadingMs": 110,
-        "toLiveMs": 111,
+        "toReadingMs": 109,
+        "toLiveMs": 110,
         "pollIntervalMs": 25
       }
     },
@@ -597,9 +597,9 @@
       "file": "perf-100kb.md",
       "byteSize": 102424,
       "open": {
-        "openToReadyMs": 138,
-        "openToEditableMs": 138,
-        "openToFirstInputMs": 144,
+        "openToReadyMs": 136,
+        "openToEditableMs": 167,
+        "openToFirstInputMs": 184,
         "pollIntervalMs": 25
       },
       "lineCount": 1179,
@@ -614,83 +614,83 @@
         "typingRounds": 50,
         "scrollRounds": 10,
         "docLines": 1179,
-        "firstInputSettledEpochMs": 1790363908040,
+        "firstInputSettledEpochMs": 1790999797669,
         "baseline": {
           "renderedLines": 54,
           "contentDomCount": 59,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 119822687
+          "jsHeapBytes": 23572341
         },
         "afterTyping": {
           "renderedLines": 54,
           "contentDomCount": 59,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 119743513
+          "jsHeapBytes": 23652534
         },
         "afterScroll": {
           "renderedLines": 54,
           "contentDomCount": 59,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 121780026
+          "jsHeapBytes": 16255687
         },
         "inputDelayMs": {
           "samples": [
-            6.4000000059604645,
-            14.400000005960464,
-            16.69999998807907,
-            16.700000002980232,
-            6.9000000059604645,
-            12.099999994039536,
-            18.100000008940697,
-            18.099999994039536,
-            12.200000002980232,
-            18.200000002980232,
-            18.099999994039536,
-            18.299999997019768,
-            12,
-            18.299999997019768,
-            31,
-            17.30000001192093,
-            18.19999998807907,
-            18.30000001192093,
-            18.099999994039536,
-            12,
-            18.200000002980232,
-            18.200000002980232,
-            18.19999998807907,
-            12.100000008940697,
-            18.200000002980232,
-            18.099999994039536,
-            18.299999997019768,
-            12,
-            18.200000002980232,
-            18.200000002980232,
-            18.200000002980232,
+            4.199999988079071,
+            11.600000023841858,
             12.199999988079071,
-            18.100000008940697,
-            18.200000002980232,
-            18.19999998807907,
-            12.100000008940697,
-            18.099999994039536,
-            18.100000008940697,
-            18.299999997019768,
             12.099999994039536,
-            18.100000008940697,
-            18.299999997019768,
-            18.200000002980232,
-            11.899999991059303,
-            18.19999998807907,
-            18.200000002980232,
-            18.200000002980232,
-            12,
-            18.200000002980232,
-            18.200000002980232
+            32.099999994039536,
+            33.30000001192093,
+            33.30000001192093,
+            33.19999998807907,
+            33.400000005960464,
+            33.400000005960464,
+            33.19999998807907,
+            33.5,
+            33.20000001788139,
+            33.29999998211861,
+            33.400000005960464,
+            33.400000005960464,
+            33.19999998807907,
+            34.400000005960464,
+            32.30000001192093,
+            33.39999997615814,
+            33.30000001192093,
+            33.400000005960464,
+            33.29999998211861,
+            33.20000001788139,
+            33.30000001192093,
+            33.39999997615814,
+            33.30000001192093,
+            33.400000005960464,
+            33.19999998807907,
+            35,
+            31.5,
+            33.5,
+            33.20000001788139,
+            33.400000005960464,
+            33.39999997615814,
+            33.20000001788139,
+            33.29999998211861,
+            33.400000005960464,
+            33.400000005960464,
+            33.400000005960464,
+            33.19999998807907,
+            33.5,
+            33.20000001788139,
+            33.29999998211861,
+            33.400000005960464,
+            33.19999998807907,
+            33.400000005960464,
+            33.30000001192093,
+            33.29999998211861,
+            33.400000005960464
           ],
-          "avgMs": 16.484000000059606,
-          "maxMs": 31
+          "avgMs": 31.43600000023842,
+          "maxMs": 35
         },
         "longTasks": null,
         "headingStats": {
@@ -703,9 +703,9 @@
         "file": "reading-100kb.md",
         "byteSize": 102389,
         "open": {
-          "openToReadyMs": 108,
-          "openToEditableMs": 139,
-          "openToFirstInputMs": 162,
+          "openToReadyMs": 141,
+          "openToEditableMs": 170,
+          "openToFirstInputMs": 200,
           "pollIntervalMs": 25
         },
         "totalBlocks": 1163,
@@ -721,14 +721,14 @@
             "contentDomCount": 102,
             "scrollTopPx": 15,
             "scrollHeightPx": 37891,
-            "jsHeapBytes": 29053507
+            "jsHeapBytes": 18051634
           },
           "afterScroll": {
             "mountedBlocks": 50,
             "contentDomCount": 102,
             "scrollTopPx": 0,
             "scrollHeightPx": 37800,
-            "jsHeapBytes": 31241605
+            "jsHeapBytes": 21751477
           },
           "parseCount": 1,
           "maxMountedBlocks": 80,
@@ -736,8 +736,8 @@
         }
       },
       "modeSwitch": {
-        "toReadingMs": 109,
-        "toLiveMs": 110,
+        "toReadingMs": 111,
+        "toLiveMs": 124,
         "pollIntervalMs": 25
       }
     },
@@ -745,9 +745,9 @@
       "file": "perf-1mb.md",
       "byteSize": 1048578,
       "open": {
-        "openToReadyMs": 119,
-        "openToEditableMs": 247,
-        "openToFirstInputMs": 257,
+        "openToReadyMs": 154,
+        "openToEditableMs": 242,
+        "openToFirstInputMs": 261,
         "pollIntervalMs": 25
       },
       "lineCount": 11926,
@@ -762,83 +762,83 @@
         "typingRounds": 50,
         "scrollRounds": 10,
         "docLines": 11926,
-        "firstInputSettledEpochMs": 1790363910675,
+        "firstInputSettledEpochMs": 1790999801179,
         "baseline": {
           "renderedLines": 54,
           "contentDomCount": 59,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 24501376
+          "jsHeapBytes": 23872525
         },
         "afterTyping": {
           "renderedLines": 54,
           "contentDomCount": 59,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 22687080
+          "jsHeapBytes": 20611023
         },
         "afterScroll": {
           "renderedLines": 54,
           "contentDomCount": 59,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 24848848
+          "jsHeapBytes": 18602797
         },
         "inputDelayMs": {
           "samples": [
-            6.0999999940395355,
-            16.700000002980232,
-            7.4000000059604645,
-            12.199999988079071,
-            18.200000002980232,
-            18.200000002980232,
-            12,
-            18.200000002980232,
-            18.200000002980232,
-            18.099999994039536,
-            12.200000002980232,
-            18.200000002980232,
-            18.099999994039536,
-            29,
-            16.700000002980232,
-            16.700000002980232,
-            22.399999991059303,
-            12.100000008940697,
-            18.299999997019768,
-            18.099999994039536,
-            18.200000002980232,
-            12.099999994039536,
-            18.200000002980232,
-            18.100000008940697,
-            18.19999998807907,
-            12.100000008940697,
-            18.099999994039536,
-            18.299999997019768,
-            18.200000002980232,
-            12,
-            18.200000002980232,
-            18.099999994039536,
-            18.30000001192093,
-            12.099999994039536,
-            18.099999994039536,
-            18.200000002980232,
-            18.099999994039536,
-            12.099999994039536,
-            18.100000008940697,
-            18.100000008940697,
-            18.19999998807907,
-            12.100000008940697,
-            18.299999997019768,
-            18.099999994039536,
-            18.200000002980232,
-            12.100000008940697,
-            18.299999997019768,
-            18.099999994039536,
-            18,
-            12.100000008940697
+            25.799999982118607,
+            33.5,
+            33.20000001788139,
+            33.400000005960464,
+            33.29999998211861,
+            33.400000005960464,
+            33.19999998807907,
+            33.5,
+            33.30000001192093,
+            33.30000001192093,
+            33.29999998211861,
+            33.400000005960464,
+            33.19999998807907,
+            33.5,
+            33.20000001788139,
+            33.400000005960464,
+            33.29999998211861,
+            33.30000001192093,
+            33.30000001192093,
+            33.19999998807907,
+            33.400000005960464,
+            33.29999998211861,
+            33.400000005960464,
+            33.30000001192093,
+            33.400000005960464,
+            33.19999998807907,
+            33.5,
+            33.19999998807907,
+            33.5,
+            33.30000001192093,
+            33.19999998807907,
+            33.30000001192093,
+            33.5,
+            33.30000001192093,
+            33.19999998807907,
+            33.400000005960464,
+            33.29999998211861,
+            33.30000001192093,
+            33.30000001192093,
+            33.29999998211861,
+            33.400000005960464,
+            33.20000001788139,
+            33.39999997615814,
+            33.30000001192093,
+            33.400000005960464,
+            33.29999998211861,
+            33.400000005960464,
+            33.30000001192093,
+            33.29999998211861,
+            33.30000001192093
           ],
-          "avgMs": 16.47,
-          "maxMs": 29
+          "avgMs": 33.17800000011921,
+          "maxMs": 33.5
         },
         "longTasks": null,
         "headingStats": {
@@ -851,9 +851,9 @@
         "file": "reading-1mb.md",
         "byteSize": 1048615,
         "open": {
-          "openToReadyMs": 142,
-          "openToEditableMs": 267,
-          "openToFirstInputMs": 286,
+          "openToReadyMs": 156,
+          "openToEditableMs": 280,
+          "openToFirstInputMs": 295,
           "pollIntervalMs": 25
         },
         "totalBlocks": 11777,
@@ -869,14 +869,14 @@
             "contentDomCount": 102,
             "scrollTopPx": 15,
             "scrollHeightPx": 381567,
-            "jsHeapBytes": 24596075
+            "jsHeapBytes": 26729678
           },
           "afterScroll": {
             "mountedBlocks": 50,
             "contentDomCount": 102,
             "scrollTopPx": 0,
             "scrollHeightPx": 381476,
-            "jsHeapBytes": 30710994
+            "jsHeapBytes": 32411061
           },
           "parseCount": 1,
           "maxMountedBlocks": 80,
@@ -884,8 +884,8 @@
         }
       },
       "modeSwitch": {
-        "toReadingMs": 124,
-        "toLiveMs": 124,
+        "toReadingMs": 125,
+        "toLiveMs": 125,
         "pollIntervalMs": 25
       }
     }
@@ -894,8 +894,8 @@
     "file": "reading-giant.md",
     "totalBlocks": 336,
     "mountedBlocks": 3,
-    "contentDomCount": 397,
-    "virtualizedMountPollMs": 102
+    "contentDomCount": 411,
+    "virtualizedMountPollMs": 114
   },
   "boundaryShapes": {
     "longLine": {
@@ -903,9 +903,9 @@
       "byteSize": 362807,
       "lineCount": 244,
       "open": {
-        "openToReadyMs": 122,
-        "openToEditableMs": 154,
-        "openToFirstInputMs": 264,
+        "openToReadyMs": 153,
+        "openToEditableMs": 184,
+        "openToFirstInputMs": 278,
         "pollIntervalMs": 25
       },
       "live": {
@@ -913,43 +913,43 @@
         "typingRounds": 10,
         "scrollRounds": 6,
         "docLines": 244,
-        "firstInputSettledEpochMs": 1790363913988,
+        "firstInputSettledEpochMs": 1790999805754,
         "baseline": {
           "renderedLines": 3,
           "contentDomCount": 6,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 47053110
+          "jsHeapBytes": 49256027
         },
         "afterTyping": {
           "renderedLines": 3,
           "contentDomCount": 6,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 49959988
+          "jsHeapBytes": 48036665
         },
         "afterScroll": {
           "renderedLines": 3,
           "contentDomCount": 6,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 50110556
+          "jsHeapBytes": 48230425
         },
         "inputDelayMs": {
           "samples": [
-            14,
-            18.100000008940697,
-            18.19999998807907,
-            18.200000002980232,
-            18.200000002980232,
-            19.200000002980232,
-            17,
-            18.200000002980232,
-            18.099999994039536,
-            18.30000001192093
+            17.5,
+            14.200000017881393,
+            17.899999976158142,
+            38.70000001788139,
+            33.29999998211861,
+            33.30000001192093,
+            33.400000005960464,
+            33.29999998211861,
+            33.30000001192093,
+            33.30000001192093
           ],
-          "avgMs": 17.750000001490115,
-          "maxMs": 19.200000002980232
+          "avgMs": 28.820000001788138,
+          "maxMs": 38.70000001788139
         },
         "longTasks": null,
         "headingStats": {
@@ -968,15 +968,15 @@
             "mountedBlocks": 2,
             "contentDomCount": 6,
             "scrollTopPx": 25,
-            "scrollHeightPx": 63092,
-            "jsHeapBytes": 50448880
+            "scrollHeightPx": 61268,
+            "jsHeapBytes": 48683993
           },
           "afterScroll": {
             "mountedBlocks": 2,
             "contentDomCount": 6,
             "scrollTopPx": 0,
-            "scrollHeightPx": 63092,
-            "jsHeapBytes": 50508284
+            "scrollHeightPx": 61268,
+            "jsHeapBytes": 48768205
           },
           "parseCount": 1,
           "maxMountedBlocks": 2,
@@ -985,7 +985,7 @@
       },
       "modeSwitch": {
         "toReadingMs": 124,
-        "toLiveMs": 125,
+        "toLiveMs": 124,
         "pollIntervalMs": 25
       }
     },
@@ -994,9 +994,9 @@
       "byteSize": 7259,
       "lineCount": 482,
       "open": {
-        "openToReadyMs": 106,
-        "openToEditableMs": 137,
-        "openToFirstInputMs": 154,
+        "openToReadyMs": 136,
+        "openToEditableMs": 167,
+        "openToFirstInputMs": 211,
         "pollIntervalMs": 25
       },
       "live": {
@@ -1004,43 +1004,43 @@
         "typingRounds": 10,
         "scrollRounds": 6,
         "docLines": 482,
-        "firstInputSettledEpochMs": 1790363915381,
+        "firstInputSettledEpochMs": 1790999807379,
         "baseline": {
           "renderedLines": 9,
-          "contentDomCount": 31,
+          "contentDomCount": 75,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 58955222
+          "jsHeapBytes": 45588551
         },
         "afterTyping": {
           "renderedLines": 9,
-          "contentDomCount": 31,
+          "contentDomCount": 75,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 61181816
+          "jsHeapBytes": 48422368
         },
         "afterScroll": {
           "renderedLines": 9,
-          "contentDomCount": 31,
+          "contentDomCount": 75,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 22903606
+          "jsHeapBytes": 50884088
         },
         "inputDelayMs": {
           "samples": [
-            4.299999997019768,
-            15.5,
-            16.700000002980232,
-            16.700000002980232,
-            16.599999994039536,
-            7.200000002980232,
-            12.099999994039536,
-            18.200000002980232,
-            18.299999997019768,
-            12
+            9.5,
+            12.199999988079071,
+            31.30000001192093,
+            33.39999997615814,
+            33.5,
+            33.20000001788139,
+            33.400000005960464,
+            33.19999998807907,
+            33.400000005960464,
+            33.29999998211861
           ],
-          "avgMs": 13.759999999403954,
-          "maxMs": 18.299999997019768
+          "avgMs": 28.639999997615813,
+          "maxMs": 33.5
         },
         "longTasks": null,
         "headingStats": {
@@ -1062,26 +1062,26 @@
           "totalBlocks": 241,
           "baseline": {
             "mountedBlocks": 6,
-            "contentDomCount": 19,
+            "contentDomCount": 54,
             "scrollTopPx": 25,
-            "scrollHeightPx": 28480,
-            "jsHeapBytes": 25082017
+            "scrollHeightPx": 24433,
+            "jsHeapBytes": 54043715
           },
           "afterScroll": {
-            "mountedBlocks": 6,
-            "contentDomCount": 19,
+            "mountedBlocks": 7,
+            "contentDomCount": 64,
             "scrollTopPx": 0,
-            "scrollHeightPx": 36156,
-            "jsHeapBytes": 25624021
+            "scrollHeightPx": 26081,
+            "jsHeapBytes": 51390909
           },
           "parseCount": 1,
-          "maxMountedBlocks": 34,
+          "maxMountedBlocks": 46,
           "ok": true
         }
       },
       "modeSwitch": {
-        "toReadingMs": 110,
-        "toLiveMs": 111,
+        "toReadingMs": 109,
+        "toLiveMs": 109,
         "pollIntervalMs": 25
       }
     },
@@ -1090,9 +1090,9 @@
       "byteSize": 21294,
       "lineCount": 602,
       "open": {
-        "openToReadyMs": 106,
-        "openToEditableMs": 163,
-        "openToFirstInputMs": 186,
+        "openToReadyMs": 138,
+        "openToEditableMs": 231,
+        "openToFirstInputMs": 262,
         "pollIntervalMs": 25
       },
       "live": {
@@ -1100,43 +1100,43 @@
         "typingRounds": 10,
         "scrollRounds": 6,
         "docLines": 602,
-        "firstInputSettledEpochMs": 1790363916702,
+        "firstInputSettledEpochMs": 1790999809176,
         "baseline": {
           "renderedLines": 32,
           "contentDomCount": 1430,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 24178709
+          "jsHeapBytes": 31117402
         },
         "afterTyping": {
           "renderedLines": 32,
           "contentDomCount": 1430,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 28418069
+          "jsHeapBytes": 28445838
         },
         "afterScroll": {
           "renderedLines": 32,
           "contentDomCount": 1430,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 21056379
+          "jsHeapBytes": 27222054
         },
         "inputDelayMs": {
           "samples": [
-            5,
-            11.899999991059303,
-            22,
-            8.200000002980232,
-            25.099999994039536,
-            17.400000005960464,
-            18.299999997019768,
-            18.100000008940697,
-            18.099999994039536,
-            12.099999994039536
+            31.69999998807907,
+            33.599999994039536,
+            33,
+            33.400000005960464,
+            33.19999998807907,
+            33.70000001788139,
+            33.099999994039536,
+            33.400000005960464,
+            33.29999998211861,
+            33.30000001192093
           ],
-          "avgMs": 15.619999998807907,
-          "maxMs": 25.099999994039536
+          "avgMs": 33.16999999880791,
+          "maxMs": 33.70000001788139
         },
         "longTasks": null,
         "headingStats": {
@@ -1156,14 +1156,14 @@
             "contentDomCount": 2846,
             "scrollTopPx": 25,
             "scrollHeightPx": 12456,
-            "jsHeapBytes": 29395522
+            "jsHeapBytes": 31361042
           },
           "afterScroll": {
             "mountedBlocks": 32,
             "contentDomCount": 2846,
             "scrollTopPx": 0,
             "scrollHeightPx": 12300,
-            "jsHeapBytes": 28454670
+            "jsHeapBytes": 33192086
           },
           "parseCount": 1,
           "maxMountedBlocks": 52,
@@ -1171,8 +1171,8 @@
         }
       },
       "modeSwitch": {
-        "toReadingMs": 110,
-        "toLiveMs": 126,
+        "toReadingMs": 126,
+        "toLiveMs": 124,
         "pollIntervalMs": 25
       }
     },
@@ -1181,9 +1181,9 @@
       "byteSize": 8680,
       "lineCount": 524,
       "open": {
-        "openToReadyMs": 108,
-        "openToEditableMs": 139,
-        "openToFirstInputMs": 157,
+        "openToReadyMs": 137,
+        "openToEditableMs": 168,
+        "openToFirstInputMs": 183,
         "pollIntervalMs": 25
       },
       "live": {
@@ -1191,43 +1191,43 @@
         "typingRounds": 10,
         "scrollRounds": 6,
         "docLines": 524,
-        "firstInputSettledEpochMs": 1790363918443,
+        "firstInputSettledEpochMs": 1790999811389,
         "baseline": {
           "renderedLines": 13,
-          "contentDomCount": 213,
+          "contentDomCount": 261,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 40130893
+          "jsHeapBytes": 43951277
         },
         "afterTyping": {
           "renderedLines": 13,
-          "contentDomCount": 213,
+          "contentDomCount": 261,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 33578350
+          "jsHeapBytes": 38029453
         },
         "afterScroll": {
           "renderedLines": 13,
-          "contentDomCount": 213,
+          "contentDomCount": 261,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 39100239
+          "jsHeapBytes": 43923743
         },
         "inputDelayMs": {
           "samples": [
-            11.700000002980232,
-            14.099999994039536,
-            16.600000008940697,
-            21,
-            18.299999997019768,
-            12.099999994039536,
-            18.200000002980232,
-            18.100000008940697,
-            18.19999998807907,
-            12.100000008940697
+            29.5,
+            33.30000001192093,
+            33.30000001192093,
+            33.39999997615814,
+            33.30000001192093,
+            33.400000005960464,
+            33.29999998211861,
+            33.30000001192093,
+            34.099999994039536,
+            32.5
           ],
-          "avgMs": 16.040000000596045,
-          "maxMs": 21
+          "avgMs": 32.940000000596044,
+          "maxMs": 34.099999994039536
         },
         "longTasks": null,
         "headingStats": {
@@ -1243,27 +1243,27 @@
           "scrollRounds": 6,
           "totalBlocks": 122,
           "baseline": {
-            "mountedBlocks": 14,
-            "contentDomCount": 432,
+            "mountedBlocks": 13,
+            "contentDomCount": 444,
             "scrollTopPx": 25,
-            "scrollHeightPx": 16857,
-            "jsHeapBytes": 35691278
+            "scrollHeightPx": 16942,
+            "jsHeapBytes": 36118404
           },
           "afterScroll": {
             "mountedBlocks": 13,
-            "contentDomCount": 388,
+            "contentDomCount": 444,
             "scrollTopPx": 0,
-            "scrollHeightPx": 16572,
-            "jsHeapBytes": 33776923
+            "scrollHeightPx": 16764,
+            "jsHeapBytes": 36349179
           },
           "parseCount": 1,
-          "maxMountedBlocks": 20,
+          "maxMountedBlocks": 21,
           "ok": true
         }
       },
       "modeSwitch": {
-        "toReadingMs": 108,
-        "toLiveMs": 109,
+        "toReadingMs": 124,
+        "toLiveMs": 124,
         "pollIntervalMs": 25
       }
     },
@@ -1272,9 +1272,9 @@
       "byteSize": 26155,
       "lineCount": 1342,
       "open": {
-        "openToReadyMs": 106,
-        "openToEditableMs": 168,
-        "openToFirstInputMs": 193,
+        "openToReadyMs": 138,
+        "openToEditableMs": 200,
+        "openToFirstInputMs": 224,
         "pollIntervalMs": 25
       },
       "live": {
@@ -1282,43 +1282,43 @@
         "typingRounds": 10,
         "scrollRounds": 6,
         "docLines": 1342,
-        "firstInputSettledEpochMs": 1790363919932,
+        "firstInputSettledEpochMs": 1790999813271,
         "baseline": {
           "renderedLines": 46,
           "contentDomCount": 349,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 40993796
+          "jsHeapBytes": 45674576
         },
         "afterTyping": {
           "renderedLines": 46,
           "contentDomCount": 349,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 45469265
+          "jsHeapBytes": 51012833
         },
         "afterScroll": {
           "renderedLines": 46,
           "contentDomCount": 349,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 48019095
+          "jsHeapBytes": 53767797
         },
         "inputDelayMs": {
           "samples": [
-            25.600000008940697,
-            22.899999991059303,
-            22.600000008940697,
-            22.399999991059303,
-            33.70000000298023,
-            33,
+            20.19999998807907,
+            40.5,
+            33.400000005960464,
+            33.20000001788139,
             33.5,
-            33.1000000089407,
-            33.3999999910593,
-            33.30000001192093
+            33.29999998211861,
+            33.400000005960464,
+            33.30000001192093,
+            33.39999997615814,
+            33.10000002384186
           ],
-          "avgMs": 29.350000001490116,
-          "maxMs": 33.70000000298023
+          "avgMs": 32.730000001192096,
+          "maxMs": 40.5
         },
         "longTasks": null,
         "headingStats": {
@@ -1335,17 +1335,17 @@
           "totalBlocks": 202,
           "baseline": {
             "mountedBlocks": 12,
-            "contentDomCount": 554,
+            "contentDomCount": 610,
             "scrollTopPx": 25,
             "scrollHeightPx": 25616,
-            "jsHeapBytes": 42983891
+            "jsHeapBytes": 56596665
           },
           "afterScroll": {
             "mountedBlocks": 12,
-            "contentDomCount": 554,
+            "contentDomCount": 610,
             "scrollTopPx": 0,
             "scrollHeightPx": 25959,
-            "jsHeapBytes": 44504098
+            "jsHeapBytes": 52150774
           },
           "parseCount": 1,
           "maxMountedBlocks": 21,
@@ -1353,8 +1353,8 @@
         }
       },
       "modeSwitch": {
-        "toReadingMs": 110,
-        "toLiveMs": 110,
+        "toReadingMs": 124,
+        "toLiveMs": 125,
         "pollIntervalMs": 25
       }
     },
@@ -1363,9 +1363,9 @@
       "byteSize": 242734,
       "lineCount": 6007,
       "open": {
-        "openToReadyMs": 123,
-        "openToEditableMs": 149,
-        "openToFirstInputMs": 178,
+        "openToReadyMs": 122,
+        "openToEditableMs": 215,
+        "openToFirstInputMs": 254,
         "pollIntervalMs": 25
       },
       "live": {
@@ -1373,43 +1373,43 @@
         "typingRounds": 10,
         "scrollRounds": 6,
         "docLines": 6007,
-        "firstInputSettledEpochMs": 1790363921316,
+        "firstInputSettledEpochMs": 1790999814973,
         "baseline": {
           "renderedLines": 52,
           "contentDomCount": 171,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 41730045
+          "jsHeapBytes": 47797342
         },
         "afterTyping": {
           "renderedLines": 52,
           "contentDomCount": 171,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 37409130
+          "jsHeapBytes": 47724916
         },
         "afterScroll": {
           "renderedLines": 52,
           "contentDomCount": 171,
           "headingLineCount": 1,
           "inviewHeadingCount": 1,
-          "jsHeapBytes": 39538179
+          "jsHeapBytes": 50113567
         },
         "inputDelayMs": {
           "samples": [
-            15.399999991059303,
-            15.5,
-            19.100000008940697,
-            33.3999999910593,
-            33.29999999701977,
-            33.900000005960464,
-            32.79999999701977,
-            33.70000000298023,
-            32.900000005960464,
-            33.79999999701977
+            39.900000005960464,
+            33.29999998211861,
+            33.30000001192093,
+            33.400000005960464,
+            33.400000005960464,
+            33.39999997615814,
+            33.20000001788139,
+            33.29999998211861,
+            33.400000005960464,
+            33.400000005960464
           ],
-          "avgMs": 28.379999999701976,
-          "maxMs": 33.900000005960464
+          "avgMs": 34,
+          "maxMs": 39.900000005960464
         },
         "longTasks": null,
         "headingStats": {
@@ -1426,17 +1426,17 @@
           "totalBlocks": 103,
           "baseline": {
             "mountedBlocks": 3,
-            "contentDomCount": 1468,
+            "contentDomCount": 1482,
             "scrollTopPx": 25,
             "scrollHeightPx": 145731,
-            "jsHeapBytes": 45903307
+            "jsHeapBytes": 50845956
           },
           "afterScroll": {
             "mountedBlocks": 3,
-            "contentDomCount": 1468,
+            "contentDomCount": 1482,
             "scrollTopPx": 0,
             "scrollHeightPx": 144906,
-            "jsHeapBytes": 25815130
+            "jsHeapBytes": 32297141
           },
           "parseCount": 1,
           "maxMountedBlocks": 3,
@@ -1444,7 +1444,7 @@
         }
       },
       "modeSwitch": {
-        "toReadingMs": 126,
+        "toReadingMs": 124,
         "toLiveMs": 124,
         "pollIntervalMs": 25
       }

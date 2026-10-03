@@ -56,10 +56,13 @@ export interface HostDocumentPort {
   getText(): string
   /** 应用一组全文偏移变更；返回是否成功 */
   applyChanges(changes: SerChange[]): Promise<boolean>
-  /** 对权威文档执行宿主撤销（undoRedoService 文本栈）；返回是否执行 */
-  undo(): Promise<boolean>
-  /** 对权威文档执行宿主重做（undoRedoService 文本栈）；返回是否执行 */
-  redo(): Promise<boolean>
+  /** 对权威文档执行宿主撤销（undoRedoService 文本栈）；返回是否执行。
+   *  P2-04（#281）起 origin（请求面板的来源身份）：嵌入目标端口的请求
+   *  经 provider 实现「临时激活 B → 全局 undo → 重显来源面板」的 P2-01
+   *  验证路由；缺省（根面板请求）为 undefined，语义不变 */
+  undo(origin?: { docUri: string }): Promise<boolean>
+  /** 对权威文档执行宿主重做（undoRedoService 文本栈）；返回是否执行（origin 语义同 undo） */
+  redo(origin?: { docUri: string }): Promise<boolean>
 }
 
 /** 面板发送通道 */
@@ -156,6 +159,10 @@ export type SessionNotice =
       /** webview 防抖重报的最新全文快照（R-1）：含暂停后继续输入与暂缓集
        *  内容，比 fragments 更完整；复制取回时优先 */
       webviewText?: string
+      /** P2-13（#290）来源标记：true = 引用编辑端口（虚拟面板，refOrigin
+       *  在场）——provider 据此把通知呈现为三项当次选择（对比并解决/
+       *  放弃当前版本/取消）；根面板关闭残留维持既有「复制取回」呈现 */
+      fromRefPort?: boolean
     }
 
 export interface DocumentSessionOptions {
@@ -203,6 +210,9 @@ interface PanelEntry {
   sessionId: string
   port: PanelPort
   ready: boolean
+  /** P2-04（#281）目标编辑端口的来源面板身份（attachPanel 注入）：宿主
+   *  undo/redo 路由据此恢复来源面板活动态；根面板为 undefined */
+  refOrigin?: { docUri: string }
   pending: PendingEdit[]
   /** 已收但仍在全局 queue 中等待执行的请求；关闭检查须同步看见。 */
   queued: Map<number, SerChange[]>
@@ -258,6 +268,9 @@ interface PanelEntry {
 interface HoverSourceGrant {
   fsPath: string
   version: number
+  /** P2-03（#280）：初始定位区间参考（锚点命中的锚定区间；宽容重载为全文
+   *  区间）——子引用准入已不以它为界（validChildSource 按来源全文校验），
+   *  仅随租约保留定位语义 */
   range: { start: number; end: number }
   scope: HoverPreviewScope
   path: string[]
@@ -280,13 +293,16 @@ const HOVER_SOURCES_LIMIT = 64
 const IMAGE_SRC_TARGET_LIMIT = 256
 
 /** #224 悬停读取缓存的请求形态键（「按规范目标、范围区分」的形态近似：
- * 三种目标形态互斥——直接目标 / 普通链接 href / 双链 target 原文；范围
- * 锚点已含在各自原文内） */
+ *  三种目标形态互斥——直接目标 / 普通链接 href / 双链 target 原文；范围
+ *  锚点已含在各自原文内。P2-03（#280）anchorOptional 并入：刷新宽容
+ *  读取（锚点缺失回成功全文）与严格读取（anchor-missing 分态）的结果
+ *  形态不同，不得共享缓存条目——宽容成功被严格首开命中会跳过锚点验证，
+ *  严格失败缓存（不缓存，天然隔离）反向亦然 */
 function hoverShapeKeyOf(
-  message: Pick<HoverPreviewRequestPayload, 'target' | 'linkHref' | 'directTarget'>,
+  message: Pick<HoverPreviewRequestPayload, 'target' | 'linkHref' | 'directTarget' | 'anchorOptional'>,
   source?: { fsPath: string; version: number },
 ): string {
-  const prefix = source ? `s:${source.fsPath}\n${source.version}\n` : ''
+  const prefix = `${source ? `s:${source.fsPath}\n${source.version}\n` : ''}${message.anchorOptional === true ? 'a:' : ''}`
   if (message.directTarget !== undefined) {
     return `${prefix}d:${message.directTarget.fsPath}\n${message.directTarget.anchor ?? ''}`
   }
@@ -394,13 +410,16 @@ export class DocumentSession {
     return this.options.docUri ?? ''
   }
 
-  /** 注册一个面板（resolveCustomTextEditor 时调用），返回 sessionId */
-  attachPanel(port: PanelPort): string {
+  /** 注册一个面板（resolveCustomTextEditor 时调用），返回 sessionId。
+   *  P2-04 起可选 refOrigin：目标编辑端口（嵌入内部 Live 的虚拟面板）携带
+   *  来源面板身份，history.request 执行时透传给权威端口 undo/redo */
+  attachPanel(port: PanelPort, opts?: { refOrigin?: { docUri: string } }): string {
     const sessionId = `panel-${this.nextPanelId++}`
     this.panels.set(sessionId, {
       sessionId,
       port,
       ready: false,
+      refOrigin: opts?.refOrigin,
       pending: [],
       queued: new Map(),
       ackCache: new Map(),
@@ -453,6 +472,7 @@ export class DocumentSession {
           // 快照随通知带走（面板即将注销，事后无从查询）；暂停后新输入
           // 与暂缓集内容只在快照里（R-1）
           webviewText: snapshotText,
+          ...(panel.refOrigin ? { fromRefPort: true } : {}),
         })
       }
     }
@@ -463,6 +483,16 @@ export class DocumentSession {
     // 被 webview 版本单调防线丢弃、增量落点错位。补发由后续路径完成：
     // apply 成功时本笔回流以外部变更身份有序入队（排在本批暂存量之前）
     // 带动补发，失败时由 processEditRequest 的失败分支收口。
+  }
+
+  /** P2-13（#290）在途编辑排空等待面：resolve = 调用时刻已入队（含正在
+   *  执行）的全部编辑任务完成。父面板关闭交接在 detach 虚拟面板前调用——
+   *  在途写回照常完成（P2-01 §7 验证），settle 之后的未确认输入才是真正
+   *  未写入 B 的（暂停快照 / 组合期），dirty 判定也取到在途完成后的最新
+   *  状态。此后新入队的任务不属于本次等待范围（调用方语义：dispose 时刻
+   *  的「宿主可继续完成的在途请求」） */
+  settleEdits(): Promise<void> {
+    return this.queue
   }
 
   dispose(): void {
@@ -481,6 +511,18 @@ export class DocumentSession {
    *  未知会话一律 false */
   hasHoverSource(sessionId: string, fsPath: string): boolean {
     return this.panels.get(sessionId)?.hoverSourceFsPaths.has(fsPath) ?? false
+  }
+
+  /** P2-04（#281）occurrence 级来源固定查询面：fsPath 是否为本面板成功
+   *  送达 **且被该 occurrence 的 watch 固定** 的目标——refEdit.bind 的校验
+   *  基准（绑定要求「宿主已确认的来源租约」：仅送达不够，该引用位置须仍
+   *  持有订阅；unwatch/淘汰后固定释放即拒绝重绑）。未知会话一律 false */
+  hasHoverSourcePin(sessionId: string, fsPath: string, instanceId: string): boolean {
+    const panel = this.panels.get(sessionId)
+    if (!panel?.ready || !panel.hoverSourceFsPaths.has(fsPath)) {
+      return false
+    }
+    return panel.hoverSourcePins.get(fsPath)?.has(instanceId) === true
   }
 
   /** 只有本面板成功送达的目标可持有；来源租约按目标精确转交到 occurrence。 */
@@ -645,8 +687,15 @@ export class DocumentSession {
       case 'image.export': {
         // #212 图片导出：只读交互（不写文档、不入撤销栈），会话守卫与
         // diagram.export 同口径（就绪且 docUri 匹配才放行，否则静默丢弃）；
-        // 结果回来源面板（宿主通知呈现，弹窗侧无 UI 反馈需求）
+        // 结果回来源面板（宿主通知呈现，弹窗侧无 UI 反馈需求）。
+        // P2-11（#288）sourceDocUri（嵌入内部 Live 弹窗导出的 B 来源）：
+        // 与 link.activate / image.request 的来源守卫同口径——须为本面板
+        // 实际送达过的目标，不匹配即丢弃（B 内图片按 A 目录导出是错误
+        // 文件，宁可不动作不回落）
         if (!panel.ready || message.docUri !== this.docUri) {
+          return Promise.resolve()
+        }
+        if (message.sourceDocUri !== undefined && !panel.hoverSourceFsPaths.has(message.sourceDocUri)) {
           return Promise.resolve()
         }
         const report = (result: { ok: boolean; reason?: ImageExportFailReason }): void => {
@@ -868,12 +917,25 @@ export class DocumentSession {
           return Promise.resolve()
         }
         const op = message.op
-        const task = this.queue.then(() => (op === 'undo' ? this.doc.undo() : this.doc.redo()))
+        // P2-04（#281）：目标编辑端口（虚拟面板）携来源身份——provider 的
+        // undo/redo 实现据此走 P2-01 验证的激活路由；根面板（无 refOrigin）
+        // 传 undefined，既有语义不变
+        const origin = panel.refOrigin
+        const task = this.queue.then(() =>
+          op === 'undo' ? this.doc.undo(origin) : this.doc.redo(origin))
         this.queue = task.then(() => undefined, () => undefined)
         return task.then(() => undefined)
       }
       case 'sync.request': {
         if (!panel.ready) {
+          return Promise.resolve()
+        }
+        if (panel.suspended) {
+          // P2-12（#289）：暂停面板的重同步请求 = 放弃当前版本／对比转交后
+          // 重新对齐 B——走恢复语义（清暂停与冲突快照 + 权威全文 doc.resync）。
+          // 只发 doc.resync 不清 suspended 会把后续输入全部落入冲突快照
+          // 黑洞（宿主暂停是写回裁决的权威侧，webview 侧标志不替代它）
+          this.resumePanel(sessionId)
           return Promise.resolve()
         }
         panel.port.send({
@@ -1059,11 +1121,17 @@ export class DocumentSession {
           if (message.source !== undefined && panel.hoverParentGrants.get(message.source.parentInstanceId) !== parent) {
             result = { ok: false, reason: 'source-expired' }
           }
+          // P2-03（#280，ADR-0011）：祖先循环按规范目标文档身份判定——不同
+          // 锚点不能绕过祖先循环，同目标兄弟 occurrence 仍合法。判定只对
+          // **链上子引用**（带来源）生效：第一跳（无 parent）不判循环——
+          // 页内锚点/自文档引用合法打开（目标即来源文档自身，一期 #219 契约
+          // 保持）；其内容中的再引用在链上按文档身份截断（深度与预算兜底）。
+          // grant.path/expansionPath 仍从根面板起算——B→A 回指在链上可见。
           const pathToParent = parent?.path ?? [canonicalRefTargetKey(
-            this.options.rootFsPath ?? this.docUri, { kind: 'full' }, this.options.isWindowsHost ?? false)]
+            this.options.rootFsPath ?? this.docUri, this.options.isWindowsHost ?? false)]
           if (result.ok) {
-            const key = canonicalRefTargetKey(result.fsPath, result.scope, this.options.isWindowsHost ?? false)
-            if (occurrenceId !== undefined && inExpansionPath(pathToParent, key)) result = { ok: false, reason: 'cycle' }
+            const key = canonicalRefTargetKey(result.fsPath, this.options.isWindowsHost ?? false)
+            if (parent !== undefined && occurrenceId !== undefined && inExpansionPath(pathToParent, key)) result = { ok: false, reason: 'cycle' }
             else if (occurrenceId !== undefined && panel.expansionBudget.attachContent(
               occurrenceId, `${occurrenceId}\n${result.fsPath}\n${result.version}`,
               result.lfText.length * 2 + 128) !== 'ok') {
@@ -1077,7 +1145,7 @@ export class DocumentSession {
               panel.hoverSourceLeases.set(sourceLeaseId, result.fsPath)
               panel.hoverLeaseGrants.set(sourceLeaseId, {
                 fsPath: result.fsPath, version: result.version, range: result.range, scope: result.scope,
-                path: [...pathToParent, canonicalRefTargetKey(result.fsPath, result.scope, this.options.isWindowsHost ?? false)],
+                path: [...pathToParent, canonicalRefTargetKey(result.fsPath, this.options.isWindowsHost ?? false)],
                 depth, treeId, occurrenceId: occurrenceId ?? '',
               })
             }
@@ -1110,7 +1178,7 @@ export class DocumentSession {
                   text: result.lfText,
                   range: result.range,
                   scope: result.scope,
-                  expansionPath: [...pathToParent, canonicalRefTargetKey(result.fsPath, result.scope,
+                  expansionPath: [...pathToParent, canonicalRefTargetKey(result.fsPath,
                     this.options.isWindowsHost ?? false)],
                   depth,
                   ...(sourceLeaseId !== undefined ? { sourceLeaseId } : {}),

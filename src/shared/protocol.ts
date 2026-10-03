@@ -64,6 +64,120 @@ export type HostToWebview =
   | { kind: 'doc.resync'; version: number; text: string }
   /** 面板处于暂停写回状态（webview 重载后由 init 后跟随下发，恢复暂停提示） */
   | { kind: 'session.suspended'; version: number; reason: 'conflict' | 'host-error' }
+  // ---- P2-04（#281）目标编辑端口（宿主 → webview）：B 会话的虚拟面板
+  // 推送经 refEdit.push 信封回来源面板，webview 按 portId 路由到嵌入实例
+  // ——B 的 ack/dirty/资源结果不落到根面板或另一 occurrence。
+  /** refEdit.bind 的结果：成功携带 portId（B 会话虚拟面板身份）、B 的
+   *  规范 docUri（出站消息目标戳记——webview 无法从 fsPath 自行构造）、
+   *  当前版本与 dirty；失败原因：source=未固定来源/occurrence 不符，
+   *  open-failed=目标文档无法装载，not-markdown=非 Markdown 目标 */
+  | {
+      kind: 'refEdit.bound'
+      reqId: number
+      ok: true
+      portId: string
+      fsPath: string
+      docUri: string
+      version: number
+      dirty: boolean
+    }
+  | { kind: 'refEdit.bound'; reqId: number; ok: false; reason: 'source' | 'open-failed' | 'not-markdown' }
+  /** B 会话编辑通道事件（init / edit.ack / doc.changed / doc.resync /
+   *  session.suspended）——B 的 DocumentSession 经虚拟面板 send 出站的
+   *  全部形态；其他消息（locale/settings 等）不进本信封 */
+  | { kind: 'refEdit.push'; portId: string; fsPath: string; message: RefEditHostEvent }
+  /** 目标 B 的未保存状态推送（dirty 变化时，面板级广播——按 fsPath 命中
+   *  该目标的全部嵌入实例；不携带 portId，多 occurrence 一致） */
+  | { kind: 'refEdit.dirty'; fsPath: string; dirty: boolean }
+  /** refEdit.save 的结果（保存失败保留现场，dirty 推送另行对齐） */
+  | { kind: 'refEdit.save.result'; portId: string; fsPath: string; ok: boolean }
+  /** P2-05（#282）refEdit.close.query 的应答：B 的最新权威状态（dirty /
+   *  version / 根内相对路径）——模态呈现与确认基线的单一事实源（宿主回包
+   *  而非 webview 缓存的 dirty 推送，规避推送时序下的旧值） */
+  | {
+      kind: 'refEdit.close.state'
+      reqId: number
+      fsPath: string
+      dirty: boolean
+      version: number
+      relPath: string
+    }
+  /** P2-05（#282）refEdit.close.execute 的结果：closed = 关闭动作完成（B 已
+   *  保存/回滚，webview 可收尾退出）；save-failed / discard-failed = 动作
+   *  失败保留现场；stale = 确认基线已过期（B 在确认期间被修改或保存后又有
+   *  新修改），须重新确认，不得用旧确认丢弃新修改 */
+  | {
+      kind: 'refEdit.close.result'
+      reqId: number
+      fsPath: string
+      outcome: 'closed' | 'save-failed' | 'discard-failed' | 'stale'
+    }
+  /** P2-12（#289）「对比并解决」结果：ok = 原生对比页已打开（临时资源完整
+   *  就绪并成功转交；webview 随即出站 sync.request 重同步解除暂停——旧
+   *  未提交队列不重放）；!ok = 打开/资源失败，暂停现场与输入保留，可重试 */
+  | { kind: 'refEdit.conflictCompare.result'; portId: string; fsPath: string; ok: boolean }
+  /** P2-04 测试钩子：切换指定嵌入（inner + occurrence 序号）的内部模式
+   *  （与用户点击头部模式按钮同一处理器链路）；宿主测试无法向 webview
+   *  派发真实点击 */
+  | { kind: 'embed.test.mode'; inner: string; mode: 'reading' | 'live'; occurrence?: number }
+  /** P2-04 测试钩子：向指定嵌入的内部 Live 实例注入一笔输入事务（与真实
+   *  键入同一事务管线 → refEdit.message 出站） */
+  | { kind: 'embed.test.type'; inner: string; pos: number; text: string; occurrence?: number }
+  /** P2-04 测试钩子：触发指定嵌入的目标保存（与头部保存入口同一出站） */
+  | { kind: 'embed.test.save'; inner: string; occurrence?: number }
+  /** P2-10 测试钩子：聚焦指定嵌入的内部 Live 编辑器（可选设置光标/选区
+   *  ——真实 focus 语义；后续 format/table 等命令按焦点目标分派到 B） */
+  | { kind: 'embed.test.focus'; inner: string; pos?: number; to?: number; occurrence?: number }
+  /** P2-04 测试钩子：向指定嵌入实例转发撤销/重做（与真实键入 Mod-Z 同一
+   *  请求管线——实例竞态守卫后经 refEdit.message 出站 history.request） */
+  | { kind: 'embed.test.history'; inner: string; op: 'undo' | 'redo'; occurrence?: number }
+  /** P2-11 测试钩子：向指定嵌入实例注入图片粘贴载荷（与真实 paste 拦截
+   *  同一实例管线——实例 reqId 分配 + 在途登记 + refEdit.message 信封
+   *  出站；宿主测试无法向 webview 派发真实剪贴板事件） */
+  | {
+      kind: 'embed.test.pasteImage'
+      inner: string
+      mime: string
+      dataBase64: string
+      fileNameHint?: string
+      occurrence?: number
+    }
+  /** P2-04 测试钩子：以给定端口身份伪造一笔 edit.request 出站（宿主侧
+   *  重复 seq 去重 / 释放后迟到写入拒收 / 不可安全写回暂停的目标文本
+   *  断言载体；repeat 控制重复发送次数——同 seq 幂等） */
+  | {
+      kind: 'embed.test.portWrite'
+      portId: string
+      fsPath: string
+      seq: number
+      baseVersion: number
+      offset: number
+      length: number
+      text: string
+      repeat?: number
+    }
+  /** P2-05（#282）测试钩子：触发指定嵌入的显式关闭意图（与头部关闭按钮 /
+   *  嵌入内 Esc / 删除拦截同一处理器链路；intent 三径同参数） */
+  | {
+      kind: 'embed.test.close'
+      inner: string
+      intent: 'close' | 'escape' | 'delete'
+      occurrence?: number
+    }
+  /** P2-05（#282）测试钩子：点击关闭确认模态的按钮（真实 click 链路；
+   *  宿主测试无法向 webview 派发真实点击） */
+  | { kind: 'embed.test.dialogAction'; action: 'save' | 'discard' | 'cancel' }
+  /** P2-05（#282）测试钩子：在主编辑器派发删除指定引用行的事务（真实
+   *  事务管线——命中活跃引用区间的删除走拦截确认链路） */
+  | { kind: 'embed.test.deleteRef'; inner: string; occurrence?: number }
+  /** P2-12（#289）测试钩子：触发指定嵌入的冲突三项动作（与选择条按钮 /
+   *  键位操作同一处理器链路；reopen 为收起态的再展开入口） */
+  | {
+      kind: 'embed.test.conflictAction'
+      inner: string
+      action: 'compare' | 'discard' | 'cancel' | 'reopen'
+      occurrence?: number
+    }
   /** 请求 webview 回报视图诊断（文本与渲染行数，供测试与性能观测） */
   | { kind: 'view.state.request' }
   /** #272 测试钩子门控的观测开关；只记录传播身份，不改变调度。 */
@@ -364,6 +478,19 @@ export type HostToWebview =
       /** Live 入口的 Ctrl 修饰位（派发 mouseover 时透传；仅 live-* 有意义） */
       ctrlKey?: boolean
     }
+  /** P2-06（#283）测试钩子：悬停浮窗根引用内部 Live 的操作族——与浮窗
+   *  头部按钮（mode/save/close）/编辑器事务管线同一处理器链路（宿主测试
+   *  无法向 webview 派发真实点击或键入）。type 向浮窗内编辑器注入一笔
+   *  输入事务；focus 聚焦浮窗内编辑器（可选设置选区）；close 携带
+   *  intent（close/escape 与头部按钮/Esc 消隐同径） */
+  | {
+      kind: 'hover.test.live'
+      action: 'mode' | 'type' | 'focus' | 'save' | 'close'
+      intent?: 'close' | 'escape'
+      pos?: number
+      to?: number
+      text?: string
+    }
   /** 测试钩子（#21）：在真实 webview 的 CM6 中输入，验证暂停态即时留存。 */
   | { kind: 'sync.test.edit'; offset: number; text: string; closeAfter?: boolean }
   /** 测试钩子：组合候选写入首行 DOM，经过 CM6 MutationObserver 的真实输入链。 */
@@ -474,11 +601,12 @@ export type HostToWebview =
     }
   /** 悬停文档预览结果（#218，hover.request 的应答，reqId+instanceId 双配对）：
    *  成功携带规范目标身份（fsPath + 所属根内相对路径）、目标版本
-   *  （TextDocument.version，#224 变更刷新的版本基准）、LF UTF-16 全文与
-   *  源范围、语义范围选择器（#219 起 full 全文 / heading 章节 / block 块；
-   *  全文随范围一起返回是「保留全文解析上下文再选取范围」的载荷形态，
-   *  webview 切范围在切块后按块区间过滤，不孤立解析截取字符串）。失败附
-   *  原因码（错误分态见 HoverPreviewFailReason；anchor-missing 附锚点原文）
+   *  （TextDocument.version，#224 变更刷新的版本基准）与 LF UTF-16 全文。
+   *  P2-03（#280，ADR-0011）起内容范围恒为目标全文；range 语义改为**初始
+   *  定位区间**（锚点命中的 LF 区间，heading/block 首开定位到 start；full
+   *  或刷新宽容锚点缺失时为全文区间 [0, length]），scope 保留语义选择器
+   *  （引用身份与观测探针用），两者均不再是内容或编辑边界。失败附原因码
+   *  （错误分态见 HoverPreviewFailReason；anchor-missing 附锚点原文）
    *  ——webview 就地 i18n 呈现，不弹宿主通知。只读消息：宿主不写任何文档 */
   | {
       kind: 'hover.result'
@@ -488,6 +616,7 @@ export type HostToWebview =
       target: HoverPreviewTargetIdentity
       version: number
       text: string
+      /** 初始定位区间（LF 坐标；锚点命中的锚定区间，full/宽容退化为全文区间） */
       range: { start: number; end: number }
       scope: HoverPreviewScope
       /** #244 Host-authenticated expansion ancestry, including root A. */
@@ -567,6 +696,26 @@ export type HostToWebview =
       resources: { js: string; wasm: string } | null
     }
 
+/** P2-04（#281）目标编辑端口推送事件（refEdit.push 载荷）：B 会话对虚拟
+ *  面板 send 出站的编辑通道子集——与根面板同构的同步语义（init 装载 /
+ *  ack 确认 / 外部增量 / 全文重同步 / 暂停通知），不含 locale/settings 等
+ *  面板级消息。P2-11（#288）起资源回包同信封定向回推（image.result /
+ *  image.invalidate / image.paste.result / refresh.invalidated）——B 会话
+ *  的资源结果按 portId 路由到嵌入实例，不广播根面板（reqId 空间隔离，
+ *  不与 A 面板或其他 B occurrence 的管理器撞号）。 */
+export type RefEditHostEvent = Extract<
+  HostToWebview,
+  | { kind: 'init' }
+  | { kind: 'edit.ack' }
+  | { kind: 'doc.changed' }
+  | { kind: 'doc.resync' }
+  | { kind: 'session.suspended' }
+  | { kind: 'image.result' }
+  | { kind: 'image.invalidate' }
+  | { kind: 'image.paste.result' }
+  | { kind: 'refresh.invalidated' }
+>
+
 /** webview → 宿主消息 */
 export type WebviewToHost =
   | { kind: 'paste.preferences.set'; reqId: number; preserveFormatting: boolean }
@@ -610,6 +759,87 @@ export type WebviewToHost =
   | { kind: 'sync.test.close'; sessionId: string; docUri: string }
   /** 暂停横幅按钮动作：copy = 请求宿主复制未确认输入；resume = 请求恢复（重新同步） */
   | { kind: 'conflict.action'; sessionId: string; docUri: string; action: 'copy' | 'resume' }
+  // ---- P2-04（#281）目标编辑端口：嵌入内部 Live 与宿主 B 会话的绑定与
+  // 编辑通道。根面板身份（panelSessionId/panelDocUri = A 的会话）用于认证
+  // 与生命周期；portId 是 B 会话上的虚拟面板身份（出站消息的目标戳记）。
+  // 宿主从已确认的来源租约绑定 B：fsPath 必须是该面板成功送达且被该
+  // occurrence watch 固定的目标——拒绝前端自报任意 URI 与释放后的迟到
+  // 消息（portId 失配即丢弃）。
+  /** 请求绑定目标编辑端口（可见且内部 Live 的嵌入实例） */
+  | {
+      kind: 'refEdit.bind'
+      panelSessionId: string
+      panelDocUri: string
+      fsPath: string
+      occurrence: string
+      reqId: number
+    }
+  /** 释放目标编辑端口（切回 Reading / 嵌入离屏 / 实例销毁） */
+  | {
+      kind: 'refEdit.unbind'
+      panelSessionId: string
+      panelDocUri: string
+      portId: string
+      fsPath: string
+    }
+  /** 编辑通道出站：edit.request / conflict.report / composition.changed /
+   *  history.request / sync.request / conflict.action（链接/图片/资源消息
+   *  不混入本通道——完整接线归后续票） */
+  | {
+      kind: 'refEdit.message'
+      panelSessionId: string
+      panelDocUri: string
+      portId: string
+      fsPath: string
+      message: RefEditClientMessage
+    }
+  /** 保存目标 B（焦点在嵌入内时的 Ctrl+S 与头部保存入口共用） */
+  | {
+      kind: 'refEdit.save'
+      panelSessionId: string
+      panelDocUri: string
+      portId: string
+      fsPath: string
+    }
+  /** P2-05（#282）显式关闭意图开始：统一检查目标 B 最新状态（关闭按钮 /
+   *  Esc / 删除活跃引用三径共用；intent 为观测与收尾分派用）。宿主回
+   *  refEdit.close.state */
+  | {
+      kind: 'refEdit.close.query'
+      panelSessionId: string
+      panelDocUri: string
+      portId: string
+      fsPath: string
+      intent: 'close' | 'escape' | 'delete'
+      reqId: number
+    }
+  /** P2-05（#282）用户确认后的关闭动作执行：save = 保存并关闭；discard =
+   *  丢弃修改并关闭（文档级回滚）。confirmedVersion 为用户确认基线（模态
+   *  最新已知版本）——宿主执行前比对 B 当前版本，不一致回 stale 重新确认，
+   *  不得用旧确认丢弃新修改。宿主回 refEdit.close.result */
+  | {
+      kind: 'refEdit.close.execute'
+      panelSessionId: string
+      panelDocUri: string
+      portId: string
+      fsPath: string
+      action: 'save' | 'discard'
+      confirmedVersion: number
+      reqId: number
+    }
+  /** P2-12（#289）冲突三项「对比并解决」：请求宿主创建承载当前未提交
+   *  输入的临时副本（untitled）并打开 VSCode 原生对比页（左=临时副本、
+   *  右=真实 B）。text 为嵌入实例当前全文快照（webview 侧唯一权威来源，
+   *  宿主不回查）。宿主回 refEdit.conflictCompare.result；对比页交互由
+   *  宿主管理，扩展不自建解决界面 */
+  | {
+      kind: 'refEdit.conflictCompare'
+      panelSessionId: string
+      panelDocUri: string
+      portId: string
+      fsPath: string
+      text: string
+    }
   /** view.locate 送达确认（#163 验收反馈）：webview 应用定位后原样回发
    *  消息 offset——宿主只补发「从未送达」的定位意图（面板重载竞态兜底），
    *  已送达的定位交给 webview 持久化锚点恢复，历史程序定位不再重播 */
@@ -784,6 +1014,19 @@ export type WebviewToHost =
           parseCount: number; virtualized: boolean; maxMountedBlocks: number
           mountedEver: number; unmountedEver: number
         } | null
+        /** P2-05 关闭确认模态观测（该嵌入发起的退出意图）：none = 无模态 /
+         *  open = 模态在场 / stale = 确认期间目标被修改需重新确认；旧
+         *  webview 缺省。 */
+        closeDialog?: 'none' | 'open' | 'stale'
+        /** P2-05 发起退出意图的径（模态/挂起期间观测）；旧 webview 缺省。 */
+        closeIntent?: 'close' | 'escape' | 'delete' | ''
+        /** P2-12 冲突选择态（none = 非暂停 / open = 三项在场 / collapsed =
+         *  已取消收起）；旧 webview 缺省。 */
+        conflictChoice?: 'none' | 'open' | 'collapsed'
+        /** P2-12 「对比并解决」在途（防重入观测）；旧 webview 缺省。 */
+        conflictComparePending?: boolean
+        /** P2-12 对比打开失败的就地提示在场；旧 webview 缺省。 */
+        conflictNotice?: boolean
       }>
       /** #223 Live 嵌入显隐观测：嵌入表逐枚的源码显形态（目标原文、行号、
        *  光标/选区是否触及源码区间——selectionTouchesRange 语义；旧 webview
@@ -918,6 +1161,11 @@ export type WebviewToHost =
        *  not-found 分态——条目仍可悬停显示失效占位）。target 字段此时为
        *  条目显示名（错误分态文案的取材） */
       directTarget?: { fsPath: string; anchor?: string }
+      /** P2-03（#280，ADR-0011）刷新宽容：已打开实例重载（hover.invalidated
+       *  changed 驱动的同实例重发 / 版本仲裁自愈重发）置 true——宿主锚点
+       *  缺失不构成失败，回成功全文（range 退化为全文区间，无初始定位点）。
+       *  首开不带本字段：锚点缺失仍 anchor-missing 分态（重开再验证原锚点） */
+      anchorOptional?: boolean
     }
   /** 悬停目标订阅（#224 引用视图同步，只读消息）：webview 侧视图实例
    *  （浮层/嵌入卡片）成功装载目标后登记——宿主对该目标的文档修改与磁盘
@@ -978,7 +1226,18 @@ export type WebviewToHost =
    *  不经 canvas 光栅化；src 为文档内图片原始地址（外链图 webview 侧
    *  按钮已禁用，不发本消息），fileName 为建议名（basename 清洗后）；
    *  结果经 image.export.result 回报来源面板 */
-  | { kind: 'image.export'; sessionId: string; docUri: string; reqId: number; src: string; fileName: string }
+  | {
+      kind: 'image.export'
+      sessionId: string
+      docUri: string
+      reqId: number
+      src: string
+      fileName: string
+      /** P2-11（#288）来源文档（嵌入内部 Live 的图片弹窗导出）：宿主按 B
+       *  目录/根边界定位导出文件；与已送达来源比对，不匹配即丢弃（不回落
+       *  面板自身目录——B 内图片按 A 目录导出是错误文件）。缺省 = 面板自身 */
+      sourceDocUri?: string
+    }
   /** 打开 Vsidian 设置页（#33）：编辑器工具栏「设置」按钮 → 宿主
    *  createWebviewPanel。无 sessionId/docUri——打开设置页不依赖任何文档
    *  会话（无文档打开时同样可用） */
@@ -1121,6 +1380,33 @@ export type WebviewToHost =
    *  宿主通知用户并记录 notice.load-failed；成功不回报 */
   | { kind: 'wordSegment.loadResult'; ok: boolean; detail?: string }
 
+/** P2-04（#281）目标编辑端口的编辑通道内消息（refEdit.message 载荷）：
+ *  与根面板编辑通道同构——B 会话按同一 DocumentSession 管线处理（seq 去重、
+ *  版本重定位、CRLF、ack、外部增量）。
+ *  P2-11（#288）起资源消息同通道入站：链接/双链/图片解析/图片粘贴/手动刷新
+ *  经宿主验证的目标端口传递 B 身份（B 会话按自身 docUri 守卫并以 B 目录/
+ *  根边界解析执行）——与 #220 悬停浮层的 sourceDocUri 直发是两条并行路径
+ *  （直发按面板已送达目标比对，端口按 portId 绑定比对；后者即「经过宿主
+ *  验证的目标绑定」）。P2-14（#291）起 codeblock.copy 同通道：嵌入内代码
+ *  卡复制经端口进 B 会话走宿主剪贴板（webview 不触碰剪贴板权限；B 会话
+ *  按自身 docUri 守卫 + B 文档 EOL 归一）。面板级消息（locale/settings/
+ *  view 族）仍不得混入。 */
+export type RefEditClientMessage = Extract<
+  WebviewToHost,
+  | { kind: 'edit.request' }
+  | { kind: 'conflict.report' }
+  | { kind: 'composition.changed' }
+  | { kind: 'history.request' }
+  | { kind: 'sync.request' }
+  | { kind: 'conflict.action' }
+  | { kind: 'link.activate' }
+  | { kind: 'wikilink.activate' }
+  | { kind: 'image.request' }
+  | { kind: 'image.paste' }
+  | { kind: 'refresh.request' }
+  | { kind: 'codeblock.copy' }
+>
+
 /** 反链面板条目载荷（#197 backlinks.snapshot.items；形态与宿主
  *  BacklinkItem 同构——本接口为协议层稳定契约） */
 export interface BacklinkItemPayload {
@@ -1185,7 +1471,8 @@ export interface HoverPreviewTargetIdentity {
 /** 悬停预览语义范围选择器（#218 一期全文；#219 扩展标题章节与块——
  *  锚点语义与链接形态无关：双链 `[[笔记#锚]]` 与普通链接 `[x](笔记.md#锚)`
  *  归同一选择器。anchor：标题原文或带 ^ 前缀的块 id（与
- *  OutlinkItemPayload.anchor 同口径） */
+ *  OutlinkItemPayload.anchor 同口径）。P2-03（#280）起只作初始定位与
+ *  引用身份标识，不再是内容、授权或编辑边界——内容范围恒为目标全文） */
 export type HoverPreviewScope =
   | { kind: 'full' }
   | { kind: 'heading'; anchor: string }
@@ -2731,6 +3018,92 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         isString(v.docUri) &&
         (v.action === 'copy' || v.action === 'resume')
       )
+    case 'refEdit.bind':
+      // P2-04：根面板身份 + 目标 fsPath + occurrence + reqId（形态学防线；
+      // 来源/固定校验在 provider 路由层，行为断言在集成用例）
+      return (
+        isString(v.panelSessionId) &&
+        isString(v.panelDocUri) &&
+        typeof v.fsPath === 'string' && v.fsPath.length > 0 &&
+        typeof v.occurrence === 'string' && v.occurrence.length > 0 &&
+        isPositiveInt(v.reqId)
+      )
+    case 'refEdit.unbind':
+    case 'refEdit.save':
+      return (
+        isString(v.panelSessionId) &&
+        isString(v.panelDocUri) &&
+        typeof v.portId === 'string' && v.portId.length > 0 &&
+        typeof v.fsPath === 'string' && v.fsPath.length > 0
+      )
+    case 'refEdit.close.query':
+      // P2-05：关闭意图开始（身份校验与 refEdit.save 同口径 + intent + reqId）
+      return (
+        isString(v.panelSessionId) &&
+        isString(v.panelDocUri) &&
+        typeof v.portId === 'string' && v.portId.length > 0 &&
+        typeof v.fsPath === 'string' && v.fsPath.length > 0 &&
+        (v.intent === 'close' || v.intent === 'escape' || v.intent === 'delete') &&
+        isPositiveInt(v.reqId)
+      )
+    case 'refEdit.close.execute':
+      // P2-05：确认后的动作执行（confirmedVersion 为非负版本基线）
+      return (
+        isString(v.panelSessionId) &&
+        isString(v.panelDocUri) &&
+        typeof v.portId === 'string' && v.portId.length > 0 &&
+        typeof v.fsPath === 'string' && v.fsPath.length > 0 &&
+        (v.action === 'save' || v.action === 'discard') &&
+        isNonNegativeInt(v.confirmedVersion) &&
+        isPositiveInt(v.reqId)
+      )
+    case 'refEdit.conflictCompare':
+      // P2-12：对比请求（身份校验与 refEdit.save 同口径 + text 全文快照）
+      return (
+        isString(v.panelSessionId) &&
+        isString(v.panelDocUri) &&
+        typeof v.portId === 'string' && v.portId.length > 0 &&
+        typeof v.fsPath === 'string' && v.fsPath.length > 0 &&
+        isString(v.text)
+      )
+    case 'refEdit.message': {
+      // 编辑与资源通道白名单：inner 消息须为 RefEditClientMessage 的合法
+      // 形态（P2-11 起含链接/双链/图片/粘贴/刷新——经目标端口传 B 身份；
+      // settings/view 等面板级消息混入即拒绝）
+      if (
+        !isString(v.panelSessionId) ||
+        !isString(v.panelDocUri) ||
+        !(typeof v.portId === 'string' && v.portId.length > 0) ||
+        !(typeof v.fsPath === 'string' && v.fsPath.length > 0) ||
+        !isObject(v.message)
+      ) {
+        return false
+      }
+      const inner = v.message as { kind?: unknown }
+      switch (inner.kind) {
+        case 'edit.request':
+        case 'conflict.report':
+        case 'composition.changed':
+          // 复用各消息自身的完整校验（含 SerChange 数组与数值域）
+          return isWebviewToHost(inner)
+        case 'history.request':
+        case 'sync.request':
+        case 'conflict.action':
+          return isWebviewToHost(inner)
+        // P2-11 资源消息：复用直发形态的完整校验（内消息 docUri 须为 B 的
+        // 规范 URI——宿主 B 会话按自身 docUri 守卫）；P2-14 codeblock.copy
+        // 同口径（复制文本经端口走宿主剪贴板）
+        case 'link.activate':
+        case 'wikilink.activate':
+        case 'image.request':
+        case 'image.paste':
+        case 'refresh.request':
+        case 'codeblock.copy':
+          return isWebviewToHost(inner)
+        default:
+          return false
+      }
+    }
     case 'view.locate.ack':
       return isNonNegativeInt(v.offset)
     case 'view.state':
@@ -2873,7 +3246,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
       )
     case 'image.export':
       // #212 图片导出：会话守卫字段对齐 image.request；src 非空、fileName
-      // 限长（与粘贴 fileNameHint 同限；非法整体丢弃）
+      // 限长（与粘贴 fileNameHint 同限；非法整体丢弃）。P2-11 sourceDocUri
+      // （嵌入内部 Live 弹窗导出的 B 来源）可选非空字符串
       return (
         isString(v.sessionId) &&
         isString(v.docUri) &&
@@ -2882,7 +3256,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         v.src.length > 0 &&
         typeof v.fileName === 'string' &&
         v.fileName.length > 0 &&
-        v.fileName.length <= IMAGE_PASTE_LIMITS.fileNameHintMaxChars
+        v.fileName.length <= IMAGE_PASTE_LIMITS.fileNameHintMaxChars &&
+        (v.sourceDocUri === undefined || (typeof v.sourceDocUri === 'string' && v.sourceDocUri.length > 0))
       )
     case 'image.request':
       // #220 sourceDocUri（悬停浮层内图片的来源文档）：可选非空字符串
@@ -2959,7 +3334,8 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         (v.directTarget === undefined ||
           (isObject(v.directTarget) &&
             isString(v.directTarget.fsPath) &&
-            (v.directTarget.anchor === undefined || isString(v.directTarget.anchor))))
+            (v.directTarget.anchor === undefined || isString(v.directTarget.anchor)))) &&
+        (v.anchorOptional === undefined || typeof v.anchorOptional === 'boolean')
       )
     case 'hover.watch':
     case 'hover.unwatch':
@@ -3124,6 +3500,163 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return (
         isNonNegativeInt(v.version) &&
         (v.reason === 'conflict' || v.reason === 'host-error')
+      )
+    case 'refEdit.bound':
+      // P2-04：成功形态须携带完整端口身份（portId/B docUri/version/dirty）；
+      // 失败限定原因码
+      if (v.ok === true) {
+        return (
+          isPositiveInt(v.reqId) &&
+          typeof v.portId === 'string' && v.portId.length > 0 &&
+          typeof v.fsPath === 'string' && v.fsPath.length > 0 &&
+          isString(v.docUri) &&
+          isNonNegativeInt(v.version) &&
+          typeof v.dirty === 'boolean'
+        )
+      }
+      if (v.ok === false) {
+        return (
+          isPositiveInt(v.reqId) &&
+          (v.reason === 'source' || v.reason === 'open-failed' || v.reason === 'not-markdown')
+        )
+      }
+      return false
+    case 'refEdit.push': {
+      // 编辑与资源回包白名单：inner 事件须为 RefEditHostEvent 合法形态
+      //（P2-11 起含 image.* / refresh.invalidated 定向回推）
+      if (
+        !(typeof v.portId === 'string' && v.portId.length > 0) ||
+        !(typeof v.fsPath === 'string' && v.fsPath.length > 0) ||
+        !isObject(v.message)
+      ) {
+        return false
+      }
+      const inner = v.message as { kind?: unknown }
+      switch (inner.kind) {
+        case 'init':
+        case 'edit.ack':
+        case 'doc.changed':
+        case 'doc.resync':
+        case 'session.suspended':
+          return isHostToWebview(inner)
+        case 'image.result':
+        case 'image.invalidate':
+        case 'image.paste.result':
+        case 'refresh.invalidated':
+          return isHostToWebview(inner)
+        default:
+          return false
+      }
+    }
+    case 'refEdit.dirty':
+      return typeof v.fsPath === 'string' && v.fsPath.length > 0 && typeof v.dirty === 'boolean'
+    case 'refEdit.save.result':
+      return (
+        typeof v.portId === 'string' && v.portId.length > 0 &&
+        typeof v.fsPath === 'string' && v.fsPath.length > 0 &&
+        typeof v.ok === 'boolean'
+      )
+    case 'refEdit.close.state':
+      // P2-05：B 最新权威状态（dirty/version/根内相对路径）
+      return (
+        isPositiveInt(v.reqId) &&
+        typeof v.fsPath === 'string' && v.fsPath.length > 0 &&
+        typeof v.dirty === 'boolean' &&
+        isNonNegativeInt(v.version) &&
+        isString(v.relPath)
+      )
+    case 'refEdit.close.result':
+      // P2-05：关闭动作结果（closed / 失败保留现场 / stale 重新确认）
+      return (
+        isPositiveInt(v.reqId) &&
+        typeof v.fsPath === 'string' && v.fsPath.length > 0 &&
+        (v.outcome === 'closed' || v.outcome === 'save-failed' ||
+          v.outcome === 'discard-failed' || v.outcome === 'stale')
+      )
+    case 'refEdit.conflictCompare.result':
+      // P2-12：对比请求结果（ok = 对比页已打开并完成转交）
+      return (
+        typeof v.portId === 'string' && v.portId.length > 0 &&
+        typeof v.fsPath === 'string' && v.fsPath.length > 0 &&
+        typeof v.ok === 'boolean'
+      )
+    case 'embed.test.mode':
+      // P2-04 测试钩子：inner + 目标模式 + 可选 occurrence 序号
+      return (
+        typeof v.inner === 'string' && v.inner.length > 0 &&
+        (v.mode === 'reading' || v.mode === 'live') &&
+        (v.occurrence === undefined || isNonNegativeInt(v.occurrence))
+      )
+    case 'embed.test.type':
+      return (
+        typeof v.inner === 'string' && v.inner.length > 0 &&
+        isNonNegativeInt(v.pos) &&
+        isString(v.text) &&
+        (v.occurrence === undefined || isNonNegativeInt(v.occurrence))
+      )
+    case 'embed.test.save':
+      return (
+        typeof v.inner === 'string' && v.inner.length > 0 &&
+        (v.occurrence === undefined || isNonNegativeInt(v.occurrence))
+      )
+    case 'embed.test.focus':
+      return (
+        typeof v.inner === 'string' && v.inner.length > 0 &&
+        (v.pos === undefined || isNonNegativeInt(v.pos)) &&
+        (v.to === undefined || isNonNegativeInt(v.to)) &&
+        (v.occurrence === undefined || isNonNegativeInt(v.occurrence))
+      )
+    case 'embed.test.history':
+      return (
+        typeof v.inner === 'string' && v.inner.length > 0 &&
+        (v.op === 'undo' || v.op === 'redo') &&
+        (v.occurrence === undefined || isNonNegativeInt(v.occurrence))
+      )
+    case 'embed.test.pasteImage':
+      // P2-11 测试钩子：mime/dataBase64 形态与 image.paste 同限
+      return (
+        typeof v.inner === 'string' && v.inner.length > 0 &&
+        typeof v.mime === 'string' &&
+        v.mime.startsWith('image/') &&
+        typeof v.dataBase64 === 'string' &&
+        v.dataBase64.length > 0 &&
+        v.dataBase64.length <= IMAGE_PASTE_LIMITS.dataBase64MaxChars &&
+        (v.fileNameHint === undefined ||
+          (typeof v.fileNameHint === 'string' &&
+            v.fileNameHint.length <= IMAGE_PASTE_LIMITS.fileNameHintMaxChars)) &&
+        (v.occurrence === undefined || isNonNegativeInt(v.occurrence))
+      )
+    case 'embed.test.portWrite':
+      return (
+        typeof v.portId === 'string' && v.portId.length > 0 &&
+        typeof v.fsPath === 'string' && v.fsPath.length > 0 &&
+        isPositiveInt(v.seq) &&
+        isNonNegativeInt(v.baseVersion) &&
+        isNonNegativeInt(v.offset) &&
+        isNonNegativeInt(v.length) &&
+        isString(v.text) &&
+        (v.repeat === undefined || isPositiveInt(v.repeat))
+      )
+    case 'embed.test.close':
+      // P2-05 测试钩子：inner + 意图三径 + 可选 occurrence 序号
+      return (
+        typeof v.inner === 'string' && v.inner.length > 0 &&
+        (v.intent === 'close' || v.intent === 'escape' || v.intent === 'delete') &&
+        (v.occurrence === undefined || isNonNegativeInt(v.occurrence))
+      )
+    case 'embed.test.dialogAction':
+      return v.action === 'save' || v.action === 'discard' || v.action === 'cancel'
+    case 'embed.test.deleteRef':
+      return (
+        typeof v.inner === 'string' && v.inner.length > 0 &&
+        (v.occurrence === undefined || isNonNegativeInt(v.occurrence))
+      )
+    case 'embed.test.conflictAction':
+      return (
+        typeof v.inner === 'string' && v.inner.length > 0 &&
+        (v.action === 'compare' || v.action === 'discard' ||
+          v.action === 'cancel' || v.action === 'reopen') &&
+        (v.occurrence === undefined || isNonNegativeInt(v.occurrence))
       )
     case 'view.state.request':
       return true
@@ -3339,6 +3872,14 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
           v.link === 'live-wikilink' || v.link === 'live-md' ||
           v.link === 'backlink' || v.link === 'outlink') &&
         (v.ctrlKey === undefined || typeof v.ctrlKey === 'boolean')
+    case 'hover.test.live':
+      // P2-06（#283）测试钩子：操作枚举 + 可选 intent/选区/文本
+      return (v.action === 'mode' || v.action === 'type' || v.action === 'focus' ||
+          v.action === 'save' || v.action === 'close') &&
+        (v.intent === undefined || v.intent === 'close' || v.intent === 'escape') &&
+        (v.pos === undefined || isNonNegativeInt(v.pos)) &&
+        (v.to === undefined || isNonNegativeInt(v.to)) &&
+        (v.text === undefined || isString(v.text))
     case 'sync.test.composition':
       return (v.phase === 'start' || v.phase === 'update' || v.phase === 'end') && isString(v.text)
     case 'link.test.mousedown':

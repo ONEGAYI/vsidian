@@ -703,7 +703,10 @@ describe('C-9：setDocument 重建时解除对旧挂载元素的观察', () => {
 // （保留全文解析上下文，不丢章节外引用式链接定义），范围选取在切块后按
 // 块区间求交（跨界块整块保留，不孤立解析截取字符串）。range 为 LF 坐标
 // （宿主 hoverDocAccess 经 NewlineCoordinator 换算后随载荷下发）。
-describe('VirtualReadingView：局部范围装载（#219 悬停预览）', () => {
+// P2-03（#280，ADR-0011）：引用内容不再按区间过滤——标题/块引用全文
+// 可达，锚点只作初始定位（由调用方经 scrollToSrcStart 执行）。本组改钉
+// 全文装载契约：setDocument 恒渲染全文块表，多行块整块语义不变。
+describe('VirtualReadingView：全文装载（P2-03 全文可达，原 #219 局部过滤退役）', () => {
   const SECTION_TEXT = [
     '# 顶部标题',
     '',
@@ -730,43 +733,24 @@ describe('VirtualReadingView：局部范围装载（#219 悬停预览）', () =>
     '',
   ].join('\n')
 
-  /** 块表对拍口径的章节范围：目标标题块行首 → 下一同级标题前最后一个
-   *  内容块的行尾（与宿主 findHeadingSectionRange 的「末行行尾不含换行」
-   *  同语义，测试不重算行界——直接消费块模型） */
-  function sectionRangeOf(text: string, title: string): { start: number; end: number } {
-    const blocks = splitReadingBlocks(text)
-    const head = blocks.find((b) => b.kind === 'heading' && text.slice(b.start, b.end).includes(title))!
-    const headIdx = blocks.indexOf(head)
-    const nextIdx = blocks.findIndex(
-      (b, i) => i > headIdx && b.kind === 'heading' && (b.level ?? 6) <= (head.level ?? 6),
-    )
-    const last = nextIdx > 0 ? blocks[nextIdx - 1]! : blocks[blocks.length - 1]!
-    return { start: head.start, end: last.end }
-  }
-
-  it('无布局回退路径：range 过滤后只渲染章节内块（标题块起、下一同级标题块前）', () => {
+  it('无布局回退路径：全文块表全量渲染（锚点前后的内容都在场）', () => {
     const container = createReadingContainer()
-    stubClientHeight(container, 0) // 无布局：全量渲染过滤后块
+    stubClientHeight(container, 0) // 无布局：全量渲染全文块
     const view = new VirtualReadingView(container)
-    const range = sectionRangeOf(SECTION_TEXT, '章节甲')
-    view.setDocument(SECTION_TEXT, { range })
-    const blocks = splitReadingBlocks(SECTION_TEXT)
-    const expected = blocks
-      .slice(blocks.findIndex((b) => b.start === range.start), blocks.findIndex((b) => b.start > range.end))
-      .map((b) => String(b.start))
+    view.setDocument(SECTION_TEXT)
+    const expected = splitReadingBlocks(SECTION_TEXT).map((b) => String(b.start))
     expect(expected.length).toBeGreaterThan(3)
     expect(mountedStarts(container)).toEqual(expected)
     expect(container.querySelector('.vsidian-reading-heading-2')?.textContent).toContain('章节甲')
-    expect(container.textContent).not.toContain('顶部段')
-    expect(container.textContent).not.toContain('乙段')
+    expect(container.textContent).toContain('顶部段')
+    expect(container.textContent).toContain('乙段')
   })
 
   it('多行块整块保留：列表、表格、围栏不被截成首行', () => {
     const container = createReadingContainer()
     stubClientHeight(container, 0)
     const view = new VirtualReadingView(container)
-    const range = sectionRangeOf(SECTION_TEXT, '章节甲')
-    view.setDocument(SECTION_TEXT, { range })
+    view.setDocument(SECTION_TEXT)
     const listEl = container.querySelector('.vsidian-reading-block ul, .vsidian-reading-block ol')
     expect(listEl?.querySelectorAll('li').length, '列表两项整取').toBe(2)
     const tableEl = container.querySelector('.vsidian-reading-block table')
@@ -776,20 +760,15 @@ describe('VirtualReadingView：局部范围装载（#219 悬停预览）', () =>
     expect(codeEl?.textContent, '围栏代码行整取（非仅首行）').toContain('const x = 1')
   })
 
-  it('布局可用路径：虚拟化窗口基于过滤后块表（屏外 spacer 高度不含范围外块）', () => {
+  it('布局可用路径：虚拟化窗口基于全文块表（总块数为全文块数）', () => {
     const heightSpy = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(36)
     try {
       const container = createReadingContainer()
       stubClientHeight(container, 400)
       const view = new VirtualReadingView(container, { bufferPx: 100000 }) // 大缓冲挂全部窗口内块
-      const range = sectionRangeOf(SECTION_TEXT, '章节甲')
-      view.setDocument(SECTION_TEXT, { range })
+      view.setDocument(SECTION_TEXT)
       const stats = view.getStats()
-      const blocks = splitReadingBlocks(SECTION_TEXT)
-      const expectedCount = blocks.slice(
-        blocks.findIndex((b) => b.start === range.start),
-        blocks.findIndex((b) => b.start > range.end),
-      ).length
+      const expectedCount = splitReadingBlocks(SECTION_TEXT).length
       expect(stats.totalBlocks).toBe(expectedCount)
       expect(stats.virtualized).toBe(true)
       expect(mountedStarts(container).length).toBe(expectedCount)
@@ -798,22 +777,7 @@ describe('VirtualReadingView：局部范围装载（#219 悬停预览）', () =>
     }
   })
 
-  it('求交语义：与 range 部分交叠的块整块保留（不丢内容）', () => {
-    const container = createReadingContainer()
-    stubClientHeight(container, 0)
-    const view = new VirtualReadingView(container)
-    const blocks = splitReadingBlocks(SECTION_TEXT)
-    const listBlock = blocks.find((b) => b.kind === 'list')!
-    // range 起点落在列表块内部（模拟宿主侧行界与 markdown-it 块界的
-    // 罕见错位）：列表块与范围求交 → 整块保留
-    const range = { start: listBlock.start + 3, end: listBlock.end }
-    view.setDocument(SECTION_TEXT, { range })
-    const starts = mountedStarts(container)
-    expect(starts, '部分交叠的列表块整块保留').toContain(String(listBlock.start))
-    expect(starts.length).toBe(1)
-  })
-
-  it('不带 range 的既有全文装载不受影响（缺省形态回归）', () => {
+  it('既有全文装载不受影响（缺省形态回归）', () => {
     const container = createReadingContainer()
     stubClientHeight(container, 0)
     const view = new VirtualReadingView(container)

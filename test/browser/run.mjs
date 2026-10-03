@@ -35,6 +35,9 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // 百分比宽 SVG 铺满正文列、固有尺寸不拉伸、限宽联动、阅读非回归）。
 // #212 合并入列：imagePopup（图片弹窗与防误触——悬停按钮组、吞点击、
 // 弹窗缩放平移/刷新/导出消息、阅读单钮与排除项）紧随 imageRefresh。
+// P2-04 合并入列：embedLive（嵌入内部 Live——端口绑定/真实键入只写目标/
+// Ctrl+S 焦点路由/撤销走 B 历史/模式继承与覆盖记忆/编辑器无泄漏，B 侧用
+// 真实 DocumentSession 驱动）紧随 refCombination。
 // #223 合并入列：liveEmbed（父文档 Live 嵌入——光标驱动源码显隐、IME
 // 修改引用、未闭合撤卡恢复、内部选区隔离与绘制断言）紧随 readingEmbed。
 // #224 合并入列：hoverRefresh（引用视图同步——目标失效推送驱动嵌入/浮层
@@ -56,11 +59,19 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // 2026-10 合并入列：findBarAnchor（浮层锚点跟随——查找面板与选词选项条
 // 右缘动态咬合正文列右缘：限宽/铺满/侧栏开合/模式切换/窗口缩放几何），
 // 紧随 hitReveal（同查找/选词族）。
+// P2-08 合入列：tableCellLive（表格格内嵌入的内部 Live——格内继承/真实
+// 键盘隔离/列行移动不误伤实例与端口/删行拦截/变高联动/离屏重挂）紧随
+// embedLiveMixed（同嵌入内部 Live 族）。
+// P2-09 合入列：recursiveLive（递归引用直接父模式与逐层目标编辑——B 内
+// 部 Live 编辑器挂孙卡〔独占行/混排/格内〕、孙卡独立端口、在 C 键入只写
+// C、父根切换不覆写手动、循环截断与编辑器移交）紧随 tableCellLive。
+// main 合入列（PR #314）：plainPaste/richPaste/richPasteUndo/
+// richPasteCompatibility（富文本粘贴/分步撤销族）紧随 imagePaste。
 const names = ['tableCaret', 'blockquoteTablePaint', 'quoteBarPaint', 'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'wordMotion', 'imagePaste', 'plainPaste', 'richPaste', 'richPasteUndo', 'richPasteCompatibility', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage', 'settingsPageRestore',
   'skeletonProbe', 'tooltipCard',
 
-  'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract', 'commentToggle', 'viewToggle', 'contextMenu', 'anchorFlash', 'readingWidthProbe', 'readingBottomReach', 'codeCardChrome', 'liveImageLayout', 'imageRefresh', 'imagePopup', 'hoverPreview', 'hoverRecursive', 'readingEmbed', 'recursiveEmbed', 'liveEmbed', 'hoverEntry', 'hoverRefresh', 'targetTip', 'multicursor', 'multicursorWrite', 'findPanel', 'occurrence', 'hitReveal', 'findBarAnchor', 'mixedEmbed', 'liveEmbedMixed', 'tableEmbed', 'refCombination']
+  'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract', 'commentToggle', 'viewToggle', 'contextMenu', 'anchorFlash', 'readingWidthProbe', 'readingBottomReach', 'codeCardChrome', 'liveImageLayout', 'imageRefresh', 'imagePopup', 'hoverPreview', 'hoverRecursive', 'readingEmbed', 'recursiveEmbed', 'liveEmbed', 'hoverEntry', 'hoverRefresh', 'targetTip', 'multicursor', 'multicursorWrite', 'findPanel', 'occurrence', 'hitReveal', 'findBarAnchor', 'mixedEmbed', 'liveEmbedMixed', 'tableEmbed', 'refCombination', 'embedLive', 'embedLiveActions', 'embedLiveMixed', 'hoverLive', 'tableCellLive', 'embedLiveResources', 'recursiveLive', 'embedLiveCloseout']
 const { workers, reuseBuilds, selected } = parseBrowserRunOptions(process.argv.slice(2), names)
 const parent = path.join(root, 'out/test/browser-runs')
 await mkdir(parent, { recursive: true })

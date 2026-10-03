@@ -1129,6 +1129,56 @@ describe('sync.request（webview 发起的全文重同步）', () => {
     await s.session.handleWebviewMessage({ kind: 'sync.request' }, id)
     expect(s.sent.get(id)!.length).toBe(0)
   })
+
+  it('P2-12：暂停面板的 sync.request 走恢复语义（清暂停与快照 + doc.resync）', async () => {
+    // 「放弃当前版本」与「对比并解决成功转交」共用出站 sync.request：宿主侧
+    // 须解除暂停（旧队列不重放）并以权威全文重置——不能只发 doc.resync 而
+    // 留下 suspended（后续输入将全部落入冲突快照黑洞）
+    const s = setup('草稿')
+    const id = s.attach()
+    await readyPanel(s, id)
+    // 外部覆盖原文区间，使基于旧版本的请求不可安全重定位 → 冲突暂停
+    s.doc.content = '外部全文'
+    s.doc.ver++
+    s.session.handleDocChanged([{ offset: 0, length: 2, text: '外部全文' }], s.doc.ver)
+    await s.send(id, {
+      kind: 'edit.request', sessionId: id, docUri: DOC_URI, seq: 1, baseVersion: 1,
+      changes: [{ offset: 0, length: 1, text: '本' }],
+    })
+    expect(s.session.getConflictState(id)?.suspended).toBe(true)
+    expect(s.session.getConflictState(id)?.fragments).toContain('本')
+    await s.send(id, { kind: 'sync.request' })
+    const state = s.session.getConflictState(id)!
+    expect(state.suspended).toBe(false)
+    expect(state.fragments).toEqual([])
+    expect(state.webviewText).toBeUndefined()
+    expect(s.sent.get(id)!.at(-1)).toMatchObject({ kind: 'doc.resync', text: '外部全文' })
+  })
+
+  it('P2-12：暂停面板 sync.request 恢复后，新 edit.request 正常写回（旧输入不重放）', async () => {
+    const s = setup('草稿')
+    const id = s.attach()
+    await readyPanel(s, id)
+    s.doc.content = '外部全文'
+    s.doc.ver++
+    s.session.handleDocChanged([{ offset: 0, length: 2, text: '外部全文' }], s.doc.ver)
+    await s.send(id, {
+      kind: 'edit.request', sessionId: id, docUri: DOC_URI, seq: 1, baseVersion: 1,
+      changes: [{ offset: 0, length: 1, text: '本' }],
+    })
+    expect(s.session.getConflictState(id)?.suspended).toBe(true)
+    await s.send(id, { kind: 'sync.request' })
+    const versionAfterResume = s.doc.version
+    // 恢复后的新输入（webview 已被 resync 重置为权威全文，baseVersion 对齐）
+    await s.send(id, {
+      kind: 'edit.request', sessionId: id, docUri: DOC_URI, seq: 2, baseVersion: versionAfterResume,
+      changes: [{ offset: 4, length: 0, text: '！' }],
+    })
+    expect(s.doc.content).toBe('外部全文！')
+    const ack = s.sent.get(id)!.at(-1)
+    expect(ack).toMatchObject({ kind: 'edit.ack', seq: 2, ok: true })
+    expect(s.session.getConflictState(id)?.suspended).toBe(false)
+  })
 })
 
 describe('perf.report 缓存（#5 性能测量通道）', () => {
@@ -2171,6 +2221,46 @@ describe('#220 来源资源：hover.result 来源记录与守卫路由', () => {
     expect(resolveCalls).toEqual([])
     expect(out.filter((m) => m.kind === 'image.result')).toHaveLength(0)
   })
+
+  it('P2-11 image.export：sourceDocUri 匹配来源记录时透传导出端口；未送达来源丢弃', async () => {
+    const s = setup()
+    const out: HostToWebview[] = []
+    const exportCalls: Array<{ src: string; sourceDocUri?: string }> = []
+    const id = s.session.attachPanel({
+      send: (m) => out.push(m),
+      readHoverTarget: (_payload, report) => {
+        report({
+          ok: true, fsPath: B_PATH, relPath: 'sub/b.md', version: 1,
+          lfText: '# B\n', range: { start: 0, end: 5 }, scope: { kind: 'full' },
+        })
+      },
+      exportImage: (payload, report) => {
+        exportCalls.push({ src: payload.src, sourceDocUri: payload.sourceDocUri })
+        report({ ok: true })
+      },
+    })
+    await ready10(s, id)
+    await s.send(id, {
+      kind: 'hover.request', sessionId: id, docUri: DOC_URI,
+      reqId: 1, instanceId: 'hover-1', sourceStart: 0, sourceEnd: 5, target: 'sub/b',
+    })
+    // 送达过的 B 目标：透传（provider 端按 B 目录解析——集成层断言磁盘）
+    await s.send(id, {
+      kind: 'image.export', sessionId: id, docUri: DOC_URI,
+      reqId: 1, src: './img.png', fileName: 'img.png', sourceDocUri: B_PATH,
+    })
+    expect(exportCalls).toEqual([{ src: './img.png', sourceDocUri: B_PATH }])
+    expect(out.filter((m) => m.kind === 'image.export.result')).toEqual([
+      { kind: 'image.export.result', reqId: 1, ok: true },
+    ])
+    // 未送达过的来源：静默丢弃（不信任前端任意 URI，不回落 A 目录导出）
+    await s.send(id, {
+      kind: 'image.export', sessionId: id, docUri: DOC_URI,
+      reqId: 2, src: './img.png', fileName: 'img.png', sourceDocUri: 'C:\\伪造\\目录.md',
+    })
+    expect(exportCalls).toHaveLength(1)
+    expect(out.filter((m) => m.kind === 'image.export.result')).toHaveLength(1)
+  })
 })
 
 // ---- 工单 #222：来源记录集合化（嵌入卡片与悬停浮层多目标共存） ----
@@ -2566,5 +2656,334 @@ describe('#299 hover.target.resolve：会话守卫与结果回包路由', () => 
       { kind: 'hover.target.resolved', reqId: 4, ok: false },
     ])
     s.session.dispose()
+  })
+})
+
+describe('P2-03 全文可达：循环身份、刷新宽容与全文计费（#280）', () => {
+  const aPath = 'D:\\notes\\a.md'
+  const bPath = 'D:\\notes\\b.md'
+  /** B 正文：顶部一个指向 A#某标题 的嵌入（锚定区间外的祖先回指） */
+  const bText = '![[A#某标题]]\n正文'
+
+  function setupHost(overrides?: {
+    readHoverTarget?: PanelPort['readHoverTarget']
+    getEmbedDepthLimit?: () => number
+  }) {
+    const doc = new FakeDoc('![[B#章节]]')
+    const session = new DocumentSession(doc, {
+      docUri: DOC_URI,
+      rootFsPath: aPath,
+      isWindowsHost: true,
+      getEmbedDepthLimit: overrides?.getEmbedDepthLimit,
+    })
+    const out: HostToWebview[] = []
+    const reads: Array<{ target: string; anchorOptional?: boolean; verifiedSource?: string }> = []
+    const id = session.attachPanel({
+      send: (m) => out.push(m),
+      readHoverSource: async (fsPath) => fsPath === bPath ? { version: 1, text: bText } : null,
+      readHoverTarget: overrides?.readHoverTarget ?? ((payload, report) => {
+        reads.push({
+          target: payload.target,
+          anchorOptional: payload.anchorOptional,
+          verifiedSource: payload.verifiedSource?.fsPath,
+        })
+        if (payload.target === 'B#章节') {
+          report({ ok: true, fsPath: bPath, relPath: 'b.md', version: 1, lfText: bText,
+            range: { start: bText.indexOf('正文'), end: bText.length }, scope: { kind: 'heading', anchor: '章节' } })
+          return
+        }
+        if (payload.target === 'A#某标题' || payload.target === 'A') {
+          report({ ok: true, fsPath: aPath, relPath: 'a.md', version: 1, lfText: doc.getText(),
+            range: { start: 0, end: doc.getText().length }, scope: { kind: 'full' } })
+          return
+        }
+        report({ ok: false, reason: 'not-found' })
+      }),
+    })
+    const last = () => out.at(-1) as Extract<HostToWebview, { kind: 'hover.result' }>
+    return { doc, session, out, id, reads, last }
+  }
+
+  /** 先把根 B 卡片（heading 引用）送达并固定租约，返回首个成功回包 */
+  async function deliverRootB(h: ReturnType<typeof setupHost>) {
+    await h.session.handleWebviewMessage({ kind: 'ready' }, h.id)
+    await h.session.handleWebviewMessage({
+      kind: 'hover.request', sessionId: h.id, docUri: DOC_URI,
+      reqId: 1, instanceId: 'mount-b', occurrenceId: 'root-b',
+      sourceStart: 0, sourceEnd: 9, target: 'B#章节', retainSource: true,
+    }, h.id)
+    const first = h.last()
+    expect(first).toMatchObject({ ok: true })
+    if (first.ok) {
+      expect(h.session.retainHoverSource(h.id, bPath, 'root-b', first.sourceLeaseId)).toBe(true)
+    }
+    return first
+  }
+
+  it('祖先循环按规范目标文档身份判定：不同锚点不能绕过（A→B#章节→A#某标题 截断）', async () => {
+    const h = setupHost()
+    await deliverRootB(h)
+    const at = bText.indexOf('![[A#某标题]]')
+    await h.session.handleWebviewMessage({
+      kind: 'hover.request', sessionId: h.id, docUri: DOC_URI,
+      reqId: 2, instanceId: 'mount-a', occurrenceId: 'child-a',
+      sourceStart: at, sourceEnd: at + '![[A#某标题]]'.length, target: 'A#某标题', retainSource: true,
+      source: { parentInstanceId: 'root-b', sourceDocUri: bPath },
+    }, h.id)
+    expect(h.last()).toMatchObject({ ok: false, reason: 'cycle' })
+  })
+
+  it('同目标兄弟实例合法：两个 B 卡片 occurrence 并存均成功', async () => {
+    const h = setupHost()
+    await h.session.handleWebviewMessage({ kind: 'ready' }, h.id)
+    for (const [reqId, occurrence] of [[1, 'root-b'], [2, 'root-b2']] as const) {
+      await h.session.handleWebviewMessage({
+        kind: 'hover.request', sessionId: h.id, docUri: DOC_URI,
+        reqId, instanceId: `mount-${occurrence}`, occurrenceId: occurrence,
+        sourceStart: 0, sourceEnd: 9, target: 'B#章节', retainSource: true,
+      }, h.id)
+      expect(h.last()).toMatchObject({ ok: true, instanceId: `mount-${occurrence}` })
+    }
+  })
+
+  it('第一跳自文档引用（页内锚点/自嵌）合法打开：循环判定只作用于链上子引用', async () => {
+    const h = setupHost()
+    await h.session.handleWebviewMessage({ kind: 'ready' }, h.id)
+    // 目标 = 根面板文档自身（页内锚点语义——替身对 'A#某标题' 返回根文档
+    // aPath）：成功打开，不判 cycle
+    await h.session.handleWebviewMessage({
+      kind: 'hover.request', sessionId: h.id, docUri: DOC_URI,
+      reqId: 1, instanceId: 'mount-self', occurrenceId: 'self-occ',
+      sourceStart: 0, sourceEnd: 9, target: 'A#某标题', retainSource: true,
+    }, h.id)
+    const self = h.last()
+    expect(self.ok, '页内锚点/自文档引用（目标即根面板文档）合法打开').toBe(true)
+    if (self.ok) {
+      // 其 grant.path 含根 A——内容中的再引用在链上按文档身份截断
+      expect(self.expansionPath?.length).toBeGreaterThanOrEqual(1)
+    }
+    h.session.dispose()
+  })
+
+  it('锚定区间外的合法子引用放行：来源守卫以直接来源全文为界（伪造来源仍拒绝）', async () => {
+    // B 正文：顶部一个指向 D 的嵌入（位于 B 初始锚定区间之外）
+    const cText = '![[D]]\n正文'
+    const doc = new FakeDoc('![[B#章节]]')
+    const session = new DocumentSession(doc, {
+      docUri: DOC_URI, rootFsPath: aPath, isWindowsHost: true,
+    })
+    const out: HostToWebview[] = []
+    const id = session.attachPanel({
+      send: (m) => out.push(m),
+      readHoverSource: async (fsPath) => fsPath === bPath ? { version: 1, text: cText } : null,
+      readHoverTarget: (payload, report) => {
+        if (payload.target === 'B#章节') {
+          // 锚定定位区间只覆盖「正文」段（子引用位于其外）
+          report({ ok: true, fsPath: bPath, relPath: 'b.md', version: 1, lfText: cText,
+            range: { start: cText.indexOf('正文'), end: cText.length }, scope: { kind: 'heading', anchor: '章节' } })
+        } else if (payload.target === 'D') {
+          report({ ok: true, fsPath: 'D:\\notes\\d.md', relPath: 'd.md', version: 1, lfText: 'D 全文',
+            range: { start: 0, end: 5 }, scope: { kind: 'full' } })
+        } else {
+          report({ ok: false, reason: 'not-found' })
+        }
+      },
+    })
+    await session.handleWebviewMessage({ kind: 'ready' }, id)
+    await session.handleWebviewMessage({
+      kind: 'hover.request', sessionId: id, docUri: DOC_URI,
+      reqId: 1, instanceId: 'mount-b', occurrenceId: 'root-b',
+      sourceStart: 0, sourceEnd: 9, target: 'B#章节', retainSource: true,
+    }, id)
+    const first = out.at(-1) as Extract<HostToWebview, { kind: 'hover.result'; ok: true }>
+    expect(first).toMatchObject({ ok: true })
+    expect(session.retainHoverSource(id, bPath, 'root-b', first.sourceLeaseId)).toBe(true)
+    // D 的 occurrence 在 B 锚定区间之外（顶部）——P2-03 起合法（先红）
+    const at = cText.indexOf('![[D]]')
+    await session.handleWebviewMessage({
+      kind: 'hover.request', sessionId: id, docUri: DOC_URI,
+      reqId: 2, instanceId: 'mount-d', occurrenceId: 'child-d',
+      sourceStart: at, sourceEnd: at + '![[D]]'.length, target: 'D',
+      source: { parentInstanceId: 'root-b', sourceDocUri: bPath },
+    }, id)
+    expect(out.at(-1)).toMatchObject({ ok: true })
+    // 伪造原文（occurrence 对不上 inner）仍拒绝
+    await session.handleWebviewMessage({
+      kind: 'hover.request', sessionId: id, docUri: DOC_URI,
+      reqId: 3, instanceId: 'mount-d2', occurrenceId: 'child-d2',
+      sourceStart: at, sourceEnd: at + '![[D]]'.length, target: '伪造成别的',
+      source: { parentInstanceId: 'root-b', sourceDocUri: bPath },
+    }, id)
+    expect(out.at(-1)).toMatchObject({ ok: false, reason: 'source-expired' })
+    session.dispose()
+  })
+
+  it('anchorOptional 刷新宽容：宿主端口透传，且与严格读取的缓存互不串台', async () => {
+    let anchorHit = false
+    const reads2: Array<{ target: string; anchorOptional?: boolean }> = []
+    const headingText = '# 存在的标题\n\n正文\n'
+    const h = setupHost({
+      readHoverTarget: (payload, report) => {
+        reads2.push({ target: payload.target, anchorOptional: payload.anchorOptional })
+        if (payload.target === 'T#标题') {
+          if (anchorHit) {
+            report({ ok: true, fsPath: 'D:\\notes\\t.md', relPath: 't.md', version: 2,
+              lfText: headingText, range: { start: 0, end: headingText.length }, scope: { kind: 'heading', anchor: '标题' } })
+          } else {
+            report({ ok: false, reason: 'anchor-missing', anchor: '标题' })
+          }
+        }
+      },
+    })
+    await h.session.handleWebviewMessage({ kind: 'ready' }, h.id)
+    // 严格首开：锚点缺失 → anchor-missing（失败不缓存）
+    await h.session.handleWebviewMessage({
+      kind: 'hover.request', sessionId: h.id, docUri: DOC_URI,
+      reqId: 1, instanceId: 'i1', occurrenceId: 'o1',
+      sourceStart: 0, sourceEnd: 5, target: 'T#标题',
+    }, h.id)
+    expect(h.last()).toMatchObject({ ok: false, reason: 'anchor-missing' })
+    // 刷新重载（anchorOptional）：端口透传且锚点此时命中 → 成功并缓存
+    anchorHit = true
+    await h.session.handleWebviewMessage({
+      kind: 'hover.request', sessionId: h.id, docUri: DOC_URI,
+      reqId: 2, instanceId: 'i1', occurrenceId: 'o1',
+      sourceStart: 0, sourceEnd: 5, target: 'T#标题', anchorOptional: true,
+    }, h.id)
+    expect(h.last()).toMatchObject({ ok: true })
+    expect(reads2.some((r) => r.anchorOptional === true), 'anchorOptional 透传到读取端口').toBe(true)
+    // 严格重开：不得命中宽容成功缓存（锚点又缺失 → 再验证 → anchor-missing）
+    anchorHit = false
+    await h.session.handleWebviewMessage({
+      kind: 'hover.request', sessionId: h.id, docUri: DOC_URI,
+      reqId: 3, instanceId: 'i2', occurrenceId: 'o2',
+      sourceStart: 0, sourceEnd: 5, target: 'T#标题',
+    }, h.id)
+    expect(h.last(), '严格重开不被宽容缓存污染').toMatchObject({ ok: false, reason: 'anchor-missing' })
+  })
+
+  it('目标按全文计费：heading 引用的大全文不能按旧局部预算通过', async () => {
+    const bigText = `${'x'.repeat(600_000)}\n## 章节\n${'y'.repeat(600_000)}\n`
+    const h = setupHost({
+      getEmbedDepthLimit: () => 3,
+      readHoverTarget: (_payload, report) => {
+        report({ ok: true, fsPath: 'D:\\notes\\big.md', relPath: 'big.md', version: 1,
+          lfText: bigText,
+          range: { start: bigText.indexOf('## 章节'), end: bigText.length },
+          scope: { kind: 'heading', anchor: '章节' } })
+      },
+    })
+    await h.session.handleWebviewMessage({ kind: 'ready' }, h.id)
+    await h.session.handleWebviewMessage({
+      kind: 'hover.request', sessionId: h.id, docUri: DOC_URI,
+      reqId: 1, instanceId: 'i-big', occurrenceId: 'o-big',
+      sourceStart: 0, sourceEnd: 5, target: 'big#章节', retainSource: true,
+    }, h.id)
+    // 全文 1.2M 字符 ≈ 2.4 MiB：超单树 2 MiB 上界 → budget 拒绝（非成功）
+    expect(h.last()).toMatchObject({ ok: false, reason: 'budget' })
+  })
+})
+
+
+// ---- P2-13（#290）父标签关闭交接的会话支撑面 ----
+// settleEdits：在途编辑排空等待面——resolve = 调用时刻已入队的全部编辑任务
+// 执行完（写回照常完成，P2-01 §7 在途验证的会话侧保证）。父面板 onDidDispose
+// 的交接流程在 detach 虚拟面板前调用：settle 之后的未确认输入才是真正未写入
+// B 的（暂停快照/组合期），dirty 判定也因此取到在途完成后的最新状态。
+describe('P2-13 settleEdits：在途编辑排空等待面', () => {
+  it('settle resolve 时已入队的写入已落权威文档（ack 已发）', async () => {
+    const s = setup('# 标题\n')
+    const id = s.attach()
+    await readyPanel(s, id)
+    await s.send(id, {
+      kind: 'edit.request', sessionId: id, docUri: DOC_URI, seq: 1,
+      baseVersion: s.doc.version, changes: [{ offset: 4, length: 0, text: '正文' }],
+    } as WebviewToHost)
+    await s.session.settleEdits()
+    expect(s.doc.getText()).toBe('# 标题正文\n')
+    expect(s.sent.get(id)!.some((m) => m.kind === 'edit.ack')).toBe(true)
+  })
+
+  it('在途挂起期间 settle 不 resolve；放行后随写入完成 resolve', async () => {
+    const s = setup('# 标题\n')
+    const id = s.attach()
+    await readyPanel(s, id)
+    // 可放行的在途闸门（holdNextApply 不可中途放行——其语义是永不完成，
+    // 本例要验证的是「settle 等待真实在途」而非永久挂起）
+    const origApply = s.doc.applyChanges.bind(s.doc)
+    let releaseGate: (() => void) | undefined
+    s.doc.applyChanges = async (changes) => {
+      await new Promise<void>((resolve) => { releaseGate = resolve })
+      return origApply(changes)
+    }
+    // 发送不 await（任务挂在闸门上；send 的返回即任务 promise）
+    const task = s.send(id, {
+      kind: 'edit.request', sessionId: id, docUri: DOC_URI, seq: 2,
+      baseVersion: s.doc.version, changes: [{ offset: 4, length: 0, text: '挂起' }],
+    } as WebviewToHost)
+    await new Promise((r) => setTimeout(r, 50)) // 等闸门挂上
+    let settled = false
+    const settlePromise = s.session.settleEdits().then(() => {
+      settled = true
+    })
+    await new Promise((r) => setTimeout(r, 50))
+    expect(settled, '在途未完成时 settle 不得提前 resolve').toBe(false)
+    releaseGate!()
+    await task
+    await settlePromise
+    expect(s.doc.getText()).toBe('# 标题挂起\n')
+  })
+
+  it('settle 不受暂停面板的既有快照影响（queue 空即 resolve——交接后续走 detach 通知）', async () => {
+    const s = setup('# 标题\n')
+    const id = s.attach()
+    await readyPanel(s, id)
+    // 制造暂停：apply 失败 → 输入留存 conflictFragments（queue 仍会排空）
+    s.doc.applyResult = false
+    await s.send(id, {
+      kind: 'edit.request', sessionId: id, docUri: DOC_URI, seq: 3,
+      baseVersion: s.doc.version, changes: [{ offset: 0, length: 0, text: '失败' }],
+    } as WebviewToHost)
+    await s.session.settleEdits()
+    const state = s.session.getConflictState(id)
+    expect(state?.suspended).toBe(true)
+    expect(state?.fragments.join('')).toContain('失败')
+  })
+})
+
+// detachPanel 通知的来源标记：引用编辑端口（虚拟面板）与根面板的关闭残留
+// 输入走不同呈现——P2-13 只对前者提供三项当次选择（对比并解决/放弃当前
+// 版本/取消），后者维持既有「复制取回」通知。
+describe('P2-13 panel-closed-with-input 通知的 fromRefPort 标记', () => {
+  it('虚拟面板（refOrigin）的关闭残留通知携带 fromRefPort: true', async () => {
+    const notices: SessionNotice[] = []
+    const s = setup('# B\n', { onNotice: (n) => notices.push(n) })
+    const id = s.session.attachPanel({ send: () => undefined }, { refOrigin: { docUri: 'file:///d%3A/notes/a.md' } })
+    // 制造未确认输入：组合期挂起（conflict.report 携 compositionPending 快照，
+    // 快照与权威全文不等即「关闭时仍有未写入输入」）
+    await s.session.handleWebviewMessage({ kind: 'ready' }, id)
+    await s.send(id, {
+      kind: 'conflict.report', sessionId: id, docUri: DOC_URI,
+      version: 1, revision: 1, text: '# B\n输入', compositionPending: true,
+    } as WebviewToHost)
+    s.session.detachPanel(id)
+    const notice = notices.find((n) => n.type === 'panel-closed-with-input')
+    expect(notice).toBeDefined()
+    expect(notice && notice.type === 'panel-closed-with-input' && notice.fromRefPort).toBe(true)
+  })
+
+  it('根面板（无 refOrigin）的关闭残留通知不带 fromRefPort（维持既有呈现）', async () => {
+    const notices: SessionNotice[] = []
+    const s = setup('# A\n', { onNotice: (n) => notices.push(n) })
+    const id = s.session.attachPanel({ send: () => undefined })
+    await s.session.handleWebviewMessage({ kind: 'ready' }, id)
+    await s.send(id, {
+      kind: 'conflict.report', sessionId: id, docUri: DOC_URI,
+      version: 1, revision: 1, text: '# A\n输入', compositionPending: true,
+    } as WebviewToHost)
+    s.session.detachPanel(id)
+    const notice = notices.find((n) => n.type === 'panel-closed-with-input')
+    expect(notice).toBeDefined()
+    expect(notice && notice.type === 'panel-closed-with-input' && notice.fromRefPort).toBeUndefined()
   })
 })
