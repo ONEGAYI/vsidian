@@ -1196,6 +1196,24 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
     '目标次段。',
     '',
   ].join('\n'), 'utf8')
+  // P2-12（#289）写入冲突三项选择：独立文件对（外部交错修改制造真实
+  // 冲突暂停；compare 的 untitled/diff、discard、cancel 分径断言素材）
+  writeFileSync(path.join(wsDir, 'p212-冲突嵌入.md'), [
+    '# P2-12 冲突嵌入',
+    '',
+    '![[p212-冲突目标]]',
+    '',
+    '尾部段落。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p212-冲突目标.md'), [
+    '# p212 冲突目标',
+    '',
+    '目标首段。',
+    '',
+    '目标次段。',
+    '',
+  ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, '嵌入改写.md'), [
     '# 嵌入改写',
     '',

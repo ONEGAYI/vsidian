@@ -30,6 +30,8 @@
 import type { HoverPreviewResult, HostToWebview, WebviewToHost } from '../shared/protocol'
 import { parseWikilinkInner } from '../shared/wikilink'
 import { t } from '../shared/i18n'
+import { bindLocale } from './localeDom'
+import type { MessageKey } from '../shared/locales/en'
 import { HOVER_REFRESH_DEFAULTS } from '../shared/hoverRefresh'
 import { REF_EXPANSION_LIMITS, RefExpansionBudget } from '../shared/refExpansion'
 import { RefContentInstance, type RefContentMount, type RefLoadedContent, type RefSourceContext } from './refContentInstance'
@@ -141,11 +143,23 @@ export const EMBED_CARD_CLASS_NAMES = {
   live: 'vsidian-embed-card-live',
   /** 内容滚动区（长内容内部滚动；max-height 由设置驱动内联写入） */
   scroll: 'vsidian-embed-card-scroll',
-  /** 就地状态行（loading / 错误分态） */
+  /** 就地状态行（loading / 错误分态；P2-12 冲突暂停时内嵌冲突选择条） */
   state: 'vsidian-embed-card-state',
   /** 错误分态修饰（验收反馈：错误文案与普通文字区分——主题错误色；
    *  loading 不挂，与悬停浮层 stateError 同口径） */
   stateError: 'vsidian-embed-card-state-error',
+  /** P2-12（#289）冲突三项选择条（状态行内，suspended 时在场） */
+  conflict: 'vsidian-embed-card-conflict',
+  /** 对比并解决（hover 逐字「在临时副本和冲突版本的对比视图中处理冲突」） */
+  conflictCompare: 'vsidian-embed-card-conflict-compare',
+  /** 放弃当前版本（只放弃本次未提交输入，非文档级回滚） */
+  conflictDiscard: 'vsidian-embed-card-conflict-discard',
+  /** 取消（保持暂停与输入，收起选择） */
+  conflictCancel: 'vsidian-embed-card-conflict-cancel',
+  /** 取消后的重新选择入口（收起态唯一按钮） */
+  conflictReopen: 'vsidian-embed-card-conflict-reopen',
+  /** 对比打开失败的就地提示行 */
+  conflictNotice: 'vsidian-embed-card-conflict-notice',
 } as const
 
 /** P2-05（#282）显式退出意图三径：close = 头部关闭按钮／键位操作，
@@ -203,6 +217,13 @@ interface EmbedLiveState {
   docUri: string | null
   dirty: boolean
   suspended: boolean
+  /** P2-12（#289）冲突选择收起标记（取消 = 收起选择保持暂停；重新选择
+   *  入口可再展开；解除暂停时复位） */
+  conflictChoiceCollapsed: boolean
+  /** P2-12（#289）「对比并解决」在途标记（结果未回期间防重入，按钮禁用） */
+  conflictComparePending: boolean
+  /** P2-12（#289）对比打开失败的就地提示（null = 无提示；重试清空） */
+  conflictNotice: string | null
   instance: LiveEditorInstance | null
   /** P2-05 已知最新 B 版本（bound/init/推送取 max——模态确认基线与 stale
    *  判定的 webview 侧参照；最终防线在宿主执行时比对权威 version） */
@@ -314,6 +335,12 @@ export interface EmbedCardProbe {
   closeDialog: 'none' | 'open' | 'stale'
   /** P2-05 发起（或挂起）的退出意图径 */
   closeIntent: 'close' | 'escape' | 'delete' | ''
+  /** P2-12 冲突选择态（none = 非暂停；open = 三项在场；collapsed = 已取消收起） */
+  conflictChoice: 'none' | 'open' | 'collapsed'
+  /** P2-12 「对比并解决」在途（防重入观测） */
+  conflictComparePending: boolean
+  /** P2-12 对比打开失败的就地提示在场 */
+  conflictNotice: boolean
 }
 
 /** 目标原文（`|` 之前——与阅读双链 a 的 href 同口径） */
@@ -1034,6 +1061,9 @@ export class EmbedCardManager {
       docUri: null,
       dirty: false,
       suspended: false,
+      conflictChoiceCollapsed: false,
+      conflictComparePending: false,
+      conflictNotice: null,
       instance: null,
       lastSeenVersion: 0,
       images: null,
@@ -1232,10 +1262,17 @@ export class EmbedCardManager {
           }
           inst.handleFullSync(message.message.version, message.message.text, { source: 'resync' })
           live.suspended = false
+          // P2-12：暂停解除复位冲突选择状态（收起/在途/失败提示不跨暂停）
+          live.conflictChoiceCollapsed = false
+          live.conflictComparePending = false
+          live.conflictNotice = null
           this.refreshLiveChrome(entry)
           break
         case 'session.suspended':
           live.suspended = true
+          // P2-12：新一轮冲突 = 新现场——选择重新展开、提示清空
+          live.conflictChoiceCollapsed = false
+          live.conflictNotice = null
           // 冲突暂停：挂起的退出意图就地消费（suspended guard 使重入 no-op）
           if (entry.pendingCloseIntent !== null) {
             const intent = entry.pendingCloseIntent
@@ -1360,7 +1397,8 @@ export class EmbedCardManager {
   }
 
   /** 头部 live chrome 刷新：dirty 圆点在场性（物理移除——干净态无节点）、
-   *  保存入口显隐、暂停态提示、P2-05 关闭编辑入口显隐（端口在场时） */
+   *  保存入口显隐、暂停态提示（P2-12：暂停现场内嵌三项冲突选择条）、
+   *  P2-05 关闭编辑入口显隐（端口在场时） */
   private refreshLiveChrome(entry: EmbedEntry): void {
     for (const handle of this.active.values()) {
       if (handle.entry !== entry) {
@@ -1389,10 +1427,145 @@ export class EmbedCardManager {
       handle.saveBtn.style.display = dirtyOn ? '' : 'none'
       if (live?.suspended) {
         handle.stateEl.style.display = ''
-        handle.stateEl.textContent = t('embed.livePaused')
-      } else if (handle.display === 'content') {
-        handle.stateEl.style.display = 'none'
+        this.buildConflictChoices(handle, entry)
+      } else {
+        // 非暂停：状态行内容交还 loading/错误分态管理（applyState 重设文案）
+        if (handle.display === 'content') {
+          handle.stateEl.style.display = 'none'
+        }
+        if (handle.stateEl.querySelector(`.${EMBED_CARD_CLASS_NAMES.conflict}`)) {
+          handle.stateEl.textContent = ''
+        }
       }
+    }
+  }
+
+  /** P2-12（#289）冲突暂停现场的选择条（状态行内重建——文案经 bindLocale
+   *  换语言刷新）：暂停提示文字 + 三项（对比并解决／放弃当前版本／取消；
+   *  compare 在途禁用）或收起态的「重新选择」入口；失败提示就地呈现。
+   *  自绘呈现（真实 button + data-tooltip），不调用 window.alert */
+  private buildConflictChoices(handle: EmbedCardHandle, entry: EmbedEntry): void {
+    const live = entry.live
+    if (!live) {
+      return
+    }
+    handle.stateEl.replaceChildren()
+    const pausedText = document.createElement('span')
+    bindLocale(pausedText, 'text', 'embed.livePaused')
+    handle.stateEl.appendChild(pausedText)
+    if (live.conflictNotice) {
+      const notice = document.createElement('div')
+      notice.className = EMBED_CARD_CLASS_NAMES.conflictNotice
+      notice.textContent = live.conflictNotice
+      handle.stateEl.appendChild(notice)
+    }
+    const box = document.createElement('div')
+    box.className = EMBED_CARD_CLASS_NAMES.conflict
+    const mkBtn = (
+      cls: keyof typeof EMBED_CARD_CLASS_NAMES,
+      labelKey: MessageKey,
+      hintKey: MessageKey,
+      onClick: () => void,
+    ): HTMLButtonElement => {
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = EMBED_CARD_CLASS_NAMES[cls]
+      bindLocale(btn, 'text', labelKey)
+      // 悬停词（tooltip.md 约定：data-tooltip 承载，'title' 目标映射写入）
+      bindLocale(btn, 'title', hintKey)
+      btn.addEventListener('click', onClick)
+      return btn
+    }
+    if (live.conflictChoiceCollapsed) {
+      box.appendChild(mkBtn('conflictReopen', 'embed.conflictReopenLabel', 'embed.conflictReopenHint',
+        () => this.onConflictAction(entry, 'reopen')))
+    } else {
+      const compare = mkBtn('conflictCompare', 'embed.conflictCompareLabel', 'embed.conflictCompareHint',
+        () => this.onConflictAction(entry, 'compare'))
+      compare.disabled = live.conflictComparePending
+      box.appendChild(compare)
+      box.appendChild(mkBtn('conflictDiscard', 'embed.conflictDiscardLabel', 'embed.conflictDiscardHint',
+        () => this.onConflictAction(entry, 'discard')))
+      box.appendChild(mkBtn('conflictCancel', 'embed.conflictCancelLabel', 'embed.conflictCancelHint',
+        () => this.onConflictAction(entry, 'cancel')))
+    }
+    handle.stateEl.appendChild(box)
+  }
+
+  /** P2-12（#289）冲突三项动作（选择条按钮 / 键位操作 / 测试钩子同一处理
+   *  器）：compare = 出站对比请求（临时副本承载当前输入）；discard = 经端
+   *  口出站 sync.request（宿主恢复语义：放弃本次未提交输入并重同步 B，不
+   *  回滚整个 B）；cancel = 收起选择（保持暂停与输入）；reopen = 再展开 */
+  private onConflictAction(entry: EmbedEntry, action: 'compare' | 'discard' | 'cancel' | 'reopen'): void {
+    const live = entry.live
+    if (!live || !live.suspended) {
+      return // 迟到点击：实例已释放 / 暂停已解除
+    }
+    switch (action) {
+      case 'compare':
+        this.conflictCompare(entry)
+        break
+      case 'discard':
+        this.sendRefEditOut(entry, { kind: 'sync.request' })
+        break
+      case 'cancel':
+        live.conflictChoiceCollapsed = true
+        this.refreshLiveChrome(entry)
+        break
+      case 'reopen':
+        live.conflictChoiceCollapsed = false
+        this.refreshLiveChrome(entry)
+        break
+    }
+  }
+
+  /** P2-12（#289）「对比并解决」：实例当前全文快照（含未提交输入——webview
+   *  侧唯一权威来源）经 refEdit.conflictCompare 出站，宿主创建 untitled
+   *  临时副本并打开原生对比页（左=临时副本、右=真实 B）。在途防重入；
+   *  结果未回/失败前不改变暂停现场 */
+  private conflictCompare(entry: EmbedEntry): boolean {
+    const live = entry.live
+    const session = this.context.session()
+    if (!live || !live.suspended || live.conflictComparePending || !live.portId ||
+      !session.sessionId || !session.docUri) {
+      return false
+    }
+    const text = live.instance?.getView()?.state.doc.toString()
+    if (text === undefined) {
+      return false
+    }
+    live.conflictComparePending = true
+    live.conflictNotice = null
+    this.refreshLiveChrome(entry)
+    this.context.send({
+      kind: 'refEdit.conflictCompare',
+      panelSessionId: session.sessionId,
+      panelDocUri: session.docUri,
+      portId: live.portId,
+      fsPath: live.fsPath,
+      text,
+    })
+    return true
+  }
+
+  /** P2-12（#289）refEdit.conflictCompare.result 路由：ok = 对比页已打开、
+   *  输入完成转交 → 恢复由宿主直驱（resumePanel → doc.resync 推送到达时
+   *  解除暂停并装载权威全文，旧未提交队列不重放；对比页激活会隐藏本
+   *  webview，恢复不依赖 webview 存活，故此处不出站 sync.request——pending
+   *  保持到 resync 到达，窗口内防重复对比页）；!ok = 打开/资源失败 → 保
+   *  留选择现场并就地提示，可重试 */
+  notifyConflictCompareResult(message: Extract<HostToWebview, { kind: 'refEdit.conflictCompare.result' }>): void {
+    for (const entry of this.entries.values()) {
+      const live = entry.live
+      if (!live || live.portId !== message.portId || live.fsPath !== message.fsPath) {
+        continue
+      }
+      if (!message.ok) {
+        live.conflictComparePending = false
+        live.conflictNotice = t('embed.conflictCompareFailed')
+        this.refreshLiveChrome(entry)
+      }
+      return
     }
   }
 
@@ -1458,18 +1631,41 @@ export class EmbedCardManager {
     return undefined
   }
 
-  /** P2-10 冲突「放弃当前版本」（conflictDiscard 执行体）：焦点嵌入处于
-   *  冲突暂停时经端口出站 sync.request（宿主回 doc.resync → 全文重置并
-   *  解除暂停 = 放弃本次未提交输入版本，不回滚整个 B）。无暂停现场零
-   *  操作；对比（conflictCompare）与取消（conflictCancel）为登记占位，
-   *  完整选择界面属 P2-12 */
+  /** P2-10 冲突「放弃当前版本」（conflictDiscard 执行体；P2-12 起与选择条
+   *  按钮 / 测试钩子同径 onConflictAction）：焦点嵌入处于冲突暂停时经端口
+   *  出站 sync.request（宿主回 doc.resync + 清暂停 = 放弃本次未提交输入版本
+   *  并重同步 B，不回滚整个 B——与 P2-05 的文档级丢弃分开建模）。无暂停
+   *  现场零操作 */
   focusedConflictDiscard(): boolean {
     const entry = this.focusedLiveEntry()
     const live = entry?.live
     if (!entry || !live || !live.suspended) {
       return false
     }
-    this.sendRefEditOut(entry, { kind: 'sync.request' })
+    this.onConflictAction(entry, 'discard')
+    return true
+  }
+
+  /** P2-12（#289）「对比并解决」（conflictCompare 键位/命令面板入口）：
+   *  焦点嵌入处于冲突暂停时出站对比请求；无暂停现场零操作 */
+  focusedConflictCompare(): boolean {
+    const entry = this.focusedLiveEntry()
+    const live = entry?.live
+    if (!entry || !live || !live.suspended) {
+      return false
+    }
+    return this.conflictCompare(entry)
+  }
+
+  /** P2-12（#289）「取消」（conflictCancel 键位/命令面板入口）：焦点嵌入
+   *  处于冲突暂停时收起选择（保持暂停与输入）；无暂停现场零操作 */
+  focusedConflictCancel(): boolean {
+    const entry = this.focusedLiveEntry()
+    const live = entry?.live
+    if (!entry || !live || !live.suspended) {
+      return false
+    }
+    this.onConflictAction(entry, 'cancel')
     return true
   }
 
@@ -1919,6 +2115,11 @@ export class EmbedCardManager {
         closeIntent: this.closeDialogBelongsTo(handle.entry)
           ? this.closeDialog!.intent
           : handle.entry.pendingCloseIntent ?? '',
+        conflictChoice: handle.entry.live?.suspended
+          ? (handle.entry.live.conflictChoiceCollapsed ? 'collapsed' : 'open')
+          : 'none',
+        conflictComparePending: handle.entry.live?.conflictComparePending === true,
+        conflictNotice: handle.entry.live?.conflictNotice != null,
       })
     }
     return out
@@ -2118,6 +2319,21 @@ export class EmbedCardManager {
       return false
     }
     this.onCloseDialogAction(action)
+    return true
+  }
+
+  /** P2-12（#289）测试钩子：触发指定嵌入的冲突三项动作（与选择条按钮 /
+   *  键位操作同一处理器 onConflictAction；reopen 为收起态的再展开入口） */
+  testConflictAction(
+    inner: string,
+    action: 'compare' | 'discard' | 'cancel' | 'reopen',
+    occurrence = 0,
+  ): boolean {
+    const entry = this.entryOfInner(inner, occurrence)
+    if (!entry) {
+      return false
+    }
+    this.onConflictAction(entry, action)
     return true
   }
 

@@ -3686,6 +3686,31 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "introduced": "#282（2026-10-03）"
   },
   {
+    "id": "embed-conflict-choices",
+    "domain": "content",
+    "category": "link-image-wikilink",
+    "kind": "selector",
+    "target": ".vsidian-embed-card-conflict（冲突三项选择条，嵌入卡片状态行 .vsidian-embed-card-state 内、P2-12 冲突暂停时在场；-compare 对比并解决 / -discard 放弃当前版本 / -cancel 取消 三按钮 / -reopen 取消收起后的重新选择入口 / -notice 对比打开失败的就地提示行）",
+    "purpose": "P2-12（#289）写入冲突三项选择：引用内部 Live 因不可安全写回（外部交错修改覆盖请求区间等）暂停时，在暂停现场（状态行）就地呈现「对比并解决／放弃当前版本／取消」——compare 的 hover 文案为用户指定原文「在临时副本和冲突版本的对比视图中处理冲突」（data-tooltip 承载，逐字）。三项语义：compare 出站当前输入全文快照，宿主创建 untitled 临时副本并打开 VSCode 原生对比页（左=临时副本、右=真实 B，P2-01 §6 验证路线；对比页交互归宿主，扩展不自建解决界面），成功转交后经 sync.request 重同步解除暂停（旧未提交队列不重放）；discard 只放弃本次未成功提交的输入并重新同步 B（不回滚整个 B——与 P2-05 的文档级丢弃分开建模）；cancel 收起选择保持暂停与输入（-reopen 单按钮提供再展开入口）。非模态呈现（不阻断嵌入内容查看，不调用 window.alert）；失败（-notice，警示左边条）保留现场可重试。主题变量取 VSCode 公开变量族（compare 主操作 button 主色族 / 其余 button-secondary 族 / 在途禁用 opacity / focus-visible 描边 / 提示行 editorWarning 左边条），主题与 CSS 片段跟随宿主外观。",
+    "views": [
+      "live"
+    ],
+    "states": "不在场（缺省——非冲突暂停；正常编辑/装载/错误分态均无选择条）/ 展开（暂停提示文字 + 三项按钮；compare 在途禁用——opacity 降级）/ 收起（cancel 后：仅剩 -reopen 重新选择入口，暂停与输入保持）/ 失败保留现场（-notice 提示行在场 + 三项按钮保留，可重试）/ 暂停解除（doc.resync 到达：选择条整体移除，状态行交还 loading/错误分态管理）。",
+    "dom": "嵌入卡片 .vsidian-embed-card 的状态行 .vsidian-embed-card-state 内：暂停提示为 <span>（文案经 i18n 词条 embed.livePaused，bindLocale 登记换语言刷新）；选择条为 div.vsidian-embed-card-conflict（flex wrap 容器）；按钮为真实 <button type=\"button\">（可见文字经 embed.conflictCompareLabel / embed.conflictDiscardLabel / embed.conflictCancelLabel / embed.conflictReopenLabel，悬停词 data-tooltip 经 embed.conflictCompareHint / embed.conflictDiscardHint / embed.conflictCancelHint / embed.conflictReopenHint——compare 悬停词为用户指定原文）；失败提示为 div.vsidian-embed-card-conflict-notice（文案 embed.conflictCompareFailed）。与选择条按钮 / 键位操作（conflictCompare/conflictDiscard/conflictCancel，P2-10 登记默认未绑定）/ 测试钩子同一处理器链路。",
+    "example": ".vsidian-embed-card .vsidian-embed-card-state .vsidian-embed-card-conflict {\n  display: flex;\n  align-items: center;\n  flex-wrap: wrap;\n  gap: 6px;\n}",
+    "obsidian": {
+      "counterpart": "无直接对应（Obsidian 冲突处理闭源；本项目自绘就地选择条，对比页走宿主原生 diff）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 embedConflictChoices（P2-12）：三项呈现与文案/hover 逐字、compare 出站全文快照与在途防重入、结果 ok 重同步（旧输入不重放）、失败保留现场可重试、cancel 收起与重新选择、键位路由与暂停外零操作",
+      "单元 embedCardCssContract（P2-12）：选择条 flex wrap、compare 主按钮色与三项次按钮色、禁用态与 focus-visible、失败提示左边条规则钉住",
+      "浏览器 embedLiveActions 场景 I（P2-12）：三项真实绘制（非零尺寸占位）、compare hover 逐字、真实点击转交与重同步、cancel 收起/重新选择、失败提示绘制（左边条）与重试",
+      "集成 P2-12 用例（1.82.3 真宿主）：真实冲突暂停现场三项、untitled 左/真实 B 右的原生对比页与两侧内容断言、转交后旧输入不写入 B、对比页关闭后 untitled 释放（无累计泄漏）、放弃不回滚 B 其他修改、干净 B 仍有保护、失败注入保留现场可重试"
+    ],
+    "introduced": "#289（2026-10-02）"
+  },
+  {
     "id": "live-embed-widget",
     "domain": "content",
     "category": "link-image-wikilink",
@@ -5375,6 +5400,14 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     "dom": "A direct child of body: .vsidian-ref-close-backdrop (a fixed full-screen overlay, z-index above the hover popup and the image popup — modal blocking) containing .vsidian-ref-close-dialog; the title and notes are divs; the three actions are real <button type=\"button\"> elements (labels from the i18n entries embed.closeCancel / embed.closeSave / embed.closeDiscard); the notice line is a div (text from embed.closeStale / embed.closeSaveFailed / embed.closeDiscardFailed, display:none by default). Keyboard semantics: Esc on the modal cancels; Enter lands on the default focus (cancel).",
     "obsidian": {
       "counterpart": "No direct counterpart (Obsidian uses the native host save-confirmation dialog; this project draws its own modal)."
+    }
+  },
+  "embed-conflict-choices": {
+    "purpose": "P2-12 (#289) write-conflict three choices: when an internal live editor is paused because writing back is unsafe (an external interleaved edit overwrote the requested range, and so on), the paused scene (the state line) shows \"Compare and Resolve / Discard Current Version / Cancel\" in place — the compare hover text is the user-specified wording \"Resolve the conflict in a diff view between the temporary copy and the conflicting version\" (carried by data-tooltip, word for word). The three actions: compare sends out the full snapshot of the current input, and the host creates an untitled temporary copy and opens the native VSCode diff (left = the temporary copy, right = the real B; the P2-01 §6 verified route — the diff view belongs to the host and the extension builds no resolution UI of its own); after a successful handoff a sync.request resyncs and lifts the pause (the old uncommitted queue is never replayed). Discard drops only the input that failed to write this time and resyncs B (never a document-level rollback of the whole B — modeled separately from the P2-05 discard). Cancel collapses the choices while keeping the pause and the input (a single -reopen button re-expands them). Non-modal presentation (reading the embedded content stays possible; never window.alert); a failure (the -notice line with the warning left bar) keeps the scene and can be retried. Theme variables come from the public VSCode families (compare as the primary button family / the others button-secondary / in-flight disabled opacity / focus-visible outline / notice editorWarning left bar), so themes and CSS snippets follow the host appearance.",
+    "states": "Absent (the default — not a conflict pause; normal editing, loading and failure states never show the choice bar) / expanded (the paused note plus the three buttons; compare disabled in flight — reduced opacity) / collapsed (after cancel: only the -reopen entry remains, the pause and input kept) / failure keeping the scene (the -notice line present plus the three buttons, retryable) / pause lifted (when doc.resync arrives: the whole choice bar is removed and the state line returns to loading/error handling).",
+    "dom": "Inside the embed card state line .vsidian-embed-card-state: the paused note is a <span> (text from the i18n entry embed.livePaused, registered with bindLocale for locale switches); the choice bar is a div.vsidian-embed-card-conflict (a flex wrap container); the buttons are real <button type=\"button\"> elements (visible labels from embed.conflictCompareLabel / embed.conflictDiscardLabel / embed.conflictCancelLabel / embed.conflictReopenLabel, tooltips via data-tooltip from embed.conflictCompareHint / embed.conflictDiscardHint / embed.conflictCancelHint / embed.conflictReopenHint — the compare tooltip is the user-specified wording); the failure note is a div.vsidian-embed-card-conflict-notice (text embed.conflictCompareFailed). The bar buttons, the keybinding operations (conflictCompare/conflictDiscard/conflictCancel, registered in P2-10 with no default binding) and the test hooks share one handler chain.",
+    "obsidian": {
+      "counterpart": "No direct counterpart (Obsidian conflict handling is closed-source; this project draws its own in-place choice bar and delegates the diff to the native host diff editor)."
     }
   },
   "live-embed-widget": {

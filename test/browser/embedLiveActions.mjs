@@ -204,6 +204,73 @@ try {
   passed++
   console.log('[嵌入Live操作][PASS] H 冲突放弃：sync.request 出站并 resync 恢复')
 
+  // ---- 场景 I（P2-12/#289）：冲突暂停现场三项选择——真实绘制 + compare
+  // 出站全文快照（含未提交输入）→ ok 转交（sync.request → resync 解除）；
+  // cancel 收起/重新选择；失败保留现场可重试 ----
+  // I-1 暂停现场：三项真实绘制（非 display:none/零尺寸），compare hover 逐字
+  await page.evaluate(() => window.focusEmbedEditor())
+  await settle(150)
+  await page.evaluate(() => window.embedSuspendPort())
+  await settle(150)
+  const choiceI1 = await page.evaluate(() => window.embedConflictChoiceState())
+  assert.equal(choiceI1.present, true, '暂停现场选择条在场')
+  assert.deepEqual(choiceI1.buttons, ['compare', 'discard', 'cancel'], '三项按钮齐全')
+  assert.equal(choiceI1.buttonsPainted, true, '三项按钮真实绘制（可见占位）')
+  assert.equal(choiceI1.compareTooltip, '在临时副本和冲突版本的对比视图中处理冲突',
+    'compare hover 为用户指定原文逐字')
+
+  // I-2 暂停后继续输入（本地保留）→ 真实点击 compare → 出站全文快照
+  await page.keyboard.type('未提交输入')
+  await settle(200)
+  const embedTextI = await page.evaluate(() => window.embedEditorText())
+  const sentBeforeCompare = (await sent()).length
+  await page.locator('.vsidian-embed-card .vsidian-embed-card-conflict-compare').click()
+  await settle(300)
+  const compareReqs = await page.evaluate(() => window.embedConflictCompareRequests())
+  assert.equal(compareReqs.length, 1, 'compare 出站 refEdit.conflictCompare')
+  assert.equal(compareReqs[0]?.text, embedTextI, '临时副本内容 = 实例当前全文（含未提交输入）')
+  // 伪宿主应答 ok + 直驱恢复（doc.resync 推送）：暂停解除、编辑器重置
+  //（生产恢复由宿主 resumePanel 直驱——对比页激活会隐藏来源 webview，
+  // 不依赖 webview 再出站请求；此处断言增量零 sync.request 出站）
+  const syncOutI = (await sent()).slice(sentBeforeCompare)
+    .filter((m) => m.kind === 'refEdit.message' && m.message.kind === 'sync.request')
+  assert.equal(syncOutI.length, 0, 'compare ok 后 webview 不出站 sync.request（宿主直驱恢复）')
+  const cardsI2 = await page.evaluate(() => window.embedLiveCards())
+  assert.equal(cardsI2[0]?.liveSuspended, false, '转交后暂停解除（宿主直驱 doc.resync）')
+  assert.equal((await page.evaluate(() => window.embedEditorText())).includes('未提交输入'), false,
+    '旧未提交输入不重放（编辑器装载权威全文）')
+
+  // I-3 cancel 收起（保持暂停与输入）→ 重新选择展开
+  await page.evaluate(() => window.embedSuspendPort())
+  await settle(150)
+  await page.locator('.vsidian-embed-card .vsidian-embed-card-conflict-cancel').click()
+  await settle(150)
+  const choiceI3 = await page.evaluate(() => window.embedConflictChoiceState())
+  assert.deepEqual(choiceI3.buttons, ['reopen'], '取消后仅剩重新选择入口')
+  await page.locator('.vsidian-embed-card .vsidian-embed-card-conflict-reopen').click()
+  await settle(150)
+  const choiceI3b = await page.evaluate(() => window.embedConflictChoiceState())
+  assert.deepEqual(choiceI3b.buttons, ['compare', 'discard', 'cancel'], '重新选择展开三项')
+
+  // I-4 失败分径：伪宿主应答 fail → 选择保留 + 失败提示绘制（警示左边条），
+  // 不出站 sync.request；配置回 ok 重试成功（宿主直驱恢复）
+  await page.evaluate(() => window.embedSetConflictCompareOk(false))
+  await page.locator('.vsidian-embed-card .vsidian-embed-card-conflict-compare').click()
+  await settle(300)
+  const choiceI4 = await page.evaluate(() => window.embedConflictChoiceState())
+  assert.deepEqual(choiceI4.buttons, ['compare', 'discard', 'cancel'], '失败后选择现场保留')
+  assert.equal(choiceI4.noticePainted, true, '失败提示真实绘制（警示左边条）')
+  const cardsI4 = await page.evaluate(() => window.embedLiveCards())
+  assert.equal(cardsI4[0]?.liveSuspended, true, '失败后保持暂停（输入不丢）')
+  await page.evaluate(() => window.embedSetConflictCompareOk(true))
+  await page.locator('.vsidian-embed-card .vsidian-embed-card-conflict-compare').click()
+  await settle(300)
+  const cardsI5 = await page.evaluate(() => window.embedLiveCards())
+  assert.equal(cardsI5[0]?.liveSuspended, false, '重试成功后暂停解除（宿主直驱恢复）')
+  assert.equal(await page.evaluate(() => window.mainEditorText()), mainAfterF, 'A 不变')
+  passed++
+  console.log('[嵌入Live操作][PASS] I 冲突三项：绘制/hover 逐字、compare 快照转交、cancel 收起、失败保留可重试')
+
   assert.deepEqual(errors, [], '页面零未捕获异常')
   console.log(`[嵌入Live操作] 全部 ${passed} 场景通过`)
 } finally {

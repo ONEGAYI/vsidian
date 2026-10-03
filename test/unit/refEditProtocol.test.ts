@@ -131,4 +131,48 @@ describe('refEdit 协议：宿主 → webview', () => {
     expect(isHostToWebview({ kind: 'refEdit.save.result', portId: 'panel-9', fsPath: 'D:\\b.md', ok: true })).toBe(true)
     expect(isHostToWebview({ kind: 'refEdit.save.result', portId: 'panel-9', fsPath: 'D:\\b.md' })).toBe(false)
   })
+
+  it('P2-12：refEdit.conflictCompare（webview → 宿主）接受完整载荷并拒绝缺 text', () => {
+    expect(isWebviewToHost({
+      kind: 'refEdit.conflictCompare',
+      ...PANEL,
+      portId: 'panel-9',
+      fsPath: 'D:\\notes\\b.md',
+      text: '# 冲突输入全文',
+    })).toBe(true)
+    // text 是临时副本的唯一内容来源，缺失/错型整体拒绝
+    expect(isWebviewToHost({
+      kind: 'refEdit.conflictCompare',
+      ...PANEL,
+      portId: 'panel-9',
+      fsPath: 'D:\\notes\\b.md',
+    })).toBe(false)
+    expect(isWebviewToHost({
+      kind: 'refEdit.conflictCompare',
+      ...PANEL,
+      portId: 'panel-9',
+      fsPath: 'D:\\notes\\b.md',
+      text: 42,
+    })).toBe(false)
+  })
+
+  it('P2-12：refEdit.conflictCompare.result（宿主 → webview）接受完整载荷并拒绝缺 ok', () => {
+    expect(isHostToWebview({
+      kind: 'refEdit.conflictCompare.result',
+      portId: 'panel-9',
+      fsPath: 'D:\\b.md',
+      ok: true,
+    })).toBe(true)
+    expect(isHostToWebview({
+      kind: 'refEdit.conflictCompare.result',
+      portId: 'panel-9',
+      fsPath: 'D:\\b.md',
+      ok: false,
+    })).toBe(true)
+    expect(isHostToWebview({
+      kind: 'refEdit.conflictCompare.result',
+      portId: 'panel-9',
+      fsPath: 'D:\\b.md',
+    })).toBe(false)
+  })
 })

@@ -9,7 +9,7 @@ import * as vscode from 'vscode'
 import { randomUUID } from 'node:crypto'
 import * as path from 'node:path'
 import { DocumentSession, type HostDocumentPort, type SessionNotice } from './documentSession'
-import { isRefEditClientMessage, RefEditPortRegistry, wrapRefEditPush } from './refEditPorts'
+import { isRefEditClientMessage, RefEditPortRegistry, wrapRefEditPush, type RefEditBinding } from './refEditPorts'
 import {
   appendImageVersionStamp,
   classifyImageTarget,
@@ -500,6 +500,98 @@ export function createTextEditorProvider(
       return false
     }
   }
+
+  // ---- P2-12（#289）冲突三项「对比并解决」：untitled 临时副本 + 原生对比
+  // 页（P2-01 §6 已验证路线）。临时副本承载 webview 送来的当前未提交输入
+  // 全文（LF 形态直接承载——untitled 行尾即 LF）；对比页打开后其编辑/保
+  // 存/关闭由宿主管理，扩展不自建解决界面，也不主动关闭已打开的对比页
+  //（revert 类命令会误伤 diff 编辑器右侧 B 的未保存修改）。释放闭环：
+  // 对比页关闭时 untitled 随之从 textDocuments 释放（宿主生命周期，P2-01
+  // §6.3 验证）；打开失败的孤儿副本由扩展自驱清理（showTextDocument +
+  // revertAndCloseActiveEditor——作用于 untitled 独立标签，只丢副本自身）。
+  // conflictTempUris 只做记账（观察与防泄漏核查），不延长文档寿命。 ----
+
+  /** 冲突临时副本（untitled）记账：在场集合，随 onDidCloseTextDocument 移除 */
+  const conflictTempUris = new Set<string>()
+  /** 测试钩子注入（VSIDIAN_TEST_HOOKS=1 经 _test.failNextConflictDiff 置位）：
+   *  下一次 compare 请求短路为失败——集成测试「API／资源打开失败原现场
+   *  可继续选择」断言载体；生产路径恒 false */
+  let conflictDiffFailOnce = false
+
+  /** 打开失败的孤儿临时副本清理：副本从未被对比页持有时（executeCommand
+   *  抛错形态），自驱关闭其独立标签使其从 textDocuments 释放 */
+  const cleanupOrphanConflictTemp = async (temp: vscode.TextDocument): Promise<void> => {
+    try {
+      if (!vscode.workspace.textDocuments.some((d) => d.uri.toString() === temp.uri.toString())) {
+        return // 已释放（宿主生命周期先行）
+      }
+      await vscode.window.showTextDocument(temp, { preview: true, preserveFocus: true })
+      await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor')
+    } catch {
+      // 清理失败：副本驻留但无编辑器持有（不可见），单次失败不累计
+    } finally {
+      conflictTempUris.delete(temp.uri.toString())
+    }
+  }
+
+  /** 「对比并解决」执行：创建 untitled 临时副本 → vscode.diff（左=临时副本、
+   *  右=真实 B；override 避免 .md 落回本扩展 custom editor，preview:false
+   *  钉住——预览语义替换会连带关闭承载未提交输入的对比页）。结果回
+   *  refEdit.conflictCompare.result：ok 前提是临时资源完整就绪且对比成功
+   *  打开（webview 收 ok 后才解除暂停重同步）；失败保留原现场 */
+  const openConflictDiff = async (
+    binding: RefEditBinding,
+    text: string,
+    reply: (ok: boolean) => void,
+  ): Promise<void> => {
+    let bDoc: vscode.TextDocument | undefined = sessions.get(binding.targetUri)?.doc
+    if (!bDoc) {
+      try {
+        bDoc = await vscode.workspace.openTextDocument(vscode.Uri.parse(binding.targetUri))
+      } catch {
+        reply(false) // 目标不可装载：原现场可继续选择（不清输入）
+        return
+      }
+    }
+    if (conflictDiffFailOnce) {
+      conflictDiffFailOnce = false
+      reply(false) // 注入失败：不消耗任何资源
+      return
+    }
+    let temp: vscode.TextDocument
+    try {
+      temp = await vscode.workspace.openTextDocument({ content: text, language: 'markdown' })
+    } catch {
+      reply(false) // 临时资源创建失败：原现场可继续选择
+      return
+    }
+    conflictTempUris.add(temp.uri.toString())
+    try {
+      await vscode.commands.executeCommand(
+        'vscode.diff',
+        temp.uri,
+        bDoc.uri,
+        t('host.conflictDiffTitle', { name: vscode.workspace.asRelativePath(bDoc.uri, false) }),
+        // P2-01 §6.1 验证形态：override 避免 .md 落回本扩展 custom editor。
+        // 不带 preview:false——1.82.3 实测 pinned diff 被 revertAndClose 关闭
+        // 时左侧 untitled 会弹独立标签驻留不释放（探针只验证过默认 preview
+        // 形态的免提示关闭与释放）；preview 形态下对比页被后续预览替换即随
+        // 宿主生命周期释放，与用户关闭同语义
+        { override: true },
+      )
+      reply(true)
+      // 成功转交：原引用重新同步 B（宿主直驱恢复）。对比页激活会隐藏来源
+      // 面板的 webview（retainContextWhenHidden 关闭——隐藏即销毁），恢复
+      // 不能依赖 webview 再出站 sync.request：resumePanel 清暂停与旧未提交
+      // 队列（不重放）；活 webview 由随后的 doc.resync 推送解除暂停 UI，
+      // 已销毁的 webview 重载后以 init 全文恢复（暂停已清，不补发 suspended）
+      sessions.get(binding.targetUri)?.session.resumePanel(binding.virtualSessionId)
+    } catch {
+      await cleanupOrphanConflictTemp(temp)
+      reply(false)
+    }
+  }
+
 
   // ---- #201 图片刷新协调器（provider 级单件：版本表与失效通道跨会话共享） ----
   const isWindowsHost = process.platform === 'win32'
@@ -1795,7 +1887,8 @@ export function createTextEditorProvider(
         if (isWebviewToHost(message) &&
           (message.kind === 'refEdit.bind' || message.kind === 'refEdit.unbind' ||
             message.kind === 'refEdit.message' || message.kind === 'refEdit.save' ||
-            message.kind === 'refEdit.close.query' || message.kind === 'refEdit.close.execute')) {
+            message.kind === 'refEdit.close.query' || message.kind === 'refEdit.close.execute' ||
+            message.kind === 'refEdit.conflictCompare')) {
           if (message.panelSessionId !== sessionId || message.panelDocUri !== document.uri.toString()) {
             return
           }
@@ -2009,6 +2102,25 @@ export function createTextEditorProvider(
               })()
               return
             }
+            case 'refEdit.conflictCompare': {
+              // P2-12（#289）「对比并解决」：临时副本 + 原生对比页（P2-01 §6
+              //  验证路线）。身份校验与 refEdit.save 同口径；text 为 webview
+              //  送来的实例当前全文快照（宿主不回查——webview 是未提交输入
+              //  的唯一权威来源）
+              const binding = refPorts.lookup(message.portId, sessionId, document.uri.toString())
+              if (!binding || binding.fsPath !== message.fsPath) {
+                return
+              }
+              void openConflictDiff(binding, message.text, (ok) => {
+                send({
+                  kind: 'refEdit.conflictCompare.result',
+                  portId: message.portId,
+                  fsPath: message.fsPath,
+                  ok,
+                })
+              })
+              return
+            }
           }
         }
         void entry.session.handleWebviewMessage(message, sessionId)
@@ -2149,6 +2261,14 @@ export function createTextEditorProvider(
       // P2-04：B 的 dirty 变化（content 与 dirty-state 两类事件）推送到
       // 绑定中的来源面板（pushRefEditDirty 内按值去重，翻转才发）
       pushRefEditDirty(event.document)
+    }),
+  )
+
+  // P2-12（#289）：冲突临时副本（untitled）关闭记账——对比页关闭时副本随
+  // 之释放（宿主生命周期），此处只同步移除在场集合（不延长文档寿命）
+  context.subscriptions.push(
+    vscode.workspace.onDidCloseTextDocument((document) => {
+      conflictTempUris.delete(document.uri.toString())
     }),
   )
 
@@ -2920,6 +3040,21 @@ export function createTextEditorProvider(
         }
         return entry.session.resumePanel(panel.sessionId)
       },
+    ),
+    vscode.commands.registerCommand(
+      // P2-12（#289）：置位下一次 refEdit.conflictCompare 短路为失败（不消
+      // 耗 untitled/对比页资源）——「API／资源打开失败原现场可继续选择」
+      // 的注入断言载体
+      'onegayi.vsidian._test.failNextConflictDiff',
+      () => {
+        conflictDiffFailOnce = true
+        return true
+      },
+    ),
+    vscode.commands.registerCommand(
+      // P2-12（#289）：冲突临时副本（untitled）记账观测（资源释放闭环断言）
+      'onegayi.vsidian._test.getConflictTempUris',
+      () => [...conflictTempUris],
     ),
     vscode.commands.registerCommand(
       'onegayi.vsidian._test.requestViewState',
