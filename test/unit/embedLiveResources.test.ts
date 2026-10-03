@@ -400,3 +400,44 @@ describe('P2-11 图片弹窗实例上下文：随实例注册与注销', () => {
     expect(imagePopupOptsOfView(view!)).toBeUndefined()
   })
 })
+
+describe('P2-14 代码卡复制：经目标端口走宿主剪贴板', () => {
+  const CODE_TEXT = ['# 目标笔记', '', '```js', 'const x = 1', 'const y = 2', '```', ''].join('\n')
+
+  /** 挂载含代码块的 B 并进入内部 Live（返回卡元素与端口 id） */
+  async function bindCodeCardLive(h: Harness): Promise<HTMLElement> {
+    const el = mountEmbedBlock(h.manager, '![[目标笔记]]\n')
+    h.manager.notifyResult(resultOk(hoverRequestOf(h.sent), CODE_TEXT))
+    h.setParentMode('live')
+    h.manager.notifyBound({ kind: 'refEdit.bound', reqId: bindReqIdOf(h.sent), ok: true, portId: 'panel-9', fsPath: B_FS, docUri: B_DOC_URI, version: 2, dirty: false })
+    h.manager.notifyPush({ kind: 'refEdit.push', portId: 'panel-9', fsPath: B_FS, message: { kind: 'init', sessionId: 'panel-9', docUri: B_DOC_URI, version: 2, text: CODE_TEXT } })
+    await settle()
+    return el
+  }
+
+  it('嵌入 Live 内代码卡复制按钮点击 → codeblock.copy 经 refEdit.message 信封出站（B 身份）', async () => {
+    const h = harness()
+    const el = await bindCodeCardLive(h)
+    const btn = editorRootOf(el).querySelector<HTMLButtonElement>('.vsidian-code-card-copy')
+    expect(btn).not.toBeNull()
+    btn!.click()
+    await settle()
+    const envelopes = envelopesOf(h.sent, 'codeblock.copy')
+    expect(envelopes).toHaveLength(1)
+    expect(envelopes[0]!.portId).toBe('panel-9')
+    expect(envelopes[0]!.fsPath).toBe(B_FS)
+    expect(envelopes[0]!.message).toMatchObject({ kind: 'codeblock.copy', docUri: B_DOC_URI, text: 'const x = 1\nconst y = 2' })
+  })
+
+  it('端口释放（切 Reading）后的迟到点击不产生信封出站', async () => {
+    const h = harness()
+    const el = await bindCodeCardLive(h)
+    h.manager.testSetMode('目标笔记', 'reading')
+    await settle()
+    const before = h.sent.length
+    // Live 编辑器已销毁：复制按钮随编辑器消失，无信封出站
+    expect(el.querySelector('.vsidian-code-card-copy')).toBeNull()
+    expect(h.sent.filter((m) => m.kind === 'refEdit.message')).toHaveLength(0)
+    expect(h.sent.length).toBe(before)
+  })
+})

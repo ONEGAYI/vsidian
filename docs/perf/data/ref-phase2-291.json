@@ -1,0 +1,90 @@
+{
+  "measuredAt": "2026-10-03T03:55:39.661Z",
+  "viewport": "980x700",
+  "scenarios": {
+    "shortTargets": {
+      "targets": 8,
+      "liveCount": 3,
+      "loadMs": 78,
+      "editors": 4,
+      "cards": 3,
+      "liveCards": 3,
+      "req": {
+        "hoverRequests": 8,
+        "binds": 8,
+        "unbinds": 5,
+        "editRequests": 0
+      },
+      "domNodes": 367,
+      "afterDispose": {
+        "editors": 0,
+        "cards": 0
+      }
+    },
+    "longTarget": {
+      "segments": 1000,
+      "editors": 2,
+      "textLen": 3061,
+      "liveTextLen": 28900,
+      "viewStats": {
+        "totalBlocks": 1001,
+        "mountedBlocks": 114,
+        "contentDomCount": 230,
+        "parseCount": 1,
+        "virtualized": true,
+        "maxMountedBlocks": 114,
+        "mountedEver": 114,
+        "unmountedEver": 0
+      },
+      "editorsDomLines": 41
+    },
+    "repeatedTarget": {
+      "occurrences": 12,
+      "viewportNote": "视口虚拟化——仅可见 occurrence 装载",
+      "editors": 4,
+      "cards": 3,
+      "liveCards": 3,
+      "req": {
+        "hoverRequests": 12,
+        "binds": 12,
+        "unbinds": 9,
+        "editRequests": 0
+      }
+    },
+    "wideBranch": {
+      "targets": 12,
+      "loadMs": 91,
+      "editors": 4,
+      "cards": 3,
+      "liveCards": 3,
+      "req": {
+        "hoverRequests": 12,
+        "binds": 12,
+        "unbinds": 9,
+        "editRequests": 0
+      }
+    },
+    "fastToggle": {
+      "rounds": 10,
+      "switchMs": 59,
+      "hoverDelta": 0,
+      "bindDelta": 10,
+      "unbindDelta": 10,
+      "editors": 1
+    },
+    "scrollOffscreen": {
+      "beforeScroll": {
+        "editors": 3,
+        "liveCards": 2
+      },
+      "afterScrollDown": {
+        "editors": 4,
+        "liveCards": 3
+      },
+      "afterScrollBack": {
+        "editors": 3,
+        "liveCards": 2
+      }
+    }
+  }
+}

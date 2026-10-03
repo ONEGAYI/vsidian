@@ -15069,4 +15069,145 @@ export const cases: Array<[string, () => Promise<void>]> = [
       '格内孙位保持手动 Live 且端口稳定（A 切换不覆写手动选择）')
     console.log('[P2-09] 直接父跟随 + 手动独立记忆 + 父根切换不覆写通过')
   }],
+
+  // ---- P2-14（#291）二期组合收口：跨票真实场景在 1.82.3 真宿主的组合
+  // 证明——表格格内三层递归（P2-08×P2-09：A 表格格 → B 手动 Live → B 内
+  // 孙卡 C 跟随）编辑/保存逐层归属与关闭回收基线；代码卡复制经目标端口
+  // 落宿主剪贴板（P2-14 接线的端到端）。 ----
+  ['P2-14 组合收口：表格格内三层递归编辑与关闭回收基线（#291）', async () => {
+    await openWithEditor('p214-组合父A.md')
+    await waitSessionReady('p214-组合父A.md')
+    const uri = wsUri('p214-组合父A.md').toString()
+    const bUri = wsUri('p214-组合B.md')
+    const cUri = wsUri('p214-组合C.md')
+    const aBefore = await readDisk('p214-组合父A.md')
+    const bBefore = await readDisk('p214-组合B.md')
+    const parentDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri)
+    assert(parentDoc, '父 A 文档在场')
+
+    // 表格格内 B 手动 Live（父 Reading 下格内卡独立进入——与 P2-08 场景 H
+    // 同款路径）；孙卡 C 随直接父 B 跟随装载并绑定独立端口
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.mode', inner: 'p214-组合B|格内位', mode: 'live',
+    })
+    const bound = await waitViewState('p214-组合父A.md', (v) => {
+      const bCard = (v.readingEmbed ?? []).find((c) => c.inner === 'p214-组合B|格内位' &&
+        c.internalMode === 'live' && c.liveBound === true && (c.liveTextLen ?? -1) >= 0)
+      const grand = (v.readingEmbed ?? []).filter((c) => c.inner === 'p214-组合C' &&
+        c.internalMode === 'live' && c.liveBound === true && (c.liveTextLen ?? -1) >= 0)
+      return bCard && grand.length >= 1 ? true : false
+    }, 0, 30000)
+    const bPort = (bound.readingEmbed ?? []).find((c) => c.inner === 'p214-组合B|格内位')?.livePortId
+    const grandPort = (bound.readingEmbed ?? []).find((c) => c.inner === 'p214-组合C' && c.liveBound === true)?.livePortId
+    assert(bPort && grandPort && bPort !== grandPort,
+      `三层组合端口分离（B ${bPort} vs C ${grandPort}）`)
+    const session0 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+
+    // 在孙卡 C 输入：只写 C——A/B 零写回零 dirty（三层逐层归属）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.type', inner: 'p214-组合C', pos: '# p214 组合 C\n\n'.length + 2,
+      text: '【三层孙】', occurrence: 0,
+    })
+    const cDoc = await poll('C 权威文本收到三层格内孙卡编辑', () => {
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === cUri.toString())
+      return doc?.getText().includes('【三层孙】') && doc.isDirty ? doc : undefined
+    })
+    assert(parentDoc.getText() === aBefore && !parentDoc.isDirty, '三层组合下父 A 零写回零 dirty')
+    const bDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === bUri.toString())
+    assert(!bDoc || (bDoc.getText() === bBefore && !bDoc.isDirty),
+      '直接来源 B 零写回零 dirty（孙卡编辑归 C）')
+    const session1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(session1.appliedEdits === session0.appliedEdits,
+      `A 会话 appliedEdits 零推进（实际 ${session1.appliedEdits}）`)
+
+    // 保存孙卡目标只落 C；随后干净关闭 A：无 B/C 交接标签 + 订阅整体回落
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.save', inner: 'p214-组合C', occurrence: 0,
+    })
+    await poll('孙目标保存落盘', async () =>
+      (await readDisk('p214-组合C.md')).includes('【三层孙】') ? true : undefined)
+    assert(!cDoc.isDirty, '保存后 C 干净')
+    assert(await readDisk('p214-组合父A.md') === aBefore, '保存孙目标不落 A 盘')
+    assert(await readDisk('p214-组合B.md') === bBefore, '保存孙目标不落 B 盘')
+    await new Promise((r) => setTimeout(r, 300))
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await poll('关闭 A 后无 B/C 交接标签（干净不交接）', () => {
+      const tabs = vscode.window.tabGroups.all.flatMap((g) => g.tabs)
+      const stray = tabs.filter((t) =>
+        t.input instanceof vscode.TabInputText &&
+        (t.input.uri.toString() === bUri.toString() || t.input.uri.toString() === cUri.toString()))
+      return stray.length === 0 ? true : undefined
+    })
+    await poll('组合链面板销毁订阅整体回落', async () => {
+      const stats = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
+      return stats.subscriptions === 0 && stats.targets === 0 ? stats : undefined
+    }, 15000)
+    console.log('[P2-14] 表格格内三层递归组合编辑 + 关闭回收基线通过')
+  }],
+
+  ['P2-14 嵌入内部 Live：代码卡复制经端口落宿主剪贴板（#291）', async () => {
+    await openWithEditor('p214-组合父A.md')
+    const session = await waitSessionReady('p214-组合父A.md')
+    const uri = wsUri('p214-组合父A.md').toString()
+    const bUri = wsUri('p214-组合B.md')
+
+    // B 手动 Live 绑定端口（格内卡进入目标编辑）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.mode', inner: 'p214-组合B|格内位', mode: 'live',
+    })
+    const bound = await waitViewState('p214-组合父A.md', (v) => {
+      const bCard = (v.readingEmbed ?? []).find((c) => c.inner === 'p214-组合B|格内位' &&
+        c.internalMode === 'live' && c.liveBound === true && (c.liveTextLen ?? -1) >= 0)
+      return bCard ? true : false
+    }, 0, 30000)
+    const card = (bound.readingEmbed ?? []).find((c) => c.inner === 'p214-组合B|格内位')!
+    assert(Boolean(card.livePortId && card.liveDocUri), 'B 端口与规范身份在场')
+
+    // 预置剪贴板哨兵后注入 codeblock.copy 信封（与 webview 复制按钮点击的
+    // 出站同形态）——宿主经端口绑定路由进 B 会话（docUri 守卫 + EOL 归一）
+    // 后由 writeClipboard 落宿主剪贴板
+    await vscode.env.clipboard.writeText('__p214-sentinel__')
+    assert(await vscode.commands.executeCommand(CMD.injectWebviewReceived, uri, {
+      kind: 'refEdit.message',
+      panelSessionId: session.panels.find((p) => p.ready)?.sessionId ?? '',
+      panelDocUri: uri,
+      portId: card.livePortId!,
+      fsPath: bUri.fsPath,
+      message: {
+        kind: 'codeblock.copy',
+        sessionId: card.livePortId!,
+        docUri: card.liveDocUri!,
+        text: 'const combo = 1',
+      },
+    }), '注入应命中真实面板处理器')
+    await poll('剪贴板收到 B 代码体', async () =>
+      (await vscode.env.clipboard.readText()) === 'const combo = 1' ? true : undefined)
+
+    // 伪造端口身份被拒：错误 docUri 的复制请求不得触碰剪贴板（哨兵保持）
+    await vscode.env.clipboard.writeText('__p214-sentinel2__')
+    assert(await vscode.commands.executeCommand(CMD.injectWebviewReceived, uri, {
+      kind: 'refEdit.message',
+      panelSessionId: session.panels.find((p) => p.ready)?.sessionId ?? '',
+      panelDocUri: uri,
+      portId: card.livePortId!,
+      fsPath: bUri.fsPath,
+      message: {
+        kind: 'codeblock.copy',
+        sessionId: card.livePortId!,
+        docUri: uri, // 伪称 A 的 docUri——B 会话按自身 docUri 守卫须拒收
+        text: 'SHOULD_NOT_COPY',
+      },
+    }), '注入应命中真实面板处理器')
+    await new Promise((r) => setTimeout(r, 300))
+    assert(await vscode.env.clipboard.readText() === '__p214-sentinel2__',
+      '伪身份复制被 B 会话守卫拒收（剪贴板不被污染）')
+
+    // 现场清理：关闭面板回落订阅
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor')
+    await poll('复制例面板销毁订阅回落', async () => {
+      const stats = (await vscode.commands.executeCommand(CMD.hoverWatchStats)) as { targets: number; subscriptions: number }
+      return stats.subscriptions === 0 && stats.targets === 0 ? stats : undefined
+    }, 15000)
+    console.log('[P2-14] 代码卡复制经端口落宿主剪贴板（含伪身份拒收）通过')
+  }],
 ]

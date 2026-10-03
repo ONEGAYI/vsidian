@@ -128,6 +128,29 @@ describe('refEdit 协议：webview → 宿主', () => {
     })).toBe(false)
   })
 
+  it('refEdit.message 携带 codeblock.copy 时接受（P2-14：代码卡复制经目标端口走宿主剪贴板）', () => {
+    expect(isWebviewToHost({
+      kind: 'refEdit.message',
+      ...PANEL,
+      portId: 'panel-9',
+      fsPath: 'D:\\notes\\b.md',
+      message: {
+        kind: 'codeblock.copy',
+        sessionId: 'panel-9',
+        docUri: 'file:///d%3A/notes/b.md',
+        text: 'const x = 1\n',
+      },
+    })).toBe(true)
+    // 缺 text / 错型仍拒绝（复用直发形态完整校验）
+    expect(isWebviewToHost({
+      kind: 'refEdit.message',
+      ...PANEL,
+      portId: 'panel-9',
+      fsPath: 'D:\\notes\\b.md',
+      message: { kind: 'codeblock.copy', sessionId: 'panel-9', docUri: 'file:///d%3A/notes/b.md' },
+    })).toBe(false)
+  })
+
   it('refEdit.save / refEdit.unbind 接受完整载荷', () => {
     expect(isWebviewToHost({
       kind: 'refEdit.save',

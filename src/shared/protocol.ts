@@ -1387,7 +1387,10 @@ export type WebviewToHost =
  *  经宿主验证的目标端口传递 B 身份（B 会话按自身 docUri 守卫并以 B 目录/
  *  根边界解析执行）——与 #220 悬停浮层的 sourceDocUri 直发是两条并行路径
  *  （直发按面板已送达目标比对，端口按 portId 绑定比对；后者即「经过宿主
- *  验证的目标绑定」）。面板级消息（locale/settings/view 族）仍不得混入。 */
+ *  验证的目标绑定」）。P2-14（#291）起 codeblock.copy 同通道：嵌入内代码
+ *  卡复制经端口进 B 会话走宿主剪贴板（webview 不触碰剪贴板权限；B 会话
+ *  按自身 docUri 守卫 + B 文档 EOL 归一）。面板级消息（locale/settings/
+ *  view 族）仍不得混入。 */
 export type RefEditClientMessage = Extract<
   WebviewToHost,
   | { kind: 'edit.request' }
@@ -1401,6 +1404,7 @@ export type RefEditClientMessage = Extract<
   | { kind: 'image.request' }
   | { kind: 'image.paste' }
   | { kind: 'refresh.request' }
+  | { kind: 'codeblock.copy' }
 >
 
 /** 反链面板条目载荷（#197 backlinks.snapshot.items；形态与宿主
@@ -3087,12 +3091,14 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
         case 'conflict.action':
           return isWebviewToHost(inner)
         // P2-11 资源消息：复用直发形态的完整校验（内消息 docUri 须为 B 的
-        // 规范 URI——宿主 B 会话按自身 docUri 守卫）
+        // 规范 URI——宿主 B 会话按自身 docUri 守卫）；P2-14 codeblock.copy
+        // 同口径（复制文本经端口走宿主剪贴板）
         case 'link.activate':
         case 'wikilink.activate':
         case 'image.request':
         case 'image.paste':
         case 'refresh.request':
+        case 'codeblock.copy':
           return isWebviewToHost(inner)
         default:
           return false

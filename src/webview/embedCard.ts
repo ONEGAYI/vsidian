@@ -1727,6 +1727,9 @@ export class EmbedCardManager {
       case 'image.request':
       case 'image.paste':
       case 'refresh.request':
+      // P2-14（#291）代码卡复制经目标端口走宿主剪贴板（B 会话按自身
+      // docUri 守卫 + B 文档 EOL 归一——与根面板 #81 同语义）
+      case 'codeblock.copy':
         this.context.send({
           kind: 'refEdit.message',
           panelSessionId: session.sessionId,
@@ -1737,7 +1740,7 @@ export class EmbedCardManager {
         })
         break
       default:
-        break // 面板级消息不经端口（codeblock.copy 等遗留丢弃，归 P2-14 收口核对）
+        break // 其余面板级消息不经端口，丢弃（宿主侧同款白名单冗余防线）
     }
   }
 
