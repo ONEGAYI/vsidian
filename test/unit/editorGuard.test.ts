@@ -1,5 +1,6 @@
 // #322 默认编辑器守护——共享纯逻辑矩阵测试（规格第六节单测面）：
 // 接管判定 / 写回值构造 / 版本三元组比较 / 拒绝记录语义 / 持久化清洗。
+// #323 增设置页状态行四形态判定（classifyDefaultEditorDisplay）矩阵。
 // 被测模块 src/shared/editorGuard（检测与写回共用同一键集常量的事实源）。
 import { describe, expect, it } from 'vitest'
 import {
@@ -9,6 +10,7 @@ import {
   EDITOR_ASSOCIATION_SPECIFIC_KEYS,
   VSIDIAN_EDITOR_VIEW_TYPE,
   buildEditorAssociationsFix,
+  classifyDefaultEditorDisplay,
   detectEditorTakeover,
   isPassiveSuppressedBy,
   sanitizeEditorGuardPersisted,
@@ -224,5 +226,64 @@ describe('isPassiveSuppressedBy 拒绝记录语义（被动层压制判定）', 
   })
   it('空记录放行', () => {
     expect(isPassiveSuppressedBy([], 'any.editor')).toBe(false)
+  })
+})
+
+describe('classifyDefaultEditorDisplay 设置页状态行四形态判定（#323）', () => {
+  it('无记录（undefined / 空对象 / 非对象 / 键值 null）→ none', () => {
+    expect(classifyDefaultEditorDisplay(undefined)).toEqual({ status: 'none', takerViewType: null })
+    expect(classifyDefaultEditorDisplay(null)).toEqual({ status: 'none', takerViewType: null })
+    expect(classifyDefaultEditorDisplay({})).toEqual({ status: 'none', takerViewType: null })
+    expect(classifyDefaultEditorDisplay('*.md')).toEqual({ status: 'none', takerViewType: null })
+    expect(classifyDefaultEditorDisplay({ '*.md': null, '*.markdown': undefined }))
+      .toEqual({ status: 'none', takerViewType: null })
+  })
+  it('键存在且全是我 → vsidian（与「无记录」区分——两形态展示不同）', () => {
+    expect(classifyDefaultEditorDisplay({ '*.md': VSIDIAN_EDITOR_VIEW_TYPE }))
+      .toEqual({ status: 'vsidian', takerViewType: null })
+    expect(classifyDefaultEditorDisplay({
+      '*.md': VSIDIAN_EDITOR_VIEW_TYPE,
+      '*.markdown': VSIDIAN_EDITOR_VIEW_TYPE,
+    })).toEqual({ status: 'vsidian', takerViewType: null })
+  })
+  it('值为内置编辑器 "default" → builtin（关联值原文随行）', () => {
+    expect(classifyDefaultEditorDisplay({ '*.md': BUILTIN_EDITOR_ASSOCIATION_VALUE }))
+      .toEqual({ status: 'builtin', takerViewType: BUILTIN_EDITOR_ASSOCIATION_VALUE })
+  })
+  it('值为其他扩展 → other（关联值原文随行，可读名反查归宿主端口）', () => {
+    expect(classifyDefaultEditorDisplay({ '*.markdown': 'cweijan.vscode-office.editor' }))
+      .toEqual({ status: 'other', takerViewType: 'cweijan.vscode-office.editor' })
+  })
+  it('多键混合：检测序（glob 长度降序）第一个非我键胜出——最贴近实际打开体验', () => {
+    // *.md 是我，**/*.md 被他者占：特异性仲裁下用户打开 .md 走他者
+    expect(classifyDefaultEditorDisplay({
+      '*.md': VSIDIAN_EDITOR_VIEW_TYPE,
+      '**/*.md': 'other.editor',
+    })).toEqual({ status: 'other', takerViewType: 'other.editor' })
+    // 无关文件类型不参与判定
+    expect(classifyDefaultEditorDisplay({
+      '*.ipynb': 'jupyter.notebook.ipynb',
+      '*.md': VSIDIAN_EDITOR_VIEW_TYPE,
+    })).toEqual({ status: 'vsidian', takerViewType: null })
+  })
+  it('仅特异键存在且非我 → other（特异键参与判定，与 detectEditorTakeover 同键集）', () => {
+    expect(classifyDefaultEditorDisplay({ '**/*.markdown': 'default' }))
+      .toEqual({ status: 'builtin', takerViewType: 'default' })
+  })
+  it('键存在但值为空字符串 → other（极端防御形态，展示层回退原文空串）', () => {
+    expect(classifyDefaultEditorDisplay({ '*.md': '' }))
+      .toEqual({ status: 'other', takerViewType: '' })
+  })
+  it('与 detectEditorTakeover 口径对齐：none/vsidian 两形态均不接管，builtin/other 均接管', () => {
+    for (const associations of [undefined, {}, { '*.md': VSIDIAN_EDITOR_VIEW_TYPE }]) {
+      expect(classifyDefaultEditorDisplay(associations).status === 'none' ||
+        classifyDefaultEditorDisplay(associations).status === 'vsidian').toBe(true)
+      expect(detectEditorTakeover(associations).takenOver).toBe(false)
+    }
+    for (const associations of [{ '*.md': 'default' }, { '*.md': 'x.editor' }]) {
+      const display = classifyDefaultEditorDisplay(associations)
+      expect(display.status === 'builtin' || display.status === 'other').toBe(true)
+      expect(detectEditorTakeover(associations).takenOver).toBe(true)
+    }
   })
 })

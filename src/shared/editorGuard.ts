@@ -1,7 +1,7 @@
 // #322 默认编辑器守护——共享纯逻辑（单一事实源）：接管判定、写回值构造、
 // 版本锁三元组比较、拒绝记录语义与持久化清洗。宿主服务（host/
 // editorGuardService）与 webview/设置页（#323 委托组）消费同一模块，不依赖
-// vscode / DOM。
+// vscode / DOM。#323 增设置页状态行四形态判定（classifyDefaultEditorDisplay）。
 //
 // 关键口径（规格 docs/specs/default-editor-guard.md 第二节决策表与第四节
 // 现状事实，按 VSCode 1.82.0 tag 源码查证）：
@@ -181,4 +181,61 @@ export function isPassiveSuppressedBy(
   takerViewType: string,
 ): boolean {
   return rejections.includes(takerViewType)
+}
+
+/**
+ * 设置页状态行四形态（#323「默认编辑器」委托组）：区分 detectEditorTakeover
+ * 合并处理的「未接管」两形态——「已是我」（键存在且全是我，展示 Vsidian）
+ * 与「无记录」（键集全部无记录，展示由 VSCode 仲裁的说明文案），两者用户
+ * 感知不同。
+ */
+export type DefaultEditorDisplayStatus = 'vsidian' | 'builtin' | 'other' | 'none'
+
+/**
+ * defaultEditor.state 消息载荷体（协议与宿主服务共用本形态；kind 字段由
+ * 消息装配处附加）：label 为「其他扩展」形态的可读名（extensions 反查
+ * displayName，反查失败回退关联值原文——本身即 viewType 字符串）；其余
+ * 形态 label 为 null（展示文本由设置页经自身语言包组句，不透传宿主侧
+ * 取词结果，换语言重渲染无滞留）。
+ */
+export interface DefaultEditorDisplayState {
+  status: DefaultEditorDisplayStatus
+  /** 抢占者关联值原文（builtin/other 形态随行；vsidian/none 为 null） */
+  viewType: string | null
+  /** 抢占者可读名（仅 other 形态非 null；builtin 由设置页自组句） */
+  label: string | null
+}
+
+/** 四形态判定结果（字段命名与 EditorTakeoverVerdict 同族；载荷装配见 DefaultEditorDisplayState） */
+export interface DefaultEditorDisplayVerdict {
+  status: DefaultEditorDisplayStatus
+  /** builtin/other 形态随行关联值原文；vsidian/none 为 null */
+  takerViewType: string | null
+}
+
+/**
+ * 四形态判定：检测序与 detectEditorTakeover 同向（glob 长度降序），第一
+ * 个非我键决定 builtin/other 并随行关联值原文；无任何记录 → none；有记
+ * 录且全是我 → vsidian。键值为 null/undefined 视同无记录（与接管判定
+ * 同口径）。
+ */
+export function classifyDefaultEditorDisplay(associations: unknown): DefaultEditorDisplayVerdict {
+  if (!isPlainObject(associations)) {
+    return { status: 'none', takerViewType: null }
+  }
+  let hasRecord = false
+  for (const key of EDITOR_ASSOCIATION_DETECT_ORDER) {
+    const value = associations[key]
+    if (value === null || value === undefined) {
+      continue
+    }
+    if (value !== VSIDIAN_EDITOR_VIEW_TYPE) {
+      return {
+        status: value === BUILTIN_EDITOR_ASSOCIATION_VALUE ? 'builtin' : 'other',
+        takerViewType: String(value),
+      }
+    }
+    hasRecord = true
+  }
+  return { status: hasRecord ? 'vsidian' : 'none', takerViewType: null }
 }

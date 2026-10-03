@@ -2216,3 +2216,36 @@ describe('手动刷新消息协议（#208）', () => {
     expect(isWebviewToHost({ kind: 'refresh.invalidated', reqId: 3, generation: 1 })).toBe(false)
   })
 })
+
+describe('默认编辑器守护消息协议（#323 设置页委托组）', () => {
+  it('接受合法 defaultEditor.get / defaultEditor.fix（无载荷开关类）', () => {
+    for (const kind of ['defaultEditor.get', 'defaultEditor.fix']) {
+      expect(isWebviewToHost({ kind }), kind).toBe(true)
+      // 多余字段不整体拒绝（与既有开关类消息同口径）
+      expect(isWebviewToHost({ kind, extra: 1 }), kind).toBe(true)
+      // 方向校验：宿主不发起
+      expect(isHostToWebview({ kind }), kind).toBe(false)
+    }
+  })
+
+  it('接受合法 defaultEditor.state 四形态，拒绝未知形态/类型不符/缺字段/方向伪造', () => {
+    // 四形态合法样例（other 带 label，builtin 不带可读名——展示文本由设置页组句）
+    expect(isHostToWebview({ kind: 'defaultEditor.state', status: 'vsidian', viewType: null, label: null })).toBe(true)
+    expect(isHostToWebview({ kind: 'defaultEditor.state', status: 'none', viewType: null, label: null })).toBe(true)
+    expect(isHostToWebview({
+      kind: 'defaultEditor.state', status: 'builtin', viewType: 'default', label: null,
+    })).toBe(true)
+    expect(isHostToWebview({
+      kind: 'defaultEditor.state', status: 'other', viewType: 'cweijan.vscode-office.editor', label: 'Office Viewer',
+    })).toBe(true)
+    // 未知形态 / 类型不符 / 缺字段
+    expect(isHostToWebview({ kind: 'defaultEditor.state', status: 'unknown', viewType: null, label: null })).toBe(false)
+    expect(isHostToWebview({ kind: 'defaultEditor.state', status: 7, viewType: null, label: null })).toBe(false)
+    expect(isHostToWebview({ kind: 'defaultEditor.state', status: 'other', viewType: 7, label: 'x' })).toBe(false)
+    expect(isHostToWebview({ kind: 'defaultEditor.state', status: 'other', viewType: 'x', label: 7 })).toBe(false)
+    expect(isHostToWebview({ kind: 'defaultEditor.state', status: 'other', viewType: 'x' })).toBe(false)
+    expect(isHostToWebview({ kind: 'defaultEditor.state', status: 'vsidian' })).toBe(false)
+    // 方向校验：webview 不发起
+    expect(isWebviewToHost({ kind: 'defaultEditor.state', status: 'none', viewType: null, label: null })).toBe(false)
+  })
+})

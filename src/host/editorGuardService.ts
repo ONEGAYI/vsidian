@@ -15,10 +15,12 @@
 // 陈述；沿语义保证状态不变期间不重复弹）。两层共用同一提示与修复链路。
 import {
   buildEditorAssociationsFix,
+  classifyDefaultEditorDisplay,
   detectEditorTakeover,
   isPassiveSuppressedBy,
   sameEditorGuardVersion,
   sanitizeEditorGuardPersisted,
+  type DefaultEditorDisplayState,
   type EditorGuardPersisted,
 } from '../shared/editorGuard'
 
@@ -83,6 +85,8 @@ export class EditorGuardService {
   private baselineTakenOver: boolean | null = null
   private promptInFlight = false
   private readonly startupPromptDelayMs: number
+  /** 判定状态变化订阅者（#323 设置页推送接线，jieba onStateChanged 同款） */
+  private readonly stateListeners = new Set<() => void>()
 
   constructor(
     private readonly ports: EditorGuardPorts,
@@ -90,6 +94,24 @@ export class EditorGuardService {
   ) {
     this.persisted = sanitizeEditorGuardPersisted(ports.readPersisted())
     this.startupPromptDelayMs = opts.startupPromptDelayMs ?? EDITOR_GUARD_STARTUP_PROMPT_DELAY_MS
+  }
+
+  /**
+   * 判定状态变化订阅（#323）：生效判定可能变化的链路（配置变更被动层、
+   * fixNow 修复）完成后通知。推送内容消费方现算（getDisplayState），本事件
+   * 只承担「该重读了」的信号；返回取消订阅函数。
+   */
+  onStateChanged(listener: () => void): () => void {
+    this.stateListeners.add(listener)
+    return () => {
+      this.stateListeners.delete(listener)
+    }
+  }
+
+  private notifyStateChanged(): void {
+    for (const listener of this.stateListeners) {
+      listener()
+    }
   }
 
   /**
@@ -119,12 +141,14 @@ export class EditorGuardService {
    * 被动层（wiring 的 onDidChangeConfiguration 过滤 workbench.
    * editorAssociations 后调用）：基线始终更新为最新判定（状态是事实）；
    * 仅在「未接管 → 接管」变更沿提示（状态不变化不重复弹），经拒绝记录
-   * 压制与 in-flight 防重弹门控。
+   * 压制与 in-flight 防重弹门控。#323：判定可能变化，完成即通知状态
+   * 订阅者（设置页状态行实时更新；通知不区分形态是否翻转——消费方现算）。
    */
   async handleAssociationsChanged(): Promise<void> {
     const verdict = detectEditorTakeover(this.ports.getAssociations())
     const previous = this.baselineTakenOver
     this.baselineTakenOver = verdict.takenOver
+    this.notifyStateChanged()
     if (previous === null) {
       return
     }
@@ -146,10 +170,13 @@ export class EditorGuardService {
       await this.ports.updateGlobalAssociations(next)
     } catch {
       this.ports.showFixFailedGuidance()
+      this.notifyStateChanged()
       return { ok: false }
     }
     const verdict = detectEditorTakeover(this.ports.getAssociations())
     this.baselineTakenOver = verdict.takenOver
+    // #323：写回与复查后生效判定可能变化（成功 → vsidian；失败维持他者）
+    this.notifyStateChanged()
     if (!verdict.takenOver) {
       this.ports.showFixedNotice()
       return { ok: true }
@@ -170,6 +197,27 @@ export class EditorGuardService {
       guardEnabled: this.ports.isGuardEnabled(),
       promptInFlight: this.promptInFlight,
     }
+  }
+
+  /**
+   * 设置页状态行载荷（#323 defaultEditor.state 消息体）：四形态判定现算；
+   * 「其他扩展」形态经 resolveTakerLabel 端口反查可读名（反查失败由端口
+   * 回退关联值原文），其余形态 label 为 null——展示文本由设置页经自身
+   * 语言包组句（换语言重渲染无宿主取词滞留）。
+   */
+  getDisplayState(): DefaultEditorDisplayState {
+    const verdict = classifyDefaultEditorDisplay(this.ports.getAssociations())
+    if (verdict.status === 'other') {
+      return {
+        status: 'other',
+        viewType: verdict.takerViewType,
+        label: this.ports.resolveTakerLabel(verdict.takerViewType!),
+      }
+    }
+    if (verdict.status === 'builtin') {
+      return { status: 'builtin', viewType: verdict.takerViewType, label: null }
+    }
+    return { status: verdict.status, viewType: null, label: null }
   }
 
   /**

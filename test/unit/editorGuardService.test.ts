@@ -418,3 +418,81 @@ describe('EditorGuardService 状态读取与重置', () => {
     expect(state.persistedRaw).toEqual({ versionLock: null, rejections: [] })
   })
 })
+
+describe('EditorGuardService getDisplayState 设置页状态行载荷（#323）', () => {
+  it('无记录 → none：viewType 与 label 均 null（展示文本由设置页组句）', () => {
+    const { service, state } = makeHarness()
+    state.associations = undefined
+    expect(service.getDisplayState()).toEqual({ status: 'none', viewType: null, label: null })
+  })
+  it('全是我 → vsidian：判定现算（修复后无需重推也能读到新形态）', async () => {
+    const { service, state } = makeHarness()
+    state.associations = { '*.md': VSIDIAN_EDITOR_VIEW_TYPE, '*.markdown': VSIDIAN_EDITOR_VIEW_TYPE }
+    expect(service.getDisplayState()).toEqual({ status: 'vsidian', viewType: null, label: null })
+  })
+  it('内置编辑器 → builtin：viewType 随行（"default"），label 为 null——展示文本走设置页语言包', () => {
+    const { service, state } = makeHarness()
+    state.associations = { '*.md': 'default' }
+    expect(service.getDisplayState()).toEqual({ status: 'builtin', viewType: 'default', label: null })
+  })
+  it('其他扩展 → other：label 经 resolveTakerLabel 端口反查可读名', () => {
+    const { service, state } = makeHarness()
+    state.associations = { '*.md': TAKER }
+    state.labels[TAKER] = 'Office Viewer'
+    expect(service.getDisplayState())
+      .toEqual({ status: 'other', viewType: TAKER, label: 'Office Viewer' })
+  })
+  it('其他扩展反查失败 → label 回退关联值原文（本身即 viewType 字符串）', () => {
+    const { service, state } = makeHarness()
+    state.associations = { '*.md': TAKER }
+    expect(service.getDisplayState())
+      .toEqual({ status: 'other', viewType: TAKER, label: TAKER })
+  })
+  it('守护开关关闭不影响状态行数据（关闭只停提示，规格守护模式决策）', () => {
+    const { service, state } = makeHarness()
+    state.associations = { '*.md': TAKER }
+    state.guardEnabled = false
+    expect(service.getDisplayState().status).toBe('other')
+  })
+})
+
+describe('EditorGuardService onStateChanged 状态变化订阅（#323 设置页推送）', () => {
+  it('配置变更（被动层）后通知监听者——包括判定不变的变更（推送现算幂等）', async () => {
+    const { service, state } = makeHarness()
+    const events: number[] = []
+    const off = service.onStateChanged(() => events.push(events.length))
+    // 先初始化基线（runStartupCheck 锁相同仅建基线，不通知）
+    state.version = '1.0.0'
+    state.persistedRaw = { versionLock: '1.0.0', rejections: [] }
+    await service.runStartupCheck()
+    expect(events).toHaveLength(0)
+    state.associations = { '*.md': TAKER }
+    await service.handleAssociationsChanged()
+    expect(events).toHaveLength(1)
+    // 判定不变（接管 → 接管）的变更沿同样通知：状态行以宿主现算为准
+    state.associations = { '*.md': 'another.editor' }
+    await service.handleAssociationsChanged()
+    expect(events).toHaveLength(2)
+    off()
+    await service.handleAssociationsChanged()
+    expect(events).toHaveLength(2)
+  })
+  it('fixNow 完成后通知监听者（手动改回 → 设置页状态行即时更新）', async () => {
+    const { service, state } = makeHarness()
+    const events: number[] = []
+    service.onStateChanged(() => events.push(events.length))
+    state.associations = { '*.md': VSIDIAN_EDITOR_VIEW_TYPE, '*.markdown': VSIDIAN_EDITOR_VIEW_TYPE }
+    await service.fixNow()
+    expect(events).toHaveLength(1)
+  })
+  it('提示在途不产生额外通知（拒绝记录与锁写不是状态行变化）', async () => {
+    const { service, state } = makeHarness()
+    const events: number[] = []
+    service.onStateChanged(() => events.push(events.length))
+    state.associations = { '*.md': TAKER }
+    state.promptAnswer = 'dismiss'
+    await service.runStartupCheck()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(events).toHaveLength(0)
+  })
+})
