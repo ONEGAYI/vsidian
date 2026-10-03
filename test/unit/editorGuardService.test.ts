@@ -21,6 +21,7 @@ interface Harness {
     globalAssociations: unknown
     updates: Array<Record<string, string>>
     updateError: unknown
+    persistError: unknown
     guardEnabled: boolean
     prompts: string[]
     promptAnswer: 'fix' | 'dismiss' | undefined
@@ -42,6 +43,7 @@ function makeHarness(
     globalAssociations: undefined,
     updates: [],
     updateError: null,
+    persistError: null,
     guardEnabled: true,
     prompts: [],
     promptAnswer: undefined,
@@ -55,6 +57,9 @@ function makeHarness(
     writePersisted: (value) => {
       state.writes.push(value)
       state.persistedRaw = value
+      if (state.persistError) {
+        return Promise.reject(state.persistError)
+      }
       return Promise.resolve()
     },
     getExtensionVersion: () => state.version,
@@ -271,6 +276,74 @@ describe('EditorGuardService in-flight 防重弹', () => {
     state.associations = { '*.md': 'another.editor' }
     await service.handleAssociationsChanged()
     expect(state.prompts).toEqual([TAKER]) // 无第二条
+  })
+})
+
+describe('EditorGuardService 审查修复回归（review-loops 轮 1）', () => {
+  function flush(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, 0))
+  }
+
+  it('在途期间换抢占者的沿：settle 后补弹新抢占者（换人资格不被吞）', async () => {
+    const { service, state } = makeHarness()
+    await service.runStartupCheck() // 基线：未接管
+    let release!: () => void
+    state.promptGate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    state.associations = { '*.md': TAKER }
+    await service.handleAssociationsChanged() // A 提示挂起（gate）
+    // in-flight 期间：改回 → 被 B 抢（沿被基线消费，B 的提示资格挂起）
+    state.associations = { '*.md': VSIDIAN_EDITOR_VIEW_TYPE }
+    await service.handleAssociationsChanged()
+    state.associations = { '*.md': 'another.editor' }
+    await service.handleAssociationsChanged()
+    expect(state.prompts).toEqual([TAKER])
+    release() // A 以超时语义 settle（不记拒绝）
+    await flush() // 等补弹微任务链
+    expect(state.prompts).toEqual([TAKER, 'another.editor'])
+  })
+
+  it('在途期间同抢占者重复触发：settle 后不补弹（一次提示已足够）', async () => {
+    const { service, state } = makeHarness()
+    await service.runStartupCheck()
+    let release!: () => void
+    state.promptGate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    state.associations = { '*.md': TAKER }
+    await service.handleAssociationsChanged()
+    state.associations = { '*.md': VSIDIAN_EDITOR_VIEW_TYPE }
+    await service.handleAssociationsChanged()
+    state.associations = { '*.md': TAKER } // 同 taker 再造沿
+    await service.handleAssociationsChanged()
+    release()
+    await flush()
+    expect(state.prompts).toEqual([TAKER]) // 无第二条
+  })
+
+  it('主动层延迟窗内用户已改回：到点弹前复核放弃提示，锁照写', async () => {
+    const { service, state } = makeHarness({ startupPromptDelayMs: 20 })
+    state.associations = { '*.md': TAKER }
+    const check = service.runStartupCheck() // 锁写与延迟提示并行，不先 await
+    state.associations = undefined // 延迟窗内用户改回（无记录 = 未接管）
+    await check
+    await new Promise((resolve) => setTimeout(resolve, 40)) // 等 20ms 延迟到期
+    expect(state.prompts).toEqual([]) // 过时的指名提示不弹
+    expect(state.writes).toEqual([{ versionLock: '1.0.0', rejections: [] }]) // 写锁不依赖提示
+  })
+
+  it('globalState 写失败：不成未处理拒绝，内存态照常推进', async () => {
+    const { service, state } = makeHarness()
+    state.persistError = new Error('disk full')
+    state.promptAnswer = 'dismiss'
+    await expect(service.runStartupCheck()).resolves.toBeUndefined() // 未接管锁写失败不冒泡
+    state.associations = { '*.md': TAKER }
+    await service.handleAssociationsChanged() // 沿触发提示并 dismiss（拒绝记录持久化同样失败）
+    expect(state.prompts).toEqual([TAKER])
+    // 内存态为准：拒绝已记录（下次同 taker 被动提示被压制），持久化失败仅下次启动多提示一次
+    expect(service.getState().rejections).toEqual([TAKER])
+    expect(service.getState().versionLock).toBe('1.0.0')
   })
 })
 

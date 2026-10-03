@@ -84,6 +84,10 @@ export class EditorGuardService {
   /** 被动层沿基线：上一次生效判定（null = 尚未初始化，不参与沿检测） */
   private baselineTakenOver: boolean | null = null
   private promptInFlight = false
+  /** 在途提示的抢占者：同 taker 的重复触发不补弹（一次提示已足够） */
+  private inFlightTakerViewType: string | null = null
+  /** 在途期间被吞的换抢占者沿（settle 后补弹，保留原始绕过语义） */
+  private pendingPrompt: { takerViewType: string; bypassRejections: boolean } | null = null
   private readonly startupPromptDelayMs: number
   /** 判定状态变化订阅者（#323 设置页推送接线，jieba onStateChanged 同款） */
   private readonly stateListeners = new Set<() => void>()
@@ -254,15 +258,26 @@ export class EditorGuardService {
     opts: { bypassRejections: boolean },
   ): Promise<void> {
     if (this.promptInFlight) {
+      // 沿已被基线消费（基线是事实状态，设置页状态行依赖它）；换抢占者的
+      // 提示资格在此挂起、在途 settle 后补弹——同 taker 重复触发不补
+      if (takerViewType !== this.inFlightTakerViewType) {
+        this.pendingPrompt = { takerViewType, bypassRejections: opts.bypassRejections }
+      }
       return
     }
     if (!this.ports.isGuardEnabled()) {
+      return
+    }
+    // 弹前复核：主动层 1.5s 延迟窗或事件排队的等待期间，用户可能已自行
+    // 改回（生效值不再被接管）——过时的指名提示比不提示更糟，放弃本次
+    if (!detectEditorTakeover(this.ports.getAssociations()).takenOver) {
       return
     }
     if (!opts.bypassRejections && isPassiveSuppressedBy(this.persisted.rejections, takerViewType)) {
       return
     }
     this.promptInFlight = true
+    this.inFlightTakerViewType = takerViewType
     try {
       const label = this.ports.resolveTakerLabel(takerViewType)
       const answer = await this.ports.showTakeoverPrompt(label)
@@ -279,10 +294,20 @@ export class EditorGuardService {
       }
     } finally {
       this.promptInFlight = false
+      this.inFlightTakerViewType = null
+    }
+    const pending = this.pendingPrompt
+    this.pendingPrompt = null
+    if (pending) {
+      void this.promptTakeover(pending.takerViewType, { bypassRejections: pending.bypassRejections })
     }
   }
 
   private async persistState(): Promise<void> {
-    await this.ports.writePersisted(this.persisted)
+    try {
+      await this.ports.writePersisted(this.persisted)
+    } catch {
+      // 持久化失败良性：内存态为准，后果仅下次启动多提示一次，不打扰用户
+    }
   }
 }
