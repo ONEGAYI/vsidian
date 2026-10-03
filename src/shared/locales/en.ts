@@ -327,6 +327,7 @@ export const en = {
   'host.indexCleanupFailed': 'Cache cleanup failed: {detail}',
   /** #318: failure feedback for the search reveal command (success is shown via the flash highlight) */
   'host.searchRevealNotFound': 'Could not match a selected search result to the current Vsidian panel (select a match in the search view first).',
+  'host.searchRevealNoPanel': 'No active Vsidian panel — open the note in Vsidian (or switch to its tab) before revealing a search result.',
   // ---- #199 rename/move reference auto-update (host notices; batch merged) ----
   'host.renameRefsUpdated': 'Renamed "{file}" and updated {count} reference(s) in {files} file(s).',
   'host.renameRefsPartiallyUpdated': 'Renamed "{file}" and updated {count} reference(s); {skipped} skipped (out of root or content changed) — not fully updated.',

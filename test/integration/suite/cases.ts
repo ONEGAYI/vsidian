@@ -15693,6 +15693,10 @@ export const cases: Array<[string, () => Promise<void>]> = [
     } finally {
       await vscode.commands.executeCommand('workbench.view.explorer').then(undefined, () => {})
       await vscode.env.clipboard.writeText('')
+      // 收尾：清理临时文档（对齐其他用例收尾惯例，不把矩阵文件留给后续用例）
+      for (const file of ['proto-a.md', 'proto-b.md', 'proto-crlf.md']) {
+        await Promise.resolve(vscode.workspace.fs.delete(wsUri(file), { useTrash: false })).catch(() => undefined)
+      }
     }
   }],
 ]

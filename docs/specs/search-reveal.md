@@ -25,7 +25,7 @@ VSCode 全工作区搜索（Ctrl+Shift+F）命中 `.md` 后点击结果条目：
 3. **行文本唯一吻合校验**（文件身份的唯一校验）：解析出的行列须落在目标文档范围内，且该行文本（剥 `\r`）与预览文本完全吻合；不吻合即安全放弃。残留选中条目配对到其他文件时在此拦下。
 4. **落位**：换算 LF 坐标后经 `view.locate` 发送（与双链锚点跳转同一通道）——单点光标落**匹配词首**（col 指向词首而非行首），flash 高亮由该通道既有语义提供；重握手补发兜底由 `documentSession.lastLocate` 既有机制承担。
 
-失败反馈：无活动面板 / copyMatch 无输出 / 行文本不吻合，均以宿主通知（`host.searchRevealNotFound`，i18n 双语）反馈，不静默。
+失败反馈按结果分型（i18n 双语，不静默）：no-panel（活动 tab 非 Vsidian 面板）以专用键 `host.searchRevealNoPanel` 提示先打开/切换 Vsidian 面板；no-match / no-fit（copyMatch 无输出 / 行文本不吻合）共用 `host.searchRevealNotFound` 提示先在搜索结果中选中匹配。触发经 promise 链串行化（快速重复触发排队执行，防两任务剪贴板交错污染）；copyMatch 后剪贴板 20ms 轮询回读（哨兵一变即取，500ms 超时未变按 no-op）；意外异常（剪贴板 API reject 等）整体兜底记 no-match 并通知，不落未处理 rejection。
 
 ## 边界清单
 
