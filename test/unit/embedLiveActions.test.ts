@@ -296,11 +296,17 @@ describe('P2-10 frontmatter Popover 捕获实例', () => {
 
 describe('P2-10 新增可绑定操作登记与最小执行', () => {
   it('embedSaveTarget/embedClose/conflict 三项均登记，默认未绑定', () => {
-    for (const id of ['embedSaveTarget', 'embedClose', 'conflictCompare', 'conflictDiscard', 'conflictCancel']) {
+    // 合并口径：embedClose 统一为 P2-05/#282 退出确认链路——仅 Live 生效
+    //（Reading 无编辑会话）；其余四项 both
+    const modes: Record<string, 'both' | 'live'> = {
+      embedSaveTarget: 'both', embedClose: 'live',
+      conflictCompare: 'both', conflictDiscard: 'both', conflictCancel: 'both',
+    }
+    for (const [id, mode] of Object.entries(modes)) {
       const op = UI_OPERATIONS.find((item) => item.id === id)
       expect(op, `操作 ${id} 未登记`).toBeDefined()
       expect(op!.defaults).toEqual([])
-      expect(op!.mode).toBe('both')
+      expect(op!.mode).toBe(mode)
     }
     // manifest 命令族齐备（genNls 按 command 推导）
     for (const id of ['embedSaveTarget', 'embedClose', 'conflictCompare', 'conflictDiscard', 'conflictCancel']) {
@@ -309,14 +315,22 @@ describe('P2-10 新增可绑定操作登记与最小执行', () => {
     }
   })
 
-  it('ui.command embedClose 关闭焦点嵌入的编辑会话（切 Reading + unbind 出站）', () => {
+  it('ui.command embedClose 关闭焦点嵌入的引用编辑（统一 P2-05 确认链路：干净目标 query→state→退出）', () => {
     const setup = setupController()
     setup.enterLive()
     setup.focusEmbed()
-    const view = setup.embedView()
     setup.controller.handleHostMessage({ kind: 'ui.command', op: 'embedClose' })
+    // 退出意图先查 B 权威 dirty（不再是无确认的立即切换）
+    const query = [...setup.sent].reverse().find((m) => m.kind === 'refEdit.close.query')
+    expect(query && query.kind === 'refEdit.close.query').toBe(true)
+    // 宿主回干净状态 → 无模态直接完成退出（切 Reading + unbind）
+    if (query && query.kind === 'refEdit.close.query') {
+      setup.controller.handleHostMessage({
+        kind: 'refEdit.close.state', reqId: query.reqId, fsPath: B_FS,
+        dirty: false, version: 2, relPath: '目标笔记.md',
+      })
+    }
     expect(setup.sent.some((m) => m.kind === 'refEdit.unbind')).toBe(true)
-    expect(view.state.doc.toString()).toBeDefined() // 视图已销毁不再断言内容
     expect(setup.manager.probe()[0]!.internalMode).toBe('reading')
     setup.controller.dispose()
   })

@@ -164,9 +164,12 @@ try {
   passed++
   console.log('[嵌入Live操作][PASS] F 焦点回 A：Ctrl+B 恢复写 A、B 不变')
 
-  // ---- 场景 G：显式关闭（embedClose）释放编辑会话；重进后编辑能力恢复 ----
+  // ---- 场景 G：显式关闭（embedClose，统一 P2-05 确认链路）释放编辑会话；重进后编辑能力恢复 ----
   await page.evaluate(() => window.focusEmbedEditor())
   await page.evaluate(() => window.embedUiCommand('embedClose'))
+  await settle(250)
+  // 统一链路：B 有未保存修改（场景 A 写入）→ 先弹三项模态，确认后才退出
+  assert.equal(await page.evaluate(() => window.embedDialogClick('save')), true, 'dirty 目标先弹三项模态，点保存并关闭')
   await settle(250)
   assert.equal(await page.evaluate(() => window.embedCardEditorCount()), 0, '显式关闭销毁嵌入编辑器')
   const unbindG = (await sent()).some((m) => m.kind === 'refEdit.unbind')
@@ -176,7 +179,7 @@ try {
   await settle(300)
   assert.equal(await page.evaluate(() => window.embedCardEditorCount()), 1, '重新进入 Live 编辑器重建')
   passed++
-  console.log('[嵌入Live操作][PASS] G 显式关闭：编辑器与端口释放、重进恢复')
+  console.log('[嵌入Live操作][PASS] G 显式关闭：dirty 模态确认后释放、重进恢复')
 
   // ---- 场景 H：冲突放弃（conflictDiscard）经端口出站 sync.request → resync 恢复 ----
   await page.evaluate(() => window.focusEmbedEditor())
