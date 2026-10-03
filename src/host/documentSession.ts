@@ -666,8 +666,15 @@ export class DocumentSession {
       case 'image.export': {
         // #212 图片导出：只读交互（不写文档、不入撤销栈），会话守卫与
         // diagram.export 同口径（就绪且 docUri 匹配才放行，否则静默丢弃）；
-        // 结果回来源面板（宿主通知呈现，弹窗侧无 UI 反馈需求）
+        // 结果回来源面板（宿主通知呈现，弹窗侧无 UI 反馈需求）。
+        // P2-11（#288）sourceDocUri（嵌入内部 Live 弹窗导出的 B 来源）：
+        // 与 link.activate / image.request 的来源守卫同口径——须为本面板
+        // 实际送达过的目标，不匹配即丢弃（B 内图片按 A 目录导出是错误
+        // 文件，宁可不动作不回落）
         if (!panel.ready || message.docUri !== this.docUri) {
+          return Promise.resolve()
+        }
+        if (message.sourceDocUri !== undefined && !panel.hoverSourceFsPaths.has(message.sourceDocUri)) {
           return Promise.resolve()
         }
         const report = (result: { ok: boolean; reason?: ImageExportFailReason }): void => {

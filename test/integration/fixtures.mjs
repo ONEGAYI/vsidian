@@ -1413,6 +1413,31 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
     '只在 hover-assets 子目录内存在的目标（B 身份解析的命中判据）。',
     '',
   ].join('\n'), 'utf8')
+  // P2-11（#288）嵌入内部 Live 的 B 目录资源：父文档在根目录、目标 B 在
+  // 子目录 embed-assets/ 内——图片 only-in-b.png、内链目标（普通链接与双链
+  // 双形态）都只在该子目录存在，按 A 目录/根解析必 not-found；B 粘贴资产
+  // 的 same-dir+assets 目录（embed-assets/assets/）也按 B 归属（磁盘位置
+  // 断言：根目录不得出现新资产）
+  writeFileSync(path.join(wsDir, 'p211-资源嵌入.md'), [
+    '# 嵌入资源父文档',
+    '',
+    '![[embed-assets/嵌入资源目标]]',
+    '',
+    '尾部段落。',
+    '',
+  ].join('\n'), 'utf8')
+  mkdirSync(path.join(wsDir, 'embed-assets'), { recursive: true })
+  writeFileSync(path.join(wsDir, 'embed-assets', '嵌入资源目标.md'), [
+    '# 嵌入资源目标标题',
+    '',
+    '![B 图](only-in-b.png)',
+    '',
+    '[B 链接](内链目标.md) 与双链 [[B内双链目标]]。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'embed-assets', 'only-in-b.png'), Buffer.from(TINY_PNG_BASE64, 'base64'))
+  writeFileSync(path.join(wsDir, 'embed-assets', '内链目标.md'), '# 内链目标\n\n只在 embed-assets 内的普通链接目标。\n', 'utf8')
+  writeFileSync(path.join(wsDir, 'embed-assets', 'B内双链目标.md'), '# B内双链目标\n\n只在 embed-assets 内的双链目标。\n', 'utf8')
   writeFileSync(path.join(wsDir, 'wikilink-target.md'), WIKILINK_TARGET_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'wikilink-crlf-target.md'), WIKILINK_CRLF_TARGET_DOC, 'utf8')
   // #162 复制块链接：frontmatter 头区（不接管断言）、标题行/普通段/表格/

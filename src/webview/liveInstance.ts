@@ -68,6 +68,7 @@ import { planTableRegionReplace, type TableRegion } from './tableRegion'
 import { splitTableRowCells } from '../shared/tableCells'
 import { ImageResourceManager } from './imageResource'
 import { createImagePaste, imagePasteCanInsertAt } from './imagePaste'
+import { registerImagePopupSource, unregisterImagePopupSource, type ImagePopupSource } from './imagePopup'
 
 /** 外部同步事务标记：updateListener 见到它即跳过（不回发）。
  *  性能探针（#5）复用同一注解——探针编辑走渲染路径但不写回宿主。
@@ -345,6 +346,10 @@ export interface LiveEditorInstanceDeps {
    *  （关闭/退出意图的输入保护：挂起的意图在此时重新检查最新 dirty）。
    *  只在 pending → idle 翻转时触发；持续 idle 不重复通知 */
   onLocalInputSettled?(): void
+  /** P2-11（#288）图片弹窗实例上下文：编辑器内图片弹窗打开时捕获实例
+   *  资源身份（B 管理器 / B 全文 / B 来源导出）。生命周期随实例——
+   *  构造注册、destroy 注销；缺省不注册（主正文回落全局上下文） */
+  imagePopupSource?: ImagePopupSource
 }
 
 /**
@@ -467,6 +472,11 @@ export class LiveEditorInstance {
       parent,
       state: EditorState.create({ doc: '', extensions: this.extensions(extraExtensions) }),
     })
+    // P2-11：图片弹窗实例上下文随实例注册（按 EditorView 反查——widget
+    // 的 popup 按钮打开弹窗时捕获所属实例的资源身份，不读主正文）
+    if (deps.imagePopupSource && this.view) {
+      registerImagePopupSource(this.view, deps.imagePopupSource)
+    }
   }
 
   // ---- 会话身份与观测（根 chrome / 探针消费；只读透出）----
@@ -553,12 +563,48 @@ export class LiveEditorInstance {
     this.imagePastePending.add(reqId)
   }
 
-  /** 实例释放：flush 计时清零 + EditorView 销毁（DOM 随 destroy 移除）。
-   *  不触碰根 chrome 与其他实例 */
+  /** #161 粘贴总开关 + Live 激活 + 非暂停（createImagePaste 的 isEnabled
+   *  与测试注入共用同一守卫口径；设置快照运行时读取）。阅读模式不接管
+   *  （只读语义）；暂停面板不产生新写回链路 */
+  private imagePasteEnabledNow(): boolean {
+    const raw = this.settings?.[IMAGE_PASTE_KEY]
+    const enabled = typeof raw === 'boolean' ? raw : IMAGE_PASTE_DEFAULT
+    return enabled && this.deps.isLiveActive() && !this.suspended
+  }
+
+  /** P2-11（#288）测试钩子配套：以实例真实管线注入粘贴载荷（宿主测试无法
+   *  向 webview 派发真实剪贴板事件）——守卫与 createImagePaste 拦截同口径，
+   *  reqId 分配与在途登记同实例空间（结果路由的配对守卫由此成立） */
+  pasteImageFromTest(payload: { mime: string; dataBase64: string; fileNameHint?: string }): boolean {
+    const view = this.view
+    if (!view || !this.sessionId || !this.imagePasteEnabledNow() ||
+      view.state.readOnly || !view.state.facet(EditorView.editable)) {
+      return false
+    }
+    const reqId = ++this.imagePasteReqId
+    this.imagePastePending.add(reqId)
+    this.deps.send({
+      kind: 'image.paste',
+      sessionId: this.sessionId,
+      docUri: this.docUri,
+      reqId,
+      mime: payload.mime,
+      dataBase64: payload.dataBase64,
+      ...(payload.fileNameHint !== undefined ? { fileNameHint: payload.fileNameHint } : {}),
+    })
+    return true
+  }
+
+  /** 实例释放：flush 计时清零 + EditorView 销毁（DOM 随 destroy 移除）+
+   *  图片弹窗实例上下文注销（P2-11——释放后的弹窗操作回落全局上下文，
+   *  不持死实例资源）。不触碰根 chrome 与其他实例 */
   destroy(): void {
     if (this.flushTimer !== undefined) {
       clearTimeout(this.flushTimer)
       this.flushTimer = undefined
+    }
+    if (this.view) {
+      unregisterImagePopupSource(this.view)
     }
     this.view?.destroy()
     this.view = undefined
@@ -1760,12 +1806,7 @@ export class LiveEditorInstance {
       // 语义（paste 与其他 DOM handler 互不竞争），置于装饰与编辑钩子之后
       // 仅作分组；命中 image/* 剪贴板项即出站宿主落盘，未命中放行默认粘贴
       createImagePaste({
-        isEnabled: () => {
-          const raw = this.settings?.[IMAGE_PASTE_KEY]
-          const enabled = typeof raw === 'boolean' ? raw : IMAGE_PASTE_DEFAULT
-          // 阅读模式不接管（只读语义）；暂停面板不产生新写回链路
-          return enabled && this.deps.isLiveActive() && !this.suspended
-        },
+        isEnabled: () => this.imagePasteEnabledNow(),
         getSession: () => (this.sessionId ? { sessionId: this.sessionId, docUri: this.docUri } : null),
         nextReqId: () => ++this.imagePasteReqId,
         post: (message) => {

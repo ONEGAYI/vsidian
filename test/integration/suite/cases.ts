@@ -36,6 +36,7 @@ const CMD = {
   // #292 骨架屏状态回报查询（hold 装配下 adopt/release 均出站回报）
   skeletonState: 'onegayi.vsidian._test.getSkeletonState',
   injectMessage: 'onegayi.vsidian._test.injectWebviewMessage',
+  injectWebviewReceived: 'onegayi.vsidian._test.injectWebviewReceived',
   postToPanel: 'onegayi.vsidian._test.postToPanel',
   viewState: 'onegayi.vsidian._test.requestViewState',
   cachedViewState: 'onegayi.vsidian._test.getCachedViewState',
@@ -1003,10 +1004,14 @@ interface ViewState {
     internalMode?: 'reading' | 'live'
     liveBound?: boolean
     livePortId?: string | null
+    /** P2-11（#288）B 规范 docUri（资源信封注入的身份载体） */
+    liveDocUri?: string | null
     liveDirty?: boolean
     liveSuspended?: boolean
     /** 内部 Live 编辑器文档长度（-1 = 无实例） */
     liveTextLen?: number
+    /** P2-11（#288）内部 Live 图片管理器的已应用地址（B 身份解析观测） */
+    liveImageSrcs?: string[]
     /** P2-05（#282）关闭确认模态观测（none/open/stale）与发起意图径 */
     closeDialog?: 'none' | 'open' | 'stale'
     closeIntent?: 'close' | 'escape' | 'delete' | ''
@@ -14315,5 +14320,143 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(await readDisk('悬停预览.md') === before, '轻量解析不得改写正文磁盘')
     const tipState = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
     assert(tipState.appliedEdits === 0, `全链路零 applyEdit（实际 ${tipState.appliedEdits}）`)
+  }],
+
+  // ---- P2-11（#288）嵌入内部 Live 的目标资源：A 在根目录、B 在子目录
+  // embed-assets/——图片/双链以 B 为来源经目标端口解析，A 文本与资产目录
+  // 不误改；粘贴按 B 的配置目录落盘且只插 B。 ----
+  ['P2-11 嵌入内部 Live：B 目录资源——图片解析与双链跳转按 B 归属（#288）', async () => {
+    await openWithEditor('p211-资源嵌入.md')
+    const session = await waitSessionReady('p211-资源嵌入.md')
+    const uri = wsUri('p211-资源嵌入.md').toString()
+    const targetUri = wsUri('embed-assets/嵌入资源目标.md')
+    const parentBefore = await readDisk('p211-资源嵌入.md')
+    const targetBefore = await readDisk('embed-assets/嵌入资源目标.md')
+
+    // 父 Live → 嵌入继承内部 Live → 自动绑定；B 图按 B 目录解析装载
+    //（only-in-b.png 只在 embed-assets/ 内：按 A/根目录解析必 not-found——
+    // 已应用地址含子目录路径是 B 身份解析的直接证据）
+    const imaged = await waitViewState('p211-资源嵌入.md', (v) => {
+      const card = (v.readingEmbed ?? []).find((c) => c.inner === 'embed-assets/嵌入资源目标')
+      return card && card.liveBound === true && card.internalMode === 'live' &&
+        (card.liveImageSrcs ?? []).some((s) => s.includes('embed-assets') && s.includes('only-in-b.png'))
+        ? true : false
+    })
+    const card = imaged.readingEmbed!.find((c) => c.inner === 'embed-assets/嵌入资源目标')!
+    assert(Boolean(card.livePortId && card.liveDocUri), '端口与 B 规范身份在探针在场')
+
+    // 资源读取零写回：父/目标双零 dirty、磁盘不动、零 applyEdit
+    const parentDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri)
+    const targetDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())
+    assert(targetDoc, '资源目标经 openTextDocument 装载（B 会话接入）')
+    assert(parentDoc?.isDirty === false && targetDoc?.isDirty === false, '父/目标文档双零 dirty')
+    assert(await readDisk('p211-资源嵌入.md') === parentBefore, '资源装载不得改写父文档磁盘')
+    assert(await readDisk('embed-assets/嵌入资源目标.md') === targetBefore, '资源装载不得改写目标磁盘')
+    const state0 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state0.appliedEdits === 0, `图片解析零 applyEdit（实际 ${state0.appliedEdits}）`)
+
+    // 来源双链跳转（跳转会打开新标签——注入放在末尾，其后不再轮询本面板）：
+    // 注入与浮层内点击同一信封形态（refEdit.message 内 wikilink.activate 携带
+    // B 身份）——宿主经端口绑定路由到 B 会话的 openWikilink（按 B 目录解析）。
+    // B内双链目标只在 embed-assets/ 内：按 B 目录解析打开子目录目标；按 A
+    // 目录解析则 not-found（不打开）
+    // 经真实 webview 消息处理入口注入（injectWebviewReceived——provider 层
+    // 拦截 refEdit.* 的同一校验与路由；injectWebviewMessage 走会话入口触达不了）
+    assert(await vscode.commands.executeCommand(CMD.injectWebviewReceived, uri, {
+      kind: 'refEdit.message',
+      panelSessionId: session.panels.find((p) => p.ready)?.sessionId ?? '',
+      panelDocUri: uri,
+      portId: card.livePortId!,
+      fsPath: targetUri.fsPath,
+      message: {
+        kind: 'wikilink.activate',
+        sessionId: card.livePortId!,
+        docUri: card.liveDocUri!,
+        target: 'B内双链目标',
+        srcStart: 0,
+        srcEnd: 8,
+      },
+    }), '注入应命中真实面板处理器')
+    // 双链执行经 B 会话端口注入（bEntry 的 linkLog）——日志按 B 的 URI 查
+    const entry = await waitWikilinkLog(targetUri.toString(), (e) =>
+      e.target === 'B内双链目标')
+    assert(entry.path === wsUri('embed-assets/B内双链目标.md').fsPath,
+      `来源双链应按 B 目录解析到子目录目标（实际 ${entry.path}）`)
+    assert(await readDisk('p211-资源嵌入.md') === parentBefore, '双链跳转不得改写父文档')
+    const state1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state1.appliedEdits === 0, `全程零 applyEdit（实际 ${state1.appliedEdits}）`)
+    console.log('[P2-11] 嵌入 B 目录资源（图片解析 + 双链跳转）通过')
+  }],
+
+  ['P2-11 嵌入内部 Live：图片粘贴按 B 配置落盘且只插 B（#288）', async () => {
+    await waitSettings({ 'image.paste': true, 'image.pasteLocation': 'same-dir', 'image.pasteSubpath': 'assets' })
+    await openWithEditor('p211-资源嵌入.md')
+    await waitSessionReady('p211-资源嵌入.md')
+    const uri = wsUri('p211-资源嵌入.md').toString()
+    const targetUri = wsUri('embed-assets/嵌入资源目标.md')
+    const parentBefore = await readDisk('p211-资源嵌入.md')
+    const targetBefore = await readDisk('embed-assets/嵌入资源目标.md')
+    await waitViewState('p211-资源嵌入.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'embed-assets/嵌入资源目标' && c.liveBound === true))
+    // 粘贴日志清底（B 的 URI 键）+ 根目录资产基线（A 目录不得新增）
+    await vscode.commands.executeCommand(CMD.imagePasteLog, targetUri.toString())
+    const rootPngBefore = (await vscode.workspace.fs.readDirectory(wsUri('.')))
+      .filter(([n, t]) => t === vscode.FileType.File && /\.png$/i.test(n))
+      .map(([n]) => n).sort()
+    const state0 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+
+    // 注入粘贴载荷（与真实 paste 拦截同一实例管线：reqId 分配 + 在途登记 +
+    // 经目标端口出站；宿主测试无法向 webview 派发真实剪贴板事件）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.pasteImage',
+      inner: 'embed-assets/嵌入资源目标',
+      mime: 'image/png',
+      dataBase64: PASTE_PNG_BASE64,
+    })
+
+    // B 权威文本收到插入（经 B 会话标准 edit.request——宿主 B 会话 applyEdit）；
+    // same-dir 模式 = B 同目录落盘（subpath 属 workspace-root 模式，此处不
+    // 参与——与 #161 主面板语义完全同款，插入为时间戳名 percent-encoded 引用）
+    const bDoc = await poll('B 收到粘贴插入', () => {
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetUri.toString())
+      return doc && /!\[Pasted image \d{14}\]\(Pasted%20image%20\d{14}\.png\)/.test(doc.getText()) ? doc : undefined
+    })
+    assert(bDoc.isDirty, '粘贴插入后目标 B dirty（未保存）')
+
+    // 磁盘资产位置（A 与 B 不同目录的核心断言）：same-dir 模式解析为 B 的
+    // 同目录 embed-assets/（时间戳名 PNG 出现）；根目录（A 所在目录）不出现
+    // 任何新 png——按 A 目录落盘则资产会出现在根目录
+    await poll('粘贴资产按 B 目录落盘', async () => {
+      const entries = await vscode.workspace.fs.readDirectory(wsUri('embed-assets'))
+      return entries.some(([name, t]) => t === vscode.FileType.File && /Pasted image \d{14}\.png$/.test(name)) ? true : undefined
+    })
+    const rootPngAfter = (await vscode.workspace.fs.readDirectory(wsUri('.')))
+      .filter(([n, t]) => t === vscode.FileType.File && /\.png$/i.test(n))
+      .map(([n]) => n).sort()
+    assert(rootPngAfter.join('|') === rootPngBefore.join('|'),
+      `根目录（A 目录）不得出现粘贴资产（前 ${JSON.stringify(rootPngBefore)} 后 ${JSON.stringify(rootPngAfter)}）`)
+
+    // 宿主粘贴日志（B 的 URI 键）：落盘执行确经 B 端口注入的 pasteImage
+    const pasteLog = (await vscode.commands.executeCommand(CMD.imagePasteLog, targetUri.toString())) as unknown[]
+    assert(pasteLog.length === 1, `B 端口收到恰一笔粘贴载荷（实际 ${pasteLog.length}）`)
+
+    // A 零写回：父磁盘不动、不 dirty、A 会话 appliedEdits 零推进
+    const parentDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri)
+    assert(await readDisk('p211-资源嵌入.md') === parentBefore, '粘贴不得改写父文档磁盘')
+    assert(await readDisk('embed-assets/嵌入资源目标.md') === targetBefore, '保存前目标磁盘未变')
+    assert(parentDoc?.isDirty === false, '父文档 A 零 dirty')
+    const state1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(state1.appliedEdits === state0.appliedEdits,
+      `A 会话 appliedEdits 零推进（B 的插入不经 A 会话；实际 ${state1.appliedEdits}，基线 ${state0.appliedEdits}）`)
+
+    // 保存路由只落 B：磁盘更新、dirty 清零（复用 P2-04 的 embed.test.save）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.save', inner: 'embed-assets/嵌入资源目标',
+    })
+    await poll('目标保存落盘', async () =>
+      /Pasted%20image%20\d{14}\.png/.test(await readDisk('embed-assets/嵌入资源目标.md')) ? true : undefined)
+    assert(!bDoc.isDirty, '保存后目标干净')
+    assert(await readDisk('p211-资源嵌入.md') === parentBefore, '保存目标不动父文档')
+    console.log('[P2-11] 嵌入图片粘贴按 B 落盘且只插 B 通过')
   }],
 ]

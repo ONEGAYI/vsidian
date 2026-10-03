@@ -372,6 +372,10 @@ export function createTextEditorProvider(
   // 同一会话——「宿主每个 B 只有一个权威 DocumentSession」），虚拟面板的
   // send 把编辑通道事件包成 refEdit.push 回来源面板（白名单见 refEditPorts）。
   const refPorts = new RefEditPortRegistry()
+  /** P2-11（#288）测试钩子配套：会话面板 → 真实 webview 消息处理器（与
+   *  onDidReceiveMessage 同一函数；refEdit.* 在 provider 层拦截，会话入口
+   *  注入无法触达——injectWebviewReceived 经此以完全一致的处理入口注入） */
+  const panelMessageHandlers = new Map<string, (message: unknown) => void>()
 
   /** 释放一个目标端口：B 会话 detach 虚拟面板；B 无面板时释放会话 */
   const releaseRefPort = (portId: string): void => {
@@ -1716,7 +1720,15 @@ export function createTextEditorProvider(
             report({ ok: false, reason: 'cancelled' })
             return
           }
-          void runImageExport(payload, linkCtx, document.uri.toString(), report)
+          // P2-11 sourceDocUri（嵌入内部 Live 弹窗导出）：按 B 目录/根边界
+          // 定位导出文件（会话侧已守卫来源为面板送达过的目标）；缺省 = 面板
+          // 自身文档
+          void runImageExport(
+            payload,
+            payload.sourceDocUri !== undefined ? linkContextOfPath(payload.sourceDocUri) : linkCtx,
+            document.uri.toString(),
+            report,
+          )
         },
         // #161 图片粘贴落盘端口：读设置快照 → 目录解析（URI path 空间）→
         // 建目录/写盘 → 回发插入文本。测试钩子模式记录载荷形态但不短路
@@ -1747,7 +1759,7 @@ export function createTextEditorProvider(
         pendingReadingRestore.add(panelStateKey(document.uri.toString(), sessionId))
       }
 
-      const messageSub = webviewPanel.webview.onDidReceiveMessage((message) => {
+      const panelMessageHandler = (message: unknown): void => {
         recordDiagnosticMessage(diagnostics, 'host.receive', message)
         if (isWebviewToHost(message) && message.kind === 'keybindings.get') {
           void webviewPanel.webview.postMessage({
@@ -1935,7 +1947,16 @@ export function createTextEditorProvider(
                 // attachPanel 分配 B 会话内的面板 id（panel-N）——会话消息
                 // 路由（ready 注入 / refEdit.message / detach）用它；portId
                 // 只是 webview 侧的端口身份，两者分开（根因修正：曾误用
-                // portId 注入 ready，会话查不到面板被静默丢弃）
+                // portId 注入 ready，会话查不到面板被静默丢弃）。
+                // P2-11（#288）资源端口随虚拟面板注入（全部按 B 身份构造）：
+                // - resolveImage：B 目录/根边界解析，URI 在来源面板 A 的
+                //   webview 构造（asWebviewUri 前缀面板私有——B 的结果最终
+                //   在 A 内加载）
+                // - pasteImage：目录解析与相对路径基准 = B 的 URI、工作区
+                //   folder 按 B 归属（粘贴资产按 B 的配置落盘，不写父文档）
+                // - openLink/openWikilink：以 B 为解析语境执行（B 打开失败
+                //   静默不动作，与 #220 来源路径同语义）
+                const bLinkCtx = linkContextOf(bDoc)
                 binding.virtualSessionId = bEntry.session.attachPanel({
                   send: (m) => {
                     if (!refPorts.lookup(portId, sessionId, document.uri.toString())) {
@@ -1945,6 +1966,40 @@ export function createTextEditorProvider(
                     if (wrapped) {
                       send(wrapped)
                     }
+                  },
+                  resolveImage: (src) =>
+                    resolveWorkspaceImage(
+                      src,
+                      bLinkCtx,
+                      webviewPanel.webview,
+                      imageRefresh.versions,
+                      bEntry.session.getImageGeneration(),
+                    ),
+                  pasteImage: (payload, report) => {
+                    if (process.env.VSIDIAN_TEST_HOOKS === '1') {
+                      const key = bDoc.uri.toString()
+                      const log = imagePasteTestLog.get(key) ?? []
+                      log.push(payload)
+                      imagePasteTestLog.set(key, log)
+                    }
+                    void runImagePaste(
+                      payload,
+                      {
+                        settings: settings?.service.getSnapshot() ?? {},
+                        docUri: bDoc.uri,
+                        workspaceRootPath:
+                          vscode.workspace.getWorkspaceFolder(bDoc.uri)?.uri.path ?? null,
+                      },
+                      report,
+                    )
+                  },
+                  openLink: (intent) => {
+                    void executeLinkIntent(bDoc, bLinkCtx, intent, bEntry.linkLog, {
+                      waitForReadyPanel,
+                    })
+                  },
+                  openWikilink: (intent) => {
+                    void executeWikilinkIntent(bDoc, intent, bEntry.linkLog)
                   },
                 }, { refOrigin: { docUri: document.uri.toString() } })
                 refPorts.register(binding)
@@ -2124,7 +2179,13 @@ export function createTextEditorProvider(
           }
         }
         void entry.session.handleWebviewMessage(message, sessionId)
-      })
+      }
+      const messageSub = webviewPanel.webview.onDidReceiveMessage(panelMessageHandler)
+      // P2-11（#288）测试钩子配套：按会话面板登记处理器——refEdit.* 在
+      // provider 层拦截（进会话之前），injectWebviewMessage 走会话入口
+      // 无法触达；本登记供 injectWebviewReceived 以真实 webview 消息的
+      // 同一处理入口注入（校验与路由完全一致）
+      panelMessageHandlers.set(sessionId, panelMessageHandler)
       // #38：面板激活（tab 切换/分组聚焦）时刷新活动模式 context——
       // custom editor 不触发 onDidChangeActiveTextEditor，靠此事件覆盖
       const viewStateSub = webviewPanel.onDidChangeViewState((e) => {
@@ -2149,6 +2210,7 @@ export function createTextEditorProvider(
           releaseEntryIfIdle(vscode.Uri.parse(targetUri))
         }
         messageSub.dispose()
+        panelMessageHandlers.delete(sessionId)
         viewStateSub.dispose()
         closeSub.dispose()
         releaseEntryIfIdle(document.uri)
@@ -2956,6 +3018,23 @@ export function createTextEditorProvider(
           { ...message, sessionId: panel.sessionId },
           panel.sessionId,
         )
+      },
+    ),
+    vscode.commands.registerCommand(
+      // P2-11（#288）：以真实 webview 消息的同一处理入口注入（provider 层的
+      // refEdit.* 拦截、校验与路由完全一致）——injectWebviewMessage 走会话
+      // 入口触达不了 provider 拦截的 refEdit 族；panelIndex 口径与 postToPanel
+      // 同（真实 webview 面板）
+      'onegayi.vsidian._test.injectWebviewReceived',
+      (uriStr: string, message: Record<string, unknown>, panelIndex = 0): boolean => {
+        const entry = getEntry(vscode.Uri.parse(uriStr))
+        const panel = realPanelsOf(entry).filter((p) => p.ready)[panelIndex]
+        const handler = panel ? panelMessageHandlers.get(panel.sessionId) : undefined
+        if (!entry || !panel || !handler) {
+          return false
+        }
+        handler(message)
+        return true
       },
     ),
     vscode.commands.registerCommand(
