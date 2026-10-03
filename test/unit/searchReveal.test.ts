@@ -2,8 +2,10 @@
 // copyMatch 输出格式钉在 1.82.3 实测样例（"3,1: 原型唯一匹配词出现在甲文件
 // 第三行。"——1-based 行列 + 行全文）；配对以行文本吻合为文件身份唯一校验
 // （残留选中条目误配对到其他文件必须在此拦下），offset 为宿主系（含 \r）。
+// 打开提示门控（shouldShowSearchRevealHint）：去重与设置开关的合取判定，
+// 记账语义 = 仅实际弹出才占用去重名额（wiring 在判 true 后记账）。
 import { describe, expect, it } from 'vitest'
-import { matchHostOffset, parseCopyMatch } from '../../src/host/searchReveal'
+import { matchHostOffset, parseCopyMatch, shouldShowSearchRevealHint } from '../../src/host/searchReveal'
 
 const LF_DOC = '# 标题\n\n第一段正文。\n\n目标行内容在此。\n\n结尾。\n'
 const CRLF_DOC = '# 标题\r\n\r\n目标行内容在此。\r\n结尾。\r\n'
@@ -54,5 +56,45 @@ describe('文档配对与宿主系 offset（matchHostOffset）', () => {
     expect(matchHostOffset(LF_DOC, last)).toBe(LF_DOC.length - '结尾。\n'.length)
     const clamped = matchHostOffset(LF_DOC, { line: 3, col: 999, text: '第一段正文。' })
     expect(clamped).toBe('# 标题\n\n第一段正文。'.length)
+  })
+})
+
+describe('打开提示门控（shouldShowSearchRevealHint）', () => {
+  /** 模拟 wiring 的「激活→判定→记账」循环：仅判 true 时记入去重集合 */
+  const activate = (shown: Set<string>, uri: string, enabled: boolean): boolean => {
+    const hint = shouldShowSearchRevealHint(shown, uri, enabled)
+    if (hint) {
+      shown.add(uri)
+    }
+    return hint
+  }
+  it('未提示过且设置开：应提示', () => {
+    expect(shouldShowSearchRevealHint(new Set(), 'file:///a.md', true)).toBe(true)
+  })
+  it('同 URI 二次激活不提示——每文档每会话最多一条', () => {
+    const shown = new Set<string>()
+    expect(activate(shown, 'file:///a.md', true)).toBe(true)
+    expect(activate(shown, 'file:///a.md', true)).toBe(false)
+  })
+  it('设置关时不提示', () => {
+    expect(shouldShowSearchRevealHint(new Set(), 'file:///a.md', false)).toBe(false)
+  })
+  it('关闭期间激活不占用去重名额：重开设置后该文档仍可提示', () => {
+    const shown = new Set<string>()
+    expect(activate(shown, 'file:///a.md', false)).toBe(false)
+    expect(activate(shown, 'file:///a.md', true)).toBe(true)
+  })
+  it('开→关→开：已提示过的文档不再提示（去重独立于设置开关）', () => {
+    const shown = new Set<string>()
+    expect(activate(shown, 'file:///a.md', true)).toBe(true)
+    expect(activate(shown, 'file:///a.md', false)).toBe(false)
+    expect(activate(shown, 'file:///a.md', true)).toBe(false)
+  })
+  it('不同 URI 互不影响（分屏同会话各自提示一次）', () => {
+    const shown = new Set<string>()
+    expect(activate(shown, 'file:///a.md', true)).toBe(true)
+    expect(activate(shown, 'file:///b.md', true)).toBe(true)
+    expect(activate(shown, 'file:///a.md', true)).toBe(false)
+    expect(activate(shown, 'file:///b.md', true)).toBe(false)
   })
 })

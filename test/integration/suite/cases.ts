@@ -15699,4 +15699,58 @@ export const cases: Array<[string, () => Promise<void>]> = [
       }
     }
   }],
+
+  // ---- #318 打开提示：面板首次激活的提示判定 / 会话去重 / 设置门控。
+  //      通知本体在 VSIDIAN_TEST_HOOKS 下不弹（editorGuard 先例——真通知
+  //      堆积干扰自动化），以提示观测记录（takeSearchRevealHintLog）断言；
+  //      按钮→定位链路与显式命令矩阵同函数（searchRevealLocateWithFeedback）
+  //      等价覆盖，通知气泡不可程序化点击的缺口见规格「打开提示」节说明 ----
+  ['搜索定位打开提示（#318）：首次激活提示/会话去重/设置门控', async () => {
+    const docA = '# 提示甲\n\n打开后首次激活应提示一次。\n'
+    const docB = '# 提示乙\n\n切走切回的对照文档。\n'
+    const docC = '# 提示丙\n\n设置关闭期间打开不提示。\n'
+    await vscode.workspace.fs.writeFile(wsUri('hint-a.md'), Buffer.from(docA, 'utf8'))
+    await vscode.workspace.fs.writeFile(wsUri('hint-b.md'), Buffer.from(docB, 'utf8'))
+    await vscode.workspace.fs.writeFile(wsUri('hint-c.md'), Buffer.from(docC, 'utf8'))
+    const log = (msg: string): void => console.log(`[#318 打开提示] ${msg}`)
+    const takeHintUris = async (): Promise<string[]> =>
+      ((await vscode.commands.executeCommand('onegayi.vsidian._test.takeSearchRevealHintLog')) as Array<{ uri: string }>).map((e) => e.uri)
+    const uriOf = (file: string): string => wsUri(file).toString()
+    try {
+      // 清场：前序用例打开 proto-* 等文档的提示记录不留入本用例断言
+      await takeHintUris()
+      // —— 首次打开 → 首次激活 → 提示一条 ——
+      await vscode.commands.executeCommand('vscode.open', wsUri('hint-a.md'))
+      await waitViewState('hint-a.md', (v) => v.text === docA)
+      let uris = await takeHintUris()
+      assert(uris.filter((u) => u === uriOf('hint-a.md')).length === 1,
+        `首次激活应恰好提示一条（实际 ${JSON.stringify(uris)}）`)
+      log('首次激活提示一条 ✓')
+
+      // —— 切走（乙首开提示自己的）再切回（甲二次激活不再提示）——
+      await vscode.commands.executeCommand('vscode.open', wsUri('hint-b.md'))
+      await waitViewState('hint-b.md', (v) => v.text === docB)
+      await vscode.commands.executeCommand('vscode.open', wsUri('hint-a.md'))
+      await new Promise((r) => setTimeout(r, 500))
+      uris = await takeHintUris()
+      assert(uris.filter((u) => u === uriOf('hint-a.md')).length === 0,
+        `同文档二次激活不应再提示（实际 ${JSON.stringify(uris)}）`)
+      assert(uris.filter((u) => u === uriOf('hint-b.md')).length === 1,
+        `乙文档首开应提示一条（实际 ${JSON.stringify(uris)}）`)
+      log('会话去重（每文档每会话最多一条）✓')
+
+      // —— 设置关 → 新文档首开不提示（门控；关闭期间激活不占用去重名额）——
+      await vscode.commands.executeCommand('onegayi.vsidian._test.setSettings', { 'editor.searchRevealHint': false })
+      await vscode.commands.executeCommand('vscode.open', wsUri('hint-c.md'))
+      await waitViewState('hint-c.md', (v) => v.text === docC)
+      uris = await takeHintUris()
+      assert(uris.length === 0, `设置关时不提示（实际 ${JSON.stringify(uris)}）`)
+      log('设置门控（关时不弹）✓')
+    } finally {
+      await vscode.commands.executeCommand('onegayi.vsidian._test.setSettings', { 'editor.searchRevealHint': true })
+      for (const file of ['hint-a.md', 'hint-b.md', 'hint-c.md']) {
+        await Promise.resolve(vscode.workspace.fs.delete(wsUri(file), { useTrash: false })).catch(() => undefined)
+      }
+    }
+  }],
 ]

@@ -375,6 +375,19 @@ export const DEFAULT_EDITOR_GUARD_KEY = 'general.defaultEditorGuard'
 export const DEFAULT_EDITOR_GUARD_DEFAULT = true
 
 /**
+ * #318「搜索定位打开提示」开关：从搜索结果打开 Vsidian 文档、面板首次
+ * 激活时右下角提示气泡（带「定位」按钮）的总开关（两态布尔，默认开）。
+ * 提示本身零副作用——不做剪贴板捕获/定位动作，按钮点击才进入既有显式
+ * 定位链路（与命令同权同反馈）；关闭只停提示，命令与键位入口不受影响
+ * （见 docs/specs/search-reveal.md「打开提示」节）。键与消费方（宿主
+ * textEditorProvider 的 maybeShowSearchRevealHint 门控）成对导出。
+ * editor.* 域（非排除前缀）→ 编辑器页「显示」小节。
+ */
+export const SEARCH_REVEAL_HINT_KEY = 'editor.searchRevealHint'
+/** 默认 true：升级后打开提示直接可用（每文档每会话最多一条，噪音有上限） */
+export const SEARCH_REVEAL_HINT_DEFAULT = true
+
+/**
  * 生产设置定义注册表：#33 交付空状态页面与完整数据链路，#34 加入首个
  * 实际设置项「显示行号」（设置页自此渲染真实开关），#79 加入「代码块卡片」，
  * #80 加入「卡内行号」，#81 加入「复制按钮」，#83 加入「语法高亮」，#96
@@ -650,6 +663,15 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     default: DEFAULT_EDITOR_GUARD_DEFAULT,
     titleKey: 'setting.defaultEditorGuard.title',
     descriptionKey: 'setting.defaultEditorGuard.description',
+  },
+  // #318 搜索定位打开提示（editor.* 域非排除前缀 → 编辑器页「显示」小节，
+  // 注册表顺序即组内顺序——追加在可读行宽之后）
+  {
+    key: SEARCH_REVEAL_HINT_KEY,
+    type: 'boolean',
+    default: SEARCH_REVEAL_HINT_DEFAULT,
+    titleKey: 'setting.searchRevealHint.title',
+    descriptionKey: 'setting.searchRevealHint.description',
   },
 ]
 

@@ -141,6 +141,23 @@ describe('页面结构（#33 归属与空状态）', () => {
     expect(item!.querySelector<HTMLInputElement>(`input.${SETTINGS_PAGE_CLASS_NAMES.checkbox}`)!.checked)
       .toBe(true)
   })
+
+  it('搜索定位打开提示（#318）渲染于编辑器页显示小节：标题/说明经 t() 取词、默认勾选、切换上送 settings.set', () => {
+    const { parent, sent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
+    clickNav(parent, zhCn['settings.editorCategory'])
+    const item = [...sectionByTitle(parent, zhCn['settings.groupDisplay'])
+      .querySelectorAll<HTMLElement>(`.${SETTINGS_PAGE_CLASS_NAMES.item}`)]
+      .find((el) => el.querySelector(`.${SETTINGS_PAGE_CLASS_NAMES.itemTitle}`)?.textContent ===
+        zhCn['setting.searchRevealHint.title'])
+    expect(item, '应渲染「搜索定位打开提示」设置行').toBeTruthy()
+    expect(item!.querySelector(`.${SETTINGS_PAGE_CLASS_NAMES.itemDescription}`)?.textContent)
+      .toBe(zhCn['setting.searchRevealHint.description'])
+    const box = item!.querySelector<HTMLInputElement>(`input.${SETTINGS_PAGE_CLASS_NAMES.checkbox}`)!
+    expect(box.checked).toBe(true) // 默认开启
+    box.checked = false
+    box.dispatchEvent(new Event('change'))
+    expect(sent).toContainEqual({ kind: 'settings.set', values: { 'editor.searchRevealHint': false } })
+  })
 })
 
 describe('定义渲染与快照回显', () => {
@@ -454,11 +471,13 @@ describe('分组重组二轮还原（#163 验收反馈：侧栏只留常规/编�
       // #298 引用视图组（hover.* / embed.* 前缀归组）
       zhCn['settings.groupRefview'],
     ])
-    // #298 迁组后「显示」小节不再收录 embed.* / hover.* 条目
+    // #298 迁组后「显示」小节不再收录 embed.* / hover.* 条目；#318 打开
+    // 提示（editor.searchRevealHint）随注册表顺序追加在末位
     expect(groupItemTitles(parent, zhCn['settings.groupDisplay']))
       .toEqual([
         zhCn['setting.editorLineNumbers.title'],
         zhCn['setting.readableLineWidth.title'],
+        zhCn['setting.searchRevealHint.title'],
       ])
     // #237 多光标（editor.multicursor 域落编辑组）
     expect(groupItemTitles(parent, zhCn['settings.groupEditing']))

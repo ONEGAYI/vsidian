@@ -54,3 +54,16 @@ export function matchHostOffset(docText: string, probe: SearchMatchProbe): numbe
   }
   return offset + Math.min(probe.col - 1, lineText.length)
 }
+
+/** #318 打开提示门控（纯逻辑，wiring 在面板激活分支调用）：会话内该
+ *  文档未提示过且设置开关开启的合取。去重语义 = 每文档每会话最多一条
+ *  （带按钮的宿主通知不自动消失，去重是噪音上限；内存 Set 会话级不
+ *  持久化）。记账约定：仅判 true（实际弹出）后调用方才记入集合——
+ *  设置关闭期间的激活不占用名额，重开设置后该文档仍可提示一次 */
+export function shouldShowSearchRevealHint(
+  shownUris: ReadonlySet<string>,
+  uriString: string,
+  hintEnabled: boolean,
+): boolean {
+  return hintEnabled && !shownUris.has(uriString)
+}

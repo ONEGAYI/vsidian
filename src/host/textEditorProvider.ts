@@ -85,7 +85,7 @@ import type { SettingsPageHandle } from './settingsPage'
 import { runDiagramExport } from './diagramExportHost'
 import { runImageExport } from './imageExportHost'
 import { runImagePaste, type ImagePasteOutcome } from './imagePasteHost'
-import { matchHostOffset, parseCopyMatch } from './searchReveal'
+import { matchHostOffset, parseCopyMatch, shouldShowSearchRevealHint } from './searchReveal'
 import {
   readHoverDocTarget,
   readHoverDirectTarget,
@@ -100,7 +100,7 @@ import { hostLocale } from './hostLocale'
 import type { FindOptionsStore } from './findOptionsStore'
 import { sanitizeFindOptions, type FindOptions } from '../shared/findOptions'
 import { t } from '../shared/i18n'
-import { EMBED_MAX_DEPTH_DEFAULT, EMBED_MAX_DEPTH_KEY, READABLE_LINE_WIDTH_KEY, PASTE_PRESERVE_FORMATTING_KEY, PASTE_ASK_BEFORE_KEY } from '../shared/settings'
+import { EMBED_MAX_DEPTH_DEFAULT, EMBED_MAX_DEPTH_KEY, READABLE_LINE_WIDTH_KEY, PASTE_PRESERVE_FORMATTING_KEY, PASTE_ASK_BEFORE_KEY, SEARCH_REVEAL_HINT_DEFAULT, SEARCH_REVEAL_HINT_KEY } from '../shared/settings'
 import type { JiebaWiring } from './jiebaResourceWiring'
 import { JIEBA_WASM_VERSION } from '../shared/jiebaManifest'
 import { recordDiagnosticMessage, TestDiagnostics } from '../shared/testDiagnostics'
@@ -1459,6 +1459,77 @@ export function createTextEditorProvider(
     return run
   }
 
+  /** 显式触发的统一执行体（命令 / 打开提示按钮共用）：成功由 view.locate
+   *  通道的 flash 高亮呈现，失败按结果分型通知——按钮点击 = 显式触发，
+   *  与命令同权同反馈，不另写路径 */
+  const searchRevealLocateWithFeedback = (): void => {
+    void queuedSearchRevealLocate().then((result) => {
+      if (result !== 'located') {
+        void vscode.window.showWarningMessage(t(result === 'no-panel'
+          ? 'host.searchRevealNoPanel'
+          : 'host.searchRevealNotFound'))
+      }
+    }).catch(() => {
+      // 意外异常兜底（剪贴板 API reject 等，capture 内部已兜后的残余路径）：
+      // 归入安全路径记 no-match 并通知放弃，不落未处理 rejection 到宿主日志
+      recordSearchReveal('no-match')
+      void vscode.window.showWarningMessage(t('host.searchRevealNotFound'))
+    })
+  }
+
+  // ---- #318 打开提示（增强入口；2026-10-04 PR #328 验收反馈） ----
+  // 从搜索结果打开文档、面板首次激活时弹宿主通知气泡（带「定位」按钮），
+  // 把「打开后需手动执行命令」的一步前置为可见入口。**零副作用边界**：
+  // 弹出提示本身不做任何剪贴板/捕获/定位动作——这是它与被停止的自动捕获
+  // 路径的本质区别（自动捕获在激活时刻就 copyMatch 扰动剪贴板并可能误
+  // 定位；本提示只在用户点击按钮后才进入既有显式链路，意图由点击确认）。
+  // 已知边界（不实现绕过）：宿主无打开来源信号，提示是猜测性的（资源
+  // 管理器/双链打开也弹，去重限频）；恢复会话时启动即激活的面板会弹一条；
+  // 已开 tab 上的重复搜索点击无激活翻转事件（原型实证盲区）不弹——命令
+  // 与键位入口仍是完整退路。详见 docs/specs/search-reveal.md「打开提示」节。
+
+  /** 会话内已提示过的文档 URI（内存去重不持久化——每文档每会话最多一条：
+   *  带按钮通知不自动消失，去重是噪音上限）。仅在实际弹出时记账（设置
+   *  关闭期间的激活不占用名额） */
+  const searchRevealHintShown = new Set<string>()
+
+  /** 提示观测记录（仅 VSIDIAN_TEST_HOOKS 下留存，供 #318 集成用例断言；
+   *  与定位观测记录分开——提示弹出与定位执行是两条独立事件） */
+  const searchRevealHintLog: Array<{ at: number; uri: string }> = []
+  const recordSearchRevealHint = (uri: string): void => {
+    if (process.env.VSIDIAN_TEST_HOOKS === '1') {
+      searchRevealHintLog.push({ at: Date.now(), uri })
+      while (searchRevealHintLog.length > 64) {
+        searchRevealHintLog.shift()
+      }
+    }
+  }
+
+  /** 面板激活分支的提示判定：门控纯函数（去重 × 设置开关）通过即弹通知，
+   *  按钮回调走显式定位统一执行体。测试钩子模式下不弹通知本体（避免真
+   *  通知堆积干扰自动化），观测记录照常保留供断言（editorGuard 先例） */
+  const maybeShowSearchRevealHint = (docUri: vscode.Uri): void => {
+    const uriString = docUri.toString()
+    const enabled = settings
+      ? settings.service.getSnapshot()[SEARCH_REVEAL_HINT_KEY] === true
+      : SEARCH_REVEAL_HINT_DEFAULT
+    if (!shouldShowSearchRevealHint(searchRevealHintShown, uriString, enabled)) {
+      return
+    }
+    searchRevealHintShown.add(uriString)
+    recordSearchRevealHint(uriString)
+    if (process.env.VSIDIAN_TEST_HOOKS === '1') {
+      return
+    }
+    const locateButton = t('host.searchRevealHintLocate')
+    void vscode.window.showInformationMessage(t('host.searchRevealHint'), locateButton)
+      .then((picked) => {
+        if (picked === locateButton) {
+          searchRevealLocateWithFeedback()
+        }
+      })
+  }
+
   // ---- #197 反链面板：快照应答与条目跳转（面板级 UI 意图的执行体） ----
 
   /** 反链广播序号（review-loops #16）：按文档单调递增——快照应答为异步
@@ -2556,10 +2627,19 @@ export function createTextEditorProvider(
       // 同一处理入口注入（校验与路由完全一致）
       panelMessageHandlers.set(sessionId, panelMessageHandler)
       // #38：面板激活（tab 切换/分组聚焦）时刷新活动模式 context——
-      // custom editor 不触发 onDidChangeActiveTextEditor，靠此事件覆盖
+      // custom editor 不触发 onDidChangeActiveTextEditor，靠此事件覆盖；
+      // #318 打开提示：同一激活分支顺带做提示判定（门控不通过时零动作）。
+      // 「打开即激活」形态无 viewState 变化事件（1.82.3 实测：vscode.open
+      // 创建面板即 active，事件零触发；上方弹回源码的 bounceToSource 对
+      // 同形态同样直接查初始态）——resolve 时刻补一次判定，去重 Set 保证
+      // 与后续事件路径每会话至多合计一条
+      if (webviewPanel.active) {
+        maybeShowSearchRevealHint(document.uri)
+      }
       const viewStateSub = webviewPanel.onDidChangeViewState((e) => {
         if (e.webviewPanel.active) {
           refreshActiveModeContext()
+          maybeShowSearchRevealHint(document.uri)
         }
       })
       const closeSub = webviewPanel.onDidDispose(() => {
@@ -3320,21 +3400,11 @@ export function createTextEditorProvider(
   // 登记、默认未绑定，见 docs/specs/keybindings.md 与 docs/specs/search-reveal.md）。
   // 成功落位由 view.locate 通道的 flash 高亮呈现；失败按结果分型通知：
   // no-panel（活动 tab 非 Vsidian 面板）提示先打开/切换面板，no-match /
-  // no-fit（无匹配输出 / 行文本不吻合）提示先在搜索结果中选中匹配
+  // no-fit（无匹配输出 / 行文本不吻合）提示先在搜索结果中选中匹配。
+  // 反馈逻辑已抽 searchRevealLocateWithFeedback（打开提示按钮同链路共用）
   context.subscriptions.push(vscode.commands.registerCommand(
     'onegayi.vsidian.searchReveal.locate',
-    () => void queuedSearchRevealLocate().then((result) => {
-      if (result !== 'located') {
-        void vscode.window.showWarningMessage(t(result === 'no-panel'
-          ? 'host.searchRevealNoPanel'
-          : 'host.searchRevealNotFound'))
-      }
-    }).catch(() => {
-      // 意外异常兜底（剪贴板 API reject 等，capture 内部已兜后的残余路径）：
-      // 归入安全路径记 no-match 并通知放弃，不落未处理 rejection 到宿主日志
-      recordSearchReveal('no-match')
-      void vscode.window.showWarningMessage(t('host.searchRevealNotFound'))
-    }),
+    searchRevealLocateWithFeedback,
   ))
 
   // ---- 测试钩子命令：仅集成测试经 runTest.mjs 注入 VSIDIAN_TEST_HOOKS=1 时
@@ -3789,6 +3859,14 @@ export function createTextEditorProvider(
     vscode.commands.registerCommand('onegayi.vsidian._test.takeSearchRevealLog', () => {
       const snapshot = [...searchRevealLog]
       searchRevealLog.length = 0
+      return snapshot
+    }),
+    // ---- #318 测试钩子：打开提示观测记录（take 语义取后清空；提示弹
+    //      出与定位执行是独立事件——通知本体在钩子模式下不弹，记录照常），
+    //      供打开提示集成用例断言 ----
+    vscode.commands.registerCommand('onegayi.vsidian._test.takeSearchRevealHintLog', () => {
+      const snapshot = [...searchRevealHintLog]
+      searchRevealHintLog.length = 0
       return snapshot
     }),
   )

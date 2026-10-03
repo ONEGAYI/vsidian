@@ -85,6 +85,9 @@ export async function run(): Promise<void> {
           // #322 默认编辑器守护开关（残留 false 会让后续守护用例的提示
           // 语义被关闭）
           'general.defaultEditorGuard': true,
+          // #318 搜索定位打开提示（残留 false 会让提示用例的门控语义被
+          // 关闭——与守护开关同一残留风险面）
+          'editor.searchRevealHint': true,
           // #161 图片粘贴三键并入重置面：pasteLocation/pasteSubpath 残留会
           // 让后续粘贴用例落盘到错误位置（paste 总开关残留 false 则整链
           // 静默失效）
