@@ -100,10 +100,11 @@ try {
   assert.equal(await select.inputValue(), 'auto')
 
   // 全程只上送 settings.set（换包由宿主 locale.changed 驱动，非 webview 自取；
-  // wordSegment.get 是 #239 中文分词页签的 init 状态查询，属合法后台通道）
+  // wordSegment.get 是 #239 中文分词页签的 init 状态查询，属合法后台通道；
+  // defaultEditor.get 是 #323 默认编辑器状态行的 init 状态查询，同属合法后台通道）
   assert.deepEqual(
     (await page.evaluate(() => window.sent.filter((m) => m.kind !== 'settings.get' && m.kind !== 'keybindings.get' && m.kind !== 'snippets.get' &&
-      m.kind !== 'wordSegment.get' && m.kind !== 'index.get')))
+      m.kind !== 'wordSegment.get' && m.kind !== 'index.get' && m.kind !== 'defaultEditor.get')))
       .map((m) => m.values['general.language']),
     ['en', 'zh-cn', 'auto'],
   )
