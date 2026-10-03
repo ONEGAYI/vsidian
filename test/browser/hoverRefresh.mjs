@@ -123,7 +123,9 @@ try {
   assert.equal(watches.length, 2, '两嵌入各发一笔实例订阅（目标相同）')
   assert.ok(watches.every((m) => m.kind === 'hover.watch' && m.fsPath === B_PATH))
   assert.notEqual(watches[0].instanceId, watches[1].instanceId, '实例身份互异（entry 语义键）')
-  assert.match(watches[0].instanceId, /^\d+::/, '嵌入实例身份为 entry 语义键')
+  // P2-07 起 watch 对外身份 = 稳定 hostId（embed-occ-N，文本平移不失配），
+  // entry 坐标键（start::inner）只在状态库内部使用
+  assert.match(watches[0].instanceId, /^embed-occ-/, '嵌入实例身份为稳定 hostId')
   let cards = await page.evaluate(() => window.readRefreshCards())
   assert.equal(cards.length, 2)
   assert.ok(cards[0].hitInside, '卡片绘制层命中（真实接收指针）')
