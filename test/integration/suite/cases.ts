@@ -13499,6 +13499,351 @@ export const cases: Array<[string, () => Promise<void>]> = [
       actSub.dispose()
     }
   }],
+
+  // ---- #318 原型验证矩阵（2026-10-03 独立树）：copyMatch 回读绕过路径。
+  //      用例一＝显式命令矩阵（意图明确路径的正例与边界）；用例二＝自动
+  //      捕获歧义矩阵（残留选中与切换标签不可区分的实证，票面停止条件
+  //      裁决依据）。观察记录经 _test.takeSearchRevealLog 断言 ----
+  ['搜索定位恢复（#318 原型）：显式命令矩阵——首次/重复/多匹配/CRLF/剪贴板恢复', async () => {
+    const needle = '原型唯一匹配词'
+    const lineA3 = `${needle}出现在甲文件第三行。`
+    const lineB3 = `${needle}出现在乙文件第三行。`
+    const lineB5 = `第二段 ${needle} 再现与同行 ${needle} 双匹配。`
+    const docA = `# 原型甲\n\n${lineA3}\n`
+    const docB = `# 原型乙\n\n${lineB3}\n\n${lineB5}\n`
+    const docCrlf = `# 原型CRLF\r\n\r\n${needle}出现在CRLF文件第三行。\r\n尾部段。\r\n`
+    await vscode.workspace.fs.writeFile(wsUri('proto-a.md'), Buffer.from(docA, 'utf8'))
+    await vscode.workspace.fs.writeFile(wsUri('proto-b.md'), Buffer.from(docB, 'utf8'))
+    await vscode.workspace.fs.writeFile(wsUri('proto-crlf.md'), Buffer.from(docCrlf, 'utf8'))
+    const log = (msg: string): void => console.log(`[#318 显式矩阵] ${msg}`)
+    const clip = async (): Promise<string> => {
+      await vscode.env.clipboard.writeText('[CLIP-S]')
+      try { await vscode.commands.executeCommand('search.action.copyMatch') } catch { return '[cmd-missing]' }
+      await new Promise((r) => setTimeout(r, 300))
+      return await vscode.env.clipboard.readText()
+    }
+    const focus = (): Thenable<string> =>
+      vscode.commands.executeCommand('search.action.focusNextSearchResult').then(() => 'ok', (e: Error) => `fail:${e.message}`)
+    /** 单点落位断言（copyMatch 无结束位置：断言光标落匹配词首，单点+flash） */
+    const assertLocated = async (file: string, wantLfOffset: number, label: string): Promise<void> => {
+      const view = await waitViewState(file, (v) =>
+        v.selectionOffset === wantLfOffset && v.selectionHead === wantLfOffset)
+      assert(view.selectionOffset === wantLfOffset,
+        `${label}：光标应落匹配词首 ${wantLfOffset}（实际 ${view.selectionOffset}/${view.selectionHead}）`)
+    }
+    try {
+      // 搜索驱动（清场词先触发一次 doSearch 清空树状态与焦点残留——同词
+      // 重搜不重置树，跨用例残留焦点会让首条选中错位；再以目标词重建）
+      await vscode.commands.executeCommand('workbench.action.findInFiles', { query: 'zzz-清场无结果词' })
+      await new Promise((r) => setTimeout(r, 1000))
+      await vscode.commands.executeCommand('workbench.action.findInFiles', { query: needle })
+      let ready = false
+      for (let i = 0; i < 20 && !ready; i++) {
+        await new Promise((r) => setTimeout(r, 500))
+        await focus()
+        ready = (await clip()).includes(needle)
+      }
+      assert(ready, '搜索结果 10s 未就绪')
+      // 甲首条选中（结果按文件名序，proto-a 最先）
+      const first = await clip()
+      assert(first.startsWith('3,1:'), `首条应为 proto-a 行 3 列 1（实际 ${JSON.stringify(first)}）`)
+
+      // —— 首次导航 + 显式命令定位 ——
+      await vscode.commands.executeCommand('list.select')
+      await waitViewState('proto-a.md', (v) => v.text === docA)
+      await vscode.commands.executeCommand('onegayi.vsidian.searchReveal.locate')
+      const wantA3 = docA.indexOf(needle)
+      await assertLocated('proto-a.md', wantA3, '首次导航定位')
+      log(`首次导航落位 ${wantA3} ✓`)
+
+      // —— 重复导航（同文件第二条：乙文件行 3）——
+      await focus()
+      await vscode.commands.executeCommand('list.select')
+      await waitViewState('proto-b.md', (v) => v.text === docB)
+      await vscode.commands.executeCommand('onegayi.vsidian.searchReveal.locate')
+      const wantB3 = docB.indexOf(needle)
+      await assertLocated('proto-b.md', wantB3, '跨文件第二条')
+      log(`跨文件条目落位 ${wantB3} ✓`)
+
+      // —— 同文件下一处（乙文件行 5 首个匹配，col>1 行中匹配落词首非行首）——
+      await focus()
+      await vscode.commands.executeCommand('list.select')
+      await waitViewState('proto-b.md', () => true)
+      await vscode.commands.executeCommand('onegayi.vsidian.searchReveal.locate')
+      const wantB5 = docB.indexOf(needle, wantB3 + 1)
+      await assertLocated('proto-b.md', wantB5, '同文件下一处（行中匹配）')
+      log(`行中匹配落位（词首非行首）${wantB5} ✓`)
+
+      // —— 同一行第二个匹配（col 区分；focusNext 逐条推进）——
+      await focus()
+      await vscode.commands.executeCommand('list.select')
+      await vscode.commands.executeCommand('onegayi.vsidian.searchReveal.locate')
+      const wantB5second = docB.indexOf(needle, wantB5 + 1)
+      await assertLocated('proto-b.md', wantB5second, '同一行第二个匹配')
+      log(`同行第二匹配落位 ${wantB5second} ✓`)
+
+      // —— 重复触发同条目（光标已被用户移走后再按命令，意图显式可重复）——
+      await vscode.commands.executeCommand(CMD.postToPanel, wsUri('proto-b.md').toString(),
+        { kind: 'view.locate', offset: 0 })
+      await waitViewState('proto-b.md', (v) => v.selectionOffset === 0)
+      await vscode.commands.executeCommand('onegayi.vsidian.searchReveal.locate')
+      await assertLocated('proto-b.md', wantB5second, '重复触发同条目')
+      log('重复触发同条目再次落位 ✓')
+
+      // —— CRLF 文档（宿主 offset 含 \r，LF 换算后落位）——
+      for (let i = 0; i < 12; i++) {
+        await focus()
+        const c = await clip()
+        if (c.includes('CRLF')) {
+          break
+        }
+      }
+      const crlfPick = await clip()
+      assert(crlfPick.includes('CRLF文件第三行'), `应推进到 CRLF 条目（实际 ${JSON.stringify(crlfPick)}）`)
+      await vscode.commands.executeCommand('list.select')
+      // view.state 的 text 为 LF 形态（webview 全程 LF），matcher 用 LF 对照
+      const docCrlfLf = docCrlf.replace(/\r\n/g, '\n')
+      await waitViewState('proto-crlf.md', (v) => v.text === docCrlfLf)
+      await vscode.commands.executeCommand('onegayi.vsidian.searchReveal.locate')
+      // 期望值按 LF 坐标计算（webview 全程 LF；'# 原型CRLF\n\n'.length）
+      await assertLocated('proto-crlf.md', '# 原型CRLF\n\n'.length, 'CRLF 文档定位')
+      log('CRLF 文档 LF 换算落位 ✓')
+
+      // —— 剪贴板文本恢复（capture 三步法不吞用户文本剪贴板）——
+      await vscode.env.clipboard.writeText('用户剪贴板原文')
+      await vscode.commands.executeCommand('onegayi.vsidian.searchReveal.locate')
+      await assertLocated('proto-crlf.md', '# 原型CRLF\n\n'.length, '定位后再断言')
+      await new Promise((r) => setTimeout(r, 300))
+      const restored = await vscode.env.clipboard.readText()
+      assert(restored === '用户剪贴板原文', `剪贴板文本应恢复（实际 ${JSON.stringify(restored)}）`)
+      log('剪贴板文本恢复 ✓')
+
+      // dirty 零扰动（纯视图定位）
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === wsUri('proto-crlf.md').toString())
+      assert(doc?.isDirty === false, '定位不得产生 dirty')
+      log('零 dirty ✓')
+
+      const revealLog = (await vscode.commands.executeCommand('onegayi.vsidian._test.takeSearchRevealLog')) as Array<{ trigger: string; result: string }>
+      const commandResults = revealLog.filter((e) => e.trigger === 'command').map((e) => e.result)
+      assert(commandResults.every((r) => r === 'located'), `命令路径应全 located（实际 ${JSON.stringify(commandResults)}）`)
+      log(`命令路径结果记录 ${JSON.stringify(commandResults)} ✓`)
+    } finally {
+      await vscode.commands.executeCommand('workbench.view.explorer').then(undefined, () => {})
+      await vscode.commands.executeCommand('onegayi.vsidian._test.setSearchRevealAuto', false).then(undefined, () => {})
+      await vscode.env.clipboard.writeText('')
+    }
+  }],
+
+  ['搜索定位恢复（#318 原型）：自动捕获歧义矩阵——正例、残留误定位实证与重搜失效', async () => {
+    // 已知边界（环境敏感）：连续合跑多轮宿主负载高时，激活事件时序整体
+    // 劣化（显式矩阵首步亦曾同窗口超时）——低负载/单跑全绿（#318 结论
+    // 评论附多轮日志指针）；核心断言（正例 located、歧义误定位、重搜
+    // no-match）均已落盘，本用例驻留分支供复跑复现。
+    const needle = '原型唯一匹配词'
+    const lineA3 = `${needle}出现在甲文件第三行。`
+    const docA = `# 原型甲\n\n${lineA3}\n`
+    // 影子文件：行 3 与甲完全同文本——残留条目配对校验在此被「吻合」击穿
+    const docShadow = `# 影子标题\n\n${lineA3}\n`
+    await vscode.workspace.fs.writeFile(wsUri('proto-a.md'), Buffer.from(docA, 'utf8'))
+    await vscode.workspace.fs.writeFile(wsUri('proto-shadow.md'), Buffer.from(docShadow, 'utf8'))
+    const log = (msg: string): void => console.log(`[#318 歧义矩阵] ${msg}`)
+    const clip = async (): Promise<string> => {
+      await vscode.env.clipboard.writeText('[CLIP-S]')
+      try { await vscode.commands.executeCommand('search.action.copyMatch') } catch { return '[cmd-missing]' }
+      await new Promise((r) => setTimeout(r, 300))
+      return await vscode.env.clipboard.readText()
+    }
+    const focus = (): Thenable<string> =>
+      vscode.commands.executeCommand('search.action.focusNextSearchResult').then(() => 'ok', (e: Error) => `fail:${e.message}`)
+    const takeLog = async (): Promise<Array<{ trigger: string; result: string }>> =>
+      (await vscode.commands.executeCommand('onegayi.vsidian._test.takeSearchRevealLog')) as Array<{ trigger: string; result: string }>
+    try {
+      // 清场重搜（同显式矩阵：消除跨用例的树焦点残留）
+      await vscode.commands.executeCommand('workbench.action.findInFiles', { query: 'zzz-清场无结果词' })
+      await new Promise((r) => setTimeout(r, 1000))
+      await vscode.commands.executeCommand('workbench.action.findInFiles', { query: needle })
+      let ready = false
+      for (let i = 0; i < 20 && !ready; i++) {
+        await new Promise((r) => setTimeout(r, 500))
+        await focus()
+        ready = (await clip()).includes(needle)
+      }
+      assert(ready, '搜索结果 10s 未就绪')
+      // 落点校正：轮询探测若首轮 copyMatch no-op（树焦点未达），第二轮才
+      // ready 时选中已被 focus 推进到影子条目——正例需要确定落点在
+      // proto-a 行 3（focus 单向 next、两步 wrap 回来），不校正则正例
+      // 的 focus 会 wrap 到 proto-a、定位落在 a 上，断言影子超时（实测 flaky 源）
+      for (let i = 0; i < 4; i++) {
+        if ((await clip()) === `3,1: ${lineA3}`) {
+          break
+        }
+        await focus()
+      }
+      const settled = await clip()
+      assert(settled === `3,1: ${lineA3}`, `选中应校正到 proto-a 行 3（实际 ${JSON.stringify(settled)}）`)
+      await takeLog() // 清空记录
+      // 关键认知（实测）：focusNextSearchResult 的原生语义是 F3「转到下一个
+      // 结果」——setFocus 选中并**打开该结果**（轮询探测本身已把 proto-a 打
+      // 开、选中停留在 proto-a 行 3 条目、proto-a 光标 0——auto 关闭期间）。
+      // 激活事件面（多轮实测澄清）：面板**首开**有激活事件（onDidChangeViewState
+      // 以 active=true 触发）；真正的结构性盲区是「已激活面板上的再次导航不
+      // 翻转」（源码核查预警）——自动钩子只覆盖「打开/切换激活」这一条通道
+
+      // —— 正例（搜索导航完整复刻）：开启 auto 后 focusNext 推进选中到影子
+      //      条目并**首开**影子面板（run9 实测首开有激活事件；此前「构造
+      //      失活再重显」的前置在合跑时序下会吞掉翻转事件，已弃用）——
+      //      真实导航意图应被自动定位 ——
+      await vscode.commands.executeCommand('onegayi.vsidian._test.setSearchRevealAuto', true)
+      const wantShadow = docShadow.indexOf(needle)
+      let positive: ViewState | undefined
+      for (let attempt = 0; attempt < 2 && !positive; attempt++) {
+        await focus()
+        positive = await waitViewState('proto-shadow.md',
+          (v) => v.selectionOffset === wantShadow && v.selectionHead === wantShadow, 0, 12000).catch(() => undefined)
+      }
+      // 观测留痕：正例失败排障（activation 记录缺失=事件未达；有记录而
+      // no-match/no-fit=捕获链断在剪贴板或配对）
+      const positiveLog = await takeLog()
+      log(`正例观测记录=${JSON.stringify(positiveLog)}`)
+      assert(positive !== undefined, '正例：focusNext 导航首开影子应自动定位（两轮内）')
+      log(`自动捕获正例：focusNext 导航首开影子即落位 ${wantShadow} ✓`)
+      // —— 歧义实证：选中残留（影子条目），纯切换激活 proto-a ——
+      // openWith 重显 proto-a 的激活不带任何搜索导航；残留选中属于影子，
+      // 但两文件行 3 同文本——行文本吻合校验被击穿，proto-a 的光标被从 0
+      // 拉到词首——「切 tab 被残留条目误定位」的直接实证
+      await vscode.commands.executeCommand('vscode.openWith', wsUri('proto-a.md'), 'onegayi.vsidian.editor')
+      const wantA3 = docA.indexOf(needle)
+      const hijacked = await waitViewState('proto-a.md',
+        (v) => v.selectionOffset === wantA3 && v.selectionHead === wantA3)
+      assert(hijacked.selectionOffset === wantA3,
+        '残留条目应在 proto-a 上误定位（歧义实证；若本断言失败说明歧义已被某种机制消除，需复查）')
+      log(`歧义实证：非搜索导航的切换被误定位到 ${hijacked.selectionOffset}（同文本行击穿文件身份校验）`)
+
+      // —— 重搜失效安全：doSearch 清空选中后，激活翻转不再产生新定位 ——
+      // （歧义段后：proto-a 活动光标 7、影子失活且 webview 已销毁——其光标
+      // 持久锚为 8；本段断言「激活后光标停在持久锚 8」+「捕获记录 no-match」
+      // 双证据：8 只能来自重握手恢复，新定位路径未触发。钩子是异步链
+      // （重握手 + 捕获），记录在视图状态就绪之后才落盘——轮询取记录）
+      await takeLog() // 清空正例/歧义的旧记录
+      await vscode.commands.executeCommand('workbench.action.findInFiles', { query: '绝不存在的词组' })
+      await new Promise((r) => setTimeout(r, 2000))
+      await vscode.commands.executeCommand('vscode.openWith', wsUri('proto-shadow.md'), 'onegayi.vsidian.editor')
+      const afterResearch = await waitViewState('proto-shadow.md',
+        (v) => v.selectionOffset === wantShadow && v.selectionHead === wantShadow)
+      let freshLog: Array<{ at: number; trigger: string; result: string }> = []
+      for (let i = 0; i < 20 && freshLog.length === 0; i++) {
+        await new Promise((r) => setTimeout(r, 500))
+        freshLog = (await vscode.commands.executeCommand('onegayi.vsidian._test.takeSearchRevealLog')) as typeof freshLog
+      }
+      assert(freshLog.length > 0, '重搜后的激活应产生一条捕获记录（钩子异步链应在 10s 内落盘）')
+      const reSearchAutos = freshLog.filter((e) => e.trigger === 'activation')
+      assert(reSearchAutos.length === 1 && reSearchAutos[0]!.result === 'no-match',
+        `重搜后激活捕获应恰好一条 no-match（实际 ${JSON.stringify(freshLog)}）`)
+      assert(afterResearch.selectionOffset === wantShadow,
+        `重搜后激活不得产生新定位（实际 ${afterResearch.selectionOffset}）`)
+      log('重搜失效安全：doSearch 清空选中 → 激活 no-match、光标停留历史持久锚 ✓')
+    } finally {
+      await vscode.commands.executeCommand('onegayi.vsidian._test.setSearchRevealAuto', false).then(undefined, () => {})
+      await vscode.commands.executeCommand('workbench.view.explorer').then(undefined, () => {})
+      await vscode.env.clipboard.writeText('')
+    }
+  }],
+
+  // ---- #318 原型验证探针（2026-10-03 独立树）：搜索视图内部命令面 +
+  //      导航时序实测。纯记录型（无强断言），观察值落
+  //      .vscode-test/integration-dev.log 供结论回票引用 ----
+  ['搜索命令面与时序探针（#318 原型验证）', async () => {
+    const needle = '原型唯一匹配词'
+    const docA = `# 原型甲\n\n${needle}出现在甲文件第三行。\n`
+    const docB = `# 原型乙\n\n${needle}出现在乙文件第三行。\n\n第二段 ${needle} 再现。\n`
+    await vscode.workspace.fs.writeFile(wsUri('proto-a.md'), Buffer.from(docA, 'utf8'))
+    await vscode.workspace.fs.writeFile(wsUri('proto-b.md'), Buffer.from(docB, 'utf8'))
+    const log = (msg: string): void => console.log(`[诊断 #318] ${msg}`)
+    const SENTINEL = '[CLIP-SENTINEL]'
+    /** 执行命令并读剪贴板：sentinel 未变 = 命令存在但未写剪贴板（no-op）；
+     *  reject = 命令未注册。两类「不可用」要区分记录 */
+    const clipCmd = async (cmd: string): Promise<string> => {
+      await vscode.env.clipboard.writeText(SENTINEL)
+      try {
+        await vscode.commands.executeCommand(cmd)
+        await new Promise((r) => setTimeout(r, 300))
+        const text = await vscode.env.clipboard.readText()
+        return text === SENTINEL ? '[no-op：未写剪贴板]' : text
+      } catch (err) {
+        return `[未注册：${(err as Error).message.slice(0, 80)}]`
+      }
+    }
+    const tryCmd = async (cmd: string, args?: unknown): Promise<string> => {
+      try {
+        await vscode.commands.executeCommand(cmd, args)
+        return 'ok'
+      } catch (err) {
+        return `fail:${(err as Error).message.slice(0, 80)}`
+      }
+    }
+    try {
+      // 1) 打开原生搜索并填词（带参形态优先，失败退化无参）
+      const withArgs = await tryCmd('workbench.action.findInFiles', { query: needle })
+      log(`findInFiles({query}) → ${withArgs}`)
+      if (withArgs.startsWith('fail')) {
+        log(`findInFiles() → ${await tryCmd('workbench.action.findInFiles')}`)
+      }
+      // 2) 等结果装载，轮询「选中移动 + copyMatch 出现 needle」确认结果就绪
+      let searchReady = false
+      for (let i = 0; i < 20; i++) {
+        await new Promise((r) => setTimeout(r, 500))
+        const moved = await tryCmd('search.action.focusNextSearchResult')
+        const match = await clipCmd('search.action.copyMatch')
+        if (match.includes(needle)) {
+          searchReady = true
+          log(`搜索结果就绪（第 ${i + 1} 轮，focusNextSearchResult=${moved}），copyMatch=${JSON.stringify(match)}`)
+          break
+        }
+        if (i === 19) {
+          log(`搜索结果 10s 未就绪：focusNextSearchResult=${moved}，copyMatch=${JSON.stringify(match)}`)
+        }
+      }
+      if (searchReady) {
+        // 3) copy 家族输出形态（选中=匹配级条目时）
+        log(`copyMatch=${JSON.stringify(await clipCmd('search.action.copyMatch'))}`)
+        log(`copyPath=${JSON.stringify(await clipCmd('search.action.copyPath'))}`)
+        log(`copyAllResults=${JSON.stringify((await clipCmd('search.action.copyAllResults')).slice(0, 400))}`)
+        // 4) getSearchResults 存在性（票面断言 1.82.3 无——实证）
+        try {
+          const res = await vscode.commands.executeCommand('search.action.getSearchResults')
+          log(`getSearchResults=存在，输出前 400 字符：${JSON.stringify(res).slice(0, 400)}`)
+        } catch (err) {
+          log(`getSearchResults=未注册（${(err as Error).message.slice(0, 80)}）`)
+        }
+        // 5) 导航时序：从选中条目触发打开 → Vsidian 面板就绪 → 立即回读选中
+        const t0 = Date.now()
+        let openVia = ''
+        for (const cmd of ['search.action.open', 'list.select']) {
+          const r = await tryCmd(cmd)
+          if (r === 'ok') {
+            openVia = cmd
+            break
+          }
+        }
+        log(`打开命令：${openVia || '候选全部不可用'}（t=0ms）`)
+        if (openVia) {
+          const view = await waitViewState('proto-a.md', () => true, 0, 10000).catch(() => undefined)
+          const t1 = Date.now() - t0
+          if (view) {
+            log(`面板就绪 t=${t1}ms，立即回读：copyMatch=${JSON.stringify(await clipCmd('search.action.copyMatch'))}`)
+            log(`面板就绪后 copyPath=${JSON.stringify(await clipCmd('search.action.copyPath'))}`)
+            log(`面板就绪后 selection=${view.selectionOffset}/${view.selectionHead}（预期丢失定位，对照用）`)
+          } else {
+            log(`面板 10s 未就绪（打开命令 ${openVia} 未产生导航？）`)
+          }
+        }
+      }
+    } finally {
+      // 观察面向真实 UI：切回资源管理器避免污染后续用例；剪贴板恢复
+      await tryCmd('workbench.view.explorer')
+      await vscode.env.clipboard.writeText('')
+    }
+  }],
 ]
 
 // ---- 诊断 fixture（2026-10-03 独立树）：目标词全文档唯一、位于第 60+ 行

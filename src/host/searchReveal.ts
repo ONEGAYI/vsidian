@@ -1,0 +1,53 @@
+// #318 原型验证：外部搜索导航定位恢复（绕过路径）。
+// VSCode 公开 API 不向 custom editor 透传 selection（microsoft/vscode#289785；
+// 1.82.3 实测扩展侧零信号），本模块验证的绕过路径是：搜索树保留被点击条目
+// 的选中态，经内部命令 search.action.copyMatch 把「起始行列 + 匹配行全文」
+// 写入剪贴板后回读，与目标文档行文本配对恢复定位意图，再经 view.locate
+// 落位（LF 坐标换算由 wiring 层完成）。
+// 已知边界（1.82.3 实测）：copyMatch 不提供文件路径与匹配结束位置——文件
+// 身份靠激活文档行文本吻合确认（吻合失败即放弃，不误定位）；结束位置缺失
+// 时只能单点定位（不选词）。本模块为原型验证产物，正式实施评估见 #318。
+
+/** copyMatch 剪贴板输出（1.82.3 实测格式：`1-based行,1-based列: 匹配行全文`，
+ *  行列口径为 workbench Range 的 1-based） */
+export interface SearchMatchProbe {
+  /** 匹配起始行（1-based） */
+  line: number
+  /** 匹配起始列（1-based） */
+  col: number
+  /** 匹配所在行全文（不含行尾符） */
+  text: string
+}
+
+/** 解析 copyMatch 输出。非匹配级输出（无选中或文件级选中时命令 no-op 不写
+ *  剪贴板，回读到的是恢复用哨兵或无关文本）、多行文本、0 基行列一律 null
+ *  ——调用方以 null 安全放弃，不误定位。只剥行尾换行符不做整体 trim：
+ *  空行匹配（正则 ^$）的输出 `N,1: ` 尾随空格是文本区的一部分 */
+export function parseCopyMatch(raw: string): SearchMatchProbe | null {
+  const match = /^([1-9]\d*),([1-9]\d*): ([^\n\r]*)$/.exec(raw.replace(/\r?\n$/, ''))
+  if (!match) {
+    return null
+  }
+  return { line: Number(match[1]), col: Number(match[2]), text: match[3] ?? '' }
+}
+
+/** 与文档文本配对：probe 行列在文档范围内且该行文本（剥除 \r）与预览吻合
+ *  时，返回匹配起始的宿主系 offset（行尾 \r 原样计入）；行号越界或行文本
+ *  不吻合返回 null。行文本吻合是文件身份的唯一校验——残留选中条目配对到
+ *  其他文件（行号恰同、内容不同）时在此拦下 */
+export function matchHostOffset(docText: string, probe: SearchMatchProbe): number | null {
+  const lines = docText.split('\n')
+  if (probe.line < 1 || probe.line > lines.length) {
+    return null
+  }
+  const rawLine = lines[probe.line - 1] ?? ''
+  const lineText = rawLine.replace(/\r$/, '')
+  if (lineText !== probe.text) {
+    return null
+  }
+  let offset = 0
+  for (let i = 0; i < probe.line - 1; i++) {
+    offset += (lines[i] ?? '').length + 1
+  }
+  return offset + Math.min(probe.col - 1, lineText.length)
+}

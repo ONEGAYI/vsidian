@@ -54,6 +54,7 @@
   "command.cssSnippets.resume.title": "CSS 片段：恢复",
   "command.index.rebuild.title": "索引：完整重建",
   "command.index.cleanup.title": "索引：清理当前工作区缓存",
+  "command.searchReveal.locate.title": "定位到搜索选中结果",
   "command.ui.sidebarToggle.title": "展开或收起右侧栏",
   "command.ui.outlineToggle.title": "显示或隐藏大纲",
   "command.ui.outlineSearch.title": "搜索大纲标题",

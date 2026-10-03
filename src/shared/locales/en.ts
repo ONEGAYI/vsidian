@@ -312,6 +312,8 @@ export const en = {
   'host.indexMaintenanceBusy': 'An index maintenance operation is already running. Please try again later.',
   'host.indexCleanupDone': 'Index cache cleaned; {count} obsolete generation(s) removed.',
   'host.indexCleanupFailed': 'Cache cleanup failed: {detail}',
+  /** #318 prototype: failure feedback for the search reveal command (success is shown via the flash highlight) */
+  'host.searchRevealNotFound': 'Could not match a selected search result to the current Vsidian panel (select a match in the search view first).',
   // ---- #199 rename/move reference auto-update (host notices; batch merged) ----
   'host.renameRefsUpdated': 'Renamed "{file}" and updated {count} reference(s) in {files} file(s).',
   'host.renameRefsPartiallyUpdated': 'Renamed "{file}" and updated {count} reference(s); {skipped} skipped (out of root or content changed) — not fully updated.',
@@ -655,6 +657,8 @@ export const en = {
    *  评估记录见 docs/specs/keybindings.md） */
   'command.index.rebuild.title': 'Index: full rebuild',
   'command.index.cleanup.title': 'Index: clean workspace cache',
+  /** #318 prototype: search reveal (unbound by default; see docs/specs/keybindings.md) */
+  'command.searchReveal.locate.title': 'Reveal selected search result',
   'command.ui.sidebarToggle.title': 'Expand or collapse the sidebar',
   'command.ui.outlineToggle.title': 'Show or hide the outline',
   'command.ui.outlineSearch.title': 'Search headings',

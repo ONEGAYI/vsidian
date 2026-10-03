@@ -312,6 +312,11 @@
         "category": "Vsidian"
       },
       {
+        "command": "onegayi.vsidian.searchReveal.locate",
+        "title": "%command.searchReveal.locate.title%",
+        "category": "Vsidian"
+      },
+      {
         "command": "onegayi.vsidian.ui.sidebarToggle",
         "title": "%command.ui.sidebarToggle.title%",
         "category": "Vsidian"
