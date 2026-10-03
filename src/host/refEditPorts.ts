@@ -55,7 +55,29 @@ export function wrapRefEditPush(
 export class RefEditPortRegistry {
   private readonly byPort = new Map<string, RefEditBinding>()
   private readonly byPanel = new Map<string, Set<string>>()
+  /** P2-13（#290）面板级「曾成功写入」记账：panelKey → 该面板端口
+   *  edit.ack(ok) 过的目标集合。端口释放（离屏回收 / 切 Reading）不清——
+   *  父标签关闭交接的判定集合 = 关闭时活跃端口 ∪ 本记账（ADR-0010
+   *  「引用编辑涉及且仍有未保存修改的 B」）。随 releasePanel 整体清账 */
+  private readonly editAckByPanel = new Map<string, Set<string>>()
   private nextPortSeq = 1
+
+  /** P2-13（#290）登记一次成功写入（该面板的端口编辑已确认写入目标） */
+  noteEditAck(panelSessionId: string, panelDocUri: string, targetUri: string): void {
+    const key = `${panelDocUri}\n${panelSessionId}`
+    let targets = this.editAckByPanel.get(key)
+    if (!targets) {
+      targets = new Set()
+      this.editAckByPanel.set(key, targets)
+    }
+    targets.add(targetUri)
+  }
+
+  /** P2-13（#290）该面板曾成功写入的目标集合（未登记面板为空数组）。
+   *  releasePanel 清账前读取——交接判定的第二来源 */
+  panelEditTargets(panelSessionId: string, panelDocUri: string): string[] {
+    return [...(this.editAckByPanel.get(`${panelDocUri}\n${panelSessionId}`) ?? [])]
+  }
 
   allocate(): string {
     return `refport-${this.nextPortSeq++}`
@@ -113,9 +135,10 @@ export class RefEditPortRegistry {
     return binding
   }
 
-  /** 面板（A）销毁时整体释放：返回全部该面板的绑定 */
+  /** 面板（A）销毁时整体释放：返回全部该面板的绑定；P2-13 记账同清 */
   releasePanel(panelSessionId: string, panelDocUri: string): RefEditBinding[] {
     const key = `${panelDocUri}\n${panelSessionId}`
+    this.editAckByPanel.delete(key)
     const released: RefEditBinding[] = []
     for (const portId of [...(this.byPanel.get(key) ?? [])]) {
       const binding = this.release(portId)

@@ -259,6 +259,15 @@ export const en = {
    *  target document) */
   'host.conflictDiffTitle': 'Write conflict: {name} (Left: copy of current input / Right: current target version)',
   'host.panelClosedWithInput': 'The editor for "{name}" was closed (or the connection dropped) with unsaved unconfirmed input: {text}',
+  /** P2-13 (#290) notice for input from a reference edit port (virtual panel)
+   *  that was never written to the target after its parent tab closed (three
+   *  immediate choices: compare and resolve / discard current version / cancel) */
+  'host.refClosedWithInput': 'The parent document closed with input from the "{name}" reference edit that was not written to the target: {text}',
+  'host.conflictCompareLabel': 'Compare and resolve',
+  'host.conflictDiscardLabel': 'Discard current version',
+  'host.conflictCancelLabel': 'Cancel',
+  'host.handoffFailed': 'Failed to open an editor tab for "{name}"; its unsaved changes are still kept by the host and can be retried.',
+  'host.handoffRetry': 'Retry opening',
   'host.wikilinkUnsupported': 'Unsupported wikilink form "[[{target}]]" (embeds ![[…]] belong to a later phase): kept as-is',
   'host.wikilinkNoWorkspace': 'The current document is not in any workspace folder: wikilink targets resolve relative to the source document, so jumping is unavailable with no folder open (the link text is kept)',
   'host.wikilinkNotFound': 'Wikilink target not found: [[{target}]] (resolved relative to the source document directory; files are never created automatically)',

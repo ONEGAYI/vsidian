@@ -156,6 +156,10 @@ export type SessionNotice =
       /** webview 防抖重报的最新全文快照（R-1）：含暂停后继续输入与暂缓集
        *  内容，比 fragments 更完整；复制取回时优先 */
       webviewText?: string
+      /** P2-13（#290）来源标记：true = 引用编辑端口（虚拟面板，refOrigin
+       *  在场）——provider 据此把通知呈现为三项当次选择（对比并解决/
+       *  放弃当前版本/取消）；根面板关闭残留维持既有「复制取回」呈现 */
+      fromRefPort?: boolean
     }
 
 export interface DocumentSessionOptions {
@@ -462,6 +466,7 @@ export class DocumentSession {
           // 快照随通知带走（面板即将注销，事后无从查询）；暂停后新输入
           // 与暂缓集内容只在快照里（R-1）
           webviewText: snapshotText,
+          ...(panel.refOrigin ? { fromRefPort: true } : {}),
         })
       }
     }
@@ -472,6 +477,16 @@ export class DocumentSession {
     // 被 webview 版本单调防线丢弃、增量落点错位。补发由后续路径完成：
     // apply 成功时本笔回流以外部变更身份有序入队（排在本批暂存量之前）
     // 带动补发，失败时由 processEditRequest 的失败分支收口。
+  }
+
+  /** P2-13（#290）在途编辑排空等待面：resolve = 调用时刻已入队（含正在
+   *  执行）的全部编辑任务完成。父面板关闭交接在 detach 虚拟面板前调用——
+   *  在途写回照常完成（P2-01 §7 验证），settle 之后的未确认输入才是真正
+   *  未写入 B 的（暂停快照 / 组合期），dirty 判定也取到在途完成后的最新
+   *  状态。此后新入队的任务不属于本次等待范围（调用方语义：dispose 时刻
+   *  的「宿主可继续完成的在途请求」） */
+  settleEdits(): Promise<void> {
+    return this.queue
   }
 
   dispose(): void {
