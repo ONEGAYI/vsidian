@@ -1038,7 +1038,10 @@ it('#245 悬停 B 内独占 C 递归请求沿 B 来源且仍只有一个浮窗',
     openHoverPopupForKeyboard(anchor, { target: 'B', sourceStart: 0, sourceEnd: 5 })
     const root = sent.find((m): m is Extract<WebviewToHost, { kind: 'hover.request' }> =>
       m.kind === 'hover.request' && m.target === 'B')!
-    expect(root.occurrenceId).toBe(root.instanceId)
+    // P2-06（#283）起浮窗根请求的 occurrenceId = 引用位置语义键（与
+    // hover.watch 身份、refEdit.bind occurrence 同源——宿主来源租约按
+    // occurrence 转交固定）；instanceId 仍为请求配对身份（hover-N）
+    expect(root.occurrenceId).toBe('hover@0::B')
     c.handleHostMessage({ kind: 'hover.result', instanceId: root.instanceId, reqId: root.reqId,
       ok: true, sourceLeaseId: 'popup-b-lease', target: { fsPath: 'D:/notes/B.md', relPath: 'B.md' },
       version: 1, text: '![[C]]\n', range: { start: 0, end: 7 }, scope: { kind: 'full' },

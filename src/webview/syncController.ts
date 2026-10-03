@@ -160,6 +160,7 @@ import {
   notifyHoverImageInvalidate,
   notifyHoverImageResult,
   notifyHoverResult,
+  hoverPopupLiveTestAction,
   notifyHoverWatchRejected,
   openHoverPopupForKeyboard,
   setHoverPreviewContext,
@@ -1006,6 +1007,10 @@ export class WebviewSyncController {
         this.embedCards?.admitPopupRoot(instanceId, target, bytes) ?? false,
       clearRootContent: (instanceId) => this.embedCards?.clearPopupRoot(instanceId),
       releaseRootContent: (instanceId) => this.embedCards?.releasePopupRoot(instanceId),
+      // P2-06（#283）浮窗根引用内部 Live 宿主：目标编辑端口/模式状态机/
+      // 显式关闭链路与正文嵌入同源（同一 EmbedCardManager——票面「后续
+      // 浮窗使用同一目标操作和结果」）
+      mountPopupRoot: (args) => this.embedCards?.mountPopupRoot(args) ?? null,
     })
     // #299 跳转目标提示上下文：与悬停预览同源装配（session/send 同款）；
     // enabled 投影 hover.targetTip（缺省视为开），dispose 清空随会话
@@ -2115,6 +2120,17 @@ export class WebviewSyncController {
         // 处理器链路）
         this.embedCards?.testConflictAction(message.inner, message.action, message.occurrence ?? 0)
         break
+      case 'hover.test.live': {
+        // P2-06（#283）测试钩子：浮窗根内部 Live 操作族（与头部按钮/编辑器
+        // 事务管线同一处理器链路——宿主测试无法派发真实点击/键入）
+        hoverPopupLiveTestAction(message.action, {
+          ...(message.intent !== undefined ? { intent: message.intent } : {}),
+          ...(message.pos !== undefined ? { pos: message.pos } : {}),
+          ...(message.to !== undefined ? { to: message.to } : {}),
+          ...(message.text !== undefined ? { text: message.text } : {}),
+        })
+        break
+      }
       case 'hover.target.resolved': {
         // #299 跳转目标提示轻量解析回包（reqId 配对在 targetTip 模块内
         // 收敛——迟到回包丢弃；失败静默不出提示）

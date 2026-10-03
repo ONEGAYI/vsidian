@@ -969,7 +969,8 @@ interface ViewState {
   /** #140 Popover 改版：frontmatter 属性编辑浮层开态（protocol.ts 缺省可选） */
   fmPopoverOpen?: boolean
   /** #218 悬停预览观测：浮层开闭、内容态、目标标识与内容块数；
-   *  #220 新增 fm 属性区三态与 imageSrcs 浮层内已应用图片地址（旧 webview 缺省） */
+   *  #220 新增 fm 属性区三态与 imageSrcs 浮层内已应用图片地址（旧 webview 缺省）；
+   *  P2-06（#283）新增根引用内部 Live 观测（旧 webview 缺省） */
   hoverPreview?: {
     open: boolean
     state: 'loading' | 'content' | 'error'
@@ -978,6 +979,11 @@ interface ViewState {
     scope: 'full' | 'heading' | 'block' | ''
     fm?: 'none' | 'collapsed' | 'expanded'
     imageSrcs?: string[]
+    internalMode?: 'reading' | 'live'
+    liveBound?: boolean
+    liveDirty?: boolean
+    liveSuspended?: boolean
+    closeDialogOpen?: boolean
   }
   /** #299 跳转目标提示观测：在场与路径文本 */
   targetTip?: {
@@ -14315,5 +14321,133 @@ export const cases: Array<[string, () => Promise<void>]> = [
     assert(await readDisk('悬停预览.md') === before, '轻量解析不得改写正文磁盘')
     const tipState = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
     assert(tipState.appliedEdits === 0, `全链路零 applyEdit（实际 ${tipState.appliedEdits}）`)
+  }],
+
+  // ---- P2-06（#283）悬停浮窗根引用内部 Live：第一条可写链路的真宿主
+  // 证明。Live 父（Ctrl+悬停）→ 浮窗根继承内部 Live → 按引用位置语义键
+  // 绑定目标端口 → 普通输入只写 B；A 零写回/零 dirty；dirty 推送驱动
+  // 圆点（探针）；保存走 TextDocument.save 只落 B；关闭后无残留编辑器。 ----
+  ['P2-06 悬停浮窗内部 Live：继承绑定、输入只写目标与保存路由（#283）', async () => {
+    await openWithEditor('p206-悬停Live.md')
+    await waitSessionReady('p206-悬停Live.md')
+    const uri = wsUri('p206-悬停Live.md').toString()
+    const parentBefore = await readDisk('p206-悬停Live.md')
+    const targetBefore = await readDisk('p206-编辑目标.md')
+    const parentDoc = await vscode.workspace.openTextDocument(wsUri('p206-悬停Live.md'))
+    const session0 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    const TARGET_HEAD = '# p206 编辑目标\n\n'.length + 3
+
+    // Live 父 + Ctrl+悬停（默认组合；与用户操作同一处理器链路）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'view.mode.set', mode: 'live' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', link: 'live-wikilink', index: 0, ctrlKey: true })
+
+    // 装载 + 继承 Live + 端口绑定（occurrence = 引用位置语义键）
+    const bound = await waitViewState('p206-悬停Live.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' &&
+      v.hoverPreview.internalMode === 'live' && v.hoverPreview.liveBound === true
+        ? true : false)
+    assert(bound.hoverPreview?.liveDirty !== true, '目标初始干净（无圆点）')
+
+    // 浮窗内输入：只写 B（经 B 会话，A 会话零 applyEdit）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'hover.test.live', action: 'type', pos: TARGET_HEAD, text: '【悬停编辑】',
+    })
+    const bDoc = await poll('B 权威文档收到悬停编辑', () => {
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === wsUri('p206-编辑目标.md').toString())
+      return doc?.getText().includes('【悬停编辑】') ? doc : undefined
+    })
+    assert(bDoc.isDirty, '悬停编辑后目标 B dirty')
+    await waitViewState('p206-悬停Live.md', (v) => v.hoverPreview?.liveDirty === true ? true : false)
+    await waitViewState('p206-悬停Live.md', (v) => v.text === parentBefore)
+    assert(parentDoc.getText() === parentBefore && !parentDoc.isDirty, '父文档 A 零写回且零 dirty')
+    const session1 = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(session1.appliedEdits === session0.appliedEdits,
+      `A 会话 appliedEdits 零推进（B 编辑走 B 会话；实际 ${session1.appliedEdits}，基线 ${session0.appliedEdits}）`)
+    assert(await readDisk('p206-编辑目标.md') === targetBefore, '保存前目标磁盘未变')
+
+    // 保存路由（hover.test.live save 与头部保存入口/Ctrl+S 焦点路由同一出站）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'hover.test.live', action: 'save',
+    })
+    await poll('目标保存落盘且权威文档干净', async () =>
+      (await readDisk('p206-编辑目标.md')).includes('【悬停编辑】') && !bDoc.isDirty ? true : undefined)
+    await waitViewState('p206-悬停Live.md', (v) => v.hoverPreview?.liveDirty !== true ? true : false)
+    assert(await readDisk('p206-悬停Live.md') === parentBefore && !parentDoc.isDirty,
+      '保存目标不动父文档（A 磁盘与 dirty 原样）')
+
+    // 干净后离开：浮窗按常规关闭（Q18：干净 Live 不保活）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', link: 'live-wikilink', index: 0 })
+    await waitViewState('p206-悬停Live.md', (v) => v.hoverPreview?.open === false)
+    console.log('[P2-06] 悬停浮窗继承绑定 + 输入只写目标 + 保存路由通过')
+  }],
+
+  // ---- P2-06（#283）dirty 保活、显式关闭三项模态与引用位置模式记忆：
+  // dirty 期间离开不销毁；头部关闭走 P2-05 确认（保存并关闭后退出编辑、
+  // 浮窗保留回 Reading）；同位置重开按手动覆盖记忆（不随父级联回 Live）。 ----
+  ['P2-06 悬停浮窗内部 Live：dirty 保活、三项模态关闭与位置记忆（#283）', async () => {
+    await openWithEditor('p206-悬停Live.md')
+    await waitSessionReady('p206-悬停Live.md')
+    const uri = wsUri('p206-悬停Live.md').toString()
+    const TARGET_HEAD = '# p206 编辑目标\n\n'.length + 3
+
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'view.mode.set', mode: 'live' })
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', link: 'live-wikilink', index: 0, ctrlKey: true })
+    await waitViewState('p206-悬停Live.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.liveBound === true ? true : false)
+
+    // dirty 后离开：浮窗保活（Q18——普通关闭条件不销毁）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'hover.test.live', action: 'type', pos: TARGET_HEAD, text: '【保活编辑】',
+    })
+    await waitViewState('p206-悬停Live.md', (v) => v.hoverPreview?.liveDirty === true ? true : false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', link: 'live-wikilink', index: 0 })
+    await new Promise((resolve) => setTimeout(resolve, 1200)) // 关延迟 350ms 的 3 倍以上
+    // 仍在场断言：poll 到 open+dirty 组合（关闭即超时失败）
+    await waitViewState('p206-悬停Live.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.liveDirty === true ? true : false)
+
+    // 显式关闭（头部按钮同径）→ dirty 弹三项模态（P2-05 链路复用）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'hover.test.live', action: 'close', intent: 'close',
+    })
+    await waitViewState('p206-悬停Live.md', (v) => v.hoverPreview?.closeDialogOpen === true ? true : false)
+    // 保存并关闭：保存落盘、退出编辑（回 Reading）、浮窗保留（close 意图不关浮窗）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.dialogAction', action: 'save',
+    })
+    await poll('模态保存落盘', async () =>
+      (await readDisk('p206-编辑目标.md')).includes('【保活编辑】') ? true : undefined)
+    const settled = await waitViewState('p206-悬停Live.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.internalMode === 'reading' &&
+      v.hoverPreview.liveBound !== true && v.hoverPreview.closeDialogOpen !== true
+        ? true : false)
+    assert(settled.hoverPreview?.liveDirty !== true, '保存后圆点消失')
+
+    // Reading 态离开：常规关闭；同位置重开按手动覆盖记忆（父 Live 不覆写）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', link: 'live-wikilink', index: 0 })
+    await waitViewState('p206-悬停Live.md', (v) => v.hoverPreview?.open === false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', link: 'live-wikilink', index: 0, ctrlKey: true })
+    const reopened = await waitViewState('p206-悬停Live.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' ? true : false)
+    assert(reopened.hoverPreview?.internalMode === 'reading',
+      `显式退出写入的手动 Reading 跨开合记忆（实际 ${reopened.hoverPreview?.internalMode}）`)
+    // 手动切回 Live：重绑端口（同位置记忆与端口复链）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'hover.test.live', action: 'mode',
+    })
+    await waitViewState('p206-悬停Live.md', (v) =>
+      v.hoverPreview?.internalMode === 'live' && v.hoverPreview.liveBound === true ? true : false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', link: 'live-wikilink', index: 0 })
+    await waitViewState('p206-悬停Live.md', (v) => v.hoverPreview?.open === false)
+    console.log('[P2-06] dirty 保活 + 三项模态关闭 + 位置记忆通过')
   }],
 ]

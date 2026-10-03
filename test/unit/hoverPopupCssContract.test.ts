@@ -135,3 +135,38 @@ describe('错误分态样式区分（验收反馈）', () => {
     expect(error).toMatch(/color:\s*var\(--vscode-errorForeground/)
   })
 })
+
+describe('P2-06 悬停浮窗根引用内部 Live CSS 契约（#283）', () => {
+  it('头部动作组：右对齐成组（标题占剩余宽）', () => {
+    const actions = rule('#app > .vsidian-hover-popup .vsidian-hover-popup-actions')
+    expect(actions).toMatch(/display:\s*inline-flex/)
+    expect(actions).toMatch(/margin-left:\s*auto/)
+  })
+
+  it('保存/模式切换/关闭编辑入口：与跳转入口同款图标按钮（尺寸/指针/hover 反馈）', () => {
+    const btn = rule('#app > .vsidian-hover-popup .vsidian-hover-popup-close')
+    expect(btn.split('{')[0])
+      .toContain('#app > .vsidian-hover-popup .vsidian-hover-popup-save')
+    expect(btn.split('{')[0])
+      .toContain('#app > .vsidian-hover-popup .vsidian-hover-popup-mode')
+    expect(btn).toMatch(/width:\s*22px/)
+    expect(btn).toMatch(/cursor:\s*pointer/)
+    const hover = rule(
+      '#app > .vsidian-hover-popup .vsidian-hover-popup-save:hover,\n#app > .vsidian-hover-popup .vsidian-hover-popup-save:focus-visible,\n#app > .vsidian-hover-popup .vsidian-hover-popup-mode:hover,\n#app > .vsidian-hover-popup .vsidian-hover-popup-mode:focus-visible,\n#app > .vsidian-hover-popup .vsidian-hover-popup-close:hover,\n#app > .vsidian-hover-popup .vsidian-hover-popup-close:focus-visible',
+    )
+    expect(hover).toMatch(/border-color:/)
+  })
+
+  it('未保存圆点：警示色加重（紧随目标显示名，绘制层可见）', () => {
+    const dot = rule('#app > .vsidian-hover-popup .vsidian-hover-popup-dirty')
+    expect(dot).toMatch(/font-weight:\s*700/)
+    expect(dot).toMatch(/color:\s*var\(--vscode-editorWarning-foreground/)
+  })
+
+  it('内部 Live 编辑器容器：不外滚（滚动由 CM6 自身 scroller 承担）', () => {
+    const live = rule('#app > .vsidian-hover-popup .vsidian-hover-popup-live')
+    expect(live).toMatch(/overflow:\s*hidden/)
+    const editor = rule('#app > .vsidian-hover-popup .vsidian-hover-popup-live .cm-editor')
+    expect(editor).toMatch(/max-height:\s*100%/)
+  })
+})

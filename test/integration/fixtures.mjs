@@ -1235,6 +1235,22 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
     '目标次段。',
     '',
   ].join('\n'), 'utf8')
+
+  // P2-06/#283 悬停浮窗根引用内部 Live：Live 父继承与手动切换/位置记忆链路
+  writeFileSync(path.join(wsDir, 'p206-悬停Live.md'), [
+    '# P2-06 悬停 Live',
+    '',
+    '指向 [[p206-编辑目标]] 的双链（Live 正文 Ctrl+悬停进入）。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, 'p206-编辑目标.md'), [
+    '# p206 编辑目标',
+    '',
+    '目标首段。',
+    '',
+    '目标次段。',
+    '',
+  ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, '嵌入改写.md'), [
     '# 嵌入改写',
     '',
