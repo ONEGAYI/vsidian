@@ -136,6 +136,20 @@ if (!production) {
     sourcemap: true,
     logLevel: 'info',
   })
+  targets.push({
+    // #335 原生文字外观探针套件（研究票，不进 VSIX）：由
+    // test/integration/runAppearanceProbe.mjs 启动；依赖
+    // vscode-textmate/vscode-oniguruma（探针专属 devDependencies）
+    entryPoints: ['test/integration/appearanceProbe/index.ts'],
+    outfile: 'out/test/integration/appearanceProbe/index.js',
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    target: 'node18',
+    external: ['vscode'],
+    sourcemap: true,
+    logLevel: 'info',
+  })
 }
 
 async function main() {
