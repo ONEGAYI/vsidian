@@ -1992,6 +1992,16 @@ export function createTextEditorProvider(
                   return null
                 }
               },
+              // #336（P3-04）图片目标的文件资源版本（mtimeMs——图片不是
+              // TextDocument 权威语义；stat 失败由访问层退 0 不构成读取失败）
+              statFile: async (fsPath: string) => {
+                try {
+                  const stat = await vscode.workspace.fs.stat(vscode.Uri.file(fsPath))
+                  return { mtimeMs: stat.mtime }
+                } catch {
+                  return null
+                }
+              },
             }
             // #333（P3-01）生产读取走类型化分派入口 readRefContentTarget：
             // 三形态（directTarget/linkHref/target 择一）在共用解析层归一，

@@ -45,9 +45,12 @@ import { liveDecorationsField } from './liveDecorations'
 import { mermaidFencesField } from './liveMermaid'
 import { chainAt } from '../shared/markdownDoc'
 import { scanEmbedsInTableRow } from '../shared/tableCellEmbed'
+import { refEmbedTargetIsImage } from '../shared/refContent'
 import type { Tree } from '@lezer/common'
 import type { FenceSpan } from '../shared/mermaid'
-import { linkLabelRangesInLine, scanEmbedsInLine, soleEmbedOfLine } from '../shared/wikilink'
+import { linkLabelRangesInLine, parseWikilinkInner, scanEmbedsInLine, soleEmbedOfLine } from '../shared/wikilink'
+import { imageWidgetDeco } from './liveLinks'
+import { hitIntersectsRange, hitRangesOf, hitRevealField, type HitRange } from './hitReveal'
 import type { EmbedCardManager } from './embedCard'
 
 /** #223 Live 嵌入宿主稳定类名（样式契约 content 域 live-embed-widget 条目同源） */
@@ -262,6 +265,7 @@ export function buildLiveEmbedDecorationRanges(
   doc: Text,
   tree: Tree | null,
   child?: LiveEmbedChildContext | null,
+  hits: readonly HitRange[] = [],
 ): Array<Range<Decoration>> {
   const out: Array<Range<Decoration>> = []
   for (const span of spans) {
@@ -284,9 +288,30 @@ export function buildLiveEmbedDecorationRanges(
     if (inLinkLabel) {
       continue
     }
+    const touched = selectionTouchesRange(selection, span.from, span.to)
+    // #336（P3-04）图片嵌入：与 `![](图.png)` 同源呈现——分流为图片
+    // widget（同一 LiveImageWidget 与 chrome/block 语义；管理器由 widget
+    // 在 toDOM 按所属视图惰性解析——根正文 A 身份/嵌入内部 Live B 身份随
+    // 视图自动成立），不挂卡片壳、不发行下方显形态。触及与独行命中显形
+    // （#251 同口径）回纯源码（图片嵌入是图片不是链接，无 mark 着色）
+    if (refEmbedTargetIsImage(span.inner)) {
+      const parsed = parseWikilinkInner(span.inner)
+      if (parsed !== null && !touched &&
+          !(span.sole && hitIntersectsRange(hits, span.from, span.to))) {
+        const chrome = tree === null ||
+          !chainAt(tree, span.from).some((node) => node.name === 'Link' || node.name === 'Table')
+        out.push(imageWidgetDeco(
+          parsed.path,
+          parsed.alias ?? '',
+          undefined,
+          span.sole,
+          chrome,
+        ).range(span.from, span.to))
+      }
+      continue
+    }
     const keyFrom = span.sole ? span.lineFrom : span.from
     const keyTo = span.sole ? span.lineTo : span.to
-    const touched = selectionTouchesRange(selection, span.from, span.to)
     const deco = liveEmbedWidgetDeco(span.inner, span.lineFrom, span.lineTo, keyFrom, keyTo, touched, child)
     out.push(touched ? deco.range(span.lineTo) : deco.range(span.from, span.to))
   }
@@ -477,6 +502,7 @@ export const liveEmbedDecorations = StateField.define<DecorationSet>({
         state.doc,
         deco.tree,
         child,
+        hitRangesOf(state),
       ),
       true,
     )
@@ -488,7 +514,10 @@ export const liveEmbedDecorations = StateField.define<DecorationSet>({
       tr.startState.field(mermaidFencesField, false) !== tr.state.field(mermaidFencesField, false)
     const liveDecoChanged =
       tr.startState.field(liveDecorationsField, false) !== tr.state.field(liveDecorationsField, false)
-    if (!tr.docChanged && tr.selection === undefined && !spansChanged && !fencesChanged && !liveDecoChanged) {
+    // #336：图片嵌入与普通图片同款命中显形（#251）——命中集变化同列重建
+    const hitsChanged =
+      tr.startState.field(hitRevealField, false) !== tr.state.field(hitRevealField, false)
+    if (!tr.docChanged && tr.selection === undefined && !spansChanged && !fencesChanged && !liveDecoChanged && !hitsChanged) {
       return value
     }
     const child = tr.state.facet(liveEmbedChildCardsFacet)
@@ -510,6 +539,7 @@ export const liveEmbedDecorations = StateField.define<DecorationSet>({
         tr.state.doc,
         deco.tree,
         child,
+        hitRangesOf(tr.state),
       ),
       true,
     )

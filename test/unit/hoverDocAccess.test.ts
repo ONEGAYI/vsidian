@@ -785,8 +785,7 @@ describe('#333 类型分派入口 readRefContentTarget', () => {
     const h = makeHarness(matrixDisk())
     const heading = await readRefContentTarget({ target: '目标#章节甲' }, h.ctx, h.ports)
     expect(heading.ok).toBe(true)
-    if (heading.ok) {
-      expect(heading.content.kind).toBe('markdown')
+    if (heading.ok && heading.content.kind === 'markdown') {
       expect(heading.content.selector).toEqual({ kind: 'heading', anchor: '章节甲' })
       expect(heading.content.lfText.slice(heading.content.range.start, heading.content.range.end))
         .toBe('## 章节甲\n\n甲段一。\n\n```js\nconst a = 1\n```')
@@ -797,7 +796,7 @@ describe('#333 类型分派入口 readRefContentTarget', () => {
     ]))
     const block = await readRefContentTarget({ target: '目标#^blk1' }, bh.ctx, bh.ports)
     expect(block.ok).toBe(true)
-    if (block.ok) {
+    if (block.ok && block.content.kind === 'markdown') {
       expect(block.content.selector).toEqual({ kind: 'block', anchor: '^blk1' })
     }
   })
@@ -806,13 +805,13 @@ describe('#333 类型分派入口 readRefContentTarget', () => {
     const h = makeHarness(matrixDisk())
     const link = await readRefContentTarget({ linkHref: '目标.md#章节乙' }, h.ctx, h.ports)
     expect(link.ok).toBe(true)
-    if (link.ok) {
+    if (link.ok && link.content.kind === 'markdown') {
       expect(link.content.selector).toEqual({ kind: 'heading', anchor: '章节乙' })
     }
     const direct = await readRefContentTarget(
       { directTarget: { fsPath: 'D:\\notes\\目标.md', anchor: '章节甲' } }, h.ctx, h.ports)
     expect(direct.ok).toBe(true)
-    if (direct.ok) {
+    if (direct.ok && direct.content.kind === 'markdown') {
       expect(direct.content.selector).toEqual({ kind: 'heading', anchor: '章节甲' })
     }
     const pageAnchor = await readRefContentTarget({ linkHref: '#父章节' }, h.ctx, h.ports)
@@ -822,10 +821,9 @@ describe('#333 类型分派入口 readRefContentTarget', () => {
     }
   })
 
-  it('非 markdown 类型（image/pdf/text）→ non-markdown 分态，读取端口零调用（不装载附件）', async () => {
+  it('非 markdown 未登记类型（pdf/text）→ non-markdown 分态，读取端口零调用（不装载附件）', async () => {
     const h = makeHarness(matrixDisk())
     for (const [form, label] of [
-      [{ target: '图.png' }, '双链图片'],
       [{ linkHref: '资料.pdf' }, '普通链接 PDF'],
       [{ directTarget: { fsPath: 'D:\\notes\\脚本.ts' } }, '直接目标文本'],
     ] as Array<[{ target?: string; linkHref?: string; directTarget?: { fsPath: string; anchor?: string } }, string]>) {
@@ -851,7 +849,7 @@ describe('#333 类型分派入口 readRefContentTarget', () => {
     const h = makeHarness(matrixDisk())
     const out = await readRefContentTarget({ target: '目标#已删除的标题' }, h.ctx, h.ports, { anchorOptional: true })
     expect(out.ok).toBe(true)
-    if (out.ok) {
+    if (out.ok && out.content.kind === 'markdown') {
       expect(out.content.range).toEqual({ start: 0, end: SECTION_DOC.length })
       expect(out.content.selector).toEqual({ kind: 'heading', anchor: '已删除的标题' })
     }
@@ -871,7 +869,6 @@ describe('#333 类型分派入口 readRefContentTarget', () => {
       { label: '普通链接全文', form: { linkHref: '目标.md' } },
       { label: '普通链接块锚点', form: { linkHref: '目标.md#章节乙' } },
       { label: '直接目标', form: { directTarget: { fsPath: 'D:\\notes\\目标.md' } } },
-      { label: '非 markdown', form: { target: '图.png' } },
       { label: '不存在', form: { target: '不存在' } },
       { label: '锚点缺失', form: { target: '目标#没有的标题' } },
     ]
@@ -892,6 +889,118 @@ describe('#333 类型分派入口 readRefContentTarget', () => {
       } else if (!legacy.ok && !typed.ok) {
         expect(typed, `${label}：失败分态一致`).toEqual(legacy)
       }
+    }
+  })
+})
+
+// #336（P3-04）image 分派登记：图片目标装载 RefImageContent——身份
+// （fsPath/relPath）在顶层，内容为「来源文档相对图源 + 文件资源版本」。
+// 不读正文（openTextDocument 零调用——图片不是 TextDocument 权威语义），
+// 版本来自可选 statFile 端口（mtimeMs 文件状态；缺省 0——仅回包排序用，
+// 刷新权威在失效通道）。锚点不构成 anchor-missing（图片无锚点语义）。
+// 旧扁平入口经 flattenHoverReadOutcome 把 image 收敛回 non-markdown 分态
+// （旧消费者语义保持——图片渲染走 webview 图片管线，不走旧 Markdown 通
+// 道）。
+describe('#336 image 分派：RefImageContent 载荷', () => {
+  function imageDisk(): Disk {
+    return new Map<string, { version: number; text: string }>([
+      ['D:\\notes\\a.md', note('# 父文档\n')],
+      ['D:\\notes\\图.png', note('binary')],
+      ['D:\\notes\\assets\\子图.jpeg', note('binary')],
+      ['D:\\notes\\sub\\来源.md', note('# 来源\n')],
+    ])
+  }
+
+  it('双链图片：ok 载荷携带身份 + 来源相对图源（src 以来源文档目录为基准，posix 分隔）', async () => {
+    const h = makeHarness(imageDisk())
+    const out = await readRefContentTarget({ target: '图.png' }, h.ctx, h.ports)
+    expect(out).toEqual({
+      ok: true,
+      fsPath: 'D:\\notes\\图.png',
+      relPath: '图.png',
+      content: { kind: 'image', src: '图.png', version: 0 },
+    } satisfies RefReadOutcome)
+    expect(h.opened, '图片目标不读正文（openTextDocument 零调用）').toEqual([])
+  })
+
+  it('子目录图源与来源在子目录：src 相对路径含目录前缀／../ 形态', async () => {
+    const h = makeHarness(imageDisk())
+    const sub = await readRefContentTarget({ target: 'assets/子图.jpeg' }, h.ctx, h.ports)
+    expect(sub.ok).toBe(true)
+    if (sub.ok) {
+      expect(sub.content.kind).toBe('image')
+      if (sub.content.kind === 'image') {
+        expect(sub.content.src).toBe('assets/子图.jpeg')
+      }
+    }
+    // 来源文档在 sub/：同图源相对路径经 ../ 上溯
+    const subCtx: HoverDocAccessContext = {
+      resolve: { docDir: 'D:\\notes\\sub', rootDir: 'D:\\notes', isWindowsHost: true, hasWorkspace: true },
+      sourceFsPath: 'D:\\notes\\sub\\来源.md',
+      rootFsPath: 'D:\\notes',
+    }
+    const subPorts: HoverDocAccessPorts = {
+      resolveVaultFile: async (rawPath) => {
+        const base = path.win32.resolve(subCtx.resolve.docDir, rawPath)
+        return imageDisk().get(base) ? { kind: 'target', fsPath: base } : { kind: 'not-found' }
+      },
+      openTextDocument: async () => null,
+    }
+    const up = await readRefContentTarget({ target: '../图.png' }, subCtx, subPorts)
+    expect(up.ok).toBe(true)
+    if (up.ok && up.content.kind === 'image') {
+      expect(up.content.src).toBe('../图.png')
+    }
+  })
+
+  it('statFile 端口在场：version 取文件 mtimeMs（文件资源版本——回包排序基准）', async () => {
+    const h = makeHarness(imageDisk())
+    const stated: string[] = []
+    h.ports.statFile = async (fsPath) => {
+      stated.push(fsPath)
+      return fsPath.endsWith('图.png') ? { mtimeMs: 1760000000123 } : null
+    }
+    const out = await readRefContentTarget({ target: '图.png' }, h.ctx, h.ports)
+    expect(out.ok).toBe(true)
+    if (out.ok && out.content.kind === 'image') {
+      expect(out.content.version).toBe(1760000000123)
+    }
+    expect(stated).toEqual(['D:\\notes\\图.png'])
+  })
+
+  it('普通链接与直接目标形态同经 image 分派；锚点不构成 anchor-missing', async () => {
+    const h = makeHarness(imageDisk())
+    const link = await readRefContentTarget({ linkHref: '图.png' }, h.ctx, h.ports)
+    expect(link.ok).toBe(true)
+    if (link.ok) {
+      expect(link.content.kind).toBe('image')
+    }
+    const direct = await readRefContentTarget(
+      { directTarget: { fsPath: 'D:\\notes\\assets\\子图.jpeg' } }, h.ctx, h.ports)
+    expect(direct.ok).toBe(true)
+    if (direct.ok && direct.content.kind === 'image') {
+      expect(direct.content.src).toBe('assets/子图.jpeg')
+    }
+    const anchored = await readRefContentTarget({ target: '图.png#任意锚' }, h.ctx, h.ports)
+    expect(anchored.ok, '图片目标锚点忽略，不 anchor-missing').toBe(true)
+    // anchorOptional 重载与严格首开对图片同形（宽容语义只对 markdown 锚点）
+    const tolerant = await readRefContentTarget({ target: '图.png#任意锚' }, h.ctx, h.ports, { anchorOptional: true })
+    expect(tolerant.ok).toBe(true)
+  })
+
+  it('解析失败分态先于类型分派（not-found 图片目标仍 not-found）', async () => {
+    const h = makeHarness(imageDisk())
+    expect(await readRefContentTarget({ target: '不存在的图.png' }, h.ctx, h.ports))
+      .toEqual({ ok: false, reason: 'not-found' })
+  })
+
+  it('旧扁平入口把 image 收敛回 non-markdown 分态（兼容适配语义保持）', async () => {
+    const h = makeHarness(imageDisk())
+    expect(await readHoverDocTarget('图.png', h.ctx, h.ports)).toEqual({ ok: false, reason: 'non-markdown' })
+    const typed = await readRefContentTarget({ target: '图.png' }, h.ctx, h.ports)
+    expect(typed.ok).toBe(true)
+    if (typed.ok) {
+      expect(flattenHoverReadOutcome(typed)).toEqual({ ok: false, reason: 'non-markdown' })
     }
   })
 })

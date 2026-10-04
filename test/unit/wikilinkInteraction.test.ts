@@ -536,3 +536,39 @@ describe('新增协议消息结构校验（#11）', () => {
     expect(isWebviewToHost({ ...base, liveWikilinkCount: 1.5 })).toBe(false)
   })
 })
+
+// #336（P3-04）图片嵌入的源码形态：图片嵌入是图片不是链接——触及/混排
+// 时不发射 wikilink mark（源码保持普通文本形态，与 `![](x)` 触及形态一
+// 致）；markdown 嵌入的既有 mark 行为不变。
+describe('#336 图片嵌入：wikilink mark 层不链接着色', () => {
+  function marksOf(text: string, selection?: { anchor: number }) {
+    const state = EditorState.create({ doc: text, selection, extensions: [liveDecorationsField] })
+    return buildWikilinkDecorationRanges(
+      state.doc,
+      state.field(liveDecorationsField).tree,
+      state.selection,
+      [{ from: 0, to: state.doc.length }],
+      state.field(liveDecorationsField).fm,
+    )
+  }
+
+  it('触及图片嵌入源码：无 mark（图片源码形态与 ![](x) 一致）', () => {
+    const text = '![[图.png]]'
+    const from = text.indexOf('![[图.png]]')
+    expect(marksOf(text, { anchor: from + 3 })).toHaveLength(0)
+  })
+
+  it('混排未触及的图片嵌入：mark 零发射（替换 widget 接管呈现）', () => {
+    const text = '文字 ![[图.png]] 混排'
+    expect(marksOf(text, { anchor: 0 }).filter((r) => {
+      const w = r.value.spec.widget
+      return w === undefined // mark（非 widget）
+    })).toHaveLength(0)
+  })
+
+  it('markdown 嵌入触及仍发射 mark（既有行为不变）', () => {
+    const text = '![[目标笔记]]'
+    const from = text.indexOf('![[目标笔记]]')
+    expect(marksOf(text, { anchor: from + 3 })).toHaveLength(1)
+  })
+})

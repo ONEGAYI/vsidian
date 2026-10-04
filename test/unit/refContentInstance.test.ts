@@ -423,7 +423,7 @@ describe('#333 挂载代次与类型化装载入口', () => {
     instance.dispose()
   })
 
-  it('refLoadedContentOfResult：markdown（显式与缺省）转换为装载内容；非 markdown kind 返回 null', async () => {
+  it('refLoadedContentOfResult：markdown（显式与缺省）转换为装载内容；未登记 kind 返回 null', async () => {
     const { refLoadedContentOfResult } = await import('../../src/webview/refContentInstance')
     const message = (extra?: Record<string, unknown>) => ({
       kind: 'hover.result',
@@ -443,9 +443,33 @@ describe('#333 挂载代次与类型化装载入口', () => {
     })
     const legacy = refLoadedContentOfResult(message() as Parameters<typeof refLoadedContentOfResult>[0])
     expect(legacy, '缺省 contentKind 兼容识别为 markdown').not.toBeNull()
-    for (const kind of ['pdf', 'image', 'text', 'web']) {
+    for (const kind of ['pdf', 'text', 'web']) {
       expect(refLoadedContentOfResult(message({ contentKind: kind }) as Parameters<typeof refLoadedContentOfResult>[0]), `kind=${kind} 应返回 null`).toBeNull()
     }
+  })
+
+  it('#336 refLoadedContentOfResult：image 载荷转换为图片装载形态（身份 + 来源相对图源 + 版本）', async () => {
+    const { refLoadedContentOfResult } = await import('../../src/webview/refContentInstance')
+    const loaded = refLoadedContentOfResult({
+      kind: 'hover.result',
+      reqId: 1,
+      instanceId: 'hover-1',
+      ok: true,
+      contentKind: 'image',
+      target: { fsPath: 'D:/notes/assets/图.png', relPath: 'assets/图.png' },
+      version: 1760000000123,
+      imageSrc: 'assets/图.png',
+      text: '',
+      range: { start: 0, end: 0 },
+      scope: { kind: 'plain' },
+    } as Parameters<typeof refLoadedContentOfResult>[0])
+    expect(loaded).toMatchObject({
+      kind: 'image',
+      fsPath: 'D:/notes/assets/图.png',
+      relPath: 'assets/图.png',
+      src: 'assets/图.png',
+      version: 1760000000123,
+    })
   })
 
   it('创建/卸载循环后活跃块计数归零（类型化路径不绕过实例预算）', async () => {

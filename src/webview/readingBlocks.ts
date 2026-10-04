@@ -23,6 +23,7 @@ import { stripHtmlComments } from './htmlComment'
 // #163 验收反馈：块 id 标记阅读隐藏（渲染前剥离，行数不变保锚点坐标系）
 import { stripBlockIdMarks } from './blockIdStrip'
 import { parseWikilinkInner, soleEmbedOfLine } from '../shared/wikilink'
+import { refEmbedTargetIsImage } from '../shared/refContent'
 import { isRenderedFenceInfo } from '../shared/mermaid'
 import { codeInfoFirstWord } from '../shared/codeLangs'
 import { buildFrontmatterTableHtml, escapeHtml, parseFrontmatterTable } from '../shared/frontmatterTable'
@@ -214,6 +215,12 @@ function embedLinesOfParagraph(text: string, start: number, end: number): EmbedL
   for (const line of lines) {
     const sole = soleEmbedOfLine(line)
     if (sole === null) {
+      return null
+    }
+    // #336（P3-04）图片嵌入不升级嵌入卡片块（不新增文件名引用卡片壳）：
+    // 整段保持普通段落（inline 规则产出 <img>，与独行 `![](x)` 段落同块
+    // 形态）；同段 markdown 嵌入经 #246 占位提升路径挂卡，不丢卡片
+    if (refEmbedTargetIsImage(sole.inner)) {
       return null
     }
     out.push({ inner: sole.inner, start: lineStart, end: lineStart + line.length })

@@ -35,7 +35,7 @@ import type { MessageKey } from '../shared/locales/en'
 import { HOVER_REFRESH_DEFAULTS } from '../shared/hoverRefresh'
 import { REF_EXPANSION_LIMITS, RefExpansionBudget } from '../shared/refExpansion'
 import { RELOCATION_SCAN_LIMITS } from '../shared/relocationScan'
-import { RefContentInstance, refLoadedContentOfResult, type RefContentMount, type RefLoadedContent, type RefMountOptions, type RefSourceContext } from './refContentInstance'
+import { RefContentInstance, isRefLoadedMarkdown, refLoadedContentOfResult, type RefContentMount, type RefLoadedAny, type RefLoadedContent, type RefMountOptions, type RefSourceContext } from './refContentInstance'
 import { promoteEmbedSlotsInBlock, promotedHostsOf } from './embedSlots'
 import { applyObsidianDomAlias } from '../shared/obsidianAlias'
 import { createReadingContainer, READING_CLASS_NAMES } from './readingView'
@@ -1162,7 +1162,10 @@ export class EmbedCardManager {
       if (entry.lastReq !== null &&
           entry.lastReq.instanceId === message.instanceId &&
           entry.lastReq.reqId === message.reqId) {
-        const loaded = !stale && okMessage !== null ? refLoadedContentOfResult(okMessage) : null
+        // #336：image 载荷对卡片路径不可应用（嵌入卡片结构上不发图片请求
+        // ——图片嵌入在装饰/渲染层分流图片管线；此处为防御性第二道防线）
+        const converted = !stale && okMessage !== null ? refLoadedContentOfResult(okMessage) : null
+        const loaded = converted !== null && isRefLoadedMarkdown(converted) ? converted : null
         if (loaded !== null && okMessage !== null) {
           entry.loaded = loaded
           entry.lastKnown = { fsPath: okMessage.target.fsPath, version: okMessage.version }
@@ -2957,7 +2960,7 @@ export class EmbedCardManager {
   }
 
   /** 悬停根 B 与正文卡树共用面板预算；解析字节在 DOM 挂载前准入。 */
-  admitPopupRoot(instanceId: string, loaded: RefLoadedContent, bytes: number): boolean {
+  admitPopupRoot(instanceId: string, loaded: RefLoadedAny, bytes: number): boolean {
     this.budget.setDepthLimit(this.context.maxDepth?.() ?? REF_EXPANSION_LIMITS.defaultDepth)
     if (this.budget.reserve(instanceId, instanceId, 1) !== 'ok' ||
       this.budget.attachContent(instanceId, `${instanceId}\n${loaded.fsPath}\n${loaded.version}`, bytes) !== 'ok') {
@@ -3431,7 +3434,10 @@ export class EmbedCardManager {
       this.applyDisplay(handle, 'error', t('hover.errorDepth'))
       return
     }
-    const loaded = refLoadedContentOfResult(message)
+    const converted = refLoadedContentOfResult(message)
+    // #336：image 载荷对卡片路径不可应用（图片嵌入经装饰/渲染层分流图片
+    // 管线，不经卡片请求——防御性第二道防线与 #333 同口径）
+        const loaded = converted !== null && isRefLoadedMarkdown(converted) ? converted : null
     if (loaded === null) {
       releaseRefSourceLease(this.context, message.sourceLeaseId)
       handle.entry.lastReq = null

@@ -117,27 +117,76 @@ export interface RefLoadedContent extends RefTargetIdentity {
 }
 
 /**
+ * #336（P3-04）图片装载形态：image 载荷的 webview 侧已装载内容——身份
+ * （fsPath/relPath）+ 来源相对图源（image.request 的 src）+ 文件资源版
+ * 本。无正文/定位区间/Markdown 选择器（图片无锚点定位语义）；渲染由容
+ * 器委托普通图片挂载（ImageResourceManager 槽位），不走 Markdown Reading
+ * 视图的 render 路径。
+ */
+export interface RefLoadedImageContent {
+  kind: 'image'
+  fsPath: string
+  relPath: string
+  /** 来源文档相对图源（hover.result 的 imageSrc；面板文档身份解析） */
+  src: string
+  version: number
+  depth?: number
+  expansionPath?: readonly string[]
+}
+
+/** 类型化装载结果（按 kind 分派的 loaded 形态联合） */
+export type RefLoadedAny = RefLoadedContent | RefLoadedImageContent
+
+/** Markdown 装载形态判别（RefLoadedContent 无 kind 判别位——#336 起联合
+ *  收宽，消费方经此收窄；image 形态只由图片装载路径消费） */
+export function isRefLoadedMarkdown(loaded: RefLoadedAny): loaded is RefLoadedContent {
+  // 运行期防御判别：RefLoadedContent（markdown）无 kind 字段，联合的
+  // image 成员带字面量 'image'——按可选字段读出后比对（未知 kind 按非
+  // image 放行给既有 markdown 消费面，由各容器自行安全处理）
+  return (loaded as { kind?: string }).kind !== 'image'
+}
+
+/**
  * #333（P3-01）webview 侧类型化装载入口：hover.result 成功回包按
  * contentKind 分派转换为已装载内容——
  * - 缺省或 'markdown'：转换为 RefLoadedContent（Markdown Reading 视图
  *   的既有装载形态；身份/版本/全文/定位区间/选择器语义不变）；
- * - 其余 kind（pdf/image/text/web）：本票未登记装载形态，返回 null——
- *   调用方按「不可应用的回包」处理（释放来源租约、呈现错误分态、不
- *   入装载缓存、不绑定任何写端口）。这是消息级校验（isHostToWebview
- *   拒绝类型与载荷不匹配）之外的消费端第二道防线。
+ * - 'image'（#336 / P3-04）：转换为 RefLoadedImageContent（身份 + 来源
+ *   相对图源 + 文件资源版本）——消费方（悬停浮层）据此委托普通图片挂载；
+ * - 其余 kind（pdf/text/web）：未登记装载形态，返回 null——调用方按
+ *   「不可应用的回包」处理（释放来源租约、呈现错误分态、不入装载缓存、
+ *   不绑定任何写端口）。这是消息级校验（isHostToWebview 拒绝类型与载荷
+ *   不匹配）之外的消费端第二道防线。
  */
 export function refLoadedContentOfResult(
   message: Extract<HoverPreviewResult, { ok: true }>,
-): RefLoadedContent | null {
+): RefLoadedAny | null {
   const kind = message.contentKind ?? 'markdown'
+  if (kind === 'image') {
+    return {
+      kind: 'image',
+      fsPath: message.target.fsPath,
+      relPath: message.target.relPath,
+      src: message.imageSrc ?? '',
+      version: message.version,
+      depth: message.depth,
+      expansionPath: message.expansionPath,
+    }
+  }
   if (kind !== 'markdown') {
     return null
   }
+  const rawScope = message.scope as HoverPreviewScope
+  const scope: HoverPreviewScope = rawScope.kind === 'full'
+    ? { kind: 'full' }
+    : rawScope.kind === 'heading'
+      ? { kind: 'heading', anchor: rawScope.anchor }
+      : { kind: 'block', anchor: rawScope.anchor }
   return {
     fsPath: message.target.fsPath,
     relPath: message.target.relPath,
-    scope: message.scope.kind,
-    selector: message.scope,
+    scope: scope.kind,
+    selector: scope,
     version: message.version,
     text: message.text,
     range: message.range,

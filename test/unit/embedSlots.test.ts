@@ -634,3 +634,38 @@ describe('P2-1 跨模式分叉钉（Reading 半边）：引用式链接 ref 未�
     expect(hosts.map((h) => h.dataset['vsidianEmbedInner'])).toEqual(['x'])
   })
 })
+
+// #336（P3-04）图片嵌入占位配对：图片目标嵌入在 Reading 侧产 img 不产占
+// 位 span——occurrence 扫描必须同步跳过图片目标，否则 pairEmbedSlots 两
+// 侧数量不等触发整块降级（同段 markdown 嵌入卡片连带丢失）。
+describe('#336 图片嵌入：occurrence 扫描跳过图片目标', () => {
+  it('同段 markdown 嵌入与图片嵌入并存：occurrence 只含 markdown 目标', () => {
+    const text = '前文 ![[目标笔记]] 与 ![[图.png|别名]] 后文'
+    const hits = blockEmbedOccurrences(text, 0, text.length)
+    expect(hits.map((o) => o.inner)).toEqual(['目标笔记'])
+  })
+
+  it('纯图片嵌入段：occurrence 为空（无占位可配对，img 走资源管理器）', () => {
+    const text = '只 ![[图.png]] 一枚'
+    expect(blockEmbedOccurrences(text, 0, text.length)).toHaveLength(0)
+  })
+
+  it('未受支持扩展名仍计入 occurrence（卡片路径保持）', () => {
+    const text = '![[照片.tif]]'
+    expect(blockEmbedOccurrences(text, 0, text.length).map((o) => o.inner)).toEqual(['照片.tif'])
+  })
+
+  it('配对完整性：图片嵌入不阻断同块 markdown 占位提升', () => {
+    const text = '甲 ![[A]] 乙 ![[图.png]] 丙'
+    const el = document.createElement('div')
+    el.innerHTML = `<p>甲 <span class="vsidian-embed-slot" data-vsidian-embed-inner="A">![[A]]</span> 乙 <img src="图.png"> 丙</p>`
+    const slots = directEmbedSlots(el)
+    expect(slots).toHaveLength(1)
+    const paired = pairEmbedSlots(slots, blockEmbedOccurrences(text, 0, text.length))
+    expect(paired).not.toBeNull()
+    expect(paired!.map((p) => p.occ.inner)).toEqual(['A'])
+    document.body.appendChild(el)
+    const hosts = promoteEmbedSlotsInBlock(el, text, 0, text.length)
+    expect(hosts.map((h) => h.dataset['vsidianEmbedInner'])).toEqual(['A'])
+  })
+})

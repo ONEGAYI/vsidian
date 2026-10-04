@@ -447,3 +447,59 @@ describe('#248 表格格内嵌入占位（转义管道解码重解析）', () =>
     expect(host.querySelector('span[data-vsidian-embed-inner]')).toBeNull()
   })
 })
+
+// #336（P3-04）图片嵌入渲染：`![[图.png]]` 在 Reading 侧按 `![](图.png)`
+// 同源呈现——inline 规则对图片目标直接产出 <img>（src = 目标原文、alt =
+// 别名），不产嵌入占位 span。后续管线（prepareReadingImages 剥离 src 绑
+// 定资源管理器、decorateImageChromeBlock 包 frame 挂按钮）与普通图片完
+// 全同路径，两侧呈现由构造保证一致。
+describe('#336 图片嵌入：inline 规则产出 img（与普通 Markdown 图片同源）', () => {
+  const md = createMarkdownRenderer()
+
+  it('图片目标嵌入渲染为 img：src 为目标原文（未编码），不产占位 span', () => {
+    const host = renderToDom(md, '前文 ![[assets/图 片.png]] 后文\n')
+    const img = host.querySelector('img')
+    expect(img).not.toBeNull()
+    expect(img!.getAttribute('src')).toBe('assets/图 片.png')
+    expect(img!.getAttribute('alt')).toBe('')
+    expect(host.querySelector('span[data-vsidian-embed-inner]')).toBeNull()
+  })
+
+  it('别名即 alt：![[图.png|说明文字]] 的 alt 取别名', () => {
+    const host = renderToDom(md, '![[图.png|一段 说明]]\n')
+    const img = host.querySelector('img')
+    expect(img).not.toBeNull()
+    expect(img!.getAttribute('src')).toBe('图.png')
+    expect(img!.getAttribute('alt')).toBe('一段 说明')
+  })
+
+  it('锚点形态的图片目标同样渲染为 img（图片无锚点语义，与宿主分派一致）', () => {
+    const host = renderToDom(md, '![[图.png#任意锚]]\n')
+    const img = host.querySelector('img')
+    expect(img).not.toBeNull()
+    expect(img!.getAttribute('src')).toBe('图.png')
+  })
+
+  it('属性值经 HTML 转义（src/alt 注入安全）', () => {
+    const host = renderToDom(md, '![[a"&b.png|标<签>]]\n')
+    const img = host.querySelector('img')
+    expect(img).not.toBeNull()
+    expect(img!.getAttribute('src')).toBe('a"&b.png')
+    expect(img!.getAttribute('alt')).toBe('标<签>')
+  })
+
+  it('markdown 嵌入不受影响：![[笔记]] 仍产占位 span（卡片路径）', () => {
+    const host = renderToDom(md, '![[目标笔记]]\n')
+    expect(host.querySelector('img')).toBeNull()
+    const slot = host.querySelector<HTMLElement>('span[data-vsidian-embed-inner]')
+    expect(slot?.dataset['vsidianEmbedInner']).toBe('目标笔记')
+  })
+
+  it('未受支持扩展名（tif/heic/md/无扩展名）仍走嵌入占位路径', () => {
+    for (const inner of ['照片.tif', '照片.heic', '笔记.md', '笔记']) {
+      const host = renderToDom(md, `![[${inner}]]\n`)
+      expect(host.querySelector('img'), inner).toBeNull()
+      expect(host.querySelector('span[data-vsidian-embed-inner]'), inner).not.toBeNull()
+    }
+  })
+})
