@@ -46,6 +46,8 @@ vsidian/
     │   ├── vaultLinkExtract.ts         # 出链抽取纯逻辑（#197）
     │   ├── vaultRenameWiring.ts        # rename 引用更新装配（#199）
     │   ├── viewCycle.ts                # 三态视图编排纯逻辑
+    │   ├── webLinkMetaService.ts       # 外链元信息受限抓取服务
+    │   ├── webMetaExtract.ts           # HTML 元信息非执行提取
     │   └── wikilinkTarget.ts           # 宿主侧双链目标解析纯逻辑（#11）
     ├── shared/      # 两端共享纯逻辑
     │   ├── blockId.ts            # 块 id 与块边界单一事实源
@@ -97,6 +99,7 @@ vsidian/
     │   ├── vaultIndexSnapshot.ts # 分片快照存储纯逻辑（#195 选型基线）
     │   ├── vaultLink.ts          # 根内相对路径解析单一事实源（#196）
     │   ├── vaultRename.ts        # 引用改写计划纯逻辑（#199）
+    │   ├── webLink.ts            # 外链 URL 准入与归一（两端共享）
     │   ├── wikilink.ts           # 双链形态学单一事实源（#11）
     │   └── wordSegment.ts        # 中文分词形态学与移动规划纯函数
     └── webview/     # webview 端实现
@@ -211,6 +214,7 @@ vsidian/
         ├── tooltipCard.css             # 悬停提示共享样式
         ├── tooltipCard.ts              # 悬停提示委托控制器
         ├── tooltipGeometry.ts          # 悬停提示定位几何纯函数
+        ├── webCard.ts                  # 外链卡片内容视图（web 通道）
         ├── wordMotion.ts               # 词级移动命令与引擎配置
         └── wordSegmentSettings.ts      # 设置页中文分词分页
 <!-- file-tree:tree^id=src:end -->

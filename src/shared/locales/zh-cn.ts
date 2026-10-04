@@ -131,6 +131,13 @@ export const zhCn: Record<MessageKey, string> = {
   /** #299 跳转目标提示（hover.targetTip） */
   'setting.hoverTargetTip.title': '悬停显示跳转目标',
   'setting.hoverTargetTip.description': '悬停在引用上且不会弹出引用视图浮层时（如实时预览中未按住 Ctrl，或悬停预览总开关已关闭），短暂停留后显示目标位置的路径提示。独立于「悬停预览引用文档」总开关——关闭总开关后提示仍可用。',
+  /** #342（P3-10）外链预览设置（hover.externalEnabled / hover.externalShape） */
+  'setting.hoverExternalEnabled.title': '悬停预览外部链接卡片',
+  'setting.hoverExternalEnabled.description': '开启后悬停 HTTP(S) 网页链接会显示标题、摘要与域名卡片：由扩展宿主发起受限网络抓取（仅 HTML 元信息、限制超时与响应大小、拒绝内网地址），不发送笔记内容、路径或任何登录凭据。默认关闭——关闭时不发起任何网络请求。远程开发（Remote SSH）下抓取发生在远端机器。',
+  'setting.hoverExternalShape.title': '外链预览形态',
+  'setting.hoverExternalShape.description': '选择悬停外部链接时的呈现形态。「卡片」显示标题、摘要与域名；「原网页」尽力在浮层内显示网页本身（后续版本提供，当前选择时先以卡片呈现）。抓取缓存按链接地址与形态分别记录。',
+  'setting.hoverExternalShapeCard': '卡片（标题摘要域名）',
+  'setting.hoverExternalShapePage': '原网页（后续版本提供）',
   /** #221 Live 悬停触发方式（Ctrl+悬停 vs 直接悬停）；#298 改名并重写描述 */
   'setting.hoverLiveDirect.title': '实时预览中直接悬停显示',
   'setting.hoverLiveDirect.description': '开启后在实时预览中指针悬停链接即可直接打开引用视图浮层，无需修饰键；关闭时需按住 Ctrl（macOS 为 Cmd）再悬停，或悬停中补按 Ctrl。关闭「悬停预览引用文档」总开关后本设置不再生效。',
@@ -447,6 +454,14 @@ export const zhCn: Record<MessageKey, string> = {
   /** 悬停文档预览（#218：浮层就地状态行；错误分态不弹宿主通知。#219 起
    *  双链与普通链接共用分态——目标原文不再裹双链括号；anchor-missing 为
    *  锚点缺失分态，不以全文替代） */
+  /** #342（P3-10）外链卡片失败分态：真实网络原因，不伪装成文件缺失 */
+  'hover.errorWebDisabled': '外部链接预览未开启（可在 Vsidian 设置页开启）。',
+  'hover.errorWebInvalidAddress': '目标地址被安全策略拒绝（内网、回环、带凭据或非法 URL）。',
+  'hover.errorWebTimeout': '目标网页响应超时。',
+  'hover.errorWebTooLarge': '目标网页超出响应大小上限。',
+  'hover.errorWebNotHtml': '目标不是可解析的网页（非 HTML 内容）。',
+  'hover.errorWebRedirects': '目标网页重定向次数过多。',
+  'hover.errorWebUnreachable': '无法访问目标网页（网络错误或服务器返回错误状态）。',
   'hover.loading': '正在加载预览…',
   'hover.errorUnsupported': '不支持的目标形态：没有可预览的目标（外部网页不在预览范围）',
   'hover.errorNoWorkspace': '当前文档不在任何工作区文件夹内：无法解析链接目标进行预览',

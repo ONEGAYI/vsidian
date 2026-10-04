@@ -152,6 +152,13 @@ export const en = {
   'setting.hoverTargetTip.title': 'Show jump target on hover',
   'setting.hoverTargetTip.description': 'When hovering a reference would not open the preview popup (for example without holding Ctrl in the live view, or while the hover preview master switch is off), show a brief path tip for the target location after a short dwell. Independent of "Preview references on hover" — the tip stays available with the master switch off.',
   /** #221 Live hover trigger (Ctrl+hover vs direct hover); #298 renamed + rewritten */
+  /** #342 (P3-10) external link preview settings (hover.externalEnabled / hover.externalShape) */
+  'setting.hoverExternalEnabled.title': 'Preview external link cards on hover',
+  'setting.hoverExternalEnabled.description': 'When enabled, hovering an HTTP(S) web link shows a card with its title, summary, and domain: the extension host performs a restricted fetch (HTML metadata only, with timeout, size limits, and private-network rejection) and never sends note content, paths, or credentials. Off by default — no network requests are made while disabled. Under Remote SSH the fetch happens on the remote machine.',
+  'setting.hoverExternalShape.title': 'External link preview shape',
+  'setting.hoverExternalShape.description': 'Choose how hovered external links are presented. "Card" shows the title, summary, and domain; "Live page" renders the page itself inside the popup (coming in a later release — falls back to the card until then). Fetch caches are tracked per link address and shape.',
+  'setting.hoverExternalShapeCard': 'Card (title, summary, domain)',
+  'setting.hoverExternalShapePage': 'Live page (later release)',
   'setting.hoverLiveDirect.title': 'Show previews directly on hover in the live view',
   'setting.hoverLiveDirect.description': 'Point at a link in the live preview to open the reference popup directly, without a modifier key. When off, hold Ctrl (Cmd on macOS) while hovering, or press Ctrl mid-hover. Has no effect while "Preview references on hover" is off.',
   'setting.codeblockCard.title': 'Code block card',
@@ -483,6 +490,14 @@ export const en = {
    *  the states — the raw target is no longer wrapped in wikilink brackets;
    *  anchor-missing covers missing heading/block anchors without falling back
    *  to the full document) */
+  /** #342 (P3-10) external card failure states: real network causes, never masked as missing files */
+  'hover.errorWebDisabled': 'External link preview is not enabled (turn it on in the Vsidian settings page).',
+  'hover.errorWebInvalidAddress': 'The target address was rejected by the safety policy (private network, loopback, credentials, or malformed URL).',
+  'hover.errorWebTimeout': 'The target page timed out.',
+  'hover.errorWebTooLarge': 'The target page exceeds the response size limit.',
+  'hover.errorWebNotHtml': 'The target is not a parsable web page (non-HTML content).',
+  'hover.errorWebRedirects': 'The target page redirected too many times.',
+  'hover.errorWebUnreachable': 'The target page could not be reached (network error or error status).',
   'hover.loading': 'Loading preview…',
   'hover.errorUnsupported': 'Unsupported link form: no preview target to show (web pages are out of scope)',
   'hover.errorNoWorkspace': 'The current document is not in any workspace folder: link targets cannot be resolved for preview',

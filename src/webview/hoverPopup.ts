@@ -56,6 +56,10 @@ import { RefContentInstance, refLoadedContentOfResult, type RefContentMount, typ
 import { createReadingContainer, READING_CLASS_NAMES } from './readingView'
 import type { ReadingViewStats } from './readingVirtualView'
 import { claimPopup, releasePopup } from './popupMutex'
+// #342（P3-10）外链卡片内容视图与 http(s) 预滤判定（与 shared/webLink 同源）
+import { buildWebCardEl, WEB_CARD_CLASS_NAMES } from './webCard'
+import { isHttpLinkHref } from '../shared/webLink'
+import type { RefWebContent } from '../shared/refContent'
 // #299 跳转目标提示联动：浮层打开路径收起提示（「浮层开则提示关」，
 // 含悬停中补按 Ctrl 的立即消失——不进互斥锁的行为面表达）
 import { closeTargetTip } from './targetTip'
@@ -163,13 +167,20 @@ export interface HoverPopupTargetSpec {
 
 /** 从 Reading 锚点提取目标规格（href 原文 + 所在块源锚点；预滤口径见
  *  isHoverableMdLinkHref——外部链接不开浮层）；非法目标返回 null。
- *  #221 导出：键盘命令的 Reading 分支复用同一提取（聚焦链接 → spec） */
-export function hoverPopupSpecOfAnchor(anchor: HTMLElement): HoverPopupTargetSpec | null {
+ *  #342（P3-10）：opts.allowExternalHttp = 外链预览开关投影（hover.
+ *  externalEnabled）——开启时放行 http(s) 绝对地址（isHttpLinkHref 与
+ *  宿主准入同源；其余外部 scheme 仍拒）。#221 导出：键盘命令的 Reading
+ *  分支复用同一提取（聚焦链接 → spec） */
+export function hoverPopupSpecOfAnchor(
+  anchor: HTMLElement,
+  opts?: { allowExternalHttp?: boolean },
+): HoverPopupTargetSpec | null {
   const target = anchor.getAttribute('href')
   if (target === null) {
     return null
   }
-  if (!anchorIsWikilink(anchor) && !isHoverableMdLinkHref(target)) {
+  if (!anchorIsWikilink(anchor) && !isHoverableMdLinkHref(target) &&
+    !(opts?.allowExternalHttp === true && isHttpLinkHref(target))) {
     return null
   }
   const block = anchor.closest<HTMLElement>('[data-vsidian-src-start]')
@@ -238,6 +249,10 @@ interface HoverPopupState {
   /** loading → content / error（结果只接受一次：陈旧回包丢弃） */
   display: 'loading' | 'content' | 'error'
   note: string
+  /** #342（P3-10）外链卡片元信息（contentKind=web 成功回包送达；null =
+   *  非 web 形态——卡片内容视图与 Reading 装载互斥，web 卡片不进
+   *  RefContentInstance/watch/租约链路） */
+  webMeta: RefWebContent | null
   /** #221 目标原文（错误分态文案取材；三入口同源——不再读锚点 href） */
   target: string
   /** #224 打开时的目标规格（订阅刷新重发 hover.request 的载荷来源） */
@@ -763,6 +778,7 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
     content,
     display: 'loading',
     note: '',
+    webMeta: null,
     target: spec.target,
     spec,
     scope: '',
@@ -817,6 +833,23 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
     }
     const ctx = context
     const session = ctx?.session()
+    // #342（P3-10）web 卡片内的显式安全链接：以父文档身份发 link.activate
+    //（external → 宿主 openExternal 浏览器打开；无 B 身份——卡片不是文档
+    // 引用，href 为宿主归一后的 http(s) 最终地址）。点击即上下文切换关闭
+    if (state.webMeta !== null) {
+      if (ctx && session?.sessionId && session.docUri) {
+        ctx.send({
+          kind: 'link.activate',
+          sessionId: session.sessionId,
+          docUri: session.docUri,
+          href,
+          srcStart: state.spec.sourceStart,
+          srcEnd: state.spec.sourceEnd,
+        })
+      }
+      closeHoverPopup()
+      return
+    }
     if (!ctx || !session?.sessionId || !session.docUri || !state.targetFsPath) {
       return // 无会话或无 B 身份（loading/错误态无内容链接；防御）
     }
@@ -834,6 +867,34 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
       ctx.send({ kind: 'wikilink.activate', target: href, ...base })
     } else {
       ctx.send({ kind: 'link.activate', href, ...base })
+    }
+    closeHoverPopup()
+  })
+
+  // #342（P3-10）web 卡片链接点击（卡片挂 scrollEl——虚拟视图地盘之外，
+  // contentEl 委托不覆盖）：域名链接 preventDefault 阻断 webview 原生导航，
+  // 经 link.activate 外开浏览器（无 sourceDocUri——卡片不是文档引用）；
+  // 点击即上下文切换，浮层关闭（与浮层内链接点击同款）
+  content.listen(scrollEl, 'click', (event) => {
+    const hit = event.target as HTMLElement | null
+    const linkAnchor = hit?.closest?.('a')
+    if (!(linkAnchor instanceof HTMLAnchorElement) || !scrollEl.contains(linkAnchor) ||
+      linkAnchor.closest(`.${WEB_CARD_CLASS_NAMES.card}`) === null) {
+      return // 仅 web 卡片内的链接（contentEl 正文链接归既有委托；liveEl 编辑器不受影响）
+    }
+    event.preventDefault()
+    const href = linkAnchor.getAttribute('href')
+    const ctx = context
+    const session = ctx?.session()
+    if (href !== null && ctx && session?.sessionId && session.docUri) {
+      ctx.send({
+        kind: 'link.activate',
+        sessionId: session.sessionId,
+        docUri: session.docUri,
+        href,
+        srcStart: spec.sourceStart,
+        srcEnd: spec.sourceEnd,
+      })
     }
     closeHoverPopup()
   })
@@ -1066,6 +1127,13 @@ export function closeHoverPopup(): void {
     return
   }
   popup = null
+  // #342（P3-10）在途请求取消：loading 态关浮层（换目标/移出/Esc/域
+  // 失效等一切关闭路径）发 hover.cancel——宿主中止外链抓取（同 URL 合并
+  // 的最后消费者离开即断开底层连接）；markdown 读取不可中止，迟到回包由
+  // 既有 instanceId+reqId 配对守卫丢弃，行为不变
+  if (state.display === 'loading') {
+    sendHoverCancel(state)
+  }
   if (state.root) {
     state.root.close()
   } else {
@@ -1143,6 +1211,23 @@ function applyHoverContent(state: HoverPopupState, message: Extract<HoverPreview
   state.root?.contentLoaded(loaded)
 }
 
+/** #342（P3-10）web 卡片内容应用：纯文字 + 域名安全链接（本地 DOM 构建，
+ *  非远程内容渲染——不执行 HTML、不加载子资源）。无 B 身份（targetFsPath
+ *  置空：卡片内链接点击走 link.activate 无来源通道）、不进 watch/租约
+ *  链路（网页无宿主文档版本可订阅）；note 为域名（状态行隐藏，供观测） */
+function applyHoverWebContent(state: HoverPopupState, meta: RefWebContent): void {
+  state.webMeta = meta
+  state.targetFsPath = ''
+  state.scope = 'full'
+  state.appliedVersion = 0
+  applyDisplay(state, 'content', meta.domain)
+  // 卡片挂 scrollEl（与 contentEl/liveEl 平级）：contentEl 是虚拟 Reading
+  // 视图的管辖地盘（updateNow 的块渲染会重建其子树——手动挂载的节点
+  // 会被冲掉），web 卡片无块语义，挂滚动区直下；容器销毁（浮层关闭）
+  // 随 DOM 树整体移除，无独立清理路径
+  state.scrollEl.appendChild(buildWebCardEl(meta))
+}
+
 /** P2-06/#224 重发读取请求（刷新与 Live 切回的静默重载共用）：新 reqId
  *  推进（旧回包按配对守卫丢弃）；silent 不切 loading 态（旧内容保留）；
  *  已打开实例的重读带 anchorOptional（锚点缺失不切错误页——P2-03） */
@@ -1213,6 +1298,22 @@ function sendWatchMessage(
   })
 }
 
+/** #342（P3-10）在途悬停请求取消出站（instanceId+reqId 与 hover.request
+ *  配对；loading 态关闭浮层时发出——宿主据此中止外链抓取） */
+function sendHoverCancel(state: HoverPopupState): void {
+  const session = context?.session()
+  if (!context || !session?.sessionId || !session.docUri) {
+    return
+  }
+  context.send({
+    kind: 'hover.cancel',
+    sessionId: session.sessionId,
+    docUri: session.docUri,
+    instanceId: state.instanceId,
+    reqId: state.reqId,
+  })
+}
+
 /** 宿主读取结果（syncController handleHostMessage 转发）：
  *  仅当场内实例、instanceId 与 reqId 双匹配的结果生效——迟到/陈旧回包
  *  丢弃，绝不重开已关闭浮层。#224 版本仲裁：成功回包的目标版本低于已
@@ -1230,6 +1331,19 @@ export function notifyHoverResult(message: HoverPreviewResult): boolean {
     return true
   }
   if (message.ok) {
+    // #342（P3-10）web 分派：外链卡片载荷不经 Markdown 装载通道
+    //（refLoadedContentOfResult 对 web 返回 null 是消息级防线——此处先于
+    // 其分派，卡片内容视图与 Reading 装载互斥）
+    if (message.contentKind === 'web') {
+      if (message.web === undefined) {
+        applyDisplay(popup, 'error', refErrorText('read-failed', popup.target))
+        position(popup)
+        return true
+      }
+      applyHoverWebContent(popup, { kind: 'web', ...message.web })
+      position(popup)
+      return true
+    }
     const loaded = refLoadedContentOfResult(message)
     if (loaded === null) {
       if (context) releaseRefSourceLease(context, message.sourceLeaseId)

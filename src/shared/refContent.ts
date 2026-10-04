@@ -81,6 +81,23 @@ export interface RefMarkdownContent {
   selector: HoverPreviewScope
 }
 
+/**
+ * #342（P3-10）外链卡片载荷（kind === 'web'）：宿主受限抓取提取的元信
+ * 息——url 为最终归一地址（重定向后），domain/title/description 为展示
+ * 面（title/description 缺席为空串，消费端以域名兜底）。无本地文件身
+ * 份（fsPath/relPath 占位空串）、无 TextDocument 版本——网页缓存按规范
+ * URL 与形态区分，不伪造宿主文档版本。
+ */
+export interface RefWebContent {
+  kind: 'web'
+  /** 最终 URL（重定向后归一；显示与缓存身份） */
+  url: string
+  /** 最终主机名（展示域名） */
+  domain: string
+  title: string
+  description: string
+}
+
 // ---- 导航选择器结构留位（按文件类型区分；本票不实现非 Markdown 锚点
 // 解析——P3-05/P3-08 接入时扩展协议消息的 scope 形态与此处对齐） ----
 

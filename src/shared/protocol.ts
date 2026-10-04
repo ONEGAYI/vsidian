@@ -622,13 +622,25 @@ export type HostToWebview =
       instanceId: string
       ok: true
       /** #333（P3-01）内容类型分派标记：宿主类型化读取入口（readRefContent
-       *  Target）成功时显式携带 'markdown'；缺省 = markdown（旧合法
-       *  Markdown 消息兼容识别）。非 markdown 类型本票未登记载荷形态
-       *  （pdf/image/text/web 的载荷与导航选择器由 P3-04/P3-05/P3-08/
-       *  P3-10 扩展本消息与校验器）——携带这些 kind 的成功形态在运行期
-       *  校验中按「类型与载荷不匹配」整体拒绝。失败形态无载荷，不带本
-       *  字段。类型学单一事实源：shared/refContent */
+       *  Target）成功时显式携带；缺省 = markdown（旧合法 Markdown 消息兼容
+       *  识别）。#342（P3-10）起 'web' 登记：外链卡片载荷（web 字段在场，
+       *  Markdown 专属字段为占位值——target 空身份 / version 0 / 空文本 /
+       *  全文区间 / full 选择器，字段形态仍须合法）；其余非 markdown 类型
+       *  （pdf/image/text）的载荷形态由 P3-04/P3-05/P3-08 扩展本消息与校验
+       *  器时放开——携带未登记 kind 或类型与载荷不匹配的整体拒绝。失败
+       *  形态无载荷，不带本字段。类型学单一事实源：shared/refContent */
       contentKind?: RefContentKind
+      /** #342（P3-10）外链卡片载荷（contentKind === 'web' 时在场，与
+       *  Markdown 载荷互斥）：宿主受限抓取提取的元信息——url 为最终归一
+       *  地址（重定向后）、domain/title/description 为展示面（title/
+       *  description 缺席为空串，webview 以域名兜底显示）。显示内容仅
+       *  文字与显式安全链接，不携带也不触发任何子资源 */
+      web?: {
+        url: string
+        domain: string
+        title: string
+        description: string
+      }
       target: HoverPreviewTargetIdentity
       version: number
       text: string
@@ -1235,6 +1247,18 @@ export type WebviewToHost =
       /** 面板直接目标（反链/出链条目；空串 fsPath = 断链条目） */
       directTarget?: { fsPath: string; anchor?: string }
     }
+  /** #342（P3-10）悬停请求取消（只读消息，**不进 edit.request 通道**）：
+   *  webview 浮层关闭/换目标时对在途 hover.request 的消费者取消——宿主
+   *  中止外链元信息抓取（同 URL 合并的最后消费者离开即断开底层连接；
+   *  markdown 读取不可中止，迟到回包由既有 reqId/instanceId 配对守卫
+   *  丢弃，行为不变）。reqId/instanceId 与被取消的 hover.request 配对 */
+  | {
+      kind: 'hover.cancel'
+      sessionId: string
+      docUri: string
+      instanceId: string
+      reqId: number
+    }
   /** 代码块复制请求（#81）：卡片头部复制按钮点击 → 宿主剪贴板 API 写入。
    *  text 为代码体原文（两条围栏行之间，不含围栏与 info string），恒为
    *  LF（CM6 LF 模型）；宿主按文档 EOL 归一后写剪贴板（webview 不触碰
@@ -1516,8 +1540,11 @@ export type HoverPreviewScope =
  *  anchor-missing=目标文件在但标题/块锚点不存在（不以全文替代，附锚点
  *  原文） */
 export type HoverPreviewFailReason =
-  'unsupported' | 'no-workspace' | 'escape' | 'not-found' | 'non-markdown' | 'read-failed' | 'anchor-missing' |
-  'source-expired' | 'cycle' | 'depth' | 'budget'
+  | 'unsupported' | 'no-workspace' | 'escape' | 'not-found' | 'non-markdown' | 'read-failed' | 'anchor-missing'
+  | 'source-expired' | 'cycle' | 'depth' | 'budget'
+  // #342（P3-10）外链卡片失败分态族：真实网络失败如实呈现（就地 i18n），
+  // 不伪装成文件缺失；语义与矩阵见 shared/webLink 的 WebLinkFailReason
+  | 'web-disabled' | 'web-invalid-address' | 'web-timeout' | 'web-too-large' | 'web-not-html' | 'web-redirects' | 'web-unreachable'
 
 /** #218 悬停预览请求载荷（宿主侧消费形态） */
 export type HoverPreviewRequestPayload = Extract<WebviewToHost, { kind: 'hover.request' }>
@@ -2369,6 +2396,19 @@ function isTableGridProbe(v: unknown): boolean {
     typeof v.selectedRowIsGrid === 'boolean' &&
     Array.isArray(v.selectedRowCells) && v.selectedRowCells.every(isString) &&
     isNonNegativeInt(v.rowHandles)
+}
+
+/** #342（P3-10）外链卡片载荷校验：四字段全字符串（title/description 允许
+ *  空串——消费端以域名兜底；url/domain 为展示与身份，空串无意义，但不
+ *  在校验层收紧——宿主装配层保证非空） */
+function isWebLinkMetaPayload(v: unknown): boolean {
+  return (
+    isObject(v) &&
+    isString(v.url) &&
+    isString(v.domain) &&
+    isString(v.title) &&
+    isString(v.description)
+  )
 }
 
 function isObject(v: unknown): v is Record<string, unknown> {
@@ -3399,6 +3439,16 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
             ((v.directTarget as { anchor?: unknown }).anchor === undefined ||
               typeof (v.directTarget as { anchor?: unknown }).anchor === 'string')))
       )
+    case 'hover.cancel':
+      // #342 悬停请求取消：会话守卫 + instanceId/reqId 配对（与被取消的
+      // hover.request 同对——宿主据此定位在途消费者中止外链抓取）
+      return (
+        isString(v.sessionId) &&
+        isString(v.docUri) &&
+        typeof v.instanceId === 'string' &&
+        v.instanceId.length > 0 &&
+        isPositiveInt(v.reqId)
+      )
     case 'perf.report':
       return (
         isNonNegativeInt(v.typingRounds) &&
@@ -3998,10 +4048,22 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         return false
       }
       if (v.ok === true) {
-        if (v.contentKind !== undefined) {
-          // 类型已知性 + 载荷匹配：本票仅 markdown 载荷形态登记（P3-04+
-          // 登记后按 kind 放开各自形态）——未知类型与未登记类型整体拒绝
-          if (!isRefContentKind(v.contentKind) || v.contentKind !== 'markdown') {
+        // #342（P3-10）web 载荷互斥校验：contentKind === 'web' ⇔ web 在场；
+        // web 形态的 Markdown 专属字段为占位值（字段形态仍须合法）；markdown
+        // 形态（缺省/'markdown'）携带 web 即整体拒绝
+        if (v.contentKind === 'web') {
+          if (!isWebLinkMetaPayload(v.web)) {
+            return false
+          }
+        } else {
+          if (v.contentKind !== undefined) {
+            // 类型已知性 + 载荷匹配：本票仅 markdown 与 web 载荷形态登记
+            // （P3-04+ 登记后按 kind 放开各自形态）——未知/未登记类型拒绝
+            if (!isRefContentKind(v.contentKind) || v.contentKind !== 'markdown') {
+              return false
+            }
+          }
+          if (v.web !== undefined) {
             return false
           }
         }
@@ -4028,10 +4090,15 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       return (
         v.ok === false &&
         v.contentKind === undefined &&
+        v.web === undefined &&
         (v.reason === 'unsupported' || v.reason === 'no-workspace' || v.reason === 'escape' ||
           v.reason === 'not-found' || v.reason === 'non-markdown' || v.reason === 'read-failed' ||
           v.reason === 'anchor-missing' || v.reason === 'source-expired' || v.reason === 'cycle' ||
-          v.reason === 'depth' || v.reason === 'budget') &&
+          v.reason === 'depth' || v.reason === 'budget' ||
+          // #342（P3-10）web 失败分态族（真实网络失败，不伪装成文件缺失）
+          v.reason === 'web-disabled' || v.reason === 'web-invalid-address' || v.reason === 'web-timeout' ||
+          v.reason === 'web-too-large' || v.reason === 'web-not-html' || v.reason === 'web-redirects' ||
+          v.reason === 'web-unreachable') &&
         (v.anchor === undefined || isString(v.anchor))
       )
     case 'hover.invalidated':

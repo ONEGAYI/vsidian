@@ -48,6 +48,7 @@ import { htmlToMarkdown } from './htmlToMarkdown'
 import { planRichPaste, richPasteDistributionMatches } from './richPastePlan'
 import type { ClipboardSnapshot } from './clipboardPaste'
 import { PASTE_PRESERVE_FORMATTING_KEY, PASTE_ASK_BEFORE_KEY, PASTE_SPLIT_UNDO_KEY } from '../shared/settings'
+import { isHttpLinkHref } from '../shared/webLink'
 import type { HostToWebview, PasteStage } from '../shared/protocol'
 import { chainAt } from '../shared/markdownDoc'
 import { LINE_NUMBER_GUTTER_SELECTOR, paintedLineNumbers } from './liveLineNumbers'
@@ -102,6 +103,7 @@ import {
   HOVER_ENABLED_KEY,
   HOVER_TARGET_TIP_KEY,
   HOVER_LIVE_DIRECT_KEY,
+  HOVER_EXTERNAL_ENABLED_KEY,
   WORD_SEGMENT_ENGINE_DEFAULT,
   WORD_SEGMENT_ENGINE_KEY,
   type SettingsPayload,
@@ -1206,7 +1208,7 @@ export class WebviewSyncController {
       // 同一提取口径：外部 scheme 与非法目标 null 不提示）；spec 经
       // thunk 统一形态（DOM 属性提取廉价，求值时机由 enterHoverOrTip
       // 的两路由决定）
-      this.enterHoverOrTip(anchor, () => hoverPopupSpecOfAnchor(anchor))
+      this.enterHoverOrTip(anchor, () => hoverPopupSpecOfAnchor(anchor, { allowExternalHttp: this.hoverExternalEnabled() }))
     })
     this.readingContainer.addEventListener('mouseout', (event) => {
       const anchor = (event.target as HTMLElement | null)?.closest?.('a[href]')
@@ -5362,6 +5364,14 @@ export class WebviewSyncController {
     return this.settings?.[HOVER_ENABLED_KEY] !== false
   }
 
+  /** #342（P3-10）外链预览开关（hover.externalEnabled；缺省/快照未达 =
+   *  false 关）：预滤门控——开启时 Reading/Live 的 http(s) 链接进入悬停
+   *  浮层（宿主经 web 通道受限抓取）；关闭态预滤不放行（零 hover.request，
+   *  宿主解析层复核兜底——双保险） */
+  private hoverExternalEnabled(): boolean {
+    return this.settings?.[HOVER_EXTERNAL_ENABLED_KEY] === true
+  }
+
   /** #299 跳转目标提示开关（hover.targetTip；缺省/快照未达 = true 开，
   *  独立于总开关——总开关关闭时提示反而成为悬停的唯一反馈）：经
   *  targetTip 上下文投影，门控收敛在 targetTip 模块入口 */
@@ -5483,14 +5493,14 @@ export class WebviewSyncController {
     })
     if (!spec) {
       activateLinkAtPos(view, pos, (href, from, to) => {
-        if (isHoverableMdLinkHref(href)) {
+        if (isHoverableMdLinkHref(href) || (this.hoverExternalEnabled() && isHttpLinkHref(href))) {
           spec = { target: href, linkHref: href, sourceStart: from, sourceEnd: to }
         }
       })
     }
     if (!spec) {
       activateLooseLinkAtPos(view, pos, (dest, from, to) => {
-        if (isHoverableMdLinkHref(dest)) {
+        if (isHoverableMdLinkHref(dest) || (this.hoverExternalEnabled() && isHttpLinkHref(dest))) {
           spec = { target: dest, linkHref: dest, sourceStart: from, sourceEnd: to }
         }
       })
@@ -5628,7 +5638,7 @@ export class WebviewSyncController {
       this.readingContainer?.contains(anchor) &&
       !anchor.closest(`.${EMBED_CARD_CLASS_NAMES.card}`)
     ) {
-      const spec = hoverPopupSpecOfAnchor(anchor)
+      const spec = hoverPopupSpecOfAnchor(anchor, { allowExternalHttp: this.hoverExternalEnabled() })
       if (spec) {
         openHoverPopupForKeyboard(anchor, spec)
       }

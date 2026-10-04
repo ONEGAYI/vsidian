@@ -170,3 +170,37 @@ describe('P2-06 悬停浮窗根引用内部 Live CSS 契约（#283）', () => {
     expect(editor).toMatch(/max-height:\s*100%/)
   })
 })
+
+// ---- #342（P3-10）外链卡片（web 通道）：卡片结构四规则 ----
+describe('外链卡片 CSS 契约（#342）', () => {
+  it('卡片容器：纵向行距组织（挂在浮层 Reading 容器内，正文留白复用）', () => {
+    const card = rule('#app > .vsidian-hover-popup .vsidian-hover-web-card')
+    expect(card).toMatch(/display:\s*flex/)
+    expect(card).toMatch(/flex-direction:\s*column/)
+    expect(card).toMatch(/gap:\s*8px/)
+  })
+
+  it('标题：加粗 + 主题前景色 + 长词折行（标题缺席时 JS 以域名兜底）', () => {
+    const title = rule('#app > .vsidian-hover-popup .vsidian-hover-web-title')
+    expect(title).toMatch(/font-weight:\s*600/)
+    expect(title).toMatch(/color:\s*var\(--vscode-editor-foreground/)
+    expect(title).toMatch(/overflow-wrap:\s*anywhere/)
+  })
+
+  it('摘要：描述色次级文字 + 折行（textContent 赋值，无 HTML 注入面）', () => {
+    const desc = rule('#app > .vsidian-hover-popup .vsidian-hover-web-desc')
+    expect(desc).toMatch(/color:\s*var\(--vscode-descriptionForeground/)
+    expect(desc).toMatch(/line-height:\s*1\.5/)
+    expect(desc).toMatch(/overflow-wrap:\s*anywhere/)
+  })
+
+  it('域名链接：主题链接色 + hover/focus 下划线（显式安全链接可点性）', () => {
+    const domain = rule('#app > .vsidian-hover-popup .vsidian-hover-web-domain')
+    expect(domain).toMatch(/color:\s*var\(--vscode-textLink-foreground/)
+    expect(domain).toMatch(/text-decoration:\s*none/)
+    // hover/focus-visible 并列组（组文本含两态选择器；尾选择器驱动匹配）
+    const hover = rule('#app > .vsidian-hover-popup .vsidian-hover-web-domain:focus-visible')
+    expect(hover).toMatch(/text-decoration:\s*underline/)
+    expect(hover.split('{')[0]).toContain('.vsidian-hover-web-domain:hover')
+  })
+})

@@ -74,6 +74,9 @@ it('生产注册表（#34 起）：快照为定义默认值（开关均开除 Li
       'hover.liveDirect': false,
       // #299 跳转目标提示（默认开 = 升级后新提示直接可用）
       'hover.targetTip': true,
+      // #342（P3-10）外链预览两件：总开关默认关（关闭态零请求）、形态默认卡片
+      'hover.externalEnabled': false,
+      'hover.externalShape': 'card',
       // #239 中文分词三件：引擎默认内置（Intl.Segmenter）、下载源默认
       // jsdelivr、自定义源基址默认空
       'editor.wordSegmentEngine': 'builtin',

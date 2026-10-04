@@ -10,6 +10,8 @@ import { randomUUID } from 'node:crypto'
 import * as path from 'node:path'
 import { DocumentSession, type HostDocumentPort, type SessionNotice } from './documentSession'
 import { isRefEditClientMessage, RefEditPortRegistry, wrapRefEditPush, type RefEditBinding } from './refEditPorts'
+import { WebLinkMetaService } from './webLinkMetaService'
+import { HOVER_EXTERNAL_ENABLED_KEY, HOVER_EXTERNAL_SHAPE_KEY, type HoverExternalShapeMode } from '../shared/settings'
 import {
   appendImageVersionStamp,
   classifyImageTarget,
@@ -364,6 +366,37 @@ export function createTextEditorProvider(
 ): vscode.CustomTextEditorProvider {
   const sessions = new Map<string, SessionEntry>()
   const diagnostics = new TestDiagnostics()
+  // ---- #342（P3-10）外链元信息服务：provider 级单例（跨面板共享缓存与
+  // 合并计数——同一 URL 的多个悬停请求只发一次网络请求）。设置开关关闭
+  // 时经 cancelAll 中止全部在途并清缓存（关闭态零请求的宿主侧防线）。
+  // Remote SSH 下本服务随扩展宿主进程在远端运行——抓取自然发生在远端 ----
+  const webLinkMeta = new WebLinkMetaService()
+  /** 在途 web 抓取的取消注册表：hover.request（webview 关浮层/换目标的
+   *  hover.cancel）→ documentSession 路由 → 此处按 instanceId+reqId 定位
+   *  消费者中止（最后消费者离开即断开底层连接）。key 为面板会话内唯一 */
+  const pendingWebFetches = new Map<string, AbortController>()
+  /** 外链预览开关（hover.externalEnabled）的宿主侧门控：false = 解析层
+   *  维持 unsupported（被攻陷 webview 无法绕过开关发起抓取） */
+  const externalHoverEnabled = (): boolean =>
+    settings !== undefined && settings.service.getSnapshot()[HOVER_EXTERNAL_ENABLED_KEY] === true
+  const externalHoverShape = (): HoverExternalShapeMode => {
+    const value = settings?.service.getSnapshot()[HOVER_EXTERNAL_SHAPE_KEY]
+    return value === 'page' ? 'page' : 'card'
+  }
+  // 开关关闭即中止在途并清缓存（含「设置页关闭时编辑器有在途抓取」的
+  // 跨面板场景；迟到结果无从产生——服务层消费者已全部取消）
+  if (settings !== undefined) {
+    context.subscriptions.push({
+      dispose: () => webLinkMeta.cancelAll(),
+    })
+    const releaseSettingsWatch = settings.service.onChange((values) => {
+      if (values[HOVER_EXTERNAL_ENABLED_KEY] !== true) {
+        webLinkMeta.cancelAll()
+        pendingWebFetches.clear()
+      }
+    })
+    context.subscriptions.push({ dispose: releaseSettingsWatch })
+  }
   /** P2-13（#290）最近一条「面板关闭残留输入」快照（宿主留存）：无条件记录
    *  ——「取消不静默清除宿主已收到快照」的可观测实现；测试钩子
    *  getLastClosedInput 暴露，放弃当前版本时清除 */
@@ -1981,6 +2014,19 @@ export function createTextEditorProvider(
               }
             }
             const access = hoverAccessContextOf(sourceDoc)
+            // #342（P3-10）外链抓取端口与取消注册：开关开（hover.external
+            // Enabled）才提供 web 通道——关闭态解析层 unsupported，零网络
+            // 请求；在途抓取登记取消句柄（hover.cancel → documentSession
+            // 路由 → abort——同 URL 合并的最后消费者离开即断开底层连接）
+            const webEnabled = externalHoverEnabled()
+            const webFetchKey = `${document.uri.toString()}#${payload.instanceId}:${payload.reqId}`
+            const webAbort = webEnabled ? new AbortController() : undefined
+            if (webAbort !== undefined) {
+              pendingWebFetches.set(webFetchKey, webAbort)
+              webAbort.signal.addEventListener('abort', () => {
+                pendingWebFetches.delete(webFetchKey)
+              }, { once: true })
+            }
             const ports = {
               resolveVaultFile: (rawPath: string) =>
                 resolveVaultLinkFile(rawPath, access.resolve, statFileRealPath),
@@ -1992,11 +2038,18 @@ export function createTextEditorProvider(
                   return null
                 }
               },
+              ...(webAbort !== undefined
+                ? {
+                  fetchWebMeta: (url: string, signal?: AbortSignal) =>
+                    webLinkMeta.fetch(url, signal ?? webAbort.signal, externalHoverShape()),
+                }
+                : {}),
             }
             // #333（P3-01）生产读取走类型化分派入口 readRefContentTarget：
             // 三形态（directTarget/linkHref/target 择一）在共用解析层归一，
-            // 按解析出的目标类型分派（markdown 通道装载既有全文载荷；其余
-            // 类型 non-markdown 分态——附件/外链载荷由三期后续票登记）。
+            // 按解析出的目标类型分派（markdown 通道装载既有全文载荷；
+            // web 通道 #342 装载外链卡片载荷；其余类型 non-markdown 分态
+            // ——附件载荷由三期后续票登记）。
             // 旧三入口保留为兼容适配（测试与既有调用等价使用）
             outcome = await readRefContentTarget(
               {
@@ -2008,8 +2061,12 @@ export function createTextEditorProvider(
               },
               access,
               ports,
-              payload.anchorOptional === true ? { anchorOptional: true } : undefined,
+              {
+                ...(payload.anchorOptional === true ? { anchorOptional: true } : {}),
+                ...(webAbort !== undefined ? { web: { enabled: true } } : {}),
+              },
             )
+            pendingWebFetches.delete(webFetchKey)
           } catch {
             outcome = { ok: false, reason: 'read-failed' }
           }
@@ -2037,6 +2094,12 @@ export function createTextEditorProvider(
         openLink,
         openWikilink,
         readHoverTarget: readHoverTargetPort,
+        // #342（P3-10）悬停请求取消路由：webview hover.cancel → 在途 web
+        // 抓取消费者中止（markdown 读取不可中止——迟到回包由既有配对守卫
+        // 丢弃，行为不变）；key 与 readHoverTargetPort 的登记同构
+        cancelHoverRead: (identity) => {
+          pendingWebFetches.get(`${document.uri.toString()}#${identity.instanceId}:${identity.reqId}`)?.abort()
+        },
         // #299 跳转目标提示轻量解析：纯路径计算、零文件系统请求——不读
         // 正文、不建读取与租约链路（用户裁定：诚实反映链接目标，不做存在性探测）
         resolveHoverTarget: (payload, report) => {

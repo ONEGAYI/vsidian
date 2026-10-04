@@ -321,6 +321,30 @@ export const HOVER_TARGET_TIP_KEY = 'hover.targetTip'
 export const HOVER_TARGET_TIP_DEFAULT = true
 
 /**
+ * #342（P3-10）「外链标题摘要预览」总开关：悬停 HTTP(S) 链接显示标题/
+ * 摘要/域名卡片（宿主受限抓取元信息）。**默认关闭**——关闭态不发起
+ * 任何 HTTP 或 DNS 请求（webview 预滤不放行外链锚点、宿主解析层复核
+ * 兜底，双保险）。键与消费方（syncController 的 hoverExternalEnabled
+ * 投影与 textEditorProvider 的 web 通道门控）成对导出。
+ */
+export const HOVER_EXTERNAL_ENABLED_KEY = 'hover.externalEnabled'
+/** 默认 false：外链抓取是显式开启的联网能力（P3-U10 用户自控） */
+export const HOVER_EXTERNAL_ENABLED_DEFAULT = false
+
+/**
+ * #342（P3-10）「外链预览形态」：card = 标题摘要域名卡片（本票实现）；
+ * page = 原网页浮层（#343/P3-11 预留设置位——本票阶段选择 page 时呈现
+ * 仍回落卡片，原网页 iframe 落地后按同一键生效，不迁移设置）。形态
+ * 参与宿主抓取缓存键（规范 URL + 形态）。键与消费方（textEditorProvider
+ * 的 web 通道 shape 装配）成对导出。
+ */
+export const HOVER_EXTERNAL_SHAPE_KEY = 'hover.externalShape'
+export const HOVER_EXTERNAL_SHAPE_MODES = ['card', 'page'] as const
+export type HoverExternalShapeMode = (typeof HOVER_EXTERNAL_SHAPE_MODES)[number]
+/** 默认 card：卡片是无需联网执行呈现的安全形态 */
+export const HOVER_EXTERNAL_SHAPE_DEFAULT: HoverExternalShapeMode = 'card'
+
+/**
  * #161 图片存放子路径（自由文本，默认 assets）：workspace-root /
  * relative-to-file 模式下拼在根后；same-dir 模式不生效（描述文案写明）。
  * 目录解析拒绝绝对路径与 `..` 越界（违规粘贴失败通知，不落盘）。
@@ -593,6 +617,37 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     default: HOVER_TARGET_TIP_DEFAULT,
     titleKey: 'setting.hoverTargetTip.title',
     descriptionKey: 'setting.hoverTargetTip.description',
+  },
+  {
+    // #342（P3-10）外链预览总开关（hover.* 域 → 设置页「文件与链接」分页
+    // 「引用视图」组：跳转目标提示之后——组内第四项）：默认关闭（关闭态
+    // 零 HTTP/DNS 请求）；开启后悬停 HTTP(S) 链接经宿主受限抓取显示
+    // 标题/摘要/域名卡片
+    key: HOVER_EXTERNAL_ENABLED_KEY,
+    type: 'boolean',
+    default: HOVER_EXTERNAL_ENABLED_DEFAULT,
+    titleKey: 'setting.hoverExternalEnabled.title',
+    descriptionKey: 'setting.hoverExternalEnabled.description',
+    // 外链能力独立于悬停总开关（hover.enabled 管辖浮层出现，本开关管辖联网
+    // 抓取——总开关关闭时浮层本就不开，本开关不必随之灰化）……但产品语义
+    // 上「悬停预览关闭时外链卡片同样不出现」，独立呈现更诚实地反映两个
+    // 开关各自的管辖面，不登记 dependsOn
+  },
+  {
+    // #342（P3-10）外链预览形态（hover.* 域 → 「引用视图」组第五项）：
+    // card 卡片（本票）/ page 原网页（#343 预留）；依赖外链总开关灰化
+    //（值不清除——重新开启后按原值生效）
+    key: HOVER_EXTERNAL_SHAPE_KEY,
+    type: 'string',
+    default: HOVER_EXTERNAL_SHAPE_DEFAULT,
+    enum: HOVER_EXTERNAL_SHAPE_MODES,
+    titleKey: 'setting.hoverExternalShape.title',
+    descriptionKey: 'setting.hoverExternalShape.description',
+    dependsOn: HOVER_EXTERNAL_ENABLED_KEY,
+    optionLabelKeys: {
+      card: 'setting.hoverExternalShapeCard',
+      page: 'setting.hoverExternalShapePage',
+    },
   },
   {
     // #244 嵌入展开层级（embed.* 域 → 设置页「文件与链接」分页「引用视图」组：
