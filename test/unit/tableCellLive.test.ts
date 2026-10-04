@@ -39,6 +39,7 @@ import {
 } from '../../src/webview/tableStructure'
 import { tableRowsAt } from '../../src/webview/tableEditing'
 import { planTableRegionPaste } from '../../src/webview/tableRegion'
+import { RELOCATION_SCAN_LIMITS } from '../../src/shared/relocationScan'
 
 installLocale('zh-cn', zhCn)
 
@@ -413,6 +414,75 @@ describe('P2-08 真删除拦截保持（源文不存活的覆盖变更）', () =
     expect(counts(h).closeQuery).toBe(c0.closeQuery + 1)
     h.manager.testDialogAction('cancel')
     expect(view.state.doc.toString()).toBe(doc0)
+    view.destroy()
+    h.manager.dispose()
+  })
+})
+
+describe('#320 重定位扫描预算（巨量文本超限：filter 放行 + remap 冻结）', () => {
+  /** 巨量填充文本（确保超过单枚变更插入文本预算） */
+  function bigFiller(extra = 128): string {
+    const unit = '巨量填充行。\n'
+    return unit.repeat(Math.ceil((RELOCATION_SCAN_LIMITS.insertTextLength + extra) / unit.length))
+  }
+
+  it('巨量全选替换（源文不在插入文本中）：超限放行不弹确认，实例冻结原位（回填缓存命中）', async () => {
+    const h = setup({ parentMode: 'live' })
+    const view = h.mountView(TABLE_DOC)
+    await driveLoaded(h, true)
+    const c0 = counts(h)
+    const big = `# 全新文档\n${bigFiller()}`
+    expect(big.length).toBeGreaterThan(RELOCATION_SCAN_LIMITS.insertTextLength)
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: big } })
+    // 超限是「无法判定存活」而非「判定已删」：不命中删除拦截——事务
+    // 应用成功、零确认弹窗（预算内源文不存活的覆盖变更照常拦截，见上组）
+    expect(view.state.doc.toString()).toBe(big)
+    expect(counts(h).closeQuery).toBe(c0.closeQuery)
+    // remap 侧超限与未命中同待遇：死键冻结在原坐标——原位回填（0 处插回
+    // 原文）装载缓存命中（零重发，undo/删表回填同款恢复形态）
+    view.dispatch({ changes: { from: 0, to: 0, insert: TABLE_DOC } })
+    expect(counts(h).req).toBe(c0.req)
+    view.destroy()
+    h.manager.dispose()
+  })
+
+  it('巨量全选替换（源文逐字在插入文本中）：放行但超限不重定位——新坐标重挂按新实例装载', async () => {
+    const h = setup({ parentMode: 'live' })
+    const view = h.mountView(TABLE_DOC)
+    await driveLoaded(h, true)
+    const c0 = counts(h)
+    // 表格段（含全部嵌入源文）逐字拼在新文档头部 + 巨量填充垫后：保文本
+    // 形态成立，但单枚插入文本超预算——存活无法在预算内判定。头部短前缀
+    // 与原文前缀长度不同（迁移坐标不撞原键，不触撞键防御冻结）
+    const tableStart = TABLE_DOC.indexOf('| ![[')
+    const big = `# 新\n\n${TABLE_DOC.slice(tableStart)}${bigFiller()}`
+    expect(big.length).toBeGreaterThan(RELOCATION_SCAN_LIMITS.insertTextLength)
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: big } })
+    expect(view.state.doc.toString()).toBe(big)
+    expect(counts(h).closeQuery).toBe(c0.closeQuery)
+    // 冻结而非重定位：键冻结在原坐标，新坐标 occurrence 重挂不命中 →
+    // 重新装载（req 重发）；若误走重定位则端口保持零重发
+    expect(counts(h).req).toBeGreaterThan(c0.req)
+    view.destroy()
+    h.manager.dispose()
+  })
+
+  it('超长嵌入源文（raw 超预算）的覆盖重写：放行但超限不重定位——新实例装载', async () => {
+    const h = setup({ parentMode: 'live' })
+    const longAlias = '长'.repeat(RELOCATION_SCAN_LIMITS.sourceTextLength + 64)
+    const doc = `# 超长嵌入\n\n前缀 ![[目标笔记|${longAlias}]] 后缀\n`
+    const view = h.mountView(doc)
+    await driveLoaded(h, true)
+    const c0 = counts(h)
+    // 整文档重写（嵌入严格在覆盖区间内部——坍缩候选成立，与列/行移动的
+    // 保文本形态同构）且逐字保留源文：raw 超预算 → 存活无法判定
+    const rewritten = `# 超长嵌入改\n\n前缀 ![[目标笔记|${longAlias}]] 后缀`
+    view.dispatch({ changes: { from: 0, to: doc.length - 1, insert: rewritten } })
+    expect(view.state.doc.toString()).toBe(`${rewritten}\n`)
+    expect(counts(h).closeQuery).toBe(c0.closeQuery)
+    // 预算内同形态（列/行移动用例）走重定位迁移零重发；raw 超预算 → 冻结
+    // 原位（标题偏移已变）→ 新位置重挂不命中 → 重新装载
+    expect(counts(h).req).toBe(c0.req + 1)
     view.destroy()
     h.manager.dispose()
   })
