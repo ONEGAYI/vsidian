@@ -78,7 +78,9 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   // #337（P3-05）PDF 悬停首条闭环：紧随 hoverLive（同悬停族——真实 pdfjs 装配与 canvas 绘制层断言）
   'hoverPdf',
   // #341（P3-09）文本嵌入容器矩阵：紧随嵌入族（textHover 之后的嵌入侧消费）
-  'textEmbed']
+  'textEmbed',
+  // #338（P3-06）PDF 全文滚动与正文嵌入：容器矩阵 + 双 occurrence 共享 + 窗口回收
+  'embedPdf']
 const { workers, reuseBuilds, selected } = parseBrowserRunOptions(process.argv.slice(2), names)
 const parent = path.join(root, 'out/test/browser-runs')
 await mkdir(parent, { recursive: true })

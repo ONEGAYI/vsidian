@@ -3,17 +3,25 @@
 // 页图像与样本正确对应」的像素断言——中心色即页身份）。
 import { PDFDocument, rgb } from 'pdf-lib'
 
+/** 红绿蓝循环（页 1=红、2=绿、3=蓝、4=红……——页身份 = (页码-1) % 3） */
+const PAGE_COLORS = [
+  rgb(0.85, 0.15, 0.15), // 红
+  rgb(0.15, 0.85, 0.15), // 绿
+  rgb(0.15, 0.15, 0.85), // 蓝
+]
+
 /** 三页样本：红/绿/蓝主导色（页面 612×792 pt） */
 export async function buildThreePageColorPdf() {
+  return buildMultiPageColorPdf(3)
+}
+
+/** #338（P3-06）多页样本：红绿蓝循环（全文滚动/窗口回收断言——首中末
+ *  页身份色 + 挂载有界） */
+export async function buildMultiPageColorPdf(pageCount) {
   const doc = await PDFDocument.create()
-  const colors = [
-    rgb(0.85, 0.15, 0.15), // 页 1：红
-    rgb(0.15, 0.85, 0.15), // 页 2：绿
-    rgb(0.15, 0.15, 0.85), // 页 3：蓝
-  ]
-  for (const color of colors) {
+  for (let i = 0; i < pageCount; i++) {
     const page = doc.addPage([612, 792])
-    page.drawRectangle({ x: 40, y: 40, width: 532, height: 712, color })
+    page.drawRectangle({ x: 40, y: 40, width: 532, height: 712, color: PAGE_COLORS[i % 3] })
   }
   return Buffer.from(await doc.save())
 }

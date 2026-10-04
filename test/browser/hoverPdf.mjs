@@ -5,13 +5,15 @@
 // 像素：非白比例与页身份色）而非 DOM 存在性；锚点分态（anchor-invalid
 // 就地报错）、页码越界（page-range 不静默跳第一页）、翻页操作（乐观页码
 // 推进 + 绘制追上）、失效撤下与零写回一并覆盖。
+// #338（P3-06）追加全文按页滚动场景：12 页样本从首到末浏览、中/末段页
+// 身份色绘制层证明、画布挂载有界与离屏回收、翻页=滚动定位互通。
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { build, artifactPath, chromium } from './runtime.mjs'
 import { buildZhLocaleIsland } from './localeIsland.mjs'
-import { buildThreePageColorPdf } from '../pdfSample.mjs'
+import { buildThreePageColorPdf, buildMultiPageColorPdf } from '../pdfSample.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const bundle = artifactPath(root, 'hoverPdf/hoverPdf.js')
@@ -28,6 +30,8 @@ const PARENT_DOC = [
   '',
   '普通链接 [本地 PDF](资料.pdf) 与 [带 fragment](资料.pdf#page=3)。',
   '',
+  '长文 [[长文.pdf]]。',
+  '',
 ].join('\n')
 
 const OPEN_WAIT = 700
@@ -35,10 +39,12 @@ const RENDER_WAIT = 2500 // PDF.js 首次装载 + worker 启动 + 绘制
 
 const { islandHtml, zhCnMessages: zhCn } = await buildZhLocaleIsland(root)
 
-// 真实 PDF 样本（三页红/绿/蓝）——经 page.route fulfill 虚拟 URL
+// 真实 PDF 样本（三页红/绿/蓝；长文 12 页红绿蓝循环）——经 page.route fulfill 虚拟 URL
 const samplePdf = await buildThreePageColorPdf()
+const longPdf = await buildMultiPageColorPdf(12)
 const pdfMainJs = await readFile(path.join(root, 'out/webview/pdfMain.js'))
 const pdfWorkerJs = await readFile(path.join(root, 'out/webview/pdfWorker.js'))
+const LONG_PDF_URI = 'https://files.local/%E9%95%BF%E6%96%87.pdf'
 
 const browser = await chromium.launch({ headless: true,
   channel: process.env.VSIDIAN_TEST_BROWSER_CHANNEL || undefined })
@@ -64,6 +70,8 @@ try {
     route.fulfill({ body: pdfWorkerJs, contentType: 'application/javascript' }))
   await page.route('https://files.local/%E8%B5%84%E6%96%99.pdf**', (route) =>
     route.fulfill({ body: samplePdf, contentType: 'application/pdf' }))
+  await page.route(`${LONG_PDF_URI}**`, (route) =>
+    route.fulfill({ body: longPdf, contentType: 'application/pdf' }))
 
   // 主页面经虚拟 https origin 装载（PDF.js 的 blob worker 按 location 同源
   // 判定启用真 worker——setContent 的 about:blank/null origin 会回落 fake
@@ -91,7 +99,25 @@ try {
   const editRequestCount = () => page.evaluate(() =>
     window.hoverPdfSent().filter((m) => m.kind === 'edit.request').length)
   const readPopup = () => page.evaluate(() => window.readHoverPdf())
-  const pixels = () => page.evaluate(() => window.readPdfCanvasPixels())
+  // 页参必须显式转发进 evaluate（缺省取文档序首个画布——页池模式下那是
+  // 窗口首页而非当前页，#338 断言一律按页号采样）
+  const pixels = (pageNo) => page.evaluate((p) => window.readPdfCanvasPixels(p), pageNo)
+  /** 命中帧采样：waitForFunction 等谓词通过后仍可能落入重渲染间隙的白帧——
+   *  Node 侧短轮询直到采样本身满足校验（绘制确实发生，交替白是过渡帧） */
+  const pixelsUntil = async (pageNo, ok) => {
+    await page.waitForFunction((p) => {
+      const px = window.readPdfCanvasPixels(p)
+      return px !== null && px.center.some((v) => v < 245)
+    }, pageNo, { timeout: 10000 })
+    let last = null
+    for (let i = 0; i < 60; i++) {
+      const px = await pixels(pageNo)
+      last = px
+      if (px && ok(px)) return px
+      await page.waitForTimeout(100)
+    }
+    return pixels(pageNo)
+  }
   const respondPdf = async (req, { page: pageNo, version = 3 } = {}) => {
     await page.evaluate(({ reqId, instanceId, pageNo, version }) =>
       window.respondHoverPdfResult({
@@ -122,7 +148,7 @@ try {
   assert.equal(probe.pdf.page, 1, '无页码从第一页开始')
   assert.equal(probe.pdf.totalPages, 3, '总页数来自真实 PDF.js 装载')
   assert.ok(probe.pdf.canvasWidth > 0 && probe.pdf.canvasHeight > 0, 'canvas 实际尺寸入观测面')
-  let px = await pixels()
+  let px = await pixels(1)
   assert.ok(px, 'canvas 在场')
   assert.ok(px.nonWhiteRatio > 0.5, `非白像素比例应过半（实测 ${px.nonWhiteRatio}）`)
   assert.ok(px.center[0] > 180 && px.center[1] < 100, `第一页中心应为红色（实测 ${px.center}）`)
@@ -142,7 +168,7 @@ try {
   probe = await readPopup()
   assert.equal(probe.pdf.phase, 'content', '指定页绘制完成')
   assert.equal(probe.pdf.page, 2, '初始定位第 2 页')
-  px = await pixels()
+  px = await pixels(2)
   assert.ok(px.center[1] > 180 && px.center[0] < 100, `第二页中心应为绿色（实测 ${px.center}）`)
 
   // 翻页操作：下一页到蓝页（乐观页码 + 绘制追上）
@@ -150,7 +176,7 @@ try {
   await page.waitForTimeout(RENDER_WAIT)
   probe = await readPopup()
   assert.equal(probe.pdf.page, 3, '翻页推进到第 3 页')
-  px = await pixels()
+  px = await pixels(3)
   assert.ok(px.center[2] > 180 && px.center[1] < 100, `第三页中心应为蓝色（实测 ${px.center}）`)
   assert.equal(await page.evaluate(() => window.turnPdfPage(1)), false, '末页再翻出界为无操作')
   await escClose()
@@ -207,8 +233,85 @@ try {
   await page.waitForTimeout(RENDER_WAIT)
   probe = await readPopup()
   assert.equal(probe.pdf.page, 1, '普通链接 fragment 不解析——从第一页开始')
-  px = await pixels()
+  px = await pixels(1)
   assert.ok(px.center[0] > 180 && px.center[1] < 100, `第一页中心应为红色（实测 ${px.center}）`)
+  await escClose()
+  passed++
+
+  // ---- 场景 G（#338）：长文 12 页全文滚动——首到末可达、中/末段绘制层
+  // 证明、画布挂载有界与离屏回收、翻页=滚动定位互通 ----
+  await page.mouse.move(5, 5)
+  await page.waitForTimeout(80)
+  const longLink = page.locator('.vsidian-view-reading .vsidian-wikilink').filter({ hasText: '长文.pdf' }).first()
+  await longLink.hover()
+  await page.waitForTimeout(OPEN_WAIT)
+  req = await lastRequest()
+  assert.equal(req.target, '长文.pdf', '长文双链 target 原文')
+  await page.evaluate(({ reqId, instanceId, pdfUri }) => window.respondHoverPdfResult({
+    reqId, instanceId, pdfUri, bytes: 8192, version: 1,
+  }), { reqId: req.reqId, instanceId: req.instanceId, pdfUri: `${LONG_PDF_URI}?v=1` })
+  await page.waitForTimeout(RENDER_WAIT)
+  probe = await readPopup()
+  assert.equal(probe.pdf.phase, 'content', '长文装载绘制完成')
+  assert.equal(probe.pdf.totalPages, 12, '总页数 12（真实 PDF.js）')
+  assert.ok(probe.pdf.mountedPages < 12, `画布挂载有界（实测 ${probe.pdf.mountedPages}/12）`)
+  assert.ok(probe.pdf.scrollHeight > 11 * 400, `全文高度撑开（实测 ${probe.pdf.scrollHeight}px）`)
+  // 滚到中段（第 7 页区间 = 6/11 × 最大滚动）
+  const longScrollMax = await page.evaluate(() => {
+    // .mjs 无 TS 转译——泛型写法会退化为链式比较（布尔），必须裸调用
+    const scroll = document.querySelector('.vsidian-hover-popup-scroll')
+    return scroll ? scroll.scrollHeight - scroll.clientHeight : 0
+  })
+  await page.evaluate((top) => window.scrollPdfTo(top), Math.round(longScrollMax * 6 / 11))
+  await page.waitForFunction(() => {
+    const probe = window.readHoverPdf()
+    return probe.pdf.page >= 7 && probe.pdf.mountedPages < 12
+  }, { timeout: 10000 })
+  probe = await readPopup()
+  assert.ok(probe.pdf.page >= 7, `滚动到中段（实际第 ${probe.pdf.page} 页）`)
+  // 首页画布回收（离屏页不占画布）
+  assert.equal(await page.evaluate(() =>
+    document.querySelectorAll('.vsidian-hover-popup .vsidian-hover-pdf-page[data-page="1"]').length), 0,
+  '离屏首页占位已回收')
+  // 中段页身份色：滚入窗口后渲染异步追上——谓词直接返回命中帧的采样
+  //（waitForFunction 通过后二次采样会再入重渲染间隙——白底已画、内容
+  // 未到的帧——取通过帧本身）
+  {
+    const midPage = probe.pdf.page
+    px = await pixelsUntil(midPage, (p) => p.center.some((v) => v < 245))
+    assert.ok(px, '中段页画布在场且非白')
+    const expectGreen = (midPage - 1) % 3 === 1
+    const okColor = expectGreen
+      ? px.center[1] > 180 && px.center[0] < 100
+      : (midPage - 1) % 3 === 0
+        ? px.center[0] > 180 && px.center[1] < 100
+        : px.center[2] > 180 && px.center[1] < 100
+    assert.ok(okColor, `中段第 ${midPage} 页身份色正确（实测 ${px.center}）`)
+  }
+  // 滚到末页（第 12 页 = 蓝）
+  await page.evaluate((top) => window.scrollPdfTo(top), longScrollMax)
+  await page.waitForFunction(() => {
+    const probe = window.readHoverPdf()
+    return probe.pdf.page === 12
+  }, { timeout: 10000 })
+  probe = await readPopup()
+  assert.equal(probe.pdf.page, 12, '滚到末页')
+  px = await pixelsUntil(12, (p) => p.center[2] > 180)
+  assert.ok(px && px.center[2] > 180 && px.center[1] < 100,
+    `末页中心应为蓝色（实测 ${px?.center}）——末段确实呈现的绘制层证明`)
+  probe = await readPopup()
+  assert.ok(probe.pdf.mountedPages < 12, `末段画布挂载仍有界（实测 ${probe.pdf.mountedPages}/12）`)
+  // 翻页=滚动定位互通：上一页（第 11 页 = 绿）落回页顶偏移
+  assert.ok(await page.evaluate(() => window.turnPdfPage(-1)), '翻页操作生效')
+  await page.waitForTimeout(400)
+  probe = await readPopup()
+  assert.equal(probe.pdf.page, 11, '翻页推进到第 11 页')
+  assert.ok(probe.pdf.scrollTop > 0 && probe.pdf.scrollTop < longScrollMax, '翻页落点为滚动定位（页顶偏移）')
+  px = await pixelsUntil(11, (p) => p.center[1] > 180)
+  assert.ok(px && px.center[1] > 180 && px.center[0] < 100, `第 11 页中心应为绿色（实测 ${px?.center}）`)
+  // 共享文档存储观测：本浮层持有 1 份引用
+  const store = await page.evaluate(() => window.pdfDocumentStoreStats())
+  assert.ok(store.length === 1 && store[0].refs === 1, `长文文档单引用（实测 ${JSON.stringify(store)}）`)
   await escClose()
   passed++
 

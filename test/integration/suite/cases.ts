@@ -12,6 +12,7 @@ import { LOCALE_MESSAGES, resolveLocale } from '../../../src/shared/locales'
 import { OBSIDIAN_ALIAS_PROBES } from '../../../src/shared/obsidianAlias'
 import legacyBaselineJson from '../../../test/style-contract/baseline-v0.4.0.json'
 import { CHROME_CONTRACT_PROBES } from '../../../src/shared/chromeContract'
+import { buildThreePageColorPdf } from '../../../test/pdfSample.mjs'
 
 /** #134 历史基线旧片段用例（基线 JSON 的 legacySnippetCases 元素形态） */
 interface LegacySnippetCase {
@@ -1063,6 +1064,18 @@ interface ViewState {
     conflictChoice?: 'none' | 'open' | 'collapsed'
     conflictComparePending?: boolean
     conflictNotice?: boolean
+    /** #338（P3-06）PDF 视图观测（嵌入卡 pdf 载荷的绘制层断言载体：
+     *  phase/page/totalPages/mountedPages/canvasBytes/nonWhiteRatio——
+     *  非 pdf 卡缺省缺席） */
+    pdf?: {
+      phase: 'idle' | 'loading' | 'content' | 'error'
+      page: number
+      totalPages: number
+      errorReason: 'corrupt' | 'encrypted' | 'page-range' | 'resource' | 'load-failed' | ''
+      mountedPages: number
+      canvasBytes: number
+      nonWhiteRatio: number
+    } | null
     /** P2-09（#286）递归深度与直接父身份——根级计数口径的观测维度 */
     depth?: number
     parentInstanceId?: string | null
@@ -12044,7 +12057,58 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const md = await waitViewState('悬停 PDF.md', (v) =>
       v.hoverPreview?.open === true && v.hoverPreview.state === 'content' &&
       v.hoverPreview.pdf?.phase === 'content')
-    assert(md.hoverPreview!.pdf!.page === 1, `普通链接 fragment 不解析——从第一页开始（实际 ${md.hoverPreview!.pdf!.page}）`)
+    assert(md.hoverPreview?.pdf?.page === 1, `普通链接 fragment 不解析——从第一页开始（实际 ${md.hoverPreview?.pdf?.page}）`)
+  }],
+
+  ['嵌入 PDF：容器矩阵绘制、挂载有界与 changed 重载钳制（#338）', async () => {
+    await openWithEditor('嵌入 PDF.md')
+    await waitSessionReady('嵌入 PDF.md')
+    const uri = wsUri('嵌入 PDF.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    const parentBefore = await readDisk('嵌入 PDF.md')
+
+    // 容器矩阵：独占行/混排/引用/表格格内/递归孙卡全部装载绘制（真实
+    // pdfjs + 宿主 pdf 载荷链路；绘制层证据 = nonWhiteRatio 像素采样）
+    const shown = await waitViewState('嵌入 PDF.md', (v) => {
+      const pdfCards = (v.readingEmbed ?? []).filter((c) => c.pdf !== undefined && c.pdf !== null)
+      return v.viewMode === 'reading' &&
+        pdfCards.length >= 5 && pdfCards.every((c) => c.pdf!.phase === 'content')
+    }, 0, 120000)
+    const pdfCards = (shown.readingEmbed ?? []).filter((c) => c.pdf != null)
+    assert(pdfCards.length >= 5, `容器矩阵五枚 PDF 卡在场（实际 ${pdfCards.length}）`)
+    const sole = pdfCards.find((c) => c.inner === '长文.pdf')
+    assert(sole?.pdf?.totalPages === 12, `长文 12 页真实装载（实际 ${sole?.pdf?.totalPages}）`)
+    assert(sole?.pdf?.page === 1, '无锚点独占行卡从第一页开始')
+    assert(sole.pdf.nonWhiteRatio > 0.5, `独占行卡绘制层证据（实测 ${sole.pdf.nonWhiteRatio}）`)
+    assert(sole.pdf.mountedPages < 12, `画布挂载有界（实测 ${sole.pdf.mountedPages}/12——不随总页数增长）`)
+    const mixed = pdfCards.find((c) => c.inner === '长文.pdf#page=2')
+    assert(mixed?.pdf?.page === 2, `混排卡初始定位第 2 页（实际 ${mixed?.pdf?.page}）`)
+    const quote = pdfCards.find((c) => c.inner === '长文.pdf#page=3')
+    assert(quote?.pdf?.page === 3, `引用内卡初始定位第 3 页（实际 ${quote?.pdf?.page}）`)
+    const table = pdfCards.filter((c) => c.inner === '长文.pdf')[1]
+    assert(table?.pdf?.phase === 'content', '表格格内卡绘制态')
+    const grand = pdfCards.find((c) => (c.depth ?? 1) >= 2)
+    assert(grand?.pdf?.phase === 'content', '递归孙卡（depth≥2）绘制态')
+    assert(grand.pdf.nonWhiteRatio > 0.5, `递归孙卡绘制层证据——probe 的 canvas 实际像素采样（实测 ${grand.pdf.nonWhiteRatio}）`)
+    assert(grand.pdf.mountedPages < 12, `递归孙卡画布挂载有界（实测 ${grand.pdf.mountedPages}/12）`)
+
+    // 零写回：父文档不脏、磁盘不动、无 applyEdit
+    const parentDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri)
+    assert(parentDoc?.isDirty === false, '嵌入 PDF 不得弄脏父文档')
+    assert(await readDisk('嵌入 PDF.md') === parentBefore, '嵌入 PDF 不得改写父文档磁盘')
+    const embedState = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(embedState.appliedEdits === 0, '嵌入 PDF 链路不得产生 applyEdit')
+
+    // changed 失效重载：替换 长文.pdf 为三页样本 → watch 推送 → 静默重发 →
+    // 新代次 uri 重载（页数 12→3，浏览位置合法钳制回第一页区间）
+    await vscode.workspace.fs.writeFile(wsUri('长文.pdf'), await buildThreePageColorPdf())
+    const reloaded = await waitViewState('嵌入 PDF.md', (v) => {
+      const card = (v.readingEmbed ?? []).find((c) => c.inner === '长文.pdf')
+      return card?.pdf?.phase === 'content' && card.pdf.totalPages === 3
+    }, 0, 120000)
+    const soleAfter = (reloaded.readingEmbed ?? []).find((c) => c.inner === '长文.pdf')
+    assert(soleAfter?.pdf?.totalPages === 3, `替换后按新文档装载（实际 ${soleAfter?.pdf?.totalPages} 页）`)
+    assert(soleAfter.pdf.nonWhiteRatio > 0.5, '替换后绘制层证据（新文档像素）')
   }],
 
   ['悬停预览：Reading 双链读取目标全文、错误分态就地呈现与双零 dirty（#218）', async () => {

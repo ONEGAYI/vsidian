@@ -3633,24 +3633,25 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "domain": "chrome",
     "category": "hover-preview",
     "kind": "selector",
-    "target": ".vsidian-hover-pdf（悬停浮层内的 PDF 内容容器；.vsidian-hover-pdf-canvas 页面画布 / .vsidian-hover-pdf-page-info 页码信息行）",
-    "purpose": "悬停 PDF 预览内容视图（#337 / P3-05 首条闭环）：悬停指向本地 PDF 的双链／普通链接时，浮层滚动区内并列的只读 PDF 渲染容器——PDF.js 在 webview 内按 canvas 绘制指定页（双链 #page=N 初始定位，无页码从第一页；普通链接 fragment 不解析）。只读呈现：无任何写回通道、不接管父输入；翻页操作（键位默认未绑定）只改变预览页不修改文档。容器与画布尺寸由渲染器按浮层内容宽适配（scale 上限 2.5），页码信息行提供「第 N / M 页」反馈。错误分态（损坏/加密/页码越界/资源失败）走浮层既有 .vsidian-hover-popup-state 状态行（含错误色修饰），本容器只承载成功绘制态。",
+    "target": ".vsidian-hover-pdf（PDF 内容容器——#337 悬停浮层、#338 起嵌入卡片同款并列；内含 .vsidian-hover-pdf-spacer 全文撑高 spacer（-top/-bottom）/ .vsidian-hover-pdf-page 窗口内页占位 / .vsidian-hover-pdf-canvas 页面画布 / .vsidian-hover-pdf-page-info 页码信息行）",
+    "purpose": "只读 PDF 阅读视图（#337 / P3-05 悬停首条闭环；#338 / P3-06 全文按页滚动与正文嵌入）：悬停指向本地 PDF 的双链／普通链接，或正文 ![[文件.pdf]] 嵌入（独占行／混排／列表／引用／表格格内／递归——同一卡片壳路径）时，宿主滚动区内并列的 PDF 渲染容器。#338 起为按页 canvas 池 + spacer 虚拟化：全文模型（页高度表——估计装载、渲染回填）与 DOM/canvas 常驻分开，仅可见页与有限相邻页保留画布（窗口挂载受 PDF_SCROLL_LIMITS 预算与上限约束——费用不随总页数线性增长）；翻页操作与滚动定位互通（键位默认未绑定，只读——不修改任何文档）；同 URI 多 occurrence 经共享文档存储复用文档数据、滚动与生命周期独立。错误分态（损坏/加密/初次页码越界/资源失败）走既有状态行（浮层 .vsidian-hover-popup-state／卡片 state 行，含错误色修饰），本容器只承载成功绘制态。",
     "views": [
       "live",
       "reading"
     ],
-    "states": "装载中（canvas 零尺寸占位，状态行 loading 文案）／绘制成功（canvas 实际尺寸随页面与适配 scale，页码信息行在场）／错误分态（canvas 清零，状态行错误文案）／失效撤下（目标 deleted/stale 时旧 canvas 一并撤下，不冒充在场内容）。交互态浮层的内部结构——不进静态探针，绘制层可见性由浏览器与集成测试按 canvas 实际像素断言（非 DOM 存在性）。",
-    "dom": "挂 #app 内浮层（.vsidian-hover-popup）的滚动区（.vsidian-hover-popup-scroll）内，与 Reading 容器并列（PDF 形态下 Reading 容器隐藏）。canvas 为原生 <canvas> 元素（width/height 由渲染器按视口写）；页码信息行为 <div>，文案经 i18n 词条 hover.pdfPageInfo。",
-    "example": "#app > .vsidian-hover-popup .vsidian-hover-pdf-canvas {\n  display: block;\n  max-width: 100%;\n}\n\n#app > .vsidian-hover-popup .vsidian-hover-pdf-page-info {\n  padding: 4px 10px;\n  text-align: center;\n  opacity: 0.85;\n}",
+    "states": "装载中（spacer/页占位零高，状态行 loading 文案）／绘制成功（窗口内页占位含 canvas 实际尺寸，spacer 撑开全文高度，页码信息行 sticky 于滚动区底部显示当前可见页）／错误分态（canvas 清零，状态行错误文案）／失效撤下（目标 deleted/stale 时旧页撤下——画布与页占位清空、spacer 归零，视图骨架保留待恢复重载）。交互态容器——不进静态探针，绘制层可见性由浏览器与集成测试按 canvas 实际像素断言（非 DOM 存在性）。",
+    "dom": "浮层挂 #app 内浮层滚动区（.vsidian-hover-popup-scroll）内；嵌入卡挂卡片滚动区（.vsidian-embed-card-scroll）内——均与 Reading 容器并列（PDF 形态下 Reading/Live 容器由渲染层隐藏）。spacer 与页占位为 <div>（高度由渲染器按页高度表写）；canvas 为原生 <canvas> 元素（width/height 按视口适配 scale，上限 2.5）；页码信息行为 <div>（sticky bottom 固定），文案经 i18n 词条 hover.pdfPageInfo。",
+    "example": "#app > .vsidian-hover-popup .vsidian-hover-pdf-page,\n#app .vsidian-embed-card .vsidian-hover-pdf-page {\n  display: flex;\n  justify-content: center;\n}\n\n#app > .vsidian-hover-popup .vsidian-hover-pdf-canvas,\n#app .vsidian-embed-card .vsidian-hover-pdf-canvas {\n  display: block;\n  max-width: 100%;\n}\n\n#app > .vsidian-hover-popup .vsidian-hover-pdf-page-info,\n#app .vsidian-embed-card .vsidian-hover-pdf-page-info {\n  position: sticky;\n  bottom: 0;\n  text-align: center;\n  opacity: 0.85;\n}",
     "obsidian": {
       "counterpart": "无（Obsidian 页面预览浮层的 PDF 呈现闭源，不作承诺）",
       "support": "none"
     },
     "verification": [
-      "单元 pdfRender：渲染器状态机（装载/绘制/错误分态/取消纪律——迟到结果不落地、失败装载也 destroy）",
-      "单元 hoverPopupCssContract：PDF 容器/画布/页码行规则钉住",
-      "浏览器 hoverPdf（#337）：真实 Chromium 内生产链路绘制——canvas 非白像素比例与指定页内容断言",
-      "集成（#337）：1.82.3 真宿主悬停 PDF——view.state.hoverPreview.pdf 探针的 canvas 尺寸与页码断言"
+      "单元 pdfRender：渲染器状态机（装载/绘制/错误分态/取消纪律）+ #338 页池契约（全文高度撑开、窗口平移回收、翻页=滚动定位、页高回填、共享文档引用计数、版本替换钳制、canvas 预算）",
+      "单元 hoverPopupCssContract：PDF 容器/页占位/画布/页码行规则钉住（浮层与嵌入卡双作用域）",
+      "单元 embedCardPdf（#338）：嵌入分派/只读卡壳/卸载回收/双 occurrence 共享/失效链路/缓存重挂",
+      "浏览器 hoverPdf / embedPdf（#337/#338）：真实 Chromium 内生产链路绘制——canvas 非白像素比例、首中末页身份色、容器矩阵（独占行/混排/表格格/递归）与挂载有界断言",
+      "集成（#337/#338）：1.82.3 真宿主——view.state.hoverPreview.pdf 与嵌入卡 probe 的 canvas 尺寸/页码/mountedPages 断言"
     ],
     "introduced": "#337（2026-10-04）"
   },
@@ -6097,9 +6098,9 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     }
   },
   "hover-pdf-view": {
-    "purpose": "The hover PDF preview content view (first closing loop, #337 / P3-05): when hovering a wikilink or plain link that targets a local PDF, a read-only PDF rendering container sits inside the popup scroll area in parallel with the reading container — PDF.js draws the requested page onto a canvas inside the webview (initial positioning via the wikilink #page=N anchor, falling back to page 1 when absent; plain-link fragments are not parsed). Read-only presentation: no write-back channel and no takeover of parent input; the page-turn operations (keybindings unbound by default) only change the previewed page and never modify the document. The container and canvas sizes are fitted by the renderer to the popup content width (scale capped at 2.5), and the page-info line reports \"Page N of M\". Error states (corrupt / encrypted / out-of-range page / resource failure) go through the popup existing .vsidian-hover-popup-state state line (with the error modifier); this container carries only the successfully painted state.",
-    "states": "Loading (zero-size canvas placeholder, loading text on the state line) / painted (canvas at its actual size per page and fitted scale, page-info line present) / error (canvas zeroed, error text on the state line) / invalidated withdrawal (when the target is deleted/stale the old canvas is withdrawn too and never impersonates live content). An internal structure of an interaction-state floating layer — not part of the static probes; paint-level visibility is asserted by browser and integration tests on actual canvas pixels (not DOM presence).",
-    "dom": "Attached inside the scroll area (.vsidian-hover-popup-scroll) of the #app popup (.vsidian-hover-popup), in parallel with the reading container (hidden in PDF form). The canvas is a native <canvas> element (width/height written by the renderer per viewport); the page-info line is a <div> whose text comes from the i18n entry hover.pdfPageInfo.",
+    "purpose": "The read-only PDF reading view (hover first closing loop, #337 / P3-05; full-document page scrolling and body embeds, #338 / P3-06): when hovering a wikilink or plain link that targets a local PDF, or embedding ![[file.pdf]] in the note body (standalone line / mixed run / list / quote / table cell / recursive — the same card-shell path), a PDF rendering container sits inside the host scroll area. Since #338 it is a per-page canvas pool plus spacer virtualization: the full-document model (page-height table — estimated at load, backfilled on render) stays separate from resident DOM/canvases, and only visible pages plus a bounded neighbor window keep canvases (window mounting is constrained by the PDF_SCROLL_LIMITS budget and caps — cost does not grow linearly with total page count); page-turn operations interoperate with scroll positioning (keybindings unbound by default, read-only — never modifying any document); multiple occurrences of the same URI share one document store while keeping their scrolling and lifecycles independent. Error states (corrupt / encrypted / first-time out-of-range page / resource failure) go through the existing state lines (the popup .vsidian-hover-popup-state / the card state line, with the error modifier); this container carries only the successfully painted state.",
+    "states": "Loading (zero-height spacer/page placeholders, loading text on the state line) / painted (in-window page placeholders carrying actual canvas sizes, the spacer opening the full-document height, and the page-info line sticky at the bottom of the scroll area reporting the current visible page) / error (canvas zeroed, error text on the state line) / invalidated withdrawal (when the target is deleted/stale the old pages are withdrawn — canvases and page placeholders cleared, the spacer zeroed, the view skeleton kept for recovery reload). An interaction-state container — not part of the static probes; paint-level visibility is asserted by browser and integration tests on actual canvas pixels (not DOM presence).",
+    "dom": "In the popup it is attached inside the #app popup scroll area (.vsidian-hover-popup-scroll); in embed cards inside the card scroll area (.vsidian-embed-card-scroll) — both in parallel with the reading container (in PDF form the reading/live containers are hidden by the render layer). The spacer and page placeholders are <div> elements (heights written by the renderer from the page-height table); the canvas is a native <canvas> element (width/height fitted to the viewport with scale capped at 2.5); the page-info line is a <div> (sticky bottom fixed) whose text comes from the i18n entry hover.pdfPageInfo.",
     "obsidian": {
       "counterpart": "None (the PDF presentation of the Obsidian page-preview popover is closed-source and not promised)"
     }

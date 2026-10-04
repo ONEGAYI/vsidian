@@ -60,6 +60,7 @@ import { classifyLocalRefContentKind, refEmbedTargetIsImage } from '../shared/re
 import {
   RefContentInstance,
   isRefLoadedMarkdown,
+  isRefLoadedPdf,
   refLoadedContentOfResult,
   type RefContentMount,
   type RefLoadedAny,
@@ -475,7 +476,10 @@ export function hoverPopupProbe(): {
     }
   }
   const pdfProbe = (): PdfRenderProbe =>
-    popup?.pdfView?.probe() ?? { phase: 'idle', page: 0, totalPages: 0, canvasWidth: 0, canvasHeight: 0, errorReason: '', requestedPage: 0, nonWhiteRatio: -1 }
+    popup?.pdfView?.probe() ?? {
+      phase: 'idle', page: 0, totalPages: 0, canvasWidth: 0, canvasHeight: 0, errorReason: '',
+      requestedPage: 0, nonWhiteRatio: -1, mountedPages: 0, canvasBytes: 0, scrollHeight: 0, scrollTop: 0,
+    }
   // #343 web 视图观测（DOM 实测：iframe 属性与退回按钮在场性）
   const webProbe = () => {
     if (!popup || popup.webMeta === null) {
@@ -1723,6 +1727,12 @@ function applyHoverPdfContent(
     if (probe.phase === 'content') {
       ensureWatch(state, message.target.fsPath, message.sourceLeaseId)
       applyDisplay(state, 'content', message.target.relPath)
+      // #338：loading 期滚动区隐藏（display:none）使初始滚动写入丢失——
+      // 滚动区显示后重新定位到导航选择器页（重定位钳制语义，非报错路径）
+      const target = page ?? 1
+      if (probe.page !== target) {
+        pdfView.locateTo(target)
+      }
     } else if (probe.phase === 'error') {
       if (context) releaseRefSourceLease(context, message.sourceLeaseId)
       applyDisplay(state, 'error', pdfErrorText(probe.errorReason === '' ? 'resource' : probe.errorReason, probe.requestedPage, probe.totalPages))
@@ -1786,6 +1796,16 @@ export function notifyHoverResult(message: HoverPreviewResult): boolean {
     }
     if (popup.pdfForm) {
       // 反向预判失手防御：pdf 形态浮层收到 markdown 载荷
+      if (context) releaseRefSourceLease(context, message.sourceLeaseId)
+      applyDisplay(popup, 'error', refErrorText('read-failed', popup.target))
+      position(popup)
+      return true
+    }
+    // #338 不可达防御：pdf 载荷在上方 contentKind 分支已分派（pdfForm 恒
+    // 走 applyHoverPdfContent / 失配错误），此处仅类型收窄后兜底——未来
+    // 新增消费形态时保持「不静默错挂」语义（置于 image 判别之外：pdf
+    // kind ≠ image，嵌在 image 分支内会被外层条件挡成不可达）
+    if (isRefLoadedPdf(loaded)) {
       if (context) releaseRefSourceLease(context, message.sourceLeaseId)
       applyDisplay(popup, 'error', refErrorText('read-failed', popup.target))
       position(popup)

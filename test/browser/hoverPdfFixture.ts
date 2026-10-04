@@ -9,7 +9,7 @@ import type { HostToWebview, WebviewToHost } from '../../src/shared/protocol'
 import { bootLocaleFromDocument } from '../../src/webview/localeBoot'
 import { keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
-import { __setPdfAssetsForTest } from '../../src/webview/pdfRender'
+import { __pdfDocumentStoreStatsForTest, __setPdfAssetsForTest } from '../../src/webview/pdfRender'
 import { hoverPopupProbe, turnHoverPdfPage } from '../../src/webview/hoverPopup'
 import '../../src/webview/main.css'
 
@@ -93,9 +93,16 @@ Object.assign(window, {
   } {
     return hoverPopupProbe()
   },
-  /** canvas 中心与九宫格采样（绘制层断言——非 DOM 存在性） */
-  readPdfCanvasPixels(): { w: number; h: number; center: number[]; nonWhiteRatio: number } | null {
-    const canvas = document.querySelector<HTMLCanvasElement>('.vsidian-hover-pdf-canvas')
+  /** canvas 中心与九宫格采样（绘制层断言——非 DOM 存在性）。
+   *  #338 全文滚动：pageNo 指定按页占位采样（缺省取文档序首个画布） */
+  readPdfCanvasPixels(pageNo?: number): { w: number; h: number; center: number[]; nonWhiteRatio: number } | null {
+    let canvas: HTMLCanvasElement | null
+    if (pageNo !== undefined) {
+      canvas = document.querySelector<HTMLCanvasElement>(
+        `.vsidian-hover-pdf-page[data-page="${pageNo}"] canvas`)
+    } else {
+      canvas = document.querySelector<HTMLCanvasElement>('.vsidian-hover-pdf-canvas')
+    }
     if (!canvas || canvas.width === 0) {
       return null
     }
@@ -124,5 +131,17 @@ Object.assign(window, {
   /** 翻页操作驱动（生产键位路由同款实现入口） */
   turnPdfPage(delta: number): boolean {
     return turnHoverPdfPage(delta === 0 ? 1 : (delta > 0 ? 1 : -1))
+  },
+  /** #338 浮层内滚动驱动（写 scrollTop 并派发 scroll——生产监听同源路径） */
+  scrollPdfTo(top: number): number {
+    const scroll = document.querySelector<HTMLElement>('.vsidian-hover-popup-scroll')
+    if (!scroll) return -1
+    scroll.scrollTop = top
+    scroll.dispatchEvent(new Event('scroll'))
+    return scroll.scrollTop
+  },
+  /** #338 共享文档存储快照（refs 断言——共享与回收纪律的观测面） */
+  pdfDocumentStoreStats(): Array<{ uri: string; refs: number }> {
+    return __pdfDocumentStoreStatsForTest()
   },
 })
