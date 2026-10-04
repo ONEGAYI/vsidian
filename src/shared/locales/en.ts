@@ -491,6 +491,10 @@ export const en = {
   'hover.errorNonMarkdown': '{target} is not a Markdown note: preview supports Markdown documents only in this phase',
   'hover.errorReadFailed': 'Failed to read the target document',
   'hover.errorAnchorMissing': 'Anchor not found in the target note: {target}#{anchor} (the full document is not shown instead)',
+  /** #337 PDF hover preview: invalid anchor syntax (page=0 / non-numeric /
+   *  unknown key / duplicate key - never silently falls back to page 1; fix
+   *  the link and retry) */
+  'hover.errorAnchorInvalid': 'Invalid anchor syntax: {target}#{anchor} (the page number must be a positive integer such as #page=3; page 1 is not silently used)',
   'hover.errorWatchCapacity': 'Too many referenced notes are open. Close another preview or card, then reopen this one.',
   'hover.errorSourceExpired': 'The source note changed or closed. Reopen this reference to refresh it.',
   'hover.errorCycle': 'This note is already in the current reference path.',
@@ -500,6 +504,15 @@ export const en = {
    *  collapse button of the note-properties section inside the hover popup
    *  (aria-label and title share the word; the button is the only operable
    *  entry, hovering the header row only reveals it) */
+  /** #337 PDF hover rendering: page info line and render failure states
+   *  (shown in place, never as host notifications; encrypted files prompt to
+   *  open the original in a local reader - no password collection) */
+  'hover.pdfPageInfo': 'Page {page} of {total}',
+  'hover.pdfErrorCorrupt': 'The PDF file is damaged or not a valid PDF; it cannot be previewed',
+  'hover.pdfErrorEncrypted': 'This PDF is encrypted and cannot be opened in the preview yet. Open the original file in a local PDF reader.',
+  'hover.pdfErrorPageRange': 'Page number out of range: page {page} was requested but the PDF has {total} pages (page 1 is not silently used)',
+  'hover.pdfErrorResource': 'Failed to load or render the PDF resource; please retry',
+  'hover.pdfErrorLoadFailed': 'The PDF renderer failed to load (the extension installation may be incomplete)',
   'hover.content.fmExpand': 'Expand note properties',
   'hover.content.fmCollapse': 'Collapse note properties',
   /** #222 Reading embed cards: loading line and the open-target entry in the
@@ -742,6 +755,8 @@ export const en = {
   'command.editor.addCursorBelow.title': 'Add cursor below',
   /** #221 preview the link at the cursor/focus (manual hover-popup open; keyboard enters the popup and Esc returns) */
   'command.ui.hoverPreviewLink.title': 'Preview the current link',
+  'command.ui.hoverPdfPageNext.title': 'PDF preview: next page',
+  'command.ui.hoverPdfPagePrev.title': 'PDF preview: previous page',
   'command.ui.embedToggleMode.title': 'Toggle reference internal view mode',
   /** P2-10 reference Live action entries (save target / explicit close / conflict trio; all unbound by default) */
   'command.embed.saveTarget.title': 'Save focused reference target',

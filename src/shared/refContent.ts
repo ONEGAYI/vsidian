@@ -5,18 +5,20 @@
 // 按同一 kind 对齐；两端不各自发明第二套类型判别。
 //
 // 类型边界（与三期正式规格「访问、身份与挂载责任」节对齐）：
-// - 本票只实现 markdown 通道（TextDocument 权威版本 + LF 全文 + 初始
-//   定位区间 + Markdown 导航选择器）；pdf/image/text/web 仅类型与校验
-//   留位，其载荷形态由 P3-04（图片）/ P3-05（PDF）/ P3-08（文本）/
-//   P3-10（外链）按同一 kind 登记——Markdown 的 TextDocument.version 和
-//   LF 范围不得冒充这些类型的版本或页码。
+// - #333 落地 markdown 通道（TextDocument 权威版本 + LF 全文 + 初始
+//   定位区间 + Markdown 导航选择器）；#337（P3-05）登记 pdf 载荷
+//   （文件资源 URI + 文件状态代次 + 源字节 + PDF 导航选择器——双链
+//   #page=N 解析单一事实源在 shared/pdfNav）；image/text/web 仍为类型
+//   与校验留位，载荷形态由 P3-04（图片）/ P3-08（文本）/ P3-10（外链）
+//   按同一 kind 登记——Markdown 的 TextDocument.version 和 LF 范围不得
+//   冒充这些类型的版本或页码。
 // - 本地目标的类型由宿主按解析出的 fsPath 分类（前端不声明类型、不
 //   接收任意 URI）；web 类型由 href scheme 判定（#342 接入），不经本地
 //   文件分类产生。
 // - 导航选择器按文件类型区分：Markdown 沿用 full/heading/block（标题
 //   锚点直读，`;`/`key=value` 分词不参与——2026-10-04 锚点语法修订的分
-//   词边界口径）；PDF #page / 文本 #line/#range 为结构留位（本票不实现
-//   非 Markdown 锚点解析）。
+//   词边界口径）；PDF #page / 文本 #line/#range 为结构留位（文本锚点
+//   解析由 P3-08 实现）。
 //
 // 本模块不依赖 vscode/DOM（两端共享纯逻辑；与 protocol 的关系：协议
 // 消息经 contentKind 引用本模块的分类学，消息形态仍以 protocol 为单一
@@ -81,11 +83,40 @@ export interface RefMarkdownContent {
   selector: HoverPreviewScope
 }
 
-// ---- 导航选择器结构留位（按文件类型区分；本票不实现非 Markdown 锚点
-// 解析——P3-05/P3-08 接入时扩展协议消息的 scope 形态与此处对齐） ----
+/**
+ * PDF 载荷（#337 / P3-05，kind === 'pdf' 的成功载荷形态）：宿主按文件
+ * 资源读取（stat 三态 + 资源 URI + 文件状态代次），**不装载正文字节**——
+ * PDF 源经 webview 资源域按需 fetch（宿主 Node 侧零 PDF 渲染代码）。
+ * - version 为**文件状态代次**（宿主侧按 mtime/size 观测推进的单调值，
+ *   图片资源版本表同款语义）——不得用 TextDocument.version 冒充（PDF
+ *   不经文本管线）；
+ * - uri 为 webview 资源 URI（含 `?v=` 代次戳，资源缓存击穿）；
+ * - bytes 为源文件字节（逻辑预算费用——REF_EXPANSION_LIMITS 的字节
+ *   预算按此计，不代表解码内存）；
+ * - selector 为 PDF 导航选择器（双链 #page=N 解析产物；普通链接
+ *   fragment 不解析，恒无 page 字段）。
+ */
+export interface RefPdfContent {
+  kind: 'pdf'
+  /** 文件状态代次（单调；mtime/size 观测变化时推进） */
+  version: number
+  /** webview 资源 URI（含 ?v= 代次戳）——PDF 源字节按需 fetch */
+  uri: string
+  /** 源文件字节（逻辑预算费用） */
+  bytes: number
+  /** PDF 导航选择器（双链限定 #page=N；无 page = 第一页） */
+  selector: RefPdfNavSelector
+}
 
-/** PDF 导航选择器（留位）：`#page=N`（双链限定）——1-based 正整数，仅
- *  初始定位；页区间等其他键不新增（2026-10-04 修订确认） */
+/** 类型化成功载荷联合（#333 markdown；#337 起 pdf 登记） */
+export type RefContentPayload = RefMarkdownContent | RefPdfContent
+
+// ---- 导航选择器结构（按文件类型区分；#337 起 PDF 选择器随 pdf 载荷
+// 落地——文本 #line/#range 的分词语义由 P3-08 实现） ----
+
+/** PDF 导航选择器（#337 落地）：`#page=N`（双链限定）——1-based 正整数，
+ *  仅初始定位，原链接不改写；页区间等其他键不新增（2026-10-04 修订
+ *  确认）。无 page 字段 = 第一页；解析与校验单一事实源 shared/pdfNav */
 export interface RefPdfNavSelector {
   kind: 'pdf'
   page?: number

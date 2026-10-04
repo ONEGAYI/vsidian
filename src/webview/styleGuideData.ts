@@ -3599,7 +3599,7 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "domain": "chrome",
     "category": "hover-preview",
     "kind": "selector",
-    "target": ".vsidian-hover-popup（浮层容器；内含 .vsidian-hover-popup-header 标题条（目标显示名 + .vsidian-hover-popup-title 与 .vsidian-hover-popup-dirty 未保存圆点（P2-06）+ .vsidian-hover-popup-actions 右侧动作组（P2-06：.vsidian-hover-popup-save 保存目标 / .vsidian-hover-popup-mode 内部模式切换 / .vsidian-hover-popup-close 关闭编辑，与 .vsidian-hover-popup-open 跳转入口同组——嵌入卡片同款，#217 验收跟进））、.vsidian-hover-popup-scroll 内容滚动区（承载只读 Reading 容器与 .vsidian-hover-popup-live 内部 Live 编辑器容器（P2-06，与 Reading 容器并列））与 .vsidian-hover-popup-state 就地状态行（loading/错误分态；错误分态追加 .vsidian-hover-popup-state-error 修饰——主题错误色，验收反馈与普通文字区分））",
+    "target": ".vsidian-hover-popup（浮层容器；内含 .vsidian-hover-popup-header 标题条（目标显示名 + .vsidian-hover-popup-title 与 .vsidian-hover-popup-dirty 未保存圆点（P2-06）+ .vsidian-hover-popup-actions 右侧动作组（P2-06：.vsidian-hover-popup-save 保存目标 / .vsidian-hover-popup-mode 内部模式切换 / .vsidian-hover-popup-close 关闭编辑，与 .vsidian-hover-popup-open 跳转入口同组——嵌入卡片同款，#217 验收跟进））、.vsidian-hover-popup-scroll 内容滚动区（承载只读 Reading 容器与 .vsidian-hover-popup-live 内部 Live 编辑器容器（P2-06，与 Reading 容器并列）；#337 起 PDF 形态并列 .vsidian-hover-pdf PDF 内容容器——见 hover-pdf-view 条目）与 .vsidian-hover-popup-state 就地状态行（loading/错误分态；错误分态追加 .vsidian-hover-popup-state-error 修饰——主题错误色，验收反馈与普通文字区分））",
     "purpose": "悬停文档预览浮层（#218 一期首条闭环）：父文档 Reading 中悬停指向 Markdown 的双链/本地链接，经文档访问通道读取目标后以只读 Reading 内容显示。#221 全入口：Live 正文（默认 Ctrl+悬停，设置 hover.liveDirect 开启后直接悬停）与反链/出链面板条目（直接悬停）共用同一浮层。默认宽 480px / 最大高 400px（小视口由 JS 几何计划四边翻转并收缩钳制）；内容只读——任务 checkbox 禁用（JS disabled + pointer-events 双保险），无任何写回通道。#220 起浮层内为目标文档（B）的 Reading 内容：图片以 B 为来源解析（sourceDocUri 通道）、链接可点击跳转、代码块朴素高亮。#245 起 B 内独占行引用沿直接来源递归为禁写卡片，共用正文卡片的深度与预算；子卡片滚轮到底接续浮层，异步高度变化按自然高重新贴锚，整轮只有一个悬停窗口。#217 验收跟进：标题条与嵌入卡片同款——目标显示名（spec.target）常驻不随回包换，右上角跳转入口按目标形态分派到既有激活消息族（双链/普通链接直发、面板形态经 openAction 闭包走条目点击同通道），点击即上下文切换关闭。P2-06（#283）起浮窗根引用支持内部 Live：默认跟随根面板模式、可手动切换（按引用位置在面板会话内记忆）；标题条新增保存目标/模式切换/关闭编辑动作组与紧随显示名的未保存圆点（`·`，目标 B dirty 时在场、警示色——嵌入卡片 P2-04 同款语义），滚动区内并列内部 Live 编辑器容器（限高随几何计划，滚动由 CM6 自身 scroller 承担）；目标 dirty 的内部 Live 抵抗移出/外点/失焦等普通关闭条件（Q18），干净时沿用普通悬停关闭，显式关闭复用嵌入的 ref-close-dialog 三项确认。",
     "views": [
       "live",
@@ -3621,6 +3621,32 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
       "浏览器 hoverLive（P2-06）：真实指针/键盘驱动浮窗根 Live——编辑器绘制层可见、圆点绘制、dirty 保活与 Esc 分层"
     ],
     "introduced": "#218（2026-09-30）"
+  },
+  {
+    "id": "hover-pdf-view",
+    "domain": "chrome",
+    "category": "hover-preview",
+    "kind": "selector",
+    "target": ".vsidian-hover-pdf（悬停浮层内的 PDF 内容容器；.vsidian-hover-pdf-canvas 页面画布 / .vsidian-hover-pdf-page-info 页码信息行）",
+    "purpose": "悬停 PDF 预览内容视图（#337 / P3-05 首条闭环）：悬停指向本地 PDF 的双链／普通链接时，浮层滚动区内并列的只读 PDF 渲染容器——PDF.js 在 webview 内按 canvas 绘制指定页（双链 #page=N 初始定位，无页码从第一页；普通链接 fragment 不解析）。只读呈现：无任何写回通道、不接管父输入；翻页操作（键位默认未绑定）只改变预览页不修改文档。容器与画布尺寸由渲染器按浮层内容宽适配（scale 上限 2.5），页码信息行提供「第 N / M 页」反馈。错误分态（损坏/加密/页码越界/资源失败）走浮层既有 .vsidian-hover-popup-state 状态行（含错误色修饰），本容器只承载成功绘制态。",
+    "views": [
+      "live",
+      "reading"
+    ],
+    "states": "装载中（canvas 零尺寸占位，状态行 loading 文案）／绘制成功（canvas 实际尺寸随页面与适配 scale，页码信息行在场）／错误分态（canvas 清零，状态行错误文案）／失效撤下（目标 deleted/stale 时旧 canvas 一并撤下，不冒充在场内容）。交互态浮层的内部结构——不进静态探针，绘制层可见性由浏览器与集成测试按 canvas 实际像素断言（非 DOM 存在性）。",
+    "dom": "挂 #app 内浮层（.vsidian-hover-popup）的滚动区（.vsidian-hover-popup-scroll）内，与 Reading 容器并列（PDF 形态下 Reading 容器隐藏）。canvas 为原生 <canvas> 元素（width/height 由渲染器按视口写）；页码信息行为 <div>，文案经 i18n 词条 hover.pdfPageInfo。",
+    "example": "#app > .vsidian-hover-popup .vsidian-hover-pdf-canvas {\n  display: block;\n  max-width: 100%;\n}\n\n#app > .vsidian-hover-popup .vsidian-hover-pdf-page-info {\n  padding: 4px 10px;\n  text-align: center;\n  opacity: 0.85;\n}",
+    "obsidian": {
+      "counterpart": "无（Obsidian 页面预览浮层的 PDF 呈现闭源，不作承诺）",
+      "support": "none"
+    },
+    "verification": [
+      "单元 pdfRender：渲染器状态机（装载/绘制/错误分态/取消纪律——迟到结果不落地、失败装载也 destroy）",
+      "单元 hoverPopupCssContract：PDF 容器/画布/页码行规则钉住",
+      "浏览器 hoverPdf（#337）：真实 Chromium 内生产链路绘制——canvas 非白像素比例与指定页内容断言",
+      "集成（#337）：1.82.3 真宿主悬停 PDF——view.state.hoverPreview.pdf 探针的 canvas 尺寸与页码断言"
+    ],
+    "introduced": "#337（2026-10-04）"
   },
   {
     "id": "hover-fm-section",
@@ -6036,6 +6062,14 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
     "dom": "Since #220 attached directly inside #app (previously on body; fixed positioning is unaffected by the #app layout) — the #app theme variables, the `#app .vsidian-view-reading …` content styles, and enabled CSS snippets (the container class carries the .markdown-preview-view alias bridge) therefore match naturally, without duplicating a second theme environment for the popup. The inner reading container carries .vsidian-view-reading. The header bar (target display name plus open button) lists its rules together with the embed-card header selectors (popup selector first, embed selector last). Since P2-06 the three action-group buttons are real <button type=\"button\"> elements (aria-label and tooltip via the i18n entries embed.saveTarget / embed.modeToLive / embed.modeToReading / embed.closeEditor, tooltips carried by data-tooltip; inline SVG icons aria-hidden, 16-grid stroke currentColor), the dot is a <span> (aria-label embed.dirtyDot), and their rules are listed alongside the embed-card header ones (popup selector first).",
     "obsidian": {
       "counterpart": ".hover-popover (the Obsidian page-preview popover direction; the internal structure is closed-source and not promised)"
+    }
+  },
+  "hover-pdf-view": {
+    "purpose": "The hover PDF preview content view (first closing loop, #337 / P3-05): when hovering a wikilink or plain link that targets a local PDF, a read-only PDF rendering container sits inside the popup scroll area in parallel with the reading container — PDF.js draws the requested page onto a canvas inside the webview (initial positioning via the wikilink #page=N anchor, falling back to page 1 when absent; plain-link fragments are not parsed). Read-only presentation: no write-back channel and no takeover of parent input; the page-turn operations (keybindings unbound by default) only change the previewed page and never modify the document. The container and canvas sizes are fitted by the renderer to the popup content width (scale capped at 2.5), and the page-info line reports \"Page N of M\". Error states (corrupt / encrypted / out-of-range page / resource failure) go through the popup existing .vsidian-hover-popup-state state line (with the error modifier); this container carries only the successfully painted state.",
+    "states": "Loading (zero-size canvas placeholder, loading text on the state line) / painted (canvas at its actual size per page and fitted scale, page-info line present) / error (canvas zeroed, error text on the state line) / invalidated withdrawal (when the target is deleted/stale the old canvas is withdrawn too and never impersonates live content). An internal structure of an interaction-state floating layer — not part of the static probes; paint-level visibility is asserted by browser and integration tests on actual canvas pixels (not DOM presence).",
+    "dom": "Attached inside the scroll area (.vsidian-hover-popup-scroll) of the #app popup (.vsidian-hover-popup), in parallel with the reading container (hidden in PDF form). The canvas is a native <canvas> element (width/height written by the renderer per viewport); the page-info line is a <div> whose text comes from the i18n entry hover.pdfPageInfo.",
+    "obsidian": {
+      "counterpart": "None (the PDF presentation of the Obsidian page-preview popover is closed-source and not promised)"
     }
   },
   "hover-fm-section": {

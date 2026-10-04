@@ -27,8 +27,17 @@
 //   WebAssembly 编译/实例化，不放行 JS eval，也不改变脚本装载的 nonce
 //   门控；官方 webview 指南允许按需为 wasm 放开此源表达式。
 //
+// #337 变更（PDF.js worker 的 Blob 装配）：
+// - 新增独立指令 `worker-src blob:`——PDF 渲染 worker 按官方 webview
+//   worker 指南装配为单文件 Blob URL（esbuild iife 产物经 fetch 文本 →
+//   Blob → objectURL → PDF.js new Worker()）。worker-src 缺省回落
+//   script-src，而 nonce 门控的 script-src 不放行 blob:——不加此指令
+//   则 new Worker(blob:) 抛 SecurityError（#334 探针变体 A 实证）。
+//   只放行 blob:（本扩展自产 worker 文本），不放行 data:/http(s) 源；
+//   worker 继承 owner 文档 CSP，其余装载面不变。
+//
 // 不放宽的面（验收红线）：
-// - script-src 维持 nonce 门控——不因字体/样式需求扩大脚本权限，不放
+// - script-src 维持 nonce 门控——不因字体/样式需求扩大脚本权限，不放行
 //   https:/unsafe-inline/unsafe-eval（'wasm-unsafe-eval' 是 #239 jieba
 //   wasm 实例化的最小必要放行，仅覆盖 WebAssembly，见文件头）；
 // - 明文 `http:` 源不放行（样式与字体都只认 https）；
@@ -51,5 +60,8 @@ export function buildEditorCsp(cspSource: string, nonce: string): string {
     `font-src ${cspSource} https:`,
     // #239 jieba wasm：init(url) 的 fetch 只指向 cspSource 资源域
     `connect-src ${cspSource}`,
+    // #337 PDF.js worker：单文件产物经 Blob URL 装配（自有 worker 文本；
+    // 移除即 new Worker(blob:) SecurityError——#334 探针实证）
+    `worker-src blob:`,
   ].join('; ')
 }

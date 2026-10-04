@@ -190,8 +190,8 @@ function applyFmCollapsedTo(section: HTMLElement, expanded: boolean): void {
   }
 }
 
-/** 引用读取错误分态 → 就地 i18n 文案（不弹宿主通知；anchor-missing 附
- *  锚点原文）——悬停浮层与嵌入卡片共用同一文案面 */
+/** 引用读取错误分态 → 就地 i18n 文案（不弹宿主通知；anchor-missing 与
+ *  #337 anchor-invalid 附锚点原文）——悬停浮层与嵌入卡片共用同一文案面 */
 export function refErrorText(reason: HoverPreviewFailReason, target: string, anchor?: string): string {
   switch (reason) {
     case 'unsupported':
@@ -208,6 +208,8 @@ export function refErrorText(reason: HoverPreviewFailReason, target: string, anc
       return t('hover.errorReadFailed')
     case 'anchor-missing':
       return t('hover.errorAnchorMissing', { target, anchor: anchor ?? '' })
+    case 'anchor-invalid':
+      return t('hover.errorAnchorInvalid', { target, anchor: anchor ?? '' })
     case 'source-expired':
       return t('hover.errorSourceExpired')
     case 'cycle':

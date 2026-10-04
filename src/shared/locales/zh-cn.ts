@@ -455,6 +455,9 @@ export const zhCn: Record<MessageKey, string> = {
   'hover.errorNonMarkdown': '{target} 不是 Markdown 笔记：本期预览仅支持 Markdown 文档',
   'hover.errorReadFailed': '读取目标文档失败',
   'hover.errorAnchorMissing': '目标笔记中不存在锚点：{target}#{anchor}（不会以全文替代显示）',
+  /** #337 PDF 悬停预览：锚点语法非法（page=0/非数字/未知键/重复键等，
+   *  不静默回落第一页——修正链接后可重试） */
+  'hover.errorAnchorInvalid': '锚点语法无效：{target}#{anchor}（页码须为正整数，如 #page=3；不会静默改用第一页）',
   'hover.errorWatchCapacity': '同时打开的引用笔记过多。请关闭其他预览或卡片后重新打开。',
   'hover.errorSourceExpired': '来源笔记已变更或关闭。请重新打开此引用。',
   'hover.errorCycle': '当前引用路径中已包含这篇笔记。',
@@ -462,6 +465,14 @@ export const zhCn: Record<MessageKey, string> = {
   'hover.errorBudget': '当前引用树已达到资源上限。',
   /** #220 引用 Reading 内容：浮层内笔记属性区展开/折叠按钮的无障碍文案
    *  （aria-label 与 title 同词；按钮是唯一操作入口，标题行悬停只负责显示） */
+  /** #337 PDF 悬停渲染：页码信息行与渲染失败分态（就地呈现，不弹宿主
+   *  通知；加密文件首批提示在原应用打开，不采集密码） */
+  'hover.pdfPageInfo': '第 {page} / {total} 页',
+  'hover.pdfErrorCorrupt': 'PDF 文件已损坏或不是有效的 PDF，无法预览',
+  'hover.pdfErrorEncrypted': '此 PDF 已加密，暂不支持在预览中打开。请使用本地 PDF 阅读器打开原文件。',
+  'hover.pdfErrorPageRange': '页码超出范围：请求第 {page} 页，该 PDF 共 {total} 页（不会静默跳到第一页）',
+  'hover.pdfErrorResource': 'PDF 资源装载或渲染失败，请重试',
+  'hover.pdfErrorLoadFailed': 'PDF 渲染组件装载失败（扩展安装可能不完整）',
   'hover.content.fmExpand': '展开笔记属性',
   'hover.content.fmCollapse': '收起笔记属性',
   /** #222 Reading 嵌入卡片：装载中文案与卡片头部打开入口的无障碍文案
@@ -692,6 +703,8 @@ export const zhCn: Record<MessageKey, string> = {
   'command.editor.addCursorBelow.title': '在下方添加光标',
   /** #221 预览当前链接（手动打开悬停浮层：键盘进入浮层、Esc 返回触发处） */
   'command.ui.hoverPreviewLink.title': '预览当前链接',
+  'command.ui.hoverPdfPageNext.title': 'PDF 预览：下一页',
+  'command.ui.hoverPdfPagePrev.title': 'PDF 预览：上一页',
   'command.ui.embedToggleMode.title': '切换引用的内部视图模式',
   /** P2-10 引用 Live 操作入口（保存目标/显式关闭/冲突三项；默认均未绑定） */
   'command.embed.saveTarget.title': '保存焦点引用的目标',

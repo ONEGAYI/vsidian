@@ -47,7 +47,8 @@ import * as path from 'node:path'
 import { NewlineCoordinator } from '../shared/newline'
 import { parseWikilinkInner } from '../shared/wikilink'
 import { isVaultPathInsideRoot, planVaultLinkPath, type VaultLinkFileResolution, type VaultLinkResolveContext } from '../shared/vaultLink'
-import { classifyLocalRefContentKind, type RefMarkdownContent } from '../shared/refContent'
+import { classifyLocalRefContentKind, type RefMarkdownContent, type RefPdfContent } from '../shared/refContent'
+import { parsePdfNavAnchor } from '../shared/pdfNav'
 import { classifyLinkTarget, planPathTextOf, splitHrefFragment } from './linkTarget'
 import { findBlockRange, findHeadingSectionRange } from './wikilinkTarget'
 import type { HoverPreviewFailReason, HoverPreviewScope } from '../shared/protocol'
@@ -78,11 +79,12 @@ export type HoverReadOutcome =
 /** #333（P3-01）类型化读取结果：成功形态为「目标身份（fsPath/relPath，
  *  类型无关）+ 按 kind 分派的内容载荷」——markdown 通道为 RefMarkdown
  *  Content（TextDocument 权威版本 + LF 全文 + 初始定位区间 + Markdown
- *  导航选择器）；pdf/image/text/web 的载荷形态由后续票（P3-04/P3-05/
- *  P3-08/P3-10）扩展 content 联合登记，登记前这些类型在分派处回落
- *  non-markdown 失败分态。失败形态与旧扁平入口同源 */
+ *  导航选择器）；#337（P3-05）起 pdf 通道为 RefPdfContent（文件资源
+ *  URI + 文件状态代次 + 源字节 + PDF 导航选择器——双链 #page=N 解析，
+ *  普通链接 fragment 不解析）；image/text/web 的载荷形态由后续票
+ * （P3-04/P3-08/P3-10）扩展 content 联合登记。失败形态与旧扁平入口同源 */
 export type RefReadOutcome =
-  | { ok: true; fsPath: string; relPath: string; content: RefMarkdownContent }
+  | { ok: true; fsPath: string; relPath: string; content: RefMarkdownContent | RefPdfContent }
   | { ok: false; reason: HoverPreviewFailReason; anchor?: string }
 
 /** 类型化结果 → 旧扁平 Markdown 形态（兼容适配展开）。非 markdown 载荷
@@ -122,6 +124,15 @@ export interface HoverDocAccessPorts {
   /** 打开并读取目标文档（vscode 层 = openTextDocument 只装载不显示 + getText；
    *  失败返回 null） */
   openTextDocument(fsPath: string): Promise<{ version: number; text: string } | null>
+  /** #337（P3-05）PDF 文件资源读取（可选——纯 Markdown 消费端不注入时
+   *  pdf 目标回落 non-markdown 分态；vscode 层 = workspace.fs.stat 三态 +
+   *  asWebviewUri + 文件状态代次表）。不装载正文字节：PDF 源经 webview
+   *  资源域按需 fetch，宿主侧零 PDF 解析代码 */
+  readPdfFileResource?(fsPath: string): Promise<
+    | { kind: 'ok'; uri: string; version: number; bytes: number }
+    | { kind: 'not-found' }
+    | { kind: 'inaccessible' }
+  >
 }
 
 /** 锚点规格（链接形态无关的语义选择器输入）：双链 heading/blockId 与
@@ -229,10 +240,12 @@ export interface HoverTargetForm {
   directTarget?: { fsPath: string; anchor?: string }
 }
 
-/** 三形态解析结果：成功携带 fsPath + 锚点规格（形态归一后）；失败为
- *  解析层错误分态（unsupported/no-workspace/escape/not-found） */
+/** 三形态解析结果：成功携带 fsPath + 锚点规格（形态归一后）+ **来源形态
+ *  标记**（#337：PDF 锚点语法双链限定——mdlink/direct 不解析 #page=N，
+ *  fragment 原样交宿主，悬停预览从第一页开始）；失败为解析层错误分态
+ *  （unsupported/no-workspace/escape/not-found） */
 type HoverTargetResolution =
-  | { ok: true; fsPath: string; spec: AnchorSpec | null }
+  | { ok: true; fsPath: string; spec: AnchorSpec | null; formKind: 'wikilink' | 'mdlink' | 'direct' }
   | { ok: false; reason: HoverPreviewFailReason }
 
 /**
@@ -260,7 +273,7 @@ async function resolveHoverTargetForm(
     if (!isVaultPathInsideRoot(direct.fsPath, ctx.resolve)) {
       return { ok: false, reason: 'escape' }
     }
-    return { ok: true, fsPath: direct.fsPath, spec: direct.anchor ? anchorSpecOfFragment(direct.anchor) : null }
+    return { ok: true, fsPath: direct.fsPath, spec: direct.anchor ? anchorSpecOfFragment(direct.anchor) : null, formKind: 'direct' }
   }
   if (form.linkHref !== undefined) {
     const classified = classifyLinkTarget(form.linkHref, {
@@ -279,7 +292,7 @@ async function resolveHoverTargetForm(
     }
     if (classified.kind === 'anchor') {
       // 页内锚点：目标即来源文档自身（不查文件系统）
-      return { ok: true, fsPath: ctx.sourceFsPath, spec: anchorSpecOfFragment(classified.fragment) }
+      return { ok: true, fsPath: ctx.sourceFsPath, spec: anchorSpecOfFragment(classified.fragment), formKind: 'mdlink' }
     }
     // doc：路径探测经同一 resolveVaultFile 端口（内部与双链共用
     // resolveVaultLinkFile——候选规划、越界判别、补 .md 同一实现；此处
@@ -296,7 +309,7 @@ async function resolveHoverTargetForm(
     if (resolution.kind === 'not-found') {
       return { ok: false, reason: 'not-found' }
     }
-    return { ok: true, fsPath: resolution.fsPath, spec: anchorSpecOfFragment(classified.fragment) }
+    return { ok: true, fsPath: resolution.fsPath, spec: anchorSpecOfFragment(classified.fragment), formKind: 'mdlink' }
   }
   const target = form.target ?? ''
   const parsed = parseWikilinkInner(target.trim())
@@ -305,7 +318,7 @@ async function resolveHoverTargetForm(
   }
   if (parsed.path === '') {
     // 本文件锚点：目标即来源文档自身（不查文件系统）
-    return { ok: true, fsPath: ctx.sourceFsPath, spec: anchorSpecOfWikilink(parsed) }
+    return { ok: true, fsPath: ctx.sourceFsPath, spec: anchorSpecOfWikilink(parsed), formKind: 'wikilink' }
   }
   const resolution = await ports.resolveVaultFile(parsed.path)
   if (resolution.kind === 'no-workspace') {
@@ -317,7 +330,54 @@ async function resolveHoverTargetForm(
   if (resolution.kind === 'not-found') {
     return { ok: false, reason: 'not-found' }
   }
-  return { ok: true, fsPath: resolution.fsPath, spec: anchorSpecOfWikilink(parsed) }
+  return { ok: true, fsPath: resolution.fsPath, spec: anchorSpecOfWikilink(parsed), formKind: 'wikilink' }
+}
+
+/**
+ * 读取 PDF 目标的文件资源与导航选择器（类型分派的 pdf 通道——调用前
+ * 类型已判定为 pdf，#337 / P3-05）：**锚点语法双链限定**——
+ * - 双链（formKind wikilink）：锚点原文经 parsePdfNavAnchor 解析
+ *   `#page=N`（1-based 正整数；块 id 形态与一切非法形态报 anchor-invalid，
+ *   附锚点原文，不静默回落第一页）；
+ * - 普通链接/直接目标（mdlink/direct）：fragment 不由本扩展解析（原样交
+ *   宿主打开），悬停预览从第一页开始；
+ * 文件资源经 readPdfFileResource 端口（stat 三态 + 资源 URI + 文件状态
+ * 代次）：not-found 归缺失分态，inaccessible（权限/断连）归 read-failed
+ * （不冒充删除）。全程无副作用：不打开、不写、不装载正文字节。
+ */
+async function readPdfContent(
+  fsPath: string,
+  spec: AnchorSpec | null,
+  formKind: 'wikilink' | 'mdlink' | 'direct',
+  ports: HoverDocAccessPorts,
+): Promise<{ ok: true; content: RefPdfContent } | { ok: false; reason: HoverPreviewFailReason; anchor?: string }> {
+  let selector: RefPdfContent['selector'] = { kind: 'pdf' }
+  if (formKind === 'wikilink' && spec !== null) {
+    // 双链限定：块 id（#^…）不是合法 PDF 锚点键；heading 原文走分词解析
+    const parsed = spec.kind === 'block'
+      ? ({ ok: false, reason: 'invalid', anchor: `^${spec.anchor}` } as const)
+      : parsePdfNavAnchor(spec.anchor)
+    if (!parsed.ok) {
+      return { ok: false, reason: 'anchor-invalid', anchor: parsed.anchor }
+    }
+    selector = parsed.selector
+  }
+  // 文件资源（端口未注入 = 纯 Markdown 消费端，维持 non-markdown 兼容降级）
+  if (ports.readPdfFileResource === undefined) {
+    return { ok: false, reason: 'non-markdown' }
+  }
+  const resource = await ports.readPdfFileResource(fsPath)
+  if (resource.kind === 'not-found') {
+    return { ok: false, reason: 'not-found' }
+  }
+  if (resource.kind === 'inaccessible') {
+    // 权限/断连等不可访问：不冒充文件删除
+    return { ok: false, reason: 'read-failed' }
+  }
+  return {
+    ok: true,
+    content: { kind: 'pdf', version: resource.version, uri: resource.uri, bytes: resource.bytes, selector },
+  }
 }
 
 /**
@@ -325,10 +385,11 @@ async function resolveHoverTargetForm(
  * fsPath 后按类型分派——
  * - markdown：装载既有全文载荷（RefMarkdownContent：TextDocument 权威
  *   版本 + LF 全文 + 初始定位区间 + Markdown 导航选择器）；
- * - 其余类型（pdf/image/text/web）：维持 non-markdown 分态（附件/外链
- *   的载荷与导航选择器由 P3-04/P3-05/P3-08/P3-10 在此分派表登记——
- *   Markdown 的 TextDocument.version 和 LF 范围不能冒充这些类型的版本
- *   或页码）。
+ * - pdf（#337 / P3-05）：装载文件资源载荷（RefPdfContent：资源 URI +
+ *   文件状态代次 + 源字节 + PDF 导航选择器——#page=N 双链限定解析）；
+ * - 其余类型（image/text/web）：维持 non-markdown 分态（载荷与导航选择器
+ *   由 P3-04/P3-08/P3-10 在此分派表登记——Markdown 的 TextDocument
+ *   .version 与 LF 范围不能冒充这些类型的版本或页码）。
  *
  * 类型由宿主按解析出的 fsPath 分类（classifyLocalRefContentKind），不
  * 接收前端声明的类型；web 目标在解析层即 unsupported（#342 接入时扩展）。
@@ -345,21 +406,30 @@ export async function readRefContentTarget(
     return resolution
   }
   const kind = classifyLocalRefContentKind(resolution.fsPath)
+  const relOf = ctx.resolve.isWindowsHost ? path.win32.relative : path.posix.relative
+  const relPath = relOf(ctx.rootFsPath, resolution.fsPath).replaceAll('\\', '/')
+  if (kind === 'pdf') {
+    // #337（P3-05）pdf 通道：文件资源载荷 + 双链限定导航选择器
+    const content = await readPdfContent(resolution.fsPath, resolution.spec, resolution.formKind, ports)
+    if (!content.ok) {
+      return content
+    }
+    return { ok: true, fsPath: resolution.fsPath, relPath, content: content.content }
+  }
   if (kind !== 'markdown') {
-    // 类型分派表（#333 落位）：markdown 通道之外的类型本票不装载——
-    // 既有 non-markdown 分态保持（图片 #336 / PDF #337 / 文本 #340 /
-    // 外链 #342 接入时按 kind 登记各自载荷与导航选择器）
+    // 类型分派表（#333 落位）：markdown/pdf 通道之外的类型本票不装载——
+    // 既有 non-markdown 分态保持（图片 #336 / 文本 #340 / 外链 #342 接入
+    // 时按 kind 登记各自载荷与导航选择器）
     return { ok: false, reason: 'non-markdown' }
   }
   const content = await readMarkdownContent(resolution.fsPath, resolution.spec, ports, opts)
   if (!content.ok) {
     return content
   }
-  const relOf = ctx.resolve.isWindowsHost ? path.win32.relative : path.posix.relative
   return {
     ok: true,
     fsPath: resolution.fsPath,
-    relPath: relOf(ctx.rootFsPath, resolution.fsPath).replaceAll('\\', '/'),
+    relPath,
     content: content.content,
   }
 }

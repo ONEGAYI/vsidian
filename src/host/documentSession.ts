@@ -36,6 +36,7 @@ import {
   type WebviewToHost,
 } from '../shared/protocol'
 import type { HoverTargetTipOutcome, RefReadOutcome } from './hoverDocAccess'
+import type { RefPdfNavSelector } from '../shared/refContent'
 import type { ImagePasteOutcome } from './imagePasteHost'
 import { mapChangeThroughChanges } from '../shared/changeMapping'
 import { NewlineCoordinator } from '../shared/newline'
@@ -276,9 +277,10 @@ interface HoverSourceGrant {
   version: number
   /** P2-03（#280）：初始定位区间参考（锚点命中的锚定区间；宽容重载为全文
    *  区间）——子引用准入已不以它为界（validChildSource 按来源全文校验），
-   *  仅随租约保留定位语义 */
+   *  仅随租约保留定位语义。#337 起 pdf 载荷为零区间占位（PDF 无 LF
+   *  坐标——定位由 scope.page 承载） */
   range: { start: number; end: number }
-  scope: HoverPreviewScope
+  scope: HoverPreviewScope | RefPdfNavSelector
   path: string[]
   depth: number
   treeId: string
@@ -1141,10 +1143,15 @@ export class DocumentSession {
             this.options.rootFsPath ?? this.docUri, this.options.isWindowsHost ?? false)]
           if (result.ok) {
             const key = canonicalRefTargetKey(result.fsPath, this.options.isWindowsHost ?? false)
+            // #337：内容字节费用按类型计——markdown 为 LF 全文 UTF-16，
+            // pdf 为源文件字节（逻辑预算费用，不代表解码内存）
+            const contentBytes = result.content.kind === 'markdown'
+              ? result.content.lfText.length * 2 + 128
+              : result.content.bytes + 128
             if (parent !== undefined && occurrenceId !== undefined && inExpansionPath(pathToParent, key)) result = { ok: false, reason: 'cycle' }
             else if (occurrenceId !== undefined && panel.expansionBudget.attachContent(
               occurrenceId, `${occurrenceId}\n${result.fsPath}\n${result.content.version}`,
-              result.content.lfText.length * 2 + 128) !== 'ok') {
+              contentBytes) !== 'ok') {
               result = { ok: false, reason: 'budget' }
             }
           }
@@ -1155,7 +1162,9 @@ export class DocumentSession {
               panel.hoverSourceLeases.set(sourceLeaseId, result.fsPath)
               panel.hoverLeaseGrants.set(sourceLeaseId, {
                 fsPath: result.fsPath, version: result.content.version,
-                range: result.content.range, scope: result.content.selector,
+                // #337：pdf 载荷无 LF 区间语义——零区间占位（定位在 scope.page）
+                range: result.content.kind === 'markdown' ? result.content.range : { start: 0, end: 0 },
+                scope: result.content.selector,
                 path: [...pathToParent, canonicalRefTargetKey(result.fsPath, this.options.isWindowsHost ?? false)],
                 depth, treeId, occurrenceId: occurrenceId ?? '',
               })
@@ -1186,13 +1195,26 @@ export class DocumentSession {
                   ok: true,
                   // #333（P3-01）类型化出站：生产读取经 readRefContentTarget
                   // 类型分派，成功显式携带 contentKind（缺省 = markdown 的
-                  // 兼容识别留给旧消息——校验器两形态都放行）
-                  contentKind: 'markdown',
+                  // 兼容识别留给旧消息——校验器两形态都放行）。#337（P3-05）
+                  // 起 pdf 登记出站形态：pdf 资源字段 + 空 text + pdf 选择器
+                  // scope + 零区间 range（PDF 无 LF 坐标）
+                  ...(result.content.kind === 'pdf'
+                    ? {
+                        contentKind: 'pdf' as const,
+                        version: result.content.version,
+                        text: '',
+                        range: { start: 0, end: 0 },
+                        scope: result.content.selector,
+                        pdf: { uri: result.content.uri, bytes: result.content.bytes },
+                      }
+                    : {
+                        contentKind: 'markdown' as const,
+                        version: result.content.version,
+                        text: result.content.lfText,
+                        range: result.content.range,
+                        scope: result.content.selector,
+                      }),
                   target: { fsPath: result.fsPath, relPath: result.relPath },
-                  version: result.content.version,
-                  text: result.content.lfText,
-                  range: result.content.range,
-                  scope: result.content.selector,
                   expansionPath: [...pathToParent, canonicalRefTargetKey(result.fsPath,
                     this.options.isWindowsHost ?? false)],
                   depth,
@@ -1616,10 +1638,13 @@ export class DocumentSession {
     }
   }
 
-  /** 成功结果入缓存（字节按 LF 全文 UTF-16 code unit ×2 近似计量；
-   *  条目/字节双上限按插入序淘汰——单条超字节上限不入缓存） */
+  /** 成功结果入缓存（字节按内容类型近似计量：markdown 为 LF 全文 UTF-16
+   *  code unit ×2，#337 起 pdf 为源文件字节；条目/字节双上限按插入序淘汰
+   *  ——单条超字节上限不入缓存） */
   private commitHoverRead(shapeKey: string, outcome: Extract<RefReadOutcome, { ok: true }>): void {
-    const bytes = outcome.content.lfText.length * 2
+    const bytes = outcome.content.kind === 'markdown'
+      ? outcome.content.lfText.length * 2
+      : outcome.content.bytes
     if (bytes > this.hoverCacheLimits.byteLimit) {
       return
     }
@@ -1656,7 +1681,9 @@ export class DocumentSession {
       return
     }
     this.hoverReadCache.delete(shapeKey)
-    this.hoverCacheBytes -= hit.content.lfText.length * 2
+    this.hoverCacheBytes -= hit.content.kind === 'markdown'
+      ? hit.content.lfText.length * 2
+      : hit.content.bytes
     const keys = this.hoverShapeTargets.get(hit.fsPath)
     if (keys) {
       keys.delete(shapeKey)
