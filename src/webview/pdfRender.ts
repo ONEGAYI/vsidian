@@ -524,6 +524,13 @@ interface PdfPageSlot {
  */
 export class PdfHoverView {
   private renderSeq = 0
+  /** 重绘代次（review-loops 三期修复）：refreshMountedScale 类「cancel
+   *  在途 + 重新入队」路径推进。zoom/宽度变化不推进 renderSeq（视图与
+   *  目标未变、slot 仍在场），被取消的旧协程若仅靠 renderSeq 守卫会在
+   *  新协程之前把半成品画布（白底 fillRect + 旧 scale 部分绘制）原子
+   *  换入，替换在场完整画布——违背「画完再换入、无白帧间隙」的自述
+   *  契约；代次已变的迟到协程不换入直接 return */
+  private repaintSeq = 0
   private disposed = false
   private phase: PdfRenderProbe['phase'] = 'idle'
   private page = 0
@@ -1001,9 +1008,11 @@ export class PdfHoverView {
     if (slot === undefined || doc === null) return
     this.rendering++
     const seq = this.renderSeq
+    const repaint = this.repaintSeq
     try {
       const page = await doc.getPage(pageNo)
-      if (seq !== this.renderSeq || this.disposed || !this.slots.has(pageNo)) {
+      if (seq !== this.renderSeq || repaint !== this.repaintSeq ||
+        this.disposed || !this.slots.has(pageNo)) {
         return
       }
       const base = page.getViewport({ scale: 1 })
@@ -1052,7 +1061,8 @@ export class PdfHoverView {
         // RenderingCancelledException（重入/离窗/dispose 取消）——不构成错误态
       }
       slot.task = null
-      if (seq !== this.renderSeq || this.disposed || !this.slots.has(pageNo)) {
+      if (seq !== this.renderSeq || repaint !== this.repaintSeq ||
+        this.disposed || !this.slots.has(pageNo)) {
         this.flushContentWaiter()
         return
       }
@@ -1085,7 +1095,7 @@ export class PdfHoverView {
         this.flushContentWaiter()
       }
     } catch {
-      if (seq !== this.renderSeq) return
+      if (seq !== this.renderSeq || repaint !== this.repaintSeq) return
       if (this.slots.has(pageNo)) {
         this.setError('resource')
         this.flushContentWaiter()
@@ -1379,6 +1389,9 @@ export class PdfHoverView {
 
   /** 已挂载页按当前 scale 重绘（取消在途、回收旧画布与层、重新入队） */
   private refreshMountedScale(): void {
+    // 重绘代次推进：被取消的旧协程迟到完成不换入半成品画布（见字段
+    // 注释——renderSeq 不覆盖本路径：视图与目标未变、slot 仍在场）
+    this.repaintSeq++
     const pages = [...this.slots.keys()].sort((a, b) => a - b)
     for (const pageNo of pages) {
       const slot = this.slots.get(pageNo)

@@ -948,6 +948,56 @@ describe('PDF 适合宽度与用户缩放（#339）', () => {
     expect(view.zoomBy(1.25)).toBe(false)
     expect(view.resetZoom()).toBe(false)
   })
+
+  it('缩放取消在途渲染：被取消的旧协程迟到完成不换入半成品画布', async () => {
+    mockViewport()
+    // 页 2 render 挂起且可控（记录每次调用的 resolve——旧协程与重新入队
+    // 后的新协程各自一枚 task）；cancel 走真实 pdfjs 语义：以
+    // RenderingCancelledException reject（渲染器 catch 吞掉后继续到达
+    // 换入守卫——正是半成品画布可能漏换入的路径）
+    const page2Tasks: Array<{ resolve: () => void }> = []
+    const hangingPage2 = {
+      getViewport: ({ scale }: { scale: number }) => ({ width: 612 * scale, height: 792 * scale }),
+      render: () => {
+        let resolveOuter!: () => void
+        let rejectOuter!: (err: Error) => void
+        const task = {
+          promise: new Promise<void>((resolve, reject) => {
+            resolveOuter = resolve
+            rejectOuter = reject
+          }),
+          cancel: () => {
+            const err = new Error('cancelled')
+            err.name = 'RenderingCancelledException'
+            task.promise.catch(() => {})
+            rejectOuter(err)
+          },
+        }
+        page2Tasks.push({ resolve: resolveOuter })
+        return task
+      },
+    }
+    installFakePdfjs(makeFakeDoc(4, { 2: hangingPage2 as unknown as ReturnType<typeof makeFakePage> }))
+    const view = new PdfHoverView(scrollEl)
+    cleanupFns.push(() => view.dispose())
+    await view.show('https://files.test/a.pdf?v=1', 1, 448)
+    // 窗口 [1,2] 并发在途：页 1 即完成（content 态），页 2 挂起
+    await pumpUntil(() => page2Tasks.length === 1)
+    // 触发缩放：cancel 页 2 在途任务并把挂载页全部重新入队
+    expect(view.zoomBy(1.25)).toBe(true)
+    await pumpUntil(() => page2Tasks.length === 2)
+    await pumpUntil(() => view.probe().canvasWidth === 560)
+    // 此刻被取消的旧协程必然已跑完换入守卫（其 continuation 排队早于
+    // 新协程的 render 调用）：旧 scale 半成品画布（宽 447）不得出现在
+    // 窗口内——在场只允许页 1 的新 scale 画布（560）
+    const widths = [...scrollEl.querySelectorAll('canvas')].map((c) => c.width)
+    expect(widths, '被取消协程的半成品画布不得换入').toEqual([560])
+    // 新协程完成：页 2 以新 scale 落地
+    page2Tasks[1]!.resolve()
+    await pumpUntil(() => scrollEl.querySelectorAll('canvas').length === 2)
+    const finalWidths = [...scrollEl.querySelectorAll('canvas')].map((c) => c.width)
+    expect(finalWidths).toEqual([560, 560])
+  })
 })
 
 describe('PDF 文本层（#339）', () => {
