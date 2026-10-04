@@ -67,7 +67,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 // C、父根切换不覆写手动、循环截断与编辑器移交）紧随 tableCellLive。
 // main 合入列（PR #314）：plainPaste/richPaste/richPasteUndo/
 // richPasteCompatibility（富文本粘贴/分步撤销族）紧随 imagePaste。
-const names = ['tableCaret', 'blockquoteTablePaint', 'quoteBarPaint', 'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'wordMotion', 'imagePaste', 'plainPaste', 'richPaste', 'richPasteUndo', 'richPasteCompatibility', 'outlineJump', 'outlineCollapse', 'outlineHover',
+const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint', 'taskClick', 'frontmatterTable', 'listEditing', 'tabIndent', 'symbolInput', 'wordMotion', 'imagePaste', 'plainPaste', 'richPaste', 'richPasteUndo', 'richPasteCompatibility', 'outlineJump', 'outlineCollapse', 'outlineHover',
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage', 'settingsPageRestore',
   'skeletonProbe', 'tooltipCard',
 

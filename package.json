@@ -535,6 +535,8 @@
     "markdown-it": "15.0.2",
     "mermaid": "11.12.2",
     "pdfjs-dist": "6.4.299",
+    "vscode-oniguruma": "1.7.0",
+    "vscode-textmate": "9.0.0",
     "yaml": "2.9.1"
   },
   "devDependencies": {
@@ -548,8 +550,6 @@
     "playwright": "1.62.1",
     "sql.js": "1.14.2",
     "typescript": "6.0.3",
-    "vitest": "5.0.1",
-    "vscode-oniguruma": "1.7.0",
-    "vscode-textmate": "9.0.0"
+    "vitest": "5.0.1"
   }
 }

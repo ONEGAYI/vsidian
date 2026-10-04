@@ -25,6 +25,7 @@ import {
   type DocumentChangeReason,
   type PasteHistory,
   type HostToWebview,
+  type HoverAnchorInvalidDetail,
   type HoverPreviewRequestPayload,
   type HoverPreviewFailReason,
   type HoverPreviewScope,
@@ -36,7 +37,7 @@ import {
   type WebviewToHost,
 } from '../shared/protocol'
 import type { HoverTargetTipOutcome, RefReadOutcome } from './hoverDocAccess'
-import type { RefImageContent, RefMarkdownContent, RefPdfContent, RefPdfNavSelector } from '../shared/refContent'
+import type { RefImageContent, RefMarkdownContent, RefPdfContent, RefPdfNavSelector, RefTextContent } from '../shared/refContent'
 import type { ImagePasteOutcome } from './imagePasteHost'
 import { isHttpLinkHref } from '../shared/webLink'
 import { mapChangeThroughChanges } from '../shared/changeMapping'
@@ -91,6 +92,18 @@ export interface PanelPort {
    *  底层连接；markdown 读取不可中止，无操作）。instanceId/reqId 与被
    *  取消的 hover.request 配对 */
   cancelHoverRead?(identity: { instanceId: string; reqId: number }): void
+  /** #340（P3-08）文本 token 计算（vscode 层注入：外观服务——语法层
+   *  vscode-textmate + 语义层公开命令；**fsPath 守卫在此端口上游**：调用
+   *  方按 hoverSourceFsPaths 复核已送达目标，被攻陷 webview 不能借本通道
+   *  探测任意文件）。version 为请求方装载版本——目标已推进回 stale。
+   *  只读交互，不进 edit.request 通道 */
+  readTextTokens?(
+    payload: { fsPath: string; version: number; beginLine: number; endLine: number },
+    report: (result:
+      | { ok: true; layer: 'textmate'; colors: string[]; tokens: number[]; version: number }
+      | { ok: true; layer: 'semantic'; colors: string[]; tokens: number[]; version: number }
+      | { ok: false; reason: 'stale' | 'unavailable' }) => void,
+  ): void
   readHoverSource?(fsPath: string): Promise<{ version: number; text: string } | null>
   /** #299 跳转目标提示轻量解析（vscode 层注入：hoverDocAccess 的
    *  resolveHoverTargetTip——路径解析与存在性探测，**不读正文**、不建
@@ -617,6 +630,61 @@ export class DocumentSession {
           this.trimHoverSources(panel)
         }
         return Promise.resolve()
+      case 'hover.tokens.request': {
+        // #340（P3-08）文本 token 请求：会话守卫与 hover.request 同款；
+        // **fsPath 来源守卫**——必须是本面板成功送达过的目标
+        // （hoverSourceFsPaths，成功读取即入集合），被攻陷 webview 不能借
+        // 本通道探测任意文件的内容侧信道。计算经面板端口注入（外观服务），
+        // 结果按 reqId+instanceId 回来源面板（webview 侧再做版本配对——
+        // 迟到/过期 token 不覆盖新正文）。只读交互：不进 edit.request
+        // 通道、不建租约，暂停态同样放行
+        if (!panel.ready || message.docUri !== this.docUri) {
+          return Promise.resolve()
+        }
+        if (!panel.hoverSourceFsPaths.has(message.fsPath)) {
+          panel.port.send({
+            kind: 'hover.tokens', reqId: message.reqId, instanceId: message.instanceId, ok: false, reason: 'stale',
+          })
+          return Promise.resolve()
+        }
+        const tokenPort = panel.port.readTextTokens
+        if (!tokenPort) {
+          panel.port.send({
+            kind: 'hover.tokens', reqId: message.reqId, instanceId: message.instanceId, ok: false, reason: 'unavailable',
+          })
+          return Promise.resolve()
+        }
+        tokenPort(
+          { fsPath: message.fsPath, version: message.version, beginLine: message.beginLine, endLine: message.endLine },
+          (result) => {
+            if (this.disposed || this.panels.get(sessionId) !== panel) {
+              return
+            }
+            panel.port.send(
+              result.ok
+                ? {
+                    kind: 'hover.tokens',
+                    reqId: message.reqId,
+                    instanceId: message.instanceId,
+                    ok: true,
+                    fsPath: message.fsPath,
+                    version: result.version,
+                    layer: result.layer,
+                    colors: result.colors,
+                    tokens: result.tokens,
+                  }
+                : {
+                    kind: 'hover.tokens',
+                    reqId: message.reqId,
+                    instanceId: message.instanceId,
+                    ok: false,
+                    reason: result.reason,
+                  },
+            )
+          },
+        )
+        return Promise.resolve()
+      }
       case 'hover.target.resolve': {
         // #299 跳转目标提示轻量解析：会话守卫与其余请求同款（就绪且
         // docUri 匹配才放行，否则静默丢弃）；解析执行经面板端口注入
@@ -1177,15 +1245,15 @@ export class DocumentSession {
             })
             return
           }
-          // 窄化：web 已出站返回，此后成功结果为 markdown / image / pdf
-          // 载荷（#336 登记 image；#337 登记 pdf；text 未登记——防御性
-          // 收敛 non-markdown，结构性不可达）
-          let outcome: { ok: true; fsPath: string; relPath: string; content: RefMarkdownContent | RefImageContent | RefPdfContent } | { ok: false; reason: HoverPreviewFailReason; anchor?: string }
+          // 窄化：web 已出站返回，此后成功结果为 markdown / image / pdf /
+          // text 载荷（#336 登记 image；#337 登记 pdf；#340 登记 text）；
+          // 未知扩展类型防御性收敛 non-markdown（结构性不可达）
+          let outcome: { ok: true; fsPath: string; relPath: string; content: RefMarkdownContent | RefImageContent | RefPdfContent | RefTextContent } | { ok: false; reason: HoverPreviewFailReason; anchor?: string; anchorDetail?: HoverAnchorInvalidDetail }
           if (result.ok) {
             // 解构后判别：TS 判别联合窄化不支持 x.content.kind 嵌套路径，
             // content 单独绑定后 kind 判别为标准形态
             const { fsPath, relPath, content } = result
-            outcome = content.kind === 'markdown' || content.kind === 'image' || content.kind === 'pdf'
+            outcome = content.kind === 'markdown' || content.kind === 'image' || content.kind === 'pdf' || content.kind === 'text'
               ? { ok: true, fsPath, relPath, content }
               : { ok: false, reason: 'non-markdown' }
           } else {
@@ -1201,11 +1269,13 @@ export class DocumentSession {
             this.options.rootFsPath ?? this.docUri, this.options.isWindowsHost ?? false)]
           if (outcome.ok) {
             const key = canonicalRefTargetKey(outcome.fsPath, this.options.isWindowsHost ?? false)
-            // 内容字节费用按类型计（#337/#336）：markdown 为 LF 全文 UTF-16
-            // （+ 小常数开销）；pdf 为源文件字节（逻辑预算费用，不代表解码
-            // 内存）；image 载荷无正文——按身份载荷小常数计量（图片解码
-            // 内存归图片管线，与普通 Markdown 图片同口径，不占文本预算大额）
-            const contentBytes = outcome.content.kind === 'markdown'
+            // 内容字节费用按类型计（#337/#336/#340）：markdown 为 LF 全文
+            // UTF-16（+ 小常数开销）；text 为窗口正文 LF UTF-16（#range 硬
+            // 窗口只计 B–E 行——范围外结构性不可达，不占预算）；pdf 为源
+            // 文件字节（逻辑预算费用，不代表解码内存）；image/web 载荷无
+            // 正文——按身份载荷小常数计量（图片解码内存归图片管线，与普通
+            // Markdown 图片同口径，不占文本预算大额）
+            const contentBytes = (outcome.content.kind === 'markdown' || outcome.content.kind === 'text')
               ? outcome.content.lfText.length * 2 + 128
               : outcome.content.kind === 'pdf'
                 ? outcome.content.bytes + 128
@@ -1227,8 +1297,13 @@ export class DocumentSession {
                 // #336：图片载荷无定位区间与 Markdown 选择器——租约只保留
                 // 身份语义（range/scope 退化中性值；图片无锚点定位语义）；
                 // #337：pdf 载荷无 LF 区间语义——零区间占位（定位由 pdf
-                // 选择器的 page 承载，租约保留 pdf 选择器）
-                range: outcome.content.kind === 'markdown' ? outcome.content.range : { start: 0, end: 0 },
+                // 选择器的 page 承载，租约保留 pdf 选择器）；#340：text 载荷
+                // 的选择器为 RefTextNavSelector（非 HoverPreviewScope）——
+                // 租约的 scope 字段只保留定位语义，text 归 full 形态（观感/
+                // 观测面），锚点语义在 textNav 载荷
+                range: (outcome.content.kind === 'markdown' || outcome.content.kind === 'text')
+                  ? outcome.content.range
+                  : { start: 0, end: 0 },
                 scope: outcome.content.kind === 'markdown' || outcome.content.kind === 'pdf'
                   ? outcome.content.selector
                   : { kind: 'full' },
@@ -1266,15 +1341,39 @@ export class DocumentSession {
                   // image 通道：图源载荷（来源相对 src；字节与版本戳走既有
                   // 图片通道），Markdown 全文/区间/选择器退化形态；#337
                   // （P3-05）pdf 通道：pdf 资源字段 + 空 text + pdf 选择器
-                  // scope + 零区间 range（PDF 无 LF 坐标）
+                  // scope + 零区间 range（PDF 无 LF 坐标）；#340（P3-08）text
+                  // 通道：窗口正文入 text、定位区间入 range；Markdown 语义
+                  // 选择器不适用于代码文件（观感探针沿用 full），窗口/落点/
+                  // 语言/字体在 textNav
                   contentKind: outcome.content.kind,
                   target: { fsPath: outcome.fsPath, relPath: outcome.relPath },
                   version: outcome.content.version,
                   ...(outcome.content.kind === 'image' ? { imageSrc: outcome.content.src } : {}),
                   ...(outcome.content.kind === 'pdf' ? { pdf: { uri: outcome.content.uri, bytes: outcome.content.bytes } } : {}),
-                  text: outcome.content.kind === 'markdown' ? outcome.content.lfText : '',
-                  range: outcome.content.kind === 'markdown' ? outcome.content.range : { start: 0, end: 0 },
-                  scope: outcome.content.kind === 'image' ? { kind: 'plain' } : outcome.content.selector,
+                  text: (outcome.content.kind === 'markdown' || outcome.content.kind === 'text') ? outcome.content.lfText : '',
+                  range: (outcome.content.kind === 'markdown' || outcome.content.kind === 'text')
+                    ? outcome.content.range
+                    : { start: 0, end: 0 },
+                  scope: outcome.content.kind === 'image' ? { kind: 'plain' }
+                    : outcome.content.kind === 'text' ? { kind: 'full' as const }
+                      : outcome.content.selector,
+                  ...(outcome.content.kind === 'text'
+                    ? {
+                        textNav: {
+                          languageId: outcome.content.languageId,
+                          hasWindow: outcome.content.hasWindow,
+                          beginLine: outcome.content.beginLine,
+                          endLine: outcome.content.endLine,
+                          locateLine: outcome.content.locateLine,
+                          jumpLine: outcome.content.jumpLine,
+                          totalLines: outcome.content.totalLines,
+                          ...(outcome.content.font.family !== undefined ? { fontFamily: outcome.content.font.family } : {}),
+                          ...(outcome.content.font.size !== undefined ? { fontSize: outcome.content.font.size } : {}),
+                          ...(outcome.content.font.ligatures !== undefined ? { fontLigatures: outcome.content.font.ligatures } : {}),
+                          lineNumbers: outcome.content.lineNumbers,
+                        },
+                      }
+                    : {}),
                   expansionPath: [...pathToParent, canonicalRefTargetKey(outcome.fsPath,
                     this.options.isWindowsHost ?? false)],
                   depth,
@@ -1287,6 +1386,7 @@ export class DocumentSession {
                   ok: false,
                   reason: outcome.reason,
                   ...(outcome.anchor !== undefined ? { anchor: outcome.anchor } : {}),
+                  ...(outcome.anchorDetail !== undefined ? { anchorDetail: outcome.anchorDetail } : {}),
                 },
           )
         }

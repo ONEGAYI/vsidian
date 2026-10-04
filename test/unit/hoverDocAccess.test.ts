@@ -953,19 +953,11 @@ describe('#333 类型分派入口 readRefContentTarget', () => {
     }
   })
 
-  it('非 markdown 未登记类型（text）→ non-markdown 分态，读取端口零调用（不装载附件）；#336/#337 起 image/pdf 各自登记，pdf 端口未注入维持降级', async () => {
+  it('pdf 资源端口未注入 → non-markdown 分态（纯 Markdown 消费端的兼容降级）；image/text 各自登记走专用通道（契约见 #336 describe 与 hoverDocAccessText.test.ts）', async () => {
     const h = makeHarness(matrixDisk())
-    for (const [form, label] of [
-      [{ directTarget: { fsPath: 'D:\\notes\\脚本.ts' } }, '直接目标文本'],
-    ] as Array<[{ target?: string; linkHref?: string; directTarget?: { fsPath: string; anchor?: string } }, string]>) {
-      expect(await readRefContentTarget(form, h.ctx, h.ports), `${label} 应 non-markdown`).toEqual({
-        ok: false,
-        reason: 'non-markdown',
-      })
-    }
-    expect(h.opened, '非 markdown 目标不读取正文').toEqual([])
-    // pdf（#337）：资源端口未注入时保持 non-markdown 分态（纯 Markdown 消费
-    // 端的兼容降级——旧调用面不因类型登记被迫接入 PDF 通道）
+    // pdf（#337）：资源端口未注入时保持 non-markdown 分态（旧调用面不因
+    // 类型登记被迫接入 PDF 通道）；#336/#340 起 image/text 已登记各自载荷，
+    // 不再回落本分态
     expect(await readRefContentTarget({ linkHref: '资料.pdf' }, h.ctx, h.ports)).toEqual({
       ok: false,
       reason: 'non-markdown',

@@ -64,6 +64,22 @@ const katexMinJsPlugin = {
   },
 }
 
+/** #340（P3-08）oniguruma WASM 复制：vscode-oniguruma 的 onig.wasm 是
+ *  运行时按路径读取的二进制资产（vscode-textmate 引擎初始化 loadWASM
+ *  需要），不能进 JS bundle——复制到 out/onig.wasm（VSIX 打包 out/ 目录
+ *  随包；运行时经 extensionUri/out/onig.wasm 定位）。release.mjs 的
+ *  REQUIRED 清单已登记该文件。 */
+const onigWasmCopyPlugin = {
+  name: 'onig-wasm-copy',
+  setup(build) {
+    build.onEnd(() => import('node:fs').then((fs) =>
+      fs.promises.copyFile(
+        path.resolve('node_modules/vscode-oniguruma/release/onig.wasm'),
+        path.resolve('out/onig.wasm'),
+      )))
+  },
+}
+
 /** webview 产物共用配置（browser/iife/chrome118 + KaTeX 字体装载） */
 const webviewBase = {
   bundle: true,
@@ -127,6 +143,7 @@ const targets = [
     sourcemap: !production,
     minify: production,
     logLevel: 'info',
+    plugins: [onigWasmCopyPlugin],
   },
   {
     entryPoints: ['src/webview/main.ts'],
@@ -181,6 +198,18 @@ if (!production) {
   targets.push({
     entryPoints: ['test/integration/suite/index.ts'],
     outfile: 'out/test/integration/suite/index.js',
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    target: 'node18',
+    external: ['vscode'],
+    sourcemap: true,
+    logLevel: 'info',
+  })
+  targets.push({
+    // #340（P3-08）真宿主高亮对照套件（生产外观服务的颜色对照断言）
+    entryPoints: ['test/integration/textAppearance/suite.ts'],
+    outfile: 'out/test/integration/textAppearance/suite.js',
     bundle: true,
     platform: 'node',
     format: 'cjs',

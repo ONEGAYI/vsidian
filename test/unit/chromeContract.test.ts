@@ -86,6 +86,7 @@ const DYNAMIC_STATE_ENTRIES: ReadonlySet<string> = new Set([
   'toast', // #305 仅反馈期间存在：plainPaste 浏览器及 plainPasteHost 真宿主 paint.toast 可见性验证
   'toast-severity', // #305 同一瞬态卡片的严重性分支：plainPaste 对三种背景与高对比/片段覆盖绘制验证
   'paste-dialog', // #306 询问会话瞬态：richPaste 浏览器断背景、焦点和局部键盘；richPasteHost断宿主编辑及偏好记忆
+  'hover-text-view', // #340 悬停浮层 text 形态（text 回包期间挂载，着色/行号/窗口由浏览器 textHover 套件按绘制层验证）
 ])
 
 describe('chromeContract 覆盖分工', () => {

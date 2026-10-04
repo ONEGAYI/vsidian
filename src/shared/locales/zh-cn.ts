@@ -478,6 +478,17 @@ export const zhCn: Record<MessageKey, string> = {
   'hover.errorCycle': '当前引用路径中已包含这篇笔记。',
   'hover.errorDepth': '已达到引用展开的最大层级。',
   'hover.errorBudget': '当前引用树已达到资源上限。',
+  /** #340（P3-08）可读文本悬停的准入与锚点错误分态：就地报错不静默
+   *  回顶/截断；{maxMb} 为单文件准入上限（MB），失败均可经浮层标题栏
+   *  打开入口在原生编辑器继续 */
+  'hover.errorTextBinary': '{target} 是二进制文件，无法作为文本预览。可点击右上角打开按钮在原生编辑器中打开。',
+  'hover.errorTextEncoding': '{target} 不是有效的 UTF-8 文本，无法可靠预览。可点击右上角打开按钮，用「Reopen with Encoding」选择正确编码。',
+  'hover.errorTextTooLarge': '{target} 超过单文件预览上限（{maxMb} MB），不读取完整内容。可点击右上角打开按钮在原生编辑器中打开。',
+  'hover.errorTextLongLine': '{target} 含超长行，为避免预览卡顿已停止加载（不截断显示）。可点击右上角打开按钮在原生编辑器中打开。',
+  'hover.errorTextAnchorFormat': '锚点语法非法：#{anchor}（文本锚点支持 #line=N 与 #range=B-E，可组合；行号为正整数）',
+  'hover.errorTextAnchorOrder': '锚点窗口非法：#{anchor}（range 的起始行不得大于结束行）',
+  'hover.errorTextAnchorBounds': '锚点越界：#{anchor}（行号超出文件总行数）',
+  'hover.errorTextAnchorOutside': '锚点冲突：#{anchor}（line 不在 range 窗口内；不会静默改用其他位置）',
   /** #220 引用 Reading 内容：浮层内笔记属性区展开/折叠按钮的无障碍文案
    *  （aria-label 与 title 同词；按钮是唯一操作入口，标题行悬停只负责显示） */
   /** #337 PDF 悬停渲染：页码信息行与渲染失败分态（就地呈现，不弹宿主
@@ -731,6 +742,8 @@ export const zhCn: Record<MessageKey, string> = {
   // ---- #159 锚点跳转（块引用定位与本文件锚点）----
   /** 块 id 缺失提示（与标题缺失同款「打开后提示」行为） */
   'host.wikilinkBlockMissing': '已在目标文档中打开{link}，但未找到块引用「^{blockId}」（块 id 是块尾行行尾的 ` ^id` 标记）',
+  /** #340（P3-08）text 目标双链跳转的锚点非法提示（仍原生打开到顶部） */
+  'host.wikilinkTextAnchorInvalid': '已在编辑器中打开{link}，但锚点「#{anchor}」非法（文本锚点支持 #line=N 与 #range=B-E，可组合；行号为正整数且不得越界）',
 
   // ---- #160 普通链接锚点定位（host 通知）----
   'host.linkAnchorMissing':

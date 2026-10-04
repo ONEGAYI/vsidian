@@ -515,6 +515,18 @@ export const en = {
   'hover.errorCycle': 'This note is already in the current reference path.',
   'hover.errorDepth': 'The reference depth limit has been reached.',
   'hover.errorBudget': 'The reference tree has reached its resource limit.',
+  /** #340 (P3-08) readable-text admission and anchor error states: reported
+   *  in place, never silently falling back to the top or truncating; {maxMb}
+   *  is the per-file admission cap in MB; every failure can continue in the
+   *  native editor via the popup header open action */
+  'hover.errorTextBinary': '{target} is a binary file and cannot be previewed as text. Use the open button in the top-right corner to open it in the native editor.',
+  'hover.errorTextEncoding': '{target} is not valid UTF-8 text and cannot be previewed reliably. Use the open button in the top-right corner, then "Reopen with Encoding" to pick the right encoding.',
+  'hover.errorTextTooLarge': '{target} exceeds the per-file preview cap ({maxMb} MB); the full content is not read. Use the open button in the top-right corner to open it in the native editor.',
+  'hover.errorTextLongLine': '{target} contains extremely long lines; loading stopped to keep the preview responsive (no truncated display). Use the open button in the top-right corner to open it in the native editor.',
+  'hover.errorTextAnchorFormat': 'Invalid anchor syntax: #{anchor} (text anchors support #line=N and #range=B-E, combinable; line numbers are positive integers)',
+  'hover.errorTextAnchorOrder': 'Invalid anchor window: #{anchor} (the range start line must not exceed the end line)',
+  'hover.errorTextAnchorBounds': 'Anchor out of bounds: #{anchor} (line number exceeds the file total)',
+  'hover.errorTextAnchorOutside': 'Anchor conflict: #{anchor} (line is outside the range window; no other position is silently used)',
   /** #220 referenced Reading content: accessibility labels of the expand/
    *  collapse button of the note-properties section inside the hover popup
    *  (aria-label and title share the word; the button is the only operable
@@ -783,6 +795,8 @@ export const en = {
   // ---- #159 锚点跳转（块引用定位与本文件锚点）----
   /** 块 id 缺失提示（与标题缺失同款「打开后提示」行为） */
   'host.wikilinkBlockMissing': 'Opened {link} in the target document, but the block reference "^{blockId}" was not found (block ids are ` ^id` markers at the end of a block’s last line)',
+  /** #340 (P3-08) invalid-anchor notice for text-target wikilink jumps (still opened natively at the top) */
+  'host.wikilinkTextAnchorInvalid': 'Opened {link} in the editor, but the anchor "#{anchor}" is invalid (text anchors support #line=N and #range=B-E, combinable; line numbers are positive integers within the file)',
 
   // ---- #160 普通链接锚点定位（host 通知）----
   'host.linkAnchorMissing':

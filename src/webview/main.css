@@ -5038,3 +5038,64 @@ body > .vsidian-ref-close-backdrop .vsidian-ref-close-actions button:focus-visib
   display: block;
   height: 0;
 }
+
+/* ---- #340（P3-08）可读文本悬停视图：类编辑器只读呈现 ----
+   观感口径（原生对齐）：字体/字号/连字来自语言级生效值（TextRefView 内联
+   写入，缺席回落编辑器默认变量族）；token 颜色全部内联（宿主外观服务计
+   算值）；行号列与前景色回落工作台 CSS 变量（与原生编辑器同源）。本段
+   只承担布局与滚动语义：gutter 纵向随内容流（浮层 scrollEl 滚动）、横向
+   固定；code 区横向滚动（原生编辑器默认不折行）。公开变量零新增——颜色
+   全部随主题变量或内联 token 值。 */
+.vsidian-text-view {
+  display: flex;
+  min-width: 0;
+  font-family: var(--vscode-editor-font-family, monospace);
+  color: var(--vscode-editor-foreground, inherit);
+  background: transparent;
+  tab-size: 4;
+}
+
+.vsidian-text-gutter {
+  flex: none;
+  min-width: 3.5em;
+  box-sizing: border-box;
+  padding-right: 12px;
+  text-align: right;
+  color: var(--vscode-editorLineNumber-foreground, #858585);
+  user-select: none;
+  position: relative;
+  overflow: hidden;
+}
+
+.vsidian-text-gutter-window {
+  position: absolute;
+  inset: 0 auto 0 0;
+  will-change: transform;
+}
+
+.vsidian-text-gutter-line {
+  white-space: pre;
+}
+
+.vsidian-text-code {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  position: relative;
+}
+
+.vsidian-text-lines {
+  position: relative;
+}
+
+.vsidian-text-window {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 100%;
+  will-change: transform;
+}
+
+.vsidian-text-line {
+  white-space: pre;
+}

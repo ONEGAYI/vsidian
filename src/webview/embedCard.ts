@@ -35,7 +35,7 @@ import type { MessageKey } from '../shared/locales/en'
 import { HOVER_REFRESH_DEFAULTS } from '../shared/hoverRefresh'
 import { REF_EXPANSION_LIMITS, RefExpansionBudget } from '../shared/refExpansion'
 import { RELOCATION_SCAN_LIMITS } from '../shared/relocationScan'
-import { RefContentInstance, isRefLoadedMarkdown, refLoadedContentOfResult, type RefContentMount, type RefLoadedAny, type RefLoadedContent, type RefMountOptions, type RefSourceContext } from './refContentInstance'
+import { RefContentInstance, isRefLoadedMarkdown, refLoadedContentOfResult, type RefContentMount, type RefLoadedAny, type RefLoadedContent, type RefLoadedTextContent, type RefMountOptions, type RefSourceContext } from './refContentInstance'
 import { promoteEmbedSlotsInBlock, promotedHostsOf } from './embedSlots'
 import { applyObsidianDomAlias } from '../shared/obsidianAlias'
 import { createReadingContainer, READING_CLASS_NAMES } from './readingView'
@@ -222,7 +222,7 @@ export interface HoverPopupRootSession {
   /** 显式关闭编辑（复用 P2-05 链路：dirty 弹三项模态、干净直接退出） */
   requestClose(intent?: 'close' | 'escape'): void
   /** 装载成功送达：entry.loaded 填充 + 生效 Live 时绑定端口 */
-  contentLoaded(loaded: RefLoadedContent): void
+  contentLoaded(loaded: RefLoadedContent | RefLoadedTextContent): void
   /** Live 在场期间的目标失效标记（切回 Reading 时补一次静默重载） */
   markPendingReadingRefresh(): void
   /** 内部 Live 端口是否在场（Esc 分层等） */
@@ -967,6 +967,11 @@ export class EmbedCardManager {
         if (!this.isPopupRootOpen(entry)) {
           return
         }
+        // #340：text 载荷无内部 Live 语义（只读浮层不走根会话 Live 端口；
+        // #341 接入嵌入文本视图时统一登记 entry 形态）
+        if ('kind' in loaded) {
+          return
+        }
         entry.loaded = loaded
         entry.lastKnown = { fsPath: loaded.fsPath, version: loaded.version }
         this.touchEntry(entry)
@@ -1163,7 +1168,9 @@ export class EmbedCardManager {
           entry.lastReq.instanceId === message.instanceId &&
           entry.lastReq.reqId === message.reqId) {
         // #336：image 载荷对卡片路径不可应用（嵌入卡片结构上不发图片请求
-        // ——图片嵌入在装饰/渲染层分流图片管线；此处为防御性第二道防线）
+        // ——图片嵌入在装饰/渲染层分流图片管线；此处为防御性第二道防线）。
+        // #341 接入前：text 载荷同样按不可应用处理（#340 仅悬停浮层消费；
+        // refLoadedContentOfResult 的 text 投影为 #341 预留）
         const converted = !stale && okMessage !== null ? refLoadedContentOfResult(okMessage) : null
         const loaded = converted !== null && isRefLoadedMarkdown(converted) ? converted : null
         if (loaded !== null && okMessage !== null) {
@@ -3436,8 +3443,9 @@ export class EmbedCardManager {
     }
     const converted = refLoadedContentOfResult(message)
     // #336：image 载荷对卡片路径不可应用（图片嵌入经装饰/渲染层分流图片
-    // 管线，不经卡片请求——防御性第二道防线与 #333 同口径）
-        const loaded = converted !== null && isRefLoadedMarkdown(converted) ? converted : null
+    // 管线，不经卡片请求——防御性第二道防线与 #333 同口径）；#341 接入
+    // 前 text 载荷同样按不可应用处理（#340 仅悬停浮层消费，同上）
+    const loaded = converted !== null && isRefLoadedMarkdown(converted) ? converted : null
     if (loaded === null) {
       releaseRefSourceLease(this.context, message.sourceLeaseId)
       handle.entry.lastReq = null
