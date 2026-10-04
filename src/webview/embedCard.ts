@@ -34,6 +34,7 @@ import { bindLocale } from './localeDom'
 import type { MessageKey } from '../shared/locales/en'
 import { HOVER_REFRESH_DEFAULTS } from '../shared/hoverRefresh'
 import { REF_EXPANSION_LIMITS, RefExpansionBudget } from '../shared/refExpansion'
+import { RELOCATION_SCAN_LIMITS } from '../shared/relocationScan'
 import { RefContentInstance, type RefContentMount, type RefLoadedContent, type RefMountOptions, type RefSourceContext } from './refContentInstance'
 import { promoteEmbedSlotsInBlock, promotedHostsOf } from './embedSlots'
 import { applyObsidianDomAlias } from '../shared/obsidianAlias'
@@ -467,36 +468,60 @@ function targetOfInner(inner: string): string {
  *  源文取自变更前 doc（原始源码坐标——不混解码偏移）。
  *  claimed：已被先序 entry 占用的命中位（多枚同源文实例按 sourceStart
  *  升序分配出现次序；重排同文实例的身份证互换属可接受边界——同源文实例
- *  目标一致，差异仅在选区/滚动记忆）。 */
+ *  目标一致，差异仅在选区/滚动记忆）。
+ *  #320 扫描预算：三层上限（源文长度 / 单枚插入文本长度 / 命中扫描次数，
+ *  见 RELOCATION_SCAN_LIMITS）把最坏 O(候选数 × 插入文本长度 × 源文长度)
+ *  的逐字检索压到数十毫秒量级；任一超限返回 'over-budget'——语义是
+ *  「无法判定存活」而非「判定已删」，与 null（真实删除）可区分，调用方
+ *  按各自口径分叉（filter 放行不拦、remap 冻结死键）。 */
 function relocatedInterval(
   doc: Text,
   changes: ChangeSet,
   sourceStart: number,
   sourceEnd: number,
   claimed: ReadonlyArray<{ start: number; end: number }>,
-): { start: number; end: number } | null {
+): { start: number; end: number } | 'over-budget' | null {
   const raw = doc.sliceString(sourceStart, sourceEnd)
   if (raw.length === 0) {
     return null
   }
+  if (raw.length > RELOCATION_SCAN_LIMITS.sourceTextLength) {
+    return 'over-budget'
+  }
   let found: { start: number; end: number } | null = null
+  let overBudget = false
+  let scans = 0
   changes.iterChanges((_fromA, _toA, fromB, _toB, inserted) => {
     if (found !== null) {
       return
     }
     const text = inserted.toString()
-    let at = text.indexOf(raw)
-    while (at >= 0) {
+    if (text.length > RELOCATION_SCAN_LIMITS.insertTextLength) {
+      // 放弃该枚逐字检索：源文可能在其中（存活无法判定）。后续短枚变更
+      // 仍可命中（行对换形态）——found 优先于 overBudget 返回
+      overBudget = true
+      return
+    }
+    let at = -1
+    while (scans < RELOCATION_SCAN_LIMITS.hitScans) {
+      at = text.indexOf(raw, at + 1)
+      scans++
+      if (at < 0) {
+        break
+      }
       const start = fromB + at
       const end = start + raw.length
       if (!claimed.some((c) => start < c.end && end > c.start)) {
         found = { start, end }
         return
       }
-      at = text.indexOf(raw, at + 1)
+    }
+    if (at >= 0 && scans >= RELOCATION_SCAN_LIMITS.hitScans) {
+      // 命中扫描预算耗尽且最后一个命中仍被占用：该枚剩余部分未判定
+      overBudget = true
     }
   })
-  return found
+  return found ?? (overBudget ? 'over-budget' : null)
 }
 
 /**
@@ -1308,6 +1333,8 @@ export class EmbedCardManager {
    *  由 mainDocChangeFilter 的存活检查放行），迁移到插入文本内的命中位
    *  （claimed 占位使同覆盖变更内多枚同源文实例按文档序分配）；源文不存
    *  在才是真删除——冻结死键（原位恢复如 undo/删表回填仍命中缓存）。
+   *  #320 扫描预算超限与未命中同待遇：冻结死键（存活无法判定 ≠ 已删，
+   *  安全退化）；filter 侧超限放行不拦，两侧口径见 relocatedInterval。
    *  doc 缺省（既有单测直驱）时不做重定位判定，保持 P2-07 纯 mapPos 语义。
    *  调用时序契约：须在 docView 更新（widget toDOM）前——生产经
    *  appendTransaction 装配（被 changeFilter 拒绝的事务不会到达，天然免除
@@ -1354,8 +1381,10 @@ export class EmbedCardManager {
       const moved = doc
         ? relocatedInterval(doc, changes, entry.sourceStart, entry.sourceEnd, claimed)
         : null
-      if (!moved) {
-        // 真实删除/改写（源文不存活）：键冻结在原坐标，后续事务不再平移
+      if (!moved || moved === 'over-budget') {
+        // 真实删除/改写（源文不存活），或 #320 扫描预算超限（存活无法判定，
+        // 与未命中同待遇——安全退化）：键冻结在原坐标，后续事务不再平移，
+        // undo/删表回填仍命中缓存
         entry.collapsed = true
         continue
       }
@@ -2648,9 +2677,12 @@ export class EmbedCardManager {
         // 保留嵌入源文的结构编辑（表格列/行移动——含行对换形态、canonical
         // 整行重写、格区粘贴重建：格值/整行取原 doc 切片搬运）不是删除引用
         // ——不弹确认不吞事务；实例键迁移由 remapSources 的重定位分支承担
-        //（filter 先于事务应用，通过后 transactionExtender 必见同一 changes）
-        if (relocatedInterval(tr.startState.doc, tr.changes, entry.sourceStart, entry.sourceEnd, [])) {
-          continue
+        //（filter 先于事务应用，通过后 transactionExtender 必见同一 changes）。
+        // #320 扫描预算超限同放行：超限是「无法判定存活」而非「判定已删」
+        //——不命中删除拦截（不打断合法大编辑），remap 侧按超限冻结死键兜底
+        const relocated = relocatedInterval(tr.startState.doc, tr.changes, entry.sourceStart, entry.sourceEnd, [])
+        if (relocated !== null) {
+          continue // 保文本命中或预算超限：均非真删除
         }
         hit = entry
         break
