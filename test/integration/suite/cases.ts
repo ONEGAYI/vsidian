@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs'
 import * as nodeHttps from 'node:https'
 import * as nodePath from 'node:path'
 import { LOCALE_MESSAGES, resolveLocale } from '../../../src/shared/locales'
+import type { HoverPreviewPdfProbe, ReadingEmbedPdfProbe } from '../../../src/shared/protocol'
 import { OBSIDIAN_ALIAS_PROBES } from '../../../src/shared/obsidianAlias'
 import legacyBaselineJson from '../../../test/style-contract/baseline-v0.4.0.json'
 import { CHROME_CONTRACT_PROBES } from '../../../src/shared/chromeContract'
@@ -1000,20 +1001,9 @@ interface ViewState {
     closeDialogOpen?: boolean
     /** #337 PDF 渲染观测（绘制层证据：canvas 实际尺寸与非白像素比例）。
      *  #339（P3-07）追加 zoom/textLayerPages/linkAnnotations（可选——
-     *  旧 webview 缺省缺席） */
-    pdf?: {
-      phase: 'idle' | 'loading' | 'content' | 'error'
-      page: number
-      totalPages: number
-      canvasWidth: number
-      canvasHeight: number
-      errorReason: 'corrupt' | 'encrypted' | 'page-range' | 'resource' | 'load-failed' | ''
-      requestedPage: number
-      nonWhiteRatio: number
-      zoom?: number
-      textLayerPages?: number
-      linkAnnotations?: number
-    }
+     *  旧 webview 缺省缺席）。形状收敛为共享类型（protocol.ts 单一
+     *  事实源——本地镜像曾漂移，review-loops 三期收敛） */
+    pdf?: HoverPreviewPdfProbe
     /** #343 请求配对身份（注入回包用；旧 webview 缺省） */
     instanceId?: string
     reqId?: number
@@ -1083,22 +1073,8 @@ interface ViewState {
     conflictNotice?: boolean
     /** #338（P3-06）PDF 视图观测（嵌入卡 pdf 载荷的绘制层断言载体：
      *  phase/page/totalPages/mountedPages/canvasBytes/nonWhiteRatio——
-     *  非 pdf 卡缺省缺席） */
-    pdf?: {
-      phase: 'idle' | 'loading' | 'content' | 'error'
-      page: number
-      totalPages: number
-      errorReason: 'corrupt' | 'encrypted' | 'page-range' | 'resource' | 'load-failed' | ''
-      mountedPages: number
-      canvasBytes: number
-      nonWhiteRatio: number
-      /** #339（P3-07）追加观测：zoom（缩放乘子，缺省 1=适合宽度）/
-       *  textLayerPages（带 span 文本层页数）/linkAnnotations（窗口内
-       *  链接元素数） */
-      zoom?: number
-      textLayerPages?: number
-      linkAnnotations?: number
-    } | null
+     *  非 pdf 卡缺省缺席）。形状收敛为共享类型（同 hoverPreview.pdf） */
+    pdf?: ReadingEmbedPdfProbe | null
     /** P2-09（#286）递归深度与直接父身份——根级计数口径的观测维度 */
     depth?: number
     parentInstanceId?: string | null

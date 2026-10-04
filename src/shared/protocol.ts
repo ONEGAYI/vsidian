@@ -1094,17 +1094,7 @@ export type WebviewToHost =
         /** #337（P3-05）PDF 渲染观测：phase（idle=非 PDF 形态或未装载）、
          *  当前页/总页数、canvas 实际绘制尺寸（绘制层断言面——非 DOM
          *  存在性）、错误分态与请求页码；旧 webview 缺省 */
-        pdf?: {
-          phase: 'idle' | 'loading' | 'content' | 'error'
-          page: number
-          totalPages: number
-          canvasWidth: number
-          canvasHeight: number
-          errorReason: 'corrupt' | 'encrypted' | 'page-range' | 'resource' | 'load-failed' | ''
-          requestedPage: number
-          /** content 态的 canvas 非白像素比例（绘制层证据；其他态 -1） */
-          nonWhiteRatio: number
-        }
+        pdf?: HoverPreviewPdfProbe
         /** #344（P3-12 收口）text 视图观测（null = 非 text 形态/未装载）：
          *  textStats（DOM 常驻受视口约束）与首个内联着色 span 的计算色
          *  （rgb(…)；无 token 为 ''）——「用户看到的颜色」级集成断言面；
@@ -1172,16 +1162,9 @@ export type WebviewToHost =
         /** P2-12 对比打开失败的就地提示在场；旧 webview 缺省。 */
         conflictNotice?: boolean
         /** #338（P3-06）PDF 视图观测（pdf 载荷卡）：phase/page/totalPages/
-         *  mountedPages/canvasBytes/nonWhiteRatio——非 pdf 卡缺省。 */
-        pdf?: {
-          phase: 'idle' | 'loading' | 'content' | 'error'
-          page: number
-          totalPages: number
-          errorReason: 'corrupt' | 'encrypted' | 'page-range' | 'resource' | 'load-failed' | ''
-          mountedPages: number
-          canvasBytes: number
-          nonWhiteRatio: number
-        } | null
+         *  mountedPages/canvasBytes/nonWhiteRatio——非 pdf 卡缺省。
+         *  #339 追加 zoom/textLayerPages/linkAnnotations（旧 webview 缺省）。 */
+        pdf?: ReadingEmbedPdfProbe | null
       }>
       /** #223 Live 嵌入显隐观测：嵌入表逐枚的源码显形态（目标原文、行号、
        *  光标/选区是否触及源码区间——selectionTouchesRange 语义；旧 webview
@@ -1671,6 +1654,45 @@ export type HoverPreviewScope =
   | { kind: 'full' }
   | { kind: 'heading'; anchor: string }
   | { kind: 'block'; anchor: string }
+
+/** #337/#339 悬停 PDF 渲染观测（view.state hoverPreview.pdf 的消息形态；
+ *  旧 webview 缺省整块缺席）。导出供集成测试读侧共享——观测形状的单一
+ *  事实源（cases.ts 曾维护本地镜像导致漂移，review-loops 三期收敛） */
+export interface HoverPreviewPdfProbe {
+  phase: 'idle' | 'loading' | 'content' | 'error'
+  page: number
+  totalPages: number
+  canvasWidth: number
+  canvasHeight: number
+  errorReason: 'corrupt' | 'encrypted' | 'page-range' | 'resource' | 'load-failed' | ''
+  requestedPage: number
+  /** content 态的 canvas 非白像素比例（绘制层证据；其他态 -1） */
+  nonWhiteRatio: number
+  /** #339 用户缩放乘子（1 = 适合宽度缺省态；旧 webview 缺省） */
+  zoom?: number
+  /** #339 当前窗口内实际带 span 的文本层页数（旧 webview 缺省） */
+  textLayerPages?: number
+  /** #339 当前窗口内已挂载的链接注解元素数（旧 webview 缺省） */
+  linkAnnotations?: number
+}
+
+/** #338/#339 嵌入卡 PDF 视图观测（view.state readingEmbed 条目的 pdf 字段
+ *  消息形态；非 pdf 卡为 null、旧 webview 缺省）。导出理由同上 */
+export interface ReadingEmbedPdfProbe {
+  phase: 'idle' | 'loading' | 'content' | 'error'
+  page: number
+  totalPages: number
+  errorReason: 'corrupt' | 'encrypted' | 'page-range' | 'resource' | 'load-failed' | ''
+  mountedPages: number
+  canvasBytes: number
+  nonWhiteRatio: number
+  /** 用户缩放乘子（1 = 适合宽度缺省态） */
+  zoom?: number
+  /** 当前窗口内实际带 span 的文本层页数 */
+  textLayerPages?: number
+  /** 当前窗口内已挂载的链接注解元素数 */
+  linkAnnotations?: number
+}
 
 /** #340（P3-08）text 通道导航载荷（hover.result 成功形态的 textNav 字段；
  *  载荷语义单一事实源在 shared/refContent 的 RefTextContent，此处为消息
@@ -3480,7 +3502,15 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
             isNonNegativeInt(v.hoverPreview.pdf.requestedPage) &&
             typeof v.hoverPreview.pdf.nonWhiteRatio === 'number' &&
             Number.isFinite(v.hoverPreview.pdf.nonWhiteRatio) &&
-            v.hoverPreview.pdf.nonWhiteRatio >= -1) &&
+            v.hoverPreview.pdf.nonWhiteRatio >= -1 &&
+            // #339 缩放/文本层/链接层观测（旧 webview 缺省；乘子为正有限数）
+            (v.hoverPreview.pdf.zoom === undefined ||
+              (typeof v.hoverPreview.pdf.zoom === 'number' &&
+                Number.isFinite(v.hoverPreview.pdf.zoom) && v.hoverPreview.pdf.zoom > 0)) &&
+            (v.hoverPreview.pdf.textLayerPages === undefined ||
+              isNonNegativeInt(v.hoverPreview.pdf.textLayerPages)) &&
+            (v.hoverPreview.pdf.linkAnnotations === undefined ||
+              isNonNegativeInt(v.hoverPreview.pdf.linkAnnotations))) &&
           (v.hoverPreview.text === undefined || v.hoverPreview.text === null ||
             (isObject(v.hoverPreview.text) &&
               isNonNegativeInt(v.hoverPreview.text.renderedLines) &&
@@ -3522,7 +3552,13 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
               isNonNegativeInt(e.pdf.canvasBytes) &&
               typeof e.pdf.nonWhiteRatio === 'number' &&
               Number.isFinite(e.pdf.nonWhiteRatio) &&
-              e.pdf.nonWhiteRatio >= -1))))) &&
+              e.pdf.nonWhiteRatio >= -1 &&
+              // #339 缩放/文本层/链接层观测（旧 webview 缺省；乘子为正有限数）
+              (e.pdf.zoom === undefined ||
+                (typeof e.pdf.zoom === 'number' &&
+                  Number.isFinite(e.pdf.zoom) && e.pdf.zoom > 0)) &&
+              (e.pdf.textLayerPages === undefined || isNonNegativeInt(e.pdf.textLayerPages)) &&
+              (e.pdf.linkAnnotations === undefined || isNonNegativeInt(e.pdf.linkAnnotations))))))) &&
         (v.typography === undefined || isTypographyProbe(v.typography))
       )
     case 'reading.perf.report':

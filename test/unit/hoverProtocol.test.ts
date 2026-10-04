@@ -549,6 +549,91 @@ describe('view.state readingEmbed 探针：host 字段入校验器', () => {
   })
 })
 
+// ---- 修 2（review-loops 三期增量）：#339 pdf 探针三字段入协议声明与校验器 ----
+// 发送侧（pdfRender.ts PdfRenderProbe / embedCard.ts 嵌入卡 probe）自 #339
+// 起携带 zoom/textLayerPages/linkAnnotations，但 protocol.ts 两处 pdf 探针
+// 类型未声明、isWebviewToHost 校验止于 nonWhiteRatio——线上形态与契约
+// 三处不同步（非法值静默放行进宿主）。
+describe('view.state pdf 探针：#339 缩放/文本层/链接层三字段入校验器', () => {
+  const hoverPdfBase = {
+    open: true,
+    state: 'content',
+    note: '资料.pdf',
+    blocks: 0,
+    scope: 'pdf',
+    pdf: {
+      phase: 'content',
+      page: 3,
+      totalPages: 12,
+      canvasWidth: 560,
+      canvasHeight: 724,
+      errorReason: '',
+      requestedPage: 3,
+      nonWhiteRatio: 0.42,
+    },
+  }
+  const embedPdfBase = {
+    phase: 'content',
+    page: 1,
+    totalPages: 5,
+    errorReason: '',
+    mountedPages: 2,
+    canvasBytes: 1048576,
+    nonWhiteRatio: 0.31,
+  }
+
+  function hoverState(pdfExtra: Record<string, unknown>): Record<string, unknown> {
+    return {
+      kind: 'view.state',
+      text: 'x',
+      docLength: 1,
+      lineCount: 1,
+      renderedLines: 1,
+      hoverPreview: { ...hoverPdfBase, pdf: { ...hoverPdfBase.pdf, ...pdfExtra } },
+    }
+  }
+
+  function embedState(pdfExtra: Record<string, unknown>): Record<string, unknown> {
+    return {
+      kind: 'view.state',
+      text: '# t',
+      docLength: 4,
+      lineCount: 1,
+      renderedLines: 1,
+      readingEmbed: [
+        {
+          inner: '![[资料.pdf]]',
+          state: 'content',
+          note: '资料.pdf',
+          blocks: 0,
+          // pdf 载荷卡无文本区间形态——发送侧 probeScopeOf 报 ''（scope
+          // 联合类型不含 'pdf'，形态区分走 pdf 字段）
+          scope: '',
+          fm: 'none',
+          maxHeightPx: 200,
+          pdf: { ...embedPdfBase, ...pdfExtra },
+        },
+      ],
+    }
+  }
+
+  it('合法形态放行：三字段携带合法值或缺省（旧 webview 缺省兼容）', () => {
+    const ok = { zoom: 1.25, textLayerPages: 2, linkAnnotations: 7 }
+    expect(isWebviewToHost(hoverState(ok))).toBe(true)
+    expect(isWebviewToHost(hoverState({}))).toBe(true)
+    expect(isWebviewToHost(embedState(ok))).toBe(true)
+    expect(isWebviewToHost(embedState({}))).toBe(true)
+  })
+
+  it('非法值整体拒绝：zoom 非正/非有限、计数负数/非整数', () => {
+    for (const bad of [{ zoom: 0 }, { zoom: -1.25 }, { zoom: Number.NaN }, { zoom: '125%' },
+      { textLayerPages: -1 }, { textLayerPages: 1.5 }, { linkAnnotations: -2 }, { linkAnnotations: true }]) {
+      expect(isWebviewToHost(hoverState(bad)), `hoverPreview.pdf ${JSON.stringify(bad)} 应拒绝`).toBe(false)
+      expect(isWebviewToHost(embedState(bad)), `readingEmbed pdf ${JSON.stringify(bad)} 应拒绝`).toBe(false)
+    }
+  })
+})
+
 it('#242 来源租约字段兼容旧协议，非法token与retainSource整体拒绝', () => {
   expect(isWebviewToHost({ ...validRequest(), retainSource: true })).toBe(true)
   expect(isWebviewToHost({ ...validRequest(), retainSource: 'true' })).toBe(false)
