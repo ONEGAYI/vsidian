@@ -372,7 +372,7 @@ const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   'link-image-wikilink': 17,
   'content-variables': 12,
   'content-limits': 11,
-  // chrome 域（86）
+  // chrome 域（87；#340 增文本视图一条）
   math: 5,
   diagram: 4,
   'graphic-interact': 2,
@@ -384,7 +384,7 @@ const CATEGORY_COUNT_SNAPSHOT: Record<string, number> = {
   'context-menu': 1,
   backlinks: 4,
   outlinks: 2,
-  'hover-preview': 3,
+  'hover-preview': 4,
   'find-panel': 6,
   loading: 3,
   tooltip: 11,
