@@ -38,6 +38,11 @@ vsidian/
     │   ├── skeletonScreen.ts           # 骨架屏内联装配纯逻辑（#292）
     │   ├── styleReferenceExport.ts     # 契约 JSON 导出宿主执行壳
     │   ├── styleReferenceExportPlan.ts # 契约 JSON 导出纯规划逻辑
+    │   ├── textAppearance/             # 宿主文本外观服务目录
+    │   │   ├── appearanceService.ts # 外观服务 vscode 装配
+    │   │   ├── themeResolution.ts   # 主题链解析与颜色管线
+    │   │   ├── tmEngine.ts          # TM 引擎封装（同版同算法）
+    │   │   └── tmScopeMatcher.ts    # TM scope 匹配器（官方移植）
     │   ├── textEditorProvider.ts       # 自定义文本编辑器提供者
     │   ├── vaultIndexMaintenance.ts    # 索引维护接线：排除持久化与操作编排
     │   ├── vaultIndexOverlay.ts        # 索引覆盖层与反链查询纯逻辑（#197）
@@ -80,6 +85,7 @@ vsidian/
     │   ├── protocol.ts           # 消息协议单一事实源
     │   ├── refContent.ts         # 引用内容类型分派共享内核（#333）
     │   ├── refExpansion.ts       # 引用递归路径与容量预算
+    │   ├── refText.ts            # 可读文本锚点与准入共享内核
     │   ├── relocationScan.ts     # 重定位逐字检索扫描预算（#320）
     │   ├── settings.ts           # 设置定义与读写纯逻辑
     │   ├── skeletonTiming.ts     # 骨架屏撤除计算与装配常量（#292）
@@ -206,6 +212,7 @@ vsidian/
         ├── tableStructure.ts           # 表格导航与增删行列纯函数（#13）
         ├── targetTip.ts                # 跳转目标提示：浮层不将现时的目标位置浮标
         ├── taskToggle.ts               # 任务勾选解析纯函数（#9）
+        ├── textRefView.ts              # 文本只读视图（虚拟化着色渲染）
         ├── toast.css                   # 轻提示主题与公开样式变量
         ├── toast.ts                    # 编辑器独立轻提示通道
         ├── tooltipCard.css             # 悬停提示共享样式
