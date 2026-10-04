@@ -998,7 +998,9 @@ interface ViewState {
     liveDirty?: boolean
     liveSuspended?: boolean
     closeDialogOpen?: boolean
-    /** #337 PDF 渲染观测（绘制层证据：canvas 实际尺寸与非白像素比例） */
+    /** #337 PDF 渲染观测（绘制层证据：canvas 实际尺寸与非白像素比例）。
+     *  #339（P3-07）追加 zoom/textLayerPages/linkAnnotations（可选——
+     *  旧 webview 缺省缺席） */
     pdf?: {
       phase: 'idle' | 'loading' | 'content' | 'error'
       page: number
@@ -1008,6 +1010,9 @@ interface ViewState {
       errorReason: 'corrupt' | 'encrypted' | 'page-range' | 'resource' | 'load-failed' | ''
       requestedPage: number
       nonWhiteRatio: number
+      zoom?: number
+      textLayerPages?: number
+      linkAnnotations?: number
     }
     /** #343 请求配对身份（注入回包用；旧 webview 缺省） */
     instanceId?: string
@@ -1075,6 +1080,12 @@ interface ViewState {
       mountedPages: number
       canvasBytes: number
       nonWhiteRatio: number
+      /** #339（P3-07）追加观测：zoom（缩放乘子，缺省 1=适合宽度）/
+       *  textLayerPages（带 span 文本层页数）/linkAnnotations（窗口内
+       *  链接元素数） */
+      zoom?: number
+      textLayerPages?: number
+      linkAnnotations?: number
     } | null
     /** P2-09（#286）递归深度与直接父身份——根级计数口径的观测维度 */
     depth?: number
@@ -1288,6 +1299,7 @@ async function waitViewState(
     // 超时附最后观测快照（关键字段）——定位「卡在哪个谓词」不再盲猜
     if (lastSeen !== undefined) {
       const s = lastSeen as unknown as Record<string, unknown>
+      const hover = s['hoverPreview'] as Record<string, unknown> | undefined
       throw new Error(`${(err as Error).message}；最后观测：${JSON.stringify({
         viewMode: s['viewMode'],
         selectionOffset: s['selectionOffset'],
@@ -1297,6 +1309,11 @@ async function waitViewState(
         imageProbe: s['imageProbe'],
         readingEmbed: s['readingEmbed'],
         liveEmbedReveal: s['liveEmbedReveal'],
+        readingWikilinkCount: s['readingWikilinkCount'],
+        hoverPreview: hover === undefined ? undefined : {
+          open: hover['open'], state: hover['state'], note: hover['note'],
+          pdf: hover['pdf'],
+        },
       })}`)
     }
     throw err
@@ -12058,6 +12075,33 @@ export const cases: Array<[string, () => Promise<void>]> = [
       v.hoverPreview?.open === true && v.hoverPreview.state === 'content' &&
       v.hoverPreview.pdf?.phase === 'content')
     assert(md.hoverPreview?.pdf?.page === 1, `普通链接 fragment 不解析——从第一页开始（实际 ${md.hoverPreview?.pdf?.page}）`)
+
+    // 场景 5（#339）：文本+链接样本双链 [[文本链接.pdf]]（第 5 枚 wikilink，
+    // index 4）→ 真实 TextLayer 装载（带 span 文本层）、缺省适合宽度
+    //（zoom=1）与链接层挂载（六枚注解矩阵——分类矩阵的宿主侧在场观测；
+    // 交互细节由浏览器套件 pdfZoomCopyLinks 钉住）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 1, link: 'md' })
+    await waitViewState('悬停 PDF.md', (v) => v.hoverPreview?.open === false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 4 })
+    const textPdf = await waitViewState('悬停 PDF.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' &&
+      v.hoverPreview.pdf?.phase === 'content' &&
+      (v.hoverPreview.pdf?.textLayerPages ?? 0) >= 1 &&
+      (v.hoverPreview.pdf?.linkAnnotations ?? 0) >= 6, 0, 120000)
+    const tp = textPdf.hoverPreview!.pdf!
+    assert(tp.zoom === 1, `缺省适合容器宽（zoom=1，实际 ${tp.zoom}）`)
+    assert((tp.textLayerPages ?? 0) >= 1, `文本层真实装载（实测 ${tp.textLayerPages} 页带 span）`)
+    assert((tp.linkAnnotations ?? 0) >= 6, `链接层注解矩阵挂载（实测 ${tp.linkAnnotations} 枚）`)
+    assert(tp.nonWhiteRatio > 0, '文本样本绘制层证据（非白比例>0——黑字墨迹）')
+    // 场景 5 收尾：离开链接（浮层关闭）后再核零写回
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 4 })
+    await waitViewState('悬停 PDF.md', (v) => v.hoverPreview?.open === false)
+    const finalDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri)
+    assert(finalDoc?.isDirty === false, '文本层/链接层观测不得弄脏父文档')
+    assert(await readDisk('悬停 PDF.md') === parentBefore, '文本层/链接层观测不得改写磁盘')
   }],
 
   ['嵌入 PDF：容器矩阵绘制、挂载有界与 changed 重载钳制（#338）', async () => {

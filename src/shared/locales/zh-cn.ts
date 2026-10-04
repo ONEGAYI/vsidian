@@ -499,6 +499,12 @@ export const zhCn: Record<MessageKey, string> = {
   /** #337 PDF 悬停渲染：页码信息行与渲染失败分态（就地呈现，不弹宿主
    *  通知；加密文件首批提示在原应用打开，不采集密码） */
   'hover.pdfPageInfo': '第 {page} / {total} 页',
+  /** #339 页码行的缩放反馈（相对适合宽度的达成百分比） */
+  'hover.pdfPageInfoZoom': '第 {page} / {total} 页 · {percent}%',
+  /** #339 链接层禁用提示（显式安全边界） */
+  'hover.pdfLinkExternalOnly': '预览中仅支持在浏览器打开 http(s) 链接',
+  'hover.pdfLinkUnsupported': '此链接操作在预览中已禁用（安全限制）',
+  'hover.pdfLinkUnresolved': '链接目标无法解析',
   'hover.pdfErrorCorrupt': 'PDF 文件已损坏或不是有效的 PDF，无法预览',
   'hover.pdfErrorEncrypted': '此 PDF 已加密，暂不支持在预览中打开。请使用本地 PDF 阅读器打开原文件。',
   'hover.pdfErrorPageRange': '页码超出范围：请求第 {page} 页，该 PDF 共 {total} 页（不会静默跳到第一页）',
@@ -736,6 +742,10 @@ export const zhCn: Record<MessageKey, string> = {
   'command.ui.hoverPreviewLink.title': '预览当前链接',
   'command.ui.hoverPdfPageNext.title': 'PDF 预览：下一页',
   'command.ui.hoverPdfPagePrev.title': 'PDF 预览：上一页',
+  /** #339 PDF 缩放三操作（只读预览呈现；默认未绑定） */
+  'command.ui.hoverPdfZoomIn.title': 'PDF 预览：放大',
+  'command.ui.hoverPdfZoomOut.title': 'PDF 预览：缩小',
+  'command.ui.hoverPdfZoomReset.title': 'PDF 预览：适合宽度',
   'command.ui.embedToggleMode.title': '切换引用的内部视图模式',
   /** P2-10 引用 Live 操作入口（保存目标/显式关闭/冲突三项；默认均未绑定） */
   'command.embed.saveTarget.title': '保存焦点引用的目标',

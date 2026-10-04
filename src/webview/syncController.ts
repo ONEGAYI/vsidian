@@ -39,6 +39,7 @@ import { createQuickActionStateReader } from './quickActionState'
 import { TOOLTIP_KEYS_SEPARATOR } from './tooltipCard'
 import { FORMAT_OPERATIONS, isFormatOperationId, type FormatOperationId } from '../shared/formatOperations'
 import { getEffectiveBindings, type KeybindingOverrides } from '../shared/keybindings'
+import { PDF_ZOOM_STEP } from './pdfRender'
 import { KeybindingRouter, keyStep } from './keybindingRouter'
 import { resolveKeybinding, formatBindingLabel } from '../shared/keybindings'
 import { clipboardPlainText, clipboardHasImages, dispatchClipboardPaste, readClipboardSnapshot } from './clipboardPaste'
@@ -177,6 +178,8 @@ import {
   notifyHoverImageResult,
   notifyHoverResult,
   turnHoverPdfPage,
+  zoomHoverPdf,
+  resetHoverPdfZoom,
   hoverPopupLiveTestAction,
   notifyHoverTokens,
   notifyHoverWatchRejected,
@@ -912,6 +915,11 @@ export class WebviewSyncController {
       // #337 PDF 翻页：作用于在场 PDF 悬停浮层（只读；无浮层/翻出界静默）
       else if (id === 'pdfPageNext') { if (!embedBlocked()) turnHoverPdfPage(1) }
       else if (id === 'pdfPagePrev') { if (!embedBlocked()) turnHoverPdfPage(-1) }
+      // #339 PDF 缩放：与翻页同款只读浮层域（无 PDF 浮层/触达 scale 上下
+      // 限静默无效——受理会谎称缩放生效）
+      else if (id === 'pdfZoomIn') { if (!embedBlocked()) zoomHoverPdf(PDF_ZOOM_STEP) }
+      else if (id === 'pdfZoomOut') { if (!embedBlocked()) zoomHoverPdf(1 / PDF_ZOOM_STEP) }
+      else if (id === 'pdfZoomReset') { if (!embedBlocked()) resetHoverPdfZoom() }
       // #237 上下添加光标：同「本地消化不转发宿主」先例——命令在 webview
       // 的 CM6 上执行（与命令面板 ui.command 回发入口共用 runCursorAdd）
       else if (id === 'addCursorAbove' || id === 'addCursorBelow') this.runCursorAdd(id)
@@ -2506,6 +2514,10 @@ export class WebviewSyncController {
           case 'hoverPreviewLink': this.previewLinkAtFocus(); break
           case 'pdfPageNext': turnHoverPdfPage(1); break
           case 'pdfPagePrev': turnHoverPdfPage(-1); break
+          // #339 PDF 缩放（命令面板/宿主命令入口与快捷键同一实现）
+          case 'pdfZoomIn': zoomHoverPdf(PDF_ZOOM_STEP); break
+          case 'pdfZoomOut': zoomHoverPdf(1 / PDF_ZOOM_STEP); break
+          case 'pdfZoomReset': resetHoverPdfZoom(); break
           // #237 上下添加光标：命令面板/宿主命令入口与快捷键（keybindingRouter
           // 本地分支）共用同一实现（仅 Live 正文生效，边界见 runCursorAdd）
           case 'addCursorAbove': this.runCursorAdd('addCursorAbove'); break

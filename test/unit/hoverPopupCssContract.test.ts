@@ -102,20 +102,64 @@ describe('悬停 PDF 内容视图 CSS 契约（#337 hover-pdf-view；#338 全文
     expect(cardRoot).toMatch(/padding:\s*8px/)
   })
 
-  it('窗口内页占位：内容宽内居中（#338 全文滚动的页池 DOM）', () => {
+  it('窗口内页占位：内容宽内居中（#338 页池 DOM；#339 safe——放大溢出两端可达）', () => {
     const page = rule('#app > .vsidian-hover-popup .vsidian-hover-pdf-page')
     expect(page).toMatch(/display:\s*flex/)
-    expect(page).toMatch(/justify-content:\s*center/)
+    expect(page).toMatch(/justify-content:\s*safe center/)
     const cardPage = rule('#app .vsidian-embed-card .vsidian-hover-pdf-page')
-    expect(cardPage).toMatch(/justify-content:\s*center/)
+    expect(cardPage).toMatch(/justify-content:\s*safe center/)
   })
 
-  it('页面画布：块级呈现且不超容器内容宽（绘制面即显示面）', () => {
+  it('页体包裹：相对定位基准（#339 画布/文本层/链接层的共同坐标系）', () => {
+    const body = rule('#app > .vsidian-hover-popup .vsidian-hover-pdf-body')
+    expect(body).toMatch(/position:\s*relative/)
+    const cardBody = rule('#app .vsidian-embed-card .vsidian-hover-pdf-body')
+    expect(cardBody).toMatch(/position:\s*relative/)
+  })
+
+  it('页面画布：块级呈现、无 max-width 缩放（绘制面即显示面——放大由滚动区横向承接）', () => {
     const canvas = rule('#app > .vsidian-hover-popup .vsidian-hover-pdf-canvas')
     expect(canvas).toMatch(/display:\s*block/)
-    expect(canvas).toMatch(/max-width:\s*100%/)
+    expect(canvas).not.toMatch(/max-width\s*:/)
     const cardCanvas = rule('#app .vsidian-embed-card .vsidian-hover-pdf-canvas')
-    expect(cardCanvas).toMatch(/max-width:\s*100%/)
+    expect(cardCanvas).not.toMatch(/max-width\s*:/)
+  })
+
+  it('文本层：绝对铺满页体、透明 span 可选中（#339 与画布字符对齐的选区面）', () => {
+    const text = rule('#app > .vsidian-hover-popup .vsidian-hover-pdf-text')
+    expect(text).toMatch(/position:\s*absolute/)
+    expect(text).toMatch(/inset:\s*0/)
+    expect(text).toMatch(/overflow:\s*clip/)
+    // 变量族：pdfjs TextLayer 的定位换算（--total-scale-factor 由渲染器内联）
+    expect(text).toMatch(/--text-scale-factor:\s*calc\(var\(--total-scale-factor\) \* var\(--min-font-size\)\)/)
+    const span = rule('#app > .vsidian-hover-popup .vsidian-hover-pdf-text span')
+    expect(span).toMatch(/color:\s*transparent/)
+    expect(span).toMatch(/position:\s*absolute/)
+    expect(span).toMatch(/white-space:\s*pre/)
+    expect(span).toMatch(/user-select:\s*text/)
+    expect(span).toMatch(/cursor:\s*text/)
+    const cardSpan = rule('#app .vsidian-embed-card .vsidian-hover-pdf-text span')
+    expect(cardSpan).toMatch(/user-select:\s*text/)
+    // 选区可见：透明文字 + 半透明主题色底
+    const sel = rule('#app > .vsidian-hover-popup .vsidian-hover-pdf-text ::selection')
+    expect(sel).toMatch(/color:\s*transparent/)
+    expect(sel).toMatch(/background:\s*color-mix\(in srgb, var\(--vscode-focusBorder/)
+  })
+
+  it('链接层：绝对定位、指针可点、悬停反馈与禁用观感（#339）', () => {
+    const link = rule('#app > .vsidian-hover-popup .vsidian-hover-pdf-link')
+    expect(link).toMatch(/position:\s*absolute/)
+    expect(link).toMatch(/cursor:\s*pointer/)
+    const cardLink = rule('#app .vsidian-embed-card .vsidian-hover-pdf-link')
+    expect(cardLink).toMatch(/cursor:\s*pointer/)
+    const hover = rule(
+      '#app > .vsidian-hover-popup .vsidian-hover-pdf-link:hover,\n#app .vsidian-embed-card .vsidian-hover-pdf-link:hover,\n#app > .vsidian-hover-popup .vsidian-hover-pdf-link:focus-visible,\n#app .vsidian-embed-card .vsidian-hover-pdf-link:focus-visible',
+    )
+    expect(hover).toMatch(/background:/)
+    const disabled = rule('#app > .vsidian-hover-popup .vsidian-hover-pdf-link-disabled')
+    expect(disabled).toMatch(/cursor:\s*not-allowed/)
+    const cardDisabled = rule('#app .vsidian-embed-card .vsidian-hover-pdf-link-disabled')
+    expect(cardDisabled).toMatch(/cursor:\s*not-allowed/)
   })
 
   it('页码信息行：sticky 固定滚动区底部、居中弱化反馈（#338 不随滚动走失）', () => {

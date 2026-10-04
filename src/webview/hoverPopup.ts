@@ -479,6 +479,7 @@ export function hoverPopupProbe(): {
     popup?.pdfView?.probe() ?? {
       phase: 'idle', page: 0, totalPages: 0, canvasWidth: 0, canvasHeight: 0, errorReason: '',
       requestedPage: 0, nonWhiteRatio: -1, mountedPages: 0, canvasBytes: 0, scrollHeight: 0, scrollTop: 0,
+      zoom: 1, textLayerPages: 0, linkAnnotations: 0,
     }
   // #343 web 视图观测（DOM 实测：iframe 属性与退回按钮在场性）
   const webProbe = () => {
@@ -935,8 +936,27 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
   })
   const content = mounted?.content ?? instance!.mount(mountOptions)
   // #337 PDF 视图：挂 scrollEl（Reading 容器在 pdf 形态下隐藏）；
-  // 渲染宽按滚动区内容宽推（clientWidth 未布局时用缺省宽）
-  const pdfView = pdfForm ? new PdfHoverView(scrollEl) : null
+  // 渲染宽按滚动区内容宽推（clientWidth 未布局时用缺省宽）。
+  // #339 外链通道：PDF 内 http(s) 链接的显式点击经 link.activate 交宿主
+  // 浏览器打开（无 sourceDocUri——PDF 不是文档解析语境；与 #342 web 卡片
+  // 同款）。浮层保持在场（外开是上下文之外的查看，不强制切换）
+  const pdfView = pdfForm ? new PdfHoverView(scrollEl, {
+    onExternalUrl: (url) => {
+      const ctx = context
+      const ses = ctx?.session()
+      if (!ctx || !ses?.sessionId || !ses.docUri) {
+        return
+      }
+      ctx.send({
+        kind: 'link.activate',
+        sessionId: ses.sessionId,
+        docUri: ses.docUri,
+        href: url,
+        srcStart: spec.sourceStart,
+        srcEnd: spec.sourceEnd,
+      })
+    },
+  }) : null
   if (pdfForm) {
     contentEl.style.display = 'none'
   }
@@ -1965,6 +1985,29 @@ export function turnHoverPdfPage(delta: 1 | -1): boolean {
     return false
   }
   return state.pdfView.turnPage(delta, state.pdfView.currentRenderWidth(HOVER_POPUP_DEFAULT_WIDTH - 32))
+}
+
+/**
+ * #339（P3-07）PDF 缩放操作（键位 pdfZoomIn/pdfZoomOut/pdfZoomReset，
+ * 默认未绑定——只读，只改预览呈现）：factor 为乘数步进（放大
+ * PDF_ZOOM_STEP / 缩小其倒数），reset 回适合宽度。返回是否生效（无 PDF
+ * 浮层/已达 scale 上限或下限为 false——键位路由按无效静默）
+ */
+export function zoomHoverPdf(factor: number): boolean {
+  const state = popup
+  if (!state?.pdfView || !state.pdfForm) {
+    return false
+  }
+  return state.pdfView.zoomBy(factor)
+}
+
+/** #339 适合宽度复位（与 zoomHoverPdf 同款守卫与静默语义） */
+export function resetHoverPdfZoom(): boolean {
+  const state = popup
+  if (!state?.pdfView || !state.pdfForm) {
+    return false
+  }
+  return state.pdfView.resetZoom()
 }
 
 /** #220 手动刷新失效（refresh.invalidated 路由）：B 管理器全量失效重挂

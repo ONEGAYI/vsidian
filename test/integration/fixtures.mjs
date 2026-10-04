@@ -2,7 +2,7 @@
 // runTest.mjs（开发模式加载）与 runInstalled.mjs（VSIX 安装态回归）共用，
 // 两条路径跑同一套 fixture，保证安装态与开发态断言的是同一组文档。
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { buildMultiPageColorPdf, buildThreePageColorPdf } from '../pdfSample.mjs'
+import { buildMultiPageColorPdf, buildTextLinkPdf, buildThreePageColorPdf } from '../pdfSample.mjs'
 import path from 'node:path'
 
 const LF_DOC = '中文编辑测试\n\n包含 emoji：🎉 与组合 emoji 👨‍👩‍👧‍👦\n\n- 列表项一\n- 列表项二\n'
@@ -1092,7 +1092,13 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
     '',
     '普通链接 [本地 PDF](资料.pdf) 与 [fragment](资料.pdf#page=3)。',
     '',
+    // #339 文本+链接样本双链（第 5 枚 wikilink——文本层/链接层观测）
+    '文本链接 [[文本链接.pdf]]。',
+    '',
   ].join('\n'), 'utf8')
+  // #339（P3-07）文本+链接样本：真实文本（TextLayer 装载断言的 pdfjs 侧
+  // 前提——宿主机有 CJK 字体时附中文行）与六枚链接注解矩阵
+  writeFileSync(path.join(wsDir, '文本链接.pdf'), (await buildTextLinkPdf()).bytes)
   // #338（P3-06）嵌入 PDF：容器矩阵样例（独占行/混排/引用/表格格内/递归
   // 孙卡）与多页长样本（12 页红绿蓝循环——全文滚动与窗口回收断言）
   writeFileSync(path.join(wsDir, '长文.pdf'), await buildMultiPageColorPdf(12))

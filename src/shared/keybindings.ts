@@ -121,6 +121,13 @@ export const UI_OPERATIONS = [
   // 评估记录见 docs/specs/keybindings.md
   { id: 'pdfPageNext', command: 'onegayi.vsidian.ui.hoverPdfPageNext', titleKey: 'command.ui.hoverPdfPageNext.title', mode: 'both', writes: false, defaults: [] },
   { id: 'pdfPagePrev', command: 'onegayi.vsidian.ui.hoverPdfPagePrev', titleKey: 'command.ui.hoverPdfPagePrev.title', mode: 'both', writes: false, defaults: [] },
+  // #339（P3-07）PDF 缩放三操作：只读（只改预览呈现，不写任何文档），与
+  // 翻页同款作用于**在场的 PDF 悬停浮层**（无 PDF 浮层或已达 scale 上限/
+  // 下限时静默无效）；缩放受 PDF_RENDER_MAX_SCALE 费用上限与画布预算约束。
+  // 默认不占键位——用户经快捷键设置自配（评估记录见 docs/specs/keybindings.md）
+  { id: 'pdfZoomIn', command: 'onegayi.vsidian.ui.hoverPdfZoomIn', titleKey: 'command.ui.hoverPdfZoomIn.title', mode: 'both', writes: false, defaults: [] },
+  { id: 'pdfZoomOut', command: 'onegayi.vsidian.ui.hoverPdfZoomOut', titleKey: 'command.ui.hoverPdfZoomOut.title', mode: 'both', writes: false, defaults: [] },
+  { id: 'pdfZoomReset', command: 'onegayi.vsidian.ui.hoverPdfZoomReset', titleKey: 'command.ui.hoverPdfZoomReset.title', mode: 'both', writes: false, defaults: [] },
   // P2-04（#281）切换焦点嵌入的内部模式（Reading ↔ Live）：与嵌入卡片头部
   // 模式按钮同一实现（焦点不在嵌入编辑器内零操作）。切换本身只建/拆目标
   // 编辑端口、不写正文（writes: false——写门控按「是否写权威文本」判定）。
