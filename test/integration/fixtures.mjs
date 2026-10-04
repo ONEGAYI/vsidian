@@ -1118,6 +1118,23 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
     '内层 ![[长文.pdf]]',
     '',
   ].join('\n'), 'utf8')
+  // B-1（review-loops 波次一）text 引用目标失效推送：text 嵌入/悬停目标
+  //（.txt 嵌入卡断言未保存编辑刷新；.json 悬停断言磁盘替换失效推送）
+  // 与 PDF 悬停替换样本（5 页 → 3 页，页数变化即重载证据）
+  writeFileSync(path.join(wsDir, '笔记.txt'), [
+    '第一行：文本目标正文。',
+    '第二行：未保存编辑的追加锚点。',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, '配置.json'), `${JSON.stringify({ env: 'itest', revision: 1 }, null, 2)}\n`, 'utf8')
+  writeFileSync(path.join(wsDir, '替换样本.pdf'), await buildMultiPageColorPdf(5))
+  writeFileSync(path.join(wsDir, '悬停文本.md'), [
+    '# 悬停文本样例',
+    '',
+    '![[笔记.txt]]',
+    '',
+    '悬停 [[配置.json]] 与 [[替换样本.pdf]]。',
+    '',
+  ].join('\n'), 'utf8')
   // #222 嵌入：父文档（独占行全文/章节嵌入 + 混排 + 缺失目标）与目标文档
   // （frontmatter + 任务 + 章节结构 + 二层嵌入——一层展开场景）；二层目标
   // 文件名含空格（嵌入 inner 字面路径解析）。嵌入改写文档独立成组（rename

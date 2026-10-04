@@ -380,6 +380,63 @@ describe('事件接线（connectHoverEvents）：缓存失效不依赖订阅在�
     expect(stats.misses).toBe(0)
     expect(stats.invalidatedAtEntries).toBe(0) // 无在途读取：失效钟零登记
   })
+
+  // B-1（review-loops 波次一）：text 载荷缓存同样走 fsPath 反查失效——
+  // #340 的 text 通道载荷（RefTextContent）入缓存后，docChanged/磁盘
+  // 事件经事件源打通（provider 侧转发判据 + per-file watcher）到达
+  // connectHoverEvents 即失效；此处钉住失效通道对 text fsPath 无 md 假设
+  it('text 载荷缓存：docChanged 与磁盘事件按 fsPath 反查失效（B-1）', async () => {
+    const textPath = 'D:\\notes\\配置.json'
+    const t = makeHarness({
+      outcome: () => ({
+        ok: true,
+        fsPath: textPath,
+        relPath: '配置.json',
+        content: {
+          kind: 'text',
+          version: 2,
+          lfText: '{ "k": 1 }\n',
+          range: { start: 0, end: 13 },
+          languageId: 'json',
+          selector: { kind: 'text' },
+          hasWindow: false,
+          beginLine: 1,
+          endLine: 2,
+          locateLine: 1,
+          jumpLine: 1,
+          totalLines: 2,
+          font: {},
+          lineNumbers: true,
+        },
+      }),
+    })
+    const pushed: Array<{ sessionKeys: string[]; fsPath: string; status: HoverInvalidationStatus; generation: number }> = []
+    const coordinator = new HoverRefreshCoordinator({
+      pushInvalidation: (sessionKeys, fsPath, status, generation) => {
+        pushed.push({ sessionKeys: [...sessionKeys], fsPath, status, generation })
+      },
+    })
+    const events = connectHoverEvents(coordinator, () => [t.session])
+    await ready(t)
+    await t.send(hoverRequest(1, 'hover-1'))
+    expect(t.reads.get('wikilink:b')).toBe(1)
+    expect(t.session.hoverReadCacheStats().entries).toBe(1)
+    // 已 watch 的 text 目标：编辑事件防抖后推送 + 缓存失效
+    const sessionKey = `${DOC_URI}\n${t.panelId}`
+    coordinator.watch(sessionKey, textPath, 'hover-1')
+    events.onDocChanged(textPath)
+    vi.advanceTimersByTime(HOVER_REFRESH_DEFAULTS.debounceMs)
+    expect(pushed).toHaveLength(1)
+    expect(pushed[0]!.fsPath).toBe(textPath)
+    await t.send(hoverRequest(2, 'hover-2'))
+    expect(t.reads.get('wikilink:b')).toBe(2) // 缓存已失效重新读取
+    // 磁盘事件直通同链路（per-file watcher 的生产事件源形态）
+    events.onDiskEvent(textPath, 'changed')
+    expect(pushed).toHaveLength(2)
+    await t.send(hoverRequest(3, 'hover-3'))
+    expect(t.reads.get('wikilink:b')).toBe(3)
+    coordinator.dispose()
+  })
 })
 
 // ---- 修 3（review 第二轮 P3）：辅助索引清理 ----

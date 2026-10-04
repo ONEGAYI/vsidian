@@ -123,6 +123,16 @@ export class HoverRefreshCoordinator {
     return !this.disposed && this.registry.canWatch(fsPath)
   }
 
+  /**
+   * 目标是否仍有活跃订阅（B-1 / review-loops 波次一）：与 handleDiskEvent
+   * 的 registry.has 同一登记表、同键归一——provider 的 TextDocument 事件
+   * 转发判据（shouldForwardHoverDocChange）与 text 目标 per-file watcher
+   * 的生命周期锚都以「目标在登记表中」为准，不另设第二套口径。
+   */
+  isWatched(fsPath: string): boolean {
+    return !this.disposed && this.registry.has(fsPath)
+  }
+
   /** 释放实例订阅（目标内最后一个实例退场才撤目标） */
   unwatch(sessionKey: string, fsPath: string, instanceId: string): void {
     this.registry.unwatch(sessionKey, fsPath, instanceId)
@@ -232,6 +242,22 @@ export class HoverRefreshCoordinator {
  *  host/documentSession 不依赖 vscode，本模块经该接口引用而不反向耦合） */
 export interface HoverCacheInvalidator {
   invalidateHoverReads(fsPath: string): void
+}
+
+/**
+ * B-1（review-loops 波次一）：onDidChangeTextDocument 的 hover 域转发
+ * 判据——.md 既有域（索引域语义：未订阅也放行，经 connectHoverEvents
+ * 无条件广播 session 缓存失效——修 1 语义保持，不得收窄）∪ 已 watch
+ * 目标（text 等非 md 载荷按订阅集合放行；#340 票面「未保存修改正确
+ * 刷新」对 text 目标的通路）。isWatched 为协调器登记表查询——判据数据
+ * 面与推送门控（registry.has 早退）同源，未 watch 目标转发即零开销。
+ */
+export function shouldForwardHoverDocChange(
+  docPath: string,
+  fsPath: string,
+  isWatched: (fsPath: string) => boolean,
+): boolean {
+  return /\.md$/i.test(docPath) || isWatched(fsPath)
 }
 
 /**

@@ -16195,4 +16195,102 @@ export const cases: Array<[string, () => Promise<void>]> = [
       })
     }
   }],
+
+  // ---- B-1（review-loops 波次一）：text/pdf 引用目标失效推送事件源 ----
+
+  // 三场景验收「宿主事件源 → hover.invalidated → webview 重载」对 text/pdf
+  // 目标可达（修复前：TextDocument 转发被 /\.md$/i 硬过滤拦死，text 磁盘
+  // 事件无 watcher，PDF 缓存无失效路径；图片目标有 #201 管线补偿，text/
+  // pdf 完全无补偿）：
+  // ① text 嵌入卡在场 → 宿主内未保存编辑 .txt → 350ms 防抖推送 → 卡片
+  //   静默重发刷新（textLen 增长——#340「未保存修改正确刷新」对 text 的
+  //   通路；TextDocument 权威正文含未保存修改）；
+  // ② 悬停 .json 在场 → 磁盘替换 → per-file watcher（B-1 新增，登记
+  //   驱动 + LRU）changed 去抖推送 → 浮层静默重发（reqId 推进即推送到达
+  //   与重发动作的证据；重载字面值以宿主已打开文档为准是 #340 读取层
+  //   既有边界——编码以宿主打开文档的解码结果为准）；
+  // ③ 悬停 PDF 在场 → 磁盘替换 5 页 → 3 页 → #338 pdf 分流事件 →
+  //   changed 推送 → 新代次资源重载（页数变化；#338 已覆盖嵌入侧，
+  //   此处补悬停侧）。
+  ['悬停/嵌入失效推送：text 未保存编辑跟随与 text/PDF 磁盘替换（B-1）', async () => {
+    await openWithEditor('悬停文本.md')
+    await waitSessionReady('悬停文本.md')
+    const uri = wsUri('悬停文本.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    const parentBefore = await readDisk('悬停文本.md')
+
+    // 场景 1：text 嵌入卡装载与未保存编辑刷新
+    const shown = await waitViewState('悬停文本.md', (v) => {
+      const card = (v.readingEmbed ?? []).find((c) => c.inner === '笔记.txt')
+      return v.viewMode === 'reading' && card?.state === 'content' && (card.textLen ?? 0) > 0
+    })
+    const cardBefore = shown.readingEmbed!.find((c) => c.inner === '笔记.txt')!
+    const lenBefore = cardBefore.textLen ?? 0
+    assert(cardBefore.note === '笔记.txt', `嵌入 text 卡目标标识（实际 ${cardBefore.note}）`)
+
+    const txtDoc = await vscode.workspace.openTextDocument(wsUri('笔记.txt'))
+    const appendAt = new vscode.Position(txtDoc.lineCount, 0)
+    const edit = new vscode.WorkspaceEdit()
+    edit.insert(txtDoc.uri, appendAt, '追加行：未保存编辑应刷新嵌入卡。\n')
+    assert(await vscode.workspace.applyEdit(edit), 'text 目标未保存编辑应成功')
+    const refreshed = await waitViewState('悬停文本.md', (v) => {
+      const card = (v.readingEmbed ?? []).find((c) => c.inner === '笔记.txt')
+      return card?.state === 'content' && (card.textLen ?? 0) > lenBefore
+    })
+    const lenAfter = refreshed.readingEmbed!.find((c) => c.inner === '笔记.txt')!.textLen ?? 0
+    assert(lenAfter > lenBefore, `未保存修改推送后嵌入卡刷新（${lenBefore} → ${lenAfter}）`)
+    // 编辑恢复（反向删除追加行；恢复本身触发一次回落刷新，不影响后续场景）
+    const restore = new vscode.WorkspaceEdit()
+    restore.delete(txtDoc.uri, new vscode.Range(appendAt, new vscode.Position(txtDoc.lineCount, 0)))
+    await vscode.workspace.applyEdit(restore)
+    console.log('[B-1] text 未保存编辑跟随 ✓')
+
+    // 场景 2：悬停 [[配置.json]]（Reading wikilink 序 0——嵌入卡不占序）
+    // → 磁盘替换 → watcher changed 推送 → 浮层静默重发（reqId 推进）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 0 })
+    const json = await waitViewState('悬停文本.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content')
+    const reqBefore = json.hoverPreview!.reqId ?? 0
+    assert(json.hoverPreview?.note === '配置.json',
+      `text 悬停目标标识应为根内相对路径（实际 ${json.hoverPreview?.note}）`)
+    await vscode.workspace.fs.writeFile(wsUri('配置.json'),
+      Buffer.from(`${JSON.stringify({ env: 'itest', revision: 2 }, null, 2)}\n`, 'utf8'))
+    await waitViewState('悬停文本.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' &&
+      (v.hoverPreview.reqId ?? 0) > reqBefore)
+    console.log('[B-1] text 磁盘替换失效推送 ✓')
+
+    // 场景 3：换悬停 [[替换样本.pdf]]（序 1）→ 磁盘替换 5 页 → 3 页 →
+    // changed 推送 → 新代次重载（页数变化即绘制层重载证据）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 0 })
+    await waitViewState('悬停文本.md', (v) => v.hoverPreview?.open === false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 1 })
+    const pdfShown = await waitViewState('悬停文本.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' &&
+      v.hoverPreview.pdf?.phase === 'content')
+    assert(pdfShown.hoverPreview!.pdf!.totalPages === 5,
+      `替换前 PDF 悬停按 5 页样本装载（实际 ${pdfShown.hoverPreview!.pdf!.totalPages}）`)
+    await vscode.workspace.fs.writeFile(wsUri('替换样本.pdf'), await buildThreePageColorPdf())
+    const pdfReloaded = await waitViewState('悬停文本.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' &&
+      v.hoverPreview.pdf?.phase === 'content' && v.hoverPreview.pdf.totalPages === 3)
+    assert(pdfReloaded.hoverPreview!.pdf!.totalPages === 3,
+      `悬停 PDF 磁盘替换后按新文档重载（实际 ${pdfReloaded.hoverPreview!.pdf!.totalPages} 页）`)
+
+    // 零写回与状态复位（父文档不脏不写；浮层关闭、磁盘样本恢复不污染重跑）
+    const parentDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri)
+    assert(parentDoc?.isDirty === false, '失效推送链路不得弄脏父文档')
+    assert(await readDisk('悬停文本.md') === parentBefore, '失效推送链路不得改写父文档磁盘')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 1 })
+    await waitViewState('悬停文本.md', (v) => v.hoverPreview?.open === false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    await waitViewState('悬停文本.md', (v) => v.viewMode === 'live')
+    await vscode.workspace.fs.writeFile(wsUri('配置.json'),
+      Buffer.from(`${JSON.stringify({ env: 'itest', revision: 1 }, null, 2)}\n`, 'utf8'))
+    console.log('[B-1] PDF 悬停侧磁盘替换重载 ✓')
+  }],
 ]

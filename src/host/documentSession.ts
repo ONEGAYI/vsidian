@@ -1441,11 +1441,14 @@ export class DocumentSession {
             // #342：web 载荷不经会话缓存（外链请求已绕过本路径——防御
             // 性跳过 web 载荷的缓存写回；#336：image 载荷入缓存——图片
             // 按身份载荷小常数计量；#337：pdf 载荷入缓存——按源文件字节
-            // 计量）；content 解构后判别（TS 不支持嵌套路径判别，同 report
-            // 处）
+            // 计量；#340：text 载荷入缓存——按窗口 LF 正文 UTF-16 计量，
+            // 与 markdown 同款（B-1 补登：#340 登记读取通道时缓存写回
+            // 判别漏 text，致 text 目标重复悬停不合并/不缓存，失效通道
+            // 也无从钉住））；content 解构后判别（TS 不支持嵌套路径判别，
+            // 同 report 处）
             if (outcome.ok) {
               const { fsPath, relPath, content } = outcome
-              if (content.kind === 'markdown' || content.kind === 'image' || content.kind === 'pdf') {
+              if (content.kind === 'markdown' || content.kind === 'image' || content.kind === 'pdf' || content.kind === 'text') {
                 // 在途竞态补校验：读取期间该目标被失效过（当时形态→fsPath
                 // 登记未发生、反查为空）——不写缓存
                 const invalidatedAt = this.hoverInvalidatedAt.get(fsPath) ?? 0
@@ -1822,13 +1825,13 @@ export class DocumentSession {
     }
   }
 
-  /** 成功结果入缓存（字节按内容类型近似计量：markdown 为 LF 全文 UTF-16
-   *  code unit ×2，#337 起 pdf 为源文件字节；#336 图片载荷无正文，按身份
-   *  载荷小常数计量（与读取预算同口径）；条目/字节双上限按插入序淘汰——
-   *  单条超字节上限不入缓存。#342：web 载荷不进本缓存（调用侧过滤，
-   *  元信息缓存归 WebLinkMetaService） */
+  /** 成功结果入缓存（字节按内容类型近似计量：markdown/#340 text 为 LF
+   *  正文 UTF-16 code unit ×2（text 为窗口正文），#337 起 pdf 为源文件
+   *  字节；#336 图片载荷无正文，按身份载荷小常数计量（与读取预算同口
+   *  径）；条目/字节双上限按插入序淘汰——单条超字节上限不入缓存。#342：
+   *  web 载荷不进本缓存（调用侧过滤，元信息缓存归 WebLinkMetaService） */
   private commitHoverRead(shapeKey: string, outcome: Extract<RefReadOutcome, { ok: true }>): void {
-    const bytes = outcome.content.kind === 'markdown'
+    const bytes = outcome.content.kind === 'markdown' || outcome.content.kind === 'text'
       ? outcome.content.lfText.length * 2
       : outcome.content.kind === 'pdf'
         ? outcome.content.bytes
@@ -1869,7 +1872,7 @@ export class DocumentSession {
       return
     }
     this.hoverReadCache.delete(shapeKey)
-    this.hoverCacheBytes -= hit.content.kind === 'markdown'
+    this.hoverCacheBytes -= hit.content.kind === 'markdown' || hit.content.kind === 'text'
       ? hit.content.lfText.length * 2
       : hit.content.kind === 'pdf'
         ? hit.content.bytes

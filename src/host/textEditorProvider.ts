@@ -76,7 +76,8 @@ import type { CssSnippetService } from './cssSnippetService'
 import type { VaultIndexService } from './vaultIndexService'
 import type { IndexMaintenance } from './vaultIndexMaintenance'
 import { ImageRefreshCoordinator } from './imageRefreshCoordinator'
-import { admitHoverWatch, connectHoverEvents, HoverRefreshCoordinator } from './hoverRefreshCoordinator'
+import { admitHoverWatch, connectHoverEvents, HoverRefreshCoordinator, shouldForwardHoverDocChange } from './hoverRefreshCoordinator'
+import { escapeGlobFilenameLiteral } from '../shared/globLiteral'
 import { TextAppearanceService } from './textAppearance/appearanceService'
 import { ImageVersionTable } from './imageVersioning'
 import {
@@ -963,6 +964,91 @@ export function createTextEditorProvider(
   const hoverEvents = connectHoverEvents(hoverRefresh, () =>
     Array.from(sessions.values(), (entry) => entry.session),
   )
+
+  // ---- B-1（review-loops 波次一）：text 引用目标磁盘事件源 ----
+  // 缺陷：#338 自建 watcher 的 glob 只含图片扩展与 pdf，text 目标（#340
+  // 的 .txt/.json/代码文件等开放扩展集）的磁盘替换/删除/恢复无事件源
+  // ——P3-U7「附件替换、删除／恢复有正确刷新或提示」对 text 不成立。
+  // 不为全部 text 扩展建工作区级监听（.json/.ts 在工作区内海量存在），
+  // 按已 watch 目标驱动：hover.watch 登记成功时为该目标建 per-file
+  // watcher（base=目标所在目录 + 转义文件名，非递归——vs/base/common/
+  // glob 的精确匹配形态，1.82.3 源码核对的 API 用法），事件与 pdf 分流
+  // 同窗去抖后送 #224 刷新协调器（schedulePdfEvent 同构）。text 目标
+  // 扩展判定复用 classifyLocalRefContentKind 的 text 通道口径，不自造
+  // 扩展清单。
+  // watcher 生命周期独立于订阅登记：常驻至 LRU 淘汰/provider 释放——
+  // 退场目标的磁盘事件仍广播 session 缓存失效（修 1 的「unwatch 后修改
+  // 不留陈旧缓存」对 text 载荷同样成立），推送门控由协调器 registry.has
+  // 早退兜住（未订阅零推送）。挂起去抖计时器随 watcher 语义：事件本身
+  // 真实，到期转发正确；teardown 时统一清（review-loops #21 同款边界）
+  interface TextWatchSlot {
+    watcher: vscode.FileSystemWatcher
+  }
+  /** 归一键（与协调器 keyOf 同口径：Windows 折叠大小写 + 正斜杠） */
+  const textWatchKeyOf = (fsPath: string): string =>
+    isWindowsHost ? fsPath.replaceAll('\\', '/').toLowerCase() : fsPath
+  /** Map 插入序 = LRU 触达序（HoverWatchRegistry 淘汰同款手法） */
+  const textWatchers = new Map<string, TextWatchSlot>()
+  const TEXT_WATCHER_LIMIT = 64
+  /** text 目标磁盘事件去抖计时器（与 pdf 同窗——保存器 rename 成组归并） */
+  const textWatchTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  const scheduleTextDiskEvent = (fsPath: string, status: 'changed' | 'deleted'): void => {
+    const prev = textWatchTimers.get(fsPath)
+    if (prev !== undefined) {
+      clearTimeout(prev)
+    }
+    textWatchTimers.set(
+      fsPath,
+      setTimeout(() => {
+        textWatchTimers.delete(fsPath)
+        hoverEvents.onDiskEvent(fsPath, status)
+      }, IMAGE_EVENT_DEBOUNCE_MS),
+    )
+  }
+  /** watch 登记成功后调用：text 目标建 per-file watcher（幂等，LRU 触达） */
+  const ensureTextWatch = (fsPath: string): void => {
+    if (classifyLocalRefContentKind(fsPath) !== 'text') {
+      return // md 域走索引 watcher、pdf/image 走自建分流——各有事件源
+    }
+    const key = textWatchKeyOf(fsPath)
+    const prev = textWatchers.get(key)
+    if (prev !== undefined) {
+      textWatchers.delete(key) // LRU 触达：移到队尾
+      textWatchers.set(key, prev)
+      return
+    }
+    const fileUri = vscode.Uri.file(fsPath)
+    const slash = fileUri.path.lastIndexOf('/')
+    const dirUri = fileUri.with({ path: slash > 0 ? fileUri.path.slice(0, slash) : '/' })
+    const watcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(dirUri, escapeGlobFilenameLiteral(fileUri.path.slice(slash + 1))),
+    )
+    watcher.onDidChange((uri) => scheduleTextDiskEvent(uri.fsPath, 'changed'))
+    watcher.onDidCreate((uri) => scheduleTextDiskEvent(uri.fsPath, 'changed'))
+    watcher.onDidDelete((uri) => scheduleTextDiskEvent(uri.fsPath, 'deleted'))
+    textWatchers.set(key, { watcher })
+    while (textWatchers.size > TEXT_WATCHER_LIMIT) {
+      const oldest = textWatchers.keys().next().value
+      if (oldest === undefined) {
+        break
+      }
+      const slot = textWatchers.get(oldest)
+      textWatchers.delete(oldest)
+      slot?.watcher.dispose()
+    }
+  }
+  const teardownTextWatches = (): void => {
+    for (const slot of textWatchers.values()) {
+      slot.watcher.dispose()
+    }
+    textWatchers.clear()
+    for (const timer of textWatchTimers.values()) {
+      clearTimeout(timer)
+    }
+    textWatchTimers.clear()
+  }
+  context.subscriptions.push({ dispose: teardownTextWatches })
+
   const getEntry = (uri: vscode.Uri): SessionEntry | undefined =>
     sessions.get(uri.toString())
 
@@ -2603,6 +2689,10 @@ export function createTextEditorProvider(
                 message.fsPath,
                 `累计 ${hoverWatchRejected} 次`,
               )
+            } else {
+              // B-1：text 目标的磁盘事件源按登记驱动建立（md/pdf/image
+              // 各有事件源，内部按扩展分类空操作）
+              ensureTextWatch(message.fsPath)
             }
           } else {
             void entry.session.handleWebviewMessage(message, sessionId)
@@ -3131,8 +3221,14 @@ export function createTextEditorProvider(
       // 空 contentChanges 是 dirty 状态事件，无内容变更不触发）。目标自
       // 引用（A 嵌入 A）同链路收敛：推送只读重载，不产生新事件。修 1 起
       // 经 connectHoverEvents 接线：未订阅目标同时广播 session 缓存失效
+      // B-1（review-loops 波次一）：转发判据改为 shouldForwardHoverDocChange
+      // ——.md 既有域不变（未订阅也放行，缓存失效广播语义），text 目标
+      //（.txt/.json/代码文件等）按订阅集合放行（#340「未保存修改正确刷新」
+      // 对 text 的通路；此前 /\.md$/i 硬过滤把已 watch 的 text 编辑拦死）
       if (event.contentChanges.length > 0 &&
-        event.document.uri.scheme === 'file' && /\.md$/i.test(event.document.uri.path)) {
+        event.document.uri.scheme === 'file' &&
+        shouldForwardHoverDocChange(event.document.uri.path, event.document.uri.fsPath,
+          (fsPath) => hoverRefresh.isWatched(fsPath))) {
         hoverEvents.onDocChanged(event.document.uri.fsPath)
       }
       const entry = getEntry(event.document.uri)
