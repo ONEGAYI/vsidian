@@ -60,6 +60,7 @@ import { refEmbedTargetIsImage } from '../shared/refContent'
 import {
   RefContentInstance,
   isRefLoadedMarkdown,
+  isRefLoadedPdf,
   refLoadedContentOfResult,
   type RefContentMount,
   type RefLoadedAny,
@@ -426,7 +427,10 @@ export function hoverPopupProbe(): {
     }
   }
   const pdfProbe = (): PdfRenderProbe =>
-    popup?.pdfView?.probe() ?? { phase: 'idle', page: 0, totalPages: 0, canvasWidth: 0, canvasHeight: 0, errorReason: '', requestedPage: 0, nonWhiteRatio: -1 }
+    popup?.pdfView?.probe() ?? {
+      phase: 'idle', page: 0, totalPages: 0, canvasWidth: 0, canvasHeight: 0, errorReason: '',
+      requestedPage: 0, nonWhiteRatio: -1, mountedPages: 0, canvasBytes: 0, scrollHeight: 0, scrollTop: 0,
+    }
   if (!popup || popup.display !== 'content') {
     return {
       open: popup !== null, state: popup?.display ?? 'loading', note: popup?.note ?? '', blocks: 0,
@@ -1531,6 +1535,12 @@ function applyHoverPdfContent(
     if (probe.phase === 'content') {
       ensureWatch(state, message.target.fsPath, message.sourceLeaseId)
       applyDisplay(state, 'content', message.target.relPath)
+      // #338：loading 期滚动区隐藏（display:none）使初始滚动写入丢失——
+      // 滚动区显示后重新定位到导航选择器页（重定位钳制语义，非报错路径）
+      const target = page ?? 1
+      if (probe.page !== target) {
+        pdfView.locateTo(target)
+      }
     } else if (probe.phase === 'error') {
       if (context) releaseRefSourceLease(context, message.sourceLeaseId)
       applyDisplay(state, 'error', pdfErrorText(probe.errorReason === '' ? 'resource' : probe.errorReason, probe.requestedPage, probe.totalPages))
@@ -1600,6 +1610,15 @@ export function notifyHoverResult(message: HoverPreviewResult): boolean {
       return true
     }
     if (!isRefLoadedMarkdown(loaded)) {
+      if (isRefLoadedPdf(loaded)) {
+        // 不可达防御：pdf 载荷在上方 contentKind 分支已分派（pdfForm 恒
+        // 走 applyHoverPdfContent / 失配错误），此处仅类型收窄后兜底——
+        // 未来新增消费形态时保持「不静默错挂」语义
+        if (context) releaseRefSourceLease(context, message.sourceLeaseId)
+        applyDisplay(popup, 'error', refErrorText('read-failed', popup.target))
+        position(popup)
+        return true
+      }
       // #336（P3-04）image 载荷：委托普通图片挂载（与 ![](图.png) 同一
       // 加载/重试/弹窗行为源），不走 Markdown Reading 渲染路径
       applyHoverImageContent(popup, message, loaded)

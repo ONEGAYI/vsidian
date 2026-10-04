@@ -1098,6 +1098,17 @@ export type WebviewToHost =
         conflictComparePending?: boolean
         /** P2-12 对比打开失败的就地提示在场；旧 webview 缺省。 */
         conflictNotice?: boolean
+        /** #338（P3-06）PDF 视图观测（pdf 载荷卡）：phase/page/totalPages/
+         *  mountedPages/canvasBytes/nonWhiteRatio——非 pdf 卡缺省。 */
+        pdf?: {
+          phase: 'idle' | 'loading' | 'content' | 'error'
+          page: number
+          totalPages: number
+          errorReason: 'corrupt' | 'encrypted' | 'page-range' | 'resource' | 'load-failed' | ''
+          mountedPages: number
+          canvasBytes: number
+          nonWhiteRatio: number
+        } | null
       }>
       /** #223 Live 嵌入显隐观测：嵌入表逐枚的源码显形态（目标原文、行号、
        *  光标/选区是否触及源码区间——selectionTouchesRange 语义；旧 webview
@@ -3320,7 +3331,20 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
             // 同步——缺省 / reading 块挂载 / live widget 挂载）
             (e.host === undefined || e.host === 'reading' || e.host === 'live') &&
             (e.rootHost === undefined || e.rootHost === 'reading' || e.rootHost === 'live' || e.rootHost === 'hover') &&
-            (e.textLen === undefined || isNonNegativeInt(e.textLen))))) &&
+            (e.textLen === undefined || isNonNegativeInt(e.textLen)) &&
+            // #338（P3-06）嵌入卡 PDF 观测（旧 webview 缺省；null = 非 pdf 卡）
+            (e.pdf === undefined || e.pdf === null || (isObject(e.pdf) &&
+              (e.pdf.phase === 'idle' || e.pdf.phase === 'loading' || e.pdf.phase === 'content' || e.pdf.phase === 'error') &&
+              isNonNegativeInt(e.pdf.page) &&
+              isNonNegativeInt(e.pdf.totalPages) &&
+              (e.pdf.errorReason === 'corrupt' || e.pdf.errorReason === 'encrypted' ||
+                e.pdf.errorReason === 'page-range' || e.pdf.errorReason === 'resource' ||
+                e.pdf.errorReason === 'load-failed' || e.pdf.errorReason === '') &&
+              isNonNegativeInt(e.pdf.mountedPages) &&
+              isNonNegativeInt(e.pdf.canvasBytes) &&
+              typeof e.pdf.nonWhiteRatio === 'number' &&
+              Number.isFinite(e.pdf.nonWhiteRatio) &&
+              e.pdf.nonWhiteRatio >= -1))))) &&
         (v.typography === undefined || isTypographyProbe(v.typography))
       )
     case 'reading.perf.report':

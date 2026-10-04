@@ -134,16 +134,46 @@ export interface RefLoadedImageContent {
   expansionPath?: readonly string[]
 }
 
+/**
+ * #338（P3-06）PDF 装载形态：pdf 载荷的 webview 侧已装载内容——身份
+ * （fsPath/relPath）+ 资源 URI（含 `?v=` 代次戳）+ 文件状态代次 + 初始
+ * 定位页（双链 #page=N 解析产物；无 page = 第一页）。无 LF 正文/定位区间
+ * （PDF 无文本坐标）；渲染由容器侧挂 PDF 视图实例（PdfHoverView——共享
+ * 文档存储按 URI 复用，各 occurrence 滚动独立），不走 Markdown Reading
+ * 视图的 render 路径。
+ */
+export interface RefLoadedPdfContent {
+  kind: 'pdf'
+  fsPath: string
+  relPath: string
+  /** webview 资源 URI（含 ?v= 代次戳——版本隔离与缓存击穿） */
+  uri: string
+  version: number
+  /** 初始定位页（1-based；undefined = 第一页） */
+  page?: number
+  /** 源文件字节（逻辑预算费用——RefExpansionBudget 按 bytes 计） */
+  bytes: number
+  depth?: number
+  expansionPath?: readonly string[]
+}
+
 /** 类型化装载结果（按 kind 分派的 loaded 形态联合） */
-export type RefLoadedAny = RefLoadedContent | RefLoadedImageContent
+export type RefLoadedAny = RefLoadedContent | RefLoadedImageContent | RefLoadedPdfContent
 
 /** Markdown 装载形态判别（RefLoadedContent 无 kind 判别位——#336 起联合
- *  收宽，消费方经此收窄；image 形态只由图片装载路径消费） */
+ *  收宽，消费方经此收窄；image/pdf 形态分别只由图片与 PDF 装载路径消费） */
 export function isRefLoadedMarkdown(loaded: RefLoadedAny): loaded is RefLoadedContent {
   // 运行期防御判别：RefLoadedContent（markdown）无 kind 字段，联合的
-  // image 成员带字面量 'image'——按可选字段读出后比对（未知 kind 按非
-  // image 放行给既有 markdown 消费面，由各容器自行安全处理）
-  return (loaded as { kind?: string }).kind !== 'image'
+  // image/pdf 成员带字面量判别位——按可选字段读出后比对（未知 kind 按
+  // 非 image/pdf 放行给既有 markdown 消费面，由各容器自行安全处理）
+  const kind = (loaded as { kind?: string }).kind
+  return kind !== 'image' && kind !== 'pdf'
+}
+
+/** PDF 装载形态判别（#338：嵌入卡与浮层的 PDF 视图分派依据；null/
+ *  undefined（未装载）恒 false——调用方可直接传 entry.loaded） */
+export function isRefLoadedPdf(loaded: RefLoadedAny | null | undefined): loaded is RefLoadedPdfContent {
+  return (loaded as { kind?: string } | null | undefined)?.kind === 'pdf'
 }
 
 /**
@@ -153,12 +183,12 @@ export function isRefLoadedMarkdown(loaded: RefLoadedAny): loaded is RefLoadedCo
  *   的既有装载形态；身份/版本/全文/定位区间/选择器语义不变）；
  * - 'image'（#336 / P3-04）：转换为 RefLoadedImageContent（身份 + 来源
  *   相对图源 + 文件资源版本）——消费方（悬停浮层）据此委托普通图片挂载；
- * - 'pdf'（#337）：**不在本通道装载**——PDF 内容视图由浮层的 pdf 形态
- *   直接消费回包（资源 URI + 导航选择器），不进 Markdown Reading 装载
- *   链。此处返回 null：按「不可应用的回包」处理语义不适用（pdf 形态
- *   浮层在 notifyHoverResult 分派，不进入本函数的消费面），但对任何
- *   仍以 Markdown 装载面消费 pdf 载荷的旧路径构成防线（释放来源租约、
- *   错误分态、不写端口）；
+ * - 'pdf'（#338 / P3-06）：转换为 RefLoadedPdfContent（身份 + 资源 URI +
+ *   文件状态代次 + 初始定位页）——消费方（悬停浮层的 pdf 形态与嵌入卡
+ *   片的 PDF 视图）据此侧挂 PdfHoverView 实例；**RefContentMount.render
+ *   仍不接受 pdf 形态**（PDF 无 Markdown Reading 装载链——防线语义从
+ *   「装载入口拒收」收窄为「Reading 挂载面拒收」，由各容器在 render 前
+ *   经 isRefLoadedPdf 分派）；
  * - 其余 kind（text/web）：未登记装载形态，返回 null——调用方按
  *   「不可应用的回包」处理（释放来源租约、呈现错误分态、不入装载缓存、
  *   不绑定任何写端口）。这是消息级校验（isHostToWebview 拒绝类型与载荷
@@ -175,6 +205,22 @@ export function refLoadedContentOfResult(
       relPath: message.target.relPath,
       src: message.imageSrc ?? '',
       version: message.version,
+      depth: message.depth,
+      expansionPath: message.expansionPath,
+    }
+  }
+  if (kind === 'pdf') {
+    if (message.pdf === undefined) {
+      return null // 消息级校验已拦（防御：载荷缺席不装载）
+    }
+    return {
+      kind: 'pdf',
+      fsPath: message.target.fsPath,
+      relPath: message.target.relPath,
+      uri: message.pdf.uri,
+      version: message.version,
+      ...(message.scope.kind === 'pdf' && message.scope.page !== undefined ? { page: message.scope.page } : {}),
+      bytes: message.pdf.bytes,
       depth: message.depth,
       expansionPath: message.expansionPath,
     }

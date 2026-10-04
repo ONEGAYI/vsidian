@@ -35,7 +35,8 @@ import type { MessageKey } from '../shared/locales/en'
 import { HOVER_REFRESH_DEFAULTS } from '../shared/hoverRefresh'
 import { REF_EXPANSION_LIMITS, RefExpansionBudget } from '../shared/refExpansion'
 import { RELOCATION_SCAN_LIMITS } from '../shared/relocationScan'
-import { RefContentInstance, isRefLoadedMarkdown, refLoadedContentOfResult, type RefContentMount, type RefLoadedAny, type RefLoadedContent, type RefMountOptions, type RefSourceContext } from './refContentInstance'
+import { RefContentInstance, isRefLoadedMarkdown, isRefLoadedPdf, refLoadedContentOfResult, type RefContentMount, type RefLoadedAny, type RefLoadedContent, type RefLoadedPdfContent, type RefMountOptions, type RefSourceContext } from './refContentInstance'
+import { PdfHoverView, pdfErrorText, type PdfRenderProbe } from './pdfRender'
 import { promoteEmbedSlotsInBlock, promotedHostsOf } from './embedSlots'
 import { applyObsidianDomAlias } from '../shared/obsidianAlias'
 import { createReadingContainer, READING_CLASS_NAMES } from './readingView'
@@ -273,8 +274,10 @@ export interface EmbedCardContext {
   mainEditorView?(): EditorView | null
 }
 
-/** 装载结果缓存（父文档会话内；#224 变更订阅推送后按目标失效清除） */
-type EmbedLoaded = RefLoadedContent
+/** 装载结果缓存（父文档会话内；#224 变更订阅推送后按目标失效清除）。
+ *  #338（P3-06）起联合收宽：pdf 载荷的嵌入卡缓存（身份 + 资源 URI +
+ *  初始定位页——重挂直接侧挂 PDF 视图，零新请求） */
+type EmbedLoaded = RefLoadedContent | RefLoadedPdfContent
 
 /** P2-04 嵌入实例的目标编辑端口状态（entry 级——同一 occurrence 的双容器
  *  挂载共享一份；Reading 态不存在，即「Reading 无写端口」） */
@@ -378,6 +381,10 @@ interface EmbedEntry {
   watchedFsPath: string | null
   watchLeaseId: string | null
   parseBytes: number
+  /** #338（P3-06）PDF occurrence 的浏览位置记忆（卸载/刷新前保存当前
+   *  可见页；重挂与新版本重载按它恢复——合法钳制口径）。markdown 形态
+   *  的滚动记忆沿用 content.scrollTop（PDF 页塔不占该字段） */
+  pdfPage: number
 }
 
 /** 挂载中的卡片实例（DOM 生命周期 = 宿主元素在场期间——Reading 块元素
@@ -398,6 +405,10 @@ interface EmbedCardHandle {
   /** P2-05 显式关闭编辑入口（内部 Live 在场时可见） */
   closeBtn: HTMLButtonElement
   content: RefContentMount
+  /** #338（P3-06）PDF 视图实例（pdf 载荷装载后非空；挂卡片滚动区内，
+   *  与 Reading/Live 容器并列——每容器一份，同 URI 多 occurrence 经共
+   *  享文档存储复用文档数据，滚动各自独立） */
+  pdfView: PdfHoverView | null
   display: 'loading' | 'content' | 'error'
   note: string
   /** 容器来源（探针观测面；行为路径不分叉——两容器共用装配）。P2-06
@@ -439,6 +450,17 @@ export interface EmbedCardProbe {
   /** P2-11（#288）内部 Live 图片管理器的已应用地址（B 身份解析结果——
    *  「按 B 目录解析才命中」的集成断言面） */
   liveImageSrcs: string[]
+  /** #338（P3-06）PDF 视图观测（嵌入卡 pdf 载荷的绘制层断言载体：
+   *  phase/page/totalPages/mountedPages/canvasBytes——非 pdf 卡恒 null） */
+  pdf: {
+    phase: PdfRenderProbe['phase']
+    page: number
+    totalPages: number
+    errorReason: PdfRenderProbe['errorReason']
+    mountedPages: number
+    canvasBytes: number
+    nonWhiteRatio: number
+  } | null
   /** P2-05 该嵌入发起的关闭确认模态态（none/open/stale） */
   closeDialog: 'none' | 'open' | 'stale'
   /** P2-05 发起（或挂起）的退出意图径 */
@@ -647,6 +669,7 @@ export class EmbedCardManager {
         watchedFsPath: null,
         watchLeaseId: null,
         parseBytes: 0,
+        pdfPage: 0,
       }
       this.entries.set(key, entry)
       const owned = entry
@@ -738,6 +761,7 @@ export class EmbedCardManager {
       modeBtn,
       saveBtn,
       closeBtn,
+      pdfView: null,
       content: entry.content.mount({
         contentEl, scrollEl, strategy: 'virtual',
         session: () => this.context.session(),
@@ -902,6 +926,7 @@ export class EmbedCardManager {
         watchedFsPath: null,
         watchLeaseId: null,
         parseBytes: 0,
+        pdfPage: 0,
       }
       this.entries.set(key, entry)
       const owned = entry
@@ -941,6 +966,7 @@ export class EmbedCardManager {
       modeBtn: args.modeBtn,
       saveBtn: args.saveBtn,
       closeBtn: args.closeBtn,
+      pdfView: null,
       content,
       display: 'loading',
       note: '',
@@ -1162,10 +1188,13 @@ export class EmbedCardManager {
       if (entry.lastReq !== null &&
           entry.lastReq.instanceId === message.instanceId &&
           entry.lastReq.reqId === message.reqId) {
-        // #336：image 载荷对卡片路径不可应用（嵌入卡片结构上不发图片请求
-        // ——图片嵌入在装饰/渲染层分流图片管线；此处为防御性第二道防线）
+        // #336：image 载荷对卡片路径不可应用（图片嵌入经装饰/渲染层分流图片
+        // 管线，不经卡片请求——防御性第二道防线）；#338：pdf 载荷可缓存
+        //（重挂直接侧挂 PDF 视图，零新请求）
         const converted = !stale && okMessage !== null ? refLoadedContentOfResult(okMessage) : null
-        const loaded = converted !== null && isRefLoadedMarkdown(converted) ? converted : null
+        const loaded = converted !== null && (isRefLoadedMarkdown(converted) || isRefLoadedPdf(converted))
+          ? converted
+          : null
         if (loaded !== null && okMessage !== null) {
           entry.loaded = loaded
           entry.lastKnown = { fsPath: okMessage.target.fsPath, version: okMessage.version }
@@ -1237,6 +1266,10 @@ export class EmbedCardManager {
       }
       // 在场滚动位置先保存（重建后恢复；离屏 entry 保留旧值）
       for (const handle of this.active.values()) {
+        if (handle.entry === entry && handle.pdfView !== null && handle.pdfView.probe().page > 0) {
+          // #338 PDF：浏览位置按当前可见页保存（重载后合法钳制恢复）
+          entry.pdfPage = handle.pdfView.probe().page
+        }
         if (handle.entry === entry && handle.scrollEl.scrollTop > 0) {
           entry.content.scrollTop = handle.scrollEl.scrollTop
         }
@@ -1262,6 +1295,8 @@ export class EmbedCardManager {
         for (const handle of handles) {
           handle.content.clear()
           handle.contentEl.textContent = '' // 旧内容撤下（防 display 反转闪现）
+          // #338 PDF：旧页一并撤下（不冒充在场内容；视图保留待恢复重载）
+          handle.pdfView?.discardContent()
           this.applyDisplay(handle, 'error', note)
         }
       }
@@ -1561,10 +1596,13 @@ export class EmbedCardManager {
   }
 
   /** 句柄级内容显隐：Live 态显示编辑器容器（实例已建）并隐藏 Reading
-   *  容器；Reading 态反转。mode 传入避免递归重算 */
+   *  容器；Reading 态反转。mode 传入避免递归重算。#338：pdf 装载的
+   *  entry 两容器均让位给 PDF 视图（挂卡片滚动区内，与容器并列）——
+   *  只读内容无编辑语义，恒不进 Live 呈现 */
   private applyInternalDom(handle: EmbedCardHandle, mode = this.effectiveMode(handle.entry)): void {
-    const liveOn = mode === 'live' && handle.entry.live?.instance != null
-    handle.contentEl.style.display = liveOn ? 'none' : ''
+    const pdfLoaded = isRefLoadedPdf(handle.entry.loaded ?? undefined)
+    const liveOn = !pdfLoaded && mode === 'live' && handle.entry.live?.instance != null
+    handle.contentEl.style.display = liveOn || pdfLoaded ? 'none' : ''
     handle.liveEl.style.display = liveOn ? '' : 'none'
   }
 
@@ -2037,7 +2075,10 @@ export class EmbedCardManager {
       return
     }
     const loaded = entry.loaded
-    if (loaded && loaded.selector !== undefined && loaded.selector.kind !== 'full' &&
+    // #338：EmbedLoaded 联合收宽后此处只对 markdown 形态定位（PDF 无
+    // 文本坐标——live 视图本就不为 pdf 装载建立，防御性收窄）
+    if (loaded !== null && isRefLoadedMarkdown(loaded) &&
+      loaded.selector !== undefined && loaded.selector.kind !== 'full' &&
       loaded.range.start > 0 && loaded.range.start <= view.state.doc.length) {
       const at = loaded.range.start
       view.dispatch({ selection: { anchor: at }, effects: EditorView.scrollIntoView(at) })
@@ -2902,6 +2943,15 @@ export class EmbedCardManager {
     }
   }
 
+  /** probe 的 scope 字段取值：markdown 装载报区间形态，pdf／未装载报空
+   *  （#338 联合收宽——pdf 无文本坐标，形态区分走 probe 的 pdf 字段） */
+  private probeScopeOf(loaded: EmbedLoaded | null): 'full' | 'heading' | 'block' | '' {
+    if (loaded === null || !isRefLoadedMarkdown(loaded)) {
+      return ''
+    }
+    return loaded.scope ?? ''
+  }
+
   /** 观测探针（view.state.readingEmbed 的数据源；host 区分容器）。P2-06：
    *  浮窗根（host='hover'）不进嵌入探针——它有自己的 hoverPreview 探针，
    *  且驻留 entry 会污染嵌入 occurrence 序号 */
@@ -2917,7 +2967,8 @@ export class EmbedCardManager {
         state: handle.display,
         note: handle.note,
         blocks: handle.contentEl.querySelectorAll(`.${READING_CLASS_NAMES.block}`).length,
-        scope: handle.entry.loaded?.scope ?? '',
+        // #338：pdf 装载无文本区间形态（形态区分走下方 pdf 字段）
+        scope: this.probeScopeOf(handle.entry.loaded),
         fm: fmSection ? (handle.entry.content.fmExpanded ? 'expanded' : 'collapsed') : 'none',
         maxHeightPx: Number.parseInt(handle.scrollEl.style.maxHeight, 10) || 0,
         host: handle.host,
@@ -2939,6 +2990,20 @@ export class EmbedCardManager {
           .map((e) => e.appliedSrc!),
         depth: handle.entry.content.source.depth ?? 1,
         parentInstanceId: handle.entry.content.source.parentInstanceId ?? null,
+        pdf: handle.pdfView !== null
+          ? (() => {
+              const p = handle.pdfView!.probe()
+              return {
+                phase: p.phase,
+                page: p.page,
+                totalPages: p.totalPages,
+                errorReason: p.errorReason,
+                mountedPages: p.mountedPages,
+                canvasBytes: p.canvasBytes,
+                nonWhiteRatio: p.nonWhiteRatio,
+              }
+            })()
+          : null,
         closeDialog: this.closeDialogBelongsTo(handle.entry)
           ? (this.closeDialog!.stale ? 'stale' : 'open')
           : 'none',
@@ -3426,7 +3491,11 @@ export class EmbedCardManager {
    *  refLoadedContentOfResult 类型化装载入口（contentKind 分派）——kind
    *  与载荷不匹配返回 null，按不可应用回包处理：释放租约、清在途配对、
    *  错误分态（不入装载缓存、不触发 refEdit 写端口——非 markdown 载荷
-   *  结构上到不了装载与端口绑定路径） */
+   *  结构上到不了装载与端口绑定路径）。
+   *  #336：image 载荷对卡片路径不可应用（图片嵌入经装饰/渲染层分流图片
+   *  管线，不经卡片请求——防御性第二道防线与 #333 同口径）。
+   *  #338（P3-06）：pdf 载荷在此分派到 PDF 视图（applyPdfLoaded——嵌入
+   *  卡侧挂 PdfHoverView 实例，不进 Markdown Reading 装载链） */
   private applyResult(handle: EmbedCardHandle, message: Extract<HoverPreviewResult, { ok: true }>): void {
     if ((handle.entry.content.source.depth ?? 1) > (this.context.maxDepth?.() ?? REF_EXPANSION_LIMITS.defaultDepth)) {
       releaseRefSourceLease(this.context, message.sourceLeaseId)
@@ -3437,17 +3506,20 @@ export class EmbedCardManager {
     const converted = refLoadedContentOfResult(message)
     // #336：image 载荷对卡片路径不可应用（图片嵌入经装饰/渲染层分流图片
     // 管线，不经卡片请求——防御性第二道防线与 #333 同口径）
-        const loaded = converted !== null && isRefLoadedMarkdown(converted) ? converted : null
+    const loaded = converted !== null && (isRefLoadedMarkdown(converted) || isRefLoadedPdf(converted)) ? converted : null
     if (loaded === null) {
       releaseRefSourceLease(this.context, message.sourceLeaseId)
       handle.entry.lastReq = null
       this.applyDisplay(handle, 'error', refErrorText('read-failed', targetOfInner(handle.entry.inner)))
       return
     }
-    const embedLoaded: EmbedLoaded = loaded
     handle.entry.lastReq = null
     handle.entry.lastKnown = { fsPath: loaded.fsPath, version: loaded.version }
-    this.applyLoaded(handle, embedLoaded, message.sourceLeaseId)
+    if (isRefLoadedPdf(loaded)) {
+      this.applyPdfLoaded(handle, loaded, message.sourceLeaseId)
+      return
+    }
+    this.applyLoaded(handle, loaded, message.sourceLeaseId)
   }
 
   /** 装载结果渲染（首载与缓存重挂共用）：B Reading 视图 + 状态恢复。
@@ -3458,6 +3530,11 @@ export class EmbedCardManager {
    *  applyInternalDom 切换到编辑器容器；生效内部模式为 Live 时随后发起
    *  端口绑定（装载完成的 watch 固定是宿主 bind 校验的前置）。 */
   private applyLoaded(handle: EmbedCardHandle, loaded: EmbedLoaded, sourceLeaseId?: string): void {
+    if (isRefLoadedPdf(loaded)) {
+      // 防御性入口归一（外部调用点已分流；联合收窄保证下方 render 只见 markdown）
+      this.applyPdfLoaded(handle, loaded, sourceLeaseId)
+      return
+    }
     if (handle.scrollEl.scrollTop > 0) {
       handle.entry.content.scrollTop = handle.scrollEl.scrollTop // 刷新前保存
     }
@@ -3501,6 +3578,83 @@ export class EmbedCardManager {
     // rAF 同帧完成，统一走延迟一帧保持两路径一致
     handle.content.restoreScroll(true)
     // #224 目标订阅（成功装载后；幂等——目标身份变化时先释放旧订阅）
+  }
+
+  /**
+   * #338（P3-06）PDF 装载渲染：嵌入卡侧挂 PDF 视图实例（PdfHoverView 挂
+   * 卡片滚动区内，按页 canvas 池全文滚动——容器只负责尺寸、挂载与焦点；
+   * 同 URI 多 occurrence 经共享文档存储复用文档数据，滚动/生命周期各自
+   * 独立）。只读卡壳：Reading/Live 容器与模式/保存/关闭入口让位；occurrence
+   * 浏览位置（entry.pdfPage）优先于载荷初始页——重挂与文件替换重载按它
+   * 恢复（合法钳制），初次装载用双链 #page=N 解析产物。
+   */
+  private applyPdfLoaded(handle: EmbedCardHandle, loaded: RefLoadedPdfContent, sourceLeaseId?: string): void {
+    if (handle.scrollEl.scrollTop > 0) {
+      handle.entry.content.scrollTop = handle.scrollEl.scrollTop // 刷新前保存
+    }
+    handle.entry.loaded = loaded
+    this.touchEntry(handle.entry) // LRU 触达（仍有效实例）
+    // 预算：源字节逻辑费用（PDF 解码内存不占文本预算——三期「不能用 2MiB
+    // 文本预算套作 PDF 解码内存」口径；canvas 费用由 PDF_SCROLL_LIMITS 自持）
+    const borrowers = [...this.active.values()].filter((h) => h.entry === handle.entry).length
+    if (this.budget.attachContent(handle.entry.hostId, this.dataKey(handle.entry, loaded),
+      loaded.bytes * Math.max(1, borrowers)) !== 'ok') {
+      releaseRefSourceLease(this.context, sourceLeaseId)
+      handle.entry.loaded = null
+      this.budget.release(handle.entry.hostId)
+      this.applyDisplay(handle, 'error', t('hover.errorBudget'))
+      return
+    }
+    handle.entry.parseBytes = loaded.bytes
+    // 先交接新版本来源（同 fsPath 未保存刷新需要此顺序），再挂视图
+    this.watchEntry(handle.entry, sourceLeaseId)
+    // 只读卡壳：容器与编辑入口让位（PDF 无内部模式切换/dirty/关闭语义）
+    this.applyInternalDom(handle)
+    handle.modeBtn.style.display = 'none'
+    handle.modeBtn.tabIndex = -1
+    handle.saveBtn.style.display = 'none'
+    handle.closeBtn.style.display = 'none'
+    if (handle.pdfView === null) {
+      handle.pdfView = new PdfHoverView(handle.scrollEl)
+      // 视图随挂载释放（content.onDispose 链）；occurrence 浏览位置先存
+      // entry（重挂与新版本重载的恢复位）
+      handle.content.onDispose(() => {
+        const view = handle.pdfView
+        if (view !== null) {
+          const page = view.probe().page
+          if (page > 0) handle.entry.pdfPage = page
+          view.dispose()
+          handle.pdfView = null
+        }
+      })
+    }
+    // 先建视口再装载（loading 期滚动区隐藏会取不到内容宽——content 态
+    // 建立视口后 ResizeObserver 兜底宽度变化的重排）
+    this.applyDisplay(handle, 'content', loaded.relPath)
+    const inner = handle.scrollEl.clientWidth
+    const width = inner > 0 ? inner - 16 : 400
+    const page = handle.entry.pdfPage > 0 ? handle.entry.pdfPage : loaded.page
+    void handle.pdfView.show(loaded.uri, page, width).then((applied) => {
+      const view = handle.pdfView
+      if (!applied || view === null) {
+        if (view === null) releaseRefSourceLease(this.context, sourceLeaseId)
+        return
+      }
+      const probe = view.probe()
+      if (probe.phase === 'error') {
+        releaseRefSourceLease(this.context, sourceLeaseId)
+        this.applyDisplay(handle, 'error',
+          pdfErrorText(probe.errorReason === '' ? 'resource' : probe.errorReason, probe.requestedPage, probe.totalPages))
+      } else if (probe.phase === 'content' && page !== undefined && page > 1 && probe.page !== page) {
+        // #338：loading 期滚动区布局未定（挂载瞬间 clientHeight 不足使
+        // scrollToPage 的 scrollTop 写入被钳回 0——页码观感退回第一页）。
+        // 内容态建立后重定位到目标页（重定位钳制语义，与浮层 applyHover
+        // PdfContent 的 locateTo 同口径，非初次非法页码报错路径）
+        view.locateTo(page)
+      }
+      this.context.requestMeasure?.()
+    })
+    this.context.requestMeasure?.()
   }
 
   /** 错误分态：就地 i18n 文案（不弹宿主通知；anchor-missing 附锚点原文） */

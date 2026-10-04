@@ -4483,26 +4483,43 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
 }
 
 /* ---- #337（P3-05）悬停 PDF 内容视图（样式契约 chrome 域 hover-pdf-view
-   条目）：浮层滚动区内与 Reading 容器并列的只读 PDF 渲染容器 ---- */
+   条目）：浮层滚动区内与 Reading 容器并列的只读 PDF 渲染容器。
+   #338（P3-06）全文按页滚动：spacer 撑开全文高度、窗口内页占位居中、
+   页码信息行 sticky 固定于滚动区底部（不随滚动走失）；嵌入卡作用域
+   同款接入（.vsidian-embed-card 内并列）。 ---- */
 
-/* 内容容器：承接画布与页码信息行（PDF 形态下 Reading 容器由渲染层隐藏） */
-#app > .vsidian-hover-popup .vsidian-hover-pdf {
+/* 内容容器：承接页塔与页码信息行（PDF 形态下 Reading 容器由渲染层隐藏） */
+#app > .vsidian-hover-popup .vsidian-hover-pdf,
+#app .vsidian-embed-card .vsidian-hover-pdf {
   padding: 8px;
 }
 
-/* 页面画布：块级呈现，不超过浮层内容宽（渲染器按内容宽适配 scale，
+/* 页占位（窗口内）：页画布在卡内容宽内居中呈现 */
+#app > .vsidian-hover-popup .vsidian-hover-pdf-page,
+#app .vsidian-embed-card .vsidian-hover-pdf-page {
+  display: flex;
+  justify-content: center;
+}
+
+/* 页面画布：块级呈现，不超过容器内容宽（渲染器按内容宽适配 scale，
    上限 2.5——绘制面即显示面，不缩小） */
-#app > .vsidian-hover-popup .vsidian-hover-pdf-canvas {
+#app > .vsidian-hover-popup .vsidian-hover-pdf-canvas,
+#app .vsidian-embed-card .vsidian-hover-pdf-canvas {
   display: block;
   max-width: 100%;
 }
 
-/* 页码信息行：居中弱化（翻页操作的状态反馈） */
-#app > .vsidian-hover-popup .vsidian-hover-pdf-page-info {
+/* 页码信息行：sticky 固定于滚动区底部（居中弱化——当前可见页反馈；
+   背景取编辑器背景防与页面内容叠字） */
+#app > .vsidian-hover-popup .vsidian-hover-pdf-page-info,
+#app .vsidian-embed-card .vsidian-hover-pdf-page-info {
+  position: sticky;
+  bottom: 0;
   padding: 4px 10px;
   text-align: center;
   opacity: 0.85;
   color: var(--vscode-descriptionForeground, inherit);
+  background: var(--vscode-editor-background, #1e1e1e);
 }
 
 /* ---- #220 悬停浮层笔记属性区（样式契约 chrome 域 hover-fm-section 条目；

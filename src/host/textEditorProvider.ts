@@ -82,6 +82,7 @@ import {
   isFileNotFound,
   isImageFileExtension,
 } from '../shared/imageRefresh'
+import { classifyLocalRefContentKind } from '../shared/refContent'
 import type { SnippetLinkList } from '../shared/cssSnippets'
 import type { SettingsPageHandle } from './settingsPage'
 import { runDiagramExport } from './diagramExportHost'
@@ -811,6 +812,26 @@ export function createTextEditorProvider(
     )
   }
   let imageWatchers: vscode.FileSystemWatcher[] = []
+  /** #338 PDF 磁盘事件去抖计时器（与图片同窗——保存器 rename 成组归并） */
+  const pdfWatchTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  /** #338 PDF 目标磁盘事件分流：索引域 watcher 只盯 *.md、图片自建管线
+   *  只覆盖图片扩展——PDF 的 changed/deleted 在此自建去抖后送 #224 刷新
+   *  协调器（hover.invalidated 推送的事件源；闭包晚绑定 hoverEvents——
+   *  事件触发恒晚于其声明，与 md 域接线同款前提）。stale 的周期核验挂
+   *  图片管线，PDF 事件驱动为一期边界（装载时 stat 三态已覆盖 inaccessible） */
+  const schedulePdfEvent = (fsPath: string, status: 'changed' | 'deleted'): void => {
+    const prev = pdfWatchTimers.get(fsPath)
+    if (prev !== undefined) {
+      clearTimeout(prev)
+    }
+    pdfWatchTimers.set(
+      fsPath,
+      setTimeout(() => {
+        pdfWatchTimers.delete(fsPath)
+        hoverEvents.onDiskEvent(fsPath, status)
+      }, IMAGE_EVENT_DEBOUNCE_MS),
+    )
+  }
   const teardownImageWatchers = (): void => {
     for (const watcher of imageWatchers) {
       watcher.dispose() // 其上的事件订阅随之释放
@@ -822,6 +843,10 @@ export function createTextEditorProvider(
       clearTimeout(timer)
     }
     imageWatchTimers.clear()
+    for (const timer of pdfWatchTimers.values()) {
+      clearTimeout(timer)
+    }
+    pdfWatchTimers.clear()
   }
   const setupImageWatchers = (): void => {
     teardownImageWatchers()
@@ -829,19 +854,28 @@ export function createTextEditorProvider(
     if (!folders || folders.length === 0) {
       return
     }
-    const glob = `**/*.{${IMAGE_WATCH_GLOB_SEGMENTS.join(',')}}`
+    // #338：glob 追加 pdf 段（PDF 磁盘事件与图片共用自建 watcher——分流
+    //  在 forward；pdf 不进图片刷新管线，走 #224 协调器）
+    const glob = `**/*.{${IMAGE_WATCH_GLOB_SEGMENTS.join(',')},pdf}`
     for (const folder of folders) {
       const watcher = vscode.workspace.createFileSystemWatcher(
         new vscode.RelativePattern(folder.uri, glob),
       )
-      const forward = (uri: vscode.Uri | undefined): void => {
-        if (uri && isImageFileExtension(uri.fsPath)) {
+      const forward = (uri: vscode.Uri | undefined, pdfStatus: 'changed' | 'deleted'): void => {
+        if (!uri) {
+          return
+        }
+        if (isImageFileExtension(uri.fsPath)) {
           scheduleImageEvent(uri.fsPath)
+          return
+        }
+        if (classifyLocalRefContentKind(uri.fsPath) === 'pdf') {
+          schedulePdfEvent(uri.fsPath, pdfStatus)
         }
       }
-      watcher.onDidChange(forward)
-      watcher.onDidCreate(forward)
-      watcher.onDidDelete(forward)
+      watcher.onDidChange((uri) => forward(uri, 'changed'))
+      watcher.onDidCreate((uri) => forward(uri, 'changed'))
+      watcher.onDidDelete((uri) => forward(uri, 'deleted'))
       imageWatchers.push(watcher)
     }
   }

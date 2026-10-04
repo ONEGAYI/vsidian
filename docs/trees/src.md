@@ -174,7 +174,7 @@ vsidian/
         ├── outlinkPanel.ts             # 出链面板 DOM 与四态渲染
         ├── overlayAnchor.ts            # 浮层右缘锚点计划纯函数
         ├── pdfMainEntry.ts             # PDF.js 主库独立产物入口
-        ├── pdfRender.ts                # PDF 悬停渲染器
+        ├── pdfRender.ts                # PDF 渲染器（全文按页滚动）
         ├── pdfWorkerEntry.ts           # PDF.js worker 独立产物入口
         ├── perfProbe.ts                # webview 性能探针（#5）
         ├── popupMutex.ts               # 图表与图片弹窗互斥
