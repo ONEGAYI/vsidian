@@ -1302,16 +1302,24 @@ export class PdfHoverView {
 
   private updatePageInfo(): void {
     if (this.page > 0 && this.totalPages > 0) {
-      // #339 缩放反馈：zoom ≠ 1 时页码行附实际达成缩放百分比（相对适合
-      // 宽度；上限钳制后的达成值——不显示未生效的乘子）
+      const args = { page: String(this.page), total: String(this.totalPages) }
+      if (this.zoom === 1) {
+        // #339 缺省态：恒纯页码——fit 被 MAX/MIN_SCALE 钳制是「适合宽度」
+        // 的实现细节，不在页码行表达（与 resetZoom 的 zoom===1 缺省判据
+        // 同一口径：此时达成值可能 ≠100%，但复位本就无操作）
+        this.pageInfo.textContent = t('hover.pdfPageInfo', args)
+        return
+      }
+      // 缩放态：附实际达成缩放百分比（相对适合宽度；上限钳制后的达成值
+      //——不显示未生效的乘子）
       const dim = this.pageDims[this.page - 1] ?? null
       const baseW = dim?.w ?? PDF_ESTIMATED_PAGE_WIDTH
       const fit = this.renderWidth / baseW
       const achieved = fit > 0 ? this.scaleFor(baseW) / fit : 1
-      const percent = Math.round(achieved * 100)
-      this.pageInfo.textContent = Math.abs(percent - 100) < 1
-        ? t('hover.pdfPageInfo', { page: String(this.page), total: String(this.totalPages) })
-        : t('hover.pdfPageInfoZoom', { page: String(this.page), total: String(this.totalPages), percent: String(percent) })
+      this.pageInfo.textContent = t('hover.pdfPageInfoZoom', {
+        ...args,
+        percent: String(Math.round(achieved * 100)),
+      })
     } else {
       this.pageInfo.textContent = ''
     }

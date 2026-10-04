@@ -998,6 +998,31 @@ describe('PDF 适合宽度与用户缩放（#339）', () => {
     const finalWidths = [...scrollEl.querySelectorAll('canvas')].map((c) => c.width)
     expect(finalWidths).toEqual([560, 560])
   })
+
+  it('页码行百分比门控：zoom=1 时 fit 被钳制也不显示（缺省态）；zoom≠1 时附达成百分比', async () => {
+    mockViewport()
+    installFakePdfjs(makeFakeDoc(3))
+    const view = new PdfHoverView(scrollEl)
+    cleanupFns.push(() => view.dispose())
+    // 测试环境 t() 回键名——两态以词条键区分（措辞由 i18nLocales parity 把关）
+    const info = () =>
+      (scrollEl.querySelector('.vsidian-hover-pdf-page-info') as HTMLElement | null)?.textContent ?? ''
+    // 宽 3000 → fit≈4.9 被 PDF_RENDER_MAX_SCALE 钳到 2.5（达成值 ≈51%），
+    // 但 zoom=1 是缺省态：钳制是「适合宽度」的实现细节，页码行不表达
+    //（与 resetZoom 的 zoom===1 缺省判据同一口径——此时复位返回 false）
+    await view.show('https://files.test/a.pdf?v=1', 1, 3000)
+    expect(view.probe().zoom).toBe(1)
+    expect(view.probe().canvasWidth).toBe(Math.floor(612 * 2.5))
+    expect(info()).toBe('hover.pdfPageInfo')
+    expect(view.resetZoom(), '缺省态复位无效').toBe(false)
+    // 常规宽度放大：zoom≠1 → 附达成百分比；复位回缺省态再隐去
+    view.turnPage(1, 448)
+    await pumpUntil(() => view.probe().canvasWidth === Math.floor(612 * (448 / 612)))
+    expect(view.zoomBy(1.25)).toBe(true)
+    expect(info()).toBe('hover.pdfPageInfoZoom')
+    expect(view.resetZoom()).toBe(true)
+    expect(info()).toBe('hover.pdfPageInfo')
+  })
 })
 
 describe('PDF 文本层（#339）', () => {
