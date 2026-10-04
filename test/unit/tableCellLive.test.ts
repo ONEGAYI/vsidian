@@ -486,6 +486,66 @@ describe('#320 重定位扫描预算（巨量文本超限：filter 放行 + rema
     view.destroy()
     h.manager.dispose()
   })
+
+  /** 多枚变更场景文档：长标题行 + 行内嵌入行（嵌入严格在行内、非行首） */
+  function manyChangesDoc(): string {
+    return `#${'x'.repeat(200)}\n\n前缀 ![[目标笔记]] 后缀\n`
+  }
+
+  it('多枚变更耗尽命中扫描预算（64 枚 miss + 第 65 枚含源文）：预算耗尽枚按超限放行冻结，不误判真删除', async () => {
+    const h = setup({ parentMode: 'live' })
+    const doc = manyChangesDoc()
+    const view = h.mountView(doc)
+    await driveLoaded(h, true)
+    const c0 = counts(h)
+    const lineFrom = doc.indexOf('前缀')
+    // 65 枚变更按文档序：标题行内 64 枚单字符替换（插入文本不含源文——
+    // miss 扫描各消耗 1 次预算；多枚形态与 planTableColumnMove 每行一枚
+    // 同构，65 行表格列移动、嵌入行最后即此分布）+ 嵌入行重写（源文逐字
+    // 在场、偏移已变）。预算耗尽后**确实未被检视**的第 65 枚必须按
+    // 「无法判定存活」（'over-budget'）处理，不得返回 null 冒充真删除
+    const changes: Array<{ from: number; to: number; insert: string }> = []
+    for (let i = 0; i < 64; i++) {
+      changes.push({ from: 1 + i * 3, to: 2 + i * 3, insert: 'y' })
+    }
+    const rewritten = '前缀改 ![[目标笔记]] 后缀改'
+    changes.push({ from: lineFrom, to: doc.length - 1, insert: rewritten })
+    view.dispatch({ changes })
+    // 超限放行：事务应用成功（64 处标题替换 + 嵌入行重写完成）、零确认弹窗
+    const expectedTitle = `#${'yxx'.repeat(64)}${'x'.repeat(8)}`
+    expect(view.state.doc.toString()).toBe(`${expectedTitle}\n\n${rewritten}\n`)
+    expect(counts(h).closeQuery).toBe(c0.closeQuery)
+    // remap 侧同因超限冻结：源文偏移已变，新位置重挂不命中冻结键 →
+    // 重新装载（req 重发）
+    expect(counts(h).req).toBe(c0.req + 1)
+    view.destroy()
+    h.manager.dispose()
+  })
+
+  it('对照：全部枚完整检视的 miss（63 枚替换 + 末枚不含源文重写、预算恰好用满）仍是真删除——照常拦截不误放行', async () => {
+    const h = setup({ parentMode: 'live' })
+    const doc = manyChangesDoc()
+    const view = h.mountView(doc)
+    await driveLoaded(h, true)
+    const doc0 = view.state.doc.toString()
+    const c0 = counts(h)
+    const lineFrom = doc.indexOf('前缀')
+    // 64 枚变更全部 miss：63 枚标题替换 + 第 64 枚嵌入行改写为不含源文
+    // 文本——第 64 枚扫描时预算余 1，**完整检视**（无「未检视的变更」），
+    // 结果是 null（真删除）：预算守卫不得把完整检视的 miss 升为超限放行
+    const changes: Array<{ from: number; to: number; insert: string }> = []
+    for (let i = 0; i < 63; i++) {
+      changes.push({ from: 1 + i * 3, to: 2 + i * 3, insert: 'y' })
+    }
+    changes.push({ from: lineFrom, to: doc.length - 1, insert: '整行改写，嵌入没了' })
+    view.dispatch({ changes })
+    expect(view.state.doc.toString()).toBe(doc0)
+    expect(counts(h).closeQuery).toBe(c0.closeQuery + 1)
+    h.manager.testDialogAction('cancel')
+    expect(view.state.doc.toString()).toBe(doc0)
+    view.destroy()
+    h.manager.dispose()
+  })
 })
 
 function lastCloseQuery(h: ReturnType<typeof setup>): Extract<WebviewToHost, { kind: 'refEdit.close.query' }> {
