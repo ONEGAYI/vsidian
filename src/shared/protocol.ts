@@ -622,19 +622,23 @@ export type HostToWebview =
       instanceId: string
       ok: true
       /** #333（P3-01）内容类型分派标记：宿主类型化读取入口（readRefContent
-       *  Target）成功时显式携带 'markdown'；缺省 = markdown（旧合法
-       *  Markdown 消息兼容识别）。非 markdown 类型本票未登记载荷形态
-       *  （pdf/image/text/web 的载荷与导航选择器由 P3-04/P3-05/P3-08/
-       *  P3-10 扩展本消息与校验器）——携带这些 kind 的成功形态在运行期
-       *  校验中按「类型与载荷不匹配」整体拒绝。失败形态无载荷，不带本
-       *  字段。类型学单一事实源：shared/refContent */
+       *  Target）成功时显式携带；缺省 = markdown（旧合法 Markdown 消息兼容
+       *  识别）。#340（P3-08）起 text 载荷形态登记：contentKind === 'text'
+       *  的成功形态必须携带 textNav（类型与载荷匹配校验）；pdf/image/web
+       *  由对应票扩展本消息与校验器。失败形态无载荷，不带本字段。类型学
+       *  单一事实源：shared/refContent */
       contentKind?: RefContentKind
       target: HoverPreviewTargetIdentity
       version: number
       text: string
-      /** 初始定位区间（LF 坐标；锚点命中的锚定区间，full/宽容退化为全文区间） */
+      /** 初始定位区间（LF 坐标；锚点命中的锚定区间，full/宽容退化为全文区间；
+       *  text 通道 = locateLine 行首起的窗口正文区间） */
       range: { start: number; end: number }
       scope: HoverPreviewScope
+      /** #340（P3-08）text 通道导航载荷（contentKind === 'text' 时必带）：
+       *  窗口/落点（1-based 绝对行）、语言身份、语言级生效字体与行号开关。
+       *  行号语义见 shared/refContent 的 RefTextContent */
+      textNav?: HoverTextNavPayload
       /** #244 Host-authenticated expansion ancestry, including root A. */
       expansionPath?: string[]
       depth?: number
@@ -647,8 +651,11 @@ export type HostToWebview =
       instanceId: string
       ok: false
       reason: HoverPreviewFailReason
-      /** anchor-missing 时的锚点原文（块 id 带 ^ 前缀），供就地提示 */
+      /** anchor-missing / anchor-invalid 时的锚点原文（块 id 带 ^ 前缀），
+       *  供就地提示 */
       anchor?: string
+      /** #340 anchor-invalid 的细分原因（错误分态文案参数） */
+      anchorDetail?: HoverAnchorInvalidDetail
     }
   /** 悬停目标失效推送（#224 引用视图同步）：宿主观测到被订阅目标（hover.watch
    *  登记）的内容或磁盘状态变化后，向订阅该目标的全部面板推送——webview
@@ -667,6 +674,41 @@ export type HostToWebview =
       generation: number
     }
   | { kind: 'hover.watch.rejected'; fsPath: string; instanceId: string; reason: 'capacity' | 'source'; sourceLeaseId?: string }
+  /** #340（P3-08）文本 token 分层推送（hover.tokens.request 的应答，
+   *  reqId+instanceId 双配对）：宿主外观服务计算的窗口内着色数据——
+   *  - layer 'textmate'：语法层（vscode-textmate 同版同算法），先到先染；
+   *  - layer 'semantic'：语义层（公开命令 + 主题/自定义解析），后到按
+   *    字符区间覆盖语法层（原生同构叠加）；无 provider 的语言不推送该层
+   *    （不算降级——原生同样无）。
+   *  tokens 为 5 元组增量编码（deltaLine/deltaStart/length/colorIdx/
+   *  fontStyleBits，**窗口内 0-based 行坐标、UTF-16 列**），colors 为颜色
+   *  表（#rrggbb(aa)，colorIdx 索引）。version 为计算时的目标 TextDocument
+   *  .version——与 webview 已装载正文版本不匹配即整体丢弃（迟到/过期
+   *  token 不覆盖新正文）。失败形态：stale=版本不配（webview 丢弃等重载）、
+   *  unavailable=引擎不可用（纯文本呈现）。只读消息 */
+  | {
+      kind: 'hover.tokens'
+      reqId: number
+      instanceId: string
+      ok: true
+      fsPath: string
+      version: number
+      layer: 'textmate' | 'semantic'
+      colors: string[]
+      tokens: number[]
+    }
+  | {
+      kind: 'hover.tokens'
+      reqId: number
+      instanceId: string
+      ok: false
+      reason: 'stale' | 'unavailable'
+    }
+  /** #340（P3-08）外观代次广播（主题/颜色自定义/语言字体设置/扩展清单
+   *  变化）：webview 在场文本视图据此重发 hover.tokens.request（generation
+   *  单调递增，仅观测——单面板 FIFO 保序，不做乱序丢弃）。Markdown 侧
+   *  CSS 变量自带跟随，无消费方则忽略 */
+  | { kind: 'appearance.changed'; generation: number }
   /** #299 跳转目标提示解析结果（hover.target.resolve 的应答，reqId 配对）：
    *  成功携带所属根内相对路径（`/` 分隔、含扩展名）与源码形态锚点
    *  （`#标题` / `#^块id`；无锚点缺省）；webview 侧拼接 `relPath + anchor`
@@ -1214,6 +1256,25 @@ export type WebviewToHost =
       instanceId: string
     }
   | { kind: 'hover.source.release'; sessionId: string; docUri: string; sourceLeaseId: string }
+  /** #340（P3-08）文本 token 请求（只读消息，**不进 edit.request 通道**）：
+   *  webview 侧文本视图装载正文（或收到 appearance.changed 广播）后请求
+   *  窗口内着色数据，应答经 hover.tokens（reqId+instanceId 双配对）。
+   *  fsPath 必须为宿主已成功送达的目标（宿主按来源集合守卫——被攻陷
+   *  webview 不能借本通道探测任意文件的内容侧信道）；version 为请求方
+   *  当前装载正文版本——宿主按此配对，目标已推进则回 stale。beginLine/
+   *  endLine 为 1-based 闭区间窗口（与装载载荷 textNav 一致），token 行
+   *  坐标按窗口内相对行返回 */
+  | {
+      kind: 'hover.tokens.request'
+      sessionId: string
+      docUri: string
+      reqId: number
+      instanceId: string
+      fsPath: string
+      version: number
+      beginLine: number
+      endLine: number
+    }
   /** #299 跳转目标提示轻量解析（只读消息，**不进 edit.request 通道**）：
    *  webview 侧「浮层不将现」的悬停场景请求宿主把目标解析为所属根内
    *  相对路径，应答经 hover.target.resolved（reqId 配对）。载荷三形态与
@@ -1509,15 +1570,49 @@ export type HoverPreviewScope =
   | { kind: 'heading'; anchor: string }
   | { kind: 'block'; anchor: string }
 
+/** #340（P3-08）text 通道导航载荷（hover.result 成功形态的 textNav 字段；
+ *  载荷语义单一事实源在 shared/refContent 的 RefTextContent，此处为消息
+ *  形态）。行号全部 1-based 绝对行（宿主 LF 权威正文） */
+export interface HoverTextNavPayload {
+  languageId: string
+  /** 是否显式 #range 硬展示窗口（false = 全文可滚） */
+  hasWindow: boolean
+  /** 当前正文覆盖窗口（闭区间；无 range 即 [1, totalLines]） */
+  beginLine: number
+  endLine: number
+  /** 初始展示起点（= #line ?? 窗口起点） */
+  locateLine: number
+  /** 跳转锚点（规范：line 决定；仅 range 落窗口起点 B；无锚点落文件顶部） */
+  jumpLine: number
+  /** 宿主 LF 权威正文总行数 */
+  totalLines: number
+  fontFamily?: string
+  fontSize?: number
+  fontLigatures?: boolean
+  lineNumbers: boolean
+}
+
 /** 悬停预览失败原因（#218 错误分态，就地 i18n 呈现；#219 增锚点缺失）：
  *  unsupported=目标形态非法/外部网页不接入；no-workspace=来源不在工作区；
  *  escape=目标越出所属根；not-found=目标文件不存在；non-markdown=目标非
- *  Markdown（一期只接 Markdown）；read-failed=打开/读取目标失败；
+ *  Markdown（本扩展暂未接入的类型分派）；read-failed=打开/读取目标失败；
  *  anchor-missing=目标文件在但标题/块锚点不存在（不以全文替代，附锚点
- *  原文） */
+ *  原文）。
+ *  #340（P3-08）text 通道准入与锚点分态：binary-file=二进制（头部探测
+ *  含 NUL，不读完整无界内容）；invalid-encoding=严格 UTF-8 探测失败
+ *  （编码以宿主打开文档的解码结果为准——探测只拦宿主解码必然无意义的
+ *  形态）；file-too-large=超单文件准入上限；line-too-long=单行超上限
+ *  （不悄悄截断）；anchor-invalid=非 Markdown 锚点段非法（0/负数/非数字/
+ *  未知键/重复键/B>E/越出总行数/line 越出 range 窗口——细分见
+ *  anchor-detail，附锚点原文）。失败均提供原生打开入口继续 */
 export type HoverPreviewFailReason =
   'unsupported' | 'no-workspace' | 'escape' | 'not-found' | 'non-markdown' | 'read-failed' | 'anchor-missing' |
-  'source-expired' | 'cycle' | 'depth' | 'budget'
+  'source-expired' | 'cycle' | 'depth' | 'budget' |
+  'binary-file' | 'invalid-encoding' | 'file-too-large' | 'line-too-long' | 'anchor-invalid'
+
+/** #340 anchor-invalid 的细分原因（错误分态文案参数；shared/refText 的
+ *  TextAnchorInvalidCode 同源——协议侧为消息形态单一事实源） */
+export type HoverAnchorInvalidDetail = 'format' | 'range-order' | 'out-of-bounds' | 'line-outside-window'
 
 /** #218 悬停预览请求载荷（宿主侧消费形态） */
 export type HoverPreviewRequestPayload = Extract<WebviewToHost, { kind: 'hover.request' }>
@@ -2730,6 +2825,38 @@ function isPositiveInt(v: unknown): boolean {
   return typeof v === 'number' && Number.isInteger(v) && v > 0
 }
 
+/** #340 text 通道导航载荷校验：结构完整 + 行号字段为 1-based 正整数 +
+ * 窗口/落点约束（begin<=end、locate/jump 落窗口内、窗口贴合总行数界内） */
+function isHoverTextNavPayload(v: unknown): boolean {
+  if (!isObject(v)) {
+    return false
+  }
+  const languageId = v.languageId
+  if (typeof languageId !== 'string' || languageId.length === 0) {
+    return false
+  }
+  const beginLine = v.beginLine
+  const endLine = v.endLine
+  const locateLine = v.locateLine
+  const jumpLine = v.jumpLine
+  const totalLines = v.totalLines
+  const lineOk = (n: unknown): n is number =>
+    typeof n === 'number' && Number.isInteger(n) && n > 0
+  if (!lineOk(beginLine) || !lineOk(endLine) || !lineOk(locateLine) || !lineOk(jumpLine) || !lineOk(totalLines)) {
+    return false
+  }
+  if (beginLine > endLine || endLine > totalLines) {
+    return false
+  }
+  if (locateLine < beginLine || locateLine > endLine || jumpLine < beginLine || jumpLine > endLine) {
+    return false
+  }
+  return (v.fontFamily === undefined || isString(v.fontFamily)) &&
+    (v.fontSize === undefined || (typeof v.fontSize === 'number' && Number.isFinite(v.fontSize) && v.fontSize > 0)) &&
+    (v.fontLigatures === undefined || typeof v.fontLigatures === 'boolean') &&
+    typeof v.lineNumbers === 'boolean' && typeof v.hasWindow === 'boolean'
+}
+
 function isString(v: unknown): boolean {
   return typeof v === 'string'
 }
@@ -3384,6 +3511,19 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
     case 'hover.source.release':
       return isString(v.sessionId) && isString(v.docUri) &&
         typeof v.sourceLeaseId === 'string' && v.sourceLeaseId.length > 0
+    case 'hover.tokens.request':
+      // #340 文本着色请求：会话守卫 + reqId/instanceId 配对 + 已送达目标
+      // 身份（fsPath 守卫在宿主读取端口按来源集合复核）+ 请求方装载版本
+      // 与 1-based 闭区间窗口（begin<=end）
+      return isString(v.sessionId) &&
+        isString(v.docUri) &&
+        isPositiveInt(v.reqId) &&
+        typeof v.instanceId === 'string' && v.instanceId.length > 0 &&
+        typeof v.fsPath === 'string' && v.fsPath.length > 0 &&
+        isNonNegativeInt(v.version) &&
+        typeof v.beginLine === 'number' && isPositiveInt(v.beginLine) &&
+        typeof v.endLine === 'number' && isPositiveInt(v.endLine) &&
+        v.beginLine <= v.endLine
     case 'hover.target.resolve':
       // #299 目标提示轻量解析：会话守卫 + reqId + 三形态目标载荷
       //（target/linkHref/directTarget 与 hover.request 同口径）
@@ -3991,19 +4131,26 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       // （anchor-missing 附锚点原文）
       // #333（P3-01）contentKind 类型分派校验：成功形态可带可选
       // contentKind（缺省 = markdown 兼容）——未知类型拒绝；非 markdown
-      // 类型本票未登记载荷形态，携带 Markdown 载荷即为类型与载荷不匹配
-      // 整体拒绝；失败形态无载荷，携带 contentKind 即拒绝
+      // 类型携带 Markdown 载荷即为类型与载荷不匹配整体拒绝；失败形态无
+      // 载荷，携带 contentKind 即拒绝。
+      // #340（P3-08）text 载荷形态登记：contentKind === 'text' 的成功
+      // 形态必须携带结构合法的 textNav（行号字段 1-based 正整数且窗口/
+      // 落点约束成立）；markdown 成功形态不得携带 textNav。失败形态新增
+      // text 通道分态（准入与锚点），anchorDetail 仅 anchor-invalid 可带
       if (!isPositiveInt(v.reqId) ||
         typeof v.instanceId !== 'string' || v.instanceId.length === 0) {
         return false
       }
       if (v.ok === true) {
-        if (v.contentKind !== undefined) {
-          // 类型已知性 + 载荷匹配：本票仅 markdown 载荷形态登记（P3-04+
-          // 登记后按 kind 放开各自形态）——未知类型与未登记类型整体拒绝
-          if (!isRefContentKind(v.contentKind) || v.contentKind !== 'markdown') {
-            return false
-          }
+        if (v.contentKind !== undefined && !isRefContentKind(v.contentKind)) {
+          return false // 未知类型（含非字符串形态）整体拒绝
+        }
+        const kind = v.contentKind ?? 'markdown'
+        if (kind !== 'markdown' && kind !== 'text') {
+          return false // pdf/image/web 载荷形态未登记（对应票接入时放开）
+        }
+        if (kind === 'text' ? !isHoverTextNavPayload(v.textNav) : v.textNav !== undefined) {
+          return false
         }
         return (
           isObject(v.target) &&
@@ -4031,8 +4178,14 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         (v.reason === 'unsupported' || v.reason === 'no-workspace' || v.reason === 'escape' ||
           v.reason === 'not-found' || v.reason === 'non-markdown' || v.reason === 'read-failed' ||
           v.reason === 'anchor-missing' || v.reason === 'source-expired' || v.reason === 'cycle' ||
-          v.reason === 'depth' || v.reason === 'budget') &&
-        (v.anchor === undefined || isString(v.anchor))
+          v.reason === 'depth' || v.reason === 'budget' ||
+          v.reason === 'binary-file' || v.reason === 'invalid-encoding' || v.reason === 'file-too-large' ||
+          v.reason === 'line-too-long' || v.reason === 'anchor-invalid') &&
+        (v.anchor === undefined || isString(v.anchor)) &&
+        (v.anchorDetail === undefined ||
+          (v.reason === 'anchor-invalid' &&
+            (v.anchorDetail === 'format' || v.anchorDetail === 'range-order' ||
+              v.anchorDetail === 'out-of-bounds' || v.anchorDetail === 'line-outside-window')))
       )
     case 'hover.invalidated':
       // #224 失效推送：非空目标路径 + status 三态（vaultIndex onTargetChange
@@ -4048,6 +4201,29 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         typeof v.instanceId === 'string' && v.instanceId.length > 0 &&
         (v.sourceLeaseId === undefined || (typeof v.sourceLeaseId === 'string' && v.sourceLeaseId.length > 0)) &&
         (v.reason === 'capacity' || v.reason === 'source')
+    case 'hover.tokens':
+      // #340 文本着色分层推送：reqId+instanceId 双配对；成功形态带窗口内
+      // 5 元组增量数据与颜色表（坐标约束在解码侧按窗口复核）；失败形态
+      // 限定 stale/unavailable 且无载荷字段
+      if (!isPositiveInt(v.reqId) ||
+        typeof v.instanceId !== 'string' || v.instanceId.length === 0) {
+        return false
+      }
+      if (v.ok === true) {
+        return (
+          typeof v.fsPath === 'string' && v.fsPath.length > 0 &&
+          isNonNegativeInt(v.version) &&
+          (v.layer === 'textmate' || v.layer === 'semantic') &&
+          Array.isArray(v.colors) && v.colors.every((c) => typeof c === 'string' && c.length > 0) &&
+          Array.isArray(v.tokens) && v.tokens.every((n) => typeof n === 'number' && Number.isInteger(n) && n >= 0) &&
+          v.tokens.length % 5 === 0
+        )
+      }
+      return v.ok === false && (v.reason === 'stale' || v.reason === 'unavailable') &&
+        v.colors === undefined && v.tokens === undefined && v.fsPath === undefined
+    case 'appearance.changed':
+      // #340 外观代次广播：非负整数代次（单调递增；首观测为 1）
+      return isNonNegativeInt(v.generation)
     case 'hover.target.resolved':
       // #299 目标提示解析结果：reqId 配对；成功形态必带非空相对路径，
       // 锚点为源码形态字符串（`#标题` / `#^块id`）或缺省

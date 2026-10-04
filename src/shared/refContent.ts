@@ -81,6 +81,59 @@ export interface RefMarkdownContent {
   selector: HoverPreviewScope
 }
 
+/** 语言级生效字体（宿主 getConfiguration('editor', doc) 合并后的值；
+ *  字段缺席 = 未设置（webview 沿用默认栈） */
+export interface RefTextFont {
+  family?: string
+  size?: number
+  ligatures?: boolean
+}
+
+/**
+ * 可读文本载荷（#340 / P3-08，kind === 'text' 的成功载荷形态）：经有界
+ * 准入（大小/二进制/编码/超长行）与锚点校验后的窗口正文——
+ * - lfText 为**窗口内** LF 正文（#range 硬窗口只携带 B–E 行，范围外
+ *   结构性不可达；无 range 恒全文）；version 为宿主 TextDocument 权威
+ *   版本（未保存修改刷新的版本基准）；
+ * - 行号字段全部为 1-based 绝对行（对应宿主 LF 权威正文）：beginLine/
+ *   endLine 为当前正文覆盖窗口（无 range 即 [1, totalLines]），
+ *   locateLine 为初始展示起点、jumpLine 为跳转锚点（规范：line 决定、
+ *   仅 range 落窗口起点 B、无锚点落文件顶部）；
+ * - languageId/font/lineNumbers 以目标资源／语言的原生配置为准（宿主
+ *   读取；不内置 grammar、不硬编码配色——token 由宿主外观服务另行
+ *   经 hover.tokens 分层推送，与正文同 version 配对）。
+ */
+export interface RefTextContent {
+  kind: 'text'
+  /** 目标 TextDocument.version（正文与 token 的版本配对基准） */
+  version: number
+  /** 窗口内 LF UTF-16 正文（硬窗口裁剪后；无 range 恒全文） */
+  lfText: string
+  /** 初始定位区间（LF 坐标，locateLine 行首起——与 markdown 通道的定位
+   *  语义同构，供既有装载路径消费） */
+  range: { start: number; end: number }
+  /** 目标语言身份（宿主 TextDocument.languageId） */
+  languageId: string
+  /** 导航选择器（resolveTextNav 校验后的数值形态） */
+  selector: RefTextNavSelector
+  /** 是否显式 range 硬窗口（false = 全文可滚） */
+  hasWindow: boolean
+  beginLine: number
+  endLine: number
+  locateLine: number
+  jumpLine: number
+  /** 宿主 LF 权威正文总行数（窗口外的总界） */
+  totalLines: number
+  /** 语言级生效字体（宿主读取；缺席字段沿用默认） */
+  font: RefTextFont
+  /** 原生 editor.lineNumbers 生效值（off 时行号列不呈现） */
+  lineNumbers: boolean
+}
+
+/** 类型化成功载荷联合：markdown 既有通道 + text（#340）；pdf/image/web
+ *  由对应票按同一模式登记 */
+export type RefLoadedPayload = RefMarkdownContent | RefTextContent
+
 // ---- 导航选择器结构留位（按文件类型区分；本票不实现非 Markdown 锚点
 // 解析——P3-05/P3-08 接入时扩展协议消息的 scope 形态与此处对齐） ----
 
@@ -91,13 +144,14 @@ export interface RefPdfNavSelector {
   page?: number
 }
 
-/** 可读文本导航选择器（留位）：`#line=N`（1-based，初始定位与跳转锚点）
- *  与 `#range=B-E`（闭区间硬展示窗口；开放端以字段缺席表示）；两者可
- *  组合、键序无关、同一键重复非法（分词语义由 P3-08 实现） */
+/** 可读文本导航选择器（#340 落地）：`#line=N`（1-based，初始定位与跳转
+ *  锚点）与 `#range=B-E`（闭区间硬展示窗口；开放端以字段缺席表示——
+ *  `B-` 缺 end、`-E` 缺 begin）；两者可组合、键序无关、同一键重复非法
+ *  （分词与校验单一事实源在 shared/refText） */
 export interface RefTextNavSelector {
   kind: 'text'
   line?: number
-  range?: { begin: number; end: number }
+  range?: { begin?: number; end?: number }
 }
 
 /** 图片/网页导航选择器：无锚点定位语义（图片复用普通图片呈现，网页为

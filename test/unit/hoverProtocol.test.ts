@@ -173,13 +173,102 @@ describe('#333 contentKind 类型分派校验（hover.result 成功载荷）', (
   })
 
   it('非 markdown 类型 + Markdown 载荷拒绝（类型与载荷不匹配——本票未登记这些载荷形态）', () => {
-    for (const kind of ['pdf', 'image', 'text', 'web']) {
+    for (const kind of ['pdf', 'image', 'web']) {
       expect(isHostToWebview({ ...validResultOk(), contentKind: kind }), `contentKind=${kind} 应拒绝`).toBe(false)
     }
   })
 
   it('失败形态携带 contentKind 拒绝（失败分态无载荷，类型字段不出现在失败形态）', () => {
     expect(isHostToWebview({ ...validResultFail(), contentKind: 'markdown' })).toBe(false)
+  })
+})
+
+// #340（P3-08）text 载荷形态登记：contentKind === 'text' 的成功形态必须
+// 携带结构合法的 textNav（行号 1-based 正整数、窗口/落点约束成立），
+// markdown 成功形态不得携带 textNav；失败形态新增 text 通道分态（准入与
+// 锚点），anchorDetail 仅 anchor-invalid 可带。token 消息族（hover.tokens /
+// hover.tokens.request）与 appearance.changed 的形态契约同区钉住。
+describe('#340 text 载荷与 token 消息校验', () => {
+  const validTextNav = () => ({
+    languageId: 'typescript',
+    hasWindow: false,
+    beginLine: 1,
+    endLine: 40,
+    locateLine: 1,
+    jumpLine: 1,
+    totalLines: 40,
+    lineNumbers: true,
+  })
+
+  it('contentKind: text + 合法 textNav 放行；缺 textNav / 非法 textNav 拒绝', () => {
+    expect(isHostToWebview({ ...validResultOk(), contentKind: 'text', textNav: validTextNav() })).toBe(true)
+    expect(isHostToWebview({ ...validResultOk(), contentKind: 'text' }), 'text 缺 textNav 应拒绝').toBe(false)
+    expect(isHostToWebview({ ...validResultOk(), contentKind: 'text', textNav: null })).toBe(false)
+    expect(isHostToWebview({ ...validResultOk(), contentKind: 'text', textNav: { ...validTextNav(), languageId: '' } })).toBe(false)
+    expect(isHostToWebview({ ...validResultOk(), contentKind: 'text', textNav: { ...validTextNav(), beginLine: 0 } })).toBe(false)
+    expect(isHostToWebview({ ...validResultOk(), contentKind: 'text', textNav: { ...validTextNav(), beginLine: 10, endLine: 5 } })).toBe(false)
+    expect(isHostToWebview({ ...validResultOk(), contentKind: 'text', textNav: { ...validTextNav(), endLine: 41, totalLines: 40 } })).toBe(false)
+    expect(isHostToWebview({ ...validResultOk(), contentKind: 'text', textNav: { ...validTextNav(), locateLine: 41 } })).toBe(false)
+    expect(isHostToWebview({ ...validResultOk(), contentKind: 'text', textNav: { ...validTextNav(), jumpLine: 0 } })).toBe(false)
+    expect(isHostToWebview({ ...validResultOk(), contentKind: 'text', textNav: { ...validTextNav(), lineNumbers: 'on' } })).toBe(false)
+    expect(isHostToWebview({ ...validResultOk(), contentKind: 'text', textNav: { ...validTextNav(), fontSize: 0 } })).toBe(false)
+    expect(isHostToWebview({ ...validResultOk(), contentKind: 'text', textNav: { ...validTextNav(), fontFamily: 14 } })).toBe(false)
+  })
+
+  it('markdown 成功形态携带 textNav 拒绝（类型与载荷不匹配）', () => {
+    expect(isHostToWebview({ ...validResultOk(), contentKind: 'markdown', textNav: validTextNav() })).toBe(false)
+    expect(isHostToWebview({ ...validResultOk(), textNav: validTextNav() })).toBe(false)
+  })
+
+  it('窗口形态放行（硬窗口 + 定位在窗口内 + 字体可选字段）', () => {
+    const nav = { ...validTextNav(), hasWindow: true, beginLine: 10, endLine: 20, locateLine: 12, jumpLine: 12 }
+    expect(isHostToWebview({ ...validResultOk(), contentKind: 'text', textNav: nav })).toBe(true)
+    expect(isHostToWebview({ ...validResultOk(), contentKind: 'text', textNav: { ...nav, fontFamily: "Consolas, 'Courier New', monospace", fontSize: 15, fontLigatures: true } })).toBe(true)
+    expect(isHostToWebview({ ...validResultOk(), contentKind: 'text', textNav: { ...nav, locateLine: 21 } }), '定位越窗应拒绝').toBe(false)
+  })
+
+  it('text 通道失败分态：准入与锚点 reason 放行；anchorDetail 限定 anchor-invalid', () => {
+    for (const reason of ['binary-file', 'invalid-encoding', 'file-too-large', 'line-too-long', 'anchor-invalid']) {
+      expect(isHostToWebview({ ...validResultFail(), reason }), `reason=${reason} 应放行`).toBe(true)
+    }
+    expect(isHostToWebview({ ...validResultFail(), reason: 'anchor-invalid', anchor: 'line=0' })).toBe(true)
+    expect(isHostToWebview({ ...validResultFail(), reason: 'anchor-invalid', anchorDetail: 'format' })).toBe(true)
+    expect(isHostToWebview({ ...validResultFail(), reason: 'anchor-invalid', anchorDetail: 'range-order' })).toBe(true)
+    expect(isHostToWebview({ ...validResultFail(), reason: 'anchor-invalid', anchorDetail: 'out-of-bounds' })).toBe(true)
+    expect(isHostToWebview({ ...validResultFail(), reason: 'anchor-invalid', anchorDetail: 'line-outside-window' })).toBe(true)
+    expect(isHostToWebview({ ...validResultFail(), reason: 'anchor-invalid', anchorDetail: 'nonsense' })).toBe(false)
+    expect(isHostToWebview({ ...validResultFail(), reason: 'read-failed', anchorDetail: 'format' }), '非 anchor-invalid 带 detail 应拒绝').toBe(false)
+  })
+
+  it('hover.tokens：成功形态（双层数组契约）放行、非法拒绝；失败形态限定 stale/unavailable', () => {
+    const base = { kind: 'hover.tokens', reqId: 1, instanceId: 'hover-1', ok: true, fsPath: 'd:/a.ts', version: 3, layer: 'textmate' } as const
+    expect(isHostToWebview({ ...base, colors: ['#cccccc'], tokens: [0, 0, 4, 0, 0] })).toBe(true)
+    expect(isHostToWebview({ ...base, layer: 'semantic', colors: ['#00ffaa'], tokens: [1, 0, 2, 0, 0, 0, 3, 1, 1, 0] })).toBe(true)
+    expect(isHostToWebview({ ...base, colors: [], tokens: [] })).toBe(true)
+    expect(isHostToWebview({ ...base, colors: ['#cccccc'], tokens: [0, 0] }), '5 元组截断应拒绝').toBe(false)
+    expect(isHostToWebview({ ...base, colors: ['#cccccc'], tokens: [0, 0, 4, 0, -1] }), '负数应拒绝').toBe(false)
+    expect(isHostToWebview({ ...base, layer: 'both', colors: [], tokens: [] })).toBe(false)
+    expect(isHostToWebview({ ...base, colors: [3], tokens: [] })).toBe(false)
+    expect(isHostToWebview({ kind: 'hover.tokens', reqId: 1, instanceId: 'hover-1', ok: false, reason: 'stale' })).toBe(true)
+    expect(isHostToWebview({ kind: 'hover.tokens', reqId: 1, instanceId: 'hover-1', ok: false, reason: 'unavailable' })).toBe(true)
+    expect(isHostToWebview({ kind: 'hover.tokens', reqId: 1, instanceId: 'hover-1', ok: false, reason: 'other' })).toBe(false)
+    expect(isHostToWebview({ kind: 'hover.tokens', reqId: 1, instanceId: 'hover-1', ok: false, reason: 'stale', tokens: [] }), '失败形态无载荷').toBe(false)
+  })
+
+  it('hover.tokens.request：合法放行、窗口倒置拒绝', () => {
+    const base = { kind: 'hover.tokens.request', sessionId: 's', docUri: 'file:///d:/a.md', reqId: 1, instanceId: 'hover-1', fsPath: 'd:/a.ts', version: 3 } as const
+    expect(isWebviewToHost({ ...base, beginLine: 1, endLine: 40 })).toBe(true)
+    expect(isWebviewToHost({ ...base, beginLine: 10, endLine: 5 })).toBe(false)
+    expect(isWebviewToHost({ ...base, beginLine: 0, endLine: 5 })).toBe(false)
+    expect(isWebviewToHost({ ...base, beginLine: 1, endLine: 40, version: -1 })).toBe(false)
+  })
+
+  it('appearance.changed：非负整数代次放行、非法拒绝', () => {
+    expect(isHostToWebview({ kind: 'appearance.changed', generation: 1 })).toBe(true)
+    expect(isHostToWebview({ kind: 'appearance.changed', generation: 0 })).toBe(true)
+    expect(isHostToWebview({ kind: 'appearance.changed', generation: -1 })).toBe(false)
+    expect(isHostToWebview({ kind: 'appearance.changed', generation: 'x' })).toBe(false)
+    expect(isHostToWebview({ kind: 'appearance.changed' })).toBe(false)
   })
 })
 
