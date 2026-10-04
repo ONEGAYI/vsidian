@@ -546,6 +546,33 @@ describe('#320 重定位扫描预算（巨量文本超限：filter 放行 + rema
     view.destroy()
     h.manager.dispose()
   })
+
+  it('边界锚：64 枚 miss 耗尽预算后第 65 枚为真删除——按超限放行（事务落盘、零确认链、无新装载）', async () => {
+    const h = setup({ parentMode: 'live' })
+    const doc = manyChangesDoc()
+    const view = h.mountView(doc)
+    await driveLoaded(h, true)
+    const c0 = counts(h)
+    const lineFrom = doc.indexOf('前缀')
+    // 65 枚变更：标题行 64 枚单字符 miss（各耗 1 次预算）+ 第 65 枚真删
+    // 嵌入行（插入文本不含源文）。预算耗尽后该枚「确实未被检视」→
+    // 'over-budget' → 放行：真删除借超限逃逸确认链是「无法判定存活 ≠
+    // 判定已删」口径的既定取舍（2026-10-04 产品决策），本例钉住该语义
+    // 不漂移；恢复途径 = undo 回填命中冻结缓存（与超限冻结同款）
+    const changes: Array<{ from: number; to: number; insert: string }> = []
+    for (let i = 0; i < 64; i++) {
+      changes.push({ from: 1 + i * 3, to: 2 + i * 3, insert: 'y' })
+    }
+    changes.push({ from: lineFrom, to: doc.length - 1, insert: '整行改写，嵌入没了' })
+    view.dispatch({ changes })
+    const expectedTitle = `#${'yxx'.repeat(64)}${'x'.repeat(8)}`
+    expect(view.state.doc.toString()).toBe(`${expectedTitle}\n\n整行改写，嵌入没了\n`)
+    expect(counts(h).closeQuery).toBe(c0.closeQuery)
+    // 真删除后文中无该 occurrence：无新装载（req 零增长）
+    expect(counts(h).req).toBe(c0.req)
+    view.destroy()
+    h.manager.dispose()
+  })
 })
 
 function lastCloseQuery(h: ReturnType<typeof setup>): Extract<WebviewToHost, { kind: 'refEdit.close.query' }> {

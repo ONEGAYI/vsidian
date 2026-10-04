@@ -42,7 +42,7 @@ import { createReadingContainer, READING_CLASS_NAMES } from './readingView'
 import type { ReadingViewStats } from './readingVirtualView'
 import { refErrorText, releaseRefSourceLease } from './refReadingContent'
 import { WIKILINK_CLASS_NAMES } from '../shared/wikilink'
-import { LiveEditorInstance } from './liveInstance'
+import { LiveEditorInstance, externalSync } from './liveInstance'
 import { liveEmbedChildCards } from './liveEmbed'
 import { ImageResourceManager, isDirectImageSrc } from './imageResource'
 import { closeFmPopoverForView } from './frontmatterPopover'
@@ -505,13 +505,15 @@ function relocatedInterval(
       overBudget = true
       return
     }
-    const text = inserted.toString()
-    if (text.length > RELOCATION_SCAN_LIMITS.insertTextLength) {
+    if (inserted.length > RELOCATION_SCAN_LIMITS.insertTextLength) {
       // 放弃该枚逐字检索：源文可能在其中（存活无法判定）。后续短枚变更
-      // 仍可命中（行对换形态）——found 优先于 overBudget 返回
+      // 仍可命中（行对换形态）——found 优先于 overBudget 返回。长度检查
+      // 先于 toString()——超限场景免整串物化分配（Text.length 与
+      // String.length 同为 UTF-16 code unit，可直接比对）
       overBudget = true
       return
     }
+    const text = inserted.toString()
     let at = -1
     while (scans < RELOCATION_SCAN_LIMITS.hitScans) {
       at = text.indexOf(raw, at + 1)
@@ -1775,8 +1777,13 @@ export class EmbedCardManager {
       // 的直接子卡（remapChildSources 同款筛选 + 端口在场——dirty 权威
       // 在宿主侧，同步 filter 拿不到，故与 A 层同因无条件拦再异步分岔）。
       // 确认后的重放事务带 refCloseReplay 豁免注解（本 filter 放行；A 层
-      // filter 只看根级条目且装配在 A view，不经过）
-      if (!tr.docChanged || tr.annotation(refCloseReplay) === true) {
+      // filter 只看根级条目且装配在 A view，不经过）。externalSync（外部
+      // 增量/全文同步，dispatchExternal/replaceDoc 派发）同样豁免：外部变
+      // 更静默同步是既有契约——拦截会把宿主同步当本地删除（dirty 弹张冠
+      // 李戴的确认），clean 路径重放还会以旧基线把同步变更当本地编辑回声
+      // 出站。A 层主 view 无 doc 型外部派发（仅选区 externalSync），故
+      // mainDocChangeFilter 无此分支
+      if (!tr.docChanged || tr.annotation(refCloseReplay) === true || tr.annotation(externalSync) === true) {
         return true
       }
       const doc = tr.startState.doc
@@ -2556,9 +2563,11 @@ export class EmbedCardManager {
     }
     if (message.outcome === 'stale') {
       this.markCloseStale()
+      dialog.reqId = 0 // 模态保持（重新确认）：防重门复位，允许再次 execute
       return
     }
     // save-failed / discard-failed：保留现场（模态在场 + 提示行）
+    dialog.reqId = 0 // 失败可重试：防重门复位
     dialog.noticeEl.style.display = ''
     dialog.noticeEl.textContent = t(message.outcome === 'save-failed'
       ? 'embed.closeSaveFailed' : 'embed.closeDiscardFailed')
@@ -2662,6 +2671,12 @@ export class EmbedCardManager {
       dialog.entry.pendingCloseIntent = null
       dialog.entry.popupHost?.onExplicitCloseCanceled?.()
       this.closeCloseDialog()
+      return
+    }
+    if (dialog.reqId !== 0) {
+      // execute 在途（结果未回）：忽略再次动作——若放行会覆写 reqId，使
+      // 首次 closed 回包按配对被丢、第二次 execute 撞版本前移回 stale，
+      // 退化为一轮多余的重新确认（取消路径不受此门限制）
       return
     }
     const live = dialog.entry.live

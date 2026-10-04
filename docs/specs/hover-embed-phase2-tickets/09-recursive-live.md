@@ -85,3 +85,5 @@ PR #313 终审留档的票面外边界「嵌入实例内部删除孙卡引用行
 - 测试：jsdom 契约 5 例（拦截/clean 静默/dirty 三项含取消与确认/表格保文本不误拦/模态期间 B 漂移守卫放弃）；browser recursiveLive 场景 4（真实键盘输入制造 dirty + 真实事务删除 + 模态按钮真实 click）；集成 P2-09 邻接一例（`#321 嵌入实例内删除孙卡引用行：B 侧拦截对齐 A 层`，新增 `embed.test.deleteChildRef` 钩子经直接父 B 编辑器派发删除事务）。
 
 **保持不动的边界**：`relocatedInterval`/`remapSources`/`remapChildSources` 内部（remapChildSources 刻意不接重定位的边界保持——B 内表格重写孙卡行走重载装载的退化，语义安全）；unmountBlock/teardownLive 离屏回收契约（P2-09）；A 层 filter 语义。孙卡 Reading（无端口）时删除仍无拦截——与 A 层「端口在场才拦」对称。
+
+外部同步豁免与既有取舍（review-loops 首轮补录，2026-10-04）：B 侧 filter 除 `refCloseReplay` 外**豁免 `externalSync`**——外部增量/全文同步（他面板同文编辑、resync）静默应用是既有契约；拦截会把宿主同步当本地删除（dirty 弹张冠李戴的确认），clean 路径的重放还会以旧基线把同步变更当本地编辑回声出站。A 层主 view 无 doc 型外部派发（仅选区 externalSync），故 `mainDocChangeFilter` 无此分支。另两条 A 层同构的既有取舍随镜像进入 B 侧：① 他 entry 的 close.query 在途窗口内的删除尝试被一次性静默吞除（filter 已吞事务、requestClose 因他意图在场清账早退），用户重试即恢复；② 同一事务覆盖多张孙卡引用行时只弹一张确认（命中首个 entry），确认后重放删除**全部**被覆盖引用——单意图串行设计的既有语义，如需按目标逐一确认另立票。

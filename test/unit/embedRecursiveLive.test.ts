@@ -16,6 +16,7 @@ import { installLocale } from '../../src/shared/i18n'
 import { zhCn } from '../../src/shared/locales/zh-cn'
 import { EditorView } from '@codemirror/view'
 import { EditorState } from '@codemirror/state'
+import { externalSync } from '../../src/webview/liveInstance'
 import {
   EMBED_CARD_CLASS_NAMES,
   EmbedCardManager,
@@ -675,5 +676,44 @@ describe('#321 嵌入实例内删除孙卡引用行', () => {
     }
     // 守卫放弃重放：孙引用保留（含漂移前缀），用户可重删
     expect(bEditor.state.doc.toString()).toContain(`![[${C_INNER}]]`)
+  })
+
+  it('外部同步事务覆盖孙卡区间不拦（他面板删除/resync 静默应用为既有契约）', () => {
+    const h = makeHarness('reading')
+    const { bEditor } = setupGrandchildLive(h)
+    h.manager.notifyDirty({ kind: 'refEdit.dirty', fsPath: C_FS, dirty: true })
+    // 外部增量（dispatchExternal/replaceDoc 带 externalSync 注解）：即使
+    // dirty 孙卡在场也不进确认链——外部变更静默同步是既有契约。拦截会把
+    // 宿主同步当本地删除（dirty 弹张冠李戴的确认），clean 路径的重放还会
+    // 以旧基线把同步变更当本地编辑回声出站（baseVersion 已推进 → 漂移）
+    const line = bEditor.state.doc.lineAt(C_FROM)
+    bEditor.dispatch({
+      changes: { from: line.from, to: line.to + 1 },
+      annotations: externalSync.of(true),
+    })
+    // 事务静默应用、零确认链、零回声（updateListener 对 externalSync 免回发）
+    expect(bEditor.state.doc.toString()).toBe(B_TEXT.replace(`![[${C_INNER}]]\n`, ''))
+    expect(h.sent.some((m) => m.kind === 'refEdit.close.query')).toBe(false)
+    expect(dialogBox()).toBeNull()
+    expect(h.sent.some((m) => m.kind === 'refEdit.message')).toBe(false)
+  })
+
+  it('孙卡 dirty：丢弃（discard）确认后 B 中删除完成（discard 分支对称覆盖）', () => {
+    const h = makeHarness('reading')
+    const { bEditor } = setupGrandchildLive(h)
+    h.manager.notifyDirty({ kind: 'refEdit.dirty', fsPath: C_FS, dirty: true })
+    deleteGrandchildLine(bEditor, C_FROM)
+    answerCloseState(h, true)
+    expect(dialogBox()).toBeTruthy()
+    clickDialogButton('discard')
+    const exec = [...h.sent].reverse().find((m) => m.kind === 'refEdit.close.execute')
+    expect(exec && exec.kind === 'refEdit.close.execute' && exec.action === 'discard' &&
+      exec.fsPath === C_FS).toBe(true)
+    if (exec && exec.kind === 'refEdit.close.execute') {
+      h.manager.notifyCloseResult({
+        kind: 'refEdit.close.result', reqId: exec.reqId, fsPath: C_FS, outcome: 'closed',
+      })
+    }
+    expect(bEditor.state.doc.toString()).not.toContain(`![[${C_INNER}]]`)
   })
 })

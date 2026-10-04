@@ -811,4 +811,36 @@ describe('#319 close 回包配对', () => {
     h.manager.dispose()
     h.mainView.destroy()
   })
+
+  it('execute 在途防重复触发：双击只出一次 execute；stale 回包复位后可重新确认', () => {
+    const h = harness()
+    setupLive(h)
+    typeAndDirty(h)
+    h.manager.testClose('目标笔记', 'close')
+    const q = lastQueryOf(h.sent)
+    if (q && q.kind === 'refEdit.close.query') {
+      h.manager.notifyCloseState({
+        kind: 'refEdit.close.state', reqId: q.reqId, fsPath: B_FS,
+        dirty: true, version: 3, relPath: '目标笔记.md',
+      })
+    }
+    // 双击保存（急点）：结果未回时第二次动作不得覆写 dialog.reqId——否则
+    // 首次 closed 回包按 reqId 配对被丢，第二次 execute 撞版本前移回
+    // stale，多一轮重确认往返
+    clickDialog('save')
+    clickDialog('save')
+    expect(h.sent.filter((m) => m.kind === 'refEdit.close.execute')).toHaveLength(1)
+    // stale 回包：模态保持在场（重新确认），防重门复位后允许再次 execute
+    const e1 = lastExecuteOf(h.sent)
+    if (e1 && e1.kind === 'refEdit.close.execute') {
+      h.manager.notifyCloseResult({
+        kind: 'refEdit.close.result', reqId: e1.reqId, fsPath: B_FS, outcome: 'stale',
+      })
+    }
+    expect(dialogBox()).toBeTruthy()
+    clickDialog('save')
+    expect(h.sent.filter((m) => m.kind === 'refEdit.close.execute')).toHaveLength(2)
+    h.manager.dispose()
+    h.mainView.destroy()
+  })
 })
