@@ -77,6 +77,7 @@ import type { VaultIndexService } from './vaultIndexService'
 import type { IndexMaintenance } from './vaultIndexMaintenance'
 import { ImageRefreshCoordinator } from './imageRefreshCoordinator'
 import { admitHoverWatch, connectHoverEvents, HoverRefreshCoordinator, shouldForwardHoverDocChange } from './hoverRefreshCoordinator'
+import { selectTextWatchEvictions } from '../shared/hoverRefresh'
 import { escapeGlobFilenameLiteral } from '../shared/globLiteral'
 import { TextAppearanceService } from './textAppearance/appearanceService'
 import { ImageVersionTable } from './imageVersioning'
@@ -987,7 +988,10 @@ export function createTextEditorProvider(
   /** 归一键（与协调器 keyOf 同口径：Windows 折叠大小写 + 正斜杠） */
   const textWatchKeyOf = (fsPath: string): string =>
     isWindowsHost ? fsPath.replaceAll('\\', '/').toLowerCase() : fsPath
-  /** Map 插入序 = LRU 触达序（HoverWatchRegistry 淘汰同款手法） */
+  /** Map 插入序 = LRU 触达序（HoverWatchRegistry 淘汰同款手法）。上限
+   *  语义（#344 RB-1 起）：**无订阅陈旧条目**的淘汰上限——仍有活跃订阅
+   *  的目标跳过淘汰（订阅注册表上限 128 为总量的另一道上界，全在 watch
+   *  时表可临时超过本值但不无界增长） */
   const textWatchers = new Map<string, TextWatchSlot>()
   const TEXT_WATCHER_LIMIT = 64
   /** text 目标磁盘事件去抖计时器（与 pdf 同窗——保存器 rename 成组归并） */
@@ -1027,13 +1031,16 @@ export function createTextEditorProvider(
     watcher.onDidCreate((uri) => scheduleTextDiskEvent(uri.fsPath, 'changed'))
     watcher.onDidDelete((uri) => scheduleTextDiskEvent(uri.fsPath, 'deleted'))
     textWatchers.set(key, { watcher })
-    while (textWatchers.size > TEXT_WATCHER_LIMIT) {
-      const oldest = textWatchers.keys().next().value
-      if (oldest === undefined) {
-        break
-      }
-      const slot = textWatchers.get(oldest)
-      textWatchers.delete(oldest)
+    // #344（P3-12 收口·RB-1）淘汰选取：跳过仍有活跃订阅的目标（订阅在
+    // 登记表而事件源被盲 LRU 淘汰 = 磁盘推送承诺落空的不对称修复）。
+    // isWatched 传归一键幂等（协调器内部再归一，见纯函数注释）
+    for (const victim of selectTextWatchEvictions(
+      [...textWatchers.keys()],
+      (victimKey) => hoverRefresh.isWatched(victimKey),
+      TEXT_WATCHER_LIMIT,
+    )) {
+      const slot = textWatchers.get(victim)
+      textWatchers.delete(victim)
       slot?.watcher.dispose()
     }
   }
@@ -3225,10 +3232,15 @@ export function createTextEditorProvider(
       // ——.md 既有域不变（未订阅也放行，缓存失效广播语义），text 目标
       //（.txt/.json/代码文件等）按订阅集合放行（#340「未保存修改正确刷新」
       // 对 text 的通路；此前 /\.md$/i 硬过滤把已 watch 的 text 编辑拦死）
+      // #344（P3-12 收口）：text 放行集合扩至「订阅中 ∪ 读取缓存驻留」
+      // ——未 watch 的 text 目标编辑事件不转发是 B-1 的窄代价，但「悬停
+      // →关闭→编辑→再悬停」会命中陈旧缓存；缓存目标同权转发后编辑事件
+      // 照常广播失效（推送门控仍在协调器内——未订阅零推送开销不变）
       if (event.contentChanges.length > 0 &&
         event.document.uri.scheme === 'file' &&
         shouldForwardHoverDocChange(event.document.uri.path, event.document.uri.fsPath,
-          (fsPath) => hoverRefresh.isWatched(fsPath))) {
+          (fsPath) => hoverRefresh.isWatched(fsPath) ||
+            Array.from(sessions.values(), (e) => e.session).some((s) => s.hasCachedHoverTarget(fsPath)))) {
         hoverEvents.onDocChanged(event.document.uri.fsPath)
       }
       const entry = getEntry(event.document.uri)

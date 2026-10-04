@@ -1799,6 +1799,19 @@ export class DocumentSession {
     }
   }
 
+  /**
+   * #344（P3-12 收口）：该目标是否有驻留的悬停读取缓存条目（读取后未
+   * 失效/未淘汰）。provider 的 TextDocument 事件转发门控查询面——B-1
+   * 的窄代价（未 watch 的 text 目标编辑事件不转发）会把「悬停→关闭→
+   * 编辑→再悬停」落进陈旧缓存；缓存目标与已 watch 目标同权转发后，
+   * 编辑事件照常广播失效，重开悬停必然重读。md 目标事件域本就恒放行，
+   * 不经此查询。
+   */
+  hasCachedHoverTarget(fsPath: string): boolean {
+    const keys = this.hoverShapeTargets.get(fsPath)
+    return keys !== undefined && keys.size > 0
+  }
+
   /** 悬停读取缓存观测（测试钩子与性能计量：条目/字节/命中/未命中与
    *  辅助索引条目数——修 3 清理行为的行为断言面） */
   hoverReadCacheStats(): {
