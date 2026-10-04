@@ -99,10 +99,17 @@ button:focus-visible, input:focus-visible {
 .vsidian-settings-group-title .vsidian-settings-generated-icon { width: 16px; height: 16px; flex: none; background-position: center; background-repeat: no-repeat; background-size: contain; }
 .vsidian-settings-generated-icon[data-icon='typewriter'] { background-image: url('../../media/quick-actions/light/light-typewriter.svg'); }
 .vsidian-settings-generated-icon[data-icon='wordSegment'] { background-image: url('../../media/quick-actions/light/light-wordSegment.svg'); }
+/* #332 二轮：引用视图/索引维护组标题生图资产（quick-actions 41/42 列） */
+.vsidian-settings-generated-icon[data-icon='pointerLink'] { background-image: url('../../media/quick-actions/light/light-pointerLink.svg'); }
+.vsidian-settings-generated-icon[data-icon='dbLink'] { background-image: url('../../media/quick-actions/light/light-dbLink.svg'); }
 body.vscode-dark .vsidian-settings-generated-icon[data-icon='typewriter'],
 body.vscode-high-contrast .vsidian-settings-generated-icon[data-icon='typewriter'] { background-image: url('../../media/quick-actions/dark/dark-typewriter.svg'); }
 body.vscode-dark .vsidian-settings-generated-icon[data-icon='wordSegment'],
 body.vscode-high-contrast .vsidian-settings-generated-icon[data-icon='wordSegment'] { background-image: url('../../media/quick-actions/dark/dark-wordSegment.svg'); }
+body.vscode-dark .vsidian-settings-generated-icon[data-icon='pointerLink'],
+body.vscode-high-contrast .vsidian-settings-generated-icon[data-icon='pointerLink'] { background-image: url('../../media/quick-actions/dark/dark-pointerLink.svg'); }
+body.vscode-dark .vsidian-settings-generated-icon[data-icon='dbLink'],
+body.vscode-high-contrast .vsidian-settings-generated-icon[data-icon='dbLink'] { background-image: url('../../media/quick-actions/dark/dark-dbLink.svg'); }
 .vsidian-settings-item { padding: 18px 0; border-bottom: 1px solid color-mix(in srgb, var(--vsidian-settings-tint) 8%, transparent); }
 .vsidian-settings-item:last-child { border-bottom: 0; }
 /* 依赖灰化（#155 跟进）：dependsOn 依赖关闭时整行降不透明度、控件禁用；

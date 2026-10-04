@@ -1,8 +1,8 @@
 # 快速操作图标
 
-`contact-sheet.png` 是栅格总览：40 列按下表顺序排列，首行为浅色主题，次行为深色主题。每格 96×96 像素，透明背景。`light/` 和 `dark/` 内的 PNG 从总览逐格原样裁切；同名 SVG 再由 VTracer 对该 PNG 描摹生成，内含真实 `<path>`，不嵌入位图。
+`contact-sheet.png` 是栅格总览：42 列按下表顺序排列，首行为浅色主题，次行为深色主题。每格 96×96 像素，透明背景。`light/` 和 `dark/` 内的 PNG 从总览逐格原样裁切；同名 SVG 再由 VTracer 对该 PNG 描摹生成，内含真实 `<path>`，不嵌入位图。
 
-AI 生图源图有四张，均保留最终原图与裁切源图：`highlight-horizontal-rule-ai-board.png` / `highlight-horizontal-rule-source.png`（高亮笔与分割线，192×96），`context-menu-ai-board.png` / `context-menu-source.png`（右键菜单图标 14 枚，1344×96；提示词与工具记录见 `context-menu-ai-prompt.md`），`find-panel-ai-board.png` / `find-panel-source.png`（查找面板图标 6 枚，576×96；提示词与工具记录见 `find-panel-ai-prompt.md`），`settings-sections-ai-board.png` / `settings-sections-source.png`（设置页标题图标 2 枚，192×96；候选、提示词与裁切记录见 `settings-sections-ai-prompt.md`）。重建脚本按格裁切源图的 alpha，分别着浅色或深色主题色，再纳入总览及 VTracer 描摹流程；其余 16 枚仍由脚本绘制。
+AI 生图源图有五张，均保留最终原图与裁切源图：`highlight-horizontal-rule-ai-board.png` / `highlight-horizontal-rule-source.png`（高亮笔与分割线，192×96），`context-menu-ai-board.png` / `context-menu-source.png`（右键菜单图标 14 枚，1344×96；提示词与工具记录见 `context-menu-ai-prompt.md`），`find-panel-ai-board.png` / `find-panel-source.png`（查找面板图标 6 枚，576×96；提示词与工具记录见 `find-panel-ai-prompt.md`），`settings-sections-ai-board.png` / `settings-sections-source.png`（设置页标题图标 2 枚，192×96；候选、提示词与裁切记录见 `settings-sections-ai-prompt.md`），`refview-index-ai-board.png` / `refview-index-source.png`（文件与链接组标题图标 2 枚，192×96；提示词与裁切记录见 `refview-index-ai-prompt.md`）。重建脚本按格裁切源图的 alpha，分别着浅色或深色主题色，再纳入总览及 VTracer 描摹流程；其余 16 枚仍由脚本绘制。
 
 | 列 | 图标 key | 列 | 图标 key | 列 | 图标 key |
 | --- | --- | --- | --- | --- | --- |
@@ -29,12 +29,14 @@ AI 生图源图有四张，均保留最终原图与裁切源图：`highlight-hor
 | 32 | `findPrev` | 34 | `findClose` | 36 | `replaceAll` |
 | 33 | `findNext` | 35 | `replaceOne` | 37 | `findInSelection` |
 
-38 列 `chevronRight` 是查找面板替换栏切换图标，由脚本直接绘制。设置页二级标题组图标（#265，39–40 列）：
+38 列 `chevronRight` 是查找面板替换栏切换图标，由脚本直接绘制。设置页二级标题组图标（#265/#332，39–42 列）：
 
 | 列 | 图标 key | 含义 |
 | --- | --- | --- |
 | 39 | `typewriter` | 符号输入组的打字机 |
 | 40 | `wordSegment` | 中文分词组的词块切分 |
+| 41 | `pointerLink` | 引用视图组的手型指针与下划线链接 |
+| 42 | `dbLink` | 索引维护组的数据库与锁链 |
 
 重建命令：
 

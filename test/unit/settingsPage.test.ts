@@ -634,6 +634,11 @@ describe('组标题图标机制（#263：编辑器页二级 h3 组字形；#265�
     expect(css).toContain('dark-typewriter.svg')
     expect(css).toContain('light-wordSegment.svg')
     expect(css).toContain('dark-wordSegment.svg')
+    // #332 二轮：引用视图/索引维护组标题生图资产的明暗映射
+    expect(css).toContain('light-pointerLink.svg')
+    expect(css).toContain('dark-pointerLink.svg')
+    expect(css).toContain('light-dbLink.svg')
+    expect(css).toContain('dark-dbLink.svg')
     // 统一渲染规则仍为字形族共本（fill:none、stroke:currentColor、1.7 圆角线帽）
     expect(css).toMatch(/\.vsidian-settings svg\s*\{[^}]*fill:\s*none[^}]*stroke:\s*currentColor[^}]*stroke-width:\s*1\.7/)
   })
@@ -652,16 +657,16 @@ describe('引用视图组（#298：总开关、改名呈现与开关回显/持�
     return item
   }
 
-  it('组标题图标一次接线：内联 svg 在文字前、aria-hidden 纯装饰（path 数据占位复用现有字形）', () => {
+  it('组标题图标一次接线：生图资产槽在文字前、aria-hidden 纯装饰（#332 二轮内联临时字形退役）', () => {
     const { parent } = makeViewWithFilesPage(PRODUCTION_SETTING_DEFINITIONS)
     const group = refviewGroup(parent)
     const title = group.querySelector<HTMLElement>('.vsidian-settings-group-title')!
     expect(title.textContent).toBe(zhCn['settings.groupRefview'])
-    const svg = title.querySelector('svg')
-    expect(svg, '引用视图组标题应带内联图标').toBeTruthy()
-    expect(title.firstElementChild).toBe(svg)
-    expect(svg!.getAttribute('aria-hidden')).toBe('true')
-    expect(svg!.querySelector('path')!.getAttribute('d')).toBeTruthy()
+    const glyph = title.querySelector<HTMLElement>('.vsidian-settings-generated-icon')
+    expect(glyph, '引用视图组标题应带生图资产槽').toBeTruthy()
+    expect(title.firstElementChild).toBe(glyph)
+    expect(glyph!.getAttribute('aria-hidden')).toBe('true')
+    expect(glyph!.dataset.icon).toBe('pointerLink')
   })
 
   it('总开关默认开启回显；切换上送 settings.set；快照回显关闭值并保持有效', () => {
@@ -1114,23 +1119,25 @@ describe('文件与链接分页（#332 设置重组：图片/引用视图迁入 
     expect(content!.querySelector('.vsidian-index-patterns')).toBeTruthy()
   })
 
-  it('组标题图标：图片=山形相框、引用视图=手型指针+链接下划线、索引维护=数据库+锁链（#332 二轮字形）', () => {
+  it('组标题图标：图片=内联山形相框、引用视图/索引维护=生图资产槽（#332 二轮 pointerLink/dbLink）', () => {
     const { parent } = makeFilesView()
     clickNav(parent, zhCn['settings.filesLinksSection'])
+    // 图片组仍是内联字形（山形相框）
     const dOf = (title: string) =>
       sectionByTitle(parent, title).querySelector('.vsidian-settings-group-title svg path')!
         .getAttribute('d')!
     expect(dOf(zhCn['settings.groupImage'])).toBe(
       'M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2ZM11 9a2 2 0 1 1-4 0 2 2 0 0 1 4 0M21 15l-3.09-3.09a2 2 0 0 0-2.82 0L6 21')
-    // pointerLink：lucide pointer 手形（0.845 缩放）起笔 + 掌底断口下划线
-    expect(dOf(zhCn['settings.groupRefview'])).toBe(
-      'M20.32 12.48a7.04 7.04 0 0 1-7.04 7.04M16.92 9.76v-.68a1.69 1.69 0 0 0-1.69-1.69 1.69 1.69 0 0 0-1.69 1.69M13.54 8.92V8.24a1.69 1.69 0 0 0-1.69-1.69 1.69 1.69 0 0 0-1.69 1.69v.68M10.16 8.47V3.66a1.69 1.69 0 0 0-1.69-1.69 1.69 1.69 0 0 0-1.69 1.69v8.45M16.92 9.76a1.69 1.69 0 1 1 3.38 0v2.03a6.76 6.76 0 0 1-6.76 6.76h-1.69c-2.36 0-3.8-.72-5.06-1.98l-3.04-3.04a1.69 1.69 0 0 1 2.39-2.38l1.69 1.69M4.5 22h6M13.5 22h6')
-    // dbLink：database 椭圆柱起笔 + 右下斜置相扣双环
-    const indexTitle = parent.querySelector<HTMLElement>(
-      '.vsidian-settings-section-content .vsidian-settings-group-title')!
-    expect(indexTitle.querySelector('svg path')!.getAttribute('d')!.startsWith('M2.25 4.6a6.75 2.25'))
-      .toBe(true)
-    expect(indexTitle.querySelector('svg path')!.getAttribute('d')).toContain('M19.8 20.7a2.1 2.1 0 1 0 4.2 0')
+    // 引用视图组：生图资产槽（generated-icon span，CSS 按 data-icon 映射明暗背景）
+    const refviewGlyph = sectionByTitle(parent, zhCn['settings.groupRefview'])
+      .querySelector<HTMLElement>('.vsidian-settings-group-title .vsidian-settings-generated-icon')!
+    expect(refviewGlyph.dataset.icon).toBe('pointerLink')
+    expect(refviewGlyph.previousElementSibling).toBeNull() // 图标在文字前
+    // 索引维护组（分页自有内容的 h3）：同为生图资产槽
+    const indexGlyph = parent.querySelector<HTMLElement>(
+      '.vsidian-settings-section-content .vsidian-settings-group-title .vsidian-settings-generated-icon')!
+    expect(indexGlyph.dataset.icon).toBe('dbLink')
+    expect(indexGlyph.parentElement!.textContent).toBe(zhCn['indexMaintenance.title'])
   })
 
   it('liveDirect 灰化联动：总开关关闭即禁用+灰化类，changed 回推就地解灰（值不清除）', () => {

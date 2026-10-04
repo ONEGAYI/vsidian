@@ -30,6 +30,7 @@ AI_ICON_SOURCES: tuple[tuple[Path, tuple[str, ...]], ...] = (
         "findPrev", "findNext", "findClose", "replaceOne", "replaceAll", "findInSelection",
     )),
     (ASSETS / "settings-sections-source.png", ("typewriter", "wordSegment")),
+    (ASSETS / "refview-index-source.png", ("pointerLink", "dbLink")),
 )
 KEYS = (
     "bold", "italic", "strikethrough", "inlineCode", "heading",
@@ -41,7 +42,7 @@ KEYS = (
     "pastePlain", "media", "footnote", "callout",
     "findPrev", "findNext", "findClose", "replaceOne", "replaceAll", "findInSelection",
     "chevronRight",
-    "typewriter", "wordSegment",
+    "typewriter", "wordSegment", "pointerLink", "dbLink",
 )
 COLORS = {"light": (54, 60, 70), "dark": (210, 218, 229)}
 CELL = 96
