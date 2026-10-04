@@ -5,13 +5,16 @@
 import { describe, expect, it } from 'vitest'
 import * as path from 'node:path'
 import {
+  flattenHoverReadOutcome,
   readHoverDocTarget,
   readHoverDirectTarget,
   readHoverMdLinkTarget,
+  readRefContentTarget,
   resolveHoverTargetTip,
   type HoverDocAccessContext,
   type HoverDocAccessPorts,
   type HoverReadOutcome,
+  type RefReadOutcome,
 } from '../../src/host/hoverDocAccess'
 import type { VaultLinkFileResolution } from '../../src/shared/vaultLink'
 
@@ -742,5 +745,153 @@ describe('P2-03 全文可达与锚点初始定位（#280，ADR-0011）', () => {
       range: { start: 0, end: TARGET_TEXT.length },
       scope: { kind: 'block', anchor: '^已删除' },
     })
+  })
+})
+
+// #333（P3-01）类型分派入口：目标三形态（双链/普通链接/直接目标）解析
+// 出 fsPath 后按类型分派——markdown 通道装载既有全文载荷（身份/版本/LF/
+// 定位区间/选择器）；其余类型维持 non-markdown 分态（附件/外链载荷由
+// P3-04/P3-05/P3-08/P3-10 登记）。旧三入口为兼容适配（经本入口后展开为
+// 旧扁平形态）——等价矩阵钉住「同一输入两条入口同果」。
+describe('#333 类型分派入口 readRefContentTarget', () => {
+  function matrixDisk(): Disk {
+    return new Map<string, { version: number; text: string }>([
+      ['D:\\notes\\a.md', note('# 父文档\n\n## 父章节\n\n父段。\n\n父块。 ^blk-p\n', 4)],
+      ['D:\\notes\\目标.md', note(SECTION_DOC, 9)],
+      ['D:\\notes\\图.png', note('binary')],
+      ['D:\\notes\\资料.pdf', note('pdf-bytes')],
+      ['D:\\notes\\脚本.ts', note('const x = 1\n')],
+    ])
+  }
+
+  it('markdown 全文：类型化结果携带 kind 标记的 Markdown 载荷（身份在顶层、内容在 content）', async () => {
+    const h = makeHarness(matrixDisk())
+    const out = await readRefContentTarget({ target: '目标' }, h.ctx, h.ports)
+    expect(out).toEqual({
+      ok: true,
+      fsPath: 'D:\\notes\\目标.md',
+      relPath: '目标.md',
+      content: {
+        kind: 'markdown',
+        version: 9,
+        lfText: SECTION_DOC,
+        range: { start: 0, end: SECTION_DOC.length },
+        selector: { kind: 'full' },
+      },
+    } satisfies RefReadOutcome)
+  })
+
+  it('markdown 锚点两形态：heading/block 选择器与定位区间经类型化通道保真', async () => {
+    const h = makeHarness(matrixDisk())
+    const heading = await readRefContentTarget({ target: '目标#章节甲' }, h.ctx, h.ports)
+    expect(heading.ok).toBe(true)
+    if (heading.ok) {
+      expect(heading.content.kind).toBe('markdown')
+      expect(heading.content.selector).toEqual({ kind: 'heading', anchor: '章节甲' })
+      expect(heading.content.lfText.slice(heading.content.range.start, heading.content.range.end))
+        .toBe('## 章节甲\n\n甲段一。\n\n```js\nconst a = 1\n```')
+    }
+    const bh = makeHarness(new Map<string, { version: number; text: string }>([
+      ['D:\\notes\\a.md', note('x')],
+      ['D:\\notes\\目标.md', note(BLOCK_DOC)],
+    ]))
+    const block = await readRefContentTarget({ target: '目标#^blk1' }, bh.ctx, bh.ports)
+    expect(block.ok).toBe(true)
+    if (block.ok) {
+      expect(block.content.selector).toEqual({ kind: 'block', anchor: '^blk1' })
+    }
+  })
+
+  it('普通链接与直接目标形态同经类型化通道；页内锚点目标即来源文档', async () => {
+    const h = makeHarness(matrixDisk())
+    const link = await readRefContentTarget({ linkHref: '目标.md#章节乙' }, h.ctx, h.ports)
+    expect(link.ok).toBe(true)
+    if (link.ok) {
+      expect(link.content.selector).toEqual({ kind: 'heading', anchor: '章节乙' })
+    }
+    const direct = await readRefContentTarget(
+      { directTarget: { fsPath: 'D:\\notes\\目标.md', anchor: '章节甲' } }, h.ctx, h.ports)
+    expect(direct.ok).toBe(true)
+    if (direct.ok) {
+      expect(direct.content.selector).toEqual({ kind: 'heading', anchor: '章节甲' })
+    }
+    const pageAnchor = await readRefContentTarget({ linkHref: '#父章节' }, h.ctx, h.ports)
+    expect(pageAnchor.ok).toBe(true)
+    if (pageAnchor.ok) {
+      expect(pageAnchor.fsPath).toBe('D:\\notes\\a.md')
+    }
+  })
+
+  it('非 markdown 类型（image/pdf/text）→ non-markdown 分态，读取端口零调用（不装载附件）', async () => {
+    const h = makeHarness(matrixDisk())
+    for (const [form, label] of [
+      [{ target: '图.png' }, '双链图片'],
+      [{ linkHref: '资料.pdf' }, '普通链接 PDF'],
+      [{ directTarget: { fsPath: 'D:\\notes\\脚本.ts' } }, '直接目标文本'],
+    ] as Array<[{ target?: string; linkHref?: string; directTarget?: { fsPath: string; anchor?: string } }, string]>) {
+      expect(await readRefContentTarget(form, h.ctx, h.ports), `${label} 应 non-markdown`).toEqual({
+        ok: false,
+        reason: 'non-markdown',
+      })
+    }
+    expect(h.opened, '非 markdown 目标不读取正文').toEqual([])
+  })
+
+  it('失败分态经类型化通道原样保留（unsupported/not-found/escape/no-workspace）', async () => {
+    const h = makeHarness(new Map())
+    expect(await readRefContentTarget({ target: 'a#b#c' }, h.ctx, h.ports)).toEqual({ ok: false, reason: 'unsupported' })
+    expect(await readRefContentTarget({ target: '不存在' }, h.ctx, h.ports)).toEqual({ ok: false, reason: 'not-found' })
+    const esc = makeHarness(new Map(), () => ({ kind: 'escape', detail: '../../x' }))
+    expect(await readRefContentTarget({ target: '../../x' }, esc.ctx, esc.ports)).toEqual({ ok: false, reason: 'escape' })
+    const noWs = makeHarness(new Map(), () => ({ kind: 'no-workspace' }))
+    expect(await readRefContentTarget({ target: 'x' }, noWs.ctx, noWs.ports)).toEqual({ ok: false, reason: 'no-workspace' })
+  })
+
+  it('anchorOptional 语义经类型化通道保持（宽容重载回成功全文）', async () => {
+    const h = makeHarness(matrixDisk())
+    const out = await readRefContentTarget({ target: '目标#已删除的标题' }, h.ctx, h.ports, { anchorOptional: true })
+    expect(out.ok).toBe(true)
+    if (out.ok) {
+      expect(out.content.range).toEqual({ start: 0, end: SECTION_DOC.length })
+      expect(out.content.selector).toEqual({ kind: 'heading', anchor: '已删除的标题' })
+    }
+    const strict = await readRefContentTarget({ target: '目标#已删除的标题' }, h.ctx, h.ports)
+    expect(strict).toEqual({ ok: false, reason: 'anchor-missing', anchor: '已删除的标题' })
+  })
+
+  it('等价矩阵：同一输入下旧扁平入口与类型化入口内容一致（兼容适配不改变语义）', async () => {
+    const disk = matrixDisk()
+    const cases: Array<{
+      label: string
+      form: { target?: string; linkHref?: string; directTarget?: { fsPath: string; anchor?: string } }
+    }> = [
+      { label: '双链全文', form: { target: '目标' } },
+      { label: '双链标题', form: { target: '目标#章节甲' } },
+      { label: '双链本文件锚点', form: { target: '#父章节' } },
+      { label: '普通链接全文', form: { linkHref: '目标.md' } },
+      { label: '普通链接块锚点', form: { linkHref: '目标.md#章节乙' } },
+      { label: '直接目标', form: { directTarget: { fsPath: 'D:\\notes\\目标.md' } } },
+      { label: '非 markdown', form: { target: '图.png' } },
+      { label: '不存在', form: { target: '不存在' } },
+      { label: '锚点缺失', form: { target: '目标#没有的标题' } },
+    ]
+    for (const { label, form } of cases) {
+      const h = makeHarness(new Map(disk))
+      const legacy: HoverReadOutcome = form.directTarget !== undefined
+        ? await readHoverDirectTarget(form.directTarget, h.ctx, h.ports)
+        : form.linkHref !== undefined
+          ? await readHoverMdLinkTarget(form.linkHref, h.ctx, h.ports)
+          : await readHoverDocTarget(form.target!, h.ctx, h.ports)
+      const typed = await readRefContentTarget(form, h.ctx, h.ports)
+      // 兼容适配等价：类型化结果经 flattenHoverReadOutcome 展开后与旧扁平
+      // 入口逐字段一致（身份 + kind 标记载荷 + 失败分态）
+      expect(typed.ok, `${label}：成败一致`).toBe(legacy.ok)
+      if (legacy.ok && typed.ok) {
+        expect(flattenHoverReadOutcome(typed), `${label}：内容一致`).toEqual(legacy)
+        expect(typed.content.kind, `${label}：kind 标记`).toBe('markdown')
+      } else if (!legacy.ok && !typed.ok) {
+        expect(typed, `${label}：失败分态一致`).toEqual(legacy)
+      }
+    }
   })
 })

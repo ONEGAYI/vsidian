@@ -52,7 +52,7 @@
 // setter 注入（imagePopup 的 setImagePopupContext 形态；syncController
 // mount 注入、dispose 清空）。
 import type { ImageResultPayload } from './imageResource'
-import { RefContentInstance, type RefContentMount, type RefLoadedContent } from './refContentInstance'
+import { RefContentInstance, refLoadedContentOfResult, type RefContentMount, type RefLoadedContent } from './refContentInstance'
 import { createReadingContainer, READING_CLASS_NAMES } from './readingView'
 import type { ReadingViewStats } from './readingVirtualView'
 import { claimPopup, releasePopup } from './popupMutex'
@@ -1104,18 +1104,15 @@ export function closeHoverPopupIfAnchorWithin(scope: ParentNode): void {
  *  #224 起刷新保持滚动位置（内容重建前保存
  *  scrollTop、重建后回写——内容缩短时浏览器按 scrollHeight 合法钳制）
  *  并登记目标订阅（hover.watch）。P2-06：装载成功送达根会话（entry.loaded
- *  填充；生效内部 Live 时绑定目标编辑端口） */
-function applyHoverContent(state: HoverPopupState, message: Extract<HoverPreviewResult, { ok: true }>): void {
+ *  填充；生效内部 Live 时绑定目标编辑端口）。
+ *  #333（P3-01）：loaded 由 refLoadedContentOfResult 类型化转换产出
+ *  （contentKind 分派——markdown 通道；非 markdown 载荷在转换处被拒，
+ *  不进入本应用路径，refEdit 写端口结构上不可达）。 */
+function applyHoverContent(state: HoverPopupState, message: Extract<HoverPreviewResult, { ok: true }>, loaded: RefLoadedContent): void {
   const keepScroll = state.scrollEl.scrollTop // #224 刷新前保存（首载为 0）
   state.scope = message.scope.kind
   state.targetFsPath = message.target.fsPath
   state.appliedVersion = message.version
-  const loaded: RefLoadedContent = {
-    fsPath: message.target.fsPath, relPath: message.target.relPath,
-    scope: message.scope.kind, selector: message.scope, range: message.range,
-    version: message.version, text: message.text,
-    depth: message.depth, expansionPath: message.expansionPath,
-  }
   const rendered = state.content.render(loaded, (bytes) => {
     if (context?.admitRootContent && !context.admitRootContent(state.instanceId, loaded, bytes)) return false
     // 同 fsPath 未保存刷新也必须先续交根 B 的来源，再挂子卡发 C 请求。
@@ -1219,7 +1216,11 @@ function sendWatchMessage(
 /** 宿主读取结果（syncController handleHostMessage 转发）：
  *  仅当场内实例、instanceId 与 reqId 双匹配的结果生效——迟到/陈旧回包
  *  丢弃，绝不重开已关闭浮层。#224 版本仲裁：成功回包的目标版本低于已
- *  应用版本（慢响应旧内容）整体丢弃，不冒充新目标 */
+ *  应用版本（慢响应旧内容）整体丢弃，不冒充新目标。
+ *  #333（P3-01）：成功回包经 refLoadedContentOfResult 类型化装载入口
+ *  （contentKind 分派）——kind 与载荷不匹配（本票防御路径：宿主与消息
+ *  校验器已拦）返回 null，按不可应用处理：释放来源租约、就地错误分态
+ *  （不悬挂 loading、不重开） */
 export function notifyHoverResult(message: HoverPreviewResult): boolean {
   if (!popup || message.instanceId !== popup.instanceId || message.reqId !== popup.reqId) {
     return false
@@ -1229,7 +1230,14 @@ export function notifyHoverResult(message: HoverPreviewResult): boolean {
     return true
   }
   if (message.ok) {
-    applyHoverContent(popup, message)
+    const loaded = refLoadedContentOfResult(message)
+    if (loaded === null) {
+      if (context) releaseRefSourceLease(context, message.sourceLeaseId)
+      applyDisplay(popup, 'error', refErrorText('read-failed', popup.target))
+      position(popup)
+      return true
+    }
+    applyHoverContent(popup, message, loaded)
   } else {
     // #221 目标原文取 state（三入口同源——面板条目/Live 装饰无 href 属性）
     applyDisplay(popup, 'error', refErrorText(message.reason, popup.target, message.anchor))

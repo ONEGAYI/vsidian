@@ -35,7 +35,7 @@ import type { MessageKey } from '../shared/locales/en'
 import { HOVER_REFRESH_DEFAULTS } from '../shared/hoverRefresh'
 import { REF_EXPANSION_LIMITS, RefExpansionBudget } from '../shared/refExpansion'
 import { RELOCATION_SCAN_LIMITS } from '../shared/relocationScan'
-import { RefContentInstance, type RefContentMount, type RefLoadedContent, type RefMountOptions, type RefSourceContext } from './refContentInstance'
+import { RefContentInstance, refLoadedContentOfResult, type RefContentMount, type RefLoadedContent, type RefMountOptions, type RefSourceContext } from './refContentInstance'
 import { promoteEmbedSlotsInBlock, promotedHostsOf } from './embedSlots'
 import { applyObsidianDomAlias } from '../shared/obsidianAlias'
 import { createReadingContainer, READING_CLASS_NAMES } from './readingView'
@@ -1154,28 +1154,22 @@ export class EmbedCardManager {
       return true
     }
     // 卸载后在途：同配对写入缓存（重挂直接用）；过期回包只清 lastReq
-    //（缓存不得写入旧版本——重挂会绕过仲裁直接渲染）
+    //（缓存不得写入旧版本——重挂会绕过仲裁直接渲染）。
+    // #333：类型化装载入口分派——kind 与载荷不匹配不缓存（不可应用载荷
+    // 复用会绕过宿主修复），仅清配对并释放租约
+    const okMessage = message.ok ? message : null
     for (const entry of this.entries.values()) {
       if (entry.lastReq !== null &&
           entry.lastReq.instanceId === message.instanceId &&
           entry.lastReq.reqId === message.reqId) {
-        if (!stale && message.ok) {
-          entry.loaded = {
-            fsPath: message.target.fsPath,
-            relPath: message.target.relPath,
-            scope: message.scope.kind,
-            selector: message.scope,
-            version: message.version,
-            text: message.text,
-            range: message.range,
-            depth: message.depth,
-            expansionPath: message.expansionPath,
-          }
-          entry.lastKnown = { fsPath: message.target.fsPath, version: message.version }
-          this.watchEntry(entry, message.sourceLeaseId)
+        const loaded = !stale && okMessage !== null ? refLoadedContentOfResult(okMessage) : null
+        if (loaded !== null && okMessage !== null) {
+          entry.loaded = loaded
+          entry.lastKnown = { fsPath: okMessage.target.fsPath, version: okMessage.version }
+          this.watchEntry(entry, okMessage.sourceLeaseId)
         }
         entry.lastReq = null
-        if (stale && message.ok) releaseRefSourceLease(this.context, message.sourceLeaseId)
+        if (loaded === null && okMessage !== null) releaseRefSourceLease(this.context, okMessage.sourceLeaseId)
         return true
       }
     }
@@ -3425,7 +3419,11 @@ export class EmbedCardManager {
     })
   }
 
-  /** 成功回包：缓存 + 渲染（在场路径） */
+  /** 成功回包：缓存 + 渲染（在场路径）。#333（P3-01）：经
+   *  refLoadedContentOfResult 类型化装载入口（contentKind 分派）——kind
+   *  与载荷不匹配返回 null，按不可应用回包处理：释放租约、清在途配对、
+   *  错误分态（不入装载缓存、不触发 refEdit 写端口——非 markdown 载荷
+   *  结构上到不了装载与端口绑定路径） */
   private applyResult(handle: EmbedCardHandle, message: Extract<HoverPreviewResult, { ok: true }>): void {
     if ((handle.entry.content.source.depth ?? 1) > (this.context.maxDepth?.() ?? REF_EXPANSION_LIMITS.defaultDepth)) {
       releaseRefSourceLease(this.context, message.sourceLeaseId)
@@ -3433,20 +3431,17 @@ export class EmbedCardManager {
       this.applyDisplay(handle, 'error', t('hover.errorDepth'))
       return
     }
-    const loaded: EmbedLoaded = {
-      fsPath: message.target.fsPath,
-      relPath: message.target.relPath,
-      scope: message.scope.kind,
-      selector: message.scope,
-      version: message.version,
-      text: message.text,
-      range: message.range,
-      depth: message.depth,
-      expansionPath: message.expansionPath,
+    const loaded = refLoadedContentOfResult(message)
+    if (loaded === null) {
+      releaseRefSourceLease(this.context, message.sourceLeaseId)
+      handle.entry.lastReq = null
+      this.applyDisplay(handle, 'error', refErrorText('read-failed', targetOfInner(handle.entry.inner)))
+      return
     }
+    const embedLoaded: EmbedLoaded = loaded
     handle.entry.lastReq = null
     handle.entry.lastKnown = { fsPath: loaded.fsPath, version: loaded.version }
-    this.applyLoaded(handle, loaded, message.sourceLeaseId)
+    this.applyLoaded(handle, embedLoaded, message.sourceLeaseId)
   }
 
   /** 装载结果渲染（首载与缓存重挂共用）：B Reading 视图 + 状态恢复。

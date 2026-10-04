@@ -10,6 +10,7 @@ import { isFormatOperationId, type FormatOperationId } from './formatOperations'
 import { isKeybindingOperationId, isUiOperationId, type KeybindingOverrides, type UiOperationId } from './keybindings'
 import { sanitizeFindOptions, type FindOptions } from './findOptions'
 import { isDiagnosticSnapshot, type DiagnosticSnapshot } from './testDiagnostics'
+import { isRefContentKind, type RefContentKind } from './refContent'
 import type { DefaultEditorDisplayState, DefaultEditorDisplayStatus } from './editorGuard'
 
 /** 设置快照类型随协议消息透出（载荷单一事实源仍在 shared/settings） */
@@ -620,6 +621,14 @@ export type HostToWebview =
       reqId: number
       instanceId: string
       ok: true
+      /** #333（P3-01）内容类型分派标记：宿主类型化读取入口（readRefContent
+       *  Target）成功时显式携带 'markdown'；缺省 = markdown（旧合法
+       *  Markdown 消息兼容识别）。非 markdown 类型本票未登记载荷形态
+       *  （pdf/image/text/web 的载荷与导航选择器由 P3-04/P3-05/P3-08/
+       *  P3-10 扩展本消息与校验器）——携带这些 kind 的成功形态在运行期
+       *  校验中按「类型与载荷不匹配」整体拒绝。失败形态无载荷，不带本
+       *  字段。类型学单一事实源：shared/refContent */
+      contentKind?: RefContentKind
       target: HoverPreviewTargetIdentity
       version: number
       text: string
@@ -3980,11 +3989,22 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       // 目标身份/版本/LF 全文/范围（start<=end）/范围选择器（#219 起
       // heading/block 附锚点原文）；失败形态 reason 限定错误分态枚举
       // （anchor-missing 附锚点原文）
+      // #333（P3-01）contentKind 类型分派校验：成功形态可带可选
+      // contentKind（缺省 = markdown 兼容）——未知类型拒绝；非 markdown
+      // 类型本票未登记载荷形态，携带 Markdown 载荷即为类型与载荷不匹配
+      // 整体拒绝；失败形态无载荷，携带 contentKind 即拒绝
       if (!isPositiveInt(v.reqId) ||
         typeof v.instanceId !== 'string' || v.instanceId.length === 0) {
         return false
       }
       if (v.ok === true) {
+        if (v.contentKind !== undefined) {
+          // 类型已知性 + 载荷匹配：本票仅 markdown 载荷形态登记（P3-04+
+          // 登记后按 kind 放开各自形态）——未知类型与未登记类型整体拒绝
+          if (!isRefContentKind(v.contentKind) || v.contentKind !== 'markdown') {
+            return false
+          }
+        }
         return (
           isObject(v.target) &&
           isString(v.target.fsPath) &&
@@ -4007,6 +4027,7 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       }
       return (
         v.ok === false &&
+        v.contentKind === undefined &&
         (v.reason === 'unsupported' || v.reason === 'no-workspace' || v.reason === 'escape' ||
           v.reason === 'not-found' || v.reason === 'non-markdown' || v.reason === 'read-failed' ||
           v.reason === 'anchor-missing' || v.reason === 'source-expired' || v.reason === 'cycle' ||

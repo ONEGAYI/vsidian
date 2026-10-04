@@ -76,14 +76,18 @@ describe('P2-04 hasHoverSourcePin：refEdit.bind 的来源校验面', () => {
     const panelId = session.attachPanel({
       send: (m) => served.push(m),
       readHoverTarget: (_payload, report) => {
+        // #333 类型化读取桩（markdown kind 标记载荷）
         report({
           ok: true,
           fsPath: 'D:\\notes\\目标.md',
           relPath: '目标.md',
-          version: 2,
-          lfText: '# t\n',
-          range: { start: 0, end: 4 },
-          scope: { kind: 'full' },
+          content: {
+            kind: 'markdown',
+            version: 2,
+            lfText: '# t\n',
+            range: { start: 0, end: 4 },
+            selector: { kind: 'full' },
+          },
         })
       },
     })

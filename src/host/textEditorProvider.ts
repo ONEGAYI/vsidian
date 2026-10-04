@@ -87,12 +87,10 @@ import { runImageExport } from './imageExportHost'
 import { runImagePaste, type ImagePasteOutcome } from './imagePasteHost'
 import { matchHostOffset, parseCopyMatch, shouldShowSearchRevealHint } from './searchReveal'
 import {
-  readHoverDocTarget,
-  readHoverDirectTarget,
-  readHoverMdLinkTarget,
+  readRefContentTarget,
   resolveHoverTargetTip,
   type HoverDocAccessContext,
-  type HoverReadOutcome,
+  type RefReadOutcome,
 } from './hoverDocAccess'
 import { installHostLocale, LOCALE_MESSAGES, type LocaleCode } from '../shared/locales'
 import { buildLocaleIslandHtml } from '../shared/locales/island'
@@ -1957,17 +1955,18 @@ export function createTextEditorProvider(
       // #218 悬停预览文档读取端口：hoverDocAccess 无副作用路径（目标解析 +
       // openTextDocument 只装载不显示 + LF 转换）；报告回 hover.result（经
       // 会话 report 闭包回来源面板）。读取异常一律收敛为 read-failed 分态
-      // ——就地 i18n 呈现，不弹宿主通知。#219 起按 linkHref 分流：普通本地
-      // Markdown 链接走 readHoverMdLinkTarget（外部网页 webview 已预滤，
-      // 宿主复核兜底），缺省为双链 readHoverDocTarget；#221 起 directTarget
-      // 优先（反链/出链面板条目的直接目标——宿主快照身份直读，不走文本
-      // 解析；断链条目空串 fsPath 由 readHoverDirectTarget 回 not-found）
+      // ——就地 i18n 呈现，不弹宿主通知。目标三形态择一：directTarget
+      // （#221 反链/出链面板条目的直接目标——宿主快照身份直读；断链条目
+      // 空串 fsPath 回 not-found）> linkHref（#219 普通本地 Markdown 链接，
+      // 外部网页 webview 已预滤、宿主复核兜底）> target（双链原文）。
+      // #333（P3-01）起读取走 readRefContentTarget 类型化分派入口（成功
+      // 载荷按 kind 标记；旧扁平入口保留为兼容适配）
       const readHoverTargetPort = (
         payload: HoverPreviewRequestPayload & { verifiedSource?: { fsPath: string; version: number } },
-        report: (result: HoverReadOutcome) => void,
+        report: (result: RefReadOutcome) => void,
       ): void => {
         void (async (): Promise<void> => {
-          let outcome: HoverReadOutcome
+          let outcome: RefReadOutcome
           try {
             let sourceDoc = document
             if (payload.source !== undefined) {
@@ -1994,14 +1993,23 @@ export function createTextEditorProvider(
                 }
               },
             }
-            outcome = payload.directTarget !== undefined
-              ? await readHoverDirectTarget(payload.directTarget, access, ports,
-                payload.anchorOptional === true ? { anchorOptional: true } : undefined)
-              : payload.linkHref !== undefined
-                ? await readHoverMdLinkTarget(payload.linkHref, access, ports,
-                  payload.anchorOptional === true ? { anchorOptional: true } : undefined)
-                : await readHoverDocTarget(payload.target, access, ports,
-                  payload.anchorOptional === true ? { anchorOptional: true } : undefined)
+            // #333（P3-01）生产读取走类型化分派入口 readRefContentTarget：
+            // 三形态（directTarget/linkHref/target 择一）在共用解析层归一，
+            // 按解析出的目标类型分派（markdown 通道装载既有全文载荷；其余
+            // 类型 non-markdown 分态——附件/外链载荷由三期后续票登记）。
+            // 旧三入口保留为兼容适配（测试与既有调用等价使用）
+            outcome = await readRefContentTarget(
+              {
+                ...(payload.directTarget !== undefined ? { directTarget: payload.directTarget } : {}),
+                ...(payload.linkHref !== undefined ? { linkHref: payload.linkHref } : {}),
+                ...(payload.directTarget === undefined && payload.linkHref === undefined
+                  ? { target: payload.target }
+                  : {}),
+              },
+              access,
+              ports,
+              payload.anchorOptional === true ? { anchorOptional: true } : undefined,
+            )
           } catch {
             outcome = { ok: false, reason: 'read-failed' }
           }
