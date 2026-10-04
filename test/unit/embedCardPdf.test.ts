@@ -42,28 +42,33 @@ interface FakeDoc {
   getPage(pageNumber: number): unknown
 }
 
-function installFakePdfjs(numPages: number): { destroyed: number } {
+/** numPages 支持按装载次序给值（函数每次 getDocument 取一次快照——
+ *  版本替换重载返回不同页数的文档） */
+function installFakePdfjs(numPages: number | (() => number)): { destroyed: number } {
   const state = { destroyed: 0 }
-  const doc: FakeDoc = {
-    numPages,
-    getPage: () => ({
-      getViewport: ({ scale }: { scale: number }) => ({ width: 612 * scale, height: 792 * scale }),
-      render: ({ canvas, viewport }: { canvas: HTMLCanvasElement; viewport: { width: number; height: number } }) => ({
-        promise: Promise.resolve().then(() => {
-          canvas.width = Math.floor(viewport.width)
-          canvas.height = Math.floor(viewport.height)
-        }),
-        cancel: () => {},
-      }),
-    }),
-  }
   const lib = {
     GlobalWorkerOptions: { workerSrc: '' },
-    getDocument: () => ({
-      promise: Promise.resolve(doc),
-      // 销毁计数挂 loadingTask（文档与 worker 的销毁正道）
-      destroy: async () => { state.destroyed++ },
-    }),
+    getDocument: () => {
+      const pages = typeof numPages === 'function' ? numPages() : numPages
+      const doc: FakeDoc = {
+        numPages: pages,
+        getPage: () => ({
+          getViewport: ({ scale }: { scale: number }) => ({ width: 612 * scale, height: 792 * scale }),
+          render: ({ canvas, viewport }: { canvas: HTMLCanvasElement; viewport: { width: number; height: number } }) => ({
+            promise: Promise.resolve().then(() => {
+              canvas.width = Math.floor(viewport.width)
+              canvas.height = Math.floor(viewport.height)
+            }),
+            cancel: () => {},
+          }),
+        }),
+      }
+      return {
+        promise: Promise.resolve(doc),
+        // 销毁计数挂 loadingTask（文档与 worker 的销毁正道）
+        destroy: async () => { state.destroyed++ },
+      }
+    },
   }
   ;(globalThis as unknown as { __vsidianPdfjs?: unknown }).__vsidianPdfjs = lib
   vi.stubGlobal('fetch', vi.fn(async () => ({
@@ -289,6 +294,68 @@ describe('正文嵌入 PDF（#338）', () => {
     await pumpUntil(() => manager.probe().some((c) => c.pdf != null && c.pdf.phase === 'content'))
     expect(sent.filter((m) => m.kind === 'hover.request').length).toBe(1)
     expect(el2.querySelector('.vsidian-hover-pdf')).not.toBeNull()
+    manager.dispose()
+  })
+
+  // ---- review-loops 波次二（D/E 审查修复）----
+
+  it('watch 被拒（capacity）：就地错误分态且 PDF 页塔与画布一并撤下（E-3）', async () => {
+    installFakePdfjs(3)
+    const sent: WebviewToHost[] = []
+    const manager = new EmbedCardManager(makeContext(sent))
+    const el = mountEmbedBlock(manager, '![[资料.pdf]]\n')
+    manager.notifyResult(pdfResultOk(hoverRequestOf(sent)))
+    await pumpUntil(() => manager.probe().some((c) => c.pdf != null && c.pdf.phase === 'content'))
+    expect(el.querySelector('.vsidian-hover-pdf canvas')).not.toBeNull()
+    // 宿主拒绝订阅（按 hostId 配对——与生产 hover.watch 回执同源身份）
+    const watch = sent.find((m) => m.kind === 'hover.watch') as { instanceId: string } | undefined
+    expect(watch).toBeDefined()
+    manager.notifyWatchRejected({ fsPath: 'D:\\notes\\资料.pdf', instanceId: watch!.instanceId, reason: 'capacity' })
+    const card = manager.probe().find((c) => c.pdf != null)
+    expect(card!.state).toBe('error')
+    // E-3：页塔与画布撤除（旧页不冒充在场内容）；视图骨架保留
+    expect(el.querySelector('.vsidian-hover-pdf canvas')).toBeNull()
+    expect(el.querySelector('.vsidian-hover-pdf-page')).toBeNull()
+    expect(el.querySelector('.vsidian-hover-pdf')).not.toBeNull()
+    manager.dispose()
+  })
+
+  it('删除后恢复链：记忆页越新文档界 → 钳制到新末页恢复（resume 容器级钉子，D-7/E-2）', async () => {
+    let loadIndex = 0
+    installFakePdfjs(() => {
+      loadIndex++
+      return loadIndex === 1 ? 12 : 4
+    })
+    const sent: WebviewToHost[] = []
+    const manager = new EmbedCardManager(makeContext(sent))
+    const el = mountEmbedBlock(manager, '![[资料.pdf]]\n')
+    manager.notifyResult(pdfResultOk(hoverRequestOf(sent)))
+    await pumpUntil(() => manager.probe().some((c) => c.pdf != null && c.pdf.phase === 'content'))
+    // 先滚到第 10 页（「先滚后 changed」——浏览位置记忆由失效推送写入 entry）。
+    // 页高从窗口页占位的实际 style.height 读取（不依赖 probe 未暴露的
+    // scrollHeight——等比页时 offset(N) = (N-1) × 页高）
+    const scroll = el.querySelector<HTMLElement>(`.${EMBED_CARD_CLASS_NAMES.scroll}`)
+    expect(scroll).not.toBeNull()
+    const pageEl = el.querySelector<HTMLElement>('.vsidian-hover-pdf-page')
+    expect(pageEl).not.toBeNull()
+    const perPage = parseInt(pageEl!.style.height, 10)
+    expect(perPage).toBeGreaterThan(0)
+    scroll!.scrollTop = 9 * perPage + 1
+    scroll!.dispatchEvent(new Event('scroll'))
+    await pumpUntil(() => manager.probe().some((c) => c.pdf != null && c.pdf.page >= 10))
+    // 目标删除：保存记忆页 10 → 页塔撤下 → not-found 分态
+    manager.notifyInvalidated({ fsPath: 'D:\\notes\\资料.pdf', status: 'deleted', generation: 2 })
+    expect(manager.probe().find((c) => c.pdf != null)!.state).toBe('error')
+    expect(el.querySelector('.vsidian-hover-pdf canvas')).toBeNull()
+    // 文件恢复（changed 推送）→ 静默重发 → 新文档 4 页 → 记忆页 10 钳制到第 4 页
+    manager.notifyInvalidated({ fsPath: 'D:\\notes\\资料.pdf', status: 'changed', generation: 3 })
+    const req2 = hoverRequestOf(sent)
+    manager.notifyResult(pdfResultOk(req2, { version: 4 }))
+    await pumpUntil(() => manager.probe().some((c) => c.pdf != null && c.pdf.phase === 'content'))
+    const recovered = manager.probe().find((c) => c.pdf != null)!
+    expect(recovered.state).toBe('content')
+    expect(recovered.pdf!.totalPages).toBe(4)
+    expect(recovered.pdf!.page, '记忆页 10 → 钳制到新末页 4（不报 page-range）').toBe(4)
     manager.dispose()
   })
 })

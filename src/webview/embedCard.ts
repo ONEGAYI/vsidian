@@ -1317,6 +1317,9 @@ export class EmbedCardManager {
     for (const handle of this.active.values()) {
       if (handle.entry !== entry) continue
       handle.content.clear()
+      // #338 PDF：页塔与画布一并撤下（与 deleted/stale 失效路径同款——
+      // watch 被拒后旧页不冒充在场内容；视图骨架保留待后续装载复用）
+      handle.pdfView?.discardContent()
       this.applyDisplay(handle, 'error', note)
     }
   }
@@ -3633,8 +3636,13 @@ export class EmbedCardManager {
     this.applyDisplay(handle, 'content', loaded.relPath)
     const inner = handle.scrollEl.clientWidth
     const width = inner > 0 ? inner - 16 : 400
-    const page = handle.entry.pdfPage > 0 ? handle.entry.pdfPage : loaded.page
-    void handle.pdfView.show(loaded.uri, page, width).then((applied) => {
+    // occurrence 浏览位置（entry.pdfPage）优先于载荷初始页——resume 语义
+    //（E-2）：记忆路径（重挂/删除恢复链——视图页码已清零）越界钳制而非
+    // 报错；双链初始页（loaded.page，用户手写锚点）不传 resume，保持初次
+    // 非法就地报错（#337 契约）
+    const resume = handle.entry.pdfPage > 0
+    const page = resume ? handle.entry.pdfPage : loaded.page
+    void handle.pdfView.show(loaded.uri, page, width, resume).then((applied) => {
       const view = handle.pdfView
       if (!applied || view === null) {
         if (view === null) releaseRefSourceLease(this.context, sourceLeaseId)
@@ -3649,8 +3657,9 @@ export class EmbedCardManager {
         // #338：loading 期滚动区布局未定（挂载瞬间 clientHeight 不足使
         // scrollToPage 的 scrollTop 写入被钳回 0——页码观感退回第一页）。
         // 内容态建立后重定位到目标页（重定位钳制语义，与浮层 applyHover
-        // PdfContent 的 locateTo 同口径，非初次非法页码报错路径）
-        view.locateTo(page)
+        // PdfContent 的 locateTo 同口径，非初次非法页码报错路径）；resume
+        // 记忆页越界时 show 已钳制呈现，重定位同样按钳制后目标
+        view.locateTo(resume ? Math.min(page, probe.totalPages) : page)
       }
       this.context.requestMeasure?.()
     })

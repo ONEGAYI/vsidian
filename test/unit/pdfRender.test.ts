@@ -74,14 +74,36 @@ function makeFakeDoc(numPages: number, pages: Record<number, ReturnType<typeof m
   }
 }
 
-function installFakePdfjs(doc: FakeDoc | ((src: Record<string, unknown>) => Promise<FakeDoc>)): { destroyed: number } {
-  const state = { destroyed: 0 }
+/** PDF 源 fetch 的可编程计划（D-2 测试钉：失败/挂起/重试控制）。worker
+ *  fetch 恒 ok——blob 单例装配不参与被测契约；计划对象由测试中途可变
+ *  （fetchImpl 闭包引用——首败后改回 200 即可断言重试语义） */
+interface FakeFetchPlan {
+  /** PDF 源 fetch 的 HTTP 状态（非 200 → !ok；默认 200） */
+  pdfStatus?: number
+  /** 就位则 PDF 源 fetch 等待该 gate（挂起装载链——fetch 阶段 dispose 用） */
+  pdfGate?: Promise<void>
+}
+
+/** fetch 替身响应面（显式注解——两分支返回形态统一，避免推断循环） */
+interface FakeFetchResponse {
+  ok: boolean
+  status: number
+  arrayBuffer: () => Promise<ArrayBuffer>
+  text: () => Promise<string>
+}
+
+function installFakePdfjs(
+  doc: FakeDoc | ((src: Record<string, unknown>) => Promise<FakeDoc>),
+  plan: FakeFetchPlan = {},
+) {
+  const state = { destroyed: 0, loaded: 0 }
   const lib = {
     GlobalWorkerOptions: { workerSrc: '' },
     getDocument: (src: Record<string, unknown>) => {
       // 装载即 transfer（#334 实测行为：主线程 byteLength 归零）——替身侧
       // 不实际 detach（jsdom/Node 的 buffer 语义差异不影响被测契约）
       void (src.data as Uint8Array)
+      state.loaded++
       const task = {
         promise: typeof doc === 'function' ? doc(src) : Promise.resolve(doc),
         destroy: async () => {
@@ -92,11 +114,26 @@ function installFakePdfjs(doc: FakeDoc | ((src: Record<string, unknown>) => Prom
     },
   }
   ;(globalThis as unknown as { __vsidianPdfjs?: unknown }).__vsidianPdfjs = lib
-  const fetchImpl = vi.fn(async (_url: string) => ({
-    ok: true,
-    arrayBuffer: async () => new TextEncoder().encode('fake-pdf-bytes').buffer,
-    text: async () => 'worker-text',
-  }))
+  const fetchImpl = vi.fn(async (url: string): Promise<FakeFetchResponse> => {
+    if (url === ASSETS.workerJs) {
+      return {
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => new TextEncoder().encode('fake-pdf-bytes').buffer as ArrayBuffer,
+        text: async () => 'worker-text',
+      }
+    }
+    if (plan.pdfGate !== undefined) {
+      await plan.pdfGate
+    }
+    const status = plan.pdfStatus ?? 200
+    return {
+      ok: status === 200,
+      status,
+      arrayBuffer: async () => new TextEncoder().encode('fake-pdf-bytes').buffer as ArrayBuffer,
+      text: async () => 'pdf-text',
+    }
+  })
   vi.stubGlobal('fetch', fetchImpl)
   vi.stubGlobal('Blob', class {
     // jsdom Blob 兜底（vitest environment 见配置；显式替换保证可移植）
@@ -115,7 +152,9 @@ function installFakePdfjs(doc: FakeDoc | ((src: Record<string, unknown>) => Prom
       }),
     } as unknown as CanvasRenderingContext2D
   })
-  return state
+  // Object.assign 就地挂 fetchImpl：返回**同一 state 引用**（计数由闭包
+  // 递增——展开拷贝会读出恒 0 的快照）
+  return Object.assign(state, { fetchImpl })
 }
 
 
@@ -278,6 +317,26 @@ describe('PDF 悬停渲染器（#337）', () => {
     cleanupFns.push(() => view.dispose())
     expect(await view.show('https://files.test/a.pdf?v=1', 1, 448)).toBe(true)
     expect(view.probe().errorReason).toBe('load-failed')
+  })
+
+  it('主库 onload 后全局缺失：load-failed 分态且单例已重置（重试可装载，D-1 半边）', async () => {
+    // 不预置替身全局：走 ensurePdfjs 动态 <script> 路径（jsdom 不自动装载）
+    const view = new PdfHoverView(container)
+    cleanupFns.push(() => view.dispose())
+    const pending = view.show('https://files.test/a.pdf?v=1', 1, 448)
+    await pumpUntil(() => document.querySelector(`script[src="${ASSETS.mainJs}"]`) !== null)
+    // 手动触发 onload 且不设 __vsidianPdfjs（产物异常）→ 该分支 reject
+    document.querySelector(`script[src="${ASSETS.mainJs}"]`)!.dispatchEvent(new Event('load'))
+    expect(await pending).toBe(true)
+    const probe = view.probe()
+    expect(probe.phase).toBe('error')
+    expect(probe.errorReason).toBe('load-failed')
+    // 可重试：装上替身全局后同 URI 再 show → 装载成功（证明 pdfjsLoad 已
+    // 重置——未重置时第二次会拿到同一 rejected Promise，仍是 load-failed）
+    installFakePdfjs(makeFakeDoc(2))
+    expect(await view.show('https://files.test/a.pdf?v=1', 1, 448)).toBe(true)
+    expect(view.probe().phase).toBe('content')
+    expect(view.probe().totalPages).toBe(2)
   })
 
   it('失效撤下：discardContent 清 canvas（deleted/stale 不冒充在场内容），视图保留可复用', async () => {
@@ -486,5 +545,152 @@ describe('PDF 全文按页滚动（#338）', () => {
     // 至少保底当前可见页
     expect(probe.mountedPages).toBeGreaterThanOrEqual(1)
     expect(probe.mountedPages).toBeLessThan(30)
+  })
+
+  // ---- review-loops 波次二（D/E 审查修复）----
+
+  it('fetch 失败：resource 分态 + store 条目不残留（E-1）——同 URI 二次 show 重新 fetch（瞬时失败可重试，D-2①）', async () => {
+    mockViewport()
+    const plan: FakeFetchPlan = { pdfStatus: 404 }
+    const state = installFakePdfjs(makeFakeDoc(3), plan)
+    const view = new PdfHoverView(scrollEl)
+    cleanupFns.push(() => view.dispose())
+    const uri = 'https://files.test/a.pdf?v=1'
+    expect(await view.show(uri, 1, 448)).toBe(true)
+    expect(view.probe().phase).toBe('error')
+    expect(view.probe().errorReason).toBe('resource')
+    expect(__pdfDocumentStoreStatsForTest(), '失败条目不得残留（rejected pending 会让该 URI 本会话永久打不开）').toEqual([])
+    // 可重试：修复后第二次 acquire 未命中 store → 重新发起 fetch
+    plan.pdfStatus = 200
+    expect(await view.show(uri, 1, 448)).toBe(true)
+    const probe = view.probe()
+    expect(probe.phase).toBe('content')
+    expect(probe.totalPages).toBe(3)
+    expect(
+      state.fetchImpl.mock.calls.filter(([u]) => u === uri),
+      'PDF 源 fetch 恰两次（失败 + 重试，不命中旧 rejection）',
+    ).toHaveLength(2)
+  })
+
+  it('装载 Promise 未决时 dispose：迟到完成后引用释放、loadingTask 显式 destroy（D-2②）', async () => {
+    mockViewport()
+    let releaseDoc!: () => void
+    const gate = new Promise<void>((resolve) => {
+      releaseDoc = resolve
+    })
+    const state = installFakePdfjs(() => gate.then(() => makeFakeDoc(2)))
+    const view = new PdfHoverView(scrollEl)
+    const pending = view.show('https://files.test/a.pdf?v=1', 1, 448)
+    // 推进到 getDocument 已发起（task 就位——fetch 未挂起即刻完成）
+    await pumpUntil(() => state.loaded === 1)
+    view.dispose()
+    // dispose 时 show 仍挂起在 acquire（docRefUri 未就位）：销毁由迟到完成
+    // 后的取代守卫释放（不泄漏 worker——destroy 恰一次）
+    expect(state.destroyed).toBe(0)
+    releaseDoc()
+    expect(await pending).toBe(false)
+    expect(state.destroyed, '迟到 doc 由已 dispose 的 show 释放 → task.destroy').toBe(1)
+    expect(__pdfDocumentStoreStatsForTest()).toEqual([])
+  })
+
+  it('fetch 阶段 refs 归零后装载完成：孤儿文档自毁（abandoned 分支，D-2③）', async () => {
+    mockViewport()
+    const plan: FakeFetchPlan = {}
+    let releaseFetch!: () => void
+    plan.pdfGate = new Promise<void>((resolve) => {
+      releaseFetch = resolve
+    })
+    const state = installFakePdfjs(makeFakeDoc(2), plan)
+    const view = new PdfHoverView(scrollEl)
+    const pending = view.show('https://files.test/a.pdf?v=1', 1, 448)
+    await pumpUntil(() => __pdfDocumentStoreStatsForTest().length === 1)
+    view.dispose() // fetch 未决：task 未就位 → 条目标记 abandoned（不销毁）
+    expect(state.destroyed).toBe(0)
+    releaseFetch() // fetch 完成 → getDocument → doc resolve → abandoned 自毁
+    await pumpUntil(() => state.destroyed === 1)
+    expect(await pending).toBe(false)
+    expect(__pdfDocumentStoreStatsForTest()).toEqual([])
+  })
+
+  it('恢复语义（resume）：记忆页越新文档界 → 钳制到新末页而非报错（E-2 重挂/删除恢复链）', async () => {
+    mockViewport()
+    let loadCount = 0
+    installFakePdfjs(() => {
+      loadCount++
+      return Promise.resolve(loadCount === 1 ? makeFakeDoc(3) : makeFakeDoc(2))
+    })
+    const view = new PdfHoverView(scrollEl)
+    cleanupFns.push(() => view.dispose())
+    // resume：记忆页 10、3 页文档 → 定位第 3 页（不报错）
+    expect(await view.show('https://files.test/a.pdf?v=1', 10, 448, true)).toBe(true)
+    let probe = view.probe()
+    expect(probe.phase).toBe('content')
+    expect(probe.page).toBe(3)
+    expect(probe.totalPages).toBe(3)
+    expect(probe.requestedPage).toBe(10)
+    // 换更短文档（?v=2，2 页）：视图记忆（restorePage）与 resume 双路径均钳制
+    expect(await view.show('https://files.test/a.pdf?v=2', 10, 448, true)).toBe(true)
+    probe = view.probe()
+    expect(probe.phase).toBe('content')
+    expect(probe.page).toBe(2)
+    expect(probe.totalPages).toBe(2)
+    // 非 resume（双链初始页）保持初次非法就地报错（#337 契约）——新视图验证
+    const fresh = new PdfHoverView(scrollEl)
+    cleanupFns.push(() => fresh.dispose())
+    expect(await fresh.show('https://files.test/a.pdf?v=9', 9, 448)).toBe(true)
+    const errProbe = fresh.probe()
+    expect(errProbe.phase).toBe('error')
+    expect(errProbe.errorReason).toBe('page-range')
+  })
+
+  it('翻页失败路径：目标页渲染失败 → error 分态且乐观页码清零（失败态诚实显示，波次二·失败页码语义）', async () => {
+    mockViewport()
+    // 末页（第 6 页）getPage 抛错——不在初始窗口（首窗 1~2），翻到第 5 页
+    //（窗口 4~6）时才入窗失败
+    const doc: FakeDoc = {
+      numPages: 6,
+      getPage: (n: number) => {
+        if (n === 6) throw new Error('page missing')
+        return makeFakePage()
+      },
+    }
+    installFakePdfjs(doc)
+    const view = new PdfHoverView(scrollEl)
+    cleanupFns.push(() => view.dispose())
+    expect(await view.show('https://files.test/a.pdf?v=1', 1, 448)).toBe(true)
+    expect(view.probe().phase).toBe('content')
+    expect(view.probe().page).toBe(1)
+    // 乐观推进返回 true；第 6 页入窗渲染失败 → resource 分态，页码不残留
+    for (let i = 0; i < 4; i++) {
+      expect(view.turnPage(1, 448)).toBe(true)
+    }
+    expect(view.probe().page).toBe(5)
+    await pumpUntil(() => view.probe().phase === 'error')
+    const probe = view.probe()
+    expect(probe.errorReason).toBe('resource')
+    expect(probe.page, 'error 态 probe 不得残留乐观页码').toBe(0)
+  })
+
+  it('上方位移补偿：视口下方页的实测回填平移 scrollTop（视口内容稳定，E-4）', async () => {
+    mockViewport()
+    // 第 3 页为双倍高长页（首窗 1~2 不触及——装载期按默认纵横比估计，
+    // 入窗渲染时回填为实测双倍高）
+    installFakePdfjs(makeFakeDoc(6, { 3: makeFakePage(612, 1584) }))
+    const view = new PdfHoverView(scrollEl)
+    cleanupFns.push(() => view.dispose())
+    await view.show('https://files.test/a.pdf?v=1', 1, 448)
+    const estimated = view.probe().scrollHeight
+    const perPage = estimated / 6
+    // 滚到第 4 页顶 = 第 3 页旧底边界（窗口 2~4 → 第 3 页入窗渲染回填）
+    scrollTo(Math.round(3 * perPage))
+    await pumpUntil(() => view.probe().page === 4)
+    // 补偿：第 3 页高度 580 → ~1159，视口顶恰在旧底 → 平移至新底（第 4 页
+    // 顶）。不补偿则 scrollTop 落进拉长后的第 3 页内，观感跳回上一页
+    await pumpUntil(() => view.probe().scrollTop >= Math.round(2 * perPage) + Math.round(perPage) + 500)
+    const probe = view.probe()
+    expect(probe.page, '补偿后视口内容仍在第 4 页顶（不跳回第 3 页）').toBe(4)
+    expect(probe.scrollTop).toBeGreaterThanOrEqual(Math.round(2 * perPage) + Math.round(perPage) + 500)
+    // 全文高度按实测修正（第 3 页从估计 ~580 修正到 ~1159）
+    expect(probe.scrollHeight).toBeGreaterThan(estimated + 500)
   })
 })

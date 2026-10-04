@@ -118,7 +118,9 @@ export interface PdfRenderProbe {
   nonWhiteRatio: number
   /** 当前挂载画布的页数（窗口内；有界——不随总页数增长） */
   mountedPages: number
-  /** 窗口内 canvas 像素总费用（w×h×4 累计；≤ PDF_SCROLL_LIMITS.canvasBudgetBytes） */
+  /** 窗口内 canvas 像素总费用（w×h×4 累计；预算收窄对常规视口收敛为
+   *  ≤ canvasBudgetBytes——但 computeWindow 以保底可见页优先，极宽视口
+   *  无上位让位页时可超预算，E-6 口径：预算是收敛目标而非硬上限） */
   canvasBytes: number
   /** 全文内容高度（spacer 撑开的估计+实测总高；px） */
   scrollHeight: number
@@ -194,6 +196,9 @@ function ensurePdfjs(assets: PdfAssetsConfig): Promise<PdfjsGlobal> {
         if (typeof lib === 'object' && lib !== null) {
           resolve(lib as PdfjsGlobal)
         } else {
+          // 装载成功但全局缺失（产物异常）：与 onerror 同款重置单例——
+          // 失败可重试，下次调用重新装载（D-1 半边不可重试修复）
+          pdfjsLoad = null
           reject(new Error('pdfjs global missing after load'))
         }
       }
@@ -275,40 +280,52 @@ async function pdfAcquireDocument(uri: string, assets: PdfAssetsConfig, lib: Pdf
   const entry: PdfStoreEntry = { doc: null, pending: null, task: null, refs: 1, abandoned: false }
   documentStore.set(uri, entry)
   entry.pending = (async () => {
-    const res = await fetch(uri)
-    if (!res.ok) {
-      throw Object.assign(new Error(`pdf fetch failed: ${res.status}`), { name: 'PdfFetchError' })
-    }
-    // data 的底层 buffer 会被 transfer 给 worker（#334 实测）——先取快照
-    const data = new Uint8Array(await res.arrayBuffer())
-    const task = lib.getDocument({
-      data,
-      cMapUrl: withTrailingSlash(assets.cMapUrl),
-      cMapPacked: true,
-      standardFontDataUrl: withTrailingSlash(assets.fontUrl),
-      wasmUrl: withTrailingSlash(assets.wasmUrl),
-      iccUrl: withTrailingSlash(assets.iccUrl),
-    })
-    entry.task = task
     try {
-      const doc = await task.promise
-      entry.doc = doc
-      entry.pending = null
-      if (entry.abandoned) {
-        // fetch 阶段所有等待者已放弃（release 时 task 尚未就位）：自毁，
-        // 不让孤儿文档与 worker 存活（残余等待者的 seq 守卫丢弃迟到结果）
-        void task.destroy().catch(() => {})
-        throw Object.assign(new Error('pdf store entry abandoned'), { name: 'PdfAbandonedError' })
+      const res = await fetch(uri)
+      if (!res.ok) {
+        throw Object.assign(new Error(`pdf fetch failed: ${res.status}`), { name: 'PdfFetchError' })
       }
-      return doc
-    } catch (err) {
-      // 失败装载也持有 worker——必须显式 destroy（#334 泄漏纪律）
+      // data 的底层 buffer 会被 transfer 给 worker（#334 实测）——先取快照
+      const data = new Uint8Array(await res.arrayBuffer())
+      const task = lib.getDocument({
+        data,
+        cMapUrl: withTrailingSlash(assets.cMapUrl),
+        cMapPacked: true,
+        standardFontDataUrl: withTrailingSlash(assets.fontUrl),
+        wasmUrl: withTrailingSlash(assets.wasmUrl),
+        iccUrl: withTrailingSlash(assets.iccUrl),
+      })
+      entry.task = task
       try {
-        await task.destroy()
-      } catch {
-        // 已销毁（迟到 destroy 双保险）
+        const doc = await task.promise
+        entry.doc = doc
+        entry.pending = null
+        if (entry.abandoned) {
+          // fetch 阶段所有等待者已放弃（release 时 task 尚未就位）：自毁，
+          // 不让孤儿文档与 worker 存活（残余等待者的 seq 守卫丢弃迟到结果）
+          void task.destroy().catch(() => {})
+          throw Object.assign(new Error('pdf store entry abandoned'), { name: 'PdfAbandonedError' })
+        }
+        return doc
+      } catch (err) {
+        // 失败装载也持有 worker——必须显式 destroy（#334 泄漏纪律）
+        try {
+          await task.destroy()
+        } catch {
+          // 已销毁（迟到 destroy 双保险）
+        }
+        throw err
       }
-      documentStore.delete(uri)
+    } catch (err) {
+      // 装载失败（fetch/解析/getDocument/装载 reject）移除本条目——不残留
+      // rejected pending（否则该 URI 本会话一切 acquire 命中旧条目直接拿
+      // rejection，永久不可重开）；按条目身份删除，并发下新建的同 URI 条目
+      // 不误伤。fetch 阶段 task 未创建无需 destroy（task 阶段的 destroy 已
+      // 在上分支按持有处理）。删除后下次 acquire 未命中 → 重新发起装载
+      //（一次瞬时失败可重试，E-1 修复语义）
+      if (documentStore.get(uri) === entry) {
+        documentStore.delete(uri)
+      }
       throw err
     }
   })()
@@ -506,9 +523,13 @@ export class PdfHoverView {
    * 返回 false = 本次调用被后续重入/dispose 取代（迟到结果不落地）。
    * - 初次定位页越界 → page-range 分态（不静默跳第一页）；
    * - 换 URI 重载（文件替换 `?v=` 推进）→ 保留当前浏览页，越界合法钳制
-   *  （已打开视图的刷新口径——与初次非法页码就地报错不冲突）。
+   *  （已打开视图的刷新口径——与初次非法页码就地报错不冲突）；
+   * - resume = true（记忆恢复链——重挂/删除恢复等视图页码已清零的场景，
+   *  page 携带 entry 记忆页）→ 越界钳制到 [1, totalPages] 而非报错（E-2：
+   *  恢复语义与同视图刷新钳制同一口径；双链初始页不传 resume，保持 #337
+   *  初次非法就地报错契约）。
    */
-  async show(uri: string, page: number | undefined, renderWidth: number): Promise<boolean> {
+  async show(uri: string, page: number | undefined, renderWidth: number, resume = false): Promise<boolean> {
     if (this.disposed) {
       return false
     }
@@ -538,12 +559,15 @@ export class PdfHoverView {
     if (seq !== this.renderSeq || this.disposed) {
       return false
     }
-    // 同文档重入：只滚动定位（文档复用——快速切换页码不重复装载）
+    // 同文档重入：只滚动定位（文档复用——快速切换页码不重复装载）；resume
+    // 记忆路径越界钳制（恢复语义），双链初始页保持就地报错
     if (this.doc !== null && this.docUri === uri) {
-      if (target >= 1 && target <= this.totalPages) {
-        this.scrollToPage(target)
+      const effective = resume && this.totalPages > 0
+        ? Math.min(Math.max(1, target), this.totalPages)
+        : target
+      if (effective >= 1 && effective <= this.totalPages) {
+        this.scrollToPage(effective)
       } else {
-        this.page = 0
         this.setError('page-range')
       }
       return seq === this.renderSeq
@@ -574,13 +598,16 @@ export class PdfHoverView {
     // 高度模型：全量估计（真实页高在窗口渲染时回填）
     this.pageDims = new Array<{ w: number; h: number } | null>(this.totalPages).fill(null)
     this.recomputeHeights()
-    // 初始定位：restore（刷新钳制）优先，否则初次 target（越界就地报错）
+    // 初始定位：restore（刷新钳制）优先，否则初次 target（越界就地报错）；
+    // resume（记忆恢复链）越界钳制而非报错（E-2）
     let initial = target
     if (restorePage > 0) {
       initial = Math.min(restorePage, this.totalPages)
     }
+    if (resume) {
+      initial = Math.min(Math.max(1, initial), this.totalPages)
+    }
     if (initial < 1 || initial > this.totalPages) {
-      this.page = 0
       this.setError('page-range')
       return true
     }
@@ -828,9 +855,13 @@ export class PdfHoverView {
         this.recomputeHeights()
         const newHeight = this.pageHeights[pageNo - 1] ?? 0
         slot.el.style.height = `${newHeight}px`
-        // 上方位移补偿：该页顶偏移变化时，视口在其下方则平移 scrollTop
-        const delta = (this.offsets[pageNo - 1] ?? 0) - (oldOffsets[pageNo - 1] ?? 0)
-        if (delta !== 0 && this.scrollEl.scrollTop > (oldOffsets[pageNo - 1] ?? 0) + prevHeight) {
+        // 上方位移补偿：本页高度回填（估计→实测）变化且该页整体在视口上方
+        //（视口顶不低于其旧底——下方内容整体平移 newHeight-prevHeight）时
+        // 平移 scrollTop，保视口内容稳定（横版页等纵横比偏离估计的页回填
+        // 不使视口瞬间跳变）。E-4：旧实现比较本页自身顶偏移之差恒 0，为
+        // 死分支——真实判据是「本页高度变化 + 视口在该页下方」
+        const oldBottom = (oldOffsets[pageNo - 1] ?? 0) + prevHeight
+        if (newHeight !== prevHeight && this.scrollEl.scrollTop >= oldBottom) {
           this.scrollEl.scrollTop += newHeight - prevHeight
         }
         const { first, last } = this.computeWindow()
@@ -906,7 +937,8 @@ export class PdfHoverView {
   /**
    * 翻页操作（键位默认未绑定；只读——不修改任何文档）。语义 = 滚动定位
    * 到目标页顶部（与滚动互通）；页码乐观推进（连续翻页每次按键立即生效
-   * ——绘制异步追上）。翻出界为无操作。
+   * ——绘制异步追上）。翻出界为无操作。绘制失败路径经 setError 清零页码
+   *（失败态诚实显示——波次二·失败页码语义：error 态 probe 不残留乐观页码）。
    */
   turnPage(delta: 1 | -1, renderWidth: number): boolean {
     if (this.disposed || this.doc === null || this.phase !== 'content') {
@@ -946,7 +978,6 @@ export class PdfHoverView {
   private setRenderWidth(width: number): void {
     if (this.disposed || this.doc === null || width <= 0) return
     this.renderWidth = width
-    const keepPage = this.page > 0 ? this.page : 1
     const scrollTop = this.scrollEl.scrollTop
     const ratio = this.pageHeights.length > 0
       ? scrollTop / Math.max(1, this.totalHeight())
@@ -959,7 +990,6 @@ export class PdfHoverView {
     this.applySpacers(first, last)
     // 滚动位置按比例恢复（宽度变化后绝对偏移失真）
     this.scrollEl.scrollTop = Math.round(ratio * this.totalHeight())
-    void keepPage
     this.updateWindow()
   }
 
@@ -985,6 +1015,7 @@ export class PdfHoverView {
   private setError(reason: PdfRenderErrorReason): void {
     this.phase = 'error'
     this.errorReason = reason
+    this.page = 0 // 失败态诚实显示：清乐观/残留页码（画布已清，页码不冒充在场——波次二·失败页码语义）
     this.clearPages()
     this.pageInfo.textContent = ''
     this.flushContentWaiter()
