@@ -44,7 +44,7 @@ function resolveVsix() {
 const wsDir = mkdtempSync(path.join(tmpdir(), 'vsidian-inst-'))
 try {
   const vsix = resolveVsix()
-  writeFixtures(wsDir, { generatePerfSample, generateReadingSample, generateMermaidDenseSample })
+  await writeFixtures(wsDir, { generatePerfSample, generateReadingSample, generateMermaidDenseSample })
   // VSIDIAN_TEST_VSCODE_PATH：指向已解压宿主可执行文件（如 1.82.3 下界
   // 验证）时跳过默认宿主下载直接使用——#255 下界安装态回归通道；后续
   // bin/code CLI 推导与测试宿主启动均基于同一 vscodeExecutablePath，

@@ -65,7 +65,7 @@ try {
       const shard = i + 1
       const wsDir = mkdtempSync(path.join(tmpdir(), `vsidian-itest-s${shard}-`))
       wsDirs.push(wsDir)
-      writeFixtures(wsDir, { generatePerfSample, generateReadingSample, generateMermaidDenseSample })
+      await writeFixtures(wsDir, { generatePerfSample, generateReadingSample, generateMermaidDenseSample })
       // 以单 folder 的 .code-workspace 启动（multi-root 形态起步）：1.86.2 上
       // 目录（single-folder）启动时 updateWorkspaceFolders 增根触发 window
       // reload（ext host 退出、suite 中断，#198 用例确定性复现；1.82.3 下界

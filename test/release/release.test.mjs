@@ -33,6 +33,8 @@ const QUICK_ICON_KEYS = [
   'chevronRight',
   'typewriter', 'wordSegment',
   'pastePlain',
+  // #337 顺带补登记（main 既有缺口：引用视图设置组跳转目标提示两枚）
+  'pointerLink', 'dbLink',
 ]
 function quickActionIconEntries() {
   return ['light', 'dark'].flatMap((theme) => QUICK_ICON_KEYS.map((key) => ({
@@ -60,6 +62,10 @@ function makeEntries() {
     // #60 Mermaid 独立产物（minify 后实测 2,727,077 B 的代表值；低于 3MB
     // 单文件警告线与 4MB 上限）
     { size: 2727077, name: 'extension/out/webview/mermaid.js' },
+    // #337 PDF 双产物（#334 探针 minified 实测代表值：主库约 480KB、
+    // worker 约 1.23MB；均低于 3MB 单文件警告线）
+    { size: 491520, name: 'extension/out/webview/pdfMain.js' },
+    { size: 1287168, name: 'extension/out/webview/pdfWorker.js' },
     { size: 3898, name: 'extension/media/css-contract-probe.css' },
     // #145 契约 JSON（机器可读清单，实测代表值）。同目录的独立 HTML 自
     // 2026-09 起不随包（无运行时加载方，仅仓库生成供契约校验）。
@@ -241,6 +247,40 @@ test('VSIX 检查：完整合法集合通过且零警告（#60 后单文件警�
   // 单文件 < 3MB——合法基线不再有预期警告（#59 期 main.js 超 700KB
   // 警告线的口径作废）
   assert.deepEqual(result.warnings, [])
+})
+
+test('VSIX 检查：#337 pdfjs 资产目录按前缀放行（cmaps/字体/wasm/iccs 内建文件名不逐个登记）', () => {
+  const withAssets = [
+    ...makeEntries(),
+    { size: 1300, name: 'extension/out/webview/pdfjs/cmaps/UniGB-UCS2-H.bcmap' },
+    { size: 300148, name: 'extension/out/webview/pdfjs/standard_fonts/LiberationSans-Regular.ttf' },
+    { size: 96000, name: 'extension/out/webview/pdfjs/wasm/openjpeg.wasm' },
+    { size: 20480, name: 'extension/out/webview/pdfjs/iccs/CGATS001Compat-v2-micro.icc' },
+  ]
+  const result = inspectVsixEntries(withAssets, { iconPath: 'media/vsidian-icon-256.png' })
+  assert.equal(result.ok, true, JSON.stringify(result.errors))
+})
+
+test('VSIX 检查：#337 .ttf 禁止模式例外仅限 pdfjs 资产目录（KaTeX 侧 ttf 回潮照拦）', () => {
+  const katexTtf = [
+    ...makeEntries(),
+    { size: 1000, name: 'extension/out/webview/assets/KaTeX_Main-Regular.ttf' },
+  ]
+  const result = inspectVsixEntries(katexTtf, { iconPath: 'media/vsidian-icon-256.png' })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((e) => e.includes('KaTeX_Main-Regular.ttf')))
+})
+
+test('VSIX 检查：#337 pdfjs 目录外的未登记 out/ 产物仍拒绝（前缀白名单不外溢）', () => {
+  const stray = [
+    ...makeEntries(),
+    { size: 500, name: 'extension/out/webview/pdfjs/stray.js' },
+    { size: 500, name: 'extension/out/webview/pdfMain.js.map' },
+  ]
+  const result = inspectVsixEntries(stray, { iconPath: 'media/vsidian-icon-256.png' })
+  assert.equal(result.ok, false)
+  assert.ok(result.errors.some((e) => e.includes('stray.js')))
+  assert.ok(result.errors.some((e) => e.includes('pdfMain.js.map')))
 })
 
 test('VSIX 检查：缺少任一 KaTeX 字体报错（公式回落系统字体的防线）', () => {

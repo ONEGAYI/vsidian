@@ -71,7 +71,9 @@ const names = ['tableCaret', 'blockquoteTablePaint', 'quoteBarPaint', 'taskClick
   'outlineSearch', 'outlineMenu', 'outlineDrag', 'outlineDragBoundary', 'settingsPage', 'settingsPageRestore',
   'skeletonProbe', 'tooltipCard',
 
-  'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract', 'commentToggle', 'viewToggle', 'contextMenu', 'anchorFlash', 'readingWidthProbe', 'readingBottomReach', 'codeCardChrome', 'liveImageLayout', 'imageRefresh', 'imagePopup', 'hoverPreview', 'hoverRecursive', 'readingEmbed', 'recursiveEmbed', 'liveEmbed', 'hoverEntry', 'hoverRefresh', 'targetTip', 'multicursor', 'multicursorWrite', 'findPanel', 'occurrence', 'hitReveal', 'findBarAnchor', 'mixedEmbed', 'liveEmbedMixed', 'tableEmbed', 'refCombination', 'embedLive', 'embedLiveActions', 'embedLiveMixed', 'hoverLive', 'tableCellLive', 'embedLiveResources', 'recursiveLive', 'embedLiveCloseout']
+  'languageSwitch', 'quickActions', 'cssSnippets', 'cssSnippetImports', 'cssHttpsImports', 'mermaidPaint', 'graphicPopup', 'keybindings', 'keybindingEditor', 'obsidianAlias', 'chromeContract', 'commentToggle', 'viewToggle', 'contextMenu', 'anchorFlash', 'readingWidthProbe', 'readingBottomReach', 'codeCardChrome', 'liveImageLayout', 'imageRefresh', 'imagePopup', 'hoverPreview', 'hoverRecursive', 'readingEmbed', 'recursiveEmbed', 'liveEmbed', 'hoverEntry', 'hoverRefresh', 'targetTip', 'multicursor', 'multicursorWrite', 'findPanel', 'occurrence', 'hitReveal', 'findBarAnchor', 'mixedEmbed', 'liveEmbedMixed', 'tableEmbed', 'refCombination', 'embedLive', 'embedLiveActions', 'embedLiveMixed', 'hoverLive', 'tableCellLive', 'embedLiveResources', 'recursiveLive', 'embedLiveCloseout',
+  // #337（P3-05）PDF 悬停首条闭环：紧随 hoverLive（同悬停族——真实 pdfjs 装配与 canvas 绘制层断言）
+  'hoverPdf']
 const { workers, reuseBuilds, selected } = parseBrowserRunOptions(process.argv.slice(2), names)
 const parent = path.join(root, 'out/test/browser-runs')
 await mkdir(parent, { recursive: true })
