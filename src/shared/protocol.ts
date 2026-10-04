@@ -622,7 +622,6 @@ export type HostToWebview =
       instanceId: string
       ok: true
       /** #333（P3-01）内容类型分派标记：宿主类型化读取入口（readRefContent
-      /** #333（P3-01）内容类型分派标记：宿主类型化读取入口（readRefContent
        *  Target）成功时显式携带；缺省 = markdown（旧合法 Markdown 消息兼容
        *  识别）。#336（P3-04）起 'image' 登记：图片载荷（imageSrc 在场，
        *  Markdown 专属字段为退化形态——空文本 / 零区间 / plain 选择器）；
