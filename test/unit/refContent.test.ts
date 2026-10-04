@@ -7,7 +7,9 @@ import {
   REF_CONTENT_KINDS,
   classifyLocalRefContentKind,
   isRefContentKind,
+  refEmbedTargetIsImage,
   type RefContentKind,
+  type RefImageContent,
   type RefMarkdownContent,
   type RefNavSelector,
 } from '../../src/shared/refContent'
@@ -41,7 +43,7 @@ describe('本地目标类型分类（classifyLocalRefContentKind）', () => {
   })
 
   it('图片扩展名 → image（与图片管线 IMAGE_WATCH_GLOB_SEGMENTS 同源）', () => {
-    for (const ext of ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif']) {
+    for (const ext of ['png', 'apng', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif']) {
       expect(classifyLocalRefContentKind(`D:\\notes\\图.${ext}`), `.${ext} 应归 image`).toBe('image')
     }
   })
@@ -88,5 +90,50 @@ describe('Markdown 载荷与导航选择器结构（类型留位）', () => {
   it('kind 联合覆盖五类（编译期完备性——pdf/image/text/web 由后续票登记载荷形态）', () => {
     const kinds: RefContentKind[] = ['markdown', 'pdf', 'image', 'text', 'web']
     expect(kinds).toHaveLength(REF_CONTENT_KINDS.length)
+  })
+
+  it('RefImageContent：kind 标记 + 来源相对图源 + 文件资源版本（#336 登记形态）', () => {
+    const content: RefImageContent = { kind: 'image', src: 'assets/图.png', version: 5 }
+    expect(content.kind).toBe('image')
+    expect(content.src).toBe('assets/图.png')
+    expect(content.version).toBe(5)
+  })
+})
+
+// #336（P3-04）嵌入目标图片判定：webview 渲染路径的形态学分流判据——
+// `![[图.png]]` 与 `![](图.png)` 同源呈现的前提是两侧（Reading inline 规
+// 则产 img、Live 嵌入装饰分流图片 widget、占位配对扫描跳过）共用同一判
+// 定。判据与宿主 classifyLocalRefContentKind 的扩展名口径对齐：带扩展名
+// 目标的解析不补 .md（implicitMd 只对无扩展名生效），书写扩展名 = 解析后
+// 扩展名，webview 预判与宿主分类结构性一致（宿主回包 contentKind 仍是
+// 权威——预判只选渲染路径）。
+describe('#336 嵌入目标图片判定 refEmbedTargetIsImage', () => {
+  it('图片扩展名目标为图片（大小写不敏感；含目录前缀与别名形态）', () => {
+    expect(refEmbedTargetIsImage('图.png')).toBe(true)
+    expect(refEmbedTargetIsImage('assets/子 目录/图.JPEG')).toBe(true)
+    expect(refEmbedTargetIsImage('a/b.gif')).toBe(true)
+    expect(refEmbedTargetIsImage('x.webp')).toBe(true)
+    expect(refEmbedTargetIsImage('x.svg')).toBe(true)
+    expect(refEmbedTargetIsImage('x.bmp')).toBe(true)
+    expect(refEmbedTargetIsImage('x.avif')).toBe(true)
+    expect(refEmbedTargetIsImage('x.apng')).toBe(true)
+    expect(refEmbedTargetIsImage('图.png|别名文字')).toBe(true)
+  })
+
+  it('锚点不改变图片判定（图片目标无锚点定位语义——与宿主按 fsPath 分派一致）', () => {
+    expect(refEmbedTargetIsImage('图.png#任意锚')).toBe(true)
+    expect(refEmbedTargetIsImage('图.png#^blk-id|别名')).toBe(true)
+  })
+
+  it('非图片目标：markdown/无扩展名/未受支持扩展名/本文件锚点/非法形态', () => {
+    expect(refEmbedTargetIsImage('笔记')).toBe(false)
+    expect(refEmbedTargetIsImage('笔记.md')).toBe(false)
+    expect(refEmbedTargetIsImage('资料.pdf')).toBe(false)
+    expect(refEmbedTargetIsImage('脚本.ts')).toBe(false)
+    expect(refEmbedTargetIsImage('照片.tif')).toBe(false)
+    expect(refEmbedTargetIsImage('照片.heic')).toBe(false)
+    expect(refEmbedTargetIsImage('#本文件锚')).toBe(false)
+    expect(refEmbedTargetIsImage('a#b#c')).toBe(false)
+    expect(refEmbedTargetIsImage('')).toBe(false)
   })
 })

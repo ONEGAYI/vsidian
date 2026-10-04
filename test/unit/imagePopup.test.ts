@@ -593,3 +593,24 @@ describe('新增协议消息结构校验', () => {
     expect(isHostToWebview({ kind: 'image.test.popup', view: 'live', index: 0, action: 'export-png' })).toBe(false)
   })
 })
+
+// #336（P3-04）图片嵌入的弹窗刷新定位：图源身份可来自双链嵌入
+// （![[图.png]] / ![[图.png|别名]]）与双链链接（[[图.png]]）——弹窗刷新
+// 在文档中定位不到身份时不重取，嵌入形态须同样可定位。边界语义与标准
+// 形态一致：更长目标的前缀不算命中。
+describe('#336 locateImageOccurrence：双链/嵌入形态', () => {
+  it('嵌入形态命中：![[图.png]] 与带别名 ![[图.png|别名]]', () => {
+    expect(locateImageOccurrence('前文 ![[assets/图.png]] 后文', 'assets/图.png')).toBe(true)
+    expect(locateImageOccurrence('![[图.png|一段说明]]', '图.png')).toBe(true)
+  })
+
+  it('双链链接形态命中：[[图.png]]（悬停浮层图片打开弹窗的刷新场景）', () => {
+    expect(locateImageOccurrence('见 [[assets/图.png]] 一处。', 'assets/图.png')).toBe(true)
+  })
+
+  it('前缀形态不误命中（![[图.png.bak]] 不算图.png）与纯提及不命中', () => {
+    expect(locateImageOccurrence('![[图.png.bak]]', '图.png')).toBe(false)
+    expect(locateImageOccurrence('文字 图.png 结尾', '图.png')).toBe(false)
+    expect(locateImageOccurrence('![[别的图.png]]', '图.png')).toBe(false)
+  })
+})

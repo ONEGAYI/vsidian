@@ -47,7 +47,7 @@ import * as path from 'node:path'
 import { NewlineCoordinator } from '../shared/newline'
 import { parseWikilinkInner } from '../shared/wikilink'
 import { isVaultPathInsideRoot, planVaultLinkPath, type VaultLinkFileResolution, type VaultLinkResolveContext } from '../shared/vaultLink'
-import { classifyLocalRefContentKind, type RefMarkdownContent, type RefWebContent } from '../shared/refContent'
+import { classifyLocalRefContentKind, type RefImageContent, type RefMarkdownContent, type RefWebContent } from '../shared/refContent'
 import { checkWebLinkUrl, isHttpLinkHref } from '../shared/webLink'
 import { classifyLinkTarget, planPathTextOf, splitHrefFragment } from './linkTarget'
 import { findBlockRange, findHeadingSectionRange } from './wikilinkTarget'
@@ -79,18 +79,22 @@ export type HoverReadOutcome =
 
 /** #333（P3-01）类型化读取结果：成功形态为「目标身份（fsPath/relPath，
  *  类型无关）+ 按 kind 分派的内容载荷」——markdown 通道为 RefMarkdown
- * Content（TextDocument 权威版本 + LF 全文 + 初始定位区间 + Markdown
- * 导航选择器）；web 通道（#342）为 RefWebContent（受限抓取的元信息；
- * fsPath/relPath 为空串占位——外链无本地文件身份）；pdf/image/text 的
- * 载荷形态由后续票（P3-04/P3-05/P3-08）扩展 content 联合登记，登记前
- * 这些类型在分派处回落 non-markdown 失败分态。失败形态与旧扁平入口同源 */
+ *  Content（TextDocument 权威版本 + LF 全文 + 初始定位区间 + Markdown
+ *  导航选择器）；#336（P3-04）登记 image 通道（RefImageContent：来源相
+ *  对图源 + 文件资源版本——不读正文，图片字节与版本戳走既有图片通道）；
+ *  web 通道（#342）为 RefWebContent（受限抓取的元信息；fsPath/relPath
+ *  为空串占位——外链无本地文件身份）；pdf/text 的载荷形态由后续票
+ *  （P3-05/P3-08）扩展 content 联合登记，登记前这些类型在分派处回落
+ *  non-markdown 失败分态。失败形态与旧扁平入口同源 */
 export type RefReadOutcome =
-  | { ok: true; fsPath: string; relPath: string; content: RefMarkdownContent }
+  | { ok: true; fsPath: string; relPath: string; content: RefMarkdownContent | RefImageContent }
   | { ok: true; fsPath: ''; relPath: ''; content: RefWebContent }
   | { ok: false; reason: HoverPreviewFailReason; anchor?: string }
 
-/** 类型化结果 → 旧扁平 Markdown 形态（兼容适配展开）。非 markdown 载荷
- *  在当前分派表内不可达（结构性保证）；防御性收敛为 non-markdown 分态 */
+/** 类型化结果 → 旧扁平 Markdown 形态（兼容适配展开）。image 载荷（#336）
+ *  收敛为 non-markdown 分态——旧扁平消费者（Markdown 语义）行为保持；图
+ *  片的 webview 呈现走类型化通道的独立装载路径。其余非 markdown 载荷在
+ *  当前分派表内不可达（结构性保证）；防御性同样收敛 non-markdown */
 export function flattenHoverReadOutcome(typed: RefReadOutcome): HoverReadOutcome {
   if (!typed.ok) {
     return typed
@@ -119,15 +123,21 @@ export interface HoverDocAccessContext {
   rootFsPath: string
 }
 
-/** 读取端口（vscode 层注入；无写端口——只读访问不依赖写入）。#342 起
- *  可选注入外链元信息抓取端口（宿主受限抓取服务的装配形态；缺席 =
- *  外链维持 unsupported 分态） */
+/** 读取端口（vscode 层注入；无写端口——只读访问不依赖写入）。可选端口：
+ *  #336 起图片文件状态探测（statFile）；#342 起外链元信息抓取
+ *  （fetchWebMeta，宿主受限抓取服务的装配形态；缺席 = 外链维持
+ *  unsupported 分态） */
 export interface HoverDocAccessPorts {
   /** 双链/链接文件目标存在性解析（vscode 层 = resolveVaultLinkFile + statFileRealPath） */
   resolveVaultFile(rawPath: string): Promise<VaultLinkFileResolution>
   /** 打开并读取目标文档（vscode 层 = openTextDocument 只装载不显示 + getText；
    *  失败返回 null） */
   openTextDocument(fsPath: string): Promise<{ version: number; text: string } | null>
+  /** #336（P3-04）图片目标的文件状态探测（vscode 层 = workspace.fs.stat）：
+   *  文件资源版本（mtimeMs）的来源——图片不是 TextDocument 权威语义，
+   *  版本取文件状态；端口缺省（node 单测替身）时 version 为 0（仅回包
+   *  排序基准，图片新鲜度权威在失效通道） */
+  statFile?(fsPath: string): Promise<{ mtimeMs: number } | null>
   /** #342（P3-10）外链元信息受限抓取（宿主 WebLinkMetaService 装配；测试
    *  注入替身）。signal 为消费者取消通道（webview 关浮层 → 宿主 abort） */
   fetchWebMeta?(url: string, signal?: AbortSignal): Promise<WebLinkMetaOutcome>
@@ -360,10 +370,14 @@ async function resolveHoverTargetForm(
  * fsPath 后按类型分派——
  * - markdown：装载既有全文载荷（RefMarkdownContent：TextDocument 权威
  *   版本 + LF 全文 + 初始定位区间 + Markdown 导航选择器）；
- * - 其余类型（pdf/image/text/web）：维持 non-markdown 分态（附件/外链
- *   的载荷与导航选择器由 P3-04/P3-05/P3-08/P3-10 在此分派表登记——
- *   Markdown 的 TextDocument.version 和 LF 范围不能冒充这些类型的版本
- *   或页码）。
+ * - image（#336 / P3-04）：装载图片载荷（RefImageContent：来源文档相对
+ *   图源 + stat 文件资源版本）——不读正文（openTextDocument 零调用），
+ *   图片字节与版本戳不经本通道（webview 经既有 image.request 解析装载，
+ *   「与普通 Markdown 图片同源呈现」）；锚点不参与（图片无锚点语义，
+ *   不构成 anchor-missing）；
+ * - 其余类型（pdf/text/web）：维持 non-markdown 分态（附件/外链的载荷
+ *   与导航选择器由 P3-05/P3-08/P3-10 在此分派表登记——Markdown 的
+ *   TextDocument.version 和 LF 范围不能冒充这些类型的版本或页码）。
  *
  * 类型由宿主按解析出的 fsPath 分类（classifyLocalRefContentKind），不
  * 接收前端声明的类型；web 目标在解析层即 unsupported（#342 接入时扩展）。
@@ -392,10 +406,35 @@ export async function readRefContentTarget(
     return { ok: true, fsPath: '', relPath: '', content: { kind: 'web', ...outcome.meta } }
   }
   const kind = classifyLocalRefContentKind(resolution.fsPath)
+  if (kind === 'image') {
+    // #336（P3-04）image 分派登记：图源 = 解析出的规范 fsPath 相对**来源
+    // 文档目录**（ctx.sourceFsPath 的父目录——链接所在文档；webview 以面
+    // 板文档身份发非来源化 image.request，同一基准解析回同一目标）。stat
+    // 端口给出文件资源版本（mtimeMs）；探测失败不构成读取失败（版本退 0
+    // ——排序基准缺失优于误报错误；图片存在性已由 resolveVaultFile 证实）
+    const relOf = ctx.resolve.isWindowsHost ? path.win32.relative : path.posix.relative
+    let version = 0
+    if (ports.statFile !== undefined) {
+      const stat = await ports.statFile(resolution.fsPath).catch(() => null)
+      if (stat !== null) {
+        version = stat.mtimeMs
+      }
+    }
+    return {
+      ok: true,
+      fsPath: resolution.fsPath,
+      relPath: relOf(ctx.rootFsPath, resolution.fsPath).replaceAll('\\', '/'),
+      content: {
+        kind: 'image',
+        src: relOf(path.dirname(ctx.sourceFsPath), resolution.fsPath).replaceAll('\\', '/'),
+        version,
+      },
+    }
+  }
   if (kind !== 'markdown') {
-    // 类型分派表（#333 落位）：markdown 通道之外的类型本票不装载——
-    // 既有 non-markdown 分态保持（图片 #336 / PDF #337 / 文本 #340 /
-    // 外链 #342 接入时按 kind 登记各自载荷与导航选择器）
+    // 类型分派表（#333 落位）：markdown/image 通道之外的类型不装载——
+    // 既有 non-markdown 分态保持（PDF #337 / 文本 #340 / 外链 #342 接入
+    // 时按 kind 登记各自载荷与导航选择器）
     return { ok: false, reason: 'non-markdown' }
   }
   const content = await readMarkdownContent(resolution.fsPath, resolution.spec, ports, opts)

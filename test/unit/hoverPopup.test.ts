@@ -1415,3 +1415,118 @@ describe('#333 类型化装载（contentKind 分派）', () => {
     closeHoverPopup()
   })
 })
+
+// #336（P3-04）图片目标浮层：悬停图片双链/链接 → hover.result 的 image
+// 载荷在浮层内渲染图片槽位（经 ImageResourceManager 装载——与普通图片同
+// 一加载/重试/弹窗行为源）；图源请求按面板文档解析（非来源化 image.request
+// ——与主视图图片同通道）；目标订阅与失效刷新沿用既有规则；纯 Reading 形
+// 态（不接根会话——图片无内部模式切换语义）。
+describe('#336 图片目标浮层：image 载荷渲染', () => {
+  const IMAGE_RESULT_OK = {
+    contentKind: 'image' as const,
+    target: { fsPath: 'D:\notes\图.png', relPath: '图.png' },
+    version: 1760000000123,
+    imageSrc: 'assets/图.png',
+    text: '',
+    range: { start: 0, end: 0 },
+    scope: { kind: 'plain' as const },
+  }
+
+  function imageHarness(): Harness {
+    const h = makeHarness()
+    h.anchor.setAttribute('href', 'assets/图.png')
+    return h
+  }
+
+  function imageRequestOf(h: Harness) {
+    const req = h.sent.find((m) => m.kind === 'image.request')
+    if (!req || req.kind !== 'image.request') {
+      throw new Error('image.request 未发出')
+    }
+    return req
+  }
+
+  it('image 载荷渲染图片槽位：img 携带图源身份，请求按面板文档解析（无 sourceDocUri）', () => {
+    vi.useFakeTimers()
+    const h = imageHarness()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    const req = requestOf(h)
+    notifyHoverResult({
+      kind: 'hover.result', reqId: req.reqId, instanceId: req.instanceId, ok: true, ...IMAGE_RESULT_OK,
+    })
+    expect(hoverPopupProbe().state).toBe('content')
+    const img = popupEl()?.querySelector('img')
+    expect(img).not.toBeNull()
+    expect(img!.dataset['vsidianImgSrc']).toBe('assets/图.png')
+    const imgReq = imageRequestOf(h)
+    expect(imgReq.src).toBe('assets/图.png')
+    expect('sourceDocUri' in imgReq, '图片目标浮层的图源按面板文档解析（非来源化）').toBe(false)
+    expect(h.sent.some((m) => m.kind === 'hover.watch' && m.fsPath === 'D:\notes\图.png'), '登记目标订阅').toBe(true)
+    closeHoverPopup()
+  })
+
+  it('image.result 路由驱动槽位装载（frame chrome 在场——查看大图入口）', () => {
+    vi.useFakeTimers()
+    const h = imageHarness()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    const req = requestOf(h)
+    notifyHoverResult({
+      kind: 'hover.result', reqId: req.reqId, instanceId: req.instanceId, ok: true, ...IMAGE_RESULT_OK,
+    })
+    const imgReq = imageRequestOf(h)
+    notifyHoverImageResult({ reqId: imgReq.reqId, ok: true, src: 'data:image/png;base64,xxx' })
+    const img = popupEl()?.querySelector('img')
+    expect(img?.getAttribute('src')).toBe('data:image/png;base64,xxx')
+    // jsdom 不触发 img load 事件——loaded 态由浏览器套件断言（绘制层）
+    expect(img?.dataset['vsidianImgState']).toBe('loading')
+    expect(popupEl()?.querySelector('.vsidian-graphic-frame'), '图片 frame chrome 在场（查看大图入口）').not.toBeNull()
+    expect(hoverPopupProbe().imageSrcs).toContain('data:image/png;base64,xxx')
+    closeHoverPopup()
+  })
+
+  it('图片目标不接根会话：模式/保存/关闭按钮隐藏（纯 Reading 形态——无内部模式切换）', () => {
+    vi.useFakeTimers()
+    const h = imageHarness()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    const el = popupEl()
+    const modeBtn = el?.querySelector<HTMLElement>('.vsidian-hover-popup-mode')
+    expect(modeBtn?.style.display, '图片目标无内部 Live 语义').toBe('none')
+    const saveBtn = el?.querySelector<HTMLElement>('.vsidian-hover-popup-save')
+    expect(saveBtn?.style.display).toBe('none')
+    closeHoverPopup()
+  })
+
+  it('目标失效 changed → 静默重发 hover.request（刷新链路沿用既有规则）', () => {
+    vi.useFakeTimers()
+    const h = imageHarness()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    const req = requestOf(h)
+    notifyHoverResult({
+      kind: 'hover.result', reqId: req.reqId, instanceId: req.instanceId, ok: true, ...IMAGE_RESULT_OK,
+    })
+    const requestsBefore = h.sent.filter((m) => m.kind === 'hover.request').length
+    notifyHoverInvalidated({ fsPath: 'D:\notes\图.png', status: 'changed', generation: 1 })
+    const requests = h.sent.filter((m) => m.kind === 'hover.request')
+    expect(requests.length).toBe(requestsBefore + 1)
+    expect(hoverPopupProbe().state, '刷新期间保留旧内容（不闪 loading）').toBe('content')
+    closeHoverPopup()
+  })
+
+  it('关闭后撤下图片（槽位释放零残留）', () => {
+    vi.useFakeTimers()
+    const h = imageHarness()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    const req = requestOf(h)
+    notifyHoverResult({
+      kind: 'hover.result', reqId: req.reqId, instanceId: req.instanceId, ok: true, ...IMAGE_RESULT_OK,
+    })
+    closeHoverPopup()
+    expect(popupEl()).toBeNull()
+    expect(document.querySelectorAll('img').length).toBe(0)
+  })
+})

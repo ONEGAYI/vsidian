@@ -52,7 +52,20 @@
 // setter 注入（imagePopup 的 setImagePopupContext 形态；syncController
 // mount 注入、dispose 清空）。
 import type { ImageResultPayload } from './imageResource'
-import { RefContentInstance, refLoadedContentOfResult, type RefContentMount, type RefLoadedContent } from './refContentInstance'
+import { IMAGE_CLASS_NAMES, ImageResourceManager, isDirectImageSrc } from './imageResource'
+import { GRAPHIC_CHROME_CLASS_NAMES, buildGraphicChrome } from './graphicBlockChrome'
+import { openImagePopup } from './imagePopup'
+import { isImageFileExtension } from '../shared/imageRefresh'
+import { refEmbedTargetIsImage } from '../shared/refContent'
+import {
+  RefContentInstance,
+  isRefLoadedMarkdown,
+  refLoadedContentOfResult,
+  type RefContentMount,
+  type RefLoadedAny,
+  type RefLoadedContent,
+  type RefLoadedImageContent,
+} from './refContentInstance'
 import { createReadingContainer, READING_CLASS_NAMES } from './readingView'
 import type { ReadingViewStats } from './readingVirtualView'
 import { claimPopup, releasePopup } from './popupMutex'
@@ -212,7 +225,8 @@ export interface HoverPreviewContext {
   /** #245 复用正文卡片管理器升级浮层内子引用，不创建第二个浮窗。 */
   mountEmbedChild?(parentInstanceId: string, block: HTMLElement, target: RefLoadedContent): void
   unmountEmbedChild?(block: HTMLElement): void
-  admitRootContent?(instanceId: string, target: RefLoadedContent, bytes: number): boolean
+  /** #336：target 联合收宽——图片载荷同样经面板预算准入（小常数计量） */
+  admitRootContent?(instanceId: string, target: RefLoadedAny, bytes: number): boolean
   clearRootContent?(instanceId: string): void
   releaseRootContent?(instanceId: string): void
   /** P2-06（#283）浮窗根引用的内部 Live 宿主（EmbedCardManager 挂载）：
@@ -246,6 +260,12 @@ interface HoverPopupState {
    *  跨开合记忆滚动/fm） */
   instance: RefContentInstance | null
   content: RefContentMount
+  /** #336 图片目标装载（image 载荷渲染的槽位管理器；markdown 目标为 null
+   *  ——内容图片归 RefContentMount 自有管理器）。关闭/撤下即 dispose */
+  image: ImageResourceManager | null
+  /** #336 图片目标渲染宿主（挂 scrollEl 层——虚拟视图重建 contentEl 不
+   *  触碰该层；撤下随 image 一并移除） */
+  imageFrame: HTMLElement | null
   /** loading → content / error（结果只接受一次：陈旧回包丢弃） */
   display: 'loading' | 'content' | 'error'
   note: string
@@ -388,7 +408,8 @@ export function hoverPopupProbe(): {
   }
   const fmSection = popup.contentEl.querySelector(`.${REF_FM_CLASS_NAMES.section}`)
   const imageSrcs: string[] = []
-  for (const img of Array.from(popup.contentEl.querySelectorAll('img'))) {
+  // #336 图片目标的渲染帧在 scrollEl 层（虚拟视图拥有 contentEl）——采集范围扩到浮层容器（已应用 src 口径不变）
+  for (const img of Array.from(popup.container.querySelectorAll('img'))) {
     const src = img.getAttribute('src')
     if (src !== null && src !== '') {
       imageSrcs.push(src)
@@ -615,6 +636,25 @@ interface HoverPopupOpenOptions {
   prevFocus?: HTMLElement | null
 }
 
+/**
+ * #336（P3-04）悬停目标的图片预判（webview 渲染路径分流）：三形态按
+ * 扩展名判图片（与宿主 classifyLocalRefContentKind 同口径——带扩展名目
+ * 标书写扩展名即解析后扩展名，预判与宿主回包 contentKind 结构性一致；
+ * 宿主仍是权威，预判只决定浮层先走哪条渲染形态——图片目标不接 P2-06
+ * 根会话（无内部模式切换语义），以纯 Reading 形态开浮层）。
+ */
+function hoverSpecTargetsImage(spec: HoverPopupTargetSpec): boolean {
+  if (spec.directFsPath !== undefined) {
+    // 空串 fsPath = 断链条目（not-found 分态照常走文档通道）
+    return spec.directFsPath !== '' && isImageFileExtension(spec.directFsPath)
+  }
+  if (spec.linkHref !== undefined) {
+    const pathText = spec.linkHref.split('#')[0]!.split('?')[0]!.trim()
+    return pathText !== '' && isImageFileExtension(pathText)
+  }
+  return refEmbedTargetIsImage(spec.target)
+}
+
 /** 打开浮层（三入口共用核心）：目标规格由调用方给出——Reading 锚点路径
  *  经 hoverPopupSpecOfAnchor 提取，Live 装饰/面板条目由 syncController 组装（见
  *  HoverPopupTargetSpec）。非法目标（null spec）不开 */
@@ -713,9 +753,12 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
   }
   // P2-06 浮窗根引用宿主接入：entry 按引用位置语义键驻留管理器状态库
   // （跨开合记忆模式/选区/滚动/fm）；Reading 挂载经 entry.content（同一
-  // RefContentInstance）。上下文未提供（纯 Reading 形态）时回落自建实例
+  // RefContentInstance）。上下文未提供（纯 Reading 形态）时回落自建实例。
+  // #336（P3-04）图片目标不接根会话：图片无内部模式切换/dirty 语义，浮层
+  // 以纯 Reading 形态开（chrome 隐藏）；载荷到达经 image 通道渲染
+  const targetsImage = hoverSpecTargetsImage(spec)
   const rootKey = hoverRootKey(spec)
-  const mounted = ctx.mountPopupRoot?.({
+  const mounted = targetsImage ? null : ctx.mountPopupRoot?.({
     key: rootKey,
     inner: spec.target,
     sourceStart: spec.sourceStart,
@@ -776,6 +819,8 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
     liveResistPrev: false,
     instance,
     content,
+    image: null,
+    imageFrame: null,
     display: 'loading',
     note: '',
     webMeta: null,
@@ -1139,6 +1184,10 @@ export function closeHoverPopup(): void {
   } else {
     state.instance?.dispose()
   }
+  state.image?.dispose() // #336 图片目标管理器（槽位/条目整体释放）
+  state.image = null
+  state.imageFrame?.remove()
+  state.imageFrame = null
   if (state.watchedFsPath !== null) {
     sendWatchMessage(state.watchedFsPath, state.watchInstanceId, 'hover.unwatch')
     state.watchedFsPath = null
@@ -1178,7 +1227,10 @@ export function closeHoverPopupIfAnchorWithin(scope: ParentNode): void {
  *  不进入本应用路径，refEdit 写端口结构上不可达）。 */
 function applyHoverContent(state: HoverPopupState, message: Extract<HoverPreviewResult, { ok: true }>, loaded: RefLoadedContent): void {
   const keepScroll = state.scrollEl.scrollTop // #224 刷新前保存（首载为 0）
-  state.scope = message.scope.kind
+  // markdown 载荷的 scope 恒为 full/heading/block（协议校验器保证）；
+  // plain 只随 image 载荷出现（不进本路径）——此处按探针枚举收窄
+  state.scope = message.scope.kind === 'full' ? 'full'
+    : message.scope.kind === 'heading' ? 'heading' : 'block'
   state.targetFsPath = message.target.fsPath
   state.appliedVersion = message.version
   const rendered = state.content.render(loaded, (bytes) => {
@@ -1226,6 +1278,77 @@ function applyHoverWebContent(state: HoverPopupState, meta: RefWebContent): void
   // 会被冲掉），web 卡片无块语义，挂滚动区直下；容器销毁（浮层关闭）
   // 随 DOM 树整体移除，无独立清理路径
   state.scrollEl.appendChild(buildWebCardEl(meta))
+}
+/**
+ * #336（P3-04）image 载荷应用：浮层内容委托普通图片挂载——经
+ * ImageResourceManager 装载（与正文 `![](图.png)` 同一加载/重试/失效管
+ * 线），frame chrome 提供查看大图入口（图片弹窗经既有 openImagePopup）。
+ * 图源请求按面板文档身份发非来源化 image.request（宿主 imageSrc 即按面
+ * 板文档目录计算，同一基准解析回同一目标）；目标订阅与失效刷新沿用既有
+ * watch 通道。刷新路径：旧管理器整体重建（条目/URI 重解析，不复活旧图）。
+ */
+function applyHoverImageContent(
+  state: HoverPopupState,
+  message: Extract<HoverPreviewResult, { ok: true }>,
+  loaded: RefLoadedImageContent,
+): void {
+  state.targetFsPath = message.target.fsPath
+  state.appliedVersion = message.version
+  state.scope = ''
+  state.image?.dispose()
+  state.image = null
+  state.imageFrame?.remove()
+  state.imageFrame = null
+  state.content.clear()
+  state.contentEl.textContent = ''
+  const manager = new ImageResourceManager({
+    isDirectSrc: isDirectImageSrc,
+    requestHost: (src, reqId) => {
+      const ctx = context
+      const session = ctx?.session()
+      if (!ctx || !session?.sessionId || !session.docUri) {
+        return
+      }
+      // 非来源化请求：按面板文档目录解析（宿主 imageSrc 同基准）；不附
+      // sourceDocUri（图片目标不是已送达的 B 内容来源）
+      ctx.send({ kind: 'image.request', sessionId: session.sessionId, docUri: session.docUri, reqId, src })
+    },
+  })
+  state.image = manager
+  const frame = document.createElement('span')
+  frame.className = `${GRAPHIC_CHROME_CLASS_NAMES.frame} ${IMAGE_CLASS_NAMES.image} ${IMAGE_CLASS_NAMES.block}`
+  const img = document.createElement('img')
+  img.alt = ''
+  frame.appendChild(img)
+  const popupSrc = loaded.src
+  frame.appendChild(buildGraphicChrome({
+    onPopup: () => { openImagePopup(popupSrc, '') },
+  }))
+  // 挂 scrollEl 层（contentEl 由虚拟视图全权重建——updateNow 会清外来
+  // 子节点；空 Reading 容器零高度不干扰布局）
+  state.scrollEl.appendChild(frame)
+  state.imageFrame = frame
+  manager.attach(img, popupSrc)
+  const ctx = context
+  if (ctx?.admitRootContent && !ctx.admitRootContent(state.instanceId, loaded, 256)) {
+    // 预算拒绝：不入场（释放租约与已建管理器，就地错误分态——与 markdown
+    // 路径同口径）
+    if (message.sourceLeaseId !== undefined) releaseRefSourceLease(ctx, message.sourceLeaseId)
+    manager.dispose()
+    state.image = null
+    frame.remove()
+    state.imageFrame = null
+    ctx.releaseRootContent?.(state.instanceId)
+    if (state.watchedFsPath !== null) {
+      sendWatchMessage(state.watchedFsPath, state.watchInstanceId, 'hover.unwatch')
+      state.watchedFsPath = null
+      state.watchLeaseId = null
+    }
+    applyDisplay(state, 'error', t('hover.errorBudget'))
+    return
+  }
+  ensureWatch(state, message.target.fsPath, message.sourceLeaseId)
+  applyDisplay(state, 'content', message.target.relPath)
 }
 
 /** P2-06/#224 重发读取请求（刷新与 Live 切回的静默重载共用）：新 reqId
@@ -1344,14 +1467,20 @@ export function notifyHoverResult(message: HoverPreviewResult): boolean {
       position(popup)
       return true
     }
-    const loaded = refLoadedContentOfResult(message)
+    const loaded: RefLoadedAny | null = refLoadedContentOfResult(message)
     if (loaded === null) {
       if (context) releaseRefSourceLease(context, message.sourceLeaseId)
       applyDisplay(popup, 'error', refErrorText('read-failed', popup.target))
       position(popup)
       return true
     }
-    applyHoverContent(popup, message, loaded)
+    if (!isRefLoadedMarkdown(loaded)) {
+      // #336（P3-04）image 载荷：委托普通图片挂载（与 ![](图.png) 同一
+      // 加载/重试/弹窗行为源），不走 Markdown Reading 渲染路径
+      applyHoverImageContent(popup, message, loaded)
+    } else {
+      applyHoverContent(popup, message, loaded)
+    }
   } else {
     // #221 目标原文取 state（三入口同源——面板条目/Live 装饰无 href 属性）
     applyDisplay(popup, 'error', refErrorText(message.reason, popup.target, message.anchor))
@@ -1415,6 +1544,13 @@ export function notifyHoverInvalidated(message: {
   // deleted / stale：撤下内容显示分态（视图清空防 display 反转后旧内容
   // 闪现；fm/滚动状态在实例 state 保留，恢复重载后无需重取）
   state.content.clear()
+  if (state.image !== null) {
+    // #336 图片目标：管理器与图 DOM 一并撤下（分态就地呈现，不残留旧图）
+    state.image.dispose()
+    state.image = null
+    state.imageFrame?.remove()
+    state.imageFrame = null
+  }
   context?.clearRootContent?.(state.instanceId)
   state.targetFsPath = ''
   state.scope = ''
@@ -1427,20 +1563,24 @@ export function notifyHoverInvalidated(message: {
 }
 
 /** #220 image.result 路由（syncController 转发）：作用于在场浮层的 B 管理
- *  器——未知 reqId 由管理器自身丢弃（主面板管理器同款守卫，双投递安全） */
+ *  器——未知 reqId 由管理器自身丢弃（主面板管理器同款守卫，双投递安全）。
+ *  #336：图片目标浮层的管理器同路由（markdown 内容管理器之外的第二消费方） */
 export function notifyHoverImageResult(msg: ImageResultPayload): void {
+  popup?.image?.handleResult(msg)
   popup?.content.notifyImageResult(msg)
 }
 
 /** #220 image.invalidate 路由（syncController 转发）：命中条目撤旧图重发
- *  （B 身份新请求；未命中条目由管理器忽略） */
+ *  （B 身份新请求；未命中条目由管理器忽略）。#336：图片目标管理器同路由 */
 export function notifyHoverImageInvalidate(srcs: readonly string[]): void {
+  popup?.image?.invalidate(srcs)
   popup?.content.invalidateImages(srcs)
 }
 
 /** #220 手动刷新失效（refresh.invalidated 路由）：B 管理器全量失效重挂
  *  （活跃槽位重新走宿主解析，新 URI 带新代次戳） */
 export function invalidateHoverPopupImages(): void {
+  popup?.image?.invalidateAll() // #336 图片目标管理器（手动刷新全量失效）
   popup?.content.invalidateImages()
 }
 

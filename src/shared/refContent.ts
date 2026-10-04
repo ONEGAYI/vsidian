@@ -23,6 +23,7 @@
 // 事实源）。
 import type { HoverPreviewScope } from './protocol'
 import { isImageFileExtension } from './imageRefresh'
+import { parseWikilinkInner } from './wikilink'
 
 /** 引用目标内容类型（三期五类）：markdown 既有通道；pdf/image/text/web
  *  为三期扩展目标（本票仅留位——载荷与导航选择器由对应票登记） */
@@ -63,6 +64,25 @@ export function classifyLocalRefContentKind(fsPath: string): LocalRefContentKind
 }
 
 /**
+ * #336（P3-04）嵌入/双链目标的图片预判（webview 渲染路径分流判据）：
+ * inner 为 `![[`/`[[` 与 `]]`/`]]` 之间的原文（可含 `|别名`）。判据 =
+ * 双链形态学解析出的 path 非空且扩展名为图片（与
+ * classifyLocalRefContentKind 的扩展名口径同源——带扩展名目标解析不补
+ * .md，书写扩展名即解析后扩展名，预判与宿主按 fsPath 分派结构性一致；
+ * 锚点不参与——图片目标无锚点定位语义）。宿主回包的 contentKind 仍是
+ * 权威，本判定只决定 webview 先走哪条**渲染路径**（Reading inline 规则
+ * 产 img、Live 嵌入装饰分流图片 widget、占位配对扫描跳过、浮层纯阅读
+ * 形态），不构成前端声明目标类型的读取通道。
+ */
+export function refEmbedTargetIsImage(inner: string): boolean {
+  const parsed = parseWikilinkInner(inner)
+  if (!parsed || parsed.path === '') {
+    return false
+  }
+  return isImageFileExtension(parsed.path)
+}
+
+/**
  * Markdown 载荷（kind === 'markdown' 的成功载荷形态）：宿主读取分派装
  * 载、会话出站（hover.result 的 Markdown 字段由此展开）、webview 装载
  * 转换三方同形。version 为宿主 TextDocument 权威版本；range 为 LF 初始
@@ -100,6 +120,28 @@ export interface RefWebContent {
 
 // ---- 导航选择器结构留位（按文件类型区分；本票不实现非 Markdown 锚点
 // 解析——P3-05/P3-08 接入时扩展协议消息的 scope 形态与此处对齐） ----
+
+/**
+ * #336（P3-04）图片载荷（kind === 'image' 的成功载荷形态）：宿主读取
+ * 分派装载、会话出站（hover.result 的 image 字段由此展开）、webview 装
+ * 载转换三方同形。
+ * - src 为**来源文档相对图源**（posix 分隔；宿主从解析出的规范 fsPath
+ *   相对来源文档目录计算）——webview 经 image.request（面板文档身份）
+ *   解析为可加载地址，复用普通 Markdown 图片的加载/重试/失效/弹窗管线
+ *   （「与普链同源呈现」的单一行为源）。宿主不回传字节或 webview URI
+ *   ——图片资源装载与版本戳走既有图片通道，不把 hover.result 变成第二
+ *   条图片资源通道。
+ * - version 为文件资源版本（stat mtimeMs；端口不可用时 0）——仅作回包
+ *   排序与预算键基准，图片新鲜度权威在失效通道（watch/#201），mtime 不
+ *   冒充 TextDocument.version。
+ */
+export interface RefImageContent {
+  kind: 'image'
+  /** 来源文档相对图源（posix 分隔；image.request 的 src 载荷） */
+  src: string
+  /** 文件资源版本（stat mtimeMs；不可得为 0） */
+  version: number
+}
 
 /** PDF 导航选择器（留位）：`#page=N`（双链限定）——1-based 正整数，仅
  *  初始定位；页区间等其他键不新增（2026-10-04 修订确认） */

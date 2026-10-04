@@ -512,3 +512,52 @@ describe('#342 hover.cancel 出站消息（webview → 宿主）', () => {
     expect(isWebviewToHost({ ...base, instanceId: '', reqId: 1 })).toBe(false)
   })
 })
+
+// #336（P3-04）image 载荷校验：contentKind 'image' 的成功形态登记——
+// imageSrc 必填非空（webview 经 image.request 解析装载），Markdown 全文/
+// 定位区间退化为空载荷（text 恒空串、range 零区间）、选择器为 plain（图
+// 片无锚点定位语义）。markdown 形态携带 imageSrc 或 plain 选择器为类型
+// 与载荷不匹配，整体拒绝。
+describe('#336 image 载荷校验（hover.result 成功载荷）', () => {
+  function validImageResult(): HostToWebview {
+    return {
+      kind: 'hover.result',
+      reqId: 1,
+      instanceId: 'hover-1',
+      ok: true,
+      contentKind: 'image',
+      target: { fsPath: 'D:\notes\图.png', relPath: '图.png' },
+      version: 1760000000123,
+      imageSrc: 'assets/图.png',
+      text: '',
+      range: { start: 0, end: 0 },
+      scope: { kind: 'plain' },
+    }
+  }
+
+  it('合法 image 形态放行（contentKind + imageSrc + 空文本/零区间/plain 选择器）', () => {
+    expect(isHostToWebview(validImageResult())).toBe(true)
+  })
+
+  it('imageSrc 缺省/空串/非字符串拒绝', () => {
+    const base = validImageResult() as Record<string, unknown>
+    const without = { ...base }
+    delete without.imageSrc
+    expect(isHostToWebview(without)).toBe(false)
+    expect(isHostToWebview({ ...base, imageSrc: '' })).toBe(false)
+    expect(isHostToWebview({ ...base, imageSrc: 3 })).toBe(false)
+  })
+
+  it('image 载荷不匹配拒绝：携带 Markdown 全文 / Markdown 选择器', () => {
+    const base = validImageResult() as Record<string, unknown>
+    expect(isHostToWebview({ ...base, text: '# 不是空载荷\n' })).toBe(false)
+    expect(isHostToWebview({ ...base, scope: { kind: 'full' } })).toBe(false)
+    expect(isHostToWebview({ ...base, range: { start: 0, end: 5 } })).toBe(false)
+  })
+
+  it('markdown 形态携带 imageSrc 或 plain 选择器拒绝（类型与载荷不匹配）', () => {
+    expect(isHostToWebview({ ...validResultOk(), imageSrc: 'assets/图.png' })).toBe(false)
+    expect(isHostToWebview({ ...validResultOk(), scope: { kind: 'plain' } })).toBe(false)
+    expect(isHostToWebview({ ...validResultOk(), contentKind: 'markdown', imageSrc: 'assets/图.png' })).toBe(false)
+  })
+})

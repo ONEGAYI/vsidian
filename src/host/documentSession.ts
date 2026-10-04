@@ -36,7 +36,7 @@ import {
   type WebviewToHost,
 } from '../shared/protocol'
 import type { HoverTargetTipOutcome, RefReadOutcome } from './hoverDocAccess'
-import type { RefMarkdownContent } from '../shared/refContent'
+import type { RefImageContent, RefMarkdownContent } from '../shared/refContent'
 import type { ImagePasteOutcome } from './imagePasteHost'
 import { isHttpLinkHref } from '../shared/webLink'
 import { mapChangeThroughChanges } from '../shared/changeMapping'
@@ -391,9 +391,10 @@ export class DocumentSession {
    *  在形态内（锚点在 target/href/anchor 原文中）。成功缓存 + 在途合并
    *  （同形态并发共享一次读取）+ 世代守卫（失效窗口内完成不回写），
    *  先例：imageCache/imageInFlight/imageEpochs（#201/#208 同构） */
-  // #342：会话读取缓存只承载 markdown 成功结果（web 元信息缓存归
-  // WebLinkMetaService，外链请求绕过本缓存路径）
-  private readonly hoverReadCache = new Map<string, { ok: true; fsPath: string; relPath: string; content: RefMarkdownContent }>()
+  // #342：web 载荷不经会话缓存（web 元信息缓存归 WebLinkMetaService，
+  // 外链请求绕过本缓存路径；#336 起 markdown/image 成功结果入缓存——
+  // 图片按身份载荷小常数计量，见 commitHoverRead）
+  private readonly hoverReadCache = new Map<string, Extract<RefReadOutcome, { ok: true }>>()
   private readonly hoverReadInFlight = new Map<string, Promise<RefReadOutcome>>()
   /** 目标 fsPath → 形态键集合（失效反查：版本变更按目标清缓存） */
   private readonly hoverShapeTargets = new Map<string, Set<string>>()
@@ -1175,14 +1176,15 @@ export class DocumentSession {
             })
             return
           }
-          // 窄化：web 已出站返回，此后成功结果恒为 markdown 载荷（pdf/
-          // image/text 未登记——防御性收敛 non-markdown，结构性不可达）
-          let outcome: { ok: true; fsPath: string; relPath: string; content: RefMarkdownContent } | { ok: false; reason: HoverPreviewFailReason; anchor?: string }
+          // 窄化：web 已出站返回，此后成功结果为 markdown 或 image 载荷
+          // （#336 登记 image；pdf/text 未登记——防御性收敛 non-markdown，
+          // 结构性不可达）
+          let outcome: { ok: true; fsPath: string; relPath: string; content: RefMarkdownContent | RefImageContent } | { ok: false; reason: HoverPreviewFailReason; anchor?: string }
           if (result.ok) {
             // 解构后判别：TS 判别联合窄化不支持 x.content.kind 嵌套路径，
             // content 单独绑定后 kind 判别为标准形态
             const { fsPath, relPath, content } = result
-            outcome = content.kind === 'markdown'
+            outcome = content.kind === 'markdown' || content.kind === 'image'
               ? { ok: true, fsPath, relPath, content }
               : { ok: false, reason: 'non-markdown' }
           } else {
@@ -1201,7 +1203,9 @@ export class DocumentSession {
             if (parent !== undefined && occurrenceId !== undefined && inExpansionPath(pathToParent, key)) outcome = { ok: false, reason: 'cycle' }
             else if (occurrenceId !== undefined && panel.expansionBudget.attachContent(
               occurrenceId, `${occurrenceId}\n${outcome.fsPath}\n${outcome.content.version}`,
-              outcome.content.lfText.length * 2 + 128) !== 'ok') {
+              // #336：图片载荷无正文——按身份载荷小常数计量（图片解码内存
+              // 归图片管线，与普通 Markdown 图片同口径，不占文本预算大额）
+              outcome.content.kind === 'markdown' ? outcome.content.lfText.length * 2 + 128 : 256) !== 'ok') {
               outcome = { ok: false, reason: 'budget' }
             }
           }
@@ -1212,7 +1216,10 @@ export class DocumentSession {
               panel.hoverSourceLeases.set(sourceLeaseId, outcome.fsPath)
               panel.hoverLeaseGrants.set(sourceLeaseId, {
                 fsPath: outcome.fsPath, version: outcome.content.version,
-                range: outcome.content.range, scope: outcome.content.selector,
+                // #336：图片载荷无定位区间与 Markdown 选择器——租约只保留
+                // 身份语义（range/scope 退化中性值；图片无锚点定位语义）
+                range: outcome.content.kind === 'markdown' ? outcome.content.range : { start: 0, end: 0 },
+                scope: outcome.content.kind === 'markdown' ? outcome.content.selector : { kind: 'full' },
                 path: [...pathToParent, canonicalRefTargetKey(outcome.fsPath, this.options.isWindowsHost ?? false)],
                 depth, treeId, occurrenceId: occurrenceId ?? '',
               })
@@ -1243,13 +1250,16 @@ export class DocumentSession {
                   ok: true,
                   // #333（P3-01）类型化出站：生产读取经 readRefContentTarget
                   // 类型分派，成功显式携带 contentKind（缺省 = markdown 的
-                  // 兼容识别留给旧消息——校验器两形态都放行）
-                  contentKind: 'markdown',
+                  // 兼容识别留给旧消息——校验器两形态都放行）。#336（P3-04）
+                  // image 通道：图源载荷（来源相对 src；字节与版本戳走既有
+                  // 图片通道），Markdown 全文/区间/选择器退化形态
+                  contentKind: outcome.content.kind,
                   target: { fsPath: outcome.fsPath, relPath: outcome.relPath },
                   version: outcome.content.version,
-                  text: outcome.content.lfText,
-                  range: outcome.content.range,
-                  scope: outcome.content.selector,
+                  ...(outcome.content.kind === 'image' ? { imageSrc: outcome.content.src } : {}),
+                  text: outcome.content.kind === 'markdown' ? outcome.content.lfText : '',
+                  range: outcome.content.kind === 'markdown' ? outcome.content.range : { start: 0, end: 0 },
+                  scope: outcome.content.kind === 'markdown' ? outcome.content.selector : { kind: 'plain' },
                   expansionPath: [...pathToParent, canonicalRefTargetKey(outcome.fsPath,
                     this.options.isWindowsHost ?? false)],
                   depth,
@@ -1307,11 +1317,12 @@ export class DocumentSession {
               return // 世代已过：迟到结果不复活旧缓存
             }
             // #342：web 载荷不经会话缓存（外链请求已绕过本路径——防御
-            // 性跳过非 markdown 载荷的缓存写回）；content 解构后判别
-            //（TS 不支持嵌套路径判别，同 report 处）
+            // 性跳过 web 载荷的缓存写回；#336：image 载荷入缓存——图片
+            // 按身份载荷小常数计量）；content 解构后判别（TS 不支持嵌套
+            // 路径判别，同 report 处）
             if (outcome.ok) {
               const { fsPath, relPath, content } = outcome
-              if (content.kind === 'markdown') {
+              if (content.kind === 'markdown' || content.kind === 'image') {
                 // 在途竞态补校验：读取期间该目标被失效过（当时形态→fsPath
                 // 登记未发生、反查为空）——不写缓存
                 const invalidatedAt = this.hoverInvalidatedAt.get(fsPath) ?? 0
@@ -1689,9 +1700,11 @@ export class DocumentSession {
   }
 
   /** 成功结果入缓存（字节按 LF 全文 UTF-16 code unit ×2 近似计量；
-   *  条目/字节双上限按插入序淘汰——单条超字节上限不入缓存） */
-  private commitHoverRead(shapeKey: string, outcome: { ok: true; fsPath: string; relPath: string; content: RefMarkdownContent }): void {
-    const bytes = outcome.content.lfText.length * 2
+   *  条目/字节双上限按插入序淘汰——单条超字节上限不入缓存。#336：图片
+   *  载荷无正文，按身份载荷小常数计量（与读取预算同口径）。#342：web
+   *  载荷不进本缓存（调用侧过滤，元信息缓存归 WebLinkMetaService） */
+  private commitHoverRead(shapeKey: string, outcome: Extract<RefReadOutcome, { ok: true }>): void {
+    const bytes = outcome.content.kind === 'markdown' ? outcome.content.lfText.length * 2 : 256
     if (bytes > this.hoverCacheLimits.byteLimit) {
       return
     }
@@ -1728,7 +1741,7 @@ export class DocumentSession {
       return
     }
     this.hoverReadCache.delete(shapeKey)
-    this.hoverCacheBytes -= hit.content.lfText.length * 2
+    this.hoverCacheBytes -= hit.content.kind === 'markdown' ? hit.content.lfText.length * 2 : 256
     const keys = this.hoverShapeTargets.get(hit.fsPath)
     if (keys) {
       keys.delete(shapeKey)

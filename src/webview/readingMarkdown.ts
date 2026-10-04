@@ -15,6 +15,7 @@ import katexPlugin from '@vscode/markdown-it-katex'
 import { MATH_CLASS_NAMES, stripInlineTexTicks } from '../shared/math'
 import { GRAPHIC_LANG_ATTR, MERMAID_CLASS_NAMES, MERMAID_CODE_ATTR, MERMAID_STATE_ATTR, isRenderedFenceInfo } from '../shared/mermaid'
 import { WIKILINK_CLASS_NAMES, embedAtPosition, parseWikilinkInner } from '../shared/wikilink'
+import { refEmbedTargetIsImage } from '../shared/refContent'
 import { parseLooseLinkAt } from '../shared/looseLink'
 import { joinObsidianDomAliasForReading } from '../shared/obsidianAlias'
 import { escapeHtml } from '../shared/frontmatterTable'
@@ -332,11 +333,32 @@ function vsidianEmbedInlineRule(state: StateInline, silent: boolean): boolean {
     return false
   }
   if (!silent) {
-    const token = state.push('vsidian_embed_slot', 'span', 0)
-    token.content = hit.inner
+    if (refEmbedTargetIsImage(hit.inner)) {
+      // #336（P3-04）图片嵌入：与 `![](图.png)` 同源呈现——产出 <img>
+      // （src = 目标原文、alt = 别名），不产嵌入占位 span、不挂卡片壳；
+      // 后续管线（prepareReadingImages 剥 src 绑资源管理器、chrome 装饰）
+      // 与普通图片逐字节同路径
+      const token = state.push('vsidian_embed_image', 'img', 0)
+      token.content = hit.inner
+    } else {
+      const token = state.push('vsidian_embed_slot', 'span', 0)
+      token.content = hit.inner
+    }
   }
   state.pos = hit.to
   return true
+}
+
+/** #336 图片嵌入的 <img> HTML（inner 随 content 携带——图源与别名的单一
+ *  来源）。src 为目标原文（未编码——wikilink 路径天然可含空格；资源管理
+ *  器 attach 时 normalizeImgSrc 与 markdown-it 编码形态归一），alt 取别名
+ *  （无别名为空串——与 `![]()` 同形态）；属性经 HTML 转义 */
+function embedImageHtml(inner: string): string {
+  const parsed = parseWikilinkInner(inner)
+  if (!parsed) {
+    return escapeHtml(`![[${inner}]]`) // 防御：规则判定已过滤非法形态
+  }
+  return `<img src="${escapeHtml(parsed.path)}" alt="${escapeHtml(parsed.alias ?? '')}">`
 }
 
 /** 占位 span 的 HTML（inner 随 data 属性携带——挂载配对的单一来源）。
@@ -380,6 +402,9 @@ export function createMarkdownRenderer(): InstanceType<typeof MarkdownIt> {
   // #246 混排嵌入占位渲染：token 无 children，inner 存 content 由本规则
   // 产出完整 span（显示文本 + data-inner——挂载配对与未升级降级的同源）
   md.renderer.rules['vsidian_embed_slot'] = (tokens, idx) => embedSlotHtml(tokens[idx]!.content)
+  // #336（P3-04）图片嵌入渲染：目标为图片的嵌入直接产出 <img>——与普通
+  // Markdown 图片同元素同管线（资源管理器装载与 chrome 装饰按 img 命中）
+  md.renderer.rules['vsidian_embed_image'] = (tokens, idx) => embedImageHtml(tokens[idx]!.content)
   // #60 Mermaid：fence 规则覆盖为容器输出（挂载后经 DOM API 渲染 SVG）
   installMermaidFenceRenderer(md)
   // 编辑态把格内回车存成 br。阅读态只在表格 inline token 里重新解析

@@ -10,7 +10,7 @@ import { isFormatOperationId, type FormatOperationId } from './formatOperations'
 import { isKeybindingOperationId, isUiOperationId, type KeybindingOverrides, type UiOperationId } from './keybindings'
 import { sanitizeFindOptions, type FindOptions } from './findOptions'
 import { isDiagnosticSnapshot, type DiagnosticSnapshot } from './testDiagnostics'
-import { isRefContentKind, type RefContentKind } from './refContent'
+import { isRefContentKind, type RefContentKind, type RefPlainNavSelector } from './refContent'
 import type { DefaultEditorDisplayState, DefaultEditorDisplayStatus } from './editorGuard'
 
 /** 设置快照类型随协议消息透出（载荷单一事实源仍在 shared/settings） */
@@ -623,12 +623,14 @@ export type HostToWebview =
       ok: true
       /** #333（P3-01）内容类型分派标记：宿主类型化读取入口（readRefContent
        *  Target）成功时显式携带；缺省 = markdown（旧合法 Markdown 消息兼容
-       *  识别）。#342（P3-10）起 'web' 登记：外链卡片载荷（web 字段在场，
-       *  Markdown 专属字段为占位值——target 空身份 / version 0 / 空文本 /
-       *  全文区间 / full 选择器，字段形态仍须合法）；其余非 markdown 类型
-       *  （pdf/image/text）的载荷形态由 P3-04/P3-05/P3-08 扩展本消息与校验
-       *  器时放开——携带未登记 kind 或类型与载荷不匹配的整体拒绝。失败
-       *  形态无载荷，不带本字段。类型学单一事实源：shared/refContent */
+       *  识别）。#336（P3-04）起 'image' 登记：图片载荷（imageSrc 在场，
+       *  Markdown 专属字段为退化形态——空文本 / 零区间 / plain 选择器）；
+       *  #342（P3-10）起 'web' 登记：外链卡片载荷（web 字段在场，Markdown
+       *  专属字段为占位值——target 空身份 / version 0 / 空文本 / 全文区间 /
+       *  full 选择器，字段形态仍须合法）；其余类型（pdf/text）的载荷形态
+       *  由 P3-05/P3-08 扩展本消息与校验器时放开——携带未登记 kind 或类型
+       *  与载荷不匹配的整体拒绝。失败形态无载荷，不带本字段。类型学单一
+       *  事实源：shared/refContent */
       contentKind?: RefContentKind
       /** #342（P3-10）外链卡片载荷（contentKind === 'web' 时在场，与
        *  Markdown 载荷互斥）：宿主受限抓取提取的元信息——url 为最终归一
@@ -644,9 +646,17 @@ export type HostToWebview =
       target: HoverPreviewTargetIdentity
       version: number
       text: string
-      /** 初始定位区间（LF 坐标；锚点命中的锚定区间，full/宽容退化为全文区间） */
+      /** #336（P3-04）image 载荷（contentKind === 'image' 必带）：来源文档
+       *  相对图源——webview 经 image.request（面板文档身份）解析装载，宿主
+       *  不经本消息回传字节或资源 URI（图片资源通道单一）；markdown 形态
+       *  不得携带（校验器按类型与载荷匹配拒绝） */
+      imageSrc?: string
+      /** 初始定位区间（LF 坐标；锚点命中的锚定区间，full/宽容退化为全文区间；
+       *  image 形态恒为零区间——图片无锚点定位语义） */
       range: { start: number; end: number }
-      scope: HoverPreviewScope
+      /** Markdown 导航选择器（full/heading/block）；image 形态为 plain
+       *  （RefPlainNavSelector——图片无锚点定位语义） */
+      scope: HoverPreviewScope | RefPlainNavSelector
       /** #244 Host-authenticated expansion ancestry, including root A. */
       expansionPath?: string[]
       depth?: number
@@ -4056,14 +4066,37 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
             return false
           }
         } else {
+          // 类型已知性 + 载荷匹配：#333 登记 markdown；#336（P3-04）登记
+          // image（imageSrc 必带非空、Markdown 载荷退化形态、plain 选择器）；
+          // 其余类型（pdf/text）载荷未登记，整体拒绝——P3-05/P3-08
+          // 接入时按 kind 放开各自形态
           if (v.contentKind !== undefined) {
-            // 类型已知性 + 载荷匹配：本票仅 markdown 与 web 载荷形态登记
-            // （P3-04+ 登记后按 kind 放开各自形态）——未知/未登记类型拒绝
-            if (!isRefContentKind(v.contentKind) || v.contentKind !== 'markdown') {
+            if (!isRefContentKind(v.contentKind)) {
+              return false
+            }
+            if (v.contentKind === 'image') {
+              const imageSrc = (v as { imageSrc?: unknown }).imageSrc
+              return (
+                typeof imageSrc === 'string' && imageSrc.length > 0 &&
+                isObject(v.target) && isString(v.target.fsPath) && isString(v.target.relPath) &&
+                isNonNegativeInt(v.version) &&
+                isString(v.text) && v.text === '' &&
+                (v.expansionPath === undefined || (Array.isArray(v.expansionPath) && v.expansionPath.every(isString))) &&
+                (v.depth === undefined || isPositiveInt(v.depth)) &&
+                (v.sourceLeaseId === undefined || (typeof v.sourceLeaseId === 'string' && v.sourceLeaseId.length > 0)) &&
+                isObject(v.range) && v.range.start === 0 && v.range.end === 0 &&
+                isObject(v.scope) && v.scope.kind === 'plain'
+              )
+            }
+            if (v.contentKind !== 'markdown') {
               return false
             }
           }
-          if (v.web !== undefined) {
+          // markdown（显式或缺省兼容）：不得携带 web 载荷（#342）、image
+          // 载荷或 plain 选择器（#336）
+          if (v.web !== undefined ||
+            (v as { imageSrc?: unknown }).imageSrc !== undefined ||
+            (isObject(v.scope) && v.scope.kind === 'plain')) {
             return false
           }
         }

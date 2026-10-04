@@ -22,6 +22,7 @@ import {
 } from '../../src/webview/liveEmbed'
 import { liveDecorationsField } from '../../src/webview/liveDecorations'
 import { mermaidFencesField } from '../../src/webview/liveMermaid'
+import { LiveImageWidget } from '../../src/webview/liveLinks'
 import type { EmbedCardManager } from '../../src/webview/embedCard'
 
 /** 装饰观测：StateField 直驱（跨行/block 装饰来自 StateField 的 CM6 约束）。
@@ -664,5 +665,80 @@ describe('#248 P1-1 消费者一致性：`]]` 紧贴转义管道的端点映射'
     expect(items[0]!.from).toBe(spans[0]!.from)
     expect(items[0]!.to).toBe(spans[0]!.to)
     expect(items[0]!.widget!.inner).toBe('B')
+  })
+})
+
+// #336（P3-04）Live 图片嵌入：图片目标嵌入装饰分流为图片 widget
+// （LiveImageWidget——与 `![](图.png)` 同一 widget 与 chrome/block 语义），
+// 不再挂卡片壳；触及显形为纯源码（无 mark 链接着色，与普通图片源码形态
+// 一致）；表格格内 chrome=false（弹窗排除矩阵不放宽）。
+describe('#336 Live 图片嵌入：装饰分流图片 widget', () => {
+  function buildDecosAll(text: string, selection: EditorSelection) {
+    const state = EditorState.create({
+      doc: text,
+      extensions: [liveDecorationsField, mermaidFencesField, liveEmbedCardsHostMark, liveEmbed],
+      selection,
+    })
+    const decos = state.field(liveEmbedDecorations)
+    const out: Array<{ from: number; to: number; block: boolean; widget: unknown }> = []
+    decos.between(0, text.length, (from, to, value) => {
+      const spec = value.spec as { widget?: unknown; block?: boolean }
+      if (spec.widget) {
+        out.push({ from, to, block: Boolean(spec.block), widget: spec.widget })
+      }
+    })
+    return out.sort((a, b) => a.from - b.from)
+  }
+
+  it('未触及：嵌入区间替换为图片 widget（src/alt 取目标原文与别名；非卡片）', () => {
+    const text = '![[assets/图.png|说明]]\n尾行'
+    const from = text.indexOf('![[assets/图.png|说明]]')
+    const items = buildDecosAll(text, EditorSelection.single(text.length))
+    expect(items).toHaveLength(1)
+    expect(items[0]!.widget).toBeInstanceOf(LiveImageWidget)
+    const w = items[0]!.widget as LiveImageWidget
+    expect(w.src).toBe('assets/图.png')
+    expect(w.alt).toBe('说明')
+    expect(items[0]!.from).toBe(from)
+    expect(items[0]!.to).toBe(from + '![[assets/图.png|说明]]'.length)
+  })
+
+  it('独行图片嵌入取块级布局标记（block=true——与独行 ![](x) 同语义）', () => {
+    const soloText = '![[图.png]]\n'
+    const solo = buildDecosAll(soloText, EditorSelection.single(soloText.length))
+    expect((solo[0]!.widget as LiveImageWidget).block).toBe(true)
+    const mixedText = '文字 ![[图.png]] 混排\n'
+    const mixed = buildDecosAll(mixedText, EditorSelection.single(0))
+    expect(mixed.length).toBe(1)
+    expect((mixed[0]!.widget as LiveImageWidget).block).toBe(false)
+  })
+
+  it('触及源码区间：无替换装饰（源码显形，无行下方卡片 widget）', () => {
+    const text = '![[图.png]]\n'
+    const from = text.indexOf('![[图.png]]')
+    const items = buildDecosAll(text, EditorSelection.single(from + 3))
+    expect(items, '触及图片嵌入不发射任何嵌入装饰（源码显形）').toHaveLength(0)
+  })
+
+  it('表格格内：图片 widget chrome=false（弹窗排除矩阵不放宽）；正文独行 chrome=true', () => {
+    const table = [
+      '| 甲 | 乙 |',
+      '| --- | --- |',
+      '| ![[图.png]] | 文字 |',
+    ].join('\n')
+    const cellAt = table.indexOf('![[图.png]]')
+    const items = buildDecosAll(table, EditorSelection.single(0))
+    const cellWidget = items.find((i) => i.from === cellAt)
+    expect(cellWidget?.widget).toBeInstanceOf(LiveImageWidget)
+    expect((cellWidget!.widget as LiveImageWidget).chrome).toBe(false)
+    const soloText = '![[图.png]]\n'
+    const solo = buildDecosAll(soloText, EditorSelection.single(soloText.length))
+    expect((solo[0]!.widget as LiveImageWidget).chrome).toBe(true)
+  })
+
+  it('markdown 嵌入不受影响：仍为 LiveEmbedWidget 卡片路径', () => {
+    const mdText = '![[目标笔记]]\n'
+    const items = buildDecosAll(mdText, EditorSelection.single(mdText.length))
+    expect(items[0]!.widget).toBeInstanceOf(LiveEmbedWidget)
   })
 })
