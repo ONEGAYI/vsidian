@@ -4505,6 +4505,68 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
   color: var(--vscode-descriptionForeground, inherit);
 }
 
+/* ---- #343（P3-11）外链原网页视图（web 通道 page 形态；样式契约
+   hover-popup 条目子结构追加）：跨源沙箱 iframe（sandbox=allow-scripts，
+   装配边界见 src/webview/webPage.ts 模块头）+ 工具行（退回卡片按钮）+
+   诚实说明行（跨源内容不可观测——不编造加载状态）。iframe 固定视口高
+   （浮层 480×400 预算内 320px），内容滚动发生在 iframe 自身的滚动容器
+   （父文档不可达跨源滚动位）；自动退回原因行（.vsidian-hover-web-reason）
+   挂卡片内，主题错误色保证明暗/高对比下实际可见 ---- */
+
+#app > .vsidian-hover-popup .vsidian-hover-web-page {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 2px;
+}
+
+#app > .vsidian-hover-popup .vsidian-hover-web-toolbar {
+  display: flex;
+  align-items: center;
+}
+
+#app > .vsidian-hover-popup .vsidian-hover-web-fallback {
+  background: transparent;
+  color: var(--vscode-textLink-foreground, #3794ff);
+  border: 1px solid var(--vscode-dropdown-border, rgba(128, 128, 128, 0.35));
+  border-radius: 3px;
+  padding: 2px 8px;
+  font-size: 0.9em;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+#app > .vsidian-hover-popup .vsidian-hover-web-fallback:hover,
+#app > .vsidian-hover-popup .vsidian-hover-web-fallback:focus-visible {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.1));
+}
+
+#app > .vsidian-hover-popup .vsidian-hover-web-frame {
+  width: 100%;
+  height: 320px;
+  border: 1px solid var(--vscode-dropdown-border, rgba(128, 128, 128, 0.35));
+  border-radius: 3px;
+  background: var(--vscode-editor-background, #ffffff);
+  display: block;
+}
+
+/* 诚实说明行（page 形态常驻）：描述色次级小字 */
+#app > .vsidian-hover-popup .vsidian-hover-web-note {
+  color: var(--vscode-descriptionForeground, inherit);
+  font-size: 0.85em;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* 自动退回原因行（卡片内）：主题错误色——与浮层错误分态同源的可见性
+   保障（明暗/高对比主题下错误色由宿主主题定义，实际可读） */
+#app > .vsidian-hover-popup .vsidian-hover-web-reason {
+  color: var(--vscode-errorForeground, #f14c4c);
+  font-size: 0.85em;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
 /* ---- #220 悬停浮层笔记属性区（样式契约 chrome 域 hover-fm-section 条目；
    引用专属样式入口——仅作用于浮层内 frontmatter 块，主阅读视图的属性
    呈现不受影响） ---- */

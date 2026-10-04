@@ -224,3 +224,42 @@ describe('外链卡片 CSS 契约（#342）', () => {
     expect(hover.split('{')[0]).toContain('.vsidian-hover-web-domain:hover')
   })
 })
+
+// ---- #343（P3-11）外链原网页视图（web 通道 page 形态）----
+describe('外链原网页视图 CSS 契约（#343）', () => {
+  it('页面容器：纵向布局（工具行 / iframe / 说明行的组织）', () => {
+    const page = rule('#app > .vsidian-hover-popup .vsidian-hover-web-page')
+    expect(page).toMatch(/display:\s*flex/)
+    expect(page).toMatch(/flex-direction:\s*column/)
+  })
+
+  it('退回卡片按钮：主题链接色 + 边框 + hover/focus 反馈（可点性）', () => {
+    const btn = rule('#app > .vsidian-hover-popup .vsidian-hover-web-fallback')
+    expect(btn).toMatch(/color:\s*var\(--vscode-textLink-foreground/)
+    expect(btn).toMatch(/border:\s*1px solid/)
+    expect(btn).toMatch(/cursor:\s*pointer/)
+    const hover = rule('#app > .vsidian-hover-popup .vsidian-hover-web-fallback:focus-visible')
+    expect(hover).toMatch(/background:/)
+    expect(hover.split('{')[0]).toContain('.vsidian-hover-web-fallback:hover')
+  })
+
+  it('iframe：100% 宽固定视口高 + 主题背景 + 边框（可见的页面视口区域）', () => {
+    const frame = rule('#app > .vsidian-hover-popup .vsidian-hover-web-frame')
+    expect(frame).toMatch(/width:\s*100%/)
+    expect(frame).toMatch(/height:\s*320px/)
+    expect(frame).toMatch(/background:\s*var\(--vscode-editor-background/)
+    expect(frame).toMatch(/border:\s*1px solid/)
+  })
+
+  it('诚实说明行：描述色次级小字 + 折行', () => {
+    const note = rule('#app > .vsidian-hover-popup .vsidian-hover-web-note')
+    expect(note).toMatch(/color:\s*var\(--vscode-descriptionForeground/)
+    expect(note).toMatch(/overflow-wrap:\s*anywhere/)
+  })
+
+  it('自动退回原因行：主题错误色（明暗/高对比下实际可见的失败说明）', () => {
+    const reason = rule('#app > .vsidian-hover-popup .vsidian-hover-web-reason')
+    expect(reason).toMatch(/color:\s*var\(--vscode-errorForeground/)
+    expect(reason).toMatch(/overflow-wrap:\s*anywhere/)
+  })
+})

@@ -26,6 +26,7 @@
 // 消息经 contentKind 引用本模块的分类学，消息形态仍以 protocol 为单一
 // 事实源）。
 import type { HoverPreviewScope } from './protocol'
+import type { WebFramePrecheck } from './webLink'
 import { isImageFileExtension } from './imageRefresh'
 import { parseWikilinkInner } from './wikilink'
 
@@ -111,6 +112,8 @@ export interface RefMarkdownContent {
  * 面（title/description 缺席为空串，消费端以域名兜底）。无本地文件身
  * 份（fsPath/relPath 占位空串）、无 TextDocument 版本——网页缓存按规范
  * URL 与形态区分，不伪造宿主文档版本。
+ * #343（P3-11）：page 形态抓取附带 frame 嵌入预检（card 形态缺席）——
+ * embeddable=false 时消费端不挂 iframe、就地退回卡片并呈现真实原因。
  */
 export interface RefWebContent {
   kind: 'web'
@@ -120,6 +123,9 @@ export interface RefWebContent {
   domain: string
   title: string
   description: string
+  /** #343 page 形态 iframe 嵌入预检（宿主最终响应判定；判据见
+   *  shared/webLink 的 assessWebFrameEmbeddability） */
+  frame?: WebFramePrecheck
 }
 
 /** 语言级生效字体（宿主 getConfiguration('editor', doc) 合并后的值；

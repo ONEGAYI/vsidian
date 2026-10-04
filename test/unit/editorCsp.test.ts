@@ -84,9 +84,17 @@ describe('编辑器 CSP 装配（#130 HTTPS 样式导入与联网字体）', () 
     expect(directives.get('worker-src')).toEqual(['blob:'])
   })
 
+  it('frame-src 仅放行 https:（#343 原网页 iframe——预检退回 HTTP 后生产恒挂 https 源；不放行 http:/cspSource 帧导航）', () => {
+    // #343（P3-11）外链 page 形态：跨源沙箱 iframe 装载远程站点内容。
+    // 只放行 https: 源表达式——HTTP 最终地址在预检层已退回卡片（安全
+    // 上下文混合内容），CSP 不为测试便利放行明文 http:；iframe 的子
+    // 资源装载由目标站点自身响应的 CSP 管辖（父文档 CSP 不作用于子文档）
+    expect(directives.get('frame-src')).toEqual(['https:'])
+  })
+
   it('指令集穷举（新增指令须随测试更新语义说明）', () => {
     expect([...directives.keys()].sort()).toEqual(
-      ['connect-src', 'default-src', 'font-src', 'img-src', 'script-src', 'style-src', 'worker-src'],
+      ['connect-src', 'default-src', 'font-src', 'frame-src', 'img-src', 'script-src', 'style-src', 'worker-src'],
     )
   })
 

@@ -181,6 +181,7 @@ import {
   notifyHoverTokens,
   notifyHoverWatchRejected,
   notifyAppearanceChanged,
+  notifyHoverExternalSettings,
   openHoverPopupForKeyboard,
   setHoverPreviewContext,
   type HoverPopupTargetSpec,
@@ -1942,6 +1943,9 @@ export class WebviewSyncController {
         this.applyEmbedMaxHeightSetting()
         this.embedCards?.setMaxDepth(this.embedMaxDepth())
         this.applyWordSegmentEngineSetting()
+        // #343（P3-11）外链设置联动：总开关关闭或形态切回 card 时销毁
+        // 在场原网页 iframe、就地退回卡片（缺键 = 无关变更不动作）
+        notifyHoverExternalSettings(message.values)
         break
       case 'wordSegment.state': {
         // #239 jieba 资源状态（宿主下载/删除后推送）：资源 URI 变化驱动

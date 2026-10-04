@@ -647,6 +647,51 @@ describe('#342 web 载荷校验（hover.result 成功形态）', () => {
   })
 })
 
+// ---- #343（P3-11）web 载荷的 frame 嵌入预检字段 ----
+
+describe('#343 web 载荷 frame 预检校验', () => {
+  const webWithFrame = (frame: unknown): Record<string, unknown> => ({
+    ...validResultOk(),
+    contentKind: 'web',
+    target: { fsPath: '', relPath: '' },
+    version: 0,
+    text: '',
+    range: { start: 0, end: 0 },
+    scope: { kind: 'full' },
+    web: { url: 'https://example.com/page', domain: 'example.com', title: '', description: '', frame },
+  })
+
+  it('frame 缺席放行（card 形态）', () => {
+    const msg = webWithFrame(undefined)
+    delete (msg.web as Record<string, unknown>).frame
+    expect(isHostToWebview(msg)).toBe(true)
+  })
+
+  it('embeddable=true 且无 reason 放行', () => {
+    expect(isHostToWebview(webWithFrame({ embeddable: true }))).toBe(true)
+  })
+
+  it('embeddable=false 携带合法 reason 放行', () => {
+    expect(isHostToWebview(webWithFrame({ embeddable: false, reason: 'denied' }))).toBe(true)
+    expect(isHostToWebview(webWithFrame({ embeddable: false, reason: 'http' }))).toBe(true)
+  })
+
+  it('embeddable=false 缺 reason 拒绝（退回必须给真实原因）', () => {
+    expect(isHostToWebview(webWithFrame({ embeddable: false }))).toBe(false)
+  })
+
+  it('embeddable=true 携带 reason 拒绝（语义矛盾形态不接受）', () => {
+    expect(isHostToWebview(webWithFrame({ embeddable: true, reason: 'denied' }))).toBe(false)
+  })
+
+  it('frame 字段类型错误拒绝（embeddable 非布尔 / reason 越权枚举 / 数组）', () => {
+    expect(isHostToWebview(webWithFrame({ embeddable: 'yes' }))).toBe(false)
+    expect(isHostToWebview(webWithFrame({ embeddable: false, reason: 'nope' }))).toBe(false)
+    expect(isHostToWebview(webWithFrame([]))).toBe(false)
+  })
+})
+
+
 describe('#342 hover.cancel 出站消息（webview → 宿主）', () => {
   const base = { kind: 'hover.cancel', sessionId: 's', docUri: 'file:///d/a.md' }
 
