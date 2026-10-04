@@ -7,6 +7,7 @@
 // WorkspaceEdit 写回；文档事件回流经 session 识别自家确认与外部变更。
 import * as vscode from 'vscode'
 import { randomUUID } from 'node:crypto'
+import * as fsp from 'node:fs/promises'
 import * as path from 'node:path'
 import { DocumentSession, type HostDocumentPort, type SessionNotice } from './documentSession'
 import { isRefEditClientMessage, RefEditPortRegistry, wrapRefEditPush, type RefEditBinding } from './refEditPorts'
@@ -27,6 +28,8 @@ import {
   type VaultLinkResolveContext,
 } from '../shared/vaultLink'
 import { parseWikilinkInner } from '../shared/wikilink'
+import { classifyLocalRefContentKind } from '../shared/refContent'
+import { parseTextAnchorSpec, resolveTextNav } from '../shared/refText'
 import { NewlineCoordinator } from '../shared/newline'
 import { buildEditorCsp } from './editorCsp'
 // #292 骨架屏内联装配（样式/#app 开标签含骨架标记/可读行宽预注入取值）
@@ -72,6 +75,7 @@ import type { VaultIndexService } from './vaultIndexService'
 import type { IndexMaintenance } from './vaultIndexMaintenance'
 import { ImageRefreshCoordinator } from './imageRefreshCoordinator'
 import { admitHoverWatch, connectHoverEvents, HoverRefreshCoordinator } from './hoverRefreshCoordinator'
+import { TextAppearanceService } from './textAppearance/appearanceService'
 import type { ImageVersionTable } from './imageVersioning'
 import {
   IMAGE_EVENT_DEBOUNCE_MS,
@@ -890,6 +894,42 @@ export function createTextEditorProvider(
   )
   const getEntry = (uri: vscode.Uri): SessionEntry | undefined =>
     sessions.get(uri.toString())
+
+  // ---- #340（P3-08）文本外观服务（provider 级单件）：语法层 vscode-
+  //  textmate + 语义层公开命令 + 主题链复刻（#335 验证路线）；onig WASM
+  //  随 VSIX 打包（esbuild 复制到 out/onig.wasm，运行时按扩展目录定位）。
+  //  主题/颜色自定义/扩展清单变化 → 失效缓存并广播 appearance.changed
+  //  （webview 在场文本视图静默重载——正文载荷含语言级字体，token 随
+  //  render 重取；Markdown 侧 CSS 变量自带跟随，忽略该广播） ----
+  const appearanceService = new TextAppearanceService(
+    vscode.Uri.joinPath(context.extensionUri, 'out', 'onig.wasm').fsPath,
+  )
+  let appearanceGeneration = 0
+  const broadcastAppearanceChanged = (): void => {
+    appearanceService.invalidateAppearance()
+    appearanceGeneration++
+    const message: HostToWebview = { kind: 'appearance.changed', generation: appearanceGeneration }
+    for (const entry of sessions.values()) {
+      for (const { sessionId } of entry.session.getInfo().panels) {
+        entry.session.postToPanel(sessionId, message)
+      }
+    }
+  }
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((event) => {
+    if (event.affectsConfiguration('workbench.colorTheme') ||
+      event.affectsConfiguration('editor.tokenColorCustomizations') ||
+      event.affectsConfiguration('editor.semanticTokenColorCustomizations') ||
+      event.affectsConfiguration('editor.fontFamily') ||
+      event.affectsConfiguration('editor.fontSize') ||
+      event.affectsConfiguration('editor.fontLigatures') ||
+      event.affectsConfiguration('editor.lineNumbers')) {
+      broadcastAppearanceChanged()
+    }
+  }))
+  context.subscriptions.push(vscode.extensions.onDidChange(() => {
+    // 扩展安装/卸载：grammar/主题贡献集变化（#335 韧性口径——清单重扫）
+    broadcastAppearanceChanged()
+  }))
 
   /** 向面板请求最新 view.state（面板存活时的最可靠未确认输入来源） */
   const fetchPanelText = async (
@@ -1734,6 +1774,52 @@ export function createTextEditorProvider(
           ? `#^${parsed.blockId}`
           : ''
     }]]`
+
+    // #340（P3-08）text 目标跳转：原生编辑器打开（reveal 到行）——跳转
+    // 锚点落点由 #line 决定（仅 range 落窗口起点 B、无锚点落文件顶部）；
+    // 双链限定的 #line/#range 锚点在此解析（分词与校验单一事实源在
+    // shared/refText）。锚点非法仍打开（顶部）+ 警告提示（同锚点缺失的
+    // 「打开后提示」语义）；Markdown 锚点定位保持既有 Vsidian 面板路径
+    if (classifyLocalRefContentKind(targetPath) === 'text') {
+      let jumpLine = 1
+      let anchorInvalid: string | null = null
+      if (parsed.heading !== null || parsed.blockId !== null) {
+        const anchorRaw = parsed.heading !== null ? parsed.heading : `^${parsed.blockId}`
+        const anchorSpec = parsed.heading !== null ? parseTextAnchorSpec(parsed.heading) : null
+        if (anchorSpec === null) {
+          anchorInvalid = anchorRaw
+        } else {
+          const textDoc = await vscode.workspace.openTextDocument(targetUri)
+          const resolved = resolveTextNav(anchorSpec, textDoc.lineCount)
+          if (resolved.ok) {
+            jumpLine = resolved.nav.jumpLine
+          } else {
+            anchorInvalid = anchorRaw
+          }
+        }
+      }
+      pushLog({
+        kind: 'wikilink-doc',
+        target: parsed.path,
+        path: targetPath,
+        heading: parsed.heading ?? undefined,
+        blockId: parsed.blockId ?? undefined,
+        locate: jumpLine > 1 ? 'custom-panel' : 'none',
+      })
+      const textEditor = await vscode.window.showTextDocument(targetUri, { preview: false })
+      const lineIdx = Math.min(jumpLine - 1, Math.max(0, textEditor.document.lineCount - 1))
+      textEditor.revealRange(
+        new vscode.Range(lineIdx, 0, lineIdx, 0),
+        vscode.TextEditorRevealType.InCenter,
+      )
+      if (anchorInvalid !== null) {
+        void vscode.window.showWarningMessage(
+          t('host.wikilinkTextAnchorInvalid', { link: display, anchor: anchorInvalid }),
+        )
+      }
+      return
+    }
+
     // 锚点定位（#159：标题→findHeadingOffset、块 id→findBlockOffset，互斥）：
     // 先读目标内容算 offset（openTextDocument 只装载不显示）。offset 是宿主系
     // （getText 保留 \r\n），发 view.locate 前须转 LF 系（见下）
@@ -1987,7 +2073,51 @@ export function createTextEditorProvider(
               openTextDocument: async (fsPath: string) => {
                 try {
                   const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fsPath))
-                  return { version: doc.version, text: doc.getText() }
+                  // #340：languageId 随读取携带（text 通道的语言身份——
+                  // 高亮按用户已装语言插件的原生身份分派）
+                  return { version: doc.version, text: doc.getText(), languageId: doc.languageId }
+                } catch {
+                  return null
+                }
+              },
+              // #340（P3-08）text 通道准入端口：stat 大小与有界头部读取
+              //（node fs 直读——workspace.fs 无部分读取；大小超限不打开）
+              statFileSize: async (fsPath: string) => {
+                try {
+                  return (await fsp.stat(fsPath)).size
+                } catch {
+                  return null
+                }
+              },
+              readFileHead: async (fsPath: string, maxBytes: number) => {
+                try {
+                  const handle = await fsp.open(fsPath, 'r')
+                  try {
+                    const buffer = Buffer.alloc(Math.max(0, maxBytes))
+                    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
+                    return new Uint8Array(buffer.buffer, buffer.byteOffset, bytesRead)
+                  } finally {
+                    await handle.close()
+                  }
+                } catch {
+                  return null
+                }
+              },
+              // #340 语言级生效外观（getConfiguration('editor', doc) 合并读取）
+              readTextEditorConfig: async (fsPath: string) => {
+                try {
+                  const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fsPath))
+                  const editor = vscode.workspace.getConfiguration('editor', doc)
+                  const family = editor.get<string | undefined>('fontFamily')
+                  const size = editor.get<number | undefined>('fontSize')
+                  const ligatures = editor.get<boolean | string | undefined>('fontLigatures')
+                  const lineNumbers = editor.get<string>('lineNumbers', 'on')
+                  return {
+                    ...(family !== undefined ? { family } : {}),
+                    ...(size !== undefined ? { size } : {}),
+                    ...(ligatures !== undefined ? { ligatures: ligatures === true } : {}),
+                    lineNumbers: lineNumbers !== 'off',
+                  }
                 } catch {
                   return null
                 }
@@ -2037,6 +2167,39 @@ export function createTextEditorProvider(
         openLink,
         openWikilink,
         readHoverTarget: readHoverTargetPort,
+        // #340（P3-08）文本 token 计算（外观服务）：版本配对在计算前
+        // （目标已推进回 stale，webview 等失效重载）与语义层回包前（3s
+        // 计算窗内文档可能再变）各核一次；语义层无 provider/超时/失败
+        // 静默不发（语法层保持——「语义暂不可用不抹掉已验证语法层」）
+        readTextTokens: (payload, report) => {
+          void (async (): Promise<void> => {
+            let doc: vscode.TextDocument
+            try {
+              doc = await vscode.workspace.openTextDocument(vscode.Uri.file(payload.fsPath))
+            } catch {
+              report({ ok: false, reason: 'stale' })
+              return
+            }
+            if (doc.version !== payload.version) {
+              report({ ok: false, reason: 'stale' })
+              return
+            }
+            const tm = await appearanceService.computeTextmateTokens(doc, payload.beginLine, payload.endLine)
+            if (doc.version !== payload.version) {
+              report({ ok: false, reason: 'stale' })
+              return
+            }
+            if (tm === null) {
+              report({ ok: false, reason: 'unavailable' })
+              return
+            }
+            report({ ok: true, layer: 'textmate', colors: tm.colors, tokens: tm.data, version: doc.version })
+            const semantic = await appearanceService.computeSemanticTokens(doc, payload.beginLine, payload.endLine)
+            if (semantic !== null && doc.version === payload.version) {
+              report({ ok: true, layer: 'semantic', colors: semantic.colors, tokens: semantic.data, version: doc.version })
+            }
+          })()
+        },
         // #299 跳转目标提示轻量解析：纯路径计算、零文件系统请求——不读
         // 正文、不建读取与租约链路（用户裁定：诚实反映链接目标，不做存在性探测）
         resolveHoverTarget: (payload, report) => {
@@ -4094,6 +4257,20 @@ async function executeLinkIntent(
       await vscode.workspace.fs.stat(uri)
     } catch {
       continue
+    }
+    // #340（P3-08）text 目标（普链）：原生编辑器打开——fragment 不解析
+    //（锚点控制仅双链可用，普链 fragment 原样交宿主打开，2026-10-04 规范
+    // 修订口径），不带行定位、不弹锚点警告
+    if (classifyLocalRefContentKind(fsPath) === 'text') {
+      pushLog({
+        kind: 'doc',
+        href: intent.href,
+        path: fsPath,
+        fragment: target.fragment ?? undefined,
+        locate: 'none',
+      })
+      await vscode.window.showTextDocument(uri, { preview: false })
+      return
     }
     // openTextDocument 只装载不显示；fragment 定位区间与日志先于打开动作
     const targetDoc = await vscode.workspace.openTextDocument(uri)

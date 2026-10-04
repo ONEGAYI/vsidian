@@ -822,12 +822,11 @@ describe('#333 类型分派入口 readRefContentTarget', () => {
     }
   })
 
-  it('非 markdown 类型（image/pdf/text）→ non-markdown 分态，读取端口零调用（不装载附件）', async () => {
+  it('非 markdown 类型（image/pdf）→ non-markdown 分态，读取端口零调用（不装载附件）。#340 起 text 走 text 通道（契约见 hoverDocAccessText.test.ts）', async () => {
     const h = makeHarness(matrixDisk())
     for (const [form, label] of [
       [{ target: '图.png' }, '双链图片'],
       [{ linkHref: '资料.pdf' }, '普通链接 PDF'],
-      [{ directTarget: { fsPath: 'D:\\notes\\脚本.ts' } }, '直接目标文本'],
     ] as Array<[{ target?: string; linkHref?: string; directTarget?: { fsPath: string; anchor?: string } }, string]>) {
       expect(await readRefContentTarget(form, h.ctx, h.ports), `${label} 应 non-markdown`).toEqual({
         ok: false,

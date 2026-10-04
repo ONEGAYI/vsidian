@@ -523,6 +523,8 @@
     "katex": "0.16.47",
     "markdown-it": "15.0.2",
     "mermaid": "11.12.2",
+    "vscode-oniguruma": "1.7.0",
+    "vscode-textmate": "9.0.0",
     "yaml": "2.9.1"
   },
   "devDependencies": {

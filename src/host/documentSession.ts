@@ -84,6 +84,18 @@ export interface PanelPort {
     payload: HoverPreviewRequestPayload & { verifiedSource?: { fsPath: string; version: number } },
     report: (result: RefReadOutcome) => void,
   ): void
+  /** #340（P3-08）文本 token 计算（vscode 层注入：外观服务——语法层
+   *  vscode-textmate + 语义层公开命令；**fsPath 守卫在此端口上游**：调用
+   *  方按 hoverSourceFsPaths 复核已送达目标，被攻陷 webview 不能借本通道
+   *  探测任意文件）。version 为请求方装载版本——目标已推进回 stale。
+   *  只读交互，不进 edit.request 通道 */
+  readTextTokens?(
+    payload: { fsPath: string; version: number; beginLine: number; endLine: number },
+    report: (result:
+      | { ok: true; layer: 'textmate'; colors: string[]; tokens: number[]; version: number }
+      | { ok: true; layer: 'semantic'; colors: string[]; tokens: number[]; version: number }
+      | { ok: false; reason: 'stale' | 'unavailable' }) => void,
+  ): void
   readHoverSource?(fsPath: string): Promise<{ version: number; text: string } | null>
   /** #299 跳转目标提示轻量解析（vscode 层注入：hoverDocAccess 的
    *  resolveHoverTargetTip——路径解析与存在性探测，**不读正文**、不建
@@ -606,6 +618,61 @@ export class DocumentSession {
           this.trimHoverSources(panel)
         }
         return Promise.resolve()
+      case 'hover.tokens.request': {
+        // #340（P3-08）文本 token 请求：会话守卫与 hover.request 同款；
+        // **fsPath 来源守卫**——必须是本面板成功送达过的目标
+        // （hoverSourceFsPaths，成功读取即入集合），被攻陷 webview 不能借
+        // 本通道探测任意文件的内容侧信道。计算经面板端口注入（外观服务），
+        // 结果按 reqId+instanceId 回来源面板（webview 侧再做版本配对——
+        // 迟到/过期 token 不覆盖新正文）。只读交互：不进 edit.request
+        // 通道、不建租约，暂停态同样放行
+        if (!panel.ready || message.docUri !== this.docUri) {
+          return Promise.resolve()
+        }
+        if (!panel.hoverSourceFsPaths.has(message.fsPath)) {
+          panel.port.send({
+            kind: 'hover.tokens', reqId: message.reqId, instanceId: message.instanceId, ok: false, reason: 'stale',
+          })
+          return Promise.resolve()
+        }
+        const tokenPort = panel.port.readTextTokens
+        if (!tokenPort) {
+          panel.port.send({
+            kind: 'hover.tokens', reqId: message.reqId, instanceId: message.instanceId, ok: false, reason: 'unavailable',
+          })
+          return Promise.resolve()
+        }
+        tokenPort(
+          { fsPath: message.fsPath, version: message.version, beginLine: message.beginLine, endLine: message.endLine },
+          (result) => {
+            if (this.disposed || this.panels.get(sessionId) !== panel) {
+              return
+            }
+            panel.port.send(
+              result.ok
+                ? {
+                    kind: 'hover.tokens',
+                    reqId: message.reqId,
+                    instanceId: message.instanceId,
+                    ok: true,
+                    fsPath: message.fsPath,
+                    version: result.version,
+                    layer: result.layer,
+                    colors: result.colors,
+                    tokens: result.tokens,
+                  }
+                : {
+                    kind: 'hover.tokens',
+                    reqId: message.reqId,
+                    instanceId: message.instanceId,
+                    ok: false,
+                    reason: result.reason,
+                  },
+            )
+          },
+        )
+        return Promise.resolve()
+      }
       case 'hover.target.resolve': {
         // #299 跳转目标提示轻量解析：会话守卫与其余请求同款（就绪且
         // docUri 匹配才放行，否则静默丢弃）；解析执行经面板端口注入
@@ -1155,7 +1222,11 @@ export class DocumentSession {
               panel.hoverSourceLeases.set(sourceLeaseId, result.fsPath)
               panel.hoverLeaseGrants.set(sourceLeaseId, {
                 fsPath: result.fsPath, version: result.content.version,
-                range: result.content.range, scope: result.content.selector,
+                range: result.content.range,
+                // #340 text 载荷的选择器为 RefTextNavSelector（非
+                // HoverPreviewScope）——租约的 scope 字段只保留定位语义，
+                // text 归 full 形态（观感/观测面），锚点语义在 textNav 载荷
+                scope: result.content.kind === 'markdown' ? result.content.selector : { kind: 'full' as const },
                 path: [...pathToParent, canonicalRefTargetKey(result.fsPath, this.options.isWindowsHost ?? false)],
                 depth, treeId, occurrenceId: occurrenceId ?? '',
               })
@@ -1187,12 +1258,31 @@ export class DocumentSession {
                   // #333（P3-01）类型化出站：生产读取经 readRefContentTarget
                   // 类型分派，成功显式携带 contentKind（缺省 = markdown 的
                   // 兼容识别留给旧消息——校验器两形态都放行）
-                  contentKind: 'markdown',
+                  contentKind: result.content.kind,
                   target: { fsPath: result.fsPath, relPath: result.relPath },
                   version: result.content.version,
                   text: result.content.lfText,
                   range: result.content.range,
-                  scope: result.content.selector,
+                  // #340 text 通道：Markdown 语义选择器不适用于代码文件
+                  //（观感探针沿用 full）；窗口/落点/语言/字体在 textNav
+                  scope: result.content.kind === 'markdown' ? result.content.selector : { kind: 'full' as const },
+                  ...(result.content.kind === 'text'
+                    ? {
+                        textNav: {
+                          languageId: result.content.languageId,
+                          hasWindow: result.content.hasWindow,
+                          beginLine: result.content.beginLine,
+                          endLine: result.content.endLine,
+                          locateLine: result.content.locateLine,
+                          jumpLine: result.content.jumpLine,
+                          totalLines: result.content.totalLines,
+                          ...(result.content.font.family !== undefined ? { fontFamily: result.content.font.family } : {}),
+                          ...(result.content.font.size !== undefined ? { fontSize: result.content.font.size } : {}),
+                          ...(result.content.font.ligatures !== undefined ? { fontLigatures: result.content.font.ligatures } : {}),
+                          lineNumbers: result.content.lineNumbers,
+                        },
+                      }
+                    : {}),
                   expansionPath: [...pathToParent, canonicalRefTargetKey(result.fsPath,
                     this.options.isWindowsHost ?? false)],
                   depth,
@@ -1205,6 +1295,7 @@ export class DocumentSession {
                   ok: false,
                   reason: result.reason,
                   ...(result.anchor !== undefined ? { anchor: result.anchor } : {}),
+                  ...(result.anchorDetail !== undefined ? { anchorDetail: result.anchorDetail } : {}),
                 },
           )
         }

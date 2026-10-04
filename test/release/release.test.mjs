@@ -53,6 +53,9 @@ function makeEntries() {
     { size: 3000, name: 'extension/CHANGELOG.md' },
     { size: 1100, name: 'extension/LICENSE.txt' },
     { size: 101482, name: 'extension/out/extension.js' },
+    // #340 oniguruma WASM（vscode-textmate 引擎运行时资产，esbuild 复制到
+    // out/；实测约 456KB，远低于 3MB 单文件警告线）
+    { size: 466_610, name: 'extension/out/onig.wasm' },
     { size: 829024, name: 'extension/out/webview/main.js' },
     { size: 41308, name: 'extension/out/webview/main.css' },
     { size: 5683, name: 'extension/out/webview/settings.js' },

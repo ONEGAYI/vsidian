@@ -47,10 +47,18 @@ import * as path from 'node:path'
 import { NewlineCoordinator } from '../shared/newline'
 import { parseWikilinkInner } from '../shared/wikilink'
 import { isVaultPathInsideRoot, planVaultLinkPath, type VaultLinkFileResolution, type VaultLinkResolveContext } from '../shared/vaultLink'
-import { classifyLocalRefContentKind, type RefMarkdownContent } from '../shared/refContent'
+import { classifyLocalRefContentKind, type RefMarkdownContent, type RefTextContent, type RefTextFont } from '../shared/refContent'
+import {
+  REF_TEXT_LIMITS,
+  clipLinesToWindow,
+  parseTextAnchorSpec,
+  resolveTextNav,
+  sniffTextHead,
+  splitLfLines,
+} from '../shared/refText'
 import { classifyLinkTarget, planPathTextOf, splitHrefFragment } from './linkTarget'
 import { findBlockRange, findHeadingSectionRange } from './wikilinkTarget'
-import type { HoverPreviewFailReason, HoverPreviewScope } from '../shared/protocol'
+import type { HoverAnchorInvalidDetail, HoverPreviewFailReason, HoverPreviewScope } from '../shared/protocol'
 
 /** 读取结果：成功携带规范身份 + 版本 + LF 全文、源范围与语义范围选择器；
  *  失败为错误分态（就地 i18n 呈现的载荷来源，不连续弹宿主通知；缺失锚点
@@ -78,12 +86,20 @@ export type HoverReadOutcome =
 /** #333（P3-01）类型化读取结果：成功形态为「目标身份（fsPath/relPath，
  *  类型无关）+ 按 kind 分派的内容载荷」——markdown 通道为 RefMarkdown
  *  Content（TextDocument 权威版本 + LF 全文 + 初始定位区间 + Markdown
- *  导航选择器）；pdf/image/text/web 的载荷形态由后续票（P3-04/P3-05/
- *  P3-08/P3-10）扩展 content 联合登记，登记前这些类型在分派处回落
- *  non-markdown 失败分态。失败形态与旧扁平入口同源 */
+ *  导航选择器）；text 通道为 RefTextContent（#340 / P3-08：有界准入 +
+ *  锚点校验后的窗口正文与导航字段）；pdf/image/web 的载荷形态由后续票
+ * （P3-04/P3-05/P3-10）扩展 content 联合登记，登记前这些类型在分派处
+ *  回落 non-markdown 失败分态。失败形态与旧扁平入口同源；text 通道的
+ *  锚点非法分态附细分原因（anchorDetail） */
 export type RefReadOutcome =
-  | { ok: true; fsPath: string; relPath: string; content: RefMarkdownContent }
-  | { ok: false; reason: HoverPreviewFailReason; anchor?: string }
+  | { ok: true; fsPath: string; relPath: string; content: RefMarkdownContent | RefTextContent }
+  | {
+      ok: false
+      reason: HoverPreviewFailReason
+      anchor?: string
+      /** #340 anchor-invalid 的细分原因（webview 分态文案参数） */
+      anchorDetail?: HoverAnchorInvalidDetail
+    }
 
 /** 类型化结果 → 旧扁平 Markdown 形态（兼容适配展开）。非 markdown 载荷
  *  在当前分派表内不可达（结构性保证）；防御性收敛为 non-markdown 分态 */
@@ -120,8 +136,17 @@ export interface HoverDocAccessPorts {
   /** 双链/链接文件目标存在性解析（vscode 层 = resolveVaultLinkFile + statFileRealPath） */
   resolveVaultFile(rawPath: string): Promise<VaultLinkFileResolution>
   /** 打开并读取目标文档（vscode 层 = openTextDocument 只装载不显示 + getText；
-   *  失败返回 null） */
-  openTextDocument(fsPath: string): Promise<{ version: number; text: string } | null>
+   *  失败返回 null。#340 起 languageId 可选携带（text 通道的语言身份；
+   *  缺省 plaintext——既有桩不破） */
+  openTextDocument(fsPath: string): Promise<{ version: number; text: string; languageId?: string } | null>
+  /** #340（P3-08）text 通道准入端口（vscode 层注入；缺省跳过对应检查——
+   *  单测直驱形态）：stat 文件大小（字节；失败 null）与有界头部字节读取
+   *  （超过可用长度返回实际读取的部分；失败 null） */
+  statFileSize?(fsPath: string): Promise<number | null>
+  readFileHead?(fsPath: string, maxBytes: number): Promise<Uint8Array | null>
+  /** #340（P3-08）语言级生效外观配置（vscode 层 = openTextDocument +
+   *  getConfiguration('editor', doc) 合并读取；缺省全缺席——沿用默认） */
+  readTextEditorConfig?(fsPath: string): Promise<RefTextFont & { lineNumbers: boolean } | null>
 }
 
 /** 锚点规格（链接形态无关的语义选择器输入）：双链 heading/blockId 与
@@ -321,18 +346,134 @@ async function resolveHoverTargetForm(
 }
 
 /**
+ * #340（P3-08）text 通道读取（调用前类型已判定为 text）：有界准入 →
+ * 宿主解码 → 锚点校验 → 窗口裁剪，全程只读。
+ *
+ * 准入顺序（「不读完整无界内容、不悄悄截断」）：
+ * 1. stat 大小超限（REF_TEXT_LIMITS.maxFileBytes）→ file-too-large（不
+ *    打开文件）；
+ * 2. 头部有界探测（probeBytes）：NUL → binary-file；严格 UTF-8 失败 →
+ *    invalid-encoding（编码以宿主打开文档的解码结果为准——探测只拦宿主
+ *    解码必然无意义的形态，UTF-16 BOM 放行）；
+ * 3. openTextDocument 解码（失败 read-failed）→ LF 正文；
+ * 4. 单行超限（maxLineChars）→ line-too-long（不截断）。
+ *
+ * 锚点（双链限定 + 分词边界）：仅双链形态（anchorSource 'wikilink'）的
+ * 锚点段进入 `;`/key=value 分词解析（Markdown 标题/块 id 直读语义不适用
+ * 于代码文件——块引用形态与非 key=value 形态一律 anchor-invalid(format)）；
+ * 普通链接 fragment 与面板直接目标锚点不解析（按无锚点全文，规范「锚点
+ * 控制仅双链可用」）。anchorOptional（刷新重载）时越界钳制（已打开视图
+ * 合法收口，初次打开仍按报错口径）。
+ */
+async function readTextContent(
+  fsPath: string,
+  spec: AnchorSpec | null,
+  anchorSource: 'wikilink' | 'mdlink' | 'direct',
+  ports: HoverDocAccessPorts,
+  opts?: { anchorOptional?: boolean },
+): Promise<{ ok: true; content: RefTextContent } | { ok: false; reason: HoverPreviewFailReason; anchor?: string; anchorDetail?: HoverAnchorInvalidDetail }> {
+  // 1. 大小准入（不打开文件）
+  if (ports.statFileSize !== undefined) {
+    const size = await ports.statFileSize(fsPath)
+    if (size !== null && size > REF_TEXT_LIMITS.maxFileBytes) {
+      return { ok: false, reason: 'file-too-large' }
+    }
+  }
+  // 2. 头部有界探测
+  if (ports.readFileHead !== undefined) {
+    const head = await ports.readFileHead(fsPath, REF_TEXT_LIMITS.probeBytes)
+    if (head !== null) {
+      const sniff = sniffTextHead(head)
+      if (sniff === 'binary') {
+        return { ok: false, reason: 'binary-file' }
+      }
+      if (sniff === 'invalid-encoding') {
+        return { ok: false, reason: 'invalid-encoding' }
+      }
+    }
+  }
+  // 3. 宿主解码（编码以宿主打开文档的解码结果为准）
+  const doc = await ports.openTextDocument(fsPath)
+  if (!doc) {
+    return { ok: false, reason: 'read-failed' }
+  }
+  const lfText = new NewlineCoordinator(doc.text).toLfText(doc.text)
+  const lines = splitLfLines(lfText)
+  // 4. 单行准入（不悄悄截断）
+  for (const line of lines) {
+    if (line.length > REF_TEXT_LIMITS.maxLineChars) {
+      return { ok: false, reason: 'line-too-long' }
+    }
+  }
+  const totalLines = lines.length
+  // 5. 锚点（双链限定）：非双链来源的锚点段不生效（无锚点全文）
+  let anchorSpec: ReturnType<typeof parseTextAnchorSpec>
+  if (spec !== null && anchorSource === 'wikilink') {
+    if (spec.kind === 'block') {
+      // `#^块id` 形态：text 目标无块语义——就地报错（不静默当标题）
+      return { ok: false, reason: 'anchor-invalid', anchor: `^${spec.anchor}`, anchorDetail: 'format' }
+    }
+    const parsed = parseTextAnchorSpec(spec.anchor)
+    if (parsed === null) {
+      return { ok: false, reason: 'anchor-invalid', anchor: spec.anchor, anchorDetail: 'format' }
+    }
+    anchorSpec = parsed
+  } else {
+    anchorSpec = {}
+  }
+  // 6. 校验与窗口规划（初次打开严格报错；anchorOptional 刷新钳制）
+  const resolved = resolveTextNav(anchorSpec, totalLines, opts?.anchorOptional === true ? 'clamp' : 'strict')
+  if (!resolved.ok) {
+    return { ok: false, reason: 'anchor-invalid', anchor: spec !== null && anchorSource === 'wikilink' && spec.kind === 'heading' ? spec.anchor : undefined, anchorDetail: resolved.code }
+  }
+  const nav = resolved.nav
+  // 7. 窗口裁剪（#range 硬窗口：范围外不进载荷——结构性不可滚达）
+  const windowText = clipLinesToWindow(lines, nav.beginLine, nav.endLine).join('\n')
+  // 定位区间（窗口正文坐标系；locateLine 在窗口内的行首——与 markdown
+  // 通道「初始定位区间」语义同构，start=0 即无定位动作）
+  let locateStart = 0
+  for (let i = 0; i < nav.locateLine - nav.beginLine; i++) {
+    locateStart += lines[nav.beginLine - 1 + i].length + 1
+  }
+  const appearance = (await ports.readTextEditorConfig?.(fsPath)) ?? null
+  const content: RefTextContent = {
+    kind: 'text',
+    version: doc.version,
+    lfText: windowText,
+    range: { start: locateStart, end: windowText.length },
+    languageId: doc.languageId ?? 'plaintext',
+    selector: {
+      kind: 'text',
+      ...(nav.selector.line !== undefined ? { line: nav.selector.line } : {}),
+      ...(nav.selector.range !== undefined ? { range: nav.selector.range } : {}),
+    },
+    hasWindow: nav.selector.range !== undefined,
+    beginLine: nav.beginLine,
+    endLine: nav.endLine,
+    locateLine: nav.locateLine,
+    jumpLine: nav.jumpLine,
+    totalLines,
+    font: appearance === null ? {} : { ...(appearance.family !== undefined ? { family: appearance.family } : {}), ...(appearance.size !== undefined ? { size: appearance.size } : {}), ...(appearance.ligatures !== undefined ? { ligatures: appearance.ligatures } : {}) },
+    lineNumbers: appearance?.lineNumbers ?? true,
+  }
+  return { ok: true, content }
+}
+
+/**
  * #333（P3-01）类型化只读访问入口（生产读取路径）：目标三形态解析出
  * fsPath 后按类型分派——
  * - markdown：装载既有全文载荷（RefMarkdownContent：TextDocument 权威
  *   版本 + LF 全文 + 初始定位区间 + Markdown 导航选择器）；
- * - 其余类型（pdf/image/text/web）：维持 non-markdown 分态（附件/外链
- *   的载荷与导航选择器由 P3-04/P3-05/P3-08/P3-10 在此分派表登记——
- *   Markdown 的 TextDocument.version 和 LF 范围不能冒充这些类型的版本
- *   或页码）。
+ * - text（#340 / P3-08）：装载窗口正文载荷（RefTextContent——有界准入、
+ *   双链 #line/#range 锚点、语言身份与外观配置，见 readTextContent）；
+ * - 其余类型（pdf/image/web）：维持 non-markdown 分态（附件载荷与导航
+ *   选择器由 P3-04/P3-05/P3-10 在此分派表登记——Markdown 的
+ *   TextDocument.version 和 LF 范围不能冒充这些类型的版本或页码）。
  *
  * 类型由宿主按解析出的 fsPath 分类（classifyLocalRefContentKind），不
  * 接收前端声明的类型；web 目标在解析层即 unsupported（#342 接入时扩展）。
- * 全程无副作用：不 openWith、不定位、不提示、不写文档。
+ * 锚点来源随三形态推导（双链限定：仅 target 形态的锚点段进入 text 锚点
+ * 解析）。全程无副作用：不 openWith、不定位、不提示、不写文档。
  */
 export async function readRefContentTarget(
   form: HoverTargetForm,
@@ -345,21 +486,30 @@ export async function readRefContentTarget(
     return resolution
   }
   const kind = classifyLocalRefContentKind(resolution.fsPath)
-  if (kind !== 'markdown') {
-    // 类型分派表（#333 落位）：markdown 通道之外的类型本票不装载——
-    // 既有 non-markdown 分态保持（图片 #336 / PDF #337 / 文本 #340 /
-    // 外链 #342 接入时按 kind 登记各自载荷与导航选择器）
+  if (kind !== 'markdown' && kind !== 'text') {
+    // 类型分派表（#333 落位，#340 扩 text）：pdf/image/web 的载荷与导航
+    // 选择器由对应票登记（图片 #336 / PDF #337 / 外链 #342）
     return { ok: false, reason: 'non-markdown' }
+  }
+  const relOf = ctx.resolve.isWindowsHost ? path.win32.relative : path.posix.relative
+  const relPath = relOf(ctx.rootFsPath, resolution.fsPath).replaceAll('\\', '/')
+  if (kind === 'text') {
+    const anchorSource: 'wikilink' | 'mdlink' | 'direct' =
+      form.directTarget !== undefined ? 'direct' : form.linkHref !== undefined ? 'mdlink' : 'wikilink'
+    const content = await readTextContent(resolution.fsPath, resolution.spec, anchorSource, ports, opts)
+    if (!content.ok) {
+      return content
+    }
+    return { ok: true, fsPath: resolution.fsPath, relPath, content: content.content }
   }
   const content = await readMarkdownContent(resolution.fsPath, resolution.spec, ports, opts)
   if (!content.ok) {
     return content
   }
-  const relOf = ctx.resolve.isWindowsHost ? path.win32.relative : path.posix.relative
   return {
     ok: true,
     fsPath: resolution.fsPath,
-    relPath: relOf(ctx.rootFsPath, resolution.fsPath).replaceAll('\\', '/'),
+    relPath,
     content: content.content,
   }
 }

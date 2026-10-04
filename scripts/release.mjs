@@ -49,6 +49,9 @@ const REQUIRED_EXTENSION = [
   'changelog.md',
   'license', // 实测形态为 LICENSE.txt，前缀匹配兜底
   'out/extension.js',
+  // #340（P3-08）oniguruma WASM（vscode-textmate 引擎的运行时二进制资产，
+  // esbuild 复制到 out/；缺失时文本悬停语法层降级纯文本呈现）
+  'out/onig.wasm',
   'out/webview/main.js',
   'out/webview/main.css',
   'out/webview/settings.js',
