@@ -106,11 +106,15 @@ vsidian/
 │   ├── features.md # README 功能与设置详解下沉页
 │   ├── perf/…      # 性能实测数据与测量工具说明
 │   ├── research/   # 技术调研报告
-│   │   ├── obsidian-live-preview-editor.md   # Obsidian 技术栈与选型调研
-│   │   ├── obsidian-viewport-rendering.md    # 视口渲染性能补充调研
-│   │   ├── pdf-engine-compatibility-probe.md # P3-02 PDF 引擎兼容性探针报告
-│   │   ├── vscode-1823-host-route-probes.md  # P2-01 宿主路线探针结论
-│   │   └── vscode-search-view-internals.md   # VSCode 搜索视图内部源码核查
+│   │   ├── data/                                  # 探针证据数据目录
+│   │   │   ├── appearance-probe-dark-custom.json   # 外观探针暗色轮证据
+│   │   │   └── appearance-probe-light-default.json # 外观探针亮色轮证据
+│   │   ├── obsidian-live-preview-editor.md        # Obsidian 技术栈与选型调研
+│   │   ├── obsidian-viewport-rendering.md         # 视口渲染性能补充调研
+│   │   ├── pdf-engine-compatibility-probe.md      # P3-02 PDF 引擎兼容性探针报告
+│   │   ├── vscode-1823-host-route-probes.md       # P2-01 宿主路线探针结论
+│   │   ├── vscode-native-text-appearance-probe.md # 原生文字外观复用探针报告
+│   │   └── vscode-search-view-internals.md        # VSCode 搜索视图内部源码核查
 │   ├── specs/      # 产品规格
 │   │   ├── anchor-navigation.md               # 锚点跳转规格（标题/块引用/复制块链接）
 │   │   ├── appearance-merge.md                # 外观合并分页规格

@@ -1,0 +1,1985 @@
+{
+  "label": "light-default",
+  "vscodeVersion": "1.82.3",
+  "hardFailures": [],
+  "observations": [],
+  "inventory": {
+    "extensionCount": 92,
+    "grammarExtensions": [
+      {
+        "id": "vscode.bat",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "bat"
+        ]
+      },
+      {
+        "id": "vscode.clojure",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "clojure"
+        ]
+      },
+      {
+        "id": "vscode.coffeescript",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "coffeescript"
+        ]
+      },
+      {
+        "id": "vscode.cpp",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 5,
+        "languages": [
+          "c",
+          "cpp",
+          "cuda-cpp"
+        ]
+      },
+      {
+        "id": "vscode.csharp",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "csharp"
+        ]
+      },
+      {
+        "id": "vscode.css",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "css"
+        ]
+      },
+      {
+        "id": "vscode.dart",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "dart"
+        ]
+      },
+      {
+        "id": "vscode.diff",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "diff"
+        ]
+      },
+      {
+        "id": "vscode.docker",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "dockerfile"
+        ]
+      },
+      {
+        "id": "vscode.fsharp",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "fsharp"
+        ]
+      },
+      {
+        "id": "vscode.git-base",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": true,
+        "grammarCount": 3,
+        "languages": [
+          "git-commit",
+          "git-rebase",
+          "ignore"
+        ]
+      },
+      {
+        "id": "vscode.go",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "go"
+        ]
+      },
+      {
+        "id": "vscode.groovy",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "groovy"
+        ]
+      },
+      {
+        "id": "vscode.handlebars",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "handlebars"
+        ]
+      },
+      {
+        "id": "vscode.hlsl",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "hlsl"
+        ]
+      },
+      {
+        "id": "vscode.html",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 2,
+        "languages": [
+          "html"
+        ]
+      },
+      {
+        "id": "vscode.ini",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 2,
+        "languages": [
+          "ini",
+          "properties"
+        ]
+      },
+      {
+        "id": "vscode.java",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "java"
+        ]
+      },
+      {
+        "id": "vscode.javascript",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 3,
+        "languages": [
+          "javascriptreact",
+          "javascript",
+          "jsx-tags"
+        ]
+      },
+      {
+        "id": "vscode.json",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 4,
+        "languages": [
+          "json",
+          "jsonc",
+          "jsonl",
+          "snippets"
+        ]
+      },
+      {
+        "id": "vscode.julia",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "julia",
+          "juliamarkdown"
+        ]
+      },
+      {
+        "id": "vscode.latex",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 5,
+        "languages": [
+          "tex",
+          "latex",
+          "bibtex",
+          "cpp_embedded_latex",
+          "markdown_latex_combined"
+        ]
+      },
+      {
+        "id": "vscode.less",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "less"
+        ]
+      },
+      {
+        "id": "vscode.log",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "log"
+        ]
+      },
+      {
+        "id": "vscode.lua",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "lua"
+        ]
+      },
+      {
+        "id": "vscode.make",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "makefile"
+        ]
+      },
+      {
+        "id": "vscode.markdown",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "markdown"
+        ]
+      },
+      {
+        "id": "vscode.markdown-math",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 3,
+        "languages": [
+          "markdown-math"
+        ]
+      },
+      {
+        "id": "ms-vscode.js-debug",
+        "version": "1.82.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "wat"
+        ]
+      },
+      {
+        "id": "vscode.objective-c",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 2,
+        "languages": [
+          "objective-c",
+          "objective-cpp"
+        ]
+      },
+      {
+        "id": "vscode.perl",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 2,
+        "languages": [
+          "perl",
+          "perl6"
+        ]
+      },
+      {
+        "id": "vscode.php",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 2,
+        "languages": [
+          "php"
+        ]
+      },
+      {
+        "id": "vscode.powershell",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "powershell"
+        ]
+      },
+      {
+        "id": "vscode.pug",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "jade"
+        ]
+      },
+      {
+        "id": "vscode.python",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 2,
+        "languages": [
+          "python"
+        ]
+      },
+      {
+        "id": "vscode.r",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "r"
+        ]
+      },
+      {
+        "id": "vscode.razor",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "razor"
+        ]
+      },
+      {
+        "id": "vscode.restructuredtext",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "restructuredtext"
+        ]
+      },
+      {
+        "id": "vscode.ruby",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "ruby"
+        ]
+      },
+      {
+        "id": "vscode.rust",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "rust"
+        ]
+      },
+      {
+        "id": "vscode.scss",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 2,
+        "languages": [
+          "scss"
+        ]
+      },
+      {
+        "id": "vscode.search-result",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "search-result"
+        ]
+      },
+      {
+        "id": "vscode.shaderlab",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "shaderlab"
+        ]
+      },
+      {
+        "id": "vscode.shellscript",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "shellscript"
+        ]
+      },
+      {
+        "id": "vscode.sql",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "sql"
+        ]
+      },
+      {
+        "id": "vscode.swift",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "swift"
+        ]
+      },
+      {
+        "id": "vscode.typescript",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 4,
+        "languages": [
+          "typescript",
+          "typescriptreact",
+          "jsonc",
+          "json"
+        ]
+      },
+      {
+        "id": "vscode.vb",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "vb"
+        ]
+      },
+      {
+        "id": "vscode.xml",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 2,
+        "languages": [
+          "xml",
+          "xsl"
+        ]
+      },
+      {
+        "id": "vscode.yaml",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 2,
+        "languages": [
+          "dockercompose",
+          "yaml"
+        ]
+      },
+      {
+        "id": "be5invis.toml",
+        "version": "0.6.0",
+        "kind": "1",
+        "active": false,
+        "grammarCount": 1,
+        "languages": [
+          "toml"
+        ]
+      }
+    ],
+    "themeExtensions": [
+      {
+        "id": "vscode.theme-abyss",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "themeCount": 1
+      },
+      {
+        "id": "vscode.theme-defaults",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "themeCount": 8
+      },
+      {
+        "id": "vscode.theme-kimbie-dark",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "themeCount": 1
+      },
+      {
+        "id": "vscode.theme-monokai",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "themeCount": 1
+      },
+      {
+        "id": "vscode.theme-monokai-dimmed",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "themeCount": 1
+      },
+      {
+        "id": "vscode.theme-quietlight",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "themeCount": 1
+      },
+      {
+        "id": "vscode.theme-red",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "themeCount": 1
+      },
+      {
+        "id": "vscode.theme-solarized-dark",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "themeCount": 1
+      },
+      {
+        "id": "vscode.theme-solarized-light",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "themeCount": 1
+      },
+      {
+        "id": "vscode.theme-tomorrow-night-blue",
+        "version": "1.0.0",
+        "kind": "1",
+        "active": false,
+        "themeCount": 1
+      }
+    ],
+    "thirdPartyGrammarInstalled": true
+  },
+  "documents": [
+    {
+      "file": "sample.ts",
+      "languageId": "typescript",
+      "version": 1,
+      "bytes": 441
+    },
+    {
+      "file": "sample.py",
+      "languageId": "python",
+      "version": 1,
+      "bytes": 301
+    },
+    {
+      "file": "sample.toml",
+      "languageId": "toml",
+      "version": 1,
+      "bytes": 162
+    },
+    {
+      "file": "plain.txt",
+      "languageId": "plaintext",
+      "version": 1,
+      "bytes": 89
+    }
+  ],
+  "settings": {
+    "workbench.colorTheme": "Default Light Modern",
+    "editor.fontFamily": "Consolas, 'Courier New', monospace",
+    "editor.fontSize": 14,
+    "editor.fontLigatures": false,
+    "editor.lineNumbers": "on",
+    "editor.semanticHighlighting": {
+      "key": "editor.semanticHighlighting",
+      "defaultValue": {
+        "enabled": "configuredByTheme"
+      }
+    },
+    "editor.tokenColorCustomizations": {},
+    "editor.semanticTokenColorCustomizations": {}
+  },
+  "theme": {
+    "requestedLabel": "Default Light Modern",
+    "resolved": {
+      "id": "Default Light Modern",
+      "label": "Light Modern",
+      "path": "d:\\CODE\\Project\\_Extensions\\.wt-p3-335\\.vscode-test\\vscode-win32-x64-archive-1.82.3\\resources\\app\\extensions\\theme-defaults\\themes\\light_modern.json",
+      "uiTheme": "vs",
+      "extensionId": "vscode.theme-defaults"
+    },
+    "includeChain": [
+      "light_vs.json",
+      "light_plus.json",
+      "light_modern.json"
+    ],
+    "editorForeground": "#3b3b3b",
+    "editorBackground": "#ffffff",
+    "tokenColorCount": 64,
+    "semanticRules": [
+      {
+        "selector": "newOperator",
+        "foreground": "#0000ff"
+      },
+      {
+        "selector": "stringLiteral",
+        "foreground": "#a31515"
+      },
+      {
+        "selector": "customLiteral",
+        "foreground": "#000000"
+      },
+      {
+        "selector": "numberLiteral",
+        "foreground": "#098658"
+      },
+      {
+        "selector": "newOperator",
+        "foreground": "#af00db"
+      },
+      {
+        "selector": "stringLiteral",
+        "foreground": "#a31515"
+      },
+      {
+        "selector": "customLiteral",
+        "foreground": "#795e26"
+      },
+      {
+        "selector": "numberLiteral",
+        "foreground": "#098658"
+      }
+    ],
+    "semanticHighlightingInTheme": true,
+    "userSemanticHighlighting": {
+      "key": "editor.semanticHighlighting",
+      "defaultValue": {
+        "enabled": "configuredByTheme"
+      }
+    },
+    "unsupportedPlistTokenColors": []
+  },
+  "textMate": [
+    {
+      "file": "sample.ts",
+      "languageId": "typescript",
+      "grammarScope": "source.ts",
+      "distinctColors": [
+        "#008000",
+        "#AF00DB",
+        "#3B3B3B",
+        "#001080",
+        "#A31515",
+        "#0000FF",
+        "#267F99",
+        "#000000",
+        "#0070C1",
+        "#795E26",
+        "#098658",
+        "#000000FF"
+      ],
+      "sampleTokens": [
+        {
+          "text": "//",
+          "scopes": [
+            "source.ts",
+            "comment.line.double-slash.ts",
+            "punctuation.definition.comment.ts"
+          ],
+          "color": "#008000"
+        },
+        {
+          "text": " 探针样本：语法 + 语义双层（#335）",
+          "scopes": [
+            "source.ts",
+            "comment.line.double-slash.ts"
+          ],
+          "color": "#008000"
+        },
+        {
+          "text": "import",
+          "scopes": [
+            "source.ts",
+            "meta.import.ts",
+            "keyword.control.import.ts"
+          ],
+          "color": "#AF00DB"
+        },
+        {
+          "text": "{",
+          "scopes": [
+            "meta.import.ts",
+            "meta.block.ts",
+            "punctuation.definition.block.ts"
+          ],
+          "color": "#3B3B3B"
+        },
+        {
+          "text": "join",
+          "scopes": [
+            "meta.import.ts",
+            "meta.block.ts",
+            "variable.other.readwrite.alias.ts"
+          ],
+          "color": "#001080"
+        },
+        {
+          "text": "}",
+          "scopes": [
+            "meta.import.ts",
+            "meta.block.ts",
+            "punctuation.definition.block.ts"
+          ],
+          "color": "#3B3B3B"
+        },
+        {
+          "text": "from",
+          "scopes": [
+            "source.ts",
+            "meta.import.ts",
+            "keyword.control.from.ts"
+          ],
+          "color": "#AF00DB"
+        },
+        {
+          "text": "'",
+          "scopes": [
+            "meta.import.ts",
+            "string.quoted.single.ts",
+            "punctuation.definition.string.begin.ts"
+          ],
+          "color": "#A31515"
+        },
+        {
+          "text": "path",
+          "scopes": [
+            "source.ts",
+            "meta.import.ts",
+            "string.quoted.single.ts"
+          ],
+          "color": "#A31515"
+        },
+        {
+          "text": "'",
+          "scopes": [
+            "meta.import.ts",
+            "string.quoted.single.ts",
+            "punctuation.definition.string.end.ts"
+          ],
+          "color": "#A31515"
+        },
+        {
+          "text": ";",
+          "scopes": [
+            "source.ts",
+            "punctuation.terminator.statement.ts"
+          ],
+          "color": "#3B3B3B"
+        },
+        {
+          "text": "export",
+          "scopes": [
+            "source.ts",
+            "meta.interface.ts",
+            "keyword.control.export.ts"
+          ],
+          "color": "#AF00DB"
+        }
+      ]
+    },
+    {
+      "file": "sample.py",
+      "languageId": "python",
+      "grammarScope": "source.python",
+      "distinctColors": [
+        "#008000",
+        "#AF00DB",
+        "#3B3B3B",
+        "#000000",
+        "#A31515",
+        "#0000FF",
+        "#795E26",
+        "#001080",
+        "#267F99",
+        "#098658"
+      ],
+      "sampleTokens": [
+        {
+          "text": "#",
+          "scopes": [
+            "source.python",
+            "comment.line.number-sign.python",
+            "punctuation.definition.comment.python"
+          ],
+          "color": "#008000"
+        },
+        {
+          "text": " 探针样本：仅 grammar 语言（#335）",
+          "scopes": [
+            "source.python",
+            "comment.line.number-sign.python"
+          ],
+          "color": "#008000"
+        },
+        {
+          "text": "import",
+          "scopes": [
+            "source.python",
+            "keyword.control.import.python"
+          ],
+          "color": "#AF00DB"
+        },
+        {
+          "text": "os",
+          "scopes": [
+            "source.python"
+          ],
+          "color": "#3B3B3B"
+        },
+        {
+          "text": "from",
+          "scopes": [
+            "source.python",
+            "keyword.control.import.python"
+          ],
+          "color": "#AF00DB"
+        },
+        {
+          "text": "pathlib",
+          "scopes": [
+            "source.python"
+          ],
+          "color": "#3B3B3B"
+        },
+        {
+          "text": "import",
+          "scopes": [
+            "source.python",
+            "keyword.control.import.python"
+          ],
+          "color": "#AF00DB"
+        },
+        {
+          "text": "Path",
+          "scopes": [
+            "source.python"
+          ],
+          "color": "#3B3B3B"
+        },
+        {
+          "text": "CONSTANT",
+          "scopes": [
+            "source.python",
+            "constant.other.caps.python"
+          ],
+          "color": "#3B3B3B"
+        },
+        {
+          "text": "=",
+          "scopes": [
+            "source.python",
+            "keyword.operator.assignment.python"
+          ],
+          "color": "#000000"
+        },
+        {
+          "text": "'",
+          "scopes": [
+            "source.python",
+            "string.quoted.single.python",
+            "punctuation.definition.string.begin.python"
+          ],
+          "color": "#A31515"
+        },
+        {
+          "text": "value",
+          "scopes": [
+            "source.python",
+            "string.quoted.single.python"
+          ],
+          "color": "#A31515"
+        }
+      ]
+    },
+    {
+      "file": "sample.toml",
+      "languageId": "toml",
+      "grammarScope": "source.toml",
+      "distinctColors": [
+        "#008000",
+        "#3B3B3B",
+        "#E50000",
+        "#800000",
+        "#A31515",
+        "#098658"
+      ],
+      "sampleTokens": [
+        {
+          "text": "#",
+          "scopes": [
+            "source.toml",
+            "comment.line.number-sign.toml",
+            "punctuation.definition.comment.toml"
+          ],
+          "color": "#008000"
+        },
+        {
+          "text": " 探针样本：第三方 grammar（#335）",
+          "scopes": [
+            "source.toml",
+            "comment.line.number-sign.toml"
+          ],
+          "color": "#008000"
+        },
+        {
+          "text": "[",
+          "scopes": [
+            "source.toml",
+            "meta.tag.table.toml",
+            "punctuation.definition.table.toml"
+          ],
+          "color": "#3B3B3B"
+        },
+        {
+          "text": "probe",
+          "scopes": [
+            "source.toml",
+            "meta.tag.table.toml",
+            "entity.other.attribute-name.table.toml"
+          ],
+          "color": "#E50000"
+        },
+        {
+          "text": "]",
+          "scopes": [
+            "source.toml",
+            "meta.tag.table.toml",
+            "punctuation.definition.table.toml"
+          ],
+          "color": "#3B3B3B"
+        },
+        {
+          "text": "title",
+          "scopes": [
+            "source.toml",
+            "entity.name.tag.toml"
+          ],
+          "color": "#800000"
+        },
+        {
+          "text": "=",
+          "scopes": [
+            "source.toml",
+            "punctuation.definition.keyValue.toml"
+          ],
+          "color": "#3B3B3B"
+        },
+        {
+          "text": "\"appearance probe\"",
+          "scopes": [
+            "source.toml",
+            "string.quoted.single.basic.line.toml"
+          ],
+          "color": "#A31515"
+        },
+        {
+          "text": "count",
+          "scopes": [
+            "source.toml",
+            "entity.name.tag.toml"
+          ],
+          "color": "#800000"
+        },
+        {
+          "text": "=",
+          "scopes": [
+            "source.toml",
+            "punctuation.definition.keyValue.toml"
+          ],
+          "color": "#3B3B3B"
+        },
+        {
+          "text": "42",
+          "scopes": [
+            "source.toml",
+            "constant.numeric.integer.toml"
+          ],
+          "color": "#098658"
+        },
+        {
+          "text": "enabled",
+          "scopes": [
+            "source.toml",
+            "entity.name.tag.toml"
+          ],
+          "color": "#800000"
+        }
+      ]
+    },
+    {
+      "file": "plain.txt",
+      "languageId": "plaintext",
+      "grammarScope": null,
+      "distinctColors": [
+        "#3b3b3b"
+      ],
+      "sampleTokens": [
+        {
+          "text": "这一行没有语法高亮（plaintext，#335 对照组）。",
+          "scopes": [],
+          "color": "#3b3b3b"
+        },
+        {
+          "text": "this line has no grammar.",
+          "scopes": [],
+          "color": "#3b3b3b"
+        }
+      ]
+    }
+  ],
+  "semantic": {
+    "tsLegend": {
+      "tokenTypes": [
+        "class",
+        "enum",
+        "interface",
+        "namespace",
+        "typeParameter",
+        "type",
+        "parameter",
+        "variable",
+        "enumMember",
+        "property",
+        "function",
+        "method"
+      ],
+      "tokenModifiers": [
+        "declaration",
+        "static",
+        "async",
+        "readonly",
+        "defaultLibrary",
+        "local"
+      ]
+    },
+    "tsTokenCount": 18,
+    "tsSampleTokens": [
+      {
+        "text": "ProbeSample",
+        "type": "interface",
+        "modifiers": [
+          "declaration"
+        ],
+        "line": 3,
+        "startChar": 17,
+        "length": 11
+      },
+      {
+        "text": "id",
+        "type": "property",
+        "modifiers": [
+          "declaration",
+          "readonly"
+        ],
+        "line": 4,
+        "startChar": 11,
+        "length": 2
+      },
+      {
+        "text": "label",
+        "type": "property",
+        "modifiers": [
+          "declaration"
+        ],
+        "line": 5,
+        "startChar": 2,
+        "length": 5
+      },
+      {
+        "text": "greeting",
+        "type": "variable",
+        "modifiers": [
+          "declaration",
+          "readonly"
+        ],
+        "line": 8,
+        "startChar": 6,
+        "length": 8
+      },
+      {
+        "text": "describe",
+        "type": "function",
+        "modifiers": [
+          "declaration"
+        ],
+        "line": 10,
+        "startChar": 16,
+        "length": 8
+      },
+      {
+        "text": "sample",
+        "type": "parameter",
+        "modifiers": [
+          "declaration"
+        ],
+        "line": 10,
+        "startChar": 25,
+        "length": 6
+      },
+      {
+        "text": "ProbeSample",
+        "type": "interface",
+        "modifiers": [],
+        "line": 10,
+        "startChar": 33,
+        "length": 11
+      },
+      {
+        "text": "count",
+        "type": "variable",
+        "modifiers": [
+          "declaration",
+          "readonly",
+          "local"
+        ],
+        "line": 11,
+        "startChar": 8,
+        "length": 5
+      },
+      {
+        "text": "sample",
+        "type": "parameter",
+        "modifiers": [],
+        "line": 11,
+        "startChar": 16,
+        "length": 6
+      },
+      {
+        "text": "id",
+        "type": "property",
+        "modifiers": [
+          "readonly"
+        ],
+        "line": 11,
+        "startChar": 23,
+        "length": 2
+      },
+      {
+        "text": "sample",
+        "type": "parameter",
+        "modifiers": [],
+        "line": 12,
+        "startChar": 12,
+        "length": 6
+      },
+      {
+        "text": "label",
+        "type": "property",
+        "modifiers": [],
+        "line": 12,
+        "startChar": 19,
+        "length": 5
+      },
+      {
+        "text": "count",
+        "type": "variable",
+        "modifiers": [
+          "readonly",
+          "local"
+        ],
+        "line": 12,
+        "startChar": 29,
+        "length": 5
+      },
+      {
+        "text": "greeting",
+        "type": "variable",
+        "modifiers": [
+          "readonly"
+        ],
+        "line": 12,
+        "startChar": 39,
+        "length": 8
+      },
+      {
+        "text": "ProbeRunner",
+        "type": "class",
+        "modifiers": [
+          "declaration"
+        ],
+        "line": 15,
+        "startChar": 6,
+        "length": 11
+      },
+      {
+        "text": "status",
+        "type": "property",
+        "modifiers": [
+          "declaration"
+        ],
+        "line": 16,
+        "startChar": 10,
+        "length": 6
+      },
+      {
+        "text": "run",
+        "type": "method",
+        "modifiers": [
+          "declaration"
+        ],
+        "line": 18,
+        "startChar": 2,
+        "length": 3
+      },
+      {
+        "text": "status",
+        "type": "property",
+        "modifiers": [],
+        "line": 19,
+        "startChar": 9,
+        "length": 6
+      }
+    ],
+    "rangeCommandResult": "ok",
+    "noProviderResults": {
+      "sample.py": "undefined",
+      "sample.toml": "undefined",
+      "plain.txt": "undefined"
+    },
+    "overlaySamples": [
+      {
+        "text": "ProbeSample",
+        "semanticColor": "#267f99",
+        "semanticLayer": "semantic-probe-tm",
+        "tmColor": "#267F99",
+        "finalColor": "#267f99",
+        "semanticWins": true
+      },
+      {
+        "text": "id",
+        "semanticColor": "#001080",
+        "semanticLayer": "semantic-probe-tm",
+        "tmColor": "#001080",
+        "finalColor": "#001080",
+        "semanticWins": false
+      },
+      {
+        "text": "label",
+        "semanticColor": "#001080",
+        "semanticLayer": "semantic-probe-tm",
+        "tmColor": "#001080",
+        "finalColor": "#001080",
+        "semanticWins": false
+      },
+      {
+        "text": "greeting",
+        "semanticColor": "#001080",
+        "semanticLayer": "semantic-probe-tm",
+        "tmColor": "#0070C1",
+        "finalColor": "#001080",
+        "semanticWins": true
+      },
+      {
+        "text": "describe",
+        "semanticColor": "#795E26",
+        "semanticLayer": "semantic-probe-tm",
+        "tmColor": "#795E26",
+        "finalColor": "#795E26",
+        "semanticWins": false
+      },
+      {
+        "text": "sample",
+        "semanticColor": "#001080",
+        "semanticLayer": "semantic-probe-tm",
+        "tmColor": "#001080",
+        "finalColor": "#001080",
+        "semanticWins": false
+      },
+      {
+        "text": "ProbeSample",
+        "semanticColor": "#267f99",
+        "semanticLayer": "semantic-probe-tm",
+        "tmColor": "#267F99",
+        "finalColor": "#267f99",
+        "semanticWins": true
+      },
+      {
+        "text": "count",
+        "semanticColor": "#001080",
+        "semanticLayer": "semantic-probe-tm",
+        "tmColor": "#0070C1",
+        "finalColor": "#001080",
+        "semanticWins": true
+      },
+      {
+        "text": "sample",
+        "semanticColor": "#001080",
+        "semanticLayer": "semantic-probe-tm",
+        "tmColor": "#001080",
+        "finalColor": "#001080",
+        "semanticWins": false
+      },
+      {
+        "text": "id",
+        "semanticColor": "#001080",
+        "semanticLayer": "semantic-probe-tm",
+        "tmColor": "#001080",
+        "finalColor": "#001080",
+        "semanticWins": false
+      },
+      {
+        "text": "sample",
+        "semanticColor": "#001080",
+        "semanticLayer": "semantic-probe-tm",
+        "tmColor": "#001080",
+        "finalColor": "#001080",
+        "semanticWins": false
+      },
+      {
+        "text": "label",
+        "semanticColor": "#001080",
+        "semanticLayer": "semantic-probe-tm",
+        "tmColor": "#001080",
+        "finalColor": "#001080",
+        "semanticWins": false
+      },
+      {
+        "text": "count",
+        "semanticColor": "#001080",
+        "semanticLayer": "semantic-probe-tm",
+        "tmColor": "#001080",
+        "finalColor": "#001080",
+        "semanticWins": false
+      },
+      {
+        "text": "greeting",
+        "semanticColor": "#001080",
+        "semanticLayer": "semantic-probe-tm",
+        "tmColor": "#001080",
+        "finalColor": "#001080",
+        "semanticWins": false
+      },
+      {
+        "text": "ProbeRunner",
+        "semanticColor": "#267f99",
+        "semanticLayer": "semantic-probe-tm",
+        "tmColor": "#267F99",
+        "finalColor": "#267f99",
+        "semanticWins": true
+      }
+    ]
+  },
+  "resilience": {
+    "ownProviderTokens": "ok",
+    "ownProviderLegend": "ok",
+    "throwingProvider": "rejected:Error: probe provider failure",
+    "delayedProviderOutcome": "bounded:Error: probe timeout 3000ms",
+    "delayedProviderBounded": true,
+    "afterDispose": "undefined",
+    "unsavedEdit": {
+      "versionBefore": 1,
+      "versionAfter": 2,
+      "tokensCoverNewLine": true,
+      "newLineInTokens": true
+    }
+  },
+  "render": {
+    "cssVarForeground": "rgb(59, 59, 59)",
+    "cssVarBackground": "rgb(255, 255, 255)",
+    "themeForeground": "#3b3b3b",
+    "themeBackground": "#ffffff",
+    "spanChecks": [
+      {
+        "text": "//",
+        "expected": "#008000",
+        "computed": "rgb(0, 128, 0)",
+        "pass": true
+      },
+      {
+        "text": " 探针样本：语法 + 语义双层（#335）",
+        "expected": "#008000",
+        "computed": "rgb(0, 128, 0)",
+        "pass": true
+      },
+      {
+        "text": "import",
+        "expected": "#AF00DB",
+        "computed": "rgb(175, 0, 219)",
+        "pass": true
+      },
+      {
+        "text": " ",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "{",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": " ",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "join",
+        "expected": "#001080",
+        "computed": "rgb(0, 16, 128)",
+        "pass": true
+      },
+      {
+        "text": " ",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "}",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": " ",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "from",
+        "expected": "#AF00DB",
+        "computed": "rgb(175, 0, 219)",
+        "pass": true
+      },
+      {
+        "text": " ",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "'",
+        "expected": "#A31515",
+        "computed": "rgb(163, 21, 21)",
+        "pass": true
+      },
+      {
+        "text": "path",
+        "expected": "#A31515",
+        "computed": "rgb(163, 21, 21)",
+        "pass": true
+      },
+      {
+        "text": "'",
+        "expected": "#A31515",
+        "computed": "rgb(163, 21, 21)",
+        "pass": true
+      },
+      {
+        "text": ";",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "export",
+        "expected": "#AF00DB",
+        "computed": "rgb(175, 0, 219)",
+        "pass": true
+      },
+      {
+        "text": " ",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "interface",
+        "expected": "#0000FF",
+        "computed": "rgb(0, 0, 255)",
+        "pass": true
+      },
+      {
+        "text": " ",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "ProbeSample",
+        "expected": "#267f99",
+        "computed": "rgb(38, 127, 153)",
+        "pass": true
+      },
+      {
+        "text": " ",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "{",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "  ",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "readonly",
+        "expected": "#0000FF",
+        "computed": "rgb(0, 0, 255)",
+        "pass": true
+      },
+      {
+        "text": " ",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "id",
+        "expected": "#001080",
+        "computed": "rgb(0, 16, 128)",
+        "pass": true
+      },
+      {
+        "text": ":",
+        "expected": "#000000",
+        "computed": "rgb(0, 0, 0)",
+        "pass": true
+      },
+      {
+        "text": " ",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "number",
+        "expected": "#267F99",
+        "computed": "rgb(38, 127, 153)",
+        "pass": true
+      },
+      {
+        "text": ";",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "  ",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "label",
+        "expected": "#001080",
+        "computed": "rgb(0, 16, 128)",
+        "pass": true
+      },
+      {
+        "text": ":",
+        "expected": "#000000",
+        "computed": "rgb(0, 0, 0)",
+        "pass": true
+      },
+      {
+        "text": " ",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "string",
+        "expected": "#267F99",
+        "computed": "rgb(38, 127, 153)",
+        "pass": true
+      },
+      {
+        "text": ";",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "}",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "const",
+        "expected": "#0000FF",
+        "computed": "rgb(0, 0, 255)",
+        "pass": true
+      },
+      {
+        "text": " ",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "greeting",
+        "expected": "#001080",
+        "computed": "rgb(0, 16, 128)",
+        "pass": true
+      },
+      {
+        "text": ":",
+        "expected": "#000000",
+        "computed": "rgb(0, 0, 0)",
+        "pass": true
+      },
+      {
+        "text": " ",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "string",
+        "expected": "#267F99",
+        "computed": "rgb(38, 127, 153)",
+        "pass": true
+      },
+      {
+        "text": " ",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "=",
+        "expected": "#000000",
+        "computed": "rgb(0, 0, 0)",
+        "pass": true
+      },
+      {
+        "text": " ",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "`",
+        "expected": "#A31515",
+        "computed": "rgb(163, 21, 21)",
+        "pass": true
+      },
+      {
+        "text": "hello ",
+        "expected": "#A31515",
+        "computed": "rgb(163, 21, 21)",
+        "pass": true
+      },
+      {
+        "text": "${",
+        "expected": "#0000FF",
+        "computed": "rgb(0, 0, 255)",
+        "pass": true
+      },
+      {
+        "text": "'",
+        "expected": "#A31515",
+        "computed": "rgb(163, 21, 21)",
+        "pass": true
+      },
+      {
+        "text": "world",
+        "expected": "#A31515",
+        "computed": "rgb(163, 21, 21)",
+        "pass": true
+      },
+      {
+        "text": "'",
+        "expected": "#A31515",
+        "computed": "rgb(163, 21, 21)",
+        "pass": true
+      },
+      {
+        "text": "}",
+        "expected": "#0000FF",
+        "computed": "rgb(0, 0, 255)",
+        "pass": true
+      },
+      {
+        "text": "`",
+        "expected": "#A31515",
+        "computed": "rgb(163, 21, 21)",
+        "pass": true
+      },
+      {
+        "text": ";",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "export",
+        "expected": "#AF00DB",
+        "computed": "rgb(175, 0, 219)",
+        "pass": true
+      },
+      {
+        "text": " ",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "function",
+        "expected": "#0000FF",
+        "computed": "rgb(0, 0, 255)",
+        "pass": true
+      },
+      {
+        "text": " ",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "describe",
+        "expected": "#795E26",
+        "computed": "rgb(121, 94, 38)",
+        "pass": true
+      },
+      {
+        "text": "(",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "sample",
+        "expected": "#001080",
+        "computed": "rgb(0, 16, 128)",
+        "pass": true
+      },
+      {
+        "text": ":",
+        "expected": "#000000",
+        "computed": "rgb(0, 0, 0)",
+        "pass": true
+      },
+      {
+        "text": " ",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "ProbeSample",
+        "expected": "#267f99",
+        "computed": "rgb(38, 127, 153)",
+        "pass": true
+      },
+      {
+        "text": ")",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": ":",
+        "expected": "#000000",
+        "computed": "rgb(0, 0, 0)",
+        "pass": true
+      },
+      {
+        "text": " ",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "string",
+        "expected": "#267F99",
+        "computed": "rgb(38, 127, 153)",
+        "pass": true
+      },
+      {
+        "text": " ",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "{",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "  ",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "const",
+        "expected": "#0000FF",
+        "computed": "rgb(0, 0, 255)",
+        "pass": true
+      },
+      {
+        "text": " ",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "count",
+        "expected": "#001080",
+        "computed": "rgb(0, 16, 128)",
+        "pass": true
+      },
+      {
+        "text": " ",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "=",
+        "expected": "#000000",
+        "computed": "rgb(0, 0, 0)",
+        "pass": true
+      },
+      {
+        "text": " ",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "sample",
+        "expected": "#001080",
+        "computed": "rgb(0, 16, 128)",
+        "pass": true
+      },
+      {
+        "text": ".",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "id",
+        "expected": "#001080",
+        "computed": "rgb(0, 16, 128)",
+        "pass": true
+      },
+      {
+        "text": " ",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "+",
+        "expected": "#000000",
+        "computed": "rgb(0, 0, 0)",
+        "pass": true
+      },
+      {
+        "text": " ",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      },
+      {
+        "text": "1",
+        "expected": "#098658",
+        "computed": "rgb(9, 134, 88)",
+        "pass": true
+      },
+      {
+        "text": ";",
+        "expected": "#3B3B3B",
+        "computed": "rgb(59, 59, 59)",
+        "pass": true
+      }
+    ],
+    "fontSizeSetting": "14",
+    "fontSizeComputed": "14px",
+    "fontFamilySetting": "Consolas, 'Courier New', monospace",
+    "fontFamilyComputed": "\"Consolas, 'Courier New', monospace\"",
+    "lineNumbersSetting": "on",
+    "screenshotSaved": null,
+    "screenshotError": "Error: command 'workbench.action.screenshot' not found"
+  },
+  "fonts": {
+    "globalFamily": "Consolas, 'Courier New', monospace",
+    "globalSize": 14,
+    "tsScopedFamily": "Consolas, 'Courier New', monospace",
+    "tsScopedSize": 14,
+    "scopedOverrideVisible": false
+  }
+}
