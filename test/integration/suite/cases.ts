@@ -4532,7 +4532,14 @@ export const cases: Array<[string, () => Promise<void>]> = [
     const diskSource = await readDisk('wikilinks.md')
     const diskTarget = await readDisk('目标笔记.md')
 
-    // 目标面板切到阅读模式（活动 tab = 目标面板）
+    // 目标面板切到阅读模式（活动 tab = 目标面板）。waitSessionReady 只等
+    // webview ready，不等 tab 激活落地——beside 打开后活动 tab 翻转与
+    // ready 上报的完成顺序在 CI 慢机上可倒置，toggleViewMode 按
+    // activeTab 推导目标（textEditorProvider deriveActiveTabMode），届时
+    // 会误切源面板、目标面板恒 live，poll 干等 20s 超时（CI s1 间歇挂的
+    // 失败形态）。与同 describe 相邻用例（waitSessionReady 后紧跟
+    // waitActiveCustomTab）一致化，显式等目标面板成为活动 tab 再切换
+    await waitActiveCustomTab('目标笔记.md')
     await vscode.commands.executeCommand('onegayi.vsidian.toggleViewMode')
     const before = await poll('目标进入阅读模式', async () => {
       const v = (await vscode.commands.executeCommand(CMD.viewState, targetUri, 0)) as ViewState | undefined
