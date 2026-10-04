@@ -111,6 +111,51 @@ if (!production) {
     sourcemap: true,
     logLevel: 'info',
   })
+  // #334（P3-02）PDF 兼容性探针三产物（研究票，不进 VSIX）：
+  // - suite：宿主侧套件（node18/cjs，复用生产 editorCsp 纯逻辑）
+  // - main：webview 主线程（browser/iife，target chrome114 对齐下界宿主
+  //   Electron 25/Chromium 114 —— 比生产 webviewBase 的 chrome118 更保守，
+  //   探明下界语法面后生产 target 是否调整由 P3-05 决策）
+  // - worker：PDF.js legacy worker 单文件 iife（blob 装配候选）
+  // banner 的 Promise.withResolvers polyfill：pdfjs-dist 6.x 的 legacy 产物
+  // 不 polyfill 该 API（Chromium 119+），1.82.3 宿主（Chromium 114）缺它；
+  // 主线程与 worker 全局作用域独立，两侧都要注入（存在性检测，无副作用）。
+  const pdfProbeBanner = {
+    js: `if (typeof Promise.withResolvers !== "function") { Promise.withResolvers = function () { let resolve, reject; const promise = new Promise((res, rej) => { resolve = res; reject = rej; }); return { promise, resolve, reject }; } }if (!ReadableStream.prototype[Symbol.asyncIterator]) { ReadableStream.prototype[Symbol.asyncIterator] = async function* () { const reader = this.getReader(); try { for (;;) { const { done, value } = await reader.read(); if (done) return; yield value; } } finally { reader.releaseLock(); } }; }`,
+  }
+  targets.push({
+    entryPoints: ['test/integration/pdfProbe/suite.ts'],
+    outfile: 'out/test/integration/pdfProbe/suite.js',
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    target: 'node18',
+    external: ['vscode'],
+    sourcemap: true,
+    logLevel: 'info',
+  })
+  targets.push({
+    entryPoints: ['test/integration/pdfProbe/webviewMain.ts'],
+    outfile: 'out/test/integration/pdfProbe/main.js',
+    bundle: true,
+    platform: 'browser',
+    format: 'iife',
+    target: 'chrome114',
+    sourcemap: true,
+    banner: pdfProbeBanner,
+    logLevel: 'info',
+  })
+  targets.push({
+    entryPoints: ['test/integration/pdfProbe/workerEntry.ts'],
+    outfile: 'out/test/integration/pdfProbe/worker.js',
+    bundle: true,
+    platform: 'browser',
+    format: 'iife',
+    target: 'chrome114',
+    sourcemap: true,
+    banner: pdfProbeBanner,
+    logLevel: 'info',
+  })
   targets.push({
     // 性能测量套件（#5）：由 test/perf/runPerf.mjs 以 extensionTestsPath 启动
     entryPoints: ['test/perf/suite.ts'],
