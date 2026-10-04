@@ -189,7 +189,13 @@ export class TextRefView {
       return
     }
     const scrollTop = this.scrollEl.scrollTop
-    const viewport = Math.max(this.scrollEl.clientHeight, this.contentEl.clientHeight, 200)
+    // #341（P3-09）修复：视口 = 滚动宿主的可见高度（裁剪区），不得取
+    // contentEl.clientHeight——内容容器高度随正文无界增长（嵌入卡内即
+    // 全文行高总和），会把「DOM 常驻受视口约束」退化成全文挂载。装载时
+    // 滚动区可能仍隐藏（loading 态 display:none——clientHeight 为 0），
+    // 两条容器路径（浮层 applyDisplay / 嵌入卡 applyDisplay）都会在滚动
+    // 区显式恢复可见后同步 updateNow 重算窗口；200 为无布局环境保底。
+    const viewport = Math.max(this.scrollEl.clientHeight, 200)
     const first = Math.max(0, Math.floor(scrollTop / this.lineHeight) - VISIBLE_BUFFER_LINES)
     const last = Math.min(this.lines.length - 1, Math.ceil((scrollTop + viewport) / this.lineHeight) + VISIBLE_BUFFER_LINES)
     this.firstRendered = first

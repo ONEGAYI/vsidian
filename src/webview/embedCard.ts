@@ -273,8 +273,17 @@ export interface EmbedCardContext {
   mainEditorView?(): EditorView | null
 }
 
-/** 装载结果缓存（父文档会话内；#224 变更订阅推送后按目标失效清除） */
-type EmbedLoaded = RefLoadedContent
+/** 装载结果缓存（父文档会话内；#224 变更订阅推送后按目标失效清除）。
+ *  #341（P3-09）起 text 形态入缓存——text 与 markdown 同走 entry 装载/
+ *  失效/重挂链路，差异只在渲染分派（RefContentMount.render 的 text 分支）
+ *  与只读边界（text 无内部 Live 端口） */
+type EmbedLoaded = RefLoadedContent | RefLoadedTextContent
+
+/** #341：装载形态判别（text 只读边界与探针分派；参数收宽到联合——
+ *  image/markdown 成员恒 false，refLoadedContentOfResult 出口直接喂入） */
+function isTextLoaded(loaded: RefLoadedAny | null | undefined): loaded is RefLoadedTextContent {
+  return loaded !== null && loaded !== undefined && 'kind' in loaded && loaded.kind === 'text'
+}
 
 /** P2-04 嵌入实例的目标编辑端口状态（entry 级——同一 occurrence 的双容器
  *  挂载共享一份；Reading 态不存在，即「Reading 无写端口」） */
@@ -426,6 +435,10 @@ export interface EmbedCardProbe {
   viewStats: ReadingViewStats | null
   /** P2-04 生效内部模式（覆盖优先，缺省跟随直接父） */
   internalMode: 'reading' | 'live'
+  /** #341（P3-09）text 视图虚拟化统计（markdown 装载为 null）：
+   *  totalLines = 窗口内总行数（#range 硬窗口时即窗口行数——窗口外
+   *  不进载荷），renderedLines = 当前 DOM 常驻行数（受视口约束） */
+  textStats: { renderedLines: number; totalLines: number } | null
   /** P2-04 目标编辑端口是否已绑定（可见且内部 Live 才为 true） */
   liveBound: boolean
   livePortId: string | null
@@ -760,6 +773,7 @@ export class EmbedCardManager {
     if (source?.parentInstanceId !== undefined && !parentEntry) {
       modeBtn.style.display = 'none'
       modeBtn.tabIndex = -1
+      modeBtn.dataset['locked'] = '1' // refreshModeChrome 恢复分支的豁免标记
       entry.modeOverride = 'reading'
     }
     this.active.set(el, handle)
@@ -1152,7 +1166,7 @@ export class EmbedCardManager {
           if (message.ok) {
             this.applyResult(handle, message)
           } else {
-            this.applyError(handle, message.reason, message.anchor)
+            this.applyError(handle, message.reason, message.anchor, message.anchorDetail)
           }
         }
       }
@@ -1169,10 +1183,10 @@ export class EmbedCardManager {
           entry.lastReq.reqId === message.reqId) {
         // #336：image 载荷对卡片路径不可应用（嵌入卡片结构上不发图片请求
         // ——图片嵌入在装饰/渲染层分流图片管线；此处为防御性第二道防线）。
-        // #341 接入前：text 载荷同样按不可应用处理（#340 仅悬停浮层消费；
-        // refLoadedContentOfResult 的 text 投影为 #341 预留）
+        // #341：text 载荷接入卡片装载（窗口正文 + 导航字段）；其余不可应用
+        // 形态（pdf/web）仍按不可应用处理
         const converted = !stale && okMessage !== null ? refLoadedContentOfResult(okMessage) : null
-        const loaded = converted !== null && isRefLoadedMarkdown(converted) ? converted : null
+        const loaded = converted !== null && (isRefLoadedMarkdown(converted) || isTextLoaded(converted)) ? converted : null
         if (loaded !== null && okMessage !== null) {
           entry.loaded = loaded
           entry.lastKnown = { fsPath: okMessage.target.fsPath, version: okMessage.version }
@@ -1194,6 +1208,50 @@ export class EmbedCardManager {
   notifyImageResult(msg: { reqId: number; ok: boolean; src?: string; reason?: string }): void {
     for (const handle of this.active.values()) {
       handle.content.notifyImageResult(msg)
+    }
+  }
+
+  /**
+   * #341（P3-09）text token 分层推送路由（syncController 转发 hover.tokens）：
+   * 按在场 handle 的内容挂载配对（instanceId = occurrence/hostId；版本与
+   * 当前 target 比对在 RefContentMount.applyTextTokens——迟到/过期 token
+   * 不覆盖新正文，释放后的挂载拒绝）。任一挂载消费即返回 true（消息非
+   * 本管理器消费时返回 false——syncController 据此观测，不发回执）。
+   */
+  notifyTokens(message: {
+    instanceId: string
+    reqId: number
+    ok: boolean
+    layer?: 'textmate' | 'semantic'
+    version?: number
+    colors?: string[]
+    tokens?: number[]
+  }): boolean {
+    let consumed = false
+    for (const handle of this.active.values()) {
+      if (handle.content.applyTextTokens(message)) {
+        consumed = true
+      }
+    }
+    return consumed
+  }
+
+  /**
+   * #341（P3-09）外观代次广播路由（appearance.changed——主题/颜色自定义/
+   * 语言字体设置/扩展清单变化）：在场 text 嵌入卡静默重载（正文载荷含
+   * 语言级字体，token 随 render 重取；重载带 anchorOptional——已打开视图
+   * 的窗口与定位合法钳制）。Markdown 卡不重载（CSS 变量自带跟随）。
+   */
+  notifyAppearanceChanged(): void {
+    for (const entry of [...this.entries.values()]) {
+      if (!isTextLoaded(entry.loaded) || entry.live) {
+        continue // 非 text 装载；Live 在场时 Reading 侧不重载（P2-04 语义——
+        // text 无端口，实际不可达，防御性排除）
+      }
+      const first = [...this.active.values()].find((h) => h.entry === entry)
+      if (first) {
+        this.requestLoad(first, { silent: true, reload: true })
+      }
     }
   }
 
@@ -1477,8 +1535,13 @@ export class EmbedCardManager {
   }
 
   /** 生效内部模式：手动覆盖优先；缺省跟随直接父视图（根级嵌入取根面板
-   *  模式，子卡取直接父嵌入的内部模式——Q19 语义） */
+   *  模式，子卡取直接父嵌入的内部模式——Q19 语义）。#341（P3-09）：text
+   *  装载恒 reading——只读文本不建编辑端口，父模式/覆盖/父切换均不改变
+   *  （「父文档模式改变不使 PDF／图片／文本／网页可写」的规格口径） */
   private effectiveMode(entry: EmbedEntry): 'reading' | 'live' {
+    if (isTextLoaded(entry.loaded)) {
+      return 'reading'
+    }
     if (entry.modeOverride) {
       return entry.modeOverride
     }
@@ -1491,8 +1554,12 @@ export class EmbedCardManager {
   }
 
   /** 手动切换内部模式（头部按钮 / 焦点嵌入的键位入口）：按 occurrence 记
-   *  忆，父模式切换不回滚 */
+   *  忆，父模式切换不回滚。#341：text 装载零操作（只读边界——按钮已在
+   *  refreshModeChrome 隐藏，此处为调用面防御） */
   private toggleMode(entry: EmbedEntry): void {
+    if (isTextLoaded(entry.loaded)) {
+      return
+    }
     entry.modeOverride = this.effectiveMode(entry) === 'live' ? 'reading' : 'live'
     this.applyInternalMode(entry)
   }
@@ -1608,9 +1675,10 @@ export class EmbedCardManager {
   /** 绑定目标编辑端口（可见且内部 Live 且已装载——装载完成的 watch 固定
    *  是宿主 bind 校验的前置）。幂等：已有端口或绑定在途直接返回。P2-06：
    *  浮窗根须在场挂载（已关浮窗的驻留 entry 不建端口——重开时按当次
-   *  装载重新绑定） */
+   *  装载重新绑定）。#341：text 装载不绑定（只读文本无编辑端口——
+   *  effectiveMode 恒 reading 已挡调用面，此处为调用分支防御） */
   private ensureLivePort(entry: EmbedEntry): void {
-    if (entry.live || !entry.loaded) {
+    if (entry.live || !entry.loaded || isTextLoaded(entry.loaded)) {
       return
     }
     if (entry.popupRoot && !this.isPopupRootOpen(entry)) {
@@ -2044,7 +2112,9 @@ export class EmbedCardManager {
       return
     }
     const loaded = entry.loaded
-    if (loaded && loaded.selector !== undefined && loaded.selector.kind !== 'full' &&
+    // #341：text 装载无 Markdown 选择器/端口（locateLiveInstance 只在 live
+    // 端口 init 后到达——text 结构性不可达，窄化为防御性跳过）
+    if (loaded && !isTextLoaded(loaded) && loaded.selector !== undefined && loaded.selector.kind !== 'full' &&
       loaded.range.start > 0 && loaded.range.start <= view.state.doc.length) {
       const at = loaded.range.start
       view.dispatch({ selection: { anchor: at }, effects: EditorView.scrollIntoView(at) })
@@ -2312,8 +2382,21 @@ export class EmbedCardManager {
     }
   }
 
-  /** 模式按钮 chrome：图标与悬停词指向另一态 */
+  /** 模式按钮 chrome：图标与悬停词指向另一态。#341：text 装载无内部 Live
+   *  语义——模式按钮隐藏（Tab 不可达；装载完成前后都经 refreshModeChrome
+   *  收敛——装载前按 entry.loaded 判定，重挂路径同样命中）。恢复分支尊重
+   *  P2-09 范围锁（dataset['locked']——父不在状态库的锁 Reading 不被本
+   *  刷新翻转） */
   private refreshModeChrome(handle: EmbedCardHandle): void {
+    if (isTextLoaded(handle.entry.loaded)) {
+      handle.modeBtn.style.display = 'none'
+      handle.modeBtn.tabIndex = -1
+      return
+    }
+    if (handle.modeBtn.dataset['locked'] !== '1') {
+      handle.modeBtn.style.display = ''
+      handle.modeBtn.tabIndex = 0
+    }
     const mode = this.effectiveMode(handle.entry)
     const toLive = mode !== 'live'
     const label = t(toLive ? 'embed.modeToLive' : 'embed.modeToReading')
@@ -2919,12 +3002,15 @@ export class EmbedCardManager {
         continue
       }
       const fmSection = handle.contentEl.querySelector('.vsidian-hover-fm')
+      const loaded = handle.entry.loaded
       out.push({
         inner: handle.entry.inner,
         state: handle.display,
         note: handle.note,
         blocks: handle.contentEl.querySelectorAll(`.${READING_CLASS_NAMES.block}`).length,
-        scope: handle.entry.loaded?.scope ?? '',
+        // #341：text 装载无 Markdown scope 语义（窗口/落点在 textNav——
+        // 探针按形态取 textStats 观测）
+        scope: loaded !== null && !isTextLoaded(loaded) ? loaded.scope : '',
         fm: fmSection ? (handle.entry.content.fmExpanded ? 'expanded' : 'collapsed') : 'none',
         maxHeightPx: Number.parseInt(handle.scrollEl.style.maxHeight, 10) || 0,
         host: handle.host,
@@ -2934,6 +3020,9 @@ export class EmbedCardManager {
         // #224 内容文本字符数（集成断言未保存修改推送后的刷新可见性）
         textLen: (handle.contentEl.textContent ?? '').length,
         viewStats: handle.content.getStats(),
+        // #341（P3-09）text 视图虚拟化统计（markdown 为 null）——DOM 常驻
+        // 受视口/窗口约束的观测面（renderedLines 远小于 totalLines）
+        textStats: handle.content.getTextStats(),
         internalMode: this.effectiveMode(handle.entry),
         liveBound: handle.entry.live?.portId != null,
         livePortId: handle.entry.live?.portId ?? null,
@@ -3443,9 +3532,10 @@ export class EmbedCardManager {
     }
     const converted = refLoadedContentOfResult(message)
     // #336：image 载荷对卡片路径不可应用（图片嵌入经装饰/渲染层分流图片
-    // 管线，不经卡片请求——防御性第二道防线与 #333 同口径）；#341 接入
-    // 前 text 载荷同样按不可应用处理（#340 仅悬停浮层消费，同上）
-    const loaded = converted !== null && isRefLoadedMarkdown(converted) ? converted : null
+    // 管线，不经卡片请求——防御性第二道防线与 #333 同口径）；#341：text
+    // 载荷接入卡片装载（同一 TextRefView 渲染管线）；其余不可应用形态
+    // （pdf/web）释放租约呈现错误分态
+    const loaded = converted !== null && (isRefLoadedMarkdown(converted) || isTextLoaded(converted)) ? converted : null
     if (loaded === null) {
       releaseRefSourceLease(this.context, message.sourceLeaseId)
       handle.entry.lastReq = null
@@ -3491,6 +3581,9 @@ export class EmbedCardManager {
     if (this.effectiveMode(handle.entry) === 'live') {
       this.ensureLivePort(handle.entry)
     }
+    // #341：装载形态确定后收敛模式 chrome（text 隐藏模式按钮——装载前
+    // 未知形态时按钮在场，此处按 loaded 形态收敛；markdown 路径幂等）
+    this.refreshModeChrome(handle)
     // 顶部文件名：装载后为目标根内相对路径
     const titleEl = handle.cardEl.querySelector<HTMLElement>(`.${EMBED_CARD_CLASS_NAMES.title}`)
     if (titleEl) {
@@ -3511,10 +3604,17 @@ export class EmbedCardManager {
     // #224 目标订阅（成功装载后；幂等——目标身份变化时先释放旧订阅）
   }
 
-  /** 错误分态：就地 i18n 文案（不弹宿主通知；anchor-missing 附锚点原文） */
-  private applyError(handle: EmbedCardHandle, reason: Extract<HoverPreviewResult, { ok: false }>['reason'], anchor?: string): void {
+  /** 错误分态：就地 i18n 文案（不弹宿主通知；anchor-missing 与 anchor-invalid
+   *  附锚点原文；#341 起 anchor-invalid 的 text 细分（format/range-order/
+   *  out-of-bounds/line-outside-window）与浮层同文案面透传） */
+  private applyError(
+    handle: EmbedCardHandle,
+    reason: Extract<HoverPreviewResult, { ok: false }>['reason'],
+    anchor?: string,
+    anchorDetail?: 'format' | 'range-order' | 'out-of-bounds' | 'line-outside-window',
+  ): void {
     handle.entry.lastReq = null
-    this.applyDisplay(handle, 'error', refErrorText(reason, targetOfInner(handle.entry.inner), anchor))
+    this.applyDisplay(handle, 'error', refErrorText(reason, targetOfInner(handle.entry.inner), anchor, anchorDetail))
   }
 
   /** 显示态施加（loading/content 切换与状态行文案） */

@@ -3660,8 +3660,8 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "views": [
       "reading"
     ],
-    "states": "悬停浮层内容态的 text 形态（markdown 回包不经过本视图）；行号列可由原生 editor.lineNumbers 生效值隐藏（gutter display:none）。",
-    "dom": "挂浮层 .vsidian-hover-popup-scroll 内容容器内（与 Markdown Reading 容器互斥——text 装载时虚拟阅读视图已释放）；行元素 white-space:pre、高度由语言级字号 ×1.5 行高计算，窗口层 translateY 位移。",
+    "states": "悬停浮层内容态的 text 形态（markdown 回包不经过本视图）；#341（P3-09）起嵌入卡内容态同形态（text 装载恒只读——模式按钮隐藏、零编辑端口）；行号列可由原生 editor.lineNumbers 生效值隐藏（gutter display:none）。",
+    "dom": "挂浮层 .vsidian-hover-popup-scroll 内容容器内（与 Markdown Reading 容器互斥——text 装载时虚拟阅读视图已释放）；#341 起同一视图亦挂嵌入卡内容区（.vsidian-embed-card 内 Reading 容器——独占行/混排提升宿主/表格格内/Live widget 容器无关，不为容器复制视图实现）；行元素 white-space:pre、高度由语言级字号 ×1.5 行高计算，窗口层 translateY 位移。",
     "example": ".vsidian-text-view {\n  display: flex;\n  font-family: var(--vscode-editor-font-family, monospace);\n  color: var(--vscode-editor-foreground, inherit);\n}\n.vsidian-text-gutter { user-select: none; color: var(--vscode-editorLineNumber-foreground, #858585); }\n.vsidian-text-code { overflow-x: auto; overflow-y: hidden; }\n.vsidian-text-line { white-space: pre; }",
     "obsidian": {
       "counterpart": ".hover-popover 内代码文件的阅读呈现（Obsidian 无独立类名承诺）",
@@ -3670,7 +3670,9 @@ export const STYLE_GUIDE_ENTRIES: readonly StyleContractEntry[] = [
     "verification": [
       "单元 textViewCssContract：flex 双列/行号不可选与变量族/横向滚动/white-space pre/虚拟化窗口层规则钉住",
       "单元 textRefContent：视图结构、行号绝对行、语言级字体内联、token 分层应用与版本竞态仲裁",
-      "浏览器 textHover：真实指针悬停 + 宿主回包注入——绘制层计算色断言（语法层 rgb(86,156,214)、语义覆盖 rgb(0,255,170)）、行号、#line 定位、#range 硬窗口不可滚达、锚点非法分态、外观广播静默重载、零写回"
+      "单元 embedText（#341）：嵌入卡 text 装载/只读边界/失效与外观广播重载/token 配对与版本仲裁/回收缓存",
+      "浏览器 textHover：真实指针悬停 + 宿主回包注入——绘制层计算色断言（语法层 rgb(86,156,214)、语义覆盖 rgb(0,255,170)）、行号、#line 定位、#range 硬窗口不可滚达、锚点非法分态、外观广播静默重载、零写回",
+      "浏览器 textEmbed（#341）：嵌入容器矩阵（独占行/混排/表格格内/Live widget）真实布局——视口约束 DOM 常驻、#range 硬窗口不可滚达与行号绝对、token 计算色、occurrence 滚动独立、视口回收重挂与缓存零重发"
     ],
     "introduced": "#340（2026-10-04）"
   },
@@ -6100,8 +6102,8 @@ export const STYLE_GUIDE_EN_OVERRIDES: Readonly<Record<string, StyleContractEntr
   },
   "hover-text-view": {
     "purpose": "The readable-text hover view (#340 / P3-08): when hovering a wikilink that points to a code/config text attachment, the popup content area renders an editor-like read-only presentation — a line-number gutter, layered token coloring (the syntax layer paints first, the semantic layer overlays per character range once it arrives — the same stacking as the native editor), and language-scoped font family/size/ligatures (carried by the payload, falling back to the editor default variable family when absent). Fixed-height virtualization: only visible lines plus a buffer are mounted, keeping the full-text model separate from resident DOM (the #341 embed reuses the same view). Read-only boundary: no input port at all (selection/copy uses the browser-native text selection, and the gutter is user-select:none so copies never sweep line numbers); with a #range hard window, out-of-range lines never enter the payload (structurally unreachable by scrolling). Zero new public CSS variables — colors all follow theme variables or inline token values (computed by the host appearance service).",
-    "states": "The text shape of the hover popup content state (Markdown result payloads never pass through this view); the gutter can be hidden by the effective editor.lineNumbers value (gutter display:none).",
-    "dom": "Attached inside the popup .vsidian-hover-popup-scroll content container (mutually exclusive with the Markdown reading container — the virtual reading view is released once text content takes over the mount); line elements use white-space:pre with heights computed from the language-scoped font size × a 1.5 line-height factor, and the window layer shifts via translateY.",
+    "states": "The text shape of the hover popup content state (Markdown result payloads never pass through this view); since #341 (P3-09) the embed-card content state takes the same shape (text loads are permanently read-only — the mode button is hidden, zero edit ports); the gutter can be hidden by the effective editor.lineNumbers value (gutter display:none).",
+    "dom": "Attached inside the popup .vsidian-hover-popup-scroll content container (mutually exclusive with the Markdown reading container — the virtual reading view is released once text content takes over the mount); since #341 the same view is also attached inside embed-card content areas (the Reading container inside .vsidian-embed-card — container-agnostic across standalone lines, promoted mixed hosts, table cells and Live widgets, with no per-container copy of the view implementation); line elements use white-space:pre with heights computed from the language-scoped font size × a 1.5 line-height factor, and the window layer shifts via translateY.",
     "obsidian": {
       "counterpart": ".hover-popover reading of code files (no standalone class-name promise in Obsidian)"
     }
