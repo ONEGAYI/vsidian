@@ -118,7 +118,10 @@ export const REF_CLOSE_DIALOG_CLASS_NAMES = {
   cancel: 'vsidian-ref-close-cancel',
 } as const
 
-/** P2-05 重放豁免注解：确认删除后重放被拦事务（changeFilter 见注解放行） */
+/** P2-05 重放豁免注解：确认删除后重放被拦事务（changeFilter 见注解放行）。
+ *  #321 起 A 主编辑器与嵌入实例内（B）的删除拦截共用：重放事务带注解
+ *  即被宿主视图自身的 filter 放行（filter 按 view 装配，A/B 重放各入
+ *  各的 view，无交叉豁免） */
 const refCloseReplay = Annotation.define<boolean>()
 
 /** 嵌入卡片稳定类名（样式契约 content 域 reading-embed-card 条目同源） */
@@ -1758,7 +1761,76 @@ export class EmbedCardManager {
           })
         },
       },
-    }, [this.embedEscapeKeymap(entryRef), EditorState.transactionExtender.of((tr) => {
+    }, [this.embedEscapeKeymap(entryRef), EditorState.changeFilter.of((tr: Transaction): boolean => {
+      // #321 孙卡删除拦截（与 A 层 mainDocChangeFilter 同构）：B 内删除
+      // 覆盖孙卡引用区间的变更先拦截确认——孙卡 clean 时静默完成删除、
+      // dirty 时弹三项确认模态。坐标空间 = B 实例自身 doc；候选 = 本 B
+      // 的直接子卡（remapChildSources 同款筛选 + 端口在场——dirty 权威
+      // 在宿主侧，同步 filter 拿不到，故与 A 层同因无条件拦再异步分岔）。
+      // 确认后的重放事务带 refCloseReplay 豁免注解（本 filter 放行；A 层
+      // filter 只看根级条目且装配在 A view，不经过）
+      if (!tr.docChanged || tr.annotation(refCloseReplay) === true) {
+        return true
+      }
+      const doc = tr.startState.doc
+      const actives: EmbedEntry[] = []
+      for (const child of this.entries.values()) {
+        if (child.live?.portId && !child.popupRoot && !child.collapsed &&
+            child.content.source.parentInstanceId === entryRef.hostId &&
+            child.sourceEnd <= doc.length) {
+          actives.push(child)
+        }
+      }
+      if (actives.length === 0) {
+        return true
+      }
+      let hit: EmbedEntry | null = null
+      for (const child of actives) {
+        let matched = false
+        tr.changes.iterChanges((fromA, toA) => {
+          if (!matched && fromA <= child.sourceStart && toA >= child.sourceEnd && toA > fromA) {
+            matched = true
+          }
+        })
+        if (!matched) {
+          continue
+        }
+        // 保文本重定位放行（P2-08/#320 同口径）：命中（文本在别处存活）
+        // 或 'over-budget'（无法判定存活）均非真删除——不拦；null（源文
+        // 不存活）才是删除引用
+        const relocated = relocatedInterval(doc, tr.changes, child.sourceStart, child.sourceEnd, [])
+        if (relocated !== null) {
+          continue
+        }
+        hit = child
+        break
+      }
+      if (!hit) {
+        return true // 不相关变更（未覆盖活跃孙卡区间）：放行
+      }
+      if (this.closeDialog || this.closePendingDelete) {
+        return false // 已有意图在处理：丢弃新命中（先关闭当前模态）
+      }
+      const parentInstance = instanceLive.instance
+      if (!parentInstance) {
+        return true // 防御：实例身份缺失（理论不可达——拦截必在自身事务上）
+      }
+      // 记录被拦事务（变更 spec + B 全文快照守卫 + 父 B 上下文）并发起
+      // 孙卡的删除退出意图（requestClose/模态/宿主链以 EmbedEntry 为键，
+      // 孙卡有独立 portId/fsPath——零改动复用）
+      const changes: { from: number; to: number; insert: string }[] = []
+      tr.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+        changes.push({ from: fromA, to: toA, insert: inserted.toString() })
+      })
+      this.closePendingDelete = {
+        entry: hit,
+        changes,
+        docSnapshot: doc.toString(),
+        parent: { entry: entryRef, instance: parentInstance },
+      }
+      this.requestClose(hit, 'delete')
+      return false
+    }), EditorState.transactionExtender.of((tr) => {
       // B 实例事务的孙卡键迁移（review-loops B-1）：docView 更新（widget
       // toDOM）前迁移，新 widget 按新坐标重挂即命中——与根级
       // rootOwnedViewExtensions 的 remapSources 装配同构（每实例只动自己
@@ -2349,13 +2421,22 @@ export class EmbedCardManager {
   /** 在途 close.query 的配对上下文（reqId → 发起 entry/intent；回包按
    *  reqId 配对后转模态或直接完成退出） */
   private closePendingQuery: { entry: EmbedEntry; intent: CloseIntent; reqId: number } | null = null
-  /** 拦截的删除活跃引用事务（确认后重放到主编辑器；取消即丢弃） */
+  /** 拦截的删除活跃引用事务（确认后重放；取消即丢弃）。快照与重放目标
+   *  按拦截来源分上下文：A 主编辑器拦截（parent = null）重放入 A、守卫
+   *  比对 A 全文（既有语义）；#321 嵌入实例内删除孙卡引用行的 B 上下文
+   *  重放入直接父 B 的编辑器、守卫比对 B 全文 */
   private closePendingDelete: {
     entry: EmbedEntry
-    /** 被拦事务的变更 spec（A 文档 LF 坐标） */
+    /** 被拦事务的变更 spec（拦截来源文档的 LF 坐标：A 文档或父 B 全文） */
     changes: { from: number; to: number; insert: string }[]
-    /** 拦截时刻的整篇 A 文本快照（重放守卫：拦截以来 A 完全未变才重放） */
+    /** 拦截时刻的重放宿主整篇文本快照（重放守卫：拦截以来宿主文档完全
+     *  未变才重放） */
     docSnapshot: string
+    /** #321 B 上下文：拦截时刻的直接父 B entry 与其实例引用（重放目标
+     *  与守卫基准切到父 B——孙卡 entry.live 在重放时可能已 teardown，父
+     *  引用在拦截时刻定格；实例已被销毁/替换则保守放弃重放）。null =
+     *  A 主编辑器上下文（既有语义） */
+    parent: { entry: EmbedEntry; instance: LiveEditorInstance } | null
   } | null = null
 
   /** 意图就此死亡（无确认链发起：无会话/暂停/他意图在场/会话身份缺失）
@@ -2614,8 +2695,11 @@ export class EmbedCardManager {
     entry.popupHost?.onExplicitCloseSettled?.(intent)
   }
 
-  /** 重放被拦的删除事务（守卫：拦截以来 A 完全未变才重放——任何漂移都
-   *  保守放弃，保持现状由用户重新删除） */
+  /** 重放被拦的删除事务（守卫：拦截以来重放宿主完全未变才重放——任何
+   *  漂移都保守放弃，保持现状由用户重新删除）。A 上下文入 A 主编辑器；
+   *  #321 B 上下文入拦截时刻的直接父 B 编辑器（孙卡 entry.live 此时
+   *  可能已 teardown——父 entry/实例引用在拦截时刻定格，实例已被销毁
+   *  或替换即放弃重放） */
   private replayPendingDelete(): void {
     const pending = this.closePendingDelete
     this.closePendingDelete = null
@@ -2623,13 +2707,21 @@ export class EmbedCardManager {
       return
     }
     pending.entry.pendingCloseIntent = null
-    const view = this.context.mainEditorView?.()
+    let view: EditorView | null | undefined
+    if (pending.parent) {
+      if (pending.parent.entry.live?.instance !== pending.parent.instance) {
+        return // 父 B 实例已销毁（模式切换/父回收）或重绑替换：保守放弃
+      }
+      view = pending.parent.instance.getView()
+    } else {
+      view = this.context.mainEditorView?.()
+    }
     if (!view) {
       return
     }
     const current = view.state.doc.toString()
     if (current !== pending.docSnapshot) {
-      return // 模态期间 A 被修改：不重放（保守——引用保留，用户可重删）
+      return // 模态期间宿主文档（A 或父 B）被修改：不重放（保守——引用保留，用户可重删）
     }
     view.dispatch({
       changes: pending.changes,
@@ -2702,6 +2794,7 @@ export class EmbedCardManager {
         entry: hit,
         changes,
         docSnapshot: tr.startState.doc.toString(),
+        parent: null, // A 主编辑器上下文：重放入 A（既有语义）
       }
       this.requestClose(hit, 'delete')
       return false
@@ -3109,6 +3202,29 @@ export class EmbedCardManager {
     const entry = this.entryOfInner(inner, occurrence)
     const view = this.context.mainEditorView?.()
     if (!entry || !view) {
+      return false
+    }
+    const doc = view.state.doc
+    if (entry.sourceStart > doc.length || entry.sourceEnd > doc.length) {
+      return false
+    }
+    const line = doc.lineAt(Math.min(entry.sourceStart, doc.length))
+    const to = line.number < doc.lines ? line.to + 1 : line.to // 含行尾换行
+    view.dispatch({ changes: { from: line.from, to } })
+    return true
+  }
+
+  /** #321 测试钩子：在指定孙卡的直接父 B 编辑器派发删除其引用行的事务
+   *  （真实事务管线；命中活跃孙卡区间走 B 侧拦截确认链路——与
+   *  testDeleteRef 同形态，宿主换直接父 B 的内部编辑器） */
+  testDeleteChildRef(inner: string, occurrence = 0): boolean {
+    const entry = this.entryOfInner(inner, occurrence)
+    const parentId = entry?.content.source.parentInstanceId
+    if (!entry || parentId === undefined) {
+      return false
+    }
+    const view = this.entryOfHostId(parentId)?.live?.instance?.getView()
+    if (!view) {
       return false
     }
     const doc = view.state.doc

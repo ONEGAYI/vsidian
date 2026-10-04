@@ -2224,6 +2224,11 @@ export class WebviewSyncController {
         // P2-05 测试钩子：主编辑器派发删除指定引用行事务（真实事务管线）
         this.embedCards?.testDeleteRef(message.inner, message.occurrence ?? 0)
         break
+      case 'embed.test.deleteChildRef':
+        // #321 测试钩子：指定孙卡的直接父 B 编辑器派发删除其引用行事务
+        //（真实事务管线——B 侧拦截确认链路的断言载体）
+        this.embedCards?.testDeleteChildRef(message.inner, message.occurrence ?? 0)
+        break
       case 'embed.test.conflictAction':
         // P2-12 测试钩子：触发指定嵌入的冲突三项动作（与选择条按钮同一
         // 处理器链路）

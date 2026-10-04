@@ -1,7 +1,8 @@
 // P2-09（#286）生产控制器 + Chromium 布局：递归引用的直接父模式与逐层
 // 目标编辑——B 内部 Live 编辑器挂孙卡（独占行/混排/表格格内）、C 跟随
 // 绑定独立端口、在 C 真实键入只写 C、父根切换不覆写手动选择、循环截断
-// 可见、父切模式编辑器移交不丢现场。
+// 可见、父切模式编辑器移交不丢现场；#321：B 内删除孙卡引用行对齐 A 层
+// 确认拦截（dirty 孙卡三项模态、取消保留、确认后 B 中删除完成）。
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -215,8 +216,60 @@ try {
     `回环错误文案在场（实际 ${JSON.stringify(loopState)}）`)
   await page3.close()
 
+  // ---- 场景 4（#321）：B 内删除孙卡引用行——dirty 孙卡弹三项确认（对齐 A 层） ----
+  const page4 = await newPage()
+  const b4 = '# 父级B标题\n\n![[孙级C]]\n\nB 尾部段落。\n'
+  const c4 = '# 孙级C标题\n\n孙级C正文一段。\n'
+  await page4.evaluate(([b, c]) => window.setupRecursiveTargets(b, c), [b4, c4])
+  await page4.evaluate(() => window.initRecursiveDoc('![[父级B]]\n', 'reading'))
+  await waitUntil(page4, () => window.recursiveCardPaint('父级B.md').present, 'B 卡装载')
+  await page4.evaluate(() => window.clickRecursiveMode('父级B.md'))
+  await waitUntil(page4, () => window.recursiveCardPaint('父级B.md').hasEditor, 'B 编辑器在场')
+  await waitUntil(page4, () => window.recursiveCardPaint('孙级C.md').hasEditor === true, '孙卡 C Live 在场')
+  // 孙卡内真实键盘输入（dirty——未保存修改在场）
+  assert.equal(await page4.evaluate(() => window.focusRecursiveEditor('孙级C.md', '# 孙级C标题\n\n'.length)), true,
+    '孙卡编辑器可聚焦')
+  await page4.keyboard.type('【孙未存】')
+  await waitUntil(page4, () => window.recursiveModel('孙级C')?.dirty === true, '孙卡 dirty（未保存输入在场）')
+  const bTextBefore4 = await page4.evaluate(() => window.recursiveEditorText('父级B.md'))
+  // B 编辑器内删除孙卡引用行：事务被拦（B 不先写入）+ 三项模态在场（目标 = 孙卡）
+  assert.equal(await page4.evaluate(() => window.recursiveDeleteGrandchildLine()), true, 'B 内删除事务发出')
+  await waitUntil(page4, () => window.recursiveCloseDialogState().open, '孙卡删除触发三项模态')
+  assert.equal(await page4.evaluate(() => window.recursiveEditorText('父级B.md')), bTextBefore4,
+    '删除被拦截：B 原文未变（不把未确认删除先写入 B）')
+  const dialog4 = await page4.evaluate(() => window.recursiveCloseDialogState())
+  assert.ok(dialog4.text.includes(zhCn['embed.closeDialogTitle']), '模态标题在场（复用既有文案）')
+  assert.ok(dialog4.text.includes('孙级C.md'), '模态指明孙卡目标文件名')
+  // 取消：B 原引用保留、孙卡现场保持
+  assert.equal(await page4.evaluate(() => window.recursiveDialogClick('cancel')), true)
+  await waitUntil(page4, () => !window.recursiveCloseDialogState().open, '模态关闭（取消）')
+  assert.equal(await page4.evaluate(() => window.recursiveEditorText('父级B.md')), bTextBefore4,
+    '取消后 B 原引用保留')
+  assert.equal((await page4.evaluate(() => window.recursiveCardOf('孙级C')))?.liveBound, true,
+    '取消后孙卡现场保持')
+  // 再次删除 → 保存并关闭：B 中删除完成（重放落地）+ 孙卡保存
+  assert.equal(await page4.evaluate(() => window.recursiveDeleteGrandchildLine()), true)
+  await waitUntil(page4, () => window.recursiveCloseDialogState().open, '再次删除触发模态')
+  assert.equal(await page4.evaluate(() => window.recursiveDialogClick('save')), true)
+  await waitUntil(page4, () => !window.recursiveCloseDialogState().open, '保存确认后模态关闭')
+  await waitUntil(page4, () => {
+    const text = window.recursiveEditorText('父级B.md')
+    return !text.includes('![[孙级C]]') ? text : null
+  }, '确认后 B 中孙卡引用行删除完成（重放落地）')
+  const cModel4 = await waitUntil(page4, () => {
+    const model = window.recursiveModel('孙级C')
+    return model?.dirty === false ? model : null
+  }, '孙卡目标已保存')
+  assert.ok((cModel4?.text ?? '').includes('【孙未存】'), '孙卡编辑随保存落盘')
+  // 重放经 B 编辑端口出站：B 权威模型收到该删除（孙引用行消失）
+  await waitUntil(page4, () => !window.recursiveModel('父级B')?.text.includes('![[孙级C]]'),
+    'B 权威文本同步删除')
+  assert.equal(await page4.evaluate(() => window.recursiveMainText()), '![[父级B]]\n',
+    'A 面板零改（B 层删除不触 A）')
+  await page4.close()
+
   assert.deepEqual(errors, [], '无浏览器运行时错误')
-  console.log('[递归Live][PASS] 直接父跟随/父Live编辑器挂孙卡（独占行/混排/格内）/逐层目标编辑与保存隔离/手动独立与父切换保持/循环截断/跟随回落回收与恢复')
+  console.log('[递归Live][PASS] 直接父跟随/父Live编辑器挂孙卡（独占行/混排/格内）/逐层目标编辑与保存隔离/手动独立与父切换保持/循环截断/跟随回落回收与恢复/孙卡删除对齐A层确认拦截（#321）')
 } finally {
   await browser.close()
 }

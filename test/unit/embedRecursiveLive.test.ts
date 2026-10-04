@@ -138,15 +138,22 @@ function respondBound(h: Harness, fsPath: string, docUri: string, text: string, 
 }
 
 /** 模拟 B 的内部 Live 编辑器 widget toDOM 的孙卡挂载（生产同入口
- *  mountCardInto：source 语义与 liveEmbed 孙卡 widget 一致） */
-function mountGrandchild(h: Harness, parentHostId: string, treeId: string): HTMLElement {
+ *  mountCardInto：source 语义与 liveEmbed 孙卡 widget 一致）。from/to
+ *  缺省取 B_TEXT 独占行区间（#321 表格形态用例传自定义区间） */
+function mountGrandchild(
+  h: Harness,
+  parentHostId: string,
+  treeId: string,
+  from = C_FROM,
+  to = C_TO,
+): HTMLElement {
   const host = document.createElement('div')
   document.body.appendChild(host)
-  h.manager.mountCardInto(host, C_INNER, C_FROM, C_TO, 'live', {
+  h.manager.mountCardInto(host, C_INNER, from, to, 'live', {
     panelDocUri: SESSION.docUri ?? '',
     sourceDocUri: B_FS,
-    range: { start: C_FROM, end: C_TO },
-    occurrence: `${parentHostId}/${C_FROM}::${C_INNER}`,
+    range: { start: from, end: to },
+    occurrence: `${parentHostId}/${from}::${C_INNER}`,
     parentInstanceId: parentHostId,
     depth: 2,
     treeId,
@@ -519,5 +526,154 @@ describe('P2-09 递归补齐（review-loops 第一轮回归）', () => {
     expect(probe?.liveBound).toBe(true)
     expect(probe?.state).toBe('content')
     setLiveEmbedCards(null)
+  })
+})
+
+// ---- #321 嵌入实例内删除孙卡引用行（B 侧对齐 A 层确认拦截）----
+
+describe('#321 嵌入实例内删除孙卡引用行', () => {
+  /** B（根级嵌入）手动 Live + 孙卡跟随建端口后的现场（孙卡 live 在场） */
+  function setupGrandchildLive(
+    h: Harness,
+    bText = B_TEXT,
+    cFrom = C_FROM,
+    cTo = C_TO,
+  ): { root: HTMLElement; bHostId: string; bEditor: EditorView } {
+    const root = loadRootCard(h, '![[目标笔记]]\n', bText)
+    cardOf(root).querySelector<HTMLButtonElement>(`.${EMBED_CARD_CLASS_NAMES.mode}`)!.click()
+    const bHostId = lastBindRequest(h).occurrence
+    respondBound(h, B_FS, B_DOC_URI, bText)
+    mountGrandchild(h, bHostId, bHostId, cFrom, cTo)
+    loadGrandchild(h)
+    respondBound(h, C_FS, C_DOC_URI, C_TEXT)
+    const bEditor = editorIn(root)
+    if (!bEditor) {
+      throw new Error('B 编辑器未建立')
+    }
+    expect(h.manager.probe().find((p) => p.inner === C_INNER)?.liveBound).toBe(true)
+    return { root, bHostId, bEditor }
+  }
+
+  /** 删除孙卡引用整行（含换行——用户删行的真实事务形态，与 A 层用例同款） */
+  function deleteGrandchildLine(bEditor: EditorView, cFrom: number): void {
+    const line = bEditor.state.doc.lineAt(cFrom)
+    bEditor.dispatch({ changes: { from: line.from, to: line.to + 1 } })
+  }
+
+  function lastQuery(h: Harness) {
+    return [...h.sent].reverse().find((m) => m.kind === 'refEdit.close.query')
+  }
+
+  /** 应答在途 close.query（dirty 分岔驱动） */
+  function answerCloseState(h: Harness, dirty: boolean, version = 3): void {
+    const query = lastQuery(h)
+    if (!query || query.kind !== 'refEdit.close.query') {
+      throw new Error('close.query 未发出')
+    }
+    h.manager.notifyCloseState({
+      kind: 'refEdit.close.state', reqId: query.reqId, fsPath: C_FS,
+      dirty, version, relPath: '孙目标.md',
+    })
+  }
+
+  function dialogBox(): HTMLElement | null {
+    return document.querySelector('.vsidian-ref-close-dialog')
+  }
+
+  function clickDialogButton(kind: 'save' | 'discard' | 'cancel'): void {
+    const btn = document.querySelector<HTMLButtonElement>(`.vsidian-ref-close-${kind}`)
+    if (!btn) {
+      throw new Error(`模态按钮 ${kind} 不在场`)
+    }
+    btn.click()
+  }
+
+  it('B 内删除覆盖孙卡区间的变更被拦：B doc 不变、close.query 出站且目标为孙卡', () => {
+    const h = makeHarness('reading')
+    const { bEditor } = setupGrandchildLive(h)
+    deleteGrandchildLine(bEditor, C_FROM)
+    // 事务被吞（拦截语义）：B 全文保持原样，不先写入删除
+    expect(bEditor.state.doc.toString()).toBe(B_TEXT)
+    const query = lastQuery(h)
+    expect(query && query.kind === 'refEdit.close.query').toBe(true)
+    if (query && query.kind === 'refEdit.close.query') {
+      expect(query.intent).toBe('delete')
+      expect(query.fsPath).toBe(C_FS) // 确认链目标 = 孙卡 C（非父 B、非根 A）
+    }
+  })
+
+  it('孙卡 clean：dirty=false 回包后静默完成删除（无模态、B 中删除重放成功）', () => {
+    const h = makeHarness('reading')
+    const { bEditor } = setupGrandchildLive(h)
+    deleteGrandchildLine(bEditor, C_FROM)
+    answerCloseState(h, false, 2)
+    // 干净目标：无确认模态，B 中删除直接完成（重放带豁免注解不被再拦）
+    expect(dialogBox()).toBeNull()
+    expect(bEditor.state.doc.toString()).not.toContain(`![[${C_INNER}]]`)
+    expect(bEditor.state.doc.toString()).toBe(B_TEXT.replace(`![[${C_INNER}]]\n`, ''))
+  })
+
+  it('孙卡 dirty：弹三项确认；取消保留 B 原引用，确认后 B 中删除完成', () => {
+    const h = makeHarness('reading')
+    const { bEditor } = setupGrandchildLive(h)
+    // 孙卡未保存修改（宿主权威 dirty 推送）
+    h.manager.notifyDirty({ kind: 'refEdit.dirty', fsPath: C_FS, dirty: true })
+    deleteGrandchildLine(bEditor, C_FROM)
+    answerCloseState(h, true)
+    expect(dialogBox()).toBeTruthy()
+    // 取消：B 原引用还原（拦截 spec 丢弃、无重放）
+    clickDialogButton('cancel')
+    expect(dialogBox()).toBeNull()
+    expect(bEditor.state.doc.toString()).toBe(B_TEXT)
+    // 重新删除 → 再确认（保存并关闭）：execute 目标为孙卡，closed 后 B 中删除完成
+    deleteGrandchildLine(bEditor, C_FROM)
+    answerCloseState(h, true, 4)
+    clickDialogButton('save')
+    const exec = [...h.sent].reverse().find((m) => m.kind === 'refEdit.close.execute')
+    expect(exec && exec.kind === 'refEdit.close.execute' && exec.action === 'save' &&
+      exec.fsPath === C_FS).toBe(true)
+    if (exec && exec.kind === 'refEdit.close.execute') {
+      h.manager.notifyCloseResult({
+        kind: 'refEdit.close.result', reqId: exec.reqId, fsPath: C_FS, outcome: 'closed',
+      })
+    }
+    expect(bEditor.state.doc.toString()).not.toContain(`![[${C_INNER}]]`)
+  })
+
+  it('B 内表格结构编辑（保文本重写孙卡行）不误拦（P2-08 语义镜像）', () => {
+    const h = makeHarness('reading')
+    // B 全文表格形态：孙引用在单元格内，列对换 = 整行覆盖重写但逐字保留源文
+    const bTable = ['# 目标笔记', '', '| a | b |', '| - | - |', `| ![[${C_INNER}]] | x |`, ''].join('\n')
+    const cFrom = bTable.indexOf(`![[${C_INNER}]]`)
+    const cTo = cFrom + `![[${C_INNER}]]`.length
+    const { bEditor } = setupGrandchildLive(h, bTable, cFrom, cTo)
+    const line = bEditor.state.doc.lineAt(cFrom)
+    bEditor.dispatch({
+      changes: { from: line.from, to: line.to, insert: `| x | ![[${C_INNER}]] |` },
+    })
+    // 保文本重定位命中：不是删除引用——放行不拦（无确认链打扰）
+    expect(bEditor.state.doc.toString()).not.toBe(bTable)
+    expect(h.sent.some((m) => m.kind === 'refEdit.close.query')).toBe(false)
+    expect(dialogBox()).toBeNull()
+  })
+
+  it('确认期间父 B 被修改：重放守卫放弃（引用保留可重删）', () => {
+    const h = makeHarness('reading')
+    const { bEditor } = setupGrandchildLive(h)
+    h.manager.notifyDirty({ kind: 'refEdit.dirty', fsPath: C_FS, dirty: true })
+    deleteGrandchildLine(bEditor, C_FROM)
+    answerCloseState(h, true)
+    expect(dialogBox()).toBeTruthy()
+    // 模态期间 B 全文漂移（孙卡区间外的其他编辑）：快照守卫失配
+    bEditor.dispatch({ changes: { from: 0, to: 0, insert: '前缀' } })
+    clickDialogButton('save')
+    const exec = [...h.sent].reverse().find((m) => m.kind === 'refEdit.close.execute')
+    if (exec && exec.kind === 'refEdit.close.execute') {
+      h.manager.notifyCloseResult({
+        kind: 'refEdit.close.result', reqId: exec.reqId, fsPath: C_FS, outcome: 'closed',
+      })
+    }
+    // 守卫放弃重放：孙引用保留（含漂移前缀），用户可重删
+    expect(bEditor.state.doc.toString()).toContain(`![[${C_INNER}]]`)
   })
 })

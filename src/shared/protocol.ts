@@ -171,6 +171,9 @@ export type HostToWebview =
   /** P2-05（#282）测试钩子：在主编辑器派发删除指定引用行的事务（真实
    *  事务管线——命中活跃引用区间的删除走拦截确认链路） */
   | { kind: 'embed.test.deleteRef'; inner: string; occurrence?: number }
+  /** #321 测试钩子：在指定孙卡的直接父 B 编辑器派发删除其引用行的事务
+   *  （真实事务管线——命中活跃孙卡区间的删除走 B 侧拦截确认链路） */
+  | { kind: 'embed.test.deleteChildRef'; inner: string; occurrence?: number }
   /** P2-12（#289）测试钩子：触发指定嵌入的冲突三项动作（与选择条按钮 /
    *  键位操作同一处理器链路；reopen 为收起态的再展开入口） */
   | {
@@ -3668,6 +3671,12 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
     case 'embed.test.dialogAction':
       return v.action === 'save' || v.action === 'discard' || v.action === 'cancel'
     case 'embed.test.deleteRef':
+      return (
+        typeof v.inner === 'string' && v.inner.length > 0 &&
+        (v.occurrence === undefined || isNonNegativeInt(v.occurrence))
+      )
+    case 'embed.test.deleteChildRef':
+      // #321 测试钩子：inner + 可选 occurrence 序号（deleteRef 同口径）
       return (
         typeof v.inner === 'string' && v.inner.length > 0 &&
         (v.occurrence === undefined || isNonNegativeInt(v.occurrence))
