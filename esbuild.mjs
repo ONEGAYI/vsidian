@@ -32,6 +32,7 @@
 import * as esbuild from 'esbuild'
 import { cp, mkdir, readdir, readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
+import { pdfBuildTargets } from './scripts/pdfBuildConfig.mjs'
 
 const production = process.argv.includes('--production')
 const watch = process.argv.includes('--watch')
@@ -97,15 +98,6 @@ const webviewBase = {
   plugins: [katexFontPlugin, katexMinJsPlugin],
 }
 
-/** #337 Chromium 114 双 polyfill（#334 探针结论，主线程与 worker 全局
- *  作用域独立、两侧同注；存在性检测——更高 Chromium 下自动跳过）：
- *  - Promise.withResolvers（Chromium 119+；缺它 pdfjs 6.x 顶层即抛）
- *  - ReadableStream async iteration（Chromium 124+；缺它 getTextContent
- *    抛 TypeError，文本层完全不可用——P3-07 前置） */
-const pdfBanner = {
-  js: `if (typeof Promise.withResolvers !== "function") { Promise.withResolvers = function () { let resolve, reject; const promise = new Promise((res, rej) => { resolve = res; reject = rej; }); return { promise, resolve, reject }; } }if (!ReadableStream.prototype[Symbol.asyncIterator]) { ReadableStream.prototype[Symbol.asyncIterator] = async function* () { const reader = this.getReader(); try { for (;;) { const { done, value } = await reader.read(); if (done) return; yield value; } } finally { reader.releaseLock(); } }; }`,
-}
-
 /** #337 PDF 资产复制（pdfjs-dist 运行时必要集，#334 探针生产候选布局）：
  *  cmaps 全量 + standard_fonts 全量（含 LiberationSans .ttf——PDF.js 内建
  *  文件名，禁止改名/转格式，release 白名单按路径例外）+ wasm 三件（裁掉
@@ -164,34 +156,10 @@ const targets = [
     outfile: 'out/webview/mermaid.js',
     ...webviewBase,
   },
-  {
-    // PDF.js 主库独立产物（#337）：动态 <script> 按需装载，pdfjsLib 挂
-    // 全局 __vsidianPdfjs（见 pdfMainEntry.ts）
-    entryPoints: ['src/webview/pdfMainEntry.ts'],
-    outfile: 'out/webview/pdfMain.js',
-    bundle: true,
-    platform: 'browser',
-    format: 'iife',
-    target: 'chrome114',
-    sourcemap: !production,
-    minify: production,
-    logLevel: 'info',
-    banner: pdfBanner,
-  },
-  {
-    // PDF.js worker 独立产物（#337）：单文件 iife，Blob URL 装配（见
-    // pdfWorkerEntry.ts）
-    entryPoints: ['src/webview/pdfWorkerEntry.ts'],
-    outfile: 'out/webview/pdfWorker.js',
-    bundle: true,
-    platform: 'browser',
-    format: 'iife',
-    target: 'chrome114',
-    sourcemap: !production,
-    minify: production,
-    logLevel: 'info',
-    banner: pdfBanner,
-  },
+  // PDF.js 双产物（#337）：配置单一事实源在 scripts/pdfBuildConfig.mjs
+  //（#346 修复轮 2 提取——浏览器测试侧 ensurePdfArtifacts 消费同一工厂，
+  // 相同 outfile 逐字段一致；banner/iife/chrome114 语义注释在彼处）
+  ...pdfBuildTargets(process.cwd(), { production }),
 ]
 
 if (!production) {

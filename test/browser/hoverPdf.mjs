@@ -11,7 +11,7 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
-import { build, artifactPath, chromium } from './runtime.mjs'
+import { build, artifactPath, chromium, ensurePdfArtifacts } from './runtime.mjs'
 import { buildZhLocaleIsland } from './localeIsland.mjs'
 import { buildThreePageColorPdf, buildMultiPageColorPdf } from '../pdfSample.mjs'
 
@@ -42,6 +42,8 @@ const { islandHtml, zhCnMessages: zhCn } = await buildZhLocaleIsland(root)
 // 真实 PDF 样本（三页红/绿/蓝；长文 12 页红绿蓝循环）——经 page.route fulfill 虚拟 URL
 const samplePdf = await buildThreePageColorPdf()
 const longPdf = await buildMultiPageColorPdf(12)
+// PDF 产物先确保在场再读取（CI 无预构建产物时按需构建，#346 修复轮 2）
+await ensurePdfArtifacts(root)
 const pdfMainJs = await readFile(path.join(root, 'out/webview/pdfMain.js'))
 const pdfWorkerJs = await readFile(path.join(root, 'out/webview/pdfWorker.js'))
 const LONG_PDF_URI = 'https://files.local/%E9%95%BF%E6%96%87.pdf'

@@ -2,6 +2,7 @@ import { build as esbuild } from 'esbuild'
 import { chromium as playwrightChromium } from 'playwright'
 import { appendFileSync } from 'node:fs'
 import path from 'node:path'
+import { pdfBuildTargets } from '../../scripts/pdfBuildConfig.mjs'
 
 export function artifactPath(root, ...parts) {
   return path.join(process.env.VSIDIAN_BROWSER_ARTIFACTS || path.join(root, 'out/test/browser'), ...parts)
@@ -62,4 +63,18 @@ export const chromium = {
       throw error
     }
   },
+}
+
+/** PDF 产物自足（#346 修复轮 2）：hoverPdf/embedPdf/pdfZoomCopyLinks 三套件
+ * 直接 readFile out/webview/pdfMain.js 与 pdfWorker.js，此前隐式依赖
+ * `npm run compile` 留在磁盘的产物——CI browser job 只有 npm ci + 按需构建
+ * fixture，产物缺失即 ENOENT 秒挂。读取前先经本入口构建：配置与 esbuild.mjs
+ * 主构建同源（scripts/pdfBuildConfig.mjs 单一事实源，相同 outfile 逐字段
+ * 一致——满足 buildBroker 防后写覆盖的 key 约束；无 plugins，走 broker IPC
+ * 复用）。不做磁盘存在性短路：每次运行经同一 build 通道重建，语义与套件
+ * fixture 构建一致（源码改动后产物必然新鲜，rm -rf out 亦自足）。 */
+export async function ensurePdfArtifacts(root) {
+  for (const target of pdfBuildTargets(root)) {
+    await build(target)
+  }
 }

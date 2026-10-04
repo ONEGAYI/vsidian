@@ -9,7 +9,7 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
-import { build, artifactPath, chromium } from './runtime.mjs'
+import { build, artifactPath, chromium, ensurePdfArtifacts } from './runtime.mjs'
 import { buildZhLocaleIsland } from './localeIsland.mjs'
 import { buildTextLinkPdf } from '../pdfSample.mjs'
 
@@ -33,6 +33,8 @@ const { islandHtml } = await buildZhLocaleIsland(root)
 
 const sample = await buildTextLinkPdf()
 const samplePdf = sample.bytes
+// PDF 产物先确保在场再读取（CI 无预构建产物时按需构建，#346 修复轮 2）
+await ensurePdfArtifacts(root)
 const pdfMainJs = await readFile(path.join(root, 'out/webview/pdfMain.js'))
 const pdfWorkerJs = await readFile(path.join(root, 'out/webview/pdfWorker.js'))
 const SAMPLE_URI = 'https://files.local/%E6%96%87%E6%9C%AC%E9%93%BE%E6%8E%A5.pdf'
