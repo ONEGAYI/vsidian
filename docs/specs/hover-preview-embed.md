@@ -908,3 +908,30 @@ P3-03 用原生对照证明 grammar／主题 include／用户 token 自定义／
 - 原生 Explorer 小浮窗已移四期 #330，父票 #228 保持开放，不将父跟踪票或四期作为子票前置。
 - PDF／文本研究只有可用路线通过且必要差异获接受才解除依赖，未实施功能与待人工验收分别记录。
 - 2026-10-04 锚点语法修订（双链限定 + 文本 #line／#range）经用户逐项确认后落档，受影响票据 #337／#340／#341 正文与索引同步更新；修订发生在实施前，不产生迁移负担。
+
+## 三期收口落档（#344，2026-10-04）
+
+收口票对历轮审查与实施积累的边界、决断与修复集中落档（单一入口，各条目注明处置）。
+
+### 决策与边界记录
+
+- **R-1（备注级）notifyWatchRejected 与 deleted/stale 分支对 contentEl 的处理差异**：`src/webview/embedCard.ts` 的 deleted/stale 失效分支在 `handle.content.clear()` 后额外执行 `handle.content.textContent = ''`（防 display 反转闪现——错误态隐藏内容容器后再可见时旧文本一闪）；`notifyWatchRejected`（宿主拒绝订阅时的撤下）分支不做该清空。差异成立的原因：撤下路径呈错误态后不恢复显示（恢复需重新装载，装载会整体重建内容容器），反转闪现面不存在。无内容正确性影响，维持现状不改。
+- **D-3 单页装载失败降级整视图（已决策）**：`renderPageInto` 的失败路径对任一页的读取/绘制失败统一 `setError('resource')` 撤下整视图、就地呈现错误分态——不做「单页占位、其余页继续」的局部降级（部分呈现会掩盖失败事实，用户无法分辨哪页不可信）。该语义由单测「翻页失败路径：目标页渲染失败 → error 分态且乐观页码清零」钉住（波次二·失败页码语义）。
+- **D-6 多 occurrence 刷新时页码统一（已决策：不统一）**：同一 PDF 的多处引用各自持有独立 `PdfHoverView`（滚动/视口/生命周期独立是 #338 的交付契约）；文件替换（`?v=` 代次推进）触发各实例独立重载，各自按「当前浏览页合法钳制」恢复。各处的浏览位置是各自的用户状态，不做跨实例页码同步或统一。
+- **#339 遗留边界（四项）**：
+  1. 嵌入卡 PDF 无缩放键位——翻页与缩放操作仅作用于悬停浮层；`docs/specs/keybindings.md` 的 #337 D-5 作用域补记与 #339 作用域条目已登记「卡内键位接管列入后续票评估」，本票维持该评估位。
+  2. PDF 链接元素无 `tabindex`——键盘 Tab 不进入 PDF 链接层（链接层元素无 href、点击全走自持处理器）；键盘可达性（tabindex + 焦点环 + Enter 触发）整体属后续可达性票，不在三期范围。
+  3. PDF 外链点击不关浮层——http(s) 链接经系统浏览器打开后浮层保持在场，与 markdown 内容链接「点击即切换关闭」（跳转目标接管浮层）不同：浮层仍是当前 PDF 的预览上下文，浏览器承担目标呈现。既定差异，不改。
+  4. `userUnit≠1` 罕见 PDF 的文本层亚像素偏差——TextLayer 的 `--total-scale-factor` 以 `viewport.scale` 为基准（pdf.js 官方 viewer 同口径），userUnit≠1 的 PDF 存在亚像素级对齐偏差。与官方 viewer 同口径，不追修。
+- **D-9 PDF stale 周期核验边界（落档）**：图片失效通道有约 30 秒合并核验兜底（imageVerifyScheduler），**PDF 无同类周期核验**——断连/权限失效的发现完全依赖磁盘事件推送（vaultIndex `onTargetChange` → `hover.invalidated`）。网络盘短暂断连期间事件丢失、恢复后无新事件的场景 PDF 不自动核验自愈，需重新悬停触发读取。按「事件驱动足够」口径收口；人工待验项与触发条件见 manual-verification.md「PDF 全文滚动、嵌入与文本选择」节第 6 条。
+- **D-10 重复开关资源回落（已压测）**：浏览器套件 hoverPdf 增设 20 轮「悬停开 → 装载绘制 → Esc 关」压测场景——每轮推进资源代次（最重路径：每轮 acquire+destroy 无缓存复用），逐轮断言共享文档存储回落为空、PDF 画布元素清零；单元层另有并发身份/abandoned 自毁/refs 归零销毁钉子（pdfRender.test.ts「PDF 渲染器收口钉」）。
+
+### 收口修复（#344 实施）
+
+- **RB-1 text per-file watcher LRU 不对称（修复）**：`ensureTextWatch` 的 watcher 表上限 64 与订阅注册表目标上限 128 不对称——盲 LRU 淘汰会把**仍有活跃订阅**的目标的磁盘事件源拆掉（订阅在登记表、推送承诺落空）。修复：淘汰选取改为纯函数 `selectTextWatchEvictions`（`src/shared/hoverRefresh.ts`）——按 LRU 序跳过仍有活跃订阅的条目、只淘汰无订阅陈旧条目；全部在 watch 时不强拆（watcher 总量由订阅注册表上限另有界，不无界增长）。契约测试：`test/unit/hoverRefresh.test.ts`「text watcher LRU 淘汰选取」。
+- **未 watch 目标编辑事件不对称（小修）**：B-1 门控下未 watch 的 text 目标编辑事件不转发，「悬停 → 关闭（unwatch）→ VSCode 内编辑 → 再悬停」会命中未失效的读取缓存（陈旧正文）。修复：`DocumentSession.hasCachedHoverTarget` 查询面 + provider 转发门控扩为「订阅中 ∪ 读取缓存驻留」——缓存目标与订阅目标同权转发，编辑事件照常广播缓存失效（推送门控仍在协调器内，未订阅零推送开销不变）。验证：单测 `hoverReadCache.test.ts`（查询面三态）+ 集成用例「未 watch 目标编辑：关闭悬停后的未保存编辑不落陈旧缓存」。
+- **设置页消息桥守卫（统一加挂）**：设置页 webview 的 `window.message` 监听此前无来源守卫（此前判定可接受残留——设置页不承载 iframe，无现实注入向量）。本票统一加挂主 webview 同款允许清单（`isTrustedHostMessageSource`，判据与实测依据见 `src/webview/untrustedFrame.ts` 模块头）：两个 webview 同一桥形态同一信任规则，未来向设置页引入嵌入内容时不留静默缺口。浏览器设置页四套件的宿主消息注入同步改走 `source: window` 自投递（身份层）。
+- **text 用例绘制层断言欠账（补齐）**：hoverPreview 探针新增 `text` 字段、嵌入卡探针新增 `textPaint` 字段（着色 span 计数 + 首个着色 span 的**计算色** `getComputedStyle`——绘制层口径），集成用例「文本绘制层：textStats 虚拟化与计算色断言」按宿主在场扩展分派断言：语法/主题扩展在场断言 rgb(86,156,214)（Default Dark Modern 的 const 语法层色；1.82.3 实测 `--disable-extensions` 不卸载内置扩展，dev 四片即走此分支），缺席则断言纯文本单色诚实态（#335 口径的防御分支）。图片双语法同源（#336 此前只测单语法）由集成用例「图片双链同源」补齐：双语法命中同一资源地址（含 `?v=` 代次）与同一解码位图，阅读与 Live 双模式。
+- **UNC/盘根 per-file watcher 实证（#344，本机 1.82.3 真宿主探针）**：以 `ensureTextWatch` 同构构造（`RelativePattern(base=目录 URI, 转义文件名 glob)`）在真宿主内实测（UNC 代理形态 `\<本机名>\d$` 管理共享，便携宿主预置 `security.allowedUNCHosts`；探针为一次性工件，证据日志见实施记录）：
+  1. **UNC 子目录与共享根直下：事件可达**——change/delete 均投递，per-file watcher 构造在 UNC 形态下工作正常。前置条件是宿主 `security.allowedUNCHosts` 已允许该主机（VSCode 自身的 UNC 安全门槛，与打开 UNC 工作区同源——产品继承该门槛，不另设处理）。
+  2. **盘根（`D:\` 直下文件）：事件不可达**——生产构造的 base 为无尾斜杠盘符根（`file:///d:`），1.82.3 下 change/delete 均不投递；「base 补尾斜杠」变体仅 delete 半通（change 仍丢），无可信修复构造。落档为已知边界：盘根直下的 text 目标磁盘事件缺失（VSCode 内编辑经 TextDocument 通道与本票「缓存目标同权转发」修复仍覆盖；外部工具改写该文件不自动刷新，重悬停触发读取自愈）。场景为「笔记引用盘根直下的代码/文本文件」，极窄，不修。

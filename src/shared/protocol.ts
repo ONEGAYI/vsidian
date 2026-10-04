@@ -1106,6 +1106,16 @@ export type WebviewToHost =
           /** content 态的 canvas 非白像素比例（绘制层证据；其他态 -1） */
           nonWhiteRatio: number
         }
+        /** #344（P3-12 收口）text 视图观测（null = 非 text 形态/未装载）：
+         *  textStats（DOM 常驻受视口约束）与首个内联着色 span 的计算色
+         *  （rgb(…)；无 token 为 ''）——「用户看到的颜色」级集成断言面；
+         *  旧 webview 缺省 */
+        text?: {
+          renderedLines: number
+          totalLines: number
+          coloredSpans: number
+          firstSpanColor: string
+        } | null
       }
       /** #299 跳转目标提示观测：在场与路径文本（旧 webview 缺省）。 */
       targetTip?: {
@@ -1139,6 +1149,10 @@ export type WebviewToHost =
          *  不进载荷），renderedLines = 当前 DOM 常驻行数（受视口约束）；
          *  旧 webview 缺省 */
         textStats?: { renderedLines: number; totalLines: number } | null
+        /** #344（P3-12 收口）text 视图绘制层观测（markdown 装载为 null）：
+         *  着色 span 计数与首个着色 span 的计算色（rgb(…)；无 token 为
+         *  ''）——「用户看到的颜色」级集成断言面；旧 webview 缺省 */
+        textPaint?: { coloredSpans: number; firstSpanColor: string } | null
         /** #243 引用内部虚拟窗口与解析观测；旧 webview 缺省。 */
         viewStats?: {
           totalBlocks: number; mountedBlocks: number; contentDomCount: number
@@ -3467,7 +3481,13 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
             isNonNegativeInt(v.hoverPreview.pdf.requestedPage) &&
             typeof v.hoverPreview.pdf.nonWhiteRatio === 'number' &&
             Number.isFinite(v.hoverPreview.pdf.nonWhiteRatio) &&
-            v.hoverPreview.pdf.nonWhiteRatio >= -1)))) &&
+            v.hoverPreview.pdf.nonWhiteRatio >= -1) &&
+          (v.hoverPreview.text === undefined || v.hoverPreview.text === null ||
+            (isObject(v.hoverPreview.text) &&
+              isNonNegativeInt(v.hoverPreview.text.renderedLines) &&
+              isNonNegativeInt(v.hoverPreview.text.totalLines) &&
+              isNonNegativeInt(v.hoverPreview.text.coloredSpans) &&
+              isString(v.hoverPreview.text.firstSpanColor)))))) &&
         (v.targetTip === undefined || (isObject(v.targetTip) &&
           typeof v.targetTip.open === 'boolean' &&
           isString(v.targetTip.text))) &&
@@ -3486,6 +3506,11 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
             (e.host === undefined || e.host === 'reading' || e.host === 'live') &&
             (e.rootHost === undefined || e.rootHost === 'reading' || e.rootHost === 'live' || e.rootHost === 'hover') &&
             (e.textLen === undefined || isNonNegativeInt(e.textLen)) &&
+            // #344（P3-12 收口）text 视图绘制层观测（旧 webview 缺省；null
+            // = markdown 装载/未装载）
+            (e.textPaint === undefined || e.textPaint === null || (isObject(e.textPaint) &&
+              isNonNegativeInt(e.textPaint.coloredSpans) &&
+              isString(e.textPaint.firstSpanColor))) &&
             // #338（P3-06）嵌入卡 PDF 观测（旧 webview 缺省；null = 非 pdf 卡）
             (e.pdf === undefined || e.pdf === null || (isObject(e.pdf) &&
               (e.pdf.phase === 'idle' || e.pdf.phase === 'loading' || e.pdf.phase === 'content' || e.pdf.phase === 'error') &&

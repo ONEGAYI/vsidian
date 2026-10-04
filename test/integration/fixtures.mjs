@@ -1141,6 +1141,35 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
     '悬停 [[配置.json]] 与 [[替换样本.pdf]]。',
     '',
   ].join('\n'), 'utf8')
+  // #344（P3-12 收口）文本绘制层与图片双链同源样本：代码样本.ts 首行
+  // const（Default Dark Modern 语法层 #569cd6 = rgb(86,156,214)——安装态
+  // 宿主内置扩展在场时的计算色锚点）；同源图.png 供 ![[图]] 与 ![](图)
+  // 双语法同源对比（同一文件、同一资源管线）
+  writeFileSync(path.join(wsDir, '代码样本.ts'), [
+    'const 收口样本 = 1;',
+    '// 注释行：第二着色锚点（#6a9955）',
+    'export const label = "text";',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, '文本外观.md'), [
+    '# 文本外观样例',
+    '',
+    '![[代码样本.ts]]',
+    '',
+    '悬停 [[代码样本.ts]] 观察计算色。',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, '同源图.png'), Buffer.from(REFRESH_GREEN_PNG_BASE64, 'base64'))
+  writeFileSync(path.join(wsDir, '图片双链.md'), [
+    '# 图片双链同源样例',
+    '',
+    '![[同源图.png]]',
+    '',
+    '![普链同源](同源图.png)',
+    '',
+    '悬停 [[同源图.png]] 观察图片目标浮层。',
+    '',
+  ].join('\n'), 'utf8')
   // #222 嵌入：父文档（独占行全文/章节嵌入 + 混排 + 缺失目标）与目标文档
   // （frontmatter + 任务 + 章节结构 + 二层嵌入——一层展开场景）；二层目标
   // 文件名含空格（嵌入 inner 字面路径解析）。嵌入改写文档独立成组（rename

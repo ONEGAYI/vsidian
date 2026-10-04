@@ -34,9 +34,10 @@ try {
         window.sentMessages.push(message)
         setTimeout(() => {
           if (message.kind === 'settings.get') {
-            window.dispatchEvent(new MessageEvent('message', { data: { kind: 'settings.snapshot', values: window.savedSettings } }))
+            // source: window 走允许清单身份层（#344 起设置页消息桥同款守卫）
+            window.dispatchEvent(new MessageEvent('message', { source: window, data: { kind: 'settings.snapshot', values: window.savedSettings } }))
             for (const reply of replies) {
-              window.dispatchEvent(new MessageEvent('message', { data: reply }))
+              window.dispatchEvent(new MessageEvent('message', { source: window, data: reply }))
             }
           }
           // settings.uiState 为通知型消息，宿主不回执（同真实宿主语义）

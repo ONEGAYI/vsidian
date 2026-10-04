@@ -194,3 +194,41 @@ export class HoverWatchRegistry {
   }
 
 }
+
+/**
+ * #344（P3-12 收口·RB-1）：text per-file watcher 的 LRU 淘汰选取（纯
+ * 函数——provider 的 ensureTextWatch 在表超限时调用）。背景：text 事件源
+ * per-file watcher 表（provider 域，上限 64）与订阅注册表（目标上限
+ * watchTargetLimit=128）不对称——盲 LRU 会把**仍有活跃订阅**的目标的
+ * watcher 淘汰掉，订阅还在但磁盘事件源断流（推送承诺落空）。
+ *
+ * 策略：按 LRU 序（Map 插入/触达序，旧在前）**跳过仍有活跃订阅的条目**，
+ * 只淘汰无订阅的陈旧条目（watcher 生命周期独立于订阅是修 1 的既有语义
+ * ——退场目标的磁盘事件继续广播缓存失效，陈旧条目是缓存失效的余量，
+ * 不是泄漏）；全部在 watch 时返回不足额（不强拆活跃事件源——此时表
+ * 大小由订阅注册表上限另有界，不无界增长）。
+ *
+ * isWatched 入参传**归一后的键**是安全的：协调器 isWatched 内部再做
+ * 键归一（Windows 折叠大小写 + 正斜杠），对已归一键幂等。
+ */
+export function selectTextWatchEvictions(
+  keysInLruOrder: readonly string[],
+  isWatched: (key: string) => boolean,
+  limit: number,
+): string[] {
+  if (keysInLruOrder.length <= limit) {
+    return []
+  }
+  const excess = keysInLruOrder.length - limit
+  const victims: string[] = []
+  for (const key of keysInLruOrder) {
+    if (victims.length >= excess) {
+      break
+    }
+    if (isWatched(key)) {
+      continue // 仍有活跃订阅：事件源不得断流
+    }
+    victims.push(key)
+  }
+  return victims
+}

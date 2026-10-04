@@ -549,3 +549,53 @@ describe('#333 类型化出站：contentKind 显式标记', () => {
     expect('contentKind' in r).toBe(false)
   })
 })
+
+// ---- #344（P3-12 收口）：缓存目标查询面（事件转发门控的判据） ----
+// 契约：hasCachedHoverTarget 反映「该目标有驻留缓存条目」——成功读取后
+// true（未 watch 的 text 目标据此获得编辑事件转发，不落陈旧缓存），
+// 失效或淘汰后回落 false，失败读取不置位。
+describe('#344 hasCachedHoverTarget：事件转发门控的缓存目标查询', () => {
+  it('未读取为 false；成功读取后 true；invalidateHoverReads 后回落 false', async () => {
+    const t = makeHarness()
+    await ready(t)
+    expect(t.session.hasCachedHoverTarget(B_PATH)).toBe(false)
+    await t.send(hoverRequest(1, 'hover-1'))
+    expect(t.session.hasCachedHoverTarget(B_PATH)).toBe(true)
+    t.session.invalidateHoverReads(B_PATH)
+    expect(t.session.hasCachedHoverTarget(B_PATH)).toBe(false)
+  })
+
+  it('失败读取不缓存：查询不置位', async () => {
+    const t = makeHarness({ outcome: () => ({ ok: false, reason: 'not-found' }) })
+    await ready(t)
+    await t.send(hoverRequest(1, 'hover-1'))
+    expect(t.session.hasCachedHoverTarget(B_PATH)).toBe(false)
+  })
+
+  it('缓存条目淘汰后查询回落（双上限收敛的查询面同源）', async () => {
+    // 按目标区分 fsPath（默认 outcome 恒报 B_PATH，驱逐后第二形态仍登记
+    // 在同名下——测不出回落）
+    const t = makeHarness({
+      cacheLimits: { entryLimit: 1 },
+      outcome: (target) => ({
+        ok: true,
+        fsPath: target === 'wikilink:b' ? B_PATH : 'D:\\notes\\sub\\c.md',
+        relPath: 'sub/c.md',
+        content: {
+          kind: 'markdown',
+          version: 3,
+          lfText: '# C\n',
+          range: { start: 0, end: 5 },
+          selector: { kind: 'full' },
+        },
+      }),
+    })
+    await ready(t)
+    await t.send(hoverRequest(1, 'hover-1', 'b'))
+    expect(t.session.hasCachedHoverTarget(B_PATH)).toBe(true)
+    // 第二目标驱逐第一目标（entryLimit=1）
+    await t.send(hoverRequest(2, 'hover-2', 'sub/c'))
+    expect(t.session.hasCachedHoverTarget(B_PATH)).toBe(false)
+    expect(t.session.hasCachedHoverTarget('D:\\notes\\sub\\c.md')).toBe(true)
+  })
+})

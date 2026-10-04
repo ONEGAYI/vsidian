@@ -55,7 +55,8 @@ try {
       }
       setTimeout(() => {
         for (const reply of replies) {
-          window.dispatchEvent(new MessageEvent('message', { data: reply }))
+          // source: window 走允许清单身份层（#344 起设置页消息桥同款守卫）
+          window.dispatchEvent(new MessageEvent('message', { source: window, data: reply }))
         }
       }, 0)
     } })

@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 import {
   HOVER_REFRESH_DEFAULTS,
   HoverWatchRegistry,
+  selectTextWatchEvictions,
   shouldApplyHoverVersion,
 } from '../../src/shared/hoverRefresh'
 
@@ -152,5 +153,56 @@ describe('订阅注册表：Windows 键归一（大小写形态漂移）', () =>
     reg.watch('s2', EDITOR_FORM, 'e2')
     expect(reg.targets()).toBe(1) // 同一目标（两实例合并）
     expect(reg.totalSubscriptions()).toBe(2)
+  })
+})
+
+// ---- #344（P3-12 收口·RB-1）：text per-file watcher 的 LRU 淘汰选取 ----
+// 契约：watcher 表超限时按 LRU 序优先淘汰**无活跃订阅**的陈旧条目；仍有
+// 订阅的条目跳过（订阅在登记表而事件源被淘汰 = 推送承诺落空的不对称）；
+// 全部在 watch 时不强拆（watcher 总量由订阅注册表上限另有界）。
+describe('text watcher LRU 淘汰选取：跳过仍有活跃订阅的目标（RB-1）', () => {
+  const neverWatched = (): boolean => false
+
+  it('未超限零淘汰', () => {
+    expect(selectTextWatchEvictions(['a', 'b', 'c'], neverWatched, 3)).toEqual([])
+    expect(selectTextWatchEvictions([], neverWatched, 3)).toEqual([])
+  })
+
+  it('超限淘汰最旧的无订阅条目，数量恰好回到上限', () => {
+    // 5 个条目上限 3：淘汰最旧 2 个（a、b——按 LRU 序从旧到新）
+    expect(selectTextWatchEvictions(['a', 'b', 'c', 'd', 'e'], neverWatched, 3)).toEqual(['a', 'b'])
+  })
+
+  it('仍有活跃订阅的条目跳过，从更旧的陈旧条目补足', () => {
+    // a、c 在 watch（有活跃订阅）：跳过；淘汰 b、d 补足超额
+    const watched = new Set(['a', 'c'])
+    expect(
+      selectTextWatchEvictions(['a', 'b', 'c', 'd', 'e'], (k) => watched.has(k), 3),
+    ).toEqual(['b', 'd'])
+  })
+
+  it('最旧条目全在 watch 时跳过，不因顺序阻塞其后陈旧条目的淘汰', () => {
+    const watched = new Set(['a', 'b'])
+    expect(
+      selectTextWatchEvictions(['a', 'b', 'c', 'd', 'e'], (k) => watched.has(k), 3),
+    ).toEqual(['c', 'd'])
+  })
+
+  it('全部在 watch 时不强拆（返回不足额——活跃事件源不得被淘汰断流）', () => {
+    const alwaysWatched = (): boolean => true
+    expect(selectTextWatchEvictions(['a', 'b', 'c', 'd', 'e'], alwaysWatched, 3)).toEqual([])
+  })
+
+  it('上界语义：淘汰后保留数 = 上限 + 在 watch 条目数（量级由订阅注册表上限兜底）', () => {
+    // 128 上限、65 个陈旧 + 64 个在 watch（订阅注册表上限内）：淘汰 1 个最旧
+    // 陈旧条目后余 128；在 watch 的 64 个全部保留
+    const stale = Array.from({ length: 65 }, (_, i) => `stale-${i}`)
+    const live = Array.from({ length: 64 }, (_, i) => `live-${i}`)
+    const watched = new Set(live)
+    const victims = selectTextWatchEvictions([...stale, ...live], (k) => watched.has(k), 128)
+    expect(victims).toEqual(['stale-0'])
+    const kept = [...stale.slice(1), ...live]
+    expect(kept.length).toBe(128)
+    expect(victims.every((v) => !watched.has(v)), '被淘汰者不得含在 watch 目标').toBe(true)
   })
 })
