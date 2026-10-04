@@ -2,7 +2,7 @@
 // runTest.mjs（开发模式加载）与 runInstalled.mjs（VSIX 安装态回归）共用，
 // 两条路径跑同一套 fixture，保证安装态与开发态断言的是同一组文档。
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { buildThreePageColorPdf } from '../pdfSample.mjs'
+import { buildMultiPageColorPdf, buildThreePageColorPdf } from '../pdfSample.mjs'
 import path from 'node:path'
 
 const LF_DOC = '中文编辑测试\n\n包含 emoji：🎉 与组合 emoji 👨‍👩‍👧‍👦\n\n- 列表项一\n- 列表项二\n'
@@ -1091,6 +1091,31 @@ export async function writeFixtures(wsDir, { generatePerfSample, generateReading
     '非法 [[资料.pdf#page=0]] 与未知键 [[资料.pdf#zoom=2]]。',
     '',
     '普通链接 [本地 PDF](资料.pdf) 与 [fragment](资料.pdf#page=3)。',
+    '',
+  ].join('\n'), 'utf8')
+  // #338（P3-06）嵌入 PDF：容器矩阵样例（独占行/混排/引用/表格格内/递归
+  // 孙卡）与多页长样本（12 页红绿蓝循环——全文滚动与窗口回收断言）
+  writeFileSync(path.join(wsDir, '长文.pdf'), await buildMultiPageColorPdf(12))
+  writeFileSync(path.join(wsDir, '嵌入 PDF.md'), [
+    '# 嵌入 PDF 样例',
+    '',
+    '![[长文.pdf]]',
+    '',
+    '混排 ![[长文.pdf#page=2]] 保留源文。',
+    '',
+    '> 引用内 ![[长文.pdf#page=3]]',
+    '',
+    '| 列一 | 列二 |',
+    '| --- | --- |',
+    '| ![[长文.pdf]] | 普通格 |',
+    '',
+    '递归 ![[嵌入 PDF 子文档]]',
+    '',
+  ].join('\n'), 'utf8')
+  writeFileSync(path.join(wsDir, '嵌入 PDF 子文档.md'), [
+    '# 嵌入 PDF 子文档',
+    '',
+    '内层 ![[长文.pdf]]',
     '',
   ].join('\n'), 'utf8')
   // #222 嵌入：父文档（独占行全文/章节嵌入 + 混排 + 缺失目标）与目标文档
