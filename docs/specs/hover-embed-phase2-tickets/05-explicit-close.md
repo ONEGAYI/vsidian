@@ -52,7 +52,7 @@ Blocked by: [#281](https://github.com/ONEGAYI/vsidian/issues/281)（P2-04）
 
 **P2-04 移交项的评估结论**：discard 必然激活 B → A webview 隐藏卸载重载 → closed 回包与删除重放随重载丢失（最终状态正确：B 已回滚、嵌入重绑干净）；「确认后 A 删除完成」断言放 save 路径验证；若未来要求重载后补完成删除，需 P2-13 交接机制协同。
 
-**边界**：冲突暂停时不弹三项（保留实例，归 P2-12）；持久草稿不建（票面）；真实 IME/物理鼠标/Remote SSH 人工清单。另两条落档（review-loops 终审补录）：确认期间目标被外部保存后选「丢弃修改并关闭」，revert 会连带回滚刚保存的内容——保存不推进 version、dirty=false 推送不触发 stale，版本守卫检测不到；属「discard = 文档级回滚」既定语义的边界，数据可经 undo 找回，人工验收时留意。close.query 宿主装载失败无回包时同 entry 意图可覆盖重发自愈、他 entry 意图被挡至该 entry 离屏（已接受形态）。
+**边界**：冲突暂停时不弹三项（保留实例，归 P2-12）；持久草稿不建（票面）；真实 IME/物理鼠标/Remote SSH 人工清单。另两条落档（review-loops 终审补录）：确认期间目标被外部保存后选「丢弃修改并关闭」，revert 会连带回滚刚保存的内容——保存不推进 version、dirty=false 推送不触发 stale，版本守卫检测不到；属「discard = 文档级回滚」既定语义的边界，数据可经 undo 找回，人工验收时留意。close.query 宿主装载失败改回干净态 close.state 闭环（#319 修复：dirty=false / version=0 不回退基线 / relPath 退化填 fsPath 不触达文案）：query 槽即时清空、目标按干净直关收尾，他 entry 意图不再被挡；原「无回包滞留至该 entry 离屏」形态退役。
 
 ## 复用入口与验证
 

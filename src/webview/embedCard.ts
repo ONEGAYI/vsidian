@@ -2422,10 +2422,13 @@ export class EmbedCardManager {
     this.openCloseDialog(entry, intent, message.version, message.relPath)
   }
 
-  /** refEdit.close.result 路由：closed 完成退出；失败保留现场；stale 重新确认 */
+  /** refEdit.close.result 路由：closed 完成退出；失败保留现场；stale 重新确认。
+   *  #319 按 reqId 配对（与 notifyCloseState 同口径）：模态 1 的 execute
+   *  迟到结果不得驱动取消后重开的同目标模态 2——未确认的模态 reqId=0，
+   *  与任何在途回包（reqId>0）天然不匹配 */
   notifyCloseResult(message: Extract<HostToWebview, { kind: 'refEdit.close.result' }>): void {
     const dialog = this.closeDialog
-    if (!dialog || dialog.entry.live?.fsPath !== message.fsPath) {
+    if (!dialog || dialog.reqId !== message.reqId || dialog.entry.live?.fsPath !== message.fsPath) {
       return
     }
     if (message.outcome === 'closed') {
@@ -2498,7 +2501,7 @@ export class EmbedCardManager {
     document.body.appendChild(root)
     this.closeDialog = {
       entry, intent, version, relPath,
-      reqId: 0, // execute 的 reqId 在动作时分配
+      reqId: 0, // execute 动作时分配并写回（notifyCloseResult 按 reqId 配对）
       stale: false,
       root,
       noticeEl: notice,
@@ -2551,6 +2554,7 @@ export class EmbedCardManager {
       return
     }
     const reqId = ++this.closeReqSeq
+    dialog.reqId = reqId // #319 回包配对：迟到结果按此比对（未确认模态保持 0）
     this.context.send({
       kind: 'refEdit.close.execute',
       panelSessionId: session.sessionId,

@@ -46,6 +46,10 @@ const B_FS = 'D:\\notes\\目标笔记.md'
 const B_DOC_URI = 'file:///d%3A/notes/%E7%9B%AE%E6%A0%87%E7%AC%94%E8%AE%B0.md'
 const TARGET_TEXT = ['# 目标笔记', '', '目标正文一段。', ''].join('\n')
 const A_DOC = ['# 父文档', '', '![[目标笔记]]', '', '尾部段落。', ''].join('\n')
+// #319 他 entry 意图被挡场景的第二目标（乙）
+const B_FS_B = 'D:\\notes\\目标笔记乙.md'
+const B_DOC_URI_B = 'file:///d%3A/notes/%E7%9B%AE%E6%A0%87%E7%AC%94%E8%AE%B0%E4%B9%99.md'
+const TARGET_TEXT_B = ['# 目标笔记乙', '', '乙正文一段。', ''].join('\n')
 
 /** 关闭模态稳定类名（样式契约 ref-close-dialog 条目同源） */
 const DIALOG = {
@@ -117,13 +121,14 @@ function resultOk(
   req: { reqId: number; instanceId: string },
   text = TARGET_TEXT,
   version = 2,
+  target: { fsPath: string; relPath: string } = { fsPath: B_FS, relPath: '目标笔记.md' },
 ): Extract<HoverPreviewResult, { ok: true }> {
   return {
     kind: 'hover.result',
     reqId: req.reqId,
     instanceId: req.instanceId,
     ok: true,
-    target: { fsPath: B_FS, relPath: '目标笔记.md' },
+    target,
     version,
     text,
     range: { start: 0, end: text.length },
@@ -670,5 +675,140 @@ describe('P2-05 协议形态', () => {
     expect(isHostToWebview({
       kind: 'refEdit.close.result', reqId: 2, fsPath: 'f', outcome: 'stale',
     } as never)).toBe(true)
+  })
+})
+
+// #319 close 回包配对补强：
+// - close.query 宿主装载失败回干净态 close.state（dirty=false / version=0 /
+//   relPath 退化填 fsPath）后，webview 侧闭环：query 槽清空、目标按干净直关
+//   收尾，同面板他 entry 的关闭意图不再被挡（原滞留形态退役）
+// - close.result 按 reqId 配对：模态 1 的 execute 迟到回包（reqId 不匹配）
+//   不驱动取消后重开的同目标模态 2 finishClose
+describe('#319 close 回包配对', () => {
+  /** 双目标装载 + 双 Live（甲/乙各一端口）：他 entry 意图被挡场景的基座 */
+  function setupDualLive(h: { manager: EmbedCardManager; sent: WebviewToHost[] }): void {
+    const a2 = ['# 父文档', '', '![[目标笔记]]', '', '![[目标笔记乙]]', ''].join('\n')
+    const els = mountEmbedBlocks(h.manager, a2)
+    const reqIds = new Set<number>()
+    for (const m of h.sent) {
+      if (m.kind === 'hover.request') {
+        reqIds.add(m.reqId)
+      }
+    }
+    for (const reqId of reqIds) {
+      const req = h.sent.find((m): m is Extract<WebviewToHost, { kind: 'hover.request' }> =>
+        m.kind === 'hover.request' && m.reqId === reqId)!
+      const isA = req.target === '目标笔记'
+      h.manager.notifyResult(resultOk(
+        { reqId: req.reqId, instanceId: req.instanceId },
+        isA ? TARGET_TEXT : TARGET_TEXT_B,
+        2,
+        isA ? undefined : { fsPath: B_FS_B, relPath: '目标笔记乙.md' },
+      ))
+    }
+    for (const el of els) {
+      el.querySelector<HTMLButtonElement>(`.${EMBED_CARD_CLASS_NAMES.mode}`)!.click()
+    }
+    const binds = h.sent.filter((m) => m.kind === 'refEdit.bind')
+    expect(binds).toHaveLength(2)
+    for (const b of binds) {
+      if (b.kind !== 'refEdit.bind') {
+        continue
+      }
+      const isA = b.fsPath === B_FS
+      h.manager.notifyBound({
+        kind: 'refEdit.bound', reqId: b.reqId, ok: true,
+        portId: isA ? 'port-1' : 'port-2',
+        fsPath: isA ? B_FS : B_FS_B,
+        docUri: isA ? B_DOC_URI : B_DOC_URI_B,
+        version: 2, dirty: false,
+      })
+      h.manager.notifyPush({
+        kind: 'refEdit.push', portId: isA ? 'port-1' : 'port-2',
+        fsPath: isA ? B_FS : B_FS_B,
+        message: {
+          kind: 'init', sessionId: isA ? 'port-1' : 'port-2',
+          docUri: isA ? B_DOC_URI : B_DOC_URI_B,
+          version: 2, text: isA ? TARGET_TEXT : TARGET_TEXT_B,
+        },
+      })
+    }
+  }
+
+  it('宿主装载失败回干净态 close.state：query 槽清空、目标直关收尾、他 entry 意图不再被挡', () => {
+    const h = harness()
+    setupDualLive(h)
+    // 甲发起关闭：宿主 openTextDocument 失败，按 #319 口径回干净态
+    // （version=0：消费侧 Math.max 聚合不回退基线；relPath 退化填 fsPath，
+    // dirty=false 不触达模态文案）
+    h.manager.testClose('目标笔记', 'close')
+    const q1 = lastQueryOf(h.sent)
+    expect(q1 && q1.kind === 'refEdit.close.query').toBe(true)
+    if (q1 && q1.kind === 'refEdit.close.query') {
+      h.manager.notifyCloseState({
+        kind: 'refEdit.close.state', reqId: q1.reqId, fsPath: B_FS,
+        dirty: false, version: 0, relPath: B_FS,
+      })
+    }
+    // 甲按干净直关收尾（不弹模态——relPath 退化形态不触达文案路径）
+    expect(dialogBox()).toBeNull()
+    expect(h.sent.some((m) => m.kind === 'refEdit.unbind')).toBe(true)
+    const probeA = h.manager.probe().find((p) => p.inner === '目标笔记')!
+    expect(probeA.liveBound).toBe(false)
+    expect(probeA.internalMode).toBe('reading')
+    // query 槽已清空：乙的关闭意图不被挡（旧滞留形态下此处早退无 query）
+    h.manager.testClose('目标笔记乙', 'close')
+    const queries = h.sent.filter((m) => m.kind === 'refEdit.close.query')
+    expect(queries).toHaveLength(2)
+    h.manager.dispose()
+    h.mainView.destroy()
+  })
+
+  it('execute 迟到回包（reqId 不匹配）不驱动取消后重开的同目标模态 finishClose', () => {
+    const h = harness()
+    setupLive(h)
+    typeAndDirty(h)
+    // 模态 1：确认保存（execute 出站，保存慢）
+    h.manager.testClose('目标笔记', 'close')
+    const q1 = lastQueryOf(h.sent)
+    if (q1 && q1.kind === 'refEdit.close.query') {
+      h.manager.notifyCloseState({
+        kind: 'refEdit.close.state', reqId: q1.reqId, fsPath: B_FS,
+        dirty: true, version: 3, relPath: '目标笔记.md',
+      })
+    }
+    clickDialog('save')
+    const e1 = lastExecuteOf(h.sent)
+    expect(e1 && e1.kind === 'refEdit.close.execute').toBe(true)
+    // 等待结果期间用户取消模态 1，随后重新发起关闭 → 模态 2（未确认）
+    clickDialog('cancel')
+    expect(dialogBox()).toBeNull()
+    h.manager.testClose('目标笔记', 'close')
+    const q2 = lastQueryOf(h.sent)
+    if (q2 && q2.kind === 'refEdit.close.query') {
+      h.manager.notifyCloseState({
+        kind: 'refEdit.close.state', reqId: q2.reqId, fsPath: B_FS,
+        dirty: true, version: 3, relPath: '目标笔记.md',
+      })
+    }
+    expect(dialogBox()).toBeTruthy() // 模态 2 在场
+    // 模态 1 的迟到结果到达（reqId 属于模态 1 的 execute）：不得驱动模态 2
+    // finishClose（模态仍在场、未 unbind、仍 Live）
+    if (e1 && e1.kind === 'refEdit.close.execute') {
+      h.manager.notifyCloseResult({
+        kind: 'refEdit.close.result', reqId: e1.reqId, fsPath: B_FS, outcome: 'closed',
+      })
+    }
+    expect(dialogBox()).toBeTruthy()
+    expect(h.sent.some((m) => m.kind === 'refEdit.unbind')).toBe(false)
+    const probe = h.manager.probe().find((p) => p.inner === '目标笔记')!
+    expect(probe.liveBound).toBe(true)
+    expect(probe.internalMode).toBe('live')
+    // 模态 2 自身确认链不受影响：取消收尾，无 execute 出站
+    clickDialog('cancel')
+    expect(dialogBox()).toBeNull()
+    expect(h.sent.filter((m) => m.kind === 'refEdit.close.execute')).toHaveLength(1)
+    h.manager.dispose()
+    h.mainView.destroy()
   })
 })

@@ -370,7 +370,7 @@ describe('P2-08 真删除拦截保持（源文不存活的覆盖变更）', () =
       Extract<WebviewToHost, { kind: 'refEdit.close.execute' }>
     expect(exec).toBeTruthy()
     h.manager.notifyCloseResult({
-      kind: 'refEdit.close.result', reqId: 0, fsPath: B_FS, outcome: 'closed',
+      kind: 'refEdit.close.result', reqId: exec.reqId, fsPath: B_FS, outcome: 'closed',
     })
     const after = view.state.doc.toString()
     expect(after).not.toContain('目标笔记\\|别名')
