@@ -103,10 +103,15 @@ function installFakePdfjs(doc: FakeDoc | ((src: Record<string, unknown>) => Prom
   vi.stubGlobal('URL', Object.assign(URL, { createObjectURL, revokeObjectURL }))
   // jsdom 无 canvas 包（getContext 返回 null）：stub 2d 上下文（真实绘制由
   // 浏览器 hoverPdf 套件断言）
-  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
-    fillStyle: '',
-    fillRect: () => {},
-  } as unknown as CanvasRenderingContext2D)
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(function (this: HTMLCanvasElement) {
+    return {
+      fillStyle: '',
+      fillRect: () => {},
+      getImageData: (_x: number, _y: number, w: number, h: number) => ({
+        data: new Uint8ClampedArray(w * h * 4).fill(200),
+      }),
+    } as unknown as CanvasRenderingContext2D
+  })
   return state
 }
 

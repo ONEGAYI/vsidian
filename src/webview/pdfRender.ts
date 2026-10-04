@@ -218,24 +218,30 @@ export class PdfHoverView {
     }
   }
 
-  /** canvas 非白像素比例（绘制层采样；无 2d 上下文时 -1——诚实边界） */
+  /** canvas 非白像素比例（绘制层采样；无 2d 上下文或采样不可用时 -1
+   *  ——诚实边界：观测失败不构成渲染失败，probe 不得因环境缺 canvas 实
+   *  现而抛错） */
   private canvasNonWhiteRatio(): number {
     if (this.canvas.width === 0 || this.canvas.height === 0) {
       return -1
     }
-    const ctx = this.canvas.getContext('2d')
-    if (ctx === null) {
+    try {
+      const ctx = this.canvas.getContext('2d')
+      if (ctx === null || typeof ctx.getImageData !== 'function') {
+        return -1
+      }
+      const data = ctx.getImageData(0, 0, this.canvas.width, this.canvas.height).data
+      let nonWhite = 0
+      const total = this.canvas.width * this.canvas.height
+      for (let i = 0; i < total; i++) {
+        if (data[i * 4] < 245 || data[i * 4 + 1] < 245 || data[i * 4 + 2] < 245) {
+          nonWhite++
+        }
+      }
+      return nonWhite / total
+    } catch {
       return -1
     }
-    const data = ctx.getImageData(0, 0, this.canvas.width, this.canvas.height).data
-    let nonWhite = 0
-    const total = this.canvas.width * this.canvas.height
-    for (let i = 0; i < total; i++) {
-      if (data[i * 4] < 245 || data[i * 4 + 1] < 245 || data[i * 4 + 2] < 245) {
-        nonWhite++
-      }
-    }
-    return nonWhite / total
   }
 
   get contentReady(): boolean {
