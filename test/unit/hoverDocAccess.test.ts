@@ -1300,4 +1300,45 @@ describe('#336 image 分派：RefImageContent 载荷', () => {
       expect(flattenHoverReadOutcome(typed)).toEqual({ ok: false, reason: 'non-markdown' })
     }
   })
+
+  // posix 宿主对照钉子（#346 修复轮 2）：win32 分支由上文 Windows 语境用例
+  // 覆盖，此处固定 posix 分支（isWindowsHost: false + posix 风格路径）的
+  // 输出形态——两分支都正确，不依赖运行平台（CI Linux / 本地 Windows 同断言）。
+  it('posix 宿主语境对照：isWindowsHost=false 时 relPath/src 按 posix 语义相对化', async () => {
+    const posixDisk = new Map<string, { version: number; text: string }>([
+      ['/notes/a.md', note('# 父文档\n')],
+      ['/notes/assets/x.jpeg', note('binary')],
+      ['/notes/sub/来源.md', note('# 来源\n')],
+    ])
+    const diskPorts = (docDir: string): HoverDocAccessPorts => ({
+      resolveVaultFile: async (rawPath) => {
+        const base = path.posix.resolve(docDir, rawPath)
+        return posixDisk.get(base) ? { kind: 'target', fsPath: base } : { kind: 'not-found' }
+      },
+      openTextDocument: async () => null,
+    })
+    const rootCtx: HoverDocAccessContext = {
+      resolve: { docDir: '/notes', rootDir: '/notes', isWindowsHost: false, hasWorkspace: true },
+      sourceFsPath: '/notes/a.md',
+      rootFsPath: '/notes',
+    }
+    const img = await readRefContentTarget({ target: 'assets/x.jpeg' }, rootCtx, diskPorts('/notes'))
+    expect(img.ok).toBe(true)
+    if (img.ok) {
+      expect(img.relPath).toBe('assets/x.jpeg')
+      if (img.content.kind === 'image') {
+        expect(img.content.src).toBe('assets/x.jpeg')
+      }
+    }
+    const subCtx: HoverDocAccessContext = {
+      resolve: { docDir: '/notes/sub', rootDir: '/notes', isWindowsHost: false, hasWorkspace: true },
+      sourceFsPath: '/notes/sub/来源.md',
+      rootFsPath: '/notes',
+    }
+    const up = await readRefContentTarget({ target: '../assets/x.jpeg' }, subCtx, diskPorts('/notes/sub'))
+    expect(up.ok).toBe(true)
+    if (up.ok && up.content.kind === 'image') {
+      expect(up.content.src, '来源在子目录：src 经 ../ 上溯').toBe('../assets/x.jpeg')
+    }
+  })
 })

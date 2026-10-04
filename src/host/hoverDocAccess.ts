@@ -620,7 +620,11 @@ export async function readRefContentTarget(
     return { ok: true, fsPath: '', relPath: '', content: { kind: 'web', ...outcome.meta } }
   }
   const kind = classifyLocalRefContentKind(resolution.fsPath)
+  // 平台 API 按 isWindowsHost 显式限定（不随运行平台漂移）：CI Linux 上默认
+  // 模块是 posix 语义，dirname 对 Windows 风格路径返回 '.'，relative 无从
+  // 相对化而回退绝对路径（#346 修复轮 2 回归钉子见 hoverDocAccessPlatform.test.ts）
   const relOf = ctx.resolve.isWindowsHost ? path.win32.relative : path.posix.relative
+  const dirnameOf = ctx.resolve.isWindowsHost ? path.win32.dirname : path.posix.dirname
   const relPath = relOf(ctx.rootFsPath, resolution.fsPath).replaceAll('\\', '/')
   if (kind === 'image') {
     // #336（P3-04）image 分派登记：图源 = 解析出的规范 fsPath 相对**来源
@@ -641,7 +645,7 @@ export async function readRefContentTarget(
       relPath,
       content: {
         kind: 'image',
-        src: relOf(path.dirname(ctx.sourceFsPath), resolution.fsPath).replaceAll('\\', '/'),
+        src: relOf(dirnameOf(ctx.sourceFsPath), resolution.fsPath).replaceAll('\\', '/'),
         version,
       },
     }
