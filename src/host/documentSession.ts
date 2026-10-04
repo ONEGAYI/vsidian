@@ -46,7 +46,7 @@ import { PasteHistoryTracker } from './pasteHistoryTracker'
 import type { ImageResolution } from './linkTarget'
 import { imageFsKey } from './imageVersioning'
 import type { ImageVerifyItem } from '../shared/imageRefresh'
-import { HOVER_REFRESH_DEFAULTS } from '../shared/hoverRefresh'
+import { HOVER_REFRESH_DEFAULTS, hoverWatchKeyOf } from '../shared/hoverRefresh'
 import { REF_EXPANSION_LIMITS, RefExpansionBudget, canonicalRefTargetKey, inExpansionPath,
   validChildSource } from '../shared/refExpansion'
 
@@ -1809,7 +1809,27 @@ export class DocumentSession {
    */
   hasCachedHoverTarget(fsPath: string): boolean {
     const keys = this.hoverShapeTargets.get(fsPath)
-    return keys !== undefined && keys.size > 0
+    if (keys !== undefined) {
+      return keys.size > 0
+    }
+    if (!this.options.isWindowsHost) {
+      return false
+    }
+    // 查询键漂移兜底（review-loops 三期修复）：登记键来自 outcome.fsPath
+    //（生产为 statFileRealPath 归正的磁盘真值，大小写任意），调用方
+    //（TextDocument 事件转发门控）传 event.document.uri.fsPath——Windows
+    // 上两者可能仅大小写/斜杠方向不同，精确匹配漏报会让未 watch 的 text
+    // 目标编辑事件不转发（与 isWatched 的 keyOf 口径不对称）。与
+    // coordinator keyOf 共用 hoverWatchKeyOf 同口径归一后线性扫描（表量级
+    // = 悬停缓存目标数，小表；幂等——精确命中已由上方 get 覆盖，本分支
+    // 只兜漂移查询，不改变既有精确路径）
+    const needle = hoverWatchKeyOf(fsPath, true)
+    for (const key of this.hoverShapeTargets.keys()) {
+      if (hoverWatchKeyOf(key, true) === needle) {
+        return true
+      }
+    }
+    return false
   }
 
   /** 悬停读取缓存观测（测试钩子与性能计量：条目/字节/命中/未命中与

@@ -598,4 +598,45 @@ describe('#344 hasCachedHoverTarget：事件转发门控的缓存目标查询', 
     expect(t.session.hasCachedHoverTarget(B_PATH)).toBe(false)
     expect(t.session.hasCachedHoverTarget('D:\\notes\\sub\\c.md')).toBe(true)
   })
+
+  it('查询键大小写/斜杠漂移仍命中（Windows 归一——与 isWatched 的 keyOf 同口径）', async () => {
+    // 登记键来自 outcome.fsPath（生产为 statFileRealPath 归正的磁盘真值，
+    // 大小写任意）；调用方（textEditorProvider 的事件转发门控）传
+    // event.document.uri.fsPath——Windows 上两者可能仅大小写/斜杠方向
+    // 不同。精确匹配漏报 → 未 watch 的 text 目标编辑事件不转发 →
+    // 「悬停→关闭→编辑→再悬停」落陈旧缓存（与 isWatched 口径不对称）
+    const truth = 'D:\\Notes\\配置.JSON'
+    const t = makeHarness({
+      outcome: () => ({
+        ok: true,
+        fsPath: truth,
+        relPath: '配置.JSON',
+        content: {
+          kind: 'text',
+          version: 2,
+          lfText: '{ "k": 1 }\n',
+          range: { start: 0, end: 13 },
+          languageId: 'json',
+          selector: { kind: 'text' },
+          hasWindow: false,
+          beginLine: 1,
+          endLine: 2,
+          locateLine: 1,
+          jumpLine: 1,
+          totalLines: 2,
+          font: {},
+          lineNumbers: true,
+        },
+      }),
+    })
+    await ready(t)
+    await t.send(hoverRequest(1, 'hover-1'))
+    // 磁盘真值精确命中（既有路径不变）
+    expect(t.session.hasCachedHoverTarget(truth)).toBe(true)
+    // 大小写折叠与正斜杠归一后的漂移查询仍命中
+    expect(t.session.hasCachedHoverTarget('d:\\notes\\配置.json')).toBe(true)
+    expect(t.session.hasCachedHoverTarget('D:/Notes/配置.JSON')).toBe(true)
+    // 归一不引入误报：不同目标仍不命中
+    expect(t.session.hasCachedHoverTarget('D:\\notes\\其他.json')).toBe(false)
+  })
 })

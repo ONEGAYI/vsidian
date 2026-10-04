@@ -25,6 +25,7 @@
 import {
   HOVER_REFRESH_DEFAULTS,
   HoverWatchRegistry,
+  hoverWatchKeyOf,
 } from '../shared/hoverRefresh'
 import { planFlushAt } from '../shared/vaultIndexSchedule'
 
@@ -105,9 +106,9 @@ export class HoverRefreshCoordinator {
       isWindowsHost?: boolean
     },
   ) {
-    this.keyOf = options?.isWindowsHost
-      ? (fsPath) => fsPath.replaceAll('\\', '/').toLowerCase()
-      : (fsPath) => fsPath
+    // keyOf 与 documentSession 的缓存目标查询兜底共用 shared 的
+    // hoverWatchKeyOf（同口径由单一函数保证——两处各写一份会漂移）
+    this.keyOf = (fsPath) => hoverWatchKeyOf(fsPath, options?.isWindowsHost ?? false)
     this.registry = new HoverWatchRegistry(options?.targetLimit, this.keyOf)
   }
 

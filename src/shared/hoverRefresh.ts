@@ -48,6 +48,17 @@ export function shouldApplyHoverVersion(applied: number | null, incoming: number
 }
 
 /**
+ * hover 域目标路径归一（review-loops 三期修复）：Windows 宿主折叠大小写
+ * 并统一正斜杠，其他平台恒等。编辑器事件（event.document.uri.fsPath）与
+ * 读取归正（statFileRealPath 的磁盘真值）可能仅大小写/斜杠方向不同——
+ * coordinator 的登记/查询键（keyOf）与 documentSession 的缓存目标查询
+ * 兜底共用本函数保持同一口径。幂等：对已归一键再跑一次结果不变。
+ */
+export function hoverWatchKeyOf(fsPath: string, isWindowsHost: boolean): string {
+  return isWindowsHost ? fsPath.replaceAll('\\', '/').toLowerCase() : fsPath
+}
+
+/**
  * 订阅注册表（#224「相同目标合并读取、各实例订阅独立释放」的数据面）：
  * fsPath → 会话 → 实例集合的三级表。目标级合并（has/targets 以目标为
  * 单位），实例级释放（unwatch 单实例，目标内最后一个实例退场才撤目标）。
