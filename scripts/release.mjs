@@ -22,9 +22,14 @@ export const SIZE_LIMITS = {
   // 刷新）后基线约 5.44 MB——距警告线 5.5 MB 仅约 66 KB，两条线各上调
   // 1 MB；v0.8.0 批次（查找引擎、悬停预览、文档嵌入与中文分词）后基线
   // 约 6.54 MB，距警告线 6.5 MB 仅约 109 KB，用户决策两条线各上调 2 MB；
-  // 防"意外塞进大文件"的语义不变。
-  totalWarnBytes: 8.5 * 1024 * 1024,
-  totalMaxBytes: 9.5 * 1024 * 1024,
+  // #337（P3-05）PDF 引擎随包（pdfjs-dist 6.4.299 双产物 + cmaps/字体/
+  // wasm/icc 资产，#334 探针核算注入约 4.0 MB）后基线约 10.8 MB，超原
+  // 失败线 9.5 MB 约 1.28 MB——2026-10-04 用户裁决：依赖资产本地随包并
+  // 上调阈值（失败线 9.5→11.5 MB、警告线 8.5→11.0 MB，单文件不动——
+  // pdfWorker.js minified 约 1.23 MB 距 3 MB 警告线余量充足）；防"意外
+  // 塞进大文件"的语义不变。
+  totalWarnBytes: 11.0 * 1024 * 1024,
+  totalMaxBytes: 11.5 * 1024 * 1024,
   // 一般单文件：mermaid.js（刻意 vendored 的独立产物，minify 后实测
   // 2,727,077 B ≈ 2.60 MB）是最大单项，警告线 3 MB 在其上留小余量、
   // 失败线 4 MB 拦截意外超大文件（如误升 mermaid 12.x 的 5.3 MB 产物）。
@@ -55,6 +60,10 @@ const REQUIRED_EXTENSION = [
   'out/webview/settings.css',
   // #60 Mermaid 独立产物（按需懒加载的渲染器；缺失时图表降级为错误态）
   'out/webview/mermaid.js',
+  // #337 PDF 双产物（pdfjs-dist@6.4.299 legacy 主库 + worker；缺失时 PDF
+  // 悬停预览如实分态 load-failed，不静默空白）
+  'out/webview/pdfmain.js',
+  'out/webview/pdfworker.js',
   'media/css-contract-probe.css',
   // #145 契约 JSON（AI 可读的机器清单，与 HTML/数据模块同源生成）：
   // 设置页「导出 JSON」与命令面板导出的即此文件字节——缺失时导出报
@@ -108,6 +117,10 @@ const QUICK_ACTION_ICON_KEYS = [
   'findPrev', 'findNext', 'findClose', 'replaceOne', 'replaceAll', 'findInSelection',
   // 2026-10 查找面板替换栏切换 chevron（Pen 直绘）
   'chevronRight',
+  // #337 顺带补登记（#334 探针报告 6.2 节记录的 main 既有缺口：引用视图
+  // 设置组的跳转目标提示两枚生图资产未同步 REQUIRED——上次发布后新增批
+  // 次的资产漏登记，非本票新增）
+  'pointerLink', 'dbLink',
   // #265 设置页二级标题组的两枚生图资产
   'typewriter', 'wordSegment',
 ]
@@ -118,6 +131,17 @@ const REQUIRED_RUNTIME_FILES = [
   ...REQUIRED_EXTENSION,
   ...REQUIRED_KATEX_FONTS,
   ...REQUIRED_QUICK_ACTION_SVGS,
+]
+
+// #337（P3-05）PDF 资产目录前缀白名单：cmaps/standard_fonts/wasm/iccs
+// 共数百文件（PDF.js 内建文件名，逐文件登记不可维护），按目录前缀放行。
+// 例外范围之外（pdfjs/ 根下散置文件、其他 out/ 未登记产物）仍按白名单
+// 拒绝——新增 PDF.js 资产目录须同步此处
+const ALLOWED_OUT_PREFIXES = [
+  'extension/out/webview/pdfjs/cmaps/',
+  'extension/out/webview/pdfjs/standard_fonts/',
+  'extension/out/webview/pdfjs/wasm/',
+  'extension/out/webview/pdfjs/iccs/',
 ]
 
 // 禁止模式：仓库管理与开发文件一律不得进入 VSIX（大小写不敏感）。
@@ -141,6 +165,17 @@ const FORBIDDEN_PATTERNS = [
   [/\.woff$/, '非 woff2 字体（字体裁剪失效，webview 仅需 woff2）'],
   [/\.ttf$/, 'TTF 字体（字体裁剪失效，webview 仅需 woff2）'],
 ]
+
+/** #337 禁止模式例外：PDF.js standard_fonts 内建 4 个 LiberationSans .ttf
+ *  （PDF.js 按文件名引用，禁止改名或转格式；.ttf 禁止模式的语义是
+ *  「KaTeX 字体裁剪失效信号」，与 pdfjs 字体是两回事——#334 探针结论）。
+ *  例外仅作用于 pdfjs 资产目录内的文件，KaTeX 侧 ttf 回潮照拦 */
+function isPdfjsAssetException(lowerName) {
+  return lowerName.startsWith('extension/out/webview/pdfjs/standard_fonts/') ||
+    lowerName.startsWith('extension/out/webview/pdfjs/cmaps/') ||
+    lowerName.startsWith('extension/out/webview/pdfjs/wasm/') ||
+    lowerName.startsWith('extension/out/webview/pdfjs/iccs/')
+}
 
 /** 解析 `unzip -l` 输出为条目列表（name 含 `extension/` 前缀）。 */
 export function parseUnzipListing(text) {
@@ -277,11 +312,13 @@ export function inspectVsixEntries(entries, options = {}) {
   // out/ 白名单（评审 C1）：上面只拦「缺」，这里拦「多」——out/ 下任何
   // 未登记文件（调试遗留、构建实验产物、裁剪失效的重复字体）一律拒绝，
   // 避免「REQUIRED 不含即静默混入包内」（v0.1.0 后曾实测发生 out/ 杂物
-  // 混入打包输入且旧检查不拦）。新增运行时产物须同步登记 REQUIRED_EXTENSION。
+  // 混入打包输入且旧检查不拦）。新增运行时产物须同步登记 REQUIRED_EXTENSION；
+  // #337 PDF 资产目录（pdfjs/ 下数百内建文件名）按前缀放行。
   const allowedOut = new Set(REQUIRED_RUNTIME_FILES.map((rel) => `extension/${rel.toLowerCase()}`))
   for (const e of entries) {
     const lower = e.name.toLowerCase()
-    if (lower.startsWith('extension/out/') && !allowedOut.has(lower)) {
+    if (lower.startsWith('extension/out/') && !allowedOut.has(lower) &&
+      !ALLOWED_OUT_PREFIXES.some((prefix) => lower.startsWith(prefix))) {
       errors.push(`out/ 未登记产物 ${e.name}（新资产须登记 REQUIRED_EXTENSION）`)
     }
   }
@@ -312,6 +349,12 @@ export function inspectVsixEntries(entries, options = {}) {
   }
 
   for (const e of entries) {
+    // #337：PDF.js 资产目录内的文件不跑禁止模式（standard_fonts 的内建
+    // .ttf、wasm 目录的 .wasm 等均系 PDF.js 按文件名引用的必要资产——
+    // 见 isPdfjsAssetException 注释）；KaTeX 侧 ttf 回潮仍照拦
+    if (isPdfjsAssetException(e.name.toLowerCase())) {
+      continue
+    }
     for (const [pattern, label] of FORBIDDEN_PATTERNS) {
       if (pattern.test(e.name.toLowerCase())) errors.push(`禁止文件 ${e.name}（${label}）`)
     }
