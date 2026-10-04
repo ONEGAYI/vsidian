@@ -367,4 +367,37 @@ Object.assign(window, {
   recursiveEditorCount(): number {
     return document.querySelectorAll('#app .cm-editor').length
   },
+  /** B 编辑器删除孙卡引用行（真实事务管线；#321 B 侧拦截断言载体——
+   *  与 embedLiveFixture.embedDeleteRefLine 同形态，宿主换 B 内部编辑器） */
+  recursiveDeleteGrandchildLine(): boolean {
+    const view = editorIn(cardOfTitle('父级B.md'))
+    const text = view?.state.doc.toString() ?? ''
+    const idx = text.indexOf('![[孙级C]]')
+    if (idx < 0 || !view) {
+      return false
+    }
+    const lineStart = text.lastIndexOf('\n', idx - 1) + 1
+    let lineEnd = text.indexOf('\n', idx)
+    if (lineEnd < 0) {
+      lineEnd = text.length
+    } else {
+      lineEnd += 1
+    }
+    view.dispatch({ changes: { from: lineStart, to: lineEnd } })
+    return true
+  },
+  /** 关闭确认模态观测（P2-05 同款简化面；#321 B 侧场景） */
+  recursiveCloseDialogState(): { open: boolean; text: string } {
+    const box = document.querySelector<HTMLElement>('.vsidian-ref-close-dialog')
+    return box ? { open: true, text: box.textContent ?? '' } : { open: false, text: '' }
+  },
+  /** 点击关闭模态按钮（真实 click；#321 B 侧场景） */
+  recursiveDialogClick(action: 'save' | 'discard' | 'cancel'): boolean {
+    const btn = document.querySelector<HTMLButtonElement>(`.vsidian-ref-close-${action}`)
+    if (!btn) {
+      return false
+    }
+    btn.click()
+    return true
+  },
 })

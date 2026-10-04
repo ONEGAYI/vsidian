@@ -71,3 +71,9 @@ src/webview/tableCellEmbed.ts、embedCard.ts 与父表格输入路径；test/bro
 合并树复验（`logs/merge-p2-08/`）：compile 通过、全量 unit 245 文件/5276 例、browser 11 套件（tableCellLive + 表格族 2 + 嵌入族 6 + hoverLive/hoverRefresh）、定向集成 20/20（加 P2-06×2、P2-12×1 复盖 remapSources 热区相邻票）。
 
 **移交父代理的边界**：格内**连击两字**（无停顿）在基线既有暂缓窗口触发 `\|` 转义丢失并使整表降级——embed-free 基线同样复现（`logs/p2-08/diag-base2.mjs`），属表格输入族既有缺陷非本票引入，已另开 [#315](https://github.com/ONEGAYI/vsidian/issues/315) 跟踪（2026-10-03 注：#315 复现尝试三层证据均不可复现——真实 Chromium 9 种驱动组合、jsdom 现状核、机制归因：物理键 keydown-forceFlush 与 DOM 回报 filter 管道双防线覆盖；原探针已删形态不可考；处置待定，tableCellLive 场景 C2 钉住连击不丢 `\|` 转义契约防回归）。同一覆盖变更内多枚同源文实例被重排时按文档序分配命中位——身份证互换仅影响选区/滚动记忆（目标一致，用户不可见）。格内空白表格组合规划（`isLiveActive:false`）与图片粘贴仍是 P2-10/P2-11 既有缺口，P2-14 收口核对。
+
+## #320 增补（2026-10-04）：重定位扫描预算与超限放行/冻结
+
+[#320](https://github.com/ONEGAYI/vsidian/issues/320)（PR #313 终审留档）：`relocatedInterval` 逐字检索（存活检查与坍缩候选重定位共用）最坏 O(候选数 × 插入文本长度 × 源文长度)，且 filter 与 remap 对同一事务各执行一遍——10 万行全选替换 × 64 活跃嵌入可一次性阻塞主线程数百 ms 量级。三层预算常量在 `src/shared/relocationScan.ts`（`sourceTextLength` 4096 / `insertTextLength` 1 MiB / `hitScans` 64，数值依据与叠加最坏口径见该文件注释）。**超限语义 =「无法判定存活」而非「判定已删」**（2026-10-04 产品决策「超限放行 + 冻结」）：filter 侧（A 层与 #321 B 层同口径）命中或超限均放行、`null`（真删除）才拦；remap 侧超限与未命中同待遇冻结死键（undo 回填命中缓存可恢复）。上文执行记录中「未命中才冻结死键」自此按「未命中**或超限**」理解。
+
+既定取舍（review-loops 钉住）：预算被前方 miss 扫描耗尽后**确实未被检视**的变更升为超限——65+ 行表格列移动（`planTableColumnMove` 每行一枚变更）且嵌入行在文档序第 65 位之后不误拦；同一形态下的**真删除**也借超限逃逸确认链（事务落盘、无确认弹窗，恢复走 undo 回填）——这是「无法判定≠判定已删」口径的另一面，边界锚定用例见 `test/unit/tableCellLive.test.ts` #320 组；全部枚完整检视的 miss 仍返回 null 照常拦截（对照例钉住）。

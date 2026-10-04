@@ -34,6 +34,7 @@ import { bindLocale } from './localeDom'
 import type { MessageKey } from '../shared/locales/en'
 import { HOVER_REFRESH_DEFAULTS } from '../shared/hoverRefresh'
 import { REF_EXPANSION_LIMITS, RefExpansionBudget } from '../shared/refExpansion'
+import { RELOCATION_SCAN_LIMITS } from '../shared/relocationScan'
 import { RefContentInstance, type RefContentMount, type RefLoadedContent, type RefMountOptions, type RefSourceContext } from './refContentInstance'
 import { promoteEmbedSlotsInBlock, promotedHostsOf } from './embedSlots'
 import { applyObsidianDomAlias } from '../shared/obsidianAlias'
@@ -41,7 +42,7 @@ import { createReadingContainer, READING_CLASS_NAMES } from './readingView'
 import type { ReadingViewStats } from './readingVirtualView'
 import { refErrorText, releaseRefSourceLease } from './refReadingContent'
 import { WIKILINK_CLASS_NAMES } from '../shared/wikilink'
-import { LiveEditorInstance } from './liveInstance'
+import { LiveEditorInstance, externalSync } from './liveInstance'
 import { liveEmbedChildCards } from './liveEmbed'
 import { ImageResourceManager, isDirectImageSrc } from './imageResource'
 import { closeFmPopoverForView } from './frontmatterPopover'
@@ -117,7 +118,10 @@ export const REF_CLOSE_DIALOG_CLASS_NAMES = {
   cancel: 'vsidian-ref-close-cancel',
 } as const
 
-/** P2-05 重放豁免注解：确认删除后重放被拦事务（changeFilter 见注解放行） */
+/** P2-05 重放豁免注解：确认删除后重放被拦事务（changeFilter 见注解放行）。
+ *  #321 起 A 主编辑器与嵌入实例内（B）的删除拦截共用：重放事务带注解
+ *  即被宿主视图自身的 filter 放行（filter 按 view 装配，A/B 重放各入
+ *  各的 view，无交叉豁免） */
 const refCloseReplay = Annotation.define<boolean>()
 
 /** 嵌入卡片稳定类名（样式契约 content 域 reading-embed-card 条目同源） */
@@ -467,36 +471,69 @@ function targetOfInner(inner: string): string {
  *  源文取自变更前 doc（原始源码坐标——不混解码偏移）。
  *  claimed：已被先序 entry 占用的命中位（多枚同源文实例按 sourceStart
  *  升序分配出现次序；重排同文实例的身份证互换属可接受边界——同源文实例
- *  目标一致，差异仅在选区/滚动记忆）。 */
+ *  目标一致，差异仅在选区/滚动记忆）。
+ *  #320 扫描预算：三层上限（源文长度 / 单枚插入文本长度 / 命中扫描次数，
+ *  见 RELOCATION_SCAN_LIMITS）把最坏 O(候选数 × 插入文本长度 × 源文长度)
+ *  的逐字检索压到数十毫秒量级；任一超限返回 'over-budget'——语义是
+ *  「无法判定存活」而非「判定已删」，与 null（真实删除）可区分，调用方
+ *  按各自口径分叉（filter 放行不拦、remap 冻结死键）。 */
 function relocatedInterval(
   doc: Text,
   changes: ChangeSet,
   sourceStart: number,
   sourceEnd: number,
   claimed: ReadonlyArray<{ start: number; end: number }>,
-): { start: number; end: number } | null {
+): { start: number; end: number } | 'over-budget' | null {
   const raw = doc.sliceString(sourceStart, sourceEnd)
   if (raw.length === 0) {
     return null
   }
+  if (raw.length > RELOCATION_SCAN_LIMITS.sourceTextLength) {
+    return 'over-budget'
+  }
   let found: { start: number; end: number } | null = null
+  let overBudget = false
+  let scans = 0
   changes.iterChanges((_fromA, _toA, fromB, _toB, inserted) => {
     if (found !== null) {
       return
     }
+    if (scans >= RELOCATION_SCAN_LIMITS.hitScans) {
+      // 命中扫描预算已被先前变更耗尽（miss 扫描同样入账——多枚变更形态
+      // 如列移动每行一枚，前方各行先各耗 1 次）：本枚**确实未被检视**，
+      // 源文是否存活无法判定——升为超限，不得返回 null 冒充真删除
+      overBudget = true
+      return
+    }
+    if (inserted.length > RELOCATION_SCAN_LIMITS.insertTextLength) {
+      // 放弃该枚逐字检索：源文可能在其中（存活无法判定）。后续短枚变更
+      // 仍可命中（行对换形态）——found 优先于 overBudget 返回。长度检查
+      // 先于 toString()——超限场景免整串物化分配（Text.length 与
+      // String.length 同为 UTF-16 code unit，可直接比对）
+      overBudget = true
+      return
+    }
     const text = inserted.toString()
-    let at = text.indexOf(raw)
-    while (at >= 0) {
+    let at = -1
+    while (scans < RELOCATION_SCAN_LIMITS.hitScans) {
+      at = text.indexOf(raw, at + 1)
+      scans++
+      if (at < 0) {
+        break
+      }
       const start = fromB + at
       const end = start + raw.length
       if (!claimed.some((c) => start < c.end && end > c.start)) {
         found = { start, end }
         return
       }
-      at = text.indexOf(raw, at + 1)
+    }
+    if (at >= 0 && scans >= RELOCATION_SCAN_LIMITS.hitScans) {
+      // 命中扫描预算耗尽且最后一个命中仍被占用：该枚剩余部分未判定
+      overBudget = true
     }
   })
-  return found
+  return found ?? (overBudget ? 'over-budget' : null)
 }
 
 /**
@@ -1308,6 +1345,8 @@ export class EmbedCardManager {
    *  由 mainDocChangeFilter 的存活检查放行），迁移到插入文本内的命中位
    *  （claimed 占位使同覆盖变更内多枚同源文实例按文档序分配）；源文不存
    *  在才是真删除——冻结死键（原位恢复如 undo/删表回填仍命中缓存）。
+   *  #320 扫描预算超限与未命中同待遇：冻结死键（存活无法判定 ≠ 已删，
+   *  安全退化）；filter 侧超限放行不拦，两侧口径见 relocatedInterval。
    *  doc 缺省（既有单测直驱）时不做重定位判定，保持 P2-07 纯 mapPos 语义。
    *  调用时序契约：须在 docView 更新（widget toDOM）前——生产经
    *  appendTransaction 装配（被 changeFilter 拒绝的事务不会到达，天然免除
@@ -1354,8 +1393,10 @@ export class EmbedCardManager {
       const moved = doc
         ? relocatedInterval(doc, changes, entry.sourceStart, entry.sourceEnd, claimed)
         : null
-      if (!moved) {
-        // 真实删除/改写（源文不存活）：键冻结在原坐标，后续事务不再平移
+      if (!moved || moved === 'over-budget') {
+        // 真实删除/改写（源文不存活），或 #320 扫描预算超限（存活无法判定，
+        // 与未命中同待遇——安全退化）：键冻结在原坐标，后续事务不再平移，
+        // undo/删表回填仍命中缓存
         entry.collapsed = true
         continue
       }
@@ -1729,7 +1770,81 @@ export class EmbedCardManager {
           })
         },
       },
-    }, [this.embedEscapeKeymap(entryRef), EditorState.transactionExtender.of((tr) => {
+    }, [this.embedEscapeKeymap(entryRef), EditorState.changeFilter.of((tr: Transaction): boolean => {
+      // #321 孙卡删除拦截（与 A 层 mainDocChangeFilter 同构）：B 内删除
+      // 覆盖孙卡引用区间的变更先拦截确认——孙卡 clean 时静默完成删除、
+      // dirty 时弹三项确认模态。坐标空间 = B 实例自身 doc；候选 = 本 B
+      // 的直接子卡（remapChildSources 同款筛选 + 端口在场——dirty 权威
+      // 在宿主侧，同步 filter 拿不到，故与 A 层同因无条件拦再异步分岔）。
+      // 确认后的重放事务带 refCloseReplay 豁免注解（本 filter 放行；A 层
+      // filter 只看根级条目且装配在 A view，不经过）。externalSync（外部
+      // 增量/全文同步，dispatchExternal/replaceDoc 派发）同样豁免：外部变
+      // 更静默同步是既有契约——拦截会把宿主同步当本地删除（dirty 弹张冠
+      // 李戴的确认），clean 路径重放还会以旧基线把同步变更当本地编辑回声
+      // 出站。A 层主 view 无 doc 型外部派发（仅选区 externalSync），故
+      // mainDocChangeFilter 无此分支
+      if (!tr.docChanged || tr.annotation(refCloseReplay) === true || tr.annotation(externalSync) === true) {
+        return true
+      }
+      const doc = tr.startState.doc
+      const actives: EmbedEntry[] = []
+      for (const child of this.entries.values()) {
+        if (child.live?.portId && !child.popupRoot && !child.collapsed &&
+            child.content.source.parentInstanceId === entryRef.hostId &&
+            child.sourceEnd <= doc.length) {
+          actives.push(child)
+        }
+      }
+      if (actives.length === 0) {
+        return true
+      }
+      let hit: EmbedEntry | null = null
+      for (const child of actives) {
+        let matched = false
+        tr.changes.iterChanges((fromA, toA) => {
+          if (!matched && fromA <= child.sourceStart && toA >= child.sourceEnd && toA > fromA) {
+            matched = true
+          }
+        })
+        if (!matched) {
+          continue
+        }
+        // 保文本重定位放行（P2-08/#320 同口径）：命中（文本在别处存活）
+        // 或 'over-budget'（无法判定存活）均非真删除——不拦；null（源文
+        // 不存活）才是删除引用
+        const relocated = relocatedInterval(doc, tr.changes, child.sourceStart, child.sourceEnd, [])
+        if (relocated !== null) {
+          continue
+        }
+        hit = child
+        break
+      }
+      if (!hit) {
+        return true // 不相关变更（未覆盖活跃孙卡区间）：放行
+      }
+      if (this.closeDialog || this.closePendingDelete) {
+        return false // 已有意图在处理：丢弃新命中（先关闭当前模态）
+      }
+      const parentInstance = instanceLive.instance
+      if (!parentInstance) {
+        return true // 防御：实例身份缺失（理论不可达——拦截必在自身事务上）
+      }
+      // 记录被拦事务（变更 spec + B 全文快照守卫 + 父 B 上下文）并发起
+      // 孙卡的删除退出意图（requestClose/模态/宿主链以 EmbedEntry 为键，
+      // 孙卡有独立 portId/fsPath——零改动复用）
+      const changes: { from: number; to: number; insert: string }[] = []
+      tr.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+        changes.push({ from: fromA, to: toA, insert: inserted.toString() })
+      })
+      this.closePendingDelete = {
+        entry: hit,
+        changes,
+        docSnapshot: doc.toString(),
+        parent: { entry: entryRef, instance: parentInstance },
+      }
+      this.requestClose(hit, 'delete')
+      return false
+    }), EditorState.transactionExtender.of((tr) => {
       // B 实例事务的孙卡键迁移（review-loops B-1）：docView 更新（widget
       // toDOM）前迁移，新 widget 按新坐标重挂即命中——与根级
       // rootOwnedViewExtensions 的 remapSources 装配同构（每实例只动自己
@@ -2320,13 +2435,22 @@ export class EmbedCardManager {
   /** 在途 close.query 的配对上下文（reqId → 发起 entry/intent；回包按
    *  reqId 配对后转模态或直接完成退出） */
   private closePendingQuery: { entry: EmbedEntry; intent: CloseIntent; reqId: number } | null = null
-  /** 拦截的删除活跃引用事务（确认后重放到主编辑器；取消即丢弃） */
+  /** 拦截的删除活跃引用事务（确认后重放；取消即丢弃）。快照与重放目标
+   *  按拦截来源分上下文：A 主编辑器拦截（parent = null）重放入 A、守卫
+   *  比对 A 全文（既有语义）；#321 嵌入实例内删除孙卡引用行的 B 上下文
+   *  重放入直接父 B 的编辑器、守卫比对 B 全文 */
   private closePendingDelete: {
     entry: EmbedEntry
-    /** 被拦事务的变更 spec（A 文档 LF 坐标） */
+    /** 被拦事务的变更 spec（拦截来源文档的 LF 坐标：A 文档或父 B 全文） */
     changes: { from: number; to: number; insert: string }[]
-    /** 拦截时刻的整篇 A 文本快照（重放守卫：拦截以来 A 完全未变才重放） */
+    /** 拦截时刻的重放宿主整篇文本快照（重放守卫：拦截以来宿主文档完全
+     *  未变才重放） */
     docSnapshot: string
+    /** #321 B 上下文：拦截时刻的直接父 B entry 与其实例引用（重放目标
+     *  与守卫基准切到父 B——孙卡 entry.live 在重放时可能已 teardown，父
+     *  引用在拦截时刻定格；实例已被销毁/替换则保守放弃重放）。null =
+     *  A 主编辑器上下文（既有语义） */
+    parent: { entry: EmbedEntry; instance: LiveEditorInstance } | null
   } | null = null
 
   /** 意图就此死亡（无确认链发起：无会话/暂停/他意图在场/会话身份缺失）
@@ -2422,10 +2546,13 @@ export class EmbedCardManager {
     this.openCloseDialog(entry, intent, message.version, message.relPath)
   }
 
-  /** refEdit.close.result 路由：closed 完成退出；失败保留现场；stale 重新确认 */
+  /** refEdit.close.result 路由：closed 完成退出；失败保留现场；stale 重新确认。
+   *  #319 按 reqId 配对（与 notifyCloseState 同口径）：模态 1 的 execute
+   *  迟到结果不得驱动取消后重开的同目标模态 2——未确认的模态 reqId=0，
+   *  与任何在途回包（reqId>0）天然不匹配 */
   notifyCloseResult(message: Extract<HostToWebview, { kind: 'refEdit.close.result' }>): void {
     const dialog = this.closeDialog
-    if (!dialog || dialog.entry.live?.fsPath !== message.fsPath) {
+    if (!dialog || dialog.reqId !== message.reqId || dialog.entry.live?.fsPath !== message.fsPath) {
       return
     }
     if (message.outcome === 'closed') {
@@ -2436,9 +2563,11 @@ export class EmbedCardManager {
     }
     if (message.outcome === 'stale') {
       this.markCloseStale()
+      dialog.reqId = 0 // 模态保持（重新确认）：防重门复位，允许再次 execute
       return
     }
     // save-failed / discard-failed：保留现场（模态在场 + 提示行）
+    dialog.reqId = 0 // 失败可重试：防重门复位
     dialog.noticeEl.style.display = ''
     dialog.noticeEl.textContent = t(message.outcome === 'save-failed'
       ? 'embed.closeSaveFailed' : 'embed.closeDiscardFailed')
@@ -2498,7 +2627,7 @@ export class EmbedCardManager {
     document.body.appendChild(root)
     this.closeDialog = {
       entry, intent, version, relPath,
-      reqId: 0, // execute 的 reqId 在动作时分配
+      reqId: 0, // execute 动作时分配并写回（notifyCloseResult 按 reqId 配对）
       stale: false,
       root,
       noticeEl: notice,
@@ -2544,6 +2673,12 @@ export class EmbedCardManager {
       this.closeCloseDialog()
       return
     }
+    if (dialog.reqId !== 0) {
+      // execute 在途（结果未回）：忽略再次动作——若放行会覆写 reqId，使
+      // 首次 closed 回包按配对被丢、第二次 execute 撞版本前移回 stale，
+      // 退化为一轮多余的重新确认（取消路径不受此门限制）
+      return
+    }
     const live = dialog.entry.live
     const session = this.context.session()
     if (!live?.portId || !session.sessionId || !session.docUri) {
@@ -2551,6 +2686,7 @@ export class EmbedCardManager {
       return
     }
     const reqId = ++this.closeReqSeq
+    dialog.reqId = reqId // #319 回包配对：迟到结果按此比对（未确认模态保持 0）
     this.context.send({
       kind: 'refEdit.close.execute',
       panelSessionId: session.sessionId,
@@ -2581,8 +2717,11 @@ export class EmbedCardManager {
     entry.popupHost?.onExplicitCloseSettled?.(intent)
   }
 
-  /** 重放被拦的删除事务（守卫：拦截以来 A 完全未变才重放——任何漂移都
-   *  保守放弃，保持现状由用户重新删除） */
+  /** 重放被拦的删除事务（守卫：拦截以来重放宿主完全未变才重放——任何
+   *  漂移都保守放弃，保持现状由用户重新删除）。A 上下文入 A 主编辑器；
+   *  #321 B 上下文入拦截时刻的直接父 B 编辑器（孙卡 entry.live 此时
+   *  可能已 teardown——父 entry/实例引用在拦截时刻定格，实例已被销毁
+   *  或替换即放弃重放） */
   private replayPendingDelete(): void {
     const pending = this.closePendingDelete
     this.closePendingDelete = null
@@ -2590,13 +2729,21 @@ export class EmbedCardManager {
       return
     }
     pending.entry.pendingCloseIntent = null
-    const view = this.context.mainEditorView?.()
+    let view: EditorView | null | undefined
+    if (pending.parent) {
+      if (pending.parent.entry.live?.instance !== pending.parent.instance) {
+        return // 父 B 实例已销毁（模式切换/父回收）或重绑替换：保守放弃
+      }
+      view = pending.parent.instance.getView()
+    } else {
+      view = this.context.mainEditorView?.()
+    }
     if (!view) {
       return
     }
     const current = view.state.doc.toString()
     if (current !== pending.docSnapshot) {
-      return // 模态期间 A 被修改：不重放（保守——引用保留，用户可重删）
+      return // 模态期间宿主文档（A 或父 B）被修改：不重放（保守——引用保留，用户可重删）
     }
     view.dispatch({
       changes: pending.changes,
@@ -2644,9 +2791,12 @@ export class EmbedCardManager {
         // 保留嵌入源文的结构编辑（表格列/行移动——含行对换形态、canonical
         // 整行重写、格区粘贴重建：格值/整行取原 doc 切片搬运）不是删除引用
         // ——不弹确认不吞事务；实例键迁移由 remapSources 的重定位分支承担
-        //（filter 先于事务应用，通过后 transactionExtender 必见同一 changes）
-        if (relocatedInterval(tr.startState.doc, tr.changes, entry.sourceStart, entry.sourceEnd, [])) {
-          continue
+        //（filter 先于事务应用，通过后 transactionExtender 必见同一 changes）。
+        // #320 扫描预算超限同放行：超限是「无法判定存活」而非「判定已删」
+        //——不命中删除拦截（不打断合法大编辑），remap 侧按超限冻结死键兜底
+        const relocated = relocatedInterval(tr.startState.doc, tr.changes, entry.sourceStart, entry.sourceEnd, [])
+        if (relocated !== null) {
+          continue // 保文本命中或预算超限：均非真删除
         }
         hit = entry
         break
@@ -2666,6 +2816,7 @@ export class EmbedCardManager {
         entry: hit,
         changes,
         docSnapshot: tr.startState.doc.toString(),
+        parent: null, // A 主编辑器上下文：重放入 A（既有语义）
       }
       this.requestClose(hit, 'delete')
       return false
@@ -3073,6 +3224,29 @@ export class EmbedCardManager {
     const entry = this.entryOfInner(inner, occurrence)
     const view = this.context.mainEditorView?.()
     if (!entry || !view) {
+      return false
+    }
+    const doc = view.state.doc
+    if (entry.sourceStart > doc.length || entry.sourceEnd > doc.length) {
+      return false
+    }
+    const line = doc.lineAt(Math.min(entry.sourceStart, doc.length))
+    const to = line.number < doc.lines ? line.to + 1 : line.to // 含行尾换行
+    view.dispatch({ changes: { from: line.from, to } })
+    return true
+  }
+
+  /** #321 测试钩子：在指定孙卡的直接父 B 编辑器派发删除其引用行的事务
+   *  （真实事务管线；命中活跃孙卡区间走 B 侧拦截确认链路——与
+   *  testDeleteRef 同形态，宿主换直接父 B 的内部编辑器） */
+  testDeleteChildRef(inner: string, occurrence = 0): boolean {
+    const entry = this.entryOfInner(inner, occurrence)
+    const parentId = entry?.content.source.parentInstanceId
+    if (!entry || parentId === undefined) {
+      return false
+    }
+    const view = this.entryOfHostId(parentId)?.live?.instance?.getView()
+    if (!view) {
       return false
     }
     const doc = view.state.doc

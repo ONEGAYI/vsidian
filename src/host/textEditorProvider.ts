@@ -2309,6 +2309,14 @@ export function createTextEditorProvider(
             message.kind === 'refEdit.close.query' || message.kind === 'refEdit.close.execute' ||
             message.kind === 'refEdit.conflictCompare')) {
           if (message.panelSessionId !== sessionId || message.panelDocUri !== document.uri.toString()) {
+            // #319 拒收观测面：合法时序（面板释放后迟到）与伪造不可区分，
+            // 留一行日志定位（不回喂——防伪造语义不变）
+            console.debug('[vsidian] refEdit 族消息面板身份不符拒收', {
+              kind: message.kind,
+              panelSessionId: message.panelSessionId,
+              panelDocUri: message.panelDocUri,
+              expectSessionId: sessionId,
+            })
             return
           }
           switch (message.kind) {
@@ -2351,6 +2359,12 @@ export function createTextEditorProvider(
                 // Map.delete 只删映射不动对象内容，判定依然正确。回包不发——
                 // 面板已死收不到
                 if (!entry.panels.has(sessionId)) {
+                  // #319 拒收观测面：回包不发（面板已死收不到），日志留痕
+                  console.debug('[vsidian] refEdit.bind 来源面板已释放，放弃注册端口', {
+                    fsPath: message.fsPath,
+                    occurrence: message.occurrence,
+                    panelSessionId: sessionId,
+                  })
                   return
                 }
                 // 同 occurrence 幂等重绑：先释放旧端口（重挂路径）
@@ -2468,10 +2482,22 @@ export function createTextEditorProvider(
             case 'refEdit.message': {
               const binding = refPorts.lookup(message.portId, sessionId, document.uri.toString())
               if (!binding || binding.fsPath !== message.fsPath || !isRefEditClientMessage(message.message)) {
-                return // 释放后迟到消息 / 伪造端口 / 非编辑通道：静默拒收
+                // 释放后迟到消息 / 伪造端口 / 非编辑通道：静默拒收（不回喂）
+                console.debug('[vsidian] refEdit.message 静默拒收', {
+                  portId: message.portId,
+                  fsPath: message.fsPath,
+                  reason: !binding ? 'port-not-found'
+                    : binding.fsPath !== message.fsPath ? 'fsPath-mismatch' : 'inner-not-whitelisted',
+                  innerKind: message.message.kind,
+                })
+                return
               }
               const bEntry = sessions.get(binding.targetUri)
               if (!bEntry) {
+                console.debug('[vsidian] refEdit.message 目标会话缺失拒收', {
+                  portId: message.portId,
+                  targetUri: binding.targetUri,
+                })
                 return
               }
               // 内消息的 docUri 由 B 会话按自身校验（= B 规范 URI）；面板
@@ -2482,6 +2508,11 @@ export function createTextEditorProvider(
             case 'refEdit.save': {
               const binding = refPorts.lookup(message.portId, sessionId, document.uri.toString())
               if (!binding || binding.fsPath !== message.fsPath) {
+                console.debug('[vsidian] refEdit.save 静默拒收', {
+                  portId: message.portId,
+                  fsPath: message.fsPath,
+                  reason: !binding ? 'port-not-found' : 'fsPath-mismatch',
+                })
                 return
               }
               void (async (): Promise<void> => {
@@ -2508,6 +2539,12 @@ export function createTextEditorProvider(
               // webview 缓存的 dirty 推送时序）
               const binding = refPorts.lookup(message.portId, sessionId, document.uri.toString())
               if (!binding || binding.fsPath !== message.fsPath) {
+                console.debug('[vsidian] refEdit.close.query 静默拒收', {
+                  portId: message.portId,
+                  fsPath: message.fsPath,
+                  reqId: message.reqId,
+                  reason: !binding ? 'port-not-found' : 'fsPath-mismatch',
+                })
                 return
               }
               void (async (): Promise<void> => {
@@ -2516,8 +2553,22 @@ export function createTextEditorProvider(
                   try {
                     bDoc = await vscode.workspace.openTextDocument(vscode.Uri.parse(binding.targetUri))
                   } catch {
-                    // 目标不可装载（极罕见——bind 成功过）：无回包；webview
-                    // 同 entry 的再次意图可覆盖重发（requestClose 允许覆盖）
+                    // 目标不可装载（极罕见——bind 成功过）：#319 回干净态
+                    // 闭环——webview 走「干净目标直接完成退出」，closePendingQuery
+                    // 即时清槽，他 entry 的关闭/Esc/删除意图不再被挡至离屏。
+                    // version 无权威可取填 0（消费侧 Math.max 聚合，不回退
+                    // 基线）；relPath 退化填 fsPath（仅 dirty 模态文案使用，
+                    // dirty=false 不触达）
+                    console.warn('[vsidian] refEdit.close.query 目标装载失败，回干净态闭环',
+                      { reqId: message.reqId, fsPath: message.fsPath, targetUri: binding.targetUri })
+                    send({
+                      kind: 'refEdit.close.state',
+                      reqId: message.reqId,
+                      fsPath: message.fsPath,
+                      dirty: false,
+                      version: 0,
+                      relPath: message.fsPath,
+                    })
                     return
                   }
                 }
@@ -2542,6 +2593,13 @@ export function createTextEditorProvider(
               // revert 推进版本，第二次到达即 stale——不重复回滚。
               const binding = refPorts.lookup(message.portId, sessionId, document.uri.toString())
               if (!binding || binding.fsPath !== message.fsPath) {
+                console.debug('[vsidian] refEdit.close.execute 静默拒收', {
+                  portId: message.portId,
+                  fsPath: message.fsPath,
+                  reqId: message.reqId,
+                  action: message.action,
+                  reason: !binding ? 'port-not-found' : 'fsPath-mismatch',
+                })
                 return
               }
               void (async (): Promise<void> => {
@@ -2604,6 +2662,11 @@ export function createTextEditorProvider(
               //  的唯一权威来源）
               const binding = refPorts.lookup(message.portId, sessionId, document.uri.toString())
               if (!binding || binding.fsPath !== message.fsPath) {
+                console.debug('[vsidian] refEdit.conflictCompare 静默拒收', {
+                  portId: message.portId,
+                  fsPath: message.fsPath,
+                  reason: !binding ? 'port-not-found' : 'fsPath-mismatch',
+                })
                 return
               }
               void openConflictDiff(binding, message.text, (ok) => {

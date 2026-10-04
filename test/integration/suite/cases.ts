@@ -15078,6 +15078,90 @@ export const cases: Array<[string, () => Promise<void>]> = [
     console.log('[P2-09] 直接父跟随 + 手动独立记忆 + 父根切换不覆写通过')
   }],
 
+  // ---- #321 嵌入实例内删除孙卡引用行对齐 A 层确认拦截：B 内删除覆盖活跃
+  // 孙卡区间的 B 事务先拦截（不把删除先写入 B）；孙卡 dirty 弹三项模态，
+  // 取消保留 B 原引用，确认（save）后 B 中删除完成、A 零写回。 ----
+  ['#321 嵌入实例内删除孙卡引用行：B 侧拦截对齐 A 层（dirty 三项确认）', async () => {
+    await openWithEditor('p209-递归父A.md')
+    await waitSessionReady('p209-递归父A.md')
+    const uri = wsUri('p209-递归父A.md').toString()
+    const aDiskBase = await readDisk('p209-递归父A.md')
+    const bDiskBase = await readDisk('p209-递归B.md')
+    const parentDoc = await vscode.workspace.openTextDocument(wsUri('p209-递归父A.md'))
+    const GRAND_HEAD = '# p209 递归 C\n\n'.length + 1
+    const bDocOf = () => vscode.workspace.textDocuments.find((d) =>
+      d.uri.toString() === wsUri('p209-递归B.md').toString())
+
+    // B 手动切 Live：孙位跟随绑定（独占行 occurrence 0 为本例删除目标）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.mode', inner: 'p209-递归B', mode: 'live',
+    })
+    await waitViewState('p209-递归父A.md', (v) => {
+      const sole = (v.readingEmbed ?? []).filter((c) => c.inner === 'p209-递归C')
+      return sole.length >= 1 && sole.every((c) => c.internalMode === 'live' && c.liveBound === true)
+        ? true : false
+    }, 0, 30000)
+    const cDoc = await poll('孙目标 C 文档打开', () => {
+      const doc = vscode.workspace.textDocuments.find((d) =>
+        d.uri.toString() === wsUri('p209-递归C.md').toString())
+      return doc ?? undefined
+    })
+
+    // 孙卡（独占行位）输入 → dirty；B 编辑器内删除其引用行（真实事务管线）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.type', inner: 'p209-递归C', pos: GRAND_HEAD, text: '【孙删拦截】', occurrence: 0,
+    })
+    await poll('C 权威文本收到孙卡编辑', () =>
+      cDoc.getText().includes('【孙删拦截】') ? true : undefined)
+    assert(cDoc.isDirty, '孙卡编辑后 C dirty')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.deleteChildRef', inner: 'p209-递归C', occurrence: 0,
+    })
+    // 拦截：B 权威文本未变（未确认删除不写入 B）+ 模态在场（delete 意图，目标 = 孙卡）
+    await waitViewState('p209-递归父A.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p209-递归C' &&
+        c.closeDialog === 'open' && c.closeIntent === 'delete') ? true : false)
+    const bDoc1 = bDocOf()
+    assert(!bDoc1 || (bDoc1.getText() === bDiskBase && !bDoc1.isDirty),
+      '拦截后宿主 B 权威文本未变（不把未确认删除先写入 B）')
+
+    // 取消：B 原引用保留、孙卡现场保持
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.dialogAction', action: 'cancel',
+    })
+    const afterCancel = await waitViewState('p209-递归父A.md', (v) => {
+      const sole = (v.readingEmbed ?? []).filter((c) => c.inner === 'p209-递归C')
+      return sole.length >= 1 && sole.every((c) => c.closeDialog === 'none') ? true : false
+    })
+    assert(afterCancel.readingEmbed?.some((c) => c.inner === 'p209-递归C' && c.liveBound === true),
+      '取消后孙卡现场保持（端口不因拦截丢失）')
+    const bDoc2 = bDocOf()
+    assert(!bDoc2 || bDoc2.getText() === bDiskBase, '取消后 B 原引用保留（宿主文本未删）')
+
+    // 再次删除 → 保存并关闭：C 落盘后 B 中该引用行删除完成（确认后才写入；
+    // 确认动作选 save——discard 激活孙卡标签的 webview 隐藏重载边界与
+    // P2-05 用例同取舍，「确认后 B 删除完成」在 save 路径下才可稳定断言）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.deleteChildRef', inner: 'p209-递归C', occurrence: 0,
+    })
+    await waitViewState('p209-递归父A.md', (v) =>
+      (v.readingEmbed ?? []).some((c) => c.inner === 'p209-递归C' && c.closeDialog === 'open')
+        ? true : false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, {
+      kind: 'embed.test.dialogAction', action: 'save',
+    })
+    await poll('确认保存落盘', async () =>
+      (await readDisk('p209-递归C.md')).includes('【孙删拦截】') ? true : undefined)
+    // B 的删除经 B 编辑端口写回宿主（重放事务 → edit.request → WorkspaceEdit）
+    await poll('B 删除写回宿主', async () => {
+      const doc = bDocOf()
+      return doc && doc.getText().split('![[p209-递归C]]').length - 1 === 0 ? true : undefined
+    })
+    assert(parentDoc.getText() === aDiskBase && !parentDoc.isDirty,
+      '父 A 零写回零 dirty（B 层删除不触 A）')
+    console.log('[#321] 嵌入实例内删除孙卡引用行：B 侧拦截对齐 A 层（dirty 三项确认）通过')
+  }],
+
   // ---- P2-14（#291）二期组合收口：跨票真实场景在 1.82.3 真宿主的组合
   // 证明——表格格内三层递归（P2-08×P2-09：A 表格格 → B 手动 Live → B 内
   // 孙卡 C 跟随）编辑/保存逐层归属与关闭回收基线；代码卡复制经目标端口

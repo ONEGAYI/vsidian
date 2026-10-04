@@ -39,6 +39,7 @@ import {
 } from '../../src/webview/tableStructure'
 import { tableRowsAt } from '../../src/webview/tableEditing'
 import { planTableRegionPaste } from '../../src/webview/tableRegion'
+import { RELOCATION_SCAN_LIMITS } from '../../src/shared/relocationScan'
 
 installLocale('zh-cn', zhCn)
 
@@ -370,7 +371,7 @@ describe('P2-08 真删除拦截保持（源文不存活的覆盖变更）', () =
       Extract<WebviewToHost, { kind: 'refEdit.close.execute' }>
     expect(exec).toBeTruthy()
     h.manager.notifyCloseResult({
-      kind: 'refEdit.close.result', reqId: 0, fsPath: B_FS, outcome: 'closed',
+      kind: 'refEdit.close.result', reqId: exec.reqId, fsPath: B_FS, outcome: 'closed',
     })
     const after = view.state.doc.toString()
     expect(after).not.toContain('目标笔记\\|别名')
@@ -413,6 +414,162 @@ describe('P2-08 真删除拦截保持（源文不存活的覆盖变更）', () =
     expect(counts(h).closeQuery).toBe(c0.closeQuery + 1)
     h.manager.testDialogAction('cancel')
     expect(view.state.doc.toString()).toBe(doc0)
+    view.destroy()
+    h.manager.dispose()
+  })
+})
+
+describe('#320 重定位扫描预算（巨量文本超限：filter 放行 + remap 冻结）', () => {
+  /** 巨量填充文本（确保超过单枚变更插入文本预算） */
+  function bigFiller(extra = 128): string {
+    const unit = '巨量填充行。\n'
+    return unit.repeat(Math.ceil((RELOCATION_SCAN_LIMITS.insertTextLength + extra) / unit.length))
+  }
+
+  it('巨量全选替换（源文不在插入文本中）：超限放行不弹确认，实例冻结原位（回填缓存命中）', async () => {
+    const h = setup({ parentMode: 'live' })
+    const view = h.mountView(TABLE_DOC)
+    await driveLoaded(h, true)
+    const c0 = counts(h)
+    const big = `# 全新文档\n${bigFiller()}`
+    expect(big.length).toBeGreaterThan(RELOCATION_SCAN_LIMITS.insertTextLength)
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: big } })
+    // 超限是「无法判定存活」而非「判定已删」：不命中删除拦截——事务
+    // 应用成功、零确认弹窗（预算内源文不存活的覆盖变更照常拦截，见上组）
+    expect(view.state.doc.toString()).toBe(big)
+    expect(counts(h).closeQuery).toBe(c0.closeQuery)
+    // remap 侧超限与未命中同待遇：死键冻结在原坐标——原位回填（0 处插回
+    // 原文）装载缓存命中（零重发，undo/删表回填同款恢复形态）
+    view.dispatch({ changes: { from: 0, to: 0, insert: TABLE_DOC } })
+    expect(counts(h).req).toBe(c0.req)
+    view.destroy()
+    h.manager.dispose()
+  })
+
+  it('巨量全选替换（源文逐字在插入文本中）：放行但超限不重定位——新坐标重挂按新实例装载', async () => {
+    const h = setup({ parentMode: 'live' })
+    const view = h.mountView(TABLE_DOC)
+    await driveLoaded(h, true)
+    const c0 = counts(h)
+    // 表格段（含全部嵌入源文）逐字拼在新文档头部 + 巨量填充垫后：保文本
+    // 形态成立，但单枚插入文本超预算——存活无法在预算内判定。头部短前缀
+    // 与原文前缀长度不同（迁移坐标不撞原键，不触撞键防御冻结）
+    const tableStart = TABLE_DOC.indexOf('| ![[')
+    const big = `# 新\n\n${TABLE_DOC.slice(tableStart)}${bigFiller()}`
+    expect(big.length).toBeGreaterThan(RELOCATION_SCAN_LIMITS.insertTextLength)
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: big } })
+    expect(view.state.doc.toString()).toBe(big)
+    expect(counts(h).closeQuery).toBe(c0.closeQuery)
+    // 冻结而非重定位：键冻结在原坐标，新坐标 occurrence 重挂不命中 →
+    // 重新装载（req 重发）；若误走重定位则端口保持零重发
+    expect(counts(h).req).toBeGreaterThan(c0.req)
+    view.destroy()
+    h.manager.dispose()
+  })
+
+  it('超长嵌入源文（raw 超预算）的覆盖重写：放行但超限不重定位——新实例装载', async () => {
+    const h = setup({ parentMode: 'live' })
+    const longAlias = '长'.repeat(RELOCATION_SCAN_LIMITS.sourceTextLength + 64)
+    const doc = `# 超长嵌入\n\n前缀 ![[目标笔记|${longAlias}]] 后缀\n`
+    const view = h.mountView(doc)
+    await driveLoaded(h, true)
+    const c0 = counts(h)
+    // 整文档重写（嵌入严格在覆盖区间内部——坍缩候选成立，与列/行移动的
+    // 保文本形态同构）且逐字保留源文：raw 超预算 → 存活无法判定
+    const rewritten = `# 超长嵌入改\n\n前缀 ![[目标笔记|${longAlias}]] 后缀`
+    view.dispatch({ changes: { from: 0, to: doc.length - 1, insert: rewritten } })
+    expect(view.state.doc.toString()).toBe(`${rewritten}\n`)
+    expect(counts(h).closeQuery).toBe(c0.closeQuery)
+    // 预算内同形态（列/行移动用例）走重定位迁移零重发；raw 超预算 → 冻结
+    // 原位（标题偏移已变）→ 新位置重挂不命中 → 重新装载
+    expect(counts(h).req).toBe(c0.req + 1)
+    view.destroy()
+    h.manager.dispose()
+  })
+
+  /** 多枚变更场景文档：长标题行 + 行内嵌入行（嵌入严格在行内、非行首） */
+  function manyChangesDoc(): string {
+    return `#${'x'.repeat(200)}\n\n前缀 ![[目标笔记]] 后缀\n`
+  }
+
+  it('多枚变更耗尽命中扫描预算（64 枚 miss + 第 65 枚含源文）：预算耗尽枚按超限放行冻结，不误判真删除', async () => {
+    const h = setup({ parentMode: 'live' })
+    const doc = manyChangesDoc()
+    const view = h.mountView(doc)
+    await driveLoaded(h, true)
+    const c0 = counts(h)
+    const lineFrom = doc.indexOf('前缀')
+    // 65 枚变更按文档序：标题行内 64 枚单字符替换（插入文本不含源文——
+    // miss 扫描各消耗 1 次预算；多枚形态与 planTableColumnMove 每行一枚
+    // 同构，65 行表格列移动、嵌入行最后即此分布）+ 嵌入行重写（源文逐字
+    // 在场、偏移已变）。预算耗尽后**确实未被检视**的第 65 枚必须按
+    // 「无法判定存活」（'over-budget'）处理，不得返回 null 冒充真删除
+    const changes: Array<{ from: number; to: number; insert: string }> = []
+    for (let i = 0; i < 64; i++) {
+      changes.push({ from: 1 + i * 3, to: 2 + i * 3, insert: 'y' })
+    }
+    const rewritten = '前缀改 ![[目标笔记]] 后缀改'
+    changes.push({ from: lineFrom, to: doc.length - 1, insert: rewritten })
+    view.dispatch({ changes })
+    // 超限放行：事务应用成功（64 处标题替换 + 嵌入行重写完成）、零确认弹窗
+    const expectedTitle = `#${'yxx'.repeat(64)}${'x'.repeat(8)}`
+    expect(view.state.doc.toString()).toBe(`${expectedTitle}\n\n${rewritten}\n`)
+    expect(counts(h).closeQuery).toBe(c0.closeQuery)
+    // remap 侧同因超限冻结：源文偏移已变，新位置重挂不命中冻结键 →
+    // 重新装载（req 重发）
+    expect(counts(h).req).toBe(c0.req + 1)
+    view.destroy()
+    h.manager.dispose()
+  })
+
+  it('对照：全部枚完整检视的 miss（63 枚替换 + 末枚不含源文重写、预算恰好用满）仍是真删除——照常拦截不误放行', async () => {
+    const h = setup({ parentMode: 'live' })
+    const doc = manyChangesDoc()
+    const view = h.mountView(doc)
+    await driveLoaded(h, true)
+    const doc0 = view.state.doc.toString()
+    const c0 = counts(h)
+    const lineFrom = doc.indexOf('前缀')
+    // 64 枚变更全部 miss：63 枚标题替换 + 第 64 枚嵌入行改写为不含源文
+    // 文本——第 64 枚扫描时预算余 1，**完整检视**（无「未检视的变更」），
+    // 结果是 null（真删除）：预算守卫不得把完整检视的 miss 升为超限放行
+    const changes: Array<{ from: number; to: number; insert: string }> = []
+    for (let i = 0; i < 63; i++) {
+      changes.push({ from: 1 + i * 3, to: 2 + i * 3, insert: 'y' })
+    }
+    changes.push({ from: lineFrom, to: doc.length - 1, insert: '整行改写，嵌入没了' })
+    view.dispatch({ changes })
+    expect(view.state.doc.toString()).toBe(doc0)
+    expect(counts(h).closeQuery).toBe(c0.closeQuery + 1)
+    h.manager.testDialogAction('cancel')
+    expect(view.state.doc.toString()).toBe(doc0)
+    view.destroy()
+    h.manager.dispose()
+  })
+
+  it('边界锚：64 枚 miss 耗尽预算后第 65 枚为真删除——按超限放行（事务落盘、零确认链、无新装载）', async () => {
+    const h = setup({ parentMode: 'live' })
+    const doc = manyChangesDoc()
+    const view = h.mountView(doc)
+    await driveLoaded(h, true)
+    const c0 = counts(h)
+    const lineFrom = doc.indexOf('前缀')
+    // 65 枚变更：标题行 64 枚单字符 miss（各耗 1 次预算）+ 第 65 枚真删
+    // 嵌入行（插入文本不含源文）。预算耗尽后该枚「确实未被检视」→
+    // 'over-budget' → 放行：真删除借超限逃逸确认链是「无法判定存活 ≠
+    // 判定已删」口径的既定取舍（2026-10-04 产品决策），本例钉住该语义
+    // 不漂移；恢复途径 = undo 回填命中冻结缓存（与超限冻结同款）
+    const changes: Array<{ from: number; to: number; insert: string }> = []
+    for (let i = 0; i < 64; i++) {
+      changes.push({ from: 1 + i * 3, to: 2 + i * 3, insert: 'y' })
+    }
+    changes.push({ from: lineFrom, to: doc.length - 1, insert: '整行改写，嵌入没了' })
+    view.dispatch({ changes })
+    const expectedTitle = `#${'yxx'.repeat(64)}${'x'.repeat(8)}`
+    expect(view.state.doc.toString()).toBe(`${expectedTitle}\n\n整行改写，嵌入没了\n`)
+    expect(counts(h).closeQuery).toBe(c0.closeQuery)
+    // 真删除后文中无该 occurrence：无新装载（req 零增长）
+    expect(counts(h).req).toBe(c0.req)
     view.destroy()
     h.manager.dispose()
   })

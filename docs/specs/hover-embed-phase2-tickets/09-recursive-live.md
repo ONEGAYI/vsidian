@@ -71,3 +71,19 @@ src/shared/refExpansion.ts；目标会话来源租约；src/webview/refContentIn
 合并树复验（`logs/merge-p2-09-*`）：compile 通过、全量 unit 248 文件/5308 例、browser 9 套件（新 recursiveLive + 递归族回归 + 交错票 embedLiveResources/hoverLive/tableCellLive/embedLive）、定向集成 11/11（+P2-11×2 + P2-06×2 交错票）。
 
 **移交边界**：①嵌入内部 Live 编辑器中表格**网格化渲染**不工作（基线 stash 对照证实的既有边界，格内孙卡以源文行内 replace 形态挂载、功能完整无网格观感）——记入 P2-14 收口清单评估；②P2-10/P2-11 既有缺口对孙卡同样适用（空白表格组合规划已由 P2-11 的 isLiveActive 接真恢复、图片粘贴经端口归 B，P2-14 组合验证）；③hoverRecursive Tab 断言适配属票面直接后果（解锁使 Tab 序多一停留点）；④键位零新增（复用 embedToggleMode/embedSaveTarget/embedClose/conflict 族）、i18n 零新增文字；⑤真实 IME／物理鼠标／Remote SSH 待人工验收。
+
+## #321 增补（2026-10-04）：孙卡删除拦截对齐 A 层语义
+
+PR #313 终审留档的票面外边界「嵌入实例内部删除孙卡引用行无确认拦截」（[#321](https://github.com/ONEGAYI/vsidian/issues/321)），经产品决策（2026-10-04）**对齐 A 层语义**收编：B 内删除孙卡引用行走与 A 层完全同构的 requestClose 关闭链——孙卡 clean 时静默完成删除（无感，与现状一致）；孙卡 dirty 时弹三项确认模态（保存/丢弃/取消，补齐缺失环节）。不做「仅 dirty 拦截」：dirty 权威在宿主侧，同步 filter 拿不到，A 层正是因此无条件拦再异步分岔。
+
+实施要点（webview 侧，宿主链零改动）：
+
+- B 实例装配仿 `mainDocChangeFilter` 的 changeFilter（`createLiveInstance` extraExtensions）：坐标空间 = B 自身 doc，候选 = 直接子卡（端口在场 + 非 popupRoot/非冻结死键 + 区间在事务定义域内）；命中条件与保文本重定位放行（含 #320 三口径：命中或 `'over-budget'` 放行、`null` 才拦）均镜像 A 层。
+- `closePendingDelete` 带 `parent`（拦截时刻的直接父 B entry + 实例引用）：B 上下文的重放目标是父 B 的编辑器、快照守卫比对 B 全文；孙卡 `entry.live` 重放时可能已 teardown，父引用在拦截时刻定格，实例已被销毁/替换即保守放弃。A 上下文（`parent: null`）行为不变。
+- `refCloseReplay` 豁免注解 A/B 共用：filter 按 view 装配，重放各入各的 view，无交叉豁免；A 层 filter 只看根级条目，天然不受 B 重放影响（既有 A-2 用例钉住）。
+- requestClose/三项模态/宿主 query/execute 链零改动（以 EmbedEntry 为键，孙卡有独立 portId/fsPath）；i18n 零新增键。
+- 测试：jsdom 契约 5 例（拦截/clean 静默/dirty 三项含取消与确认/表格保文本不误拦/模态期间 B 漂移守卫放弃）；browser recursiveLive 场景 4（真实键盘输入制造 dirty + 真实事务删除 + 模态按钮真实 click）；集成 P2-09 邻接一例（`#321 嵌入实例内删除孙卡引用行：B 侧拦截对齐 A 层`，新增 `embed.test.deleteChildRef` 钩子经直接父 B 编辑器派发删除事务）。
+
+**保持不动的边界**：`relocatedInterval`/`remapSources`/`remapChildSources` 内部（remapChildSources 刻意不接重定位的边界保持——B 内表格重写孙卡行走重载装载的退化，语义安全）；unmountBlock/teardownLive 离屏回收契约（P2-09）；A 层 filter 语义。孙卡 Reading（无端口）时删除仍无拦截——与 A 层「端口在场才拦」对称。
+
+外部同步豁免与既有取舍（review-loops 首轮补录，2026-10-04）：B 侧 filter 除 `refCloseReplay` 外**豁免 `externalSync`**——外部增量/全文同步（他面板同文编辑、resync）静默应用是既有契约；拦截会把宿主同步当本地删除（dirty 弹张冠李戴的确认），clean 路径的重放还会以旧基线把同步变更当本地编辑回声出站。A 层主 view 无 doc 型外部派发（仅选区 externalSync），故 `mainDocChangeFilter` 无此分支。另两条 A 层同构的既有取舍随镜像进入 B 侧：① 他 entry 的 close.query 在途窗口内的删除尝试被一次性静默吞除（filter 已吞事务、requestClose 因他意图在场清账早退），用户重试即恢复；② 同一事务覆盖多张孙卡引用行时只弹一张确认（命中首个 entry），确认后重放删除**全部**被覆盖引用——单意图串行设计的既有语义，如需按目标逐一确认另立票。
