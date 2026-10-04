@@ -464,7 +464,9 @@ export interface EmbedCardProbe {
    *  「按 B 目录解析才命中」的集成断言面） */
   liveImageSrcs: string[]
   /** #338（P3-06）PDF 视图观测（嵌入卡 pdf 载荷的绘制层断言载体：
-   *  phase/page/totalPages/mountedPages/canvasBytes——非 pdf 卡恒 null） */
+   *  phase/page/totalPages/mountedPages/canvasBytes——非 pdf 卡恒 null）。
+   *  #339（P3-07）追加 zoom（缩放乘子）/textLayerPages（带 span 文本层
+   *  页数）/linkAnnotations（窗口内链接元素数） */
   pdf: {
     phase: PdfRenderProbe['phase']
     page: number
@@ -473,6 +475,9 @@ export interface EmbedCardProbe {
     mountedPages: number
     canvasBytes: number
     nonWhiteRatio: number
+    zoom: number
+    textLayerPages: number
+    linkAnnotations: number
   } | null
   /** P2-05 该嵌入发起的关闭确认模态态（none/open/stale） */
   closeDialog: 'none' | 'open' | 'stale'
@@ -3099,6 +3104,10 @@ export class EmbedCardManager {
                 mountedPages: p.mountedPages,
                 canvasBytes: p.canvasBytes,
                 nonWhiteRatio: p.nonWhiteRatio,
+                // #339 缩放/文本层/链接层观测（集成断言面）
+                zoom: p.zoom,
+                textLayerPages: p.textLayerPages,
+                linkAnnotations: p.linkAnnotations,
               }
             })()
           : null,
@@ -3718,7 +3727,25 @@ export class EmbedCardManager {
     handle.saveBtn.style.display = 'none'
     handle.closeBtn.style.display = 'none'
     if (handle.pdfView === null) {
-      handle.pdfView = new PdfHoverView(handle.scrollEl)
+      // #339 外链通道：PDF 内 http(s) 链接的显式点击经面板会话发
+      // link.activate（无 sourceDocUri——PDF 不是文档解析语境；宿主按
+      // external 白名单 openExternal，与 #342 web 卡片同款）。卡片保持在场
+      handle.pdfView = new PdfHoverView(handle.scrollEl, {
+        onExternalUrl: (url) => {
+          const ses = this.context.session()
+          if (!ses.sessionId || !ses.docUri) {
+            return
+          }
+          this.context.send({
+            kind: 'link.activate',
+            sessionId: ses.sessionId,
+            docUri: ses.docUri,
+            href: url,
+            srcStart: 0,
+            srcEnd: 0,
+          })
+        },
+      })
       // 视图随挂载释放（content.onDispose 链）；occurrence 浏览位置先存
       // entry（重挂与新版本重载的恢复位）
       handle.content.onDispose(() => {

@@ -2209,23 +2209,53 @@ ul.legend { padding-left: 18px; font-size: 13px; }
       <p class="life">引入：#218（2026-09-30）</p>
     </article>
     <article class="entry" id="hover-pdf-view">
-      <h3><code>.vsidian-hover-pdf（PDF 内容容器——#337 悬停浮层、#338 起嵌入卡片同款并列；内含 .vsidian-hover-pdf-spacer 全文撑高 spacer（-top/-bottom）/ .vsidian-hover-pdf-page 窗口内页占位 / .vsidian-hover-pdf-canvas 页面画布 / .vsidian-hover-pdf-page-info 页码信息行）</code><span class="eid">hover-pdf-view</span></h3>
-      <p class="purpose">只读 PDF 阅读视图（#337 / P3-05 悬停首条闭环；#338 / P3-06 全文按页滚动与正文嵌入）：悬停指向本地 PDF 的双链／普通链接，或正文 ![[文件.pdf]] 嵌入（独占行／混排／列表／引用／表格格内／递归——同一卡片壳路径）时，宿主滚动区内并列的 PDF 渲染容器。#338 起为按页 canvas 池 + spacer 虚拟化：全文模型（页高度表——估计装载、渲染回填）与 DOM/canvas 常驻分开，仅可见页与有限相邻页保留画布（窗口挂载受 PDF_SCROLL_LIMITS 预算与上限约束——费用不随总页数线性增长）；翻页操作与滚动定位互通（键位默认未绑定，只读——不修改任何文档）；同 URI 多 occurrence 经共享文档存储复用文档数据、滚动与生命周期独立。错误分态（损坏/加密/初次页码越界/资源失败）走既有状态行（浮层 .vsidian-hover-popup-state／卡片 state 行，含错误色修饰），本容器只承载成功绘制态。</p>
+      <h3><code>.vsidian-hover-pdf（PDF 内容容器——#337 悬停浮层、#338 起嵌入卡片同款并列；内含 .vsidian-hover-pdf-spacer 全文撑高 spacer（-top/-bottom）/ .vsidian-hover-pdf-page 窗口内页占位（#339 起居中为 safe——放大溢出两端可达）/ .vsidian-hover-pdf-body 页体包裹（#339：画布+文本层+链接层的共同定位基准）/ .vsidian-hover-pdf-canvas 页面画布 / .vsidian-hover-pdf-text 文本层容器（#339：pdfjs TextLayer 透明 span）及其内 span / .vsidian-hover-pdf-link 链接层元素（#339；.vsidian-hover-pdf-link-disabled 为禁用修饰）/ .vsidian-hover-pdf-page-info 页码信息行）</code><span class="eid">hover-pdf-view</span></h3>
+      <p class="purpose">只读 PDF 阅读视图（#337 / P3-05 悬停首条闭环；#338 / P3-06 全文按页滚动与正文嵌入）：悬停指向本地 PDF 的双链／普通链接，或正文 ![[文件.pdf]] 嵌入（独占行／混排／列表／引用／表格格内／递归——同一卡片壳路径）时，宿主滚动区内并列的 PDF 渲染容器。#338 起为按页 canvas 池 + spacer 虚拟化：全文模型（页高度表——估计装载、渲染回填）与 DOM/canvas 常驻分开，仅可见页与有限相邻页保留画布（窗口挂载受 PDF_SCROLL_LIMITS 预算与上限约束——费用不随总页数线性增长）；翻页操作与滚动定位互通（键位默认未绑定，只读——不修改任何文档）；同 URI 多 occurrence 经共享文档存储复用文档数据、滚动与生命周期独立。错误分态（损坏/加密/初次页码越界/资源失败）走既有状态行（浮层 .vsidian-hover-popup-state／卡片 state 行，含错误色修饰），本容器只承载成功绘制态。#339（P3-07）起补全基础阅读交互：默认适合容器宽（zoom=1），用户缩放乘子（键位 pdfZoomIn/pdfZoomOut/pdfZoomReset，默认未绑定、只读）作用于宽度适配 scale 且受 PDF_RENDER_MAX_SCALE（2.5）总上限钳制与画布预算收窄，触顶/触底操作静默无效；缩放与容器宽度变化全量重算高度模型并重绘已挂载页（旧画布/文本层/链接层回收不留残影）。文本层为 pdfjs TextLayer：透明 span 与画布字符精确对齐承接原生选区复制（中英文均可，选区底色主题化），扫描页/提取失败页无 span 不虚构；链接层消费 getAnnotations——同 PDF 页跳转就地导航、http(s) 外链经显式点击走 link.activate 宿主通道（无 href 不可导航面，不发送自动外链预览），具名动作/附件/非许可协议（file/javascript/ftp/mailto/tel）一律禁用态（aria-disabled + title 提示，点击零动作）。</p>
       <p class="views"><span class="badge">实时预览</span><span class="badge">阅读</span> <span class="support support-none">none</span></p>
-<p class="states">状态：装载中（spacer/页占位零高，状态行 loading 文案）／绘制成功（窗口内页占位含 canvas 实际尺寸，spacer 撑开全文高度，页码信息行 sticky 于滚动区底部显示当前可见页）／错误分态（canvas 清零，状态行错误文案）／失效撤下（目标 deleted/stale 时旧页撤下——画布与页占位清空、spacer 归零，视图骨架保留待恢复重载）。交互态容器——不进静态探针，绘制层可见性由浏览器与集成测试按 canvas 实际像素断言（非 DOM 存在性）。</p>
+<p class="states">状态：装载中（spacer/页占位零高，状态行 loading 文案）／绘制成功（窗口内页占位含 canvas 实际尺寸，spacer 撑开全文高度，页码信息行 sticky 于滚动区底部显示当前可见页——缩放态附达成百分比）／缩放态（zoom≠1：页体宽于内容宽时宿主滚动区横向滚动，页占位 safe center 两端可达；页码行百分比反馈）／错误分态（canvas 清零，状态行错误文案）／失效撤下（目标 deleted/stale 时旧页撤下——画布与页占位清空、spacer 归零，视图骨架保留待恢复重载）。链接层禁用态（非许可协议/不支持动作/不可解析目标：cursor not-allowed + title 提示）。交互态容器——不进静态探针，绘制层可见性由浏览器与集成测试按 canvas 实际像素断言（非 DOM 存在性）；文本层对齐由「span 矩形映射画布墨迹」的绘制层断言钉住。</p>
       <p class="obsidian">Obsidian 对应：无（Obsidian 页面预览浮层的 PDF 呈现闭源，不作承诺）</p>
 
-      <p class="dom">DOM 关系：浮层挂 #app 内浮层滚动区（.vsidian-hover-popup-scroll）内；嵌入卡挂卡片滚动区（.vsidian-embed-card-scroll）内——均与 Reading 容器并列（PDF 形态下 Reading/Live 容器由渲染层隐藏）。spacer 与页占位为 &lt;div&gt;（高度由渲染器按页高度表写）；canvas 为原生 &lt;canvas&gt; 元素（width/height 按视口适配 scale，上限 2.5）；页码信息行为 &lt;div&gt;（sticky bottom 固定），文案经 i18n 词条 hover.pdfPageInfo。</p>
+      <p class="dom">DOM 关系：浮层挂 #app 内浮层滚动区（.vsidian-hover-popup-scroll）内；嵌入卡挂卡片滚动区（.vsidian-embed-card-scroll）内——均与 Reading 容器并列（PDF 形态下 Reading/Live 容器由渲染层隐藏）。spacer 与页占位为 &lt;div&gt;（高度由渲染器按页高度表写；占位居中 justify-content: safe center——普通 center 在放大溢出时会两端等裁）；页占位内为 .vsidian-hover-pdf-body 页体包裹 &lt;div&gt;（position: relative，宽度收缩为画布显示面——文本层百分比定位与链接层绝对定位的共同坐标系），包裹内依次为 canvas（原生 &lt;canvas&gt;，width/height 按视口适配 scale × 缩放乘子、上限 2.5；无 max-width——绘制面即显示面，放大由滚动区横向滚动承接）、文本层 &lt;div&gt;（absolute inset 0，--total-scale-factor 由渲染器按绘制 scale 内联、--min-font-size 由 TextLayer 写入，内为绝对定位透明 span——变量族与 pdfjs 官方 textLayer 样式同构）与链接层元素（每条 Link 注解一枚，绝对定位矩形由 viewport 变换写出；**不带 href**——内部目标点击就地翻页、http(s) 经回调通道，禁用态加 link-disabled 类与 aria-disabled）；页码信息行为 &lt;div&gt;（sticky bottom 固定），文案经 i18n 词条 hover.pdfPageInfo（缩放态为 hover.pdfPageInfoZoom 附百分比）、链接禁用提示经 hover.pdfLinkExternalOnly／hover.pdfLinkUnsupported／hover.pdfLinkUnresolved。</p>
       <pre><code>#app &gt; .vsidian-hover-popup .vsidian-hover-pdf-page,
 #app .vsidian-embed-card .vsidian-hover-pdf-page {
   display: flex;
-  justify-content: center;
+  justify-content: safe center;
+}
+
+#app &gt; .vsidian-hover-popup .vsidian-hover-pdf-body,
+#app .vsidian-embed-card .vsidian-hover-pdf-body {
+  position: relative;
 }
 
 #app &gt; .vsidian-hover-popup .vsidian-hover-pdf-canvas,
 #app .vsidian-embed-card .vsidian-hover-pdf-canvas {
   display: block;
-  max-width: 100%;
+}
+
+#app &gt; .vsidian-hover-popup .vsidian-hover-pdf-text,
+#app .vsidian-embed-card .vsidian-hover-pdf-text {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+}
+
+#app &gt; .vsidian-hover-popup .vsidian-hover-pdf-text span {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  user-select: text;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+}
+
+#app &gt; .vsidian-hover-popup .vsidian-hover-pdf-link,
+#app .vsidian-embed-card .vsidian-hover-pdf-link {
+  position: absolute;
+  cursor: pointer;
+}
+
+#app &gt; .vsidian-hover-popup .vsidian-hover-pdf-link-disabled {
+  cursor: not-allowed;
 }
 
 #app &gt; .vsidian-hover-popup .vsidian-hover-pdf-page-info,
@@ -2235,7 +2265,7 @@ ul.legend { padding-left: 18px; font-size: 13px; }
   text-align: center;
   opacity: 0.85;
 }</code></pre>
-      <p class="verify">验证：单元 pdfRender：渲染器状态机（装载/绘制/错误分态/取消纪律）+ #338 页池契约（全文高度撑开、窗口平移回收、翻页=滚动定位、页高回填、共享文档引用计数、版本替换钳制、canvas 预算）；单元 hoverPopupCssContract：PDF 容器/页占位/画布/页码行规则钉住（浮层与嵌入卡双作用域）；单元 embedCardPdf（#338）：嵌入分派/只读卡壳/卸载回收/双 occurrence 共享/失效链路/缓存重挂；浏览器 hoverPdf / embedPdf（#337/#338）：真实 Chromium 内生产链路绘制——canvas 非白像素比例、首中末页身份色、容器矩阵（独占行/混排/表格格/递归）与挂载有界断言；集成（#337/#338）：1.82.3 真宿主——view.state.hoverPreview.pdf 与嵌入卡 probe 的 canvas 尺寸/页码/mountedPages 断言</p>
+      <p class="verify">验证：单元 pdfRender：渲染器状态机（装载/绘制/错误分态/取消纪律）+ #338 页池契约（全文高度撑开、窗口平移回收、翻页=滚动定位、页高回填、共享文档引用计数、版本替换钳制、canvas 预算）；单元 hoverPopupCssContract：PDF 容器/页占位/画布/页码行规则钉住（浮层与嵌入卡双作用域）；单元 embedCardPdf（#338）：嵌入分派/只读卡壳/卸载回收/双 occurrence 共享/失效链路/缓存重挂；浏览器 hoverPdf / embedPdf（#337/#338）：真实 Chromium 内生产链路绘制——canvas 非白像素比例、首中末页身份色、容器矩阵（独占行/混排/表格格/递归）与挂载有界断言；集成（#337/#338）：1.82.3 真宿主——view.state.hoverPreview.pdf 与嵌入卡 probe 的 canvas 尺寸/页码/mountedPages 断言；单元 + 浏览器 + 集成（#339）：缩放上限/预算/重绘与文本层/链接层契约（pdfRender 单元矩阵）；浏览器 pdfZoomCopyLinks——span 矩形映射画布墨迹的对齐断言、原生选区文本、缩放重绘、链接跳转/外链通道/禁用面与零写回；集成 probe 的 zoom/textLayerPages/linkAnnotations 观测</p>
       <p class="life">引入：#337（2026-10-04）</p>
     </article>
     <article class="entry" id="hover-text-view">

@@ -394,6 +394,21 @@
         "category": "Vsidian"
       },
       {
+        "command": "onegayi.vsidian.ui.hoverPdfZoomIn",
+        "title": "%command.ui.hoverPdfZoomIn.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.ui.hoverPdfZoomOut",
+        "title": "%command.ui.hoverPdfZoomOut.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.ui.hoverPdfZoomReset",
+        "title": "%command.ui.hoverPdfZoomReset.title%",
+        "category": "Vsidian"
+      },
+      {
         "command": "onegayi.vsidian.ui.embedToggleMode",
         "title": "%command.ui.embedToggleMode.title%",
         "category": "Vsidian"

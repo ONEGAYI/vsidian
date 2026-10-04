@@ -540,6 +540,12 @@ export const en = {
    *  (shown in place, never as host notifications; encrypted files prompt to
    *  open the original in a local reader - no password collection) */
   'hover.pdfPageInfo': 'Page {page} of {total}',
+  /** #339 zoom feedback on the page-info line (achieved percent vs fit width) */
+  'hover.pdfPageInfoZoom': 'Page {page} of {total} - {percent}%',
+  /** #339 link-layer disabled tooltips (explicit security boundary) */
+  'hover.pdfLinkExternalOnly': 'Only http(s) links can be opened in the browser from the preview',
+  'hover.pdfLinkUnsupported': 'This link action is disabled in the preview (security restriction)',
+  'hover.pdfLinkUnresolved': 'The link target could not be resolved',
   'hover.pdfErrorCorrupt': 'The PDF file is damaged or not a valid PDF; it cannot be previewed',
   'hover.pdfErrorEncrypted': 'This PDF is encrypted and cannot be opened in the preview yet. Open the original file in a local PDF reader.',
   'hover.pdfErrorPageRange': 'Page number out of range: page {page} was requested but the PDF has {total} pages (page 1 is not silently used)',
@@ -789,6 +795,10 @@ export const en = {
   'command.ui.hoverPreviewLink.title': 'Preview the current link',
   'command.ui.hoverPdfPageNext.title': 'PDF preview: next page',
   'command.ui.hoverPdfPagePrev.title': 'PDF preview: previous page',
+  /** #339 PDF zoom trio (read-only preview presentation; unbound by default) */
+  'command.ui.hoverPdfZoomIn.title': 'PDF preview: zoom in',
+  'command.ui.hoverPdfZoomOut.title': 'PDF preview: zoom out',
+  'command.ui.hoverPdfZoomReset.title': 'PDF preview: fit width',
   'command.ui.embedToggleMode.title': 'Toggle reference internal view mode',
   /** P2-10 reference Live action entries (save target / explicit close / conflict trio; all unbound by default) */
   'command.embed.saveTarget.title': 'Save focused reference target',

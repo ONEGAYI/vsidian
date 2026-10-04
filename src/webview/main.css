@@ -4486,7 +4486,11 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
    条目）：浮层滚动区内与 Reading 容器并列的只读 PDF 渲染容器。
    #338（P3-06）全文按页滚动：spacer 撑开全文高度、窗口内页占位居中、
    页码信息行 sticky 固定于滚动区底部（不随滚动走失）；嵌入卡作用域
-   同款接入（.vsidian-embed-card 内并列）。 ---- */
+   同款接入（.vsidian-embed-card 内并列）。
+   #339（P3-07）页体包裹 + 文本层 + 链接层：画布与文本/链接层共用一个
+   定位基准（.vsidian-hover-pdf-body）；文本层透明 span 承接原生选区复制，
+   链接层定位元素不带 href（点击走自持处理器）；页占位居中改 safe——
+   放大溢出时左右两端皆可达（横向滚动发生在宿主滚动区）。 ---- */
 
 /* 内容容器：承接页塔与页码信息行（PDF 形态下 Reading 容器由渲染层隐藏） */
 #app > .vsidian-hover-popup .vsidian-hover-pdf,
@@ -4494,23 +4498,108 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
   padding: 8px;
 }
 
-/* 页占位（窗口内）：页画布在卡内容宽内居中呈现 */
+/* 页占位（窗口内）：页体在卡内容宽内居中呈现。safe center——缩放放大
+   使页体宽于内容宽时，溢出端仍可滚动到达（普通 center 会两端等裁） */
 #app > .vsidian-hover-popup .vsidian-hover-pdf-page,
 #app .vsidian-embed-card .vsidian-hover-pdf-page {
   display: flex;
-  justify-content: center;
+  justify-content: safe center;
 }
 
-/* 页面画布：块级呈现，不超过容器内容宽（渲染器按内容宽适配 scale，
-   上限 2.5——绘制面即显示面，不缩小） */
+/* 页体包裹（#339）：画布 + 文本层 + 链接层的共同坐标系——宽度收缩为
+   画布显示面（文本层百分比定位与链接层绝对定位都以它为基准） */
+#app > .vsidian-hover-popup .vsidian-hover-pdf-body,
+#app .vsidian-embed-card .vsidian-hover-pdf-body {
+  position: relative;
+}
+
+/* 页面画布：块级呈现。绘制面即显示面（渲染器按内容宽 × 缩放乘子适配
+   scale、上限钳制——本规则不设 max-width：缩放放大时画布宽于内容宽，
+   由滚动区横向滚动承接；fit 态画布天然不超过内容宽） */
 #app > .vsidian-hover-popup .vsidian-hover-pdf-canvas,
 #app .vsidian-embed-card .vsidian-hover-pdf-canvas {
   display: block;
-  max-width: 100%;
 }
 
-/* 页码信息行：sticky 固定于滚动区底部（居中弱化——当前可见页反馈；
-   背景取编辑器背景防与页面内容叠字） */
+/* 文本层（#339）：pdfjs TextLayer 容器——透明 span 与画布字符对齐，
+   承接原生选区与复制（user-select: text；文字配色透明，选区底色可见）。
+   --total-scale-factor 由渲染器按绘制 scale 内联写入；--min-font-size 由
+   TextLayer 构造写入（此处的静态值是缺席兜底）。span 定位/字号换算
+   变量族与 pdfjs 官方 textLayer 样式同构（去掉 viewer 专属部分） */
+#app > .vsidian-hover-popup .vsidian-hover-pdf-text,
+#app .vsidian-embed-card .vsidian-hover-pdf-text {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  line-height: 1;
+  text-align: initial;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  z-index: 1;
+  --scale-round-x: 1px;
+  --scale-round-y: 1px;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+
+#app > .vsidian-hover-popup .vsidian-hover-pdf-text span,
+#app .vsidian-embed-card .vsidian-hover-pdf-text span {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0 0;
+  user-select: text;
+  --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+
+#app > .vsidian-hover-popup .vsidian-hover-pdf-text ::selection,
+#app .vsidian-embed-card .vsidian-hover-pdf-text ::selection {
+  background: color-mix(in srgb, var(--vscode-focusBorder, #007fd4), transparent 55%);
+  color: transparent;
+}
+
+#app > .vsidian-hover-popup .vsidian-hover-pdf-text br::selection,
+#app .vsidian-embed-card .vsidian-hover-pdf-text br::selection {
+  background: transparent;
+}
+
+/* 链接层元素（#339）：注解矩形定位（渲染器按 viewport 变换写 left/top/
+   width/height）。元素不带 href——不可导航面，点击走自持处理器（内部
+   目标就地翻页、http(s) 经宿主 openExternal）；悬停轻底色提供可点反馈 */
+#app > .vsidian-hover-popup .vsidian-hover-pdf-link,
+#app .vsidian-embed-card .vsidian-hover-pdf-link {
+  position: absolute;
+  cursor: pointer;
+  z-index: 2;
+}
+
+#app > .vsidian-hover-popup .vsidian-hover-pdf-link:hover,
+#app .vsidian-embed-card .vsidian-hover-pdf-link:hover,
+#app > .vsidian-hover-popup .vsidian-hover-pdf-link:focus-visible,
+#app .vsidian-embed-card .vsidian-hover-pdf-link:focus-visible {
+  background: color-mix(in srgb, var(--vscode-focusBorder, #007fd4), transparent 85%);
+}
+
+#app > .vsidian-hover-popup .vsidian-hover-pdf-link:focus-visible,
+#app .vsidian-embed-card .vsidian-hover-pdf-link:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, rgba(128, 128, 128, 0.6));
+  outline-offset: -1px;
+}
+
+/* 禁用链接（非许可协议/不支持动作/不可解析目标）：明确禁用观感 */
+#app > .vsidian-hover-popup .vsidian-hover-pdf-link-disabled,
+#app .vsidian-embed-card .vsidian-hover-pdf-link-disabled {
+  cursor: not-allowed;
+}
+
+/* 页码信息行：sticky 固定滚动区底部（居中弱化反馈——当前可见页反馈；
+   背景取编辑器背景防与页面内容叠字；#339 缩放时附达成百分比） */
 #app > .vsidian-hover-popup .vsidian-hover-pdf-page-info,
 #app .vsidian-embed-card .vsidian-hover-pdf-page-info {
   position: sticky;

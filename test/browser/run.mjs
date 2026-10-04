@@ -80,7 +80,10 @@ const names = ['textHover', 'tableCaret', 'blockquoteTablePaint', 'quoteBarPaint
   // #341（P3-09）文本嵌入容器矩阵：紧随嵌入族（textHover 之后的嵌入侧消费）
   'textEmbed',
   // #338（P3-06）PDF 全文滚动与正文嵌入：容器矩阵 + 双 occurrence 共享 + 窗口回收
-  'embedPdf']
+  'embedPdf',
+  // #339（P3-07）PDF 适合宽度/缩放/文本选择/链接：紧随 hoverPdf/embedPdf（同 PDF 族
+  // ——真实 TextLayer 对齐/选区/缩放重绘/链接矩阵与零写回）
+  'pdfZoomCopyLinks']
 const { workers, reuseBuilds, selected } = parseBrowserRunOptions(process.argv.slice(2), names)
 const parent = path.join(root, 'out/test/browser-runs')
 await mkdir(parent, { recursive: true })
