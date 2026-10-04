@@ -57,11 +57,28 @@ describe('分页注册与回显', () => {
     const root = document.createElement('div')
     view.mount(root)
     const nav = [...root.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
-    const indexNav = nav.find((b) => b.textContent === zhCn['indexMaintenance.title'])
-    expect(indexNav, '侧栏应出现索引维护分类').toBeTruthy()
+    // #332 设置重组：分页改名「文件与链接」（原索引维护），标题/描述走新词条
+    const indexNav = nav.find((b) => b.textContent === zhCn['settings.filesLinksSection'])
+    expect(indexNav, '侧栏应出现文件与链接分类').toBeTruthy()
     indexNav!.click()
-    expect(root.querySelector('.vsidian-settings-heading')?.textContent).toBe(zhCn['indexMaintenance.title'])
-    expect(root.querySelector('.vsidian-settings-subtitle')?.textContent).toBe(zhCn['indexMaintenance.description'])
+    expect(root.querySelector('.vsidian-settings-heading')?.textContent).toBe(zhCn['settings.filesLinksSection'])
+    expect(root.querySelector('.vsidian-settings-subtitle')?.textContent).toBe(zhCn['settings.filesLinksSectionDescription'])
+    view.dispose()
+  })
+
+  it('#332 页内嵌标准行组与二级组标题：图片/引用视图组在前、索引维护组标题后置', () => {
+    const sent: unknown[] = []
+    const section = new IndexMaintenanceSection({ postMessage: (m) => sent.push(m) })
+    // 空定义表：defsGroups 前缀过滤以视图定义表为源——空组跳过不占位
+    const view = new SettingsPageView({ postMessage: (m) => sent.push(m) }, [], [section])
+    const root = document.createElement('div')
+    view.mount(root)
+    const nav = [...root.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
+    nav.find((b) => b.textContent === zhCn['settings.filesLinksSection'])!.click()
+    expect(root.querySelectorAll('.vsidian-settings-group')).toHaveLength(0)
+    // 索引维护降为页内二级组：h3 组标题在分页内容容器内
+    expect(root.querySelector('.vsidian-settings-section-content .vsidian-settings-group-title')?.textContent)
+      .toBe(zhCn['indexMaintenance.title'])
     view.dispose()
   })
 
@@ -186,7 +203,7 @@ describe('维护操作反馈', () => {
   })
 })
 
-describe('索引维护分页图标（形态改版批次）', () => {
+describe('索引维护分页图标（形态改版批次；#332 改名后槽位沿用）', () => {
   it('分页图标为链环 glyph（links）：导航按钮内的 svg path 是链环双环形态', () => {
     const section = new IndexMaintenanceSection({ postMessage: () => {} })
     expect(section.icon).toBe('links')
@@ -196,7 +213,7 @@ describe('索引维护分页图标（形态改版批次）', () => {
     const root = document.createElement('div')
     view.mount(root)
     const nav = [...root.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
-    const indexNav = nav.find((b) => b.textContent === zhCn['indexMaintenance.title'])!
+    const indexNav = nav.find((b) => b.textContent === zhCn['settings.filesLinksSection'])!
     const path = indexNav.querySelector('svg path')!
     expect(path.getAttribute('d')!.startsWith('M10 13a5 5 0 0 0 7.54.54l3-3')).toBe(true)
     view.dispose()

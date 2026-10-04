@@ -10,6 +10,7 @@ import {
   SettingsPageView,
   SETTINGS_PAGE_CLASS_NAMES,
   type SettingsPageDelegateGroup,
+  type SettingsPageSection,
 } from '../../src/webview/settingsPageView'
 import { PRODUCTION_SETTING_DEFINITIONS, type SettingDefinition } from '../../src/shared/settings'
 import { installLocale } from '../../src/shared/i18n'
@@ -35,16 +36,26 @@ const FIXTURE_DEFS: readonly SettingDefinition[] = [
   { key: 'editor.spellcheck', type: 'boolean', default: true, titleKey: 'setting.testFlag.title' },
 ]
 
-function makeView(defs: readonly SettingDefinition[], editorGroups: readonly SettingsPageDelegateGroup[] = []): {
+function makeView(
+  defs: readonly SettingDefinition[],
+  editorGroups: readonly SettingsPageDelegateGroup[] = [],
+  /** 附加分页（#332 起「文件与链接」等用例需要真实分页注册进侧栏） */
+  sections: readonly SettingsPageSection[] = [],
+): {
   view: SettingsPageView
   sent: unknown[]
   parent: HTMLElement
 } {
   const sent: unknown[] = []
-  const view = new SettingsPageView({ postMessage: (m) => sent.push(m) }, defs, [], editorGroups)
+  const view = new SettingsPageView({ postMessage: (m) => sent.push(m) }, defs, sections, editorGroups)
   const parent = document.createElement('div')
   view.mount(parent)
   return { view, sent, parent }
+}
+
+/** 带文件与链接分页（IndexMaintenanceSection，#332 改名后承接）的装配 */
+function makeViewWithFilesPage(defs: readonly SettingDefinition[]): ReturnType<typeof makeView> {
+  return makeView(defs, [], [new IndexMaintenanceSection({ postMessage() {} })])
 }
 
 /** 点击侧栏导航项（按显示文本定位，生产注册表口径） */
@@ -319,6 +330,8 @@ it('样式契约：双栏独立滚动、分组容器、拨动开关、主题选�
   expect(css).toContain('color-mix(in srgb, var(--vsidian-settings-tint) 4%')
   // #163 二轮还原：编辑器页多小节容器，容器间留呼吸间距
   expect(css).toMatch(/\.vsidian-settings-group \+ \.vsidian-settings-group\s*\{[^}]*margin-top:\s*20px/)
+  // #332 附加分页内嵌标准行组：组容器与分页自有内容容器之间同呼吸间距
+  expect(css).toMatch(/\.vsidian-settings-group \+ \.vsidian-settings-section-content\s*\{[^}]*margin-top:\s*20px/)
   expect(css).toMatch(/\.vsidian-settings-checkbox\s*\{[^}]*appearance:\s*none/)
   // #155 跟进：依赖灰化（dependsOn 注册表驱动）为纯 CSS 契约
   expect(css).toMatch(/\.vsidian-settings-item-disabled[^{]*\{[^}]*opacity:\s*0\.55/)
@@ -459,7 +472,7 @@ describe('分组重组二轮还原（#163 验收反馈：侧栏只留常规/编�
       .not.toContain(zhCn['setting.experimentalTableRender.title'])
   })
 
-  it('编辑器页内小节为显示/编辑/符号输入/代码块/图片/引用视图，条目按前缀归节', () => {
+  it('编辑器页内小节为显示/编辑/符号输入/代码块（#332 图片/引用视图迁出至文件与链接页）', () => {
     const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
     clickNav(parent, zhCn['settings.editorCategory'])
     expect(sectionTitles(parent)).toEqual([
@@ -467,9 +480,6 @@ describe('分组重组二轮还原（#163 验收反馈：侧栏只留常规/编�
       zhCn['settings.groupEditing'],
       zhCn['settings.groupSymbols'],
       zhCn['settings.groupCodeblock'],
-      zhCn['settings.groupImage'],
-      // #298 引用视图组（hover.* / embed.* 前缀归组）
-      zhCn['settings.groupRefview'],
     ])
     // #298 迁组后「显示」小节不再收录 embed.* / hover.* 条目；#318 打开
     // 提示（editor.searchRevealHint）随注册表顺序追加在末位
@@ -493,16 +503,16 @@ describe('分组重组二轮还原（#163 验收反馈：侧栏只留常规/编�
       zhCn['setting.codeblockCopyButton.title'],
       zhCn['setting.codeblockHighlight.title'],
     ])
-    expect(groupItemTitles(parent, zhCn['settings.groupImage'])).toEqual([
-      zhCn['setting.imagePaste.title'],
-      zhCn['setting.imagePasteLocation.title'],
-      zhCn['setting.imagePasteSubpath.title'],
-    ])
+    // #332 迁出校验：图片粘贴与引用视图族条目不再出现于编辑器页任何小节
+    const editorItemTitles = [...parent.querySelectorAll(`.${SETTINGS_PAGE_CLASS_NAMES.itemTitle}`)]
+      .map((el) => el.textContent ?? '')
+    expect(editorItemTitles).not.toContain(zhCn['setting.imagePaste.title'])
+    expect(editorItemTitles).not.toContain(zhCn['setting.hoverEnabled.title'])
   })
 
-  it('引用视图组（#298/#299）组内顺序：总开关 → 直接悬停显示 → 跳转目标提示 → 嵌入展开层级 → 嵌入最大高度', () => {
-    const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
-    clickNav(parent, zhCn['settings.editorCategory'])
+  it('引用视图组（#298/#299）组内顺序：总开关 → 直接悬停显示 → 跳转目标提示 → 嵌入展开层级 → 嵌入最大高度（#332 起在文件与链接页）', () => {
+    const { parent } = makeViewWithFilesPage(PRODUCTION_SETTING_DEFINITIONS)
+    clickNav(parent, zhCn['settings.filesLinksSection'])
     expect(groupItemTitles(parent, zhCn['settings.groupRefview'])).toEqual([
       zhCn['setting.hoverEnabled.title'],
       // #298 改名后标题经同一词条键取词（值见 settings.test 词条契约）
@@ -515,9 +525,9 @@ describe('分组重组二轮还原（#163 验收反馈：侧栏只留常规/编�
     ])
   })
 
-  it('图片子路径依赖灰化（#163 验收反馈防呆）：同目录模式置灰禁改，后两种模式可用', () => {
-    const { view, parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
-    clickNav(parent, zhCn['settings.editorCategory'])
+  it('图片子路径依赖灰化（#163 验收反馈防呆）：同目录模式置灰禁改，后两种模式可用（#332 起在文件与链接页）', () => {
+    const { view, parent } = makeViewWithFilesPage(PRODUCTION_SETTING_DEFINITIONS)
+    clickNav(parent, zhCn['settings.filesLinksSection'])
     const subpathInput = parent.querySelector<HTMLInputElement>(
       'input[type="text"][data-setting-key="image.pasteSubpath"]')!
     // 默认 same-dir：子路径灰化禁改
@@ -550,11 +560,11 @@ describe('组标题图标机制（#263：编辑器页二级 h3 组字形；#265�
     return [...parent.querySelectorAll<HTMLElement>('.vsidian-settings-group-title')]
   }
 
-  it('五组标题均渲染图标：四枚内联字形与符号输入打字机资产都在文字前', () => {
+  it('四组标题均渲染图标（#332 图片/引用视图迁出后）：三枚内联字形与符号输入打字机资产都在文字前', () => {
     const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
     const titles = groupTitleEls(parent)
-    expect(titles).toHaveLength(6)
-    const withIcon = [0, 1, 3, 4, 5]
+    expect(titles).toHaveLength(4)
+    const withIcon = [0, 1, 3]
     for (const i of withIcon) {
       const svg = titles[i]!.querySelector('svg')
       expect(svg, `第 ${i} 组标题应带图标`).toBeTruthy()
@@ -570,13 +580,13 @@ describe('组标题图标机制（#263：编辑器页二级 h3 组字形；#265�
     expect(titles[2]!.textContent).toBe(zhCn['settings.groupSymbols'])
   })
 
-  it('七组标题均渲染图标（#264 生产装配）：五枚内联字形 + 打字机/分词两枚生图资产', () => {
+  it('五组标题均渲染图标（#264 生产装配 + #332 迁出）：三枚内联字形 + 打字机/分词两枚生图资产', () => {
     const wordSegment = new WordSegmentSection({ postMessage: () => {} })
     const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS, [wordSegment])
     const titles = groupTitleEls(parent)
-    expect(titles).toHaveLength(7)
-    // 内联五枚（显示/编辑/代码块/图片/引用视图）
-    for (const i of [0, 1, 3, 4, 5]) {
+    expect(titles).toHaveLength(5)
+    // 内联三枚（显示/编辑/代码块）
+    for (const i of [0, 1, 3]) {
       const svg = titles[i]!.querySelector('svg')
       expect(svg, `第 ${i} 组标题应带内联图标`).toBeTruthy()
       expect(titles[i]!.firstElementChild).toBe(svg)
@@ -584,7 +594,7 @@ describe('组标题图标机制（#263：编辑器页二级 h3 组字形；#265�
     }
     // 生图两枚走同一 generated-icon 槽（委托组经组对象 icon 槽登记）：
     // 符号输入 = 打字机、中文分词 = wordSegment，都在文字前、纯装饰
-    const generatedKinds = [2, 6].map((i) => {
+    const generatedKinds = [2, 4].map((i) => {
       const glyph = titles[i]!.querySelector<HTMLElement>('.vsidian-settings-generated-icon')
       expect(glyph, `第 ${i} 组标题应带生图资产图标`).toBeTruthy()
       expect(titles[i]!.firstElementChild).toBe(glyph)
@@ -596,14 +606,13 @@ describe('组标题图标机制（#263：编辑器页二级 h3 组字形；#265�
     expect(generatedKinds).toEqual(['typewriter', 'wordSegment'])
   })
 
-  it('字形与 v2 拍板清单一致：显示器/双 I 光标/尖括号/山形相框（24 viewBox 单 path）', () => {
+  it('字形与 v2 拍板清单一致：显示器/双 I 光标/尖括号（24 viewBox 单 path）', () => {
     const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
     const titles = groupTitleEls(parent)
     const dOf = (i: number) => titles[i]!.querySelector('svg path')!.getAttribute('d')!
     expect(dOf(0)).toBe('M4 3h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2ZM8 21h8M12 17v4')
     expect(dOf(1)).toBe('M7 4v16M5 4h4M5 20h4M17 4v16M15 4h4M15 20h4')
     expect(dOf(3)).toBe('M8 7l-5 5 5 5M16 7l5 5-5 5')
-    expect(dOf(4)).toBe('M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2ZM11 9a2 2 0 1 1-4 0 2 2 0 0 1 4 0M21 15l-3.09-3.09a2 2 0 0 0-2.82 0L6 21')
   })
 
   it('样式契约：h3 flex+gap 布局、图标 16px 覆盖、行级 margin/padding/border 规则不变', async () => {
@@ -630,10 +639,10 @@ describe('组标题图标机制（#263：编辑器页二级 h3 组字形；#265�
   })
 })
 
-describe('引用视图组（#298：总开关、改名呈现与开关回显/持久化）', () => {
-  /** 切到编辑器分组后取「引用视图」组容器 */
+describe('引用视图组（#298：总开关、改名呈现与开关回显/持久化；#332 迁入文件与链接页）', () => {
+  /** 切到文件与链接分页后取「引用视图」组容器 */
   function refviewGroup(parent: HTMLElement): HTMLElement {
-    clickNav(parent, zhCn['settings.editorCategory'])
+    clickNav(parent, zhCn['settings.filesLinksSection'])
     return sectionByTitle(parent, zhCn['settings.groupRefview'])
   }
   /** 组内设置行（按 data-setting-key 取） */
@@ -644,7 +653,7 @@ describe('引用视图组（#298：总开关、改名呈现与开关回显/持�
   }
 
   it('组标题图标一次接线：内联 svg 在文字前、aria-hidden 纯装饰（path 数据占位复用现有字形）', () => {
-    const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
+    const { parent } = makeViewWithFilesPage(PRODUCTION_SETTING_DEFINITIONS)
     const group = refviewGroup(parent)
     const title = group.querySelector<HTMLElement>('.vsidian-settings-group-title')!
     expect(title.textContent).toBe(zhCn['settings.groupRefview'])
@@ -656,7 +665,7 @@ describe('引用视图组（#298：总开关、改名呈现与开关回显/持�
   })
 
   it('总开关默认开启回显；切换上送 settings.set；快照回显关闭值并保持有效', () => {
-    const { view, sent, parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
+    const { view, sent, parent } = makeViewWithFilesPage(PRODUCTION_SETTING_DEFINITIONS)
     const group = refviewGroup(parent)
     const box = itemOf(group, 'hover.enabled').querySelector<HTMLInputElement>(
       `input.${SETTINGS_PAGE_CLASS_NAMES.checkbox}`)!
@@ -677,7 +686,7 @@ describe('引用视图组（#298：总开关、改名呈现与开关回显/持�
   })
 
   it('改名后的标题与重写后的描述在组内呈现（用户可见文字经词条取词）', () => {
-    const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
+    const { parent } = makeViewWithFilesPage(PRODUCTION_SETTING_DEFINITIONS)
     const group = refviewGroup(parent)
     const item = itemOf(group, 'hover.liveDirect')
     expect(item.querySelector(`.${SETTINGS_PAGE_CLASS_NAMES.itemTitle}`)?.textContent)
@@ -833,7 +842,7 @@ describe('外观合并分页（#231）', () => {
     result!.click()
   }
 
-  it('侧栏六条：常规、编辑器、实验性功能、快捷键、外观、索引维护；「外观」为调色板图标', () => {
+  it('侧栏六条：常规、编辑器、实验性功能、快捷键、外观、文件与链接；「外观」为调色板图标', () => {
     const { parent } = makeFullView()
     expect(navItems(parent).map((b) => b.textContent)).toEqual([
       zhCn['settings.generalSection'],
@@ -841,7 +850,7 @@ describe('外观合并分页（#231）', () => {
       zhCn['settings.experimentalSection'],
       zhCn['keybindingSettings.title'],
       zhCn['appearance.title'],
-      zhCn['indexMaintenance.title'],
+      zhCn['settings.filesLinksSection'],
     ])
     // 外观条目 icon 是调色板：主体轮廓（lucide palette 形）+ 颜料孔圆点子路径
     const appearanceNav = navItems(parent).find((b) => b.textContent === zhCn['appearance.title'])!
@@ -1042,6 +1051,13 @@ describe('会话内恢复：uiState 上报与 focusSection.scroll 应用（面�
     expect(mainEl(parent).scrollTop).toBe(120)
   })
 
+  it('focusSection section=index（#332 改名后分页 id 不变）：打开文件与链接页', () => {
+    const { view, parent } = makeTrackedFullView()
+    view.handleHostMessage({ kind: 'settings.focusSection', section: 'index' })
+    expect(parent.querySelector('.vsidian-settings-heading')?.textContent)
+      .toBe(zhCn['settings.filesLinksSection'])
+  })
+
   it('focusSection 不带 scroll（既有定位形态）：切页复位顶部，定位语义不回归', () => {
     const { view, sent, parent } = makeTrackedFullView()
     clickNav(parent, zhCn['appearance.title'])
@@ -1050,5 +1066,116 @@ describe('会话内恢复：uiState 上报与 focusSection.scroll 应用（面�
     view.handleHostMessage({ kind: 'settings.focusSection', section: 'general' })
     expect(parent.querySelector('.vsidian-settings-heading')?.textContent).toBe(zhCn['settings.generalSection'])
     expect(mainEl(parent).scrollTop).toBe(0)
+  })
+})
+
+describe('文件与链接分页（#332 设置重组：图片/引用视图迁入 + liveDirect 灰化联动补漏）', () => {
+  /** 生产注册口径完整装配：侧栏含快捷键与文件与链接两条附加分页 */
+  function makeFilesView(): { view: SettingsPageView; sent: unknown[]; parent: HTMLElement } {
+    const sent: unknown[] = []
+    const view = new SettingsPageView(
+      { postMessage: (m) => sent.push(m) },
+      PRODUCTION_SETTING_DEFINITIONS,
+      [
+        new KeybindingSettingsSection({ postMessage() {} }),
+        new IndexMaintenanceSection({ postMessage: (m) => sent.push(m) }),
+      ],
+    )
+    const parent = document.createElement('div')
+    view.mount(parent)
+    return { view, sent, parent }
+  }
+  const sectionTitlesOf = (parent: HTMLElement): string[] =>
+    [...parent.querySelectorAll('.vsidian-settings-group-title')].map((el) => el.textContent ?? '')
+  const itemTitlesOf = (parent: HTMLElement, title: string): string[] =>
+    [...sectionByTitle(parent, title).querySelectorAll(`.${SETTINGS_PAGE_CLASS_NAMES.item}`)]
+      .map((el) => el.querySelector(`.${SETTINGS_PAGE_CLASS_NAMES.itemTitle}`)?.textContent ?? '')
+
+  it('页内三组：图片/引用视图标准行组在前，索引维护二级组（分页自有内容）收尾', () => {
+    const { parent } = makeFilesView()
+    clickNav(parent, zhCn['settings.filesLinksSection'])
+    expect(parent.querySelector('.vsidian-settings-heading')?.textContent)
+      .toBe(zhCn['settings.filesLinksSection'])
+    expect(sectionTitlesOf(parent)).toEqual([
+      zhCn['settings.groupImage'],
+      zhCn['settings.groupRefview'],
+      zhCn['indexMaintenance.title'],
+    ])
+    expect(itemTitlesOf(parent, zhCn['settings.groupImage'])).toEqual([
+      zhCn['setting.imagePaste.title'],
+      zhCn['setting.imagePasteLocation.title'],
+      zhCn['setting.imagePasteSubpath.title'],
+    ])
+    // 索引维护降为页内二级组：h3 组标题在分页自有内容容器内（原分页内容不回归）
+    const content = parent.querySelector('.vsidian-settings-section-content')
+    expect(content).toBeTruthy()
+    expect(content!.querySelector('.vsidian-settings-group-title')?.textContent)
+      .toBe(zhCn['indexMaintenance.title'])
+    expect(content!.querySelector('.vsidian-index-patterns')).toBeTruthy()
+  })
+
+  it('组标题图标：图片=山形相框、引用视图=内联占位字形、索引维护=链环（h3 容器同一路径）', () => {
+    const { parent } = makeFilesView()
+    clickNav(parent, zhCn['settings.filesLinksSection'])
+    const dOf = (title: string) =>
+      sectionByTitle(parent, title).querySelector('.vsidian-settings-group-title svg path')!
+        .getAttribute('d')!
+    expect(dOf(zhCn['settings.groupImage'])).toBe(
+      'M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2ZM11 9a2 2 0 1 1-4 0 2 2 0 0 1 4 0M21 15l-3.09-3.09a2 2 0 0 0-2.82 0L6 21')
+    expect(dOf(zhCn['settings.groupRefview'])).toBe(
+      'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71')
+    const indexTitle = parent.querySelector<HTMLElement>(
+      '.vsidian-settings-section-content .vsidian-settings-group-title')!
+    expect(indexTitle.querySelector('svg path')!.getAttribute('d')!.startsWith('M10 13a5 5 0 0 0 7.54.54l3-3'))
+      .toBe(true)
+  })
+
+  it('liveDirect 灰化联动：总开关关闭即禁用+灰化类，changed 回推就地解灰（值不清除）', () => {
+    const { view, parent } = makeFilesView()
+    clickNav(parent, zhCn['settings.filesLinksSection'])
+    view.handleHostMessage({ kind: 'settings.snapshot', values: {
+      'hover.enabled': false, 'hover.liveDirect': true, 'hover.targetTip': true, 'embed.maxDepth': 3,
+    } })
+    const liveDirect = parent.querySelector<HTMLInputElement>('input[data-setting-key="hover.liveDirect"]')!
+    expect(liveDirect.disabled).toBe(true)
+    expect(liveDirect.closest(`.${SETTINGS_PAGE_CLASS_NAMES.item}`)!.classList
+      .contains('vsidian-settings-item-disabled')).toBe(true)
+    expect(liveDirect.checked).toBe(true) // 依赖灰化不清除值：解灰后按原值生效
+    // 独立项不随总开关灰化：targetTip 独立（#299 既定决策）、embed 常驻呈现
+    const targetTip = parent.querySelector<HTMLInputElement>('input[data-setting-key="hover.targetTip"]')!
+    expect(targetTip.disabled).toBe(false)
+    const embedDepth = parent.querySelector<HTMLInputElement>('input[data-setting-key="embed.maxDepth"]')!
+    expect(embedDepth.disabled).toBe(false)
+    // 用户打开总开关：changed 广播就地解灰（同一控件实例，无重渲染）
+    view.handleHostMessage({ kind: 'settings.changed', values: {
+      'hover.enabled': true, 'hover.liveDirect': true, 'hover.targetTip': true, 'embed.maxDepth': 3,
+    } })
+    expect(liveDirect.disabled).toBe(false)
+    expect(liveDirect.closest(`.${SETTINGS_PAGE_CLASS_NAMES.item}`)!.classList
+      .contains('vsidian-settings-item-disabled')).toBe(false)
+    expect(liveDirect.checked).toBe(true)
+  })
+
+  it('全局搜索路由：引用视图/图片条目落文件与链接分组并定位组内行', () => {
+    const { parent } = makeFilesView()
+    const search = parent.querySelector<HTMLInputElement>('input[type=search]')!
+    search.value = zhCn['setting.hoverEnabled.title']
+    search.dispatchEvent(new Event('input'))
+    const result = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-result')]
+      .find((b) => b.querySelector('.vsidian-settings-result-category')?.textContent === zhCn['settings.filesLinksSection']
+        && (b.textContent ?? '').includes(zhCn['setting.hoverEnabled.title']))
+    expect(result, '引用视图条目应落文件与链接分组').toBeTruthy()
+    result!.click()
+    expect(parent.querySelector('[data-setting-key="hover.enabled"]')!.closest(`.${SETTINGS_PAGE_CLASS_NAMES.item}`)!.classList
+      .contains('vsidian-settings-item-located')).toBe(true)
+    // 图片条目同归属（编辑器页分组不再收录）
+    search.value = zhCn['setting.imagePaste.title']
+    search.dispatchEvent(new Event('input'))
+    const imageResult = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-result')]
+      .find((b) => b.querySelector('.vsidian-settings-result-category')?.textContent === zhCn['settings.filesLinksSection'])
+    expect(imageResult, '图片粘贴条目应落文件与链接分组').toBeTruthy()
+    imageResult!.click()
+    expect(parent.querySelector('[data-setting-key="image.paste"]')!.closest(`.${SETTINGS_PAGE_CLASS_NAMES.item}`)!.classList
+      .contains('vsidian-settings-item-located')).toBe(true)
   })
 })

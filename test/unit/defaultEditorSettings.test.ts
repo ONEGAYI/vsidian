@@ -97,7 +97,7 @@ const hostValues = (values: Partial<SettingsPayload>): HostToWebview =>
   ({ kind: 'settings.snapshot', values }) as HostToWebview
 
 describe('常规页委托组装配（#323）', () => {
-  it('侧栏七项不变：「默认编辑器」组不占侧栏分页槽位（委托组不产生分页）', () => {
+  it('侧栏六项不变：「默认编辑器」组不占侧栏分页槽位（委托组不产生分页；#332 末项为文件与链接）', () => {
     const { parent } = makeProductionView()
     const titles = [...parent.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
       .map((b) => b.textContent ?? '')
@@ -107,7 +107,7 @@ describe('常规页委托组装配（#323）', () => {
       zhCn['settings.experimentalSection'],
       zhCn['keybindingSettings.title'],
       zhCn['appearance.title'],
-      zhCn['indexMaintenance.title'],
+      zhCn['settings.filesLinksSection'],
     ])
   })
 

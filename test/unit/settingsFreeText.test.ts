@@ -23,6 +23,7 @@ import {
   type SettingDefinition,
 } from '../../src/shared/settings'
 import { SettingsPageView } from '../../src/webview/settingsPageView'
+import { IndexMaintenanceSection } from '../../src/webview/indexMaintenanceSettings'
 import { installLocale } from '../../src/shared/i18n'
 import { zhCn } from '../../src/shared/locales/zh-cn'
 
@@ -151,7 +152,10 @@ describe('设置页 text input 控件（#161）', () => {
     root: HTMLElement
   } {
     const bridge = { postMessage: () => {} }
-    const view = new SettingsPageView(bridge, TEXT_AND_ENUM)
+    // #332 设置重组：image.* 键迁至「文件与链接」附加分页（defsGroups 承
+    // 接）——注册该分页后它成为此 fixture 的首个分类（editor/general 均空），
+    // image 行落在默认页，查询断言无需切页
+    const view = new SettingsPageView(bridge, TEXT_AND_ENUM, [new IndexMaintenanceSection(bridge)])
     const root = document.createElement('div')
     document.body.append(root)
     view.mount(root)
@@ -188,7 +192,8 @@ describe('设置页 text input 控件（#161）', () => {
 
   it('change 上送 settings.set；后续快照回显同步（checkbox 回显不回归）', () => {
     const sent: Array<{ kind?: string; values?: Record<string, unknown> }> = []
-    const view = new SettingsPageView({ postMessage: (m) => sent.push(m as { kind?: string; values?: Record<string, unknown> }) }, TEXT_AND_ENUM)
+    const bridge = { postMessage: (m: unknown) => sent.push(m as { kind?: string; values?: Record<string, unknown> }) }
+    const view = new SettingsPageView(bridge, TEXT_AND_ENUM, [new IndexMaintenanceSection(bridge)])
     const root = document.createElement('div')
     document.body.append(root)
     view.mount(root)

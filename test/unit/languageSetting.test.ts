@@ -152,19 +152,19 @@ describe('设置页「常规」分组渲染与选项显示名（视觉层断言�
       .toEqual(['常规', '编辑器', '实验性功能'])
   })
 
-  it('分组隔离（#163 二轮还原口径）：编辑器页「图片」小节只含 image.* 定义，语言项不在其中', () => {
+  it('分组隔离（#163 二轮还原口径；#332 图片组迁出编辑器页）：编辑器页无「图片」小节、语言项不在编辑器页', () => {
     installLocale('zh-cn', zhCn)
     const { parent } = makeView(PRODUCTION_SETTING_DEFINITIONS)
     const editorNav = [...parent.querySelectorAll<HTMLButtonElement>(NAV_ITEM)]
       .find((b) => b.textContent === '编辑器')!
     editorNav.click()
-    // #163 二轮还原：图片是编辑器页内的组内标题小节——语言项（general.）
-    // 仍在「常规」页，不得出现在编辑器页任何小节
-    const imageSection = [...parent.querySelectorAll('.vsidian-settings-group')]
-      .find((g) => g.querySelector('.vsidian-settings-group-title')?.textContent === '图片')!
-    const editorSelects = [...imageSection.querySelectorAll<HTMLSelectElement>(`select.${SETTINGS_PAGE_CLASS_NAMES.select}`)]
-    expect(editorSelects.length).toBe(1)
-    expect(editorSelects[0]!.dataset.settingKey).toBe('image.pasteLocation')
+    // #163 二轮还原：语言项（general.）在「常规」页，不得出现在编辑器页；
+    // #332 设置重组：图片小节迁至「文件与链接」附加分页，编辑器页不再有
+    // 该组（image.pasteLocation 下拉的呈现断言随迁至 settingsFreeText /
+    // settingsPage 两处）
+    const hasImageSection = [...parent.querySelectorAll('.vsidian-settings-group')]
+      .some((g) => g.querySelector('.vsidian-settings-group-title')?.textContent === '图片')
+    expect(hasImageSection).toBe(false)
     const allGeneral = [...parent.querySelectorAll('[data-setting-key]')].every((el) =>
       !(el.getAttribute('data-setting-key') ?? '').startsWith('general.'))
     expect(allGeneral).toBe(true)

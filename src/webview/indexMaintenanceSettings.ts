@@ -1,14 +1,17 @@
-// 索引维护设置分页（工单 #198）：排除模式列表编辑（增删行/保存/恢复默认）
-// 与缓存清理、完整重建操作（进度/取消/结果反馈）。经 SettingsPageSection
-// 注入设置页（与 CSS 片段分页同模式）；状态权威在宿主（index.state 推送
-// 回显，页面不自行推断）。文案一律 t() 取词（indexMaintenance.* 词条）。
+// 「文件与链接」设置分页（工单 #198 起为索引维护；#332 设置重组改名承接
+// 文件/链接域：页内由视图装配「图片」「引用视图」两个标准设置行组
+// （defsGroups），本类自有内容降为页内「索引维护」二级组——排除模式列表
+// 编辑（增删行/保存/恢复默认）与缓存清理、完整重建操作（进度/取消/结果
+// 反馈））。经 SettingsPageSection 注入设置页（与 CSS 片段分页同模式）；
+// 状态权威在宿主（index.state 推送回显，页面不自行推断）。文案一律 t()
+// 取词（indexMaintenance.* 词条）。
 //
 // 编辑态语义：输入框内容为**本地草稿**（draft），权威清单只在 index.state
 // 到达时同步（draft 置空回落权威值）；「保存」上送非空 trim 后的清单，
 // 「恢复默认」上送默认清单——两者都经宿主清洗（非法项在 notice 回显）。
 import { t } from '../shared/i18n'
 import { isHostToWebview } from '../shared/protocol'
-import type { SettingsPageBridge, SettingsPageSection } from './settingsPageView'
+import { groupIcon, type SettingsPageBridge, type SettingsPageSection } from './settingsPageView'
 
 type IndexStateMessage = Extract<import('../shared/protocol').HostToWebview, { kind: 'index.state' }>
 
@@ -18,11 +21,21 @@ export const INDEX_SECTION_ACTIONS_ENTRY = 'actions'
 
 export class IndexMaintenanceSection implements SettingsPageSection {
   readonly id = 'index'
-  /** 链环 glyph（形态改版批次：自 'editor' 铅笔改为链环——索引维护的
-   *  链接域意象，与侧栏反链/出链图标同形语言） */
+  /** 链环 glyph（形态改版批次：自 'editor' 铅笔改为链环——链接域意象，
+   *  与侧栏反链/出链图标同形语言；#332 改名「文件与链接」后槽位沿用） */
   readonly icon = 'links' as const
-  get title(): string { return t('indexMaintenance.title') }
-  get description(): string { return t('indexMaintenance.description') }
+  /** #332 页内嵌标准设置行组：图片（image.*，自编辑器页迁入）与引用视图
+   *  （hover.* 与 embed.* 两前缀，#298 自编辑器页迁组、#332 随分页迁移）。
+   *  视图装配 h3 组容器与标准行，条目进全局搜索并归本分页分组命中；前缀
+   *  过滤以视图定义表为源（本类不引用生产注册表，fixture 场景自然为空组） */
+  readonly defsGroups = [
+    { titleKey: 'settings.groupImage', icon: 'image' as const, prefixes: ['image.'] },
+    { titleKey: 'settings.groupRefview', icon: 'refview' as const, prefixes: ['hover.', 'embed.'] },
+  ] as const
+  // #332 改名：分页标题/描述走文件与链接词条；「索引维护」降为页内二级
+  // 组标题（render 内 h3，indexMaintenance.title 词条沿用）
+  get title(): string { return t('settings.filesLinksSection') }
+  get description(): string { return t('settings.filesLinksSectionDescription') }
 
   private state: IndexStateMessage | undefined
   /** 编辑草稿（null = 跟随权威 state.patterns） */
@@ -83,6 +96,15 @@ export class IndexMaintenanceSection implements SettingsPageSection {
     parent.replaceChildren()
     const state = this.state
     const busy = state?.status === 'cleaning' || state?.status === 'rebuilding'
+
+    // ---- 页内二级组标题（#332：原分页降为「索引维护」组，与迁入的标准
+    // 行组同一 h3 容器语言；icon 槽登记链环 glyph，装配走 groupIcon 同路径） ----
+    const groupTitle = document.createElement('h3')
+    groupTitle.className = 'vsidian-settings-group-title'
+    const glyph = groupIcon('links')
+    glyph.setAttribute('aria-hidden', 'true')
+    groupTitle.append(glyph, document.createTextNode(t('indexMaintenance.title')))
+    parent.append(groupTitle)
 
     // ---- 排除模式编辑 ----
     const patternsBlock = document.createElement('div')

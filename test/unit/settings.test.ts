@@ -518,6 +518,9 @@ describe('Live 直接悬停设置（#221）', () => {
     expect(def).toMatchObject({ type: 'boolean', default: false })
     expect(def?.titleKey).toBe('setting.hoverLiveDirect.title')
     expect(def?.descriptionKey).toBe('setting.hoverLiveDirect.description')
+    // #332 灰化联动补漏：liveDirect 只在总开关开启时生效（描述既有口径），
+    // 登记依赖后设置页随总开关灰化/解灰
+    expect(def?.dependsOn).toBe('hover.enabled')
     // 注册表整体恒合法（依赖校验 + 定义自校验兜底）
     expect(validateSettingDependencies(PRODUCTION_SETTING_DEFINITIONS)).toEqual([])
     // 默认快照含新键；非法存量（类型不符）恢复默认
@@ -526,6 +529,14 @@ describe('Live 直接悬停设置（#221）', () => {
       .toBe(false)
     expect(sanitizeStoredSettings(PRODUCTION_SETTING_DEFINITIONS, { 'hover.liveDirect': true })['hover.liveDirect'])
       .toBe(true)
+  })
+
+  it('isSettingEnabled：总开关关闭时 liveDirect 不可用，开启即恢复（#332 灰化联动口径）', () => {
+    const liveDirect = PRODUCTION_SETTING_DEFINITIONS.find((d) => d.key === 'hover.liveDirect')!
+    expect(isSettingEnabled(PRODUCTION_SETTING_DEFINITIONS, { 'hover.enabled': false }, liveDirect)).toBe(false)
+    expect(isSettingEnabled(PRODUCTION_SETTING_DEFINITIONS, { 'hover.enabled': true }, liveDirect)).toBe(true)
+    // 缺值回退依赖项默认值（true）：全新安装不灰化
+    expect(isSettingEnabled(PRODUCTION_SETTING_DEFINITIONS, {}, liveDirect)).toBe(true)
   })
 })
 

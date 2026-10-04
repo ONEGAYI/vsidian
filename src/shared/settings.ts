@@ -562,8 +562,8 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     unit: 'px',
   },
   {
-    // #298 悬停预览总开关（hover.* 域 → 编辑器页「引用视图」组：组内首项，
-    // 见 settingsPageView 的 refviewDefs；注册表顺序即组内渲染顺序）
+    // #298 悬停预览总开关（hover.* 域 → 设置页「文件与链接」分页「引用视图」
+    // 组：组内首项，#332 自编辑器页迁入；注册表顺序即组内渲染顺序）
     key: HOVER_ENABLED_KEY,
     type: 'boolean',
     default: HOVER_ENABLED_DEFAULT,
@@ -571,17 +571,22 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     descriptionKey: 'setting.hoverEnabled.description',
   },
   {
-    // #221 Live 直接悬停（hover.* 域 → 编辑器页「引用视图」组：#298 自
-    //「显示」组迁入并改名「实时预览中直接悬停显示」，总开关之后第二项）
+    // #221 Live 直接悬停（hover.* 域 → 设置页「文件与链接」分页「引用视图」
+    // 组：#298 自「显示」组迁入并改名「实时预览中直接悬停显示」，总开关之后
+    // 第二项；#332 起分页随组迁至文件与链接）
     key: HOVER_LIVE_DIRECT_KEY,
     type: 'boolean',
     default: HOVER_LIVE_DIRECT_DEFAULT,
     titleKey: 'setting.hoverLiveDirect.title',
     descriptionKey: 'setting.hoverLiveDirect.description',
+    // #332 灰化联动补漏：本项只在总开关开启时生效（描述既有口径），登记
+    // 依赖后设置页随总开关灰化/解灰（值不清除）。targetTip 明确独立不登记
+    // （#299：总开关关闭时提示反而是悬停的唯一反馈）
+    dependsOn: HOVER_ENABLED_KEY,
   },
   {
-    // #299 跳转目标提示（hover.* 域 → 编辑器页「引用视图」组：直接悬停
-    // 显示之后、嵌入展开层级之前——组内第三项；独立于总开关不登记
+    // #299 跳转目标提示（hover.* 域 → 设置页「文件与链接」分页「引用视图」组：
+    // 直接悬停显示之后、嵌入展开层级之前——组内第三项；独立于总开关不登记
     // dependsOn，总开关关闭时提示是悬停的唯一反馈、不随其灰化）
     key: HOVER_TARGET_TIP_KEY,
     type: 'boolean',
@@ -590,8 +595,8 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     descriptionKey: 'setting.hoverTargetTip.description',
   },
   {
-    // #244 嵌入展开层级（embed.* 域 → 编辑器页「引用视图」组：#298 自
-    //「显示」组迁入，取值/范围/生效行为零迁移，仅呈现位置变化）
+    // #244 嵌入展开层级（embed.* 域 → 设置页「文件与链接」分页「引用视图」组：
+    // #298 自「显示」组迁入，取值/范围/生效行为零迁移，仅呈现位置变化）
     key: EMBED_MAX_DEPTH_KEY,
     type: 'number',
     default: EMBED_MAX_DEPTH_DEFAULT,
@@ -602,8 +607,8 @@ export const PRODUCTION_SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     descriptionKey: 'setting.embedMaxDepth.description',
   },
   {
-    // #222 嵌入最大高度（embed.* 域 → 编辑器页「引用视图」组：#298 自
-    //「显示」组迁入，零迁移；refviewDefs 收纳 hover.*/embed.* 两前缀）
+    // #222 嵌入最大高度（embed.* 域 → 设置页「文件与链接」分页「引用视图」组：
+    // #298 自「显示」组迁入，零迁移；#332 起组随分页迁至文件与链接）
     key: EMBED_MAX_HEIGHT_KEY,
     type: 'number',
     default: EMBED_MAX_HEIGHT_DEFAULT,
