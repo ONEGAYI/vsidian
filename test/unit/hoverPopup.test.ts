@@ -1375,3 +1375,43 @@ describe('#242 浮层挂载释放', () => {
     expect(h.sent.length).toBe(before)
   })
 })
+
+// #333（P3-01）类型化装载：hover.result 成功回包经 contentKind 分派——
+// markdown（显式与缺省兼容）照常应用；kind 与载荷不匹配的回包（本票
+// 防御路径：宿主/校验器已拦，此处钉住消费端不应用、不悬挂租约）。
+describe('#333 类型化装载（contentKind 分派）', () => {
+  it('显式 contentKind: markdown 照常应用内容（生产类型化出站形态）', () => {
+    vi.useFakeTimers()
+    const h = makeHarness()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    const req = requestOf(h)
+    notifyHoverResult({
+      kind: 'hover.result', reqId: req.reqId, instanceId: req.instanceId, ok: true,
+      contentKind: 'markdown', ...RESULT_OK,
+    })
+    expect(hoverPopupProbe().state).toBe('content')
+    expect(hoverPopupProbe().scope).toBe('full')
+    expect(hoverPopupProbe().blocks).toBeGreaterThan(0)
+    closeHoverPopup()
+  })
+
+  it('kind 与载荷不匹配（pdf + Markdown 载荷）：不应用内容、显示错误分态、释放来源租约', () => {
+    vi.useFakeTimers()
+    const h = makeHarness()
+    hoverPreviewAnchorEnter(h.anchor)
+    vi.advanceTimersByTime(HOVER_POPUP_OPEN_DELAY_MS)
+    const req = requestOf(h)
+    notifyHoverResult({
+      kind: 'hover.result', reqId: req.reqId, instanceId: req.instanceId, ok: true,
+      contentKind: 'pdf', sourceLeaseId: 'lease-1', ...RESULT_OK,
+    })
+    expect(hoverPopupProbe().state).toBe('error')
+    expect(hoverPopupProbe().blocks).toBe(0)
+    expect(h.sent).toContainEqual({
+      kind: 'hover.source.release', sessionId: SESSION.sessionId, docUri: SESSION.docUri,
+      sourceLeaseId: 'lease-1',
+    })
+    closeHoverPopup()
+  })
+})

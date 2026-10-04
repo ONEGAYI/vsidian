@@ -78,7 +78,9 @@ vsidian/
     │   ├── newline.ts            # CRLF/LF 换行协调器
     │   ├── obsidianAlias.ts      # Obsidian 别名桥实现同源表
     │   ├── protocol.ts           # 消息协议单一事实源
+    │   ├── refContent.ts         # 引用内容类型分派共享内核（#333）
     │   ├── refExpansion.ts       # 引用递归路径与容量预算
+    │   ├── relocationScan.ts     # 重定位逐字检索扫描预算（#320）
     │   ├── settings.ts           # 设置定义与读写纯逻辑
     │   ├── skeletonTiming.ts     # 骨架屏撤除计算与装配常量（#292）
     │   ├── styleContract.ts      # 公开样式契约清单单一事实源

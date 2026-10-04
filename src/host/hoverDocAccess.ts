@@ -33,17 +33,30 @@
 // 实例继续可用，重开再验证）。
 //
 // 本模块不依赖 vscode（node 单测直驱；vscode 层装配在 textEditorProvider）。
+//
+// #333（P3-01）类型分派入口：readRefContentTarget 为生产读取入口——目标
+// 三形态（双链/普通链接/直接目标）先解析出 fsPath，再按 shared/refContent
+// 的类型分类学分派：markdown 通道装载既有全文载荷（RefMarkdownContent）；
+// 其余类型维持 non-markdown 分态（pdf/image/text/web 的载荷与导航选择器
+// 由 P3-04/P3-05/P3-08/P3-10 在分派表登记——Markdown 的 TextDocument
+// .version 与 LF 范围不得冒充这些类型的版本或页码）。旧三入口
+// （readHoverDocTarget/readHoverMdLinkTarget/readHoverDirectTarget）成为
+// 兼容适配薄壳：经类型化入口后展开回旧扁平形态（HoverReadOutcome），
+// 供既有调用与测试保持等价。
 import * as path from 'node:path'
 import { NewlineCoordinator } from '../shared/newline'
 import { parseWikilinkInner } from '../shared/wikilink'
 import { isVaultPathInsideRoot, planVaultLinkPath, type VaultLinkFileResolution, type VaultLinkResolveContext } from '../shared/vaultLink'
+import { classifyLocalRefContentKind, type RefMarkdownContent } from '../shared/refContent'
 import { classifyLinkTarget, planPathTextOf, splitHrefFragment } from './linkTarget'
 import { findBlockRange, findHeadingSectionRange } from './wikilinkTarget'
 import type { HoverPreviewFailReason, HoverPreviewScope } from '../shared/protocol'
 
 /** 读取结果：成功携带规范身份 + 版本 + LF 全文、源范围与语义范围选择器；
  *  失败为错误分态（就地 i18n 呈现的载荷来源，不连续弹宿主通知；缺失锚点
- *  分态附锚点原文） */
+ *  分态附锚点原文）。#333 起为**兼容适配形态**——生产读取走类型化
+ *  RefReadOutcome（旧扁平形态经 flattenHoverReadOutcome 展开，供既有调用
+ *  与测试保持等价；字段语义不变） */
 export type HoverReadOutcome =
   | {
       ok: true
@@ -61,6 +74,36 @@ export type HoverReadOutcome =
       scope: HoverPreviewScope
     }
   | { ok: false; reason: HoverPreviewFailReason; /** anchor-missing 时的锚点原文（块 id 带 ^ 前缀） */ anchor?: string }
+
+/** #333（P3-01）类型化读取结果：成功形态为「目标身份（fsPath/relPath，
+ *  类型无关）+ 按 kind 分派的内容载荷」——markdown 通道为 RefMarkdown
+ *  Content（TextDocument 权威版本 + LF 全文 + 初始定位区间 + Markdown
+ *  导航选择器）；pdf/image/text/web 的载荷形态由后续票（P3-04/P3-05/
+ *  P3-08/P3-10）扩展 content 联合登记，登记前这些类型在分派处回落
+ *  non-markdown 失败分态。失败形态与旧扁平入口同源 */
+export type RefReadOutcome =
+  | { ok: true; fsPath: string; relPath: string; content: RefMarkdownContent }
+  | { ok: false; reason: HoverPreviewFailReason; anchor?: string }
+
+/** 类型化结果 → 旧扁平 Markdown 形态（兼容适配展开）。非 markdown 载荷
+ *  在当前分派表内不可达（结构性保证）；防御性收敛为 non-markdown 分态 */
+export function flattenHoverReadOutcome(typed: RefReadOutcome): HoverReadOutcome {
+  if (!typed.ok) {
+    return typed
+  }
+  if (typed.content.kind !== 'markdown') {
+    return { ok: false, reason: 'non-markdown' }
+  }
+  return {
+    ok: true,
+    fsPath: typed.fsPath,
+    relPath: typed.relPath,
+    version: typed.content.version,
+    lfText: typed.content.lfText,
+    range: typed.content.range,
+    scope: typed.content.selector,
+  }
+}
 
 /** 读取上下文：来源文档的解析语境与身份（vscode 层从父 TextDocument 构造） */
 export interface HoverDocAccessContext {
@@ -81,11 +124,6 @@ export interface HoverDocAccessPorts {
   openTextDocument(fsPath: string): Promise<{ version: number; text: string } | null>
 }
 
-/** 目标是否 Markdown（一期悬停只接 Markdown；大小写不敏感） */
-function isMarkdownPath(fsPath: string): boolean {
-  return /\.md$/i.test(fsPath)
-}
-
 /** 锚点规格（链接形态无关的语义选择器输入）：双链 heading/blockId 与
  *  普通链接 fragment 归一到同一形态 */
 interface AnchorSpec {
@@ -101,38 +139,31 @@ function scopeOf(spec: AnchorSpec): HoverPreviewScope {
     : { kind: 'block', anchor: `^${spec.anchor}` }
 }
 
-/** 读取目标正文并定位锚点（双链与普通链接共用收尾）：内容范围恒为全文
- *  （P2-03 #280，ADR-0011——标题/块引用全文可达）；锚点命中 → LF 换算的
- *  **初始定位区间**（不再是内容边界）；锚点缺失 → anchor-missing 分态
- *  （不以全文替代，重开再验证）；anchorOptional（刷新重载）时锚点缺失
- *  不构成失败——回成功全文，定位区间退化为全文区间（已打开实例继续
- *  可用）；无锚点 → 全文与 full 选择器 */
-async function readAndScope(
+/** 读取 Markdown 目标正文并定位锚点（类型分派的 markdown 通道——调用前
+ *  类型已判定为 markdown）：内容范围恒为全文（P2-03 #280，ADR-0011——
+ *  标题/块引用全文可达）；锚点命中 → LF 换算的**初始定位区间**（不再是
+ *  内容边界）；锚点缺失 → anchor-missing 分态（不以全文替代，重开再验
+ *  证）；anchorOptional（刷新重载）时锚点缺失不构成失败——回成功全文，
+ *  定位区间退化为全文区间（已打开实例继续可用）；无锚点 → 全文与 full
+ *  选择器 */
+async function readMarkdownContent(
   fsPath: string,
   spec: AnchorSpec | null,
-  ctx: HoverDocAccessContext,
   ports: HoverDocAccessPorts,
   opts?: { anchorOptional?: boolean },
-): Promise<HoverReadOutcome> {
-  if (!isMarkdownPath(fsPath)) {
-    // 一期只接 Markdown；图片/附件等目标不读取正文（#220/#223+ 再扩）
-    return { ok: false, reason: 'non-markdown' }
-  }
+): Promise<{ ok: true; content: RefMarkdownContent } | { ok: false; reason: HoverPreviewFailReason; anchor?: string }> {
   const doc = await ports.openTextDocument(fsPath)
   if (!doc) {
     return { ok: false, reason: 'read-failed' }
   }
   const coord = new NewlineCoordinator(doc.text)
   const lfText = coord.toLfText(doc.text)
-  const relOf = ctx.resolve.isWindowsHost ? path.win32.relative : path.posix.relative
-  const identity = {
-    fsPath,
-    relPath: relOf(ctx.rootFsPath, fsPath).replaceAll('\\', '/'),
-    version: doc.version,
-    lfText,
-  }
+  const base = { kind: 'markdown' as const, version: doc.version, lfText }
   if (spec === null) {
-    return { ok: true, ...identity, range: { start: 0, end: lfText.length }, scope: { kind: 'full' } }
+    return {
+      ok: true,
+      content: { ...base, range: { start: 0, end: lfText.length }, selector: { kind: 'full' } },
+    }
   }
   const hostRange = spec.kind === 'heading'
     ? findHeadingSectionRange(doc.text, spec.anchor)
@@ -140,18 +171,23 @@ async function readAndScope(
   if (hostRange === null) {
     // P2-03 刷新宽容：已打开实例重载时锚点缺失不切成错误页（重开再验证）
     if (opts?.anchorOptional === true) {
-      return { ok: true, ...identity, range: { start: 0, end: lfText.length }, scope: scopeOf(spec) }
+      return {
+        ok: true,
+        content: { ...base, range: { start: 0, end: lfText.length }, selector: scopeOf(spec) },
+      }
     }
     return { ok: false, reason: 'anchor-missing', anchor: spec.kind === 'block' ? `^${spec.anchor}` : spec.anchor }
   }
   return {
     ok: true,
-    ...identity,
-    range: {
-      start: coord.hostOffsetToLf(hostRange.start),
-      end: coord.hostOffsetToLf(hostRange.end),
+    content: {
+      ...base,
+      range: {
+        start: coord.hostOffsetToLf(hostRange.start),
+        end: coord.hostOffsetToLf(hostRange.end),
+      },
+      selector: scopeOf(spec),
     },
-    scope: scopeOf(spec),
   }
 }
 
@@ -180,87 +216,76 @@ function anchorSpecOfFragment(fragment: string | null): AnchorSpec | null {
 }
 
 /** 读取选项（P2-03 #280）：anchorOptional = 刷新重载宽容——已打开实例的
- *  重载在锚点缺失时仍回成功全文（重开再验证原锚点，见 readAndScope） */
+ *  重载在锚点缺失时仍回成功全文（重开再验证原锚点，见 readMarkdownContent） */
 export interface HoverReadOpts {
   anchorOptional?: boolean
 }
 
-/**
- * 读取悬停双链的目标文档（#218 全文路径；#219 起锚点收窄为章节/块；
- *  P2-03 起锚点只决定初始定位区间，内容范围恒全文）。
- *
- * rawTarget 为 `[[` 与 `]]` 之间、`|` 之前的原文（未 trim——parseWikilinkInner
- * 自带规范化）。全程无副作用：不 openWith、不定位、不提示、不写文档。
- */
-export async function readHoverDocTarget(
-  rawTarget: string,
-  ctx: HoverDocAccessContext,
-  ports: HoverDocAccessPorts,
-  opts?: HoverReadOpts,
-): Promise<HoverReadOutcome> {
-  const parsed = parseWikilinkInner(rawTarget.trim())
-  if (!parsed) {
-    return { ok: false, reason: 'unsupported' }
-  }
-  let fsPath: string
-  if (parsed.path === '') {
-    // 本文件锚点：目标即来源文档自身（不查文件系统）
-    fsPath = ctx.sourceFsPath
-  } else {
-    const resolution = await ports.resolveVaultFile(parsed.path)
-    if (resolution.kind === 'no-workspace') {
-      return { ok: false, reason: 'no-workspace' }
-    }
-    if (resolution.kind === 'escape') {
-      return { ok: false, reason: 'escape' }
-    }
-    if (resolution.kind === 'not-found') {
-      return { ok: false, reason: 'not-found' }
-    }
-    fsPath = resolution.fsPath
-  }
-  return readAndScope(fsPath, anchorSpecOfWikilink(parsed), ctx, ports, opts)
+/** 目标三形态（与 hover.request 的载荷形态一一对应：双链 target 原文 /
+ *  普通链接 linkHref / 面板直接目标 directTarget——择一） */
+export interface HoverTargetForm {
+  target?: string
+  linkHref?: string
+  directTarget?: { fsPath: string; anchor?: string }
 }
 
+/** 三形态解析结果：成功携带 fsPath + 锚点规格（形态归一后）；失败为
+ *  解析层错误分态（unsupported/no-workspace/escape/not-found） */
+type HoverTargetResolution =
+  | { ok: true; fsPath: string; spec: AnchorSpec | null }
+  | { ok: false; reason: HoverPreviewFailReason }
+
 /**
- * 读取悬停普通 Markdown 链接的目标文档（#219）：`[text](relative.md)` 全文、
- * `[text](note#anchor)` 章节/块（`#^id` 为块引用，与跳转链路同口径）、
- * `[text](#frag)` 页内锚点以**来源文档**为目标（页内锚点不跨文档）。
- *
- * 外部网页（http/https 等 scheme）与协议相对地址不接入（webview 侧已预
- * 滤，此处按 unsupported 复核兜底）；越出所属根 escape。href 为 `<a>` 的
- * 原始 href（阅读侧可能经 markdown-it normalizeLink 编码——容错解码与
- * fragment 拆分复用 linkTarget 的同一实现）。全程无副作用。
+ * 解析目标三形态为 fsPath + 锚点规格（#333 从旧三入口提炼的共用解析层
+ * ——形态学与既有行为逐一保持：双链形态学 parseWikilinkInner；普通链接
+ * classifyLinkTarget + resolveVaultFile（剥 fragment/query 后容错解码）；
+ * 直接目标 fsPath 直取（根内边界校验，不走文本解析））。不读正文——
+ * 类型分派在解析之后（readRefContentTarget）。
  */
-export async function readHoverMdLinkTarget(
-  href: string,
+async function resolveHoverTargetForm(
+  form: HoverTargetForm,
   ctx: HoverDocAccessContext,
   ports: HoverDocAccessPorts,
-  opts?: HoverReadOpts,
-): Promise<HoverReadOutcome> {
-  const classified = classifyLinkTarget(href, {
-    docDir: ctx.resolve.docDir,
-    rootDir: ctx.resolve.rootDir,
-    isWindowsHost: ctx.resolve.isWindowsHost,
-  })
-  if (classified.kind === 'external') {
-    // 外部网页不接入本功能（一期范围）；webview 已预滤，防御性兜底
-    return { ok: false, reason: 'unsupported' }
+): Promise<HoverTargetResolution> {
+  if (form.directTarget !== undefined) {
+    const direct = form.directTarget
+    if (direct.fsPath === '') {
+      return { ok: false, reason: 'not-found' }
+    }
+    // P1-1 宿主侧静态边界：fsPath 来自前端消息（正常来源是宿主快照的身份
+    // 直读，但被攻陷 webview 可伪造任意路径）——文本解析路径经
+    // resolveVaultFile 的 escape 拦截天然带界，直供身份在此补同一根内语义
+    // （所属根 = 当前文档的 workspaceFolder；索引按根分区、跨根目标不解析，
+    // 面板快照身份恒在所属根内，合法条目不受影响）。越界/相对形态归 escape。
+    if (!isVaultPathInsideRoot(direct.fsPath, ctx.resolve)) {
+      return { ok: false, reason: 'escape' }
+    }
+    return { ok: true, fsPath: direct.fsPath, spec: direct.anchor ? anchorSpecOfFragment(direct.anchor) : null }
   }
-  if (classified.kind === 'blocked') {
-    // 越出所属根单独分态；其余拦截形态（scheme/空目标/跨宿主盘符）不接入
-    return { ok: false, reason: classified.reason === 'escape' ? 'escape' : 'unsupported' }
-  }
-  let fsPath: string
-  if (classified.kind === 'anchor') {
-    // 页内锚点：目标即来源文档自身（不查文件系统）
-    fsPath = ctx.sourceFsPath
-  } else {
+  if (form.linkHref !== undefined) {
+    const classified = classifyLinkTarget(form.linkHref, {
+      docDir: ctx.resolve.docDir,
+      rootDir: ctx.resolve.rootDir,
+      isWindowsHost: ctx.resolve.isWindowsHost,
+    })
+    if (classified.kind === 'external') {
+      // 外部网页不接入本功能（web 类型载荷由 #342 接入，届时在分派层扩展
+      // 而非此处放行）；webview 已预滤，防御性兜底
+      return { ok: false, reason: 'unsupported' }
+    }
+    if (classified.kind === 'blocked') {
+      // 越出所属根单独分态；其余拦截形态（scheme/空目标/跨宿主盘符）不接入
+      return { ok: false, reason: classified.reason === 'escape' ? 'escape' : 'unsupported' }
+    }
+    if (classified.kind === 'anchor') {
+      // 页内锚点：目标即来源文档自身（不查文件系统）
+      return { ok: true, fsPath: ctx.sourceFsPath, spec: anchorSpecOfFragment(classified.fragment) }
+    }
     // doc：路径探测经同一 resolveVaultFile 端口（内部与双链共用
     // resolveVaultLinkFile——候选规划、越界判别、补 .md 同一实现；此处
     // 喂「剥 fragment/query 后容错解码」的路径文本，与 classifyLinkTarget
     // 的 planPathTextOf 同一口径）
-    const { pathText } = splitHrefFragment(href.trim())
+    const { pathText } = splitHrefFragment(form.linkHref.trim())
     const resolution = await ports.resolveVaultFile(planPathTextOf(pathText))
     if (resolution.kind === 'no-workspace') {
       return { ok: false, reason: 'no-workspace' }
@@ -271,9 +296,113 @@ export async function readHoverMdLinkTarget(
     if (resolution.kind === 'not-found') {
       return { ok: false, reason: 'not-found' }
     }
-    fsPath = resolution.fsPath
+    return { ok: true, fsPath: resolution.fsPath, spec: anchorSpecOfFragment(classified.fragment) }
   }
-  return readAndScope(fsPath, anchorSpecOfFragment(classified.fragment), ctx, ports, opts)
+  const target = form.target ?? ''
+  const parsed = parseWikilinkInner(target.trim())
+  if (!parsed) {
+    return { ok: false, reason: 'unsupported' }
+  }
+  if (parsed.path === '') {
+    // 本文件锚点：目标即来源文档自身（不查文件系统）
+    return { ok: true, fsPath: ctx.sourceFsPath, spec: anchorSpecOfWikilink(parsed) }
+  }
+  const resolution = await ports.resolveVaultFile(parsed.path)
+  if (resolution.kind === 'no-workspace') {
+    return { ok: false, reason: 'no-workspace' }
+  }
+  if (resolution.kind === 'escape') {
+    return { ok: false, reason: 'escape' }
+  }
+  if (resolution.kind === 'not-found') {
+    return { ok: false, reason: 'not-found' }
+  }
+  return { ok: true, fsPath: resolution.fsPath, spec: anchorSpecOfWikilink(parsed) }
+}
+
+/**
+ * #333（P3-01）类型化只读访问入口（生产读取路径）：目标三形态解析出
+ * fsPath 后按类型分派——
+ * - markdown：装载既有全文载荷（RefMarkdownContent：TextDocument 权威
+ *   版本 + LF 全文 + 初始定位区间 + Markdown 导航选择器）；
+ * - 其余类型（pdf/image/text/web）：维持 non-markdown 分态（附件/外链
+ *   的载荷与导航选择器由 P3-04/P3-05/P3-08/P3-10 在此分派表登记——
+ *   Markdown 的 TextDocument.version 和 LF 范围不能冒充这些类型的版本
+ *   或页码）。
+ *
+ * 类型由宿主按解析出的 fsPath 分类（classifyLocalRefContentKind），不
+ * 接收前端声明的类型；web 目标在解析层即 unsupported（#342 接入时扩展）。
+ * 全程无副作用：不 openWith、不定位、不提示、不写文档。
+ */
+export async function readRefContentTarget(
+  form: HoverTargetForm,
+  ctx: HoverDocAccessContext,
+  ports: HoverDocAccessPorts,
+  opts?: HoverReadOpts,
+): Promise<RefReadOutcome> {
+  const resolution = await resolveHoverTargetForm(form, ctx, ports)
+  if (!resolution.ok) {
+    return resolution
+  }
+  const kind = classifyLocalRefContentKind(resolution.fsPath)
+  if (kind !== 'markdown') {
+    // 类型分派表（#333 落位）：markdown 通道之外的类型本票不装载——
+    // 既有 non-markdown 分态保持（图片 #336 / PDF #337 / 文本 #340 /
+    // 外链 #342 接入时按 kind 登记各自载荷与导航选择器）
+    return { ok: false, reason: 'non-markdown' }
+  }
+  const content = await readMarkdownContent(resolution.fsPath, resolution.spec, ports, opts)
+  if (!content.ok) {
+    return content
+  }
+  const relOf = ctx.resolve.isWindowsHost ? path.win32.relative : path.posix.relative
+  return {
+    ok: true,
+    fsPath: resolution.fsPath,
+    relPath: relOf(ctx.rootFsPath, resolution.fsPath).replaceAll('\\', '/'),
+    content: content.content,
+  }
+}
+
+/**
+ * 读取悬停双链的目标文档（#218 全文路径；#219 起锚点收窄为章节/块；
+ * P2-03 起锚点只决定初始定位区间，内容范围恒全文）。
+ *
+ * rawTarget 为 `[[` 与 `]]` 之间、`|` 之前的原文（未 trim——parseWikilinkInner
+ * 自带规范化）。全程无副作用：不 openWith、不定位、不提示、不写文档。
+ *
+ * #333 起为兼容适配薄壳：经 readRefContentTarget 类型化通道后展开回旧
+ * 扁平形态（行为等价由 hoverDocAccess 契约测试的等价矩阵钉住）。
+ */
+export async function readHoverDocTarget(
+  rawTarget: string,
+  ctx: HoverDocAccessContext,
+  ports: HoverDocAccessPorts,
+  opts?: HoverReadOpts,
+): Promise<HoverReadOutcome> {
+  return flattenHoverReadOutcome(await readRefContentTarget({ target: rawTarget }, ctx, ports, opts))
+}
+
+/**
+ * 读取悬停普通 Markdown 链接的目标文档（#219）：`[text](relative.md)` 全文、
+ * `[text](note#anchor)` 章节/块（`#^id` 为块引用，与跳转链路同口径）、
+ * `[text](#frag)` 页内锚点以**来源文档**为目标（页内锚点不跨文档）。
+ *
+ * 外部网页（http/https 等 scheme）与协议相对地址不接入（webview 侧已预
+ * 滤，此处按 unsupported 复核兜底；web 类型载荷由 #342 接入）；越出所属
+ * 根 escape。href 为 `<a>` 的原始 href（阅读侧可能经 markdown-it
+ * normalizeLink 编码——容错解码与 fragment 拆分复用 linkTarget 的同一实
+ * 现）。全程无副作用。
+ *
+ * #333 起为兼容适配薄壳（经 readRefContentTarget 后展开回旧扁平形态）。
+ */
+export async function readHoverMdLinkTarget(
+  href: string,
+  ctx: HoverDocAccessContext,
+  ports: HoverDocAccessPorts,
+  opts?: HoverReadOpts,
+): Promise<HoverReadOutcome> {
+  return flattenHoverReadOutcome(await readRefContentTarget({ linkHref: href }, ctx, ports, opts))
 }
 
 /**
@@ -392,11 +521,14 @@ export async function resolveHoverTargetTip(
  *
  * - 无锚点 / 空串锚点 → 全文（scope=full；反链条目与无锚点出链条目）；
  * - 锚点语义与链接形态无关（`^id` 前缀 = 块引用，否则标题章节——与
- *   OutlinkItemPayload.anchor 同口径，复用 anchorSpecOfFragment 归一）；
+ *   OutlinkItemPayload.anchor 同口径）；
  * - 空串 fsPath = 断链出链条目 → not-found 分态（条目仍可悬停显示失效
  *   占位，而非静默不发）。
  *
  * 全程无副作用：不 openWith、不定位、不提示、不写文档。
+ *
+ * #333 起为兼容适配薄壳（经 readRefContentTarget 后展开回旧扁平形态；
+ * 根内静态边界 P1-1 校验在共用解析层 resolveHoverTargetForm 保持）。
  */
 export async function readHoverDirectTarget(
   direct: { fsPath: string; anchor?: string },
@@ -404,17 +536,5 @@ export async function readHoverDirectTarget(
   ports: HoverDocAccessPorts,
   opts?: HoverReadOpts,
 ): Promise<HoverReadOutcome> {
-  if (direct.fsPath === '') {
-    return { ok: false, reason: 'not-found' }
-  }
-  // P1-1 宿主侧静态边界：fsPath 来自前端消息（正常来源是宿主快照的身份
-  // 直读，但被攻陷 webview 可伪造任意路径）——文本解析路径经
-  // resolveVaultFile 的 escape 拦截天然带界，直供身份在此补同一根内语义
-  // （所属根 = 当前文档的 workspaceFolder；索引按根分区、跨根目标不解析，
-  // 面板快照身份恒在所属根内，合法条目不受影响）。越界/相对形态归 escape。
-  if (!isVaultPathInsideRoot(direct.fsPath, ctx.resolve)) {
-    return { ok: false, reason: 'escape' }
-  }
-  const spec = direct.anchor ? anchorSpecOfFragment(direct.anchor) : null
-  return readAndScope(direct.fsPath, spec, ctx, ports, opts)
+  return flattenHoverReadOutcome(await readRefContentTarget({ directTarget: direct }, ctx, ports, opts))
 }

@@ -1,6 +1,16 @@
 // #242：内容实例不拥有展示壳、布局或写端口。容器提供挂载位置和读取结果，
 // 实例持有 occurrence 状态；每次挂载独立配对释放 DOM、资源及异步工作。
-import type { HoverPreviewScope, WebviewToHost } from '../shared/protocol'
+//
+// #333（P3-01）：RefContentSurface 为**最窄内容挂载生命周期接口**——容器
+// （嵌入卡片壳/浮层壳）向内容视图交付的空间（内容/滚动元素与布局策略）、
+// 会话与出站通道、挂载回调；焦点、关闭与释放的决定权保留在容器（只读内
+// 容不接管父输入与宿主键位——Esc 沿既有优先级）。refLoadedContentOfResult
+// 为 webview 侧类型化装载入口（hover.result 成功载荷按 contentKind 分派，
+// 本票仅 markdown 通道）；RefContentInstance 为挂载代次的发放者（每次
+// mount 递增 generation——释放后的挂载拒绝渲染，「过期挂载」的运行期
+// 拒绝点）。后续类型（PDF/图片/文本/网页）的内容视图按同一表面与代次
+// 生命周期接入，不另建挂载通道。
+import type { HoverPreviewResult, HoverPreviewScope, WebviewToHost } from '../shared/protocol'
 import type { ReadingBlock } from './readingBlocks'
 import { splitReadingBlocks } from './readingBlocks'
 import { createReadingBlockElement } from './readingView'
@@ -106,11 +116,43 @@ export interface RefLoadedContent extends RefTargetIdentity {
   expansionPath?: readonly string[]
 }
 
+/**
+ * #333（P3-01）webview 侧类型化装载入口：hover.result 成功回包按
+ * contentKind 分派转换为已装载内容——
+ * - 缺省或 'markdown'：转换为 RefLoadedContent（Markdown Reading 视图
+ *   的既有装载形态；身份/版本/全文/定位区间/选择器语义不变）；
+ * - 其余 kind（pdf/image/text/web）：本票未登记装载形态，返回 null——
+ *   调用方按「不可应用的回包」处理（释放来源租约、呈现错误分态、不
+ *   入装载缓存、不绑定任何写端口）。这是消息级校验（isHostToWebview
+ *   拒绝类型与载荷不匹配）之外的消费端第二道防线。
+ */
+export function refLoadedContentOfResult(
+  message: Extract<HoverPreviewResult, { ok: true }>,
+): RefLoadedContent | null {
+  const kind = message.contentKind ?? 'markdown'
+  if (kind !== 'markdown') {
+    return null
+  }
+  return {
+    fsPath: message.target.fsPath,
+    relPath: message.target.relPath,
+    scope: message.scope.kind,
+    selector: message.scope,
+    version: message.version,
+    text: message.text,
+    range: message.range,
+    depth: message.depth,
+    expansionPath: message.expansionPath,
+  }
+}
+
 /** 每个引用位置独立；数据可共享，挂载、滚动、属性状态不跨 occurrence。 */
 export class RefContentInstance {
   fmExpanded = false
   scrollTop = 0
   private released = false
+  /** #333 挂载代次序列（同实例每次 mount 递增——挂载身份的可观测发放） */
+  private mountSeq = 0
   private readonly mounts = new Set<RefContentMount>()
   private readonly cleanups: Array<() => void> = []
 
@@ -124,9 +166,9 @@ export class RefContentInstance {
     else this.cleanups.push(cleanup)
   }
 
-  mount(options: RefMountOptions): RefContentMount {
+  mount(surface: RefContentSurface): RefContentMount {
     if (this.released) throw new Error('Released reference instance')
-    const mount = new RefContentMount(this, options, () => this.mounts.delete(mount))
+    const mount = new RefContentMount(this, surface, ++this.mountSeq, () => this.mounts.delete(mount))
     this.mounts.add(mount)
     return mount
   }
@@ -139,7 +181,15 @@ export class RefContentInstance {
   }
 }
 
-export interface RefMountOptions {
+/**
+ * #333（P3-01）最窄内容挂载生命周期接口：容器（嵌入卡片壳/浮层壳）向
+ * 内容视图交付的表面——空间（内容/滚动元素与布局策略）、会话与出站
+ * 通道、块级挂载回调。焦点、关闭与释放由容器保留决定权（内容视图不
+ * 自持这些能力——只读内容不接管父输入与宿主键位）。本票为
+ * Markdown Reading 视图的既有装配面（RefMountOptions 与之同构）；后续
+ * 类型（PDF/图片/文本/网页）的内容视图按同一表面接入。
+ */
+export interface RefContentSurface {
   contentEl: HTMLElement
   scrollEl: HTMLElement
   /** 引用内容的布局策略；生产卡片与浮层均按外层视口虚拟挂载。 */
@@ -150,6 +200,8 @@ export interface RefMountOptions {
   onEmbedBlockMounted?(el: HTMLElement, target: RefLoadedContent): void
   onEmbedBlockUnmounted?(el: HTMLElement): void
 }
+
+export interface RefMountOptions extends RefContentSurface {}
 
 /** 窄挂载接口：容器负责位置、可用空间、requestMeasure 与请求仲裁。 */
 export class RefContentMount {
@@ -171,11 +223,16 @@ export class RefContentMount {
   private lastKnownScrollTop = 0
   private settleTimer: number | null = null
 
+  /** #333 挂载代次（同实例内单调递增的挂载身份；释放后的挂载拒绝渲染） */
+  readonly generation: number
+
   constructor(
     readonly instance: RefContentInstance,
     private readonly options: RefMountOptions,
+    generation: number,
     private readonly onRelease: () => void,
   ) {
+    this.generation = generation
     this.view = options.strategy === 'virtual' ? new VirtualReadingView(options.contentEl, {
       scrollEl: options.scrollEl,
       onBlockMounted: (el) => this.mountBlock(el),

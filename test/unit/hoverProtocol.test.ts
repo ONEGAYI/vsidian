@@ -151,6 +151,38 @@ describe('hover.result 校验（宿主 → webview）', () => {
   })
 })
 
+// #333（P3-01）类型分派校验：hover.result 成功载荷携带可选 contentKind
+// （缺省 = markdown——旧合法 Markdown 消息兼容识别）。运行期契约：未知
+// 类型拒绝；非 markdown 类型本票未登记载荷形态，携带 Markdown 全文/
+// LF 范围/Markdown 选择器即为「类型与载荷不匹配」整体拒绝（pdf/image/
+// text/web 的载荷由 P3-04/P3-05/P3-08/P3-10 扩展校验器时放开）；失败
+// 分态无载荷，contentKind 不出现在失败形态。
+describe('#333 contentKind 类型分派校验（hover.result 成功载荷）', () => {
+  it('显式 contentKind: markdown 放行（生产类型化入口的出站形态）', () => {
+    expect(isHostToWebview({ ...validResultOk(), contentKind: 'markdown' })).toBe(true)
+  })
+
+  it('缺省 contentKind 放行（旧合法 Markdown 消息兼容识别）', () => {
+    expect(isHostToWebview(validResultOk())).toBe(true)
+  })
+
+  it('未知类型拒绝（video / 非字符串）', () => {
+    expect(isHostToWebview({ ...validResultOk(), contentKind: 'video' })).toBe(false)
+    expect(isHostToWebview({ ...validResultOk(), contentKind: 3 })).toBe(false)
+    expect(isHostToWebview({ ...validResultOk(), contentKind: null })).toBe(false)
+  })
+
+  it('非 markdown 类型 + Markdown 载荷拒绝（类型与载荷不匹配——本票未登记这些载荷形态）', () => {
+    for (const kind of ['pdf', 'image', 'text', 'web']) {
+      expect(isHostToWebview({ ...validResultOk(), contentKind: kind }), `contentKind=${kind} 应拒绝`).toBe(false)
+    }
+  })
+
+  it('失败形态携带 contentKind 拒绝（失败分态无载荷，类型字段不出现在失败形态）', () => {
+    expect(isHostToWebview({ ...validResultFail(), contentKind: 'markdown' })).toBe(false)
+  })
+})
+
 // #220 来源资源：悬停浮层内 B 文档的图片/链接以 B 为来源解析——webview
 // 在既有通道上附可选 sourceDocUri（B 的 fsPath；缺省 = 面板自身文档，
 // 向后兼容）。此处钉住三条消息的校验器行为。

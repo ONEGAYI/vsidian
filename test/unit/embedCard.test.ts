@@ -960,3 +960,54 @@ describe('#246 混排嵌入：块内占位提升挂载（context.sourceText 注�
     manager.dispose()
   })
 })
+
+// #333（P3-01）类型化装载：hover.result 成功回包经 contentKind 分派——
+// markdown（显式与缺省兼容）照常装载；kind 与载荷不匹配的回包不装载、
+// 不入装载缓存、显示错误分态并释放来源租约（防御路径：宿主与消息校验器
+// 已拦，消费端第二道防线——非 markdown 载荷不经此装载，refEdit 写端口
+// 结构上不可达）。
+describe('#333 类型化装载（contentKind 分派）', () => {
+  it('显式 contentKind: markdown 照常装载渲染（生产类型化出站形态）', () => {
+    const sent: WebviewToHost[] = []
+    const manager = new EmbedCardManager(makeContext(sent))
+    const el = mountEmbedBlock(manager, '![[目标笔记]]\n')
+    const req = hoverRequestOf(sent)
+    manager.notifyResult({ ...resultOk(req, TARGET_TEXT), contentKind: 'markdown' })
+    expect(el.querySelector('.vsidian-reading-heading-1')?.textContent).toContain('目标笔记')
+    manager.dispose()
+  })
+
+  it('kind 与载荷不匹配（pdf + Markdown 载荷）：错误分态、不渲染、不入缓存、释放租约', () => {
+    const sent: WebviewToHost[] = []
+    const manager = new EmbedCardManager(makeContext(sent))
+    const el = mountEmbedBlock(manager, '![[目标笔记]]\n')
+    const req = hoverRequestOf(sent)
+    manager.notifyResult({ ...resultOk(req, TARGET_TEXT), contentKind: 'pdf', sourceLeaseId: 'lease-1' })
+    // 错误分态（不渲染 Markdown 正文）
+    expect(el.querySelector(`.${EMBED_CARD_CLASS_NAMES.stateError}`)).not.toBeNull()
+    expect(el.querySelector('.vsidian-reading-heading-1')).toBeNull()
+    expect(sent).toContainEqual({
+      kind: 'hover.source.release', sessionId: SESSION.sessionId, docUri: SESSION.docUri,
+      sourceLeaseId: 'lease-1',
+    })
+    // 不入装载缓存：宿主修复后重挂应重新请求（而非复用不可应用的载荷）
+    manager.unmountBlock(el)
+    document.body.innerHTML = ''
+    const sentBefore = sent.length
+    const manager2 = new EmbedCardManager(makeContext(sent))
+    const el2 = mountEmbedBlock(manager2, '![[目标笔记]]\n')
+    expect(sent.length).toBeGreaterThan(sentBefore)
+    expect(el2.querySelector(`.${EMBED_CARD_CLASS_NAMES.stateError}`)).toBeNull()
+    manager2.dispose()
+  })
+
+  it('非 markdown 载荷不触达写端口：装载拒绝路径零 refEdit 消息', () => {
+    const sent: WebviewToHost[] = []
+    const manager = new EmbedCardManager(makeContext(sent))
+    mountEmbedBlock(manager, '![[目标笔记]]\n')
+    const req = hoverRequestOf(sent)
+    manager.notifyResult({ ...resultOk(req, TARGET_TEXT), contentKind: 'image' })
+    expect(sent.some((m) => m.kind === 'refEdit.bind' || m.kind === 'edit.request')).toBe(false)
+    manager.dispose()
+  })
+})

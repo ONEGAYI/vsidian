@@ -10,7 +10,7 @@ import {
   HoverRefreshCoordinator,
   type HoverInvalidationStatus,
 } from '../../src/host/hoverRefreshCoordinator'
-import type { HoverReadOutcome } from '../../src/host/hoverDocAccess'
+import type { RefReadOutcome } from '../../src/host/hoverDocAccess'
 import type { HostToWebview, WebviewToHost } from '../../src/shared/protocol'
 import { HOVER_REFRESH_DEFAULTS } from '../../src/shared/hoverRefresh'
 
@@ -49,7 +49,7 @@ interface Harness {
 }
 
 function makeHarness(opts?: {
-  outcome?: (target: string) => HoverReadOutcome
+  outcome?: (target: string) => RefReadOutcome
   cacheLimits?: { entryLimit?: number; byteLimit?: number }
 }): Harness {
   const out: HostToWebview[] = []
@@ -68,16 +68,21 @@ function makeHarness(opts?: {
           ? `href:${payload.linkHref}`
           : `wikilink:${payload.target}`
       reads.set(target, (reads.get(target) ?? 0) + 1)
-      const outcome: HoverReadOutcome = opts?.outcome
+      // #333 类型化读取端口：成功载荷为 kind 标记的 Markdown 内容
+      //（生产 readRefContentTarget 的出站形态）
+      const outcome: RefReadOutcome = opts?.outcome
         ? opts.outcome(target)
         : {
             ok: true,
             fsPath: B_PATH,
             relPath: 'b.md',
-            version: 3,
-            lfText: '# B\n',
-            range: { start: 0, end: 5 },
-            scope: { kind: 'full' },
+            content: {
+              kind: 'markdown',
+              version: 3,
+              lfText: '# B\n',
+              range: { start: 0, end: 5 },
+              selector: { kind: 'full' },
+            },
           }
       report(outcome)
     },
@@ -201,7 +206,7 @@ describe('悬停读取缓存：失效与世代守卫', () => {
   it('在途跨失效窗口完成不回写缓存（世代守卫）：下一请求重新读取', async () => {
     const out: HostToWebview[] = []
     const reads = { count: 0 }
-    const releaseRead: Array<(o: HoverReadOutcome) => void> = []
+    const releaseRead: Array<(o: RefReadOutcome) => void> = []
     const session = new DocumentSession(new StaticDoc('# A\n'), { docUri: DOC_URI, isWindowsHost: true })
     const panelId = session.attachPanel({
       send: (m) => out.push(m),
@@ -220,10 +225,13 @@ describe('悬停读取缓存：失效与世代守卫', () => {
       ok: true,
       fsPath: B_PATH,
       relPath: 'b.md',
-      version: 3,
-      lfText: '# B\n',
-      range: { start: 0, end: 5 },
-      scope: { kind: 'full' },
+      content: {
+        kind: 'markdown',
+        version: 3,
+        lfText: '# B\n',
+        range: { start: 0, end: 5 },
+        selector: { kind: 'full' },
+      },
     })
     await new Promise((r) => setTimeout(r, 0))
     // 请求面板仍收到回包（webview 侧按 reqId/版本仲裁丢弃旧内容）
@@ -255,14 +263,17 @@ describe('悬停读取缓存：双上限（条目与字节分别计量）', () =
   it('字节上限：大文本写入触发淘汰（容量/内存有界）', async () => {
     const bigText = 'x'.repeat(600)
     const t = makeHarness({
-      outcome: (target) => ({
+      outcome: (target): RefReadOutcome => ({
         ok: true,
         fsPath: `D:\\notes\\${target.split(':').pop()}.md`,
         relPath: `${target.split(':').pop()}.md`,
-        version: 1,
-        lfText: target === 'wikilink:big' ? bigText : '# 小\n',
-        range: { start: 0, end: target === 'wikilink:big' ? bigText.length : 4 },
-        scope: { kind: 'full' },
+        content: {
+          kind: 'markdown',
+          version: 1,
+          lfText: target === 'wikilink:big' ? bigText : '# 小\n',
+          range: { start: 0, end: target === 'wikilink:big' ? bigText.length : 4 },
+          selector: { kind: 'full' },
+        },
       }),
       cacheLimits: { byteLimit: 1000 }, // big（600×2=1200 字节）单条即超限
     })
@@ -388,7 +399,7 @@ describe('辅助索引清理：失效钟与世代表不随事件无界积累', (
 
   it('有在途读取时失效钟条目保留（竞态窗口守卫），下一次 quiescent 失效顺带清理', async () => {
     const out: HostToWebview[] = []
-    const releaseRead: Array<(o: HoverReadOutcome) => void> = []
+    const releaseRead: Array<(o: RefReadOutcome) => void> = []
     const session = new DocumentSession(new StaticDoc('# A\n'), { docUri: DOC_URI, isWindowsHost: true })
     const panelId = session.attachPanel({
       send: (m) => out.push(m),
@@ -406,10 +417,13 @@ describe('辅助索引清理：失效钟与世代表不随事件无界积累', (
       ok: true,
       fsPath: B_PATH,
       relPath: 'b.md',
-      version: 3,
-      lfText: '# B\n',
-      range: { start: 0, end: 5 },
-      scope: { kind: 'full' },
+      content: {
+        kind: 'markdown',
+        version: 3,
+        lfText: '# B\n',
+        range: { start: 0, end: 5 },
+        selector: { kind: 'full' },
+      },
     })
     await new Promise((r) => setTimeout(r, 0))
     // 完成后条目仍在（等待下次失效顺带清理——无缓存反查时清）
@@ -419,14 +433,17 @@ describe('辅助索引清理：失效钟与世代表不随事件无界积累', (
 
   it('世代条目随缓存条目淘汰同步清理（LRU 淘汰路径挂钩）', async () => {
     const t = makeHarness({
-      outcome: (target) => ({
+      outcome: (target): RefReadOutcome => ({
         ok: true,
         fsPath: `D:\\notes\\${target.split(':').pop()}.md`,
         relPath: `${target.split(':').pop()}.md`,
-        version: 1,
-        lfText: '# t\n',
-        range: { start: 0, end: 4 },
-        scope: { kind: 'full' as const },
+        content: {
+          kind: 'markdown',
+          version: 1,
+          lfText: '# t\n',
+          range: { start: 0, end: 4 },
+          selector: { kind: 'full' },
+        },
       }),
       cacheLimits: { entryLimit: 1 },
     })
@@ -439,5 +456,39 @@ describe('辅助索引清理：失效钟与世代表不随事件无界积累', (
     await t.send(hoverRequest(3, 'i3', 'c')) // entryLimit=1：淘汰 b 形态
     expect(t.session.hoverReadCacheStats().entries).toBe(1)
     expect(t.session.hoverReadCacheStats().epochEntries).toBe(0) // 淘汰同步清理
+  })
+})
+
+// ---- #333（P3-01）类型化出站：生产 Markdown 读取结果经类型化端口回报，
+// 出站 hover.result 显式携带 contentKind:markdown；缓存/合并/世代守卫
+// 语义不变（上文各节即等价回归——此处钉住新出站形态）。
+describe('#333 类型化出站：contentKind 显式标记', () => {
+  it('成功回包携带 contentKind: markdown 与 Markdown 通道载荷字段', async () => {
+    const t = makeHarness()
+    await ready(t)
+    await t.send(hoverRequest(1, 'hover-1'))
+    const results = resultsOf(t)
+    expect(results).toHaveLength(1)
+    const r = results[0]!
+    expect(r.ok).toBe(true)
+    if (!r.ok) {
+      return
+    }
+    expect(r.contentKind).toBe('markdown')
+    expect(r.version).toBe(3)
+    expect(r.text).toBe('# B\n')
+    expect(r.range).toEqual({ start: 0, end: 5 })
+    expect(r.scope).toEqual({ kind: 'full' })
+  })
+
+  it('失败回包不携带 contentKind（失败分态无载荷）', async () => {
+    const t = makeHarness({ outcome: () => ({ ok: false, reason: 'not-found' }) })
+    await ready(t)
+    await t.send(hoverRequest(1, 'hover-1'))
+    const results = resultsOf(t)
+    expect(results).toHaveLength(1)
+    const r = results[0]!
+    expect(r.ok).toBe(false)
+    expect('contentKind' in r).toBe(false)
   })
 })
