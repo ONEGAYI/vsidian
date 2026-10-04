@@ -422,6 +422,11 @@ export class RefContentMount {
     return this.target !== null && 'kind' in this.target && this.target.kind === 'text'
   }
   getStats(): ReadingViewStats | null { return this.view?.getStats() ?? null }
+  /** #341：text 视图虚拟化统计（markdown 装载返回 null——探针按形态分派，
+   *  DOM 常驻受视口/窗口约束的观测面） */
+  getTextStats(): { renderedLines: number; totalLines: number } | null {
+    return this.textView?.getStats() ?? null
+  }
   updateNow(): void { this.view?.updateNow(); this.textView?.updateNow() }
 
   onDispose(cleanup: () => void): void {

@@ -1129,6 +1129,16 @@ export type WebviewToHost =
         /** #224 内容文本字符数（未保存修改推送后刷新可见性的观测面：
          *  目标内容变化 → textLen 变化；旧 webview 缺省） */
         textLen?: number
+        /** P2-04 生效内部模式与编辑端口绑定态（#341 起 text 装载恒
+         *  'reading'/false——只读边界；协议类型补记 probe 自 P2-04 起
+         *  已携带的线上形态） */
+        internalMode?: 'reading' | 'live'
+        liveBound?: boolean
+        /** #341（P3-09）text 视图虚拟化统计（markdown 装载为 null）：
+         *  totalLines = 窗口内总行数（#range 硬窗口时即窗口行数——窗口外
+         *  不进载荷），renderedLines = 当前 DOM 常驻行数（受视口约束）；
+         *  旧 webview 缺省 */
+        textStats?: { renderedLines: number; totalLines: number } | null
         /** #243 引用内部虚拟窗口与解析观测；旧 webview 缺省。 */
         viewStats?: {
           totalBlocks: number; mountedBlocks: number; contentDomCount: number

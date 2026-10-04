@@ -2143,15 +2143,19 @@ export class WebviewSyncController {
       }
       case 'hover.tokens': {
         // #340（P3-08）文本 token 分层推送：转发浮层模块（instanceId 配
-        // 对 + 版本仲裁在 applyTextTokens——迟到/过期 token 不覆盖新正文；
-        // 嵌入文本视图 #341 接入时在此同点扩展）
+        // 对 + 版本仲裁在 applyTextTokens——迟到/过期 token 不覆盖新正文）；
+        // #341（P3-09）嵌入卡片同点转发（notifyTokens 遍历在场挂载，按
+        // occurrence/hostId 配对——同 occurrence 双容器各视图分别应用）
         notifyHoverTokens(message)
+        this.embedCards?.notifyTokens(message)
         break
       }
       case 'appearance.changed': {
         // #340 外观代次广播：text 浮层静默重载（语言字体随正文载荷刷新、
-        // token 随 render 重取）；Markdown 侧 CSS 变量自带跟随
+        // token 随 render 重取）；#341 嵌入卡片同点转发（在场 text 卡静默
+        // 重载）。Markdown 侧 CSS 变量自带跟随
         notifyAppearanceChanged()
+        this.embedCards?.notifyAppearanceChanged()
         break
       }
       case 'refEdit.bound':
