@@ -786,10 +786,14 @@ describe('#333 类型分派入口 readRefContentTarget', () => {
     const heading = await readRefContentTarget({ target: '目标#章节甲' }, h.ctx, h.ports)
     expect(heading.ok).toBe(true)
     if (heading.ok) {
-      expect(heading.content.kind).toBe('markdown')
-      expect(heading.content.selector).toEqual({ kind: 'heading', anchor: '章节甲' })
-      expect(heading.content.lfText.slice(heading.content.range.start, heading.content.range.end))
-        .toBe('## 章节甲\n\n甲段一。\n\n```js\nconst a = 1\n```')
+      // 局部变量判别（TS 嵌套路径判别限制，同 documentSession 注记）
+      const content = heading.content
+      expect(content.kind).toBe('markdown')
+      if (content.kind === 'markdown') {
+        expect(content.selector).toEqual({ kind: 'heading', anchor: '章节甲' })
+        expect(content.lfText.slice(content.range.start, content.range.end))
+          .toBe('## 章节甲\n\n甲段一。\n\n```js\nconst a = 1\n```')
+      }
     }
     const bh = makeHarness(new Map<string, { version: number; text: string }>([
       ['D:\\notes\\a.md', note('x')],
@@ -798,7 +802,10 @@ describe('#333 类型分派入口 readRefContentTarget', () => {
     const block = await readRefContentTarget({ target: '目标#^blk1' }, bh.ctx, bh.ports)
     expect(block.ok).toBe(true)
     if (block.ok) {
-      expect(block.content.selector).toEqual({ kind: 'block', anchor: '^blk1' })
+      const blockContent = block.content
+      if (blockContent.kind === 'markdown') {
+        expect(blockContent.selector).toEqual({ kind: 'block', anchor: '^blk1' })
+      }
     }
   })
 
@@ -807,13 +814,19 @@ describe('#333 类型分派入口 readRefContentTarget', () => {
     const link = await readRefContentTarget({ linkHref: '目标.md#章节乙' }, h.ctx, h.ports)
     expect(link.ok).toBe(true)
     if (link.ok) {
-      expect(link.content.selector).toEqual({ kind: 'heading', anchor: '章节乙' })
+      const linkContent = link.content
+      if (linkContent.kind === 'markdown') {
+        expect(linkContent.selector).toEqual({ kind: 'heading', anchor: '章节乙' })
+      }
     }
     const direct = await readRefContentTarget(
       { directTarget: { fsPath: 'D:\\notes\\目标.md', anchor: '章节甲' } }, h.ctx, h.ports)
     expect(direct.ok).toBe(true)
     if (direct.ok) {
-      expect(direct.content.selector).toEqual({ kind: 'heading', anchor: '章节甲' })
+      const directContent = direct.content
+      if (directContent.kind === 'markdown') {
+        expect(directContent.selector).toEqual({ kind: 'heading', anchor: '章节甲' })
+      }
     }
     const pageAnchor = await readRefContentTarget({ linkHref: '#父章节' }, h.ctx, h.ports)
     expect(pageAnchor.ok).toBe(true)
@@ -852,8 +865,11 @@ describe('#333 类型分派入口 readRefContentTarget', () => {
     const out = await readRefContentTarget({ target: '目标#已删除的标题' }, h.ctx, h.ports, { anchorOptional: true })
     expect(out.ok).toBe(true)
     if (out.ok) {
-      expect(out.content.range).toEqual({ start: 0, end: SECTION_DOC.length })
-      expect(out.content.selector).toEqual({ kind: 'heading', anchor: '已删除的标题' })
+      const outContent = out.content
+      if (outContent.kind === 'markdown') {
+        expect(outContent.range).toEqual({ start: 0, end: SECTION_DOC.length })
+        expect(outContent.selector).toEqual({ kind: 'heading', anchor: '已删除的标题' })
+      }
     }
     const strict = await readRefContentTarget({ target: '目标#已删除的标题' }, h.ctx, h.ports)
     expect(strict).toEqual({ ok: false, reason: 'anchor-missing', anchor: '已删除的标题' })
@@ -893,5 +909,148 @@ describe('#333 类型分派入口 readRefContentTarget', () => {
         expect(typed, `${label}：失败分态一致`).toEqual(legacy)
       }
     }
+  })
+})
+
+// ---- #342（P3-10）外链悬停分派：external 分支的 web 载荷装载 ----
+
+describe('readRefContentTarget 外链（web）分派', () => {
+  /** web 抓取端口替身：记录调用并返回可控结果 */
+  function webHarness(
+    fetchImpl: (_url: string, signal?: AbortSignal) => Promise<import('../../src/host/webLinkMetaService').WebLinkMetaOutcome>,
+  ): { h: Harness; fetches: Array<{ url: string; aborted: boolean }> } {
+    const h = makeHarness(new Map())
+    const fetches: Array<{ url: string; aborted: boolean }> = []
+    ;(h.ports as HoverDocAccessPorts & {
+      fetchWebMeta?: (url: string, signal?: AbortSignal) => Promise<import('../../src/host/webLinkMetaService').WebLinkMetaOutcome>
+    }).fetchWebMeta = async (url, signal) => {
+      fetches.push({ url, aborted: signal?.aborted === true })
+      return fetchImpl(url, signal)
+    }
+    return { h, fetches }
+  }
+
+  const okMeta = { url: 'https://example.com/page', domain: 'example.com', title: '示例', description: '摘要' }
+
+  it('开关开启 + 端口在场：http(s) 链接装载 web 载荷（身份字段为空串占位）', async () => {
+    const { h, fetches } = webHarness(async () => ({ ok: true, meta: okMeta }))
+    const outcome = await readRefContentTarget(
+      { linkHref: 'https://example.com/page' },
+      h.ctx,
+      h.ports,
+      { web: { enabled: true } },
+    )
+    expect(outcome).toEqual({ ok: true, fsPath: '', relPath: '', content: { kind: 'web', ...okMeta } })
+    expect(fetches.length).toBe(1)
+    expect(fetches[0].url).toBe('https://example.com/page')
+  })
+
+  it('开关关闭（web 未开）：external 维持 unsupported（关闭态零抓取）', async () => {
+    const { h, fetches } = webHarness(async () => ({ ok: true, meta: okMeta }))
+    const outcome = await readRefContentTarget({ linkHref: 'https://example.com/page' }, h.ctx, h.ports)
+    expect(outcome).toEqual({ ok: false, reason: 'unsupported' })
+    expect(fetches.length).toBe(0)
+  })
+
+  it('web.enabled=false 显式关闭同 unsupported', async () => {
+    const { h, fetches } = webHarness(async () => ({ ok: true, meta: okMeta }))
+    const outcome = await readRefContentTarget(
+      { linkHref: 'https://example.com/page' },
+      h.ctx,
+      h.ports,
+      { web: { enabled: false } },
+    )
+    expect(outcome).toEqual({ ok: false, reason: 'unsupported' })
+    expect(fetches.length).toBe(0)
+  })
+
+  it('端口缺席（宿主未装配抓取服务）：unsupported', async () => {
+    const h = makeHarness(new Map())
+    const outcome = await readRefContentTarget(
+      { linkHref: 'https://example.com/page' },
+      h.ctx,
+      h.ports,
+      { web: { enabled: true } },
+    )
+    expect(outcome).toEqual({ ok: false, reason: 'unsupported' })
+  })
+
+  it('非 http(s) scheme（ftp/mailto）不进 web 通道：unsupported', async () => {
+    const { h, fetches } = webHarness(async () => ({ ok: true, meta: okMeta }))
+    for (const href of ['ftp://example.com/f', 'mailto:a@b.c', 'javascript:alert(1)']) {
+      const outcome = await readRefContentTarget({ linkHref: href }, h.ctx, h.ports, { web: { enabled: true } })
+      expect(outcome, href).toEqual({ ok: false, reason: 'unsupported' })
+    }
+    expect(fetches.length).toBe(0)
+  })
+
+  it('凭据/私网 URL 在准入层拒绝（web-invalid-address），不进抓取端口', async () => {
+    const { h, fetches } = webHarness(async () => ({ ok: true, meta: okMeta }))
+    for (const href of ['http://user:pw@example.com/', 'http://192.168.1.1/x', 'http://127.0.0.1:8080/']) {
+      const outcome = await readRefContentTarget({ linkHref: href }, h.ctx, h.ports, { web: { enabled: true } })
+      expect(outcome, href).toEqual({ ok: false, reason: 'web-invalid-address' })
+    }
+    expect(fetches.length).toBe(0)
+  })
+
+  it('抓取失败 reason 逐字透传（网络失败不伪装成文件缺失）', async () => {
+    const reasons = ['web-timeout', 'web-too-large', 'web-not-html', 'web-redirects', 'web-unreachable'] as const
+    for (const reason of reasons) {
+      const { h } = webHarness(async () => ({ ok: false, reason }))
+      const outcome = await readRefContentTarget(
+        { linkHref: 'https://example.com/slow' },
+        h.ctx,
+        h.ports,
+        { web: { enabled: true } },
+      )
+      expect(outcome).toEqual({ ok: false, reason })
+    }
+  })
+
+  it('取消信号透传到抓取端口（webview 关浮层 → 宿主 abort）', async () => {
+    const { h, fetches } = webHarness((_url, signal) => new Promise((resolve) => {
+      // 已中止的 signal 不再派发 abort 事件——先查 aborted（与生产服务行为一致）
+      if (signal?.aborted) {
+        resolve({ ok: false, reason: 'web-unreachable' })
+        return
+      }
+      signal?.addEventListener('abort', () => {
+        resolve({ ok: false, reason: 'web-unreachable' })
+      })
+    }))
+    const outcome = await readRefContentTarget(
+      { linkHref: 'https://example.com/cancelled' },
+      h.ctx,
+      h.ports,
+      { web: { enabled: true, signal: AbortSignal.abort() } },
+    )
+    expect(outcome).toEqual({ ok: false, reason: 'web-unreachable' })
+    expect(fetches.length).toBe(1)
+  })
+
+  it('兼容适配壳：旧入口不带 web 选项，external 恒 unsupported（旧调用方不见 web 数据）', async () => {
+    const { h } = webHarness(async () => ({ ok: true, meta: okMeta }))
+    const typed = await readRefContentTarget(
+      { linkHref: 'https://example.com/page' },
+      h.ctx,
+      h.ports,
+      { web: { enabled: true } },
+    )
+    // 类型化通道装载 web 载荷后经 flatten 收敛 non-markdown（防御性）；
+    // 旧壳入口不带 web 选项 → external 在解析层即 unsupported
+    expect(flattenHoverReadOutcome(typed as RefReadOutcome)).toEqual({ ok: false, reason: 'non-markdown' })
+    expect(await readHoverMdLinkTarget('https://example.com/page', h.ctx, h.ports)).toEqual({ ok: false, reason: 'unsupported' })
+  })
+
+  it('大写 scheme/fragment 归一后进抓取端口（缓存键同源）', async () => {
+    const { h, fetches } = webHarness(async () => ({ ok: true, meta: okMeta }))
+    await readRefContentTarget(
+      { linkHref: 'HTTPS://EXAMPLE.com/page#frag' },
+      h.ctx,
+      h.ports,
+      { web: { enabled: true } },
+    )
+    expect(fetches.length).toBe(1)
+    expect(fetches[0].url).toBe('https://example.com/page')
   })
 })

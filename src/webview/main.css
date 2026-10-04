@@ -4441,6 +4441,47 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
   color: var(--vscode-errorForeground, #f14c4c);
 }
 
+/* ---- #342（P3-10）外链卡片内容视图（web 通道；样式契约 hover-popup 条目
+   子结构追加）：宿主受限抓取的元信息——标题/摘要纯文字（textContent 赋
+   值，无 HTML 注入面）+ 域名安全链接（唯一可点元素，点击经 link.activate
+   外开浏览器）。挂在浮层 Reading 容器内（正文留白 10/14 已有，卡片只做
+   行距组织）；错误/加载态沿用既有状态行 ---- */
+
+#app > .vsidian-hover-popup .vsidian-hover-web-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 2px;
+}
+
+/* 标题：主题前景色与内容字体加粗强调（无标题时由 JS 以域名兜底填充） */
+#app > .vsidian-hover-popup .vsidian-hover-web-title {
+  font-weight: 600;
+  color: var(--vscode-editor-foreground, inherit);
+  overflow-wrap: anywhere;
+}
+
+/* 摘要：描述色次级文字（长 URL/长词不断溢——anywhere 折行） */
+#app > .vsidian-hover-popup .vsidian-hover-web-desc {
+  color: var(--vscode-descriptionForeground, inherit);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* 域名链接：主题链接色 + hover/focus 下划线（显式安全链接的可见可点性） */
+#app > .vsidian-hover-popup .vsidian-hover-web-domain {
+  color: var(--vscode-textLink-foreground, #3794ff);
+  text-decoration: none;
+  font-size: 0.9em;
+  overflow-wrap: anywhere;
+  align-self: flex-start;
+}
+
+#app > .vsidian-hover-popup .vsidian-hover-web-domain:hover,
+#app > .vsidian-hover-popup .vsidian-hover-web-domain:focus-visible {
+  text-decoration: underline;
+}
+
 /* ---- #220 悬停浮层笔记属性区（样式契约 chrome 域 hover-fm-section 条目；
    引用专属样式入口——仅作用于浮层内 frontmatter 块，主阅读视图的属性
    呈现不受影响） ---- */

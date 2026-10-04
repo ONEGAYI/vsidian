@@ -452,3 +452,63 @@ describe('跳转目标提示消息协议（#299：hover.target.resolve / hover.t
     expect(isHostToWebview({ kind: 'hover.target.resolved', reqId: 1, ok: true, relPath: 'b.md', anchor: 5 })).toBe(false)
   })
 })
+
+// ---- #342（P3-10）web 载荷与取消通道 ----
+
+describe('#342 web 载荷校验（hover.result 成功形态）', () => {
+  const validWebResult = (): Record<string, unknown> => ({
+    ...validResultOk(),
+    contentKind: 'web',
+    // web 形态的 Markdown 专属字段为占位值（target 空身份 / version 0 /
+    // 空文本 / 全文区间 / full 选择器——校验器仍要求字段形态合法）
+    target: { fsPath: '', relPath: '' },
+    version: 0,
+    text: '',
+    range: { start: 0, end: 0 },
+    scope: { kind: 'full' },
+    web: { url: 'https://example.com/page', domain: 'example.com', title: '示例', description: '摘要' },
+  })
+
+  it('contentKind=web + web 载荷放行', () => {
+    expect(isHostToWebview(validWebResult())).toBe(true)
+  })
+
+  it('contentKind=web 缺 web 载荷拒绝（类型与载荷不匹配）', () => {
+    const msg = validWebResult()
+    delete msg.web
+    expect(isHostToWebview(msg)).toBe(false)
+  })
+
+  it('web 载荷字段类型错误拒绝（url/title/description 非字符串）', () => {
+    expect(isHostToWebview({ ...validWebResult(), web: { url: 42, domain: 'example.com', title: '', description: '' } })).toBe(false)
+    expect(isHostToWebview({ ...validWebResult(), web: { url: 'https://a/', domain: 1, title: '', description: '' } })).toBe(false)
+    expect(isHostToWebview({ ...validWebResult(), web: { url: 'https://a/', domain: 'a', title: null, description: '' } })).toBe(false)
+    expect(isHostToWebview({ ...validWebResult(), web: [] })).toBe(false)
+  })
+
+  it('markdown 形态（缺省/markdown）携带 web 载荷拒绝（互斥）', () => {
+    expect(isHostToWebview({ ...validResultOk(), web: { url: 'https://a/', domain: 'a', title: '', description: '' } })).toBe(false)
+    expect(isHostToWebview({ ...validResultOk(), contentKind: 'markdown', web: { url: 'https://a/', domain: 'a', title: '', description: '' } })).toBe(false)
+  })
+
+  it('失败形态携带 web 或 contentKind 拒绝', () => {
+    expect(isHostToWebview({
+      kind: 'hover.result', reqId: 1, instanceId: 'i', ok: false, reason: 'web-timeout', contentKind: 'web',
+    })).toBe(false)
+  })
+})
+
+describe('#342 hover.cancel 出站消息（webview → 宿主）', () => {
+  const base = { kind: 'hover.cancel', sessionId: 's', docUri: 'file:///d/a.md' }
+
+  it('合法形态放行（instanceId + reqId 配对）', () => {
+    expect(isWebviewToHost({ ...base, instanceId: 'hover-1', reqId: 3 })).toBe(true)
+  })
+
+  it('缺会话守卫 / 非法 reqId / instanceId 拒绝', () => {
+    expect(isWebviewToHost({ kind: 'hover.cancel', docUri: 'x', instanceId: 'i', reqId: 1 })).toBe(false)
+    expect(isWebviewToHost({ kind: 'hover.cancel', sessionId: 's', instanceId: 'i', reqId: 1 })).toBe(false)
+    expect(isWebviewToHost({ ...base, instanceId: 'i', reqId: 0 })).toBe(false)
+    expect(isWebviewToHost({ ...base, instanceId: '', reqId: 1 })).toBe(false)
+  })
+})

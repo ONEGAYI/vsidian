@@ -253,9 +253,12 @@ try {
       zhCn['setting.hoverEnabled.title'],
       zhCn['setting.hoverLiveDirect.title'],
       zhCn['setting.hoverTargetTip.title'],
+      // #342（P3-10）外链预览两件：跳转目标提示之后、嵌入两项之前
+      zhCn['setting.hoverExternalEnabled.title'],
+      zhCn['setting.hoverExternalShape.title'],
       zhCn['setting.embedMaxDepth.title'],
       zhCn['setting.embedMaxHeight.title'],
-    ], '引用视图组内顺序：总开关 → 直接悬停显示 → 跳转目标提示 → 嵌入展开层级 → 嵌入最大高度')
+    ], '引用视图组内顺序：总开关 → 直接悬停显示 → 跳转目标提示 → 外链开关与形态 → 嵌入展开层级 → 嵌入最大高度')
     assert.equal(await refviewGroup.getByRole('checkbox', { name: zhCn['setting.hoverLiveDirect.title'], exact: true })
       .isVisible(), true, '改名后的「实时预览中直接悬停显示」条目在组内呈现')
     const hoverEnabledBox = refviewGroup.getByRole('checkbox', { name: zhCn['setting.hoverEnabled.title'], exact: true })

@@ -36,7 +36,9 @@ import {
   type WebviewToHost,
 } from '../shared/protocol'
 import type { HoverTargetTipOutcome, RefReadOutcome } from './hoverDocAccess'
+import type { RefMarkdownContent } from '../shared/refContent'
 import type { ImagePasteOutcome } from './imagePasteHost'
+import { isHttpLinkHref } from '../shared/webLink'
 import { mapChangeThroughChanges } from '../shared/changeMapping'
 import { NewlineCoordinator } from '../shared/newline'
 import { PasteHistoryTracker } from './pasteHistoryTracker'
@@ -84,6 +86,11 @@ export interface PanelPort {
     payload: HoverPreviewRequestPayload & { verifiedSource?: { fsPath: string; version: number } },
     report: (result: RefReadOutcome) => void,
   ): void
+  /** #342（P3-10）悬停请求取消（vscode 层注入：定位在途 web 抓取消费者
+   *  并中止——WebLinkMetaService 的合并计数减一，最后消费者离开即断开
+   *  底层连接；markdown 读取不可中止，无操作）。instanceId/reqId 与被
+   *  取消的 hover.request 配对 */
+  cancelHoverRead?(identity: { instanceId: string; reqId: number }): void
   readHoverSource?(fsPath: string): Promise<{ version: number; text: string } | null>
   /** #299 跳转目标提示轻量解析（vscode 层注入：hoverDocAccess 的
    *  resolveHoverTargetTip——路径解析与存在性探测，**不读正文**、不建
@@ -384,7 +391,9 @@ export class DocumentSession {
    *  在形态内（锚点在 target/href/anchor 原文中）。成功缓存 + 在途合并
    *  （同形态并发共享一次读取）+ 世代守卫（失效窗口内完成不回写），
    *  先例：imageCache/imageInFlight/imageEpochs（#201/#208 同构） */
-  private readonly hoverReadCache = new Map<string, Extract<RefReadOutcome, { ok: true }>>()
+  // #342：会话读取缓存只承载 markdown 成功结果（web 元信息缓存归
+  // WebLinkMetaService，外链请求绕过本缓存路径）
+  private readonly hoverReadCache = new Map<string, { ok: true; fsPath: string; relPath: string; content: RefMarkdownContent }>()
   private readonly hoverReadInFlight = new Map<string, Promise<RefReadOutcome>>()
   /** 目标 fsPath → 形态键集合（失效反查：版本变更按目标清缓存） */
   private readonly hoverShapeTargets = new Map<string, Set<string>>()
@@ -1076,6 +1085,16 @@ export class DocumentSession {
         panel.port.send({ kind: 'refresh.invalidated', reqId: message.reqId, generation })
         return Promise.resolve()
       }
+      case 'hover.cancel': {
+        // #342（P3-10）悬停请求取消：webview 浮层关闭/换目标时中止在途
+        // 抓取（外链元信息的合并消费者离开；markdown 读取不可中止——迟到
+        // 回包由 reqId/instanceId 配对守卫丢弃，行为不变）。只读消息
+        if (!panel.ready || message.docUri !== this.docUri) {
+          return Promise.resolve()
+        }
+        panel.port.cancelHoverRead?.({ instanceId: message.instanceId, reqId: message.reqId })
+        return Promise.resolve()
+      }
       case 'hover.request': {
         // #218 悬停预览文档读取：会话守卫对齐 image.request / diagram.export
         // 先例（就绪且 docUri 匹配才放行，否则静默丢弃）；读取执行经面板
@@ -1131,6 +1150,44 @@ export class DocumentSession {
           if (message.source !== undefined && panel.hoverParentGrants.get(message.source.parentInstanceId) !== parent) {
             result = { ok: false, reason: 'source-expired' }
           }
+          // #342（P3-10）web 通道出站：外链卡片载荷走 hover.result 的 web
+          // 形态（Markdown 专属字段为占位值）。无本地文件身份——不进
+          // cycle/attachContent/租约/来源集合/expansionPath 链路（网页缓存
+          // 按规范 URL 与形态在抓取服务内管理，不伪造宿主文档版本）
+          if (result.ok && result.content.kind === 'web') {
+            panel.port.send({
+              kind: 'hover.result',
+              reqId: message.reqId,
+              instanceId: message.instanceId,
+              ok: true,
+              contentKind: 'web',
+              web: {
+                url: result.content.url,
+                domain: result.content.domain,
+                title: result.content.title,
+                description: result.content.description,
+              },
+              target: { fsPath: '', relPath: '' },
+              version: 0,
+              text: '',
+              range: { start: 0, end: 0 },
+              scope: { kind: 'full' },
+            })
+            return
+          }
+          // 窄化：web 已出站返回，此后成功结果恒为 markdown 载荷（pdf/
+          // image/text 未登记——防御性收敛 non-markdown，结构性不可达）
+          let outcome: { ok: true; fsPath: string; relPath: string; content: RefMarkdownContent } | { ok: false; reason: HoverPreviewFailReason; anchor?: string }
+          if (result.ok) {
+            // 解构后判别：TS 判别联合窄化不支持 x.content.kind 嵌套路径，
+            // content 单独绑定后 kind 判别为标准形态
+            const { fsPath, relPath, content } = result
+            outcome = content.kind === 'markdown'
+              ? { ok: true, fsPath, relPath, content }
+              : { ok: false, reason: 'non-markdown' }
+          } else {
+            outcome = result
+          }
           // P2-03（#280，ADR-0011）：祖先循环按规范目标文档身份判定——不同
           // 锚点不能绕过祖先循环，同目标兄弟 occurrence 仍合法。判定只对
           // **链上子引用**（带来源）生效：第一跳（无 parent）不判循环——
@@ -1139,24 +1196,24 @@ export class DocumentSession {
           // grant.path/expansionPath 仍从根面板起算——B→A 回指在链上可见。
           const pathToParent = parent?.path ?? [canonicalRefTargetKey(
             this.options.rootFsPath ?? this.docUri, this.options.isWindowsHost ?? false)]
-          if (result.ok) {
-            const key = canonicalRefTargetKey(result.fsPath, this.options.isWindowsHost ?? false)
-            if (parent !== undefined && occurrenceId !== undefined && inExpansionPath(pathToParent, key)) result = { ok: false, reason: 'cycle' }
+          if (outcome.ok) {
+            const key = canonicalRefTargetKey(outcome.fsPath, this.options.isWindowsHost ?? false)
+            if (parent !== undefined && occurrenceId !== undefined && inExpansionPath(pathToParent, key)) outcome = { ok: false, reason: 'cycle' }
             else if (occurrenceId !== undefined && panel.expansionBudget.attachContent(
-              occurrenceId, `${occurrenceId}\n${result.fsPath}\n${result.content.version}`,
-              result.content.lfText.length * 2 + 128) !== 'ok') {
-              result = { ok: false, reason: 'budget' }
+              occurrenceId, `${occurrenceId}\n${outcome.fsPath}\n${outcome.content.version}`,
+              outcome.content.lfText.length * 2 + 128) !== 'ok') {
+              outcome = { ok: false, reason: 'budget' }
             }
           }
-          const sourceLeaseId = result.ok && message.retainSource
+          const sourceLeaseId = outcome.ok && message.retainSource
             ? `${sessionId}:source-${++this.hoverSourceLeaseSeq}` : undefined
-          if (result.ok) {
+          if (outcome.ok) {
             if (sourceLeaseId !== undefined) {
-              panel.hoverSourceLeases.set(sourceLeaseId, result.fsPath)
+              panel.hoverSourceLeases.set(sourceLeaseId, outcome.fsPath)
               panel.hoverLeaseGrants.set(sourceLeaseId, {
-                fsPath: result.fsPath, version: result.content.version,
-                range: result.content.range, scope: result.content.selector,
-                path: [...pathToParent, canonicalRefTargetKey(result.fsPath, this.options.isWindowsHost ?? false)],
+                fsPath: outcome.fsPath, version: outcome.content.version,
+                range: outcome.content.range, scope: outcome.content.selector,
+                path: [...pathToParent, canonicalRefTargetKey(outcome.fsPath, this.options.isWindowsHost ?? false)],
                 depth, treeId, occurrenceId: occurrenceId ?? '',
               })
             }
@@ -1166,19 +1223,19 @@ export class DocumentSession {
             // 已存在成员重读时移到队尾（插入序 = 淘汰序改最近读取序）——
             // #242 watch 持有者固定来源；LRU 只回收未固定记录，刚送达
             // 的目标保留到前端订阅（或下一次读取后回收）。
-            if (panel.hoverSourceFsPaths.has(result.fsPath)) {
-              panel.hoverSourceFsPaths.delete(result.fsPath)
+            if (panel.hoverSourceFsPaths.has(outcome.fsPath)) {
+              panel.hoverSourceFsPaths.delete(outcome.fsPath)
             }
-            panel.hoverSourceFsPaths.add(result.fsPath)
-            this.trimHoverSources(panel, result.fsPath)
-            panel.hoverSourceFsPath = result.fsPath
+            panel.hoverSourceFsPaths.add(outcome.fsPath)
+            this.trimHoverSources(panel, outcome.fsPath)
+            panel.hoverSourceFsPath = outcome.fsPath
           } else if (occurrenceId !== undefined && !panel.hoverParentGrants.has(occurrenceId) &&
             !panel.expansionBudget.hasActiveRead(occurrenceId) &&
             ![...panel.hoverLeaseGrants.values()].some((grant) => grant.occurrenceId === occurrenceId)) {
             panel.expansionBudget.release(occurrenceId)
           }
           panel.port.send(
-            result.ok
+            outcome.ok
               ? {
                   kind: 'hover.result',
                   reqId: message.reqId,
@@ -1188,12 +1245,12 @@ export class DocumentSession {
                   // 类型分派，成功显式携带 contentKind（缺省 = markdown 的
                   // 兼容识别留给旧消息——校验器两形态都放行）
                   contentKind: 'markdown',
-                  target: { fsPath: result.fsPath, relPath: result.relPath },
-                  version: result.content.version,
-                  text: result.content.lfText,
-                  range: result.content.range,
-                  scope: result.content.selector,
-                  expansionPath: [...pathToParent, canonicalRefTargetKey(result.fsPath,
+                  target: { fsPath: outcome.fsPath, relPath: outcome.relPath },
+                  version: outcome.content.version,
+                  text: outcome.content.lfText,
+                  range: outcome.content.range,
+                  scope: outcome.content.selector,
+                  expansionPath: [...pathToParent, canonicalRefTargetKey(outcome.fsPath,
                     this.options.isWindowsHost ?? false)],
                   depth,
                   ...(sourceLeaseId !== undefined ? { sourceLeaseId } : {}),
@@ -1203,14 +1260,23 @@ export class DocumentSession {
                   reqId: message.reqId,
                   instanceId: message.instanceId,
                   ok: false,
-                  reason: result.reason,
-                  ...(result.anchor !== undefined ? { anchor: result.anchor } : {}),
+                  reason: outcome.reason,
+                  ...(outcome.anchor !== undefined ? { anchor: outcome.anchor } : {}),
                 },
           )
         }
         const port = panel.port.readHoverTarget
         if (!port) {
           report({ ok: false, reason: 'read-failed' })
+          return Promise.resolve()
+        }
+        // #342（P3-10）外链请求绕过会话读取缓存/在途合并：web 元信息的
+        // 缓存（规范 URL + 形态键）与同 URL 合并在抓取服务（WebLinkMeta
+        // Service）内管理——会话级 shapeKey 按目标文本形态区分，URL 微差
+        // 产生不同键，合并口径以服务层归一为准。此处仅按 href scheme 预
+        // 判路由（安全边界仍由 resolveHoverTargetForm 的开关/准入复核）
+        if (message.linkHref !== undefined && isHttpLinkHref(message.linkHref)) {
+          port({ ...message, ...(verifiedSource ? { verifiedSource } : {}) }, report)
           return Promise.resolve()
         }
         const shapeKey = hoverShapeKeyOf(message, verifiedSource)
@@ -1240,12 +1306,18 @@ export class DocumentSession {
             if ((this.hoverEpochs.get(shapeKey) ?? 0) !== epoch) {
               return // 世代已过：迟到结果不复活旧缓存
             }
+            // #342：web 载荷不经会话缓存（外链请求已绕过本路径——防御
+            // 性跳过非 markdown 载荷的缓存写回）；content 解构后判别
+            //（TS 不支持嵌套路径判别，同 report 处）
             if (outcome.ok) {
-              // 在途竞态补校验：读取期间该目标被失效过（当时形态→fsPath
-              // 登记未发生、反查为空）——不写缓存
-              const invalidatedAt = this.hoverInvalidatedAt.get(outcome.fsPath) ?? 0
-              if (invalidatedAt <= requestClock) {
-                this.commitHoverRead(shapeKey, outcome)
+              const { fsPath, relPath, content } = outcome
+              if (content.kind === 'markdown') {
+                // 在途竞态补校验：读取期间该目标被失效过（当时形态→fsPath
+                // 登记未发生、反查为空）——不写缓存
+                const invalidatedAt = this.hoverInvalidatedAt.get(fsPath) ?? 0
+                if (invalidatedAt <= requestClock) {
+                  this.commitHoverRead(shapeKey, { ok: true, fsPath, relPath, content })
+                }
               }
             }
           })
@@ -1618,7 +1690,7 @@ export class DocumentSession {
 
   /** 成功结果入缓存（字节按 LF 全文 UTF-16 code unit ×2 近似计量；
    *  条目/字节双上限按插入序淘汰——单条超字节上限不入缓存） */
-  private commitHoverRead(shapeKey: string, outcome: Extract<RefReadOutcome, { ok: true }>): void {
+  private commitHoverRead(shapeKey: string, outcome: { ok: true; fsPath: string; relPath: string; content: RefMarkdownContent }): void {
     const bytes = outcome.content.lfText.length * 2
     if (bytes > this.hoverCacheLimits.byteLimit) {
       return

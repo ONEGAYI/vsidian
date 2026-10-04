@@ -216,5 +216,21 @@ export function refErrorText(reason: HoverPreviewFailReason, target: string, anc
       return t('hover.errorDepth')
     case 'budget':
       return t('hover.errorBudget')
+    // #342（P3-10）外链卡片失败分态：真实网络原因如实呈现，不伪装成
+    // 文件缺失；打开入口（浮层标题条 open 按钮）在错误态保持可用
+    case 'web-disabled':
+      return t('hover.errorWebDisabled')
+    case 'web-invalid-address':
+      return t('hover.errorWebInvalidAddress')
+    case 'web-timeout':
+      return t('hover.errorWebTimeout')
+    case 'web-too-large':
+      return t('hover.errorWebTooLarge')
+    case 'web-not-html':
+      return t('hover.errorWebNotHtml')
+    case 'web-redirects':
+      return t('hover.errorWebRedirects')
+    case 'web-unreachable':
+      return t('hover.errorWebUnreachable')
   }
 }

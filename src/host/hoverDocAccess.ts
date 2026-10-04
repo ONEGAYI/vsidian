@@ -47,10 +47,12 @@ import * as path from 'node:path'
 import { NewlineCoordinator } from '../shared/newline'
 import { parseWikilinkInner } from '../shared/wikilink'
 import { isVaultPathInsideRoot, planVaultLinkPath, type VaultLinkFileResolution, type VaultLinkResolveContext } from '../shared/vaultLink'
-import { classifyLocalRefContentKind, type RefMarkdownContent } from '../shared/refContent'
+import { classifyLocalRefContentKind, type RefMarkdownContent, type RefWebContent } from '../shared/refContent'
+import { checkWebLinkUrl, isHttpLinkHref } from '../shared/webLink'
 import { classifyLinkTarget, planPathTextOf, splitHrefFragment } from './linkTarget'
 import { findBlockRange, findHeadingSectionRange } from './wikilinkTarget'
 import type { HoverPreviewFailReason, HoverPreviewScope } from '../shared/protocol'
+import type { WebLinkMetaOutcome } from './webLinkMetaService'
 
 /** 读取结果：成功携带规范身份 + 版本 + LF 全文、源范围与语义范围选择器；
  *  失败为错误分态（就地 i18n 呈现的载荷来源，不连续弹宿主通知；缺失锚点
@@ -77,12 +79,14 @@ export type HoverReadOutcome =
 
 /** #333（P3-01）类型化读取结果：成功形态为「目标身份（fsPath/relPath，
  *  类型无关）+ 按 kind 分派的内容载荷」——markdown 通道为 RefMarkdown
- *  Content（TextDocument 权威版本 + LF 全文 + 初始定位区间 + Markdown
- *  导航选择器）；pdf/image/text/web 的载荷形态由后续票（P3-04/P3-05/
- *  P3-08/P3-10）扩展 content 联合登记，登记前这些类型在分派处回落
- *  non-markdown 失败分态。失败形态与旧扁平入口同源 */
+ * Content（TextDocument 权威版本 + LF 全文 + 初始定位区间 + Markdown
+ * 导航选择器）；web 通道（#342）为 RefWebContent（受限抓取的元信息；
+ * fsPath/relPath 为空串占位——外链无本地文件身份）；pdf/image/text 的
+ * 载荷形态由后续票（P3-04/P3-05/P3-08）扩展 content 联合登记，登记前
+ * 这些类型在分派处回落 non-markdown 失败分态。失败形态与旧扁平入口同源 */
 export type RefReadOutcome =
   | { ok: true; fsPath: string; relPath: string; content: RefMarkdownContent }
+  | { ok: true; fsPath: ''; relPath: ''; content: RefWebContent }
   | { ok: false; reason: HoverPreviewFailReason; anchor?: string }
 
 /** 类型化结果 → 旧扁平 Markdown 形态（兼容适配展开）。非 markdown 载荷
@@ -115,13 +119,18 @@ export interface HoverDocAccessContext {
   rootFsPath: string
 }
 
-/** 读取端口（vscode 层注入；无写端口——只读访问不依赖写入） */
+/** 读取端口（vscode 层注入；无写端口——只读访问不依赖写入）。#342 起
+ *  可选注入外链元信息抓取端口（宿主受限抓取服务的装配形态；缺席 =
+ *  外链维持 unsupported 分态） */
 export interface HoverDocAccessPorts {
   /** 双链/链接文件目标存在性解析（vscode 层 = resolveVaultLinkFile + statFileRealPath） */
   resolveVaultFile(rawPath: string): Promise<VaultLinkFileResolution>
   /** 打开并读取目标文档（vscode 层 = openTextDocument 只装载不显示 + getText；
    *  失败返回 null） */
   openTextDocument(fsPath: string): Promise<{ version: number; text: string } | null>
+  /** #342（P3-10）外链元信息受限抓取（宿主 WebLinkMetaService 装配；测试
+   *  注入替身）。signal 为消费者取消通道（webview 关浮层 → 宿主 abort） */
+  fetchWebMeta?(url: string, signal?: AbortSignal): Promise<WebLinkMetaOutcome>
 }
 
 /** 锚点规格（链接形态无关的语义选择器输入）：双链 heading/blockId 与
@@ -216,9 +225,12 @@ function anchorSpecOfFragment(fragment: string | null): AnchorSpec | null {
 }
 
 /** 读取选项（P2-03 #280）：anchorOptional = 刷新重载宽容——已打开实例的
- *  重载在锚点缺失时仍回成功全文（重开再验证原锚点，见 readMarkdownContent） */
+ *  重载在锚点缺失时仍回成功全文（重开再验证原锚点，见 readMarkdownContent）。
+ *  web（#342）：外链卡片开关与取消信号——enabled 为 false/缺席时 external
+ *  目标维持 unsupported（关闭态零抓取：不发起任何网络请求） */
 export interface HoverReadOpts {
   anchorOptional?: boolean
+  web?: { enabled: boolean; signal?: AbortSignal }
 }
 
 /** 目标三形态（与 hover.request 的载荷形态一一对应：双链 target 原文 /
@@ -229,10 +241,12 @@ export interface HoverTargetForm {
   directTarget?: { fsPath: string; anchor?: string }
 }
 
-/** 三形态解析结果：成功携带 fsPath + 锚点规格（形态归一后）；失败为
- *  解析层错误分态（unsupported/no-workspace/escape/not-found） */
+/** 三形态解析结果：成功携带 fsPath + 锚点规格（形态归一后）；web 目标
+ * （#342）携带归一 URL（webUrl 在场 = 外链卡片通道，无本地文件身份）；
+ * 失败为解析层错误分态（unsupported/no-workspace/escape/not-found） */
 type HoverTargetResolution =
   | { ok: true; fsPath: string; spec: AnchorSpec | null }
+  | { ok: true; webUrl: string }
   | { ok: false; reason: HoverPreviewFailReason }
 
 /**
@@ -241,11 +255,19 @@ type HoverTargetResolution =
  * classifyLinkTarget + resolveVaultFile（剥 fragment/query 后容错解码）；
  * 直接目标 fsPath 直取（根内边界校验，不走文本解析））。不读正文——
  * 类型分派在解析之后（readRefContentTarget）。
+ *
+ * #342（P3-10）：external 分支为 web 类型入口——仅 http(s) 且总开关开启
+ * （opts.web.enabled）且抓取端口在场时归一为 webUrl 交付分派层；凭据/
+ * 私网/畸形 URL 在准入层拒绝（web-invalid-address）；其余形态（非 http
+ * scheme、开关关闭、端口缺席）维持 unsupported。不放行任意 URI——
+ * href scheme 判定不经 classifyLocalRefContentKind（本地文件分类不适用
+ * 于外链目标）。
  */
 async function resolveHoverTargetForm(
   form: HoverTargetForm,
   ctx: HoverDocAccessContext,
   ports: HoverDocAccessPorts,
+  opts?: HoverReadOpts,
 ): Promise<HoverTargetResolution> {
   if (form.directTarget !== undefined) {
     const direct = form.directTarget
@@ -269,9 +291,22 @@ async function resolveHoverTargetForm(
       isWindowsHost: ctx.resolve.isWindowsHost,
     })
     if (classified.kind === 'external') {
-      // 外部网页不接入本功能（web 类型载荷由 #342 接入，届时在分派层扩展
-      // 而非此处放行）；webview 已预滤，防御性兜底
-      return { ok: false, reason: 'unsupported' }
+      // #342（P3-10）web 类型入口：总开关开启 + 抓取端口在场才进外链
+      // 通道；关闭态零抓取（webview 预滤已拦，此处宿主复核兜底——被攻陷
+      // webview 无法绕过开关发起抓取）
+      if (opts?.web?.enabled !== true || ports.fetchWebMeta === undefined) {
+        return { ok: false, reason: 'unsupported' }
+      }
+      // 仅 http(s)：ftp/mailto/javascript 等其余 external 形态不接入
+      if (!isHttpLinkHref(form.linkHref.trim())) {
+        return { ok: false, reason: 'unsupported' }
+      }
+      // URL 准入（scheme/凭据/字面私网）+ 归一（缓存键与抓取地址同源）
+      const check = checkWebLinkUrl(form.linkHref.trim())
+      if (!check.ok) {
+        return check
+      }
+      return { ok: true, webUrl: check.url }
     }
     if (classified.kind === 'blocked') {
       // 越出所属根单独分态；其余拦截形态（scheme/空目标/跨宿主盘符）不接入
@@ -340,9 +375,21 @@ export async function readRefContentTarget(
   ports: HoverDocAccessPorts,
   opts?: HoverReadOpts,
 ): Promise<RefReadOutcome> {
-  const resolution = await resolveHoverTargetForm(form, ctx, ports)
+  const resolution = await resolveHoverTargetForm(form, ctx, ports, opts)
   if (!resolution.ok) {
     return resolution
+  }
+  if ('webUrl' in resolution) {
+    // #342（P3-10）web 通道：受限抓取元信息（解析层已完成开关/端口/scheme/
+    // URL 准入复核）；失败 reason 逐字透传（网络失败不伪装成文件缺失），
+    // 成功装载 RefWebContent（fsPath/relPath 空串占位——无本地文件身份，
+    // 不进 watch/租约/来源集合链路）
+    const fetchWebMeta = ports.fetchWebMeta!
+    const outcome = await fetchWebMeta(resolution.webUrl, opts?.web?.signal)
+    if (!outcome.ok) {
+      return outcome
+    }
+    return { ok: true, fsPath: '', relPath: '', content: { kind: 'web', ...outcome.meta } }
   }
   const kind = classifyLocalRefContentKind(resolution.fsPath)
   if (kind !== 'markdown') {
