@@ -79,6 +79,7 @@ vsidian/
     │   ├── mermaid.ts            # Mermaid 围栏形态学（#60）
     │   ├── newline.ts            # CRLF/LF 换行协调器
     │   ├── obsidianAlias.ts      # Obsidian 别名桥实现同源表
+    │   ├── pdfNav.ts             # PDF 导航锚点解析纯逻辑
     │   ├── protocol.ts           # 消息协议单一事实源
     │   ├── refContent.ts         # 引用内容类型分派共享内核（#333）
     │   ├── refExpansion.ts       # 引用递归路径与容量预算
@@ -172,6 +173,9 @@ vsidian/
         ├── outlineSection.ts           # 大纲控制域纯函数
         ├── outlinkPanel.ts             # 出链面板 DOM 与四态渲染
         ├── overlayAnchor.ts            # 浮层右缘锚点计划纯函数
+        ├── pdfMainEntry.ts             # PDF.js 主库独立产物入口
+        ├── pdfRender.ts                # PDF 悬停渲染器
+        ├── pdfWorkerEntry.ts           # PDF.js worker 独立产物入口
         ├── perfProbe.ts                # webview 性能探针（#5）
         ├── popupMutex.ts               # 图表与图片弹窗互斥
         ├── quickActionState.ts         # 快速操作状态判定

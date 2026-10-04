@@ -6,6 +6,23 @@
 //   （同 browser/iife 形态）。mermaid 不进主 bundle（约 2.7MB 会让每个 webview
 //   启动都付出解析成本），宿主在 webview HTML 注入资源 URI、webview 存在
 //   mermaid 围栏时按需 <script> 加载。
+// - PDF 双产物（#337 / P3-05，装配结论来自 #334 探针）：
+//   src/webview/pdfMainEntry.ts -> out/webview/pdfMain.js（pdfjs-dist@6.4.299
+//   legacy 主库，约 480KB minified——不进主 bundle，悬停 PDF 时动态 <script>
+//   按需装载，pdfjsLib 挂全局）；src/webview/pdfWorkerEntry.ts ->
+//   out/webview/pdfWorker.js（legacy worker 单文件 iife，运行时经 fetch 文本
+//   -> Blob -> objectURL 装配，CSP worker-src blob: 放行）。
+//   target chrome114（对齐下界宿主 Electron 25 / Chromium 114——比
+//   webviewBase 的 chrome118 更保守：PDF.js 6.x 官方 legacy 下界为
+//   Chrome 125，1.82.3 靠 banner 双 polyfill 补齐 Promise.withResolvers 与
+//   ReadableStream async iteration；升级 pdfjs-dist 必须重跑
+//   test/integration/pdfProbe 回归门禁）。
+// - PDF 资产复制：node_modules/pdfjs-dist 的 cmaps / standard_fonts / wasm /
+//   iccs -> out/webview/pdfjs/<同名目录>（构建产物目录，gitignore 天然排除、
+//   .vscodeignore 保留 out/webview 进包）。wasm 裁掉 quickjs-eval（sandbox
+//   产物专用——不随包即天然拒绝 PDF JavaScript）与 *_nowasm_fallback.js
+//   （#334 探针口径：wasm 失败降级路径未随包，属待验降级面）；分许可
+//   文件随包（Apache-2.0 的 Foxit/Liberation/OpenJPEG/QCMS/JBIG2 条款）。
 // - 集成测试入口（仅开发构建）：test/integration/suite/index.ts -> out/test/integration/suite/index.js
 // 类型检查由 `tsc --noEmit`（npm run typecheck / compile）负责，esbuild 只做转译打包。
 //
@@ -13,7 +30,7 @@
 // 移除 woff/ttf 回退条目（chrome118 目标只需 woff2），并以 assetNames 固定
 // 产物名为 out/webview/assets/<原名>（无 hash，供发布检查的必需清单逐文件登记）。
 import * as esbuild from 'esbuild'
-import { readFile } from 'node:fs/promises'
+import { cp, mkdir, readdir, readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
 
 const production = process.argv.includes('--production')
@@ -64,6 +81,39 @@ const webviewBase = {
   plugins: [katexFontPlugin, katexMinJsPlugin],
 }
 
+/** #337 Chromium 114 双 polyfill（#334 探针结论，主线程与 worker 全局
+ *  作用域独立、两侧同注；存在性检测——更高 Chromium 下自动跳过）：
+ *  - Promise.withResolvers（Chromium 119+；缺它 pdfjs 6.x 顶层即抛）
+ *  - ReadableStream async iteration（Chromium 124+；缺它 getTextContent
+ *    抛 TypeError，文本层完全不可用——P3-07 前置） */
+const pdfBanner = {
+  js: `if (typeof Promise.withResolvers !== "function") { Promise.withResolvers = function () { let resolve, reject; const promise = new Promise((res, rej) => { resolve = res; reject = rej; }); return { promise, resolve, reject }; } }if (!ReadableStream.prototype[Symbol.asyncIterator]) { ReadableStream.prototype[Symbol.asyncIterator] = async function* () { const reader = this.getReader(); try { for (;;) { const { done, value } = await reader.read(); if (done) return; yield value; } } finally { reader.releaseLock(); } }; }`,
+}
+
+/** #337 PDF 资产复制（pdfjs-dist 运行时必要集，#334 探针生产候选布局）：
+ *  cmaps 全量 + standard_fonts 全量（含 LiberationSans .ttf——PDF.js 内建
+ *  文件名，禁止改名/转格式，release 白名单按路径例外）+ wasm 三件（裁掉
+ *  quickjs-eval 与 *_nowasm_fallback）+ iccs；分许可文件随包。幂等：先清
+ *  旧目录再复制（依赖升级后无残留） */
+async function copyPdfjsAssets() {
+  const srcRoot = 'node_modules/pdfjs-dist'
+  const destRoot = 'out/webview/pdfjs'
+  await rm(destRoot, { recursive: true, force: true })
+  await mkdir(destRoot, { recursive: true })
+  await cp(path.join(srcRoot, 'cmaps'), path.join(destRoot, 'cmaps'), { recursive: true })
+  await cp(path.join(srcRoot, 'standard_fonts'), path.join(destRoot, 'standard_fonts'), { recursive: true })
+  await cp(path.join(srcRoot, 'iccs'), path.join(destRoot, 'iccs'), { recursive: true })
+  // wasm：排除 sandbox 专用 quickjs-eval 与未随包的 nowasm 降级回退
+  await mkdir(path.join(destRoot, 'wasm'), { recursive: true })
+  const wasmFiles = await readdir(path.join(srcRoot, 'wasm'))
+  for (const name of wasmFiles) {
+    if (name.startsWith('quickjs-eval') || name.includes('_nowasm_')) {
+      continue
+    }
+    await cp(path.join(srcRoot, 'wasm', name), path.join(destRoot, 'wasm', name))
+  }
+}
+
 /** @type {Array<import('esbuild').BuildOptions>} */
 const targets = [
   {
@@ -96,6 +146,34 @@ const targets = [
     entryPoints: ['src/webview/mermaidEntry.ts'],
     outfile: 'out/webview/mermaid.js',
     ...webviewBase,
+  },
+  {
+    // PDF.js 主库独立产物（#337）：动态 <script> 按需装载，pdfjsLib 挂
+    // 全局 __vsidianPdfjs（见 pdfMainEntry.ts）
+    entryPoints: ['src/webview/pdfMainEntry.ts'],
+    outfile: 'out/webview/pdfMain.js',
+    bundle: true,
+    platform: 'browser',
+    format: 'iife',
+    target: 'chrome114',
+    sourcemap: !production,
+    minify: production,
+    logLevel: 'info',
+    banner: pdfBanner,
+  },
+  {
+    // PDF.js worker 独立产物（#337）：单文件 iife，Blob URL 装配（见
+    // pdfWorkerEntry.ts）
+    entryPoints: ['src/webview/pdfWorkerEntry.ts'],
+    outfile: 'out/webview/pdfWorker.js',
+    bundle: true,
+    platform: 'browser',
+    format: 'iife',
+    target: 'chrome114',
+    sourcemap: !production,
+    minify: production,
+    logLevel: 'info',
+    banner: pdfBanner,
   },
 ]
 
@@ -205,6 +283,9 @@ async function main() {
   } else {
     await Promise.all(contexts.map((ctx) => ctx.rebuild()))
     await Promise.all(contexts.map((ctx) => ctx.dispose()))
+    // #337 PDF 资产复制（一次性收尾步骤——不进 watch 循环；依赖变更后
+    // 重跑构建刷新）
+    await copyPdfjsAssets()
   }
 }
 

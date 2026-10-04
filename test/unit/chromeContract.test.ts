@@ -74,6 +74,7 @@ const DYNAMIC_STATE_ENTRIES: ReadonlySet<string> = new Set([
   'diagram-popup', // 弹窗在场期间（chromePopup 观测）
   'hover-popup', // #218 悬停预览浮层（悬停延迟打开期间挂载，开闭/保活/绘制由浏览器 hoverPreview 套件验证）
   'hover-fm-section', // #220 悬停浮层笔记属性区（浮层在场期间的结构；折叠/热区/键盘由浏览器套件验证）
+  'hover-pdf-view', // #337 悬停 PDF 内容视图（浮层在场期间的结构；canvas 绘制层可见性由浏览器/集成按实际像素断言）
   'mode-toggle', // 已移除（历史记录条目）
   'mode-body', // 模式态类（live/reading 互斥，两态必居其一——无静态单值可断言）
   'find-match-highlight', // #236 匹配装饰（查找会话打开且命中时在场；计数/序号/定位由集成 find 用例按行为路径验证）

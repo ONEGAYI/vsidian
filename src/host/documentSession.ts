@@ -36,7 +36,7 @@ import {
   type WebviewToHost,
 } from '../shared/protocol'
 import type { HoverTargetTipOutcome, RefReadOutcome } from './hoverDocAccess'
-import type { RefImageContent, RefMarkdownContent } from '../shared/refContent'
+import type { RefImageContent, RefMarkdownContent, RefPdfContent, RefPdfNavSelector } from '../shared/refContent'
 import type { ImagePasteOutcome } from './imagePasteHost'
 import { isHttpLinkHref } from '../shared/webLink'
 import { mapChangeThroughChanges } from '../shared/changeMapping'
@@ -283,9 +283,10 @@ interface HoverSourceGrant {
   version: number
   /** P2-03（#280）：初始定位区间参考（锚点命中的锚定区间；宽容重载为全文
    *  区间）——子引用准入已不以它为界（validChildSource 按来源全文校验），
-   *  仅随租约保留定位语义 */
+   *  仅随租约保留定位语义。#337 起 pdf 载荷为零区间占位（PDF 无 LF
+   *  坐标——定位由 scope.page 承载） */
   range: { start: number; end: number }
-  scope: HoverPreviewScope
+  scope: HoverPreviewScope | RefPdfNavSelector
   path: string[]
   depth: number
   treeId: string
@@ -1176,15 +1177,15 @@ export class DocumentSession {
             })
             return
           }
-          // 窄化：web 已出站返回，此后成功结果为 markdown 或 image 载荷
-          // （#336 登记 image；pdf/text 未登记——防御性收敛 non-markdown，
-          // 结构性不可达）
-          let outcome: { ok: true; fsPath: string; relPath: string; content: RefMarkdownContent | RefImageContent } | { ok: false; reason: HoverPreviewFailReason; anchor?: string }
+          // 窄化：web 已出站返回，此后成功结果为 markdown / image / pdf
+          // 载荷（#336 登记 image；#337 登记 pdf；text 未登记——防御性
+          // 收敛 non-markdown，结构性不可达）
+          let outcome: { ok: true; fsPath: string; relPath: string; content: RefMarkdownContent | RefImageContent | RefPdfContent } | { ok: false; reason: HoverPreviewFailReason; anchor?: string }
           if (result.ok) {
             // 解构后判别：TS 判别联合窄化不支持 x.content.kind 嵌套路径，
             // content 单独绑定后 kind 判别为标准形态
             const { fsPath, relPath, content } = result
-            outcome = content.kind === 'markdown' || content.kind === 'image'
+            outcome = content.kind === 'markdown' || content.kind === 'image' || content.kind === 'pdf'
               ? { ok: true, fsPath, relPath, content }
               : { ok: false, reason: 'non-markdown' }
           } else {
@@ -1200,12 +1201,19 @@ export class DocumentSession {
             this.options.rootFsPath ?? this.docUri, this.options.isWindowsHost ?? false)]
           if (outcome.ok) {
             const key = canonicalRefTargetKey(outcome.fsPath, this.options.isWindowsHost ?? false)
+            // 内容字节费用按类型计（#337/#336）：markdown 为 LF 全文 UTF-16
+            // （+ 小常数开销）；pdf 为源文件字节（逻辑预算费用，不代表解码
+            // 内存）；image 载荷无正文——按身份载荷小常数计量（图片解码
+            // 内存归图片管线，与普通 Markdown 图片同口径，不占文本预算大额）
+            const contentBytes = outcome.content.kind === 'markdown'
+              ? outcome.content.lfText.length * 2 + 128
+              : outcome.content.kind === 'pdf'
+                ? outcome.content.bytes + 128
+                : 256
             if (parent !== undefined && occurrenceId !== undefined && inExpansionPath(pathToParent, key)) outcome = { ok: false, reason: 'cycle' }
             else if (occurrenceId !== undefined && panel.expansionBudget.attachContent(
               occurrenceId, `${occurrenceId}\n${outcome.fsPath}\n${outcome.content.version}`,
-              // #336：图片载荷无正文——按身份载荷小常数计量（图片解码内存
-              // 归图片管线，与普通 Markdown 图片同口径，不占文本预算大额）
-              outcome.content.kind === 'markdown' ? outcome.content.lfText.length * 2 + 128 : 256) !== 'ok') {
+              contentBytes) !== 'ok') {
               outcome = { ok: false, reason: 'budget' }
             }
           }
@@ -1217,9 +1225,13 @@ export class DocumentSession {
               panel.hoverLeaseGrants.set(sourceLeaseId, {
                 fsPath: outcome.fsPath, version: outcome.content.version,
                 // #336：图片载荷无定位区间与 Markdown 选择器——租约只保留
-                // 身份语义（range/scope 退化中性值；图片无锚点定位语义）
+                // 身份语义（range/scope 退化中性值；图片无锚点定位语义）；
+                // #337：pdf 载荷无 LF 区间语义——零区间占位（定位由 pdf
+                // 选择器的 page 承载，租约保留 pdf 选择器）
                 range: outcome.content.kind === 'markdown' ? outcome.content.range : { start: 0, end: 0 },
-                scope: outcome.content.kind === 'markdown' ? outcome.content.selector : { kind: 'full' },
+                scope: outcome.content.kind === 'markdown' || outcome.content.kind === 'pdf'
+                  ? outcome.content.selector
+                  : { kind: 'full' },
                 path: [...pathToParent, canonicalRefTargetKey(outcome.fsPath, this.options.isWindowsHost ?? false)],
                 depth, treeId, occurrenceId: occurrenceId ?? '',
               })
@@ -1250,16 +1262,19 @@ export class DocumentSession {
                   ok: true,
                   // #333（P3-01）类型化出站：生产读取经 readRefContentTarget
                   // 类型分派，成功显式携带 contentKind（缺省 = markdown 的
-                  // 兼容识别留给旧消息——校验器两形态都放行）。#336（P3-04）
+                  // 兼容识别留给旧消息——校验器各形态都放行）。#336（P3-04）
                   // image 通道：图源载荷（来源相对 src；字节与版本戳走既有
-                  // 图片通道），Markdown 全文/区间/选择器退化形态
+                  // 图片通道），Markdown 全文/区间/选择器退化形态；#337
+                  // （P3-05）pdf 通道：pdf 资源字段 + 空 text + pdf 选择器
+                  // scope + 零区间 range（PDF 无 LF 坐标）
                   contentKind: outcome.content.kind,
                   target: { fsPath: outcome.fsPath, relPath: outcome.relPath },
                   version: outcome.content.version,
                   ...(outcome.content.kind === 'image' ? { imageSrc: outcome.content.src } : {}),
+                  ...(outcome.content.kind === 'pdf' ? { pdf: { uri: outcome.content.uri, bytes: outcome.content.bytes } } : {}),
                   text: outcome.content.kind === 'markdown' ? outcome.content.lfText : '',
                   range: outcome.content.kind === 'markdown' ? outcome.content.range : { start: 0, end: 0 },
-                  scope: outcome.content.kind === 'markdown' ? outcome.content.selector : { kind: 'plain' },
+                  scope: outcome.content.kind === 'image' ? { kind: 'plain' } : outcome.content.selector,
                   expansionPath: [...pathToParent, canonicalRefTargetKey(outcome.fsPath,
                     this.options.isWindowsHost ?? false)],
                   depth,
@@ -1318,11 +1333,12 @@ export class DocumentSession {
             }
             // #342：web 载荷不经会话缓存（外链请求已绕过本路径——防御
             // 性跳过 web 载荷的缓存写回；#336：image 载荷入缓存——图片
-            // 按身份载荷小常数计量）；content 解构后判别（TS 不支持嵌套
-            // 路径判别，同 report 处）
+            // 按身份载荷小常数计量；#337：pdf 载荷入缓存——按源文件字节
+            // 计量）；content 解构后判别（TS 不支持嵌套路径判别，同 report
+            // 处）
             if (outcome.ok) {
               const { fsPath, relPath, content } = outcome
-              if (content.kind === 'markdown' || content.kind === 'image') {
+              if (content.kind === 'markdown' || content.kind === 'image' || content.kind === 'pdf') {
                 // 在途竞态补校验：读取期间该目标被失效过（当时形态→fsPath
                 // 登记未发生、反查为空）——不写缓存
                 const invalidatedAt = this.hoverInvalidatedAt.get(fsPath) ?? 0
@@ -1699,12 +1715,17 @@ export class DocumentSession {
     }
   }
 
-  /** 成功结果入缓存（字节按 LF 全文 UTF-16 code unit ×2 近似计量；
-   *  条目/字节双上限按插入序淘汰——单条超字节上限不入缓存。#336：图片
-   *  载荷无正文，按身份载荷小常数计量（与读取预算同口径）。#342：web
-   *  载荷不进本缓存（调用侧过滤，元信息缓存归 WebLinkMetaService） */
+  /** 成功结果入缓存（字节按内容类型近似计量：markdown 为 LF 全文 UTF-16
+   *  code unit ×2，#337 起 pdf 为源文件字节；#336 图片载荷无正文，按身份
+   *  载荷小常数计量（与读取预算同口径）；条目/字节双上限按插入序淘汰——
+   *  单条超字节上限不入缓存。#342：web 载荷不进本缓存（调用侧过滤，
+   *  元信息缓存归 WebLinkMetaService） */
   private commitHoverRead(shapeKey: string, outcome: Extract<RefReadOutcome, { ok: true }>): void {
-    const bytes = outcome.content.kind === 'markdown' ? outcome.content.lfText.length * 2 : 256
+    const bytes = outcome.content.kind === 'markdown'
+      ? outcome.content.lfText.length * 2
+      : outcome.content.kind === 'pdf'
+        ? outcome.content.bytes
+        : 256
     if (bytes > this.hoverCacheLimits.byteLimit) {
       return
     }
@@ -1741,7 +1762,11 @@ export class DocumentSession {
       return
     }
     this.hoverReadCache.delete(shapeKey)
-    this.hoverCacheBytes -= hit.content.kind === 'markdown' ? hit.content.lfText.length * 2 : 256
+    this.hoverCacheBytes -= hit.content.kind === 'markdown'
+      ? hit.content.lfText.length * 2
+      : hit.content.kind === 'pdf'
+        ? hit.content.bytes
+        : 256
     const keys = this.hoverShapeTargets.get(hit.fsPath)
     if (keys) {
       keys.delete(shapeKey)

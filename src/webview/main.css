@@ -4482,6 +4482,29 @@ body.vscode-high-contrast #app .vsidian-find .vsidian-find-in-selection { backgr
   text-decoration: underline;
 }
 
+/* ---- #337（P3-05）悬停 PDF 内容视图（样式契约 chrome 域 hover-pdf-view
+   条目）：浮层滚动区内与 Reading 容器并列的只读 PDF 渲染容器 ---- */
+
+/* 内容容器：承接画布与页码信息行（PDF 形态下 Reading 容器由渲染层隐藏） */
+#app > .vsidian-hover-popup .vsidian-hover-pdf {
+  padding: 8px;
+}
+
+/* 页面画布：块级呈现，不超过浮层内容宽（渲染器按内容宽适配 scale，
+   上限 2.5——绘制面即显示面，不缩小） */
+#app > .vsidian-hover-popup .vsidian-hover-pdf-canvas {
+  display: block;
+  max-width: 100%;
+}
+
+/* 页码信息行：居中弱化（翻页操作的状态反馈） */
+#app > .vsidian-hover-popup .vsidian-hover-pdf-page-info {
+  padding: 4px 10px;
+  text-align: center;
+  opacity: 0.85;
+  color: var(--vscode-descriptionForeground, inherit);
+}
+
 /* ---- #220 悬停浮层笔记属性区（样式契约 chrome 域 hover-fm-section 条目；
    引用专属样式入口——仅作用于浮层内 frontmatter 块，主阅读视图的属性
    呈现不受影响） ---- */

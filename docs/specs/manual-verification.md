@@ -1741,3 +1741,13 @@ Live 渲染态经 lezer `HorizontalRule` 节点驱动：未触及该行时源文
   4. **Remote SSH 实机**：远程窗口开启开关并悬停外链 → 卡片正常（抓取发生在远端；本机无法直连的站点在远程可达时应成功）。
   5. **关闭态零请求复核**：关闭开关后悬停外链 → 不弹浮层；有条件时在本地抓包/代理侧确认无出站请求。
   6. **设置回显**：开关与形态切换后重开设置页、重启 VSCode → 值保持；开关关闭时形态选择灰化（值不清除）。
+
+## PDF 悬停预览首条闭环（#337，2026-10-04 实施待验收）
+
+- 交付范围：悬停指向本地 PDF 的双链/普通链接/键盘预览入口 → 浮层内 canvas 绘制第一页或双链 `#page=N` 指定页（普通链接 fragment 不解析——从第一页开始，fragment 原样交宿主）；页码新操作（`hoverPdfPageNext`/`hoverPdfPagePrev`，默认未绑定，翻出界静默）；错误分态（缺文件/锚点非法/页码越界/损坏/加密/资源失败）就地 i18n 呈现。pdfjs-dist@6.4.299（legacy 主库 + worker + cmaps/字体/wasm/icc 资产本地随包）。
+- 自动化记录（2026-10-04，工作树 impl/337）：单测（pdfNav 锚点矩阵 / pdfRender 状态机与取消纪律 / hoverDocAccess pdf 分派与 anchor-invalid / 协议 pdf 载荷校验 / CSP worker-src 词法 / release 白名单与 ttf 例外）；浏览器 hoverPdf 6 场景（真实 Chromium 生产装配链路——懒加载主库、blob worker、canvas 像素页身份断言：三页红/绿/蓝）；集成真宿主 1.82.3「悬停 PDF：双链 #page 指定页真实绘制、非法页码分态与零写回」（5.2s，nonWhiteRatio>0.5 绘制层证据 + 零 dirty/applyEdit）；VSIX 解压 10.79 MB（11.0 警告/11.5 失败线内）；样式契约八项检查通过（worker-src blob: 一条新增 + hover-pdf-view 新条目）。
+- 人工待验（自动化无法覆盖真实观感、物理鼠标与远程环境，逐项记录实际结果）：
+  1. **观感**：中文 PDF（非内嵌 CMap 字体）悬停渲染的字形清晰度与配色（深色主题下画布留白观感）；页码信息行「第 N / M 页」可读性。
+  2. **物理鼠标手感**：悬停开/移入浮层滚动/移出关闭的时序手感；翻页操作自配键位后的连续翻页响应。
+  3. **Remote SSH**【需远程环境】：远程工作区 PDF 悬停绘制（资源 URI 经 vscode-cdn 转发、worker 在 webview 本地 blob——#334 探针单列待验项的 P3-05 复核）。
+  4. **加密 PDF**：真实加密文件悬停显示「在本地 PDF 阅读器打开」提示（不采集密码）。

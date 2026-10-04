@@ -176,6 +176,7 @@ import {
   notifyHoverImageInvalidate,
   notifyHoverImageResult,
   notifyHoverResult,
+  turnHoverPdfPage,
   hoverPopupLiveTestAction,
   notifyHoverWatchRejected,
   openHoverPopupForKeyboard,
@@ -905,6 +906,9 @@ export class WebviewSyncController {
       // #221 预览当前链接：纯 webview 域（目标判定与浮层打开都在 webview，
       // 无宿主往返依赖），与命令面板入口（ui.command 回发）共用同一实现
       else if (id === 'hoverPreviewLink') { if (!embedBlocked()) this.previewLinkAtFocus() }
+      // #337 PDF 翻页：作用于在场 PDF 悬停浮层（只读；无浮层/翻出界静默）
+      else if (id === 'pdfPageNext') { if (!embedBlocked()) turnHoverPdfPage(1) }
+      else if (id === 'pdfPagePrev') { if (!embedBlocked()) turnHoverPdfPage(-1) }
       // #237 上下添加光标：同「本地消化不转发宿主」先例——命令在 webview
       // 的 CM6 上执行（与命令面板 ui.command 回发入口共用 runCursorAdd）
       else if (id === 'addCursorAbove' || id === 'addCursorBelow') this.runCursorAdd(id)
@@ -2477,6 +2481,8 @@ export class WebviewSyncController {
           // #221 预览当前链接：命令面板/宿主命令入口与快捷键（keybindingRouter
           // 本地分支）共用同一实现（目标判定在 webview，无目标静默不误开）
           case 'hoverPreviewLink': this.previewLinkAtFocus(); break
+          case 'pdfPageNext': turnHoverPdfPage(1); break
+          case 'pdfPagePrev': turnHoverPdfPage(-1); break
           // #237 上下添加光标：命令面板/宿主命令入口与快捷键（keybindingRouter
           // 本地分支）共用同一实现（仅 Live 正文生效，边界见 runCursorAdd）
           case 'addCursorAbove': this.runCursorAdd('addCursorAbove'); break

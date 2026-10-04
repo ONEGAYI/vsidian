@@ -153,7 +153,13 @@ export function isRefLoadedMarkdown(loaded: RefLoadedAny): loaded is RefLoadedCo
  *   的既有装载形态；身份/版本/全文/定位区间/选择器语义不变）；
  * - 'image'（#336 / P3-04）：转换为 RefLoadedImageContent（身份 + 来源
  *   相对图源 + 文件资源版本）——消费方（悬停浮层）据此委托普通图片挂载；
- * - 其余 kind（pdf/text/web）：未登记装载形态，返回 null——调用方按
+ * - 'pdf'（#337）：**不在本通道装载**——PDF 内容视图由浮层的 pdf 形态
+ *   直接消费回包（资源 URI + 导航选择器），不进 Markdown Reading 装载
+ *   链。此处返回 null：按「不可应用的回包」处理语义不适用（pdf 形态
+ *   浮层在 notifyHoverResult 分派，不进入本函数的消费面），但对任何
+ *   仍以 Markdown 装载面消费 pdf 载荷的旧路径构成防线（释放来源租约、
+ *   错误分态、不写端口）；
+ * - 其余 kind（text/web）：未登记装载形态，返回 null——调用方按
  *   「不可应用的回包」处理（释放来源租约、呈现错误分态、不入装载缓存、
  *   不绑定任何写端口）。这是消息级校验（isHostToWebview 拒绝类型与载荷
  *   不匹配）之外的消费端第二道防线。
@@ -173,7 +179,7 @@ export function refLoadedContentOfResult(
       expansionPath: message.expansionPath,
     }
   }
-  if (kind !== 'markdown') {
+  if (kind !== 'markdown' || message.scope.kind !== 'full' && message.scope.kind !== 'heading' && message.scope.kind !== 'block') {
     return null
   }
   const rawScope = message.scope as HoverPreviewScope

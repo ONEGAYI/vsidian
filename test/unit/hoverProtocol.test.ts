@@ -183,6 +183,66 @@ describe('#333 contentKind 类型分派校验（hover.result 成功载荷）', (
   })
 })
 
+// #337（P3-05）PDF 载荷校验：contentKind 'pdf' 的成功形态——PDF 源经
+// webview 资源域 fetch（pdf.uri + 源字节），text 恒空（无 LF 全文），range
+// 不适用（零区间占位），scope 为 PDF 导航选择器（{kind:'pdf', page?}——
+// 1-based 正整数或缺失=第一页）；version 为文件状态代次（非 TextDocument）。
+// 失败形态新增 anchor-invalid（双链锚点语法非法，附锚点原文）。
+/** 合法 hover.result pdf 成功形态基线 */
+function validResultPdf(): HostToWebview {
+  return {
+    kind: 'hover.result',
+    reqId: 1,
+    instanceId: 'hover-1',
+    ok: true,
+    contentKind: 'pdf',
+    target: { fsPath: 'D:\\notes\\资料.pdf', relPath: '资料.pdf' },
+    version: 3,
+    text: '',
+    range: { start: 0, end: 0 },
+    scope: { kind: 'pdf', page: 3 },
+    pdf: { uri: 'https://vscode-cdn.net/path/%E8%B5%84%E6%96%99.pdf?v=3', bytes: 709 },
+  }
+}
+
+describe('#337 PDF 载荷校验（hover.result contentKind=pdf）', () => {
+  it('合法 pdf 载荷放行（含 page 指定页与无页两形态）', () => {
+    expect(isHostToWebview(validResultPdf())).toBe(true)
+    expect(isHostToWebview({ ...validResultPdf(), scope: { kind: 'pdf' } })).toBe(true)
+  })
+
+  it('pdf 载荷字段契约：uri 非空字符串 + bytes 正整数；缺失或非法整体拒绝', () => {
+    const base = validResultPdf() as Record<string, unknown>
+    for (const broken of [
+      { ...base, pdf: undefined },
+      { ...base, pdf: { uri: '', bytes: 10 } },
+      { ...base, pdf: { uri: 3, bytes: 10 } },
+      { ...base, pdf: { uri: 'x' } },
+      { ...base, pdf: { uri: 'x', bytes: 0 } },
+      { ...base, pdf: { uri: 'x', bytes: -1 } },
+      { ...base, pdf: null },
+    ]) {
+      expect(isHostToWebview(broken), 'pdf 字段非法应整体拒绝').toBe(false)
+    }
+  })
+
+  it('pdf 载荷与 Markdown 字段互斥：text 须为空串；scope 须为 pdf 选择器', () => {
+    expect(isHostToWebview({ ...validResultPdf(), text: '# 不是全文' })).toBe(false)
+    expect(isHostToWebview({ ...validResultPdf(), scope: { kind: 'full' } })).toBe(false)
+    expect(isHostToWebview({ ...validResultPdf(), scope: { kind: 'heading', anchor: 'x' } })).toBe(false)
+    expect(isHostToWebview({ ...validResultPdf(), scope: { kind: 'pdf', page: 0 } })).toBe(false)
+    expect(isHostToWebview({ ...validResultPdf(), scope: { kind: 'pdf', page: -1 } })).toBe(false)
+    expect(isHostToWebview({ ...validResultPdf(), scope: { kind: 'pdf', page: 1.5 } })).toBe(false)
+    expect(isHostToWebview({ ...validResultPdf(), scope: { kind: 'pdf', page: '3' } })).toBe(false)
+  })
+
+  it('anchor-invalid 失败分态：新增 reason 放行（附锚点原文）；未知 reason 仍拒绝', () => {
+    expect(isHostToWebview({ ...validResultFail(), reason: 'anchor-invalid', anchor: 'page=0' })).toBe(true)
+    expect(isHostToWebview({ ...validResultFail(), reason: 'anchor-invalid' })).toBe(true)
+    expect(isHostToWebview({ ...validResultFail(), reason: 'made-up' })).toBe(false)
+  })
+})
+
 // #220 来源资源：悬停浮层内 B 文档的图片/链接以 B 为来源解析——webview
 // 在既有通道上附可选 sourceDocUri（B 的 fsPath；缺省 = 面板自身文档，
 // 向后兼容）。此处钉住三条消息的校验器行为。

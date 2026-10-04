@@ -68,6 +68,8 @@
   "command.editor.addCursorAbove.title": "在上方添加光标",
   "command.editor.addCursorBelow.title": "在下方添加光标",
   "command.ui.hoverPreviewLink.title": "预览当前链接",
+  "command.ui.hoverPdfPageNext.title": "PDF 预览：下一页",
+  "command.ui.hoverPdfPagePrev.title": "PDF 预览：上一页",
   "command.ui.embedToggleMode.title": "切换引用的内部视图模式",
   "command.embed.saveTarget.title": "保存焦点引用的目标",
   "command.embed.close.title": "关闭焦点引用的编辑会话",

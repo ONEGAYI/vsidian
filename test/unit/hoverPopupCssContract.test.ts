@@ -86,6 +86,26 @@ describe('悬停预览浮层 CSS 契约（#218）', () => {
   })
 })
 
+describe('悬停 PDF 内容视图 CSS 契约（#337 hover-pdf-view）', () => {
+  it('PDF 容器在场承载画布与页码行（紧凑内边距）', () => {
+    const root = rule('#app > .vsidian-hover-popup .vsidian-hover-pdf')
+    expect(root).toMatch(/padding:\s*8px/)
+  })
+
+  it('页面画布：块级呈现且不超浮层内容宽（绘制面即显示面）', () => {
+    const canvas = rule('#app > .vsidian-hover-popup .vsidian-hover-pdf-canvas')
+    expect(canvas).toMatch(/display:\s*block/)
+    expect(canvas).toMatch(/max-width:\s*100%/)
+  })
+
+  it('页码信息行：居中弱化反馈（opacity 与描述色）', () => {
+    const info = rule('#app > .vsidian-hover-popup .vsidian-hover-pdf-page-info')
+    expect(info).toMatch(/text-align:\s*center/)
+    expect(info).toMatch(/opacity:\s*0\.85/)
+    expect(info).toMatch(/color:\s*var\(--vscode-descriptionForeground/)
+  })
+})
+
 describe('悬停浮层笔记属性区 CSS 契约（#220）', () => {
   it('标题行是悬停热区（position:relative 承载绝对定位按钮）', () => {
     const header = rule('.vsidian-hover-popup .vsidian-hover-fm .vsidian-fm-header')

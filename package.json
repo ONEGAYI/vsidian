@@ -384,6 +384,16 @@
         "category": "Vsidian"
       },
       {
+        "command": "onegayi.vsidian.ui.hoverPdfPageNext",
+        "title": "%command.ui.hoverPdfPageNext.title%",
+        "category": "Vsidian"
+      },
+      {
+        "command": "onegayi.vsidian.ui.hoverPdfPagePrev",
+        "title": "%command.ui.hoverPdfPagePrev.title%",
+        "category": "Vsidian"
+      },
+      {
         "command": "onegayi.vsidian.ui.embedToggleMode",
         "title": "%command.ui.embedToggleMode.title%",
         "category": "Vsidian"
@@ -524,6 +534,7 @@
     "katex": "0.16.47",
     "markdown-it": "15.0.2",
     "mermaid": "11.12.2",
+    "pdfjs-dist": "6.4.299",
     "yaml": "2.9.1"
   },
   "devDependencies": {
@@ -534,7 +545,6 @@
     "esbuild": "0.28.2",
     "jsdom": "30.1.1",
     "pdf-lib": "1.17.1",
-    "pdfjs-dist": "6.4.299",
     "playwright": "1.62.1",
     "sql.js": "1.14.2",
     "typescript": "6.0.3",

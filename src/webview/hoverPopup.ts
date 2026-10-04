@@ -73,6 +73,8 @@ import { claimPopup, releasePopup } from './popupMutex'
 import { buildWebCardEl, WEB_CARD_CLASS_NAMES } from './webCard'
 import { isHttpLinkHref } from '../shared/webLink'
 import type { RefWebContent } from '../shared/refContent'
+// #337（P3-05）PDF 悬停渲染视图
+import { PdfHoverView, pdfErrorText, type PdfRenderProbe } from './pdfRender'
 // #299 跳转目标提示联动：浮层打开路径收起提示（「浮层开则提示关」，
 // 含悬停中补按 Ctrl 的立即消失——不进互斥锁的行为面表达）
 import { closeTargetTip } from './targetTip'
@@ -150,6 +152,20 @@ export function isHoverableMdLinkHref(href: string): boolean {
  *  Markdown 链接是其余 a[href]） */
 function anchorIsWikilink(anchor: HTMLElement): boolean {
   return anchor.classList.contains(WIKILINK_CLASS_NAMES.wikilink)
+}
+
+/** #337（P3-05）PDF 形态预判：目标路径文本以 `.pdf` 结尾（大小写不敏感
+ *  ——与宿主 classifyLocalRefContentKind 同口径：解析出的 fsPath 扩展名
+ *  即类型）。锚点（`#` 后段）与普通链接 fragment 均不参与判定；预判
+ *  失手（回包 contentKind 与形态不符）按「不可应用的回包」防御处理 */
+export function hoverSpecIsPdfTarget(spec: HoverPopupTargetSpec): boolean {
+  const raw = spec.directFsPath !== undefined
+    ? spec.directFsPath
+    : spec.linkHref !== undefined
+      ? spec.linkHref
+      : spec.target
+  const pathText = raw.split('#')[0] ?? raw
+  return /\.pdf$/i.test(pathText)
 }
 
 /** #221 显式目标规格：Live 装饰 DOM 与面板条目不是 `<a href>`，目标形态
@@ -273,12 +289,18 @@ interface HoverPopupState {
    *  非 web 形态——卡片内容视图与 Reading 装载互斥，web 卡片不进
    *  RefContentInstance/watch/租约链路） */
   webMeta: RefWebContent | null
+  /** #337 PDF 形态在场标记（openPopup 按扩展名预判；只读内容无 P2-06
+   *  根会话——Live chrome 不显示） */
+  pdfForm: boolean
+  /** #337 PDF 渲染器（pdfForm 时非空；挂 scrollEl 内） */
+  pdfView: PdfHoverView | null
   /** #221 目标原文（错误分态文案取材；三入口同源——不再读锚点 href） */
   target: string
   /** #224 打开时的目标规格（订阅刷新重发 hover.request 的载荷来源） */
   spec: HoverPopupTargetSpec
-  /** #219 语义范围选择器探针：收到成功回包前为空串 */
-  scope: 'full' | 'heading' | 'block' | ''
+  /** #219 语义范围选择器探针：收到成功回包前为空串（#337 起 pdf 载荷
+   *  标记 'pdf'——观测面区分内容形态） */
+  scope: 'full' | 'heading' | 'block' | 'pdf' | ''
   /** #220 当前目标 fsPath（成功回包送达；B 身份图片/链接的 sourceDocUri） */
   targetFsPath: string
   /** #224 已应用的目标内容版本（-1 = 从未应用；旧回包按版本仲裁丢弃） */
@@ -371,7 +393,7 @@ export function hoverPopupProbe(): {
   state: 'loading' | 'content' | 'error'
   note: string
   blocks: number
-  scope: 'full' | 'heading' | 'block' | ''
+  scope: 'full' | 'heading' | 'block' | 'pdf' | ''
   /** #220 属性区三态（none = 无属性区：非全文范围或无 frontmatter） */
   fm: 'none' | 'collapsed' | 'expanded'
   /** #220 浮层内已应用 src 的图片地址（B 身份资源解析观测面） */
@@ -387,6 +409,10 @@ export function hoverPopupProbe(): {
   liveSuspended: boolean
   /** P2-06/P2-05 三项关闭确认模态在场 */
   closeDialogOpen: boolean
+  /** #337 PDF 渲染观测（pdfForm=false 时恒为 idle 空值——形态区分与
+   *  绘制断言面：canvas 尺寸为实际绘制面，集成/浏览器测试断言据此落
+   *  绘制层而非 DOM 存在性） */
+  pdf: PdfRenderProbe
 } {
   const liveProbe = () => {
     const st = popup?.root?.liveState()
@@ -399,11 +425,14 @@ export function hoverPopupProbe(): {
       closeDialogOpen: popup?.root?.isCloseDialogOpen() ?? false,
     }
   }
+  const pdfProbe = (): PdfRenderProbe =>
+    popup?.pdfView?.probe() ?? { phase: 'idle', page: 0, totalPages: 0, canvasWidth: 0, canvasHeight: 0, errorReason: '', requestedPage: 0, nonWhiteRatio: -1 }
   if (!popup || popup.display !== 'content') {
     return {
       open: popup !== null, state: popup?.display ?? 'loading', note: popup?.note ?? '', blocks: 0,
       scope: popup?.scope ?? '', fm: 'none', imageSrcs: [], viewStats: null,
       ...liveProbe(),
+      pdf: pdfProbe(),
     }
   }
   const fmSection = popup.contentEl.querySelector(`.${REF_FM_CLASS_NAMES.section}`)
@@ -431,6 +460,7 @@ export function hoverPopupProbe(): {
     imageSrcs,
     viewStats: popup.content.getStats(),
     ...liveProbe(),
+    pdf: pdfProbe(),
   }
 }
 
@@ -622,6 +652,10 @@ function applyDisplay(state: HoverPopupState, display: 'loading' | 'content' | '
   if (display === 'content') {
     state.stateEl.style.display = 'none'
     state.scrollEl.style.display = ''
+    // #337 PDF 形态：Reading 容器保持隐藏（PDF 视图挂 scrollEl 内）
+    if (state.pdfForm) {
+      state.contentEl.style.display = 'none'
+    }
     state.content.updateNow()
   } else {
     state.stateEl.style.display = ''
@@ -737,6 +771,11 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
   const instanceId = `hover-${++instanceSeq}`
   const reqId = ++reqSeq
   const ctx = context
+  // #337（P3-05）PDF 形态：按目标扩展名预判（与宿主类型分类同口径）。
+  // 只读内容不接入 P2-06 根会话（无编辑端口/模式切换/dirty 语义——Live
+  // chrome 不显示），PDF 视图独立装配（挂 scrollEl 内，与 Reading 容器
+  // 并列）；markdown 形态既有链路不变
+  const pdfForm = hoverSpecIsPdfTarget(spec)
   // P2-06：子引用挂载的父身份 = watch 身份（宿主对子请求按父 watch 固定
   // 校验来源）。根会话在场为引用位置语义键（与 bind occurrence 同源），
   // 否则 instanceId（纯 Reading 形态）；闭包晚绑定——mountPopupRoot 结果
@@ -755,38 +794,41 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
   // （跨开合记忆模式/选区/滚动/fm）；Reading 挂载经 entry.content（同一
   // RefContentInstance）。上下文未提供（纯 Reading 形态）时回落自建实例。
   // #336（P3-04）图片目标不接根会话：图片无内部模式切换/dirty 语义，浮层
-  // 以纯 Reading 形态开（chrome 隐藏）；载荷到达经 image 通道渲染
+  // 以纯 Reading 形态开（chrome 隐藏）；载荷到达经 image 通道渲染。
+  // #337（P3-05）PDF 形态同样恒不接入（只读内容无编辑语义）
   const targetsImage = hoverSpecTargetsImage(spec)
   const rootKey = hoverRootKey(spec)
-  const mounted = targetsImage ? null : ctx.mountPopupRoot?.({
-    key: rootKey,
-    inner: spec.target,
-    sourceStart: spec.sourceStart,
-    sourceEnd: spec.sourceEnd,
-    container,
-    scrollEl,
-    stateEl,
-    contentEl,
-    liveEl,
-    modeBtn,
-    saveBtn,
-    closeBtn,
-    headerActionsEl: headerActions,
-    dirtyClass: HOVER_POPUP_CLASS_NAMES.dirty,
-    contentMount: mountOptions,
-    reloadContent: (silent) => {
-      if (popup) {
-        requestReload(popup, silent)
-      }
-    },
-    onExplicitCloseSettled: (intent) => onRootCloseSettled(intent),
-    onExplicitCloseCanceled: () => {
-      if (popup) {
-        popup.dismissPending = false
-      }
-    },
-    onLiveStateChanged: () => reevaluateLiveKeepAlive(),
-  }) ?? null
+  const mounted = targetsImage || pdfForm
+    ? null
+    : ctx.mountPopupRoot?.({
+      key: rootKey,
+      inner: spec.target,
+      sourceStart: spec.sourceStart,
+      sourceEnd: spec.sourceEnd,
+      container,
+      scrollEl,
+      stateEl,
+      contentEl,
+      liveEl,
+      modeBtn,
+      saveBtn,
+      closeBtn,
+      headerActionsEl: headerActions,
+      dirtyClass: HOVER_POPUP_CLASS_NAMES.dirty,
+      contentMount: mountOptions,
+      reloadContent: (silent) => {
+        if (popup) {
+          requestReload(popup, silent)
+        }
+      },
+      onExplicitCloseSettled: (intent) => onRootCloseSettled(intent),
+      onExplicitCloseCanceled: () => {
+        if (popup) {
+          popup.dismissPending = false
+        }
+      },
+      onLiveStateChanged: () => reevaluateLiveKeepAlive(),
+    }) ?? null
   const root = mounted?.session ?? null
   embedParentIdentity = root ? rootKey : instanceId
   const instance = root ? null : new RefContentInstance({
@@ -796,8 +838,14 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
     occurrence: instanceId,
   })
   const content = mounted?.content ?? instance!.mount(mountOptions)
+  // #337 PDF 视图：挂 scrollEl（Reading 容器在 pdf 形态下隐藏）；
+  // 渲染宽按滚动区内容宽推（clientWidth 未布局时用缺省宽）
+  const pdfView = pdfForm ? new PdfHoverView(scrollEl) : null
+  if (pdfForm) {
+    contentEl.style.display = 'none'
+  }
   if (!root) {
-    // 纯 Reading 形态：chrome 隐藏（Tab 序不新增停留点）
+    // 纯 Reading / PDF 形态：chrome 隐藏（Tab 序不新增停留点）
     saveBtn.style.display = 'none'
     modeBtn.style.display = 'none'
     modeBtn.tabIndex = -1
@@ -821,6 +869,8 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
     content,
     image: null,
     imageFrame: null,
+    pdfForm,
+    pdfView,
     display: 'loading',
     note: '',
     webMeta: null,
@@ -1061,6 +1111,11 @@ function openPopup(anchor: HTMLElement, spec: HoverPopupTargetSpec | null, optio
     })
     observer.observe(container)
     observer.observe(contentEl)
+    // #337 PDF 视图容器：canvas 绘制完成撑高内容后重定位（Reading 的
+    // contentEl 在 pdf 形态下隐藏，观察不到绘制增高）
+    if (pdfView) {
+      observer.observe(pdfView.root)
+    }
     // P2-06 视觉验收回归：内部 Live 编辑器异步建立/装载撑高 liveEl 时同样
     // 重定位——否则浮窗冻结在 Reading 期测量高度，编辑器溢出被裁
     //（用户实测 251px 编辑器被 148px 容器裁掉一截）
@@ -1188,6 +1243,8 @@ export function closeHoverPopup(): void {
   state.image = null
   state.imageFrame?.remove()
   state.imageFrame = null
+  // #337 PDF 视图释放（取消在途任务、销毁文档与 worker、清 DOM）
+  state.pdfView?.dispose()
   if (state.watchedFsPath !== null) {
     sendWatchMessage(state.watchedFsPath, state.watchInstanceId, 'hover.unwatch')
     state.watchedFsPath = null
@@ -1437,14 +1494,61 @@ function sendHoverCancel(state: HoverPopupState): void {
   })
 }
 
+/** #337（P3-05）PDF 载荷应用：pdfView 按资源 URI 装载绘制（页码取导航
+ *  选择器；无 page 从第一页）。绘制结果分态就地呈现（corrupt/encrypted/
+ *  page-range/resource/load-failed——i18n 文案经 pdfErrorText）；成功登记
+ *  目标订阅（hover.watch——PDF 文件变化的失效通道与 Markdown 同源）。
+ *  迟到守卫：show 被「后续重入 / 关闭 / 换目标」取代时释放本回包租约，
+ *  旧 canvas 不冒充新目标 */
+function applyHoverPdfContent(
+  state: HoverPopupState,
+  message: Extract<HoverPreviewResult, { ok: true }>,
+): void {
+  state.scope = 'pdf'
+  state.targetFsPath = message.target.fsPath
+  state.appliedVersion = message.version
+  const pdfView = state.pdfView
+  if (pdfView === null || message.pdf === undefined) {
+    if (context) releaseRefSourceLease(context, message.sourceLeaseId)
+    applyDisplay(state, 'error', refErrorText('read-failed', state.target))
+    position(state)
+    return
+  }
+  const page = message.scope.kind === 'pdf' ? message.scope.page : undefined
+  // 渲染宽：滚动区内容宽（未布局/零宽时用浮层缺省宽——canvas 先建立，
+  // ResizeObserver 后续重定位不依赖本次取值）
+  const inner = state.scrollEl.clientWidth
+  const renderWidth = inner > 0 ? inner - 16 : HOVER_POPUP_DEFAULT_WIDTH - 32
+  void pdfView.show(message.pdf.uri, page, renderWidth).then((applied) => {
+    if (popup !== state) {
+      return // 浮层已关闭/换目标：视图已 dispose，迟到结果不落地
+    }
+    if (!applied) {
+      if (context) releaseRefSourceLease(context, message.sourceLeaseId)
+      return
+    }
+    const probe = pdfView.probe()
+    if (probe.phase === 'content') {
+      ensureWatch(state, message.target.fsPath, message.sourceLeaseId)
+      applyDisplay(state, 'content', message.target.relPath)
+    } else if (probe.phase === 'error') {
+      if (context) releaseRefSourceLease(context, message.sourceLeaseId)
+      applyDisplay(state, 'error', pdfErrorText(probe.errorReason === '' ? 'resource' : probe.errorReason, probe.requestedPage, probe.totalPages))
+    }
+    position(state)
+  })
+}
+
 /** 宿主读取结果（syncController handleHostMessage 转发）：
  *  仅当场内实例、instanceId 与 reqId 双匹配的结果生效——迟到/陈旧回包
  *  丢弃，绝不重开已关闭浮层。#224 版本仲裁：成功回包的目标版本低于已
  *  应用版本（慢响应旧内容）整体丢弃，不冒充新目标。
  *  #333（P3-01）：成功回包经 refLoadedContentOfResult 类型化装载入口
- *  （contentKind 分派）——kind 与载荷不匹配（本票防御路径：宿主与消息
+ *  （contentKind 分派）——kind 与载荷不匹配（防御路径：宿主与消息
  *  校验器已拦）返回 null，按不可应用处理：释放来源租约、就地错误分态
- *  （不悬挂 loading、不重开） */
+ *  （不悬挂 loading、不重开）。
+ *  #337（P3-05）：contentKind 'pdf' 的回包经 applyHoverPdfContent 绘制
+ *  （PDF 形态浮层预判在 openPopup——预判失手按不可应用防御）。 */
 export function notifyHoverResult(message: HoverPreviewResult): boolean {
   if (!popup || message.instanceId !== popup.instanceId || message.reqId !== popup.reqId) {
     return false
@@ -1467,8 +1571,29 @@ export function notifyHoverResult(message: HoverPreviewResult): boolean {
       position(popup)
       return true
     }
+    // #337（P3-05）pdf 分派：pdf 载荷经 pdfView 绘制（Reading 装载通道
+    // 对 pdf 返回 null——先于其分派；页码定位取导航选择器）
+    if (message.contentKind === 'pdf') {
+      if (!popup.pdfForm) {
+        // 预判失手防御：markdown 形态浮层收到 pdf 载荷（宿主类型分类与
+        // webview 扩展名预判口径分叉）——不应用、释放租约、错误分态
+        if (context) releaseRefSourceLease(context, message.sourceLeaseId)
+        applyDisplay(popup, 'error', refErrorText('read-failed', popup.target))
+        position(popup)
+        return true
+      }
+      applyHoverPdfContent(popup, message)
+      return true
+    }
     const loaded: RefLoadedAny | null = refLoadedContentOfResult(message)
     if (loaded === null) {
+      if (context) releaseRefSourceLease(context, message.sourceLeaseId)
+      applyDisplay(popup, 'error', refErrorText('read-failed', popup.target))
+      position(popup)
+      return true
+    }
+    if (popup.pdfForm) {
+      // 反向预判失手防御：pdf 形态浮层收到 markdown 载荷
       if (context) releaseRefSourceLease(context, message.sourceLeaseId)
       applyDisplay(popup, 'error', refErrorText('read-failed', popup.target))
       position(popup)
@@ -1504,6 +1629,8 @@ export function notifyHoverWatchRejected(message: {
   }
   state.watchedFsPath = null
   state.watchLeaseId = null
+  // #337 PDF：旧 canvas 一并撤下
+  state.pdfView?.discardContent()
   state.content.clear()
   context?.clearRootContent?.(state.instanceId)
   applyDisplay(state, 'error', t(message.reason === 'capacity' ? 'hover.errorWatchCapacity' : 'hover.errorSourceExpired'))
@@ -1542,7 +1669,9 @@ export function notifyHoverInvalidated(message: {
     return
   }
   // deleted / stale：撤下内容显示分态（视图清空防 display 反转后旧内容
-  // 闪现；fm/滚动状态在实例 state 保留，恢复重载后无需重取）
+  // 闪现；fm/滚动状态在实例 state 保留，恢复重载后无需重取）。
+  // #337 PDF：旧 canvas 一并撤下（不冒充在场内容）
+  state.pdfView?.discardContent()
   state.content.clear()
   if (state.image !== null) {
     // #336 图片目标：管理器与图 DOM 一并撤下（分态就地呈现，不残留旧图）
@@ -1575,6 +1704,19 @@ export function notifyHoverImageResult(msg: ImageResultPayload): void {
 export function notifyHoverImageInvalidate(srcs: readonly string[]): void {
   popup?.image?.invalidate(srcs)
   popup?.content.invalidateImages(srcs)
+}
+
+/**
+ * #337（P3-05）PDF 翻页操作（键位 pdfPageNext/pdfPagePrev，默认未绑定
+ * ——只读 PDF 悬停预览适用范围；作用于在场 PDF 浮层）。返回是否有翻页
+ * 发生（无 PDF 浮层/无内容/翻出界为 false——键位路由按无效静默）
+ */
+export function turnHoverPdfPage(delta: 1 | -1): boolean {
+  const state = popup
+  if (!state?.pdfView || !state.pdfForm) {
+    return false
+  }
+  return state.pdfView.turnPage(delta, state.pdfView.currentRenderWidth(HOVER_POPUP_DEFAULT_WIDTH - 32))
 }
 
 /** #220 手动刷新失效（refresh.invalidated 路由）：B 管理器全量失效重挂

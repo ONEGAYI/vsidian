@@ -115,6 +115,12 @@ export const UI_OPERATIONS = [
   // 生效（mode: both 只表示两模式下命令均可用——目标判定各自实现）；
   // 默认不占键位，键位留给用户按需绑定（评估记录见 docs/specs/keybindings.md）
   { id: 'hoverPreviewLink', command: 'onegayi.vsidian.ui.hoverPreviewLink', titleKey: 'command.ui.hoverPreviewLink.title', mode: 'both', writes: false, defaults: [] },
+  // #337（P3-05）PDF 悬停预览翻页：只读操作（翻页不修改任何文档，页码仅
+  // 控制预览呈现），作用于在场的 PDF 悬停浮层（无 PDF 浮层或翻出界时静默
+  // 无效）；默认不占键位——翻页属 P3-06 全文滚动接入前的最小页码操作，
+  // 评估记录见 docs/specs/keybindings.md
+  { id: 'pdfPageNext', command: 'onegayi.vsidian.ui.hoverPdfPageNext', titleKey: 'command.ui.hoverPdfPageNext.title', mode: 'both', writes: false, defaults: [] },
+  { id: 'pdfPagePrev', command: 'onegayi.vsidian.ui.hoverPdfPagePrev', titleKey: 'command.ui.hoverPdfPagePrev.title', mode: 'both', writes: false, defaults: [] },
   // P2-04（#281）切换焦点嵌入的内部模式（Reading ↔ Live）：与嵌入卡片头部
   // 模式按钮同一实现（焦点不在嵌入编辑器内零操作）。切换本身只建/拆目标
   // 编辑端口、不写正文（writes: false——写门控按「是否写权威文本」判定）。

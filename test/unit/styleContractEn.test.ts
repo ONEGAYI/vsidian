@@ -96,17 +96,17 @@ describe('英文覆盖一致性契约（#178 机制 + #179 content 域全量 + #
     }
   })
 
-  it('chrome 域全部 114 条 id 均有英文覆盖（#180 全量交付 + #191 折行钮 + #208 刷新钮 + 面板批次 + #218 悬停浮层 + #220 属性区 + 2026-10 FM 折叠 + 阅读查找源码浮层 + #292 骨架屏三条 + #300 悬停提示 11 条）', () => {
+  it('chrome 域全部 115 条 id 均有英文覆盖（#180 全量交付 + #191 折行钮 + #208 刷新钮 + 面板批次 + #218 悬停浮层 + #220 属性区 + 2026-10 FM 折叠 + 阅读查找源码浮层 + #292 骨架屏三条 + #300 悬停提示 11 条 + #337 PDF 视图）', () => {
     const chromeIds = STYLE_CONTRACT_ENTRIES.filter((e) => e.domain === 'chrome').map((e) => e.id)
-    expect(chromeIds.length).toBe(114)
+    expect(chromeIds.length).toBe(115)
     for (const id of chromeIds) {
       expect(STYLE_CONTRACT_EN_OVERRIDES[id], `chrome 条目缺英文覆盖：${id}`).toBeDefined()
     }
   })
 
   it('两域合计全量覆盖，无覆盖表缺口（历史批次 + P2-12 #289 冲突三项选择条 + #305 toast + #306 粘贴询问）', () => {
-    expect(STYLE_CONTRACT_ENTRIES.length).toBe(202)
-    expect(Object.keys(STYLE_CONTRACT_EN_OVERRIDES).length).toBe(202)
+    expect(STYLE_CONTRACT_ENTRIES.length).toBe(203)
+    expect(Object.keys(STYLE_CONTRACT_EN_OVERRIDES).length).toBe(203)
     for (const entry of STYLE_CONTRACT_ENTRIES) {
       expect(STYLE_CONTRACT_EN_OVERRIDES[entry.id], `条目缺英文覆盖：${entry.id}`).toBeDefined()
     }

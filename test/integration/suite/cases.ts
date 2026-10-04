@@ -985,7 +985,8 @@ interface ViewState {
     state: 'loading' | 'content' | 'error'
     note: string
     blocks: number
-    scope: 'full' | 'heading' | 'block' | ''
+    /** #337 起 'pdf' 标记 PDF 载荷形态 */
+    scope: 'full' | 'heading' | 'block' | 'pdf' | ''
     fm?: 'none' | 'collapsed' | 'expanded'
     imageSrcs?: string[]
     internalMode?: 'reading' | 'live'
@@ -993,6 +994,17 @@ interface ViewState {
     liveDirty?: boolean
     liveSuspended?: boolean
     closeDialogOpen?: boolean
+    /** #337 PDF 渲染观测（绘制层证据：canvas 实际尺寸与非白像素比例） */
+    pdf?: {
+      phase: 'idle' | 'loading' | 'content' | 'error'
+      page: number
+      totalPages: number
+      canvasWidth: number
+      canvasHeight: number
+      errorReason: 'corrupt' | 'encrypted' | 'page-range' | 'resource' | 'load-failed' | ''
+      requestedPage: number
+      nonWhiteRatio: number
+    }
   }
   /** #299 跳转目标提示观测：在场与路径文本 */
   targetTip?: {
@@ -11945,6 +11957,76 @@ export const cases: Array<[string, () => Promise<void>]> = [
     }, 60000)
     // 兜底清理（正常路径已删净目录内容；失败路径尽力还原不抛二次错误）
     await rm(`${wsDir}/git-switch`, { recursive: true, force: true }).catch(() => {})
+  }],
+
+  ['悬停 PDF：双链 #page 指定页真实绘制、非法页码分态与零写回（#337）', async () => {
+    await openWithEditor('悬停 PDF.md')
+    await waitSessionReady('悬停 PDF.md')
+    const uri = wsUri('悬停 PDF.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    await waitViewState('悬停 PDF.md', (v) => v.viewMode === 'reading' && (v.readingWikilinkCount ?? 0) >= 4)
+    const parentBefore = await readDisk('悬停 PDF.md')
+
+    // 场景 1：全文双链 [[资料.pdf]]（index 0）→ pdf 载荷 → 第一页真实绘制
+    //（绘制层证据：canvas 实际尺寸与非白像素比例——非 DOM 存在性）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 0 })
+    const first = await waitViewState('悬停 PDF.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' &&
+      v.hoverPreview.pdf?.phase === 'content')
+    const firstPdf = first.hoverPreview!.pdf!
+    assert(firstPdf.page === 1, `无页码从第一页开始（实际 ${firstPdf.page}）`)
+    assert(firstPdf.totalPages === 3, `总页数来自真实 PDF.js 装载（实际 ${firstPdf.totalPages}）`)
+    assert(firstPdf.canvasWidth > 0 && firstPdf.canvasHeight > 0, 'canvas 实际尺寸入观测面')
+    assert(firstPdf.nonWhiteRatio > 0.5, `canvas 非白像素比例应过半（实测 ${firstPdf.nonWhiteRatio}——绘制层证据）`)
+    assert(first.hoverPreview?.scope === 'pdf', 'scope 标记 pdf 载荷形态')
+    assert(first.hoverPreview?.note === '资料.pdf', '浮层目标标识为根内相对路径')
+
+    // 零写回：父文档不脏、磁盘不动、无 applyEdit（PDF 全程只读）
+    const parentDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri)
+    assert(parentDoc?.isDirty === false, '悬停 PDF 不得弄脏父文档')
+    assert(await readDisk('悬停 PDF.md') === parentBefore, '悬停 PDF 不得改写磁盘')
+    const hoverState = (await vscode.commands.executeCommand(CMD.sessionState, uri)) as SessionState
+    assert(hoverState.appliedEdits === 0, '悬停 PDF 链路不得产生 applyEdit')
+
+    // 场景 2：指定页双链 [[资料.pdf#page=2]]（index 1）→ 宿主解析页码 → 第 2 页绘制
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 0 })
+    await waitViewState('悬停 PDF.md', (v) => v.hoverPreview?.open === false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 1 })
+    const second = await waitViewState('悬停 PDF.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' &&
+      v.hoverPreview.pdf?.phase === 'content' && v.hoverPreview.pdf?.page === 2)
+    assert(second.hoverPreview!.pdf!.nonWhiteRatio > 0.5, '指定页绘制层证据（非白比例）')
+
+    // 场景 3：非法锚点 [[资料.pdf#page=0]]（index 2）→ anchor-invalid 分态
+    //（不静默回落第一页；修正引用后可重试）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 1 })
+    await waitViewState('悬停 PDF.md', (v) => v.hoverPreview?.open === false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 2 })
+    const invalid = await waitViewState('悬停 PDF.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'error')
+    assert(invalid.hoverPreview?.pdf?.phase === 'error' || invalid.hoverPreview?.pdf?.phase === 'idle',
+      '非法锚点不进入绘制态')
+    assert(invalid.hoverPreview?.note.includes('page=0'),
+      `anchor-invalid 文案附锚点原文（实际 ${invalid.hoverPreview?.note}）`)
+
+    // 场景 4：普通链接 fragment 不解析（[fragment](资料.pdf#page=3)）→
+    // 悬停仍可预览但从第一页开始（index 0 的 md 链接为「本地 PDF」——
+    // 断言改用第 1 个链接即 fragment 链接：md 链接序按文档顺序 0=本地、
+    // 1=fragment；此处驱动 1 号链接验证 fragment 不生效）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 2 })
+    await waitViewState('悬停 PDF.md', (v) => v.hoverPreview?.open === false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 1, link: 'md' })
+    const md = await waitViewState('悬停 PDF.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' &&
+      v.hoverPreview.pdf?.phase === 'content')
+    assert(md.hoverPreview!.pdf!.page === 1, `普通链接 fragment 不解析——从第一页开始（实际 ${md.hoverPreview!.pdf!.page}）`)
   }],
 
   ['悬停预览：Reading 双链读取目标全文、错误分态就地呈现与双零 dirty（#218）', async () => {

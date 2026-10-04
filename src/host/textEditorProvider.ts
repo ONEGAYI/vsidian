@@ -74,7 +74,7 @@ import type { VaultIndexService } from './vaultIndexService'
 import type { IndexMaintenance } from './vaultIndexMaintenance'
 import { ImageRefreshCoordinator } from './imageRefreshCoordinator'
 import { admitHoverWatch, connectHoverEvents, HoverRefreshCoordinator } from './hoverRefreshCoordinator'
-import type { ImageVersionTable } from './imageVersioning'
+import { ImageVersionTable } from './imageVersioning'
 import {
   IMAGE_EVENT_DEBOUNCE_MS,
   IMAGE_WAKE_MIN_GAP_MS,
@@ -758,6 +758,11 @@ export function createTextEditorProvider(
   // ---- #201 图片刷新协调器（provider 级单件：版本表与失效通道跨会话共享） ----
   const isWindowsHost = process.platform === 'win32'
   const imageRefreshEvents: string[] = []
+  // #337（P3-05）PDF 文件状态版本表（provider 级单件，图片版本表同款语义
+  // ——mtime/size 观测推进单调代次；hover.result 的 pdf version 与资源 URI
+  // 的 ?v= 戳同源）。独立于图片表：失效通道与代次语义不混用（图片的周期
+  // 核验/事件推进不扰动 PDF 目标；PDF 变化经 hover.invalidated 通道刷新）
+  const pdfVersions = new ImageVersionTable(isWindowsHost)
   const IMAGE_EVENT_LOG_LIMIT = 8 // 环形上限（RENAME_LOG_LIMIT 同形态）：会话生命周期内无界增长
   const imageRefresh = new ImageRefreshCoordinator(
     {
@@ -2052,6 +2057,36 @@ export function createTextEditorProvider(
                   return { mtimeMs: stat.mtime }
                 } catch {
                   return null
+                }
+              },
+              // #337（P3-05）PDF 文件资源端口：stat 三态（FileNotFound =
+              // not-found；权限/断连 = inaccessible 不冒充删除）+ asWebviewUri
+              // + 文件状态代次戳。本地与 Remote SSH 同通道（webview 资源
+              // 服务按远程权威路由）。不装载正文字节——宿主侧零 PDF 解析
+              // 代码，PDF 源由 webview 按需 fetch
+              readPdfFileResource: async (fsPath: string) => {
+                const uri = vscode.Uri.file(fsPath)
+                let stat: vscode.FileStat
+                try {
+                  stat = await vscode.workspace.fs.stat(uri)
+                } catch (err) {
+                  return isFileNotFound(err) ? { kind: 'not-found' } as const : { kind: 'inaccessible' } as const
+                }
+                if ((stat.type & vscode.FileType.File) === 0) {
+                  return { kind: 'not-found' } as const
+                }
+                const { generation } = pdfVersions.recordObservation(fsPath, {
+                  mtimeMs: stat.mtime,
+                  size: stat.size,
+                })
+                return {
+                  kind: 'ok' as const,
+                  uri: appendImageVersionStamp(
+                    webviewPanel.webview.asWebviewUri(uri).toString(),
+                    generation,
+                  ),
+                  version: generation,
+                  bytes: stat.size,
                 }
               },
             }
@@ -4301,6 +4336,18 @@ function buildWebviewHtml(
   const mermaidUri = webview.asWebviewUri(
     vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'mermaid.js'),
   ).toString()
+  // #337（P3-05）PDF 装配资源 URI（mermaid 同款全局传递机制）：pdfMain/
+  // pdfWorker 双产物 + cmaps/standard_fonts/wasm/iccs 资产目录（尾斜杠由
+  // webview 渲染器按 PDF.js 参数约定补齐）。webview 无法自行构造
+  // asWebviewUri 前缀，经此内联注入
+  const pdfAssets = {
+    mainJs: webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'pdfMain.js')).toString(),
+    workerJs: webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'pdfWorker.js')).toString(),
+    cMapUrl: webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'pdfjs', 'cmaps')).toString(),
+    fontUrl: webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'pdfjs', 'standard_fonts')).toString(),
+    wasmUrl: webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'pdfjs', 'wasm')).toString(),
+    iccUrl: webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'pdfjs', 'iccs')).toString(),
+  }
   // 稳定样式契约内部测试片段（#6）：验证外部样式表可经稳定类名/变量
   // 定位两种视图；一期不提供用户 CSS 加载（见 docs/design/obsidian-selector-map.md）
   const probeCssUri = webview.asWebviewUri(
@@ -4324,7 +4371,7 @@ ${buildSkeletonStyleHtml()}
 <body>
 ${buildAppOpenTag(initial.readableLineWidthPx)}
 ${buildLocaleIslandHtml(locale, LOCALE_MESSAGES[locale])}
-<script nonce="${nonce}">window.__vsidianMermaidUri = "${mermaidUri}";${initial.holdSkeleton ? `window.${SKELETON_HOLD_GLOBAL} = true;` : ''}window.${SKELETON_SHOWN_AT_GLOBAL} = performance.now();</script>
+<script nonce="${nonce}">window.__vsidianMermaidUri = "${mermaidUri}";window.__vsidianPdfAssets = ${JSON.stringify(pdfAssets)};${initial.holdSkeleton ? `window.${SKELETON_HOLD_GLOBAL} = true;` : ''}window.${SKELETON_SHOWN_AT_GLOBAL} = performance.now();</script>
 <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`

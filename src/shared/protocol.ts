@@ -10,7 +10,7 @@ import { isFormatOperationId, type FormatOperationId } from './formatOperations'
 import { isKeybindingOperationId, isUiOperationId, type KeybindingOverrides, type UiOperationId } from './keybindings'
 import { sanitizeFindOptions, type FindOptions } from './findOptions'
 import { isDiagnosticSnapshot, type DiagnosticSnapshot } from './testDiagnostics'
-import { isRefContentKind, type RefContentKind, type RefPlainNavSelector } from './refContent'
+import { isRefContentKind, type RefContentKind, type RefPdfNavSelector, type RefPlainNavSelector } from './refContent'
 import type { DefaultEditorDisplayState, DefaultEditorDisplayStatus } from './editorGuard'
 
 /** 设置快照类型随协议消息透出（载荷单一事实源仍在 shared/settings） */
@@ -622,15 +622,17 @@ export type HostToWebview =
       instanceId: string
       ok: true
       /** #333（P3-01）内容类型分派标记：宿主类型化读取入口（readRefContent
+      /** #333（P3-01）内容类型分派标记：宿主类型化读取入口（readRefContent
        *  Target）成功时显式携带；缺省 = markdown（旧合法 Markdown 消息兼容
        *  识别）。#336（P3-04）起 'image' 登记：图片载荷（imageSrc 在场，
        *  Markdown 专属字段为退化形态——空文本 / 零区间 / plain 选择器）；
-       *  #342（P3-10）起 'web' 登记：外链卡片载荷（web 字段在场，Markdown
-       *  专属字段为占位值——target 空身份 / version 0 / 空文本 / 全文区间 /
-       *  full 选择器，字段形态仍须合法）；其余类型（pdf/text）的载荷形态
-       *  由 P3-05/P3-08 扩展本消息与校验器时放开——携带未登记 kind 或类型
-       *  与载荷不匹配的整体拒绝。失败形态无载荷，不带本字段。类型学单一
-       *  事实源：shared/refContent */
+       *  #337（P3-05）起 'pdf' 登记载荷形态（pdf 字段 + 空 text + pdf
+       *  选择器 scope，页码定位由 scope.page 承载）；#342（P3-10）起 'web'
+       *  登记：外链卡片载荷（web 字段在场，Markdown 专属字段为占位值——
+       *  target 空身份 / version 0 / 空文本 / 全文区间 / full 选择器，
+       *  字段形态仍须合法）；其余类型（text）的载荷形态由 P3-08 扩展本
+       *  消息与校验器时放开——携带未登记 kind 或类型与载荷不匹配的整体
+       *  拒绝。失败形态无载荷，不带本字段。类型学单一事实源：shared/refContent */
       contentKind?: RefContentKind
       /** #342（P3-10）外链卡片载荷（contentKind === 'web' 时在场，与
        *  Markdown 载荷互斥）：宿主受限抓取提取的元信息——url 为最终归一
@@ -652,11 +654,20 @@ export type HostToWebview =
        *  不得携带（校验器按类型与载荷匹配拒绝） */
       imageSrc?: string
       /** 初始定位区间（LF 坐标；锚点命中的锚定区间，full/宽容退化为全文区间；
-       *  image 形态恒为零区间——图片无锚点定位语义） */
+       *  image 形态恒为零区间——图片无锚点定位语义；PDF 无 LF 坐标语义
+       *  （#337）：恒零区间占位（[0,0]），初始定位由 scope 的 page 字段承载） */
       range: { start: number; end: number }
       /** Markdown 导航选择器（full/heading/block）；image 形态为 plain
-       *  （RefPlainNavSelector——图片无锚点定位语义） */
-      scope: HoverPreviewScope | RefPlainNavSelector
+       *  （RefPlainNavSelector——图片无锚点定位语义）；#337 起 pdf =
+       *  RefPdfNavSelector（{kind:'pdf', page?}——双链 #page=N 解析产物，
+       *  类型与载荷匹配由校验器钉住） */
+      scope: HoverPreviewScope | RefPlainNavSelector | RefPdfNavSelector
+      /** #337（P3-05）PDF 资源载荷（contentKind === 'pdf' 时必带）：PDF 源
+       *  经 webview 资源域按需 fetch——uri 含 `?v=` 文件状态代次戳（缓存
+       *  击穿；version 字段同源），bytes 为源文件字节（逻辑预算费用）。
+       *  宿主不装载正文字节（Node 侧零 PDF 渲染代码），损坏/加密分态由
+       *  webview 装载后如实回报 */
+      pdf?: { uri: string; bytes: number }
       /** #244 Host-authenticated expansion ancestry, including root A. */
       expansionPath?: string[]
       depth?: number
@@ -1021,7 +1032,8 @@ export type WebviewToHost =
         state: 'loading' | 'content' | 'error'
         note: string
         blocks: number
-        scope: 'full' | 'heading' | 'block' | ''
+        /** #337 起 'pdf' 标记 PDF 载荷形态（导航选择器 kind） */
+        scope: 'full' | 'heading' | 'block' | 'pdf' | ''
         fm?: 'none' | 'collapsed' | 'expanded'
         imageSrcs?: string[]
         /** #243 引用内部虚拟窗口与解析观测；旧 webview 缺省。 */
@@ -1030,6 +1042,20 @@ export type WebviewToHost =
           parseCount: number; virtualized: boolean; maxMountedBlocks: number
           mountedEver: number; unmountedEver: number
         } | null
+        /** #337（P3-05）PDF 渲染观测：phase（idle=非 PDF 形态或未装载）、
+         *  当前页/总页数、canvas 实际绘制尺寸（绘制层断言面——非 DOM
+         *  存在性）、错误分态与请求页码；旧 webview 缺省 */
+        pdf?: {
+          phase: 'idle' | 'loading' | 'content' | 'error'
+          page: number
+          totalPages: number
+          canvasWidth: number
+          canvasHeight: number
+          errorReason: 'corrupt' | 'encrypted' | 'page-range' | 'resource' | 'load-failed' | ''
+          requestedPage: number
+          /** content 态的 canvas 非白像素比例（绘制层证据；其他态 -1） */
+          nonWhiteRatio: number
+        }
       }
       /** #299 跳转目标提示观测：在场与路径文本（旧 webview 缺省）。 */
       targetTip?: {
@@ -1548,9 +1574,11 @@ export type HoverPreviewScope =
  *  escape=目标越出所属根；not-found=目标文件不存在；non-markdown=目标非
  *  Markdown（一期只接 Markdown）；read-failed=打开/读取目标失败；
  *  anchor-missing=目标文件在但标题/块锚点不存在（不以全文替代，附锚点
- *  原文） */
+ *  原文）；anchor-invalid=非 Markdown 目标的锚点语法非法（#337 PDF
+ *  #page=0/非数字/未知键/重复键等——不静默回落第一页，附锚点原文，
+ *  修正后可重试） */
 export type HoverPreviewFailReason =
-  | 'unsupported' | 'no-workspace' | 'escape' | 'not-found' | 'non-markdown' | 'read-failed' | 'anchor-missing'
+  | 'unsupported' | 'no-workspace' | 'escape' | 'not-found' | 'non-markdown' | 'read-failed' | 'anchor-missing' | 'anchor-invalid'
   | 'source-expired' | 'cycle' | 'depth' | 'budget'
   // #342（P3-10）外链卡片失败分态族：真实网络失败如实呈现（就地 i18n），
   // 不伪装成文件缺失；语义与矩阵见 shared/webLink 的 WebLinkFailReason
@@ -3255,11 +3283,26 @@ export function isWebviewToHost(v: unknown): v is WebviewToHost {
           isString(v.hoverPreview.note) &&
           isNonNegativeInt(v.hoverPreview.blocks) &&
           (v.hoverPreview.scope === 'full' || v.hoverPreview.scope === 'heading' ||
-            v.hoverPreview.scope === 'block' || v.hoverPreview.scope === '') &&
+            v.hoverPreview.scope === 'block' || v.hoverPreview.scope === 'pdf' ||
+            v.hoverPreview.scope === '') &&
           (v.hoverPreview.fm === undefined || v.hoverPreview.fm === 'none' ||
             v.hoverPreview.fm === 'collapsed' || v.hoverPreview.fm === 'expanded') &&
           (v.hoverPreview.imageSrcs === undefined ||
-            (Array.isArray(v.hoverPreview.imageSrcs) && v.hoverPreview.imageSrcs.every(isString))))) &&
+            (Array.isArray(v.hoverPreview.imageSrcs) && v.hoverPreview.imageSrcs.every(isString))) &&
+          (v.hoverPreview.pdf === undefined || (isObject(v.hoverPreview.pdf) &&
+            (v.hoverPreview.pdf.phase === 'idle' || v.hoverPreview.pdf.phase === 'loading' ||
+              v.hoverPreview.pdf.phase === 'content' || v.hoverPreview.pdf.phase === 'error') &&
+            isNonNegativeInt(v.hoverPreview.pdf.page) &&
+            isNonNegativeInt(v.hoverPreview.pdf.totalPages) &&
+            isNonNegativeInt(v.hoverPreview.pdf.canvasWidth) &&
+            isNonNegativeInt(v.hoverPreview.pdf.canvasHeight) &&
+            (v.hoverPreview.pdf.errorReason === 'corrupt' || v.hoverPreview.pdf.errorReason === 'encrypted' ||
+              v.hoverPreview.pdf.errorReason === 'page-range' || v.hoverPreview.pdf.errorReason === 'resource' ||
+              v.hoverPreview.pdf.errorReason === 'load-failed' || v.hoverPreview.pdf.errorReason === '') &&
+            isNonNegativeInt(v.hoverPreview.pdf.requestedPage) &&
+            typeof v.hoverPreview.pdf.nonWhiteRatio === 'number' &&
+            Number.isFinite(v.hoverPreview.pdf.nonWhiteRatio) &&
+            v.hoverPreview.pdf.nonWhiteRatio >= -1)))) &&
         (v.targetTip === undefined || (isObject(v.targetTip) &&
           typeof v.targetTip.open === 'boolean' &&
           isString(v.targetTip.text))) &&
@@ -4048,11 +4091,12 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
       // #218 悬停预览结果：reqId+instanceId 双配对；成功形态须携带完整
       // 目标身份/版本/LF 全文/范围（start<=end）/范围选择器（#219 起
       // heading/block 附锚点原文）；失败形态 reason 限定错误分态枚举
-      // （anchor-missing 附锚点原文）
+      // （anchor-missing/anchor-invalid 附锚点原文）
       // #333（P3-01）contentKind 类型分派校验：成功形态可带可选
-      // contentKind（缺省 = markdown 兼容）——未知类型拒绝；非 markdown
-      // 类型本票未登记载荷形态，携带 Markdown 载荷即为类型与载荷不匹配
-      // 整体拒绝；失败形态无载荷，携带 contentKind 即拒绝
+      // contentKind（缺省 = markdown 兼容）——未知类型拒绝；载荷形态按
+      // kind 分派匹配（#337 起 pdf 登记：pdf 字段 + 空 text + pdf 选择器
+      // scope），未登记类型与类型载荷不匹配整体拒绝；失败形态无载荷，
+      // 携带 contentKind 即拒绝
       if (!isPositiveInt(v.reqId) ||
         typeof v.instanceId !== 'string' || v.instanceId.length === 0) {
         return false
@@ -4068,8 +4112,9 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         } else {
           // 类型已知性 + 载荷匹配：#333 登记 markdown；#336（P3-04）登记
           // image（imageSrc 必带非空、Markdown 载荷退化形态、plain 选择器）；
-          // 其余类型（pdf/text）载荷未登记，整体拒绝——P3-05/P3-08
-          // 接入时按 kind 放开各自形态
+          // #337（P3-05）登记 pdf（pdf 字段必带、空 text、pdf 选择器——
+          // 形态经下方 pdf 分支校验）；其余类型（text）载荷未登记，整体
+          // 拒绝——P3-08 接入时按 kind 放开各自形态
           if (v.contentKind !== undefined) {
             if (!isRefContentKind(v.contentKind)) {
               return false
@@ -4088,17 +4133,44 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
                 isObject(v.scope) && v.scope.kind === 'plain'
               )
             }
-            if (v.contentKind !== 'markdown') {
+            if (v.contentKind !== 'markdown' && v.contentKind !== 'pdf') {
               return false
             }
           }
           // markdown（显式或缺省兼容）：不得携带 web 载荷（#342）、image
-          // 载荷或 plain 选择器（#336）
-          if (v.web !== undefined ||
+          // 载荷或 plain/pdf 选择器（#336/#337）；pdf 形态不适用 markdown
+          // 互斥，由下方 pdf 分支按自身契约校验
+          if (v.contentKind !== 'pdf' && (
+            v.web !== undefined ||
             (v as { imageSrc?: unknown }).imageSrc !== undefined ||
-            (isObject(v.scope) && v.scope.kind === 'plain')) {
+            (isObject(v.scope) && (v.scope.kind === 'plain' || v.scope.kind === 'pdf')))) {
             return false
           }
+        }
+        if (v.contentKind === 'pdf') {
+          // #337（P3-05）PDF 载荷契约：pdf 资源字段必带（uri 非空 + bytes
+          // 正整数）；text 恒空（无 LF 全文）；range 零区间（PDF 无 LF 坐标）；
+          // scope 为 pdf 选择器（page 1-based 正整数或缺失=第一页）
+          if (!isObject(v.pdf) ||
+            typeof v.pdf.uri !== 'string' || v.pdf.uri.length === 0 ||
+            !isPositiveInt(v.pdf.bytes)) {
+            return false
+          }
+          return (
+            v.text === '' &&
+            isObject(v.target) &&
+            isString(v.target.fsPath) &&
+            isString(v.target.relPath) &&
+            isNonNegativeInt(v.version) &&
+            isObject(v.range) &&
+            v.range.start === 0 && v.range.end === 0 &&
+            isObject(v.scope) &&
+            v.scope.kind === 'pdf' &&
+            (v.scope.page === undefined || isPositiveInt(v.scope.page)) &&
+            (v.expansionPath === undefined || (Array.isArray(v.expansionPath) && v.expansionPath.every(isString))) &&
+            (v.depth === undefined || isPositiveInt(v.depth)) &&
+            (v.sourceLeaseId === undefined || (typeof v.sourceLeaseId === 'string' && v.sourceLeaseId.length > 0))
+          )
         }
         return (
           isObject(v.target) &&
@@ -4106,6 +4178,7 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
           isString(v.target.relPath) &&
           isNonNegativeInt(v.version) &&
           isString(v.text) &&
+          v.pdf === undefined &&
           (v.expansionPath === undefined || (Array.isArray(v.expansionPath) && v.expansionPath.every(isString))) &&
           (v.depth === undefined || isPositiveInt(v.depth)) &&
           (v.sourceLeaseId === undefined || (typeof v.sourceLeaseId === 'string' && v.sourceLeaseId.length > 0)) &&
@@ -4126,7 +4199,8 @@ export function isHostToWebview(v: unknown): v is HostToWebview {
         v.web === undefined &&
         (v.reason === 'unsupported' || v.reason === 'no-workspace' || v.reason === 'escape' ||
           v.reason === 'not-found' || v.reason === 'non-markdown' || v.reason === 'read-failed' ||
-          v.reason === 'anchor-missing' || v.reason === 'source-expired' || v.reason === 'cycle' ||
+          v.reason === 'anchor-missing' || v.reason === 'anchor-invalid' ||
+          v.reason === 'source-expired' || v.reason === 'cycle' ||
           v.reason === 'depth' || v.reason === 'budget' ||
           // #342（P3-10）web 失败分态族（真实网络失败，不伪装成文件缺失）
           v.reason === 'web-disabled' || v.reason === 'web-invalid-address' || v.reason === 'web-timeout' ||

@@ -753,6 +753,124 @@ describe('P2-03 全文可达与锚点初始定位（#280，ADR-0011）', () => {
 // 定位区间/选择器）；其余类型维持 non-markdown 分态（附件/外链载荷由
 // P3-04/P3-05/P3-08/P3-10 登记）。旧三入口为兼容适配（经本入口后展开为
 // 旧扁平形态）——等价矩阵钉住「同一输入两条入口同果」。
+//
+// #337（P3-05）起 pdf 类型在分派表登记真实载荷（RefPdfContent：资源 URI
+// + 文件状态代次 + 源字节 + PDF 导航选择器）；锚点解析双链限定（普通链接
+// fragment 不解析页码，悬停仍可预览但从第一页开始）。
+//
+// #337（P3-05）PDF 通道的端口替身：文件资源形态（stat + 资源 URI + 代次）。
+type PdfResource =
+  | { kind: 'ok'; uri: string; version: number; bytes: number }
+  | { kind: 'not-found' }
+  | { kind: 'inaccessible' }
+
+/** PDF 资源端口替身：默认命中返回稳定 URI 与代次 */
+function pdfHarness(disk?: Disk, resources?: Map<string, PdfResource>): Harness {
+  const base = makeHarness(disk ?? new Map<string, { version: number; text: string }>([
+    ['D:\\notes\\a.md', note('# 父文档\n')],
+    ['D:\\notes\\资料.pdf', note('pdf-bytes')],
+  ]))
+  const res = resources ?? new Map<string, PdfResource>([
+    ['D:\\notes\\资料.pdf', { kind: 'ok', uri: 'https://vscode-cdn.net/资料.pdf?v=3', version: 3, bytes: 709 }],
+  ])
+  ;(base.ports as unknown as { readPdfFileResource: (fsPath: string) => Promise<PdfResource> }).readPdfFileResource =
+    async (fsPath) => res.get(fsPath) ?? { kind: 'not-found' }
+  return base
+}
+
+describe('#337 PDF 分派：双链 #page 解析与文件资源载荷', () => {
+  it('双链指定页：[[资料.pdf#page=3]] → pdf 载荷携带 page 选择器（不读 TextDocument）', async () => {
+    const h = pdfHarness()
+    const out = await readRefContentTarget({ target: '资料.pdf#page=3' }, h.ctx, h.ports)
+    expect(out).toEqual({
+      ok: true,
+      fsPath: 'D:\\notes\\资料.pdf',
+      relPath: '资料.pdf',
+      content: {
+        kind: 'pdf',
+        version: 3,
+        uri: 'https://vscode-cdn.net/资料.pdf?v=3',
+        bytes: 709,
+        selector: { kind: 'pdf', page: 3 },
+      },
+    } satisfies RefReadOutcome)
+    expect(h.opened, 'PDF 目标不经 TextDocument 通道').toEqual([])
+  })
+
+  it('双链无锚点 → 第一页（selector 无 page 字段）', async () => {
+    const h = pdfHarness()
+    const out = await readRefContentTarget({ target: '资料.pdf' }, h.ctx, h.ports)
+    expect(out.ok).toBe(true)
+    if (out.ok) {
+      expect(out.content.kind).toBe('pdf')
+      if (out.content.kind === 'pdf') {
+        expect(out.content.selector).toEqual({ kind: 'pdf' })
+      }
+    }
+  })
+
+  it('页码格式非法（0/负数/小数/非数字）与不支持 fragment → anchor-invalid 分态（不静默回落第一页）', async () => {
+    const h = pdfHarness()
+    for (const anchor of ['page=0', 'page=-1', 'page=1.5', 'page=abc', 'zoom=2', 'page=1;page=2']) {
+      const out = await readRefContentTarget({ target: `资料.pdf#${anchor}` }, h.ctx, h.ports)
+      expect(out, `锚点 ${anchor} 应 anchor-invalid`).toEqual({ ok: false, reason: 'anchor-invalid', anchor })
+    }
+  })
+
+  it('块 id 锚点（#^blk）对 PDF 非法（PDF 锚点键只有 page）', async () => {
+    const h = pdfHarness()
+    const out = await readRefContentTarget({ target: '资料.pdf#^blk' }, h.ctx, h.ports)
+    expect(out).toEqual({ ok: false, reason: 'anchor-invalid', anchor: '^blk' })
+  })
+
+  it('普通链接 fragment 不解析：[x](资料.pdf#page=3) 仍可预览但从第一页开始', async () => {
+    const h = pdfHarness()
+    const out = await readRefContentTarget({ linkHref: '资料.pdf#page=3' }, h.ctx, h.ports)
+    expect(out.ok).toBe(true)
+    if (out.ok) {
+      expect(out.content.kind).toBe('pdf')
+      if (out.content.kind === 'pdf') {
+        expect(out.content.selector).toEqual({ kind: 'pdf' })
+      }
+    }
+  })
+
+  it('直接目标（面板条目）不走双链锚点语义：无 page 选择器', async () => {
+    const h = pdfHarness()
+    const out = await readRefContentTarget(
+      { directTarget: { fsPath: 'D:\\notes\\资料.pdf', anchor: 'page=3' } }, h.ctx, h.ports)
+    expect(out.ok).toBe(true)
+    if (out.ok) {
+      expect(out.content.kind).toBe('pdf')
+      if (out.content.kind === 'pdf') {
+        expect(out.content.selector).toEqual({ kind: 'pdf' })
+      }
+    }
+  })
+
+  it('文件资源分态：解析命中但 stat 缺失 → not-found；不可访问（权限/断连）→ read-failed', async () => {
+    const missing = pdfHarness(undefined, new Map<string, PdfResource>([
+      ['D:\\notes\\资料.pdf', { kind: 'not-found' }],
+    ]))
+    expect(await readRefContentTarget({ target: '资料.pdf' }, missing.ctx, missing.ports))
+      .toEqual({ ok: false, reason: 'not-found' })
+
+    const broken = pdfHarness(undefined, new Map<string, PdfResource>([
+      ['D:\\notes\\资料.pdf', { kind: 'inaccessible' }],
+    ]))
+    expect(await readRefContentTarget({ target: '资料.pdf' }, broken.ctx, broken.ports))
+      .toEqual({ ok: false, reason: 'read-failed' })
+  })
+
+  it('旧扁平入口对 pdf 载荷的兼容适配：flatten 收敛为 non-markdown（Markdown 消费端不接收 PDF）', async () => {
+    const h = pdfHarness()
+    const out = await readRefContentTarget({ target: '资料.pdf' }, h.ctx, h.ports)
+    expect(out.ok).toBe(true)
+    if (out.ok) {
+      expect(flattenHoverReadOutcome(out)).toEqual({ ok: false, reason: 'non-markdown' })
+    }
+  })
+})
 describe('#333 类型分派入口 readRefContentTarget', () => {
   function matrixDisk(): Disk {
     return new Map<string, { version: number; text: string }>([
@@ -835,10 +953,9 @@ describe('#333 类型分派入口 readRefContentTarget', () => {
     }
   })
 
-  it('非 markdown 未登记类型（pdf/text）→ non-markdown 分态，读取端口零调用（不装载附件）', async () => {
+  it('非 markdown 未登记类型（text）→ non-markdown 分态，读取端口零调用（不装载附件）；#336/#337 起 image/pdf 各自登记，pdf 端口未注入维持降级', async () => {
     const h = makeHarness(matrixDisk())
     for (const [form, label] of [
-      [{ linkHref: '资料.pdf' }, '普通链接 PDF'],
       [{ directTarget: { fsPath: 'D:\\notes\\脚本.ts' } }, '直接目标文本'],
     ] as Array<[{ target?: string; linkHref?: string; directTarget?: { fsPath: string; anchor?: string } }, string]>) {
       expect(await readRefContentTarget(form, h.ctx, h.ports), `${label} 应 non-markdown`).toEqual({
@@ -847,6 +964,12 @@ describe('#333 类型分派入口 readRefContentTarget', () => {
       })
     }
     expect(h.opened, '非 markdown 目标不读取正文').toEqual([])
+    // pdf（#337）：资源端口未注入时保持 non-markdown 分态（纯 Markdown 消费
+    // 端的兼容降级——旧调用面不因类型登记被迫接入 PDF 通道）
+    expect(await readRefContentTarget({ linkHref: '资料.pdf' }, h.ctx, h.ports)).toEqual({
+      ok: false,
+      reason: 'non-markdown',
+    })
   })
 
   it('失败分态经类型化通道原样保留（unsupported/not-found/escape/no-workspace）', async () => {
@@ -903,6 +1026,10 @@ describe('#333 类型分派入口 readRefContentTarget', () => {
       if (legacy.ok && typed.ok) {
         expect(flattenHoverReadOutcome(typed), `${label}：内容一致`).toEqual(legacy)
         expect(typed.content.kind, `${label}：kind 标记`).toBe('markdown')
+        if (typed.content.kind === 'markdown') {
+          // markdown 载荷字段（等价矩阵只覆盖 markdown 目标）
+          expect(typed.content.lfText.length + typed.content.range.end).toBeGreaterThanOrEqual(0)
+        }
       } else if (!legacy.ok && !typed.ok) {
         expect(typed, `${label}：失败分态一致`).toEqual(legacy)
       }

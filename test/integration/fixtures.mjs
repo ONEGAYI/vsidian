@@ -2,6 +2,7 @@
 // runTest.mjs（开发模式加载）与 runInstalled.mjs（VSIX 安装态回归）共用，
 // 两条路径跑同一套 fixture，保证安装态与开发态断言的是同一组文档。
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { buildThreePageColorPdf } from '../pdfSample.mjs'
 import path from 'node:path'
 
 const LF_DOC = '中文编辑测试\n\n包含 emoji：🎉 与组合 emoji 👨‍👩‍👧‍👦\n\n- 列表项一\n- 列表项二\n'
@@ -847,7 +848,7 @@ const HR_DOC = [
  * 向目录写入全部集成测试 fixture（字节由脚本直接生成，不经 git 检出，
  * 避免 autocrlf 干扰断言）。返回 { largeDocLines } 供启动器注入环境变量。
  */
-export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample, generateMermaidDenseSample }) {
+export async function writeFixtures(wsDir, { generatePerfSample, generateReadingSample, generateMermaidDenseSample }) {
   writeFileSync(path.join(wsDir, 'lf.md'), LF_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'find.md'), FIND_DOC, 'utf8')
   writeFileSync(path.join(wsDir, 'find-hidden-source.md'),
@@ -1078,6 +1079,20 @@ export function writeFixtures(wsDir, { generatePerfSample, generateReadingSample
     '',
   ].join('\n'), 'utf8')
   writeFileSync(path.join(wsDir, '目标笔记.md'), TARGET_NOTE_DOC, 'utf8')
+  // #337 悬停 PDF：三页色样本（红/绿/蓝——页身份供「指定页图像与样本
+  // 正确对应」的像素断言；脚本生成不引入二进制样本入库）与悬停文档
+  // （双链全文/指定页/非法锚点 + 普通链接 fragment 不解析）
+  writeFileSync(path.join(wsDir, '资料.pdf'), await buildThreePageColorPdf())
+  writeFileSync(path.join(wsDir, '悬停 PDF.md'), [
+    '# 悬停 PDF 样例',
+    '',
+    '全文 [[资料.pdf]]、指定页 [[资料.pdf#page=2]]。',
+    '',
+    '非法 [[资料.pdf#page=0]] 与未知键 [[资料.pdf#zoom=2]]。',
+    '',
+    '普通链接 [本地 PDF](资料.pdf) 与 [fragment](资料.pdf#page=3)。',
+    '',
+  ].join('\n'), 'utf8')
   // #222 嵌入：父文档（独占行全文/章节嵌入 + 混排 + 缺失目标）与目标文档
   // （frontmatter + 任务 + 章节结构 + 二层嵌入——一层展开场景）；二层目标
   // 文件名含空格（嵌入 inner 字面路径解析）。嵌入改写文档独立成组（rename
