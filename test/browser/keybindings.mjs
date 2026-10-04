@@ -34,15 +34,16 @@ try {
       window.overrides = {}
       window.acquireVsCodeApi = () => ({ postMessage(message) {
         window.messages.push(message)
+        // source: window 走允许清单身份层（#344 起设置页消息桥同款守卫）
         if (message.kind === 'settings.get') setTimeout(() => window.dispatchEvent(new MessageEvent('message',
-          { data: { kind: 'settings.snapshot', values: { 'editor.lineNumbers': true } } })), 0)
+          { source: window, data: { kind: 'settings.snapshot', values: { 'editor.lineNumbers': true } } })), 0)
         if (message.kind === 'keybindings.get') setTimeout(() => window.dispatchEvent(new MessageEvent('message',
-          { data: { kind: 'keybindings.snapshot', overrides: window.overrides } })), 0)
+          { source: window, data: { kind: 'keybindings.snapshot', overrides: window.overrides } })), 0)
         if (message.kind === 'keybindings.set') {
           window.overrides[message.id] = message.bindings
           if (message.replaceConflicts) window.overrides.bold = []
           setTimeout(() => window.dispatchEvent(new MessageEvent('message',
-            { data: { kind: 'keybindings.changed', overrides: window.overrides,
+            { source: window, data: { kind: 'keybindings.changed', overrides: window.overrides,
               requestId: message.requestId, ok: true } })), 0)
         }
       } })
@@ -185,7 +186,7 @@ try {
       .evaluate(el => el.readOnly), false, '退回文字模式恢复可编辑')
     // 筛选签（#155）：冲突计数与四维过滤（真实点击路径）
     await page.evaluate(() => window.dispatchEvent(new MessageEvent('message',
-      { data: { kind: 'keybindings.snapshot',
+      { source: window, data: { kind: 'keybindings.snapshot',
         overrides: { bold: [], italic: ['ctrl+b'], find: ['ctrl+b'], inlineMath: [] } } })))
     const chip = (kind) => page.locator(`.vsidian-keybindings-filter[data-filter="${kind}"]`)
     assert.equal(await chip('conflict').innerText(), `${zhCn['keybindingSettings.filterConflicts']} (2)`)

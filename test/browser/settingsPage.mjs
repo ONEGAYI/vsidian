@@ -34,7 +34,8 @@ try {
           // 通知型消息（uiState 等宿主不回执）不产生回包——真实宿主对
           // uiState 无应答；对请求/保存类回 snapshot/changed
           if (message.kind === 'settings.uiState') return
-          window.dispatchEvent(new MessageEvent('message', { data: { kind: message.kind === 'settings.set' ? 'settings.changed' : 'settings.snapshot', values: window.savedSettings } }))
+          // source: window 走允许清单身份层（#344 起设置页消息桥同款守卫）
+          window.dispatchEvent(new MessageEvent('message', { source: window, data: { kind: message.kind === 'settings.set' ? 'settings.changed' : 'settings.snapshot', values: window.savedSettings } }))
         }, 0)
       } })
     })
@@ -442,6 +443,7 @@ try {
     // 兼容路由：宿主按退役分页 id 定位（focusSection wordSegment）打开编辑器
     // 页分词组：外框只容忍原生滚动的亚像素取整，文字/控件必须完整可见。
     await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {
+      source: window,
       data: { kind: 'settings.focusSection', section: 'wordSegment', entry: 'engine' } })))
     const wordsegLocated = wordsegGroup.locator('.vsidian-wordseg-block.vsidian-settings-item-located')
     await wordsegLocated.waitFor()
