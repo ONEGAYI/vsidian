@@ -1029,6 +1029,14 @@ interface ViewState {
       fallbackButton: boolean
       note: string
     } | null
+    /** #344（P3-12 收口）text 视图观测（null = 非 text 形态/未装载）：
+     *  textStats 虚拟化统计与首个内联着色 span 的计算色（绘制层断言面） */
+    text?: {
+      renderedLines: number
+      totalLines: number
+      coloredSpans: number
+      firstSpanColor: string
+    } | null
   }
   /** #299 跳转目标提示观测：在场与路径文本 */
   targetTip?: {
@@ -1048,6 +1056,10 @@ interface ViewState {
     rootHost?: 'reading' | 'live'
     /** #224 内容文本字符数（未保存修改推送后刷新可见性断言） */
     textLen?: number
+    /** #344（P3-12 收口）text 视图绘制层观测（null = markdown 装载）：
+     *  着色 span 计数与首个着色 span 的计算色（无 token 为 ''） */
+    textStats?: { renderedLines: number; totalLines: number } | null
+    textPaint?: { coloredSpans: number; firstSpanColor: string } | null
     /** #243 现有虚拟窗口观测；仅取目标自身块数，排除子卡正文长度。 */
     viewStats?: { totalBlocks: number; mountedBlocks: number } | null
     /** P2-04（#281）内部模式与目标编辑端口观测 */
@@ -16336,5 +16348,196 @@ export const cases: Array<[string, () => Promise<void>]> = [
     await vscode.workspace.fs.writeFile(wsUri('配置.json'),
       Buffer.from(`${JSON.stringify({ env: 'itest', revision: 1 }, null, 2)}\n`, 'utf8'))
     console.log('[B-1] PDF 悬停侧磁盘替换重载 ✓')
+  }],
+
+  // ---- #344（P3-12 收口）：text 用例的绘制层断言欠账 ----
+  // 现有 text 用例（B-1）只断 textLen/reqId（消息级），无「用户看到的
+  // 东西」级证据；本用例补 textStats 虚拟化观测与计算色断言（内联 token
+  // span 的 getComputedStyle——rgb(86,156,214) = Default Dark Modern 的
+  // const 语法层色 #569cd6）。宿主能力分派按在场扩展实测判定：1.82.3 的
+  // --disable-extensions 不卸载内置主题/语言扩展（vscode.theme-defaults
+  // 仍在场，dev 宿主实测走计算色分支）；else 分支为无语法扩展环境的防御
+  // （#335 结论：无 grammar 的纯文本单色呈现不算降级——coloredSpans=0
+  // 为诚实态）。
+  ['文本绘制层：textStats 虚拟化与计算色断言——嵌入卡与悬停浮层（#344）', async () => {
+    await openWithEditor('文本外观.md')
+    await waitSessionReady('文本外观.md')
+    const uri = wsUri('文本外观.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    const parentBefore = await readDisk('文本外观.md')
+
+    // 嵌入卡：textStats（totalLines = 窗口内行数；renderedLines 受视口约束）
+    const shown = await waitViewState('文本外观.md', (v) => {
+      const card = (v.readingEmbed ?? []).find((c) => c.inner === '代码样本.ts')
+      return v.viewMode === 'reading' && card?.state === 'content' && (card.textStats?.totalLines ?? 0) > 0
+    })
+    const card = shown.readingEmbed!.find((c) => c.inner === '代码样本.ts')!
+    assert(card.note === '代码样本.ts', `嵌入 text 卡目标标识（实际 ${card.note}）`)
+    const stats = card.textStats!
+    assert(stats.renderedLines >= 1 && stats.renderedLines <= stats.totalLines,
+      `虚拟化统计合法（rendered ${stats.renderedLines} / total ${stats.totalLines}）`)
+    assert(card.textPaint !== null, 'text 装载卡应携带 textPaint 观测（markdown 卡为 null）')
+
+    const grammarCapable = vscode.extensions.all.some((e) => e.id === 'vscode.theme-defaults')
+    if (grammarCapable) {
+      const painted = await waitViewState('文本外观.md', (v) => {
+        const c = (v.readingEmbed ?? []).find((x) => x.inner === '代码样本.ts')
+        return (c?.textPaint?.coloredSpans ?? 0) > 0
+      })
+      const paint = painted.readingEmbed!.find((x) => x.inner === '代码样本.ts')!.textPaint!
+      assert(paint.firstSpanColor.includes('86, 156, 214'),
+        `嵌入卡 text 首着色 span 计算色应为 const 语法层蓝 rgb(86,156,214)（实际 ${paint.firstSpanColor}）`)
+      console.log('[#344] 嵌入卡 text 计算色（宿主语法/主题扩展在场） ✓')
+    } else {
+      assert(card.textPaint!.coloredSpans === 0 && card.textPaint!.firstSpanColor === '',
+        `dev 宿主（--disable-extensions）无语法扩展：纯文本单色呈现是诚实态（实际 ${JSON.stringify(card.textPaint)}）`)
+      console.log('[#344] 嵌入卡 text 纯文本呈现（宿主无语法扩展，口径符合 #335） ✓')
+    }
+
+    // 悬停侧：hoverPreview.text 同款观测（wikilink 序 0 = [[代码样本.ts]]，
+    // 嵌入卡不占序）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 0 })
+    const hovered = await waitViewState('文本外观.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' &&
+      (v.hoverPreview.text?.totalLines ?? 0) > 0)
+    assert(hovered.hoverPreview!.note === '代码样本.ts',
+      `悬停 text 目标标识（实际 ${hovered.hoverPreview!.note}）`)
+    const text = hovered.hoverPreview!.text!
+    assert(text.renderedLines >= 1 && text.renderedLines <= text.totalLines,
+      `悬停 text 虚拟化统计合法（rendered ${text.renderedLines} / total ${text.totalLines}）`)
+    if (grammarCapable) {
+      const colored = await waitViewState('文本外观.md', (v) =>
+        v.hoverPreview?.open === true && (v.hoverPreview.text?.coloredSpans ?? 0) > 0)
+      assert(colored.hoverPreview!.text!.firstSpanColor.includes('86, 156, 214'),
+        `悬停 text 首着色 span 计算色应为 rgb(86,156,214)（实际 ${colored.hoverPreview!.text!.firstSpanColor}）`)
+      console.log('[#344] 悬停 text 计算色 ✓')
+    } else {
+      assert(text.coloredSpans === 0 && text.firstSpanColor === '',
+        `dev 宿主悬停 text 纯文本呈现（实际 ${JSON.stringify(text)}）`)
+      console.log('[#344] 悬停 text 纯文本呈现（宿主无语法扩展口径） ✓')
+    }
+
+    // 零写回与复位
+    const parentDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri)
+    assert(parentDoc?.isDirty === false, '文本绘制层链路不得弄脏父文档')
+    assert(await readDisk('文本外观.md') === parentBefore, '文本绘制层链路不得改写父文档磁盘')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 0 })
+    await waitViewState('文本外观.md', (v) => v.hoverPreview?.open === false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    await waitViewState('文本外观.md', (v) => v.viewMode === 'live')
+  }],
+
+  // ---- #344（P3-12 收口）：图片双语法同源对比（视觉层断言硬规则欠账） ----
+  // #336 此前只测单语法；同源承诺 = ![[图.png]] 与 ![](图.png) 走同一
+  // 加载/重试/失效管线。断言落在用户所见：同一资源地址（含 ?v= 代次）、
+  // 同一解码位图（naturalWidth）、双 loaded 态——阅读与 Live 双模式。
+  ['图片双链同源：![[图]] 与 ![](图) 渲染结果一致（#344）', async () => {
+    await openWithEditor('图片双链.md')
+    await waitSessionReady('图片双链.md')
+    const uri = wsUri('图片双链.md').toString()
+    const parentBefore = await readDisk('图片双链.md')
+
+    const assertParity = (slots: NonNullable<ViewState['imageProbe']>, mode: string): void => {
+      assert(slots.length >= 2, `${mode} 模式应有双语法的两个图片槽（实际 ${slots.length}）`)
+      const loaded = slots.filter((s) => s.state === 'loaded')
+      assert(loaded.length === slots.length, `${mode} 模式全部图片装载成功（实际 ${JSON.stringify(slots)}）`)
+      assert(slots[0]!.src !== null && slots[0]!.src === slots[1]!.src,
+        `${mode} 模式双语法应命中同一资源地址（实际 ${slots[0]!.src} vs ${slots[1]!.src}）`)
+      assert((slots[0]!.naturalWidth ?? 0) > 0 && slots[0]!.naturalWidth === slots[1]!.naturalWidth,
+        `${mode} 模式双语法解码位图一致（实际 ${slots[0]!.naturalWidth} vs ${slots[1]!.naturalWidth}）`)
+    }
+
+    // 阅读模式：markdown-it 的 <img>（双链 embed 图与普链图同代码路径）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    const reading = await waitViewState('图片双链.md', (v) =>
+      v.viewMode === 'reading' && (v.imageProbe?.length ?? 0) >= 2 &&
+      v.imageProbe!.every((s) => s.state === 'loaded'))
+    assertParity(reading.imageProbe!, '阅读')
+    assert((reading.readingImageCount ?? 0) >= 2, '阅读模式双 <img> 在场')
+    console.log('[#344] 阅读模式图片双语法同源 ✓')
+
+    // Live 模式：LiveImageWidget（#336 的装饰分流）与普链同管线
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    const live = await waitViewState('图片双链.md', (v) =>
+      v.viewMode === 'live' && (v.imageProbe?.length ?? 0) >= 2 &&
+      v.imageProbe!.every((s) => s.state === 'loaded'))
+    assertParity(live.imageProbe!, 'Live')
+    console.log('[#344] Live 模式图片双语法同源 ✓')
+
+    // 悬停侧：图片目标浮层（imageSrcs 携带已应用地址；#336 悬停图片目标
+    // 以纯 Reading 形态开浮层）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+    await waitViewState('图片双链.md', (v) => v.viewMode === 'reading' && (v.readingWikilinkCount ?? 0) >= 1)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 0 })
+    const imaged = await waitViewState('图片双链.md', (v) =>
+      v.hoverPreview?.open === true && (v.hoverPreview.imageSrcs?.length ?? 0) > 0)
+    const hoverSrc = imaged.hoverPreview!.imageSrcs![0]!
+    assert(hoverSrc.includes('%E5%90%8C%E6%BA%90%E5%9B%BE') || hoverSrc.includes('同源图'),
+      `悬停图片目标浮层应装载同源图（实际 ${hoverSrc}）`)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 0 })
+    await waitViewState('图片双链.md', (v) => v.hoverPreview?.open === false)
+
+    // 零写回与复位
+    const parentDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri)
+    assert(parentDoc?.isDirty === false, '图片同源链路不得弄脏父文档')
+    assert(await readDisk('图片双链.md') === parentBefore, '图片同源链路不得改写父文档磁盘')
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    await waitViewState('图片双链.md', (v) => v.viewMode === 'live')
+  }],
+
+  // ---- #344（P3-12 收口）：未 watch 目标编辑事件不对称的小修验证 ----
+  // 窄场景：悬停 text 目标 → 关闭（unwatch）→ VSCode 内未保存编辑 → 再
+  // 悬停。B-1 门控下未 watch 的 text 编辑事件不转发，读取缓存不失效，
+  // 再悬停命中陈旧缓存；修复（缓存目标与订阅目标同权转发）后编辑事件
+  // 照常广播失效，重开悬停必然重读（totalLines 随编辑增长）。
+  ['未 watch 目标编辑：关闭悬停后的未保存编辑不落陈旧缓存（#344）', async () => {
+    await openWithEditor('悬停文本.md')
+    await waitSessionReady('悬停文本.md')
+    const uri = wsUri('悬停文本.md').toString()
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'reading' })
+
+    // 首次悬停 [[配置.json]]（wikilink 序 0）：装载并缓存
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 0 })
+    const first = await waitViewState('悬停文本.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' &&
+      (v.hoverPreview.text?.totalLines ?? 0) > 0)
+    const linesBefore = first.hoverPreview!.text!.totalLines
+    // 关闭浮层（unwatch——事件通道随订阅退场）
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 0 })
+    await waitViewState('悬停文本.md', (v) => v.hoverPreview?.open === false)
+
+    // VSCode 内未保存编辑（无磁盘事件——TextDocument 通道是唯一事件源）
+    const jsonDoc = await vscode.workspace.openTextDocument(wsUri('配置.json'))
+    const edit = new vscode.WorkspaceEdit()
+    edit.insert(jsonDoc.uri, new vscode.Position(jsonDoc.lineCount, 0), '  "staleProbe": true\n')
+    assert(await vscode.workspace.applyEdit(edit), '未保存编辑应成功')
+
+    // 再悬停：缓存已失效（编辑事件广播）→ 重读含未保存内容
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'enter', index: 0 })
+    const second = await waitViewState('悬停文本.md', (v) =>
+      v.hoverPreview?.open === true && v.hoverPreview.state === 'content' &&
+      (v.hoverPreview.text?.totalLines ?? 0) > linesBefore)
+    assert(second.hoverPreview!.text!.totalLines > linesBefore,
+      `再悬停应读到含未保存编辑的正文（${linesBefore} → ${second.hoverPreview!.text!.totalLines} 行）——` +
+      '命中陈旧缓存则为旧行数')
+
+    // 复原：删除插入行（恢复本身走同一失效链路，不污染重跑）
+    const restore = new vscode.WorkspaceEdit()
+    restore.delete(jsonDoc.uri, new vscode.Range(
+      new vscode.Position(jsonDoc.lineCount - 1, 0), new vscode.Position(jsonDoc.lineCount, 0)))
+    await vscode.workspace.applyEdit(restore)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri,
+      { kind: 'hover.test.pointer', action: 'leave', index: 0 })
+    await waitViewState('悬停文本.md', (v) => v.hoverPreview?.open === false)
+    await vscode.commands.executeCommand(CMD.postToPanel, uri, { kind: 'view.mode.set', mode: 'live' })
+    await waitViewState('悬停文本.md', (v) => v.viewMode === 'live')
+    console.log('[#344] 未 watch 目标编辑不落陈旧缓存 ✓')
   }],
 ]

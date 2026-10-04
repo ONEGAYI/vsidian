@@ -167,6 +167,9 @@ interface FakeFetchPlan {
   pdfStatus?: number
   /** 就位则 PDF 源 fetch 等待该 gate（挂起装载链——fetch 阶段 dispose 用） */
   pdfGate?: Promise<void>
+  /** #344：按 URL 精确挂起（并发装载身份判定——多 URI 场景单挂其一；
+   *  与 pdfGate 互斥使用，就位时优先于全局 gate） */
+  pdfGateFor?: (url: string) => Promise<void> | undefined
 }
 
 /** fetch 替身响应面（显式注解——两分支返回形态统一，避免推断循环） */
@@ -210,7 +213,12 @@ function installFakePdfjs(
         text: async () => 'worker-text',
       }
     }
-    if (plan.pdfGate !== undefined) {
+    if (plan.pdfGateFor !== undefined) {
+      const gate = plan.pdfGateFor(url)
+      if (gate !== undefined) {
+        await gate
+      }
+    } else if (plan.pdfGate !== undefined) {
       await plan.pdfGate
     }
     const status = plan.pdfStatus ?? 200
@@ -1199,5 +1207,153 @@ describe('PDF 链接层交互（#339）', () => {
     await pumpUntil(() => view.probe().page === 3)
     expect(scrollEl.querySelector('.vsidian-hover-pdf-page[data-page="1"]')).toBeNull()
     expect(linkEls().filter((el) => el.closest('[data-page="1"]'))).toHaveLength(0)
+  })
+})
+
+// ---- #344（P3-12 收口）：并发身份/补偿负向/重入 resume/失败清页 四钉 ----
+// 历轮审查积累的缺口：① 同 URI 并发 acquire 的结果归属（早请求迟到不得
+// 冒充新目标——E-2/D-2 家族补集：换目标期间旧装载完成的释放与自毁路径）；
+// ② 视口补偿的负向边界（视口在回填页自身范围内不补偿——E-4 的补集）；
+// ③ 同文档重入 + resume 的越界钳制（E-2 在 show 同文档复用分支的钉子）；
+// ④ 装载失败后 setError 清页契约（probe.page === 0，失败态不残留旧页码）。
+describe('PDF 渲染器收口钉（#344）', () => {
+  let scrollEl: HTMLElement
+  let cleanupFns: Array<() => void> = []
+
+  function mockViewport(): void {
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.dataset['pdfScrollPort'] === '1' ? 400 : 0
+    })
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.dataset['pdfScrollPort'] === '1' ? 448 : 0
+    })
+  }
+
+  function scrollTo(top: number): void {
+    scrollEl.scrollTop = top
+    scrollEl.dispatchEvent(new Event('scroll'))
+  }
+
+  beforeEach(() => {
+    __setPdfAssetsForTest(ASSETS)
+    ;(globalThis as unknown as { __vsidianPdfjs?: unknown }).__vsidianPdfjs = undefined
+    scrollEl = document.createElement('div')
+    scrollEl.dataset['pdfScrollPort'] = '1'
+    document.body.appendChild(scrollEl)
+  })
+
+  afterEach(() => {
+    for (const fn of cleanupFns.splice(0)) fn()
+    scrollEl.remove()
+    __resetPdfjsSingletonsForTest()
+    __setPdfAssetsForTest(null)
+    ;(globalThis as unknown as { __vsidianPdfjs?: unknown }).__vsidianPdfjs = undefined
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('并发装载身份判定：换目标期间旧 acquire 完成 → 释放引用自毁，不冒充新目标', async () => {
+    mockViewport()
+    const uriA = 'https://files.test/a.pdf?v=1'
+    const uriB = 'https://files.test/b.pdf?v=1'
+    let releaseA!: () => void
+    const gateA = new Promise<void>((resolve) => {
+      releaseA = resolve
+    })
+    const state = installFakePdfjs(makeFakeDoc(3), {
+      pdfGateFor: (url) => (url === uriA ? gateA : undefined),
+    })
+    const view = new PdfHoverView(scrollEl)
+    cleanupFns.push(() => view.dispose())
+    const first = view.show(uriA, 1, 448)
+    // A 的装载挂在 fetch（条目在场、引用 1）
+    await pumpUntil(() => __pdfDocumentStoreStatsForTest().some((e) => e.uri === uriA))
+    // 换目标：show(B) 使 first 的 seq 过期并释放 A 引用（fetch 阶段归零 →
+    // 条目标记 abandoned 并从 store 删除）
+    const second = view.show(uriB, 1, 448)
+    expect(await second).toBe(true)
+    // A 的 fetch 此刻才完成：装载完成后按 abandoned 自毁（worker 不泄漏），
+    // first 以 false 收敛——迟到的 A 文档不得落地冒充 B 的内容
+    releaseA()
+    expect(await first).toBe(false)
+    await pumpUntil(() => state.destroyed === 1)
+    const probe = view.probe()
+    expect(probe.phase).toBe('content')
+    expect(probe.totalPages).toBe(3)
+    expect(view.probe().page).toBe(1)
+    // store 只剩 B 的活跃引用；A 无残留条目
+    const stats = __pdfDocumentStoreStatsForTest()
+    expect(stats).toEqual([{ uri: uriB, refs: 1 }])
+  })
+
+  it('视口补偿负向边界：视口在回填页自身范围内不补偿（scrollTop 不变）', async () => {
+    mockViewport()
+    // 第 3 页为双倍高长页：估计装载后滚到该页中段（视口顶 < 该页旧底）
+    installFakePdfjs(makeFakeDoc(6, { 3: makeFakePage(612, 1584) }))
+    const view = new PdfHoverView(scrollEl)
+    cleanupFns.push(() => view.dispose())
+    await view.show('https://files.test/a.pdf?v=1', 1, 448)
+    const estimated = view.probe().scrollHeight
+    const perPage = estimated / 6
+    // 滚到第 3 页中段（约 2.5 页偏移）：视口顶落在该页旧区间内部
+    const midPage3 = Math.round(2.5 * perPage)
+    scrollTo(midPage3)
+    await pumpUntil(() => view.probe().page === 3)
+    // 等第 3 页回填完成（全文高度按实测增长）
+    await pumpUntil(() => view.probe().scrollHeight > estimated + 300)
+    const probe = view.probe()
+    expect(probe.page, '视口仍在第 3 页内（不跳页）').toBe(3)
+    expect(probe.scrollTop, '页内视口不位移（补偿仅限视口在回填页下方的情形）').toBe(midPage3)
+    expect(probe.scrollHeight).toBeGreaterThan(estimated + 300)
+  })
+
+  it('同文档重入 + resume：越界记忆页钳制而非报错（show 复用分支的 E-2 钉子）', async () => {
+    mockViewport()
+    installFakePdfjs(makeFakeDoc(3))
+    const view = new PdfHoverView(scrollEl)
+    cleanupFns.push(() => view.dispose())
+    const uri = 'https://files.test/a.pdf?v=1'
+    expect(await view.show(uri, 2, 448)).toBe(true)
+    expect(view.probe().page).toBe(2)
+    // 同 URI 重入（文档复用分支）携带 resume 与越界页 9：钳制到 3，content
+    //（非 resume 的同分支越界仍就地报错——既有钉子见「无页码从第一页开始」）
+    expect(await view.show(uri, 9, 448, true)).toBe(true)
+    const probe = view.probe()
+    expect(probe.phase).toBe('content')
+    expect(probe.errorReason).toBe('')
+    expect(probe.page).toBe(3)
+    expect(probe.requestedPage).toBe(9)
+    // 对照：同 URI 重入不带 resume 的越界 → page-range（分支语义分野钉住）
+    expect(await view.show(uri, 9, 448)).toBe(true)
+    const errProbe = view.probe()
+    expect(errProbe.phase).toBe('error')
+    expect(errProbe.errorReason).toBe('page-range')
+  })
+
+  it('装载失败清页契约：换目标 fetch 失败 → error 态 probe.page === 0（不残留旧文档页码）', async () => {
+    mockViewport()
+    let loadCount = 0
+    const plan: FakeFetchPlan = {}
+    installFakePdfjs(() => {
+      loadCount++
+      return Promise.resolve(makeFakeDoc(5))
+    }, plan)
+    const view = new PdfHoverView(scrollEl)
+    cleanupFns.push(() => view.dispose())
+    // 旧文档 5 页、浏览到第 4 页（页码在场）
+    expect(await view.show('https://files.test/a.pdf?v=1', 4, 448)).toBe(true)
+    expect(view.probe().page).toBe(4)
+    // 换目标失败（B fetch 404）：setError 清页——失败态不残留旧文档页码
+    plan.pdfStatus = 404
+    expect(await view.show('https://files.test/b.pdf?v=1', 1, 448)).toBe(true)
+    const probe = view.probe()
+    expect(probe.phase).toBe('error')
+    expect(probe.errorReason).toBe('resource')
+    expect(probe.page, '失败态 probe.page 必须为 0（清页契约）').toBe(0)
+    expect(probe.totalPages).toBe(0)
+    // 恢复：修复后重开仍可装载（失败不留 rejected pending——E-1 既有语义）
+    plan.pdfStatus = 200
+    expect(await view.show('https://files.test/b.pdf?v=1', 1, 448)).toBe(true)
+    expect(view.probe().phase).toBe('content')
   })
 })

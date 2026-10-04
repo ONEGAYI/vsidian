@@ -315,6 +315,34 @@ try {
   await escClose()
   passed++
 
+  // ---- 场景 E2（#344 / D-10）：重复开关的资源回落压测 ----
+  // 20 轮「悬停开 → 装载绘制 → Esc 关」，每轮推进资源代次（?v= 不同 =
+  // 新 store 键——最重路径：每轮 acquire + destroy，无缓存复用）。每轮
+  // 关闭后断言共享文档存储回落为空、画布元素清空；收口断言总开关次数下
+  // 无任何累积（store 条目/refs/canvas）。
+  const stressRounds = 20
+  for (let round = 0; round < stressRounds; round++) {
+    await page.mouse.move(5, 5)
+    await page.waitForTimeout(60)
+    await wikilink.hover()
+    await page.waitForTimeout(OPEN_WAIT)
+    req = await lastRequest()
+    await respondPdf(req, { version: 100 + round })
+    await page.waitForTimeout(RENDER_WAIT)
+    const opened = await readPopup()
+    assert.ok(opened.open && opened.pdf.phase === 'content',
+      `压测轮 ${round}：装载绘制完成（实际 ${JSON.stringify(opened.pdf?.phase)}）`)
+    await escClose()
+    const store = await page.evaluate(() => window.pdfDocumentStoreStats())
+    assert.deepEqual(store, [],
+      `压测轮 ${round}：关闭后共享文档存储应回落为空（实际 ${JSON.stringify(store)}）`)
+    const canvasCount = await page.evaluate(() =>
+      document.querySelectorAll('.vsidian-hover-pdf-canvas').length)
+    assert.equal(canvasCount, 0, `压测轮 ${round}：浮层销毁后 PDF 画布不残留（实际 ${canvasCount}）`)
+  }
+  passed++
+  console.log(`[#344/D-10] ${stressRounds} 轮开关资源回落压测通过`)
+
   // ---- 场景 F：零写回与装配无页面错误 ----
   assert.equal(await editRequestCount(), 0, '悬停 PDF 全程零写回（edit.request 通道零调用）')
   assert.deepEqual(errors, [], '页面零未捕获错误（worker blob 装配与渲染无异常）')

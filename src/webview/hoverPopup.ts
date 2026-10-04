@@ -449,6 +449,16 @@ export function hoverPopupProbe(): {
    *  绘制断言面：canvas 尺寸为实际绘制面，集成/浏览器测试断言据此落
    *  绘制层而非 DOM 存在性） */
   pdf: PdfRenderProbe
+  /** #344（P3-12 收口）text 视图观测（null = 非 text 形态/未装载）：
+   *  textStats（DOM 常驻受视口约束）+ 首个内联着色 span 的**计算色**
+   *  （rgb(…) 字符串，无 token 为 ''）——集成层「用户看到的颜色」级
+   *  断言面（视觉层断言规则的欠账补齐，非 DOM 存在性） */
+  text: {
+    renderedLines: number
+    totalLines: number
+    coloredSpans: number
+    firstSpanColor: string
+  } | null
   /** #343（P3-11）外链视图观测（null = 非 web 形态）：shape=page 时
    *  frameMounted 连同沙箱/src 与退回按钮在场性（集成层可见性证据的
    *  webview 侧观测面）；shape=card 为卡片呈现（frameMounted=false） */
@@ -481,6 +491,37 @@ export function hoverPopupProbe(): {
       requestedPage: 0, nonWhiteRatio: -1, mountedPages: 0, canvasBytes: 0, scrollHeight: 0, scrollTop: 0,
       zoom: 1, textLayerPages: 0, linkAnnotations: 0,
     }
+  // #344（P3-12 收口）text 视图观测：仅 text 装载形态采集（contentEl 的
+  // 着色 span 计算色——getComputedStyle 是绘制层口径，样式注入失效时
+  // 与内联值分道，断言不虚过）
+  const textProbe = (): {
+    renderedLines: number
+    totalLines: number
+    coloredSpans: number
+    firstSpanColor: string
+  } | null => {
+    if (!popup || popup.display !== 'content' || popup.content.isTextContent !== true) {
+      return null
+    }
+    const stats = popup.content.getTextStats()
+    let coloredSpans = 0
+    let firstSpanColor = ''
+    for (const span of Array.from(popup.contentEl.querySelectorAll<HTMLElement>('span'))) {
+      if (span.style.color === '') {
+        continue // 无内联着色的 span（无 token 整行/纯字形段）不计
+      }
+      coloredSpans++
+      if (firstSpanColor === '') {
+        firstSpanColor = getComputedStyle(span).color
+      }
+    }
+    return stats === null ? null : {
+      renderedLines: stats.renderedLines,
+      totalLines: stats.totalLines,
+      coloredSpans,
+      firstSpanColor,
+    }
+  }
   // #343 web 视图观测（DOM 实测：iframe 属性与退回按钮在场性）
   const webProbe = () => {
     if (!popup || popup.webMeta === null) {
@@ -520,6 +561,7 @@ export function hoverPopupProbe(): {
       scope: popup?.scope ?? '', fm: 'none', imageSrcs: [], viewStats: null,
       ...liveProbe(),
       pdf: pdfProbe(),
+      text: null,
       web: webProbe(),
     }
   }
@@ -551,6 +593,7 @@ export function hoverPopupProbe(): {
     viewStats: popup.content.getStats(),
     ...liveProbe(),
     pdf: pdfProbe(),
+    text: textProbe(),
     web: webProbe(),
   }
 }

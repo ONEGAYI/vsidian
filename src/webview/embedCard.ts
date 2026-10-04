@@ -450,6 +450,10 @@ export interface EmbedCardProbe {
    *  totalLines = 窗口内总行数（#range 硬窗口时即窗口行数——窗口外
    *  不进载荷），renderedLines = 当前 DOM 常驻行数（受视口约束） */
   textStats: { renderedLines: number; totalLines: number } | null
+  /** #344（P3-12 收口）text 视图绘制层观测（markdown 装载为 null）：着
+   *  色 span 计数与首个着色 span 的**计算色**（rgb(…)；无 token 为 ''）
+   *  ——集成层「用户看到的颜色」级断言面（视觉层断言规则欠账补齐） */
+  textPaint: { coloredSpans: number; firstSpanColor: string } | null
   /** P2-04 目标编辑端口是否已绑定（可见且内部 Live 才为 true） */
   liveBound: boolean
   livePortId: string | null
@@ -3050,6 +3054,27 @@ export class EmbedCardManager {
     return loaded.scope ?? ''
   }
 
+  /** #344（P3-12 收口）：text 装载的着色 span 观测（markdown/未装载为
+   *  null）。计算色为绘制层口径——样式注入失效时与内联值分道，集成
+   *  断言据此不虚过（视觉层断言规则） */
+  private probeTextPaintOf(handle: EmbedCardHandle): { coloredSpans: number; firstSpanColor: string } | null {
+    if (!handle.content.isTextContent) {
+      return null
+    }
+    let coloredSpans = 0
+    let firstSpanColor = ''
+    for (const span of Array.from(handle.contentEl.querySelectorAll<HTMLElement>('span'))) {
+      if (span.style.color === '') {
+        continue // 无内联着色的 span（无 token 整行/纯字形段）不计
+      }
+      coloredSpans++
+      if (firstSpanColor === '') {
+        firstSpanColor = getComputedStyle(span).color
+      }
+    }
+    return { coloredSpans, firstSpanColor }
+  }
+
   /** 观测探针（view.state.readingEmbed 的数据源；host 区分容器）。P2-06：
    *  浮窗根（host='hover'）不进嵌入探针——它有自己的 hoverPreview 探针，
    *  且驻留 entry 会污染嵌入 occurrence 序号 */
@@ -3081,6 +3106,8 @@ export class EmbedCardManager {
         // #341（P3-09）text 视图虚拟化统计（markdown 为 null）——DOM 常驻
         // 受视口/窗口约束的观测面（renderedLines 远小于 totalLines）
         textStats: handle.content.getTextStats(),
+        // #344（P3-12 收口）text 视图绘制层观测（计算色断言面）
+        textPaint: this.probeTextPaintOf(handle),
         internalMode: this.effectiveMode(handle.entry),
         liveBound: handle.entry.live?.portId != null,
         livePortId: handle.entry.live?.portId ?? null,
