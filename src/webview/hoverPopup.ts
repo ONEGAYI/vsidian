@@ -88,6 +88,7 @@ import {
   CLOSE_ICON,
   MODE_LIVE_ICON,
   OPEN_ICON,
+  probeSpanPaint,
   SAVE_ICON,
   type HoverPopupRootMountArgs,
   type HoverPopupRootSession,
@@ -493,7 +494,8 @@ export function hoverPopupProbe(): {
     }
   // #344（P3-12 收口）text 视图观测：仅 text 装载形态采集（contentEl 的
   // 着色 span 计算色——getComputedStyle 是绘制层口径，样式注入失效时
-  // 与内联值分道，断言不虚过）
+  // 与内联值分道，断言不虚过）；span 遍历核心经共享 probeSpanPaint
+  //（embedCard 同款——#344 同批两份重复收敛，review-loops 三期）
   const textProbe = (): {
     renderedLines: number
     totalLines: number
@@ -504,22 +506,15 @@ export function hoverPopupProbe(): {
       return null
     }
     const stats = popup.content.getTextStats()
-    let coloredSpans = 0
-    let firstSpanColor = ''
-    for (const span of Array.from(popup.contentEl.querySelectorAll<HTMLElement>('span'))) {
-      if (span.style.color === '') {
-        continue // 无内联着色的 span（无 token 整行/纯字形段）不计
-      }
-      coloredSpans++
-      if (firstSpanColor === '') {
-        firstSpanColor = getComputedStyle(span).color
-      }
+    if (stats === null) {
+      return null
     }
-    return stats === null ? null : {
+    const paint = probeSpanPaint(popup.contentEl)
+    return {
       renderedLines: stats.renderedLines,
       totalLines: stats.totalLines,
-      coloredSpans,
-      firstSpanColor,
+      coloredSpans: paint.coloredSpans,
+      firstSpanColor: paint.firstSpanColor,
     }
   }
   // #343 web 视图观测（DOM 实测：iframe 属性与退回按钮在场性）

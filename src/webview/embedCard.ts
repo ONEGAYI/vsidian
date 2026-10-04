@@ -506,6 +506,26 @@ function targetOfInner(inner: string): string {
   return pipeAt >= 0 ? inner.slice(0, pipeAt) : inner
 }
 
+/** #344 着色 span 绘制观测（共享探针）：过滤有内联色的 span 计数，首个
+ *  取 getComputedStyle 计算色（绘制层口径——样式注入失效时与内联值分道，
+ *  集成断言据此不虚过，视觉层断言规则）。hoverPopup 的 hoverPreview 探针
+ *  与嵌入卡 probeTextPaintOf 同款消费（#344 同批引入的两份重复，
+ *  review-loops 三期收敛为单一实现——纯搬移，零行为变化） */
+export function probeSpanPaint(contentEl: Element): { coloredSpans: number; firstSpanColor: string } {
+  let coloredSpans = 0
+  let firstSpanColor = ''
+  for (const span of Array.from(contentEl.querySelectorAll<HTMLElement>('span'))) {
+    if (span.style.color === '') {
+      continue // 无内联着色的 span（无 token 整行/纯字形段）不计
+    }
+    coloredSpans++
+    if (firstSpanColor === '') {
+      firstSpanColor = getComputedStyle(span).color
+    }
+  }
+  return { coloredSpans, firstSpanColor }
+}
+
 /** P2-08（#285）重定位命中判定：A 的变更使嵌入源区间被覆盖重写时，检查
  *  事务插入文本中是否**逐字保留嵌入源文**（表格行列结构编辑的保文本重写
  *  形态——列/行移动、canonical 整行重写、格区粘贴重建：格值/整行取原 doc
@@ -3055,24 +3075,12 @@ export class EmbedCardManager {
   }
 
   /** #344（P3-12 收口）：text 装载的着色 span 观测（markdown/未装载为
-   *  null）。计算色为绘制层口径——样式注入失效时与内联值分道，集成
-   *  断言据此不虚过（视觉层断言规则） */
+   *  null）。span 遍历核心经共享 probeSpanPaint */
   private probeTextPaintOf(handle: EmbedCardHandle): { coloredSpans: number; firstSpanColor: string } | null {
     if (!handle.content.isTextContent) {
       return null
     }
-    let coloredSpans = 0
-    let firstSpanColor = ''
-    for (const span of Array.from(handle.contentEl.querySelectorAll<HTMLElement>('span'))) {
-      if (span.style.color === '') {
-        continue // 无内联着色的 span（无 token 整行/纯字形段）不计
-      }
-      coloredSpans++
-      if (firstSpanColor === '') {
-        firstSpanColor = getComputedStyle(span).color
-      }
-    }
-    return { coloredSpans, firstSpanColor }
+    return probeSpanPaint(handle.contentEl)
   }
 
   /** 观测探针（view.state.readingEmbed 的数据源；host 区分容器）。P2-06：
