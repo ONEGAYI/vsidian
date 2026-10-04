@@ -37,7 +37,9 @@ const styleRef = new StyleReferenceSection({ postMessage: (message) => vscode.po
 // 复用上述两个分页作为页签体；侧栏取 CSS 片段原槽位，位于快捷键与索引维护
 // 之间）
 const appearance = new AppearanceSection(snippets, styleRef)
-// #198 索引维护：排除模式编辑与清理/重建操作（状态权威在宿主，index.state 推送回显）
+// #198 索引维护：排除模式编辑与清理/重建操作（状态权威在宿主，index.state
+// 推送回显）。#332 起分页改名「文件与链接」并承接图片/引用视图两组标准行
+// （defsGroups），本分页自有内容降为页内「索引维护」二级组
 const indexMaintenance = new IndexMaintenanceSection({ postMessage: (message) => vscode.postMessage(message) })
 // #239 中文分词：引擎选择与 jieba 资源下载管理（设置值与资源状态权威
 // 都在宿主，settings.* / wordSegment.state 推送回显）。#264 起分词分页

@@ -63,10 +63,18 @@ export const en = {
   'settings.groupEditing': 'Editing',
   /** Editor-page section: codeblock.* presentation */
   'settings.groupCodeblock': 'Code blocks',
-  /** Editor-page section: image.* paste settings */
+  /** Files-and-links page section (moved from editor page in #332): image.* paste settings */
   'settings.groupImage': 'Images',
-  /** Editor-page section (#298): hover.* preview family and embed.* family */
+  /** Files-and-links page section (#298 created, moved with the page in #332):
+   *  hover.* preview family and embed.* family */
   'settings.groupRefview': 'Reference views',
+  /** Settings "Files and links" section page (#332: renamed from "Index
+   *  maintenance" to host the Images / Reference views / Index maintenance
+   *  groups, mirroring Obsidian's Files & links page) */
+  'settings.filesLinksSection': 'Files and links',
+  /** Settings "Files and links" page subtitle */
+  'settings.filesLinksSectionDescription':
+    'Image paste storage, reference view hover and embed presentation, and workspace reference index maintenance (exclusions, rebuild, cleanup). Changes save automatically.',
   /** Settings-page "Experimental" sidebar category (home for experimental.*
    *  toggles; defaults follow the shipped behavior, disable to fall back) */
   'settings.experimentalSection': 'Experimental',
@@ -573,9 +581,10 @@ export const en = {
   'outlinks.errorNoWorkspace': 'Open a workspace to see outgoing links',
   'outlinks.jumpTo': 'Open {target}',
 
-  /** 索引维护设置分页（#198：排除模式与维护操作） */
+  /** #332: "Index maintenance" group title inside the Files and links page
+   *  (#198: exclude patterns and maintenance ops; the former page title key
+   *  is reused for the in-page group, page-level title uses filesLinksSection) */
   'indexMaintenance.title': 'Index maintenance',
-  'indexMaintenance.description': 'Control what the workspace reference index scans, and rebuild or clean the index cache. Maintenance runs in the background; scheduling values are engineering defaults, not time-limit guarantees.',
   'indexMaintenance.patternsLabel': 'Exclude patterns',
   'indexMaintenance.patternsDescription': 'Glob patterns matched against paths relative to each workspace root (**, * and ?; a plain folder name excludes its whole subtree). Defaults to **/.git/** and **/node_modules/**. VSCode search exclude rules and .gitignore are never inherited. Excluded files are not scanned, while targets inside them that an indexed note references explicitly stay registered.',
   'indexMaintenance.addPattern': 'Add pattern',

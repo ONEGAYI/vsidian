@@ -28,11 +28,24 @@ export interface SettingsPageSection {
   /** 分页图标（侧栏导航与搜索分组共用）。#231 外观合并：'palette' 由
    *  CSS 片段分页槽位改为调色板字形并被「外观」合并分页沿用（画笔字形
    *  退役）；'book'（#132 样式参考分页）随侧栏条目合并一并退役；
-   *  'links' 为索引维护分页的链环 glyph——形态改版批次自 'editor' 铅笔
-   *  改为链环（与侧栏反链图标同形语言）；'keyboard' 为快捷键分页的字形
-   *  （#264 中文分词分页退役——其曾占位借用的 keyboard 槽位随之消失） */
-  icon: 'keyboard' | 'editor' | 'palette' | 'links'
+   *  'folderCog' 为「文件与链接」分页（#332 原索引维护改名承接）字形
+   *  （#332 二轮自链环 glyph 换装：文件夹 + 右下角齿轮，用户指定意象）；
+   *  'keyboard' 为快捷键分页的字形（#264 中文分词分页退役——其曾占位借
+   *  用的 keyboard 槽位随之消失） */
+  icon: 'keyboard' | 'editor' | 'palette' | 'folderCog'
   entries: readonly { id: string; title: string; description?: string }[]
+  /**
+   * 附加分页内嵌标准设置行组（#332 设置重组）：每组由视图统一装配为 h3
+   * 组容器 + 标准设置行（与本页 defs 同一渲染与依赖灰化链路，快照回推的
+   * data-setting-key 同步天然覆盖），空组跳过；组条目进全局搜索索引并归
+   * 本分页分组命中（点击进分页并定位组内行）。前缀过滤以视图装配的定义
+   * 表为源——fixture 场景自然为空组，分页实现不直接引用生产注册表。
+   */
+  defsGroups?: readonly {
+    titleKey: MessageKey
+    icon?: SettingsGroupIcon
+    prefixes: readonly string[]
+  }[]
   /** 返回清理函数；focusEntry 为全局搜索定位到的入口。 */
   mount(parent: HTMLElement, focusEntry?: string): void | (() => void)
 }
@@ -103,15 +116,16 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, tex
  *  表达，仍为单 path 线性风格；#128 起槽位沿用的「样式定制」意象不变，
  *  原画笔字形随合并退役）；
  *  editor：铅笔起笔（「编辑器」分组）；
- *  links（形态改版批次）：互锁双链环（lucide link 形）——与侧栏反链/出链
- *  链环图标同一造型语言（索引维护分页的链接域意象）；
+ *  folderCog（#332 二轮「文件与链接」分页）：文件夹 + 右下角齿轮（lucide
+ *  folder-cog 组合线性化——文件/链接域与索引维护的合体意象，替换原链环
+ *  glyph）；用户指定意象，SVG 自绘（2026-10-04 拍板）；
  *  display/editing/codeblock/image（#263 编辑器页二级组标题四枚，v2 拍板
  *  清单原样 path）：显示 = 显示器、编辑 = 双 I 光标、代码块 = 尖括号、
- *  图片 = 山形相框（#265 生图两枚从独立 SVG 资产加载，不在本表）。
- *  refview（#298 引用视图组）：path 数据暂以 links 双链环占位（引用域
- *  意象就近借用）——正式图标由用户后补，届时仅替换本行数据、接线不动；
+ *  图片 = 山形相框（#265 生图两枚从独立 SVG 资产加载，不在本表）；
  *  shield（#323 常规页「默认编辑器」组标题）：盾牌（lucide shield 线性
  *  化——守护意象）；
+ *  links（形态改版批次链环）与 refview（#298 占位链环）随 #332 二轮三处
+ *  链环重复整改退役（引用全部迁移至上述三枚新字形）；
  *  book（#132 样式参考分页）随 #231 侧栏条目合并退役；
  *  #163 一轮曾为符号/代码块/图片三组新增 keyboard 复用与 code/image 形，
  *  二轮还原为页内小节后侧栏不再使用，已随分支退役。 */
@@ -121,7 +135,11 @@ const ICON_PATHS = {
   general: 'M7 2h10a4 4 0 0 1 0 8H7a4 4 0 0 1 0-8ZM8 4a2 2 0 1 0 0 4 2 2 0 1 0 0-4M7 14h10a4 4 0 0 1 0 8H7a4 4 0 0 1 0-8ZM16 16a2 2 0 1 0 0 4 2 2 0 1 0 0-4',
   palette: 'M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z M13.5 6.5h.01 M17.5 10.5h.01 M8.5 7.5h.01 M6.5 12.5h.01',
   editor: 'M14 4l6 6M3 21l5-1L21 7a2 2 0 0 0-4-4L4 16z',
-  links: 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71',
+  // #332 二轮（用户指定意象，lucide folder-cog 线性化）：folder-cog 主体
+  // + 齿轮圆与 8 根放射齿；pointerLink/dbLink 两枚曾以内联字形过渡，资产
+  // 交付后改走生图槽（GENERATED_GROUP_ICONS + CSS 映射），本表不再承载
+  folderCog:
+    'M10.3 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.98a2 2 0 0 1 1.69.9l.66 1.2A2 2 0 0 0 12 6h8a2 2 0 0 1 2 2v3.3M18 15a3 3 0 1 0 0 6 3 3 0 1 0 0-6M14.305 19.53l.923-.382M15.228 16.852l-.923-.383M16.852 15.228l-.383-.923M16.852 20.772l-.383.924M19.148 15.228l.383-.923M19.53 21.696l-.382-.924M20.772 16.852l.924-.383M20.772 19.148l.924.383',
   display: 'M4 3h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2ZM8 21h8M12 17v4',
   editing: 'M7 4v16M5 4h4M5 20h4M17 4v16M15 4h4M15 20h4',
   codeblock: 'M8 7l-5 5 5 5M16 7l5 5-5 5',
@@ -133,7 +151,6 @@ const ICON_PATHS = {
   experimental:
     'M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2 M8.5 2h7 M7 15h10',
   table: 'M3 5h18v14H3zM12 5v14M3 12h18',
-  refview: 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71',
 } as const
 
 function icon(kind: keyof typeof ICON_PATHS): SVGSVGElement {
@@ -146,14 +163,32 @@ function icon(kind: keyof typeof ICON_PATHS): SVGSVGElement {
   return svg
 }
 
-/** 编辑器页二级组标题图标：五枚内联线性字形与 #265 两枚生图资产。
- *  refview（#298）：引用视图小节标题（path 暂以 links 字形占位，正式图
- *  标后补仅换数据）；table（#296 三轮）：实验页「表格行为」小节标题；
- *  shield（#323）：常规页「默认编辑器」委托组标题（守护意象内联字形）。 */
-export type SettingsGroupIcon = 'display' | 'editing' | 'codeblock' | 'image' | 'typewriter' | 'wordSegment' | 'refview' | 'table' | 'shield'
+/** 二级组标题图标：内联线性字形与生图资产（generated 槽）两类。
+ *  生图四枚（#265 打字机/分词起，#332 二轮增引用视图/索引维护两枚）：
+ *  typewriter / wordSegment / pointerLink（手型指针+链接下划线，#298 占
+ *  位链环的正式兑现）/ dbLink（数据库圆柱+锁链）——经 GENERATED_GROUP_
+ *  ICONS 走 CSS 背景映射（media/quick-actions 明暗资产）；两者的内联临时
+ *  字形随资产交付退役（#298 占位链环 → 一轮内联 → 二轮生图资产）；
+ *  table（#296 三轮）：实验页「表格行为」小节标题；
+ *  shield（#323）：常规页「默认编辑器」委托组标题（守护意象内联字形）；
+ *  refview（#298 占位）与 links（#332 一轮借位）随二轮三处链环重复整改
+ *  一并退役（全仓引用迁移至新字形）。 */
+export type SettingsGroupIcon = 'display' | 'editing' | 'codeblock' | 'image' | 'typewriter' | 'wordSegment' | 'pointerLink' | 'table' | 'shield' | 'dbLink'
 
-function groupIcon(kind: SettingsGroupIcon): SVGSVGElement | HTMLSpanElement {
-  if (kind === 'typewriter' || kind === 'wordSegment') {
+/** 生图资产槽位：这些 kind 不走 ICON_PATHS 内联字形，装配为 generated
+ *  span（CSS 按 data-icon 映射 media/quick-actions 明暗背景） */
+type GeneratedGroupIcon = 'typewriter' | 'wordSegment' | 'pointerLink' | 'dbLink'
+const GENERATED_GROUP_ICONS: readonly GeneratedGroupIcon[] = ['typewriter', 'wordSegment', 'pointerLink', 'dbLink']
+
+function isGeneratedGroupIcon(kind: SettingsGroupIcon): kind is GeneratedGroupIcon {
+  return (GENERATED_GROUP_ICONS as readonly string[]).includes(kind)
+}
+
+/** 二级组标题图标装配（#332 起导出）：内联字形与生图资产同槽返回，附
+ *  加分页自有内容内的 h3 组标题（如文件与链接页「索引维护」）复用同一
+ *  路径——组标题容器语言不因装配方分叉。 */
+export function groupIcon(kind: SettingsGroupIcon): SVGSVGElement | HTMLSpanElement {
+  if (isGeneratedGroupIcon(kind)) {
     const glyph = element('span', 'vsidian-settings-generated-icon')
     glyph.dataset.icon = kind
     glyph.setAttribute('aria-hidden', 'true')
@@ -348,9 +383,6 @@ export class SettingsPageView {
   private codeblockDefs(): readonly SettingDefinition[] {
     return this.defs.filter((d) => d.key.startsWith('codeblock.'))
   }
-  private imageDefs(): readonly SettingDefinition[] {
-    return this.defs.filter((d) => d.key.startsWith('image.'))
-  }
   /** 实验性页全部定义（侧栏分组与搜索分组的条目源）：experimental.* 前缀 */
   private experimentalDefs(): readonly SettingDefinition[] {
     return this.defs.filter((d) => d.key.startsWith('experimental.'))
@@ -360,21 +392,12 @@ export class SettingsPageView {
     return this.defs.filter((d) => d.key.startsWith('experimental.table.'))
   }
   /** 编辑器页「显示」小节：非 general 且不属其他小节的 editor.* 定义
-   *  （#298 起 hover 与 embed 两前缀改归「引用视图」小节，此处显式排除；
-   *  #296 三轮起 experimental.* 归「实验性功能」侧栏分组，上游 editorDefs
+   *  （#296 三轮起 experimental.* 归「实验性功能」侧栏分组，上游 editorDefs
    *  一并排除） */
   private displayDefs(): readonly SettingDefinition[] {
     return this.editorDefs().filter(
       (d) => !d.key.startsWith('editor.symbol') && !d.key.startsWith('editor.multicursor') && !d.key.startsWith('editor.paste') &&
-      !d.key.startsWith('codeblock.') && !d.key.startsWith('image.') &&
-      !d.key.startsWith('hover.') && !d.key.startsWith('embed.'))
-  }
-  /** 编辑器页「引用视图」小节（#298）：hover.*（悬停预览族）与 embed.*
-   *  （正文嵌入族）前缀的定义——组内顺序由注册表顺序决定（总开关 →
-   *  直接悬停显示 → 嵌入展开层级 → 嵌入最大高度），本过滤只做前缀收纳 */
-  private refviewDefs(): readonly SettingDefinition[] {
-    return this.editorDefs().filter(
-      (d) => d.key.startsWith('hover.') || d.key.startsWith('embed.'))
+      !d.key.startsWith('codeblock.'))
   }
   private editorDefs(): readonly SettingDefinition[] {
     // #239 分词三键（editor.wordSegment*）不由本表渲染；#264 起呈现归编辑
@@ -382,26 +405,26 @@ export class SettingsPageView {
     // 理，值仍走标准保存链路），排除保留防止标准设置行与搜索内建分组重复
     // 呈现（搜索条目由委托组 entries 提供）；#296 三轮 experimental.* 归
     // 独立「实验性功能」侧栏分组，同样不进编辑器页（displayDefs 以上游
-    // editorDefs 为基，一并排除）
+    // editorDefs 为基，一并排除）；#332 起图片（image.*）与引用视图
+    // （hover.*/embed.*）两族迁至「文件与链接」分页（分页 defsGroups 按
+    // 同一前缀收纳，搜索随该分页分组命中）
     return this.defs.filter((d) => !d.key.startsWith('general.') && !d.key.startsWith('editor.wordSegment') &&
-      !d.key.startsWith('experimental.'))
+      !d.key.startsWith('experimental.') && !d.key.startsWith('image.') &&
+      !d.key.startsWith('hover.') && !d.key.startsWith('embed.'))
   }
   /** 编辑器页内小节（顺序即渲染顺序）；空小节由调用方跳过不渲染。
-   *  icon 为二级组标题图标，注册表驱动（#263 内联四枚 + #265 生图两枚）。
+   *  icon 为二级组标题图标，注册表驱动（#263 内联字形 + #265 生图资产）。
    *  #264 起尾部追加委托组（分词）：组内容非标准设置行，经 group.mount
    *  装配，图标经组对象 icon 槽登记、走与 defs 组同一 h3 容器路径（结构
    *  不加特判；未登记 = 槽位空缺，布局机制对其无差别）。
-   *  标准组/委托组互斥由 EditorSection 可辨识联合钉住。 */
+   *  标准组/委托组互斥由 EditorSection 可辨识联合钉住。
+   *  #332 起图片/引用视图两小节迁出（文件与链接分页 defsGroups 承接）。 */
   private editorSectionDefs(): EditorSection[] {
     return [
       { titleKey: 'settings.groupDisplay', icon: 'display', defs: () => this.displayDefs() },
       { titleKey: 'settings.groupEditing', icon: 'editing', defs: () => this.editingDefs() },
       { titleKey: 'settings.groupSymbols', icon: 'typewriter', defs: () => this.symbolDefs() },
       { titleKey: 'settings.groupCodeblock', icon: 'codeblock', defs: () => this.codeblockDefs() },
-      { titleKey: 'settings.groupImage', icon: 'image', defs: () => this.imageDefs() },
-      // #298 引用视图组：hover.*/embed.* 前缀收纳（icon key 一次接线，path
-      // 数据暂以 links 字形占位）；置于图片组之后、委托组（分词）之前
-      { titleKey: 'settings.groupRefview', icon: 'refview', defs: () => this.refviewDefs() },
       ...this.editorGroups.map((group): EditorSection => ({ titleKey: group.titleKey, icon: group.icon, group })),
     ]
   }
@@ -413,7 +436,11 @@ export class SettingsPageView {
     ]
   }
   private categories() {
-    const builtIn: Array<{ id: string; title: string; icon: 'general' | 'editor' | 'experimental' }> = []
+    // #332 二轮：「文件与链接」附加分页提前进内建段——与「实验性功能」
+    // 槽位互换（2026-10-04 用户拍板），文件/链接域紧跟编辑器（Obsidian
+    // 相邻心智），实验性退居其后；其余附加分页仍排内建之后。
+    // icon 放宽到字形注册表全集（内建分组与提前分页同列表混排）
+    const builtIn: Array<{ id: string; title: string; icon: keyof typeof ICON_PATHS }> = []
     // 空组不注册（fixture 可能只含部分前缀——空组不得占据默认激活位）；
     // #323：委托组同样计入所属页的注册条件（常规页仅有委托组时也注册）
     if (this.generalDefs().length > 0 || this.generalGroups.length > 0) {
@@ -422,11 +449,14 @@ export class SettingsPageView {
     if (this.editorDefs().length > 0) {
       builtIn.push({ id: 'editor', title: t('settings.editorCategory'), icon: 'editor' })
     }
+    const filesLinks = this.sections.filter((s) => s.id === 'index')
+    const trailingSections = this.sections.filter((s) => s.id !== 'index')
+    builtIn.push(...filesLinks)
     // #296 三轮「实验性功能」侧栏分组（experimental.* 的独立归属页）
     if (this.experimentalDefs().length > 0) {
       builtIn.push({ id: 'experimental', title: t('settings.experimentalSection'), icon: 'experimental' })
     }
-    return [...builtIn, ...this.sections]
+    return [...builtIn, ...trailingSections]
   }
   private render(focusEntry?: string): void {
     if (!this.listEl) return
@@ -522,7 +552,18 @@ export class SettingsPageView {
         ] },
         // #296 三轮 experimental.* 随「实验性功能」分组命中（无委托组）
         { id: 'experimental', title: t('settings.experimentalSection'), entries: toEntries(this.experimentalDefs()) },
-        ...this.sections,
+        // #332 附加分页内嵌标准行组的条目随分页分组命中（点击进分页并
+        // 定位组内行）；自有 entries（组内非标准行入口）缀后。分组对象显式
+        // 构造——分页实现以原型 getter 暴露 id/title，对象展开取不到
+        ...this.sections.map((s) => ({
+          id: s.id,
+          title: s.title,
+          entries: [
+            ...(s.defsGroups ?? []).flatMap((g) =>
+              toEntries(this.defs.filter((d) => g.prefixes.some((p) => d.key.startsWith(p))))),
+            ...s.entries,
+          ],
+        })),
       ]
       let count = 0
       for (const group of groups) for (const entry of group.entries) {
@@ -553,6 +594,19 @@ export class SettingsPageView {
     if (section) {
       list.append(element('h2', 'vsidian-settings-heading', section.title),
         element('p', SETTINGS_PAGE_CLASS_NAMES.subtitle, section.description))
+      // #332 分页内嵌标准设置行组：视图统一装配（h3 组容器 + 标准行，依赖
+      // 灰化与快照回推共用既有链路）；空组跳过（fixture 只含部分前缀时不占位）
+      for (const group of section.defsGroups ?? []) {
+        const defs = this.defs.filter((d) => group.prefixes.some((p) => d.key.startsWith(p)))
+        if (!defs.length) continue
+        const container = element('div', 'vsidian-settings-group')
+        const title = element('h3', 'vsidian-settings-group-title')
+        if (group.icon) title.append(groupIcon(group.icon))
+        title.append(document.createTextNode(t(group.titleKey)))
+        container.append(title)
+        list.append(container)
+        this.renderDefItems(container, defs, focusEntry)
+      }
       const content = element('div', 'vsidian-settings-section-content')
       list.append(content)
       const dispose = section.mount(content, focusEntry)

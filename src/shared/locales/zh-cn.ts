@@ -56,10 +56,16 @@ export const zhCn: Record<MessageKey, string> = {
   'settings.groupEditing': '编辑',
   /** 编辑器页内小节：codeblock.* 呈现类 */
   'settings.groupCodeblock': '代码块',
-  /** 编辑器页内小节：image.* 图片粘贴设置 */
+  /** 「文件与链接」分页内小节（#332 自编辑器页迁入）：image.* 图片粘贴设置 */
   'settings.groupImage': '图片',
-  /** 编辑器页内小节（#298）：hover.* 悬停预览族与 embed.* 正文嵌入族 */
+  /** 「文件与链接」分页内小节（#298 建组、#332 随分页迁移）：hover.* 悬停
+   *  预览族与 embed.* 正文嵌入族 */
   'settings.groupRefview': '引用视图',
+  /** 设置页「文件与链接」附加分页（#332：原「索引维护」改名承接图片/
+   *  引用视图/索引维护三组，对齐 Obsidian 文件与链接分页心智） */
+  'settings.filesLinksSection': '文件与链接',
+  /** 设置页「文件与链接」分页副文案 */
+  'settings.filesLinksSectionDescription': '图片粘贴存放、引用视图悬停与嵌入呈现，以及工作区引用索引的排除、重建与清理维护。更改会自动保存。',
   /** 设置页「实验性功能」侧栏分组（experimental.* 设置项的归属分组；
    *  实验性开闭默认随功能落地状态，出问题可关闭回退稳定行为） */
   'settings.experimentalSection': '实验性功能',
@@ -533,9 +539,9 @@ export const zhCn: Record<MessageKey, string> = {
   'outlinks.errorNoWorkspace': '未打开工作区，无法查看出链',
   'outlinks.jumpTo': '打开 {target}',
 
-  /** 索引维护设置分页（#198：排除模式与维护操作） */
+  /** #332 起「文件与链接」分页内「索引维护」二级组标题（#198：排除模式
+   *  与维护操作；原分页标题词条降级复用，分页级标题走 filesLinksSection） */
   'indexMaintenance.title': '索引维护',
-  'indexMaintenance.description': '控制工作区引用索引的扫描范围，并提供建立索引缓存的重建与清理操作。维护在后台执行；调度取值为工程默认初值，不构成时限承诺。',
   'indexMaintenance.patternsLabel': '排除模式',
   'indexMaintenance.patternsDescription': '按各工作区根的相对路径匹配的 glob 模式（支持 **、* 与 ?；单独的目录名会排除其整个子树）。默认为 **/.git/** 与 **/node_modules/**。不继承 VSCode 搜索排除规则与 .gitignore。被排除的文件不参与扫描；其中被已索引笔记显式引用的目标仍会登记。',
   'indexMaintenance.addPattern': '添加模式',

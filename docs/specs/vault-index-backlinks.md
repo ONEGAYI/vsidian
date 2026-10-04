@@ -112,7 +112,7 @@ webview/样式修改执行 style-contract，绘制层至少验证真实可见性
 
 - **清理当前工作区缓存**：按 `planCleanupDirs` 安全回收各根分区的过期代际——保留 CURRENT 指向代、其全部继承源与**更高代际**目录（可能是并发窗口的在途提交），回收严格更旧代、孤儿代与 tmp-/非法目录名残留。不删活跃文件；健康缓存不按固定天数失效；清理是用户显式操作。
 - **完整重建**：全部根全量重扫（重解析正文并核验资源），进度回报（约每 2% 推送一次）与取消（`cancelMaintenance` 递增维护代际，扫描/核验/队列泵在批间检查并中止；中止后模型保持上次完整数据）。重建与清理互斥。
-- 入口：设置页「索引维护」分页按钮与宿主命令 `onegayi.vsidian.index.rebuild` / `onegayi.vsidian.index.cleanup`（默认未绑定，评估记录见 [keybindings.md](keybindings.md)）共用同一 wiring。
+- 入口：设置页「文件与链接」分页的「索引维护」组按钮（#332 前分页名为「索引维护」）与宿主命令 `onegayi.vsidian.index.rebuild` / `onegayi.vsidian.index.cleanup`（默认未绑定，评估记录见 [keybindings.md](keybindings.md)）共用同一 wiring。
 
 ### 变化发布通道（#201 消费）
 

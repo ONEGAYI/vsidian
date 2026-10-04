@@ -88,6 +88,8 @@ button:focus-visible, input:focus-visible {
 .vsidian-settings-group { padding: 2px 20px 8px; }
 /* #163 二轮还原：编辑器页按小节分多个容器纵向排布，容器间留呼吸间距 */
 .vsidian-settings-list .vsidian-settings-group + .vsidian-settings-group { margin-top: 20px; }
+/* #332 附加分页内嵌标准行组：最后一个组容器与分页自有内容容器同呼吸间距 */
+.vsidian-settings-list .vsidian-settings-group + .vsidian-settings-section-content { margin-top: 20px; }
 .vsidian-settings-section-content { padding: 16px 20px; }
 /* #263 组标题图标布局：flex + gap——图标置左 padding 缘、标题文字右移；
  * 行级 margin、padding、border-bottom 视觉规则不变（「对齐方式不变」口径），
@@ -97,10 +99,17 @@ button:focus-visible, input:focus-visible {
 .vsidian-settings-group-title .vsidian-settings-generated-icon { width: 16px; height: 16px; flex: none; background-position: center; background-repeat: no-repeat; background-size: contain; }
 .vsidian-settings-generated-icon[data-icon='typewriter'] { background-image: url('../../media/quick-actions/light/light-typewriter.svg'); }
 .vsidian-settings-generated-icon[data-icon='wordSegment'] { background-image: url('../../media/quick-actions/light/light-wordSegment.svg'); }
+/* #332 二轮：引用视图/索引维护组标题生图资产（quick-actions 41/42 列） */
+.vsidian-settings-generated-icon[data-icon='pointerLink'] { background-image: url('../../media/quick-actions/light/light-pointerLink.svg'); }
+.vsidian-settings-generated-icon[data-icon='dbLink'] { background-image: url('../../media/quick-actions/light/light-dbLink.svg'); }
 body.vscode-dark .vsidian-settings-generated-icon[data-icon='typewriter'],
 body.vscode-high-contrast .vsidian-settings-generated-icon[data-icon='typewriter'] { background-image: url('../../media/quick-actions/dark/dark-typewriter.svg'); }
 body.vscode-dark .vsidian-settings-generated-icon[data-icon='wordSegment'],
 body.vscode-high-contrast .vsidian-settings-generated-icon[data-icon='wordSegment'] { background-image: url('../../media/quick-actions/dark/dark-wordSegment.svg'); }
+body.vscode-dark .vsidian-settings-generated-icon[data-icon='pointerLink'],
+body.vscode-high-contrast .vsidian-settings-generated-icon[data-icon='pointerLink'] { background-image: url('../../media/quick-actions/dark/dark-pointerLink.svg'); }
+body.vscode-dark .vsidian-settings-generated-icon[data-icon='dbLink'],
+body.vscode-high-contrast .vsidian-settings-generated-icon[data-icon='dbLink'] { background-image: url('../../media/quick-actions/dark/dark-dbLink.svg'); }
 .vsidian-settings-item { padding: 18px 0; border-bottom: 1px solid color-mix(in srgb, var(--vsidian-settings-tint) 8%, transparent); }
 .vsidian-settings-item:last-child { border-bottom: 0; }
 /* 依赖灰化（#155 跟进）：dependsOn 依赖关闭时整行降不透明度、控件禁用；

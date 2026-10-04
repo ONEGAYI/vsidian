@@ -99,19 +99,19 @@ const hostValues = (values: Partial<SettingsPayload>): HostToWebview =>
   ({ kind: 'settings.snapshot', values }) as HostToWebview
 
 describe('侧栏与编辑器页组结构（#264）', () => {
-  it('侧栏六项：常规/编辑器/实验性功能/快捷键/外观/索引维护，「中文分词」入口退役', () => {
+  it('侧栏六项：常规/编辑器/文件与链接/实验性功能/快捷键/外观（#332 二轮槽位互换），「中文分词」入口退役', () => {
     const { parent } = makeProductionView()
     expect(navTitles(parent)).toEqual([
       zhCn['settings.generalSection'],
       zhCn['settings.editorCategory'],
+      zhCn['settings.filesLinksSection'],
       zhCn['settings.experimentalSection'],
       zhCn['keybindingSettings.title'],
       zhCn['appearance.title'],
-      zhCn['indexMaintenance.title'],
     ])
   })
 
-  it('编辑器页含七个二级组，尾组为「中文分词」（图片/引用视图组之后）', () => {
+  it('编辑器页含五个二级组，尾组为「中文分词」（#332 图片/引用视图迁出至文件与链接页）', () => {
     const { parent } = makeProductionView()
     clickNav(parent, zhCn['settings.editorCategory'])
     expect(groupTitles(parent)).toEqual([
@@ -119,9 +119,7 @@ describe('侧栏与编辑器页组结构（#264）', () => {
       zhCn['settings.groupEditing'],
       zhCn['settings.groupSymbols'],
       zhCn['settings.groupCodeblock'],
-      zhCn['settings.groupImage'],
-      // #298 引用视图组（hover/embed 前缀归组，图片组之后、分词组之前）
-      zhCn['settings.groupRefview'],
+      // #332 图片/引用视图两小节迁至「文件与链接」分页，分词组上移为尾组
       zhCn['wordSegment.title'],
     ])
   })
