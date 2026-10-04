@@ -842,15 +842,15 @@ describe('外观合并分页（#231）', () => {
     result!.click()
   }
 
-  it('侧栏六条：常规、编辑器、实验性功能、快捷键、外观、文件与链接；「外观」为调色板图标', () => {
+  it('侧栏六条：常规、编辑器、文件与链接、实验性功能、快捷键、外观；「外观」为调色板图标', () => {
     const { parent } = makeFullView()
     expect(navItems(parent).map((b) => b.textContent)).toEqual([
       zhCn['settings.generalSection'],
       zhCn['settings.editorCategory'],
+      zhCn['settings.filesLinksSection'],
       zhCn['settings.experimentalSection'],
       zhCn['keybindingSettings.title'],
       zhCn['appearance.title'],
-      zhCn['settings.filesLinksSection'],
     ])
     // 外观条目 icon 是调色板：主体轮廓（lucide palette 形）+ 颜料孔圆点子路径
     const appearanceNav = navItems(parent).find((b) => b.textContent === zhCn['appearance.title'])!
@@ -1114,7 +1114,7 @@ describe('文件与链接分页（#332 设置重组：图片/引用视图迁入 
     expect(content!.querySelector('.vsidian-index-patterns')).toBeTruthy()
   })
 
-  it('组标题图标：图片=山形相框、引用视图=内联占位字形、索引维护=链环（h3 容器同一路径）', () => {
+  it('组标题图标：图片=山形相框、引用视图=手型指针+链接下划线、索引维护=数据库+锁链（#332 二轮字形）', () => {
     const { parent } = makeFilesView()
     clickNav(parent, zhCn['settings.filesLinksSection'])
     const dOf = (title: string) =>
@@ -1122,12 +1122,15 @@ describe('文件与链接分页（#332 设置重组：图片/引用视图迁入 
         .getAttribute('d')!
     expect(dOf(zhCn['settings.groupImage'])).toBe(
       'M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2ZM11 9a2 2 0 1 1-4 0 2 2 0 0 1 4 0M21 15l-3.09-3.09a2 2 0 0 0-2.82 0L6 21')
+    // pointerLink：lucide pointer 手形（0.845 缩放）起笔 + 掌底断口下划线
     expect(dOf(zhCn['settings.groupRefview'])).toBe(
-      'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71')
+      'M20.32 12.48a7.04 7.04 0 0 1-7.04 7.04M16.92 9.76v-.68a1.69 1.69 0 0 0-1.69-1.69 1.69 1.69 0 0 0-1.69 1.69M13.54 8.92V8.24a1.69 1.69 0 0 0-1.69-1.69 1.69 1.69 0 0 0-1.69 1.69v.68M10.16 8.47V3.66a1.69 1.69 0 0 0-1.69-1.69 1.69 1.69 0 0 0-1.69 1.69v8.45M16.92 9.76a1.69 1.69 0 1 1 3.38 0v2.03a6.76 6.76 0 0 1-6.76 6.76h-1.69c-2.36 0-3.8-.72-5.06-1.98l-3.04-3.04a1.69 1.69 0 0 1 2.39-2.38l1.69 1.69M4.5 22h6M13.5 22h6')
+    // dbLink：database 椭圆柱起笔 + 右下斜置相扣双环
     const indexTitle = parent.querySelector<HTMLElement>(
       '.vsidian-settings-section-content .vsidian-settings-group-title')!
-    expect(indexTitle.querySelector('svg path')!.getAttribute('d')!.startsWith('M10 13a5 5 0 0 0 7.54.54l3-3'))
+    expect(indexTitle.querySelector('svg path')!.getAttribute('d')!.startsWith('M2.25 4.6a6.75 2.25'))
       .toBe(true)
+    expect(indexTitle.querySelector('svg path')!.getAttribute('d')).toContain('M19.8 20.7a2.1 2.1 0 1 0 4.2 0')
   })
 
   it('liveDirect 灰化联动：总开关关闭即禁用+灰化类，changed 回推就地解灰（值不清除）', () => {

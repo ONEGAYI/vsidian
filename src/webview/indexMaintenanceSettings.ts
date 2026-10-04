@@ -21,16 +21,18 @@ export const INDEX_SECTION_ACTIONS_ENTRY = 'actions'
 
 export class IndexMaintenanceSection implements SettingsPageSection {
   readonly id = 'index'
-  /** 链环 glyph（形态改版批次：自 'editor' 铅笔改为链环——链接域意象，
-   *  与侧栏反链/出链图标同形语言；#332 改名「文件与链接」后槽位沿用） */
-  readonly icon = 'links' as const
+  /** 文件夹+齿轮字形（#332 二轮：用户指定意象，自链环 glyph 换装——
+   *  文件/链接域与索引维护的合体意象；一轮曾为 'links' 链环） */
+  readonly icon = 'folderCog' as const
   /** #332 页内嵌标准设置行组：图片（image.*，自编辑器页迁入）与引用视图
    *  （hover.* 与 embed.* 两前缀，#298 自编辑器页迁组、#332 随分页迁移）。
    *  视图装配 h3 组容器与标准行，条目进全局搜索并归本分页分组命中；前缀
-   *  过滤以视图定义表为源（本类不引用生产注册表，fixture 场景自然为空组） */
+   *  过滤以视图定义表为源（本类不引用生产注册表，fixture 场景自然为空组）。
+   *  #332 二轮：引用视图组标题换「手型指针+链接下划线」字形（占位链环
+   *  退役，#298「正式图标后补」兑现） */
   readonly defsGroups = [
     { titleKey: 'settings.groupImage', icon: 'image' as const, prefixes: ['image.'] },
-    { titleKey: 'settings.groupRefview', icon: 'refview' as const, prefixes: ['hover.', 'embed.'] },
+    { titleKey: 'settings.groupRefview', icon: 'pointerLink' as const, prefixes: ['hover.', 'embed.'] },
   ] as const
   // #332 改名：分页标题/描述走文件与链接词条；「索引维护」降为页内二级
   // 组标题（render 内 h3，indexMaintenance.title 词条沿用）
@@ -98,10 +100,11 @@ export class IndexMaintenanceSection implements SettingsPageSection {
     const busy = state?.status === 'cleaning' || state?.status === 'rebuilding'
 
     // ---- 页内二级组标题（#332：原分页降为「索引维护」组，与迁入的标准
-    // 行组同一 h3 容器语言；icon 槽登记链环 glyph，装配走 groupIcon 同路径） ----
+    // 行组同一 h3 容器语言；#332 二轮换「数据库+锁链」字形，装配走
+    // groupIcon 同路径） ----
     const groupTitle = document.createElement('h3')
     groupTitle.className = 'vsidian-settings-group-title'
-    const glyph = groupIcon('links')
+    const glyph = groupIcon('dbLink')
     glyph.setAttribute('aria-hidden', 'true')
     groupTitle.append(glyph, document.createTextNode(t('indexMaintenance.title')))
     parent.append(groupTitle)

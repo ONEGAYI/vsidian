@@ -28,11 +28,11 @@ export interface SettingsPageSection {
   /** 分页图标（侧栏导航与搜索分组共用）。#231 外观合并：'palette' 由
    *  CSS 片段分页槽位改为调色板字形并被「外观」合并分页沿用（画笔字形
    *  退役）；'book'（#132 样式参考分页）随侧栏条目合并一并退役；
-   *  'links' 为「文件与链接」分页（#332 原索引维护改名承接）的链环
-   *  glyph——形态改版批次自 'editor' 铅笔改为链环（与侧栏反链图标同形
-   *  语言）；'keyboard' 为快捷键分页的字形（#264 中文分词分页退役——其
-   *  曾占位借用的 keyboard 槽位随之消失） */
-  icon: 'keyboard' | 'editor' | 'palette' | 'links'
+   *  'folderCog' 为「文件与链接」分页（#332 原索引维护改名承接）字形
+   *  （#332 二轮自链环 glyph 换装：文件夹 + 右下角齿轮，用户指定意象）；
+   *  'keyboard' 为快捷键分页的字形（#264 中文分词分页退役——其曾占位借
+   *  用的 keyboard 槽位随之消失） */
+  icon: 'keyboard' | 'editor' | 'palette' | 'folderCog'
   entries: readonly { id: string; title: string; description?: string }[]
   /**
    * 附加分页内嵌标准设置行组（#332 设置重组）：每组由视图统一装配为 h3
@@ -116,16 +116,22 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, tex
  *  表达，仍为单 path 线性风格；#128 起槽位沿用的「样式定制」意象不变，
  *  原画笔字形随合并退役）；
  *  editor：铅笔起笔（「编辑器」分组）；
- *  links（形态改版批次）：互锁双链环（lucide link 形）——与侧栏反链/出链
- *  链环图标同一造型语言（索引维护分页的链接域意象）；
+ *  folderCog（#332 二轮「文件与链接」分页）：文件夹 + 右下角齿轮（lucide
+ *  folder-cog 组合线性化——文件/链接域与索引维护的合体意象，替换原链环
+ *  glyph）；用户指定意象，SVG 自绘（2026-10-04 拍板，不满意走生图 handoff）；
+ *  pointerLink（#332 二轮「引用视图」组标题）：手型指针悬于掌底断口的
+ *  下划线上（lucide pointer 手形整体 0.845 缩放——悬停引用的意象，替换
+ *  原占位链环，#298「正式图标后补」兑现）；
+ *  dbLink（#332 二轮「索引维护」组标题）：数据库圆柱（lucide database
+ *  缩移 0.75 左置、高度收短让位）+ 右下斜置相扣双环锁链——索引存储与
+ *  链接域意象；
  *  display/editing/codeblock/image（#263 编辑器页二级组标题四枚，v2 拍板
  *  清单原样 path）：显示 = 显示器、编辑 = 双 I 光标、代码块 = 尖括号、
- *  图片 = 山形相框（#265 生图两枚从独立 SVG 资产加载，不在本表）。
- *  refview（#298 引用视图组）：path 数据暂以 links 双链环占位（引用域
- *  意象就近借用）——正式图标由用户后补，届时仅替换本行数据、接线不动；
- *  #332 起组呈现于「文件与链接」分页（defsGroups 槽位），接线不变；
+ *  图片 = 山形相框（#265 生图两枚从独立 SVG 资产加载，不在本表）；
  *  shield（#323 常规页「默认编辑器」组标题）：盾牌（lucide shield 线性
  *  化——守护意象）；
+ *  links（形态改版批次链环）与 refview（#298 占位链环）随 #332 二轮三处
+ *  链环重复整改退役（引用全部迁移至上述三枚新字形）；
  *  book（#132 样式参考分页）随 #231 侧栏条目合并退役；
  *  #163 一轮曾为符号/代码块/图片三组新增 keyboard 复用与 code/image 形，
  *  二轮还原为页内小节后侧栏不再使用，已随分支退役。 */
@@ -135,7 +141,17 @@ const ICON_PATHS = {
   general: 'M7 2h10a4 4 0 0 1 0 8H7a4 4 0 0 1 0-8ZM8 4a2 2 0 1 0 0 4 2 2 0 1 0 0-4M7 14h10a4 4 0 0 1 0 8H7a4 4 0 0 1 0-8ZM16 16a2 2 0 1 0 0 4 2 2 0 1 0 0-4',
   palette: 'M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z M13.5 6.5h.01 M17.5 10.5h.01 M8.5 7.5h.01 M6.5 12.5h.01',
   editor: 'M14 4l6 6M3 21l5-1L21 7a2 2 0 0 0-4-4L4 16z',
-  links: 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71',
+  // #332 二轮三枚（用户指定意象，lucide 组合线性化，path 数据见头注）：
+  // folderCog = folder-cog 主体 + 齿轮圆与 8 根放射齿；pointerLink =
+  // pointer 手形整体 0.845 缩放 + 掌底断口下划线（渲染比对取大号手形）；
+  // dbLink = database 椭圆柱 0.75 缩放左置（高度收短让位）+ 右下斜置相扣
+  // 双环（斜挂链感最强，与圆柱底弧留白分离）
+  folderCog:
+    'M10.3 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.98a2 2 0 0 1 1.69.9l.66 1.2A2 2 0 0 0 12 6h8a2 2 0 0 1 2 2v3.3M18 15a3 3 0 1 0 0 6 3 3 0 1 0 0-6M14.305 19.53l.923-.382M15.228 16.852l-.923-.383M16.852 15.228l-.383-.923M16.852 20.772l-.383.924M19.148 15.228l.383-.923M19.53 21.696l-.382-.924M20.772 16.852l.924-.383M20.772 19.148l.924.383',
+  pointerLink:
+    'M20.32 12.48a7.04 7.04 0 0 1-7.04 7.04M16.92 9.76v-.68a1.69 1.69 0 0 0-1.69-1.69 1.69 1.69 0 0 0-1.69 1.69M13.54 8.92V8.24a1.69 1.69 0 0 0-1.69-1.69 1.69 1.69 0 0 0-1.69 1.69v.68M10.16 8.47V3.66a1.69 1.69 0 0 0-1.69-1.69 1.69 1.69 0 0 0-1.69 1.69v8.45M16.92 9.76a1.69 1.69 0 1 1 3.38 0v2.03a6.76 6.76 0 0 1-6.76 6.76h-1.69c-2.36 0-3.8-.72-5.06-1.98l-3.04-3.04a1.69 1.69 0 0 1 2.39-2.38l1.69 1.69M4.5 22h6M13.5 22h6',
+  dbLink:
+    'M2.25 4.6a6.75 2.25 0 1 0 13.5 0 6.75 2.25 0 1 0-13.5 0M2.25 4.6v9.6a6.75 2.25 0 0 0 13.5 0V4.6M2.25 9.6a6.75 2.25 0 0 0 13.5 0M16.9 17.9a2.1 2.1 0 1 0 4.2 0 2.1 2.1 0 1 0-4.2 0M19.8 20.7a2.1 2.1 0 1 0 4.2 0 2.1 2.1 0 1 0-4.2 0',
   display: 'M4 3h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2ZM8 21h8M12 17v4',
   editing: 'M7 4v16M5 4h4M5 20h4M17 4v16M15 4h4M15 20h4',
   codeblock: 'M8 7l-5 5 5 5M16 7l5 5-5 5',
@@ -147,7 +163,6 @@ const ICON_PATHS = {
   experimental:
     'M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2 M8.5 2h7 M7 15h10',
   table: 'M3 5h18v14H3zM12 5v14M3 12h18',
-  refview: 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71',
 } as const
 
 function icon(kind: keyof typeof ICON_PATHS): SVGSVGElement {
@@ -160,14 +175,16 @@ function icon(kind: keyof typeof ICON_PATHS): SVGSVGElement {
   return svg
 }
 
-/** 编辑器页二级组标题图标：内联线性字形与 #265 两枚生图资产。
- *  refview（#298）：引用视图组标题（path 暂以 links 字形占位，正式图
- *  标后补仅换数据；#332 起组随分页迁至「文件与链接」，槽位沿用）；
- *  links（#332）：文件与链接分页「索引维护」二级组标题（与分页侧栏
- *  glyph 同形——链接域意象）；
+/** 二级组标题图标：内联线性字形与 #265 两枚生图资产。
+ *  pointerLink（#332 二轮）：「引用视图」组标题——手型指针悬于断口下划
+ *  线上（#298 占位链环的正式兑现，用户指定意象）；
+ *  dbLink（#332 二轮）：文件与链接分页「索引维护」组标题——数据库圆柱
+ *  + 右下角双环锁链；
  *  table（#296 三轮）：实验页「表格行为」小节标题；
- *  shield（#323）：常规页「默认编辑器」委托组标题（守护意象内联字形）。 */
-export type SettingsGroupIcon = 'display' | 'editing' | 'codeblock' | 'image' | 'typewriter' | 'wordSegment' | 'refview' | 'table' | 'shield' | 'links'
+ *  shield（#323）：常规页「默认编辑器」委托组标题（守护意象内联字形）；
+ *  refview（#298 占位）与 links（#332 一轮借位）随二轮三处链环重复整改
+ *  一并退役（全仓引用迁移至上述新字形）。 */
+export type SettingsGroupIcon = 'display' | 'editing' | 'codeblock' | 'image' | 'typewriter' | 'wordSegment' | 'pointerLink' | 'table' | 'shield' | 'dbLink'
 
 /** 二级组标题图标装配（#332 起导出）：内联字形与生图资产同槽返回，附
  *  加分页自有内容内的 h3 组标题（如文件与链接页「索引维护」）复用同一
@@ -421,7 +438,11 @@ export class SettingsPageView {
     ]
   }
   private categories() {
-    const builtIn: Array<{ id: string; title: string; icon: 'general' | 'editor' | 'experimental' }> = []
+    // #332 二轮：「文件与链接」附加分页提前进内建段——与「实验性功能」
+    // 槽位互换（2026-10-04 用户拍板），文件/链接域紧跟编辑器（Obsidian
+    // 相邻心智），实验性退居其后；其余附加分页仍排内建之后。
+    // icon 放宽到字形注册表全集（内建分组与提前分页同列表混排）
+    const builtIn: Array<{ id: string; title: string; icon: keyof typeof ICON_PATHS }> = []
     // 空组不注册（fixture 可能只含部分前缀——空组不得占据默认激活位）；
     // #323：委托组同样计入所属页的注册条件（常规页仅有委托组时也注册）
     if (this.generalDefs().length > 0 || this.generalGroups.length > 0) {
@@ -430,11 +451,14 @@ export class SettingsPageView {
     if (this.editorDefs().length > 0) {
       builtIn.push({ id: 'editor', title: t('settings.editorCategory'), icon: 'editor' })
     }
+    const filesLinks = this.sections.filter((s) => s.id === 'index')
+    const trailingSections = this.sections.filter((s) => s.id !== 'index')
+    builtIn.push(...filesLinks)
     // #296 三轮「实验性功能」侧栏分组（experimental.* 的独立归属页）
     if (this.experimentalDefs().length > 0) {
       builtIn.push({ id: 'experimental', title: t('settings.experimentalSection'), icon: 'experimental' })
     }
-    return [...builtIn, ...this.sections]
+    return [...builtIn, ...trailingSections]
   }
   private render(focusEntry?: string): void {
     if (!this.listEl) return

@@ -203,19 +203,21 @@ describe('维护操作反馈', () => {
   })
 })
 
-describe('索引维护分页图标（形态改版批次；#332 改名后槽位沿用）', () => {
-  it('分页图标为链环 glyph（links）：导航按钮内的 svg path 是链环双环形态', () => {
+describe('索引维护分页图标（形态改版批次；#332 改名后二轮换装）', () => {
+  it('分页图标为文件夹+齿轮字形（folderCog）：导航按钮内的 svg path 以文件夹主体与齿轮圆起笔', () => {
     const section = new IndexMaintenanceSection({ postMessage: () => {} })
-    expect(section.icon).toBe('links')
-    // 经设置页渲染路径钉住形态：导航按钮内 svg 的 path 以链环双环起笔
-    //（M10 13a5 5 0 0 0 7.54…——与侧栏反链/出链链环图标同一造型语言）
+    expect(section.icon).toBe('folderCog')
+    // 经设置页渲染路径钉住形态：folder-cog 主体（M10.3 20H4…）+ 齿轮圆
+    //（M18 15a3 3…）+ 8 根放射齿——#332 二轮自链环 glyph 换装
     const view = new SettingsPageView({ postMessage: () => {} }, [], [section])
     const root = document.createElement('div')
     view.mount(root)
     const nav = [...root.querySelectorAll<HTMLButtonElement>('.vsidian-settings-nav-item')]
     const indexNav = nav.find((b) => b.textContent === zhCn['settings.filesLinksSection'])!
     const path = indexNav.querySelector('svg path')!
-    expect(path.getAttribute('d')!.startsWith('M10 13a5 5 0 0 0 7.54.54l3-3')).toBe(true)
+    const d = path.getAttribute('d')!
+    expect(d.startsWith('M10.3 20H4a2 2 0 0 1-2-2V5')).toBe(true)
+    expect(d).toContain('M18 15a3 3 0 1 0 0 6')
     view.dispose()
   })
 })
