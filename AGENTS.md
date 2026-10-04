@@ -126,6 +126,7 @@ vsidian/
 │   │   ├── frontmatter-table.md               # frontmatter 表格化规格
 │   │   ├── graphic-code-block-interaction.md  # 图形化代码块交互规格
 │   │   ├── hover-embed-phase2-tickets/…       # 二期票据正文与依赖
+│   │   ├── hover-embed-phase3-tickets/…       # 三期票据正文与依赖
 │   │   ├── hover-preview-embed.md             # 悬停预览与文档嵌入规格
 │   │   ├── html-comment-support.md            # HTML 注释快捷键与呈现规格
 │   │   ├── i18n.md                            # 全局 i18n 适配规格
